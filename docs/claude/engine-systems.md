@@ -23,13 +23,49 @@ Before building anything adjacent, wire into the existing system:
   writers must yield to `CBZ.fpsScopeFov()` (precedence: fitted optic >
   lockon scope) — a scope-blind FOV writer re-creates the "fake scope" bug.
 - **Touch layer** — `src/systems/touch.js` + `touch_vehicle.js`. Fixed
-  stick (rim = sprint, press = crouch), slide-holds (aim/scope→fire),
-  verb pills (words for interactions, icons for combat), stale-touch
-  sweepers. New on-screen controls join THIS layer; never add a parallel
-  touch handler. Interaction popups on touch are tappable pills, and
+  stick (rim = sprint, press = crouch), **AIM/SCOPE latches** (tap on,
+  tap off, lit — `TOUCH_AIM_TOGGLE`; the old hold+slide-onto-fire
+  grammar is the flag-off revert), a **trigger that is also a stick**
+  (hold FIRE and drag the SAME finger to keep aiming mid-burst —
+  `TOUCH_FIRE_PAD`), verb pills (words for interactions, icons for
+  combat), stale-touch sweepers. THE LAW A THUMB IMPOSES: a hold owns
+  the thumb it is under, and the right thumb is the only one that can
+  reach the trigger — so any control that wants to be held at the same
+  time as FIRE must be a LATCH, and any control held *while* aiming
+  must do the aiming itself. New on-screen controls join THIS layer;
+  never add a parallel touch handler. A latch has two obligations the
+  hold never had: it must READ the game's own truth each frame
+  (`fpsAimHeld`/`fpsScoped`) rather than remember its own, and it must
+  be released the moment its button leaves the glass or the page blurs. Interaction popups on touch are tappable pills, and
   single-verb rides are SILENT (press/tap to take — see
   `interactions.js` SILENT_RIDE; the airliner BOARD/HIJACK card is the
   one sanctioned exception).
+- **The ONE ink recipe** — `css/hud.css` `:root { --ink / --ink-stroke /
+  --ink-shadow }`. Every observed-world line (`.world-subtitle-line`,
+  `.pi-subtitle-line`, `#hint.hint-sub`, `#pinteractWho`) wears one outline
+  and reads it in two lines: `-webkit-text-stroke: var(--ink-stroke,<old>)
+  var(--ink,#090909)` + `text-shadow: var(--ink-shadow,<old>)`. It was
+  hand-copied four times at three different stroke widths. **The units are em
+  and that is the point**: the old flat `1.6px` stroke + four hard-offset
+  `±2px` glyph copies were sized against desktop's 36px cap, so on touch's
+  ~19px line the copies stopped fusing and read as a SECOND, ghosted copy of
+  the sentence with the counters of o/a/e silted up — the owner's "two
+  versions of the dialogue barely overlapping" (2026-08-04), which a
+  full-document scan proved was one element the whole time. em keeps the ring
+  the same fraction of the letterform at every size; the ratios are taken from
+  the 36px cap so desktop is unchanged. `em` inside a custom property resolves
+  against the element that USES it — that is what lets one declaration serve
+  four type sizes. A new outlined surface adds those two lines; it never
+  retypes the numbers.
+- **Subtitle layers are a LADDER, never a pile** — `css/hud.css`
+  `--subtitle-rank`. `#campaignDialogue` (rung 0) · `#pinteractSay` (rung 1) ·
+  `#citySpeech` (rung 2), each lifted one `--subtitle-slot` per live layer
+  beneath it, driven by body classes the owning file stamps for the life of a
+  line (`campaign-dialogue-active` from campaign_ui.js,
+  `interact-subtitle-active` from interact.js). On touch every one of these
+  bands resolves to the SAME 120px floor, so an unranked layer renders
+  character-on-character over another. A new spoken-line surface joins the
+  ladder; it does not park itself on the floor.
 - **HUD doctrine** — the only popup is the killfeed. Rich info lives in
   logic/phone/leaderboards, not floating cards; aiming shows a floating
   `Lv.N Title` overhead pill (`aim_dossier.js`), full data stays
@@ -529,9 +565,15 @@ Before building anything adjacent, wire into the existing system:
   it cannot re-deal the world. Everything is `CBZ.hash01`, so order-
   independent. The backcountry (`city/continent.js`) went from ONE tree per
   46 m cell at a flat 34% chance — 10,083 stems over 190 km², i.e. parkland —
-  to closure-driven CLUSTERS plus a trunkless 20-triangle roof
-  (`vegetationKit` `canopy-dome`), the conifer `conifer-spire` and a
-  `krummholz` scrub band. **The forest is built as 1.6 km CHUNKS with a
+  to closure-driven CLUSTERS, the conifer `conifer-spire` and a `krummholz`
+  scrub band. It ALSO grew a trunkless 20-triangle roof (`vegetationKit`
+  `canopy-dome`, 57,694 crowns at ground + 7..14 m); **that roof was removed
+  2026-08-04** — on RELIEF a crown with no tree under it reads as a floating
+  green boulder the moment the camera is at eye level instead of overhead,
+  and top-down canopy-cover metrics structurally cannot see it. The rule
+  that replaced it: a canopy filler is only honest over ground already full
+  of real stems (`biome_forest.js`'s flat y=0 plate keeps its roof for
+  exactly that reason); close a wood on relief with stems or wider crowns. **The forest is built as 1.6 km CHUNKS with a
   throttled distance test**, because r128 frustum-culls an InstancedMesh by
   its GEOMETRY's bounding sphere — one country-wide mesh is all-or-nothing,
   and the camera's far plane is 2.2 km, so ~70% of the instances never enter

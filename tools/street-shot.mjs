@@ -3,11 +3,15 @@
    person: override the camera each frame (render-wrap trick), aim at a road
    with traffic + peds, screenshot. Integration eyeball for rigs + cars. */
 import { spawn } from "node:child_process";
-import { rm, writeFile } from "node:fs/promises";
+import { rm, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const OUT = process.argv[2] || path.join(ROOT, "tools/shots/street.png");
+// tools/shots/ is gitignored, so on a FRESH CLONE it does not exist and the
+// screenshot write ENOENTs AFTER the whole run has already passed — which is
+// how this cost a green pre-deploy render gate. Create it, like touch-hud-check does.
+await mkdir(path.dirname(OUT), { recursive: true });
 const BUILDING_FOCUS = process.argv.includes("--building");
 const THREADS_FOCUS = process.argv.includes("--threads");
 const SPAWN_FOCUS = process.argv.includes("--spawn");

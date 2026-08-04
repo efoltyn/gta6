@@ -878,8 +878,38 @@
     CBZ.CONFIG.BLD_ROOF_CLUTTER_V1 = false;
     CBZ.CONFIG.BLD_WEATHERING_V1 = false;
     CBZ.CONFIG.DETAIL_GROUND_GRIME = false;
-    // KEPT: the government/civic buildings and their monumental entries.
-    // Explicitly left alone so a future blanket edit cannot quietly take them.
+    // KEPT: the government/civic buildings. They are placed by
+    // city/govcomplex.js, which owns its own stone and its own monumental
+    // entrance (§1 perron), so none of the lines above can reach them.
+    //
+    // NOT KEPT, AND THIS COMMENT USED TO CLAIM OTHERWISE (corrected
+    // 2026-08-04). It read "the government/civic buildings and their
+    // monumental entries … explicitly left alone so a future blanket edit
+    // cannot quietly take them", and a blanket edit had already quietly taken
+    // half of it — this very block. `BLD_MASONRY_V1 = false` two lines up is
+    // ALSO the gate on buildings_civic.js's civic kit:
+    //     bldCivicOrder  (buildings_civic.js:367) — podium, columns,
+    //                    entablature, PEDIMENT
+    //     bldCivicCrown  (buildings_civic.js:568) — DOME / CLOCK TOWER /
+    //                    lantern
+    // both of which open `if (!flag("BLD_MASONRY_V1") || !flag(
+    // "BLD_CIVIC_PODIUM")) return;` and are called from buildings.js:3827-3828.
+    // So every civic anchor in the world is authored WITH a crown and an order
+    // and draws NEITHER: govcomplex.js asks for `crown:"dome"` on the
+    // Executive Mansion, `crown:"clock"` on City Hall, `crown:"pediment"` +
+    // `order:"ionic"` on the Capitol, and the flag drops all of it on the
+    // floor. That is a geometry stat fiction — a registry declaring domes the
+    // renderer cannot draw — and it is the most likely reason the owner's read
+    // of the seat of power is "kinda stupid": he is looking at a box.
+    //
+    // DELIBERATELY NOT FIXED HERE. The fix is to gate the civic kit on
+    // BLD_CIVIC_PODIUM alone (the masonry FACADE is the residential brick the
+    // owner actually cut; the colonnade is not), but that puts columns and
+    // domes on every civic anchor in the world, and it lands next to
+    // govcomplex's new perron on the same facades — two monumental entries
+    // stacked is the "stairway that makes no sense" bug again, in reverse.
+    // How it LOOKS is the owner's call, judged by playing. This comment now
+    // states what is true so the next author is not misled by it.
   }
 
   if (CBZ.CONFIG.AIR_TRAFFIC_AMBIENT == null) CBZ.CONFIG.AIR_TRAFFIC_AMBIENT = true;
@@ -1403,6 +1433,15 @@
   // sessions only, retain the callsite so the benchmark can name anonymous
   // updater functions without adding any normal-game stack-capture overhead.
   const profileFrameWork = typeof location !== "undefined" && /(?:\?|&)profile=1(?:&|$)/.test(location.search || "");
+  // Files that only ever FORWARD a registration are never the answer to "who
+  // registered this work". config.js is this file; core/prio.js wraps
+  // CBZ.onUpdate/onAlways in place (its collision-warning dev aid), so its
+  // wrapper frame sits between every caller and this function. Skipping only
+  // config.js meant prio.js became the first match and ALL 653 updaters
+  // reported "src/core/prio.js:182" — the profiler could name the cost of
+  // every system in the game and not one of their names. Any future in-place
+  // wrapper of these registrars belongs in this list.
+  const FRAME_SOURCE_SKIP = ["src/config.js", "src/core/prio.js"];
   function frameSource() {
     if (!profileFrameWork) return "";
     const stack = (new Error()).stack || "";
@@ -1410,7 +1449,7 @@
     for (let i = 2; i < lines.length; i++) {
       // Script cachebusters appear in stacks as file.js?v=tag:line:col.
       const m = lines[i].match(/(src\/[^:?)]+\.js)(?:\?[^:)\s]+)?:(\d+)/);
-      if (m && m[1] !== "src/config.js") return m[1] + ":" + m[2];
+      if (m && FRAME_SOURCE_SKIP.indexOf(m[1]) === -1) return m[1] + ":" + m[2];
     }
     return "";
   }

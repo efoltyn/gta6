@@ -216,23 +216,18 @@
     return g;
   }
 
-  // ---- THE CARPET FILLER ------------------------------------------------
-  // A crown with no tree under it. The reference's valley floors have NO
-  // ground visible between crowns, and paying a trunk + a collider + an
-  // audit chain for every square metre of that roof is how a canopy becomes
-  // unaffordable. One squashed lobe (20 tris) with the same baked underside
-  // ramp: from the air it is canopy, from beneath it is the roof over the
-  // real trunks standing beside it. `city/biome_forest.js`'s detached roof is
-  // the precedent this generalises.
-  function canopyDome() {
-    const g = new THREE.IcosahedronGeometry(1, 0);
-    g.scale(8.6, 5.4, 8.2);
-    g.computeBoundingBox(); g.translate(0, -g.boundingBox.min.y, 0);
-    shadeByHeight(g, 0.34, 0.60);
-    g.name = "cbz-canopy-dome";
-    g.userData.vegetationArchetype = "canopy-dome";
-    return g;
-  }
+  // ---- THE CARPET FILLER — REMOVED 2026-08-04 ---------------------------
+  // `canopyDome()` lived here: one 20-triangle squashed lobe used as a crown
+  // with no tree under it, so a wood could close its canopy without paying a
+  // trunk + collider + audit chain per square metre. city/continent.js flew
+  // 57,694 of them at ground + 7..14 m and the owner photographed the result
+  // from a beach: green boulders hanging in the sky over open ground.
+  //
+  // The archetype is deleted rather than left unused because an unused
+  // geometry is an invitation. A canopy filler is only honest where the
+  // ground under it is already full of real stems — biome_forest.js's flat
+  // y=0 plate qualifies and keeps its roof; RELIEF does not. Close a wood on
+  // relief with stems or with wider crowns on the stems it has.
 
   // ---- KRUMMHOLZ --------------------------------------------------------
   // The scrub band between the last tree and the open meadow. Deliberately
@@ -260,7 +255,6 @@
     subcanopy: subcanopy,
     "canopy-patch": canopyPatch,
     "conifer-spire": coniferSpire,
-    "canopy-dome": canopyDome,
     krummholz: krummholz,
     thicket: thicket,
   };
@@ -339,8 +333,6 @@
       thicketHeight: 4.3,
       spireHeight: 23,
       spireRadius: 3.15,
-      canopyDomeRadius: 8.6,
-      canopyDomeHeight: 5.4,
       krummholzHeight: 1.2,
     },
   };

@@ -49,13 +49,44 @@
      TOUCH_HUD_TIDY     — body.touch-tidy declutter CSS (mobile.css)
      TOUCH_VEHICLE      — drive/heli/wing button layer (touch_vehicle.js)
      TOUCH_FIXED_STICK  — joystick anchored bottom-left (false = dynamic)
-     TOUCH_AIM_SLIDE    — hold AIM/SCOPE and SLIDE onto FIRE to shoot
-                          while the hold stays down; also seats those two
-                          buttons beside the trigger (mobile.css .tslide)
-     TOUCH_SCOPE_UP     — from SCOPE, an upward drag ALSO fires (owner: "drag
-                          UP, not right"); same hold/release as the FIRE slide
-     TOUCH_AIM_DRAG     — the console LT+right-stick grammar: while a finger
-                          HOLDS aim/scope, dragging that same finger FINE-
+     TOUCH_AIM_TOGGLE   — THE 2026-08-04 GRAMMAR (owner): AIM is a LATCH, not
+                          a hold. Press it once and it LIGHTS UP and stays
+                          aiming; press it again to drop out. SCOPE latches
+                          the same way. WHY: a held AIM costs the right thumb,
+                          which is the only thumb that can also reach FIRE —
+                          so holding aim meant the trigger could only be
+                          reached by a slide gesture ("you have to do the
+                          swipe to shoot, which is dumb"). A latch frees the
+                          thumb: press aim, THEN hold the trigger normally.
+                          The latch follows the GAME's truth (fpsAimHeld /
+                          fpsScoped) each frame, so anything else that drops
+                          ADS drops the lamp with it, and it clears itself the
+                          moment the button leaves the glass (holster, car,
+                          death). false = the legacy hold + slide grammar.
+     TOUCH_FIRE_PAD     — the trigger IS a stick (owner: "when you hold the
+                          shoot button it should almost look like the movement
+                          keypad… while I'm shooting I can also change the aim
+                          while still shooting"). Holding FIRE keeps firing
+                          wherever the thumb roams, and DRAGGING that same
+                          finger fine-aims through the very applyLookDelta the
+                          look-drag uses — so an automatic rifle can be walked
+                          across a target without ever letting go. The button
+                          grows a stick ring + a knob that tracks the thumb
+                          (mobile.css #tfire.tpad) so the gesture is visible
+                          rather than folklore. Same math as TOUCH_AIM_DRAG,
+                          moved to the finger that is actually free now.
+     TOUCH_AIM_SLIDE    — LEGACY (only wired when TOUCH_AIM_TOGGLE=0): hold
+                          AIM/SCOPE and SLIDE onto FIRE to shoot while the
+                          hold stays down. It still seats those two buttons
+                          beside the trigger (mobile.css .tslide) in BOTH
+                          grammars — a latch you tap wants to be under the
+                          thumb just as much as a hold you roll off.
+     TOUCH_SCOPE_UP     — LEGACY (slide grammar only): from SCOPE, an upward
+                          drag ALSO fires (owner: "drag UP, not right")
+     TOUCH_AIM_DRAG     — the console LT+right-stick grammar for the LEGACY
+                          hold path (TOUCH_FIRE_PAD is the same idea on the
+                          trigger, which is where the free thumb now lives):
+                          while a finger HOLDS aim/scope, dragging it FINE-
                           AIMS the camera (identical math to the look-drag,
                           via applyLookDelta). The drag never cancels the
                           hold, works before/during/after a slide onto FIRE,
@@ -105,6 +136,8 @@
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_AUTOSPRINT == null) CBZ.CONFIG.TOUCH_AUTOSPRINT = true;
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_HUD_TIDY == null) CBZ.CONFIG.TOUCH_HUD_TIDY = true;
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_FIXED_STICK == null) CBZ.CONFIG.TOUCH_FIXED_STICK = true;
+  if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_AIM_TOGGLE == null) CBZ.CONFIG.TOUCH_AIM_TOGGLE = true;
+  if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_FIRE_PAD == null) CBZ.CONFIG.TOUCH_FIRE_PAD = true;
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_AIM_SLIDE == null) CBZ.CONFIG.TOUCH_AIM_SLIDE = true;
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_SCOPE_UP == null) CBZ.CONFIG.TOUCH_SCOPE_UP = true;
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_AIM_UP == null) CBZ.CONFIG.TOUCH_AIM_UP = true;
@@ -117,7 +150,10 @@
   const V2 = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_V2 !== false;
   const TPV2 = () => !CBZ.CONFIG || CBZ.CONFIG.TOUCH_TP_CAMERA_V2 !== false;
   const FIXED = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_FIXED_STICK !== false;
-  const SLIDE = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_AIM_SLIDE !== false;
+  const AIMTOG = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_AIM_TOGGLE !== false;
+  const FIREPAD = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_FIRE_PAD !== false;
+  // The slide grammar is the LEGACY path: it only wires when the latch is off.
+  const SLIDE = (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_AIM_SLIDE !== false) && !AIMTOG;
   const SCOPEUP = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_SCOPE_UP !== false;
   const AIMUP = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_AIM_UP !== false;
   const AIMDRAG = () => !CBZ.CONFIG || CBZ.CONFIG.TOUCH_AIM_DRAG !== false;
@@ -142,6 +178,11 @@
   // before the drag can pitch the iPad camera very far; 10px release hysteresis
   // keeps a held burst stable. SCOPE keeps the older, longer threshold.
   const AIM_UP_TRIGGER = 18, AIM_UP_RELEASE = 10;
+  // TOUCH_FIRE_PAD — how far the trigger's knob may travel from where the thumb
+  // landed. Purely visual (the aim itself is a running delta, so it never runs
+  // out of room): the knob has to say "this is a stick, keep dragging" without
+  // sliding out from under the finger that is holding the trigger down.
+  const PAD_MAXR = 42;   // matches the 124px ring in mobile.css (#tfire.tpad::after)
   const LOOK_STALE_MS = 3000;  // look watchdog: no move this long = ghost
   const WALK_MAX = 46;        // don't set off on a cross-map trek from one tap
   const WALK_TIMEOUT = 14;    // give up (moving target / stuck) after this many s
@@ -235,7 +276,9 @@
     wrap.innerHTML =
       '<div id="tstick"><div id="tknob"></div></div>' +
       '<div id="tbtns">' +
-      btn("tfire", "tbtn tbig tfire", SVG.fire, "Fire") +
+      // TOUCH_FIRE_PAD: the trigger carries a stick KNOB (the ring is a CSS
+      // pseudo-element). Both are inert until a finger is actually holding it.
+      btn("tfire", "tbtn tbig tfire", SVG.fire + (FIREPAD ? '<span class="tpknob" aria-hidden="true"></span>' : ""), "Fire") +
       btn("tjump", "tbtn tjump", SVG.jump, "Jump") +
       btn("tview", "tbtn tsm", SVG.eye, "First-person view") +
       btn("tswap", "tbtn tsm", SVG.swap, "Next weapon") +
@@ -248,7 +291,9 @@
       // target the moment some other rule un-hides it.
       ((!CBZ.CONFIG || CBZ.CONFIG.TOUCH_RECENTER !== false)
         ? btn("trecen", "tbtn tsm", SVG.level, "Recenter the view") : "") +
-      '<div id="tfireup" aria-hidden="true">' + SVG.fire + "</div>" +
+      // The AIM-UP ghost pad belongs to the legacy slide grammar only: with the
+      // latch, nothing is ever held on AIM for it to be a target for.
+      (SLIDE ? '<div id="tfireup" aria-hidden="true">' + SVG.fire + "</div>" : "") +
       "</div>";
     document.body.appendChild(wrap);
     baseEl = document.getElementById("tstick");
@@ -258,7 +303,11 @@
     // FIRE goes through the refcounted fireHold so the physical button and an
     // aim/scope finger that has SLID onto it can overlap without cutting each
     // other's trigger (fireAction sees one down on 0→1, one up on 1→0).
-    holdBtn("tfire", fireHold);
+    // TOUCH_FIRE_PAD makes it a STICK as well as a trigger: the hold survives
+    // the finger roaming anywhere (implicit touch capture), and the roam itself
+    // aims. That is the whole point — an automatic weapon is fired by holding
+    // one button, so that button has to be the one that can also steer.
+    holdBtn("tfire", fireHold, { drag: FIREPAD });
     tapBtn(document.getElementById("tview"), () => { if (CBZ.toggleFPS) CBZ.toggleFPS(); });
     tapBtn(document.getElementById("tswap"), () => { if (CBZ.fpsNextWeapon) CBZ.fpsNextWeapon(); });
     // homing on/off (owner: toggleable "even on the iPad"). State reads as
@@ -279,26 +328,36 @@
       glide.vx = glide.vy = 0;
       if (CBZ.sfx) CBZ.sfx("key", { volume: 0.22, pitch: 1.1 });
     });
-    // AIM (ADS) — the missing iPad right-mouse: hold pulls the camera in /
+    // AIM (ADS) — the missing iPad right-mouse: it pulls the camera in /
     // tightens FOV / steadies recoil via the EXISTING CBZ.fpsSetAim hook the
-    // gamepad triggers use. Hold = aim, release = unaim.
+    // gamepad triggers use.
     // SCOPE — sibling system (sniper scope + lock-on) exposes feature-detected
     // hooks; every call is guarded so this button is correct whether that API
-    // is present, absent, or lands under a slightly different shape. Hold =
-    // scope while pressed (CBZ.fpsScope(down)); tap with only a toggle API =
-    // CBZ.fpsScopeToggle(). Distinct from AIM: scope = true sniper zoom.
-    // Visibility for both is driven from the armed check below.
-    // Both are SLIDE-holds (TOUCH_AIM_SLIDE): the touch keeps aim/scope down
-    // for its whole life, and rolling onto FIRE shoots without lifting —
-    // press aim, DRAG to shoot (mobile.css .tslide seats them beside FIRE).
+    // is present, absent, or lands under a slightly different shape
+    // (CBZ.fpsScope(down), or only CBZ.fpsScopeToggle()). Distinct from AIM:
+    // scope = true sniper zoom. Visibility for both: the armed check below.
+    //
+    // TOUCH_AIM_TOGGLE (default) — both are LATCHES. Tap on, tap off, lit while
+    // on. A thumb has one job at a time: while AIM was a hold it OWNED the only
+    // thumb that can reach the trigger, which is what forced the slide gesture.
+    // Latched, aim costs nothing and FIRE is just a button again.
+    // Legacy (flag off) — SLIDE-holds: the touch keeps aim/scope down for its
+    // whole life and rolling onto FIRE shoots without lifting.
     const aimFn = (down) => { if (CBZ.fpsSetAim) CBZ.fpsSetAim(down); };
     const scopeFn = (down) => {
       if (CBZ.fpsScope) CBZ.fpsScope(down);
-      else if (down && CBZ.fpsScopeToggle) CBZ.fpsScopeToggle();
+      // Toggle-only API: a latch has to flip it on BOTH of its edges, or the
+      // second tap would darken the lamp while the scope stayed down.
+      else if (CBZ.fpsScopeToggle && (down || AIMTOG)) CBZ.fpsScopeToggle();
     };
-    if (SLIDE) { slideHoldBtn("taim", aimFn); slideHoldBtn("tscope", scopeFn); }
+    if (AIMTOG) {
+      latchBtn("taim", aimFn, () => (CBZ.fpsAimHeld ? !!CBZ.fpsAimHeld() : null));
+      latchBtn("tscope", scopeFn, () => (CBZ.fpsScoped ? !!CBZ.fpsScoped() : null));
+    } else if (SLIDE) { slideHoldBtn("taim", aimFn); slideHoldBtn("tscope", scopeFn); }
     else { holdBtn("taim", aimFn); holdBtn("tscope", scopeFn); }
-    if (SLIDE) document.getElementById("tbtns").classList.add("tslide");
+    // The beside-the-trigger seating outlives the slide gesture that introduced
+    // it: a latch you tap between bursts wants to be under the same thumb.
+    if (SLIDE || AIMTOG) document.getElementById("tbtns").classList.add("tslide");
     if (FIXED) baseEl.classList.add("tfixed");
     // RECENTER starts hidden: it is a self-summoning control (see the visibility
     // rule in the onAlways below) and a one-frame flash of a button that then
@@ -314,32 +373,110 @@
   // MOST-pressed buttons in the game — FIRE and JUMP — never did. A lost
   // touchend on JUMP left CBZ.keys[" "] held down until the next blur, which
   // in a helicopter is the collective pinned up.
+  //
+  // opts.drag (TOUCH_FIRE_PAD) turns the button into a STICK that is also a
+  // hold: the finger keeps the button down wherever it roams (implicit touch
+  // capture already delivers its moves here), and every move fine-aims through
+  // the shared applyLookDelta — the same one math the look-drag and the legacy
+  // aim-drag use, so the trigger can never grow a second sensitivity. The knob
+  // is drawn from the touch's OWN landing point, not the button centre, so the
+  // stick appears under the thumb exactly like the dynamic movement disc.
   const holdBtns = [];
-  function holdBtn(id, fn) {
+  function holdBtn(id, fn, opts) {
     const b = document.getElementById(id);
+    const drag = !!(opts && opts.drag);
     const rec = { el: b, ids: new Set(), born: 0 };
-    const down = (t) => {
+    const pts = drag ? new Map() : null;   // per-finger anchor + last position
+    const knob = (dx, dy) => {
+      if (!drag) return;
+      const len = Math.hypot(dx, dy) || 1, cl = Math.min(len, PAD_MAXR);
+      b.style.setProperty("--kx", (dx / len * cl).toFixed(1) + "px");
+      b.style.setProperty("--ky", (dy / len * cl).toFixed(1) + "px");
+    };
+    const down = (t, x, y) => {
       if (rec.ids.has(t)) return;
       rec.ids.add(t); rec.born = performance.now();
-      if (rec.ids.size === 1) { b.classList.add("on"); fn(true); }
+      if (pts) pts.set(t, { lx: x, ly: y, ax: x, ay: y });
+      if (rec.ids.size === 1) {
+        b.classList.add("on");
+        if (drag) { knob(0, 0); b.classList.add("tpad"); }
+        fn(true);
+      }
+    };
+    const move = (t, x, y) => {
+      const p = pts && pts.get(t);
+      if (!p) return;
+      // accel=false: this is a fine-aim drag, exactly like the aim finger's.
+      // A curve on the hand that is holding a burst on target is a bug.
+      applyLookDelta(x - p.lx, y - p.ly, false);
+      p.lx = x; p.ly = y;
+      knob(x - p.ax, y - p.ay);
+    };
+    const clear = () => {
+      b.classList.remove("on");
+      if (drag) { b.classList.remove("tpad"); knob(0, 0); }
     };
     const up = (t) => {
       if (!rec.ids.delete(t)) return;
-      if (rec.ids.size === 0) { b.classList.remove("on"); fn(false); }
+      if (pts) pts.delete(t);
+      if (rec.ids.size === 0) { clear(); fn(false); }
     };
     rec.release = function () {
       if (!rec.ids.size) return;
-      rec.ids.clear(); b.classList.remove("on");
+      rec.ids.clear(); if (pts) pts.clear(); clear();
       try { fn(false); } catch (e) {}
     };
     holdBtns.push(rec);
-    b.addEventListener("touchstart", (e) => { e.preventDefault(); for (const t of e.changedTouches) down(t.identifier); }, { passive: false });
+    b.addEventListener("touchstart", (e) => { e.preventDefault(); for (const t of e.changedTouches) down(t.identifier, t.clientX, t.clientY); }, { passive: false });
+    if (drag) b.addEventListener("touchmove", (e) => { e.preventDefault(); for (const t of e.changedTouches) move(t.identifier, t.clientX, t.clientY); }, { passive: false });
     const endF = (e) => { e.preventDefault(); for (const t of e.changedTouches) up(t.identifier); };
     b.addEventListener("touchend", endF, { passive: false });
     b.addEventListener("touchcancel", endF, { passive: false });
-    b.addEventListener("mousedown", (e) => { e.preventDefault(); down("m"); });
+    b.addEventListener("mousedown", (e) => { e.preventDefault(); down("m", e.clientX, e.clientY); });
     b.addEventListener("mouseup", () => up("m"));
   }
+  // ---- LATCH button (TOUCH_AIM_TOGGLE) --------------------------------------
+  // Press on, press off, LIT while on. `read` returns the GAME's own truth for
+  // the verb (or null when that hook is absent) and the per-frame sync below
+  // adopts it, so the lamp can never disagree with the world: a scope that
+  // released itself, a weapon holstered, an ADS some other system dropped all
+  // put the button back where it belongs without this file tracking any of them.
+  // A latch that outlives its button is the failure mode that matters (aim
+  // stuck on forever), so it is cleared whenever the control leaves the glass.
+  const latchBtns = [];
+  function latchBtn(id, fn, read) {
+    const b = document.getElementById(id);
+    if (!b) return null;                       // a missing control must not throw
+    const rec = { el: b, id: id, on: false, read: read };
+    rec.set = function (want, silent) {
+      want = !!want;
+      b.classList.toggle("on", want);
+      if (want === rec.on) return;
+      rec.on = want;
+      if (!silent) { try { fn(want); } catch (e) {} }
+    };
+    rec.release = function () { if (rec.on) rec.set(false); };
+    b.classList.add("tlatch");
+    latchBtns.push(rec);
+    const tap = (e) => {
+      e.preventDefault();
+      rec.set(!rec.on);
+      if (CBZ.sfx) CBZ.sfx("key", { volume: 0.24, pitch: rec.on ? 1.25 : 0.85 });
+    };
+    b.addEventListener("touchstart", tap, { passive: false });
+    b.addEventListener("mousedown", tap);
+    return rec;
+  }
+  // Adopt the world's answer (never re-firing the verb — that would be a loop).
+  function syncLatches() {
+    for (let i = 0; i < latchBtns.length; i++) {
+      const r = latchBtns[i];
+      const truth = r.read ? r.read() : null;
+      if (truth === null || truth === undefined) continue;
+      if (!!truth !== r.on) r.set(truth, true);
+    }
+  }
+  function releaseLatches() { for (let i = 0; i < latchBtns.length; i++) latchBtns[i].release(); }
   // tap button (toggle/one-shot). The .on flash is not decoration: these fire on
   // touchSTART with no hold state, so without it a tap that DID work is
   // indistinguishable from a tap that missed the 52 px circle — and on a
@@ -683,7 +820,7 @@
   CBZ.onAlways(49.5, function (dt) {
     if (!glide.vx && !glide.vy) return;
     if (!enabled || !lookGlideOn() || !CBZ.game || CBZ.game.state !== "playing" ||
-        CBZ.cityMenuOpen || walk.on || look.id !== null || slideTouches.size ||
+        CBZ.cityMenuOpen || walk.on || look.id !== null || slideTouches.size || fireOn ||
         (CBZ.fps && CBZ.fps.active) || (CBZ.isADS && CBZ.isADS())) { glide.vx = glide.vy = 0; return; }
     const d = Math.max(0.001, Math.min(0.05, dt || 0.016));
     applyLookDelta(glide.vx * d, glide.vy * d, false);
@@ -1299,6 +1436,10 @@
   function clearAllTouchState() {
     if (!enabled) return;   // layer never armed → desktop stays byte-identical
     for (let i = 0; i < holdBtns.length; i++) { try { holdBtns[i].release(); } catch (e) {} }
+    // A LATCH IS THE ONE CONTROL THAT CAN SURVIVE A REFOCUS. Aim left down
+    // across an app switch is the same class of bug as a stuck Space: nothing
+    // on screen is holding it and nothing will release it.
+    try { releaseLatches(); } catch (e) {}
     releaseStick(); releaseLook(); pinchPrev = 0;
     glide.vx = glide.vy = 0; _flkX = _flkY = 0;   // no coast survives a refocus
     for (const rec of Array.from(slideTouches.values())) rec.release();
@@ -1334,8 +1475,17 @@
     if (!show) {
       if (stick.id !== null) releaseStick();
       if (walk.on) cancelWalk();
+      releaseLatches();   // aim must never outlive the controls that show it
       return;
     }
+    // SCOPED: lockon.js's optic (#realScope, z-45) masks the whole screen
+    // outside the tube — including, until now, the trigger. Aiming used to
+    // make the FIRE button VANISH, which is exactly why the only way to shoot
+    // felt like the slide gesture. The cluster steps above the mask while the
+    // optic is up; the rest of the HUD stays behind it, which is the point of
+    // the mask. (One class, so the ordering lives in CSS with the z-index it
+    // has to beat, not in a magic number here.)
+    root.classList.toggle("tabovescope", !!(CBZ.fpsScoped && CBZ.fpsScoped()));
     // touch_vehicle's context watcher runs at 97, immediately before this one.
     // If the player entered a road car while still holding the on-foot stick,
     // release it before another frame can leak its WASD into the car.
@@ -1350,6 +1500,15 @@
     if (am) am.style.display = (armed && CBZ.fpsSetAim) ? "" : "none";
     const sc = document.getElementById("tscope");
     if (sc) sc.style.display = (armed && CBZ.fpsCanScope && CBZ.fpsCanScope()) ? "" : "none";
+    // LATCH HYGIENE, in this order: drop any latch whose button just left the
+    // glass (holstered, entered a car, weapon can no longer scope — the thumb
+    // that would turn it off is gone with it), then adopt the game's own truth
+    // for the ones still standing so the lamps are never a claim of their own.
+    for (let i = 0; i < latchBtns.length; i++) {
+      const L = latchBtns[i];
+      if (L.on && L.el.style.display === "none") L.release();
+    }
+    syncLatches();
     // HOMING pill: only while the lock-on system has a live missile platform
     // (RPG in hand, armed aircraft, tank...). Lit = homing on, dim = dumb-fire.
     const hm = document.getElementById("thoming");
@@ -1442,6 +1601,8 @@
   CBZ.touchVerb("crouch", { ctx: "foot", key: "C", hook: null });
   CBZ.touchVerb("jump", { ctx: "foot", key: "Space", hook: null });
   CBZ.touchVerb("look", { ctx: "any", key: "mouse", hook: null });
+  // fire: HOLD (and, with TOUCH_FIRE_PAD, drag-to-aim while held).
+  // aim/scope: LATCHES with TOUCH_AIM_TOGGLE (default), holds without it.
   CBZ.touchVerb("fire", { ctx: "foot", key: "LMB", hook: null });
   CBZ.touchVerb("aim", { ctx: "foot", key: "RMB", hook: "fpsSetAim" });
   CBZ.touchVerb("scope", { ctx: "foot", key: "RMB/scope", hook: "fpsCanScope" });

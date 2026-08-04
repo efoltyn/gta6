@@ -2048,7 +2048,7 @@
       // the stem pitch below is DERIVED from it: crowns touch when the
       // spacing is ~1.5 r, so a wider crown must buy fewer stems, not more.
       const CROWN_R = 12.6;
-      const stemList = [], domeList = [], scrubList = [];
+      const stemList = [], scrubList = [];
       if (CARPET) {
         for (const s of spots) {
           if (s.storey === "scrub") {
@@ -2071,20 +2071,26 @@
             const sp = FLOOK.species(px, pz, { alt: alt, site: "continent" });
             stemList.push({ x: px, z: pz, conifer: sp.conifer, c: c, grad: s.grad });
           }
-          // THE ROOF. Trunkless crowns riding at canopy height, only where the
-          // wood is genuinely closed (c > 0.42) — they are what removes the
-          // ground between crowns from an aerial view, and they cost 20
-          // triangles, no collider and no support chain.
-          if (c > 0.26) {
-            const m = Math.min(8, FLOOK.stems(s.x + 11.3, s.z - 7.1, (c - 0.26) / 0.74, CELL, CROWN_R * 0.90, 8833));
-            for (let k = 0; k < m; k++) {
-              domeList.push({
-                x: s.x + ((CBZ.hash01 ? CBZ.hash01(s.x + k * 41.7, s.z + k * 29.3, 8834) : 0.5) - 0.5) * CELL,
-                z: s.z + ((CBZ.hash01 ? CBZ.hash01(s.x - k * 33.1, s.z - k * 47.9, 8835) : 0.5) - 0.5) * CELL,
-                c: c, grad: s.grad,
-              });
-            }
-          }
+          // THE ROOF IS GONE (2026-08-04, owner: "fake fucking geometric
+          // floating tree things"). 57,694 trunkless crowns used to ride at
+          // ground + 7..14 m here to close the canopy from the air for 20
+          // triangles each. The trick only holds where real stems stand under
+          // it, and nothing enforced that: the gate was written `c > 0.26`
+          // while its own comment claimed `c > 0.42`, so the roof spilled out
+          // of closed wood onto thin ground and shoreline, where a crown with
+          // no tree under it is exactly what it is — a green boulder hanging
+          // in the sky at eye level.
+          //
+          // WHY IT PASSED: canopy cover was measured top-down in five preset
+          // frames, and from above a fake roof is indistinguishable from a
+          // forest. The metric could not see the failure it was hiding. Do
+          // not reintroduce trunkless crowns on RELIEF; if this wood needs
+          // to close, it buys stems (they are real, they collide, they are
+          // audited) or wider crowns on the stems it already has — both are
+          // visible from the side. Redhollow's roof (city/biome_forest.js)
+          // is deliberately kept: that biome is a flat plate at y=0 with
+          // ~2,900 trunks and 23 m spires under it, so its patches are
+          // genuinely buried in a wood rather than hanging over open ground.
         }
       }
       const nTree = CARPET ? stemList.length : spots.filter(isTreeSpot).length;
@@ -2144,7 +2150,6 @@
       const tbb = TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(trunkG) : null;
       const cbb = TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(canopyG) : null;
       const spireG = CARPET && VKIT ? VKIT.geometry("conifer-spire") : null;
-      const domeG = CARPET && VKIT ? VKIT.geometry("canopy-dome") : null;
       const scrubG = CARPET && VKIT ? VKIT.geometry("krummholz") : null;
       const sbb = spireG && TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(spireG) : null;
 
@@ -2174,7 +2179,7 @@
         const key = kx + "|" + kz;
         let c = chunkMap.get(key);
         if (!c) {
-          c = { cx: (kx + 0.5) * CHUNK, cz: (kz + 0.5) * CHUNK, stems: [], domes: [], scrub: [], meshes: [] };
+          c = { cx: (kx + 0.5) * CHUNK, cz: (kz + 0.5) * CHUNK, stems: [], scrub: [], meshes: [] };
           chunkMap.set(key, c);
         }
         return c;
@@ -2186,7 +2191,6 @@
           chunkAt(st.x, st.z).stems.push(st);
           if (st.conifer) nCone++; else nBroad++;
         }
-        for (let i = 0; i < domeList.length; i++) chunkAt(domeList[i].x, domeList[i].z).domes.push(domeList[i]);
         for (let i = 0; i < scrubList.length; i++) chunkAt(scrubList[i].x, scrubList[i].z).scrub.push(scrubList[i]);
       }
       // ---- SOLIDITY: a tree you can DRIVE THROUGH is the worst decoy an open
@@ -2311,25 +2315,6 @@
         C.ti++;
       }
 
-      // A crown with no tree under it, riding at the height the real crowns
-      // around it ride at. No collider, no audit chain, no trunk — see the
-      // canopy-dome note in world/vegetation.js.
-      function plantDome(dm, i, C) {
-        const gy = reliefAt(dm.x, dm.z);
-        const hs = CBZ.hash01 ? CBZ.hash01(dm.x, dm.z, 8836) : 0.5;
-        const rot = (CBZ.hash01 ? CBZ.hash01(dm.x, dm.z, 8837) : 0.5) * Math.PI * 2;
-        const ds = 0.85 + hs * 0.80;
-        dummy.position.set(dm.x, gy + 7.0 + hs * 7.0, dm.z);
-        dummy.rotation.set(0, rot, 0);
-        dummy.scale.set(ds, ds * (0.80 + hs * 0.40), ds);
-        dummy.updateMatrix(); C.domes.setMatrixAt(i, dummy.matrix);
-        FLOOK.tint(col, dm.x, dm.z, {
-          conifer: false, alt: dm.grad ? dm.grad.alt : 0, closure: dm.c, site: "continent",
-          gx: dm.grad ? dm.grad.gx : null, gz: dm.grad ? dm.grad.gz : null,
-        });
-        C.dCol[i * 3] = col.r; C.dCol[i * 3 + 1] = col.g; C.dCol[i * 3 + 2] = col.b;
-      }
-
       // KRUMMHOLZ — the scrub band that turns a treeline into a gradient.
       // Under physics.js's 0.45 STEP_UP is not the point here (it is waist
       // high); it gets no collider because a shrub is something you push
@@ -2356,7 +2341,7 @@
       if (CARPET) {
         chunkMap.forEach(function (ch) {
           const nT = ch.stems.length;
-          if (!nT && !ch.domes.length && !ch.scrub.length) return;
+          if (!nT && !ch.scrub.length) return;
           let cone = 0;
           for (let i = 0; i < nT; i++) if (ch.stems[i].conifer) cone++;
           const broad = nT - cone;
@@ -2382,13 +2367,6 @@
             C.spires.userData.forestColors = C.sCol;
             ch.meshes.push(C.spires);
           }
-          if (ch.domes.length && domeG) {
-            C.domes = new THREE.InstancedMesh(domeG, canopyMat, ch.domes.length);
-            C.dCol = new Float32Array(ch.domes.length * 3);
-            C.domes.name = "backcountry-canopy-roof";
-            C.domes.userData.forestColors = C.dCol;
-            ch.meshes.push(C.domes);
-          }
           if (ch.scrub.length && scrubG) {
             C.scrubs = new THREE.InstancedMesh(scrubG, canopyMat, ch.scrub.length);
             C.kCol = new Float32Array(ch.scrub.length * 3);
@@ -2397,7 +2375,6 @@
             ch.meshes.push(C.scrubs);
           }
           for (let i = 0; i < nT; i++) plantStem(ch.stems[i], C);
-          if (C.domes) for (let i = 0; i < ch.domes.length; i++) plantDome(ch.domes[i], i, C);
           if (C.scrubs) for (let i = 0; i < ch.scrub.length; i++) plantScrub(ch.scrub[i], i, C);
           for (let i = 0; i < ch.meshes.length; i++) {
             const m = ch.meshes[i];
@@ -2413,7 +2390,7 @@
             m.userData.sceneryScale = true;
             m.userData.vegetationLayer = m === C.trunks ? "landscape-wood"
               : (m === C.canopies ? "landscape-crown"
-                : (m === C.spires ? "conifer-spire" : (m === C.domes ? "canopy-dome" : "krummholz")));
+                : (m === C.spires ? "conifer-spire" : "krummholz"));
             city.root.add(m);
             forestMeshes++;
           }
@@ -2586,7 +2563,7 @@
       // says the backcountry is timber and stone rather than a painted backdrop.
       CBZ.backcountrySolids = {
         trees: ti, rocks: ri, solids: solids, on: SOLID_BC, sceneryScale: SCENERY,
-        conifers: nCone, broadleaf: nBroad, roof: domeList.length, scrub: scrubList.length,
+        conifers: nCone, broadleaf: nBroad, scrub: scrubList.length,
         carpet: CARPET, reliefTop: reliefTop, chunks: forestChunks.length, meshes: forestMeshes,
       };
     }

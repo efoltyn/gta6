@@ -154,20 +154,33 @@ body.show-minimap #minimap{ opacity:1; pointer-events:auto; }
    so on touch it adopts the one observed-world dialogue grammar this game has
    (.world-subtitle / .pi-subtitle: heavy white Fredoka, black stroke, NO box)
    and sits one step above the .pi-subtitle band (touch floor 120px) so the two
-   read as stacked lines of the same language, never as competing cards. */
+   read as stacked lines of the same language, never as competing cards.
+
+   THAT "ONE STEP" WAS A TYPED 166px, AND IT WAS ONLY EVER RIGHT BY LUCK. On
+   touch the speech floor is 120px and one --subtitle-slot is 19.27px x 2.35 =
+   45.3px, so 120 + 45.3 = 165.3 — which is what 166 was approximating. It held
+   while the layer below it could not move. It can now: the subtitle LADDER
+   below (--subtitle-rank) lifts #citySpeech by a slot whenever an authored or
+   interaction line is live, which would have parked ambient speech at 165.3px
+   directly on this hint. So this rides the same ladder, always exactly one rung
+   above the highest live speech layer, and the default resolves to the 165.3px
+   it has always sat at. Derived, not typed — same fix as the flight of steps
+   that arrived nowhere, in a different file. */
 #hint.hint-sub{
-  bottom:calc(166px + env(safe-area-inset-bottom, 0px));
+  bottom:calc(var(--subtitle-floor) + var(--hint-rank, var(--subtitle-slot)));
   max-width:min(74vw, 680px);
   padding:0; background:none; border:0; border-radius:0; box-shadow:none;
   backdrop-filter:none; -webkit-backdrop-filter:none;
   font-family:Fredoka, "Arial Rounded MT Bold", "Trebuchet MS", system-ui, sans-serif;
   font-size:var(--pi-sub-line, 19px); font-weight:700; color:#fff;
   text-align:center; letter-spacing:.005em;
-  -webkit-text-stroke:1.4px #090909; paint-order:stroke fill;
-  text-shadow:
+  -webkit-text-stroke:var(--ink-stroke,1.4px) var(--ink,#090909); paint-order:stroke fill;
+  /* the shared recipe (see :root --ink-*) — this is a TOUCH-ONLY skin, so it
+     was the worst-hit copy of the four: a flat 2px ghost quad on 19px type. */
+  text-shadow:var(--ink-shadow,
     -2px -2px 0 #090909, 2px -2px 0 #090909,
     -2px 2px 0 #090909, 2px 2px 0 #090909,
-    0 3px 1px rgba(0,0,0,.9);
+    0 3px 1px rgba(0,0,0,.9));
 }
 
 /* THE CENTRE TOAST — the legacy skin. 64px of white type over a four-layer
@@ -559,6 +572,43 @@ body.full-map-open #interact{display:none !important;}
      (2.2em) plus a little air. This is the rung height of the stack. */
   --subtitle-slot:calc(var(--subtitle-line) * 2.35);
   --subtitle-floor:calc(env(safe-area-inset-bottom,0px) + 206px);
+
+  /* ---- THE ONE INK RECIPE -------------------------------------------------
+     Every observed-world line in this game wears the same outline: heavy white
+     type, a black stroke, and a four-corner black drop that makes it legible
+     over a white pavement or a bright sky. That recipe was hand-copied into
+     FOUR rules (.world-subtitle-line, .pi-subtitle-line, #hint.hint-sub,
+     #pinteractWho) with three different stroke widths. It is declared ONCE
+     here now and each of those four reads it in two lines.
+
+     WHY em AND NOT px — OWNER, 2026-08-04, from an iPad screenshot: "when you
+     see the dialogue, there's little... you can see there's two versions of
+     the dialogue barely overlapping." There is only ONE element (proved: a
+     full-document scan at iPad metrics finds exactly one node carrying the
+     line). The second "version" was the outline itself. The old numbers — a
+     1.6px stroke plus four hard-offset ±2px COPIES of the glyph — were chosen
+     against desktop's 36px cap, where 2px is 5.5% of the em and the four
+     copies fuse into one smooth ring. Touch sizes the same line at ~19px
+     (mobile.css: clamp(16px,2.35vh,24px)), and there the SAME 2px is 10.5% of
+     the em: the copies stop fusing, the upper pair reads as a second sentence
+     ghosted up-left of the first, and they close the counters of o/a/e/g so
+     the letters silt up. One element, an outline made of four ghosts of itself.
+
+     In em the ring is the same FRACTION of the letterform at every size. The
+     ratios are taken FROM the desktop cap so that end is byte-identical
+     (.045em x 36px = 1.62px stroke, .056em x 36px = 2.02px offsets, .084em x
+     36px = 3.02px drop), and 19px type finally gets the outline it would have
+     had if anyone had drawn it at 19px. em inside a custom property resolves
+     against the element that USES it — that is the whole reason one
+     declaration can serve four different type sizes without a media query.
+     One-line revert: delete this block and every consumer falls back through
+     its own var() default to the literal that shipped. */
+  --ink:#090909;
+  --ink-stroke:.045em;
+  --ink-shadow:
+    -.056em -.056em 0 var(--ink,#090909), .056em -.056em 0 var(--ink,#090909),
+    -.056em .056em 0 var(--ink,#090909), .056em .056em 0 var(--ink,#090909),
+    0 .084em .028em rgba(0,0,0,.9);
 }
 @media (max-width:900px),(max-height:560px){
   :root{ --subtitle-floor:calc(env(safe-area-inset-bottom,0px) + 186px); }
@@ -588,13 +638,43 @@ body.full-map-open #interact{display:none !important;}
      rung 0 — the authored campaign line. It keeps the readable base slot: it is
               the beat you are not allowed to miss, and (with choices) it is the
               one that owns a real panel.
-     rung 1 — ambient world speech, lifted by exactly one slot.
+     rung 1 — the answer to a verb YOU pressed (#pinteractSay).
+     rung 2 — ambient world speech, lifted clear of both.
+
+   THE THIRD LAYER, ADDED 2026-08-04. This rule shipped with only two layers
+   enrolled and a third already built: interact.js's #pinteractSay (.pi-subtitle,
+   interact_touch.css). On touch that layer's floor is --pi-sub-floor = 120px and
+   #citySpeech's is --subtitle-floor = 120px — the SAME BAND, byte for byte, with
+   nothing ranking them. A ped bark landing while a verb result was up rendered
+   the two character-on-character, which is the exact fault this comment block
+   was written to end. It is a rung now, not an exception.
+   Order of the ladder is "whose line is it": the authored beat you may not miss
+   keeps the base, then the answer to a button you actually pressed, then the
+   street talking near you.
 
    campaign_ui.js already stamps `campaign-dialogue-active` on <body> for the
-   whole life of a line (say() adds it, finishDialogue() removes it), so this
-   costs no new state anywhere. --subtitle-rank defaults to 0px, so a world
-   subtitle with no campaign line above it is unmoved. */
-body.campaign-dialogue-active #citySpeech{ --subtitle-rank:var(--subtitle-slot); }
+   whole life of a line (say() adds it, finishDialogue() removes it), and
+   interact.js now stamps `interact-subtitle-active` the same way (sayResult
+   adds, saySilence removes), so this costs no new state anywhere.
+   --subtitle-rank defaults to 0px, so a layer with nothing live under it is
+   unmoved and every existing single-line case is byte-identical. */
+body.campaign-dialogue-active #pinteractSay{ --subtitle-rank:var(--subtitle-slot); }
+body.campaign-dialogue-active #citySpeech,
+body.interact-subtitle-active #citySpeech{ --subtitle-rank:var(--subtitle-slot); }
+body.campaign-dialogue-active.interact-subtitle-active #citySpeech{
+  --subtitle-rank:calc(var(--subtitle-slot) * 2);
+}
+/* …and the touch hint (#hint.hint-sub, systems/hud.js) rides one rung above
+   whatever the tallest live speech layer is, by the same two flags. It is a
+   HINT, not a line of dialogue, so it belongs on top of the conversation
+   rather than inside it. */
+body.campaign-dialogue-active #hint.hint-sub,
+body.interact-subtitle-active #hint.hint-sub{
+  --hint-rank:calc(var(--subtitle-slot) * 2);
+}
+body.campaign-dialogue-active.interact-subtitle-active #hint.hint-sub{
+  --hint-rank:calc(var(--subtitle-slot) * 3);
+}
 .world-subtitle .world-subtitle-speaker{
   position:absolute!important;
   width:1px!important;
@@ -615,9 +695,9 @@ body.campaign-dialogue-active #citySpeech{ --subtitle-rank:var(--subtitle-slot);
   letter-spacing:.005em;
   text-align:center;
   text-wrap:balance;
-  -webkit-text-stroke:1.6px #090909;
+  -webkit-text-stroke:var(--ink-stroke,1.6px) var(--ink,#090909);
   paint-order:stroke fill;
-  text-shadow:var(--subtitle-shadow);
+  text-shadow:var(--ink-shadow,var(--subtitle-shadow));
 }
 
 #citySpeech{

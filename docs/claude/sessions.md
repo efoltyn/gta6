@@ -1820,6 +1820,338 @@ documented revert `?cfg_TOUCH_RECENTER=1&cfg_CAM_TOUCH_RECENTER=1` → button
 present, cluster 8/8. The B run is what makes A evidence rather than a
 photograph of an empty pavement.
 
+## 2026-08-04 — THE TRIGGER BECOMES A STICK (TOUCH_AIM_TOGGLE · TOUCH_FIRE_PAD)
+
+Owner, on the iPad: *"you press the aim button and it lights up, and then you
+press it to turn it off… when you press aim, the shooting button should stay
+there. Right now the shooting button disappears, you have to do the swipe to
+shoot, which is dumb… when you hold the shoot button it should almost look like
+the movement keypad, so while I'm shooting I can also change the aim while
+still shooting."* Three complaints, ONE cause, and it is a fact about hands:
+
+**A HOLD OWNS THE THUMB IT IS UNDER.** The right thumb is the only one that can
+reach the trigger, so an AIM that had to be HELD had already spent it. Every
+gesture this file grew afterwards — the slide onto FIRE, the AIM-UP ghost pad,
+the aim-finger fine-aim drag — was scaffolding around that one mistake, and each
+one taught the player a swipe where a button would do. The fix is not another
+gesture. It is to stop spending the thumb:
+
+- **AIM and SCOPE are LATCHES** (`TOUCH_AIM_TOGGLE`, default on). Tap on, tap
+  off, amber lamp while on (`.tbtn.tlatch.on` — deliberately NOT the momentary
+  3 px press-travel; a latch that looks pressed is lying about where your finger
+  is). The latch never remembers its own state as truth: every frame it ADOPTS
+  `fpsAimHeld()` / `fpsScoped()`, so a scope that released itself, a gamepad
+  trigger, or any other ADS writer moves the lamp instead of contradicting it.
+- **The trigger is also a stick** (`TOUCH_FIRE_PAD`, default on). Holding FIRE
+  keeps firing wherever the finger roams, and dragging that same finger aims —
+  through the shared `applyLookDelta` (accel=false, the fine-aim path), so the
+  trigger can never grow a second sensitivity. `#tfire.tpad` draws the movement-
+  pad vocabulary the owner asked for: a 124 px dashed ring and a knob tracking
+  the thumb from where it LANDED (not from the button centre — same grammar as
+  the dynamic movement disc). Walking an automatic across a target is now one
+  finger doing one thing.
+- **THE FIRE BUTTON REALLY WAS DISAPPEARING, and it was not the layout.**
+  `lockon.js`'s optic (`#realScope`, z-45) paints `rgba(2,2,3,.995)` over
+  everything outside the tube, and the touch cluster lives at z-22 — so on any
+  scope-capable weapon, engaging AIM (which drives `resolveScope`) BLACKED OUT
+  the trigger. The buttons were still tappable; they were invisible, which is
+  worse, because it taught the player that the swipe was the only way to shoot.
+  `#touch.tabovescope` (z-46) lifts the cluster over the mask for exactly as
+  long as the optic is up; the rest of the HUD stays masked, which is the point
+  of a mask. **A control hidden by another layer's z-index reads to the player
+  as a control that does not exist** — and it will be blamed on the layer that
+  did nothing wrong.
+
+Legacy grammar is the one-line revert and it is WIRED, not just declared:
+`?cfg_TOUCH_AIM_TOGGLE=0` restores the hold + slide-onto-FIRE path (and rebuilds
+`#tfireup`, which is not built at all under the latch — an unreachable target is
+still a tap target), `?cfg_TOUCH_FIRE_PAD=0` restores the plain trigger.
+
+VERIFIED (`tools/probe.mjs` + `CBZ_PRELOAD=tools/preload/ipad.js`, the headless
+iPad session that last wave's recenter fix left on the shelf — this is exactly
+the compounding it was built for; three probes, all `fails: []`):
+- default grammar: AIM latches on and SURVIVES the lift, FIRE is on the glass
+  and holdable while aiming, dragging the held trigger turns the camera without
+  releasing it, the latch survives the burst, tap 2 drops it — and the two
+  failure modes that matter both hold: a latch does NOT survive its button
+  leaving the glass (holster → `taim` hidden → aim released) and does NOT
+  survive a blur. `touchAudit()` 40/40, uncovered 0, noHook 0.
+- sniper: SCOPE latches, the AIM lamp follows the ADS the optic drives, the
+  cluster lifts above the mask, FIRE stays visible AND drag-aims while scoped,
+  and dropping either latch lowers the optic and the lift together.
+- flags off: `#tfireup` rebuilt, no latch class, no knob, hold aims only while
+  held, slide onto FIRE still shoots, no drag-aim leak. Ledger still 40/40.
+- CSS geometry (computed, not eyeballed): knob hidden idle → 40 px shown and
+  translated while held → hidden after the lift; ring 124 px dashed and inside
+  the glass; lamp background 20,30,46 → 255,177,60 with no press-travel.
+- `MATHGATE: ok (90210: 329/182/206 | 400 ticks | det ok | errors baseline-only)`.
+
+PROBE CAVEAT worth the ink, because it produced a FALSE FAIL in this very run:
+`getComputedStyle(el)` returns a LIVE declaration. Holding one "before" and one
+"after" reference and comparing them compares the object to ITSELF — snapshot
+the strings you care about at read time, or your A/B is a tautology.
+
+## THE 2026-08-04 FLOATING-CANOPY REMOVAL + PROFILER REPAIR (solo)
+
+**Mandate (owner, with a photograph):** "Find these fake fucking geometric
+floating tree things that you added." Then: why does it exist, why does
+everything have a kill switch, and is that why the game runs slow.
+
+- **THE ROOF IS GONE.** `canopy-dome` (world/vegetation.js archetype +
+  city/continent.js `domeList`/`plantDome`/per-chunk mesh) flew ~57k trunkless
+  20-triangle icosahedra at ground + 7..14 m. Its own gate read `c > 0.26`
+  while its comment claimed `c > 0.42`, so it spilled out of closed wood onto
+  thin ground and shoreline. **It passed 2026-08-03 review because canopy
+  cover was measured TOP-DOWN in five preset frames, and from above a fake
+  roof is indistinguishable from a forest — the metric structurally could not
+  see what it was hiding.** Generalise that, not just the fix: a coverage
+  metric taken from one camera angle cannot validate geometry that is only
+  wrong from another. `biome_forest.js`'s roof is KEPT and that is the line —
+  Redhollow is a flat y=0 plate whose patches sit inside ~2,900 trunks and
+  23 m spires; a canopy filler is honest over ground already full of real
+  stems, never on relief. Stems from that wave are real and stay: backcountry
+  49,241 (90210) / 53,056 (1337) against the ≥20,000 ratchet, `legacy` 0.
+
+- **THE PROFILER COULD NOT NAME ANYTHING.** `config.js frameSource()` walked
+  the stack for the first `src/*.js` frame that wasn't config.js — but
+  `core/prio.js` wraps `CBZ.onUpdate`/`onAlways` in place, so its wrapper
+  frame sat between every caller and the capture. **All 653 registered
+  updaters reported `src/core/prio.js:182`.** The one instrument for "what is
+  eating the frame" could measure every system's cost and name none of them.
+  Fixed with a skip LIST (`FRAME_SOURCE_SKIP`); any future in-place wrapper of
+  those registrars belongs in it. Verified: 0/30 unattributed, top entries now
+  read `src/city/charpanel.js:1060`, `src/city/arena_fights.js:1416`, …
+  Profiling-only path — `frameSource()` still returns "" in normal play.
+
+- **`tools/run-city-browser-profile.mjs` was darwin-hardcoded**, so it could
+  not run in headless Linux — exactly where frame-time questions get asked. Now
+  honours `CBZ_CHROME` with the same fallback as math-gate.mjs:89 / probe.mjs:110.
+  NOTE for the next runner: raise `CBZ_CDP_TIMEOUT_MS` (the 60 s default expires
+  during a SwiftShader boot).
+
+**DEBT LEFT NAMED — the real perf lead, MEASURED, unacted-on.** SwiftShader
+renders this scene at ~0.09 fps, so every ms/frame figure from a headless
+profile is noise and none is quoted here. The scene-graph counts are
+device-independent and are the lead: **153,163 objects / 138,823 meshes /
+65,420 visible / 14,015 groups / 90 lights**, 122,980 colliders, 23,202 LOS
+blockers. r128 recurses the WHOLE graph in `projectObject` every render, so
+that traversal is CPU cost paid per frame on any device. `cityRootCensus` says
+**114,076 meshes share just 2,865 geometry+material pairs** and **27,496 are
+static-merge-eligible but unmerged** (batch.js already merged 757 / removed
+203,810). That is the next wave, and it needs a real GPU to A/B — do not
+"optimise" it against a software rasteriser.
+
+**Flag-count honesty (owner asked):** 786 distinct `CBZ.CONFIG` flags, 2,410
+reads. They are NOT a frame-time cost — they resolve to booleans at build time
+(`CARPET`, continent.js) and `core/loop.js` reads none. But 786 is the Block
+Law's own indictment quantified: each one marks a place where a new path was
+added BESIDE the old one instead of replacing it, and both stay resident.
+
+## THE 2026-08-04 iPAD WAVE — one doubled subtitle, one stairway to a wall, one ordered apocalypse
+
+Three owner complaints off a single iPad screenshot of the present-day city, one
+orchestrator + one builder subagent (govcomplex) + one recon scout (strategic).
+
+**"THERE'S TWO VERSIONS OF THE DIALOGUE BARELY OVERLAPPING" — AND THERE WAS
+ONLY EVER ONE ELEMENT.** A full-document scan at iPad metrics (1180x820 @2x,
+`pointer:coarse`, touch latched) found exactly ONE node carrying the spoken
+line: `#citySpeech .citySpeechLine`, effective opacity 1. The second "version"
+was the outline. `.world-subtitle-line` drew a flat `1.6px` stroke plus FOUR
+hard-offset `±2px` COPIES of the glyph — numbers chosen against desktop's 36px
+cap, where 2px is 5.5% of the em and the four copies fuse into one smooth ring.
+Touch sizes the same line at 19.27px (mobile.css `clamp(16px,2.35vh,24px)`),
+where the SAME 2px is 10.5% of the em: the copies stop fusing, the upper pair
+reads as a ghosted second sentence up-left of the first, and they close the
+counters of o/a/e so the letters silt up. Reproduced headless and confirmed
+character-for-character against the owner's screenshot. **Fix: the recipe is
+now `:root { --ink / --ink-stroke / --ink-shadow }` in `css/hud.css`, in em, and
+all FOUR hand-copies read it in two lines** (`.world-subtitle-line`,
+`.pi-subtitle-line`, `#hint.hint-sub`, `#pinteractWho` — three different stroke
+widths before, one now). Ratios are taken from the 36px cap, so desktop is
+unchanged (`.045em x 36 = 1.62px`, `.056em x 36 = 2.02px`); at 19.27px the
+measured stroke goes 1.6px -> 0.867px and the offsets 2px -> 1.079px. Each
+consumer keeps its old literal as the `var()` fallback, so deleting the `:root`
+block is a true one-line revert. **em inside a custom property resolves against
+the element that USES it** — that is the whole reason one declaration serves
+four type sizes with no media query, and it is measured, not assumed.
+
+**AND WHILE READING IT, A REAL SECOND LAYER.** `hud.css` already declares "TWO
+SUBTITLE LAYERS NEVER SHARE PIXELS" and ranked exactly two — with a third built
+and unenrolled: `#pinteractSay` (`.pi-subtitle`, `--pi-sub-floor`) resolves to
+the SAME 120px touch floor as `#citySpeech` (`--subtitle-floor`), so a ped bark
+landing during a verb result rendered the two character-on-character. It is a
+rung now: campaign (0) -> your own verb's answer (1) -> ambient street speech
+(2), off `interact-subtitle-active`, which `interact.js` stamps for the life of
+a line exactly as campaign_ui.js stamps its own. `saySilence()` already runs on
+every non-playing frame, so the class cannot stick.
+
+**THE STAIRWAY THAT "DOESN'T EVEN HAVE PHYSICS" WAS A FLIGHT TO A BLANK WALL.**
+Both halves of the owner's sentence were one fault: `govcomplex.js`'s `steps()`
+took `rise` and `n` as hand-typed arguments and nothing checked the total
+against the surface at the top. City Hall's climbed `6 x 0.30 = 1.80 m` into the
+front wall of a shell whose floor and threshold sit at y=0 (`cityMakeBuilding`
+builds every building on the ground); the Capitol's climbed 2.88 m and its top
+three treads stood ON its own doorway. And it registered only `plat()` — a
+walkable top, never `col()` — which is the correct, documented contract at
+0.30 m (`buildings.js:3755`: "NO collider: a monumental stair must never be able
+to seal a building's own front door") and a LIE at 1.8-2.9 m, so the whole stone
+mass was walk-through. **Fix: `steps(root,x,z,w,depth,TOP,…)` — the caller
+states the height the flight ARRIVES AT, the riser count and rise are solved
+from it, and the flanks take real per-tread colliders once `top >= STEP_UP`.**
+The four monumental entrances become a `perron()`: a 0.30 m stylobate you cross
+to the door, with capped cheek walls carrying the colliders — monumental read
+kept, threshold one 16 cm lip away, nothing can be sealed out of its own front
+door. New ratchet `govComplexAudit().stairsFloating`, **PIN AT 0** (a flight
+more than one `STEP_UP` from its declared landing), with `stairs` printed beside
+it so a "fix" that stops drawing steps cannot pass.
+
+**"THE GOVERNMENT BUILDING IS KINDA STUPID" — IT HAD NO CLOSED DOOR IN IT.**
+Not one, in any of eleven complexes. `keepOut` is a spawn zone; `access` is a
+trespass query; `occupy.js` says so in its own header ("it does not lock doors,
+because nothing in this engine has a lockable door yet"). A building with
+nothing shut in it cannot make a gradient, which is doctrine LAW 1's exact
+complaint. **§5d THE STRONGROOM** answers it with the gun-room grammar applied
+literally: a steel leaf with a barred vision panel off City Hall's PUBLIC lobby
+(so you meet it on your first visit, unsent), the confiscated arms rack and the
+city seal lit on the far side of the bars, the key press on the floor
+`power.js` already declares `vip` and `occupy.js` already puts men on. The rack
+pays a real gun through `cityGiveWeapon`; the SEAL pays the category — every
+government floor in the world stops reading you as an intruder, through
+occupy.js's own `cityOccupyGrant`, re-asserted per complex as its occupancy
+comes up. Declared as a five-field registry row, so a second complex is one
+line and no geometry. Flags `GOV_STRONGROOM` / `GOV_STRONGROOM_WRIT`; audit
+`strongroomsDeclared` must equal `strongrooms`.
+
+**"ORDER A NUKE ON A PLACE AND A B-2 SHOULD FLY THERE AND DROP IT — THE SAME
+WAY IT WORKS WHEN YOU DROP ONE IN PILOT."** The last clause is the whole
+specification, and honouring it made the feature ~150 lines instead of a second
+weapon system. `strategic.js` already claimed "TWO ROUTES TO A DETONATION …
+both end in nukeDetonate", but its only called route (`strategicCallStrike`)
+spawns no aircraft at all — it authors impact points and hands them to
+`cityBombWalk`. The reason was one gate: everything from "the store has left the
+bay" onward lived in the tail of `dropPayload()`, which is welded to
+`flyingB2()`, i.e. to the PLAYER being at the controls. **Split out as
+`releaseStore(kind, p, rv, opts)`** (exported `CBZ.strategicRelease`) and the
+file's own law finally holds for a third route: the ordered sortie calls the
+identical function the `[B]` key calls, so it inherits the closed-form solve,
+the B61 laydown parachute, the tumble, `bombAt` and
+`resolveImpact -> nukeDetonate -> the bus`, with no delivery code of its own.
+Attribution now rides on the bomb (`b.by`/`b.byPlayer`, undefined on the
+piloted path — byte-identical there).
+
+**THE AEROPLANE IS THE ONE ON THE APRON.** `CBZ.strategicNuclearSortie({x,z})`
+CLAIMS the parked B-2 through the same ownership protocol `aircraft.js`'s
+fighter scramble uses (`cityClaimMilitaryVehicle` / `cityReleaseMilitaryVehicle`)
+and flies `b2rec.group` itself. Three consequences, none of them bookkeeping:
+the apron is genuinely empty and the boarding verb genuinely gone while your
+strike is up; steal or wreck the bomber and nobody can order a strike; and a
+real garrison trooper flies it via `CBZ.airSeatActor`, so shooting him down
+costs the base its bomber permanently (the mesh goes with the record — a
+`destroyed` release deliberately does not re-park, which for a flying one would
+have left a B-2 at 210 m forever). No aircrew on the base, no sortie.
+**The release point is SOLVED, not tuned** — playerair.js's called jet drops at
+a flat 55 m; this runs the same ballistic solve directly over the aimpoint,
+reads how far downrange the weapon actually travels *including the canopy's
+horizontal decay integral*, and releases at `aimpoint - throw`. `rv` is computed
+once and reused, so the prediction and the event are the same numbers and
+`ordnanceAudit()` still counts one release per sortie. Release altitude 210 m is
+chosen so `retardFor` ALWAYS takes the retarded laydown (5.5 s ballistic vs
+`RET.T_ESCAPE` 12 s) — the real B61 rule, and the reason you get to watch a
+parachute come down. Order it at the **nuclear release console**, a new locked
+machine in the Fort Brandt command room beside the map table (its own zone, not
+a second option on the strike console — `interactions.js` renders ONE verb per
+card, so a second option would simply have hidden the iron strike), gated on
+`cityLock({verb:"vault"})`: the same apex authority that opens the nuclear vault
+six metres away. Every refusal is a fact about the world and is said out loud.
+
+**A PRE-EXISTING BUG THE RECON FOUND ON THE WAY.** `aircraft.js`'s
+`parkedMilitary` excluded strategic airframes with `/bomber/i` — which does not
+match `"B-2 SPIRIT"`. A 5-star police response could therefore scramble the
+strategic bomber as a fighter and fly strafing passes with it, and (the claim
+being exclusive) could take the airframe out from under an ordered sortie. Now
+tested on the record's own `b2` flag.
+
+**GATE:** `MATHGATE: ok` on 90210 — `329/182/206` lots/shops/roads (golden),
+`gov 11/11 placed rejected=25 overlap=0 urban=0 staffed=10`, `mtnOutSnow 0
+cityOnMtn 0 overlaps 0`, 400 sim ticks clean, determinism re-run byte-identical,
+console baseline-only.
+
+**AND THE SORTIE WAS FLOWN, NOT ARGUED.** A live probe ordered one from the API
+and read the whole arc off `CBZ.strategicSortieState()` while bursting
+`stepSim(1/60)`:
+
+| t (sim-s) | phase | dist to mark | alt |
+|---|---|---|---|
+| 0 | ordered — `{ok:true}`, pilot "Tess Wozniak", `bomber:false` (claimed off the pad) | 900 | 210 |
+| 2 | inbound | 537 | 210 |
+| 4 | inbound | 307 | 210 |
+| **5.5** | **RELEASE** -> egress | **43** | 210 |
+| 8 | egress | 470 | 210 |
+| 12 | egress | 1310 | 210 |
+| **16.65** | **DETONATION** — `wanted` 0 -> **5** | 2151 clear | — |
+
+Three numbers in that table are the design working rather than a coincidence.
+**43 m** is the solved throw distance, not a tuned constant — the release fired
+the frame the predicted impact reached the mark. **11.15 s** of fall from 210 m
+is the RETARDED laydown: free fall from that height is `sqrt(2*210/14) = 5.5 s`,
+so the canopy streamed exactly as `retardFor` intends. And **2151 m** is where
+the bomber was when it went off, which is what the parachute is FOR. The 5th
+star is the decisive detonation signal because `cityAddStars(5, "Nuclear
+detonation — military response")` is reachable from nowhere else, and
+`channelBusy` latched true after. Console errors: **zero**.
+
+METHOD NOTE FOR THE NEXT PROBE, because it cost two runs: the first detector
+wrapped `CBZ.strategicNukeDetonate` and never fired. `resolveImpact` calls the
+MODULE-LOCAL `nukeDetonate`, so the export is not on the path — a wrapper on a
+`CBZ.*` handle only sees calls from OUTSIDE its own file. Detect a detonation by
+its consequences (the reserved 5th star, the radiation zone), never by wrapping
+a same-file function.
+
+### 2026-08-04, same wave, after the merge decision
+
+**THE HINT'S "ONE STEP ABOVE" WAS A TYPED 166px AND THE LADDER BROKE IT.** The
+subtitle ladder above lifts `#citySpeech` by a slot whenever an authored or
+interaction line is live — which put ambient speech at 120 + 45.3 = 165.3px,
+straight onto `#hint.hint-sub`'s hardcoded 166. That number was only ever an
+approximation of `--subtitle-floor + --subtitle-slot`, correct while the layer
+under it could not move. It now rides the same ladder, always one rung above
+the tallest live speech layer, and its default resolves to the 165.3px it has
+always sat at. Same lesson as the flight of steps that arrived nowhere: **a
+number that agrees with another number by luck is a bug that has not gone off
+yet.** Derive it or it will drift.
+
+**A GEOMETRY STAT FICTION, FOUND AND DELIBERATELY NOT FIXED.** `config.js`'s
+`BLD_EXTRAS = false` block carried the line "KEPT: the government/civic
+buildings and their monumental entries … explicitly left alone so a future
+blanket edit cannot quietly take them" — and a blanket edit had already quietly
+taken half of it, in that same block. `BLD_MASONRY_V1 = false` two lines above
+is ALSO the gate on `buildings_civic.js`'s civic kit: `bldCivicOrder` (:367 —
+podium, columns, entablature, pediment) and `bldCivicCrown` (:568 — dome /
+clock tower / lantern) both open `if (!flag("BLD_MASONRY_V1") ||
+!flag("BLD_CIVIC_PODIUM")) return;` and are called at `buildings.js:3827-3828`.
+So `govcomplex.js` asks for `crown:"dome"` on the Executive Mansion,
+`crown:"clock"` on City Hall, `crown:"pediment"` + `order:"ionic"` on the
+Capitol — **and every one of them draws a box.** A registry declaring domes the
+renderer cannot draw is exactly the banned shape, and it is the most likely
+reason the owner's read of a seat of power is "kinda stupid".
+
+It is NOT fixed in this wave, on purpose, and the comment now says so instead
+of lying. The fix is to gate the civic kit on `BLD_CIVIC_PODIUM` alone (the
+masonry FACADE is the residential brick the owner actually cut; a colonnade is
+not) — but that puts columns and domes on every civic anchor in the world, and
+it lands on the same facades as govcomplex's new perron, which is two
+monumental entries stacked: the "stairway that makes no sense" bug in reverse.
+How it LOOKS is the owner's call, judged by playing. **This is the next thing
+worth doing to the government buildings, and it is bigger than everything §5d
+added.**
+
+**NEW TOOL:** `tools/nuke-sortie-check.mjs`, promoted from the probe this wave
+wrote five times. It proves the ordered sortie end to end and the canopy
+ARITHMETICALLY — the measured fall must exceed `sqrt(2h/GRAV)` from the release
+altitude by 1.4x, which free fall cannot do however the solver drifts. It also
+carries the method trap in its header so the next author does not lose two runs
+to it.
+
 ## THE 2026-08-04 LOAD-COST TEARDOWN — the jail vs the city, measured
 
 Owner: *"Figure out why the prison escape game loads fucking amazing, I can

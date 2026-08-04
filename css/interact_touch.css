@@ -114,11 +114,14 @@
   max-width: 100%; text-align: right;
   font-family: Fredoka, "Arial Rounded MT Bold", "Trebuchet MS", system-ui, sans-serif;
   paint-order: stroke fill;
-  -webkit-text-stroke: 1.2px #090909;
-  text-shadow:
+  /* hud.css's shared --ink-* recipe (declared at :root there, this sheet loads
+     after it). Was a fourth hand-copy of the same outline at a third stroke
+     width; in em the name plate now wears the same ring as the line below it. */
+  -webkit-text-stroke: var(--ink-stroke, 1.2px) var(--ink, #090909);
+  text-shadow: var(--ink-shadow,
     -1px -1px 0 #090909, 1px -1px 0 #090909,
     -1px 1px 0 #090909, 1px 1px 0 #090909,
-    0 2px 1px rgba(0,0,0,.85);
+    0 2px 1px rgba(0,0,0,.85));
 }
 #pinteractWho > span{
   max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -242,7 +245,11 @@
     0 3px 1px rgba(0,0,0,.9);
   position: fixed;
   left: 50%;
-  bottom: var(--pi-sub-floor);
+  /* --subtitle-rank is hud.css's ONE subtitle ladder (see "TWO SUBTITLE LAYERS
+     NEVER SHARE PIXELS" there). This band and #citySpeech's resolve to the same
+     120px floor on touch, so this layer is a rung in that ladder rather than a
+     third element quietly parked on top of it. 0px when nothing is under it. */
+  bottom: calc(var(--pi-sub-floor) + var(--subtitle-rank, 0px));
   width: min(940px, calc(100vw - 34px));
   box-sizing: border-box;
   z-index: 27;
@@ -262,9 +269,9 @@
   font-size: var(--pi-sub-line);
   font-weight: 700; line-height: 1.1; letter-spacing: .005em;
   text-align: center; text-wrap: balance;
-  -webkit-text-stroke: 1.6px #090909;
+  -webkit-text-stroke: var(--ink-stroke, 1.6px) var(--ink, #090909);
   paint-order: stroke fill;
-  text-shadow: var(--pi-sub-shadow);
+  text-shadow: var(--ink-shadow, var(--pi-sub-shadow));
 }
 
 /* ============================================================

@@ -7,11 +7,15 @@
    5. day-jump → REBUILT: building back, ledger empty, colliders restored
    6. serialize/apply round-trip */
 import { spawn } from "node:child_process";
-import { rm, writeFile } from "node:fs/promises";
+import { rm, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const OUTDIR = ROOT + "/tools/shots";
+// tools/shots/ is gitignored, so on a FRESH CLONE it does not exist and the
+// screenshot write ENOENTs AFTER the whole run has already passed — which is
+// how this cost a green pre-deploy render gate. Create it, like touch-hud-check does.
+await mkdir(path.dirname(OUT), { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const port = 8930 + Math.floor(Math.random() * 9);
 const server = spawn("python3", [path.join(ROOT, "tools/devserver.py")], { env: { ...process.env, PORT: String(port) }, stdio: "ignore" });

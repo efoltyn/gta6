@@ -105,8 +105,44 @@ html, body { touch-action: none; -webkit-user-select: none; user-select: none; }
 #tbtns.aimup-live #tfireup.fireon { border-style: solid; border-color: #ff6a5e;
   background: rgba(255,80,60,.30); opacity: 1; }
 .tbtn.tjump { width: 72px; height: 72px; background: rgba(58,209,122,.42); border-color: rgba(58,209,122,.6); }
-.tbtn.tfire { background: rgba(226,74,58,.5); border-color: rgba(255,120,100,.65); }
+.tbtn.tfire { background: rgba(226,74,58,.5); border-color: rgba(255,120,100,.65);
+  position: relative; overflow: visible; }
 .tbtn.on { transform: translateY(3px); background: rgba(255,122,26,.62); box-shadow: 0 1px 0 rgba(0,0,0,.3); }
+
+/* TOUCH_AIM_TOGGLE (.tlatch, touch.js): AIM and SCOPE are LATCHES, not holds —
+   tap on, tap off. A latch must not borrow the momentary "pressed" look (that
+   3px push reads as "your finger is on it right now"); it reads as a LAMP:
+   amber ring, glow, no travel. touch.js keeps the .on class in sync with the
+   game's own aim/scope truth, so this style is never a claim of its own. */
+.tbtn.tlatch.on {
+  transform: none; background: rgba(255,177,60,.55); border-color: #ffd166; color: #fff;
+  box-shadow: 0 0 0 3px rgba(255,209,102,.26), 0 0 16px rgba(255,177,60,.45), 0 4px 0 rgba(0,0,0,.3);
+  opacity: 1;
+}
+
+/* TOUCH_FIRE_PAD (#tfire.tpad, touch.js): while the trigger is HELD it is also
+   a stick — drag the holding thumb to fine-aim without releasing the burst. The
+   ring (124px = 2 x PAD_MAXR + the knob) plus a knob that tracks the thumb from
+   wherever it landed give the gesture the movement-pad vocabulary, so it can be
+   discovered instead of read about. Both are inert until a finger is down. */
+#tfire .tpknob {
+  display: none; position: absolute; left: 50%; top: 50%; width: 40px; height: 40px;
+  margin: -20px 0 0 -20px; border-radius: 50%; background: rgba(255,255,255,.42);
+  box-shadow: 0 2px 8px rgba(0,0,0,.45); pointer-events: none; z-index: 2;
+  transform: translate(var(--kx, 0px), var(--ky, 0px));
+}
+#tfire.tpad .tpknob { display: block; }
+#tfire.tpad::after {
+  content: ""; position: absolute; left: 50%; top: 50%; width: 124px; height: 124px;
+  margin: -62px 0 0 -62px; border-radius: 50%; z-index: 0; pointer-events: none;
+  border: 2px dashed rgba(255,255,255,.30); background: rgba(255,255,255,.05);
+}
+
+/* SCOPED: lockon.js's optic (#realScope, z-45) blacks out everything outside
+   the tube. It used to black out the TRIGGER too — aiming made the fire button
+   disappear. touch.js lifts the cluster over the mask for exactly as long as
+   the optic is up; every other HUD layer stays masked, which is the point. */
+#touch.tabovescope { z-index: 46; }
 
 /* ============================================================
    VERB PILLS (TOUCH_VERB_PROMPTS) — the owner's "button that SAYS
