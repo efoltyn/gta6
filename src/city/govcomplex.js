@@ -202,6 +202,19 @@
   // feature — idempotent, whichever parses first wins (interact.js's
   // PROPS_WIRED_V1 precedent).
   if (CFG.WAREHOUSE_COMPLEX_V1 == null) CFG.WAREHOUSE_COMPLEX_V1 = true;
+  /* GOV_STRONGROOM — §5d. The locked room and everything that follows from it:
+     the key press upstairs, the steel door with the barred panel you can see
+     the prize through, the arms rack and the city seal. Off → City Hall is
+     byte-for-byte the building it was before (its lobby simply keeps the bay
+     the vault would have taken).
+     GOV_STRONGROOM_WRIT — the CATEGORICAL half only. With the seal in your
+     hands every government floor in the world reads you as VIP through
+     occupy.js's own `cityOccupyGrant`, so you stop being an intruder in the
+     buildings that used to shoot you for standing in them. Off → the vault
+     still pays its gun and its cash and you are still a trespasser upstairs.
+     This is the flag to flip if access control misbehaves. */
+  if (CFG.GOV_STRONGROOM == null) CFG.GOV_STRONGROOM = true;
+  if (CFG.GOV_STRONGROOM_WRIT == null) CFG.GOV_STRONGROOM_WRIT = true;
 
   /* ====================================================================
      §0  SMALL SHARED HELPERS — materials, boxes, colliders, platforms.
@@ -463,13 +476,59 @@
     }
   }
 
-  // MONUMENTAL STEPS. Real stacked treads with real platforms, so the front
-  // of a capitol is something you WALK UP rather than something you clip
-  // through. `dir` is the OUTWARD normal (+1/-1); the flight climbs inward,
-  // so tread 0 is the lowest and sits at the outer lip. `axis:"x"` runs the
-  // same flight up an east/west facade.
-  function steps(root, x, z, w, depth, rise, n, hex, dir, axis) {
+  /* ------------------------------------------------------------------
+     A FLIGHT OF STEPS IS DEFINED BY WHAT IS AT THE TOP OF IT.
+
+     THE BUG THE OWNER FILMED (iPad, the present-day city): "there's that,
+     um, like, stairway thing that doesn't even have physics that's in front
+     of the government building. That doesn't really make sense what it's
+     there for." Both halves of that sentence were true and they are one
+     fault — a flight whose HEIGHT was typed per call and never checked
+     against the surface it arrives at:
+
+       · IT ARRIVED NOWHERE. `rise * n` was authored four times by hand.
+         City Hall's flight climbed 6 x 0.30 = 1.80 m and its top tread
+         landed FLUSH against the front wall of a shell whose floor and
+         threshold sit at y = 0 — `cityMakeBuilding` builds every building
+         in this game on the ground, and buildings_civic.js's own monumental
+         podium is 0.30 m tall for exactly that reason and says so in its
+         comment ("the interior floor slab tops out at 0.14 and physics'
+         STEP_UP is 0.45, so a rider walks up the flight and straight in").
+         The Capitol's flight climbed 2.88 m and its top three treads stood
+         ON its own doorway. So the "stairway" was a solid stone mass parked
+         in front of a door, going up to a blank wall: a thing that answers
+         no why, which is precisely what the owner saw and could not name.
+       · IT HAD NO COLLIDER — only `plat()`, a walkable TOP. That is the
+         correct, documented contract at 0.30 m (buildings.js:3755 states
+         it: "NO collider: a monumental stair must never be able to seal a
+         building's own front door") because a riser under physics.js's
+         STEP_UP = 0.45 has no flank you could walk through that you would
+         not simply step onto. At 1.8-2.9 m it is a LIE: the risers were not
+         solid, so the whole mass was walk-through. Hence "doesn't even have
+         physics".
+
+     So: `top` is the height the flight ARRIVES AT and the caller must state
+     it; the riser count and the rise fall out of it, and the flanks take
+     real colliders per tread the moment the flight is taller than one
+     auto-climb. `dir` is the OUTWARD normal (+1/-1) — the flight climbs
+     inward, so tread 0 is the lowest and sits at the outer lip; `axis:"x"`
+     runs the same flight up an east/west face.
+     ------------------------------------------------------------------ */
+  const STEP_UP = 0.45;      // physics.js's own auto-climb height, quoted once
+  const RISE_MAX = 0.30;     // a comfortable tread rise, and strictly under it
+  // every flight this file lays, so §9 can measure that each lands on something
+  const _flights = [];
+  function steps(root, x, z, w, depth, top, hex, dir, axis, landing) {
+    if (!(top > 0.02) || !(depth > 0.2) || !(w > 0.2)) return 0;
+    /* THE RISER COUNT IS SOLVED FROM BOTH DIMENSIONS, never typed. The rise
+       may not exceed RISE_MAX (that is what makes every tread auto-climbable),
+       and the GOING may not be so deep that a "flight" reads as one kerb — a
+       0.42 m going is the shallow end of real stair practice, and the cap of
+       four extra treads stops a 12 m ceremonial band from becoming thirty. */
+    const n = Math.max(1, Math.ceil(top / RISE_MAX - 1e-6), Math.min(4, Math.round(depth / 0.42)));
+    const rise = top / n;
     const tread = depth / n;
+    const flank = top >= STEP_UP;
     for (let i = 0; i < n; i++) {
       const back = dir * (depth / 2 - tread * (i + 0.5));   // outer lip -> facade
       const cxs = axis === "x" ? x + back : x;
@@ -478,7 +537,58 @@
       const y = rise * (i + 1);
       box(root, cxs, y / 2, czs, sw, y, sd, hex, { cast: false });
       plat(cxs, czs, sw, sd, y);
+      // THE FLANKS, per tread and never across one: a collider on the two
+      // SIDES of the run makes the stone solid from every direction the walk
+      // platforms do not answer, while the treads themselves stay open so the
+      // climb the platforms exist to allow still works.
+      if (!flank) continue;
+      for (const s of [-1, 1]) {
+        if (axis === "x") col(cxs, czs + s * (w / 2 - 0.12), tread, 0.24, 0, y);
+        else col(cxs + s * (w / 2 - 0.12), czs, 0.24, tread, 0, y);
+      }
     }
+    _flights.push({ x: x, z: z, top: top, landing: landing == null ? top : landing });
+    return n;
+  }
+
+  /* THE MONUMENTAL ENTRANCE, and it is a PERRON, not a tower of stairs.
+     A capitol is monumental because it stands on a STYLOBATE — a broad, low
+     platform you step up onto and cross to the door — not because its steps
+     are tall. That is the only shape available to us and it is also the
+     historically correct one: the deck is 0.30 m (buildings_civic.js's solved
+     number, quoted rather than re-derived), so the threshold at 0.14 is one
+     16 cm lip away and NOTHING can be sealed out of its own front door.
+     The caller passes the point ON THE FACADE and how far the platform reaches
+     out from it, so the entrance's geometry is derived from the door instead
+     of being a second set of constants that can drift away from it (the lamp
+     -arm lesson). Returns the deck height, so a caller can stand something on
+     it without re-typing the number. */
+  const PERRON_TOP = 0.30;     // deck height — under STEP_UP, over the 0.14 slab
+  const PERRON_FLIGHT = 1.2;   // the band the treads themselves occupy
+  function perron(root, fx, fz, w, depth, hex, dir, axis) {
+    depth = Math.max(PERRON_FLIGHT + 0.8, depth);
+    const deckD = depth - PERRON_FLIGHT;
+    const dcx = axis === "x" ? fx + dir * deckD / 2 : fx;
+    const dcz = axis === "x" ? fz : fz + dir * deckD / 2;
+    const dw = axis === "x" ? deckD : w, dd = axis === "x" ? w : deckD;
+    box(root, dcx, PERRON_TOP / 2, dcz, dw, PERRON_TOP, dd, hex, { cast: false });
+    plat(dcx, dcz, dw, dd, PERRON_TOP);
+    const scx = axis === "x" ? fx + dir * (deckD + PERRON_FLIGHT / 2) : fx;
+    const scz = axis === "x" ? fz : fz + dir * (deckD + PERRON_FLIGHT / 2);
+    steps(root, scx, scz, w - 1.4, PERRON_FLIGHT, PERRON_TOP, hex, dir, axis, PERRON_TOP);
+    // CHEEK WALLS either flank, capped — the piece that makes a low platform
+    // read as a monumental entrance rather than as a kerb, and the one part of
+    // the entrance that is SUPPOSED to stop you (so it takes a real collider).
+    for (const s of [-1, 1]) {
+      const t = s * (w / 2 + 0.45);
+      const cw = axis === "x" ? depth : 0.9, cd = axis === "x" ? 0.9 : depth;
+      const ccx = axis === "x" ? fx + dir * depth / 2 : fx + t;
+      const ccz = axis === "x" ? fz + t : fz + dir * depth / 2;
+      box(root, ccx, 0.34, ccz, cw, 0.68, cd, hex, { cast: false });
+      box(root, ccx, 0.74, ccz, cw + 0.16, 0.12, cd + 0.16, hex === M.stone ? M.stoneD : M.concreteD, { cast: false });
+      col(ccx, ccz, cw, cd, 0, 0.8);
+    }
+    return PERRON_TOP;
   }
 
   // PARKING SEA. Painted stalls only — one InstancedMesh for every stripe in
@@ -791,7 +901,9 @@
           { kind: "capitol", crown: "pediment", order: "ionic", motto: "SENATE", stone: true }, "Senate Wing");
         civic(root, cx + 80, cz - 20, 44, 38, 2, M.stone, 1,
           { kind: "capitol", crown: "pediment", order: "ionic", motto: "ASSEMBLY", stone: true }, "Assembly Wing");
-        steps(root, cx, cz + 8, 62, 12, 0.32, 9, M.stone, 1);      // z +2..+14
+        // THE STYLOBATE. `cz - 26 + 56/2` IS the front facade, so the entrance
+        // is derived from the chamber's own wall and reaches 12 m out from it.
+        perron(root, cx, cz + 2, 62, 12, M.stone, 1);              // z +2..+14
         flagpole(root, cx - 34, cz + 18, 16);
         flagpole(root, cx + 34, cz + 18, 16);
         const lamps = [];
@@ -839,7 +951,7 @@
         const main = civic(root, cx, cz - 34, 56, 34, 2, M.marble, 1,
           { kind: "mansion", crown: "dome", order: "doric", motto: "EXECUTIVE MANSION", stone: true }, "Executive Mansion");
         c.main = main;
-        steps(root, cx, cz - 12, 30, 8, 0.3, 6, M.stone, 1);       // z -16..-8
+        perron(root, cx, cz - 17, 30, 9, M.stone, 1);              // facade z -17, out to -8
         // the WEST WING: the office half of "residence and workplace"
         civic(root, cx - 58, cz - 30, 34, 22, 2, M.stone, 3,
           { kind: "federal", crown: "flat", order: "pilaster", motto: "WEST WING", stone: true }, "West Wing");
@@ -892,7 +1004,7 @@
         const main = civic(root, cx, cz - 26, 42, 28, 2, M.stone, 1,
           { kind: "cityannex", crown: "clock", order: "pilaster", motto: "GOVERNOR'S RESIDENCE", stone: true }, "Governor's Residence");
         c.main = main;
-        steps(root, cx, cz - 8, 22, 6, 0.3, 5, M.stone, 1);        // z -11..-5
+        perron(root, cx, cz - 12, 22, 7, M.stone, 1);              // facade z -12, out to -5
         disc(root, cx, cz + 16, 24, M.paving, YS, 24);
         disc(root, cx, cz + 16, 7, M.lawn, YM, 18);
         block(root, cx - 54, cz + 2, 22, 16, 1, M.stoneD, 3, { facade: "office", garageGround: true });
@@ -1019,6 +1131,17 @@
       fan: 22, fanStep: 16 * Math.PI / 180,
       principal: { key: "mayor", tier: 3, org: "state", lawful: true, role: "Mayor", job: "official", wealth: 0.7 },
       interiors: { main: ["lobby", "deskfarm", "bosssuite"], aux: ["deskfarm"] },
+      /* §5d — THE ONE LOCKED ROOM. Five words and no coordinates: the bay, the
+         walls, the door and the key press are all derived from the shell's own
+         floorplate and its stair core. `floor: 0` is deliberate and is the
+         whole design — the strongroom opens off the PUBLIC lobby, so the first
+         time you walk into City Hall you can see through the bars at the thing
+         you cannot have. `keyFloor: "top"` is the floor you are not allowed on.
+         A second complex that wants one adds this line and no geometry. */
+      strongroom: {
+        name: "City Hall Strongroom", floor: 0, keyFloor: "top",
+        key: "the strongroom key", org: "state",
+      },
       build: function (c) {
         const R = c.rect, root = c.root, cx = c.cx, cz = c.cz;
         pad(root, R, M.paving, "cityhall");
@@ -1027,7 +1150,7 @@
         const main = civic(root, cx, cz - 24, 50, 32, 3, M.stone, 1,
           { kind: "cityhall", crown: "clock", order: "pilaster", motto: "CITY HALL", stone: true }, "City Hall");
         c.main = main;
-        steps(root, cx, cz - 4, 30, 8, 0.3, 6, M.stone, 1);        // z -8..0
+        perron(root, cx, cz - 8, 30, 8, M.stone, 1);               // facade z -8, out to 0
         flagpole(root, cx - 18, cz + 6, 12);
         flagpole(root, cx + 18, cz + 6, 12);
         bollardLine(root, cx, cz + 12, 19.2, new THREE.CylinderGeometry(0.22, 0.26, 0.95, 8), 0.26, 0.95);
@@ -1484,7 +1607,9 @@
           box(root, dx - 2.5, DOCK_H + 0.5, BFZ + GZ * 0.3, 0.4, 0.7, 0.3, M.dark, { cast: false });
           box(root, dx + 2.5, DOCK_H + 0.5, BFZ + GZ * 0.3, 0.4, 0.7, 0.3, M.dark, { cast: false });
         }
-        steps(root, DOCK_X + DOCK_W / 2 + 3.0, DOCK_Z, DOCK_D - 2, 6.0, 0.3, 4, M.concreteD, 1, "x");
+        // the flight's height is DOCK_H, not a second number that agrees with
+        // it by luck: one author, two consumers (the deck and its stair).
+        steps(root, DOCK_X + DOCK_W / 2 + 3.0, DOCK_Z, DOCK_D - 2, 6.0, DOCK_H, M.concreteD, 1, "x", DOCK_H);
         // the yellow safety line along the dock lip
         slab(root, DOCK_X, BFZ + GZ * (DOCK_D - 0.6), DOCK_W, 0.5, M.warn, DOCK_H + 0.02);
 
@@ -2289,9 +2414,14 @@
   // "room:<program>", which routes to world/roombuild.js's layout planner.
   // Returns the role-tagged anchors (empty for a planner room, which is honest:
   // a bedroom has no guard post in it).
-  function dressFloor(bld, k, name) {
+  function dressFloor(bld, k, name, vault) {
     const room = CBZ.interiorFloorRoom(bld, k);
     if (!room) return null;
+    // §5d reserved a bay off this plate: the room the PROGRAM is handed stops
+    // at the strongroom's wall, which is what keeps the lobby's furniture out
+    // of a room the lobby cannot reach (and is why the vault is carved before
+    // anything is dressed rather than stamped over a finished floor).
+    if (vault && vault.floor === k) room.x1 = vault.lobbyX1;
     const rect = { x0: room.x0, x1: room.x1, z0: room.z0, z1: room.z1, y: room.y };
     const ctx = { b: bld, opts: { door: arriveOn(bld, k), inset: insetOn(bld, room) } };
     if (name.slice(0, 5) === "room:") {
@@ -2329,7 +2459,7 @@
   // one shell, floor by floor. `list` is the registry row; its LAST entry
   // repeats for every storey above it, which is how a five-storey annex and a
   // one-storey garage share one declaration.
-  function dressShell(bld, list, ledgerHost) {
+  function dressShell(bld, list, ledgerHost, vault) {
     if (!bld || !list || !list.length || typeof bld.lbox !== "function") return 0;
     const n = CBZ.interiorFloorCount ? CBZ.interiorFloorCount(bld) : 0;
     if (n < 1) return 0;
@@ -2342,7 +2472,7 @@
       // a re-occupied building from getting two floor coverings.
       if (ledgerHost && ledgerHost._occupyProgrammed && ledgerHost._occupyProgrammed[k]) continue;
       let anchors = null;
-      try { anchors = dressFloor(bld, k, name); } catch (e) { anchors = null; }
+      try { anchors = dressFloor(bld, k, name, vault); } catch (e) { anchors = null; }
       if (!anchors) continue;
       done++;
       AUDIT.govFloors++;
@@ -2375,10 +2505,16 @@
       if (CFG.OCCUPY_STAIRS !== false && CBZ.cityStairCore) {
         try { CBZ.cityStairCore(site.lot); } catch (e) {}
       }
-      const got = dressShell(mainB, plan.main, mainB);
+      // THE STRONGROOM IS RESERVED BEFORE ANYTHING IS FURNISHED and built after,
+      // for the same reason the stair core is asked for first: the bay it takes
+      // out of the plate has to be known to the programs, and its own walls have
+      // to stand on a floor covering that is already down.
+      const vault = planStrongroom(site, mainB);
+      const got = dressShell(mainB, plan.main, mainB, vault);
       n += got;
       if (got) AUDIT.govBuildings++; else AUDIT.govBare++;
       mainB._govDressed = got;
+      if (vault) { try { buildStrongroom(site, vault); } catch (e) { console.error("[govcomplex] strongroom " + site.id, e); } }
     }
     for (let i = 0; i < _shells.length; i++) {
       const s = _shells[i];
@@ -2396,6 +2532,435 @@
       s.b._govDressed = got;
     }
     return n;
+  }
+
+  /* ====================================================================
+     §5d  THE STRONGROOM — the one LOCKED room, and the only reason any of
+     this architecture is worth walking into.
+
+     OWNER (verbatim, on the screenshot this wave came from): "The government
+     building, in general, is kinda stupid."  He is right, and the audit says
+     why in one line: before this block a seat of power was a shell, a
+     furnished floorplate and a man on the threshold, and there was NOTHING
+     ANYWHERE INSIDE IT THAT WAS SHUT. `keepOut` is a spawn zone. `access` is a
+     trespass query. occupy.js states the gap in its own header — "it does not
+     lock doors, because nothing in this engine has a lockable door yet" — and
+     docs/claude/engine-systems.md books it as the NEXT OWED. A building with
+     no closed door in it cannot make a gradient, and a building that makes no
+     gradient is a prop with a marker on it, which is doctrine LAW 1's exact
+     complaint.
+
+     THE GUN-ROOM GRAMMAR, applied literally (doctrine's three conditions):
+       (a) IT IS LOCKED, and the lock is real: a steel leaf with a real
+           collider across a real doorway, which the player meets on his FIRST
+           visit because the vault opens off the PUBLIC lobby. Nobody sends him
+           there. He walks in the front door of a building he is allowed in,
+           and there is a door he is not allowed through.
+       (b) YOU CAN SEE THROUGH IT. The leaf carries a barred vision panel and
+           the rack and the seal stand lit on the other side of it. A key is a
+           promise, and a promise you can SEE out-motivates any quest marker.
+       (c) THE REWARD CHANGES YOUR CATEGORY. The rack pays a real gun through
+           `CBZ.cityGiveWeapon` (careers.js's Senior Guard seam — never a stat
+           fiction). The SEAL pays the thing a number cannot: hold it and every
+           government floor in the world stops reading you as an intruder,
+           through occupy.js's OWN `cityOccupyGrant`. You go from "shot for
+           standing on the mayor's floor" to "walks into government buildings",
+           which is the jail's "only character with a gun" in civic dress.
+
+     THE LADDER IS THE BUILDING, and it is four rungs you can see from the one
+     below: the public lobby → the door you cannot open → the floor you are not
+     allowed on (power.js already declares it `vip` and occupy.js already puts
+     men on it) → the key press on its wall → back down to the door. That is
+     the keycard story, one for one, and not one rung of it is a marker.
+
+     WHAT IT AUTHORS: the bay, four walls, the leaf, the reader, the rack, the
+     seal, the shelving, the key press. WHAT IT DOES NOT AUTHOR: the interaction
+     card (city/interactions.js `registerZone`), the floor covering and ceiling
+     light (`CBZ.interiorShell`), the guards on the key floor (power.js →
+     occupy.js), the alarm (`cityOccupyAlarm`), the heat (`cityCrime`), the
+     weapon (`cityGiveWeapon`), the money (`CBZ.city.addCash`), the item rows
+     (`CBZ.cityEcon.add`) or the access model (`cityOccupyGrant`). Nine shipped
+     systems; this block is a PLACE and a lock.
+
+     DETERMINISM: every coordinate is derived from the shell's own floorplate
+     and stair core. No rng, no hash, no Math.random in the build path.
+     ==================================================================== */
+  function srOn() { return CFG.GOV_STRONGROOM !== false; }
+  const SR = [];                 // live strongrooms, one per complex that declares one
+  // WHO HOLDS THE WRIT. One boolean, on CBZ.game so a save that serialises the
+  // game object carries it, mirrored locally so a flag-off build reads false.
+  function writHeld() { return !!(CBZ.game && CBZ.game.cityGovWrit) && CFG.GOV_STRONGROOM_WRIT !== false; }
+
+  const SR_WT = 0.34;            // the strongroom wall's thickness, declared ONCE:
+                                 // planStrongroom stops the lobby's floor
+                                 // covering exactly at its outer face and
+                                 // buildStrongroom stands the wall on it, so the
+                                 // two cannot drift into a bare strip of slab.
+  const SRM = {
+    wall: 0xa9a49a, steel: 0x596069, steelD: 0x3a4048, bar: 0x8c939b,
+    rackY: 0xb98a2e, gun: 0x2c2f34, crate: 0x6d6558, sealG: 0xd8b24a,
+    lampW: 0xeaf0ff, lockRed: 0xd23b32, lockGrn: 0x35c06a,
+  };
+  function srMesh(b, geo, mat, lx, ly, lz, parent) {
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(lx, ly, lz);
+    m.castShadow = false; m.receiveShadow = true;
+    (parent || b.group).add(m);
+    return m;
+  }
+
+  /* RESERVE THE BAY. Called before a single floor is furnished; returns null
+     (and the building is untouched) whenever the shell cannot carry a vault —
+     too few floors to hide a key on, or a plate so small that taking a bay out
+     of it would leave no lobby. Nothing here draws. */
+  function planStrongroom(site, bld) {
+    if (!srOn() || !site.def.strongroom) return null;
+    if (!bld || typeof bld.lbox !== "function" || !bld.group) return null;
+    if (!CBZ.interiorFloorRoom || !CBZ.interiorFloorCount) return null;
+    const spec = site.def.strongroom;
+    const nF = CBZ.interiorFloorCount(bld) | 0;
+    if (nF < 2) return null;                        // no floor to put the key on
+    const kF = Math.max(0, Math.min(nF - 1, spec.floor | 0));
+    const keyF = spec.keyFloor === "top" ? nF - 1 : Math.max(0, Math.min(nF - 1, spec.keyFloor | 0));
+    if (keyF === kF) return null;                   // the key must not be IN the room
+    const room = CBZ.interiorFloorRoom(bld, kF);
+    // the key floor has to be a real floorplate too — a vault whose key press
+    // has nowhere to hang is a locked door with no key, which is worse than no
+    // door at all.
+    if (!room || !CBZ.interiorFloorRoom(bld, keyF)) return null;
+    const W = room.x1 - room.x0, D = room.z1 - room.z0;
+    const BAY = Math.max(4.6, Math.min(7.0, W * 0.28));
+    if (W - BAY < 7.0 || D < 7.0) return null;      // the lobby must still be a lobby
+    return {
+      id: site.id, site: site, b: bld, spec: spec,
+      floor: kF, keyFloor: keyF,
+      x0: room.x1 - BAY, x1: room.x1, z0: room.z0, z1: room.z1,
+      y: room.y, fh: room.fh, lobbyX1: room.x1 - BAY - SR_WT / 2,
+      // state
+      locked: true, key: false, rack: false, seal: false,
+      swing: 0, target: 0, pivot: null, lamp: null, keyMesh: null,
+      doorCol: null, at: null, keyAt: null, rackAt: null, sealAt: null,
+    };
+  }
+
+  /* BUILD IT. Everything below is building-LOCAL (buildings.js parks the shell
+     group at (ox, 0, oz) with no rotation, so local y IS world y and local x/z
+     plus the origin IS world x/z — which is what lets the interaction zone
+     work in world space without a transform). */
+  function buildStrongroom(site, v) {
+    const b = v.b, y = v.y, WH = Math.max(2.6, v.fh - 0.12);
+    const WT = SR_WT, GAP = 2.0, DH = Math.min(2.28, WH - 0.5);
+    const gz = v.z1 - 3.4;                       // the doorway, at the lobby end
+    const BAY = v.x1 - v.x0;
+    const insideX = (v.x0 + v.x1) / 2;
+
+    // ---- the room itself: floor covering + ceiling strip from the shared kit
+    if (CBZ.interiorShell) {
+      try { CBZ.interiorShell({ x0: v.x0, x1: v.x1, z0: v.z0, z1: v.z1, y: y }, { b: b }); } catch (e) {}
+    }
+    // ---- THE WALL. Solid, unlike every partition the interior kit draws —
+    // that kit's walls carry no collider on purpose (they divide a room you are
+    // allowed in), and a strongroom wall you can walk through is the whole bug.
+    const segs = [[v.z0, gz - GAP / 2], [gz + GAP / 2, v.z1]];
+    for (const s of segs) {
+      const len = s[1] - s[0];
+      if (len < 0.2) continue;
+      b.lbox(v.x0, y + WH / 2, (s[0] + s[1]) / 2, WT, WH, len, SRM.wall, { solid: true, los: true, cast: false });
+    }
+    // the header over the opening, and the steel surround under it
+    b.lbox(v.x0, y + DH + (WH - DH) / 2, gz, WT, WH - DH, GAP, SRM.wall, { solid: true, cast: false });
+    b.lbox(v.x0, y + DH + 0.09, gz, WT + 0.12, 0.18, GAP + 0.24, SRM.steelD, { cast: false });
+    for (const s of [-1, 1]) b.lbox(v.x0, y + DH / 2, gz + s * (GAP / 2 + 0.06), WT + 0.12, DH, 0.12, SRM.steelD, { cast: false });
+
+    /* ---- THE LEAF. A pivot at the hinge so the door SWINGS rather than
+       teleports; the collider is a separate world-space record we splice out of
+       CBZ.colliders the moment it opens (physics.js rebuilds its bucket grid on
+       any length change, so nothing has to be told). The leaf carries no
+       userData and needs none — a mesh under a pivot Group is not in the static
+       merge's flat scan path, and the pieces that ARE flat (the walls) are
+       spared by their own collider refs, which is core/batch.js's own rule. */
+    const HZ = gz - GAP / 2 + 0.05;              // hinge, on the -z jamb
+    const LW = GAP - 0.14;                       // leaf width along +z from the hinge
+    const pivot = new THREE.Group();
+    pivot.position.set(v.x0, y, HZ);
+    b.group.add(pivot);
+    v.pivot = pivot;
+    const steel = cm(SRM.steel);
+    const WINY0 = 1.24, WINY1 = 1.78, WINH = 0.72;   // the vision panel
+    const cz0 = LW / 2;
+    srMesh(b, bg(0.16, WINY0, LW), steel, 0, WINY0 / 2, cz0, pivot);
+    srMesh(b, bg(0.16, DH - WINY1, LW), steel, 0, (WINY1 + DH) / 2, cz0, pivot);
+    for (const s of [-1, 1]) {
+      const stile = (LW - WINH) / 2;
+      srMesh(b, bg(0.16, WINY1 - WINY0, stile), steel, 0, (WINY0 + WINY1) / 2, cz0 + s * (LW - stile) / 2, pivot);
+    }
+    // the bars — five of them, and they are the reason the room is a promise
+    const barMat = cm(SRM.bar);
+    for (let i = 0; i < 5; i++) {
+      srMesh(b, bg(0.05, WINY1 - WINY0, 0.05), barMat, 0, (WINY0 + WINY1) / 2,
+        cz0 - WINH / 2 + (WINH / 4) * i, pivot);
+    }
+    srMesh(b, bg(0.09, 0.09, 0.34), cm(SRM.steelD), -0.13, 1.05, LW - 0.34, pivot);   // the handle
+    // ---- THE READER, on the lobby side of the jamb. Its lamp is a FRESH
+    // material on purpose: CBZ.cmat is a colour-keyed GLOBAL cache and this one
+    // has to change colour when you are carrying the key.
+    b.lbox(v.x0 - WT / 2 - 0.06, y + 1.32, gz - GAP / 2 - 0.34, 0.1, 0.34, 0.22, SRM.steelD, { cast: false });
+    const lampMat = new THREE.MeshLambertMaterial({ color: SRM.lockRed, emissive: SRM.lockRed, emissiveIntensity: 0.9 });
+    v.lamp = srMesh(b, bg(0.05, 0.09, 0.09), lampMat, v.x0 - WT / 2 - 0.13, y + 1.42, gz - GAP / 2 - 0.34);
+    v.lampMat = lampMat;
+
+    // ---- WHAT IS BEHIND THE BARS. Sited on the sightline through the panel so
+    // the prize is what you see, not the back of a shelf.
+    // THE ARMS RACK — the confiscated guns, on the far wall facing the door.
+    const rz = gz + 0.4, rx = v.x1 - 0.55;
+    b.lbox(rx, y + 1.05, rz, 0.34, 2.1, 3.0, SRM.steelD, { solid: true, cast: false });
+    for (let i = 0; i < 2; i++) b.lbox(rx - 0.22, y + 0.72 + i * 0.72, rz, 0.1, 0.08, 2.9, SRM.rackY, { cast: false });
+    for (let i = 0; i < 6; i++) {
+      const gzz = rz - 1.25 + i * 0.5;
+      b.lbox(rx - 0.3, y + 1.12, gzz, 0.1, 0.9, 0.12, SRM.gun, { cast: false });
+      b.lbox(rx - 0.3, y + 0.72, gzz, 0.1, 0.34, 0.09, SRM.gun, { cast: false });
+    }
+    v.rackAt = { x: b.ox + rx - 0.9, z: b.oz + rz };
+    // THE SEAL — the die the city stamps its writs with, on a lit plinth in the
+    // middle of the sightline. One downlight over it: the room is CRAFTED, and
+    // craft is the signal (doctrine's gun-room condition (b)).
+    const sx = insideX + 0.2, sz = gz + 0.2;
+    b.lbox(sx, y + 0.45, sz, 0.8, 0.9, 0.8, SRM.steelD, { solid: true, cast: false });
+    b.lbox(sx, y + 0.94, sz, 1.0, 0.08, 1.0, SRM.wall, { cast: false });
+    const sealMat = new THREE.MeshLambertMaterial({ color: SRM.sealG, emissive: SRM.sealG, emissiveIntensity: 0.35 });
+    v.sealMesh = srMesh(b, new THREE.CylinderGeometry(0.3, 0.3, 0.24, 18), sealMat, sx, y + 1.1, sz);
+    srMesh(b, new THREE.CylinderGeometry(0.14, 0.14, 0.3, 12), cm(SRM.steelD), sx, y + 1.37, sz);
+    b.lbox(sx, y + v.fh - 0.28, sz, 0.5, 0.1, 0.5, SRM.lampW, { emissive: SRM.lampW, ei: 0.75, cast: false });
+    v.sealAt = { x: b.ox + sx, z: b.oz + sz };
+    // …and the rest of the bay is what a strongroom actually holds: evidence.
+    for (let r = 0; r < 3; r++) {
+      const ez = v.z0 + 1.6 + r * ((gz - 2.4 - v.z0) / 3);
+      if (ez > gz - 1.6) break;
+      b.lbox(insideX, y + 1.1, ez, BAY - 1.4, 0.09, 0.7, SRM.steelD, { cast: false });
+      b.lbox(insideX, y + 1.85, ez, BAY - 1.4, 0.09, 0.7, SRM.steelD, { cast: false });
+      // the boxes are spaced off the BAY the plate actually gave us — a typed
+      // pitch is how the first draft of the Freeport's racking put a column of
+      // duffels through the west wall.
+      const pitch = (BAY - 2.0) / 3;
+      for (let i = 0; i < 4; i++) {
+        b.lbox(v.x0 + 1.0 + i * pitch, y + 1.36, ez, Math.min(0.7, pitch - 0.2), 0.42, 0.55, SRM.crate, { cast: false });
+      }
+    }
+
+    // ---- THE KEY PRESS, on the floor you are not allowed on. Mounted flat on
+    // the stair core's own wall beside the stairhead — the strip every interior
+    // program insets AWAY from, so it can never be furnished over, and the
+    // first thing you meet when you come up the stairs you should not be on.
+    const kRoom = CBZ.interiorFloorRoom(b, v.keyFloor);
+    const core = b._stairCore;
+    let kx, kz, kn;
+    if (core && core.head) {
+      const n = { x: core.head.nx || 0, z: core.head.nz || 0 };
+      const nl = Math.hypot(n.x, n.z) || 1;
+      n.x /= nl; n.z /= nl;
+      kn = n;
+      kx = core.head.x + n.x * 0.2 + (-n.z) * 1.9;
+      kz = core.head.z + n.z * 0.2 + (n.x) * 1.9;
+    } else if (kRoom) {
+      kn = { x: -1, z: 0 };
+      kx = kRoom.x1 - 0.2; kz = kRoom.z0 + 1.9;
+    } else { kx = null; }
+    if (kx != null) {
+      const ky = (kRoom ? kRoom.y : v.y) + 1.52;
+      b.lbox(kx, ky, kz, 0.9 * Math.abs(kn.z) + 0.24 * Math.abs(kn.x), 0.72,
+        0.9 * Math.abs(kn.x) + 0.24 * Math.abs(kn.z), SRM.steelD, { cast: false });
+      const glass = new THREE.MeshLambertMaterial({ color: 0xbfe9f7, transparent: true, opacity: 0.4 });
+      srMesh(b, bg(0.72 * Math.abs(kn.z) + 0.05 * Math.abs(kn.x), 0.54,
+        0.72 * Math.abs(kn.x) + 0.05 * Math.abs(kn.z)), glass,
+        kx + kn.x * 0.14, ky, kz + kn.z * 0.14);
+      const keyMat = new THREE.MeshLambertMaterial({ color: SRM.sealG, emissive: SRM.sealG, emissiveIntensity: 0.4 });
+      v.keyMesh = srMesh(b, bg(0.06 * Math.abs(kn.z) + 0.03, 0.26, 0.06 * Math.abs(kn.x) + 0.03), keyMat,
+        kx + kn.x * 0.05, ky - 0.02, kz + kn.z * 0.05);
+      v.keyAt = { x: b.ox + kx + kn.x * 0.7, z: b.oz + kz + kn.z * 0.7, y: (kRoom ? kRoom.y : v.y) };
+    }
+
+    // ---- the lock itself. World space, so it can be spliced out on open.
+    v.at = { x: b.ox + v.x0, z: b.oz + gz, y: y };
+    v.doorCol = col(v.at.x, v.at.z, WT + 0.2, GAP, y, y + DH);
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    v.gz = gz; v.floorY = y;
+    SR.push(v);
+    site.strongroom = v;
+    registerStrongroomZone();
+    return v;
+  }
+
+  function srNote(s, t) { if (CBZ.city && CBZ.city.note) CBZ.city.note(s, t || 2.2); }
+
+  function srOpen(v) {
+    if (!v.locked) return;
+    v.locked = false;
+    v.target = -1.55;                                  // swings out into the lobby
+    if (v.doorCol) {
+      const i = (CBZ.colliders || []).indexOf(v.doorCol);
+      if (i >= 0) CBZ.colliders.splice(i, 1);
+      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+      v.doorCol = null;
+    }
+    // A GOVERNMENT STRONGROOM COMING OPEN IS A CRIME AND THE BUILDING HEARS IT.
+    // Both consequences are shipped systems; neither is written here.
+    if (CBZ.cityCrime) { try { CBZ.cityCrime(230, { instant: true, x: v.at.x, z: v.at.z, type: "burglary" }); } catch (e) {} }
+    if (CBZ.cityOccupyAlarm && v.site && v.site.lot) {
+      try { CBZ.cityOccupyAlarm(v.site.lot, CBZ.player, v.floor, { secs: 22 }); } catch (e) {}
+    }
+    if (CBZ.cityPanicRaise) { try { CBZ.cityPanicRaise(v.at.x, v.at.z, 0.8); } catch (e) {} }
+    srNote("The bolts go back. Somebody upstairs heard that.", 2.6);
+  }
+
+  // THE VERBS. One zone, one option, four targets — the registry's own slot
+  // exclusivity keeps them from colliding, and no second popup exists.
+  let srZoned = false;
+  function srTargets(px, pz, py) {
+    let best = null, bd = 3.4 * 3.4;
+    for (let i = 0; i < SR.length; i++) {
+      const v = SR[i];
+      const pts = [];
+      if (v.at && v.locked) pts.push({ x: v.at.x, z: v.at.z, y: v.floorY, what: "door" });
+      if (v.keyAt && !v.key) pts.push({ x: v.keyAt.x, z: v.keyAt.z, y: v.keyAt.y, what: "key" });
+      if (v.rackAt && !v.locked && !v.rack) pts.push({ x: v.rackAt.x, z: v.rackAt.z, y: v.floorY, what: "rack" });
+      if (v.sealAt && !v.locked && !v.seal) pts.push({ x: v.sealAt.x, z: v.sealAt.z, y: v.floorY, what: "seal" });
+      for (let k = 0; k < pts.length; k++) {
+        const p = pts[k];
+        // a tower stacks a floorplate every 3.2 m: the plan distance to the one
+        // above you is zero, so Y is not optional here.
+        if (py != null && Math.abs(p.y - py) > 2.2) continue;
+        const dx = p.x - px, dz = p.z - pz, d = dx * dx + dz * dz;
+        if (d >= bd) continue;
+        bd = d; best = { x: p.x, z: p.z, what: p.what, v: v };
+      }
+    }
+    return best;
+  }
+  function registerStrongroomZone() {
+    if (srZoned || !CBZ.interactions || !CBZ.interactions.registerZone) return;
+    srZoned = true;
+    CBZ.interactions.registerZone({
+      id: "gov-strongroom", kind: "gov-strongroom", radius: 3.4,
+      find: function (px, pz) {
+        if (!srOn()) return null;
+        const P = CBZ.player;
+        return srTargets(px, pz, P && P.pos ? P.pos.y : null);
+      },
+      options: [{
+        id: "gov-strongroom-use", slot: "e",
+        label: function (t) {
+          if (!t) return "";
+          const v = t.v;
+          if (t.what === "key") return "Take " + (v.spec.key || "the key");
+          if (t.what === "rack") return "Take a weapon off the rack";
+          if (t.what === "seal") return "Take the city seal";
+          return v.key ? "Unlock the strongroom" : "Strongroom — locked";
+        },
+        // deliberately NOT `bad`: that field is a static truthy in this registry
+        // (interactions.js:363 subtracts 240 from the target score for it), so
+        // flagging a door as a crime prompt would push the card behind any ped
+        // standing in the lobby. The consequence is filed when the bolts go
+        // back, which is the honest place for it.
+        onSelect: function (t) {
+          if (!t) return;
+          const v = t.v;
+          if (t.what === "key") {
+            v.key = true;
+            if (v.keyMesh) v.keyMesh.visible = false;
+            // the reader goes green. Wrapped because a THROW out of onSelect
+            // lands in the interaction registry's own dispatch and would eat
+            // every verb on the card, not just this one.
+            try { v.lampMat.color.setHex(SRM.lockGrn); v.lampMat.emissive.setHex(SRM.lockGrn); } catch (e) {}
+            srNote("A brass key on a tagged fob. It opens one door in this building.", 2.8);
+            return;
+          }
+          if (t.what === "door") {
+            if (!v.key) {
+              srNote("Steel, and the reader wants a card nobody down here carries. The key is upstairs.", 2.8);
+              return;
+            }
+            srOpen(v);
+            return;
+          }
+          if (t.what === "rack") {
+            v.rack = true;
+            srTakeRack(v);
+            return;
+          }
+          if (t.what === "seal") {
+            v.seal = true;
+            srTakeSeal(v);
+          }
+        },
+      }],
+    });
+  }
+
+  // THE HAUL — the rack. `cityGiveWeapon` is careers.js's Senior-Guard seam:
+  // an inventory row AND the real equipped weapon, so a gun on the wall is a
+  // gun in your hands and never a number on a sheet.
+  const SR_GUNS = ["AK-47", "Rifle", "Shotgun", "SMG", "Pistol"];
+  function srTakeRack(v) {
+    const econ = CBZ.cityEcon;
+    let name = null;
+    for (let i = 0; i < SR_GUNS.length && !name; i++) {
+      const n = SR_GUNS[i];
+      if (!econ || !econ.ITEMS || econ.ITEMS[n]) name = n;
+    }
+    if (name && econ && econ.add) { try { econ.add(name, 1); } catch (e) {} }
+    if (name && CBZ.cityGiveWeapon) { try { CBZ.cityGiveWeapon(name); } catch (e) {} }
+    if (CBZ.cityAddAmmo) { try { CBZ.cityAddAmmo(60); } catch (e) {} }
+    if (econ && econ.add) { try { econ.add("Body Armor", 1); } catch (e) {} }
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("CONFISCATED ARMS — " + (name || "the rack") + " + plates");
+    else srNote("You take " + (name || "what is on the rack") + " off the rack.", 2.4);
+  }
+
+  /* THE CATEGORY CHANGE — the seal. Not a number: from here on every
+     government floor in the world reads you as VIP, through occupy.js's own
+     one-line grant, which the §7 tick re-applies to each complex as its
+     occupancy comes up (a building 4 km away has no `_occupancy` record yet,
+     so granting once here would silently cover only what happens to be live).
+     That is the whole reward and it is a CATEGORY: the trespass sweep stops
+     seeing you, and the men on the mayor's floor stop being a problem. */
+  function srTakeSeal(v) {
+    if (v.sealMesh) v.sealMesh.visible = false;
+    if (CBZ.game) CBZ.game.cityGovWrit = true;
+    srGrantAll();
+    if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(2400);
+    if (CBZ.city && CBZ.city.addRespect) { try { CBZ.city.addRespect(6); } catch (e) {} }
+    if (CFG.GOV_STRONGROOM_WRIT === false) {
+      if (CBZ.city && CBZ.city.big) CBZ.city.big("THE CITY SEAL");
+      return;
+    }
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("THE CITY SEAL — you sign for yourself now");
+    srNote("The seal of the city, in your pocket. No government door in this state is closed to you.", 3.4);
+  }
+  // idempotent, one line per complex — occupy.js stores the pass on the actor,
+  // never a mirror here (the parallel-bookkeeping trap).
+  function srGrantAll() {
+    if (!writHeld() || !CBZ.cityOccupyGrant) return 0;
+    let n = 0;
+    for (let i = 0; i < SITES.length; i++) {
+      const s = SITES[i];
+      if (!s.lot || !s.lot._occupancy) continue;
+      try { if (CBZ.cityOccupyGrant(s.lot, "vip")) n++; } catch (e) {}
+    }
+    return n;
+  }
+
+  // the leaf's swing — the only per-frame work this block does, and only while
+  // a door is actually moving.
+  if (CBZ.onUpdate) {
+    CBZ.onUpdate(38.75, function (dt) {
+      for (let i = 0; i < SR.length; i++) {
+        const v = SR[i];
+        if (!v.pivot || v.swing === v.target) continue;
+        const step = (dt || 0) * 1.9;
+        if (Math.abs(v.target - v.swing) <= step) v.swing = v.target;
+        else v.swing += Math.sign(v.target - v.swing) * step;
+        v.pivot.rotation.y = v.swing;
+      }
+    });
   }
 
   function staffSite(city, site) {
@@ -2477,6 +3042,10 @@
     // a rebuild re-runs this builder; start from an empty ledger so stale
     // records can never be counted by the audit or re-staffed by the tick.
     SITES.length = 0; _bays.length = 0; _shells.length = 0;
+    // …and the same rule for the two ledgers this wave added: a stale flight or
+    // a strongroom whose building left the scene must never be measured, and a
+    // spliced-out door collider from the last world must never be spliced again.
+    _flights.length = 0; SR.length = 0;
     // rows this build will actually TRY to place — a flag-reverted row is not
     // one of them, so `placed === complexes` stays the honest pass condition
     // however many rows carry their own flag.
@@ -2661,6 +3230,19 @@
       const roster = CBZ.cityPeds || [];
       const P = CBZ.player;
       const city = CBZ.city && CBZ.city.arena;
+      // §5d — THE WRIT. A pass is stored on the ACTOR by occupy.js, against a
+      // building's `_occupancy` record — and a complex four kilometres away has
+      // no such record until power.js seats its principal. So the grant is not a
+      // one-shot at the moment you pocket the seal: it is re-asserted here as
+      // each seat of power comes up, which is the only way "no government door
+      // in this state is closed to you" can be a true sentence rather than a
+      // stat fiction about the one building you were standing in.
+      if (writHeld()) srGrantAll();
+      // …and a lazy re-try on the zone, because index.html's script order is the
+      // one thing this file cannot assert about itself: if city/interactions.js
+      // parsed after us, the build-time registration was a no-op and the vault
+      // would have no verb for the rest of the session.
+      if (SR.length && !srZoned) registerStrongroomZone();
       for (let i = 0; i < SITES.length; i++) {
         const s = SITES[i];
         if (!s.rect) continue;
@@ -2818,6 +3400,29 @@
       govBuildings: AUDIT.govBuildings,
       govFloors: AUDIT.govFloors,
       govBare: AUDIT.govBare,
+      /* §1 — EVERY FLIGHT OF STEPS THIS FILE LAYS, AND WHETHER IT LANDS ON
+         ANYTHING. `stairsFloating` is the ratchet and is PINNED AT 0: a flight
+         whose top is more than one auto-climb (physics.js STEP_UP = 0.45) away
+         from the surface it declares it arrives at is the owner's "stairway
+         thing that doesn't make sense what it's there for", and it is now a
+         number rather than a screenshot. `stairs` prints beside it so a "fix"
+         that simply stops drawing steps cannot pass. Recomputed every call. */
+      stairs: _flights.length,
+      stairsFloating: _flights.reduce(function (n, f) {
+        return n + (Math.abs(f.top - f.landing) > STEP_UP ? 1 : 0);
+      }, 0),
+      /* §5d — THE LOCKED ROOM. `strongroomsDeclared` counts registry rows that
+         asked for one; `strongrooms` counts the ones a shell could actually
+         carry. They must be equal on a world where the complex found ground —
+         a row that silently failed to build its vault is a door that never
+         existed, which is the stat fiction this whole block exists to avoid. */
+      strongroomsDeclared: COMPLEXES.reduce(function (n, d) {
+        return n + ((d.strongroom && !(d.flag && CFG[d.flag] === false)) ? 1 : 0);
+      }, 0),
+      strongrooms: SR.length,
+      strongroomsLocked: SR.reduce(function (n, v) { return n + (v.locked ? 1 : 0); }, 0),
+      strongroomKeys: SR.reduce(function (n, v) { return n + (v.key ? 1 : 0); }, 0),
+      writ: writHeld(),
       // the per-site working, so a probe can say WHICH one moved and why
       sites: SITES.map(function (s) {
         // an unstaffed row (the Freeport) declares no principal at all — read
