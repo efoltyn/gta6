@@ -432,6 +432,59 @@
     return obj;
   };
 
+  /* ---- ANSWERING FOR OURSELVES ----------------------------------------
+     CBZ.pedInstanceDraws(mesh) -> true | false | null
+
+     WHY THIS HAD TO BE EXPORTED. This file introduced a way for a body part
+     to stop drawing that NOTHING else in the engine can observe. Every other
+     "is this part missing" test in the repo — and city/clothes.js's
+     clothMeshRenders() is THE one, shared by cityClothesBare(), the
+     CITY_OUTFIT_GUARANTEE repair sweep and outfitIntegrityAudit() — reads
+     `visible`, `parent`, geometry and material. A pooled part passes all four
+     while rendering nothing, because what stopped it was `layers`. Measured on
+     seed 90210: 334 garment meshes on the hide layer, clothMeshRenders() calls
+     334 of them healthy, and the audit prints bare 0. So the guarantee that
+     exists precisely to stop a body rendering with a hole in it is structurally
+     blind to the newest thing that can put one there, and would stay blind
+     however many times somebody ran it (CLAUDE.md: "an audit nobody has
+     executed is not a measurement" — this is its sibling, an audit that cannot
+     measure).
+
+     THE ANSWER IS DELIBERATELY THREE-VALUED:
+       null  — not ours. The mesh is not on our layer, so the caller's own
+               test is the whole truth (and is byte-identical to today).
+       true  — ours AND being carried: either a live instance holds this
+               frame's pose, or we PARKED THE WHOLE RIG on purpose because
+               nobody is drawing that body. A deliberate park is not a hole;
+               reporting it as one would have the repair sweep rebuild bodies
+               that are off-screen, every sweep, forever.
+       false — ours, the rig is being drawn, and this part has no live
+               instance behind it. That is a hole in a person, and it is the
+               only state this function exists to name.
+
+     CBZ.pedInstanceRelease(mesh) hands a part BACK: it drops our record,
+     frees the slot and restores the layer mask, so the mesh draws itself
+     again. A repair must use this rather than pedInstanceReveal — clearing
+     the mask alone would leave `rec.hidden` true, and part()'s
+     `if (!rec.hidden) hide(rec)` would then never re-hide it, so the body
+     would draw twice for the rest of its life. */
+  CBZ.pedInstanceDraws = function (mesh) {
+    if (!mesh || !mesh.layers || mesh.layers.mask !== HIDE_MASK) return null;
+    const rec = mesh._pinst;
+    if (!rec || rec.dead) return false;             // hidden by us, nothing owns it
+    if (rec.rig && rec.rig.parked) return true;     // whole body parked on purpose
+    if (rec.parked || rec.slot < 0) return false;
+    const p = rec.pool;
+    if (!p || !p.active || !p.mesh || rec.slot >= p.mesh.count) return false;
+    return true;
+  };
+  CBZ.pedInstanceRelease = function (mesh) {
+    const rec = mesh && mesh._pinst;
+    if (rec && !rec.dead) release(rec);
+    else if (mesh && mesh.layers && mesh.layers.mask === HIDE_MASK) mesh.layers.mask = 1;
+    return mesh;
+  };
+
   // ---- slot binding -----------------------------------------------------
 
   function bind(rig, o) {

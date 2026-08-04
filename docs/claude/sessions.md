@@ -1324,3 +1324,87 @@ orchestrator only orchestrates + one merged math-gate.
   split between playercars/vehicles (+) and OCC_SLOTS/DB_SEATS (−) documented
   in boarding.js header; two session-limit interruptions mid-wave were
   resumed by audit-then-finish agents (the resume-file pattern in memory).
+
+## 2026-08-04 — the invisible chest, third producer: an audit that could not measure
+
+**Report:** owner, verbatim: "There are guys in the game, NPCs with no outfit
+that just have a invisible chest area." Later, unprompted: "IT WAS A CASHIER."
+This is the SAME sentence as 2026-07-29 ("weird NPCs that have no outfit, and
+it's like invisible where the outfit should be"), which `fa51cd1` closed at one
+producer — the static batch/freeze passes eating untagged rig meshes. That fix
+is in main and it still holds (verified below). So this is a repeat report
+against a fix that works, which is the interesting part.
+
+**WHAT WAS ACTUALLY FOUND — a blind audit, not a new hole.** On 2026-08-03
+`entities/pedinstance.js` shipped **default ON**. It stops a body part drawing
+by moving it to a private LAYER (30) and drawing it from an InstancedMesh pool
+— deliberately NOT by touching `visible`, because `visible` on a rig part is
+gameplay state here (gore, dismemberment, clothes). That is a THIRD way to
+empty a person, and every guard built for this exact symptom is structurally
+blind to it. `clothMeshRenders()` — the one shared definition of "is this cloth
+mesh actually drawing", consumed by `cityClothesBare()`, the
+`CITY_OUTFIT_GUARANTEE` repair sweep and `outfitIntegrityAudit()` — tested
+`visible` / `parent` / geometry / material, all four of which a layer-hidden
+mesh passes. **Measured, seed 90210: 334 garment meshes on the hide layer,
+`clothMeshRenders()` called 334 of them healthy, `outfitIntegrityAudit().bare`
+= 0.** So had instancing dropped a slot, the owner would see the hole, the
+self-healing sweep would never fire, and the audit would print `bare: 0`
+forever. This is the sibling of the propUseAudit lesson: not an audit nobody
+ran, but an audit that COULD NOT MEASURE the newest producer.
+
+**THE FIX (one answer, three consumers migrated in the same change).**
+- `entities/pedinstance.js` exports `CBZ.pedInstanceDraws(mesh)` →
+  `true` / `false` / `null`. Deliberately three-valued: `null` = not ours
+  (caller's own test is the whole truth, byte-identical to before); `true` =
+  carried by a live instance **or the whole rig was parked on purpose** (a
+  deliberate park is not a hole — reporting it as one would have the sweep
+  rebuild off-screen bodies forever); `false` = the rig is being drawn and this
+  part has no live instance. Plus `CBZ.pedInstanceRelease(mesh)`, which a
+  repair must use instead of the existing `pedInstanceReveal` — clearing the
+  mask alone leaves `rec.hidden` true, and `part()`'s `if (!rec.hidden)` would
+  then never re-hide it, so the body would draw twice for the rest of its life.
+- `city/clothes.js`: `clothMeshRenders()` consults it (degrade-safe one-liner),
+  and `cityClothesRepairRig()` releases the mesh before rebuilding it.
+- `city/outfits.js`: `outfitIntegrityAudit()` gains `instHeld` (evidence) and
+  `instHoles` (the invariant).
+
+**RUN AND PINNED** (the audit's own header asked whoever ran it first to write
+the number in; nobody had). Seed 90210, 600 sim ticks from a campaign boot:
+`rigs 128, bare 0, deadTex 0, repaired 0, pinned 0, setsRebuilt 0, instHeld 476,
+instHoles 0`. `bare` / `deadTex` / `instHoles` pinned at 0 in
+`tools/math-gate.mjs`; `rigs` / `instHeld` printed as evidence so a "fix" that
+works by dressing nobody — or by switching the instancer off — cannot pass.
+
+**PROVED BY FAULT INJECTION, not by assertion.** Parking one drawn ped's chest
+pool slot, changing nothing else about the mesh, moves `bare` 0 → 1 and
+`instHoles` 0 → 1 (before this change: 0 → 0), and the body recovers on its own
+inside a sweep with `repaired` still 0 — i.e. the producer heals itself first
+and the guarantee is the floor under it, which is the cheap ordering.
+
+**WHAT WAS NOT REPRODUCED, stated plainly.** No live NPC with a missing chest
+was found in any state reachable from seed 90210: 878 rigs across six pools,
+781 character roots scene-wide, a chest-band occupancy sweep, plain-civilian
+shirt-colour census, atlas alpha sampling per outfit key, teleport churn across
+the map, and a vendor post/recycle walk past 8 shop counters all came back
+clean, and a studio turntable of the `vendor` apron look renders correctly. The
+2026-07-29 batcher fix is intact (`userData.dynamic` prunes `batchStaticUnder`,
+`instanceStaticUnder` and `freezeStaticUnder`; `detached` = 0 on 878 rigs).
+One earlier "leak" was a FALSE POSITIVE from a census of mine that tested a
+mesh's own `visible` without walking its ancestors — an ancestor-hidden limb is
+gore, not a hole. Recorded because it is the exact mistake this file keeps
+catching itself in.
+
+**NEW INSTRUMENT: `tools/ped-lineup.mjs`** — photograph the PEOPLE. The shelf
+could shoot one body (`studio.mjs rig`) or the player's wardrobe
+(`outfit-gallery`), but nothing could answer a question about the POPULATION,
+which is what "there are guys walking around with an invisible chest" is. It
+boots the real city, pulls live rigs out of `cityPeds`/`cityCops`, stands them
+in a row on deterministic marks and shoots them. `--filter plain|painted|cop|
+vendor` picks who stands in it (`vendor` first walks the player past counters,
+because LAZY_VENDORS only grows a body within 55 m in daylight). `--cfg
+PED_INSTANCED=0` is the A/B this exists for. It refuses to lie: every staged
+body is PROJECTED through the live camera and the run prints `outOfFrame` and
+`bodiesWithUndrawnParts` — the first pass framed an empty pavement while every
+coordinate checked out, which is aimlib's lesson arriving a second time.
+
+**GATE**: MATHGATE ok (90210: 318/180/204, det ok, errors baseline-only).
