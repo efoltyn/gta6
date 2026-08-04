@@ -377,7 +377,11 @@
     const rows = [
       // ONLY the doable verb. No decline row: walking away (look off / don't
       // tap) is how you decline — owner doctrine, "NO is not an option".
-      { key: "e", hold: false, label: "YES", bad: false, opt: chosen, decision: "yes", proposal, standing },
+      // `label` is the SHORT head of the proposal, and it is what the docked
+      // iPad button wears. It used to be the literal string "YES", which is how
+      // the owner's tablet ended up with a MOUNT THE HORSE bar next to a YES
+      // button: two halves of one sentence pretending to be a question.
+      { key: "e", hold: false, label: verbHead(proposal), bad: false, opt: chosen, decision: "yes", proposal, standing },
     ];
     rows._pass = pass;   // the full gated pool — the airliner verb card picks from it
     return rows;
@@ -459,6 +463,71 @@
     }
     return v;
   }
+  // THE BUTTON IS THE VERB — never "YES" (owner, 2026-08-04). A card that
+  // printed "Mount the horse" beside a YES button was asking a question the
+  // player had already answered by walking up; the word on the thumb target is
+  // the thing that happens. This is the prison rail's `shortLabel` law ported:
+  // cut at the first dash clause, then to a word boundary inside 18 chars, so
+  // the docked button stays a button and the copy bar keeps the whole line.
+  // When nothing is lost in that cut the copy bar is dropped (the `dup` test in
+  // the renderer) and the single verb button IS the card.
+  function verbHead(text) {
+    let v = String(text || "").split(/\s+[—–-]\s+/)[0].trim();
+    if (v.length > 18) {
+      const sp = v.slice(0, 18).lastIndexOf(" ");
+      v = sp > 5 ? v.slice(0, sp) : v.slice(0, 17) + "…";
+    }
+    return v || "Continue";
+  }
+
+  /* ---- THE ONE ROW RENDERER (Block Law) ----------------------------------
+     Every #interact card in city mode speaks this grammar, so it is authored
+     ONCE here and read by everyone who writes those rows — this file's own
+     card and police.js's gun-stop stand-off. Before this, the stand-off hand-
+     rolled legacy `.iopt` markup, which the iPad dock (mobile.css) styles to
+     transparent with pointer-events:none: the owner's screenshot showed YES and
+     REFUSE as bare unstyled text floating 440px left of their own name plate —
+     two dialogues where there was one, and neither of them tappable.
+       desktop  [E] MOUNT THE HORSE          (the .ikey badge carries the key)
+       phone    one full-width verb pill
+       iPad     prose bar on the left, real 52px verb button on the right rail
+     Row records need { key, proposal } and may carry { label, bad, decision }. */
+  function rowsHTML(rows) {
+    const touchVerbs = CBZ.touchMode && (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_VERB_PROMPTS !== false);
+    const docked = touchVerbs && CBZ.touchInteractionDocked && CBZ.touchInteractionDocked();
+    const red = (r) => (r.bad ? " style=\"color:#ff9a9a\"" : "");
+    return rows.map((r, i) => {
+      if (!touchVerbs) {
+        return `<div class="iopt" data-i="${i}"><span class="ikey">${String(r.key || "e").toUpperCase()}</span>` +
+          `<span class="ilab"${red(r)}>${verbText(r)}</span></div>`;
+      }
+      const yes = r.decision !== "no";
+      if (!docked) {
+        return `<div class="iopt tverb ${yes ? "tyes" : "tno"}" data-i="${i}">` +
+          `<span class="ilab"${red(r)}>${verbText(r)}</span></div>`;
+      }
+      // THE BUTTON IS THE WHOLE VERB WHENEVER THE VERB FITS ON A BUTTON.
+      // The prison rail splits every row into prose + a short verb because its
+      // rows are authored SENTENCES ("Pay 8 to keep Marcus quiet"). A city
+      // proposal is already a bare verb phrase by the grammar law above, so
+      // splitting "Mount the horse" into a bar plus a MOUNT button says it
+      // twice — the owner asked for "just a mount button". Only a phrase too
+      // long to be a thumb target (a hijack-the-airliner line) falls back to
+      // head-on-the-button, whole-line-in-the-bar. ACTION_MAX ≈ the widest
+      // 14px/800 caps string that still leaves the 440px rail room to breathe.
+      const prose = copyText(r);
+      const ACTION_MAX = 24;
+      const action = (prose && prose.length <= ACTION_MAX ? prose : verbHead(r.label || prose)).toUpperCase();
+      const aria = verbText(r).replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+      // SAY IT ONCE (the zip-tie law): a copy bar that would only repeat the
+      // button's own words is dropped, and the button carries the row alone.
+      const dup = !prose || prose.toUpperCase() === action;
+      return `<div class="iopt tverb ${yes ? "tyes" : "tno"}" data-i="${i}">` +
+        (dup ? "" : `<span class="itouch-copy"><span class="ilab"${red(r)}>${prose}</span></span>`) +
+        `<button type="button" class="itouch-act${r.bad ? " ibad" : ""}" aria-label="${aria}">${action}</button></div>`;
+    }).join("");
+  }
+  CBZ.cityInteractRowsHTML = rowsHTML;
 
   // NOTE: #interact's base style is opacity:0; only `.show` lifts it to 1.
   function hidePanel() { dom(); if (panel) { panel.style.display = "none"; panel.classList.remove("show"); } current = null; currentRows = []; fingerprint = ""; currentScore = -1; }
@@ -656,27 +725,16 @@
     current = pick; currentRows = rows; currentScore = pick.score;
     dom();
     if (noteEl) {
-      // Just the proposition. The old "· Lv.6→3 · heard" stat suffix was HUD
-      // clutter that read like a debug overlay; level now floats over the head
-      // (aim_dossier), and the standing still gates the verb underneath.
-      // A verb card (airliner BOARD/HIJACK) carries NO question line at all —
-      // the rows ARE the proposition. Same on TOUCH (owner: the card read
-      // "Zip tie them?" with a ZIP TIE pill right under it — say it ONCE):
-      // verb pills carry the proposal themselves, so the question line only
-      // exists for the keyboard's YES/NO rows — and per the grammar law it is
-      // the bare verb phrase, not a "…?" question (the YES/NO rows already
-      // carry the decision; a button is a thing to do, not a sentence).
-      const touchVerbsNote = CBZ.touchMode && (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_VERB_PROMPTS !== false);
-      // A verb-card provider may pin a SPOKEN LINE to the card (rows.note —
-      // dialogue's "what they just said to you"). The line IS the content, so
-      // it outranks both hides and shows on desktop and touch alike.
-      if (rows.note != null) {
-        noteEl.textContent = rows.note;
-        noteEl.style.display = rows.note ? "" : "none";
-      } else {
-        noteEl.textContent = (rows.dualRide || touchVerbsNote) ? "" : (rows[0].proposal || "Continue");
-        noteEl.style.display = (rows.dualRide || touchVerbsNote) ? "none" : "";
-      }
+      // NO QUESTION LINE, ANYWHERE (owner, 2026-08-04). It only ever existed to
+      // give the keyboard's YES row something to say yes TO; now that the row
+      // wears the verb itself on every surface, printing the proposal here as
+      // well is the "Zip tie them?" over a ZIP TIE pill all over again — say it
+      // ONCE, and say it on the button.
+      // A verb-card provider may still pin a SPOKEN LINE to the card
+      // (rows.note — dialogue's "what they just said to you"). That line IS
+      // content rather than a restated control, so it keeps the slot.
+      noteEl.textContent = rows.note != null ? rows.note : "";
+      noteEl.style.display = noteEl.textContent ? "" : "none";
     }
     if (fp !== fingerprint || dirty) {
       fingerprint = fp; dirty = false;
@@ -686,39 +744,9 @@
         ? String(desc.label || "").replace(/\s*—\s*HIJACKABLE\s*$/i, "")
         : desc.label;
       // ONE doable verb per card (the airliner BOARD/HIJACK is the lone
-      // two-ACTION exception — never a YES/NO). The proposition lives in the
-      // note; these rows never mutate into a hidden action wheel.
-      // TOUCH (TOUCH_VERB_PROMPTS): no keyboard letters — each row becomes a
-      // pill carrying the VERB ITSELF ("HIJACK THE AIRLINER"). Same .iopt/
-      // data-i contract, so the existing click dispatch above fires them;
-      // targeting/verb logic is untouched.
-      const touchVerbs = CBZ.touchMode && (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_VERB_PROMPTS !== false);
-      const dockedTouch = touchVerbs && CBZ.touchInteractionDocked && CBZ.touchInteractionDocked();
-      if (optsEl) optsEl.innerHTML = touchVerbs
-        ? rows.map((r, i) => {
-            const yes = r.decision !== "no";
-            if (dockedTouch) {
-              const action = String(r.label || "DO").trim().toUpperCase();
-              const aria = verbText(r).replace(/&/g, "&amp;").replace(/"/g, "&quot;");
-              // SAY IT ONCE (the zip-tie law above, applied to this layout):
-              // the copy column exists to say what the button cannot. A row
-              // whose proposal is nothing but its own verb — the airliner's
-              // BOARD / HIJACK card — would print the button's word in a bar
-              // beside the button, so the bar is dropped and the button
-              // carries the row alone (aria keeps the full line either way).
-              const prose = copyText(r);
-              const dup = !prose || prose.toUpperCase() === action;
-              return `<div class="iopt tverb ${yes ? "tyes" : "tno"}" data-i="${i}">` +
-                (dup ? "" : `<span class="itouch-copy"><span class="ilab"${r.bad ? " style=\"color:#ff9a9a\"" : ""}>${prose}</span></span>`) +
-                `<button type="button" class="itouch-act${r.bad ? " ibad" : ""}" aria-label="${aria}">${action}</button></div>`;
-            }
-            return `<div class="iopt tverb ${yes ? "tyes" : "tno"}" data-i="${i}">` +
-              `<span class="ilab"${r.bad ? " style=\"color:#ff9a9a\"" : ""}>${verbText(r)}</span></div>`;
-          }).join("")
-        : rows.map((r, i) =>
-          `<div class="iopt" data-i="${i}"><span class="ikey">${r.key.toUpperCase()}</span>` +
-          `<span class="ilab"${r.bad ? " style=\"color:#ff9a9a\"" : ""}>${r.label}</span></div>`
-        ).join("");
+      // two-ACTION exception — never a YES/NO). The proposition lives ON the
+      // row; these rows never mutate into a hidden action wheel.
+      if (optsEl) optsEl.innerHTML = rowsHTML(rows);
       showPanel();
     }
   });
