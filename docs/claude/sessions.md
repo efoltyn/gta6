@@ -1751,3 +1751,71 @@ per side, and that is what shipped.
   fix. Also: the 7 authored mesas spread with FSC as designed, which on a
   21 km^2 basin is one landmark per 3 km — the dunes carry the space, but a
   bigger basin arguably wants more buttes.
+
+## 2026-08-04 — the merge wave: seven branches land, and the recenter button goes
+
+**Owner:** "there's a ton of branches rn, go by recent first and merge whatever
+is good and doesn't kill new shit, and remove the recenter button on ipad while
+you are at it."
+
+**THE BRANCH LANDSCAPE, measured before touching anything.** 30+ refs existed;
+only 7 had commits main did not. Everything else — `agent/*-handoff`,
+`ipad-interaction-layout`, `animal-skin-auto-equip`, `multi-mode-game-expansion`
+— was already ancestral (`git rev-list --count main..<ref>` = 0), i.e. merged
+long ago and kept as a label. The two `backup/*` refs are pre-sync snapshots,
+not work. So "a ton of branches" was 7 branches and ~25 tombstones, which is
+worth knowing before anyone plans another merge session.
+
+**MERGED (all 7, recency-first as asked):** the black-body fix (instanced peds
+had `vertexColors` with no white `color` attribute → every NPC a silhouette),
+the invisible-chest audit fix (`clothMeshRenders()` was blind to layer-hidden
+parts, so the outfit guarantee could not see the newest way to empty a person),
+boats-cannot-drive-onto-land (`marineShoreBlock` + AGROUND), the YES/REFUSE
+button wave (one renderer, `cityInteractRowsHTML`), the campaign phone into the
+hotbar, the formal-neck V2 collars/knots, and WORLD_SCALE_V5 (10x desert in a
+10x sea).
+
+**Conflicts were 100% this file** — every branch appends a dated entry, so every
+concurrent branch collides here and the resolution is always "keep both", never
+"pick one". Not one source conflict in 21 changed files. The two waves that both
+rewrote `entities/pedinstance.js` touched disjoint regions and are
+complementary, which is what a file-territory split is supposed to buy.
+
+**GATE:** `MATHGATE: ok (90210:329/182/206 | 400 ticks | det ok | errors
+baseline-only)`. Every ratchet the merged branches introduced is green in the
+same run: `pedInst … black=0`, `outfits … bare=0 deadTex=0 instHoles=0`,
+`clearance … docked=2(2368m)`, `airspace ring 9085`. Lots/shops/roads moved
+318/180/204 → 329/182/206 because WORLD_SCALE_V5 moved the three eastern
+nations; that is the change, not a regression.
+
+**THE RECENTER BUTTON WAS TWO BUTTONS** — the self-summoning `#trecen` icon on
+foot (`TOUCH_RECENTER`) and the `RECENTER` pill in the vehicle layer
+(`CAM_TOUCH_RECENTER`). Removing either alone leaves the owner still looking at
+a recenter button. Both flags now default false, both controls are NOT BUILT
+rather than built-and-hidden, and both verb rows carry a `skip` reason so
+`touchAudit().uncovered` — a ratchet that may only go down — stays at 0 instead
+of absorbing two deleted controls. The vehicle's AUTOMATIC recenter is a
+different writer (`camRecenterSuspended`) and is untouched.
+
+**AND IT ALMOST SHIPPED AN IPAD YOU CANNOT SHOOT FROM.** `enable()` wires the
+cluster in one straight line and `tapBtn()` had no null guard, so the unbuilt
+`#trecen` threw and abandoned the wiring for aim, scope and fire. The lesson is
+general and belongs in the law: **a build gate and a wiring gate that disagree
+are a ghost control, and any flag that can remove a control can silently unbind
+the cluster below it.**
+
+**NEW INSTRUMENT (this is why the bug was catchable at all).** `touch.js` builds
+its whole layer from one load-time `matchMedia("(pointer: coarse)")`, and
+`enable()` is closed over with no export — so a headless desktop boot has NO
+touch layer and every DOM assertion about a touch control was a false negative
+dressed as a pass. Chrome's `--touch-events=enabled` does not flip
+`pointer:coarse` headless (measured). So `tools/probe.mjs` gained
+**`CBZ_PRELOAD=<path|js>`** (runs in every new document before any game script —
+`CBZ_URL_EXTRA` can only set CONFIG, this reaches the environment the game
+feature-DETECTS) and `tools/preload/ipad.js` fakes exactly the three signals
+this tree checks, delegating every other media query to the real
+implementation. **Any touch-layout question is now askable headless.**
+Verified by A/B: default → button absent, cluster 8/8, console clean; the
+documented revert `?cfg_TOUCH_RECENTER=1&cfg_CAM_TOUCH_RECENTER=1` → button
+present, cluster 8/8. The B run is what makes A evidence rather than a
+photograph of an empty pavement.
