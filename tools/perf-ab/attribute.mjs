@@ -45,7 +45,9 @@ const dbg = await claimPort(10800, 200, (p) => fetch(`http://127.0.0.1:${p}/json
 const prof = `/tmp/cbz-attr-${dbg}`;
 await rm(prof, { recursive: true, force: true });
 const cfgQuery = CFG ? "&" + CFG.split(",").filter(Boolean).map((kv) => { const [k, v] = kv.split("="); return `cfg_${k}=${v}`; }).join("&") : "";
-const chrome = spawn("/opt/pw-browsers/chromium", [
+const CHROME_BIN = process.env.CBZ_CHROME
+  || (process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "/opt/pw-browsers/chromium");
+const chrome = spawn(CHROME_BIN, [
   "--headless=new", "--no-sandbox", "--disable-dev-shm-usage",
   "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
   "--enable-webgl", "--mute-audio", "--window-size=1280,720",

@@ -19,6 +19,12 @@
   }
 
   const _dir = new THREE.Vector3(), _q = new THREE.Quaternion();
+  // The arrow only ever renders at 0.1° resolution, so a fresh
+  // `rotate(...)` string every frame is a transform write (and a style
+  // recalc) for a picture that did not change. Cache the last DEGREE STRING
+  // actually written and skip the assignment when it repeats — same pixels,
+  // written only when the number moves.
+  let lastDeg = null;
   CBZ.onUpdate(46, function () {
     if (CBZ.game.mode !== "escape") return; // survival points the compass at the zone (HUD handles it)
     const tgt = objectivePos();
@@ -27,8 +33,8 @@
     // transform the world direction into the camera's own space — robust to
     // any yaw/pitch. In view space: -z is forward (up on screen), +x is right.
     _dir.normalize().applyQuaternion(_q.copy(CBZ.camera.quaternion).invert());
-    const deg = Math.atan2(_dir.x, -_dir.z) * 180 / Math.PI; // 0 = ahead, +clockwise
-    arrowEl.style.transform = `rotate(${deg.toFixed(1)}deg)`;
+    const deg = (Math.atan2(_dir.x, -_dir.z) * 180 / Math.PI).toFixed(1); // 0 = ahead, +clockwise
+    if (deg !== lastDeg) { lastDeg = deg; arrowEl.style.transform = `rotate(${deg}deg)`; }
     distEl.textContent = Math.round(dist) + "m";
   });
 })();

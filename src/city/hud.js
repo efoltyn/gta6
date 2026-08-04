@@ -32,7 +32,7 @@
   const CBZ = window.CBZ;
   const g = CBZ.game;
 
-  let root, cashEl, deltaEl, starsEl, starsWrap, hpBar, hungerBar, stamBar, wpnEl, jobEl, crewEl, worldEl, radar, turfEl, homeLineEl, feedEl, speedEl;
+  let root, cashEl, deltaEl, starsEl, starsWrap, hpBar, hungerBar, stamBar, wpnEl, jobEl, crewEl, worldEl, radar, turfEl, homeLineEl, feedEl, speedEl, crossEl;
   let armBar, armRowEl, armLabEl;   // ARMOR bar (the steel/blue outer-layer gauge under HP)
   let slotsEl, ammoLineEl, lootEl;   // weapon hotbar (slots + ammo) + carried-loot row
   let objEl, objTxtEl, objRouteEl, objSlotEl, objFillEl;   // retired prospect objective shell
@@ -385,6 +385,9 @@
     if (objRouteEl) objRouteEl.addEventListener("click", routeToProspectHQ);
     radar = root.querySelector("#cRadar"); turfEl = root.querySelector("#cTurf"); homeLineEl = root.querySelector("#cHomeLine");
     feedEl = root.querySelector("#cFeed"); speedEl = root.querySelector("#cSpeed");
+    // the aiming dot is read EVERY frame by the onAlways tick — resolve it here
+    // with the rest of the furniture instead of re-querying the subtree 60x/s.
+    crossEl = root.querySelector("#cCross");
     popEl = root.querySelector("#cPop"); killEl = root.querySelector("#cKill");
     turfPayEl = root.querySelector("#cTurfPay");
     membEl = root.querySelector("#cMemb"); membFillEl = root.querySelector("#cMembFill");
@@ -1714,22 +1717,31 @@
     // radar repaint rides the perf/quality slider — tier0 drops to 7Hz (the
     // canvas redraw is the HUD's priciest CPU line), Best keeps today's 14Hz.
     if (radarAcc >= 1 / (CBZ.qScale ? CBZ.qScale(7, 14) : 14)) { radarAcc = 0; drawRadar(); }
-    if (turfEl) {
+    // These two rows were retired (their facts moved to the phone) but the tick
+    // kept re-asserting the SAME empty string and the SAME "none" every frame —
+    // a style write dirties layout whether or not the value changed. One-time
+    // latch, kept on the ELEMENT like _cbzH/_cbzW above, so a rebuilt HUD gets
+    // its fresh node cleared again.
+    if (turfEl && !turfEl._cbzCleared) {
+      turfEl._cbzCleared = true;
       turfEl.textContent = "";
       turfEl.style.display = "none";
     }
-    if (homeLineEl) {
+    if (homeLineEl && !homeLineEl._cbzCleared) {
+      homeLineEl._cbzCleared = true;
       homeLineEl.textContent = "";
       homeLineEl.style.display = "none";
     }
     // aiming reticle when holding a firearm on foot — but the engine gun system
     // (fpsmode) draws its OWN reticle whenever it's presenting a weapon, so only
     // show the city dot when fpsmode is NOT (avoids two crosshairs).
-    const cross = root.querySelector("#cCross");
-    if (cross) {
+    if (crossEl) {
       const it = CBZ.cityCurrentWeapon && CBZ.cityCurrentWeapon();
       const fpsAiming = (CBZ.weaponThirdPersonActive && CBZ.weaponThirdPersonActive()) || (CBZ.fpsActive && CBZ.fpsActive());
-      cross.style.display = (it && it.gun && !fpsAiming && !P.driving && !P.dead && !CBZ.cityMenuOpen) ? "block" : "none";
+      const cDisp = (it && it.gun && !fpsAiming && !P.driving && !P.dead && !CBZ.cityMenuOpen) ? "block" : "none";
+      // cached-write, same shape as root._cbzDisp above: the dot changes state a
+      // handful of times a minute, not sixty times a second.
+      if (crossEl._cbzDisp !== cDisp) { crossEl._cbzDisp = cDisp; crossEl.style.display = cDisp; }
     }
   });
 

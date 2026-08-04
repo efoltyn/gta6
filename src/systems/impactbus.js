@@ -1320,6 +1320,19 @@
      item-count behaviour (and tools/test-nuke-freeze-node.mjs's stubbed
      applies never reach the budget, so its contract is unchanged). */
   if (CBZ.CONFIG.NUKE_DRAIN_BUDGET_MS == null) CBZ.CONFIG.NUKE_DRAIN_BUDGET_MS = 5;
+  /* THE SAME LAW FOR THE ORDINARY RING WAVES. Everything above was written for
+     the nuke and applied only to it, but the cost it bounds is not nuclear:
+     stepWaves() sweeps EVERY live wave every frame, and one sweepRing() call is
+     a crowd annulus kill + a full ped scan + a full car scan + a structural
+     sweep. Rockets, car bombs and a chained cook-off (a wave's own billCar can
+     detonate a car, which queues another wave) put several of those in one
+     frame with nothing but an item-count cap on the car drain to hold them
+     back. WAVE_DRAIN_BUDGET_MS gives that path the identical deadline, the
+     identical resume semantics and the identical rotation, through the SAME
+     drainDeadline/drainOverBudget state — one budget mechanism in this file,
+     not two. 0 or negative = the pre-2026-08-03 unbudgeted behaviour, order
+     included. */
+  if (CBZ.CONFIG.WAVE_DRAIN_BUDGET_MS == null) CBZ.CONFIG.WAVE_DRAIN_BUDGET_MS = 5;
   // performance.now with a Date.now fallback — headless VM harnesses
   // (tools/test-nuke-freeze-node.mjs) don't inject `performance`.
   const drainNow = (typeof performance !== "undefined" && performance.now)
@@ -1482,6 +1495,15 @@
       // the 25th car in a parking lot; a finite queue preserves every admitted
       // car without executing the whole lot in one frame.
       carQueue: [], carHead: 0,
+      // Last frame this wave was stepped; the budgeted, rotating stepWaves()
+      // loop reads it so a mid-frame queue mutation can never step one wave
+      // twice. Seeded with the CURRENT frameNo, which reproduces the old
+      // descending loop exactly: a wave born from a cook-off DURING stepWaves
+      // (frameNo already incremented at the top of the 34.4 tick) waits for the
+      // next frame like it always did, while a wave queued by an explosion
+      // earlier in this frame — before 34.4 ran, so frameNo is still the
+      // previous one — still sweeps immediately.
+      _stepFrame: frameNo,
       acc: 0, done: false,
     });
   }
@@ -1490,6 +1512,9 @@
     if (!w.carQueue || w.carHead >= w.carQueue.length) return;
     let budget = 24;                                   // the established per-frame ceiling
     while (budget-- > 0 && w.carHead < w.carQueue.length) {
+      // Over budget: stop where we are. w.carHead is the cursor, so next frame
+      // resumes at the same car and the queue keeps every admitted vehicle.
+      if (drainOverBudget()) break;
       const job = w.carQueue[w.carHead++], cv = job.cv, frac = job.frac;
       _ringBill.x = w.x; _ringBill.y = w.y; _ringBill.z = w.z;
       _ringBill.byPlayer = w.byPlayer; _ringBill.sev = frac;
@@ -1505,64 +1530,101 @@
     }
   }
 
+  /* ONE WAVE'S FRAME. Split out of stepWaves so the ms budget can stop between
+     waves, and so a deferred wave is deferred as a WHOLE tick rather than
+     half-swept: the only state a skipped wave loses is a frame of `acc`
+     accumulation, which it does not lose at all — `acc` keeps summing dt and
+     the next tick's band is simply [r0, r1) with a wider r1. Deferral is
+     therefore EXACTLY a slow frame, which this function has always handled
+     (`step = w.speed * w.acc`), and the bands stay contiguous: nothing between
+     the old r and the new one is ever skipped, so the set of people, cars and
+     lots the front eventually reaches is unchanged — only WHICH FRAME the
+     verdict lands on moves, and the ped/crowd/structure verdicts are position
+     hashes and per-wave ids, not frame-dependent rolls. */
+  function stepWave(w, dt) {
+    drainWaveCars(w);
+    if (w.done) return;
+    w.acc += dt;
+    // 12 × 1/60 is microscopically below 0.2 in binary floating point.
+    // Epsilon keeps a declared 5 Hz row at 5 Hz instead of silently making
+    // it ~4.6 Hz / 41 m bands.
+    if (w.acc + 1e-9 < w.tick) return;
+    // The budget is checked AFTER `acc` has taken this frame's dt, never
+    // before: a deferred ring must not lose elapsed time, or the front would
+    // physically slow down under load instead of arriving a frame late.
+    if (drainOverBudget()) return;
+    const step = w.speed * w.acc;
+    const r0 = w.r, r1 = Math.min(w.maxR, w.r + step);
+    w.acc = 0;
+    w.r = r1;
+    try { sweepRing(w, r0, r1); } catch (e) {}
+    // ---- THE THERMAL FRONT OUTRUNS THE BLAST FRONT --------------------
+    // Blast radius scales as Y^0.33 and thermal as Y^0.41 (Glasstone &
+    // Dolan), so at nuclear yield the two genuinely diverge and the IGNITION
+    // zone is meaningfully WIDER than the destruction zone — at very high
+    // yield a burn victim is out where the blast can do little more than
+    // break windows. This is intentionally NOT painted as an outer ring;
+    // world fires are the visual receipt. The wave carries `fire`
+    // only as far as maxR, so the game's burn zone WAS its blast zone and
+    // the two zones could never disagree.
+    //
+    // A row whose ignition zone reaches PAST its own blast reach gets one
+    // extra sweep out there: amount ~0 (nothing that far out is knocked
+    // down — that is the whole point) with the fire term intact. It IGNITES
+    // without wounding, which is what a thermal pulse does, and it leaves
+    // irregular world fires outside the flattened core instead of a fake
+    // circular decal.
+    // AS OF 2026-07-28 NO SHIPPING ROW TAKES THIS BRANCH: the nuke's
+    // ignition radius (2,016 m) is now INSIDE its 1 psi reach (3,276 m),
+    // so its thermal boundary acts as the ceiling in sweepRing instead.
+    // The branch is kept because it is the correct handling of the other
+    // case and a future high-yield row will take it — Y^0.41 vs Y^0.33
+    // means ignition really does overtake blast as yield climbs. It is NOT
+    // dead code pretending to be a feature: `thermal` is read on every
+    // sweep either way, which is what stops it being a stat fiction.
+    if (w.thermal > w.maxR && !w.burned && r1 >= w.maxR) {
+      w.burned = true;
+      if (CBZ.CONFIG.IMPACT_STRUCTURAL && CBZ.structure && CBZ.structure.sweep) {
+        try {
+          CBZ.structure.sweep(w.x, w.z, w.maxR, w.thermal, 0.001, {
+            kind: w.kind, fire: w.fire * 0.5, by: w.by, byPlayer: w.byPlayer,
+            waveId: w.id, y: w.y, dirx: 0, dirz: 0, radial: true,
+          });
+        } catch (e) {}
+      }
+    }
+    if (r1 >= w.maxR) w.done = true;
+  }
+
+  /* THE FRAME. Same shared deadline the nuclear drains use (drainDeadline /
+     drainOverBudget above), same rotation law: the ms budget can only stop the
+     sweeps if whichever wave it stopped at is FIRST next frame, otherwise a
+     two-wave frame would starve the same wave forever. The rotation is applied
+     ONLY when the budget is on, so WAVE_DRAIN_BUDGET_MS = 0 keeps the legacy
+     newest-first order byte for byte.
+
+     Removal moved to a second pass because the loop no longer walks the array
+     backwards: a wave's own car bill can cook off a car, which detonates,
+     which queues (and at WAVE_MAX shifts) another wave WHILE we iterate — so
+     the loop bounds-checks every index and refuses to step the same wave twice
+     in one frame instead of relying on descending indices to absorb it. */
   function stepWaves(dt) {
     if (!waves.length) return;
+    const budgetMs = Number(CBZ.CONFIG.WAVE_DRAIN_BUDGET_MS) || 0;
+    drainDeadline = budgetMs > 0 ? drainNow() + budgetMs : 0;
+    const n = waves.length;
+    const start = (n - 1) + (budgetMs > 0 ? frameNo % n : 0);
+    for (let k = 0; k < n; k++) {
+      if (drainOverBudget()) break;      // the rest resume next frame, fronts intact
+      const w = waves[(start - k) % n];
+      if (!w || w._stepFrame === frameNo) continue;
+      w._stepFrame = frameNo;
+      stepWave(w, dt);
+    }
+    drainDeadline = 0;
     for (let i = waves.length - 1; i >= 0; i--) {
       const w = waves[i];
-      drainWaveCars(w);
-      if (w.done) {
-        if (!w.carQueue.length) waves.splice(i, 1);
-        continue;
-      }
-      w.acc += dt;
-      // 12 × 1/60 is microscopically below 0.2 in binary floating point.
-      // Epsilon keeps a declared 5 Hz row at 5 Hz instead of silently making
-      // it ~4.6 Hz / 41 m bands.
-      if (w.acc + 1e-9 < w.tick) continue;
-      const step = w.speed * w.acc;
-      const r0 = w.r, r1 = Math.min(w.maxR, w.r + step);
-      w.acc = 0;
-      w.r = r1;
-      try { sweepRing(w, r0, r1); } catch (e) {}
-      // ---- THE THERMAL FRONT OUTRUNS THE BLAST FRONT --------------------
-      // Blast radius scales as Y^0.33 and thermal as Y^0.41 (Glasstone &
-      // Dolan), so at nuclear yield the two genuinely diverge and the IGNITION
-      // zone is meaningfully WIDER than the destruction zone — at very high
-      // yield a burn victim is out where the blast can do little more than
-      // break windows. This is intentionally NOT painted as an outer ring;
-      // world fires are the visual receipt. The wave carries `fire`
-      // only as far as maxR, so the game's burn zone WAS its blast zone and
-      // the two zones could never disagree.
-      //
-      // A row whose ignition zone reaches PAST its own blast reach gets one
-      // extra sweep out there: amount ~0 (nothing that far out is knocked
-      // down — that is the whole point) with the fire term intact. It IGNITES
-      // without wounding, which is what a thermal pulse does, and it leaves
-      // irregular world fires outside the flattened core instead of a fake
-      // circular decal.
-      // AS OF 2026-07-28 NO SHIPPING ROW TAKES THIS BRANCH: the nuke's
-      // ignition radius (2,016 m) is now INSIDE its 1 psi reach (3,276 m),
-      // so its thermal boundary acts as the ceiling in sweepRing instead.
-      // The branch is kept because it is the correct handling of the other
-      // case and a future high-yield row will take it — Y^0.41 vs Y^0.33
-      // means ignition really does overtake blast as yield climbs. It is NOT
-      // dead code pretending to be a feature: `thermal` is read on every
-      // sweep either way, which is what stops it being a stat fiction.
-      if (w.thermal > w.maxR && !w.burned && r1 >= w.maxR) {
-        w.burned = true;
-        if (CBZ.CONFIG.IMPACT_STRUCTURAL && CBZ.structure && CBZ.structure.sweep) {
-          try {
-            CBZ.structure.sweep(w.x, w.z, w.maxR, w.thermal, 0.001, {
-              kind: w.kind, fire: w.fire * 0.5, by: w.by, byPlayer: w.byPlayer,
-              waveId: w.id, y: w.y, dirx: 0, dirz: 0, radial: true,
-            });
-          } catch (e) {}
-        }
-      }
-      if (r1 >= w.maxR) {
-        w.done = true;
-        if (!w.carQueue.length) waves.splice(i, 1);
-      }
+      if (w.done && !w.carQueue.length) waves.splice(i, 1);
     }
   }
 

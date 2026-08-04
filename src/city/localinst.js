@@ -32,7 +32,11 @@
   "use strict";
   const CBZ = window.CBZ;
   if (!CBZ) return;
-  if (CBZ.CONFIG && CBZ.CONFIG.LOCAL_INSTANCING == null) CBZ.CONFIG.LOCAL_INSTANCING = false;
+  // Default ON since 2026-08-03: pixel-parity pass on stadium aerial+ground
+  // (artifacts/visual-comparisons/localinst-parity2, OFF-vs-OFF control in
+  // localinst-control pinned the only deltas to boot noise) plus the ROUND 3b
+  // A/B (−30% draw calls, two seeds, demo-inst-safety green). Revert: =false.
+  if (CBZ.CONFIG && CBZ.CONFIG.LOCAL_INSTANCING == null) CBZ.CONFIG.LOCAL_INSTANCING = true;
 
   // Cell size + min pool size are tunable for A/B (bigger cells collapse more
   // in-view props per pool at the cost of coarser frustum granularity).

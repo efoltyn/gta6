@@ -551,8 +551,10 @@
   // biggest lever but also the one prior rounds REGRESSED on (batch.js already
   // merges statics — a naive second pass double-processed them). Gated off and
   // built census-first so it targets only geometry batch.js leaves individual.
-  // URL: ?cfg_LOCAL_INSTANCING=1
-  if (CBZ.CONFIG.LOCAL_INSTANCING == null) CBZ.CONFIG.LOCAL_INSTANCING = false;
+  // URL: ?cfg_LOCAL_INSTANCING=0 to revert. Default ON 2026-08-03 after the
+  // pixel-parity pass (artifacts/visual-comparisons/localinst-parity2 + the
+  // OFF-vs-OFF noise control) on top of ROUND 3b's measured −30% draw calls.
+  if (CBZ.CONFIG.LOCAL_INSTANCING == null) CBZ.CONFIG.LOCAL_INSTANCING = true;
   // WORLD ENLARGE V2 (map-enlargement stage 2): non-zero world-layout offsets
   // spread every biome/island/nation radially outward from the mainland and
   // grow the FLAT terrain contract + continent margin to match. The flag is

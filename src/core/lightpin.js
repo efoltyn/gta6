@@ -31,8 +31,10 @@
 
    Registry: PointLight/SpotLight constructors are Proxy-wrapped (prototype
    chain intact) so the frame pass walks dozens of lights, not the 150k-
-   object scene graph; a full scene traverse re-syncs every 300 frames to
-   catch lights detached and re-added past the constructor hook.
+   object scene graph. Re-entry (a light detached and later re-added, or one
+   born from .clone()/.copy(), which both bypass the constructor hook) is
+   caught at Object3D.prototype.add instead of by a periodic full traverse —
+   see THE RE-ENTRY SEAM below.
 
    Flags: LIGHT_COUNT_PIN (master, default on — ?cfg_LIGHT_COUNT_PIN=0
    restores the old thrashing behaviour), LIGHT_BUDGET_POINT (default 16),
@@ -59,6 +61,47 @@
   }
   wrap("PointLight", "point");
   wrap("SpotLight", "spot");
+
+  /* ---- THE RE-ENTRY SEAM (2026-08-03) ------------------------------------
+     The constructor hook sees a light once, at birth. Two things escape it:
+     a light that is detached (pruned from the registry below the moment its
+     .parent goes null) and later re-added, and a light that was never
+     constructed through THREE.PointLight/SpotLight at all — .clone() calls
+     `new this.constructor()`, and *.prototype.constructor still points at the
+     ORIGINAL function the Proxy wraps, so clones and .copy(recursive) bypass
+     the hook entirely.
+
+     That is what the old `frame % 300` CBZ.scene.traverse() was for: a
+     ~150k-object walk, forever, every five seconds, to find a few dozen
+     lights. It is replaced by a hook on the ONE funnel every parent/child
+     link in r128 goes through. Verified against the vendored r128 build:
+       - `add(t){ if (arguments.length>1) { ...this.add(arguments[i])... }
+         ... t.parent=this, this.children.push(t) ... }` — the variadic form
+         recurses through `this.add`, i.e. through this wrapper.
+       - `attach(t){ ... this.add(t) ... }`
+       - `copy(t, recursive){ ... this.add(n.clone()) ... }`
+       - grep: nothing outside src/vendor touches `children.push(`, so no
+         module builds a parent link behind Object3D's back.
+     Cost: one call plus two property reads per .add(), against a walk of the
+     whole graph in the steady state. Prototype patching is established
+     practice in this directory (core/matrixskip.js patches
+     updateMatrixWorld on the same prototype). Idempotent, marker-carrying,
+     and it returns the original's return value (`this`) untouched. */
+  const _proto = THREE.Object3D.prototype;
+  if (!_proto.add._cbzLightPinWrapped) {
+    const origAdd = _proto.add;
+    const wrappedAdd = function (o) {
+      const r = origAdd.apply(this, arguments);
+      if (o && !o._cbzPinDummy) {
+        if (o.isPointLight) reg.point.add(o);
+        else if (o.isSpotLight) reg.spot.add(o);
+      }
+      return r;
+    };
+    for (const k in origAdd) if (k.endsWith("Wrapped")) wrappedAdd[k] = origAdd[k];
+    wrappedAdd._cbzLightPinWrapped = true;
+    _proto.add = wrappedAdd;
+  }
 
   // a light reaches the shader only when its whole parent chain is visible
   // and it hangs off the live scene (r128 projectObject semantics). Our own
@@ -95,7 +138,7 @@
     const list = dummies[kind];
     while (list.length < want) {
       const d = new Orig(0xffffff, 0, 0.001);              // pre-wrap ctor: not registered
-      d._cbzPinDummy = true;
+      d._cbzPinDummy = true;                               // ...and the add seam skips it too
       d.name = "lightpin-dummy";
       d.matrixAutoUpdate = false;
       list.push(d); pool.add(d);
@@ -104,7 +147,6 @@
     return on;
   }
 
-  let frame = 0;
   CBZ.onAlways(97, function () {
     if (!CBZ.CONFIG.LIGHT_COUNT_PIN || !CBZ.scene || !CBZ.camera) return;
     if (!pool) {
@@ -112,10 +154,11 @@
       pool.name = "lightpin-pool";
       pool.position.y = -4000;          // out of every playfield; intensity 0 anyway
       CBZ.scene.add(pool);
-    }
-    // slow re-sync: catch lights detached and later re-added, which the
-    // constructor hook only sees once.
-    if (++frame % 300 === 0) {
+      // ONE-TIME sync, not a periodic one. The only lights neither hook can
+      // see are those already parented before this file ran (script order
+      // puts it early, but that is a load-order fact, not a guarantee). From
+      // here on every arrival comes through the add seam above, so this walk
+      // never runs again.
       CBZ.scene.traverse(function (o) {
         if (o._cbzPinDummy) return;
         if (o.isPointLight) reg.point.add(o);
