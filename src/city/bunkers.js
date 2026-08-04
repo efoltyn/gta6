@@ -323,6 +323,7 @@
   const crateTokens = [];    // {x, z, kind:"armory"|"cache", site, nextRestock, taken}
   const vaultTokens = [];    // {x, z, site, taken, deviceMesh}
   const strikeTokens = [];   // {x, z, site}  — the command map table
+  const nukeTokens = [];     // {x, z, site}  — the nuclear release console
   let _zonesWired = false;
   function nearestTok(list, px, pz, r) {
     let best = null, bd = r * r;
@@ -533,9 +534,74 @@
         note: wp ? "Tasks the B-2 against your marked waypoint" : "Needs a map waypoint to task",
       };
     });
-    if (CBZ.cityLockRegister) { CBZ.cityLockRegister("bunker-armory"); CBZ.cityLockRegister("bunker-strike"); }
+
+    /* ---- THE NUCLEAR RELEASE CONSOLE ---------------------------------------
+       OWNER (2026-08-04): "they should be able to order a nuke on a place and
+       literally in the game, a B-2 should fly to that place and drop a nuke.
+       The same way that it works when you currently drop a nuke in pilot."
+
+       The console is one verb. Everything behind it already existed or is one
+       new seam in the file that owns bombers:
+         the aimpoint = fullmap.js's waypoint, the same one the strike console
+                        reads — never a second target picker
+         the sortie   = strategic.js's CBZ.strategicNuclearSortie, which CLAIMS
+                        the parked B-2, flies it here, and calls the same
+                        release the player's [B] key calls
+         the impact   = whatever that release does, which is nukeDetonate and
+                        the bus — this file contributes nothing to the physics
+         the verb     = this registry
+
+       WHY A RUNG ABOVE THE STRIKE CONSOLE. `siege` (an outfit) can task iron.
+       `vault` is the apex grant — the same authority that opens the nuclear
+       vault six metres away — and it is the only thing in this room that
+       should be able to order a city erased. The refusal LINE comes back from
+       the sortie itself, because every reason it can say no with is a fact
+       about the world (no bomber on the pad, no aircrew alive, a weapon
+       already in the air) rather than a cooldown, and the player has earned a
+       straight answer about which one it is.                                */
+    I.registerZone({
+      id: "bunker-nuke", kind: "bunkernuke", radius: 2.6,
+      find: function (px, pz) {
+        if (!CBZ.strategicNuclearSortie) return null;
+        return nearestTok(nukeTokens, px, pz, 2.6);
+      },
+      options: [{
+        id: "bunkernuke-release", slot: "e", bad: true,
+        label: function () {
+          const wp = waypoint();
+          if (!wp) return "Mark a waypoint on the map first";
+          return "Order a nuclear strike on " + (wp.label || "your waypoint");
+        },
+        onSelect: function () {
+          const L = CBZ.cityLock ? CBZ.cityLock({ id: "bunker-nuke", verb: "vault", label: "The release console", orgs: ["army", "military"], wasOpen: true }) : { open: true };
+          if (!L.open) { note(L.line, 3.2); return; }
+          const wp = waypoint();
+          if (!wp) { note("Open the map and mark the grid.", 2.6); return; }
+          const res = CBZ.strategicNuclearSortie({ x: wp.x, z: wp.z, label: wp.label || null, byPlayer: true });
+          if (!res || !res.ok) { note((res && res.why) || "No sortie available.", 2.6); return; }
+          // Ordering it is the crime. The detonation bills its own terrorism
+          // charge when the weapon lands; this is the ORDER, and it is on you
+          // from the moment the bomber rolls — the same shape the conventional
+          // strike console already uses.
+          if (CBZ.cityCrime) { try { CBZ.cityCrime(400, { x: wp.x, z: wp.z, type: "terrorism", instant: true }); } catch (e) {} }
+          if (CBZ.cityAddStars) { try { CBZ.cityAddStars(5, "Nuclear release authorised"); } catch (e) {} }
+        },
+      }],
+    });
+    if (I.describe) I.describe("bunkernuke", function () {
+      const st = CBZ.strategicSortieState ? CBZ.strategicSortieState() : null;
+      let n;
+      if (st && st.active) n = "A weapon is already airborne";
+      else if (st && !st.bomber) n = "No bomber on the pad";
+      else if (st && !st.crew) n = "No aircrew on the base";
+      else n = waypoint() ? "Tasks the B-2 with one weapon" : "Needs a map waypoint to task";
+      return { label: "Nuclear Release Console", note: n };
+    });
+
+    if (CBZ.cityLockRegister) { CBZ.cityLockRegister("bunker-armory"); CBZ.cityLockRegister("bunker-strike"); CBZ.cityLockRegister("bunker-nuke"); }
     _zonesWired = true;
   }
+  function note(m, s) { if (CBZ.city && CBZ.city.note && m) { try { CBZ.city.note(m, s || 2.6); } catch (e) {} } }
   // the ONE waypoint in the game (systems/fullmap.js) — never a second one
   function waypoint() {
     try {
@@ -738,6 +804,28 @@
     // verb is one interaction option, the aimpoint is fullmap.js's existing
     // waypoint, and the sortie itself is strategic.js's called run.
     strikeTokens.push({ x: cx + 2.5, z: iz0 + 5.4, site: rec.name });
+
+    /* THE NUCLEAR RELEASE CONSOLE — its own machine, on the other side of the
+       room, because it is its own decision. It could have been a second line
+       on the map table, and that would have been the wrong shape twice over:
+       city/interactions.js renders ONE verb per card (resolveRows), so a
+       second option on the strike zone would simply have hidden the iron one;
+       and a release console SHOULD be a distinct, locked, unmistakable object
+       rather than a menu entry. Squat armoured pedestal, keyed twin slots, a
+       red key-light — it reads as the thing it is from across the room, and
+       the verb on it is gated a full rung above the conventional strike. */
+    const nzX = cx - 2.6, nzZ = iz0 + 4.2;
+    box(g, nzX, FY + 0.5, nzZ, 1.5, 1.0, 1.1, M.steelD);              // armoured pedestal
+    box(g, nzX, FY + 1.04, nzZ, 1.34, 0.12, 0.96, M.map);             // canted panel face
+    for (const s of [-0.34, 0.34]) {                                   // the two key slots
+      box(g, nzX + s, FY + 1.12, nzZ - 0.06, 0.2, 0.06, 0.2, M.steelD);
+    }
+    glow(g, nzX, FY + 1.14, nzZ + 0.3, 0.9, 0.05, 0.16, 0x5a1f1f, 0.85);   // release light
+    glow(g, nzX, FY + 1.62, nzZ - 0.5, 0.5, 0.5, 0.06, 0x9fd08a, 0.4);     // status repeater
+    box(g, nzX, FY + 1.5, nzZ - 0.58, 0.14, 1.0, 0.14, M.steelD);          // repeater stalk
+    col(nzX - 0.85, nzX + 0.85, nzZ - 0.7, nzZ + 0.7, FY, FY + 1.1);
+    nukeTokens.push({ x: nzX, z: nzZ + 1.0, site: rec.name });
+
     const deskZ = iz0 + 1.9;
     for (const dxo of [-4.5, -1.5]) {
       const dx = cx + dxo;
@@ -948,6 +1036,7 @@
     // point at removed groups; the zones' find() walks these live lists)
     doors.length = 0; bunkers.length = 0;
     doorTokens.length = 0; crateTokens.length = 0; vaultTokens.length = 0; strikeTokens.length = 0;
+    nukeTokens.length = 0;
     _npcCursor = 0; _npcSpawned.length = 0;
 
     // ---- SITE 1: FORT BRANDT DEEP SHELTER (command tier). NW quadrant of

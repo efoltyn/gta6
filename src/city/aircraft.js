@@ -332,7 +332,12 @@
     for (let i = 0; i < list.length; i++) {
       const v = list[i];
       if (!v || v.civilian || v.kind !== kind || v.taken || v._aiActive || !v.group || !v.group.parent) continue;
-      if (kind === "plane" && v.model && /bomber/i.test(v.model.name || "")) continue;
+      // NEVER SCRAMBLE THE STRATEGIC BOMBER AS A FIGHTER. The name test was the
+      // only guard and it does not match "B-2 SPIRIT", so a 5-star response
+      // could claim strategic.js's B-2 and fly strafing passes with it — and,
+      // since the claim is exclusive, could also take the airframe out from
+      // under an ordered nuclear sortie. `b2` is the record's own flag.
+      if (kind === "plane" && (v.b2 || (v.model && /bomber|b-2/i.test(v.model.name || "")))) continue;
       return v;
     }
     return null;
