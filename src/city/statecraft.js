@@ -222,21 +222,13 @@
     return [].concat(CBZ.polity.list("city"), CBZ.polity.list("state"),
       CBZ.polity.list("federal"), CBZ.polity.list("country"));
   }
-  // officials.js's titleFor() is NO LONGER module-private (officials.js:807)
-  // — the comment this replaced was written before it was exported and was
-  // stale for months. Call the owner; the local branches below stay only as
-  // the degrade fallback, and they already agree with it.
+  // THE LADDER LIVES IN ONE FILE. officials.js exports titleFor() and that
+  // is the one declaration; the hand-typed kind->title branches this file
+  // kept "as the degrade fallback" WERE the copy doctrine counts (one of
+  // eight). Deleted — the degrade is neutral "Official" prose, cosmetic
+  // only, and a fallback ladder that can drift from its owner is worse.
   function titleOf(rec) {
     if (CBZ.officials && CBZ.officials.titleFor) { try { const t = CBZ.officials.titleFor(rec); if (t) return t; } catch (e) {} }
-    if (!rec) return "Official";
-    if (rec.kind === "country") {
-      if (rec.govType !== "monarchy") return "President";
-      const id = (CBZ.officials && CBZ.officials.identityOf && rec.office && rec.office.holder)
-        ? CBZ.officials.identityOf(rec.office.holder) : null;
-      return (id && id.gender === "m") ? "King" : "Queen";
-    }
-    if (rec.kind === "state" || rec.kind === "federal") return "Governor";
-    if (rec.kind === "city") return rec.tier === "village" ? "Chief" : "Mayor";
     return "Official";
   }
   function holds() {

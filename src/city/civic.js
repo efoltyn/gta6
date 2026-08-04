@@ -192,19 +192,12 @@
     }
     return out;
   }
-  // officials.js keeps titleFor() private; mirror it here rather than reach
-  // into the file another agent owns this wave. Prefer a real export if one
-  // ever lands.
+  // THE LADDER LIVES IN ONE FILE. officials.js exports titleFor() (it was
+  // private when the comment this replaces was written); the hand-typed
+  // kind->title copy this file carried is deleted — that copy was one of the
+  // EIGHT doctrine counts, and the count only goes down. Degrade: "Official".
   function titleOf(rec) {
-    if (CBZ.officials && CBZ.officials.titleFor) return CBZ.officials.titleFor(rec);
-    if (!rec) return "Official";
-    if (rec.kind === "country") {
-      if (rec.govType !== "monarchy") return "President";
-      const id = holderId(rec);
-      return id.gender === "f" ? "Queen" : "King";
-    }
-    if (rec.kind === "state" || rec.kind === "federal") return "Governor";
-    if (rec.kind === "city") return rec.tier === "village" ? "Chief" : "Mayor";
+    if (CBZ.officials && CBZ.officials.titleFor) { try { const t = CBZ.officials.titleFor(rec); if (t) return t; } catch (e) {} }
     return "Official";
   }
   function holderId(rec) {

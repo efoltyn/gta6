@@ -216,15 +216,12 @@
     const P = CBZ.player;
     return (P && P.name) || (g && g.playerName) || "You";
   }
-  // titleFor is officials.js's (now exported); the local derivation is the
-  // documented fallback contracts.js already keeps for the same reason.
+  // THE LADDER LIVES IN ONE FILE. officials.js's exported titleFor() is the
+  // one declaration; this file's hand-typed kind->title branches (one of the
+  // EIGHT copies doctrine counts) are deleted. Degrade: "Official" — prose
+  // only, never a break.
   function titleOf(rec) {
-    if (CBZ.officials && CBZ.officials.titleFor) { try { return CBZ.officials.titleFor(rec); } catch (e) {} }
-    if (!rec) return "Official";
-    // "Monarch" disagreed with the owner (officials.js says Queen/King).
-    if (rec.kind === "country") return rec.govType === "monarchy" ? "Queen" : "President";
-    if (rec.kind === "state" || rec.kind === "federal") return "Governor";
-    if (rec.kind === "city") return rec.tier === "village" ? "Chief" : "Mayor";
+    if (CBZ.officials && CBZ.officials.titleFor) { try { const t = CBZ.officials.titleFor(rec); if (t) return t; } catch (e) {} }
     return "Official";
   }
   // the shared politics block (worldstate.js:105) — corruption/scandal/
@@ -1569,6 +1566,44 @@
   };
 
   // ============================================================
+  //  SWEAR-IN — the origin fast-forward. "The President" story starts a run
+  //  already holding the country seat, and this is the ONE sanctioned way in:
+  //  the exact bookkeeping elections.js's resolve() performs on a won ballot
+  //  (holder -> the player sentinel; the outgoing holder's ledger job reverts
+  //  to "politician", never dies; termDay restarts on officials.js's own
+  //  exported term axis), done by THIS file because player-as-officeholder is
+  //  this file's remit. Nothing anywhere writes a parallel holder field — a
+  //  presidency reached here and one reached through a real election are the
+  //  same state, read by the same statecraft/elections/officials code.
+  // ============================================================
+  function swearIn(officeId, opts) {
+    opts = opts || {};
+    if (!CFG.GOV_CANDIDACY) return { ok: false, why: "Candidacy is switched off." };
+    const P = polity();
+    const rec = P && P.get ? P.get(officeId) : null;
+    if (!rec || !rec.office) return { ok: false, why: "No such seat." };
+    if (rec.govType === "monarchy") return { ok: false, why: "A crown is not sworn in." };
+    if (isPlayerSid(rec.office.holder)) return { ok: false, why: "You already hold it." };
+    const d = worldDay();
+    const outSid = rec.office.holder;
+    if (outSid && CBZ.cityLedgerEntry) {
+      const e = CBZ.cityLedgerEntry(outSid);
+      if (e) e.job = "politician";
+    }
+    const sid = (CBZ.officials && CBZ.officials.PLAYER_SID) || "player";
+    rec.office.holder = sid;
+    rec.vacuum = null;
+    const term = (CBZ.officials && CBZ.officials.termDaysFor) ? CBZ.officials.termDaysFor(rec)
+      : (rec.kind === "country" ? 28 : rec.kind === "city" ? 7 : 14);
+    rec.office.termDay = d + term;
+    const st = state();
+    st.officeId = rec.id;
+    st.wins = (st.wins | 0) + 1; st.runs = (st.runs | 0) + 1;
+    if (!opts.quiet) feed(playerName() + " is sworn in as " + titleOf(rec) + " of " + rec.name + ".", "#8fe08a");
+    return { ok: true, why: "", officeId: rec.id, termDay: rec.office.termDay };
+  }
+
+  // ============================================================
   //  PUBLIC API
   // ============================================================
   CBZ.cityRun = {
@@ -1576,6 +1611,7 @@
     live: live,
     offices: offices,
     file: file,
+    swearIn: swearIn,
     withdraw: withdraw,
     pledge: pledgePlatform,
     canSign: canSign,

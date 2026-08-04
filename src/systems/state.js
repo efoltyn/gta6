@@ -21,11 +21,14 @@
   function setState(s) {
     g.state = s;
     document.body.classList.toggle("state-playing", s === "playing");
-    const surv = g.mode === "survival";
+    // the ARENA modes (survival + gungame) share one pair of result cards
+    // (#survwin/#survlose); each fills/relabels them at show time. escape
+    // keeps its own #win card.
+    const arena = g.mode === "survival" || g.mode === "gungame";
     screens.title.classList.toggle("hidden", s !== "title");
     screens.pause.classList.toggle("hidden", s !== "paused");
-    screens.win.classList.toggle("hidden", !(s === "won" && !surv));
-    if (screens.survwin) screens.survwin.classList.toggle("hidden", !(s === "won" && surv));
+    screens.win.classList.toggle("hidden", !(s === "won" && !arena));
+    if (screens.survwin) screens.survwin.classList.toggle("hidden", !(s === "won" && arena));
     if (screens.survlose) screens.survlose.classList.toggle("hidden", s !== "lost");
   }
 
@@ -39,15 +42,31 @@
     // escape, retry, or mode transition.
     CBZ.hitstop = 0;
     CBZ.slowmo = 0;
-    g.mode = id === "survival" ? "survival" : (id === "city" ? "city" : "escape");
+    const prev = g.mode;
+    // "gungame" is only a real destination while modes/gungame.js registered
+    // it (GUNGAME_V1) — otherwise the button falls back to escape, exactly
+    // like the pre-mode stub did.
+    g.mode = id === "survival" ? "survival"
+      : (id === "city" ? "city"
+      : (id === "gungame" && CBZ.modes.gungame ? "gungame" : "escape"));
+    // leaving GUN GAME must scrub everything it borrowed: bots out of the
+    // shared npc/bot lists, the prison cast un-hidden, rung weapons wiped.
+    // Runs BEFORE the root-visibility lines below so they settle the final
+    // look for the mode we are ENTERING.
+    if (prev === "gungame" && g.mode !== "gungame" && CBZ.gungameExit) { try { CBZ.gungameExit(); } catch (e) { console.error("[gungame exit]", e); } }
     if (g.mode !== "escape" && CBZ.setSimulationView) CBZ.setSimulationView(false);
     modeButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.mode === g.mode));
     document.body.classList.toggle("mode-survival", g.mode === "survival");
     document.body.classList.toggle("mode-city", g.mode === "city");
+    document.body.classList.toggle("mode-gungame", g.mode === "gungame");
     const m = CBZ.modes[g.mode];
-    if ((g.mode === "survival" || g.mode === "city") && m && m.build) { try { m.build(); } catch (e) { console.error("[mode build]", e); } }
-    if (CBZ.prisonRoot) CBZ.prisonRoot.visible = g.mode === "escape";
-    if (g.mode !== "survival" && CBZ.surv && CBZ.surv.arena) CBZ.surv.arena.root.visible = false;
+    if ((g.mode === "survival" || g.mode === "city" || g.mode === "gungame") && m && m.build) { try { m.build(); } catch (e) { console.error("[mode build]", e); } }
+    // GUN GAME borrows worlds it never builds: the prison stays visible when
+    // its JAIL map is chosen, the disaster island when ISLAND is (the match
+    // reset re-applies this per the picker; CBZ.gungameWorlds is the truth).
+    const ggw = g.mode === "gungame" && CBZ.gungameWorlds ? CBZ.gungameWorlds() : null;
+    if (CBZ.prisonRoot) CBZ.prisonRoot.visible = g.mode === "escape" || !!(ggw && ggw.jail);
+    if (g.mode !== "survival" && CBZ.surv && CBZ.surv.arena) CBZ.surv.arena.root.visible = !!(ggw && ggw.island);
     if (g.mode !== "city" && CBZ.city && CBZ.city.arena) CBZ.city.arena.root.visible = false;
     // leaving city cleanly cancels any in-progress WASTED/spectate state so the
     // kill-cam HUD + global respawn listeners can't leak into another mode.
@@ -58,12 +77,13 @@
   function resetGame() {
     CBZ.hitstop = 0;
     CBZ.slowmo = 0;
-    const mode = g.mode === "survival" ? "survival" : (g.mode === "city" ? "city" : "escape");
+    const mode = g.mode === "survival" ? "survival" : (g.mode === "city" ? "city" : (g.mode === "gungame" ? "gungame" : "escape"));
     if (CBZ.setSimulationView) CBZ.setSimulationView(false);
     if (CBZ.clearGore) CBZ.clearGore();   // wipe blood/gibs from the prior match
     g.detection = 0; g.invuln = 0; g.elapsed = 0;
     document.body.classList.toggle("mode-survival", mode === "survival");
     document.body.classList.toggle("mode-city", mode === "city");
+    document.body.classList.toggle("mode-gungame", mode === "gungame");
     if (mode === "escape") {
     const role = g.role === "cop" ? "cop" : "inmate";
     g.cigs = 0; g.caughtCount = 0; g.trades = 0; g.hasKey = false;
@@ -178,8 +198,17 @@
     const st = (CBZ.surv && CBZ.surv.stats) || { placement: 1, total: 1, disastersSurvived: 0 };
     const time = CBZ.fmtTime(g.elapsed);
     if (win) {
+      // GUN GAME shares this card and relabels it (CBZ.gungameFillResult);
+      // survival reclaims its own copy every time it fills — same discipline
+      // styleLossCard() already applies to the loss card.
+      const box = screens.survwin;
+      const logo = box && box.querySelector(".logo");
+      if (logo) logo.textContent = "VICTORY ROYALE";
       setText("swPlace", "#1"); setText("swTotal", "of " + st.total);
       setText("swTime", time); setText("swDis", st.disastersSurvived);
+      const timeEl = document.getElementById("swTime"), disEl = document.getElementById("swDis");
+      if (timeEl && timeEl.nextElementSibling) timeEl.nextElementSibling.textContent = "Survived";
+      if (disEl && disEl.nextElementSibling) disEl.nextElementSibling.textContent = "Disasters";
     } else {
       setText("slPlace", "#" + (st.placement || 1)); setText("slTotal", "of " + st.total);
       setText("slTime", time); setText("slDis", st.disastersSurvived);
@@ -230,6 +259,9 @@
     // the caller. Survival keeps its placement stats (and relabels the card
     // back in case a jail loss restyled it earlier in the session).
     if (g.mode === "escape") { styleLossCard(true, reason); return; }
+    // GUN GAME: a bot finished the ladder first — its own fill owns the card
+    // (ladder standings, not disaster placement).
+    if (g.mode === "gungame") { if (CBZ.gungameFillResult) CBZ.gungameFillResult(false); return; }
     fillSurvResult(false);
     styleLossCard(false);
   }
@@ -239,6 +271,9 @@
     if (g.state === "won") return;
     setState("won"); CBZ.sfx("win");
     if (g.mode === "survival") { fillSurvResult(true); if (CBZ.recordSurvWin) CBZ.recordSurvWin(); return; }
+    // GUN GAME: the player landed the final rung's kill — the shared win card
+    // shows the ladder result (gungame.js owns the fill).
+    if (g.mode === "gungame") { if (CBZ.gungameFillResult) CBZ.gungameFillResult(true); return; }
     if (g.mode === "escape" && g.cityWorld && CBZ.cityEvent) {
       CBZ.cityEvent("jail-escape", { respect: 4, panic: 2 }, { noWanted: true });
     }
@@ -441,7 +476,9 @@
       if (CBZ.setSimulationView) CBZ.setSimulationView(false);
       if (CBZ.disarmFPSAfterIntro) CBZ.disarmFPSAfterIntro();
       else if (CBZ.setFPS) CBZ.setFPS(false);
-    } else if ((g.mode === "escape" || cityIntro) && CBZ.armFPSAfterIntro) {
+    } else if ((g.mode === "escape" || g.mode === "gungame" || cityIntro) && CBZ.armFPSAfterIntro) {
+      // gungame spawns you armed — a shooting mode opens in first person,
+      // exactly like the escape run's armed start.
       CBZ.armFPSAfterIntro();
     }
     let introOpts = cityIntro && CBZ.cityOriginIntroOpts ? CBZ.cityOriginIntroOpts() : undefined;

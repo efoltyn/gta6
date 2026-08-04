@@ -156,6 +156,27 @@
       </details>
     </div>
 
+    <!-- GUN GAME mode (map buttons are built by src/modes/gungame.js from its
+         own MAPS registry — the registry is the truth, the markup is a slot) -->
+    <div class="mode-gungame-only">
+      <div class="logo">GUN <span class="z">GAME</span></div>
+      <div class="sub">Weapon-Ladder Deathmatch</div>
+      <div class="gg-map-label">CHOOSE YOUR MAP</div>
+      <div id="gungameMapSelect" class="gg-map-select" aria-label="Choose map"></div>
+      <details class="controls">
+        <summary>Controls</summary>
+        <div class="keys">
+          <div class="row"><span class="keycol"><span class="kbd">WASD</span></span><span class="lab">Move</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">Shift</span></span><span class="lab">Sprint</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Fire · punch</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">R-Click</span></span><span class="lab">Aim</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">R</span></span><span class="lab">Reload</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">V</span></span><span class="lab">First-person</span></div>
+        </div>
+      </details>
+      <div class="smallnote" id="gungameMapNote">Every kill climbs the ladder. The final rung is bare fists.</div>
+    </div>
+
     <!-- CITY mode -->
     <div class="mode-city-only">
       <div class="logo">GANG <span class="z">LIFE</span></div>
@@ -164,11 +185,12 @@
            applies the pick at run-start — see that file's header). -->
       <div class="origin-label">CHOOSE YOUR STORY</div>
       <div id="originSelect" class="origin-select" aria-label="Choose your story">
-        <button class="origin-btn origin-btn-contract" type="button" data-origin="contract"><b>The Contract</b><span>The authored story. A roof, a prison, a Director.</span></button>
+        <button class="origin-btn origin-btn-contract" type="button" data-origin="contract"><b>The Hitman</b><span>A motel, a silencer, one name — then the Director.</span></button>
         <button class="origin-btn active" type="button" data-origin="exec"><b>The Executive</b><span>Top floor. Crash. Street. Jail if you slip.</span></button>
-        <button class="origin-btn" type="button" data-origin="hitman"><b>The Hitman</b><span>A motel, a silencer, and one name.</span></button>
         <button class="origin-btn" type="button" data-origin="pilot"><b>The Pilot</b><span>You start airborne. Pick the airframe.</span></button>
-        <button class="origin-btn" type="button" data-origin="racer"><b>The Racer</b><span>Back row at Diamond. Earn the APEX title.</span></button>
+        <button class="origin-btn" type="button" data-origin="racer"><b>The Racer</b><span>Back row at Diamond. Locked doors all the way to APEX.</span></button>
+        <button class="origin-btn" type="button" data-origin="captain"><b>The Captain</b><span>A diesel trawler, a crew of three, and open water.</span></button>
+        <button class="origin-btn" type="button" data-origin="president"><b>The President</b><span>Sworn in this morning. Wall, war, crown, or a cell.</span></button>
         <button class="origin-btn" type="button" data-origin="hustler"><b>The Hustler</b><span>A corner, $60, and a mouth on you.</span></button>
         <button class="origin-btn" type="button" data-origin="debtor"><b>The Debtor</b><span>$48,000 down. The collector is walking.</span></button>
         <button class="origin-btn" type="button" data-origin="wick"><b>The Marked</b><span>Open contract. Everyone wants the money.</span></button>
@@ -576,6 +598,8 @@
 <script src="src/systems/disasters.js?v=strato1"></script>
 <script src="src/systems/survival_interact.js?v=ctrl1"></script>
 <script src="src/systems/survivalhud.js?v=nozone1"></script>
+<!-- GUN GAME ladder HUD (mode-gated; shares #survBars with survival) -->
+<script src="src/systems/gungamehud.js?v=gg1"></script>
 
 <!-- 4d. CITY — open-world GTA-style mode (a third game mode). Additive:
      registers its own updaters (gated by game.mode==="city") and builds its
@@ -984,6 +1008,7 @@
 <!-- THE RACING GAME: real driving opponents (one brain for oval + street) + race scorer + racing HUD -->
 <script src="src/city/racedrivers.js?v=race2"></script>
 <script src="src/city/racehud.js?v=touchclose1"></script>
+<script src="src/city/racecareer.js?v=ladder1"></script>
 <!-- custom dialogue + street talk (one contextual YES/NO decision) — after the registry -->
 <script src="src/systems/custom_dialogue.js?v=ce1"></script>
 <script src="src/city/street_talk.js?v=binary3"></script>
@@ -1070,7 +1095,11 @@
      worldstate.js, wanted.js, outfits.js, combat.js, police.js, death.js,
      bank.js, housing.js, minicities.js, citytemplates.js and club.js — all
      already loaded above — so it goes last in the city block. -->
-<script src="src/city/origins.js?v=contractrow1"></script>
+<script src="src/city/origins.js?v=onecard1"></script>
+<!-- The one hitman pipe + the motel room HQ (wall of marks, gear case, the
+     tiered ladder of marks) — activities' Crime doors and the campaign's
+     merged opening both route through it. -->
+<script src="src/city/hitman.js?v=oneroom1"></script>
 <!-- Canonical story layer: the diegetic phone mounts first, then the campaign
      director drives the rooftop arrest, prison choice and contract chain. -->
 <script src="src/city/campaign_ui.js?v=contractcard1"></script>
@@ -1380,6 +1409,16 @@
      captives, mission, power details and garrison all present above. -->
 <script src="src/city/piracy.js?v=piracy1"></script>
 
+<!-- THE CAPTAIN — the boat-captain career spine: the spawn-at-the-helm origin
+     (origins.js's `voyage` verb defers into it), crew orders on real bodies
+     (cast lines / take the helm / arm up, on seacrew's shipco ladder), the
+     chart-table voyage board (charters, cargo through a vehicle_hold room,
+     fishing trips, salvage, the black book), and the locked prize hull on the
+     marina hard stand. Loads after piracy.js (marineAutopilot, pirateProvoke)
+     and before water_helm; every cross-read is feature-detected.
+     Revert with ?cfg_CAPTAIN_V1=0. -->
+<script src="src/city/captain.js?v=capt1"></script>
+
 <!-- SEATS OF POWER — the standalone complexes that do NOT fit inside a city
      block: the capitol, the executive mansion, the agency headquarters, the
      five-sided defence HQ, and the private estates (the mob compound, the
@@ -1389,6 +1428,17 @@
      guards. After power.js and the biome/continent builders whose empty land
      it claims. Revert with ?cfg_GOV_COMPLEX=0. -->
 <script src="src/city/govcomplex.js?v=gov2xt"></script>
+
+<!-- THE PRESIDENCY — one spine over organs built above: the President origin
+     (candidacy's swearIn fast-forward), the Situation Room inside govcomplex's
+     Executive Mansion (a locked door + a console of real orders), the
+     Saltlands terror cell (factions/occupy/aigoals), Bureau raids (real
+     agents at real cell members), the border wall order (construction.js's
+     CBZ.stateWall) and the falls (regimes' dictatorship, crown's coronation,
+     jail's transport). AFTER govcomplex.js (reads CBZ.govComplexes); every
+     other read is feature-detected and lazily retried.
+     Revert with ?cfg_PRESIDENCY_V1=0. -->
+<script src="src/city/presidency.js?v=pres1"></script>
 
 <!-- CASH STORE — the back half of the cash-bag loop (owner: "only driving to
      your own place can store the cash, not just rob"). Turns govcomplex's

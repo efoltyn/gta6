@@ -1469,7 +1469,12 @@
     // water at least 620 m out and off the padded screen (npcTransitionSafe is
     // strictly stronger than a yaw cone), and the crew goes STRAIGHT INTO ITS
     // SEATS — the drive-by grammar — so nothing is ever watched to appear.
-    const target = pickPrize();
+    // A provoked prize (pirateProvoke — a cargo manifest is a reason to go
+    // hunting) is taken first, but only while it still PRICES as a prize:
+    // prizeValue is the same test every raid passes, so a provoked hull that
+    // sank, beached or emptied falls straight back to the ordinary hunt.
+    const named = _provokePrize; _provokePrize = null;
+    const target = (named && prizeValue(named) > 0) ? named : pickPrize();
     if (!target) return null;
     const bearing = rnd() * Math.PI * 2;
     let sx = 0, sz = 0, ok = false;
@@ -2122,6 +2127,7 @@
   let _mustered = 0, _boarded = 0, _taken = 0, _paid = 0, _paidCash = 0, _paidByPlayer = 0,
     _executed = 0, _rescued = 0, _cuts = 0, _hot = 0, _ordered = 0, _stoodDown = 0;
   let raidCD = 150, verbsRegistered = 0, skiffRegistered = false;
+  let _provokePrize = null;   // a caller-named prize for the NEXT muster (captain.js's cargo runs)
 
   /* THE ONE SWEEPER. core/mission.js's onInterrupt is the shared death /
      arrest / mode-exit edge — never grow a local one (CLAUDE.md). A player who
@@ -2289,5 +2295,13 @@
   };
   CBZ.pirateCrews = function () { return crews.slice(); };
   CBZ.pirateStandDown = standDown;
+  // Pull the NEXT raid forward (never past the scheduler's own gates: the
+  // crew cap, the open-water check and the over-the-horizon muster all still
+  // apply, and most provocations still come to nothing — the menace law).
+  // `target` optionally names the prize; it is re-priced at muster time.
+  CBZ.pirateProvoke = function (secs, target) {
+    raidCD = Math.min(raidCD, Math.max(4, num(secs, 20)));
+    if (target) _provokePrize = target;
+  };
   CBZ.cityPiracyReset = function () { arenaRef = null; resetIfNewArena(); };
 })();
