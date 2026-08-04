@@ -1979,3 +1979,48 @@ MODULE-LOCAL `nukeDetonate`, so the export is not on the path — a wrapper on a
 `CBZ.*` handle only sees calls from OUTSIDE its own file. Detect a detonation by
 its consequences (the reserved 5th star, the radiation zone), never by wrapping
 a same-file function.
+
+### 2026-08-04, same wave, after the merge decision
+
+**THE HINT'S "ONE STEP ABOVE" WAS A TYPED 166px AND THE LADDER BROKE IT.** The
+subtitle ladder above lifts `#citySpeech` by a slot whenever an authored or
+interaction line is live — which put ambient speech at 120 + 45.3 = 165.3px,
+straight onto `#hint.hint-sub`'s hardcoded 166. That number was only ever an
+approximation of `--subtitle-floor + --subtitle-slot`, correct while the layer
+under it could not move. It now rides the same ladder, always one rung above
+the tallest live speech layer, and its default resolves to the 165.3px it has
+always sat at. Same lesson as the flight of steps that arrived nowhere: **a
+number that agrees with another number by luck is a bug that has not gone off
+yet.** Derive it or it will drift.
+
+**A GEOMETRY STAT FICTION, FOUND AND DELIBERATELY NOT FIXED.** `config.js`'s
+`BLD_EXTRAS = false` block carried the line "KEPT: the government/civic
+buildings and their monumental entries … explicitly left alone so a future
+blanket edit cannot quietly take them" — and a blanket edit had already quietly
+taken half of it, in that same block. `BLD_MASONRY_V1 = false` two lines above
+is ALSO the gate on `buildings_civic.js`'s civic kit: `bldCivicOrder` (:367 —
+podium, columns, entablature, pediment) and `bldCivicCrown` (:568 — dome /
+clock tower / lantern) both open `if (!flag("BLD_MASONRY_V1") ||
+!flag("BLD_CIVIC_PODIUM")) return;` and are called at `buildings.js:3827-3828`.
+So `govcomplex.js` asks for `crown:"dome"` on the Executive Mansion,
+`crown:"clock"` on City Hall, `crown:"pediment"` + `order:"ionic"` on the
+Capitol — **and every one of them draws a box.** A registry declaring domes the
+renderer cannot draw is exactly the banned shape, and it is the most likely
+reason the owner's read of a seat of power is "kinda stupid".
+
+It is NOT fixed in this wave, on purpose, and the comment now says so instead
+of lying. The fix is to gate the civic kit on `BLD_CIVIC_PODIUM` alone (the
+masonry FACADE is the residential brick the owner actually cut; a colonnade is
+not) — but that puts columns and domes on every civic anchor in the world, and
+it lands on the same facades as govcomplex's new perron, which is two
+monumental entries stacked: the "stairway that makes no sense" bug in reverse.
+How it LOOKS is the owner's call, judged by playing. **This is the next thing
+worth doing to the government buildings, and it is bigger than everything §5d
+added.**
+
+**NEW TOOL:** `tools/nuke-sortie-check.mjs`, promoted from the probe this wave
+wrote five times. It proves the ordered sortie end to end and the canopy
+ARITHMETICALLY — the measured fall must exceed `sqrt(2h/GRAV)` from the release
+altitude by 1.4x, which free fall cannot do however the solver drifts. It also
+carries the method trap in its header so the next author does not lose two runs
+to it.

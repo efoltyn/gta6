@@ -878,8 +878,38 @@
     CBZ.CONFIG.BLD_ROOF_CLUTTER_V1 = false;
     CBZ.CONFIG.BLD_WEATHERING_V1 = false;
     CBZ.CONFIG.DETAIL_GROUND_GRIME = false;
-    // KEPT: the government/civic buildings and their monumental entries.
-    // Explicitly left alone so a future blanket edit cannot quietly take them.
+    // KEPT: the government/civic buildings. They are placed by
+    // city/govcomplex.js, which owns its own stone and its own monumental
+    // entrance (§1 perron), so none of the lines above can reach them.
+    //
+    // NOT KEPT, AND THIS COMMENT USED TO CLAIM OTHERWISE (corrected
+    // 2026-08-04). It read "the government/civic buildings and their
+    // monumental entries … explicitly left alone so a future blanket edit
+    // cannot quietly take them", and a blanket edit had already quietly taken
+    // half of it — this very block. `BLD_MASONRY_V1 = false` two lines up is
+    // ALSO the gate on buildings_civic.js's civic kit:
+    //     bldCivicOrder  (buildings_civic.js:367) — podium, columns,
+    //                    entablature, PEDIMENT
+    //     bldCivicCrown  (buildings_civic.js:568) — DOME / CLOCK TOWER /
+    //                    lantern
+    // both of which open `if (!flag("BLD_MASONRY_V1") || !flag(
+    // "BLD_CIVIC_PODIUM")) return;` and are called from buildings.js:3827-3828.
+    // So every civic anchor in the world is authored WITH a crown and an order
+    // and draws NEITHER: govcomplex.js asks for `crown:"dome"` on the
+    // Executive Mansion, `crown:"clock"` on City Hall, `crown:"pediment"` +
+    // `order:"ionic"` on the Capitol, and the flag drops all of it on the
+    // floor. That is a geometry stat fiction — a registry declaring domes the
+    // renderer cannot draw — and it is the most likely reason the owner's read
+    // of the seat of power is "kinda stupid": he is looking at a box.
+    //
+    // DELIBERATELY NOT FIXED HERE. The fix is to gate the civic kit on
+    // BLD_CIVIC_PODIUM alone (the masonry FACADE is the residential brick the
+    // owner actually cut; the colonnade is not), but that puts columns and
+    // domes on every civic anchor in the world, and it lands next to
+    // govcomplex's new perron on the same facades — two monumental entries
+    // stacked is the "stairway that makes no sense" bug again, in reverse.
+    // How it LOOKS is the owner's call, judged by playing. This comment now
+    // states what is true so the next author is not misled by it.
   }
 
   if (CBZ.CONFIG.AIR_TRAFFIC_AMBIENT == null) CBZ.CONFIG.AIR_TRAFFIC_AMBIENT = true;

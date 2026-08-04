@@ -154,9 +154,20 @@ body.show-minimap #minimap{ opacity:1; pointer-events:auto; }
    so on touch it adopts the one observed-world dialogue grammar this game has
    (.world-subtitle / .pi-subtitle: heavy white Fredoka, black stroke, NO box)
    and sits one step above the .pi-subtitle band (touch floor 120px) so the two
-   read as stacked lines of the same language, never as competing cards. */
+   read as stacked lines of the same language, never as competing cards.
+
+   THAT "ONE STEP" WAS A TYPED 166px, AND IT WAS ONLY EVER RIGHT BY LUCK. On
+   touch the speech floor is 120px and one --subtitle-slot is 19.27px x 2.35 =
+   45.3px, so 120 + 45.3 = 165.3 — which is what 166 was approximating. It held
+   while the layer below it could not move. It can now: the subtitle LADDER
+   below (--subtitle-rank) lifts #citySpeech by a slot whenever an authored or
+   interaction line is live, which would have parked ambient speech at 165.3px
+   directly on this hint. So this rides the same ladder, always exactly one rung
+   above the highest live speech layer, and the default resolves to the 165.3px
+   it has always sat at. Derived, not typed — same fix as the flight of steps
+   that arrived nowhere, in a different file. */
 #hint.hint-sub{
-  bottom:calc(166px + env(safe-area-inset-bottom, 0px));
+  bottom:calc(var(--subtitle-floor) + var(--hint-rank, var(--subtitle-slot)));
   max-width:min(74vw, 680px);
   padding:0; background:none; border:0; border-radius:0; box-shadow:none;
   backdrop-filter:none; -webkit-backdrop-filter:none;
@@ -652,6 +663,17 @@ body.campaign-dialogue-active #citySpeech,
 body.interact-subtitle-active #citySpeech{ --subtitle-rank:var(--subtitle-slot); }
 body.campaign-dialogue-active.interact-subtitle-active #citySpeech{
   --subtitle-rank:calc(var(--subtitle-slot) * 2);
+}
+/* …and the touch hint (#hint.hint-sub, systems/hud.js) rides one rung above
+   whatever the tallest live speech layer is, by the same two flags. It is a
+   HINT, not a line of dialogue, so it belongs on top of the conversation
+   rather than inside it. */
+body.campaign-dialogue-active #hint.hint-sub,
+body.interact-subtitle-active #hint.hint-sub{
+  --hint-rank:calc(var(--subtitle-slot) * 2);
+}
+body.campaign-dialogue-active.interact-subtitle-active #hint.hint-sub{
+  --hint-rank:calc(var(--subtitle-slot) * 3);
 }
 .world-subtitle .world-subtitle-speaker{
   position:absolute!important;

@@ -59,6 +59,12 @@ every time. The real rules:
   live camera so it reports `outOfFrame` instead of handing you a confident
   photograph of an empty pavement), `tools/city-atlas.mjs` (top-down world), `tools/demolition-check.mjs` (destroy→rebuild arc; its
   FLOATING-GEOMETRY AABB-chain invariant is a good pattern to copy),
+  `tools/nuke-sortie-check.mjs` (the ORDERED nuclear sortie end to end —
+  order accepted, the parked B-2 claimed with a real pilot, release at the
+  SOLVED throw, the canopy proven by arithmetic against the ballistic fall
+  from the same height, detonation, bomber clear; and it carries the trap
+  that cost two runs to find — a wrapper on a `CBZ.*` handle never sees a
+  same-file caller, so detect a detonation by its consequences),
   `tools/smoke-play.mjs` (full RENDERED boot — the only gate on the real
   render path; run before a big deploy or when render code changed),
   `tools/terrain-map-audit.mjs` (deep terrain sweep), `tools/aimlib.js`
