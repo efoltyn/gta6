@@ -1819,3 +1819,132 @@ Verified by A/B: default → button absent, cluster 8/8, console clean; the
 documented revert `?cfg_TOUCH_RECENTER=1&cfg_CAM_TOUCH_RECENTER=1` → button
 present, cluster 8/8. The B run is what makes A evidence rather than a
 photograph of an empty pavement.
+
+## THE 2026-08-04 iPAD WAVE — one doubled subtitle, one stairway to a wall, one ordered apocalypse
+
+Three owner complaints off a single iPad screenshot of the present-day city, one
+orchestrator + one builder subagent (govcomplex) + one recon scout (strategic).
+
+**"THERE'S TWO VERSIONS OF THE DIALOGUE BARELY OVERLAPPING" — AND THERE WAS
+ONLY EVER ONE ELEMENT.** A full-document scan at iPad metrics (1180x820 @2x,
+`pointer:coarse`, touch latched) found exactly ONE node carrying the spoken
+line: `#citySpeech .citySpeechLine`, effective opacity 1. The second "version"
+was the outline. `.world-subtitle-line` drew a flat `1.6px` stroke plus FOUR
+hard-offset `±2px` COPIES of the glyph — numbers chosen against desktop's 36px
+cap, where 2px is 5.5% of the em and the four copies fuse into one smooth ring.
+Touch sizes the same line at 19.27px (mobile.css `clamp(16px,2.35vh,24px)`),
+where the SAME 2px is 10.5% of the em: the copies stop fusing, the upper pair
+reads as a ghosted second sentence up-left of the first, and they close the
+counters of o/a/e so the letters silt up. Reproduced headless and confirmed
+character-for-character against the owner's screenshot. **Fix: the recipe is
+now `:root { --ink / --ink-stroke / --ink-shadow }` in `css/hud.css`, in em, and
+all FOUR hand-copies read it in two lines** (`.world-subtitle-line`,
+`.pi-subtitle-line`, `#hint.hint-sub`, `#pinteractWho` — three different stroke
+widths before, one now). Ratios are taken from the 36px cap, so desktop is
+unchanged (`.045em x 36 = 1.62px`, `.056em x 36 = 2.02px`); at 19.27px the
+measured stroke goes 1.6px -> 0.867px and the offsets 2px -> 1.079px. Each
+consumer keeps its old literal as the `var()` fallback, so deleting the `:root`
+block is a true one-line revert. **em inside a custom property resolves against
+the element that USES it** — that is the whole reason one declaration serves
+four type sizes with no media query, and it is measured, not assumed.
+
+**AND WHILE READING IT, A REAL SECOND LAYER.** `hud.css` already declares "TWO
+SUBTITLE LAYERS NEVER SHARE PIXELS" and ranked exactly two — with a third built
+and unenrolled: `#pinteractSay` (`.pi-subtitle`, `--pi-sub-floor`) resolves to
+the SAME 120px touch floor as `#citySpeech` (`--subtitle-floor`), so a ped bark
+landing during a verb result rendered the two character-on-character. It is a
+rung now: campaign (0) -> your own verb's answer (1) -> ambient street speech
+(2), off `interact-subtitle-active`, which `interact.js` stamps for the life of
+a line exactly as campaign_ui.js stamps its own. `saySilence()` already runs on
+every non-playing frame, so the class cannot stick.
+
+**THE STAIRWAY THAT "DOESN'T EVEN HAVE PHYSICS" WAS A FLIGHT TO A BLANK WALL.**
+Both halves of the owner's sentence were one fault: `govcomplex.js`'s `steps()`
+took `rise` and `n` as hand-typed arguments and nothing checked the total
+against the surface at the top. City Hall's climbed `6 x 0.30 = 1.80 m` into the
+front wall of a shell whose floor and threshold sit at y=0 (`cityMakeBuilding`
+builds every building on the ground); the Capitol's climbed 2.88 m and its top
+three treads stood ON its own doorway. And it registered only `plat()` — a
+walkable top, never `col()` — which is the correct, documented contract at
+0.30 m (`buildings.js:3755`: "NO collider: a monumental stair must never be able
+to seal a building's own front door") and a LIE at 1.8-2.9 m, so the whole stone
+mass was walk-through. **Fix: `steps(root,x,z,w,depth,TOP,…)` — the caller
+states the height the flight ARRIVES AT, the riser count and rise are solved
+from it, and the flanks take real per-tread colliders once `top >= STEP_UP`.**
+The four monumental entrances become a `perron()`: a 0.30 m stylobate you cross
+to the door, with capped cheek walls carrying the colliders — monumental read
+kept, threshold one 16 cm lip away, nothing can be sealed out of its own front
+door. New ratchet `govComplexAudit().stairsFloating`, **PIN AT 0** (a flight
+more than one `STEP_UP` from its declared landing), with `stairs` printed beside
+it so a "fix" that stops drawing steps cannot pass.
+
+**"THE GOVERNMENT BUILDING IS KINDA STUPID" — IT HAD NO CLOSED DOOR IN IT.**
+Not one, in any of eleven complexes. `keepOut` is a spawn zone; `access` is a
+trespass query; `occupy.js` says so in its own header ("it does not lock doors,
+because nothing in this engine has a lockable door yet"). A building with
+nothing shut in it cannot make a gradient, which is doctrine LAW 1's exact
+complaint. **§5d THE STRONGROOM** answers it with the gun-room grammar applied
+literally: a steel leaf with a barred vision panel off City Hall's PUBLIC lobby
+(so you meet it on your first visit, unsent), the confiscated arms rack and the
+city seal lit on the far side of the bars, the key press on the floor
+`power.js` already declares `vip` and `occupy.js` already puts men on. The rack
+pays a real gun through `cityGiveWeapon`; the SEAL pays the category — every
+government floor in the world stops reading you as an intruder, through
+occupy.js's own `cityOccupyGrant`, re-asserted per complex as its occupancy
+comes up. Declared as a five-field registry row, so a second complex is one
+line and no geometry. Flags `GOV_STRONGROOM` / `GOV_STRONGROOM_WRIT`; audit
+`strongroomsDeclared` must equal `strongrooms`.
+
+**"ORDER A NUKE ON A PLACE AND A B-2 SHOULD FLY THERE AND DROP IT — THE SAME
+WAY IT WORKS WHEN YOU DROP ONE IN PILOT."** The last clause is the whole
+specification, and honouring it made the feature ~150 lines instead of a second
+weapon system. `strategic.js` already claimed "TWO ROUTES TO A DETONATION …
+both end in nukeDetonate", but its only called route (`strategicCallStrike`)
+spawns no aircraft at all — it authors impact points and hands them to
+`cityBombWalk`. The reason was one gate: everything from "the store has left the
+bay" onward lived in the tail of `dropPayload()`, which is welded to
+`flyingB2()`, i.e. to the PLAYER being at the controls. **Split out as
+`releaseStore(kind, p, rv, opts)`** (exported `CBZ.strategicRelease`) and the
+file's own law finally holds for a third route: the ordered sortie calls the
+identical function the `[B]` key calls, so it inherits the closed-form solve,
+the B61 laydown parachute, the tumble, `bombAt` and
+`resolveImpact -> nukeDetonate -> the bus`, with no delivery code of its own.
+Attribution now rides on the bomb (`b.by`/`b.byPlayer`, undefined on the
+piloted path — byte-identical there).
+
+**THE AEROPLANE IS THE ONE ON THE APRON.** `CBZ.strategicNuclearSortie({x,z})`
+CLAIMS the parked B-2 through the same ownership protocol `aircraft.js`'s
+fighter scramble uses (`cityClaimMilitaryVehicle` / `cityReleaseMilitaryVehicle`)
+and flies `b2rec.group` itself. Three consequences, none of them bookkeeping:
+the apron is genuinely empty and the boarding verb genuinely gone while your
+strike is up; steal or wreck the bomber and nobody can order a strike; and a
+real garrison trooper flies it via `CBZ.airSeatActor`, so shooting him down
+costs the base its bomber permanently (the mesh goes with the record — a
+`destroyed` release deliberately does not re-park, which for a flying one would
+have left a B-2 at 210 m forever). No aircrew on the base, no sortie.
+**The release point is SOLVED, not tuned** — playerair.js's called jet drops at
+a flat 55 m; this runs the same ballistic solve directly over the aimpoint,
+reads how far downrange the weapon actually travels *including the canopy's
+horizontal decay integral*, and releases at `aimpoint - throw`. `rv` is computed
+once and reused, so the prediction and the event are the same numbers and
+`ordnanceAudit()` still counts one release per sortie. Release altitude 210 m is
+chosen so `retardFor` ALWAYS takes the retarded laydown (5.5 s ballistic vs
+`RET.T_ESCAPE` 12 s) — the real B61 rule, and the reason you get to watch a
+parachute come down. Order it at the **nuclear release console**, a new locked
+machine in the Fort Brandt command room beside the map table (its own zone, not
+a second option on the strike console — `interactions.js` renders ONE verb per
+card, so a second option would simply have hidden the iron strike), gated on
+`cityLock({verb:"vault"})`: the same apex authority that opens the nuclear vault
+six metres away. Every refusal is a fact about the world and is said out loud.
+
+**A PRE-EXISTING BUG THE RECON FOUND ON THE WAY.** `aircraft.js`'s
+`parkedMilitary` excluded strategic airframes with `/bomber/i` — which does not
+match `"B-2 SPIRIT"`. A 5-star police response could therefore scramble the
+strategic bomber as a fighter and fly strafing passes with it, and (the claim
+being exclusive) could take the airframe out from under an ordered sortie. Now
+tested on the record's own `b2` flag.
+
+**GATE:** `MATHGATE: ok` on 90210 — `329/182/206` lots/shops/roads (golden),
+`gov 11/11 placed rejected=25 overlap=0 urban=0 staffed=10`, `mtnOutSnow 0
+cityOnMtn 0 overlaps 0`, 400 sim ticks clean, determinism re-run byte-identical,
+console baseline-only.

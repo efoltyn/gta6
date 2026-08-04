@@ -30,6 +30,32 @@ Before building anything adjacent, wire into the existing system:
   single-verb rides are SILENT (press/tap to take — see
   `interactions.js` SILENT_RIDE; the airliner BOARD/HIJACK card is the
   one sanctioned exception).
+- **The ONE ink recipe** — `css/hud.css` `:root { --ink / --ink-stroke /
+  --ink-shadow }`. Every observed-world line (`.world-subtitle-line`,
+  `.pi-subtitle-line`, `#hint.hint-sub`, `#pinteractWho`) wears one outline
+  and reads it in two lines: `-webkit-text-stroke: var(--ink-stroke,<old>)
+  var(--ink,#090909)` + `text-shadow: var(--ink-shadow,<old>)`. It was
+  hand-copied four times at three different stroke widths. **The units are em
+  and that is the point**: the old flat `1.6px` stroke + four hard-offset
+  `±2px` glyph copies were sized against desktop's 36px cap, so on touch's
+  ~19px line the copies stopped fusing and read as a SECOND, ghosted copy of
+  the sentence with the counters of o/a/e silted up — the owner's "two
+  versions of the dialogue barely overlapping" (2026-08-04), which a
+  full-document scan proved was one element the whole time. em keeps the ring
+  the same fraction of the letterform at every size; the ratios are taken from
+  the 36px cap so desktop is unchanged. `em` inside a custom property resolves
+  against the element that USES it — that is what lets one declaration serve
+  four type sizes. A new outlined surface adds those two lines; it never
+  retypes the numbers.
+- **Subtitle layers are a LADDER, never a pile** — `css/hud.css`
+  `--subtitle-rank`. `#campaignDialogue` (rung 0) · `#pinteractSay` (rung 1) ·
+  `#citySpeech` (rung 2), each lifted one `--subtitle-slot` per live layer
+  beneath it, driven by body classes the owning file stamps for the life of a
+  line (`campaign-dialogue-active` from campaign_ui.js,
+  `interact-subtitle-active` from interact.js). On touch every one of these
+  bands resolves to the SAME 120px floor, so an unranked layer renders
+  character-on-character over another. A new spoken-line surface joins the
+  ladder; it does not park itself on the floor.
 - **HUD doctrine** — the only popup is the killfeed. Rich info lives in
   logic/phone/leaderboards, not floating cards; aiming shows a floating
   `Lv.N Title` overhead pill (`aim_dossier.js`), full data stays
