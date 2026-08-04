@@ -148,6 +148,13 @@
         "#cHud .cSlot.item .s{font-size:11px}" +
         "#cHud .cSlot .itemIcn{width:26px;height:26px}" +
         "#cHud .cSlot .cnt{position:absolute;right:2px;top:1px;font-size:9px;font-weight:700;color:var(--hud-ink);background:rgba(8,11,17,.85);border-radius:6px;padding:0 3px;line-height:1.3}" +
+        // PHONE chip (campaign_ui.js's handset, carried like a gun): the same
+        // frame as every other slot, plus the two signals the old corner
+        // button owned — an unread LED and the stowed-phone buzz.
+        "#cHud .cSlot .led{position:absolute;right:3px;top:3px;width:6px;height:6px;border-radius:50%;background:#53606a;opacity:.35;box-shadow:0 0 0 2px rgba(0,0,0,.28)}" +
+        "#cHud .cSlot.unread .led{background:#ff6258;opacity:1;box-shadow:0 0 0 2px rgba(0,0,0,.28),0 0 8px #ff6258}" +
+        "#cHud .cSlot.buzz{animation:cPhoneBuzz .82s ease}" +
+        "@keyframes cPhoneBuzz{0%,100%{transform:translateY(0) rotate(0)}18%{transform:translateY(-4px) rotate(-5deg)}38%{transform:translateY(-2px) rotate(5deg)}58%{transform:translateY(-1px) rotate(-3deg)}}" +
         // the held slot is a SELECTION (interactive chrome) → the one cyan accent,
         // same for guns and melee. The old green/orange split spent the cash and
         // heat semantics on a highlight that just means "in hand".
@@ -1277,6 +1284,14 @@
             html += "<div class='cSlot item" + (held ? " held" : "") + "' data-bi='" + bi + "' title='" +
               String(iname).replace(/'/g, "&#39;") + "'>" +
               "<span class='key'>" + (bi + 1) + "</span>" + face + cnt + "</div>";
+          } else if (e.kind === "phone") {
+            // The handset as a carried thing: itemicons.js already photographs
+            // a "phone" kind, so the slot shows the object — same face the
+            // full I inventory would draw — never the word PHONE.
+            html += "<div class='cSlot item phone" + (held ? " held" : "") +
+              (e.unread ? " unread" : "") + (e.buzz ? " buzz" : "") + "' data-bi='" + bi + "' title='Phone'>" +
+              "<span class='key'>" + (bi + 1) + "</span>" + hotbarItemFace("Phone", null) +
+              "<i class='led' aria-hidden='true'></i></div>";
           }
         }
         wHTML(slotsEl, html);
@@ -1491,6 +1506,8 @@
       const e = bar[i];
       s += "|" + (e.kind || "") + ":" + (e.short || e.label || "") + (e.active ? "*" : "");
       if (e.kind === "item") s += "#" + (e.count | 0);
+      // the phone chip's LED and buzz are state the bar must repaint on
+      if (e.kind === "phone") s += (e.unread ? "u" : "") + (e.buzz ? "z" : "");
       if (e.kind === "gun" && e.active && fps && fps.rounds && fps.reserves) {
         const m = weaponMetaById(e.id) || weaponMetaByLabel(e.label, e.short);
         const k = m ? m.i : -1;

@@ -3033,10 +3033,12 @@
   // bar in the I-screen. Order (contract): [0] HOLSTER/fists chip, then the
   // OWNED GUNS in their current left-to-right order (gunSlot = index into
   // availableIndices, selected byte-identically via CBZ.fpsSelectSlot), then the
-  // USABLE ITEMS (g.cityInv entries whose econ tag is food/drug/throwable).
-  // Each entry: { kind:"holster"|"gun"|"item", label, short, item?, gunSlot?,
-  //   count?, active }. HOTBAR/CHARPANEL render exactly this; CBZ.cityHotbarSelect
-  // dispatches a bar index. Pure read (no side effects) so the renderers can poll.
+  // USABLE ITEMS (g.cityInv entries whose econ tag is food/drug/throwable), then
+  // the PHONE when the campaign handset is live (see the phone note below).
+  // Each entry: { kind:"holster"|"gun"|"item"|"phone", label, short, item?,
+  //   gunSlot?, count?, active }. HOTBAR/CHARPANEL render exactly this;
+  // CBZ.cityHotbarSelect dispatches a bar index. Pure read (no side effects) so
+  // the renderers can poll.
   const USABLE_TAGS = { food: 1, drug: 1, throwable: 1 };
   function hotbarItemNames() {
     // stable order: ITEMS catalog declaration order, filtered to owned usables.
@@ -3070,6 +3072,25 @@
       const name = items[i];
       bar.push({ kind: "item", item: name, label: name, short: name, count: inv[name] || 0, active: false });
     }
+    // ---- THE PHONE IS A POCKET ITEM, NOT A CORNER BUTTON --------------------
+    // OWNER (2026-08-04): "in hitman mode there's a phone in the right corner
+    // of the screen, click to press. Instead that should just be like a gun —
+    // it should just be in the inventory." Doctrine already says so: "the
+    // pocket keeps only what a person pockets: cash, PHONE, keys/keycards,
+    // medkit, grenades, bricks" (doctrine.md, item existence test).
+    // So the handset becomes a SLOT on this one bar and gets a number key, a
+    // click target, a highlight and the I-screen mirror for free — exactly
+    // what a gun gets. city/campaign_ui.js still owns the device itself and
+    // publishes its chip state read-only through CBZ.campaignPhoneChip();
+    // this file owns only the slot's place in the bar.
+    let ph = null;
+    try { ph = (typeof CBZ.campaignPhoneChip === "function") ? CBZ.campaignPhoneChip() : null; } catch (e) { ph = null; }
+    if (ph && ph.available) {
+      bar.push({
+        kind: "phone", label: "Phone", short: "PHONE", item: "Phone",
+        active: !!ph.open, unread: !!ph.unread, buzz: !!ph.buzz,
+      });
+    }
     return bar;
   }
   CBZ.cityHotbar = cityHotbar;
@@ -3085,6 +3106,9 @@
     if (e.kind === "holster") { CBZ.cityHolster(true); return true; }
     if (e.kind === "gun") { CBZ.game.cityHolstered = false; return selectWeaponSlot(e.gunSlot); }   // fpsSelectSlot also clears holster
     if (e.kind === "item") return useHotbarItem(e.item);
+    // the phone slot raises/stows the handset — the same "select the slot,
+    // hold the thing" verb every other chip on this bar answers to.
+    if (e.kind === "phone") { try { return !!(CBZ.campaignPhoneToggle && CBZ.campaignPhoneToggle()); } catch (err) { return false; } }
     return false;
   }
   CBZ.cityHotbarSelect = cityHotbarSelect;

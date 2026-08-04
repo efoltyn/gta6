@@ -871,7 +871,14 @@
       "#invHotbar{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:30;display:none;gap:3px}" +
       "#invHotbar .ci2Slot{cursor:pointer;pointer-events:auto}" +
       "#invHotbar .ci2Slot .s{font-size:11px;font-weight:800;color:#cdd6e2;pointer-events:none;text-shadow:0 1px 2px #000}" +
-      "#invHotbar .ci2Slot.sel{box-shadow:0 0 0 2px rgba(232,236,242,.85),inset 2px 2px 0 rgba(0,0,0,.35);transform:scale(1.08)}";
+      "#invHotbar .ci2Slot.sel{box-shadow:0 0 0 2px rgba(232,236,242,.85),inset 2px 2px 0 rgba(0,0,0,.35);transform:scale(1.08)}" +
+      // PHONE slot — the campaign handset carried like a gun (campaign_ui.js).
+      // The unread LED and the stowed buzz are the two signals the retired
+      // corner button owned; they ride the chip now, unchanged in kind.
+      "#invHotbar .ci2Slot .led{position:absolute;right:3px;top:3px;width:6px;height:6px;border-radius:50%;background:#53606a;opacity:.35;box-shadow:0 0 0 2px rgba(0,0,0,.28)}" +
+      "#invHotbar .ci2Slot.unread .led{background:#ff6258;opacity:1;box-shadow:0 0 0 2px rgba(0,0,0,.28),0 0 8px #ff6258}" +
+      "#invHotbar .ci2Slot.buzz{animation:ci2PhoneBuzz .82s ease}" +
+      "@keyframes ci2PhoneBuzz{0%,100%{transform:translateY(0) rotate(0)}18%{transform:translateY(-4px) rotate(-5deg)}38%{transform:translateY(-2px) rotate(5deg)}58%{transform:translateY(-1px) rotate(-3deg)}}";
     document.head.appendChild(st);
   }
 
@@ -1271,16 +1278,24 @@
     let bar = [];
     try { bar = (CBZ.cityHotbar && CBZ.cityHotbar()) || []; } catch (e) { bar = []; }
     let sig = "";
-    for (let i = 0; i < bar.length; i++) { const b = bar[i]; sig += (b.short || b.label) + ":" + (b.count | 0) + ":" + (b.active ? 1 : 0) + "|"; }
+    // the phone chip's LED/buzz are state too — without them in the signature
+    // the bar would never repaint when the handset actually buzzes.
+    for (let i = 0; i < bar.length; i++) {
+      const b = bar[i];
+      sig += (b.short || b.label) + ":" + (b.count | 0) + ":" + (b.active ? 1 : 0) +
+        (b.unread ? "u" : "") + (b.buzz ? "z" : "") + "|";
+    }
     if (sig === _hotSig && hotbarEl.style.display === "flex") return;
     _hotSig = sig;
     let html = "";
     for (let i = 0; i < bar.length && i < 9; i++) {
       const b = bar[i];
-      const face = b.kind === "item" ? itemFace(b.item || b.label, "md")
+      const face = (b.kind === "item" || b.kind === "phone") ? itemFace(b.item || b.label, "md")
         : b.kind === "gun" ? weaponFace(b.id, b.label)
         : "<span class='s'>" + String(b.short || b.label || "?").slice(0, 6) + "</span>";
-      html += "<div class='ci2Slot" + (b.active ? " sel" : "") + "' data-i='" + i + "'>" + face +
+      const flags = b.kind === "phone" ? ((b.unread ? " unread" : "") + (b.buzz ? " buzz" : "")) : "";
+      html += "<div class='ci2Slot" + (b.active ? " sel" : "") + flags + "' data-i='" + i + "'>" + face +
+        (b.kind === "phone" ? "<i class='led' aria-hidden='true'></i>" : "") +
         (b.count != null && b.count > 1 ? "<span class='ct'>" + (b.count | 0) + "</span>" : "") + "</div>";
     }
     hotbarEl.innerHTML = html;
