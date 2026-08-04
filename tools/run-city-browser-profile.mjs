@@ -17,7 +17,14 @@ const server = process.env.CBZ_PROFILE_URL || "http://127.0.0.1:8765/";
 const commandTimeout = Math.max(10000, Number(process.env.CBZ_CDP_TIMEOUT_MS) || 60000);
 const port = 9300 + Math.floor(Math.random() * 500);
 const profileDir = `/tmp/cbz-browser-profile-${port}`;
-const chromePath = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+// Same browser resolution as math-gate.mjs:89 and probe.mjs:110. This tool was
+// the one instrument left on the darwin-only hardcode after the 2026-08-03
+// portability pass, which made it unrunnable in headless Linux — i.e. exactly
+// where the frame-time questions get asked. CBZ_CHROME overrides both.
+const chromePath = process.env.CBZ_CHROME ||
+  (process.platform === "darwin"
+    ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    : "/opt/pw-browsers/chromium");
 const forceQuery = forcedQuality == null ? "" : `&qforce=${forcedQuality}`;
 const url = `${server}?profile=1&scenario=${encodeURIComponent(scenario)}&frames=${frames}&seconds=120${forceQuery}`;
 

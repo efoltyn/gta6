@@ -1403,6 +1403,15 @@
   // sessions only, retain the callsite so the benchmark can name anonymous
   // updater functions without adding any normal-game stack-capture overhead.
   const profileFrameWork = typeof location !== "undefined" && /(?:\?|&)profile=1(?:&|$)/.test(location.search || "");
+  // Files that only ever FORWARD a registration are never the answer to "who
+  // registered this work". config.js is this file; core/prio.js wraps
+  // CBZ.onUpdate/onAlways in place (its collision-warning dev aid), so its
+  // wrapper frame sits between every caller and this function. Skipping only
+  // config.js meant prio.js became the first match and ALL 653 updaters
+  // reported "src/core/prio.js:182" — the profiler could name the cost of
+  // every system in the game and not one of their names. Any future in-place
+  // wrapper of these registrars belongs in this list.
+  const FRAME_SOURCE_SKIP = ["src/config.js", "src/core/prio.js"];
   function frameSource() {
     if (!profileFrameWork) return "";
     const stack = (new Error()).stack || "";
@@ -1410,7 +1419,7 @@
     for (let i = 2; i < lines.length; i++) {
       // Script cachebusters appear in stacks as file.js?v=tag:line:col.
       const m = lines[i].match(/(src\/[^:?)]+\.js)(?:\?[^:)\s]+)?:(\d+)/);
-      if (m && m[1] !== "src/config.js") return m[1] + ":" + m[2];
+      if (m && FRAME_SOURCE_SKIP.indexOf(m[1]) === -1) return m[1] + ":" + m[2];
     }
     return "";
   }

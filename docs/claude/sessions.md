@@ -1890,3 +1890,59 @@ PROBE CAVEAT worth the ink, because it produced a FALSE FAIL in this very run:
 `getComputedStyle(el)` returns a LIVE declaration. Holding one "before" and one
 "after" reference and comparing them compares the object to ITSELF — snapshot
 the strings you care about at read time, or your A/B is a tautology.
+
+## THE 2026-08-04 FLOATING-CANOPY REMOVAL + PROFILER REPAIR (solo)
+
+**Mandate (owner, with a photograph):** "Find these fake fucking geometric
+floating tree things that you added." Then: why does it exist, why does
+everything have a kill switch, and is that why the game runs slow.
+
+- **THE ROOF IS GONE.** `canopy-dome` (world/vegetation.js archetype +
+  city/continent.js `domeList`/`plantDome`/per-chunk mesh) flew ~57k trunkless
+  20-triangle icosahedra at ground + 7..14 m. Its own gate read `c > 0.26`
+  while its comment claimed `c > 0.42`, so it spilled out of closed wood onto
+  thin ground and shoreline. **It passed 2026-08-03 review because canopy
+  cover was measured TOP-DOWN in five preset frames, and from above a fake
+  roof is indistinguishable from a forest — the metric structurally could not
+  see what it was hiding.** Generalise that, not just the fix: a coverage
+  metric taken from one camera angle cannot validate geometry that is only
+  wrong from another. `biome_forest.js`'s roof is KEPT and that is the line —
+  Redhollow is a flat y=0 plate whose patches sit inside ~2,900 trunks and
+  23 m spires; a canopy filler is honest over ground already full of real
+  stems, never on relief. Stems from that wave are real and stay: backcountry
+  49,241 (90210) / 53,056 (1337) against the ≥20,000 ratchet, `legacy` 0.
+
+- **THE PROFILER COULD NOT NAME ANYTHING.** `config.js frameSource()` walked
+  the stack for the first `src/*.js` frame that wasn't config.js — but
+  `core/prio.js` wraps `CBZ.onUpdate`/`onAlways` in place, so its wrapper
+  frame sat between every caller and the capture. **All 653 registered
+  updaters reported `src/core/prio.js:182`.** The one instrument for "what is
+  eating the frame" could measure every system's cost and name none of them.
+  Fixed with a skip LIST (`FRAME_SOURCE_SKIP`); any future in-place wrapper of
+  those registrars belongs in it. Verified: 0/30 unattributed, top entries now
+  read `src/city/charpanel.js:1060`, `src/city/arena_fights.js:1416`, …
+  Profiling-only path — `frameSource()` still returns "" in normal play.
+
+- **`tools/run-city-browser-profile.mjs` was darwin-hardcoded**, so it could
+  not run in headless Linux — exactly where frame-time questions get asked. Now
+  honours `CBZ_CHROME` with the same fallback as math-gate.mjs:89 / probe.mjs:110.
+  NOTE for the next runner: raise `CBZ_CDP_TIMEOUT_MS` (the 60 s default expires
+  during a SwiftShader boot).
+
+**DEBT LEFT NAMED — the real perf lead, MEASURED, unacted-on.** SwiftShader
+renders this scene at ~0.09 fps, so every ms/frame figure from a headless
+profile is noise and none is quoted here. The scene-graph counts are
+device-independent and are the lead: **153,163 objects / 138,823 meshes /
+65,420 visible / 14,015 groups / 90 lights**, 122,980 colliders, 23,202 LOS
+blockers. r128 recurses the WHOLE graph in `projectObject` every render, so
+that traversal is CPU cost paid per frame on any device. `cityRootCensus` says
+**114,076 meshes share just 2,865 geometry+material pairs** and **27,496 are
+static-merge-eligible but unmerged** (batch.js already merged 757 / removed
+203,810). That is the next wave, and it needs a real GPU to A/B — do not
+"optimise" it against a software rasteriser.
+
+**Flag-count honesty (owner asked):** 786 distinct `CBZ.CONFIG` flags, 2,410
+reads. They are NOT a frame-time cost — they resolve to booleans at build time
+(`CARPET`, continent.js) and `core/loop.js` reads none. But 786 is the Block
+Law's own indictment quantified: each one marks a place where a new path was
+added BESIDE the old one instead of replacing it, and both stay resident.
