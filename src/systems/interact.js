@@ -486,8 +486,17 @@
     sayLine.textContent = String(msg).replace(/^[“"]|[”"]$/g, "");
     sayEl.classList.add("show");
     sayT = secs || 2.8;
+    // Enrol in hud.css's ONE subtitle ladder for the life of the line, exactly
+    // the way campaign_ui.js stamps campaign-dialogue-active. Without it this
+    // band and #citySpeech's resolve to the same 120px touch floor and a ped
+    // bark lands character-on-character over the answer to the player's verb.
+    document.body.classList.add("interact-subtitle-active");
   }
-  function saySilence() { sayT = 0; if (sayEl) sayEl.classList.remove("show"); }
+  function saySilence() {
+    sayT = 0;
+    if (sayEl) sayEl.classList.remove("show");
+    document.body.classList.remove("interact-subtitle-active");
+  }
   function tickSay(dt) {
     if (sayT <= 0) return;
     sayT -= dt;
