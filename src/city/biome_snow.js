@@ -1082,13 +1082,16 @@
       const c = new THREE.Color(), rc = new THREE.Color(), snowLit = new THREE.Color(0xf9fafb);
       const snowShadow = new THREE.Color(0xd4dfe4), iceBlue = new THREE.Color(0xaec7d4);
       const lakeIce = new THREE.Color(COL.ice), lakeIceDeep = new THREE.Color(COL.iceDeep);
-      const granite = new THREE.Color(0x5d5952), graniteDark = new THREE.Color(0x262b2e);
-      const tundraEdge = new THREE.Color(0x66745d);
+      const granite = new THREE.Color(0x554f47), graniteDark = new THREE.Color(0x232829);
+      const tundraEdge = new THREE.Color(0x5e6f52);
       // Alpine soil/tundra/turf — what shows on SHALLOW ground below the snow.
       // The old field had no soil at all: every non-snow pixel was granite, so
       // gentle benches read as bare rock slabs.
-      const alpSoil = new THREE.Color(0x5c6250), alpTurf = new THREE.Color(0x687059);
-      const screeCol = new THREE.Color(0x7a7469);
+      // Saturated, not grey-green — see the note on the Greater Range's
+      // alpineFoot: a desaturated base cannot survive a snow lerp.
+      const alpSoil = new THREE.Color(0x4f5c3e), alpTurf = new THREE.Color(0x5d6f47);
+      const alpBare = new THREE.Color(0x5b5449);
+      const screeCol = new THREE.Color(0x736d61);
       const STRATA = HAS_KIT && CFGS.MOUNT_STRATA_V1 !== false;
       const _mixOut = { v: 0 };
       const n = new THREE.Vector3(), light = new THREE.Vector3(-0.35, 0.82, 0.45).normalize();
@@ -1115,9 +1118,16 @@
             // so the colour bands sit exactly on the geometric risers.
             step: 16, dip: 24, dipCell: 560, dipCell2: 155,
             slope0: 0.05, slope1: 0.30, salt: S_STRATA, aspect: 1, mixOut: _mixOut,
+            // the lower flank is vegetated, and vegetation holds ground far too
+            // steep for a pure-slope window: the green climbs the massif's foot
+            // instead of surrendering to granite at the first 6° of tilt.
+            vegHold: 1 - smooth01((y - 26) / 62), vegSlope: 0.18,
           });
-          // soil/turf base, drier and greyer as it climbs toward the treeline
+          // soil/turf base, drier and greyer as it climbs toward the treeline —
+          // and MINERAL above it (see the Greater Range's alpineBare note: the
+          // old ramp stopped at "greyer soil" and left a green summit).
           c.copy(alpTurf).lerp(alpSoil, smooth01((y - 8) / 70));
+          c.lerp(alpBare, smooth01((y - 96) / 105));
           // scree/talus band: below the cliffs the ground is loose broken rock
           const scree = smooth01((bedrock - 0.42) / 0.30) * smooth01((slope - 0.07) / 0.13) *
                         (1 - smooth01((y - 150) / 90));
@@ -1127,8 +1137,18 @@
           // aspect raises it on lit faces and drops it on shaded ones, two
           // noise octaves feather the edge. faceLight was already being
           // computed here and thrown away on brightness alone.
+          // CONCAVITY: the couloirs hold snow far below the open-slope line and
+          // the ribs between them stay bare — the streak-and-spine pattern the
+          // reference photographs show, instead of a contour cap. mountainHeightAt
+          // is the SAME memoised field the mesh is displaced by (mtnGridCache), so
+          // the four extra samples are array reads and the white lands in the
+          // gullies that are actually cut here.
+          const conc = CBZ.mtnConcavity ? CBZ.mtnConcavity(mountainHeightAt, wx, wz, 14, 0.055) : 0;
+          // Same correction as the Greater Range, one scale down: 24 m put the
+          // snowline barely above the valley floor of a 260 m massif.
           const cover = CBZ.mtnSnowCover(wx - DX, wz - DZ, y, slope, faceLight, {
-            line: 24, band: 58, aspect: 40, wob: 22, shed0: 0.13, shed1: 0.50, salt: S_SNOW,
+            line: 58, band: 70, aspect: 40, wob: 22, shed0: 0.13, shed1: 0.50, salt: S_SNOW,
+            concave: conc, gully: 34, spine: 0.5, patch: 0.8, patchCell: 95,
           });
           rc.copy(snowShadow).lerp(snowLit, 0.70 + 0.27 * faceLight);
           rc.lerp(iceBlue, cold);
@@ -1167,7 +1187,7 @@
         // Most of snow's form comes from its subtly cool shadow hue. A shallow
         // value multiplier preserves its high albedo instead of turning the
         // shaded half of every peak into slate-blue terrain.
-        const shade = 0.84 + faceLight * 0.14;
+        const shade = 0.76 + faceLight * 0.28;
         colors[i * 3] = c.r * shade;
         colors[i * 3 + 1] = c.g * shade;
         colors[i * 3 + 2] = c.b * shade;
@@ -1185,6 +1205,13 @@
         polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 2,
       });
       if (CBZ.terrainFogScale) CBZ.terrainFogScale(groundMat, 0.12);
+      // Mount Mercy is the MID-ground headland, so it recedes on a much longer
+      // leash than the Greater Range behind it (start 2.4 km vs 1.4 km, less
+      // amount). That difference IS the layering: two ranges paling at
+      // different rates is what separates them in depth.
+      if (CBZ.terrainAerial) {
+        CBZ.terrainAerial(groundMat, { start: 1500, full: 6000, minY: 6, maxY: 40, amount: 0.62 });
+      }
       // unlit material — must darken with the day like the Lambert plate it
       // stands on, or it glows as a self-lit white massif at dawn/night
       if (CBZ.terrainDayTint) CBZ.terrainDayTint(groundMat);
@@ -1264,9 +1291,27 @@
       // Neutral granite then reads as geology rather than a third blue layer.
       const snow = new THREE.Color(0xf8fafb), coldSnow = new THREE.Color(0xd2dde2);
       const shadeSnow = new THREE.Color(0xbac9d0);
-      const granite = new THREE.Color(0x5f5b54), graniteDark = new THREE.Color(0x293033);
-      const alpineFoot = new THREE.Color(0x566452);
-      const screeCol = new THREE.Color(0x746e63);
+      // MEASURED AGAINST THE REFERENCE (2026-08-03). The range came back as a
+      // single khaki-white mush: 0x566452 is a grey-green that, lerped under
+      // any snow at all, lands on the same mid-olive as the granite beside it,
+      // so rock, plant and snow all collapsed into one value. A real range is
+      // THREE separated materials — dark grey-brown rock, saturated green
+      // flank, near-white snow — and the separation is the whole picture.
+      const granite = new THREE.Color(0x554e46), graniteDark = new THREE.Color(0x242a2c);
+      const alpineFoot = new THREE.Color(0x3f5a34);
+      // A single flat green over two kilometres of flank reads as paint. The
+      // reference's lower slopes are mottled — darker where the forest closes
+      // in the hollows, lighter where meadow and scrub take the open ground —
+      // so the base is a two-stop mix driven by the bedrock noise the loop was
+      // already computing and throwing away on the rock blend alone.
+      const alpineMeadow = new THREE.Color(0x58743f);
+      // ABOVE THE TREELINE NOTHING GROWS. The base colour had no altitude term
+      // at all, so a 560 m summit was painted the same green as its foot and
+      // only the slope-driven rock blend could argue otherwise — which is why
+      // the highest ground came back GREEN under the snow patches. This is the
+      // other half of vegHold: the green climbs high, and then it stops.
+      const alpineBare = new THREE.Color(0x5a5349);
+      const screeCol = new THREE.Color(0x6d6659);
       const STRATA_G = HAS_KIT && CFGS.MOUNT_STRATA_V1 !== false;
       const _mixG = { v: 0 };
       const n = new THREE.Vector3(), light = new THREE.Vector3(-0.36, 0.83, 0.43).normalize();
@@ -1287,14 +1332,29 @@
             // identical bedding params to greaterMercyMacroA's mtnTerrace call
             step: 34, dip: 52, dipCell: 1250, dipCell2: 340,
             slope0: 0.05, slope1: 0.32, salt: S_GSTRATA, aspect: 1, mixOut: _mixG,
+            // vegetated foothills: the range stands on green, not on scree
+            vegHold: 1 - smooth01((y - 40) / 120), vegSlope: 0.20,
           });
-          c.copy(alpineFoot);
+          c.copy(alpineFoot).lerp(alpineMeadow, smooth01((grain - 0.34) / 0.46));
+          c.lerp(alpineBare, smooth01((y - 155) / 190));
           const scree = smooth01((bedrock - 0.44) / 0.30) * smooth01((slope - 0.07) / 0.14) *
                         (1 - smooth01((y - 260) / 160));
           c.lerp(screeCol, scree * 0.5);
           c.lerp(rc, Math.min(0.92, bare * (0.55 + 0.45 * smooth01((bedrock - 0.36) / 0.34))));
+          // Same couloir/spine law one scale up (bigger stencil, deeper drop):
+          // this range is the far panorama, and a far range that wears a flat
+          // white cap is the single most artificial thing in the skyline.
+          const gconc = CBZ.mtnConcavity ? CBZ.mtnConcavity(greaterMercyHeightAt, wx, wz, 30, 0.05) : 0;
+          // The line was 46 m on a range whose summits stand past 400: seven
+          // eighths of every flank was already under the snow ramp, which is
+          // why the whole massif photographed as one white cardboard cutout
+          // with no geology in it at all. Lifting it to 96 puts the field on
+          // the upper THIRD, where the reference photographs put it, and the
+          // gully term then walks it back down the couloirs to ~22 m — snow
+          // running down the concavities past bare rock, which is the look.
           const cover = CBZ.mtnSnowCover(wx - DX, wz - DZ, y, slope, faceLight, {
-            line: 46, band: 130, aspect: 70, wob: 40, shed0: 0.14, shed1: 0.54, salt: S_GSNOW,
+            line: 96, band: 140, aspect: 70, wob: 40, shed0: 0.14, shed1: 0.54, salt: S_GSNOW,
+            concave: gconc, gully: 74, spine: 0.58, patch: 0.85, patchCell: 190,
           });
           rc.copy(coldSnow).lerp(snow, 0.68 + faceLight * 0.29);
           rc.lerp(shadeSnow, (1 - faceLight) * 0.22);
@@ -1318,7 +1378,10 @@
           }
           rc.copy(c); c.copy(alpineFoot).lerp(rc, smooth01((y - 4) / 30));
         }
-        const shade = 0.80 + faceLight * 0.18;
+        // Wider than the old 0.80..0.98: an 18% swing across a whole massif is
+        // not enough modelling to tell a lit face from a shaded one at 4 km,
+        // and flat light is most of what made the range read as cardboard.
+        const shade = 0.72 + faceLight * 0.32;
         colors[i * 3] = c.r * shade;
         colors[i * 3 + 1] = c.g * shade;
         colors[i * 3 + 2] = c.b * shade;
@@ -1347,6 +1410,18 @@
       // Retain the distant landmark through normal city fog, but let it gain
       // atmospheric depth instead of remaining a full-white cardboard cutout.
       if (CBZ.terrainFogScale) CBZ.terrainFogScale(rangeMat, 0.12);
+      // AERIAL PERSPECTIVE: this is THE far range — the pale, desaturated
+      // blue-white wall standing behind darker foreground headlands in the
+      // reference. Fog at 0.12 keeps it present; this is what makes it read
+      // as being kilometres away rather than as a white cutout parked on the
+      // horizon. Land gate at 6 m: its own vegetated feet stay green.
+      if (CBZ.terrainAerial) {
+        // MEASURED: on foot the city fog wall is only 760 m and this material
+        // deliberately runs it at 0.12, so at 4 km the range had spent barely
+        // half the fog ramp and still read as a solid near-object. 900→4200 m
+        // is the band that actually exists between the coast and this range.
+        CBZ.terrainAerial(rangeMat, { start: 900, full: 4200, minY: 6, maxY: 40, amount: 0.85 });
+      }
       // unlit — darken with the day in step with the lit ground (see
       // terrainDayTint: the luminance seam at the massif's foot was the tell)
       if (CBZ.terrainDayTint) CBZ.terrainDayTint(rangeMat);

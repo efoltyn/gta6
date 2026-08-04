@@ -87,6 +87,53 @@ const subjects = [
     note: "quadruped_ragdoll refuses aquatic species, so this tumble is the only thing that settles a marine body.",
     camDist: 17, camSide: 0.6, camEye: 6.0, aimUp: -0.9,
   },
+  /* ---- THE SURFACE ITSELF (owner's coastal-Alaska reference photos) -------
+     The five frames above ask "is the animal in the water". These four ask
+     "does the water look like water": deep saturated teal, a dense field of
+     fine wind ripple with directional streaky lanes, silvery sheen toward the
+     light, a pale silver-blue horizon, and a glassy calm band hugging the
+     shore. No animal is staged — the subject IS the sea, photographed from a
+     deterministic anchor with the day phase pinned so both builds get the same
+     sun. Four numbers ride along, all read off the rendered framebuffer:
+     rippleContrast (micro-detail), tealIndex (green-vs-blue in the near
+     water), horizonLift (how much paler the far sea is than the near sea) and
+     nearSaturation. */
+  {
+    id: "sea-sheen-lane",
+    kind: "seascape", scenario: "deep", look: "sun",
+    label: "Open Sea — Into the Light",
+    focus: "Two metres over open water, looking down the sun's azimuth: the reference has broad silvery sheen lanes riding a dense ripple field, brightening toward the horizon.",
+    state: "OPEN SEA · TOWARD SUN",
+    note: "Sheen is the ripple field catching the sky — not one specular dot.",
+    camEye: 2.2, aimDist: 900, aimUp: 0.35, phase: 0.20,
+  },
+  {
+    id: "sea-deep-teal",
+    kind: "seascape", scenario: "deep", look: "away",
+    label: "Open Sea — Away From the Light",
+    focus: "The same water with the sun behind the camera, where no glitter can hide the body colour. The reference is a deep, saturated TEAL — never navy, never grey-blue plastic.",
+    state: "OPEN SEA · BODY COLOUR",
+    note: "Near water reads dark and saturated; far water goes pale silver-blue.",
+    camEye: 1.7, aimDist: 700, aimUp: 0.25, phase: 0.20, searchFrom: 3400,
+  },
+  {
+    id: "shore-calm-band",
+    kind: "seascape", scenario: "shore", look: "shoreward",
+    label: "Shoreline — The Calm Band",
+    focus: "Standing 220 m off the beach, 35 m up, looking back at it: the reference has a smooth glassy strip hugging the shore before the ripple field starts, then turquoise shallows grading out into deep teal.",
+    state: "SHORE · CALM BAND",
+    note: "The shallow-reads-as-sand work (2a87e5a) must survive this frame.",
+    camEye: 35, standOff: 220, aimDist: -45, aimUp: 0.0, phase: 0.20, searchFrom: 2600,
+  },
+  {
+    id: "sea-from-height",
+    kind: "seascape", scenario: "deep", look: "sun",
+    label: "Open Sea — From 85 m",
+    focus: "The whole gradient in one frame: dark saturated water under the camera, ripple texture holding at every distance, pale silver toward the horizon. This is the frame a tiling pattern or a dead far field shows up in.",
+    state: "OPEN SEA · AERIAL",
+    note: "Detail must survive distance without tiling into a visible grid.",
+    camEye: 85, aimDist: 1500, aimUp: 0.0, phase: 0.20,
+  },
 ];
 
 async function stageMarine(input) {
@@ -157,20 +204,182 @@ async function stageMarine(input) {
   if (!wf) return { ok: false, missing: "waterField" };
 
   // ---- deterministic water anchors (fixed scan order, never Math.random) ---
-  function findWater(minShore, maxShore) {
-    for (let r = 260; r <= 7000; r += 30) {
+  function findWater(minShore, maxShore, from, oceanOnly) {
+    for (let r = Number(from) || 260; r <= 9000; r += 30) {
       for (let i = 0; i < 96; i++) {
         const ang = (i / 96) * Math.PI * 2;
         const x = Math.cos(ang) * r, z = Math.sin(ang) * r;
         const s = wf.shoreAt(x, z);
         if (!(s <= maxShore && s >= minShore)) continue;
         if (!wf.isSurfaceWater(x, z, 0)) continue;
+        // A seascape must be photographed on the SEA: the registered inland
+        // bodies render deliberately calmer and greener (WATER_LAKE_TINT), so
+        // an anchor that lands in Redhollow Lake is a different material law.
+        if (oceanOnly && CBZ.waterInlandFactorAt && CBZ.waterInlandFactorAt(x, z) > 0.02) continue;
         return { x: Number(x.toFixed(2)), z: Number(z.toFixed(2)), shore: Number(s.toFixed(2)) };
       }
     }
     return null;
   }
   const ref = input.referenceStage || null;
+
+  // ---- the overlay writer, shared by both kinds of subject ----------------
+  const label = (name, text, css) => {
+    const el = S.overlay.querySelector("[data-" + name + "]");
+    if (!el) return;
+    el.textContent = text;
+    el.style.cssText = css;
+  };
+  const sideBadge = (before) => {
+    label("side", before ? input.beforeLabel : input.afterLabel,
+      `position:absolute;top:22px;left:26px;padding:7px 11px;border-radius:7px;background:${before ? "#c94c4c" : "#218b60"};font-size:12px;font-weight:900;letter-spacing:.12em`);
+  };
+
+  /* ==== SEASCAPE: no animal, the water IS the subject ====================
+     The camera is placed from the live surface height at a deterministic
+     anchor, the day phase is pinned so both builds share a sun, and four
+     numbers are read straight off the rendered framebuffer. Screen rows for
+     the "near" and "far" samples are PROJECTED from real world points on the
+     sea plane through the live camera, so the bands mean the same distance in
+     both builds however the framing lands. */
+  if (subject.kind === "seascape") {
+    const anchor = (ref && ref.anchor) || (subject.scenario === "shore"
+      ? findWater(-30, -12, subject.searchFrom, true)
+      : findWater(-6000, -2400, subject.searchFrom, true));
+    if (!anchor) return { ok: false, err: "no " + subject.scenario + " water found" };
+
+    // Pin the clock: a seascape is a lighting shot, and subject order must not
+    // decide the sun. Six ticks let daynight/sky/water uniforms re-derive.
+    if (typeof CBZ.dayPhase === "function") CBZ.dayPhase(Number(subject.phase) || 0.20);
+    for (let i = 0; i < 6; i++) { CBZ.hitstop = 0; CBZ.slowmo = 0; CBZ.stepSim(1 / 60); }
+
+    const surf = CBZ.citySeaHeightAt(anchor.x, anchor.z);
+    // View azimuth: toward or away from the REAL sun, or straight out to sea.
+    let vx = 1, vz = 0;
+    if (subject.look === "seaward" || subject.look === "shoreward") {
+      const g = wf.shoreGradient ? wf.shoreGradient(anchor.x, anchor.z, 10, {}) : { x: 1, z: 0 };
+      const m = Math.hypot(g.x || 1, g.z || 0) || 1;
+      vx = -(g.x || 1) / m; vz = -(g.z || 0) / m;          // gradient points landward
+      if (subject.look === "shoreward") { vx = -vx; vz = -vz; }
+    } else {
+      const sd = new T.Vector3(1, 1, 0);
+      if (CBZ.sun && CBZ.sunTarget) sd.copy(CBZ.sun.position).sub(CBZ.sunTarget.position);
+      const m = Math.hypot(sd.x, sd.z) || 1;
+      vx = sd.x / m; vz = sd.z / m;
+      if (subject.look === "away") { vx = -vx; vz = -vz; }
+    }
+    const eye = Number(subject.camEye) || 2;
+    const aimD = Number(subject.aimDist) || 800;
+    let camPos, camAim;
+    if (ref && ref.camera) { camPos = ref.camera.position.slice(); camAim = ref.camera.target.slice(); }
+    else if (subject.look === "seaward" || subject.look === "shoreward") {
+      // stand OFF the anchor along the view axis and look back down it, so the
+      // shore, the calm band, the shallow ramp and the open sea are all in one
+      // frame in that order
+      const off = Number(subject.standOff) || 30;
+      camPos = [anchor.x - vx * off, surf + eye, anchor.z - vz * off];
+      camAim = [anchor.x + vx * aimD, surf + (Number(subject.aimUp) || 0.4), anchor.z + vz * aimD];
+    } else {
+      camPos = [anchor.x, surf + eye, anchor.z];
+      camAim = [anchor.x + vx * aimD, surf + (Number(subject.aimUp) || 0.3), anchor.z + vz * aimD];
+    }
+
+    const camera = CBZ.camera;
+    camera.aspect = input.width / input.height;
+    camera.fov = 52; camera.near = 0.12; camera.far = 24000;
+    camera.position.set(camPos[0], camPos[1], camPos[2]);
+    camera.lookAt(camAim[0], camAim[1], camAim[2]);
+    camera.updateProjectionMatrix();
+    if (CBZ.player && CBZ.player.pos) {
+      // park the player under the camera so LOD/mirror passes centre here
+      CBZ.player.pos.x = camPos[0]; CBZ.player.pos.z = camPos[2]; CBZ.player.pos.y = surf + 0.4;
+    }
+    if (typeof CBZ.skySync === "function") CBZ.skySync();
+    hideHud();
+    CBZ.renderer.render(CBZ.scene, camera);
+
+    // ---- read the frame ---------------------------------------------------
+    // Same task as the render, so the WebGL drawing buffer is still live.
+    const canvas = CBZ.renderer.domElement;
+    const RW = 256, RH = Math.max(8, Math.round(RW * canvas.height / canvas.width));
+    const c2 = document.createElement("canvas");
+    c2.width = RW; c2.height = RH;
+    const ctx = c2.getContext("2d");
+    ctx.drawImage(canvas, 0, 0, RW, RH);
+    const px = ctx.getImageData(0, 0, RW, RH).data;
+    const _p = new T.Vector3();
+    const rowOf = (dist) => {
+      _p.set(camPos[0] + vx * dist, surf, camPos[2] + vz * dist).project(camera);
+      return Math.max(0, Math.min(RH - 1, Math.round((1 - (_p.y * 0.5 + 0.5)) * RH)));
+    };
+    const lum = (i) => 0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2];
+    const bandStats = (r0, r1) => {
+      r0 = Math.max(0, Math.min(RH - 1, r0)); r1 = Math.max(0, Math.min(RH - 1, r1));
+      if (r1 < r0) { const t2 = r0; r0 = r1; r1 = t2; }
+      let n = 0, L = 0, sat = 0, gb = 0, R = 0, G = 0, B = 0;
+      for (let y = r0; y <= r1; y++) {
+        for (let x = 0; x < RW; x++) {
+          const i = (y * RW + x) * 4;
+          const r = px[i], g = px[i + 1], b = px[i + 2];
+          const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+          L += lum(i); sat += mx > 0 ? (mx - mn) / mx : 0; gb += (g - b) / (g + b + 8);
+          R += r; G += g; B += b;
+          n++;
+        }
+      }
+      return n ? { lum: L / n, sat: (sat / n) * 100, gb: (gb / n) * 100, rows: [r0, r1],
+        rgb: Math.round(R / n) + "," + Math.round(G / n) + "," + Math.round(B / n) } : null;
+    };
+    const nearRow = rowOf(Math.max(12, eye * 3)), farRow = rowOf(2600);
+    // The SKY, sampled well above the horizon: the reference's whole point is
+    // that the sea is much darker than the sky it reflects, and "how white did
+    // the ocean go" is exactly the gap between those two numbers.
+    const skyBand = bandStats(Math.max(0, farRow - 60), Math.max(2, farRow - 30)) || { lum: 0 };
+    const near = bandStats(nearRow - 3, nearRow + 3) || { lum: 0, sat: 0, gb: 0, rgb: "-" };
+    const far = bandStats(farRow - 2, farRow + 2) || { lum: 0, sat: 0, gb: 0 };
+    // Micro-detail, measured where micro-detail belongs: the mean absolute
+    // luminance step between horizontally adjacent pixels in the NEAR band.
+    // Measured over the whole water body it is not a texture reading at all —
+    // a marbled sheet of reflected cloud scores higher than a real ripple
+    // field — so it is deliberately confined to water the camera can resolve.
+    let steps = 0, stepN = 0;
+    for (let y = Math.max(0, nearRow - 14); y < Math.min(RH, nearRow + 15); y++) {
+      for (let x = 0; x < RW - 1; x++) {
+        const i = (y * RW + x) * 4;
+        steps += Math.abs(lum(i + 4) - lum(i)); stepN++;
+      }
+    }
+
+    sideBadge(input.side === "before");
+    label("name", subject.label, "position:absolute;top:64px;left:26px;font-size:26px;font-weight:800;letter-spacing:-.02em");
+    label("focus", subject.focus, "position:absolute;top:100px;left:28px;color:#c3d4de;font-size:13px;font-weight:550;max-width:730px;line-height:1.35");
+    label("state", subject.state, `position:absolute;right:26px;top:25px;color:${input.side === "before" ? "#ffb0b0" : "#7ff0bb"};font-size:11px;font-weight:900;letter-spacing:.1em`);
+    const seaMode = (CBZ.citySea && CBZ.citySea.material && CBZ.citySea.material.userData &&
+      CBZ.citySea.material.userData.waterMode) || (CBZ.citySea && CBZ.citySea.name) || "?";
+    label("read",
+      `ripple ${(stepN ? steps / stepN : 0).toFixed(2)} · teal ${near.gb.toFixed(1)} · lift ${(far.lum - near.lum).toFixed(1)} · skyGap ${(skyBand.lum - near.lum).toFixed(1)}` +
+      `\nnear rgb ${near.rgb} · ${seaMode}`,
+      "position:absolute;right:26px;top:52px;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:#9fe8c3;white-space:pre;text-align:right");
+    label("note", subject.note, "position:absolute;right:26px;bottom:20px;padding:7px 10px;border-radius:6px;background:rgba(3,18,28,.72);color:#bfe9ff;font:11px ui-monospace,SFMono-Regular,Menlo,monospace;max-width:520px");
+    label("source", new URL(input.sourceUrl).host + new URL(input.sourceUrl).pathname,
+      "position:absolute;bottom:20px;left:26px;color:#9cb0bf;font:11px ui-monospace,SFMono-Regular,Menlo,monospace");
+
+    return {
+      ok: true,
+      kind: "seascape",
+      anchor,
+      shore: anchor.shore,
+      camera: { position: camPos.slice(), target: camAim.slice() },
+      bands: { nearRow, farRow, height: RH },
+      metrics: {
+        rippleContrast: Number((stepN ? steps / stepN : 0).toFixed(3)),
+        tealIndex: Number(near.gb.toFixed(2)),
+        horizonLift: Number((far.lum - near.lum).toFixed(2)),
+        skyGap: Number((skyBand.lum - near.lum).toFixed(2)),
+      },
+    };
+  }
+
   const anchor = (ref && ref.anchor) || (subject.scenario === "shallow"
     ? findWater(-18, -10)
     : findWater(-4000, -600));
@@ -359,6 +568,10 @@ export default {
     aboveWaterM: { label: "Model origin above the live surface", unit: "m", better: "lower" },
     bellyAboveWaterM: { label: "Lowest point of the body above the surface", unit: "m", better: "lower" },
     surfaceFins: { label: "Separate dorsals cutting the surface", unit: "", better: "lower" },
+    rippleContrast: { label: "Micro-detail in the near band — mean luminance step between adjacent pixels", unit: "/255", better: "higher" },
+    tealIndex: { label: "Near-water green-vs-blue balance (teal, not navy)", unit: "%", better: "higher" },
+    horizonLift: { label: "Far water brighter than near water (aerial silvering)", unit: "/255", better: "higher" },
+    skyGap: { label: "Sky brighter than the near sea (the sea must not be a mirror)", unit: "/255", better: "higher" },
   },
   metricsNote: "Negative metres mean the body is under the water, which is the whole point. One dorsal at the surface is correct; two is the owner's \"another fin above the fin\".",
   subjects,

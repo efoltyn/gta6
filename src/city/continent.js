@@ -1816,7 +1816,46 @@
       });
     })();
 
-    // ---- dressing: sparse trees + rocks, instanced (3 draw calls) ---------
+    // ---- dressing: trees + rocks, instanced -------------------------------
+    // THE CANOPY CARPET (world/forestlook.js). OWNER REFERENCE, coastal
+    // Alaska: a wood is a continuous roof on the valley floors and lower
+    // slopes — the terrain reads as bumps in the canopy, never as gaps
+    // between lollipops — and it ENDS gradually, through broken clumps and
+    // fingers up the gullies into scrub and then meadow. What stood here was
+    // one tree per 46 m cell at a flat 34% chance: 10,083 stems over 190 km²,
+    // i.e. 53 trees per square kilometre. That is not a thin forest, it is
+    // parkland, and no amount of crown detail fixes a stem count that low.
+    //
+    // The cell grid is KEPT (it is what makes the expensive per-cell gates —
+    // insideAnything over ~98 regions, the shore field, the authored-surface
+    // carve — affordable at country scale); what changes is that a cell now
+    // carries a CLUSTER whose size is the block's canopy closure, so density
+    // varies continuously with stand mask, altitude, slope and gully instead
+    // of being one constant. Everything remains hash01-driven: no sequential
+    // stream exists here, so adding or removing a stem re-deals nothing.
+    const FLOOK = CBZ.forestLook;
+    // CARPET implies the whole scenery-scale stack (the kit's metre-authored
+    // archetypes, TREES_V2's seating law and FOREST_V2's ecology), because it
+    // reads VKIT.nominal for its heights and registers every stem with
+    // world/treeaudit.js. Any one of those flags off = the previous world,
+    // which is what makes each of them a real one-line revert.
+    const CARPET = !!(FLOOK && CFG.FOREST_LOOK !== false && CFG.FOREST_CANOPY_CARPET !== false &&
+      CBZ.vegetationKit && CFG.SCENERY_VEGETATION !== false &&
+      CFG.CONTINENT_FOREST_V2 !== false && CFG.TREES_V2 !== false && CBZ.treeRegisterTree);
+    // The relief ceiling this builder can actually produce, MEASURED (a 64x64
+    // scan of its own height function), never a typed metre constant — the
+    // altitude gradient is expressed as a fraction of it, so terrain work
+    // that raises the country thins the wood in the same PLACES rather than
+    // at the same height. Deterministic: a fixed grid over fixed bounds.
+    let reliefTop = 0;
+    if (CARPET) {
+      for (let i = 0; i <= 64; i++) {
+        for (let j = 0; j <= 64; j++) {
+          const y = reliefAt(minX + (maxX - minX) * (i / 64), minZ + (maxZ - minZ) * (j / 64));
+          if (Number.isFinite(y) && y > reliefTop) reliefTop = y;
+        }
+      }
+    }
     const CELL = 46;
     const spots = [];
     for (let gx = minX + CELL / 2; gx < maxX; gx += CELL) {
@@ -1833,7 +1872,17 @@
           else if (coverHit.biome === "farmland") density -= 0.11 * coverHit.weight;
           else if (coverHit.biome === "desert") density -= 0.22 * coverHit.weight;
         }
-        if (h > Math.max(0.08, Math.min(0.84, density))) continue;
+        // A STAND IS A PLACE, NOT A PROBABILITY. The cell-accept chance now
+        // carries the low-frequency stand mask, so cells inside a wood almost
+        // all survive to plant a cluster and cells in a meadow mostly do not.
+        // It can only ever ADD cells (Math.max), which is what keeps the
+        // rock/no-rock decision below and the sparse fallback intact.
+        const bareOk = h <= Math.max(0.08, Math.min(0.84, density));
+        if (CARPET) {
+          const stand = FLOOK.noise(gx, gz, 760, 4441);
+          density = Math.max(density, 0.30 + 0.66 * stand * stand);
+        }
+        if (h > Math.max(0.08, Math.min(CARPET ? 0.97 : 0.84, density))) continue;
         const jx = gx + ((CBZ.hash01 ? CBZ.hash01(gx, gz, 8804) : 0.5) - 0.5) * CELL * 0.8;
         const jz = gz + ((CBZ.hash01 ? CBZ.hash01(gx, gz, 8805) : 0.5) - 0.5) * CELL * 0.8;
         if (insideAnything(jx, jz, 14)) continue;            // never dress a place
@@ -1850,7 +1899,7 @@
         // clearing mask. All hash01/noise2, so adding these gates shifts NO
         // other placement (nothing rides a sequential rng stream). Steep ground
         // is kept but flagged so the build turns it into scree, not trees.
-        let steep = false;
+        let steep = false, closure = 0, storey = "canopy", grad = null;
         if (CFG.CONTINENT_FOREST_V2 !== false) {
           const reliefY = reliefAt(jx, jz);
           const e = 4;                                        // slope: 2-tap finite diff of the SAME height fn the prop sits on
@@ -1858,13 +1907,38 @@
           const szg = reliefAt(jx, jz + e) - reliefAt(jx, jz - e);
           const slope = Math.sqrt(sxg * sxg + szg * szg) / (2 * e);   // rise/run
           steep = slope > 0.85;                               // ridge faces -> rock, not tree
-          const treeline = smooth01((22 - reliefY) / 7);      // canopy thins out on the high ridges
-          const clearing = noise2(jx, jz, 240, 8815);         // low-freq meadow/clearing field
-          const keep = steep ? 0.55 : treeline * smooth01((clearing - 0.30) / 0.22);
-          const die = CBZ.hash01 ? CBZ.hash01(jx, jz, 8816) : 0.5;
-          if (die > 0.05 + keep * 0.9) continue;              // clearing / treeline reject
+          if (CARPET) {
+            // CURVATURE, at gully scale (18 m) and normalised by the relief
+            // ceiling so it means the same thing in flat country and in
+            // mountains: negative in a concave draw, positive on a convex
+            // ridge. This is the term that sends the wood UP the gullies
+            // after the open slope beside it has already given out.
+            const q = 18;
+            const avg4 = (reliefAt(jx + q, jz) + reliefAt(jx - q, jz) +
+              reliefAt(jx, jz + q) + reliefAt(jx, jz - q)) * 0.25;
+            const curv = (reliefY - avg4) / Math.max(0.5, 0.05 * reliefTop);
+            closure = FLOOK.closure(jx, jz, {
+              relief: reliefY, top: reliefTop, slope: slope, curv: curv,
+              cover: coverHit && coverHit.biome, weight: coverHit && coverHit.weight,
+              site: "continent",
+            });
+            storey = FLOOK.storey(jx, jz, closure);
+            if (storey === "none") continue;                  // open meadow
+            grad = { gx: sxg / (2 * e), gz: szg / (2 * e), alt: reliefTop > 1 ? reliefY / reliefTop : 0 };
+          } else {
+            const treeline = smooth01((22 - reliefY) / 7);    // canopy thins out on the high ridges
+            const clearing = noise2(jx, jz, 240, 8815);       // low-freq meadow/clearing field
+            const keep = steep ? 0.55 : treeline * smooth01((clearing - 0.30) / 0.22);
+            const die = CBZ.hash01 ? CBZ.hash01(jx, jz, 8816) : 0.5;
+            if (die > 0.05 + keep * 0.9) continue;            // clearing / treeline reject
+          }
         }
-        spots.push({ x: jx, z: jz, h, cover: coverHit, steep: steep });
+        // `bareOk` is what keeps the STONE scatter exactly where it was: the
+        // stand mask may only ever add cells, and a cell that exists only
+        // because a wood grows there must not also deal a field stone into
+        // country that never had one (that is 7k pebbles and ~0.7M triangles
+        // of pure noise, and the owner asked for FEWER geometric rocks).
+        spots.push({ x: jx, z: jz, h, cover: coverHit, steep: steep, c: closure, storey: storey, grad: grad, bare: bareOk });
       }
     }
     if (spots.length) {
@@ -1941,8 +2015,62 @@
         g.computeBoundingSphere();
         return g;
       }
-      const nTree = spots.filter(isTreeSpot).length;
-      const nRock = Math.max(1, spots.length - nTree);
+      // ---- THE CLUSTER PASS -------------------------------------------
+      // One cell no longer means one tree. Closure (world/forestlook.js)
+      // says how much of the sky this ground closes; the cell then carries
+      // that many stems, the species mask splits them into broadleaf sweeps
+      // and conifer stands, and a roof of trunkless crowns fills what the
+      // stems cannot. Counting first is not optional: an InstancedMesh takes
+      // its capacity at construction.
+      // Mean drawn crown radius, metres — the kit's 8.9 m landscape crown
+      // under this file's own 1.28 spread multiplier at mean scale. It is
+      // read straight out of the geometry rather than typed twice, because
+      // the stem pitch below is DERIVED from it: crowns touch when the
+      // spacing is ~1.5 r, so a wider crown must buy fewer stems, not more.
+      const CROWN_R = 12.6;
+      const stemList = [], domeList = [], scrubList = [];
+      if (CARPET) {
+        for (const s of spots) {
+          if (s.storey === "scrub") {
+            if (!s.steep) scrubList.push(s);
+            continue;
+          }
+          if (!isTreeSpot(s)) continue;
+          const c = s.c;
+          let n = FLOOK.stems(s.x, s.z, c, CELL, CROWN_R, 8830);
+          if (n < 1) n = 1;                // an accepted cell always keeps its tree
+          if (n > 5) n = 5;                // a cell is 46 m: five mature crowns already touch,
+                                           // and every stem past that is a collider and an audit
+                                           // chain buying canopy the ROOF buys for 20 triangles
+          const alt = s.grad ? s.grad.alt : 0;
+          for (let k = 0; k < n; k++) {
+            // deterministic in-cell offset; k enters through the position so
+            // there is no counter and no stream to keep in step.
+            const px = k === 0 ? s.x : s.x + ((CBZ.hash01 ? CBZ.hash01(s.x + k * 97.3, s.z - k * 61.7, 8831) : 0.5) - 0.5) * CELL * 0.94;
+            const pz = k === 0 ? s.z : s.z + ((CBZ.hash01 ? CBZ.hash01(s.x - k * 71.9, s.z + k * 53.1, 8832) : 0.5) - 0.5) * CELL * 0.94;
+            const sp = FLOOK.species(px, pz, { alt: alt, site: "continent" });
+            stemList.push({ x: px, z: pz, conifer: sp.conifer, c: c, grad: s.grad });
+          }
+          // THE ROOF. Trunkless crowns riding at canopy height, only where the
+          // wood is genuinely closed (c > 0.42) — they are what removes the
+          // ground between crowns from an aerial view, and they cost 20
+          // triangles, no collider and no support chain.
+          if (c > 0.26) {
+            const m = Math.min(8, FLOOK.stems(s.x + 11.3, s.z - 7.1, (c - 0.26) / 0.74, CELL, CROWN_R * 0.90, 8833));
+            for (let k = 0; k < m; k++) {
+              domeList.push({
+                x: s.x + ((CBZ.hash01 ? CBZ.hash01(s.x + k * 41.7, s.z + k * 29.3, 8834) : 0.5) - 0.5) * CELL,
+                z: s.z + ((CBZ.hash01 ? CBZ.hash01(s.x - k * 33.1, s.z - k * 47.9, 8835) : 0.5) - 0.5) * CELL,
+                c: c, grad: s.grad,
+              });
+            }
+          }
+        }
+      }
+      const nTree = CARPET ? stemList.length : spots.filter(isTreeSpot).length;
+      const nRock = Math.max(1, CARPET
+        ? spots.filter(function (s) { return s.bare && s.storey !== "scrub" && !isTreeSpot(s); }).length
+        : spots.length - nTree);
       // Backcountry is the kit's landscape consumer: same metre-authored scale
       // and irregular mass as Redhollow, but the lighter landscape archetypes
       // avoid multiplying close-detail roots/limbs across ~10k far cells.
@@ -1984,17 +2112,63 @@
         ? { color: 0xffffff, vertexColors: true, flatShading: true }
         : { color: 0x3f7a3f });
       const rockMat = new THREE.MeshLambertMaterial(V2 ? { color: 0xffffff, flatShading: true } : { color: 0x8b8f96 });
-      const trunks = new THREE.InstancedMesh(trunkG, trunkMat, Math.max(1, nTree));
-      const canopies = new THREE.InstancedMesh(canopyG, canopyMat, Math.max(1, nTree));
+      const trunks = new THREE.InstancedMesh(trunkG, trunkMat, Math.max(1, CARPET ? 1 : nTree));
+      const canopies = new THREE.InstancedMesh(canopyG, canopyMat, Math.max(1, CARPET ? 1 : nTree));
       const rocks = new THREE.InstancedMesh(rockG, rockMat, nRock);
       trunks.name = "backcountry-tree-trunks";
       canopies.name = "backcountry-tree-canopies";
       rocks.name = "backcountry-rocks";
-      const tCol = V2 ? new Float32Array(Math.max(1, nTree) * 3) : null;
-      const cCol = V2 ? new Float32Array(Math.max(1, nTree) * 3) : null;
+      const tCol = V2 && !CARPET ? new Float32Array(Math.max(1, nTree) * 3) : null;
+      const cCol = V2 && !CARPET ? new Float32Array(Math.max(1, nTree) * 3) : null;
       const rCol = V2 ? new Float32Array(nRock * 3) : null;
       const tbb = TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(trunkG) : null;
       const cbb = TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(canopyG) : null;
+      const spireG = CARPET && VKIT ? VKIT.geometry("conifer-spire") : null;
+      const domeG = CARPET && VKIT ? VKIT.geometry("canopy-dome") : null;
+      const scrubG = CARPET && VKIT ? VKIT.geometry("krummholz") : null;
+      const sbb = spireG && TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(spireG) : null;
+
+      /* ---- THE DRAWN SET IS A DISC, NOT A COUNTRY ----------------------
+         The whole reason a canopy this dense is affordable. One InstancedMesh
+         spanning 14.5 x 13 km cannot be frustum-culled by r128 (the test is a
+         bounding sphere off the GEOMETRY, so an InstancedMesh either draws
+         every instance or none — which is why every scatter in this file is
+         `frustumCulled = false`), and the camera's far plane is ~2.2 km. So a
+         country-wide forest was paying vertex cost for ~190 km² of trees to
+         render the ~15 km² anyone can see.
+
+         The forest is therefore built as a grid of 1.2 km CHUNKS, each with
+         its own meshes, and a throttled updater shows only the chunks within
+         reach of the camera. Cost of the split: a handful of extra draw calls
+         for the chunks actually on screen (this frame already issues
+         thousands); saving: ~90% of the instances never enter a vertex
+         shader. The chunk is deliberately bigger than the fade distance so a
+         chunk switching on is always already behind fog.
+
+         Determinism is untouched — chunking only decides WHICH mesh an
+         instance lands in, never whether it exists.                        */
+      const CHUNK = 1600;
+      const chunkMap = new Map();
+      function chunkAt(x, z) {
+        const kx = Math.floor(x / CHUNK), kz = Math.floor(z / CHUNK);
+        const key = kx + "|" + kz;
+        let c = chunkMap.get(key);
+        if (!c) {
+          c = { cx: (kx + 0.5) * CHUNK, cz: (kz + 0.5) * CHUNK, stems: [], domes: [], scrub: [], meshes: [] };
+          chunkMap.set(key, c);
+        }
+        return c;
+      }
+      let nCone = 0, nBroad = 0;
+      if (CARPET) {
+        for (let i = 0; i < stemList.length; i++) {
+          const st = stemList[i];
+          chunkAt(st.x, st.z).stems.push(st);
+          if (st.conifer) nCone++; else nBroad++;
+        }
+        for (let i = 0; i < domeList.length; i++) chunkAt(domeList[i].x, domeList[i].z).domes.push(domeList[i]);
+        for (let i = 0; i < scrubList.length; i++) chunkAt(scrubList[i].x, scrubList[i].z).scrub.push(scrubList[i]);
+      }
       // ---- SOLIDITY: a tree you can DRIVE THROUGH is the worst decoy an open
       // world can ship, and until now every one of these trunks and every one
       // of these boulders was pure silhouette. They stand on ground THIS FILE
@@ -2031,7 +2205,236 @@
         COLS.push(rec);
       }
       let ti = 0, ri = 0, solids = 0;
+
+      /* ---- ONE STEM, PLANTED -------------------------------------------
+         The two species share this whole body — seating, collider, audit
+         chain, bark — and differ in four numbers: how narrow the bole is,
+         which crown mesh it wears, how far down the bole that crown starts
+         and how far above the broadleaf roof its tip lands. A spruce is not
+         a different object, it is a different SHAPE of the same object, and
+         writing it as a second placement loop is how a codebase ends up with
+         two forests that disagree about the ground.                       */
+      function plantStem(st, C) {
+        const px = st.x, pz = st.z, conifer = !!st.conifer;
+        const gy = reliefAt(px, pz);
+        const hs = CBZ.hash01 ? CBZ.hash01(px, pz, 8808) : 0.5;
+        const rot = (CBZ.hash01 ? CBZ.hash01(px, pz, 8807) : 0.3) * Math.PI * 2;
+        const sc = 0.68 + hs * hs * 0.66;
+        const narrow = conifer ? 0.74 : 1;              // spruce bole reads thin
+        // A COASTAL WOOD IS NOT A SAVANNA. The kit's landscape archetype is
+        // a 20 m bole carrying its crown from 13 m up — emergent-rainforest
+        // proportions, and from the air that reads as a field of poles with
+        // green lids, which is exactly what the reference is not. The bole is
+        // shortened to ~72% and the crown dropped to 6.4 m so the canopy
+        // starts at a third of the tree's height, the way an alder or a
+        // spruce actually carries foliage.
+        const BOLE = 0.72;
+        const trunkH = VKIT.nominal.matureWoodHeight * sc * BOLE;
+        const trunkTop = gy + trunkH - 0.06;
+        // SEATED: base below the LOWEST sample under the footprint (the
+        // TREES_V2 law) — unchanged, and it is why a cluster on a slope has
+        // no floating stems.
+        const gu = CBZ.treeGroundUnder(reliefAt, px, pz, Math.max(0.82 * sc * narrow, 0.6));
+        const seatRef = Math.min(gy, gu.min);
+        const seatY = seatRef - 0.25;
+        dummy.position.set(px, seatY, pz);
+        dummy.rotation.set(0, rot, 0);
+        dummy.scale.set(sc * narrow, sc * BOLE, sc * narrow);
+        dummy.updateMatrix(); C.trunks.setMatrixAt(C.ti, dummy.matrix);
+        const trunkR = 0.76 * sc * narrow;
+        solidAt(px, pz, trunkR, trunkR, 0, C.trunks, seatY, trunkTop);
+        solids++;
+        let parts = null;
+        if (tbb) {
+          parts = [];
+          CBZ.treeAabbPush(parts, dummy.matrix, tbb.min.x, tbb.min.y, tbb.min.z, tbb.max.x, tbb.max.y, tbb.max.z);
+        }
+        const crownJ = CBZ.hash01 ? CBZ.hash01(px, pz, 8809) : 0.5;
+        const alt = st.grad ? st.grad.alt : 0;
+        let bb = cbb, idx;
+        if (conifer && C.spires) {
+          // The spire carries its foliage down the bole and its tip 30-45%
+          // above the broadleaf roof — that overshoot IS the reference's
+          // skyline, so it is derived from the same sc the roof uses rather
+          // than typed as a separate height.
+          const sy = sc * (0.86 + crownJ * 0.20);
+          const base = gy + 2.6 * sc;
+          dummy.position.set(px, base, pz);
+          dummy.rotation.set(0, rot, 0);
+          dummy.scale.set(sc * (0.92 + crownJ * 0.34), sy, sc * (0.92 + crownJ * 0.34));
+          dummy.updateMatrix(); C.spires.setMatrixAt(C.ci, dummy.matrix);
+          bb = sbb; idx = C.ci;
+        } else {
+          const cr = sc * (1.14 + crownJ * 0.28);
+          const ch = sc * (0.86 + hs * 0.20);
+          dummy.position.set(px, gy + 6.4 * sc, pz);
+          dummy.rotation.set(0, rot, 0);
+          dummy.scale.set(cr, ch, cr);
+          dummy.updateMatrix(); C.canopies.setMatrixAt(C.bi, dummy.matrix);
+          bb = cbb; idx = C.bi;
+        }
+        if (parts && bb) {
+          CBZ.treeAabbPush(parts, dummy.matrix, bb.min.x, bb.min.y, bb.min.z, bb.max.x, bb.max.y, bb.max.z);
+          CBZ.treeRegisterTree("continent", seatRef, parts);
+        }
+        // COLOUR — the block owns the whole ramp now (see world/forestlook.js).
+        const topt = {
+          conifer: conifer, alt: alt, closure: st.c, site: "continent",
+          gx: st.grad ? st.grad.gx : null, gz: st.grad ? st.grad.gz : null,
+        };
+        FLOOK.tint(col, px, pz, topt);
+        const dst = conifer && C.spires ? C.sCol : C.cCol;
+        dst[idx * 3] = col.r; dst[idx * 3 + 1] = col.g; dst[idx * 3 + 2] = col.b;
+        FLOOK.bark(col, px, pz, topt);
+        C.tCol[C.ti * 3] = col.r; C.tCol[C.ti * 3 + 1] = col.g; C.tCol[C.ti * 3 + 2] = col.b;
+        if (conifer && C.spires) C.ci++; else C.bi++;
+        C.ti++;
+      }
+
+      // A crown with no tree under it, riding at the height the real crowns
+      // around it ride at. No collider, no audit chain, no trunk — see the
+      // canopy-dome note in world/vegetation.js.
+      function plantDome(dm, i, C) {
+        const gy = reliefAt(dm.x, dm.z);
+        const hs = CBZ.hash01 ? CBZ.hash01(dm.x, dm.z, 8836) : 0.5;
+        const rot = (CBZ.hash01 ? CBZ.hash01(dm.x, dm.z, 8837) : 0.5) * Math.PI * 2;
+        const ds = 0.85 + hs * 0.80;
+        dummy.position.set(dm.x, gy + 7.0 + hs * 7.0, dm.z);
+        dummy.rotation.set(0, rot, 0);
+        dummy.scale.set(ds, ds * (0.80 + hs * 0.40), ds);
+        dummy.updateMatrix(); C.domes.setMatrixAt(i, dummy.matrix);
+        FLOOK.tint(col, dm.x, dm.z, {
+          conifer: false, alt: dm.grad ? dm.grad.alt : 0, closure: dm.c, site: "continent",
+          gx: dm.grad ? dm.grad.gx : null, gz: dm.grad ? dm.grad.gz : null,
+        });
+        C.dCol[i * 3] = col.r; C.dCol[i * 3 + 1] = col.g; C.dCol[i * 3 + 2] = col.b;
+      }
+
+      // KRUMMHOLZ — the scrub band that turns a treeline into a gradient.
+      // Under physics.js's 0.45 STEP_UP is not the point here (it is waist
+      // high); it gets no collider because a shrub is something you push
+      // through, and a wall of AABBs on an alpine slope is a snag field.
+      function plantScrub(s, i, C) {
+        const gy = reliefAt(s.x, s.z);
+        const hs = CBZ.hash01 ? CBZ.hash01(s.x, s.z, 8838) : 0.5;
+        const rot = (CBZ.hash01 ? CBZ.hash01(s.x, s.z, 8839) : 0.5) * Math.PI * 2;
+        const ks = 0.65 + hs * 1.05;
+        dummy.position.set(s.x, gy - 0.15, s.z);
+        dummy.rotation.set(0, rot, 0);
+        dummy.scale.set(ks, ks * (0.7 + hs * 0.5), ks);
+        dummy.updateMatrix(); C.scrubs.setMatrixAt(i, dummy.matrix);
+        FLOOK.tint(col, s.x, s.z, {
+          conifer: hs < 0.55, alt: s.grad ? s.grad.alt : 1, closure: 0.1, site: "continent",
+          gx: s.grad ? s.grad.gx : null, gz: s.grad ? s.grad.gz : null,
+        });
+        C.kCol[i * 3] = col.r; C.kCol[i * 3 + 1] = col.g; C.kCol[i * 3 + 2] = col.b;
+      }
+
+      // ---- build one chunk's worth of forest ---------------------------
+      const forestChunks = [];
+      let forestMeshes = 0;
+      if (CARPET) {
+        chunkMap.forEach(function (ch) {
+          const nT = ch.stems.length;
+          if (!nT && !ch.domes.length && !ch.scrub.length) return;
+          let cone = 0;
+          for (let i = 0; i < nT; i++) if (ch.stems[i].conifer) cone++;
+          const broad = nT - cone;
+          const C = { ti: 0, bi: 0, ci: 0 };
+          if (nT) {
+            C.trunks = new THREE.InstancedMesh(trunkG, trunkMat, nT);
+            C.tCol = new Float32Array(nT * 3);
+            C.trunks.name = "backcountry-tree-trunks";
+            C.trunks.userData.forestColors = C.tCol;
+            ch.meshes.push(C.trunks);
+          }
+          if (broad) {
+            C.canopies = new THREE.InstancedMesh(canopyG, canopyMat, broad);
+            C.cCol = new Float32Array(broad * 3);
+            C.canopies.name = "backcountry-tree-canopies";
+            C.canopies.userData.forestColors = C.cCol;
+            ch.meshes.push(C.canopies);
+          }
+          if (cone && spireG) {
+            C.spires = new THREE.InstancedMesh(spireG, canopyMat, cone);
+            C.sCol = new Float32Array(cone * 3);
+            C.spires.name = "backcountry-conifer-spires";
+            C.spires.userData.forestColors = C.sCol;
+            ch.meshes.push(C.spires);
+          }
+          if (ch.domes.length && domeG) {
+            C.domes = new THREE.InstancedMesh(domeG, canopyMat, ch.domes.length);
+            C.dCol = new Float32Array(ch.domes.length * 3);
+            C.domes.name = "backcountry-canopy-roof";
+            C.domes.userData.forestColors = C.dCol;
+            ch.meshes.push(C.domes);
+          }
+          if (ch.scrub.length && scrubG) {
+            C.scrubs = new THREE.InstancedMesh(scrubG, canopyMat, ch.scrub.length);
+            C.kCol = new Float32Array(ch.scrub.length * 3);
+            C.scrubs.name = "backcountry-krummholz";
+            C.scrubs.userData.forestColors = C.kCol;
+            ch.meshes.push(C.scrubs);
+          }
+          for (let i = 0; i < nT; i++) plantStem(ch.stems[i], C);
+          if (C.domes) for (let i = 0; i < ch.domes.length; i++) plantDome(ch.domes[i], i, C);
+          if (C.scrubs) for (let i = 0; i < ch.scrub.length; i++) plantScrub(ch.scrub[i], i, C);
+          for (let i = 0; i < ch.meshes.length; i++) {
+            const m = ch.meshes[i];
+            // The colour buffer travels WITH its mesh. Reading it out of a
+            // fixed five-slot array is how a chunk with no broadleaf hands
+            // the conifer buffer to the spires and the world build dies.
+            m.instanceColor = new THREE.InstancedBufferAttribute(m.userData.forestColors, 3);
+            m.instanceMatrix.needsUpdate = true;
+            // Never frustum-culled for the reason in the chunk note above;
+            // the chunk's own distance test is what culls it.
+            m.frustumCulled = false;
+            m.userData.terrain = true;
+            m.userData.sceneryScale = true;
+            m.userData.vegetationLayer = m === C.trunks ? "landscape-wood"
+              : (m === C.canopies ? "landscape-crown"
+                : (m === C.spires ? "conifer-spire" : (m === C.domes ? "canopy-dome" : "krummholz")));
+            city.root.add(m);
+            forestMeshes++;
+          }
+          ti += C.ti;
+          forestChunks.push(ch);
+        });
+        // ---- THE DISC. One throttled distance test per chunk, not per
+        // tree: 90-odd numbers a few times a second against ~45k instances
+        // that would otherwise be submitted every frame from 12 km away.
+        // The radius is generously past the camera's far plane so a chunk is
+        // always deep in fog before it switches, and it is checked against
+        // the CAMERA rather than the player so a helicopter or a long lens
+        // never flies into an empty country.
+        const SEE = 2350 + CHUNK * 0.71;
+        const chunkList = forestChunks;
+        let lastCx = 1e9, lastCz = 1e9, lastPx = 1e9, lastPz = 1e9;
+        CBZ.onAlways(97.4, function () {
+          const cam = CBZ.camera;
+          const p = CBZ.player && CBZ.player.pos;
+          if (!cam && !p) return;
+          // Both eyes, and the union of their discs. A camera can be flown
+          // hundreds of metres off the body (aircraft chase, cutscene rigs,
+          // a screenshot tool posing a lens), and a chunk hidden because the
+          // BODY is far away is a hole in the photograph.
+          const cx = cam ? cam.position.x : p.x, cz = cam ? cam.position.z : p.z;
+          const px = p ? p.x : cx, pz = p ? p.z : cz;
+          if (Math.abs(cx - lastCx) < 90 && Math.abs(cz - lastCz) < 90 &&
+              Math.abs(px - lastPx) < 90 && Math.abs(pz - lastPz) < 90) return;
+          lastCx = cx; lastCz = cz; lastPx = px; lastPz = pz;
+          for (let i = 0; i < chunkList.length; i++) {
+            const ch = chunkList[i];
+            const dx = ch.cx - cx, dz = ch.cz - cz;
+            const ex = ch.cx - px, ez = ch.cz - pz;
+            const on = (dx * dx + dz * dz) < SEE * SEE || (ex * ex + ez * ez) < SEE * SEE;
+            for (let k = 0; k < ch.meshes.length; k++) ch.meshes[k].visible = on;
+          }
+        });
+      }
+
       for (const s of spots) {
+        if (CARPET && (isTreeSpot(s) || s.storey === "scrub" || !s.bare)) continue;   // planted above
         const scale = 0.8 + (CBZ.hash01 ? CBZ.hash01(s.x, s.z, 8806) : 0.5) * 0.7;
         const rot = (CBZ.hash01 ? CBZ.hash01(s.x, s.z, 8807) : 0.3) * Math.PI * 2;
         if (isTreeSpot(s)) {
@@ -2139,22 +2542,33 @@
           ri++;
         }
       }
-      trunks.count = canopies.count = ti; rocks.count = ri;
-      if (V2) {
-        trunks.instanceColor = new THREE.InstancedBufferAttribute(tCol, 3);
-        canopies.instanceColor = new THREE.InstancedBufferAttribute(cCol, 3);
-        rocks.instanceColor = new THREE.InstancedBufferAttribute(rCol, 3);
+      rocks.count = ri;
+      if (V2) rocks.instanceColor = new THREE.InstancedBufferAttribute(rCol, 3);
+      rocks.instanceMatrix.needsUpdate = true;
+      rocks.frustumCulled = false;
+      rocks.userData.terrain = true;
+      city.root.add(rocks);
+      if (!CARPET) {
+        trunks.count = canopies.count = ti;
+        if (V2) {
+          trunks.instanceColor = new THREE.InstancedBufferAttribute(tCol, 3);
+          canopies.instanceColor = new THREE.InstancedBufferAttribute(cCol, 3);
+        }
+        trunks.instanceMatrix.needsUpdate = canopies.instanceMatrix.needsUpdate = true;
+        trunks.frustumCulled = canopies.frustumCulled = false;
+        trunks.userData.terrain = canopies.userData.terrain = true;
+        trunks.userData.vegetationLayer = SCENERY ? "landscape-wood" : "backcountry-trunk";
+        canopies.userData.vegetationLayer = SCENERY ? "landscape-crown" : "backcountry-crown";
+        trunks.userData.sceneryScale = canopies.userData.sceneryScale = SCENERY;
+        city.root.add(trunks, canopies);
       }
-      trunks.instanceMatrix.needsUpdate = canopies.instanceMatrix.needsUpdate = rocks.instanceMatrix.needsUpdate = true;
-      trunks.frustumCulled = canopies.frustumCulled = rocks.frustumCulled = false;
-      trunks.userData.terrain = canopies.userData.terrain = rocks.userData.terrain = true;
-      trunks.userData.vegetationLayer = SCENERY ? "landscape-wood" : "backcountry-trunk";
-      canopies.userData.vegetationLayer = SCENERY ? "landscape-crown" : "backcountry-crown";
-      trunks.userData.sceneryScale = canopies.userData.sceneryScale = SCENERY;
-      city.root.add(trunks, canopies, rocks);
       // published for CBZ.solidityAudit() (city/props.js) — the ONE number that
       // says the backcountry is timber and stone rather than a painted backdrop.
-      CBZ.backcountrySolids = { trees: ti, rocks: ri, solids: solids, on: SOLID_BC, sceneryScale: SCENERY };
+      CBZ.backcountrySolids = {
+        trees: ti, rocks: ri, solids: solids, on: SOLID_BC, sceneryScale: SCENERY,
+        conifers: nCone, broadleaf: nBroad, roof: domeList.length, scrub: scrubList.length,
+        carpet: CARPET, reliefTop: reliefTop, chunks: forestChunks.length, meshes: forestMeshes,
+      };
     }
 
     // ---- the walkable underlay region(s) (registered LAST on purpose:

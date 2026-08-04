@@ -171,7 +171,22 @@
       sea.rotation.x = -Math.PI / 2; sea.position.set(cx + 150, -0.5, cz - 200);
       sea.receiveShadow = false; root.add(sea);
     }
-    const seaDay = new THREE.Color(0x0d3b58), seaNight = new THREE.Color(0x04131d), seaDusk = new THREE.Color(0x34364d);
+    // THE BODY COLOUR OF THE OPEN SEA (owner's coastal reference, 2026-08-03).
+    // 0x0d3b58 was a NAVY: blue channel nearly half again the green, which is
+    // the colour of a swimming pool photographed through a grey sky, not of
+    // cold northern ocean. The reference is a deep, saturated TEAL — green and
+    // blue within a few percent of each other, with the green ahead of the blue
+    // in sunlight — and it has to stay dark enough that the near field reads
+    // opaque. Night keeps the same hue relationship at a tenth the luminance;
+    // dusk is a mauve wash and is unchanged. water_spec.js publishes these so
+    // the shader sea, the planar mirror and anything else asking "what colour
+    // is the sea" read one table (degrade-safe: the literals stay as fallback).
+    // (The fallbacks are the ORIGINAL navy: a build where water_spec.js failed
+    // to load renders exactly the sea that shipped before this pass.)
+    const TONES = CBZ.WATER_TONES || {};
+    const seaDay = new THREE.Color(TONES.day != null ? TONES.day : 0x0d3b58),
+      seaNight = new THREE.Color(TONES.night != null ? TONES.night : 0x04131d),
+      seaDusk = new THREE.Color(TONES.dusk != null ? TONES.dusk : 0x34364d);
     // THE SEA WAS FROZEN. This block used to write the wave clock into a local
     // `seaTimeU` object and scroll `seaNormalTex.offset` — but the material's
     // uniforms had been built with THREE.UniformsUtils.merge(), and r128's
@@ -1307,29 +1322,37 @@
         // no green flicker and no apparent ocean growing around trees.
         "  if (uSeaHasLandMask > 0.5 && field.r > uShoreCut) discard;",
         "  float inland = max(vSeaInland, field.a);",
-        // Two scrolling ripple fields supply the metre-scale detail that even
-        // the radial mesh cannot tessellate. Detail is faded with distance so
-        // the far ocean settles instead of boiling into aliased sparkle.
-        "  vec2 flow0 = vSeaWorld.xz * 0.036 + vec2(uSeaTime * 0.027, -uSeaTime * 0.018);",
-        "  vec2 flow1 = vec2(vSeaWorld.z, -vSeaWorld.x) * 0.061 + vec2(-uSeaTime * 0.019, uSeaTime * 0.023);",
-        "  vec3 n0s = texture2D(uSeaNormal, flow0).rgb * 2.0 - 1.0;",
-        "  vec3 n1s = texture2D(uSeaNormal, flow1).rgb * 2.0 - 1.0;",
+        // WATER_SURFACE_LOOK: the ripple field, the streak lanes and the shore
+        // calm band all live in world/water_spec.js so the planar mirror gets
+        // the identical surface. `lane` is 0.5 and `calm` 0 with the flag off,
+        // and cbzSeaNormal then runs the exact two-sample ripple this replaced.
+        "  float calm = cbzShoreCalm(field);",
+        "  float lane = cbzLane(vSeaWorld.xz);",
         "  float detail = mix(0.60, 0.16, smoothstep(90.0, 1500.0, vSeaDist)) * mix(1.0, 0.42, inland) * (1.0 + uChop * 0.5);",
-        "  vec3 fineN = normalize(vec3((n0s.r + n1s.r) * 0.34, 1.0, (n0s.g + n1s.g) * 0.34));",
-        "  vec3 N = normalize(vSeaNormal + fineN * detail - vec3(0.0, detail, 0.0));",
+        "  vec3 N = cbzSeaNormal(vSeaNormal, vSeaWorld.xz, vSeaDist, detail, calm, lane);",
         "  vec3 V = normalize(cameraPosition - vSeaWorld);",
         "  float under = gl_FrontFacing ? 0.0 : 1.0;",
         "  N = mix(N, -N, under);",             // looking up from below
         "  vec3 L = normalize(uSunDir);",
         "  float ndl = max(dot(N, L), 0.0);",
-        "  float fres = 0.028 + 0.972 * pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 4.6);",
+        // Mirror Fresnel near, rough-surface Fresnel far (see cbzRough): a
+        // faded ripple normal is a MIRROR, and a grazing mirror returns the
+        // brightest band of sky, which is what bleached the far ocean white.
+        "  float fres = cbzFresnel(dot(N, V), vSeaDist);",
         "  vec3 body = cbzDepthColor(uSeaColor, field, inland);",
-        "  vec3 base = body * vec3(0.96, 1.04, 1.09) + vec3(0.003, 0.012, 0.020);",
+        "  vec3 base = body * mix(vec3(0.96, 1.04, 1.09), vec3(0.95, 1.06, 1.03), step(0.001, uLook.x)) + mix(vec3(0.003, 0.012, 0.020), vec3(0.003, 0.012, 0.018), step(0.001, uLook.x));",
         "  base *= 0.63 + ndl * 0.37;",
-        "  vec3 sky = uSeaColor * 1.34 + vec3(0.060, 0.125, 0.190);",
+        // The reflected sky as RADIANCE (horizon band == the live fog colour,
+        // deep cool sky overhead) instead of a brightened copy of the water's
+        // own colour. Off -> the old expression, byte for byte.
+        "  vec3 R = reflect(-V, N);",
+        "  vec3 sky = cbzSkyTone(R, cbzRough(vSeaDist, dot(N, V)) * 0.12);",
+        "  vec3 skyOld = uSeaColor * 1.34 + vec3(0.060, 0.125, 0.190);",
+        "  sky = mix(skyOld, sky * 0.58, step(0.001, uLook.x));",   // REFL_GAIN, water_spec.js
         "  sky = mix(sky, uSunColor * 0.34 + sky * 0.70, 0.22);",
-        "  vec3 outColor = mix(base, sky, fres * 0.66 * mix(1.0, 0.55, inland));",
+        "  vec3 outColor = mix(base, sky, fres * mix(0.66, 0.90, step(0.001, uLook.x)) * mix(1.0, 0.55, inland));",
         "  outColor += cbzSunGlitter(N, V, L, fres, vSeaFade) * mix(1.0, 0.30, inland);",
+        "  outColor += cbzSheen(N, V, L, lane, vSeaDist, fres) * mix(1.0, 0.35, inland);",
         // The old foam was a static bake whose only motion was a brightness
         // pulse. cbzSurf() phases the band by DISTANCE-TO-SHORE minus TIME, so
         // white water advances up the beach and dies at the waterline.

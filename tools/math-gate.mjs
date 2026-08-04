@@ -569,6 +569,26 @@ const PASS = `(() => {
       if (pp.atTranslatedParent > 0) out.fails.push("WORLD-COORD POOL ON A TRANSLATED PARENT: " + pp.atTranslatedParent + " " + JSON.stringify(pp.offenders));
     }
     if (CBZ.swimAudit) { const sw = CBZ.swimAudit(); out.swim = "sink " + sw.sinkRate + " up " + sw.ascendRate + " breath " + sw.breathSec + "s"; }
+    // ---- the forest look block (world/forestlook.js): ONE green ramp, one
+    // species mask and one canopy-closure law for every wood in the game.
+    // legacy counts foliage colours a vegetation builder still hand-types;
+    // pinned at 0 and may only ever go DOWN. tinted/species/closure print
+    // beside it so a "fix" that stops asking cannot pass for a migration.
+    if (CBZ.forestLookAudit) {
+      const fl = CBZ.forestLookAudit();
+      out.forestLook = "tint " + fl.tinted + " species " + fl.species + " closure " + fl.closure +
+        " legacy " + fl.legacy + " sites " + Object.keys(fl.sites || {}).length;
+      if (fl.legacy > 0) out.fails.push("HAND-TYPED FOLIAGE COLOURS: " + fl.legacy + " " + JSON.stringify(fl.legacySites));
+      if (fl.on && !fl.tinted) out.fails.push("forestLook is on and nothing adopted it");
+    }
+    if (CBZ.backcountrySolids && CBZ.backcountrySolids.carpet) {
+      const bs = CBZ.backcountrySolids;
+      out.backcountry = "trees " + bs.trees + " (conifer " + bs.conifers + ") roof " + bs.roof +
+        " scrub " + bs.scrub + " rocks " + bs.rocks + " chunks " + bs.chunks + "/" + bs.meshes;
+      // The carpet exists to be DENSE; a build that quietly stops planting is
+      // the regression this line is here to catch (pre-carpet was 10,083).
+      if (bs.trees < 20000) out.fails.push("BACKCOUNTRY CANOPY THINNED OUT: " + bs.trees + " stems");
+    }
     if (CBZ.peakShapeAudit) {
       const pk = CBZ.peakShapeAudit();
       out.peaks = "maxH " + Math.round(pk.maxH||0) + " shoulderTop " + Math.round(pk.shoulderTop||0) + " smallest " + Math.round(pk.smallestSummit||0);
@@ -872,6 +892,7 @@ async function runSeed(seed, label) {
   tmark(`${label}: street ${r.street || "-"} | stunts ${r.stunts || "-"}`);
   tmark(`${label}: ground ${r.ground || "-"} | backdrop ${r.backdrop || "-"} | peaks ${r.peaks || "-"} | swim ${r.swim || "-"}`);
   tmark(`${label}: pools ${r.pools || "-"}`);
+  tmark(`${label}: forestLook ${r.forestLook || "-"} | backcountry ${r.backcountry || "-"}`);
   tmark(`${label}: arena ${r.arena || "-"} | frontGlass ${r.frontGlass || "-"} | elevators ${r.elevators || "-"}`);
   tmark(`${label}: map ${r.map || "-"} | crowdSpawn ${r.crowdSpawn || "-"} | platforms ${r.platforms == null ? "-" : r.platforms}`);
   tmark(`${label}: cockpit ${r.cockpit || "-"} | wounds ${r.wounds || "-"} | cabin ${r.cabin || "-"} | power ${r.power || "-"}`);

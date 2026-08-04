@@ -50,6 +50,10 @@
                                       of summits.
      CBZ.mtnTalus(x,z,opts,out)       scree/talus apron field (accumulation
                                       slope below cliff bands).
+     CBZ.mtnConcavity(hAt,x,z,e)      signed curvature off any height sampler:
+                                      +1 = couloir/hollow, -1 = ridge/spine.
+                                      Slope cannot tell those apart, which is
+                                      why snow used to paint contour bands.
 
    Shading (so colour and geometry agree instead of a sine ripple):
      CBZ.mtnStrataTint(out, x, z, y, slope, faceLight, opts)
@@ -114,6 +118,19 @@
   // mountains (cliff bands, talus fans, boulder fields, rockfall debris).
   // Off → no scatter (the decorative backdrop keeps its own, unchanged).
   if (CFG.MOUNT_ROCKS_V1 == null) CFG.MOUNT_ROCKS_V1 = true;
+  // MOUNT_SNOW_GULLIES — snow follows the CONCAVITIES. Couloirs and hollows
+  // hold white far below the line the open slope keeps, convex spines and
+  // aretes stay bare rock right through a summit field, and marginal cover
+  // breaks into patches instead of ramping smoothly. Off → the previous
+  // altitude/slope/aspect coverage, byte for byte (every new term is keyed
+  // off an option that defaults to zero, so a caller that passes none is
+  // unchanged either way).
+  if (CFG.MOUNT_SNOW_GULLIES == null) CFG.MOUNT_SNOW_GULLIES = true;
+  // MOUNT_VEG_SLOPE_HOLD — below the treeline, vegetation holds STEEP ground:
+  // a coastal range rises green straight out of the sea and only gives way to
+  // bare rock with altitude and on the ridgelines. Off → the rock-exposure
+  // window sits where it did (slope0/slope1 unshifted).
+  if (CFG.MOUNT_VEG_SLOPE_HOLD == null) CFG.MOUNT_VEG_SLOPE_HOLD = true;
   // MOUNT_MESH_DENSITY — global multiplier on the real mountains' mesh
   // resolution. 1 = the previous ~3.2 u/vertex. 1.45 ≈ 2.2 u/vertex, which is
   // what cliff/terrace detail needs to actually resolve. Lower it to claw back
@@ -391,6 +408,31 @@
     return out;
   };
 
+  // ---- CONCAVITY — the one signal that says "gully" or "spine" ---------
+  // A discrete Laplacian over the caller's OWN height sampler. Positive means
+  // the ground curves away below the tangent plane (a hollow, a couloir, a
+  // valley head); negative means it curves above it (a ridge crest, an arete,
+  // a rock rib). Slope cannot answer this — a gully wall and a spine flank are
+  // the same steepness — which is exactly why every snow model in this repo
+  // painted contour bands instead of the streaks a real range shows.
+  //
+  // The result is squashed by k/(1+|k|), so it is bounded to (-1, 1) for ANY
+  // terrain amplitude and a caller never has to know the field's scale. `e`
+  // should be >= the sampler's memo cell (mtnGridCache bilinear creases alias
+  // into curvature far more strongly than into slope) and is really a CHOICE
+  // OF FEATURE SIZE: a 6 m stencil finds boulder-scale dents, a 40 m stencil
+  // finds the couloirs. Costs four height samples; on a memoised field that is
+  // four array reads.
+  CBZ.mtnConcavity = function (heightAt, x, z, e, scale) {
+    if (typeof heightAt !== "function") return 0;
+    e = e || 6;
+    const h = heightAt(x, z);
+    const lap = (heightAt(x + e, z) + heightAt(x - e, z) +
+                 heightAt(x, z + e) + heightAt(x, z - e)) * 0.25 - h;
+    const k = lap / (e * (scale == null ? 0.10 : scale));
+    return k / (1 + (k < 0 ? -k : k));
+  };
+
   // ======================================================================
   //  2. SHADING — strata colour + physically-flavoured snow cover
   // ======================================================================
@@ -433,8 +475,19 @@
     out.b *= (0.86 + 0.20 * lit * asp);
     // how much rock shows at all: shallow ground grows soil, steep ground is
     // scoured bare. THIS is the slope→material coupling the old code lacked.
-    const s0 = o.slope0 == null ? 0.10 : o.slope0;
-    const s1 = o.slope1 == null ? 0.34 : o.slope1;
+    // VEGETATION HOLDS THE LOW GROUND. Rock exposure is not a pure function of
+    // steepness: below the treeline a 40° slope is still forest — the coastal
+    // ranges in the reference photographs rise DENSE GREEN straight out of the
+    // sea and the green climbs surprisingly high before anything grey shows.
+    // `vegHold` (0..1, caller-supplied, typically 1 well under the treeline
+    // falling to 0 above it) slides the whole exposure window uphill in SLOPE
+    // by `vegSlope`. It touches neither the rock colour nor the geometry, and
+    // it defaults to 0, so every existing call site is byte-identical.
+    const hold = (CFG.MOUNT_VEG_SLOPE_HOLD === false || o.vegHold == null)
+      ? 0 : clamp01(o.vegHold);
+    const vshift = hold * (o.vegSlope == null ? 0.30 : o.vegSlope);
+    const s0 = (o.slope0 == null ? 0.10 : o.slope0) + vshift;
+    const s1 = (o.slope1 == null ? 0.34 : o.slope1) + vshift;
     const bare = sm((slope - s0) / Math.max(1e-3, s1 - s0));
     if (o.mixOut) o.mixOut.v = bare;
     return bare;
@@ -457,7 +510,25 @@
     const wob = o.wob == null ? 26 : o.wob;
     const feather = (n2(x, z, 210, salt + 131) - 0.5) * wob +
                     (n2(x, z, 47, salt + 137) - 0.5) * wob * 0.45;
-    let cover = sm((y - (line + aspectShift + feather)) / Math.max(1, band));
+    /* ---- CONCAVITY: SNOW LIVES IN THE GULLIES -------------------------
+       A snowfield is not a contour band, and that single wrong assumption is
+       what made every range in this game wear a flat white cap. In the
+       reference photographs the white is STREAKS: it runs down the couloirs
+       and hollows hundreds of metres below the line the open slope holds
+       (wind loads the lee, avalanche debris runs the channel and shades
+       itself), while the convex spines BETWEEN those channels stay dark rock
+       right through the middle of a summit field. Both halves come off one
+       signed number the caller already has cheap access to — see
+       CBZ.mtnConcavity, or a drainage `carve` term for free.
+         concave  +1 = deep hollow / couloir, -1 = ridge crest / arete
+         gully    metres the snowline DROPS in a full hollow
+         spine    0..1 how hard a full convexity strips cover back off  */
+    const GUL = CFG.MOUNT_SNOW_GULLIES !== false;
+    let conc = (GUL && o.concave != null) ? +o.concave : 0;
+    if (!(conc === conc)) conc = 0;                 // NaN-strict: terrain gate
+    if (conc > 1) conc = 1; else if (conc < -1) conc = -1;
+    const gully = GUL ? (o.gully == null ? 0 : o.gully) : 0;
+    let cover = sm((y - (line + aspectShift + feather - gully * conc)) / Math.max(1, band));
     // steep faces shed: above ~45° almost nothing holds, below ~20° it all does
     const sh0 = o.shed0 == null ? 0.16 : o.shed0;
     const sh1 = o.shed1 == null ? 0.52 : o.shed1;
@@ -466,6 +537,45 @@
     // wind-loading: lee gullies pack deep even on a steep face
     const load = n2(x, z, 90, salt + 141);
     cover = clamp01(cover * (0.86 + 0.28 * load));
+    // ROCK RIBS THROUGH THE FIELD. The shed term above cannot do this: it is
+    // symmetric in slope, so it strips a gully wall exactly as hard as the
+    // spine beside it and the field closes back over both. Keying on
+    // CONVEXITY specifically is what leaves the dark serrated ribs the
+    // reference shows dividing a summit snowfield into fingers.
+    if (GUL && o.spine) {
+      const rib = sm((-conc - 0.10) / 0.55);
+      cover *= 1 - clamp01(o.spine) * rib * (0.42 + 0.58 * sm((slope - 0.16) / 0.42));
+    }
+    /* PATCHINESS. Coverage is a FRACTION, and a fraction near 0.5 does not
+       mean half-deep snow everywhere — it means a MOSAIC of drifts and bare
+       ground. Rendering it as a smooth ramp is what produced the airbrushed
+       sage-grey that made every snowfield in this game read as dirty paint:
+       half white lerped over half rock is neither, and it is the single
+       loudest difference between our massifs and the reference photographs.
+
+       MEASURED, and it is why the obvious fix is not enough: merely OFFSETTING
+       cover by a noise leaves the large fraction of the surface where that
+       noise is itself mid-valued sitting right back at half cover. Value noise
+       is centre-heavy, so an offset moves the mosaic without ever creating one.
+       So this does two separate things — the noise moves WHERE the patch edge
+       falls, and a gain through that point decides HOW SHARP it is:
+         thr  the 50% point, walked around by the noise
+         k    the slope through it; patch=1 is nearly a step
+       Both endpoints are preserved exactly (cover 0 and 1 map to 0 and 1), so
+       a deep field stays deep and bare rock stays bare — only the contested
+       ground resolves into blobs and streaks instead of a wash. */
+    if (GUL && o.patch) {
+      const pa = clamp01(o.patch);
+      const pc = o.patchCell == null ? 120 : o.patchCell;
+      // two octaves: the coarse one sizes the drift, the fine one keeps its
+      // EDGE ragged — a single octave gives round blobs, which is a different
+      // kind of wrong from a smooth ramp but just as recognisable.
+      const pn = (n2(x, z, pc, salt + 151) - 0.5) * 0.74 +
+                 (n2(x, z, pc * 0.34, salt + 157) - 0.5) * 0.26;
+      const thr = 0.5 + pn * (0.55 + 0.35 * pa);
+      const k = 1 / Math.max(0.12, 1 - 0.82 * pa);
+      cover = clamp01((cover - thr) * k + 0.5);
+    }
     return cover;
   };
 

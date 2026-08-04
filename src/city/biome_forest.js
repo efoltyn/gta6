@@ -322,6 +322,13 @@
     const TREES2 = !!(CBZ.CONFIG && CBZ.CONFIG.TREES_V2 !== false && CBZ.treeRegisterTree);
     const KIT = CBZ.vegetationKit;
     const SCENERY = !!(TREES2 && KIT && CBZ.CONFIG.SCENERY_VEGETATION !== false);
+    // THE FOREST LOOK BLOCK (world/forestlook.js). Redhollow is the game's
+    // flagship wood and it was drawn in ONE green with a ±0.15 jitter and a
+    // single crown silhouette — the two faults the owner's reference names
+    // first. Degrade-safe: without the block every line below falls back to
+    // exactly the colours and the single species this file already had.
+    const FLOOK = (CBZ.CONFIG.FOREST_LOOK !== false) ? CBZ.forestLook : null;
+    const FMIX = !!(FLOOK && CBZ.CONFIG.FOREST_SPECIES_MIX !== false);
     if (TREES2 && CBZ.treeAuditResetSite) CBZ.treeAuditResetSite("forest");
     // The scenery-scale kit remains the authoritative visual owner. The older
     // one-tree grammar only supplies the flag-off fallback, where it adds roots
@@ -399,6 +406,11 @@
         const speciesRoll = rng();
         const broad = !SCENERY && speciesRoll < 0.12;
         const round = SCENERY ? speciesRoll < 0.18 : (!broad && speciesRoll < 0.22);
+        // WHICH SPECIES, from the shared patch mask — a POSITION hash, so it
+        // consumes nothing from the stream above and the conifer stands here
+        // line up with the ones the backcountry grows on the other side of
+        // the biome's edge instead of stopping at it.
+        const conifer = !!(FMIX && FLOOK.species(x, z, { site: "forest" }).conifer);
         const tShade = 0.34 + rng() * 0.18;
         colTrunk.setRGB(tShade, tShade * 0.66, tShade * 0.38);
 
@@ -430,20 +442,41 @@
         const folR = SCENERY ? sc * (0.88 + rng() * 0.20) : (broad ? h * 0.42 : h * 0.30);
         const folY = SCENERY ? KIT.nominal.matureCrownBase * sc : (broad ? h * 0.55 : h * 0.35);
 
-        // colour variety via instanceColor (still ONE material / draw call).
-        if (SCENERY) colFoli.setRGB(0.14 + rng() * 0.10, 0.32 + rng() * 0.15, 0.10 + rng() * 0.07);
-        else if (broad) colFoli.setRGB(0.30 + rng() * 0.18, 0.46 + rng() * 0.16, 0.16 + rng() * 0.10);
-        else colFoli.setRGB(0.10 + rng() * 0.08, 0.30 + rng() * 0.14, 0.13 + rng() * 0.08);
+        // COLOUR — one ramp for every wood in the game (world/forestlook.js).
+        // The three rng draws are KEPT and PASSED IN rather than replaced:
+        // this file's placement rides one sequential stream, so removing a
+        // draw would re-deal every cabin, trail and animal downstream of it.
+        // The block turns them into a jitter on a field instead of being the
+        // whole colour, which is the entire difference between "many greens"
+        // and "green plus noise".
+        const j0 = rng(), j1 = rng(), j2 = rng();
+        if (SCENERY && FLOOK) {
+          FLOOK.tint(colFoli, x, z, {
+            conifer: conifer, j0: j0, j1: j1, closure: 0.92, alt: 0, sun: 0.42, site: "forest",
+          });
+        } else if (SCENERY) colFoli.setRGB(0.14 + j0 * 0.10, 0.32 + j1 * 0.15, 0.10 + j2 * 0.07);
+        else if (broad) colFoli.setRGB(0.30 + j0 * 0.18, 0.46 + j1 * 0.16, 0.16 + j2 * 0.10);
+        else colFoli.setRGB(0.10 + j0 * 0.08, 0.30 + j1 * 0.14, 0.13 + j2 * 0.08);
 
-        trees.push({ x, z, h, tr, sc, rot, lean, folH, folR, folY, giant });
+        trees.push({ x, z, h, tr, sc, rot, lean, folH, folR, folY, giant, conifer });
         trunkColors.push(colTrunk.r, colTrunk.g, colTrunk.b);
         foliColors.push(colFoli.r, colFoli.g, colFoli.b);
       }
     }
 
     const N = trees.length;
+    // ---- THE SECOND SILHOUETTE ---------------------------------------
+    // A share of the mature storey wears the kit's conifer spire instead of
+    // the rounded crown, in the same low-frequency patches the backcountry
+    // uses. Cost: ONE extra InstancedMesh (the trunk mesh is shared — a
+    // spruce bole is the same timber), and the spire is 40 triangles against
+    // the rounded crown's 100, so the mix is cheaper than the monoculture.
+    let nSpire = 0;
+    for (let i = 0; i < N; i++) if (trees[i].conifer) nSpire++;
+    const spireGeo = (FMIX && nSpire) ? KIT.geometry("conifer-spire") : null;
     const trunkInst = new THREE.InstancedMesh(trunkGeo, trunkMat, N);
-    const foliInst = new THREE.InstancedMesh(conGeo, foliMat, N);
+    const foliInst = new THREE.InstancedMesh(conGeo, foliMat, Math.max(1, N - (spireGeo ? nSpire : 0)));
+    const spireInst = spireGeo ? new THREE.InstancedMesh(spireGeo, foliMat, nSpire) : null;
     const treeShadows = !SCENERY || (CBZ.qualityLevel == null ? 2 : CBZ.qualityLevel) >= 2;
     trunkInst.castShadow = treeShadows; foliInst.castShadow = treeShadows;
     trunkInst.receiveShadow = true; foliInst.receiveShadow = true;
@@ -454,10 +487,20 @@
     foliInst.userData.vegetationLayer = "mature-crown";
     trunkInst.userData.sceneryScale = foliInst.userData.sceneryScale = SCENERY;
     trunkInst.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(trunkColors), 3);
-    foliInst.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(foliColors), 3);
+    const foliCol = new Float32Array(foliInst.count * 3);
+    const spireCol = spireInst ? new Float32Array(nSpire * 3) : null;
+    if (spireInst) {
+      spireInst.castShadow = treeShadows; spireInst.receiveShadow = true;
+      spireInst.name = "redhollow-conifer-spires";
+      spireInst.frustumCulled = false;
+      spireInst.userData.vegetationLayer = "conifer-spire";
+      spireInst.userData.sceneryScale = SCENERY;
+    }
 
     const tbb = TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(trunkGeo) : null;
     const fbb = TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(conGeo) : null;
+    const sbb = spireInst && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(spireGeo) : null;
+    let fi = 0, si = 0;
     for (let i = 0; i < N; i++) {
       const t = trees[i];
       // trunk (V2: base sunk V2SINK below the floor, top unchanged at t.h)
@@ -472,21 +515,45 @@
         parts = [];
         CBZ.treeAabbPush(parts, dummy.matrix, tbb.min.x, tbb.min.y, tbb.min.z, tbb.max.x, tbb.max.y, tbb.max.z);
       }
-      // foliage cone (rides above, same lean)
-      dummy.position.set(t.x, t.folY, t.z);
-      dummy.rotation.set(t.lean, t.rot, t.lean * 0.5);
-      dummy.scale.set(t.folR, t.folH, t.folR);
-      dummy.updateMatrix();
-      foliInst.setMatrixAt(i, dummy.matrix);
-      if (parts && fbb) {
-        CBZ.treeAabbPush(parts, dummy.matrix, fbb.min.x, fbb.min.y, fbb.min.z, fbb.max.x, fbb.max.y, fbb.max.z);
+      // crown (rides above, same lean). The spire is authored 23 m tall with
+      // its foliage running down the bole, so it is seated LOW and stretched
+      // to land its tip above the rounded roof — the reference's skyline.
+      let bb = fbb, dst = foliCol, idx = fi;
+      if (t.conifer && spireInst) {
+        dummy.position.set(t.x, KIT.nominal.matureCrownBase * t.sc * 0.30, t.z);
+        dummy.rotation.set(t.lean, t.rot, t.lean * 0.5);
+        dummy.scale.set(t.sc * 0.92, t.sc * (KIT.nominal.matureWoodHeight / KIT.nominal.spireHeight) * 1.34, t.sc * 0.92);
+        dummy.updateMatrix();
+        spireInst.setMatrixAt(si, dummy.matrix);
+        bb = sbb; dst = spireCol; idx = si; si++;
+      } else {
+        dummy.position.set(t.x, t.folY, t.z);
+        dummy.rotation.set(t.lean, t.rot, t.lean * 0.5);
+        dummy.scale.set(t.folR, t.folH, t.folR);
+        dummy.updateMatrix();
+        foliInst.setMatrixAt(fi, dummy.matrix);
+        idx = fi; fi++;
+      }
+      dst[idx * 3] = foliColors[i * 3];
+      dst[idx * 3 + 1] = foliColors[i * 3 + 1];
+      dst[idx * 3 + 2] = foliColors[i * 3 + 2];
+      if (parts && bb) {
+        CBZ.treeAabbPush(parts, dummy.matrix, bb.min.x, bb.min.y, bb.min.z, bb.max.x, bb.max.y, bb.max.z);
         CBZ.treeRegisterTree("forest", 0, parts);      // flat biome floor (plane top at 0.02)
       }
     }
+    foliInst.count = fi;
+    foliInst.instanceColor = new THREE.InstancedBufferAttribute(foliCol, 3);
     trunkInst.instanceMatrix.needsUpdate = true;
     foliInst.instanceMatrix.needsUpdate = true;
     root.add(trunkInst);
     root.add(foliInst);
+    if (spireInst) {
+      spireInst.count = si;
+      spireInst.instanceColor = new THREE.InstancedBufferAttribute(spireCol, 3);
+      spireInst.instanceMatrix.needsUpdate = true;
+      root.add(spireInst);
+    }
 
     // ---- SUBCANOPY trees: a separate, lower storey beneath the detached roof.
     const RN = roundTrees.length;
@@ -605,6 +672,7 @@
             x: x, z: z, y: (upper ? 20.0 : 11.8) + cv * (upper ? 5.0 : 5.6),
             sx: s * (0.92 + jx * 0.16), sy: s * (upper ? 0.86 : 0.98), sz: s * (0.94 + jz * 0.15),
             ry: hv * Math.PI * 2, rx: jx * 0.045, rz: jz * 0.045,
+            j0: hv, j1: cv,
             r: upper ? 0.13 + cv * 0.08 : 0.10 + cv * 0.07,
             g: upper ? 0.31 + hv * 0.13 : 0.27 + hv * 0.12,
             b: upper ? 0.10 + cv * 0.055 : 0.075 + cv * 0.045,
@@ -620,7 +688,19 @@
       return KIT.instanceLayer(root, {
         kind: "canopy-patch", name: name, owner: "forest",
         castShadow: false, receiveShadow: true,
-        color: function (c, p) { c.setRGB(p.r, p.g, p.b); },
+        // THE ROOF IS TWO STOREYS OF LIGHT, and that is the whole reason
+        // this reads as a canopy and not a green ceiling: the upper phase is
+        // what the sun actually lands on, the lower phase is what it does
+        // not. One `sun` argument to the shared ramp says so (world/
+        // forestlook.js), replacing two hand-typed colour ladders here.
+        color: function (c, p) {
+          if (FLOOK) {
+            FLOOK.tint(c, p.x, p.z, {
+              conifer: false, closure: upper ? 0.55 : 0.95, alt: 0,
+              sun: upper ? 0.72 : 0.24, j0: p.j0, j1: p.j1, site: "forest-roof",
+            });
+          } else c.setRGB(p.r, p.g, p.b);
+        },
       }, items);
     }
     const lowerRoofMesh = roofMesh("redhollow-canopy-lower", lowerRoof, false);

@@ -116,7 +116,14 @@
     // a single fluted bole: matureWood's buttresses and fork limbs are close
     // detail that would multiply millions of invisible vertices outside the
     // player's current district.
-    const g = new THREE.CylinderGeometry(0.34, 0.76, 20, 6);
+    //
+    // OPEN-ENDED, and it is not a detail at this count: the top disc lives
+    // inside the crown and the bottom disc is buried below the seat line
+    // (every consumer seats a trunk under the LOWEST sample beneath its
+    // footprint), so both caps are hidden BY CONSTRUCTION. Dropping them
+    // halves the bole from 24 triangles to 12 — across a country-scale
+    // canopy that is worth more than any shading trick on the same mesh.
+    const g = new THREE.CylinderGeometry(0.34, 0.76, 20, 6, 1, true);
     g.translate(0, 10, 0);
     shadeByHeight(g, 0.50, 0.82);
     g.name = "cbz-landscape-tree-wood";
@@ -184,6 +191,67 @@
     return g;
   }
 
+  // ---- THE SECOND SILHOUETTE -------------------------------------------
+  // OWNER REFERENCE (coastal Alaska): the rounded crowns above are only half
+  // a forest. The other half is the spruce SPIRE that stands through the
+  // broadleaf roof, and a wood with one silhouette reads as a crop. Built
+  // through the ONE TREE GRAMMAR (world/treeaudit.js §2) rather than as a
+  // fourth private cone stack, so it lands in CBZ.treeGrammarAudit() and
+  // inherits the whorl/bite solve that keeps a crown support-connected.
+  function coniferSpire() {
+    const H = 23, R = 3.15;
+    let g = null;
+    if (CBZ.treeCrownGeo) {
+      // 4 whorls, slow taper, deep bite: a narrow column of foliage rather
+      // than the 2-whorl broadleaf cone. seg 5 keeps a 23 m tree at 40 tris,
+      // which is what makes a country-wide conifer storey affordable.
+      g = CBZ.treeCrownGeo({
+        tiers: 4, r: R, h: H, seg: 5, taper: 0.80, hRatio: 0.92, bite: 0.30,
+        ao: true, aoLow: 0.42, site: "vegetation-kit",
+      });
+    }
+    if (!g) { g = new THREE.ConeGeometry(R, H, 5); g.translate(0, H / 2, 0); shadeByHeight(g, 0.42, 0.7); }
+    g.name = "cbz-conifer-spire";
+    g.userData.vegetationArchetype = "conifer-spire";
+    return g;
+  }
+
+  // ---- THE CARPET FILLER ------------------------------------------------
+  // A crown with no tree under it. The reference's valley floors have NO
+  // ground visible between crowns, and paying a trunk + a collider + an
+  // audit chain for every square metre of that roof is how a canopy becomes
+  // unaffordable. One squashed lobe (20 tris) with the same baked underside
+  // ramp: from the air it is canopy, from beneath it is the roof over the
+  // real trunks standing beside it. `city/biome_forest.js`'s detached roof is
+  // the precedent this generalises.
+  function canopyDome() {
+    const g = new THREE.IcosahedronGeometry(1, 0);
+    g.scale(8.6, 5.4, 8.2);
+    g.computeBoundingBox(); g.translate(0, -g.boundingBox.min.y, 0);
+    shadeByHeight(g, 0.34, 0.60);
+    g.name = "cbz-canopy-dome";
+    g.userData.vegetationArchetype = "canopy-dome";
+    return g;
+  }
+
+  // ---- KRUMMHOLZ --------------------------------------------------------
+  // The scrub band between the last tree and the open meadow. Deliberately
+  // the thicket mass at a third of the size: a wind-flagged alpine shrub is
+  // exactly a low, dense, sprawling version of the same thing, and authoring
+  // a fifth blob family for it would be the parallel-system trap.
+  function krummholz() {
+    const parts = [
+      lobe(0, 0.62, 0, 1.5, 0.62, 1.3),
+      lobe(-1.1, 0.52, 0.35, 1.0, 0.50, 0.95),
+      lobe(1.0, 0.46, -0.30, 1.05, 0.44, 1.0),
+    ];
+    const g = shadeByHeight(merged(parts, parts[0]), 0.30, 0.80);
+    g.computeBoundingBox(); g.translate(0, -g.boundingBox.min.y, 0); shadeByHeight(g, 0.30, 0.80);
+    g.name = "cbz-krummholz";
+    g.userData.vegetationArchetype = "krummholz";
+    return g;
+  }
+
   const builders = {
     "mature-wood": matureWood,
     "mature-crown": matureCrown,
@@ -191,6 +259,9 @@
     "landscape-crown": landscapeCrown,
     subcanopy: subcanopy,
     "canopy-patch": canopyPatch,
+    "conifer-spire": coniferSpire,
+    "canopy-dome": canopyDome,
+    krummholz: krummholz,
     thicket: thicket,
   };
 
@@ -266,6 +337,11 @@
       subcanopyHeight: 7,
       canopyPatchRadius: 7.8,
       thicketHeight: 4.3,
+      spireHeight: 23,
+      spireRadius: 3.15,
+      canopyDomeRadius: 8.6,
+      canopyDomeHeight: 5.4,
+      krummholzHeight: 1.2,
     },
   };
   CBZ.vegetationInstanceLayer = instanceLayer;

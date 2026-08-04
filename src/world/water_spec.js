@@ -167,6 +167,42 @@
   // One-line revert: ?cfg_WATER_FAR_CALM=0
   if (CFG.WATER_FAR_CALM == null) CFG.WATER_FAR_CALM = true;
 
+  // WATER_SURFACE_LOOK: the SURFACE LOOK pass, built against the owner's
+  // coastal-Alaska reference photos (2026-08-03). Five things, all of them
+  // shading-only — not one line of it touches a height, a slope or the CPU
+  // wave query, so buoyancy, the swimmer, the hulls and the amplitude budget
+  // at the top of section 1 are untouched BY CONSTRUCTION:
+  //   1. WIND RIPPLE — three octaves of the shared tile sampled in a rotated,
+  //      wind-stretched frame at incommensurate scales, each octave's gradient
+  //      rotated back into world space. Dense small wavelets, no visible tile.
+  //   2. STREAK LANES — one very low-frequency, hard-stretched lookup that
+  //      modulates how rough each lane of water is. That is what makes a real
+  //      sea read as bands of calmer and rougher water instead of one uniform
+  //      fizz, and it is what breaks a single glare blob into sheen lanes.
+  //   3. DISTANCE = ROUGHNESS. Fading the ripple normal with distance (which
+  //      WATER_FAR_CALM must do, or the horizon aliases) silently turns the far
+  //      sea into a MIRROR, so every far pixel reflected the brightest part of
+  //      the sky and the ocean went white. The fade now hands its energy to a
+  //      roughness term instead: the reflection is pre-filtered toward the
+  //      higher, deeper sky and the Fresnel curve relaxes from a mirror's to a
+  //      rough surface's. That single pair is what puts colour back in the
+  //      distance.
+  //   4. SHORE CALM BAND — the glassy strip hugging a shoreline before the
+  //      ripple field starts (reference: the water under the mountains).
+  //   5. SKY TONE — one shared horizon/upper-sky pair driven from the LIVE
+  //      scene fog colour (core/sky.js pins the dome's horizon band to exactly
+  //      that, so the sea and the sky agree by construction), attenuated by one
+  //      reflectance gain: the dome is painted to look right AS SKY, and handing
+  //      the sea an unattenuated copy of it pushed every water pixel into the
+  //      ACES shoulder, where the grade desaturates — which is why a teal
+  //      ocean kept coming back grey whatever the body tint was set to.
+  //   6. CALM MEANS CALM — the whitecap threshold and gain are retuned so a
+  //      windless sea carries ripple and no spray, and the body colour table
+  //      (CBZ.WATER_TONES) moves off navy onto the reference's teal.
+  // OFF -> the previous ripple pair, the old Fresnel and no lanes, i.e. the
+  // sea exactly as it shipped (`?cfg_WATER_SURFACE_LOOK=0`).
+  if (CFG.WATER_SURFACE_LOOK == null) CFG.WATER_SURFACE_LOOK = true;
+
   // ============================================================
   //  1. THE SWELL TABLE — the single source of truth
   // ============================================================
@@ -283,6 +319,18 @@
   // array that a GLSL ES 1.0 loop can iterate with a constant bound.
   const MAX_INLAND = 4;
   CBZ.WATER_MAX_INLAND = MAX_INLAND;
+
+  // ---- THE SEA'S BODY COLOUR, ONE TABLE -----------------------------------
+  // city/world.js drives uSeaColor from these across the day/night cycle and
+  // world/waterfx.js copies that value into the mirror, so this is the single
+  // place the ocean's tone is authored. Owner's coastal reference: a deep,
+  // SATURATED TEAL — green and blue within a few percent — never the old navy
+  // (whose blue ran half again ahead of its green) and never a grey-blue
+  // plastic. Consumers read it with a literal fallback, so a build without this
+  // table renders exactly as before.
+  CBZ.WATER_TONES = surfaceLookOn()
+    ? { day: 0x041b1c, night: 0x020a0c, dusk: 0x1e2130 }
+    : { day: 0x0d3b58, night: 0x04131d, dusk: 0x34364d };
 
   // ---- shared clock -------------------------------------------------------
   // Wrapped so sin() arguments stay small. Every consumer (both shaders and
@@ -776,7 +824,10 @@
   CBZ.waterCommonUniforms = function () {
     const u = THREE.UniformsUtils.clone(THREE.UniformsLib.fog);
     u.uSeaTime = { value: 0 };
-    u.uSeaColor = { value: new THREE.Color(0x0d3b58) };
+    // The initial tone only matters for a frame or two (city/world.js's
+    // day/night tick owns it from then on), but it must be the SAME table, or
+    // a mode that never runs that tick renders the old navy for its whole life.
+    u.uSeaColor = { value: new THREE.Color(CBZ.WATER_TONES.day) };
     u.uSeaNormal = { value: CBZ.waterRippleTexture() };
     u.uSeaLandMask = { value: null };
     u.uSeaLandBounds = { value: new THREE.Vector4(0, 0, 1, 1) };
@@ -817,10 +868,28 @@
     u.uSeaY = { value: CBZ.SEA_Y != null ? CBZ.SEA_Y : SEA_Y_FALLBACK };
     u.uWaveAmp = { value: 1.0 };
     u.uChop = { value: 0.0 };
-    u.uCapThresh = { value: 0.62 };
+    u.uCapThresh = { value: surfaceLookOn() ? 0.86 : 0.62 };
     u.uSurf = { value: new THREE.Vector4(22.0, 0.28, 2.05, 1.0) }; // width, freq, speed, gain
     u.uGlitter = { value: 1.0 };
     u.uShoreFx = { value: CFG.WATER_SHORE_FX === false ? 0 : 1 };
+    // ---- WATER_SURFACE_LOOK ------------------------------------------------
+    // The reflected sky, as TWO radiances rather than a tint on the water's own
+    // colour (which is what made the old `sky` term a brighter navy instead of
+    // an actual sky). uSkyLow is the horizon band and is driven from
+    // scene.fog.color every frame — core/sky.js's seam law repaints the dome's
+    // horizon stop to exactly that colour, and city/world.js's horizon fuse
+    // already converges the sea on it, so all three agree by construction.
+    // uSkyHigh is the deeper, cooler sky a ROUGH surface reflects.
+    u.uSkyLow = { value: new THREE.Color(0xb6c4c8) };
+    u.uSkyHigh = { value: new THREE.Color(0x42699a) };
+    // Unit wind direction in world XZ. Fixed (deterministic, and a coastline's
+    // prevailing wind does not spin); the streak lanes and every ripple octave
+    // are built in this frame.
+    u.uWindDir = { value: new THREE.Vector2(0.882, 0.471) };
+    // x = ripple/sheen gain, y = lane contrast, z = shore calm strength,
+    // w = distance-roughness master. All four go to 0 with the flag, which is
+    // what makes the revert exact on BOTH sea materials at once.
+    u.uLook = { value: new THREE.Vector4(1.0, 1.0, 1.0, 1.0) };
     return u;
   };
 
@@ -829,6 +898,17 @@
   const _sunDir = new THREE.Vector3();
   const _moonDir = new THREE.Vector3(0.34, -0.84, -0.42).normalize();
   const FOAM_DAY = new THREE.Color(0xe2f1f3), FOAM_NIGHT = new THREE.Color(0xbed4e8);
+  // The upper-sky radiance a rough sea reflects, day and night. Blended with
+  // the live fog colour (see waterDriveCommonUniforms) so dusk arrives for
+  // free instead of needing a third keyframe.
+  const SKY_HIGH_DAY = new THREE.Color(0.028, 0.078, 0.150);
+  const SKY_HIGH_NIGHT = new THREE.Color(0.004, 0.009, 0.022);
+  const _skyHigh = new THREE.Color();
+  // See cbzReflectGrade: how much of the painted sky the water is allowed to
+  // return. Shared by both sea materials so they cannot disagree.
+  const REFL_GAIN = 0.58;
+  function surfaceLookOn() { return CFG.WATER_SURFACE_LOOK !== false && CFG.WATER_V2 !== false; }
+  CBZ.waterSurfaceLookOn = surfaceLookOn;
   CBZ.waterDriveCommonUniforms = function (u) {
     if (!u) return;
     if (u.uSeaTime) u.uSeaTime.value = CBZ.waterClock();
@@ -875,7 +955,7 @@
     if (u.uWaveAmp) u.uWaveAmp.value = weatherAmp();
     if (u.uDeepGain) u.uDeepGain.value = deepGain();
     if (u.uChopGain) u.uChopGain.value = chopGain();
-    if (u.uCapThresh) u.uCapThresh.value = 0.62 - wet * 0.34;
+    if (u.uCapThresh) u.uCapThresh.value = (surfaceLookOn() ? 0.86 : 0.62) - wet * (surfaceLookOn() ? 0.46 : 0.34);
     if (u.uGlitter) u.uGlitter.value = 1 - wet * 0.55;
     if (u.uShoreFx) u.uShoreFx.value = CFG.WATER_SHORE_FX === false ? 0 : 1;
     if (u.uSwash) {
@@ -886,6 +966,33 @@
     // stays the brightest thing on a night sea. Cool it toward moonlight
     // instead of dimming it, so it reads as spray and not as a daylight leak.
     if (u.uFoamColor) u.uFoamColor.value.copy(FOAM_DAY).lerp(FOAM_NIGHT, nightAmt * 0.85);
+
+    // ---- the reflected sky (WATER_SURFACE_LOOK) ----------------------------
+    // The horizon radiance IS the fog colour: core/renderer.js puts fogColor
+    // through the same tone-map + encode the rest of the frame rides, and
+    // core/sky.js paints the dome's horizon stop to match it, so taking it
+    // verbatim is the one choice that cannot produce a seam. The upper sky is
+    // the same radiance pulled down and toward a deep blue — that is what a
+    // rough water surface actually reflects, and it is why the far sea has a
+    // colour at all instead of mirroring the brightest band in the sky.
+    const lookOn = surfaceLookOn();
+    if (u.uSkyLow) {
+      const fog = CBZ.scene && CBZ.scene.fog && CBZ.scene.fog.color;
+      if (fog) u.uSkyLow.value.copy(fog);
+    }
+    if (u.uSkyHigh) {
+      _skyHigh.copy(SKY_HIGH_NIGHT).lerp(SKY_HIGH_DAY, Math.max(0, Math.min(1, +CBZ.dayness || 0)));
+      u.uSkyHigh.value.copy(u.uSkyLow ? u.uSkyLow.value : SKY_HIGH_DAY).lerp(_skyHigh, 0.86);
+    }
+    if (u.uLook) {
+      const v = u.uLook.value;
+      // A storm is rougher water, not calmer: chop widens the lanes and pushes
+      // the roughness term without touching a single amplitude.
+      v.x = lookOn ? 1.0 : 0.0;
+      v.y = lookOn ? 1.0 + wet * 0.45 : 0.0;
+      v.z = lookOn ? 1.0 : 0.0;
+      v.w = lookOn ? 1.0 + wet * 0.25 : 0.0;
+    }
   };
 
   // ============================================================
@@ -1002,6 +1109,10 @@
       "uniform vec4 uSwash;",
       "uniform float uGlitter;",
       "uniform float uShoreFx;",
+      "uniform vec3 uSkyLow;",
+      "uniform vec3 uSkyHigh;",
+      "uniform vec2 uWindDir;",
+      "uniform vec4 uLook;",
       // Written by waterVertexBody(); == the surface normal's Y, i.e. the
       // cosine of the tilt. Both sea materials inject that body, so this
       // varying is always driven.
@@ -1092,6 +1203,13 @@
       "  return clamp(breaker * rise * uSurf.w * 0.72 + edge * 0.85 + wash * 0.55, 0.0, 1.0) * distFade;",
       "}",
       // --- whitecaps on open-sea crests -----------------------------------
+      // WATER_SURFACE_LOOK also RETUNES this, because the old numbers put a
+      // permanent milky spray over a dead-calm sea: the crest threshold rises
+      // (uCapThresh 0.62 -> 0.86, driven in waterDriveCommonUniforms) and the
+      // calm-weather gain drops to a fifth, while the WEATHER term is scaled
+      // back up so a squall breaks harder than it used to. Reference: flat
+      // northern water carries wind ripple and no whitecaps at all until it
+      // blows.
       // Crest HEIGHT alone smears foam down the whole flank of a swell. Real
       // whitecaps live on the tipping apex, and the apex of a wave is its
       // FLATTEST part — so a high power of the surface tilt cosine isolates it
@@ -1107,7 +1225,7 @@
       "  vec4 fw = cbzWaterField(p);",
       "  float shoal = 1.0 - smoothstep(0.0, 0.30, clamp(fw.b, 0.0, 1.0));",
       "  float breaking = mix(1.0, 2.30, shoal * (1.0 - inland));",
-      "  return cap * steep * breaking * distFade * (1.0 - inland * 0.85) * (0.28 + uChop * 0.9);",
+      "  return cap * steep * breaking * distFade * (1.0 - inland * 0.85) * mix(0.28, 0.055, step(0.001, uLook.x)) * (1.0 + uChop * 3.1);",
       "}",
       // --- fresnel-weighted sun glitter -----------------------------------
       // A wide, rough lobe (the glitter path a real sea makes) plus a tight
@@ -1143,6 +1261,176 @@
       "    c += uMoonColor * ((mw * 0.30 + mt * 1.45 * sharp) * (0.20 + fres * 1.2) * uGlitter * mup * uMoon * (0.35 + distFade * 0.65));",
       "  }",
       "  return c;",
+      "}",
+
+      /* ================= WATER_SURFACE_LOOK ==============================
+         Everything below is SHADING ONLY. It reads world XZ, the shared
+         clock, the baked field and the view vectors; it writes no height and
+         no slope, so the amplitude budget, the CPU wave query, buoyancy, the
+         swimmer and every hull are untouched by construction. Both sea
+         materials call these, so the shader sea and the planar mirror cannot
+         drift apart.                                                       */
+
+      // --- STREAK LANES ----------------------------------------------------
+      // One very low-frequency lookup, stretched ~9x along the wind, giving
+      // long bands of "this lane of water is rougher than that one". A real
+      // sea is never uniformly textured — it is lanes — and the same mask is
+      // what turns a single specular blob into the reference's sheen streaks.
+      "float cbzLane(vec2 p) {",
+      "  if (uLook.y < 0.001) return 0.5;",
+      "  vec2 d = normalize(uWindDir); vec2 q = vec2(-d.y, d.x);",
+      "  vec2 uv = vec2(dot(p, d) * 0.00085, dot(p, q) * 0.00760) + vec2(uSeaTime * 0.00090, uSeaTime * 0.00035);",
+      "  float s = texture2D(uSeaNormal, uv).r;",
+      "  return clamp(0.5 + (s - 0.5) * (1.9 * uLook.y), 0.0, 1.0);",
+      "}",
+
+      // --- MULTI-OCTAVE WIND RIPPLE ----------------------------------------
+      // Three samples of the ONE shared tile, each in its own rotated frame,
+      // each stretched along the wind so the crests run ACROSS it, at scales
+      // with no common factor so the three tilings never line up into a grid.
+      // Each octave's gradient is rotated back into world space before it is
+      // summed (the stretch is therefore a real anisotropy, not a smear), and
+      // the two fine octaves fade out by distance ON THEIR OWN so the near
+      // field keeps sub-metre wavelets while the far field cannot alias.
+      "vec3 cbzRippleN(vec2 p, float dist) {",
+      "  vec2 d0 = normalize(uWindDir); vec2 q0 = vec2(-d0.y, d0.x);",
+      "  vec2 g = vec2(0.0);",
+      "  vec2 uv; vec3 n; vec2 d; vec2 q;",
+      // DOMAIN WARP. One 256-texel tile sampled on a lattice IS a lattice, and
+      // from a helicopter the ~23 m octave read as a visible grid of cells
+      // marching to the horizon. Displacing the lookup by a very low-frequency
+      // read of the same tile destroys the lattice for one texture fetch: the
+      // pattern still repeats, but never on a straight line and never in step
+      // with itself. (This is why there is still only ONE ripple texture.)
+      "  vec3 wp = texture2D(uSeaNormal, p * 0.00135 + vec2(uSeaTime * 0.00042, uSeaTime * -0.00026)).rgb;",
+      "  vec2 warp = (wp.rg - 0.5) * 0.55;",
+      // octave 1 — ~23 m across the wind, 2.4x long. The one that survives to
+      // the horizon.
+      "  d = d0; q = q0;",
+      "  uv = vec2(dot(p, d) * 0.0182, dot(p, q) * 0.0437) + warp + vec2(uSeaTime * 0.0165, uSeaTime * -0.0060);",
+      "  n = texture2D(uSeaNormal, uv).rgb * 2.0 - 1.0;",
+      "  g += (d * n.r * 0.0182 + q * n.g * 0.0437) * 1.00;",
+      // octave 2 — ~9 m, rotated 37 degrees off the wind
+      "  d = normalize(d0 * 0.7986 + q0 * 0.6018); q = vec2(-d.y, d.x);",
+      "  uv = vec2(dot(p, d) * 0.0397, dot(p, q) * 0.1110) + warp * 1.7 + vec2(uSeaTime * 0.0410, uSeaTime * 0.0128);",
+      "  n = texture2D(uSeaNormal, uv).rgb * 2.0 - 1.0;",
+      "  g += (d * n.r * 0.0397 + q * n.g * 0.1110) * (0.72 * (1.0 - smoothstep(90.0, 620.0, dist)));",
+      // octave 3 — ~3.6 m, rotated the other way; the wavelet field you see
+      // from a boat deck, gone before it can twinkle
+      "  d = normalize(d0 * 0.4384 - q0 * 0.8988); q = vec2(-d.y, d.x);",
+      "  uv = vec2(dot(p, d) * 0.0863, dot(p, q) * 0.2760) + warp * 3.1 + vec2(uSeaTime * 0.0980, uSeaTime * -0.0355);",
+      "  n = texture2D(uSeaNormal, uv).rgb * 2.0 - 1.0;",
+      "  g += (d * n.r * 0.0863 + q * n.g * 0.2760) * (0.46 * (1.0 - smoothstep(18.0, 150.0, dist)));",
+      "  return normalize(vec3(g.x * 8.6, 1.0, g.y * 8.6));",
+      "}",
+
+      // --- THE SHORE CALM BAND ---------------------------------------------
+      // Under a headland the water goes glassy for a few tens of metres before
+      // the ripple field starts. field.b is normalised distance into deep
+      // water (1.0 == 420 m), so this is a ~10-70 m strip that follows the real
+      // coastline for free, plus the last couple of metres of wash.
+      "float cbzShoreCalm(vec4 field) {",
+      "  if (uShoreFx < 0.5 || uLook.z < 0.001) return 0.0;",
+      "  float band = 1.0 - smoothstep(0.022, 0.165, clamp(field.b, 0.0, 1.0));",
+      "  float wash = smoothstep(0.60, 0.99, clamp(field.g, 0.0, 1.0));",
+      "  return clamp(max(band * 0.88, wash * 0.55) * uLook.z, 0.0, 1.0);",
+      "}",
+
+      // --- DISTANCE IS ROUGHNESS -------------------------------------------
+      // The ripple normal MUST fade with distance or the horizon crawls, but a
+      // faded normal is a MIRROR, and a mirror at a grazing angle returns the
+      // brightest band of the sky — which is exactly how this ocean turned
+      // into a white sheet. Hand the fade's energy to a roughness term
+      // instead: it pre-filters the reflection (below) and relaxes the Fresnel
+      // curve, which is what a microfacet surface does and what puts the sea's
+      // own colour back into the distance.
+      //
+      // It is a FOOTPRINT, not a distance. A 0.4 m wavelet 20 m from a
+      // standing camera is already two pixels tall, because a grazing view
+      // compresses the surface by 1/cos: the metres of water behind one pixel
+      // go as dist / (N.V). Keying the term to raw distance would leave the
+      // whole near field of an eye-height shot — where this ocean actually
+      // looked worst — behaving like a polished mirror.
+      "float cbzRough(float dist, float ndv) {",
+      "  float foot = dist / max(clamp(ndv, 0.0, 1.0), 0.02);",
+      "  return clamp(smoothstep(22.0, 420.0, foot) * uLook.w, 0.0, 1.0);",
+      "}",
+
+      // Sharp (mirror) Fresnel near, relaxed (rough) Fresnel far. Identical to
+      // the old expression at footprint 0, so the near field is unchanged.
+      // The rough curve is deliberately far flatter than Schlick: a wind-ripple
+      // field has ~15-25 degrees of slope variance, so at a grazing view a
+      // third of its facets are turned back toward you and the directional
+      // reflectance never approaches the mirror's 1.0. That single number is
+      // the difference between an ocean and a sheet of white plastic.
+      "float cbzFresnel(float ndv, float dist) {",
+      "  float c = clamp(ndv, 0.0, 1.0);",
+      "  float sharp = 0.028 + 0.972 * pow(1.0 - c, 4.6);",
+      "  float rough = 0.030 + 0.260 * pow(1.0 - c, 1.6);",
+      "  return mix(sharp, rough, cbzRough(dist, c));",
+      "}",
+
+      // The sky as radiance, not as a tint on the water: horizon band (== the
+      // live fog colour) below, deep cool sky above. `bias` lifts the sampled
+      // elevation for a rough surface, whose lobe reaches higher into the sky
+      // than its mirror direction says.
+      "vec3 cbzSkyTone(vec3 R, float bias) {",
+      "  return mix(uSkyLow, uSkyHigh, smoothstep(-0.06, 0.62, R.y + bias));",
+      "}",
+
+      // Pre-filter a REFLECTION SAMPLE (the planar mirror's texel) toward that
+      // analytic sky by distance-roughness, then let the lanes decide which
+      // bands of water catch more of it. Near the camera this returns the
+      // mirror verbatim.
+      "vec3 cbzReflectGrade(vec3 refl, vec3 R, float dist, float ndv, float lane) {",
+      "  float rgh = cbzRough(dist, ndv);",
+      "  vec3 c = mix(refl, cbzSkyTone(R, rgh * 0.12), rgh * 0.92);",
+      // WATER IS DARKER THAN THE SKY IT REFLECTS. The dome is a painted canvas
+      // authored to look right as SKY, and the frame is tone-mapped once for
+      // both — so handing the sea an unattenuated copy of it pushed every water
+      // pixel into the ACES shoulder, where the curve desaturates hard. That is
+      // the whole reason a teal ocean kept coming back grey however the body
+      // tint was set. One reflectance gain fixes the level and the saturation
+      // together; it is inert with the flag off (cbzReflectGrade is only
+      // reached from the WATER_SURFACE_LOOK path).
+      "  return c * mix(1.0, mix(0.80, 1.22, lane) * " + gnum(REFL_GAIN) + ", step(0.001, uLook.x));",
+      "}",
+
+      // --- BROAD SHEEN ------------------------------------------------------
+      // cbzSunGlitter's lobes are pow 24 / pow 220 — a glitter path and a
+      // mirror dot. The reference's dominant light response is neither: it is
+      // a WIDE silvery sheen spread over whole lanes of ripple, brightening
+      // toward the light. One extra broad lobe, lane-modulated, distance-
+      // damped so it cannot become the old white sheet.
+      "vec3 cbzSheen(vec3 N, vec3 V, vec3 L, float lane, float dist, float fres) {",
+      "  if (uLook.x < 0.001) return vec3(0.0);",
+      "  vec3 H = normalize(L + V);",
+      "  float broad = pow(max(dot(N, H), 0.0), 7.0);",
+      "  float up = smoothstep(-0.06, 0.24, L.y);",
+      "  float lanes = mix(0.42, 1.58, lane);",
+      "  float ndv = clamp(dot(N, V), 0.0, 1.0);",
+      "  return uSunColor * (broad * 0.24 * lanes * up * (0.24 + fres * 0.70) * uGlitter * mix(1.0, 0.28, cbzRough(dist, ndv)));",
+      "}",
+
+      // --- THE ONE SURFACE NORMAL -------------------------------------------
+      // geoN is the analytic swell normal from the vertex stage; this adds the
+      // ripple field to it, damped inside the shore calm band. Both sea
+      // materials call THIS, so there is exactly one answer to "which way is
+      // this bit of water facing".
+      "vec3 cbzSeaNormal(vec3 geoN, vec2 p, float dist, float detail, float calm, float lane) {",
+      "  vec3 fine;",
+      "  if (uLook.x > 0.001) {",
+      "    fine = cbzRippleN(p, dist);",
+      "    detail *= mix(0.45, 1.45, lane) * (1.0 - calm * 0.82);",
+      "  } else {",
+      // exact legacy path: the two scrolling samples this replaced
+      "    vec2 f0 = p * 0.036 + vec2(uSeaTime * 0.027, -uSeaTime * 0.018);",
+      "    vec2 f1 = vec2(p.y, -p.x) * 0.061 + vec2(-uSeaTime * 0.019, uSeaTime * 0.023);",
+      "    vec3 a = texture2D(uSeaNormal, f0).rgb * 2.0 - 1.0;",
+      "    vec3 b = texture2D(uSeaNormal, f1).rgb * 2.0 - 1.0;",
+      "    fine = normalize(vec3((a.r + b.r) * 0.34, 1.0, (a.g + b.g) * 0.34));",
+      "  }",
+      "  return normalize(geoN + fine * detail - vec3(0.0, detail, 0.0));",
       "}",
     ].join("\n");
   };

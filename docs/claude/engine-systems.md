@@ -355,6 +355,27 @@ Before building anything adjacent, wire into the existing system:
   in the survival arena for its whole life: a separate mesh has to be taught to
   every water consumer individually. `city/tsunami.js` is the whole main-world
   event and it authors no water, no flood damage model and no panic AI.
+- **THE SEA'S SURFACE LOOK IS ONE SET OF FUNCTIONS** — `WATER_SURFACE_LOOK`
+  (`world/water_spec.js`, gated on the `WATER_V2` master; `?cfg_WATER_SURFACE_LOOK=0`
+  reverts everything at once). The spec owns `CBZ.WATER_TONES` (deep TEAL body
+  colours — day/night/dusk, original navy literals kept as degrade-safe
+  fallbacks) plus nine shared GLSL functions — `cbzSeaNormal` (three-octave,
+  wind-stretched, domain-warped ripple with an exact legacy fallback),
+  `cbzLane`, `cbzShoreCalm`, `cbzRough`, `cbzFresnel`, `cbzSkyTone`,
+  `cbzReflectGrade`, `cbzSheen` — and BOTH sea materials call them: the shader
+  sea (`city/world.js`) and the planar mirror (`world/waterfx.js`, the surface
+  players actually see at tier ≥ 2). THE DIAGNOSIS THAT MATTERS: fading the
+  ripple normal with distance (`WATER_FAR_CALM`) silently turns far water into
+  a MIRROR, and a grazing mirror returns the brightest band of sky — that is
+  what bleached the ocean into a white sheet. The fade now hands its energy to
+  a roughness/footprint term (`cbzRough` = dist / N·V) feeding a rough-surface
+  Fresnel + pre-filtered reflection instead of mirror Schlick, and the vendored
+  mirror's white `sunColor * diffuseLight * 0.3` Lambert wash is cut ~4× and
+  tinted by the water body. Do NOT re-add a per-material ripple or colour: any
+  new water consumer asks water_spec. Preset: `marine-surface.mjs` seascape
+  subjects measure tealIndex / rippleContrast / horizonLift off the framebuffer
+  (measured 2026-08-03: tealIndex −8..−16 → −1..0, water luminance 175 → 92,
+  eye-height rippleContrast ×5, marine-life waterlines within 0.11 m).
 - **WEATHER LEAVES STATE ON THE GROUND** — `CBZ.weatherDrive({… pool, cover})`
   (`systems/weather.js`) + `CBZ.groundWaterSet / groundWaterAt / groundWaterFrontSet
   / groundWaterLevelY / groundWaterFlowAt` (`city/waterfield.js`). OWNER: "rain
@@ -476,6 +497,40 @@ Before building anything adjacent, wire into the existing system:
   ladder does not also GROW the range: a shape change that raises the massif is a
   different change and would move the gate's mountain-cell sets. No octave and no
   noise call was added — the field costs exactly what it did.
+- **A WOOD IS A CARPET, TWO SILHOUETTES AND MANY GREENS** — `CBZ.forestLook`
+  (`world/forestlook.js`): `species(x,z)` · `tint(color,x,z,opts)` ·
+  `bark(...)` · `closure(x,z,{relief,top,slope,curv,cover,weight})` ·
+  `storey(...)` · `stems(...)`. OWNER REFERENCE (coastal Alaska photos,
+  2026-08-03): a forest is a CONTINUOUS canopy on the valley floors (terrain
+  reads as bumps in the crowns, never gaps between lollipops), rounded
+  broadleaf sweeps interleaved in PATCHES with darker conifer spires that
+  poke through the roof, greens running from almost-chartreuse fresh growth
+  to dark blue-green, and a treeline that ENDS GRADUALLY — clumps, fingers up
+  the gullies, krummholz scrub, then meadow. Before this file `continent.js`
+  typed one green ramp, `biome_forest.js` three more and `biome_snow.js` a
+  fifth; none agreed and none knew about slope, aspect, altitude or a stand
+  mask. **It replaces the `col.setRGB(...)` line the caller already wrote**
+  (degrade-safe: `FLOOK ? FLOOK.tint(...) : <old inline>`), and a caller on a
+  sequential `rng()` stream PASSES ITS OWN DRAWS IN (`j0`/`j1`) so adopting
+  it cannot re-deal the world. Everything is `CBZ.hash01`, so order-
+  independent. The backcountry (`city/continent.js`) went from ONE tree per
+  46 m cell at a flat 34% chance — 10,083 stems over 190 km², i.e. parkland —
+  to closure-driven CLUSTERS plus a trunkless 20-triangle roof
+  (`vegetationKit` `canopy-dome`), the conifer `conifer-spire` and a
+  `krummholz` scrub band. **The forest is built as 1.6 km CHUNKS with a
+  throttled distance test**, because r128 frustum-culls an InstancedMesh by
+  its GEOMETRY's bounding sphere — one country-wide mesh is all-or-nothing,
+  and the camera's far plane is 2.2 km, so ~70% of the instances never enter
+  a vertex shader now. Flags `FOREST_LOOK` · `FOREST_SPECIES_MIX` ·
+  `FOREST_CANOPY_CARPET` · `FOREST_ALPINE_GRADIENT`. Ratchet:
+  **`CBZ.forestLookAudit().legacy`** (hand-typed foliage colours left) pinned
+  at **0**, with `tinted`/`species`/`closure` printed beside it so a builder
+  that stops asking cannot pass for a migration; the gate also fails if the
+  backcountry plants under 20k stems. Preset: `tools/visual-presets/forest-look.mjs`.
+  **NOT DONE, and it is the reference's best shot**: `city/biome_snow.js`
+  still carries 130 hand-scattered pines and no treeline gradient — the
+  subalpine wood running up a real mountain into meadow is one
+  `closure`/`storey` call away for whoever owns that file.
 - **Beach/outdoor furniture** — `CBZ.furnish.lounger` / `.deckchair`
   (`city/furniture.js`). A lounger registers a propuse BED, so lying on one runs
   the same walk→perch→swing arc as getting into a bed; a deck chair registers a

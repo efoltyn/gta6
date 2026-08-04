@@ -196,9 +196,13 @@
         // cbzWaveAmp3 (`cfade`), which is what stops the SILHOUETTE crawling
         // too — a normal-only fade leaves the horizon twinkling.
         "float cbzDetail = " + (CBZ.waterFarCalmOn && CBZ.waterFarCalmOn()
-          ? "mix( 0.62, 0.05, smoothstep( 70.0, 1100.0, vDist ) )"
+          ? "mix( 0.62, 0.15, smoothstep( 70.0, 1100.0, vDist ) )"
           : "mix( 0.60, 0.16, smoothstep( 90.0, 1500.0, vDist ) )") +
           " * mix( 1.0, 0.42, cbzInland ) * ( 1.0 + uChop * 0.5 );",
+        // WATER_SURFACE_LOOK — the streak lanes and the shore calm band. Both
+        // collapse to their inert values (0.5 / 0.0) with the flag off.
+        "float cbzLaneAmt = cbzLane( worldPosition.xz );",
+        "float cbzCalm = cbzShoreCalm( cbzField );",
       ].join("\n"),
       "fragment shore field");
 
@@ -207,11 +211,60 @@
     p.at(
       "vec3 surfaceNormal = normalize( noise.xzy * vec3( 1.5, 1.0, 1.5 ) );",
       [
-        "vec3 cbzFine = normalize( noise.xzy * vec3( 1.5, 1.0, 1.5 ) );",
-        "vec3 surfaceNormal = normalize( vSwellN + cbzFine * cbzDetail - vec3( 0.0, cbzDetail, 0.0 ) );",
+        // The vendor's own single-octave getNoise() is the legacy ripple; the
+        // shared cbzSeaNormal replaces it with the wind-stretched three-octave
+        // field (and reproduces the OLD pair exactly when the flag is off), so
+        // the mirror and the shader sea are the same surface to the pixel.
+        "vec3 surfaceNormal = cbzSeaNormal( vSwellN, worldPosition.xz, vDist, cbzDetail, cbzCalm, cbzLaneAmt );",
+        "if ( uLook.x < 0.001 ) {",
+        "  vec3 cbzFine = normalize( noise.xzy * vec3( 1.5, 1.0, 1.5 ) );",
+        "  surfaceNormal = normalize( vSwellN + cbzFine * cbzDetail - vec3( 0.0, cbzDetail, 0.0 ) );",
+        "}",
         "surfaceNormal = mix( surfaceNormal, -surfaceNormal, gl_FrontFacing ? 0.0 : 1.0 );",
       ].join("\n"),
       "fragment surface normal");
+
+    // WATER_SURFACE_LOOK — the two lines that decide whether an ocean has a
+    // colour at all beyond fifty metres.
+    //
+    //   • REFLECTANCE. The vendor's rf0 + (1-rf0)*pow(1-theta,5) is a MIRROR's
+    //     Fresnel, and past a few tens of metres every water pixel is at a
+    //     grazing angle, so it returned ~0.9 and the sea became a sheet of
+    //     reflected sky. cbzFresnel relaxes toward a ROUGH surface's response
+    //     exactly as fast as the ripple normal is faded out for anti-aliasing,
+    //     which is the same trade a real microfacet LOD makes. Identical to the
+    //     vendor expression at distance 0 (and everywhere, flag off).
+    //   • THE SAMPLE. The mirror pass renders the SKY RIG ONLY, so a distant
+    //     texel is a razor-sharp cloud edge painted on water that is no longer
+    //     being told it is rough — the marbled white smears in the reference
+    //     comparison. cbzReflectGrade pre-filters it toward the analytic sky in
+    //     the same reflected direction, and lets the streak lanes decide which
+    //     bands catch the most of it.
+    p.at(
+      "float reflectance = rf0 + ( 1.0 - rf0 ) * pow( ( 1.0 - theta ), 5.0 );",
+      [
+        "float reflectance = mix( rf0 + ( 1.0 - rf0 ) * pow( ( 1.0 - theta ), 5.0 ),",
+        "                         cbzFresnel( theta, vDist ), step( 0.001, uLook.x ) );",
+        "reflectionSample = cbzReflectGrade( reflectionSample, reflect( -eyeDirection, surfaceNormal ), vDist, theta, cbzLaneAmt );",
+      ].join("\n"),
+      "fragment reflectance");
+
+    // WATER IS NOT A DIFFUSE SURFACE. The vendor adds `sunColor * diffuseLight
+    // * 0.3` — a flat white Lambert wash worth ~0.135 of linear radiance on a
+    // sunlit sea, which is MORE than the whole body colour contributes and is
+    // most of why this ocean read as pale grey-green plastic whatever the tint
+    // was set to. What actually comes back out of water toward the sun is
+    // sub-surface scatter, and it is the colour of the WATER, not of the sun.
+    // Keep a tenth of it, tinted by the body. Flag off -> the vendor term.
+    p.at(
+      "vec3 albedo = mix( ( sunColor * diffuseLight * 0.3 + scatter ) * getShadowMask(), reflectionSample + specularLight, reflectance );",
+      [
+        "vec3 cbzWash = mix( sunColor * diffuseLight * 0.3,",
+        "                    sunColor * diffuseLight * 0.075 * ( 0.30 + cbzBody * 2.6 ),",
+        "                    step( 0.001, uLook.x ) );",
+        "vec3 albedo = mix( ( cbzWash + scatter ) * getShadowMask(), reflectionSample + specularLight, reflectance );",
+      ].join("\n"),
+      "fragment albedo wash");
 
     // Depth-graded body colour: turquoise shallows, deep blue offshore, a
     // green calm over registered inland lakes.
@@ -220,6 +273,10 @@
       [
         "vec3 cbzBody = cbzDepthColor( waterColor, cbzField, cbzInland );",
         "vec3 scatter = max( 0.0, dot( surfaceNormal, eyeDirection ) ) * cbzBody;",
+        // A rough sea is not a dark mirror: the body colour has to survive the
+        // reflection, so lift the scatter term as roughness rises. Without
+        // this the graded reflection alone still washes the teal out.
+        "scatter = mix( scatter, cbzBody * ( 0.55 + 0.45 * max( 0.0, dot( surfaceNormal, eyeDirection ) ) ), cbzRough( vDist, theta ) * 0.85 );",
       ].join("\n"),
       "fragment depth colour");
 
@@ -229,6 +286,7 @@
       [
         "vec3 cbzOut = outgoingLight;",
         "cbzOut += cbzSunGlitter( surfaceNormal, eyeDirection, normalize( uSunDir ), reflectance, vFade ) * mix( 1.0, 0.30, cbzInland );",
+        "cbzOut += cbzSheen( surfaceNormal, eyeDirection, normalize( uSunDir ), cbzLaneAmt, vDist, reflectance ) * mix( 1.0, 0.35, cbzInland );",
         "float cbzSurfAmt = cbzSurf( worldPosition.xz, cbzField, vSwellH, vFade );",
         "float cbzCapAmt = cbzWhitecap( worldPosition.xz, vSwellH, vFade, cbzInland );",
         "float cbzUnder = gl_FrontFacing ? 0.0 : 1.0;",
@@ -292,7 +350,8 @@
       textureWidth: mirrorSize(),
       textureHeight: mirrorSize(),
       alpha: 1.0,
-      waterColor: 0x0d3b58,      // matches world.js's day sea; re-tinted per frame
+      // ONE table (world/water_spec.js): world.js's day sea, re-tinted per frame
+      waterColor: (CBZ.WATER_TONES && CBZ.WATER_TONES.day != null) ? CBZ.WATER_TONES.day : 0x0d3b58,
       sunColor: 0xfff4e0,
       sunDirection: _sunDir.clone(),
       // Livelier than before: the surface now has real geometric relief for

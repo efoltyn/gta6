@@ -735,6 +735,110 @@
     return mat;
   };
 
+  /* ---- AERIAL PERSPECTIVE — a far range must go PALE, not merely dim ----
+     Fog converges everything on ONE colour at ONE length scale, and this
+     file's terrain deliberately runs it at 0.12 (see FOG_SCALE) so a 3 km
+     range keeps its presence instead of dissolving. That is right for
+     PRESENCE and wrong for DEPTH, and the two are separate problems:
+
+       • fog is a grey/cyan LERP — it takes a saturated green ridge to the
+         sky colour along a straight line, so at 40% fog the ridge is still
+         40% as green as the headland in front of it and the two read at the
+         same distance;
+       • real aerial perspective DESATURATES FIRST and only then brightens
+         (Rayleigh scatter adds a blue-white veil in front of the object
+         while absorption eats its own colour), and it acts over KILOMETRES,
+         not across the city's fog wall.
+
+     In the owner's reference photographs the near headlands are almost
+     black-green while a snow range four ridgelines behind them is a pale
+     desaturated blue-white that reads nearly as sky — and every ridgeline
+     between is a distinct step paler than the one in front. That LAYERING is
+     the whole depth cue, and it is what the game's mountains had none of.
+
+     So this is one extra term, not a second fog: a saturate→pale-blue ramp
+     over [start, full] metres of view distance, applied before <fog_fragment>
+     so the live fog (day/night/weather correct) still lands on top.
+     TWO GATES keep it inside this territory:
+       • it acts only on land above `minY` — the sea bed and the shoreline
+         belong to the water look and must not be touched;
+       • the pale colour TRACKS THE LIVE FOG COLOUR (lifted toward blue-white
+         and scaled by CBZ.dayness), so a range does not glow pale blue at
+         midnight or stay cold under a sunset sky.
+     Chain-safe exactly like terrainDayTint. `?cfg_TERRAIN_AERIAL_V1=0`
+     reverts to the pure-fog look. */
+  if (CFG.TERRAIN_AERIAL_V1 == null) CFG.TERRAIN_AERIAL_V1 = true;
+  const _aerColU = { value: new THREE.Color(0xc9d8e4) };
+  const _aerDefault = new THREE.Color(0xc9d8e4);
+  const _aerTmp = new THREE.Color();
+  let _aerHooked = false;
+  function aerialTick() {
+    const c = _aerColU.value;
+    const fog = CBZ.scene && CBZ.scene.fog;
+    if (fog && fog.color) _aerTmp.copy(fog.color); else _aerTmp.copy(_aerDefault);
+    // Lift the fog hue toward a cool blue-white: haze over a distant range is
+    // brighter and bluer than the fog immediately around the camera, because
+    // there are kilometres more air scattering into the line of sight.
+    _aerTmp.r = _aerTmp.r * 0.80 + 0.16;
+    _aerTmp.g = _aerTmp.g * 0.82 + 0.18;
+    _aerTmp.b = _aerTmp.b * 0.84 + 0.22;
+    // Night must not leave a self-lit pale veil hanging on the ridgelines.
+    const day = CBZ.dayness != null ? Math.max(0, Math.min(1, +CBZ.dayness)) : 1;
+    const k = 0.34 + 0.66 * day;
+    c.setRGB(_aerTmp.r * k, _aerTmp.g * k, _aerTmp.b * k);
+  }
+  const _aerRangeU = new Map();     // one shared uniform per distinct band
+  CBZ.terrainAerial = function (mat, o) {
+    if (!mat || CFG.TERRAIN_AERIAL_V1 === false) return mat;
+    o = o || {};
+    const start = o.start == null ? 900 : o.start;
+    const full = o.full == null ? 5200 : o.full;
+    const minY = o.minY == null ? 8 : o.minY;
+    const maxY = o.maxY == null ? 40 : o.maxY;      // fully "land" by here
+    const amt = o.amount == null ? 0.72 : o.amount;
+    const key = start + "|" + full + "|" + minY + "|" + maxY + "|" + amt;
+    let u = _aerRangeU.get(key);
+    if (!u) {
+      u = {
+        range: { value: new THREE.Vector4(start, full, minY, maxY) },
+        amount: { value: amt },
+      };
+      _aerRangeU.set(key, u);
+    }
+    const prev = mat.onBeforeCompile;
+    mat.onBeforeCompile = function (sh) {
+      if (prev) prev.call(this, sh);
+      sh.uniforms.uCbzAerRange = u.range;
+      sh.uniforms.uCbzAerAmt = u.amount;
+      sh.uniforms.uCbzAerCol = _aerColU;            // SHARED — one tick drives all
+      sh.vertexShader = "varying vec2 vCbzAer;\n" + sh.vertexShader
+        .replace("#include <project_vertex>",
+          "#include <project_vertex>\n" +
+          "vCbzAer = vec2(-mvPosition.z, (modelMatrix * vec4(transformed, 1.0)).y);");
+      sh.fragmentShader = "uniform vec4 uCbzAerRange;\nuniform float uCbzAerAmt;\n" +
+        "uniform vec3 uCbzAerCol;\nvarying vec2 vCbzAer;\n" +
+        sh.fragmentShader.replace("#include <fog_fragment>",
+          "float cbzAerD = smoothstep(uCbzAerRange.x, uCbzAerRange.y, vCbzAer.x);\n" +
+          "float cbzAerL = smoothstep(uCbzAerRange.z, uCbzAerRange.w, vCbzAer.y);\n" +
+          "float cbzAer = cbzAerD * cbzAerL * uCbzAerAmt;\n" +
+          "float cbzAerLum = dot(gl_FragColor.rgb, vec3(0.299, 0.587, 0.114));\n" +
+          "gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(cbzAerLum), 0.85 * cbzAer);\n" +
+          "gl_FragColor.rgb = mix(gl_FragColor.rgb, uCbzAerCol, cbzAer);\n" +
+          "#include <fog_fragment>");
+    };
+    mat.needsUpdate = true;
+    mat.userData = mat.userData || {};
+    mat.userData._cbzAerial = true;
+    // The live uniform objects, hung where a probe can reach them. Aerial
+    // perspective is the one part of this that cannot be checked by reading
+    // numbers off the world — it lives in the fragment shader — so the tuning
+    // loop needs to be able to drive it from outside without a rebuild.
+    mat.userData._cbzAerialU = u;
+    mat.userData._cbzAerialColU = _aerColU;
+    if (!_aerHooked && CBZ.onAlways) { _aerHooked = true; CBZ.onAlways(91.6, aerialTick); }
+    return mat;
+  };
+
   /* ======================================================================
      V3 — the reference algorithm, ported.
   ====================================================================== */
@@ -1092,8 +1196,13 @@
     bedSilt: new THREE.Color(0x928363),    // ref 3 middle distance
     bedShelf: new THREE.Color(0x3d5c67),   // ref 4 — the shelf going over
     bedDeep: new THREE.Color(0x101d2c),    // ref 5 — abyssal sediment
-    dry: new THREE.Color(0x707252), moistV: new THREE.Color(0x4b6a49),
-    forest: new THREE.Color(0x374f3a),
+    // The vegetated flank is the reference's loudest colour: a coastal range
+    // is DENSE saturated green from the waterline up, not the grey-olive a
+    // desaturated ramp gives. dry (the exposed shoulder) is unchanged — the
+    // contrast between a wet gully and a dry spur is what makes the moisture
+    // field visible at all; only the wet/forest stops go greener.
+    dry: new THREE.Color(0x707252), moistV: new THREE.Color(0x44693f),
+    forest: new THREE.Color(0x2f4a33),
     granite: new THREE.Color(0x5f5b54), graniteD: new THREE.Color(0x293033),
     snow: new THREE.Color(0xf8fafb), snowSh: new THREE.Color(0xd4dfe2),
   };
@@ -1132,14 +1241,25 @@
       out.lerp(C3.bedDeep, smooth(22, 56, col));
       return;
     }
-    if (y < 2.6) {                                      // shoreline sand
+    /* ---- A BEACH ONLY WHERE THE SHORE IS FLAT -------------------------
+       A fjord wall has no beach: the forest goes straight into the water,
+       and that abrupt green-meets-sea edge is most of what makes the
+       reference read as a drowned mountain range rather than an island with
+       hills on it. The old ramp gave EVERY metre of coastline the same 12 m
+       sand apron whatever the ground did behind it, which hung a pale collar
+       around ranges that should rise green out of the sea. Both stops now
+       collapse with slope — 12 m of apron on a flat strand, under 2 m on a
+       headland — so a beach is somewhere the land arrives gently. */
+    const steepShore = smooth(0.15, 0.44, slope);
+    const shoreTop = 2.6 - 2.1 * steepShore;
+    if (y < shoreTop) {                                 // shoreline sand
       out.copy(C3.shallow).lerp(C3.sand, smooth(-0.6, 1.6, y));
       return;
     }
     // vegetation base: dry↔moist by the moisture field, deepening to forest
     _veg.copy(C3.dry).lerp(C3.moistV, fld.moist);
-    _veg.lerp(C3.forest, smooth(24, 170, y) * (0.35 + fld.moist * 0.5));
-    out.copy(C3.sand).lerp(_veg, smooth(2.6, 12, y));
+    _veg.lerp(C3.forest, smooth(18, 150, y) * (0.42 + fld.moist * 0.5));
+    out.copy(C3.sand).lerp(_veg, smooth(shoreTop, shoreTop + 12 - 10 * steepShore, y));
     // ---- RIVER BED: gravel bars in the channel, a wetted line at the thalweg
     if (CFG.TERRAIN_RIVER_BANKS !== false && fld.rivBed > 0.01 && y < snowY - 30) {
       out.lerp(C3_GRAVEL, Math.min(0.85, fld.rivBed * 0.9));
@@ -1148,11 +1268,19 @@
     if (CFG.TERRAIN_STRATA !== false && CBZ.mtnStrataTint) {
       // ---- BANDED ROCK: per-bed hue + a shadowed bedding contact, blended in
       // by SLOPE (steep = bare rock, shallow = soil), not by altitude alone.
+      // THE GREEN CLIMBS BEFORE IT GIVES WAY. Below the treeline, and most of
+      // all in the wet valleys, vegetation survives ground far too steep for
+      // the old pure-slope window — so the exposure band slides uphill in
+      // slope by up to 0.30 (about 17°) down there and sits exactly where it
+      // did above the treeline, where bare rock genuinely is the answer.
+      const treeline = snowY - 95;
+      const vegHold = (1 - smooth(treeline - 130, treeline, y)) * (0.34 + 0.66 * fld.moist);
       const bare = CBZ.mtnStrataTint(_rk, x, z, y, slope, faceLight, {
         rock: C3.granite, rockDark: C3.graniteD,
         // identical bedding params to the mtnTerrace call in v3Field
         step: 26, dip: 44, dipCell: 900, dipCell2: 250,
         slope0: 0.22, slope1: 0.58, salt: 0x7e11, aspect: 1,
+        vegHold: vegHold, vegSlope: 0.30,
       });
       out.lerp(_rk, Math.min(0.94, bare));
       // talus apron: just below the steep bands the ground is loose scree
@@ -1166,9 +1294,16 @@
     // it far lower than steep sunlit ones, and the edge is noise-feathered.
     let sn;
     if (CBZ.mtnSnowCover && CFG.MOUNT_SNOW_ASPECT_V1 !== false) {
+      // CONCAVITY IS FREE HERE. v3Field's drainage already computed `carve`
+      // (0 on an interfluve rim, 0.5 on the thalweg), so the couloir signal
+      // costs nothing but a remap — and it is the SAME field that cut the
+      // channels geometrically, so the white streaks land in the real gullies
+      // instead of floating across them.
       sn = CBZ.mtnSnowCover(x, z, y, slope, faceLight, {
         line: snowY - 40, band: 74, aspect: 62, wob: 40,
         shed0: 0.20, shed1: 0.66, salt: 0x7e22,
+        concave: fld.carve * 4 - 1, gully: 70, spine: 0.55,
+        patch: 0.85, patchCell: 300,
       });
     } else {
       sn = smooth(snowY - 70, snowY, y + (wob - 0.5) * 44);
@@ -1260,6 +1395,12 @@
       color: 0xffffff, vertexColors: true, flatShading: !SMOOTH_SHADE, fog: true,
       transparent: false, opacity: 1, depthTest: true, depthWrite: true,
     })));
+    // Layered depth: this backdrop is the ring of headlands and ranges BEHIND
+    // everything else, spanning ~1-8 km from the coast, so it is where the
+    // reference's receding pale ridgelines have to happen. Gated to land above
+    // 8 m — the seabed and the surf line inside these same tiles keep exactly
+    // the colour the water pass gave them.
+    CBZ.terrainAerial(terrMat, { start: 1100, full: 6400, minY: 8, maxY: 46, amount: 0.74 });
     const _c = new THREE.Color();
     const _nrm = new THREE.Vector3();
     const _lightDir = new THREE.Vector3(-0.36, 0.83, 0.43).normalize();
