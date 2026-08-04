@@ -17,11 +17,15 @@
         (NDC projection) before the screenshot; shots → tools/shots/ocean-*.png
    ANY page console error fails. Non-zero exit on any failure. */
 import { spawn } from "node:child_process";
-import { rm, writeFile } from "node:fs/promises";
+import { rm, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const OUTDIR = ROOT + "/tools/shots";
+// tools/shots/ is gitignored, so on a FRESH CLONE it does not exist and the
+// screenshot write ENOENTs AFTER the whole run has already passed — which is
+// how this cost a green pre-deploy render gate. Create it, like touch-hud-check does.
+await mkdir(path.dirname(OUT), { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const port = 8960 + Math.floor(Math.random() * 10);
 const dbg = 9960 + Math.floor(Math.random() * 10);

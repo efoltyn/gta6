@@ -4,13 +4,17 @@
    The pass/fail gate for rig/vehicle refactors: the city must come up clean.
    Usage: node tools/smoke-play.mjs [seconds=12] [out.png] */
 import { spawn } from "node:child_process";
-import { rm, writeFile } from "node:fs/promises";
+import { rm, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const RUN_S = +(process.argv[2] || 12);
 const OUT = process.argv[3] || path.join(ROOT, "tools/shots/smoke-play.png");
+// tools/shots/ is gitignored, so on a FRESH CLONE it does not exist and the
+// screenshot write ENOENTs AFTER the whole run has already passed — which is
+// how this cost a green pre-deploy render gate. Create it, like touch-hud-check does.
+await mkdir(path.dirname(OUT), { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const T0 = Date.now();
 const tmark = (label) => console.log(`[t+${((Date.now() - T0) / 1000).toFixed(1)}s] ${label}`);
