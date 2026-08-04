@@ -108,6 +108,7 @@
       <button class="mode-btn active" type="button" data-mode="city"><span>Gang Life</span><small>Turf, gangs, cops</small></button>
       <button class="mode-btn" type="button" data-mode="escape"><span>Prison Escape</span><small>Stealth &amp; survival</small></button>
       <button class="mode-btn" type="button" data-mode="survival"><span>Disaster Survival</span><small>100 players · last alive</small></button>
+      <button class="mode-btn" type="button" data-mode="gungame"><span>Gun Game</span><small>Pick a map · climb the ladder</small></button>
     </div>
 
     <!-- ESCAPE mode -->
@@ -555,6 +556,9 @@
 <script src="src/systems/grapple.js?v=intact1"></script>
 <script src="src/entities/survivorbot.js?v=nozone1"></script>
 <script src="src/modes/survival.js?v=nozone1"></script>
+<!-- GUN GAME borrows worlds it never builds: the prison (escape), the disaster
+     island (survival). Loads AFTER both so their builders exist. -->
+<script src="src/modes/gungame.js?v=gg1"></script>
 <!-- THE SHAFT IS SHARED: world/groundshaft.js owns every hole in the ground
      (survival sinkholes today, CITY_SINKHOLES tomorrow). Must precede
      systems/disasters.js so the roster finds CBZ.groundShaft at load. -->
