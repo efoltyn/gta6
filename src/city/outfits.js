@@ -2127,13 +2127,46 @@
      `setsRebuilt` (clothes.js atlas entries rebuilt from a dead texture —
      expected 0). Both are printed so a "fix" that just stops dressing anybody
      cannot pass: rigs and repaired have to stay honest beside bare.
-     NOT YET PINNED — whoever runs it first writes the number in (do not repeat
-     the propUseAudit mistake of pinning a guess). */
+     RUN AND PINNED 2026-08-04 (seed 90210, 600 sim ticks from a campaign boot,
+     the whole live roster): rigs 128, bare 0, deadTex 0, repaired 0, pinned 0,
+     setsRebuilt 0, instHeld 476, instHoles 0. bare / deadTex / instHoles are
+     pinned at 0 in tools/math-gate.mjs; rigs and instHeld are EVIDENCE, not
+     invariants — they move with the population, and they are printed so a "fix"
+     that works by dressing nobody, or by switching the instancer off, cannot
+     pass.
+
+     WHAT THIS AUDIT COULD NOT SEE UNTIL TODAY, which is why instHeld exists.
+     entities/pedinstance.js (default ON since 2026-08-03) stops a body part
+     drawing by moving it to a private LAYER and drawing it from an
+     InstancedMesh pool instead. clothMeshRenders() — the shared definition
+     every line of this file rests on — tested visible / parent / geometry /
+     material, and a layer-hidden mesh passes all four. Measured before the fix,
+     same seed: 334 garment meshes on that layer, 334 of them called healthy,
+     bare 0. So the guarantee that exists to stop a body rendering with a hole
+     in it was blind to the newest thing that can put one there, and would have
+     stayed blind however many times anybody ran it. clothes.js now asks the
+     instancer (CBZ.pedInstanceDraws) and the repair hands the mesh back
+     (CBZ.pedInstanceRelease) before rebuilding it. Verified by fault injection:
+     parking one live chest's pool slot moves bare 0 -> 1 and instHoles 0 -> 1
+     with nothing else about that mesh changed, and the body comes back on its
+     own inside a sweep. */
   CBZ.outfitIntegrityAudit = function () {
     const BARE = CBZ.cityClothesBare, MATOK = CBZ.cityClothMatOk;
     const out = {
       rigs: 0, bare: 0, deadTex: 0, repaired: _integRepaired, pinned: _integPinned,
       setsRebuilt: CBZ.cityClothesSetsRebuilt ? CBZ.cityClothesSetsRebuilt() : 0,
+      // WHAT THE INSTANCER IS HOLDING. entities/pedinstance.js draws most of
+      // the city's garment boxes from pools and hides the originals on a
+      // private layer; `instHeld` is how many of this audit's cloth meshes are
+      // in its hands right now, and `instHoles` how many of those it is NOT
+      // carrying — a garment that renders nothing while every other test in
+      // this file calls it healthy. instHoles is the number to pin at 0.
+      // Reported beside `bare` rather than folded into it because they are
+      // different producers with different repairs, and a merged number would
+      // hide which one moved. (instHoles is ALSO counted in `bare` — clothes.js
+      // teaches clothMeshRenders about the layer — so bare stays the one
+      // question "is anybody rendering with a hole in them".)
+      instHeld: 0, instHoles: 0,
       guarantee: guaranteeOn(), sample: [],
     };
     if (!BARE) return out;
@@ -2155,13 +2188,20 @@
           out.sample.push((p.name || p.job || p.kind || "?") + ":" + holes + (ch._clothesKey ? "@" + ch._clothesKey : ""));
         }
       }
-      if (!MATOK) continue;
+      const DRAWS = CBZ.pedInstanceDraws;
+      if (!MATOK && !DRAWS) continue;
       for (let k = 0; k < SLOTS.length; k++) {
         const list = s[SLOTS[k]];
         if (!list) continue;
         for (let j = 0; j < list.length; j++) {
-          const m = list[j] && list[j].material;
-          if (m && m.map && !MATOK(m)) out.deadTex++;
+          const mesh = list[j];
+          if (!mesh) continue;
+          const m = mesh.material;
+          if (MATOK && m && m.map && !MATOK(m)) out.deadTex++;
+          if (DRAWS) {
+            const held = DRAWS(mesh);
+            if (held !== null) { out.instHeld++; if (held === false) out.instHoles++; }
+          }
         }
       }
     }

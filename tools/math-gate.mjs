@@ -917,9 +917,20 @@ const PASS = `(() => {
       const oi = CBZ.outfitIntegrityAudit();
       out.outfits = oi.rigs + " rigs bare=" + oi.bare + " deadTex=" + oi.deadTex +
                     " repaired=" + oi.repaired + " pinned=" + oi.pinned +
+                    " instHeld=" + oi.instHeld + " instHoles=" + oi.instHoles +
                     (oi.sample && oi.sample.length ? " " + JSON.stringify(oi.sample) : "");
       if (oi.bare > 0) out.fails.push("BARE RIGS (invisible outfit regions): " + oi.bare + " " + JSON.stringify(oi.sample));
       if (oi.deadTex > 0) out.fails.push("DEAD CLOTH TEXTURES: " + oi.deadTex);
+      // THE THIRD PRODUCER OF THE SAME SYMPTOM, now visible to this gate.
+      // entities/pedinstance.js draws most garment boxes from instance pools
+      // and hides the originals on a private LAYER, which is a way to empty a
+      // person that visible/parent/geometry/material cannot detect - until
+      // 2026-08-04 the four tests above called 334 layer-hidden meshes healthy
+      // on this very seed. instHeld is evidence (how many garment meshes the
+      // instancer is carrying, ~400-500 here; a collapse to 0 means the system
+      // stopped running, not that it got safe). instHoles is the invariant:
+      // a garment the instancer hid and is NOT drawing. PINNED AT 0.
+      if (oi.instHoles > 0) out.fails.push("PED-INSTANCED GARMENT HOLES: " + oi.instHoles + " of " + oi.instHeld + " held");
     }
     // ---- evidence only (adoption counters / world census) ------------------
     if (CBZ.predatorAudit) { const p = CBZ.predatorAudit(); out.predator = p.legacy + "/" + p.adopted; }
@@ -988,6 +999,12 @@ async function runSeed(seed, label) {
   tmark(`${label}: arena ${r.arena || "-"} | frontGlass ${r.frontGlass || "-"} | elevators ${r.elevators || "-"}`);
   tmark(`${label}: map ${r.map || "-"} | crowdSpawn ${r.crowdSpawn || "-"} | platforms ${r.platforms == null ? "-" : r.platforms}`);
   tmark(`${label}: cockpit ${r.cockpit || "-"} | wounds ${r.wounds || "-"} | cabin ${r.cabin || "-"} | power ${r.power || "-"}`);
+  // BODIES AND WHAT THEY ARE WEARING. Both audits have asserted above for a
+  // while and neither was ever printed — so a passing run showed no evidence
+  // that anybody had checked whether people still have clothes on, which is
+  // this printer's own stated reason for existing. outfits carries instHeld /
+  // instHoles (entities/pedinstance.js's hide layer) as of 2026-08-04.
+  tmark(`${label}: outfits ${r.outfits || "-"} | armorFit ${r.armorFit || "-"}`);
   return r;
 }
 

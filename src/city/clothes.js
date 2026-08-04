@@ -1899,7 +1899,19 @@
     if (mesh.visible === false) return false;
     if (!mesh.parent) return false;
     if (!geomOk(mesh.geometry)) return false;
-    return clothMatOk(mesh.material);
+    if (!clothMatOk(mesh.material)) return false;
+    /* THE THIRD WAY A GARMENT STOPS DRAWING, and the only one the four tests
+       above cannot see. entities/pedinstance.js (default ON since 2026-08-03)
+       stops a body part rendering by moving it to a private LAYER and drawing
+       it from an InstancedMesh pool instead — deliberately NOT by touching
+       `visible`, because `visible` on a rig part is gameplay state here. So a
+       pooled part that lost its pool slot is `visible`, parented, geometrically
+       sound and holding a live material, and every line above calls it healthy
+       while the person has a hole in them. Ask the file that hid it; it is the
+       only one that knows. Degrade-safe: absent, or a mesh it does not own,
+       returns null and this line is a no-op. */
+    if (CBZ.pedInstanceDraws && CBZ.pedInstanceDraws(mesh) === false) return false;
+    return true;
   }
   CBZ.cityClothMatOk = clothMatOk;
   CBZ.cityClothMeshRenders = clothMeshRenders;
@@ -2340,6 +2352,14 @@
           const host = repairHost(ch, row[0], i);
           if (host && host.add) host.add(mesh);
         }
+        // HAND THE MESH BACK FROM THE INSTANCER FIRST. If pedinstance.js is
+        // holding this part on its hide layer, everything below — a live
+        // material, a real box, visible=true — still draws nothing, because
+        // the layer is what stopped it. Release (never just un-mask): the
+        // record has to die with the mask or part()'s `if (!rec.hidden)` can
+        // never re-hide the part, and the body would draw twice forever. It
+        // re-binds on its own on a later frame, cleanly.
+        if (CBZ.pedInstanceRelease) CBZ.pedInstanceRelease(mesh);
         const f = mesh.userData && mesh.userData._cbzFlat;
         if (f && geomOk(f.g)) mesh.geometry = f.g;
         if (row[3] && !geomOk(mesh.geometry)) {
