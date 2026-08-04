@@ -1820,6 +1820,77 @@ documented revert `?cfg_TOUCH_RECENTER=1&cfg_CAM_TOUCH_RECENTER=1` → button
 present, cluster 8/8. The B run is what makes A evidence rather than a
 photograph of an empty pavement.
 
+## 2026-08-04 — THE TRIGGER BECOMES A STICK (TOUCH_AIM_TOGGLE · TOUCH_FIRE_PAD)
+
+Owner, on the iPad: *"you press the aim button and it lights up, and then you
+press it to turn it off… when you press aim, the shooting button should stay
+there. Right now the shooting button disappears, you have to do the swipe to
+shoot, which is dumb… when you hold the shoot button it should almost look like
+the movement keypad, so while I'm shooting I can also change the aim while
+still shooting."* Three complaints, ONE cause, and it is a fact about hands:
+
+**A HOLD OWNS THE THUMB IT IS UNDER.** The right thumb is the only one that can
+reach the trigger, so an AIM that had to be HELD had already spent it. Every
+gesture this file grew afterwards — the slide onto FIRE, the AIM-UP ghost pad,
+the aim-finger fine-aim drag — was scaffolding around that one mistake, and each
+one taught the player a swipe where a button would do. The fix is not another
+gesture. It is to stop spending the thumb:
+
+- **AIM and SCOPE are LATCHES** (`TOUCH_AIM_TOGGLE`, default on). Tap on, tap
+  off, amber lamp while on (`.tbtn.tlatch.on` — deliberately NOT the momentary
+  3 px press-travel; a latch that looks pressed is lying about where your finger
+  is). The latch never remembers its own state as truth: every frame it ADOPTS
+  `fpsAimHeld()` / `fpsScoped()`, so a scope that released itself, a gamepad
+  trigger, or any other ADS writer moves the lamp instead of contradicting it.
+- **The trigger is also a stick** (`TOUCH_FIRE_PAD`, default on). Holding FIRE
+  keeps firing wherever the finger roams, and dragging that same finger aims —
+  through the shared `applyLookDelta` (accel=false, the fine-aim path), so the
+  trigger can never grow a second sensitivity. `#tfire.tpad` draws the movement-
+  pad vocabulary the owner asked for: a 124 px dashed ring and a knob tracking
+  the thumb from where it LANDED (not from the button centre — same grammar as
+  the dynamic movement disc). Walking an automatic across a target is now one
+  finger doing one thing.
+- **THE FIRE BUTTON REALLY WAS DISAPPEARING, and it was not the layout.**
+  `lockon.js`'s optic (`#realScope`, z-45) paints `rgba(2,2,3,.995)` over
+  everything outside the tube, and the touch cluster lives at z-22 — so on any
+  scope-capable weapon, engaging AIM (which drives `resolveScope`) BLACKED OUT
+  the trigger. The buttons were still tappable; they were invisible, which is
+  worse, because it taught the player that the swipe was the only way to shoot.
+  `#touch.tabovescope` (z-46) lifts the cluster over the mask for exactly as
+  long as the optic is up; the rest of the HUD stays masked, which is the point
+  of a mask. **A control hidden by another layer's z-index reads to the player
+  as a control that does not exist** — and it will be blamed on the layer that
+  did nothing wrong.
+
+Legacy grammar is the one-line revert and it is WIRED, not just declared:
+`?cfg_TOUCH_AIM_TOGGLE=0` restores the hold + slide-onto-FIRE path (and rebuilds
+`#tfireup`, which is not built at all under the latch — an unreachable target is
+still a tap target), `?cfg_TOUCH_FIRE_PAD=0` restores the plain trigger.
+
+VERIFIED (`tools/probe.mjs` + `CBZ_PRELOAD=tools/preload/ipad.js`, the headless
+iPad session that last wave's recenter fix left on the shelf — this is exactly
+the compounding it was built for; three probes, all `fails: []`):
+- default grammar: AIM latches on and SURVIVES the lift, FIRE is on the glass
+  and holdable while aiming, dragging the held trigger turns the camera without
+  releasing it, the latch survives the burst, tap 2 drops it — and the two
+  failure modes that matter both hold: a latch does NOT survive its button
+  leaving the glass (holster → `taim` hidden → aim released) and does NOT
+  survive a blur. `touchAudit()` 40/40, uncovered 0, noHook 0.
+- sniper: SCOPE latches, the AIM lamp follows the ADS the optic drives, the
+  cluster lifts above the mask, FIRE stays visible AND drag-aims while scoped,
+  and dropping either latch lowers the optic and the lift together.
+- flags off: `#tfireup` rebuilt, no latch class, no knob, hold aims only while
+  held, slide onto FIRE still shoots, no drag-aim leak. Ledger still 40/40.
+- CSS geometry (computed, not eyeballed): knob hidden idle → 40 px shown and
+  translated while held → hidden after the lift; ring 124 px dashed and inside
+  the glass; lamp background 20,30,46 → 255,177,60 with no press-travel.
+- `MATHGATE: ok (90210: 329/182/206 | 400 ticks | det ok | errors baseline-only)`.
+
+PROBE CAVEAT worth the ink, because it produced a FALSE FAIL in this very run:
+`getComputedStyle(el)` returns a LIVE declaration. Holding one "before" and one
+"after" reference and comparing them compares the object to ITSELF — snapshot
+the strings you care about at read time, or your A/B is a tautology.
+
 ## THE 2026-08-04 iPAD WAVE — one doubled subtitle, one stairway to a wall, one ordered apocalypse
 
 Three owner complaints off a single iPad screenshot of the present-day city, one
