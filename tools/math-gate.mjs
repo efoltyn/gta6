@@ -47,11 +47,21 @@ const CALIBRATE = argv.includes("--calibrate");
 // deliberately when a world-content merge intends to change them — run
 // `node tools/math-gate.mjs --calibrate --seeds 90210,1337` and paste.
 const BIOMES_ALL = ["airport","annex","arena","capeharbor","city","desert","farmland","forest","foundry","goldspire","kesh","kesh_east","kesh_north","keshtown","lowport","mbeya","mbeya_east","mbeya_south","mbeya_west","mbeyacity","military","neonreef","snow","solara","solaracity","speedway","veridia","veridiacity","wilds"];
+// "frontier" is the four Frontier Lookout pads continent.js stands at the
+// midpoints of the plate's edges. They are 32 x 24 m and they have ALWAYS
+// existed; whether the sweep grid lands on one is a coincidence of where the
+// plate edge falls for that seed, which is why it shows on 90210 and not on
+// 1337. It is a sampling fact, not world content — do not "fix" either list
+// to match the other, and do not read its absence as a missing landmass.
+const BIOMES_ALL_LOOKOUT = BIOMES_ALL.concat(["frontier"]).sort();
 const GOLDEN = {
-  // recal 2026-08-02 (--calibrate, both seeds): the stored goldens predated
-  // the annex region and road growth already shipping on deployed main.
-  90210: { lots: 318, shops: 180, roads: 202, biomes: BIOMES_ALL },
-  1337:  { lots: 336, shops: 193, roads: 202, biomes: BIOMES_ALL },
+  // recal 2026-08-04 (--calibrate, both seeds) for WORLD_SCALE_V5: the desert
+  // went 10x by area and the sea 10x with it, so the country belt, the
+  // frontier loop and the eastern nations all moved — lots 318 -> 329 /
+  // 336 -> 352, roads 202 -> 206 / 205. The previous recal was 2026-08-02
+  // (the annex region and road growth already shipping on deployed main).
+  90210: { lots: 329, shops: 182, roads: 206, biomes: BIOMES_ALL_LOOKOUT },
+  1337:  { lots: 352, shops: 204, roads: 205, biomes: BIOMES_ALL },
 };
 const BAND = 0.12;
 const MTN_OUT_SNOW_MAX = 60;   // backdrop-ring cells the audit reports on a clean world

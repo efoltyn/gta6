@@ -1632,3 +1632,122 @@ EXISTS now; collarΔ still 0), math gate green. Debt left named: the yoke sits
 the seam (slab construction, not paint); the composite spawn fit layers its
 3-D tie over the painted suit's own tie (pre-existing doubling, hidden in
 practice); the tan closeup's leaves could still take an under-shade line.
+## THE 2026-08-04 STAGE-5 SCALE — a 10x desert in a 10x sea
+
+Owner: *"make the desert 10x bigger and make water around world 10x bigger,
+world will become island."* One flag, `CBZ.CONFIG.WORLD_SCALE_V5`
+(`world/layout.js`), and both numbers are read as **AREA** — which is the whole
+sizing decision and is worth stating plainly, because the linear reading is not
+a smaller version of the same idea. 10x linear is 100x area: a 14 x 15 km erg,
+wider than the entire stage-4 region union INCLUDING all four nations, with no
+offset table that keeps a strait open around it. 10x area is x sqrt(10) = 3.162
+per side, and that is what shipped.
+
+- **THE ERG.** `FOOT_SCALE.desert` 1.60 -> **5.06** (= 1.60 x sqrt(10)).
+  The Saltlands go 1408 x 1504 m -> **4453 x 4756 m**, i.e. 2.12 km^2 ->
+  **21.18 km^2** (`CBZ.worldScaleAudit().desertKm2`). It is now the largest
+  single thing in the world — the first time a BIOME rather than a nation sets
+  an edge of the FLAT rect.
+- **THE SEA.** `SEA_OPEN_WATER` 2.3 -> **5.45**, span 34000 -> **108000**:
+  1156 km^2 -> **11664 km^2** of published ocean, 10.09x. WHY THAT IS AN
+  ISLAND, arithmetically: land reaches 7.7 km from the sea's centre and water
+  reaches 54 km, so the continent is 7% of the sea's width and 1.1% of its
+  area. Still free — the drawn ocean is a camera-centred 4.5 km disc, so this
+  sizes the BOUNDS record, the geometry's bounding box and therefore the
+  flyable airspace (ring 7485 -> **9085**), never a mesh.
+- **IT GROWS EAST AND SOUTH, NOT OUTWARD FROM ITS CENTRE**, and that is the
+  whole layout design. `desert { dx 2825, dz 1927 }` is chosen to HOLD the
+  basin's north-west corner (minX 1719, minZ -301) while its half-extents
+  triple, which keeps three shipped contracts free: the Saltlands causeway
+  still docks on the same speedway chord, speedway<->desert stays 618 u (the
+  speedway is PINNED — live build zone), and Coyle<->Saltlands stays 989 u so
+  the farm county does not move at all. Every measured gap is at or above its
+  stage-4 value: desert<->farmland 988 -> 989, desert<->forest 2995 -> 2998,
+  forest<->snow 984 and farmland<->snow 1331 untouched. ONLY the three eastern
+  nations move (dx 2400 -> **5600**) because only they were in the way; mbeya,
+  the forest, the alpine north and every mini-city keep their stage-4 offsets.
+- **WHAT IT COSTS, AND THE ANSWER TO IT.** Holding the north-west corner walks
+  the basin's CENTRE — and with it the Dry Gulch spine — 2.3 km south of the
+  causeway that is the desert's only land link. So the deck TURNS: a third path
+  point at `CW_X1` runs 2293 m south to T onto the spine (`clearance ...
+  docked=2(2368m)`), `buildHighway` registers it as a drivable leg for free,
+  and the corridor gate flattens it. A 10x basin whose only entrance dead-ends
+  in open dune is not a bigger desert, it is a bigger nothing.
+- **THREE STALE-LITERAL BUGS the scale exposed**, all in `biome_desert.js`'s
+  corridor gate, all found by reading rather than running:
+  (1) the Coyle corridor ended at `MINZ + 600` while biome_farmland runs that
+  deck to `max(MINZ + 600, HWY_Z + 30)` — it aims at the SPINE — so 1.7 km of
+  real drivable highway would have been buried under 55 m draa (at stage 4 the
+  deck overruns by 142 m and the 150 m fade happens to cover it);
+  (2) the Saltlands band was gated on `|z - CW_Z|` with no bound in x, i.e. a
+  dead-flat strip running the FULL width of the erg — 1.4 km of it hidden
+  against the shore falloff, 4.5 km of it not hidden at all;
+  (3) every corridor gated on distance to an infinite LINE inside a window,
+  which puts a CLIFF at the window edge — full relief one side of an invisible
+  line, dead flat the other, with no road within 150 m. All three now use
+  point-to-SEGMENT distance (`segDist`, the same grammar
+  `CBZ.highwayNetReliefGate` uses); stage <= 4 keeps the old form byte for byte.
+- **THE ERG MESH IS TILED, AND THE BAKE GOT CHEAPER.** One 4453 x 4756 m plane
+  is a single mesh with a 3.3 km bounding sphere — drawn whole or not at all.
+  **6x6 tiles** of 742 x 793 m frustum-cull to the few you can see. The four
+  extra height evals per vertex (a 2.4 m central-difference normal) only ever
+  shaded the baked vertex COLOUR while the LIT normal came from
+  `computeVertexNormals` — so the two never agreed. Each tile now samples a
+  one-cell HALO and central-differences the grid it already has, and that
+  single normal serves both: colour and lighting agree by construction, and
+  because the halo is the NEIGHBOUR tile's real ground the normals stay
+  continuous across a seam (per-tile `computeVertexNormals` would have drawn
+  10 lighting creases across the erg). Vertices carry ABSOLUTE world coords
+  with every tile at the origin, because `centre + half` and
+  `centre + width - half` are not the same float and the difference is a crack.
+  Net: 70k verts / 139k tris -> **439k verts / 862k tris**, cell 5.3 -> 7.0 m
+  (10 vertices across the shortest 72 m ridge, was 13), and the bake costs
+  LESS than it did (measured 1.15 us per height eval).
+- **DENSITY HELD, NOT INHERITED.** The saguaro/brush/tumbleweed fields are
+  fixed candidate counts (90 / 110 / 24) over whatever rect the biome has, so
+  their density has fallen with every scale: 109 per km^2 as authored, 42 by
+  stage 4, and 4 per km^2 on a 21 km^2 erg — one saguaro every 490 m. `SCAT`
+  (= area growth since stage 4, so 10) holds the STAGE-4 density, which keeps
+  today's world untouched and the flag a real revert. All instanced: 900
+  saguaros are the same draw call as 90.
+- **CONSUMERS THAT HAD TO FOLLOW.** `continent.js` `W_ROOF` 15500 -> **19500**
+  (measured plate W 17728 x D 15782 — this is the number that silently DELETES
+  the continent if it goes stale, and a world with no continent still boots)
+  and the `PLATE_SEG` cap 448 -> 480 so the derived 38 m cell does not clip
+  (seg 368 -> **472**, cell 37.56 m; clipped at 448 it would creep to 39.6).
+  `highwaynet.js`: exactly two free-country lanes were inside the new basin —
+  `southZ` 1650 -> **4700**, `eastX` 3700 -> **6800** (midpoint of the corridor
+  between the erg's new east shore and the nations that moved to clear it); the
+  other five are west or north of a biome that only went the other way.
+- **THE MINI-CITY SIZE GRADIENT IS PINNED, ON PURPOSE.** `minicities.js`'s
+  rim fraction read `WORLD_ENLARGE_FLAT`, so every world scale silently
+  re-tuned a curve that was measured against specific values (Neon Reef 0.44,
+  Cape Harbor 0.72, Goldspire 0.84). Stage 5 walks the FLAT centre 1.6 km east
+  and would have dropped Goldspire to t 0.29 — handing a shipped city 17
+  storeys nobody asked for, because a desert three biomes away got bigger. It
+  now reads `CBZ.WORLD_RIM_REF` (the stage-4 FLAT, published by layout.js);
+  continent.js's relief RING still rides the live FLAT and walks out with the
+  world, which is a different question and the right answer to it.
+- **`worldScaleAudit()` gained `scaleV5`, `desertKm2`, `seaKm2`,** and its
+  `duneMaxU` sample now rides the footprint (a fixed 96x96 grid is really "a
+  sample every 15 m" and walked to 46 m on the 10x erg — wider than the 72 m
+  dunes it is trying to find a crest of, so the number would have DROPPED from
+  an oracle that returns the identical height for the identical point).
+- **GATE**: MATHGATE ok, both seeds, determinism ok, errors baseline-only.
+  GOLDEN recalibrated (`--calibrate`, both seeds): 90210 318/180/202 ->
+  **329/182/206**, 1337 336/193/202 -> **352/204/205**. `mtnOutSnow 0`,
+  `cityOnMtn 0`, `overlaps 0`, `clearance viol=0 clamped=0`, ground error
+  0.34 -> 0.31 m max. NOTE the biome-set golden is now PER SEED: 90210 sees
+  `frontier` and 1337 does not, because whether the sweep grid lands on one of
+  continent.js's four 32 x 24 m Frontier Lookout pads is a coincidence of where
+  the plate edge falls. It is a sampling fact, not world content — do not
+  "fix" one list to match the other.
+- **DEBT NAMED, NOT FIXED**: `bunkers.js` SITE 3, the "desert civil-defense
+  shelter", is hard-coded at (1450, 500) in the AUTHORED desert frame and never
+  rode the layout dial — it has been sitting on open plate ~270 m WEST of the
+  Saltlands since stage 3 and still is. Pre-existing and untouched here (it is
+  not a scale bug, it is a missing `CBZ.worldFoot("desert")` call), but it is
+  exactly the copy-rect disease `worldFoot` exists to kill and it is owed a
+  fix. Also: the 7 authored mesas spread with FSC as designed, which on a
+  21 km^2 basin is one landmark per 3 km — the dunes carry the space, but a
+  bigger basin arguably wants more buttes.

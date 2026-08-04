@@ -88,8 +88,17 @@
   // from a landmass builder would make the answer depend on build ORDER,
   // i.e. non-deterministic in the one way this repo cannot tolerate. No
   // rect -> 0 -> no gradient: degrade-safe, never a broken town.
+  // WORLD_SCALE_V5: read the PINNED reference rect when world/layout.js
+  // publishes one (CBZ.WORLD_RIM_REF — the stage-4 FLAT). "How rim-side is
+  // this town" has to be asked against where the world's PEOPLE are, not
+  // against its total extent: stage 5 grew an empty 21 km^2 erg and a 108 km
+  // sea, which walks the FLAT centre 1.6 km east and would have handed
+  // Goldspire 17 storeys and Cape Harbor its full crown back, purely because
+  // a desert three biomes away got bigger. Degrade-safe both ways — no
+  // layout.js, or a stage that publishes no reference, and this is the old
+  // rect byte for byte.
   function rimFraction(cx, cz) {
-    const F = CBZ.WORLD_ENLARGE_FLAT;
+    const F = CBZ.WORLD_RIM_REF || CBZ.WORLD_ENLARGE_FLAT;
     if (!F || !isFinite(F.minX)) return 0;
     const fx = (F.minX + F.maxX) / 2, fz = (F.minZ + F.maxZ) / 2;
     const hx = Math.max(1, (F.maxX - F.minX) / 2), hz = Math.max(1, (F.maxZ - F.minZ) / 2);

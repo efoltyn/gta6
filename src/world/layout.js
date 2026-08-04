@@ -143,6 +143,58 @@
    city/highwaynet.js (the free-country lanes were re-measured against the
    stage-4 rects — see that file).
 
+   ------------------------------------------------------------------
+   STAGE 5 — WORLD_SCALE_V5 (owner: "make the desert 10x bigger and make
+   water around world 10x bigger, world will become island").
+
+   TWO NUMBERS, AND THEY ARE READ AS AREA. "10x bigger" applied to a 2D
+   basin is 10x the AREA, i.e. x sqrt(10) = 3.162 in each direction. The
+   linear reading is not a smaller version of the same idea, it is a
+   different world: 10x LINEAR is 100x the area, a 14 x 15 km erg — wider
+   than the entire stage-4 region union including all four nations — and
+   there is no offset table that keeps a strait open around it. So:
+
+     • DESERT FOOT 1.60 -> 5.06 (= 1.60 x sqrt(10)). The Saltlands go
+       1408 x 1504 m -> 4453 x 4756 m, i.e. 2.12 km^2 -> 21.2 km^2 of erg.
+       Ten times the sand, and the ONE dial that says so.
+     • SEA_OPEN_WATER 2.3 -> 5.45. The published ocean goes 34 km ->
+       108 km across: 1156 km^2 -> 11664 km^2, also 10x the area. The land
+       reaches 7.7 km from the sea's centre and the water reaches 54 km,
+       so the whole continent is a 7% smudge in the middle of an ocean —
+       "the world becomes an island" is what that ratio MEANS, and it is
+       the ratio, not the coastline, that had to move.
+
+   THE DESERT GROWS EAST AND SOUTH, NOT OUTWARD FROM ITS OWN CENTRE, and
+   that is the entire layout design. Holding the basin's NORTH-WEST corner
+   (minX 1719, minZ -301 — within 3 u of the stage-4 corner, in the safe
+   direction on both axes) keeps three shipped contracts intact for free,
+   none of which would survive a symmetric expansion:
+     • the Saltlands causeway — the desert's only land link — still docks
+       on the speedway's east rim at the same chord (its z clamps into the
+       basin's north edge, which has not moved);
+     • the speedway<->desert strait stays at its stage-4 618 u (the
+       speedway is a live build zone and is PINNED);
+     • the Coyle<->Saltlands strait stays at 989 u, so biome_farmland's
+       county does not have to move at all.
+   What it costs is that the basin's CENTRE — and with it the Dry Gulch
+   spine, the town and the mesa spread — walks 2.3 km south, so the
+   causeway now lands 2.3 km north of the highway it exists to reach.
+   biome_desert.js answers that with an approach leg (see its section 9);
+   a 10x basin whose only entrance dead-ends in open dune is not a bigger
+   desert, it is a bigger nothing.
+
+   THE NATIONS MOVE, NOTHING ELSE DOES. The grown basin runs east to
+   x 6171, which is 1.9 km past veridia's west edge, so veridia/kesh/
+   solara slide dx 2400 -> 5600. mbeya (far west), the forest, the alpine
+   north, the mini-cities and every ring-0/1 anchor are untouched: only
+   what the desert would have swallowed had to move.
+
+   REVERT: CBZ.CONFIG.WORLD_SCALE_V5 = false -> the stage-4 table, scale,
+   FLAT, sea multiplier and plate roof return in one line. Consumers:
+   city/continent.js (plate roof + segment cap), city/biome_desert.js
+   (mesh tiling, scatter density, the approach leg), city/highwaynet.js
+   (the two free-country lanes the basin now covers).
+
    DETERMINISM: offsets are build-time constants (no rng, no per-seed
    variation), so worlds stay byte-identical per seed across clients.
 ============================================================ */
@@ -162,6 +214,8 @@
       if (CFG.WORLD_LAYOUT_V2 == null && v2 != null) CFG.WORLD_LAYOUT_V2 = !(v2 === "0" || v2 === "false");
       const v4 = q.get("cfg_WORLD_SCALE_V4");
       if (CFG.WORLD_SCALE_V4 == null && v4 != null) CFG.WORLD_SCALE_V4 = !(v4 === "0" || v4 === "false");
+      const v5 = q.get("cfg_WORLD_SCALE_V5");
+      if (CFG.WORLD_SCALE_V5 == null && v5 != null) CFG.WORLD_SCALE_V5 = !(v5 === "0" || v5 === "false");
     }
   } catch (e) {}
   if (CFG.WORLD_ENLARGE_V2 == null) CFG.WORLD_ENLARGE_V2 = true;
@@ -176,9 +230,15 @@
   // footprint scale without the spread that pays for it would close every
   // strait the re-lay opened.
   if (CFG.WORLD_SCALE_V4 == null) CFG.WORLD_SCALE_V4 = true;
+  // STAGE 5 — the desert goes 10x by area and the sea goes 10x with it. Rides
+  // on top of stage 4 for the same reason stage 4 rides on stage 3: the basin
+  // is grown by turning the stage-4 footprint scale further, and a footprint
+  // without the spread that pays for it closes every strait east of the city.
+  if (CFG.WORLD_SCALE_V5 == null) CFG.WORLD_SCALE_V5 = true;
   const ON = CFG.WORLD_ENLARGE_V2 !== false;
   const V3 = ON && CFG.WORLD_LAYOUT_V2 !== false;
   const V4 = V3 && CFG.WORLD_SCALE_V4 !== false;
+  const V5 = V4 && CFG.WORLD_SCALE_V5 !== false;
 
   // Per-landmass translation, applied to each file's anchor constants.
   // Zero = the stage-1 authored spot. Flag off = ALL zero (old world).
@@ -356,13 +416,51 @@
     mbeya:   { dx: -2240, dz: -400 },       // far west
   };
 
-  const SPREAD = V4 ? SPREAD_V4 : (V3 ? SPREAD_V3 : SPREAD_V2);
+  // ------------------------------------------------------------------
+  // STAGE 5 (WORLD_SCALE_V5). SPREAD_V4 with exactly SIX entries changed —
+  // the desert, because it is the thing that grew, and the three nations it
+  // would otherwise have run over. Everything else is SPREAD_V4 verbatim:
+  // a landmass that the 10x basin does not reach has no reason to move, and
+  // moving it would churn straits that are already measured and correct.
+  // ------------------------------------------------------------------
+  const SPREAD_V5 = Object.assign({}, SPREAD_V4, {
+    // --- RING 2 E. THE 10x BASIN. Both offsets are chosen to HOLD the
+    //     basin's north-west corner while its half-extents triple, which is
+    //     what keeps the causeway docks and both straits at their stage-4
+    //     values (see the header):
+    //       dx: minX 1718.6 = 1120 + 2825 - 2226.4   (was 1716)
+    //           -> speedway<->desert strait 618.6 u (was 616). The speedway
+    //              is PINNED at dx 400, so this is the whole margin there is.
+    //       dz: minZ -301.2 = 150 + 1927 - 2378.2    (was -302)
+    //           -> Coyle<->Saltlands strait 988.8 u (was 988), so biome_
+    //              farmland's county does not move and its causeway, which
+    //              re-derives from our published rect, still docks.
+    //     The basin therefore runs x 1719..6171, z -301..4455: it grows
+    //     3044 u east into open sea and 3252 u south into open sea, and
+    //     touches nothing on the two sides where the world already is.
+    desert:   { dx: 2825,  dz: 1927 },
+    // --- RING 3 nations. 2400 -> 5600, dz unchanged. They are air/boat-only
+    //     so the only question is clearance, and the basin's new east shore
+    //     (6171) is the constraint: veridia minX 7455 clears it by 1284 u,
+    //     solara minX 7670 by 1499 u (solara is the only one whose z-span
+    //     lies INSIDE the basin's, so it is the one that had to clear in x),
+    //     keshtown minX 7400 clears farmland maxX 3200 by 4200 u.
+    //     mbeya is NOT here: it is 4.8 km the other way and the desert never
+    //     reaches it, so it keeps its stage-4 offset exactly.
+    veridia: { dx: 5600,  dz: 0 },
+    kesh:    { dx: 5600,  dz: -640 },
+    solara:  { dx: 5600,  dz: 1020 },
+  });
+
+  const SPREAD = V5 ? SPREAD_V5 : (V4 ? SPREAD_V4 : (V3 ? SPREAD_V3 : SPREAD_V2));
   const ZERO = { dx: 0, dz: 0 };
   const OFFSETS = {};
   for (const id in SPREAD) OFFSETS[id] = ON ? SPREAD[id] : ZERO;
 
   CBZ.WORLD_LAYOUT_OFFSETS = OFFSETS;
-  CBZ.WORLD_LAYOUT_STAGE = ON ? (V4 ? 4 : (V3 ? 3 : 2)) : 1;
+  // Consumers gate on `>= N`, never on equality — stage 5 is a stage-4 world
+  // with a bigger basin, so every `>= 4` branch already shipped stays live.
+  CBZ.WORLD_LAYOUT_STAGE = ON ? (V5 ? 5 : (V4 ? 4 : (V3 ? 3 : 2))) : 1;
   CBZ.worldOff = function (id) { return OFFSETS[id] || ZERO; };
 
   /* ==================================================================
@@ -397,11 +495,19 @@
                       the Greater Mercy envelope (whose south edge IS the
                       snow core's north edge), which is already the single
                       largest region in the world.
+     STAGE 5 turns ONE of those four: desert 1.60 -> 5.06, which is
+     1.60 x sqrt(10) and therefore exactly 10x the stage-4 AREA
+     (2.12 km^2 -> 21.2 km^2). The other three do not move — the owner asked
+     for the desert, and a farmland that grew with it would close the Coyle
+     strait this table spent two stages opening.
+
      Flag off -> every scale is 1 and the authored rect returns byte for byte.
   ================================================================== */
-  const FOOT_SCALE = V4
-    ? { desert: 1.60, farmland: 1.60, forest: 1.45, snow: 1.30 }
-    : {};
+  const FOOT_SCALE = V5
+    ? { desert: 5.06, farmland: 1.60, forest: 1.45, snow: 1.30 }
+    : (V4
+      ? { desert: 1.60, farmland: 1.60, forest: 1.45, snow: 1.30 }
+      : {});
   // AUTHORED anchors — the stage-1 literals each biome file declares. They are
   // repeated here ON PURPOSE and each names its owner, because this table has
   // to be able to answer for a biome whose file has not parsed yet
@@ -460,13 +566,48 @@
   // envelope deliberately overhangs this seed to the north — syncTerrainFlat
   // grows the live rect over every registered region at build time, so the
   // ring walks out behind snow-labelled cover on its own.
+  //
+  // STAGE 5 numbers, same derivation again (region union + ~40u slack). Only
+  // the two edges the 10x basin and the nations pushed actually move:
+  //   minX  mbeya_west  UNCHANGED (-4766)                       ->  -4800
+  //   maxX  solara      cx  2200 + dx  5600 + hx 130 =  7930    ->   7970
+  //   minZ  snow core   UNCHANGED (FOOT.snow.minZ, snow.dz -2400) -> -4319
+  //   maxZ  desert      FOOT.desert.maxZ 4455.2                 ->   4500
+  // FLAT is 12770 x 8819 (was 9570 x 6109). maxZ is the FIRST time a BIOME
+  // rather than a nation sets an edge of this rect, which is the whole point:
+  // the erg is now the largest single thing in the world.
+  const FLAT_V4 = { minX: -4800, maxX: 4770, minZ: Math.round(FOOT.snow.minZ) - 40, maxZ: 1790 };
   CBZ.WORLD_ENLARGE_FLAT = ON
-    ? (V4
-      ? { minX: -4800, maxX: 4770, minZ: Math.round(FOOT.snow.minZ) - 40, maxZ: 1790 }
-      : (V3
-        ? { minX: -3960, maxX: 3860, minZ: -1890 + SPREAD_V3.snow.dz, maxZ: 1420 }
-        : { minX: -3160, maxX: 3060, minZ: -1890 + SPREAD_V2.snow.dz, maxZ: 1030 }))
+    ? (V5
+      ? { minX: -4800, maxX: 7970, minZ: FLAT_V4.minZ, maxZ: 4500 }
+      : (V4
+        ? FLAT_V4
+        : (V3
+          ? { minX: -3960, maxX: 3860, minZ: -1890 + SPREAD_V3.snow.dz, maxZ: 1420 }
+          : { minX: -3160, maxX: 3060, minZ: -1890 + SPREAD_V2.snow.dz, maxZ: 1030 })))
     : null;
+
+  /* ------------------------------------------------------------------
+     CBZ.WORLD_RIM_REF — "how far out is this place, as a fraction of the
+     INHABITED world?" (city/minicities.js's size gradient reads it).
+
+     That gradient bends a town's SILHOUETTE by how rim-side it sits, and it
+     was tuned against measured fractions: Neon Reef 0.44 (untouched, keeps
+     its 38-storey crown), Cape Harbor 0.72, Goldspire 0.84 (44 -> 27). It
+     read CBZ.WORLD_ENLARGE_FLAT, which means every world scale silently
+     re-tunes it — and stage 5 is where that stops being a rounding error:
+     the FLAT centre walks 1.6 km east and 1.35 km south to sit in the middle
+     of the new erg, which would drop Goldspire from t 0.84 to t 0.29 and hand
+     a shipped city 17 storeys nobody asked for.
+
+     So the REFERENCE rect is pinned at the stage-4 FLAT and the growth of an
+     empty quadrant no longer votes on how tall the casino is. This is not the
+     terrain rim: continent.js's relief ring still rides the LIVE FLAT and
+     walks out with the world, exactly as before. It is the answer to a
+     different question — where the world's PEOPLE are — and that has not
+     moved. Degrade-safe: consumers fall back to WORLD_ENLARGE_FLAT.
+  ------------------------------------------------------------------ */
+  CBZ.WORLD_RIM_REF = ON ? (V4 ? FLAT_V4 : CBZ.WORLD_ENLARGE_FLAT) : null;
 
   /* ------------------------------------------------------------------
      THE SEA'S FOOTPRINT, DERIVED (city/world.js reads this).
@@ -502,8 +643,27 @@
      consumer that asks "is this open sea" agrees out to 17 km instead of
      12.5 km, which is what makes a long offshore passage in a 156 m hull a
      real voyage rather than a swim to the edge of the record.
+
+     OWNER (2026-08-04): "make water around world 10x bigger, world will
+     become island". 2.3 -> 5.45, read as 10x the AREA like the desert
+     alongside it, and it is still the same honest place to do it: this reads
+     the FLAT rect, it never writes it, so no region moves and no biome
+     changes shape.
+       reach = max(|-4800-310|, |7970-310|, |-4319+750|, |4500+750|) = 7660
+       2 x (7660 + 2200) x 5.45 = 107474  ->  half 54000, span 108000
+     34000 -> 108000 across: 1156 km^2 -> 11664 km^2 of published sea, 10.09x.
+     WHY THAT MAKES IT AN ISLAND, arithmetically: the land now reaches 7.7 km
+     from the sea's centre and the water reaches 54 km, so the continent
+     occupies 7% of the sea's width and 1.1% of its area. It clears the
+     stage-5 plate (x -7000..10170 / z -6519..6700) by 43.6 km on the tightest
+     side. And it is still free to render — the drawn ocean is a
+     camera-centred 4.5 km disc (world/water_spec.js), so this sizes the
+     published BOUNDS record, the geometry's bounding box and therefore the
+     flyable airspace, never a mesh. What it buys is that every consumer that
+     asks "is this open sea" agrees out to 54 km: you can point a hull at the
+     horizon and keep going for an hour and the world still says ocean.
   ------------------------------------------------------------------ */
-  const SEA_OPEN_WATER = 2.3;            // sea half-span as a multiple of the land's reach
+  const SEA_OPEN_WATER = V5 ? 5.45 : 2.3;   // sea half-span as a multiple of the land's reach
   CBZ.WORLD_SEA_SPAN = null;
   if (V4 && CBZ.WORLD_ENLARGE_FLAT) {
     const F = CBZ.WORLD_ENLARGE_FLAT, SCX = 310, SCZ = -750;
@@ -566,7 +726,15 @@
     let duneMax = null;
     if (typeof CBZ.desertDuneHeightAt === "function" && R.desert) {
       duneMax = 0;
-      const N = 96;
+      // THE SAMPLE RIDES THE FOOTPRINT, like every other count in this file.
+      // A fixed 96x96 grid is really the statement "sample every 15 m" — that
+      // is what it measured on the stage-4 basin — and left as a literal it
+      // walks to 46 m on the 10x erg, which is wider than the 72 m dunes it is
+      // trying to find a crest of. The number would have DROPPED as the basin
+      // grew, from an oracle that returns the identical height for the
+      // identical point. Capped at 320 so the audit stays a sub-second read.
+      const N = Math.max(96, Math.min(320,
+        Math.round((R.desert.maxX - R.desert.minX) / 15)));
       for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
         const x = R.desert.minX + (i + 0.5) * (R.desert.maxX - R.desert.minX) / N;
         const z = R.desert.minZ + (j + 0.5) * (R.desert.maxZ - R.desert.minZ) / N;
@@ -575,9 +743,17 @@
       }
       duneMax = Math.round(duneMax * 10) / 10;
     }
+    // The erg as an AREA, which is the unit stage 5's ask was written in.
+    const km2 = function (r) {
+      return r ? Math.round((r.maxX - r.minX) * (r.maxZ - r.minZ) / 1e4) / 100 : null;
+    };
     return {
       stage: CBZ.WORLD_LAYOUT_STAGE,
       scaleV4: V4,
+      scaleV5: V5,
+      desertKm2: km2(R.desert),
+      seaKm2: CBZ.WORLD_SEA_SPAN
+        ? Math.round(CBZ.WORLD_SEA_SPAN * CBZ.WORLD_SEA_SPAN / 1e4) / 100 : null,
       flatW: flat ? Math.round(flat.maxX - flat.minX) : null,
       flatD: flat ? Math.round(flat.maxZ - flat.minZ) : null,
       plateW: pw == null ? null : Math.round(pw),

@@ -196,6 +196,11 @@
       ? CBZ.WORLD_LAYOUT_STAGE >= 4
       : (LAYOUT_V2() && CFG.WORLD_SCALE_V4 !== false);
   };
+  // WORLD_SCALE_V5 — the 10x desert. The same two numbers answer for it again,
+  // for the same reason: the region union grew, and both a stale roof and a
+  // stale segment count fail SILENTLY (the roof by deleting the continent, the
+  // count by coarsening every cell in the world).
+  const SCALE_V5 = function () { return (CBZ.WORLD_LAYOUT_STAGE || 1) >= 5; };
 
   /* ==================================================================
      CBZ.worldLayoutAudit() — THE WORLD LAYOUT AS NUMBERS.
@@ -446,7 +451,17 @@
     // 1.6x wider. The union is now mbeya_west (-4766) to solara (4730) =
     // 9496 u, so W = 9496 + 2x2200 = 13896 and D = 8245 + 4400 = 12645.
     // 15500 keeps the same ~1.6k of headroom the stage-3 roof had.
-    const W_ROOF = SCALE_V4() ? 15500 : (LAYOUT_V2() ? 13500 : 12000);
+    //
+    // STAGE 5 (WORLD_SCALE_V5) re-measures it a third time. The Saltlands went
+    // 10x by area and the three eastern nations moved out past its new shore.
+    // MEASURED off the built plate rather than derived from the anchor table
+    // (CBZ.worldScaleAudit().plateW), because the union is every REGISTERED
+    // rect — link decks and pads included — not just the landmass anchors:
+    // W = 17728 and D = 15782 with the 2200 belt. 19500 keeps ~1.8k of
+    // headroom, in line with the previous two roofs. THIS IS THE NUMBER THAT
+    // DELETES THE WORLD IF IT GOES STALE — `return` below bails the whole
+    // plate, silently, and a world with no continent still boots.
+    const W_ROOF = SCALE_V5() ? 19500 : (SCALE_V4() ? 15500 : (LAYOUT_V2() ? 13500 : 12000));
     if (!isFinite(W) || W <= 0 || W > W_ROOF) return;
 
     function insideAnything(x, z, margin) {
@@ -728,9 +743,14 @@
     //            rounding both land exactly on the authored value)
     //   stage 4: max(13896, 12645)/38 = 366  ->  368  (cells 37.8 x 34.4 m,
     //            369^2 = 136k verts, 271k triangles)
+    //   stage 5: max(17728, 15782)/38 = 467  ->  472  (cells 37.6 x 33.4 m,
+    //            473^2 = 224k verts, 446k triangles). The CAP has to move with
+    //            it — left at 448 the derivation would CLIP and the cell would
+    //            start creeping back up (39.6 m), which is exactly the silent
+    //            coarsening this comment exists to prevent.
     const PLATE_CELL = 38;
     const PLATE_SEG = COAST
-      ? Math.max(320, Math.min(448, Math.ceil(Math.max(W, D) / PLATE_CELL / 8) * 8))
+      ? Math.max(320, Math.min(SCALE_V5() ? 480 : 448, Math.ceil(Math.max(W, D) / PLATE_CELL / 8) * 8))
       : 72;
     const BUILT_FLAT = Math.hypot(W / PLATE_SEG, D / PLATE_SEG) + 6;
     const BUILT_FADE = 110;    // then the country rises back over ~one block

@@ -155,6 +155,16 @@
     // margin before it needs this table again.
     // The STAGE layout.js resolved to, not the raw flag — WORLD_SCALE_V4 rides
     // on top of WORLD_LAYOUT_V2, and a stage-2 world must keep stage-2 lanes.
+    //
+    // WORLD_SCALE_V5 MOVED TWO OF THEM, AND ONLY TWO. The Saltlands went 10x
+    // by area (x 1719..6171, z -301..4455), which puts the Continental Loop's
+    // south leg (southZ 1650) and its east leg (eastX 3700) INSIDE the basin —
+    // 2 km and 2.5 km of six-lane motorway through open erg respectively. The
+    // other five lanes are untouched because the basin grew east and south,
+    // away from every one of them: dunesX 1300 still threads the snow/desert
+    // gap (desert minX did not move), timberX/corridorZ/westX/foothillZ are
+    // all west or north of a biome that only went the other way.
+    const V5 = (CBZ.WORLD_LAYOUT_STAGE || 1) >= 5;
     const V4 = (CBZ.WORLD_LAYOUT_STAGE || 1) >= 4;
     //  name        stage-4 value   the corridor it threads (stage-4 world AABBs)
     //  timberX      -560   forest maxX -894 .. snow minX -196; also >= 273 off
@@ -175,8 +185,16 @@
     const timberX = V4 ? -560 : -400;          // forest/snow corridor
     const corridorZ = V4 ? -1600 : -1415;      // forest/military gap
     const westX = V4 ? -2380 : -1960;          // west of neonreef/foundry
-    const southZ = V4 ? 1650 : 1230;           // south of goldspire/desert
-    const eastX = V4 ? 3700 : 2560;            // east of desert/farmland
+    //  stage-5 re-measure (the two the basin now covers):
+    //  southZ       4700   south of desert maxZ 4455 by 245 m and 3.2 km south
+    //                      of goldspire maxZ 1490; still 2.0 km inside the
+    //                      stage-5 plate's south edge (z 6700).
+    //  eastX        6800   east of desert maxX 6171 (629 m), west of keshtown
+    //                      minX 7400 (600) and veridia minX 7455 — the
+    //                      midpoint of the corridor between the erg's new east
+    //                      shore and the nations that moved to clear it.
+    const southZ = V5 ? 4700 : (V4 ? 1650 : 1230);   // south of goldspire/desert
+    const eastX = V5 ? 6800 : (V4 ? 3700 : 2560);    // east of desert/farmland
     const foothillZ = V4 ? -3400 : -3250;      // south of Greater Mercy
     const dunesX = V4 ? 1300 : 1200;           // snow/desert gap
 
