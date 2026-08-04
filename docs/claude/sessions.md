@@ -1593,3 +1593,42 @@ bespoke floating button.
   `unread`+`buzz` on the entry, a chip click AND the digit both raise the
   handset, flag-off restores `#cSlots:none` + the fallback bar + no slot.
 - **GATE**: MATHGATE ok (90210: 318/180/204, det ok, errors baseline-only).
+## 2026-08-04 — THE FORMAL NECK: the collar and the top of the tie (reference images from the owner)
+
+OWNER (with two reference renders of suited blocky characters): "the issue rn
+is with the collar and top of tie." Both faults were GEOMETRY, found by
+reading `entities/character.js` against `city/clothes.js` and then PROVEN by
+the outfit-gallery preset before a line changed:
+
+- **The knot had never been visible, on any suit, ever.** The shoulder-yoke
+  slab (centre `neckY-0.04`, H 0.18) overlaps the chest box's top **0.145 m**
+  and sits ~1 cm PROUD of it — and every knot/bow in the file was painted on
+  the chest's top 0.115 of the torso row, i.e. entirely behind the slab. The
+  BEFORE shots show a knotless blade emerging from under a white trapezoid,
+  and a tuxedo with NO bow tie at all.
+- **The jacket V ran backwards.** The alpha-cut gap pinched at the throat
+  (±0.035) and swung open toward the hem; a worn suit is wide open at the
+  collar and CONVERGES to the fastened button. Nothing at a collar can read
+  through a 7%-wide slit.
+
+`CLOTH_FORMAL_NECK_V2` (default on, `city/clothes.js` owns the flag): the
+painter now DECLARES its neckwear in its parts return (`parts.neck =
+{tie, w}` / `{bow}`); the yoke micro-atlas (bumped 64x16 → 128x32, still
+16 KB, no mips) draws the collar leaves and the KNOT/BOW — the slab IS the
+collar zone — with the knot running to the slab's bottom edge; the chest
+paints only the BLADE, from row 0, so it runs continuously under the slab on
+EVERY body profile and emerges below the seam with no gap (alignment by
+construction, not per-profile arithmetic). The shell's V is recut the
+reference way (wide at the collar → button stance; DB fastens FLAT with six
+buttons on the wrap; sb keeps a relaxed slit below the button), lapels run
+alongside the V with a high gorge notch / up-swept peak / bowed shawl, and
+the 3-piece finally wears its tie ON the waistcoat instead of a severed
+glimpse. Migrated in the same change (Block Law #3): **suit (all 21 styles),
+tuxedo, waiter, office, police, pilot** — six painters declare neckwear; chef
+kept its kerchief because the throat sample only steps off-centre when
+neckwear is declared. Verified: outfit-gallery before/after (the tuxedo's bow
+EXISTS now; collarΔ still 0), math gate green. Debt left named: the yoke sits
+1 cm deeper than the chest so a top-down closeup shows the tie step back at
+the seam (slab construction, not paint); the composite spawn fit layers its
+3-D tie over the painted suit's own tie (pre-existing doubling, hidden in
+practice); the tan closeup's leaves could still take an under-shade line.
