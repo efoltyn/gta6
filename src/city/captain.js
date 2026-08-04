@@ -160,6 +160,7 @@
     }
     return true;
   };
+  CBZ.captainBoat = function () { return boat; };
 
   // The boatyard's own record shape, byte for byte (boatyard.js record()) —
   // worldstate already round-trips g.cityGarage, so ownership persists free.
@@ -503,6 +504,25 @@
       label: function () { return armedUp ? "Order: stow the guns" : "Order: all hands, arm up"; },
       onSelect: function () { armAll(!armedUp); },
     });
+
+    // ...and the same handover FROM the wheel (ped layers are driving:false,
+    // so without this the one order that needs giving from the helm could
+    // never be given there — boatyard's anchor verb is the idiom, on its own
+    // slot so the two never collide).
+    I.register("vehicle:inside", {
+      id: "capt-handover", slot: "j",
+      canShow: function (car, ctx) {
+        if (!on() || C.CAPTAIN_ORDERS === false) return false;
+        if (!(ctx && ctx.driving && ctx.vehicle === car && car === boat)) return false;
+        return !!mateAboard();
+      },
+      label: function () { return "Hand the helm to the mate"; },
+      onSelect: function () { const m = mateAboard(); if (m) takeHelm(m); },
+    });
+  }
+  function mateAboard() {
+    for (const c of liveCrew()) if (crewCan(c, "moor") && !c._captFishing) return c;
+    return null;
   }
 
   function orderLines(p, castIt) {
@@ -534,8 +554,10 @@
     if (wasDriving && CBZ.cityExitVehicle) CBZ.cityExitVehicle();
     // step out ONTO YOUR OWN DECK, not into the sea: wheelhouse sole, beside
     // the table (the walkable deck rig water_hulls already runs holds you).
+    // Only on the from-the-wheel handover — ordered from the deck, you are
+    // already standing wherever you chose to stand.
     const P = CBZ.player;
-    if (P && P.pos && boat.group) {
+    if (wasDriving && P && P.pos && boat.group) {
       const w = boatWorld(boat, -0.2, 1.4);
       P.pos.set(w.x, boat.group.position.y + 2.59, w.z);
       P.vy = 0; P.grounded = true;
@@ -1311,6 +1333,7 @@
     if (!on() || !g || g.mode !== "city") return;
     wireOrders();
     wireZones();
+    if (g.state !== "playing") return;          // origins' own tick gates the same way
     if (pendingStart) {
       pendingStart.t += dt;
       if (tryLaunch()) pendingStart = null;
@@ -1327,6 +1350,11 @@
       }
     } else if (boat.dead || !boat.group || !boat.group.parent) {
       boat = null; hold = null; chartGrp = null; helm = null; crew.length = 0;
+      // the posts died with her (their alive() reads the hull) — zero the
+      // venue's declared count NOW, or venueStaffAudit's shared unstaffed pin
+      // (0) would read a phantom shortfall until she is redelivered.
+      crewPosts.length = 0;
+      if (venueDeclared && CBZ.cityStaffStations) { try { CBZ.cityStaffStations("captain", 0); } catch (e) {} }
     }
     if (!boat) return;
     helmTick(dt);

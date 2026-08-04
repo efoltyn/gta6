@@ -616,7 +616,11 @@
       onSelect: (p) => {
         const r = p._racer; if (!r) return;
         const pos = cityRacing.positionOf(r);
-        note("" + r.name + " — P" + pos + " in the championship, " + r.wins + " wins (#" + r.number + ").", 3.0);
+        // rivals remember: pink-slip history reads on the man himself
+        const slip = r.slips && (r.slips.won || r.slips.lost)
+          ? (r.slips.won > r.slips.lost ? " Holds YOUR pink slip." : " You hold HIS pink slip.")
+          : "";
+        note("" + r.name + " — P" + pos + " in the championship, " + r.wins + " wins (#" + r.number + ")." + slip, 3.2);
       },
     });
     // challenge to a street race → route to the speedway join flow if it exists,

@@ -437,7 +437,7 @@
     if (CBZ.sfx) CBZ.sfx("key");
   }
   function advanceBot(b) {
-    if (!gg.match || gg.match.over || !b || b.dead === undefined) return;
+    if (!gg.match || gg.match.over || !b || !b._ggBot) return;
     b.kills++;
     b.rungKills++;
     if (b.rungKills < rungNeed(b.rung)) return;
@@ -608,7 +608,7 @@
       // body layer — the humiliation kill everyone can see coming.
       if (dh > 2.2 || Math.abs((foe.pos.y || 0) - (b.pos.y || 0)) > 2.0) { b.fireCD = 0.15; return; }
       b.fireCD = 0.8 + rand() * 0.5;
-      if (CBZ.actorAimAt) CBZ.actorAimAt(b, foe);
+      b.group.rotation.y = Math.atan2(dx, dz);   // square up (no gun-ready pose on the fists rung)
       if (CBZ.body && !foe.isPlayer) CBZ.body.hit(foe, { fromX: b.pos.x, fromZ: b.pos.z, force: 5 });
       if (CBZ.sfx) CBZ.sfx("punch");
       hurt(foe, 16 + rand() * 8, { by: b, cause: "fists" });
@@ -695,6 +695,18 @@
       if (CBZ.collide) CBZ.collide(b.pos, BOT_RADIUS, b.pos.y, b.pos.y + 1.7);
       b.pos.y = mapFloor(b.pos.x, b.pos.z);
       if (near && CBZ.animChar) CBZ.animChar(b.char, b.speed, dt);
+      // hold the gun-ready pose EVERY animated frame while engaged — the
+      // actorweapons order-36 pose pass is city-only, and animChar just wrote
+      // walk-swing over the arms; actorAimAt (after it) turns to the foe and
+      // re-applies the ready pose, so the carried gun never droops mid-duel.
+      // A FISTS-rung bot only turns (no ready pose — its hands are the gun).
+      if (near && b.foe && !b.foe.dead) {
+        if (b.armed && CBZ.actorAimAt) CBZ.actorAimAt(b, b.foe, dt);
+        else if (CBZ.lerpAngle) {
+          const fx = b.foe.pos.x - b.pos.x, fz = b.foe.pos.z - b.pos.z;
+          if (fx * fx + fz * fz > 0.01) b.group.rotation.y = CBZ.lerpAngle(b.group.rotation.y, Math.atan2(fx, fz), 1 - Math.pow(0.0005, dt));
+        }
+      }
       botFire(b, dt);
     }
   });

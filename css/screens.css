@@ -130,6 +130,9 @@ body.mode-survival .mode-survival-only{display:block;}
 .mode-gungame-only{display:none;}
 body.mode-gungame .mode-escape-only{display:none;}
 body.mode-gungame .mode-gungame-only{display:block;}
+/* the campaign's canonical title shows ONLY the city block (campaign.css
+   hides escape/survival the same way) — keep gungame out of it too */
+body.campaign-canonical-title #title .mode-gungame-only{display:none !important;}
 
 /* ============================================================
    settings panel (src/systems/settings.js) — pause-screen overlay with
