@@ -1948,3 +1948,34 @@ tested on the record's own `b2` flag.
 `gov 11/11 placed rejected=25 overlap=0 urban=0 staffed=10`, `mtnOutSnow 0
 cityOnMtn 0 overlaps 0`, 400 sim ticks clean, determinism re-run byte-identical,
 console baseline-only.
+
+**AND THE SORTIE WAS FLOWN, NOT ARGUED.** A live probe ordered one from the API
+and read the whole arc off `CBZ.strategicSortieState()` while bursting
+`stepSim(1/60)`:
+
+| t (sim-s) | phase | dist to mark | alt |
+|---|---|---|---|
+| 0 | ordered — `{ok:true}`, pilot "Tess Wozniak", `bomber:false` (claimed off the pad) | 900 | 210 |
+| 2 | inbound | 537 | 210 |
+| 4 | inbound | 307 | 210 |
+| **5.5** | **RELEASE** -> egress | **43** | 210 |
+| 8 | egress | 470 | 210 |
+| 12 | egress | 1310 | 210 |
+| **16.65** | **DETONATION** — `wanted` 0 -> **5** | 2151 clear | — |
+
+Three numbers in that table are the design working rather than a coincidence.
+**43 m** is the solved throw distance, not a tuned constant — the release fired
+the frame the predicted impact reached the mark. **11.15 s** of fall from 210 m
+is the RETARDED laydown: free fall from that height is `sqrt(2*210/14) = 5.5 s`,
+so the canopy streamed exactly as `retardFor` intends. And **2151 m** is where
+the bomber was when it went off, which is what the parachute is FOR. The 5th
+star is the decisive detonation signal because `cityAddStars(5, "Nuclear
+detonation — military response")` is reachable from nowhere else, and
+`channelBusy` latched true after. Console errors: **zero**.
+
+METHOD NOTE FOR THE NEXT PROBE, because it cost two runs: the first detector
+wrapped `CBZ.strategicNukeDetonate` and never fired. `resolveImpact` calls the
+MODULE-LOCAL `nukeDetonate`, so the export is not on the path — a wrapper on a
+`CBZ.*` handle only sees calls from OUTSIDE its own file. Detect a detonation by
+its consequences (the reserved 5th star, the radiation zone), never by wrapping
+a same-file function.
