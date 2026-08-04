@@ -655,7 +655,7 @@ const PASS = `(() => {
     }
     if (CBZ.backcountrySolids && CBZ.backcountrySolids.carpet) {
       const bs = CBZ.backcountrySolids;
-      out.backcountry = "trees " + bs.trees + " (conifer " + bs.conifers + ") roof " + bs.roof +
+      out.backcountry = "trees " + bs.trees + " (conifer " + bs.conifers + ")" +
         " scrub " + bs.scrub + " rocks " + bs.rocks + " chunks " + bs.chunks + "/" + bs.meshes;
       // The carpet exists to be DENSE; a build that quietly stops planting is
       // the regression this line is here to catch (pre-carpet was 10,083).

@@ -529,9 +529,15 @@ Before building anything adjacent, wire into the existing system:
   it cannot re-deal the world. Everything is `CBZ.hash01`, so order-
   independent. The backcountry (`city/continent.js`) went from ONE tree per
   46 m cell at a flat 34% chance — 10,083 stems over 190 km², i.e. parkland —
-  to closure-driven CLUSTERS plus a trunkless 20-triangle roof
-  (`vegetationKit` `canopy-dome`), the conifer `conifer-spire` and a
-  `krummholz` scrub band. **The forest is built as 1.6 km CHUNKS with a
+  to closure-driven CLUSTERS, the conifer `conifer-spire` and a `krummholz`
+  scrub band. It ALSO grew a trunkless 20-triangle roof (`vegetationKit`
+  `canopy-dome`, 57,694 crowns at ground + 7..14 m); **that roof was removed
+  2026-08-04** — on RELIEF a crown with no tree under it reads as a floating
+  green boulder the moment the camera is at eye level instead of overhead,
+  and top-down canopy-cover metrics structurally cannot see it. The rule
+  that replaced it: a canopy filler is only honest over ground already full
+  of real stems (`biome_forest.js`'s flat y=0 plate keeps its roof for
+  exactly that reason); close a wood on relief with stems or wider crowns. **The forest is built as 1.6 km CHUNKS with a
   throttled distance test**, because r128 frustum-culls an InstancedMesh by
   its GEOMETRY's bounding sphere — one country-wide mesh is all-or-nothing,
   and the camera's far plane is 2.2 km, so ~70% of the instances never enter
