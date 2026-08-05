@@ -1400,7 +1400,13 @@
       // over the world in escape mode — the weapon's NAME and the word RES,
       // beside a boxed hotbar chip that already shows which gun is in your
       // hands. Numbers stay; the words were the clutter.
+      // …AND SO IS GUN GAME, for the same reason and now on the same evidence:
+      // its weapon strip docks into the hotbar as one boxed chip (2026-08-04,
+      // systems/inventory.js), so "9MM SIDEARM" over the crosshair was naming a
+      // gun that was already drawn at the bottom of the screen, and "RES" was a
+      // label on a number nothing else could be.
       const campaignMinimal = CBZ.game.mode === "city" || CBZ.game.mode === "escape" ||
+        CBZ.game.mode === "gungame" ||
         !!(CBZ.cityCampaignOwnsMission && CBZ.cityCampaignOwnsMission());
       const rocketSpec = w.explosive ? rocketAmmoSpec(w) : null;
       const rocketMode = rocketSpec ? (rocketSpec.label || rocketSpec.id || "").toUpperCase() : "";

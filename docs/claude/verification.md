@@ -68,7 +68,12 @@ every time. The real rules:
   `tools/smoke-play.mjs` (full RENDERED boot — the only gate on the real
   render path; run before a big deploy or when render code changed),
   `tools/terrain-map-audit.mjs` (deep terrain sweep), `tools/aimlib.js`
-  (honest camera aiming from probes).
+  (honest camera aiming from probes),
+  `tools/prison-polish-check.mjs` (the PRISON, mode "escape" + gungame: the
+  armory's slot-per-weapon and take-it-off-the-wall contract, LOS through an
+  OPENED door — the losgrid mover trap — the tight-space first-person rule with
+  its hysteresis and its player-outranks-it clause, and the "a zero is not news"
+  HUD panels; ~2 min, 22 assertions).
 - **A probe written twice becomes a tool.** If a task needs a bespoke CDP
   script a second time, promote it into the shelf (or a visual-compare
   preset) rather than retyping it. Tool speed is a feature: a shaved boot

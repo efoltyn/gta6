@@ -687,6 +687,11 @@
   // all along), and #cRadar / #minimap taps open the full map (fullmap.js).
   const UI_SEL = "#tbtns, #tveh, #interact, .screen, #pkgPanel, #cpPanel, #fullMap, " +
     "#raceBoard, #speedwayStandings, #speedwayBook, " +
+    // #hotbar (systems/inventory.js) is a div bar of divs — no <button> in it —
+    // so it was never covered by the `button` selector, and on a phone the
+    // joystick's corner anchor now sits over its left-hand cells. A slot tap
+    // must reach the slot, not start a walk.
+    "#hotbar, #weaponStrip, " +
     "#phone, #dashboard, button, [data-act], .iopt, .tpill, #cRadar, #minimap, " +
     "#bankPrompt, #pawnPrompt, #jewelryPrompt, #clothingPrompt, #gunstorePrompt, " +
     "#shopliftPrompt, #cityStoragePrompt, #cityAircraftPrompt";

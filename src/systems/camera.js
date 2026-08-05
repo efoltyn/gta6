@@ -656,7 +656,15 @@
     const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
     return t * t * (3 - 2 * t);
   }
+  // ONE MEASUREMENT PER FRAME. senseRoom is now called from two places (the
+  // tight-space FP check before the first-person hand-off, and the boom in the
+  // third-person tail), and its enclosure damp integrates fdt — calling it
+  // twice in a frame would double-step that damp and halve ROOM_TAU. The
+  // second caller of a frame gets the first one's answer.
+  let _camFrame = 0, _roomFrame = -1;
   function senseRoom(px, py, pz, fdt) {
+    if (_roomFrame === _camFrame) return encK;
+    _roomFrame = _camFrame;
     roomT -= fdt;
     if (roomT <= 0) {
       roomT = 1 / ROOM_HZ;
@@ -694,6 +702,107 @@
     return Math.max(INT_DIST_MIN, Math.min(INT_DIST_MAX, roomSpan * 0.5 - ROOM_CLEAR));
   }
 
+  /* ==========================================================================
+     A CELL IS TOO SMALL FOR A BOOM (CAM_TIGHT_FP).
+
+     OWNER: "test my camera idea — third person mixed with first person for when
+     they are in small rooms or cells etc where 3rd person gets messed up.
+     maybe that's dumb but we will try it."
+
+     It is not dumb; it is the only answer the geometry allows. A prison cell in
+     world/cellblock.js is about 2.4 m across. A third-person camera needs the
+     boom LENGTH plus the camera's own radius behind the character's back — call
+     it 1.5 + 0.34 — and there is 1.2 m of room behind him. Every third-person
+     camera ever written does one of two things with that: clip through the wall
+     (you photograph the corridor and the cell disappears) or slam the lens into
+     the back of his skull (you photograph the inside of a head). Both are what
+     "3rd person gets messed up" means, and no amount of tuning fixes it because
+     the space is smaller than the shot.
+
+     So below a threshold the rig stops pretending. First person needs no room
+     behind the character at all, and this game already has a good one — the
+     standing owner mandate is FIRST PERSON IS SACRED, so nothing here touches
+     it: this calls CBZ.setFPS exactly the way [V] and the touch eye button do,
+     and systems/fpsmode.js runs unchanged and unaware. The switch even inherits
+     the existing CAM_TOGGLE_BLEND dolly, so a doorway reads as a ~0.3 s move in
+     rather than a cut.
+
+     TWO RULES KEEP IT HONEST:
+       · HYSTERESIS, not a threshold. In at 3.0 m of floor span, back out at
+         4.6 m, so standing in a doorway cannot strobe the view.
+       · THE PLAYER OUTRANKS IT. Toggling the view by hand (or fpsmode changing
+         it for its own reasons) drops the claim immediately, and the claim can
+         only be re-armed after the room has opened back up. If you want third
+         person in your cell, you press the button once and you keep it.
+     It gives back ONLY what it took: leaving a tight space restores first
+     person if that is where it found you, and never forces third person on a
+     player who chose first.
+
+     Scoped to the prison (mode "escape") on purpose. The city has its own
+     interior camera — the room-aware boom below, which the owner has already
+     signed off — and the arenas have no rooms. Flag false = nothing at all.
+     ========================================================================== */
+  if (CBZ.CONFIG.CAM_TIGHT_FP == null) CBZ.CONFIG.CAM_TIGHT_FP = true;
+  // MEASURED, not guessed (tools/prison-polish-check.mjs): a world/cellblock.js
+  // cell probes at span 3.20 / ceiling 1.90, the wing's central hall at 18.0
+  // with no lid at all (the block is open-topped, so only the cell roof slabs
+  // read as a ceiling). 3.6 clears the cell with margin and is still nowhere
+  // near a corridor; 5.2 is the release, wide enough that a doorway cannot
+  // strobe and narrow enough that the hall always trips it.
+  const FP_SPAN_IN = 3.6;      // narrow floor span that means "no room for a boom"
+  const FP_SPAN_OUT = 5.2;     // …and the span that hands third person back
+  const FP_CEIL_IN = 2.9;      // a lid too: a narrow alley is not a cell
+  let autoFP = false;          // WE put the player in first person
+  let autoFPWas = false;       // …and this is the view we found him in
+  let tfpPrev = null;          // last frame's fps.active, to spot a manual flip
+  let autoFPBlock = false;     // a manual toggle parks us until the room opens
+  let _selfFlip = false;       // the setFPS call about to land is ours
+  function tightFP(fdt) {
+    const on = CBZ.CONFIG.CAM_TIGHT_FP !== false && !!CBZ.setFPS && !!CBZ.fps;
+    const live = on && CBZ.game.mode === "escape" && CBZ.game.state === "playing" &&
+      !player.dead && !player.driving && !(CBZ.simView && CBZ.simView.active) &&
+      !(CBZ.cineCam && CBZ.cineCam.active);
+    if (!live) {
+      // hand the view back on the way out of play (death/pause/mode change), so
+      // a run can never end with a camera nobody asked for latched on.
+      if (autoFP && CBZ.setFPS) { autoFP = false; CBZ.setFPS(autoFPWas); }
+      autoFP = false; autoFPBlock = false;
+      tfpPrev = !!(CBZ.fps && CBZ.fps.active);
+      return;
+    }
+    const nowFP = !!CBZ.fps.active;
+    // SOMEBODY ELSE MOVED IT. Any change we did not make is the player's (or
+    // fpsmode's) and outranks us until the room opens up again. `null` is the
+    // FIRST observation, not a change: escape mode arms first person after the
+    // intro (state.js -> armFPSAfterIntro), so a `false` seed would read that
+    // as a hand toggle on frame one and park the rule for the whole run.
+    if (tfpPrev !== null && nowFP !== tfpPrev && !_selfFlip) { autoFP = false; autoFPBlock = true; }
+    _selfFlip = false;
+
+    senseRoom(player.pos.x, player.pos.y + height, player.pos.z, fdt);
+    const tight = roomSpan <= FP_SPAN_IN && roomCeil <= FP_CEIL_IN;
+    const open = roomSpan >= FP_SPAN_OUT;
+    if (open) autoFPBlock = false;
+
+    if (!autoFP && tight && !autoFPBlock && !nowFP) {
+      autoFP = true; autoFPWas = false;
+      _selfFlip = true; CBZ.setFPS(true);
+    } else if (autoFP && open) {
+      autoFP = false;
+      _selfFlip = true; CBZ.setFPS(autoFPWas);
+    }
+    tfpPrev = !!CBZ.fps.active;
+  }
+  // the numbers, for a probe: `span`/`ceil` are the live measurement, `auto` is
+  // whether THIS rule owns the current view.
+  CBZ.camRoomAudit = function () {
+    return {
+      on: CBZ.CONFIG.CAM_TIGHT_FP !== false, span: roomSpan, ceil: roomCeil,
+      enc: encK, boom: roomBoom(), auto: autoFP, blocked: autoFPBlock,
+      fp: !!(CBZ.fps && CBZ.fps.active),
+    };
+  };
+
   // FP<->TP TOGGLE BLEND (CAM_TOGGLE_BLEND): the eye and the 4m boom used to
   // hard-teleport on [V]/the touch eye button. While blendT runs, the frame
   // eases from the captured outgoing transform to the incoming rig's live
@@ -720,6 +829,7 @@
     // Used ONLY for time-integration of the damps/exp-chase below; the velocity
     // calc keeps the world dt so look-ahead/FOV pacing is unchanged.
     const fdt = (CBZ.feelCam && CBZ.feelDt != null) ? CBZ.feelDt : dt;
+    _camFrame++;                 // senseRoom answers once per frame (see it)
     // ---- CAMERA POLISH per-frame state (cheap, runs in every branch) ----
     if (flT > 0 && !flHold) flT = Math.max(0, flT - fdt);          // free-look decay after the glance
     // RECENTER ease (CAM_TOUCH_RECENTER). Runs on the wall-clock feel-dt like
@@ -851,6 +961,10 @@
     // synced so the 3rd-person hand-off on toggle-off doesn't spike velocity or
     // replay the intro.) fpsmode positions the FP camera in ALL modes, so this is
     // safe for jail/escape FP too — they had the identical race.
+    // CAM_TIGHT_FP — decided BEFORE the first-person hand-off below, because
+    // once fps.active is true this function returns and the room would never be
+    // measured again (so nothing could ever hand third person back).
+    tightFP(fdt);
     if (CBZ.fps && CBZ.fps.active && !player.dead && !player.driving) {
       introT = 0; prev.copy(player.pos);
       return;
@@ -1093,7 +1207,15 @@
     // It may only ever pull the boom IN — a room must never push the camera OUT,
     // which is what a bare lerp would do the moment the ADS punch-in (2.65 m) is
     // already tighter than the room's own derived boom.
-    const roomK = (TP && !player.driving && CBZ.CONFIG.CAM_ROOM_BOOM !== false)
+    // THE PRISON HAS ROOMS TOO. This was gated on `TP`, which is the CITY
+    // on-foot tier and null everywhere else — so the mode with the most and the
+    // smallest interiors in the game (cells, the corridor, the gun room) was the
+    // one mode the room-aware boom never ran in, and its camera behaved indoors
+    // exactly the way the owner describes: messed up. The probes and the damp
+    // are the same ones; only who is allowed to ask changed. Chute/driving still
+    // opt out, and CAM_ROOM_BOOM=false still reverts the lot.
+    const roomK = (!player.driving && !chuteState && CBZ.CONFIG.CAM_ROOM_BOOM !== false &&
+        (TP || CBZ.game.mode === "escape"))
       ? senseRoom(player.pos.x, player.pos.y + height, player.pos.z, fdt)
       : (encK = 0);
     const wantDist = roomK > 0
@@ -1273,7 +1395,13 @@
       // note. Where the room probes say we are in a room, the floor rides down
       // with the enclosure to the spring-arm minimum, because in a room the
       // boom is short BY DESIGN and has nothing to protect.
-      if (roomK > 0) minCam = minCam + (INT_MIN_CAM - minCam) * roomK;
+      // …and it may only ever LOWER the floor. Reading this as an unconditional
+      // lerp toward INT_MIN_CAM was safe while the room probes were city-only
+      // (every city floor is 1.5-3.0, i.e. above it), but the prison's floor is
+      // 0.28 — there the same line would PUSH the lens out to 0.75 in exactly
+      // the cells it exists to let it into. `minCam` is a floor; a room lifting
+      // a floor is never the intent.
+      if (roomK > 0 && minCam > INT_MIN_CAM) minCam = minCam + (INT_MIN_CAM - minCam) * roomK;
       const d = Math.max(minCam, occ - 0.25);
       dx = baseX + _rd.x * d; dy = baseY + _rd.y * d; dz = baseZ + _rd.z * d;
     }

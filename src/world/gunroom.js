@@ -260,6 +260,13 @@
 
   // ------------------------------------------------------------------
   //  THE RACK (unchanged geometry — the owner already likes this)
+  //
+  //  ...and the geometry stays unchanged, which is the whole point of how the
+  //  "all the guns" ask below is answered. The backboard has ALWAYS carried two
+  //  shelf runs at y 2.38 and 1.38, and only the top one ever held anything —
+  //  five weapons on a rack built for ten. The lower shelf is now stocked
+  //  instead of the pitch being tightened, so not one bracket, board or
+  //  coordinate in this block moves.
   // ------------------------------------------------------------------
   addBox(27.8, 1.75, 1, 0.55, 2.7, 11.6, 0x3c2f22, {});
   for (let i = -2; i <= 2; i++) {
@@ -275,26 +282,68 @@
     return g;
   }
 
+  // a HANDGUN-sized silhouette needs more scale to read at rack distance than a
+  // rifle does. One list instead of the old `id === "sidearm" || id === "taser"`
+  // test, because the rack now carries five small guns rather than two.
+  const SMALL = { sidearm: 1, taser: 1, revolver: 1, deagle: 1, uzi: 1 };
+  function rackScale(id) { return SMALL[id] ? 1.25 : 1.05; }
   function buildRackModel(id) {
     const builder = CBZ.weaponAppearance && CBZ.weaponAppearance[id];
     const model = builder ? builder({ THREE, box, cyl, mat: mats }) : fallbackGun();
-    model.scale.setScalar(id === "sidearm" || id === "taser" ? 1.25 : 1.05);
+    model.scale.setScalar(rackScale(id));
     model.rotation.set(0.04, 0, 0);
     return model;
   }
 
+  /* ==================================================================
+     EVERY GUN IN THE GAME IS IN THIS ROOM (PRISON_ARMORY_FULL_RACK).
+
+     OWNER: "the armory needs to have all the guns."
+
+     CBZ.FPS_WEAPONS declares thirteen. The armory carried six of them — five on
+     the rack and the bolt sniper in the cage — so seven weapons the game fully
+     models, animates and gives a voice to existed nowhere a player could ever
+     pick one up in the prison. That is the gun-room grammar failing its own
+     rule (c): the room is supposed to be where a CATEGORY changes hands.
+
+     They are placed by what they are, not dumped in a row:
+       · THE RACK (nine, open the moment the keycard turns) — every gun a screw
+         could plausibly be holding: three handguns, three long guns, two
+         machine pistols and the taser. The four new ones go on the LOWER shelf
+         run, which the rack has always had and never used, so the board, the
+         brackets and the five original positions are untouched.
+       · THE CAGE (four, behind the Warden's key or a hacksaw) — the ones that
+         change what game you are playing: the bolt sniper on its plinth, plus
+         the M249, the RPG and the 40mm on a wall rack beside it. REACH and
+         EXPLOSIVES are the categorical tier; that is why they are the ones
+         behind the second door rather than the first.
+     Flag false → the exact five-and-one the room shipped with.
+     ================================================================== */
+  if (CBZ.CONFIG.PRISON_ARMORY_FULL_RACK == null) CBZ.CONFIG.PRISON_ARMORY_FULL_RACK = true;
+  const FULL = SPINE && CBZ.CONFIG.PRISON_ARMORY_FULL_RACK !== false;
+
   const rackData = [
+    // ---- TOP shelf run (y 2.38): the five this rack always held ----
     { id: "sidearm", z: -3.0, y: 2.35, name: "9MM SIDEARM" },
     { id: "shotgun", z: -1.0, y: 2.18, name: "12G PUMP" },
     { id: "carbine", z: 1.0, y: 2.18, name: "M4 CARBINE" },
     { id: "smg", z: 3.0, y: 2.20, name: "COMPACT SMG" },
     { id: "taser", z: 5.0, y: 2.35, name: "X26 TASER" },
   ];
+  if (FULL) {
+    // ---- LOWER shelf run (y 1.38): the four that had no home ----
+    rackData.push(
+      { id: "revolver", z: -3.0, y: 1.35, name: ".357 MAGNUM" },
+      { id: "ak47", z: -1.0, y: 1.18, name: "AK-47" },
+      { id: "uzi", z: 1.0, y: 1.35, name: "MICRO UZI" },
+      { id: "deagle", z: 3.0, y: 1.35, name: ".50 DESERT EAGLE" }
+    );
+  }
 
   function makeSlot(data) {
     const pad = addBox(27.25, data.y - 0.52, data.z, 0.12, 0.09, 1.55, 0x202833, { cast: false, emissive: 0x080b10, ei: 0.5 });
     const model = buildRackModel(data.id);
-    // Slot ownership changes this model's scale at runtime. Keep its parent
+    // Slot ownership toggles this model's VISIBILITY at runtime. Keep its parent
     // matrix live when the rest of the static prison set is frozen.
     model.userData.dynamic = true;
     model.position.set(27.18, data.y, data.z + 0.46);
@@ -305,13 +354,36 @@
   }
   rackData.forEach(makeSlot);
 
+  /* ---- AN EMPTY BRACKET IS THE RECEIPT (PRISON_RACK_EMPTIES) ---------------
+     OWNER: "when I take a gun it turns green under it, instead of just removing
+     the gun from the wall as it should do."
+
+     He is describing a UI tell standing in for a physical fact. The rifle stayed
+     bolted to the wall after you took it, shrunk by 8% (invisible at rack
+     distance) with a green pad glowing under it — a status LED explaining a
+     thing the world could simply have shown by not having the rifle there any
+     more. Two wrong readings fall out of it: the rack still looks fully stocked
+     after you have cleared it, and green — the colour every door lamp in this
+     room uses for OPEN — reads as "available" on the one gun that is gone.
+
+     The gun leaves the wall. The pad goes DARK, because an unlit bracket is what
+     an empty bracket looks like, and the lit ones now genuinely mean "there is a
+     weapon here". Flag false = the old shrink-and-glow, byte for byte. */
+  if (CBZ.CONFIG.PRISON_RACK_EMPTIES == null) CBZ.CONFIG.PRISON_RACK_EMPTIES = true;
   function refreshSlotVisual(slot) {
-    const owned = CBZ.hasWeapon && CBZ.hasWeapon(slot.id);
-    slot.taken = !!owned;
-    slot.pad.material.color.setHex(owned ? 0x254f35 : 0x202833);
-    slot.pad.material.emissive.setHex(owned ? 0x0b3b1b : 0x080b10);
-    slot.model.visible = true;
-    slot.model.scale.setScalar((slot.id === "sidearm" || slot.id === "taser" ? 1.25 : 1.05) * (owned ? 0.92 : 1));
+    const owned = !!(CBZ.hasWeapon && CBZ.hasWeapon(slot.id));
+    slot.taken = owned;
+    if (CBZ.CONFIG.PRISON_RACK_EMPTIES === false) {
+      slot.pad.material.color.setHex(owned ? 0x254f35 : 0x202833);
+      slot.pad.material.emissive.setHex(owned ? 0x0b3b1b : 0x080b10);
+      slot.model.visible = true;
+      slot.model.scale.setScalar(rackScale(slot.id) * (owned ? 0.92 : 1));
+      return;
+    }
+    slot.model.visible = !owned;
+    slot.model.scale.setScalar(rackScale(slot.id));
+    slot.pad.material.color.setHex(owned ? 0x14181d : 0x202833);
+    slot.pad.material.emissive.setHex(owned ? 0x000000 : 0x080b10);
   }
 
   function pickupSlot(slot) {
@@ -532,6 +604,33 @@
       id: "sniper", name: "BOLT SNIPER", pad: cagePad, model: cageGun,
       taken: false, cool: 0, x: 23.40, z: -3.30, gated: true,
     });
+    // ---- THE REST OF THE CATEGORICAL TIER (PRISON_ARMORY_FULL_RACK) --------
+    // A wall rack on the cage's one SOLID face (x=25.2), so the three heaviest
+    // things in the game hang broadside to the gate and read through both sets
+    // of bars beside the rifle on its plinth. Guns lie along Z at x≈24.55,
+    // clear of the plinth (z -4.95..-4.05) and inside the cage (z -5.75..-2.2).
+    if (FULL) {
+      const HX = 24.55, HZ = -3.10;
+      addBox(24.98, 1.66, HZ, 0.20, 2.62, 1.62, 0x3c2f22, {});               // backboard
+      const heavy = [
+        { id: "lmg", y: 2.42, name: "M249 LMG" },
+        { id: "bazooka", y: 1.62, name: "RPG LAUNCHER" },
+        { id: "glauncher", y: 0.82, name: "40MM LAUNCHER" },
+      ];
+      for (let i = 0; i < heavy.length; i++) {
+        const h = heavy[i];
+        addBox(24.74, h.y - 0.20, HZ, 0.44, 0.08, 1.30, 0x14181d, { cast: false });   // bracket
+        const pad = addBox(24.90, h.y - 0.44, HZ, 0.10, 0.09, 1.30, 0x202833, { cast: false, emissive: 0x080b10, ei: 0.5 });
+        const model = buildRackModel(h.id);
+        model.userData.dynamic = true;
+        model.position.set(HX, h.y, HZ + 0.40);
+        ROOT.add(model);
+        armory.slots.push({
+          id: h.id, name: h.name, pad: pad, model: model,
+          taken: false, cool: 0, x: 23.90, z: HZ, gated: true,
+        });
+      }
+    }
     // ammunition for it, because a locked rifle with no rounds is a prop
     addBox(24.62, 0.22, -4.86, 0.72, 0.44, 0.52, 0x3f4a33, {});
     addBox(24.62, 0.46, -4.86, 0.76, 0.06, 0.56, 0x2f3a26, { cast: false });

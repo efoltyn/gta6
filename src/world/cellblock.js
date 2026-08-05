@@ -356,7 +356,16 @@
     //      one is the exact "reads fake" fault jail.js:427 names, and the
     //      hemisphere ambient (core/lights.js, 0.85, unshadowed) keeps a
     //      roofed cell readable, so enclosing costs nothing in legibility.
-    addBox(c.x, CH + RT / 2, c.z, c.hx * 2 + WT, RT, c.hz * 2 + WT, C_ROOF, { cast: false });
+    //      blockLOS because it is 30 cm of concrete and nothing can see through
+    //      it — the wing itself is open-topped, so this slab is the ONLY lid in
+    //      the prison and the only thing that can tell a cell apart from the
+    //      corridor outside it. systems/camera.js's room probe asks exactly that
+    //      question (CAM_TIGHT_FP / CAM_ROOM_BOOM: a room has a ceiling AND
+    //      walls; a corridor has walls and open sky), and with no LOS-visible
+    //      lid anywhere it could only ever answer "outdoors". It costs no draw
+    //      call — core/batch.js still merges an LOS blocker's geometry and keeps
+    //      the hidden original purely as a raycast target.
+    addBox(c.x, CH + RT / 2, c.z, c.hx * 2 + WT, RT, c.hz * 2 + WT, C_ROOF, { cast: false, blockLOS: true });
 
     // ---- the FACE: fixed grille + a jamb + the sliding leaf's floor track.
     const gA = c.flip ? [c.ob, c.half] : [-c.half, c.oa];        // the pocket
