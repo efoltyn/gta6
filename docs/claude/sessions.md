@@ -2212,3 +2212,79 @@ rest: build-only-near-spawn, the ~148k-object `minicities` count,
 `LOCAL_INSTANCING` (still off pending the owner's parity call), shader
 precompile, and `defer` on the 467 tags (measure first — the inline block at
 `index.html:354` must still run before `config.js`).
+
+## 2026-08-05 — THE NUKE STOPPED BEING ROCKS (solo)
+
+Owner, verbatim: *"Nukes looked almost perfect... The only issue is they look
+like rocks. They look a little geometric instead of looking like smoke — when
+the RPG blows up, it's like a cloud. Don't change anything about the nuke at
+all, don't change its shape or its speed. I just want whatever the RPG is
+doing."* Second time this complaint has been filed (the first produced
+`NUKE_FX_SOFT_LOBES`, 2026-08-02); this time it was read as a rendering-model
+question rather than an edge-softness one.
+
+- **THE DIAGNOSIS WAS A READ, NOT A GUESS.** `city/crashfx.js:418-577` (the
+  RPG blast) and `city/nukefx.js`'s lobe field differ in exactly four ways,
+  and the cloud had none of the four: RPG puffs are **unlit** (a
+  SpriteMaterial takes no lights, so no puff carries a terminator — ours were
+  MeshLambert under the sun, and a terminator across a closed convex surface
+  is what "geometric" names); **depthWrite is off**, so overlapping puffs
+  ACCUMULATE (ours wrote depth, so lobes hard-clipped and a near lobe's soft
+  rim faded to SKY rather than to the lobe behind it — a pile of soft-edged
+  boulders); the **mask is lumpy**, so a silhouette is ragged (a fresnel fade
+  is smooth, and a smoothly faded sphere is still a sphere); and **alpha is
+  thickness**, zero at the edge with no floor. Also found: the file header has
+  claimed since d186a55 that the fields "reuse the RPG's soft fire/smoke
+  masks" — `TEX.blastSmoke` was fetched at load and never bound to anything.
+- **`NUKE_FX_SMOKE_LOBES`** (one flag, one revert) draws the SAME lobes as
+  puffs: unlit wrap-scatter shading injected at `<tonemapping_fragment>`
+  (energy-matched to Lambert at 1/PI, after the first draft at 0.62 washed the
+  cap pale exactly when the fireball was boosting the sun); depthWrite off with
+  instances flushed back-to-front by `flushVolume` (an InstancedMesh is one
+  draw call, so buffer order IS paint order and three can never sort it
+  against itself); the RPG's own smoke mask, cloned for RepeatWrapping and
+  offset per instance, carving each silhouette; a no-floor alpha that erodes
+  to nothing at the rim. Additive layers moved UNDER the cap (hot 7 -> 5.05,
+  glow 5.25 -> 5.15) because their "heat between the lumps" read came from the
+  cap's depth, and now has to come from its alpha.
+- **TWO THINGS ONLY THE SCREENSHOT COULD HAVE TOLD ME**, both first-round
+  failures, both fixed: (1) shading a billow by its OWN normal is a per-lobe
+  identity — the cap came back as countable balls with the terminator already
+  gone. The light gradient is now the CLOUD's (a world-space top-lit ramp every
+  lobe samples identically, `uSmokeSpan`), with the lobe normal down to 30%
+  weight; adjacent lobes agree at their seam. (2) The last rock was
+  GRANULARITY: eighteen circles read as eighteen circles however softly each
+  is drawn. The smoke path fills the SAME envelope more finely — cap 18->34,
+  stem 10->18, surge 20->30, crown 14->24, identical seed laws, identical size
+  distribution, so outline/width/height/timing are untouched and the field
+  simply stops being gappy. Fill cost measured FLAT (151/64/54/59 ms vs
+  151/67/58/49 ms, SwiftShader, median of 8 renders per beat).
+- **`CBZ.nukeSmokeAudit()` + `tools/nuke-smoke-check.mjs`** — the rock/smoke
+  argument as a number, because the owner has now filed BOTH complaints:
+  "slightly opaque floating rocks" (the body must not be see-through) and
+  "looks like rocks" (a lobe must not have an outline). One per-lobe alpha
+  cannot satisfy both; overlap can. The probe reads live instance matrices,
+  casts 16 rays through each layer's centroid and reports 1-(1-a)^hits. Peaks
+  are now PER LAYER off those measurements — cap 0.58 (6.7-7.6 lobes crossed),
+  stem 0.93 (1.1-7.6: a horizontal ray crosses a COLUMN about once, so its
+  density can only come from the lobe itself), surge 0.82. A DENSE CENTRE WAS
+  NEVER THE ROCK; the terminator, the depth clipping and the unbroken
+  silhouette were.
+- **THE PROBE'S OWN FIRST METRIC WAS WRONG AND IS WORTH REMEMBERING**: it
+  asserted a per-lobe alpha CEILING as a proxy for "the rim still wisps". Per-
+  lobe alpha is the density at a lobe's CENTRE; the rim is driven to zero by
+  the shader, independent of it. On a single-file layer the ceiling and the
+  body floor are arithmetically incompatible, so the pair could only ever be
+  satisfied by making the cloud see-through. The no-floor silhouette is pinned
+  where it is decidable — in source, by `tools/test-nukefx-phases.mjs`.
+- **HARNESS BUG FOUND, DOCUMENTED, NOT MINE**: every AFTER-side frame of
+  `tools/visual-presets/nuke-sequence.mjs` carries a dark faceted disc at
+  (587,401)-(719,530), pixel-identical in every beat regardless of camera
+  distance or simulated time. It survives the A/B it appears to belong to
+  (identical with the nuke flags flipped either way, darkpx 11447 both times),
+  never appears on the BEFORE side or on a single-navigation `--only after`
+  run, and does not reproduce in a standalone probe copying the preset's
+  staging exactly. It is triggered by the SECOND `Page.navigate` in the tab.
+  Until somebody roots it out, judge looks from two separate `--only after`
+  runs; the note is in the preset header so the next reader does not spend an
+  hour on it like this session did.
