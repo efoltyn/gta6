@@ -1030,7 +1030,7 @@ async function runSeed(seed, label) {
   if (r.ranksEmpty) tmark(`${label}: rank slots with nobody in them: ${r.ranksEmpty}`);
   if (r.ranksVerbless) tmark(`${label}: rungs that unlock nothing: ${r.ranksVerbless}`);
   tmark(`${label}: street ${r.street || "-"} | stunts ${r.stunts || "-"}`);
-  tmark(`${label}: ground ${r.ground || "-"} | backdrop ${r.backdrop || "-"} | peaks ${r.peaks || "-"} | swim ${r.swim || "-"}`);
+  tmark(`${label}: ground ${r.ground || "-"} | backdrop ${r.backdrop || "-"} | peaks ${r.peaks || "-"} | swim ${r.swim || "-"} | waterShared ${r.waterShared || "-"}`);
   tmark(`${label}: pools ${r.pools || "-"}`);
   tmark(`${label}: forestLook ${r.forestLook || "-"} | backcountry ${r.backcountry || "-"}`);
   tmark(`${label}: arena ${r.arena || "-"} | frontGlass ${r.frontGlass || "-"} | elevators ${r.elevators || "-"}`);
