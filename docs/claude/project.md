@@ -41,4 +41,9 @@ not `index.html` loads it.** Build-time-only sources go in `vite.config.js`'s
   `tools/load-profile.mjs`. `PERF-NOTES.md` is the sibling for frame cost.
 - `PROCGEN.md` — the method behind generation (seed tree, fields, roadmap).
 - `INFINITE-WORLD.md` — chunked-world migration plan (M0–M8).
+- `docs/plan/engine-oneshot.md` — the ENGINE plan: turn the 400k-LOC repo into
+  something that makes a short one-shot game cheap and uniform (BOOT manifest ·
+  SESSION registry · WORLD hooks · the starter-asset inventory · the budget
+  ratchet). **It deliberately contradicts `GAMES-FIRST.md`'s "Roles, not
+  one-shots" section** — read both before acting on either.
 
