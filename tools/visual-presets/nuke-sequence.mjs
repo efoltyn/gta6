@@ -25,7 +25,26 @@
    - The whiteout is the #nukeFlash DOM div (nukefx reuses strategic.js's
      element) — it must survive the HUD hide sweep.
    - The player spawns near the centroid; they are teleported to each
-     tripod and healed every tick so the storyboard cannot end in WASTED. */
+     tripod and healed every tick so the storyboard cannot end in WASTED.
+
+   KNOWN HARNESS ARTIFACT, MEASURED 2026-08-05 — READ THIS BEFORE BELIEVING
+   AN AFTER-SIDE SHOT. On a two-sided run, every AFTER frame carries a dark
+   faceted disc at pixels (587,401)-(719,530) of the 1100x680 viewport,
+   identical to the pixel in every beat regardless of camera distance, cloud
+   size or simulated time. It is NOT the cloud and it is NOT whatever change
+   is under test:
+     * it is pixel-identical (darkpx 11447) with the build's own nuke flags
+       flipped either way, i.e. it survives the A/B it appears to belong to;
+     * it never appears on the BEFORE side, and never on a single-navigation
+       run (--only after), no matter which build is loaded;
+     * it does not reproduce in a standalone CDP probe that copies this
+       preset's staging exactly — same seed, tripod, quality tier, hideHud
+       and player teleport.
+   So it is triggered by the SECOND Page.navigate in the same tab, not by
+   page content. Until somebody roots it out: for a look judgement, run the
+   two builds as two separate `--only after` runs (each is a first
+   navigation, and both come back clean) and compare those. Numbers on the
+   Measurements page are unaffected. */
 
 const beats = [
   { id: "flash",    t: 0.18, label: "t=0.18s — Double flash",

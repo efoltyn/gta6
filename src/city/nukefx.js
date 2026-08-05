@@ -104,8 +104,10 @@
                               cloud is.
      0.70-25.0  MUSHROOM      six pooled InstancedMeshes form a genuinely 3D
                               hot core, thin rising stem, broad lobed cap and
-                              filled ground cloud. Depth-writing surfaces and
-                              real parallax carry the silhouette from every view.
+                              filled ground cloud. Blended, depth-sorted lobes
+                              and real parallax carry the silhouette from every
+                              view; density comes from OVERLAP, never from a
+                              lobe being individually opaque.
      0.60-10.0  CAP GLOW      (NUKE_FX_V2) the cap is INCANDESCENT INSIDE while
                               its surface has already gone to soot — that is
                               the whole reason a mushroom photograph reads as
@@ -226,11 +228,15 @@
    the bus's and ledger's. This file renders consequences—cloud, dust, world
    fires and broken windows—without outlining any zone on the ground.
 
-   MUSHROOM CLOUDS, CHEAPLY: six InstancedMeshes place rough, light-reactive 3D
-   lobes through a cap/stem/surge field. They write depth and self-occlude, so
-   the cloud reads as one turbulent volume instead of stacked transparent
-   camera-facing cards. Geometry and materials are baked once at load; nothing
-   is fetched (CDN is blocked and must stay that way).
+   MUSHROOM CLOUDS, CHEAPLY: six InstancedMeshes place 3D lobes through a
+   cap/stem/surge field, so the cloud is a volume with real parallax rather
+   than stacked camera-facing cards. Under NUKE_FX_SMOKE_LOBES those lobes are
+   SHADED AS SMOKE, not as surfaces: unlit wrap-scatter (no terminator), the
+   RPG blast's own smoke mask eroding each silhouette, alpha as thickness, and
+   depth-write OFF with the instances flushed back-to-front so overlapping
+   billows accumulate density the way overlapping puffs do. Geometry and
+   materials are baked once at load; nothing is fetched (CDN is blocked and
+   must stay that way).
 
    ------------------------------------------------------------------
    COST DISCIPLINE (fill rate is the enemy — a full-screen additive layer is
@@ -246,7 +252,11 @@
      • Big layers are SEQUENCED, not stacked: the whiteout has faded before
        the cap blooms; the fireball shell is retired before the cloud is big.
      • The coherent cold silhouette is
-       a fixed 72 depth-writing lobes; eight additive hot lobes sit inside it.
+       a fixed 106 blended lobes (72 on the flag-off path); eight additive hot
+       lobes sit inside it. Still SIX draw calls either way — an InstancedMesh
+       costs one whatever its count, so granularity is paid in fill, and the
+       fill was measured flat (tools/nuke-smoke-check.mjs reports render ms
+       per beat for both paths).
        Their transforms upload at 12 Hz while opacity and colour remain smooth.
      • Not one new runtime particle pool. Nuclear cloud/dust is six bounded
        InstancedMeshes; the ordinary explosion-puff storm is legacy-opt-in.
@@ -304,6 +314,43 @@
   // dissolves at its silhouette exactly like a gradient puff, while the core
   // stays dense and depth-writing. false => the hard-rimmed read.
   if (CBZ.CONFIG.NUKE_FX_SOFT_LOBES == null) CBZ.CONFIG.NUKE_FX_SOFT_LOBES = true;
+  /* OWNER AGAIN (2026-08-05), and the second time is the useful one: "they
+     look like rocks... a little geometric instead of looking like smoke. When
+     the RPG blows up it's like a cloud. Don't change anything about the nuke's
+     shape or its speed — I just want whatever the RPG is doing."
+
+     SOFT_LOBES above softened the EDGE of an object that was still being drawn
+     as an object, and the 2026-08-03 solidity pass (see solidOp) then pushed
+     its interiors to fully opaque, which made the object-ness worse. Read the
+     RPG blast (city/crashfx.js:418-577) and there are exactly four properties
+     doing the work, none of which this cloud had:
+
+       (1) NOTHING IS LIT. A SpriteMaterial takes no lights, so no puff has a
+           light/dark terminator. Our lobes were MeshLambert under the sun:
+           a terminator across a closed convex surface is the single loudest
+           "solid body" cue there is, and it is what "geometric" names.
+       (2) depthWrite IS OFF, so overlapping puffs ACCUMULATE density. Ours
+           wrote depth: lobes hard-clipped into each other, and a near lobe's
+           soft rim faded to SKY instead of to the lobe behind it. That is a
+           pile of soft-edged boulders, which is still boulders.
+       (3) THE MASK IS LUMPY (makeSmokeTexture: seven overlapping blobs), so
+           a puff's own silhouette is ragged. A fresnel fade is smooth, and a
+           smoothly faded sphere still reads as a sphere.
+       (4) THE PUFF IS NOT A SURFACE. Its alpha is thickness, densest through
+           the middle, zero at the edge — no floor, no rim, no outline.
+
+     So: same lobes, same field, same transforms — drawn like a puff instead of
+     like a rock. Unlit wrap-scatter shading, depth-write off with the instances
+     sorted back-to-front so the accumulation is CORRECT, the RPG's own smoke
+     mask (TEX.blastSmoke, fetched here since d186a55 and never once bound)
+     eroding the silhouette, and per-lobe alpha dropped because overlap now
+     supplies the density that solidOp used to fake per lobe.
+
+     NOT TOUCHED, deliberately: every dimension, envelope, curve, count, seed
+     and duration in this file. The cloud is the same cloud, frame for frame.
+     false => the lit, depth-writing, hard-clipping read this shipped with. */
+  if (CBZ.CONFIG.NUKE_FX_SMOKE_LOBES == null) CBZ.CONFIG.NUKE_FX_SMOKE_LOBES = true;
+  function smokeLobes() { return CBZ.CONFIG.NUKE_FX_SMOKE_LOBES !== false; }
   // THE ATMOSPHERE DRIVE — the single cheapest "this is nuclear" cue there is.
   // Lerps scene.fog.color along the timeline (white-out -> orange -> ash grey);
   // core/sky.js@99 paints its horizon band from scene.fog.color, so the whole
@@ -996,12 +1043,32 @@
      of one instanced field: [0, CROWN_N) boil over the cap's top, [CROWN_N,
      crown) hang under its rim as the skirt. One buffer, one upload, one
      draw, and a budget cut decimates both together. */
-  // A few real 3D lobes establish macro-volume; procedural roughness supplies
+  // A few real 3D lobes establish macro-volume; the fragment shader supplies
   // the small scale. The former 134 giant transparent cards spent fill-rate on
-  // repeated flat detail. These 80 depth-writing instances spend geometry once
-  // and then let the depth buffer reject hidden cloud surfaces.
-  const VOL_MAX = { cap: 18, stem: 10, surge: 20, hot: 10, crown: 14, glow: 8 };
-  const CROWN_N = 8;                        // of VOL_MAX.crown; the rest is collar
+  // repeated flat detail; these instances spend geometry once and carry their
+  // roughness in the shading, where it costs no silhouette.
+  /* GRANULARITY IS THE LAST ROCK. Shading fixed the facets, the terminator
+     and the hard clipping; what still read as "balls" at the cap is simply
+     that a silhouette assembled from EIGHTEEN circles is eighteen circles,
+     however softly each one is drawn. The RPG blast looks like cloud partly
+     because it spends dozens of small puffs where this spent a handful of
+     large ones.
+
+     So the smoke path fills the SAME envelope more finely. Every added lobe
+     is drawn from the identical seed law (area-uniform r <= 0.86 for the cap,
+     stratified stations for the stem, and so on), at the identical size
+     distribution, so the cloud's OUTLINE, WIDTH, HEIGHT and TIMING are the
+     ones already tuned — the field just stops being gappy between them. No
+     new draw call: an InstancedMesh costs one either way.
+
+     Cost is fill, not geometry, and it is measured rather than assumed —
+     tools/nuke-smoke-check.mjs reports median render ms per beat, and
+     --cfg NUKE_FX_SMOKE_LOBES=0 runs the old path for the comparison. */
+  const VOL_MAX = smokeLobes()
+    ? { cap: 34, stem: 18, surge: 30, hot: 10, crown: 24, glow: 8 }
+    : { cap: 18, stem: 10, surge: 20, hot: 10, crown: 14, glow: 8 };
+  // of VOL_MAX.crown; the rest is collar (the ratio is held across both paths)
+  const CROWN_N = smokeLobes() ? 14 : 8;
   const VOL_SEED = { cap: [], stem: [], surge: [], hot: [], crown: [], glow: [] };
 
   // One deterministic layout, reused by every detonation. The instances move
@@ -1118,6 +1185,30 @@
     return mesh;
   }
 
+  /* ---- SMOKE LIGHTING, ONE SHARED SET OF UNIFORMS -----------------------
+     Four lobe materials, one uniform object per term: onBeforeCompile drops
+     these exact references into every compiled shader, so the per-frame
+     update (see smokeLight() by stepVolumes) is four assignments, not
+     four materials x four uniforms. They are also why the four materials can
+     share ONE compiled program — identical source, identical uniform names.
+
+     WHY WE LIGHT IT OURSELVES instead of letting Lambert do it: Lambert's
+     dot(N,L) puts a terminator on every lobe, and a terminator is the thing
+     that says "solid". Smoke has none — it has a bright sun side, a dark
+     side that never reaches black because the sky fills it, and a strong
+     forward-scatter bloom when you look through it toward the sun. That is
+     the whole shading model below, and it is what a soft radial sprite gets
+     for free by being unlit. */
+  const SMOKE_U = {
+    uSmokeSun: { value: new THREE.Vector3(0.35, 0.86, 0.37) },
+    uSmokeSunCol: { value: new THREE.Color(0xfff4e0) },
+    uSmokeAmb: { value: new THREE.Color(0x5d6a7d) },
+    uSmokeMask: { value: null },
+    // world Y of the deck and of the cap centre — the two ends of the cloud's
+    // own vertical light gradient (see uSmokeSpan's use in the shader).
+    uSmokeSpan: { value: new THREE.Vector2(0, 1) },
+  };
+
   function buildPool() {
     TEX.cloud = makeCloudTexture();
     TEX.noise = makeNoiseTexture();
@@ -1125,6 +1216,19 @@
     const blastAssets = CBZ.cityBlastPuffAssets ? CBZ.cityBlastPuffAssets() : null;
     TEX.blastFlame = blastAssets ? blastAssets.flame : TEX.cloud;
     TEX.blastSmoke = blastAssets ? blastAssets.smoke : TEX.cloud;
+    /* The lobe mask is a CLONE of the RPG's smoke texture, never the texture
+       itself: the original is live on every pooled blast sprite in crashfx,
+       and the lobes need RepeatWrapping (each lobe offsets its sample by its
+       own instance translation, so no two billows wear the same lumps).
+       Mutating the shared one would have re-wrapped the whole game's smoke. */
+    if (TEX.blastSmoke && TEX.blastSmoke.clone) {
+      TEX.smokeMask = TEX.blastSmoke.clone();
+      TEX.smokeMask.wrapS = TEX.smokeMask.wrapT = THREE.RepeatWrapping;
+      TEX.smokeMask.needsUpdate = true;
+    } else {
+      TEX.smokeMask = TEX.blastSmoke;
+    }
+    SMOKE_U.uSmokeMask.value = TEX.smokeMask;
     TEX.mushEarly = makeMushroomTexture(0);
     TEX.mushForm = makeMushroomTexture(1);
     TEX.mush = makeMushroomTexture(2);
@@ -1137,10 +1241,18 @@
     // keep the shared mesh from reading as repeated balls.
     const billowGeo = new THREE.IcosahedronGeometry(1, 2);
     const bp = billowGeo.attributes.position;
+    /* THE DISPLACEMENT IS AN ASTEROID RECIPE. +/-15.5% multi-frequency
+       displacement baked into a 320-tri icosphere and re-normalled is
+       literally how you model a boulder, and at 250-470 m per cap lobe those
+       bumps are the size of a city block — visible as SHAPE, not as texture.
+       Under NUKE_FX_SMOKE_LOBES the macro-roughness moves into the fragment
+       shader (mask erosion + world-space noise), where roughness costs no
+       silhouette, and the mesh keeps just enough wobble to break the sphere. */
+    const rk = smokeLobes() ? 0.34 : 1;
     for (let bi = 0; bi < bp.count; bi++) {
       const bx = bp.getX(bi), by = bp.getY(bi), bz = bp.getZ(bi);
-      const rough = 1 + 0.10 * Math.sin(bx * 7.1 + by * 3.7) * Math.sin(bz * 8.3 - by * 4.1)
-        + 0.055 * Math.sin((bx + bz) * 13.7 + by * 9.2);
+      const rough = 1 + rk * (0.10 * Math.sin(bx * 7.1 + by * 3.7) * Math.sin(bz * 8.3 - by * 4.1)
+        + 0.055 * Math.sin((bx + bz) * 13.7 + by * 9.2));
       bp.setXYZ(bi, bx * rough, by * rough, bz * rough);
     }
     bp.needsUpdate = true;
@@ -1175,15 +1287,172 @@
     function volumeMat(color, emissive, opacity, rimFloor) {
       // (peak opacity is applied per frame — see solidOp() near the layer
       //  writes; the constructor value only covers the first frame)
+      const smoke = smokeLobes();
       const m = new THREE.MeshLambertMaterial({
         color: color, emissive: emissive, emissiveIntensity: 1,
-        transparent: true, opacity: opacity, depthWrite: true,
+        // DEPTH-WRITE OFF IS THE WHOLE FIX. With it on, one unsorted instanced
+        // pass means the first lobe drawn owns those pixels forever: overlaps
+        // hard-clip into visible intersection curves and a soft rim reveals
+        // SKY rather than the lobe behind it. Off + back-to-front instance
+        // order (flushVolume) makes overlapping billows accumulate exactly
+        // like overlapping RPG puffs. depthTest stays on, so the city still
+        // occludes the cloud and the cloud still sits behind what is nearer.
+        transparent: true, opacity: opacity, depthWrite: !smoke,
         depthTest: true,
         // fog:false under NUKE_FX_FOGPROOF — the cloud stands above the haze
         // layer; scene fog erased it completely past ~5 km (see the flag).
         fog: !CBZ.CONFIG.NUKE_FX_FOGPROOF,
         side: THREE.FrontSide, flatShading: false,
       });
+      /* ---- NUKE_FX_SMOKE_LOBES: draw the lobe as a PUFF, not a surface ----
+         Four patches, one per property the RPG blast has and this did not:
+
+           SHADE   the Lambert result is discarded and replaced by a wrap-lit
+                   scatter term. dot(N,L)*0.5+0.5 has no terminator anywhere on
+                   the sphere; the sky ambient keeps the dark side from ever
+                   reaching black; and a forward-scatter lobe brightens the
+                   cloud when the sun is behind it, which is the reason real
+                   smoke glows at its edges. Injected at <tonemapping_fragment>
+                   (NOT at <dithering_fragment>, where the old patch sat) so the
+                   colour still goes through tone mapping and output encoding
+                   like every other surface in the game.
+           MASK    the RPG's own makeSmokeTexture, sampled twice in OBJECT
+                   space (xy and zy) and averaged. Object space means the lumps
+                   scale WITH the lobe as it blooms — exactly what a growing
+                   sprite does — and the per-instance offset means 18 cap lobes
+                   are 18 different clouds, not one cloud stamped 18 times.
+           ERODE   density is squared off against itself (smoothstep on smDen),
+                   so thin regions dissolve to nothing instead of fading
+                   smoothly. A smooth fade gives you a soft-edged ball; smoke
+                   needs a RAGGED edge, and this is where it comes from.
+           NO FLOOR the old per-role rim floors (0.22/0.45/0.60) existed only
+                   because a depth-WRITING rim punched holes in the lobes
+                   behind it. Nothing writes depth now, so alpha is free to
+                   reach a true zero at the silhouette. That is the difference
+                   between a lobe that ends and a lobe that has an outline. */
+      if (smoke) {
+        m.customProgramCacheKey = function () { return "cbzSmokeLobes1"; };
+        m.onBeforeCompile = function (shader) {
+          shader.uniforms.uSmokeSun = SMOKE_U.uSmokeSun;
+          shader.uniforms.uSmokeSunCol = SMOKE_U.uSmokeSunCol;
+          shader.uniforms.uSmokeAmb = SMOKE_U.uSmokeAmb;
+          shader.uniforms.uSmokeMask = SMOKE_U.uSmokeMask;
+          shader.uniforms.uSmokeSpan = SMOKE_U.uSmokeSpan;
+          shader.vertexShader = shader.vertexShader
+            .replace("#include <common>",
+              "#include <common>\nvarying vec3 vSmN;\nvarying vec3 vSmV;\n" +
+              "varying vec3 vSmW;\nvarying vec3 vSmO;\nvarying vec3 vSmSeed;")
+            .replace("#include <defaultnormal_vertex>",
+              "#include <defaultnormal_vertex>\nvSmN = transformedNormal;")
+            // EVERY #ifdef GETS ITS OWN LINE. A missing \n before one of these
+            // once compiled all four lobe materials into invisibility and cost
+            // a whole look round to find (sessions.md, 2026-08-02).
+            .replace("#include <project_vertex>",
+              "#include <project_vertex>\n" +
+              "vSmV = -mvPosition.xyz;\n" +
+              "vSmO = transformed;\n" +
+              "vSmSeed = vec3(0.0);\n" +
+              "vSmW = (modelMatrix * (\n" +
+              "#ifdef USE_INSTANCING\n instanceMatrix *\n#endif\n" +
+              " vec4(transformed, 1.0))).xyz;\n" +
+              "#ifdef USE_INSTANCING\n" +
+              " vSmSeed = vec3(instanceMatrix[3][0], instanceMatrix[3][1], instanceMatrix[3][2]);\n" +
+              "#endif\n");
+          shader.fragmentShader = shader.fragmentShader
+            .replace("#include <common>",
+              "#include <common>\nvarying vec3 vSmN;\nvarying vec3 vSmV;\n" +
+              "varying vec3 vSmW;\nvarying vec3 vSmO;\nvarying vec3 vSmSeed;\n" +
+              "uniform vec3 uSmokeSun;\nuniform vec3 uSmokeSunCol;\n" +
+              "uniform vec3 uSmokeAmb;\nuniform sampler2D uSmokeMask;\n" +
+              "uniform vec2 uSmokeSpan;\n" +
+              // globals: written at the tone-mapping hook, read again at the
+              // alpha hook further down the same main().
+              "float smNoise;\nfloat smMask;\nfloat smRim;")
+            .replace("#include <tonemapping_fragment>",
+              "vec3 smN = normalize(vSmN);\n" +
+              "vec3 smV = normalize(vSmV);\n" +
+              "smRim = abs(dot(smN, smV));\n" +
+              // Two octaves of world-space value noise, ~450 m and ~1.5 km:
+              // broad billow mottling that still reads on the 5 km mature cap.
+              "float smA1 = sin(vSmW.x * 0.0041 + vSmW.y * 0.0062) * sin(vSmW.z * 0.0051 - vSmW.y * 0.0039);\n" +
+              "float smA2 = sin(vSmW.x * 0.0118 - vSmW.y * 0.0089) * sin(vSmW.z * 0.0104 + vSmW.x * 0.0077);\n" +
+              /* A THIRD OCTAVE, AND IT IS THE ONE THAT WELDS THE CLOUD. ~130 m
+                 is SMALLER than a cap lobe (250-470 m across), so unlike the
+                 two broad octaves it varies WITHIN a lobe — and because it is
+                 world-space, two overlapping lobes are mottled by the same
+                 function at their seam. Density structure that crosses the
+                 boundary is what stops the eye from resolving the boundary.
+                 An object-space texture can never do this: it stops at the
+                 lobe, which is precisely what draws the lobe. */
+              "float smA3 = sin(vSmW.x * 0.0472 + vSmW.z * 0.0388) * sin(vSmW.y * 0.0431 - vSmW.x * 0.0295);\n" +
+              "smNoise = 0.5 + 0.27 * smA1 + 0.15 * smA2 + 0.14 * smA3;\n" +
+              "vec2 smOff = vec2(vSmSeed.x + vSmSeed.y, vSmSeed.z - vSmSeed.y) * 0.0037;\n" +
+              /* 1.15, not 0.5: the object-space span is about [-1,1], so the
+                 first mapping stretched one copy of a 64 px blur over a whole
+                 billow — a gentle tint. Tiling it ~2.3x carved, but a mask of
+                 seven soft blobs REPEATED reads as concentric rings, which is
+                 its own artificial pattern. Just over one copy per lobe plus
+                 the per-instance offset is the balance: real carving from the
+                 RPG's own mask, no tiling signature. The fine mottling that
+                 breaks a lobe's interior is the third world-space octave
+                 above, which is deliberately NOT tied to the lobe. */
+              "float smM1 = texture2D(uSmokeMask, vSmO.xy * 0.62 + smOff).a;\n" +
+              "float smM2 = texture2D(uSmokeMask, vSmO.zy * 0.62 + smOff.yx).a;\n" +
+              "smMask = 0.5 * (smM1 + smM2);\n" +
+              "vec3 smL = normalize((viewMatrix * vec4(uSmokeSun, 0.0)).xyz);\n" +
+              "float smWrap = dot(smN, smL) * 0.5 + 0.5;\n" +
+              "float smFwd = pow(max(0.0, dot(-smV, smL)), 3.0);\n" +
+              /* THE LIGHT GRADIENT IS THE CLOUD'S, NOT THE LOBE'S — and this
+                 is the correction the first look round demanded. Shading each
+                 billow by its OWN normal is physically reasonable and visually
+                 fatal: a per-lobe bright-side/dark-side is a per-lobe identity,
+                 so the cap came back as a heap of countable balls even with the
+                 terminator gone. An RPG puff has no normal at all; its
+                 brightness comes from where it sits in the plume, so adjacent
+                 puffs agree at their seam and the eye reads ONE mass.
+                 smH is that: a continuous top-lit/bottom-shadowed ramp across
+                 the whole cloud in WORLD space, which every lobe samples the
+                 same way. The lobe normal keeps 30% of the weight — enough to
+                 hint at volume, not enough to draw an outline. */
+              "float smH = clamp((vSmW.y - uSmokeSpan.x) / max(1.0, uSmokeSpan.y - uSmokeSpan.x), 0.0, 1.0);\n" +
+              "smH = 0.45 + 0.55 * smoothstep(0.0, 0.85, smH);\n" +
+              "float smShade = 0.30 * smWrap * smWrap + 0.70 * smH;\n" +
+              // CLAMPED, because the cloud lights ITSELF. The atmosphere drive
+              // (onAlways 94.6) multiplies sun.intensity by up to ~2.4x during
+              // the burn, which is correct for the city and blows a directly
+              // multiplied smoke term past white — the first look round came
+              // back with a pale tan cap where the old build had orange. The
+              // ceiling keeps the fire's brightening while leaving the colour
+              // cloudColor() authored (hot -> ash) legible.
+              "vec3 smLit = min(vec3(1.15), uSmokeAmb * (0.62 + 0.38 * smH) + uSmokeSunCol * (smShade * 0.90 + 0.10 + smFwd * 0.50));\n" +
+              "gl_FragColor.rgb = diffuse * smLit * (0.80 + 0.40 * smNoise) + emissive;\n" +
+              "#include <tonemapping_fragment>")
+            .replace("#include <dithering_fragment>",
+              // alpha IS thickness: densest looking through the middle of the
+              // lobe, zero at the silhouette, broken up by the mask.
+              /* PLATEAU, not a dome. smoothstep(0.02,0.72) put most of a
+                 lobe's projected disc BELOW full density, so every lobe
+                 painted a visible radial gradient — a bag of soft discs still
+                 shows you the discs. The inner ~80% now sits at full density
+                 and only the outer edge falls away, so a joint between two
+                 lobes stays dense and the mass closes up. The silhouette is
+                 still ragged: the mask erosion below owns that, not this. */
+              "float smBody = smoothstep(0.0, 0.42, smRim);\n" +
+              /* Both modulators average ~1.0 (mask and noise both centre on
+                 0.5), so material.opacity stays the honest MEAN alpha through
+                 a lobe and CBZ.nukeSmokeAudit()'s coverage arithmetic keeps
+                 meaning what it says — while the swing carries density from
+                 0.42x up to saturation, which is the carving. */
+              "float smDen = smBody * (0.42 + 1.16 * smMask) * (0.70 + 0.60 * smNoise);\n" +
+              // ...and then thin density dies outright, so the silhouette
+              // tears instead of fading like the edge of a ball.
+              "smDen *= smoothstep(0.05, 0.34, smDen);\n" +
+              "gl_FragColor.a *= clamp(smDen, 0.0, 1.0);\n" +
+              "#include <dithering_fragment>");
+        };
+        m._shared = true;
+        return m;
+      }
       // NUKE_FX_SOFT_LOBES: alpha falls off toward each lobe's silhouette
       // (view-space fresnel), so the billow reads as participating smoke
       // instead of a lit rock. The 0.16 floor keeps the depth-written rim
@@ -1252,7 +1521,18 @@
       side: THREE.FrontSide, blending: THREE.AdditiveBlending,
     });
     hotMat._shared = true;
-    POOL.hotVol = volumeMesh("hot-billows", VOL_MAX.hot, hotMat, 7);
+    /* RENDER ORDER UNDER NUKE_FX_SMOKE_LOBES, and it is not cosmetic.
+       The hot billows and the cap glow are ADDITIVE and rely on the cold
+       lobes' DEPTH to hide them: "heat coming out from between the lumps,
+       never a ball in front of a cloud". The cold lobes no longer write
+       depth, so that occlusion has to come from alpha instead — which means
+       the additive layers must be painted BEFORE the mass that covers them,
+       so the cap's own alpha attenuates them where it is dense and lets them
+       through where the billows part. Same read, one number, no depth pass:
+         surge 4 -> hot 5.05 -> stem 5.1 -> glow 5.15 -> cap 5.2 -> crown 5.3
+       Flag off restores 7 / 5.25, which is correct for a depth-writing cap. */
+    POOL.hotVol = volumeMesh("hot-billows", VOL_MAX.hot, hotMat,
+      smokeLobes() ? 5.05 : 7);
 
     /* ---- THE CROWN + COLLAR: cold, dark, soft cauliflower -----------------
        Soft smoke masks, drawn at renderOrder 5.3 — i.e. immediately
@@ -1276,7 +1556,8 @@
       side: THREE.FrontSide, blending: THREE.AdditiveBlending,
     });
     glowMat._shared = true;
-    POOL.glowVol = volumeMesh("cap-glow", VOL_MAX.glow, glowMat, 5.25);
+    POOL.glowVol = volumeMesh("cap-glow", VOL_MAX.glow, glowMat,
+      smokeLobes() ? 5.15 : 5.25);      // see the render-order note above
 
     /* ---- THE WHITE DOME — the first second, and the single biggest thing
        missing from this sequence.
@@ -1602,7 +1883,7 @@
      solid instead of at 85%. NUKE_FX_SOLID_CLOUD=false restores the old
      peaks byte for byte.
      ============================================================ */
-  function solidOp(peak) {
+  function solidOp(peak, smokePeak) {
     /* 1.45, not 1.05, and the reason is NUKE_FX_SOFT_LOBES: its fragment
        patch multiplies alpha by BOTH a rim fresnel AND a noise term whose
        floor is 0.70 (see volumeMat). So a layer whose peak was 0.86 actually
@@ -1611,6 +1892,47 @@
        clamp do the work: lobe INTERIORS finish solid, while the rim fresnel
        still dissolves the silhouette. Solid billows, soft edges, which is
        what the soft-lobe patch was reaching for in the first place. */
+    /* SMOKE MODE PAYS FOR SOLIDITY WITH OVERLAP, NOT WITH ALPHA. The x1.45
+       over-drive above exists to beat the soft-lobe patch's own alpha
+       multipliers back up to opaque INTERIORS, and it worked — but a lobe
+       that is individually opaque is individually an object, which is the
+       complaint this whole flag answers. With depth-write off and the
+       instances sorted, coverage COMPOSES: n overlapping lobes at alpha a
+       reach 1-(1-a)^n. Density is bought with n, and the rim — crossed by
+       exactly ONE lobe — is left free to wisp.
+
+       WHICH MEANS THE PEAK IS PER LAYER, and the numbers below are measured,
+       not chosen (tools/nuke-smoke-check.mjs, seed 90210, quality tier 3,
+       16 rays through each layer's own centroid):
+
+         layer   lobes crossed   peak   body coverage
+         cap        6.7 - 7.6    0.58     0.997 - 0.999
+         stem       1.1 - 7.6    0.93     0.951 - 1.000
+         surge      3.1 - 5.8    0.82     0.995 - 1.000
+
+       The STEM carries the highest peak of the three and that is structural,
+       not a compromise: a horizontal ray crosses a COLUMN about once, so its
+       density can only come from the lobe itself. A real convective column is
+       opaque through the middle; what stops it reading as a stack of eggs is
+       the eroded silhouette and the shading, both of which it keeps.
+
+       The cap is a MASS and stacks four deep, so it can be thin per lobe.
+       The stem and the surge stack single-file — a horizontal ray crosses a
+       column once — so a thin peak there is a see-through column, which is
+       the 2026-08-03 complaint all over again. This is the same law the old
+       per-role rim floors encoded (cap 0.22 / surge 0.45 / stem 0.60); it is
+       just being applied to the quantity that actually controls opacity.
+
+       A dense CENTRE is not what made this look like rock: the terminator,
+       the depth clipping and the unbroken silhouette did, and all three are
+       gone. Real smoke columns are opaque in the middle and ragged at the
+       edge, which is exactly what these numbers plus the shader produce.
+
+       The crown/collar is deliberately NOT in that table: it is a shell over
+       the cap and a skirt under its rim, so no ray through the cloud's axis
+       crosses more than about one of its lobes. Its mass is the cap behind
+       it; its own job is silhouette. */
+    if (smokeLobes()) return Math.min(1, smokePeak != null ? smokePeak : peak * 0.68);
     return CBZ.CONFIG.NUKE_FX_SOLID_CLOUD === false ? peak : Math.min(1, peak * 1.45);
   }
 
@@ -2172,9 +2494,9 @@
       };
       const fullCold = nuke && phasedCloud();
       live.volN = {
-        cap: fullCold ? VOL_MAX.cap : count(nuke ? 12 : 8, nuke ? VOL_MAX.cap : 18),
-        stem: fullCold ? VOL_MAX.stem : count(nuke ? 8 : 5, nuke ? VOL_MAX.stem : 10),
-        surge: fullCold ? VOL_MAX.surge : count(nuke ? 10 : 7, nuke ? VOL_MAX.surge : 15),
+        cap: fullCold ? VOL_MAX.cap : count(nuke ? 12 : 8, nuke ? VOL_MAX.cap : Math.min(18, VOL_MAX.cap)),
+        stem: fullCold ? VOL_MAX.stem : count(nuke ? 8 : 5, nuke ? VOL_MAX.stem : Math.min(10, VOL_MAX.stem)),
+        surge: fullCold ? VOL_MAX.surge : count(nuke ? 10 : 7, nuke ? VOL_MAX.surge : Math.min(15, VOL_MAX.surge)),
         hot: count(nuke ? 8 : 6, nuke ? VOL_MAX.hot : 11),
         crown: 0, glow: 0,
       };
@@ -2536,11 +2858,12 @@
                                     cam.position.z - mesh.position.z), 0);
   }
 
-  /* ---- DEPTH-WRITING 3D MUSHROOM FIELD ------------------------------------
-     Rough, anisotropic lobes establish a real cap/stem/surge volume. Their
-     surfaces light, parallax and occlude in world space; no cloud primitive
-     rotates to follow the lens. Slow buoyant motion is uploaded at 12 Hz while
-     colour/light envelopes remain frame-smooth. */
+  /* ---- THE 3D MUSHROOM FIELD ----------------------------------------------
+     Rough, anisotropic lobes establish a real cap/stem/surge volume. They
+     parallax in world space; no cloud primitive rotates to follow the lens.
+     Slow buoyant motion is uploaded at 12 Hz while colour/light envelopes
+     remain frame-smooth. Under NUKE_FX_SMOKE_LOBES they blend instead of
+     occluding (see volumeMat/flushVolume) — same field, same transforms. */
   const _volDummy = new THREE.Object3D();
   let _volWrite = true;
   const VOL_HOT = new THREE.Color(0xff7a18);
@@ -2571,14 +2894,124 @@
   const VOL_CROWN_ASH = new THREE.Color(0x2a2723);
   const VOL_CROWN_EMBER = new THREE.Color(0x2c0d03);
 
-  function putVolume(mesh, i, x, y, z, sx, sy, sz, ry) {
-    if (!_volWrite) return;
+  /* ---- BACK-TO-FRONT INSTANCE ORDER ---------------------------------------
+     An InstancedMesh is ONE draw call, so three's transparent sort can order
+     it against other objects but never against ITSELF: instances composite in
+     buffer order, whatever that is. While the lobes wrote depth that was
+     hidden (the depth test discarded the mistakes, at the cost of looking like
+     a pile of solids). Now that they blend, buffer order IS paint order, and
+     painting a far lobe over a near one is visibly wrong — the far side of the
+     cloud smears over the near side.
+
+     So the writes are buffered and flushed in depth order. It is 20 lobes at
+     most, sorted at the existing 12 Hz transform cadence — an insertion sort
+     over 20 keys, on the frames that were already uploading a matrix buffer.
+     Additive layers (hot billows, cap glow) skip the sort: addition commutes. */
+  const VOL_SORT_MAX = 24;
+  const _volBuf = {
+    n: 0,
+    x: new Float64Array(VOL_SORT_MAX), y: new Float64Array(VOL_SORT_MAX),
+    z: new Float64Array(VOL_SORT_MAX), sx: new Float64Array(VOL_SORT_MAX),
+    sy: new Float64Array(VOL_SORT_MAX), sz: new Float64Array(VOL_SORT_MAX),
+    r: new Float64Array(VOL_SORT_MAX), key: new Float64Array(VOL_SORT_MAX),
+    idx: new Int32Array(VOL_SORT_MAX),
+  };
+
+  function writeVolume(mesh, slot, x, y, z, sx, sy, sz, ry) {
     _volDummy.position.set(x, y, z);
     const r = ry || 0;
     _volDummy.rotation.set(r * 0.37, r, r * 0.19);
     _volDummy.scale.set(Math.max(0.01, sx), Math.max(0.01, sy), Math.max(0.01, sz));
     _volDummy.updateMatrix();
-    mesh.setMatrixAt(i, _volDummy.matrix);
+    mesh.setMatrixAt(slot, _volDummy.matrix);
+  }
+
+  function putVolume(mesh, i, x, y, z, sx, sy, sz, ry) {
+    if (!_volWrite) return;
+    if (!smokeLobes()) { writeVolume(mesh, i, x, y, z, sx, sy, sz, ry); return; }
+    const n = _volBuf.n;
+    if (n >= VOL_SORT_MAX) { writeVolume(mesh, i, x, y, z, sx, sy, sz, ry); return; }
+    _volBuf.x[n] = x; _volBuf.y[n] = y; _volBuf.z[n] = z;
+    _volBuf.sx[n] = sx; _volBuf.sy[n] = sy; _volBuf.sz[n] = sz;
+    _volBuf.r[n] = ry || 0;
+    _volBuf.n = n + 1;
+  }
+
+  // Flush one layer's buffered lobes. `sorted` is false for additive layers.
+  function flushVolume(mesh, sorted) {
+    if (!_volWrite) return;
+    mesh.instanceMatrix.needsUpdate = true;
+    if (!smokeLobes()) return;
+    const n = _volBuf.n;
+    _volBuf.n = 0;
+    if (!n) return;
+    const B = _volBuf;
+    for (let i = 0; i < n; i++) B.idx[i] = i;
+    if (sorted !== false) {
+      // These meshes are parented straight to the scene with a position and
+      // no rotation or scale (see the placement block), so camera-local is a
+      // subtraction — no matrix inverse, no allocation.
+      const cam = camPos();
+      if (cam) {
+        const cx = cam.x - mesh.position.x, cy = cam.y - mesh.position.y,
+          cz = cam.z - mesh.position.z;
+        for (let i = 0; i < n; i++) {
+          const dx = B.x[i] - cx, dy = B.y[i] - cy, dz = B.z[i] - cz;
+          B.key[i] = dx * dx + dy * dy + dz * dz;
+        }
+        for (let i = 1; i < n; i++) {           // insertion sort, far -> near
+          const v = B.idx[i], k = B.key[v];
+          let j = i - 1;
+          while (j >= 0 && B.key[B.idx[j]] < k) { B.idx[j + 1] = B.idx[j]; j--; }
+          B.idx[j + 1] = v;
+        }
+      }
+    }
+    for (let i = 0; i < n; i++) {
+      const j = B.idx[i];
+      writeVolume(mesh, i, B.x[j], B.y[j], B.z[j], B.sx[j], B.sy[j], B.sz[j], B.r[j]);
+    }
+  }
+
+  /* ---- the smoke shading uniforms, refreshed once per frame ---------------
+     The lobes are lit by the SAME sun and hemisphere the city is (including
+     the fireball's own boost — the atmosphere drive at onAlways 94.6 has
+     already multiplied sun.intensity by the time this reads it, so the cloud
+     goes orange with everything else), just through a wrap-scatter model
+     instead of Lambert's terminator. */
+  const _smokeDir = new THREE.Vector3();
+  const _smokeCol = new THREE.Color();
+  function smokeLight() {
+    if (!smokeLobes()) return;
+    const sun = CBZ.sun, hemi = CBZ.hemi;
+    if (sun && sun.position) {
+      _smokeDir.copy(sun.position);
+      if (CBZ.sunTarget && CBZ.sunTarget.position) _smokeDir.sub(CBZ.sunTarget.position);
+      if (_smokeDir.lengthSq() > 1e-6) SMOKE_U.uSmokeSun.value.copy(_smokeDir).normalize();
+      if (sun.color) {
+        /* 0.34 is not a taste number: it is 1/PI to two places, which is
+           exactly the factor three's own BRDF_Diffuse_Lambert applies to a
+           direct light. Energy-matching the replacement shading to the
+           lighting it replaces is what keeps this a LOOK change and not a
+           brightness change — the first draft used 0.62 and washed the cap
+           out at the same moment the fireball was boosting the sun. */
+        SMOKE_U.uSmokeSunCol.value.copy(sun.color)
+          .multiplyScalar(clamp(sun.intensity || 1, 0, 2.4) * 0.34);
+      }
+    }
+    if (live) {
+      // deck -> cap centre, in world Y. Both are already computed every frame
+      // by the sequence; this only publishes them to the shader.
+      const base = live.y || 0;
+      const top = base + Math.max(60, capYAt(riseAt(live.t, live), live) - base);
+      SMOKE_U.uSmokeSpan.value.set(base, top);
+    }
+    if (hemi && hemi.color) {
+      _smokeCol.copy(hemi.color);
+      if (hemi.groundColor) _smokeCol.lerp(hemi.groundColor, 0.34);
+      SMOKE_U.uSmokeAmb.value.copy(_smokeCol)
+        .multiplyScalar(clamp(hemi.intensity || 1, 0, 3) * 0.32);
+    }
   }
 
   function cloudColor(mat, hot, ash, u, ember) {
@@ -2592,6 +3025,9 @@
     if (!L.volume || !L.volN) return;
     _volWrite = L.volNext == null || t + 1e-6 >= L.volNext;
     if (_volWrite) L.volNext = t + 1 / 12;
+    _volBuf.n = 0;        // nothing may survive a frame in the flush buffer
+    // colour/light stay frame-smooth even when the transforms upload at 12 Hz
+    smokeLight();
     // 1 while the legacy far tier owns the picture, 0 while 3D lobes do.
     const mixC = clamp(mix || 0, 0, 1);
     const near = 1 - mixC;
@@ -2648,10 +3084,10 @@
         lobe * (1.08 + s.r * 0.22), lobe * (0.72 + (1 - s.r) * 0.18) * flat, lobe,
         a * 0.35);
     }
-    cap.material.opacity = solidOp(0.86) * capIn * endFade * near;
+    cap.material.opacity = solidOp(0.86, 0.58) * capIn * endFade * near;
     cloudColor(cap.material, VOL_HOT, VOL_ASH, cloudCool);
     cap.visible = cap.material.opacity > 0.004;
-    if (_volWrite) cap.instanceMatrix.needsUpdate = true;
+    flushVolume(cap);
 
     /* ---- THE CAP GLOWS FROM WITHIN --------------------------------------
        This is the layer that makes the reference plate read as a LIGHT
@@ -2688,7 +3124,7 @@
       glow.material.color.setHex(t < 1.6 ? 0xfff2c8 : t < 4.5 ? 0xffc45a : 0xd96a1e);
       glow.material.opacity = 0.54 * glowIn * glowOut * endFade * near;
       glow.visible = glow.material.opacity > 0.004;
-      if (_volWrite) glow.instanceMatrix.needsUpdate = true;
+      flushVolume(glow, false);   // additive: addition commutes, no sort
     }
 
     /* ---- THE COLLAR AND THE CROWN, one mesh, two slices -----------------
@@ -2734,10 +3170,10 @@
           lobe * (isCrown ? 1.05 : 1.42), lobe * (isCrown ? 0.94 : 0.56) * flat,
           lobe * (isCrown ? 1.05 : 1.42), a * 0.5);
       }
-      crown.material.opacity = solidOp(0.88) * Math.max(collarIn, crownIn) * endFade * near;
+      crown.material.opacity = solidOp(0.88, 0.62) * Math.max(collarIn, crownIn) * endFade * near;
       cloudColor(crown.material, VOL_CROWN_HOT, VOL_CROWN_ASH, cloudCool, VOL_CROWN_EMBER);
       crown.visible = crown.material.opacity > 0.004;
-      if (_volWrite) crown.instanceMatrix.needsUpdate = true;
+      flushVolume(crown);
     }
 
     // STEM — overlapping vertical billows leave no chair-leg-thin cylinder and
@@ -2824,10 +3260,10 @@
     // loses 55% of its opacity, not all of it): the reference plate's whole
     // foreground is that thick roiling column, and it is the one part of the
     // cloud that genuinely is inside the frustum.
-    stem.material.opacity = solidOp(0.84) * stemIn * endFade * (photo ? (1 - mixC * 0.55) : near);
+    stem.material.opacity = solidOp(0.84, 0.93) * stemIn * endFade * (photo ? (1 - mixC * 0.55) : near);
     cloudColor(stem.material, VOL_STEM_HOT_V[v2() ? 1 : 0], VOL_STEM_ASH, cloudCool);
     stem.visible = stem.material.opacity > 0.004;
-    if (_volWrite) stem.instanceMatrix.needsUpdate = true;
+    flushVolume(stem);
 
     // BASE SURGE — a FILLED, irregular dust cloud. It occupies area; it never
     // traces the pressure radius as a line.
@@ -2867,11 +3303,11 @@
         lobe * 1.25, lobe * 0.38 * tall, lobe,
         a + spin);
     }
-    surge.material.opacity = solidOp(deep ? 0.76 : 0.82) * surgeIn * surgeFade;
+    surge.material.opacity = solidOp(deep ? 0.76 : 0.82, 0.82) * surgeIn * surgeFade;
     cloudColor(surge.material, VOL_DUST_HOT_V[deep ? 1 : 0], VOL_DUST_ASH_V[deep ? 1 : 0],
       cloudCool * 0.85);
     surge.visible = surge.material.opacity > 0.004;
-    if (_volWrite) surge.instanceMatrix.needsUpdate = true;
+    flushVolume(surge);
 
     // HOT BILLOWS — the RPG's layered, short-lived fireball logic translated
     // into real 3D lobes around the core, so it roils instead of reading as one orb.
@@ -2898,7 +3334,7 @@
     hot.material.color.setHex(t < 0.45 ? 0xfff4cf : t < 1.8 ? 0xffa02e : 0xd94312);
     hot.material.opacity = 0.82 * hotIn * hotFade * (0.18 + 0.82 * pulse);
     hot.visible = hot.material.opacity > 0.004;
-    if (_volWrite) hot.instanceMatrix.needsUpdate = true;
+    flushVolume(hot, false);    // additive: addition commutes, no sort
     _volWrite = true;
   }
 
@@ -3705,6 +4141,90 @@
      DEV/QA — read the whole spectacle's numbers from a CDP probe with no
      rendering at all (CLAUDE.md's closed loop is math over live state).
      ============================================================ */
+  /* ============================================================
+     CBZ.nukeSmokeAudit() — THE ROCK/SMOKE ARGUMENT AS A NUMBER.
+
+     Two owner complaints pull in opposite directions and both are right:
+       "slightly opaque orange floating rocks" (2026-08-03) — the BODY must
+          not be see-through;
+       "they look like rocks, not smoke" (2026-08-05) — a lobe must not have
+          an outline, which means its rim must NOT be opaque.
+     A single per-lobe alpha cannot satisfy both; overlap can, and this is the
+     measurement that proves it did. It reads the LIVE instance matrices (math
+     over live state, never a screenshot), casts 16 horizontal rays through
+     each layer's own centroid, counts how many lobes each ray crosses, and
+     reports the accumulated coverage 1-(1-a)^hits.
+
+     WHAT GOOD LOOKS LIKE while a cloud is up:
+       body   (mean/max hits) coverage >= 0.95   — no see-through
+       rim    (min hits, i.e. 1 lobe)  <= 0.70   — the silhouette still wisps
+     Lobes are sphere-approximated at the mean of their three instance scales;
+     they are drawn as rotated ellipsoids, so a hit count is +/-1 near a rim.
+     ============================================================ */
+  const _auditM = new THREE.Matrix4();
+  const _auditP = new THREE.Vector3();
+  const _auditQ = new THREE.Quaternion();
+  const _auditS = new THREE.Vector3();
+  CBZ.nukeSmokeAudit = function () {
+    const layers = {
+      cap: POOL.capVol, crown: POOL.crownVol,
+      stem: POOL.stemVol, surge: POOL.surgeVol,
+    };
+    const out = {
+      smokeLobes: smokeLobes(),
+      live: !!live, t: live ? +live.t.toFixed(2) : null,
+      mask: !!(SMOKE_U.uSmokeMask.value),
+      layers: {},
+    };
+    for (const key in layers) {
+      const mesh = layers[key];
+      if (!mesh) continue;
+      const n = Math.max(0, mesh.count | 0);
+      const a = +(mesh.material.opacity || 0);
+      const rec = {
+        lobes: n, perLobeAlpha: +a.toFixed(3),
+        depthWrite: !!mesh.material.depthWrite,
+        renderOrder: mesh.renderOrder,
+        visible: !!mesh.visible,
+      };
+      if (n > 0) {
+        const px = [], py = [], pz = [], pr = [];
+        let cx = 0, cy = 0, cz = 0;
+        for (let i = 0; i < n; i++) {
+          mesh.getMatrixAt(i, _auditM);
+          _auditM.decompose(_auditP, _auditQ, _auditS);
+          px.push(_auditP.x); py.push(_auditP.y); pz.push(_auditP.z);
+          pr.push((_auditS.x + _auditS.y + _auditS.z) / 3);
+          cx += _auditP.x; cy += _auditP.y; cz += _auditP.z;
+        }
+        cx /= n; cy /= n; cz /= n;
+        let sum = 0, min = 1e9, max = 0;
+        const RAYS = 16;
+        for (let r = 0; r < RAYS; r++) {
+          const ang = (r * Math.PI) / RAYS;      // a line, so half a turn covers it
+          const dx = Math.cos(ang), dz = Math.sin(ang);
+          let hits = 0;
+          for (let i = 0; i < n; i++) {
+            // perpendicular distance from the lobe centre to the ray
+            const ox = px[i] - cx, oy = py[i] - cy, oz = pz[i] - cz;
+            const proj = ox * dx + oz * dz;
+            const ex = ox - proj * dx, ez = oz - proj * dz;
+            if (ex * ex + oy * oy + ez * ez < pr[i] * pr[i]) hits++;
+          }
+          sum += hits;
+          if (hits < min) min = hits;
+          if (hits > max) max = hits;
+        }
+        const mean = sum / RAYS;
+        const cov = function (h) { return +(1 - Math.pow(1 - a, h)).toFixed(3); };
+        rec.hits = { min: min === 1e9 ? 0 : min, mean: +mean.toFixed(2), max: max };
+        rec.coverage = { one: cov(1), mean: cov(mean), max: cov(max) };
+      }
+      out.layers[key] = rec;
+    }
+    return out;
+  };
+
   CBZ.nukeFxDebug = function () {
     return {
       wired: wired,
@@ -3755,6 +4275,7 @@
         pulse: !!CBZ.CONFIG.NUKE_FX_PULSE, veil: !!CBZ.CONFIG.NUKE_FX_VEIL,
         rise: !!CBZ.CONFIG.NUKE_FX_RISE, roll: !!CBZ.CONFIG.NUKE_FX_ROLL,
         glass: !!CBZ.CONFIG.NUKE_FX_GLASS, v2: v2(),
+        smokeLobes: smokeLobes(),
         phasedCloud: phasedCloud(),
         coherentCloud: coherentCloud(),
         legacyPuffs: CBZ.CONFIG.NUKE_FX_LEGACY_PUFFS === true,

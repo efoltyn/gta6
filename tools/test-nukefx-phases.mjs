@@ -54,6 +54,39 @@ match(/NUKE_FX_FOGPROOF == null\) CBZ\.CONFIG\.NUKE_FX_FOGPROOF = true/,
   "the cloud must default to punching through distance fog");
 match(/fog: !CBZ\.CONFIG\.NUKE_FX_FOGPROOF/,
   "lobe materials must gate their fog mix on the fogproof flag");
+/* THE LOBES ARE SMOKE, NOT SURFACES (2026-08-05). Each of these is one of the
+   four properties the RPG blast has and the lit, depth-writing cloud did not;
+   any one of them silently reverting puts the boulders back. */
+match(/NUKE_FX_SMOKE_LOBES == null\) CBZ\.CONFIG\.NUKE_FX_SMOKE_LOBES = true/,
+  "smoke-shaded lobes must default on");
+match(/transparent: true, opacity: opacity, depthWrite: !smoke/,
+  "lobes must stop writing depth in smoke mode, or overlaps hard-clip again");
+match(/function flushVolume\(mesh, sorted\)/,
+  "blended lobes must be flushed in an explicit depth order");
+match(/gl_FragColor\.rgb = diffuse \* smLit/,
+  "smoke lobes must discard Lambert's terminator for wrap-scatter shading");
+// Pin the PROPERTY (the RPG mask is sampled in the lobe's own object space,
+// offset per instance so no two billows wear the same lumps), never the tiling
+// constant — that number is a look dial and pinning it turns every future
+// adjustment into a false contract failure.
+match(/texture2D\(uSmokeMask, vSmO\.[xz]y[^)]*smOff/,
+  "the RPG's own smoke mask must erode the lobe silhouette");
+match(/if \(smokeLobes\(\)\) return Math\.min\(1, smokePeak != null \? smokePeak : peak \* 0\.68\)/,
+  "per-lobe alpha must be a per-layer smoke peak once overlap supplies density");
+/* THE SILHOUETTE HAS NO FLOOR. The old soft-lobe patch kept a per-role alpha
+   floor (0.22/0.45/0.60) purely because a depth-WRITING rim punched holes in
+   the lobes behind it; nothing writes depth now, so the rim must be free to
+   reach a true zero. A floor term reappearing here is a lobe getting its
+   outline back, and it is the one rim property that is decidable in source. */
+assert.doesNotMatch(
+  source.slice(source.indexOf("if (smoke) {"), source.indexOf("// NUKE_FX_SOFT_LOBES:")),
+  /gl_FragColor\.a \*= \(0\./,
+  "smoke lobes must not reintroduce an alpha floor at the silhouette");
+match(/smDen \*= smoothstep\([0-9.]+, [0-9.]+, smDen\)/,
+  "thin density must erode to nothing, or the silhouette is smooth like a ball");
+match(/TEX\.smokeMask = TEX\.blastSmoke\.clone\(\)/,
+  "the lobe mask must be a clone — re-wrapping crashfx's live texture would " +
+  "change every blast sprite in the game");
 match(/NUKE_FX_BIG_FORMATION == null\) CBZ\.CONFIG\.NUKE_FX_BIG_FORMATION = true/,
   "photographic formation scale must default on");
 match(/NUKE_FX_AFTERMATH == null\) CBZ\.CONFIG\.NUKE_FX_AFTERMATH = true/,
