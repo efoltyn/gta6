@@ -66,7 +66,15 @@ and you make each book short, then the books will have very clear plots."*
    Ease is the facade (§1–3). Consistency is ONE working template plus ONE gate
    with a **budget ratchet** (§5). Without the ratchet, one-shot #4 re-grows
    467 tags and we are back here.
-9. **Do not start by refactoring the city.** Every phase in §6 is additive and
+9. **The shared character already exists and is named `city`.** Owner: *"all
+   the games can share one character — level and role, and money."* All three
+   are built: `city/worldstate.js` is a ~40-field ledger, `city/origins.js` is
+   already a three-protagonist **character vault** with a GTA5-style swap, and
+   **level is DERIVED, never stored** (`level.js:176-206`) from inputs the
+   ledger already holds. The modes cannot reach any of it — escape mode runs on
+   **cigarettes** because the wallet is behind a `city` prefix. This is a rename
+   and a promotion, not a build. §7.
+10. **Do not start by refactoring the city.** Every phase in §6 is additive and
    flag-reverted; the city keeps booting byte-identically until the very last
    one. `docs/claude/project.md`'s rule stands — pushing to main IS the deploy,
    and no build step is coming.
@@ -264,8 +272,10 @@ CODE" comments demonstrably did nothing*).
    repo has already hit.
 4. **`CBZ.oneshotAudit()`** — games registered, games with a declared world,
    games with a verdict, games with map presence, games still requiring the
-   `city` bundle. Measure it before pinning anything (`doctrine.md:200`: *an
-   audit nobody has executed is not a measurement*).
+   `city` bundle, games declaring `stakes`/`carry`, and **cash-in / cash-out
+   per game per playing hour** (§7.3b — a money printer must be a number, not a
+   rumour). Measure it before pinning anything (`doctrine.md:200`: *an audit
+   nobody has executed is not a measurement*).
 
 ---
 
@@ -275,6 +285,7 @@ CODE" comments demonstrably did nothing*).
 |---|---|---|---|
 | **0** | `CBZ.oneshotAudit()` + budget gate. No behavior change. | none | numbers exist |
 | **1** | **SESSION.** Extract `state.js`'s 4-mode hardcode to `CBZ.session`; re-express city · escape · survival · gungame through it. | medium — `state.js` is the boot path | 4 consumers migrated, all four modes byte-identical |
+| **1.5** | **CHARACTER.** Lift `worldstate.js` + `origins.js` out of `city/`; declare `stakes` / `carry` (§7.3). No new fields, no new storage key. | low | escape mode spends real cash instead of cigarettes |
 | **2** | **WORLD.** Promote gungame's `MAPS` to `CBZ.worlds`; register `flat`/`jail`/`island`/`city`. gungame is consumer #1, unchanged. | low | gungame plays identically on both maps |
 | **3** | **BOOT.** Emit index.html's 467 tags from a manifest. index.html declares everything, so nothing changes. Preserve `index.html:354` ordering. | **highest** | byte-identical tag list, MATHGATE ok |
 | **4** | **First one-shot.** Re-ship ONE existing game — police is the candidate: it has both a standalone reference and a package. | low (additive file) | requests · ms-to-playable · LOC, all three against the package |
@@ -289,7 +300,118 @@ re-argued before Phase 5 multiplies it by eight.
 
 ---
 
-## 7. WHAT THIS CONTRADICTS, ON PURPOSE
+## 7. THE CHARACTER — one person across every game
+
+Owner: *"all the games can share one character. It's a level and role. And
+money."*
+
+This is the fourth service, and it is the one that makes a LIBRARY out of a
+shelf of unrelated short books: the books share a protagonist, so a race purse
+buys the bribe that gets your boy out of PRECINCT 13. The 450-chapter book
+never gave you that either — the nine packages already run on city cash and it
+reads as nothing, because there is no second place to spend it.
+
+### 7.1 It is already built. It is just called `city`.
+
+- **The ledger** — `city/worldstate.js`, localStorage key `CBZ_CITY_WORLD_V2`.
+  A full character sheet, ~40 fields: `cash · bank · debt · respect ·
+  inventory · weapons · currentWeapon · meleeWeapon · cityLoans ·
+  cityPawnTickets · cityOutfit · cityFenceRep · cityHome · cityRentTier ·
+  cityGarage · cityOwnsPenthouse · cityOwnsHeli · cityOwnsHangar · playerGang ·
+  cityMembership · campaign · assets · injuries · criminalRecord · jailHistory ·
+  reputation · records · races · fights · betting · casino · hitman · transport ·
+  politics · identities` + per-faction standing.
+- **The vault** — `city/origins.js` is already a THREE-PROTAGONIST character
+  system: `CBZ.citySwitchLedger(id)` parks the active ledger and activates
+  another (parked copies in `CBZ_CITY_CHARS_V1`), each with its own last
+  position and home spawn, each playing its origin scene only the first time
+  that character is ever started. The multi-character problem is solved; it
+  just has "city" in the name.
+- **LEVEL IS DERIVED, NEVER STORED.** `playerLevel()` (`city/level.js:176-206`)
+  = net worth + the gun on your hip + kills + crew + gang rank (or +35 if you
+  run your own set) + respect + wanted stars + bounty. **Every input is already
+  in the ledger.** Share the ledger and the level shares itself. There is no XP
+  bar to build, and building one would be exactly the stat fiction
+  `doctrine.md:208` bans — `level.js`'s own `MIL_NAME` was deleted for being
+  eight rungs that unlocked nothing.
+- **ROLE is already three-layered and already portable.** TRUE role (what the
+  sim acts on) vs PRESENTED role (what an observer is entitled to see) vs COVER
+  (`cityTrueRole` / `cityTitle` / `citySetCover` / `cityBurnCover`), plus org +
+  rank through `factions.declare` where every rung must unlock a verb. **A
+  one-shot's role — inmate · jailor · diver · shark · fighter · bettor — is an
+  org membership, not a mode flag.** That is the machinery `GAMES-FIRST.md:117-120`
+  wanted for two-sided games and never wired.
+
+### 7.2 The modes cannot reach any of it, and the proof is cigarettes
+
+`modes/survival.js`, `modes/gungame.js` and `systems/capture.js` contain **zero**
+references to `worldstate`, `g.cash`, `CBZ.city.spend` or `cityLevel`. Escape
+mode runs its whole economy on `g.cigs` (`systems/state.js:89`) — a private
+currency it invented because the wallet is behind a `city` prefix. Of the files
+touching `cityWorldCommit`/`cityWorldCollect`, **40 are in `src/city/`**.
+
+So the work is §1's bundle boundary applied to the ledger: **it moves into the
+kernel and the city becomes its biggest consumer instead of its owner.**
+`ctx.wallet` (already real city money, already the casino's cage) becomes the
+one wallet. `CBZ.citySwitchLedger` becomes `CBZ.character.switch`. No new
+storage format, no migration of saved games — the key and the shape do not
+change.
+
+### 7.3 Three decisions this forces, and they are the owner's
+
+**(a) STAKES — what may a game take from you?** `CITY_PERMADEATH` defaults TRUE
+(`city/death.js:301`): a brutal death is GAME OVER **plus a save wipe**. Share
+one character across every game and a headshot in the gun game deletes your
+city kingpin. That is either the best idea in this design or a catastrophe, and
+it cannot be left to fall out of load order. The one-line contract that settles
+it: **a game declares what it can take.**
+
+```
+stakes: { cash: true, life: false }
+```
+
+A boxing match, a race and a casino night are SANCTIONED — they take your money
+and never your life. The street, the jail and the gun game are REAL. One field,
+honest on the title card ("this one can kill you for good"), and it is the
+doctrine's own asymmetric-reward grammar pointed at risk instead of reward.
+
+**(b) ECONOMY — one wallet means one balance sheet.** The moment casino
+payouts, jail bribes and race purses draw on one account, every game's numbers
+are priced against every other game's. The repo already half-knows this:
+`ctx.wallet` is real city cash and the casino's shark fronts chips against a
+marker the cage collects first. Cheapest guard, and it needs no design meeting:
+the ledger owns cash, a game may move it **only** through `ctx.wallet`, and the
+§5 gate reports **cash-in / cash-out per game per playing hour**. A money
+printer then shows up as a number instead of as a rumour. Pin it as a ratchet.
+
+**(c) CARRY-IN — what walks through the door with you.** A shared character
+arrives armed, rich and famous, which un-games most short games: PRECINCT 13's
+bail is pocket change to a kingpin and Cell Block Z is trivial if you spawn
+with an AK. The answer already exists and needs no new system — arrest is the
+one sanctioned "your stuff is taken" mechanic and `CBZ.cityBust` already
+confiscates. So a one-shot declares a carry policy:
+
+```
+carry: "all" | "person" | "none"
+```
+
+`person` = cash and clothes, not the arsenal — which is exactly what a jail
+intake is. And because level is DERIVED, your level then reads honestly lower
+inside the jail without anyone writing a single line to lower it. **That is the
+system working, not a bug to patch** — and it is the strongest argument that
+§7.1's derived-level design was right.
+
+### 7.4 Where it lands in the staging
+
+The character is **Phase 1.5** — after SESSION (§2, which gives a game a
+start and an end for the ledger to be committed at) and before WORLD (§3).
+It is the smallest phase in this document: no new storage, no new fields, no
+new UI. It is `city/worldstate.js` and `city/origins.js` moving up one level
+and losing a prefix, plus the three declarations in §7.3.
+
+---
+
+## 8. WHAT THIS CONTRADICTS, ON PURPOSE
 
 `GAMES-FIRST.md:111-115` says: *"What blocks that today is the one-shot shape:
 the jail mode and disaster mode are entire simulations you enter once, not games
