@@ -66,7 +66,16 @@ and you make each book short, then the books will have very clear plots."*
    Ease is the facade (§1–3). Consistency is ONE working template plus ONE gate
    with a **budget ratchet** (§5). Without the ratchet, one-shot #4 re-grows
    467 tags and we are back here.
-9. **The shared character already exists and is named `city`.** Owner: *"all
+9. **The engine already owns 40+ distinct places and exposes TWO of them.**
+   Census in §8.1: 4 purpose-built islands, 5 biome landmasses, 11 standalone
+   complexes, 19 named countries/villages, the bunkers, two mode worlds, the
+   urban set, plus 11 claimable interior lot kinds. The gun game's map picker
+   is the only surface in the project that shows the inventory, and the ONLY
+   reason it lists two is that `addLandmass` stores no id and `cityWorldGeo`
+   runs all 39 builders unconditionally into one shared root
+   (`worldmap.js:77-80, 625-626`). Two fields and a filter — §8.2. **This is
+   the cheapest high-value change in this document and should go first.**
+10. **The shared character already exists and is named `city`.** Owner: *"all
    the games can share one character — level and role, and money."* All three
    are built: `city/worldstate.js` is a ~40-field ledger, `city/origins.js` is
    already a three-protagonist **character vault** with a GTA5-style swap, and
@@ -74,7 +83,7 @@ and you make each book short, then the books will have very clear plots."*
    ledger already holds. The modes cannot reach any of it — escape mode runs on
    **cigarettes** because the wallet is behind a `city` prefix. This is a rename
    and a promotion, not a build. §7.
-10. **Do not start by refactoring the city.** Every phase in §6 is additive and
+11. **Do not start by refactoring the city.** Every phase in §6 is additive and
    flag-reverted; the city keeps booting byte-identically until the very last
    one. `docs/claude/project.md`'s rule stands — pushing to main IS the deploy,
    and no build step is coming.
@@ -284,6 +293,7 @@ CODE" comments demonstrably did nothing*).
 | phase | what | risk | proof it worked |
 |---|---|---|---|
 | **0** | `CBZ.oneshotAudit()` + budget gate. No behavior change. | none | numbers exist |
+| **0.5** | **VENUES.** `addLandmass` takes an `id` and a group; `cityWorldGeo` accepts a subset filter (§8.2). Then give the gun game a dozen maps. | low — the loop is already per-builder try/caught | the picker lists 12+; a one-venue build skips 38 builders |
 | **1** | **SESSION.** Extract `state.js`'s 4-mode hardcode to `CBZ.session`; re-express city · escape · survival · gungame through it. | medium — `state.js` is the boot path | 4 consumers migrated, all four modes byte-identical |
 | **1.5** | **CHARACTER.** Lift `worldstate.js` + `origins.js` out of `city/`; declare `stakes` / `carry` (§7.3). No new fields, no new storage key. | low | escape mode spends real cash instead of cigarettes |
 | **2** | **WORLD.** Promote gungame's `MAPS` to `CBZ.worlds`; register `flat`/`jail`/`island`/`city`. gungame is consumer #1, unchanged. | low | gungame plays identically on both maps |
@@ -411,7 +421,108 @@ and losing a prefix, plus the three declarations in §7.3.
 
 ---
 
-## 8. WHAT THIS CONTRADICTS, ON PURPOSE
+## 8. THE VENUE LIBRARY — the engine already has 40+ places and shows you 2
+
+Owner: *"the whole airplanes thing and planes feature is so good. The nukes are
+so good, and the B-2 bomber, and the air force base. And the buildings with the
+glass are so good — but they're good ASSETS. It was stupid to try and make it
+into a game… when I look at the options for the venue for gun game I think holy
+shit, my engine has like twenty venues built in. Desert military base. Casino.
+Urban. Forest. Mountain and ice. Yacht."*
+
+**The gun game's map picker is the only place in this entire project where the
+engine shows you its inventory.** That is why it produces that reaction, and it
+is the whole product thesis in one dropdown. It currently lists **two**.
+
+### 8.1 The census — every place with a registered footprint
+
+Counted by `registerCityRegion()` call sites (37) plus the `COMPLEXES` table
+(`govcomplex.js:870`) and the two mode worlds.
+
+| group | places |
+|---|---|
+| **Purpose-built islands** | Halloran Field (airport) · Fort Brandt (military base) · Diamond Speedway (raceway) · Ironjaw Arena |
+| **Biome landmasses** | The Saltlands (desert) · Coyle Valley (farmland) · Redhollow Woods (forest) · Mount Mercy + Greater Mercy Range (snow / ice / alpine) · The Backcountry (wilds) |
+| **Standalone complexes** (`COMPLEXES`, 11 rows) | The Capitol · The Executive Mansion · The Governor's Residence · Bureau Headquarters · Defence Headquarters · City Hall · The Compound · La Finca · The Cliff House · County Jail · Freeport Compound |
+| **Countries & villages** (19 named) | Kingdom of Kesh · Keshtown · Kesh Heartland · Mbeya Federation · Mbeya City · Mbeya Central · Mbeya Outlands · Republic of Veridia · Veridia City · Veridia Lowport · Veridia Prime · Solara · Solara Isle · Kolo Village · Ruvu Village · Tende Village · Adar's Well · Nur Hollow · Freeport |
+| **Bunkers** | Ridge Line Station · Station 9 · the vault (blast door inside a blast door, THE DEVICE — `doctrine.md`'s named instance of the gun-room grammar) |
+| **Mode worlds** | the prison (`CBZ.prisonRoot`) · the disaster island (`CBZ.surv.arena`) |
+| **Urban & other** | Goldspire Civic Campus · Commerce Annex · the mini-cities · the marina · the beach · the boatyard · the yachts · the tower crown (`exec_office.js`, storey 50 of the 52-storey Spire — the glass) |
+| **Interior lot kinds** (claimable, not sited) | casino · bar · club · arena · cityhall · gym · hospital · shop · warehouse · garage · home |
+
+**Forty-plus.** The owner guessed twenty from a two-entry dropdown.
+
+### 8.2 The one-line finding: they are geometry, not units
+
+Here is the gap between 40 places and 40 maps, and it is small and specific.
+
+`CBZ.addLandmass(fn, order)` stores `{fn, order}` — **no id**
+(`worldmap.js:77-80`). `cityWorldGeo` then runs *all* of them:
+
+```js
+const list = CBZ._landmassBuilders.slice().sort((a,b) => a.order - b.order);
+for (const b of list) { try { b.fn(city); } catch (e) { … } }   // worldmap.js:625-626
+```
+
+Every builder is **already independent and already individually try/caught** —
+the comment above the loop says so in as many words ("one bad biome can never
+take down the rest of the world"). They are 39 separable units run
+unconditionally, and they drop their geometry into one shared `city.root` with
+no group of their own.
+
+So a venue cannot be built alone and cannot be shown alone. **That is the only
+reason Fort Brandt is not a gun-game map today** — not missing content, not
+missing art. Two fields on one registration and a filter on one loop:
+
+```
+CBZ.addLandmass(fn, order)  →  CBZ.addLandmass(id, fn, order)   // name it
+for (const b of list) …     →  if (want && !want.has(b.id)) continue;  // build a subset
+                               b.fn(city, b.group)              // give it a root
+```
+
+`id` gives you `ensure()`. `group` gives you `root()`. `CBZ.floorAt` is already
+global and already 45× cheaper than it was (`engine-systems.md:485`), so
+`floorAt` is free. `point()` comes from `CBZ.placement`, which every biome
+already uses.
+
+**That is the same change that fixes the boot.** `cityWorldGeo`'s unyielding
+39-builder loop is 18.2 s of the 21–31 s freeze (`LOAD-NOTES.md`). A game that
+asks for one venue runs one builder. §1's manifest is this loop's twin — one
+selects scripts, the other selects places, and neither needs a build step.
+
+### 8.3 The doctrine correction this earns
+
+`GAMES-FIRST.md`'s WHY rule — *every prop a package builds is interactable or
+load-bearing to a mechanic; decoration with no job gets cut* — is right about
+**games** and wrong applied to a **library**. The B-2, the nuke cloud, the
+airfield and the glass crown have no mechanic today and are not garnish: they
+are stock. An asset earns its WHY the first time a short game casts it, and it
+may sit in the library unemployed until then.
+
+Restated so it can be applied: **the WHY rule binds a GAME, not the asset
+library.** A venue with no game on it is inventory. A prop inside a shipped
+game with no job is still garnish and still gets cut.
+
+This is also the answer to *"it was stupid to try and make it into a game"* —
+nothing built was wasted. What was wasted was welding it all to ONE game.
+
+### 8.4 The cheapest next move in this entire document
+
+Not Phase 1. **Give the gun game its maps.** Each entry is the five hooks and
+the existing ones run 7–20 lines (`gungame.js:98-130`). With §8.2's two fields
+in place, a dozen more are a dozen small entries against venues that already
+exist — desert · military base · forest · alpine · speedway · arena · airport ·
+capitol · compound · marina · yacht · tower crown.
+
+It is worth doing first for a reason beyond cost: **the picker is the
+engine's shop window.** It is the artifact that made the owner see the
+inventory, and it will do that for every future reader — including the next
+agent, who will otherwise read 400,329 lines and conclude this repo is a game
+about gangs.
+
+---
+
+## 9. WHAT THIS CONTRADICTS, ON PURPOSE
 
 `GAMES-FIRST.md:111-115` says: *"What blocks that today is the one-shot shape:
 the jail mode and disaster mode are entire simulations you enter once, not games
