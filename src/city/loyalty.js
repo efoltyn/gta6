@@ -610,7 +610,33 @@
      makes the door a gradient instead of a wall.
 
      `orgs` is the third route: the uniform/rank you are already wearing. It
-     goes through factions.js and outfits.js, never a private membership test. */
+     goes through factions.js and outfits.js, never a private membership test.
+
+     ---- 2026-08-05: `power:false`, AND WHY A DOOR GETS TO REFUSE THE LEDGER --
+     OWNER, reading the prison armory's own line off his screen ("The armory
+     door needs a Keycard, the police, $204,167 more, or 10 more guns un…"):
+     "this specific text is way too long. It's dumb that an amount of money can
+     get you into the armory."
+
+     Both halves are one fault. The gradient sentence is GOOD — a locked door
+     that names its price out-motivates a quest marker, which is LAW 1 — but it
+     is only good where the price is a thing that door would actually take. A
+     steel door with a card reader does not have a cash price; quoting one turns
+     the ledger into a universal solvent and the sentence into a four-clause
+     list that the HUD then truncates mid-word, so the door ends up naming a
+     route the player cannot even finish reading.
+
+     `power:false` is a door saying: my locks are the ones I physically have.
+     It skips route 4 entirely and prints from the door's OWN keys/orgs, which
+     is short by construction because a door has one or two of those, never
+     four. It is opt-IN — every other lock in the repo keeps the ledger route,
+     because a warehouse, a strike console or a crew's turf genuinely can be
+     taken by a big enough crew, and that is the whole point of the ladder. */
+  function haveLine(label, keys, orgs) {
+    if (keys && keys.length) return label + " needs a " + keys[0] + ".";
+    if (orgs && orgs.length) return label + " only opens for the " + orgs[0] + ".";
+    return label + " is locked.";
+  }
   CBZ.cityLock = function (spec) {
     spec = spec || {};
     const label = spec.label || "It";
@@ -641,7 +667,10 @@
     for (let i = 0; i < keys.length; i++) {
       if (CBZ.cityEcon && CBZ.cityEcon.count && CBZ.cityEcon.count(keys[i]) > 0) return { open: true, line: "", route: "item" };
     }
-    // route 4 — you simply have the power to take it
+    // route 4 — you simply have the power to take it. A door that declared
+    // `power:false` has none: it prints its own keys and stops. (Note this
+    // sits AFTER routes 1-3, so refusing the ledger never refuses a key.)
+    if (spec.power === false) return { open: false, route: null, line: haveLine(label, keys, orgs) };
     if (spec.verb && CBZ.cityPowerKnows(spec.verb)) {
       if (CBZ.cityPowerCan(spec.verb)) return { open: true, line: "", route: "power" };
       const need = CBZ.cityPowerNeed(spec.verb);

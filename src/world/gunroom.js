@@ -76,6 +76,26 @@
   if (CBZ.CONFIG.PRISON_ARMORY_SPINE == null) CBZ.CONFIG.PRISON_ARMORY_SPINE = true;
   const SPINE = !!CBZ.CONFIG.PRISON_ARMORY_SPINE;
 
+  /* ---- 2026-08-05: THE ARMORY IS A KEY DOOR, NOT A PRICE ------------------
+     OWNER: "The armory door needs a key card… It's dumb that an amount of
+     money can get you into the armory."
+
+     Both gates in this room now pass `power:false` to the shared lock, so the
+     loyalty ledger's buy-your-way-in route is off HERE and nowhere else. The
+     line they print collapses from four clauses that the HUD truncated —
+     "needs a Keycard, the police, $204,167 more, or 10 more guns un…" — to the
+     card the door actually reads. Both, not just the outer one the owner was
+     standing at: they are two locks in one room and fixing one would have left
+     the identical cash quote six metres inside it.
+
+     Nothing else about the door moves. The keycard route, the police route and
+     the cop-role bypass are byte-for-byte what they were, because those are
+     things the door physically respects; route 4 was the only one that wasn't.
+     PRISON_ARMORY_KEY_ONLY=false hands the ledger route back to both gates. */
+  if (CBZ.CONFIG.PRISON_ARMORY_KEY_ONLY == null) CBZ.CONFIG.PRISON_ARMORY_KEY_ONLY = true;
+  // undefined (not false) when reverted, so the lock's own default path runs
+  const LOCK_POWER = CBZ.CONFIG.PRISON_ARMORY_KEY_ONLY === false ? undefined : false;
+
   // ------------------------------------------------------------------
   //  shared palette + the three build helpers (hoisted above the shell so
   //  the gate itself can use them — they were previously declared after it)
@@ -720,16 +740,19 @@
 
            The KEYCARD STILL WINS. `have` is the file's own original condition,
            byte-for-byte, and the lock returns immediately on it — a key is a
-           key and no amount of power takes that away. What is ADDED is the
-           second route (a crew strong enough to simply take the rack) and,
-           when neither is true, a sentence that names the route instead of
-           repeating "it wants a keycard" forever. In the prison you have no
-           people, so the ledger route is honestly unreachable there and the
-           key is the only way — which is exactly the story. */
+           key and no amount of power takes that away.
+
+           What the lock adds here is now only the POLICE route (the uniform
+           the door would believe) — `power:false` since 2026-08-05 declines
+           the crew-strong-enough-to-take-it route, per the owner's call at the
+           top of this file. That was always the honest answer in the prison
+           anyway: in here you have no people, so the ledger route was
+           unreachable while still quoting a cash price at the player. The key
+           is the way, which is exactly the story. */
         const have = !!(CBZ.game.hasKey || CBZ.game.role === "cop");
         const L = CBZ.cityLock
-          ? CBZ.cityLock({ id: "prison-armory", verb: "press", label: "The armory door", have: have, keys: ["Keycard"], orgs: ["police"] })
-          : { open: have, line: "The armory door won't budge — it wants a keycard." };
+          ? CBZ.cityLock({ id: "prison-armory", verb: "press", label: "The armory door", have: have, keys: ["Keycard"], orgs: ["police"], power: LOCK_POWER })
+          : { open: have, line: "The armory door needs a Keycard." };
         if (L.open) {
           armory.open = true;
           const i = CBZ.colliders.indexOf(armory.collider);
@@ -745,7 +768,7 @@
           // locked door's REASON is not visible from outside it, and this is
           // the whole keycard gradient the owner ran the jail hundreds of times
           // for (doctrine LAW 1). Declared on the audit so the number is honest.
-          CBZ.flashHint(L.line || "The armory door won't budge — it wants a keycard.", 1.4);
+          CBZ.flashHint(L.line || "The armory door needs a Keycard.", 1.4);
         }
       }
     } else if (armory.t < 1) {
@@ -765,7 +788,7 @@
             const econ = CBZ.econ;
             const keyed = !!(econ && econ.hasItem && econ.hasItem("Gun-Room Key"));
             const L = CBZ.cityLock
-              ? CBZ.cityLock({ id: "prison-armory-cage", verb: "press", label: "The inner cage", have: keyed, keys: ["Gun-Room Key"] })
+              ? CBZ.cityLock({ id: "prison-armory-cage", verb: "press", label: "The inner cage", have: keyed, keys: ["Gun-Room Key"], power: LOCK_POWER })
               : { open: keyed, line: "" };
             if (L.open) {
               inner.setOpen(true);
@@ -803,9 +826,15 @@
                 inner.saw = Math.max(0, inner.saw - dt * 2);
                 if (inner.sawMsg <= 0) {
                   inner.sawMsg = 1.6;
+                  // The hand-written line WINS over `L.line` here (it used to
+                  // be the fallback). The lock can only name routes it was
+                  // told about, and the cage's second route is a hacksaw —
+                  // which is not a key, an org or a power rung, so no
+                  // generated sentence can ever mention it. This one does, in
+                  // fewer characters than the ledger's used to take.
                   tellHint(saw
                     ? "Padlocked. Hold [E] to saw through it."
-                    : (L.line || "Padlocked — the Warden carries that key. Or something that cuts."), 1.5);
+                    : "Padlocked — the Warden has that key. Or find something that cuts.", 1.5);
                 }
               }
             }

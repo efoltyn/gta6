@@ -32,6 +32,30 @@
    person's name and rung. Nobody ahead prints nothing at all, because the
    absence of a threat is not a readout. GUNGAME_HUD_TERSE=false restores the
    five labelled lines exactly.
+
+   ---- 2026-08-05: THE ROW IS GONE (GUNGAME_HUD_PANEL=false) ----------------
+   OWNER, on the row sitting just above the hotbar: "it has this pop up right
+   above the gun that says, like, what gun you're on. Remove that. You know
+   what gun you're on because you're holding it in your hand."
+
+   Told that the ▲ gun is the NEXT rung and not the one in his hands, the
+   verdict did not move: kill the whole row. That is the honest read of the
+   2026-08-04 terse pass too — that wave cut the row from fifty-one characters
+   to about fourteen and the row STILL read as clutter, which is the shape of a
+   readout nobody was looking at rather than one that was merely too wordy. The
+   gradient survives where it always actually lived: the gun in your hands
+   changes category the instant you climb a rung, killfeed narrates the kill,
+   and the timer is already top-right. A panel that restates all three is the
+   fourth wall.
+
+   The BARS still write. #survBars (HP/stamina) is shared arena furniture that
+   survival draws too — it was never part of the row and returning early out of
+   this tick would have blanked it. So the panel is what is gated; the bar
+   writes below run in every gungame frame exactly as before.
+
+   GUNGAME_HUD_PANEL=true rebuilds the row (and GUNGAME_HUD_TERSE still picks
+   which of the two layouts it rebuilds), so both of the owner's past calls on
+   this panel stay one line apart.
 ============================================================ */
 (function () {
   "use strict";
@@ -43,22 +67,30 @@
   // declared HERE, in the owning file (CLAUDE.md: config.js is an Edit-race file)
   CBZ.CONFIG = CBZ.CONFIG || {};
   if (CBZ.CONFIG.GUNGAME_HUD_TERSE == null) CBZ.CONFIG.GUNGAME_HUD_TERSE = true;
+  // OFF by default as of 2026-08-05 — see the block comment above. The node is
+  // never even created, so there is nothing for the DOM (or a screenshot) to
+  // find; flipping this true is the whole revert.
+  if (CBZ.CONFIG.GUNGAME_HUD_PANEL == null) CBZ.CONFIG.GUNGAME_HUD_PANEL = false;
+  const PANEL = CBZ.CONFIG.GUNGAME_HUD_PANEL === true;
 
   // built once, hidden by CSS outside body.mode-gungame.state-playing
-  const root = document.createElement("div");
-  root.id = "gungameHud";
-  // one ROW of cells (terse) vs the legacy stack of five lines. The class is
-  // what css/screens.css hangs the row layout off, so the flag flips both
-  // halves of the change together.
-  if (CBZ.CONFIG.GUNGAME_HUD_TERSE !== false) root.className = "gg-terse";
-  const nowEl = document.createElement("div"); nowEl.className = "gg-now";
-  const pipsEl = document.createElement("div"); pipsEl.className = "gg-pips";
-  const nextEl = document.createElement("div"); nextEl.className = "gg-next";
-  const leadEl = document.createElement("div"); leadEl.className = "gg-lead";
-  const spawnEl = document.createElement("div"); spawnEl.className = "gg-spawn";
-  root.appendChild(nowEl); root.appendChild(pipsEl); root.appendChild(nextEl);
-  root.appendChild(leadEl); root.appendChild(spawnEl);
-  hud.appendChild(root);
+  let root = null, nowEl = null, pipsEl = null, nextEl = null, leadEl = null, spawnEl = null;
+  if (PANEL) {
+    root = document.createElement("div");
+    root.id = "gungameHud";
+    // one ROW of cells (terse) vs the legacy stack of five lines. The class is
+    // what css/screens.css hangs the row layout off, so the flag flips both
+    // halves of the change together.
+    if (CBZ.CONFIG.GUNGAME_HUD_TERSE !== false) root.className = "gg-terse";
+    nowEl = document.createElement("div"); nowEl.className = "gg-now";
+    pipsEl = document.createElement("div"); pipsEl.className = "gg-pips";
+    nextEl = document.createElement("div"); nextEl.className = "gg-next";
+    leadEl = document.createElement("div"); leadEl.className = "gg-lead";
+    spawnEl = document.createElement("div"); spawnEl.className = "gg-spawn";
+    root.appendChild(nowEl); root.appendChild(pipsEl); root.appendChild(nextEl);
+    root.appendChild(leadEl); root.appendChild(spawnEl);
+    hud.appendChild(root);
+  }
 
   const el = {
     hp: document.getElementById("hpBar"),
@@ -84,6 +116,22 @@
     if (!g || g.mode !== "gungame") return;
     const gg = CBZ.gungame;
     if (!gg || !gg.match) return;
+    if (PANEL) panel(gg);
+
+    // shared arena bars (survivalhud's exact write). NOT part of the row —
+    // these are #survBars, drawn for survival too, so they write either way.
+    if (el.hp) {
+      const h = Math.max(0, CBZ.player.hp);
+      el.hp.style.width = h + "%";
+      el.hp.style.background = h > 50 ? "#3ad17a" : (h > 22 ? "#ffd451" : "#ff4d4d");
+    }
+    if (el.stam) {
+      el.stam.style.width = Math.max(0, CBZ.player.stamina || 0) + "%";
+      el.stam.style.background = "#5bc8ff";
+    }
+  });
+
+  function panel(gg) {
     const L = (CBZ.CONFIG && CBZ.CONFIG.GUNGAME_LADDER) || [];
     const total = L.length || 1;
     const r = gg.playerRung;
@@ -119,16 +167,5 @@
     put(spawnEl, "spawn", CBZ.player.dead && gg.respawnT > 0
       ? (terse ? String(Math.ceil(gg.respawnT)) : "RESPAWN IN " + Math.ceil(gg.respawnT))
       : "");
-
-    // shared arena bars (survivalhud's exact write)
-    if (el.hp) {
-      const h = Math.max(0, CBZ.player.hp);
-      el.hp.style.width = h + "%";
-      el.hp.style.background = h > 50 ? "#3ad17a" : (h > 22 ? "#ffd451" : "#ff4d4d");
-    }
-    if (el.stam) {
-      el.stam.style.width = Math.max(0, CBZ.player.stamina || 0) + "%";
-      el.stam.style.background = "#5bc8ff";
-    }
-  });
+  }
 })();

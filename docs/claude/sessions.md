@@ -2455,3 +2455,66 @@ question rather than an edge-softness one.
   Until somebody roots it out, judge looks from two separate `--only after`
   runs; the note is in the preset header so the next reader does not spend an
   hour on it like this session did.
+
+## 2026-08-05 — THE DOOR STOPPED HAVING A PRICE, THE LADDER ROW DIED (solo)
+
+Two owner calls off one iPad screenshot of the prison, both about text nobody
+asked the game to say.
+
+**1. THE ARMORY IS A KEY DOOR (`PRISON_ARMORY_KEY_ONLY`, `cityLock power:false`).**
+Owner, reading his own screen: *"The armory door needs a Keycard, the police,
+$204,167 more, or 10 more guns un…"* → *"this specific text is way too long.
+It's dumb that an amount of money can get you into the armory."*
+
+Both halves were one fault. `city/loyalty.js`'s lock sentence is GOOD doctrine —
+a locked door that names its price out-motivates a quest marker (LAW 1) — but
+only where the price is something that door would actually take. A steel door
+with a card reader has no cash price, and quoting one made the ledger a
+universal solvent AND produced a four-clause list the HUD then truncated
+mid-word. So the door named a route the player could not finish reading.
+
+`cityLock({… power:false})` is new and opt-IN: the door declines route 4 and
+prints from its OWN keys/orgs, which is short by construction because a door has
+one or two of those and never four. Routes 1-3 are untouched and the check sits
+after them, so refusing the ledger can never refuse a key. Every other lock in
+the repo keeps the ledger route — a warehouse or a strike console genuinely can
+be taken by a big enough crew, which is the whole point of the ladder.
+
+MEASURED, live boot, no card / not a cop / $5M in pocket:
+
+| | line | chars |
+|---|---|---|
+| was | "The armory door needs a Keycard, the police, $225,000 more, or 11 more guns under your command." | **95** |
+| now | "The armory door needs a Keycard." | **32** |
+
+Both gates in the room take it, not just the outer one the owner was standing
+at — they are two locks six metres apart and fixing one would have left the
+identical cash quote inside. The cage also stops preferring `L.line` over its
+own hand-written one: the cage's second route is a HACKSAW, which is not a key,
+an org or a power rung, so no generated sentence can ever name it. `have:true`
+still returns `route:"key"` — verified.
+
+**2. THE GUN GAME LADDER ROW IS GONE (`GUNGAME_HUD_PANEL=false`).** Owner, on
+the row above the hotbar: *"it has this pop up right above the gun that says
+what gun you're on. Remove that. You know what gun you're on because you're
+holding it in your hand."* Told the ▲ gun is the NEXT rung and not the one in
+his hands, the verdict did not move: kill the row.
+
+That is the honest read of the 2026-08-04 terse pass too. That wave cut the row
+from fifty-one characters to about fourteen and it STILL read as clutter —
+which is the shape of a readout nobody was looking at, not one that was merely
+too wordy. **A panel can be trimmed to nothing and still be the wrong idea.**
+The gradient survives where it always actually lived: the gun in your hands
+changes CATEGORY the instant you climb, killfeed narrates the kill, the timer is
+top-right.
+
+The trap here was the tick, not the row. `#survBars` (HP/stamina) is shared
+arena furniture that survival draws too and it is written from the same
+`onUpdate(49.2)` — returning early would have blanked the health bar in every
+gungame match. The panel is gated; the bar writes run unconditionally, and
+`tools/prison-polish-check.mjs` now pins BOTH halves ("no ladder row above the
+hotbar" + "HP/stamina still write with the row gone", hp=100%). Its old
+`terse === true` assertion is retired: the node no longer exists to be terse.
+
+Gates: PRISON-POLISH 34/34, MATHGATE ok (det ok, gungame 9rungs maps=2,
+loyalty locks=6). Reverts are one line each and independent.
