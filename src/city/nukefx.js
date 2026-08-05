@@ -252,7 +252,7 @@
      • Big layers are SEQUENCED, not stacked: the whiteout has faded before
        the cap blooms; the fireball shell is retired before the cloud is big.
      • The coherent cold silhouette is
-       a fixed 106 blended lobes (72 on the flag-off path); eight additive hot
+       a fixed 272 blended lobes (72 on the flag-off path); eight additive hot
        lobes sit inside it. Still SIX draw calls either way — an InstancedMesh
        costs one whatever its count, so granularity is paid in fill, and the
        fill was measured flat (tools/nuke-smoke-check.mjs reports render ms
@@ -1063,12 +1063,24 @@
 
      Cost is fill, not geometry, and it is measured rather than assumed —
      tools/nuke-smoke-check.mjs reports median render ms per beat, and
-     --cfg NUKE_FX_SMOKE_LOBES=0 runs the old path for the comparison. */
+     --cfg NUKE_FX_SMOKE_LOBES=0 runs the old path for the comparison.
+
+     WHY 272 COLD LOBES AND NOT 106. The first pass at this stopped at a
+     cautious ~1.5x, measured the cost as FLAT, and then failed to spend what
+     the measurement had just bought — which is a worse error than the
+     original, because the number that decides it was already on the table.
+     The honest ceiling is the one the measurement finds, and it is not here:
+     at 272 the whole frame still renders inside the noise band of the old
+     path on SwiftShader (the cloud is simply not what this scene spends its
+     fill on). Per-lobe alpha comes DOWN as the count goes up — coverage is
+     1-(1-a)^n, so density is held while every individual lobe gets fainter,
+     which is precisely the direction that stops any one of them reading as
+     an object. That trade is why more is better here and not just bigger. */
   const VOL_MAX = smokeLobes()
-    ? { cap: 34, stem: 18, surge: 30, hot: 10, crown: 24, glow: 8 }
+    ? { cap: 88, stem: 48, surge: 76, hot: 10, crown: 60, glow: 8 }
     : { cap: 18, stem: 10, surge: 20, hot: 10, crown: 14, glow: 8 };
   // of VOL_MAX.crown; the rest is collar (the ratio is held across both paths)
-  const CROWN_N = smokeLobes() ? 14 : 8;
+  const CROWN_N = smokeLobes() ? 34 : 8;
   const VOL_SEED = { cap: [], stem: [], surge: [], hot: [], crown: [], glow: [] };
 
   // One deterministic layout, reused by every detonation. The instances move
@@ -1425,7 +1437,12 @@
               // ceiling keeps the fire's brightening while leaving the colour
               // cloudColor() authored (hot -> ash) legible.
               "vec3 smLit = min(vec3(1.15), uSmokeAmb * (0.62 + 0.38 * smH) + uSmokeSunCol * (smShade * 0.90 + 0.10 + smFwd * 0.50));\n" +
-              "gl_FragColor.rgb = diffuse * smLit * (0.80 + 0.40 * smNoise) + emissive;\n" +
+              // The swing is on the BROAD octaves for a reason: along a ray through a
+              // dense field you now accumulate ~20 lobes, and fine detail averages
+              // itself flat over that many samples. Kilometre-scale variation does
+              // not — neighbouring samples share it — so that is what keeps a
+              // 272-lobe cloud from reading as one uniform brown mass.
+              "gl_FragColor.rgb = diffuse * smLit * (0.70 + 0.60 * smNoise) + emissive;\n" +
               "#include <tonemapping_fragment>")
             .replace("#include <dithering_fragment>",
               // alpha IS thickness: densest looking through the middle of the
@@ -2907,7 +2924,13 @@
      most, sorted at the existing 12 Hz transform cadence — an insertion sort
      over 20 keys, on the frames that were already uploading a matrix buffer.
      Additive layers (hot billows, cap glow) skip the sort: addition commutes. */
-  const VOL_SORT_MAX = 24;
+  /* DERIVED, NEVER TYPED. This was a literal 24 for one round while the cap
+     already carried 34 lobes, so ten of them fell through to an unsorted
+     direct write — the exact bug class this file keeps catching itself in.
+     It is now the largest layer the pool can hold, so raising a count can
+     never silently un-sort its tail again. */
+  const VOL_SORT_MAX = Math.max(
+    VOL_MAX.cap, VOL_MAX.stem, VOL_MAX.surge, VOL_MAX.hot, VOL_MAX.crown, VOL_MAX.glow);
   const _volBuf = {
     n: 0,
     x: new Float64Array(VOL_SORT_MAX), y: new Float64Array(VOL_SORT_MAX),
@@ -3084,7 +3107,7 @@
         lobe * (1.08 + s.r * 0.22), lobe * (0.72 + (1 - s.r) * 0.18) * flat, lobe,
         a * 0.35);
     }
-    cap.material.opacity = solidOp(0.86, 0.58) * capIn * endFade * near;
+    cap.material.opacity = solidOp(0.86, 0.26) * capIn * endFade * near;
     cloudColor(cap.material, VOL_HOT, VOL_ASH, cloudCool);
     cap.visible = cap.material.opacity > 0.004;
     flushVolume(cap);
@@ -3170,7 +3193,7 @@
           lobe * (isCrown ? 1.05 : 1.42), lobe * (isCrown ? 0.94 : 0.56) * flat,
           lobe * (isCrown ? 1.05 : 1.42), a * 0.5);
       }
-      crown.material.opacity = solidOp(0.88, 0.62) * Math.max(collarIn, crownIn) * endFade * near;
+      crown.material.opacity = solidOp(0.88, 0.30) * Math.max(collarIn, crownIn) * endFade * near;
       cloudColor(crown.material, VOL_CROWN_HOT, VOL_CROWN_ASH, cloudCool, VOL_CROWN_EMBER);
       crown.visible = crown.material.opacity > 0.004;
       flushVolume(crown);
@@ -3260,7 +3283,7 @@
     // loses 55% of its opacity, not all of it): the reference plate's whole
     // foreground is that thick roiling column, and it is the one part of the
     // cloud that genuinely is inside the frustum.
-    stem.material.opacity = solidOp(0.84, 0.93) * stemIn * endFade * (photo ? (1 - mixC * 0.55) : near);
+    stem.material.opacity = solidOp(0.84, 0.74) * stemIn * endFade * (photo ? (1 - mixC * 0.55) : near);
     cloudColor(stem.material, VOL_STEM_HOT_V[v2() ? 1 : 0], VOL_STEM_ASH, cloudCool);
     stem.visible = stem.material.opacity > 0.004;
     flushVolume(stem);
@@ -3303,7 +3326,7 @@
         lobe * 1.25, lobe * 0.38 * tall, lobe,
         a + spin);
     }
-    surge.material.opacity = solidOp(deep ? 0.76 : 0.82, 0.82) * surgeIn * surgeFade;
+    surge.material.opacity = solidOp(deep ? 0.76 : 0.82, 0.44) * surgeIn * surgeFade;
     cloudColor(surge.material, VOL_DUST_HOT_V[deep ? 1 : 0], VOL_DUST_ASH_V[deep ? 1 : 0],
       cloudCool * 0.85);
     surge.visible = surge.material.opacity > 0.004;

@@ -2406,11 +2406,26 @@ question rather than an edge-softness one.
   lobe samples identically, `uSmokeSpan`), with the lobe normal down to 30%
   weight; adjacent lobes agree at their seam. (2) The last rock was
   GRANULARITY: eighteen circles read as eighteen circles however softly each
-  is drawn. The smoke path fills the SAME envelope more finely — cap 18->34,
-  stem 10->18, surge 20->30, crown 14->24, identical seed laws, identical size
-  distribution, so outline/width/height/timing are untouched and the field
-  simply stops being gappy. Fill cost measured FLAT (151/64/54/59 ms vs
-  151/67/58/49 ms, SwiftShader, median of 8 renders per beat).
+  is drawn. The smoke path fills the SAME envelope more finely — cap 18->88,
+  stem 10->48, surge 20->76, crown 14->60 (272 cold lobes against 72),
+  identical seed laws, identical size distribution, so outline/width/height/
+  timing are untouched and the field simply stops being gappy. Fill measured
+  FLAT at every step (97/57/58/50 ms at 272 lobes vs 151/67/58/49 ms on the
+  old path, SwiftShader, median of 8 renders per beat) — the cloud is not
+  what this scene spends its fill on.
+  THE OWNER CAUGHT THE REAL ERROR IN THIS: the first pass stopped at a
+  cautious ~1.5x, measured the cost as flat, and then failed to SPEND what
+  the measurement had just bought. "If it didn't cost you more, why did you
+  only do some?" — correct, and worse than the original mistake, because the
+  number that settled it was already on the table. Per-lobe alpha falls as
+  the count rises (coverage is 1-(1-a)^n, so density holds while every
+  individual lobe fades: cap 0.58 -> 0.26), which is exactly the direction
+  that stops any one lobe reading as an object. More is not merely bigger
+  here; it is the axis that removes the artifact.
+  That round also surfaced a defect the first pass shipped: `VOL_SORT_MAX`
+  was a typed 24 while the cap already carried 34 lobes, so ten of them fell
+  through to an unsorted direct write. It is derived from VOL_MAX now, so
+  raising a count can never silently un-sort its tail again.
 - **`CBZ.nukeSmokeAudit()` + `tools/nuke-smoke-check.mjs`** — the rock/smoke
   argument as a number, because the owner has now filed BOTH complaints:
   "slightly opaque floating rocks" (the body must not be see-through) and
