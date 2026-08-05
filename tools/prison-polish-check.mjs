@@ -368,17 +368,23 @@ async function moveTo(expr, ticks) {
         stripShown: !!(s && getComputedStyle(s).display !== "none"),
         cells: cells, hiddenCells: hidden,
         bagHidden: getComputedStyle(document.getElementById("invBagBtn") || document.createElement("i")).display === "none",
-        terse: !!(gg && gg.classList.contains("gg-terse")),
+        panel: !!gg,
+        panelFlag: !!(window.CBZ.CONFIG && window.CBZ.CONFIG.GUNGAME_HUD_PANEL),
         now: txt(".gg-now"), next: txt(".gg-next"), lead: txt(".gg-lead"),
+        hp: (document.getElementById("hpBar") || {}).style ? document.getElementById("hpBar").style.width : null,
       };
     `);
     if (bad(r)) check("gungame: hud reads", false, why(r));
     else {
       check("gungame: ONE gun bar (the strip is docked, not floating)", r.docked === true && r.floating === false, JSON.stringify({ docked: r.docked, floating: r.floating }));
       check("gungame: the empty contraband cells are off", r.cells > 0 && r.hiddenCells === r.cells && r.bagHidden, JSON.stringify({ cells: r.cells, hidden: r.hiddenCells, bag: r.bagHidden }));
-      // "RUNG 1/9 — 9MM SIDEARM" / "NEXT: …" / "LEADER: You" are the dead words.
-      const dead = [r.now, r.next, r.lead].filter(Boolean).join(" ");
-      check("gungame: no never-changing labels in the ladder HUD", r.terse === true && !/RUNG|NEXT|LEADER|RESPAWN/i.test(dead), JSON.stringify({ terse: r.terse, now: r.now, next: r.next, lead: r.lead }));
+      // 2026-08-05 — the ladder row is GONE, not merely terse (the 08-04 pass
+      // shortened it and the owner still read it as clutter above his gun).
+      // The node must not exist at all, and the shared arena bars must survive
+      // it: gungamehud.js writes #survBars from the same tick the row used to
+      // live in, so "row removed" and "bars still written" is ONE assertion.
+      check("gungame: no ladder row above the hotbar", r.panel === false && r.panelFlag === false, JSON.stringify({ panel: r.panel, flag: r.panelFlag, now: r.now, next: r.next, lead: r.lead }));
+      check("gungame: HP/stamina still write with the row gone", !!r.hp && r.hp !== "", JSON.stringify({ hp: r.hp }));
     }
   }
 }
