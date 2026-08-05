@@ -632,10 +632,10 @@
   CBZ.onUpdate(38.6, function (dt) {
     if (!on()) return;
     const g = CBZ.game;
-    // Left city mode (or a teardown): drop every body properly — clearing the
-    // array alone would leave the `_waterFloat` markers set and the same
-    // objects could never be re-adopted on the next run.
-    if (!g || g.mode !== "city") {
+    // Left every water world (or a teardown): drop every body properly —
+    // clearing the array alone would leave the `_waterFloat` markers set and
+    // the same objects could never be re-adopted on the next run.
+    if (!g || !(CBZ.waterModeOn ? CBZ.waterModeOn() : g.mode === "city")) {
       for (let i = bodies.length - 1; i >= 0; i--) release(bodies[i]);
       lifted.length = 0;
       return;

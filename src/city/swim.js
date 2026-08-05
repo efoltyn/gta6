@@ -442,7 +442,20 @@
   function bedDepthAt(x, z) {
     // THE ISLAND has a real, queryable bed — the arena's own height field —
     // so no synthetic shelf is needed or wanted here.
-    if (survOn()) return Math.max(0, CBZ.survFloodDepthAt(x, z));
+    //
+    // MEAN, NOT THE LIVE CREST. The city's shelf (cityBedDepthAt, below) is
+    // built from waterfield's static shore distance, so a wave rolling past
+    // never changes how deep the water is here. The island's was being read off
+    // the wavy surface, which made THIS number swing by metres at wave
+    // frequency during a tsunami — and the swim/wade hysteresis right below
+    // (enter at 1.35 m, leave at 1.05 m) turned that into several
+    // enterWater/exitWater round-trips a second, each one a splash, an sfx, a
+    // shake and a velocity reset. survFloodDepthMeanAt is the same water column
+    // measured against mean sea level; the SURFACE query (surfAt) stays wavy.
+    if (survOn()) {
+      return Math.max(0, CBZ.survFloodDepthMeanAt
+        ? CBZ.survFloodDepthMeanAt(x, z) : CBZ.survFloodDepthAt(x, z));
+    }
     return cityBedDepthAt(x, z);
   }
 

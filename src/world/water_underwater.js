@@ -798,7 +798,13 @@
     const scene = CBZ.scene;
     if (!scene) return;
     const g = CBZ.game;
-    const gone = off() || !g || g.mode !== "city";
+    // "Is there water in this world", not "is this the city". The survival
+    // island is water too — its sea is the same surge-driven surface — and this
+    // whole treatment was dark there purely because the ONE oracle below
+    // (cityWaterAt / citySeaHeightAt, via eyeDepth) only answered for the city.
+    // world/water_survival.js makes it answer for both; this is the gate that
+    // was keeping the answer from being asked.
+    const gone = off() || !g || !(CBZ.waterModeOn ? CBZ.waterModeOn() : g.mode === "city");
 
     const depth = gone ? -1 : eyeDepth();
     // A little hysteresis so a crest rolling past the eye cannot strobe the

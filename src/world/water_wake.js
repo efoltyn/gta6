@@ -1061,7 +1061,7 @@
     dt = Math.min(0.1, +dt || 0);
     if (!(dt > 0)) return false;
     const g = CBZ.game;
-    if (!g || g.mode !== "city") return false;
+    if (!g || !(CBZ.waterModeOn ? CBZ.waterModeOn() : g.mode === "city")) return false;
     build();
     if (!pos) return false;
     const st = resolve(obj, opts, dt);
@@ -1233,7 +1233,11 @@
       return;
     }
     const g = CBZ.game;
-    if (!g || g.mode !== "city") {
+    // The swim wash, the splash rings and the rain dimples are water effects,
+    // not city effects. On the island this pass hid the whole buffer, so
+    // city/swim.js's waterSplashAt() on every entry and exit emitted into a
+    // points cloud that was never drawn — a silent, invisible plunge.
+    if (!g || !(CBZ.waterModeOn ? CBZ.waterModeOn() : g.mode === "city")) {
       if (points) points.visible = false;
       count = 0;
       ribClearAll();

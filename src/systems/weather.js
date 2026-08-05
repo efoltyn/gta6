@@ -474,6 +474,20 @@
       const g = CBZ.groundWaterAt ? CBZ.groundWaterAt(x, z) : 0;
       return g > 0 ? Math.max(g, Number.isFinite(d) ? d : 0) : d;
     };
+    /* THE MEAN-LEVEL TWIN GETS THE SAME RAIN. survFloodDepthMeanAt is the same
+       water column measured against mean sea level instead of the live crest —
+       the reading city/swim.js's bed test and CBZ.survWaterAt take, so that a
+       passing swell cannot chatter the swim state (world/disaster_arena.js says
+       why). It is a SIBLING of the function above, not a caller of it, so
+       without this wrap a flash flood would fill the island's streets for the
+       shader and the flood-threat AI and leave them dry for the swimmer — the
+       exact split this whole wrap exists to prevent. */
+    const baseM = CBZ.survFloodDepthMeanAt;
+    if (baseM) CBZ.survFloodDepthMeanAt = function (x, z) {
+      const d = +baseM(x, z);
+      const g = CBZ.groundWaterAt ? CBZ.groundWaterAt(x, z) : 0;
+      return g > 0 ? Math.max(g, Number.isFinite(d) ? d : 0) : d;
+    };
     const baseY = CBZ.survSeaHeightAt;
     if (baseY) CBZ.survSeaHeightAt = function (x, z) {
       const y = +baseY(x, z);

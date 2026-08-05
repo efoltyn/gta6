@@ -225,6 +225,21 @@ const PASS = `(() => {
     out.groundWater = "stage=" + gw.stage + " cells=" + gw.cells + " planes=" + gw.privateWaterPlanes;
     if (gw.privateWaterPlanes > 0) out.fails.push("PRIVATE WATER PLANE: " + gw.privateWaterPlanes);
   } catch (e) { out.fails.push("groundWaterAudit threw: " + (e && e.message)); } }
+  // ---- ONE WATER ORACLE, BOTH WORLDS (world/water_survival.js). The water
+  // presentation stack (underwater grade, wake/splash, impact bus, floating
+  // bodies) used to carry four private mode === city gates - not because the
+  // effects were city-specific but because CBZ.cityWaterAt/citySeaHeightAt
+  // only ANSWERED for the city. They now ask CBZ.waterModeOn() and the oracle
+  // answers for the survival island too. cityGated is what is left of that
+  // duplication and may only ever go DOWN; wrapped proves the switch actually
+  // installed (its publishers load across three script tags, so a reorder that
+  // silently skipped it is the failure mode worth pinning).
+  if (CBZ.waterSharedAudit) { try { const ws = CBZ.waterSharedAudit();
+    out.waterShared = "wrapped=" + ws.wrapped + " bed=" + ws.bedWrapped + " cityGated=" + ws.cityGated;
+    if (ws.on && !ws.wrapped) out.fails.push("WATER ORACLE SHIM NEVER INSTALLED (water_survival.js load order)");
+    if (ws.on && !ws.bedWrapped) out.fails.push("WATER ORACLE SHIM: bathymetry pair not wrapped");
+    if (ws.cityGated > 0) out.fails.push("CITY-GATED WATER MODULES rose to " + ws.cityGated + " (ratchet 0)");
+  } catch (e) { out.fails.push("waterSharedAudit threw: " + (e && e.message)); } }
   // ---- volcano block (volcanofx.js): lava is OPAQUE crusted rock, never a
   // translucent box - transparent lava and legacy stream paths pinned at 0.
   if (CBZ.volcanoAudit) { try { const va = CBZ.volcanoAudit();

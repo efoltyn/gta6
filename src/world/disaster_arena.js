@@ -33,6 +33,12 @@
   const arenaWave = { amp: 0.86, chop: 0.72, foam: 0.34, opacity: 1 };
   let arena_meanY = function () { return -0.8; };
 
+  // SURV_SEABED — the island's coastal shelf (see groundHeightAt below). ON →
+  // the ground falls away past the beach, so the open ocean is real water and
+  // city/swim.js's swimmer runs on this island. OFF (or ?cfg_SURV_SEABED=0) →
+  // the flat y=0 floor out to infinity, and you walk on the sea.
+  if (CBZ.CONFIG.SURV_SEABED == null) CBZ.CONFIG.SURV_SEABED = true;
+
   /* ---- THE SURVIVAL WATER QUERIES ---------------------------------------
      One surface, three questions, all answered off world/water_spec.js's
      canonical swell table — the same one the shader displaces by. These are
@@ -50,20 +56,60 @@
   /* Metres of water standing over the ground at (x,z) — the survival twin of
      CBZ.cityFloodDepthAt. Negative/zero means dry land.
 
-     SCOPE, DELIBERATELY: this answers FLOOD water, not open ocean. The arena's
-     walkable floor is a flat 0 everywhere outside the four hills — including
-     out to sea — which is why you have always been able to walk off this
-     island onto nothing. Making the sea beyond the beach swimmable means
-     giving the arena a real bathymetry, and that is a terrain change, not a
-     water one; doing it here would put the swimmer and the walk floor in a
-     fight over the same body. So: the sea rises, and when it is over your
-     ground you are in it. */
+     THE OLD SCOPE NOTE SAID this answered FLOOD water and not open ocean,
+     because the arena's walkable floor was a flat 0 everywhere outside the
+     four hills — including out to sea — "which is why you have always been
+     able to walk off this island onto nothing". That was not a scope, it was
+     the bug, and it was measured (survival, seed 90210, 300 m offshore):
+
+         playerPos [300, 0, 600]  grounded true   seaY -0.762
+         feetAboveSea 0.762       _swim false     submergence 0  breath 1.0
+         ground = 0 at 400 m, 1000 m, 5000 m out.
+
+     The player stood 0.76 m ABOVE the sea, grounded, for as far as the map
+     goes, and city/swim.js was never entered — because the swimmer is gated on
+     survWaterAt, and survWaterAt is this function. The whole shared-swim wiring
+     (SURV_SHARED_SWIM) was live and unreachable: no stroke pose, no buoyancy,
+     no breath drain, on an island whose headline event is a tsunami.
+
+     SURV_SEABED (below) gives the arena the missing bathymetry, so this
+     function now answers for the open ocean as well and the sentence above
+     stops being true. */
   CBZ.survFloodDepthAt = function (x, z) {
     if (!arena) return 0;
     return CBZ.survSeaHeightAt(x, z) - arena.groundHeightAt(x, z);
   };
-  // "is this point in the water" — the survival twin of CBZ.cityWaterAt.
-  CBZ.survWaterAt = function (x, z) { return CBZ.survFloodDepthAt(x, z) > 0.3; };
+  /* THE SAME WATER COLUMN, MEASURED AGAINST MEAN SEA LEVEL INSTEAD OF THE LIVE
+     CREST — and the swimmer's entry test must use THIS one.
+
+     WHY THERE ARE TWO. The city's bed depth (city/swim.js's cityBedDepthAt) is
+     built from waterfield's SHORE DISTANCE, which is a static field: a wave
+     rolling past does not change how deep the water is. Here the depth was
+     being read off the live wavy surface, so during a tsunami — waveAmp 1.38 /
+     chopAmp 1.72 in the flood phase, 1.55 / 2.15 in the sweep — the "depth" at
+     a fixed point swung by metres at wave frequency. swim.js enters the swim at
+     1.35 m and leaves it at 1.05 m, so everywhere near that band the swimmer
+     entered and exited several times a second, and every one of those
+     transitions fires a splash, an sfx, a camera shake and a velocity reset.
+     The whole town crosses that band twice per event: once as the surge arrives
+     and once as it drains from 8.3-14.3 m back to zero.
+
+     So: the SURFACE question stays wavy (that is the crest you can see and ride)
+     and the BED question goes flat. One water, two honest readings of it. */
+  CBZ.survFloodDepthMeanAt = function (x, z) {
+    if (!arena) return 0;
+    return arena_meanY() - arena.groundHeightAt(x, z);
+  };
+  // "is this point in the water" — the survival twin of CBZ.cityWaterAt. Reads
+  // the MEAN column for the same reason: a swell crest lapping over a kerb does
+  // not make the street a swimmable body of water, and letting it flicker here
+  // flickers every consumer downstream (the swimmer, the camera, the FX).
+  CBZ.survWaterAt = function (x, z) { return CBZ.survFloodDepthMeanAt(x, z) > 0.3; };
+  // World Y of the seabed — what a renderer and a camera boom actually want.
+  // The survival twin of CBZ.citySeaBedYAt.
+  CBZ.survSeaBedYAt = function (x, z) {
+    return arena ? arena.groundHeightAt(x, z) : 0;
+  };
 
   // deterministic-ish RNG so the map is the same each match (learnable)
   let _s = 1337;
@@ -98,6 +144,44 @@
       { x: cx + 48, z: cz + 40, r: 22, peak: 11 },
       { x: cx + 40, z: cz - 48, r: 16, peak: 7 },
     ];
+    /* ---- SURV_SEABED — THE ISLAND GETS A BOTTOM ---------------------------
+       This function used to `return h` — 0 everywhere outside the four cones,
+       out to infinity — and CBZ.floorAt (modes/survival.js) is wired straight
+       to it. Mean sea is -0.8, so the walkable floor sat 0.8 m ABOVE the sea
+       and you walked out onto the ocean and kept going. Worse, everything that
+       asks "is there water here" is defined off this height, so the answer
+       offshore was NO and city/swim.js — un-gated for survival, fully wired,
+       measured idle at `sinkRate 0.85, breathSec 28, swimming false` — could
+       never once be entered. The island's headline event is a tsunami and the
+       island had no water to swim in.
+
+       THE MODEL IS THE CITY'S, NOT A NEW ONE. city/swim.js's cityBedDepthAt
+       synthesises the coastal shelf analytically: signed distance to the shore
+       times a slope, capped at a depth. There is no submerged geometry in this
+       engine and none is wanted here either. The city's shore field comes from
+       waterfield.js because a continent's coast is an arbitrary curve; this
+       island's coast is a CIRCLE, so its signed shore distance is one
+       Math.hypot and the same shelf falls out for free.
+
+       THE SLOPE IS DELIBERATELY GENTLER THAN THE CITY'S. city/swim.js uses
+       1.10 m of depth per metre out and says why: its shore field describes a
+       vertical harbour seawall as well as a beach, so a wide synthetic shelf
+       would let you "stand" in open water beside a quay. This island has no
+       seawalls — it is beach the whole way round — so that constraint does not
+       apply and honouring it would give a 1.2 m wade band, i.e. a cliff edge
+       with sand painted on it. 0.34 (about 1:3, a real fringing-reef profile)
+       puts the swim threshold ~4 m past the waterline: you walk in, the water
+       climbs you, and then it has you. DEEP caps the column where the
+       underwater treatment has long since faded to black anyway.
+
+       `?cfg_SURV_SEABED=0` restores the flat floor — and the walk-on-water. */
+    const SHELF_SLOPE = 0.34;          // m of depth per m past the waterline
+    const SHORE_R = R + 8;             // where the ground starts falling away
+    const DEEP = 34;                   // m — the shelf stops falling here (~100 m out)
+    function seabedAt(x, z) {
+      const d = Math.hypot(x - cx, z - cz) - SHORE_R;
+      return d > 0 ? -Math.min(d * SHELF_SLOPE, DEEP) : 0;
+    }
     function groundHeightAt(x, z) {
       let h = 0;
       for (let i = 0; i < hills.length; i++) {
@@ -105,7 +189,8 @@
         const d = Math.hypot(x - hl.x, z - hl.z);
         if (d < hl.r) { const t = 1 - d / hl.r; const hh = hl.peak * t; if (hh > h) h = hh; }
       }
-      return h;
+      if (h > 0 || CBZ.CONFIG.SURV_SEABED === false) return h;
+      return seabedAt(x, z);
     }
 
     // ---- island ground + ocean ----
@@ -163,8 +248,29 @@
     // rng stream so the island layout stays byte-identical.
     let _s2 = 424243;
     const rng2 = () => { _s2 = (_s2 * 1103515245 + 12345) & 0x7fffffff; return _s2 / 0x7fffffff; };
-    const seabed = new THREE.Mesh(new THREE.CircleGeometry(R + 170, 48),
-      new THREE.MeshLambertMaterial({ color: 0xcdbb8f }));
+    /* THE BOTTOM YOU SEE IS THE BOTTOM YOU STOP AT. This was a flat disc at a
+       fixed y=-1.35 while groundHeightAt now falls to -34 m, so drawn and
+       walked would have been two different surfaces 30 m apart — exactly the
+       split city/swim.js's note warns about, and the reason the city publishes
+       CBZ.citySeaBedYAt for world/terrain_overhaul.js to draw FROM. Same
+       discipline here: a ring with real radial subdivision, every vertex
+       displaced to the one height field. RingGeometry (not CircleGeometry,
+       which has a single ring of rim vertices and nothing to shape).
+
+       CircleGeometry/RingGeometry are authored in XY and rotated -PI/2 about X,
+       which maps local (x, y, z) -> world (x, z, -y). So the vertex's LOCAL Z
+       is its world height, and its world XZ comes from local (x, -y). */
+    const seabedGeo = new THREE.RingGeometry(SHORE_R - 1, R + 170, 96, 28);
+    if (CBZ.CONFIG.SURV_SEABED !== false) {
+      const sp = seabedGeo.attributes.position, sa = sp.array;
+      for (let i = 0; i < sa.length; i += 3) {
+        sa[i + 2] = seabedAt(cx + sa[i], cz - sa[i + 1]) + 1.35;   // +1.35 undoes the mesh offset below
+      }
+      sp.needsUpdate = true;
+      seabedGeo.computeVertexNormals();
+    }
+    const seabed = new THREE.Mesh(seabedGeo,
+      new THREE.MeshLambertMaterial({ color: 0xcdbb8f, side: THREE.DoubleSide }));
     seabed.rotation.x = -Math.PI / 2; seabed.position.set(cx, -1.35, cz);
     seabed.receiveShadow = true; root.add(seabed);
     // darker wet patches + shallow pools scattered across the exposed shelf
@@ -174,12 +280,17 @@
       const a2 = rng2() * Math.PI * 2, d2 = R + 10 + rng2() * 148;
       const pm = new THREE.Mesh(new THREE.CircleGeometry(3.5 + rng2() * 9, 12), i % 3 === 2 ? poolM : wetM);
       pm.rotation.x = -Math.PI / 2;
-      pm.position.set(cx + Math.cos(a2) * d2, -1.15, cz + Math.sin(a2) * d2);
+      // Sit each patch ON the shelf now that the shelf has a shape — a fixed
+      // -1.15 would bury them in the slope or hang them in the water column.
+      const pmx = cx + Math.cos(a2) * d2, pmz = cz + Math.sin(a2) * d2;
+      pm.position.set(pmx, groundHeightAt(pmx, pmz) + 0.2, pmz);
       root.add(pm);
     }
 
-    // the island disc (grass) with a sandy beach ring
-    const beach = new THREE.Mesh(new THREE.CircleGeometry(R + 14, 64),
+    // the island disc (grass) with a sandy beach ring. The ring ends AT the
+    // waterline (SHORE_R) and the draped shelf above takes over from there, so
+    // sand meets sea instead of overhanging it.
+    const beach = new THREE.Mesh(new THREE.CircleGeometry(SHORE_R, 64),
       new THREE.MeshLambertMaterial({ color: 0xe6d49a }));
     beach.rotation.x = -Math.PI / 2; beach.position.set(cx, -0.02, cz);
     beach.receiveShadow = true; root.add(beach);

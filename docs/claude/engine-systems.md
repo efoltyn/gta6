@@ -405,6 +405,24 @@ Before building anything adjacent, wire into the existing system:
   in the survival arena for its whole life: a separate mesh has to be taught to
   every water consumer individually. `city/tsunami.js` is the whole main-world
   event and it authors no water, no flood damage model and no panic AI.
+- **ONE WATER ORACLE, BOTH WORLDS** — `CBZ.waterModeOn()` (`world/water_survival.js`,
+  flag `SURV_SHARED_WATER_FX`). The oracle above is named `city*` but is not
+  city-only: this file wraps `cityWaterAt` / `citySeaHeightAt` /
+  `citySeaBedDepthAt` / `citySeaBedYAt` so they answer with the survival island's
+  numbers (`survWaterAt` / `survSeaHeightAt` / `survSeaBedYAt`,
+  `world/disaster_arena.js`) in survival mode. **Any water consumer gates on
+  `CBZ.waterModeOn()`, never on `g.mode === "city"`** — four of them
+  (`water_underwater` · `water_wake` · `water_impact` · `water_float`) did the
+  latter and were therefore dark on an island whose headline event is a tsunami;
+  `systems/camera.js`'s `waterCamFloor` read the oracle without a gate and was
+  broken purely by the answer. Ratchet: `CBZ.waterSharedAudit().cityGated`,
+  pinned at **0** in the math gate. Companion law: the island has a real
+  bathymetry now (`SURV_SEABED`, `disaster_arena.js` `groundHeightAt`) — before
+  it, the walkable floor was a flat 0 out to infinity sitting 0.8 m above a
+  −0.8 m sea, so you walked on the ocean and `city/swim.js` could never once be
+  entered there. The BED question reads `survFloodDepthMeanAt` (mean sea level)
+  and the SURFACE question reads `survSeaHeightAt` (the live crest); reading a
+  wavy surface for the bed made the swim/wade hysteresis chatter every wave.
 - **A BOAT CANNOT BE DRIVEN ONTO LAND** — `CBZ.marineShoreBlock(car, spec, dt)`
   (`world/water_helm.js`, flag `BOAT_NO_LAND`). ONE shoreline resolver, and every
   path that moves a hull calls it: the player's helm (`marineHelm` §11.5), the AI

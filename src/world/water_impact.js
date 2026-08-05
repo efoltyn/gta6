@@ -620,7 +620,7 @@
   function shotWaterEntry(from, to) {
     if (off() || !from || !to) return;
     const g = CBZ.game;
-    if (!g || g.mode !== "city") return;
+    if (!g || !(CBZ.waterModeOn ? CBZ.waterModeOn() : g.mode === "city")) return;
     const y0 = +from.y, y1 = +to.y;
     if (!Number.isFinite(y0) || !Number.isFinite(y1)) return;
     // The highest crest ANYWHERE right now. This used to be the flat
@@ -938,7 +938,10 @@
 
     if (off()) return;
     const g = CBZ.game;
-    if (!g || g.mode !== "city") { entryAcc = 0; return; }
+    // waterSplashAt() delegates HERE first (the body-class entry), so with this
+    // gate shut the island lost the splash twice over — once in the impact bus
+    // and once in the wake pool it falls through to.
+    if (!g || !(CBZ.waterModeOn ? CBZ.waterModeOn() : g.mode === "city")) { entryAcc = 0; return; }
 
     entryAcc += dt;
     if (entryAcc >= ENTRY_DT) {

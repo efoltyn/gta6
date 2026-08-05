@@ -3,6 +3,71 @@
 > Extracted verbatim from the old giant CLAUDE.md (split 2026-08-02).
 > These are dated session narratives and measured ratchets — historical evidence, not timeless law.
 
+## 2026-08-05 — THE ISLAND HAD NO WATER (and so it had no swimmer)
+
+Owner: *"When there's a tsunami, the swimming in the disaster survival game is
+horrible because it's not the same swimming that was hard bought and built in
+Gang City."* Then, decisively: *"You can walk on top of the water."*
+
+The wiring was not the problem and had not been for a wave — `SURV_SHARED_SWIM`
+un-gated `city/swim.js` for survival, and `systems/disasters.js` deleted its
+private buoyancy/stamina-as-air solve and pinned `privateSwim: 0`. **The
+precondition was the problem, and it had never once been true.**
+`world/disaster_arena.js`'s `groundHeightAt` returned `h` — 0 everywhere outside
+four hill cones, out to infinity — and `modes/survival.js` wires `CBZ.floorAt`
+straight to it. Mean sea is −0.8. **Measured before the fix** (survival, seed
+90210, 300 m offshore, 300 ticks):
+
+    playerPos [300, 0, 600]   grounded true   seaY -0.762  feetAboveSea +0.762
+    _swim false   charSwimming false   submergence 0   breath 1.0
+    ground = 0 at 400 m, 1000 m, 5000 m
+
+The player stood 0.76 m **above** the sea, grounded, as far as the map goes.
+`survWaterAt` was false, so `waterAt()` was false, so the swimmer was never
+entered: `swimAudit()` reported the whole Gang City model loaded and idle
+(`sinkRate 0.85, breathSec 28, sinkOn true, swimming false`). The only water on
+the island was the ~30 s the tsunami surge stood over the town ground — which is
+exactly the window the owner was describing as horrible.
+
+**After** (same probe, same spot): `_swim true · charSwimming true ·
+citySwimming true · submergence 1`, feet 32.9 m under the surface.
+
+- **THE ISLAND GETS A BOTTOM** — `SURV_SEABED` (`disaster_arena.js`). Six lines,
+  and the model is the city's, not a new one: `city/swim.js`'s `cityBedDepthAt`
+  synthesises the coastal shelf analytically (signed shore distance × slope,
+  capped). The city needs `waterfield.js` for that distance because a continent's
+  coast is an arbitrary curve; this island's coast is a CIRCLE, so it is one
+  `Math.hypot`. Slope 0.34 (~1:3), deliberately gentler than the city's 1.10 —
+  that number exists because the city's shore field also describes vertical
+  harbour seawalls, a constraint this all-beach island does not have; honouring
+  it would give a 1.2 m wade band, i.e. a cliff with sand painted on it.
+  The drawn shelf is DISPLACED TO THE SAME FIELD (`RingGeometry`, 96×28, every
+  vertex through `seabedAt`) so the bottom you see is the bottom you stop at.
+- **ONE WATER ORACLE, BOTH WORLDS** — `world/water_survival.js`, new,
+  `SURV_SHARED_WATER_FX`. The four water-presentation modules carried private
+  `g.mode === "city"` gates not because their effects were city-specific but
+  because `CBZ.cityWaterAt` / `citySeaHeightAt` only ANSWERED for the city. One
+  wrap, four one-line gate swaps to `CBZ.waterModeOn()`, and the island gets the
+  underwater colour grade, caustics, god rays, audio muffle, swim wash, splash
+  rings and floating bodies it never had. **`systems/camera.js` was fixed with
+  zero edits**: its `waterCamFloor` (CAM_WATER_FLOOR) reads the oracle and is not
+  mode-gated, so on the island the third-person boom kept its "absolute 0.6
+  pavement" floor and stayed in the air while the swimmer went under — the exact
+  bug its own note describes having fixed for the city.
+- **THE BED QUESTION IS FLAT, THE SURFACE QUESTION IS WAVY** —
+  `CBZ.survFloodDepthMeanAt`. The island read its depth off the live crest, so
+  during a tsunami (waveAmp 1.38 / chop 1.72 flooding, 1.55 / 2.15 sweeping) the
+  depth at a fixed point swung by metres at wave frequency, and swim.js's
+  hysteresis (in at 1.35 m, out at 1.05 m) turned that into several
+  enterWater/exitWater round-trips a second — each one a splash, an sfx, a shake
+  and a velocity reset. The town crosses that band twice per event. The city
+  never had this because its shelf is built from a STATIC shore distance.
+  `systems/weather.js` wraps the new twin alongside its sibling so a flash flood
+  still reaches the swimmer.
+- Ratchet: **`CBZ.waterSharedAudit().cityGated` pinned at 0** in the math gate,
+  plus hard fails if the oracle shim never installs (its publishers span three
+  script tags, so a reorder that silently skipped it is the real failure mode).
+
 ## THE 2026-07-27 EVENING WAVE — seven territories, one merge
 
 Seven opus builders in parallel, disjoint file territories, orchestrator merged

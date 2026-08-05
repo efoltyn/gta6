@@ -1535,6 +1535,15 @@
      water-aware by wrapping, with zero edits to their files). -->
 <script src="src/world/water_float.js?v=waterv2"></script>
 <script src="src/world/water_impact.js?v=waterv2"></script>
+<!-- ONE WATER ORACLE, BOTH WORLDS. Wraps CBZ.cityWaterAt / citySeaHeightAt /
+     citySeaBedDepthAt / citySeaBedYAt so they answer with the survival island's
+     numbers in survival mode, and publishes CBZ.waterModeOn() — the predicate
+     the four modules above now gate on instead of `g.mode === "city"`. Must
+     load AFTER city/waterfield.js (publishes the first two) and city/swim.js
+     (publishes the bathymetry pair); it retries on the update bus if either is
+     still missing, so a future reorder degrades to a late install rather than a
+     silent no-op. Revert with ?cfg_SURV_SHARED_WATER_FX=0. -->
+<script src="src/world/water_survival.js?v=survwater1"></script>
 
 <!-- WORLD DRESSING (5 layers) — the "lived-in" pass: street furniture, power
      poles + catenary-sagging wires, road wear/paint/puddles, and rooftop and
