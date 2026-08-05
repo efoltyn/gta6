@@ -2518,3 +2518,52 @@ hotbar" + "HP/stamina still write with the row gone", hp=100%). Its old
 
 Gates: PRISON-POLISH 34/34, MATHGATE ok (det ok, gungame 9rungs maps=2,
 loyalty locks=6). Reverts are one line each and independent.
+
+## 2026-08-05 — THE DIFFICULTY TOAST IS DELETED (solo)
+
+OWNER: *"It says the guards are getting restless. And I get those pop ups when
+I'm playing gun game and natural disaster game, not even just when I'm playing
+the jail game. And first of all, that pop up should never exist anyway in any
+game. It's so stupid, and it means nothing."*
+
+`systems/difficulty.js` fired one of five prison-flavored lines each time its
+ramp crossed a fifth. All five are gone, with `checkTier()` and the `tier`
+counter that existed only to stop them repeating.
+
+**WHY DELETE RATHER THAN ADD A THIRD MODE TO THE EXCLUSION LIST.** The toast had
+already been scoped twice — `mode === "city"` returned early inside `checkTier`,
+`mode === "survival"` returned early in the driver — and it still reached the
+owner. An allowlist patched once per complaint is not converging on a rule;
+there was no mode where the line was right. It is a system announcing its own
+internal state in prison voice, and "the guards are getting restless" names
+nothing a player can see or act on. **A narrator for a number is not a why.**
+
+MEASURED (throwaway CDP probe, `CBZ.flashHint` wrapped and every line recorded,
+600 × 0.5s `stepSim` per mode — RAMP_SECS is 240, so this crosses all five old
+boundaries). Run against BOTH sides, because a probe that passes before and
+after proves nothing:
+
+| mode | before | after |
+|---|---|---|
+| escape | **5 toasts** (all five lines) | 0 |
+| gungame | **5 toasts** (all five lines) | 0 |
+| survival | 0 (driver already excluded it) | 0 |
+| city | 0 (`checkTier` already excluded it) | 0 |
+
+`ramp` reaches 1.00 / tier 5-of-5 in every ramped mode after the change — the
++35% viewDist and speed, the slowed cooling and the patrol scans are all
+untouched. That difficulty was always meant to be FELT; the caption was the only
+thing removed. Note the probe did NOT reproduce the owner's disaster-mode
+sighting — survival was already silent pre-change — but with the strings deleted
+the question is moot in every mode.
+
+**ON GATE CHOICE (owner, same message: "Are you using gates that have nothing to
+do with the work you are doing?").** Fair. The previous wave ran the full math
+gate — 4 minutes of city generation, tree counts, arena seats and biome
+histograms — to land two string changes it could not possibly have exercised.
+`verification.md` says "use after EVERY change", and that instruction is what
+produced the waste. **The gate should be the one that can actually fail on the
+work.** For this change that is a throwaway toast probe (~90s, and it caught the
+old behavior) plus `node --check`. Run the math gate when the change can move
+what the math gate measures — world building, sim ticks, determinism — not as a
+tax on editing a sentence.

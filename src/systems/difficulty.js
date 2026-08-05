@@ -6,9 +6,10 @@
    (viewDist) and pace (speed) up to ~+35%, let heat cool a touch
    slower, and — to break up the memorise-the-route exploit — every
    so often a patrolling guard stops, plants its feet, and sweeps its
-   head around to scan the area. The ramp climbs in discrete "tiers"
-   that fire a subtle hint when crossed, so the difficulty creep is
-   felt, not just numbers behind the curtain.
+   head around to scan the area. The creep is meant to be FELT — a guard
+   seeing you from further out than he did ten minutes ago IS the readout.
+   It used to also narrate itself in five toasts; those are deleted (see
+   the block below the tuning constants).
 
    Everything is restored to the stored base the instant a new run
    starts (we watch CBZ.game.elapsed fall back toward 0) and also if
@@ -29,7 +30,7 @@
   // ---- tuning ----
   const RAMP_SECS = 240;     // ~4 minutes to reach full difficulty
   const MAX_BOOST = 0.35;    // +35% to viewDist and speed at full ramp
-  const TIERS = 5;           // number of "step up" notifications across the ramp
+  const TIERS = 5;           // how many steps the ramp is read out in (debug hook only)
   const COOL_SLOW = 0.55;    // at full ramp, ~55% of the would-be cooling is clawed back
 
   // scan pacing (only kicks in once the ramp is meaningfully up)
@@ -43,7 +44,6 @@
 
   // ---- run-local state ----
   let ramp = 0;                 // smooth 0..1 difficulty
-  let tier = 0;                 // last announced tier
   let scanRollT = 0;            // throttle for picking a scanner
   // run-reset detection shares CBZ.jailBoost's elapsed watcher (same 0.5
   // epsilon this module always used)
@@ -79,7 +79,7 @@
   function maybeReset() {
     // a fresh run zeroes elapsed; any meaningful backward jump is a reset.
     if (pollNewRun && pollNewRun()) {
-      ramp = 0; tier = 0; scanRollT = 0;
+      ramp = 0; scanRollT = 0;
       restoreAll();
     }
   }
@@ -92,28 +92,33 @@
     return t * t * (3 - 2 * t);
   }
 
-  // ---- announce tier step-ups with a subtle hint ----
-  const TIER_HINTS = [
-    "The block is settling in for a long shift…",
-    "The guards are getting restless.",
-    "Patrols sharpen up — eyes everywhere.",
-    "Lockdown footing. They're hunting harder now.",
-    "Maximum vigilance — the whole block is on edge.",
-  ];
-  function checkTier() {
-    // tiers spread across the ramp; the final tier lands at full difficulty
-    const t = Math.min(TIERS, Math.floor(ramp * TIERS + 0.0001));
-    if (t > tier) {
-      tier = t;
-      // The prison-flavor difficulty hints ("⚠ The guards are getting restless"…)
-      // do NOT belong in the open CITY — advance the tier SILENTLY there (survival
-      // is already excluded in the driver). The difficulty math still applies; only
-      // the fourth-wall toast is suppressed.
-      if (CBZ.game && CBZ.game.mode === "city") return;
-      const msg = TIER_HINTS[Math.min(TIER_HINTS.length - 1, t - 1)];
-      if (typeof CBZ.flashHint === "function" && msg) CBZ.flashHint(msg, 2.2);
-    }
-  }
+  /* ---- 2026-08-05: THE TIER TOAST IS DELETED, NOT RE-SCOPED ---------------
+     OWNER: "It says the guards are getting restless. And I get those pop ups
+     when I'm playing gun game and natural disaster game, not even just when
+     I'm playing the jail game. And first of all, that pop up should never
+     exist anyway in any game. It's so stupid, and it means nothing."
+
+     Five strings ("The block is settling in for a long shift…", "The guards
+     are getting restless.", "Patrols sharpen up", "Lockdown footing.",
+     "Maximum vigilance") fired from `checkTier` whenever `ramp` crossed a
+     fifth. They are gone, along with `checkTier` and the `tier` counter, which
+     existed for nothing else.
+
+     WHY DELETE RATHER THAN ADD A THIRD MODE TO THE LIST. The toast had already
+     been scoped twice — `mode === "city"` returned early right here, and
+     `mode === "survival"` returned early in the driver — and it still reached
+     the owner in two modes. That is the tell: an allowlist that has been
+     patched once per complaint is not converging on the right rule, because
+     there is no mode where the line is right. It is a system announcing its
+     own internal state in prison voice, which is the fourth wall whichever
+     arena you are standing in, and "the guards are getting restless" describes
+     nothing a player can see, do, or act on differently. A narrator for a
+     number is not a why.
+
+     THE RAMP ITSELF IS UNTOUCHED and still very real: guards keep climbing to
+     +35% viewDist and speed over RAMP_SECS, cooling still slows, patrols still
+     stop and sweep. That difficulty is meant to be FELT — a guard spotting you
+     from further out is the readout — and it never needed a caption. */
 
   // ---- occasional patrol scan ----
   // A scanning guard freezes in place and sweeps its facing back and forth.
@@ -211,10 +216,9 @@
 
   // ---- main per-frame driver (playing only) ----
   CBZ.onUpdate(62, function (dt) {
-    if (g.mode === "survival") return;   // prison difficulty curve / "guards restless" hints don't belong in disaster mode
+    if (g.mode === "survival") return;   // the prison difficulty curve has no guards to sharpen in disaster mode
     maybeReset();
 
-    const prevRamp = ramp;
     ramp = computeRamp(g.elapsed || 0);
 
     // make sure every guard (including any spawned mid-run) has a stored base,
@@ -226,8 +230,6 @@
         CBZ.jailBoost.scale("difficulty", gd, { viewDist: mult, speed: mult });
       }
     }
-
-    if (ramp > prevRamp) checkTier();   // only test for step-ups while climbing
 
     updateScans(dt);
     slowCooldown(dt);
@@ -246,6 +248,8 @@
   CBZ.difficulty = {
     get ramp() { return ramp; },
     get multiplier() { return 1 + MAX_BOOST * ramp; },
-    get tier() { return tier; },
+    // derived, not stored — the counter it used to read existed only to stop
+    // the deleted toast firing twice for one step.
+    get tier() { return Math.min(TIERS, Math.floor(ramp * TIERS + 0.0001)); },
   };
 })();
