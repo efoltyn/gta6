@@ -51,9 +51,9 @@
     has one verb — release — and every rung below a nuke would be that
     same verb with a bigger number on it. Going down loses the count, and
     it is one a half, so a nuke can never buy the next one. The runners
-    get a white ring 2.4 km across and fifteen seconds on the clock, which
+    get a white ring 2.2 km across and fifteen seconds on the clock, which
     is the whole reason it is a decision and not a coin flip. Under a roof
-    past 400 m you live. It is `kind:"nuke"` and nothing else: same bay,
+    past 600 m you live. It is `kind:"nuke"` and nothing else: same bay,
     same integrator, same pipper, same cover question.
 
   WHY THE COVER RULE IS THE WHOLE GAME. systems/ordnance.js asks whether
@@ -162,7 +162,8 @@
   #nukeRow{display:none;align-items:center;justify-content:center;gap:8px;margin-top:7px}
   .lamp.nuke.on{background:rgba(255,186,84,.9);color:#241400}
   .lamp.nuke.inbound.on{background:rgba(255,70,54,.92);color:#fff;animation:pulse .7s infinite}
-  #nukeVal{font:700 11px/1 monospace;letter-spacing:1.5px;opacity:.85;font-variant-numeric:tabular-nums}
+  #nukeVal{font:700 11px/1 monospace;letter-spacing:1.5px;opacity:.85;font-variant-numeric:tabular-nums;
+    white-space:nowrap}
   /* A KEY CAP ON A TOUCHSCREEN IS A LIE — the same law the briefing's
      .keys.desk block runs under, applied to the one <kbd> that lives in the
      HUD. body.is-touch is stamped at LOAD on a coarse pointer, so a phone
@@ -246,6 +247,11 @@
     #feed{width:auto;right:auto;left:calc(10px + var(--sal));font-size:11px;bottom:auto;
       top:calc(84px + var(--sat));max-width:52%}
     #vitals{padding:7px 9px}
+    /* the top pane is only ~126 px between health and the radar on a 390 px
+       phone, and IMPACT 05 wrapped onto a second line there. Shrink the row's
+       own lamp and type rather than the shared instrument lamps. */
+    #nukeRow .lamp{width:38px;letter-spacing:1px}
+    #nukeVal{font-size:10px;letter-spacing:.8px}
     .bar{width:64px}
     .meter>b{width:20px}
     .meter>s{display:none}          /* the bar IS the reading at this size */
@@ -384,7 +390,7 @@
         <div class="stat"><b>COVER</b> cuts blast 75%</div>
         <div class="line">Walls. Shelter roofs. Park canopy. Concrete stands on the corners.</div>
         <div class="stat"><b>WHITE RING</b> 16 kilotons. fifteen seconds. run</div>
-        <div class="line">A roof is worth your life past 400 m. Inside that, distance is the only answer.</div>
+        <div class="line">A roof is worth your life past 600 m. Inside that, distance is the only answer.</div>
         <div class="stat"><b>NO RESPAWNS</b></div>
       </div>
       <div class="box b3">
@@ -1512,8 +1518,9 @@ function updateHUD() {
 }
 // ---- the nuke row, and the countdown that is the runners' whole answer.
 // THE WARNING IS PROPORTIONATE, and that is a rule and not a nicety: the
-// threat ring already paints a 2.4 km white circle from the moment the round
-// leaves the bay (systems/ordnance.js sizes both the ring's brightness and
+// threat ring already paints a white circle wider than the weapon from the
+// moment the round leaves the bay, closing onto its true 2.2 km reach as it
+// falls (systems/ordnance.js sizes both the ring's brightness and
 // dangerAt's horizon off the kind's own `warn`, so the vignette and every AI
 // runner start reacting fifteen seconds out instead of six). This adds the one
 // thing a ring on the ground cannot say while you are looking the other way:

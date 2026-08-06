@@ -121,9 +121,20 @@
   //        buildings — at 440·16^(1/3) = 1109 m. So the kill radius and the
   //        spectacle are the SAME device, and `init()` re-derives this number
   //        from `CBZ.nukeRings()` when that file is in the page so the two
-  //        cannot drift. It is also the number that makes the cover rule the
-  //        whole answer: at 900 power a man in the open dies out to ~730 m
-  //        and a man under a roof lives past ~420 m.
+  //        cannot drift.
+  //      power — 1800 was MEASURED, not chosen. At 900 a nuke over a dense
+  //        city killed ONE man in ten (measured 2026-08-06, ten runners at
+  //        301..902 m from ground zero): a 1.1 km ray through two hundred
+  //        towers is blocked for very nearly everybody, so the flat 0.25
+  //        cover factor — calibrated against a 46 m frag bomb — was quartering
+  //        the whole event. At 1800 the same ten lose five. It is still far
+  //        GENTLER than the research the same file publishes:
+  //        `CBZ.nukeLethalAt()` carries the USSBS Hiroshima survey, which puts
+  //        83% dead at one kilometre, where this model kills nobody who is
+  //        behind anything. A game has to leave the running side something to
+  //        do; the arithmetic is the ceiling, not the target.
+  //        The cover rule stays the whole answer: in the open a man dies out
+  //        to ~848 m, behind something to ~587 m. A wall is 260 metres.
   //      warn — how many seconds of threat ring this thing is WORTH. Five is
   //        right for a 500-pounder that ruins one street. A weapon that takes
   //        a quarter of the city has to be visible from the moment it leaves
@@ -138,7 +149,7 @@
   //        (which is what `60 + radius*0.35` would have produced — a whistle).
   if (C.ORDNANCE_NUKE) {
     KINDS.nuke = {
-      radius: 1100, power: 900, drag: 0.00006, size: 1.6, len: 5.2,
+      radius: 1100, power: 1800, drag: 0.00006, size: 1.6, len: 5.2,
       color: 0xb9c0c7,                 // the unpainted grey a stockpile weapon wears
       fuse: 0, name: "TACTICAL NUKE",
       fx: "nuke", body: "nukeWarhead",
