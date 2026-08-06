@@ -368,8 +368,16 @@
     window.addEventListener("mouseup", function (e) { input.buttons[e.button] = false; });
     el.addEventListener("contextmenu", function (e) { e.preventDefault(); });
     window.addEventListener("wheel", function (e) { input.wheel += e.deltaY; }, { passive: true });
+    // DRAG-LOOK IS NOT A DOWNGRADE, IT IS THE FALLBACK THAT KEEPS THE PAGE
+    // PLAYABLE. Pointer lock is refused in plenty of real places a slice page
+    // ends up — an iframe without allow="pointer-lock", a browser that wants
+    // a fresh gesture, a user who pressed Escape. Without a fallback the
+    // camera simply stops answering and the page looks broken. Holding the
+    // left button and dragging feeds the SAME mx/mz, so nothing downstream
+    // knows which one is driving.
     document.addEventListener("mousemove", function (e) {
-      if (!input.locked || !input.enabled) return;
+      if (!input.enabled) return;
+      if (!input.locked && !input.buttons[0]) return;
       input.mx += e.movementX || 0;
       input.mz += e.movementY || 0;
     });

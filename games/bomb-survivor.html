@@ -268,7 +268,7 @@
     </div>
     <button id="playBtn">BUILD THE BASIN</button>
     <div id="loadNote"></div>
-    <div class="foot" id="ctlNote">Click the world to capture the mouse · <kbd>ESC</kbd> releases it · <kbd>P</kbd> pauses</div>
+    <div class="foot" id="ctlNote">Click the world to capture the mouse (or just hold the left button and drag) · <kbd>ESC</kbd> releases it · <kbd>P</kbd> pauses</div>
   </div>
 </div>
 
@@ -1449,7 +1449,9 @@ document.addEventListener("click", function () {
   if (started && !CBZ.micro.input.locked && match.phase !== "over") CBZ.micro.lock();
   if (CBZ.micro.sfx) CBZ.micro.sfx.resume();
 });
-CBZ.micro.onUnlock = function () { if (started && match && match.phase !== "over") showBanner("MOUSE RELEASED", "CLICK TO RESUME"); };
+// no banner on unlock: core/microboot.js falls back to drag-look, so the
+// camera still answers and there is nothing to announce
+CBZ.micro.onUnlock = function () {};
 
 // a phone should be told about its thumbs, not about a mouse it does not have
 if (CBZ.micro.touch && ((window.matchMedia && window.matchMedia("(pointer: coarse)").matches) ||
