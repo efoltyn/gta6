@@ -273,12 +273,17 @@
   const save = () => { try { C.saveState(); } catch (e) {} };
   const o2cap = () => O2_TIERS[bag().o2Tier] || 60;
   function cargoValue() { let v = 0; for (const c of bag().cargo) v += c.v; return v; }
-  const isNight = () => (CBZ.nightAmount != null ? CBZ.nightAmount > 0.55 : false);
+  const isNight = () => (C ? C.time.isNight() : false);
 
-  /* ---------------------------------------- world water sampling (engine) -- */
+  /* ---------------------------------------- world water sampling (engine) --
+     ctx.water is the shared spelling of what these three used to derive by
+     hand. WORLD coordinates (the coordinate law) — which is what this package
+     always passed anyway; it just had to know the engine's function names.
+     C is null until mount, and resolve() runs before that, so the pre-mount
+     guard stays: it is the only path that can ask before there is a ctx. */
   const SEA_Y = () => (CBZ.SEA_Y != null ? CBZ.SEA_Y : -0.48);
-  function surfaceY(x, z) { return CBZ.citySeaHeightAt ? CBZ.citySeaHeightAt(x, z, simT) : SEA_Y(); }
-  function depthAt(x, z) { return CBZ.cityWaterDepthAt ? CBZ.cityWaterDepthAt(x, z) : 30; }
+  function surfaceY(x, z) { return C ? C.water.surfaceY(x, z, simT) : SEA_Y(); }
+  function depthAt(x, z) { return C ? C.water.depth(x, z) : 30; }
   function floorY(x, z) { return SEA_Y() - depthAt(x, z); }
 
   /* ============================================================
@@ -435,10 +440,8 @@
         wz = origin.z + uz * def.dist + ux * lat;
       }
       // snap to genuine water so a wreck never lands on a shoal/island
-      if (CBZ.waterField && CBZ.waterField.nearestWater) {
-        const w = CBZ.waterField.nearestWater(wx, wz, 12, 260);
-        if (w) { wx = w.x; wz = w.z; }
-      }
+      const w = C.water.nearest(wx, wz, 12, 260);
+      if (w) { wx = w.x; wz = w.z; }
       const lx = wx - origin.x, lz = wz - origin.z;
       const gy = floorY(wx, wz);
       const yaw = rng() * Math.PI * 2, tilt = 0.14 + rng() * 0.22;

@@ -61,6 +61,11 @@
 
   CBZ.CONFIG = CBZ.CONFIG || {};
   if (CBZ.CONFIG.GAME_PACKAGES == null) CBZ.CONFIG.GAME_PACKAGES = true;
+  // The world VERBS (ctx.time / ctx.water / ctx.weather) split in two: reads
+  // are free and always work, DRIVERS mutate the shared world. Only the drivers
+  // are risky, so only the drivers get the flag — false makes every one of them
+  // an inert `return false` while every read carries on answering.
+  if (CBZ.CONFIG.PKG_WORLD_DRIVE == null) CBZ.CONFIG.PKG_WORLD_DRIVE = true;
 
   const defs = [];        // registered package defs
   const live = [];        // mounted instances {def, ctx, venue}
@@ -292,6 +297,28 @@
   }
   function closePanel() { if (!panelEl) return; panelEl.style.display = "none"; panelEl.innerHTML = ""; panelHandlers = null; }
 
+  /* ---------------- world-verb vocabularies ------------------------------
+     Names, not numbers. "dusk" is the thing an author means; 0.5 is the thing
+     the sun needs, and nobody should have to know that sunrise is phase 0.
+     Hours here are the SHARED unit — core/packages.js's ctx.time converts. */
+  const TIME_NAMES = {
+    dawn: 6, sunrise: 6, morning: 9, midday: 12, noon: 12, afternoon: 15,
+    dusk: 18, sunset: 18, evening: 20, night: 22, midnight: 0,
+  };
+  /* Weather presets are plain CBZ.weatherDrive specs (systems/weather.js owns
+     every field). A name buys the whole look — rain AND wind AND fog AND the
+     lightning that makes it read as one storm instead of three sliders. */
+  const WEATHER_NAMES = {
+    rain:     { rain: 0.55, wind: 6, fog: 0.18 },
+    downpour: { rain: 1.0, wind: 11, fog: 0.34 },
+    storm:    { rain: 0.9, wind: 16, fog: 0.3, lightning: 0.7 },
+    drizzle:  { rain: 0.22, wind: 3, fog: 0.12 },
+    fog:      { fog: 0.8, wind: 2 },
+    snow:     { snow: 0.6, wind: 5, fog: 0.25 },
+    blizzard: { snow: 1.0, wind: 18, fog: 0.6, cover: 1 },
+    wind:     { wind: 14 },
+  };
+
   /* ---------------- ctx factory ------------------------------------------ */
   // degrade-safe stand-in for ctx.mission() when core/mission.js is not in the
   // build: same shape, every method a no-op, so a package never branches.
@@ -494,6 +521,107 @@
         toast(msg) { if (CBZ.city && CBZ.city.note) CBZ.city.note(msg, 2.4); else ctx.hud.feed(msg, "#ffd166"); },
         panel: openPanel, closePanel,
       },
+      /* -------- THE WORLD VERBS: time · water · weather --------------------
+         The cast, the props, the money and the missions were already one-liners.
+         The WORLD was not — so every package that wanted the sea or the clock
+         re-derived the same degrade chain by hand: ocean.js wrote its own
+         surfaceY/depthAt pair, government.js its own worldDay fallback, jail.js
+         its own guarded dayPhase roll. Three files, three spellings, one engine
+         underneath. These verbs ARE that engine, spelled once.
+
+         THE COORDINATE LAW (the one thing to remember): everything you BUILD is
+         venue-LOCAL — solid/light/npc/zone/mission. Everything you ASK ABOUT THE
+         WORLD is WORLD-space — water/time/weather. A harbour does not move when
+         the venue moves, so pretending the sea is venue-local would be a lie the
+         author has to undo on every call (ocean.js undid it by hand, twice).
+         Cross the boundary with ctx.toWorld / ctx.toLocal.
+
+         NOTHING HERE DRAWS WATER. city/waterfield.js owns the only surface in
+         the game and audits for rivals (`privateWaterPlanes` is a live scan) —
+         so ctx.water SAMPLES and FLOODS, and a package that wants a pond raises
+         the real field instead of parking a blue plane on the world. */
+      toWorld(x, z) { const o = venue.origin; return { x: o.x + (x || 0), z: o.z + (z || 0) }; },
+      toLocal(x, z) { const o = venue.origin; return { x: (x || 0) - o.x, z: (z || 0) - o.z }; },
+
+      /* THE TWO CLOCKS, moved together. core/daynight.js owns the SKY (dayPhase
+         0..1, sunrise at 0) and city/peds.js owns the ped SCHEDULE (cityHour
+         0..24, loose). They drift on purpose and are related by one identity —
+         hour = phase*24 + 6 — so set() can move both and leave the world
+         agreeing with itself, which is the whole reason a package would ask. */
+      time: {
+        phase(v) {
+          if (v != null && !CBZ.CONFIG.PKG_WORLD_DRIVE) return CBZ.dayPhase ? CBZ.dayPhase() : 0.18;
+          return CBZ.dayPhase ? CBZ.dayPhase(v) : 0.18;
+        },
+        hour() { return CBZ.cityHour ? CBZ.cityHour() : (CBZ.dayPhase ? (CBZ.dayPhase() * 24 + 6) % 24 : 12); },
+        // THE calendar day. polity.js's worldDay is the real one; dayCount is
+        // the sky's own midnight counter and the standing fallback.
+        day() { return CBZ.worldDay ? CBZ.worldDay() : (CBZ.dayCount ? CBZ.dayCount() : 0); },
+        isNight() {
+          if (CBZ.nightAmount != null) return CBZ.nightAmount > 0.55;
+          const h = ctx.time.hour(); return h < 6 || h >= 20;
+        },
+        // set("dusk") | set(18) — a name or a bare hour. Moves sky AND peds.
+        set(when) {
+          if (!CBZ.CONFIG.PKG_WORLD_DRIVE) return false;
+          const h = typeof when === "number" ? when : TIME_NAMES[String(when).toLowerCase()];
+          if (!isFinite(h)) return false;
+          if (CBZ.dayPhase) CBZ.dayPhase((((h - 6) / 24) % 1 + 1) % 1);
+          if (CBZ.cityHour) CBZ.cityHour(h);
+          return true;
+        },
+        // roll the clock FORWARD in days (0.5 = half a day). Serving a sentence,
+        // sleeping off a night, waiting out a cooldown — all the same verb.
+        advance(days) {
+          if (!CBZ.CONFIG.PKG_WORLD_DRIVE || !isFinite(days) || days <= 0) return false;
+          if (CBZ.dayPhase) {
+            const p = CBZ.dayPhase() + days;
+            if (CBZ.dayCount) CBZ.dayCount(CBZ.dayCount() + Math.floor(p));  // midnight wraps the caller skipped
+            CBZ.dayPhase(p);
+          }
+          if (CBZ.cityHour) CBZ.cityHour(CBZ.cityHour() + days * 24);
+          return true;
+        },
+      },
+
+      /* WORLD-SPACE, every one of them (see the coordinate law above). */
+      water: {
+        at(x, z) { return CBZ.cityWaterAt ? !!CBZ.cityWaterAt(x, z) : false; },
+        depth(x, z) { return CBZ.cityWaterDepthAt ? CBZ.cityWaterDepthAt(x, z) : 0; },
+        surfaceY(x, z, t) { return CBZ.citySeaHeightAt ? CBZ.citySeaHeightAt(x, z, t) : (CBZ.SEA_Y != null ? CBZ.SEA_Y : -0.48); },
+        // THE ONE SEABED (waterfield.js's law: never CBZ.floorAt under water).
+        bedY(x, z) { return CBZ.citySeaBedY ? CBZ.citySeaBedY(x, z) : ctx.water.surfaceY(x, z) - 30; },
+        // nearest genuine water to a world point, or null. Snapping a prop to
+        // this is how a package stops landing boats on shoals.
+        nearest(x, z, minR, maxR) {
+          const wf = CBZ.waterField;
+          return (wf && wf.nearestWater) ? wf.nearestWater(x, z, minR || 8, maxR || 260) : null;
+        },
+        navigable(x, z) {
+          const wf = CBZ.waterField;
+          return (wf && wf.isNavigableWater) ? !!wf.isNavigableWater(x, z) : ctx.water.at(x, z);
+        },
+        // RAISE THE REAL FIELD — metres of standing water, held for secs. The
+        // swimmer, the drowning, the buoyancy and the gore medium all read
+        // waterfield.js's mask, so they follow for free.
+        flood(metres, secs) {
+          if (!CBZ.CONFIG.PKG_WORLD_DRIVE || !CBZ.weatherDrive) return false;
+          return !!CBZ.weatherDrive({ pool: Math.max(0, +metres || 0) }, secs > 0 ? +secs : 30);
+        },
+      },
+
+      /* ctx.weather("storm", 90) — a named sky, held for seconds, then RELEASED
+         (weather.js bleeds a lapsed drive back to ambient over ~3.5s, so a scene
+         ending never snaps the sky). An object passes straight through for the
+         fields no name covers. */
+      weather(spec, secs) {
+        if (!CBZ.CONFIG.PKG_WORLD_DRIVE || !CBZ.weatherDrive) return false;
+        if (spec === "clear" || spec === false) { if (CBZ.weatherRelease) CBZ.weatherRelease(); return true; }
+        const s = typeof spec === "string" ? WEATHER_NAMES[spec.toLowerCase()] : spec;
+        if (!s) return false;
+        return !!CBZ.weatherDrive(s, secs > 0 ? +secs : 30);
+      },
+
       rand(a, b, salt) { return CBZ.hash01 ? CBZ.hash01(a, b, "pkg:" + def.id + ":" + (salt || "")) : 0.5; },
       stream(name) { return CBZ.seedStream ? CBZ.seedStream("pkg:" + def.id + ":" + name) : function () { return 0.5; }; },
       anim(fn) { animators.push(fn); },

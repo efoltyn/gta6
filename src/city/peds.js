@@ -3411,7 +3411,17 @@
   //      ped anywhere, so it coexists with aigoals.js' EARN/DRUGS/etc. layer.
   let _dayClock = 9.5;                 // start mid-morning
   const DAY_LEN = 360;                 // seconds per in-city day
-  CBZ.cityHour = function () { return _dayClock; };           // 0..24, for other modules
+  // 0..24, for other modules. Passing a number SETS it — the sky clock
+  // (core/daynight.js CBZ.dayPhase) has always been settable and this one was
+  // not, so anything that moved the world to dusk moved the LIGHT but left
+  // every ped still running its 10am errands. The two clocks are independent
+  // by design (this one is loose and only biases routine destinations), but a
+  // caller that wants the whole world at an hour must be able to say so once —
+  // see ctx.time.set() in core/packages.js, the only sanctioned mover.
+  CBZ.cityHour = function (v) {
+    if (v != null && isFinite(v)) _dayClock = (((+v) % 24) + 24) % 24;
+    return _dayClock;
+  };
   function dayPhase() {                                       // coarse phase of life
     const h = _dayClock;
     if (h < 6 || h >= 22) return "night";    // sparse, head home

@@ -79,6 +79,18 @@
         id: "play", label: "[E] Play MY GAME", pos: [0, -1.2], r: 1.6,
         onUse: () => openPanel(),
       });
+
+      // ---- the WORLD verbs: you do not build weather, sea or a clock ----
+      // COORDINATE LAW: what you BUILD is venue-LOCAL (above); what you ASK
+      // ABOUT THE WORLD is WORLD-space (below). ctx.toWorld/ctx.toLocal cross.
+      ctx.time.set("dusk");            // moves the sky AND the ped schedule
+      ctx.weather("storm", 90);        // named sky, held 90s, then released
+      // ctx.weather("clear")          // hand the sky back to ambient
+      // ctx.time.advance(0.5)         // roll the clock half a day forward
+      // ctx.time.day() / .hour() / .isNight() / .phase()
+      // ctx.water.at(wx,wz) .depth() .surfaceY() .bedY() .navigable()
+      // ctx.water.nearest(wx,wz,min,max)   snap a prop to genuine water
+      // ctx.water.flood(1.2, 40)           raise the REAL field — never a plane
     },
 
     update(ctx, dt) {
