@@ -77,6 +77,10 @@
   display:grid; grid-template-columns:repeat(2,1fr); gap:10px;
   width:min(460px,100%); margin:0 auto 18px;
 }
+/* A launcher tile spans the grid: it leaves the page, so it must not read as
+   a fifth sibling of four modes that stay. */
+.mode-launch{ grid-column:1 / -1; background:linear-gradient(180deg,#fff,#ffeede); }
+.mode-launch span::after{ content:" \2192"; opacity:.5; }
 .mode-btn{
   pointer-events:auto; cursor:pointer; font-family:inherit; text-align:center;
   border:2px solid #2a2622; border-bottom-width:5px; border-radius:14px;

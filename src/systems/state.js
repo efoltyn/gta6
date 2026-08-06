@@ -341,7 +341,13 @@
   });
   setRole(g.role || "inmate");
   modeButtons.forEach((btn) => {
-    btn.addEventListener("click", () => setMode(btn.dataset.mode));
+    btn.addEventListener("click", () => {
+      // A tile carrying data-href is NOT a mode of this build — it is another
+      // game on the release, on its own page. There is nothing here to switch
+      // to, so it navigates. Everything without data-href is untouched.
+      if (btn.dataset.href) { location.href = btn.dataset.href; return; }
+      setMode(btn.dataset.mode);
+    });
   });
   setMode(g.mode || "escape");
 
