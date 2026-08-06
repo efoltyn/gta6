@@ -1403,6 +1403,13 @@
       }
       // pull every remnant collider back out of the broadphase
       for (const rc of b.remnCols) { const i = CBZ.colliders.indexOf(rc); if (i >= 0) { CBZ.colliders.splice(i, 1); dirty = true; } }
+      // put the OPENING back: colliders lifted out of the hole return, clipped
+      // ones get their original extents, hidden neighbours are drawn again.
+      // (See "CLEAR THE OPENING" in carveHole — without this a new run would
+      // inherit a facade quietly missing its sill run and its mullions.)
+      if (b.clearedCols) for (const cc of b.clearedCols) { if (CBZ.colliders.indexOf(cc) === -1) { CBZ.colliders.push(cc); dirty = true; } }
+      if (b.clippedCols) for (const q of b.clippedCols) { q.c.minX = q.minX; q.c.maxX = q.maxX; q.c.minZ = q.minZ; q.c.maxZ = q.maxZ; dirty = true; }
+      if (b.hidRefs) for (const hr of b.hidRefs) hr.visible = true;
       // restore the original wall mesh + its collider. A BATCH-V2 merged wall
       // renders through its slice in the merged shell — restore the slice and
       // keep the original invisible (visible=true would double-draw it).
@@ -1484,10 +1491,22 @@
     } catch (e) { return null; }
   }
 
+  // WHAT THE LAST CARVE ACTUALLY DID. The owner's "the response is fake, you
+  // can't walk through it" was two separate faults stacked (a surviving sill
+  // course, and neighbours left solid inside the opening) and NEITHER was
+  // visible from outside the function — every number below was reconstructed
+  // by a probe walking a body at the hole. Publishing them turns the next
+  // "the hole doesn't work" into one call instead of another probe round.
+  const carveDbg = {};
+  CBZ.cityBreachAudit = function () { return Object.assign({}, carveDbg); };
+
   function carveHole(x, y, z, r, opts) {
     opts = opts || {};
     r = r || 1.2;
     if (!CBZ.scene || !CBZ.colliders) return null;
+    carveDbg.calls = (carveDbg.calls || 0) + 1;
+    carveDbg.at = [Math.round(x), +(+y).toFixed(2), Math.round(z)];
+    carveDbg.r = r; carveDbg.result = "searching";
     // --- nearest WALL box whose y-span contains the hit ---
     const sr = opts.search != null ? opts.search : 2.6, sr2 = sr * sr;
     let best = null, bestD = 1e9, bestY0 = 0, bestY1 = 0;
@@ -1511,8 +1530,11 @@
       bestD = dd; best = c; bestY0 = cy0; bestY1 = cy1;
     }
     const wall = best && best.ref;
-    if (!wall || wall._breached) return null;
+    if (!wall) { carveDbg.result = "no eligible wall"; return null; }
+    if (wall._breached) { carveDbg.result = "already breached"; return null; }
     wall._breached = true;
+    carveDbg.result = "carved";
+    carveDbg.band = [+bestY0.toFixed(2), +bestY1.toFixed(2)];
 
     const c = best;
     const parent = wall.parent;                             // the building group (its position offsets locals)
@@ -1530,9 +1552,27 @@
     const hit = horiz ? x : z;                              // where the blast struck along the wall axis
     // gap = the opening centred on the hit, clamped within the wall, sized to the blast
     // (opts.gapW overrides for callers that know the exact opening — window frames)
-    const gapW = Math.max(0.5, Math.min(len * 0.8, opts.gapW != null ? opts.gapW : r * 2));
-    let u0 = Math.max(minU, hit - gapW / 2), u1 = Math.min(maxU, hit + gapW / 2);
-    if (u1 - u0 < 0.4) { u0 = Math.max(minU, (minU + maxU) / 2 - gapW / 2); u1 = Math.min(maxU, (minU + maxU) / 2 + gapW / 2); }
+    /* THE HOLE IS THE SIZE OF THE ORDNANCE, NOT OF ONE BOX.
+       MEASURED, city lot (-130,-778): an RPG (r = 3.94, which fracture.js
+       floors deliberately so the wound reads as "a blown-open apartment") cut
+       a gap of **0.50 m**. Both clamps below did it — `len * 0.8` and then
+       `Math.max(minU, …)` — because a city facade is not one wall, it is a run
+       of SHORT segments, and the one the rocket struck was 0.6 m long. A body
+       is 1.1 m across. That is the whole of the owner's "you can't actually
+       walk through it": the fireball, the lit room, the fractured rim and the
+       debris all fire, and the passage is a half-metre slit.
+       (The prison never showed it because its walls are single 5.5 m boxes.)
+       So the span comes from the blast, and the neighbouring segments inside
+       it are cleared below. This can only ever WIDEN an existing carve — the
+       old value is kept as a floor — and a window opening, which passes an
+       explicit gapW, is untouched. */
+    const ordnanceW = Math.min(opts.gapW != null ? opts.gapW : r * 2, 9);
+    const gapW = Math.max(0.5, Math.min(len * 0.8, opts.gapW != null ? opts.gapW : r * 2), ordnanceW);
+    let u0 = hit - gapW / 2, u1 = hit + gapW / 2;
+    if (u1 - u0 < 0.4) { u0 = (minU + maxU) / 2 - gapW / 2; u1 = (minU + maxU) / 2 + gapW / 2; }
+    // the STRUCK box's own surviving extent (its remnants can never be wider
+    // than the box they came from — the neighbours own their own geometry)
+    const su0 = Math.max(minU, u0), su1 = Math.min(maxU, u1);
     // vertical opening, clamped to the storey box. A bottom near the floor
     // drops the SILL entirely (a blasted doorway); a top near the slab keeps
     // no header. Anything between leaves real partial-height remnants.
@@ -1544,6 +1584,40 @@
     if (v1 - v0 < 1.0) { const vm = (v0 + v1) / 2; v0 = Math.max(y0, vm - 0.5); v1 = Math.min(y1, vm + 0.5); }
     if (v0 - y0 < 0.55) v0 = y0;        // no ankle lip — clean walk-through bottom
     if (y1 - v1 < 0.35) v1 = y1;
+    /* THE ANKLE LIP ACROSS A STACKED FACADE. The line above has always meant
+       "a breach near the bottom should reach the floor", but it measures
+       against THIS BOX's own y0 — and a city facade is a stack of courses, so
+       the box the rocket struck starts 0.55 m up with a separate SILL course
+       beneath it. Result, measured on lot (-130,-778): the opening's bottom
+       sat at 0.55 m and the sill run survived as a kerb across the doorway —
+       and STEP_UP is 0.45, so the player could not step over it. A drawn hole
+       you cannot walk through is the owner's "fake response".
+       So walk DOWN the courses that sit directly under the opening in this same
+       wall plane and take the opening to the real floor. Bounded hard: at most
+       four courses and 1.4 m, and only courses whose TOP is the current bottom
+       — a breach two storeys up finds nothing under it and is unchanged. */
+    const v0Lip = v0;
+    if (v0 > 0.02) {
+      let openBottom = v0;
+      for (let pass = 0; pass < 4; pass++) {
+        let stepTo = null;
+        for (let i = 0; i < CBZ.colliders.length; i++) {
+          const o = CBZ.colliders[i];
+          if (o === c || !o || !o.ref || o.y0 == null || o.y1 == null || o.noBreach) continue;
+          const oF = horiz ? (o.minZ + o.maxZ) / 2 : (o.minX + o.maxX) / 2;
+          if (Math.abs(oF - fixed) > thick / 2 + 0.35) continue;      // in this wall, not behind it
+          const oU0 = horiz ? o.minX : o.minZ, oU1 = horiz ? o.maxX : o.maxZ;
+          if (oU1 <= u0 + 0.02 || oU0 >= u1 - 0.02) continue;         // not under the opening
+          if (Math.abs(o.y1 - openBottom) > 0.06) continue;           // its TOP is our bottom
+          if (stepTo == null || o.y0 < stepTo) stepTo = o.y0;
+        }
+        if (stepTo == null || openBottom - stepTo < 0.02) break;
+        openBottom = stepTo;
+        if (v0 - openBottom > 1.4) break;                             // that is a storey, not a lip
+      }
+      if (openBottom < v0 - 0.02 && v0 - openBottom <= 1.4) v0 = openBottom;
+      carveDbg.lipFrom = v0Lip; carveDbg.lipTo = v0;
+    }
     // OUTWARD side: from the building centre when we have one (stable across
     // replays), else from the side the hit came from (scene-level props).
     const cOff = horiz ? fixed - pz : fixed - px;
@@ -1587,13 +1661,107 @@
       CBZ.colliders.push(col); rec.remnCols.push(col);
       if (rec.wallWasLos && CBZ.losBlockers) CBZ.losBlockers.push(m);
     }
-    addRemnant(minU, u0);                       // left flank
-    addRemnant(u1, maxU);                       // right flank
-    addRemnant(u0 - 0.01, u1 + 0.01, y0, v0);   // sill below the opening
-    addRemnant(u0 - 0.01, u1 + 0.01, v1, y1);   // header above it
+    // Remnants belong to the STRUCK box, so they are clamped to its own extent
+    // (su0/su1). With an ordnance-sized gap the opening routinely runs past
+    // both ends of that box; the flanks then come out negative-width and
+    // addRemnant skips them, which is correct — there is nothing of THIS box
+    // left on that side. The neighbours the gap now covers are handled by the
+    // opening sweep further down, each against its own geometry.
+    addRemnant(minU, su0);                        // left flank
+    addRemnant(su1, maxU);                        // right flank
+    addRemnant(su0 - 0.01, su1 + 0.01, y0, v0);   // sill below the opening
+    addRemnant(su0 - 0.01, su1 + 0.01, v1, y1);   // header above it
 
     // OPEN THE COLLIDER: splice the original wall AABB out + rebuild broadphase
     const ci = CBZ.colliders.indexOf(c); if (ci >= 0) CBZ.colliders.splice(ci, 1);
+
+    /* ---- CLEAR THE OPENING ------------------------------------------------
+       OWNER, 2026-08-06: "you can shoot a window and walk through it, but if
+       you shoot a building with an RPG the response is fake — you can't
+       actually walk through it."  He is right, and this is why.
+
+       Everything above removes exactly ONE collider: the wall box the search
+       struck. A city facade is not one box, it is a STACK — measured on lot
+       (-130,-778), the rocket struck the storey infill band (y 0.55..2.75,
+       0.4 thin) and left standing, inside the hole it had just drawn:
+         y 0..0.55   28 m long  <- the SILL run under the whole facade
+         y 0.55..2.75 0.55 deep <- a pier stub in the opening
+         y 0.55..2.75 0.07 thin <- a mullion across it
+       Three of those four had `visible === false` already. So the player got a
+       drawn hole, a lit room behind it, a fractured rim — and an INVISIBLE
+       FORCE FIELD in the doorway, plus a 0.55 m sill lip that STEP_UP (0.45)
+       refuses to climb. A walk from 2.5 m outside to 2.5 m inside stopped 38%
+       of the way. That is the whole "fake response".
+
+       So the opening is CLEARED, not just the one box: any collider living in
+       THIS wall plane (never a structural pier a metre inside the building)
+       whose band overlaps the opening is lifted out if it sits wholly inside,
+       and CLIPPED to the surviving side(s) if it runs past — which is exactly
+       what addRemnant already does for the struck wall, applied to its
+       neighbours. Every edit is recorded on the rec so resetBreaches puts the
+       facade back byte-for-byte on a new run. */
+    rec.clearedCols = [];      // lifted out whole (restored on reset)
+    rec.clippedCols = [];      // {c, minX, maxX, minZ, maxZ} originals to restore
+    rec.hidRefs = [];          // meshes hidden because they sat inside the hole
+    const planeTol = thick / 2 + 0.35;   // "in this wall", not "behind it"
+    for (let oi = CBZ.colliders.length - 1; oi >= 0; oi--) {
+      const o = CBZ.colliders[oi];
+      if (o === c || !o || rec.remnCols.indexOf(o) >= 0) continue;
+      // A WALL THAT REFUSES TO BE BREACHED ALSO REFUSES TO BE DELETED BY ITS
+      // NEIGHBOUR'S BREACH. Caught by tools/mode-engine-check.mjs the first run
+      // after the opening was widened to ordnance size: the blast could not
+      // carve the prison perimeter directly (1 m thick, over the 0.9 m limit)
+      // but a carve on a wall NEAR it swept the perimeter collider out of the
+      // opening — "PERIMETER BREACHED" through the side door.
+      if (o.noBreach) continue;
+      const oFixed = horiz ? (o.minZ + o.maxZ) / 2 : (o.minX + o.maxX) / 2;
+      if (Math.abs(oFixed - fixed) > planeTol) continue;
+      // a heightless collider is full-height, so it always overlaps
+      const oy0 = o.y0 == null ? -1e3 : o.y0, oy1 = o.y1 == null ? 1e3 : o.y1;
+      if (oy1 <= v0 + 0.02 || oy0 >= v1 - 0.02) continue;
+      const oU0 = horiz ? o.minX : o.minZ, oU1 = horiz ? o.maxX : o.maxZ;
+      if (oU1 <= u0 + 0.02 || oU0 >= u1 - 0.02) continue;      // clear of the gap
+      if (oU0 >= u0 - 0.02 && oU1 <= u1 + 0.02) {
+        // wholly inside the hole — it goes, and so does its picture if that
+        // mesh is not also carrying another live collider somewhere else.
+        CBZ.colliders.splice(oi, 1);
+        rec.clearedCols.push(o);
+        if (o.ref && o.ref.visible !== false && o.ref !== wall) {
+          let shared = false;
+          for (let k = 0; k < CBZ.colliders.length && !shared; k++) if (CBZ.colliders[k].ref === o.ref) shared = true;
+          if (!shared) { o.ref.visible = false; rec.hidRefs.push(o.ref); }
+        }
+        continue;
+      }
+      // runs past the opening — keep whichever parts survive OUTSIDE it.
+      // Both survivors must be real: clipping to a sliver (or, worse, to an
+      // INVERTED box when the gap swallows one end) leaves an AABB whose min
+      // exceeds its max, and the shared resolver treats that as a phantom wall
+      // sitting exactly where the doorway is.
+      const leftLen = u0 - oU0, rightLen = oU1 - u1;
+      const keepL = leftLen > 0.12, keepR = rightLen > 0.12;
+      if (!keepL && !keepR) {                                   // nothing outside worth keeping
+        CBZ.colliders.splice(oi, 1);
+        rec.clearedCols.push(o);
+        continue;
+      }
+      rec.clippedCols.push({ c: o, minX: o.minX, maxX: o.maxX, minZ: o.minZ, maxZ: o.maxZ });
+      if (keepL) {
+        if (horiz) o.maxX = u0; else o.maxZ = u0;
+        if (keepR) {                                            // both sides survive
+          const cp = { minX: o.minX, maxX: o.maxX, minZ: o.minZ, maxZ: o.maxZ, ref: o.ref };
+          if (o.y0 != null) cp.y0 = o.y0;
+          if (o.y1 != null) cp.y1 = o.y1;
+          if (o.noBreach) cp.noBreach = true;
+          if (horiz) { cp.minX = u1; cp.maxX = oU1; } else { cp.minZ = u1; cp.maxZ = oU1; }
+          CBZ.colliders.push(cp); rec.remnCols.push(cp);
+        }
+      } else if (horiz) o.minX = u1; else o.minZ = u1;          // only the far side survives
+    }
+    carveDbg.gapU = [+u0.toFixed(2), +u1.toFixed(2)];
+    carveDbg.gapV = [+v0.toFixed(2), +v1.toFixed(2)];
+    carveDbg.cleared = rec.clearedCols.length;
+    carveDbg.clipped = rec.clippedCols.length;
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
 
     // window panes hanging on the carved band would float over the hole —

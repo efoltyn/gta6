@@ -2846,3 +2846,102 @@ itself, so a city wall never touches the new derivation.
 the first has no non-city caller, the second replays a CITY save's hole ledger,
 so neither is the same bug. Prison holes are therefore **not persisted across a
 run** yet; that needs an escape-side ledger, not a gate change.
+
+## 2026-08-06 (third pass) — "THE RPG RESPONSE IS FAKE, YOU CAN'T WALK THROUGH IT"
+
+Owner: *"You can shoot a window in Gang City and walk through it, but if you
+shoot a building with an RPG the response is fake — you can't actually walk
+through the building after shooting it with an RPG. Look in real life if you
+can do that."*
+
+**REAL LIFE FIRST, because it changes what the right answer even is.** A
+shaped-charge (HEAT) RPG round does NOT make a doorway. The copper jet is
+focused to defeat armour, so the entry hole is roughly 30 cm or less —
+practitioners report never seeing an RPG hole big enough to use as personnel
+access. The PG-7VR will punch 1.5 m of reinforced concrete and 2 m of
+brickwork, but that is PENETRATION, not an opening. The thermobaric TBG-7V is
+smaller still at the wall (30–40 mm) because its job is to inject the fuel-air
+cloud inside. What actually makes a man-sized hole is a CONTACT DEMOLITION
+CHARGE, and the doctrine is precise about it: against non-reinforced concrete,
+2 lb of C4 makes a mousehole, **5 lb makes a hole a man can move through**,
+7 lb takes two men abreast. The tactic has a name — **mouse-holing** — and it
+is in FM 3-06.11, FM 90-10-1 App M and ATP 3-21.8 App H.
+
+So the physically honest design is: **the RPG punches and wrecks; C4 breaches.**
+The game already ships C4 (`city/explosives.js`) with no categorical identity —
+this is the verb it has been missing, and it is exactly the LAW-1 "categorical
+asymmetry" reward. Recorded as the design option; NOT built this pass.
+
+**THE BUG IS REAL AND SEPARATE, and it is worse than the design question**,
+because the game already DRAWS a doorway-sized hole and then refuses passage.
+Measured on city lot (-130,-778), RPG at r = 3.94 (the value `fracture.js`
+deliberately floors so the wound reads as "a blown-open apartment"):
+
+| what the carve did | value |
+|---|---|
+| opening WIDTH | **0.50 m** |
+| opening bottom | **0.55 m** above the floor |
+| neighbours left solid inside the drawn hole | **3**, of which `visible === false` on **3** |
+| walk from 2.5 m outside to 2.5 m inside | **blocked at 38%** |
+
+Three independent faults, all in `carveHole`:
+1. **The hole is sized to ONE BOX, not to the ordnance.** `gapW` is clamped by
+   `len * 0.8` and then `u0/u1` are clamped again to the struck box's own
+   extent. A city facade is not one wall, it is a run of SHORT segments — the
+   one the rocket struck was 0.6 m long. A 7.9 m blast cut a 0.5 m slit. A body
+   is 1.1 m across. **The prison never showed this because its walls are single
+   5.5 m boxes** — which is why the escape-mode probe passed that morning while
+   the city was broken.
+2. **The "no ankle lip" clamp measures against the struck box's own `y0`**, and
+   a facade is a stack of courses, so the box starts 0.55 m up with a separate
+   SILL course beneath. `STEP_UP` is 0.45, so the player could not step over
+   the lip left in the doorway.
+3. **`carveHole` removed exactly ONE collider** — the box it struck — leaving
+   piers, mullions and sill runs standing inside the hole it had just drawn.
+   Three of the four blockers were ALREADY `visible === false`: the repo's own
+   named anti-pattern, invisible force fields, sitting in the doorway.
+
+Fixed: the span comes from the ordnance (bounded 9 m, and floored at the old
+value so no existing carve can get SMALLER); the opening walks DOWN the courses
+directly beneath it to the real floor (max 4 courses / 1.4 m, so a breach two
+storeys up is unchanged); and the opening is CLEARED — neighbours wholly inside
+are lifted out (and hidden if no other live collider shares their mesh),
+neighbours that run past are clipped to the surviving side(s). Every edit is
+recorded on the rec and undone by `resetBreaches`. After: **gap 7.88 m, bottom
+0.00 m.**
+
+TWO BUGS THE WORK ITSELF INTRODUCED, both caught by instruments, both worth
+recording because they are the same species:
+- The first clip could produce an **inverted AABB** (`w: -0.13`) when the gap
+  swallowed one end — a box whose min exceeds its max, sitting exactly in the
+  doorway. Now a survivor under 0.12 m means the collider is removed outright.
+- Widening the opening to ordnance size let **a neighbour's carve delete the
+  prison perimeter**: the blast cannot carve it directly (1 m thick, over the
+  0.9 m limit) but the sweep had no `noBreach` check, so it went out through
+  the side door. `tools/mode-engine-check.mjs` failed with "PERIMETER
+  BREACHED — the escape game is now one verb" on the first run after the
+  change. That is the whole reason that assertion exists.
+
+**WHAT IS NOT PROVEN, stated plainly.** A population probe over 12 eligible
+ground-floor walls across 6 lots read **3/12 walk-through BEFORE and 3/12
+AFTER**. The change did not move that number, and the number is not
+trustworthy either: the failures report `depthIn: -2.42`, i.e. blocked 2.4 m
+OUTSIDE the target wall — the probe's start points land inside adjacent
+recessed facades. It is measuring probe placement, not the game. The one clean
+end-to-end case (a 6.9 m mid-facade wall) walks through both before and after.
+So: the three faults above are each measured and fixed, the numbers that
+describe the hole moved decisively (0.50 → 7.88 m wide, 0.55 → 0.00 m bottom),
+and **the end-to-end "can I now walk into any building I rocket" claim is NOT
+established.** The likely remaining obstacle is the building's INTERIOR
+structure — full-height `y 0..12.8`, 0.18 m piers sitting ~0.95 m behind the
+facade, deliberately outside the sweep's plane tolerance because deleting a
+building's structure is not this function's job.
+
+New instrument: **`CBZ.cityBreachAudit()`** publishes what the last carve
+actually did (hit point, radius, result, struck band, lip before/after, gap U/V,
+cleared + clipped counts). Every number in the table above was reconstructed by
+a probe walking a body at the hole; this turns the next "the hole doesn't work"
+into one call. Note the trap it exposed: window openings carve constantly, so a
+blast-class carve must be selected by radius, not by reading "the last one".
+
+`MATHGATE: ok`, determinism ok. `MODE-ENGINE: ok` both sides.
