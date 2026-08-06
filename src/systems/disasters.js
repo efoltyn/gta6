@@ -125,6 +125,7 @@
   function root() { return CBZ.surv.arena.root; }
   function floor(x, z) { return CBZ.surv.arena.groundHeightAt(x, z); }
   function scale(base, ctx) { return base * (0.85 + ctx.intensity); }
+  function clamp01(v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
   function sound(name) { if (CBZ.sfx) CBZ.sfx(name); }
   function soundAt(name, x, z, opts) { if (CBZ.sfxAt) CBZ.sfxAt(name, x, z, opts); }
 
@@ -908,7 +909,14 @@
 
     // ---- VOLCANO: ash-out, lava flows from the mountain, lava bombs ----
     volcano: {
-      name: "VOLCANIC ERUPTION", emoji: "", warnSecs: 6, activeSecs: 20, gap: 7, cause: "incinerated by lava", tint: 0x2e211c,
+      /* THIRTY-SIX SECONDS, NOT TWENTY. OWNER: "it keeps shooting for longer.
+         Right now, it shoots really quick." A real sustained column stands for
+         hours; twenty seconds was not enough to hold ONE arc, let alone the
+         three-act one an eruption has — open, sustain, and then the column
+         losing its buoyancy and coming down over everything. The extra sixteen
+         seconds are what buy the third act, which is the ash-out below and the
+         thing the owner actually asked for. */
+      name: "VOLCANIC ERUPTION", emoji: "", warnSecs: 6, activeSecs: 36, gap: 7, cause: "incinerated by lava", tint: 0x2e211c,
       /* THE MOUNTAIN WAKES UP IN FRONT OF YOU. A rising rumble under your
          feet, the crater rim starting to glow, and the first ash beginning
          to fall — three physical facts that between them say everything the
@@ -2480,22 +2488,33 @@
          pressure finds a weakness, and it finds them in sequence: a fissure
          propagates, a flank cracks, a bocca opens further down. So the flows
          are SCHEDULED here and built as their moment arrives. */
-      const n = 4;
+      /* EIGHT THIN RIVULETS, NOT FOUR FAT RIBBONS. The owner's Arenal
+         reference is a dark cone with a FAN of narrow incandescent streams
+         coming off one summit — the flow is legible because there are many of
+         them and each is thin, which is also what a fissure system actually
+         does. Four channels at 4.6-6.8 m wide read as four painted stripes.
+         Eight at 2.6-3.8 m read as a mountain bleeding. The crust/crack cost
+         per flow went DOWN with the narrower width, so this is roughly the
+         same triangle budget. */
+      const n = 8;
       ctx.st.erLava = [];
       ctx.st.erVents = [];
       for (let i = 0; i < n; i++) {
         // never straight down the pyroclastic lane — the two hazards want
         // separate faces of the cone so the mountain reads as having sides
-        const a = ctx.st.pyroBear + 1.1 + (i / n) * 5.0 + (CBZ.hash01 ? CBZ.hash01(h.x + i, h.z, 91) : 0.5) * 0.3;
+        const a = ctx.st.pyroBear + 1.1 + (i / n) * 5.0 + (CBZ.hash01 ? CBZ.hash01(h.x + i, h.z, 91) : 0.5) * 0.45;
         const p = vent(h, a, 2.8);
         ctx.st.erVents.push({
           // the first is immediate (something has to be happening at t=0);
           // the rest crack open across the first two thirds of the event
-          at: i === 0 ? 0 : 1.6 + i * (2.3 - 0.5 * ctx.intensity),
+          // spread across the OPEN and SUSTAIN acts of the longer event, so
+          // the cone is still cracking open halfway through instead of being
+          // fully committed in the first six seconds
+          at: i === 0 ? 0 : 1.4 + i * (2.5 - 0.5 * ctx.intensity),
           o: {
             x: p.x, z: p.z, groundAt: gAt(ctx), parent: root(), bearing: a,
             len: h.r * 1.35 + 16 * ctx.intensity,
-            width: 4.6 + 2.2 * ctx.intensity,
+            width: 2.6 + 1.2 * ctx.intensity,
             /* THE SPEED. Measured lava fronts run 1-10 m/HOUR (pahoehoe) up to
                ~133 m/hour (the 1859 Mauna Loa a'a) — call it 0.04 m/s at the
                fast end. This was 4.2-6.8 m/s, i.e. two orders of magnitude out,
@@ -2510,7 +2529,7 @@
                than merely slow is volcanofx's `lobeK`. */
             speed: 1.2 + 0.5 * ctx.intensity,
             salt: 4700 + i * 137,
-            light: i < 2,      // BUDGET: two real lights for four flows
+            light: i < 2,      // BUDGET: two real lights for eight flows
           },
         });
       }
@@ -2568,25 +2587,72 @@
        than the midnight around it — which is also precisely the condition
        under which the lava's own light is supposed to be the thing you see.
        dayK() is the sun's own elevation off core/daynight.js. */
-    const dk = dayK();
-    ctx.env.fog = lerpHex(0x120b08, 0x2e211c, dk); ctx.env.fogNear = 40; ctx.env.fogFar = 300;
-    ctx.env.sunInt = 0.5 * dk; ctx.env.sunColor = 0xff6a3a;
-    ctx.env.hemiInt = 0.14 + 0.46 * dk; ctx.env.hemiColor = 0xff7a4a;
-    // the ash rains where the wind carries it — the fallout wedge is VISIBLE
-    if (ctx.st.erWindX != null) ctx.st.erAsh.update(dt, h.x + ctx.st.erWindX * 40, 0, h.z + ctx.st.erWindZ * 40);
-    else ctx.st.erAsh.update(dt, camPos().x, 0, camPos().z);
-    /* THE VENT BUILDS. `vig` is how hard it is erupting: it climbs over the
-       first four seconds, holds, and slumps over the last three. The fountain,
-       the column and the ashfall rate all read it, so the whole event has one
-       arc instead of three things that snap on together at t=0 and off at t=20
-       — which is what "shoots out at once" looks like from the player's chair. */
+    /* ---- THE THREE ACTS ----------------------------------------------------
+       OPEN (0-6 s)      the vent builds, the column climbs, vents crack open
+                         one at a time. `vig` ramps.
+       SUSTAIN (6-21 s)  it just keeps going, which is the owner's "it keeps
+                         shooting for longer". `vig` holds at 1.
+       ASH-OUT (21-36 s) the column loses buoyancy and comes DOWN, and the
+                         island disappears inside its own eruption cloud.
+                         `eg` drives it.
+
+       OWNER: "when it ends, it's a huge gray cloud … it would be easier and
+       better UI to just fill the entire map with a cloud and make it look
+       more like this actual cloud."
+
+       He is right that it is easier AND that it is better, and the reason is
+       worth writing down: the thing that actually happens to a town under a
+       collapsing column is not that it gets hit by an object, it is that the
+       WORLD GOES AWAY. You cannot see the mountain, the sky, the next street
+       or the person in front of you. Modelling that as geometry would be a
+       dome of ten thousand billows nobody can render; modelling it as the
+       scene's own fog is four numbers, costs nothing, works at every distance
+       and is a truer picture. The blanket on the ground and the roof load are
+       already real and already accumulating — this is the same event seen
+       from inside it. */
     ctx.st.erT = (ctx.st.erT || 0) + dt;
-    const total = ctx.activeSecs || 20;
-    const vig = Math.min(
-      Math.min(1, ctx.st.erT / 4),
-      Math.min(1, Math.max(0.12, (total - ctx.st.erT) / 3))
-    );
+    const total = ctx.activeSecs || 36;
+    const climb = Math.min(1, ctx.st.erT / 6);
+    // 0 until the column starts failing, 1 once the island is inside the cloud
+    const eg = clamp01((ctx.st.erT - total * 0.58) / (total * 0.30));
+    ctx.st.erEngulf = eg;
+    // the column collapses as it ash-outs: what is coming down is what was up
+    const vig = Math.min(climb, 1 - 0.72 * eg);
     ctx.st.erVig = vig;
+
+    const dk = dayK();
+    /* THE ASH-OUT IS THE SCENE'S OWN FOG, DRIVEN TO WHITE-GREY. Note the
+       direction it goes: BRIGHTER, not darker. Inside a fall of fine ash you
+       are not in the dark, you are in a luminous grey nothing — the reference
+       photograph's cloud is nearly white — so the sun goes out but the hemi
+       comes UP and the fog colour walks to pale ash. A build that just dims
+       everything reads as night, which is the wrong event entirely. 300 m of
+       visibility collapses to 26. */
+    const eFog = lerpHex(lerpHex(0x120b08, 0x2e211c, dk), 0xa8a39a, eg);
+    ctx.env.fog = eFog;
+    /* 34 m, NOT 26, AND fogNear STAYS OFF YOUR FACE. The first pass took the
+       far plane to 26 with a near of 1.5 and a near-white fog colour, and the
+       result was a screen with nothing on it at all — the thing three metres
+       away was already half dissolved. The point is that the world goes away,
+       not that the renderer does: at 6/34 the street you are standing in still
+       has silhouettes in it and everything beyond it is gone, which is both
+       playable and what the reference photograph looks like from inside. */
+    ctx.env.fogNear = 40 * (1 - eg) + 6 * eg;
+    ctx.env.fogFar = 300 * (1 - eg) + 34 * eg;
+    ctx.env.sunInt = 0.5 * dk * (1 - 0.88 * eg);
+    ctx.env.sunColor = lerpHex(0xff6a3a, 0xbdb8ae, eg);
+    ctx.env.hemiInt = (0.14 + 0.46 * dk) * (1 - eg) + 0.66 * eg;
+    ctx.env.hemiColor = lerpHex(0xff7a4a, 0xc6c0b5, eg);
+    /* The ash rains where the wind carries it — the fallout wedge is VISIBLE.
+       In the ash-out it stops being a downwind wedge and becomes everywhere,
+       so it re-centres on the CAMERA and thickens: the fog says the air is
+       full of ash, and the motes say it is coming down. */
+    if (eg > 0.25) {
+      ctx.st.erAsh.setActive(0.85 + 0.15 * eg);
+      ctx.st.erAsh.update(dt, camPos().x, 0, camPos().z);
+    } else if (ctx.st.erWindX != null) {
+      ctx.st.erAsh.update(dt, h.x + ctx.st.erWindX * 40, 0, h.z + ctx.st.erWindZ * 40);
+    } else ctx.st.erAsh.update(dt, camPos().x, 0, camPos().z);
     ctx.st.erFountain.setActive(0.35 + 0.6 * vig);
     ctx.st.erFountain.update(dt, h.x, h.peak, h.z);
     if (ctx.st.erColumn) {
@@ -2598,8 +2664,12 @@
     if (ctx.st.erCrater) ctx.st.erCrater.material.opacity = 0.7 + 0.25 * (0.5 + 0.5 * Math.sin(CBZ.now * 0.012));
     // ash is weather: it dims the sun, it blows downwind, and it is the same
     // wind everything else in the game reads
-    weather({ rain: 0, wind: 7, windDir: { x: ctx.st.erWindX || 1, z: ctx.st.erWindZ || 0 }, fog: 0.55, fogColor: 0x2e211c });
-    if (rnd() < dt * 1.6) sound("rumble");
+    weather({
+      rain: 0, wind: 7 * (1 - 0.7 * eg),   // inside the cloud the air goes dead still
+      windDir: { x: ctx.st.erWindX || 1, z: ctx.st.erWindZ || 0 },
+      fog: 0.55 + 0.45 * eg, fogColor: eFog,
+    });
+    if (rnd() < dt * (1.6 + 1.4 * eg)) sound("rumble");
 
     // ---------------- LAVA ----------------
     if (ctx.st.erLava) {
@@ -2659,7 +2729,7 @@
           tail: 58, salt: 8100 + pyroRuns * 311,
         });
         pyroRuns++;
-        ctx.st.pyroCd = 7.5 - 2.5 * ctx.prog;
+        ctx.st.pyroCd = 9.5 - 3.0 * ctx.prog;   // ~4 over the longer event
         if (CBZ.shake) CBZ.shake(1.15);
         soundAt("explosion", p.x, p.z); sound("rumble");
       }
@@ -2707,7 +2777,8 @@
            the ash until the roof goes" is something that HAPPENS inside one
            event instead of a rule on paper. Upwind stays green, which is what
            makes the wedge readable at all. */
-        rate: 0.014 + 0.024 * ctx.intensity,
+        // ...and the column coming down doubles what is arriving on the deck
+        rate: (0.014 + 0.024 * ctx.intensity) * (1 + 1.1 * (ctx.st.erEngulf || 0)),
         windX: ctx.st.erWindX, windZ: ctx.st.erWindZ,
         srcX: h.x, srcZ: h.z, spread: 0.16,
       });
@@ -2743,6 +2814,7 @@
        indefinitely if you are indoors). */
     const P = ctx.st.pyro, LH = ctx.st.lahar, LV = ctx.st.erLava;
     const wX = ctx.st.erWindX, wZ = ctx.st.erWindZ;
+    const EG = ctx.st.erEngulf || 0;
     surv().forEachActor(function (a) {
       const ax = a.pos.x, az = a.pos.z;
       /* 1) PYROCLASTIC FLOW — zero survival INSIDE it, no exceptions. A roof
@@ -2807,7 +2879,14 @@
           return;
         }
       }
-      // 5) ASHFALL — glass in the lungs, and a roof is a real answer to it
+      /* 5) ASHFALL — glass in the lungs, and a roof is a real answer to it.
+            IN THE ASH-OUT THERE IS NO UPWIND. While the column stands, the
+            fall is a downwind wedge and half the island is clean; once it
+            collapses the whole map is inside the cloud, which is exactly what
+            the fog is saying, and the damage model has to agree with the
+            picture or the picture is decoration. Indoors is STILL the answer —
+            that is the tension the whole hazard is built on — right up until
+            the roof gives way under the load. */
       if (!sheltered(a)) {
         let choke = 0;
         if (AL && AL.depthAt(ax, az) > ASH_DOT_DEPTH) choke = 1;
@@ -2815,14 +2894,15 @@
           const dx = ax - h.x, dz = az - h.z, d = Math.hypot(dx, dz);
           if (d > 8 && d < 80 && (dx * wX + dz * wZ) / d > 0.72) choke = 0.7;
         }
-        if (choke > 0) surv().hurt(a, scale(6, ctx) * choke * dt, { cause: "choked by volcanic ash" });
+        choke = Math.max(choke, EG);
+        if (choke > 0) surv().hurt(a, scale(6, ctx) * (1 + 1.2 * EG) * choke * dt, { cause: "choked by volcanic ash" });
       }
     });
 
     // lava bombs arc out of the summit and crash down across the island
     ctx.st.erBombCd -= dt;
     if (ctx.st.erBombCd <= 0) {
-      ctx.st.erBombCd = 1.0 - 0.4 * ctx.prog;
+      ctx.st.erBombCd = 1.5 - 0.5 * ctx.prog;   // ditto: 36 s is not 20
       const p = ctx.arena.randomPoint(8, ctx.R);
       const mk = CBZ.fx.groundMarker(p.x, p.z, 5.5, 0xff7a30); mk.set(1);   // bigger + longer telegraph: bomb deaths are dodgeable, not "nothing"
       setTimeout0(ctx, 0.85, function () {
@@ -4004,6 +4084,17 @@
          `nukeVeils` counts how many times a NON-nuclear death borrowed
          city/nukefx.js's nuclear double-pulse whiteout. Volcano deaths used to
          be most of them. It may only go DOWN. */
+      /* THE ASH-OUT, as numbers. `ashOutFog` is the scene's own far plane
+         while the island is inside the cloud — the owner's "fill the entire
+         map with a cloud" is true exactly when this collapses, and a build
+         that quietly restores a 300 m view has stopped doing it. `ashOutLit`
+         guards the direction: an ash cloud is a LUMINOUS grey, so the hemi
+         must go UP as the sun goes out; if this ever reads false somebody has
+         turned the third act into nightfall. */
+      erupting: !!st.erupting,
+      ashOut: +(st.erEngulf || 0).toFixed(2),
+      ashOutFog: st.erupting ? Math.round(CBZ.survEnv.fogFar || 0) : 0,
+      ashOutLit: !st.erupting || !(st.erEngulf > 0.8) || (CBZ.survEnv.hemiInt || 0) > 0.5,
       lavaVentsPending: (st.erVents && st.erVents.length) || 0,
       lavaFrontSpeed: +(1.2 + 0.5 * dir.intensity).toFixed(2),
       lavaSet: volA ? volA.lavaSet : 0,

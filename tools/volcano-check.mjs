@@ -138,14 +138,15 @@ try {
        pins the state; it does not politely wait for a coin flip. */
     const alive = function () { if (CBZ.game.state !== "playing") CBZ.setState("playing"); };
     CBZ.disasters.force("volcano");
-    const R = { advances: [], ventsPending: [], column: [], causes: {}, lavaCounts: [] };
+    const R = { advances: [], ventsPending: [], column: [], causes: {}, lavaCounts: [],
+                ashOut: [], fogFar: [], ashOutDark: false };
     // through the warn phase into the active eruption
     for (let i = 0; i < 400; i++) { alive(); CBZ.stepSim(1 / 60); }
     const arena = CBZ.surv.arena, h = arena.hills[0];
     // park the player well off the cone so this run measures looks, not death
     const px = arena.center.x, pz = arena.center.z + arena.radius * 0.92;
     let lastLen = null;
-    for (let sec = 0; sec < 20; sec++) {
+    for (let sec = 0; sec < 38; sec++) {
       for (let i = 0; i < 60; i++) {
         CBZ.player.pos.x = px; CBZ.player.pos.z = pz;
         CBZ.player.pos.y = arena.groundHeightAt(px, pz) + 1;
@@ -154,6 +155,11 @@ try {
       const d = CBZ.disasterAudit(), v = CBZ.volcanoAudit();
       R.ventsPending.push(d.lavaVentsPending);
       R.lavaCounts.push(v.lavaFlows);
+      if (d.erupting) {
+        R.ashOut.push(d.ashOut);
+        R.fogFar.push(d.ashOutFog);
+        if (!d.ashOutLit) R.ashOutDark = true;
+      }
       R.column.push({ live: v.columnLive, blobs: v.columnBillows, trans: v.columnTransparent, top: v.columnTopY });
       // front advance of the FIRST flow, one sample per simulated second
       const len = v.lavaTips.length ? v.lavaTips[0] : null;
@@ -194,8 +200,15 @@ try {
   check("column is OPAQUE (no transparent billows, ever)", A.column.every((c) => c.trans === 0), "max=" + Math.max(...A.column.map((c) => c.trans)));
   const peakBlobs = Math.max(...A.column.map((c) => c.blobs));
   check("column has enough overlapping billows to read as one cloud", peakBlobs >= 20, "peak billows=" + peakBlobs);
-  const topGrew = A.column[A.column.length - 1].top > A.column[0].top;
-  check("column BUILDS instead of arriving whole", topGrew, A.column[0].top + " -> " + A.column[A.column.length - 1].top);
+  /* Measure the PEAK, not the last sample: the run now carries on into the
+     ash-out, where the column has deliberately collapsed, so comparing first
+     against last would score the third act instead of the first. */
+  const topPeak = Math.max(...A.column.map((c) => c.top));
+  check("column BUILDS instead of arriving whole", topPeak > A.column[0].top * 1.8,
+    A.column[0].top + " -> peak " + topPeak.toFixed(0) + " m");
+  check("...and it COMES DOWN again in the ash-out",
+    A.column[A.column.length - 1].top < topPeak * 0.75,
+    "peak " + topPeak.toFixed(0) + " -> end " + A.column[A.column.length - 1].top.toFixed(0) + " m");
 
   check("lava front speed is not a jog", A.frontSpeed > 0 && A.frontSpeed < 2.5, A.frontSpeed + " m/s");
   check("lava stays opaque", A.lavaTransparent === 0, A.lavaTransparent);
@@ -209,6 +222,15 @@ try {
     "mean=" + mean.toFixed(2) + " m/s  cv=" + spread.toFixed(2));
   check("stopped lava sets into a scar instead of vanishing", A.setFlows > 0,
     "set=" + A.setFlows + " of " + A.flowsAfter + " (director " + A.endState + ")");
+  // ---- the third act: the island disappears inside its own cloud ----
+  const peakEg = Math.max(0, ...A.ashOut);
+  const minFog = Math.min(...A.fogFar.filter((f) => f > 0));
+  check("the eruption SUSTAINS instead of being over in a blink",
+    A.ashOut.length >= 30, A.ashOut.length + " s of live eruption sampled");
+  check("the column collapses into an ash-out", peakEg > 0.95, "peak engulf=" + peakEg.toFixed(2));
+  check("the ash-out fills the whole map (visibility collapses)", minFog > 0 && minFog < 45,
+    "fogFar " + Math.max(...A.fogFar) + " -> " + minFog + " m");
+  check("the ash-out is a LUMINOUS grey, not nightfall", !A.ashOutDark, "hemi stays up");
 
   /* ---------- RUN B: the two kill models, MEASURED SEPARATELY.
         B1 turns the density current OFF (VOLCANO_PYRO is a live flag) and

@@ -49,14 +49,33 @@ const subjects = [
     act: { force: "volcano", untilState: "warn", extraSecs: 4.2 },
     cam: { lane: true, ahead: 60, side: 26, alt: 26, fallback: { x: 108, y: 46, z: 672, ax: 0, ay: 20, az: 600 } } },
 
-  { id: "column", label: "The eruption column", hud: false,
-    focus: "First seconds of the active phase: lava fountain out of the vent, dark ash column standing up over it, flows starting down the cone.",
-    act: { untilState: "active", extraSecs: 3.2 },
+  { id: "column", label: "ACT 1 — the column climbs", hud: false,
+    focus: "First seconds of the active phase: the vent opens, the column starts climbing out of it. Before-side: three THREE.Points clouds — untextured square dots you can count individually, with empty bands between them (the owner's 'separate rocks ... several circular clouds').",
+    /* FORCES ITS OWN ERUPTION. The three ACT beats are one continuous event
+       — that is the point of them — so only the first may inherit, and it
+       must not inherit from `warn-lane`: --subjects can drop that beat, and
+       when it did, ACT 2 photographed a lightning storm. */
+    act: { force: "volcano", untilState: "active", extraSecs: 3.2 },
     cam: { x: 118, y: 40, z: 686, ax: 0, ay: 30, az: 600 } },
 
-  { id: "lava-day", label: "Lava close-up — opaque crust", hud: false,
-    focus: "OPAQUE crusted flow: dark basalt levees standing proud of the ground with a white-yellow incandescent channel cracking through, cooling to dull red downstream. Before-side: an additive box you can see the grass through. vol_lavaTransparent must read 0.",
-    act: { extraSecs: 2.2 },
+  { id: "column-tall", label: "ACT 2 — sustained, and it KEEPS going", hud: false,
+    focus: "Fourteen seconds in, the middle of the event. Reference: Mount St Helens. One continuous opaque cauliflower — narrow incandescent gas thrust at the vent, convective stem, and an umbrella several times wider than the stem spreading downwind. Pale grey, not brown. Before-side: the event is nearly OVER by now (it was 20 s, not 36).",
+    act: { extraSecs: 11 },
+    // far enough back that the UMBRELLA fits: the cap is the silhouette, and
+    // a frame that crops it is a photograph of a stem
+    cam: { x: 235, y: 150, z: 880, ax: 0, ay: 150, az: 600 } },
+
+  { id: "ash-out", label: "ACT 3 — the island inside its own cloud", hud: false,
+    focus: "Thirty seconds in. THE OWNER'S ASK: 'when it ends it's a huge gray cloud ... just fill the entire map with a cloud'. The column loses buoyancy and comes down, and 300 m of visibility collapses to 26 — driven through the scene's own fog, which costs nothing and works at every distance. It goes BRIGHTER, not darker: inside fine ash you are in a luminous grey nothing, so the sun goes out and the hemi comes up. Before-side has no third act at all.",
+    act: { extraSecs: 16 },
+    cam: { x: 46, y: 16, z: 664, ax: -4, ay: 8, az: 618 } },
+
+  { id: "lava-day", label: "The flow — black plate, glowing CRACKS", hud: false,
+    focus: "Reference: Fagradalsfjall. A flow is not a dark ribbon with a bright stripe down it — it is a near-black crusted PLATE broken into slabs, with the incandescence showing through a network of seams that pinch and gape, plus one small very bright throat at the vent. Before-side: a wide bright channel painted down the middle, and four fat ribbons instead of eight thin rivulets.",
+    // its OWN eruption: this beat used to inherit whatever second the previous
+    // one left behind, and with a 36 s event that landed it inside the ash-out
+    // photographing a white screen
+    act: { force: "volcano", untilState: "active", extraSecs: 9 },
     cam: { lava: true, side: 15, alt: 8, back: 19, fallback: { x: 26, y: 12, z: 626, ax: 4, ay: 4, az: 606 } } },
 
   { id: "pyroclastic", label: "Pyroclastic flow — mid-descent", hud: false,
@@ -73,6 +92,11 @@ const subjects = [
     focus: "The blanket. Ash accumulates as COVERAGE, not as a translucent sheet: the downwind ground and roofs grey over while upwind stays green, and past ~9 cm the roofs start failing through the ONE structural ledger. audit_ashRoofCollapses is the number.",
     act: { force: "volcano", untilState: "active", extraSecs: 17.5 },
     cam: { x: 46, y: 15, z: 662, ax: -6, ay: 3, az: 618 } },
+
+  { id: "lava-cold", label: "AFTER — it turns black and hardens", hud: false,
+    focus: "Four seconds after the eruption ends. OWNER: 'the other picture actually shows what it looks like at the end where it turns kinda black and hardens.' The cracks close, the glow goes out over ~9 s and the flows STAY — eight black basalt tongues down the cone for the rest of the match. Before-side deleted every flow the instant the timer ran out.",
+    act: { force: "volcano", untilState: "active", extraSecs: 41 },
+    cam: { x: 92, y: 44, z: 690, ax: 0, ay: 26, az: 604 } },
 
   { id: "lava-night", label: "Lava at night — it lights the hill", hud: false,
     focus: "The same flow after dark. The channel is an UNLIT material, so it stays exactly as bright as it was at noon (that IS incandescence), and its pooled point lights paint the hillside around it. The eruption's own sky tint now follows the day cycle instead of overriding night into noon.",

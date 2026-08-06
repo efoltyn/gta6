@@ -271,10 +271,27 @@
      (Sources: Oregon State Volcano World flow rates + pahoehoe/a'a,
      USGS lava-flow-forms.)
      ============================================================ */
-  const LAVA_COLS = 5;              // crust columns across the flow
-  const LAVA_U = [-1, -0.56, 0, 0.56, 1];
-  const CH_COLS = 3;
-  const CH_U = [-1, 0, 1];
+  /* ---- WHAT A FLOW ACTUALLY LOOKS LIKE (owner reference, Fagradalsfjall) ---
+     The single most useful thing in the owner's photographs, because it is
+     not what this file was drawing. An active basaltic flow is NOT a dark
+     ribbon with a bright stripe painted down the middle of it. It is a
+     BLACK CRUSTED PLATE, broken into slabs, with the incandescence showing
+     through a NETWORK OF CRACKS between those slabs — long seams running
+     with the flow, pinching shut where two slabs have welded and gaping open
+     where the plate has torn. The only place you see open molten lava is the
+     THROAT at the vent, which is small and very bright.
+
+     So the second mesh stopped being a channel and became the crack network:
+     five seams that run the length of the flow, each with its own hashed
+     pinch, all sitting ON the crust surface rather than floating over it.
+     That is also why "it turns kinda black and hardens" now costs nothing to
+     express — the cracks close and go out, and what is left is the plate,
+     which was always the thing you were mostly looking at.                */
+  const LAVA_COLS = 7;              // crust columns across the flow (slabs)
+  const LAVA_U = [-1, -0.72, -0.38, 0, 0.38, 0.72, 1];
+  // the seams the glow comes through, in the same -1..1 lateral space
+  const CRACK_U = [-0.80, -0.42, 0, 0.42, 0.80];
+  const CRACK_COLS = CRACK_U.length * 2;   // two verts per seam: its two lips
 
   V.lavaFlow = function (o) {
     o = o || {};
@@ -295,15 +312,11 @@
     // ---- per-station shape, hashed off the station's own world position so
     //      the river's outline is identical on every client ----
     const wProf = new Float32Array(N);     // crust half-width multiplier
-    const chProf = new Float32Array(N);    // channel half-width multiplier
     const hot0 = new Float32Array(N);      // incandescence at birth
     for (let i = 0; i < N; i++) {
       const p = path.pts[i], u = i / (N - 1);
       // a flow LEAVES the vent narrow and FANS OUT as the ground flattens
       wProf[i] = (0.5 + 0.72 * Math.pow(u, 0.7)) * (0.84 + 0.32 * h01(p.x, p.z, salt + 11));
-      // the channel pinches shut where the crust has welded across it
-      const gap = h01(p.x, p.z, salt + 23);
-      chProf[i] = gap < 0.19 ? 0.05 : (0.16 + 0.34 * gap);
       // temperature falls downstream — this is the whole colour story
       hot0[i] = clamp(1.06 - 0.85 * u + (h01(p.x, p.z, salt + 37) - 0.5) * 0.16, 0.06, 1);
     }
@@ -339,14 +352,18 @@
     crust.renderOrder = 2;
     parent.add(crust);
 
-    // ---- CHANNEL: opaque, UNLIT (= incandescent) ----
-    const kPos = new Float32Array(N * CH_COLS * 3);
-    const kCol = new Float32Array(N * CH_COLS * 3);
-    const kIdx = new Uint16Array(Math.max(1, (N - 1) * (CH_COLS - 1) * 6));
+    /* ---- THE CRACK NETWORK: opaque, UNLIT (= incandescent) ----
+       One strip per seam rather than one band down the middle. Each seam owns
+       two vertex columns (its lips), so the index is per-seam instead of the
+       crust's plain grid. */
+    const kPos = new Float32Array(N * CRACK_COLS * 3);
+    const kCol = new Float32Array(N * CRACK_COLS * 3);
+    const kIdx = new Uint16Array(Math.max(1, (N - 1) * CRACK_U.length * 6));
     ii = 0;
     for (let i = 0; i < N - 1; i++) {
-      for (let c = 0; c < CH_COLS - 1; c++) {
-        const a = i * CH_COLS + c, b2 = a + 1, d = a + CH_COLS, e = d + 1;
+      for (let s = 0; s < CRACK_U.length; s++) {
+        const a = i * CRACK_COLS + s * 2, b2 = a + 1;
+        const d = (i + 1) * CRACK_COLS + s * 2, e = d + 1;
         kIdx[ii++] = a; kIdx[ii++] = d; kIdx[ii++] = b2;
         kIdx[ii++] = b2; kIdx[ii++] = d; kIdx[ii++] = e;
       }
@@ -450,34 +467,56 @@
         let nx = -(b2.z - a.z), nz = (b2.x - a.x);
         const nl = Math.hypot(nx, nz) || 1; nx /= nl; nz /= nl;
 
+        // crust surface height at lateral coordinate u — shared by the slabs
+        // AND by the cracks, so a seam can never float off its own plate
+        const topAt = function (u) { return p.y + 0.05 + thick * (0.28 + 0.72 * (1 - u * u)); };
         for (let c = 0; c < LAVA_COLS; c++) {
           const u = LAVA_U[c], off = (i * LAVA_COLS + c) * 3;
           const au = Math.abs(u);
           cPos[off] = p.x + nx * u * hw;
           cPos[off + 2] = p.z + nz * u * hw;
           // convex cross-section: crown in the middle, feathered at the levee
-          cPos[off + 1] = p.y + 0.05 + thick * (0.28 + 0.72 * (1 - au * au));
-          // COLOUR: black basalt at the levee, scorched red-brown inboard.
-          // A rock crust never goes bright — the brightness lives in the
-          // channel mesh, which is the whole point of the split.
-          const grain = 0.82 + 0.36 * h01(cPos[off], cPos[off + 2], salt + 5);
-          ramp3(clamp((1 - au) * (0.35 + 0.65 * hot), 0, 1), 0x241b16, 0x3b241a, 0x6d2f12, _c3);
+          cPos[off + 1] = topAt(u);
+          /* THE PLATE IS BLACK, AND SOME OF ITS SLABS ARE PALE GREY. In the
+             owner's reference the crust is charcoal — near blue-black — with
+             scattered lighter slabs where an older, dustier plate has been
+             rafted along on top. The old ramp was brown-to-red-brown, which is
+             what made the flow read as "a hot thing" all over instead of as
+             cold rock with hot cracks in it. The heat now lives entirely in
+             the crack mesh, which is the whole point of the split; the crust
+             only warms very slightly right at the vent. */
+          const g2 = h01(cPos[off], cPos[off + 2], salt + 5);
+          const grain = 0.78 + 0.44 * g2;
+          const slab = g2 > 0.80 ? (g2 - 0.80) * 3.4 : 0;    // the pale rafted slabs
+          ramp3(clamp((1 - au) * 0.30 * hot, 0, 1), 0x131418, 0x201d1c, 0x3c2418, _c3);
+          _c3.lerp(_c1.setHex(0x8d8a86), slab * (1 - setK * 0.4));
           cCol[off] = _c3.r * grain;
           cCol[off + 1] = _c3.g * grain;
           cCol[off + 2] = _c3.b * grain;
         }
-        // the channel: white-yellow at 1150 C, orange, then dull red as it cools
-        const chw = halfW * chProf[i] * (1 - 0.55 * cool);
-        const cy = p.y + 0.05 + thick * 1.0 + 0.03;
-        for (let c = 0; c < CH_COLS; c++) {
-          const u = CH_U[c], off = (i * CH_COLS + c) * 3;
-          kPos[off] = p.x + nx * u * chw;
-          kPos[off + 2] = p.z + nz * u * chw;
-          kPos[off + 1] = cy;
-          // edges of the channel are cooler than its middle
-          const edge = 1 - Math.abs(u) * 0.42;
-          ramp3(clamp(hot * edge, 0, 1), 0x4a1103, 0xe8560a, 0xfff3c4, _c3);
-          kCol[off] = _c3.r; kCol[off + 1] = _c3.g; kCol[off + 2] = _c3.b;
+        /* THE CRACKS. Each seam gapes and pinches on its own hash, so the five
+           of them never agree about where they are open — which is what turns
+           five parallel lines into a network. `vent` reopens the seams into a
+           single wide molten throat over the first few metres, because that IS
+           the one place open lava is visible. */
+        const ventK = clamp(1 - (i * seg) / Math.max(seg, len * 0.13), 0, 1);
+        for (let s = 0; s < CRACK_U.length; s++) {
+          const u0 = CRACK_U[s];
+          const gap = h01(p.x + s * 7.3, p.z - s * 4.1, salt + 23);
+          // welded shut about a fifth of the time; otherwise a thin tear
+          let cw = (gap < 0.22 ? 0.012 : 0.035 + 0.075 * gap) * (1 - 0.55 * cool);
+          cw += ventK * 0.30 * (1 - Math.abs(u0));      // the throat
+          const seamK = (gap < 0.22 ? 0.35 : 1) * (1 - Math.abs(u0) * 0.30);
+          for (let k = 0; k < 2; k++) {
+            const u = u0 + (k ? cw : -cw);
+            const off = (i * CRACK_COLS + s * 2 + k) * 3;
+            kPos[off] = p.x + nx * u * hw;
+            kPos[off + 2] = p.z + nz * u * hw;
+            // sit ON the plate, not above it
+            kPos[off + 1] = topAt(u) + 0.02;
+            ramp3(clamp(hot * seamK * (0.55 + 0.75 * ventK), 0, 1), 0x2e0800, 0xe8560a, 0xfff3c4, _c3);
+            kCol[off] = _c3.r; kCol[off + 1] = _c3.g; kCol[off + 2] = _c3.b;
+          }
         }
       }
     }
@@ -524,7 +563,7 @@
           chGeo.attributes.position.needsUpdate = true;
           chGeo.attributes.color.needsUpdate = true;
           crustGeo.setDrawRange(0, Math.max(0, st) * (LAVA_COLS - 1) * 6);
-          chGeo.setDrawRange(0, Math.max(0, st) * (CH_COLS - 1) * 6);
+          chGeo.setDrawRange(0, Math.max(0, st) * CRACK_U.length * 6);
           crustGeo.computeVertexNormals();
         }
         if (frozen) return handle;
@@ -636,13 +675,23 @@
      (Sources: Sparks 1986, The dimensions and dynamics of volcanic
      eruption columns; USGS/Wikipedia eruption-column structure.)
      ============================================================ */
-  // Ash greys, running PALER with altitude: the low column is dense and
-  // dark, the umbrella is fine ash lit from all sides.
-  const COL_ASH = [0x2e2b28, 0x3b3733, 0x4a4540, 0x5d574f, 0x716a60, 0x8a8278];
+  /* ASH IS PALE. The owner's Mount St Helens reference is the correction:
+     a sustained column is a BRIGHT GREY-WHITE cauliflower, not a brown smoke
+     pillar — it is fine rock dust plus condensed steam, and it is lit from
+     every side by the sky. The first build ran 0x2e2b28..0x8a8278 (near-black
+     to mid-brown) and read as a chimney fire.
+
+     The small NEUTRAL EMISSIVE is not decoration and the ash deposit already
+     documents why: an eruption drives the scene sun to 0xff6a3a, and a purely
+     diffuse grey under an orange sun comes out peach. A cool floor under the
+     diffuse term keeps ash the colour ash is in every photograph. */
+  const COL_ASH = [0x6f6d69, 0x827f7a, 0x96928b, 0xaba69e, 0xc0bab1, 0xd6cfc5];
   let _colMats = null;
   function colMats() {
     if (_colMats) return _colMats;
-    _colMats = COL_ASH.map(function (c) { return new THREE.MeshLambertMaterial({ color: c }); });
+    _colMats = COL_ASH.map(function (c) {
+      return new THREE.MeshLambertMaterial({ color: c, emissive: 0x14161c, emissiveIntensity: 1 });
+    });
     /* THE GAS-THRUST BASE IS GLOWING ASH, NOT A SUN. It is incandescent —
        that part is real — but the first build gave it emissive 0xd44b08 under
        an eruption sky whose own sun is 0xff6a3a, and the two compounded into a
@@ -666,11 +715,22 @@
     const bend = o.bend != null ? +o.bend : 1;      // how hard the wind leans it
 
     // radius of the column at normalised altitude u — the three regions
+    /* THE UMBRELLA IS THE SILHOUETTE. In the reference the cap is several
+       times wider than the stem that feeds it and it starts spreading well
+       below the top — that proportion IS what makes a photograph read as an
+       eruption column rather than as a smoke plume, so the cap now opens at
+       0.55 and reaches ~8R against a 2R stem. */
     function radAt(u) {
-      if (u < 0.12) return R * (0.34 + 1.56 * (u / 0.12));
-      if (u < 0.70) return R * (1.90 + 2.10 * ((u - 0.12) / 0.58));
+      if (u < 0.12) return R * (0.30 + 0.85 * (u / 0.12));
+      // A NARROW STEM IS NOT A STYLE CHOICE, IT IS A BILLOW BUDGET. The first
+      // build ran the stem at 1.7-2.8R, which is 34-56 m of diameter to fill
+      // with the handful of billows that happen to be at that altitude — so it
+      // came out BEADED, a chain of separate spheres you could count, which is
+      // the owner's complaint arriving from a third direction. A real stem is
+      // narrow relative to its cap anyway; at ~1.2-1.8R the same billows weld.
+      if (u < 0.55) return R * (1.15 + 0.65 * ((u - 0.12) / 0.43));
       // the umbrella bulges out and then rounds off at the very top
-      return R * (4.00 + 3.10 * Math.sin(((u - 0.70) / 0.30) * Math.PI * 0.86));
+      return R * (1.80 + 6.00 * Math.sin(((u - 0.55) / 0.45) * Math.PI * 0.80));
     }
     // how fast the column is still climbing at u — fast low, dead in the cap
     function riseAt(u) {
@@ -685,7 +745,7 @@
     grp.frustumCulled = false;
     parent.add(grp);
 
-    const N = qi(26, 68);
+    const N = qi(34, 96);
     const JET = Math.max(4, Math.round(N * 0.15));   // billows pinned to the base
     const blobs = [];
     for (let i = 0; i < N; i++) {
@@ -702,7 +762,12 @@
         jet: jet,
         ang: Math.random() * 6.28,
         rr: Math.sqrt(Math.random()),                 // even area fill, not centre-heavy
-        sz: 0.62 + Math.pow(Math.random(), 1.5) * 0.72,
+        /* CAULIFLOWER IS A SIZE DISTRIBUTION. The reference has lobes at
+           every scale from the whole cap down to a few metres, all packed on
+           each other — one narrow size band reads as bubbles no matter how
+           many you draw. Spread over 5x, biased small, so a handful of big
+           lobes carry the silhouette and a crowd of small ones roughen it. */
+        sz: 0.30 + Math.pow(Math.random(), 2.1) * 1.30,
         ph: Math.random() * 6.28,
         spin: (Math.random() - 0.5) * 0.35,
         roll: 0.88 + Math.random() * 0.24,            // per-billow rise jitter
@@ -756,7 +821,7 @@
              which is wrong and looks like a chimney; below ~0.6 so much piles
              into the cap that the STEM goes beaded and you can count the
              billows in it again. */
-          const u = B.jet ? B.q * 0.085 : Math.pow(B.q, 0.72);
+          const u = B.jet ? B.q * 0.085 : Math.pow(B.q, 0.86);
           B.m.visible = true;
           /* THE COLUMN GROWS OUT OF THE VENT rather than fading in at full
              height: the live top scales BOTH the altitude and the radius, so a
@@ -791,8 +856,15 @@
              were making, and one of them filled the sky. Roughly a third of
              the local radius puts about six billows across the diameter, which
              is the density that reads as boiling rather than as beanbags. */
-          const sc = rad * B.sz * (0.42 + 0.07 * Math.sin(t * 2.1 + B.ph)) * (B.jet ? 1.5 : 1);
-          B.m.scale.set(sc, sc * (u > 0.70 ? 0.66 : 0.9), sc);
+          /* THE STEM AND THE CAP WANT DIFFERENT LUMP-TO-WIDTH RATIOS. In the
+             stem a billow has to be nearly as wide as the column to weld with
+             its neighbours into a tube; in the cap the lumps must be SMALL
+             relative to the cap or there is no cauliflower, just three balls.
+             One number cannot serve both, and trying to was what beaded the
+             stem while the umbrella looked right. */
+          const rel = u < 0.58 ? 0.98 : 0.40;
+          const sc = rad * B.sz * (rel + 0.07 * Math.sin(t * 2.1 + B.ph)) * (B.jet ? 1.5 : 1);
+          B.m.scale.set(sc, sc * (u > 0.55 ? 0.62 : 0.9), sc);
           B.m.rotation.y += B.spin * dt;
           B.m.rotation.x += B.spin * 0.4 * dt;
         }
