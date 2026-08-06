@@ -242,9 +242,16 @@ const PASS = `(() => {
   } catch (e) { out.fails.push("waterSharedAudit threw: " + (e && e.message)); } }
   // ---- volcano block (volcanofx.js): lava is OPAQUE crusted rock, never a
   // translucent box - transparent lava and legacy stream paths pinned at 0.
+  // The ERUPTION COLUMN carries the same pin (2026-08-06): the owner's "it
+  // shoots out ash that just looks like a bunch of floating rocks, separate
+  // rocks instead of one ash cloud" was a pile of transparent square Points,
+  // and the only structural defence against it coming back is that every
+  // billow in the column is an opaque lit mesh. Both may only read 0.
   if (CBZ.volcanoAudit) { try { const va = CBZ.volcanoAudit();
-    out.volcano = "flows=" + va.lavaFlows + " transparent=" + va.lavaTransparent;
+    out.volcano = "flows=" + va.lavaFlows + " transparent=" + va.lavaTransparent
+      + " column=" + va.columnLive + " colTransparent=" + va.columnTransparent;
     if (va.lavaTransparent > 0) out.fails.push("TRANSPARENT LAVA: " + va.lavaTransparent);
+    if (va.columnTransparent > 0) out.fails.push("TRANSPARENT ERUPTION COLUMN: " + va.columnTransparent);
   } catch (e) { out.fails.push("volcanoAudit threw: " + (e && e.message)); } }
   if (CBZ.weatherAudit) { try { const wa = CBZ.weatherAudit();
     out.weatherGround = "pool=" + wa.groundWater + " snow=" + wa.snowCover + " coated=" + wa.coatedMaterials;

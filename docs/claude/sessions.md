@@ -2632,3 +2632,164 @@ work.** For this change that is a throwaway toast probe (~90s, and it caught the
 old behavior) plus `node --check`. Run the math gate when the change can move
 what the math gate measures — world building, sim ticks, determinism — not as a
 tax on editing a sentence.
+
+## 2026-08-06 — THE VOLCANO STOPPED BEING A BOMB (solo)
+
+OWNER, verbatim: *"figure out why the volcano in natural disaster when it kills
+you, it says that it was a nuclear blast that killed you. And it also doesn't
+kill you correctly. The volcano, all the magma shoots out at once instead of
+dripping down the side, which it's very viscous in real life. It slowly comes
+down. The ash is fast, but the magma, it's a little slower, I think… right now,
+it shoots out this ash that just looks like a bunch of floating rocks, separate
+rocks instead of one ash cloud like it should be. It comes out like several
+cyclic or circular clouds."*
+
+Four claims, one hazard. The first one was the interesting one, because the
+obvious reading of it is wrong.
+
+### 1. "IT SAYS IT WAS A NUCLEAR BLAST" — the string was never wrong
+
+Checked first, because a text bug and a picture bug want opposite fixes.
+Harvested every cause string a full 20 s eruption actually emits, player and
+bots, off the live roster:
+
+> crushed by a volcanic bomb · incinerated by lava · incinerated by the
+> pyroclastic flow · asphyxiated in the ash cloud · choked by volcanic ash ·
+> crushed in the lahar · crushed by an ash-laden roof
+
+No nuclear string anywhere — not in `surv._deathCause`, not on the lose card,
+not in the kill feed. `killfeed.js`'s `normCause` DOES collapse "incinerated by
+lava" to "explosion", but `modes/survival.js:78` puts the precise cause straight
+back on, exactly as its comment claims.
+
+**What said nuclear blast was the PICTURE, and it said it twice.**
+
+- `incinerate()` handed every incineration — pyroclastic included — to
+  `CBZ.cityNukeWhiteout`. That sheet is not a generic white flash. It is
+  `city/nukefx.js`'s researched NUCLEAR DOUBLE PULSE: full white, then the
+  shock front going opaque and swallowing its own fireball, then a second
+  brighter thermal maximum. That envelope is the most recognisable signature a
+  nuclear weapon has; it is why bhangmeters can count warheads. Playing it over
+  a volcano is the game saying "a bomb went off" in the most legible language
+  it owns.
+- And the degrade path said it too: **`CBZ.fx.flash(s, colour)` has taken a
+  colour since it was written, stored it in `survEnv.flashColor`, and NOTHING
+  has ever read it.** `#survFlash` is `background:#fff` in index.html. Every
+  caller's colour argument in the whole mode was being discarded.
+
+Fixed as two different events. The nuke keeps the double pulse. A volcanic
+death gets a PYROCLASTIC SEAR: ember orange for ~0.2 s (the incandescent basal
+fringe going over you) decaying to ash-black as the current buries you and puts
+the daylight out — orange-in/black-out, the exact inverse of white-out/daylight-
+back. `survivalhud.js` now paints `flashColor`, and `fx.flash` resets it to
+white when a caller names none, so lightning cannot inherit lava's orange.
+
+### 2. "IT DOESN'T KILL YOU CORRECTLY" — two mismatches
+
+**The pyroclastic cloud you saw was not the cloud that killed you.** The
+billows were placed at `lat * halfW * (0.55 + 0.75*ageK)` with |lat| ≤ 1.15,
+each drawing a sphere of its own on top — visible envelope ~0.82 halfW at the
+head and ~1.9 at the tail. `contains()` used a separately-typed 0.62 / 1.22.
+The band between them is a place where the screen is full of 600 °C ash and
+nothing happens to you. Now ONE `laneHalf()` serves the geometry and the kill
+test, plus an honest margin for the billow radius — measured 0 of 420 visible
+billow cores non-lethal, from 25%+ before. `contains()` also takes Y now, so a
+surge that is 25 m deep no longer kills someone standing above it.
+
+**Lava was an instakill.** The file's own doctrine block says lava is "honestly
+the LEAST dangerous of the four — you walk away from lava", and the code said
+`hurt(a, 1e6)`. Brushing the edge of a flow was as instantly fatal as standing
+under the nuke. It is a severe burn now: ~87 HP/s, so 0.5 s of contact costs 44
+and ~1.2 s kills. Nobody survives it by accident; anybody survives it by
+reacting — which is only fair now that the flow moves slower than a walk.
+
+### 3. "ALL THE MAGMA SHOOTS OUT AT ONCE" — viscosity is a PACE, not a speed
+
+Researched, and the owner's instinct ("the ash is fast, but the magma is
+slower") is right by two orders of magnitude:
+
+| | real | was | now |
+|---|---|---|---|
+| pahoehoe flow front | 1–10 m/**hour** | — | — |
+| fastest ordinary a'a (1859 Mauna Loa) | 133 m/hour = **0.037 m/s** | — | — |
+| this file's commanded front speed | — | **4.2–6.8 m/s** | **1.4–2.4 m/s** |
+| eruption column, gas thrust | >100 m/s | — | — |
+| pyroclastic density current | 100–700 km/h | 36–52 m/s | unchanged |
+
+A 20 s hazard cannot run at 0.037 m/s and be seen to move, so the compression
+stays — but it now compresses the RATE, not the CHARACTER, and the front is
+slower than a walk. The character is the part that was missing entirely:
+
+- **The front stalls and lurches.** A real flow front is hundreds of TOES; each
+  runs for minutes, stalls, INFLATES as lava keeps arriving under a skin that
+  has already chilled, then the skin splits and a new toe breaks out. `lobeK()`
+  is that cycle (two incommensurate sines, hash-phased off the vent so it is
+  deterministic and no two flows lurch together), normalised against its own
+  average so `speed` still means the mean front speed. Measured cv of the
+  per-second advance: **0.82** — a constant-rate ribbon reads 0.
+- **It inflates.** Thickness keys off when a station was actually reached, not
+  `i*seg/speed`, so a stalled lobe swells where it stands.
+- **The tip is a blunt wall,** pinched in and stood up — an a'a front is a 1–3 m
+  bank of rubble being bulldozed, not a taper.
+- **The vents open in sequence,** not all on frame one, over the first two
+  thirds of the event.
+- **And the flow SETS.** A creeping flow that has only made a third of the cone
+  when the 20 s are up used to be DELETED, which is a worse lie than the speed
+  was. `lavaFlow.harden()` freezes it, walks the channel out over ~9 s and
+  leaves a black basalt tongue on the mountain for the rest of the match —
+  same contract the lahar already had, and `hitTest()` returns false once set
+  because cold rock is terrain.
+
+### 4. "SEPARATE ROCKS, SEVERAL CIRCULAR CLOUDS" — that was a Points fact
+
+The column was three `THREE.Points` clouds: 260 + 200 + 300 untextured dots
+scattered through a 15 m cylinder 52 m tall. **A PointsMaterial with no `map`
+draws a hard-edged opaque SQUARE**, and a few hundred of them over that volume
+are individually resolvable at every distance the mountain is ever seen from.
+The eye counts them, and counting is the failure — a cloud is a thing whose
+parts you cannot count. The scatter also left altitude bands with no mote in
+them, which is the "several circular clouds".
+
+Replaced with `V.column()`, built on the grammar this file already proved on
+the pyroclastic flow: **many heavily overlapping OPAQUE LIT billows**, in the
+three regions a real column has — narrow GAS THRUST jet (the only incandescent
+part), widening CONVECTIVE region doing most of the climbing, and an UMBRELLA
+that stops rising and spreads sideways at neutral buoyancy. Billow altitudes
+are STRATIFIED by index, not random, so there is no band without a billow in
+it; each billow scales off the LOCAL column radius so the overlap never opens
+up as the column widens; the whole thing BUILDS out of the vent instead of
+arriving whole. The falling ashfall stays Points but gained a shared soft-mote
+texture (`fx.particleCloud({soft:true})`, opt-in, one 32×32 canvas for the
+whole game) at 2× the count and half the size.
+
+### RATCHETS
+
+New tool: **`tools/volcano-check.mjs`** — 20 assertions, ~4 min, boots the real
+mode and drives three separate eruptions. It exists because three of the four
+claims above were only checkable by playing. Notable traps it cost two runs to
+find and now documents in place:
+
+- `core/loop.js` only ticks the updater chain while `g.state === "playing"`,
+  and a full eruption routinely kills 98 of the 99 bots — so **the round can
+  resolve mid-event and freeze the sim**, which reads exactly like "the volcano
+  never ends". A harness pins the state.
+- The lava flows come off the same cone as the pyroclastic lane and overlap it,
+  so a naive "lava killed me" assertion kept being answered by the wrong
+  hazard. The lava run turns `VOLCANO_PYRO` off.
+
+New audit fields: `volcanoAudit().columnTransparent` (**pinned at 0** in
+`math-gate.mjs` beside `lavaTransparent` — the ash-cloud twin of the owner's
+"see thru" complaint), `columnBillows`, `lavaSet`; `disasterAudit()
+.lavaFrontSpeed` (**must stay under 2.5**), `.lavaVentsPending`, `.ashVeils`,
+`.nukeVeilsBorrowed` (**pinned at 0** — non-nuclear deaths borrowing the
+nuclear whiteout; volcano deaths used to be all of them).
+
+Also fixed while here: `disasters.start()` never cleared `volScars`, so hitting
+Try Again without returning to the menu started the new island wearing the old
+island's set lahar and ash blanket. Now six meshes a match instead of two, so
+it mattered more.
+
+MEASURED: `MATHGATE: ok` · `VOLCANO: ok (20 assertions)` · bot attrition over a
+full eruption A/B'd against pre-change HEAD (2 alive at t+28 both sides — the
+widened pyroclastic lane and the softened lava cancel out; the volcano is no
+more or less lethal than it was).

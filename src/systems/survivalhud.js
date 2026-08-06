@@ -35,6 +35,7 @@
     stam: document.getElementById("stamBar"),
     flash: document.getElementById("survFlash"),
   };
+  let lastFlashCol = null;      // only touch the sheet's style when it changes
   const cv = document.getElementById("minimap");
   const ctx = cv ? cv.getContext("2d") : null;
   const W = cv ? cv.width : 0, H = cv ? cv.height : 0;
@@ -148,10 +149,21 @@
       }
     }
 
-    // screen flash (lightning / nuke white-out)
+    /* SCREEN FLASH — and it is not always white. `CBZ.fx.flash(s, color)` has
+       taken a colour since it was written and stored it in survEnv.flashColor,
+       and NOTHING has ever read it: the sheet is `background:#fff` in
+       index.html, so every caller's colour argument was discarded and every
+       death veil in the mode came out as the same nuclear white. That is half
+       of why an eruption killing you looked like a bomb going off. One
+       assignment, and lightning stays white because lightning passes white. */
     if (el.flash) {
       const f = CBZ.survEnv.flash;
       el.flash.style.opacity = Math.min(0.92, f).toFixed(2);
+      const c = CBZ.survEnv.flashColor;
+      if (c != null && c !== lastFlashCol) {
+        lastFlashCol = c;
+        el.flash.style.background = "#" + (c >>> 0).toString(16).padStart(6, "0");
+      }
     }
 
     drawMinimap();

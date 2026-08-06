@@ -69,6 +69,19 @@ every time. The real rules:
   render path; run before a big deploy or when render code changed),
   `tools/terrain-map-audit.mjs` (deep terrain sweep), `tools/aimlib.js`
   (honest camera aiming from probes),
+  `tools/volcano-check.mjs` (the STRATOVOLCANO end to end, ~4 min, 20
+  assertions across three forced eruptions: death ATTRIBUTION — no eruption
+  cause, lose card or kill-feed line may say anything nuclear, and a volcano
+  death must raise the mode's ash veil rather than borrow nukefx's nuclear
+  double-pulse; the two KILL MODELS — a visible pyroclastic billow must be a
+  lethal one, and lava must burn rather than instakill; and the PACING — front
+  speed under 2.5 m/s, vents opening in sequence, an advance uneven enough to
+  read as viscous. It carries two traps worth knowing before writing any
+  survival probe: `core/loop.js` only ticks updaters while `g.state ===
+  "playing"` and a full eruption can resolve the round mid-event, freezing the
+  sim in a way that reads as "the disaster never ended"; and hazards off the
+  same cone overlap, so an assertion about one can be silently answered by
+  another — turn the other one off with its flag),
   `tools/prison-polish-check.mjs` (the PRISON, mode "escape" + gungame: the
   armory's slot-per-weapon and take-it-off-the-wall contract, LOS through an
   OPENED door — the losgrid mover trap — the tight-space first-person rule with

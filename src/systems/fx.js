@@ -32,6 +32,36 @@
 
   function rng() { return Math.random(); }
 
+  /* ---- ONE SOFT MOTE TEXTURE, shared by every cloud that opts in ---------
+     OWNER, 2026-08-06, on the volcano: "it shoots out ash that just looks
+     like a bunch of floating rocks, separate rocks".
+
+     Half of that is a POINTS MATERIAL FACT. A PointsMaterial with no `map`
+     draws a hard-edged opaque SQUARE. At the sizes a disaster uses (0.24-0.62 m
+     with size attenuation) each square is several pixels of solid colour with
+     four corners on it, and a few hundred of those is a field of little
+     rocks — which is precisely what the owner described, for rain and snow as
+     much as for ash. A soft radial alpha falloff costs one 32x32 canvas for
+     the whole game and makes the same mote read as a fleck of dust.
+
+     Opt-in (`soft: true`) rather than global: rain wants a hard streak and
+     the existing clouds are tuned against the square. New callers should ask
+     for it; old ones keep exactly the pixels they had. */
+  let _moteTex = null;
+  function moteTex() {
+    if (_moteTex) return _moteTex;
+    const S = 32, cv = document.createElement("canvas");
+    cv.width = cv.height = S;
+    const g = cv.getContext("2d");
+    const rg = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+    rg.addColorStop(0, "rgba(255,255,255,1)");
+    rg.addColorStop(0.45, "rgba(255,255,255,0.72)");
+    rg.addColorStop(1, "rgba(255,255,255,0)");
+    g.fillStyle = rg; g.fillRect(0, 0, S, S);
+    _moteTex = new THREE.CanvasTexture(cv);
+    return _moteTex;
+  }
+
   // ---------------------------------------------------------------
   // particleCloud: one pooled Points cloud. The owner calls update()
   // each frame with a world center (camera for global weather, or a
@@ -81,6 +111,7 @@
       size: o.size || 0.18,
       transparent: true, opacity: 0, depthWrite: false, fog: true,
       sizeAttenuation: o.sizeAttenuation !== false,
+      map: o.soft ? moteTex() : null,          // see moteTex(): square dot = rock
     });
     const points = new THREE.Points(geo, mat);
     points.frustumCulled = false;
@@ -213,8 +244,14 @@
   // ---------------------------------------------------------------
   fx.flash = function (s, color) {
     const e = CBZ.survEnv;
-    e.flash = Math.max(e.flash, Math.max(0, Math.min(1, s)));
-    if (color != null) e.flashColor = color;
+    const v = Math.max(0, Math.min(1, s));
+    /* THE BRIGHTEST FLASH THIS FRAME OWNS THE COLOUR, and a caller that names
+       no colour means WHITE. Both halves matter now that survivalhud.js
+       actually paints flashColor: `if (color != null)` alone would let one
+       orange lava-contact tick leave every later lightning strike orange,
+       because the strike passes no colour at all. */
+    if (v >= e.flash) e.flashColor = color != null ? color : 0xffffff;
+    e.flash = Math.max(e.flash, v);
   };
 
   // ---- one mode-gated updater drives all fire-and-forget effects ----

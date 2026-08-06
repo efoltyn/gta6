@@ -2316,15 +2316,67 @@
   function gAt(ctx) { return ctx.arena.groundHeightAt; }
   function vent(h, ang, r) { return { x: h.x + Math.cos(ang) * r, z: h.z + Math.sin(ang) * r }; }
 
-  /* ---- THE INCINERATION WHITEOUT -----------------------------------------
-     One grammar for every death where the answer to "what did you see" is
-     LIGHT, not geometry: the pyroclastic front, and the nuke you are
-     standing under. city/nukefx.js already owns that sheet (#nukeFlash) with
-     a researched double-pulse envelope, and it is DOM — so it works at any
-     camera distance, in any mode, and it still runs while the run is over.
-     Degrade-safe: no nukefx, and the mode's own additive survEnv flash
-     stands in exactly as it did before. */
-  function incinerate(peak, fade) {
+  /* ---- THE INCINERATION VEIL ---------------------------------------------
+     A death where the answer to "what did you see" is LIGHT, not geometry.
+     There are two of those in this mode and they are NOT the same event.
+
+     OWNER, 2026-08-06: "when the volcano kills you, it says that it was a
+     nuclear blast that killed you."
+
+     The kill-feed STRING was never wrong — a pyroclastic death has always
+     read "incinerated by the pyroclastic flow", and a full 20 s eruption
+     emits only volcano causes (bomb / lava / flow / ash cloud / choke /
+     lahar; verified against the live roster). What SAID nuclear blast was
+     the picture. This function used to hand every incineration straight to
+     city/nukefx.js's whiteout, and that sheet is not a generic white flash:
+     it is the researched NUCLEAR DOUBLE PULSE — full white, the shock front
+     going opaque and swallowing the fireball, then a second brighter thermal
+     maximum. That envelope is the single most recognisable signature a
+     nuclear weapon has. It is the whole reason bhangmeters exist. Playing it
+     over a volcano is the game telling you, in the most legible language it
+     owns, that a bomb went off.
+
+     And the degrade path said it too, because `CBZ.fx.flash(s, colour)`'s
+     colour argument was being thrown away (see systems/survivalhud.js) — so
+     the fallback was also pure white.
+
+     So the two events get the two veils they actually have:
+
+       "nuke"  the double pulse, unchanged, through nukefx. Correct there
+               and only there.
+       "ash"   a PYROCLASTIC SEAR. You are not lit up by a fireball; you are
+               overrun by an opaque wall of 600 C ash. So it flares ember
+               orange for about a fifth of a second — the incandescent basal
+               fringe passing over you — and then goes to ash-black as the
+               current buries you and puts the daylight out. Orange in,
+               black out: the exact inverse of a nuclear flash, which is
+               white out and then daylight back.
+
+     Degrade-safe: the sear is the mode's own survEnv sheet, which exists
+     whether or not city/nukefx.js loaded. */
+  if (CBZ.CONFIG.VOLCANO_ASH_VEIL == null) CBZ.CONFIG.VOLCANO_ASH_VEIL = true;
+  let sear = null, searRuns = 0;
+  function searOut(peak, dur) {
+    sear = { t: 0, dur: dur > 0 ? dur : 2.6, peak: peak == null ? 1 : peak };
+    searRuns++;
+  }
+  function searTick(dt) {
+    if (!sear) return;
+    sear.t += dt;
+    const u = Math.min(1, sear.t / sear.dur);
+    /* The envelope: a fast ember flare, then a long smothering hold that
+       never fully clears while it runs — ash does not get out of your eyes
+       the way a flash does. */
+    const v = u < 0.08 ? u / 0.08 : 0.30 + 0.70 * Math.pow(1 - (u - 0.08) / 0.92, 1.1);
+    CBZ.survEnv.flash = Math.max(CBZ.survEnv.flash, v * sear.peak);
+    CBZ.survEnv.flashColor = lerpHex(0xff5a12, 0x191512, Math.min(1, u * 2.4));
+    if (u >= 1) { sear = null; CBZ.survEnv.flash = 0; CBZ.survEnv.flashColor = 0xffffff; }
+  }
+  function incinerate(peak, fade, style) {
+    if (style === "ash" && CBZ.CONFIG.VOLCANO_ASH_VEIL !== false) {
+      searOut(peak, fade);
+      return true;
+    }
     if (CBZ.CONFIG.NUKE_FINALE_REAL !== false && CBZ.cityNukeWhiteout) {
       try {
         CBZ.cityNukeWhiteout(fade == null ? 2.4 : fade, peak == null ? 1 : peak, true);
@@ -2363,12 +2415,19 @@
     narrate("banner", "VOLCANIC ERUPTION");
     narrate("hint", "THE MOUNTAIN ERUPTS — stay off the lava!", 3);
     if (CBZ.shake) CBZ.shake(0.9); sound("explosion"); sound("rumble");
-    // a fountain of glowing lava bursting UP out of the summit vent
-    ctx.st.erFountain = CBZ.fx.particleCloud({ mode: "rise", color: 0xff6a1a, count: 260, radius: 7, top: 22, size: 0.3, opacity: 0.85, vMin: 12, vMax: 22, drift: 3 }); ctx.st.erFountain.setActive(0.95);
-    // a towering dark ash/smoke column above the fountain
-    ctx.st.erSmoke = CBZ.fx.particleCloud({ mode: "rise", color: 0x2a2420, count: 200, radius: 15, top: 52, size: 0.62, opacity: 0.4, vMin: 5, vMax: 10, drift: 9 }); ctx.st.erSmoke.setActive(0.6);
-    // fine ash raining back down over the island
-    ctx.st.erAsh = CBZ.fx.particleCloud({ mode: "fall", color: 0x4a4038, count: 300, radius: 26, top: 30, size: 0.24, opacity: 0.45, vMin: 6, vMax: 12 }); ctx.st.erAsh.setActive(0.85);
+    /* THE LAVA FOUNTAIN stays a particle cloud, because a fountain genuinely
+       IS discrete lumps of molten rock on ballistic arcs — that is the one
+       thing in this event points are the right primitive for. It is smaller
+       and softer than it was (the ash column above it used to be points too,
+       and 460 hard squares in one place was the "floating rocks" the owner
+       saw), and it now RAMPS instead of arriving whole. */
+    ctx.st.erFountain = CBZ.fx.particleCloud({ mode: "rise", color: 0xff7a24, count: 150, radius: 5, top: 17, size: 0.34, opacity: 0.9, vMin: 12, vMax: 22, drift: 3, soft: true });
+    ctx.st.erFountain.setActive(0.2);
+    /* Fine ash raining back down: softened (see fx.js moteTex) and roughly
+       twice as many, half the size. A mote you can see the corners of is a
+       rock; the same mass as more, smaller, round flecks is ash. */
+    ctx.st.erAsh = CBZ.fx.particleCloud({ mode: "fall", color: 0x4a4038, count: 560, radius: 30, top: 34, size: 0.13, opacity: 0.5, vMin: 5, vMax: 11, soft: true });
+    ctx.st.erAsh.setActive(0.85);
     // the glowing crater rim sitting on the peak
     ctx.st.erCrater = disc(h.x, h.z, 0xff5210, 0.9, h.peak + 0.3); ctx.st.erCrater.material.blending = THREE.AdditiveBlending; ctx.st.erCrater.scale.set(5, 5, 1);
 
@@ -2394,24 +2453,66 @@
       });
     }
 
+    /* ---- THE ERUPTION COLUMN — ONE cloud, three regions --------------------
+       Outside the V gate on purpose: the column is what the player looks at
+       for the whole twenty seconds, so it must not disappear because somebody
+       reverted the LAVA. VOLCANO_COLUMN=0 (or volcanofx absent) puts the old
+       200-point smoke stack back, verbatim. */
+    if (V && V.column && CBZ.CONFIG.VOLCANO_COLUMN !== false) {
+      ctx.st.erColumn = V.column({
+        x: h.x, y: h.peak + 2, z: h.z, parent: root(),
+        radius: 9 + 3 * ctx.intensity,
+        height: 190 + 90 * ctx.intensity,
+        rise: 0.2, bend: 1, salt: 5501,
+        windX: ctx.st.erWindX, windZ: ctx.st.erWindZ,
+      });
+    } else {
+      ctx.st.erSmoke = CBZ.fx.particleCloud({ mode: "rise", color: 0x2a2420, count: 200, radius: 15, top: 52, size: 0.62, opacity: 0.4, vMin: 5, vMax: 10, drift: 9 });
+      ctx.st.erSmoke.setActive(0.6);
+    }
+
     ctx.st.erLava = null; ctx.st.erStreams = null; ctx.st.erPools = null;
     if (V) {
-      /* ---- LAVA: opaque crusted flows down the fall line ---- */
+      /* ---- LAVA: opaque crusted flows down the fall line -------------------
+         VENTS OPEN ONE AT A TIME. Four flows all starting on the same frame is
+         half of "all the magma shoots out at once" — the other half was the
+         speed, which now lives in world/volcanofx.js. A cone fails where the
+         pressure finds a weakness, and it finds them in sequence: a fissure
+         propagates, a flank cracks, a bocca opens further down. So the flows
+         are SCHEDULED here and built as their moment arrives. */
       const n = 4;
       ctx.st.erLava = [];
+      ctx.st.erVents = [];
       for (let i = 0; i < n; i++) {
         // never straight down the pyroclastic lane — the two hazards want
         // separate faces of the cone so the mountain reads as having sides
         const a = ctx.st.pyroBear + 1.1 + (i / n) * 5.0 + (CBZ.hash01 ? CBZ.hash01(h.x + i, h.z, 91) : 0.5) * 0.3;
         const p = vent(h, a, 2.8);
-        ctx.st.erLava.push(V.lavaFlow({
-          x: p.x, z: p.z, groundAt: gAt(ctx), parent: root(), bearing: a,
-          len: h.r * 1.35 + 16 * ctx.intensity,
-          width: 4.6 + 2.2 * ctx.intensity,
-          speed: 4.2 + 2.6 * ctx.intensity,
-          salt: 4700 + i * 137,
-          light: i < 2,        // BUDGET: two real lights for four flows
-        }));
+        ctx.st.erVents.push({
+          // the first is immediate (something has to be happening at t=0);
+          // the rest crack open across the first two thirds of the event
+          at: i === 0 ? 0 : 1.6 + i * (2.3 - 0.5 * ctx.intensity),
+          o: {
+            x: p.x, z: p.z, groundAt: gAt(ctx), parent: root(), bearing: a,
+            len: h.r * 1.35 + 16 * ctx.intensity,
+            width: 4.6 + 2.2 * ctx.intensity,
+            /* THE SPEED. Measured lava fronts run 1-10 m/HOUR (pahoehoe) up to
+               ~133 m/hour (the 1859 Mauna Loa a'a) — call it 0.04 m/s at the
+               fast end. This was 4.2-6.8 m/s, i.e. two orders of magnitude out,
+               and that is why it read as being fired rather than poured. A
+               twenty-second hazard cannot run at 0.04 m/s and be seen to move
+               at all, so the compression stays — but 1.2 m/s at the opening of
+               a run to 2.05 at the end of one is WALKING PACE, which is the
+               thing the player is actually judging, and it is bounded so a
+               late-arc eruption cannot quietly wind back up to a jog
+               (disasterAudit().lavaFrontSpeed is pinned under 2.5). The
+               stall-and-breakout pacing that makes it read as viscous rather
+               than merely slow is volcanofx's `lobeK`. */
+            speed: 1.2 + 0.5 * ctx.intensity,
+            salt: 4700 + i * 137,
+            light: i < 2,      // BUDGET: two real lights for four flows
+          },
+        });
       }
       /* ---- ASHFALL AS A LOAD: one field, plus every standing roof ---- */
       if (CBZ.CONFIG.VOLCANO_ASH_LOAD !== false) {
@@ -2474,8 +2575,26 @@
     // the ash rains where the wind carries it — the fallout wedge is VISIBLE
     if (ctx.st.erWindX != null) ctx.st.erAsh.update(dt, h.x + ctx.st.erWindX * 40, 0, h.z + ctx.st.erWindZ * 40);
     else ctx.st.erAsh.update(dt, camPos().x, 0, camPos().z);
+    /* THE VENT BUILDS. `vig` is how hard it is erupting: it climbs over the
+       first four seconds, holds, and slumps over the last three. The fountain,
+       the column and the ashfall rate all read it, so the whole event has one
+       arc instead of three things that snap on together at t=0 and off at t=20
+       — which is what "shoots out at once" looks like from the player's chair. */
+    ctx.st.erT = (ctx.st.erT || 0) + dt;
+    const total = ctx.activeSecs || 20;
+    const vig = Math.min(
+      Math.min(1, ctx.st.erT / 4),
+      Math.min(1, Math.max(0.12, (total - ctx.st.erT) / 3))
+    );
+    ctx.st.erVig = vig;
+    ctx.st.erFountain.setActive(0.35 + 0.6 * vig);
     ctx.st.erFountain.update(dt, h.x, h.peak, h.z);
-    ctx.st.erSmoke.update(dt, h.x + (ctx.st.erWindX || 0) * 14, h.peak + 6, h.z + (ctx.st.erWindZ || 0) * 14);
+    if (ctx.st.erColumn) {
+      ctx.st.erColumn.wind(ctx.st.erWindX || 0, ctx.st.erWindZ || 0);
+      ctx.st.erColumn.update(dt, vig);
+    } else if (ctx.st.erSmoke) {
+      ctx.st.erSmoke.update(dt, h.x + (ctx.st.erWindX || 0) * 14, h.peak + 6, h.z + (ctx.st.erWindZ || 0) * 14);
+    }
     if (ctx.st.erCrater) ctx.st.erCrater.material.opacity = 0.7 + 0.25 * (0.5 + 0.5 * Math.sin(CBZ.now * 0.012));
     // ash is weather: it dims the sun, it blows downwind, and it is the same
     // wind everything else in the game reads
@@ -2484,6 +2603,17 @@
 
     // ---------------- LAVA ----------------
     if (ctx.st.erLava) {
+      // a scheduled vent cracks open — see startEruption's note
+      const VS = ctx.st.erVents;
+      if (VS && VS.length) {
+        for (let i = VS.length - 1; i >= 0; i--) {
+          if (ctx.st.erT < VS[i].at) continue;
+          ctx.st.erLava.push(V.lavaFlow(VS[i].o));
+          VS.splice(i, 1);
+          if (CBZ.shake) CBZ.shake(0.35);
+          soundAt("rumble", h.x, h.z);
+        }
+      }
       for (let i = 0; i < ctx.st.erLava.length; i++) ctx.st.erLava[i].update(dt);
     } else if (ctx.st.erStreams) {
       // legacy revert path: grow + orient each additive stream down the cone
@@ -2615,13 +2745,18 @@
     const wX = ctx.st.erWindX, wZ = ctx.st.erWindZ;
     surv().forEachActor(function (a) {
       const ax = a.pos.x, az = a.pos.z;
-      // 1) PYROCLASTIC FLOW — zero survival in the path, no exceptions.
-      //    A roof is not shelter from 600 C at 130 m/s and pretending it is
-      //    would be the worst lie in the file.
+      /* 1) PYROCLASTIC FLOW — zero survival INSIDE it, no exceptions. A roof
+            is not shelter from 600 C at 130 m/s and pretending it is would be
+            the worst lie in the file. But "inside" now means inside the cloud
+            you can SEE, in all three dimensions: volcanofx's contains() takes
+            the actor's Y and shares one lane function with the geometry, so
+            the band where the screen was full of ash and nothing happened is
+            gone, and so is dying on a tower standing clear above the surge. */
       if (P) {
-        const zone = P.contains(ax, az);
+        const zone = P.contains(ax, az, a.pos.y);
         if (zone) {
-          if (a.isPlayer) incinerate(1, zone === 1 ? 1.9 : 2.6);
+          // "ash", not the nuke's double pulse — see incinerate()
+          if (a.isPlayer) incinerate(1, zone === 1 ? 2.2 : 2.9, "ash");
           const fp = P.frontPos();
           surv().hurt(a, 1e6, {
             cause: zone === 1 ? "incinerated by the pyroclastic flow" : "asphyxiated in the ash cloud",
@@ -2632,11 +2767,26 @@
       }
       // 2) the vent itself
       if (Math.hypot(ax - h.x, az - h.z) < 3.4) { surv().hurt(a, 1e6, { cause: "swallowed by the crater", fromX: h.x, fromZ: h.z }); return; }
-      // 3) LAVA — what kills you is exactly what glows
+      /* 3) LAVA — IT BURNS YOU, IT DOES NOT DELETE YOU.
+            This file's own doctrine block says lava is "honestly the LEAST
+            dangerous of the four — you walk away from lava", and then the code
+            did `hurt(a, 1e6)`: brushing the edge of a flow was as instantly
+            fatal as being under the nuke. That is the other half of the
+            owner's "it doesn't kill you correctly". A flow moves slower than
+            you walk (that is the whole point of the new pacing), so the honest
+            model is a savage burn while you are standing in it and a way out
+            if you move NOW — about a second and a half of contact from full
+            health, which nobody survives by accident and anybody survives by
+            reacting. Bots get the same deal, so the crowd running out of a
+            flow is something you can watch happen. */
       if (LV) {
         for (let i = 0; i < LV.length; i++) if (LV[i].hitTest(ax, az)) {
           const t = LV[i].tip;
-          surv().hurt(a, 1e6, { cause: "incinerated by lava", fromX: t.x, fromZ: t.z });
+          surv().hurt(a, scale(72, ctx) * dt, { cause: "incinerated by lava", fromX: t.x, fromZ: t.z });
+          if (a.isPlayer) {
+            CBZ.fx.flash(0.16, 0xff5a12);
+            if (CBZ.shake) CBZ.shake(0.12);
+          }
           return;
         }
       } else if (ctx.st.erStreams) {
@@ -2695,26 +2845,32 @@
     if (!ctx.st.erupting) return;
     if (ctx.st.erFountain) ctx.st.erFountain.dispose();
     if (ctx.st.erSmoke) ctx.st.erSmoke.dispose();
+    if (ctx.st.erColumn) { ctx.st.erColumn.dispose(); ctx.st.erColumn = null; }
     if (ctx.st.erAsh) ctx.st.erAsh.dispose();
     if (ctx.st.erCrater) rmMesh(ctx.st.erCrater);
     (ctx.st.erStreams || []).forEach((s) => rmMesh(s.mesh));
     ctx.st.erStreams = null;
     (ctx.st.erPools || []).forEach((P) => rmMesh(P.m));
     ctx.st.erPools = null;
-    // the lava cools and goes; the flows themselves are transient hazards
-    (ctx.st.erLava || []).forEach((f) => f.dispose());
-    ctx.st.erLava = null;
     if (ctx.st.pyro) { ctx.st.pyro.dispose(); ctx.st.pyro = null; }
-    /* THE SCARS OUTLIVE THE EVENT, and that is the point: a lahar SETS, and
-       ash does not wash off between disasters. Both stay in the world for the
-       rest of the match and are cleared when the mode is torn down. */
+    /* THE SCARS OUTLIVE THE EVENT, and that is the point: a lahar SETS, ash
+       does not wash off between disasters, AND LAVA IS ROCK. That last one is
+       new, and it is the payoff for making the flow slow: a creeping flow that
+       has only made it a third of the way down the cone when the twenty
+       seconds are up USED TO BE DELETED, which is a worse lie than the speed
+       was. Now it freezes where it stood, its channel goes out over ~9 s, and
+       what is left is a black basalt tongue on the mountain for the rest of
+       the match. hitTest() returns false once it is set: cold rock is terrain.
+       Vents that never got their turn are simply dropped. */
+    (ctx.st.erLava || []).forEach(function (f) { volScars.push(f.harden()); });
+    ctx.st.erLava = null; ctx.st.erVents = null;
     if (ctx.st.lahar) { volScars.push(ctx.st.lahar.harden()); ctx.st.lahar = null; }
     if (ctx.st.erAshLoad) { volScars.push(ctx.st.erAshLoad); ctx.st.erAshLoad = null; }
     /* A SCAR IS A MEMORY, NOT A LEAK. Two eruptions can legitimately happen
-       in one match (the volcano, plus the earthquake's surprise one), and a
-       third would only be stacking a second full ash field on top of an
-       identical one. Oldest out at four. */
-    while (volScars.length > 4) { const old = volScars.shift(); try { old.dispose(); } catch (e) {} }
+       in one match (the volcano, plus the earthquake's surprise one), each
+       leaving up to four flows + a lahar + an ash field. Oldest out at twelve,
+       which is exactly two eruptions' worth. */
+    while (volScars.length > 12) { const old = volScars.shift(); try { old.dispose(); } catch (e) {} }
     ctx.st.erRoofs = null;
     ctx.st.erWindX = ctx.st.erWindZ = null;
     ctx.st.erupting = false;
@@ -2725,6 +2881,11 @@
      that puts the sea and the weather back. */
   CBZ.onAlways(28.06, function (dt) {
     const inSurv = CBZ.game.mode === "survival" && !!(CBZ.surv && CBZ.surv.arena);
+    /* THE SEAR OUTLIVES ITS DISASTER ON PURPOSE. It is the last thing you
+       see, so it has to keep running after the eruption's active window has
+       closed and after the run is over — same reason nukefx drives its own
+       sheet from an always-chain rather than from the weapon. */
+    if (inSurv) searTick(dt); else if (sear) { sear = null; CBZ.survEnv.flash = 0; CBZ.survEnv.flashColor = 0xffffff; }
     if (volScars.length) {
       if (!inSurv) {
         for (let i = 0; i < volScars.length; i++) { try { volScars[i].dispose(); } catch (e) {} }
@@ -3555,6 +3716,16 @@
       if (dir.cur && dir.cur.end && dir.state === "active") { try { dir.cur.end(makeCtx(0)); } catch (e) {} }
       // a fresh match starts on a flat sea, clear weather and no open holes
       surgeSet(0); weatherOff();
+      /* ...AND NO LAST MATCH'S SCARS. A set lahar, an ash blanket and (now)
+         a cooled lava tongue all deliberately outlive their own disaster, and
+         the only thing that used to clear them was leaving survival entirely
+         (the always-hook below). Hitting Try Again without going back to the
+         menu therefore started the new island wearing the old island's
+         deposits — and now that a whole eruption's flows are kept, that is
+         six meshes a match instead of two. */
+      for (let i = 0; i < volScars.length; i++) { try { volScars[i].dispose(); } catch (e) {} }
+      volScars.length = 0;
+      sear = null; CBZ.survEnv.flash = 0; CBZ.survEnv.flashColor = 0xffffff;
       if (CBZ.survHoles) CBZ.survHoles.length = 0;
       said.banners = said.hints = said.toasts = 0;
       // a fresh SEEDED arc for this run: world seed + run counter → the same
@@ -3820,6 +3991,28 @@
       lavaTransparent: volA ? volA.lavaTransparent : 0,
       lavaFlows: volA ? volA.lavaFlows : 0,
       lavaLegacy: lavaLegacy,
+      /* ---- THE OWNER'S TWO 2026-08-06 COMPLAINTS, AS NUMBERS ----
+         `lavaVentsPending` proves the vents open in SEQUENCE rather than all
+         on frame one: mid-eruption it is non-zero, and only a build that went
+         back to spawning every flow at t=0 can read 0 the whole way through.
+         `lavaFrontSpeed` is the commanded front speed in m/s — measured lava
+         fronts run 0.0003-0.04 m/s, this file used to command 4.2-6.8, and the
+         ratchet's job is to stop it ever climbing back there.
+         `columnOpaque` is the ash-cloud twin of `lavaOpaque`: the eruption
+         column is opaque lit billows, never a pile of transparent sprites,
+         which is "one ash cloud, not separate floating rocks" as a boolean.
+         `nukeVeils` counts how many times a NON-nuclear death borrowed
+         city/nukefx.js's nuclear double-pulse whiteout. Volcano deaths used to
+         be most of them. It may only go DOWN. */
+      lavaVentsPending: (st.erVents && st.erVents.length) || 0,
+      lavaFrontSpeed: +(1.2 + 0.5 * dir.intensity).toFixed(2),
+      lavaSet: volA ? volA.lavaSet : 0,
+      columnLive: volA ? volA.columnLive : 0,
+      columnBillows: volA ? volA.columnBillows : 0,
+      columnOpaque: volA ? !!volA.columnOpaque : true,
+      columnTransparent: volA ? volA.columnTransparent : 0,
+      columnTopY: volA ? volA.columnTopY : 0,
+      ashVeils: searRuns,
       pyroRuns: pyroRuns,
       pyroLive: volA ? volA.pyroLive : 0,
       laharRuns: laharRuns,
@@ -3839,6 +4032,8 @@
       nukeUsedNukefx: nukeFxRuns > 0,
       nukeFxRuns: nukeFxRuns,
       nukeWhiteouts: whiteouts,
+      // whiteouts raised by something that was NOT the nuke — see ashVeils
+      nukeVeilsBorrowed: Math.max(0, whiteouts - nukeFxRuns),
       cameraFar: CBZ.camera ? Math.round(CBZ.camera.far) : 0,
       shaftShared: !!CBZ.groundShaft,
       holesOnSlopes: shaftA ? shaftA.holesOnSlopes : 0,

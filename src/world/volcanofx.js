@@ -39,6 +39,15 @@
 
    THE THREE KILL MODES ARE MODELLED AS WHAT THEY PHYSICALLY ARE:
 
+     column()       the ERUPTION COLUMN, in the three regions a real one
+                    has: a narrow GAS THRUST jet leaving the vent at
+                    >100 m/s, a CONVECTIVE region that widens as it
+                    entrains air and does most of the climbing, and an
+                    UMBRELLA that stops rising and spreads sideways at
+                    its neutral-buoyancy level. Built from the same
+                    opaque overlapping billows as the flow below,
+                    because that is the only thing that reads as ONE
+                    cloud instead of a bag of separate puffs.
      pyroclastic()  a ground-hugging density current: pulverised rock
                     and 400 C gas rolling DOWN the fall line far faster
                     than anything can run. Boiling, opaque, overlapping
@@ -74,7 +83,8 @@
 
    Flags: VOLCANO_V2 (the opaque crust+channel lava; false = the caller
    keeps its legacy visual) · VOLCANO_PYRO · VOLCANO_LAHAR ·
-   VOLCANO_ASH_LOAD. Ratchet: CBZ.volcanoAudit().
+   VOLCANO_ASH_LOAD · VOLCANO_COLUMN. Ratchet: CBZ.volcanoAudit()
+   (lavaTransparent AND columnTransparent both pinned at 0).
 ============================================================ */
 (function () {
   "use strict";
@@ -86,13 +96,15 @@
   // Each is a genuine one-line revert of one hazard.
   if (CBZ.CONFIG.VOLCANO_V2 == null) CBZ.CONFIG.VOLCANO_V2 = true;
   if (CBZ.CONFIG.VOLCANO_PYRO == null) CBZ.CONFIG.VOLCANO_PYRO = true;
+  // false = the caller keeps its old THREE.Points ash column (see V.column)
+  if (CBZ.CONFIG.VOLCANO_COLUMN == null) CBZ.CONFIG.VOLCANO_COLUMN = true;
   if (CBZ.CONFIG.VOLCANO_LAHAR == null) CBZ.CONFIG.VOLCANO_LAHAR = true;
   if (CBZ.CONFIG.VOLCANO_ASH_LOAD == null) CBZ.CONFIG.VOLCANO_ASH_LOAD = true;
 
   const V = {};
   // live census for CBZ.volcanoAudit() — measured, never counted in source
-  const census = { lava: 0, pyro: 0, lahar: 0, ash: 0, lights: 0, tris: 0 };
-  const LIVE = { lava: [], pyro: [], lahar: [], ash: [] };
+  const census = { lava: 0, pyro: 0, lahar: 0, ash: 0, column: 0, lights: 0, tris: 0 };
+  const LIVE = { lava: [], pyro: [], lahar: [], ash: [], column: [] };
 
   function h01(x, z, salt) { return CBZ.hash01 ? CBZ.hash01(x, z, salt | 0) : 0.5; }
   function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
@@ -227,6 +239,37 @@
 
   /* ============================================================
      LAVA FLOW — opaque crust + incandescent channel.
+
+     OWNER, 2026-08-06: "all the magma shoots out at once instead of
+     dripping down the side, which it's very viscous in real life. It
+     slowly comes down." He is right on both counts, and the second one
+     is the reason the first one looked wrong.
+
+     THE MEASURED TRUTH. A pahoehoe flow front advances at 1-10 METRES
+     PER HOUR. The fastest thing anybody calls an ordinary lava flow —
+     the 1859 Mauna Loa a'a — averaged 133 m/hour, which is 0.037 m/s.
+     This file used to run its fronts at 4.2-6.8 m/s: between one and
+     six HUNDRED times too fast, i.e. the flow arrived at the bottom of
+     the cone at a jog, which is exactly "it shoots out at once".
+
+     AND IT DOES NOT ADVANCE SMOOTHLY. The front of a real flow is
+     hundreds of TOES. Each toe runs for a few minutes, stalls, INFLATES
+     as lava keeps being pumped into a bag that has already skinned over,
+     and then the chilled skin splits — usually at the seam between two
+     toes — and a new toe breaks out. So the front's motion is stall,
+     swell, lurch, stall. A constant-velocity ribbon can never read as
+     viscous no matter how slow you make it, because viscosity is not a
+     speed, it is a PACE.
+
+     Both facts are now in the geometry: `lobeK()` is the stall/breakout
+     envelope, the front decelerates as it lengthens and cools, and the
+     live tip is pinched in and stood UP into the blunt 1-3 m rubble
+     wall an a'a front actually is. A game still has to compress an
+     hour into twenty seconds — but it compresses the RATE, not the
+     CHARACTER.
+
+     (Sources: Oregon State Volcano World flow rates + pahoehoe/a'a,
+     USGS lava-flow-forms.)
      ============================================================ */
   const LAVA_COLS = 5;              // crust columns across the flow
   const LAVA_U = [-1, -0.56, 0, 0.56, 1];
@@ -350,19 +393,58 @@
 
     let adv = Math.min(seg * 1.05, len);   // metres of flow laid down
     let age = 0, dead = false, colT = 0;
+    let setT = -1;                         // >=0 once harden() has been called
     const _v = new THREE.Vector3();
 
+    /* THE TOE CYCLE. Two incommensurate slow sines multiplied together give
+       an irregular train of breakouts with genuinely dead ground between them
+       — long stalls, then a short lurch — which one sine cannot do and a
+       random walk cannot do deterministically. Hash-phased off the vent, so
+       two flows off the same summit never lurch on the same beat and every
+       client sees the same lurches. */
+    const lobePh = h01(o.x || 0, o.z || 0, salt + 61) * 6.28;
+    function lobeRaw(a) {
+      const s = Math.sin(a * 0.85 + lobePh) * Math.sin(a * 0.31 + lobePh * 1.7);
+      return 0.22 + 2.6 * Math.pow(Math.max(0, s), 1.2);
+    }
+    /* `speed` MUST MEAN THE MEAN FRONT SPEED, so the envelope is normalised
+       against its own average — sampled here rather than hard-coded, because a
+       hard-coded constant silently rescales the whole hazard the first time
+       anybody touches the shape. 240 samples over the beat period is exact
+       enough that the flow's total run is within a metre of speed*duration. */
+    let lobeNorm = 0;
+    for (let k = 0; k < 240; k++) lobeNorm += lobeRaw(k * 0.25);
+    lobeNorm = 240 / Math.max(0.001, lobeNorm);
+    function lobeK(a) { return lobeRaw(a) * lobeNorm; }
+    // when each station was actually reached — see writeStations' inflation note
+    const bornT = new Float32Array(N).fill(-1);
+    bornT[0] = 0; bornT[1] = 0;
+
     function writeStations(from, to) {
+      const setK = setT >= 0 ? clamp(setT / 9, 0, 1) : 0;
       for (let i = from; i <= to && i < N; i++) {
         const p = path.pts[i];
-        // thickness: a flow builds LEVEES and stands proud of the ground.
-        // Older stations (nearer the vent, laid down first) are thicker.
-        const bornAt = i * seg / Math.max(0.001, speed);
-        const localAge = clamp(age - bornAt, 0, 40);
-        const thick = 0.18 + 0.5 * (localAge / (localAge + 6)) + 0.4 * wProf[i] * 0.25;
-        const hw = halfW * wProf[i];
-        const cool = clamp(localAge / 26, 0, 1);
-        const hot = hot0[i] * (1 - 0.78 * cool);
+        /* THICKNESS IS INFLATION. A stalled toe does not stop being fed — the
+           lava keeps arriving under a skin that has already chilled, so the
+           lobe SWELLS in place. That is why a flow that has sat still for a
+           minute is the thickest part of the whole thing, and it is why the
+           levees stand proud of the grass. `bornT` is when this station was
+           actually reached, stamped by update(), because the front no longer
+           advances at a constant rate and i*seg/speed would now be fiction. */
+        const born = bornT[i] < 0 ? age : bornT[i];
+        const localAge = clamp(age - born, 0, 60);
+        let thick = 0.2 + 0.62 * (localAge / (localAge + 5)) + 0.4 * wProf[i] * 0.25;
+        let hw = halfW * wProf[i];
+        /* THE FRONT IS A BLUNT WALL. An a'a front is a 1-3 m bank of rubble
+           being bulldozed forward, not a taper that thins to nothing — the
+           live tip is therefore pinched narrow and stood UP. Without this the
+           slow flow just looked like a painted stripe getting longer. */
+        const toe = clamp(1 - (adv - i * seg) / (seg * 1.7), 0, 1);
+        hw *= 1 - 0.40 * toe;
+        thick *= 1 + 0.75 * toe;
+        // cooling: local age, plus the whole flow going cold once it has set
+        const cool = clamp(Math.max(localAge / 26, setK), 0, 1);
+        const hot = hot0[i] * (1 - 0.78 * cool) * (1 - setK);
         // heading normal for the lateral offset
         const a = path.pts[Math.max(0, i - 1)], b2 = path.pts[Math.min(N - 1, i + 1)];
         let nx = -(b2.z - a.z), nz = (b2.x - a.x);
@@ -411,30 +493,53 @@
       update(dt) {
         if (dead) return handle;
         age += dt;
+        if (setT >= 0) setT += dt;
         const was = adv;
-        adv = Math.min(len, adv + speed * dt);
+        /* STALL, SWELL, LURCH. `lobeK` is the toe cycle; the second term is
+           the flow running out of push — it is fed from a vent at a fixed
+           rate, so the further it has already gone the more of that supply is
+           spent keeping the length it has hot, and the front creeps to a
+           halt rather than stopping at a hard cap. */
+        if (setT < 0) {
+          const spent = 1 / (1 + 2.2 * (adv / Math.max(1, len)));
+          adv = Math.min(len, adv + speed * lobeK(age) * spent * dt);
+        }
         const st = Math.min(N - 1, Math.floor(adv / seg) + 1);
-        // rewrite the whole live ribbon: N is a couple of dozen stations, so
-        // this is cheaper than tracking dirty ranges and it lets the ENTIRE
-        // flow cool and thicken instead of only its front
+        for (let i = 0; i <= st && i < N; i++) if (bornT[i] < 0) bornT[i] = age;
+        /* Rewrite the whole live ribbon: N is a couple of dozen stations, so
+           this is cheaper than tracking dirty ranges and it lets the ENTIRE
+           flow cool, thicken and inflate instead of only its front.
+
+           A FINISHED SCAR COSTS NOTHING. Once the deposit has gone fully cold
+           its vertices and colours can never change again, so it stops paying
+           for a rewrite and a computeVertexNormals() every 0.12 s — which
+           matters now that a match can be carrying a dozen of these. */
+        const frozen = setT > 9;
         colT += dt;
-        if (adv !== was || colT > 0.12) { colT = 0; writeStations(0, st); }
-        crustGeo.attributes.position.needsUpdate = true;
-        crustGeo.attributes.color.needsUpdate = true;
-        chGeo.attributes.position.needsUpdate = true;
-        chGeo.attributes.color.needsUpdate = true;
-        crustGeo.setDrawRange(0, Math.max(0, st) * (LAVA_COLS - 1) * 6);
-        chGeo.setDrawRange(0, Math.max(0, st) * (CH_COLS - 1) * 6);
-        crustGeo.computeVertexNormals();
+        if (!frozen && (adv !== was || colT > 0.12)) {
+          colT = 0;
+          writeStations(0, st);
+          crustGeo.attributes.position.needsUpdate = true;
+          crustGeo.attributes.color.needsUpdate = true;
+          chGeo.attributes.position.needsUpdate = true;
+          chGeo.attributes.color.needsUpdate = true;
+          crustGeo.setDrawRange(0, Math.max(0, st) * (LAVA_COLS - 1) * 6);
+          chGeo.setDrawRange(0, Math.max(0, st) * (CH_COLS - 1) * 6);
+          crustGeo.computeVertexNormals();
+        }
+        if (frozen) return handle;
         // runtime-only flicker (allowed to be non-deterministic): the whole
         // channel breathes as one, which costs one uniform instead of a
         // per-vertex rewrite
         const fl = 0.9 + 0.12 * Math.sin(age * 5.3) + Math.random() * 0.04;
         chMat.color.setScalar(clamp(fl, 0.7, 1.08));
 
+        // a set flow stops being a light source before it stops being a shape
+        const glowK = setT >= 0 ? clamp(1 - setT / 9, 0, 1) : 1;
+        hazeMat.opacity = 0.3 * glowK;
         for (let i = 0; i < haze.length; i++) {
           const H = haze[i], s = adv * H.u;
-          if (s < 0.5) { H.sp.visible = false; continue; }
+          if (s < 0.5 || glowK <= 0.02) { H.sp.visible = false; continue; }
           pathAt(path, s, _v);
           H.sp.visible = true;
           H.sp.position.set(
@@ -448,13 +553,14 @@
         if (light) {
           pathAt(path, adv * 0.82, _v);
           light.position.set(_v.x, _v.y + 2.2, _v.z);
-          light.intensity = 1.5 + 0.35 * Math.sin(age * 4.1);
+          light.intensity = (1.5 + 0.35 * Math.sin(age * 4.1)) * glowK;
         }
         return handle;
       },
       // is (x,z) ON the flow? The lethal corridor IS the drawn ribbon —
       // the same wProf the geometry used, so what kills you is what glows.
       hitTest(x, z) {
+        if (setT >= 0) return false;          // set rock is terrain, not lava
         const c = pathCoord(path, x, z, adv);
         if (c.s < 0 || c.s > adv) return false;
         const i = clamp(Math.round(c.s / seg), 0, N - 1);
@@ -462,6 +568,15 @@
       },
       // 0..1 "how much of its run has it made" — for threat maps
       progress() { return adv / len; },
+      /* IT COOLS, IT DOES NOT EVAPORATE. Lava that has stopped is ROCK, and
+         the mountainside keeps it — the same contract the lahar's harden()
+         already has, so a caller can park both in the same scar list. The
+         front freezes where it stood, the channel goes out over ~9 s and what
+         is left is a black basalt tongue down the cone for the rest of the
+         match. `hardened` lets a caller stop hit-testing it: cold rock is
+         terrain, not a hazard. */
+      harden() { if (setT < 0) setT = 0; return handle; },
+      get hardened() { return setT >= 0; },
       dispose() {
         if (dead) return;
         dead = true;
@@ -476,6 +591,223 @@
     };
     census.lava++;
     LIVE.lava.push(handle);
+    return handle;
+  };
+
+  /* ============================================================
+     THE ERUPTION COLUMN.
+
+     OWNER, 2026-08-06: "it shoots out ash that just looks like a bunch
+     of floating rocks, separate rocks instead of one ash cloud like it
+     should be. It comes out like several cyclic or circular clouds."
+
+     That was an exact description of what the code did. The column was
+     three THREE.Points clouds — 260 + 200 + 300 untextured square dots
+     scattered through a 15 m cylinder 52 m tall. Points with no map are
+     hard-edged squares, and a few hundred of them spread over that
+     volume are individually resolvable at every distance the player
+     ever sees the mountain from. The eye counts them. Counting is the
+     failure: a cloud is a thing whose parts you CANNOT count.
+
+     The fix is the one this file already proved on the pyroclastic
+     flow: MANY HEAVILY OVERLAPPING OPAQUE LIT BILLOWS. Overlap is what
+     turns spheres into a cloud; separation is what turns them into
+     rocks. Nothing here is transparent and nothing here is a sprite.
+
+     THE SHAPE IS THE REAL THREE-REGION STRUCTURE, because the three
+     regions are what makes a column read as a column instead of a
+     smoke pillar:
+
+       GAS THRUST    the lowest ~1-2 km, driven by momentum alone —
+                     particles leave the vent at >100 m/s. NARROW, fast,
+                     and the only part that is incandescent.
+       CONVECTIVE    entrained air heats, expands and takes over; this
+                     region does most of the climbing (tens to 200+ m/s)
+                     and WIDENS steadily as it entrains.
+       UMBRELLA      at neutral buoyancy the column stops rising and
+                     goes SIDEWAYS — St Helens' umbrella spread at
+                     >55 m/s. This is the flat-topped mushroom cap, and
+                     it is the silhouette everyone recognises.
+
+     It also has to BUILD. A column is not present at t=0 — it climbs
+     out of the vent, which is why `update(dt, vigour)` chases a live
+     top rather than drawing the finished shape on frame one.
+
+     (Sources: Sparks 1986, The dimensions and dynamics of volcanic
+     eruption columns; USGS/Wikipedia eruption-column structure.)
+     ============================================================ */
+  // Ash greys, running PALER with altitude: the low column is dense and
+  // dark, the umbrella is fine ash lit from all sides.
+  const COL_ASH = [0x2e2b28, 0x3b3733, 0x4a4540, 0x5d574f, 0x716a60, 0x8a8278];
+  let _colMats = null;
+  function colMats() {
+    if (_colMats) return _colMats;
+    _colMats = COL_ASH.map(function (c) { return new THREE.MeshLambertMaterial({ color: c }); });
+    /* THE GAS-THRUST BASE IS GLOWING ASH, NOT A SUN. It is incandescent —
+       that part is real — but the first build gave it emissive 0xd44b08 under
+       an eruption sky whose own sun is 0xff6a3a, and the two compounded into a
+       saturated yellow ball hanging over the summit. Matched to the
+       pyroclastic flow's basal fringe instead, which is the same physical
+       thing (hot gas, not hot rock) and was already tuned against this sky. */
+    _colMats.push(new THREE.MeshLambertMaterial({
+      color: 0x4d2a1c, emissive: 0x8a2c06, emissiveIntensity: 1,
+    }));
+    return _colMats;
+  }
+
+  V.column = function (o) {
+    o = o || {};
+    const parent = o.parent || CBZ.scene;
+    const R = o.radius > 0 ? +o.radius : 12;        // vent-scale radius
+    const H = o.height > 0 ? +o.height : 120;       // full column height
+    const salt = o.salt != null ? (o.salt | 0) : 5501;
+    const cx = +o.x || 0, cz = +o.z || 0, cy = +o.y || 0;
+    const rise = o.rise > 0 ? +o.rise : 0.19;       // fraction of H per second
+    const bend = o.bend != null ? +o.bend : 1;      // how hard the wind leans it
+
+    // radius of the column at normalised altitude u — the three regions
+    function radAt(u) {
+      if (u < 0.12) return R * (0.34 + 1.56 * (u / 0.12));
+      if (u < 0.70) return R * (1.90 + 2.10 * ((u - 0.12) / 0.58));
+      // the umbrella bulges out and then rounds off at the very top
+      return R * (4.00 + 3.10 * Math.sin(((u - 0.70) / 0.30) * Math.PI * 0.86));
+    }
+    // how fast the column is still climbing at u — fast low, dead in the cap
+    function riseAt(u) {
+      if (u < 0.12) return 1;
+      if (u < 0.70) return 1 - 0.52 * ((u - 0.12) / 0.58);
+      return 0.48 * (1 - (u - 0.70) / 0.30) + 0.04;
+    }
+
+    const geo = billowGeo();
+    const mats = colMats();
+    const grp = new THREE.Group();
+    grp.frustumCulled = false;
+    parent.add(grp);
+
+    const N = qi(26, 68);
+    const JET = Math.max(4, Math.round(N * 0.15));   // billows pinned to the base
+    const blobs = [];
+    for (let i = 0; i < N; i++) {
+      const jet = i < JET;
+      /* STRATIFIED, NOT RANDOM. Scattering u uniformly at random leaves
+         altitude bands with no billow in them, and a band with a gap in it is
+         precisely the "several separate circular clouds" complaint. Marching u
+         with the index guarantees the column is continuous from vent to cap
+         before any jitter is added. */
+      const q0 = jet ? (i / JET) : ((i - JET) / (N - JET));
+      blobs.push({
+        m: new THREE.Mesh(geo, jet ? mats[6] : mats[Math.min(5, (i * 7) % 6)]),
+        q: q0,
+        jet: jet,
+        ang: Math.random() * 6.28,
+        rr: Math.sqrt(Math.random()),                 // even area fill, not centre-heavy
+        sz: 0.62 + Math.pow(Math.random(), 1.5) * 0.72,
+        ph: Math.random() * 6.28,
+        spin: (Math.random() - 0.5) * 0.35,
+        roll: 0.88 + Math.random() * 0.24,            // per-billow rise jitter
+      });
+      grp.add(blobs[i].m);
+    }
+
+    let t = 0, topU = 0, dead = false, vig = 1;
+    let wx = o.windX != null ? +o.windX : 0, wz = o.windZ != null ? +o.windZ : 0;
+
+    const handle = {
+      kind: "column", group: grp,
+      get topY() { return cy + H * topU; },
+      get vigour() { return vig; },
+      wind(x, z) { wx = +x || 0; wz = +z || 0; return handle; },
+      /* update(dt, vigour) — vigour 0..1 is how hard the vent is erupting.
+         The live top CHASES it, so the column climbs when the eruption
+         starts and slumps when it stops instead of popping in and out. */
+      update(dt, vigour) {
+        if (dead) return handle;
+        t += dt;
+        if (vigour != null) vig = clamp(+vigour || 0, 0, 1);
+        topU += (vig - topU) * Math.min(1, dt * (vig > topU ? 0.55 : 0.28));
+        if (topU < 0.02) {
+          for (let i = 0; i < blobs.length; i++) blobs[i].m.visible = false;
+          return handle;
+        }
+        for (let i = 0; i < blobs.length; i++) {
+          const B = blobs[i];
+          /* A WRAPPING PHASE, NOT AN ALTITUDE. The first build advanced each
+             billow's altitude directly and recycled it at the top, and within
+             a few seconds every billow had drained out of the middle of the
+             column and piled into the umbrella — a glowing lump at the vent, a
+             brown lump in the sky, and NOTHING BETWEEN THEM. That is the
+             owner's "several circular clouds" reappearing from the other
+             direction, and it is inherent to per-billow altitude: any spread
+             in rise rate empties some band.
+
+             So the state is a phase that wraps, uniformly spaced at build
+             time and advanced at a near-common rate, and ALTITUDE IS DERIVED
+             from it. The column can never open a gap, because the phases can
+             never bunch. `q^0.62` is what puts the physics back: it maps
+             uniform phase onto altitudes crowded toward the top, so material
+             piles up and slows down where a real column reaches neutral
+             buoyancy. Density and deceleration in the umbrella both fall out
+             of one exponent. */
+          B.q += rise * B.roll * dt * (0.4 + 0.6 * vig);
+          if (B.q >= 1) B.q -= 1;
+          /* 0.72, not 0.5 and not 1.0. At 1.0 the phase maps straight to
+             altitude and the umbrella carries no more material than the stem,
+             which is wrong and looks like a chimney; below ~0.6 so much piles
+             into the cap that the STEM goes beaded and you can count the
+             billows in it again. */
+          const u = B.jet ? B.q * 0.085 : Math.pow(B.q, 0.72);
+          B.m.visible = true;
+          /* THE COLUMN GROWS OUT OF THE VENT rather than fading in at full
+             height: the live top scales BOTH the altitude and the radius, so a
+             young column is a small column all the way up — which is also why
+             there is no band to be starved while it builds. */
+          /* THE GAS THRUST IS A THROAT, NOT A NECKLACE. Its billows sit on the
+             same ring as everything else, and at the vent that ring is wide
+             enough relative to how FEW of them there are that they read as
+             separate glowing lumps floating over the summit — which is the
+             owner's "floating rocks" complaint, reintroduced by the fix for
+             it. Pulled hard onto the axis so the hot part is one welded throat
+             coming out of the crater. */
+          const rad = radAt(u) * (0.42 + 0.58 * topU) * (B.jet ? 0.42 : 1);
+          // the billows churn about their own anchor — a column boils, and a
+          // ring of blobs that only translates reads as a smoke ring
+          const churn = 1 + 0.22 * Math.sin(t * 1.6 + B.ph);
+          const a = B.ang + t * (B.jet ? 0.5 : 0.16) * (1 - u * 0.6);
+          /* THE WIND LEANS IT, AND THE LEAN GROWS WITH ALTITUDE. A plume is
+             advected by a wind that has had longer to act the higher it goes,
+             so the offset goes as u^1.7 — that curve IS the classic bent
+             column, and it is the same wind the ashfall wedge uses. */
+          const lean = Math.pow(u, 1.7) * H * topU * 0.42 * bend;
+          B.m.position.set(
+            cx + Math.cos(a) * rad * B.rr * churn + wx * lean,
+            cy + H * topU * u + Math.sin(t * 1.1 + B.ph) * R * 0.14,
+            cz + Math.sin(a) * rad * B.rr * churn + wz * lean
+          );
+          /* SIZE MUST OUTRUN SPACING, BUT NOT BY MUCH. Each billow is scaled
+             off the LOCAL column radius so the lumps widen with the column and
+             the overlap never opens up — but the first build used 0.62 of the
+             radius as a billow RADIUS, i.e. lumps wider than the column they
+             were making, and one of them filled the sky. Roughly a third of
+             the local radius puts about six billows across the diameter, which
+             is the density that reads as boiling rather than as beanbags. */
+          const sc = rad * B.sz * (0.42 + 0.07 * Math.sin(t * 2.1 + B.ph)) * (B.jet ? 1.5 : 1);
+          B.m.scale.set(sc, sc * (u > 0.70 ? 0.66 : 0.9), sc);
+          B.m.rotation.y += B.spin * dt;
+          B.m.rotation.x += B.spin * 0.4 * dt;
+        }
+        return handle;
+      },
+      dispose() {
+        if (dead) return;
+        dead = true;
+        for (let i = 0; i < blobs.length; i++) grp.remove(blobs[i].m);
+        parent.remove(grp);
+        const k = LIVE.column.indexOf(handle); if (k >= 0) LIVE.column.splice(k, 1);
+      },
+    };
+    census.column++;
+    LIVE.column.push(handle);
     return handle;
   };
 
@@ -535,6 +867,30 @@
       step: 6, count: Math.ceil(len / 6) + 1, salt: salt, turn: 0.4, wander: 0.1,
     });
 
+    /* ---- ONE LANE, TWO CONSUMERS: the geometry AND the kill test ----------
+       OWNER, 2026-08-06: "it doesn't kill you correctly."
+
+       It didn't, and this was one of the two reasons. The billows were placed
+       at `lat * halfW * (0.55 + 0.75*ageK)` with |lat| up to 1.15 and then each
+       drew a sphere of its own on top of that, so the cloud you SEE reaches
+       about 0.82 of the half-width at the head and 1.9 at the tail. The kill
+       test used a completely separately-typed 0.62 / 1.22. The band between
+       the two numbers is a place where the screen is full of 600 C ash and
+       nothing happens to you — which is the worst thing a hazard can do,
+       because it teaches the player that the picture is a lie.
+
+       So the two are now the same function plus one honest margin for the
+       billow's own radius. This file's own law, from the lava block: WHAT
+       KILLS YOU IS WHAT YOU CAN SEE. */
+    function laneHalf(ageK) { return halfW * (0.55 + 0.75 * ageK); }
+    function blobR(ageK) { return width * 0.23 * (0.42 + 0.5 * ageK); }
+    function killHalf(ageK) { return laneHalf(ageK) * 1.05 + blobR(ageK) * 0.7; }
+    // ...and it has a TOP. A surge is a ground-hugging current a couple of
+    // dozen metres deep, not an infinite column: standing on something taller
+    // than the flow is the one piece of cover that physically exists, and the
+    // 2D-only test used to kill people who were demonstrably above it.
+    function surgeTop(ageK) { return height * (0.32 + 0.85 * ageK) * 1.35 + blobR(ageK) + 2; }
+
     const geo = billowGeo();
     const mats = pyroMats();
     /* MANY SMALL BILLOWS, NOT A FEW BIG ONES. The first build used ~40 blobs
@@ -592,7 +948,7 @@
           const nl = Math.hypot(nx, nz) || 1; nx /= nl; nz /= nl;
           // the cloud SPREADS as it runs out and rises behind the head
           const ageK = clamp(B.lag / Math.max(1, tail), 0, 1);
-          const spread = halfW * (0.55 + 0.75 * ageK);
+          const spread = laneHalf(ageK);
           const churn = 1 + 0.35 * Math.sin(t * 2.3 + B.ph);
           const gy = groundAt(_v.x, _v.z);
           B.m.position.set(
@@ -612,13 +968,28 @@
          180 km/h — instant incineration), 2 = the trailing ash cloud (still
          lethal, but it is the gas that gets you). 0 = outside, and outside
          is the only survival there is. */
-      contains(x, z) {
+      contains(x, z, y) {
         const c = pathCoord(path, x, z, Math.min(front + 6, path.total));
         if (c.s > front + 3 || c.s < front - tail * 0.9) return 0;
-        // the lane widens behind the head, same as the geometry
+        // the lane widens behind the head, THROUGH THE SAME FUNCTION the
+        // geometry used — see the lane note above
         const ageK = clamp((front - c.s) / Math.max(1, tail), 0, 1);
-        if (c.perp >= halfW * (0.62 + 0.6 * ageK)) return 0;
+        if (c.perp >= killHalf(ageK)) return 0;
+        // above the surge is above the surge, whatever you are standing on
+        if (y != null) {
+          pathAt(path, clamp(c.s, 0, path.total), _v);
+          if (y - groundAt(x, z) > surgeTop(ageK)) return 0;
+        }
         return ageK < 0.42 ? 1 : 2;
+      },
+      // how deep the surge is over the ground at (x,z) right now — a caller
+      // that wants to draw or reason about the ceiling asks here, it does not
+      // re-type the profile
+      depthAt(x, z) {
+        const c = pathCoord(path, x, z, Math.min(front + 6, path.total));
+        if (c.s > front + 3 || c.s < front - tail * 0.9) return 0;
+        const ageK = clamp((front - c.s) / Math.max(1, tail), 0, 1);
+        return c.perp >= killHalf(ageK) ? 0 : surgeTop(ageK);
       },
       // 0..1 threat for the bot flee field / minimap, ahead of the front too
       threatAt(x, z) {
@@ -1079,10 +1450,11 @@
      can see it.
      ============================================================ */
   CBZ.volcanoAudit = function () {
-    let lavaTransparent = 0, lavaMeshes = 0, lavaTris = 0;
+    let lavaTransparent = 0, lavaMeshes = 0, lavaTris = 0, lavaSet = 0;
     const lavaTips = [];
     for (let i = 0; i < LIVE.lava.length; i++) {
       const f = LIVE.lava[i];
+      if (f.hardened) lavaSet++;
       try { lavaTips.push(f.tip); } catch (e) {}
       const ms = [f.mesh, f.channel];
       for (let k = 0; k < ms.length; k++) {
@@ -1097,6 +1469,25 @@
     for (let i = 0; i < LIVE.pyro.length; i++) {
       const g = LIVE.pyro[i].group;
       if (g) pyroBlobs += g.children.length;
+    }
+    /* THE COLUMN'S OWN RATCHET. `columnTransparent` is the ash-cloud twin of
+       `lavaTransparent`: the moment any billow becomes transparent or additive
+       the column is a sprite pile again, which is the exact failure the owner
+       named ("separate rocks... several circular clouds"). Pinned at 0.
+       `columnBillows` prints beside it so a fix that passes by drawing NOTHING
+       cannot pass. */
+    let columnBillows = 0, columnTransparent = 0, columnTop = 0;
+    for (let i = 0; i < LIVE.column.length; i++) {
+      const C = LIVE.column[i], g = C.group;
+      columnTop = Math.max(columnTop, C.topY || 0);
+      if (!g) continue;
+      for (let k = 0; k < g.children.length; k++) {
+        const m = g.children[k];
+        if (!m.visible) continue;
+        columnBillows++;
+        const mt = m.material;
+        if (mt && (mt.transparent || mt.blending === THREE.AdditiveBlending)) columnTransparent++;
+      }
     }
     let ashPeak = 0, ashCells = 0;
     for (let i = 0; i < LIVE.ash.length; i++) {
@@ -1113,15 +1504,29 @@
       // where the live fronts actually are — so a camera (or a threat map)
       // can aim at the flow instead of guessing a hillside
       lavaTips: lavaTips,
+      lavaSet: lavaSet,                        // flows that cooled into scars
       pyroLive: LIVE.pyro.length, pyroBlobs: pyroBlobs,
+      columnLive: LIVE.column.length,
+      columnBillows: columnBillows,
+      columnTransparent: columnTransparent,    // MUST be 0
+      columnOpaque: columnTransparent === 0,
+      columnTopY: +columnTop.toFixed(1),
       laharLive: LIVE.lahar.length,
       ashFields: LIVE.ash.length, ashCells: ashCells,
       ashPeakDepth: +ashPeak.toFixed(3),
       lights: census.lights,
       builtLava: census.lava, builtPyro: census.pyro,
       builtLahar: census.lahar, builtAsh: census.ash,
+      builtColumn: census.column,
     };
   };
+
+  /* LIVE HANDLES, for a probe that needs to INTERROGATE a hazard rather than
+     photograph it. tools/volcano-check.mjs walks the pyroclastic's own billow
+     meshes and asks its own contains() about each one — which is the only way
+     to prove "what you see is what kills you" as a number instead of as a
+     comment. Read-only by convention; nothing in the game reads it. */
+  V.live = LIVE;
 
   CBZ.volcanoFx = V;
 })();
