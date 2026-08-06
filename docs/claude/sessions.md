@@ -2698,3 +2698,87 @@ is 34/36 both BEFORE and AFTER, byte-identical failures (`cast: 3 guards
 {"guards":0,"inmates":0,…}`): that is `games/jail.js`'s county-jail cast in the
 CITY, pre-existing and untouched by this wave. Reverts remain one line each —
 `JAIL_SHOW_DONT_TELL=false` restores every popup in guards.js and ai.js.
+
+## 2026-08-06 — THE BAND IS A REACTION SYSTEM, NOT A PLACE TO PUT NARRATION (solo)
+
+OWNER, after the wave above shipped: *"So did you fix the massive amount of pop
+up slop?"* — and then, decisively, the design it was hiding: *"the whole point
+of that pop up was for it to be dialogue from actual people that you walk up
+to, and then you do something, and then they say something different after what
+you do to them. That's the whole idea of interacting with the world. And what
+they say isn't just automatic based off what you do. It's based off the
+statistics of what it was before and what it is now after what you did, whether
+it was an interaction or running into them physically or pulling a gun out —
+and it's used for narration and dumb dialogue slop now."*
+
+**THE HONEST ANSWER TO THE FIRST QUESTION WAS NO.** The previous wave fixed
+eight call sites — the three the owner pointed at, plus the guard barks — and
+reported it as done. **Measured** (throwaway CDP census, `flashHint` and
+`flashToast` both wrapped, one scripted run of ordinary actions):
+
+| | popups |
+|---|---|
+| before this wave | **10** |
+| after | **0** |
+
+    "A thief swiped 5 from your pocket!"              entities/npc.js
+    "LEG HIT — you're limping"                        city/death.js
+    "REINFORCEMENTS!"                                 systems/reinforcements.js
+    "The towers called it in — riot squad incoming!"  systems/reinforcements.js
+    "The riot squad stands down."                     systems/reinforcements.js
+
+A first census returned **0 and was worthless**: it walked the player around
+without *doing* anything, and every remaining popup is on a verb. The slop is
+on the interactions, which is the whole point.
+
+**THE REAL FAULT WAS NOT THE POPUPS.** Deleting the yellow read line freed the
+subtitle band, and what was still being fed into it was one canned string per
+verb, printed under the actor's name:
+
+    Officer #1
+    Caught red-handed! They're onto you!
+
+The same sentence to every man in the block, whatever he thought of you before
+you did it. A caption with a nametag on it.
+
+**NEW — `systems/prison_react.js` (PRISON_REACT).** Snapshot the actor's
+relationship, let the event happen, diff it, speak what the RESULT calls for.
+The axis that moved furthest — normalised per axis, so three points of grudge
+outranks three points of love — picks the subject; the band the axis LANDS IN
+picks the intensity. Line choice is a stable hash of speaker + situation +
+that speaker's reaction count (quests.js's `chainLine` idiom), never
+`Math.random`, so the same man in the same spot says the same thing and repeats
+walk the pool instead of re-rolling it. Wired to all three causes the owner
+named: menu verbs (`interact.js`), walking into somebody
+(`humancontact.js reactEscape`, which already moved grudge and alerted guards
+in total silence), and a drawn gun (`intimidate.js`).
+
+**A PUNCH MOVED NO RELATIONSHIP AT ALL** — which is exactly why the only thing
+it could say afterwards was a canned "X drops!". `combat.js` now builds
+`playerFear` on a hit and hardens it into `playerGrudge` on repeats. Deliberate
+behaviour change: those two numbers feed the same flee/snitch/gang brains every
+other source of fear already does.
+
+MEASURED, on a clean world, trusting `prisonReact`'s RETURN VALUE:
+
+    nothing moved        -> spoke: false                       (the band stays quiet)
+    grudge 0 -> 3        -> "Watch yourself."
+    grudge 0 -> 12       -> (grudge:up:hi, a different pool)
+    inmate, gun, fear 9  -> "Okay! Okay! It's yours, all of it!"
+    guard,  gun, fear 9  -> "Drop it! DROP IT!"
+    inmate, bump         -> "Watch where you're walking."
+    trust 0 -> 11        -> "I'd take the hole for you. You know that?"
+
+**ON PROBES THAT LIE (`verification.md`).** Two versions of this probe read the
+subtitle out of the DOM. A REFUSED reaction leaves the previous line on screen,
+so every field came back `"Disappointing."` — one stale string — and would have
+passed a naive assertion. A third ran *after* a 60-second heat storm, so
+`doInteract` was acting on whoever was nearest rather than the chosen actor.
+The gate that shipped calls `prisonReact` directly with an explicit actor,
+asserts on its boolean return, and reads the line only when it returned true.
+**A probe that cannot fail is not evidence.**
+
+Six assertions in `tools/prison-polish-check.mjs` section 0c, including "no
+line is a stat readout" (`/\d|\(rep|%|cigs/`) — the failure mode the whole wave
+exists to kill. Reverts stay one line: `PRISON_REACT=false` for the reaction
+layer, `JAIL_SHOW_DONT_TELL=false` for every deleted caption.

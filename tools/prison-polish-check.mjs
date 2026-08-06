@@ -211,6 +211,77 @@ const step = (n) => evl(`for(var i=0;i<${n | 0};i++) CBZ.stepSim(1/60); return t
   }
 }
 
+// ---- 0c. THE RELATIONSHIP PICKS THE LINE, NOT THE VERB (PRISON_REACT) ------
+// 2026-08-06. OWNER: "what they say isn't just automatic based off what you
+// do. It's based off the statistics of what it was before and what it is now
+// after what you did, whether it was an interaction or running into them
+// physically or pulling a gun out."
+//
+// TRUST THE RETURN VALUE, NEVER THE DOM. Two earlier versions of this probe
+// read the subtitle element instead, so a REFUSED reaction handed back the
+// previous line still on screen and every assertion passed on stale text.
+// prisonReact returns true only when the actor actually spoke; the reported
+// line is only read when it did.
+{
+  const r = await evl(`
+    var P = CBZ.player;
+    function line(){ var e=document.getElementById("pinteractSay"); return e?(e.querySelector(".pi-subtitle-line")||{}).textContent:null; }
+    function fresh(l){ return l.filter(function(x){ return x&&x.data&&x.group&&!x.dead&&!x.escaped&&!(x.ko>0); }); }
+    function fire(who, mutate, opts){
+      if (!who) return { noActor: true };
+      who._reactN = 0;
+      P.pos.x = who.group.position.x + 1.0; P.pos.z = who.group.position.z;
+      var before = CBZ.prisonReactSnap(who);
+      mutate(who);
+      var ok = CBZ.prisonReact(who, before, opts || {});
+      return { spoke: !!ok, line: ok ? line() : null };
+    }
+    var npcs = fresh(CBZ.npcs), guards = fresh(CBZ.guards);
+    var A = npcs[0], B = npcs[1], G = guards[0];
+    if (!A || !B || !G) return { cast: { npcs: npcs.length, guards: guards.length } };
+    function zero(w){ w.playerGrudge=0; w.playerFear=0; w.playerTrust=0; w.love=0; w.rep=0; w.bribed=0; }
+    zero(A); zero(B); zero(G);
+    var o = {};
+    o.nothing   = fire(A, function(w){}, {});                                  // no delta -> silent
+    o.grudgeLo  = fire(A, function(w){ w.playerGrudge = 3; }, {});
+    o.grudgeHi  = fire(A, function(w){ w.playerGrudge = 12; }, {});
+    zero(B);
+    o.gunInmate = fire(B, function(w){ w.playerFear = 9; }, { cause: "gun" });
+    zero(B);
+    o.bumpInmate= fire(B, function(w){ w.playerGrudge = 2; }, { cause: "bump" });
+    o.gunGuard  = fire(G, function(w){ w.playerFear = 9; }, { cause: "gun" });
+    zero(A);
+    o.trustHi   = fire(A, function(w){ w.playerTrust = 11; }, {});
+    o.audit = CBZ.prisonReactAudit();
+    return o;
+  `);
+  if (bad(r) || r.cast) check("react: a cast to react to", false, why(r));
+  else {
+    // 1. NOTHING MOVED -> NOTHING SAID. The rule that keeps the band quiet.
+    check("react: no stat moved, nobody speaks", r.nothing.spoke === false, JSON.stringify(r.nothing));
+    // 2. SAME AXIS, SAME DIRECTION, DIFFERENT BAND -> DIFFERENT LINE. This is
+    //    the owner's sentence: the RESULT decides, not the act.
+    check("react: grudge low vs grudge high are different lines",
+      r.grudgeLo.spoke && r.grudgeHi.spoke && r.grudgeLo.line !== r.grudgeHi.line,
+      JSON.stringify({ lo: r.grudgeLo.line, hi: r.grudgeHi.line }));
+    // 3. SAME EVENT, DIFFERENT SPEAKER -> DIFFERENT REGISTER.
+    check("react: a guard and an inmate answer a gun differently",
+      r.gunInmate.spoke && r.gunGuard.spoke && r.gunInmate.line !== r.gunGuard.line,
+      JSON.stringify({ inmate: r.gunInmate.line, guard: r.gunGuard.line }));
+    // 4. THE PHYSICAL CAUSES SPEAK AT ALL — a gun and a shoulder, no menu.
+    check("react: pulling a gun and walking into someone both speak",
+      r.gunInmate.spoke && r.bumpInmate.spoke && r.gunInmate.line !== r.bumpInmate.line,
+      JSON.stringify({ gun: r.gunInmate.line, bump: r.bumpInmate.line }));
+    // 5. A LINE IS A LINE, NOT A STAT READOUT. No numbers, no percentages, no
+    //    "rep 40" — the failure mode this whole wave exists to kill.
+    const said = [r.grudgeLo.line, r.grudgeHi.line, r.gunInmate.line, r.gunGuard.line, r.bumpInmate.line, r.trustHi.line];
+    const numeric = said.filter((s) => s && /\d|\(rep|%|\bcigs?\b/i.test(s));
+    check("react: no line is a stat readout", numeric.length === 0, JSON.stringify(numeric));
+    check("react: every pool reached was a distinct situation",
+      Object.keys(r.audit.byAxis).length >= 5, JSON.stringify(r.audit.byAxis));
+  }
+}
+
 // ---- 1. THE ARMORY HAS EVERY GUN, AND A TAKEN GUN LEAVES THE WALL ---------
 {
   const r = await evl(`
