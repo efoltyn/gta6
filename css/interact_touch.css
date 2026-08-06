@@ -127,7 +127,8 @@
   max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 #pinteractWho .piw-name{ font-size: 15px; font-weight: 700; letter-spacing: 1.3px; color: #fff; }
-#pinteractWho .piw-note{ font-size: 12px; font-weight: 600; letter-spacing: .2px; color: #ffd451; }
+/* .piw-note (the yellow "clean guard | flashlight up" read line) is DELETED
+   in systems/interact.js — no element, so no rule. See the block there. */
 #pinteractWho .piw-tip{ font-size: 11.5px; font-weight: 600; color: #d7e4f3; opacity: .92; }
 
 /* ============================================================
@@ -309,7 +310,7 @@ body.tveh-on #pinteract{ display: none !important; }
   #poptions .po-pill{ min-height: 38px; padding: 6px 12px; }
   #poptions .po-pill .pi-lab{ font-size: 12.5px; }
   #pinteractWho .piw-name{ font-size: 13.5px; }
-  #pinteractWho .piw-note, #pinteractWho .piw-tip{ font-size: 11px; }
+  #pinteractWho .piw-tip{ font-size: 11px; }
 }
 @media (max-width: 520px){
   /* 58, not 48: "Romance" at 9px is ~48px of type and a 48px button (46px of

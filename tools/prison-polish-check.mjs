@@ -116,6 +116,101 @@ const step = (n) => evl(`for(var i=0;i<${n | 0};i++) CBZ.stepSim(1/60); return t
   }
 }
 
+// ---- 0b. THE INTERACTION CARD: NO YELLOW LINE, NO BEFRIEND, BARKS SPEAK ----
+// 2026-08-06. OWNER, on a phone screenshot of a guard's card: "Remove this
+// little yellow text ... remove befriend that's not a thing remove that
+// completely from the game ... there's messages that pop up like THEYRE ONTO
+// YOU, that's where dialogue should pop up. REMOVE POPUPSLOP HUDWASTE."
+// Three claims about live state, none about pixels. Runs BEFORE the armory
+// section for the same reason section 0 does — that section makes real heat.
+{
+  // Stand on top of a guard so systems/interact.js raises the card on him.
+  const r = await evl(`
+    var g = CBZ.guards.filter(function(x){ return x.data && !x.dead && !(x.ko > 0); })[0];
+    if (!g) return { noGuard: true };
+    CBZ.player.pos.x = g.group.position.x + 1.2;
+    CBZ.player.pos.z = g.group.position.z;
+    for (var i=0;i<30;i++) CBZ.stepSim(1/60);
+    var note = document.getElementById("interactNote");
+    var card = document.getElementById("interact");
+    var verbs = g._verbs || [];
+    return {
+      up: !!(card && card.classList.contains("show")),
+      noteText: note ? note.textContent : null,
+      noteShown: !!(note && getComputedStyle(note).display !== "none"),
+      piwNotes: document.querySelectorAll(".piw-note").length,
+      verbs: verbs,
+      cardText: (card ? card.innerText : "") + " " + ((document.getElementById("pinteract") || {}).innerText || ""),
+    };
+  `);
+  if (bad(r) || r.noGuard) check("card: a guard raises the card", false, why(r));
+  else {
+    check("card: it is up on the guard", r.up === true, JSON.stringify({ up: r.up, verbs: r.verbs }));
+    // THE YELLOW LINE. #interactNote is SHARED with the city card, so the
+    // prison must leave it both empty AND hidden; .piw-note (touch) is deleted
+    // outright, so the element must not exist at all.
+    check("card: no yellow read line on the desktop card",
+      r.noteText === "" && r.noteShown === false,
+      JSON.stringify({ text: r.noteText, shown: r.noteShown }));
+    check("card: the touch rail has no note element at all", r.piwNotes === 0, "nodes=" + r.piwNotes);
+    // BEFRIEND. Not renamed on the button — gone from the verb table, so no
+    // context anywhere can produce the id, and `talk` is what took its slot.
+    check("card: no befriend verb on a guard",
+      Array.isArray(r.verbs) && r.verbs.indexOf("befriend") < 0 && r.verbs.indexOf("talk") >= 0,
+      JSON.stringify(r.verbs));
+    check("card: the word 'Befriend' is nowhere in the card",
+      !/befriend/i.test(r.cardText || ""), JSON.stringify((r.cardText || "").slice(0, 120)));
+  }
+}
+{
+  // Every inmate context too — the base verb list, not just the guard branch.
+  const r = await evl(`
+    var n = CBZ.npcs.filter(function(x){ return x.data && !x.dead && !(x.ko > 0); })[0];
+    if (!n) return { noNpc: true };
+    CBZ.player.pos.x = n.group.position.x + 1.2;
+    CBZ.player.pos.z = n.group.position.z;
+    for (var i=0;i<30;i++) CBZ.stepSim(1/60);
+    return { verbs: n._verbs || [], winReasons: typeof CBZ.winGame === "function" };
+  `);
+  if (bad(r) || r.noNpc) check("card: an inmate raises the card", false, why(r));
+  else check("card: no befriend verb on an inmate",
+    Array.isArray(r.verbs) && r.verbs.indexOf("befriend") < 0 && r.verbs.indexOf("talk") >= 0,
+    JSON.stringify(r.verbs));
+}
+{
+  // A BARK IS DIALOGUE. Put a guard on the hunt beside the player and count
+  // both surfaces: the hint panel must stay at zero and the subtitle must
+  // carry the line with the speaker's name on it.
+  const r = await evl(`
+    var hints = 0, real = CBZ.flashHint;
+    CBZ.flashHint = function(){ hints++; return real && real.apply(null, arguments); };
+    var g = CBZ.guards.filter(function(x){ return x.data && !x.dead && !(x.ko > 0) && !(x.bribed > 0); })[0];
+    if (!g) { CBZ.flashHint = real; return { noGuard: true }; }
+    CBZ.player.pos.x = g.group.position.x + 3.0;
+    CBZ.player.pos.z = g.group.position.z;
+    var said0 = CBZ.prisonSayAudit().said;
+    g.state = "patrol"; g.hunt = 3;
+    for (var i=0;i<45;i++) CBZ.stepSim(1/60);
+    var sub = document.getElementById("pinteractSay");
+    var out = {
+      hints: hints,
+      spokeMore: CBZ.prisonSayAudit().said > said0,
+      shown: !!(sub && sub.classList.contains("show")),
+      line: sub ? (sub.querySelector(".pi-subtitle-line") || {}).textContent : null,
+      who: sub ? (sub.querySelector(".pi-subtitle-speaker") || {}).textContent : null,
+    };
+    CBZ.flashHint = real;
+    return out;
+  `);
+  if (bad(r) || r.noGuard) check("bark: a guard can hunt", false, why(r));
+  else {
+    check("bark: nothing went to the hint popup", r.hints === 0, "flashHint calls=" + r.hints);
+    check("bark: the guard SPOKE instead", r.spokeMore === true && r.shown === true,
+      JSON.stringify({ line: r.line, who: r.who }));
+    check("bark: the speaker is named", !!r.who, JSON.stringify(r.who));
+  }
+}
+
 // ---- 1. THE ARMORY HAS EVERY GUN, AND A TAKEN GUN LEAVES THE WALL ---------
 {
   const r = await evl(`

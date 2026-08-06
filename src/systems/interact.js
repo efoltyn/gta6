@@ -3,14 +3,14 @@
    anyone and the options fade in beside them. Four social verbs on the
    home-row cluster (the numbers belong to the inventory hotbar):
 
-       [I] Romance   [J] Insult   [K] Befriend   [L] Steal
+       [I] Romance   [J] Insult   [K] Talk   [L] Steal
        (fight is left-click / the touch trigger, never a menu row)
 
    Merchants, the dealer and bent cops swap a row for Trade, guards for
    Bribe / Pay off, a cop player for Question / Warn / Cuff / Search,
-   and an approaching NPC replaces the lot with its own offer. Befriend
-   routes through systems/quests.js (favors, rep, and the "they let you
-   walk out" win); Romance is its own way out.
+   and an approaching NPC replaces the lot with its own offer. Talk
+   routes through systems/quests.js (favors and rep); Romance is its own
+   way out.
 
    ON TOUCH the whole card is REPLACED rather than restyled — on iPad,
    every choice is a vertical row docked beside Reload with its full
@@ -83,7 +83,7 @@
     romance:  { label: "Romance",         fn: (a) => CBZ.econ.romance(a) },
     insult:   { label: "Insult",          fn: (a) => CBZ.econ.insult(a) },
     fight:    { label: "Fight",           fn: (a) => (CBZ.punch ? CBZ.punch(a) : CBZ.econ.beat(a)) },
-    befriend: { label: "Befriend",        fn: (a) => (CBZ.quests ? CBZ.quests.onTalk(a) : CBZ.econ.talk(a)) },
+    talk:     { label: "Talk",            fn: (a) => (CBZ.quests ? CBZ.quests.onTalk(a) : CBZ.econ.talk(a)) },
     trade:    { label: "Trade",           fn: (a) => {
       const res = CBZ.econ.trade(a);
       if (res && res.ok && a.approach && a.approach.kind === "deal") {
@@ -138,7 +138,7 @@
     romance:  "Flirt — max it and they'll break you out",
     insult:   "Talk trash — drops rep, may start a brawl",
     fight:    "Throw hands — chain hits for a K.O. combo",
-    befriend: "Do favors, build rep — friends walk you free",
+    talk:     "Hear them out — favors pay in cigs",
     trade:    "Buy contraband with cigarettes",
     bribe:    "Spend cigs to make authority look away",
     steal:    "Lift a key, a chain, or cigs — risky if seen",
@@ -206,21 +206,6 @@
     try { localStorage.setItem("cbz_learned", JSON.stringify(learned)); localStorage.setItem("cbz_help", helpOn ? "1" : "0"); } catch (e) {}
   }
   function tipsShowing() { return helpOn && !Object.keys(DESC).every((k) => learned[k]); }
-  function reportTone(a) {
-    if (!a || !(a.reportedPlayerT > 0) || a.reportedPlayerCred == null) return "";
-    if (a.reportedPlayerCred < 0.45) return "shaky ";
-    if (a.reportedPlayerCred > 0.78) return "solid ";
-    return "";
-  }
-  function reportDetail(a) {
-    const base = `${reportTone(a)}${a.reportedPlayerKind || "reported"} to ${a.reportedPlayerGuard || "a guard"}`;
-    const parts = [];
-    if (a.reportedPlayerCred != null) parts.push(`cred ${Math.round(a.reportedPlayerCred * 100)}%`);
-    if (a.reportedPlayerT > 0) parts.push(`${Math.ceil(a.reportedPlayerT)}s`);
-    if (a.reportedPlayerSpread > 0) parts.push(`${a.reportedPlayerSpread} heard`);
-    if (a.reportedPlayerLastKnown && a.reportedPlayerLastKnown.type) parts.push(a.reportedPlayerLastKnown.type);
-    return `KNOWN SNITCH - ${base}${parts.length ? " · " + parts.join(" · ") : ""}`;
-  }
   function cleanName(a) {
     return a && a.data && a.data.name ? a.data.name.replace(/^the |^a |^an /, "") : "someone";
   }
@@ -234,76 +219,46 @@
     const names = CBZ.GANG_NAMES || ["Reds", "Blues"];
     return (names[a.gang] || "Crew").replace(/^the /, "");
   }
-  function readKindLabel(kind) {
-    if (kind === "wealth") return "heard cigs";
-    if (kind === "heat") return "heard heat";
-    if (kind === "badge") return "heard badge";
-    if (kind === "snitch") return "heard snitch";
-    if (kind === "debt") return "heard debt";
-    if (kind === "fear") return "heard violence";
-    return kind ? "heard " + kind : "";
-  }
-  function actorRead(a) {
-    if (!a) return "";
-    if (a.kind === "guard" || a.kind === "warden") {
-      const guardBits = [];
-      if (a.kind === "warden") guardBits.push("warden leverage");
-      else guardBits.push(a.corrupt ? "bent cop" : "clean guard");
-      if (a.bribed > 0) guardBits.push(`paid ${Math.ceil(a.bribed)}s`);
-      else if (a.corrupt) guardBits.push("wants payoff");
-      if (a.flashlightOn) guardBits.push("flashlight up");
-      return guardBits.slice(0, 3).join(" | ");
-    }
+  /* ===========================================================================
+     THE YELLOW LINE IS GONE (2026-08-06).
 
-    const bits = [];
-    const trust = a.playerTrust || 0;
-    const fear = a.playerFear || 0;
-    const grudge = a.playerGrudge || 0;
-    if (trust >= 8) bits.push("loyal");
-    else if (trust >= 4) bits.push("trusts you");
-    else if (trust <= -4) bits.push("cold");
-    if (grudge >= 9) bits.push("wants payback");
-    else if (grudge >= 5) bits.push("holds grudge");
-    if (fear >= 9) bits.push("afraid");
-    else if (fear >= 5) bits.push("wary");
+     OWNER, on a phone screenshot of a guard's card: "Remove this little yellow
+     text from the game jail game … there's messages that pop up like THEYRE
+     ONTO YOU, that's where dialogue should pop up. REMOVE POPUPSLOP HUDWASTE."
 
-    const read = a.blockRead && (a.blockRead.t || 0) > 0 ? a.blockRead : null;
-    if (read && read.score > 12) {
-      const src = read.source ? ` from ${shortText(read.source, 11)}` : "";
-      bits.push(`${readKindLabel(read.kind)}${src}`);
-    }
+     The photographed line was `actorRead()` — "clean guard | flashlight up" —
+     and it is the exact fourth-wall shape JAIL_SHOW_DONT_TELL already deleted
+     everywhere else in the prison: a STAT DUMP printed over a world that was
+     already showing every one of those facts. The flashlight is ON, in his
+     hand, lighting the floor. The uniform is the uniform. "neutral read",
+     "wants payoff", "Reds crew", "KNOWN SNITCH - shaky reported to a guard ·
+     cred 62% · 14s" — all of it read as a debug overlay, and none of it was a
+     thing a person in that room could see.
 
-    if (a.gang >= 0) {
-      const crew = gangShort(a);
-      const standing = CBZ.gangStanding ? CBZ.gangStanding(a.gang) : 0;
-      const debt = CBZ.gangDebt ? CBZ.gangDebt(a.gang) : 0;
-      if (debt >= 10) bits.push(`${crew} debt ${Math.ceil(debt)}`);
-      else if (standing >= 35) bits.push(`${crew} cover`);
-      else if (standing <= -22) bits.push(`${crew} hostile`);
-      else if (CBZ.player && CBZ.player.gang === a.gang) bits.push(`${crew} crew`);
-    }
-
-    if (!bits.length) {
-      if (a.role === "dealer" || (a.data && a.data.offer)) bits.push("watching pockets");
-      else if ((a.personality && a.personality.snitch) > 0.72) bits.push("talks to guards");
-      else if ((a.personality && a.personality.nerve) > 0.72) bits.push("bold");
-      else bits.push("neutral read");
-    }
-    return bits.slice(0, 3).join(" | ");
-  }
-  function panelNote(a) {
-    const priority = a.quest
-      ? "TASK: " + a.quest.text
-      : (a.approach && a.approach.msg ? a.approach.msg
-        : ((a.reportedPlayerT || 0) > 0 ? reportDetail(a)
-        : (CBZ.game.role === "cop" && a.copMarked > 0 ? "TIP TARGET - search or detain with cleaner cause"
-        : (a.rep >= (CBZ.quests ? CBZ.quests.FRIEND : 100) ? "FRIEND - Befriend to walk free"
-        : (a.love >= 100 ? "LOVER - Romance to walk free" : "")))));
-    const read = actorRead(a);
-    const motive = a.approach && a.approach.motive ? `motive: ${shortText(a.approach.motive, 24)}` : "";
-    if (!priority) return read;
-    if (motive) return `${shortText(priority, 62)} | ${motive}`;
-    return priority.length < 58 && read ? `${priority} | ${read}` : priority;
+     So `panelNote` is deleted outright rather than trimmed. Nothing that
+     carried real state is lost:
+       · an approach's OFFER is now SPOKEN by the person making it, through
+         prisonSay — the file's own ranged/ranked dialogue surface. That is the
+         owner's second sentence, done literally: where a HUD line used to pop,
+         a line of dialogue pops instead;
+       · the price/target/meter each verb needs still rides its own button
+         (`labelFor` writes "Slip 10 to look away", `subFor` writes the chip);
+       · a live TASK is still on the button that answers it.
+     Both HUD slots — the prison card's #interactNote and the touch rail's
+     .piw-note — are left permanently empty and hidden. #interactNote is SHARED
+     with city/interactions.js and city/police.js, which set their own text and
+     display on every render, so blanking it here cannot leak into the city.
+     =========================================================================== */
+  // The offer, said out loud, ONCE per approach. Re-armed by a new approach on
+  // the same actor (`.t` climbs again) so a second visit still speaks.
+  function speakApproach(a) {
+    if (!a || !a.approach || !(a.approach.t > 0) || !a.approach.msg) return;
+    if (a.approach.greeted) return;
+    // `greeted` is the SAME latch entities/guards.js sets when a guard finishes
+    // walking over and says his piece — shared on purpose, so the offer is
+    // spoken exactly once whichever of the two got there first.
+    a.approach.greeted = true;
+    prisonSay(a, a.approach.msg, { rank: SAY_ACT, secs: 3.0 });
   }
 
   function verbsFor(a) {
@@ -350,11 +305,11 @@
       return ["question", "warn", "detain", "search"];
     }
     if (a.kind === "guard" || a.kind === "warden") {
-      const gverbs = (a.corrupt || a.kind === "warden") ? ["bribe", "payoff", "trade", "insult", "steal"] : ["bribe", "insult", "befriend", "steal"];
+      const gverbs = (a.corrupt || a.kind === "warden") ? ["bribe", "payoff", "trade", "insult", "steal"] : ["bribe", "insult", "talk", "steal"];
       if (!a.data || !a.data.offer) return gverbs.filter((v) => v !== "trade");
       return gverbs;
     }
-    const base = ["romance", "insult", "befriend"];   // fight = left-click
+    const base = ["romance", "insult", "talk"];   // fight = left-click
     if (a.data && a.data.offer) base.push("trade");                       // merchants/bent cops
     base.push("steal");                                                   // pickpocket ANYONE — lift cigs, a chain, even a key
     if (a.gang >= 0 && CBZ.player.gang == null && (a.rep || 0) >= 40) base.push("join"); // recruit you
@@ -370,11 +325,10 @@
     if (v === "accept" || v === "join" || v === "trade" || v === "bribe" ||
         v === "payoff" || v === "pay" || v === "paySilence" || v === "respect") return "";
     if (v === "romance") return "" + Math.round(a.love || 0);
-    if (v === "befriend") {
-      if ((a.playerTrust || 0) >= 6) return "trust+";
-      if ((a.playerGrudge || 0) >= 6) return "repair";
-      return "♥ " + (a.rep || 0);
-    }
+    // `talk` carries NO chip. The "♥ 0" that used to hang under this button was
+    // the same yellow debug read as the deleted note line — a rep integer the
+    // player never asked to see. What talking does shows up in what they say.
+    if (v === "talk") return "";
     if (v === "insult") {
       if ((a.playerGrudge || 0) >= 6) return "bad blood";
       if ((a.playerFear || 0) >= 6) return "fear";
@@ -454,7 +408,7 @@
     switch (v) {
       case "romance":  return (a.love || 0) >= 60 ? `Get closer to ${nm}` : `Flirt with ${nm}`;
       case "insult":   return `Talk trash to ${nm}`;
-      case "befriend": return (a.playerGrudge || 0) >= 6 ? `Square things with ${nm}` : ((a.rep || 0) >= 45 ? `Catch up with ${nm}` : `Chat up ${nm}`);
+      case "talk":     return (a.playerGrudge || 0) >= 6 ? `Square things with ${nm}` : ((a.rep || 0) >= 45 ? `Catch up with ${nm}` : `Chat up ${nm}`);
       case "fight":    return `Throw hands with ${nm}`;
       case "trade":    { const o = a.data && a.data.offer; return o ? `Buy ${shortText(o.item, 16)} — ${o.price}` : "Browse their goods"; }
       case "bribe":    { const c = a.kind === "warden" ? 25 : (a.corrupt ? 5 : 10); return `Slip ${c} to look away`; }
@@ -615,7 +569,7 @@
   //  arithmetic block at the top of css/interact_touch.css. All this file does
   //  is build and fill the DOM; where it lands is one CSS decision.
   // ===========================================================================
-  let piRoot = null, piWho = null, piName = null, piNote = null, piTip = null;
+  let piRoot = null, piWho = null, piName = null, piTip = null;
   let piVerbs = null, piOpts = null, piSig = "", piShown = false, piQuiet = null;
 
   function buildTouchUI() {
@@ -625,16 +579,16 @@
     // The containers stay separate for the compact phone fallback; tablet CSS
     // stacks both into one uninterrupted vertical rail.
     piRoot.innerHTML =
+      // .piw-note is NOT built any more — the yellow read line is deleted, not
+      // hidden, so nothing downstream can put text back into it.
       '<div id="pinteractWho">' +
         '<span class="piw-name"></span>' +
-        '<span class="piw-note"></span>' +
         '<span class="piw-tip"></span>' +
       "</div>" +
       '<div class="pi-row"><div id="pverbs"></div><div id="poptions"></div></div>';
     document.body.appendChild(piRoot);
     piWho = piRoot.querySelector("#pinteractWho");
     piName = piRoot.querySelector(".piw-name");
-    piNote = piRoot.querySelector(".piw-note");
     piTip = piRoot.querySelector(".piw-tip");
     piVerbs = piRoot.querySelector("#pverbs");
     piOpts = piRoot.querySelector("#poptions");
@@ -694,10 +648,9 @@
       esc(label) + '">' + esc(word) + "</button></div>";
   }
 
-  function renderTouch(a, core, rest, rawNote) {
+  function renderTouch(a, core, rest) {
     buildTouchUI();
     const name = cleanName(a).toUpperCase();
-    const note = shortText(rawNote, 74);
     const docked = !!(CBZ.touchInteractionDocked && CBZ.touchInteractionDocked());
     // ONE teaching line, never a wall: the first verb on offer this player has
     // never used. Tips off — or everything learned — leaves the row silent.
@@ -737,12 +690,10 @@
 
     // renderPanel runs EVERY frame while somebody is in range; only touch the
     // DOM when what it would say actually changed.
-    const sig = [name, note, tip, btns, pills].join("\u0001");
+    const sig = [name, tip, btns, pills].join("\u0001");
     if (sig === piSig) return;
     piSig = sig;
     piName.textContent = name;
-    piNote.textContent = note;
-    piNote.style.display = note ? "" : "none";
     piTip.textContent = tip;
     piTip.style.display = tip ? "" : "none";
     piVerbs.innerHTML = btns;
@@ -801,9 +752,13 @@
   }
 
   function renderPanel(a) {
-    const note = panelNote(a);
     el.interactName.textContent = cleanName(a).toUpperCase();
-    el.interactNote.textContent = note;
+    // The prison card has no note line at all now. #interactNote is SHARED with
+    // the city card, which writes its own text + display on every render, so
+    // blanking it from here is scoped to the prison by construction.
+    if (el.interactNote.textContent !== "") el.interactNote.textContent = "";
+    el.interactNote.style.display = "none";
+    speakApproach(a);           // the offer is SAID, not printed
 
     if (touchUI()) {
       // TOUCH: on iPad every verb becomes a vertical explained row beside
@@ -817,7 +772,7 @@
       const core = cap4(all);
       const rest = all.filter((v) => core.indexOf(v) < 0);
       a._verbs = core.concat(rest);
-      renderTouch(a, core, rest, note);
+      renderTouch(a, core, rest);
       return;
     }
 
@@ -860,10 +815,10 @@
   const OPT_KEYS = ["i", "j", "k", "l"];
   // contexts can offer more verbs than four slots — when they overflow, keep
   // the FOUR most important and never silently strand a game-critical verb
-  // (refuse=decline, steal=lift keys/loot, trade=commerce, befriend/join/
+  // (refuse=decline, steal=lift keys/loot, trade=commerce, talk/join/
   // romance=win+progression). Selection is by priority; menu order preserved.
   const VERB_PRIORITY = {
-    refuse: 100, accept: 92, trade: 88, steal: 86, befriend: 84, confrontReport: 84,
+    refuse: 100, accept: 92, trade: 88, steal: 86, talk: 84, confrontReport: 84,
     join: 82, romance: 80, paySilence: 80, bribe: 78, threatenSnitch: 78, payoff: 76,
     pay: 74, detain: 72, listen: 70, search: 70, warn: 66, threaten: 64, respect: 60,
     question: 60, haggle: 50, insult: 40,

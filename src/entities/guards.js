@@ -11,6 +11,41 @@
   // guards call out their state changes ("STOP RIGHT THERE!") near the player.
   if (CBZ.CONFIG && CBZ.CONFIG.JAIL_GUARD_BARKS == null) CBZ.CONFIG.JAIL_GUARD_BARKS = true;
 
+  /* ==========================================================================
+     THE SAME NARRATION SINK entities/ai.js ALREADY OWNS (JAIL_SHOW_DONT_TELL).
+
+     OWNER, 2026-08-06: "there's messages that pop up like THEYRE ONTO YOU,
+     that's where dialogue should pop up. REMOVE POPUPSLOP HUDWASTE."
+
+     ai.js migrated its fifty-five popups a wave ago; this file kept seven, and
+     the worst of them was `guardBark` — which printed an actual LINE OF
+     DIALOGUE ('Officer #1: "STOP RIGHT THERE!"') into the #hint panel, i.e.
+     put speech in the one place speech must never go. The rest were captions
+     over visible events: a guard turning away, a bent cop leaning on the tab,
+     an inmate pointing at you while `npcEmote` already floats a "!" over his
+     head.
+
+     `nar` and `say` are the same two functions ai.js exports the doctrine
+     through, kept local so this file has no new dependency:
+       nar(text, secs)                 -> silent (counted mute)
+       nar(text, secs, actor, "line")  -> that actor SAYS it, over their head
+     `text` is still the JAIL_SHOW_DONT_TELL=false popup, so the flag remains a
+     byte-identical one-line revert to the old caption track. Speech goes
+     through systems/interact.js's CBZ.prisonSay, which is ranged (you overhear
+     it, you are not broadcast at), ranked (it cannot stomp the answer to a
+     verb you just pressed) and silent for the downed — none of which the hint
+     panel was.
+     ========================================================================== */
+  function guardShowing() { return !(CBZ.CONFIG && CBZ.CONFIG.JAIL_SHOW_DONT_TELL === false); }
+  function say(actor, text, secs, rank) {
+    if (!actor || !text || !CBZ.prisonSay) return false;
+    return CBZ.prisonSay(actor, text, { secs: Math.max(1.6, secs || 2.0), rank: rank });
+  }
+  function nar(text, secs, actor, spoken) {
+    if (!guardShowing()) { if (CBZ.flashHint) CBZ.flashHint(text, secs); return false; }
+    return say(actor, spoken, secs) || true;
+  }
+
   let guardNo = 0;
   function addFlashlight(ch) {
     const group = new THREE.Group();
@@ -267,7 +302,7 @@
       CBZ.addHeat && CBZ.addHeat(a.kind === "racketOffer" ? (reason === "refuse" ? 18 : 11) : (reason === "refuse" ? 14 : 8));
       nudgeCleanGuard(g);
     }
-    if (near && CBZ.flashHint) CBZ.flashHint(`${nameOf(g)} stops being friendly.`, 1.7);
+    if (near) nar(`${nameOf(g)} stops being friendly.`, 1.7, g, "We're done talking.");
   }
 
   function considerPayoffApproach(g, dt) {
@@ -325,13 +360,14 @@
     return best;
   }
 
-  function racketHint(text) {
+  // The racket used to caption itself ("X leans on the racket tab."). Same
+  // 1-in-3 spacing, but the bent cop says his own half of it now.
+  function racketHint(text, guard, spoken) {
     const game = CBZ.game || {};
-    if (!CBZ.flashHint) return;
     game.racketHintT = Math.max(0, (game.racketHintT || 0) - 1);
     if (game.racketHintT > 0) return;
     game.racketHintT = 3;
-    CBZ.flashHint(text, 1.7);
+    nar(text, 1.7, guard, spoken);
   }
 
   function tagNearbyBadgeRumor(source, strength) {
@@ -387,7 +423,7 @@
         startPayoffApproach(bent, "payoffOffer", { thresholdPressure: true });
       }
       tagNearbyBadgeRumor(bent, 18 + Math.min(20, debt + Math.max(0, -ledger) * 0.5));
-      racketHint(`${nameOf(bent)} leans on the racket tab.`);
+      racketHint(`${nameOf(bent)} leans on the racket tab.`, bent, "Your tab's getting long. Settle it.");
       game.racketPressureT = 8.5 + CBZ.econ.rng() * 5;
       return;
     }
@@ -396,7 +432,7 @@
       startCleanSweep(bent, 16 + Math.min(18, debt * 0.45 + Math.max(0, -ledger) * 0.28));
       addRacketStanding(-2);
       tagNearbyBadgeRumor(bent, 24);
-      racketHint(`${nameOf(bent)} leaks your trail to clean guards.`);
+      racketHint(`${nameOf(bent)} leaks your trail to clean guards.`, bent, "You don't pay me? Then somebody else hears your name.");
       game.racketPressureT = 11 + CBZ.econ.rng() * 7;
       return;
     }
@@ -712,7 +748,7 @@
       };
       n.approachCD = Math.min(n.approachCD || 2, 0.9 + rng() * 2.0);
       if (CBZ.npcEmote) CBZ.npcEmote(n, "?");
-      if (nearPlayer && CBZ.flashHint) CBZ.flashHint(`${who} misdirects ${nameOf(g)}.`, 1.5);
+      if (nearPlayer) nar(`${who} misdirects ${nameOf(g)}.`, 1.5, n, "Nah, boss — nobody came through here.");
       return;
     }
 
@@ -765,7 +801,7 @@
       n.approachCD = Math.min(n.approachCD || 2.5, 1.0 + rng() * 2.4);
       n.playerGrudge = Math.min(14, grudge + 1);
       if (CBZ.npcEmote) CBZ.npcEmote(n, "!");
-      if (nearPlayer && CBZ.flashHint) CBZ.flashHint(`${who} points ${nameOf(g)} your way.`, 1.6);
+      if (nearPlayer) nar(`${who} points ${nameOf(g)} your way.`, 1.6, n, "Boss — he went that way. I saw him.");
       return;
     }
 
@@ -785,7 +821,7 @@
     huntWarden: ["You dare run from ME?", "MY block. MY rules. Take him down!"],
     investigate: ["I heard something over there…", "Eyes open — something moved.", "Hold up. Checking that out."],
   };
-  let barkCD = 0;   // global spacing so barks never spam the hint line
+  let barkCD = 0;   // global spacing so barks never spam the subtitle band
 
   function guardBark(g, s) {
     if (!(CBZ.CONFIG && CBZ.CONFIG.JAIL_GUARD_BARKS)) return;
@@ -797,8 +833,13 @@
     if (!pool) return;
     const dx = player.pos.x - g.group.position.x, dz = player.pos.z - g.group.position.z;
     if (dx * dx + dz * dz > 26 * 26) return;   // out of earshot
+    const line = pool[(Math.random() * pool.length) | 0];
+    // A BARK IS DIALOGUE. It goes over the guard's head as a subtitle with his
+    // name attached, not into #hint quoted as a caption. prisonSay applies its
+    // own (tighter) range gate on top of the 26u earshot test above, so a bark
+    // it turns down must not burn the cooldown either.
+    if (!say(g, line, 1.9)) { if (!guardShowing() && CBZ.flashHint) CBZ.flashHint(`${nameOf(g)}: “${line}”`, 1.7); else return; }
     barkCD = 6;
-    if (CBZ.flashHint) CBZ.flashHint(`${nameOf(g)}: “${pool[(Math.random() * pool.length) | 0]}”`, 1.7);
   }
 
   function noteState(g, s) {
@@ -872,7 +913,11 @@
         animChar(g.char, 0, dt);
         if (!a.greeted) {
           a.greeted = true;
-          CBZ.flashHint && CBZ.flashHint(a.msg + " Walk up to answer.", 2.1);
+          // He walked over to say a thing — so he SAYS it. The old line also
+          // tacked on "Walk up to answer.", a stage direction for a man who is
+          // already standing in front of you; the card is up, the buttons are
+          // the answer.
+          nar(a.msg, 2.1, g, a.msg);
         }
       }
       updateFlashlight(g, dt);

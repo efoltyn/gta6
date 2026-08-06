@@ -3609,7 +3609,11 @@
           n.group.rotation.y = CBZ.lerpAngle(n.group.rotation.y, Math.atan2(px - n.group.position.x, pz - n.group.position.z), 1 - Math.pow(0.0001, dt));
           if (!a.greeted) {
             a.greeted = true;
-            nar(a.msg + " Walk up to answer.", 2.2);
+            // He crossed the block to say this — so he SAYS it, over his head,
+            // instead of the line being dropped mute (it has been silent since
+            // the show-don't-tell wave) or captioned with "Walk up to answer.",
+            // a stage direction for a man already standing in front of you.
+            nar(a.msg, 2.2, n, a.msg);
           }
           return 0;
         }

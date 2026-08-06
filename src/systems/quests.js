@@ -1,11 +1,20 @@
 /* ============================================================
-   systems/quests.js — favors, reputation, and the "befriend your way
-   out" win. Talking to an actor can hand you a task; doing dirty work
-   for them (beating someone up, pulling heists, paying tribute) raises
-   their reputation toward you. Max it out and ANYONE — inmate, guard,
-   even the Warden — will quietly let you walk out the back.
+   systems/quests.js — favors and reputation. Talking to an actor can hand
+   you a task; doing dirty work for them (beating someone up, pulling heists,
+   paying tribute) raises their reputation toward you and pays in cigs.
 
-   This routes the menu's [1] Talk action through onTalk().
+   This routes the menu's Talk action through onTalk().
+
+   BEFRIEND IS GONE (2026-08-06). OWNER: "remove befriend that's not a thing
+   remove that completely from the game." The verb, its "♥ rep" chip, its
+   "FRIEND - Befriend to walk free" HUD line and the rep-100 `winGame(
+   "befriend")` it existed to reach are all deleted — you did not make a
+   friend, you ran errands until a number hit 100 and a side gate opened,
+   which is exactly the fake-mechanic shape the complaint names. What is left
+   is the part that was always real: people ask you for things, you do them,
+   they pay you, and the block's intel points at the keycard→armory spine.
+   Rep still accumulates and still gates who talks straight to you; it is no
+   longer a win condition and is no longer printed at the player.
 
    SPINE EMPHASIS (PRISON_ARMORY_SPINE, declared in world/gunroom.js). OWNER,
    verbatim: "it's not about getting cigarettes and opening the dumb chests —
@@ -31,7 +40,7 @@
   const CBZ = window.CBZ;
   const econ = CBZ.econ;
   const g = CBZ.game;
-  const FRIEND = 100; // rep needed for a freedom favor
+  const FRIEND = 100; // rep at which an actor stops holding anything back
   // gunroom.js owns the default (it loads first); undefined reads as ON.
   const SPINE = !(CBZ.CONFIG && CBZ.CONFIG.PRISON_ARMORY_SPINE === false);
 
@@ -108,19 +117,13 @@
     actor.rep = (actor.rep || 0) + 34;
     actor.quest = null;
     CBZ.sfx("key");
-    if (actor.rep >= FRIEND) return `${actor.data.name} grins: "You're alright. Come find me — I'll get you out."`;
-    return `${actor.data.name}: "Nice work." (+34 rep${q.reward ? ", +" + q.reward + " cigs" : ""})`;
+    if (actor.rep >= FRIEND) return `${actor.data.name}: "You're alright. Anything you need in here, you ask me first."`;
+    return `${actor.data.name}: "Nice work."${q.reward ? ` (+${q.reward} cigs)` : ""}`;
   }
 
-  // the [1] Talk handler
+  // the Talk handler
   function onTalk(actor) {
     actor.rep = actor.rep || 0;
-
-    // befriended enough? they spring you — alternative victory.
-    if (actor.rep >= FRIEND) {
-      CBZ.winGame("befriend", actor);
-      return { ok: true, msg: `${actor.data.name} slips you out a side gate. You're free!` };
-    }
 
     // active quest: report progress or complete it
     if (actor.quest) {

@@ -2632,3 +2632,69 @@ work.** For this change that is a throwaway toast probe (~90s, and it caught the
 old behavior) plus `node --check`. Run the math gate when the change can move
 what the math gate measures — world building, sim ticks, determinism — not as a
 tax on editing a sentence.
+
+## 2026-08-06 — THE YELLOW LINE, BEFRIEND, AND BARKS IN THE HINT PANEL (solo)
+
+OWNER, on a phone screenshot of a guard's interaction card: *"Remove this
+little yellow text from the game jail game and also remove befriend that's not
+a thing remove that completely from the game plus there's messages that pop up
+like THEYRE ONTO YOU, that's where dialogue should pop up REMOVE POPUPSLOP
+HUDWASTE."*
+
+Three separate faults, all in `mode === "escape"`.
+
+**1. THE YELLOW LINE WAS A DEBUG OVERLAY.** The photographed text — `clean
+guard | flashlight up` — was `actorRead()` feeding `panelNote()` in
+`systems/interact.js`. It is the exact fourth-wall shape JAIL_SHOW_DONT_TELL
+deleted everywhere else in the prison: the flashlight is ON, in his hand,
+lighting the floor; the uniform is the uniform. `panelNote` is DELETED, not
+trimmed — with it `actorRead`, `readKindLabel`, `reportDetail` and `reportTone`
+(that last pair printed `KNOWN SNITCH - shaky reported to a guard · cred 62% ·
+14s` at the player). `.piw-note` no longer exists as an element, and
+`#interactNote` — SHARED with `city/interactions.js` and `city/police.js`, both
+of which write their own text and display every render — is left empty and
+hidden by the prison card. Nothing informative was lost: `labelFor` already
+writes `Slip 10 to look away`, `subFor` writes the chip, and an approach's
+OFFER is now SPOKEN by the person making it (`speakApproach` → `prisonSay`),
+which is the owner's second sentence done literally.
+
+**2. BEFRIEND IS GONE, NOT RENAMED.** The verb id, its `♥ 0` chip, the
+`FRIEND - Befriend to walk free` note and the rep-100 `winGame("befriend")` it
+existed to reach are all deleted (`systems/interact.js`, `systems/quests.js`,
+`systems/state.js`). You never made a friend — you ran errands until an integer
+hit 100 and a side gate opened. `talk` takes the slot and the same
+`quests.onTalk` handler, so the favor/rep/armory-intel content is untouched and
+still reachable; rep still accumulates and still changes what people say. It is
+no longer a win condition and no longer printed at the player.
+
+**3. A BARK IS DIALOGUE AND WAS GOING TO #hint.** `entities/guards.js` kept
+seven `flashHint` calls after ai.js migrated its fifty-five, and the worst
+printed an actual line of speech into the hint panel: `Officer #1: "STOP RIGHT
+THERE!"`. That file now carries the same `nar`/`say` sink ai.js exports the
+doctrine through, so all seven route to `CBZ.prisonSay` — ranged, ranked,
+silent for the downed, speaker named — or go mute. `entities/ai.js`'s
+walk-up greeting (silent since the show-don't-tell wave, and captioned before
+that with `"Walk up to answer."`, a stage direction for a man already standing
+in front of you) now speaks its own `a.msg`. The `greeted` latch is shared with
+`speakApproach` so an offer is spoken exactly once.
+
+**GATE — the one that can actually fail on the work** (`verification.md`, and
+the 2026-08-05 note on gate choice). Nine new assertions in
+`tools/prison-polish-check.mjs`, section 0b, all numeric:
+
+    card: it is up on the guard              {"up":true,"verbs":["bribe","insult","talk","steal"]}
+    card: no yellow read line                {"text":"","shown":false}
+    card: touch rail has no note element     nodes=0
+    card: no befriend verb on a guard        ["bribe","insult","talk","steal"]
+    card: 'Befriend' nowhere in the card     "OFFICER #1 / Slip 10 to look away / Talk trash to… / Chat up… / Lift…'s keys"
+    card: no befriend verb on an inmate      ["romance","talk","trade","steal"]
+    bark: nothing went to the hint popup     flashHint calls=0
+    bark: the guard SPOKE instead            {"line":"You're mine, inmate!","who":"Officer #1"}
+    bark: the speaker is named               "Officer #1"
+
+`PRISON-POLISH: 43/43 ok`. `MATHGATE: ok` (determinism ok, errors baseline-only)
+— run because `guards.js` is a sim file, not as a tax. `tools/jail-check.mjs`
+is 34/36 both BEFORE and AFTER, byte-identical failures (`cast: 3 guards
+{"guards":0,"inmates":0,…}`): that is `games/jail.js`'s county-jail cast in the
+CITY, pre-existing and untouched by this wave. Reverts remain one line each —
+`JAIL_SHOW_DONT_TELL=false` restores every popup in guards.js and ai.js.
