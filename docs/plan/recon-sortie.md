@@ -128,7 +128,58 @@ a scripted degradation system. Bomb the map for four minutes and the map
 *is* degraded, permanently, and the ledger proves it. Late-half runners are
 naked because of physics, not because of a timer.
 
-### 1.7 Multiplayer — real, but honestly assessed
+### 1.7 Flight is already one thumb — and it is the SAME thumb that runs
+
+Owner, 2026-08-06: *"I made flight easy. A single movement pad. You can do it
+on the phone with one hand, with one finger."*
+
+Verified, and it is stronger than that sentence sounds. `systems/touch.js` +
+`systems/touch_vehicle.js` (2,553 lines, desktop byte-identical) put **one
+fixed bottom-left stick** under the left thumb and re-purpose it per context:
+
+| context | the same stick does |
+|---|---|
+| on foot | move · **rim-deflection = sprint** (gait lives in the stick, with hysteresis) · **base-press = crouch** (the L3 gesture) |
+| wing | **pitch + roll** — `FLIGHT_CONTROLS_V2`, left/right rolls, up/down pitches |
+| heli | yaw + thrust |
+| boat | steer + throttle |
+
+**There is no separate "flight control scheme" to learn.** The finger that
+runs is the finger that flies, in the same corner of the same screen.
+
+Three details make it genuinely one-finger and not one-finger-with-asterisks:
+
+1. **The airframe flies itself back to level.** The `WING` table
+   (`playeraircraft.js:145`) carries `autoLevel` — wings-level return rate
+   with no input. Let go and it recovers.
+2. **The B-2 is stamped onto the most forgiving row in that table.**
+   `strategic.js:849` sets `airClass = "airliner"` — `rollMax 0.55`,
+   `rollRate 1.3`, `pitchMax 0.40`, **`autoLevel 1.6`** (the highest). Against
+   the jet row's 0.80 / 2.0 / 0.85 / 1.1. *The bomber is the easiest thing to
+   fly in the game*, deliberately, and that was a flight-feel decision made
+   before this mode was conceived.
+3. **Throttle is optional.** `JET_MIN = 38` is an engine idle floor — the
+   throttle pair is a right-thumb refinement, not a requirement for staying
+   airborne.
+
+And the ordnance is already on the glass. The `#tvAux` rail wires every seam
+`strategic.js` published:
+
+- **BOMB** = hold → `strategicBombHold`. *Tap releases one; past 0.4 s it
+  becomes a carpet run* — because it **is** the [B] state machine, not a copy.
+- **PAYLOAD** = tap → `strategicPayloadCycle`, and the pill is **also the
+  readout** ("MK-84 ×16"), because `mobile.css` hides the flight strip.
+- **BOMB CAM** = hold → `strategicBombCameraHold`
+- **HOMING** = tap → `lockonHomingSet`
+
+> **A phone player can already board a B-2, fly it one-thumbed, walk a carpet
+> of bombs and watch them land through the bomb camera.** The pilot half of
+> this mode is, on the platform that matters most, *already built*.
+
+That reframes the concept from "can we make flight approachable enough" to
+"we have a mobile-native bomber and nobody has shipped a game around it."
+
+### 1.8 Multiplayer — real, but honestly assessed
 
 | have | file | fit for 5v5 |
 |---|---|---|
@@ -200,7 +251,17 @@ game).
 The pattern: aviation games on Roblox are *technically excellent and
 demographically capped*. The diagnosis in the retention literature is
 unambiguous — *"if onboarding is too long, confusing or boring, players churn
-before they experience the core fun."* Flight is a twenty-minute skill.
+before they experience the core fun."* Flight is normally a twenty-minute
+skill, and Roblox is majority-mobile.
+
+**This is the wedge, and §1.7 is why.** Hostile Skies advertises "advanced
+flight physics"; Combined Arms advertises "hyper-realistic aerodynamics, full
+cockpits, carrier ops." Those are *promises of difficulty*, and they are why
+both games are excellent and capped. A stealth bomber that a ten-year-old
+flies with one thumb on a phone, carpet-bombs with one hold, and reviews
+through a bomb camera with one more — while the competition is teaching
+rudder trim — is not a de-risked version of those games. It is a different
+market.
 
 ### 2.6 The retention arithmetic that constrains everything
 
@@ -217,23 +278,42 @@ before they experience the core fun."* Flight is a twenty-minute skill.
 
 ## PART 3 — THE SYNTHESIS
 
-> **Aviation games die at onboarding. Asymmetric games die at the queue. A
-> forced team swap kills both, with one mechanic, because the ground half IS
-> the flight tutorial.**
+> **Asymmetric games die at the queue. Aviation games die at onboarding. The
+> swap kills the first. §1.7 already killed the second.**
 
-You spend your first four minutes as a runner. You are not reading a manual —
-you are being bombed. You learn, from underneath and at gunpoint, what a bomb
-run looks like as it commits, what the bay opening sounds like, how long the
-fall takes, where the pilot has to be to hit you. Then you swap, and every one
-of those four minutes converts directly into competence in the cockpit.
+**Onboarding is solved, and it was solved before this mode was imagined.** The
+flight tutorial is not needed, because the stick that runs is the stick that
+flies and the bomber is the most forgiving airframe in the table. That removes
+the largest single risk in the original recon and it changes what the ground
+half is *for*.
 
-That is a flight tutorial disguised as the most exciting four minutes on the
-platform, and it costs zero tutorial UI — which is the exact budget the
-retention numbers allow.
+The ground half was never going to teach controls. It teaches the **read**:
+
+- what a bomb run looks like *as it commits* — the bank, the line, the height
+- what the bay sounds like opening, and how much warning that actually is
+- how long the fall takes, so you know whether to break or to keep running
+- where a pilot has to be to hit you, so that later, in the seat, you know
+  where to be
+
+That is tactical literacy, not motor skill, and it is the half of the game
+that no amount of easy controls can hand you. You cannot read a bomb run you
+have never been under.
+
+**Consequence for the design:** the ground half must *show the commit*. If the
+runner cannot see the plane bank onto its line, hear the bay, and watch the
+sticks leave, the ground half teaches nothing and the swap stops compounding.
+Every one of those cues is a Phase 2 requirement, not polish.
 
 **Second-order consequence:** because you played the other side, you cannot
 believe the other side is easy. The single most toxic dynamic in asymmetric
 games — each side certain the other is overpowered — is structurally disarmed.
+
+**Third-order consequence, and it is the new central risk:** if flying is
+trivial *and* the bomber is the game's most forgiving airframe, then **all of
+the pilot's skill expression has to live in the ordnance**. Easy to fly must
+not mean easy to bomb well. The commit window (§4.5) and the ordnance economy
+(§4.6) stop being design details and become the load-bearing structure of the
+entire pilot half. See risk #2.
 
 ---
 
@@ -245,9 +325,21 @@ games — each side certain the other is overpowered — is structurally disarme
 - **Half length 4:00.** Match ≈ 9:00 with the swap beat and a 30 s lobby —
   inside Flee the Facility's proven 5–8 min envelope, inside the sub-5-minute
   loop rule *per half*.
-- **You always run first.** Never fly first. Flying first is the churn event.
-- **T+0 you are already sprinting and a bomb is already whistling.** The
-  10-second rule is not decorated with a countdown.
+- **Your first-ever match starts you in the cockpit. Every match after that,
+  you run first.**
+
+That is a reversal of the original recon, and §1.7 is the reason. "Never fly
+first" was a churn defense written on the assumption that flight was hard. It
+isn't. So the first 30 seconds of a player's life should be the strongest
+thing this game owns: **you are flying a stealth bomber with one thumb and one
+button walks a carpet of bombs.** That clears the 10-second bar with room to
+spare, and it is a better first impression than being bombed by a stranger.
+
+From match two onward, run first — because by then the goal isn't the hook,
+it's the read (§3), and the read only compounds if you've been underneath.
+
+- **T+0 you are already sprinting, or already airborne with the bay open.**
+  No countdown, no lobby tutorial, no "press W to fly."
 
 ### 4.2 The scoring ladder — the actual design work
 
@@ -279,10 +371,13 @@ ceiling hatches, maintenance crawls, keycard) · **and the RPG red-lock**, the
 one and only way to hurt a plane.
 
 **Pilot** — tap [B] · hold [B] carpet · [X] payload · hold [C] bomb camera ·
-lock-on squares · the bay · the flight deck on [V] for anyone who wants it.
+lock-on squares · the bay · the flight deck on [V] for anyone who wants it —
+**and every one of those already has a thumb button on the `#tvAux` rail**
+(§1.7), including the payload pill that doubles as the readout.
 
-**Nothing on either list needs to be invented.** They need to be *reachable
-outside the city*, which is what `modecaps.js` exists for.
+**Nothing on either list needs to be invented, and nothing on either list
+needs a mobile port.** They need to be *reachable outside the city*, which is
+what `modecaps.js` exists for.
 
 ### 4.4 The one design decision that decides everything
 
@@ -329,20 +424,25 @@ out of the physics already in `strategic.js`.
 makes the runner's dodge cost the pilot something. Unlimited bombs turn the
 map into weather, and weather is not an opponent.
 
-### 4.7 The concern I owe you: five planes is probably too many
+### 4.7 Five planes: a softer concern than it was
 
-Five bombers over one theater is a mid-air collision problem, a visual
-legibility problem (whose bomb was that?), and a *pacing* problem — five
-pilots each wanting a run means someone is always circling. The honest
-recommendation is **2 pilots + 3 ground/support roles on the air team**
-(spotter with the bomb camera, an AA-suppression gunner, a JTAC calling
-lock-ons), or **hard altitude bands** so five aircraft can share the sky.
+The original recon recommended splitting the air team (2 pilots + 3 support)
+partly because not everyone would want to fly. **§1.7 retires that half of the
+argument** — with a one-thumb bomber on the most forgiving airframe in the
+table, five people flying is not a skill problem, and asking three of them to
+sit out the best toy in the game to solve a problem that no longer exists
+would be the wrong trade.
 
-**The plan below builds 5v5 as asked** — it is the right thing to prototype
-because the swap is the thesis and the swap needs even teams. But the very
-first thing the Phase 1 probe should measure is whether five simultaneous
-bomb runs read as anything but noise, and the roster split is the cheapest
-lever if it doesn't.
+What survives is narrower and purely about **legibility and airspace**:
+
+- five bombers over one theater is a mid-air collision problem
+- "whose bomb was that?" is a real question with five carpets in the air
+- five pilots each wanting a run means someone is always circling
+
+Preferred fix, in order: **hard altitude bands** (cheap, invisible, keeps all
+five flying) → **staggered run windows** → role-splitting only as a last
+resort. Phase 1 measures whether five simultaneous runs read as anything but
+noise; the bands are the first lever, not the roster.
 
 ### 4.8 Map
 
@@ -379,7 +479,13 @@ Answer before writing a mode:
    wrapper or the core.
 2. Does `lockon.js` acquire a craft that is not in `cityMilitaryVehicles`?
 3. Does `playeraircraft.js` `spawnFlyableFromProp` fly with no city built?
-4. Frame cost of 5 aircraft + 10 rigs + the voxel debris pools, on a phone.
+4. **Does `touch_vehicle.js`'s context watcher match a B-2 outside the city?**
+   It keys off `P._vehicle`; §1.7's own header records that `militaryvehicles.js`
+   set `P.driving` without it and stranded an iPad player inside a tank. The
+   same class of miss here means the phone gets no stick and no `#tvAux` rail
+   — i.e. the mode's best asset silently absent on its primary platform.
+5. Frame cost of 5 aircraft + 10 rigs + the voxel debris pools, **on a phone
+   first, desktop second.**
 
 Ship as `tools/sortie-probe.mjs`, headless, in the `tools/math-gate.mjs`
 tradition.
@@ -402,7 +508,14 @@ single line of flight code.
 `modecaps.js` gains its row. B-2 spawns on the island apron. Bomb path routed
 per Phase 0's finding. Ordnance economy. The pilot's HUD lifted from
 `b2code.html`'s stores/BDA panels — **rescored from casualties to denial**
-(4.4), which is a relabel of a panel that already exists.
+(4.4), which is a relabel of a panel that already exists. Mobile is the
+reference build, not the port: if it doesn't read on the `#tvAux` rail, it
+isn't done.
+
+**Also Phase 2, and not optional: the commit must be legible from the
+ground** (§3, risk #6). The bank onto the line, the bay opening, the sticks
+leaving the aircraft — visible and audible to a runner. Without it the ground
+half teaches nothing and the swap stops compounding.
 
 ### Phase 3 — counterplay
 
@@ -437,32 +550,38 @@ the specific failure this mode has to be defended against.
 | # | risk | severity | mitigation |
 |---|---|---|---|
 | 1 | Bomb-vs-man is unfun in both directions | **fatal** | §4.4 — bombs kill terrain, exposure kills runners |
-| 2 | Five simultaneous runs read as noise | high | §4.7 — 2 pilots + 3 support, or altitude bands. Measure in Phase 1 |
-| 3 | `cityExplosion` wrapper chain silently no-ops outside the city | high | Phase 0 probe #1. CLAUDE.md warns about this exact class |
-| 4 | Flight onboarding churn | high | Runner half first, always. Chase cam default, cockpit opt-in |
-| 5 | Scoring compresses (the L4D failure) | high | Continuous ladder + the `unscored` ratchet |
-| 6 | Host-authoritative referee in a scored PvP match | med | Phase 5 gate; bots-only until then |
-| 7 | Perf: 5 craft + 10 rigs + voxel debris on mobile | med | Phase 0 probe #4 |
-| 8 | Runners hide and stall out the clock | med | The fracture ledger has no decay — cover *permanently* degrades. Free ramp, zero new systems |
-| 9 | Determinism | low | Placement = `hash01` only; combat-time FX may use `Math.random` (existing C4/grenade rule) |
+| 2 | **Cockpit skill ceiling too low.** Easy flight + the game's most forgiving airframe = if bombing well is also easy, the pilot half has no skill expression and the half-to-half comparison degenerates into the exact L4D noise §2.2 warns about | **fatal — new, and created by the thing that fixed #4** | ALL pilot skill must live in the ordnance: the 8–10 s commit window (§4.5) and the 16-bomb economy (§4.6) are now load-bearing, not detail. Phase 1 must measure *variance between pilots*, not just fun |
+| 3 | Five simultaneous runs read as noise | med *(was high)* | §4.7 — altitude bands first, roster split last. Measure in Phase 1 |
+| 4 | `cityExplosion` wrapper chain silently no-ops outside the city | high | Phase 0 probe #1. CLAUDE.md warns about this exact class |
+| 5 | ~~Flight onboarding churn~~ | **retired** | §1.7 — one stick, on foot and in the air; `autoLevel 1.6`; ordnance already on the `#tvAux` thumb rail. Solved before the mode existed |
+| 6 | The ground half fails to *show the commit*, so the swap stops compounding (§3) | high — **promoted** | Bank/line/bay/sticks-away must be visible and audible from the ground. Phase 2 requirement, not polish |
+| 7 | Scoring compresses (the L4D failure) | high | Continuous ladder + the `unscored` ratchet |
+| 8 | Host-authoritative referee in a scored PvP match | med | Phase 5 gate; bots-only until then |
+| 9 | Perf: 5 craft + 10 rigs + voxel debris on mobile — *and mobile is now the primary target, not the fallback* | med → **high** | Phase 0 probe #4 runs on a phone first, desktop second |
+| 10 | Runners hide and stall out the clock | med | The fracture ledger has no decay — cover *permanently* degrades. Free ramp, zero new systems |
+| 11 | Determinism | low | Placement = `hash01` only; combat-time FX may use `Math.random` (existing C4/grenade rule) |
 
 ---
 
 ## THE ONE-PARAGRAPH VERSION
 
 The B-2 in this repo is a finished weapons platform with solved ballistics, a
-carpet-bomb walk, a bomb camera and a flight deck; `b2code.html` is the
-pilot's screen already designed; `lockon.js` already gives a man on foot a
+carpet-bomb walk, a bomb camera and a flight deck; **it flies on one thumb,
+from the same stick that runs, on the most forgiving airframe in the table,
+with its whole ordnance kit already on the phone's glass**; `b2code.html` is
+the pilot's screen already designed; `lockon.js` already gives a man on foot a
 sluggish, exposure-priced MANPADS; `modecaps.js` and `registerMode` make a new
 mode a table row; `gungame.js` is the worked example of a mode that borrows
 its map; the fracture ledger gives a free, permanent difficulty ramp; and the
 relay already seats 16 with real cross-wire PvP. Roblox's own history says
-asymmetry dies at the queue and aviation dies at onboarding — and a forced
-team swap is the one mechanic that kills both, because the ground half is the
-flight tutorial. The work that is genuinely new is small and it is not the
-planes: it is a continuous scoring ladder that survives being compared across
-halves, and the decision that **bombs kill terrain while exposure kills
-runners.** Get those two right and the rest of this is assembly.
+asymmetry dies at the queue and aviation dies at onboarding — the swap kills
+the first, and the one-thumb bomber killed the second before this mode was
+imagined, which is not a de-risking but a market: every competing aviation
+game on the platform advertises difficulty. The work that is genuinely new is
+small and it is not the planes: a continuous scoring ladder that survives
+comparison across halves, the decision that **bombs kill terrain while
+exposure kills runners**, and — because flight got easy — **making sure
+bombing well did not.** Get those three right and the rest is assembly.
 
 ---
 
