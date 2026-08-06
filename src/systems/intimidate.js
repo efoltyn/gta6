@@ -131,10 +131,14 @@
       n.intimidMode = "scared";
       n.poseHandsUp = true; n.poseAimBack = false;
       if (CBZ.npcEmote) CBZ.npcEmote(n, "");
-      if (!n._reactHinted) {
-        n._reactHinted = true;
-        CBZ.flashHint && CBZ.flashHint("" + shortName(n) + " freezes up — " + robCue(), 1.7);
-      }
+      // A MUZZLE IN THE FACE IS AN INTERACTION (PRISON_REACT). Owner: "…or
+      // pulling a gun out". The popup this replaces ("X freezes up — press G
+      // to rob") was a caption plus a keyboard instruction over a man who was
+      // VISIBLY freezing: hands up pose, emote, aim-back cleared. His fear is
+      // now a real number, and the number picks how he begs.
+      const before = CBZ.prisonReactSnap ? CBZ.prisonReactSnap(n) : null;
+      n.playerFear = Math.min(14, (n.playerFear || 0) + 3.2 + (lethal ? 2.4 : 0));
+      if (CBZ.prisonReact) CBZ.prisonReact(n, before, { cause: "gun", rank: CBZ.PRISON_SAY && CBZ.PRISON_SAY.act });
     }
   }
 
@@ -210,7 +214,15 @@
             n.poseAimBack = true;
             n.intimidFireT = 0.8 + ((n.personality && n.personality.nerve) || 0.5) * 1.7;
             CBZ.sfx && CBZ.sfx("switch");
-            CBZ.flashHint && CBZ.flashHint("" + shortName(n) + " pulls a gun on you!", 1.5);
+            // He is drawing on you, in front of you, with a slide-rack sound.
+            // The caption said so anyway; now HE talks, and what he says comes
+            // off how little he fears you — that is why he chanced it.
+            {
+              const b0 = CBZ.prisonReactSnap ? CBZ.prisonReactSnap(n) : null;
+              n.playerFear = Math.max(0, (n.playerFear || 0) - 2.5);
+              n.playerGrudge = Math.min(14, (n.playerGrudge || 0) + 2.0);
+              if (CBZ.prisonReact) CBZ.prisonReact(n, b0, { rank: CBZ.PRISON_SAY && CBZ.PRISON_SAY.act });
+            }
           }
         } else if (n.intimidMode === "standoff") {
           if (aimedHere) {
@@ -269,7 +281,14 @@
       let r = null;
       try { r = CBZ.cityTake(target, { by: "player", site: "intimidate:gunpoint" }); } catch (e) { r = null; }
       if (!r || (!r.units && (!r.items || !r.items.length))) {
-        CBZ.flashHint && CBZ.flashHint(shortName(target) + " has nothing left — you already took it.", 1.6);
+        // "X has nothing left" is a thing the man being patted down SAYS, and
+        // he is standing right there with his hands up to say it.
+        if (!CBZ.prisonSay || !CBZ.prisonSay(target, "I've got nothing! You already took it all!",
+            { rank: CBZ.PRISON_SAY && CBZ.PRISON_SAY.act })) {
+          if (CBZ.CONFIG && CBZ.CONFIG.PRISON_REACT === false && CBZ.flashHint) {
+            CBZ.flashHint(shortName(target) + " has nothing left — you already took it.", 1.6);
+          }
+        }
       }
     } else if (!target.looted) {
       if (CBZ.cityTakeLegacy) { try { CBZ.cityTakeLegacy("intimidate:gunpoint"); } catch (e) {} }

@@ -56,6 +56,22 @@
   if (CBZ.CONFIG.PRISON_ITEM_ICONS == null) CBZ.CONFIG.PRISON_ITEM_ICONS = true;
   function iconsOn() { return CBZ.CONFIG.PRISON_ITEM_ICONS !== false; }
 
+  /* ---- NINE CAPTIONS OVER A MOVING METER (JAIL_SHOW_DONT_TELL) ------------
+     "Patched up — no pain." beside a health bar that just jumped 35. "Wired —
+     wide awake." beside a stamina bar that just filled. "Slurp — calm and
+     clear-headed.", "Sugar rush", "Liquid courage.", "Numb to it all.",
+     "Wired and jittery." — five different ways of writing "the heat meter went
+     down", printed next to the heat meter going down. "Fenced X for 12" beside
+     a cig counter that just went up by twelve and played a coin. And
+     "X — equipped." for a hotbar slot that visibly lights up.
+
+     Every one of them narrates a number the HUD is already animating, which is
+     the exact shape the show-don't-tell wave deleted everywhere else. They go
+     through CBZ.jailTell like the rest of the prison, so
+     CBZ.CONFIG.JAIL_SHOW_DONT_TELL = false brings all nine back verbatim.
+     The EFFECTS are untouched — only the sentence about them is gone. */
+  function tellHint(m, s) { if (CBZ.jailTell) return CBZ.jailTell.hint(m, s); if (CBZ.flashHint) try { CBZ.flashHint(m, s); } catch (e) {} return false; }
+
   /* ---- ONE BAR (JAIL_HUD_UNIFIED) -----------------------------------------
      OWNER: "unite all these inventory into one, and clean the hud up." The
      jail screen reported "what am I carrying" three ways at once: this bag's
@@ -494,21 +510,21 @@
     if (FENCEABLE.has(name)) {
       const v = (CBZ.econ && CBZ.econ.ITEMS[name] && CBZ.econ.ITEMS[name].value) || 10;
       CBZ.econ && CBZ.econ.addCigs(v);
-      CBZ.flashHint && CBZ.flashHint("Fenced " + name + " for " + v + "", 1.8);
+      tellHint("Fenced " + name + " for " + v + "", 1.8);
       CBZ.sfx && CBZ.sfx("coin"); return;
     }
-    if (name === "Painkillers") { CBZ.player.stun = 0; CBZ.player.hp = Math.min(100, (CBZ.player.hp || 100) + 35); CBZ.addHeat && CBZ.addHeat(-10); CBZ.flashHint && CBZ.flashHint("Patched up — no pain.", 1.6); CBZ.sfx && CBZ.sfx("coin"); return; }
-    if (name === "Energy Drink") { CBZ.player.stun = 0; CBZ.player.stamina = 100; CBZ.addHeat && CBZ.addHeat(-8); CBZ.flashHint && CBZ.flashHint("Wired — wide awake.", 1.6); CBZ.sfx && CBZ.sfx("coin"); return; }
-    if (name === "Ramen") { CBZ.player.stun = 0; CBZ.addHeat && CBZ.addHeat(-40); CBZ.flashHint && CBZ.flashHint("Slurp — calm and clear-headed.", 1.6); }
-    else if (name === "Energy Bar") { CBZ.player.stun = 0; CBZ.addHeat && CBZ.addHeat(-25); CBZ.flashHint && CBZ.flashHint("Sugar rush — shake it off.", 1.6); }
-    else if (name === "Pruno Hooch") { CBZ.addHeat && CBZ.addHeat(-20); CBZ.flashHint && CBZ.flashHint("Liquid courage.", 1.6); }
-    else if (name === "Pills") { CBZ.addHeat && CBZ.addHeat(-15); CBZ.flashHint && CBZ.flashHint("Numb to it all.", 1.6); }
-    else if (name === "Powder") { CBZ.addHeat && CBZ.addHeat(-15); CBZ.flashHint && CBZ.flashHint("Wired and jittery.", 1.6); }
+    if (name === "Painkillers") { CBZ.player.stun = 0; CBZ.player.hp = Math.min(100, (CBZ.player.hp || 100) + 35); CBZ.addHeat && CBZ.addHeat(-10); tellHint("Patched up — no pain.", 1.6); CBZ.sfx && CBZ.sfx("coin"); return; }
+    if (name === "Energy Drink") { CBZ.player.stun = 0; CBZ.player.stamina = 100; CBZ.addHeat && CBZ.addHeat(-8); tellHint("Wired — wide awake.", 1.6); CBZ.sfx && CBZ.sfx("coin"); return; }
+    if (name === "Ramen") { CBZ.player.stun = 0; CBZ.addHeat && CBZ.addHeat(-40); tellHint("Slurp — calm and clear-headed.", 1.6); }
+    else if (name === "Energy Bar") { CBZ.player.stun = 0; CBZ.addHeat && CBZ.addHeat(-25); tellHint("Sugar rush — shake it off.", 1.6); }
+    else if (name === "Pruno Hooch") { CBZ.addHeat && CBZ.addHeat(-20); tellHint("Liquid courage.", 1.6); }
+    else if (name === "Pills") { CBZ.addHeat && CBZ.addHeat(-15); tellHint("Numb to it all.", 1.6); }
+    else if (name === "Powder") { CBZ.addHeat && CBZ.addHeat(-15); tellHint("Wired and jittery.", 1.6); }
     CBZ.sfx && CBZ.sfx("coin");
   }
   function useItem(name) {
     if (!name || !(CBZ.game.inventory[name] > 0)) return;
-    if (!CONSUMABLE.has(name)) { CBZ.flashHint && CBZ.flashHint(name + " — equipped.", 1.0); return; }
+    if (!CONSUMABLE.has(name)) { tellHint(name + " — equipped.", 1.0); return; }
     if (CBZ.econ && CBZ.econ.takeItem && CBZ.econ.takeItem(name)) { effect(name); resync(); }
   }
 

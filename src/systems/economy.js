@@ -268,10 +268,10 @@
   // ---------- TRADE: buy the actor's current offer for cigarettes ----------
   function trade(actor) {
     const offer = actor.data.offer; // { item, price }
-    if (!offer) return { ok: false, msg: "Nothing to trade." };
+    if (!offer) return { ok: false, msg: "I'm not carrying anything worth your smokes." };
     const priced = offerPrice(actor);
     const price = priced.price;
-    if (g.cigs < price) return { ok: false, msg: `Need ${price} for ${offer.item}${priceTag(priced.reasons) ? " (" + priceTag(priced.reasons) + ")" : ""}.` };
+    if (g.cigs < price) return { ok: false, msg: `${price}\u{1F6AC} for the ${offer.item}. Come back when you have it.` };
     addCigs(-price);
     addItem(offer.item, 1);
     g.trades++;
@@ -288,14 +288,14 @@
     actor.data.offer = pickOffer(actor.data.pool);
     CBZ.sfx("coin");
     const why = priceTag(priced.reasons);
-    return { ok: true, msg: `Bought ${offer.item} for ${price} ${why ? " (" + why + ")" : ""}` };
+    return { ok: true, msg: `${offer.item}. Don't let a screw see it on you.` };
   }
 
   // ---------- BRIBE: pay cigarettes to make a guard look away ----------
   function bribe(actor) {
     if (actor.kind === "guard" || actor.kind === "warden") {
       const cost = actor.kind === "warden" ? 25 : (actor.corrupt ? 5 : 10); // bent cops come cheap
-      if (g.cigs < cost) return { ok: false, msg: `Bribe costs ${cost} .` };
+      if (g.cigs < cost) return { ok: false, msg: `${cost} smokes. That's the price. Not one less.` };
       addCigs(-cost);
       actor.bribed = actor.kind === "warden" ? 22 : 14; // seconds of blindness
       actor.alert = 0;
@@ -314,36 +314,36 @@
       // a generous warden bribe coughs up the gun-room key
       if (actor.kind === "warden" && !hasItem("Gun-Room Key") && rng() < 0.5) {
         addItem("Gun-Room Key", 1);
-        return { ok: true, msg: "Warden looks away… and palms you a Gun-Room Key!" };
+        return { ok: true, msg: "…Take it. I was never here, and neither were you." };
       }
-      return { ok: true, msg: actor.corrupt ? `${actor.data.name} looks away. Wanted ${Math.round(g.detection || 0)}%.` : `${actor.data.name} looks the other way.` };
+      return { ok: true, msg: actor.corrupt ? "Go on. I'm looking at that wall." : "…I didn't see which way you went." };
     }
     // inmates: a small gift earns goodwill + sometimes a free item/tip
     const cost = 3;
-    if (g.cigs < cost) return { ok: false, msg: `Gift costs ${cost} .` };
+    if (g.cigs < cost) return { ok: false, msg: `Nice thought. You haven't got ${cost} to give.` };
     addCigs(-cost);
     actor.playerTrust = (actor.playerTrust || 0) + 1.2;
     nudgeGang(actor, 4, -2);
     if (actor.gang >= 0 && CBZ.noteGangIncident) CBZ.noteGangIncident(actor, "gift", 4, { source: "gift" });
     noteRead(actor.gang >= 0 ? "debt" : "wealth", actor.gang >= 0 ? -3 : -2, nm(actor), 10);
-    if (rng() < 0.5) { const it = SELLABLE[Math.floor(rng() * 4)]; addItem(it, 1); return { ok: true, msg: `Grateful, they slip you a ${it}.` }; }
+    if (rng() < 0.5) { const it = SELLABLE[Math.floor(rng() * 4)]; addItem(it, 1); return { ok: true, msg: `Here — take this. You're alright.` }; }
     return { ok: true, msg: actor.gang >= 0 ? `${actor.data.tip || "Thanks, friend."} Gang respect +4.` : (actor.data.tip || "Thanks, friend.") };
   }
 
   // ---------- PAYOFF: corrupt authority can clean up heat ----------
   function payoff(actor) {
     const guardish = actor.kind === "guard" || actor.kind === "warden";
-    if (!guardish) return { ok: false, msg: "They can't fix your wanted level." };
+    if (!guardish) return { ok: false, msg: "You think I can make paperwork disappear? Look at me." };
     if (!actor.corrupt && actor.kind !== "warden") {
       if (CBZ.addHeat) CBZ.addHeat(6);
       actor.alert = Math.max(actor.alert || 0, 1.2);
-      return { ok: false, msg: `${actor.data.name} won't take a payoff.` };
+      return { ok: false, msg: "Put that away. I don't take money." };
     }
 
     const heat = g.detection || 0;
     const complaints = g.complaints || 0;
     const cost = payoffCost(actor);
-    if (g.cigs < cost) return { ok: false, msg: `Payoff costs ${cost} .` };
+    if (g.cigs < cost) return { ok: false, msg: `${cost} makes it go away. You're short.` };
 
     addCigs(-cost);
     actor.bribed = Math.max(actor.bribed || 0, actor.kind === "warden" ? 28 : 20);
@@ -371,7 +371,7 @@
       }
     }
     CBZ.sfx("coin");
-    return { ok: true, msg: g.role === "cop" ? `${actor.data.name} buries the complaint. Reports ${Math.round(g.complaints || 0)}%.` : `${actor.data.name} buries the paperwork. Wanted ${Math.round(g.detection || 0)}%.` };
+    return { ok: true, msg: "It's handled. Don't make me do it twice." };
   }
 
   // ---------- STEAL: risky pickpocket ----------
@@ -414,14 +414,14 @@
       if (actor.corrupt && CBZ.addRacketStanding) CBZ.addRacketStanding(-8);
       noteRead("heat", 14, nm(actor), 16);
       actor.bribed = 0;
-      return { ok: false, msg: "Caught red-handed! They're onto you!" };
+      return { ok: false, msg: "HANDS! Get your hands out of my pocket!" };
     }
     CBZ.reportCrime(16, { type: "steal", actorRole: g.role });
     actor.playerGrudge = (actor.playerGrudge || 0) + 2;
     if (actor.gang >= 0) nudgeGang(actor, -5, 1);
     if (actor.gang >= 0 && CBZ.noteGangIncident) CBZ.noteGangIncident(actor, "steal", 5, { source: "failed theft" });
     noteRead("snitch", 10, nm(actor), 14);
-    return { ok: false, msg: "They shove you off — eyes turn your way." };
+    return { ok: false, msg: "Try that again and I'll break your fingers." };
   }
 
   // ---------- ROMANCE: a relationship that can spring you out ----------
@@ -432,11 +432,11 @@
     if (actor.gang >= 0 && CBZ.noteGangIncident) CBZ.noteGangIncident(actor, "romance", 2, { source: "rapport", silent: true });
     if (actor.love >= 100) {
       CBZ.winGame("romance", actor);
-      return { ok: true, msg: `${nm(actor)} can't stand to see you caged — busts you out!` };
+      return { ok: true, msg: "I can't watch them cage you another day. Go. GO!" };
     }
-    if (rng() < 0.22) { actor.love = Math.max(0, actor.love - 7); return { ok: false, msg: `${nm(actor)} brushes you off.` }; }
+    if (rng() < 0.22) { actor.love = Math.max(0, actor.love - 7); return { ok: false, msg: "Not interested." }; }
     CBZ.sfx("coin");
-    return { ok: true, msg: `${nm(actor)} blushes (${Math.round(actor.love)}/100)` };
+    return { ok: true, msg: "…Stop looking at me like that." };
   }
 
   // ---------- INSULT: lower rep, maybe start a fight / a hunt ----------
@@ -450,9 +450,9 @@
     if (rng() < 0.5) {
       if (actor.kind === "guard" || actor.kind === "warden") { actor.hunt = 3; CBZ.addHeat(25); }
       else if (CBZ.provokeGang) CBZ.provokeGang(actor, 10);
-      return { ok: false, msg: `${nm(actor)} squares up — you've made an enemy!` };
+      return { ok: false, msg: "Say it again. Say it to my face." };
     }
-    return { ok: true, msg: `${nm(actor)} scowls at you. (rep ${actor.rep})` };
+    return { ok: true, msg: "Get away from me." };
   }
 
   // ---------- BEAT UP / FIGHT: knock an actor out (drives most quests) ----------
@@ -483,7 +483,7 @@
       // a downed mark often drops loot
       if (rng() < 0.6) addCigs(2 + Math.floor(rng() * 6));
       if (CBZ.knockback) CBZ.knockback(actor, CBZ.player.pos.x, CBZ.player.pos.z, 0.9);
-      return { ok: true, msg: `You laid out ${actor.data.name}!`, beat: actor.data.name };
+      return { ok: true, msg: "", beat: actor.data.name };
     }
     // whiffed it
     CBZ.reportCrime(guardish ? 40 : 14, { type: "melee", actorRole: g.role });
@@ -491,7 +491,7 @@
     if (actor.gang >= 0) nudgeGang(actor, -4, 1);
     if (actor.gang >= 0 && CBZ.noteGangIncident) CBZ.noteGangIncident(actor, "attack", 4, { source: "swing" });
     actor.alert = guardish ? 2.5 : 0;
-    return { ok: false, msg: `${actor.data.name} fights back — bad idea!` };
+    return { ok: false, msg: "Wrong man. Wrong day." };
   }
 
   // ---------- ambient: thief inmates lift cigs off you when close ----------

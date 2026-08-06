@@ -265,7 +265,15 @@
     if (n.role === "thief" && d2 < 400) {
       const d = Math.hypot(CBZ.player.pos.x - gp.x, CBZ.player.pos.z - gp.z);
       const msg = econ.thiefTick(n, dt, d);
-      if (msg) CBZ.flashHint(msg, 1.8);
+      // "A thief swiped 5 from your pocket!" was a caption over a man standing
+      // in arm's reach with his hand in your pocket, printed beside a cig
+      // counter that had just gone down by five. He talks now — and what he
+      // says lands on the grudge the theft just built (prison_react.js).
+      if (msg) {
+        const spoke = CBZ.prisonReact && CBZ.prisonReact(n, { playerGrudge: (n.playerGrudge || 0) - 0.7 },
+          { cause: "lifted", rank: CBZ.PRISON_SAY && CBZ.PRISON_SAY.act });
+        if (!spoke && CBZ.CONFIG && CBZ.CONFIG.PRISON_REACT === false) CBZ.flashHint(msg, 1.8);
+      }
     }
   }
   CBZ.npcPickTarget = pickTarget;

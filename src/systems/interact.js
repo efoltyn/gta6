@@ -867,8 +867,32 @@
       return;
     }
     if (!VERB[v]) return;
+
+    /* THE RELATIONSHIP ANSWERS, NOT THE VERB (PRISON_REACT, prison_react.js).
+       This used to print the verb's one canned string under the actor's name,
+       so the band read "Officer #1 / Caught red-handed! They're onto you!" —
+       the same sentence to every man in the block, whatever he thought of you
+       before you did it. Now the actor is SNAPSHOTTED, the verb runs, and what
+       he says is chosen by which part of the relationship moved and where it
+       landed. Steal from a stranger and steal from somebody who trusted you
+       and the two lines differ, because the two men do.
+
+       The verb's own msg survives as the FALLBACK, and it earns that: a
+       failure carries information the numbers do not ("Bribe costs 10") and is
+       already written as something the seller says. So — react first; if
+       nothing about the relationship moved, the old line still speaks. */
+    const before = CBZ.prisonReactSnap ? CBZ.prisonReactSnap(current) : null;
     const fallback = VERB[v].fn(current);
-    if (fallback && fallback.msg) sayResult(who, fallback.msg, 2.8);
+    // a theft the mark NOTICED is the one physical cause a menu verb has; the
+    // failure flag is how economy.js reports being caught with your hand in
+    // the pocket, and the line has to be legible about that.
+    const cause = (v === "steal" && fallback && fallback.ok === false) ? "robbed" : "";
+    // A LIFT HE DIDN'T FEEL IS SILENT. The whole point of a clean pickpocket is
+    // that the mark does not know, so he must not turn round and comment on it
+    // — the cig counter and the loot feed are the only honest report.
+    if (v === "steal" && fallback && fallback.ok) return;
+    const spoke = CBZ.prisonReact && CBZ.prisonReact(current, before, { cause: cause });
+    if (!spoke && fallback && fallback.msg) sayResult(who, fallback.msg, 2.8);
   }
 
   addEventListener("keydown", (e) => {

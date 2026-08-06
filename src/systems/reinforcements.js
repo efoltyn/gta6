@@ -29,6 +29,12 @@
   const g = CBZ.game;
   if (!g) return;
 
+  // THE ONE NARRATION GATE, shared with lockdown / detection / killstreaks /
+  // capture / gunroom (systems/capture.js publishes it). Both return TRUE when
+  // the line was suppressed; flag off falls straight through to the old popup.
+  function tellToast(m) { if (CBZ.jailTell) return CBZ.jailTell.toast(m); if (CBZ.flashToast) try { CBZ.flashToast(m); } catch (e) {} return false; }
+  function tellHint(m, s) { if (CBZ.jailTell) return CBZ.jailTell.hint(m, s); if (CBZ.flashHint) try { CBZ.flashHint(m, s); } catch (e) {} return false; }
+
   // ---- tuning ----------------------------------------------------------
   const HEAT_CALL = 70;      // heat at/above which the "call it in" timer builds
   const HEAT_STAND = 20;     // heat at/below which the "stand down" timer builds
@@ -203,8 +209,14 @@
             spawnCd = SPAWN_CD;
             if (!announced) {
               announced = true;
-              if (CBZ.flashToast) { try { CBZ.flashToast("REINFORCEMENTS!"); } catch (e) {} }
-              if (CBZ.flashHint) { try { CBZ.flashHint("The towers called it in — riot squad incoming!", 2.4); } catch (e) {} }
+              // SHOW DON'T TELL (JAIL_SHOW_DONT_TELL, via CBZ.jailTell — the
+              // one gate lockdown/detection/killstreaks/capture already share).
+              // A riot squad spawns at a tower corner, sprints across the yard
+              // and converges on you with their hunt primed. Printing
+              // "REINFORCEMENTS!" and "riot squad incoming!" beside that is
+              // captioning a thing the player is watching happen.
+              tellToast("REINFORCEMENTS!");
+              tellHint("The towers called it in — riot squad incoming!", 2.4);
             }
           }
         }
@@ -233,7 +245,9 @@
         standT += dt;
         if (standT >= STAND_HOLD) {
           recallAll();
-          if (CBZ.flashHint) { try { CBZ.flashHint("The riot squad stands down.", 2.0); } catch (e) {} }
+          // recallAll() walks them off and splices them out of CBZ.guards —
+          // they visibly leave. The caption said the same thing twice.
+          tellHint("The riot squad stands down.", 2.0);
         }
       } else {
         standT = 0;                        // still warm — hold the line

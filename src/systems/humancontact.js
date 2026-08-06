@@ -89,10 +89,22 @@
     }
   }
 
+  // WALKING INTO SOMEBODY IS AN INTERACTION (PRISON_REACT). Owner: "whether it
+  // was an interaction or running into them physically". This function already
+  // moved a real relationship — grudge up, guards alerted, the timid sent
+  // fleeing — and nobody ever said a word about it. Snapshot / act / react is
+  // the same three lines every caller of prison_react.js runs; the shove is
+  // just another cause, and its BAND still comes from the grudge it lands on,
+  // so the third bump escalates because the number did.
   function reactEscape(a, source, level, severity) {
     const byPlayer = source && isPlayer(source);
+    const before = byPlayer && CBZ.prisonReactSnap ? CBZ.prisonReactSnap(a) : null;
     if (a.kind === "guard") {
-      if (byPlayer) { a.alert = Math.max(a.alert || 0, 1.1); a.hunt = Math.max(a.hunt || 0, 2 + severity * 2); }
+      if (byPlayer) {
+        a.alert = Math.max(a.alert || 0, 1.1); a.hunt = Math.max(a.hunt || 0, 2 + severity * 2);
+        a.playerGrudge = Math.min(14, (a.playerGrudge || 0) + 0.6 + severity * 1.4);
+        if (CBZ.prisonReact) CBZ.prisonReact(a, before, { cause: "bump", rank: CBZ.PRISON_SAY && CBZ.PRISON_SAY.act });
+      }
       return;
     }
     if (!byPlayer) return;
@@ -105,7 +117,9 @@
       if (CBZ.provokeGang && a.gang >= 0) CBZ.provokeGang(a, 4 + level * 4);
     } else if (level >= 0.35) {
       a.aiState = "flee"; a.fleeT = Math.max(a.fleeT || 0, 1.8 + severity * 2);
+      a.playerFear = Math.min(14, (a.playerFear || 0) + 0.8 + severity * 1.6);
     }
+    if (CBZ.prisonReact) CBZ.prisonReact(a, before, { cause: "bump", rank: CBZ.PRISON_SAY && CBZ.PRISON_SAY.act });
   }
 
   function reactSurvival(a, source, level, severity) {

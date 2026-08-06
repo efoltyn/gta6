@@ -83,7 +83,11 @@
       c.collected = true; c.anim = 0;
       if (c.ring) c.ring.visible = false;
       CBZ.econ.addCigs(c.value);
-      CBZ.flashHint(`+${c.value}`, 1.0);
+      // "+5" beside a cig counter that just went up by five, with a coin sound
+      // on the same frame. Three surfaces for one event; the popup is the one
+      // that is only text. Reverts with JAIL_SHOW_DONT_TELL like the rest.
+      if (CBZ.jailTell) CBZ.jailTell.hint(`+${c.value}`, 1.0);
+      else CBZ.flashHint(`+${c.value}`, 1.0);
       CBZ.sfx("coin");
       return false;   // never structurally removed — state.js resets it on respawn
     },

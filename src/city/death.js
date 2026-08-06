@@ -194,7 +194,15 @@
     if (roll < 0.34) {
       P._legSide = Math.random() < 0.5 ? 1 : -1;
       P._legWound = Math.min(1, (P._legWound || 0) + 0.35 + sev * 0.55);
-      if (CBZ.flashHint && (P._legWound > 0.45)) CBZ.flashHint("LEG HIT — you're limping", 1.6);
+      // "LEG HIT — you're limping" over a player who is, on this exact frame,
+      // limping: _legWound drives the gait. In the prison it goes through the
+      // shared JAIL_SHOW_DONT_TELL gate with every other caption; the city and
+      // the island keep it, because this file is theirs too and nobody has
+      // asked for it there.
+      if (CBZ.flashHint && (P._legWound > 0.45)) {
+        if (CBZ.game && CBZ.game.mode === "escape" && CBZ.jailTell) CBZ.jailTell.hint("LEG HIT — you're limping", 1.6);
+        else CBZ.flashHint("LEG HIT — you're limping", 1.6);
+      }
     } else if (roll < 0.55) {
       P._armWound = Math.min(1, (P._armWound || 0) + 0.3 + sev * 0.5);
     } else {

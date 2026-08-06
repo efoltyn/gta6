@@ -87,6 +87,9 @@
   function popup() {}
 
   let combo = 0, lastPunch = -1e9, pendingPunch = null, stamina = 1;
+  // who the last swing actually landed on, and what he thought of you before
+  // it did — set inside landPunch, consumed by the reaction pass below.
+  let lastHit = null, lastHitBefore = null;
 
   function punchable(actor) {
     return !!(actor && actor.group && !actor.dead && !(actor.ko > 0) && !actor.escaped);
@@ -193,6 +196,11 @@
       return { ok: false, msg: "" };
     }
     if (actor.hp == null) actor.hp = maxHpOf(actor);
+    // The swing re-resolves its own target through findPunchTarget, so the man
+    // who actually gets hit is only known HERE — snapshot him for the reaction
+    // pass (prison_react.js) at the one point his identity is settled.
+    lastHit = actor;
+    lastHitBefore = CBZ.prisonReactSnap ? CBZ.prisonReactSnap(actor) : null;
     const heavy = attack.heavy;
     const guardish = actor.kind === "guard" || actor.kind === "warden";
 
@@ -207,6 +215,17 @@
 
     const dmg = attack.dmg;
     actor.hp -= dmg;
+    /* GETTING HIT IS A RELATIONSHIP EVENT, and it was not one. economy.js's
+       verbs all move playerFear / playerGrudge; a fist to the face moved
+       neither, so the block could simulate an entire beating and remember
+       nothing about it — which is also why the only thing this could say
+       afterwards was a canned "X drops!". A hard swing FRIGHTENS; repeated
+       swings stop frightening and harden into a grudge. Those two numbers are
+       what prison_react.js reads to decide whether the man begs or threatens,
+       and they feed the same flee/snitch/gang brains every other source of
+       fear already does. */
+    actor.playerFear = Math.min(14, (actor.playerFear || 0) + (heavy ? 2.6 : 1.4));
+    actor.playerGrudge = Math.min(14, (actor.playerGrudge || 0) + (heavy ? 1.6 : 0.9));
     // punches BRUISE (wounds.js) — the face you beat carries it
     if (CBZ.bodyWound) CBZ.bodyWound(actor, { x: actor.pos.x, y: (actor.pos.y || 0) + 1.55, z: actor.pos.z }, { melee: "blunt", fromX: CBZ.player.pos.x, fromZ: CBZ.player.pos.z });
     stamina = Math.min(1, stamina + 0.05);
@@ -277,9 +296,17 @@
     if (!pendingPunch) return;
     pendingPunch.t -= dt;
     if (pendingPunch.t > 0) return;
+    lastHit = null; lastHitBefore = null;
     const res = landPunch(pendingPunch);
     pendingPunch = null;
-    if (res && res.msg) CBZ.flashHint(res.msg, 2.4);
+    const target = lastHit;
+    // A PUNCH IS AN INTERACTION. `popup()` already threw "WHAM!"/"DOWN!" over
+    // the target's head and the body visibly dropped, so "X drops! (3-hit
+    // combo!)" was a third surface for one event. The man you hit talks
+    // instead — off the fear and grudge the hit just moved — and if he is
+    // knocked out he says nothing at all, which prisonSay enforces for us.
+    const spoke = target && CBZ.prisonReact && CBZ.prisonReact(target, lastHitBefore, { cause: "bump" });
+    if (!spoke && res && res.msg && CBZ.CONFIG && CBZ.CONFIG.PRISON_REACT === false) CBZ.flashHint(res.msg, 2.4);
   });
 
   CBZ.punch = punch;
@@ -297,7 +324,10 @@
     if (CBZ.game.state !== "playing" || !document.pointerLockElement) return;
     if (CBZ.fps && CBZ.fps.active) return;
     if (CBZ.playerArmed && CBZ.playerArmed()) return;
+    // "Swing..." printed on every left click, over an arm that is visibly
+    // swinging. The refusals ("Catch your breath.") are the player's own body
+    // and belong on the stamina bar, not in a sentence.
     const r = punch();
-    if (r && r.msg) CBZ.flashHint(r.msg, 1.4);
+    if (r && r.msg && CBZ.CONFIG && CBZ.CONFIG.JAIL_SHOW_DONT_TELL === false) CBZ.flashHint(r.msg, 1.4);
   });
 })();

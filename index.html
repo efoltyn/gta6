@@ -542,6 +542,11 @@
 <script src="src/systems/dashboard.js?v=ranks1"></script>
 <script src="src/systems/combat.js?v=phys1"></script>
 <script src="src/systems/killstreaks.js"></script>
+<!-- WHAT A PERSON SAYS AFTER YOU DO SOMETHING TO THEM. Snapshots an actor's
+     relationship, diffs it after the event, and speaks the line the RESULTING
+     numbers call for through prisonSay. Loads before interact/intimidate/
+     humancontact, which are its three callers (verb, gun, shoulder). -->
+<script src="src/systems/prison_react.js?v=react1"></script>
 <script src="src/systems/interact.js?v=allmain3"></script>
 <script src="src/systems/interactions.js?v=onebar1"></script>
 <!-- WHAT A THING IN YOUR BAG LOOKS LIKE: one real 3D object per item KIND,
