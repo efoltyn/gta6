@@ -233,9 +233,9 @@
       return m;
     };
     function beginHalf() {
-      m.log("HALF " + (m.half + 1) + " — " + teams.map(function (t) {
-        return t.name + ": " + String(m.roleOf(t.id)).toUpperCase();
-      }).join("  ·  "), { tone: "phase" });
+      m.log("HALF " + (m.half + 1) + " · " + teams.map(function (t) {
+        return t.name + " " + String(m.roleOf(t.id)).toUpperCase();
+      }).join(" · "), { tone: "phase" });
       if (opts.onHalfStart) { try { opts.onHalfStart(m.half, m); } catch (e) { console.error("[teammatch onHalfStart]", e); } }
     }
     m.endHalf = function () {
@@ -244,7 +244,7 @@
       if (m.half + 1 >= HALVES) return finish();
       m.phase = "intermission";
       m.intermissionLeft = INTERMISSION;
-      m.log("HALF " + (m.half + 1) + " OVER — SIDES SWAP", { tone: "phase" });
+      m.log("HALF " + (m.half + 1) + " OVER · SIDES SWAP", { tone: "phase" });
     };
     function finish() {
       m.phase = "over";

@@ -182,12 +182,24 @@
      background:linear-gradient(90deg,#ffb15c,#ff5f4a 55%,#7fe0ff);-webkit-background-clip:text;
      background-clip:text;color:transparent}
   .sub{font-size:13px;letter-spacing:5px;opacity:.65;margin-bottom:18px}
-  .cols{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:14px 0 18px}
+  .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin:14px 0 18px}
   .box{background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.10);border-radius:12px;padding:14px 16px}
   .box h3{margin:0 0 8px;font-size:14px;letter-spacing:3px;color:#ffb15c}
   .box.b2 h3{color:#7fe0ff}
   .box p,.box li{font-size:13px;line-height:1.65;opacity:.88;margin:0 0 6px}
   .box ul{margin:0;padding-left:16px}
+  .box.b3 h3{color:#8bf0a8}
+  .line{font-size:12.5px;line-height:1.5;opacity:.62;margin:0 0 8px}
+  .keys{display:flex;flex-direction:column;gap:5px;margin:0 0 10px}
+  .keys div{font-size:12px;opacity:.82}
+  .stat{font-size:13px;line-height:1.5;opacity:.9;margin:0 0 5px}
+  .stat b{color:#ffb15c;letter-spacing:1px}
+  .box.b2 .stat b{color:#7fe0ff}
+  .box.b3 .stat b{color:#8bf0a8}
+  #credit{margin-top:14px;display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline;
+    font-size:11px;letter-spacing:1px;opacity:.5}
+  #credit b{color:#8bf0a8;letter-spacing:2px;opacity:.9}
+  #credit code{opacity:.75}
   kbd{background:rgba(255,255,255,.13);border:1px solid rgba(255,255,255,.2);border-radius:4px;
     padding:1px 6px;font:700 11px monospace}
   button{pointer-events:auto;cursor:pointer;font:800 17px 'Trebuchet MS',sans-serif;letter-spacing:3px;
@@ -243,29 +255,32 @@
     <div class="sub">BASIN CITY · KESTREL FIELD · 10 v 10 · TWO HALVES OF TEN MINUTES</div>
     <div class="cols">
       <div class="box">
-        <h3>HALF 1 — YOU BOMB</h3>
-        <p>You spawn on the apron at Kestrel Field, out in the dunes. The flying wing is on the centre stand.</p>
-        <ul>
-          <li><kbd>WASD</kbd> walk · <kbd>SHIFT</kbd> sprint · <kbd>SPACE</kbd> jump</li>
-          <li><kbd>E</kbd> board the bomber (walk up to it)</li>
-          <li>In the air: <kbd>MOUSE</kbd> pitch/roll · <kbd>A</kbd><kbd>D</kbd> rudder · <kbd>W</kbd><kbd>S</kbd> throttle · <kbd>SHIFT</kbd> burner</li>
-          <li><kbd>SPACE</kbd> release — hold it to walk a stick</li>
-          <li><kbd>C</kbd> bomb camera · <kbd>V</kbd> cockpit/chase · <kbd>R</kbd> radar range · <kbd>T</kbd> test rig</li>
-        </ul>
-        <p>250 points a kill. The green pipper is where the next one lands — it is the same integrator the bomb itself uses, so it cannot lie to you.</p>
-        <p>The scope bottom-right is a <b>radar</b>, not a map: heading-up, sweeping, and it paints only aircraft and falling ordnance. Neutral traffic is up there too — sorting it is the job.</p>
-        <p>The scope bottom-right is a <b>radar</b>, not a map: heading-up, sweeping, and it only paints aircraft and falling ordnance. Neutral traffic is up there too — sorting it is the job.</p>
+        <h3>HALF 1 · YOU BOMB</h3>
+        <div class="line">Apron at Kestrel Field. Wing on the centre stand.</div>
+        <div class="keys">
+          <div><kbd>WASD</kbd> walk <kbd>SHIFT</kbd> sprint <kbd>SPACE</kbd> jump</div>
+          <div><kbd>E</kbd> board the wing</div>
+          <div><kbd>MOUSE</kbd> pitch roll <kbd>A</kbd><kbd>D</kbd> rudder <kbd>W</kbd><kbd>S</kbd> throttle</div>
+          <div><kbd>SPACE</kbd> release. hold for a stick</div>
+          <div><kbd>C</kbd> bomb cam <kbd>V</kbd> cockpit <kbd>R</kbd> radar range <kbd>T</kbd> rig</div>
+        </div>
+        <div class="stat"><b>250</b> a kill</div>
+        <div class="stat"><b>GREEN PIPPER</b> impact point</div>
       </div>
       <div class="box b2">
-        <h3>HALF 2 — THEY BOMB</h3>
-        <p>Sides swap. You are on the street with nine teammates and two hundred empty towers.</p>
-        <ul>
-          <li>0.4 points a second for every runner still alive</li>
-          <li>Red rings on the ground are inbound ordnance — they tighten as impact closes</li>
-          <li>A wall, a shelter roof or the park canopy between you and the blast is worth <b>75%</b></li>
-          <li>Concrete shelters are marked on the map. Open ground is a decision, not a default</li>
-        </ul>
-        <p>No respawns on the running half. That is the point of it.</p>
+        <h3>HALF 2 · THEY BOMB</h3>
+        <div class="line">Sides swap. Street level, nine teammates, 200 towers.</div>
+        <div class="stat"><b>0.4</b> a second, every runner alive</div>
+        <div class="stat"><b>RED RINGS</b> inbound. tighten as impact closes</div>
+        <div class="stat"><b>COVER</b> cuts blast 75%</div>
+        <div class="line">Walls. Shelter roofs. Park canopy. Concrete stands on the corners.</div>
+        <div class="stat"><b>NO RESPAWNS</b></div>
+      </div>
+      <div class="box b3">
+        <h3>RADAR · BOTTOM RIGHT</h3>
+        <div class="stat">Heading up. Sweeps.</div>
+        <div class="stat">Paints aircraft and falling ordnance.</div>
+        <div class="stat">Neutral traffic is up there. Sort it.</div>
       </div>
     </div>
     <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
@@ -276,18 +291,15 @@
       <a href="../index.html" style="color:#9aa4ad;font-size:12px;letter-spacing:2px;
          text-decoration:none;border-bottom:1px solid rgba(154,164,173,.35);padding-bottom:2px">← GANG CITY</a>
     </div>
-    <div style="margin-top:14px;padding:11px 14px;border-radius:11px;background:rgba(120,220,150,.09);
-      border:1px solid rgba(140,240,180,.24);font-size:12px;line-height:1.65;opacity:.9">
-      <b style="color:#8bf0a8;letter-spacing:2px">RUNNING THE SHIPPED ASSETS.</b>
-      The aeroplane on the stand is <code>city/strategic.js</code>'s B-2 — the real loft, not a
-      lookalike. The fighters, the helicopters on the pads and the tanks in the motor pool are
-      <code>city/island_military.js</code>'s. Every person is
-      <code>entities/character.js</code>'s rig walking on <code>CBZ.animChar</code>. The park is
-      <code>world/vegetation.js</code>. The terrain, the towers and the water are still local —
-      see the asset sheet for exactly which is which and why.
+    <div id="credit">
+      <b>SHIPPED ASSETS</b>
+      <span>B-2 <code>city/strategic.js</code></span>
+      <span>fleet <code>city/island_military.js</code></span>
+      <span>people <code>entities/character.js</code></span>
+      <span>park <code>world/vegetation.js</code></span>
     </div>
     <div id="loadNote"></div>
-    <div class="foot" id="ctlNote">Click the world to capture the mouse (or just hold the left button and drag) · <kbd>ESC</kbd> releases it · <kbd>P</kbd> pauses</div>
+    <div class="foot" id="ctlNote">Click to capture the mouse, or hold left and drag · <kbd>ESC</kbd> release · <kbd>P</kbd> pause</div>
   </div>
 </div>
 
@@ -621,8 +633,8 @@ function startHalf(half) {
     else spawnBomber(u, { onApron: u.human, wing: u.human || (i % 4 === 0) });
   }
   camMode = myUnit.role === "bomber" ? "chase" : "chase";
-  showBanner(myUnit.role === "bomber" ? "YOU ARE THE BOMBERS" : "YOU ARE ON THE GROUND",
-    myUnit.role === "bomber" ? "KESTREL FIELD · BOARD THE WING" : "BASIN CITY · SURVIVE TEN MINUTES");
+  showBanner(myUnit.role === "bomber" ? "YOU BOMB" : "YOU RUN",
+    myUnit.role === "bomber" ? "KESTREL FIELD · BOARD THE WING" : "BASIN CITY · TEN MINUTES");
   if (CBZ.micro.sfx) CBZ.micro.sfx.siren(2.4, { gain: 0.12 });
 }
 
@@ -648,7 +660,7 @@ function matchTick(dt) {
   // an early finish: if every runner is down, the half is decided
   const rTeam = runners[0];
   if (rTeam && units.filter(function (u) { return u.team === rTeam.id && u.role === "runner" && u.alive; }).length === 0) {
-    match.log("EVERY RUNNER DOWN — HALF CALLED", { tone: "phase" });
+    match.log("EVERY RUNNER DOWN · HALF CALLED", { tone: "phase" });
     match.endHalf();
   }
 }
@@ -762,7 +774,7 @@ function updateBoarding() {
   const d = Math.hypot(u.pos.x - base.bomber.x, u.pos.z - base.bomber.z);
   if (d < 34) {
     p.style.display = "block";
-    p.innerHTML = "<kbd>E</kbd>  BOARD THE FLYING WING";
+    p.innerHTML = "<kbd>E</kbd>  BOARD";
     if (KEY.pressed("KeyE")) {
       u.boarded = true;
       u.kind = "air";
@@ -778,12 +790,12 @@ function updateBoarding() {
       u.pos.copy(u.af.pos);
       camMode = "chase";
       p.style.display = "none";
-      match.log("YOU · airborne from Kestrel Field", { tone: "good" });
+      match.log("YOU · airborne", { tone: "good" });
       if (CBZ.micro.sfx) CBZ.micro.sfx.tone(180, 0.5, { type: "sawtooth", gain: 0.2, slideTo: 420 });
     }
   } else {
     p.style.display = "block";
-    p.innerHTML = "THE WING IS ON THE CENTRE STAND · " + Math.round(d) + " m";
+    p.innerHTML = "FLYING WING · " + Math.round(d) + " m";
   }
 }
 
@@ -826,7 +838,7 @@ function updateFlight(u, dt, human) {
     if (hard || (offField && af.speed > 30)) {
       af.touchdownSpeed = 0;
       killUnit(u, { team: null });
-      if (human) match.log("YOU · flew into the deck", { tone: "bad" });
+      if (human) match.log("YOU · into the deck", { tone: "bad" });
       return;
     }
   }
@@ -841,7 +853,7 @@ function updateFlight(u, dt, human) {
     const pr = el("prompt");
     if (af.grounded && af.speed > 52) {
       pr.style.display = "block";
-      pr.innerHTML = "PULL THE MOUSE BACK — ROTATE  ·  " + Math.round(af.speed) + " m/s";
+      pr.innerHTML = "PULL BACK TO ROTATE · " + Math.round(af.speed) + " m/s";
     } else if (pr.innerHTML.indexOf("ROTATE") >= 0) {
       pr.style.display = "none";
     }
@@ -875,7 +887,7 @@ function releaseFrom(u) {
 function enterSpectate() {
   camMode = "spectate";
   spectateOf = null;
-  showBanner("YOU ARE DOWN", "YOUR SIDE PLAYS ON");
+  showBanner("DOWN", "YOUR SIDE PLAYS ON");
 }
 function updateSpectate(dt) {
   if (!spectateOf || !spectateOf.alive) {
@@ -1378,7 +1390,7 @@ function showResults(res) {
   const meRec = match.human();
   t += "<tr><td colspan='4' style='opacity:.6;font-size:12px;border:0;padding-top:12px'>YOU · " +
     meRec.kills + " kills · " + meRec.deaths + " deaths · " +
-    CBZ.ordnanceAudit().released + " stores released across the match</td></tr>";
+    CBZ.ordnanceAudit().released + " stores released</td></tr>";
   el("resTable").innerHTML = t;
 }
 
@@ -1443,7 +1455,7 @@ function downJet(j) {
   CBZ.ordnance.removeTarget(j.tgt);
   CBZ.scene.remove(j.group);
   j.af.dispose();
-  match.log((j.heavy ? "HEAVY" : "PATROL") + " down — neutral traffic", { tone: "bad" });
+  match.log((j.heavy ? "HEAVY" : "PATROL") + " down · neutral", { tone: "bad" });
 }
 
 // ============================================================ DESERT LIFE
@@ -1576,7 +1588,7 @@ function buildTestRig() {
 function forceAirborne() {
   const u = myUnit;
   if (!u) return;
-  if (u.role !== "bomber") { match.log("TEST · you are the running side this half", { tone: "bad" }); return; }
+  if (u.role !== "bomber") { match.log("TEST · running side this half", { tone: "bad" }); return; }
   if (!u.boarded) {
     u.boarded = true; u.kind = "air";
     u.group = CBZ.airbase.bomber({});
@@ -1610,7 +1622,7 @@ function testTick() {
 
 // ============================================================ BOOT
 function build() {
-  el("loadNote").textContent = "raising the basin…";
+  el("loadNote").textContent = "raising the basin";
   CBZ.micro.boot({
     fov: 72, far: 16000,
     // exposure under 1 on purpose: a desert noon at sun 1.12 + hemi 0.60 with
@@ -1699,7 +1711,7 @@ window.addEventListener("keydown", function (e) {
     const foes = units.filter(function (x) { return x.alive && x.role === "runner" && x.team !== myUnit.team; });
     if (foes.length) {
       const f = foes[Math.floor(rngGame() * foes.length) % foes.length];
-      match.log("VECTOR · " + Math.round(Math.hypot(f.pos.x - myUnit.pos.x, f.pos.z - myUnit.pos.z)) + " m to a runner", { tone: "info" });
+      match.log("VECTOR · " + Math.round(Math.hypot(f.pos.x - myUnit.pos.x, f.pos.z - myUnit.pos.z)) + " m", { tone: "info" });
     }
   }
 });
@@ -1714,8 +1726,7 @@ CBZ.micro.onUnlock = function () {};
 // a phone should be told about its thumbs, not about a mouse it does not have
 if (CBZ.micro.touch && ((window.matchMedia && window.matchMedia("(pointer: coarse)").matches) ||
     (navigator.maxTouchPoints || 0) > 0)) {
-  el("ctlNote").innerHTML = "LEFT THUMB = the stick (push it to the RIM to sprint) · " +
-    "RIGHT HALF = drag to look · buttons appear when they apply";
+  el("ctlNote").innerHTML = "LEFT THUMB stick · rim to sprint · RIGHT HALF drag to look";
 }
 
 let wantTest = /[?&]test=1/.test(location.search);
@@ -1727,7 +1738,7 @@ el("testBtn").addEventListener("click", function () {
 });
 el("playBtn").addEventListener("click", function () {
   el("playBtn").disabled = true;
-  el("loadNote").textContent = "building 200 towers, a park and a runway…";
+  el("loadNote").textContent = "200 towers · a park · a runway";
   setTimeout(build, 60);
 });
 el("againBtn").addEventListener("click", function () { location.reload(); });
