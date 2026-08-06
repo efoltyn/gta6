@@ -66,6 +66,32 @@
   function bg(w, h, d) { return CBZ.boxGeom ? CBZ.boxGeom(w, h, d) : new THREE.BoxGeometry(w, h, d); }
   function collide(b) { return (CBZ.micro && CBZ.micro.addCollider) ? CBZ.micro.addCollider(b) : b; }
 
+  /* ---- WHEELS ON CONCRETE: MEASURE, DON'T TRUST A HAND-PASSED DROP ------
+     Where a parked machine's undercarriage is depends on who modelled it,
+     and every scheme that answers that from a number carried alongside the
+     model eventually meets a model whose number is missing, stale or — the
+     bug this replaces — a legitimate ZERO that a `||` default swallowed.
+     The geometry always knows: the lowest point of a parked aeroplane IS
+     its wheels. So ask the bounding box, once, at placement time. Right for
+     the primitives, right for the shipped gang-city models, and right for
+     whatever model gets pointed at this file next with no call site edited. */
+  const _bb = new THREE.Box3();
+  function boxOf(g) { return _bb.setFromObject(g); }
+
+  // Seat `g` at pad-local (lx,lz) with yaw `yaw` so its lowest point rests on
+  // the slab top `top`. CALL BEFORE root.add(g): Box3.setFromObject reads
+  // world matrices, so an unparented group measures in its own frame — which
+  // is the same pad-local frame `top` is expressed in. Once it is inside the
+  // root, the same measurement comes back in world metres and the sum is off
+  // by the whole pad height.
+  function seat(g, lx, lz, top, yaw) {
+    g.rotation.y = yaw;
+    g.position.set(lx, 0, lz);
+    const low = boxOf(g).min.y;               // empty group ⇒ +Infinity
+    g.position.y = top - (isFinite(low) ? low : 0);
+    return g.position.y;
+  }
+
   const M = {
     concrete: 0x9a978d, runway: 0x33363a, paint: 0xe4e0d2, tarmac: 0x4a4d52,
     olive: 0x4a5238, oliveD: 0x39402e, steel: 0x5c626a, steelD: 0x3d424a,
@@ -122,8 +148,16 @@
     const g = new THREE.Group();
     raw.rotation.y = Math.PI;                 // nose +Z → nose −Z
     g.add(raw);
-    // these models are authored standing on their own wheels at y = 0
-    g.userData.gearDrop = 0;
+    // These models are authored standing on their own wheels at y ≈ 0, so
+    // this used to be a flat `= 0`. That literal zero is what floated the
+    // whole field: every placement read it as `userData.gearDrop || 3.2`,
+    // and a legitimate zero is falsy, so each real airframe took the
+    // PRIMITIVE's fallback drop and parked three metres in the air.
+    // Publish the MEASURED offset instead — same sign convention as
+    // addGear() (how far the lowest point hangs BELOW the group origin, so
+    // a model standing proud of its own origin reports a negative), which
+    // also stops the field lying about heli skids that sit at +0.145.
+    g.userData.gearDrop = -boxOf(g).min.y;
     g.userData.airframe = meta || {};
     g.userData.real = true;
     if (made && made.footW != null) {
@@ -324,7 +358,11 @@
     const CX = opts.x || 0, CZ = opts.z || 0;
     const HEAD = opts.heading || 0;                       // runway bearing, radians
     const groundAt = opts.groundAt || function () { return 0; };
-    const rng = CBZ.seedStream ? CBZ.seedStream(opts.seed || "airbase") : Math.random;
+    // seed 0 is a seed. Swept up with the gearDrop fix below: the other `||`
+    // defaults in this function guard dimensions (a 0 m runway is not a
+    // request) or already default to 0, so this was the only other one where
+    // a falsy value the caller meant could be silently overruled.
+    const rng = CBZ.seedStream ? CBZ.seedStream(opts.seed != null ? opts.seed : "airbase") : Math.random;
     const rr = function (a, b) { return a + rng() * (b - a); };
 
     const RW_LEN = opts.runwayLength || 1800;
@@ -483,10 +521,16 @@
     })();
 
     // ---- apron: where the aeroplanes actually stand
+    // An aeroplane stands on the apron's TOP FACE, not on its centre and not
+    // on the pad slab underneath it — three surfaces within half a metre of
+    // each other, which is exactly the spread a hand-tuned constant gets
+    // wrong. Derive the top from the geometry that defines it and hand THAT
+    // to seat(), so the slab and the aircraft on it can never drift apart.
     const APRON_Z = -PAD_W * 0.22 + RW_W / 2 + 190;
+    const APRON_Y = 0.32, APRON_H = 0.45, APRON_TOP = APRON_Y + APRON_H / 2;
     (function apron() {
-      const ap = new THREE.Mesh(bg(RW_LEN * 0.66, 0.45, 210), cm(M.tarmac));
-      ap.position.set(0, 0.32, APRON_Z);
+      const ap = new THREE.Mesh(bg(RW_LEN * 0.66, APRON_H, 210), cm(M.tarmac));
+      ap.position.set(0, APRON_Y, APRON_Z);
       ap.receiveShadow = true;
       root.add(ap);
       base.apron = { x: wx(0, APRON_Z), z: wz(0, APRON_Z), y: padY };
@@ -588,10 +632,13 @@
     (function fleet() {
       const padMat = cm(M.tarmac), lineMat = cm(M.paint, { emissive: 0x2a2a24, ei: 0.3 });
       const HELI_Z = APRON_Z - 96;
+      // the discs stand slightly proud of the apron; their top is its own
+      // surface and the helicopters are seated on it, not on the apron
+      const HELI_Y = 0.35, HELI_H = 0.4, HELI_TOP = HELI_Y + HELI_H / 2;
       for (let i = 0; i < 4; i++) {
         const hx = RW_LEN * 0.10 + i * 74;
-        const pad = new THREE.Mesh(new THREE.CylinderGeometry(24, 24, 0.4, 20), padMat);
-        pad.position.set(hx, 0.35, HELI_Z);
+        const pad = new THREE.Mesh(new THREE.CylinderGeometry(24, 24, HELI_H, 20), padMat);
+        pad.position.set(hx, HELI_Y, HELI_Z);
         pad.receiveShadow = true;
         root.add(pad);
         // the H every helipad wears, so the circle reads as a landing point
@@ -601,12 +648,12 @@
 
         const heli = airbase.heli({ name: "HELO " + (i + 1) });
         if (heli) {
-          heli.position.set(hx, 0.6, HELI_Z);
-          heli.rotation.y = Math.PI + (i % 2 ? 0.3 : -0.3);
+          const yaw = Math.PI + (i % 2 ? 0.3 : -0.3);
+          const hy = seat(heli, hx, HELI_Z, HELI_TOP, yaw);
           root.add(heli);
           base.parked.push({
             kind: "heli", group: heli, x: wx(hx, HELI_Z), z: wz(hx, HELI_Z),
-            y: padY + 0.6, heading: HEAD + Math.PI, airframe: heli.userData.airframe,
+            y: padY + hy, heading: HEAD + yaw, airframe: heli.userData.airframe,
           });
           solidAt(hx, HELI_Z, 14, 18, 0, 5, "heli");
         }
@@ -615,40 +662,38 @@
       // motor pool: tanks nose-out in a row, trucks staged behind them, the
       // way a real pool lines up so nothing has to be shunted to move one
       const POOL_X = -RW_LEN * 0.44, POOL_Z = APRON_Z - 70;
-      const apronPool = new THREE.Mesh(bg(240, 0.4, 120), padMat);
-      apronPool.position.set(POOL_X + 90, 0.32, POOL_Z);
+      const POOL_Y = 0.32, POOL_H = 0.4, POOL_TOP = POOL_Y + POOL_H / 2;
+      const apronPool = new THREE.Mesh(bg(240, POOL_H, 120), padMat);
+      apronPool.position.set(POOL_X + 90, POOL_Y, POOL_Z);
       apronPool.receiveShadow = true;
       root.add(apronPool);
       for (let i = 0; i < 6; i++) {
         const tx = POOL_X + 18 + i * 34, tz = POOL_Z - 28;
         const t = airbase.tank({ name: "TANK " + (i + 1) });
         if (!t) break;
-        t.position.set(tx, 0.55, tz);
-        t.rotation.y = Math.PI;
+        const ty = seat(t, tx, tz, POOL_TOP, Math.PI);
         root.add(t);
         solidAt(tx, tz, 9, 12, 0, 4, "tank");
-        base.parked.push({ kind: "tank", group: t, x: wx(tx, tz), z: wz(tx, tz), y: padY + 0.55, heading: HEAD + Math.PI });
+        base.parked.push({ kind: "tank", group: t, x: wx(tx, tz), z: wz(tx, tz), y: padY + ty, heading: HEAD + Math.PI });
       }
       for (let i = 0; i < 5; i++) {
         const tx = POOL_X + 26 + i * 40, tz = POOL_Z + 26;
         const t = airbase.truck({ name: "TRUCK " + (i + 1) });
         if (!t) break;
-        t.position.set(tx, 0.55, tz);
-        t.rotation.y = Math.PI;
+        const ty = seat(t, tx, tz, POOL_TOP, Math.PI);
         root.add(t);
         solidAt(tx, tz, 8, 14, 0, 4, "truck");
-        base.parked.push({ kind: "truck", group: t, x: wx(tx, tz), z: wz(tx, tz), y: padY + 0.55, heading: HEAD + Math.PI });
+        base.parked.push({ kind: "truck", group: t, x: wx(tx, tz), z: wz(tx, tz), y: padY + ty, heading: HEAD + Math.PI });
       }
 
       // one transport on the far apron — the thing that brought everyone here
       const cargo = airbase.cargo({ name: "TRANSPORT" });
       if (cargo) {
         const cx = -RW_LEN * 0.30, cz = APRON_Z + 40;
-        cargo.position.set(cx, 0.6, cz);
-        cargo.rotation.y = Math.PI - 0.4;
+        const cy = seat(cargo, cx, cz, APRON_TOP, Math.PI - 0.4);
         root.add(cargo);
         solidAt(cx, cz, 40, 44, 0, 12, "aircraft");
-        base.parked.push({ kind: "cargo", group: cargo, x: wx(cx, cz), z: wz(cx, cz), y: padY + 0.6, heading: HEAD + Math.PI - 0.4 });
+        base.parked.push({ kind: "cargo", group: cargo, x: wx(cx, cz), z: wz(cx, cz), y: padY + cy, heading: HEAD + Math.PI - 0.4 });
       }
     })();
 
@@ -707,15 +752,19 @@
     //      parks alert aircraft.
     (function park() {
       const bomber = airbase.bomber({});
-      const drop = bomber.userData.gearDrop || 3.2;
-      bomber.position.set(0, 0.6 + drop, APRON_Z);
-      bomber.rotation.y = Math.PI;                     // nose out, toward the taxiway
+      // WAS: `bomber.userData.gearDrop || 3.2`, and that `||` is the whole
+      // bug — adopt() sets a legitimate 0 for models already standing on
+      // their wheels, 0 is falsy, so the real B-2 inherited the PRIMITIVE
+      // wing's 3.2 m undercarriage and hovered over the apron. `!= null`
+      // would have patched it; measuring the model instead means the next
+      // airframe with no gearDrop at all lands on the concrete too.
+      const by = seat(bomber, 0, APRON_Z, APRON_TOP, Math.PI);  // nose out, toward the taxiway
       root.add(bomber);
       // hold the RECORD, not an index: the helipads and the motor pool push
       // into base.parked before this runs, so parked[0] is a helicopter now
       const rec = {
         kind: "bomber", group: bomber,
-        x: wx(0, APRON_Z), z: wz(0, APRON_Z), y: padY + 0.6 + drop,
+        x: wx(0, APRON_Z), z: wz(0, APRON_Z), y: padY + by,
         heading: HEAD + Math.PI, airframe: bomber.userData.airframe,
       };
       base.parked.push(rec);
@@ -733,13 +782,12 @@
         const lx = side * (95 + row * 62);
         const lz = APRON_Z + (row % 2 === 0 ? -34 : 30);
         const f = airbase.fighter({ color: row % 2 ? M.jet : M.jetD, name: "FIGHTER " + (i + 1) });
-        const fd = f.userData.gearDrop || 2.1;
-        f.position.set(lx, 0.6 + fd, lz);
-        f.rotation.y = Math.PI + (side * 0.16);
+        // same trap as the bomber above: `gearDrop || 2.1` lifted all eight
+        const fy = seat(f, lx, lz, APRON_TOP, Math.PI + side * 0.16);
         root.add(f);
         base.parked.push({
           kind: "fighter", group: f,
-          x: wx(lx, lz), z: wz(lx, lz), y: padY + 0.6 + fd,
+          x: wx(lx, lz), z: wz(lx, lz), y: padY + fy,
           heading: HEAD + Math.PI + side * 0.16, airframe: f.userData.airframe,
         });
         // parked aircraft are solid: they read as real and they block you
