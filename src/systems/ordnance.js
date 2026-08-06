@@ -44,6 +44,20 @@
    without bound — the oldest crater is recycled, which is also why the
    city never accumulates a million-triangle scar.
 
+   THE NUKE IS A ROW, NOT A FILE (2026-08-06). A nuclear store differs
+   from the 2000-pounder in exactly two places — the BODY and the FLASH —
+   and this engine already shipped both. `city/strategic.js` publishes
+   `CBZ.nukeWarhead()` (the B61 casing the bunker vault rack and the B-2's
+   round both wear: computed tangent ogive, boat-tail, cruciform fins,
+   arming bands) and `city/nukefx.js` owns the entire detonation (the DOM
+   whiteout, the Taylor-Sedov white dome, the mushroom stages, and the
+   researched ring model behind `CBZ.nukeRings` / `nukeLethalAt`). So the
+   nuke here is a KIND that POINTS AT THEM, and everything that makes a
+   falling thing a falling thing — the integrator, the prediction, the
+   cover question, the threat ring — is the same code the iron bomb runs.
+   Both reuses degrade: with neither engine file in the page the nuke
+   falls as the primitive body and detonates as the pooled fireball.
+
    USE:
      CBZ.ordnance.init({groundAt, scene});
      const t = CBZ.ordnance.addTarget({pos, team, onDamage});
@@ -51,7 +65,7 @@
      // stepped automatically off CBZ.micro.onFrame when present.
 
    Flags: ORDNANCE_V1 (master), ORDNANCE_THREAT_RINGS, ORDNANCE_CRATERS,
-   ORDNANCE_COVER_FACTOR. Audit: CBZ.ordnanceAudit().
+   ORDNANCE_COVER_FACTOR, ORDNANCE_NUKE. Audit: CBZ.ordnanceAudit().
 ============================================================ */
 (function () {
   "use strict";
@@ -65,6 +79,12 @@
   if (C.ORDNANCE_THREAT_RINGS == null) C.ORDNANCE_THREAT_RINGS = true;
   if (C.ORDNANCE_CRATERS == null) C.ORDNANCE_CRATERS = 90;
   if (C.ORDNANCE_COVER_FACTOR == null) C.ORDNANCE_COVER_FACTOR = 0.25;
+  // ORDNANCE_NUKE — the nuclear KIND (see the header). false and the row is
+  // never declared, so `kind:"nuke"` resolves to the iron bomb through the
+  // same `KINDS[k] || KINDS.iron` fallback every other unknown kind takes,
+  // and a caller can ask whether the reward exists at all with
+  // `!!CBZ.ordnance.kinds.nuke`. One line, whole feature.
+  if (C.ORDNANCE_NUKE == null) C.ORDNANCE_NUKE = true;
   if (C.ORDNANCE_V1 === false) return;
 
   const ord = (CBZ.ordnance = CBZ.ordnance || {});
@@ -73,7 +93,7 @@
   let scene = null, groundAt = null, blocked = null, ready = false;
   const bombs = [], targets = [], fx = [], rings = [], craters = [];
   let craterAt = 0;
-  const stats = { released: 0, detonated: 0, hits: 0, kills: 0 };
+  const stats = { released: 0, detonated: 0, hits: 0, kills: 0, nukes: 0 };
 
   const _v = new THREE.Vector3(), _v2 = new THREE.Vector3();
 
@@ -87,6 +107,45 @@
     cluster: { radius: 30, power: 110, drag: 0.00030, size: 0.9, len: 2.8, color: 0x6b6250, fuse: 0, name: "CLUSTER" },
     rocket: { radius: 26, power: 130, drag: 0.00010, size: 0.6, len: 2.4, color: 0xa9a294, fuse: 0, name: "ROCKET" },
   };
+
+  // ---- THE ONE THAT IS NOT A STORE. Everything above is a claim about
+  //      weight and lethality; this row also claims a different BODY and a
+  //      different FLASH, and names the engine files that own them (`fx` and
+  //      `body`, resolved in bombMesh/blast below). It carries four numbers
+  //      the shared machinery cannot guess:
+  //
+  //      radius — 1100 m is NOT a taste. `city/nukefx.js` inverts the
+  //        published maximum-fireball relation R = 50·W^(1/3) out of the
+  //        shipped bus row and gets 16 kt, Hiroshima-class; its `nukeRings()`
+  //        then puts 5 psi — the overpressure that collapses ordinary
+  //        buildings — at 440·16^(1/3) = 1109 m. So the kill radius and the
+  //        spectacle are the SAME device, and `init()` re-derives this number
+  //        from `CBZ.nukeRings()` when that file is in the page so the two
+  //        cannot drift. It is also the number that makes the cover rule the
+  //        whole answer: at 900 power a man in the open dies out to ~730 m
+  //        and a man under a roof lives past ~420 m.
+  //      warn — how many seconds of threat ring this thing is WORTH. Five is
+  //        right for a 500-pounder that ruins one street. A weapon that takes
+  //        a quarter of the city has to be visible from the moment it leaves
+  //        the bay, or the running side is playing a coin flip (see THE
+  //        TELEGRAPH). `dangerAt()` and the ring both read it.
+  //      craterK — the scorch is sized to the FIREBALL (126 m), not to the
+  //        blast reach. A 460 m disc of char is not a crater, it is a paint
+  //        bucket over the map.
+  //      sound — a nuke is not a louder bomb: the flash arrives at c and the
+  //        report walks out at 340 m/s, so the delay cap is nine seconds
+  //        rather than two, and the punch is a 34 Hz sub, not a 445 Hz one
+  //        (which is what `60 + radius*0.35` would have produced — a whistle).
+  if (C.ORDNANCE_NUKE) {
+    KINDS.nuke = {
+      radius: 1100, power: 900, drag: 0.00006, size: 1.6, len: 5.2,
+      color: 0xb9c0c7,                 // the unpainted grey a stockpile weapon wears
+      fuse: 0, name: "TACTICAL NUKE",
+      fx: "nuke", body: "nukeWarhead",
+      warn: 15, craterK: 0.11,
+      sound: { ref: 3, dur: 7.5, sub: 34, delayMax: 9 },
+    };
+  }
   ord.kinds = KINDS;
 
   // ---------------------------------------------------------------- INIT
@@ -154,6 +213,18 @@
       }
     }
 
+    // ---- ONE DEVICE, ONE SET OF NUMBERS. city/nukefx.js already solved the
+    // whole event out of the bus row it draws; if it is in the page, take its
+    // 5 psi contour rather than trusting the literal in the table above. This
+    // is the difference between a constant somebody has to remember and a
+    // constant that cannot go stale.
+    if (KINDS.nuke && CBZ.nukeRings) {
+      try {
+        const t = CBZ.nukeRings();
+        if (t && t.psi5 > 0) { KINDS.nuke.radius = Math.round(t.psi5); KINDS.nuke.kt = t.W; }
+      } catch (e) { /* keep the literal; it IS that contour */ }
+    }
+
     if (CBZ.micro && CBZ.micro.onFrame) CBZ.micro.onFrame(ord.step, { id: "ordnance", order: 20 });
     return ord;
   };
@@ -202,8 +273,52 @@
   };
 
   // ------------------------------------------------------------- RELEASE
+  // THE REAL CASING WHEN THE REAL CASING IS IN THE PAGE. Same shape
+  // world/airbase.js's realModel()/adopt() uses for the B-2: ask the engine,
+  // reconcile the ONE convention that differs, fall back to primitives on
+  // absence OR on a throw, and never fork the geometry.
+  //
+  // TWO CONVENTIONS RECONCILED HERE:
+  //   • CBZ.nukeWarhead builds NOSE ALONG +X (its own header says so; it is
+  //     the axis a laid-down CylinderGeometry naturally takes). A store in
+  //     this file is attitude'd by `mesh.lookAt(pos + vel)` in ord.step, and
+  //     Object3D.lookAt points LOCAL +Z at the target — so nose must be +Z.
+  //     RotY(−90°) maps +X onto +Z, which is the same single yaw
+  //     city/strategic.js writes for the same reason.
+  //   • The shipped casing is 2.52 m — deliberately, it is a B61 at game
+  //     scale. Beside this file's own 4.2 m iron bomb that reads as the
+  //     SMALLER weapon, which is a joke at 300 m slant range. `len`/`rad` are
+  //     public opts, so it is built at 5.2 m holding the shipped L/D of 6.0:
+  //     the proportions stay the engine's, only the scale is the game's.
+  //
+  // NO CHUTE, on purpose. The casing can build its ribbon parachute and the
+  // real B61 delivery streams one — but a chute is a DRAG CHANGE mid-fall,
+  // and `predict()` integrates one constant drag per kind. A store whose drag
+  // changed after release would make the pipper lie about its own impact
+  // point, which is the one bug class this file's design forbids (see THE
+  // PREDICTION).
+  function nukeBody(K) {
+    if (!CBZ.nukeWarhead) return null;
+    try {
+      // rad is a RADIUS, and the shipped L/D of 6.0 is length over DIAMETER —
+      // so it is len/12, not len/6. Getting that wrong builds a 3:1 barrel
+      // whose fins span four metres, which is how it was caught.
+      const w = CBZ.nukeWarhead({ len: K.len, rad: K.len / 12, chute: false, lugs: false });
+      if (!w || !w.isObject3D) return null;
+      const g = new THREE.Group();
+      w.rotation.y = -Math.PI / 2;
+      g.add(w);
+      g.userData.real = true;
+      return g;
+    } catch (e) {
+      console.warn("[ordnance] CBZ.nukeWarhead present but failed; using the primitive body", e);
+      return null;
+    }
+  }
+
   let bombGeo = null, bombMats = null;
   function bombMesh(K) {
+    if (K.body === "nukeWarhead") { const w = nukeBody(K); if (w) return w; }
     if (!bombGeo) {
       bombGeo = new THREE.CylinderGeometry(0.5, 0.34, 1, 8);
       bombMats = {};
@@ -281,36 +396,65 @@
   ord.blast = function (x, y, z, radius, power, info) {
     info = info || {};
     stats.detonated++;
-    spawnFx(x, y, z, radius);
+    // The KIND is what decides which spectacle runs; everything after it —
+    // sound, crater, damage, cover — is one path for every warhead there is.
+    const K = info.kind ? KINDS[info.kind] : null;
+    const nuclear = !!(K && K.fx === "nuke");
+    if (nuclear) fireNukeFx(x, y, z, radius, info);
+    else spawnFx(x, y, z, radius);
 
     // sound, attenuated by the listener's distance (the listener is the
     // camera — the only ear the engine has)
     if (CBZ.micro && CBZ.micro.sfx) {
+      const S = (K && K.sound) || null;
       const cam = CBZ.camera;
       const d = cam ? cam.position.distanceTo(_v.set(x, y, z)) : 0;
-      const gain = CBZ.micro.sfx.gainAt(d, radius * 9);
+      const gain = CBZ.micro.sfx.gainAt(d, radius * (S ? S.ref : 9));
       if (gain > 0.02) {
-        const delay = Math.min(2.2, d / 340);          // sound is slower than sight
+        const delay = Math.min(S ? S.delayMax : 2.2, d / 340);   // sound is slower than sight
         setTimeout(function () {
-          CBZ.micro.sfx.boom({ gain: gain * 0.85, dur: 1.1 + radius / 90, sub: 60 + radius * 0.35 });
+          CBZ.micro.sfx.boom({
+            gain: gain * 0.85,
+            dur: S ? S.dur : 1.1 + radius / 90,
+            sub: S ? S.sub : 60 + radius * 0.35,
+          });
         }, delay * 1000);
       }
       if (ord.onShake) ord.onShake(Math.max(0, 1 - d / (radius * 7)));
     }
 
-    // crater
+    // crater — sized to the SCORCH, which for a nuke is the fireball and not
+    // the blast reach (see craterK in the table)
     if (craters.length) {
       const m = craters[craterAt = (craterAt + 1) % craters.length];
       m.position.set(x, (groundAt ? groundAt(x, z) : 0) + 0.09, z);
-      const s = radius * 0.42;
+      const s = radius * ((K && K.craterK) || 0.42);
       m.scale.set(s, 1, s);
       m.visible = true;
     }
 
     // ---- damage, with the cover question (see THE BLAST, AND COVER)
+    //
+    // WALK A SNAPSHOT, NEVER THE LIVE ARRAY. `onDamage` is allowed to KILL,
+    // and every mode that kills unregisters the body it just removed from the
+    // world — `ord.removeTarget` splices the very array this loop was walking,
+    // so whoever slid into the vacated slot was stepped straight over. With a
+    // 46 m bomb that killed one man it was one silently-spared target nobody
+    // could see. Measured 2026-08-06 with a 1109 m nuclear blast over a live
+    // squad: two removals inside one call, two men inside the radius, in the
+    // open, never asked.
+    //
+    // AND THE SNAPSHOT IS LOCAL, NOT A REUSED MODULE SCRATCH. That was the
+    // first fix and it was worse than the bug: a mode's kill handler fires its
+    // own small FX blast (bomb-survivor's `boom()` does exactly this), so
+    // ord.blast is RE-ENTRANT — the nested call cleared the shared array and
+    // the outer loop ended at its first casualty. One array per detonation is
+    // the price of a function that can call itself, and detonations are not a
+    // per-frame cost.
     let hits = 0;
-    for (let i = 0; i < targets.length; i++) {
-      const t = targets[i];
+    const list = targets.slice();
+    for (let i = 0; i < list.length; i++) {
+      const t = list[i];
       if (!t || t.alive === false) continue;
       const p = t.pos;
       if (!p) continue;
@@ -340,6 +484,32 @@
   };
 
   // ---------------------------------------------------------------- FX
+  // THE NUCLEAR DETONATION IS NOT DRAWN HERE AND MUST NOT BE. city/nukefx.js
+  // is 4700 lines of exactly this event — the whiteout, the double flash, the
+  // R ∝ t^(2/5) Taylor-Sedov dome, the mushroom's rise/bloom/flatten stages,
+  // the base surge — and it fires from one call with no impact bus loaded
+  // (its own comment: the defaults MIRROR the bus row verbatim, so a probe
+  // gets the same 126 m fireball the real row produces). Two things this
+  // caller must get right:
+  //   noDamage — the damage already happened, five lines up in ord.blast,
+  //     through the cover question. The composer draws; it never bills.
+  //   the row — left at its default ON PURPOSE. That default IS the 16 kt
+  //     device the nuke kind's radius was derived from in init(); passing a
+  //     hand-made row here would be the second table this file spent its
+  //     header arguing against.
+  // No file present, or a throw inside one: the pooled fireball, which is
+  // what every other kind gets and is never worse than nothing.
+  function fireNukeFx(x, y, z, R, info) {
+    if (CBZ.cityNukeFX) {
+      try {
+        stats.nukes++;
+        CBZ.cityNukeFX(x, y + 1.2, z, { noDamage: true, byPlayer: !!info.byPlayer });
+        return;
+      } catch (e) { console.error("[ordnance nukefx]", e); }
+    }
+    spawnFx(x, y, z, R);
+  }
+
   function spawnFx(x, y, z, R) {
     let e = null;
     for (let i = 0; i < fx.length; i++) if (fx[i].t < 0) { e = fx[i]; break; }
@@ -437,10 +607,19 @@
         // the ring TIGHTENS as time-to-impact falls: wide and faint when you
         // still have time, hard and bright when you do not
         const ttl = Math.max(0, b.impact.t);
-        const tight = Math.max(0.55, Math.min(2.2, ttl * 0.5));
+        // A NUCLEAR RING NEVER SHRINKS BELOW ITS OWN REACH. Every other store
+        // closes to 0.55 of its radius because the message is "the impact is
+        // HERE" and standing at the edge of a 46 m bomb is a survivable
+        // mistake. Standing anywhere inside a nuke's ring is not, so its floor
+        // is 1.0: what you see is what it takes.
+        const nuclear = b.K.fx === "nuke";
+        const tight = Math.max(nuclear ? 1.0 : 0.55, Math.min(2.2, ttl * 0.5));
         const s = b.radius * tight;
         m.scale.set(s, 1, s);
-        m.material.opacity = 0.30 + 0.55 * Math.max(0, 1 - ttl / 5);
+        // brightness runs the kind's OWN warning window (see `warn`), so a
+        // weapon worth fifteen seconds of dread is bright for fifteen seconds
+        m.material.opacity = 0.30 + 0.55 * Math.max(0, 1 - ttl / (b.K.warn || 5));
+        m.material.color.setHex(nuclear ? 0xfff0b0 : 0xff4436);
       }
       for (; ri < rings.length; ri++) rings[ri].visible = false;
     }
@@ -454,7 +633,14 @@
     for (let i = 0; i < bombs.length; i++) {
       const b = bombs[i];
       if (!b.impact || !b.impact.hit) continue;
-      out.push({ x: b.impact.x, y: b.impact.y, z: b.impact.z, t: b.impact.t, radius: b.radius, team: b.team, power: b.power });
+      // `kind` and `warn` ride along because a HUD that shows every inbound
+      // store the same way is not a telegraph. The caller decides what a
+      // fifteen-second warning looks like; this file only knows it is owed.
+      out.push({
+        x: b.impact.x, y: b.impact.y, z: b.impact.z, t: b.impact.t,
+        radius: b.radius, team: b.team, power: b.power,
+        kind: b.kind, warn: b.K.warn || 0,
+      });
     }
     return out;
   };
@@ -465,7 +651,14 @@
     let worst = 0;
     for (let i = 0; i < bombs.length; i++) {
       const b = bombs[i];
-      if (!b.impact || !b.impact.hit || b.impact.t > H) continue;
+      // A STORE MAY OWE MORE WARNING THAN THE CALLER ASKED FOR. Six seconds
+      // is the right horizon for a bomb you can walk out of; it is the wrong
+      // one for something whose ring covers a quarter of the map, because an
+      // AI that only starts running with six seconds left cannot reach a roof
+      // and a HUD that only screams then has told you nothing. The kind's own
+      // `warn` raises the floor and nothing else changes.
+      const h = Math.max(H, b.K.warn || 0);
+      if (!b.impact || !b.impact.hit || b.impact.t > h) continue;
       const d = Math.hypot(x - b.impact.x, z - b.impact.z);
       if (d > b.radius * 1.3) continue;
       const f = 1 - d / (b.radius * 1.3);
@@ -486,6 +679,16 @@
       fxPool: fx.length, ringPool: rings.length, craterPool: craters.length,
       released: stats.released, detonated: stats.detonated, hits: stats.hits,
       coverFactor: C.ORDNANCE_COVER_FACTOR,
+      // WHICH HALVES OF THE NUKE THIS PAGE ACTUALLY GOT. Both are optional
+      // reuses of shipped engine files, so both are worth being able to read
+      // from the outside: a page that silently fell back to a grey drum and a
+      // pooled fireball looks identical from in here otherwise.
+      nuke: !!KINDS.nuke,
+      nukeRadius: KINDS.nuke ? KINDS.nuke.radius : 0,
+      nukeKt: KINDS.nuke && KINDS.nuke.kt != null ? KINDS.nuke.kt : null,
+      nukeBody: !!(KINDS.nuke && CBZ.nukeWarhead),
+      nukeFx: !!(KINDS.nuke && CBZ.cityNukeFX),
+      nukes: stats.nukes,
     };
   };
 })();

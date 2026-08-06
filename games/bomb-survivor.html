@@ -22,6 +22,9 @@
                               the civil-defence shelters
     src/world/airbase.js      the installation + the flying wing + the
                               fighters standing on its apron
+    src/city/strategic.js     the B-2, and CBZ.nukeWarhead — the B61 casing
+    src/city/nukefx.js        the detonation: whiteout, Taylor-Sedov dome,
+                              mushroom stages, and the researched ring model
     src/systems/airframe.js   how an aeroplane moves (and how an AI flies)
     src/systems/ordnance.js   the fall, the prediction, the blast, the
                               cover question, the threat ring
@@ -42,6 +45,16 @@
     them still breathing. Ten minutes each way; the aggregate wins it.
     That is why the swap is in the framework and not in this file: an
     asymmetric fight scored from one side is not a score.
+
+  THE ONE REWARD. Six kills inside a half, still standing, and the bomber
+    is holding a 16 kiloton weapon. There is no ladder under it: a bomber
+    has one verb — release — and every rung below a nuke would be that
+    same verb with a bigger number on it. Going down loses the count, and
+    it is one a half, so a nuke can never buy the next one. The runners
+    get a white ring 2.4 km across and fifteen seconds on the clock, which
+    is the whole reason it is a decision and not a coin flip. Under a roof
+    past 400 m you live. It is `kind:"nuke"` and nothing else: same bay,
+    same integrator, same pipper, same cover question.
 
   WHY THE COVER RULE IS THE WHOLE GAME. systems/ordnance.js asks whether
   the target could SEE the detonation before it applies damage — a wall,
@@ -138,6 +151,24 @@
   #scoreBar>i:last-child>u{left:0}
   #lifePips{display:flex;gap:3px;justify-content:center;margin-top:7px}
   #lifePips span{width:14px;height:5px;border-radius:2px;background:rgba(255,255,255,.13)}
+  /* THE NUKE ROW. One lamp and one plain value, the same instrument grammar
+     as the STALL and COVER lamps — caps label, tabular number, no emoji. It
+     lives under the life pips because it belongs to the MATCH cluster (it is
+     earned from kills and lost on a death), and because health owns the top
+     left and nothing is allowed to move into that corner. Three states, and
+     only ever one of them: counting up (3/6), armed (READY), inbound (a
+     countdown in seconds, which outranks the other two because a nuke in the
+     air is the only thing on this HUD that can kill you in nine seconds). */
+  #nukeRow{display:none;align-items:center;justify-content:center;gap:8px;margin-top:7px}
+  .lamp.nuke.on{background:rgba(255,186,84,.9);color:#241400}
+  .lamp.nuke.inbound.on{background:rgba(255,70,54,.92);color:#fff;animation:pulse .7s infinite}
+  #nukeVal{font:700 11px/1 monospace;letter-spacing:1.5px;opacity:.85;font-variant-numeric:tabular-nums}
+  /* A KEY CAP ON A TOUCHSCREEN IS A LIE — the same law the briefing's
+     .keys.desk block runs under, applied to the one <kbd> that lives in the
+     HUD. body.is-touch is stamped at LOAD on a coarse pointer, so a phone
+     never renders this at all. */
+  #nukeKey{opacity:.62}
+  body.is-touch #nukeKey{display:none}
 
   /* ---- feed: three lines, and they leave ---- */
   #feed{bottom:calc(14px + var(--sab));left:calc(12px + var(--sal));width:290px;font-size:12px;
@@ -290,6 +321,10 @@
     <div id="timeBar"><i style="width:0%"></i></div>
     <div id="scoreBar"><i><u></u></i><i><u></u></i></div>
     <div id="lifePips"></div>
+    <div id="nukeRow">
+      <div class="lamp nuke" id="lampNuke">NUKE</div>
+      <span id="nukeVal"></span><span id="nukeKey"><kbd>N</kbd></span>
+    </div>
   </div>
   <div class="pane" id="feed"></div>
   <div class="pane" id="mapPane"><canvas id="radar" width="176" height="176"></canvas></div>
@@ -325,6 +360,7 @@
           <div><kbd>E</kbd> board the wing</div>
           <div><kbd>MOUSE</kbd> pitch roll <kbd>A</kbd><kbd>D</kbd> rudder <kbd>W</kbd><kbd>S</kbd> throttle</div>
           <div><kbd>SPACE</kbd> release. hold for a stick</div>
+          <div><kbd>N</kbd> the nuke, once it is yours</div>
           <div><kbd>C</kbd> bomb cam <kbd>V</kbd> cockpit <kbd>R</kbd> radar range <kbd>T</kbd> rig</div>
         </div>
         <div class="keys touch">
@@ -333,9 +369,12 @@
           <div>BOARD button at the wing</div>
           <div>STICK pitch roll · THR slider · rudder pads</div>
           <div>Big round button releases. Hold for a stick</div>
+          <div>NUKE button, once it is yours</div>
         </div>
         <div class="stat"><b>250</b> a kill</div>
         <div class="stat"><b>GREEN PIPPER</b> impact point</div>
+        <div class="stat"><b>6 KILLS</b> one half, still standing, and the nuke is yours</div>
+        <div class="line">Going down loses it. One a half.</div>
       </div>
       <div class="box b2">
         <h3>HALF 2 · THEY BOMB</h3>
@@ -344,6 +383,8 @@
         <div class="stat"><b>RED RINGS</b> inbound. tighten as impact closes</div>
         <div class="stat"><b>COVER</b> cuts blast 75%</div>
         <div class="line">Walls. Shelter roofs. Park canopy. Concrete stands on the corners.</div>
+        <div class="stat"><b>WHITE RING</b> 16 kilotons. fifteen seconds. run</div>
+        <div class="line">A roof is worth your life past 400 m. Inside that, distance is the only answer.</div>
         <div class="stat"><b>NO RESPAWNS</b></div>
       </div>
       <div class="box b3">
@@ -364,6 +405,8 @@
     <div id="credit">
       <b>SHIPPED ASSETS</b>
       <span>B-2 <code>city/strategic.js</code></span>
+      <span>warhead <code>city/strategic.js</code></span>
+      <span>the flash <code>city/nukefx.js</code></span>
       <span>fleet <code>city/island_military.js</code></span>
       <span>people <code>entities/character.js</code></span>
       <span>park <code>world/vegetation.js</code></span>
@@ -408,6 +451,17 @@
 <script src="../src/entities/poses.js"></script>
 <script src="../src/city/island_military.js"></script>
 <script src="../src/city/strategic.js"></script>
+<!-- city/nukefx.js is here for ONE reason: this game earned a nuclear round
+  and refuses to draw one. 4700 lines of the actual event already ship — the
+  DOM whiteout, the double flash, the Taylor-Sedov white dome (R ∝ t^2/5), the
+  mushroom's rise/bloom/flatten stages, the base surge, and the researched ring
+  model (nukeYield · nukeRings · nukeLethalAt · nukeDims) that systems/ordnance
+  .js now sizes its kill radius from. It needs CBZ.scene at MODULE LOAD, which
+  is why it sits after microboot's tag and not next to the game code, and it
+  registers its own per-frame updater through CBZ.onAlways — the frame-hook
+  bridge microboot already stands up for slice pages. Nothing else in the file
+  had to change to get it. -->
+<script src="../src/city/nukefx.js"></script>
 <script src="../src/world/desertcity.js"></script>
 <script src="../src/world/airbase.js"></script>
 <script src="../src/systems/airframe.js"></script>
@@ -434,6 +488,16 @@ const BOMBER_ALT   = 360;     // where the AI bombers work. Lower than it
                               // aeroplane. 360 m keeps the lead honest (~1.3 km)
                               // and keeps the bomber in the runner's sky.
 const RESPAWN_AIR  = 6;       // a downed bomber is back in the air in this
+// ---- THE ONE REWARD. Not a ladder: the bomber has exactly one verb, and
+// every rung below a nuke would be that same verb with a bigger number on it.
+// So there is one, it costs SIX KILLS INSIDE ONE HALF, and going down at any
+// point resets the count to zero — which is the only thing that makes the
+// bomber's own survival matter in a half where he respawns in six seconds.
+// One a half, so a nuke can never pay for the next nuke.
+// Six is tuned against the half: the AI bombers average four or five kills in
+// ten minutes, so six is a good half, not a routine one.
+const NUKE_KIND    = "nuke";
+const NUKE_ARM     = 6;
 // what a full bar means. A bombing side that kills the whole squad banks
 // SQUAD × PTS_KILL; a running side that keeps everyone alive for the whole
 // half banks SQUAD × PTS_ALIVE_S × HALF_SECONDS. They are within 4% of each
@@ -454,6 +518,13 @@ let started = false, paused = false;
 let camMode = "chase";        // chase · cockpit · bomb · spectate
 let shake = 0, shakeT = 0;
 let spectateOf = null;
+// the reward, and the whole of its state. `spent` is per HALF, `kills` is per
+// LIFE — that pair is the entire rule and it is why neither is on the unit.
+const nuke = { kills: 0, armed: false, spent: false, warned: false };
+// systems/ordnance.js declares the row behind CBZ.CONFIG.ORDNANCE_NUKE. With
+// the flag off there is no such kind, so there is no reward to offer either —
+// one line reverts the weapon AND its whole UI.
+const NUKE_ON = !!(CBZ.ordnance && CBZ.ordnance.kinds && CBZ.ordnance.kinds.nuke);
 const rngGame = CBZ.seedStream ? CBZ.seedStream("bombsurvivor") : Math.random;
 function rr(a, b) { return a + rngGame() * (b - a); }
 function pick(a) { return a[Math.floor(rngGame() * a.length) % a.length]; }
@@ -632,6 +703,11 @@ function killUnit(u, info) {
   u.alive = false;
   const killer = info && info.team ? unitsOfTeam(info.team).find(function (k) { return k.id === info.by; }) : null;
   match.kill(u.rec, killer ? killer.rec : null, "ordnance");
+  // THE REWARD IS COUNTED HERE, at the one place a body actually stops, and
+  // only for a RUNNER — the neutral traffic and a bomber caught by his own
+  // stick are not the thing being asked for.
+  if (killer === myUnit && u.role === "runner") nukeCredit();
+  if (u === myUnit) nukeLost();
 
   if (u.role === "runner") {
     // the bombing side gets paid, once, here
@@ -653,6 +729,53 @@ function unitsOfTeam(id) { return units.filter(function (u) { return u.team === 
 
 function boom(p, r) {
   CBZ.ordnance.blast(p.x, p.y, p.z, r, 0, {});   // FX + sound only: power 0
+}
+
+// ============================================================ THE NUKE
+// The game side of it is four small functions, and that is the point: the
+// WEAPON is a row in systems/ordnance.js (which took its 1100 m kill radius
+// from city/nukefx.js's own 5 psi contour for the 16 kt device it draws), the
+// BODY is city/strategic.js's B61 casing, the FLASH is city/nukefx.js's whole
+// sequence. Nothing below this line knows what any of that looks like. What
+// it owns is the RULE: who earns it, who loses it, and when it may fly.
+function nukeCredit() {
+  if (!NUKE_ON || nuke.spent || nuke.armed) return;
+  nuke.kills++;
+  if (nuke.kills < NUKE_ARM) return;
+  nuke.armed = true;
+  match.log("NUKE ARMED", { tone: "good" });
+  // the touch build never names a key and the desktop build always does —
+  // one string each, chosen from the same test the CSS uses
+  showBanner("NUKE ARMED", TOUCH.active ? "NUKE BUTTON" : "PRESS N");
+  if (CBZ.micro.sfx) CBZ.micro.sfx.tone(140, 0.9, { type: "sawtooth", gain: 0.16, slideTo: 300 });
+}
+// GOING DOWN LOSES IT, ARMED OR NOT. A bomber is back in the air in six
+// seconds, so his death costs him almost nothing — this is the one thing it
+// costs him, and it is what makes pressing the attack below release altitude
+// a decision instead of a free ride.
+function nukeLost() {
+  if (!NUKE_ON || (!nuke.armed && nuke.kills === 0)) return;
+  const had = nuke.armed;
+  nuke.armed = false;
+  nuke.kills = 0;
+  if (had) match.log("NUKE LOST", { tone: "bad" });
+}
+function nukeReset() { nuke.kills = 0; nuke.armed = false; nuke.spent = false; nuke.warned = false; }
+
+// [N] on the desk, the NUKE pill under the right thumb — both arrive here,
+// because the touch layer synthesises the same key code and this is polled off
+// the input floor rather than off a DOM keydown. ONE handler per verb.
+function callNuke() {
+  const u = myUnit;
+  if (!NUKE_ON || !nuke.armed) return;
+  if (!u || !u.alive || u.kind !== "air" || !u.af) return;   // it is a bomb; it needs a bomb bay
+  nuke.armed = false;
+  nuke.spent = true;
+  nuke.kills = 0;
+  releaseFrom(u, NUKE_KIND);
+  match.log("NUKE AWAY", { tone: "phase" });
+  showBanner("NUKE AWAY", "");
+  if (CBZ.micro.sfx) CBZ.micro.sfx.siren(3.2, { gain: 0.15 });
 }
 
 // ============================================================ THE MATCH
@@ -693,6 +816,7 @@ function buildMatch() {
 function startHalf(half) {
   CBZ.ordnance.clear();
   spectateOf = null;
+  nukeReset();          // the count is a HALF's count, and so is the one shot
   for (let i = 0; i < units.length; i++) {
     const u = units[i];
     u.role = match.roleOf(u.team, half);
@@ -764,6 +888,13 @@ function buildTouch() {
   // interaction verbs carry WORDS (the one place the HUD is allowed to talk)
   TB.act = TOUCH.addButton({ id: "act", word: true, label: "BOARD", key: "KeyE", size: 52, right: 22, bottom: 130 });
   TB.next = TOUCH.addButton({ id: "next", word: true, label: "NEXT", key: "KeyQ", size: 46, right: 22, bottom: 130 });
+  // THE ONE REWARD GETS A WORD, and it is LATCHED — a nuke is a single
+  // decision, never a thing you lean on. It sits at bottom 172, clear of the
+  // rudder pads (they top out at 142) and inboard of the throttle slider
+  // (right 24..70), because the only control it must never be mistaken for is
+  // the trigger under the same thumb. Hidden until it is actually yours: a
+  // greyed-out button is a promise the interface cannot keep.
+  TB.nuke = TOUCH.addButton({ id: "nuke", word: true, label: "NUKE", key: "KeyN", latch: true, size: 46, right: 108, bottom: 172 });
   syncTouch();
 }
 // show only the controls this role can actually use
@@ -782,11 +913,16 @@ function syncTouch() {
   TB.thr.show(flying);
   TB.act.set(boarding);
   TB.next.set(!!(u && !u.alive));
+  TB.nuke.set(!!(NUKE_ON && nuke.armed && flying), true);
 }
 
 function updatePlayer(dt) {
   const u = myUnit;
   if (!u) return;
+  // polled, not listened for: the touch pill synthesises KeyN into the input
+  // floor and never fires a DOM keydown, so a window listener would answer
+  // the desk build only
+  if (KEY.pressed("KeyN")) callNuke();
   if (!u.alive) { updateSpectate(dt); return; }
   if (u.kind === "foot") updateFoot(u, dt, true);
   else updateFlight(u, dt, true);
@@ -939,14 +1075,16 @@ function updateFlight(u, dt, human) {
   }
 }
 
-function releaseFrom(u) {
+function releaseFrom(u, kind) {
   const af = u.af;
   if (!af) return;
-  // released with the AEROPLANE's velocity — the header's whole point
+  // released with the AEROPLANE's velocity — the header's whole point. `kind`
+  // is the ONLY thing that differs between the stick and the nuke: same bay,
+  // same integrator, same pipper, same cover question on the far end.
   CBZ.ordnance.release({
     pos: _v.copy(af.pos).addScaledVector(af.up(_v2), -2.2),
     vel: af.vel,
-    kind: BOMB_KIND,
+    kind: kind || BOMB_KIND,
     team: u.team,
     owner: u.id,
   });
@@ -1247,6 +1385,8 @@ function hudCache() {
   HUD.tapeT = el("tapeT"); HUD.tapeS = el("tapeS"); HUD.tapeA = el("tapeA");
   HUD.lampStall = el("lampStall"); HUD.lampCover = el("lampCover");
   HUD.vig = el("vignette"); HUD.arrow = el("dangerArrow");
+  HUD.nukeRow = el("nukeRow"); HUD.lampNuke = el("lampNuke");
+  HUD.nukeVal = el("nukeVal"); HUD.nukeKey = el("nukeKey");
   for (let i = 0; i < SQUAD; i++) HUD.pips.appendChild(document.createElement("span"));
 }
 function setTape(wrap, frac, value, show) {
@@ -1297,6 +1437,8 @@ function updateHUD() {
     const live = rList[i] && rList[i].alive;
     HUD.pips.children[i].style.background = live ? rc : "rgba(255,255,255,.13)";
   }
+
+  updateNukeHud(role);
 
   // ---- feed
   const sig = match.feed.length + "|" + (match.feed[0] ? match.feed[0].text : "");
@@ -1368,6 +1510,57 @@ function updateHUD() {
   el("inst").style.display = flying ? "flex" : "none";
   el("cross").style.display = (u && u.alive && u.kind === "foot") ? "block" : "none";
 }
+// ---- the nuke row, and the countdown that is the runners' whole answer.
+// THE WARNING IS PROPORTIONATE, and that is a rule and not a nicety: the
+// threat ring already paints a 2.4 km white circle from the moment the round
+// leaves the bay (systems/ordnance.js sizes both the ring's brightness and
+// dangerAt's horizon off the kind's own `warn`, so the vignette and every AI
+// runner start reacting fifteen seconds out instead of six). This adds the one
+// thing a ring on the ground cannot say while you are looking the other way:
+// how many seconds are left. Ordered so INBOUND always wins — an armed nuke in
+// your own bay is not news while one is falling on you.
+function updateNukeHud(role) {
+  const row = HUD.nukeRow;
+  if (!NUKE_ON) { row.style.display = "none"; return; }
+  let inbound = null;
+  const th = CBZ.ordnance.activeThreats();
+  for (let i = 0; i < th.length; i++) {
+    if (th[i].kind === NUKE_KIND && (!inbound || th[i].t < inbound.t)) inbound = th[i];
+  }
+  if (inbound) {
+    row.style.display = "flex";
+    HUD.lampNuke.className = "lamp nuke inbound on";
+    HUD.nukeVal.textContent = "IMPACT " + String(Math.max(0, Math.ceil(inbound.t))).padStart(2, "0");
+    HUD.nukeKey.style.visibility = "hidden";
+    // once per round, and only to the side it is falling on
+    if (!nuke.warned && role === "runner") {
+      nuke.warned = true;
+      showBanner("NUKE INBOUND", "GET UNDER A ROOF");
+      if (CBZ.micro.sfx) CBZ.micro.sfx.siren(4.5, { gain: 0.2 });
+    }
+    return;
+  }
+  nuke.warned = false;
+  HUD.nukeKey.style.visibility = "";
+  if (nuke.armed) {
+    row.style.display = "flex";
+    HUD.lampNuke.className = "lamp nuke on";
+    HUD.nukeVal.textContent = "READY";
+    return;
+  }
+  // COUNTING UP IS THE POINT. A reward nobody can see coming is a surprise,
+  // and a surprise is not a gradient — 3/6 on the glass is what makes the
+  // fourth kill worth flying back for.
+  if (role === "bomber" && !nuke.spent && nuke.kills > 0) {
+    row.style.display = "flex";
+    HUD.lampNuke.className = "lamp nuke";
+    HUD.nukeVal.textContent = nuke.kills + "/" + NUKE_ARM;
+    HUD.nukeKey.style.visibility = "hidden";
+    return;
+  }
+  row.style.display = "none";
+}
+
 let warnPlaying = false, vigFlash = 0;
 function flashVignette(v) {
   vigFlash = v;
@@ -1619,6 +1812,18 @@ function buildTestRig() {
       ["walk a stick", function () { const u = myUnit; if (!u) return; for (let k = 0; k < 6; k++) (function (k) { setTimeout(function () { CBZ.ordnance.release({ pos: _v.set(u.pos.x + k * 40 - 120, u.pos.y + 320, u.pos.z), vel: _v2.set(0, 0, 0), kind: BOMB_KIND, team: "test" }); }, k * 120); })(k); }],
       ["clear the air", function () { CBZ.ordnance.clear(); }],
     ]],
+    ["NUKE", [
+      // the two states worth reaching in a hurry: holding one, and being
+      // under one. Neither skips the real path — "arm" only sets the flag the
+      // sixth kill would have set, and "call" is the same callNuke() the key
+      // and the touch pill go through.
+      ["arm it", function () { nuke.spent = false; nuke.kills = NUKE_ARM - 1; nukeCredit(); }],
+      ["call it", function () { callNuke(); }],
+      ["one on my head", function () {
+        const u = myUnit;
+        if (u) CBZ.ordnance.release({ pos: _v.set(u.pos.x, u.pos.y + 900, u.pos.z), vel: _v2.set(0, 0, 0), kind: NUKE_KIND, team: "test" });
+      }],
+    ]],
     ["ROSTER", [
       ["thin runners (5)", function () { const live = units.filter(function (x) { return x.role === "runner" && x.alive && x !== myUnit; }); for (let i = 0; i < 5 && i < live.length; i++) killUnit(live[i], { team: match.enemyOf(live[i].team).id }); }],
       ["down one bomber", function () { const b = units.filter(function (x) { return x.role === "bomber" && x.alive && x !== myUnit; })[0]; if (b) killUnit(b, {}); }],
@@ -1694,7 +1899,10 @@ function testTick() {
     "jets " + jets.filter(function (j) { return j.alive; }).length +
     "  runners " + units.filter(function (x) { return x.role === "runner" && x.alive; }).length + "\n" +
     (u ? ("you " + Math.round(u.pos.x) + "," + Math.round(u.pos.y) + "," + Math.round(u.pos.z) +
-      "  hp " + Math.round(Math.max(0, u.hp)) + (godMode ? " [GOD]" : "")) : "");
+      "  hp " + Math.round(Math.max(0, u.hp)) + (godMode ? " [GOD]" : "")) : "") + "\n" +
+    "nuke " + nuke.kills + "/" + NUKE_ARM + (nuke.armed ? " ARMED" : "") + (nuke.spent ? " SPENT" : "") +
+      "  R" + a.nukeRadius + " " + (a.nukeKt != null ? a.nukeKt + "kt" : "?") +
+      "  body " + (a.nukeBody ? "real" : "prim") + " fx " + (a.nukeFx ? "real" : "pool");
 }
 
 // ============================================================ BOOT
@@ -1832,6 +2040,8 @@ window.__bomb = {
   get base() { return base; },
   get units() { return units; },
   get me() { return myUnit; },
+  get nuke() { return nuke; },
+  callNuke: callNuke,
   warp: function (x, z) { if (myUnit) { myUnit.pos.set(x, floorAt(x, z) + 2, z); if (myUnit.af) myUnit.af.pos.copy(myUnit.pos); } },
   board: function () { if (myUnit) { myUnit.pos.set(base.bomber.x + 6, base.bomber.y, base.bomber.z); } },
   audit: function () {
