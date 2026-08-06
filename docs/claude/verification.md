@@ -69,6 +69,26 @@ every time. The real rules:
   render path; run before a big deploy or when render code changed),
   `tools/terrain-map-audit.mjs` (deep terrain sweep), `tools/aimlib.js`
   (honest camera aiming from probes),
+  `tools/breach-check.mjs` (ENOUGH IS ENOUGH — does explosive ACCUMULATE?
+  Measures, live: the charge table is the doctrinal 2/5/7/10 rows; ONE 5 lb
+  contact brick opens a wall; N standoff rockets do the same and REPORTS N
+  rather than asserting a magic number; a wall too thick for any single hit
+  opens once the ledger crosses the heavy rows; a vault opens at the pounds it
+  declared; and `noBreach` holds at 100 lb. `--escape` runs it in the prison,
+  `--off` asserts the BREACH_TABLE_V1 revert. Two traps it already caught and
+  that will catch you too: pick a wall by its DECLARED y0/y1 band and detonate
+  at that band's mid-height — a fixed 1.4 m silently tests only ground floors
+  and the first run "failed" on a wall 14 m up; and the revert path reverts to
+  BEFORE breach.js, not to "nothing carves", because the city's own
+  blast->structuralBlast chain predates all of this),
+  `tools/mode-engine-check.mjs` (ONE ENGINE, EVERY MODE — boots into escape and
+  asks by CONSEQUENCE whether Gang City's engine actually reaches the other
+  modes: does the shared vault probe accept the prison's own mess furniture,
+  does the PLAYER's real `start()` path fire on it, does a HUNTING guard vault
+  off guards.js's own mover, and does an RPG blast actually kill men standing in
+  its lethal core. `--revert` re-runs the whole thing with `MODE_CAPS_V1=0` and
+  asserts the OPPOSITE — the degrade-safe claim proved, not asserted. Copy that
+  two-sided shape: a probe that passes before and after proves nothing),
   `tools/prison-polish-check.mjs` (the PRISON, mode "escape" + gungame: the
   armory's slot-per-weapon and take-it-off-the-wall contract, LOS through an
   OPENED door — the losgrid mover trap — the tight-space first-person rule with

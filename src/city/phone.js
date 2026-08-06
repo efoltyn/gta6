@@ -603,6 +603,62 @@
       (sub ? "<div style='color:" + DIM + ";font-size:11px;margin-top:2px'>" + esc(sub) + "</div>" : "") +
       "</div>";
   }
+  /* ---- DEMOLITION — THE DETONATOR IS AN APP ------------------------------
+     OWNER (2026-08-06): "Detonator not in hand. It should be on your phone.
+     We already have a phone code, and it's good."
+
+     He is right and the first attempt was wrong: a clacker box modelled into
+     the off-hand is a second UI competing with the one this file already is.
+     The phone is the surface the game already carries for "things you own,
+     read at a glance, act on" — it has the modal, the card grammar, the
+     click delegation and the [P] key. A remote detonator is a PHONE APP in
+     every crime story since about 2005, so the fiction is free too.
+
+     What it shows is the whole point of systems/breach.js being a shared
+     table rather than a constant: how many pounds you have OUT, and what the
+     nearest thing you could open COSTS. A bank reserve vault says 10 lb, the
+     prison's yard door says 5, and the card does the subtraction for you —
+     so "go back for another brick" is information, not trial and error. */
+  function demoApp() {
+    const outN = (typeof CBZ.cityC4Planted === "function") ? CBZ.cityC4Planted() : 0;
+    const carried = (typeof CBZ.cityC4Count === "function") ? CBZ.cityC4Count() : 0;
+    if (!outN && !carried) return "";                 // no charges, no app — nothing to say
+    const LB = 5;                                     // one brick, the doctrinal one-man row
+    const outLb = outN * LB;
+    let inner = "";
+    inner += row("Charges out", outN ? (outN + "  (" + outLb + " lb)") : "none", outN ? RED : DIM);
+    inner += row("In your bag", carried + (carried === 1 ? " brick" : " bricks"), carried ? GREEN : DIM);
+
+    // WHAT IS IN FRONT OF YOU, PRICED. Reads the shared registry, so this line
+    // is written by whatever declared the target — this file knows about
+    // neither vaults nor prison doors.
+    let tgt = null;
+    try {
+      const P = CBZ.player;
+      if (P && P.pos && typeof CBZ.breachTargetAt === "function") {
+        tgt = CBZ.breachTargetAt(P.pos.x, (P.pos.y || 0) + 1.2, P.pos.z, 6);
+      }
+    } catch (e) { tgt = null; }
+    if (tgt) {
+      const need = tgt.lb || LB;
+      const short = Math.max(0, Math.ceil((need - outLb) / LB));
+      const label = String(tgt.id || "target").replace(/[-_]/g, " ");
+      inner += row(label, need + " lb", GOLD);
+      inner += short
+        ? "<div style='font-size:11px;color:" + RED + ";margin:2px 0 4px'>Short " + (need - outLb) +
+          " lb — set " + short + " more brick" + (short === 1 ? "" : "s") + " on it.</div>"
+        : "<div style='font-size:11px;color:" + GREEN + ";margin:2px 0 4px'>Enough on it. Send it.</div>";
+    }
+
+    const armed = outN > 0;
+    inner += "<div data-demo='fire' data-on='" + (armed ? "1" : "0") + "' style=\"margin-top:6px;padding:9px 10px;border-radius:8px;text-align:center;font-weight:700;letter-spacing:.08em;" +
+      (armed ? "background:#5a1512;border:1px solid #ff5b5b;color:#ffd9d6;cursor:pointer"
+             : "background:#1b1f26;border:1px solid #2c333d;color:" + DIM) + "\">" +
+      (armed ? "DETONATE" : "NOTHING PLANTED") + "</div>";
+    if (armed) inner += "<div style='font-size:10px;color:" + DIM + ";margin-top:4px'>Everything within 2.5 m of another charge fires together, and the masses add.</div>";
+    return card("DEMOLITION", inner);
+  }
+
   function servicesApp() {
     const s = (typeof CBZ.cityAirServices === "function") ? CBZ.cityAirServices() : null;
     let inner = "";
@@ -808,6 +864,7 @@
     let fxRows = [];
     try { html += contactsApp(); } catch (e) {}
     try { html += servicesApp(); } catch (e) {}
+    try { html += demoApp(); } catch (e) {}
     try { html += wantedApp(); } catch (e) {}
     try { html += territoryApp(); } catch (e) {}
     try { html += empireApp(); } catch (e) {}
@@ -886,6 +943,18 @@
           render();
         }
         else render();
+        return;
+      }
+      // ---- DEMOLITION: the detonator lives here now, not in your hand.
+      // Closes the phone on a live send — you want to be LOOKING at it.
+      const dt2 = e.target && e.target.closest ? e.target.closest("[data-demo]") : null;
+      if (dt2) {
+        if (dt2.getAttribute("data-on") === "1" && typeof CBZ.cityC4Detonate === "function") {
+          let sent = false;
+          try { sent = CBZ.cityC4Detonate(); } catch (err) {}
+          if (sent) { close(); return; }
+        }
+        render();
         return;
       }
       // ---- CONTACTS clicks — the two-choice answer to a follow-up offer.

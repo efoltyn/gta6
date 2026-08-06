@@ -210,7 +210,15 @@
   const STEP_UP_NPC = 0.9;        // max ledge an NPC auto-climbs (curb/window sill ~0.5–0.9m)
   const STEP_MIN_NPC = 0.08;      // ignore ~flat/terrain-level boxes
   function npcStepLedge(pos, radius, feetY, headY, moveX, moveZ) {
-    if (CBZ.game.mode !== "city") return feetY;        // jail/survival untouched
+    // CAPABILITY, not scenario (systems/modecaps.js). NOTE FOR THE NEXT
+    // READER: as of 2026-08-06 this block has ZERO callers anywhere in the
+    // repo — it was written city-only, nobody adopted it, and the header
+    // above still describes it as SECONDARY. That is the Block Law's own
+    // failure mode ("a block with zero consumers is prose"), and un-gating it
+    // does not fix that; only a mover calling it would. It is migrated here so
+    // that when a mover does adopt it, it is not born city-only for a third
+    // time. Off-capability it returns feetY unchanged, exactly as before.
+    if (!(CBZ.modeHas ? CBZ.modeHas("stepLedge") : CBZ.game.mode === "city")) return feetY;
     const ml = moveX * moveX + moveZ * moveZ;
     if (ml < 1e-6) return feetY;                        // not moving → nothing to climb
     const cols = nearbyColliders(pos);
@@ -335,6 +343,28 @@
   const carFrame = { x: 0, z: 0, s: 0, c: 1 };
   const carDir = { x: 0, z: 0 };
 
+  // WHERE A BODY IS, whoever owns it. City pedestrians and survival/gun-game
+  // bots carry their own `.pos` vector; the PRISON's guards and inmates ARE
+  // their THREE.Group — `n.group.position` is the authoritative position and
+  // there is no `.pos` field at all (entities/npc.js, entities/guards.js).
+  // That single missing field is the second reason the prison never vaulted:
+  // even with the mode gate open, probeTraversal's `!actor.pos` guard would
+  // have refused every guard and every inmate in the block. Reading through
+  // this accessor is the same idiom systems/humancontact.js:25 already uses,
+  // and it means NO prison record has to grow a field (an aliased `.pos` would
+  // have silently switched those records onto city-shaped code paths in
+  // weather.js, tornado.js and combat_iq.js, all of which use `!a.pos` as
+  // their "this is not a positioned actor" test).
+  function travPos(a) { return (a && (a.pos || (a.group && a.group.position))) || null; }
+
+  // CBZ.cityCars is a CITY record list living in a coordinate space that
+  // overlaps the prison arena (the same overlap city/mode.js stamps `_city` on
+  // its colliders to fix). Outside city mode those cars are not in this world,
+  // so neither the vault probe nor the landing check may see them.
+  function traversalCars() {
+    return (!CBZ.game || CBZ.game.mode === "city") ? CBZ.cityCars : null;
+  }
+
   function colliderVerticalBand(c) {
     if (c.y0 != null && c.y1 != null && isFinite(c.y0) && isFinite(c.y1)) {
       return c;                         // zero-allocation hot path
@@ -385,7 +415,9 @@
     if (c.noVault || c.noClimb || c._noTraversal) return null;
     const band = colliderVerticalBand(c);
     if (!band) return null;
-    const feet = actor.pos.y || 0;
+    const ap = travPos(actor);
+    if (!ap) return null;
+    const feet = ap.y || 0;
     // A suspended rail/awning is not a ledge. The solid face has to begin at
     // (or just below) this body's feet so there is something to plant against.
     if (band.y0 > feet + 0.38 || band.y1 <= feet + TRAV_MIN_RISE) return null;
@@ -394,10 +426,10 @@
     if (rise > maxRise) return null;                         // hands cannot reach the top
 
     const expanded = rayRect(
-      actor.pos.x, actor.pos.z, dirX, dirZ,
+      ap.x, ap.z, dirX, dirZ,
       c.minX - radius, c.maxX + radius, c.minZ - radius, c.maxZ + radius, 64);
     if (!expanded || expanded.enter > reach) return null;
-    const raw = rayRect(actor.pos.x, actor.pos.z, dirX, dirZ,
+    const raw = rayRect(ap.x, ap.z, dirX, dirZ,
       c.minX, c.maxX, c.minZ, c.maxZ, 64);
     if (!raw || raw.exit <= TRAV_EPS) return null;
     const span = Math.max(0.04, raw.exit - raw.enter);
@@ -436,7 +468,7 @@
       endY = band.y1;
     } else {
       endT = expanded.exit + TRAV_LAND_PAD;
-      const ex = actor.pos.x + dirX * endT, ez = actor.pos.z + dirZ * endT;
+      const ex = ap.x + dirX * endT, ez = ap.z + dirZ * endT;
       endY = groundAt(ex, ez, feet);
     }
     return {
@@ -453,13 +485,15 @@
     if (speed > TRAV_CAR_SPEED) return null;
     const dims = car.dims || (car.group && car.group.userData && car.group.userData.vehicleDims);
     if (!dims || !(dims.width > 0) || !(dims.length > 0) || !(dims.height > 0)) return null;
-    const feet = actor.pos.y || 0;
+    const ap = travPos(actor);
+    if (!ap) return null;
+    const feet = ap.y || 0;
     const top = (car.group ? car.group.position.y : car.pos.y || 0) + dims.height;
     const rise = top - feet;
     const maxRise = height + Math.max(0.48, Math.min(0.72, height * 0.34));
     if (rise <= TRAV_MIN_RISE || rise > maxRise) return null;
 
-    carLocal(car, actor.pos.x, actor.pos.z, carFrame);
+    carLocal(car, ap.x, ap.z, carFrame);
     // Transform the world heading into the car's local frame.
     carDir.x = dirX * carFrame.c - dirZ * carFrame.s;
     carDir.z = dirX * carFrame.s + dirZ * carFrame.c;
@@ -479,7 +513,7 @@
       ? Math.max(0, raw.enter - Math.min(0.58, height * 0.30))
       : Math.max(0, expanded.enter + 0.03);
     const endT = expanded.exit + TRAV_LAND_PAD;
-    const ex = actor.pos.x + dirX * endT, ez = actor.pos.z + dirZ * endT;
+    const ex = ap.x + dirX * endT, ez = ap.z + dirZ * endT;
     return {
       kind, car, collider: null, rise, top, span, landOnTop: false,
       enter: expanded.enter, exit: expanded.exit, faceT: raw.enter,
@@ -489,7 +523,14 @@
   }
 
   function landingClear(cand, x, z, feet, height, radius) {
-    if (CBZ.cityWaterAt) {
+    // "Do not vault into water." cityWaterAt answers for the CITY's water
+    // field (and, through world/water_survival.js's wrapper, the disaster
+    // island's) — it knows nothing about the prison, whose slab sits in the
+    // same coordinate space the city calls ocean. Asking it there would refuse
+    // every vault in the block once the campaign has built the city. Ask only
+    // where the answer is about this world.
+    const wetMode = !CBZ.game || CBZ.game.mode === "city" || CBZ.game.mode === "survival";
+    if (wetMode && CBZ.cityWaterAt) {
       try { if (CBZ.cityWaterAt(x, z)) return false; } catch (e) {}
     }
     CBZ.queryCollidersNear(x, z, radius + 0.2, travClearQuery);
@@ -500,7 +541,7 @@
       if (c.y0 != null && (head <= c.y0 || feet >= c.y1)) continue;
       if (circleTouchesRect(x, z, radius, c.minX, c.maxX, c.minZ, c.maxZ)) return false;
     }
-    const cars = CBZ.cityCars;
+    const cars = traversalCars();
     if (cars && cars.length) {
       for (let i = 0; i < cars.length; i++) {
         const car = cars[i];
@@ -551,7 +592,7 @@
   }
 
   function buildTraversal(actor, rig, dirX, dirZ, opts, hit) {
-    const p = actor.pos, height = rigHeight(rig, opts), radius = opts.radius || actor.radius || 0.5;
+    const p = travPos(actor), height = rigHeight(rig, opts), radius = opts.radius || actor.radius || 0.5;
     const endX = p.x + dirX * hit.endT, endZ = p.z + dirZ * hit.endT;
     const contactX = p.x + dirX * hit.contactT, contactZ = p.z + dirZ * hit.contactT;
     // The animator targets this actual near/top edge with both wrists. Keeping
@@ -596,6 +637,14 @@
       crestY: hit.top + (hit.landOnTop ? 0.04 : 0.20),
       dirX, dirZ, yaw: Math.atan2(dirX, dirZ),
       radius, height, speed: opts.speed || 0, sprinting: opts.sprinting === true,
+      // WHOSE FIELD IS `.speed`? For a city pedestrian and a survival bot it is
+      // the CURRENT speed, recomputed every frame, and stepTraversal writing the
+      // vault speed into it is what keeps the animator in sync. For a PRISON
+      // inmate it is the record's BASE walking speed, read as
+      // `CBZ.aiThink(n, dt) || n.speed` (entities/npc.js) — writing to it would
+      // permanently re-tune that inmate to whatever pace they last vaulted at.
+      // Callers who own a base-speed field opt out with speedField:false.
+      speedField: opts.speedField !== false,
       duration, elapsed: 0, t: 0,
       wallStart: (CBZ.now != null ? CBZ.now : (typeof performance !== "undefined" ? performance.now() : 0)),
       sounded: false,
@@ -621,7 +670,16 @@
   function probeTraversal(actor, rig, dirX, dirZ, opts) {
     opts = opts || {};
     travAudit.probes++;
-    if (!actor || !actor.pos || !rig || CBZ.game.mode !== "city") return null;
+    // THE CAPABILITY, NOT THE SCENARIO (systems/modecaps.js). This line used to
+    // read `CBZ.game.mode !== "city"`, which is why the prison's own mess
+    // tables and stools — which already register exactly the y0/y1 + ref
+    // colliders this probe wants (world/cafeteria.js:320,342) — could not be
+    // vaulted by anybody. Nothing below reads a city record: colliders,
+    // platforms and the character rig are engine, not city.
+    const traverseOn = CBZ.modeHas ? CBZ.modeHas("traverse") : CBZ.game.mode === "city";
+    if (!actor || !rig || !traverseOn) return null;
+    const apos = travPos(actor);
+    if (!apos) return null;
     if (actor._traversal || actor.dead || actor.driving || actor.inCar) return null;
     let dl = Math.hypot(dirX, dirZ);
     if (dl < 0.5) return null;
@@ -630,15 +688,16 @@
     const height = rigHeight(rig, opts);
     const reach = opts.reach || Math.min(2.25, TRAV_REACH_BASE + Math.max(0, opts.speed || 0) * TRAV_REACH_SPEED);
     let best = null;
-    CBZ.queryCollidersNear(actor.pos.x + dirX * reach * 0.5,
-      actor.pos.z + dirZ * reach * 0.5, reach + 1.2, travQuery);
+    CBZ.queryCollidersNear(apos.x + dirX * reach * 0.5,
+      apos.z + dirZ * reach * 0.5, reach + 1.2, travQuery);
     for (let i = 0; i < travQuery.length; i++) {
       const hit = colliderCandidate(actor, rig, dirX, dirZ, opts, travQuery[i], radius, height, reach);
       if (hit && (!best || hit.enter < best.enter)) best = hit;
     }
-    if (opts.cars !== false && CBZ.cityCars && CBZ.cityCars.length) {
-      for (let i = 0; i < CBZ.cityCars.length; i++) {
-        const hit = carCandidate(actor, rig, dirX, dirZ, opts, CBZ.cityCars[i], radius, height, reach);
+    const roadCars = traversalCars();
+    if (opts.cars !== false && roadCars && roadCars.length) {
+      for (let i = 0; i < roadCars.length; i++) {
+        const hit = carCandidate(actor, rig, dirX, dirZ, opts, roadCars[i], radius, height, reach);
         if (hit && (!best || hit.enter < best.enter)) best = hit;
       }
     }
@@ -690,6 +749,8 @@
   function stepTraversal(actor, rig, dt, animate) {
     const s = actor && actor._traversal;
     if (!s || !rig) return false;
+    const ap = travPos(actor);
+    if (!ap) { cancelTraversal(actor, rig, false, "no-position"); return false; }
     const now = (CBZ.now != null ? CBZ.now : (typeof performance !== "undefined" ? performance.now() : 0));
     let cancelReason = "";
     if (actor.dead) cancelReason = "dead";
@@ -705,13 +766,13 @@
     s.elapsed += Math.max(0, dt || 0);
     s.t = Math.min(1, s.elapsed / s.duration);
     sampleTraversal(s, s.t, travPoint);
-    actor.pos.x = travPoint.x; actor.pos.y = travPoint.y; actor.pos.z = travPoint.z;
+    ap.x = travPoint.x; ap.y = travPoint.y; ap.z = travPoint.z;
     // Animation uses the current root and the fixed ledge point to keep the
     // palms planted while the shoulder rises through the pull.
     s.rootX = travPoint.x; s.rootY = travPoint.y; s.rootZ = travPoint.z;
-    actor.speed = s.speed;
+    if (s.speedField) actor.speed = s.speed;
     if (actor.grounded != null) actor.grounded = false;
-    if (rig.group.position !== actor.pos) rig.group.position.copy(actor.pos);
+    if (rig.group.position !== ap) rig.group.position.copy(ap);
     rig.group.rotation.y = s.yaw;
     rig.traversePose = s;
     if (!s.sounded && s.t >= 0.30) {
@@ -721,8 +782,8 @@
     if (animate !== false) animChar(rig, s.speed, dt);
     if (s.t < 1) return true;
 
-    actor.pos.x = s.endX; actor.pos.y = s.endY; actor.pos.z = s.endZ;
-    if (rig.group.position !== actor.pos) rig.group.position.copy(actor.pos);
+    ap.x = s.endX; ap.y = s.endY; ap.z = s.endZ;
+    if (rig.group.position !== ap) rig.group.position.copy(ap);
     actor.vy = 0;
     if (actor.grounded != null) actor.grounded = true;
     if (s.landOnTop && s.collider) {
@@ -1370,7 +1431,12 @@
         }
         // Running into registered solid geometry turns the SAME jump press into
         // traversal. A clear run line keeps the original ballistic jump exactly.
-        const traverse = !mountedAnimal && (jumpWasSliding || len > 0.15) && CBZ.game.mode === "city"
+        // The capability replaces the mode enum here too, so the mess-hall
+        // table, the disaster island's abandoned cars and the Gun Game map's
+        // cover are all vaultable with the SAME press that already worked in
+        // the city (systems/modecaps.js).
+        const traverse = !mountedAnimal && (jumpWasSliding || len > 0.15) &&
+          (CBZ.modeHas ? CBZ.modeHas("traverse") : CBZ.game.mode === "city")
           ? startTraversal(player, playerChar, jumpDirX, jumpDirZ, {
               speed: Math.max(player.speed, moveSpeed),
               radius: player.radius,

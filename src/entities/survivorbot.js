@@ -134,11 +134,45 @@
     }
   }
 
+  // ---- VAULT (systems/physics.js characterTraversal) ------------------------
+  // The comment on line 151 below has always said bots "don't climb". They do
+  // now, over the one band a person can cross without climbing gear: the
+  // island's abandoned cars, low walls and rubble. The capability is the SAME
+  // one the city gives a fleeing pedestrian — it was refused outside city mode
+  // until systems/modecaps.js made it a capability instead of a scenario — and
+  // a bot SPRINTING from a tsunami is exactly the body it was written for.
+  // Returns true when the vault owns the frame (skip normal locomotion).
+  function botTraverse(b, dt, spd) {
+    const T = CBZ.characterTraversal;
+    if (!T || !b.char || !(CBZ.modeHas && CBZ.modeHas("traverse"))) return false;
+    if (b._traversal) {
+      if (b.dead) { T.cancel(b, b.char, false, "dead"); return false; }
+      const owned = T.step(b, b.char, dt, true);
+      if (!b._traversal) b._travCD = 0.4;
+      return owned;
+    }
+    // Only a body with somewhere urgent to be. A wandering islander walks round.
+    if (b.state !== "flee" && b.state !== "move") return false;
+    b._travCD = (b._travCD || 0) - dt;
+    if (b._travCD > 0 || !b.target) return false;
+    const tx = b.target.x - b.pos.x, tz = b.target.z - b.pos.z;
+    if (tx * tx + tz * tz < 0.81) return false;
+    b._travCD = 0.14;
+    const started = T.start(b, b.char, tx, tz, {
+      speed: spd, radius: BOT_RADIUS,
+      height: (b.char.metric && b.char.metric.height) || 1.7,
+      allowTop: false, cars: false, npc: true, running: true,
+      sprinting: b.state === "flee",
+    });
+    return !!(started && T.step(b, b.char, dt, true));
+  }
+
   // ---- locomotion (every frame; only for living, non-busy bots) ----
   function move(b, dt, animate) {
     // fleeing reads urgency: a bot brushing a threat jogs (~1.55×), one caught
     // outside the closing zone or under a strike marker SPRINTS (~2.15×)
     const spd = b.state === "flee" ? b.baseSpeed * (1.55 + 0.6 * (b.urg || 0)) : (b.state === "move" ? b.baseSpeed * 1.25 : b.baseSpeed);
+    if (botTraverse(b, dt, spd)) return;
     const dx = b.target.x - b.pos.x, dz = b.target.z - b.pos.z;
     const dist = Math.hypot(dx, dz);
     if (b.pause > 0) b.pause -= dt;
@@ -195,7 +229,9 @@
     sepList.length = 0;
     for (let i = 0; i < CBZ.bots.length; i++) {
       const b = CBZ.bots[i];
-      if (!b.dead && !(CBZ.body && CBZ.body.busy(b))) sepList.push(b);
+      // a body mid-vault is owned by the traversal spline: the clamp below
+      // would shove it back off the car it is crossing.
+      if (!b.dead && !b._traversal && !(CBZ.body && CBZ.body.busy(b))) sepList.push(b);
     }
     if (!CBZ.player.dead) { playerEntry.pos = CBZ.player.pos; playerEntry.r = CBZ.player.radius || 0.55; sepList.push(playerEntry); }
     if (CBZ.humanContact) {

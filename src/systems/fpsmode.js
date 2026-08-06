@@ -2495,7 +2495,38 @@
       const launchDir = fwd.clone();
       const launchEye = eye.clone();
       const detonate = function () {
-        if (CBZ.game.mode === "city") {
+        // ---- THE SPLIT (2026-08-06) ----------------------------------------
+        // OWNER: "in prison mode the RPGs don't blow up, but in Gang City the
+        // RPGs blow up beautifully." This whole body used to sit inside ONE
+        // `if (CBZ.game.mode === "city")`, so a rocket fired in the prison, in
+        // Gun Game or on the disaster island produced a camera shake and
+        // nothing else — no fireball, no damage, no sound, no scorch.
+        //
+        // The block was never city-shaped as a whole. It is two things welded
+        // together, and they are separated here:
+        //
+        //   BLAST      the fireball, smoke, shockwave, sound, shake, ground
+        //              scorch and blast damage. Owned by crashfx.js's
+        //              cityExplosion, which draws with the pooled FX system and
+        //              reads no city record. Runs wherever the mode declares
+        //              the capability (systems/modecaps.js) — which is
+        //              everywhere. THE PEOPLE it hurts are resolved by the
+        //              mode's own roster (CBZ.blastWorldActors, called from
+        //              applyBlastDamage), so a rocket in the mess hall kills
+        //              the men in the mess hall through CBZ.aiKill and not
+        //              through a city helper pasted into the prison.
+        //   CITY WORLD glass, the facade carve, the walkable breach, the
+        //              aircraft splashes and the car it landed on. Every one of
+        //              these reads a CITY record (cityGlass, cityFracture,
+        //              cityCars, the aircraft fleets) that does not exist in
+        //              the other maps. Stays on the mode enum, deliberately.
+        //
+        // The prison and the arena get the explosion; the city keeps the
+        // demolition. When those systems grow a non-city owner (a prison wall
+        // that can be breached), the second gate is where that lands.
+        const cityWorld = CBZ.game.mode === "city";
+        const blastOn = CBZ.modeHas ? CBZ.modeHas("blast") : cityWorld;
+        if (blastOn) {
           const groundHit = pt.y < 3.5;   // the blast actually couples to the street
           // the fireball/smoke/damage bloom AT the impact height — a tower hit
           // 30u up no longer pops at the kerb below it (crashfx reads opts.y). This
@@ -2529,14 +2560,46 @@
           // must not be quietly re-priced as an RPG. It takes the row only
           // when the row IS its numbers, and otherwise fires the exact line
           // the rocket has always fired. Same for flag-off / bus-absent.
-          const useBus = CBZ.detonate && CBZ.CONFIG && CBZ.CONFIG.ORDNANCE_BUS_ALL !== false &&
+          // CITY-ONLY BUS: the ordnance bus's extra work beyond the fireball is
+          // the STRUCTURAL ledger (city/structural.js, cityDamageBuilding, the
+          // fracture escalation) — city records, every one. Outside the city we
+          // take the plain cityExplosion line, which is the same numbers by
+          // construction (the "rpg" row IS 1.9/13, straight off weapon-data),
+          // so the picture and the damage are identical and only the building
+          // bookkeeping is skipped.
+          const useBus = cityWorld && CBZ.detonate && CBZ.CONFIG && CBZ.CONFIG.ORDNANCE_BUS_ALL !== false &&
                          (w.blastPower || 1.4) === 1.9 && (w.blastRadius || 7) === 13;
           if (useBus) {
             CBZ.detonate(pt.x, pt.y, pt.z, "rpg", {
               byPlayer: true, airburst: airburst,
               dirx: launchDir.x, dirz: launchDir.z,
             });
-          } else if (CBZ.cityExplosion) CBZ.cityExplosion(pt.x, pt.z, { power: w.blastPower || 1.4, radius: w.blastRadius || 7, byPlayer: true, y: pt.y, airburst: airburst });
+          } else {
+            // CBZ.cityExplosion is the head of a wrapper chain that couples the
+            // blast to city records (structural ledger, bank vaults, site
+            // walls, wildlife, armored trucks) and stays installed for the rest
+            // of the session once the city has been visited. Outside the city
+            // we detonate through CBZ.cityBlastCore — the same fireball,
+            // damage, sound and shake, before any of those wraps. City mode is
+            // untouched and still runs the full chain.
+            const boom = cityWorld ? CBZ.cityExplosion : (CBZ.cityBlastCore || null);
+            if (boom) boom(pt.x, pt.z, { power: w.blastPower || 1.4, radius: w.blastRadius || 7, byPlayer: true, y: pt.y, airburst: airburst });
+          }
+          /* ENOUGH ROCKETS OPEN IT (systems/breach.js). The rocket banks its
+             warhead mass into the wall it hit, at the STANDOFF coupling — a
+             shaped charge penetrates rather than breaches, which is why the
+             research says an RPG hole is ~30 cm and never a doorway. So one
+             rocket wrecks; several into the same panel eventually open it, and
+             a vault or a door opens when the running total reaches the pounds
+             it declared. WARHEAD_LB is the PG-7-class filler in TNT-equivalent
+             pounds; at 0.35 coupling that is 0.77 lb a shot, so a man-sized
+             hole costs about seven rockets — or one 5 lb brick in contact. */
+          if (CBZ.breachDeliver) {
+            const WARHEAD_LB = 2.2;
+            try { CBZ.breachDeliver(pt.x, pt.y, pt.z, WARHEAD_LB, false, { byPlayer: true }); } catch (e) {}
+          }
+          // ---- everything below reads a CITY record ------------------------
+          if (cityWorld) {
           // a guest's blast never reaches the host's sim otherwise — the host
           // can't count structural HP for a detonation it never saw (mirrors
           // localGunHit's "hit" forwarding in net.js). FX stays local (above);
@@ -2629,7 +2692,8 @@
               });
             } catch (e) {}
           }
-        }
+          }   // end cityWorld (glass / facade / breach / aircraft / cars)
+        }     // end blastOn (the shared fireball + damage)
         // kick scales with how close the blast is to the lens — a rocket at your
         // feet rattles, one parked 100u up a tower rumbles (crashfx attenuates
         // its own explosion shake the same way)
@@ -2916,7 +2980,8 @@
         else if (CBZ.cityBulletHole) CBZ.cityBulletHole(hit.point.x, hit.point.y, hit.point.z, wnx, 0, wnz);
         // rifle-class rounds CHEW: sustained heavy fire on one wall cell quietly
         // grinds open a murder hole (city/fracture.js counts per 1.2u cell)
-        if (CBZ.game.mode === "city" && cal >= 1.2 && !w.pellets && CBZ.cityFracture && CBZ.cityFracture.chewWall)
+        if ((CBZ.modeHas ? CBZ.modeHas("breach") : CBZ.game.mode === "city") &&
+            cal >= 1.2 && !w.pellets && CBZ.cityFracture && CBZ.cityFracture.chewWall)
           CBZ.cityFracture.chewWall(hit.point.x, hit.point.y, hit.point.z);
         if (wallThudDist < 0) wallThudDist = hit.dist;
         // (d) PENETRATION / RICOCHET — purely additive flavor on top of the
