@@ -91,10 +91,72 @@
 
   const airbase = (CBZ.airbase = CBZ.airbase || {});
 
+  /* ======================================================================
+     REAL HARDWARE FIRST. THE PRIMITIVES ARE THE FALLBACK.
+
+     The engine already owns this hardware and owns it far better than this
+     file ever will: `city/strategic.js` lofts the actual B-2 (aerofoil
+     thickness law, the double-W trailing edge falling out of the planform,
+     a windscreen cut from the hull itself) and `city/island_military.js`
+     builds the fighter, the heavy bomber, the transport, the helicopter,
+     the tank and the truck. Both were unreachable from a standalone page
+     because they were welded to the archipelago — so both now publish
+     their model factories (CBZ.strategicModels / CBZ.milModels) and this
+     file ASKS FOR THEM BEFORE IT BUILDS ANYTHING.
+
+     The primitives below are not the plan. They are what a page falls back
+     to when those files are not loaded, so a slice that wants a runway and
+     two shapes on it does not have to pull in 220 kB of city to get one.
+     Load the city files and every airframe on the field upgrades in place,
+     with no call site changed. `airbase.usingReal()` reports which you got.
+
+     TWO CONVENTIONS TO RECONCILE, both handled in adopt():
+       • gang-city models point their nose down +Z; every airframe this file
+         hands out points −Z (so `group.rotation.y = heading` just works).
+       • some factories return {group, footW, footL, height}, some return a
+         bare Group. The adopter takes either.
+  ====================================================================== */
+  function adopt(made, meta) {
+    const raw = (made && made.isObject3D) ? made : (made && made.group);
+    if (!raw) return null;
+    const g = new THREE.Group();
+    raw.rotation.y = Math.PI;                 // nose +Z → nose −Z
+    g.add(raw);
+    // these models are authored standing on their own wheels at y = 0
+    g.userData.gearDrop = 0;
+    g.userData.airframe = meta || {};
+    g.userData.real = true;
+    if (made && made.footW != null) {
+      g.userData.footprint = { w: made.footW, l: made.footL, h: made.height };
+    }
+    return g;
+  }
+  function realModel(path, meta) {
+    const parts = path.split(".");
+    const ns = CBZ[parts[0]];
+    const fn = ns && ns[parts[1]];
+    if (typeof fn !== "function") return null;
+    try { return adopt(fn(), meta); }
+    catch (e) { console.warn("[airbase] " + path + " present but failed; using primitives", e); return null; }
+  }
+  airbase.usingReal = function () {
+    return {
+      b2: !!(CBZ.strategicModels && CBZ.strategicModels.b2),
+      mil: !!CBZ.milModels,
+      models: CBZ.milModels ? Object.keys(CBZ.milModels) : [],
+    };
+  };
+
   // THE FLYING WING. Half the outline is authored; the mirror is generated,
   // so the aeroplane cannot come out asymmetric by a typo.
   airbase.bomber = function (opts) {
     opts = opts || {};
+    if (opts.primitive !== true) {
+      // the REAL B-2 first; then the base's own heavy bomber; then ours
+      const real = realModel("strategicModels.b2", { kind: "bomber", span: 52.4, length: 21, name: "B-2 SPIRIT" }) ||
+        realModel("milModels.bomber", { kind: "bomber", span: 48, length: 40, name: "HEAVY BOMBER" });
+      if (real) return real;
+    }
     const g = new THREE.Group();
     const SPAN = opts.span || 52.4, LEN = opts.length || 21;
     const hx = SPAN / 2, hz = LEN / 2;
@@ -159,6 +221,10 @@
 
   airbase.fighter = function (opts) {
     opts = opts || {};
+    if (opts.primitive !== true) {
+      const real = realModel("milModels.jet", { kind: "fighter", span: 9, length: 12.5, name: opts.name || "FIGHTER" });
+      if (real) return real;
+    }
     const g = new THREE.Group();
     const SPAN = opts.span || 11.6, LEN = opts.length || 17;
     const hx = SPAN / 2, hz = LEN / 2;
@@ -226,6 +292,16 @@
     return g;
   };
 
+  /* ---- THE REST OF THE MOTOR POOL. No primitive fallback, and that is the
+     honest answer: this file never modelled a helicopter, a tank, a truck or
+     a transport, so it returns null rather than inventing a fifth one. A
+     caller checks the result and simply places nothing — which is exactly
+     what a base without city/island_military.js loaded should look like. */
+  airbase.heli = function (o) { return realModel("milModels.heli", { kind: "heli", name: (o && o.name) || "HELICOPTER" }); };
+  airbase.tank = function (o) { return realModel("milModels.tank", { kind: "tank", name: (o && o.name) || "TANK" }); };
+  airbase.truck = function (o) { return realModel("milModels.truck", { kind: "truck", name: (o && o.name) || "TRUCK" }); };
+  airbase.cargo = function (o) { return realModel("milModels.cargo", { kind: "cargo", name: (o && o.name) || "TRANSPORT" }); };
+
   // shared undercarriage: strut + wheel at each [x,z], group sits wheels-down
   function addGear(g, legs, drop) {
     const strutM = cm(M.steelD), tireM = cm(M.tire);
@@ -260,8 +336,8 @@
     let padY = -Infinity;
     for (let i = -6; i <= 6; i++) for (let j = -3; j <= 3; j++) {
       const lx = (i / 6) * (PAD_L / 2), lz = (j / 3) * (PAD_W / 2);
-      const wx = CX + lx * Math.cos(HEAD) - lz * Math.sin(HEAD);
-      const wz = CZ + lx * Math.sin(HEAD) + lz * Math.cos(HEAD);
+      const wx = CX + lx * Math.cos(HEAD) + lz * Math.sin(HEAD);
+      const wz = CZ - lx * Math.sin(HEAD) + lz * Math.cos(HEAD);
       const h = groundAt(wx, wz);
       if (h > padY) padY = h;
     }
@@ -274,10 +350,23 @@
     root.name = "airbase";
     (opts.parent || CBZ.scene).add(root);
 
-    // local→world, so colliders (which are world-axis-aligned) are correct
+    // ---- LOCAL → WORLD, and it must be THREE's rotation, not a plausible
+    // one. `root.rotation.y = HEAD` builds the matrix
+    //        [  cos 0 sin ]
+    //        [   0  1  0  ]
+    //        [ -sin 0 cos ]
+    // so local +X lands on world (cos, −sin) and local +Z on (sin, cos).
+    // Writing the "obvious" (cos, +sin) / (−sin, cos) instead is not a
+    // rotation at all — it is a REFLECTION about the base's own axis, and
+    // because every published landmark and every collider went through it
+    // together, nothing looked wrong: the spawn was still the right distance
+    // from the bomber, the pad still contained the runway. They were all
+    // just mirrored off the meshes they described. What actually gives it
+    // away is a camera: point one at base.hangars[1] and you photograph
+    // empty apron, because the hangar is on the other side.
     const cosH = Math.cos(HEAD), sinH = Math.sin(HEAD);
-    function wx(lx, lz) { return CX + lx * cosH - lz * sinH; }
-    function wz(lx, lz) { return CZ + lx * sinH + lz * cosH; }
+    function wx(lx, lz) { return CX + lx * cosH + lz * sinH; }
+    function wz(lx, lz) { return CZ - lx * sinH + lz * cosH; }
     // A rotated box has no exact AABB; use the circumscribed square, which
     // over-blocks by at most 41% on a 45° base and never lets you inside a
     // hangar wall. Bases are placed axis-ish in practice, so this is cheap
@@ -321,7 +410,9 @@
       // caller that ever put an aircraft on this runway had to re-derive
       // that conversion, and the first one to get it wrong took off across
       // the runway instead of down it. So the base states both.
-      const AIR_HEAD = Math.atan2(-Math.cos(HEAD), -Math.sin(HEAD));
+      // runway runs toward (cos HEAD, −sin HEAD); an airframe's nose is −Z,
+      // i.e. (−sin h, −cos h). Solving the two gives:
+      const AIR_HEAD = Math.atan2(-Math.cos(HEAD), Math.sin(HEAD));
 
       const rw = new THREE.Mesh(bg(RW_LEN, 0.5, RW_W), cm(M.runway));
       rw.position.set(0, 0.25, -PAD_W * 0.22);
@@ -486,6 +577,81 @@
       }
     })();
 
+    /* ---- HELIPADS AND THE MOTOR POOL ------------------------------------
+       An air base is not only fixed wing, and now that the real rotary and
+       ground hardware is reachable (CBZ.milModels, published by
+       city/island_military.js) there is no reason for the field to be bare.
+       Everything here is CONDITIONAL: no city files loaded → no helicopters,
+       no tanks, and the base still builds. The pads and the parking bays are
+       drawn either way, because a marked-out empty pad reads as a base
+       waiting for its aircraft, and a blank apron reads as a mistake. */
+    (function fleet() {
+      const padMat = cm(M.tarmac), lineMat = cm(M.paint, { emissive: 0x2a2a24, ei: 0.3 });
+      const HELI_Z = APRON_Z - 96;
+      for (let i = 0; i < 4; i++) {
+        const hx = RW_LEN * 0.10 + i * 74;
+        const pad = new THREE.Mesh(new THREE.CylinderGeometry(24, 24, 0.4, 20), padMat);
+        pad.position.set(hx, 0.35, HELI_Z);
+        pad.receiveShadow = true;
+        root.add(pad);
+        // the H every helipad wears, so the circle reads as a landing point
+        const bar1 = new THREE.Mesh(bg(3, 0.06, 20), lineMat); bar1.position.set(hx - 6, 0.58, HELI_Z); root.add(bar1);
+        const bar2 = new THREE.Mesh(bg(3, 0.06, 20), lineMat); bar2.position.set(hx + 6, 0.58, HELI_Z); root.add(bar2);
+        const cross = new THREE.Mesh(bg(12, 0.06, 3), lineMat); cross.position.set(hx, 0.58, HELI_Z); root.add(cross);
+
+        const heli = airbase.heli({ name: "HELO " + (i + 1) });
+        if (heli) {
+          heli.position.set(hx, 0.6, HELI_Z);
+          heli.rotation.y = Math.PI + (i % 2 ? 0.3 : -0.3);
+          root.add(heli);
+          base.parked.push({
+            kind: "heli", group: heli, x: wx(hx, HELI_Z), z: wz(hx, HELI_Z),
+            y: padY + 0.6, heading: HEAD + Math.PI, airframe: heli.userData.airframe,
+          });
+          solidAt(hx, HELI_Z, 14, 18, 0, 5, "heli");
+        }
+      }
+
+      // motor pool: tanks nose-out in a row, trucks staged behind them, the
+      // way a real pool lines up so nothing has to be shunted to move one
+      const POOL_X = -RW_LEN * 0.44, POOL_Z = APRON_Z - 70;
+      const apronPool = new THREE.Mesh(bg(240, 0.4, 120), padMat);
+      apronPool.position.set(POOL_X + 90, 0.32, POOL_Z);
+      apronPool.receiveShadow = true;
+      root.add(apronPool);
+      for (let i = 0; i < 6; i++) {
+        const tx = POOL_X + 18 + i * 34, tz = POOL_Z - 28;
+        const t = airbase.tank({ name: "TANK " + (i + 1) });
+        if (!t) break;
+        t.position.set(tx, 0.55, tz);
+        t.rotation.y = Math.PI;
+        root.add(t);
+        solidAt(tx, tz, 9, 12, 0, 4, "tank");
+        base.parked.push({ kind: "tank", group: t, x: wx(tx, tz), z: wz(tx, tz), y: padY + 0.55, heading: HEAD + Math.PI });
+      }
+      for (let i = 0; i < 5; i++) {
+        const tx = POOL_X + 26 + i * 40, tz = POOL_Z + 26;
+        const t = airbase.truck({ name: "TRUCK " + (i + 1) });
+        if (!t) break;
+        t.position.set(tx, 0.55, tz);
+        t.rotation.y = Math.PI;
+        root.add(t);
+        solidAt(tx, tz, 8, 14, 0, 4, "truck");
+        base.parked.push({ kind: "truck", group: t, x: wx(tx, tz), z: wz(tx, tz), y: padY + 0.55, heading: HEAD + Math.PI });
+      }
+
+      // one transport on the far apron — the thing that brought everyone here
+      const cargo = airbase.cargo({ name: "TRANSPORT" });
+      if (cargo) {
+        const cx = -RW_LEN * 0.30, cz = APRON_Z + 40;
+        cargo.position.set(cx, 0.6, cz);
+        cargo.rotation.y = Math.PI - 0.4;
+        root.add(cargo);
+        solidAt(cx, cz, 40, 44, 0, 12, "aircraft");
+        base.parked.push({ kind: "cargo", group: cargo, x: wx(cx, cz), z: wz(cx, cz), y: padY + 0.6, heading: HEAD + Math.PI - 0.4 });
+      }
+    })();
+
     // ---- perimeter fence + the one gate (a base is SEALED; that is what
     //      makes the gate mean anything)
     (function fence() {
@@ -545,12 +711,15 @@
       bomber.position.set(0, 0.6 + drop, APRON_Z);
       bomber.rotation.y = Math.PI;                     // nose out, toward the taxiway
       root.add(bomber);
-      base.parked.push({
+      // hold the RECORD, not an index: the helipads and the motor pool push
+      // into base.parked before this runs, so parked[0] is a helicopter now
+      const rec = {
         kind: "bomber", group: bomber,
         x: wx(0, APRON_Z), z: wz(0, APRON_Z), y: padY + 0.6 + drop,
         heading: HEAD + Math.PI, airframe: bomber.userData.airframe,
-      });
-      base.bomber = base.parked[0];
+      };
+      base.parked.push(rec);
+      base.bomber = rec;
       // a mission marker on the concrete so the stand reads as THE stand
       const ring = new THREE.Mesh(new THREE.RingGeometry(30, 33, 40, 1), cm(M.warn, { emissive: 0x3a2c05, ei: 0.5 }));
       ring.rotation.x = -Math.PI / 2;
@@ -586,14 +755,15 @@
     //      two positions, so moving either one keeps the gaze correct.
     (function spawn() {
       const sx = wx(52, APRON_Z + 74), sz = wz(52, APRON_Z + 74);
-      const b = base.parked[0];
+      const b = base.bomber;      // never parked[0] — the pool fills first
       const dx = (b ? b.x : CX) - sx, dz = (b ? b.z : CZ) - sz;
       base.spawn = { x: sx, z: sz, y: padY, heading: Math.atan2(-dx, -dz) };
     })();
     base.ground = function () { return padY; };
     base.contains = function (x, z) {
       const dx = x - CX, dz = z - CZ;
-      const lx = dx * cosH + dz * sinH, lz = -dx * sinH + dz * cosH;
+      // inverse of wx/wz above: [cos −sin; sin cos]
+      const lx = dx * cosH - dz * sinH, lz = dx * sinH + dz * cosH;
       return Math.abs(lx) <= PAD_L / 2 && Math.abs(lz) <= PAD_W / 2;
     };
     // the ground height a walker should stand on here: the pad inside the

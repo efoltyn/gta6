@@ -1619,10 +1619,46 @@
     return made.group;
   }
 
+  /* ========================================================================
+     THE HARDWARE, PUBLISHED.
+
+     Everything above this line is a MODEL FACTORY: makeJet, makeBomber,
+     makeCargoPlane, makeHeli, makeTank, makeTruck each return a THREE.Group
+     (nose +Z, standing on its wheels at y=0) and know nothing about Fort
+     Brandt. Everything BELOW it is the base — the placement, the landmass
+     registration, the causeway, the militia. Only the second half needs the
+     city; the first half never did.
+
+     Until now there was no way to say so. Anything that wanted a fighter
+     jet had to boot the entire archipelago to get one, which is why a
+     slice page ended up modelling its own — the hardware was in here, and
+     in here was unreachable. These four lines are the whole fix, and they
+     cost the shipped game nothing: the base below still calls the same
+     local functions it always did.
+
+     `world/airbase.js` asks for CBZ.milModels FIRST and only falls back to
+     its own primitives when this file is absent. So loading this file is
+     what upgrades every standalone page to the real hardware.
+  ======================================================================== */
+  CBZ.milModels = {
+    jet: makeJet,
+    bomber: makeBomber,
+    cargo: makeCargoPlane,
+    heli: makeHeli,
+    tank: makeTank,
+    truck: makeTruck,
+  };
+
   // ========================================================================
   //   MAIN BUILDER
   // ========================================================================
-  CBZ.addLandmass(function (city) {
+  // GUARDED, because a page may want the hardware without the archipelago.
+  // Every other island in the repo that can be loaded piecemeal already
+  // guards this the same way (marina.js, snowboard.js, bank.js, captain.js);
+  // unguarded, a missing addLandmass throws at LOAD and takes the model
+  // factories above down with it — the module is lost for the sake of a
+  // registration nobody asked for.
+  if (CBZ.addLandmass) CBZ.addLandmass(function (city) {
     const root = city.root || (CBZ.scene);
 
     // a city rebuild re-runs this whole builder → fresh prop groups. Clear the

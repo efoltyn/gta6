@@ -134,10 +134,14 @@
     if (!CBZ.onUpdate) {
       CBZ.onUpdate = function (order, fn) { CBZ.updaters.push({ order: order, fn: fn, source: "micro" }); bridgeDirty = true; };
     }
-    // Engine modules routinely read `CBZ.game.state` before doing work. A
-    // slice page has no state machine, so declare the one the engine expects
-    // and park it in the state that means "the world is live".
-    if (!CBZ.game) CBZ.game = { state: "playing", paused: false };
+    // Engine modules routinely read `CBZ.game.state` and `CBZ.game.mode`
+    // before doing work. A slice page has no state machine, so declare the
+    // one the engine expects: LIVE, but explicitly NOT "city". That second
+    // word is doing real work — city systems guard on `g.mode !== "city"`
+    // and returning early is exactly what they should do here, so declaring
+    // an honest mode turns dozens of would-be exceptions into clean no-ops
+    // and lets a page load a city module purely for the assets inside it.
+    if (!CBZ.game) CBZ.game = { state: "playing", mode: "slice", paused: false };
 
     // Seeded streams are DOCTRINE (core/seed.js). If seed.js was not loaded,
     // stand up the same mulberry32-by-name contract so world builders stay
@@ -265,10 +269,32 @@
   };
 
   micro.paused = false;
+  micro.autoRender = true;      // false → the page owns its own render calls
   micro.elapsed = 0;
   micro.frames = 0;
   micro.fps = 0;
   let _fpsAcc = 0, _fpsN = 0, _last = 0, _raf = 0;
+
+  // A BRIDGED HOOK THAT CANNOT RUN HERE GETS RETIRED, NOT RE-THROWN.
+  // Loading a city module for the assets inside it also brings its per-frame
+  // work along, and some of that work genuinely cannot run without the city.
+  // Left alone it throws sixty times a second: the console fills, the profile
+  // is meaningless, and a real error further down is impossible to see. Three
+  // strikes and the hook is dropped, with ONE line saying which and why —
+  // which is also the honest signal that the module needs a better seam.
+  micro.retired = [];
+  function runBridged(entry, dt, band) {
+    if (entry.dead) return;
+    try { entry.fn(dt); entry.fails = 0; }
+    catch (e) {
+      entry.fails = (entry.fails || 0) + 1;
+      if (entry.fails >= 3) {
+        entry.dead = true;
+        micro.retired.push({ band: band, order: entry.order, source: entry.source || "", error: String(e && e.message || e) });
+        console.warn("[micro] retired a " + band + " hook (order " + entry.order + ") — it needs the full engine:", e);
+      }
+    }
+  }
 
   function tick(now) {
     _raf = requestAnimationFrame(tick);
@@ -289,20 +315,22 @@
       CBZ.always.sort(function (a, b) { return a.order - b.order; });
       CBZ.updaters.sort(function (a, b) { return a.order - b.order; });
     }
-    for (let i = 0; i < CBZ.always.length; i++) {
-      try { CBZ.always[i].fn(dt); } catch (e) { console.error("[micro always]", e); }
-    }
+    for (let i = 0; i < CBZ.always.length; i++) runBridged(CBZ.always[i], dt, "always");
     if (!micro.paused) {
       micro.elapsed += dt;
-      for (let i = 0; i < CBZ.updaters.length; i++) {
-        try { CBZ.updaters[i].fn(dt); } catch (e) { console.error("[micro update]", e); }
-      }
+      for (let i = 0; i < CBZ.updaters.length; i++) runBridged(CBZ.updaters[i], dt, "update");
       for (let i = 0; i < frameHooks.length; i++) {
         try { frameHooks[i].fn(dt, micro.elapsed); }
         catch (e) { console.error("[micro frame " + (frameHooks[i].id || i) + "]", e); }
       }
     }
-    if (CBZ.renderer && CBZ.camera) {
+    // A page that draws its OWN views (a multi-viewport gallery, a split
+    // screen, a render-to-texture pass) must be able to stop the default
+    // one. Without this switch its only lever is nulling CBZ.camera, and
+    // meanwhile the default render keeps firing into whatever viewport and
+    // scissor rect the page last set — silently painting over every region
+    // it just drew, one per frame, until the whole page is blank.
+    if (micro.autoRender && CBZ.renderer && CBZ.camera) {
       try { CBZ.renderer.render(scene, CBZ.camera); } catch (e) { console.error("[micro render]", e); }
     }
     input.endFrame();
@@ -999,6 +1027,8 @@
       hasRealSeed: !!CBZ.hash01,               // core/seed.js present
       bridgedAlways: CBZ.always ? CBZ.always.length : 0,
       bridgedUpdaters: CBZ.updaters ? CBZ.updaters.length : 0,
+      retiredHooks: micro.retired ? micro.retired.length : 0,
+      retired: micro.retired || [],
       colliders: boxes.length,
       frameHooks: frameHooks.length,
       fps: micro.fps,

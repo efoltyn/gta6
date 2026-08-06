@@ -114,7 +114,7 @@
 
   /* ---- minimap ---- */
   #mapPane{bottom:12px;right:12px;padding:6px}
-  #map{display:block;border-radius:8px;background:rgba(6,9,12,.5)}
+  #radar{display:block;border-radius:50%}
 
   /* ---- instruments ---- */
   #inst{bottom:16px;left:50%;transform:translateX(-50%);display:flex;gap:16px;align-items:flex-end;
@@ -163,7 +163,7 @@
     #clock{font-size:26px}
     #feed{width:auto;right:auto;left:10px;font-size:11px;bottom:auto;top:96px;max-width:52%}
     #mapPane{padding:4px;bottom:auto;top:10px;right:10px}
-    #map{width:104px;height:104px}
+    #radar{width:104px;height:104px}
     #inst{bottom:auto;top:126px;left:auto;right:10px;transform:none;gap:9px;padding:7px 9px}
     .tape{height:62px}
     #lamps{height:62px}
@@ -219,7 +219,7 @@
     <div id="lifePips"></div>
   </div>
   <div class="pane" id="feed"></div>
-  <div class="pane" id="mapPane"><canvas id="map" width="176" height="176"></canvas></div>
+  <div class="pane" id="mapPane"><canvas id="radar" width="176" height="176"></canvas></div>
   <div class="pane" id="inst">
     <div class="ringWrap" id="ringA"><div class="ring" style="--c:#6fd08a;--p:100"></div><em>♥</em></div>
     <div class="ringWrap" id="ringB"><div class="ring" style="--c:#e0c060;--p:100"></div><em>»</em></div>
@@ -250,9 +250,11 @@
           <li><kbd>E</kbd> board the bomber (walk up to it)</li>
           <li>In the air: <kbd>MOUSE</kbd> pitch/roll · <kbd>A</kbd><kbd>D</kbd> rudder · <kbd>W</kbd><kbd>S</kbd> throttle · <kbd>SHIFT</kbd> burner</li>
           <li><kbd>SPACE</kbd> release — hold it to walk a stick</li>
-          <li><kbd>C</kbd> bomb camera · <kbd>V</kbd> cockpit/chase · <kbd>Q</kbd> next target</li>
+          <li><kbd>C</kbd> bomb camera · <kbd>V</kbd> cockpit/chase · <kbd>R</kbd> radar range · <kbd>T</kbd> test rig</li>
         </ul>
         <p>250 points a kill. The green pipper is where the next one lands — it is the same integrator the bomb itself uses, so it cannot lie to you.</p>
+        <p>The scope bottom-right is a <b>radar</b>, not a map: heading-up, sweeping, and it paints only aircraft and falling ordnance. Neutral traffic is up there too — sorting it is the job.</p>
+        <p>The scope bottom-right is a <b>radar</b>, not a map: heading-up, sweeping, and it only paints aircraft and falling ordnance. Neutral traffic is up there too — sorting it is the job.</p>
       </div>
       <div class="box b2">
         <h3>HALF 2 — THEY BOMB</h3>
@@ -266,7 +268,22 @@
         <p>No respawns on the running half. That is the point of it.</p>
       </div>
     </div>
-    <button id="playBtn">BUILD THE BASIN</button>
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+      <button id="playBtn">BUILD THE BASIN</button>
+      <button id="testBtn" class="ghost">TEST RIG</button>
+      <a href="bomb-survivor-assets.html" style="color:#7fe0ff;font-size:12px;letter-spacing:2px;
+         text-decoration:none;border-bottom:1px solid rgba(127,224,255,.4);padding-bottom:2px">EVERY ASSET →</a>
+    </div>
+    <div style="margin-top:14px;padding:11px 14px;border-radius:11px;background:rgba(120,220,150,.09);
+      border:1px solid rgba(140,240,180,.24);font-size:12px;line-height:1.65;opacity:.9">
+      <b style="color:#8bf0a8;letter-spacing:2px">RUNNING THE SHIPPED ASSETS.</b>
+      The aeroplane on the stand is <code>city/strategic.js</code>'s B-2 — the real loft, not a
+      lookalike. The fighters, the helicopters on the pads and the tanks in the motor pool are
+      <code>city/island_military.js</code>'s. Every person is
+      <code>entities/character.js</code>'s rig walking on <code>CBZ.animChar</code>. The park is
+      <code>world/vegetation.js</code>. The terrain, the towers and the water are still local —
+      see the asset sheet for exactly which is which and why.
+    </div>
     <div id="loadNote"></div>
     <div class="foot" id="ctlNote">Click the world to capture the mouse (or just hold the left button and drag) · <kbd>ESC</kbd> releases it · <kbd>P</kbd> pauses</div>
   </div>
@@ -287,10 +304,31 @@
 <script src="../src/core/seed.js"></script>
 <script src="../src/core/microboot.js"></script>
 <script src="../src/world/materials.js"></script>
+<!-- ============ THE REAL GANG-CITY MODULES ============================
+  Loaded ahead of the world builders on purpose: world/airbase.js asks for
+  CBZ.strategicModels / CBZ.milModels at BUILD time and only falls back to
+  its own primitives if they are absent, and world/desertcity.js does the
+  same with CBZ.vegetationKit. So these six tags are what upgrade the field
+  from "two extruded planforms" to the engine's actual B-2, fighters,
+  helicopters, tanks and trucks — and the game code below did not change a
+  line to get them.
+
+  Each one had to earn a seam first (see their headers): island_military.js
+  and strategic.js now publish their model factories and guard their
+  CBZ.addLandmass registration, so the hardware is reachable without
+  booting the archipelago that used to own it.
+============================================================ -->
+<script src="../src/world/carfx.js"></script>
+<script src="../src/world/vegetation.js"></script>
+<script src="../src/entities/character.js"></script>
+<script src="../src/entities/poses.js"></script>
+<script src="../src/city/island_military.js"></script>
+<script src="../src/city/strategic.js"></script>
 <script src="../src/world/desertcity.js"></script>
 <script src="../src/world/airbase.js"></script>
 <script src="../src/systems/airframe.js"></script>
 <script src="../src/systems/ordnance.js"></script>
+<script src="../src/systems/radarscope.js"></script>
 <script src="../src/modes/teammatch.js"></script>
 <script>
 (function () {
@@ -346,9 +384,31 @@ function floorAt(x, z) {
 }
 
 // ============================================================ BODIES
-// A soldier is six boxes. It has to read as a person at 40 m from a
-// bomb bay and at 2 m in a shelter, and nothing more is asked of it.
-function makeSoldier(color) {
+// THE ENGINE'S OWN PEOPLE FIRST. `entities/character.js` publishes
+// CBZ.makeCharacter({legs,torso,arms,skin,hair,shoes,…}) — the voxel rig the
+// whole game runs on, human-scaled to 1.82 m, with CBZ.animChar driving its
+// gait — and CBZ.charProfile behind it. There is no reason a match should
+// wear a different body from the city.
+//
+// The six boxes below stay as the fallback for a page that does not load
+// character.js. That is the pattern everywhere in this file now: ask the
+// engine, fall back to primitives, never fork.
+const CHAR_KITS = [
+  { legs: 0x2f3a2a, torso: 0x46543a, arms: 0x46543a, skin: 0xc09070, hair: 0x241c14, shoes: 0x1a1a1c },
+  { legs: 0x2a2f3a, torso: 0x3a465a, arms: 0x3a465a, skin: 0x8b6544, hair: 0x140f0a, shoes: 0x1a1a1c },
+];
+function makeSoldier(color, kitIndex) {
+  if (CBZ.makeCharacter) {
+    try {
+      const kit = CHAR_KITS[(kitIndex || 0) % CHAR_KITS.length];
+      const ch = CBZ.makeCharacter({
+        legs: kit.legs, torso: color, collar: color, arms: kit.arms,
+        skin: kit.skin, hair: kit.hair, shoes: kit.shoes, cap: color,
+      });
+      const g = (ch && ch.isObject3D) ? ch : (ch && ch.group);
+      if (g) { g.userData.charRig = ch; return g; }
+    } catch (e) { /* fall through to the primitive body */ }
+  }
   const g = new THREE.Group();
   const skin = CBZ.cmat(0xb98f6a), kit = CBZ.cmat(color), dark = CBZ.cmat(0x2c3038);
   const torso = new THREE.Mesh(CBZ.boxGeom(0.62, 0.78, 0.34), kit);
@@ -366,7 +426,11 @@ function makeSoldier(color) {
   g.userData.limbs = { legL: legL, legR: legR, armL: armL, armR: armR };
   return g;
 }
-function animateSoldier(g, speed, t) {
+function animateSoldier(g, speed, t, dt) {
+  // the real rig animates through the engine's own gait solver
+  if (g.userData.charRig && CBZ.animChar) {
+    try { CBZ.animChar(g.userData.charRig, speed, dt || 0.016); return; } catch (e) {}
+  }
   const L = g.userData.limbs;
   if (!L) return;
   const sw = Math.sin(t * (6 + speed * 0.5)) * Math.min(0.9, speed * 0.14);
@@ -407,7 +471,7 @@ function spawnRunner(u) {
   u.yaw = rr(0, Math.PI * 2);
   u.goal = null; u.goalT = 0;
   if (!u.human) {
-    u.group = makeSoldier(teamColor(u.team));
+    u.group = makeSoldier(teamColor(u.team), units.indexOf(u));
     u.group.position.copy(u.pos);
     CBZ.scene.add(u.group);
   }
@@ -469,6 +533,7 @@ function isMyTeam(u) { return myUnit && u.team === myUnit.team; }
 //      scoreboard cannot disagree with the world
 function hurt(u, dmg, info) {
   if (!u.alive) return;
+  if (godMode && u === myUnit) return;
   u.hp -= dmg;
   if (u === myUnit) {
     shake = Math.max(shake, Math.min(1, dmg / 90));
@@ -680,7 +745,7 @@ function updateFoot(u, dt, human) {
   if (u.group) {
     u.group.position.copy(u.pos);
     u.group.rotation.y = u.yaw;
-    animateSoldier(u.group, len > 0.001 ? spd : 0, CBZ.micro.elapsed);
+    animateSoldier(u.group, len > 0.001 ? spd : 0, CBZ.micro.elapsed, dt);
   }
   u.speed = len > 0.001 ? spd : 0;
 }
@@ -706,7 +771,7 @@ function updateBoarding() {
       // airHeading, not heading — world/airbase.js publishes both because the
       // base and the airframe disagree about which way a nose points
       const rw = base.runway;
-      u.af.place(rw.startX, base.y + 3.4, rw.startZ, rw.airHeading, 0);
+      u.af.place(rw.startX, base.y + (u.af.spec.gearHeight || 3.4), rw.startZ, rw.airHeading, 0);
       u.af.throttle = 1;
       u.pos.copy(u.af.pos);
       camMode = "chase";
@@ -890,7 +955,7 @@ function driveFoot(u, dt, goal, spd) {
   if (u.group) {
     u.group.position.copy(u.pos);
     u.group.rotation.y = u.yaw;
-    animateSoldier(u.group, d > 1.5 ? spd : 0, CBZ.micro.elapsed + u.orbit);
+    animateSoldier(u.group, d > 1.5 ? spd : 0, CBZ.micro.elapsed + u.orbit, dt);
   }
 }
 
@@ -1228,67 +1293,66 @@ function showBanner(a, b) {
   bannerT = 3.4;
 }
 
-// ---- minimap: the basin, seen from directly above
-const mapCtx = el("map").getContext("2d");
-const MAP_C = 88, MAP_R = 86, MAP_WORLD = 2600;
-function updateMap() {
-  const g = mapCtx, u = myUnit;
-  g.clearRect(0, 0, MAP_C * 2, MAP_C * 2);
-  function P(x, z) { return [MAP_C + (x / MAP_WORLD) * MAP_R, MAP_C + (z / MAP_WORLD) * MAP_R]; }
+// ---- THE SCOPE. What replaced the minimap, and why: a top-down plan of
+// the city with every shelter, every tower and every enemy printed on it is
+// a GOD VIEW, and a bomber holding one is never searching for anything —
+// the whole strike becomes "fly to the marker". systems/radarscope.js draws
+// the instrument an aircraft actually carries: heading-up, sweeping, and it
+// only knows what the sensor returns. Contacts are AIRCRAFT and INBOUND
+// ORDNANCE. Nothing else. The ground is not a radar return.
+let scope = null;
+function buildScope() {
+  scope = CBZ.radar.create({
+    canvas: el("radar"),
+    range: 3000,
+    label: "AIR",
+    self: function () {
+      const u = myUnit;
+      if (!u) return { x: 0, z: 0, y: 0, heading: 0 };
+      return {
+        x: u.pos.x, z: u.pos.z, y: u.pos.y,
+        heading: (u.kind === "air" && u.af) ? u.af.heading() : u.yaw,
+      };
+    },
+    contacts: radarContacts,
+  });
+}
 
-  // the rings, so the map says the same thing the world does
-  g.fillStyle = "rgba(196,168,110,.16)";
-  g.beginPath(); g.arc(MAP_C, MAP_C, MAP_R, 0, 7); g.fill();
-  g.fillStyle = "rgba(60,66,74,.55)";
-  g.beginPath(); g.arc(MAP_C, MAP_C, (world.rings.city / MAP_WORLD) * MAP_R, 0, 7); g.fill();
-  g.fillStyle = "rgba(70,120,60,.6)";
-  let p = P(world.park.x, world.park.z);
-  g.beginPath(); g.arc(p[0], p[1], (world.park.r / MAP_WORLD) * MAP_R, 0, 7); g.fill();
+function radarContacts() {
+  const out = [];
+  const u = myUnit;
+  if (!u) return out;
+  const mine = u.team;
+  // ON FOOT you are not carrying a radar set — you are carrying eyes and a
+  // siren. So the ground scope only shows what a man in a street could
+  // actually know about: aircraft low and close enough to see or hear, and
+  // the ordnance already falling toward him.
+  const airborne = u.kind === "air";
+  const eyeshot = airborne ? Infinity : 1500;
 
-  // shelters — the running half's whole map read
-  g.fillStyle = "rgba(220,220,230,.75)";
-  for (let i = 0; i < world.shelters.length; i++) {
-    const s = world.shelters[i];
-    const q = P(s.x, s.z);
-    g.fillRect(q[0] - 1.6, q[1] - 1.6, 3.2, 3.2);
-  }
-
-  // the base
-  if (base) {
-    const q = P(base.x, base.z);
-    g.strokeStyle = "#ffd479"; g.lineWidth = 1.4;
-    g.strokeRect(q[0] - 5, q[1] - 3, 10, 6);
-  }
-
-  // threats
-  const th = CBZ.ordnance.activeThreats();
-  for (let i = 0; i < th.length; i++) {
-    const q = P(th[i].x, th[i].z);
-    g.strokeStyle = "rgba(255,70,54,.9)"; g.lineWidth = 1.2;
-    g.beginPath(); g.arc(q[0], q[1], Math.max(2, (th[i].radius / MAP_WORLD) * MAP_R * 1.6), 0, 7); g.stroke();
-  }
-
-  // units. Bombers see runners (they have the sensors); runners see only
-  // their own side — being hunted means not knowing where the hunter is.
   for (let i = 0; i < units.length; i++) {
     const x = units[i];
-    if (!x.alive) continue;
-    const friendly = myUnit && x.team === myUnit.team;
-    if (!friendly && !(myUnit && myUnit.role === "bomber" && x.role === "runner")) continue;
-    const q = P(x.pos.x, x.pos.z);
-    g.fillStyle = x === myUnit ? "#ffffff" : (friendly ? "#7fe0ff" : "#ff6a3d");
-    const r = x === myUnit ? 3 : 2;
-    g.beginPath(); g.arc(q[0], q[1], r, 0, 7); g.fill();
+    if (x === u || !x.alive || x.kind !== "air") continue;
+    if (!airborne && Math.hypot(x.pos.x - u.pos.x, x.pos.z - u.pos.z) > eyeshot) continue;
+    out.push({
+      id: x.id, x: x.pos.x, z: x.pos.z, y: x.pos.y,
+      heading: x.af ? x.af.heading() : null,
+      friend: x.team === mine, foe: x.team !== mine,
+    });
   }
-  // where I am looking
-  if (u && u.alive) {
-    const q = P(u.pos.x, u.pos.z);
-    const hd = u.kind === "air" && u.af ? u.af.heading() : u.yaw;
-    g.strokeStyle = "#fff"; g.lineWidth = 1.4;
-    g.beginPath(); g.moveTo(q[0], q[1]);
-    g.lineTo(q[0] - Math.sin(hd) * 9, q[1] - Math.cos(hd) * 9);
-    g.stroke();
+  for (let i = 0; i < jets.length; i++) {
+    const j = jets[i];
+    if (!j.alive) continue;
+    if (!airborne && Math.hypot(j.af.pos.x - u.pos.x, j.af.pos.z - u.pos.z) > eyeshot) continue;
+    out.push({ id: j.id, x: j.af.pos.x, z: j.af.pos.z, y: j.af.pos.y, heading: j.af.heading() });
   }
+  const th = CBZ.ordnance.activeThreats();
+  for (let i = 0; i < th.length; i++) {
+    // your OWN side's stores are not a threat to you and would bury the scope
+    if (th[i].team === mine && airborne) continue;
+    out.push({ id: "t" + i, x: th[i].x, z: th[i].z, y: th[i].y, threat: true, ttl: th[i].t });
+  }
+  return out;
 }
 
 // ============================================================ RESULTS
@@ -1314,6 +1378,70 @@ function showResults(res) {
     meRec.kills + " kills · " + meRec.deaths + " deaths · " +
     CBZ.ordnanceAudit().released + " stores released across the match</td></tr>";
   el("resTable").innerHTML = t;
+}
+
+// ============================================================ NPC JETS
+// The basin is CONTESTED AIRSPACE, not a private range. These are neutral
+// traffic — a patrol pair on a racetrack, a high transit, a couple of
+// interceptors working a wide orbit — and they earn their frame time for one
+// reason: a scope carrying only ten hostile returns teaches you nothing
+// about reading a scope. You have to SORT it. Neutral returns are what make
+// "is that him?" a question worth asking.
+//
+// They are composed, not authored: world/airbase.js's airframes flying on
+// systems/airframe.js with the same autopilot the AI bombers use. They are
+// killable (a blast will take one down) and they score nothing.
+let jets = [];
+function buildJets(n) {
+  const N = n != null ? n : 7;
+  for (let i = 0; i < N; i++) {
+    const heavy = i >= N - 2;
+    const grp = heavy ? CBZ.airbase.bomber({}) : CBZ.airbase.fighter({ color: 0x9aa3ad });
+    CBZ.scene.add(grp);
+    const af = CBZ.airframe.make({ preset: heavy ? "bomber" : "fighter", groundAt: floorAt });
+    const R = 1500 + rr(0, 1700);
+    const alt = 430 + rr(0, 760);
+    const a0 = rr(0, Math.PI * 2);
+    af.launch(Math.cos(a0) * R, alt, Math.sin(a0) * R, a0, heavy ? 132 : 180);
+    const j = {
+      id: "jet" + i + "_" + jets.length, group: grp, af: af, alive: true,
+      R: R, alt: alt, a: a0, w: (heavy ? 0.055 : 0.10) * (i % 2 ? -1 : 1),
+      heavy: heavy, cruise: heavy ? 135 : 185,
+    };
+    j.tgt = CBZ.ordnance.addTarget({
+      pos: af.pos, team: null, unit: j,
+      onDamage: function (d) { if (d > 55) downJet(j); },
+    });
+    jets.push(j);
+  }
+}
+function updateJets(dt) {
+  for (let i = 0; i < jets.length; i++) {
+    const j = jets[i];
+    if (!j.alive) continue;
+    j.a += j.w * dt;
+    // aim AHEAD along the circuit, never at your own position — steering at
+    // where you already are is how an orbit turns into a spiral
+    const lead = j.a + (j.w > 0 ? 0.45 : -0.45);
+    _v.set(Math.cos(lead) * j.R, j.alt, Math.sin(lead) * j.R);
+    const aim = j.af.steerTo(_v, { gain: 1.9 });
+    aim.pitch = 0;
+    j.af.holdAltitude(j.alt, aim);
+    aim.pitch = Math.max(-0.40, Math.min(0.85, aim.pitch));
+    aim.throttle = Math.max(0, Math.min(1, 0.35 + (j.cruise - j.af.speed) * 0.02));
+    j.af.step(dt, aim);
+    j.af.applyTo(j.group);
+    if (j.af.grounded) downJet(j);
+  }
+}
+function downJet(j) {
+  if (!j.alive) return;
+  j.alive = false;
+  CBZ.ordnance.blast(j.af.pos.x, j.af.pos.y, j.af.pos.z, 26, 0, {});
+  CBZ.ordnance.removeTarget(j.tgt);
+  CBZ.scene.remove(j.group);
+  j.af.dispose();
+  match.log((j.heavy ? "HEAVY" : "PATROL") + " down — neutral traffic", { tone: "bad" });
 }
 
 // ============================================================ DESERT LIFE
@@ -1344,7 +1472,7 @@ function buildDesertLife() {
     CBZ.scene.add(fire);
     // people
     for (let k = 0; k < 5; k++) {
-      const g = makeSoldier(pick([0x8d7a55, 0x6f7a86, 0xa2724a, 0x5f6b52]));
+      const g = makeSoldier(pick([0x8d7a55, 0x6f7a86, 0xa2724a, 0x5f6b52]), i * 5 + k);
       const wx = p.x + rr(-30, 30), wz = p.z + rr(-30, 30);
       g.position.set(wx, floorAt(wx, wz), wz);
       CBZ.scene.add(g);
@@ -1359,9 +1487,123 @@ function buildDesertLife() {
       const z = w.home.z + Math.sin(w.ang) * w.rad;
       w.g.position.set(x, floorAt(x, z), z);
       w.g.rotation.y = -w.ang + Math.PI / 2;
-      animateSoldier(w.g, 3, t + i);
+      animateSoldier(w.g, 3, t + i, dt);
     }
   }, { id: "desertlife", order: 5 });
+}
+
+// ============================================================ THE TEST RIG
+// A twenty-minute match is a terrible way to check a five-second thing. This
+// is the door into every state the game can be in, without playing to it:
+// jump the clock, put yourself in the air, drop one on your own head, thin
+// the runners out, and read every subsystem's audit in one place.
+// Open it with ?test=1, the TEST RIG button on the briefing, or [T].
+let testOpen = false, godMode = false, timeScale = 1;
+function buildTestRig() {
+  const box = document.createElement("div");
+  box.id = "testRig";
+  box.style.cssText =
+    "position:fixed;left:10px;top:10px;z-index:30;width:216px;padding:10px;border-radius:12px;" +
+    "background:rgba(8,12,16,.92);border:1px solid rgba(255,255,255,.16);color:#dfe6ea;" +
+    "font:600 11px 'Trebuchet MS',sans-serif;display:none;backdrop-filter:blur(4px);" +
+    "max-height:94vh;overflow:auto";
+  document.body.appendChild(box);
+
+  const ROWS = [
+    ["MATCH", [
+      ["half 2 now", function () { match.timeLeft = 0.05; setTimeout(function () { match.intermissionLeft = 0.05; }, 400); }],
+      ["skip 60s", function () { match.timeLeft = Math.max(1, match.timeLeft - 60); }],
+      ["end match", function () { match.timeLeft = 0.05; match.half = match.halves - 1; }],
+    ]],
+    ["YOU", [
+      ["airborne", function () { forceAirborne(); }],
+      ["at the wing", function () { const u = myUnit; if (u && base) { u.pos.set(base.bomber.x + 8, base.bomber.y, base.bomber.z + 8); } }],
+      ["into the city", function () { const u = myUnit; if (!u) return; const p = world.streetPoint(rngGame, 500); u.pos.set(p.x, floorAt(p.x, p.z), p.z); if (u.af) u.af.pos.copy(u.pos); }],
+      ["into the park", function () { const u = myUnit; if (!u) return; u.pos.set(world.park.x, floorAt(world.park.x, world.park.z), world.park.z); }],
+      ["nearest shelter", function () { const u = myUnit; if (!u) return; const s = world.nearestShelter(u.pos.x, u.pos.z); if (s) u.pos.set(s.shelter.x, floorAt(s.shelter.x, s.shelter.z), s.shelter.z); }],
+      ["god mode", function (b) { godMode = !godMode; b.classList.toggle("on", godMode); }],
+    ]],
+    ["ORDNANCE", [
+      ["one on my head", function () { const u = myUnit; if (u) CBZ.ordnance.release({ pos: _v.set(u.pos.x, u.pos.y + 320, u.pos.z), vel: _v2.set(0, 0, 0), kind: BOMB_KIND, team: "test" }); }],
+      ["walk a stick", function () { const u = myUnit; if (!u) return; for (let k = 0; k < 6; k++) (function (k) { setTimeout(function () { CBZ.ordnance.release({ pos: _v.set(u.pos.x + k * 40 - 120, u.pos.y + 320, u.pos.z), vel: _v2.set(0, 0, 0), kind: BOMB_KIND, team: "test" }); }, k * 120); })(k); }],
+      ["clear the air", function () { CBZ.ordnance.clear(); }],
+    ]],
+    ["ROSTER", [
+      ["thin runners (5)", function () { const live = units.filter(function (x) { return x.role === "runner" && x.alive && x !== myUnit; }); for (let i = 0; i < 5 && i < live.length; i++) killUnit(live[i], { team: match.enemyOf(live[i].team).id }); }],
+      ["down one bomber", function () { const b = units.filter(function (x) { return x.role === "bomber" && x.alive && x !== myUnit; })[0]; if (b) killUnit(b, {}); }],
+      ["+4 neutral jets", function () { buildJets(4); }],
+    ]],
+    ["RIG", [
+      ["time x1 / x3", function (b) { timeScale = timeScale === 1 ? 3 : 1; b.textContent = "time x" + timeScale; }],
+      ["scope range", function () { if (scope) scope.cycleRange(1); }],
+      ["audit → console", function () { console.log(JSON.stringify(window.__bomb.audit(), null, 1)); }],
+    ]],
+  ];
+
+  const st = document.createElement("style");
+  st.textContent =
+    "#testRig h4{margin:8px 0 5px;font-size:9px;letter-spacing:2.2px;opacity:.5}" +
+    "#testRig h4:first-child{margin-top:0}" +
+    "#testRig button{display:block;width:100%;margin:0 0 4px;padding:6px 8px;text-align:left;" +
+      "font:600 11px 'Trebuchet MS',sans-serif;letter-spacing:.6px;border-radius:7px;cursor:pointer;" +
+      "background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.13);color:#dfe6ea;" +
+      "box-shadow:none;pointer-events:auto}" +
+    "#testRig button:hover{background:rgba(255,255,255,.15)}" +
+    "#testRig button.on{background:rgba(120,220,150,.3);border-color:#7fe0a0}" +
+    "#testRig pre{margin:8px 0 0;font:600 10px monospace;opacity:.6;white-space:pre-wrap;line-height:1.45}";
+  document.head.appendChild(st);
+
+  for (let i = 0; i < ROWS.length; i++) {
+    const h = document.createElement("h4");
+    h.textContent = ROWS[i][0];
+    box.appendChild(h);
+    const items = ROWS[i][1];
+    for (let k = 0; k < items.length; k++) {
+      const b = document.createElement("button");
+      b.textContent = items[k][0];
+      const fn = items[k][1];
+      b.addEventListener("click", function (e) { e.stopPropagation(); fn(b); });
+      box.appendChild(b);
+    }
+  }
+  const out = document.createElement("pre");
+  box.appendChild(out);
+  window.__testOut = out;
+  window.__testBox = box;
+}
+function forceAirborne() {
+  const u = myUnit;
+  if (!u) return;
+  if (u.role !== "bomber") { match.log("TEST · you are the running side this half", { tone: "bad" }); return; }
+  if (!u.boarded) {
+    u.boarded = true; u.kind = "air";
+    u.group = CBZ.airbase.bomber({});
+    CBZ.scene.add(u.group);
+  }
+  const a = rr(0, Math.PI * 2), R = 1700;
+  u.af.launch(Math.cos(a) * R, 430, Math.sin(a) * R, Math.atan2(Math.cos(a) * R, Math.sin(a) * R), 170);
+  u.pos.copy(u.af.pos);
+  camMode = "chase";
+}
+function toggleTestRig(on) {
+  testOpen = on != null ? on : !testOpen;
+  if (!window.__testBox) return;
+  window.__testBox.style.display = testOpen ? "block" : "none";
+  // the rig owns the left edge while it is open; the feed lives there too
+  el("feed").style.left = testOpen ? "244px" : "12px";
+}
+function testTick() {
+  if (!testOpen || !window.__testOut) return;
+  const a = CBZ.ordnanceAudit(), r = CBZ.radarAudit()[0] || {};
+  const u = myUnit;
+  window.__testOut.textContent =
+    "fps " + CBZ.micro.fps + "   phase " + match.phase + " h" + (match.half + 1) + "\n" +
+    "stores " + a.released + " → " + a.detonated + "  hits " + a.hits + "  air " + a.inAir + "\n" +
+    "scope " + (r.contacts || 0) + " returns @ " + ((r.range || 0) / 1000).toFixed(1) + "km\n" +
+    "jets " + jets.filter(function (j) { return j.alive; }).length +
+    "  runners " + units.filter(function (x) { return x.role === "runner" && x.alive; }).length + "\n" +
+    (u ? ("you " + Math.round(u.pos.x) + "," + Math.round(u.pos.y) + "," + Math.round(u.pos.z) +
+      "  hp " + Math.round(Math.max(0, u.hp)) + (godMode ? " [GOD]" : "")) : "");
 }
 
 // ============================================================ BOOT
@@ -1394,15 +1636,20 @@ function build() {
   CBZ.ordnance.onShake = function (v) { shake = Math.max(shake, v * 0.7); };
 
   hudCache();
+  buildTestRig();
+  if (/[?&]test=1/.test(location.search) || wantTest) toggleTestRig(true);
+  buildScope();
   buildTouch();
   buildPipper();
   buildMarks();
+  buildJets();
   buildDesertLife();
   buildMatch();
 
   // ---- the game's own frame: units, then camera, then the glass
   CBZ.micro.onFrame(function (dt) {
     if (paused || match.phase === "over") return;
+    dt *= timeScale;
     if (match.phase === "live") {
       updatePlayer(dt);
       updateAI(dt);
@@ -1411,6 +1658,9 @@ function build() {
     }
     updatePipper();
     updateMarks();
+    // traffic flies through the intermission too — the sky does not stop
+    // because the match did
+    updateJets(dt);
   }, { id: "bomb-game", order: 0 });
 
   CBZ.micro.onFrame(function (dt) {
@@ -1418,11 +1668,14 @@ function build() {
     if (bannerT > 0) { bannerT -= dt; if (bannerT <= 0) el("banner").style.display = "none"; }
   }, { id: "bomb-camera", order: 10 });
 
-  let hudT = 0, mapT = 0;
+  let hudT = 0, radT = 0;
   CBZ.micro.onFrame(function (dt) {
-    hudT += dt; mapT += dt;
+    hudT += dt; radT += dt;
     if (hudT > 0.1) { hudT = 0; updateHUD(); syncTouch(); }
-    if (mapT > 0.14) { mapT = 0; updateMap(); }
+    // the scope redraws at 15 Hz: any slower and the sweep judders, any
+    // faster and it is 2-D canvas work nobody can see
+    if (radT > 0.066) { if (scope) scope.draw(radT); radT = 0; }
+    testTick();
   }, { id: "bomb-hud", order: 60 });
 
   el("title").style.display = "none";
@@ -1434,6 +1687,9 @@ function build() {
 // ---- keys the page owns rather than the units
 window.addEventListener("keydown", function (e) {
   if (!started) return;
+  if (e.code === "KeyT") toggleTestRig();
+  if (e.code === "KeyR" && scope) scope.cycleRange(1);
+  if (e.code === "KeyR" && scope) scope.cycleRange(1);
   if (e.code === "KeyP") { paused = !paused; showBanner(paused ? "PAUSED" : "RESUMED", ""); }
   if (e.code === "KeyC" && myUnit && myUnit.kind === "air") camMode = camMode === "bomb" ? "chase" : "bomb";
   if (e.code === "KeyV" && myUnit && myUnit.kind === "air") camMode = camMode === "cockpit" ? "chase" : "cockpit";
@@ -1460,6 +1716,13 @@ if (CBZ.micro.touch && ((window.matchMedia && window.matchMedia("(pointer: coars
     "RIGHT HALF = drag to look · buttons appear when they apply";
 }
 
+let wantTest = /[?&]test=1/.test(location.search);
+el("testBtn").addEventListener("click", function () {
+  wantTest = true;
+  el("testBtn").classList.add("on");
+  el("testBtn").textContent = "TEST RIG ✓";
+  if (started) toggleTestRig(true);
+});
 el("playBtn").addEventListener("click", function () {
   el("playBtn").disabled = true;
   el("loadNote").textContent = "building 200 towers, a park and a runway…";
@@ -1480,6 +1743,13 @@ window.__bomb = {
     return {
       micro: CBZ.microAudit(), city: CBZ.desertCityAudit(), base: CBZ.airbaseAudit(),
       ordnance: CBZ.ordnanceAudit(), airframe: CBZ.airframeAudit(), match: CBZ.teammatchAudit(),
+      radar: CBZ.radarAudit(),
+      // which assets are the SHIPPED gang-city models and which are local
+      // primitives — the one number this whole refactor was about
+      reuse: Object.assign({}, CBZ.airbase.usingReal(), {
+        people: !!CBZ.makeCharacter, gait: !!CBZ.animChar,
+        trees: CBZ.desertCity.world ? CBZ.desertCity.world.stats.treeSource : null,
+      }),
     };
   },
 };

@@ -492,24 +492,21 @@
       path.position.set(park.x, 0.17, park.z);
       root.add(path);
 
-      // trees: two instanced meshes (trunk + canopy) for the whole park
+      /* ---- TREES. The engine's own, when the engine's own are loaded.
+         `world/vegetation.js` publishes CBZ.vegetationKit — the archetype
+         geometry, the shared vertex-coloured materials and the InstancedMesh
+         assembly seam every biome in the game builds its forests through.
+         A cylinder-and-sphere pair is what a page falls back to when that
+         file is absent, not the plan. Placement is identical either way, so
+         the park is the same park and only the foliage improves. */
       const N = 170;
-      const trunkG = new THREE.CylinderGeometry(0.55, 0.8, 6, 5);
-      const leafG = new THREE.SphereGeometry(4.4, 7, 6);
-      const trunks = new THREE.InstancedMesh(trunkG, cm(0x5a4630), N);
-      const leaves = new THREE.InstancedMesh(leafG, cm(0x3f7a34), N);
-      leaves.castShadow = true;
-      const mtx = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), s = new THREE.Vector3();
-      let placed = 0;
-      for (let i = 0; i < N * 4 && placed < N; i++) {
+      const spots = [];
+      for (let i = 0; i < N * 4 && spots.length < N; i++) {
         const a = rng() * Math.PI * 2, rad = Math.sqrt(rng()) * park.r * 0.94;
         const x = park.x + Math.cos(a) * rad, z = park.z + Math.sin(a) * rad;
         if (park.pond && Math.hypot(x - park.pond.x, z - park.pond.z) < park.pond.r + 6) continue;
         const sc = 0.8 + rng() * 0.9;
-        s.set(sc, sc, sc);
-        mtx.compose(v.set(x, 3 * sc, z), q, s); trunks.setMatrixAt(placed, mtx);
-        mtx.compose(v.set(x, 6 * sc + 3, z), q, s); leaves.setMatrixAt(placed, mtx);
-        placed++;
+        spots.push({ x: x, z: z, s: sc, rot: rng() * Math.PI * 2 });
         // a tree is cover from a blast but not a wall you bump into: the
         // collider is height-gated to the CANOPY, so you run under it.
         collide({
@@ -517,12 +514,47 @@
           y0: 4 * sc, y1: 11 * sc, tag: "tree",
         });
       }
-      trunks.count = leaves.count = placed;
-      trunks.instanceMatrix.needsUpdate = true;
-      leaves.instanceMatrix.needsUpdate = true;
-      trunks.frustumCulled = false; leaves.frustumCulled = false;
-      root.add(trunks); root.add(leaves);
-      world.stats.parkTrees = placed;
+
+      const kit = CBZ.vegetationKit;
+      if (kit && kit.instanceLayer) {
+        const wood = kit.instanceLayer(root, {
+          kind: "mature-wood", name: "park-wood", castShadow: true,
+          transform: function (d, it) {
+            d.position.set(it.x, 0, it.z);
+            d.rotation.set(0, it.rot, 0);
+            d.scale.setScalar(it.s * 0.55);
+            d.updateMatrix();
+          },
+        }, spots);
+        const crown = kit.instanceLayer(root, {
+          kind: "canopy-patch", name: "park-canopy", castShadow: true,
+          transform: function (d, it) {
+            d.position.set(it.x, 0, it.z);
+            d.rotation.set(0, it.rot * 1.7, 0);
+            d.scale.setScalar(it.s * 0.6);
+            d.updateMatrix();
+          },
+        }, spots);
+        world.stats.parkTrees = spots.length;
+        world.stats.treeSource = (wood || crown) ? "vegetationKit" : "none";
+      } else {
+        const trunks = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.55, 0.8, 6, 5), cm(0x5a4630), spots.length);
+        const leaves = new THREE.InstancedMesh(new THREE.SphereGeometry(4.4, 7, 6), cm(0x3f7a34), spots.length);
+        leaves.castShadow = true;
+        const mtx = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), s = new THREE.Vector3();
+        for (let i = 0; i < spots.length; i++) {
+          const it = spots[i];
+          s.set(it.s, it.s, it.s);
+          mtx.compose(v.set(it.x, 3 * it.s, it.z), q, s); trunks.setMatrixAt(i, mtx);
+          mtx.compose(v.set(it.x, 6 * it.s + 3, it.z), q, s); leaves.setMatrixAt(i, mtx);
+        }
+        trunks.instanceMatrix.needsUpdate = true;
+        leaves.instanceMatrix.needsUpdate = true;
+        trunks.frustumCulled = false; leaves.frustumCulled = false;
+        root.add(trunks); root.add(leaves);
+        world.stats.parkTrees = spots.length;
+        world.stats.treeSource = "primitive";
+      }
 
       // bandstand at the centre — the park's one built thing, and a roof
       const stage = new THREE.Mesh(new THREE.CylinderGeometry(16, 17, 1.2, 16), cm(0xb0a68c));
@@ -533,10 +565,12 @@
       roof.castShadow = true;
       root.add(roof);
       const pillars = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.5, 0.5, 6, 6), cm(0xcfc6ad), 8);
+      const pm = new THREE.Matrix4(), pq = new THREE.Quaternion();
+      const pv = new THREE.Vector3(), ps = new THREE.Vector3(1, 1, 1);
       for (let i = 0; i < 8; i++) {
         const a = (i / 8) * Math.PI * 2;
-        mtx.compose(v.set(park.x + Math.cos(a) * 15, 4, park.z + Math.sin(a) * 15), q, s.set(1, 1, 1));
-        pillars.setMatrixAt(i, mtx);
+        pm.compose(pv.set(park.x + Math.cos(a) * 15, 4, park.z + Math.sin(a) * 15), pq, ps);
+        pillars.setMatrixAt(i, pm);
       }
       pillars.instanceMatrix.needsUpdate = true;
       root.add(pillars);

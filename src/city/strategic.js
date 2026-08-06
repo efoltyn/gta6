@@ -761,8 +761,25 @@
   // bunkers so the whole strategic kit builds together; the apron slot is
   // clear of every authored Fort Brandt prop: jets end ~x -627, the heavy
   // bomber starts ~x -495, helipads sit at z -670).
+  /* ---- THE AEROPLANE, PUBLISHED ------------------------------------------
+     makeB2() is 260 lines of loft: a real planform (52.4 m span, 33° leading
+     edge, the double-W trailing edge falling out of the geometry rather than
+     drawn as teeth), an aerofoil thickness law, a cockpit blister windowed to
+     close at the apex, and the flight-deck trick of re-emitting the hull
+     quads over the cockpit in glass so the windscreen IS the hull.
+
+     None of that needs the city. What needed the city was everything after
+     this line — the apron slot, the hatch, the payload chain, the bay. So the
+     aeroplane is exported on its own, and `world/airbase.js` asks for it
+     before it falls back to its own flying wing. A standalone page that loads
+     this file gets the REAL B-2 and the replacement is never built.
+
+     makeB2 returns {group, …}; the adopter in airbase.js unwraps it. -------- */
+  CBZ.strategicModels = { b2: makeB2 };
+
   let b2rec = null, _b2Reg = false;
-  CBZ.addLandmass(function (city) {
+  // guarded: see CBZ.milModels in city/island_military.js for why
+  if (CBZ.addLandmass) CBZ.addLandmass(function (city) {
     b2rec = null; _b2Reg = false;
     if (CBZ.CONFIG.STRAT_B2 === false) return;
     const root = city.root || CBZ.scene;

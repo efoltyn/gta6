@@ -225,6 +225,11 @@
     return g;
   }
 
+  // A store as a bare THREE.Group, detached from any flight. An asset
+  // viewer, a loadout screen and a bomb-bay prop all want to SEE one
+  // without dropping it.
+  ord.makeMesh = function (kind) { return bombMesh(KINDS[kind] || KINDS.iron); };
+
   // release({pos, vel, team, kind, owner, radius?, power?, onDetonate?})
   ord.release = function (o) {
     if (!ready) ord.init({});
