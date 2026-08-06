@@ -1507,6 +1507,8 @@
     carveDbg.calls = (carveDbg.calls || 0) + 1;
     carveDbg.at = [Math.round(x), +(+y).toFixed(2), Math.round(z)];
     carveDbg.r = r; carveDbg.result = "searching";
+    const maxThick = opts.maxThick > 0 ? opts.maxThick : 0.9;
+    carveDbg.maxThick = maxThick;
     // --- nearest WALL box whose y-span contains the hit ---
     const sr = opts.search != null ? opts.search : 2.6, sr2 = sr * sr;
     let best = null, bestD = 1e9, bestY0 = 0, bestY1 = 0;
@@ -1522,7 +1524,13 @@
       const cy0 = band.y0, cy1 = band.y1;
       if (y < cy0 - 0.3 || y > cy1 + 0.3) continue;         // the box must CONTAIN the hit height
       if (cy1 - cy0 < 1.6) continue;                        // sills / furniture slabs aren't walls
-      if (Math.min(c.maxX - c.minX, c.maxZ - c.minZ) > 0.9) continue;   // thick = counters/plinths, skip
+      // THICKNESS IS A PRICE, NOT A VETO. 0.9 m is right for ONE hit — a
+      // single rocket should not open a structural pier. But a wall that has
+      // absorbed enough explosive should go, which is the owner's "the parts
+      // that fake blow up, with enough C4 actually blowing up". systems/
+      // breach.js raises this ceiling as its ledger crosses the heavier rows,
+      // so a thick wall opens when the POUNDS say it does. Default unchanged.
+      if (Math.min(c.maxX - c.minX, c.maxZ - c.minZ) > maxThick) continue;   // thick = counters/plinths, skip
       const mt = c.ref.material; if (mt && mt.transparent) continue;    // glass/doors keep their own systems
       const sx = Math.max(c.minX, Math.min(c.maxX, x)), sz = Math.max(c.minZ, Math.min(c.maxZ, z));
       const dx = x - sx, dz = z - sz, dd = dx * dx + dz * dz;

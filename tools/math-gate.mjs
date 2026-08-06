@@ -258,6 +258,22 @@ const PASS = `(() => {
     if (mc.blastModes < 4) out.fails.push("modeCaps: blast-capable modes fell to " + mc.blastModes + " (expect 4)");
   } catch (e) { out.fails.push("modeCapsAudit threw: " + (e && e.message)); } }
   else out.fails.push("modeCapsAudit MISSING (systems/modecaps.js not loaded)");
+  // ---- THE CHARGE TABLE (systems/breach.js). Real urban-breaching doctrine
+  // published once so a prison door and a bank vault price themselves in the
+  // same unit - pounds of C4. unreachable counts registered targets whose
+  // stated cost is above the heaviest row in the table, i.e. a door the player
+  // can never open however many charges they stack. That is a promise the game
+  // cannot keep, so it is pinned at 0. targets proves the registry is
+  // actually being fed: the vaults register per generation, so a rebuild that
+  // silently stopped registering shows up as a fall to zero.
+  if (CBZ.breachAudit) { try { const ba = CBZ.breachAudit();
+    out.breach = "targets=" + ba.targets + " rows=" + ba.rows +
+      " unreachable=" + ba.unreachable + " flag=" + ba.flag;
+    if (ba.unreachable > 0) out.fails.push("BREACH TARGETS NO CHARGE CAN OPEN: " + ba.unreachable + " [" + ba.unreachableIds.join(",") + "]");
+    if (ba.rows < 4) out.fails.push("breach table lost rows: " + ba.rows);
+    if (ba.targets < 1) out.fails.push("breach registry EMPTY - no door or vault declared a price");
+  } catch (e) { out.fails.push("breachAudit threw: " + (e && e.message)); } }
+  else out.fails.push("breachAudit MISSING (systems/breach.js not loaded)");
   // ---- volcano block (volcanofx.js): lava is OPAQUE crusted rock, never a
   // translucent box - transparent lava and legacy stream paths pinned at 0.
   if (CBZ.volcanoAudit) { try { const va = CBZ.volcanoAudit();

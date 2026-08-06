@@ -2585,6 +2585,19 @@
             const boom = cityWorld ? CBZ.cityExplosion : (CBZ.cityBlastCore || null);
             if (boom) boom(pt.x, pt.z, { power: w.blastPower || 1.4, radius: w.blastRadius || 7, byPlayer: true, y: pt.y, airburst: airburst });
           }
+          /* ENOUGH ROCKETS OPEN IT (systems/breach.js). The rocket banks its
+             warhead mass into the wall it hit, at the STANDOFF coupling — a
+             shaped charge penetrates rather than breaches, which is why the
+             research says an RPG hole is ~30 cm and never a doorway. So one
+             rocket wrecks; several into the same panel eventually open it, and
+             a vault or a door opens when the running total reaches the pounds
+             it declared. WARHEAD_LB is the PG-7-class filler in TNT-equivalent
+             pounds; at 0.35 coupling that is 0.77 lb a shot, so a man-sized
+             hole costs about seven rockets — or one 5 lb brick in contact. */
+          if (CBZ.breachDeliver) {
+            const WARHEAD_LB = 2.2;
+            try { CBZ.breachDeliver(pt.x, pt.y, pt.z, WARHEAD_LB, false, { byPlayer: true }); } catch (e) {}
+          }
           // ---- everything below reads a CITY record ------------------------
           if (cityWorld) {
           // a guest's blast never reaches the host's sim otherwise — the host

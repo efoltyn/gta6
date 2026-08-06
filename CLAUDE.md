@@ -60,3 +60,41 @@ none of the city bookkeeping. Wrap `cityExplosion`; never wrap `cityBlastCore`.
 
 Ratchet: `CBZ.modeCapsAudit().unrouted` — modes declared blast-capable whose
 people a blast cannot reach. **Pinned at 0** in `tools/math-gate.mjs`.
+
+## THE CHARGE TABLE — real breaching math, shared by every game
+
+`src/systems/breach.js` publishes US Army urban-breaching doctrine (FM 3-06.11
+ch.8 · FM 90-10-1 app.M · ATP 3-21.8 app.H) as engine fact, so the prison door,
+the bank vault and every wall price themselves in **one unit: pounds of C4**.
+
+| charge | opening |
+|---|---|
+| 2 lb | mousehole — not walkable |
+| **5 lb** | **one man moves through** (one C4 brick) |
+| 7 lb | two abreast |
+| 10 lb | wide breach |
+
+**CONTACT vs STANDOFF is the law.** A charge STUCK to something opens it; a
+rocket only wrecks it — a shaped charge penetrates (PG-7VR: 1.5 m of reinforced
+concrete) while leaving a ~30 cm hole nobody walks through. Standoff banks
+`STANDOFF_COUPLING` (0.35) of its mass. **Measured: 1 brick, or 7 rockets, or
+2 bricks through a wall too thick for any single hit.**
+
+**NOTHING FAKE-BLOWS-UP ANY MORE.** Every detonation banks mass into a world
+cell (`CBZ.breachDeliver`) and the cell REMEMBERS — no decay, concrete does not
+heal. A wall that refused the first hit is closer to opening than it was, and
+crossing the 7 lb / 10 lb rows raises `carveHole`'s thickness ceiling so piers
+go too. Do **not** zero the ledger on a hit: a facade is layers, and the reset
+is what made a thick wall unopenable at sixty pounds.
+
+A game declares a defeatable thing in one line and the charge never learns what
+it is: `CBZ.registerBreachTarget({id, at, reach, lb, defeat})`. Live: the
+prison's yard door (5 lb — a second answer beside the keycard) and every bank
+vault (branch 5 / count 7 / reserve 10). Charges within 2.5 m fire together and
+their masses ADD (det cord), which is how two bricks open a reserve vault.
+
+The detonator is a **phone app** (`city/phone.js` DEMOLITION card), not a hand
+prop — it shows pounds out, bricks left and what the nearest target costs.
+Hold-[B] stays the fast path, and is the only one inside the wire: a man in a
+prison yard does not have a phone. Flags `BREACH_TABLE_V1` · ratchet
+`CBZ.breachAudit().unreachable` pinned at 0. Tool: `tools/breach-check.mjs`.

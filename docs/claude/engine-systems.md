@@ -32,6 +32,16 @@ Before building anything adjacent, wire into the existing system:
   smoke, shockwave, sound, shake, scorch and the shared damage sweep, none of
   which reads a city record. Non-city modes detonate through the core; the city
   keeps the chain. **Wrap `cityExplosion`, never `cityBlastCore`.**
+- **The charge table** — `src/systems/breach.js`. `CBZ.breachSpec(lb)` turns
+  pounds of C4 into an opening off real US Army doctrine (2 mousehole / 5 one
+  man / 7 two abreast / 10 wide). `CBZ.breachDeliver(x,y,z,lb,contact)` is THE
+  call every explosion makes: it banks mass into a world cell that never
+  forgets, and opens whatever is there once the total crosses the row. CONTACT
+  couples fully, STANDOFF at 0.35 — so one brick, or seven rockets. A game
+  declares a defeatable thing with `CBZ.registerBreachTarget({id,at,reach,lb,
+  defeat})` and the charge never learns what a door or a vault is. Ratchet
+  `CBZ.breachAudit().unreachable` (targets priced above the heaviest row —
+  a promise the player cannot keep), pinned at 0.
 - **Breachable walls** — `city/buildings.js` `CBZ.cityCarveWall` (the primitive:
   hide the wall, splice its AABB, rebuild flank/sill/header remnants with real
   colliders + LOS, dress a lit room behind the hole) + `city/fracture.js` (the

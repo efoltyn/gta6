@@ -45,4 +45,52 @@
     door.readerLight.material.emissive.setHex(0x14c258);
     if (CBZ.sfx) CBZ.sfx("door_open");
   };
+
+  /* ---- A SECOND WAY THROUGH (systems/breach.js) ---------------------------
+     THE KEYCARD STORY, doctrine LAW 1: the owner ran for the keycard hundreds
+     of times because it opened a door to a bigger room. This door is the one
+     the whole escape game is built around — and until now it had exactly ONE
+     answer. A breaching charge is a second answer with a different PRICE:
+     the keycard is quiet and needs a plan; 5 lb of C4 on the reader is loud,
+     costs a charge you had to steal from the armory, and brings every guard
+     in the block. That is not a shortcut, it is a different game, and it is
+     the gun-room grammar chained — the RPG and the C4 are both ON the armory
+     wall (world/gunroom.js), so the door you cannot open is the reason to go
+     get the thing that opens it.
+
+     5 lb is not chosen: it is the doctrinal row for a hole one man can move
+     through (FM 90-10-1 app.M). Declaring the requirement in POUNDS rather
+     than as a boolean is the whole point of the shared table — the bank vault
+     next door states its price the same way, in the same unit.
+
+     One line of declaration; this file learns nothing about explosives, and
+     the charge learns nothing about prisons. */
+  if (CBZ.registerBreachTarget) {
+    CBZ.registerBreachTarget({
+      id: "prison-yard-door",
+      lb: 5,
+      reach: 3.0,                                   // stuck anywhere on a 6 m slab
+      at: function () { return { x: 0, y: 2.0, z: -8 }; },
+      done: function () { return !!door.open; },    // already blown/opened: not a target
+      defeat: function () {
+        CBZ.openDoor();
+        // the door does not politely slide — it is GONE. The blast owns the
+        // picture; this just makes sure the slab reads as destroyed and can
+        // never be "closed" back over the hole by a later lockdown.
+        door.blown = true;
+        if (door.mesh) door.mesh.visible = false;
+        if (CBZ.losBlockers) { const li = CBZ.losBlockers.indexOf(door.mesh); if (li >= 0) CBZ.losBlockers.splice(li, 1); }
+        if (CBZ.addHeat) CBZ.addHeat(60);           // every screw in the block heard that
+        if (CBZ.guards) for (const gd of CBZ.guards) { gd.alert = 1; gd.hunt = Math.max(gd.hunt || 0, 6); }
+        if (CBZ.jailTell) CBZ.jailTell.hint("THE DOOR IS GONE", 2.4);
+        else if (CBZ.flashHint) CBZ.flashHint("THE DOOR IS GONE", 2.4);
+      },
+    });
+  }
+  // a blown door stays blown for the run — closeDoor must not resurrect it
+  const _close = CBZ.closeDoor;
+  CBZ.closeDoor = function () {
+    if (door.blown) return;
+    return _close.apply(this, arguments);
+  };
 })();

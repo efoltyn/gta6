@@ -2945,3 +2945,97 @@ into one call. Note the trap it exposed: window openings carve constantly, so a
 blast-class carve must be selected by radius, not by reading "the last one".
 
 `MATHGATE: ok`, determinism ok. `MODE-ENGINE: ok` both sides.
+
+## 2026-08-06 (fourth pass) — THE CHARGE TABLE: real math as the connective tissue
+
+Owner: *"What we discovered is a math, a real math, that should be put into
+Gang City and then put throughout my games — which makes a reason for
+connecting the engine to the games."* And then the sharper one: *"the parts of
+buildings that FAKE blow up — with enough C4 actually blowing up, or enough
+rockets actually opening a man-sized hole. Your research proved it."*
+
+**THE INSIGHT, and it is his.** `systems/modecaps.js` connected the engine to
+the scenarios by CAPABILITY. This connects them by FACT — a number that is true
+in a prison, a bank and a burning island because it is true in the world. So
+`src/systems/breach.js` publishes US Army urban-breaching doctrine (FM 3-06.11
+ch.8 · FM 90-10-1 app.M · ATP 3-21.8 app.H) and every game prices itself in
+**one unit: pounds of C4.** 2 lb mousehole · **5 lb one man** · 7 lb two
+abreast · 10 lb wide breach. The tactic has a name, MOUSE-HOLING, and it is
+older than the medium — Stalingrad, 1942.
+
+**CONTACT vs STANDOFF is the other half, and it is what makes the RPG honest
+without nerfing it.** A shaped charge PENETRATES (PG-7VR: 1.5 m of reinforced
+concrete, 2 m of brick) and leaves a ~30 cm hole nobody walks through; what
+opens a wall is explosive touching it. So contact couples at 1.0 and standoff
+at `STANDOFF_COUPLING = 0.35` — deliberately generous to the rocket, since a
+strict 0.2 would want eleven of them. The ratio IS the design: **the rocket is
+the loud way, the charge is the right way.**
+
+**"FAKE BLOW UP" WAS LITERALLY TRUE AND THIS IS THE FIX.** A hit either opened
+a wall or did nothing *forever* — `carveHole` refuses anything over 0.9 m
+thick, so a wall that refused the first rocket refused the hundredth. Now every
+detonation BANKS mass into a world cell (`CBZ.breachDeliver`), the cell
+remembers with **no decay** (concrete does not heal), and crossing the 7 lb /
+10 lb rows raises `carveHole`'s thickness ceiling so piers go too.
+
+**MEASURED** (`tools/breach-check.mjs`, new; seed 90210; runs city, escape and
+the flag-off control):
+
+| | city | escape | `BREACH_TABLE_V1=0` |
+|---|---|---|---|
+| charge table rows | 2/5/7/10 | 2/5/7/10 | — |
+| **one 5 lb brick, contact** | **opens** | **opens** | (pre-existing carve) |
+| **rockets to open the same wall** | **7** | **7** | never |
+| thick wall refuses a single hit | yes | yes | yes |
+| **bricks to open that thick wall** | **2** | **2** | never |
+| vault opens at its declared price | 1 brick (branch = 5 lb) | — | never |
+| `noBreach` perimeter at **100 lb** | held | held | held |
+| console errors | 0 | 0 | 0 |
+
+**THE BUG THE MEASUREMENT CAUGHT, and it is the interesting one.** The ledger
+originally ZEROED on a successful carve — "the wall is open, the debt is paid".
+A facade is LAYERS, so the first 5 lb opened the thin skin, the counter reset,
+and the total could never climb to the rows that raise the thickness ceiling: a
+thick pier behind a thin panel was unopenable **at sixty pounds**. Keeping the
+running total fixed it in one line (each wall still opens only once via
+`carveHole`'s own `_breached`), and it is now a comment in the file so nobody
+"tidies" it back.
+
+**THE PROBE'S OWN TWO TRAPS**, both worth the shelf note: it first picked a
+wall whose declared band is `y 13.7–15.18` and detonated at a hard-coded 1.4 m,
+then reported "a thick wall never opened, even at 60 lb" — a test failure
+wearing a code failure's clothes. Select by the DECLARED `y0/y1` and detonate at
+that band's mid-height. And the revert control asserted too much: `=0` reverts
+to BEFORE `breach.js`, not to "nothing ever carves", because the city's own
+blast→structuralBlast chain predates all of this.
+
+**WHAT IT CONNECTS TO, which was the owner's actual question.** A game declares
+a defeatable thing in ONE line and the charge never learns what a door is:
+`CBZ.registerBreachTarget({id, at, reach, lb, defeat})`. Live today: the
+prison's locked yard door at 5 lb — *a second answer beside the keycard*, and
+the gun-room grammar chained, because the RPG and the C4 are both on the armory
+wall — and every bank vault at branch 5 / count 7 / reserve 10. Charges within
+2.5 m fire **together and their masses ADD** (det cord: FM 90-10-1 is explicit
+that breaching charges are primed for *simultaneous* detonation), which is how
+two bricks open a reserve vault and why a door priced in pounds is a decision
+rather than a lookup.
+
+**C4 ITSELF** left city-only: capability-gated like everything else, it now
+sticks to PEOPLE through `CBZ.worldActors()` (the same switchboard the blast
+damage uses), and a tap with nothing in reach THROWS it along your look arc —
+a strict superset of the old drop-at-your-feet.
+
+**THE DETONATOR IS A PHONE APP.** First attempt modelled a clacker box into the
+off-hand; the owner: *"Detonator not in hand. It should be on your phone. We
+already have a phone code, and it's good."* He was right and the viewmodel was
+deleted along with the seam it needed — `city/phone.js` already had the modal,
+the card grammar, the click delegation and the key, so DEMOLITION is a card
+showing pounds out, bricks left, and **what the nearest target costs**, which is
+the shared table made visible in your hand. Hold-[B] stays the fast path and is
+the only one inside the wire: a man in a prison yard does not have a phone.
+
+Ratchet: `CBZ.breachAudit().unreachable` — targets priced above the heaviest row
+in the table, i.e. a door the player can never open however many charges they
+stack. **Pinned at 0**; `targets` also pinned ≥1 so a rebuild that silently
+stopped registering shows up. `MATHGATE: ok`, `MODE-ENGINE: ok` both sides,
+`BREACH-CHECK: ok` city + escape + revert.
