@@ -2,65 +2,159 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <link rel="icon" href="data:," />
-<title>BOMB SURVIVOR — every asset, and where it should have come from</title>
+<title>BOMB SURVIVOR · ASSET SHEET</title>
 <!-- ============================================================
   THE ASSET SHEET. Every model bomb-survivor.html puts on screen, framed
-  live in the real world that builds it — these are not re-creations for a
-  gallery, they are cameras pointed at the actual runtime geometry. One
-  scene, one renderer, one viewport per card (scissor + round-robin).
+  live in the real world that builds it. These are cameras pointed at the
+  actual runtime geometry: one scene, one renderer, one scissored viewport
+  per card.
 
   IT ALSO CARRIES THE ACCOUNTING. Each card names the gang-city module that
   ALREADY OWNS this asset, because the honest answer to "why did you rebuild
   it" is a list, and this is the list. Read the RESERVED FOR line as the
-  migration target: the seam is `world/airbase.js`-style — take coordinates,
-  publish what you built, depend on nothing but THREE — and once an existing
+  migration target: the seam is `world/airbase.js`-style (take coordinates,
+  publish what you built, depend on nothing but THREE) and once an existing
   module has that seam it drops straight in here and the new one is deleted.
 
   Boots on core/microboot.js, so it stands the world up without index.html's
   468 script tags.
+
+  PHONE FIRST. See the two blocks marked HANDHELD: one in the CSS (safe
+  areas, reflow, 44 px targets) and one at the top of the script (the pixel
+  budget). Both were measured, both have their numbers written down.
 ============================================================ -->
 <style>
   *{box-sizing:border-box}
-  html,body{margin:0;padding:0;min-height:100%;background:#0a0d10;color:#e6e9ec;
-    font-family:'Trebuchet MS',Verdana,sans-serif;-webkit-font-smoothing:antialiased}
+  /* ============ THE PAGE IS A HANDHELD FIRST ============================
+     Three things this block owns and nothing below it may undo:
+     1. THE SAFE AREA IS A VARIABLE. Every page edge is calc(gap +
+        var(--sa*)), so a notch and a home indicator move the whole sheet
+        instead of eating a corner of it. The meta tag carries
+        viewport-fit=cover, which is what makes env() non-zero.
+     2. THE PAGE NEVER SCROLLS SIDEWAYS. One axis, always.
+     3. A CARD IS A WINDOW ONTO A FIXED CANVAS, so its width is also a
+        RENDER TARGET width. The grid reflows to one column on a phone and
+        the script's pixel budget is what pays for it.
+  ==================================================================== */
+  :root{
+    --sat:env(safe-area-inset-top,0px);
+    --sar:env(safe-area-inset-right,0px);
+    --sab:env(safe-area-inset-bottom,0px);
+    --sal:env(safe-area-inset-left,0px);
+    --amber:#ffb15c; --ice:#7fe0ff; --lime:#8bf0a8; --rust:#ff9b7a;
+  }
+  html,body{margin:0;padding:0;min-height:100%;width:100%;max-width:100%;
+    overflow-x:hidden;overscroll-behavior-x:none;background:#0a0d10;color:#e8e4d8;
+    font-family:'Trebuchet MS',Verdana,sans-serif;-webkit-font-smoothing:antialiased;
+    -webkit-text-size-adjust:100%}
   #gl{position:fixed;inset:0;width:100%;height:100%;display:block;z-index:0}
-  #page{position:relative;z-index:1;max-width:1240px;margin:0 auto;padding:28px 20px 70px}
-  header{margin-bottom:22px}
-  h1{margin:0 0 6px;font-size:36px;letter-spacing:6px;font-weight:900;
+  #page{position:relative;z-index:1;width:100%;max-width:1240px;margin:0 auto;
+    padding:calc(22px + var(--sat)) calc(16px + var(--sar))
+            calc(56px + var(--sab)) calc(16px + var(--sal))}
+
+  /* ---- the house panel, same tokens as bomb-survivor.html ---- */
+  .pane{background:rgba(10,14,18,.62);border:1px solid rgba(255,255,255,.09);
+    border-radius:12px;padding:13px 15px;backdrop-filter:blur(3px)}
+  .k{display:block;font:700 9px/1 'Trebuchet MS',sans-serif;letter-spacing:1.9px;
+    opacity:.55;margin:0 0 7px;text-transform:uppercase}
+
+  header{margin-bottom:16px}
+  /* h1 and the two nav chips share one row and wrap together, so a short
+     landscape window spends its height on cards instead of on a masthead */
+  .topbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;margin:0 0 12px}
+  h1{margin:0;font-size:clamp(25px,7.2vw,38px);letter-spacing:clamp(3px,1.4vw,7px);
+    font-weight:900;line-height:1.05;
     background:linear-gradient(90deg,#ffb15c,#ff5f4a 55%,#7fe0ff);-webkit-background-clip:text;
     background-clip:text;color:transparent}
-  .lede{font-size:13px;line-height:1.7;opacity:.72;max-width:74ch}
-  .lede b{color:#ffb15c}
-  a{color:#7fe0ff}
-  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(288px,1fr));gap:16px;margin-top:22px}
+  /* stretch, so the chip carrying the arrow glyph and the chip without one
+     come out the same height whatever font the arrow falls back to */
+  .nav{display:flex;flex-wrap:wrap;align-items:stretch;gap:8px;margin-left:auto}
+  .lede{font-size:12.5px;line-height:1.6;opacity:.86;max-width:74ch}
+  .lede p{margin:0 0 6px}
+  .lede p:last-child{margin-bottom:0}
+  .lede code{font-size:11px;opacity:.8}
+  .key{display:flex;flex-wrap:wrap;gap:7px 10px;align-items:center;margin:9px 0 11px}
+  a{color:var(--ice)}
+  /* 44 px is the floor for anything a thumb aims at */
+  .chip{display:inline-flex;align-items:center;min-height:44px;padding:0 16px;
+    border-radius:11px;text-decoration:none;font:800 12px/1 'Trebuchet MS',sans-serif;
+    letter-spacing:2.2px;color:var(--ice);border:1px solid rgba(127,224,255,.32);
+    background:rgba(127,224,255,.07)}
+  .chip.dim{color:#9aa4ad;border-color:rgba(154,164,173,.28);background:rgba(255,255,255,.03)}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(300px,100%),1fr));
+    gap:14px;margin-top:16px}
   /* THE STAGE IS A HOLE, NOT A PANEL. The canvas is one fixed layer behind
      the whole page and each stage is a window onto it, so the card cannot
-     carry a background of its own — a card tinted rgba(16,21,26,.82) sits
+     carry a background of its own: a card tinted rgba(16,21,26,.82) sits
      ON TOP of the viewport it is framing and dims the render to about an
      eighth. The panel colour lives on .meta, which has no window in it. */
-  .card{background:none;border:1px solid rgba(255,255,255,.10);border-radius:14px;overflow:hidden}
+  .card{background:none;border:1px solid rgba(255,255,255,.09);border-radius:12px;overflow:hidden}
   .stage{height:186px;background:none;position:relative}
   .stage:after{content:'';position:absolute;inset:0;pointer-events:none;
     box-shadow:inset 0 -26px 34px -28px #000, inset 0 0 0 1px rgba(255,255,255,.05)}
-  .meta{padding:11px 13px 13px;background:rgba(14,19,24,.93);backdrop-filter:blur(3px)}
-  .meta h3{margin:0;font-size:14px;letter-spacing:2px;color:#ffd9a8}
-  .dim{font:600 11px/1.5 monospace;opacity:.62;margin:4px 0 7px;font-variant-numeric:tabular-nums}
-  .why{font-size:12px;line-height:1.55;opacity:.85;margin:0 0 8px}
-  .src{font:600 10px/1.5 monospace;letter-spacing:.4px;opacity:.55}
-  .src em{font-style:normal;color:#8bd8a0}
-  .res{display:block;margin-top:5px;color:#ff9b7a}
+  /* .meta carries NO backdrop-filter: eighteen blurred layers over a live
+     WebGL canvas is a real bill on a phone, and the panel is opaque enough
+     to read without one. The two .pane surfaces keep theirs, there are two. */
+  .meta{padding:11px 13px 13px;background:rgba(11,15,20,.93)}
+  .meta h3{margin:0;font-size:13.5px;letter-spacing:2.2px;color:#ffd9a8}
+  .dim{font:600 11px/1.55 ui-monospace,Menlo,Consolas,monospace;opacity:.66;margin:4px 0 8px;
+    font-variant-numeric:tabular-nums}
+  .why{font-size:12px;line-height:1.55;opacity:.86;margin:0 0 8px}
+  .src{font:600 10px/1.6 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.3px;opacity:.6;
+    word-break:break-word}
+  .src em{font-style:normal;color:var(--lime)}
+  .res{display:block;margin-top:5px;color:var(--rust)}
+  .res b{font-weight:700;letter-spacing:1.4px;opacity:.8}
   .res.none{color:#7f8a93}
-  .badge{display:inline-block;margin:0 0 7px;padding:2px 8px;border-radius:20px;
-    font:700 9px/1.6 monospace;letter-spacing:1.6px}
-  .badge.real{background:rgba(120,220,150,.18);color:#8bf0a8;border:1px solid rgba(140,240,180,.35)}
+  .badge{display:inline-block;margin:0 0 7px;padding:3px 9px;border-radius:20px;
+    font:700 9px/1.5 ui-monospace,Menlo,Consolas,monospace;letter-spacing:1.7px}
+  .badge.real{background:rgba(120,220,150,.18);color:var(--lime);border:1px solid rgba(140,240,180,.35)}
+  .badge.proc{background:rgba(140,175,210,.13);color:#a9c6de;border:1px solid rgba(160,195,225,.28)}
   .badge.prim{background:rgba(255,150,90,.14);color:#ffb98a;border:1px solid rgba(255,170,110,.3)}
-  #note{margin-top:26px;padding:16px 18px;border-radius:14px;background:rgba(255,120,70,.09);
-    border:1px solid rgba(255,140,90,.25);font-size:13px;line-height:1.7}
-  #note h3{margin:0 0 8px;font-size:13px;letter-spacing:2.5px;color:#ff9b7a}
+
+  #note{margin-top:22px;background:rgba(255,120,70,.09);border-color:rgba(255,140,90,.25);
+    font-size:12.5px;line-height:1.65}
+  #note h3{margin:0 0 10px;font-size:12px;letter-spacing:2.6px;color:var(--rust)}
+  #note h4{margin:14px 0 6px;font:700 9px/1 'Trebuchet MS',sans-serif;letter-spacing:2px;opacity:.6}
+  #note h4:first-of-type{margin-top:0}
+  #note p{margin:0 0 5px}
+  #note p:last-child{margin-bottom:0}
+  #note ul{margin:0 0 8px;padding:0;list-style:none;
+    font:600 11px/1.75 ui-monospace,Menlo,Consolas,monospace}
+  #note li{opacity:.85;word-break:break-word}
+  #note li b{color:#ffd9a8;font-weight:700}
+  #note code{font-size:11.5px;opacity:.85}
+
   #boot{position:fixed;inset:0;z-index:9;display:flex;align-items:center;justify-content:center;
-    background:#0a0d10;font-size:13px;letter-spacing:4px;opacity:.75}
+    background:#0a0d10;font-size:12px;letter-spacing:4px;opacity:.75;text-align:center;padding:24px}
+
+  /* ---- PHONE PORTRAIT: one column, and the stage keeps a readable aspect */
+  @media (max-width:600px){
+    #page{padding-top:calc(16px + var(--sat))}
+    .grid{gap:12px}
+    .stage{height:min(52vw,200px)}
+    .meta{padding:10px 12px 12px}
+    .why{font-size:11.5px}
+    .nav{width:100%;margin-left:0}
+    .chip{flex:1 1 auto;justify-content:center}
+  }
+  /* ---- SHORT WINDOW (phone landscape): the masthead is the thing that
+          costs height here, so it is what gets cut. A card has to clear the
+          fold or the sheet opens on nothing. */
+  @media (max-height:520px) and (orientation:landscape){
+    #page{padding-top:calc(12px + var(--sat))}
+    h1{font-size:24px;letter-spacing:4px}
+    .topbar{margin-bottom:8px}
+    header{margin-bottom:10px}
+    .pane{padding:9px 12px}
+    .lede{font-size:11.5px;line-height:1.5;max-width:none}
+    .key{margin:7px 0 8px}
+    .stage{height:132px}
+    .grid{margin-top:10px}
+  }
 </style>
 </head>
 <body>
@@ -68,40 +162,101 @@
 <canvas id="gl"></canvas>
 <div id="page">
   <header>
-    <h1>EVERY ASSET</h1>
-    <div class="lede">
-      Live cameras on the running geometry — nothing here was re-created to be photographed.
-      The green badge means the card is showing <b>the shipped gang-city model</b>; the amber one
-      means it is still a local primitive. The aircraft, the motor pool, the people and the park
-      trees are green now: <code>island_military.js</code> and <code>strategic.js</code> publish
-      their model factories, <code>world/airbase.js</code> asks for them before it builds anything
-      of its own, and this page loads the same six tags the game does.
-      <br /><a href="bomb-survivor.html">← back to the game</a>
+    <div class="topbar">
+      <h1>EVERY ASSET</h1>
+      <div class="nav">
+        <a class="chip" href="bomb-survivor.html">← THE GAME</a>
+        <a class="chip dim" href="../index.html">GANG CITY</a>
+      </div>
+    </div>
+    <div class="pane lede">
+      <span class="k">LIVE CAMERAS ON THE RUNNING GEOMETRY</span>
+      <p>One scene. One renderer. Every card is a viewport onto it.</p>
+      <div class="key">
+        <span class="badge real">SHIPPED MODEL</span>
+        <span class="badge proc">PROCEDURAL</span>
+        <span class="badge prim">LOCAL PRIMITIVE</span>
+      </div>
+      <p>Green: the engine's own model. Slate: generated here at runtime. Amber: a stand-in,
+      waiting on the module named under it.</p>
+      <p>Aircraft, motor pool, people and park trees run the shipped models.
+      <code>island_military.js</code> and <code>strategic.js</code> publish their model
+      factories, <code>world/airbase.js</code> asks for them first, and this page loads the
+      same six tags the game does.</p>
     </div>
   </header>
   <div class="grid" id="grid"></div>
-  <div id="note">
+  <div class="pane" id="note">
     <h3>THE ACCOUNTING</h3>
-    <b>Reclaimed.</b> The B-2 (<code>city/strategic.js</code>), the fighter, helicopter, tank,
-    truck and transport (<code>city/island_military.js</code>), the people
-    (<code>entities/character.js</code> + <code>CBZ.animChar</code>) and the park trees
-    (<code>world/vegetation.js</code>) are all the shipped models now. The change that made it
-    possible was small and belongs to the engine: those files were welded to the archipelago only
-    at their REGISTRATION, not at their geometry, so each now publishes its model factories
-    (<code>CBZ.milModels</code>, <code>CBZ.strategicModels</code>) and guards its
-    <code>CBZ.addLandmass</code> call the way marina.js and bank.js already did. Nothing about the
-    shipped game changed — the base below those exports still calls the same local functions.
-    <br /><br />
-    <b>Still local.</b> The terrain, the towers, the streets, the water ring and the shelters.
-    <code>city/buildings.js</code> is driven lazily by the city, <code>world/water_spec.js</code>
-    reads the terrain stack, and <code>city/continent.js</code> builds an archipelago rather than
-    one basin. Those need the same treatment: take a position, publish what you built, depend on
-    nothing but THREE — and then the replacement here gets deleted too.
+    <h4>RECLAIMED</h4>
+    <ul>
+      <li><b>B-2</b> · city/strategic.js</li>
+      <li><b>fighter · helicopter · tank · truck · transport</b> · city/island_military.js</li>
+      <li><b>people</b> · entities/character.js + CBZ.animChar</li>
+      <li><b>park trees</b> · world/vegetation.js</li>
+    </ul>
+    <h4>WHAT THE ENGINE HAD TO CHANGE</h4>
+    <p>Those files were welded to the archipelago at their REGISTRATION. The geometry was
+    always free.</p>
+    <p>Each publishes its model factories now: <code>CBZ.milModels</code> ·
+    <code>CBZ.strategicModels</code>.</p>
+    <p>Each guards its <code>CBZ.addLandmass</code> call, the way marina.js and bank.js already
+    did.</p>
+    <p>The shipped game still calls the same local functions.</p>
+    <h4>STILL LOCAL</h4>
+    <ul>
+      <li><b>terrain · towers · streets · water ring · shelters</b> · world/desertcity.js</li>
+    </ul>
+    <p><code>city/buildings.js</code> · driven lazily by the city.</p>
+    <p><code>world/water_spec.js</code> · reads the terrain stack.</p>
+    <p><code>city/continent.js</code> · builds an archipelago. This page wants one basin.</p>
+    <h4>THE SEAM, WHEN THEIR TURN COMES</h4>
+    <p>Take a position. Publish what you built. Depend on THREE alone. Then the replacement
+    here gets deleted too.</p>
   </div>
 </div>
 
 <script src="../src/vendor/three.r128.min.js"></script>
 <script src="../src/core/seed.js"></script>
+<script>
+// ============ THE PIXEL BUDGET, SET BEFORE THE RENDERER EXISTS ==========
+// One canvas serves the whole sheet, so its BUFFER SIZE is paid for by every
+// card that draws into it. core/microboot.js reads MICRO_DPR_MAX at
+// construction AND on every resize, which is why this runs ahead of it.
+//
+// THE NUMBER THAT MATTERS: an iPhone reports devicePixelRatio 3. The engine
+// default caps at 1.75, so a 390x664 window becomes a 682x1162 buffer. Cap
+// at 1.0 and it is 390x664 — 3.06x fewer pixels, and every one of them is
+// paid for once per visible card.
+//
+// MEASURED (headless swiftshader, iPhone 13 metrics, scrolled so two cards
+// are live, GL fenced with readPixels, min of 14 samples, runs interleaved):
+//   DPR cap 1.75   341.7 / 285.4 ms
+//   DPR cap 1.00   268.5 / 269.3 ms
+//   shadow 2048    324.2 / 309.8 ms
+//   shadow 1024    275.4 / 287.5 ms
+// Read the size of the win as a floor: swiftshader is a CPU rasteriser and
+// this scene is ~150k triangles per card, so it spends most of its time
+// where a phone GPU spends least. The pixel cut is worth more on real
+// hardware than these numbers show, and it costs the sheet nothing.
+//
+// 1.0 is the floor worth having. An earlier run at 0.75 came out SLOWER as
+// well as softer: below 1.0 the cost has already left the fragment shader.
+//
+// WHAT IS DELIBERATELY NOT DONE: skipping cards on a rotation. See the loop
+// comment in frame() — a region that is not redrawn comes back black.
+(function () {
+  const C = (window.CBZ = window.CBZ || {}).CONFIG = (window.CBZ.CONFIG || {});
+  window.__assetTier = function () {
+    const min = Math.min(window.innerWidth, window.innerHeight);
+    const coarse = window.matchMedia && window.matchMedia("(pointer:coarse)").matches;
+    if (min <= 540) return { name: "phone", dpr: 1.0, shadowMap: 1024, aa: false };
+    if (coarse || min <= 700) return { name: "tablet", dpr: 1.25, shadowMap: 1536, aa: true };
+    return { name: "desk", dpr: 1.75, shadowMap: 2048, aa: true };
+  };
+  C.MICRO_DPR_MAX = window.__assetTier().dpr;
+})();
+</script>
 <script src="../src/core/microboot.js"></script>
 <script src="../src/world/materials.js"></script>
 <!-- the real gang-city modules, same six tags the game loads -->
@@ -120,11 +275,12 @@
 (function () {
 "use strict";
 const CBZ = window.CBZ, THREE = window.THREE;
+const TIER = window.__assetTier();
 
 CBZ.micro.boot({
-  canvas: "#gl", fov: 40, far: 16000, autoStart: false,
+  canvas: "#gl", fov: 40, far: 16000, autoStart: false, antialias: TIER.aa,
   sky: { top: 0x2a6bb2, bottom: 0xe3c893, fogNear: 4000, fogFar: 20000, radius: 12000 },
-  lights: { sun: 1.0, hemi: 0.55, shadowSpan: 260, groundColor: 0x8f7850 },
+  lights: { sun: 1.0, hemi: 0.55, shadowSpan: 260, groundColor: 0x8f7850, shadowMap: TIER.shadowMap },
 });
 CBZ.renderer.toneMappingExposure = 0.95;
 
@@ -168,6 +324,7 @@ if (CBZ.makeCharacter) {
   } catch (e) { person = null; }
 }
 const REAL = CBZ.airbase.usingReal();
+const WAIT = "awaiting city/island_military.js";
 
 // =============================================================== THE CARDS
 // pos/target are either absolute or a function of the world, so a card is a
@@ -189,182 +346,192 @@ function fromBase(anchorX, anchorZ, dLocalX, dLocalZ, y) {
 
 const CARDS = [
   {
-    t: "HELICOPTER", dim: heli ? "rotary wing · shipped model" : "not loaded",
+    t: "HELICOPTER", dim: heli ? "rotary wing · main + tail rotor" : WAIT,
     live: heli ? "real" : "prim",
-    why: "Straight out of the base's own motor pool. This file never modelled a helicopter and now never has to — it asks CBZ.milModels for one and parks it on a pad.",
-    src: "city/island_military.js — <em>CBZ.milModels.heli()</em>",
+    why: "Out of the base's own motor pool. airbase.js asks CBZ.milModels for one and parks it on a pad.",
+    src: "city/island_military.js · <em>CBZ.milModels.heli()</em>",
     res: null,
     orbit: heli ? { at: heli.position, r: 26, h: 9, spin: 0.4 } : null,
     fixed: heli ? null : { pos: [0, 90, -4180], look: [0, 40, -4300] },
   },
   {
-    t: "TANK + TRUCK", dim: tank ? "the ground fleet, shipped models" : "not loaded",
+    t: "TANK + TRUCK", dim: tank ? "tracked hull + soft-skin, nose-out" : WAIT,
     live: tank ? "real" : "prim",
-    why: "The motor pool lines up nose-out the way a real one does, so nothing has to be shunted to move one. Both models are the engine's.",
-    src: "city/island_military.js — <em>CBZ.milModels.tank / .truck</em>",
+    why: "The motor pool lines up nose-out, the way a real one does, so any vehicle drives straight off its slot. Both models belong to the engine.",
+    src: "city/island_military.js · <em>CBZ.milModels.tank / .truck</em>",
     res: null,
     orbit: tank ? { at: tank.position.clone().add(new THREE.Vector3(-25, 0, 0)), r: 44, h: 14, spin: 0.35 } : null,
     fixed: tank ? null : { pos: [0, 90, -4180], look: [0, 40, -4300] },
   },
   {
-    t: "TRANSPORT", dim: cargo ? "heavy lift · shipped model" : "not loaded",
+    t: "TRANSPORT", dim: cargo ? "heavy lift · four-engine · far apron" : WAIT,
     live: cargo ? "real" : "prim",
-    why: "The thing that brought everybody here. Sits on the far apron and is solid, like every other parked machine on the field.",
-    src: "city/island_military.js — <em>CBZ.milModels.cargo()</em>",
+    why: "The thing that brought everybody here. Far apron. Solid, like every other parked machine on the field.",
+    src: "city/island_military.js · <em>CBZ.milModels.cargo()</em>",
     res: null,
     orbit: cargo ? { at: cargo.position, r: 62, h: 20, spin: 0.28 } : null,
     fixed: cargo ? null : { pos: [0, 90, -4180], look: [0, 40, -4300] },
   },
   {
-    t: "THE PEOPLE", dim: person ? "1.82 m voxel rig · CBZ.animChar gait" : "not loaded",
+    t: "THE PEOPLE", dim: person ? "1.82 m voxel rig · CBZ.animChar gait" : "awaiting entities/character.js",
     live: person ? "real" : "prim",
-    why: "Every runner, every bomber crew, every nomad in the desert is now the engine's own body running the engine's own gait solver — not six boxes with a sine wave on the legs.",
-    src: "entities/character.js — <em>CBZ.makeCharacter() + CBZ.animChar()</em>",
+    why: "Every runner, every bomber crew, every nomad in the desert. The engine's own body, running the engine's own gait solver.",
+    src: "entities/character.js · <em>CBZ.makeCharacter() + CBZ.animChar()</em>",
     res: null,
     orbit: person ? { at: person.position.clone().add(new THREE.Vector3(0, 4, 0)), r: 18, h: 4, spin: 0.5 } : null,
     fixed: person ? null : { pos: [0, 90, -4180], look: [0, 40, -4300] },
   },
   {
-    t: "FLYING WING", dim: "52.4 m span · 21.0 m · ratio 2.50 · 33° LE",
-    why: "A 2-D planform extruded to thickness, mirrored from one authored half so it cannot come out asymmetric. Tailless, engines inside the wing, W sawtooth trailing edge.",
-    src: "world/airbase.js — <em>CBZ.airbase.bomber()</em>",
+    t: "FLYING WING", dim: "52.4 m span · 21.0 m long · ratio 2.50 · 33° LE",
+    why: "A 2-D planform extruded to thickness. One authored half, mirrored, so it comes out symmetric. Tailless. Engines inside the wing. W sawtooth trailing edge.",
+    src: "world/airbase.js · <em>CBZ.airbase.bomber()</em>",
     live: REAL.b2 ? "real" : "prim",
-    res: REAL.b2 ? null : "city/strategic.js has the real B-2 — load it and this card upgrades.",
+    res: REAL.b2 ? null : "city/strategic.js holds the real B-2. Load it and this card upgrades.",
     orbit: { at: wing.position, r: 48, h: 15, spin: 0.25 },
   },
   {
-    t: "DELTA FIGHTER", dim: "11.6 m span · 17.0 m · twin canted stabilators",
-    why: "Same planform method at a quarter of the size, plus a bubble canopy and wingtip rails. Built to read as a fighter at 800 m, which is the range it gets read from.",
-    src: "world/airbase.js — <em>CBZ.airbase.fighter()</em>",
+    t: "DELTA FIGHTER", dim: "11.6 m span · 17.0 m long · twin canted stabilators",
+    why: "Same planform method at a quarter of the size. Bubble canopy, wingtip rails. Built to read as a fighter at 800 m, which is the range it gets read from.",
+    src: "world/airbase.js · <em>CBZ.airbase.fighter()</em>",
     live: REAL.mil ? "real" : "prim",
-    res: REAL.mil ? null : "city/island_military.js has the real jet — load it and this card upgrades.",
+    res: REAL.mil ? null : "city/island_military.js holds the real jet. Load it and this card upgrades.",
     orbit: { at: jet.position, r: 26, h: 8, spin: 0.4 },
   },
   {
-    t: "THE STORES", dim: "500 lb iron · 46 m blast — 2000 lb · 78 m blast",
-    why: "Shown at 3×. The heavy falls straighter (less drag per unit mass) AND hurts more, so choosing it is a real trade against how many you can carry.",
-    src: "systems/ordnance.js — <em>CBZ.ordnance.makeMesh()</em>",
+    t: "THE STORES", dim: "500 lb IRON · 46 m blast<br />2000 lb HEAVY · 78 m blast<br />shown at 3×",
+    why: "The heavy falls straighter (less drag per unit mass) and hurts more. Picking one is a real trade against how many you carry.",
+    src: "systems/ordnance.js · <em>CBZ.ordnance.makeMesh()</em>",
     res: null,
     orbit: { at: iron.position.clone().add(new THREE.Vector3(15, 0, 0)), r: 62, h: 12, spin: 0.5 },
   },
   {
     t: "KESTREL FIELD", dim: "1800 m runway · 2040 × 760 m pad · 9 airframes",
-    why: "Runway, taxiways, apron, four hangars, tower, fuel farm, radar, barracks, fence and one gate — standing on a concrete platform raised to the highest ground under its footprint.",
-    src: "world/airbase.js — <em>CBZ.airbase.build()</em>",
-    res: "city/island_military.js IS this base. It takes the city, not coordinates.",
+    why: "Runway, taxiways, apron, four hangars, tower, fuel farm, radar, barracks, fence, one gate. All of it on a concrete platform raised to the highest ground under its footprint.",
+    src: "world/airbase.js · <em>CBZ.airbase.build()</em>",
+    res: "city/island_military.js IS this base. It takes the city as its argument.",
     fixed: { pos: [base.x - 1500, base.y + 620, base.z + 1500], look: [base.x, base.y, base.z] },
   },
   {
     t: "HANGAR", dim: "70 × 120 m · 34 m barrel vault",
-    why: "A half-cylinder shell with a back wall and door frames. Solid, so it reads as real and blocks you.",
+    why: "A half-cylinder shell, a back wall, door frames. Solid, so it reads as real and blocks you.",
     src: "world/airbase.js",
     res: "city/island_military.js has enterable hangars.",
     fixed: { pos: fromBase(HG.x, HG.z, 40, -165, 52), look: [HG.x, base.y + 15, HG.z] },
   },
   {
     t: "CONTROL TOWER", dim: "50 m · glazed cab · green beacon",
-    why: "The tallest thing on the field, and the landmark you navigate the apron by when you are on foot at ground level among parked aircraft.",
+    why: "The tallest thing on the field. The landmark you navigate the apron by, on foot at ground level among parked aircraft.",
     src: "world/airbase.js",
     res: "city/island_military.js · city/airside.js",
     fixed: { pos: fromBase(base.tower.x, base.tower.z, 30, -105, 62), look: [base.tower.x, base.y + 28, base.tower.z] },
   },
   {
     t: "DOWNTOWN TOWER", dim: B_TALL.w + " × " + B_TALL.d + " × " + B_TALL.h + " m",
-    why: "One wrapping window texture serves all 200 facades: the per-building repeat comes from scaling the box's own UV attribute, not from cloning 200 GPU textures.",
+    why: "One wrapping window texture serves all 200 facades. The per-building repeat comes from scaling the box's own UV attribute, so the GPU holds one texture.",
     src: "world/desertcity.js",
-    res: "city/buildings.js — 525 kB, and it does interiors.",
+    res: "city/buildings.js · 525 kB · it does interiors.",
     fixed: { pos: [B_TALL.x + 210, B_TALL.h * 0.75, B_TALL.z + 210], look: [B_TALL.x, B_TALL.h * 0.45, B_TALL.z] },
   },
   {
-    t: "CIVIL-DEFENCE SHELTER", dim: "22 × 22 m · roof at 4.8–6.1 m",
-    why: "The reason open ground is a decision. Its ROOF is a height-gated collider, so you run under it freely and the blast ray does not: 190 damage in the open becomes 23 here.",
-    src: "world/desertcity.js — <em>world.shelters[]</em>",
+    t: "CIVIL-DEFENCE SHELTER", dim: "22 × 22 m · roof at 4.8 – 6.1 m",
+    why: "The reason open ground is a decision. The roof is a height-gated collider: you run under it freely and the blast ray stops on it. 190 damage in the open becomes 23 here.",
+    src: "world/desertcity.js · <em>world.shelters[]</em>",
     res: null,
     fixed: { pos: [SH.x + 34, 16, SH.z + 34], look: [SH.x, 3, SH.z] },
   },
   {
     t: "THE PARK", dim: "600 m across · 170 trees · pond · bandstand",
     why: "The one soft place in a hard grid, and the landmark a pilot navigates the basin by. The bandstand roof counts as cover.",
-    src: "world/desertcity.js — <em>world.park</em>",
+    src: "world/desertcity.js · <em>world.park</em>",
     live: (world.stats.treeSource === "vegetationKit") ? "real" : "prim",
     res: (world.stats.treeSource === "vegetationKit") ? null : "world/vegetation.js owns the engine's real trees.",
     fixed: { pos: [world.park.x + 330, 190, world.park.z + 330], look: [world.park.x, 0, world.park.z] },
   },
   {
     t: "BASIN CITY", dim: "200 towers · 210 lots · tallest " + B_TALL.h + " m",
-    why: "A street grid on a dead-flat basin floor. Flat is not laziness — a grid on a hillside needs terracing, and the flat floor is why a runner's sprint line and a bomber's aiming line agree.",
+    why: "A street grid on a dead-flat basin floor. Flat is a decision: a grid on a hillside needs terracing, and the flat floor is why a runner's sprint line and a bomber's aiming line agree.",
     src: "world/desertcity.js",
     res: "city/continent.js + the biome files build the shipped archipelago.",
     fixed: { pos: [1500, 900, 1500], look: [0, 60, 0] },
   },
   {
-    t: "THE INLAND SEA", dim: "ring, 2.8 – 4.2 km · surface at −6 m",
-    why: "A ring, not a lake: from the air the city reads as an island in sand inside an island in water. The terrain floor drops to −46 m beneath it.",
-    src: "world/desertcity.js — <em>world.water</em>",
-    res: "world/water_spec.js — WATER_V2, with shore FX, buoyancy and wakes.",
+    t: "THE INLAND SEA", dim: "ring · 2.8 – 4.2 km · surface at −6 m",
+    why: "A ring around the sand. From the air the city reads as an island in sand inside an island in water. The terrain floor drops to −46 m beneath it.",
+    src: "world/desertcity.js · <em>world.water</em>",
+    res: "world/water_spec.js · WATER_V2 · shore FX, buoyancy, wakes.",
     fixed: { pos: [0, 420, 2400], look: [0, -20, 3400] },
   },
   {
     t: "SALT & MOUNTAIN RIM", dim: "white flats 3.75 – 5.0 km · rim to ~560 m",
-    why: "The map's “you have gone too far” surface, and the lid on the basin. Blinding and featureless — it says the boundary without a wall, which is the only kind worth having.",
-    src: "world/desertcity.js — analytic <em>heightAt(x,z)</em>",
+    why: "The map's “you have gone too far” surface, and the lid on the basin. Blinding and featureless. It states the boundary and stays walkable, which is the only kind worth having.",
+    src: "world/desertcity.js · analytic <em>heightAt(x,z)</em>",
     res: "world/terrain.js · mountain_detail.js · biome_snow.js",
     fixed: { pos: [0, 700, 4200], look: [0, 240, 7000] },
   },
   {
     t: "DUNE DESERT", dim: "1.05 – 2.7 km · 260 rocks · 420 scrub · 40 buttes",
-    why: "Fbm dunes rising with distance, so the city sits in a bowl and the horizon closes behind you as you walk out of it.",
+    why: "Fbm dunes rising with distance. The city sits in a bowl and the horizon closes behind you as you walk out of it.",
     src: "world/desertcity.js",
-    res: "city/biome_desert.js — 86 kB of the real thing.",
+    res: "city/biome_desert.js · 86 kB of the real thing.",
     fixed: { pos: [1400, 150, 1900], look: [1900, 20, 2400] },
   },
   {
     t: "THE APRON", dim: "9 airframes · 30 m mission ring",
-    why: "Where the match begins: you spawn off the wing's starboard quarter, far enough back to read it as an aeroplane rather than a wall, already looking at it.",
-    src: "world/airbase.js — <em>base.parked[] / base.spawn</em>",
+    why: "Where the match begins. You spawn off the wing's starboard quarter, far enough back to read it as an aeroplane, already looking at it.",
+    src: "world/airbase.js · <em>base.parked[] / base.spawn</em>",
     res: "city/island_military.js parks tanks, helicopters and jets.",
     fixed: { pos: fromBase(base.bomber.x, base.bomber.z, 66, -96, 30), look: [base.bomber.x, base.y + 5, base.bomber.z] },
   },
 ];
 
 // ============================================================ THE VIEWPORTS
-// One scene, one renderer, N cameras. Round-robin: rendering fourteen full
-// views every frame is ~6000 draw calls for a page nobody is playing, so
-// each frame refreshes a few regions and the rest persist (autoClear off,
-// scissor clear per region).
+// One scene, one renderer, N cameras, N scissored regions on one buffer.
 const grid = document.getElementById("grid");
 const views = [];
 CARDS.forEach(function (c, i) {
   const card = document.createElement("div");
   card.className = "card";
+  const badge = c.live === "real" ? ["real", "SHIPPED MODEL"]
+              : c.live === "prim" ? ["prim", "LOCAL PRIMITIVE"]
+              : ["proc", "PROCEDURAL"];
   card.innerHTML =
     '<div class="stage"></div><div class="meta">' +
     "<h3>" + c.t + "</h3>" +
     '<div class="dim">' + c.dim + "</div>" +
-    '<div class="badge ' + (c.live === "real" ? "real" : c.live === "prim" ? "prim" : "prim") + '">' +
-      (c.live === "real" ? "LIVE: GANG CITY MODULE" : c.live === "prim" ? "LIVE: LOCAL PRIMITIVE" : "LIVE: PROCEDURAL") + "</div>" +
+    '<div class="badge ' + badge[0] + '">' + badge[1] + "</div>" +
     '<p class="why">' + c.why + "</p>" +
     '<div class="src">' + c.src +
-    (c.res ? '<span class="res">RESERVED FOR: ' + c.res + "</span>"
+    (c.res ? '<span class="res"><b>RESERVED FOR</b> ' + c.res + "</span>"
            : c.live === "real" ? ""                      // the badge already said it
-           : '<span class="res none">no gang-city equivalent — this one is genuinely new</span>') +
+           : '<span class="res none"><b>ORIGIN</b> written here, first of its kind</span>') +
     "</div></div>";
   grid.appendChild(card);
   const cam = new THREE.PerspectiveCamera(c.orbit ? 34 : 42, 1.6, 0.5, 20000);
   views.push({ card: card, stage: card.querySelector(".stage"), cam: cam, def: c, a: i * 0.9 });
 });
 
-let cursor = 0, t = 0;
+const PAGE_BG = new THREE.Color(0x0a0d10);
+let t = 0;
 function frame(dt) {
   t += dt;
   const R = CBZ.renderer;
-  const H = R.domElement.clientHeight;
+  const W = R.domElement.clientWidth, H = R.domElement.clientHeight;
   R.autoClear = false;
+
+  // WIPE THE WHOLE BUFFER FIRST, IN THE PAGE'S OWN COLOUR. autoClear is off,
+  // so nothing else ever touches the pixels between the cards — and a rect
+  // read this frame is somewhere else than it was last frame the moment you
+  // scroll. Without this wipe the gaps keep the previous frame's sky and the
+  // sheet smears while it moves. One full clear is cheaper than one card.
+  R.setScissorTest(false);
+  R.setViewport(0, 0, W, H);
+  R.setClearColor(PAGE_BG, 1);
+  R.clear();
+
   R.setScissorTest(true);
-  // autoClear is off, so scene.background never gets painted — the manual
-  // clear below is the only thing filling a region, and it uses the
-  // RENDERER's clear colour. Set it to the sky's haze or every card sits on
-  // black and reads as "failed to render" instead of "sky".
+  // The per-region clear below uses the RENDERER's clear colour. Set it to
+  // the sky's haze or every card sits on black and reads as "failed to
+  // render" instead of "sky".
   R.setClearColor(CBZ.micro.hazeColor, 1);
 
   // EVERY ON-SCREEN REGION, EVERY FRAME. The round-robin this started as
@@ -374,11 +541,13 @@ function frame(dt) {
   // between frames. Regions that were not redrawn this frame came back
   // black — which reads as "that camera is broken", not "that camera is
   // stale". Off-screen cards are still skipped, and that is where the
-  // saving actually was: a sheet of fourteen only ever shows six or eight.
+  // saving actually was: a sheet of eighteen only ever shows two on a phone
+  // and six or eight on a desk. The OTHER saving is the pixel budget at the
+  // top of this file, which is per-pixel and therefore per-card as well.
   for (let n = 0; n < views.length; n++) {
-    const v = views[cursor = (cursor + 1) % views.length];
+    const v = views[n];
     const r = v.stage.getBoundingClientRect();
-    if (r.bottom < 0 || r.top > window.innerHeight) continue;   // off-screen: skip
+    if (r.bottom <= 0 || r.top >= H || r.width < 1 || r.height < 1) continue;   // off-screen: skip
     const d = v.def;
     if (d.orbit) {
       v.a += dt * d.orbit.spin;
@@ -396,6 +565,9 @@ function frame(dt) {
     CBZ.camera.position.copy(v.cam.position);
     v.cam.aspect = r.width / r.height;
     v.cam.updateProjectionMatrix();
+    // getBoundingClientRect is viewport-relative and the canvas is
+    // position:fixed inset:0, so left/top ARE canvas coordinates at every
+    // size and at every scroll offset. GL counts y up from the bottom.
     const y = H - r.bottom;
     R.setViewport(r.left, y, r.width, r.height);
     R.setScissor(r.left, y, r.width, r.height);
@@ -412,13 +584,28 @@ CBZ.micro.onFrame(frame, { id: "assets", order: 0 });
 CBZ.micro.autoRender = false;
 CBZ.micro.start();
 
-window.addEventListener("scroll", function () { cursor = 0; }, { passive: true });
+// ROTATION CHANGES THE TIER. A phone turned sideways is still a phone, but
+// a tablet crossing 900 px is not the same budget, so re-price on the way
+// through. microboot's own resize handler reads MICRO_DPR_MAX, and it is
+// registered ahead of this one, so apply the new cap here as well.
+function reprice() {
+  const tier = window.__assetTier();
+  CBZ.CONFIG.MICRO_DPR_MAX = tier.dpr;
+  CBZ.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, tier.dpr));
+  CBZ.renderer.setSize(window.innerWidth, Math.max(1, window.innerHeight), false);
+}
+window.addEventListener("resize", reprice);
+window.addEventListener("orientationchange", reprice);
+// Scrolling needs no handler: every region's rect is read fresh each frame
+// and the full-buffer wipe above covers the gaps while it moves.
+
 document.getElementById("boot").remove();
 
 window.__assets = {
-  world: world, base: base, views: views,
+  world: world, base: base, views: views, tier: TIER,
   audit: function () {
-    return { micro: CBZ.microAudit(), city: CBZ.desertCityAudit(), base: CBZ.airbaseAudit(), cards: CARDS.length };
+    return { micro: CBZ.microAudit(), city: CBZ.desertCityAudit(), base: CBZ.airbaseAudit(),
+             cards: CARDS.length, tier: window.__assetTier() };
   },
 };
 })();
