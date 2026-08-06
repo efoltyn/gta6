@@ -28,10 +28,22 @@ CBZ.modeHas ? CBZ.modeHas("traverse") : CBZ.game.mode === "city"   // adopt like
 ```
 
 `src/systems/modecaps.js` owns the table (`traverse` · `stepLedge` · `blast` ·
-`blastActors`), the mode's live actor roster (`CBZ.worldActors`), the damage
-switchboard (`CBZ.hurtWorldActor` → `aiKill` / `gungame.hurt` / `surv.hurt` /
-`cityKillPed`) and the shared blast coupling (`CBZ.blastWorldActors`). Flag
-`MODE_CAPS_V1=false` restores the old city-only answer at every site at once.
+`blastActors` · `breach`), the mode's live actor roster (`CBZ.worldActors`), the
+damage switchboard (`CBZ.hurtWorldActor` → `aiKill` / `gungame.hurt` /
+`surv.hurt` / `cityKillPed`) and the shared blast coupling
+(`CBZ.blastWorldActors`). Flag `MODE_CAPS_V1=false` restores the old city-only
+answer at every site at once.
+
+**WALLS BREAK EVERYWHERE; THE PERIMETER DOESN'T.** `city/buildings.js`
+`carveHole` opens real walk-through holes with sill/header/flank remnants and a
+lit room behind; `city/fracture.js` owns the ledger (24 holes, plywood
+eviction, coordinate-stable persistence, net broadcast) and `chewWall` (25
+rifle rounds in a 1.2 m cell = a murder hole). None of it reads a city record.
+A wall opts OUT with **`noBreach` on its collider** — that one flag on
+`world/yard.js`'s `wall()` helper is the entire policy keeping the prison an
+escape game rather than a jailbreak sandbox. A collider with no `y0`/`y1`
+derives its band from `c.ref`'s bounds, so pre-contract walls are carvable
+without editing the world files.
 
 **The rule this file exists to enforce:** `mode === "city"` is legitimate when
 it guards a CITY RECORD (`cityCars`, `city.arena`, the wanted ladder, the

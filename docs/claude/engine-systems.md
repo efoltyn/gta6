@@ -32,6 +32,19 @@ Before building anything adjacent, wire into the existing system:
   smoke, shockwave, sound, shake, scorch and the shared damage sweep, none of
   which reads a city record. Non-city modes detonate through the core; the city
   keeps the chain. **Wrap `cityExplosion`, never `cityBlastCore`.**
+- **Breachable walls** — `city/buildings.js` `CBZ.cityCarveWall` (the primitive:
+  hide the wall, splice its AABB, rebuild flank/sill/header remnants with real
+  colliders + LOS, dress a lit room behind the hole) + `city/fracture.js` (the
+  policy: `blastAt` sizes by ordnance, `chewWall` grinds a murder hole from 25
+  rifle rounds, 24-hole cap with plywood eviction, coordinate-stable
+  persistence, net broadcast). Gated by `modeHas("breach")`, so it works in
+  every mode. **A wall opts out with `noBreach` on its collider** — that is how
+  `world/yard.js` keeps the prison perimeter standing while its interiors open.
+  A collider with no `y0`/`y1` derives its band from `c.ref`'s bounds (same
+  idiom as `physics.js`'s `colliderVerticalBand`), so pre-contract walls are
+  carvable with no world-file edits. Note the two sub-gates that must move
+  together with `blastAt`: `drainDefer` (a queue drained by a stricter test than
+  the one that filled it silently eats every carve) and `chewWall`.
 - **Vault / mantle** — `CBZ.characterTraversal` (`src/systems/physics.js`).
   `start(actor, rig, dx, dz, opts)` then `step(actor, rig, dt, animate)`, and
   the caller returns early for the frame the step owns. Reads position through

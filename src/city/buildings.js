@@ -1449,24 +1449,66 @@
   function plyMat() { return _plyMat || (_plyMat = new THREE.MeshLambertMaterial({ color: 0x9a7b4f })); }
   function plyBatMat() { return _plyBatMat || (_plyBatMat = new THREE.MeshLambertMaterial({ color: 0x6f5636 })); }
 
+  /* ---- WHAT COUNTS AS A CARVABLE WALL -------------------------------------
+     MEASURED 2026-08-06, escape mode, seed 90210: of 240 live prison
+     colliders, 214 carry a mesh, 45 carry a y0/y1 band, 8 of those are >=1.6 m
+     tall and **ZERO** survived the thickness test. Not one prison wall was
+     carvable — a forced carve on the biggest wall in the block returned
+     "REFUSED (no eligible wall collider)". Yet 73 prison colliders are
+     wall-SHAPED by geometry (>=1.6 m tall measured off the mesh, <=0.9 m thin,
+     opaque), and ZERO of those 73 declare a band.
+
+     The reason is one line in world/materials.js: CBZ.addBox pushes
+     {minX,maxX,minZ,maxZ,ref} and only attaches y0/y1 when the caller asks.
+     The prison was built before that contract existed, so its walls are real
+     walls with real meshes that simply never said how tall they are — and the
+     filter's FIRST test is `c.y1 == null`. The mode gate on blastAt was never
+     what stopped the prison being breachable; this was.
+
+     So derive the band the same way systems/physics.js:338 already does for
+     the vault probe — from the registered mesh's own bounds. Reading a solid's
+     visual height is not inventing geometry, it is asking the thing that is
+     already there. A collider with no mesh stays non-carvable, as before. */
+  const carveBounds = window.THREE && THREE.Box3 ? new THREE.Box3() : null;
+  const carveBand = { y0: 0, y1: 0, derived: false };
+  function wallBandOf(c) {
+    if (c.y0 != null && c.y1 != null && isFinite(c.y0) && isFinite(c.y1)) return c;   // zero-alloc hot path
+    if (!c.ref || c.ref.visible === false || !carveBounds) return null;
+    try {
+      carveBounds.setFromObject(c.ref);
+      if ((carveBounds.isEmpty && carveBounds.isEmpty()) ||
+          !isFinite(carveBounds.min.y) || !isFinite(carveBounds.max.y)) return null;
+      carveBand.y0 = carveBounds.min.y; carveBand.y1 = carveBounds.max.y;
+      carveBand.derived = true;
+      return carveBand;
+    } catch (e) { return null; }
+  }
+
   function carveHole(x, y, z, r, opts) {
     opts = opts || {};
     r = r || 1.2;
     if (!CBZ.scene || !CBZ.colliders) return null;
     // --- nearest WALL box whose y-span contains the hit ---
     const sr = opts.search != null ? opts.search : 2.6, sr2 = sr * sr;
-    let best = null, bestD = 1e9;
+    let best = null, bestD = 1e9, bestY0 = 0, bestY1 = 0;
     for (let i = 0; i < CBZ.colliders.length; i++) {
       const c = CBZ.colliders[i];
-      if (c.y1 == null || !c.ref) continue;                 // not a wall-style AABB w/ a mesh
-      if (y < c.y0 - 0.3 || y > c.y1 + 0.3) continue;       // the box must CONTAIN the hit height
-      if (c.y1 - c.y0 < 1.6) continue;                      // sills / furniture slabs aren't walls
+      if (!c.ref) continue;                                 // no mesh: nothing to hide or remnant
+      // THE PERIMETER HOLDS. A wall the world declares un-breachable is not a
+      // candidate at any radius — see world/yard.js. The blast still scars,
+      // shakes and throws debris there; it just does not open.
+      if (c.noBreach) continue;
+      const band = wallBandOf(c);
+      if (!band) continue;                                  // heightless AND no readable mesh
+      const cy0 = band.y0, cy1 = band.y1;
+      if (y < cy0 - 0.3 || y > cy1 + 0.3) continue;         // the box must CONTAIN the hit height
+      if (cy1 - cy0 < 1.6) continue;                        // sills / furniture slabs aren't walls
       if (Math.min(c.maxX - c.minX, c.maxZ - c.minZ) > 0.9) continue;   // thick = counters/plinths, skip
       const mt = c.ref.material; if (mt && mt.transparent) continue;    // glass/doors keep their own systems
       const sx = Math.max(c.minX, Math.min(c.maxX, x)), sz = Math.max(c.minZ, Math.min(c.maxZ, z));
       const dx = x - sx, dz = z - sz, dd = dx * dx + dz * dz;
       if (dd > sr2 || dd >= bestD) continue;
-      bestD = dd; best = c;
+      bestD = dd; best = c; bestY0 = cy0; bestY1 = cy1;
     }
     const wall = best && best.ref;
     if (!wall || wall._breached) return null;
@@ -1480,7 +1522,11 @@
     const len = maxU - minU;
     const thick = horiz ? (c.maxZ - c.minZ) : (c.maxX - c.minX);
     const fixed = horiz ? (c.minZ + c.maxZ) / 2 : (c.minX + c.maxX) / 2;    // world coord on the off-axis
-    const y0 = c.y0, y1 = c.y1;
+    // the band the search settled on — DECLARED (city walls) or DERIVED off the
+    // mesh (the prison's, which predate the y0/y1 contract). Every remnant below
+    // is built against it, so a carved prison wall leaves properly height-gated
+    // flanks/sill/header where the original collider was full-height.
+    const y0 = bestY0, y1 = bestY1;
     const hit = horiz ? x : z;                              // where the blast struck along the wall axis
     // gap = the opening centred on the hit, clamped within the wall, sized to the blast
     // (opts.gapW overrides for callers that know the exact opening — window frames)

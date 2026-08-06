@@ -219,7 +219,14 @@
   function blastAt(pt, radius, opts) {
     opts = opts || {};
     if (pt && pt.point) pt = pt.point;
-    if (!pt || !CBZ.cityCarveWall || !CBZ.game || CBZ.game.mode !== "city") return null;
+    // CAPABILITY, not scenario (systems/modecaps.js). Nothing below reads a city
+    // record: carveHole resolves the wall out of CBZ.colliders and its own
+    // registered mesh, and it already carries an explicit fallback for a wall
+    // with no building parent ("scene-level props"). The prison's walls became
+    // eligible the day carveHole learned to derive a band off the mesh; this is
+    // the policy layer catching up. Individual walls refuse with `noBreach`.
+    if (!pt || !CBZ.cityCarveWall || !CBZ.game) return null;
+    if (!(CBZ.modeHas ? CBZ.modeHas("breach") : CBZ.game.mode === "city")) return null;
     const power = opts.power || 1.2;
     let r = Math.max(0.5, radius || 2.6);
     // floor the hole to a dramatic, room-exposing size by ordnance class
@@ -296,7 +303,10 @@
   // outlived its arena (mode exit / run reset mid-window) self-cancels.
   function drainDefer() {
     if (!deferQ.length) return;
-    if (!CBZ.cityCarveWall || !CBZ.game || CBZ.game.mode !== "city" || !CBZ.colliders || !CBZ.colliders.length) {
+    // Same capability the enqueue was allowed under — a queue drained by a
+    // stricter test than the one that filled it silently eats every carve.
+    const may = CBZ.modeHas ? CBZ.modeHas("breach") : (CBZ.game && CBZ.game.mode === "city");
+    if (!CBZ.cityCarveWall || !CBZ.game || !may || !CBZ.colliders || !CBZ.colliders.length) {
       deferQ.length = 0; return;        // arena gone — drop the stale carves
     }
     const todo = deferQ.splice(0, deferQ.length);
@@ -333,7 +343,11 @@
   // ---- murder holes: sustained heavy fire grinds through concrete ----------
   function prune(t) { chew.forEach(function (c, k) { if (t - c.t > 14) chew.delete(k); }); }
   function chewWall(x, y, z) {
-    if (!CBZ.cityCarveWall || !CBZ.game || CBZ.game.mode !== "city") return null;
+    // COVER YOU MAKE, in any mode. 25 rifle-class rounds into one wall cell
+    // grind a murder hole — the purest form of "the world reacts to the gun",
+    // and nothing in it reads a city record either.
+    if (!CBZ.cityCarveWall || !CBZ.game) return null;
+    if (!(CBZ.modeHas ? CBZ.modeHas("breach") : CBZ.game.mode === "city")) return null;
     const k = Math.round(x / CHEW_CELL) + "," + Math.round(y / CHEW_CELL) + "," + Math.round(z / CHEW_CELL);
     const t = nowS();
     let c = chew.get(k);

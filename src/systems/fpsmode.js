@@ -2967,7 +2967,8 @@
         else if (CBZ.cityBulletHole) CBZ.cityBulletHole(hit.point.x, hit.point.y, hit.point.z, wnx, 0, wnz);
         // rifle-class rounds CHEW: sustained heavy fire on one wall cell quietly
         // grinds open a murder hole (city/fracture.js counts per 1.2u cell)
-        if (CBZ.game.mode === "city" && cal >= 1.2 && !w.pellets && CBZ.cityFracture && CBZ.cityFracture.chewWall)
+        if ((CBZ.modeHas ? CBZ.modeHas("breach") : CBZ.game.mode === "city") &&
+            cal >= 1.2 && !w.pellets && CBZ.cityFracture && CBZ.cityFracture.chewWall)
           CBZ.cityFracture.chewWall(hit.point.x, hit.point.y, hit.point.z);
         if (wallThudDist < 0) wallThudDist = hit.dist;
         // (d) PENETRATION / RICOCHET — purely additive flavor on top of the

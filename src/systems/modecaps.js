@@ -99,14 +99,22 @@
                    mode's own roster. CITY IS DELIBERATELY 0: city/crashfx's
                    applyBlastDamage already sweeps peds/cops/crowd/player, and
                    a second sweep would double-kill.
+       breach      may an explosion open a real, permanent, walk-through HOLE
+                   in a wall here (city/fracture.js's ledger + city/buildings.js
+                   carveHole). The carve primitive reads only CBZ.colliders and
+                   the registered mesh — no lot, no building record, and it
+                   already carries a scene-level fallback for props with no
+                   parent group — so it is engine, not city. Individual walls
+                   opt OUT with `noBreach` on their collider, which is how the
+                   prison perimeter stays standing while its interiors open.
 
      A mode absent from this table has NO shared capabilities — which is the
      safe answer for a future mode nobody has thought about yet. -------- */
   const CAPS = {
-    city: { traverse: 1, stepLedge: 1, blast: 1, blastActors: 0 },
-    escape: { traverse: 1, stepLedge: 1, blast: 1, blastActors: 1 },
-    gungame: { traverse: 1, stepLedge: 1, blast: 1, blastActors: 1 },
-    survival: { traverse: 1, stepLedge: 1, blast: 1, blastActors: 1 },
+    city: { traverse: 1, stepLedge: 1, blast: 1, blastActors: 0, breach: 1 },
+    escape: { traverse: 1, stepLedge: 1, blast: 1, blastActors: 1, breach: 1 },
+    gungame: { traverse: 1, stepLedge: 1, blast: 1, blastActors: 1, breach: 1 },
+    survival: { traverse: 1, stepLedge: 1, blast: 1, blastActors: 1, breach: 1 },
   };
   CBZ.MODE_CAPS = CAPS;
 

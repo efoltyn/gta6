@@ -883,8 +883,17 @@
     // (power ≳1) carves; the heli ember (power 0.2, noDamage) and tiny car-pops
     // must NOT punch holes — noDamage is skipped outright, weak blasts scar at
     // most. CITY-ONLY (cityFracture.blastAt self-guards mode==="city").
+    // ANTI-DOUBLE-CARVE, SCOPED. The skip below exists because buildings.js's
+    // wrap on CBZ.cityExplosion runs structuralBlast->blastAt AFTER this
+    // returns. That wrap only runs when the call came through the WRAPPED
+    // chain — and outside the city, systems/fpsmode.js detonates through
+    // CBZ.cityBlastCore precisely to avoid the chain, so nothing runs after us
+    // and suppressing here would mean no prison wall ever opens. Test the mode,
+    // not just the marker: in city this is byte-identical to before.
+    const chainWillCarve = (!CBZ.game || CBZ.game.mode === "city") &&
+      !!(CBZ.cityExplosion && CBZ.cityExplosion._structWrapped);
     if (!opts.noDamage && power >= 1.0 && CBZ.cityFracture && CBZ.cityFracture.blastAt
-        && !(CBZ.cityExplosion && CBZ.cityExplosion._structWrapped)) {
+        && !chainWillCarve) {
       // hole radius by ordnance class (blastAt re-floors it to a room-exposing
       // size); search left to blastAt's radius-scaled default so a blast a few
       // units off the wall still couples to the NEAREST facade at this height.

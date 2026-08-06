@@ -230,6 +230,61 @@ const PASS = `(() => {
   out.travStats = { startsDelta: t1.starts - t0.starts, vaults: t1.vaults, mantles: t1.mantles, lastCancel: t1.lastCancel };
   if (!REVERT && !drove) out.fails.push("a HUNTING guard never vaulted any of " + tried + " low prison props");
   if (REVERT && drove) out.fails.push("REVERT FAILED: guard still vaulted");
+
+  // ---- 6. A BLAST OPENS A REAL, WALK-THROUGH HOLE — AND THE PERIMETER HOLDS
+  // Proof by consequence again: a carved wall is one whose mesh went invisible,
+  // whose original AABB left CBZ.colliders, and through which the SHARED
+  // collide resolver no longer pushes a body.
+  const wallShaped = [];
+  let noBreachTotal = 0;
+  for (const c of CBZ.colliders) {
+    if (c._city || !c.ref) continue;
+    if (c.noBreach) noBreachTotal++;
+    let h = 0, bot = 0;
+    try { const b = new THREE.Box3().setFromObject(c.ref); h = b.max.y - b.min.y; bot = b.min.y; } catch (e) {}
+    const thin = Math.min(c.maxX - c.minX, c.maxZ - c.minZ);
+    const opaque = !(c.ref.material && c.ref.material.transparent);
+    if (h >= 2.4 && thin <= 0.9 && opaque && bot < 0.6 && !c.noBreach && c.ref.visible !== false &&
+        Math.max(c.maxX - c.minX, c.maxZ - c.minZ) >= 3) wallShaped.push(c);
+  }
+  out.breach = { cap: CBZ.modeHas("breach"), eligibleWalls: wallShaped.length, perimeterFlagged: noBreachTotal };
+  // THE PERIMETER IS ALSO 1 m THICK, which carveHole refuses on its own — so a
+  // standing outer wall proves nothing. Flag an ELIGIBLE wall and confirm the
+  // carve refuses it, with the unflagged carve as the control.
+  if (wallShaped.length) {
+    const c0 = wallShaped[0], cx = (c0.minX + c0.maxX) / 2, cz = (c0.minZ + c0.maxZ) / 2;
+    c0.noBreach = true;
+    const refused = !CBZ.cityCarveWall(cx, 1.4, cz, 1.8, { search: 1.0 });
+    c0.noBreach = false;
+    const opens = !!CBZ.cityCarveWall(cx, 1.4, cz, 1.8, { search: 1.0 });
+    out.breach.flagProof = (refused ? "flagged=REFUSED" : "flagged=CARVED(BUG)") + " / " + (opens ? "unflagged=CARVED" : "unflagged=refused");
+    if (!refused) out.fails.push("noBreach IGNORED — a flagged wall still carved");
+    if (!REVERT && !opens) out.fails.push("control failed: an unflagged eligible wall did not carve");
+  }
+  // a real blast through the shared core, then walk the hole
+  if (wallShaped.length > 1) {
+    const t = wallShaped[wallShaped.length - 1];
+    const tx = (t.minX + t.maxX) / 2, tz = (t.minZ + t.maxZ) / 2, tm = t.ref;
+    CBZ.cityBlastCore(tx, tz, { power: 1.9, radius: 13, byPlayer: true, y: 1.4 });
+    for (let i = 0; i < 8; i++) CBZ.stepSim(1/60);      // the carve defers one frame
+    const probe = { x: tx, y: 0, z: tz };
+    CBZ.collide(probe, 0.55, 0.1, 1.8);
+    out.breach.opened = tm.visible === false && CBZ.colliders.indexOf(t) < 0;
+    out.breach.walkThrough = Math.hypot(probe.x - tx, probe.z - tz) < 0.05;
+    if (!REVERT && !out.breach.opened) out.fails.push("an RPG on a prison wall opened NO hole");
+    if (!REVERT && !out.breach.walkThrough) out.fails.push("the hole is not walk-through (collide still blocks it)");
+    if (REVERT && out.breach.opened) out.fails.push("REVERT FAILED: a wall still carved");
+  }
+  // three point-blank rockets into the outer wall: it must still be there
+  let peri = null;
+  for (const c of CBZ.colliders) if (c.noBreach && c.ref && c.ref.visible !== false) { peri = c; break; }
+  if (!peri) out.fails.push("no live perimeter collider carries noBreach");
+  else {
+    const px = (peri.minX + peri.maxX) / 2, pz = (peri.minZ + peri.maxZ) / 2;
+    for (let k = 0; k < 3; k++) { CBZ.cityBlastCore(px, pz, { power: 1.9, radius: 13, byPlayer: true, y: 1.4 }); for (let i = 0; i < 8; i++) CBZ.stepSim(1/60); }
+    out.breach.perimeterHeld = peri.ref.visible !== false && CBZ.colliders.indexOf(peri) >= 0;
+    if (!out.breach.perimeterHeld) out.fails.push("PERIMETER BREACHED — the escape game is now one verb");
+  }
   return out;
 })()`;
 

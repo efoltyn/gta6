@@ -2749,3 +2749,100 @@ read, deliberately out of scope):
   where that gate comes down next.
 - `CBZ.npcStepLedge` still has zero consumers. Un-gating it did not fix that;
   only a mover calling it will.
+
+## 2026-08-06 (same day, follow-up) — SHOULD A WALL BREAK? THE CITY ALREADY SAID YES
+
+Owner: *"Should a wall be breakable by explosion? Should holes open up in walls
+with explosion. Look it up."*
+
+**LOOKED IT UP. The city has a complete, mature breach system** — not a stub.
+`city/buildings.js` `carveHole` is the primitive (hide the wall mesh, splice its
+AABB out, rebuild left/right flanks + sill + header as real height-gated
+colliders with LOS, dress an inset pocket, a darker back wall, a concrete floor
+slab, a glowing ceiling light, blast-shoved furniture, rebar hanging from the
+header, and 8–13 jittered concrete prisms merged into one fractured rim).
+`city/fracture.js` is the policy: `blastAt` sizes the hole by ordnance class
+(RPG/airstrike floors to r≈3.4–4.6, grenade r≈2.2), `chewWall` grinds a murder
+hole from 25 rifle-class rounds in one 1.2 m cell, 24 live holes with plywood
+eviction of the oldest, coordinate-stable persistence, and an `onHole`
+broadcast so multiplayer guests land the same hole. Its own header states the
+why: *"an RPG that permanently remodels a bank facade is money ON the wall."*
+
+**I WAS WRONG THIS MORNING AND THE MEASUREMENT SAID SO.** The previous entry
+closed with "the city-world half of a blast is still city-gated by design — a
+breachable prison wall is where that gate comes down next." The gate was never
+the blocker. **Measured** (escape, seed 90210, live colliders):
+
+| `carveHole`'s five filters | prison colliders surviving |
+|---|---:|
+| total (non-city) | 240 |
+| has a `ref` mesh | 214 |
+| has a `y0`/`y1` band | **45** |
+| band ≥ 1.6 m tall | **8** |
+| thinner than 0.9 m | **0** |
+| opaque | **0** |
+
+A forced carve on the biggest wall in the block, with the mode gate bypassed,
+returned **`REFUSED (no eligible wall collider)`**. Deleting the gate alone
+would have shipped a no-op. Meanwhile **73 prison colliders ARE wall-shaped by
+geometry** (≥1.6 m tall measured off the mesh, ≤0.9 m thin, opaque) and **0 of
+those 73 declare a band** — because `CBZ.addBox` (`world/materials.js:196`)
+attaches `y0`/`y1` only when the caller asks, and the prison predates that
+contract. `carveHole`'s FIRST test is `c.y1 == null`.
+
+**THE FIX IS THE SAME ONE PHYSICS ALREADY SHIPPED.** `physics.js:338`
+`colliderVerticalBand` derives a band off `c.ref`'s Box3 for exactly this case —
+*"legacy solid props that predate the y0/y1 collider contract but still carry
+the actual Mesh they block with."* `carveHole` now does the same, so 73 prison
+walls became carvable with no world-file edits and no new geometry. Same shape
+as the vault finding, one layer deeper: **the capability was shared; the DATA
+did not meet its contract, and the mode gate was hiding that.**
+
+**THE DESIGN CALL, and it is the whole reason this is not just an un-gating.**
+The prison IS the escape game. Doctrine LAW 1 argues hard FOR interior
+breaching — the gun room worked because it was locked and it changed your
+CATEGORY, and the RPG is hanging on that gun room's wall
+(`world/gunroom.js:637`), so key → gun room → RPG → blow your way through the
+block is the gun-room grammar chained into itself. But applied to the OUTER wall
+it collapses the escape into one verb and orphans the authored gradient the
+keycard, the maintenance crawls, the ceiling hatches, the drainage and the
+culvert (`world/escape_routes.js`) exist to be. So: **interiors open, the
+perimeter holds** — one `noBreach` flag stamped in `world/yard.js`'s `wall()`
+helper, which every one of the compound's perimeter segments already goes
+through. Delete that line and the prison becomes a jailbreak sandbox; that is
+deliberately a one-line decision.
+
+TWO SUB-GATES had to move with `blastAt` or the change would have been a
+silent no-op: `drainDefer` (a queue drained by a STRICTER test than the one
+that filled it eats every carve) and `chewWall`. And `cityBlastCore`'s
+anti-double-carve skip had to be scoped to city mode — it exists because
+buildings.js's wrap carves AFTER the core returns, but outside the city
+fpsmode detonates through the core precisely to avoid that wrap, so the skip
+would have meant no prison wall ever opened.
+
+**MEASURED AFTER** (`tools/mode-engine-check.mjs`, now covering breach; both
+sides run):
+
+| question | `MODE_CAPS_V1=1` | `=0` (revert) |
+|---|---|---|
+| eligible (unflagged, carvable) prison walls | **58** | 58 |
+| perimeter segments carrying `noBreach` | **10** | 10 |
+| flagged wall vs the same wall unflagged | **`flagged=REFUSED / unflagged=CARVED`** | same |
+| RPG on an interior wall opens a hole | **yes** (mesh hidden, AABB spliced out, 5 banded remnants) | no |
+| a body can walk through the hole | **yes** (`CBZ.collide` no longer pushes it out) | no |
+| perimeter after 3 point-blank rockets | **held** | held |
+| console errors | 0 | 0 |
+
+The `flagProof` control matters: the real perimeter is **1 m thick** and
+`carveHole` already refuses anything over 0.9 m, so a standing outer wall proves
+nothing on its own. Flagging an ELIGIBLE wall and watching it refuse — with the
+unflagged carve as the control — is what actually proves the policy works.
+
+`MATHGATE: ok` (329/182/206, 400 ticks, determinism ok) — the city path is
+byte-identical; `carveHole`'s declared-band hot path returns the collider
+itself, so a city wall never touches the new derivation.
+
+**STILL OPEN:** `fractureBurst` and the ledger `drain()` remain city-gated —
+the first has no non-city caller, the second replays a CITY save's hole ledger,
+so neither is the same bug. Prison holes are therefore **not persisted across a
+run** yet; that needs an escape-side ledger, not a gate change.
