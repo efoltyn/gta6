@@ -2632,3 +2632,120 @@ work.** For this change that is a throwaway toast probe (~90s, and it caught the
 old behavior) plus `node --check`. Run the math gate when the change can move
 what the math gate measures — world building, sim ticks, determinism — not as a
 tax on editing a sentence.
+
+## 2026-08-06 — GANG CITY IS THE ENGINE (the RPG that would not blow up, the chair nobody could jump over)
+
+Owner: *"In prison mode the RPGs don't blow up… but in Gang City the RPGs blow
+up beautifully. And in Gang City the players and NPCs interact with walls and
+with assets in front of them, like a chair, or something to jump over — they
+interact with that better than prison mode. So prison mode, gun game and natural
+disaster can all use these elements from Gang City. Gang City becomes like this
+engine and this asset farm."*
+
+**BOTH SYMPTOMS WERE ONE LINE, TWICE.** Neither was a missing feature and
+neither needed new geometry, new animation or new damage code:
+
+| symptom | the whole cause |
+|---|---|
+| an RPG in prison/gun game/disaster gives a camera shake and nothing else | `systems/fpsmode.js:2498` — the ENTIRE detonation payload sat inside one `if (CBZ.game.mode === "city")`. Outside it, only `CBZ.shake` + `doHitstop` remained. The prison gun room stocks an **RPG LAUNCHER and a 40 MM LAUNCHER** on the wall (`world/gunroom.js:637-638`), so the owner was taking a live weapon off a rack and firing a dud. |
+| nobody outside the city can vault a chair | `systems/physics.js:624` — `probeTraversal` returns `null` on its first line unless mode is city. The prison's own mess tables and stools **already register exactly the `y0/y1` + `ref` colliders the probe reads** (`world/cafeteria.js:320,342`). Nothing was missing but permission. |
+
+**WHAT IT SAYS ABOUT THE CODEBASE.** `mode === "city"` appears **583 times**.
+Most are honest — they guard a city RECORD (`cityCars`, `city.arena`, the wanted
+ladder, the world-state ledger, the fracture chain) and must stay. A minority
+guard a shared ENGINE verb, and those are bugs wearing the same clothes. The
+repo had already diagnosed this class once and cured it in one domain: the water
+oracle (`waterSharedAudit().cityGated`, pinned 0) — *"not because the effects
+were city-specific but because `cityWaterAt` only ANSWERED for the city."* The
+GPT handoff put it in one sentence: **"a hard-coded mode enum is not the final
+capability contract."** Same disease, two more organs.
+
+**THE BLOCK: `src/systems/modecaps.js`** — `CBZ.modeHas(cap)` replaces the enum
+at capability sites; `CBZ.worldActors()` is the mode's live roster;
+`CBZ.hurtWorldActor()` routes a hit to the funnel the mode ALREADY owns
+(`aiKill` for prison, `gungame.hurt`, `surv.hurt`, `cityKillPed`); and
+`CBZ.blastWorldActors()` couples a blast to that roster. It is a switchboard,
+never a second ledger — which is the line the GPT handoff drew (*"do not call a
+city-only local damage helper from prison and declare parity"*). `MODE_CAPS_V1
+= false` makes `modeHas` itself answer `mode === "city"`, reverting every
+migrated site at once. Six consumers migrated in the same change (Block Law
+rule 3): physics ×3, fpsmode, actorcollide, crashfx, gungame, survivorbot.
+
+**FOUR THINGS FOUND BY READING, NOT BY THE GATE:**
+1. **`CBZ.cityExplosion` is a WRAPPER CHAIN, not a function.** Six files
+   (buildings' structural ledger, bank vault doors, construction walls,
+   wildlife, armored hulls, demolition) hang city couplings on it and they stay
+   installed for the whole session once the city is built. Detonating the chain
+   from the prison yard would run six city couplings against lists describing a
+   different world. Fixed by exporting **`CBZ.cityBlastCore`** — the blast
+   itself, before any wrap. Shared modes use the core; the city keeps the chain.
+2. **Prison actors have no `.pos`.** They ARE their `THREE.Group`. Even with the
+   gate open, `probeTraversal`'s `!actor.pos` guard would have refused every
+   guard and inmate. Fixed by reading `a.pos || a.group.position` inside the
+   traversal — **NOT** by aliasing `.pos` onto the record: `weather.js:763`,
+   `tornado.js:1004` and `combat_iq.js` all use `!a.pos` as their "not a
+   positioned actor" test, so the alias would have silently switched the prison
+   cast onto city-shaped paths.
+3. **`.speed` means different things.** For a city ped it is the live per-frame
+   speed; for a prison inmate it is the BASE walking speed, read back as
+   `CBZ.aiThink(n, dt) || n.speed`. `stepTraversal` writing to it would have
+   permanently re-tuned every inmate to whatever pace it last vaulted at. New
+   `speedField:false` opt.
+4. **`CBZ.npcStepLedge` has ZERO callers** — written city-only in a past wave,
+   never adopted, still labelled SECONDARY in its own header. Migrated so it is
+   not born city-only a third time, and NAMED as prose in its comment. The Block
+   Law's own failure mode, live in the file.
+
+**THE PRISON CAST GOT THE VAULT FROM ONE HOOK.** `city/peds.js` calls the
+traversal from inside its own `move()`, but the prison's movers are five
+separate `group.position.x += …` sites across `entities/npc.js` and
+`entities/guards.js`. `systems/actorcollide.js` already runs over the whole cast
+every frame right after they move, expressly to stop them walking through
+things — so the vault is wired there, and guards + inmates got it with **no edit
+to a single mover**.
+
+**THE BUG THAT COST A PROBE ROUND, and it is the interesting one.** First wiring
+measured heading/speed from pre-clamp to pre-clamp. That reads **~0 for exactly
+the actor this exists for** — a body grinding a table face has its whole step
+eaten by the clamp, so the probe never fired (`starts` delta 0 across 19 props,
+while `probes` climbed to 279). The reference sample has to be taken AFTER the
+clamp, which makes the difference the step the mover TRIED to take. Second bug
+in the same call: `probeTraversal` wants a UNIT heading and refuses `dl < 0.5`,
+so a raw 0.087 m/frame displacement was refused every time.
+
+**MEASURED** (`tools/mode-engine-check.mjs`, new, seed 90210, escape mode, one
+boot, no rendered frames — and it runs BOTH sides, because a probe that passes
+before and after proves nothing):
+
+| question | `MODE_CAPS_V1=1` | `=0` (revert) |
+|---|---|---|
+| waist-high prison colliders the SHARED probe accepts | **3 / 19** (`vault rise=0.85 span=1.24`) | 0 / 19 |
+| the player's own `start()` on a prison prop | **`mantle over 0.95m`** | none |
+| a HUNTING guard, driven by guards.js's OWN mover | **`vault over 0.85m`** | none |
+| RPG blast: of 6 prison cast in the lethal core | **4 dead** (5 reached) | 0 |
+| fireball draws landing in the scene | **+117 children** | — |
+| `modeCapsAudit().unrouted` | **0** | 0 |
+| console errors | 0 | 0 |
+
+3-of-19 is not a miss: the other sixteen are benches jammed against walls whose
+LANDING is blocked, and `landingClear` correctly refuses them. Routes resolved:
+city→`applyBlastDamage`, escape→`aiKill + capture.hurtPlayer`,
+gungame→`gungame.hurt`, survival→`surv.hurtRadius`.
+
+**Ratchet added:** `CBZ.modeCapsAudit().unrouted` — modes declared blast-capable
+whose PEOPLE a detonation cannot reach. It RESOLVES the real funnel rather than
+reading its own table, so a file dropping out of `index.html` or a mode losing
+its damage path pushes it up. **Pinned at 0** in `tools/math-gate.mjs`
+(`MATHGATE: ok`, determinism ok, city untouched).
+
+**STILL OPEN, named rather than quietly left** (each is a real finding from this
+read, deliberately out of scope):
+- `systems/actorcollide.js` clamps the prison cast with `CBZ.collide(pos, r)` —
+  **no `feetY`/`headY`**, so every height-banded collider acts full-height for
+  guards and inmates. City peds pass their span. 45 banded colliders in
+  `src/world/`. Changing it opens paths and needs the owner's eyes, not a number.
+- The city-world half of a blast — glass, the facade carve, the walkable breach
+  — is still `mode === "city"` by design. A prison wall that can be breached is
+  where that gate comes down next.
+- `CBZ.npcStepLedge` still has zero consumers. Un-gating it did not fix that;
+  only a mover calling it will.

@@ -69,6 +69,14 @@ every time. The real rules:
   render path; run before a big deploy or when render code changed),
   `tools/terrain-map-audit.mjs` (deep terrain sweep), `tools/aimlib.js`
   (honest camera aiming from probes),
+  `tools/mode-engine-check.mjs` (ONE ENGINE, EVERY MODE — boots into escape and
+  asks by CONSEQUENCE whether Gang City's engine actually reaches the other
+  modes: does the shared vault probe accept the prison's own mess furniture,
+  does the PLAYER's real `start()` path fire on it, does a HUNTING guard vault
+  off guards.js's own mover, and does an RPG blast actually kill men standing in
+  its lethal core. `--revert` re-runs the whole thing with `MODE_CAPS_V1=0` and
+  asserts the OPPOSITE — the degrade-safe claim proved, not asserted. Copy that
+  two-sided shape: a probe that passes before and after proves nothing),
   `tools/prison-polish-check.mjs` (the PRISON, mode "escape" + gungame: the
   armory's slot-per-weapon and take-it-off-the-wall contract, LOS through an
   OPENED door — the losgrid mover trap — the tight-space first-person rule with

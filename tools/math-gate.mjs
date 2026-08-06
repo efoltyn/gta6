@@ -240,6 +240,24 @@ const PASS = `(() => {
     if (ws.on && !ws.bedWrapped) out.fails.push("WATER ORACLE SHIM: bathymetry pair not wrapped");
     if (ws.cityGated > 0) out.fails.push("CITY-GATED WATER MODULES rose to " + ws.cityGated + " (ratchet 0)");
   } catch (e) { out.fails.push("waterSharedAudit threw: " + (e && e.message)); } }
+  // ---- ONE ENGINE, EVERY MODE (systems/modecaps.js). Same disease the water
+  // oracle above already cured, in two more places: the vault/mantle probe and
+  // the whole RPG detonation payload were welded to mode === city, so the
+  // prison, gun game and the disaster island got a camera shake where the city
+  // got a fireball, and nobody outside the city could get over a chair. The
+  // capability bus replaced the enum. unrouted counts the modes declared
+  // blast-capable whose PEOPLE a detonation cannot actually reach - it resolves
+  // the real damage funnel (aiKill, gungame.hurt, surv.hurtRadius, the city
+  // sweep) rather than trusting the table, so a file dropping out of the load
+  // order or a mode losing its funnel pushes it up. Pinned at 0.
+  if (CBZ.modeCapsAudit) { try { const mc = CBZ.modeCapsAudit();
+    out.modeCaps = "flag=" + mc.flag + " blastModes=" + mc.blastModes +
+      " unrouted=" + mc.unrouted + " orphanCaps=" + mc.orphanCaps;
+    if (mc.unrouted > 0) out.fails.push("BLAST CANNOT REACH " + mc.unrouted + " MODE ROSTER(S) (ratchet 0): " + JSON.stringify(mc.routes));
+    if (mc.orphanCaps > 0) out.fails.push("SHARED CAPABILITY WITH NO OWNING SYSTEM: " + mc.orphanCaps);
+    if (mc.blastModes < 4) out.fails.push("modeCaps: blast-capable modes fell to " + mc.blastModes + " (expect 4)");
+  } catch (e) { out.fails.push("modeCapsAudit threw: " + (e && e.message)); } }
+  else out.fails.push("modeCapsAudit MISSING (systems/modecaps.js not loaded)");
   // ---- volcano block (volcanofx.js): lava is OPAQUE crusted rock, never a
   // translucent box - transparent lava and legacy stream paths pinned at 0.
   if (CBZ.volcanoAudit) { try { const va = CBZ.volcanoAudit();

@@ -7,6 +7,42 @@
 One conversation-long push turned several one-offs into shared grammar.
 Before building anything adjacent, wire into the existing system:
 
+- **Mode capability bus** — `src/systems/modecaps.js`. `CBZ.modeHas("traverse")`
+  replaces `CBZ.game.mode === "city"` at any site guarding a shared ENGINE verb
+  (adopt as `CBZ.modeHas ? CBZ.modeHas(cap) : CBZ.game.mode === "city"`; flag
+  `MODE_CAPS_V1=false` reverts every site at once). Also owns
+  `CBZ.worldActors(out)` — the CURRENT mode's live roster, replacing the
+  hand-written `city ? cityPeds/cityCops : guards/npcs` fan-out —
+  `CBZ.hurtWorldActor(a, dmg, imp)`, which routes a hit to the funnel the mode
+  already owns (`CBZ.aiKill` for prison, `CBZ.gungame.hurt`, `CBZ.surv.hurt`,
+  `cityKillPed`/`cityHurtCop`), and `CBZ.blastWorldActors(x,y,z,R,power,opts)`,
+  the blast coupling `city/crashfx.js`'s `applyBlastDamage` calls for every
+  non-city roster (deliberately a no-op in city, which already sweeps its own).
+  **Keep `mode === "city"` where it guards a city RECORD** — `cityCars`,
+  `city.arena`, the wanted ladder, the world-state ledger, the fracture chain.
+  Ratchet `CBZ.modeCapsAudit().unrouted`, pinned at 0. This is the same disease
+  `CBZ.waterSharedAudit().cityGated` already cured for the water oracle: an
+  effect that was never city-specific, gated to the city because only the city
+  could ANSWER for it.
+- **THE BLAST vs THE BLAST CHAIN** — `CBZ.cityExplosion` is the head of a
+  wrapper chain (buildings' structural ledger, bank vault doors,
+  construction-site walls, wildlife panic, armored hulls, demolition, water
+  impact) that stays installed for the whole session once the city is built.
+  `CBZ.cityBlastCore` (`city/crashfx.js`) is the blast ITSELF — fireball,
+  smoke, shockwave, sound, shake, scorch and the shared damage sweep, none of
+  which reads a city record. Non-city modes detonate through the core; the city
+  keeps the chain. **Wrap `cityExplosion`, never `cityBlastCore`.**
+- **Vault / mantle** — `CBZ.characterTraversal` (`src/systems/physics.js`).
+  `start(actor, rig, dx, dz, opts)` then `step(actor, rig, dt, animate)`, and
+  the caller returns early for the frame the step owns. Reads position through
+  `actor.pos || actor.group.position`, so a prison record (which has NO `.pos`)
+  works unchanged — **do not alias `.pos` onto a prison actor**, several shared
+  systems use `!a.pos` as their "not a positioned actor" test. Pass
+  `speedField:false` when the record's `.speed` is a BASE speed rather than a
+  live one (every prison actor). Callers: the player's jump (physics.js),
+  `city/peds.js`, `systems/actorcollide.js` (guards + inmates, one hook for
+  five movers), `modes/gungame.js`, `entities/survivorbot.js`.
+
 - **The prison's ONE mouth** — `CBZ.prisonSay(actor, line, {rank, secs})`
   (`src/systems/interact.js`). Anything the PRISON simulation wants the
   player to learn — a debt, a threat, a rat naming you to a screw — is a
