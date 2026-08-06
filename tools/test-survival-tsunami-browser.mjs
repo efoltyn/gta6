@@ -168,8 +168,13 @@ try {
 
   // Run through flood/drain until cleanup returns the director to idle.
   const finish = JSON.parse(await evaluate(`JSON.stringify((function(){
+    /* 4800 ticks = 80 simulated seconds. The event is a WAVE TRAIN now
+       (sweep -> flooded -> drawback -> surge2 -> drain, 50 s of active plus
+       its warning), and the old 2400-tick cap ran out mid-drain — which
+       surfaced not as "the guard was too small" but as "the director did not
+       cleanly return idle", three assertions further down. */
     const phases={},A=CBZ.surv.arena;let guard=0;
-    while(CBZ.disasters.state()==="active"&&guard++<2400){const p=CBZ.disasters.tsunamiAudit().phase;phases[p]=(phases[p]||0)+1;CBZ.stepSim(1/60);}
+    while(CBZ.disasters.state()==="active"&&guard++<4800){const p=CBZ.disasters.tsunamiAudit().phase;phases[p]=(phases[p]||0)+1;CBZ.stepSim(1/60);}
     const event=CBZ.waterEventGet();
     return {guard:guard,state:CBZ.disasters.state(),phases:phases,event:event,
       oceanY:A.ocean.position.y,baseline:A.oceanY,surge:CBZ.waterSurge(),
@@ -197,6 +202,10 @@ try {
   if (!(middle.summitDepth < 0)) failures.push("the refuge mountain flooded — high ground must stay dry");
   if (!(middle.uniforms?.time > 0 && middle.uniforms?.amp > 1 && middle.uniforms?.chop > middle.uniforms?.amp)) failures.push("shared water uniforms were not driven into storm state");
   if (!(finish.phases?.flooded > 0 && finish.phases?.drain > 0)) failures.push("event did not traverse flooded and drain phases");
+  // THE WAVE TRAIN. The first wave is frequently not the largest, so the event
+  // must draw the sea back out and bring a second, bigger one in behind it.
+  if (!(finish.phases?.drawback > 0)) failures.push("the sea never drew back between waves");
+  if (!(finish.phases?.surge2 > 0)) failures.push("there was no second wave");
   if (finish.state !== "idle") failures.push(`director did not cleanly return idle (${finish.state})`);
   if (finish.event != null) failures.push("survival water event leaked after cleanup");
   if (Math.abs(finish.oceanY - finish.baseline) > 1e-6) failures.push("arena ocean did not restore its baseline level");

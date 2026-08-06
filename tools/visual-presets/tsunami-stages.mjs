@@ -60,6 +60,20 @@ const beats = [
     shot: { mode: "center", dist: 86, alt: 30, aimY: 5 },
   },
   {
+    id: "drawback",
+    label: "The sea goes out AGAIN — and that is the warning",
+    focus: "The water leaving is the same water that has to come back, so the outflow does not stop at rest — it keeps going, past mean level, and the shelf empties a second time. Survivors describe the sea 'disappearing' between waves. Before-side: there is no such phase; the event is already finished and the sea is flat.",
+    wait: { phase: "drawback", extraSecs: 3.5 },
+    shot: { mode: "center", dist: 150, alt: 40, aimY: 3 },
+  },
+  {
+    id: "wave2",
+    label: "WAVE 2 — the first one is not the largest",
+    focus: "Crests arrive 5-90 minutes apart and the first is frequently not the biggest. This one is 25% taller than wave 1 and it arrives over ground that is already drowned — so there is no beach to break on and no wall to see, just the sea coming back up through the streets. The only warning was the drawback in the frame before this one.",
+    wait: { phase: "surge2", extraSecs: 5 },
+    shot: { mode: "center", dist: 120, alt: 34, aimY: 6 },
+  },
+  {
     id: "undertow",
     label: "The drain — the undertow",
     focus: "The water tearing back out to sea. This is the half that drowns people: the current reverses, and the wreckage the wave carried in is stranded across the streets as it goes.",
@@ -175,7 +189,18 @@ async function stageTsunami(input) {
   // ---- poll to this beat's PHYSICAL moment (never a wall clock) -----------
   let guard = 0;
   if (w.state) while (guard++ < 4000 && CBZ.disasters.state() !== w.state) step(0.1);
-  if (w.phase) { guard = 0; while (guard++ < 4000 && audit().phase !== w.phase) step(0.1); }
+  /* A PHASE THAT NEVER COMES MUST NOT HANG THE RUN. The before-side build has
+     no `drawback` and no `surge2` — that is the point of those beats — so the
+     poll also breaks the moment the tsunami stops being the live disaster.
+     Without this the old build stepped 400 simulated seconds through four
+     unrelated hazards and photographed whichever one it landed in. */
+  if (w.phase) {
+    guard = 0;
+    while (guard++ < 4000 && audit().phase !== w.phase) {
+      if (CBZ.disasters.current() !== "TSUNAMI") break;
+      step(0.1);
+    }
+  }
   /* SHOAL, NOT SECONDS. The bore crosses its open water in under two seconds
      at this pacing, so "2.5 s into the sweep" would photograph the landfall on
      one build and the beach on another. `shoal` is the physical fraction of

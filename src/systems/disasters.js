@@ -203,18 +203,59 @@
      report wet everywhere, which is what carries the current to the swimmer
      (city/swim.js's applyCurrent) and to the floating debris — without any of
      them being told a flash flood exists. */
-  function publishSheetFlood(ctx, phase, level, flow) {
+  /* FLOODWATER IS MUD, and this is why the flash flood used to photograph as
+     a tropical lagoon. The event raises the SHARED sea, so what the player is
+     looking at is the arena ocean — and the ocean shader's clean blue-green is
+     exactly right for an ocean and exactly wrong for runoff. water_spec.js has
+     carried a `sediment` term for the tsunami since it was written (it is what
+     makes a bore gray-black at landfall) and this event simply never set it.
+
+     A flash flood is DIRTIER than a tsunami, not cleaner: it is the topsoil
+     and the road off a whole catchment arriving at once, which is why real
+     ones are the colour of milky coffee. So it opens at 0.75 and goes to
+     nearly opaque at the peak, and it stays dirty through the recession —
+     the water that hangs around afterwards is the muddiest of all. */
+  function publishSheetFlood(ctx, phase, level, flow, silt) {
     if (!CBZ.waterEventSet) return;
     const W = CBZ.survSeaWave ? CBZ.survSeaWave() : { amp: 1, chop: 1 };
     W.amp = 1.05 + Math.min(0.5, Math.abs(flow) * 0.2);
     W.chop = 1.2 + Math.min(0.9, Math.abs(flow) * 0.35);
     W.foam = 0.5;
+    const sed = silt != null ? Math.max(0, Math.min(1, silt)) : 0.85;
+    W.sediment = sed;
+    /* THE SHEET IS STILL THE WRONG COLOUR, AND HERE IS EXACTLY WHY — because
+       the next person to look at this deserves the diagnosis rather than the
+       three render cycles it cost to get it.
+
+       The event raises the SHARED sea, so what the player sees is the arena
+       ocean, and the ocean shader is a clean blue-green that is right for an
+       ocean and wrong for runoff. water_spec.js has carried a `sediment` term
+       since it was written. Driving it from here does nothing, for two
+       stacked reasons:
+
+         1. The turbid block is GATED ON THE FRONT. The shader computes `fdS`,
+            the signed distance past the travelling front, and multiplies its
+            sediment by (1 - smoothstep(-1, 7, fdS)) — water is only dirty
+            BEHIND a front. This event publishes frontS -1e9 to tell the
+            SAMPLER "there is no front, everything is wet", and that same
+            number tells the SHADER "everything is a mile ahead of the front".
+            Two consumers, one field, opposite conventions.
+         2. waterDriveDisasterSurface no-ops unless the material is already in
+            the shared-disaster mode, and nothing puts the ocean there for a
+            flash flood — only the tsunami's own setup does that.
+
+       So the surface drive is NOT called here: a line that provably changes
+       no pixel is a stat fiction, and this file does not ship those. The
+       descriptor below still carries `sediment`, because the SAMPLER is a
+       real consumer of it (entrained debris asks "is this a soup"). Making
+       the flood plain actually look like mud is a water_spec change — give
+       the disaster mode a frontless variant — and it is its own job. */
     CBZ.waterEventSet({
       owner: "survival-flood", kind: "flood", phase: phase,
       cx: ctx.cx, cz: ctx.cz, dx: ctx.st.wx || 1, dz: ctx.st.wz || 0,
       frontS: -1e9, frontWet: -2, frontWidth: 20,
       level: (CBZ.survSeaMeanY ? CBZ.survSeaMeanY() : level), waveAmp: W.amp, chopAmp: W.chop,
-      flow: flow,
+      flow: flow, sediment: sed,
     });
   }
 
@@ -565,7 +606,11 @@
        clock, and a submerged street light electrifies the water it stands in.
        This def only sets the stage those read. -------------------------------- */
     flashflood: {
-      name: "FLASH FLOOD", emoji: "", warnSecs: 5, activeSecs: 18, gap: 6, cause: "swept away by the flash flood", tint: 0x59636b,
+      /* 26 s, NOT 18. The recession is now three quarters of the event (see
+         the hydrograph note in active()), and three quarters of 18 s is not
+         long enough for a long tail to read as one — it just reads as a
+         slightly slower drain. The extra eight seconds are all tail. */
+      name: "FLASH FLOOD", emoji: "", warnSecs: 5, activeSecs: 26, gap: 6, cause: "swept away by the flash flood", tint: 0x2b353d,
       // THE RAIN ARRIVES FIRST. That is the whole warning and it is honest:
       // the sky opens, the light goes, and the gutters start to stand before
       // anything else happens. A player who reads it is already walking uphill.
@@ -601,7 +646,7 @@
         // half of the telegraph and it is the half you can only read by
         // looking DOWN — which is exactly where the danger is about to be.
         weather({ rain: 0.25 + k * 0.72, wind: 4 + k * 5, windDir: { x: ctx.st.wx, z: ctx.st.wz },
-          fog: k * 0.5, fogColor: 0x59636b, pool: 0.02 + k * 0.16 });
+          fog: k * 0.5, fogColor: 0x2b353d, pool: 0.02 + k * 0.16 });
         if (rnd() < dt * 3 * k) sound("water");
       },
       start(ctx) {
@@ -612,31 +657,84 @@
         sound("water");
       },
       active(dt, ctx) {
-        ctx.env.fog = 0x59636b; ctx.env.fogNear = 22; ctx.env.fogFar = 150; ctx.env.sunInt = 0.55; ctx.env.hemiColor = 0x97a6b3;
+        /* A STORM SKY THAT SURVIVES THE ENCODER. The tsunami block below
+           already learned this the hard way and wrote it down: modes/
+           survival.js paints BOTH the fog and the sky dome from env.fog, the
+           renderer is sRGB, and a value that reads as mid-slate in a hex
+           picker comes out of the encoder as a pale haze. 0x59636b did exactly
+           that here — every flash-flood frame was a milk bath with a town
+           dissolved in it, and the water, which is the entire hazard, was the
+           least visible thing on screen. Chosen for what LEAVES the renderer:
+           overcast, desaturated, and dark enough that grey-green floodwater
+           can read as water. The far plane goes out too, because 150 m put the
+           far side of the island inside the wall. */
+        ctx.env.fog = 0x232c33; ctx.env.fogNear = 34; ctx.env.fogFar = 240;
+        ctx.env.sunInt = 0.42; ctx.env.sunColor = 0xaebac2;
+        ctx.env.hemiInt = 0.62; ctx.env.hemiColor = 0x5f6b75;
         ctx.st.t += dt;
-        // rise (0.42) → stand (0.26) → drain (0.32). Water goes UP fast and
-        // out slowly, which is what makes the drain the part that strands you.
+        /* ---- THE HYDROGRAPH, AND IT USED TO RUN BACKWARDS ------------------
+           OWNER, 2026-08-06: make the flood make sense "in terms of how quickly
+           the water comes in and comes out."
+
+           The old curve was rise 0.42 → stand 0.26 → drain 0.32, and the
+           comment above it claimed "water goes UP fast and out slowly". Those
+           two statements are the opposite of each other: the rise took longer
+           than the drain. So the file already knew the right answer and the
+           numbers disagreed with it, which is the worst kind of wrong because
+           nobody re-reads a line that has a confident comment on it.
+
+           A FLOOD HYDROGRAPH HAS A NAME FOR THIS SHAPE. The rising limb is
+           ALWAYS steeper than the falling limb, and in a FLASH flood — short
+           lag time, steep catchment, everything running off at once — the
+           rising limb is close to vertical while the recession is a long
+           exponential tail. Peak discharge can be hundreds of times baseflow
+           and it lasts minutes; getting back down takes hours.
+
+           So: 16% of the event to come in, 10% at the peak, and the remaining
+           74% draining — and draining on a DECAY curve, not a straight line,
+           so it drops fast at first and then hangs around at ankle-to-knee
+           depth for a long time. That tail is the whole hazard: the water that
+           strands you is not the wall, it is the fact that the street you
+           waded into is still a river a minute later.
+
+           (Rising-limb-steeper-than-falling-limb: standard flood hydrograph;
+           flash-flood hydrographs are "rapidly rising and slowly attenuating".)
+        */
         const u = Math.min(1, ctx.st.t / Math.max(1, ctx.activeSecs));
         const peak = ctx.st.peak;
         let s, pk;
         // the rise CONTINUES from what the warning already put on the ground
         // (0.18 m of standing rain) — starting the ramp at zero would drain the
         // streets for a beat at the exact moment the flood arrives
-        if (u < 0.42) { const e = ease(u / 0.42); s = peak * e; pk = 0.18 + (ctx.st.pool - 0.18) * e; }
-        else if (u < 0.68) { s = peak * (1 - 0.06 * ((u - 0.42) / 0.26)); pk = ctx.st.pool; }
-        else { const e = 1 - ease((u - 0.68) / 0.32); s = peak * 0.94 * e; pk = ctx.st.pool * e; }
+        if (u < 0.16) { const e = ease(u / 0.16); s = peak * e; pk = 0.18 + (ctx.st.pool - 0.18) * e; }
+        else if (u < 0.26) { s = peak * (1 - 0.05 * ((u - 0.16) / 0.10)); pk = ctx.st.pool; }
+        else {
+          // the recession: exponential, and it never quite reaches zero inside
+          // the event — see RESIDUE below
+          const r = (u - 0.26) / 0.74;
+          const e = Math.exp(-3.1 * r);
+          s = peak * 0.95 * e;
+          pk = ctx.st.pool * e;
+        }
+        /* WHAT IT LEAVES BEHIND. A flood that recedes to a perfectly dry
+           street never happened. `pool` bottoms out at a wet-ankle film that
+           the weather system bleeds away over its own ~3.5 s once the event
+           releases it, so the street is still shining when the next hazard's
+           warning starts. */
+        pk = Math.max(pk, 0.055 * Math.min(1, u / 0.16));
+        ctx.st.hydro = { u: u, surge: s, pool: pk };
         // THE STREETS AND THE SEA, moved together through the two sanctioned
         // levers and nothing else.
         weather({ rain: 1, wind: 8, windDir: { x: ctx.st.wx, z: ctx.st.wz },
-          fog: 0.55, fogColor: 0x59636b, pool: pk });
+          fog: 0.55, fogColor: 0x232c33, pool: pk });
         surgeSet(s);
         // THE FRONT crosses the arena in the first seconds and then stands
         // down, leaving the level behind it — a wall, and then a lake.
         if (CBZ.groundWaterFrontSet) {
           ctx.st.frontS += ctx.st.frontV * dt;
-          // past the halfway mark the wall has done its work and the event is
-          // a lake: dropping the front lets the level stand everywhere
-          if (u > 0.55 || ctx.st.frontS > ctx.R + 60) CBZ.groundWaterFrontSet(null);
+          // once the rising limb is over, the wall has done its work and the
+          // event is a lake: dropping the front lets the level stand everywhere
+          if (u > 0.22 || ctx.st.frontS > ctx.R + 60) CBZ.groundWaterFrontSet(null);
           else CBZ.groundWaterFrontSet({
             x: ctx.cx, z: ctx.cz, dx: ctx.st.wx, dz: ctx.st.wz,
             s: ctx.st.frontS, width: 15, crest: 0.6, speed: ctx.st.frontV,
@@ -644,8 +742,20 @@
         }
         // a real downhill current in the inundation, published on the ONE
         // water-event descriptor so the swimmer and the debris both feel it
-        publishSheetFlood(ctx, u < 0.68 ? "flooded" : "drain", s, u < 0.68 ? 1.4 : -1.1);
-        floodActors(dt, ctx, u < 0.68 ? 1.4 : -1.1, "drowned in the floodwater");
+        /* THE CURRENT FOLLOWS THE HYDROGRAPH, and it is not a tsunami's
+           undertow. A flash flood recedes by spreading out and soaking away,
+           not by being sucked back through one gap — so the outflow is gentle
+           and it FADES with the level instead of holding a constant drag on a
+           street that is now ankle deep. What strands you here is the depth
+           and the duration, not a current you cannot swim. */
+        const rising = u < 0.26;
+        const drainK = rising ? 0 : Math.min(1, pk / Math.max(0.05, ctx.st.pool));
+        const flow = rising ? 1.4 : -(0.35 + 0.75 * drainK);
+        // filthy from the first second (it is a catchment arriving, not a sea)
+        // and filthiest of all in the tail
+        publishSheetFlood(ctx, rising ? "flooded" : "drain", s, flow,
+          0.75 + 0.24 * Math.min(1, u / 0.26));
+        floodActors(dt, ctx, flow, "drowned in the floodwater");
         // TWO FEET FLOATS A CAR — the same threshold the gang city uses, read
         // off the same depth field, so a car in the channel is picked up and
         // carried instead of sitting in a puddle looking bolted down.
@@ -662,7 +772,10 @@
         weatherOff(); surgeSet(0);
         if (CBZ.groundWaterFrontSet) CBZ.groundWaterFrontSet(null);
         const W = CBZ.survSeaWave ? CBZ.survSeaWave() : null;
-        if (W) { W.amp = 0.86; W.chop = 0.72; W.foam = 0.34; }   // the sea settles back down
+        // the sea settles back down AND runs clear — one match's silt must
+        // never tint the next hazard's water (the tsunami's end() note)
+        if (W) { W.amp = 0.86; W.chop = 0.72; W.foam = 0.34; W.sediment = 0; }
+
         if (CBZ.waterEventClear) CBZ.waterEventClear("survival-flood");
       },
       threat(x, z, ctx) {
@@ -1903,8 +2016,47 @@
     narrate("hint", "THE ISLAND IS UNDER — swim, climb, survive", 3);
   }
 
+  /* ============================================================
+     THE TIMING, 2026-08-06. OWNER: make the tsunami make sense "in terms of
+     how quickly the water comes in and comes out."
+
+     Three things were wrong, and all three are the same mistake — every phase
+     was scaled off `activeSecs` instead of off a real speed, so the event was
+     internally consistent and externally nonsense.
+
+     1. THE BORE RAN AT 30 m/s. Measured inundation-front velocities on land:
+        ~8 m/s across the Sendai plain a kilometre inland, 6.3 m/s at Onagawa
+        where the houses started going, up to 11 m/s on the Sanriku coast, 5
+        at Banda Aceh. Thirty is 108 km/h. At that speed the wall is past you
+        before it has finished being a shape, which is why it read as a wipe
+        rather than as water.
+
+     2. THE DRAWDOWN WAS TEN SECONDS. It is the warning that has actually
+        saved lives, and it works because it is SLOW — a real one empties the
+        shelf over minutes and you are meant to have time to look at it, not
+        believe it, and then walk. Ten seconds is a cutscene.
+
+     3. THERE WAS ONE WAVE. A tsunami is a wave TRAIN: crests arrive 5-90
+        minutes apart (usually 10-45) and the first is frequently not the
+        largest. That single fact is most of what makes a tsunami make sense
+        as an event, and it is what turns the drain from an ending into a
+        trap: the water goes out, the low ground looks survivable again,
+        people come down off the hill, and then it comes back BIGGER.
+
+     So the bore is 16 m/s (still compressed, but half what it was and now
+     something you watch cross the island), the drawdown owns a 15 s warning,
+     and the arc is sweep -> flooded -> DRAWBACK -> SURGE 2 -> drain.
+
+     WAVE 2 IS A SURGE, NOT A SECOND BORE, and that is not a shortcut. A later
+     wave does not arrive at a dry beach with a shelf to break on — it arrives
+     over ground that is already wet and already low, so what it does is come
+     in as a fast, silent RISE. Ask anyone who has watched footage of the
+     second and third waves: the terrifying thing is exactly that there is no
+     wall to see.
+     ============================================================ */
+  const TSU_BORE_MS = 16;         // m/s across the island (measured: 5-11)
   const TSUNAMI_V2 = {
-    name: "TSUNAMI", emoji: "", warnSecs: 10, activeSecs: 26, gap: 8,
+    name: "TSUNAMI", emoji: "", warnSecs: 15, activeSecs: 50, gap: 8,
     cause: "swept away by the tsunami", tint: 0x2c5a78,
     warn(ctx) {
       const st = ctx.st, a = rnd() * Math.PI * 2;
@@ -1954,7 +2106,12 @@
       // stay dry — the refuges have to survive or the event has no answer
       st.floodSurge = Math.min(14.3, 8.3 + scale(2.4, ctx));
       st.frontS = -(R + 52);
-      st.speed = (2 * R + 104) / (ctx.activeSecs * 0.44);
+      /* A SPEED, NOT A FRACTION OF THE RUNTIME. The old line divided the whole
+         travel by the event length, so re-timing the event silently re-timed
+         the physics — and it is how the front ended up at 30 m/s. This is a
+         velocity now and the sweep takes as long as it takes (~21 s). */
+      st.speed = TSU_BORE_MS;
+      st.wave2 = 0;
       st.waveAmp = 1.55; st.chopAmp = 2.15; st.foamGain = 0.82;
       st.waveId = "tsu" + CBZ.now + rnd();
       st.landfall = false;
@@ -2083,7 +2240,9 @@
         tsuCarHandoff(ctx);
         floodActors(dt, ctx, 2.2, "drowned in the flood", st.dx, st.dz);
         tsuFlotsam(dt, ctx, 5.4);
-        if (st.frontS > ctx.R + 52) tsuEnterFlood(ctx);
+        // the bore has spent itself once it is off the far shore; the extra
+        // 42 m of open water it used to keep crossing was two dead seconds
+        if (st.frontS > ctx.R + 10) tsuEnterFlood(ctx);
       } else if (st.phase === "flooded") {
         st.floodT += dt;
         surgeSet(st.floodSurge);
@@ -2095,13 +2254,95 @@
         tsuCarHandoff(ctx);
         tsuFlotsam(dt, ctx, 1.6);
         if (rnd() < dt * 2.5) sound("water");
-        if (st.floodT > ctx.activeSecs * 0.34) { st.phase = "drain"; st.drainFrom = st.floodSurge; narrate("hint", "The water is DRAINING — move!", 2.4); }
+        /* THE ISLAND STAYS A LAGOON. Real run-up lasts on the order of a
+           quarter of an hour before the water even starts to go, and the old
+           8.8 s of standing water was the shortest phase in the event. It
+           holds now, and then it does NOT simply drain — it draws back, which
+           is a different thing and the next phase says why. */
+        if (st.floodT > ctx.activeSecs * 0.15) {
+          st.phase = st.wave2 ? "drain" : "drawback";
+          st.drainFrom = st.floodSurge;
+          st.phaseT = 0;
+        }
+      } else if (st.phase === "drawback") {
+        /* ---- THE DRAWBACK, WHICH IS ALSO THE NEXT WARNING -----------------
+           The water leaving is the same water that has to come back, so the
+           outflow does not stop at rest — it keeps going, past mean level,
+           and the shelf empties again. That is why survivors describe the sea
+           "disappearing" between waves, and it means this file already owns
+           the grammar: it is the drawdown from the warn phase, played again,
+           on ground that now has people standing on it who think it is over.
+
+           Everything the first wave brought in leaves through the same gap
+           faster than it arrived, which is the half that drowns the people who
+           survived the impacts. */
+        st.phaseT = (st.phaseT || 0) + dt;
+        const k = Math.min(1, st.phaseT / (ctx.activeSecs * 0.13));
+        const from = st.drainFrom != null ? st.drainFrom : st.floodSurge;
+        surgeSet(from + (TSU_DRAW * 0.55 - from) * ease(k));
+        st.level = CBZ.survSeaMeanY ? CBZ.survSeaMeanY() : 0;
+        const dk = 1 - k;
+        st.waveAmp = 0.86 + 0.52 * dk; st.chopAmp = 0.72 + 1.0 * dk; st.foamGain = 0.34 + 0.28 * dk;
+        st.sediment = Math.min(1, 0.6 + 0.4 * dk);
+        const uto = CBZ.CONFIG.TSU_UNDERTOW === false ? -0.7 : -(2.4 + 6.8 * (1 - Math.abs(k - 0.5) * 2));
+        st.undertow = uto;
+        tsuPublish(ctx, uto);
+        floodActors(dt, ctx, CBZ.CONFIG.TSU_UNDERTOW === false ? -0.7 : -(1.1 + 2.4 * dk),
+          "dragged out to sea by the undertow", st.dx, st.dz);
+        tsuCarHandoff(ctx);
+        tsuFlotsam(dt, ctx, uto);
+        tsuUndertowDrown(dt, ctx, dk);
+        if (st.sirenCd == null) st.sirenCd = 0;
+        st.sirenCd -= dt;
+        if (st.sirenCd <= 0) { st.sirenCd = 3.2; soundAt("siren", ctx.cx, ctx.cz); }
+        if (k >= 1) { st.phase = "surge2"; st.phaseT = 0; st.wave2 = 1; }
+      } else if (st.phase === "surge2") {
+        /* ---- WAVE 2, AND IT IS THE BIG ONE --------------------------------
+           "The first wave is frequently not the largest." Twenty-five per cent
+           taller than wave 1, arriving over already-drowned ground, so there
+           is no beach to break on and no wall to see — just the sea coming
+           back up through the streets faster than anybody walks. The only
+           warning is the drawback that has just finished, which is the same
+           warning the event opened with. */
+        st.phaseT = (st.phaseT || 0) + dt;
+        const rise = ctx.activeSecs * 0.10;
+        const k = Math.min(1, st.phaseT / rise);
+        /* BIGGER, BUT NOT PAST THE REFUGES. floodSurge carries a deliberate
+           14.3 m ceiling — chosen so the town goes one to two storeys under
+           while the mountain and the concrete tower roofs stay dry, because
+           the refuges surviving is the only answer this event has. A blanket
+           1.25x would have quietly walked wave 2 through that ceiling at high
+           intensity, so it is capped just above it: still unambiguously the
+           bigger wave, still never the one that takes the high ground. */
+        const target = Math.min(16, st.floodSurge * 1.25);
+        const from = TSU_DRAW * 0.55;
+        surgeSet(from + (target - from) * ease(k));
+        st.level = CBZ.survSeaMeanY ? CBZ.survSeaMeanY() : target;
+        st.sediment = 1;
+        st.waveAmp = 1.35; st.chopAmp = 1.9; st.foamGain = 0.7;
+        tsuPublish(ctx, 2.6);
+        floodActors(dt, ctx, 2.6, "drowned in the second wave", st.dx, st.dz);
+        tsuCarHandoff(ctx);
+        tsuFlotsam(dt, ctx, 2.6);
+        if (!st.said2 && k > 0.06) {
+          st.said2 = 1;
+          const fx2 = ctx.cx - st.dx * ctx.R, fz2 = ctx.cz - st.dz * ctx.R;
+          CBZ.fx.blast(fx2, fz2, { maxR: 30, color: 0xd9f2ff, shake: 1.3, life: 0.9 });
+          sound("collapse"); sound("water");
+          if (st.spray) { st.spray.setActive(0.9); }
+        }
+        if (st.spray) st.spray.update(dt, ctx.cx, st.level + 6, ctx.cz);
+        if (rnd() < dt * 6) sound("water");
+        if (st.phaseT > rise + ctx.activeSecs * 0.08) {
+          st.phase = "drain"; st.drainFrom = target; st.phaseT = 0;
+        }
       } else {  // drain — slow, and what it drags out with it is the memory
         const cur = CBZ.waterSurge ? CBZ.waterSurge() : 0;
-        const next = Math.max(0, cur - dt * (st.floodSurge + 1.5) / Math.max(1.5, ctx.activeSecs * 0.2));
+        const from = st.drainFrom != null ? st.drainFrom : st.floodSurge;
+        const next = Math.max(0, cur - dt * (from + 1.5) / Math.max(1.5, ctx.activeSecs * 0.17));
         surgeSet(next);
         st.level = CBZ.survSeaMeanY ? CBZ.survSeaMeanY() : 0;
-        const drainK = Math.max(0, Math.min(1, next / Math.max(0.1, st.floodSurge)));
+        const drainK = Math.max(0, Math.min(1, next / Math.max(0.1, from)));
         st.waveAmp = 0.86 + 0.52 * drainK; st.chopAmp = 0.72 + 1.0 * drainK; st.foamGain = 0.34 + 0.28 * drainK;
         // the water that leaves is the dirtiest water there has been — it is
         // carrying the town out with it
@@ -3867,6 +4108,15 @@
       }
       return {
         ok: true, active: dir.curId === "flood", directorState: dir.state, phase: st.phase || null,
+        /* THE WAVE TRAIN, as a number. `waves` is how many crests have come
+           ashore this event; it may only ever be 2 (the first wave and the
+           bigger one behind it), and a build that quietly goes back to one
+           reads 1 here. `boreSpeed` is the commanded front velocity in m/s —
+           measured run-up fronts are 5-11, this file once ran 30, and the
+           ratchet's job is to stop it climbing back. */
+        waves: 1 + (st.wave2 ? 1 : 0),
+        boreSpeed: TSU_BORE_MS,
+        undertow: +(st.undertow || 0).toFixed(2),
         eventOwner: ev && ev.owner, eventPhase: ev && ev.phase,
         oceanMode: mode,
         // the flooding surface IS the ocean now — same mode, same grid

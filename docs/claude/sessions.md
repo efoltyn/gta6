@@ -2793,3 +2793,97 @@ MEASURED: `MATHGATE: ok` · `VOLCANO: ok (20 assertions)` · bot attrition over 
 full eruption A/B'd against pre-change HEAD (2 alive at t+28 both sides — the
 widened pyroclastic lane and the softened lava cancel out; the volcano is no
 more or less lethal than it was).
+
+## 2026-08-06 — THE WATER, TIMED AGAINST REAL WATER (solo)
+
+OWNER: *"make the tsunami make sense and also the flash flood make sense, in
+terms of how quickly the water comes in and comes out."*
+
+Both events were wrong in the same way, and it is a way worth naming because
+it does not look like a bug: **every phase was scaled off the event's own
+runtime instead of off a real speed.** That makes an event internally
+consistent — nothing can disagree with anything — and externally nonsense,
+and it hides because the code reads as tidy.
+
+### TSUNAMI
+
+| | measured | was | now |
+|---|---|---|---|
+| inundation front on land | 6–11 m/s (Sendai 8, Onagawa 6.3, Sanriku 11) | **30 m/s** | **16** |
+| drawdown warning | minutes | 10 s | 15 s |
+| waves | 5–90 min apart, first often not largest | **1** | **2** |
+
+`st.speed = (2R + 104) / (activeSecs * 0.44)` is how a front ends up at 108
+km/h: it is not a velocity at all, it is a fraction of the runtime, so
+re-timing the event silently re-times the physics. It is `TSU_BORE_MS` now.
+
+The arc is **sweep → flooded → drawback → surge2 → drain** (46 s). The new
+middle two are the whole point:
+
+- **DRAWBACK.** The water leaving is the same water that has to come back, so
+  the outflow does not stop at rest — it keeps going, past mean level, and the
+  shelf empties again. This file already owned that grammar: it is the warn
+  phase's drawdown, played a second time, on ground that now has people
+  standing on it who think it is over.
+- **SURGE 2**, capped just above wave 1's deliberate 14.3 m ceiling so it is
+  unambiguously bigger and still never takes the refuges (measured 9/9 towers
+  standing at its peak). It is a SURGE and not a second bore, which is not a
+  shortcut: a later wave arrives over ground that is already wet and already
+  low, so there is no beach to break on and no wall to see.
+
+### FLASH FLOOD — the comment was right and the code was not
+
+The curve was rise 0.42 → stand 0.26 → drain 0.32, under a comment reading
+*"Water goes UP fast and out slowly."* Those two statements are the opposite
+of each other and the numbers won: **the rise took longer than the drain.**
+
+**A flood hydrograph's rising limb is always steeper than its falling limb**,
+and a flash flood is the extreme case — near-vertical rise, then a long
+exponential recession. Now 0.16 rise / 0.10 peak / 0.74 tail on an
+`exp(-3.1r)` decay, over 26 s instead of 18 so the tail has room to read as
+one. Measured street depth: 0.31 → 1.90 m in four seconds, then twenty-two
+seconds coming down, and it never reaches zero — the pool bottoms out at a
+film, because a flood that recedes to a dry street never happened.
+
+**THE LESSON IS NOT THE CURVE, IT IS THE COMMENT.** Nobody re-reads a line
+that has a confident explanation sitting on top of it. When a comment and its
+code disagree, the comment is the thing that keeps anybody from noticing.
+
+### ALSO FIXED, AND ONE THING DELIBERATELY NOT
+
+- The flash flood's sky was `0x59636b` — mid-slate in a hex picker, a pale
+  haze out of the sRGB encoder. Every flood frame was a milk bath with a town
+  dissolved in it. **The tsunami block twenty lines below had already
+  documented this exact trap and fixed it for itself**, which is the second
+  time in one session that a file knew the answer in one place and not in the
+  one next to it.
+- **NOT fixed, diagnosed in place:** the floodwater is still tropical blue
+  rather than mud. Driving `sediment` from the flood changes no pixel, for two
+  stacked reasons — water_spec's turbid block is gated on a travelling front
+  this event deliberately has none of (frontS −1e9 means "everywhere is wet"
+  to the sampler and "everywhere is a mile ahead of the front" to the shader,
+  one field, two opposite conventions), and `waterDriveDisasterSurface` no-ops
+  unless the material is already in the shared-disaster mode, which only the
+  tsunami sets up. The dead call is REMOVED rather than left in looking
+  plausible; the diagnosis is in the file. It is a water_spec job.
+
+### RATCHETS
+
+New tool: **`tools/water-check.mjs`** — 13 assertions, ~4 min. It samples the
+water level once per simulated second across both hazards and asserts on the
+SHAPE of the curve, not on any single value: rising limb steeper than falling,
+recession decays rather than ramps, the sea draws back below rest between
+waves, the second wave is the bigger one, the bore is under 20 m/s. A future
+edit that flattens either arc fails out loud.
+
+`tsunamiAudit()` gains `waves` (pinned at 2), `boreSpeed`, `undertow`. The
+existing browser regression now asserts the `drawback` and `surge2` phases and
+its tick guard went 2400 → 4800, because the old cap ran out mid-drain and
+surfaced as "the director did not cleanly return idle" three assertions later.
+
+New preset `tools/visual-presets/flashflood-stages.mjs` and two new tsunami
+beats. Both storyboards poll to a PHYSICAL threshold (a depth, a phase) rather
+than to a wall clock, which is the only honest way to photograph two builds
+whose curves are different shapes.
+
+MEASURED: `MATHGATE: ok` · `WATER: ok (13 assertions)`.
