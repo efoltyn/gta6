@@ -24,6 +24,26 @@
    (`root()` / `rawFloor()` / `eachActor()`). The survival roster and the city
    both call the same function and get the same hole.
 
+   THE HOLE IS CUT, NOT SUGGESTED
+   ------------------------------
+   OWNER, 2026-08-06: "Sinkhole is a fucking ring right now. It's not a hole.
+   You can't fall in it." Both halves were true and they had ONE cause. The
+   shaft's geometry was always built — sheer walls, strata, stair, rubble — but
+   the SURFACE over it was only asked to stop drawing, via a `discard` injected
+   into whatever material a downward raycast happened to land on. When that
+   injection missed (a stale matrixWorld on a subtree core/matrixskip.js had
+   frozen while hidden, a material with no anchor to patch), the island disc
+   kept drawing across the mouth and the only thing left above ground was the
+   shaft's own lip collar: a ring on the grass, with a 50 m shaft invisible
+   underneath it, which is also why nobody ever chose to walk into one.
+
+   The ground is now CUT AS GEOMETRY (see THE CUT below). Every flat ground
+   sheet in this world is authored from a THREE primitive, so its outline is
+   recoverable exactly, and `ShapeGeometry` re-triangulates it with a real
+   `Path` hole per live shaft. There is no raycast to miss and no shader to
+   fail to recompile — the triangles are gone. The discard survives as a
+   second layer for the one sheet with no recoverable outline: the sea.
+
    THE FLOOR IS THE WHOLE INTEGRATION, AND IT IS ONE FUNCTION
    ---------------------------------------------------------
    Nothing in this game is told a shaft exists. `CBZ.survHoles` was already the
@@ -112,7 +132,7 @@
   const live = [];
   const chunks = [];          // falling rim/entrained debris (our own integrator)
   const seqs = [];            // running collapse sequences
-  const stats = { falls: 0, crushed: 0, buried: 0, voidSaves: 0, siteRejects: 0, cut: 0 };
+  const stats = { falls: 0, crushed: 0, buried: 0, voidSaves: 0, siteRejects: 0, cut: 0, groundCuts: 0, swallowed: 0 };
 
   // ---- host seams: the only three things a shaft needs from its world ----
   function survMode() { return CBZ.game && CBZ.game.mode === "survival" && CBZ.surv && CBZ.surv.arena; }
@@ -158,29 +178,43 @@
   function hs(h, a, b) { return CBZ.hash01 ? CBZ.hash01(h.seed + a * 13.7, b * 7.3, 91) : rnd(); }
 
   /* ============================================================
-     THE GROUND OVER A HOLE IS NOT DRAWN
+     THE GROUND OVER A HOLE IS CUT AWAY — GEOMETRY FIRST, SHADER SECOND
 
-     This is the difference between a hole and a picture of a hole, and the
-     old shaft never solved it: the island is ONE `CircleGeometry(R, 64)` disc
-     and the city is a plate, so a shaft cut beneath either was completely
-     hidden by the very surface it had removed — which is why the legacy
-     version had to paint a dark ring on the grass to suggest an opening it
-     could not show. You cannot re-topologise a 64-triangle disc to punch a
-     20 m hole in it, and you should not have to: the ground does not need new
-     geometry, it needs to STOP BEING DRAWN inside the mouth.
+     This is the difference between a hole and a picture of a hole, and it is
+     the fault the owner reported in one word: "it's a ring." The island is
+     ONE `CircleGeometry(R, 64)` disc and the city is a plate, so a shaft cut
+     beneath either is completely hidden by the very surface it removed. All
+     that is left above ground is the shaft's own lip collar lying on the
+     grass — a RING. Not a hole. Nothing to fall into that you can see.
 
-     So every material standing between the sky and the shaft floor (found by
-     ONE downward raycast, which is what "standing between" means) gets a
-     four-slot discard injected into its fragment shader. Consequences that
-     fall out for free and would each have been their own bug otherwise: the
-     road paint over a city junction goes with the road, and on the island the
-     OCEAN PLANE goes too — it sits at y=-0.8 across the whole island, so a
-     46 m shaft looked up at blue water and down into it saw the sea, and both
-     are fixed by the same four numbers.
+     The first fix for that was a four-slot `discard` injected into whatever
+     material a downward raycast happened to find. That is a real technique
+     and it is kept below, but it can NEVER be the primary: it depends on
+     finding the right mesh (a raycast against a possibly-stale matrixWorld),
+     on the material having a shader anchor we recognise, and on r128 agreeing
+     to recompile a program it has already cached. Three ways to silently do
+     nothing, and a hole that silently does nothing is a ring.
 
-     Degrade-safe by construction: if a material's shader has no anchor we
-     recognise (a custom ShaderMaterial that is not the disaster water), it is
-     left alone and the only cost is that one surface still draws over the hole.
+     So the ground is now CUT, as geometry, and the cut is the thing you can
+     stand at the edge of. Every flat ground sheet in this game is authored
+     from a THREE primitive with `parameters` — CircleGeometry (the island
+     disc, the beach), PlaneGeometry (roads, lane paint, lot pads, the city
+     plate), RingGeometry (aprons) — so its OUTLINE is recoverable exactly.
+     Rebuild that outline as a `THREE.Shape`, push one `Path` hole per live
+     shaft, and `ShapeGeometry` re-triangulates the sheet with a real opening
+     in it. No raycast, no shader, no cache key: the triangles are gone.
+
+     The originals are kept (`rec.base`) and every re-cut starts from them, so
+     a growing sinkhole re-punches a bigger hole in the ORIGINAL disc instead
+     of eating its own cut, and disposing the last shaft restores the ground
+     byte-for-byte.
+
+     The shader discard stays as the SECOND layer, for the sheets that have no
+     recoverable outline — chiefly the disaster ocean, a custom displaced
+     BufferGeometry that sits across the whole island at sea level and would
+     otherwise let a 46 m shaft look up at blue water. Degrade-safe by
+     construction: a material we can neither cut nor patch simply keeps
+     drawing, and it is the only surface that does.
      ============================================================ */
   const SHAFT_SLOTS = 4;
   const shaftV = [];
@@ -190,11 +224,10 @@
   function syncMask() {
     for (let i = 0; i < SHAFT_SLOTS; i++) {
       const h = live[i];
-      // the discard radius is the WALL's outer radius, not the removed-floor
-      // radius: between the two lies the sliver of ground the wall stands
-      // behind, and on the island that sliver is where the SEA was showing
-      // through as a blue crescent at the rim.
-      if (h) shaftV[i].set(h.x, h.z, h.r * 1.06, h.bottom);
+      // the discard radius is the CUT radius — the same number the geometry
+      // cut uses, so a sheet that is masked and a sheet that is cut end at
+      // exactly the same circle and the lip collar covers both seams.
+      if (h) shaftV[i].set(h.x, h.z, h.cutR, h.bottom);
       else shaftV[i].set(0, 0, 0, 0);
     }
   }
@@ -228,47 +261,304 @@
       mat.needsUpdate = true;
     } catch (e) { /* a material we cannot patch simply keeps drawing */ }
   }
-  // ONE raycast per site: everything the sky can see through is what has to
-  // stop being drawn. Repeat sites (the growth phase re-cuts the shaft several
-  // times) are skipped — the materials are already masked and the uniform is
-  // what moves.
+  /* ---- THE CUT ------------------------------------------------------------
+     `cutSheets` is every flat ground mesh any live shaft passes through, each
+     paired with the geometry it was BUILT with. Every re-cut re-triangulates
+     from that original, so growth widens the hole in the disc instead of
+     nibbling its own previous cut, and the last dispose puts the ground back
+     exactly as the arena authored it. */
+  const cutSheets = [];
+  const TMPV = new THREE.Vector3();
+  const TMPB = new THREE.Box3();
+
+  // The outline of a sheet, in the geometry's own authoring plane. Circles,
+  // rings and planes cover every ground surface in this world; anything else
+  // returns null and falls through to the shader mask.
+  function outlineShape(geo) {
+    const p = geo && geo.parameters;
+    if (!p) return null;
+    if (geo.type === "CircleGeometry" && p.radius > 0) {
+      const s = new THREE.Shape(); s.absarc(0, 0, p.radius, 0, TAU, false); return s;
+    }
+    if (geo.type === "RingGeometry" && p.outerRadius > 0) {
+      const s = new THREE.Shape(); s.absarc(0, 0, p.outerRadius, 0, TAU, false);
+      if (p.innerRadius > 0.01) { const hp = new THREE.Path(); hp.absarc(0, 0, p.innerRadius, 0, TAU, true); s.holes.push(hp); }
+      return s;
+    }
+    if (geo.type === "PlaneGeometry" && p.width > 0 && p.height > 0) {
+      const w = p.width / 2, d = p.height / 2;
+      const s = new THREE.Shape();
+      s.moveTo(-w, -d); s.lineTo(w, -d); s.lineTo(w, d); s.lineTo(-w, d); s.lineTo(-w, -d);
+      return s;
+    }
+    return null;
+  }
+  /* A HOLE WIDER THAN THE SHEET IT IS IN.
+
+     `ShapeGeometry` is exact and beautiful and it has one hard requirement:
+     the hole path must lie STRICTLY INSIDE the outer contour. Earcut bridges
+     each hole to the outline with a seam, and if the hole crosses the outline
+     that seam is self-intersecting — the triangulator does not error, it
+     returns a plausible-looking mesh with the sheet still spanning the void.
+     Which is exactly what a road is: a 6 m strip crossed by a 26 m mouth. The
+     island disc satisfies the requirement and gets the exact path; a road
+     never can, and got tarmac drawn over the sinkhole.
+
+     So a strip is re-tessellated instead: a grid of cells over its own
+     rectangle, and every cell the mouth reaches is simply not emitted. The
+     edge that leaves behind is ragged to within one cell, and that is fine by
+     construction — the lip collar is opaque from the torn rim `r` out to
+     `cutR + 0.15`, a band 13% of the radius wide, so any remnant inside it is
+     covered and no remnant survives inside the visible mouth. */
+  const CELL = 0.9;
+  function gridCutPlane(base, holes) {
+    const p = base.parameters;
+    const W = p.width, H = p.height;
+    const nx = Math.min(220, Math.max(1, Math.ceil(W / CELL)));
+    const ny = Math.min(220, Math.max(1, Math.ceil(H / CELL)));
+    const cw = W / nx, ch = H / ny;
+    const pos = [], uv = [], nor = [], idx = [];
+    let kept = 0, dropped = 0;
+    for (let j = 0; j < ny; j++) {
+      const y0 = -H / 2 + j * ch, y1 = y0 + ch;
+      for (let i = 0; i < nx; i++) {
+        const x0 = -W / 2 + i * cw, x1 = x0 + cw;
+        let gone = false;
+        for (let k = 0; k < holes.length; k++) {
+          const c = holes[k];
+          // nearest point of the cell to the hole centre — a cell the circle
+          // so much as clips is gone, so nothing survives inside the mouth
+          const qx = Math.max(x0, Math.min(c.x, x1)), qy = Math.max(y0, Math.min(c.y, y1));
+          if ((qx - c.x) * (qx - c.x) + (qy - c.y) * (qy - c.y) < c.r * c.r) { gone = true; break; }
+        }
+        if (gone) { dropped++; continue; }
+        kept++;
+        const b = pos.length / 3;
+        pos.push(x0, y0, 0, x1, y0, 0, x1, y1, 0, x0, y1, 0);
+        uv.push((x0 + W / 2) / W, (y0 + H / 2) / H, (x1 + W / 2) / W, (y0 + H / 2) / H,
+          (x1 + W / 2) / W, (y1 + H / 2) / H, (x0 + W / 2) / W, (y1 + H / 2) / H);
+        nor.push(0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1);
+        idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
+      }
+    }
+    if (!dropped) return null;                 // nothing was taken — keep the original
+    const g = new THREE.BufferGeometry();
+    if (kept) {
+      g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+      g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+      g.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
+      g.setIndex(idx);
+    } else {
+      g.setAttribute("position", new THREE.Float32BufferAttribute([], 3));
+    }
+    return g;
+  }
+  function underShaft(o) {
+    let p = o; while (p) { if (p.userData && p.userData.groundShaft) return true; p = p.parent; }
+    return false;
+  }
+  /* A sheet is cuttable when it is FLAT IN ITS OWN GEOMETRY. That test is what
+     protects the seabed shelf: it is a RingGeometry whose vertices are pushed
+     to a height field, so rebuilding it from its outline would flatten 34 m of
+     draped shoreline into a disc. Flat in local Z → the outline IS the mesh. */
+  function cuttableSheet(o) {
+    if (!o || !o.isMesh || !o.geometry || underShaft(o)) return null;
+    /* NOT AN INSTANCED DRAW, AND NOT A MULTI-MATERIAL MESH. An InstancedMesh
+       shares ONE geometry across every copy, so cutting it would punch this
+       hole through every lot slab in the world; a mesh with a material array
+       is drawn from geometry groups a re-triangulation does not carry. Both
+       fall through to the shader mask, which is per-material and safe. */
+    if (o.isInstancedMesh || Array.isArray(o.material)) return null;
+    const g = o.geometry;
+    if (!g.parameters) return null;
+    if (!g.boundingBox) g.computeBoundingBox();
+    if (g.boundingBox.max.z - g.boundingBox.min.z > 0.05) return null;
+    /* HORIZONTAL ONLY. A shop window and a lane marking are both a short flat
+       PlaneGeometry; only one of them is ground. The geometry's own +Z axis
+       (its authoring normal) taken into world space says which — a hole
+       punched into a vertical pane would be a hole punched at a point that is
+       nowhere inside its outline, and earcut is under no obligation to be
+       polite about that. */
+    const e = o.matrixWorld.elements;
+    const nx = e[8], ny = e[9], nz = e[10];
+    const len = Math.hypot(nx, ny, nz) || 1;
+    if (Math.abs(ny / len) < 0.9) return null;
+    return outlineShape(g);
+  }
+  // Find every sheet this shaft opens through. `updateWorldMatrix(true,false)`
+  // and not the cached matrixWorld: core/matrixskip.js deliberately stops
+  // updating hidden subtrees, and the arena spends most of the game hidden, so
+  // the cached matrix of a just-shown island is whatever it was at build.
+  function findSheets(h) {
+    const R = h.cutR + 2;
+    try {
+      root().traverse(function (o) {
+        if (!o || !o.isMesh || !o.geometry || underShaft(o)) return;
+        for (let i = 0; i < cutSheets.length; i++) if (cutSheets[i].o === o) return;
+        o.updateWorldMatrix(true, false);
+        if (!cuttableSheet(o)) return;
+        TMPB.copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld);
+        if (TMPB.max.y - TMPB.min.y > 3) return;
+        if (TMPB.max.y < h.bottom || TMPB.min.y > h.gy + 6) return;
+        if (TMPB.max.x < h.x - R || TMPB.min.x > h.x + R) return;
+        if (TMPB.max.z < h.z - R || TMPB.min.z > h.z + R) return;
+        cutSheets.push({ o: o, base: o.geometry, cut: null });
+      });
+    } catch (e) {}
+  }
+  // Re-triangulate every known sheet against EVERY live shaft, from base.
+  function recutGround() {
+    for (let i = cutSheets.length - 1; i >= 0; i--) {
+      const rec = cutSheets[i], o = rec.o;
+      if (!o.parent && !rec.cut) { cutSheets.splice(i, 1); continue; }
+      const shape = outlineShape(rec.base);
+      if (!shape) continue;
+      o.updateWorldMatrix(true, false);
+      const y = o.matrixWorld.elements[13];
+      // one world unit in the sheet's own plane (uniform scale in practice,
+      // but a scaled road must not get a hole of the wrong size)
+      const sx = Math.hypot(o.matrixWorld.elements[0], o.matrixWorld.elements[1], o.matrixWorld.elements[2]) || 1;
+      if (!rec.base.boundingBox) rec.base.computeBoundingBox();
+      const bb = rec.base.boundingBox;
+      const local = [];               // the holes, in this sheet's own plane
+      let n = 0, swallowed = false, strict = true;
+      for (let k = 0; k < live.length; k++) {
+        const h = live[k];
+        if (y < h.bottom || y > h.gy + 6) continue;
+        TMPV.set(h.x, y, h.z);
+        o.worldToLocal(TMPV);
+        const hr = h.cutR / sx;
+        /* SWALLOWED WHOLE. A lane marking or a wet patch can be smaller than
+           the hole it is standing in; a hole path that encloses its own
+           outline is not a hole. Those go away entirely — which is what
+           happened to them. */
+        if (Math.hypot(bb.min.x - TMPV.x, bb.min.y - TMPV.y) < hr && Math.hypot(bb.max.x - TMPV.x, bb.max.y - TMPV.y) < hr &&
+            Math.hypot(bb.min.x - TMPV.x, bb.max.y - TMPV.y) < hr && Math.hypot(bb.max.x - TMPV.x, bb.min.y - TMPV.y) < hr) {
+          swallowed = true; break;
+        }
+        // no overlap → no hole. A hole path that lies entirely outside its
+        // shape is not a hole, it is a second contour, and the triangulator
+        // will happily hand back a sheet with a bite out of the wrong side.
+        if (TMPV.x + hr < bb.min.x || TMPV.x - hr > bb.max.x) continue;
+        if (TMPV.y + hr < bb.min.y || TMPV.y - hr > bb.max.y) continue;
+        // is this hole entirely inside the sheet? only then is an exact path
+        // legal input for the triangulator
+        if (TMPV.x - hr < bb.min.x || TMPV.x + hr > bb.max.x ||
+            TMPV.y - hr < bb.min.y || TMPV.y + hr > bb.max.y) strict = false;
+        local.push({ x: TMPV.x, y: TMPV.y, r: hr, h: h });
+        const path = new THREE.Path();
+        path.absarc(TMPV.x, TMPV.y, hr, 0, TAU, true);
+        shape.holes.push(path);
+        n++;
+      }
+      let next = null;
+      if (n && !swallowed) {
+        try {
+          if (strict) next = new THREE.ShapeGeometry(shape, 48);
+          else if (rec.base.type === "PlaneGeometry") next = gridCutPlane(rec.base, local);
+          // a round sheet the mouth runs off the EDGE of has no safe
+          // re-tessellation here; leave it whole rather than hand the
+          // triangulator input it will answer wrongly and confidently
+          else next = null;
+        } catch (e) { next = null; }
+        if (next && !rec.cut) shedSurface(rec, local);
+      }
+      if (next) { next.computeBoundingBox(); next.computeBoundingSphere(); }
+      if (rec.cut && rec.cut !== next) rec.cut.dispose();
+      rec.cut = next;
+      o.geometry = next || rec.base;
+      if (swallowed && o.visible) { o.visible = false; rec.hid = true; }
+      else if (rec.hid && !swallowed) { o.visible = true; rec.hid = false; }
+      stats.groundCuts += (n && !swallowed) ? 1 : 0;
+    }
+  }
+  /* THE SURFACE THAT WAS THERE GOES DOWN THE HOLE.
+
+     Deleting the triangles is only half of it. A road that vanishes at the rim
+     is a road that was never there; what a sinkhole does is TEAR it and send
+     the pieces down. So the first time a sheet loses area, slabs of that
+     sheet's own colour — the tarmac, the lane paint, the turf — are dropped
+     into the shaft on the same falling-debris integrator the rim chunks use.
+     They land on the shaft floor (dropChunk asks CBZ.groundShaftFloor, not the
+     terrain that used to be there) and become part of the pile at the bottom.
+
+     Capped against the live chunk count: a single collapse can re-cut forty
+     sheets and forty sheets' worth of slabs is a debris storm, not a road. */
+  function shedSurface(rec, local) {
+    if (chunks.length > 90) return;
+    const o = rec.o;
+    const col = (o.material && o.material.color) ? o.material.color.getHex() : 0x4a4036;
+    const bb = rec.base.boundingBox;
+    for (let k = 0; k < local.length; k++) {
+      const c = local[k];
+      const n = 4 + Math.min(8, Math.round(c.r * 0.3));
+      for (let i = 0; i < n; i++) {
+        const a = rnd() * TAU, d = Math.sqrt(rnd()) * c.r * 0.92;
+        const lx = c.x + Math.cos(a) * d, ly = c.y + Math.sin(a) * d;
+        if (lx < bb.min.x || lx > bb.max.x || ly < bb.min.y || ly > bb.max.y) continue;
+        TMPV.set(lx, ly, 0);
+        o.localToWorld(TMPV);
+        dropChunk({
+          x: TMPV.x, z: TMPV.z, y: TMPV.y + 0.35,
+          vy: 0.3 + rnd() * 1.3,
+          vx: (c.h.x - TMPV.x) * 0.06, vz: (c.h.z - TMPV.z) * 0.06,
+          size: 1.1 + rnd() * 2.3, color: col, dmg: 0, keep: rnd() < 0.3,
+        });
+      }
+    }
+  }
+  // the last shaft is gone → hand every sheet its original geometry back
+  function restoreGround() {
+    for (let i = 0; i < cutSheets.length; i++) {
+      const rec = cutSheets[i];
+      rec.o.geometry = rec.base;
+      if (rec.hid) { rec.o.visible = true; rec.hid = false; }
+      if (rec.cut) { rec.cut.dispose(); rec.cut = null; }
+    }
+    cutSheets.length = 0;
+  }
+  function isCut(o) {
+    for (let i = 0; i < cutSheets.length; i++) if (cutSheets[i].o === o) return true;
+    return false;
+  }
+
+  /* ---- THE SECOND LAYER: the sheets that have no outline to cut ----------
+     One raycast per site plus a footprint sweep, exactly as before, but it now
+     only reaches what the cut could not take — in practice the disaster ocean.
+     Repeat sites (the growth phase re-cuts the shaft several times) are
+     skipped; the materials are already patched and the uniform is what moves. */
   function maskGroundAt(h) {
     for (let i = 0; i < maskedSites.length; i++) {
       if (Math.hypot(maskedSites[i].x - h.x, maskedSites[i].z - h.z) < 4) return;
     }
     maskedSites.push({ x: h.x, z: h.z });
     function take(o) {
-      if (!o || !o.material) return;
-      let p = o, skip = false;
-      while (p) { if (p.userData && p.userData.groundShaft) { skip = true; break; } p = p.parent; }
-      if (skip) return;
+      if (!o || !o.material || underShaft(o) || isCut(o)) return;
       if (Array.isArray(o.material)) { for (let k = 0; k < o.material.length; k++) maskMaterial(o.material[k]); }
       else maskMaterial(o.material);
     }
     try {
-      // (a) what the sky sees through — catches the ground plate and the sea
+      // (a) what the sky sees through — catches the sea and any plate
       const rc = new THREE.Raycaster(new THREE.Vector3(h.x, h.gy + 60, h.z), new THREE.Vector3(0, -1, 0), 0, 60 + h.depth + 40);
       const hits = rc.intersectObject(root(), true) || [];
       for (let i = 0; i < hits.length; i++) take(hits[i].object);
       /* (b) every FLAT surface overlapping the footprint. One ray down the
          middle is not enough: a road, its lane paint, a kerb and a lot slab
          are separate meshes at slightly different heights and a ray that
-         misses one by a metre leaves a strip of tarmac hanging over the void
-         — which is exactly what the first pass photographed. Flat-only
-         (under 3 m tall) so this never recompiles a building's shader for a
-         hole that, by the placement law, is not under a building anyway. */
-      const box = new THREE.Box3();
-      const R = h.mouth + 2;
+         misses one by a metre leaves a strip of tarmac hanging over the void.
+         Flat-only (under 3 m tall) so this never recompiles a building's
+         shader for a hole that, by the placement law, is not under one. */
       root().traverse(function (o) {
-        if (!o.isMesh || !o.geometry) return;
-        let p = o; while (p) { if (p.userData && p.userData.groundShaft) return; p = p.parent; }
+        if (!o.isMesh || !o.geometry || underShaft(o)) return;
         if (o.material && o.material._shaftMasked) return;
+        if (isCut(o)) return;
+        o.updateWorldMatrix(true, false);
         if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
-        box.copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld);
-        if (box.max.y - box.min.y > 3) return;
-        if (box.max.y < h.bottom || box.min.y > h.gy + 2.5) return;
-        if (box.max.x < h.x - R || box.min.x > h.x + R) return;
-        if (box.max.z < h.z - R || box.min.z > h.z + R) return;
+        TMPB.copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld);
+        if (TMPB.max.y - TMPB.min.y > 3) return;
+        if (TMPB.max.y < h.bottom || TMPB.min.y > h.gy + 2.5) return;
+        if (TMPB.max.x < h.x - h.cutR - 2 || TMPB.min.x > h.x + h.cutR + 2) return;
+        if (TMPB.max.z < h.z - h.cutR - 2 || TMPB.min.z > h.z + h.cutR + 2) return;
         take(o);
       });
     } catch (e) {}
@@ -395,20 +685,27 @@
      down the wall at 0 rad (the last column and the first are neighbours in
      space but strangers to the hash), so every angular input below is the
      bearing's cos/sin — a closed curve, and the seam cannot exist. */
+  /* HOW MUCH SKY REACHES DEPTH t. ONE function, because the wall, the spiral
+     of ledges and the rubble at the bottom all have to agree — two independent
+     falloff curves is how a ledge ends up floating out of the wall it was
+     sheared from (CLAUDE.md's utility-pole lesson).
+
+     The curve was too steep. A reciprocal falloff bottoming out at 0.02 is
+     physically the right SHAPE — a narrowing cone of visible sky — but it made
+     the lower two thirds of the shaft a black tube, which is a different lie
+     from the ring: you could not see that there was dirt down there at all,
+     let alone the rubble cone you are meant to land on. Real sinkhole
+     photographs bottom out at dim BROWN, not black: the walls bounce plenty at
+     this width. So the floor of the curve is 0.30 and the bite is gentler. */
+  function skyLight(t) {
+    return Math.max(0.30, Math.pow(1 / (1 + 3.0 * t), 1.05));
+  }
   function strataColor(h, t, ang, out) {
     const j = (hs(h, Math.cos(ang) * 3.1 + t * 40, Math.sin(ang) * 3.1) - 0.5) * 0.055;
     const tt = Math.max(0, Math.min(1, t + j));
     let c = STRATA[0][1];
     for (let i = 0; i < STRATA.length; i++) if (tt >= STRATA[i][0]) c = STRATA[i][1];
-    // DARK WITH DEPTH: no light reaches down a 30 m shaft. The floor of the
-    // reference photograph is black, and that is not a shadow — it is the
-    // absence of a bounce. Multiplicative, so the strata still read near the top.
-    /* NO LIGHT GETS DOWN THERE. A Lambert wall under this game's hemisphere
-       reads as a bright tan tube at any depth, so the sky-occlusion a real
-       shaft has is put in by hand: a reciprocal falloff (what a narrowing
-       cone of visible sky actually does) rather than a linear fade — it bites
-       within the first few metres and is essentially black by half depth. */
-    const dark = Math.max(0.02, Math.pow(1 / (1 + 7 * t), 1.15));
+    const dark = skyLight(t);
     const mot = 0.9 + hs(h, Math.cos(ang) * 9.7, Math.sin(ang) * 9.7 + t * 71) * 0.2;
     const k = dark * mot;
     out[0] = (((c >> 16) & 255) / 255) * k;
@@ -416,11 +713,17 @@
     out[2] = ((c & 255) / 255) * k;
   }
 
-  // radius profile: sheer, with a slight inward taper and a hint of an
-  // undercut just below the lip (the overhang the surface layer makes when it
-  // is left cantilevered over the void).
+  /* Radius profile: sheer, with a slight inward taper and an undercut just
+     BELOW the lip (the overhang the surface layer makes when it is left
+     cantilevered over the void).
+
+     The undercut starts at zero AT the rim and not before it. It used to peak
+     at t=0, which meant the top ring of the wall was 1.055r while the ground
+     was removed at r — a 5% band of wall standing OUTSIDE the opening, i.e.
+     wall drawn on top of grass. The rim is now exactly `h.r`, which is exactly
+     what the floor query, the lip collar and the ground cut all use. */
   function wallRadius(h, t, ang) {
-    const undercut = 1 + 0.055 * Math.exp(-Math.pow(t / 0.10, 2));   // widest just under the rim
+    const undercut = 1 + 0.06 * Math.sin(Math.PI * Math.min(1, t / 0.17));   // 1 at the rim, widest just under it
     const taper = 1 - 0.10 * t * t;
     const noise = 1 + (hs(h, Math.cos(ang) * 2.3 + t * 17, Math.sin(ang) * 2.3) - 0.5) * 0.05;   // sheer: ±2.5%
     return h.r * undercut * taper * noise;
@@ -459,12 +762,23 @@
     return new THREE.Mesh(geo, wallMat);
   }
 
-  /* THE SHEARED LIP. This is the detail that makes the picture: the road (or
-     the turf) does not slope into the hole, it STOPS, cut off square, with the
-     bitumen crust standing proud over the soil section under it. Inner radius
-     is torn per-vertex, and the SAME torn radius drives the collar and the
-     vertical cut face — one solve, two meshes, so the crust can never float
-     off its own edge. */
+  /* THE SHEARED LIP — AND IT IS NOT A RING ON THE GRASS.
+
+     This is the detail that makes the picture: the road (or the turf) does not
+     slope into the hole, it STOPS, cut off square, with the crust standing
+     proud over the soil section under it. But the collar used to be drawn from
+     the rim OUTWARD across ground that was still there, in the ground's own
+     colour, floating 35 mm above it — which, whenever the surface underneath
+     failed to stop drawing, was the entire visible sinkhole. A ring.
+
+     Now the collar is the LID OF THE CUT: the ground geometry is removed out
+     to `h.cutR`, and the collar spans from just past that radius inward to the
+     torn rim at `h.r`. It replaces ground rather than covering it, so if it is
+     visible at all it is because there is a hole under it.
+
+     Inner radius is torn per-vertex, and the SAME torn radius drives the
+     collar and the vertical cut face — one solve, two meshes, so the crust can
+     never float off its own edge. */
   function buildLip(h) {
     const seg = 46;
     const inner = new Float32Array(seg + 1);
@@ -473,13 +787,9 @@
       // torn, never machined — but always at or OUTSIDE the removed floor, so
       // the edge you can see is still an edge you can stand on (the overhang
       // comes from the wall undercutting below, not from the crust lying).
-      inner[i] = h.mouth * (1.035 + (hs(h, Math.cos(a) * 4.1, Math.sin(a) * 4.1) - 0.5) * 0.09);
+      inner[i] = h.r * (1.005 + (hs(h, Math.cos(a) * 4.1, Math.sin(a) * 4.1) - 0.5) * 0.055);
     }
     inner[seg] = inner[0];
-    const rows = [
-      { r: 1.0, y: 0, c: h.surfaceColor, k: 1 },
-      { r: 1.22, y: 0.0, c: h.surfaceColor, k: 1 },
-    ];
     // collar (the intact surface, ragged edge) + cut face (the section)
     const cutRows = [
       { rf: 1.0, dy: 0.0, c: h.surfaceColor, k: 1 },
@@ -487,15 +797,15 @@
       { rf: 0.985, dy: -1.05, c: 0x4a3826, k: 0.7 },
       { rf: 0.97, dy: -2.1, c: 0x6a5233, k: 0.55 },
     ];
-    const nR = rows.length + cutRows.length;
+    const nR = 2 + cutRows.length;
     const pos = new Float32Array((seg + 1) * nR * 3);
     const col = new Float32Array((seg + 1) * nR * 3);
     const idx = [];
     let p = 0, row = 0;
-    function emit(rf, dy, hex, k) {
+    function emit(rad0, dy, hex, k, absolute) {
       for (let i = 0; i <= seg; i++) {
         const a = (i / seg) * TAU;
-        const rad = inner[i] * rf;
+        const rad = absolute ? rad0 : inner[i] * rad0;
         pos[p] = Math.cos(a) * rad; pos[p + 1] = h.gy + dy; pos[p + 2] = Math.sin(a) * rad;
         const mot = (0.86 + hs(h, Math.cos(a) * 5.3, Math.sin(a) * 5.3 + dy * 11) * 0.28) * k;
         col[p] = (((hex >> 16) & 255) / 255) * mot;
@@ -505,10 +815,12 @@
       }
       row++;
     }
-    // outward collar first (flat, on the ground), then downward cut face
-    emit(rows[1].r, 0.035, h.surfaceColor, 0.72);
-    emit(rows[0].r, 0.035, h.surfaceColor, 0.5);
-    for (let i = 0; i < cutRows.length; i++) emit(cutRows[i].rf, cutRows[i].dy, cutRows[i].c, cutRows[i].k);
+    // the crust filling the cut annulus (outer edge overlaps the surviving
+    // ground by 15 cm so no daylight can show through the seam), then the
+    // downward cut face
+    emit(h.cutR + 0.15, 0.02, h.surfaceColor, 0.86, true);
+    emit(1.0, 0.02, h.surfaceColor, 0.62, false);
+    for (let i = 0; i < cutRows.length; i++) emit(cutRows[i].rf, cutRows[i].dy, cutRows[i].c, cutRows[i].k, false);
     for (let j = 0; j < row - 1; j++) {
       for (let i = 0; i < seg; i++) {
         const a = j * (seg + 1) + i, b = a + 1, d = a + (seg + 1), e = d + 1;
@@ -563,14 +875,27 @@
   function buildFloorFurniture(h) {
     const B = BoxBuf();
     h.voids = [];
-    // talus cone, as stacked broken plates (a cone primitive reads too clean)
+    const kf = skyLight(1);            // everything down here takes the SAME dimming
+    // talus cone, as stacked broken plates (a cone primitive reads too clean).
+    // Wider and denser than it was: at 26 plates over a 0.66r cone the floor
+    // read as scattered litter on a black disc, when what a sinkhole actually
+    // has down there is a MOUND of the street that went first.
     const cone = h.coneR;
-    for (let i = 0; i < 26; i++) {
+    for (let i = 0; i < 48; i++) {
       const a = hs(h, i, 1) * TAU, d = Math.sqrt(hs(h, i, 2)) * cone;
       const y = h.bottom + h.coneH * Math.max(0, 1 - d / cone) * (0.35 + hs(h, i, 3) * 0.6);
-      const s = 1.1 + hs(h, i, 4) * 2.3;
-      B.add(h.x + Math.cos(a) * d, y, h.z + Math.sin(a) * d, s, 0.35 + hs(h, i, 5) * 0.7, s * (0.6 + hs(h, i, 6) * 0.8),
-        hs(h, i, 7) * TAU, i % 3 === 0 ? h.surfaceColor : 0x4a4036, 0.16 + hs(h, i, 8) * 0.1);
+      const s = 1.2 + hs(h, i, 4) * 2.6;
+      B.add(h.x + Math.cos(a) * d, y, h.z + Math.sin(a) * d, s, 0.4 + hs(h, i, 5) * 0.8, s * (0.6 + hs(h, i, 6) * 0.8),
+        hs(h, i, 7) * TAU, i % 4 === 0 ? h.surfaceColor : (i % 3 === 0 ? 0x6a5539 : 0x4a4036), kf * (0.86 + hs(h, i, 8) * 0.34));
+    }
+    // spill against the foot of the wall — soil that ran in and found its
+    // angle of repose, which is also what the burial DOT is modelling
+    for (let i = 0; i < 22; i++) {
+      const a = (i / 22) * TAU + hs(h, i, 21) * 0.24;
+      const d = h.r * (0.80 + hs(h, i, 22) * 0.16);
+      const s = 1.6 + hs(h, i, 23) * 2.4;
+      B.add(h.x + Math.cos(a) * d, h.bottom + 0.35 + hs(h, i, 24) * 0.7, h.z + Math.sin(a) * d,
+        s, 0.7 + hs(h, i, 25) * 1.1, s * 0.8, a, 0x54432c, kf * (0.8 + hs(h, i, 26) * 0.3));
     }
     // wedged slabs → the void spaces
     const nV = 3;
@@ -579,8 +904,8 @@
       const rr = h.r * 0.72;
       const px = h.x + Math.cos(a) * rr, pz = h.z + Math.sin(a) * rr;
       const w = Math.max(3.2, h.r * 0.55);
-      B.add(px, h.bottom + 1.15, pz, w * 0.8, 0.45, w, a, h.surfaceColor, 0.2);
-      B.add(px + Math.cos(a) * 0.1, h.bottom + 0.45, pz + Math.sin(a) * 0.1, 0.7, 1.0, 0.7, a, 0x3a332c, 0.16);
+      B.add(px, h.bottom + 1.15, pz, w * 0.8, 0.45, w, a, h.surfaceColor, kf * 1.1);
+      B.add(px + Math.cos(a) * 0.1, h.bottom + 0.45, pz + Math.sin(a) * 0.1, 0.7, 1.0, 0.7, a, 0x3a332c, kf * 0.8);
       h.voids.push({ x: px - Math.cos(a) * 0.7, z: pz - Math.sin(a) * 0.7, r: Math.max(1.6, w * 0.42) });
     }
     return B.mesh(rockMat);
@@ -604,7 +929,7 @@
       const t = 1 - (y - h.bottom) / h.depth;   // t is DEPTH fraction from the top
       // the ledges take the SAME sky-occlusion curve as the wall behind them,
       // so a step does not float out of a wall it is supposed to be part of
-      const k = Math.max(0.03, Math.pow(1 / (1 + 7 * t), 1.15)) * 0.95;
+      const k = skyLight(t) * 0.95;
       // yaw = a puts the box's local +x along the RADIUS, so `wide` is radial
       // and `arc` tangential — swap them and the stair spirals through its wall
       B.add(h.x + Math.cos(a) * rm, y - 0.22, h.z + Math.sin(a) * rm,
@@ -627,14 +952,23 @@
     const depth = Math.max(r * 2.4, opts.depth || r * 4.2);
     const h = {
       x: x, z: z, r: r,
-      mouth: r * 0.93,          // the floor is gone a hair inside the visible rim
+      /* THREE RADII, AND THEY ARE DERIVED FROM ONE.
+           r      the torn rim: where the wall starts and the lip ends
+           mouth  where there is nothing to stand on — THE SAME CIRCLE.
+                  It used to be 0.93r, which left a 7% annulus of invisible
+                  ground you could stand on inside a hole you could see.
+           cutR   where the ground SHEET is removed. Slightly wider than the
+                  rim so the lip collar has something to fill and the seam
+                  between torn crust and intact grass is never a gap. */
+      mouth: r,
+      cutR: r * 1.13,
       gy: gy, depth: depth, bottom: gy - depth,
       seed: opts.seed != null ? opts.seed : (x * 0.37 + z * 0.11),
       surfaceColor: opts.surface === "asphalt" ? 0x2f2e2c : (opts.surface === "soil" ? 0x554129 : (survMode() ? 0x4c5a34 : 0x2f2e2c)),
       mode: CBZ.game ? CBZ.game.mode : null,
       grp: new THREE.Group(),
       voids: [],
-      coneR: r * 0.66, coneH: Math.min(4.2, depth * 0.11),
+      coneR: r * 0.82, coneH: Math.min(5.5, depth * 0.13),
       stepN: 0, stepA0: 0, stepIn: r * 0.78,
       born: CBZ.now || 0,
     };
@@ -647,15 +981,24 @@
     const lip = buildLip(h);
     const rubble = buildFloorFurniture(h);
     const stair = buildStair(h);
-    // the black — a disc at the very bottom under the rubble, so a shaft you
-    // cannot see the bottom of still reads as bottomless rather than as a gap
-    const dark = new THREE.Mesh(new THREE.CircleGeometry(r * 0.95, 24),
-      new THREE.MeshBasicMaterial({ color: 0x05040a }));
-    dark.rotation.x = -Math.PI / 2;
-    dark.position.set(x, h.bottom - 0.2, z);
+    /* THE BOTTOM IS DIRT, NOT A VOID. This was a near-black disc (0x05040a)
+       under the rubble, on the theory that a shaft you cannot see the bottom
+       of reads as bottomless. It read as a gap in the world instead — the
+       owner's note is "it has dirt at the bottom", and it does: packed soil,
+       lit by whatever the walls bounce down, which is what skyLight(1) is.
+       Basic and not Lambert on purpose: at 50 m down, a Lambert floor gets no
+       light from this game's hemisphere at all and would go back to black. */
+    const kf = skyLight(1);
+    const floorHex = 0x4a3a26;
+    const floorDisc = new THREE.Mesh(new THREE.CircleGeometry(r * 1.04, 32),
+      new THREE.MeshBasicMaterial({
+        color: new THREE.Color((((floorHex >> 16) & 255) / 255) * kf, (((floorHex >> 8) & 255) / 255) * kf, ((floorHex & 255) / 255) * kf),
+      }));
+    floorDisc.rotation.x = -Math.PI / 2;
+    floorDisc.position.set(x, h.bottom - 0.05, z);
     wall.position.set(x, 0, z);
     lip.position.set(x, 0, z);
-    h.grp.add(wall, lip, dark);
+    h.grp.add(wall, lip, floorDisc);
     if (rubble) h.grp.add(rubble);
     if (stair) h.grp.add(stair);
     h.grp.userData.groundShaft = true;
@@ -664,6 +1007,10 @@
     live.push(h);
     if (pub.indexOf(h) < 0) pub.push(h);
     stats.cut++;
+    // GEOMETRY FIRST: take the ground out for real, then let the shader mask
+    // pick up whatever had no outline to cut (the sea).
+    findSheets(h);
+    recutGround();
     maskGroundAt(h);
     clearInside(h);
     syncMask();
@@ -719,12 +1066,16 @@
     }
     let i = live.indexOf(h); if (i >= 0) live.splice(i, 1);
     i = pub.indexOf(h); if (i >= 0) pub.splice(i, 1);
-    syncMask();                 // the ground comes back the moment the record does not
+    // the ground comes back the moment the record does not — both layers
+    if (live.length) recutGround(); else restoreGround();
+    syncMask();
   }
   CBZ.groundShaftClear = function (mode) {
     for (let i = live.length - 1; i >= 0; i--) if (!mode || live[i].mode === mode) disposeShaft(live[i]);
     for (let i = seqs.length - 1; i >= 0; i--) seqs[i].dispose();
     clearChunks();
+    unswallowAll();
+    if (!live.length) restoreGround();
     maskedSites.length = 0;
   };
 
@@ -820,6 +1171,10 @@
      ============================================================ */
   function dropChunk(o) {
     mats();
+    // every chunk is its own mesh, and `keep` ones never expire — so past a
+    // ceiling the permanent pile stops growing and new debris is transient.
+    // Five shafts' worth of kept rubble was 160 live meshes on its own.
+    const keep = !!o.keep && chunks.length < 120;
     const s = o.size || 1.2;
     const B = BoxBuf();
     B.add(0, 0, 0, s, s * (0.35 + rnd() * 0.5), s * (0.7 + rnd() * 0.6), rnd() * TAU, o.color != null ? o.color : 0x51473b, 0.5);
@@ -830,7 +1185,7 @@
     chunks.push({
       m: m, x: o.x, z: o.z, y: o.y, vy: o.vy || 0, vx: o.vx || 0, vz: o.vz || 0,
       sx: (rnd() - 0.5) * 5, sz: (rnd() - 0.5) * 5, r: s * 0.7,
-      dmg: o.dmg != null ? o.dmg : 0, landed: false, keep: !!o.keep, t: 0,
+      dmg: o.dmg != null ? o.dmg : 0, landed: false, keep: keep, t: 0,
     });
   }
   function clearChunks() {
@@ -873,6 +1228,215 @@
         chunks.splice(i, 1);
       }
     }
+  }
+
+  /* ============================================================
+     A BUILDING GOES IN, AND IT GOES IN LIKE A BUILDING
+
+     The reference photograph has the towers STANDING at the lip, and the
+     placement law protects that — a hole does not open under a building,
+     because a tower whose footing is inside the mouth is a floating tower and
+     this game's structural ledger has no concept of "undermined".
+
+     But the mouth GROWS. A structure that was four metres clear of the plug is
+     four metres inside the final radius, and at that moment the honest answer
+     is not "it stands anyway" and not "it sinks into the ground" (which is the
+     roster's generic collapse animation, and reads as a lift going down). It
+     TIPS. The ground left from one side, so it hinges over that side, goes
+     past vertical, stops being supported at all, and falls fifty metres down a
+     shaft, spinning, into the rubble at the bottom.
+
+     So this is a real integrator and not a canned animation:
+
+       tip     angular acceleration about the base edge nearest the void,
+               driven by gravity through the body's own height — a tall tower
+               goes over slowly and a squat shop snaps over, because the same
+               torque law is fed each one's own H.
+       slide   the footing walks toward the centre while it leans: the ground
+               under it is leaving, not hinged.
+       fall    the moment the base centre is inside the mouth, support is gone
+               and it is a body in free fall with its angular rate preserved.
+       wall    it cannot pass through the shaft it is falling down; contact
+               with the wall costs it horizontal speed and adds tumble, which
+               is why it arrives at the bottom crooked and not neatly.
+       impact  dust, shake, a real rubble field, and anyone standing down there
+               is under a building. Then it STAYS — the wreck at the bottom is
+               the hole's permanent furniture.
+
+     The host supplies the object and its own teardown (colliders, platforms,
+     glass, kill ledger) through the callbacks; this file supplies the physics,
+     which is the part that is the same in every mode.
+     ============================================================ */
+  const swallowed = [];
+  const SW_AXIS = new THREE.Vector3();
+  const SW_Q = new THREE.Quaternion();
+
+  CBZ.groundShaftSwallow = function (h, o) {
+    if (!on() || !h || !o || !o.group || o.group._shaftSwallow) return null;
+    const g = o.group;
+    const bx = o.x != null ? o.x : g.position.x;
+    const bz = o.z != null ? o.z : g.position.z;
+    const by = o.gy != null ? o.gy : h.gy;
+    /* A PIVOT OF OUR OWN. Rotating the building's own group assumes its origin
+       sits at the base centre — true for the arena's towers today, and exactly
+       the assumption that turns into a building spinning around a point two
+       streets away the first time somebody authors one differently. Wrapping
+       it in a group parked AT the base and re-seating the child by the same
+       offset preserves the world transform exactly and makes the pivot a fact
+       instead of a hope. */
+    const home = g.parent || root();
+    const homePos = g.position.clone();
+    const pivot = new THREE.Group();
+    pivot.position.set(bx, by, bz);
+    pivot.userData.dynamic = true;            // core/staticfreeze.js: keep my matrix live
+    /* AND IT IS SHAFT FURNITURE NOW. The same marker the walls carry, for the
+       same three reasons: clearInside() must not hide a building that is
+       mid-fall through the mouth, the ground cut must not punch a hole in its
+       floor slabs, and the shader mask must not recompile its shaders. */
+    pivot.userData.groundShaft = true;
+    home.add(pivot);
+    g.position.set(g.position.x - bx, g.position.y - by, g.position.z - bz);
+    pivot.add(g);
+    g._shaftSwallow = true;
+
+    const dx = h.x - bx, dz = h.z - bz;
+    const d = Math.hypot(dx, dz) || 1;
+    const rec = {
+      h: h, pivot: pivot, group: g, o: o, home: home, homePos: homePos,
+      dirX: dx / d, dirZ: dz / d,           // downhill: the side the ground left
+      x: bx, y: by, z: bz,
+      th: 0, om: 0.35 + rnd() * 0.35,       // lean, and the shove that starts it
+      spin: (rnd() - 0.5) * 0.7,            // yaw it picks up on the way down
+      yaw: 0, vy: 0, vx: 0, vz: 0,
+      H: Math.max(4, o.h || 12), W: Math.max(2.5, Math.max(o.w || 8, o.d || 8)),
+      phase: "tip", t: 0, hitWall: 0,
+    };
+    swallowed.push(rec);
+    if (CBZ.shake && nearCam(bx, bz, 90)) CBZ.shake(0.5);
+    sfx("collapse", bx, bz);
+    if (o.onTip) { try { o.onTip(rec); } catch (e) {} }
+    return rec;
+  };
+
+  function tickSwallowed(dt) {
+    if (!swallowed.length) return;
+    const G = (CBZ.TUNE && CBZ.TUNE.gravity) || 22;
+    for (let i = swallowed.length - 1; i >= 0; i--) {
+      const s = swallowed[i], h = s.h;
+      s.t += dt;
+      if (s.phase !== "rest") {
+        const dc = Math.hypot(s.x - h.x, s.z - h.z);
+        /* SUPPORT. Half a footprint still over solid ground holds the base up;
+           once the base centre itself is inside the mouth there is nothing
+           under any of it. `th > 1.15` is the other way out — past ~66° a
+           building has committed and no footing is bearing. */
+        const supported = s.phase === "tip" && dc > h.mouth && s.th < 1.15;
+        // gravity torque about the tipping edge, through the body's own height
+        s.om += (G / s.H) * (0.30 + Math.sin(Math.min(s.th, Math.PI * 0.5))) * dt;
+        s.th += s.om * dt;
+        s.yaw += s.spin * dt;
+        if (supported) {
+          // the footing walks toward the void as the ground under it leaves
+          const slide = 1.1 + s.th * 3.4;
+          s.x += s.dirX * slide * dt;
+          s.z += s.dirZ * slide * dt;
+          s.y = h.gy - (1 - Math.cos(Math.min(s.th, 1.2))) * 0.9;
+          s.vx = s.dirX * slide; s.vz = s.dirZ * slide; s.vy = 0;
+        } else {
+          if (s.phase === "tip") { s.phase = "fall"; s.vy = -1.5; }
+          s.vy -= G * dt;
+          s.x += s.vx * dt; s.z += s.vz * dt; s.y += s.vy * dt;
+          /* THE SHAFT IS SOLID. Without this it drifts out through the wall
+             and falls past the world; with it, a wall strike costs it half its
+             horizontal speed and pays that into tumble, which is what puts it
+             on the rubble at an angle instead of standing on its head. */
+          const t = Math.max(0, Math.min(1, (h.gy - s.y) / h.depth));
+          const wallR = wallRadius(h, t, Math.atan2(s.z - h.z, s.x - h.x)) - s.W * 0.28;
+          const dd = Math.hypot(s.x - h.x, s.z - h.z);
+          if (dd > wallR && dd > 0.01) {
+            const nx = (s.x - h.x) / dd, nz = (s.z - h.z) / dd;
+            s.x = h.x + nx * wallR; s.z = h.z + nz * wallR;
+            s.vx = -nx * Math.abs(s.vx) * 0.35; s.vz = -nz * Math.abs(s.vz) * 0.35;
+            s.om += 0.5; s.spin += (rnd() - 0.5) * 0.8;
+            if (s.hitWall++ < 3 && CBZ.shake && nearCam(s.x, s.z, 70)) CBZ.shake(0.12);
+          }
+        }
+        const floorY = CBZ.groundShaftFloor(s.x, s.z, rawFloor(s.x, s.z));
+        if (s.y <= floorY + 0.35 && s.phase === "fall") swallowLand(s, floorY);
+      }
+      // ---- apply: one axis-angle about the pivot, plus the yaw it picked up
+      SW_AXIS.set(s.dirZ, 0, -s.dirX).normalize();
+      SW_Q.setFromAxisAngle(SW_AXIS, s.th);
+      s.pivot.quaternion.copy(SW_Q);
+      s.pivot.rotateY(s.yaw);
+      s.pivot.position.set(s.x, s.y, s.z);
+      s.pivot.updateMatrix();
+      s.pivot.matrixWorldNeedsUpdate = true;
+      // a wreck that has been still for a while stops costing anything —
+      // it keeps its pivot and its pose, it just stops being integrated
+      if (s.phase === "rest" && s.t > 6) { parked.push(s); swallowed.splice(i, 1); }
+    }
+  }
+  /* GIVING THE BUILDING BACK. `arena.reset()` re-seats a fallen structure with
+     `b.group.position.set(b.ox, b.gy, b.oz)` — which is only true if the group
+     is still a direct child of the arena root. Every swallowed record is
+     therefore reversible, and reversing it restores the ORIGINAL local
+     position as well as the parent, so it does not matter whether the arena's
+     reset ran before this or after it. */
+  const parked = [];
+  function unswallowAll() {
+    const all = swallowed.concat(parked);
+    for (let i = 0; i < all.length; i++) {
+      const s = all[i];
+      if (s.pivot.parent) s.pivot.parent.remove(s.pivot);
+      s.pivot.remove(s.group);
+      s.group.position.copy(s.homePos);
+      s.group.quaternion.set(0, 0, 0, 1);
+      s.group.rotation.set(0, 0, 0);
+      s.group._shaftSwallow = false;
+      s.home.add(s.group);
+    }
+    swallowed.length = 0; parked.length = 0;
+  }
+
+  function swallowLand(s, floorY) {
+    const h = s.h;
+    s.phase = "rest"; s.t = 0;
+    s.y = floorY + 0.2;
+    // it comes to rest crumpled, never square
+    s.th = Math.max(1.15, Math.min(2.3, s.th)) + (rnd() - 0.5) * 0.25;
+    s.om = 0; s.spin = 0;
+    stats.swallowed++;
+    /* A BUILDING ARRIVING AT THE BOTTOM. The dust and the shake are felt from
+       the rim; the rubble is real falling debris on this file's own integrator
+       (so it lands on the shaft floor, not on the terrain that used to be
+       there); and anything alive down there is under a building. */
+    const RUB = [0x70757e, 0x8b9097, 0x5c6168, 0x9aa0a8, 0x6a5539];
+    const n = 16 + ((rnd() * 10) | 0);
+    for (let i = 0; i < n; i++) {
+      const a = rnd() * TAU, dd = rnd() * h.r * 0.8;
+      dropChunk({
+        x: s.x + Math.cos(a) * dd, z: s.z + Math.sin(a) * dd, y: s.y + 2 + rnd() * 6,
+        vy: 1 + rnd() * 4, vx: Math.cos(a) * (1 + rnd() * 3), vz: Math.sin(a) * (1 + rnd() * 3),
+        size: 0.9 + rnd() * 2.4, color: RUB[(rnd() * RUB.length) | 0],
+        dmg: i < 5 ? 70 : 0, keep: true,
+      });
+    }
+    eachActor(function (a) {
+      if (!a || !a.pos || a.dead) return;
+      if (a.pos.y > s.y + s.H * 0.6) return;
+      if (Math.hypot(a.pos.x - s.x, a.pos.z - s.z) > s.W * 0.9 + 2) return;
+      stats.crushed++;
+      hurt(a, 1e6, "crushed by a building that fell into the sinkhole", { fromX: s.x, fromZ: s.z, force: 9, fling: 2 });
+    });
+    if (CBZ.shake && nearCam(s.x, s.z, 120)) CBZ.shake(0.85);
+    sfx("collapse", s.x, s.z);
+    if (CBZ.fx && CBZ.fx.dropDebris) {
+      for (let i = 0; i < 8; i++) {
+        CBZ.fx.dropDebris({ x: s.x + (rnd() - 0.5) * h.r, z: s.z + (rnd() - 0.5) * h.r, fromY: s.y + 4, vy: 3 + rnd() * 4, size: 1.2 + rnd(), color: 0x8f8676, linger: 2.2 });
+      }
+    }
+    if (s.o.onRest) { try { s.o.onRest(s); } catch (e) {} }
   }
 
   /* ============================================================
@@ -1165,7 +1729,7 @@
      ============================================================ */
   CBZ.onUpdate(28.6, function (dt) {
     if (!on()) return;
-    if (!live.length && !seqs.length && !chunks.length) return;
+    if (!live.length && !seqs.length && !chunks.length && !swallowed.length) return;
     /* EXTERNAL CLEAR = RESET. The survival director empties CBZ.survHoles on
        match start and on mode exit; that array IS our registry, so an empty
        published list with live records means the world was reset under us and
@@ -1174,6 +1738,7 @@
       for (let i = live.length - 1; i >= 0; i--) if (live[i].mode === "survival") disposeShaft(live[i]);
       for (let i = seqs.length - 1; i >= 0; i--) seqs[i].dispose();
       clearChunks();
+      unswallowAll();
     }
     for (let i = 0; i < live.length; i++) if (pub.indexOf(live[i]) < 0) pub.push(live[i]);
     // re-wrap in ANY mode if somebody re-installed a floor after us (a city
@@ -1181,6 +1746,7 @@
     if (live.length && CBZ.floorAt !== cityFloorFn) installCityFloor();
     for (let i = seqs.length - 1; i >= 0; i--) { const s = seqs[i]; if (!s.done) s.tick(dt); }
     tickChunks(dt);
+    tickSwallowed(dt);
     tickHazards(dt);
   });
 
@@ -1222,10 +1788,22 @@
       voidsPerShaft: live.length ? live[0].voids.length : 0,
       stepsPerShaft: live.length ? live[0].stepN : 0,
       escapeReady: CBZ.CONFIG.SHAFT_ESCAPE !== false,
+      /* THE GROUND IS ACTUALLY GONE. `sheetsCut` counts the ground sheets
+         currently carrying a real ShapeGeometry hole and `sheetsOpen` counts
+         them by live triangulation, so a build where the cut silently did
+         nothing reads 0 with shafts > 0 — which is the ring, measured. */
+      sheetsCut: cutSheets.length,
+      sheetsOpen: cutSheets.reduce(function (n, rec) { return n + ((rec.cut || rec.hid) ? 1 : 0); }, 0),
+      groundCuts: stats.groundCuts,
+      mouthOverRim: live.length ? +(live[0].mouth / live[0].r).toFixed(2) : 0,
       cityShaftReady: !!(CBZ.CONFIG.CITY_SINKHOLES && CBZ.roadJunctions && CBZ.city && CBZ.city.arena),
       cityFloorWrapped: !!(CBZ.floorAt && CBZ.floorAt._shaft),
       sequences: seqs.length,
       chunks: chunks.length,
+      // buildings the growing mouth actually took, and how many are still
+      // being integrated (a wreck at the bottom parks after it settles)
+      buildingsSwallowed: stats.swallowed,
+      swallowing: swallowed.length,
       cut: stats.cut, siteRejects: stats.siteRejects,
       falls: stats.falls, crushed: stats.crushed, buried: stats.buried, voidSaves: stats.voidSaves,
     };

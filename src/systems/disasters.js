@@ -3090,18 +3090,26 @@
      Three disasters used to reach in here directly with a coin flip; if you
      find yourself wanting to call this, you want structureHit() with an
      amount — that is what lets damage from two different disasters add up. */
+  /* THE STRUCTURE STOPS BEING A STRUCTURE. Pulled out of collapse() so the
+     sinkhole can reuse it: a building tipping into a shaft has to shed its
+     walls, floors and glass for exactly the same reasons a building crumbling
+     in place does, and re-typing that list at a second site is how one of the
+     two ends up leaving a staircase floating in mid-air. */
+  function stripBuilding(b) {
+    if (b.colliders) for (const c of b.colliders) { const i = CBZ.colliders.indexOf(c); if (i >= 0) CBZ.colliders.splice(i, 1); }
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    if (b.platforms) for (const p of b.platforms) { const i = CBZ.platforms.indexOf(p); if (i >= 0) CBZ.platforms.splice(i, 1); }
+    if (CBZ.shatterGlass) CBZ.shatterGlass(b.x, b.z, Math.max(b.w, b.d) * 0.85);
+  }
   function collapse(b, ctx) {
     if (!b || b.fallen) return; b.fallen = true;
     b._dmg = 1.2;
     // yank ALL of this building's walls (colliders) and floors/stairs/roof
-    // (platforms) so survivors can run AND fall through the rubble
-    if (b.colliders) for (const c of b.colliders) { const i = CBZ.colliders.indexOf(c); if (i >= 0) CBZ.colliders.splice(i, 1); }
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
-    if (b.platforms) for (const p of b.platforms) { const i = CBZ.platforms.indexOf(p); if (i >= 0) CBZ.platforms.splice(i, 1); }
+    // (platforms) so survivors can run AND fall through the rubble, and blow
+    // every window out of it as it goes
+    stripBuilding(b);
     // crush anyone in the footprint
     surv().hurtRadius(b.x, b.z, Math.max(b.w, b.d) * 0.62, 1e6);
-    // blow every window out of the building as it goes
-    if (CBZ.shatterGlass) CBZ.shatterGlass(b.x, b.z, Math.max(b.w, b.d) * 0.85);
     // animate the whole structure crumbling as one piece — walls, every floor,
     // AND the roof sink and tilt together (handled by the transient ticker)
     fallingBuildings.push({ group: b.group, t: 0, h: b.h, tilt: (rnd() - 0.5) * 0.9 });
@@ -3272,6 +3280,37 @@
           const m = d || 1;
           flingCar(c, -dx / m, -dz / m, 5 + rnd() * 4, -3);   // inward and DOWN
         }
+        /* AND THE BUILDINGS. The mouth grows past structures that were clear
+           of the first plug, and when it reaches one the honest outcome is not
+           the roster's generic collapse (which sinks a tower into the ground —
+           a fine animation for an earthquake and a lie beside a fifty-metre
+           void). It goes OVER THE EDGE: world/groundshaft.js owns the physics,
+           this owns the ledger.
+
+           UNDERMINED IS MEASURED OFF THE FOOTPRINT, NOT THE CENTRE. "Centre
+           inside the mouth" reads as the obvious test and is the wrong one:
+           the placement law already refuses any site closer than half a radius
+           plus half a footprint, so a centre-only test can never fire and the
+           feature is dead on arrival — six holes opened beside six buildings
+           and took none of them. A structure is undermined when its centre is
+           within a quarter of its own width of the edge, i.e. when at least
+           half the footing is standing over nothing. */
+        const B = ctx.arena.fragile || [];
+        const shaft = CBZ.groundShaftAt ? CBZ.groundShaftAt(hx, hz) : null;
+        for (let i = 0; i < B.length; i++) {
+          const b = B[i];
+          if (!b || b.fallen || !b.group) continue;
+          const bx = b.ox != null ? b.ox : b.x, bz = b.oz != null ? b.oz : b.z;
+          if (bx == null) continue;
+          if (Math.hypot(bx - hx, bz - hz) > hr + Math.max(b.w || 8, b.d || 8) * 0.25) continue;
+          if (!CBZ.groundShaftSwallow || !shaft) { collapse(b, ctx); continue; }
+          b.fallen = true; b._dmg = 1.2;
+          stripBuilding(b);
+          narrate("hint", "The building is going in!", 2.2);
+          CBZ.groundShaftSwallow(shaft, {
+            group: b.group, x: bx, z: bz, gy: b.gy, w: b.w, d: b.d, h: b.h,
+          });
+        }
       },
     });
   }
@@ -3287,7 +3326,15 @@
       if (h) (ctx.st.holes = ctx.st.holes || []).push(h);
       return null;
     }
-    const r = 7 + scale(3.4, ctx);
+    /* THE HOLE IS THE SIZE OF AN INTERSECTION. 7-10 m of radius is a crater
+       you step over; the reference photograph is ~20 m ACROSS and reads as a
+       shaft you could lose a building down. 12-16 m of radius is 25-31 m of
+       opening — the reference's own scale — and at the primitive's 4.2x depth
+       that is 50-65 m of drop, which is what "you can fall in it" is supposed
+       to mean. Kept off `scale`'s full swing on purpose: at intensity 1.7 a
+       5 m coefficient reached r=25, and a 50 m mouth stops being a sinkhole
+       and starts being a missing quarter of the island. */
+    const r = 10 + scale(2.2, ctx);
     const spec = {
       cx: ctx.cx, cz: ctx.cz, R: ctx.R, r: r, rng: rnd, minDist: 14, tries: 90,
       avoid(x, z) {
@@ -3295,17 +3342,24 @@
         for (let i = 0; i < S.length; i++) if (Math.hypot(x - S[i].x, z - S[i].z) < S[i].r + r + 12) return true;
         const P = ctx.st.seqs || [];
         for (let i = 0; i < P.length; i++) if (Math.hypot(x - P[i].x, z - P[i].z) < P[i].r + r + 12) return true;
-        /* THE BUILDINGS MUST BE STANDING AT THE LIP, NOT IN THE HOLE. That is
-           the whole read of the reference photograph — a tower whose footing
-           is inside the mouth is a floating tower, and this file's structural
-           ledger has no concept of "undermined". Close is the point; over is
-           the bug. */
+        /* THE HOLE DOES NOT OPEN THROUGH THE MIDDLE OF A TOWER — BUT IT MAY
+           REACH ONE. The old rule kept every structure a full radius plus half
+           a footprint clear, which is what guaranteed the reference
+           photograph's intact surroundings AND guaranteed that nothing was
+           ever taken: the final mouth could not touch a building by
+           construction, so the most spectacular thing a sinkhole can do could
+           not happen. The ledger now HAS a concept of undermined (see
+           entrain(), which hands the structure to groundShaftSwallow), so the
+           refusal only needs to cover the degenerate case — the plug opening
+           directly under a footprint, which reads as a building deleted rather
+           than a building falling. Clear of the FIRST DROP (0.5r) and its own
+           footprint; everything the growth then reaches, it takes. */
         const B = ctx.arena.fragile || [];
         for (let i = 0; i < B.length; i++) {
           const b = B[i];
           const bx = b.ox != null ? b.ox : b.x, bz = b.oz != null ? b.oz : b.z;
           if (bx == null) continue;
-          if (Math.hypot(x - bx, z - bz) < r * 0.85 + (b.w || 8) * 0.5) return true;
+          if (Math.hypot(x - bx, z - bz) < r * 0.5 + (b.w || 8) * 0.45) return true;
         }
         return false;
       },
@@ -3844,6 +3898,9 @@
       holesOnSlopes: shaftA ? shaftA.holesOnSlopes : 0,
       holeSlopeMax: shaftA ? shaftA.holeSlopeMax : 0,
       holeDeepOverWide: shaftA ? shaftA.deepOverWide : 0,
+      // the ring, measured: ground sheets currently carrying a REAL hole. A
+      // shaft standing over an uncut island is a lip collar lying on grass.
+      holeSheetsOpen: shaftA ? shaftA.sheetsOpen : 0,
       cityShaftReady: shaftA ? shaftA.cityShaftReady : false,
       shaftFalls: shaftA ? shaftA.falls : 0,
       shaftCrushed: shaftA ? shaftA.crushed : 0,

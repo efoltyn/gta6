@@ -2632,3 +2632,99 @@ work.** For this change that is a throwaway toast probe (~90s, and it caught the
 old behavior) plus `node --check`. Run the math gate when the change can move
 what the math gate measures — world building, sim ticks, determinism — not as a
 tax on editing a sentence.
+
+---
+
+## 2026-08-06 — THE SINKHOLE IS A HOLE (world/groundshaft.js)
+
+**OWNER:** "Sinkhole is a fucking ring right now. It's not a fucking hole. You
+can't fall in it. It's so easy to code a fucking hole, a massive cylinder hole,
+and that has dirt at the bottom." Then, on the first screenshot back: "you see
+how the road isn't falling in."
+
+**THE CAUSE WAS ONE THING, AND IT WAS NOT THE SHAFT.** The shaft geometry was
+always built — sheer walls, strata, torn lip, spiral stair, rubble cone. What
+never happened was the GROUND STOPPING. The surface over the mouth was only
+*asked* to stop drawing, via a `discard` injected into whatever material a
+downward raycast landed on. That has three silent failure modes (a stale
+`matrixWorld` on a subtree `core/matrixskip.js` freezes while hidden — and the
+arena spends most of the game hidden; a material with no anchor to patch; a
+program r128 declines to recompile). When it missed, the island disc kept
+drawing across the mouth and the only thing left above ground was the shaft's
+own lip collar lying on the grass. **A ring.** And a 50 m shaft nobody could see
+is a 50 m shaft nobody chooses to walk into.
+
+**THE FIX IS GEOMETRY, NOT SHADERS.** Every flat ground sheet in this world is
+authored from a THREE primitive with `parameters`, so its outline is recoverable
+exactly. Rebuild it as a `Shape`, push one `Path` per live shaft, re-triangulate.
+Originals are kept, so growth re-punches the ORIGINAL disc and the last dispose
+restores the ground byte-for-byte. The discard survives as layer two, for the one
+sheet with no recoverable outline (the disaster ocean).
+
+**AND THE HOLE-WIDER-THAN-THE-SHEET TRAP**, which is what the owner's second
+message caught. `ShapeGeometry` requires the hole path to be STRICTLY INSIDE the
+contour; earcut bridges each hole to the outline and a hole that crosses it makes
+that seam self-intersecting. It does not throw — it returns a plausible mesh with
+the sheet still spanning the void. A 6 m road crossed by a 26 m mouth can never
+satisfy the requirement, so **every road stayed drawn over every sinkhole**, and
+the island disc (which does satisfy it) looked fine, which is why one screenshot
+read as fixed. Strips are now re-tessellated on a 0.9 m grid with the reached
+cells simply not emitted; the ragged edge is covered by construction, because the
+lip collar is opaque from the torn rim out to `cutR + 0.15` (13% of the radius).
+
+MEASURED (throwaway CDP probe, real survival mode, `disasters.force("sinkhole")`,
+`CBZ.stepSim` as the only clock):
+
+| | before | after |
+|---|---|---|
+| sheets carrying a real hole | — (no such thing) | **21–77** |
+| meshes over the mouth | island disc + beach + roads | masked ocean only |
+| `CBZ.floorAt` at centre | -42.5 (worked all along) | -47.7 |
+| player dropped in from y=2 | — | falls to the floor, `falls: 1` |
+| `mouthOverRim` | 0.93 (7% of invisible standable ground *inside* the hole) | **1.00** |
+| ground after `groundShaftClear()` | — | CircleGeometry back at y=0 |
+
+**THE RING WAS ALSO PARTLY THE LIP'S FAULT.** The collar used to be drawn from
+the rim OUTWARD across ground that was still there, in the ground's own colour,
+35 mm above it. Now it spans from just past `cutR` inward to the torn rim — it
+replaces ground instead of covering it, so if it is visible at all it is because
+there is a hole under it.
+
+**AND THE BOTTOM IS DIRT.** The sky-occlusion curve bottomed out at 0.02, which
+is physically the right *shape* and made the lower two thirds a black tube — a
+different lie from the ring. Floored at 0.30 with a gentler bite, one `skyLight(t)`
+shared by the wall, the ledges, the rubble and the floor disc (which was a
+near-black 0x05040a plate and is now soil).
+
+**A BUILDING CAN GO IN NOW, AND IT GOES IN LIKE A BUILDING.** Owner: "can a
+building fall into a sinkhole, and does it fall in with beautiful, cool physics?"
+The placement law used to refuse any site within a full radius plus half a
+footprint of a structure — the intact surroundings of the reference photograph,
+bought at the price of *the most spectacular thing a sinkhole can do being
+unreachable by construction*. The refusal now only covers the degenerate case
+(the first plug opening under a footprint, which reads as a building deleted),
+and the growing mouth takes what it undermines: `CBZ.groundShaftSwallow` is a
+real integrator — gravity torque about the base edge through the body's own
+height, the footing sliding toward the void while it leans, free fall the moment
+the base centre is inside the mouth, wall contact that trades horizontal speed
+for tumble, then impact, dust, crush and a permanent wreck at the bottom.
+
+Two traps worth writing down. **The pivot:** rotating the building's own group
+assumes its origin is the base centre — true for the arena's towers today and
+exactly the assumption that becomes a tower spinning around a point two streets
+away. It is wrapped in its own pivot instead. **The reset:** `arena.reset()`
+re-seats a fallen structure with `b.group.position.set(b.ox, b.gy, b.oz)`, which
+is only true while the group is a direct child of the arena root — so every
+swallow is reversible and reversing it restores the original parent AND local
+position, which makes the ordering against `arena.reset()` irrelevant.
+
+**RATCHETS** (`CBZ.shaftAudit()`): `sheetsOpen` — ground sheets currently
+carrying a real hole. **A build with `shafts > 0` and `sheetsOpen: 0` is the ring,
+measured.** `mouthOverRim` must stay 1.00 (walkable hole == visible rim).
+`buildingsSwallowed` counts what the mouth actually took. `holesOnSlopes` is
+still pinned at 0.
+
+**GATE CHOICE.** Not the math gate — this change cannot move city generation or
+biome histograms. A survival-mode CDP probe that opens a real sinkhole and asks
+what is drawn over the mouth, plus rendered frames, plus `node --check`. It
+caught the ring, then caught the roads, which is the whole point.
