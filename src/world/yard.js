@@ -14,7 +14,22 @@
   const YH = DIM.YH;
   const N = WORLD.northYard, S = WORLD.southBlock, gap = WORLD.exit.gap;
 
-  const wall = (x, z, w, d) => addBox(x, YH / 2, z, w, YH, d, WALL, { solid: true, blockLOS: true });
+  // THE PERIMETER HOLDS (2026-08-06). Explosions now open real walk-through
+  // holes in walls everywhere, not just the city (city/fracture.js blastAt ->
+  // buildings.js carveHole). That is a gift to the prison's INTERIOR — the gun
+  // room stocks an RPG, so blowing your way through the block is the gun-room
+  // grammar chained into itself. Applied to the OUTER wall it would collapse
+  // the whole escape game into one verb and orphan the authored gradient the
+  // keycard, the maintenance crawls, the ceiling hatches, the drainage and the
+  // culvert (world/escape_routes.js) exist to be. So every segment of the
+  // compound perimeter declares `noBreach`: the blast still scars it, shakes
+  // the camera and throws debris — it just does not open. ONE line, and it is
+  // the whole policy; delete it and the prison becomes a jailbreak sandbox.
+  const wall = (x, z, w, d) => {
+    const m = addBox(x, YH / 2, z, w, YH, d, WALL, { solid: true, blockLOS: true });
+    if (m && m.userData && m.userData.collider) m.userData.collider.noBreach = true;
+    return m;
+  };
   // red warning trim hugging a wall top; ax 'x' runs along x, 'z' along z
   function trim(x, z, len, ax) {
     if (ax === "z") addBox(x, YH - 0.5, z, 0.4, 0.4, len, TRIM, { cast: false });

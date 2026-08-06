@@ -360,6 +360,17 @@
 <!-- 0. namespace + constants -->
 <script src="src/config.js?v=campaignon1"></script>
 <script src="src/core/seed.js"></script>
+<!-- THE MODE CAPABILITY BUS (CBZ.modeHas / worldActors / blastWorldActors).
+     Turns "is this the city?" into "may I vault / may I blow up here?", so the
+     prison, gun game and the disaster island reuse Gang City's engine instead
+     of being refused by a mode enum. Loads before every consumer; flag
+     MODE_CAPS_V1=false restores the old city-only answers everywhere at once. -->
+<script src="src/systems/modecaps.js?v=caps1"></script>
+<!-- THE CHARGE TABLE: real US Army urban-breaching arithmetic (2 lb mousehole /
+     5 lb one man / 7 lb two abreast) plus the CONTACT-vs-STANDOFF law, published
+     once so the prison door, the bank vault and every wall price themselves in
+     the same unit. Must precede any file registering a breach target. -->
+<script src="src/systems/breach.js?v=breach1"></script>
 <!-- tree connection-law registry + CBZ.treeAudit() — must precede every
      vegetation builder (they register planted parts into it) -->
 <script src="src/world/treeaudit.js?v=allmain1"></script>

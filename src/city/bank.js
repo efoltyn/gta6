@@ -1509,6 +1509,34 @@
     lot._vaultRoom = v;
     VAULTS.push(v);
     VTALLY.built++;
+
+    /* ---- THE DOOR STATES ITS PRICE IN POUNDS (systems/breach.js) ----------
+       The vault already took blast damage from ANY explosion within 7.5 m
+       (installVaultBlastWrap, below) — which is right for a rocket that
+       happens to land nearby, and wrong as the whole story, because real
+       doctrine is unambiguous that what opens a door is a charge IN CONTACT
+       with it. So the standoff path is untouched (a hit still chips the hp,
+       still says "the door held (x%)"), and a CONTACT charge now gets a
+       second, decisive answer priced in the SAME UNIT the prison's yard door
+       uses: pounds of C4.
+
+       The tiers fall out of the hp the vaults already carry — a branch door
+       (820) is the one-man row, the count room (1120) wants two abreast, and
+       the reserve (1900) wants the wide breach. With one 5 lb brick per
+       charge that means the reserve needs TWO stuck side by side, which the
+       det-cord clustering in city/explosives.js makes a real decision rather
+       than a lookup. Nothing here knows what C4 is. */
+    if (CBZ.registerBreachTarget) {
+      const lb = v.tier === "reserve" ? 10 : (v.tier === "count" ? 7 : 5);
+      v._breachReg = CBZ.registerBreachTarget({
+        id: "bank-vault-" + v.tier,
+        lb: lb,
+        reach: 3.2,
+        at: function () { return { x: v.x, y: (v.y || 0) + 1.2, z: v.z }; },
+        done: function () { return !!v.open; },
+        defeat: function () { vaultBreach(v, "blast", CBZ.player); },
+      });
+    }
     return v;
   };
 
@@ -1820,6 +1848,12 @@
     if (CBZ.CONFIG.BANK_VAULT_V1 === false) return;
     const A = city || CBZ._settlementArena || (CBZ.city && CBZ.city.arena) || null;
     if (!A) return;
+    // drop the old generation's breach registrations before the list is
+    // wiped, or systems/breach.js keeps aiming charges at vaults that no
+    // longer exist (and breachAudit().targets climbs every rebuild).
+    if (CBZ.unregisterBreachTarget) for (let i = 0; i < VAULTS.length; i++) {
+      if (VAULTS[i]._breachReg) CBZ.unregisterBreachTarget(VAULTS[i]._breachReg);
+    }
     VAULTS.length = 0; DRAWERS.length = 0;
     VTALLY.built = VTALLY.breached = VTALLY.blasted = VTALLY.insider = 0;
     VTALLY.bags = VTALLY.bagged = VTALLY.refused = 0;

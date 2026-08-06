@@ -679,7 +679,7 @@
 
   // a real EXPLOSION (super-fast car-on-car, grenades later, etc.): fireball +
   // smoke + shockwave + white flash + blast damage to everyone in radius. Reusable.
-  CBZ.cityExplosion = function (x, z, opts) {
+  function cityExplosionCore(x, z, opts) {
     opts = opts || {};
     const power = opts.power || 1, R = (opts.radius || 6) * power, byPlayer = !!opts.byPlayer;
     const P = Math.min(2.2, power);            // visual scale is clamped so huge blasts stay cheap
@@ -854,7 +854,12 @@
         applyBlastDamage(x, z, gR, power, byPlayer, null, null, cause);
       }
     }
-    if (CBZ.cityEvent) CBZ.cityEvent("explosion", { x: x, z: z, panic: 10 * power, damage: 8 * power }, { silent: true, noWanted: true });
+    // The world-state ledger (city/worldstate.js) is the CITY's persistent
+    // truth — panic, damage, repair debt, insurance. A rocket fired in the
+    // prison yard or on the disaster island must not write into it. Before the
+    // blast was shared this line was unreachable outside city mode, so adding
+    // the gate is a no-op there and a correctness guard everywhere else.
+    if (CBZ.cityEvent && (!CBZ.game || CBZ.game.mode === "city")) CBZ.cityEvent("explosion", { x: x, z: z, panic: 10 * power, damage: 8 * power }, { silent: true, noWanted: true });
 
     // ---- STRUCTURAL COUPLING (the one place a blast wounds a building) --------
     // EVERY ordnance routes through cityExplosion (RPG, grenade, C4, airstrike),
@@ -878,15 +883,43 @@
     // (power ≳1) carves; the heli ember (power 0.2, noDamage) and tiny car-pops
     // must NOT punch holes — noDamage is skipped outright, weak blasts scar at
     // most. CITY-ONLY (cityFracture.blastAt self-guards mode==="city").
+    // ANTI-DOUBLE-CARVE, SCOPED. The skip below exists because buildings.js's
+    // wrap on CBZ.cityExplosion runs structuralBlast->blastAt AFTER this
+    // returns. That wrap only runs when the call came through the WRAPPED
+    // chain — and outside the city, systems/fpsmode.js detonates through
+    // CBZ.cityBlastCore precisely to avoid the chain, so nothing runs after us
+    // and suppressing here would mean no prison wall ever opens. Test the mode,
+    // not just the marker: in city this is byte-identical to before.
+    const chainWillCarve = (!CBZ.game || CBZ.game.mode === "city") &&
+      !!(CBZ.cityExplosion && CBZ.cityExplosion._structWrapped);
     if (!opts.noDamage && power >= 1.0 && CBZ.cityFracture && CBZ.cityFracture.blastAt
-        && !(CBZ.cityExplosion && CBZ.cityExplosion._structWrapped)) {
+        && !chainWillCarve) {
       // hole radius by ordnance class (blastAt re-floors it to a room-exposing
       // size); search left to blastAt's radius-scaled default so a blast a few
       // units off the wall still couples to the NEAREST facade at this height.
       const hr = power >= 1.3 ? Math.min(3.4, 2.6 + (power - 1.3) * 0.7) : 1.6;
       try { CBZ.cityFracture.blastAt({ x: x, y: cy, z: z }, hr, { power: power }); } catch (e) {}
     }
-  };
+  }
+  CBZ.cityExplosion = cityExplosionCore;
+
+  // ---- THE UNWRAPPED BLAST (CBZ.cityBlastCore) ------------------------------
+  // CBZ.cityExplosion is the head of a WRAPPER CHAIN — buildings.js hangs the
+  // structural ledger on it, bank.js the vault-door coupling, construction.js
+  // the site walls, wildlife.js the herd panic, armored.js the truck hull,
+  // demolition.js, water_impact.js. Every one of those couples the blast to a
+  // CITY record, and once a session has visited the city the wraps stay
+  // installed for the rest of it — so calling the chain from the prison yard
+  // would run six city couplings against lists that describe a different world.
+  //
+  // This handle is the blast ITSELF, before any of them: the fireball, the
+  // smoke, the shockwave, the sound, the shake, the scorch and the shared
+  // damage sweep — none of which reads a city record. Shared modes detonate
+  // through THIS (systems/fpsmode.js's rocket), the city keeps detonating
+  // through the full chain, and neither has to know about the other. Do not
+  // wrap this handle; wrap CBZ.cityExplosion, which is what everything already
+  // does.
+  CBZ.cityBlastCore = cityExplosionCore;
 
   // Shared blast-damage application — the SAME path cityExplosion always used:
   // crowd circle-kill, peds, cops, and the player, scaled by distance/power.
@@ -895,16 +928,40 @@
   function applyBlastDamage(x, z, R, power, byPlayer, force, fling, cause) {
     force = force == null ? 9 : force; fling = fling == null ? 6 : fling;
     cause = cause || "explosion";
+    // ---- THE OTHER ROSTERS (2026-08-06) ---------------------------------
+    // Everything below this line names a CITY list. A bullet already knew
+    // better — systems/fpsmode.js's target scan reads cityPeds/cityCops in the
+    // city and guards/npcs everywhere else — but a BLAST never learned, so an
+    // RPG in the prison passed through a room full of men. CBZ.blastWorldActors
+    // (systems/modecaps.js) applies this exact shape (a lethal core at 0.55R,
+    // the player on a linear falloff to R) to whichever roster the current mode
+    // actually owns, and routes each hit through that mode's OWN kill funnel —
+    // CBZ.aiKill for the prison, gungame.hurt for a match bot, surv.hurtRadius
+    // for the island. It is a deliberate NO-OP in city mode so the two sweeps
+    // can never double-kill the same pedestrian.
+    if (CBZ.blastWorldActors) {
+      try { CBZ.blastWorldActors(x, 0, z, R, power, { byPlayer: byPlayer, force: force, fling: fling, cause: cause }); }
+      catch (e) {}
+    }
     // REALISTIC LETHALITY: a blast is fatal near ground zero, not across its whole
     // visual / ground-shock radius. Killing EVERYONE within R wiped out crowds of
     // bystanders most of a block away (filmed "kills a huge amount of people").
     // Lethal core ≈ 0.55R (≈0.3× the area, so ~3× fewer deaths); past it, spared.
     const LR = R * 0.55, LR2 = LR * LR;
-    if (CBZ.cityCrowdCircleKill) CBZ.cityCrowdCircleKill(x, z, LR, { byCar: false, quiet: true, fromX: x, fromZ: z, noCrime: !byPlayer, byPlayer: byPlayer, cause: cause });
-    for (const p of (CBZ.cityPeds || [])) { if (p.dead) continue; const dx = p.pos.x - x, dz = p.pos.z - z; if (dx * dx + dz * dz <= LR2 && CBZ.cityKillPed) CBZ.cityKillPed(p, { fromX: x, fromZ: z, force: force, fling: fling, byPlayer: byPlayer }, cause); }
-    for (const c of (CBZ.cityCops || [])) { if (c.dead) continue; const dx = c.pos.x - x, dz = c.pos.z - z; if (dx * dx + dz * dz <= LR2 && CBZ.cityHurtCop) CBZ.cityHurtCop(c, 9999, { fromX: x, fromZ: z, force: force, fling: fling, byPlayer: byPlayer }); }
-    const PL = CBZ.player;
-    if (PL && !PL.dead) { const dx = PL.pos.x - x, dz = PL.pos.z - z, d2 = dx * dx + dz * dz; if (d2 < R * R) { const dmg = Math.round(85 * power * (1 - Math.sqrt(d2) / (R + 0.01))); if (dmg > 0 && CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(dmg, x, z, cause === "nuclear blast" ? "killed by a nuclear blast" : "caught in an explosion", false, null, false); } }
+    // CITY ROSTERS ONLY. The prison arena overlaps the city's coordinate space
+    // around the origin — the same overlap city/mode.js stamps `_city` on its
+    // colliders to fix — so a blast in the yard sitting on top of a stale
+    // pedestrian list would have killed people who are not in this world, and
+    // cityHurtPlayer would have run the CITY's death instead of the prison's
+    // haul-to-your-cell. The non-city rosters were handled above.
+    const cityRoster = !CBZ.game || CBZ.game.mode === "city";
+    if (cityRoster) {
+      if (CBZ.cityCrowdCircleKill) CBZ.cityCrowdCircleKill(x, z, LR, { byCar: false, quiet: true, fromX: x, fromZ: z, noCrime: !byPlayer, byPlayer: byPlayer, cause: cause });
+      for (const p of (CBZ.cityPeds || [])) { if (p.dead) continue; const dx = p.pos.x - x, dz = p.pos.z - z; if (dx * dx + dz * dz <= LR2 && CBZ.cityKillPed) CBZ.cityKillPed(p, { fromX: x, fromZ: z, force: force, fling: fling, byPlayer: byPlayer }, cause); }
+      for (const c of (CBZ.cityCops || [])) { if (c.dead) continue; const dx = c.pos.x - x, dz = c.pos.z - z; if (dx * dx + dz * dz <= LR2 && CBZ.cityHurtCop) CBZ.cityHurtCop(c, 9999, { fromX: x, fromZ: z, force: force, fling: fling, byPlayer: byPlayer }); }
+      const PL = CBZ.player;
+      if (PL && !PL.dead) { const dx = PL.pos.x - x, dz = PL.pos.z - z, d2 = dx * dx + dz * dz; if (d2 < R * R) { const dmg = Math.round(85 * power * (1 - Math.sqrt(d2) / (R + 0.01))); if (dmg > 0 && CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(dmg, x, z, cause === "nuclear blast" ? "killed by a nuclear blast" : "caught in an explosion", false, null, false); } }
+    }
 
     // ---- B5: STRUCTURAL BLAST DAMAGE — every player-built piece (systems/
     // pieces.js) within the FULL blast sphere R (not the reduced ped lethal

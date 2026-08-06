@@ -2632,3 +2632,410 @@ work.** For this change that is a throwaway toast probe (~90s, and it caught the
 old behavior) plus `node --check`. Run the math gate when the change can move
 what the math gate measures — world building, sim ticks, determinism — not as a
 tax on editing a sentence.
+
+## 2026-08-06 — GANG CITY IS THE ENGINE (the RPG that would not blow up, the chair nobody could jump over)
+
+Owner: *"In prison mode the RPGs don't blow up… but in Gang City the RPGs blow
+up beautifully. And in Gang City the players and NPCs interact with walls and
+with assets in front of them, like a chair, or something to jump over — they
+interact with that better than prison mode. So prison mode, gun game and natural
+disaster can all use these elements from Gang City. Gang City becomes like this
+engine and this asset farm."*
+
+**BOTH SYMPTOMS WERE ONE LINE, TWICE.** Neither was a missing feature and
+neither needed new geometry, new animation or new damage code:
+
+| symptom | the whole cause |
+|---|---|
+| an RPG in prison/gun game/disaster gives a camera shake and nothing else | `systems/fpsmode.js:2498` — the ENTIRE detonation payload sat inside one `if (CBZ.game.mode === "city")`. Outside it, only `CBZ.shake` + `doHitstop` remained. The prison gun room stocks an **RPG LAUNCHER and a 40 MM LAUNCHER** on the wall (`world/gunroom.js:637-638`), so the owner was taking a live weapon off a rack and firing a dud. |
+| nobody outside the city can vault a chair | `systems/physics.js:624` — `probeTraversal` returns `null` on its first line unless mode is city. The prison's own mess tables and stools **already register exactly the `y0/y1` + `ref` colliders the probe reads** (`world/cafeteria.js:320,342`). Nothing was missing but permission. |
+
+**WHAT IT SAYS ABOUT THE CODEBASE.** `mode === "city"` appears **583 times**.
+Most are honest — they guard a city RECORD (`cityCars`, `city.arena`, the wanted
+ladder, the world-state ledger, the fracture chain) and must stay. A minority
+guard a shared ENGINE verb, and those are bugs wearing the same clothes. The
+repo had already diagnosed this class once and cured it in one domain: the water
+oracle (`waterSharedAudit().cityGated`, pinned 0) — *"not because the effects
+were city-specific but because `cityWaterAt` only ANSWERED for the city."* The
+GPT handoff put it in one sentence: **"a hard-coded mode enum is not the final
+capability contract."** Same disease, two more organs.
+
+**THE BLOCK: `src/systems/modecaps.js`** — `CBZ.modeHas(cap)` replaces the enum
+at capability sites; `CBZ.worldActors()` is the mode's live roster;
+`CBZ.hurtWorldActor()` routes a hit to the funnel the mode ALREADY owns
+(`aiKill` for prison, `gungame.hurt`, `surv.hurt`, `cityKillPed`); and
+`CBZ.blastWorldActors()` couples a blast to that roster. It is a switchboard,
+never a second ledger — which is the line the GPT handoff drew (*"do not call a
+city-only local damage helper from prison and declare parity"*). `MODE_CAPS_V1
+= false` makes `modeHas` itself answer `mode === "city"`, reverting every
+migrated site at once. Six consumers migrated in the same change (Block Law
+rule 3): physics ×3, fpsmode, actorcollide, crashfx, gungame, survivorbot.
+
+**FOUR THINGS FOUND BY READING, NOT BY THE GATE:**
+1. **`CBZ.cityExplosion` is a WRAPPER CHAIN, not a function.** Six files
+   (buildings' structural ledger, bank vault doors, construction walls,
+   wildlife, armored hulls, demolition) hang city couplings on it and they stay
+   installed for the whole session once the city is built. Detonating the chain
+   from the prison yard would run six city couplings against lists describing a
+   different world. Fixed by exporting **`CBZ.cityBlastCore`** — the blast
+   itself, before any wrap. Shared modes use the core; the city keeps the chain.
+2. **Prison actors have no `.pos`.** They ARE their `THREE.Group`. Even with the
+   gate open, `probeTraversal`'s `!actor.pos` guard would have refused every
+   guard and inmate. Fixed by reading `a.pos || a.group.position` inside the
+   traversal — **NOT** by aliasing `.pos` onto the record: `weather.js:763`,
+   `tornado.js:1004` and `combat_iq.js` all use `!a.pos` as their "not a
+   positioned actor" test, so the alias would have silently switched the prison
+   cast onto city-shaped paths.
+3. **`.speed` means different things.** For a city ped it is the live per-frame
+   speed; for a prison inmate it is the BASE walking speed, read back as
+   `CBZ.aiThink(n, dt) || n.speed`. `stepTraversal` writing to it would have
+   permanently re-tuned every inmate to whatever pace it last vaulted at. New
+   `speedField:false` opt.
+4. **`CBZ.npcStepLedge` has ZERO callers** — written city-only in a past wave,
+   never adopted, still labelled SECONDARY in its own header. Migrated so it is
+   not born city-only a third time, and NAMED as prose in its comment. The Block
+   Law's own failure mode, live in the file.
+
+**THE PRISON CAST GOT THE VAULT FROM ONE HOOK.** `city/peds.js` calls the
+traversal from inside its own `move()`, but the prison's movers are five
+separate `group.position.x += …` sites across `entities/npc.js` and
+`entities/guards.js`. `systems/actorcollide.js` already runs over the whole cast
+every frame right after they move, expressly to stop them walking through
+things — so the vault is wired there, and guards + inmates got it with **no edit
+to a single mover**.
+
+**THE BUG THAT COST A PROBE ROUND, and it is the interesting one.** First wiring
+measured heading/speed from pre-clamp to pre-clamp. That reads **~0 for exactly
+the actor this exists for** — a body grinding a table face has its whole step
+eaten by the clamp, so the probe never fired (`starts` delta 0 across 19 props,
+while `probes` climbed to 279). The reference sample has to be taken AFTER the
+clamp, which makes the difference the step the mover TRIED to take. Second bug
+in the same call: `probeTraversal` wants a UNIT heading and refuses `dl < 0.5`,
+so a raw 0.087 m/frame displacement was refused every time.
+
+**MEASURED** (`tools/mode-engine-check.mjs`, new, seed 90210, escape mode, one
+boot, no rendered frames — and it runs BOTH sides, because a probe that passes
+before and after proves nothing):
+
+| question | `MODE_CAPS_V1=1` | `=0` (revert) |
+|---|---|---|
+| waist-high prison colliders the SHARED probe accepts | **3 / 19** (`vault rise=0.85 span=1.24`) | 0 / 19 |
+| the player's own `start()` on a prison prop | **`mantle over 0.95m`** | none |
+| a HUNTING guard, driven by guards.js's OWN mover | **`vault over 0.85m`** | none |
+| RPG blast: of 6 prison cast in the lethal core | **4 dead** (5 reached) | 0 |
+| fireball draws landing in the scene | **+117 children** | — |
+| `modeCapsAudit().unrouted` | **0** | 0 |
+| console errors | 0 | 0 |
+
+3-of-19 is not a miss: the other sixteen are benches jammed against walls whose
+LANDING is blocked, and `landingClear` correctly refuses them. Routes resolved:
+city→`applyBlastDamage`, escape→`aiKill + capture.hurtPlayer`,
+gungame→`gungame.hurt`, survival→`surv.hurtRadius`.
+
+**Ratchet added:** `CBZ.modeCapsAudit().unrouted` — modes declared blast-capable
+whose PEOPLE a detonation cannot reach. It RESOLVES the real funnel rather than
+reading its own table, so a file dropping out of `index.html` or a mode losing
+its damage path pushes it up. **Pinned at 0** in `tools/math-gate.mjs`
+(`MATHGATE: ok`, determinism ok, city untouched).
+
+**STILL OPEN, named rather than quietly left** (each is a real finding from this
+read, deliberately out of scope):
+- `systems/actorcollide.js` clamps the prison cast with `CBZ.collide(pos, r)` —
+  **no `feetY`/`headY`**, so every height-banded collider acts full-height for
+  guards and inmates. City peds pass their span. 45 banded colliders in
+  `src/world/`. Changing it opens paths and needs the owner's eyes, not a number.
+- The city-world half of a blast — glass, the facade carve, the walkable breach
+  — is still `mode === "city"` by design. A prison wall that can be breached is
+  where that gate comes down next.
+- `CBZ.npcStepLedge` still has zero consumers. Un-gating it did not fix that;
+  only a mover calling it will.
+
+## 2026-08-06 (same day, follow-up) — SHOULD A WALL BREAK? THE CITY ALREADY SAID YES
+
+Owner: *"Should a wall be breakable by explosion? Should holes open up in walls
+with explosion. Look it up."*
+
+**LOOKED IT UP. The city has a complete, mature breach system** — not a stub.
+`city/buildings.js` `carveHole` is the primitive (hide the wall mesh, splice its
+AABB out, rebuild left/right flanks + sill + header as real height-gated
+colliders with LOS, dress an inset pocket, a darker back wall, a concrete floor
+slab, a glowing ceiling light, blast-shoved furniture, rebar hanging from the
+header, and 8–13 jittered concrete prisms merged into one fractured rim).
+`city/fracture.js` is the policy: `blastAt` sizes the hole by ordnance class
+(RPG/airstrike floors to r≈3.4–4.6, grenade r≈2.2), `chewWall` grinds a murder
+hole from 25 rifle-class rounds in one 1.2 m cell, 24 live holes with plywood
+eviction of the oldest, coordinate-stable persistence, and an `onHole`
+broadcast so multiplayer guests land the same hole. Its own header states the
+why: *"an RPG that permanently remodels a bank facade is money ON the wall."*
+
+**I WAS WRONG THIS MORNING AND THE MEASUREMENT SAID SO.** The previous entry
+closed with "the city-world half of a blast is still city-gated by design — a
+breachable prison wall is where that gate comes down next." The gate was never
+the blocker. **Measured** (escape, seed 90210, live colliders):
+
+| `carveHole`'s five filters | prison colliders surviving |
+|---|---:|
+| total (non-city) | 240 |
+| has a `ref` mesh | 214 |
+| has a `y0`/`y1` band | **45** |
+| band ≥ 1.6 m tall | **8** |
+| thinner than 0.9 m | **0** |
+| opaque | **0** |
+
+A forced carve on the biggest wall in the block, with the mode gate bypassed,
+returned **`REFUSED (no eligible wall collider)`**. Deleting the gate alone
+would have shipped a no-op. Meanwhile **73 prison colliders ARE wall-shaped by
+geometry** (≥1.6 m tall measured off the mesh, ≤0.9 m thin, opaque) and **0 of
+those 73 declare a band** — because `CBZ.addBox` (`world/materials.js:196`)
+attaches `y0`/`y1` only when the caller asks, and the prison predates that
+contract. `carveHole`'s FIRST test is `c.y1 == null`.
+
+**THE FIX IS THE SAME ONE PHYSICS ALREADY SHIPPED.** `physics.js:338`
+`colliderVerticalBand` derives a band off `c.ref`'s Box3 for exactly this case —
+*"legacy solid props that predate the y0/y1 collider contract but still carry
+the actual Mesh they block with."* `carveHole` now does the same, so 73 prison
+walls became carvable with no world-file edits and no new geometry. Same shape
+as the vault finding, one layer deeper: **the capability was shared; the DATA
+did not meet its contract, and the mode gate was hiding that.**
+
+**THE DESIGN CALL, and it is the whole reason this is not just an un-gating.**
+The prison IS the escape game. Doctrine LAW 1 argues hard FOR interior
+breaching — the gun room worked because it was locked and it changed your
+CATEGORY, and the RPG is hanging on that gun room's wall
+(`world/gunroom.js:637`), so key → gun room → RPG → blow your way through the
+block is the gun-room grammar chained into itself. But applied to the OUTER wall
+it collapses the escape into one verb and orphans the authored gradient the
+keycard, the maintenance crawls, the ceiling hatches, the drainage and the
+culvert (`world/escape_routes.js`) exist to be. So: **interiors open, the
+perimeter holds** — one `noBreach` flag stamped in `world/yard.js`'s `wall()`
+helper, which every one of the compound's perimeter segments already goes
+through. Delete that line and the prison becomes a jailbreak sandbox; that is
+deliberately a one-line decision.
+
+TWO SUB-GATES had to move with `blastAt` or the change would have been a
+silent no-op: `drainDefer` (a queue drained by a STRICTER test than the one
+that filled it eats every carve) and `chewWall`. And `cityBlastCore`'s
+anti-double-carve skip had to be scoped to city mode — it exists because
+buildings.js's wrap carves AFTER the core returns, but outside the city
+fpsmode detonates through the core precisely to avoid that wrap, so the skip
+would have meant no prison wall ever opened.
+
+**MEASURED AFTER** (`tools/mode-engine-check.mjs`, now covering breach; both
+sides run):
+
+| question | `MODE_CAPS_V1=1` | `=0` (revert) |
+|---|---|---|
+| eligible (unflagged, carvable) prison walls | **58** | 58 |
+| perimeter segments carrying `noBreach` | **10** | 10 |
+| flagged wall vs the same wall unflagged | **`flagged=REFUSED / unflagged=CARVED`** | same |
+| RPG on an interior wall opens a hole | **yes** (mesh hidden, AABB spliced out, 5 banded remnants) | no |
+| a body can walk through the hole | **yes** (`CBZ.collide` no longer pushes it out) | no |
+| perimeter after 3 point-blank rockets | **held** | held |
+| console errors | 0 | 0 |
+
+The `flagProof` control matters: the real perimeter is **1 m thick** and
+`carveHole` already refuses anything over 0.9 m, so a standing outer wall proves
+nothing on its own. Flagging an ELIGIBLE wall and watching it refuse — with the
+unflagged carve as the control — is what actually proves the policy works.
+
+`MATHGATE: ok` (329/182/206, 400 ticks, determinism ok) — the city path is
+byte-identical; `carveHole`'s declared-band hot path returns the collider
+itself, so a city wall never touches the new derivation.
+
+**STILL OPEN:** `fractureBurst` and the ledger `drain()` remain city-gated —
+the first has no non-city caller, the second replays a CITY save's hole ledger,
+so neither is the same bug. Prison holes are therefore **not persisted across a
+run** yet; that needs an escape-side ledger, not a gate change.
+
+## 2026-08-06 (third pass) — "THE RPG RESPONSE IS FAKE, YOU CAN'T WALK THROUGH IT"
+
+Owner: *"You can shoot a window in Gang City and walk through it, but if you
+shoot a building with an RPG the response is fake — you can't actually walk
+through the building after shooting it with an RPG. Look in real life if you
+can do that."*
+
+**REAL LIFE FIRST, because it changes what the right answer even is.** A
+shaped-charge (HEAT) RPG round does NOT make a doorway. The copper jet is
+focused to defeat armour, so the entry hole is roughly 30 cm or less —
+practitioners report never seeing an RPG hole big enough to use as personnel
+access. The PG-7VR will punch 1.5 m of reinforced concrete and 2 m of
+brickwork, but that is PENETRATION, not an opening. The thermobaric TBG-7V is
+smaller still at the wall (30–40 mm) because its job is to inject the fuel-air
+cloud inside. What actually makes a man-sized hole is a CONTACT DEMOLITION
+CHARGE, and the doctrine is precise about it: against non-reinforced concrete,
+2 lb of C4 makes a mousehole, **5 lb makes a hole a man can move through**,
+7 lb takes two men abreast. The tactic has a name — **mouse-holing** — and it
+is in FM 3-06.11, FM 90-10-1 App M and ATP 3-21.8 App H.
+
+So the physically honest design is: **the RPG punches and wrecks; C4 breaches.**
+The game already ships C4 (`city/explosives.js`) with no categorical identity —
+this is the verb it has been missing, and it is exactly the LAW-1 "categorical
+asymmetry" reward. Recorded as the design option; NOT built this pass.
+
+**THE BUG IS REAL AND SEPARATE, and it is worse than the design question**,
+because the game already DRAWS a doorway-sized hole and then refuses passage.
+Measured on city lot (-130,-778), RPG at r = 3.94 (the value `fracture.js`
+deliberately floors so the wound reads as "a blown-open apartment"):
+
+| what the carve did | value |
+|---|---|
+| opening WIDTH | **0.50 m** |
+| opening bottom | **0.55 m** above the floor |
+| neighbours left solid inside the drawn hole | **3**, of which `visible === false` on **3** |
+| walk from 2.5 m outside to 2.5 m inside | **blocked at 38%** |
+
+Three independent faults, all in `carveHole`:
+1. **The hole is sized to ONE BOX, not to the ordnance.** `gapW` is clamped by
+   `len * 0.8` and then `u0/u1` are clamped again to the struck box's own
+   extent. A city facade is not one wall, it is a run of SHORT segments — the
+   one the rocket struck was 0.6 m long. A 7.9 m blast cut a 0.5 m slit. A body
+   is 1.1 m across. **The prison never showed this because its walls are single
+   5.5 m boxes** — which is why the escape-mode probe passed that morning while
+   the city was broken.
+2. **The "no ankle lip" clamp measures against the struck box's own `y0`**, and
+   a facade is a stack of courses, so the box starts 0.55 m up with a separate
+   SILL course beneath. `STEP_UP` is 0.45, so the player could not step over
+   the lip left in the doorway.
+3. **`carveHole` removed exactly ONE collider** — the box it struck — leaving
+   piers, mullions and sill runs standing inside the hole it had just drawn.
+   Three of the four blockers were ALREADY `visible === false`: the repo's own
+   named anti-pattern, invisible force fields, sitting in the doorway.
+
+Fixed: the span comes from the ordnance (bounded 9 m, and floored at the old
+value so no existing carve can get SMALLER); the opening walks DOWN the courses
+directly beneath it to the real floor (max 4 courses / 1.4 m, so a breach two
+storeys up is unchanged); and the opening is CLEARED — neighbours wholly inside
+are lifted out (and hidden if no other live collider shares their mesh),
+neighbours that run past are clipped to the surviving side(s). Every edit is
+recorded on the rec and undone by `resetBreaches`. After: **gap 7.88 m, bottom
+0.00 m.**
+
+TWO BUGS THE WORK ITSELF INTRODUCED, both caught by instruments, both worth
+recording because they are the same species:
+- The first clip could produce an **inverted AABB** (`w: -0.13`) when the gap
+  swallowed one end — a box whose min exceeds its max, sitting exactly in the
+  doorway. Now a survivor under 0.12 m means the collider is removed outright.
+- Widening the opening to ordnance size let **a neighbour's carve delete the
+  prison perimeter**: the blast cannot carve it directly (1 m thick, over the
+  0.9 m limit) but the sweep had no `noBreach` check, so it went out through
+  the side door. `tools/mode-engine-check.mjs` failed with "PERIMETER
+  BREACHED — the escape game is now one verb" on the first run after the
+  change. That is the whole reason that assertion exists.
+
+**WHAT IS NOT PROVEN, stated plainly.** A population probe over 12 eligible
+ground-floor walls across 6 lots read **3/12 walk-through BEFORE and 3/12
+AFTER**. The change did not move that number, and the number is not
+trustworthy either: the failures report `depthIn: -2.42`, i.e. blocked 2.4 m
+OUTSIDE the target wall — the probe's start points land inside adjacent
+recessed facades. It is measuring probe placement, not the game. The one clean
+end-to-end case (a 6.9 m mid-facade wall) walks through both before and after.
+So: the three faults above are each measured and fixed, the numbers that
+describe the hole moved decisively (0.50 → 7.88 m wide, 0.55 → 0.00 m bottom),
+and **the end-to-end "can I now walk into any building I rocket" claim is NOT
+established.** The likely remaining obstacle is the building's INTERIOR
+structure — full-height `y 0..12.8`, 0.18 m piers sitting ~0.95 m behind the
+facade, deliberately outside the sweep's plane tolerance because deleting a
+building's structure is not this function's job.
+
+New instrument: **`CBZ.cityBreachAudit()`** publishes what the last carve
+actually did (hit point, radius, result, struck band, lip before/after, gap U/V,
+cleared + clipped counts). Every number in the table above was reconstructed by
+a probe walking a body at the hole; this turns the next "the hole doesn't work"
+into one call. Note the trap it exposed: window openings carve constantly, so a
+blast-class carve must be selected by radius, not by reading "the last one".
+
+`MATHGATE: ok`, determinism ok. `MODE-ENGINE: ok` both sides.
+
+## 2026-08-06 (fourth pass) — THE CHARGE TABLE: real math as the connective tissue
+
+Owner: *"What we discovered is a math, a real math, that should be put into
+Gang City and then put throughout my games — which makes a reason for
+connecting the engine to the games."* And then the sharper one: *"the parts of
+buildings that FAKE blow up — with enough C4 actually blowing up, or enough
+rockets actually opening a man-sized hole. Your research proved it."*
+
+**THE INSIGHT, and it is his.** `systems/modecaps.js` connected the engine to
+the scenarios by CAPABILITY. This connects them by FACT — a number that is true
+in a prison, a bank and a burning island because it is true in the world. So
+`src/systems/breach.js` publishes US Army urban-breaching doctrine (FM 3-06.11
+ch.8 · FM 90-10-1 app.M · ATP 3-21.8 app.H) and every game prices itself in
+**one unit: pounds of C4.** 2 lb mousehole · **5 lb one man** · 7 lb two
+abreast · 10 lb wide breach. The tactic has a name, MOUSE-HOLING, and it is
+older than the medium — Stalingrad, 1942.
+
+**CONTACT vs STANDOFF is the other half, and it is what makes the RPG honest
+without nerfing it.** A shaped charge PENETRATES (PG-7VR: 1.5 m of reinforced
+concrete, 2 m of brick) and leaves a ~30 cm hole nobody walks through; what
+opens a wall is explosive touching it. So contact couples at 1.0 and standoff
+at `STANDOFF_COUPLING = 0.35` — deliberately generous to the rocket, since a
+strict 0.2 would want eleven of them. The ratio IS the design: **the rocket is
+the loud way, the charge is the right way.**
+
+**"FAKE BLOW UP" WAS LITERALLY TRUE AND THIS IS THE FIX.** A hit either opened
+a wall or did nothing *forever* — `carveHole` refuses anything over 0.9 m
+thick, so a wall that refused the first rocket refused the hundredth. Now every
+detonation BANKS mass into a world cell (`CBZ.breachDeliver`), the cell
+remembers with **no decay** (concrete does not heal), and crossing the 7 lb /
+10 lb rows raises `carveHole`'s thickness ceiling so piers go too.
+
+**MEASURED** (`tools/breach-check.mjs`, new; seed 90210; runs city, escape and
+the flag-off control):
+
+| | city | escape | `BREACH_TABLE_V1=0` |
+|---|---|---|---|
+| charge table rows | 2/5/7/10 | 2/5/7/10 | — |
+| **one 5 lb brick, contact** | **opens** | **opens** | (pre-existing carve) |
+| **rockets to open the same wall** | **7** | **7** | never |
+| thick wall refuses a single hit | yes | yes | yes |
+| **bricks to open that thick wall** | **2** | **2** | never |
+| vault opens at its declared price | 1 brick (branch = 5 lb) | — | never |
+| `noBreach` perimeter at **100 lb** | held | held | held |
+| console errors | 0 | 0 | 0 |
+
+**THE BUG THE MEASUREMENT CAUGHT, and it is the interesting one.** The ledger
+originally ZEROED on a successful carve — "the wall is open, the debt is paid".
+A facade is LAYERS, so the first 5 lb opened the thin skin, the counter reset,
+and the total could never climb to the rows that raise the thickness ceiling: a
+thick pier behind a thin panel was unopenable **at sixty pounds**. Keeping the
+running total fixed it in one line (each wall still opens only once via
+`carveHole`'s own `_breached`), and it is now a comment in the file so nobody
+"tidies" it back.
+
+**THE PROBE'S OWN TWO TRAPS**, both worth the shelf note: it first picked a
+wall whose declared band is `y 13.7–15.18` and detonated at a hard-coded 1.4 m,
+then reported "a thick wall never opened, even at 60 lb" — a test failure
+wearing a code failure's clothes. Select by the DECLARED `y0/y1` and detonate at
+that band's mid-height. And the revert control asserted too much: `=0` reverts
+to BEFORE `breach.js`, not to "nothing ever carves", because the city's own
+blast→structuralBlast chain predates all of this.
+
+**WHAT IT CONNECTS TO, which was the owner's actual question.** A game declares
+a defeatable thing in ONE line and the charge never learns what a door is:
+`CBZ.registerBreachTarget({id, at, reach, lb, defeat})`. Live today: the
+prison's locked yard door at 5 lb — *a second answer beside the keycard*, and
+the gun-room grammar chained, because the RPG and the C4 are both on the armory
+wall — and every bank vault at branch 5 / count 7 / reserve 10. Charges within
+2.5 m fire **together and their masses ADD** (det cord: FM 90-10-1 is explicit
+that breaching charges are primed for *simultaneous* detonation), which is how
+two bricks open a reserve vault and why a door priced in pounds is a decision
+rather than a lookup.
+
+**C4 ITSELF** left city-only: capability-gated like everything else, it now
+sticks to PEOPLE through `CBZ.worldActors()` (the same switchboard the blast
+damage uses), and a tap with nothing in reach THROWS it along your look arc —
+a strict superset of the old drop-at-your-feet.
+
+**THE DETONATOR IS A PHONE APP.** First attempt modelled a clacker box into the
+off-hand; the owner: *"Detonator not in hand. It should be on your phone. We
+already have a phone code, and it's good."* He was right and the viewmodel was
+deleted along with the seam it needed — `city/phone.js` already had the modal,
+the card grammar, the click delegation and the key, so DEMOLITION is a card
+showing pounds out, bricks left, and **what the nearest target costs**, which is
+the shared table made visible in your hand. Hold-[B] stays the fast path and is
+the only one inside the wire: a man in a prison yard does not have a phone.
+
+Ratchet: `CBZ.breachAudit().unreachable` — targets priced above the heaviest row
+in the table, i.e. a door the player can never open however many charges they
+stack. **Pinned at 0**; `targets` also pinned ≥1 so a rebuild that silently
+stopped registering shows up. `MATHGATE: ok`, `MODE-ENGINE: ok` both sides,
+`BREACH-CHECK: ok` city + escape + revert.

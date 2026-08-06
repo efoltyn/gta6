@@ -661,6 +661,41 @@
     }
   }
 
+  // ---- VAULT (systems/physics.js characterTraversal) ------------------------
+  // Another borrowed capability, not a new one. The probe was refused outside
+  // city mode until systems/modecaps.js turned the mode enum into a capability;
+  // the maps this mode borrows are FULL of the waist-high geometry it wants —
+  // the prison's mess benches and stools (world/cafeteria.js registers them
+  // with the exact y0/y1 + ref band the probe reads) and the disaster island's
+  // abandoned cars. A bot running a duel line now gets over them the same way
+  // the player does, off the same code, with no bot-side animation authored.
+  // `b.speed` here IS the live per-frame speed (b.baseSpeed holds the base), so
+  // the default speedField:true is correct — the traversal drives the animator.
+  function ggTraverse(b, dt) {
+    const T = CBZ.characterTraversal;
+    if (!T || !b.char || !(CBZ.modeHas && CBZ.modeHas("traverse"))) return false;
+    if (b._traversal) {
+      if (b.dead || b.ko > 0) { T.cancel(b, b.char, false, "interrupted"); return false; }
+      const owned = T.step(b, b.char, dt, true);
+      if (!b._traversal) b._ggTravT = 0.36;      // a beat before the next probe
+      return owned;
+    }
+    b._ggTravT = (b._ggTravT || 0) - dt;
+    if (b._ggTravT > 0 || !b.target) return false;
+    const tx = b.target.x - b.pos.x, tz = b.target.z - b.pos.z;
+    const dist = Math.hypot(tx, tz);
+    if (dist < 0.9) return false;
+    const spd = b.baseSpeed * (b.foe ? 1.35 : 1.0);
+    b._ggTravT = 0.12;
+    const started = T.start(b, b.char, tx, tz, {
+      speed: spd, radius: BOT_RADIUS,
+      height: (b.char.metric && b.char.metric.height) || 1.7,
+      allowTop: false, cars: false, npc: true, running: true,
+      sprinting: !!b.foe,
+    });
+    return !!(started && T.step(b, b.char, dt, true));
+  }
+
   CBZ.onUpdate(23.2, function (dt) {
     if (g.mode !== "gungame" || g.state !== "playing" || !gg.match) return;
     frame++;
@@ -687,6 +722,7 @@
       if (b.ko > 0) { botDeath(b, "player", "beaten cold"); continue; }
       if (gg.match.over) { b.speed = 0; continue; }
       if (CBZ.body && CBZ.body.busy(b)) continue;      // flung / knocked down → body owns it
+      if (ggTraverse(b, dt)) continue;                 // a vault owns the whole frame
       const dx = b.pos.x - camx, dz = b.pos.z - camz;
       const near = dx * dx + dz * dz < ANIM_DIST2;
       if ((frame + b.slice) % (near ? 3 : 7) === 0) think(b);
