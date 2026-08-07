@@ -63,8 +63,9 @@ building-damage verb saw an empty world. `CBZ.shake` lives in city-coupled
 explosions were silent and still.
 
 Flags `STUDIO_V1`. Ratchet `CBZ.studio.audit().missing` pinned at 0 by
-`tools/studio-check.mjs`; `--print` emits the catalog as the markdown a
-one-shot's system prompt is written against. Dogfood: `games/bomb-survivor.html`
+`tools/studio-check.mjs`; `--print` regenerates **`docs/ONE-SHOT.md`**, the ~150
+line system prompt a new mini-game is written against. Regenerate it whenever a
+pack or verb changes. Dogfood: `games/bomb-survivor.html`
 (A, 17 tags) beside `games/bomb-survivor-b.html` (B, 1 tag).
 
 ## THE MODE ENUM IS NOT A CAPABILITY CONTRACT — `CBZ.modeHas()`

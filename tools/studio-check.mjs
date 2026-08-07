@@ -6,8 +6,9 @@
 
    The only measurement that means anything for src/core/studio.js is whether
    a page that names its packs BOOTS. Not whether the manifest parses. So this
-   loads games/bomb-survivor.html — the page migrated from seventeen
-   hand-found script tags to one — in a real headless browser and asks:
+   loads games/bomb-survivor-b.html, the page that carries ONE script tag where
+   games/bomb-survivor.html carries seventeen, in a real headless browser and
+   asks:
 
      1. ONE TAG. The document really does carry a single authored <script src>,
         and the studio really did inject the rest.
@@ -54,7 +55,9 @@ if (process.argv.includes("--print")) {
   const st = await manifest();
   const rows = st.list();
   const out = [];
-  out.push("# THE STUDIO — what a one-shot HTML page can ask Gang City for");
+  out.push("# THE STUDIO");
+  out.push("");
+  out.push("What a one-shot HTML page can ask Gang City for.");
   out.push("");
   out.push("Two tags. The second one is your game.");
   out.push("");
@@ -86,9 +89,46 @@ if (process.argv.includes("--print")) {
   out.push("## Machines, by name");
   out.push("");
   out.push("`CBZ.studio.model(name)` returns shipped geometry, or null when the pack");
-  out.push("that owns it is not loaded.");
+  out.push("that owns it is not loaded. `CBZ.studio.fly(kind)` returns the model with a");
+  out.push("flight model already attached.");
   out.push("");
-  out.push("With `military`: `jet` · `bomber` · `cargo` · `heli` · `tank` · `truck` · `b2`");
+  out.push("With `military`: `bomber` · `fighter` (alias `jet`) · `cargo` · `heli` · `tank` · `truck` · `b2`");
+  out.push("");
+  out.push("## The rest of the verbs");
+  out.push("");
+  for (const [sig, what] of [
+    ["CBZ.studio.join({actors, hurt})", "declare and BECOME a mode. Until you call this, every shared engine verb declines: no vault, no ledge step, no blast damage, no wall breach. `actors` hands over your roster, `hurt` your kill funnel, so the engine cannot kill somebody your score does not hear about."],
+    ["CBZ.studio.world(name)", "build a named world. `desert` today."],
+    ["CBZ.studio.crowd(n, role, {at})", "n shipped bodies, placed and parented."],
+    ["CBZ.studio.boom(pos, {radius, power})", "fireball, blast damage against your roster, building collapse, and attenuated sound. Never grow your own explosion."],
+    ["CBZ.studio.structureAt(x, z, reach)", "what is standing here: the building record under a point, or null."],
+    ["CBZ.studio.bombsight({kind})", "the predicted impact, drawn, off the SHARED ballistic integrator."],
+    ["CBZ.studio.chase({groundAt})", "a smoothed, ground-clamped follow camera."],
+    ["CBZ.studio.controls(kind, {buttons})", "one surface for keyboard, mouse and touch. `fly` also gets a throttle slider on a phone."],
+    ["CBZ.studio.hud({...})", "the standard HUD. See the rules below."],
+    ["CBZ.studio.trail({length, color})", "a contrail, a dust plume, a wake. One draw call."],
+    ["CBZ.studio.engineSound()", "the noise a machine makes, mapped from throttle and speed."],
+    ["CBZ.studio.alarm(level)", "one warning voice, cooldown inside it, interval tightening with the level."],
+  ]) { out.push("- `" + sig + "`\n  " + what); }
+  out.push("");
+  out.push("## Rules that are not negotiable");
+  out.push("");
+  out.push("**HUD.** Health is always top left, and it is one meter. No emoji anywhere in");
+  out.push("HUD space. Never render a keyboard key on a touchscreen: `controls()` and");
+  out.push("`hud().prompt()` already decide that from pointer coarseness, so use them and");
+  out.push("the question does not arise. Keep the HUD bare. Say danger with");
+  out.push("`hud.danger()`, which costs no space.");
+  out.push("");
+  out.push("**Player-facing words.** Fragments, not sentences. No em dashes. Never define a");
+  out.push("thing by what it is not.");
+  out.push("");
+  out.push("**Phones are the default target.** Every action must be reachable by thumb.");
+  out.push("");
+  out.push("**Determinism.** Never `Math.random` in a world build. Use `CBZ.seedStream(name)`.");
+  out.push("");
+  out.push("**Never fork.** If you are about to draw a person, a vehicle, a HUD, a camera or");
+  out.push("an explosion, stop: ask the studio for it. If it is genuinely missing, the fix");
+  out.push("is a new verb in `src/core/studio.js`, not a copy in your page.");
   out.push("");
   console.log(out.join("\n"));
   process.exit(0);
@@ -116,14 +156,14 @@ const chrome = spawn(CHROME_BIN, [
   "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
   "--enable-webgl", "--mute-audio", "--window-size=480,300",
   `--remote-debugging-port=${dbg}`, `--user-data-dir=${profile}`,
-  `${origin}games/bomb-survivor.html`,
+  `${origin}games/bomb-survivor-b.html`,
 ], { stdio: "ignore" });
 
 let page = null;
 for (let i = 0; i < 240 && !page; i++) {
   try {
     const ps = await (await fetch(`http://127.0.0.1:${dbg}/json/list`)).json();
-    page = ps.find((p) => p.type === "page" && p.url.indexOf("bomb-survivor") >= 0);
+    page = ps.find((p) => p.type === "page" && p.url.indexOf("bomb-survivor-b") >= 0);
   } catch (_) {}
   if (!page) await sleep(100);
 }
@@ -153,7 +193,7 @@ await send("Runtime.enable");
 // the studio has to finish loading before anything is true
 let ready = false;
 for (let i = 0; i < 300 && !ready; i++) {
-  ready = await evl("!!(window.CBZ && CBZ.studio && CBZ.micro && window.__bomb)");
+  ready = await evl("!!(window.CBZ && CBZ.studio && CBZ.micro && window.__bombB)");
   if (!ready) await sleep(500);
 }
 if (!ready) done(1, "STUDIO: FAIL the page never finished loading (studio/micro/__bomb absent)");
