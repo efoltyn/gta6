@@ -137,7 +137,8 @@ const TEAMS = [
   { id: "ghost", name: "GHOST", color: 0x49c6ff },
 ];
 
-let world, base, hud, match, cam, chase, sight, scope, ctl, eng;
+let world, base, hud, match, cam, chase, sight, scope, eng;
+let ctlFly, ctlWalk, ctl;
 let units = [], me = null, started = false, groundAt = function () { return 0; };
 const nuke = { kills: 0, armed: false, spent: false };
 const _v = new THREE.Vector3();
@@ -192,8 +193,13 @@ CBZ.ordnance.init({ scene: CBZ.scene, groundAt: groundAt });
 hud   = CBZ.studio.hud({ health: true, clock: true, score: false, feed: false, note: false });
 chase = CBZ.studio.chase({ groundAt: groundAt, camera: cam });
 sight = CBZ.studio.bombsight({ kind: "iron", outer: 9 });
-ctl   = CBZ.studio.controls("fly", { buttons: { fire: "DROP", nuke: "NUKE" } });
-eng   = CBZ.studio.engineSound({ vRef: 260, earshot: 300 });
+// ONE SURFACE PER ROLE. Half time swaps what you are, and a man on foot must
+// not be looking at a throttle slider and a bomb button. The pause control
+// belongs to the flight surface only, so there is exactly one of it.
+ctlFly  = CBZ.studio.controls("fly",  { buttons: { fire: "DROP", nuke: "NUKE" } });
+ctlWalk = CBZ.studio.controls("walk", { buttons: { sprint: "RUN" }, pause: false });
+ctl = ctlFly;
+eng = CBZ.studio.engineSound({ vRef: 260, earshot: 300 });
 scope = CBZ.radar.create({
   canvas: el("radar"), range: 3000, label: "AIR",
   self: function () {
@@ -328,8 +334,8 @@ match = CBZ.teammatch.create({
   onHalfStart: function (half, m) {
     clearUnits();
     nuke.kills = 0; nuke.armed = false; nuke.spent = false;
-    ctl.button("nuke", false);            // a dead control reads as a broken one
-    ctl.button("fire", true);
+    ctlFly.button("nuke", false);         // a dead control reads as a broken one
+    ctlFly.button("fire", true);
     const players = m.players;
     for (let i = 0; i < players.length; i++) {
       const p = players[i];
@@ -337,7 +343,11 @@ match = CBZ.teammatch.create({
       if (p.human) me = u;
     }
     if (chase) chase.reset();
-    el("radar").style.display = (me && me.role === "bomber") ? "block" : "none";
+    const flying = !!(me && me.role === "bomber");
+    ctl = flying ? ctlFly : ctlWalk;
+    ctlFly.show(flying);
+    ctlWalk.show(!flying);
+    el("radar").style.display = flying ? "block" : "none";
     setRole();
     if (me) showSwap(half);
   },
@@ -401,7 +411,7 @@ function onStoreLands(b) {
 function fireNuke(u) {
   if (!u || !u.af || !nuke.armed || nuke.spent) return;
   nuke.spent = true; nuke.armed = false;
-  ctl.button("nuke", false);
+  ctlFly.button("nuke", false);
   CBZ.ordnance.release({
     pos: u.af.pos, vel: u.af.vel, kind: "nuke", team: u.team, owner: u.id,
     onDetonate: function (b) {
@@ -418,7 +428,7 @@ function fireNuke(u) {
 function earnKill() {
   if (nuke.spent) return;
   nuke.kills++;
-  if (nuke.kills >= NUKE_ARM && !nuke.armed) { nuke.armed = true; streak("NUKE ARMED"); ctl.button("nuke", true, true); }
+  if (nuke.kills >= NUKE_ARM && !nuke.armed) { nuke.armed = true; streak("NUKE ARMED"); ctlFly.button("nuke", true, true); }
   else streak(nuke.kills + " OF " + NUKE_ARM);
 }
 let streakT = 0;
@@ -501,6 +511,10 @@ function stepBomber(u, dt, mine) {
   if (mine) {
     u.hdg += ctl.move.x * 0.95 * dt;
     u.af.throttle = Math.max(0.25, ctl.throttle);
+    // The stick's Y walks the RUN ALTITUDE, because that is the decision a
+    // bomber actually makes: lower is accurate and lethal and inside your own
+    // fragmentation, higher is safe and vague. Throttle lives on the slider.
+    u.alt = Math.max(RELEASE_MIN + 20, Math.min(900, (u.alt || BOMB_ALT) - ctl.move.y * 130 * dt));
     if (ctl.tapped("fire")) dropStick(u);
     if (ctl.tapped("nuke")) fireNuke(u);
   } else {
@@ -512,9 +526,10 @@ function stepBomber(u, dt, mine) {
     if (p && Math.hypot(p.x, p.z) < world.rings.city * 0.88) dropStick(u);
   }
 
-  _v.set(u.af.pos.x - Math.sin(u.hdg) * 2400, BOMB_ALT, u.af.pos.z - Math.cos(u.hdg) * 2400);
+  const alt = u.alt || BOMB_ALT;
+  _v.set(u.af.pos.x - Math.sin(u.hdg) * 2400, alt, u.af.pos.z - Math.cos(u.hdg) * 2400);
   const aim = u.af.steerTo(_v, { gain: 2.0 });
-  u.af.holdAltitude(BOMB_ALT, aim);
+  u.af.holdAltitude(alt, aim);
   u.af.step(dt, aim);
   u.pos.copy(u.af.pos);
   if (u.group) u.af.applyTo(u.group);
@@ -560,9 +575,10 @@ function stepRunner(u, dt, mine) {
     mx = bx; mz = bz;
   }
   const n = Math.hypot(mx, mz);
+  const spd = RUN_SPEED * ((mine && ctl.held("sprint")) ? 1.7 : 1);
   if (n > 0.01) {
-    u.pos.x += (mx / n) * RUN_SPEED * dt;
-    u.pos.z += (mz / n) * RUN_SPEED * dt;
+    u.pos.x += (mx / n) * spd * dt;
+    u.pos.z += (mz / n) * spd * dt;
     u.yaw = Math.atan2(mx, mz);
     // the engine's own slide resolver, so a runner uses the city as cover
     // rather than walking through it. It corrects `pos` in place.
@@ -574,7 +590,7 @@ function stepRunner(u, dt, mine) {
     u.group.position.copy(u.pos);
     u.group.rotation.y = u.yaw;
     if (CBZ.animChar && u.group.userData.charRig) {
-      try { CBZ.animChar(u.group.userData.charRig, dt, { speed: n > 0.01 ? RUN_SPEED : 0 }); } catch (e) {}
+      try { CBZ.animChar(u.group.userData.charRig, dt, { speed: n > 0.01 ? spd : 0 }); } catch (e) {}
     }
   }
 }

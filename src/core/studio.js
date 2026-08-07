@@ -670,9 +670,15 @@
     const btnDefs = opts.buttons || (kind === "fly" ? { fire: "DROP" } : { fire: "USE" });
     const state = { held: Object.create(null), tapped: Object.create(null) };
     const handles = Object.create(null);
-    const KEYMAP = opts.keys || { fire: "Space", alt: "KeyF", boost: "ShiftLeft" };
+    // Sensible keys for the verbs a page usually has, so a keyboard player gets
+    // the same actions the touch buttons give without the page restating them.
+    const KEYMAP = opts.keys || {
+      fire: "Space", alt: "KeyF", boost: "ShiftLeft",
+      sprint: "ShiftLeft", nuke: "KeyN", use: "KeyE",
+    };
 
     let throttleSlider = null;
+    const furniture = [];
     if (coarse) {
       T.init({});
       // A FLYING GAME ON A PHONE NEEDS A THROTTLE, and holding a key is not an
@@ -683,15 +689,16 @@
           label: "PWR", value: 0.72, right: 24, bottom: 210, height: 168,
           onChange: function (v) { C.throttle = v; },
         });
+        furniture.push(throttleSlider);
       }
       /* A PHONE MUST BE ABLE TO PAUSE. The engine owns KeyP, and a
          touchscreen has no keys, so a page that never thinks about it ships a
          ten minute half nobody can stop. Added here, once, above the page. */
       if (opts.pause !== false) {
-        T.addButton({
+        furniture.push(T.addButton({
           label: "II", size: 44, right: 22, top: 16,
           onDown: function () { if (CBZ.micro) CBZ.micro.paused = !CBZ.micro.paused; },
-        });
+        }));
       }
       let i = 0;
       for (const name in btnDefs) {
@@ -702,6 +709,7 @@
             onDown: function () { state.held[n] = true; state.tapped[n] = true; },
             onUp: function () { state.held[n] = false; },
           });
+          furniture.push(handles[n]);
         })(name, i++);
       }
     }
@@ -745,6 +753,20 @@
         const h = handles[n];
         if (h && h.set) h.set(visible, lit, label);
         return h || null;
+      },
+      /* SHOW OR HIDE THE WHOLE SURFACE. A game whose player changes role
+         mid-match otherwise leaves a throttle slider and a bomb button on
+         screen for a man on foot, which is the same "a dead control reads as
+         broken" failure one level up. Make one surface per role and show the
+         one that is live. */
+      show: function (on) {
+        for (let i = 0; i < furniture.length; i++) {
+          const f = furniture[i];
+          if (f && f.show) f.show(on !== false);
+          else if (f && f.set) f.set(on !== false);
+        }
+        if (on === false) { for (const k in state.held) state.held[k] = false; }
+        return C;
       },
       lock: function () { if (!coarse && CBZ.micro && CBZ.micro.lock) CBZ.micro.lock(); },
     };
