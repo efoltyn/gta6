@@ -392,13 +392,28 @@
     // is an integrator with no stop.** With the shipped gain of 2.0 anything
     // more than ~30° off the nose saturates the command, so the aeroplane
     // rolls at full rate and NOTHING anywhere asks how far over it already
-    // is. Measured on a bomber in bomb-survivor (2026-08-07, 181 s, 4463
-    // samples): 58% of flight time past 60° of bank, peak 179.6° — inverted.
-    // holdAltitude() then did the killing: at 90° of bank the lift vector
+    // is. holdAltitude() then did the killing: at 90° of bank the lift vector
     // points at the horizon, so "nose up to hold 450 m" is a turn straight
-    // into the deck at full throttle. 24 AI aircraft lost in three minutes,
-    // every one of them with no killer, wings past vertical, not stalled and
-    // not grounded until the last frame.
+    // into the deck at full throttle, with no killer, not stalled and not
+    // grounded until the last frame.
+    //
+    // A/B in bomb-survivor, 2026-08-07, one build, one world, this flag
+    // flipped between the two arms — 200 s each, one AI bomber sampled every
+    // frame (~4-6k samples), bank bucketed 0-30/30-60/60-90/90-120/120-150/
+    // 150-180:
+    //
+    //   rate command   1060 640 1054 993 101 92   57% past 60°, 30% past 90°,
+    //                  peak 179.9° · 29 aircraft lost = 173 per 20-minute
+    //                  match · seven neutral patrol jets down to two
+    //   this loop       669 5260  0    0   0   0   0% past 60°, peak 55.4°
+    //                  (a fighter holding its 60° limit) · ZERO aircraft
+    //                  lost · all seven jets still up
+    //
+    // And it turns MORE, not less. Flown against the game's own aiming law
+    // offline for 240 s: the rate command made one pass at 35 m and then
+    // departed in a locked 80° bank to 37 km and never came back; this loop
+    // made six passes inside 400 m, closest 19 m, wings near level on every
+    // run-in. Knife-edge is not a tight turn, it is a departure.
     //
     // The fix is the shape a real autopilot has: command a bank ANGLE, hold
     // it with a proportional loop on the MEASURED bank, and clamp the
