@@ -18,8 +18,9 @@
      3. THE PAGE IS REACHABLE, which is the fault that started this. Before the
         manifest, that page did not load systems/modecaps.js at all, so its
         CBZ.registerMode call was a no-op and no shared engine verb could find
-        its people. modeHas must now answer, and the mode must resolve a real
-        damage route.
+        its people. modeHas must now answer, and THIS PAGE's row must resolve a
+        real damage route. The four built-in modes are deliberately not held to
+        that here: their funnels live in files a slice page never loads.
      4. THE CATALOG GIVES. cast("soldier") returns the shipped 1.82 m rig and
         model("bomber") returns shipped geometry, so a one-shot never has to
         rebuild a person or an aeroplane it already owns.
@@ -220,10 +221,22 @@ const R = await evl(`(() => {
   else {
     out.caps = { traverse: CBZ.modeHas("traverse"), blast: CBZ.modeHas("blast"),
                  blastActors: CBZ.modeHas("blastActors"), breach: CBZ.modeHas("breach") };
-    for (const k in out.caps) if (!out.caps[k]) out.fails.push("mode denied " + k);
+    // blastActors is NOT asserted true. This page declares it 0 on purpose, for
+    // the same reason the city row is 0: systems/ordnance.js already sweeps its
+    // roster through addTarget and applies the cover rules while doing it, so a
+    // second sweep would kill the same man twice AND do it without the roof
+    // test. What must hold is that the page can be reached at all.
+    for (const k of ["traverse", "blast", "breach"]) if (!out.caps[k]) out.fails.push("mode denied " + k);
     const a = CBZ.modeCapsAudit();
     out.unrouted = a.unrouted; out.route = a.routes[out.mode] || null;
-    if (a.unrouted) out.fails.push("unrouted blast-capable modes: " + a.unrouted);
+    // unrouted is NOT asserted here either, and the reason is worth stating:
+    // it counts every blast-capable mode whose damage funnel cannot be
+    // resolved, and on a slice page the four BUILT-IN modes are all unrouted by
+    // construction — surv.hurt, gungame.hurt, aiKill and cityKillPed are in
+    // files this page never loads, and correctly so. The ratchet is meaningful
+    // where those owners exist, which is the full engine, and tools/math-gate
+    // .mjs pins it at 0 there. What matters HERE is the one row this page owns.
+    out.unroutedBuiltins = a.unrouted;
     if (!out.route || out.route === "UNROUTED") out.fails.push("this page's own blast route is " + out.route);
   }
 
