@@ -627,8 +627,18 @@
     const state = { held: Object.create(null), tapped: Object.create(null) };
     const KEYMAP = opts.keys || { fire: "Space", alt: "KeyF", boost: "ShiftLeft" };
 
+    let throttleSlider = null;
     if (coarse) {
       T.init({});
+      // A FLYING GAME ON A PHONE NEEDS A THROTTLE, and holding a key is not an
+      // option there. microboot already ships the slider; nobody had wired it
+      // to the one control that actually needs to be held at a value.
+      if (kind === "fly" && T.addSlider) {
+        throttleSlider = T.addSlider({
+          label: "PWR", value: 0.72, right: 24, bottom: 210, height: 168,
+          onChange: function (v) { C.throttle = v; },
+        });
+      }
       let i = 0;
       for (const name in btnDefs) {
         (function (n, idx) {
@@ -666,9 +676,10 @@
         const sens = IN.sensitivity || 0.0022;
         C.look.x = -IN.mx * sens;
         C.look.y = -IN.mz * sens;
-        if (kind === "fly") {
-          const up = C.held("boost") ? 1 : 0;
-          C.throttle = Math.max(0.15, Math.min(1, C.throttle + (up ? 0.5 : 0) * dt));
+        if (kind === "fly" && !throttleSlider) {
+          // no slider means a keyboard, where the stick's Y is the throttle and
+          // the page should not have to know which of the two it is reading
+          C.throttle = Math.max(0.15, Math.min(1, C.throttle + C.move.y * 0.55 * dt));
         }
         return C;
       },
@@ -769,6 +780,124 @@
       },
       reset: function () { seeded = false; },
     };
+  };
+
+  /* ==========================================================================
+     trail(opts) — A CONTRAIL, A SMOKE COLUMN, A WAKE. One draw call.
+
+     Anything that moves fast and matters reads better with a line behind it,
+     and every page that wanted one has either gone without or spawned a
+     particle per frame and watched the frame time climb. This is a single
+     THREE.Line over a ring buffer: fixed memory, fixed draw calls, and the
+     tail fades by vertex colour rather than by spawning anything.
+
+       const t = CBZ.studio.trail({ length: 90, color: 0xdfe6ee });
+       t.push(af.pos);        // each frame while it should be drawing
+       t.cut();               // a gap: the aeroplane died, do not join the dots
+     ========================================================================== */
+  CBZ.studio.trail = function (opts) {
+    opts = opts || {};
+    const THREE = window.THREE;
+    if (!THREE || !CBZ.scene) return { push: function () {}, cut: function () {}, dispose: function () {} };
+    const N = Math.max(8, opts.length || 80);
+    const pos = new Float32Array(N * 3);
+    const col = new Float32Array(N * 3);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    const c = new THREE.Color(opts.color != null ? opts.color : 0xdfe6ee);
+    const line = new THREE.Line(geo, new THREE.LineBasicMaterial({
+      vertexColors: true, transparent: true, opacity: opts.opacity != null ? opts.opacity : 0.55, depthWrite: false,
+    }));
+    line.frustumCulled = false;
+    line.renderOrder = 850;
+    CBZ.scene.add(line);
+    let n = 0, last = null;
+    const minStep = opts.minStep != null ? opts.minStep : 6;
+    return {
+      line: line,
+      push: function (p) {
+        if (!p) return;
+        if (last && (p.x - last.x) * (p.x - last.x) + (p.y - last.y) * (p.y - last.y) +
+            (p.z - last.z) * (p.z - last.z) < minStep * minStep) return;
+        last = { x: p.x, y: p.y, z: p.z };
+        // shift back by one and write the head: a ring buffer would need an
+        // index attribute to draw in order, and N is small enough that the
+        // copy is cheaper than the bookkeeping.
+        if (n >= N) {
+          pos.copyWithin(0, 3);
+          n = N - 1;
+        }
+        pos[n * 3] = p.x; pos[n * 3 + 1] = p.y; pos[n * 3 + 2] = p.z;
+        n++;
+        for (let i = 0; i < n; i++) {
+          const f = i / Math.max(1, n - 1);      // 0 at the tail, 1 at the head
+          col[i * 3] = c.r * f; col[i * 3 + 1] = c.g * f; col[i * 3 + 2] = c.b * f;
+        }
+        geo.setDrawRange(0, n);
+        geo.attributes.position.needsUpdate = true;
+        geo.attributes.color.needsUpdate = true;
+        geo.computeBoundingSphere();
+      },
+      cut: function () { n = 0; last = null; geo.setDrawRange(0, 0); },
+      dispose: function () { if (line.parent) line.parent.remove(line); geo.dispose(); line.material.dispose(); },
+    };
+  };
+
+  /* ==========================================================================
+     engineSound(opts) — THE NOISE A MACHINE MAKES, tied to what it is doing.
+
+     microboot's bank already has a controllable noise bed; what nobody has is
+     the mapping from throttle and airspeed onto it, so every vehicle page
+     either ships silence or invents its own. Two beds, because one is not
+     enough to read as machinery: a low core that follows THROTTLE, and a
+     bright rush that follows SPEED. A jet at idle in a dive should hiss and
+     not roar, and at full power on the deck it should do both.
+
+       const eng = CBZ.studio.engineSound();
+       eng.set(af.throttle, af.speed, distanceToCamera);
+       eng.stop();
+     ========================================================================== */
+  CBZ.studio.engineSound = function (opts) {
+    opts = opts || {};
+    const S = CBZ.micro && CBZ.micro.sfx;
+    if (!S || !S.loop) return { set: function () {}, stop: function () {} };
+    const core = S.loop({ freq: opts.coreFreq || 110, q: 0.9, filter: "lowpass" });
+    const rush = S.loop({ freq: opts.rushFreq || 900, q: 0.5, filter: "bandpass" });
+    let dead = false;
+    return {
+      set: function (throttle, speed, dist) {
+        if (dead) return;
+        const t = Math.max(0, Math.min(1, throttle || 0));
+        const v = Math.max(0, Math.min(1, (speed || 0) / (opts.vRef || 240)));
+        let att = 1;
+        if (dist != null && S.gainAt) att = S.gainAt(dist, opts.earshot || 260);
+        core.set((opts.coreFreq || 110) * (0.7 + t * 0.9), (0.05 + t * 0.20) * att);
+        rush.set((opts.rushFreq || 900) * (0.6 + v * 1.5), (0.01 + v * 0.10) * att);
+      },
+      stop: function () { if (dead) return; dead = true; core.stop(); rush.stop(); },
+    };
+  };
+
+  /* alarm(level, opts) — ONE WARNING VOICE, rate limited so a salvo cannot
+     turn it into a drone. `level` is 0..1; below the threshold it says nothing.
+     A page should not own a cooldown timer for a siren. */
+  let _alarmAt = -1e9;
+  CBZ.studio.alarm = function (level, opts) {
+    opts = opts || {};
+    const S = CBZ.micro && CBZ.micro.sfx;
+    if (!S || !S.tone) return false;
+    const L = level || 0;
+    if (L < (opts.threshold != null ? opts.threshold : 0.18)) return false;
+    const now = (CBZ.micro && CBZ.micro.elapsed) || 0;
+    // the closer it is, the faster it repeats — the interval IS the warning
+    const gap = opts.gap != null ? opts.gap : (1.15 - Math.min(0.95, L) * 0.85);
+    if (now - _alarmAt < gap) return false;
+    _alarmAt = now;
+    S.tone(opts.hi || (560 + L * 260), 0.16, {
+      type: "square", gain: (opts.gain || 0.10) * (0.5 + L * 0.5), slideTo: opts.lo || 380,
+    });
+    return true;
   };
 
   /* ==========================================================================

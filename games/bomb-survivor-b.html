@@ -43,6 +43,11 @@
   #streak{position:fixed;left:50%;bottom:calc(96px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);
     z-index:41;font-size:12px;letter-spacing:.22em;color:#ffc46a;opacity:0;transition:opacity .3s;pointer-events:none}
   #streak.on{opacity:.95}
+  #swap{position:fixed;inset:0;display:grid;place-items:center;z-index:58;pointer-events:none;
+    background:rgba(9,11,14,.82);opacity:0;transition:opacity .45s;font-size:clamp(26px,8vw,52px);
+    letter-spacing:.06em;text-align:center;line-height:1.15}
+  #swap.on{opacity:1}
+  #swap small{display:block;font-size:12px;letter-spacing:.3em;opacity:.55;margin-top:14px}
   #radar{position:fixed;right:calc(14px + env(safe-area-inset-right,0px));
     bottom:calc(14px + env(safe-area-inset-bottom,0px));width:132px;height:132px;z-index:41;
     opacity:.82;pointer-events:none;display:none}
@@ -67,6 +72,7 @@
 </div></div>
 
 <div id="role"></div>
+<div id="swap"></div>
 <div id="streak"></div>
 <canvas id="radar" width="264" height="264"></canvas>
 <div id="flash"></div>
@@ -122,7 +128,7 @@ const TEAMS = [
   { id: "ghost", name: "GHOST", color: 0x49c6ff },
 ];
 
-let world, base, hud, match, cam, chase, sight, scope, ctl;
+let world, base, hud, match, cam, chase, sight, scope, ctl, eng;
 let units = [], me = null, started = false, groundAt = function () { return 0; };
 const nuke = { kills: 0, armed: false, spent: false };
 const _v = new THREE.Vector3();
@@ -168,6 +174,7 @@ hud   = CBZ.studio.hud({ health: true, clock: true, score: false, feed: false, n
 chase = CBZ.studio.chase({ groundAt: groundAt, camera: cam });
 sight = CBZ.studio.bombsight({ kind: "iron", outer: 9 });
 ctl   = CBZ.studio.controls("fly", { buttons: { fire: "DROP", nuke: "NUKE" } });
+eng   = CBZ.studio.engineSound({ vRef: 260, earshot: 300 });
 scope = CBZ.radar.create({
   canvas: el("radar"), range: 3000, label: "AIR",
   self: function () {
@@ -185,6 +192,18 @@ scope = CBZ.radar.create({
     return out;
   },
 });
+
+// THE CITY IS INHABITED. Forty neutral bodies on the streets, asked for by
+// name — they are not scored and not targets, they are the reason a city reads
+// as a city from 360 m up. One call, and the engine casts and dresses them.
+const locals = CBZ.studio.crowd(40, "civilian", {
+  at: function (i) {
+    const a = (i / 40) * Math.PI * 2 * 3.7, r = 90 + (i % 9) * 96;
+    const x = Math.cos(a) * r, z = Math.sin(a) * r;
+    return { x: x, z: z, y: groundAt(x, z) };
+  },
+});
+for (let i = 0; i < locals.length; i++) locals[i].rotation.y = i * 1.7;
 
 // ============================================================ THE CAST
 // Nobody here is drawn by this file. A runner is the shipped body, cast and
@@ -217,6 +236,7 @@ function spawnUnit(rec, role, i) {
       u.af.launch(x, BOMB_ALT + (i % 3) * 45, z, u.hdg, 168);
     }
     if (u.af) u.pos.copy(u.af.pos);
+    u.trail = CBZ.studio.trail({ length: 70, color: team.color, opacity: 0.4, minStep: 22 });
   } else {
     u.group = CBZ.studio.cast("runner", { color: team.color, variant: i });
     if (u.group) CBZ.scene.add(u.group);
@@ -243,6 +263,7 @@ function clearUnits() {
     if (u.tgt && CBZ.ordnance.removeTarget) CBZ.ordnance.removeTarget(u.tgt);
     if (u.group && u.group.parent) u.group.parent.remove(u.group);
     if (u.af && u.af.dispose) u.af.dispose();
+    if (u.trail) u.trail.dispose();
   }
   units = [];
   me = null;
@@ -270,6 +291,7 @@ function hurt(u, dmg, info) {
   } else {
     if (u.af) CBZ.studio.boom(u.af.pos, { radius: 22, power: 1.5, structural: false });
     if (u.group) u.group.visible = false;
+    if (u.trail) u.trail.cut();
     u.respawnIn = RESPAWN_AIR;      // pressure that stops when you die is not pressure
   }
 }
@@ -289,6 +311,7 @@ match = CBZ.teammatch.create({
     if (chase) chase.reset();
     el("radar").style.display = (me && me.role === "bomber") ? "block" : "none";
     setRole();
+    if (me) showSwap(half);
   },
   onEnd: function (result, m) { finish(result, m); },
 });
@@ -300,6 +323,15 @@ for (let t = 0; t < TEAMS.length; t++) {
       team: TEAMS[t].id, human: t === 0 && i === 0,
     });
   }
+}
+
+let swapT = 0;
+function showSwap(half) {
+  const n = el("swap");
+  n.innerHTML = (me.role === "bomber" ? "YOU BOMB" : "YOU RUN") +
+    "<small>HALF " + (half + 1) + " OF " + HALVES + "</small>";
+  n.classList.add("on");
+  swapT = 2.4;
 }
 
 function setRole() {
@@ -365,6 +397,7 @@ CBZ.micro.onFrame(function (dt) {
   if (!started) return;
   match.step(dt);
   if (streakT > 0 && (streakT -= dt) <= 0) el("streak").classList.remove("on");
+  if (swapT > 0 && (swapT -= dt) <= 0) el("swap").classList.remove("on");
   if (match.phase === "over") return;
 
   ctl.step(dt);
@@ -384,6 +417,18 @@ CBZ.micro.onFrame(function (dt) {
   }
 
   CBZ.ordnance.step(dt);
+
+  // WHAT YOU HEAR IS WHAT IS HAPPENING TO YOU. A bomber hears its own machine;
+  // a runner hears the interval between warnings shorten as a stick closes.
+  if (me && me.alive && eng) {
+    if (me.role === "bomber" && me.af) eng.set(me.af.throttle, me.af.speed, 0);
+    else {
+      eng.set(0, 0, 400);
+      const risk = CBZ.ordnance.dangerAt ? CBZ.ordnance.dangerAt(me.pos.x, me.pos.z, 10) : 0;
+      CBZ.studio.alarm(risk);
+    }
+  }
+
   aimAndFollow(dt);
   hud.clock(match.clock());
   if (me) hud.health(Math.max(0, me.hp) / 100);
@@ -422,7 +467,7 @@ function stepBomber(u, dt, mine) {
 
   if (mine) {
     u.hdg += ctl.move.x * 0.55 * dt;
-    u.af.throttle = Math.max(0.25, Math.min(1, u.af.throttle + ctl.move.y * 0.5 * dt));
+    u.af.throttle = Math.max(0.25, ctl.throttle);
     if (ctl.tapped("fire")) dropStick(u);
     if (ctl.tapped("nuke")) fireNuke(u);
   } else {
@@ -440,6 +485,7 @@ function stepBomber(u, dt, mine) {
   u.af.step(dt, aim);
   u.pos.copy(u.af.pos);
   if (u.group) u.af.applyTo(u.group);
+  if (u.trail && !u.rolling) u.trail.push(u.af.pos);
 }
 
 function stepRunner(u, dt, mine) {
@@ -460,12 +506,21 @@ function stepRunner(u, dt, mine) {
     // eight directions and walks down the gradient. Nothing here models a
     // bomb, a trajectory or a warning time.
     let best = 1e9, bx = Math.cos(u.yaw), bz = Math.sin(u.yaw);
+    // a shelter is a LID, and ordnance already knows what a lid is worth — the
+    // roof test is its own. So under fire, run for one; otherwise drift.
+    const here = CBZ.ordnance.dangerAt ? CBZ.ordnance.dangerAt(u.pos.x, u.pos.z, 10) : 0;
+    const lid = here > 0.05 ? nearestShelter(u.pos) : null;
     for (let a = 0; a < 8; a++) {
       const th = (a / 8) * Math.PI * 2;
-      const sx = u.pos.x + Math.cos(th) * 16, sz = u.pos.z + Math.sin(th) * 16;
-      const risk = CBZ.ordnance.dangerAt ? CBZ.ordnance.dangerAt(sx, sz, 9) : 0;
-      const spin = Math.abs(Math.atan2(Math.sin(th - u.yaw), Math.cos(th - u.yaw))) * 0.03;
-      if (risk + spin < best) { best = risk + spin; bx = Math.cos(th); bz = Math.sin(th); }
+      const cx = Math.cos(th), cz = Math.sin(th);
+      const sx = u.pos.x + cx * 16, sz = u.pos.z + cz * 16;
+      let cost = CBZ.ordnance.dangerAt ? CBZ.ordnance.dangerAt(sx, sz, 10) : 0;
+      cost += Math.abs(Math.atan2(Math.sin(th - u.yaw), Math.cos(th - u.yaw))) * 0.03;
+      if (lid) {
+        const dx = lid.x - u.pos.x, dz = lid.z - u.pos.z, n2 = Math.hypot(dx, dz) || 1;
+        cost -= (cx * dx / n2 + cz * dz / n2) * 0.5;      // pull toward the lid
+      }
+      if (cost < best) { best = cost; bx = cx; bz = cz; }
     }
     mx = bx; mz = bz;
   }
@@ -486,6 +541,21 @@ function stepRunner(u, dt, mine) {
       try { CBZ.animChar(u.group.userData.charRig, dt, { speed: n > 0.01 ? RUN_SPEED : 0 }); } catch (e) {}
     }
   }
+}
+
+const _sh = new THREE.Vector3();
+function nearestShelter(p) {
+  const list = (world && world.shelters) || null;
+  if (!list || !list.length) return null;
+  let best = null, bd = 1e18;
+  for (let i = 0; i < list.length; i++) {
+    const s = list[i];
+    const sx = s.x != null ? s.x : (s.pos ? s.pos.x : 0);
+    const sz = s.z != null ? s.z : (s.pos ? s.pos.z : 0);
+    const d = (sx - p.x) * (sx - p.x) + (sz - p.z) * (sz - p.z);
+    if (d < bd) { bd = d; best = _sh.set(sx, 0, sz); }
+  }
+  return best;
 }
 
 function aimAndFollow(dt) {
