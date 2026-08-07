@@ -669,6 +669,7 @@
     const coarse = COARSE && T && T.init;
     const btnDefs = opts.buttons || (kind === "fly" ? { fire: "DROP" } : { fire: "USE" });
     const state = { held: Object.create(null), tapped: Object.create(null) };
+    const handles = Object.create(null);
     const KEYMAP = opts.keys || { fire: "Space", alt: "KeyF", boost: "ShiftLeft" };
 
     let throttleSlider = null;
@@ -683,10 +684,19 @@
           onChange: function (v) { C.throttle = v; },
         });
       }
+      /* A PHONE MUST BE ABLE TO PAUSE. The engine owns KeyP, and a
+         touchscreen has no keys, so a page that never thinks about it ships a
+         ten minute half nobody can stop. Added here, once, above the page. */
+      if (opts.pause !== false) {
+        T.addButton({
+          label: "II", size: 44, right: 22, top: 16,
+          onDown: function () { if (CBZ.micro) CBZ.micro.paused = !CBZ.micro.paused; },
+        });
+      }
       let i = 0;
       for (const name in btnDefs) {
         (function (n, idx) {
-          T.addButton({
+          handles[n] = T.addButton({
             label: btnDefs[n], word: String(btnDefs[n]).length > 2, size: 76,
             right: 24 + idx * 96, bottom: kind === "fly" ? 108 : 132,
             onDown: function () { state.held[n] = true; state.tapped[n] = true; },
@@ -726,6 +736,15 @@
           C.throttle = Math.max(0.15, Math.min(1, C.throttle + C.move.y * 0.55 * dt));
         }
         return C;
+      },
+      /* SHOW A BUTTON ONLY WHEN IT DOES SOMETHING. A touch layout is small and
+         a dead control on it is worse than a missing one: it reads as broken.
+         `visible` hides it, `lit` marks it armed, `label` renames it. On a
+         mouse this is a no-op, because there is no button to hide. */
+      button: function (n, visible, lit, label) {
+        const h = handles[n];
+        if (h && h.set) h.set(visible, lit, label);
+        return h || null;
       },
       lock: function () { if (!coarse && CBZ.micro && CBZ.micro.lock) CBZ.micro.lock(); },
     };
@@ -998,6 +1017,9 @@
 .sHud .pr.on{display:flex}
 .sHud .dg{position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity .18s linear;
   box-shadow:inset 0 0 90px 22px rgba(196,44,30,.85), inset 0 0 260px 60px rgba(150,20,10,.42)}
+.sHud .pz{position:absolute;inset:0;display:none;place-items:center;background:rgba(9,11,14,.62);
+  font-size:clamp(20px,6vw,34px);letter-spacing:.34em}
+body.micro-paused .sHud .pz{display:grid}
 .sHud .pr kbd{font:inherit;font-size:12px;padding:2px 8px;border-radius:5px;background:rgba(255,255,255,.16);
   border:1px solid rgba(255,255,255,.26)}
 .sHud.touch .pr{padding:15px 30px;font-size:16px}
@@ -1035,6 +1057,7 @@
     // which is the whole reason a bare HUD can still tell you you are about to
     // die. No icon, no emoji, no counter.
     const dg = spec.danger === false ? null : mk("dg", "");
+    if (spec.pause !== false) mk("pz", "PAUSED");
     let onTap = null;
     if (pr) pr.addEventListener("click", function (e) { e.preventDefault(); if (onTap) onTap(); });
     document.body.appendChild(root);

@@ -328,6 +328,8 @@ match = CBZ.teammatch.create({
   onHalfStart: function (half, m) {
     clearUnits();
     nuke.kills = 0; nuke.armed = false; nuke.spent = false;
+    ctl.button("nuke", false);            // a dead control reads as a broken one
+    ctl.button("fire", true);
     const players = m.players;
     for (let i = 0; i < players.length; i++) {
       const p = players[i];
@@ -399,6 +401,7 @@ function onStoreLands(b) {
 function fireNuke(u) {
   if (!u || !u.af || !nuke.armed || nuke.spent) return;
   nuke.spent = true; nuke.armed = false;
+  ctl.button("nuke", false);
   CBZ.ordnance.release({
     pos: u.af.pos, vel: u.af.vel, kind: "nuke", team: u.team, owner: u.id,
     onDetonate: function (b) {
@@ -415,7 +418,7 @@ function fireNuke(u) {
 function earnKill() {
   if (nuke.spent) return;
   nuke.kills++;
-  if (nuke.kills >= NUKE_ARM && !nuke.armed) { nuke.armed = true; streak("NUKE ARMED"); }
+  if (nuke.kills >= NUKE_ARM && !nuke.armed) { nuke.armed = true; streak("NUKE ARMED"); ctl.button("nuke", true, true); }
   else streak(nuke.kills + " OF " + NUKE_ARM);
 }
 let streakT = 0;
@@ -496,7 +499,7 @@ function stepBomber(u, dt, mine) {
   }
 
   if (mine) {
-    u.hdg += ctl.move.x * 0.55 * dt;
+    u.hdg += ctl.move.x * 0.95 * dt;
     u.af.throttle = Math.max(0.25, ctl.throttle);
     if (ctl.tapped("fire")) dropStick(u);
     if (ctl.tapped("nuke")) fireNuke(u);
@@ -611,7 +614,8 @@ function aimAndFollow(dt) {
 // ============================================================ START / END
 function finish(result, m) {
   el("over").style.display = "grid";
-  el("overTitle").textContent = result && result.winner ? (teamOf(result.winner).name + " TAKE IT") : "DRAW";
+  // result.winner is a STANDINGS ROW, not a team id: it already carries .name
+  el("overTitle").textContent = (result && result.winner) ? (result.winner.name + " TAKE IT") : "DRAW";
   const rows = m.standings();
   let h = "";
   for (let i = 0; i < rows.length; i++) h += "<tr><td>" + rows[i].name + "</td><td>" + Math.round(rows[i].total) + "</td></tr>";

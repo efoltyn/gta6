@@ -269,6 +269,8 @@
   };
 
   micro.paused = false;
+  micro.pauseKey = "KeyP";
+  let _wasPaused = false;
   micro.autoRender = true;      // false → the page owns its own render calls
   micro.elapsed = 0;
   micro.frames = 0;
@@ -354,6 +356,19 @@
       CBZ.updaters.sort(function (a, b) { return a.order - b.order; });
     }
     for (let i = 0; i < CBZ.always.length; i++) runBridged(CBZ.always[i], dt, "always");
+    /* THE PAUSE KEY IS OWNED HERE, ABOVE THE GATE, and that is the whole point.
+       A page that toggles micro.paused from inside its own onFrame hook can
+       pause once and never unpause: the hooks are exactly what the gate below
+       stops running. Every page hits this the same way, so it is not a page's
+       problem to solve. Set micro.pauseKey = null to own it yourself. */
+    if (micro.pauseKey && input.down[micro.pauseKey]) micro.paused = !micro.paused;
+    // A PAUSED PAGE CANNOT DRAW ITS OWN "PAUSED", because the frame hooks are
+    // precisely what stopped. So the state goes on the document, where CSS can
+    // still see it, and studio's HUD reads the mark.
+    if (micro.paused !== _wasPaused) {
+      _wasPaused = micro.paused;
+      try { document.body.classList.toggle("micro-paused", !!micro.paused); } catch (e) {}
+    }
     if (!micro.paused) {
       micro.elapsed += dt;
       for (let i = 0; i < CBZ.updaters.length; i++) runBridged(CBZ.updaters[i], dt, "update");
@@ -653,6 +668,10 @@
     b.style.right = (o.right != null ? o.right : 24) + "px";
     b.style.bottom = (o.bottom != null ? o.bottom : 24) + "px";
     if (o.left != null) { b.style.left = o.left + "px"; b.style.right = "auto"; }
+    // TOP ANCHORING, because a layer that can only hang off the bottom edge
+    // forces every page to put system controls (pause, mute, camera) in the
+    // thumb zone with the game verbs, where they get hit by accident.
+    if (o.top != null) { b.style.top = o.top + "px"; b.style.bottom = "auto"; }
     b.textContent = o.glyph || o.label || "";
     touch.root.appendChild(b);
 
