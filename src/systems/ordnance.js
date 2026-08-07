@@ -19,17 +19,63 @@
       reason bombers fly straight and level on the run-in.
 
    2. THE PREDICTION. `predict()` integrates the same equation forward
-      to the ground and returns the impact point and time-to-impact.
-      One function, and it is the SAME integrator the bomb itself uses,
-      so the aiming reticle cannot disagree with the bomb — the class of
-      bug where the pipper lies to you is structurally impossible here.
+      and returns the impact point and time-to-impact.
+
+      SHARING THE INTEGRATOR IS NOT ENOUGH, AND THIS FILE CLAIMED IT WAS
+      (fixed 2026-08-07). The old header said a pipper fed by the bomb's
+      own integrator "cannot disagree with the bomb". It disagreed by
+      HUNDREDS OF METRES. `predict()` stepped to `groundAt`
+      and stopped there, while `ord.step()` ALSO burst the store on the
+      first roof it clipped — so over a city of 200 towers up to 270 m the
+      pipper pointed at a street the bomb never reached. Measured, ten
+      releases at 360 m / 175 m/s across the basin: 10 of 10 struck a
+      roof, mean XZ error 312 m, worst 484 m, against a 46 m blast
+      radius; predicted 8.96 s of fall against 5.5–7.9 s actual. The AI's
+      CCIP release test calls the same function, so the bombing side was
+      pickling at a solution that did not exist.
+      The trap was never the arithmetic — it was that the STOPPING RULE
+      lived in one of the two callers. So there is now exactly one
+      routine that answers "what did a store flying THIS SEGMENT hit, and
+      at what height" (`strikeSeg`), and `predict()` and `step()` both
+      ask IT with the piece of flight they just made. A future stopping
+      rule (water, a bridge deck, a proximity fuse) goes in there and
+      both sides get it in the same commit or neither does. It takes a
+      segment rather than a point because the two callers sample at
+      different rates and a point test hands them different answers for
+      that reason alone. The residual is the integrator's own few metres.
+
+      AND THE PIPPER SHOWS THE ROOF. `predict()` returns the impact at
+      the height it happens (`.roof` says which), so the ring draws on
+      the rooftop the store is really going to burst on. A burst 200 m up
+      is >45 m from the man in the street below and does nothing to him —
+      the player should watch himself waste that bomb, not be told he hit.
 
    3. THE BLAST, AND COVER. Damage is `power × (1 − d/R)²`, and then it
-      asks the world whether the target could SEE the detonation
-      (`CBZ.micro.segmentBlocked`, the same ray the movement floor
-      uses). A wall between you and the bang is worth 75%. THIS IS THE
-      WHOLE GAME OF BEING BOMBED: without it, cover is decoration and
-      the only counterplay is running; with it, a roof is a decision.
+      asks whether the target was SHIELDED, which is two questions and
+      for a long time this file asked only one:
+
+        • is something BETWEEN him and the bang (`CBZ.micro.segmentBlocked`,
+          the same ray the movement floor uses) — a wall, a tower, a pier;
+        • is something OVER HIM — a roof, a canopy, an overhang.
+
+      ONLY THE FIRST WAS ASKED, AND IT INVERTED THE RULE THE GAME TEACHES
+      (fixed 2026-08-07). That ray runs from 0.4 m above the burst to
+      0.9 m above the target: near-horizontal, so it can never enter a
+      shelter roof's `y0:4.8 → y1:6.1` band. Measured: a runner standing
+      dead centre under a civil-defence shelter — `inShelter()` true, the
+      HUD's COVER lamp lit, the briefing promising him 75% — took
+      `blocked:false, damage 70.4`, which is the FULL `190·(1−18/46)²`,
+      off a 500-pounder 18 m away. Meanwhile 40 of 40 sampled tower pairs
+      returned blocked. So cover was handed out by whatever masonry
+      happened to be on the line, and the one place the game tells you to
+      stand was the one place worth nothing.
+      Ordnance is an OVERHEAD threat; a roof is the whole reason a
+      civil-defence shelter exists, and the overhead test is what this
+      file was missing rather than an exception bolted onto it. It is
+      general — it reads `y0`/`y1` off the collider and never reads a tag,
+      so a park tree's canopy and a building overhang shelter you for the
+      same reason the concrete slab does. One dial for both answers:
+      ORDNANCE_COVER_FACTOR.
 
    4. THE TELEGRAPH. Ordnance in the air paints a THREAT RING on the
       ground at its predicted impact point, sized to its blast radius
@@ -258,16 +304,97 @@
 
   // ----------------------------------------------------------- BALLISTICS
   // ONE integrator, used by the bomb AND by the prediction (see header).
+  //
+  // IT FILLS A SCRATCH ROW RATHER THAN RETURNING A FRESH ONE. `predict()`
+  // steps this ~110 times per call and is now asked once a frame by the
+  // player's pipper AND by every AI bomber's CCIP test; a six-element array
+  // per step is a thousand throwaway arrays a second for one aeroplane. Every
+  // caller reads the row before stepping again, which is the only contract
+  // this shortcut needs.
+  const _int = [0, 0, 0, 0, 0, 0];
   function integrate(px, py, pz, vx, vy, vz, drag, dt) {
-    const sp = Math.hypot(vx, vy, vz);
-    const d = drag * sp;
+    // sqrt, not Math.hypot: hypot pays for overflow guards on numbers that
+    // are a bomb's speed in m/s, and its precision is implementation-defined
+    // where sqrt is exactly rounded — cheaper AND more repeatable.
+    const d = drag * Math.sqrt(vx * vx + vy * vy + vz * vz);
     vx -= vx * d * dt;
     vz -= vz * d * dt;
     vy -= (vy * d + G) * dt;
-    return [px + vx * dt, py + vy * dt, pz + vz * dt, vx, vy, vz];
+    _int[0] = px + vx * dt; _int[1] = py + vy * dt; _int[2] = pz + vz * dt;
+    _int[3] = vx; _int[4] = vy; _int[5] = vz;
+    return _int;
   }
 
-  // Where does it land, and when? Steps the same equation to the ground.
+  // ---- WHAT A STORE HITS, ASKED IN ONE PLACE (see THE PREDICTION).
+  // The falling bomb and the aiming reticle must never own separate copies of
+  // the stopping rule; when they did, the reticle was wrong by 312 m on
+  // average. `strikeSeg` answers for a SEGMENT of flight — the frame the bomb
+  // just flew, or the step the prediction just took — and fills the four
+  // scratch fields below rather than allocating an answer per integrator step.
+  let _hitX = 0, _hitY = 0, _hitZ = 0, _hitRoof = false;
+
+  // A SEGMENT AND NOT A POINT, because the callers sample at wildly different
+  // rates and a point test makes the answer depend on that rate. `predict()`
+  // steps 0.08 s (14 m at bombing speed) and the bomb steps a real frame,
+  // which microboot clamps at 0.1 s (17 m). Measured: shot E3 of the ten-shot
+  // table CLIPS THE CORNER of a 250 m tower over about 4 m of ground track —
+  // the fine step sees it, a 14 m step walks straight past, and the two
+  // answers are 254 m apart. Corner grazes are not a rare curiosity in a city
+  // of two hundred boxes; they are the edge of every one of them.
+  const FINE = 2.5;                 // m of track per fine sample near a tower
+
+  // The skyline's ceiling, cached. This single compare is what keeps the
+  // rooftop test off the hot part of the trajectory: a store released at
+  // 360 m spends most of its fall above every roof in the world, and up
+  // there the answer is knowable without touching the building list.
+  let _ceil = 0, _ceilWorld = null, _ceilN = -1;
+  function roofCeiling() {
+    const w = CBZ.desertCity && CBZ.desertCity.world;
+    const B = w && w.buildings;
+    // No skyline in this page (a slice, a test rig, the prison): the ground
+    // is the only thing there is to hit, and −Infinity says so in one compare.
+    if (!B || !B.length) return -Infinity;
+    if (w !== _ceilWorld || B.length !== _ceilN) {
+      _ceilWorld = w; _ceilN = B.length;
+      let h = 0;
+      for (let i = 0; i < B.length; i++) if (B[i].h > h) h = B[i].h;
+      _ceil = h;
+    }
+    return _ceil;
+  }
+
+  function strikeSeg(x0, y0, z0, x1, y1, z1) {
+    _hitRoof = false;
+    const g = groundAt ? groundAt(x1, z1) : 0;
+    if (y1 <= g) { _hitX = x1; _hitY = g; _hitZ = z1; return true; }
+    if ((y0 < y1 ? y0 : y1) > roofCeiling()) return false;   // the whole segment is above every roof
+    const w = CBZ.desertCity && CBZ.desertCity.world;
+    if (!w || !w.buildingAt) return false;
+
+    // TWO TIERS, AND THE CHEAP ONE ANSWERS ALMOST EVERY TIME. `buildingAt`'s
+    // `pad` turns the point query into "is there a tower within pad of here";
+    // pad = HALF the segment, so the two end discs between them cover the
+    // whole of it (the ground track is a straight line — drag scales vx and
+    // vz together and never turns them, so there is nothing off the line to
+    // miss). Null means the segment is clear and costs ONE scan.
+    const dx = x1 - x0, dz = z1 - z0;
+    const len = Math.sqrt(dx * dx + dz * dz);
+    if (!w.buildingAt(x1, z1, len * 0.5 + 0.5)) return false;
+
+    // Something is within half a step. Only now is the segment worth walking.
+    const n = Math.max(1, Math.ceil(len / FINE));
+    const dy = y1 - y0;
+    for (let i = 1; i <= n; i++) {
+      const u = i / n;
+      const px = x0 + dx * u, py = y0 + dy * u, pz = z0 + dz * u;
+      const bl = w.buildingAt(px, pz, 0);
+      if (bl && py <= bl.h) { _hitX = px; _hitY = bl.h; _hitZ = pz; _hitRoof = true; return true; }
+    }
+    return false;
+  }
+
+  // Where does it land, and when? Steps the same equation, and stops on the
+  // same rule, as the bomb.
   ord.predict = function (pos, vel, kind, maxT) {
     const K = KINDS[kind] || KINDS.iron;
     let px = pos.x, py = pos.y, pz = pos.z;
@@ -276,11 +403,11 @@
     const T = maxT || 40;
     for (let t = 0; t < T; t += dt) {
       const r = integrate(px, py, pz, vx, vy, vz, K.drag, dt);
+      if (strikeSeg(px, py, pz, r[0], r[1], r[2]))
+        return { x: _hitX, y: _hitY, z: _hitZ, t: t, hit: true, roof: _hitRoof };
       px = r[0]; py = r[1]; pz = r[2]; vx = r[3]; vy = r[4]; vz = r[5];
-      const g = groundAt ? groundAt(px, pz) : 0;
-      if (py <= g) return { x: px, y: g, z: pz, t: t, hit: true };
     }
-    return { x: px, y: py, z: pz, t: T, hit: false };
+    return { x: px, y: py, z: pz, t: T, hit: false, roof: false };
   };
 
   // ------------------------------------------------------------- RELEASE
@@ -403,6 +530,55 @@
     return out;
   };
 
+  // ----------------------------------------------------------- THE ROOF
+  // THE SECOND HALF OF THE COVER QUESTION (see THE BLAST, AND COVER). The
+  // near-horizontal burst→target ray answers "is there a wall in the way";
+  // this answers "is there a lid on him", which is the question ordnance
+  // actually poses and the only one a civil-defence shelter was ever built
+  // to fail.
+  //
+  // WHAT MAKES A COLLIDER A ROOF, WITH NO TAG ANYWHERE IN IT:
+  //   • it is HEIGHT-GATED (`y0` present). A box with no y0 is full height —
+  //     a wall, a tower, a rock. Standing inside one is not standing under
+  //     something, it is standing in it, and it is the horizontal ray's
+  //     business, not this one's.
+  //   • its floor clears his head (`y0 ≥ pos.y + HEAD`). A vaultable rail at
+  //     y0 = 0.9 is beside him; the shelter slab at 4.8 and a park canopy,
+  //     which starts anywhere from 3.2 m up, are over him. Measured: a rail
+  //     collider returns overhead:false and is still worth its 75% through
+  //     the horizontal ray, which is the right answer by the right route.
+  //   • his XZ is inside its footprint. Not "near" — under.
+  //
+  // GROUND BURST vs AIRBURST, WHICH IS THE ONLY DISTINCTION THAT MATTERS
+  // HERE: a lid is worth nothing against a bang that is UNDER IT WITH YOU, so
+  // a burst inside the footprint AND below the slab is refused — run into a
+  // shelter a store has already gone off inside and it is open ground. Every
+  // other geometry — a store on the street outside, a store on the slab, a
+  // store bursting in the air above it — is a lid between him and it. That is
+  // deliberately more generous than a fragment trace would be for a
+  // ground-level burst beside the shelter: this world's shelters are the
+  // published answer to "where do I stand when the sky opens" (world.shelters,
+  // world.inShelter, the HUD lamp, the briefing), and a 75% roof is the
+  // contract those four make with the player.
+  const HEAD = 2.0;
+  const _over = [];
+  function underCover(tx, ty, tz, bx, by, bz) {
+    if (!CBZ.micro || !CBZ.micro.queryColliders) return false;
+    const head = ty + HEAD;
+    // own scratch array: micro's internal one is in use by segmentBlocked,
+    // which this function is asked in front of
+    const list = CBZ.micro.queryColliders(tx, tz, 0.6, _over);
+    for (let i = 0; i < list.length; i++) {
+      const c = list[i];
+      if (c.noBlock || c.y0 == null) continue;
+      if (c.y0 < head) continue;
+      if (tx < c.minX || tx > c.maxX || tz < c.minZ || tz > c.maxZ) continue;
+      if (by < c.y0 && bx >= c.minX && bx <= c.maxX && bz >= c.minZ && bz <= c.maxZ) continue;
+      return true;
+    }
+    return false;
+  }
+
   // ------------------------------------------------------------- THE BLAST
   ord.blast = function (x, y, z, radius, power, info) {
     info = info || {};
@@ -473,17 +649,22 @@
       if (d > radius) continue;
       let f = 1 - d / radius;
       f = f * f;
-      let covered = false;
-      if (blocked && blocked(x, y + 0.4, z, p.x, p.y + 0.9, p.z)) {
-        f *= C.ORDNANCE_COVER_FACTOR;
-        covered = true;
-      }
+      // COVER IS TWO QUESTIONS AND EITHER ONE IS ENOUGH. The roof is asked
+      // FIRST because it is the cheap one — a single grid cell's worth of
+      // boxes — where the ray walks every cell between the bang and the man,
+      // which for a 1109 m nuke is forty-odd of them per target.
+      let covered = false, overhead = false;
+      if (underCover(p.x, p.y, p.z, x, y, z)) { covered = true; overhead = true; }
+      else if (blocked && blocked(x, y + 0.4, z, p.x, p.y + 0.9, p.z)) covered = true;
+      if (covered) f *= C.ORDNANCE_COVER_FACTOR;
       const dmg = power * f;
       if (dmg < 1) continue;
       hits++;
       stats.hits++;
       if (t.onDamage) {
-        try { t.onDamage(dmg, { x: x, y: y, z: z, radius: radius, covered: covered, by: info.owner, team: info.team, cause: "ordnance" }); }
+        // `overhead` rides along beside `covered` so a HUD can tell a man he
+        // was saved by the thing over his head rather than by luck of the line
+        try { t.onDamage(dmg, { x: x, y: y, z: z, radius: radius, covered: covered, overhead: overhead, by: info.owner, team: info.team, cause: "ordnance" }); }
         catch (e) { console.error("[ordnance damage]", e); }
       } else if (t.hp != null) {
         t.hp -= dmg;
@@ -577,6 +758,12 @@
       const b = bombs[i];
       b.age += dt;
       const r = integrate(b.pos.x, b.pos.y, b.pos.z, b.vel.x, b.vel.y, b.vel.z, b.K.drag, dt);
+      // ASK BEFORE MOVING: the frame the store just flew is a SEGMENT, and at
+      // microboot's 0.1 s dt clamp that segment is seventeen metres long. The
+      // tower corner it grazes lives inside it, not at either end — the same
+      // reason the pipper missed E3. Both callers hand strikeSeg the flight
+      // they just made, which is the whole point of there being one of it.
+      const struck = strikeSeg(b.pos.x, b.pos.y, b.pos.z, r[0], r[1], r[2]);
       b.pos.set(r[0], r[1], r[2]);
       b.vel.set(r[3], r[4], r[5]);
       b.mesh.position.copy(b.pos);
@@ -585,20 +772,14 @@
       _v.copy(b.pos).add(b.vel);
       b.mesh.lookAt(_v);
 
-      const g = groundAt(b.pos.x, b.pos.z);
-      // a tower it clips on the way down counts as the ground it hit
-      let struckY = null;
-      if (CBZ.desertCity && CBZ.desertCity.world) {
-        const bl = CBZ.desertCity.world.buildingAt(b.pos.x, b.pos.z, 0);
-        if (bl && b.pos.y <= bl.h) struckY = bl.h;
-      }
-      if (b.pos.y <= g || struckY != null || b.age > 45) {
-        const hy = struckY != null ? struckY : g;
-        b.pos.y = hy;
+      if (struck || b.age > 45) {
+        const hx = struck ? _hitX : b.pos.x, hz = struck ? _hitZ : b.pos.z;
+        const hy = struck ? _hitY : groundAt(b.pos.x, b.pos.z);
+        b.pos.set(hx, hy, hz);
         scene.remove(b.mesh);
         bombs.splice(i, 1);
         b.live = false;
-        ord.blast(b.pos.x, hy, b.pos.z, b.radius, b.power, { owner: b.owner, team: b.team, kind: b.kind });
+        ord.blast(hx, hy, hz, b.radius, b.power, { owner: b.owner, team: b.team, kind: b.kind });
         if (b.onDetonate) { try { b.onDetonate(b); } catch (e) { console.error("[ordnance onDetonate]", e); } }
         continue;
       }
@@ -670,7 +851,13 @@
       // `warn` raises the floor and nothing else changes.
       const h = Math.max(H, b.K.warn || 0);
       if (!b.impact || !b.impact.hit || b.impact.t > h) continue;
-      const d = Math.hypot(x - b.impact.x, z - b.impact.z);
+      // MEASURED IN THREE DIMENSIONS, because the impact point is now allowed
+      // to be two hundred metres in the air (a rooftop burst — see THE
+      // PREDICTION). A man on the street under that tower is outside the
+      // radius and is not in danger; screaming at him would be the same lie
+      // the pipper used to tell, only at the other end of the fall.
+      const dy = b.impact.y - (groundAt ? groundAt(x, z) : 0);
+      const d = Math.hypot(x - b.impact.x, dy, z - b.impact.z);
       if (d > b.radius * 1.3) continue;
       const f = 1 - d / (b.radius * 1.3);
       if (f > worst) worst = f;
