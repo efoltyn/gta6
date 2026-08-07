@@ -240,6 +240,12 @@ function spawnUnit(rec, role, i) {
   } else {
     u.group = CBZ.studio.cast("runner", { color: team.color, variant: i });
     if (u.group) CBZ.scene.add(u.group);
+    // THE HUNT ONLY WORKS IF THERE IS SOMETHING TO SEE. A man is two pixels
+    // from 360 m and the bombing half died of it. He kicks up dust, and a
+    // moving smudge on a pale street is findable from altitude — diegetic,
+    // costs one draw call, and it fades the moment he stops, so standing
+    // still under a shelter is a real choice rather than a lost cause.
+    u.trail = CBZ.studio.trail({ length: 26, color: 0xd8c39a, opacity: 0.5, minStep: 3.5 });
     const a = (i / SQUAD) * Math.PI * 2 + (rec.team === TEAMS[1].id ? 0.4 : 0);
     const r = 190 + (i % 5) * 95;
     u.pos.set(Math.cos(a) * r, 0, Math.sin(a) * r);
@@ -286,6 +292,7 @@ function hurt(u, dmg, info) {
     if (enemy) match.addScore(enemy.id, PTS_KILL, "kill");
     if (killer === me) earnKill();
     CBZ.studio.boom(u.pos, { radius: 5, power: 0.45, structural: false });
+    if (u.trail) u.trail.cut();
     if (u.group && u.group.parent) u.group.parent.remove(u.group);
     if (u === me) hud.health(0);
   } else {
@@ -328,8 +335,11 @@ for (let t = 0; t < TEAMS.length; t++) {
 let swapT = 0;
 function showSwap(half) {
   const n = el("swap");
+  const rows = match.standings();
+  let line = "";
+  for (let i = 0; i < rows.length; i++) line += (i ? "   " : "") + rows[i].name + " " + Math.round(rows[i].total);
   n.innerHTML = (me.role === "bomber" ? "YOU BOMB" : "YOU RUN") +
-    "<small>HALF " + (half + 1) + " OF " + HALVES + "</small>";
+    "<small>HALF " + (half + 1) + " OF " + HALVES + (half > 0 ? "   ·   " + line : "") + "</small>";
   n.classList.add("on");
   swapT = 2.4;
 }
@@ -421,11 +431,12 @@ CBZ.micro.onFrame(function (dt) {
   // WHAT YOU HEAR IS WHAT IS HAPPENING TO YOU. A bomber hears its own machine;
   // a runner hears the interval between warnings shorten as a stick closes.
   if (me && me.alive && eng) {
-    if (me.role === "bomber" && me.af) eng.set(me.af.throttle, me.af.speed, 0);
+    if (me.role === "bomber" && me.af) { eng.set(me.af.throttle, me.af.speed, 0); hud.danger(0); }
     else {
       eng.set(0, 0, 400);
       const risk = CBZ.ordnance.dangerAt ? CBZ.ordnance.dangerAt(me.pos.x, me.pos.z, 10) : 0;
       CBZ.studio.alarm(risk);
+      hud.danger(risk);
     }
   }
 
@@ -534,6 +545,7 @@ function stepRunner(u, dt, mine) {
     if (CBZ.micro.resolveCircle) CBZ.micro.resolveCircle(u.pos, 0.55, u.pos.y, 1.8);
   }
   u.pos.y = groundAt(u.pos.x, u.pos.z);
+  if (u.trail && n > 0.01) u.trail.push(u.pos);
   if (u.group) {
     u.group.position.copy(u.pos);
     u.group.rotation.y = u.yaw;

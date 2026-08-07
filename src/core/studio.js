@@ -565,6 +565,37 @@
     return { group: g, af: af };
   };
 
+  /* structureAt(x, z, reach) — WHAT IS STANDING HERE.
+
+     Reads CBZ.colliders, which is the registry the whole engine already writes
+     and reads, and returns the nearest full-height box's own record — its
+     centre, its extents and its height — or null over open ground. A world
+     declares a building by registering one collider with a `ref`; nothing here
+     knows what a lot, a district or a city is, so the prison, the desert and
+     the city all answer the same way.
+
+     `reach` lets a near miss still find the wall it went off beside, which is
+     what a bomb actually does to a building. */
+  CBZ.studio.structureAt = function (x, z, reach) {
+    const list = CBZ.colliders;
+    if (!list || !list.length) return null;
+    const R = reach > 0 ? reach : 0;
+    let best = null, bd = Infinity;
+    for (let i = 0; i < list.length; i++) {
+      const c = list[i];
+      if (!c || c.y0 != null) continue;                 // height-gated: a rail, a roof, not a structure
+      const r = c.ref;
+      if (!r || !(r.w > 0) || !(r.h > 0)) continue;     // a record that cannot describe itself
+      if (r.alive === false) continue;
+      const dx = Math.max(c.minX - x, 0, x - c.maxX);
+      const dz = Math.max(c.minZ - z, 0, z - c.maxZ);
+      const d = Math.hypot(dx, dz);
+      if (d > R) continue;
+      if (d < bd) { bd = d; best = r; }
+    }
+    return best;
+  };
+
   /* boom(pos, opts) — a detonation, through the best route that is loaded.
      ordnance owns the shape of one; crashfx owns what it looks like; modecaps
      owns whose people it reaches. A page should never grow its own fireball.
@@ -593,10 +624,23 @@
     }
     let hit = 0;
     if (CBZ.blastWorldActors) { try { hit = CBZ.blastWorldActors(pos.x, pos.y || 1, pos.z, R, power, opts) || 0; } catch (e) {} }
+    // AND IT MUST HIT THE BUILDING. cityAirstrikeCollapse resolves a facade
+    // out of whatever it is given, and given only a point it has to guess the
+    // footprint. The world already knows: the structure under the impact is a
+    // collider with a `ref` carrying its own extents. Hand over the real lot
+    // and the collapse lands on the real face at the real roofline.
+    let struck = null;
     if (opts.structural !== false && CBZ.cityAirstrikeCollapse) {
-      try { CBZ.cityAirstrikeCollapse({ x: pos.x, z: pos.z, at: pos, power: power }, opts); } catch (e) {}
+      const s = CBZ.studio.structureAt(pos.x, pos.z, opts.reach != null ? opts.reach : R);
+      const lot = s ? { cx: s.x, cz: s.z, w: s.w, d: s.d } : { x: pos.x, z: pos.z };
+      try {
+        CBZ.cityAirstrikeCollapse(lot, {
+          at: pos, top: s ? s.h : undefined, power: power, radius: R,
+        });
+        struck = s;
+      } catch (e) {}
     }
-    return { drew: drew, hit: hit };
+    return { drew: drew, hit: hit, struck: struck };
   };
 
   /* ==========================================================================
@@ -938,6 +982,8 @@
   background:rgba(16,17,20,.66);border:1px solid rgba(255,255,255,.2);backdrop-filter:blur(6px);
   font-size:14px;letter-spacing:.1em;cursor:pointer}
 .sHud .pr.on{display:flex}
+.sHud .dg{position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity .18s linear;
+  box-shadow:inset 0 0 90px 22px rgba(196,44,30,.85), inset 0 0 260px 60px rgba(150,20,10,.42)}
 .sHud .pr kbd{font:inherit;font-size:12px;padding:2px 8px;border-radius:5px;background:rgba(255,255,255,.16);
   border:1px solid rgba(255,255,255,.26)}
 .sHud.touch .pr{padding:15px 30px;font-size:16px}
@@ -970,6 +1016,11 @@
     const fd = spec.feed === false ? null : mk("fd", "");
     const nt = spec.note === false ? null : mk("nt", "");
     const pr = spec.prompt === false ? null : mk("pr", "");
+    // DANGER IS A VIGNETTE, NOT A WORD. It costs no HUD space, it reads in
+    // peripheral vision, and it cannot collide with anything else on screen —
+    // which is the whole reason a bare HUD can still tell you you are about to
+    // die. No icon, no emoji, no counter.
+    const dg = spec.danger === false ? null : mk("dg", "");
     let onTap = null;
     if (pr) pr.addEventListener("click", function (e) { e.preventDefault(); if (onTap) onTap(); });
     document.body.appendChild(root);
@@ -1007,6 +1058,12 @@
         pr.innerHTML = COARSE ? String(label)
           : "<kbd>" + (key || "E") + "</kbd><span>" + String(label) + "</span>";
         pr.classList.add("on");
+      },
+      danger: function (level) {
+        if (!dg) return;
+        const f = Math.max(0, Math.min(1, level || 0));
+        // squared, so a distant store is a hint and a close one is the screen
+        dg.style.opacity = (f * f * 0.92).toFixed(3);
       },
       hide: function () { root.style.display = "none"; },
       show: function () { root.style.display = ""; },
