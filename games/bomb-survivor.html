@@ -127,7 +127,11 @@
      Two clip-paths: a flying wing for the bombing half, a shelter roof for
      the running half. They take the panel's accent colour and nothing else. */
   #roleGlyph{width:19px;height:19px;position:relative;flex:0 0 19px;color:#ffb15c}
+  /* the glow used to be written from script as a hard-coded hex per role, which
+     is the same colour twice in two languages — currentColor takes it from the
+     class that already decides the shape */
   #roleGlyph:after{content:'';position:absolute;inset:0;background:currentColor;
+    filter:drop-shadow(0 0 6px currentColor);
     clip-path:polygon(50% 4%,98% 94%,50% 72%,2% 94%)}
   #roleGlyph.run{color:#7fe0ff}
   #roleGlyph.run:after{clip-path:polygon(50% 6%,100% 52%,84% 52%,84% 94%,16% 94%,16% 52%,0 52%)}
@@ -244,8 +248,13 @@
     #topPane{width:auto;left:calc(128px + var(--sal));right:calc(136px + var(--sar));
       transform:none;padding:7px 10px}
     #clock{font-size:26px}
+    /* THE FEED STARTS BELOW THE TOP PANE, and 84 px was inside it: the pane is
+       79 px tall from y=10, so the feed overlapped it by 5 px at 760x420 (and
+       by more with the test rig open, which shifts the feed right into the
+       pane's own column). The pane grows to ~106 px when the NUKE row lights,
+       so the feed clears both states. */
     #feed{width:auto;right:auto;left:calc(10px + var(--sal));font-size:11px;bottom:auto;
-      top:calc(84px + var(--sat));max-width:52%}
+      top:calc(122px + var(--sat));max-width:52%}
     #vitals{padding:7px 9px}
     /* the top pane is only ~126 px between health and the radar on a 390 px
        phone, and IMPACT 05 wrapped onto a second line there. Shrink the row's
@@ -320,7 +329,7 @@
   <div id="cross"></div>
   <div class="pane" id="topPane">
     <div id="clockRow">
-      <span id="roleGlyph">✈</span>
+      <span id="roleGlyph"></span>
       <span id="clock">10:00</span>
       <span id="halfDots"><span class="on"></span><span></span></span>
     </div>
@@ -609,16 +618,47 @@ function makeUnit(o) {
     pos: new THREE.Vector3(), vel: new THREE.Vector3(),
     yaw: 0, pitch: 0, onGround: true, stamina: 1,
     hp: 100, alive: true, group: null, af: null,
-    boarded: false, dropCd: 0, respawnIn: 0,
+    boarded: false, dropCd: 0, respawnIn: 0, stick: 0, stickT: 0,
     goal: null, goalT: 0, targetId: null, orbit: rr(0, Math.PI * 2),
     rec: null, tgt: null,
   };
 }
 
+// ---- EVERY BODY THIS FILE THROWS AWAY OWNS GPU MEMORY, and taking it out of
+// the scene frees none of it. Measured over one half, 45 aircraft destroyed and
+// rebuilt: renderer.info.memory.geometries 2212 → 2740, monotonic, +11.7 per
+// aircraft — invisible to scene.children (flat at 242) and to the JS heap,
+// because CBZ.airbase.bomber()/.fighter() extrude a fresh planform per call and
+// af.dispose() only flips a flag. A full match leaked ~3000 geometries.
+//
+// WHAT THIS WALK MUST NOT TOUCH: the engine shares deliberately. CBZ.boxGeom()
+// and CBZ.cmat() hand out CACHED resources tagged `_shared`, city/clothes.js
+// hands out painted cloth tagged `_cbzClothKey` (a per-rig clone is a legal
+// door into the one texture every wearer samples), and r128 sprites share a
+// geometry singleton. Disposing any of those corrupts every other object still
+// using it — the city's towers, the other nine soldiers, the whole field. Skip
+// them by name, which is the same guard city/peds.js and city/regimes.js use.
+function disposeBody(g) {
+  if (!g) return;
+  g.traverse(function (o) {
+    if (o.isSprite) return;
+    const geo = o.geometry;
+    if (geo && !geo._shared && geo.dispose) { try { geo.dispose(); } catch (e) {} }
+    const m = o.material;
+    if (!m) return;
+    const list = Array.isArray(m) ? m : [m];
+    for (let i = 0; i < list.length; i++) {
+      const mm = list[i];
+      if (mm && !mm._shared && !mm._cbzClothKey && mm.dispose) { try { mm.dispose(); } catch (e) {} }
+    }
+  });
+}
+
 function clearBody(u) {
-  if (u.group) { CBZ.scene.remove(u.group); u.group = null; }
+  if (u.group) { CBZ.scene.remove(u.group); disposeBody(u.group); u.group = null; }
   if (u.af) { u.af.dispose(); u.af = null; }
   if (u.tgt) { CBZ.ordnance.removeTarget(u.tgt); u.tgt = null; }
+  u.stick = 0;          // a dead bomber's stick dies with him (see aiBomber)
 }
 
 // ---- put a unit into the world in the shape its role demands
@@ -649,16 +689,21 @@ function spawnBomber(u, opts) {
   u.kind = "air";
   u.alive = true; u.hp = 100;
   u.dropCd = 0;
-  u.group = (u.human || opts.wing) ? CBZ.airbase.bomber({}) : CBZ.airbase.fighter({ color: 0x6a727c });
-  CBZ.scene.add(u.group);
-  u.af = CBZ.airframe.make({ preset: (u.human || opts.wing) ? "bomber" : "fighter", groundAt: floorAt });
+  const wing = !!(u.human || opts.wing);
+  const onApron = !!(u.human && opts.onApron);
+  // THE APRON START HAS NO AEROPLANE ATTACHED TO IT, so it must not build one.
+  // This used to extrude a whole bomber, add it to the scene and drop it two
+  // lines later — a set of geometries nobody ever saw, leaked once a half.
+  if (!onApron) {
+    u.group = wing ? CBZ.airbase.bomber({}) : CBZ.airbase.fighter({ color: 0x6a727c });
+    CBZ.scene.add(u.group);
+  }
+  u.af = CBZ.airframe.make({ preset: wing ? "bomber" : "fighter", groundAt: floorAt });
 
-  if (u.human && opts.onApron) {
+  if (onApron) {
     // THE BRIEF: the player starts ON FOOT at the base, beside the wing.
     u.kind = "foot";
     u.boarded = false;
-    CBZ.scene.remove(u.group);
-    u.group = null;
     u.af.place(base.bomber.x, base.bomber.y, base.bomber.z, base.bomber.heading);
     u.pos.set(base.spawn.x, base.spawn.y, base.spawn.z);
     u.yaw = base.spawn.heading;
@@ -708,7 +753,11 @@ function killUnit(u, info) {
   if (!u.alive) return;
   u.alive = false;
   const killer = info && info.team ? unitsOfTeam(info.team).find(function (k) { return k.id === info.by; }) : null;
-  match.kill(u.rec, killer ? killer.rec : null, "ordnance");
+  // A CRASH IS NOT A KILL. teammatch prints "<killer, or the cause> → <victim>"
+  // when nobody is credited, so hardcoding "ordnance" printed 173 self-inflicted
+  // crashes as `ordnance → MERCER` — a weapon nobody fired, in a feed whose only
+  // job is to say what happened. The airframe meeting the ground says so.
+  match.kill(u.rec, killer ? killer.rec : null, (info && info.crash) ? "CRASH" : "ORDNANCE");
   // THE REWARD IS COUNTED HERE, at the one place a body actually stops, and
   // only for a RUNNER — the neutral traffic and a bomber caught by his own
   // stick are not the thing being asked for.
@@ -922,6 +971,27 @@ function syncTouch() {
   TB.nuke.set(!!(NUKE_ON && nuke.armed && flying), true);
 }
 
+// ---- THE PROMPT HAS ONE OWNER PER FRAME. It used to have two, and they fought
+// every frame of a takeoff roll: updateFlight wrote "PULL BACK TO ROTATE" and
+// set the element to block, then the boarding branch's `else` set it straight
+// back to none on the same frame, because myUnit.boarded had just become true.
+// Measured mid-roll: {"spd":55,"g":true,"disp":"none","html":"PULL BACK TO
+// ROTATE · 55 m/s"} — written sixty times a second and shown never, so a
+// first-time player got no rotation cue at all. Now nothing writes the element
+// directly: a system CLAIMS the line, and the frame applies the last claim once
+// at the end. No claim means no prompt.
+let promptClaim = null, promptShown = null;
+function claimPrompt(html) { promptClaim = html; }
+function applyPrompt() {
+  const p = el("prompt");
+  if (promptClaim == null) {
+    if (promptShown !== null) { promptShown = null; p.style.display = "none"; }
+    return;
+  }
+  if (promptClaim !== promptShown) { promptShown = promptClaim; p.innerHTML = promptClaim; }
+  p.style.display = "block";
+}
+
 function updatePlayer(dt) {
   const u = myUnit;
   if (!u) return;
@@ -981,12 +1051,10 @@ function updateFoot(u, dt, human) {
 //      world/airbase.js published where the aeroplane stands.
 function updateBoarding() {
   const u = myUnit;
-  const p = el("prompt");
-  if (!u || u.role !== "bomber" || u.boarded || !u.alive || !base) { p.style.display = "none"; return; }
+  if (!u || u.role !== "bomber" || u.boarded || !u.alive || !base) return;
   const d = Math.hypot(u.pos.x - base.bomber.x, u.pos.z - base.bomber.z);
   if (d < 34) {
-    p.style.display = "block";
-    p.innerHTML = TOUCH.active ? "AT THE WING" : "<kbd>E</kbd>  BOARD";
+    claimPrompt(TOUCH.active ? "AT THE WING" : "<kbd>E</kbd>  BOARD");
     if (KEY.pressed("KeyE")) {
       u.boarded = true;
       u.kind = "air";
@@ -1001,13 +1069,12 @@ function updateBoarding() {
       u.af.throttle = 1;
       u.pos.copy(u.af.pos);
       camMode = "chase";
-      p.style.display = "none";
+      claimPrompt(null);                 // boarded: the line belongs to nobody now
       match.log("YOU · airborne", { tone: "good" });
       if (CBZ.micro.sfx) CBZ.micro.sfx.tone(180, 0.5, { type: "sawtooth", gain: 0.2, slideTo: 420 });
     }
   } else {
-    p.style.display = "block";
-    p.innerHTML = "FLYING WING · " + Math.round(d) + " m";
+    claimPrompt("FLYING WING · " + Math.round(d) + " m");
   }
 }
 
@@ -1049,7 +1116,9 @@ function updateFlight(u, dt, human) {
     const offField = !base.contains(af.pos.x, af.pos.z);
     if (hard || (offField && af.speed > 30)) {
       af.touchdownSpeed = 0;
-      killUnit(u, { team: null });
+      // `crash` is what stops the feed crediting a weapon nobody fired — see
+      // killUnit. This is the only way a unit in this game kills itself.
+      killUnit(u, { team: null, crash: true });
       if (human) match.log("YOU · into the deck", { tone: "bad" });
       return;
     }
@@ -1061,14 +1130,8 @@ function updateFlight(u, dt, human) {
   //      never flown one will hold the throttle open down 1.8 km of concrete
   //      waiting for something to happen. Say the word at the speed it
   //      becomes true, and only then.
-  if (human) {
-    const pr = el("prompt");
-    if (af.grounded && af.speed > 52) {
-      pr.style.display = "block";
-      pr.innerHTML = "PULL BACK TO ROTATE · " + Math.round(af.speed) + " m/s";
-    } else if (pr.innerHTML.indexOf("ROTATE") >= 0) {
-      pr.style.display = "none";
-    }
+  if (human && af.grounded && af.speed > 52) {
+    claimPrompt("PULL BACK TO ROTATE · " + Math.round(af.speed) + " m/s");
   }
 
   // ---- release
@@ -1081,9 +1144,16 @@ function updateFlight(u, dt, human) {
   }
 }
 
+// WHAT THE PLAYER HIMSELF DROPPED. CBZ.ordnanceAudit().released counts every
+// store in the match — ten AI bombers, the test rig and him — so the results
+// screen read a whole match's ordnance back as his: a player who never boarded
+// was credited with 730 stores. Counted here because this is the one door every
+// release of his goes through, the stick and the nuke alike.
+let myStores = 0;
 function releaseFrom(u, kind) {
   const af = u.af;
   if (!af) return;
+  if (u === myUnit) myStores++;
   // released with the AEROPLANE's velocity — the header's whole point. `kind`
   // is the ONLY thing that differs between the stick and the nuke: same bay,
   // same integrator, same pipper, same cover question on the far end.
@@ -1222,7 +1292,7 @@ function aiBomber(u, dt) {
     const lx = tgt.pos.x + (tgt.velX || 0) * sol.t * 0.6;
     const lz = tgt.pos.z + (tgt.velZ || 0) * sol.t * 0.6;
     if (sol.hit && u.dropCd <= 0 && Math.hypot(sol.x - lx, sol.z - lz) < 85) {
-      for (let k = 0; k < 5; k++) setTimeout(function () { if (u.alive && u.af) releaseFrom(u); }, k * 200);
+      u.stick = 5; u.stickT = 0;      // five stores, walked below on the SIM clock
       u.dropCd = 6 + rr(0, 4);
       u.targetId = null;
     }
@@ -1231,6 +1301,19 @@ function aiBomber(u, dt) {
     u.orbit += dt * 0.16;
     _v.set(Math.cos(u.orbit) * 900, BOMBER_ALT, Math.sin(u.orbit) * 900);
     aim = af.steerTo(_v, { gain: 2.0 });
+  }
+
+  // ---- THE STICK IS PART OF THE SIMULATION. It used to be five setTimeouts on
+  // the wall clock — `for k<5: setTimeout(release, k*200)` — which nothing in
+  // the game could reach: the pause key could not stop it, no clock the rig
+  // owned could reach it, and it fired ACROSS THE HALF BOUNDARY, putting
+  // stores into the air during the intermission after startHalf's
+  // ordnance.clear() had already run. Counted down in dt here, it stops when
+  // the frame stops, it dies with the bomber (clearBody zeroes it), and the
+  // spacing is the SAME constant the player's held trigger uses.
+  if (u.stick > 0) {
+    u.stickT -= dt;
+    if (u.stickT <= 0) { releaseFrom(u); u.stick--; u.stickT = STICK_GAP; }
   }
   // A bomber turns with BANK and holds its altitude with pitch — so the
   // steering solution keeps its roll and surrenders its pitch entirely.
@@ -1418,8 +1501,13 @@ function updateHUD() {
   // ---- clock, half, and the role: a colour and a glyph, not a sentence
   HUD.clock.textContent = match.clock();
   HUD.clock.className = (match.phase === "live" && match.timeLeft < 60) ? "low" : "";
-  HUD.glyph.textContent = role === "bomber" ? "✈" : "🏃";
-  HUD.glyph.style.filter = "drop-shadow(0 0 6px " + (role === "bomber" ? "#ffb15c" : "#7fe0ff") + ")";
+  // THE GLYPH IS THE CLIP-PATH, AND ONLY THE CLIP-PATH. Two emoji were still
+  // being written into this element behind the drawn shape (measured on the
+  // running half: a runner emoji as textContent, class "(none)"), and the `.run`
+  // class the stylesheet defines was never added by anybody — so the running
+  // half wore the orange WING. One class now carries both the shape and the
+  // colour, and nothing writes text into the element at all.
+  HUD.glyph.className = role === "runner" ? "run" : "";
   for (let i = 0; i < HUD.dots.children.length; i++) {
     HUD.dots.children[i].className = i <= match.half ? "on" : "";
   }
@@ -1667,7 +1755,7 @@ function showResults(res) {
   const meRec = match.human();
   t += "<tr><td colspan='4' style='opacity:.6;font-size:12px;border:0;padding-top:12px'>YOU · " +
     meRec.kills + " kills · " + meRec.deaths + " deaths · " +
-    CBZ.ordnanceAudit().released + " stores released</td></tr>";
+    myStores + " stores released</td></tr>";
   el("resTable").innerHTML = t;
 }
 
@@ -1731,6 +1819,7 @@ function downJet(j) {
   CBZ.ordnance.blast(j.af.pos.x, j.af.pos.y, j.af.pos.z, 26, 0, {});
   CBZ.ordnance.removeTarget(j.tgt);
   CBZ.scene.remove(j.group);
+  disposeBody(j.group);       // neutral traffic leaks exactly like a bomber did
   j.af.dispose();
   match.log((j.heavy ? "HEAVY" : "PATROL") + " down · neutral", { tone: "bad" });
 }
@@ -1789,7 +1878,7 @@ function buildDesertLife() {
 // jump the clock, put yourself in the air, drop one on your own head, thin
 // the runners out, and read every subsystem's audit in one place.
 // Open it with ?test=1, the TEST RIG button on the briefing, or [T].
-let testOpen = false, godMode = false, timeScale = 1;
+let testOpen = false, godMode = false;
 function buildTestRig() {
   const box = document.createElement("div");
   box.id = "testRig";
@@ -1836,8 +1925,17 @@ function buildTestRig() {
       ["down one bomber", function () { const b = units.filter(function (x) { return x.role === "bomber" && x.alive && x !== myUnit; })[0]; if (b) killUnit(b, {}); }],
       ["+4 neutral jets", function () { buildJets(4); }],
     ]],
+    // NO TIME CONTROL LIVES HERE ANY MORE. "time x3" multiplied dt inside this
+    // file's own frame hook, which is the only clock this file owns — so units
+    // moved three times as fast while their bombs fell at 1x in ordnance.step
+    // and the match clock ticked at 1x in teammatch's. Measured: the world ran
+    // 0.6 s of travel against 0.2 s of engine time, a ratio of 2.99, and every
+    // CCIP solution, every lead and every stick interval was wrong by that
+    // factor. An honest fast-forward has to be the ENGINE's (microboot has no
+    // time scale, and this file is the game, not the engine), so the lever is
+    // gone rather than lying. MATCH · skip 60s moves the clock without touching
+    // physics, which is the honest half of what this was used for.
     ["RIG", [
-      ["time x1 / x3", function (b) { timeScale = timeScale === 1 ? 3 : 1; b.textContent = "time x" + timeScale; }],
       ["scope range", function () { if (scope) scope.cycleRange(1); }],
       ["audit → console", function () { console.log(JSON.stringify(window.__bomb.audit(), null, 1)); }],
     ]],
@@ -1892,8 +1990,10 @@ function toggleTestRig(on) {
   testOpen = on != null ? on : !testOpen;
   if (!window.__testBox) return;
   window.__testBox.style.display = testOpen ? "block" : "none";
-  // the rig owns the left edge while it is open; the feed lives there too
-  el("feed").style.left = testOpen ? "244px" : "12px";
+  // the rig owns the left edge while it is open; the feed lives there too.
+  // Closing hands the position back to the stylesheet rather than pinning 12px
+  // over the small-screen rule.
+  el("feed").style.left = testOpen ? "244px" : "";
 }
 function testTick() {
   if (!testOpen || !window.__testOut) return;
@@ -1929,12 +2029,23 @@ function build() {
 
   world = CBZ.desertCity.build({ seed: "basincity" });
 
-  // the base goes in the dunes, runway pointed at the city, so the first
-  // thing a takeoff sees is the target
+  // The base goes in the dunes with the runway pointed at the city, so the
+  // first thing a takeoff sees is the target.
+  //
+  // THE Z SIGN IS THE WHOLE OF IT, AND IT WAS MIRRORED. world/airbase.js lays
+  // its runway along the base's local +X, which THREE's rotation.y = HEAD puts
+  // on world (cos HEAD, −sin HEAD) — that file publishes the convention in its
+  // runway() block and says why. This call read it as a standard (cos, sin)
+  // angle and asked for atan2(−bz, −bx), which mirrors the runway about the
+  // base's own X axis. Measured: runwayDir [−0.660, +0.751] against toCity
+  // [−0.660, −0.751], 97.4° apart, and a manual takeoff flew to (−1746, 5223)
+  // — closest approach to the city 2132 m — and into the mountain rim. The
+  // comment above it claimed the opposite for as long as it existed.
+  // Solve (cos H, −sin H) = (−bx, −bz)/r: cos H = −bx, sin H = bz.
   const ba = 0.85, brad = 1980;
   const bx = Math.cos(ba) * brad, bz = Math.sin(ba) * brad;
   base = CBZ.airbase.build({
-    x: bx, z: bz, heading: Math.atan2(-bz, -bx),
+    x: bx, z: bz, heading: Math.atan2(bz, -bx),
     groundAt: world.heightAt, seed: "kestrel", runwayLength: 1800,
   });
 
@@ -1954,14 +2065,16 @@ function build() {
 
   // ---- the game's own frame: units, then camera, then the glass
   CBZ.micro.onFrame(function (dt) {
+    // `paused` is belt-and-braces: [P] stops the whole loop at CBZ.micro.paused,
+    // so this hook is not running at all while it is set.
     if (paused || match.phase === "over") return;
-    dt *= timeScale;
+    promptClaim = null;
     if (match.phase === "live") {
       updatePlayer(dt);
       updateAI(dt);
       if (myUnit && myUnit.role === "bomber" && !myUnit.boarded) updateBoarding();
-      else el("prompt").style.display = "none";
     }
+    applyPrompt();
     updatePipper();
     updateMarks();
     // traffic flies through the intermission too — the sky does not stop
@@ -1996,7 +2109,22 @@ window.addEventListener("keydown", function (e) {
   if (e.code === "KeyT") toggleTestRig();
   if (e.code === "KeyR" && scope) scope.cycleRange(1);
   if (e.code === "KeyR" && scope) scope.cycleRange(1);
-  if (e.code === "KeyP") { paused = !paused; showBanner(paused ? "PAUSED" : "RESUMED", ""); }
+  // ---- PAUSE IS THE ENGINE'S LEVER, NOT THIS FILE'S FLAG. `paused` gated only
+  // the hook this file registered, and the match is not in that hook: teammatch
+  // autoStep is its own hook at order −50 and ordnance.step is another at order
+  // 20. So the banner said PAUSED while the clock ran 487.3 → 476.8 over ten
+  // seconds and bombs kept falling and detonating; only player, AI and jet
+  // motion stopped. CBZ.micro.paused stops EVERY micro.onFrame hook at once —
+  // the match, the ordnance, this game and the HUD — while the renderer keeps
+  // drawing (microboot renders outside the pause gate) and the `always` band
+  // keeps running by contract, so the banner stays on screen and the frozen
+  // frame stays lit. dt is clamped at 0.1 s upstream, so the resume cannot
+  // teleport anything.
+  if (e.code === "KeyP" && match && match.phase !== "over") {
+    paused = !paused;
+    CBZ.micro.paused = paused;
+    showBanner(paused ? "PAUSED" : "RESUMED", "");
+  }
   if (e.code === "KeyC" && myUnit && myUnit.kind === "air") camMode = camMode === "bomb" ? "chase" : "bomb";
   if (e.code === "KeyV" && myUnit && myUnit.kind === "air") camMode = camMode === "cockpit" ? "chase" : "cockpit";
   if (e.code === "KeyQ" && myUnit && myUnit.role === "bomber" && myUnit.alive && myUnit.kind === "air") {
