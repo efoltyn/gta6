@@ -502,6 +502,30 @@ const BOMBER_ALT   = 360;     // where the AI bombers work. Lower than it
                               // so far out that the runners never see an
                               // aeroplane. 360 m keeps the lead honest (~1.3 km)
                               // and keeps the bomber in the runner's sky.
+// ---- WHAT AN AI BOMBER FLIES LIKE. Every number here is a turn-radius
+// argument and they were all measured, not chosen (see THE HUNT in aiBomber).
+// r = v² / (g·tan φ): at the old 170 m/s on the bomber preset's own 30° limit
+// that is 5103 m, and the basin is 1050 m across — the aeroplane could not
+// manoeuvre inside its own target area, which is why the old brain released
+// twice in 200 s. At 122 m/s (the preset's cruise) and 54° it is 1102 m, and
+// a re-attack fits in the map.
+const BOMB_SPEED   = 122;     // m/s on the run and in the turn
+const AI_BANK_TURN = 0.95;    // ~54°, 1.7 g — repositioning
+const AI_BANK_RUN  = 0.50;    // ~29° — the run-in, still enough to trim
+const AI_STICK     = 7;       // stores in an AI stick: 7 × 26 m = 160 m of
+                              // street, which is what covers a man who has
+                              // five seconds of threat ring to run in
+const RUN_LOOK     = 1150;    // carrot down the run-in line while capturing it
+const AI_CORRIDOR  = 24;      // m off the street centreline a man has to
+                              // be inside to be worth the stick. The stick's
+                              // own lethal corridor is ±18.5 m at 26 m
+                              // spacing, and a 26 m road is narrower than
+                              // that — the street IS the weapon.
+const AI_XT_GATE   = 26;      // m of CROSS-track the solution must be inside
+                              // to pickle. Along-track is a timing question
+                              // the stick's own length answers; cross-track
+                              // is the whole difference between this street
+                              // and the next one.
 const RESPAWN_AIR  = 6;       // a downed bomber is back in the air in this
 // ---- THE ONE REWARD. Not a ladder: the bomber has exactly one verb, and
 // every rung below a nuke would be that same verb with a bigger number on it.
@@ -621,6 +645,9 @@ function makeUnit(o) {
     boarded: false, dropCd: 0, respawnIn: 0, stick: 0, stickT: 0,
     goal: null, goalT: 0, targetId: null, orbit: rr(0, Math.PI * 2),
     rec: null, tgt: null,
+    // the planned attack (see aiBomber): a frozen run-in heading, the street
+    // it walks down, and how old the plan is
+    run: null, runAge: 0, wing: false,
   };
 }
 
@@ -659,6 +686,7 @@ function clearBody(u) {
   if (u.af) { u.af.dispose(); u.af = null; }
   if (u.tgt) { CBZ.ordnance.removeTarget(u.tgt); u.tgt = null; }
   u.stick = 0;          // a dead bomber's stick dies with him (see aiBomber)
+  u.run = null;         // and so does his attack plan
 }
 
 // ---- put a unit into the world in the shape its role demands
@@ -689,7 +717,15 @@ function spawnBomber(u, opts) {
   u.kind = "air";
   u.alive = true; u.hp = 100;
   u.dropCd = 0;
-  const wing = !!(u.human || opts.wing);
+  u.run = null; u.runAge = 0; u.targetId = null;
+  // WHICH AEROPLANE HE FLIES IS DECIDED ONCE A HALF, NOT ONCE A LIFE. The
+  // respawn path passed `wing: u.human`, so every AI bomber came back as a
+  // FIGHTER — different preset, different bank limit, 403 m/s top end, a
+  // different model in the sky — and the half quietly turned into a
+  // fighter-bomber half after the first casualty. `opts.wing` is honoured
+  // when it is given; otherwise the unit keeps what it started the half with.
+  const wing = opts.wing != null ? !!(u.human || opts.wing) : !!u.wing;
+  u.wing = wing;
   const onApron = !!(u.human && opts.onApron);
   // THE APRON START HAS NO AEROPLANE ATTACHED TO IT, so it must not build one.
   // This used to extrude a whole bomber, add it to the scene and drop it two
@@ -716,7 +752,7 @@ function spawnBomber(u, opts) {
     const alt = BOMBER_ALT + rr(-40, 90);
     // inbound: the airframe's nose is −Z, so a heading that flies from (x,z)
     // toward the origin is atan2(x, z) — not a compass bearing
-    u.af.launch(x, alt, z, Math.atan2(x, z), 150);
+    u.af.launch(x, alt, z, Math.atan2(x, z), BOMB_SPEED);
     u.boarded = true;
     u.pos.copy(u.af.pos);
     u.af.applyTo(u.group);
@@ -903,7 +939,7 @@ function matchTick(dt) {
     u.respawnIn -= dt;
     if (u.respawnIn <= 0) {
       u.rec.alive = true;
-      spawnBomber(u, { wing: u.human });
+      spawnBomber(u, {});    // no `wing`: he comes back in the aeroplane he had
       if (u === myUnit) { camMode = "chase"; showBanner("AIRBORNE", "REPLACEMENT AIRFRAME"); }
     }
   }
@@ -1197,14 +1233,15 @@ function updateSpectate(dt) {
 const probe = {
   asks: 0,        // aiBomber frames that had a target and a solution
   runIn: 0,       // ... of which were on a settled run-in (see aiBomber)
-  ready: 0,       // ... of which were also off cooldown (the gate proper)
-  pass: 0,        // ... of which released
+  ready: 0,       // ... of which were also off cooldown
+  win: 0,         // ... of which were in the along-track pickle window
+  pass: 0,        // ... of which were also inside the cross-track gate
   miss: [0, 0, 0, 0, 0, 0, 0],   // miss buckets: 25 50 85 150 300 600 more
   missSum: 0, missN: 0, missMin: 1e9,
   blasts: 0, near: [0, 0, 0, 0, 0],  // blast→nearest-live-runner: 13 25 46 100 more
   kills: 0,
   reset: function () {
-    probe.asks = probe.runIn = probe.ready = probe.pass = 0;
+    probe.asks = probe.runIn = probe.ready = probe.win = probe.pass = 0;
     probe.miss = [0, 0, 0, 0, 0, 0, 0];
     probe.missSum = 0; probe.missN = 0; probe.missMin = 1e9;
     probe.blasts = 0; probe.near = [0, 0, 0, 0, 0]; probe.kills = 0;
@@ -1216,7 +1253,7 @@ const probe = {
   },
   snap: function () {
     return {
-      asks: probe.asks, runIn: probe.runIn, ready: probe.ready, pass: probe.pass,
+      asks: probe.asks, runIn: probe.runIn, ready: probe.ready, win: probe.win, pass: probe.pass,
       missAvg: probe.missN ? Math.round(probe.missSum / probe.missN) : 0,
       missMin: probe.missMin < 1e9 ? Math.round(probe.missMin) : null,
       miss: probe.miss.slice(), blasts: probe.blasts, near: probe.near.slice(),
@@ -1298,52 +1335,316 @@ function driveFoot(u, dt, goal, spd) {
   }
 }
 
+// ---------------------------------------------------------------- THE HUNT
+// Three measured facts decided the shape of everything below.
+//
+//  1. THE AEROPLANE COULD NOT MANOEUVRE INSIDE ITS OWN TARGET AREA. A 30°
+//     bank at 170 m/s is a 5103 m turn radius; the basin is 1050 m across.
+//     The old brain re-aimed at the man EVERY FRAME — pure pursuit — which
+//     at a turn radius five times the range is a limit cycle it can never
+//     close. Measured, 200 s of sim, ten bombers: 61,155 solutions asked,
+//     TWO releases, mean miss 2249 m, closest approach ever seen 76 m, zero
+//     stores inside 46 m of a living man, zero kills. So the run-in is
+//     PLANNED now: pick a heading once, fly the LINE and not the point.
+//
+//  2. LEADING A FLEEING MAN IS UNSOLVABLE, not merely hard. aiRunner runs
+//     AWAY FROM THE THREAT — so "aim where he will be" has no fixed point:
+//     write a = p + flee(a) and it has no solution, every aim point pushes
+//     him off itself. What can be aimed at is ground he cannot leave. The
+//     basin is a GRID — 88 m blocks, 26 m roads — and a man in a street who
+//     runs from a ring runs into a tower and slides ALONG the street. So a
+//     bomber runs in down a STREET AXIS and walks the stick down the road.
+//     The road is 26 m wide; the stick's own lethal corridor is ±18.5 m at
+//     26 m spacing. The street is the weapon; the man is only the reason to
+//     pick that street.
+//
+//  3. ONE 500 lb STORE KILLS A 100 hp MAN AT 12.6 m AND NO FURTHER —
+//     190 × (1 − d/46)² = 100 solves at d = 12.6. Under a roof the same
+//     store peaks at 47.5 and CANNOT kill him at any distance. That is not
+//     a bug to fix, it is the running side's whole contract, and it is why
+//     the answer is stick length and street choice rather than a bigger
+//     warhead: seven stores 26 m apart is 160 m of lethal street, against a
+//     man who can cover ~57 m in the five seconds of ring he is owed.
+//
+// The counterplay is untouched: nine seconds of fall, five of threat ring,
+// a roof still worth 75%, and a man who gets under one — or simply turns a
+// corner out of the street — does not die. That IS the hunt.
+
+const _axes = [];
+function streetAxes(x, z) {
+  // Which street is this man standing in, and which way does it run? The
+  // city publishes its own skeleton (world.grid: block · road · pitch ·
+  // origin), so this is arithmetic and not a search. Lot centres sit on the
+  // pitch; the roads are the gaps halfway between them.
+  _axes.length = 0;
+  const g = world && world.grid;
+  if (!g) return _axes;
+  const h = g.pitch / 2;
+  const cx = Math.round((x - g.origin - h) / g.pitch) * g.pitch + g.origin + h;
+  const cz = Math.round((z - g.origin - h) / g.pitch) * g.pitch + g.origin + h;
+  const w = g.road * 0.5 + 8;      // the road, plus the kerb he slides along
+  if (Math.abs(x - cx) < w) _axes.push({ hx: 0, hz: 1, ox: cx, oz: z });
+  if (Math.abs(z - cz) < w) _axes.push({ hx: 1, hz: 0, ox: x, oz: cz });
+  return _axes;
+}
+
+// how far downrange a store released RIGHT NOW would travel. Asked of the
+// same integrator the bomb uses, so it cannot disagree with the pipper.
+function releaseRange(af) {
+  const sol = CBZ.ordnance.predict(af.pos, af.vel, BOMB_KIND);
+  if (!sol.hit) return 1000;
+  return Math.max(500, Math.min(1700, Math.hypot(sol.x - af.pos.x, sol.z - af.pos.z)));
+}
+
+// Choose the STREET, not the man. A street is worth a pass when several of
+// them are standing in it, none of them is beside a roof, and it does not
+// cost half the clock to get onto. The man is only how the street got
+// nominated — by the time the stick leaves the bay a minute later, the aim
+// has been re-taken from whoever is actually down there (see aiBomber).
+function planAttack(u) {
+  const af = u.af;
+  u.run = null; u.runAge = 0; u.targetId = null;
+  const foes = units.filter(function (x) { return x.alive && x.role === "runner" && x.team !== u.team; });
+  if (!foes.length) return;
+  const psi = af.heading();
+  const range = releaseRange(af);
+
+  let best = null, bestC = -1e9;
+  for (let i = 0; i < foes.length; i++) {
+    const ax = streetAxes(foes[i].pos.x, foes[i].pos.z);
+    for (let a = 0; a < ax.length; a++) {
+      for (let sgn = -1; sgn <= 1; sgn += 2) {
+        const hx = ax[a].hx * sgn, hz = ax[a].hz * sgn;
+        const ox = ax[a].ox, oz = ax[a].oz;
+        const nx = -hz, nz = hx;
+        // who else is in this street, and how exposed are they? A ROOF BEATS
+        // THIS WEAPON OUTRIGHT — 190 × 0.25 is 47.5 at point blank against
+        // 100 hp — so a man standing beside a shelter is not a target, he is
+        // a wasted pass. This is where the shelters push back on the bombing
+        // side, and it is deliberate.
+        let worth = 0;
+        for (let j = 0; j < foes.length; j++) {
+          const fx = foes[j].pos.x - ox, fz = foes[j].pos.z - oz;
+          if (Math.abs(fx * nx + fz * nz) > AI_CORRIDOR) continue;
+          const sh = world.nearestShelter(foes[j].pos.x, foes[j].pos.z);
+          worth += 1 - (sh ? Math.max(0, 1 - sh.dist / 140) : 0) * 0.8;
+        }
+        if (worth <= 0) continue;
+        // don't let ten aeroplanes queue up behind one street
+        let taken = 0;
+        for (let k = 0; k < units.length; k++) {
+          const o = units[k];
+          if (o !== u && o.run && Math.abs(o.run.ox - ox) < 60 && Math.abs(o.run.oz - oz) < 60) taken++;
+        }
+        // the flying: distance to the release point, plus the arc the turn
+        // onto the run-in heading actually costs at this turn radius
+        const al = (foes[i].pos.x - ox) * hx + (foes[i].pos.z - oz) * hz;
+        const rx = ox + hx * (al - range), rz = oz + hz * (al - range);
+        let dh = Math.atan2(-hx, -hz) - psi;
+        while (dh > Math.PI) dh -= Math.PI * 2;
+        while (dh < -Math.PI) dh += Math.PI * 2;
+        const fly = Math.hypot(rx - af.pos.x, rz - af.pos.z) + 1100 * Math.abs(dh);
+        const c = worth * 900 - fly * 0.30 - taken * 500;
+        if (c > bestC) {
+          bestC = c;
+          best = { hx: hx, hz: hz, ox: ox, oz: oz, al: al, tid: foes[i].id };
+        }
+      }
+    }
+  }
+  if (!best) return;
+  u.targetId = best.tid;
+  u.run = {
+    hx: best.hx, hz: best.hz,
+    ox: best.ox, oz: best.oz,       // a fixed point ON the line
+    al: best.al,                    // the aim's place along it
+    ax: best.ox + best.hx * best.al,
+    az: best.oz + best.hz * best.al,
+    range: range, spent: false, sideT: 0,
+  };
+}
+
 function aiBomber(u, dt) {
   const af = u.af;
   if (!af) return;
-  // pick a live runner and hold it; switching every frame is how an AI
-  // ends up orbiting forever without ever releasing
-  let tgt = u.targetId ? units.find(function (x) { return x.id === u.targetId && x.alive; }) : null;
-  if (!tgt) {
-    const foes = units.filter(function (x) { return x.alive && x.role === "runner" && x.team !== u.team; });
-    tgt = foes.length ? foes[Math.floor(rngGame() * foes.length) % foes.length] : null;
-    u.targetId = tgt ? tgt.id : null;
-  }
+  u.dropCd -= dt;
 
-  let aim;
-  if (tgt) {
-    // Fly a GROUND TRACK THROUGH the target, not AT it. The aim point sits
-    // far beyond, so the run-in is a straight line over the man rather than
-    // a turn that never finishes — and the aeroplane is never asked to
-    // point its nose at something on the ground, which is what used to fly
-    // them into the deck at full throttle.
-    const dx = tgt.pos.x - af.pos.x, dz = tgt.pos.z - af.pos.z;
-    const d = Math.max(1, Math.hypot(dx, dz));
-    _v.set(tgt.pos.x + (dx / d) * 2200, BOMBER_ALT, tgt.pos.z + (dz / d) * 2200);
-    aim = af.steerTo(_v, { gain: 2.0 });
+  // re-plan when the run is spent: the man is dead, we have gone past him
+  // dry, or the plan is simply old
+  if (!u.run || u.run.spent || u.runAge > 140) planAttack(u);
+  else u.runAge += dt;
 
-    // CCIP: ask the SAME integrator the bomb uses where a release right now
-    // would land, and pickle when that answer is on top of him. There is no
-    // "close enough to the target" distance test — the solution IS the test,
-    // which is why the release happens a kilometre out where it should.
+  let aim, lim = AI_BANK_TURN;
+  const run = u.run;
+  if (run) {
+    const nx = -run.hz, nz = run.hx;
+    // THE LINE'S OWN FRAME. Everything below is (along, cross) measured from
+    // a FIXED point on the street. The approach geometry never reads the aim
+    // point: a first cut re-took the aim every frame and fed it back into
+    // the carrot, and the discontinuity when it jumped from one man to
+    // another knocked the aeroplane off its own run — 98 releases at a 7 m
+    // mean solution error became 33 at 55 m. Geometry is frozen; only the
+    // PICKLE is live.
+    const rx = af.pos.x - run.ox, rz = af.pos.z - run.oz;
+    const sPl = rx * run.hx + rz * run.hz;
+    const cP = rx * nx + rz * nz;                  // cross-track from the street
+    const sP = sPl - run.al;                       // -ve = still inbound
+    let hErr = Math.atan2(-run.hx, -run.hz) - af.heading();
+    while (hErr > Math.PI) hErr -= Math.PI * 2;
+    while (hErr < -Math.PI) hErr += Math.PI * 2;
+    // ---- THE BANK LIMIT IS NOT A PHASE, IT IS A QUESTION ABOUT THE LINE.
+    // First cut of this had it keyed to range - inside 2 km, fly the run -
+    // and measured 18,871 frames "on final" against ONE release in 200 s:
+    // the aeroplane dropped to 20 deg of bank while still 400 m to one side,
+    // and a 20 deg bank at 122 m/s is a 4.3 km turn, which cannot recover
+    // 400 m in the 8 s of run-in that is left. So the aeroplane keeps its
+    // whole turn until it is ESTABLISHED, and only then flies wings-near-
+    // level, which is what makes the solution mean anything.
+    const settled = Math.abs(cP) < 140 && Math.abs(hErr) < 0.30;
+    lim = settled ? AI_BANK_RUN : AI_BANK_TURN;
+    // ---- THE CARROT: a point ON the line, a lookahead ahead of where we
+    // are along it. Chasing a point on the path is what captures the path;
+    // the old brain chased the MAN, which at a 5 km turn radius is a limit
+    // cycle it can never close.
+    //
+    // TWO NUMBERS HERE ARE A CONTROL LOOP AND THEY WERE SOLVED, NOT GUESSED.
+    // Carrot tracking closes as s^2 + Ks + Kv/L, with K = g*gain*bankLimit/v.
+    // The first cut flew gain 2.0 at a 700 m lookahead: w = 0.12 rad/s, a
+    // 53-SECOND period, against a final leg of twelve seconds - so the
+    // aeroplane arrived at the pickle point still 40-85 m to one side, and
+    // 208 pickle windows in 200 s produced ONE release. At gain 9 and a
+    // 420 m lookahead it is w ~ 0.42, zeta ~ 0.7: settled inside eight
+    // seconds, no hunting. Measured after: mean solution error 7 m, worst 25.
+    const look = settled
+      ? Math.max(420, Math.min(900, Math.abs(cP) * 1.6 + 420))
+      : RUN_LOOK;
+    // ---- THE JOIN, AND THE WAY BACK TO IT. This was worth more than the
+    // gains. Traced, one bomber, 260 s: every plan STARTED between 250 and
+    // 650 m short of the aim point - inside its own release range - so the
+    // solution was already a kilometre past the man before the aeroplane was
+    // ever wings-level, and the pickle window could not be reached at all. A
+    // bomb run has to begin where the bomb does: the JOIN sits a release
+    // range plus a mile upstream, and an aeroplane downstream of it GOES
+    // ROUND rather than pressing on.
+    //
+    // The go-around is one expression rather than a state machine: while we
+    // are downstream of the join the carrot slides ABEAM, onto the side the
+    // aeroplane is already on, by up to two and a half turn diameters. That
+    // is a downwind leg - it flies out, the offset shrinks as the join comes
+    // back, and the carrot walks itself onto the line. No mode to be stuck
+    // in, and a plan made in the wrong place fixes itself.
+    const joinS = -(run.range + 2000);
+    const need = sP - joinS;
+    let cs, off = 0;
+    if (settled) cs = sP + look;
+    else {
+      cs = Math.min(sP + look, joinS);
+      if (need > 0) off = Math.min(2600, need * 1.25) * (cP >= 0 ? 1 : -1);
+    }
+    _v.set(run.ax + run.hx * cs + nx * off, BOMBER_ALT, run.az + run.hz * cs + nz * off);
+    aim = af.steerTo(_v, { gain: settled ? 9.0 : 2.0, bankLimit: lim });
+    // flown the whole street and found nobody: go and pick another one
+    if (u.runAge > 6 && sP > 900) run.spent = true;
+    // NOT RE-PICKED ON THE WAY OUT, and that was measured. A street goes
+    // stale while you fly to it, so re-planning every 12 s on the downwind
+    // leg looks free — it is not: `need > 0` covers most of the pattern, so
+    // the aeroplane re-decides where it is going before it has finished
+    // getting anywhere. Settled frames fell 12,625 -> 4,979 and five sticks
+    // became one. A plan that is a minute old and pointed at the right city
+    // block beats a fresh plan the aeroplane never flies.
+
+    // ---- THE SIDESTEP, AND THE BOTTLENECK IT EXISTS FOR. Established on a
+    // street, off cooldown, wings level: 13,957 such frames in 200 s of sim,
+    // and 34 of them had a living man inside the stick's own footprint. A
+    // street chosen ninety seconds ago is an empty street by the time the
+    // aeroplane gets to it, and that — not the aiming, not the release rate
+    // — was what the half was actually short of.
+    //
+    // The HEADING is a decision made a minute ago and cannot be revisited.
+    // WHICH STREET is not: the grid puts the next one 114 m away, and 114 m
+    // of lateral displacement is about four seconds of a 29 deg bank. So the
+    // aeroplane keeps choosing its street right up to the last mile, and
+    // slides one block over when the block over has people in it. It is what
+    // a bomber does with a target of opportunity, and it costs the runners
+    // nothing they were promised: the ring, the roof and the corner are all
+    // still there.
+    run.sideT -= dt;
+    if (settled && u.runAge > 3 && run.sideT <= 0 && sP < -(run.range + 500) && world.grid) {
+      const pitch = world.grid.pitch;
+      let bestK = 0, bestW = -1e9;
+      for (let k = -3; k <= 3; k++) {
+        const kx = run.ox + nx * k * pitch, kz = run.oz + nz * k * pitch;
+        let w = 0;
+        for (let i = 0; i < units.length; i++) {
+          const f = units[i];
+          if (!f.alive || f.role !== "runner" || f.team === u.team) continue;
+          const fx = f.pos.x - kx, fz = f.pos.z - kz;
+          if (Math.abs(fx * nx + fz * nz) > AI_CORRIDOR) continue;
+          const fal = fx * run.hx + fz * run.hz;
+          // only men this pass can still reach: ahead of the solution, and
+          // not past the far kerb of the city
+          if (fal < sPl + run.range * 0.7 || fal > sPl + run.range + 1500) continue;
+          const sh = world.nearestShelter(f.pos.x, f.pos.z);
+          w += 1 - (sh ? Math.max(0, 1 - sh.dist / 140) : 0) * 0.8;
+        }
+        if (k === 0) w += 0.4;                 // hysteresis: stay put on a tie
+        w -= Math.abs(k) * 0.12;               // and a slide is not free
+        if (w > bestW) { bestW = w; bestK = k; }
+      }
+      if (bestK !== 0) {
+        run.ox += nx * bestK * pitch; run.oz += nz * bestK * pitch;
+        run.ax = run.ox + run.hx * run.al; run.az = run.oz + run.hz * run.al;
+        run.sideT = 2.5;                       // let the aeroplane fly it
+      }
+    }
+
+    // ---- THE PICKLE, AND WHY IT IS A FOOTPRINT AND NOT A POINT. A stick of
+    // seven at 26 m is 160 m of street, and the question is not "is the
+    // solution on the man" - it is "will this stick land ON somebody". So
+    // the solution is turned into the strip of road the seven stores will
+    // actually cover, and the trigger is a living man standing in the middle
+    // third of it. That is also what makes the aim honest against a man who
+    // runs: he gets his five seconds of ring and ~57 m of sprint, the strip
+    // is 160 m long, and the towers either side of a 26 m road are what stop
+    // him leaving it sideways. A roof still saves him outright, and so does
+    // turning a corner.
     const sol = CBZ.ordnance.predict(af.pos, af.vel, BOMB_KIND);
-    // lead him: the comparison is against where he will BE when the store
-    // arrives, not where he is when it leaves. Only 60% of the lead, because
-    // a man who is running has already decided to change direction.
-    const lx = tgt.pos.x + (tgt.velX || 0) * sol.t * 0.6;
-    const lz = tgt.pos.z + (tgt.velZ || 0) * sol.t * 0.6;
-    if (sol.hit) { probe.asks++; if (u.dropCd <= 0) { probe.ready++; probe.logMiss(Math.hypot(sol.x - lx, sol.z - lz)); } }
-    if (sol.hit && u.dropCd <= 0 && Math.hypot(sol.x - lx, sol.z - lz) < 85) {
-      probe.pass++;
-      u.stick = 5; u.stickT = 0;      // five stores, walked below on the SIM clock
-      u.dropCd = 6 + rr(0, 4);
-      u.targetId = null;
+    if (sol.hit) {
+      probe.asks++;
+      if (settled) probe.runIn++;
+      if (settled && u.dropCd <= 0) {
+        probe.ready++;
+        const sx = sol.x - run.ox, sz = sol.z - run.oz;
+        const sAl = sx * run.hx + sz * run.hz;
+        const sCr = sx * nx + sz * nz;
+        const len = (AI_STICK - 1) * STICK_GAP * Math.max(60, af.speed);
+        let on = false;
+        for (let i = 0; i < units.length && !on; i++) {
+          const f = units[i];
+          if (!f.alive || f.role !== "runner" || f.team === u.team) continue;
+          const fx = f.pos.x - run.ox, fz = f.pos.z - run.oz;
+          if (Math.abs(fx * nx + fz * nz) > AI_CORRIDOR) continue;
+          const fal = fx * run.hx + fz * run.hz;
+          if (fal > sAl + len * 0.28 && fal < sAl + len * 0.72) on = true;
+        }
+        if (on) {
+          probe.win++; probe.logMiss(Math.abs(sCr));
+          if (Math.abs(sCr) < AI_XT_GATE) {
+            probe.pass++;
+            u.stick = AI_STICK; u.stickT = 0;
+            // the run is NOT spent: the aeroplane is already down the street
+            // wings-level, and if a second man walks into the footprint
+            // before it runs out of road that is a second stick for free
+            u.dropCd = 7;
+          }
+        }
+      }
     }
   } else {
     // nothing to hit: orbit the city so the sky is never empty
     u.orbit += dt * 0.16;
     _v.set(Math.cos(u.orbit) * 900, BOMBER_ALT, Math.sin(u.orbit) * 900);
-    aim = af.steerTo(_v, { gain: 2.0 });
+    aim = af.steerTo(_v, { gain: 2.0, bankLimit: lim });
   }
 
   // ---- THE STICK IS PART OF THE SIMULATION. It used to be five setTimeouts on
@@ -1360,14 +1661,19 @@ function aiBomber(u, dt) {
   }
   // A bomber turns with BANK and holds its altitude with pitch — so the
   // steering solution keeps its roll and surrenders its pitch entirely.
+  // The SAME limit goes to both halves of the autopilot: holdAltitude fades
+  // nose-up authority out past the limit it is given, so an altitude hold
+  // still on the preset's 30° while the turn is flying at 54° is an
+  // aeroplane commanded to bank and forbidden to pull.
   aim.pitch = 0;
-  af.holdAltitude(BOMBER_ALT, aim);
+  af.holdAltitude(BOMBER_ALT, aim, { bankLimit: lim });
   aim.pitch = Math.max(-0.40, Math.min(0.85, aim.pitch));
-  // hold a bombing speed rather than a throttle setting: a stick walked at
-  // 330 m/s lands two kilometres apart and hits nobody
-  aim.throttle = Math.max(0, Math.min(1, 0.35 + (170 - af.speed) * 0.02));
+  // hold a bombing SPEED, not a throttle setting. 122 m/s is the bomber
+  // preset's own cruise and it is the number the whole hunt rests on: at
+  // 170 m/s a 30° bank is a 5.1 km turn and the basin is 1.05 km across, so
+  // the aeroplane could not manoeuvre inside its own target area.
+  aim.throttle = Math.max(0, Math.min(1, 0.20 + (BOMB_SPEED - af.speed) * 0.03));
   u.aiCtrl = aim;
-  u.dropCd -= dt;
   updateFlight(u, dt, false);
 }
 
