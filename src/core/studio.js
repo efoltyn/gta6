@@ -491,6 +491,12 @@
   CBZ.studio.join = function (spec) {
     spec = spec || {};
     const id = spec.id || (CBZ.game && CBZ.game.mode) || "slice";
+    // AND BECOME THAT MODE. Every shared verb resolves through CBZ.game.mode,
+    // and microboot's honest default is "slice". A page that declares itself
+    // "bombsurvivor" and stays "slice" registers a descriptor nothing will ever
+    // look up — reachable on paper, unreachable in fact, which is the exact
+    // failure this whole path exists to end.
+    if (CBZ.game && spec.mode !== false) CBZ.game.mode = id;
     if (!CBZ.registerMode) return null;
     CBZ.registerMode(id, {
       id: id, label: spec.label || id,
@@ -570,12 +576,199 @@
     const power = opts.power > 0 ? opts.power : 1;
     let drew = false;
     if (CBZ.cityBlastCore) { try { CBZ.cityBlastCore(pos.x, pos.y || 1, pos.z, { power: power, radius: R }); drew = true; } catch (e) {} }
+    // IT MUST ALSO BE HEARD, and the falloff is the bank's own job rather than
+    // every caller's. A detonation across the basin should be a thud, not the
+    // same bang as one in the street.
+    const S = CBZ.micro && CBZ.micro.sfx;
+    if (opts.silent !== true && S && S.boom) {
+      let gain = 0.75 * Math.min(1.6, power);
+      if (CBZ.camera && S.gainAt) {
+        const c = CBZ.camera.position;
+        const d = Math.sqrt((c.x - pos.x) * (c.x - pos.x) + (c.y - (pos.y || 0)) * (c.y - (pos.y || 0)) + (c.z - pos.z) * (c.z - pos.z));
+        gain *= S.gainAt(d, opts.earshot || 420);
+      }
+      if (gain > 0.015) {
+        try { S.boom({ gain: gain, dur: 1.2 + power * 0.5, sub: 96 - power * 12, bright: R < 12 }); } catch (e) {}
+      }
+    }
     let hit = 0;
     if (CBZ.blastWorldActors) { try { hit = CBZ.blastWorldActors(pos.x, pos.y || 1, pos.z, R, power, opts) || 0; } catch (e) {} }
     if (opts.structural !== false && CBZ.cityAirstrikeCollapse) {
       try { CBZ.cityAirstrikeCollapse({ x: pos.x, z: pos.z, at: pos, power: power }, opts); } catch (e) {}
     }
     return { drew: drew, hit: hit };
+  };
+
+  /* ==========================================================================
+     controls(kind, opts) — ONE CONTROL SURFACE, PHONE FIRST.
+
+     Every page in games/ has re-typed the same branch: read WASD, read a mouse
+     delta, then bolt on a touch stick afterwards and discover on a phone that
+     half the game is unreachable. So the branch lives here once and a page
+     reads a surface that means the same thing on both.
+
+       const C = CBZ.studio.controls("fly", { buttons: { fire: "DROP" } });
+       C.move.x  C.move.y      -1..1   left stick, or WASD
+       C.look.x  C.look.y      radians this frame, mouse or right-side drag
+       C.held("fire")  C.tapped("fire")
+       C.throttle              0..1, held by the surface across frames
+
+     kind is "fly" or "walk" and only changes the default layout of the touch
+     furniture. A coarse pointer gets a stick and real buttons; a mouse gets
+     pointer lock. NOTHING renders a key cap on a touchscreen, here or in the
+     HUD, because that is the rule that keeps getting broken.
+     ========================================================================== */
+  CBZ.studio.controls = function (kind, opts) {
+    opts = opts || {};
+    const IN = (CBZ.micro && CBZ.micro.input) || null;
+    const T = (CBZ.micro && CBZ.micro.touch) || null;
+    const coarse = COARSE && T && T.init;
+    const btnDefs = opts.buttons || (kind === "fly" ? { fire: "DROP" } : { fire: "USE" });
+    const state = { held: Object.create(null), tapped: Object.create(null) };
+    const KEYMAP = opts.keys || { fire: "Space", alt: "KeyF", boost: "ShiftLeft" };
+
+    if (coarse) {
+      T.init({});
+      let i = 0;
+      for (const name in btnDefs) {
+        (function (n, idx) {
+          T.addButton({
+            label: btnDefs[n], word: String(btnDefs[n]).length > 2, size: 76,
+            right: 24 + idx * 96, bottom: kind === "fly" ? 108 : 132,
+            onDown: function () { state.held[n] = true; state.tapped[n] = true; },
+            onUp: function () { state.held[n] = false; },
+          });
+        })(name, i++);
+      }
+    }
+
+    const C = {
+      kind: kind || "walk",
+      touch: !!coarse,
+      move: { x: 0, y: 0 },
+      look: { x: 0, y: 0 },
+      throttle: kind === "fly" ? 0.72 : 1,
+      held: function (n) {
+        if (state.held[n]) return true;
+        return !!(IN && KEYMAP[n] && IN.isDown(KEYMAP[n]));
+      },
+      tapped: function (n) {
+        if (state.tapped[n]) { state.tapped[n] = false; return true; }
+        return !!(IN && KEYMAP[n] && IN.pressed(KEYMAP[n]));
+      },
+      // called once a frame by the page; keeps the surface honest about edges
+      step: function (dt) {
+        C.move.x = 0; C.move.y = 0; C.look.x = 0; C.look.y = 0;
+        if (!IN) return C;
+        const st = T && T.stick;
+        if (st && st.mag > 0.04) { C.move.x = st.x; C.move.y = -st.y; }
+        else { C.move.x = IN.axis("KeyA", "KeyD"); C.move.y = IN.axis("KeyS", "KeyW"); }
+        const sens = IN.sensitivity || 0.0022;
+        C.look.x = -IN.mx * sens;
+        C.look.y = -IN.mz * sens;
+        if (kind === "fly") {
+          const up = C.held("boost") ? 1 : 0;
+          C.throttle = Math.max(0.15, Math.min(1, C.throttle + (up ? 0.5 : 0) * dt));
+        }
+        return C;
+      },
+      lock: function () { if (!coarse && CBZ.micro && CBZ.micro.lock) CBZ.micro.lock(); },
+    };
+    return C;
+  };
+
+  /* ==========================================================================
+     bombsight(opts) — WHERE THE BOMB LANDS, DRAWN.
+
+     A bombing game is the mark under the nose. This asks systems/ordnance.js's
+     SHARED integrator, so the ring on the ground and the bomb that follows it
+     cannot disagree — the pipper that lied by 311 m did so because it ran its
+     own maths beside the bomb's. One integrator, one answer, and this verb has
+     no maths of its own to get wrong.
+
+       const sight = CBZ.studio.bombsight({ kind: "iron" });
+       sight.aim(af.pos, af.vel);     // each frame while attacking
+       sight.hide();                  // when not
+       sight.mark                     // THREE.Vector3, the predicted impact
+     ========================================================================== */
+  CBZ.studio.bombsight = function (opts) {
+    opts = opts || {};
+    const THREE = window.THREE;
+    if (!THREE || !CBZ.scene) return { aim: function () {}, hide: function () {}, mark: null, ok: false };
+    const kind = opts.kind || "iron";
+    const col = opts.color != null ? opts.color : 0xffc46a;
+    const g = new THREE.Group();
+    const ringGeo = new THREE.RingGeometry(opts.inner || 7, opts.outer || 8.4, 40, 1);
+    ringGeo.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.9, depthTest: false, side: THREE.DoubleSide });
+    g.add(new THREE.Mesh(ringGeo, mat));
+    // a cross, so the mark reads as an AIM and not as a decal on the ground
+    const barGeo = new THREE.PlaneGeometry(opts.outer ? opts.outer * 2.6 : 22, 0.7);
+    barGeo.rotateX(-Math.PI / 2);
+    const b1 = new THREE.Mesh(barGeo, mat); const b2 = new THREE.Mesh(barGeo, mat);
+    b2.rotation.y = Math.PI / 2;
+    g.add(b1); g.add(b2);
+    g.renderOrder = 900;
+    g.visible = false;
+    CBZ.scene.add(g);
+    const mark = new THREE.Vector3();
+    return {
+      ok: true, group: g, mark: mark,
+      aim: function (pos, vel) {
+        if (!CBZ.ordnance || !CBZ.ordnance.predict) { g.visible = false; return null; }
+        // predict() returns {x,y,z,t,hit,roof} — a flat point, not a wrapper.
+        const p = CBZ.ordnance.predict(pos, vel, kind, opts.maxT || 40);
+        if (!p || p.x == null) { g.visible = false; return null; }
+        mark.set(p.x, p.y, p.z);
+        g.position.set(mark.x, mark.y + 0.6, mark.z);
+        g.visible = true;
+        return p;
+      },
+      hide: function () { g.visible = false; },
+      dispose: function () { if (g.parent) g.parent.remove(g); },
+    };
+  };
+
+  /* ==========================================================================
+     chase(opts) — A CAMERA THAT IS NOT A SUBTRACTION OF TWO VECTORS.
+
+     Every page writes this and every page writes it slightly wrong: no
+     smoothing, so the frame jitters; no ground clamp, so it clips through a
+     hill; no separate air/ground distance, so an aeroplane is either a speck
+     or inside its own tail. Written once.
+
+       const cam = CBZ.studio.chase({ groundAt: world.heightAt });
+       cam.follow(target.pos, yaw, dt, { air: true });
+     ========================================================================== */
+  CBZ.studio.chase = function (opts) {
+    opts = opts || {};
+    const THREE = window.THREE;
+    const groundAt = opts.groundAt || function () { return 0; };
+    const cur = new THREE.Vector3();
+    const want = new THREE.Vector3();
+    const look = new THREE.Vector3();
+    let seeded = false;
+    return {
+      follow: function (pos, yaw, dt, o) {
+        o = o || {};
+        const camera = opts.camera || CBZ.camera;
+        if (!camera || !pos) return;
+        const back = o.back != null ? o.back : (o.air ? 64 : 7.2);
+        const up = o.up != null ? o.up : (o.air ? 17 : 2.7);
+        want.set(pos.x - Math.sin(yaw) * back, pos.y + up, pos.z - Math.cos(yaw) * back);
+        // never inside the hill: the world's own height function decides
+        const floor = groundAt(want.x, want.z) + (o.air ? 6 : 1.2);
+        if (want.y < floor) want.y = floor;
+        if (!seeded) { cur.copy(want); seeded = true; }
+        // frame-rate independent smoothing, so a slow frame does not lurch
+        const k = 1 - Math.pow(0.0016, Math.max(0.0001, dt));
+        cur.lerp(want, o.snap ? 1 : k);
+        camera.position.copy(cur);
+        look.set(pos.x, pos.y + (o.air ? 1.5 : 1.55), pos.z);
+        camera.lookAt(look);
+      },
+      reset: function () { seeded = false; },
+    };
   };
 
   /* ==========================================================================

@@ -16,6 +16,57 @@ the repo root of `main`, so **pushing to main IS the deploy** and anything in
 
 Also `GAMEPLAN.md`, `docs/plan/`, `PROCGEN.md`.
 
+## THE STUDIO — `src/core/studio.js`, one script tag
+
+**GANG CITY IS THE BACK END; THE HTML IS ADDITION** (owner, 2026-08-07). A
+one-shot page should spend its lines on what is new, never on redrawing a body,
+an aeroplane, a camera, a HUD or an explosion this repo already ships.
+
+`index.html` carries 471 tags, so every mode pays for every other mode and the
+cheapest thing to add has always been another dressed room. A `games/` page pays
+only for what it names, and until now it could not NAME anything: bomb
+survivor's seventeen tags were found by failure, and the one it needed most
+(`systems/modecaps.js`) was missing, so its `registerMode` call was a no-op.
+
+```html
+<script src="../src/core/studio.js"></script>
+<script>CBZ.studio.need("people","desert","air").then(function(){ /* your game */ });</script>
+```
+
+**18 packs.** `three` · `seed` · `boot` · `look` · `green` · `people` · `caps` ·
+`military` · `desert` · `airbase` · `air` · `ordnance` · `nukefx` · `fx` ·
+`damage` · `sound` · `radar` · `match`. The manifest owns dependencies, the load
+ORDER measured to work, and what each publishes. `src/` is derived from
+studio.js's own URL. Files a page lists by hand are never re-injected.
+
+**The verbs, all routes to what exists.** `join()` declare and become a mode ·
+`world(name)` · `cast(role)` the shipped 1.82 m rig · `crowd(n, role)` ·
+`model(name)` / `fly(kind)` shipped geometry, asking `airbase.js` first because
+its factories fall back and seat wheels · `boom(pos)` fireball + damage +
+collapse + attenuated sound · `bombsight()` the impact mark off the SHARED
+integrator · `chase()` a smoothed, ground-clamped camera · `controls(kind)` one
+surface for keyboard, mouse and touch · `hud()`.
+
+**THE HUD RULES LIVE IN `hud()` NOW**, so the next one-shot cannot get them
+wrong: health is always top left and is one meter; no emoji in HUD space; and a
+touchscreen is NEVER shown a keyboard key, because `controls()`/`hud()` decide
+that once from pointer coarseness rather than in every page by whoever forgot.
+
+**THERE IS EXACTLY ONE `registerMode`.** A second definition of that name
+replaced `config.js`'s, `city/mode.js`'s descriptor stopped landing in
+`CBZ.modes`, and the city built with no arena. The math gate caught it.
+
+**`CBZ.colliders` and `CBZ.shake` are published by microboot**, both under the
+names the engine already reads. Colliders were private, so every
+building-damage verb saw an empty world. `CBZ.shake` lives in city-coupled
+`systems/camera.js` while `crashfx.js` calls it on every blast, so slice-page
+explosions were silent and still.
+
+Flags `STUDIO_V1`. Ratchet `CBZ.studio.audit().missing` pinned at 0 by
+`tools/studio-check.mjs`; `--print` emits the catalog as the markdown a
+one-shot's system prompt is written against. Dogfood: `games/bomb-survivor.html`
+(A, 17 tags) beside `games/bomb-survivor-b.html` (B, 1 tag).
+
 ## THE MODE ENUM IS NOT A CAPABILITY CONTRACT — `CBZ.modeHas()`
 
 **GANG CITY IS THE ENGINE AND THE ASSET FARM** (owner, 2026-08-06). Prison

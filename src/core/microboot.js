@@ -283,6 +283,43 @@
   // strikes and the hook is dropped, with ONE line saying which and why —
   // which is also the honest signal that the module needs a better seam.
   micro.retired = [];
+
+  /* ---- CAMERA SHAKE, PUBLISHED UNDER THE NAME THE ENGINE ALREADY CALLS ----
+     `CBZ.shake(m)` is owned by systems/camera.js in the full engine, and
+     city/crashfx.js calls it on EVERY detonation — guarded, so outside the
+     full engine those calls have simply been landing on undefined. Which is
+     why a slice page's explosions were silent and still: the blast was asking
+     for the kick and nothing was there to answer.
+
+     The shape is camera.js's: a scalar somebody raises, which decays. The
+     decay is frame-rate independent and the offset is undone straight after
+     the draw, so this composes with any camera a page writes, including
+     studio.chase's smoothing. Yields if camera.js got here first. */
+  let _shake = 0, _shookX = 0, _shookY = 0, _shookZ = 0;
+  if (!CBZ.shake) CBZ.shake = function (m) { _shake = Math.max(_shake, Math.min(3.5, m || 0)); };
+  micro.shake = function (m) { if (CBZ.shake) CBZ.shake(m); };
+  micro.shakeAmount = function () { return _shake; };
+  function _shakeDecay(dt) { if (_shake > 0) _shake = Math.max(0, _shake - dt * (2.2 + _shake * 1.6)); }
+  function _shakeApply() {
+    if (!(_shake > 0.001) || !CBZ.camera) return false;
+    // three uncorrelated sinusoids rather than random noise: a random jitter
+    // reads as a broken frame, a beat reads as a shockwave passing through.
+    const t = micro.elapsed * 46;
+    const a = _shake * 0.5;
+    _shookX = Math.sin(t * 1.00) * a;
+    _shookY = Math.sin(t * 1.37 + 1.1) * a * 0.8;
+    _shookZ = Math.sin(t * 0.83 + 2.3) * a * 0.6;
+    CBZ.camera.position.x += _shookX;
+    CBZ.camera.position.y += _shookY;
+    CBZ.camera.position.z += _shookZ;
+    return true;
+  }
+  function _shakeUndo() {
+    CBZ.camera.position.x -= _shookX;
+    CBZ.camera.position.y -= _shookY;
+    CBZ.camera.position.z -= _shookZ;
+  }
+
   function runBridged(entry, dt, band) {
     if (entry.dead) return;
     try { entry.fn(dt); entry.fails = 0; }
@@ -306,6 +343,7 @@
     if (!(dt > 0)) dt = 0;
     if (dt > 0.1) dt = 0.1;
     micro.frames++;
+    _shakeDecay(dt);
     _fpsAcc += dt; _fpsN++;
     if (_fpsAcc >= 0.5) { micro.fps = Math.round(_fpsN / _fpsAcc); _fpsAcc = 0; _fpsN = 0; }
     // the engine's own registry first, in ITS declared order (see the bridge
@@ -331,7 +369,12 @@
     // scissor rect the page last set — silently painting over every region
     // it just drew, one per frame, until the whole page is blank.
     if (micro.autoRender && CBZ.renderer && CBZ.camera) {
+      // SHAKE IS APPLIED HERE AND UNDONE IMMEDIATELY, so a page's own camera
+      // maths never has to know it happened — a page that reads camera.position
+      // next frame gets the number it set, not the number that was drawn.
+      const sh = _shakeApply();
       try { CBZ.renderer.render(scene, CBZ.camera); } catch (e) { console.error("[micro render]", e); }
+      if (sh) _shakeUndo();
     }
     input.endFrame();
   }

@@ -10,15 +10,15 @@
   Same game as bomb-survivor.html. A different bet about where the lines go.
 
   A carries seventeen script tags, its own character kit, its own aircraft
-  primitives, its own HUD markup and its own explosion. Roughly 2,600 lines,
-  most of them redrawing things Gang City already ships.
+  primitives, its own HUD markup, its own camera and its own explosion.
 
-  B carries ONE tag. Every asset is asked for by name. What is left in this
-  file is the part that is actually this game: who is on which side, what a
-  bombing run is, what a runner does about it, and how the clock decides.
+  B carries ONE. Every asset, every instrument and every camera is asked for
+  by name through core/studio.js. What is left in this file is the part that
+  is actually this game: who is on which side, what a bombing run is, what a
+  runner does about it, and what the clock decides.
 
-  The HUD is deliberately bare. Health top left, the clock, nothing else
-  competing for the same glance.
+  The HUD is deliberately bare. Health top left, the clock, the role. Nothing
+  else competing for the same glance.
 ============================================================ -->
 <style>
   :root{color-scheme:dark}
@@ -29,25 +29,32 @@
   canvas{display:block}
   #gate{position:fixed;inset:0;display:grid;place-items:center;padding:26px;z-index:60;
     background:radial-gradient(120% 90% at 50% 0%,#1b2330,#0b0d10 70%)}
-  #gate .in{text-align:center;max-width:520px;width:100%}
-  #gate h1{margin:0 0 6px;font-size:clamp(30px,9vw,54px);letter-spacing:-.02em;line-height:.95}
+  #gate .in{text-align:center;max-width:480px;width:100%}
+  #gate h1{margin:0 0 8px;font-size:clamp(32px,10vw,58px);letter-spacing:-.02em;line-height:.92}
   #gate h1 em{font-style:normal;color:#ff7a45}
-  #gate p{margin:0 0 26px;opacity:.62;letter-spacing:.1em;font-size:12px}
+  #gate p{margin:0 0 30px;opacity:.6;letter-spacing:.16em;font-size:11px}
   #gate button{-webkit-appearance:none;appearance:none;border:0;cursor:pointer;width:100%;
-    padding:20px;border-radius:16px;background:#4fbf6a;color:#07130b;font:800 20px/1 inherit;
-    letter-spacing:.12em;box-shadow:0 6px 0 #2f8a4a}
+    padding:22px;border-radius:18px;background:#4fbf6a;color:#07130b;font:800 21px/1 inherit;
+    letter-spacing:.14em;box-shadow:0 6px 0 #2f8a4a}
   #gate button:active{transform:translateY(3px);box-shadow:0 3px 0 #2f8a4a}
-  #gate .st{margin-top:20px;font-size:12px;letter-spacing:.14em;opacity:.45;min-height:16px}
-  #side{position:fixed;left:50%;top:calc(56px + env(safe-area-inset-top,0px));transform:translateX(-50%);
-    z-index:41;font-size:12px;letter-spacing:.2em;opacity:.75;pointer-events:none;text-align:center}
-  #over{position:fixed;inset:0;display:none;place-items:center;z-index:62;background:rgba(9,11,14,.9);padding:26px}
+  #gate .st{margin-top:22px;font-size:11px;letter-spacing:.18em;opacity:.4;min-height:15px}
+  #role{position:fixed;left:50%;top:calc(58px + env(safe-area-inset-top,0px));transform:translateX(-50%);
+    z-index:41;font-size:11px;letter-spacing:.28em;opacity:.7;pointer-events:none;white-space:nowrap}
+  #streak{position:fixed;left:50%;bottom:calc(96px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);
+    z-index:41;font-size:12px;letter-spacing:.22em;color:#ffc46a;opacity:0;transition:opacity .3s;pointer-events:none}
+  #streak.on{opacity:.95}
+  #radar{position:fixed;right:calc(14px + env(safe-area-inset-right,0px));
+    bottom:calc(14px + env(safe-area-inset-bottom,0px));width:132px;height:132px;z-index:41;
+    opacity:.82;pointer-events:none;display:none}
+  #flash{position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none;z-index:55;transition:opacity .5s}
+  #over{position:fixed;inset:0;display:none;place-items:center;z-index:62;background:rgba(9,11,14,.92);padding:26px}
   #over .in{text-align:center}
-  #over h2{margin:0 0 14px;font-size:clamp(24px,7vw,40px)}
-  #over table{margin:0 auto 22px;border-collapse:collapse;font-variant-numeric:tabular-nums}
-  #over td{padding:6px 16px;opacity:.85}
+  #over h2{margin:0 0 16px;font-size:clamp(26px,7vw,42px)}
+  #over table{margin:0 auto 24px;border-collapse:collapse;font-variant-numeric:tabular-nums}
+  #over td{padding:7px 18px;opacity:.85}
   #over button{-webkit-appearance:none;appearance:none;border:1px solid rgba(255,255,255,.25);
-    background:transparent;color:inherit;padding:14px 30px;border-radius:999px;font:700 15px/1 inherit;
-    letter-spacing:.14em;cursor:pointer}
+    background:transparent;color:inherit;padding:15px 32px;border-radius:999px;font:700 15px/1 inherit;
+    letter-spacing:.16em;cursor:pointer}
 </style>
 </head>
 <body>
@@ -59,7 +66,10 @@
   <div class="st" id="st"></div>
 </div></div>
 
-<div id="side"></div>
+<div id="role"></div>
+<div id="streak"></div>
+<canvas id="radar" width="264" height="264"></canvas>
+<div id="flash"></div>
 
 <div id="over"><div class="in">
   <h2 id="overTitle">RESULT</h2>
@@ -68,10 +78,10 @@
 </div></div>
 
 <!-- ============ THE STUDIO IS ONE TAG ============================
-  core/studio.js resolves the packs named below into the files and the
-  ORDER measured to work, finds src/ from its own URL, and skips
-  anything a page already lists by hand. Everything this game draws is
-  something Gang City already draws.
+  core/studio.js resolves the packs below into the files and the ORDER
+  measured to work, finds src/ from its own URL, and skips anything a
+  page already lists by hand. Everything this game draws is something
+  Gang City already draws.
 ============================================================ -->
 <script src="../src/core/studio.js"></script>
 <script>
@@ -85,37 +95,42 @@ CBZ.studio.need(
   "air",       // flight with derived coefficients
   "ordnance",  // bombs and one shared ballistic integrator
   "damage",    // fireball, wall ruin, and the building-collapse verb
+  "nukefx",    // the researched mushroom
+  "radar",     // PPI scope
   "match"      // two sides, a clock, the half-time swap
 ).then(function () {
 "use strict";
 const CBZ = window.CBZ, THREE = window.THREE;
 const el = function (id) { return document.getElementById(id); };
-const st = function (t) { el("st").textContent = t; };
+const st = function (t) { const n = el("st"); if (n) n.textContent = t; };
 
 // ============================================================ THE RULES
-const SQUAD = 8;             // per side
-const HALVES = 2;
-const HALF_SECONDS = 600;    // ten minutes each way
-const PTS_KILL = 250;
-const PTS_ALIVE = 0.4;       // per second, per living runner
-const BOMB_ALT = 360;        // where a bombing run lives
-const BOMB_SPEED = 170;
-const RUN_SPEED = 6.2;
-const STICK = 6;             // bombs per press
+const SQUAD        = 8;        // per side
+const HALVES       = 2;
+const HALF_SECONDS = 600;      // ten minutes each way
+const PTS_KILL     = 250;
+const PTS_ALIVE    = 0.4;      // per second, per living runner
+const BOMB_ALT     = 360;      // where a bombing run lives
+const RUN_SPEED    = 6.4;
+const STICK        = 7;        // stores per press
+const RELEASE_MIN  = 120;      // press below this and the stick is yours
+const NUKE_ARM     = 6;        // runner kills that earn the one round
+const RESPAWN_AIR  = 9;
 
 const TEAMS = [
   { id: "talon", name: "TALON", color: 0xff6a3d },
   { id: "ghost", name: "GHOST", color: 0x49c6ff },
 ];
 
-let world = null, base = null, hud = null, match = null, cam = null;
-let units = [], me = null, started = false, dead = false;
-const tmp = new THREE.Vector3();
+let world, base, hud, match, cam, chase, sight, scope, ctl;
+let units = [], me = null, started = false, groundAt = function () { return 0; };
+const nuke = { kills: 0, armed: false, spent: false };
+const _v = new THREE.Vector3();
 
 // ============================================================ BOOT
 st("RAISING THE BASIN");
 CBZ.micro.boot({
-  fov: 72, far: 16000, exposure: 0.88,
+  fov: 74, far: 16000, exposure: 0.88,
   sky: { top: 0x2a6bb2, bottom: 0xe3c893, fogNear: 1200, fogFar: 9000, radius: 12000 },
   lights: { sun: 0.98, hemi: 0.46, shadowSpan: 700, groundColor: 0x8f7850 },
 });
@@ -123,8 +138,8 @@ cam = CBZ.camera;
 
 // BE REACHABLE. One call, and every shared verb in the engine can find these
 // people: the blast, the vault, the ledge step, the wall breach. `units` is the
-// roster this file already keeps and `hurt` is the same funnel the scoreboard
-// reads, so the engine cannot kill somebody the score does not know about.
+// roster this file already keeps and `hurt` is the funnel the scoreboard reads,
+// so the engine cannot kill somebody the score does not hear about.
 CBZ.studio.join({
   id: "bombsurvivor", label: "Bomb Survivor",
   actors: function (out) { for (let i = 0; i < units.length; i++) if (units[i].alive) out.push(units[i]); return out; },
@@ -137,53 +152,81 @@ CBZ.studio.join({
 // flats, a mountain rim, and heightAt(x,z) as a pure function.
 st("TWO HUNDRED TOWERS");
 world = CBZ.studio.world("desert", { seed: "basincity" });
-const groundAt = (world && world.heightAt) || function () { return 0; };
+groundAt = (world && world.heightAt) || groundAt;
 
 // THE BASE, in the dunes, runway pointed at the city so the first thing a
-// takeoff sees is the target. atan2(x, z) because the airframe's nose is -Z.
+// takeoff sees is the target. The airframe's nose is -Z, so a heading that
+// flies from (x,z) toward the origin is atan2(-x, -z) and not a compass bearing.
 st("A RUNWAY IN THE DUNES");
-const BX = -(world.rings.city + 620), BZ = world.rings.city * 0.42;
-base = CBZ.airbase.build({
-  x: BX, z: BZ, heading: Math.atan2(-BX, -BZ), groundAt: groundAt, seed: "bs-base",
-});
+const BX = -(world.rings.city + 640), BZ = world.rings.city * 0.42;
+base = CBZ.airbase.build({ x: BX, z: BZ, heading: Math.atan2(-BX, -BZ), groundAt: groundAt, seed: "bs-base" });
 
 CBZ.ordnance.init({ scene: CBZ.scene, groundAt: groundAt });
 
-// THE HUD. Health top left. The clock. Nothing else asking for the same
-// glance. Everything below comes from the engine, including the rule that a
-// touchscreen never gets shown a keyboard key.
-hud = CBZ.studio.hud({ health: true, clock: true, score: false, feed: false, note: false });
+// EVERY INSTRUMENT COMES FROM THE ENGINE.
+hud   = CBZ.studio.hud({ health: true, clock: true, score: false, feed: false, note: false });
+chase = CBZ.studio.chase({ groundAt: groundAt, camera: cam });
+sight = CBZ.studio.bombsight({ kind: "iron", outer: 9 });
+ctl   = CBZ.studio.controls("fly", { buttons: { fire: "DROP", nuke: "NUKE" } });
+scope = CBZ.radar.create({
+  canvas: el("radar"), range: 3000, label: "AIR",
+  self: function () {
+    if (!me) return { x: 0, z: 0, y: 0, heading: 0 };
+    return { x: me.pos.x, z: me.pos.z, y: me.pos.y, heading: me.af ? me.af.heading() : me.yaw };
+  },
+  contacts: function () {
+    const out = [];
+    if (!me) return out;
+    for (let i = 0; i < units.length; i++) {
+      const u = units[i];
+      if (!u.alive || u === me) continue;
+      out.push({ id: u.id, x: u.pos.x, z: u.pos.z, y: u.pos.y, hostile: u.team !== me.team });
+    }
+    return out;
+  },
+});
 
 // ============================================================ THE CAST
 // Nobody here is drawn by this file. A runner is the shipped body, cast and
-// dressed; a bomber is the shipped B-2 with the derived-coefficient airframe
-// already attached to it.
+// dressed. A bomber is the shipped B-2 with the derived-coefficient airframe
+// attached, and it starts ON THE RUNWAY because taxiing 1.8 km is not the game.
 function spawnUnit(rec, role, i) {
   const team = teamOf(rec.team);
   const u = {
     rec: rec, id: rec.id, team: rec.team, role: role, human: !!rec.human,
-    alive: true, hp: 100, pos: new THREE.Vector3(), yaw: 0,
-    group: null, af: null, tgt: null, cool: 0, aim: null,
+    alive: true, hp: 100, pos: new THREE.Vector3(), yaw: 0, hdg: 0,
+    group: null, af: null, tgt: null, cool: 0, respawnIn: 0, rolling: false,
   };
   if (role === "bomber") {
-    const ring = world.rings.city + 900 + (i % 4) * 220;
-    const a = (i / SQUAD) * Math.PI * 2 + (rec.team === TEAMS[0].id ? 0 : Math.PI);
-    const x = Math.cos(a) * ring, z = Math.sin(a) * ring;
-    const flown = CBZ.studio.fly("bomber", {
-      at: { x: x, y: BOMB_ALT + (i % 3) * 40, z: z },
-      heading: Math.atan2(x, z), speed: BOMB_SPEED, groundAt: groundAt,
-    });
+    const flown = CBZ.studio.fly("bomber", { groundAt: groundAt });
     if (flown) { u.group = flown.group; u.af = flown.af; }
+    if (u.human && u.af) {
+      // rolling start on the threshold. airHeading, not heading: airbase.js
+      // publishes both because the base and the airframe disagree about which
+      // way a nose points.
+      const rw = base.runway;
+      u.af.place(rw.startX, base.y + (u.af.spec.gearHeight || 3.4), rw.startZ, rw.airHeading, 0);
+      u.af.throttle = 1;
+      u.rolling = true;
+      u.hdg = rw.airHeading;
+    } else if (u.af) {
+      const a = (i / SQUAD) * Math.PI * 2 + (rec.team === TEAMS[1].id ? Math.PI : 0);
+      const r = world.rings.city + 900 + (i % 4) * 240;
+      const x = Math.cos(a) * r, z = Math.sin(a) * r;
+      u.hdg = Math.atan2(-x, -z);
+      u.af.launch(x, BOMB_ALT + (i % 3) * 45, z, u.hdg, 168);
+    }
     if (u.af) u.pos.copy(u.af.pos);
   } else {
     u.group = CBZ.studio.cast("runner", { color: team.color, variant: i });
     if (u.group) CBZ.scene.add(u.group);
-    const a = (i / SQUAD) * Math.PI * 2, r = 180 + (i % 5) * 90;
+    const a = (i / SQUAD) * Math.PI * 2 + (rec.team === TEAMS[1].id ? 0.4 : 0);
+    const r = 190 + (i % 5) * 95;
     u.pos.set(Math.cos(a) * r, 0, Math.sin(a) * r);
     u.pos.y = groundAt(u.pos.x, u.pos.z);
   }
   // a bomber can be hurt by its own stick, which is the honest punishment for
-  // pressing an attack below release altitude
+  // pressing the attack below release altitude
   u.tgt = CBZ.ordnance.addTarget({
     pos: u.pos, team: u.team, unit: u,
     onDamage: function (dmg, info) { hurt(u, role === "bomber" ? dmg * 0.55 : dmg, info); },
@@ -193,51 +236,59 @@ function spawnUnit(rec, role, i) {
 }
 
 function teamOf(id) { for (let i = 0; i < TEAMS.length; i++) if (TEAMS[i].id === id) return TEAMS[i]; return TEAMS[0]; }
+function unitById(id) { for (let i = 0; i < units.length; i++) if (units[i].id === id) return units[i]; return null; }
 function clearUnits() {
   for (let i = 0; i < units.length; i++) {
     const u = units[i];
     if (u.tgt && CBZ.ordnance.removeTarget) CBZ.ordnance.removeTarget(u.tgt);
     if (u.group && u.group.parent) u.group.parent.remove(u.group);
-    if (u.af && u.af.retire) u.af.retire();
+    if (u.af && u.af.dispose) u.af.dispose();
   }
   units = [];
+  me = null;
 }
 
 // ============================================================ DAMAGE
 function hurt(u, dmg, info) {
   if (!u || !u.alive || !(dmg > 0)) return;
   u.hp -= dmg;
+  if (u === me && CBZ.micro.shake) CBZ.micro.shake(Math.min(1, dmg / 80));
   if (u.hp > 0) return;
-  u.alive = false;
-  u.hp = 0;
+  u.alive = false; u.hp = 0;
   const killer = info && info.by ? unitById(info.by) : null;
+  // A CRASH IS NOT A KILL. The feed prints the cause when nobody is credited,
+  // so an airframe meeting the ground has to say so rather than blame a weapon.
   match.kill(u.rec, killer ? killer.rec : null, (info && info.crash) ? "CRASH" : "ORDNANCE");
+
   if (u.role === "runner") {
     const enemy = match.enemyOf(u.team);
     if (enemy) match.addScore(enemy.id, PTS_KILL, "kill");
-    // the engine owns what a body coming apart looks like
-    CBZ.studio.boom(u.pos, { radius: 6, power: 0.5, structural: false });
+    if (killer === me) earnKill();
+    CBZ.studio.boom(u.pos, { radius: 5, power: 0.45, structural: false });
     if (u.group && u.group.parent) u.group.parent.remove(u.group);
-  } else if (u.af) {
-    CBZ.studio.boom(u.af.pos, { radius: 22, power: 1.4, structural: false });
+    if (u === me) hud.health(0);
+  } else {
+    if (u.af) CBZ.studio.boom(u.af.pos, { radius: 22, power: 1.5, structural: false });
+    if (u.group) u.group.visible = false;
+    u.respawnIn = RESPAWN_AIR;      // pressure that stops when you die is not pressure
   }
-  if (u === me) { dead = true; hud.health(0); }
 }
-function unitById(id) { for (let i = 0; i < units.length; i++) if (units[i].id === id) return units[i]; return null; }
 
 // ============================================================ THE MATCH
 match = CBZ.teammatch.create({
   teams: TEAMS, roles: ["bomber", "runner"], halves: HALVES, halfSeconds: HALF_SECONDS,
   onHalfStart: function (half, m) {
     clearUnits();
-    dead = false;
+    nuke.kills = 0; nuke.armed = false; nuke.spent = false;
     const players = m.players;
     for (let i = 0; i < players.length; i++) {
       const p = players[i];
       const u = spawnUnit(p, m.roleOf(p.team), i % SQUAD);
       if (p.human) me = u;
     }
-    el("side").textContent = me ? (me.role === "bomber" ? "YOU BOMB" : "YOU RUN") : "";
+    if (chase) chase.reset();
+    el("radar").style.display = (me && me.role === "bomber") ? "block" : "none";
+    setRole();
   },
   onEnd: function (result, m) { finish(result, m); },
 });
@@ -251,111 +302,175 @@ for (let t = 0; t < TEAMS.length; t++) {
   }
 }
 
-// ============================================================ A BOMBING RUN
-// The one piece of maths this file owns, because it is the game: where a
-// falling bomb lands. It asks the SHARED integrator, so the mark under the
-// nose and the bomb that follows it cannot disagree.
-function aimPoint(u) {
-  if (!u.af) return null;
-  const p = CBZ.ordnance.predict(u.af.pos, u.af.vel, "iron", 30);
-  return p && p.pos ? p.pos : null;
+function setRole() {
+  if (!me) { el("role").textContent = ""; return; }
+  el("role").textContent = me.role === "bomber"
+    ? (me.rolling ? "FULL POWER · ROLL" : "YOU BOMB")
+    : "YOU RUN";
 }
 
+// ============================================================ A BOMBING RUN
 function dropStick(u) {
   if (!u.af || u.cool > 0) return;
-  u.cool = 2.2;
+  const agl = u.af.pos.y - groundAt(u.af.pos.x, u.af.pos.z);
+  if (agl < RELEASE_MIN && u.human) {
+    // the stick will find you, and that is the whole of the lesson
+    if (CBZ.micro.sfx) CBZ.micro.sfx.tone(140, 0.18, { type: "square", gain: 0.16 });
+  }
+  u.cool = 2.4;
   CBZ.ordnance.stick({
-    count: STICK, interval: 0.14, kind: "iron", team: u.team, by: u.id,
-    getState: function () { return { pos: u.af.pos, vel: u.af.vel }; },
+    count: STICK, interval: 0.13, kind: "iron", team: u.team, owner: u.id, by: u.id,
+    getState: function () { return u.alive && u.af ? { pos: u.af.pos, vel: u.af.vel } : null; },
+    onDetonate: onStoreLands,
   });
 }
 
+// A STORE THAT LANDS ON A BUILDING TAKES THE BUILDING DOWN. The verb is
+// city/crashfx.js's cityAirstrikeCollapse, which stopped asking which scenario
+// was running, and it resolves its own face out of CBZ.colliders — which
+// microboot now publishes under the name the engine reads. Nothing about a
+// collapsing tower is written in this file.
+function onStoreLands(b) {
+  if (!b || !b.impact) return;
+  CBZ.studio.boom(b.impact, { radius: b.radius, power: b.power, by: b.owner, structural: true });
+}
+
+function fireNuke(u) {
+  if (!u || !u.af || !nuke.armed || nuke.spent) return;
+  nuke.spent = true; nuke.armed = false;
+  CBZ.ordnance.release({
+    pos: u.af.pos, vel: u.af.vel, kind: "nuke", team: u.team, owner: u.id,
+    onDetonate: function (b) {
+      const f = el("flash");
+      f.style.transition = "none"; f.style.opacity = "1";
+      setTimeout(function () { f.style.transition = "opacity 2.4s"; f.style.opacity = "0"; }, 90);
+      if (CBZ.cityNukeFX) { try { CBZ.cityNukeFX(b.impact.x, b.impact.y, b.impact.z, {}); } catch (e) {} }
+      CBZ.studio.boom(b.impact, { radius: b.radius, power: b.power, by: u.id, structural: true, earshot: 4000 });
+    },
+  });
+  streak("ROUND AWAY");
+}
+
+function earnKill() {
+  if (nuke.spent) return;
+  nuke.kills++;
+  if (nuke.kills >= NUKE_ARM && !nuke.armed) { nuke.armed = true; streak("NUKE ARMED"); }
+  else streak(nuke.kills + " OF " + NUKE_ARM);
+}
+let streakT = 0;
+function streak(t) { el("streak").textContent = t; el("streak").classList.add("on"); streakT = 2.6; }
+
 // ============================================================ THE FRAME
-let camYaw = 0, camPitch = -0.22;
 CBZ.micro.onFrame(function (dt) {
   if (!started) return;
   match.step(dt);
+  if (streakT > 0 && (streakT -= dt) <= 0) el("streak").classList.remove("on");
   if (match.phase === "over") return;
 
-  const IN = CBZ.micro.input, T = CBZ.micro.touch;
-  const stick = (T && T.stick) || null;
+  ctl.step(dt);
 
   for (let i = 0; i < units.length; i++) {
     const u = units[i];
-    if (!u.alive) continue;
-    if (u.role === "bomber") stepBomber(u, dt, u === me ? IN : null, u === me ? stick : null);
-    else stepRunner(u, dt, u === me ? IN : null, u === me ? stick : null);
-    if (u.role === "runner" && u.alive) {
-      const enemy = match.enemyOf(u.team);
-      if (enemy) match.addScore(enemy.id === u.team ? u.team : u.team, PTS_ALIVE * dt, "alive");
+    if (!u.alive) {
+      if (u.role === "bomber" && (u.respawnIn -= dt) <= 0) reflight(u);
+      continue;
+    }
+    if (u.role === "bomber") stepBomber(u, dt, u === me);
+    else {
+      stepRunner(u, dt, u === me);
+      const own = match.team(u.team);
+      if (own) match.addScore(u.team, PTS_ALIVE * dt, "alive");
     }
   }
 
   CBZ.ordnance.step(dt);
-  drive(dt);
-  paint();
+  aimAndFollow(dt);
+  hud.clock(match.clock());
+  if (me) hud.health(Math.max(0, me.hp) / 100);
+  if (scope && me && me.role === "bomber") scope.draw(dt);
 });
 
-// The airframe steers toward a POINT, and holds its altitude separately —
-// that split is why an aeroplane here cannot roll itself into the ground. A
-// player turns by walking the aim point around; the AI puts it on the city.
-const _aimV = new THREE.Vector3();
-function stepBomber(u, dt, IN, stick) {
+function reflight(u) {
+  u.alive = true; u.hp = 100; u.respawnIn = 0;
+  if (u.group) u.group.visible = true;
+  const a = Math.random() * Math.PI * 2;
+  const r = world.rings.city + 1100;
+  const x = Math.cos(a) * r, z = Math.sin(a) * r;
+  u.hdg = Math.atan2(-x, -z);
+  if (u.af) u.af.launch(x, BOMB_ALT, z, u.hdg, 168);
+  if (u === me) setRole();
+}
+
+// The airframe steers toward a POINT and holds its altitude separately. That
+// split is why an aeroplane here cannot roll itself into the ground: the
+// autopilot commands bank ANGLE, never bank rate.
+function stepBomber(u, dt, mine) {
   if (!u.af) return;
   u.cool = Math.max(0, u.cool - dt);
-  if (u.hdg == null) u.hdg = u.af.heading ? u.af.heading() : 0;
 
-  if (IN) {
-    let turn = IN.axis("KeyA", "KeyD");
-    if (stick && stick.mag > 0.05) turn = stick.x;
-    u.hdg += turn * 0.6 * dt;
-    u.af.throttle = Math.max(0.25, Math.min(1, u.af.throttle + IN.axis("KeyS", "KeyW") * 0.5 * dt));
-    if (IN.isDown("Space") || u.tapFire) { dropStick(u); u.tapFire = false; }
-  } else {
-    // AI: put the aim point on the city, and let go when the SHARED integrator
-    // says the fall lands inside the built area. Nothing here models a bomb.
-    u.hdg = Math.atan2(-u.af.pos.x, -u.af.pos.z);
-    u.af.throttle = 0.78;
-    const mark = aimPoint(u);
-    if (mark && Math.hypot(mark.x, mark.z) < world.rings.city * 0.86) dropStick(u);
+  if (u.rolling) {
+    // takeoff: hold the centreline, let the elevator bite at rotate speed
+    u.af.throttle = 1;
+    const aim = u.af.steerTo(_v.set(
+      u.af.pos.x + Math.sin(u.hdg) * 3000, base.y + 4, u.af.pos.z + Math.cos(u.hdg) * 3000), { gain: 3.2 });
+    u.af.step(dt, aim);
+    u.pos.copy(u.af.pos);
+    if (u.group) u.af.applyTo(u.group);
+    if (u.af.pos.y - groundAt(u.af.pos.x, u.af.pos.z) > 45) { u.rolling = false; if (mine) setRole(); }
+    return;
   }
 
-  _aimV.set(u.af.pos.x + Math.sin(u.hdg) * 2200, BOMB_ALT, u.af.pos.z + Math.cos(u.hdg) * 2200);
-  const aim = u.af.steerTo(_aimV, { gain: 2.0 });
+  if (mine) {
+    u.hdg += ctl.move.x * 0.55 * dt;
+    u.af.throttle = Math.max(0.25, Math.min(1, u.af.throttle + ctl.move.y * 0.5 * dt));
+    if (ctl.tapped("fire")) dropStick(u);
+    if (ctl.tapped("nuke")) fireNuke(u);
+  } else {
+    // AI: put the run on the city, and let go when the SHARED integrator says
+    // the fall lands inside the built area. Nothing here models a bomb.
+    u.hdg = Math.atan2(-u.af.pos.x, -u.af.pos.z);
+    u.af.throttle = 0.8;
+    const p = CBZ.ordnance.predict(u.af.pos, u.af.vel, "iron", 40);
+    if (p && Math.hypot(p.x, p.z) < world.rings.city * 0.88) dropStick(u);
+  }
+
+  _v.set(u.af.pos.x + Math.sin(u.hdg) * 2400, BOMB_ALT, u.af.pos.z + Math.cos(u.hdg) * 2400);
+  const aim = u.af.steerTo(_v, { gain: 2.0 });
   u.af.holdAltitude(BOMB_ALT, aim);
   u.af.step(dt, aim);
   u.pos.copy(u.af.pos);
   if (u.group) u.af.applyTo(u.group);
 }
 
-function stepRunner(u, dt, IN, stick) {
+function stepRunner(u, dt, mine) {
   let mx = 0, mz = 0;
-  if (IN) {
-    mx = IN.axis("KeyA", "KeyD");
-    mz = IN.axis("KeyW", "KeyS");
-    if (stick && (stick.x || stick.y)) { mx = stick.x; mz = stick.y; }
+  if (mine) {
+    mx = ctl.move.x; mz = -ctl.move.y;
     const s = Math.hypot(mx, mz);
-    if (s > 0.001) {
-      const c = Math.cos(camYaw), sn = Math.sin(camYaw);
-      const wx = mx * c - mz * sn, wz = mx * sn + mz * c;
-      mx = wx / Math.max(1, s); mz = wz / Math.max(1, s);
+    if (s > 0.01) {
+      // move relative to where the camera is looking, which is the only
+      // third-person control scheme anybody finds natural
+      const c = Math.cos(u.camYaw || 0), sn = Math.sin(u.camYaw || 0);
+      const wx = mx * c + mz * sn, wz = -mx * sn + mz * c;
+      mx = wx; mz = wz;
     }
+    u.camYaw = (u.camYaw || 0) + ctl.look.x * 60 * dt;
   } else {
-    // AI: ordnance already publishes a danger field, so a runner samples it
-    // in eight directions and walks down the gradient. Nothing here models a
+    // ordnance already publishes a danger field, so a runner samples it in
+    // eight directions and walks down the gradient. Nothing here models a
     // bomb, a trajectory or a warning time.
-    let best = 1e9, bx = 0, bz = 0;
+    let best = 1e9, bx = Math.cos(u.yaw), bz = Math.sin(u.yaw);
     for (let a = 0; a < 8; a++) {
       const th = (a / 8) * Math.PI * 2;
-      const sx = u.pos.x + Math.cos(th) * 14, sz = u.pos.z + Math.sin(th) * 14;
-      const risk = CBZ.ordnance.dangerAt ? CBZ.ordnance.dangerAt(sx, sz, 8) : 0;
-      const drift = Math.abs(th - u.yaw) * 0.02;      // prefer not to pirouette
-      if (risk + drift < best) { best = risk + drift; bx = Math.cos(th); bz = Math.sin(th); }
+      const sx = u.pos.x + Math.cos(th) * 16, sz = u.pos.z + Math.sin(th) * 16;
+      const risk = CBZ.ordnance.dangerAt ? CBZ.ordnance.dangerAt(sx, sz, 9) : 0;
+      const spin = Math.abs(Math.atan2(Math.sin(th - u.yaw), Math.cos(th - u.yaw))) * 0.03;
+      if (risk + spin < best) { best = risk + spin; bx = Math.cos(th); bz = Math.sin(th); }
     }
     mx = bx; mz = bz;
   }
-  if (mx || mz) {
-    const n = Math.hypot(mx, mz) || 1;
+  const n = Math.hypot(mx, mz);
+  if (n > 0.01) {
     u.pos.x += (mx / n) * RUN_SPEED * dt;
     u.pos.z += (mz / n) * RUN_SPEED * dt;
     u.yaw = Math.atan2(mx, mz);
@@ -367,26 +482,27 @@ function stepRunner(u, dt, IN, stick) {
   if (u.group) {
     u.group.position.copy(u.pos);
     u.group.rotation.y = u.yaw;
-    if (CBZ.animChar) CBZ.animChar(u.group.userData.charRig, dt, { speed: (mx || mz) ? RUN_SPEED : 0 });
+    if (CBZ.animChar && u.group.userData.charRig) {
+      try { CBZ.animChar(u.group.userData.charRig, dt, { speed: n > 0.01 ? RUN_SPEED : 0 }); } catch (e) {}
+    }
   }
 }
 
-function drive(dt) {
-  const IN = CBZ.micro.input;
-  camYaw -= IN.mx * (IN.sensitivity || 0.0022) * 60 * dt * 12;
-  camPitch = Math.max(-1.2, Math.min(0.5, camPitch - IN.mz * (IN.sensitivity || 0.0022) * 60 * dt * 12));
-  const look = (me && me.alive) ? me.pos : (units[0] ? units[0].pos : tmp.set(0, 40, 0));
-  const back = (me && me.role === "bomber") ? 62 : 7.5;
-  const up = (me && me.role === "bomber") ? 16 : 2.6;
-  const yaw = (me && me.role === "bomber" && me.af) ? me.af.yaw + Math.PI : camYaw;
-  cam.position.set(look.x - Math.sin(yaw) * back, look.y + up, look.z - Math.cos(yaw) * back);
-  cam.lookAt(look.x, look.y + (me && me.role === "bomber" ? 0 : 1.5), look.z);
-}
-
-function paint() {
-  if (me) hud.health(Math.max(0, me.hp) / 100);
-  hud.clock(match.clock());
-  if (dead && me) hud.clock(match.clock());
+function aimAndFollow(dt) {
+  // spectate the nearest living friend rather than a black screen
+  let look = me;
+  if (!look || !look.alive) {
+    for (let i = 0; i < units.length; i++) if (units[i].alive && (!me || units[i].team === me.team)) { look = units[i]; break; }
+  }
+  if (!look) return;
+  const air = look.role === "bomber";
+  if (air && look.af) {
+    chase.follow(look.af.pos, look.af.heading(), dt, { air: true, back: look.rolling ? 34 : 66, up: look.rolling ? 9 : 18 });
+    if (look === me && !look.rolling) sight.aim(look.af.pos, look.af.vel); else sight.hide();
+  } else {
+    chase.follow(look.pos, look.camYaw || look.yaw, dt, { air: false });
+    sight.hide();
+  }
 }
 
 // ============================================================ START / END
@@ -397,6 +513,7 @@ function finish(result, m) {
   let h = "";
   for (let i = 0; i < rows.length; i++) h += "<tr><td>" + rows[i].name + "</td><td>" + Math.round(rows[i].total) + "</td></tr>";
   el("overTable").innerHTML = h;
+  if (scope) el("radar").style.display = "none";
 }
 el("again").addEventListener("click", function () { location.reload(); });
 
@@ -405,7 +522,7 @@ el("go").addEventListener("click", function () {
   el("gate").style.display = "none";
   started = true;
   match.start();
-  if (!CBZ.studio.touchDevice && CBZ.micro.lock) CBZ.micro.lock();
+  ctl.lock();
 });
 
 // a probe surface, so the reuse claim can be checked rather than asserted
@@ -420,13 +537,15 @@ window.__bombB = {
       } : null,
       route: CBZ.modeCapsAudit ? CBZ.modeCapsAudit().routes[CBZ.game.mode] : null,
       colliders: (CBZ.colliders && CBZ.colliders.length) || 0,
+      structural: !!CBZ.cityAirstrikeCollapse,
       reuse: {
         people: !!CBZ.makeCharacter, gait: !!CBZ.animChar,
-        aircraft: CBZ.airbase ? CBZ.airbase.usingReal && CBZ.airbase.usingReal() : null,
-        models: CBZ.studio.models(),
-        roles: CBZ.studio.roles(),
+        aircraft: CBZ.airbase.usingReal ? CBZ.airbase.usingReal() : null,
+        models: CBZ.studio.models(), roles: CBZ.studio.roles(),
+        sight: !!(sight && sight.ok), scope: !!scope, touch: ctl.touch,
       },
       units: units.length, alive: units.filter(function (u) { return u.alive; }).length,
+      nuke: { kills: nuke.kills, armed: nuke.armed, spent: nuke.spent },
     };
   },
 };
