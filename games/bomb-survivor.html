@@ -2110,7 +2110,8 @@ function build() {
 window.addEventListener("keydown", function (e) {
   if (!started) return;
   if (e.code === "KeyT") toggleTestRig();
-  if (e.code === "KeyR" && scope) scope.cycleRange(1);
+  // one line, not two: this handler carried the same cycleRange twice, so one
+  // press of R stepped the scope through two ranges and skipped one
   if (e.code === "KeyR" && scope) scope.cycleRange(1);
   // ---- PAUSE IS THE ENGINE'S LEVER, NOT THIS FILE'S FLAG. `paused` gated only
   // the hook this file registered, and the match is not in that hook: teammatch
