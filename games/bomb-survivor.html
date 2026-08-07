@@ -481,11 +481,6 @@
 <script src="../src/world/airbase.js"></script>
 <script src="../src/systems/airframe.js"></script>
 <script src="../src/systems/ordnance.js"></script>
-<!-- systems/hunt.js — WHERE THE PREY WILL BE. A bomb falls for nine seconds
-  and this aeroplane is a minute out; both of those are questions about the
-  FUTURE, and nothing in this page is allowed to answer them privately. See
-  THE HUNT below for what it bought and what it refused to promise. -->
-<script src="../src/systems/hunt.js"></script>
 <script src="../src/systems/radarscope.js"></script>
 <script src="../src/modes/teammatch.js"></script>
 <script>
@@ -570,12 +565,6 @@ const nuke = { kills: 0, armed: false, spent: false, warned: false };
 // one line reverts the weapon AND its whole UI.
 const NUKE_ON = !!(CBZ.ordnance && CBZ.ordnance.kinds && CBZ.ordnance.kinds.nuke);
 const rngGame = CBZ.seedStream ? CBZ.seedStream("bombsurvivor") : Math.random;
-// THE HUNTER'S ONE HANDLE. Degrade-safe by construction: every site below
-// reads `HUNT ? HUNT.at(f, t) : f.pos`, so a missing tag — or
-// CBZ.CONFIG.HUNT_LEAD_V1 = false — puts the whole page back on "aim at where
-// he is" with no other edit.
-const HUNT = CBZ.hunt || null;
-const _fp = { x: 0, z: 0 };   // one scratch point, never a fresh object per foe
 function rr(a, b) { return a + rngGame() * (b - a); }
 function pick(a) { return a[Math.floor(rngGame() * a.length) % a.length]; }
 
@@ -1092,9 +1081,6 @@ function updateFoot(u, dt, human) {
     animateSoldier(u.group, len > 0.001 ? spd : 0, CBZ.micro.elapsed, dt);
   }
   u.speed = len > 0.001 ? spd : 0;
-  // the human runner is a target like any other, and a bomber must be able to
-  // lead HIM — including his strafe, which is the whole counter-play
-  if (HUNT) HUNT.track(u);
 }
 
 // ---- boarding: walk to the wing and press E. This is the one place the
@@ -1337,16 +1323,11 @@ function driveFoot(u, dt, goal, spd) {
     u.pos.x += (dx / d) * spd * dt;
     u.pos.z += (dz / d) * spd * dt;
     CBZ.micro.resolveCircle(u.pos, 0.55, u.pos.y, 1.8);
-  }
+    // published so a bomber can LEAD him: a store falls for nine seconds
+    // and a man walks forty metres in that time
+    u.velX = (dx / d) * spd; u.velZ = (dz / d) * spd;
+  } else { u.velX = 0; u.velZ = 0; }
   u.pos.y = floorAt(u.pos.x, u.pos.z);
-  // ONE LINE, AND IT REPLACED TWO DEAD ONES. This mover used to publish
-  // `u.velX/u.velZ` with the comment "published so a bomber can LEAD him: a
-  // store falls for nine seconds and a man walks forty metres in that time" —
-  // and nothing in the file ever read either field. That is the whole fault in
-  // miniature: the observation was right, the consumer was never written, and
-  // the bomber went on aiming at where a man had been. The engine keeps the
-  // track now, off the positions this line has just finished writing.
-  if (HUNT) HUNT.track(u);
   if (u.group) {
     u.group.position.copy(u.pos);
     u.group.rotation.y = u.yaw;
@@ -1355,7 +1336,7 @@ function driveFoot(u, dt, goal, spd) {
 }
 
 // ---------------------------------------------------------------- THE HUNT
-// Four measured facts decided the shape of everything below.
+// Three measured facts decided the shape of everything below.
 //
 //  1. THE AEROPLANE COULD NOT MANOEUVRE INSIDE ITS OWN TARGET AREA. A 30°
 //     bank at 170 m/s is a 5103 m turn radius; the basin is 1050 m across.
@@ -1366,14 +1347,10 @@ function driveFoot(u, dt, goal, spd) {
 //     stores inside 46 m of a living man, zero kills. So the run-in is
 //     PLANNED now: pick a heading once, fly the LINE and not the point.
 //
-//  2. LEADING A FLEEING MAN AT THE AIM POINT IS UNSOLVABLE, not merely hard.
-//     aiRunner runs AWAY FROM THE THREAT once the ring is up — so "aim where
-//     he will be" has no fixed point: write a = p + flee(a) and it has no
-//     solution, every aim point pushes him off itself. (That is a statement
-//     about the AIM POINT of a threat he can SEE, and fact 4 is the other
-//     half of it: for the fifty-odd seconds before there is any ring to run
-//     from, he is not fleeing anything and he is perfectly leadable.)
-//     What can be aimed at is ground he cannot leave. The
+//  2. LEADING A FLEEING MAN IS UNSOLVABLE, not merely hard. aiRunner runs
+//     AWAY FROM THE THREAT — so "aim where he will be" has no fixed point:
+//     write a = p + flee(a) and it has no solution, every aim point pushes
+//     him off itself. What can be aimed at is ground he cannot leave. The
 //     basin is a GRID — 88 m blocks, 26 m roads — and a man in a street who
 //     runs from a ring runs into a tower and slides ALONG the street. So a
 //     bomber runs in down a STREET AXIS and walks the stick down the road.
@@ -1389,32 +1366,8 @@ function driveFoot(u, dt, goal, spd) {
 //     warhead: seven stores 26 m apart is 160 m of lethal street, against a
 //     man who can cover ~57 m in the five seconds of ring he is owed.
 //
-//  4. AND THE HALF WAS STILL SHORT, BECAUSE EVERY POSITION IN THE BRAIN WAS
-//     A PRESENT-TENSE ONE. Measured over a full 580 s bombing half: 63,005
-//     frames with a bomber established on a run and off cooldown, and 335 of
-//     them — half of one per cent — had a living man inside the stick's own
-//     footprint. The bomb works and the aiming works (mean solution error
-//     7 m). What did not work is that a bomber picks a street, spends up to a
-//     minute flying to it, and arrives after they have walked off it; and
-//     that the release gate compared a NINE-SECOND-OLD future impact point
-//     against where men were standing that frame.
-//
-//     This file no longer owns one line of the answer. `systems/hunt.js`
-//     publishes it for every game on this engine — `hunt.at(a, t)` is where
-//     an actor will be in t seconds and `hunt.spread(a, t)` is how wrong
-//     that is, both out of the persistent-random-walk model with one
-//     measured parameter. Three horizons, one function: the plan asks it at
-//     ~60 s (where it correctly answers "you cannot know", and the plan
-//     stops pretending), the sidestep at 8-20 s, the pickle at the store's
-//     own time of fall. If the maths is good enough to work it is good
-//     enough to be engine, so none of it is written here.
-//
-// The counterplay is untouched, and one piece of it is now enforced by
-// arithmetic rather than by luck: hunt.js MEASURES how fast a target is
-// turning and shortens its own correlation time to match, so a man who jukes
-// is forecast with a large smear and almost no lead — juking beats the lead
-// because the model says so. Nine seconds of fall, five of threat ring, a
-// roof still worth 75%, and a man who gets under one — or simply turns a
+// The counterplay is untouched: nine seconds of fall, five of threat ring,
+// a roof still worth 75%, and a man who gets under one — or simply turns a
 // corner out of the street — does not die. That IS the hunt.
 
 const _axes = [];
@@ -1443,22 +1396,11 @@ function releaseRange(af) {
   return Math.max(500, Math.min(1700, Math.hypot(sol.x - af.pos.x, sol.z - af.pos.z)));
 }
 
-// Choose the STREET, not the man — but choose it for the minute from NOW,
-// not for this instant. A street is worth a pass when several of them will
-// still be in it when the aeroplane arrives, none of them is beside a roof,
-// and it does not cost half the clock to get onto.
-//
-// EVERY POSITION IN THIS FUNCTION IS A FORECAST, AND THE FORECAST KNOWS IT IS
-// WEAK. At sixty seconds `CBZ.hunt.spread` is ~150 m on a 5.4 m/s man — wider
-// than the 114 m block pitch — so the corridor test is not a fence any more,
-// it is `hunt.within`: 1 inside the corridor and an honest Gaussian tail
-// outside it. What that does to the ranking is the point. A street with men
-// standing in it right now no longer outscores its neighbour by a cliff,
-// because at a minute's flying time it genuinely is not going to be that
-// street; what survives the smear is where the CROWD is, which is a thing
-// that does not move in a minute. The sharp decision is deferred to the
-// sidestep and the pickle, where the horizon is eight seconds and nine, and
-// where the same function answers to within a few metres.
+// Choose the STREET, not the man. A street is worth a pass when several of
+// them are standing in it, none of them is beside a roof, and it does not
+// cost half the clock to get onto. The man is only how the street got
+// nominated — by the time the stick leaves the bay a minute later, the aim
+// has been re-taken from whoever is actually down there (see aiBomber).
 function planAttack(u) {
   const af = u.af;
   u.run = null; u.runAge = 0; u.targetId = null;
@@ -1475,21 +1417,6 @@ function planAttack(u) {
         const hx = ax[a].hx * sgn, hz = ax[a].hz * sgn;
         const ox = ax[a].ox, oz = ax[a].oz;
         const nx = -hz, nz = hx;
-        // THE TURN IS PAID BEFORE THE FLIGHT IS MEASURED, so `travel` below
-        // can price a release point without re-deriving it.
-        let dh = Math.atan2(-hx, -hz) - psi;
-        while (dh > Math.PI) dh -= Math.PI * 2;
-        while (dh < -Math.PI) dh += Math.PI * 2;
-        // seconds for THIS aeroplane to reach the release point for a target
-        // standing at (tx,tz) on this line: the distance to it plus the arc
-        // the turn onto the run-in heading actually costs at this turn radius.
-        // Handing this to the engine as `opts.travel` is what makes the
-        // intercept below a fixed point rather than a guess — a bomber's
-        // arrival time is not range/speed, and hunt.intercept never has to
-        // learn what an aeroplane is.
-        const al = (foes[i].pos.x - ox) * hx + (foes[i].pos.z - oz) * hz;
-        const rx = ox + hx * (al - range), rz = oz + hz * (al - range);
-        const fly = Math.hypot(rx - af.pos.x, rz - af.pos.z) + 1100 * Math.abs(dh);
         // who else is in this street, and how exposed are they? A ROOF BEATS
         // THIS WEAPON OUTRIGHT — 190 × 0.25 is 47.5 at point blank against
         // 100 hp — so a man standing beside a shelter is not a target, he is
@@ -1509,6 +1436,14 @@ function planAttack(u) {
           const o = units[k];
           if (o !== u && o.run && Math.abs(o.run.ox - ox) < 60 && Math.abs(o.run.oz - oz) < 60) taken++;
         }
+        // the flying: distance to the release point, plus the arc the turn
+        // onto the run-in heading actually costs at this turn radius
+        const al = (foes[i].pos.x - ox) * hx + (foes[i].pos.z - oz) * hz;
+        const rx = ox + hx * (al - range), rz = oz + hz * (al - range);
+        let dh = Math.atan2(-hx, -hz) - psi;
+        while (dh > Math.PI) dh -= Math.PI * 2;
+        while (dh < -Math.PI) dh += Math.PI * 2;
+        const fly = Math.hypot(rx - af.pos.x, rz - af.pos.z) + 1100 * Math.abs(dh);
         const c = worth * 900 - fly * 0.30 - taken * 500;
         if (c > bestC) {
           bestC = c;
@@ -1626,28 +1561,13 @@ function aiBomber(u, dt) {
     // — was what the half was actually short of.
     //
     // The HEADING is a decision made a minute ago and cannot be revisited.
-    // WHICH STREET is not: the grid puts the next one 114 m away. So the
+    // WHICH STREET is not: the grid puts the next one 114 m away, and 114 m
+    // of lateral displacement is about four seconds of a 29 deg bank. So the
     // aeroplane keeps choosing its street right up to the last mile, and
     // slides one block over when the block over has people in it. It is what
     // a bomber does with a target of opportunity, and it costs the runners
     // nothing they were promised: the ring, the roof and the corner are all
     // still there.
-    //
-    // A BLOCK SLIDE IS NINE SECONDS, NOT FOUR — AND LETTING IT HAVE NINE MADE
-    // THE HALF WORSE. The four was arithmetic that was simply wrong: an
-    // aeroplane does not translate sideways, it flies an S, two opposite arcs
-    // of radius r = v²/(g·tan φ) = 122²/(9.81·tan 0.50) = 2777 m, so an offset
-    // d costs θ = acos(1 − d/2r) of arc each way and 114 m is 1127 m of ground
-    // and 9.2 s of flying. The obvious repair — hold the decision
-    // for the whole S and only offer a slide there is room to fly — was built
-    // and MEASURED over a full half, and it lost: releases 10 → 18 but mean
-    // cross-track at the footprint 34 → 65 m, stores inside the 13 m lethal
-    // ring 1 → 0, kills 8 → 5. The reason is worth keeping: a 2.5 s hold means
-    // the aeroplane is CONTINUALLY re-solving toward the best street and is
-    // never committed to being off one, while a 9.2 s hold parks it mid-S —
-    // at a cross-track of half a block — for nine seconds of exactly the
-    // wings-level run-in during which the footprint sweeps over people. The
-    // hold is a commitment, and the commitment is the cost. 2.5 s stands.
     run.sideT -= dt;
     if (settled && u.runAge > 3 && run.sideT <= 0 && sP < -(run.range + 500) && world.grid) {
       const pitch = world.grid.pitch;
@@ -1698,21 +1618,11 @@ function aiBomber(u, dt) {
         const sAl = sx * run.hx + sz * run.hz;
         const sCr = sx * nx + sz * nz;
         const len = (AI_STICK - 1) * STICK_GAP * Math.max(60, af.speed);
-        // THE ONE PLACE THE OLD BRAIN WAS PLAINLY WRONG, AND IT IS ARITHMETIC.
-        // `sol` is where the store LANDS — nine seconds from now, because
-        // ordnance.predict integrates the fall and hands back the time it
-        // took. The men were then tested at where they stood THIS frame, so
-        // the whole gate compared a future impact against a present body: at
-        // 5.4 m/s that is fifty metres of error against a middle third of the
-        // strip only seventy metres long. `sol.t` is the horizon the store
-        // itself declares, and the gate stays HARD at AI_CORRIDOR — the smear
-        // belongs in choosing a street, never in pulling a trigger.
         let on = false;
         for (let i = 0; i < units.length && !on; i++) {
           const f = units[i];
           if (!f.alive || f.role !== "runner" || f.team === u.team) continue;
-          const fp = HUNT ? HUNT.at(f, sol.t, _fp) : f.pos;
-          const fx = fp.x - run.ox, fz = fp.z - run.oz;
+          const fx = f.pos.x - run.ox, fz = f.pos.z - run.oz;
           if (Math.abs(fx * nx + fz * nz) > AI_CORRIDOR) continue;
           const fal = fx * run.hx + fz * run.hz;
           if (fal > sAl + len * 0.28 && fal < sAl + len * 0.72) on = true;
@@ -2672,9 +2582,6 @@ window.__bomb = {
       micro: CBZ.microAudit(), city: CBZ.desertCityAudit(), base: CBZ.airbaseAudit(),
       ordnance: CBZ.ordnanceAudit(), airframe: CBZ.airframeAudit(), match: CBZ.teammatchAudit(),
       radar: CBZ.radarAudit(),
-      // the forecast grading itself: calibration ~1 means hunt.spread is
-      // telling the truth about how wrong hunt.at is
-      hunt: CBZ.huntAudit ? CBZ.huntAudit() : null,
       // which assets are the SHIPPED gang-city models and which are local
       // primitives — the one number this whole refactor was about
       reuse: Object.assign({}, CBZ.airbase.usingReal(), {

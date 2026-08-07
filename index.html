@@ -119,6 +119,13 @@
               data-href="games/bomb-survivor.html">
         <span>Bomb Survivor</span><small>10 v 10 · ten minutes bombing, ten minutes bombed</small>
       </button>
+      <!-- THE SAME GAME, THE OTHER BET. A redraws what Gang City already
+           ships; B asks for it by name through core/studio.js. Both here on
+           purpose: the comparison is played, not argued. -->
+      <button class="mode-btn mode-launch" type="button" data-mode="bombsurvivorb"
+              data-href="games/bomb-survivor-b.html">
+        <span>Bomb Survivor B</span><small>same game · one script tag · every asset asked for by name</small>
+      </button>
     </div>
 
     <!-- ESCAPE mode -->
@@ -540,14 +547,6 @@
 <script src="src/systems/simulation.js?v=scale8"></script>
 <script src="src/systems/detection.js?v=npcgoal51"></script>
 <script src="src/systems/aitactics.js?v=tac1"></script>
-<!-- WHERE THE PREY WILL BE (HUNT_LEAD_V1). aitactics.js's sibling and its
-     missing half: that file answers "he was HERE when I last saw him", this
-     one answers "he will be THERE when I arrive, and here is how wrong I
-     expect to be". No consumer in the city yet — the shipped consumer is
-     games/bomb-survivor.html — but CBZ.huntAudit().legacy is the migration
-     debt this file exists to retire, so it must be loadable here to be
-     counted. See CLAUDE.md. -->
-<script src="src/systems/hunt.js?v=hunt1"></script>
 <!-- HOW WELL A PERSON FIGHTS (NPC_COMBAT_IQ). The ONE competence model —
      role x weapon -> reaction, settle, burst, accuracy, cover quality — plus
      real collider-derived cover, the shooter token that stops a crew firing

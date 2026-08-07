@@ -246,16 +246,6 @@
       fog: src.fog,
       transparent: !!src.transparent,
       opacity: src.opacity != null ? src.opacity : 1,
-      // DEPTH STATE IS PART OF THE MATERIAL, AND A PROMOTION THAT DROPS IT
-      // IS THE SAME BUG core/batch.js's V2 merge already shipped once: a
-      // polygonOffset decal re-materialled without its offset stops being a
-      // decal and starts z-fighting the surface it was painted on
-      // (city/world.js's `userData.roadPaint` guard exists for exactly that).
-      // These four fields are carried, not re-derived.
-      polygonOffset: !!src.polygonOffset,
-      polygonOffsetFactor: src.polygonOffsetFactor != null ? src.polygonOffsetFactor : 0,
-      polygonOffsetUnits: src.polygonOffsetUnits != null ? src.polygonOffsetUnits : 0,
-      depthWrite: src.depthWrite !== false,
       // A city is overwhelmingly rough dielectric. The point of the promotion
       // is the environment term and the specular falloff, not gloss.
       roughness: 0.88,
