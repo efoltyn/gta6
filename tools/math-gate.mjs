@@ -258,6 +258,19 @@ const PASS = `(() => {
     if (mc.blastModes < 4) out.fails.push("modeCaps: blast-capable modes fell to " + mc.blastModes + " (expect 4)");
   } catch (e) { out.fails.push("modeCapsAudit threw: " + (e && e.message)); } }
   else out.fails.push("modeCapsAudit MISSING (systems/modecaps.js not loaded)");
+  // ---- WHERE THE PREY WILL BE (systems/hunt.js). A hunter that needs TIME to
+  // arrive must aim at the future, and this engine had re-authored that
+  // privately four times over (heliGun, piracy's interceptCmd, police's
+  // roadblock stager, squadai's screen) with nothing shared and nothing that
+  // could say how wrong it expected to be. legacy is the hand-counted census
+  // of those private implementations, named file:line in hunt.js's header. It
+  // is a duplication count: it may only ever go DOWN, and it goes down by
+  // MIGRATING one of them onto CBZ.hunt, never by editing this line.
+  if (CBZ.huntAudit) { try { const ha = CBZ.huntAudit();
+    out.hunt = "legacy=" + ha.legacy + " on=" + ha.on + " asks=" + ha.asks;
+    if (ha.legacy > 3) out.fails.push("PRIVATE LEAD/INTERCEPT IMPLEMENTATIONS rose to " + ha.legacy + " (ratchet 3)");
+  } catch (e) { out.fails.push("huntAudit threw: " + (e && e.message)); } }
+  else out.fails.push("huntAudit MISSING (systems/hunt.js not loaded)");
   // ---- THE CHARGE TABLE (systems/breach.js). Real urban-breaching doctrine
   // published once so a prison door and a bank vault price themselves in the
   // same unit - pounds of C4. unreachable counts registered targets whose

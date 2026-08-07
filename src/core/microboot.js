@@ -44,6 +44,16 @@
    script tag runs. Microboot therefore creates the scene at load time and
    boot() only attaches the renderer to it.
 
+   IT ALSO READS ?cfg_FLAG=0. That reader lived only in config.js — the big
+   door — so a slice page had no way to revert one of its own flags and no
+   headless harness could A/B one. Fifteen lines, same precedence, yields to
+   config.js.
+
+   AND IT DERIVES THE NEAR PLANE FROM THE FAR ONE. See boot(): a page asks
+   for a 16 km world and used to inherit a near plane picked for a 14 km one.
+   The arithmetic lives in world/materials.js (CBZ.depthNearFor) with the rest
+   of the depth budget, because a depth budget is one subject.
+
    Flags: MICRO_V1 (master), MICRO_SHADOWS, MICRO_DPR_MAX, MICRO_SFX.
    Audit: CBZ.microAudit().
 ============================================================ */
@@ -55,6 +65,30 @@
 
   CBZ.CONFIG = CBZ.CONFIG || {};
   const C = CBZ.CONFIG;
+
+  /* ?cfg_FLAG=0 WORKS ON A SLICE PAGE TOO (2026-08-07).
+     Doctrine says "every risky feature must be a one-line revert", and
+     verification.md says the URL override is "the only way to A/B a
+     build-time flag headless (a same-page reset reuses the already-built
+     world, so flipping after boot proves nothing)". Both were false here:
+     the reader is fifteen lines inside `config.js`, which is part of the BIG
+     door, so a games/ page could declare all the flags it liked and no
+     harness could ever turn one off. Same contract, same precedence — read
+     FIRST, so it beats every `== null` default in this file and in every
+     module a slice page loads. Yields whole if config.js already ran. */
+  if (!CBZ._cfgUrlRead) {
+    CBZ._cfgUrlRead = true;
+    try {
+      if (typeof location !== "undefined" && location.search) {
+        const sp = new URLSearchParams(location.search);
+        sp.forEach(function (v, k) {
+          if (k.slice(0, 4) !== "cfg_") return;
+          C[k.slice(4)] = v === "0" || v === "false" ? false : v === "1" || v === "true" ? true : v;
+        });
+      }
+    } catch (e) {}
+  }
+
   if (C.MICRO_V1 == null) C.MICRO_V1 = true;
   if (C.MICRO_SHADOWS == null) C.MICRO_SHADOWS = true;
   if (C.MICRO_DPR_MAX == null) C.MICRO_DPR_MAX = 1.75;
@@ -1007,11 +1041,28 @@
     }
 
     if (!CBZ.camera) {
+      /* THE NEAR PLANE IS DERIVED FROM THE FAR PLANE, NOT TYPED (2026-08-07).
+         A page asks for a world ("far: 16000") and inherits a near plane
+         chosen for a 14 km one, and nothing anywhere tells it what that
+         costs. Gang City does not work this way: city/mode.js moves its own
+         near with the situation and says why in a comment — "a 0.1m near
+         plane paired with a 2800m flight far plane throws away most depth
+         precision". That arithmetic is now engine fact in world/materials.js
+         (CBZ.depthNearFor), so the small door gets the same answer the big
+         one has always had.
+         It can only ever RAISE near — the floor inside depthNearFor is this
+         file's own shipped 0.35 — so no page that already looked right can
+         lose anything, and a caller that passes `near` still wins outright.
+         Honest about the size of it: precision goes as 1/near, so a 16 km
+         page moves 0.35 -> 0.50 and buys 1.43x. That is worth having and it
+         is NOT a cure for a coplanar ground; CBZ.depthGround is. */
+      const far = opts.far != null ? opts.far : 14000;
+      const near = opts.near != null ? opts.near
+        : (CBZ.depthNearFor ? CBZ.depthNearFor(far) : 0.35);
       CBZ.camera = new THREE.PerspectiveCamera(
         opts.fov != null ? opts.fov : 68,
         window.innerWidth / Math.max(1, window.innerHeight),
-        opts.near != null ? opts.near : 0.35,
-        opts.far != null ? opts.far : 14000);
+        near, far);
       CBZ.camera.position.set(0, 20, 60);
     }
     if (!CBZ.clock) CBZ.clock = new THREE.Clock();
@@ -1053,6 +1104,11 @@
       retiredHooks: micro.retired ? micro.retired.length : 0,
       retired: micro.retired || [],
       colliders: boxes.length,
+      // the frustum this page actually got, and what a depth LSB is worth at
+      // a kilometre in it (world/materials.js's depth budget, when present)
+      near: CBZ.camera ? CBZ.camera.near : 0,
+      far: CBZ.camera ? CBZ.camera.far : 0,
+      depthQuantumAt1km: CBZ.depthQuantum ? +CBZ.depthQuantum(1000).toFixed(4) : null,
       frameHooks: frameHooks.length,
       fps: micro.fps,
       sceneChildren: scene.children.length,

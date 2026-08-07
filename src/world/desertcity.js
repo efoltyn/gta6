@@ -69,6 +69,17 @@
      world.inCity/inPark/onStreet(x,z)
      world.skylineHeightAt(x,z)   tallest thing over a point (bomb clearance)
 
+   THE GROUND IS A DECAL LADDER, NOT A STACK OF PLANES. The basin floor is
+   dead flat at y = 0 and five things are drawn on it — the road disc, the
+   lane paint, the park, its pond, its path. They used to be a y-ladder
+   (0.04 / 0.08 / 0.12 / 0.16 / 0.17), which is invisible on foot and worth
+   nothing from a bomber: measured, 100% of ground samples from 1200 m sat
+   inside ONE depth-buffer LSB. They now go down through
+   `CBZ.depthGround(mesh, rank, lift)` (world/materials.js) — coplanar, with
+   polygonOffset doing the separating, which is what city/world.js's road
+   paint has done all along. Anything else printed on this floor joins the
+   ladder at the next rank; it does not pick a new number.
+
    Flags: DESERTCITY_V1 (master), DESERTCITY_TOWERS, DESERTCITY_SEG,
    DESERTCITY_SHELTERS, DESERTCITY_PROPS.
    Audit: CBZ.desertCityAudit().
@@ -344,7 +355,16 @@
       const geo = new THREE.CircleGeometry(R, 72);
       geo.rotateX(-Math.PI / 2);
       const m = new THREE.Mesh(geo, cm(0x35383d));
-      m.position.y = 0.04;
+      // THE GROUND IS A LADDER OF DECALS, NOT A STACK OF PLANES. This disc is
+      // a kilometre across and the terrain plate under it is dead flat at
+      // y = 0 inside R_CITY, so the two are one 4 cm gap apart over the whole
+      // city. On foot that is invisible — a grazing ray separates the two hits
+      // by 4cm x D / eye-height, twenty-three metres at a kilometre. From a
+      // bomber it is nothing: measured 100% of ground samples under one depth
+      // LSB from 1200 m. CBZ.depthGround (world/materials.js) lays the disc
+      // COPLANAR and lets polygonOffset do the separating, which is exactly
+      // what city/world.js's road paint has always done.
+      m.position.y = CBZ.depthGround ? CBZ.depthGround(m, 1, 0.04) : 0.04;
       m.receiveShadow = true;
       root.add(m);
       world.roadPlane = m;
@@ -363,6 +383,16 @@
       const s = new THREE.Vector3();
       const away = new THREE.Vector3(0, -9999, 0);
       const FULL = PITCH * GRID_N;
+      // rank 2: paint ON the road disc, which is rank 1. The returned y puts
+      // the strip's UNDERSIDE on the road rather than its middle, so the
+      // 4 cm bar is not half-buried in the surface it marks.
+      // `hairline: 1.4` is the STRIPE WIDTH, and it is what actually stops
+      // the shimmer: measured, 49 of 484 fixed ground points changed which
+      // surface they showed under sub-metre camera steps at 1200 m, and every
+      // one of them was this paint — a 1.4 m stripe is 0.87 of a pixel at
+      // that height, so its coverage flips as you fly. The engine now fades
+      // it out before it gets thinner than a pixel.
+      const PAINT_Y = CBZ.depthGround ? CBZ.depthGround(im, 2, 0.08, { hairline: 1.4 }) : 0.08;
       let k = 0;
       for (let i = 0; i < nx; i++) {
         const p = ORIGIN - PITCH / 2 + i * PITCH;
@@ -373,8 +403,8 @@
         // drawn on the desert, visible from the air.
         const half = off ? 0 : Math.sqrt(Math.max(0, R * R - p * p));
         s.set(1, 1, (half * 2) / FULL);
-        mtx.compose(off ? away : v.set(p, 0.08, 0), qI, s); im.setMatrixAt(k++, mtx);
-        mtx.compose(off ? away : v.set(0, 0.08, p), qR, s); im.setMatrixAt(k++, mtx);
+        mtx.compose(off ? away : v.set(p, PAINT_Y, 0), qI, s); im.setMatrixAt(k++, mtx);
+        mtx.compose(off ? away : v.set(0, PAINT_Y, p), qR, s); im.setMatrixAt(k++, mtx);
       }
       im.instanceMatrix.needsUpdate = true;
       im.frustumCulled = false;
@@ -471,7 +501,8 @@
       const g = new THREE.CircleGeometry(park.r, 56);
       g.rotateX(-Math.PI / 2);
       const disc = new THREE.Mesh(g, cm(0x4e6b38));
-      disc.position.set(park.x, 0.12, park.z);
+      // the park is a 600 m disc printed on the road plane — same ladder, rank 2
+      disc.position.set(park.x, CBZ.depthGround ? CBZ.depthGround(disc, 2, 0.12) : 0.12, park.z);
       disc.receiveShadow = true;
       root.add(disc);
 
@@ -481,7 +512,9 @@
       const pond = new THREE.Mesh(pg, new THREE.MeshLambertMaterial({
         color: 0x2f6f86, transparent: true, opacity: 0.9, emissive: 0x102a33, emissiveIntensity: 0.5,
       }));
-      pond.position.set(park.x + park.r * 0.22, 0.16, park.z - park.r * 0.18);
+      pond.position.set(park.x + park.r * 0.22,
+        CBZ.depthGround ? CBZ.depthGround(pond, 3, 0.16) : 0.16,
+        park.z - park.r * 0.18);
       root.add(pond);
       park.pond = { x: pond.position.x, z: pond.position.z, r: park.r * 0.28 };
 
@@ -489,7 +522,8 @@
       const ring = new THREE.RingGeometry(park.r * 0.62, park.r * 0.68, 48, 1);
       ring.rotateX(-Math.PI / 2);
       const path = new THREE.Mesh(ring, cm(0xa8977a));
-      path.position.set(park.x, 0.17, park.z);
+      // rank 4 keeps the path above the pond, the order the old y-ladder had
+      path.position.set(park.x, CBZ.depthGround ? CBZ.depthGround(path, 4, 0.17) : 0.17, park.z);
       root.add(path);
 
       /* ---- TREES. The engine's own, when the engine's own are loaded.
@@ -834,6 +868,9 @@
       terrainVerts: w.stats.terrainVerts || 0,
       tallest: w.buildings.reduce(function (m, b) { return Math.max(m, b.h); }, 0),
       rings: CBZ.desertCity.rings,
+      // the basin's ground is five layers over one flat plate; this is the
+      // engine's answer for whether they can hold their order (materials.js)
+      depth: CBZ.depthAudit ? CBZ.depthAudit() : null,
     };
   };
 })();
