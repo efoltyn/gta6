@@ -401,14 +401,15 @@ function dropStick(u) {
   });
 }
 
-// A STORE THAT LANDS ON A BUILDING TAKES THE BUILDING DOWN. The verb is
-// city/crashfx.js's cityAirstrikeCollapse, which stopped asking which scenario
-// was running, and it resolves its own face out of CBZ.colliders — which
-// microboot now publishes under the name the engine reads. Nothing about a
-// collapsing tower is written in this file.
+// A STORE THAT LANDS ON A BUILDING TAKES THE BUILDING DOWN. collapseAt, NOT
+// boom: ordnance has already drawn its own fireball and applied its own damage
+// by the time this fires, so boom would give every store a second explosion and
+// stack the bang seven deep across a stick. The only missing half is the
+// building, and city/crashfx.js's cityAirstrikeCollapse owns that. Nothing
+// about a collapsing tower is written in this file.
 function onStoreLands(b) {
   if (!b || !b.impact) return;
-  CBZ.studio.boom(b.impact, { radius: b.radius, power: b.power, by: b.owner, structural: true });
+  CBZ.studio.collapseAt(b.impact, { radius: b.radius, power: b.power });
 }
 
 function fireNuke(u) {
@@ -422,7 +423,13 @@ function fireNuke(u) {
       f.style.transition = "none"; f.style.opacity = "1";
       setTimeout(function () { f.style.transition = "opacity 2.4s"; f.style.opacity = "0"; }, 90);
       if (CBZ.cityNukeFX) { try { CBZ.cityNukeFX(b.impact.x, b.impact.y, b.impact.z, {}); } catch (e) {} }
-      CBZ.studio.boom(b.impact, { radius: b.radius, power: b.power, by: u.id, structural: true, earshot: 4000 });
+      // the mushroom is nukefx's, the damage is ordnance's; only the city
+      // coming down is still owed, and a nuke owes it over a wide footprint
+      for (let r = 0; r < 9; r++) {
+        const a = (r / 9) * Math.PI * 2, d = b.radius * 0.55;
+        CBZ.studio.collapseAt({ x: b.impact.x + Math.cos(a) * d, y: b.impact.y, z: b.impact.z + Math.sin(a) * d },
+          { radius: d * 0.5, power: 3 });
+      }
     },
   });
   streak("ROUND AWAY");
@@ -456,8 +463,7 @@ CBZ.micro.onFrame(function (dt) {
     if (u.role === "bomber") stepBomber(u, dt, u === me);
     else {
       stepRunner(u, dt, u === me);
-      const own = match.team(u.team);
-      if (own) match.addScore(u.team, PTS_ALIVE * dt, "alive");
+      match.addScore(u.team, PTS_ALIVE * dt, "alive");
     }
   }
 
@@ -481,15 +487,29 @@ CBZ.micro.onFrame(function (dt) {
   if (scope && me && me.role === "bomber") scope.draw(dt);
 });
 
+const _reroll = CBZ.seedStream ? CBZ.seedStream("bs-reflight") : function () { return 0.5; };
 function reflight(u) {
   u.alive = true; u.hp = 100; u.respawnIn = 0;
   if (u.group) u.group.visible = true;
-  const a = Math.random() * Math.PI * 2;
+  // seeded, not Math.random: the determinism law is not optional and a
+  // respawn ring is exactly the kind of place it quietly gets broken
+  const a = _reroll() * Math.PI * 2;
   const r = world.rings.city + 1100;
   const x = Math.cos(a) * r, z = Math.sin(a) * r;
   u.hdg = headingToward(x, z, 0, 0);
   if (u.af) u.af.launch(x, BOMB_ALT, z, u.hdg, 168);
   if (u === me) setRole();
+}
+
+function nearestEnemyRunner(u) {
+  let best = null, bd = Infinity;
+  for (let i = 0; i < units.length; i++) {
+    const t = units[i];
+    if (!t.alive || t.role !== "runner" || t.team === u.team) continue;
+    const d = (t.pos.x - u.af.pos.x) * (t.pos.x - u.af.pos.x) + (t.pos.z - u.af.pos.z) * (t.pos.z - u.af.pos.z);
+    if (d < bd) { bd = d; best = t; }
+  }
+  return best;
 }
 
 // The airframe steers toward a POINT and holds its altitude separately. That
@@ -521,12 +541,24 @@ function stepBomber(u, dt, mine) {
     if (ctl.tapped("fire")) dropStick(u);
     if (ctl.tapped("nuke")) fireNuke(u);
   } else {
-    // AI: put the run on the city, and let go when the SHARED integrator says
-    // the fall lands inside the built area. Nothing here models a bomb.
-    u.hdg = headingToward(u.af.pos.x, u.af.pos.z, 0, 0);
-    u.af.throttle = 0.8;
-    const p = CBZ.ordnance.predict(u.af.pos, u.af.vel, "iron", 40);
-    if (p && Math.hypot(p.x, p.z) < world.rings.city * 0.88) dropStick(u);
+    // AI: hunt a MAN, not the middle of the map. Eight bombers all steering at
+    // the origin fly one line over an empty point, which is exactly how the
+    // bombing half scored nothing the first time. Each one holds the nearest
+    // living enemy runner and re-picks slowly, so it commits to a run instead
+    // of thrashing between targets.
+    u.pick = (u.pick || 0) - dt;
+    if (u.pick <= 0 || !u.mark || !u.mark.alive) { u.mark = nearestEnemyRunner(u); u.pick = 7; }
+    const mk = u.mark;
+    u.af.throttle = 0.85;
+    if (mk) {
+      u.hdg = headingToward(u.af.pos.x, u.af.pos.z, mk.pos.x, mk.pos.z);
+      // let go when the SHARED integrator says the fall lands on him. One
+      // integrator for the prediction and the bomb, so they cannot disagree.
+      const p = CBZ.ordnance.predict(u.af.pos, u.af.vel, "iron", 40);
+      if (p && Math.hypot(p.x - mk.pos.x, p.z - mk.pos.z) < 70) dropStick(u);
+    } else {
+      u.hdg = headingToward(u.af.pos.x, u.af.pos.z, 0, 0);
+    }
   }
 
   const alt = u.alt || BOMB_ALT;

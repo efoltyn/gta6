@@ -665,23 +665,36 @@
     }
     let hit = 0;
     if (CBZ.blastWorldActors) { try { hit = CBZ.blastWorldActors(pos.x, pos.y || 1, pos.z, R, power, opts) || 0; } catch (e) {} }
-    // AND IT MUST HIT THE BUILDING. cityAirstrikeCollapse resolves a facade
-    // out of whatever it is given, and given only a point it has to guess the
-    // footprint. The world already knows: the structure under the impact is a
-    // collider with a `ref` carrying its own extents. Hand over the real lot
-    // and the collapse lands on the real face at the real roofline.
-    let struck = null;
-    if (opts.structural !== false && CBZ.cityAirstrikeCollapse) {
-      const s = CBZ.studio.structureAt(pos.x, pos.z, opts.reach != null ? opts.reach : R);
-      const lot = s ? { cx: s.x, cz: s.z, w: s.w, d: s.d } : { x: pos.x, z: pos.z };
-      try {
-        CBZ.cityAirstrikeCollapse(lot, {
-          at: pos, top: s ? s.h : undefined, power: power, radius: R,
-        });
-        struck = s;
-      } catch (e) {}
-    }
+    const struck = opts.structural === false ? null : CBZ.studio.collapseAt(pos, opts);
     return { drew: drew, hit: hit, struck: struck };
+  };
+
+  /* collapseAt(pos, opts) — THE STRUCTURAL HALF ON ITS OWN.
+
+     systems/ordnance.js already draws its own fireball and applies its own
+     damage when a store goes off, so a page hooking onDetonate and calling
+     boom() there gets the explosion TWICE: two fireballs, two bangs, and the
+     sound stacking seven deep across a stick. What ordnance does not do is
+     bring the building down, and that is the only part such a hook wants.
+
+     cityAirstrikeCollapse resolves a facade out of whatever it is given, and
+     given only a point it has to guess the footprint. The world already knows:
+     the structure under the impact is a collider with a `ref` carrying its own
+     extents. Hand over the real lot and the collapse lands on the real face at
+     the real roofline. Returns the struck record, or null over open ground. */
+  CBZ.studio.collapseAt = function (pos, opts) {
+    opts = opts || {};
+    if (!CBZ.cityAirstrikeCollapse || !pos) return null;
+    const R = opts.radius > 0 ? opts.radius : 18;
+    const s = CBZ.studio.structureAt(pos.x, pos.z, opts.reach != null ? opts.reach : R);
+    const lot = s ? { cx: s.x, cz: s.z, w: s.w, d: s.d } : { x: pos.x, z: pos.z };
+    try {
+      CBZ.cityAirstrikeCollapse(lot, {
+        at: pos, top: s ? s.h : undefined,
+        power: opts.power > 0 ? opts.power : 1, radius: R,
+      });
+    } catch (e) { return null; }
+    return s;
   };
 
   /* ==========================================================================
