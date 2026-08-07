@@ -565,6 +565,47 @@
     return { group: g, af: af };
   };
 
+  /* drop(obj) — REMOVE IT AND GIVE THE MEMORY BACK.
+
+     `parent.remove(obj)` unhooks it from the scene graph and leaves every
+     BufferGeometry and Material it owns resident on the GPU. That is not a
+     leak you notice: it is a slow climb, and it was measured here at +11.7 MB
+     per aircraft, monotonic, in a game that respawns aircraft on a nine second
+     timer. Any page that spawns and despawns needs this and no page had it.
+
+     SHARED assets are spared. materials.js caches materials and geometry
+     behind `_shared`, and microboot's own helpers do the same, so disposing
+     one of those would blank every other object using it. Anything a page
+     wants kept regardless takes `userData.keepAssets = true`. */
+  CBZ.studio.drop = function (obj) {
+    if (!obj) return 0;
+    let freed = 0;
+    const seenG = new Set(), seenM = new Set();
+    obj.traverse(function (o) {
+      if (o.userData && o.userData.keepAssets) return;
+      if (o.geometry && !o.geometry._shared && !seenG.has(o.geometry)) {
+        seenG.add(o.geometry);
+        if (o.geometry.dispose) { o.geometry.dispose(); freed++; }
+      }
+      const m = o.material;
+      if (!m) return;
+      const list = Array.isArray(m) ? m : [m];
+      for (let i = 0; i < list.length; i++) {
+        const mm = list[i];
+        if (!mm || mm._shared || seenM.has(mm)) continue;
+        seenM.add(mm);
+        // a texture a material owns goes with it, unless it is shared too
+        for (const k of ["map", "normalMap", "emissiveMap", "alphaMap", "roughnessMap"]) {
+          const t = mm[k];
+          if (t && !t._shared && t.dispose) t.dispose();
+        }
+        if (mm.dispose) { mm.dispose(); freed++; }
+      }
+    });
+    if (obj.parent) obj.parent.remove(obj);
+    return freed;
+  };
+
   /* structureAt(x, z, reach) — WHAT IS STANDING HERE.
 
      Reads CBZ.colliders, which is the registry the whole engine already writes
