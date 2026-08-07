@@ -62,6 +62,12 @@ building-damage verb saw an empty world. `CBZ.shake` lives in city-coupled
 `systems/camera.js` while `crashfx.js` calls it on every blast, so slice-page
 explosions were silent and still.
 
+**`tools/api-lint.mjs`** answers "does this page call things that exist" without
+running anything: it collects every `CBZ.<name>` and `CBZ.<ns>.<member>` a page
+mentions and asks whether the engine ever assigns it. `CBZ.radarScope` for
+`CBZ.radar` is not a syntax error, so `node --check` is blind to it, and that
+exact one shipped. Proven to bite by injecting three typos.
+
 Flags `STUDIO_V1`. Ratchet `CBZ.studio.audit().missing` pinned at 0 by
 `tools/studio-check.mjs`; `--print` regenerates **`docs/ONE-SHOT.md`**, the ~150
 line system prompt a new mini-game is written against. Regenerate it whenever a
