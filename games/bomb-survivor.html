@@ -1905,7 +1905,10 @@ function buildTestRig() {
     ]],
     ["ORDNANCE", [
       ["one on my head", function () { const u = myUnit; if (u) CBZ.ordnance.release({ pos: _v.set(u.pos.x, u.pos.y + 320, u.pos.z), vel: _v2.set(0, 0, 0), kind: BOMB_KIND, team: "test" }); }],
-      ["walk a stick", function () { const u = myUnit; if (!u) return; for (let k = 0; k < 6; k++) (function (k) { setTimeout(function () { CBZ.ordnance.release({ pos: _v.set(u.pos.x + k * 40 - 120, u.pos.y + 320, u.pos.z), vel: _v2.set(0, 0, 0), kind: BOMB_KIND, team: "test" }); }, k * 120); })(k); }],
+      // the six stores are spaced on the WALL clock because the rig is a hand,
+      // not a bomber — but each one still asks whether the match wants it, so a
+      // paused or swapped-over world cannot be rained on from four seconds ago
+      ["walk a stick", function () { const u = myUnit; if (!u) return; for (let k = 0; k < 6; k++) (function (k) { setTimeout(function () { if (paused || match.phase !== "live") return; CBZ.ordnance.release({ pos: _v.set(u.pos.x + k * 40 - 120, u.pos.y + 320, u.pos.z), vel: _v2.set(0, 0, 0), kind: BOMB_KIND, team: "test" }); }, k * 120); })(k); }],
       ["clear the air", function () { CBZ.ordnance.clear(); }],
     ]],
     ["NUKE", [
