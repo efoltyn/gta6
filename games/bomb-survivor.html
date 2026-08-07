@@ -765,6 +765,7 @@ function killUnit(u, info) {
   if (u === myUnit) nukeLost();
 
   if (u.role === "runner") {
+    probe.kills++;
     // the bombing side gets paid, once, here
     const enemy = match.enemyOf(u.team);
     if (enemy) match.addScore(enemy.id, PTS_KILL, "kill");
@@ -1184,6 +1185,46 @@ function updateSpectate(dt) {
   }
 }
 
+// ============================================================ THE PROBE
+// WHY THIS IS IN THE SHIPPED FILE. The bombing half was measured at one kill
+// per 104 stores and nobody could say which link was broken, because the only
+// numbers the game published were RELEASED and KILLS — the two ends of a
+// chain with four joints in it. These counters are the joints: how often the
+// release gate is even ASKED, how often it passes, how far off the solution
+// was when it did not, and how close the resulting bang actually landed to a
+// living man. They cost six increments a frame and they are the difference
+// between tuning and guessing. `__bomb.probe.snap()` reads them.
+const probe = {
+  asks: 0,        // aiBomber frames that had a target and a solution
+  runIn: 0,       // ... of which were on a settled run-in (see aiBomber)
+  ready: 0,       // ... of which were also off cooldown (the gate proper)
+  pass: 0,        // ... of which released
+  miss: [0, 0, 0, 0, 0, 0, 0],   // miss buckets: 25 50 85 150 300 600 more
+  missSum: 0, missN: 0, missMin: 1e9,
+  blasts: 0, near: [0, 0, 0, 0, 0],  // blast→nearest-live-runner: 13 25 46 100 more
+  kills: 0,
+  reset: function () {
+    probe.asks = probe.runIn = probe.ready = probe.pass = 0;
+    probe.miss = [0, 0, 0, 0, 0, 0, 0];
+    probe.missSum = 0; probe.missN = 0; probe.missMin = 1e9;
+    probe.blasts = 0; probe.near = [0, 0, 0, 0, 0]; probe.kills = 0;
+  },
+  logMiss: function (m) {
+    const b = m < 25 ? 0 : m < 50 ? 1 : m < 85 ? 2 : m < 150 ? 3 : m < 300 ? 4 : m < 600 ? 5 : 6;
+    probe.miss[b]++; probe.missSum += m; probe.missN++;
+    if (m < probe.missMin) probe.missMin = m;
+  },
+  snap: function () {
+    return {
+      asks: probe.asks, runIn: probe.runIn, ready: probe.ready, pass: probe.pass,
+      missAvg: probe.missN ? Math.round(probe.missSum / probe.missN) : 0,
+      missMin: probe.missMin < 1e9 ? Math.round(probe.missMin) : null,
+      miss: probe.miss.slice(), blasts: probe.blasts, near: probe.near.slice(),
+      kills: probe.kills,
+    };
+  },
+};
+
 // ============================================================ THE AI
 // Two brains, both small on purpose: the engine already answers the hard
 // questions (steerTo, dangerAt, nearestShelter), so a brain here is a
@@ -1291,7 +1332,9 @@ function aiBomber(u, dt) {
     // a man who is running has already decided to change direction.
     const lx = tgt.pos.x + (tgt.velX || 0) * sol.t * 0.6;
     const lz = tgt.pos.z + (tgt.velZ || 0) * sol.t * 0.6;
+    if (sol.hit) { probe.asks++; if (u.dropCd <= 0) { probe.ready++; probe.logMiss(Math.hypot(sol.x - lx, sol.z - lz)); } }
     if (sol.hit && u.dropCd <= 0 && Math.hypot(sol.x - lx, sol.z - lz) < 85) {
+      probe.pass++;
       u.stick = 5; u.stickT = 0;      // five stores, walked below on the SIM clock
       u.dropCd = 6 + rr(0, 4);
       u.targetId = null;
@@ -2054,6 +2097,19 @@ function build() {
 
   CBZ.ordnance.init({ scene: CBZ.scene, groundAt: floorAt });
   CBZ.ordnance.onShake = function (v) { shake = Math.max(shake, v * 0.7); };
+  // the far end of the chain: how close a store that actually went off came
+  // to a living man. A release rate means nothing without this number.
+  CBZ.ordnance.onBlast = function (x, y, z) {
+    probe.blasts++;
+    let best = 1e9;
+    for (let i = 0; i < units.length; i++) {
+      const u = units[i];
+      if (!u.alive || u.role !== "runner") continue;
+      const d = Math.hypot(u.pos.x - x, u.pos.z - z);
+      if (d < best) best = d;
+    }
+    probe.near[best < 13 ? 0 : best < 25 ? 1 : best < 46 ? 2 : best < 100 ? 3 : 4]++;
+  };
 
   hudCache();
   buildTestRig();
@@ -2180,6 +2236,10 @@ window.__bomb = {
   get units() { return units; },
   get me() { return myUnit; },
   get nuke() { return nuke; },
+  // the aeroplanes, which nothing else exposes: a bomber's whole state is on
+  // its airframe and there is no way to look at one from outside without this
+  get jets() { return units.filter(function (u) { return u.alive && u.af; }); },
+  probe: probe,
   callNuke: callNuke,
   warp: function (x, z) { if (myUnit) { myUnit.pos.set(x, floorAt(x, z) + 2, z); if (myUnit.af) myUnit.af.pos.copy(myUnit.pos); } },
   board: function () { if (myUnit) { myUnit.pos.set(base.bomber.x + 6, base.bomber.y, base.bomber.z); } },
