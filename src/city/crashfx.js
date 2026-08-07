@@ -1,8 +1,65 @@
 /* ============================================================
-   city/crashfx.js - compact car-impact visuals for CITY mode.
+   city/crashfx.js - the shared IMPACT + BLAST + STRUCTURAL-RUIN picture.
+
+   Named for the car crashes it started as. It is now the file that owns what
+   ordnance LOOKS LIKE when it lands on anything, anywhere: the pooled
+   fireball, the wall ruin, the collapse curtain, the rubble heap, the rebar,
+   the ejecta cone and the debris pool they all draw from.
 
    Crashes are infrequent, so a short-lived point burst and a few shared-geo
    body fragments buy a lot of impact without adding steady frame cost.
+
+   ------------------------------------------------------------------
+   THE GUARD THAT WAS THE BUG (fixed 2026-08-07). Seven of this file's
+   public verbs opened with
+
+       if (!CBZ.game || CBZ.game.mode !== "city") return;
+
+   and CLAUDE.md names that exact line as legitimate on a CITY RECORD and a
+   BUG on a shared verb. Every one of these seven composes pooled FX out of
+   `CBZ.colliders`, the chunk/puff/point pools in this file, and the numbers
+   the caller hands in. None of them reads a city list. So the guard was not
+   protecting anything — it was REFUSING SERVICE, and it was refusing it to
+   callers that had already been taught to work everywhere:
+
+     • city/fracture.js already carves real holes in prison and gun-game and
+       survival walls (it asks `modeHas("breach")`, and CLAUDE.md's WALLS
+       BREAK EVERYWHERE section is the policy). Its `debris()` then calls
+       cityWallRuin / cityHeavyWallRuin to pour the avalanche, the heap and
+       the rebar out of that hole — and outside the city those three lines
+       returned instantly. A prison wall opened with nothing coming out of it.
+     • systems/fpsmode.js's rocket detonates through CBZ.cityBlastCore
+       outside the city (see the UNWRAPPED BLAST block below) and then calls
+       cityBlastWall. Same silence. This is the second half of the RPG the
+       owner filmed producing "a camera shake and nothing else".
+     • the owner, on games/bomb-survivor.html: "you can't hit buildings look
+       how gang city could be used". Two hundred towers, a bombing game, and
+       cityAirstrikeCollapse — the endpoint whose whole job is a section of a
+       building sloughing — declined at its first line.
+
+   WHY NO `modeHas()` GATE EITHER. `modeHas` answers a table of MODES
+   (systems/modecaps.js), and these verbs do not need a mode: they need
+   colliders and a scene, which this file already checks for at load. A
+   capability gate here would have re-broken the slice pages, which run
+   `mode:"slice"` and are absent from that table by design ("a mode absent
+   from this table has NO shared capabilities"). Gating a pure composition on
+   a roster of scenarios is the same category error one layer up.
+
+   WHAT DELIBERATELY KEPT ITS CITY GUARD, because the doctrine cuts both ways:
+     • cityExplosionCore's `CBZ.cityEvent(...)` — the world-state ledger.
+     • cityExplosionCore's `chainWillCarve` test — the wrapper chain is a
+       city fact.
+     • applyBlastDamage's `cityRoster` block — cityPeds / cityCops /
+       cityCrowdCircleKill / cityHurtPlayer are city lists, and the prison
+       arena overlaps the city's coordinate space.
+     • cityAirstrikeCollapse's closing `CBZ.cityDamageBuilding(...)` — that
+       is buildings.js's persistent per-building damage state (window panes,
+       cityChunks, accumulation toward a carved opening). It is a CITY
+       RECORD, it does not self-guard, and it is now guarded HERE — which it
+       was not before, because the function's own dead gate hid the need.
+   A wall additionally opts OUT of being collapsed with `noBreach` on its
+   collider, the same one flag that keeps the prison perimeter standing.
+   ------------------------------------------------------------------
 
    DETERMINISM: every jitter/scatter draw in this file (particle spread,
    scorch/splat texture mottling, chunk/rubble placement, rebar angles, smoke
@@ -391,7 +448,10 @@
   // opts.speed scales the violence. Safe to call without THREE gore loaded.
   CBZ.cityImpactSplat = function (x, y, z, opts) {
     opts = opts || {};
-    if (!CBZ.game || CBZ.game.mode !== "city") return;
+    // NO MODE GATE (see THE GUARD THAT WAS THE BUG). A body hitting concrete
+    // at speed is the same event in a yard as on a street; every layer below
+    // is this file's own pools plus CBZ.gore/sfx/shake, all shared. Today's
+    // only caller is city/death.js, so the city read is byte-identical.
     const player = !!opts.player;
     const speed = opts.speed || 18;
     const power = Math.min(2.4, Math.max(1, speed / 16));   // visual dial, clamped
@@ -1377,7 +1437,9 @@
   // ============================================================
   CBZ.cityWallRuin = function (x, y, z, nx, nz, o) {
     o = o || {};
-    if (!CBZ.game || CBZ.game.mode !== "city") return;
+    // NO MODE GATE. fracture.js carves holes wherever `modeHas("breach")`
+    // allows, and this is the debris that pours out of the hole it just made.
+    // Refusing here is what made a prison wall open in silence.
     const power = Math.min(2.4, o.power || 1.4);
     const width = Math.max(1.0, o.width || (2 + power));
     const top = o.top != null ? o.top : y + width * 0.5;
@@ -1443,7 +1505,9 @@
   // just shattered here". Pooled (pointBurst ring + spawnPuff pool), so it's
   // draw-call-cheap and can't flood; power scales the volume. Headless-safe.
   CBZ.cityDustKick = function (x, y, z, power) {
-    if (!CBZ.game || CBZ.game.mode !== "city") return;
+    // NO MODE GATE. Two pooled emitters and nothing else — the most obviously
+    // shared verb in the file, and the one fracture.js's debris burst calls
+    // on every carve regardless of which scenario is wearing the engine.
     const P = Math.min(2.6, Math.max(0.4, power || 1));
     const cy = y == null ? 0.4 : y;
     // a fast pale dust spray + a couple of slow rolling billows that linger
@@ -1509,7 +1573,7 @@
   // ============================================================
   CBZ.cityHeavyWallRuin = function (x, y, z, nx, nz, o) {
     o = o || {};
-    if (!CBZ.game || CBZ.game.mode !== "city") return;
+    // NO MODE GATE — the heavy-ordnance twin of cityWallRuin, same argument.
     const power = Math.min(2.6, o.power || 2);
     const width = Math.max(1.2, o.width || (2 + power));
     const top = o.top != null ? o.top : y + width * 0.5;
@@ -1565,15 +1629,40 @@
   // tallest wall + footprint from the live colliders either way. Pooled (chunk /
   // puff / scorch caps), draw-call-cheap, headless-safe, and self-throttled so a
   // missile salvo on one building can't re-collapse it every frame.
+  //
+  // NO MODE GATE (2026-08-07 — see THE GUARD THAT WAS THE BUG in the file
+  // header). This is the endpoint the complaint was about: a bombing game
+  // over two hundred towers where the towers were invulnerable, because the
+  // one verb that knows how to bring a section down asked which SCENARIO was
+  // running before it would draw. Everything below resolves out of
+  // CBZ.colliders, the caller's footprint and this file's pools. The single
+  // city record it touches — cityDamageBuilding, step (7) — is guarded on the
+  // spot instead.
+  //
+  // TWO TIERS OF FACE RESOLUTION, because a world may register its buildings
+  // either way and the collapse has to land on a real facade in both:
+  //   TIER 1  WALL COLLIDERS. The city registers per-wall AABBs carrying y1
+  //           and a mesh `ref`, so the tallest non-glass one near the centre
+  //           IS the face and its top IS the roofline. A wall with `noBreach`
+  //           is skipped (the prison-perimeter opt-out), and if every
+  //           candidate is noBreach the collapse is refused outright.
+  //   TIER 2  THE FOOTPRINT. A world that registers ONE full-height box per
+  //           building (world/desertcity.js does exactly this: no y1, and
+  //           `ref` is a plain record, so tier 1 finds nothing) still knows
+  //           its own extents. Take the face of the lot rectangle nearest the
+  //           impact point (`opts.at`) and the roof height the caller passes
+  //           (`opts.top`). Derived from real data, not invented: with no
+  //           `at` it degrades to the old +Z face and with no `top` to the
+  //           old mid-rise assumption.
   // ============================================================
   const _collapseSeen = new Map();   // building-key -> last collapse time (anti-spam)
   CBZ.cityAirstrikeCollapse = function (lot, opts) {
     opts = opts || {};
-    if (!CBZ.game || CBZ.game.mode !== "city") return;
     // resolve a centre + footprint from a lot OR a bare position
-    let cx, cz, half = 8, key = null;
+    let cx, cz, half = 8, key = null, halfX = 0, halfZ = 0;
     if (lot && lot.cx != null) {
       cx = lot.cx; cz = lot.cz;
+      halfX = (lot.w || 16) * 0.5; halfZ = (lot.d || 16) * 0.5;
       half = Math.max(4, Math.min((lot.w || 16), (lot.d || 16)) * 0.5);
       key = Math.round(cx) + "," + Math.round(cz);
     } else if (lot && (lot.x != null || lot.point)) {
@@ -1697,7 +1786,9 @@
 
   CBZ.cityBlastWall = function (pt, normal, opts) {
     opts = opts || {};
-    if (!CBZ.game || CBZ.game.mode !== "city") return;
+    // NO MODE GATE. fpsmode.js calls this on every rocket that finds a wall,
+    // in every mode; outside the city it was the silent half of the RPG the
+    // owner filmed. Reads CBZ.colliders for the roofline and nothing else.
     const power = Math.min(2.4, opts.power || 1.4);
     const x = pt.x, y = Math.max(0.6, pt.y || 0), z = pt.z;
     let nx = normal ? normal.x : 0, ny = normal ? normal.y : 0, nz = normal ? normal.z : 1;
@@ -2001,7 +2092,8 @@
   // ============================================================
   CBZ.cityEjectaCone = function (x, y, z, nx, nz, power, opts) {
     opts = opts || {};
-    if (!CBZ.game || CBZ.game.mode !== "city") return;
+    // NO MODE GATE — pure composition on this file's three pools, exactly as
+    // its own header above already claims ("adds no pool, no draw call class").
     const P = Math.min(3, Math.max(0.3, power || 1));
     // FX budget rides the perf/quality slider (tier0 sheds ~65%), sampled ONCE
     const fxq = CBZ.qScale ? CBZ.qScale(0.35, 1) : 1;

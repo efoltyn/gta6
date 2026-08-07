@@ -2379,6 +2379,34 @@ function build() {
   });
   cam = CBZ.camera;
 
+  // ---- JOIN THE ENGINE. One call, from the game, and every shared verb in
+  // Gang City starts working here: the vault, the ledge step, the blast, the
+  // wall breach, the collapse. Before this line microboot's default mode
+  // ("slice") was in nobody's capability table, so `modeHas` answered false
+  // at every gate and the whole shared layer was politely doing nothing to a
+  // world with two hundred towers in it.
+  //
+  // What we hand over is POINTERS, never a second ledger — `units` is the
+  // roster this file already keeps and `hurt` is the same funnel the
+  // scoreboard and the kill feed read. So a blast lit by ordnance.js kills
+  // through the identical path a bomb does, and the two cannot disagree.
+  const MODE = (CBZ.game && CBZ.game.mode) || "slice";
+  if (CBZ.registerMode) CBZ.registerMode(MODE, {
+    id: MODE, label: "Bomb Survivor",
+    caps: { traverse: 1, stepLedge: 1, blast: 1, blastActors: 1, breach: 1 },
+    actors: function (out) {
+      for (let i = 0; i < units.length; i++) if (units[i].alive) out.push(units[i]);
+      return out;
+    },
+    hurt: function (u, dmg, imp) { hurt(u, dmg, imp || {}); return true; },
+    hurtPlayer: function (dmg, x, z, cause) {
+      if (!myUnit || !myUnit.alive) return false;
+      hurt(myUnit, dmg, { cause: cause });
+      return true;
+    },
+    route: "bomb-survivor units + hurt()",
+  });
+
   world = CBZ.desertCity.build({ seed: "basincity" });
 
   // The base goes in the dunes with the runway pointed at the city, so the

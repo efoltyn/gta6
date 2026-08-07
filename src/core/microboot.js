@@ -712,6 +712,29 @@
     return micro.addCollider(b);
   };
   micro.colliders = boxes;
+
+  /* PUBLISHED UNDER THE NAME THE ENGINE ALREADY READS (2026-08-07).
+     `CBZ.colliders` is Gang City's world-geometry registry — 40+ files write
+     it and the shared verbs READ it: physics.js's vault probe, fracture.js's
+     carveHole, crashfx.js's wall ruin and airstrike collapse, the camera's
+     occlusion test. Its element is exactly the box this file already builds,
+     field for field: {minX,maxX,minZ,maxZ, y0?, y1?, ref?}. Nothing needed
+     converting; the two registries were the same registry under two names.
+
+     THE FAULT. Microboot kept its boxes at `micro.colliders` and nowhere
+     else, so a one-shot page stood up a world with two hundred towers in it
+     and every shared verb in the engine looked at `CBZ.colliders`, found
+     undefined, and did nothing. The owner filmed the result: "you can't hit
+     buildings". The buildings were never invulnerable. They were INVISIBLE
+     to the only code that knew how to hurt them.
+
+     SAME ARRAY, not a copy — a copy would go stale the moment a game
+     registered another box, and staleness here reads as "the collapse missed
+     a building that is plainly there". Yields per this file's own rule: the
+     full engine defines CBZ.colliders long before microboot would run, and a
+     slice page that already made one keeps it, so adoption cannot clobber. */
+  if (!CBZ.colliders) CBZ.colliders = boxes;
+
   micro.clearColliders = function () { boxes.length = 0; grid.clear(); };
 
   micro.queryColliders = function (x, z, r, out) {

@@ -34,6 +34,49 @@ damage switchboard (`CBZ.hurtWorldActor` → `aiKill` / `gungame.hurt` /
 (`CBZ.blastWorldActors`). Flag `MODE_CAPS_V1=false` restores the old city-only
 answer at every site at once.
 
+### A GAMES/ PAGE JOINS THE ENGINE IN ONE CALL — capabilities on `CBZ.modes`
+
+**A ONE-SHOT HTML GAME MUST NEVER HAVE TO EDIT ENGINE SOURCE TO BE REACHED**
+(owner, 2026-08-07: "make it so next time there's a one shot of a new HTML
+game, they can easily use Gang City like an engine"). The capability table
+above answered from engine source, so a new page landed in no row, `modeHas`
+said false at every gate, and the whole shared layer politely did nothing.
+`games/bomb-survivor.html` is the measured case: two hundred towers, and a
+blast could not reach a man, a vault, or a wall.
+
+The registry was **already there** — `config.js:37` owns `CBZ.modes` and
+`CBZ.registerMode(id, def)`, `state.js` delegates to it, and `city/mode.js`,
+`modes/survival.js` and `modes/gungame.js` already call it. Capabilities are
+now FIELDS ON THAT DESCRIPTOR, so declaring is one call the mode already makes:
+
+```js
+CBZ.registerMode("slice", { id: "slice", label: "Bomb Survivor",
+  caps: { traverse:1, stepLedge:1, blast:1, blastActors:1, breach:1 },
+  actors: (out) => { for (const m of myMen) if (!m.dead) out.push(m); },
+  hurt: (a, dmg, imp) => { a.hp -= dmg; if (a.hp <= 0) myKill(a, imp); return true; },
+  hurtPlayer: (dmg, x, z, cause) => myHurtPlayer(dmg, cause),
+  route: "slice roster + myKill" });
+```
+
+A descriptor with no `caps` behaves exactly as before, which is why the three
+shipped modes needed no edit. `caps` is an open string set: a future block
+grants a capability by documenting a name, never by editing `modecaps.js`.
+Flag `MODE_CAPS_DECL_V1=false`. Tool: `tools/mode-registry-check.mjs`.
+
+**THERE IS EXACTLY ONE `registerMode`.** A second definition of that name
+replaced config.js's, `city/mode.js`'s descriptor stopped landing in
+`CBZ.modes`, and the city built with no arena and an empty biome set. The math
+gate caught it. `modecaps.js` now creates the pair only when config.js is
+absent (the slice-page case), yielding otherwise.
+
+**`CBZ.colliders` IS THE WORLD, AND MICROBOOT NOW PUBLISHES IT.**
+`core/microboot.js` kept its boxes at `micro.colliders` and nowhere else, so
+every shared verb that reads `CBZ.colliders` — the vault probe, `carveHole`,
+`cityWallRuin`, `cityAirstrikeCollapse`, camera occlusion — looked at a world
+with two hundred towers in it and found `undefined`. The element shape was
+already identical field for field. Same array, published under the name the
+engine reads, yielding if anything defined it first.
+
 **WALLS BREAK EVERYWHERE; THE PERIMETER DOESN'T.** `city/buildings.js`
 `carveHole` opens real walk-through holes with sill/header/flank remnants and a
 lit room behind; `city/fracture.js` owns the ledger (24 holes, plywood

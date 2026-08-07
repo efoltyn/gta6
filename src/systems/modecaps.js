@@ -118,6 +118,111 @@
   };
   CBZ.MODE_CAPS = CAPS;
 
+  /* ---- CAPABILITIES RIDE THE REGISTRY THAT ALREADY EXISTS -----------------
+     OWNER DOCTRINE (2026-08-07): "make it so next time there's a one shot of a
+     new HTML game, they can easily use Gang City like an engine… we're making
+     a really powerful game development engine out of the gang city code."
+
+     THE FAULT THIS REGISTRY EXISTS TO FIX. The block above solved "a shared
+     verb must ask for the capability, not the scenario" — and then answered
+     the capability question out of a table hard-coded in engine source. Four
+     more hard-coded `if (m === "...")` chains follow it in this same file:
+     the roster fan-out, the actor damage switchboard, the player funnel and
+     the audit's route resolver. So the migration stopped exactly one layer
+     short of the thing it was for. A new game gets `mode: "slice"`, lands in
+     none of the five chains, and reads its sentence in the comment above:
+     "a mode absent from this table has NO shared capabilities". Correct, and
+     a dead end — the only way in was to edit this file, which is precisely
+     the coupling the Rome Test says a scenario must not have.
+
+     games/bomb-survivor.html is the proof: two hundred towers, a bombing
+     game, and every shared verb in the engine declining at its first line.
+     It could not vault, could not be reached by a blast, could not breach.
+     Not because anything was missing — because nothing knew it existed.
+
+     THE ENGINE ALREADY HAD THE REGISTRY, AND THAT IS THE WHOLE FIX.
+     config.js:37 has owned `CBZ.modes` and `CBZ.registerMode(id, def)` since
+     long before this file existed, systems/state.js delegates build/reset/
+     objective to whatever descriptor it finds there, and three shipped modes
+     already call it: city/mode.js:504, modes/survival.js:390 and
+     modes/gungame.js:923. So a mode ALREADY announces itself to the engine in
+     one line from outside engine source. Nothing about that needed inventing.
+     What was missing is that the descriptor said what a mode DOES and never
+     what it CAN DO, so the capability question above had to be answered from
+     a table instead — and the table is the part a games/ page cannot reach.
+
+     (Written the honest way round: the first draft of this block added a
+     SECOND registry and took the name `CBZ.registerMode` for it, which
+     silently replaced config.js's. city/mode.js's descriptor stopped landing
+     in CBZ.modes, and the city built with no arena and an empty biome set.
+     The math gate caught it. The rule that would have prevented it is the one
+     at the top of docs/claude/engine-systems.md: REUSE, never re-invent.)
+
+     A CAPABILITY IS NOW A FIELD ON THE DESCRIPTOR THAT ALREADY EXISTS:
+
+         CBZ.registerMode("slice", {
+           id: "slice", label: "Bomb Survivor",
+           caps:  { traverse:1, stepLedge:1, blast:1, blastActors:1, breach:1 },
+           actors: (out) => { for (const m of myMen) if (!m.dead) out.push(m); },
+           hurt:   (a, dmg, imp) => { a.hp -= dmg; if (a.hp <= 0) myKill(a, imp); return true; },
+           hurtPlayer: (dmg, x, z, cause) => myHurtPlayer(dmg, cause),
+           route: "slice roster + myKill",
+         });
+
+     and from that line on, every shared verb in the engine — the blast, the
+     vault, the ledge, the wall breach, the collapse — reaches this mode's
+     people and its geometry, because all five chains below ASK THE DESCRIPTOR
+     FIRST and fall through to the built-in chain when it stays quiet. A
+     descriptor with no `caps` behaves exactly as it did yesterday, which is
+     why the three shipped modes above needed no edit.
+
+     `caps` is deliberately an open string set, not an enum. A future engine
+     block that invents a capability grants it to a game by documenting a
+     name, never by editing this file again.
+
+     THE FIVE-POINT BLOCK LAW COMPLIANCE (docs/claude/doctrine.md):
+     1. ONE-LINE ADOPTION — one field on a call the mode already makes.
+     2. DEGRADE-SAFE — `MODE_CAPS_DECL_V1 = false` makes every chain below
+        ignore descriptors entirely and run the code it ran before this block
+        existed. One line reverts every site, and no descriptor is mutated,
+        so nothing has to be undone.
+     3. >=3 REAL CONSUMERS ALREADY ON THIS PATH — city/mode.js,
+        modes/survival.js and modes/gungame.js register through this exact
+        function today; the capability layer is a READER of what they already
+        publish. games/bomb-survivor.html is the fourth and the first to carry
+        a full funnel set.
+     4. NAMED IN CLAUDE.md — see the MODE ENUM section there.
+     5. RATCHET — `modeCapsAudit().unrouted` already counts blast-capable
+        modes a detonation cannot reach, and now resolves DECLARING modes by
+        the same rule, so a game that declares `blast` without wiring a damage
+        funnel pushes it up. Still pinned at 0 in tools/math-gate.mjs.
+
+     WHAT THIS DOES NOT DO, unchanged from the block above: it owns no damage
+     model, no roster, no FX and no kill rule. A declaration is a set of
+     POINTERS to the funnels the game already wrote. It is a phone book, not a
+     second ledger. ------------------------------------------------------- */
+  if (CBZ.CONFIG.MODE_CAPS_DECL_V1 == null) CBZ.CONFIG.MODE_CAPS_DECL_V1 = true;
+
+  // A slice page boots through core/microboot.js and never loads config.js,
+  // so the registry it is supposed to write into may not exist yet. Create it
+  // with config.js's EXACT signature, and yield if config.js got here first —
+  // this is the same door-holding rule microboot itself follows, and it is
+  // what stops a second definition of registerMode from ever existing again.
+  if (!CBZ.modes) CBZ.modes = {};
+  if (!CBZ.registerMode) CBZ.registerMode = function (id, def) { CBZ.modes[id] = def; };
+
+  /* The DECLARATION for a mode, or null: the descriptor config.js is holding,
+     surfaced only when it actually declares capabilities. A descriptor that
+     says nothing about what it can do reads as absent here, which is what
+     keeps the three shipped modes on their existing chains. */
+  function modeSpec(m) {
+    if (CBZ.CONFIG.MODE_CAPS_DECL_V1 === false) return null;
+    const d = CBZ.modes && CBZ.modes[m || curMode()];
+    if (!d) return null;
+    return (d.caps || d.actors || d.hurt || d.hurtPlayer || d.blast) ? d : null;
+  }
+  CBZ.modeSpec = modeSpec;
+
   function curMode() { return (CBZ.game && CBZ.game.mode) || "escape"; }
 
   function modeHas(cap, mode) {
@@ -127,6 +232,8 @@
     // other mode is refused — i.e. the `mode === "city"` line each consumer
     // used to write, restored from one place.
     if (CBZ.CONFIG.MODE_CAPS_V1 === false) return m === "city" && !!(CAPS.city[cap]);
+    const spec = modeSpec(m);                    // a registered game answers first
+    if (spec && spec.caps) return !!spec.caps[cap];
     const row = CAPS[m];
     return !!(row && row[cap]);
   }
@@ -159,6 +266,22 @@
     out.length = 0;
     rosterSeen.clear();
     const m = curMode();
+    // A REGISTERED GAME ANSWERS FOR ITS OWN CAST. It hands back either a fresh
+    // array or the `out` it was given; both are accepted so a game may keep a
+    // preallocated roster and never garbage a frame. `pushLive` still applies
+    // the shared liveness rule (dead / escaped / duplicate) so a game does not
+    // have to reimplement it to be swept correctly by a blast.
+    const spec = modeSpec(m);
+    if (spec && spec.actors) {
+      let got = null;
+      try { got = spec.actors(out); } catch (e) { got = null; }
+      if (got && got !== out) pushLive(out, got);
+      else if (out.length) {
+        const raw = out.slice(); out.length = 0; pushLive(out, raw);
+      }
+      rosterSeen.clear();
+      return out;
+    }
     if (m === "city") {
       pushLive(out, CBZ.cityPeds);
       pushLive(out, CBZ.cityCops);
@@ -189,6 +312,16 @@
     if (!a || a.dead || !(dmg > 0)) return false;
     imp = imp || {};
     const m = curMode();
+    // A REGISTERED GAME'S OWN KILL FUNNEL, for the same reason every branch
+    // below routes to one: the mode decides what a death MEANS. Returning
+    // false here falls through to the built-in chain, which is what a game
+    // that only wants the prison's rules should do.
+    const spec = modeSpec(m);
+    if (spec && spec.hurt) {
+      let took = false;
+      try { took = spec.hurt(a, dmg, imp) !== false; } catch (e) { took = false; }
+      if (took) return true;
+    }
     if (m === "survival") {
       if (!CBZ.surv || !CBZ.surv.hurt) return false;
       CBZ.surv.hurt(a, dmg, imp);
@@ -233,6 +366,12 @@
     const P = CBZ.player;
     if (!P || P.dead) return false;
     const m = curMode();
+    const spec = modeSpec(m);
+    if (spec && spec.hurtPlayer) {
+      let took = false;
+      try { took = spec.hurtPlayer(dmg, x, z, cause) !== false; } catch (e) { took = false; }
+      if (took) return true;
+    }
     if (m === "survival") {
       if (!CBZ.surv || !CBZ.surv.hurt) return false;
       CBZ.surv.hurt(CBZ.surv.playerActor || P, dmg, { fromX: x, fromZ: z, fling: 4, cause: cause });
@@ -267,6 +406,16 @@
     power = power > 0 ? power : 1;
     const cause = opts.cause || "explosion";
     const m = curMode();
+    // A GAME THAT ALREADY OWNS A RADIUS VERB uses it, for the same reason
+    // survival does two lines down: its own falloff, knockback and kill feed
+    // beat re-deriving them here. Return a count; anything else falls through
+    // to the shared sweep.
+    const spec = modeSpec(m);
+    if (spec && spec.blast) {
+      let n = null;
+      try { n = spec.blast(x, y, z, R, power, opts); } catch (e) { n = null; }
+      if (typeof n === "number") return n;
+    }
     // SURVIVAL already owns a radius verb with knockback and the kill feed —
     // calling it is strictly better than re-deriving its falloff here.
     if (m === "survival") {
@@ -318,6 +467,21 @@
      mode losing its damage funnel, or a new blast-capable row with no owner
      all push `unrouted` up. Pinned at 0 in tools/math-gate.mjs. --------- */
   function blastRouteFor(m) {
+    // A DECLARING MODE — one with no built-in row, i.e. a games/ page — is
+    // audited by the same rule as the prison: not "did it fill in a route
+    // string" but "is there a funnel a blast can land on". Declaring
+    // blastActors and wiring no hurt is UNROUTED and pushes the pinned ratchet
+    // up, which is the whole point of asking. A mode may instead declare
+    // `blast` and own the whole sweep.
+    const spec = CAPS[m] ? null : modeSpec(m);
+    if (spec) {
+      if (!spec.caps || !spec.caps.blast) return "n/a";
+      if (spec.blast) return spec.route || "declared blast sweep";
+      if (spec.caps.blastActors) return spec.hurt ? (spec.route || "declared hurt") : null;
+      // blast without blastActors is the CITY's shape: the FX are shared and
+      // some other sweep owns the bodies. Nothing for this audit to resolve.
+      return spec.route || "n/a";
+    }
     if (!CAPS[m] || !CAPS[m].blast) return "n/a";
     if (m === "city") {
       return (CBZ.cityKillPed && CBZ.cityHurtCop && CBZ.cityHurtPlayer) ? "city/crashfx applyBlastDamage" : null;
@@ -336,9 +500,22 @@
 
   CBZ.modeCapsAudit = function () {
     const rows = {};
-    let unrouted = 0, blastModes = 0;
-    for (const m in CAPS) {
-      if (!CAPS[m].blast) continue;
+    let unrouted = 0, blastModes = 0, registered = 0;
+    // sweep the BUILT-IN table and the REGISTRY together — a game that
+    // declares blast is held to exactly the standard the prison is.
+    const seen = {};
+    for (const m in CAPS) seen[m] = 1;
+    if (CBZ.CONFIG.MODE_CAPS_DECL_V1 !== false && CBZ.modes) {
+      for (const m in CBZ.modes) {
+        if (!modeSpec(m)) continue;              // a descriptor that declares nothing
+        seen[m] = 1;
+        if (!CAPS[m]) registered++;              // joined from OUTSIDE engine source
+      }
+    }
+    for (const m in seen) {
+      const spec = modeSpec(m);
+      const row = (spec && spec.caps) || CAPS[m];
+      if (!row || !row.blast) continue;
       blastModes++;
       const route = blastRouteFor(m);
       rows[m] = route || "UNROUTED";
@@ -351,8 +528,10 @@
     const traversalOwner = !!(CBZ.characterTraversal && CBZ.characterTraversal.start);
     const stepOwner = typeof CBZ.npcStepLedge === "function";
     const blastOwner = typeof CBZ.cityExplosion === "function";
-    for (const m in CAPS) {
-      const r = CAPS[m];
+    for (const m in seen) {
+      const s = modeSpec(m);
+      const r = (s && s.caps) || CAPS[m];
+      if (!r) continue;
       if (r.traverse && !traversalOwner) orphanCaps++;
       if (r.stepLedge && !stepOwner) orphanCaps++;
       if (r.blast && !blastOwner) orphanCaps++;
@@ -361,9 +540,12 @@
       unrouted: unrouted,          // <- THE RATCHET. Pin at 0. May only go down.
       orphanCaps: orphanCaps,
       blastModes: blastModes,
+      registered: registered,      // modes that joined from OUTSIDE engine source
       routes: rows,
       flag: CBZ.CONFIG.MODE_CAPS_V1 !== false,
+      declarations: CBZ.CONFIG.MODE_CAPS_DECL_V1 !== false,
       mode: curMode(),
     };
   };
+
 })();
