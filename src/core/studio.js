@@ -822,6 +822,20 @@
         look.set(pos.x, pos.y + (o.air ? 1.5 : 1.55), pos.z);
         camera.lookAt(look);
       },
+      /* THE AIRCRAFT CONVENTION, kept here so no flying page has to rediscover
+         it. systems/airframe.js publishes af.heading() as atan2(-fx, -fz),
+         because the nose is -Z: forward is (-sin h, -cos h). follow() places
+         the camera at pos - (sin y, cos y) * back, which is BEHIND a body whose
+         forward is (sin y, cos y) — a walking man — and directly IN FRONT of an
+         aeroplane. Passing af.heading() straight into follow() therefore flies
+         the camera backwards through the aeroplane, which looks like a broken
+         renderer and is really a sign. */
+      followAir: function (af, dt, o) {
+        if (!af) return;
+        o = o || {};
+        o.air = o.air !== false;
+        this.follow(af.pos, af.heading() + Math.PI, dt, o);
+      },
       reset: function () { seeded = false; },
     };
   };

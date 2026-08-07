@@ -117,6 +117,15 @@ const HALF_SECONDS = 600;      // ten minutes each way
 const PTS_KILL     = 250;
 const PTS_ALIVE    = 0.4;      // per second, per living runner
 const BOMB_ALT     = 360;      // where a bombing run lives
+// THE HEADING CONVENTION, stated once because getting it wrong is silent and
+// cost a whole session already. systems/airframe.js publishes heading() as
+// atan2(-fx, -fz) since the nose is -Z, so for heading h the aeroplane's
+// forward is (-sin h, -cos h). Therefore:
+//   fly toward a point p from q:  h = atan2(q.x - p.x, q.z - p.z)
+//   a point d metres ahead:       (pos.x - sin h * d, pos.z - cos h * d)
+// world/airbase.js's runway heading is a DIFFERENT convention (it lays the
+// strip along local +X) and publishes rw.airHeading for the airframe's one.
+function headingToward(fromX, fromZ, toX, toZ) { return Math.atan2(fromX - toX, fromZ - toZ); }
 const RUN_SPEED    = 6.4;
 const STICK        = 7;        // stores per press
 const RELEASE_MIN  = 120;      // press below this and the stick is yours
@@ -146,8 +155,15 @@ cam = CBZ.camera;
 // people: the blast, the vault, the ledge step, the wall breach. `units` is the
 // roster this file already keeps and `hurt` is the funnel the scoreboard reads,
 // so the engine cannot kill somebody the score does not hear about.
+// blastActors is 0 ON PURPOSE, and it is the same reason the CITY row is 0:
+// systems/ordnance.js already sweeps this game's roster through addTarget, and
+// it applies the cover rules while doing it — the horizontal wall trace and the
+// overhead lid test. A second sweep by blastWorldActors would kill the same man
+// twice and would do it WITHOUT the roof test, so a runner under a shelter slab
+// would die to a store that ordnance had correctly decided he survived.
 CBZ.studio.join({
   id: "bombsurvivor", label: "Bomb Survivor",
+  caps: { traverse: 1, stepLedge: 1, blast: 1, blastActors: 0, breach: 1 },
   actors: function (out) { for (let i = 0; i < units.length; i++) if (units[i].alive) out.push(units[i]); return out; },
   hurt: function (u, dmg, imp) { hurt(u, dmg, imp); return true; },
   hurtPlayer: function (dmg, x, z, cause) { if (!me || !me.alive) return false; hurt(me, dmg, { cause: cause }); return true; },
@@ -161,11 +177,14 @@ world = CBZ.studio.world("desert", { seed: "basincity" });
 groundAt = (world && world.heightAt) || groundAt;
 
 // THE BASE, in the dunes, runway pointed at the city so the first thing a
-// takeoff sees is the target. The airframe's nose is -Z, so a heading that
-// flies from (x,z) toward the origin is atan2(-x, -z) and not a compass bearing.
+// takeoff sees is the target. This heading is world/airbase.js's convention,
+// NOT the airframe's: the strip is laid along the base's local +X, which
+// THREE's rotation.y puts on world (cos, -sin). Reading it as a standard angle
+// mirrors the runway about the base's own X axis, and that shipped once, with
+// the runway pointing 97.4 degrees away from the city.
 st("A RUNWAY IN THE DUNES");
 const BX = -(world.rings.city + 640), BZ = world.rings.city * 0.42;
-base = CBZ.airbase.build({ x: BX, z: BZ, heading: Math.atan2(-BX, -BZ), groundAt: groundAt, seed: "bs-base" });
+base = CBZ.airbase.build({ x: BX, z: BZ, heading: Math.atan2(BZ, -BX), groundAt: groundAt, seed: "bs-base" });
 
 CBZ.ordnance.init({ scene: CBZ.scene, groundAt: groundAt });
 
@@ -232,7 +251,7 @@ function spawnUnit(rec, role, i) {
       const a = (i / SQUAD) * Math.PI * 2 + (rec.team === TEAMS[1].id ? Math.PI : 0);
       const r = world.rings.city + 900 + (i % 4) * 240;
       const x = Math.cos(a) * r, z = Math.sin(a) * r;
-      u.hdg = Math.atan2(-x, -z);
+      u.hdg = headingToward(x, z, 0, 0);
       u.af.launch(x, BOMB_ALT + (i % 3) * 45, z, u.hdg, 168);
     }
     if (u.af) u.pos.copy(u.af.pos);
@@ -452,7 +471,7 @@ function reflight(u) {
   const a = Math.random() * Math.PI * 2;
   const r = world.rings.city + 1100;
   const x = Math.cos(a) * r, z = Math.sin(a) * r;
-  u.hdg = Math.atan2(-x, -z);
+  u.hdg = headingToward(x, z, 0, 0);
   if (u.af) u.af.launch(x, BOMB_ALT, z, u.hdg, 168);
   if (u === me) setRole();
 }
@@ -468,7 +487,7 @@ function stepBomber(u, dt, mine) {
     // takeoff: hold the centreline, let the elevator bite at rotate speed
     u.af.throttle = 1;
     const aim = u.af.steerTo(_v.set(
-      u.af.pos.x + Math.sin(u.hdg) * 3000, base.y + 4, u.af.pos.z + Math.cos(u.hdg) * 3000), { gain: 3.2 });
+      u.af.pos.x - Math.sin(u.hdg) * 3000, base.y + 4, u.af.pos.z - Math.cos(u.hdg) * 3000), { gain: 3.2 });
     u.af.step(dt, aim);
     u.pos.copy(u.af.pos);
     if (u.group) u.af.applyTo(u.group);
@@ -484,13 +503,13 @@ function stepBomber(u, dt, mine) {
   } else {
     // AI: put the run on the city, and let go when the SHARED integrator says
     // the fall lands inside the built area. Nothing here models a bomb.
-    u.hdg = Math.atan2(-u.af.pos.x, -u.af.pos.z);
+    u.hdg = headingToward(u.af.pos.x, u.af.pos.z, 0, 0);
     u.af.throttle = 0.8;
     const p = CBZ.ordnance.predict(u.af.pos, u.af.vel, "iron", 40);
     if (p && Math.hypot(p.x, p.z) < world.rings.city * 0.88) dropStick(u);
   }
 
-  _v.set(u.af.pos.x + Math.sin(u.hdg) * 2400, BOMB_ALT, u.af.pos.z + Math.cos(u.hdg) * 2400);
+  _v.set(u.af.pos.x - Math.sin(u.hdg) * 2400, BOMB_ALT, u.af.pos.z - Math.cos(u.hdg) * 2400);
   const aim = u.af.steerTo(_v, { gain: 2.0 });
   u.af.holdAltitude(BOMB_ALT, aim);
   u.af.step(dt, aim);
@@ -502,7 +521,9 @@ function stepBomber(u, dt, mine) {
 function stepRunner(u, dt, mine) {
   let mx = 0, mz = 0;
   if (mine) {
-    mx = ctl.move.x; mz = -ctl.move.y;
+    // forward is +Z at camYaw 0, because chase() puts the camera at
+    // pos - (sin yaw, cos yaw) * back and looks back along it
+    mx = ctl.move.x; mz = ctl.move.y;
     const s = Math.hypot(mx, mz);
     if (s > 0.01) {
       // move relative to where the camera is looking, which is the only
@@ -579,7 +600,7 @@ function aimAndFollow(dt) {
   if (!look) return;
   const air = look.role === "bomber";
   if (air && look.af) {
-    chase.follow(look.af.pos, look.af.heading(), dt, { air: true, back: look.rolling ? 34 : 66, up: look.rolling ? 9 : 18 });
+    chase.followAir(look.af, dt, { back: look.rolling ? 34 : 66, up: look.rolling ? 9 : 18 });
     if (look === me && !look.rolling) sight.aim(look.af.pos, look.af.vel); else sight.hide();
   } else {
     chase.follow(look.pos, look.camYaw || look.yaw, dt, { air: false });
