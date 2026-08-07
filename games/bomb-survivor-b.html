@@ -471,6 +471,7 @@ CBZ.micro.onFrame(function (dt) {
 
   // WHAT YOU HEAR IS WHAT IS HAPPENING TO YOU. A bomber hears its own machine;
   // a runner hears the interval between warnings shorten as a stick closes.
+  if (me && !me.alive) hud.danger(0);
   if (me && me.alive && eng) {
     if (me.role === "bomber" && me.af) { eng.set(me.af.throttle, me.af.speed, 0); hud.danger(0); }
     else {
@@ -585,7 +586,8 @@ function stepRunner(u, dt, mine) {
       const wx = mx * c + mz * sn, wz = -mx * sn + mz * c;
       mx = wx; mz = wz;
     }
-    u.camYaw = (u.camYaw || 0) + ctl.look.x * 60 * dt;
+    // look.x is already a per-frame delta, so it must NOT be scaled by dt
+    u.camYaw = (u.camYaw || 0) + ctl.look.x * 58;
   } else {
     // ordnance already publishes a danger field, so a runner samples it in
     // eight directions and walks down the gradient. Nothing here models a
