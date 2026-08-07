@@ -684,14 +684,94 @@
     world.inCity = function (x, z) { return Math.hypot(x, z) <= R_CITY; };
     world.inPark = function (x, z) { return Math.hypot(x - park.x, z - park.z) <= park.r; };
 
+    /* ---- LOT INDEX. `buildingAt` was a linear scan over all 200 towers, and
+       that was fine while it answered a handful of gameplay questions a
+       frame. It stopped being fine when systems/ordnance.js taught bomb
+       PREDICTION to respect rooftops: predict() walks its trajectory through
+       `strikeSeg`, which asks buildingAt tens of times per call — measured
+       mean 36 / worst 58 over five bombing runs here, mean 59.7 / worst 86
+       where ordnance measured it — and predict() runs every frame for the
+       player's pipper AND once per AI bomber. MEASURED, headless, same page,
+       both implementations interleaved: the scan costs 150 box tests per
+       buildingAt (it early-exits on a hit) and 5409 per predict, 0.48 µs and
+       21.5 µs; the index costs 3.8 and 136, 0.08 µs and 9.5 µs.
+
+       The city does not need a search. It is a GRID and section 3 publishes
+       it: every lot centre is exactly ORIGIN + g * PITCH, at most one
+       building per lot, and the building sits ON the lot centre
+       (rec.x === lot.x). So the map from a world point back to candidate lots
+       is arithmetic.
+
+       THE NEIGHBOURHOOD ARGUMENT (the part a future reader needs). A building
+       on lot gx can satisfy the X half of the test only if
+           |x - (ORIGIN + gx*PITCH)| <= w/2 + pad <= MAX_HW + pad
+       so gx is confined to [(x-ORIGIN-MAX_HW-pad)/PITCH,
+       (x-ORIGIN+MAX_HW+pad)/PITCH], and the same in Z. Widening that with
+       floor/ceil costs at most one extra cell per side and is FREE: every
+       candidate still gets the identical box test, so the bound only has to
+       avoid MISSING a building, never avoid visiting a spare cell. That is
+       also why no epsilon reasoning is needed at the boundaries.
+       Concretely: footprints top out at 78 m (66 m lot x the 1.18 peak
+       multiplier) so MAX_HW <= 39 against a 114 m pitch — the interval is
+       0.684 cells wide at pad 0, i.e. 2x2 cells worst case, 4 box tests
+       instead of 200. A large pad (strikeSeg passes a half-step radius)
+       widens it linearly and degrades gracefully back toward the scan.
+
+       ORDER MATTERS. The old loop returned the FIRST match in
+       world.buildings order — lots sorted downtown-first. Two footprints can
+       both cover a point once pad >= ~18 (39+39+2pad >= 114), which
+       strikeSeg's radius reaches, so the index cannot return whichever cell
+       it happened to visit first: it keeps the LOWEST building index found.
+       That is the whole of the behavioural difference, and it is none.
+
+       The index rebuilds if world.buildings ever changes length, and falls
+       back to the scan if a record is not on a grid lot, so the contract
+       survives a future caller that appends a building off-plan. */
+    let _bIdx = null, _bIdxN = -1, _bMaxHW = 0, _bMaxHD = 0, _bLinear = false;
+    function _buildIndex() {
+      const B = world.buildings;
+      _bIdxN = B.length;
+      _bLinear = false;
+      _bMaxHW = 0; _bMaxHD = 0;
+      _bIdx = new Int32Array(GRID_N * GRID_N).fill(-1);
+      for (let i = 0; i < B.length; i++) {
+        const b = B[i], lot = b.lot;
+        if (!lot || !(lot.gx >= 0) || lot.gx >= GRID_N || !(lot.gz >= 0) || lot.gz >= GRID_N ||
+            b.x !== ORIGIN + lot.gx * PITCH || b.z !== ORIGIN + lot.gz * PITCH) { _bLinear = true; return; }
+        if (b.w / 2 > _bMaxHW) _bMaxHW = b.w / 2;
+        if (b.d / 2 > _bMaxHD) _bMaxHD = b.d / 2;
+        // one building per lot by construction; first wins, matching the scan
+        const c = lot.gz * GRID_N + lot.gx;
+        if (_bIdx[c] < 0) _bIdx[c] = i;
+      }
+    }
     world.buildingAt = function (x, z, pad) {
       pad = pad || 0;
       const B = world.buildings;
-      for (let i = 0; i < B.length; i++) {
-        const b = B[i];
-        if (Math.abs(x - b.x) <= b.w / 2 + pad && Math.abs(z - b.z) <= b.d / 2 + pad) return b;
+      if (_bIdxN !== B.length) _buildIndex();
+      if (_bLinear) {
+        for (let i = 0; i < B.length; i++) {
+          const b = B[i];
+          if (Math.abs(x - b.x) <= b.w / 2 + pad && Math.abs(z - b.z) <= b.d / 2 + pad) return b;
+        }
+        return null;
       }
-      return null;
+      const rx = _bMaxHW + pad, rz = _bMaxHD + pad;
+      let gx0 = Math.floor((x - ORIGIN - rx) / PITCH), gx1 = Math.ceil((x - ORIGIN + rx) / PITCH);
+      let gz0 = Math.floor((z - ORIGIN - rz) / PITCH), gz1 = Math.ceil((z - ORIGIN + rz) / PITCH);
+      if (gx0 < 0) gx0 = 0; if (gx1 > GRID_N - 1) gx1 = GRID_N - 1;
+      if (gz0 < 0) gz0 = 0; if (gz1 > GRID_N - 1) gz1 = GRID_N - 1;
+      let best = -1;
+      for (let gz = gz0; gz <= gz1; gz++) {
+        const row = gz * GRID_N;
+        for (let gx = gx0; gx <= gx1; gx++) {
+          const i = _bIdx[row + gx];
+          if (i < 0 || (best >= 0 && i > best)) continue;
+          const b = B[i];
+          if (Math.abs(x - b.x) <= b.w / 2 + pad && Math.abs(z - b.z) <= b.d / 2 + pad) best = i;
+        }
+      }
+      return best >= 0 ? B[best] : null;
     };
     // tallest thing standing over a point — a bomber's clearance check
     world.skylineHeightAt = function (x, z) {
