@@ -275,14 +275,53 @@
   const samples = new Map(); // short key -> AudioBuffer (only successful loads)
   function S(key) { return samples.get(key) || null; }
 
+  /* ============================================================
+     THE LOUDNESS SCHEME — every gain below is a real decibel
+
+     These gains used to be authored one cue at a time, by ear, over months.
+     Nobody ever put them side by side, so nothing enforced a hierarchy. When
+     they finally were measured (tools/sound-loudness.mjs decodes every file in
+     a real browser and reports peak + loudest-400 ms RMS), the bank said:
+
+       a dropped coin  -6.7 dBFS          a punch to a body  -17.7 dBFS
+
+     ELEVEN DECIBELS THE WRONG WAY. In the world those two events are about
+     50 dB SPL and 80 dB SPL at a metre — the punch is thirty decibels LOUDER,
+     roughly thirty times the pressure. And 26 of the 33 cues landed above the
+     master compressor's -12 dBFS threshold, where a 5:1 ratio squashes
+     everything into everything else: a gunshot and a coin came out of that
+     stage within a couple of dB of each other. Nothing sounded important
+     because, at the output, nothing was.
+
+     So the bank is now DERIVED, not tuned. Each cue names the real-world sound
+     pressure level of the thing it depicts (dB SPL at 1 m, sourced in
+     docs/claude/sound.md — 3M's Noise Navigator database of 1700+ measurements
+     where one exists, anchored between two measured neighbours where it does
+     not), and the mix maps that onto:
+
+         target dBFS = -0.2 + (dB SPL - 170) x 0.2      [clamped at -0.2]
+
+     A fifth of a decibel per decibel: 145 dB of world into a 27 dB window,
+     which is the same order as Wwise HDR's recommended window and DICE's
+     Frostbite mapping. Anchored at the LOUD end (a grenade keeps the level it
+     already had) so the game's perceived volume does not move and no makeup
+     gain is needed — everything else falls in below it, in proportion.
+
+     The number beside each cue is that SPL. The gain is what
+     tools/sound-loudness.mjs says lands that recording on its target, and that
+     tool re-derives and re-checks the whole table on demand: it is the ratchet,
+     not this comment. Three cues are deliberate EXCEPTIONS, each labelled below.
+     ============================================================ */
   // Each effect can contain multiple recorded layers. Files within a layer
   // are variants; one is picked per play so repeated footsteps and hits vary.
   const BANK = {
-    coin: fx([K + "handleCoins.m4a", K + "handleCoins2.m4a"], 0.42, 0.06),
-    key: fx([O + "sfx100v2_lock_open_01.m4a", K + "metalClick.m4a"], 0.48, 0.06),
-    loot: fx([K + "beltHandle1.m4a", K + "beltHandle2.m4a", K + "drop_001.m4a"], 0.52, 0.08),
-    pickup: fx([K + "cloth1.m4a", K + "cloth2.m4a", K + "beltHandle1.m4a"], 0.42, 0.06),
-    equip: fx([K + "clothBelt.m4a", K + "beltHandle2.m4a"], 0.45, 0.08),
+    // Handling money, a key, a belt pouch, a jacket: all of it is quieter than
+    // speech, and all of it used to be louder than a fist landing.
+    coin: fx([K + "handleCoins.m4a", K + "handleCoins2.m4a"], 0.056, 0.06),          // 50 dB
+    key: fx([O + "sfx100v2_lock_open_01.m4a", K + "metalClick.m4a"], 0.092, 0.06),   // 55 dB
+    loot: fx([K + "beltHandle1.m4a", K + "beltHandle2.m4a", K + "drop_001.m4a"], 0.061, 0.08), // 45 dB
+    pickup: fx([K + "cloth1.m4a", K + "cloth2.m4a", K + "beltHandle1.m4a"], 0.075, 0.06),      // 40 dB
+    equip: fx([K + "clothBelt.m4a", K + "beltHandle2.m4a"], 0.081, 0.08),            // 45 dB
 
     // PHYSICAL DOORS ONLY. The old generic `door` cue randomized unrelated
     // open/close recordings and was requested by UI/state changes all over the
@@ -290,13 +329,15 @@
     // it is doing; source contracts below the bank keep fake callers out.
     // doorClose_1 is mastered ~4 LU louder than doorOpen_1, hence the lower
     // gain here — a closing leaf should not jump above nearby gunfire.
-    door_open: fx([K + "doorOpen_1.m4a"], 0.36, 0.12),
-    door_close: fx([K + "doorClose_1.m4a"], 0.22, 0.12),
+    // A slammed car door measures 65 dB at 10 m (Noise Navigator) = 85 dB at 1 m;
+    // a door merely opening is a latch and a hinge, far below that.
+    door_open: fx([K + "doorOpen_1.m4a"], 0.094, 0.12),   // 70 dB
+    door_close: fx([K + "doorClose_1.m4a"], 0.12, 0.12),  // 85 dB
 
     // This cue is source-gated in city/buildings.js: only a pane directly
     // broken by the player may request it. Ambient damage, NPC fire, crashes,
     // explosions and UI/state changes remain silent.
-    glass: fx([O + "sfx100v2_glass_03.m4a", O + "sfx100v2_glass_05.m4a", K + "impactGlass_heavy_000.m4a", K + "impactGlass_heavy_001.m4a"], 0.66, 0.08),
+    glass: fx([O + "sfx100v2_glass_03.m4a", O + "sfx100v2_glass_05.m4a", K + "impactGlass_heavy_000.m4a", K + "impactGlass_heavy_001.m4a"], 0.17, 0.08), // 95 dB
 
     // POLICE SIREN, not an air-raid alarm (owner: "I hate the wanted sound —
     // there is no sound for being wanted in real life, only the siren of a real
@@ -306,65 +347,85 @@
     // than like being chased: the sound was announcing a STATE, not a vehicle.
     // Pitched up and shortened so it reads as a car passing rather than a town
     // being evacuated, and quieter so the real cue is the cop you can see.
+    // EXCEPTION TO THE SCHEME: an ambulance siren measures 120 dB at a metre,
+    // which the table would put 6 dB ABOVE where this sits today. That raise is
+    // refused — the owner's decision that the siren must not dominate outranks
+    // the table, and the cue's own square-law rolloff (see sfx) already means
+    // the number here is the level of a siren in your face, which is not the
+    // situation it is ever played in.
     siren: layers([part([W + "disaster_siren.m4a"], 0.34, 1.42, 1.62)], 1.9),
-    lockdown: fx([W + "lockdown_brief.m4a"], 0.6, 1.0),   // BRIEF jail-lockdown siren (one-shot, not a loop)
+    // EXCEPTION: unmeasurable headless — lockdown_brief.m4a is the one bank
+    // file with no .ogg/.wav twin, so tools/sound-loudness.mjs cannot decode it
+    // without an AAC codec. Set from the scheme assuming the near-full-scale
+    // mastering its siblings measure at (125 dB SPL -> -9.2 dBFS); re-measure
+    // and correct the moment an .ogg twin exists.
+    lockdown: fx([W + "lockdown_brief.m4a"], 0.35, 1.0),  // 125 dB, ESTIMATED
 
     step: fx([
       K + "footstep_concrete_000.m4a", K + "footstep_concrete_001.m4a",
       K + "footstep_concrete_002.m4a", K + "footstep_concrete_003.m4a",
       K + "footstep_concrete_004.m4a",
-    ], 0.22, 0.045),
+    ], 0.086, 0.045),                                                  // 60 dB
     // jumping is near-silent in reality — just a soft cloth/effort, NO arcade
     // whoosh (that cartoon swoosh was the "retarded" jump sound).
-    jump: fx([K + "cloth1.m4a", K + "cloth2.m4a"], 0.2, 0.08),
+    jump: fx([K + "cloth1.m4a", K + "cloth2.m4a"], 0.083, 0.08),       // 40 dB
     // Fists use the recorded body hit only. The old randomized game-foley bank
     // made identical contact alternate between unrelated arcade slaps.
+    // THE PUNCH BARELY MOVES, and that is the finding. Measured, it was already
+    // at -17.7 dBFS against a -18.2 target: half a decibel out. A punch was
+    // never the loudest thing in this game — it only SEEMED loud because
+    // strangers' fists were played at full volume from anywhere in the world
+    // (fixed by CBZ.worldSfx) and because the coin, the key and the belt pouch
+    // beside it were all 10-17 dB too loud.
     punch: layers([
-      part([W + "punch_real.m4a"], 0.62, 0.94, 1.04),
-      part([W + "thud_real.m4a"], 0.18, 0.88, 0.98, 0.012),
+      part([W + "punch_real.m4a"], 0.47, 0.94, 1.04),                  // 80 dB
+      part([W + "thud_real.m4a"], 0.14, 0.88, 0.98, 0.012),
     ], 0.035),
-    hit: fx([W + "thud_real.m4a"], 0.44, 0.025),
+    hit: fx([W + "thud_real.m4a"], 0.13, 0.025),                       // 75 dB
     ko: layers([
-      part([K + "impactPunch_heavy_000.m4a", K + "impactPunch_heavy_001.m4a", K + "impactPunch_heavy_002.m4a"], 0.8, 0.92, 1.04),
-      part([W + "thud_real.m4a"], 0.42, 0.84, 0.96, 0.03),
+      part([K + "impactPunch_heavy_000.m4a", K + "impactPunch_heavy_001.m4a", K + "impactPunch_heavy_002.m4a"], 0.15, 0.92, 1.04), // 85 dB
+      part([W + "thud_real.m4a"], 0.081, 0.84, 0.96, 0.03),
     ], 0.09),
     // A fist cutting air is mostly sleeve movement. Keep this quiet and dry;
     // the recorded body impact above supplies the weight only on contact.
-    whoosh: fx([K + "cloth1.m4a", K + "cloth2.m4a"], 0.14, 0.025),
+    whoosh: fx([K + "cloth1.m4a", K + "cloth2.m4a"], 0.074, 0.025),    // 35 dB
     headshot: layers([
-      part([K + "impactPunch_heavy_001.m4a", K + "impactPunch_heavy_002.m4a"], 0.66, 1.08, 1.18),
-      part([O + "sfx100v2_misc_04.m4a", K + "impactMetal_light_001.m4a"], 0.26, 1.1, 1.24, 0.012),
+      part([K + "impactPunch_heavy_001.m4a", K + "impactPunch_heavy_002.m4a"], 0.17, 1.08, 1.18), // 90 dB
+      part([O + "sfx100v2_misc_04.m4a", K + "impactMetal_light_001.m4a"], 0.068, 1.1, 1.24, 0.012),
     ], 0.07),
 
     // (gun voices moved OUT of the recording bank — see GUNS below; the taser
     // is the one "shoot_" that stays a recording: it's an electric zap, not
     // a ballistic report, and the resonance+click pair already reads right)
     shoot_taser: layers([
-      part([R + "resonance2.mp3"], 0.5, 1.55, 1.75),
-      part([R + "click6.mp3", R + "click7.mp3"], 0.34, 1.0, 1.12),
+      part([R + "resonance2.mp3"], 0.17, 1.55, 1.75),                  // 90 dB
+      part([R + "click6.mp3", R + "click7.mp3"], 0.12, 1.0, 1.12),
     ], 0.1),
     tase: layers([
-      part([R + "resonance2.mp3"], 0.58, 1.32, 1.5),
-      part([R + "click6.mp3", R + "click7.mp3"], 0.38, 0.94, 1.08),
+      part([R + "resonance2.mp3"], 0.17, 1.32, 1.5),                   // 90 dB
+      part([R + "click6.mp3", R + "click7.mp3"], 0.11, 0.94, 1.08),
     ], 0.12),
-    empty: fx([R + "click3.mp3", R + "click4.mp3", K + "metalClick.m4a"], 0.36, 0.09),
+    empty: fx([R + "click3.mp3", R + "click4.mp3", K + "metalClick.m4a"], 0.098, 0.09), // 70 dB
     reload: layers([
-      part([K + "metalLatch.m4a", K + "metalClick.m4a"], 0.52, 0.92, 1.06),
-      part([K + "clothBelt.m4a", K + "beltHandle1.m4a"], 0.25, 0.94, 1.06, 0.08),
+      part([K + "metalLatch.m4a", K + "metalClick.m4a"], 0.099, 0.92, 1.06),  // 75 dB
+      part([K + "clothBelt.m4a", K + "beltHandle1.m4a"], 0.047, 0.94, 1.06, 0.08),
     ], 0.26),
-    rack: fx([K + "metalLatch.m4a", O + "sfx100v2_metal_04.m4a", O + "sfx100v2_switch_02.m4a"], 0.5, 0.15),
-    shell: fx([K + "impactMetal_light_000.m4a", K + "impactMetal_light_001.m4a", O + "sfx100v2_metal_03.m4a"], 0.28, 0.035),
+    rack: fx([K + "metalLatch.m4a", O + "sfx100v2_metal_04.m4a", O + "sfx100v2_switch_02.m4a"], 0.11, 0.15), // 80 dB
+    shell: fx([K + "impactMetal_light_000.m4a", K + "impactMetal_light_001.m4a", O + "sfx100v2_metal_03.m4a"], 0.082, 0.035), // 60 dB
     switch: layers([
-      part([K + "switch_001.m4a", K + "switch_002.m4a", K + "switch_003.m4a"], 0.34, 0.96, 1.08),
-      part([K + "cloth1.m4a", K + "cloth2.m4a"], 0.2, 0.98, 1.06),
+      part([K + "switch_001.m4a", K + "switch_002.m4a", K + "switch_003.m4a"], 0.068, 0.96, 1.08), // 50 dB
+      part([K + "cloth1.m4a", K + "cloth2.m4a"], 0.04, 0.98, 1.06),
     ], 0.12),
-    win: fx([R + "jingle3.mp3", R + "chime1.mp3", R + "chime2.mp3"], 0.58, 0.5),
+    // The one cue with no real-world referent at all: nothing in a prison yard
+    // plays a chime. It is priced as the quiet UI flourish it is, not as an
+    // event in the world — 55 dB is a desk bell across a room.
+    win: fx([R + "jingle3.mp3", R + "chime1.mp3", R + "chime2.mp3"], 0.095, 0.5), // 55 dB
 
-    thunder: fx([O + "sfx100v2_thunder_01.m4a"], 0.86, 0.8),
-    rumble: fx([O + "sfx100v2_loop_machine_02.m4a", O + "sfx100v2_stones_01.m4a"], 0.58, 0.5),
+    thunder: fx([O + "sfx100v2_thunder_01.m4a"], 0.46, 0.8),           // 120 dB
+    rumble: fx([O + "sfx100v2_loop_machine_02.m4a", O + "sfx100v2_stones_01.m4a"], 0.24, 0.5), // 100 dB
     collapse: layers([
-      part([R + "cannon1.mp3"], 0.62, 0.72, 0.86),
-      part([O + "sfx100v2_stones_01.m4a", O + "sfx100v2_stones_02.m4a"], 0.6, 0.76, 0.92, 0.05),
+      part([R + "cannon1.mp3"], 0.25, 0.72, 0.86),                     // 110 dB
+      part([O + "sfx100v2_stones_01.m4a", O + "sfx100v2_stones_02.m4a"], 0.24, 0.76, 0.92, 0.05),
     ], 0.25),
     explosion: layers([
       part([R + "cannon1.mp3"], 0.98, 0.82, 0.94),
@@ -374,7 +435,12 @@
        thunder/rumble clocks. Existing recordings are re-voiced into a short
        broadband crack, the long low positive-phase roar, then local debris.
        Conservative gains plus the master limiter create scale by envelope and
-       spectrum, never by hazardous playback level. */
+       spectrum, never by hazardous playback level.
+       EXCEPTION TO THE SCHEME: 180 dB SPL would put this 5.5 dB ABOVE where it
+       plays today, and that raise is refused. Scale here is produced by the
+       pressure stage ducking and low-passing the whole world (nuclearShock),
+       which is how you say "too loud to hear" without asking the speakers to
+       be too loud to hear. */
     nuclear_shock: layers([
       part([R + "cannon1.mp3"], 0.52, 0.56, 0.66, 0,
         { hp: 80, lp: 2600, bass: 4, decay: 0.34 }),
@@ -385,9 +451,9 @@
       part([O + "sfx100v2_stones_01.m4a", O + "sfx100v2_stones_02.m4a"],
         0.30, 0.62, 0.76, 0.72, { lp: 950, bass: 4 }),
     ], 0.65),
-    water: fx([O + "sfx100v2_loop_water_02.m4a", O + "sfx100v2_loop_water_03.m4a", R + "splash1.mp3"], 0.52, 0.36),
-    wind: fx([O + "sfx100v2_air_01.m4a", O + "sfx100v2_air_02.m4a", O + "sfx100v2_air_03.m4a"], 0.42, 0.26),
-    fire: fx([O + "sfx100v2_misc_37.m4a", O + "sfx100v2_loop_ambient_03.m4a"], 0.38, 0.28),
+    water: fx([O + "sfx100v2_loop_water_02.m4a", O + "sfx100v2_loop_water_03.m4a", R + "splash1.mp3"], 0.1, 0.36), // 60 dB
+    wind: fx([O + "sfx100v2_air_01.m4a", O + "sfx100v2_air_02.m4a", O + "sfx100v2_air_03.m4a"], 0.071, 0.26),     // 50 dB
+    fire: fx([O + "sfx100v2_misc_37.m4a", O + "sfx100v2_loop_ambient_03.m4a"], 0.14, 0.28),                       // 70 dB
   };
 
   // Looping beds. Per user direction: NO bullshit background drone / music.
@@ -1008,6 +1074,29 @@
 
   const FAR_DIST = 60; // beyond this, gunfire goes through the muffle+echo bus
 
+  /* ---- THE SOUND CENSUS ----------------------------------------------------
+     Always-on counters, one Map row per cue, so "which sound is repeating and
+     how often" is a NUMBER any probe can read (tools/sound-census.mjs) instead
+     of something you have to sit and listen for. The owner's report — "the
+     prison spams one very annoying sound" — was answered in 45 headless
+     seconds by this table plus the F8 feed's caller: `punch`, 90 requests per
+     minute, standing still, all of them global.
+
+     `global` (a request with NO dist) is the field that matters. A sound with
+     no distance is a sound with no place in the world: it plays at full volume
+     wherever it happened. That is correct for what YOU do and for what happens
+     TO you, and it is a bug for anything else. */
+  const auditRows = new Map();
+  let auditStart = 0;
+  function auditRow(name) {
+    let r = auditRows.get(name);
+    if (!r) {
+      r = { req: 0, global: 0, spatial: 0, world: 0, far: 0, gated: 0, sent: 0 };
+      auditRows.set(name, r);
+    }
+    return r;
+  }
+
   function sfx(name, opts) {
     if (!ctx || !sfxBus) return null;
     if (ctx.state === "suspended") ctx.resume();
@@ -1016,6 +1105,9 @@
     const entry = gun || horn ? null : BANK[name];
     if (!gun && !horn && !entry) { console.warn("[audio] unmapped sfx:", name); return null; }
     opts = opts || {};
+    const row = auditRow(name);
+    row.req++;
+    if (opts.dist == null) row.global++; else row.spatial++;
     // opts.dist (world units from the player): attenuate with range, and past
     // FAR_DIST swap to the muffled far-field voice — distance IS information.
     if (opts.dist != null) {
@@ -1036,7 +1128,8 @@
     const now = performance.now() * 0.001;
     const prev = last.get(name) || -1e9;
     const cd = gun ? gun.cd : horn ? 0.15 : entry.cooldown;
-    if (!opts.force && now - prev < cd) return null;
+    if (!opts.force && now - prev < cd) { row.gated++; return null; }
+    row.sent++;
     // opts.ghost: play without stamping the cooldown — NPC fire must never
     // starve the player's own muzzle report out of the channel.
     if (!opts.ghost) last.set(name, now);
@@ -1244,6 +1337,86 @@
     o.dist = Math.hypot(x - p.x, y - (p.y || 0), z - p.z);
     return sfx(name, o);
   };
+  /* ---- SOMEBODY ELSE'S SOUND — CBZ.worldSfx(name, x, z, opts) -------------
+     WHY THIS EXISTS. `CBZ.sfx("punch")` inside an NPC-vs-NPC brawl is a sound
+     with no place: the prison yard runs two or three fist fights at any moment,
+     each fighter swinging every 0.7 s, and every blow landed at FULL VOLUME in
+     the player's skull from anywhere in a 84x110 m compound. Measured standing
+     still in mode "escape": 90 punch requests per minute, 100% of them global
+     (tools/sound-census.mjs). That is the "annoying sound that keeps
+     repeating" — not a bad recording, a good recording with no distance.
+
+     gunVoice() already solved exactly this for NPC gunfire. worldSfx is that
+     proven policy generalised to everything else an actor does:
+
+       · past audibility the sound is NOT REQUESTED AT ALL — a fight you cannot
+         pick out across the yard is not your business;
+       · ONE CUE IS ONE VOICE: the whole world shares a per-cue gap, so ten
+         brawlers make a brawl instead of a machine gun;
+       · unless the new emitter is meaningfully CLOSER than the one holding the
+         gap — the nearest source is the one that means something, so it takes
+         the slot instead of being swallowed by a fight across the wire;
+       · ghost + force: we did our own gating, and a stranger's fist must never
+         eat the cooldown slot the player's own fist is about to need.
+
+     A call site that knows better may override `ref`, `cutoff`, `gap` and
+     `volume`; the defaults are what a body impact wants. Rule of thumb for
+     choosing between the three surfaces: YOU did it -> CBZ.sfx, it happened TO
+     you -> CBZ.sfxAt, SOMEONE ELSE did it -> CBZ.worldSfx.
+
+     A BODY IS NOT A GUNSHOT, so worldSfx does not reuse sfx()'s distance
+     curve. That curve is the (praised, untouched) GUN curve — 84% volume still
+     at 42 m — because a rifle report really does carry across a city. A fist
+     landing on a rib does not: it is a near-field sound. Foley therefore gets
+     its own inverse-square rolloff, half volume at WORLD_REF metres, ON TOP of
+     the shared curve; and anything landing under WORLD_FLOOR is not requested
+     at all. An inaudible sound that still holds the cue's one voice is worse
+     than silence — it is silence that also mutes the punch you should hear.
+     A louder emitter (a scream, a slammed car door) passes its own `ref`. */
+  const WORLD_REF = 8;       // m — where world foley falls to half volume
+  const WORLD_FLOOR = 0.06;  // quieter than this is not sent (≈32 m for a fist)
+  const WORLD_GAP = 0.3;     // s — the world's floor on repeats of one cue
+  const worldLast = new Map();                                        // cue -> {t, dist}
+  const worldOpts = { force: true, ghost: true, volume: 1, dist: 0, far: false }; // reused: no per-call allocation
+  CBZ.worldSfx = function (name, x, z, opts) {
+    if (!ctx || !sfxBus) return null;
+    const p = CBZ.player && CBZ.player.pos;
+    if (!p || !isFinite(x) || !isFinite(z)) return null;
+    opts = opts || {};
+    const y = opts.y == null ? p.y : opts.y;
+    const d = Math.hypot(x - p.x, (y || 0) - (p.y || 0), z - p.z);
+    const row = auditRow(name);
+    row.world++;
+    const ref = opts.ref == null ? WORLD_REF : opts.ref;
+    const near = 1 / (1 + (d / ref) * (d / ref));
+    if (near < WORLD_FLOOR || (opts.cutoff != null && d > opts.cutoff)) { row.far++; return null; }
+    const now = performance.now() * 0.001;
+    const gap = opts.gap == null ? WORLD_GAP : opts.gap;
+    const prev = worldLast.get(name);
+    if (prev && now - prev.t < gap && !(d < prev.dist * 0.6)) { row.gated++; return null; }
+    if (prev) { prev.t = now; prev.dist = d; } else worldLast.set(name, { t: now, dist: d });
+    worldOpts.force = true; worldOpts.ghost = true; worldOpts.far = false;
+    // half the authored level before distance even applies: a stranger's blow
+    // is background, and your own must always read louder than the yard's.
+    worldOpts.volume = (opts.volume == null ? 0.5 : opts.volume) * near;
+    worldOpts.dist = d;
+    return sfx(name, worldOpts);
+  };
+  /* The census itself. `global` is the ratchet: sounds requested with no place
+     in the world. Reset it to time a window (the probe does this after boot, so
+     the loading screen's own noise never lands in a gameplay measurement). */
+  CBZ.soundAudit = function () {
+    const cues = {};
+    let req = 0, global = 0, sent = 0, world = 0;
+    auditRows.forEach(function (r, k) {
+      cues[k] = { req: r.req, global: r.global, spatial: r.spatial, world: r.world, far: r.far, gated: r.gated, sent: r.sent };
+      req += r.req; global += r.global; sent += r.sent; world += r.world;
+    });
+    const seconds = Math.max(0.001, performance.now() * 0.001 - auditStart);
+    return { cues: cues, req: req, global: global, sent: sent, world: world, seconds: seconds };
+  };
+  CBZ.soundAuditReset = function () { auditRows.clear(); worldLast.clear(); auditStart = performance.now() * 0.001; };
+
   // your car's voice: start on enter, update every driven frame, stop on exit
   CBZ.carAudio = { start: engineStart, stop: engineStop, update: engineUpdate };
   CBZ.gunVoice = gunVoice;

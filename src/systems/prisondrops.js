@@ -285,7 +285,13 @@
           d.rest = true;
           m.rotation.set(0, m.rotation.y, 0);      // lie flat, keep the yaw
           m.position.y = fy + d.hh;
-          if (CBZ.sfx && impact > 1.0) { try { CBZ.sfx("shell"); } catch (e) {} }
+          // A crate landing in the yard is somebody else's sound: it has a
+          // position, so it gets one. This was global — a drop 90 m away
+          // clattered at full volume in your ear like it had landed at
+          // your feet. `ref` is short because a small metal knock is quiet.
+          if (impact > 1.0 && CBZ.worldSfx) {
+            try { CBZ.worldSfx("shell", m.position.x, m.position.z, { y: m.position.y, ref: 6 }); } catch (e) {}
+          }
         }
       }
       const drag = Math.pow(0.986, sdt);

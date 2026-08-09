@@ -658,7 +658,12 @@
     tellToast("BOOKED — YOUR CELL");
     tellHint("Intake. The door stays shut for the count — " +
       Math.ceil(+g.jailSentence) + "s to serve.", 3.0);
-    if (showing() && CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} }
+    // NO SOUND REQUEST HERE. The bars racking shut on you is the one sound the
+    // intake is about, and it was silent — this asked for a generic `door` cue
+    // that had been retired months earlier, so it warned and played nothing.
+    // The fix is not a corrected cue name at this line: a state change does not
+    // get to voice hardware. sealPlayerCell() above drives the real leaf
+    // through cellblock.setDoor, and that is where the leaf now speaks.
   }
 
   // per-frame bookkeeping
@@ -702,7 +707,8 @@
         CBZ.hideHint();
         // the leaf sliding into its pocket + the rack is the "yard time" line.
         tellHint(wasShut ? "The door racks open. Yard time." : "The screws lose interest. Yard time.", 1.6);
-        if (showing() && wasShut && CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} }
+        // (releasePlayerCell drives the same leaf, and the leaf speaks — see
+        // the intake note above.)
       }
     }
 

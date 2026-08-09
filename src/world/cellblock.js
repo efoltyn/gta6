@@ -762,9 +762,24 @@
     const i = arr.indexOf(c.doorCol);
     if (locked && i < 0) arr.push(c.doorCol);
     else if (!locked && i >= 0) arr.splice(i, 1);
+    const moved = c.locked !== !!locked;
     c.locked = !!locked;
     c.slideT = locked ? 0 : 1;                 // 0 = shut, 1 = pocketed
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    // THE LEAF IS THE THING THAT MAKES THE NOISE, so it is voiced HERE, from
+    // the moving hardware at the door's own coordinates — never at whatever
+    // state change asked for it (tools/test-sound-source-contracts.mjs holds
+    // that line, and systems/capture.js was breaking it by asking for a
+    // generic `door` cue that had not existed for months: the bars racking
+    // shut on you at intake played nothing at all). Every caller gets it free:
+    // intake, release, a facility lockdown racking the whole wing. `ref` is
+    // wider than a fist's because a steel gate at 85 dB carries further than
+    // an 80 dB body blow, and CBZ.worldSfx collapses lockAll's hundred
+    // simultaneous leaves into ONE voice — the nearest one, which is the only
+    // one that means anything.
+    if (moved && CBZ.worldSfx && c.leafClosed) {
+      CBZ.worldSfx(locked ? "door_close" : "door_open", c.leafClosed.x, c.leafClosed.z, { ref: 14 });
+    }
     return true;
   }
 
