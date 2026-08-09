@@ -113,6 +113,7 @@
   #end button{appearance:none;border:1px solid rgba(255,255,255,.25);background:transparent;color:inherit;
     flex:1;padding:15px 10px;border-radius:999px;font:700 14px/1 inherit;letter-spacing:.14em;cursor:pointer}
   #end button.big{background:#4fbf6a;border:0;color:#07130b}
+  #nflash{position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none;z-index:55}
   #hint{position:fixed;left:calc(14px + env(safe-area-inset-left,0px));bottom:calc(14px + env(safe-area-inset-bottom,0px));
     z-index:41;font-size:10px;letter-spacing:.14em;opacity:.45;pointer-events:none;display:none;max-width:26vw;line-height:1.6}
 </style>
@@ -136,6 +137,7 @@
       </div>
       <select id="redW"></select>
       <select id="redT"></select>
+      <select id="redS"></select>
     </div>
     <div class="team blue">
       <h3>BLUE</h3>
@@ -146,6 +148,7 @@
       </div>
       <select id="blueW"></select>
       <select id="blueT"></select>
+      <select id="blueS"></select>
     </div>
   </div>
 
@@ -180,6 +183,7 @@
   <button id="cCam">AUTO CAM</button>
 </div>
 <div id="banner"></div>
+<div id="nflash"></div>
 <div id="hint"></div>
 
 <div id="end"><div class="in">
@@ -218,9 +222,17 @@ const SET = {
   blueW: Q.get("bw") || saved.blueW || "ak47",
   redT:  Q.get("rt") || saved.redT || "elite",
   blueT: Q.get("bt") || saved.blueT || "elite",
+  redS:  Q.get("rs") || saved.redS || "none",
+  blueS: Q.get("bs") || saved.blueS || "none",
   bench: Q.get("bench") === "1",
   auto:  Q.get("auto") === "1",
 };
+const SUPPORTS = [
+  { id: "none", label: "NO AIR" },
+  { id: "bomber", label: "ONE BOMBER" },
+  { id: "bomber2", label: "TWO BOMBERS" },
+  { id: "nuke", label: "NUKE RUN" },
+];
 if (SET.redN < 1) SET.redN = 1;
 if (SET.blueN < 1) SET.blueN = 1;
 
@@ -338,8 +350,14 @@ CBZ.studio.need(NEED).then(function () {
       return "<option value=\"" + t.id + "\"" + (cur === t.id ? " selected" : "") + ">" + t.label + "</option>";
     }).join("");
   }
+  function fillSupport(sel, cur) {
+    sel.innerHTML = SUPPORTS.map(function (s) {
+      return "<option value=\"" + s.id + "\"" + (cur === s.id ? " selected" : "") + ">" + s.label + "</option>";
+    }).join("");
+  }
   fillGuns(el("redW"), SET.redW); fillGuns(el("blueW"), SET.blueW);
   fillTraining(el("redT"), SET.redT); fillTraining(el("blueT"), SET.blueT);
+  fillSupport(el("redS"), SET.redS); fillSupport(el("blueS"), SET.blueS);
   el("redN").value = SET.redN; el("blueN").value = SET.blueN;
   document.querySelectorAll(".cnt button").forEach(function (b) {
     b.addEventListener("click", function () {
@@ -358,18 +376,33 @@ CBZ.studio.need(NEED).then(function () {
     SET.blueN = Math.max(1, parseInt(el("blueN").value, 10) || 1);
     SET.redW = el("redW").value; SET.blueW = el("blueW").value;
     SET.redT = el("redT").value; SET.blueT = el("blueT").value;
+    SET.redS = el("redS").value; SET.blueS = el("blueS").value;
     try {
       localStorage.setItem("cbz-npcwar", JSON.stringify({
         map: SET.map, redN: SET.redN, blueN: SET.blueN,
         redW: SET.redW, blueW: SET.blueW, redT: SET.redT, blueT: SET.blueT,
+        redS: SET.redS, blueS: SET.blueS,
       }));
     } catch (e) {}
   }
+  // what the chosen battle actually needs: the ground's packs, plus the air
+  // stack only when somebody bought air, plus the mushroom only for a nuke
+  function packsFor() {
+    const p = MAPS[SET.map].packs.slice();
+    // airbase rides along for its aircraft FACTORIES, not for a base: raw
+    // milModels.bomber returns a {group, footprint} record, and airbase.js is
+    // the layer that hands back a seated THREE.Group — the exact reason
+    // studio.model asks it first.
+    if (SET.redS !== "none" || SET.blueS !== "none") p.push("military", "airbase", "air", "ordnance");
+    if (SET.redS === "nuke" || SET.blueS === "nuke") p.push("nukefx");
+    return p;
+  }
   el("start").addEventListener("click", function () {
     readMenu();
-    if (MAPS[SET.map].packs.length) {
+    const need = packsFor();
+    if (need.length) {
       bootst("LOADING THE GROUND");
-      CBZ.studio.need(MAPS[SET.map].packs).then(function () { begin(false); });
+      CBZ.studio.need(need).then(function () { begin(false); });
     } else begin(false);
   });
   el("bench").addEventListener("click", function () {
@@ -382,7 +415,9 @@ CBZ.studio.need(NEED).then(function () {
   const V = function () { return new THREE.Vector3(); };
   const _v = V(), _v2 = V(), _muz = V();
   let world = null, base = null, MAP = null, hud = null;
-  let men = [], corpses = [], rockets = [], dropGuns = [];
+  let men = [], corpses = [], rockets = [], dropGuns = [], planes = [];
+  const squads = { red: [], blue: [] };
+  const AIR = { on: false, nuke: false, nukeAt: 42 };   // nukeAt rescaled at begin: it must land ON a battle, not after one
   let started = false, over = false, simT = 0, speed = 1, lastSpeed = 1;
   let bench = null;
   const stats = { red: { kills: 0, shots: 0, hits: 0 }, blue: { kills: 0, shots: 0, hits: 0 } };
@@ -494,9 +529,21 @@ CBZ.studio.need(NEED).then(function () {
       cool: 0.4 + lcg() * 1.2, reloadT: 0,
       tgt: null, losBadT: 0, slot: "hold", thinkAt: simT + lcg() * 0.3, lastThink: simT,
       dead: false, dieT: 0, dieDir: 1, animF: (i % 4),
-      lastShotT: -9,
+      lastShotT: -9, sq: Math.floor(i / 10), sqSlot: i % 10,
     };
     man.target.set(at.x, 0, at.z);
+    (squads[teamId][man.sq] = squads[teamId][man.sq] || []).push(man);
+    // when there is an air war, every man is a thing a bomb can find — through
+    // ordnance's OWN cover rules, so a roof or a wall between the bang and the
+    // body genuinely spares him
+    if (AIR.on && CBZ.ordnance && CBZ.ordnance.addTarget) {
+      man.ordTgt = CBZ.ordnance.addTarget({
+        pos: man.pos, team: teamId, unit: man,
+        onDamage: function (dmg, info) {
+          hurtMan(man, dmg, { byTeam: info && info.team, cause: "bomb" });
+        },
+      });
+    }
     // training tier fields combat_iq's roleTier() already reads off city actors
     if (tr.id === "swat") man.swat = true;
     else if (tr.id === "elite") man.kind = "soldier";
@@ -533,9 +580,15 @@ CBZ.studio.need(NEED).then(function () {
   }
   function killMan(m, imp) {
     m.dead = true; m.hp = 0;
-    const by = imp && imp.by && imp.by.team ? imp.by : null;
-    if (by) stats[by.team].kills++;
-    else stats[m.team === "red" ? "blue" : "red"].kills++;   // blast with no author still scores the other side
+    if (m.ordTgt) {
+      m.ordTgt.alive = false;
+      if (CBZ.ordnance && CBZ.ordnance.removeTarget) CBZ.ordnance.removeTarget(m.ordTgt);
+      m.ordTgt = null;
+    }
+    const byT = (imp && imp.by && imp.by.team) || (imp && imp.byTeam) || null;
+    if (byT && byT !== m.team) stats[byT].kills++;
+    else if (!byT) stats[m.team === "red" ? "blue" : "red"].kills++;   // blast with no author still scores the other side
+    // fratricide (a bomb is a blunt tool) credits nobody
     // sprawl: the rig's own death variety; the topple is ours (caller owns it)
     if (m.char && CBZ.deathPose) { try { CBZ.deathPose(m.char, m.i * 3.7 + 1.3, lcg()); } catch (e) {} }
     m.dieT = 0.0001;
@@ -639,8 +692,10 @@ CBZ.studio.need(NEED).then(function () {
     });
   }
   const teamCOM = { red: { x: 0, z: 0 }, blue: { x: 0, z: 0 } };
+  const HUNT = { red: false, blue: false };
   let comAt = -1;
   function updateCOM() {
+    const count = { red: 0, blue: 0 };
     ["red", "blue"].forEach(function (t) {
       let x = 0, z = 0, n = 0;
       for (let i = 0; i < men.length; i++) {
@@ -648,8 +703,11 @@ CBZ.studio.need(NEED).then(function () {
         if (m.team !== t || m.dead) continue;
         x += m.pos.x; z += m.pos.z; n++;
       }
+      count[t] = n;
       if (n) { teamCOM[t].x = x / n; teamCOM[t].z = z / n; }
     });
+    HUNT.red = count.blue > 0 && count.red >= count.blue * 8;
+    HUNT.blue = count.red > 0 && count.blue >= count.red * 8;
     comAt = simT;
   }
 
@@ -814,6 +872,209 @@ CBZ.studio.need(NEED).then(function () {
     }
   }
 
+  /* ============================================================ AIR SUPPORT
+     A team's bombers are the SHIPPED B-2 on the derived-coefficient airframe,
+     dropping ordnance sticks on the densest enemy concentration the grid can
+     see. The nuke run is one aircraft, one release, after the armies have
+     already met — then it leaves. Aircraft are equipment, not actors: nobody
+     down there has anything that reaches 330 m. */
+  const airAim = { red: null, blue: null };   // where each team's AIR is looking (enemy mass)
+  let airAimT = 0;
+  function densestCellOf(team) {
+    let best = null, bn = 0;
+    grid.forEach(function (a) {
+      let n = 0, x = 0, z = 0;
+      for (let i = 0; i < a.length; i++) {
+        const m = a[i];
+        if (m.dead || m.team !== team) continue;
+        n++; x += m.pos.x; z += m.pos.z;
+      }
+      if (n > bn) { bn = n; best = { x: x / n, z: z / n, n: n }; }
+    });
+    return best;
+  }
+  function spawnPlanes() {
+    ["red", "blue"].forEach(function (team) {
+      const opt = team === "red" ? SET.redS : SET.blueS;
+      if (opt === "none") return;
+      const count = opt === "bomber2" ? 2 : 1;
+      for (let i = 0; i < count; i++) {
+        const side = team === "red" ? -1 : 1;
+        const isNuke = opt === "nuke" && i === 0;
+        // A NUKE PLANE NEVER TURNS. A loaded bomber's turnaround measured
+        // close to a minute here, longer than half a war — so the armed run
+        // is its FIRST run: it spawns however far out release-time-times-
+        // airspeed says, already nose-on, and simply arrives.
+        // release happens ~1.3 km short of the mass (that is how far a bomb
+        // thrown at 165 m/s travels): the spawn distance buys the seconds
+        // that put each plane's FIRST window after its own opening gate
+        const dist = isNuke ? Math.max(2800, 165 * (AIR.nukeAt + 6)) : 3400;
+        const sx = MAP.cx + side * dist, sz = MAP.cz + (300 + i * 340) * side;
+        const flown = CBZ.studio.fly("bomber", {
+          groundAt: MAP.groundAt,
+          at: { x: sx, y: 330 + i * 45, z: sz },
+          heading: Math.atan2(sx - MAP.cx, sz - MAP.cz), speed: 165,
+        });
+        if (!flown || !flown.af) return;
+        planes.push({
+          team: team, af: flown.af, group: flown.group,
+          mode: "in", outPt: null, runPt: null,
+          nuke: isNuke, egress: false, dropCool: 1 + i * 2,
+          trail: CBZ.studio.trail({ length: 60, color: TEAMS[team].color, opacity: 0.35, minStep: 24 }),
+        });
+      }
+    });
+    if (planes.length) hud.feed("AIR IS UP");
+  }
+  function dropStick(p) {
+    // five bombs a pass on a long cooldown: air PUNCTUATES an infantry fight.
+    // Seven on a short one deleted both armies at first contact and the
+    // scoreboard read 8% infantry hits — a bombing demo, not a war.
+    p.dropCool = 15 + lcg() * 9;
+    AIR.sticks = (AIR.sticks || 0) + 1;
+    CBZ.ordnance.stick({
+      count: 5, interval: 0.14, kind: "iron", team: p.team, owner: "air-" + p.team,
+      getState: function () { return p.af ? { pos: p.af.pos, vel: p.af.vel } : null;
+      },
+      onDetonate: function (b) {
+        if (b && b.impact && MAP.id !== "arena") {
+          CBZ.studio.collapseAt(b.impact, { radius: b.radius, power: b.power });
+        }
+      },
+    });
+  }
+  function releaseNuke(p) {
+    p.nuke = false; p.egress = true;
+    AIR.nukes = (AIR.nukes || 0) + 1;
+    const kinds = CBZ.ordnance.kinds || {};
+    CBZ.ordnance.release({
+      pos: p.af.pos, vel: p.af.vel, kind: kinds.nuke ? "nuke" : "heavy",
+      team: p.team, owner: "air-" + p.team,
+      onDetonate: function (b) {
+        const f = el("nflash");
+        if (f) {
+          f.style.transition = "none"; f.style.opacity = "1";
+          setTimeout(function () { f.style.transition = "opacity 2.6s"; f.style.opacity = "0"; }, 90);
+        }
+        if (b && b.impact && MAP.id !== "arena") {
+          for (let r = 0; r < 9; r++) {
+            const a = (r / 9) * Math.PI * 2, d = b.radius * 0.5;
+            CBZ.studio.collapseAt({ x: b.impact.x + Math.cos(a) * d, y: b.impact.y, z: b.impact.z + Math.sin(a) * d },
+              { radius: d * 0.5, power: 3 });
+          }
+        }
+      },
+    });
+    banner("NUKE AWAY", TEAMS[p.team].name + " AIR");
+  }
+  /* A bomber at 165 m/s turns on a KILOMETRES-wide circle — measured here:
+     bank-limited, ~1.6 km radius, which is why "orbit the target" never put
+     the fall line over the mass and the first build dropped nothing all
+     battle. So it flies what real bombers fly: a RACETRACK. A long straight
+     run-in (head-on geometry always sweeps the release solution through the
+     aim), one stick per pass, then a slow wide turnaround far past the
+     target and back in. The pause between passes is not a limitation, it is
+     the drone of a returning bomber. */
+  function stepPlanes(sdt) {
+    for (let i = planes.length - 1; i >= 0; i--) {
+      const p = planes[i];
+      const enemy = p.team === "red" ? "blue" : "red";
+      const aim = airAim[p.team] || teamCOM[enemy];
+      p.dropCool -= sdt;
+      const distAim = Math.hypot(p.af.pos.x - aim.x, p.af.pos.z - aim.z);
+      /* THE ORBIT TRAP, measured twice before this shape: a jet whose turn
+         circle is WIDER than its distance to the mark can chase the mark's
+         bearing forever and never arrive — it settles into a stable ring at
+         exactly its own turn radius (logged: d≈1.1 km, "inbound", for a
+         whole battle). So the pattern is a real attack profile:
+           out  — fly well past the mass and away (3 km), any bank
+           turn — far out, slow to ~90 and haul around until the nose is ON
+           in   — LOCK THE LINE: a fixed point far beyond the mass on the
+                  run-in bearing; never chase the aim sideways again. The
+                  predict gate spends the precision; the line spends none. */
+      let hx, hz, phase = p.egress ? "egress" : p.mode;
+      if (phase === "egress") {
+        hx = MAP.cx + (p.team === "red" ? -4200 : 4200); hz = MAP.cz;
+      } else if (phase === "out") {
+        hx = p.outPt.x; hz = p.outPt.z;
+        if (distAim > 1900) { p.mode = "turn"; phase = "turn"; }
+      }
+      if (phase === "turn") {
+        hx = aim.x; hz = aim.z;
+        let hErr = Math.atan2(p.af.pos.x - aim.x, p.af.pos.z - aim.z) - p.af.heading();
+        while (hErr > Math.PI) hErr -= Math.PI * 2;
+        while (hErr < -Math.PI) hErr += Math.PI * 2;
+        if (Math.abs(hErr) < 0.3) {
+          p.mode = "in"; phase = "in";
+          const fx = aim.x - p.af.pos.x, fz = aim.z - p.af.pos.z;
+          const fl = Math.hypot(fx, fz) || 1;
+          p.runPt = { x: aim.x + (fx / fl) * 3000, z: aim.z + (fz / fl) * 3000 };
+        }
+      }
+      if (phase === "in") {
+        // the line is RE-LOCKED while far (the mass marches; a line drawn at
+        // spawn points at where they were) and FROZEN inside 1200 m, where
+        // chasing the aim sideways is the orbit trap again
+        if (!p.runPt || (distAim > 1200 && (p.relockT = (p.relockT || 0) - sdt) <= 0)) {
+          p.relockT = 2;
+          const fx = aim.x - p.af.pos.x, fz = aim.z - p.af.pos.z;
+          const fl = Math.hypot(fx, fz) || 1;
+          p.runPt = { x: aim.x + (fx / fl) * 3000, z: aim.z + (fz / fl) * 3000 };
+        }
+        hx = p.runPt.x; hz = p.runPt.z;
+      }
+      // the airframe convention: heading h means forward is (-sin h, -cos h)
+      const hdg = Math.atan2(p.af.pos.x - hx, p.af.pos.z - hz);
+      _v.set(p.af.pos.x - Math.sin(hdg) * 2400, 330, p.af.pos.z - Math.cos(hdg) * 2400);
+      const cmd = p.af.steerTo(_v, { gain: 2.4, bankLimit: phase === "turn" ? 1.15 : 0.8 });
+      p.af.holdAltitude(330, cmd);
+      p.af.throttle = phase === "turn" ? 0.42 : 0.72;
+      p.af.step(sdt, cmd);
+      if (p.group) p.af.applyTo(p.group);
+      if (p.trail) p.trail.push(p.af.pos);
+      if (p.egress) {
+        if (Math.hypot(p.af.pos.x - MAP.cx, p.af.pos.z - MAP.cz) > 3200) {
+          if (p.trail) p.trail.dispose();
+          if (p.group) CBZ.studio.drop(p.group);
+          if (p.af.dispose) p.af.dispose();
+          planes.splice(i, 1);
+        }
+        continue;
+      }
+      if (p.mode !== "in" && distAim > 500) continue;
+      // release when the SHARED integrator says the fall lands on the mass —
+      // the same one-integrator rule the bombing game learned the hard way
+      let dropped = false;
+      if (CBZ.ordnance.predict) {
+        const wantNuke = p.nuke && simT >= AIR.nukeAt;
+        const nukeKind = (CBZ.ordnance.kinds && CBZ.ordnance.kinds.nuke) ? "nuke" : "heavy";
+        const pr = CBZ.ordnance.predict(p.af.pos, p.af.vel, wantNuke ? nukeKind : "iron", 40);
+        if (pr && pr.x != null) {
+          const d = Math.hypot(pr.x - aim.x, pr.z - aim.z);
+          p._predD = d;
+          // a kilometre-radius weapon does not need a bullseye: any pass
+          // within a few hundred metres of the mass IS on target
+          if (wantNuke && (d < 400 || distAim < 700)) { releaseNuke(p); dropped = true; }
+          // no bombs before the lines have even formed: the opening belongs
+          // to the infantry, the air arrives ON a battle. The stick WALKS, so
+          // overhead within half its spread is close enough when the
+          // predicted point never quite kisses the aim.
+          else if (!p.nuke && (d < 110 || (d < 300 && distAim < 500)) && p.dropCool <= 0 && simT > 10) { dropStick(p); dropped = true; }
+        } else p._predD = -2;
+      }
+      // one pass, one stick: past the mass (or having dropped, or overshot
+      // the locked line), swing out and set up the next run
+      const overshot = p.runPt && Math.hypot(p.af.pos.x - p.runPt.x, p.af.pos.z - p.runPt.z) < 1100;
+      if (!p.egress && p.mode === "in" && (dropped || distAim < 300 || overshot)) {
+        p.mode = "out"; p.runPt = null;
+        // outbound point: straight ahead through the mass and past it — kept
+        // short, because every metre out here is lap time between passes
+        const fwdH = p.af.heading();
+        p.outPt = { x: p.af.pos.x - Math.sin(fwdH) * 1900, z: p.af.pos.z - Math.cos(fwdH) * 1900 };
+      }
+    }
+  }
+
   /* ============================================================ THINK
      Slow tick per man: pick a mark, hand steering to combat_iq's posture
      (cover, fire token, band, bearing slot), advance when walls have kept
@@ -823,13 +1084,29 @@ CBZ.studio.need(NEED).then(function () {
     m.lastThink = now;
     const crowd = men.length;
     m.thinkAt = now + 0.14 + Math.min(0.42, crowd / 2600) + lcg() * 0.06;
+    m.hunt = HUNT[m.team];
 
-    if (!m.tgt || m.tgt.dead) { m.tgt = nearestEnemy(m, SIGHT); m.losBadT = 0; }
+    if (!m.tgt || m.tgt.dead) { m.tgt = nearestEnemy(m, m.hunt ? SIGHT * 2 : SIGHT); m.losBadT = 0; }
     const tgt = m.tgt;
     if (!tgt) {
-      // nobody in sight: march on the other army's centre of mass
+      // nobody in sight: MARCH. Squads move as ranked columns behind their
+      // senior man — the approach reads as an army, and it costs one lookup
+      // per follower. Contact dissolves the parade: the moment anyone has a
+      // mark, combat_iq owns him.
       const com = teamCOM[m.team === "red" ? "blue" : "red"];
-      m.target.set(com.x + (lcg() - 0.5) * 24, 0, com.z + (lcg() - 0.5) * 24);
+      const sq = squads[m.team][m.sq];
+      let lead = null;
+      if (sq) for (let i = 0; i < sq.length; i++) if (!sq[i].dead) { lead = sq[i]; break; }
+      if (lead && lead !== m) {
+        const my = Math.atan2(com.x - lead.pos.x, com.z - lead.pos.z);
+        const row = ((m.sqSlot / 2) | 0) + 1, col = (m.sqSlot & 1) ? 1.25 : -1.25;
+        m.target.set(
+          lead.pos.x - Math.sin(my) * row * 2.0 + Math.cos(my) * col, 0,
+          lead.pos.z - Math.cos(my) * row * 2.0 - Math.sin(my) * col);
+      } else {
+        const j = m.hunt ? 0 : 14;      // a hunt marches STRAIGHT at them
+        m.target.set(com.x + (lcg() - 0.5) * j, 0, com.z + (lcg() - 0.5) * j);
+      }
       m.slot = "march";
       return;
     }
@@ -841,6 +1118,10 @@ CBZ.studio.need(NEED).then(function () {
       // trading nothing with a facade. The assault around the corner IS the
       // readable behaviour.
       if (m.losBadT > 2.6) {
+        // and a mark that stays unseeable even at arm's length is a dead end
+        // (a body wedged in geometry, a hole nobody can shoot into) — let it
+        // go and take the next fight rather than freezing the war on it
+        if (m.losBadT > 7) { m.tgt = null; m.losBadT = 0; return; }
         m.target.set(tgt.pos.x, 0, tgt.pos.z);
         m.slot = "push";
         return;
@@ -893,17 +1174,63 @@ CBZ.studio.need(NEED).then(function () {
     }
     m.cool -= sdt;
 
-    // ---- move toward the goal combat_iq (or the march) set ----
+    // ---- move toward the goal combat_iq (or the march) set. A man is not a
+    // pathfinder: when a wall eats his progress he slides ALONG it for a
+    // while instead of pressing his face into it — one distance test, no
+    // graph, and a column flows around a tower like water instead of queueing
+    // against the facade (the shipped city bug this block exists to fix). ----
     const dx = m.target.x - m.pos.x, dz = m.target.z - m.pos.z;
     const d = Math.hypot(dx, dz);
+    const tgt0 = m.tgt;
+    const tdist = tgt0 && !tgt0.dead
+      ? Math.hypot(tgt0.pos.x - m.pos.x, tgt0.pos.z - m.pos.z) : 1e9;
     let spd = 0;
     if (d > 1.1) {
       const hurtish = m.hp < m.maxHp * 0.45;
-      spd = (m.slot === "push" || m.slot === "march" || m.slot === "flank") ? 6.2 :
+      // a wounded man limps AWAY slower than a fresh man walks IN — the old
+      // 7.0 fallback outran every pursuer and froze a whole battle behind
+      // one unkillable runner. And an army that outnumbers the last few
+      // holdouts eight to one smells blood and sprints.
+      spd = m.slot === "fallback" ? 5.2 :
+            (m.slot === "push" || m.slot === "march" || m.slot === "flank") ? (m.hunt ? 7.6 : 6.2) :
             (m.slot === "cover" || hurtish) ? 7.0 : 4.6;
-      m.pos.x += dx / d * spd * sdt;
-      m.pos.z += dz / d * spd * sdt;
+      // holding the fire token forty metres out of range is not holding
+      // anything: closing to the band is a RUN, whatever the slot says
+      if (tdist < 1e9 && tdist > 42 && spd < 6.2) spd = m.hunt ? 7.6 : 6.4;
+      // and a mob eight-to-one over the last holdouts does not respect the
+      // band at all — it runs them down. This rule is what ENDS a battle.
+      if (m.hunt && tdist < 999) spd = Math.max(spd, 8.0);
+      let nx = dx / d, nz = dz / d;
+      if (m.detourT > 0) {
+        m.detourT -= sdt;
+        const sw = m.detourDir || 1;
+        const tx = nz * sw, tz = -nx * sw;      // 90 degrees off the blocked line
+        nx = tx; nz = tz;
+      }
+      const ox = m.pos.x, oz = m.pos.z;
+      m.pos.x += nx * spd * sdt;
+      m.pos.z += nz * spd * sdt;
       CBZ.micro.resolveCircle(m.pos, 0.5, m.pos.y, 1.8);
+      const got = Math.hypot(m.pos.x - ox, m.pos.z - oz);
+      const want = spd * sdt;
+      if (want > 0.001 && got < want * 0.25) {
+        m.stuckT = (m.stuckT || 0) + sdt;
+        if (m.stuckT > 0.8) {
+          m.stuckT = 0;
+          m.detourT = 1.5 + ((m.i % 5) * 0.35);
+          m.detourDir = (m.i & 1) ? 1 : -1;
+        }
+      } else if (got > want * 0.6 && m.stuckT) m.stuckT = Math.max(0, m.stuckT - sdt * 2);
+    } else {
+      // STANDING MEN GET RESOLVED TOO. The separation pass and blast shoves
+      // move bodies without asking the world, and a man embedded in a crate
+      // is invisible to every line of sight — an immortal, and a battle that
+      // cannot end. A slow timer keeps the cost of honesty near zero.
+      m.resT = (m.resT || 0) - sdt;
+      if (m.resT <= 0) {
+        m.resT = 0.25;
+        CBZ.micro.resolveCircle(m.pos, 0.5, m.pos.y, 1.8);
+      }
     }
     m.speed = spd;
     m.pos.y = MAP.groundAt(m.pos.x, m.pos.z);
@@ -933,7 +1260,8 @@ CBZ.studio.need(NEED).then(function () {
       return;
     }
     const p = CBZ.combatIQ && CBZ.combatIQ.profile ? CBZ.combatIQ.profile(m) : null;
-    const fireMax = p ? Math.min(125, p.hi * 2.6 + 8) : 60;
+    let fireMax = p ? Math.min(125, p.hi * 2.6 + 8) : 60;
+    if (m.hunt) fireMax *= 1.6;          // running a man down includes shooting at him
     if (!m.sees || dist > fireMax) return;
     if (m.slot !== "fire" && m.slot !== "peek" && m.slot !== "push" && dist > 12) return;
     if (m.cool > 0) return;
@@ -1089,6 +1417,33 @@ CBZ.studio.need(NEED).then(function () {
   }, { passive: true });
   window.addEventListener("contextmenu", function (e) { if (started && !uiTarget(e)) e.preventDefault(); });
 
+  /* ============================================================ RESOLUTION
+     The cheapest frames in a massive battle are the pixels you stop drawing.
+     When the frame rate slips the render scale steps down before anything
+     else does; it climbs back when the war thins out. */
+  const RES = { steps: [1], idx: 0, t: 0, good: 0 };
+  function initRes(total) {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    RES.steps = [dpr, 1, 0.78, 0.6].filter(function (v, i, a) { return a.indexOf(v) === i; })
+      .sort(function (a, b) { return b - a; });
+    RES.idx = total > 900 && RES.steps.length > 1 ? 1 : 0;
+    applyRes();
+  }
+  function applyRes() {
+    const R = CBZ.renderer;
+    if (!R || !R.setPixelRatio) return;
+    R.setPixelRatio(RES.steps[RES.idx]);
+    R.setSize(window.innerWidth, window.innerHeight, false);
+  }
+  function stepRes(dt) {
+    RES.t -= dt;
+    if (RES.t > 0) return;
+    RES.t = 1.6;
+    const fps = CBZ.micro.fps || 0;
+    if (fps > 4 && fps < 28 && RES.idx < RES.steps.length - 1) { RES.idx++; RES.good = 0; applyRes(); }
+    else if (fps > 50 && RES.idx > 0 && ++RES.good >= 3) { RES.good = 0; RES.idx--; applyRes(); }
+  }
+
   /* ============================================================ CLOCK */
   let effSpeed = 1;
   function setSpeed(s) {
@@ -1204,6 +1559,12 @@ CBZ.studio.need(NEED).then(function () {
     if (!CBZ.groundAt) CBZ.groundAt = function (x, z) { return MAP ? MAP.groundAt(x, z) : 0; };
 
     MAP = buildMap(SET.map);
+    AIR.on = SET.redS !== "none" || SET.blueS !== "none";
+    // a small war is short: the warhead arms early enough to matter
+    AIR.nukeAt = 20 + Math.min(22, (SET.redN + SET.blueN) / 36);
+    if (AIR.on && CBZ.ordnance && CBZ.ordnance.init) {
+      CBZ.ordnance.init({ scene: CBZ.scene, groundAt: MAP.groundAt });
+    }
     if (asBench) {
       bench = { t: 0, nextAt: 3.2, step: 30, lastGood: 0, dips: 0, grown: 0, fpsAcc: 0, fpsN: 0 };
       SET.redN = SET.blueN = 40;
@@ -1242,8 +1603,10 @@ CBZ.studio.need(NEED).then(function () {
     setSpeed(1);
     setCamMode(asBench ? "free" : "auto");
     if (asBench) { cam.wPitch = 0.9; cam.wDist = 170; }
+    initRes(spawnTotal);
     started = true;
     banner(MAPS[SET.map].label, TEAMS.red.name + " " + SET.redN + "   V   " + TEAMS.blue.name + " " + SET.blueN);
+    if (AIR.on) spawnPlanes();
     CBZ.micro.onFrame(frame);
   }
 
@@ -1298,6 +1661,15 @@ CBZ.studio.need(NEED).then(function () {
         for (let i = 0; i < men.length; i++) stepMan(men[i], sdt);
         separatePass(Math.min(1, sdt * 9));
         stepRockets(sdt);
+        if (AIR.on) {
+          if (simT - airAimT > 3) {
+            airAimT = simT;
+            airAim.red = densestCellOf("blue");   // red's air looks at blue mass
+            airAim.blue = densestCellOf("red");
+          }
+          if (CBZ.ordnance && CBZ.ordnance.step) CBZ.ordnance.step(sdt);
+          stepPlanes(sdt);
+        }
       }
     }
 
@@ -1323,6 +1695,7 @@ CBZ.studio.need(NEED).then(function () {
       }
     }
     stepCamera(dt);
+    stepRes(dt);
     effSpeed += ((realDt > 0 ? (simT - simBefore) / realDt : speed) - effSpeed) * Math.min(1, dt * 2);
 
     if (bench && !bench.done) stepBench(dt);
@@ -1363,6 +1736,14 @@ CBZ.studio.need(NEED).then(function () {
         map: SET.map, started: started, over: over,
         men: men.length, red: aliveCount("red"), blue: aliveCount("blue"),
         queued: spawnQueue.length, corpses: corpses.length, rockets: rockets.length,
+        planes: planes.length, air: AIR.on, sticks: AIR.sticks || 0, nukes: AIR.nukes || 0,
+        planesDbg: planes.map(function (p) {
+          return { t: p.team, nuke: p.nuke, mode: p.egress ? "egress" : p.mode,
+            cool: Math.round(p.dropCool * 10) / 10,
+            d: Math.round(p._predD == null ? -1 : p._predD),
+            x: Math.round(p.af.pos.x), y: Math.round(p.af.pos.y), z: Math.round(p.af.pos.z) };
+        }),
+        pixelRatio: RES.steps[RES.idx],
         fps: CBZ.micro.fps || 0,
         calls: (CBZ.renderer && CBZ.renderer.info) ? CBZ.renderer.info.render.calls : null,
         speed: speed, simT: Math.round(simT * 10) / 10,
@@ -1380,13 +1761,27 @@ CBZ.studio.need(NEED).then(function () {
     },
     speed: setSpeed,
     reinforce: function (n) { queueMen(n || 10); },
+    debugMen: function (n) {
+      const out = [];
+      for (let i = 0; i < men.length && out.length < (n || 4); i++) {
+        const m = men[i];
+        if (m.dead) continue;
+        out.push({ id: m.id, x: Math.round(m.pos.x), z: Math.round(m.pos.z),
+          slot: m.slot, sees: !!m.sees, mag: m.mag, rel: Math.round((m.reloadT || 0) * 10) / 10,
+          cool: Math.round(m.cool * 100) / 100,
+          tgt: m.tgt && !m.tgt.dead ? m.tgt.id : null,
+          tx: Math.round(m.target.x), tz: Math.round(m.target.z) });
+      }
+      return out;
+    },
   };
 
   // a shared link or a bench run skips the menu; kicked from here so every
   // declaration above is live before begin() touches it
   if (SET.auto || SET.bench) {
     const go = function () { begin(SET.bench); };
-    if (MAPS[SET.map].packs.length) CBZ.studio.need(MAPS[SET.map].packs).then(go); else go();
+    const need = packsFor();
+    if (need.length) CBZ.studio.need(need).then(go); else go();
   }
 }).catch(function (e) {
   bootst("LOAD FAILED " + (e && e.message ? e.message : e));

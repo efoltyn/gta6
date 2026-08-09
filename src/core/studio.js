@@ -916,7 +916,23 @@
     const R = opts.radius > 0 ? opts.radius : 18;
     const power = opts.power > 0 ? opts.power : 1;
     let drew = false;
-    if (CBZ.cityBlastCore) { try { CBZ.cityBlastCore(pos.x, pos.y || 1, pos.z, { power: power, radius: R }); drew = true; } catch (e) {} }
+    // cityExplosionCore's signature is (x, z, opts) with the detonation HEIGHT
+    // riding opts.y — this call used to pass (x, y, z, opts), so every slice
+    // page's fireball drew at z≈1 with the default 6 m radius and its own
+    // mis-aimed damage sweep. Measured from games/battle.html: rockets whose
+    // blast damage landed (boom's own sweep below is aimed right) while the
+    // flame bloomed a map away. noDamage because the roster sweep is done
+    // HERE, once, through modecaps — the core's internal applyBlastDamage
+    // would run the same blastWorldActors again and double-kill.
+    if (CBZ.cityBlastCore) {
+      try {
+        CBZ.cityBlastCore(pos.x, pos.z, {
+          power: power, radius: R / Math.max(0.2, power),
+          y: pos.y || 1, noDamage: true, byPlayer: !!opts.byPlayer,
+        });
+        drew = true;
+      } catch (e) {}
+    }
     // IT MUST ALSO BE HEARD, and the falloff is the bank's own job rather than
     // every caller's. A detonation across the basin should be a thud, not the
     // same bang as one in the street.
