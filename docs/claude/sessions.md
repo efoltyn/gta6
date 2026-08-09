@@ -3382,3 +3382,64 @@ that the rollout never left the paving, and that it parked on a stand belonging
 to the other airport. It steps at dt 0.25 — the airline's own per-frame clamp,
 so nothing is tested at a step the shipping code refuses — because a full-world
 `stepSim` costs ~0.4 s of wall clock whatever dt you hand it.
+
+## 2026-08-09 — THE PRISON HELD 207 MEN AND HAD 26 BUNKS
+
+Owner: *"There's too many fucking people. THINK DONT FIX."*
+
+The second half of that sentence is the whole entry. He had said it before —
+`MASS_CROWD` was cut **900 → 140** for the first "way too crowded" — and cutting
+it again would have been the third guess at a number that was never answerable
+to anything. So: what is the headcount actually made of, and what should decide
+it?
+
+**MADE OF FIVE CONSTANTS IN FOUR FILES**, none of which can see the building:
+`MASS_CROWD` 140 instanced ambient (config.js) · `JAIL_CROWD` 14 extra rigs
+(config.js) · a 30-name `ROSTER` (entities/npc.js) · one resident per cell
+(world/cellblock.js) · 12 posts (entities/guards.js). Measured live in escape:
+**124 in `CBZ.npcs` + 12 guards, with ~140 instanced bodies behind them.**
+
+**AND THE BUILDING SLEEPS 26.** Thirteen cells, each drawn double-bunked
+(`bunkRig` beds the top rack — that is what makes it a bunk). The only housing
+in the world was running at about **800% of capacity**. Not "overcrowded":
+impossible. There was nowhere for a hundred and eighty of them to lie down.
+
+**A PRISON IS THE ONE PLACE WHERE THIS RATIO IS LITIGATED**, so the number did
+not have to be taste. Population is stated against DESIGN CAPACITY: *Brown v.
+Plata*, 563 U.S. 493 (2011) found California at ~156k against an 85k design —
+about 185% — and the three-judge order capped it at **137.5%**, the
+constitutional ceiling. 1.85 is therefore the worst figure a real system has
+been made to answer for, and this wing sits there deliberately, because an
+overcrowded prison is the setting.
+
+So the headcount stopped being typed and became a subtraction. `world/cellblock.js`
+publishes `CBZ.prisonBeds()` — cells × bunks, at the documented occupancy — and
+both ANONYMOUS tiers take what is left after the men already on the floor:
+`entities/ambientstate.js` for the instanced crowd, `entities/npc.js` for the
+extra rigs. Load order makes it exact rather than clever (index.html: cellblock
+456 → guards 528 → npc.js 535 → ambientstate 559), so the cast is fully dealt
+before anything asks. The NAMED cast is deliberately not trimmed — those men are
+the game — and where they overshoot, the answer is a bigger wing, not a shorter
+cast. An explicit `CBZ.MASS_CROWD` / `CBZ.JAIL_CROWD` (the Settings slider, the
+localStorage override) still wins: an owner overruling the derivation is a
+decision, not a drift.
+
+    bodies in a 60° cone within 45 m, same frame     69 -> 20
+    instanced ambient tier                          140 -> 0
+    live inmates                                    124 -> 50
+    occupancy of the wing                          ~800% -> 192%
+
+**THE LEVER IS CELLS, NOT A CONSTANT.** Want a packed yard back? Build a housing
+unit — the south block has a chow hall and a dayroom and no beds at all — and
+the population follows on its own, everywhere, at once. Ratchet:
+`tools/prison-polish-check.mjs` (38 checks) asserts the capacity is published,
+the headcount is derived and not typed, no anonymous body is added to a prison
+that cannot sleep the men already in it, and occupancy stays inside 200% — past
+which the world is no longer describing a prison. It prints the live figure
+either way: *192% of design capacity — 50 men, 26 bunks, 12 staff.*
+
+The measurement it was taken with had to move, too: the block first ran at the
+END of that suite and read 227%, because by then the suite had spawned test
+actors and switched into gungame, whose bots live in `CBZ.npcs`. A population
+assertion has to be taken before the suite starts editing the world it means to
+measure.

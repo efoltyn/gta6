@@ -10,7 +10,45 @@
   const CBZ = window.CBZ;
   if (!CBZ) return;
 
-  const total = Math.max(0, CBZ.MASS_CROWD | 0);
+  /* THE AMBIENT TIER FILLS WHAT THE BUILDING HAS LEFT.
+
+     This was `CBZ.MASS_CROWD | 0` — a constant in config.js, cut 900 -> 140
+     once already for the owner's "way too crowded", and answerable to nothing.
+     It is now the remainder of a subtraction: what the wing can sleep, at the
+     documented occupancy (world/cellblock.js's prisonBeds — read that block for
+     the Brown v. Plata figures), minus everybody the prison has ALREADY put on
+     its floor. Load order makes that subtraction honest rather than clever:
+     index.html runs cellblock (456), guards (528) and npc.js (535) before this
+     file (559), so CBZ.npcs and CBZ.guards are fully cast by the time we ask,
+     and the wing's own cell residents are one per cell by construction.
+
+     Consequences worth stating plainly, because they are the point:
+       · the rig cast alone now exceeds what the wing can sleep, so the ambient
+         tier lands at ZERO and entities/crowd.js bails at its own `!S.total`
+         guard. The prison you walk through is its NAMED cast — men with faces,
+         tempers and beef — instead of that cast plus 140 anonymous bodies.
+       · nobody can quietly type the number back up. Adding cells raises it
+         everywhere at once; that is the only lever, and it is a real one.
+     An EXPLICIT CBZ.MASS_CROWD (the Settings "Total Population" slider, or the
+     localStorage override index.html applies before config.js) still wins —
+     an owner overruling the derivation is a decision, not a drift. */
+  const explicitPop = !!CBZ.MASS_CROWD_EXPLICIT;   // stamped by config.js
+  const wing = CBZ.prisonBeds ? CBZ.prisonBeds() : null;
+  let derived = null;
+  if (wing && !explicitPop) {
+    const housed = (CBZ.npcs ? CBZ.npcs.length : 0) + wing.cells;   // rigs on the floor + one resident per cell
+    derived = Math.max(0, wing.houses - housed);
+  }
+  const total = Math.max(0, (derived == null ? (CBZ.MASS_CROWD | 0) : derived) | 0);
+  CBZ.prisonPopulationAudit = function () {
+    const w = CBZ.prisonBeds ? CBZ.prisonBeds() : { beds: 0, houses: 0, cells: 0 };
+    const rigs = (CBZ.npcs || []).filter(function (n) { return n && !n.dead && !n.escaped; }).length;
+    const live = rigs + total;
+    return { beds: w.beds, cells: w.cells, houses: w.houses, occupancyRule: w.occupancy,
+      rigs: rigs, ambient: total, live: live, guards: (CBZ.guards || []).length,
+      occupancy: w.beds ? +(live / w.beds).toFixed(2) : 0,
+      derived: derived != null, explicit: !!explicitPop };
+  };
   const rigCapacity = Math.max(0, Math.min(total, (CBZ.CROWD_RIG_CAP || 1600) | 0));
   const canShare = !!(self.crossOriginIsolated && typeof SharedArrayBuffer !== "undefined");
   const ZONES = [
