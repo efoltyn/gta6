@@ -63,6 +63,20 @@ a portable military installation: runway, hangars, tower, revetments, and parked
 Pulls: `look`, `military`
 Gives you: `CBZ.airbase`
 
+### `citycore`
+THE REAL CITY FABRIC: cityMakeBuilding, the one mint every shell in Gang City comes from — enterable glass towers with pooled instanced panes, stairs, doors, furnished floors — plus buildTown, the street generator that lays a grid of marked roads, sidewalks, crosswalks, non-overlapping lots, shops with signs and a skyline cluster. Ask for a downtown with CBZ.studio.town(); nothing in it is a stage flat.
+Pulls: `look`, `seed`
+Gives you: `CBZ.cityMakeBuilding`, `CBZ.buildTown`
+
+### `militaryisland`
+the REAL military island from the Gang City map, raised at its authored place (centre -620,-700): fenced perimeter, airstrip with parked fighters and the heavy bomber, cargo apron, helipads, motor pool. Load it, then `CBZ.studio.raise("militaryisland")` builds it. Same files as `military`, named separately so a page that only wants the MODELS never raises an island by accident.
+Pulls: `military`
+
+### `airport`
+the REAL civil airport island from the Gang City map (Halloran Field, x -900..290, z -280..40): terminal, gates, tower, aprons and parked airliners. Load it, then `CBZ.studio.raise("airport")`.
+Pulls: `look`, `military`, `seed`
+Gives you: `CBZ.cityCivilAircraftRayTest`
+
 ### `air`
 flight for a bomber, a fighter or a transport. Coefficients are DERIVED from cruise speed and max thrust, not tuned by feel, and the autopilot commands bank ANGLE so an aeroplane cannot roll itself into the ground.
 Pulls: `boot`
@@ -124,8 +138,14 @@ With `military`: `bomber` · `fighter` (alias `jet`) · `cargo` · `heli` · `ta
   declare and BECOME a mode. Until you call this, every shared engine verb declines: no vault, no ledge step, no blast damage, no wall breach. `actors` hands over your roster, `hurt` your kill funnel, so the engine cannot kill somebody your score does not hear about.
 - `CBZ.studio.world(name)`
   build a named world. `desert` today.
-- `CBZ.studio.crowd(n, role, {at})`
-  n shipped bodies, placed and parented.
+- `CBZ.studio.town({at, seed, cols, rows, skyline, prefabs})`
+  A REAL DOWNTOWN, by name: the city's own street generator + the one shell mint. Marked streets, sidewalks, crosswalks, shops with lit signs, and a cluster of real glass towers. Returns `{lots, roads, rect, square}` — every `lot.building.door` is a real doorway a runner can duck through. Deterministic per seed.
+- `CBZ.studio.raise(pack)`
+  build a REAL piece of the Gang City map at its authored coordinates. `militaryisland` and `airport` today. Returns the context with `.roads` and `.regions` the builders filed. A page that raises the islands is standing on Gang City's own geography.
+- `CBZ.studio.setWorld({groundAt, waterAt, seaLevel})`
+  answer the world's questions once, and every conduct that needs ground or water — cameras, crowds, ordnance, future boats and wildlife — asks `CBZ.world` instead of you.
+- `CBZ.studio.crowd(n, role, {at, wander})`
+  n shipped bodies, placed and parented. Pass `wander: true` (or `{range, speed, pause}`) and they LIVE: seeded strolling on the real gait, sliding along real colliders. Forty statues never read as a city; forty walkers do.
 - `CBZ.studio.boom(pos, {radius, power})`
   fireball, blast damage against your roster, building collapse, and attenuated sound. Never grow your own explosion.
 - `CBZ.studio.structureAt(x, z, reach)`
