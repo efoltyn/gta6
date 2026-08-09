@@ -402,6 +402,12 @@
      once so the prison door, the bank vault and every wall price themselves in
      the same unit. Must precede any file registering a breach target. -->
 <script src="src/systems/breach.js?v=breach1"></script>
+<!-- THE AIRPORT REGISTRY (CBZ.registerAirport / CBZ.airports / the local
+     airfield frame). An airport stops being a rectangle of the map and becomes
+     a RECORD with an origin, a bearing and a runway, so a second field is a
+     spec rather than a second copy of island_airport.js's 4,000 lines. Must
+     precede every field builder and the airline that flies between them. -->
+<script src="src/systems/airports.js?v=air1"></script>
 <!-- tree connection-law registry + CBZ.treeAudit() — must precede every
      vegetation builder (they register planted parts into it) -->
 <script src="src/world/treeaudit.js?v=allmain1"></script>
@@ -749,6 +755,14 @@
 <script src="src/city/speedway_structures.js?v=circuit1"></script>
 <script src="src/city/island_speedway.js?v=touchclose1"></script>
 <script src="src/city/island_airport.js?v=aircraftroot4w9w11x"></script>
+<!-- THE AIRFIELD KIT + THE SECOND AIRPORT. buildAirfield() lays a complete
+     field (runway, markings, edge lights, taxiway, apron, stands, terminal,
+     tower, fence, kerb, access causeway) from one spec at any origin and any
+     bearing, reusing island_airport.js's OWN airframe factories — which is
+     why airport_capeharbor.js is a spec and a single call. Both load after
+     island_airport.js: it is what publishes CBZ.airportKit. -->
+<script src="src/city/airport_kit.js?v=air1"></script>
+<script src="src/city/airport_capeharbor.js?v=air1"></script>
 <script src="src/city/island_military.js?v=cargolift1"></script>
 <script src="src/city/biome_desert.js?v=organicdesert9"></script>
 <script src="src/city/biome_forest.js?v=allmain1"></script>
@@ -974,6 +988,18 @@
      After roadrules.js (the access law) and island_airport.js (the apron
      geometry it works). Revert with ?cfg_AIRSIDE_TRAFFIC=0. -->
 <script src="src/city/airside.js?v=air1s"></script>
+<!-- THE AIRLINE. Claims a parked airliner off a stand and flies it, for real:
+     doors, taxi to the holding point via a connector, backtrack, line up,
+     rotate, climb, cruise, descend on the far field's extended centreline,
+     touch down in the touchdown zone, brake, taxi in, park, turn round, fly
+     back. No new aeroplane and no new pilots — the airframe it moves is the
+     one island_airport.js parks, so its cockpit seats, its cabin, its
+     passengers, its doors and its damage model all come with it. Hijack one
+     and the flight is cancelled. Then ticketing.js sells you a seat on it:
+     [E] at any check-in counter, the flight holds its doors for you, and you
+     ride the cabin the whole way. After the fields that register themselves. -->
+<script src="src/systems/airline.js?v=air1"></script>
+<script src="src/city/ticketing.js?v=air1"></script>
 <!-- HIGHWAY CHECKPOINTS. Permanent policed shoulders, as opposed to the
      dynamic roadblock police.js already stages across your lane at 3 stars.
      The officers run police.js's OWN posted-officer brain (c._post) and the

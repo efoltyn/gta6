@@ -35,6 +35,15 @@ not `index.html` loads it.** Build-time-only sources go in `vite.config.js`'s
   one that matters — does a sea surge turn a point that was DRY LAND into
   water. Copy its shape; that last assertion is the pattern (prove the flood is
   real to the game's own queries, not just to the shader).
+- `tools/airline-check.mjs` — the other worked example of step (3), and a
+  different shape: a probe about TIME. It flies a whole scheduled leg headless
+  (fast-forwarding only the two wall-clock dwells) and asserts the phase order,
+  the peak altitude, that the wheels touched down inside the DESTINATION runway
+  rectangle *measured in that runway's own local frame*, that the rollout never
+  left the paving, and that the aeroplane parked on a stand belonging to the
+  other airport. Copy its shape when the claim is "X eventually becomes Y"
+  rather than "the world built" — and note the dt: it steps at the airline's
+  OWN per-frame clamp, so nothing is tested at a step the shipping code refuses.
 - `tools/STUDIO.md` — studio.mjs subjects/modes/flags in full.
 - `LOAD-NOTES.md` — what it costs to GET to the world (boot bytes, the one
   synchronous 21–31 s world build, the ranked plan to slice it), measured with

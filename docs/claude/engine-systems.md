@@ -55,6 +55,27 @@ Before building anything adjacent, wire into the existing system:
   carvable with no world-file edits. Note the two sub-gates that must move
   together with `blastAt`: `drainDefer` (a queue drained by a stricter test than
   the one that filled it silently eats every carve) and `chewWall`.
+- **An airport is a RECORD, not a rectangle** — `src/systems/airports.js`.
+  `CBZ.registerAirport(spec)` takes ONE origin and ONE bearing and publishes a
+  field with a local frame: origin = the runway midpoint, local +X down the
+  runway, local +Z the apron side (taxiway 50, stands 76, apron 90, terminal
+  114, kerb 128). `ap.toWorld(lx,lz)` / `ap.toLocal(x,z)` use the SAME heading
+  convention the shipped aircraft do — forward is `(cos h, 0, -sin h)` — so a
+  LOCAL heading becomes a world heading by ADDING the bearing, with no second
+  mapping to get wrong. Derived and free: both thresholds (`ap.ends`, where
+  `sign` is the sign of that threshold's own local x), their touchdown zones,
+  their hold-short points, the connectors, the apron centre and the field AABB.
+  **Never author a field in world coordinates again**: `CBZ.buildAirfield(city,
+  spec)` (`city/airport_kit.js`) lays the whole thing, and it authors NO
+  aircraft — `CBZ.airportKit.airliner/jet/boardable`, published by
+  `city/island_airport.js`'s own build, is the one airliner the game has, with
+  its cabin, its seats, its doors, its damage model and its pilots. Reference
+  duplication: `city/airport_capeharbor.js`, one spec and one call.
+  `systems/airline.js` flies between the records (`CBZ.airlineDepartures` /
+  `CBZ.airlineBook`); `CBZ.cabinCarry(rec, dx, dy, dz)` is how ANY system that
+  moves an airframe tells the cabin the room moved. Ratchets
+  `CBZ.airportAudit().malformed` and `CBZ.airlineAudit().stranded`, both at 0.
+
 - **Vault / mantle** — `CBZ.characterTraversal` (`src/systems/physics.js`).
   `start(actor, rig, dx, dz, opts)` then `step(actor, rig, dt, animate)`, and
   the caller returns early for the frame the step owns. Reads position through

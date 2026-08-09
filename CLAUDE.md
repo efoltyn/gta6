@@ -202,6 +202,79 @@ Tools: `tools/sound-census.mjs [--gate]` · `tools/sound-loudness.mjs [--gate]`.
 Headless Chromium has no AAC decoder, so both ratchets are pinned on numbers
 stamped before the decoder (engine counters, `.ogg` twins).
 
+## AN AIRPORT IS A RECORD — `CBZ.registerAirport` / `CBZ.buildAirfield`
+
+**OWNER (2026-08-09): "package the airport so you can just duplicate and put it
+somewhere else easily without rewriting that code … put another airport in
+another city … have planes actually go up to the runway, take off, land at the
+other airport … make it so you can buy a ticket and get on the plane."**
+
+`city/island_airport.js` is 3,977 lines and every one is authored in WORLD
+coordinates (`RWY_X0 = -850 + ADX`). A second airport meant copying it. But
+nothing about an airport needs world coordinates: a runway is a LENGTH and a
+WIDTH, a stand is "185 m along the field, 76 m off the centreline, nose out".
+What differs between two fields is ONE ORIGIN AND ONE BEARING.
+
+**`src/systems/airports.js` owns the frame and only the frame.** Origin = the
+runway MIDPOINT; local +X runs down the runway; local +Z is the apron side
+(taxiway 50, stands 76, apron 90, terminal 114, kerb 128). `ap.toWorld(lx,lz)`
+uses the SAME heading convention the shipped aircraft do — forward is
+`(cos h, 0, -sin h)` — so **a local heading becomes a world heading by adding
+the field bearing**, with no second mapping to get wrong. `end.sign` is the
+sign of that threshold's own local x (the first draft made it the departure
+DIRECTION, which lines an aeroplane up at the wrong threshold facing off the
+end). Halloran registers ITSELF from the same variables its runway was drawn
+from, so the worldOff dial moves the record and the tarmac together.
+
+**`src/city/airport_kit.js` builds a field from that spec** — surfaces,
+markings, edge lights, stands, terminal, tower, fence, kerb, keep-out, access
+causeway — and **authors no aeroplane**: `island_airport.js` now publishes its
+own airframe factories as **`CBZ.airportKit`** (`airliner` / `jet` /
+`boardable`), so a kit field's parked fleet is the same hull with the same
+cabin, the same seats, the same doors, the same damage model and the same
+pilots. `city/airport_capeharbor.js` is the proof: **one spec and one call**,
+runway 20/02 deliberately OFF-AXIS so the frame is actually exercised.
+
+**`src/systems/airline.js` flies it.** A shuttle CLAIMS a parked airliner off a
+stand and runs the real arc: doors → taxi via a connector → backtrack → line up
+→ rotate → climb → cruise → descend on the far field's extended centreline →
+touch down in the touchdown zone → brake → taxi in → park → turn round → fly
+back. **The pilots were already in the aeroplane** (two `reservedForNpc`
+cockpit seats npclife casts into). Altitude is a closed-form trapezoid of
+distance — `min(cruise, flown·tan9°, toTouchdown·tan5.5°)` — so it cannot
+oscillate and lands at exactly zero; the fields are 2.2 km apart, so the
+profile is scale-honest, not A320-honest. **Hijack the aeroplane and the
+flight is cancelled**, because a plane you stole is not one the airline
+operates. `CBZ.cabinCarry` is the one call that tells island_airport.js the
+room moved — standing you translate, seated your propuse anchor re-solves.
+
+**`src/city/ticketing.js` is only the verb.** [E] at any check-in counter; the
+fare leaves `CBZ.city.spend`; the flight HOLDS ITS DOORS for a ticket; you
+board through the shipped "Board the cabin" arc and ride the cabin the whole
+way. **No fade to black and no teleport.**
+
+**EVERY APPROACH BUG IN THIS WAVE WAS A DISTANCE THAT SHOULD HAVE BEEN A
+LATCH.** Past a waypoint, the distance to it grows again — so "am I past the
+final approach fix" and "are the wheels down" both turned the aeroplane round
+to have another go (measured: 250 sim-seconds orbiting Cape Harbor). Commit the
+state; never re-ask a distance you have already answered. Same family: a taxi
+capture radius SMALLER than the turn circle (9 m against 15.5) is a corner that
+can never be made.
+
+Flags `AIRPORT_REGISTRY_V1` · `AIRPORT_KIT_V1` · `AIRPORT_CAPEHARBOR` ·
+`AIRLINE_V1` · `AIRLINE_TICKETS_V1`. Ratchets in `tools/math-gate.mjs`, all
+**pinned at 0**: `CBZ.airportAudit().malformed`, `CBZ.airlineAudit().stranded`
+(how a two-node network silently wedges — an aeroplane lands with no stand free
+and the departures board just keeps counting down) and
+`CBZ.airlineAudit().shortFields` (a runway shorter than the fleet's own
+take-off roll, re-derived from the airline's constants — declare the next
+airport with 400 m and the gate says so instead of the sea).
+Tool: **`tools/airline-check.mjs`** flies a whole leg headless and asserts the
+phase order, the peak altitude, that the wheels touched down inside the
+DESTINATION runway rectangle in that runway's own local frame, that the rollout
+never left the paving, and that it parked on a stand belonging to the other
+airport.
+
 ## THE CHARGE TABLE — real breaching math, shared by every game
 
 `src/systems/breach.js` publishes US Army urban-breaching doctrine (FM 3-06.11
