@@ -1101,6 +1101,75 @@
     return { arcs: deplanes.length, walking: walking, queued: queued };
   }
 
+  /* THE STANDABLE DECK, SOLVED FROM THE LIVE POSE.
+     This used to be four lines inlined in cabinCompleteBoard, computed ONCE at
+     the moment you stepped aboard — which was correct for exactly as long as
+     an airliner was a thing that never moved. systems/airline.js flies this
+     same airframe between two airports with you standing in it, so the deck
+     has to be re-solvable every frame from wherever the hull now is. Same
+     oriented-extent AABB as before (the trick playeraircraft.js's collider
+     restore uses); `into` lets the caller update the record already in
+     CBZ.platforms in place rather than churn the array. */
+  function cabinSolvePlatform(rec, into) {
+    const cab = rec.group.userData.cabin;
+    const th = rec.group.rotation.y;
+    const ca = Math.abs(Math.cos(th)), sa = Math.abs(Math.sin(th));
+    // cabin local half-extents; with the real cockpit door the standable deck
+    // runs on through the bulkhead doorway to the cockpit front (local
+    // x -12.8..14.6 instead of -12.6..12.2 — the wall clamp elsewhere is what
+    // actually shapes the rooms, the platform just has to underlie them)
+    const cock = !!cab.cockpitLeaf;
+    const hx = (cock ? 13.7 : 12.4) * AL_SC, hz = 1.6 * AL_SC;
+    const ctr = cabinWorld(rec, (cock ? 0.9 : -0.2) * AL_SC, 0);
+    const ex = ca * hx + sa * hz, ez = sa * hx + ca * hz;
+    const p = into || {};
+    p.minX = ctr.x - ex; p.maxX = ctr.x + ex;
+    p.minZ = ctr.z - ez; p.maxZ = ctr.z + ez;
+    p.top = rec.group.position.y + cab.floorTop;
+    return p;
+  }
+
+  /* CARRY THE PASSENGER (AIRLINE_RIDE). A cabin is a room, and a room that
+     flies has to take the person in it with it. Called by whoever is MOVING
+     the airframe, once per frame, with the world delta it just applied:
+
+       • standing — translate the player by the same delta. The per-frame wall
+         clamp in the 55.2 upkeep then shapes them to the aisle exactly as it
+         does on the ground, so nothing about the room's geometry is special-
+         cased for flight.
+       • seated — propuse.js's order-42 hold re-pins the player to the seat
+         record's own x/y/z/face every frame, and `P._propSeat` IS the record
+         cabinSitSeat handed it. So the ride is: re-solve that record from the
+         live hull pose and let the hold do the work. Fighting the hold by
+         writing P.pos would lose every frame.
+
+     Returns false when this rec is not the one the player is inside, so a
+     mover can call it unconditionally. */
+  CBZ.cabinCarry = function (rec, dx, dy, dz) {
+    if (!cabinState.inside || cabinState.rec !== rec) return false;
+    const P = CBZ.player;
+    if (!P || P.dead || !rec.group || !rec.group.parent) return false;
+    const seat = P._aircraftCabinSeat;
+    if (seat && P._propSeat) {
+      const w = cabinWorld(rec, seat.x, seat.z);
+      const s = P._propSeat;
+      s.x = w.x; s.y = rec.group.position.y + seat.y; s.z = w.z;
+      s.face = rec.group.rotation.y + (seat.heading == null ? Math.PI / 2 : seat.heading);
+    } else if (!P._propSeat) {
+      P.pos.x += dx; P.pos.y += dy; P.pos.z += dz;
+      P.vy = 0; P.grounded = true;
+      if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.position.copy(P.pos);
+    }
+    if (cabinState.platform) cabinSolvePlatform(rec, cabinState.platform);
+    return true;
+  };
+
+  // Is the player standing/sitting in THIS aircraft's cabin? The one honest
+  // answer for a caller that must not move an aeroplane out from under them.
+  CBZ.cabinRider = function (rec) {
+    return !!(cabinState.inside && cabinState.rec === rec && CBZ.player && !CBZ.player.dead);
+  };
+
   function cabinCompleteBoard(rec) {
     const P = CBZ.player;
     if (!P || P.dead || P.driving || P._aircraft) return;
@@ -1114,22 +1183,7 @@
       rec._colliderDetached = true; rec._cabinDetached = true;
       if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     }
-    // standable cabin deck (oriented-extent AABB, same trick as the
-    // collider restore in playeraircraft.js)
-    const th = rec.group.rotation.y;
-    const ca = Math.abs(Math.cos(th)), sa = Math.abs(Math.sin(th));
-    // cabin local half-extents; with the real cockpit door the standable deck
-    // runs on through the bulkhead doorway to the cockpit front (local
-    // x -12.8..14.6 instead of -12.6..12.2 — the wall clamp below is what
-    // actually shapes the rooms, the platform just has to underlie them)
-    const cock = !!cab.cockpitLeaf;
-    const hx = (cock ? 13.7 : 12.4) * AL_SC, hz = 1.6 * AL_SC;
-    const ctr = cabinWorld(rec, (cock ? 0.9 : -0.2) * AL_SC, 0);
-    const ex = ca * hx + sa * hz, ez = sa * hx + ca * hz;
-    cabinState.platform = {
-      minX: ctr.x - ex, maxX: ctr.x + ex, minZ: ctr.z - ez, maxZ: ctr.z + ez,
-      top: rec.group.position.y + cab.floorTop,
-    };
+    cabinState.platform = cabinSolvePlatform(rec, null);
     if (CBZ.platforms) CBZ.platforms.push(cabinState.platform);
     // step in at the door row
     const inPt = cabinWorld(rec, 9.4 * AL_SC, -0.6 * AL_SC);
@@ -1157,9 +1211,20 @@
     if (CBZ.propStand && P && P._propSeat) { try { CBZ.propStand(P); } catch (e) {} }
     if (P && rec && rec.group) {
       const out = cabinWorld(rec, rec.group.userData.cabin.doorX, -4.4 * AL_SC);
-      const gy = CBZ.floorAt ? CBZ.floorAt(out.x, out.z) : 0;
-      P.pos.set(out.x, gy, out.z);
-      P.vy = 0; P.grounded = true;
+      const hullY = rec.group.position.y || 0;
+      if (hullY >= 0.6) {
+        // BELT AND BRACES for the airborne case. The verb above refuses to
+        // start while the hull is up, but the arc has a 0.5 s commit window and
+        // an aeroplane can rotate inside it. Stepping out of a moving aircraft
+        // is then exactly what it should be — you leave at the DOOR and you
+        // fall — rather than a teleport to the ground the old line performed.
+        P.pos.set(out.x, hullY + (rec.group.userData.cabin.floorTop || 0), out.z);
+        P.vy = 0; P.grounded = false;
+      } else {
+        const gy = CBZ.floorAt ? CBZ.floorAt(out.x, out.z) : 0;
+        P.pos.set(out.x, gy, out.z);
+        P.vy = 0; P.grounded = true;
+      }
       if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.position.copy(P.pos);
     }
     cabinForceClear(true);
@@ -1332,9 +1397,22 @@
       options: [
         {
           id: "airliner_exit", slot: "e", label: "Exit the airliner",
+          /* YOU CANNOT STEP OFF AN AEROPLANE THAT IS FLYING. This gate had no
+             reason to exist while an airliner was a thing bolted to a gate;
+             systems/airline.js flies this same hull with you in it, and the
+             exit below puts you on the GROUND under the door — i.e. it would
+             have teleported a passenger 130 m straight down out of a cruise.
+             Asked of the airframe's own height, not of who is moving it, so
+             it holds for any future mover. */
+          canShow: function () {
+            const rec = cabinState.rec;
+            return !!rec && !!rec.group && rec.group.position.y < 0.6;
+          },
           onSelect: function () {
             if (!cabinState.inside) return;
-            cabinState.pending = { rec: cabinState.rec, t: 0.5, dir: "out" };
+            const rec = cabinState.rec;
+            if (rec && rec.group && rec.group.position.y >= 0.6) return;
+            cabinState.pending = { rec: rec, t: 0.5, dir: "out" };
           },
         },
       ],
@@ -3148,6 +3226,35 @@
       return g;
     }
 
+    /* ===================================================================
+       THE AIRFRAMES, PUBLISHED (owner 2026-08-09: "package the airport so
+       you can just duplicate and put it somewhere else easily without
+       rewriting that code").
+
+       These three functions are the only part of this file a SECOND airport
+       actually needs, and until now they were locked inside this closure.
+       They stay here — this is where the part kit, the cabin, the livery
+       materials and the seat maths live, and moving them would fork the one
+       airliner the game has. Publishing them costs three lines and buys
+       city/airport_kit.js and systems/airline.js the whole aeroplane: hull,
+       cabin, seats, pilots, doors, damage model and the hand-off to the
+       player's flight physics, with no second copy of any of it.
+
+       `boardable` is the important one: it is what makes a group a member of
+       `placed`, and `placed` is what the gun path, the blast path, the
+       boarding arc and the flight hand-off all read. A plane built without
+       it is scenery.
+       =================================================================== */
+    CBZ.airportKit = {
+      airliner: buildAirliner,        // (x, z, heading, livery) -> group
+      jet: buildPrivateJet,           // (x, z, heading, livery) -> group
+      boardable: boardablePlane,      // (group, x, z, heading, footW, footL, name)
+      dims: AIRCRAFT_DIMS,
+      scale: AL_SC,
+      // the live boardable roster, so a flight can find the record it built
+      records: function () { return placed; },
+    };
+
     // parked airliners at the gates (along the terminal apron edge) — each a
     // STEALABLE aircraft (climb in and fly it off the gate).
     const liveries = [0x2d5fb0, 0xb33636, 0x1f7a4d, 0xc78a1f];
@@ -3873,6 +3980,59 @@
       noSpawn: NO_SPAWN,
       aircraft: AIRCRAFT_DIMS,
     };
+
+    /* ===================================================================
+       HALLORAN JOINS THE NETWORK (systems/airports.js). Not a copy of the
+       layout above — every number handed over is the SAME variable the
+       surface was drawn from, so the record cannot drift from the runway
+       and the worldOff dial moves both together. The frame's origin is the
+       runway MIDPOINT and its local +Z is the apron side, which is exactly
+       how this island was always authored; that is why the conversion below
+       is subtraction and nothing else.
+
+       Without this the network has one node and a flight has nowhere to go.
+       =================================================================== */
+    if (CBZ.registerAirport) {
+      /* THE STANDS. The four gates are the four the fleet is parked on, read
+         off the same expression the parked loop used. The two after them are
+         REMOTE STANDS on the east ramp, 115 m clear of the terminal and 32 m
+         clear of the private-jet line — and they are not decoration: a field
+         whose every stand is occupied by a permanently parked aeroplane is a
+         field an arriving flight cannot park at, which is exactly how a
+         shuttle network wedges itself. A real airport keeps remote stands for
+         the same reason. */
+      const gateLX = [];
+      for (let i = 0; i < 4; i++) gateLX.push((-120 + ADX + i * 55) - RWY_CX);
+      gateLX.push((150 + ADX) - RWY_CX, (205 + ADX) - RWY_CX);
+      CBZ.registerAirport({
+        id: "halloran", name: "Halloran Field", code: "HLR",
+        city: "Los Vantos", hub: true, builtBy: "island_airport",
+        x: RWY_CX, z: RWY_Z, yaw: 0,
+        runway: { len: RWY_LEN, w: RWY_W, tdz: 180 },
+        // the two connector taxiways this island actually drew (CONN_XS)
+        connectors: CONN_XS.map(function (x) { return x - RWY_CX; }),
+        taxiZ: TAX_Z - RWY_Z,
+        apronZ: APRON_Z - RWY_Z,
+        standZ: gateZ - RWY_Z,
+        termZ: TERM_Z - RWY_Z,
+        kerbZ: KERB_Z - RWY_Z,
+        gates: gateLX.map(function (lx, i) {
+          return {
+            id: i < 4 ? ("HLR-" + (i + 1)) : ("HLR-R" + (i - 3)),
+            lx: lx, lz: gateZ - RWY_Z, heading: -Math.PI / 2, size: "airliner",
+          };
+        }),
+        // the westmost of the four check-in counters the concourse already
+        // draws (buildTerminal's `dx = tx - tw/2 + 20 + k*30`, k=0), with the
+        // player standing on the queue side of it.
+        desk: {
+          lx: (APRON_X - TERM_W / 2 + 20) - RWY_CX,
+          lz: (TERM_Z + TERM_D / 2 - 5.2) - RWY_Z,
+          heading: 0, label: "Halloran Field — Check-in",
+        },
+        bounds: { minX: A_MINX, maxX: A_MAXX, minZ: A_MINZ, maxZ: A_MAXZ },
+      });
+    }
     // give traffic a road down the causeway (runs along Z → vertical)
     if (city.roads) {
       /* THE CAUSEWAY RUNS ONTO THE ISLAND, not up to its edge. It used to stop

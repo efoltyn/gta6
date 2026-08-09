@@ -3039,3 +3039,163 @@ in the table, i.e. a door the player can never open however many charges they
 stack. **Pinned at 0**; `targets` also pinned ≥1 so a rebuild that silently
 stopped registering shows up. `MATHGATE: ok`, `MODE-ENGINE: ok` both sides,
 `BREACH-CHECK: ok` city + escape + revert.
+
+## 2026-08-09 — THE AIRPORT WAS A PLACE; IT IS NOW A RECORD (and two of them fly)
+
+Owner, one paragraph, four asks: *"package the airport so you can just
+duplicate and put it somewhere else easily without rewriting that code and put
+another airport in another city and then have planes actually actually go up to
+the runway, take off, land at the other airport … make it so you can buy a
+ticket and get on the plane."*
+
+**THE FAULT WAS COORDINATES, NOT SIZE.** `city/island_airport.js` is 3,977
+lines and every one of them is authored in world space — `RWY_X0 = -850 + ADX`,
+`gateZ = APRON_Z - 14`, a terminal at `tz = 24`. Nothing in it is wrong and
+none of it is reusable: "another airport" against that file is a copy plus
+several hundred edited numbers. But an airport does not need world coordinates.
+A runway is a LENGTH and a WIDTH. A stand is *185 m along the field, 76 m off
+the centreline, nose out*. Those numbers are identical at both fields. **What
+differs is one origin and one bearing.**
+
+**`systems/airports.js` — the frame, and only the frame.** Origin = runway
+midpoint, local +X down the runway, local +Z the apron side (taxiway 50, stands
+76, apron 90, terminal 114, kerb 128). `toWorld/toLocal` use the SAME heading
+convention the shipped aircraft already use — forward is `(cos h, 0, -sin h)`,
+which is `rotation.y` applied to a hull that noses down local +X — so a local
+heading becomes a world heading by ADDING the bearing. That identity is the
+whole reason the packaging is cheap, and it was read off island_airport.js's
+own parked fleet rather than invented.
+
+**Halloran registers itself** from the same variables its tarmac was drawn
+from, so the record cannot drift from the runway and the `worldOff` dial moves
+both. `island_airport.js` also now publishes **`CBZ.airportKit`** — three
+functions (`airliner` / `jet` / `boardable`) that were locked in its closure.
+They stay where the part kit, the cabin and the seat maths live; publishing
+them costs three lines and buys every future field the whole aeroplane.
+
+**`city/airport_kit.js`** lays a complete field from a spec — surfaces, merged
+markings, one instanced light run, one instanced fence, stands, terminal,
+canopy, tower, windsock, kerb, keep-out, L-shaped access causeway — and authors
+**no aircraft**. **`city/airport_capeharbor.js` is 95 lines**: one spec, one
+call. That is the deliverable the owner asked for, stated as a file length.
+
+**THREE THINGS THE SECOND FIELD TAUGHT US, all found by measuring:**
+
+- **The causeways, not the towns, are the constraint.** Cape Harbor's own
+  access deck runs 1,000 m up x=610 from z=-130 to z=875. The field's first two
+  placements straddled it — a mini-city's road going straight down a runway.
+  The field moved twice; the header now records every neighbour AND every deck
+  it clears.
+- **A bearing needs its half-turn.** The terminal is always on local +Z, so
+  pointing the field the "obvious" way put the kerb on the far side and the
+  access causeway had to cross its own runway (measured: the link entered the
+  airside keep-out for 148 m and crossed the centreline near lx=31 — a
+  `zoneCrossings` failure waiting to happen). `yaw = 0.28 + PI` puts the door
+  on the town's side.
+- **A road record cannot carry a bearing.** `city.roads` has a `vertical`
+  boolean, so a 217 m kerb at 16 degrees drifts 60 m off its own canopy. The
+  kit emits a kerb road only when the field is within ~6 degrees of an axis and
+  **simply does not** when it is not. Approximating it would have painted a
+  lane through the terminal.
+
+**`systems/airline.js` — the aeroplanes actually go.** A shuttle CLAIMS a
+parked airliner off a stand (it builds none) and runs doors → taxi via a
+connector → **backtrack** → line up → rotate → climb → cruise → descend on the
+far field's extended centreline → touch down in the touchdown zone → brake →
+taxi in → park → turn round → fly home. **The pilots were already in the
+aeroplane**: two `reservedForNpc` cockpit seats npclife casts uniformed bodies
+into, held facing forward by island_airport.js's own order-55.2 seat hold — in
+a hull that now moves. Hijack it (`rec.taken`) and the flight is cancelled the
+same frame.
+
+Altitude is a **closed-form trapezoid of distance**, not an integrated climb
+rate: `min(cruise, flown*tan9, toTouchdown*tan5.5)`. It cannot oscillate, cannot
+overshoot, lands at exactly zero, and a leg too short for cruise flies a
+triangle with nothing special-cased. The fields are 2.2 km apart and a real
+A320 needs ~30 km to climb and descend, so the profile is **scale-honest, not
+absolute-honest** — the shape is preserved, the magnitudes are the world's.
+
+**Two bugs found by reading before the probe ever ran**, both in the same
+family — a sign and a latch:
+- `end.sign` meant *the departure direction*, which is opposite for the two
+  ends. An aeroplane lined up at the wrong threshold facing off the end of the
+  runway. It now means the sign of that threshold's own local x, so
+  `sign*(H-25)` reads as "just inside this threshold".
+- `beyondFaf` was a distance test. Past the final approach fix the distance to
+  it GROWS, so the aeroplane turned round to fly over it again. It is a latch.
+
+**A THIRD AND FOURTH, found by flying it:** the approach had the SAME latch
+bug twice. Past the final approach fix the distance to it grows, so the
+aeroplane turned round to fly over it again; and the touchdown test was also a
+distance, so an aeroplane still 12 m up as it crossed the aiming point flew
+past and came round — **measured, 250 sim-seconds orbiting Cape Harbor.** Both
+are now committed states, not distances: `onFinal` latches, the profile
+commands zero altitude 60 m SHORT of the aiming point to absorb the easing lag,
+and the wheels are down the moment you are past the mark measured ALONG the
+landing direction.
+
+**And two numbers the world's scale had made wrong**, both found by arithmetic
+against the runways that actually exist rather than by watching:
+- **Take-off acceleration.** A real 2 m/s2 needs 1,089 m and the longest runway
+  in the game is 1,090 — so Halloran was a 99.9%-of-the-concrete departure and
+  Cape Harbor's 900 m was an airliner driving into the sea. 4.5 m/s2 puts the
+  roll at 484 m, 54% of the SHORTEST field. **This is now a ratchet, not a
+  memory**: `airlineAudit().shortFields` re-derives take-off and landing runs
+  from the fleet's own constants and checks every registered field, so the next
+  airport declared with 400 m of runway fails the gate instead of the sea.
+- **The taxi capture radius.** 9 m against a 15.5 m turn circle means the corner
+  can never be made: the aeroplane orbited the intersection until the turn-cut
+  bled off enough speed to fall inside it, and a 780 m taxi took 240
+  sim-seconds — an effective 3.2 m/s. 20 m captures cleanly. A watchdog now
+  takes any waypoint that has stopped getting closer for 10 s, because a
+  shuttle doing laps of a taxiway is worse than one cutting a corner.
+
+**A THIRD, found by asking what a moving room breaks:** "Exit the airliner"
+put the player at `floorAt(doorX, doorZ)` — correct for a hull bolted to a
+gate, and a teleport 130 m straight down out of a cruise the moment one flies.
+The verb now refuses while the hull is up, and the 0.5 s commit window drops
+you at the DOOR with `grounded = false` if an aeroplane rotates inside it. Both
+asked of the airframe's own height, never of who is moving it, so they hold for
+the next mover too.
+
+**And one the probe found:** Halloran's derived designator came out **36/18**
+while its own runway PAINT, drawn waves ago, reads **09/27** — the compass was
+missing its +90 (this world's north is +Z, so heading 0 is EAST). A HUD that
+contradicts the tarmac under the wheels. Fixed, with `designators` available as
+an override for a field whose paint says otherwise.
+
+**`city/ticketing.js` is only the verb** — no geometry, no money, no aeroplane,
+no boarding arc. [E] at a check-in counter, `CBZ.city.spend` takes the fare,
+the flight **holds its doors** for a ticket (and rolls the seat to the next
+departure rather than eating it if you miss), and you board through the shipped
+"Board the cabin" option and ride the cabin the whole way. `CBZ.cabinCarry` is
+the single new call that tells island_airport.js the room moved: standing you
+translate, seated your `_propSeat` anchor re-solves so propuse's order-42 hold
+does the work instead of fighting it. **No fade to black and no teleport.**
+
+**MEASURED — the delta, same seed 90210, before vs after:**
+
+    lots/shops    329/182 -> 329/182   (the generator is untouched)
+    roads         206     -> 208       (the two causeway legs; the rotated
+                                        field correctly declines a kerb road)
+    region overlaps     0 -> 0
+    road violations     0 -> 0    zoneCrossings 0 -> 0    clamped 0 -> 0
+    cabin seats   115/880 -> 141/1106  (+226: the new field's fleet)
+    trees           53944 -> 53809     (-135, displaced by the pad)
+    determinism        ok -> ok
+
+Ratchets, both **pinned at 0** in `tools/math-gate.mjs`:
+`CBZ.airportAudit().malformed` (a field that cannot be flown — no runway, a
+frame that does not round-trip, a stand off its own field) and
+`CBZ.airlineAudit().stranded` (a shuttle that landed with no stand free — the
+way a two-node network silently wedges; Halloran carries two REMOTE STANDS for
+exactly this, because four gates with four permanently parked aeroplanes is a
+field an arriving flight cannot park at).
+
+New tool: **`tools/airline-check.mjs`** — flies a whole leg headless and
+asserts the phase order, the peak altitude, that the wheels touched down inside
+the DESTINATION runway rectangle *measured in that runway's own local frame*,
+that the rollout never left the paving, and that it parked on a stand belonging
+to the other airport. It steps at dt 0.25 — the airline's own per-frame clamp,
+so nothing is tested at a step the shipping code refuses — because a full-world
+`stepSim` costs ~0.4 s of wall clock whatever dt you hand it.

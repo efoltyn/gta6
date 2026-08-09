@@ -587,6 +587,33 @@ const PASS = `(() => {
         " hold=" + aa.holdEvents + " bail=" + aa.bailouts;
       if (aa.onRunway > 0) out.fails.push("SERVICE VEHICLES ON THE RUNWAY: " + aa.onRunway);
     }
+    /* THE AIRPORT NETWORK (systems/airports.js + systems/airline.js).
+       malformed — a registered field that cannot be flown: no runway, a frame
+                   whose toWorld/toLocal do not round-trip, or a stand that is
+                   not on the field it claims. PINNED AT 0, and it is what
+                   makes "duplicate the airport somewhere else" a checkable
+                   claim rather than a hope.
+       stranded  — a shuttle that landed with no stand free. That is how a
+                   two-node network silently wedges: the aeroplanes stop, the
+                   departures board keeps counting down and nothing says why.
+                   PINNED AT 0. Halloran carries two remote stands for exactly
+                   this reason.
+       Fields/stands/shuttles print beside them so a "fix" that stops
+       registering airports cannot pass this gate by having nothing to check. */
+    if (CBZ.airportAudit) {
+      const ar = CBZ.airportAudit();
+      const al = CBZ.airlineAudit ? CBZ.airlineAudit() : null;
+      out.airnet = ar.count + " fields " + ar.gates + "stands " + ar.desks + "desks malformed=" + ar.malformed +
+        (al ? (" | " + al.shuttles + " shuttles air=" + al.airborne + " crewed=" + al.crewed +
+               " stranded=" + al.stranded + " short=" + al.shortFields +
+               " (needs " + al.takeoffRun + "m up / " + al.landingRun + "m down)") : "");
+      if (ar.malformed > 0) out.fails.push("MALFORMED AIRPORT RECORDS: " + ar.malformed + " " + JSON.stringify(ar.rows));
+      if (al && al.stranded > 0) out.fails.push("SHUTTLES STRANDED WITH NO STAND: " + al.stranded);
+      // A runway shorter than the take-off roll is an airliner driving into
+      // the sea. Pure arithmetic, so it costs nothing and it holds for every
+      // field the network ever registers.
+      if (al && al.shortFields > 0) out.fails.push("RUNWAY TOO SHORT FOR THE FLEET: " + JSON.stringify(al.shortWhere));
+    }
     // gov complexes: they exist BECAUSE putting them in a city overlapped.
     // overlaps excludes the one declared exception (City Hall, edgeOfCity),
     // which is reported separately as urbanAdjacent so it cannot hide a real
@@ -1057,6 +1084,7 @@ async function runSeed(seed, label) {
   tmark(`${label}: take ${r.take || "-"}`);
   tmark(`${label}: till ${r.till || "-"}`);
   tmark(`${label}: clearance ${r.clearance || "-"}`);
+  tmark(`${label}: airnet ${r.airnet || "-"}`);
   tmark(`${label}: fxwarm ${r.fxwarm || "-"} | platGrid ${r.platGrid || "-"} | airspace ${r.airspace || "-"}`);
   tmark(`${label}: holds ${r.holds || "-"}`);
   tmark(`${label}: pedInst ${r.pedInst || "-"}`);
