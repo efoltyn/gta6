@@ -263,7 +263,13 @@
   // Hot local decisions should not scan the entire prison population. The
   // spatial index is installed later by systems/npcgrid.js; keep a fallback
   // so this module remains load-order tolerant and easy to test headlessly.
+  // One scratch array per QUERY SITE, never per concept: nearbyNpcs refills the
+  // array it is handed, so a helper that queries while its caller is iterating
+  // the same array eats the caller's list mid-loop. _markNear and _crewNear
+  // exist because bandNear() is called from inside findBrawlTarget's own
+  // _brawlNear loop, and down() sweeps a crew while the fight tick is live.
   const _palNear = [], _foeNear = [], _brawlNear = [], _defendNear = [], _shadowNear = [];
+  const _markNear = [], _crewNear = [];
   function nearbyNpcs(n, radius, out) {
     const p = n.group.position;
     if (CBZ.queryNpcsNear) return CBZ.queryNpcsNear(p.x, p.z, radius, out);
@@ -2767,6 +2773,51 @@
     return false;
   }
 
+  /* WORDS GO WRONG — where a yard fight actually starts.
+
+     With violence now requiring a reason, the yard needed the place reasons
+     really come from, and it was already running: 38 of 124 men are in
+     `socialize` at any moment, trading gossip in twos. A prison fight almost
+     never begins with two strangers deciding to fight; it begins in a
+     conversation that turns — a debt, a name used wrong, a rumour about who
+     talked. So an exchange can now sour, and when it does it books beef on
+     BOTH men (an argument leaves two angry men, not one).
+
+     Nothing here rolls a fight. It rolls a GRIEVANCE, usually small: most sour
+     talk decays to nothing over the next minute and the two of them go back to
+     wandering. Occasionally one crosses the swing line, and by then the player
+     could have watched it building — two men squared up, an emote, a set that
+     is doing badly. That is the difference between drama and noise. */
+  function argue(n, p) {
+    const fuse = (behaviorOf(n).init + behaviorOf(p).init) * 0.5;   // short tempers
+    const nerve = ((n.personality && n.personality.nerve) || 0.5);
+    // a set that is losing is a set that turns on itself
+    const strain = n.gang >= 0 ? Math.max(0, -gangStanding(n.gang)) * 0.004 : 0;
+    // he has heard this one is talking to the screws
+    const talked = (p.snitchHeat || 0) > 0 || (n.snitchKnown && n.snitchKnown === p) ? 0.45 : 0;
+    // AN ARGUMENT ALREADY UNDER WAY IS NOT A FRESH ROLL. Nobody calms down in
+    // the middle of one, and this is what was missing: sour exchanges landed
+    // one at a time on different pairs, so a man got halfway to the line and
+    // the grudge decayed before he ever saw that face again. Once these two
+    // have something, every further exchange between THEM is far more likely
+    // to go wrong — so an argument concentrates, escalates, and resolves,
+    // instead of spreading a thin film of resentment across the whole yard.
+    const already = beefWith(n, p);
+    const friction = (fuse + strain + talked + (nerve - 0.5) * 0.2) * (1 + already / 4);
+    if (friction <= 0 || rng() > friction * 0.46) return false;     // most talk is still just talk
+    const w = 2.4 + rng() * 3.6;
+    addBeef(n, p, w);
+    addBeef(p, n, w * (0.45 + rng() * 0.75));                       // he takes it differently
+    emote(n, "!");
+    // The conversation deliberately does NOT end here. An argument that ends
+    // the moment it turns can never become anything: the two would part with a
+    // grievance neither of them would ever be near enough to act on. They stay
+    // in it, and each further exchange adds to what is already there — which is
+    // how a yard argument actually escalates, over ten or twenty seconds, in
+    // front of anyone who is watching.
+    return true;
+  }
+
   function gossip(n, p) {
     let source = null, target = null;
     if (n.memory && n.memory.t > 2 && !p.memory) { source = n; target = p; }
@@ -2802,6 +2853,116 @@
     }
   }
 
+  /* ============================================================
+     BEEF — why two men fight, and why they stopped needing a reason
+
+     MEASURED (tools/sound-census.mjs, mode escape, player idle): 124 inmates
+     alive and 7.3 of them in `fight` at any instant. Three and a half brawls
+     running CONTINUOUSLY, forever. The punch spam the owner heard was the
+     audible half of that; the deafening half is that a yard where three fights
+     are always in progress contains no fights at all, because nothing in it is
+     an event.
+
+     THE ROOT was that violence needed no cause. findFoe() returned any
+     rival-gang inmate within 8 m; findBrawlTarget() returned any man within
+     9 m; the wander tick rolled on that every 1.5-4.5 s, per inmate. Standing
+     near someone was the entire motive, so the condition for a fight was
+     "being in the yard" — and everyone is always in the yard.
+
+     THE FIX IS NOT A CAP. A budget ("at most N brawls") would have produced
+     the same arbitrary violence with a quota on it, and the yard would still
+     have had no memory of why anyone swung. Instead a fight now needs what a
+     fight needs: A REASON AND AN OPENING.
+
+       REASON  — beef, carried per pair and decaying. It is not invented here:
+                 it is BOOKED by things that already happen in this sim. He hit
+                 me. He put me down. He put my crewmate down. He snitched. He
+                 is standing on our turf. The prison already tracked exactly
+                 this against the PLAYER (n.playerGrudge, 130 call sites) and
+                 tracked nothing at all between two inmates — so this is that
+                 same idea, pointed at the yard.
+       OPENING — nobody starts something in front of a screw. CBZ.guardWatching
+                 is the guards' own cone (entities/guards.js), asked about a
+                 patch of yard instead of about the player. `guts` decides how
+                 much a given man cares that he is being watched.
+
+     And starting a fight SPENDS the beef, while losing one BOOKS fresh beef on
+     the winner. So violence in this yard now has a cause, a place, and a
+     consequence that comes back around later — instead of a dice roll every
+     three seconds. The rate falls out of that; it is not dialled.
+     ============================================================ */
+  /* These four numbers set HOW MUCH REASON IS ENOUGH, and how long the yard
+     remembers — they do not set how much violence is allowed. The rate falls
+     out of them and is measured, never asserted. At the values below,
+     tools/sound-census.mjs over a 300 s window reports 121 inmates with 2.3 of
+     them swinging at any instant — about one brawl live — and 31 blows a
+     minute across the whole compound, against 7.3 men and 90 blows a minute
+     when a fight needed no reason at all. Turn the memory up and the yard gets
+     meaner because more men are carrying something, which is a different thing
+     from rolling more dice. */
+  const BEEF_MAX = 24;        // one grievance can only weigh so much
+  const BEEF_FADE = 0.023;    // per second — a grudge outlives the argument by minutes, not forever
+  const BEEF_SWING = 8;       // below this, a man may glare but he does not swing
+
+  function beefList(n) { return n._beef || (n._beef = []); }
+  function beefWith(n, other) {
+    if (!n || !other || !n._beef) return 0;
+    for (const b of n._beef) if (b.who === other) return b.w;
+    return 0;
+  }
+  function addBeef(n, other, w) {
+    if (!n || !other || n === other || !alive(n) || w <= 0) return;
+    const list = beefList(n);
+    for (const b of list) {
+      if (b.who === other) { b.w = Math.min(BEEF_MAX, b.w + w); return; }
+    }
+    list.push({ who: other, w: Math.min(BEEF_MAX, w) });
+  }
+  function spendBeef(n, other) {
+    if (!n || !n._beef) return;
+    for (let i = 0; i < n._beef.length; i++) {
+      if (n._beef[i].who === other) { n._beef.splice(i, 1); return; }
+    }
+  }
+  // Grudges cool. A man who has not seen the other guy in a while stops
+  // looking for him, which is what keeps the yard from accumulating an
+  // ever-growing pile of reasons to fight.
+  function fadeBeef(n, dt) {
+    const list = n._beef;
+    if (!list || !list.length) return;
+    const drop = BEEF_FADE * dt;
+    for (let i = list.length - 1; i >= 0; i--) {
+      const b = list[i];
+      b.w -= drop;
+      if (b.w <= 0 || !alive(b.who)) list.splice(i, 1);
+    }
+  }
+  // Somebody in uniform is looking at this patch of ground. `guts` is how
+  // little that stops you: a Predator (0.96) barely slows down, an Opportunist
+  // (0.40) waits for the screw to turn around.
+  function watched(n) {
+    if (!CBZ.guardWatching) return 0;
+    const p = n.group.position;
+    return CBZ.guardWatching(p.x, p.y, p.z) ? 1 : 0;
+  }
+  // How badly this man wants to swing at that man, 0..1. Beef is the reason;
+  // temperament decides what weight of reason is enough.
+  function wantsToSwing(n, other) {
+    const b = behaviorOf(n);
+    const odds = fightOdds(n, other);                      // 0..1 he wins this
+    const risk = watched(n) * (1 - b.guts) * 1.2;          // a screw is watching
+    const beef = beefWith(n, other);
+    if (beef < BEEF_SWING) {
+      // NO HISTORY. The only violence that needs none is predation, and it
+      // needs an opening instead: a mark he is sure of, and nobody looking.
+      if (b.picksWeak < 0.85 || odds < 0.72) return 0;
+      return Math.max(0, Math.min(1, b.init * (odds - 0.5) * 1.6 - risk));
+    }
+    const nerve = 0.35 + b.init * 1.6;                     // how readily this one starts things
+    const edge = b.picksWeak > 0.8 ? (odds - 0.5) * 1.6 : (odds - 0.5) * 0.5;
+    return Math.max(0, Math.min(1, (beef / BEEF_MAX) * nerve + edge - risk));
+  }
+
   function findFoe(n) {
     // rare betrayal: jump your own leader
     if (n.gang >= 0 && !n.isLeader && rng() < 0.012) {
@@ -2813,15 +2974,45 @@
       const guards = CBZ.guards.filter((g) => alive(g) && dist(n, g) < 8);
       if (guards.length) return guards[Math.floor(rng() * guards.length)];
     }
-    // otherwise: nearest living rival-gang inmate, only if fairly close
-    let best = null, bd = 8 * 8;
+    // A RIVAL IS NOT A REASON. This used to return the nearest living rival
+    // within 8 m, full stop — so two gangs sharing one yard meant permanent
+    // war, since somebody is always within 8 m. Wearing the other colour now
+    // BUILDS beef (see turfFriction) rather than being beef; what comes back
+    // from here is the man this one actually has something with.
+    let best = null, bw = BEEF_SWING;
     for (const a of nearbyNpcs(n, 8, _foeNear)) {
       if (a === n || !alive(a) || a.gang < 0 || a.gang === n.gang) continue;
-      const dx = a.group.position.x - n.group.position.x, dz = a.group.position.z - n.group.position.z;
-      const d2 = dx * dx + dz * dz;
-      if (d2 < bd) { bd = d2; best = a; }
+      const w = beefWith(n, a);
+      if (w > bw) { bw = w; best = a; }
     }
     return best;
+  }
+
+  /* TURF FRICTION — where a gang feud comes from when nobody has swung yet.
+     A rival standing in your set's circle is an insult that accumulates while
+     he stands there, and it accumulates FASTER the worse the standing between
+     the two sets already is. Stand on the wrong grass long enough and someone
+     will eventually have a reason; walk through and nothing happens. That is a
+     feud with a cause and a place, and it costs one cheap check per actor on
+     the wander tick rather than a roll against every neighbour. */
+  function turfFriction(n, dt) {
+    if (n.gang < 0) return;
+    // Accumulate and query on a slow beat rather than once per inmate per
+    // frame — 124 spatial queries every frame to notice a man standing still is
+    // the kind of cost that does not show up until the yard is full. The rate
+    // maths is unchanged because the whole accumulated dt is applied when it
+    // does run.
+    n._turfT = (n._turfT || 0) + dt;
+    if (n._turfT < 0.75) return;
+    dt = n._turfT;
+    n._turfT = 0;
+    for (const a of nearbyNpcs(n, 9, _foeNear)) {
+      if (a === n || !alive(a) || a.gang < 0 || a.gang === n.gang) continue;
+      if (!isOnTurf(n.gang, a.group.position)) continue;    // he is on OUR grass
+      const heat = 1 + Math.max(0, -gangStanding(n.gang)) * 0.02;
+      addBeef(n, a, 1.7 * dt * heat * (0.5 + behaviorOf(n).init * 2));
+      break;                                                // one insult at a time
+    }
   }
 
   function pickTurfTarget(n) {
@@ -2835,6 +3026,10 @@
 
   function startFight(n, foe) {
     n.aiState = "fight"; n.foe = foe; n.hitCD = 0;
+    // THE REASON IS NOW SPENT. Without this the same grievance re-fires the
+    // same fight on every wander tick for as long as it takes to decay, which
+    // is the shape the old dice roll had and the whole point of removing it.
+    spendBeef(n, foe);
     n.interceptTarget = null; n.interceptMode = null; n.interceptT = 0;
     // how the target answers depends on its TEMPERAMENT, not its skill:
     // a Defensive bruiser stands and wrecks you; a Pacifist bolts even
@@ -2842,7 +3037,13 @@
     if (foe.gang != null && foe.aiState && alive(foe) && !foe.foe) {
       const fb = behaviorOf(foe);
       const odds = fightOdds(foe, n);                 // 0..1 the target would win
-      const stand = fb.retaliate * (0.45 + odds * 0.85);
+      // ...and whether he has his OWN reason. A man who has been carrying
+      // something against you does not run when you finally swing: he has been
+      // waiting for it. Without this, most "fights" were one man chasing one
+      // man who bolted, which is why the yard could throw blows and still not
+      // look like it had a fight in it.
+      const mutual = Math.min(1, beefWith(foe, n) / BEEF_SWING);
+      const stand = fb.retaliate * (0.45 + odds * 0.85) + mutual * 0.5;
       if (rng() < Math.min(0.98, stand)) {
         foe.aiState = "fight"; foe.foe = n; foe.hitCD = 0.3;
       } else {
@@ -2861,17 +3062,45 @@
     if (n.gang >= 0) { const f = findFoe(n); if (f) return f; }
     if (b.init < 0.1) return null;                    // peaceful types never go looking
     const reach = b.picksWeak >= 0.9 ? 7 : 9;
-    let best = null, bd = reach * reach;
+    // WHO THIS MAN HAS SOMETHING WITH — not who is closest. Proximity used to
+    // BE the motive here, which is why the yard never stopped swinging.
+    let best = null, bw = BEEF_SWING;
     for (const a of nearbyNpcs(n, reach, _brawlNear)) {
       if (a === n || !alive(a) || a.role === "merchant") continue;
-      if (n.gang >= 0 && a.gang === n.gang) continue; // don't jump your own crew
-      const dx = a.group.position.x - n.group.position.x, dz = a.group.position.z - n.group.position.z;
-      const d2 = dx * dx + dz * dz;
-      if (d2 >= bd) continue;
-      if (b.picksWeak >= 0.85 && fightOdds(n, a) < 0.55) continue; // bullies skip fair fights
-      bd = d2; best = a;
+      // YOU DON'T JUMP YOUR OWN CREW — WITHOUT A REASON. This used to be a
+      // flat skip, which made intra-crew grievance unactionable: an argument
+      // with your own man could book beef forever and never go anywhere. Crew
+      // raises the bar, it does not remove the possibility, because a set that
+      // cannot turn on itself is not a set of people.
+      const bar = (n.gang >= 0 && a.gang === n.gang) ? BEEF_SWING * 1.6 : BEEF_SWING;
+      const w = beefWith(n, a);
+      if (w > bar && w > bw) { bw = w; best = a; }
     }
-    return best;
+    if (best) return best;
+    // PREDATION IS ITS OWN REASON, and it is the one kind of violence that
+    // genuinely needs no history — but it needs an opening. A bully wants a
+    // mark he beats, alone, with nobody in uniform looking. That is a hunt,
+    // not a dice roll, and it is why the fights that do start now start in the
+    // corners of the yard instead of under the tower.
+    if (b.picksWeak < 0.85 || watched(n)) return null;
+    for (const a of nearbyNpcs(n, reach, _brawlNear)) {
+      if (a === n || !alive(a) || a.role === "merchant") continue;
+      if (n.gang >= 0 && a.gang === n.gang) continue;
+      if (fightOdds(n, a) < 0.72) continue;           // he has to be sure he wins
+      if (a.gang >= 0 && bandNear(a, 7) > 1) continue; // not while the mark's crew is around
+      return a;
+    }
+    return null;
+  }
+
+  // how many of this actor's own set are standing near him — an isolated man
+  // is a mark, a man with his crew around him is not.
+  function bandNear(a, r) {
+    let count = 0;
+    for (const o of nearbyNpcs(a, r, _markNear)) {
+      if (o !== a && alive(o) && o.gang >= 0 && o.gang === a.gang) count++;
+    }
+    return count;
   }
 
   function coolWanted(amount) {
@@ -3431,6 +3660,17 @@
     credit(by, "knockdowns");
     credit(actor, "downs");
     actor.ko = 6 + rng() * 4; actor.hp = Math.round((actor.maxHp || 100) * 0.5); actor.aiState = "wander"; actor.foe = null;
+    // PUT A MAN DOWN AND YOU HAVE MADE AN ENEMY — his, and his crew's. This is
+    // the retaliation loop: today's beating is tomorrow's reason, which is what
+    // a yard with a memory feels like from the inside.
+    if (by && by !== CBZ.player) {
+      addBeef(actor, by, 14);
+      if (actor.gang >= 0) {
+        for (const m of nearbyNpcs(actor, 10, _crewNear)) {
+          if (m !== actor && alive(m) && m.gang === actor.gang && m.gang !== by.gang) addBeef(m, by, 5);
+        }
+      }
+    }
     if (actor.gang >= 0 && by === CBZ.player) addGangStanding(actor.gang, -14);
     if (by === CBZ.player) addBuzz("fear", 12, actorName(actor));
     if (CBZ.knockback && by) CBZ.knockback(actor, by.group.position.x, by.group.position.z, 0.8);
@@ -3446,7 +3686,18 @@
     f.hp -= (4 + rng() * 5) * (0.55 + nf / 80) * (1 - ft / 320);
     n.hp -= ((guardish ? 7 : 3) + rng() * 4) * (0.55 + ff / 80) * (1 - nt / 320);
     if (guardish) f.alert = 2.5;
-    CBZ.sfx && CBZ.sfx("punch");
+    // BEING HIT IS A REASON. This is where most of the yard's beef is booked,
+    // and it is why violence here comes back around: the man on the receiving
+    // end of a beating remembers who gave it to him long after this fight ends.
+    addBeef(f, n, 3.2);
+    // TWO OTHER MEN FIGHTING IS NOT A SOUND IN YOUR HEAD. This was a bare
+    // CBZ.sfx("punch") — no distance — and with the yard's two or three
+    // standing brawls each swinging every 0.7 s it measured 90 full-volume
+    // body impacts per minute while the player stood still doing nothing
+    // (tools/sound-census.mjs). CBZ.worldSfx gives the blow the place it
+    // always had: attenuated by range, silent past 42 m, one voice for the
+    // whole yard, and the NEAREST fight owns that voice.
+    if (CBZ.worldSfx) CBZ.worldSfx("punch", n.group.position.x, n.group.position.z, { y: n.group.position.y });
     if (f.hp <= 0 && alive(f)) down(f, n);
     if (n.hp <= 0 && alive(n)) down(n, f);
   }
@@ -3461,6 +3712,12 @@
       n.memory.t -= dt;
       if (n.memory.t <= 0) n.memory = null;
     }
+    // grudges between inmates cool, and standing on a rival's grass heats.
+    // Both are cheap and both run every frame because a feud is a pressure,
+    // not an event: it is what makes the fight that eventually happens land
+    // as the consequence of something the player could have watched building.
+    fadeBeef(n, dt);
+    if (n.aiState !== "fight") turfFriction(n, dt);
     if (n.blockRead && n.blockRead.t > 0) {
       n.blockRead.t -= dt;
       if (n.blockRead.t <= 0) n.blockRead = null;
@@ -3930,6 +4187,17 @@
             emote(n, rng() < 0.4 ? "" : rng() < 0.5 ? "" : "♥");
             gossip(n, p);
             if (n.aiState === "snitch") return n.baseSpeed * 1.85;
+            // IT TURNED. A fight that starts out of a conversation is the one
+            // the player can see coming, so this is where it is allowed to
+            // start — not on some later wander tick in a different corner of
+            // the yard. Crew or not: the man is named by the argument, so the
+            // "never jump your own crew" default does not apply to him.
+            if (argue(n, p)) {
+              const want = wantsToSwing(n, p);
+              if (want > 0 && rng() < want) { startFight(n, p); break; }
+              if (rng() < 0.3) { n.aiState = "wander"; n.social = null; n.aiTimer = 0.4 + rng(); } // walked off
+              break;
+            }
             // a neutral drifter sometimes gets recruited
             if (n.gang < 0 && p.gang >= 0 && rng() < 0.3) { n.gang = p.gang; addBand(n, n.gang); emote(n, ""); }
             if (rng() < 0.45) { n.aiState = "wander"; n.social = null; }
@@ -3969,17 +4237,18 @@
       default: { // wander
         if (n.aiTimer <= 0) {
           n.aiTimer = 1.5 + rng() * 3;
-          // re-evaluate: pick a fight, make a run for it, or just roam.
-          // WHETHER they start a fight is governed by temperament (init),
-          // tempered by how the matchup looks (capability vs the target).
+          // re-evaluate: settle something, make a run for it, or just roam.
+          // WHETHER they start a fight is now the answer to "does this man
+          // have a reason, and is anyone watching" (wantsToSwing) instead of a
+          // roll against temperament and how close somebody was standing.
           const b = behaviorOf(n);
           const foe = findBrawlTarget(n);
           if (foe) {
-            let p = b.init * (0.55 + ((n.ratings && n.ratings.fighting) || 50) / 100);
-            const odds = fightOdds(n, foe);
-            if (b.picksWeak > 0) p *= 0.25 + b.picksWeak * odds * 1.7;  // bullies want the edge
-            else p *= 0.7 + odds * 0.5;                                 // others mildly prefer winnable fights
-            if (rng() < Math.min(0.6, p)) { startFight(n, foe); break; }
+            const want = wantsToSwing(n, foe);
+            if (want > 0 && rng() < want) { startFight(n, foe); break; }
+            // A REASON YOU DON'T ACT ON IS STILL A REASON: he holds the look,
+            // the beef stays booked, and it fades or it comes due later.
+            if (want > 0 && rng() < 0.3) emote(n, "!");
           }
           const pal = findPal(n);
           if (pal && rng() < 0.45) { n.aiState = "socialize"; n.social = pal; break; }

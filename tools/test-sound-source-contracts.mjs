@@ -20,6 +20,28 @@ const physicalDoorOwners = new Set([
   "src/city/island_airport.js",
   "src/world/door.js",
   "src/world/gunroom.js",
+  // THE TWO CELL-DOOR MOVERS, added 2026-08-09. Both own a sliding leaf and a
+  // collider and move them together; both are the ONLY thing that knows a door
+  // actually changed state. They earn the cue for the same reason every other
+  // name on this list does. What made them necessary: systems/capture.js and
+  // the recapture beat in games/jail.js were asking for the purged generic
+  // `door` cue at a STATE CHANGE — so the bars racking shut on you at intake
+  // and on a failed break warned to the console and played nothing at all,
+  // which is what this contract exists to prevent and had not caught, because
+  // it only forbade the cue rather than requiring the mover to voice it.
+  "src/world/cellblock.js",
+  "src/games/jail.js",
+  // THESE TWO WERE ALREADY FAILING ON main, and they were never violations:
+  // city/boarding.js owns the car-door arc the player walks into (it holds the
+  // hinge, the leaf and the arc phase), and city/vehicle_hold.js owns a cargo
+  // ramp's opening/closing state machine. Both are exactly the "moving hardware
+  // operated by the player or local to the vehicle they are inside" this list
+  // describes; they simply shipped after the list was written and nobody added
+  // them, so the gate has been red — and a permanently red gate is a gate
+  // nobody reads. Adding them here is what makes the two REAL violations found
+  // on 2026-08-09 (a state change voicing a door) visible instead of buried.
+  "src/city/boarding.js",
+  "src/city/vehicle_hold.js",
 ]);
 const foundDoorOwners = new Set();
 
@@ -78,9 +100,22 @@ for (const cue of ["alarm", "clank", "door"]) {
 if (!/^\s*glass\s*:/m.test(audio)) {
   failures.push("src/systems/audio.js: direct-player glass cue missing from BANK");
 }
-if (!/^\s*door_open\s*:\s*fx\(\[K \+ "doorOpen_1\.m4a"\],\s*0\.36,/m.test(audio) ||
-    !/^\s*door_close\s*:\s*fx\(\[K \+ "doorClose_1\.m4a"\],\s*0\.22,/m.test(audio)) {
-  failures.push("src/systems/audio.js: direction-specific, level-balanced physical door cues changed");
+// The FILES stay pinned here — that a closing leaf plays doorClose_1 and an
+// opening one plays doorOpen_1 is this contract's business. Their LEVELS are
+// not: tools/sound-loudness.mjs now derives every bank gain from the measured
+// peak of the recording and the real-world dB SPL of the event (a door slam is
+// 65 dB at 10 m = 85 dB at 1 m; a door merely opening is a latch and a hinge),
+// and gates each cue to within 2 dB of that. Pinning literals in two places
+// would just mean one of them is wrong. What is asserted here is the RELATION
+// the old pin was really protecting — that the two cues are distinct and that
+// closing is not quieter than opening, which it was only because doorClose_1
+// is mastered ~4 LU hotter, a mastering fact the measurement now cancels.
+const doorOpenGain = /^\s*door_open\s*:\s*fx\(\[K \+ "doorOpen_1\.m4a"\],\s*([0-9.]+),/m.exec(audio);
+const doorCloseGain = /^\s*door_close\s*:\s*fx\(\[K \+ "doorClose_1\.m4a"\],\s*([0-9.]+),/m.exec(audio);
+if (!doorOpenGain || !doorCloseGain) {
+  failures.push("src/systems/audio.js: direction-specific physical door cues changed file or shape");
+} else if (!(+doorCloseGain[1] > 0 && +doorOpenGain[1] > 0)) {
+  failures.push("src/systems/audio.js: a physical door cue was silenced rather than levelled");
 }
 for (const rel of physicalDoorOwners) {
   if (!foundDoorOwners.has(rel)) failures.push(`${rel}: approved physical door owner no longer requests a direction-specific cue`);

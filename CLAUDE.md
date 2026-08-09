@@ -12,6 +12,7 @@ the repo root of `main`, so **pushing to main IS the deploy** and anything in
 - `engine-systems.md` — shared systems: REUSE, never re-invent
 - `sessions.md` — dated wave reports and measured ratchets
 - `gpt-handoffs.md` — GPT diagnostics, open issues 28–121
+- `sound.md` — what may make a noise, how loud, and why (the dB scheme + ratchets)
 - `project.md` — deploy details, doc map
 
 Also `GAMEPLAN.md`, `docs/plan/`, `PROCGEN.md`.
@@ -162,6 +163,44 @@ none of the city bookkeeping. Wrap `cityExplosion`; never wrap `cityBlastCore`.
 
 Ratchet: `CBZ.modeCapsAudit().unrouted` — modes declared blast-capable whose
 people a blast cannot reach. **Pinned at 0** in `tools/math-gate.mjs`.
+
+## A SOUND HAS A PLACE AND A DECIBEL — `docs/claude/sound.md`
+
+**"He hears punches from any distance at the same volume"** (owner, 2026-08-09).
+Measured, mode escape, player standing still: `punch` at **90 requests/minute,
+100% of them global** — `exchangeBlows` voiced every NPC-vs-NPC blow with a bare
+`CBZ.sfx()`, so a fight anywhere in an 84×110 m yard landed at full volume in
+your skull. Three surfaces now, and the choice is mechanical:
+
+| you are voicing | use |
+|---|---|
+| something **you** did | `CBZ.sfx(name)` — global, you are where the listener is |
+| something that happened **to you** | `CBZ.sfxAt(name, x, z)` — the shared (gun) curve |
+| something **someone else** did | `CBZ.worldSfx(name, x, z)` — near-field rolloff, one voice per cue, nearest wins |
+
+`worldSfx` does NOT reuse the shared curve: that is the gun curve, still 84% at
+42 m, right for a rifle and absurd for a fist. Foley gets its own inverse-square
+rolloff (half at 8 m) and below 6% is not requested at all.
+
+**EVERY BANK GAIN IS A REAL DECIBEL.** Measured, the bank had **a dropped coin
+at −6.7 dBFS and a punch at −17.7** — eleven decibels the wrong way, against
+thirty the other way in the real world — and 26 of 33 cues sat above the master
+compressor's −12 dBFS threshold, where 5:1 flattened a gunshot and a coin to
+within a couple of dB. Gains are now derived from measured real-world SPL (3M
+Noise Navigator) through `target dBFS = −0.2 + (dB SPL − 170) × 0.2`. Cues above
+the threshold: **26 → 3**. Three documented exceptions, each a decision.
+
+**A REPEATING SOUND IS USUALLY A REPEATING WORLD.** The census samples what the
+world is DOING beside what it plays, because the punch spam was the audible half
+of 7.3 of 124 inmates fighting at every instant, forever — violence needed no
+cause (`findFoe` = any rival within 8 m). Fixed at the root in `entities/ai.js`
+(BEEF): a fight needs a REASON booked by things that already happen, and an
+OPENING (`CBZ.guardWatching`). Not a cap — a cap is the same arbitrary violence
+with a quota on it.
+
+Tools: `tools/sound-census.mjs [--gate]` · `tools/sound-loudness.mjs [--gate]`.
+Headless Chromium has no AAC decoder, so both ratchets are pinned on numbers
+stamped before the decoder (engine counters, `.ogg` twins).
 
 ## THE CHARGE TABLE — real breaching math, shared by every game
 

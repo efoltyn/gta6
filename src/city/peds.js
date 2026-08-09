@@ -3216,7 +3216,13 @@
       const beat = IQ && IQ.melee ? IQ.melee(att, tgt, dt || 0.016, { reach: 1.85 }) : null;
       if (beat && beat !== "swing") { att.attackCD = 0; return; }
       att.attackCD = 0.5 + rng() * 0.4;
-      if (CBZ.sfx) CBZ.sfx("punch");
+      // Same law as the yard brawl (entities/ai.js): a punch thrown by someone
+      // who is not you is world foley, so it goes through CBZ.worldSfx and
+      // carries a distance. A street beef three blocks away used to land at
+      // full volume in your ear. Player-thrown blows keep CBZ.sfx — city/
+      // combat.js — because those genuinely happen where the listener is.
+      if (tgt.isPlayer) { if (CBZ.sfxAt) CBZ.sfxAt("punch", att.pos.x, att.pos.z); }
+      else if (CBZ.worldSfx) CBZ.worldSfx("punch", att.pos.x, att.pos.z, { y: att.pos.y });
       hurtActor(att, tgt, 16 + rng() * 8, true);
     } else if (att._iqM && IQ && IQ.meleeReset) {
       IQ.meleeReset(att);                                  // out of the bout — drop the beat state

@@ -3099,3 +3099,89 @@ Flag `MAP_TOUCH_LABELS` (one line, reverts every site — which is why the
 **NOT DONE, same bug:** the Gang Life, Disaster Survival and Gun Game title
 cards still carry key-cap-only Controls grids. The owner asked about the prison;
 those three want the same `.keys-touch` twin.
+
+## 2026-08-09 — THE YARD NEVER STOPPED SWINGING (and the mixer had no hierarchy)
+
+Owner: *"The prison game spams annoying sounds. One very annoying sound… make
+the sounds much more intentional."* Then, on the first pass: *"He hears punches
+from any distance at the same volume. It's the fact that you can hear it. It's
+not muting it."* Then: *"Compare the decibel level in real life of a gumdrop
+versus a punch."* Then, decisively: *"The spamming of punches is not a sign of
+the audio being as much of a problem, but also maybe the NPCs."*
+
+Four statements, four separate bugs, every one of them real. Full write-up and
+sources in `docs/claude/sound.md`; this is the evidence.
+
+**Found in 45 headless seconds, not by listening.** `tools/sound-census.mjs`
+boots the real page into the escape run, turns on the F8 sound-review feed
+(which already recorded cue + asset + original caller) and counts. Mode
+`escape`, player standing still in a cell:
+
+    punch   90.5 requests/min   100% global   src/entities/ai.js:3449
+
+`exchangeBlows` voiced every NPC-vs-NPC blow with a bare `CBZ.sfx("punch")` —
+no position — so a fight anywhere in an 84x110 m compound landed at full volume
+in the player's skull.
+
+**A sound must have a place.** `CBZ.worldSfx(name, x, z)` is the third surface
+beside `sfx` (you did it) and `sfxAt` (it happened to you). It does not reuse
+the shared distance curve: that is the *gun* curve, still 84% at 42 m, correct
+for a rifle report and absurd for a fist. World foley gets its own near-field
+rolloff (half at 8 m, a fifth at 16 m) and is not requested at all below 6%.
+One cue is one voice across the whole world, and a closer emitter takes the
+voice off a farther one.
+
+**A sound must be worth its loudness.** `tools/sound-loudness.mjs` decodes all
+61 bank files in a real browser (the `.ogg` twins — headless Chromium has no
+AAC decoder) and measures them. The bank said **a dropped coin at -6.7 dBFS and
+a punch at -17.7 dBFS: eleven decibels the wrong way**, against a real-world
+gap of thirty decibels in the other direction. And **26 of 33 cues sat above the
+master compressor's -12 dBFS threshold**, where 5:1 squashed a gunshot and a
+coin to within a couple of dB of each other. Gains are now derived from measured
+real-world SPL (3M Noise Navigator, 1700+ measurements) through one documented
+mapping, anchored at the loud end so perceived volume does not move. Cues above
+the threshold: **26 → 3**. Ratchet: `tools/sound-loudness.mjs --gate`, every cue
+within 2 dB of its target, three named exceptions.
+
+**A cue must exist.** `CBZ.sfx("door")` was still called from three sites
+including the prison intake, months after `door` was split into
+`door_open`/`door_close`. An unmapped cue is a warning and silence — the bars
+racking shut on you at booking had not played at all.
+
+**And the sound was the symptom.** The census samples what the world is DOING
+beside what it is playing, and the world was doing this:
+
+    124 inmates alive     7.3 of them in `fight` at any instant
+
+Three and a half brawls, running continuously, forever. The root: violence
+needed no cause. `findFoe` returned any rival within 8 m, `findBrawlTarget`
+returned any man within 9 m, and the wander tick rolled on that every 1.5-4.5 s
+per inmate — so the condition for a fight was *being in the yard*, and everyone
+is always in the yard. **Not fixed with a cap.** A budget would have been the
+same arbitrary violence with a quota on it. A fight now needs what a fight
+needs: a REASON (beef, booked per pair by things that already happen — he hit
+me, he put my crewmate down, he is standing on our turf, the conversation
+turned) and an OPENING (`CBZ.guardWatching`, the guards' own vision cone from
+`entities/guards.js` asked about a patch of yard instead of about the player;
+`guts` decides how much a man cares he is being watched). Starting a fight
+SPENDS the beef; losing one BOOKS fresh beef on the winner, so violence comes
+back around later instead of restarting every three seconds. The grudge idea is
+not new here — the prison already tracked exactly this against the player
+(`n.playerGrudge`, 130 sites) and tracked nothing at all between two inmates.
+
+Measured over a 300 s window, same probe, same seed path:
+
+    fighting inmates   7.3 -> 2.3        blows thrown   90/min -> 31/min
+
+The owner's call on the amount: *"somewhere in between"* — keep the causes,
+land between the permanent riot and the near-pacifist yard the first cut
+produced. So the numbers that were raised to get there are the ones that say
+HOW MUCH REASON IS ENOUGH and how long the yard remembers (grudge decay,
+how readily talk sours, how fast a rival on your grass grates), never a
+probability of violence and never a quota on it. Two of the four came out of
+measurement rather than taste: an argument that does not escalate spreads a
+thin film of resentment over the whole yard instead of concentrating on one
+pair, and a man with his own grudge does not bolt when you finally swing at
+him — without that second one, most "fights" were one man chasing one man who
+ran, which is how a yard can throw blows and still not look like it has a
+fight in it.

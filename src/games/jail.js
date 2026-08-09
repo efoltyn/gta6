@@ -893,9 +893,19 @@
     const i = arr.indexOf(cell.doorCol);
     if (locked && i < 0) arr.push(cell.doorCol);
     else if (!locked && i >= 0) arr.splice(i, 1);
+    const moved = cell.locked !== !!locked;
     cell.locked = !!locked;
     if (cell.bars) cell.bars.visible = !!locked;
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    // The door speaks HERE, from the hardware, because that is the only place
+    // that knows a leaf actually moved. recapture() used to shout its own cue
+    // at the end of a state change — and for months it shouted a cue name that
+    // no longer existed, so the bars slamming on a failed break played nothing.
+    // Voicing the mover covers that beat and the eight other callers for free.
+    if (moved && CBZ.worldSfx) {
+      const w = W(cell.lx, cell.lz);
+      CBZ.worldSfx(locked ? "door_close" : "door_open", w.x, w.z, { ref: 14 });
+    }
   }
 
   /* deferred cast (arena root/peds land after our order-88 build) */
@@ -1162,7 +1172,8 @@
     feed((byName ? byName + " drags you back. " : "Dragged back. ") + "+" +
       Math.round(RECAP_PENALTY * PRISON_SCALE) + "s inside, and the van's early.", "#ff9a9a");
     if (CBZ.shake) { try { CBZ.shake(0.7); } catch (e) {} }
-    if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} }
+    // (the bars shutting behind you are voiced by setDoor above — the leaf,
+    // not the beat that asked for it.)
   }
 
   /* ---- the PRY: physical escape, gated by real guard sightlines ---------- */

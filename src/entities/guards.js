@@ -960,24 +960,40 @@
   // ---- line-of-sight test ----
   const raycaster = new THREE.Raycaster();
   const _ro = new THREE.Vector3(), _rd = new THREE.Vector3();
-  function guardSees(g) {
+  // ONE cone test, two questions. It always answered "can this screw see the
+  // PLAYER" because the player was the only thing in the prison worth hiding
+  // from — but an inmate deciding whether to start something cares about the
+  // same cone over a different patch of yard, and that is what makes a yard
+  // read like a prison instead of a pit: violence happens where the screws
+  // aren't looking. Same geometry, same LOS raycast, same blind conditions.
+  function guardSeesPoint(g, x, y, z, shrink) {
     if (g.dead || g.ko > 0 || g.bribed > 0) return false;   // dead, down, or bribed = blind
     if (g.corrupt && CBZ.game && (CBZ.game.racketProtectionT || 0) > 0) return false;
     const gx = g.group.position.x, gz = g.group.position.z;
-    const dx = player.pos.x - gx, dz = player.pos.z - gz;
+    const dx = x - gx, dz = z - gz;
     const dist = Math.hypot(dx, dz);
     let vd = g.viewDist;
-    if (player.crouch) vd *= 0.55;            // crouching shrinks spot range
+    if (shrink) vd *= shrink;                 // crouching shrinks spot range
     if (dist > vd || dist < 0.05) return false;
     const yaw = g.group.rotation.y;
     const dot = (Math.sin(yaw) * dx + Math.cos(yaw) * dz) / dist;
     if (dot < Math.cos(g.half)) return false; // outside the cone angle
     _ro.set(gx, 1.5, gz);
-    _rd.set(dx, player.pos.y + 1.0 - 1.5, dz).normalize();
+    _rd.set(dx, y + 1.0 - 1.5, dz).normalize();
     raycaster.set(_ro, _rd);
     raycaster.far = Math.max(0.1, dist - 0.4);
     if ((CBZ.losRaycast ? CBZ.losRaycast(raycaster, CBZ.losBlockers) : raycaster.intersectObjects(CBZ.losBlockers, false)).length > 0) return false; // cover
     return true;
+  }
+  function guardSees(g) {
+    return guardSeesPoint(g, player.pos.x, player.pos.y, player.pos.z, player.crouch ? 0.55 : 0);
+  }
+  // "Is anyone in uniform watching this spot?" — the question an inmate asks
+  // before starting something, and the reason the fights that do happen happen
+  // in the blind corners rather than in front of the tower.
+  function guardWatching(x, y, z) {
+    for (const g of CBZ.guards || []) if (guardSeesPoint(g, x, y || 0, z, 0)) return g;
+    return null;
   }
 
   // ---- CBZ.jailBoost — ONE shared ledger for "temporarily boost an actor's
@@ -1059,6 +1075,8 @@
   CBZ.addRacketStanding = addRacketStanding;
   CBZ.racketStanding = racketStanding;
   CBZ.guardSees = guardSees;
+  CBZ.guardSeesPoint = guardSeesPoint;
+  CBZ.guardWatching = guardWatching;
   CBZ.spawnGuard = makeGuard;   // systems/reinforcements.js spawns extra patrols
 
   // drive all guards every playing frame
