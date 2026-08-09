@@ -88,6 +88,53 @@ const results = [];
 function check(name, cond, detail) { results.push({ name, ok: !!cond, detail }); console.log((cond ? "  ok  " : "FAIL  ") + name + (detail != null ? "  " + detail : "")); }
 function bad(r) { return !r || typeof r !== "object" || r.__err != null; }
 function why(r) { return (r && r.__err) ? ("threw: " + String(r.__err).split("\n")[0]) : JSON.stringify(r); }
+
+// MEASURED FIRST, ON THE PRISON AS BOOTED. This block ran last and read
+// 227%: by then the suite had spawned test actors and switched into
+// gungame, whose bots live in CBZ.npcs too. A population assertion has to
+// be taken before the suite starts editing the world it is measuring.
+{
+  /* THE PRISON HOLDS WHO IT CAN SLEEP (2026-08-09).
+
+     Owner: "There's too many fucking people" — the second time, MASS_CROWD
+     having already been cut 900 -> 140 for the first. The headcount was five
+     constants in four files and not one of them could see that the wing has
+     thirteen cells; measured, the yard ran ~207 bodies against 26 bunks, about
+     800% of the only housing in the world. These assertions exist so the
+     number can never go back to being typed: what the building sleeps is a
+     FACT it publishes, and the anonymous tiers are the remainder of a
+     subtraction against it.
+
+     `occupancy` is reported rather than merely bounded, because it is the
+     honest number: the NAMED cast alone runs this wing at ~185%, which is
+     California's pre-Plata figure (Brown v. Plata, 563 U.S. 493) and about as
+     overcrowded as a real prison has ever been made to answer for. The cap
+     here is 2.0 — past that the world is describing something that is not a
+     prison, and the fix is cells, not a smaller cast. */
+  const r = await evl(`
+    if (!CBZ.prisonPopulationAudit || !CBZ.prisonBeds) return { no: true };
+    const a = CBZ.prisonPopulationAudit(), w = CBZ.prisonBeds();
+    return { a: a, w: w };
+  `);
+  if (bad(r) || r.no) check("population: the wing publishes what it sleeps", false, why(r));
+  else {
+    check("population: the building states its own capacity",
+      r.w.cells > 0 && r.w.beds === r.w.cells * r.w.perCell && r.w.houses > 0,
+      JSON.stringify(r.w));
+    check("population: the headcount is derived, not typed",
+      r.a.derived === true && r.a.explicit === false,
+      JSON.stringify({ derived: r.a.derived, explicit: r.a.explicit, ambient: r.a.ambient }));
+    // the load-bearing one: no ANONYMOUS body may be added to a prison that
+    // already cannot sleep the men in it.
+    check("population: the anonymous tier never exceeds the beds left over",
+      r.a.ambient === Math.max(0, r.w.houses - (r.a.rigs + r.w.cells - r.a.ambient)) || r.a.ambient === 0,
+      JSON.stringify({ ambient: r.a.ambient, houses: r.w.houses, rigs: r.a.rigs }));
+    check("population: occupancy stays inside the worst real prison on record",
+      r.a.occupancy > 0 && r.a.occupancy <= 2.0,
+      `${(r.a.occupancy * 100).toFixed(0)}% of design capacity — ${r.a.live} men, ${r.w.beds} bunks, ${r.a.guards} staff`);
+  }
+}
+
 const step = (n) => evl(`for(var i=0;i<${n | 0};i++) CBZ.stepSim(1/60); return true;`);
 
 // ---- 0. THE HUD SAYS ONLY WHAT IS TRUE -----------------------------------

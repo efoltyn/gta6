@@ -489,7 +489,27 @@
      (set before load). The LOD + AI time-slicing in updateNpc + the O(n) grid
      separation keep it smooth; per-part InstancedMesh is the next step to
      push this into the thousands. */
-  const CROWD = (typeof CBZ.JAIL_CROWD === "number") ? CBZ.JAIL_CROWD : 14;
+  /* HOW MANY EXTRAS THE BUILDING CAN STILL SLEEP.
+
+     JAIL_CROWD is the same kind of body as MASS_CROWD — an anonymous inmate
+     with no name, no history and no part in the story — so it answers to the
+     same fact, and for the same reason: the wing has thirteen cells, and the
+     count that put ~207 men in front of them could not see that. Load order
+     makes it exact (index.html: cellblock 456 -> this file 535): the wing is
+     built, the named ROSTER above is already on the floor, and what is left is
+     arithmetic. See world/cellblock.js's prisonBeds block for the occupancy
+     figures and their source.
+
+     The NAMED cast is deliberately NOT trimmed here. Those men are the game —
+     they have faces, tempers and grudges — and where they overshoot the wing,
+     the honest answer is a bigger wing, not a shorter cast. CBZ.prisonPopulationAudit()
+     prints that overshoot as a live number so it stays visible instead of
+     becoming folklore. An explicit CBZ.JAIL_CROWD (someone typing a count on
+     purpose) still wins. */
+  const wing = CBZ.prisonBeds ? CBZ.prisonBeds() : null;
+  const CROWD = (typeof CBZ.JAIL_CROWD === "number" && CBZ.JAIL_CROWD_EXPLICIT) ? CBZ.JAIL_CROWD
+    : (wing ? Math.max(0, wing.houses - CBZ.npcs.length - wing.cells)
+            : ((typeof CBZ.JAIL_CROWD === "number") ? CBZ.JAIL_CROWD : 14));
   (function spawnCrowd(count) {
     let s = 0x4a1f7b;
     const rr = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };

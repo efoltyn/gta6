@@ -164,6 +164,32 @@ none of the city bookkeeping. Wrap `cityExplosion`; never wrap `cityBlastCore`.
 Ratchet: `CBZ.modeCapsAudit().unrouted` — modes declared blast-capable whose
 people a blast cannot reach. **Pinned at 0** in `tools/math-gate.mjs`.
 
+## THE PRISON HOLDS WHO IT CAN SLEEP — `CBZ.prisonBeds()`
+
+**"There's too many fucking people"** (owner, 2026-08-09) — the second time,
+`MASS_CROWD` having already been cut 900 → 140 for the first. The headcount was
+**five constants in four files** (`MASS_CROWD` · `JAIL_CROWD` · npc.js's 30-name
+`ROSTER` · one resident per cell · 12 guard posts) and not one could see that
+the wing has **thirteen cells**. Measured: ~207 bodies against **26 bunks** —
+about 800% of the only housing in the world. Not overcrowded, impossible.
+
+A prison is the one place where this ratio is litigated, so the number is not
+taste: *Brown v. Plata* (563 U.S. 493, 2011) found California at ~185% of design
+capacity and capped it at **137.5%**. `world/cellblock.js` publishes
+`CBZ.prisonBeds()` — cells × bunks × occupancy — and both ANONYMOUS tiers are
+now the REMAINDER of a subtraction against it (`entities/ambientstate.js`,
+`entities/npc.js`), exact because of load order (cellblock 456 → guards 528 →
+npc.js 535 → ambientstate 559). The NAMED cast is never trimmed: those men are
+the game, and where they overshoot the answer is a bigger wing. An explicit
+`CBZ.MASS_CROWD`/`JAIL_CROWD` still wins — overruling is a decision, not a drift.
+
+    bodies in a 60° cone     69 → 20        ambient tier   140 → 0
+    live inmates            124 → 50        occupancy     ~800% → 192%
+
+**THE LEVER IS CELLS, NOT A CONSTANT.** Ratchet: `tools/prison-polish-check.mjs`
+— capacity published, headcount derived not typed, no anonymous body added to a
+prison that cannot sleep the men in it, occupancy ≤ 200%.
+
 ## A SOUND HAS A PLACE AND A DECIBEL — `docs/claude/sound.md`
 
 **"He hears punches from any distance at the same volume"** (owner, 2026-08-09).
