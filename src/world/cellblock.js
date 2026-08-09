@@ -1044,6 +1044,45 @@
   };
 
   /* ==========================================================
+     WHAT THIS PRISON CAN SLEEP — the fact every population number owes.
+
+     OWNER, 2026-08-09: "There's too many fucking people." He had said it
+     before: MASS_CROWD was cut 900 -> 140 for the same complaint. Cutting it
+     again would have been the third guess at a number that was never
+     answerable to anything, and that is the actual bug. Measured, the prison
+     ran ~207 bodies — 140 instanced ambient + ~55 rigs + 12 guards — set by
+     five constants in four files (MASS_CROWD, JAIL_CROWD, npc.js's 30-name
+     ROSTER, this wing's cast, guards.js's posts). Not one of them could see
+     the building.
+
+     THE BUILDING SLEEPS 26. Thirteen cells, each drawn double-bunked (the
+     top bunk gets its own bedding in bunkRig, which is what makes it a bunk
+     rather than a bed). So the yard was running at ~800% of the only housing
+     in the world — not "overcrowded", IMPOSSIBLE: there was nowhere for a
+     hundred and eighty of them to lie down.
+
+     A prison is the one place where this is a measured, litigated ratio.
+     Population is stated against DESIGN CAPACITY: Brown v. Plata (563 U.S.
+     493, 2011) put California's system at ~156k against an 85k design — about
+     185% — and the three-judge order capped it at 137.5%, which is the
+     constitutional ceiling a US prison may legally run at. So OCCUPANCY is
+     not taste; 1.85 is the worst real system anyone has had to litigate, and
+     this wing is deliberately at that end because an overcrowded prison is
+     the setting. Beyond it the number stops describing a prison.
+
+     THE LEVER IS CELLS, NOT A CONSTANT. Want a packed yard again? Build a
+     housing unit — the south block has a chow hall and a dayroom and no beds
+     at all — and the population follows on its own, everywhere, at once.
+     ========================================================== */
+  const BUNKS_PER_CELL = 2;          // bunkRig draws and beds the top rack
+  const OCCUPANCY = 1.85;            // design capacity multiplier — see above
+  CBZ.prisonBeds = function () {
+    const beds = cells.length * BUNKS_PER_CELL;
+    return { cells: cells.length, perCell: BUNKS_PER_CELL, beds: beds,
+      occupancy: OCCUPANCY, houses: Math.round(beds * OCCUPANCY) };
+  };
+
+  /* ==========================================================
      12. THE RATCHET. Numbers, not screenshots. Everything here is a hard
          invariant of THIS file's own colliders, so a regression cannot be
          blamed on world/door.js or the yard.
