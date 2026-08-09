@@ -93,7 +93,17 @@ every time. The real rules:
   armory's slot-per-weapon and take-it-off-the-wall contract, LOS through an
   OPENED door — the losgrid mover trap — the tight-space first-person rule with
   its hysteresis and its player-outranks-it clause, and the "a zero is not news"
-  HUD panels; ~2 min, 22 assertions).
+  HUD panels; ~2 min, 22 assertions),
+  `tools/touch-keycap-check.mjs` (**NO KEYBOARD ⇒ NO KEY LEGEND**: boots the
+  prison twice over the same page — once as a mouse, once as a REAL emulated
+  iPad via `Emulation.setTouchEmulationEnabled` + `setDeviceMetricsOverride`
+  and a reload, so `touch.js`'s own coarse-pointer line fires `enable()` and
+  the `@media (pointer: coarse)` rules actually apply — then regex-scans the
+  rendered text of every VISIBLE node in the map, the waypoint arrow, the
+  rankings panel and the title briefing. Asserts zero key caps on touch, the
+  legends still present on a mouse, and that each stripped sentence left a real
+  ≥44 px verb behind. ~3 min, 20 assertions. Copy its two-pass shape whenever a
+  fix is "different on touch": one pass proves nothing).
 - **A probe written twice becomes a tool.** If a task needs a bespoke CDP
   script a second time, promote it into the shelf (or a visual-compare
   preset) rather than retyping it. Tool speed is a feature: a shaved boot

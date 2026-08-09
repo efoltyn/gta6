@@ -418,7 +418,10 @@
     // the same event. The boxed hotbar chip lighting up IS "equipped", so that
     // half of the line is deleted outright.
     if (CBZ.pickupNote) { try { CBZ.pickupNote(slot.name, { rare: true }); } catch (e) {} }
-    else tellHint((first ? "Picked up " : "Equipped ") + slot.name + " — Q/wheel swaps.", 1.8);
+    // (fallback only — pickupNote owns this normally.) "Q/wheel" is a keyboard
+    // and a mouse; a thumb has the swap button, which the hotbar already shows.
+    else tellHint((first ? "Picked up " : "Equipped ") + slot.name +
+      (CBZ.touchMode ? "." : " — Q/wheel swaps."), 1.8);
   }
 
   // ==================================================================
@@ -832,8 +835,14 @@
                   // which is not a key, an org or a power rung, so no
                   // generated sentence can ever mention it. This one does, in
                   // fewer characters than the ledger's used to take.
+                  // "[E]" names a key an iPad does not have, and the pill
+                  // raised above already says "Saw the padlock" in words —
+                  // so on touch the sentence keeps the FACT and drops the
+                  // instruction, exactly as crates.js/prisondrops.js do.
+                  const pilled = saw && CBZ.touchMode && CBZ.prisonPrompt;
                   tellHint(saw
-                    ? "Padlocked. Hold [E] to saw through it."
+                    ? (pilled ? "Padlocked. That blade will go through it."
+                              : "Padlocked. Hold [E] to saw through it.")
                     : "Padlocked — the Warden has that key. Or find something that cuts.", 1.5);
                 }
               }

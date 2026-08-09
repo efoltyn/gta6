@@ -144,6 +144,21 @@ Before building anything adjacent, wire into the existing system:
   `Lv.N Title` overhead pill (`aim_dossier.js`), full data stays
   available via `CBZ.cityActorDossier()`. Never render keyboard key
   glyphs on touch (`CBZ.touchActionPrompt` re-skins prompts).
+- **NO KEYBOARD ⇒ NO KEY LEGEND, and the replacement is a VERB** (owner,
+  2026-08-09, prison on an iPad). The rule above is old; what kept breaking is
+  that it was applied one element at a time. Two things make it stick. **(1) One
+  decision per surface, re-run.** `fullmap.js`'s `keycaps()` owns all four map
+  sites and `dashboard.js`'s `hintHtml()` owns the rankings header — each off a
+  single live `CBZ.touchMode` read, re-run on every render, never once at init
+  (`touch.js` can raise the latch mid-session, and the waypoint arrow renders
+  without the map ever opening). **(2) Never just delete the sentence.** If the
+  key it named was the only route — `[Space] clear waypoint` was the map's only
+  clear, `Esc — close` the rankings panel's only exit — stripping it reads as
+  fixed and is worse. Ship the ≥44 px tap target the sentence was standing in
+  for, wired to the SAME handler the key drives. Flag `MAP_TOUCH_LABELS`;
+  gate `tools/touch-keycap-check.mjs` (mouse pass + real emulated-iPad pass,
+  regex over every visible node, so a NEW legend fails there and not on the
+  owner's iPad). Still owed: the city / survival / gungame title cards.
 - **The map is laid out on purpose** — `CBZ.CONFIG.WORLD_LAYOUT_V2` +
   `SPREAD_V3` in `src/world/layout.js`, the rim-relief law in
   `city/continent.js`, and `CBZ.worldLayoutAudit()`. OWNER: "the cities and

@@ -618,6 +618,17 @@
   // about overlays and vehicles.js's handbrake / playeraircraft's throttle read
   // that latch every frame. Flip false to give Space back to the world.
   if (CBZ.CONFIG.MAP_SPACE_CLEARS == null) CBZ.CONFIG.MAP_SPACE_CLEARS = true;
+  // NO KEYBOARD ⇒ NO KEY LEGEND (owner, iPad/prison: the map "says keystrokes…
+  // like what the fuck you're doing"). The map overlay named three keys a
+  // tablet does not have — "Close [M]", "[Space] clear waypoint" and "Click or
+  // right-click to place a waypoint" — and Space was the ONLY documented way
+  // to drop a waypoint, so on touch that instruction was a dead end rather
+  // than merely wrong. On → fullmap.js retitles all three off CBZ.touchMode at
+  // every open(), the footer legend becomes a real 44px tap target wired to
+  // the same clearWaypoint(), and mobile.css drops the waypoint arrow's
+  // "[M] map" tail (pointer-events:none, so there is nothing to retitle it to).
+  // Flip false to restore the key legends everywhere.
+  if (CBZ.CONFIG.MAP_TOUCH_LABELS == null) CBZ.CONFIG.MAP_TOUCH_LABELS = true;
   // BRIDGE WALL RULES: causeway guardrails + curb fall-guard colliders are
   // GAPPED wherever the deck crosses a registered road, so bridge walls only
   // exist over real water/gap spans — never across intersections/mouths.

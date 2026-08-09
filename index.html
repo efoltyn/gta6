@@ -83,7 +83,7 @@
 <div id="fullMap" aria-hidden="true">
   <div class="fullmap-shell panel">
     <div class="fullmap-head">
-      <div><b id="fullMapTitle">AREA MAP</b><span>Click or right-click to place a waypoint</span></div>
+      <div><b id="fullMapTitle">AREA MAP</b><span id="fullMapPlaceHint">Click or right-click to place a waypoint</span></div>
       <button id="fullMapClose" type="button" aria-label="Close map">Close [M]</button>
     </div>
     <canvas id="fullMapCanvas" width="960" height="620"></canvas>
@@ -93,7 +93,10 @@
       <button id="fullMapZoomOut" type="button" aria-label="Zoom out">−</button>
     </div>
     <div id="fullMapLegend" class="fullmap-legend"></div>
-    <div class="fullmap-foot"><span id="fullMapReadout">No waypoint set</span><span>[Space] clear waypoint</span></div>
+    <!-- The clear-waypoint affordance is a BUTTON, not a key legend: an iPad has
+         no Space bar, so the only documented way to drop a waypoint did not
+         exist there at all. fullmap.js relabels it "Clear waypoint" on touch. -->
+    <div class="fullmap-foot"><span id="fullMapReadout">No waypoint set</span><button id="fullMapClear" type="button" class="fullmap-clear">[Space] clear waypoint</button></div>
   </div>
 </div>
 <div id="waypointGuide" class="panel">
@@ -140,9 +143,26 @@
           <span>Cop</span><small>Patrol with gear</small>
         </button>
       </div>
+      <!-- NO KEYBOARD ⇒ NO KEY LEGEND (owner, 2026-08-09, iPad). This card is
+           the prison's ONLY how-to-play surface — systems/controls.js's card,
+           the one that already knows how to render touchRows, never fires here
+           (its context() bails outside the city) — so on a tablet the entire
+           tutorial was nine key caps for keys that do not exist. The touch grid
+           names the on-screen control instead. css/mobile.css swaps the two off
+           body.touch; the other three mode cards still carry key caps only. -->
       <details class="controls">
         <summary>Controls</summary>
-        <div class="keys">
+        <div class="keys keys-touch">
+          <div class="row"><span class="keycol"><span class="tcap">Left stick</span></span><span class="lab">Move · rim to sprint · press to sneak</span></div>
+          <div class="row"><span class="keycol"><span class="tcap">Fire</span></span><span class="lab">Punch · fire</span></div>
+          <div class="row"><span class="keycol"><span class="tcap">Jump</span></span><span class="lab">Jump · vault</span></div>
+          <div class="row"><span class="keycol"><span class="tcap">Reload</span></span><span class="lab">Reload</span></div>
+          <div class="row"><span class="keycol"><span class="tcap">Eye</span></span><span class="lab">First-person</span></div>
+          <div class="row"><span class="keycol"><span class="tcap">Word pills</span></span><span class="lab">Interact — the pill names the action</span></div>
+          <div class="row"><span class="keycol"><span class="tcap">Minimap</span></span><span class="lab">Tap it for the map</span></div>
+          <div class="row"><span class="keycol"><span class="tcap">Ranks</span></span><span class="lab">Yard rankings</span></div>
+        </div>
+        <div class="keys keys-kbd">
           <div class="row"><span class="keycol"><span class="kbd">WASD</span></span><span class="lab">Move</span></div>
           <div class="row"><span class="keycol"><span class="kbd">Shift</span></span><span class="lab">Sprint</span></div>
           <div class="row"><span class="keycol"><span class="kbd">Ctrl / C</span></span><span class="lab">Sneak</span></div>

@@ -30,6 +30,16 @@
 }
 #dashboard .dtab.on{ background:var(--orange,#ff7a1a); color:#161616; border-color:transparent; box-shadow:0 3px 0 rgba(0,0,0,.25); }
 #dashboard .dhint{ font-size:10px; font-weight:600; letter-spacing:.5px; color:#7e8aa0; opacity:.6; margin-left:4px; }
+/* Touch replacement for that hint (dashboard.js hintHtml): Esc is not a thing
+   a thumb can press, and this panel had no other way out. 44px is the same tap
+   floor mobile.css holds every other pop-up control to. */
+#dashboard .dclose{
+  margin-left:6px; min-height:44px; min-width:44px; padding:8px 14px; border-radius:11px;
+  font:700 12px/1 Fredoka,system-ui,sans-serif; letter-spacing:.6px; cursor:pointer;
+  background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.22); color:#dfe8f5;
+  touch-action:manipulation; -webkit-tap-highlight-color:transparent;
+}
+#dashboard .dclose:active{ background:rgba(255,255,255,.16); }
 
 /* summary stat strip */
 #dashboard .dsummary{ display:flex; flex-wrap:wrap; gap:8px; margin:12px 0 6px; }

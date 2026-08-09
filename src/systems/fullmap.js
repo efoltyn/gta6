@@ -25,11 +25,14 @@
   const closeBtn = document.getElementById("fullMapClose");
   const titleEl = document.getElementById("fullMapTitle");
   const readout = document.getElementById("fullMapReadout");
+  const placeHint = document.getElementById("fullMapPlaceHint");
+  const clearBtn = document.getElementById("fullMapClear");
   const legend = document.getElementById("fullMapLegend");
   const zoomWrap = document.getElementById("fullMapZoom");
   const zoomInBtn = document.getElementById("fullMapZoomIn");
   const zoomOutBtn = document.getElementById("fullMapZoomOut");
   const guide = document.getElementById("waypointGuide");
+  const mapKeyEl = document.querySelector("#waypointGuide .waypoint-mapkey");
   const arrow = document.getElementById("waypointArrow");
   const distEl = document.getElementById("waypointDist");
   const labelEl = document.getElementById("waypointLabel");
@@ -199,6 +202,48 @@
   }
   map.clearWaypoint = clearWaypoint;
 
+  /* ---- NO KEYBOARD ⇒ NO KEY LEGEND -----------------------------------------
+     OWNER (iPad, prison): the map still shouted keystrokes at a device that has
+     none — "Close [M]", "[Space] clear waypoint", "Click or right-click to
+     place a waypoint". Two of those named the ONLY documented way to do the
+     thing, so on a tablet the instruction was not merely wrong, it was a dead
+     end: there was no other clear-waypoint affordance anywhere.
+
+     Same rule the rest of the codebase already keeps (mobile.css's doctrine
+     header, controls.js's isTouch card, interact.js's verb pills): a touch
+     surface carries WORDS, never a key cap. Decided once, here, off the single
+     CBZ.touchMode latch systems/touch.js raises — and re-run on every open()
+     so a session that starts on a mouse and gets a finger later still flips.
+     `.waypoint-mapkey`'s "[M] map" tail is the third site; it is
+     pointer-events:none so mobile.css drops it instead of retitling it. */
+  const KEYCAPS = {
+    close: { key: "Close [M]", touch: "✕ Close" },
+    clear: { key: "[Space] clear waypoint", touch: "Clear waypoint" },
+    place: { key: "Click or right-click to place a waypoint", touch: "Tap the map to place a waypoint" },
+  };
+  function keycaps() {
+    if (CBZ.CONFIG && CBZ.CONFIG.MAP_TOUCH_LABELS === false) return;
+    const t = !!CBZ.touchMode;
+    const set = function (el, spec) {
+      if (!el) return;
+      const want = t ? spec.touch : spec.key;
+      if (el.textContent !== want) el.textContent = want;
+    };
+    set(closeBtn, KEYCAPS.close);
+    set(clearBtn, KEYCAPS.clear);
+    set(placeHint, KEYCAPS.place);
+    // The arrow's "[M] map" tail. #waypointGuide is pointer-events:none, so
+    // there is no touch verb to swap in — a finger opens the map by tapping the
+    // minimap (wired below), which the arrow is in no position to advertise.
+    // Inline "" rather than a rule, so city.css's own !important hide still wins.
+    if (mapKeyEl) mapKeyEl.style.display = t ? "none" : "";
+  }
+  map.keycaps = keycaps;
+  // The footer chip is the clear-waypoint verb itself, not a caption of the
+  // Space handler below — that key is what a hand on a keyboard reaches for,
+  // and this is what a thumb reaches for. Both land on clearWaypoint().
+  if (clearBtn) clearBtn.addEventListener("click", function (e) { e.preventDefault(); clearWaypoint(); });
+
   function nearLabel(x, z, which) {
     if (which === "city") {
       const A = CBZ.city && CBZ.city.arena;
@@ -335,8 +380,7 @@
     map._cursor = null; map._sel = null; map._hoverKey = "";
     root.setAttribute("aria-hidden", "false");
     document.body.classList.add("full-map-open");
-    // touch: no M key exists — the close chip drops the key hint
-    if (CBZ.touchMode && closeBtn && closeBtn.textContent !== "✕ Close") closeBtn.textContent = "✕ Close";
+    keycaps();   // touch: no M key, no Space bar, no right-click — see KEYCAPS
     // touch zoom chips: only the city map runs the pan/zoom view (other modes
     // ignore map.view entirely), so the chips hide with it. Desktop never sees
     // them regardless — CSS only reveals the stack under body.touch.
@@ -2405,6 +2449,10 @@
     if (dt == null) _guideT = 0; else _guideT -= dt;
     if (_guideT > 0) return;
     _guideT = 0.125;
+    // 8 Hz, and every set() is a compare-before-write: touch.js can raise
+    // CBZ.touchMode long after the arrow first appeared (first finger on a
+    // hybrid), and the arrow shows without the map ever having been opened.
+    keycaps();
     guide.classList.toggle("show", !!wp && !map.active);
     if (!wp || !CBZ.player || !CBZ.player.pos) return;
     const nav = CBZ.navigation && CBZ.navigation.next(activeRoute(), CBZ.player.pos);

@@ -3039,3 +3039,63 @@ in the table, i.e. a door the player can never open however many charges they
 stack. **Pinned at 0**; `targets` also pinned ≥1 so a rebuild that silently
 stopped registering shows up. `MATHGATE: ok`, `MODE-ENGINE: ok` both sides,
 `BREACH-CHECK: ok` city + escape + revert.
+
+## 2026-08-09 — NO KEYBOARD ⇒ NO KEY LEGEND (the prison, on an iPad)
+
+Owner, playing the prison on an iPad: *"three [places] where it says
+keystrokes, like m to open map, space to clear way point. It's like what the
+fuck you're doing."*
+
+The reaction is the finding. A key cap on a touchscreen is not a cosmetic
+mismatch, because **two of these named the ONLY documented way to do the
+thing** — so on a tablet the instruction was not merely wrong, it was a dead
+end with no second route to discover:
+
+| site | said | why it was a dead end |
+|---|---|---|
+| `#fullMapClear` (index.html) | `[Space] clear waypoint` | the map had **no** clear affordance at all |
+| `.waypoint-mapkey` | `[M] map` | the arrow is `pointer-events:none` — nothing to tap |
+| `#fullMapPlaceHint` | `Click or **right-click** to place a waypoint` | no finger produces a right-click |
+| `#dashboard .dhint` | `Tab / L — cycle · **Esc — close**` | the panel had no ✕; closing meant cycling `#dashBtn` through every view |
+| title `.controls` card | nine `<span class="kbd">` rows | the prison's **only** how-to-play surface |
+| `gunroom.js` padlock | `Hold [E] to saw through it.` | the pill above it already said *Saw the padlock*, in words |
+
+The owner counted three; the sweep found six. `#fullMapClose` was the seventh
+and was **already** handled (`"✕ Close"`, 2026-08-04) — which is the tell: the
+rule existed and was applied one element at a time, by whoever remembered.
+
+**THE RULE HAS ONE HOME PER SURFACE NOW.** `fullmap.js`'s `keycaps()` owns all
+four map sites off a single `CBZ.touchMode` read, and — this is the part the
+old one-shot fix got wrong — it runs on `open()` **and** on every `updateGuide()`
+tick (8 Hz, compare-before-write), because the waypoint arrow renders without
+the map ever having been opened and `touch.js` can raise the latch mid-session.
+`dashboard.js`'s `hintHtml()` does the same for the rankings header.
+
+**A LEGEND IS NOT DELETED, IT IS REPLACED BY THE VERB IT WAS STANDING IN FOR.**
+Stripping the sentence and leaving no way to clear a waypoint would have read as
+fixed and been worse. So the footer legend became a real 44 px chip wired to the
+same `clearWaypoint()`, and the rankings header got the ✕ its sentence promised.
+Space and Esc are untouched on a keyboard — both routes, one handler.
+
+**MEASURED — `tools/touch-keycap-check.mjs`, 20 assertions, two passes over the
+SAME page.** Pass one is a mouse; pass two sets `Emulation.setTouchEmulationEnabled`
++ `setDeviceMetricsOverride({mobile:true})` at 1180×820 and **reloads**, so
+`touch.js`'s own `matchMedia("(pointer: coarse)")` line fires `enable()` for
+real — a stamped `CBZ.touchMode` would not have reached the `@media (pointer:
+coarse)` block where the 44 px floor lives. The scan is a **regex over the
+rendered text of every visible node**, not a whitelist of the six ids, so a
+seventh legend added later fails here instead of on the owner's iPad. Both
+directions are asserted: desktop must still read `[M]`, `[Space]`, `right-click`
+and all ten key caps, and Space must still clear.
+
+It earned its keep immediately: `.controls .keys` (0,2,0) outranked a bare
+`.keys-touch` hide, so **both grids rendered at once on desktop** and the probe
+caught it, not a screenshot.
+
+Flag `MAP_TOUCH_LABELS` (one line, reverts every site — which is why the
+`[M] map` tail is dropped inline by `keycaps()` rather than by a CSS rule).
+`MATHGATE: ok` · `PRISON-POLISH: 34/34` · `API-LINT: ok`.
+
+**NOT DONE, same bug:** the Gang Life, Disaster Survival and Gun Game title
+cards still carry key-cap-only Controls grids. The owner asked about the prison;
+those three want the same `.keys-touch` twin.

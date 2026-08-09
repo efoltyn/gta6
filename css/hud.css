@@ -522,6 +522,13 @@ body.full-map-open #fullMap{display:flex;}
 .fullmap-legend i{display:inline-block; width:9px; height:9px; border-radius:50%; box-shadow:0 0 7px rgba(255,255,255,.28);}
 .fullmap-foot{padding:10px 2px 0;}
 #fullMapReadout{color:#dffaff;}
+/* Reads as the plain footer legend it has always been on a mouse; mobile.css
+   promotes it to a real 44px chip on touch, where it is the ONLY way to clear. */
+.fullmap-clear{
+  background:none; border:0; padding:0; margin:0; color:inherit; font:inherit;
+  letter-spacing:inherit; cursor:pointer;
+}
+.fullmap-clear:hover{color:#dffaff;}
 #waypointGuide{
   display:none; position:fixed; left:50%; bottom:22px; z-index:48; transform:translateX(-50%);
   align-items:center; gap:9px; padding:9px 12px; color:#dffaff; pointer-events:none;

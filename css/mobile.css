@@ -419,7 +419,7 @@ body.touch-tidy #cpPanel.cpOpen .cpHint { margin-top: 8px; }
    DOM controls; the click handlers these panels already use fire on tap. */
 @media (pointer: coarse) {
   .btn, .mode-btn, .role-btn, .origin-btn, .iopt, summary,
-  [data-act], #pkgPanel button, #fullMapClose, #fullMapLegend > * {
+  [data-act], #pkgPanel button, #fullMapClose, #fullMapClear, #fullMapLegend > * {
     touch-action: manipulation; -webkit-tap-highlight-color: transparent;
   }
   .btn { min-height: 52px; }
@@ -427,9 +427,28 @@ body.touch-tidy #cpPanel.cpOpen .cpHint { margin-top: 8px; }
   #interactOpts .iopt { min-height: 44px; padding: 10px 8px; }
   #pkgPanel button, #pkgPanel [data-act] { min-height: 44px; padding: 10px 14px; }
   #fullMapClose { min-height: 44px; padding: 8px 14px; }
+  /* NO KEYBOARD ⇒ NO KEY LEGEND. The footer's "[Space] clear waypoint" was the
+     only clear affordance in the game and a Space bar does not exist here, so
+     fullmap.js retitles it "Clear waypoint" and it becomes a real tap target. */
+  #fullMapClear {
+    min-height: 44px; padding: 8px 14px; border-radius: 8px;
+    border: 1px solid rgba(125,231,255,.5); background: rgba(31,67,82,.72);
+    color: #dffaff; font: 700 12px Fredoka, system-ui, sans-serif;
+  }
   /* keep the shared bottom panel clear of the home-indicator / rounded corner */
   #pkgPanel { bottom: calc(14px + env(safe-area-inset-bottom, 0px)) !important; }
 }
+/* THE PRISON BRIEFING. Its Controls card is the mode's only how-to-play surface
+   and it listed nine keys; index.html carries a .keys-touch twin naming the
+   on-screen controls instead. One swap, both directions, so a hybrid iPad with
+   a keyboard attached still gets whichever grid its pointer says it is. */
+body.touch .mode-escape-only .controls .keys-kbd { display: none; }
+body.touch .mode-escape-only .controls .keys-touch { display: grid; }
+
+/* The waypoint arrow's "[M] map" tail is the third key legend a tablet cannot
+   act on (city mode has hidden it outright since the HUD declutter; prison and
+   survival still showed it). fullmap.js's keycaps() drops it inline instead of
+   a rule here, so CBZ.CONFIG.MAP_TOUCH_LABELS=false reverts all three sites. */
 
 /* ---- iPad interaction dock ------------------------------------------------
    The first action is aligned by touch.js with Reload (or the nearest visible

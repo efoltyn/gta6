@@ -190,6 +190,27 @@
     return rows;
   }
 
+  /* NO KEYBOARD ⇒ NO KEY LEGEND (owner, 2026-08-09, iPad/prison). This header
+     read "Tab / L — cycle · Esc — close", and on a tablet that was worse than
+     noise: #dashBtn ("Ranks") is a tap target and css/city.css only hides it in
+     the CITY, so the panel opens with a finger in the prison — and then Esc,
+     the sole close it named, does not exist. Closing meant cycling #dashBtn
+     through every view. Touch gets the ✕ the sentence was standing in for.
+     Same CBZ.touchMode latch as fullmap.js's keycaps(); read at render time so
+     a first finger mid-session flips it. CBZ.CONFIG.MAP_TOUCH_LABELS reverts. */
+  function hintHtml() {
+    const off = CBZ.CONFIG && CBZ.CONFIG.MAP_TOUCH_LABELS === false;
+    if (CBZ.touchMode && !off) return '<button type="button" class="dclose" aria-label="Close rankings">✕ Close</button>';
+    return '<span class="dhint">Tab / L — cycle · Esc — close</span>';
+  }
+  // Delegated: render() rewrites this header at ~5 Hz, so the button itself is
+  // a different node every tick and can never own the listener.
+  root.addEventListener("click", function (e) {
+    if (!e.target || !e.target.closest || !e.target.closest(".dclose")) return;
+    e.preventDefault();
+    close();
+  });
+
   function render() {
     if (!CBZ.ui.dashboard) { root.classList.remove("show"); return; }
     root.classList.add("show");
@@ -253,7 +274,7 @@
       `<div class="dpanel${ledger ? " dledger" : ""}">` +
         `<div class="dhead">` +
           `<div class="dtitle">CELL BLOCK <span class="z">Z</span> · YARD RANKINGS</div>` +
-          `<div class="dtabs">${tabsHtml}<span class="dhint">Tab / L — cycle · Esc — close</span></div>` +
+          `<div class="dtabs">${tabsHtml}${hintHtml()}</div>` +
         `</div>` +
         `<div class="dsummary">${headStats}</div>` +
         `<div class="dsub">${sub}</div>` +
