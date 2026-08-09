@@ -3358,6 +3358,23 @@ simulation keeps open otherwise. And the wheels at 15 m off a 30 m centreline
 were ON the paint but on the EDGE of it, so a stabilised final now turns at
 2.2x the en-route rate — lining up is the one thing an approach is for.
 
+**AND THE GREEN RUN**, after those three fixes:
+
+    phases      taxiOut -> lineup -> roll -> air -> rollout -> taxiIn -> park -> turn
+    peak alt    134 m
+    touchdown   local (327, -8) — 27 m past the aiming point, 8 m off a 30 m
+                centreline (was 15), at 74 m/s
+    rollout     0 ticks off the runway
+    result      halloran -> capeharbor-air, 2,021 m, PARKED ON STAND CHR-1
+    crewed      2 of 2      stranded 0
+
+    AIRLINE: ok (halloran -> capeharbor-air, peak 134m, stand CHR-1)
+
+One number is still honest debt: the wheels touch at 74 m/s rather than the
+58 the schedule aims for, because the aeroplane crosses the aiming point before
+the last of the bleed has happened. The adaptive brake absorbs it — 0 ticks off
+the paving — but a tighter approach would land it on speed.
+
 New tool: **`tools/airline-check.mjs`** — flies a whole leg headless and
 asserts the phase order, the peak altitude, that the wheels touched down inside
 the DESTINATION runway rectangle *measured in that runway's own local frame*,
