@@ -115,6 +115,38 @@
   }
   const ROOT = srcRoot();
 
+  /* ---- THE LANDMASS COLLECTOR ---------------------------------------------
+     The REAL islands — the military base, the civil airport — register
+     themselves with CBZ.addLandmass and wait for the city's world build to
+     call them. On a slice page there is no world build, so that registration
+     either threw at load (island_airport.js calls it unguarded) or vanished
+     into a function nobody would ever run — which is exactly how the bomb
+     game ended up with a hand-rolled airbase beside a shipped one.
+
+     So the studio collects. When no city owns the registry, addLandmass files
+     each builder under the FILE that registered it (loadFile stamps the name),
+     and CBZ.studio.raise(pack) runs a pack's builders against a synthesized
+     city context. The array is the SAME name worldmap.js uses, so a page that
+     later grows into the full engine hands its registry over cleanly. */
+  let _loadingFile = null;
+  if (!CBZ.addLandmass) {
+    CBZ._landmassBuilders = CBZ._landmassBuilders || [];
+    CBZ.addLandmass = function (fn, order) {
+      CBZ._landmassBuilders.push({ fn: fn, order: order == null ? 50 : order, file: _loadingFile });
+    };
+    CBZ.addLandmass._studioCollector = true;
+  }
+  /* The islands also file their walkable regions at the end of their builders,
+     UNGUARDED — a missing registrar would abort a builder's tail on a page.
+     Collect regions onto the city context instead of losing the island. */
+  if (!CBZ.registerCityRegion) {
+    CBZ.registerCityRegion = function (city, r) {
+      if (city && r) (city.regions || (city.regions = [])).push(r);
+      return r;
+    };
+    CBZ.registerCityRegion._studioCollector = true;
+  }
+
   /* ==========================================================================
      THE MANIFEST.
 
@@ -217,6 +249,37 @@
       files: ["world/airbase.js"],
       publishes: ["airbase"],
     },
+    citycore: {
+      gives: "THE REAL CITY FABRIC: cityMakeBuilding, the one mint every shell " +
+             "in Gang City comes from — enterable glass towers with pooled " +
+             "instanced panes, stairs, doors, furnished floors — plus buildTown, " +
+             "the street generator that lays a grid of marked roads, sidewalks, " +
+             "crosswalks, non-overlapping lots, shops with signs and a skyline " +
+             "cluster. Ask for a downtown with CBZ.studio.town(); nothing in it " +
+             "is a stage flat",
+      needs: ["look", "seed"],
+      files: ["vendor/BufferGeometryUtils.js", "city/buildings.js", "city/furniture.js", "city/towngen.js"],
+      publishes: ["cityMakeBuilding", "buildTown"],
+    },
+    militaryisland: {
+      gives: "the REAL military island from the Gang City map, raised at its " +
+             "authored place (centre -620,-700): fenced perimeter, airstrip with " +
+             "parked fighters and the heavy bomber, cargo apron, helipads, motor " +
+             "pool. Load it, then CBZ.studio.raise('militaryisland') builds it. " +
+             "Same files as `military`, named separately so a page that only " +
+             "wants the MODELS never raises an island by accident",
+      needs: ["military"],
+      files: ["city/island_military.js"],
+      publishes: [],
+    },
+    airport: {
+      gives: "the REAL civil airport island from the Gang City map (Halloran " +
+             "Field, x -900..290, z -280..40): terminal, gates, tower, aprons " +
+             "and parked airliners. Load it, then CBZ.studio.raise('airport')",
+      needs: ["look", "military", "seed"],
+      files: ["city/island_airport.js"],
+      publishes: ["cityCivilAircraftRayTest"],
+    },
 
     // ---- flight and weapons -------------------------------------------------
     air: {
@@ -317,8 +380,12 @@
       const s = document.createElement("script");
       s.src = ROOT + rel;
       s.async = false;                            // order is the contract
-      s.onload = function () { loaded[rel] = 1; resolve(); };
-      s.onerror = function () { reject(new Error("studio: cannot load " + ROOT + rel)); };
+      // Files load one at a time (need() awaits each), so whatever calls
+      // addLandmass while this file executes belongs to this file. That stamp
+      // is what lets raise() run ONE island's builders and not the world's.
+      _loadingFile = rel;
+      s.onload = function () { loaded[rel] = 1; _loadingFile = null; resolve(); };
+      s.onerror = function () { _loadingFile = null; reject(new Error("studio: cannot load " + ROOT + rel)); };
       document.head.appendChild(s);
     });
     inflight[rel] = p;
@@ -519,12 +586,162 @@
   };
   CBZ.studio.worlds = function () { return CBZ.desertCity ? ["desert"] : []; };
 
+  /* ==========================================================================
+     THE WORLD CONTRACT — a pack never asks WHICH world it landed in.
+
+     It asks the world questions: where is the ground, where is the water.
+     Any page that answers them gets conduct for free — a chase camera that
+     stays out of the hill, ordnance that knows where dirt is, crowds that
+     stand on the floor, and every future pack (boats, wildlife) that needs to
+     know sea from land. Same law as CBZ.modeHas, one level down.
+
+       CBZ.studio.setWorld({ groundAt: fn(x,z), waterAt: fn(x,z), seaLevel: 0 })
+
+     Additive and degrade-safe: nothing anywhere REQUIRES CBZ.world; every
+     consumer feature-detects it and keeps its old inline answer. */
+  CBZ.studio.setWorld = function (api) {
+    api = api || {};
+    const W = (CBZ.world = CBZ.world || {});
+    if (typeof api.groundAt === "function") W.groundAt = api.groundAt;
+    if (typeof api.waterAt === "function") W.waterAt = api.waterAt;
+    if (api.seaLevel != null) W.seaLevel = api.seaLevel;
+    return W;
+  };
+
+  /* ==========================================================================
+     raise(pack, opts) — BUILD A REAL PIECE OF THE GANG CITY MAP, HERE.
+
+     The islands in city/ register themselves as landmass builders and wait
+     for a world build that a slice page never runs. raise() runs them: it
+     takes the builders the named pack's files registered (the collector above
+     stamped each with its file), synthesizes the small `city` context they
+     actually read — root, roads, regions, a note sink — and calls them in
+     their authored order, each try/caught so one bad builder cannot sink the
+     rest (the worldmap contract, kept).
+
+     The island builds at its AUTHORED map coordinates, which is the point:
+     a page that raises the military base and the airport is standing on Gang
+     City's own geography, and a game grown there transfers.
+
+       const base = CBZ.studio.raise("militaryisland");
+       base.roads      // every road record the builders pushed
+       base.regions    // every walkable region they filed
+
+     Returns the city context, or null when there was nothing to raise (no
+     collector — a full city owns the registry — or no builders from that
+     pack). */
+  CBZ.studio.raise = function (name, opts) {
+    opts = opts || {};
+    if (!CBZ.addLandmass || !CBZ.addLandmass._studioCollector) return null;
+    const P = PACKS[name];
+    const files = P ? P.files : [String(name)];
+    const list = (CBZ._landmassBuilders || [])
+      .filter(function (b) { return b.file && files.indexOf(b.file) >= 0 && !b._raised; })
+      .sort(function (a, b) { return a.order - b.order; });
+    if (!list.length) return null;
+    const city = opts.city || {};
+    if (!city.root) city.root = opts.parent || CBZ.scene;
+    if (!city.roads) city.roads = [];
+    if (!city.regions) city.regions = [];
+    if (!city.note) city.note = opts.note || function () {};
+    for (let i = 0; i < list.length; i++) {
+      list[i]._raised = true;             // an island raised twice is two islands
+      try { list[i].fn(city); }
+      catch (e) { try { console.error("[studio.raise]", name, e); } catch (e2) {} }
+    }
+    return city;
+  };
+
+  /* ==========================================================================
+     town(opts) — A REAL DOWNTOWN, BY NAME.
+
+     city/towngen.js is the generator every settlement in Gang City grows
+     from, and city/buildings.js is the one mint every enterable shell comes
+     from. This verb is the missing door: it hands buildTown a seeded rng, a
+     downtown recipe and a skyline plan, so a page gets marked streets,
+     sidewalks, crosswalks, shops with lit signs and vendors' counters, and a
+     CLUSTER of real glass towers — the same instanced-pane, stairs-inside,
+     door-in-the-facade shells the mainland is made of. Nothing here is new
+     geometry; it is the city's own fabric, called.
+
+       const town = CBZ.studio.town({ at: {x:0, z:-700}, seed: "talloran" });
+       town.lots        // every lot; lot.building.door is a REAL doorway
+       town.roads       // the street grid, with lane metadata
+       town.rect        // the footprint
+
+     opts: at {x,z} · seed · cols/rows · blockW/blockD/roadW · name ·
+           skyline (towngen shape) · prefabs (overrides the recipe) ·
+           parent (default CBZ.scene). Deterministic per seed. */
+  CBZ.studio.town = function (opts) {
+    opts = opts || {};
+    if (typeof CBZ.buildTown !== "function") return null;
+    const root = opts.parent || CBZ.scene;
+    // seeded local LCG — the determinism law forbids Math.random in layout
+    const ss = String(opts.seed == null ? "studio-town" : opts.seed);
+    let h = 2166136261;
+    for (let i = 0; i < ss.length; i++) { h ^= ss.charCodeAt(i); h = (h * 16777619) >>> 0; }
+    const rng = (function (s) {
+      let x = s >>> 0 || 1;
+      return function () { x = (x * 1103515245 + 12345) & 0x7fffffff; return x / 0x7fffffff; };
+    })(h);
+    // THE DOWNTOWN RECIPE. Weighted prefabs per zone: towngen builds nothing
+    // from an empty recipe, so the verb carries a real one — office glass and
+    // trades in the core, apartments outward. A page overrides with its own
+    // prefabs to change the town's character without touching the generator.
+    const prefabs = opts.prefabs || {
+      civic: [
+        { name: "Exchange Bank", w: 2, storeys: 6, color: 0x46607a, lotKind: "shop", shopKind: "bank" },
+        { name: "Meridian Tower", w: 3, storeys: 8, color: 0x3e5a74, lotKind: "shop", shopKind: "security" },
+        { name: "Civic Center", w: 1, storeys: 5, color: 0x54626e, lotKind: "shop", shopKind: "hardware" },
+      ],
+      commercial: [
+        { name: "Glasshouse Offices", w: 3, storeys: 7, color: 0x3a4e64, lotKind: "shop", shopKind: "security" },
+        { name: "Harbor Market", w: 2, storeys: 3, color: 0x62707c, lotKind: "shop", shopKind: "food" },
+        { name: "Corner Bar", w: 1, storeys: 3, color: 0x5a4a3c, lotKind: "shop", shopKind: "bar" },
+        { name: "Pawn & Gold", w: 1, storeys: 2, color: 0x6b5d44, lotKind: "shop", shopKind: "pawn" },
+        { name: "Clinic", w: 1, storeys: 4, color: 0x9aa3ab, lotKind: "shop", shopKind: "hospital" },
+      ],
+      residential: [
+        { name: "Riverside Flats", w: 3, storeys: 4, color: 0x6e6a62, lotKind: "home" },
+        { name: "Block Housing", w: 2, storeys: 3, color: 0x75706a, lotKind: "home" },
+        { name: "Terrace Homes", w: 1, storeys: 2, color: 0x7d7468, lotKind: "home" },
+      ],
+    };
+    const at = opts.at || { x: 0, z: 0 };
+    const cfg = {
+      cx: at.x || 0, cz: at.z || 0,
+      cols: opts.cols || 6, rows: opts.rows || 6,
+      blockW: opts.blockW || 42, blockD: opts.blockD || 42, roadW: opts.roadW || 14,
+      pattern: opts.pattern || "grid",
+      density: opts.density != null ? opts.density : 0.85,
+      name: opts.name || "Downtown", district: opts.district || "downtown",
+      rng: rng, prefabs: prefabs, region: opts.region || null,
+      integratedSkyline: true,
+      skyline: opts.skyline || {
+        minStoreys: 4, maxStoreys: 9, landmarkStoreys: 24,
+        towerFrac: 0.3, megaChance: true, townMax: 5,
+      },
+      palette: opts.palette || {
+        ground: 0x8b8f96, sidewalk: 0x9aa0a8, road: 0x33363c,
+        plaza: 0xa8adb4, wood: 0x5a6470, accent: 0x8a94a0,
+      },
+    };
+    return CBZ.buildTown(root, cfg);
+  };
+
   /* crowd(n, role, opts) — N shipped bodies, placed and parented. The whole
      point of the asset farm: a page that wants people gets people.
        opts.at(i)  -> {x,z,y?}  placement, called per body (else a ring)
        opts.color             team/faction colour
        opts.parent            defaults to CBZ.scene
-     Returns the array of groups, empty when `people` is not loaded. */
+       opts.wander            they LIVE: seeded strolling on the real gait,
+                              sliding along real colliders, standing on the
+                              world's own ground. A city read as a city from
+                              the air because forty statues stood in it was a
+                              lie; a person is a body that goes somewhere.
+         wander: true | { range: 46, speed: 1.25, pause: 2.5 }
+     Returns the array of groups, empty when `people` is not loaded. The array
+     carries .stop() to end the wandering. */
   CBZ.studio.crowd = function (n, role, opts) {
     opts = opts || {};
     const out = [];
@@ -540,6 +757,58 @@
       g.position.set(p.x || 0, p.y || 0, p.z || 0);
       if (parent && parent.add) parent.add(g);
       out.push(g);
+    }
+    out.stop = function () {};
+    if (opts.wander && out.length && CBZ.micro && CBZ.micro.onFrame) {
+      const W = opts.wander === true ? {} : opts.wander;
+      const range = W.range > 0 ? W.range : 46;
+      const speed = W.speed > 0 ? W.speed : 1.25;
+      const pauseFor = W.pause > 0 ? W.pause : 2.5;
+      // seeded, not Math.random: crowds are world dressing and the
+      // determinism law does not stop applying because a thing is small
+      const roll = CBZ.seedStream ? CBZ.seedStream("studio-crowd-" + role)
+        : (function () { let s = 0x9e3779b9; return function () { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; }; })();
+      const groundAt = W.groundAt || (CBZ.world && CBZ.world.groundAt) || null;
+      const walkers = out.map(function (g) {
+        return { g: g, hx: g.position.x, hz: g.position.z, tx: g.position.x, tz: g.position.z, wait: roll() * pauseFor, yaw: g.rotation.y };
+      });
+      let live = true;
+      CBZ.micro.onFrame(function (dt) {
+        if (!live) return;
+        for (let i = 0; i < walkers.length; i++) {
+          const w = walkers[i], g = w.g;
+          if (!g.parent) continue;                       // dropped: leave it be
+          if (g.userData.dead) continue;                 // a page may kill one
+          const dx = w.tx - g.position.x, dz = w.tz - g.position.z;
+          const d = Math.hypot(dx, dz);
+          let moving = false;
+          if (w.wait > 0) { w.wait -= dt; }
+          else if (d < 0.6) {
+            const a = roll() * Math.PI * 2, r = 6 + roll() * range;
+            w.tx = w.hx + Math.cos(a) * r; w.tz = w.hz + Math.sin(a) * r;
+            w.wait = pauseFor * (0.4 + roll());
+          } else {
+            const vx = dx / d, vz = dz / d;
+            g.position.x += vx * speed * dt;
+            g.position.z += vz * speed * dt;
+            // the engine's own slide resolver: a walker uses doors and corners
+            // rather than passing through the town like a ghost
+            if (CBZ.micro.resolveCircle) CBZ.micro.resolveCircle(g.position, 0.42, g.position.y, 1.8);
+            const wantYaw = Math.atan2(vx, vz);
+            let dy = wantYaw - w.yaw;
+            while (dy > Math.PI) dy -= Math.PI * 2;
+            while (dy < -Math.PI) dy += Math.PI * 2;
+            w.yaw += dy * Math.min(1, dt * 6);
+            g.rotation.y = w.yaw;
+            moving = true;
+          }
+          if (groundAt) g.position.y = groundAt(g.position.x, g.position.z);
+          if (CBZ.animChar && g.userData.charRig) {
+            try { CBZ.animChar(g.userData.charRig, dt, { speed: moving ? speed : 0 }); } catch (e) {}
+          }
+        }
+      });
+      out.stop = function () { live = false; };
     }
     return out;
   };

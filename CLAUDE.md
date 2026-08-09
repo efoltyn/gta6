@@ -71,8 +71,9 @@ exact one shipped. Proven to bite by injecting three typos.
 Flags `STUDIO_V1`. Ratchet `CBZ.studio.audit().missing` pinned at 0 by
 `tools/studio-check.mjs`; `--print` regenerates **`docs/ONE-SHOT.md`**, the ~150
 line system prompt a new mini-game is written against. Regenerate it whenever a
-pack or verb changes. Dogfood: `games/bomb-survivor.html`
-(A, 17 tags) beside `games/bomb-survivor-b.html` (B, 1 tag).
+pack or verb changes. Dogfood: `games/bomb-survivor.html` — ONE page now (the
+A/B bet is settled: one tag, and the game stands on the real map via
+`citycore`/`militaryisland`/`airport` packs, `studio.raise()`, `studio.town()`).
 
 ## THE MODE ENUM IS NOT A CAPABILITY CONTRACT — `CBZ.modeHas()`
 

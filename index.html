@@ -113,21 +113,15 @@
       <button class="mode-btn" type="button" data-mode="survival"><span>Disaster Survival</span><small>100 players · last alive</small></button>
       <button class="mode-btn" type="button" data-mode="gungame"><span>Gun Game</span><small>Pick a map · climb the ladder</small></button>
       <!-- BOMB SURVIVOR is not a mode of this build — it is another game on the
-           release, standing on its own page (core/microboot.js boots the engine
+           release, standing on its own page (one studio tag boots the engine
            without the city). So the tile NAVIGATES rather than calling setMode:
            systems/state.js honours data-href on any .mode-btn. Full width,
            because a tile that leaves the page should not look like a sibling of
-           four that do not. -->
+           four that do not. There used to be an A and a B here; the bet is
+           settled — the studio won, and the one game stands on the real map. -->
       <button class="mode-btn mode-launch" type="button" data-mode="bombsurvivor"
               data-href="games/bomb-survivor.html">
-        <span>Bomb Survivor</span><small>10 v 10 · ten minutes bombing, ten minutes bombed</small>
-      </button>
-      <!-- THE SAME GAME, THE OTHER BET. A redraws what Gang City already
-           ships; B asks for it by name through core/studio.js. Both here on
-           purpose: the comparison is played, not argued. -->
-      <button class="mode-btn mode-launch" type="button" data-mode="bombsurvivorb"
-              data-href="games/bomb-survivor-b.html">
-        <span>Bomb Survivor B</span><small>same game · one script tag · every asset asked for by name</small>
+        <span>Bomb Survivor</span><small>6 v 6 · the real island, the real downtown · 3 minutes each way</small>
       </button>
     </div>
 
