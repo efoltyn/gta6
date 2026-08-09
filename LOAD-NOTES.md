@@ -160,3 +160,34 @@ Both are `CBZ.CONFIG` flags with a one-line URL revert, per doctrine. Gated:
 
 Not worth doing: bundling. The no-build-step rule is load-bearing —
 **pushing to main IS the deploy** (`docs/claude/project.md`).
+
+---
+
+## Re-measured 2026-08-09 (branch `claude/gang-city-performance-2q7b4m`) — the diagnosis stands
+
+The owner asked the question again, so the instrument was re-run on today's
+tree (same rig: headless Chromium, SwiftShader, localhost devserver, no gzip).
+Nothing above needs rewriting; the numbers moved only the way the repo moved:
+
+| | 2026-08-04 | 2026-08-09 |
+|---|---|---|
+| script tags / JS shipped | 467 / 21.1 MB | **470 / 22.4 MB** |
+| requests / bytes to title | 486 / 23.2 MB | 490 / 25.0 MB |
+| V8 ScriptDuration at boot | 2.8 s | 3.17 s |
+| `startRun` freeze | 20.9–30.6 s (5 runs) | **31.7 s** (1 run, top of the old range) |
+| scene objects / colliders | ~142,000 / 123,000 | 142,927 / 122,963 |
+| JS heap after build | 442 MB | 402 MB |
+
+The builder table is the same story, same order: `biome_snow` 4.5 s,
+`continent` 4.1 s (+0.8 s since the teardown — the one line that grew),
+`minicities` 2.7 s, `packages` venue claim 1.5 s, then the desert/farmland and
+countries rows. 39 builders, one unyielding loop, `worldmap.js:625`.
+
+The studio contrast, measured with the same tool on the same rig:
+`games/bomb-survivor-b.html` — the whole engine à la carte — is **23 requests,
+1.9 MB on the wire, 1.83 s of script**; naming ALL 18 packs would ship 22
+files / 1.9 MB. The mini-games are fast because they pay only for what they
+name and build one arena; the city pays for 470 files and then builds the
+entire planet before the first step. The owed list above is unchanged and
+**#1 (slice the build) is still the headline** — the freeze is 5× the cost of
+everything else combined.
