@@ -44,7 +44,10 @@ const SEED = +argS("--seed", "90210");
 // clock here whatever dt you hand it, so 1/60 would spend forty minutes
 // simulating four minutes of taxiing.
 const DT = +argS("--dt", "0.25");
-const MAX = +argS("--max", "2400");
+// A full leg is ~700 sim-seconds, and most of that is TAXI: a 1,090 m runway
+// reached by a connector two-thirds of the way down it means a real backtrack.
+// 3,600 ticks (900 sim-s) leaves headroom without waiting on a wedged run.
+const MAX = +argS("--max", "3600");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const T0 = Date.now();
 const tmark = (l) => console.log(`[t+${((Date.now() - T0) / 1000).toFixed(1)}s] ${l}`);

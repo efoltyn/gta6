@@ -3192,6 +3192,26 @@ way a two-node network silently wedges; Halloran carries two REMOTE STANDS for
 exactly this, because four gates with four permanently parked aeroplanes is a
 field an arriving flight cannot park at).
 
+**WHAT THE PROBE ACTUALLY MEASURED**, first complete leg, seed 90210:
+
+    phases      boarding -> taxiOut -> lineup -> roll -> air -> rollout -> taxiIn
+    peak alt    134 m   (the closed form predicts legD x 0.06 = 134. Exactly.)
+    touchdown   local (303, -15) — the aiming point is 300. THREE METRES long.
+    crewed      2 of 2 shuttles have bodies in their cockpit seats
+    moved       2,081 m, halloran -> capeharbor-air
+    stranded    0
+
+That run still FAILED, and on the right thing: it crossed the threshold at
+93 m/s instead of 58 and used 248 ticks of sea. The speed schedule was a fixed
+bleed rate over a fixed range and the leg was too short to finish it — so it is
+now a closed form of distance-to-touchdown like the altitude beside it, which
+makes crossing at V_APP a property of the arithmetic on any leg length. The
+rollout also brakes as hard as the concrete remaining demands, solved from the
+runway actually left: a no-op on a normal landing, and not an option the
+simulation keeps open otherwise. And the wheels at 15 m off a 30 m centreline
+were ON the paint but on the EDGE of it, so a stabilised final now turns at
+2.2x the en-route rate — lining up is the one thing an approach is for.
+
 New tool: **`tools/airline-check.mjs`** — flies a whole leg headless and
 asserts the phase order, the peak altitude, that the wheels touched down inside
 the DESTINATION runway rectangle *measured in that runway's own local frame*,

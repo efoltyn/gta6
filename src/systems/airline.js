@@ -396,10 +396,23 @@
         const toTd = beyondFaf
           ? dist(s.grp.position.x, s.grp.position.z, s.td.x, s.td.z)
           : toFaf + fafToTd;
-        const t = steer(s, tgt.x, tgt.z, AIR_TURN, dt);
-        // ---- speed: cruise, then a stabilised approach from ~1.1 km out
-        const vWant = toTd > 1100 ? V_CRUISE : V_APP + (V_CRUISE - V_APP) * Math.max(0, (toTd - 260) / 840);
-        accelTo(s, vWant, toTd > 1100 ? 1.3 : 1.1, dt);
+        // A stabilised final is allowed a firmer turn than an en-route leg:
+        // measured, rate one put the wheels down 15 m off a 30 m centreline —
+        // on the paint, but on the EDGE of it. Lining up is the one thing an
+        // approach is for.
+        const t = steer(s, tgt.x, tgt.z, beyondFaf ? AIR_TURN * 2.2 : AIR_TURN, dt);
+        /* ---- speed: a CLOSED FORM OF DISTANCE, exactly like the altitude
+           above, and for the same reason. The first version bled speed at a
+           fixed rate from a fixed range and simply ran out of runway to do it
+           in: measured, the aeroplane crossed Cape Harbor's threshold at
+           75 m/s instead of 58, which is 879 m of braking on 750 m of
+           concrete. Tying the speed to distance-to-touchdown makes crossing
+           the threshold at V_APP a property of the arithmetic rather than a
+           hope, on any leg length. The implied deceleration is steep because
+           the legs are 2 km rather than the 30 km a real approach uses —
+           the same scaling the climb profile already declares. */
+        const vWant = Math.min(V_CRUISE, V_APP + Math.max(0, toTd - 120) * 0.075);
+        accelTo(s, vWant, toTd > 1100 ? 1.3 : 4.0, dt);
         advance(s, dt);
         // ---- vertical: the closed-form trapezoid (see the header)
         const flown = dist(s.grp.position.x, s.grp.position.z, s.liftoff.x, s.liftoff.z);
@@ -445,7 +458,18 @@
         break;
       }
       case "rollout": {
-        accelTo(s, TAXI_SPD, BRAKE, dt);
+        /* BRAKE AS HARD AS THE CONCRETE LEFT DEMANDS. The nominal rate stops
+           an aeroplane that crossed the threshold at V_APP inside every field
+           in the network (the shortFields audit checks exactly that), but a
+           runway is a hard limit rather than a target: if anything ever puts
+           an aircraft down long or fast, standing on the brakes is what a crew
+           does, and running off the end into the sea is not an option the
+           simulation should keep open. Solved from the runway actually
+           remaining, so it is a no-op on a normal landing. */
+        const l = s.at.toLocal(s.grp.position.x, s.grp.position.z);
+        const remain = Math.max(20, s.at.runway.len / 2 - (-s.arrEnd.sign) * l.lx - 25);
+        const need = (s.spd * s.spd - TAXI_SPD * TAXI_SPD) / (2 * remain);
+        accelTo(s, TAXI_SPD, Math.max(BRAKE, need), dt);
         const far = s.at.toWorld(s.arrEnd.sign * -(s.at.runway.len / 2 - 20), 0);
         steer(s, far.x, far.z, 0.2, dt);
         advance(s, dt);
