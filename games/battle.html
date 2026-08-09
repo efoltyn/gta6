@@ -1,0 +1,1398 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<link rel="icon" href="data:,">
+<title>NPC War</title>
+<!-- ============================================================
+  NPC WAR — a battle you WATCH.
+
+  Two armies of Gang City's own people, any size, any gun in the armoury,
+  fighting each other with the engine's own combat brain while you fly a
+  camera around it and turn the clock up.
+
+  Nothing violent here is drawn by this file. The men are studio.cast. The
+  guns in their hands are weapons/appearances via systems/actorweapons.js.
+  HOW they fight is systems/combat_iq.js — the same fire tokens, cover
+  breaks, flanking arcs, suppression and per-training accuracy the city
+  runs. Tracers, muzzle flashes, impacts and the pocked walls afterwards
+  are systems/gunfx.js. Dead men sprawl through CBZ.deathPose and their
+  rifles fall through CBZ.weaponPhysics and clatter on the real ground.
+  Rockets detonate through studio.boom, so they hurt both sides and bring
+  the towers down through the same collapse chain a bomber uses.
+
+  What IS this file: who is on which side, the spectator cameras, the sim
+  clock (pause, quarter speed, up to eight times), and the benchmark that
+  answers "how many can this machine actually show" by measuring instead
+  of guessing. There is NO cap on team size anywhere in this page — the
+  input takes what you type and the frame rate tells you the truth.
+============================================================ -->
+<style>
+  :root{color-scheme:dark}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:#0b0d10;overflow:hidden;
+    font:600 15px/1.35 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#f2efe8;
+    -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+  canvas{display:block}
+  button{font:inherit;color:inherit}
+
+  /* ---- the war room (setup) ---- */
+  #menu{position:fixed;inset:0;z-index:60;overflow:auto;
+    background:radial-gradient(130% 100% at 50% 0%,#1c2431,#0b0d10 72%);padding:20px 16px 40px}
+  #menu .in{max-width:760px;margin:0 auto}
+  #menu h1{margin:6px 0 2px;font-size:clamp(30px,8vw,52px);letter-spacing:-.02em;line-height:.94}
+  #menu h1 em{font-style:normal;color:#ff7a45}
+  #menu .sub{margin:0 0 18px;opacity:.55;letter-spacing:.18em;font-size:11px}
+  .lbl{font-size:11px;letter-spacing:.22em;opacity:.6;margin:18px 0 8px}
+  .maps{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+  .maps button{appearance:none;border:1px solid rgba(255,255,255,.14);border-radius:14px;background:rgba(255,255,255,.04);
+    padding:13px 12px;text-align:left;cursor:pointer}
+  .maps button b{display:block;font-size:14px;letter-spacing:.08em}
+  .maps button i{display:block;font-style:normal;font-size:11px;opacity:.55;margin-top:4px}
+  .maps button.on{border-color:#ff7a45;background:rgba(255,122,69,.12)}
+  .teams{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media (max-width:560px){.teams{grid-template-columns:1fr}}
+  .team{border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:14px}
+  .team.red{box-shadow:inset 3px 0 0 #ff5a3d}
+  .team.blue{box-shadow:inset 3px 0 0 #3fa8ff}
+  .team h3{margin:0 0 10px;font-size:13px;letter-spacing:.22em}
+  .team .cnt{display:flex;gap:8px;align-items:center;margin-bottom:10px}
+  .team .cnt button{appearance:none;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.06);
+    border-radius:10px;width:44px;height:44px;font-size:18px;cursor:pointer;flex:none}
+  .team input[type=number]{appearance:none;-moz-appearance:textfield;width:100%;min-width:0;height:44px;border-radius:10px;
+    border:1px solid rgba(255,255,255,.2);background:rgba(0,0,0,.3);color:inherit;font:700 19px/1 inherit;
+    text-align:center;letter-spacing:.06em}
+  .team input::-webkit-inner-spin-button{display:none}
+  .team select{width:100%;height:42px;border-radius:10px;border:1px solid rgba(255,255,255,.2);
+    background:rgba(0,0,0,.3);color:inherit;font:600 14px/1 inherit;padding:0 10px;margin-bottom:8px}
+  .presets{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .presets button{appearance:none;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.05);
+    border-radius:999px;padding:9px 14px;font-size:12px;letter-spacing:.1em;cursor:pointer}
+  #start{appearance:none;border:0;cursor:pointer;width:100%;margin-top:20px;
+    padding:20px;border-radius:18px;background:#4fbf6a;color:#07130b;font:800 20px/1 inherit;
+    letter-spacing:.14em;box-shadow:0 6px 0 #2f8a4a}
+  #start:active{transform:translateY(3px);box-shadow:0 3px 0 #2f8a4a}
+  #bench{appearance:none;cursor:pointer;width:100%;margin-top:10px;padding:14px;border-radius:14px;
+    border:1px solid rgba(255,255,255,.22);background:transparent;font:700 14px/1 inherit;letter-spacing:.14em}
+  #maxline{margin-top:10px;font-size:11px;letter-spacing:.16em;opacity:.5;text-align:center;min-height:14px}
+  #bootst{margin-top:14px;font-size:11px;letter-spacing:.2em;opacity:.45;text-align:center;min-height:14px}
+
+  /* ---- battle chrome ---- */
+  #top{position:fixed;left:50%;top:calc(10px + env(safe-area-inset-top,0px));transform:translateX(-50%);
+    z-index:41;display:none;align-items:center;gap:12px;padding:8px 14px;border-radius:999px;
+    background:rgba(12,14,17,.55);border:1px solid rgba(255,255,255,.12);backdrop-filter:blur(6px);
+    font-variant-numeric:tabular-nums;pointer-events:none;white-space:nowrap}
+  #top .r{color:#ff8a70;font-weight:800}
+  #top .b{color:#7cc4ff;font-weight:800}
+  #top .bar{width:min(17vw,110px);height:7px;border-radius:4px;background:rgba(255,255,255,.14);overflow:hidden}
+  #top .bar s{display:block;height:100%}
+  #top .bar.rr s{background:#ff5a3d}
+  #top .bar.bb s{background:#3fa8ff;margin-left:auto}
+  #top .mid{font-size:12px;opacity:.85;letter-spacing:.08em;text-align:center;min-width:86px}
+  #top .mid small{display:block;font-size:10px;opacity:.6;letter-spacing:.2em}
+  #ctl{position:fixed;left:50%;bottom:calc(12px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);
+    z-index:42;display:none;gap:7px;align-items:center}
+  #ctl button{appearance:none;border:1px solid rgba(255,255,255,.2);background:rgba(12,14,17,.6);
+    backdrop-filter:blur(6px);border-radius:12px;min-width:46px;height:44px;padding:0 12px;cursor:pointer;
+    font:700 13px/1 inherit;letter-spacing:.06em}
+  #ctl button.on{background:rgba(255,122,69,.28);border-color:#ff7a45}
+  body.coarse #ctl button{min-width:52px;height:52px}
+  #banner{position:fixed;left:50%;top:26%;transform:translateX(-50%);z-index:44;pointer-events:none;
+    font-size:clamp(20px,5.4vw,38px);letter-spacing:.1em;text-align:center;opacity:0;transition:opacity .4s;
+    text-shadow:0 2px 12px rgba(0,0,0,.8);white-space:nowrap}
+  #banner.on{opacity:.96}
+  #banner small{display:block;font-size:12px;letter-spacing:.3em;opacity:.6;margin-top:8px}
+  #end{position:fixed;inset:0;display:none;place-items:center;z-index:62;background:rgba(9,11,14,.9);padding:26px}
+  #end .in{text-align:center;max-width:440px;width:100%}
+  #end h2{margin:0 0 14px;font-size:clamp(26px,7vw,42px)}
+  #end table{margin:0 auto 22px;border-collapse:collapse;font-variant-numeric:tabular-nums}
+  #end td{padding:6px 16px;opacity:.85;text-align:left}
+  #end td+td{text-align:right}
+  #end .row{display:flex;gap:10px}
+  #end button{appearance:none;border:1px solid rgba(255,255,255,.25);background:transparent;color:inherit;
+    flex:1;padding:15px 10px;border-radius:999px;font:700 14px/1 inherit;letter-spacing:.14em;cursor:pointer}
+  #end button.big{background:#4fbf6a;border:0;color:#07130b}
+  #hint{position:fixed;left:calc(14px + env(safe-area-inset-left,0px));bottom:calc(14px + env(safe-area-inset-bottom,0px));
+    z-index:41;font-size:10px;letter-spacing:.14em;opacity:.45;pointer-events:none;display:none;max-width:26vw;line-height:1.6}
+</style>
+</head>
+<body>
+
+<div id="menu"><div class="in">
+  <h1>NPC <em>WAR</em></h1>
+  <p class="sub">TWO ARMIES. YOUR CLOCK. NO CAP.</p>
+
+  <div class="lbl">GROUND</div>
+  <div class="maps" id="maps"></div>
+
+  <div class="teams" style="margin-top:16px">
+    <div class="team red">
+      <h3>RED</h3>
+      <div class="cnt">
+        <button data-t="red" data-d="-10">&minus;</button>
+        <input id="redN" type="number" inputmode="numeric" min="1" value="30">
+        <button data-t="red" data-d="10">+</button>
+      </div>
+      <select id="redW"></select>
+      <select id="redT"></select>
+    </div>
+    <div class="team blue">
+      <h3>BLUE</h3>
+      <div class="cnt">
+        <button data-t="blue" data-d="-10">&minus;</button>
+        <input id="blueN" type="number" inputmode="numeric" min="1" value="30">
+        <button data-t="blue" data-d="10">+</button>
+      </div>
+      <select id="blueW"></select>
+      <select id="blueT"></select>
+    </div>
+  </div>
+
+  <div class="presets" id="presets">
+    <button data-n="10">10 v 10</button>
+    <button data-n="30">30 v 30</button>
+    <button data-n="80">80 v 80</button>
+    <button data-n="200">200 v 200</button>
+    <button data-n="500">500 v 500</button>
+  </div>
+
+  <button id="start">START THE WAR</button>
+  <button id="bench">FIND MY MAX</button>
+  <div id="maxline"></div>
+  <div id="bootst"></div>
+</div></div>
+
+<div id="top">
+  <span class="r" id="redC">0</span>
+  <span class="bar rr"><s id="redB" style="width:100%"></s></span>
+  <span class="mid"><span id="clk">0:00</span><small id="spd">SPEED 1</small></span>
+  <span class="bar bb"><s id="blueB" style="width:100%"></s></span>
+  <span class="b" id="blueC">0</span>
+</div>
+<div id="ctl">
+  <button id="cPause">PAUSE</button>
+  <button data-s="0.25">&frac14;</button>
+  <button data-s="1" class="on">1</button>
+  <button data-s="2">2</button>
+  <button data-s="4">4</button>
+  <button data-s="8">8</button>
+  <button id="cCam">AUTO CAM</button>
+</div>
+<div id="banner"></div>
+<div id="hint"></div>
+
+<div id="end"><div class="in">
+  <h2 id="endT">RESULT</h2>
+  <table id="endTable"></table>
+  <div class="row">
+    <button id="endWatch">WATCH</button>
+    <button id="endMenu">SETUP</button>
+    <button id="endAgain" class="big">AGAIN</button>
+  </div>
+</div></div>
+
+<!-- ============ ONE TAG FOR THE STUDIO ============================
+  The packs below are the studio's front door. The combat stack under
+  THE ARMOURY is listed by hand because no pack names it yet: the studio
+  skips files a page already carries, so the day a "guns" pack ships,
+  these lines simply stop being needed.
+============================================================ -->
+<script src="../src/core/studio.js"></script>
+<script>
+"use strict";
+(function () {
+const el = function (id) { return document.getElementById(id); };
+const bootst = function (t) { const n = el("bootst"); if (n) n.textContent = t; };
+
+/* ============================================================ SETTINGS
+   URL params override localStorage so a benchmark or a shared link can
+   reproduce a battle exactly. */
+const Q = new URLSearchParams(location.search);
+const saved = (function () { try { return JSON.parse(localStorage.getItem("cbz-npcwar") || "{}"); } catch (e) { return {}; } })();
+const SET = {
+  map:   Q.get("map")  || saved.map  || "city",
+  redN:  parseInt(Q.get("red")  || saved.redN  || 30, 10) || 30,
+  blueN: parseInt(Q.get("blue") || saved.blueN || 30, 10) || 30,
+  redW:  Q.get("rw") || saved.redW || "ak47",
+  blueW: Q.get("bw") || saved.blueW || "ak47",
+  redT:  Q.get("rt") || saved.redT || "elite",
+  blueT: Q.get("bt") || saved.blueT || "elite",
+  bench: Q.get("bench") === "1",
+  auto:  Q.get("auto") === "1",
+};
+if (SET.redN < 1) SET.redN = 1;
+if (SET.blueN < 1) SET.blueN = 1;
+
+const MAPS = {
+  city:  { label: "DESERT CITY", note: "200 towers. streets. hard cover", packs: ["desert"] },
+  dunes: { label: "OPEN DUNES", note: "bare sand. firing lines", packs: ["desert"] },
+  arena: { label: "KILL BOX", note: "flat yard. crates. walls", packs: [] },
+  base:  { label: "AIRBASE", note: "runway. hangars. parked jets", packs: ["desert", "airbase"] },
+};
+if (!MAPS[SET.map]) SET.map = "city";
+
+const TRAININGS = [
+  { id: "civ",   label: "UNTRAINED",  role: "civilian", hp: 90 },
+  { id: "thug",  label: "STREET",     role: "thug",     hp: 100 },
+  { id: "pro",   label: "TRAINED",    role: "guard",    hp: 120 },
+  { id: "elite", label: "SOLDIER",    role: "soldier",  hp: 140 },
+  { id: "swat",  label: "SWAT",       role: "agent",    hp: 160 },
+];
+const TEAMS = {
+  red:  { id: "red",  name: "RED",  color: 0xff5a3d },
+  blue: { id: "blue", name: "BLUE", color: 0x3fa8ff },
+};
+
+/* actor.weapon strings chosen so BOTH consumers read them right:
+   actorweapons.js resolves the appearance model, combat_iq.js classifies the
+   competence column. "MIXED" and "EVERYTHING" pick per man, seeded. */
+const GUN_NAME = {
+  sidearm: "Pistol", shotgun: "Shotgun", carbine: "Carbine", smg: "SMG",
+  revolver: "Revolver", deagle: "Desert Eagle", ak47: "AK-47", uzi: "Uzi",
+  sniper: "Sniper", lmg: "LMG", taser: "Taser", bazooka: "bazooka", glauncher: "glauncher",
+};
+const GUN_ORDER = ["ak47", "carbine", "lmg", "smg", "uzi", "shotgun", "sniper",
+  "sidearm", "revolver", "deagle", "glauncher", "bazooka", "taser"];
+const MIX_RIFLES = ["ak47", "carbine", "lmg", "smg", "shotgun", "sniper"];
+
+/* ============================================================ LOAD
+   Base packs first; the armoury after, in dependency order. Every file in
+   the second list is engine source loaded verbatim — the page adds nothing
+   to any of them. */
+const NEED = ["caps", "people", "fx", "damage", "sound"].concat(MAPS[SET.map].packs);
+const ARMOURY = [
+  "weapons/weapon-data.js",
+  "weapons/appearances/sidearm.js", "weapons/appearances/shotgun.js",
+  "weapons/appearances/carbine.js", "weapons/appearances/smg.js",
+  "weapons/appearances/revolver.js", "weapons/appearances/deagle.js",
+  "weapons/appearances/ak47.js", "weapons/appearances/uzi.js",
+  "weapons/appearances/sniper.js", "weapons/appearances/lmg.js",
+  "weapons/appearances/bazooka.js", "weapons/appearances/taser.js",
+  "weapons/appearances/glauncher.js",
+  "systems/actorweapons.js",   // guns in hands + muzzle points + drop physics
+  "systems/gunfx.js",          // tracers, flashes, impacts, holes, suppression
+  "systems/combat_iq.js",      // HOW WELL A PERSON FIGHTS — the whole point
+  "systems/wounds.js",         // bodies remember hits (optional, self-capping)
+];
+function loadSrc(rel) {
+  return new Promise(function (resolve) {
+    const s = document.createElement("script");
+    s.src = CBZ.studio.root + rel;
+    s.async = false;
+    s.onload = resolve;
+    s.onerror = function () { console.warn("[war] optional file failed:", rel); resolve(); };
+    document.head.appendChild(s);
+  });
+}
+
+bootst("OPENING THE STUDIO");
+CBZ.studio.need(NEED).then(function () {
+  bootst("OPENING THE ARMOURY");
+  let chain = Promise.resolve();
+  ARMOURY.forEach(function (f) { chain = chain.then(function () { return loadSrc(f); }); });
+  return chain;
+}).then(function () {
+  const THREE = window.THREE;
+
+  /* ---- the two shims that let the shared combat brain run out here ----
+     combat_iq's cover search reads CBZ.queryCollidersNear (physics.js, not
+     loaded on a slice page). microboot's own grid query returns the exact
+     same box shape, so route the name. CBZ.now is the frame stamp
+     combat_iq keys its timers on; this page advances it on SIM time, which
+     is what makes fire discipline follow the speed dial. */
+  if (!CBZ.queryCollidersNear) {
+    CBZ.queryCollidersNear = function (x, z, r, out) { return CBZ.micro.queryColliders(x, z, r, out); };
+  }
+  if (CBZ.now == null) CBZ.now = performance.now();
+
+  const COARSE = CBZ.studio.touchDevice;
+  if (COARSE) document.body.classList.add("coarse");
+
+  /* ============================================================ MENU */
+  const mapsEl = el("maps");
+  Object.keys(MAPS).forEach(function (id) {
+    const b = document.createElement("button");
+    b.innerHTML = "<b>" + MAPS[id].label + "</b><i>" + MAPS[id].note + "</i>";
+    b.className = id === SET.map ? "on" : "";
+    b.addEventListener("click", function () {
+      SET.map = id;
+      mapsEl.querySelectorAll("button").forEach(function (x) { x.className = ""; });
+      b.className = "on";
+    });
+    mapsEl.appendChild(b);
+  });
+  function fillGuns(sel, cur) {
+    let h = "";
+    GUN_ORDER.forEach(function (id) {
+      const w = CBZ.weaponById && CBZ.weaponById(id);
+      if (!w) return;
+      h += "<option value=\"" + id + "\"" + (cur === id ? " selected" : "") + ">" + w.label + "</option>";
+    });
+    h += "<option value=\"mixed\"" + (cur === "mixed" ? " selected" : "") + ">MIXED RIFLES</option>";
+    h += "<option value=\"everything\"" + (cur === "everything" ? " selected" : "") + ">EVERYTHING</option>";
+    sel.innerHTML = h;
+  }
+  function fillTraining(sel, cur) {
+    sel.innerHTML = TRAININGS.map(function (t) {
+      return "<option value=\"" + t.id + "\"" + (cur === t.id ? " selected" : "") + ">" + t.label + "</option>";
+    }).join("");
+  }
+  fillGuns(el("redW"), SET.redW); fillGuns(el("blueW"), SET.blueW);
+  fillTraining(el("redT"), SET.redT); fillTraining(el("blueT"), SET.blueT);
+  el("redN").value = SET.redN; el("blueN").value = SET.blueN;
+  document.querySelectorAll(".cnt button").forEach(function (b) {
+    b.addEventListener("click", function () {
+      const inp = el(b.dataset.t + "N");
+      inp.value = Math.max(1, (parseInt(inp.value, 10) || 1) + parseInt(b.dataset.d, 10));
+    });
+  });
+  el("presets").querySelectorAll("button").forEach(function (b) {
+    b.addEventListener("click", function () { el("redN").value = b.dataset.n; el("blueN").value = b.dataset.n; });
+  });
+  const savedMax = (function () { try { return parseInt(localStorage.getItem("cbz-npcwar-max") || "0", 10); } catch (e) { return 0; } })();
+  if (savedMax > 0) el("maxline").textContent = "MEASURED HERE " + savedMax + " PER SIDE AT 30 FPS";
+
+  function readMenu() {
+    SET.redN = Math.max(1, parseInt(el("redN").value, 10) || 1);
+    SET.blueN = Math.max(1, parseInt(el("blueN").value, 10) || 1);
+    SET.redW = el("redW").value; SET.blueW = el("blueW").value;
+    SET.redT = el("redT").value; SET.blueT = el("blueT").value;
+    try {
+      localStorage.setItem("cbz-npcwar", JSON.stringify({
+        map: SET.map, redN: SET.redN, blueN: SET.blueN,
+        redW: SET.redW, blueW: SET.blueW, redT: SET.redT, blueT: SET.blueT,
+      }));
+    } catch (e) {}
+  }
+  el("start").addEventListener("click", function () {
+    readMenu();
+    if (MAPS[SET.map].packs.length) {
+      bootst("LOADING THE GROUND");
+      CBZ.studio.need(MAPS[SET.map].packs).then(function () { begin(false); });
+    } else begin(false);
+  });
+  el("bench").addEventListener("click", function () {
+    readMenu();
+    begin(true);
+  });
+  bootst("READY");
+
+  /* ============================================================ STATE */
+  const V = function () { return new THREE.Vector3(); };
+  const _v = V(), _v2 = V(), _muz = V();
+  let world = null, base = null, MAP = null, hud = null;
+  let men = [], corpses = [], rockets = [], dropGuns = [];
+  let started = false, over = false, simT = 0, speed = 1, lastSpeed = 1;
+  let bench = null;
+  const stats = { red: { kills: 0, shots: 0, hits: 0 }, blue: { kills: 0, shots: 0, hits: 0 } };
+  const shotsRing = [];          // recent fire positions, feeds the director
+  const spawnQueue = [];
+  let spawnTotal = 0;
+
+  // seeded streams — the determinism law reaches world layout and combat alike
+  const sWorld = CBZ.seedStream("npcwar-world");
+  let _s = 421371;
+  function lcg() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
+
+  /* ============================================================ MAPS
+     Each ground answers the same three questions: height, where RED stands,
+     where BLUE stands. The kill box registers its crates as real colliders,
+     which is all it takes for combat_iq to treat them as cover and for
+     segmentBlocked to treat them as walls. */
+  function flatDisc(r, color, y) {
+    const g = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.6, 48),
+      new THREE.MeshLambertMaterial({ color: color }));
+    g.position.y = (y || 0) - 0.3;
+    g.receiveShadow = true;
+    CBZ.scene.add(g);
+    return g;
+  }
+  function crate(x, z, w, h, d, color) {
+    const m = new THREE.Mesh(CBZ.boxGeom(w, h, d), CBZ.cmat(color));
+    m.position.set(x, h / 2, z);
+    m.castShadow = m.receiveShadow = true;
+    CBZ.scene.add(m);
+    CBZ.micro.addBoxCollider(x, h / 2, z, w, h, d);
+    return m;
+  }
+  function buildMap(id) {
+    const gap = { city: 190, dunes: 150, arena: 120, base: 170 }[id] || 150;
+    let groundAt = function () { return 0; };
+    let cx = 0, cz = 0;
+
+    if (id === "arena") {
+      flatDisc(260, 0x6b6657, 0);
+      // walls make it a box; crates make it a fight. Seeded layout.
+      const W = 210, D = 150, wallC = 0x54504a;
+      crate(0, -D / 2, W, 3.4, 2, wallC); crate(0, D / 2, W, 3.4, 2, wallC);
+      crate(-W / 2, 0, 2, 3.4, D, wallC); crate(W / 2, 0, 2, 3.4, D, wallC);
+      for (let i = 0; i < 34; i++) {
+        const x = (sWorld() - 0.5) * (W - 40), z = (sWorld() - 0.5) * (D - 30);
+        if (Math.abs(x) > gap / 2 - 6 && Math.abs(x) < gap / 2 + 18) continue;  // keep spawn lanes open
+        const tall = sWorld() < 0.62;
+        crate(x, z, 2.4 + sWorld() * 4.4, tall ? 1.9 + sWorld() * 0.6 : 1.15,
+          1.6 + sWorld() * 2.6, sWorld() < 0.5 ? 0x7a5f43 : 0x5d6a70);
+      }
+    } else {
+      world = CBZ.studio.world("desert", { seed: "npcwar" });
+      groundAt = (world && world.heightAt) || groundAt;
+      if (id === "dunes") { cx = (world.rings && world.rings.city ? world.rings.city : 900) + 650; cz = 0; }
+      if (id === "base") {
+        const R = (world.rings && world.rings.city ? world.rings.city : 900);
+        cx = R + 780; cz = R * 0.3;
+        base = CBZ.airbase && CBZ.airbase.build
+          ? CBZ.airbase.build({ x: cx, z: cz, heading: Math.atan2(cz, -cx), groundAt: groundAt, seed: "npcwar-base" })
+          : null;
+      }
+    }
+    return {
+      id: id, gap: gap, cx: cx, cz: cz, groundAt: groundAt,
+      // team spawn: ranked columns either side of the centre, jittered so a
+      // thousand men do not form a copied lattice
+      spawnAt: function (team, i) {
+        const side = team === "red" ? -1 : 1;
+        const col = Math.floor(i / 10), row = i % 10;
+        const x = cx + side * (gap / 2 + 8 + col * 3.1) + (sWorld() - 0.5) * 1.8;
+        const z = cz + (row - 4.5) * 3.4 + (col % 2) * 1.7 + (sWorld() - 0.5) * 1.8;
+        return { x: x, z: z };
+      },
+    };
+  }
+
+  /* ============================================================ THE MEN */
+  const trainingOf = function (id) {
+    for (let i = 0; i < TRAININGS.length; i++) if (TRAININGS[i].id === id) return TRAININGS[i];
+    return TRAININGS[3];
+  };
+  function pickGun(choice, i) {
+    if (choice === "mixed") return MIX_RIFLES[(i * 7 + ((i / MIX_RIFLES.length) | 0)) % MIX_RIFLES.length];
+    if (choice === "everything") return GUN_ORDER[(i * 5 + ((i / GUN_ORDER.length) | 0)) % GUN_ORDER.length];
+    return GUN_NAME[choice] ? choice : "ak47";
+  }
+  function makeMan(teamId, i) {
+    const T = TEAMS[teamId];
+    const tr = trainingOf(teamId === "red" ? SET.redT : SET.blueT);
+    const wid = pickGun(teamId === "red" ? SET.redW : SET.blueW, i);
+    const w = CBZ.weaponById(wid) || CBZ.weaponById("ak47");
+    const group = CBZ.studio.cast(tr.role, { color: T.color, variant: i * 2 + (teamId === "red" ? 0 : 1) });
+    if (!group) return null;
+    const at = MAP.spawnAt(teamId, i);
+    group.position.set(at.x, MAP.groundAt(at.x, at.z), at.z);
+    group.rotation.y = teamId === "red" ? Math.PI / 2 : -Math.PI / 2;
+    CBZ.scene.add(group);
+    const man = {
+      id: teamId + i, team: teamId, i: i,
+      group: group, char: group.userData.charRig,
+      pos: group.position,                    // combat_iq + actorweapons read .pos
+      target: V(),                            // combat_iq's posture() steers this
+      yaw: group.rotation.y, speed: 0,
+      hp: bench ? 1e9 : tr.hp, maxHp: bench ? 1e9 : tr.hp,
+      armed: true, weapon: GUN_NAME[wid], wid: wid,
+      launcher: !!w.explosive,
+      mag: w.magSize || w.mag || 30, magSize: w.magSize || w.mag || 30,
+      cool: 0.4 + lcg() * 1.2, reloadT: 0,
+      tgt: null, losBadT: 0, slot: "hold", thinkAt: simT + lcg() * 0.3, lastThink: simT,
+      dead: false, dieT: 0, dieDir: 1, animF: (i % 4),
+      lastShotT: -9,
+    };
+    man.target.set(at.x, 0, at.z);
+    // training tier fields combat_iq's roleTier() already reads off city actors
+    if (tr.id === "swat") man.swat = true;
+    else if (tr.id === "elite") man.kind = "soldier";
+    else if (tr.id === "pro") man.kind = "guard";
+    else if (tr.id === "thug") man.aggr = 0.92;
+    if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(man);
+    return man;
+  }
+
+  /* ============================================================ REACHABLE
+     One join and the engine's shared verbs can find these men: a rocket's
+     studio.boom sweeps THIS roster (both sides — a blast has no team), and
+     the hurt funnel is the same one the scoreboard reads. */
+  CBZ.studio.join({
+    id: "npcwar", label: "NPC War",
+    caps: { traverse: 1, stepLedge: 1, blast: 1, blastActors: 1, breach: 1 },
+    actors: function (out) {
+      for (let i = 0; i < men.length; i++) if (!men[i].dead) out.push(men[i]);
+      return out;
+    },
+    hurt: function (a, dmg, imp) { hurtMan(a, dmg, imp || {}); return true; },
+    hurtPlayer: function () { return true; },   // nobody IS the player here
+    route: "npcwar roster + hurtMan",
+  });
+
+  /* ============================================================ DAMAGE */
+  function hurtMan(m, dmg, imp) {
+    if (!m || m.dead || !(dmg > 0) || over) return;
+    m.hp -= dmg;
+    if (CBZ.combatIQ && CBZ.combatIQ.suppress) CBZ.combatIQ.suppress(m, 0.9);
+    // getting shot IS information: retaliate at the shooter if unengaged
+    if (imp && imp.by && imp.by.team && imp.by.team !== m.team && (!m.tgt || m.tgt.dead)) m.tgt = imp.by;
+    if (m.hp <= 0) killMan(m, imp);
+  }
+  function killMan(m, imp) {
+    m.dead = true; m.hp = 0;
+    const by = imp && imp.by && imp.by.team ? imp.by : null;
+    if (by) stats[by.team].kills++;
+    else stats[m.team === "red" ? "blue" : "red"].kills++;   // blast with no author still scores the other side
+    // sprawl: the rig's own death variety; the topple is ours (caller owns it)
+    if (m.char && CBZ.deathPose) { try { CBZ.deathPose(m.char, m.i * 3.7 + 1.3, lcg()); } catch (e) {} }
+    m.dieT = 0.0001;
+    m.dieDir = lcg() < 0.5 ? -1 : 1;
+    // the rifle leaves his hands and lands like hardware, not like a prop
+    const prop = m._weaponProp;
+    if (prop && CBZ.weaponPhysics && CBZ.weaponPhysics.drop) {
+      try {
+        CBZ.scene.attach(prop);
+        m._weaponProp = null; m._weaponPropId = null;
+        CBZ.weaponPhysics.drop(prop, {
+          vx: (lcg() - 0.5) * 2.4, vy: 1.6 + lcg(), vz: (lcg() - 0.5) * 2.4,
+          source: "npcwar-death",
+        });
+        dropGuns.push(prop);
+        if (dropGuns.length > 140) {
+          const old = dropGuns.shift();
+          if (old && old.parent) old.parent.remove(old);
+        }
+      } catch (e) {}
+    }
+    m.armed = false;
+    corpses.push(m);
+    if (corpses.length > 260) {
+      const old = corpses.shift();
+      const k = men.indexOf(old);
+      if (k >= 0) men.splice(k, 1);
+      if (old.group) CBZ.studio.drop(old.group);
+    }
+    if (camDist2(m.pos) < 120 * 120 || aliveCount("red") + aliveCount("blue") < 40) {
+      hud.feed(TEAMS[m.team].name + " " + (m.i + 1) + " DOWN");
+    }
+  }
+  function aliveCount(team) {
+    let n = 0;
+    for (let i = 0; i < men.length; i++) if (men[i].team === team && !men[i].dead) n++;
+    return n;
+  }
+
+  /* ============================================================ THE GRID
+     Target search over thousands of men cannot be O(n squared). One uniform
+     grid, rebuilt on a slow tick, queried in rings. */
+  const GRID_CELL = 14;
+  const grid = new Map();
+  let gridAt = -1;
+  function gridKey(cx, cz) { return cx * 73856093 ^ cz * 19349663; }
+  function rebuildGrid() {
+    grid.clear();
+    for (let i = 0; i < men.length; i++) {
+      const m = men[i];
+      if (m.dead) continue;
+      const k = gridKey(Math.floor(m.pos.x / GRID_CELL), Math.floor(m.pos.z / GRID_CELL));
+      let a = grid.get(k);
+      if (!a) { a = []; grid.set(k, a); }
+      a.push(m);
+    }
+    gridAt = simT;
+  }
+  function nearestEnemy(m, range) {
+    const cx = Math.floor(m.pos.x / GRID_CELL), cz = Math.floor(m.pos.z / GRID_CELL);
+    const maxR = Math.ceil(range / GRID_CELL);
+    let best = null, bd = range * range;
+    for (let r = 0; r <= maxR; r++) {
+      for (let dx = -r; dx <= r; dx++) for (let dz = -r; dz <= r; dz++) {
+        if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;   // ring shell only
+        const a = grid.get(gridKey(cx + dx, cz + dz));
+        if (!a) continue;
+        for (let i = 0; i < a.length; i++) {
+          const o = a[i];
+          if (o.team === m.team || o.dead) continue;
+          const d = (o.pos.x - m.pos.x) * (o.pos.x - m.pos.x) + (o.pos.z - m.pos.z) * (o.pos.z - m.pos.z);
+          if (d < bd) { bd = d; best = o; }
+        }
+      }
+      if (best && r > 1) break;    // a full ring past the first hit is enough
+    }
+    return best;
+  }
+  // BODIES ARE NOT GHOSTS. Goal-level spacing is not enough once a column
+  // converges on one point, so overlapping pairs get pushed apart for real,
+  // cell by cell. Grid cells are rebuilt on a slow tick; a push a few frames
+  // stale still points the right way.
+  function separatePass(k) {
+    grid.forEach(function (a) {
+      for (let i = 0; i < a.length; i++) {
+        const m = a[i];
+        if (m.dead) continue;
+        const jEnd = Math.min(a.length, i + 6);
+        for (let j = i + 1; j < jEnd; j++) {
+          const o = a[j];
+          if (o.dead) continue;
+          const dx = o.pos.x - m.pos.x, dz = o.pos.z - m.pos.z;
+          const d2 = dx * dx + dz * dz;
+          if (d2 > 1.0 || d2 < 1e-6) continue;
+          const d = Math.sqrt(d2);
+          const push = (1.0 - d) * 0.5 * k / d;
+          m.pos.x -= dx * push; m.pos.z -= dz * push;
+          o.pos.x += dx * push; o.pos.z += dz * push;
+        }
+      }
+    });
+  }
+  const teamCOM = { red: { x: 0, z: 0 }, blue: { x: 0, z: 0 } };
+  let comAt = -1;
+  function updateCOM() {
+    ["red", "blue"].forEach(function (t) {
+      let x = 0, z = 0, n = 0;
+      for (let i = 0; i < men.length; i++) {
+        const m = men[i];
+        if (m.team !== t || m.dead) continue;
+        x += m.pos.x; z += m.pos.z; n++;
+      }
+      if (n) { teamCOM[t].x = x / n; teamCOM[t].z = z / n; }
+    });
+    comAt = simT;
+  }
+
+  /* ============================================================ FIRE
+     The trigger pull is combat_iq's: reaction beat, settle, burst rhythm,
+     token discipline, derived damage. This page only draws the round,
+     plays the report and applies the number it was handed. */
+  const SIGHT = 175;
+  function eyeLos(m, o) {
+    return !CBZ.micro.segmentBlocked(m.pos.x, m.pos.y + 1.52, m.pos.z, o.pos.x, o.pos.y + 1.35, o.pos.z);
+  }
+  function camDist2(p) {
+    const c = CBZ.camera.position;
+    return (p.x - c.x) * (p.x - c.x) + (p.y - c.y) * (p.y - c.y) + (p.z - c.z) * (p.z - c.z);
+  }
+  let fxBudget = 0;              // tracers drawn this frame — a salvo cannot flood it
+  function fireShot(m, tgt, r) {
+    const w = CBZ.weaponById(m.wid);
+    m.mag--; m.lastShotT = simT;
+    stats[m.team].shots++;
+    if (shotsRing.length > 90) shotsRing.shift();
+    shotsRing.push({ x: m.pos.x, z: m.pos.z, t: simT, m: m });
+
+    const cd2 = camDist2(m.pos);
+    const seen = cd2 < 240 * 240;
+    const hit = lcg() < r.hit;
+    const head = hit && lcg() < 0.12;
+
+    // the round, resolved: chest point on a hit, a spread-true near miss on a miss
+    _v.set(tgt.pos.x, tgt.pos.y + (head ? 1.62 : 1.28), tgt.pos.z);
+    if (!hit) {
+      const slot = (w && w.slot) || "_def";
+      const spread = (CBZ.NPC_SPREAD && (CBZ.NPC_SPREAD[slot] || CBZ.NPC_SPREAD._def)) || 0.055;
+      const mul = CBZ.suppressionAccuracyMul ? CBZ.suppressionAccuracyMul(m) : 1;
+      const dist = Math.hypot(tgt.pos.x - m.pos.x, tgt.pos.z - m.pos.z);
+      const miss = spread * mul * dist * (0.5 + lcg() * 1.6);
+      const ang = lcg() * Math.PI * 2;
+      _v.x += Math.cos(ang) * miss;
+      _v.y += (lcg() - 0.35) * miss * 0.8;
+      _v.z += Math.sin(ang) * miss;
+    }
+
+    if (seen && fxBudget < 26) {
+      fxBudget++;
+      let from = null;
+      if (cd2 < 130 * 130 && CBZ.actorMuzzle) from = CBZ.actorMuzzle(m, _muz);
+      if (!from) from = _muz.set(m.pos.x + Math.sin(m.yaw) * 0.5, m.pos.y + 1.42, m.pos.z + Math.cos(m.yaw) * 0.5);
+      // pellets read as a cone; everything else is one line
+      const lines = (w && w.pellets) ? 3 : 1;
+      for (let i = 0; i < lines; i++) {
+        _v2.copy(_v);
+        if (i) { _v2.x += (lcg() - 0.5) * 1.6; _v2.y += (lcg() - 0.5) * 0.9; _v2.z += (lcg() - 0.5) * 1.6; }
+        CBZ.tracer(from, _v2, { shooter: m, targetActor: tgt, muzzle: i === 0,
+          muzzleScale: (w && w.flash ? 0.5 + w.flash : 0.9) });
+      }
+      const dCam = Math.sqrt(cd2);
+      if (w && w.sfx && dCam < 230) {
+        try {
+          CBZ.sfx(w.sfx, { dist: dCam, ghost: true, volume: (w.sfxVol || 1) * 0.82,
+            pitch: w.sfxPitch || 1, delay: dCam > 40 ? dCam / 343 : 0 });
+        } catch (e) {}
+      }
+      if (!hit) missImpact(from, _v, cd2);
+    }
+
+    if (hit) {
+      stats[m.team].hits++;
+      if (CBZ.bodyWound && cd2 < 90 * 90) { try { CBZ.bodyWound(tgt, _v, {}); } catch (e) {} }
+      // combat_iq's ladder is authored for fights against the PLAYER, whose
+      // fairness cap this page has no player to need. Army-on-army trades at
+      // band edge under mutual suppression, so battles read livelier a step
+      // hotter — a page rule, applied where damage lands, never inside the IQ.
+      hurtMan(tgt, r.dmg * 1.45 * (head ? 2.2 : 1), { by: m, headshot: head });
+    }
+  }
+  // where did the miss land: walk the line for the first collider, else the
+  // ground, and let gunfx stamp the world so the fight leaves evidence
+  const _mq = [];
+  function missImpact(from, to, cd2) {
+    if (cd2 > 150 * 150) return;
+    const dx = to.x - from.x, dy = to.y - from.y, dz = to.z - from.z;
+    const len = Math.hypot(dx, dy, dz);
+    if (len < 1) return;
+    const steps = Math.min(14, Math.ceil(len / 2.4));
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      const x = from.x + dx * t, y = from.y + dy * t, z = from.z + dz * t;
+      const g = MAP.groundAt(x, z);
+      if (y <= g + 0.05) {
+        _v2.set(x, g + 0.03, z);
+        CBZ.bulletImpact(_v2, { x: 0, y: 1, z: 0 }, { kind: "dust", power: 0.8 });
+        return;
+      }
+      const cols = CBZ.micro.queryColliders(x, z, 0.4, _mq);
+      for (let c = 0; c < cols.length; c++) {
+        const b = cols[c];
+        if (x < b.minX || x > b.maxX || z < b.minZ || z > b.maxZ) continue;
+        if (b.y0 != null && (y < b.y0 || y > b.y1)) continue;
+        _v2.set(x, y, z);
+        const nx = Math.abs(x - b.minX) < Math.abs(x - b.maxX) ? -1 : 1;
+        CBZ.bulletImpact(_v2, { x: nx, y: 0.2, z: 0 }, { kind: "spark", power: 1 });
+        if (CBZ.bulletHole) CBZ.bulletHole(_v2, { x: nx, y: 0, z: 0 }, { mm: 8, noProp: true });
+        return;
+      }
+    }
+  }
+
+  /* ---- rockets: the launcher classes fly a real round and detonate
+     through studio.boom, which damages BOTH rosters through the caps bus
+     and takes the building face with it outside the kill box. ---- */
+  function fireRocket(m, tgt) {
+    const w = CBZ.weaponById(m.wid);
+    m.mag--; m.lastShotT = simT;
+    stats[m.team].shots++;
+    shotsRing.push({ x: m.pos.x, z: m.pos.z, t: simT, m: m });
+    let from = null;
+    if (camDist2(m.pos) < 150 * 150 && CBZ.actorMuzzle) from = CBZ.actorMuzzle(m, _muz);
+    if (!from) from = _muz.set(m.pos.x + Math.sin(m.yaw) * 0.6, m.pos.y + 1.45, m.pos.z + Math.cos(m.yaw) * 0.6);
+    const dx = tgt.pos.x - from.x, dy = (tgt.pos.y + 1.1) - from.y, dz = tgt.pos.z - from.z;
+    const dist = Math.hypot(dx, dz);
+    const spd = (w.projSpeed || 60) * 0.95;
+    const grav = w.projGravity || 6;
+    const tFly = dist / spd;
+    const r = {
+      pos: V().copy(from),
+      vel: new THREE.Vector3(dx / tFly, dy / tFly + 0.5 * grav * tFly, dz / tFly),
+      grav: grav, t: 0, w: w, by: m,
+      trail: CBZ.studio.trail({ length: 26, color: 0xd8c39a, opacity: 0.5, minStep: 1.6 }),
+    };
+    rockets.push(r);
+    const dCam = Math.sqrt(camDist2(m.pos));
+    if (dCam < 240) {
+      try { CBZ.sfx(w.sfx || "shoot_shotgun", { dist: dCam, ghost: true, pitch: w.sfxPitch || 1, volume: (w.sfxVol || 1) * 0.85 }); } catch (e) {}
+      CBZ.muzzleFlash(from, { scale: 1.6 });
+    }
+  }
+  function stepRockets(sdt) {
+    for (let i = rockets.length - 1; i >= 0; i--) {
+      const r = rockets[i];
+      r.t += sdt;
+      r.vel.y -= r.grav * sdt;
+      r.pos.addScaledVector(r.vel, sdt);
+      r.trail.push(r.pos);
+      let boom = r.t > 7 || r.pos.y <= MAP.groundAt(r.pos.x, r.pos.z) + 0.25;
+      if (!boom) {
+        const cols = CBZ.micro.queryColliders(r.pos.x, r.pos.z, 0.5, _mq);
+        for (let c = 0; c < cols.length; c++) {
+          const b = cols[c];
+          if (r.pos.x < b.minX || r.pos.x > b.maxX || r.pos.z < b.minZ || r.pos.z > b.maxZ) continue;
+          if (b.y0 != null && (r.pos.y < b.y0 || r.pos.y > b.y1)) continue;
+          boom = true; break;
+        }
+      }
+      if (boom) {
+        r.trail.dispose();
+        rockets.splice(i, 1);
+        CBZ.studio.boom({ x: r.pos.x, y: Math.max(r.pos.y, MAP.groundAt(r.pos.x, r.pos.z) + 0.6), z: r.pos.z }, {
+          radius: r.w.blastRadius || 13, power: (r.w.blastPower || 1.9) * 0.55,
+          structural: MAP.id !== "arena" && spawnTotal < 700,
+        });
+      }
+    }
+  }
+
+  /* ============================================================ THINK
+     Slow tick per man: pick a mark, hand steering to combat_iq's posture
+     (cover, fire token, band, bearing slot), advance when walls have kept
+     the mark unseen too long. The fast path below only moves and shoots. */
+  function think(m, now) {
+    const thinkDt = Math.min(1.2, now - m.lastThink);
+    m.lastThink = now;
+    const crowd = men.length;
+    m.thinkAt = now + 0.14 + Math.min(0.42, crowd / 2600) + lcg() * 0.06;
+
+    if (!m.tgt || m.tgt.dead) { m.tgt = nearestEnemy(m, SIGHT); m.losBadT = 0; }
+    const tgt = m.tgt;
+    if (!tgt) {
+      // nobody in sight: march on the other army's centre of mass
+      const com = teamCOM[m.team === "red" ? "blue" : "red"];
+      m.target.set(com.x + (lcg() - 0.5) * 24, 0, com.z + (lcg() - 0.5) * 24);
+      m.slot = "march";
+      return;
+    }
+    const sees = eyeLos(m, tgt);
+    m.sees = sees;
+    if (!sees) {
+      m.losBadT += thinkDt;
+      // a wall has held this line too long: push up on the mark instead of
+      // trading nothing with a facade. The assault around the corner IS the
+      // readable behaviour.
+      if (m.losBadT > 2.6) {
+        m.target.set(tgt.pos.x, 0, tgt.pos.z);
+        m.slot = "push";
+        return;
+      }
+    } else m.losBadT = 0;
+
+    if (m.launcher) {
+      // launchers stand off; combat_iq has no rocket column, so the band is ours
+      const d = Math.hypot(tgt.pos.x - m.pos.x, tgt.pos.z - m.pos.z);
+      if (d < 22) { m.target.set(m.pos.x + (m.pos.x - tgt.pos.x) / d * 12, 0, m.pos.z + (m.pos.z - tgt.pos.z) / d * 12); m.slot = "back"; }
+      else if (d > 52) { m.target.set(tgt.pos.x, 0, tgt.pos.z); m.slot = "close"; }
+      else { m.slot = "fire"; m.target.set(m.pos.x, 0, m.pos.z); }
+      return;
+    }
+    const slot = CBZ.combatIQ && CBZ.combatIQ.posture
+      ? CBZ.combatIQ.posture(m, tgt, thinkDt) : "fire";
+    m.slot = slot || "fire";
+
+    // anti-clump on the goal, from the grid: posture's own separation scans
+    // city rosters, which are empty out here
+    const a = grid.get(gridKey(Math.floor(m.pos.x / GRID_CELL), Math.floor(m.pos.z / GRID_CELL)));
+    if (a && a.length > 1) {
+      let ox = 0, oz = 0, n = 0;
+      for (let i = 0; i < a.length && n < 4; i++) {
+        const o = a[i];
+        if (o === m || o.dead) continue;
+        const dx = m.target.x - o.pos.x, dz = m.target.z - o.pos.z;
+        const d = Math.hypot(dx, dz);
+        if (d > 2.6 || d < 0.001) continue;
+        ox += dx / d * (2.6 - d); oz += dz / d * (2.6 - d); n++;
+      }
+      m.target.x += ox; m.target.z += oz;
+    }
+  }
+
+  /* ============================================================ SIM STEP */
+  function stepMan(m, sdt) {
+    if (m.dead) {
+      if (m.dieT > 0 && m.dieT < 1) {
+        m.dieT = Math.min(1, m.dieT + sdt * 2.4);
+        const k = 1 - (1 - m.dieT) * (1 - m.dieT);
+        m.group.rotation.x = m.dieDir * k * (Math.PI / 2 - 0.07);
+      }
+      return;
+    }
+    if (simT >= m.thinkAt) think(m, simT);
+    if (m.reloadT > 0) {
+      m.reloadT -= sdt;
+      if (m.reloadT <= 0) m.mag = m.magSize;
+    }
+    m.cool -= sdt;
+
+    // ---- move toward the goal combat_iq (or the march) set ----
+    const dx = m.target.x - m.pos.x, dz = m.target.z - m.pos.z;
+    const d = Math.hypot(dx, dz);
+    let spd = 0;
+    if (d > 1.1) {
+      const hurtish = m.hp < m.maxHp * 0.45;
+      spd = (m.slot === "push" || m.slot === "march" || m.slot === "flank") ? 6.2 :
+            (m.slot === "cover" || hurtish) ? 7.0 : 4.6;
+      m.pos.x += dx / d * spd * sdt;
+      m.pos.z += dz / d * spd * sdt;
+      CBZ.micro.resolveCircle(m.pos, 0.5, m.pos.y, 1.8);
+    }
+    m.speed = spd;
+    m.pos.y = MAP.groundAt(m.pos.x, m.pos.z);
+
+    // face the fight when there is one, else the walk
+    const tgt = m.tgt;
+    const engaged = tgt && !tgt.dead && m.sees;
+    if (!engaged && spd > 0.1) {
+      const want = Math.atan2(dx, dz);
+      let dy = want - m.yaw;
+      while (dy > Math.PI) dy -= Math.PI * 2;
+      while (dy < -Math.PI) dy += Math.PI * 2;
+      m.yaw += dy * Math.min(1, sdt * 7);
+      m.group.rotation.y = m.yaw;
+    }
+
+    // ---- the trigger ----
+    if (!tgt || tgt.dead || m.reloadT > 0) return;
+    const dist = Math.hypot(tgt.pos.x - m.pos.x, tgt.pos.z - m.pos.z);
+    if (m.launcher) {
+      if (m.cool <= 0 && m.sees && dist > 16 && dist < 95) {
+        const w = CBZ.weaponById(m.wid);
+        fireRocket(m, tgt);
+        if (m.mag <= 0) { m.reloadT = w.reloadTime || w.reload || 2; m.mag = 0; }
+        m.cool = (w.fireDelay || w.interval || 1.2) + 0.6 + lcg() * 0.8;
+      }
+      return;
+    }
+    const p = CBZ.combatIQ && CBZ.combatIQ.profile ? CBZ.combatIQ.profile(m) : null;
+    const fireMax = p ? Math.min(125, p.hi * 2.6 + 8) : 60;
+    if (!m.sees || dist > fireMax) return;
+    if (m.slot !== "fire" && m.slot !== "peek" && m.slot !== "push" && dist > 12) return;
+    if (m.cool > 0) return;
+    const w = CBZ.weaponById(m.wid);
+    const r = CBZ.combatIQ && CBZ.combatIQ.shot
+      ? CBZ.combatIQ.shot(m, tgt, dist, 0, w ? w.damage : 14) : null;
+    if (!r) { m.cool = 0.5; return; }
+    m.cool = r.cd;
+    if (!r.fire) return;
+    fireShot(m, tgt, r);
+    if (m.mag <= 0) {
+      m.reloadT = (w && (w.reloadTime || w.reload)) || 1.6;
+      const dCam = Math.sqrt(camDist2(m.pos));
+      if (dCam < 60 && CBZ.audioManifest && CBZ.audioManifest.effects && CBZ.audioManifest.effects.reload) {
+        try { CBZ.sfx("reload", { dist: dCam, ghost: true }); } catch (e) {}
+      }
+    }
+  }
+
+  /* ============================================================ CAMERA
+     Three postures. FREE: drag orbits, wheel zooms, WASD pans. FOLLOW: over
+     the shoulder of whoever is doing the shooting. AUTO: a director that
+     cuts between crane shots and shoulders wherever the fire is. Any manual
+     input takes the camera back. */
+  const cam = {
+    mode: "auto",
+    focus: V(), yaw: 0.9, pitch: 0.62, dist: 64,
+    wFocus: V(), wYaw: 0.9, wPitch: 0.62, wDist: 64,
+    followM: null, cutAt: 0, shot: "crane", craneSpin: 0.05,
+  };
+  function camApply(dt) {
+    const k = 1 - Math.pow(0.002, dt);
+    cam.focus.lerp(cam.wFocus, k);
+    cam.yaw += (cam.wYaw - cam.yaw) * k;
+    cam.pitch += (cam.wPitch - cam.pitch) * k;
+    cam.dist += (cam.wDist - cam.dist) * k;
+    const c = CBZ.camera;
+    const cp = Math.max(0.12, Math.min(1.42, cam.pitch));
+    const x = cam.focus.x + Math.sin(cam.yaw) * Math.cos(cp) * cam.dist;
+    const z = cam.focus.z + Math.cos(cam.yaw) * Math.cos(cp) * cam.dist;
+    let y = cam.focus.y + Math.sin(cp) * cam.dist;
+    const g = MAP.groundAt(x, z) + 1.6;
+    if (y < g) y = g;
+    c.position.set(x, y, z);
+    c.lookAt(cam.focus.x, cam.focus.y + 1.2, cam.focus.z);
+  }
+  function hotspot() {
+    if (!shotsRing.length) return null;
+    const seed = shotsRing[(lcg() * shotsRing.length) | 0];
+    let x = 0, z = 0, n = 0;
+    for (let i = 0; i < shotsRing.length; i++) {
+      const s = shotsRing[i];
+      if (simT - s.t > 7) continue;
+      if (Math.hypot(s.x - seed.x, s.z - seed.z) > 46) continue;
+      x += s.x; z += s.z; n++;
+    }
+    return n ? { x: x / n, z: z / n } : { x: seed.x, z: seed.z };
+  }
+  function hottestMan() {
+    let best = null, bt = -1e9;
+    for (let i = 0; i < men.length; i++) {
+      const m = men[i];
+      if (m.dead || m.lastShotT < bt) continue;
+      bt = m.lastShotT; best = m;
+    }
+    return best;
+  }
+  function directorCut() {
+    cam.cutAt = simT + 5.5 + lcg() * 3.5;
+    const hs = hotspot();
+    cam.shot = lcg() < 0.45 && hottestMan() ? "shoulder" : "crane";
+    if (cam.shot === "shoulder") {
+      cam.followM = hottestMan();
+    } else if (hs) {
+      cam.wFocus.set(hs.x, MAP.groundAt(hs.x, hs.z), hs.z);
+      cam.wYaw = lcg() * Math.PI * 2;
+      cam.wPitch = 0.4 + lcg() * 0.5;
+      cam.wDist = 26 + lcg() * 46;
+      cam.craneSpin = (lcg() < 0.5 ? -1 : 1) * (0.03 + lcg() * 0.05);
+    }
+  }
+  function stepCamera(dt) {
+    const IN = CBZ.micro.input;
+    if (cam.mode === "auto") {
+      if (simT >= cam.cutAt || (cam.shot === "shoulder" && (!cam.followM || cam.followM.dead))) directorCut();
+      if (cam.shot === "shoulder" && cam.followM && !cam.followM.dead) {
+        const m = cam.followM;
+        cam.wFocus.set(m.pos.x, m.pos.y, m.pos.z);
+        cam.wYaw = m.yaw + Math.PI + 0.35;
+        cam.wPitch = 0.3; cam.wDist = 10.5;
+      } else cam.wYaw += cam.craneSpin * dt * 8;
+    } else if (cam.mode === "follow") {
+      if (!cam.followM || cam.followM.dead) cam.followM = hottestMan();
+      const m = cam.followM;
+      if (m) {
+        cam.wFocus.set(m.pos.x, m.pos.y, m.pos.z);
+        cam.wYaw = m.yaw + Math.PI + 0.3;
+        cam.wPitch = 0.26; cam.wDist = 8.5;
+      }
+    } else if (IN) {
+      const fwd = 46 * dt * (cam.dist / 60 + 0.4);
+      const mx = IN.axis("KeyA", "KeyD"), mz = IN.axis("KeyS", "KeyW");
+      if (mx || mz) {
+        cam.wFocus.x += (-Math.sin(cam.yaw) * mz - Math.cos(cam.yaw) * mx) * fwd;
+        cam.wFocus.z += (-Math.cos(cam.yaw) * mz + Math.sin(cam.yaw) * mx) * fwd;
+        cam.wFocus.y = MAP.groundAt(cam.wFocus.x, cam.wFocus.z);
+      }
+    }
+    camApply(dt);
+  }
+  function setCamMode(mode) {
+    cam.mode = mode;
+    el("cCam").textContent = mode === "auto" ? "AUTO CAM" : mode === "follow" ? "FOLLOW" : "FREE CAM";
+    el("cCam").classList.toggle("on", mode === "auto");
+    if (mode === "follow") cam.followM = hottestMan();
+  }
+  // manual orbit: pointers on the page, ignored while the UI owns them
+  let drag = null;
+  const pinch = { d: 0 };
+  function uiTarget(e) {
+    return e.target && (e.target.closest && e.target.closest("#menu,#ctl,#end,button,select,input"));
+  }
+  window.addEventListener("pointerdown", function (e) {
+    if (!started || uiTarget(e)) return;
+    if (cam.mode !== "free") setCamMode("free");
+    drag = { id: e.pointerId, x: e.clientX, y: e.clientY, b: e.button };
+  });
+  window.addEventListener("pointermove", function (e) {
+    if (!drag || e.pointerId !== drag.id) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    drag.x = e.clientX; drag.y = e.clientY;
+    if (drag.b === 2) {
+      const s = cam.dist * 0.0016;
+      cam.wFocus.x += (-Math.cos(cam.yaw) * -dx + Math.sin(cam.yaw) * -dy) * s;
+      cam.wFocus.z += (Math.sin(cam.yaw) * -dx + Math.cos(cam.yaw) * -dy) * s;
+    } else {
+      cam.wYaw -= dx * 0.0052;
+      cam.wPitch = Math.max(0.12, Math.min(1.42, cam.wPitch + dy * 0.004));
+    }
+  });
+  window.addEventListener("pointerup", function () { drag = null; pinch.d = 0; });
+  window.addEventListener("wheel", function (e) {
+    if (!started || uiTarget(e)) return;
+    if (cam.mode !== "free") setCamMode("free");
+    cam.wDist = Math.max(6, Math.min(420, cam.wDist * (e.deltaY > 0 ? 1.13 : 0.885)));
+  }, { passive: true });
+  window.addEventListener("touchmove", function (e) {
+    if (!started || e.touches.length !== 2) return;
+    const d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX,
+      e.touches[0].clientY - e.touches[1].clientY);
+    if (pinch.d) cam.wDist = Math.max(6, Math.min(420, cam.wDist * (pinch.d / d)));
+    pinch.d = d;
+  }, { passive: true });
+  window.addEventListener("contextmenu", function (e) { if (started && !uiTarget(e)) e.preventDefault(); });
+
+  /* ============================================================ CLOCK */
+  let effSpeed = 1;
+  function setSpeed(s) {
+    if (s > 0) lastSpeed = s;
+    speed = s;
+    el("spd").textContent = s === 0 ? "PAUSED" : "SPEED " + (s < 1 ? s.toFixed(2).replace("0.", ".") : s);
+    el("cPause").textContent = s === 0 ? "PLAY" : "PAUSE";
+    el("ctl").querySelectorAll("button[data-s]").forEach(function (b) {
+      b.classList.toggle("on", parseFloat(b.dataset.s) === s);
+    });
+  }
+  el("cPause").addEventListener("click", function () { setSpeed(speed === 0 ? lastSpeed : 0); });
+  el("ctl").querySelectorAll("button[data-s]").forEach(function (b) {
+    b.addEventListener("click", function () { setSpeed(parseFloat(b.dataset.s)); });
+  });
+  el("cCam").addEventListener("click", function () {
+    setCamMode(cam.mode === "auto" ? "follow" : cam.mode === "follow" ? "free" : "auto");
+  });
+
+  /* ============================================================ BENCH
+     The honest answer to "how many". Everybody is unkillable so the census
+     is exact; every few seconds the measured frame rate decides whether two
+     more platoons walk on. When it dips under 30 twice, the last size that
+     held is the machine's number. */
+  function stepBench(dt) {
+    const B = bench;
+    B.t += dt;
+    B.fpsAcc += dt; B.fpsN++;
+    if (B.t < B.nextAt) return;
+    const fps = CBZ.micro.fps || 0;
+    B.t = 0; B.nextAt = 3.2;
+    hud.note("BENCH " + aliveCount("red") + " PER SIDE  " + fps + " FPS");
+    if (fps >= 33 && spawnQueue.length === 0) {
+      B.lastGood = aliveCount("red");
+      B.dips = 0;
+      queueMen(B.step);
+      B.grown += B.step;
+    } else if (fps < 30) {
+      B.dips++;
+      if (B.dips >= 2) {
+        const n = B.lastGood || aliveCount("red");
+        try { localStorage.setItem("cbz-npcwar-max", String(n)); } catch (e) {}
+        banner("MAX " + n + " PER SIDE", "AT 30 FPS ON THIS MACHINE");
+        hud.note("BENCH DONE  " + n + " PER SIDE");
+        bench = { done: true, n: n, t: 0, nextAt: 1e9, fpsAcc: 0, fpsN: 0, step: 0, grown: B.grown, lastGood: n, dips: 0 };
+      }
+    } else B.dips = 0;
+  }
+
+  /* ============================================================ SPAWN */
+  function queueMen(perSide) {
+    const r0 = spawnCount.red, b0 = spawnCount.blue;
+    for (let i = 0; i < perSide; i++) {
+      spawnQueue.push(["red", r0 + i], ["blue", b0 + i]);
+    }
+    spawnCount.red += perSide; spawnCount.blue += perSide;
+    spawnTotal = spawnCount.red + spawnCount.blue;
+  }
+  const spawnCount = { red: 0, blue: 0 };
+  function drainSpawns() {
+    let n = 0;
+    while (spawnQueue.length && n < 10) {
+      const s = spawnQueue.shift();
+      const m = makeMan(s[0], s[1]);
+      if (m) men.push(m);
+      n++;
+    }
+  }
+
+  /* ============================================================ BANNER / END */
+  let bannerT = 0;
+  function banner(big, small) {
+    el("banner").innerHTML = big + (small ? "<small>" + small + "</small>" : "");
+    el("banner").classList.add("on");
+    bannerT = 3.4;
+  }
+  function endWar(winner) {
+    over = true;
+    const rows = [
+      ["DURATION", clockText()],
+      ["RED KILLS", stats.red.kills], ["BLUE KILLS", stats.blue.kills],
+      ["RED SHOTS", stats.red.shots + "  (" + pct(stats.red.hits, stats.red.shots) + " HIT)"],
+      ["BLUE SHOTS", stats.blue.shots + "  (" + pct(stats.blue.hits, stats.blue.shots) + " HIT)"],
+      ["LEFT STANDING", aliveCount("red") + aliveCount("blue")],
+    ];
+    el("endT").textContent = winner ? TEAMS[winner].name + " TAKE IT" : "NOBODY LEFT";
+    el("endTable").innerHTML = rows.map(function (r) {
+      return "<tr><td>" + r[0] + "</td><td>" + r[1] + "</td></tr>";
+    }).join("");
+    el("end").style.display = "grid";
+  }
+  function pct(a, b) { return b ? Math.round(a / b * 100) + "%" : "0%"; }
+  el("endAgain").addEventListener("click", function () { location.reload(); });
+  el("endMenu").addEventListener("click", function () {
+    location.href = location.pathname;
+  });
+  el("endWatch").addEventListener("click", function () { el("end").style.display = "none"; });
+
+  /* ============================================================ BEGIN */
+  function begin(asBench) {
+    el("menu").style.display = "none";
+    const arena = SET.map === "arena";
+    CBZ.micro.boot(arena ? {
+      fov: 72, far: 3200, exposure: 0.92,
+      sky: { top: 0x46586c, bottom: 0xb4ac96, fogNear: 260, fogFar: 1500, radius: 2600 },
+      lights: { sun: 0.9, hemi: 0.5, shadowSpan: 320, groundColor: 0x6b6657 },
+    } : {
+      fov: 72, far: 16000, exposure: 0.88,
+      sky: { top: 0x2a6bb2, bottom: 0xe3c893, fogNear: 1100, fogFar: 8600, radius: 12000 },
+      lights: { sun: 0.98, hemi: 0.46, shadowSpan: 620, groundColor: 0x8f7850 },
+    });
+    CBZ.micro.pauseKey = null;                       // the clock is ours (Space)
+    if (!CBZ.groundAt) CBZ.groundAt = function (x, z) { return MAP ? MAP.groundAt(x, z) : 0; };
+
+    MAP = buildMap(SET.map);
+    if (asBench) {
+      bench = { t: 0, nextAt: 3.2, step: 30, lastGood: 0, dips: 0, grown: 0, fpsAcc: 0, fpsN: 0 };
+      SET.redN = SET.blueN = 40;
+      SET.redW = SET.blueW = (SET.redW === "everything" || SET.redW === "mixed") ? "ak47" : SET.redW;
+    }
+
+    // SHADOWS PAY TWICE (a shadow pass draws every caster again). Big armies
+    // buy frames with the sun instead.
+    const total = SET.redN + SET.blueN;
+    const R = CBZ.renderer || (CBZ.micro && CBZ.micro.renderer);
+    if (R && R.shadowMap && (total > 170 || asBench)) R.shadowMap.enabled = false;
+
+    hud = CBZ.studio.hud({ health: false, clock: false, score: false, feed: true, note: true, prompt: false, danger: false, pause: false });
+
+    spawnQueue.length = 0;
+    // interleave the queues so uneven armies still stream in fairly
+    for (let i = 0; i < Math.max(SET.redN, SET.blueN); i++) {
+      if (i < SET.redN) spawnQueue.push(["red", i]);
+      if (i < SET.blueN) spawnQueue.push(["blue", i]);
+    }
+    spawnCount.red = SET.redN; spawnCount.blue = SET.blueN;
+    spawnTotal = SET.redN + SET.blueN;
+
+    cam.focus.set(MAP.cx, MAP.groundAt(MAP.cx, MAP.cz) + 2, MAP.cz);
+    cam.wFocus.copy(cam.focus);
+    cam.wDist = Math.min(300, 40 + Math.sqrt(spawnTotal) * 3.2);
+    cam.dist = cam.wDist + 60;
+    cam.cutAt = 4;
+
+    el("top").style.display = "flex";
+    el("ctl").style.display = "flex";
+    if (!COARSE) {
+      el("hint").style.display = "block";
+      el("hint").innerHTML = "DRAG ORBIT &middot; WHEEL ZOOM &middot; WASD PAN<br>SPACE PAUSE &middot; 1-5 SPEED &middot; F FOLLOW";
+    }
+    setSpeed(1);
+    setCamMode(asBench ? "free" : "auto");
+    if (asBench) { cam.wPitch = 0.9; cam.wDist = 170; }
+    started = true;
+    banner(MAPS[SET.map].label, TEAMS.red.name + " " + SET.redN + "   V   " + TEAMS.blue.name + " " + SET.blueN);
+    CBZ.micro.onFrame(frame);
+  }
+
+  function clockText() {
+    const s = Math.floor(simT);
+    return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+  }
+
+  /* ============================================================ FRAME */
+  let uiT = 0, winCheckT = 0, lastWall = 0;
+  function frame(dt) {
+    if (!started) return;
+    // THE SIM CLOCK IS WALL TIME, NOT RENDER TIME. microboot clamps its dt
+    // for animation stability, so on a struggling machine the battle would
+    // quietly run at a fraction of the dial. The dial is a promise: SPEED 1
+    // is one real second per second, and the sub-steps below keep the
+    // integration solid however long the frame took.
+    const wall = performance.now();
+    const realDt = lastWall ? Math.min(0.25, (wall - lastWall) / 1000) : dt;
+    lastWall = wall;
+    dt = realDt;                      // gait, camera and timers follow the same clock
+    dbgWall += realDt; dbgN++;
+    fxBudget = 0;
+    drainSpawns();
+
+    // keys: the clock and the cameras
+    const IN = CBZ.micro.input;
+    if (IN) {
+      if (IN.pressed("Space")) setSpeed(speed === 0 ? lastSpeed : 0);
+      if (IN.pressed("Digit1")) setSpeed(1);
+      if (IN.pressed("Digit2")) setSpeed(2);
+      if (IN.pressed("Digit3")) setSpeed(4);
+      if (IN.pressed("Digit4")) setSpeed(8);
+      if (IN.pressed("Digit5")) setSpeed(0.25);
+      if (IN.pressed("KeyF")) setCamMode("follow");
+      if (IN.pressed("KeyC")) setCamMode(cam.mode === "auto" ? "free" : "auto");
+    }
+
+    // ---- SIM at the dialled speed, sub-stepped so 8x stays solid. The
+    // sub-step cap means a machine that cannot COMPUTE eight seconds per
+    // second degrades to what it can; effSpeed below is the HUD admitting it.
+    let simDt = realDt * speed;
+    const simBefore = simT;
+    if (simDt > 0) {
+      const sub = Math.min(8, Math.max(1, Math.ceil(simDt / 0.055)));
+      const sdt = Math.min(0.055, simDt / sub);
+      for (let s = 0; s < sub; s++) {
+        simT += sdt;
+        CBZ.now += sdt * 1000;             // combat_iq's clocks follow the dial
+        if (simT - gridAt > 0.35) rebuildGrid();
+        if (simT - comAt > 0.6) updateCOM();
+        for (let i = 0; i < men.length; i++) stepMan(men[i], sdt);
+        separatePass(Math.min(1, sdt * 9));
+        stepRockets(sdt);
+      }
+    }
+
+    // ---- render-side work at real time: gait, aim pose, camera ----
+    const camP = CBZ.camera.position;
+    for (let i = 0; i < men.length; i++) {
+      const m = men[i];
+      if (m.dead) continue;
+      const d2 = (m.pos.x - camP.x) * (m.pos.x - camP.x) + (m.pos.z - camP.z) * (m.pos.z - camP.z);
+      m.animF = (m.animF + 1) & 1023;
+      const every = d2 < 70 * 70 ? 1 : d2 < 150 * 150 ? 2 : 4;
+      if ((m.animF % every) === 0 && CBZ.animChar && m.char) {
+        try { CBZ.animChar(m.char, m.speed * speed, dt * every); } catch (e) {}
+      }
+      const engaged = m.tgt && !m.tgt.dead && m.sees;
+      if (engaged && d2 < 190 * 190 && CBZ.actorAimAt) {
+        CBZ.actorAimAt(m, m.tgt, dt);
+        m.yaw = m.group.rotation.y;
+      }
+      if (m._weaponProp) {
+        const showGun = d2 < 130 * 130;
+        if (m._weaponProp.visible !== showGun) m._weaponProp.visible = showGun;
+      }
+    }
+    stepCamera(dt);
+    effSpeed += ((realDt > 0 ? (simT - simBefore) / realDt : speed) - effSpeed) * Math.min(1, dt * 2);
+
+    if (bench && !bench.done) stepBench(dt);
+    if (bannerT > 0 && (bannerT -= dt) <= 0) el("banner").classList.remove("on");
+
+    // ---- chrome on a slow tick ----
+    uiT -= dt;
+    if (uiT <= 0) {
+      uiT = 0.25;
+      const ar = aliveCount("red"), ab = aliveCount("blue");
+      el("redC").textContent = ar;
+      el("blueC").textContent = ab;
+      el("redB").style.width = (spawnCount.red ? ar / spawnCount.red * 100 : 0) + "%";
+      el("blueB").style.width = (spawnCount.blue ? ab / spawnCount.blue * 100 : 0) + "%";
+      el("clk").textContent = clockText() + "  " + (CBZ.micro.fps || 0) + "FPS";
+      // a dial the machine cannot honour says so instead of lying
+      if (speed > 0 && effSpeed < speed * 0.8) {
+        el("spd").textContent = "SPEED " + speed + "  REAL " + (Math.round(effSpeed * 10) / 10);
+      } else if (speed > 0) {
+        el("spd").textContent = "SPEED " + (speed < 1 ? speed.toFixed(2).replace("0.", ".") : speed);
+      }
+    }
+    winCheckT -= dt;
+    if (winCheckT <= 0 && !over && !bench && spawnQueue.length === 0) {
+      winCheckT = 0.5;
+      const ar = aliveCount("red"), ab = aliveCount("blue");
+      if (ar === 0 || ab === 0) endWar(ar > 0 ? "red" : ab > 0 ? "blue" : null);
+    }
+  }
+
+  /* ============================================================ PROBE
+     The reuse claim, checkable instead of asserted. */
+  let dbgWall = 0, dbgN = 0;
+  window.__battle = {
+    audit: function () {
+      return {
+        clock: { frames: dbgN, wallSum: Math.round(dbgWall * 100) / 100 },
+        map: SET.map, started: started, over: over,
+        men: men.length, red: aliveCount("red"), blue: aliveCount("blue"),
+        queued: spawnQueue.length, corpses: corpses.length, rockets: rockets.length,
+        fps: CBZ.micro.fps || 0,
+        calls: (CBZ.renderer && CBZ.renderer.info) ? CBZ.renderer.info.render.calls : null,
+        speed: speed, simT: Math.round(simT * 10) / 10,
+        stats: JSON.parse(JSON.stringify(stats)),
+        caps: CBZ.modeHas ? { blast: CBZ.modeHas("blast"), blastActors: CBZ.modeHas("blastActors") } : null,
+        unrouted: CBZ.modeCapsAudit ? CBZ.modeCapsAudit().unrouted : null,
+        colliders: (CBZ.colliders && CBZ.colliders.length) || 0,
+        reuse: {
+          iq: !!(CBZ.combatIQ && CBZ.combatIQ.shot), gunfx: !!CBZ.tracer,
+          rig: !!CBZ.makeCharacter, guns: !!(CBZ.weaponAppearance && CBZ.weaponAppearance.ak47),
+          gunPhysics: !!CBZ.weaponPhysics, wounds: !!CBZ.bodyWound,
+        },
+        bench: bench,
+      };
+    },
+    speed: setSpeed,
+    reinforce: function (n) { queueMen(n || 10); },
+  };
+
+  // a shared link or a bench run skips the menu; kicked from here so every
+  // declaration above is live before begin() touches it
+  if (SET.auto || SET.bench) {
+    const go = function () { begin(SET.bench); };
+    if (MAPS[SET.map].packs.length) CBZ.studio.need(MAPS[SET.map].packs).then(go); else go();
+  }
+}).catch(function (e) {
+  bootst("LOAD FAILED " + (e && e.message ? e.message : e));
+  console.error(e);
+});
+})();
+</script>
+</body>
+</html>
