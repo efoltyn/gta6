@@ -214,6 +214,12 @@
   let A_root = null;          // arena scene root (resolved lazily)
   let initialized = false;
   let heli = null;            // the single attack gunship, or null
+  // A SCRAMBLE THAT FAILED MUST NOT BE RETRIED EVERY FRAME. A crew shot on the
+  // apron (or one that could not reach the pad) releases the airframe, and the
+  // request loop would otherwise re-claim it on the very next tick and march a
+  // fresh man into the same fire — an unwatchable stutter and a claim/release
+  // churn on the shared vehicle registry.
+  let heliBoardCD = 0;
   const jets = [];            // live fighter passes
   const missiles = [];        // active missiles (subset of the pool)
   const missilePool = [];     // recycled missile objects
@@ -327,8 +333,31 @@
   // module only flies the claimed object.  There is deliberately no procedural
   // fallback: if the base has no available aircraft or pilot, no air response
   // materialises from nowhere.
+  /* WHICH MACHINE. This returned the FIRST free record in the registry, which
+     was fine while the crew teleported into it and is not fine now that they
+     walk: Fort Brandt parks four helicopters in a row 30 m apart and five
+     fighters in a row 34 m apart, so "the first one" routinely sat at the far
+     end of the line with every other airframe's solid collider between it and
+     the men. MEASURED: a weapons officer stopped dead 26 m short of his target,
+     speed 0, wedged against the neighbouring helicopter — peds.js steers around
+     obstacles, it does not path around a wall of them.
+     Take the machine the crew is STANDING NEAREST instead. It is one sort, it
+     reads better than the registry order ever did (you fly the aircraft you
+     are next to), and it turns the walk into open ground. */
+  function nearestFreeCrewDist(rec) {
+    const troops = CBZ.militaryPersonnel ? CBZ.militaryPersonnel() : (CBZ.cityMilitaryPersonnel || []);
+    let d = Infinity;
+    for (let i = 0; i < troops.length; i++) {
+      const p = troops[i];
+      if (!p || p.dead || !p.pos || p._milPilot || p._airPilot || p.inCar || p._npcAttached) continue;
+      const dd = Math.hypot(p.pos.x - rec.pos.x, p.pos.z - rec.pos.z);
+      if (dd < d) d = dd;
+    }
+    return d;
+  }
   function parkedMilitary(kind) {
     const list = CBZ.cityMilitaryVehicles || [];
+    let bestRec = null, bestD = Infinity;
     for (let i = 0; i < list.length; i++) {
       const v = list[i];
       if (!v || v.civilian || v.kind !== kind || v.taken || v._aiActive || !v.group || !v.group.parent) continue;
@@ -338,17 +367,35 @@
       // since the claim is exclusive, could also take the airframe out from
       // under an ordered nuclear sortie. `b2` is the record's own flag.
       if (kind === "plane" && (v.b2 || (v.model && /bomber|b-2/i.test(v.model.name || "")))) continue;
-      return v;
+      if (!boardOn()) return v;                      // flag off: the original first-free answer
+      const d = nearestFreeCrewDist(v);
+      if (d < bestD) { bestD = d; bestRec = v; }
     }
-    return null;
+    return bestRec;
   }
+  // ONE ROSTER. `CBZ.cityMilitaryPersonnel` is island_military.js's own 44
+  // bodies, and it was the ONLY list this function had ever read — so a
+  // garrison sentry standing at the gate under city/garrison.js, or any other
+  // body in the world stamped `organization:"military"`, could never be
+  // aircrew. `CBZ.militaryPersonnel()` (city/fortresponse.js) is the merged
+  // answer and the island list is one of its sources, so this degrades to
+  // exactly what it did before when that file is absent.
+  //
+  // AND A WALK HAS A LENGTH. Boarding is real now (AIR_CREW_BOARD), so the
+  // nearest free body is no longer a free choice: a man on the far side of the
+  // reservation would spend the whole 30 s window crossing the apron and the
+  // sortie would be given up. PILOT_REACH is what a crew can actually cover.
+  const PILOT_REACH = 170;
   function militaryPilot(rec) {
-    const troops = CBZ.cityMilitaryPersonnel || [];
+    const troops = CBZ.militaryPersonnel ? CBZ.militaryPersonnel() : (CBZ.cityMilitaryPersonnel || []);
     let best = null, bd = Infinity;
     for (let i = 0; i < troops.length; i++) {
       const p = troops[i];
       if (!p || p.dead || p._milPilot || p._airPilot || (CBZ.body && CBZ.body.busy && CBZ.body.busy(p))) continue;
+      if (p.inCar || p._npcAttached || p.surrender || (p.ko || 0) > 0) continue;
+      if (CBZ.boardingHolds && CBZ.boardingHolds(p)) continue;
       const d = Math.hypot(p.pos.x - rec.pos.x, p.pos.z - rec.pos.z);
+      if (boardOn() && d > PILOT_REACH) continue;
       if (d < bd) { bd = d; best = p; }
     }
     return best;
@@ -412,6 +459,10 @@
     for (let i = 0; i < craft.crew.length; i++) {
       const c = craft.crew[i], s = GUNSHIP_SEATS[i] || GUNSHIP_SEATS[0];
       if (!c || !c.actor || c.actor.dead || c.seated) continue;
+      // AIR_CREW_BOARD: a man who has not reached the aircraft does not get a
+      // seat in it. `aboard` is true by construction on the no-walk path, so
+      // with the flag off this reads exactly as it always did.
+      if (c.aboard === false) continue;
       c.actor.group.visible = true;
       // RE-ARM THE HOLD — cityUnseat drops `_seatHold` to get a body out of a
       // chair, and a body seated again later needs it back or syncAttached
@@ -451,22 +502,253 @@
     } catch (e) { return false; }
   }
 
+  /* =========================================================================
+     THE CREW RUNS TO THE AIRCRAFT — CBZ.CONFIG.AIR_CREW_BOARD.
+
+     OWNER (2026-08-09, verbatim): "They don't run and get in the fighter when
+     you have five stars… I'd see them run towards fire like a real NPC."
+
+     He is describing THIS function, and he is right. `enlist` below set
+     `inCar = true` and `group.visible = false` on the SAME FRAME the airframe
+     was claimed, and `seatCrew`/`seatSolo` then put the body in the cockpit —
+     so a man standing on the parade ground 200 m from the flight line ceased
+     to exist and reappeared behind the canopy. `phase:"spool"` is ENGINE
+     spool; it was never a boarding beat, and there has never been one.
+
+     THE BEAT, AND WHY IT IS NOT A NEW LOCOMOTION SYSTEM. A scrambled crewman
+     stays an ORDINARY ped: we write `target` / `state` / `pause`, which is the
+     only steering contract peds.js has ever exposed, and we set `_boardRun` —
+     city/boarding.js's OWN flag (peds.js:5803, a x1.9 multiplier on the shared
+     mover) which exists for exactly this: "somebody called you and you are
+     across the apron." Context steering, the vault probe, depenetration and
+     animChar's run layer all still run, because it is the same mover.
+
+     WHY NOT boarding.js's arc WHOLESALE: `seatsOf()` derives seats from
+     `userData.cabin` (an airliner) or a car cabin, and a parked fighter has
+     neither — its seat is solved by the COCKPIT GENERATOR (`CBZ.airSeatActor`,
+     playeraircraft.js), which is what `seatSolo` already calls and what the
+     strategic bomber already uses. Teaching boarding.js to speak cockpit is a
+     bigger change in a file this wave does not own; the WALK is the part that
+     was missing, and the walk is four fields.
+
+     A BOARDING SORTIE CAN FAIL, AND THAT IS THE POINT. Shoot the man crossing
+     the apron and no aircraft launches — the airframe is released and the next
+     request tries again on its own cooldown. That is the same honest refusal
+     strategic.js already prints for "No aircrew left on the base", and it is
+     the whole reason the beat is worth having: the crew is now a target during
+     the one window they are in the open.
+     ========================================================================= */
+  if (CBZ.CONFIG.AIR_CREW_BOARD == null) CBZ.CONFIG.AIR_CREW_BOARD = true;
+  function boardOn() { return CBZ.CONFIG.AIR_CREW_BOARD !== false; }
+  // BOTH OF THESE ARE MEASURED, NOT CHOSEN. Live world, seed 90210, five
+  // scrambled crew: `_boardRun` puts a soldier on the apron at 2.9-4.1 m/s
+  // (it is x1.9 on his own baseSpeed, so it varies by body), and Fort Brandt's
+  // own geometry puts the parade ground 14 m from the nearest helipad and
+  // ~130 m from the fighter line. A 170 m reach at 3 m/s is a 57 s run, so the
+  // window has to clear that or every fighter sortie would be given up on the
+  // walk — which is exactly what a 30 s window did on the first measured pass.
+  // The staging that falls out is the right one: the gunship is up in seconds
+  // because its crew is standing next to the pad, and fast air follows.
+  const BOARD_T = 60;          // s a crewman gets to cross the apron before the sortie is given up
+  const BOARD_REACH = 3.2;     // m from his own boarding mark at which he climbs in
+  /* AND THE WALK IS ONLY RUN WHERE SOMEBODY CAN WATCH IT.
+     This is the repo's own no-spawn-in-view discipline (citystaff mints inside
+     170 m, peds.js draws inside 95 m) applied to a beat instead of a body, and
+     it is forced by a measurement, not by taste. Fort Brandt is 1.3 km from the
+     city; peds.js time-slices a body that far from the player, so a crewman
+     whose `speed` field reads 3.5 m/s actually covers about 2 — MEASURED at
+     130 m of apron still unfinished after forty seconds. Holding a fighter on
+     the line for a minute and a half of a manhunt nobody can see is a pure
+     downside: the player gets no scramble to watch AND no air support. Inside
+     this radius the crew run and you watch them; outside it, nobody is there to
+     see the difference and the seat is taken at once, exactly as it always was.
+     `airCrewAudit().teleportedInView` is the ratchet, and it is the honest one. */
+  const BOARD_VIEW = 420;      // m from the airframe within which the walk is worth running
+  let _boardStat = { started: 0, walked: 0, timedOut: 0, killed: 0, teleported: 0, unwatched: 0 };
+
+  function playerNear(rec, r) {
+    const P = CBZ.player;
+    if (!P || !P.pos || !rec || !rec.pos) return false;
+    const dx = P.pos.x - rec.pos.x, dz = P.pos.z - rec.pos.z;
+    return (dx * dx + dz * dz) < r * r;
+  }
+
+  /* WHERE HE RUNS TO. Beside the airframe, off the port beam, and CLEAR OF THE
+     HULL — which is the whole difficulty, and the first version got it wrong.
+
+     A parked machine is a solid world collider (island_military.js sizes it
+     from the model's own span and length), so a boarding mark 3 m off the
+     centreline sits UNDER THE WING of a fighter whose half-span is ~5 m. The
+     ped's depenetration then pushed him back out every frame and he could
+     never close the last three metres: MEASURED as three aircraft still in the
+     board phase after forty seconds with nobody arriving and nothing timing
+     out. The offset has to come from the AIRFRAME'S OWN FOOTPRINT — the same
+     `footW`/`footL` militaryvehicles.js already carries on the record — not
+     from a constant that happens to suit one model. */
+  function boardMark(craft, c, i) {
+    const rec = craft.sourceRec;
+    const half = Math.max(+(rec && rec.footW) || 0, +(rec && rec.footL) || 0) * 0.5;
+    const off = Math.max(6, half + 2.6);
+    // APPROACH FROM THE SIDE HE IS ALREADY ON. A fixed port-beam mark points
+    // along the flight line — straight through the neighbouring airframe — and
+    // it was the second half of the wedged-crewman measurement. The bearing
+    // from the man to the machine is by construction the open side, because he
+    // is standing on it. Solved ONCE, when the mark is first needed, so it
+    // cannot slide around the hull as he walks.
+    const p = c && c.actor;
+    let dx = p ? p.pos.x - craft.pos.x : 1, dz = p ? p.pos.z - craft.pos.z : 0;
+    const d = Math.hypot(dx, dz) || 1; dx /= d; dz /= d;
+    const lx = -dz, lz = dx, t = (i - 1) * 1.5;         // a rank abreast, not a stack
+    return { x: craft.pos.x + dx * off + lx * t, z: craft.pos.z + dz * off + lz * t };
+  }
+
+  /* Walk the unseated crew in. Returns "boarding" | "aboard" | "lost".
+
+     THE AIRCRAFT LEAVES ON THE PILOT, NOT ON THE LAST MAN. Waiting for the
+     whole crew made a three-seat gunship only as fast as its slowest gunner —
+     MEASURED at fifty seconds of a sixty-second window still unspent with one
+     man 68 m out — so the pad-hold could routinely outlive the manhunt that
+     ordered it. A real gunship launches when the left seat is filled; anybody
+     still on the apron is simply left behind, and crewLost() already models
+     exactly what an empty seat costs (no WSO, the optics go slack; no door
+     gunner, the chin gun stops). The men left behind are not deleted — they
+     go back to being soldiers on their own base. */
+  function boardTick(craft, dt) {
+    if (!craft || !craft.crew) return "aboard";
+    craft.boardT = (craft.boardT || 0) + dt;
+    let pilot = null;
+    for (let i = 0; i < craft.crew.length; i++) {
+      const c = craft.crew[i], p = c && c.actor;
+      if (!p) continue;
+      if (p.dead) {
+        // THE PILOT IS THE SORTIE. Lose him on the apron and the aeroplane
+        // stays on the apron.
+        if (c.job === "Pilot") { _boardStat.killed++; return "lost"; }
+        continue;
+      }
+      if (c.job === "Pilot") pilot = c;
+      if (c.seated || c.aboard) continue;
+      const m = c.mark || (c.mark = boardMark(craft, c, i));
+      const d = Math.hypot(p.pos.x - m.x, p.pos.z - m.z);
+      if (d < BOARD_REACH) { c.aboard = true; continue; }
+      // the four fields peds.js steers by — nothing else, and no integrator
+      p.path = null; p.finalGoal = null;
+      if (p.target && p.target.set) p.target.set(m.x, 0, m.z);
+      p.state = "walk"; p.pause = 0; p._boardRun = true;
+      p.rage = null; p.targetActor = null;
+    }
+    if (!pilot) { _boardStat.killed++; return "lost"; }
+    if (pilot.aboard) return "aboard";
+    if (craft.boardT > BOARD_T) { _boardStat.timedOut++; return "lost"; }
+    return "boarding";
+  }
+
+  /* THE INVARIANT, DEFENDED RATHER THAN ASSUMED: `_milBoarding` is true only
+     while a body is in the crew of a craft that is actually in the board
+     phase. island_military.js's troop tick yields on that flag, so a stale one
+     means a soldier nobody is steering — and the first version of this wave
+     shipped exactly that, because `recall()` (written years before "board"
+     existed) moved a craft out of the phase without telling the crew. The
+     fix above closes that path; this sweep closes ALL of them, including the
+     ones the next wave adds. One Set per frame over a 59-body roster. */
+  function sweepBoarders() {
+    if (!boardOn()) return;
+    const live = (typeof Set === "function") ? new Set() : null;
+    const add = function (c) {
+      if (!c || c.phase !== "board" || !c.crew) return;
+      for (let i = 0; i < c.crew.length; i++) if (c.crew[i] && c.crew[i].actor && live) live.add(c.crew[i].actor);
+    };
+    add(heli);
+    for (let i = 0; i < jets.length; i++) add(jets[i]);
+    const roster = CBZ.militaryPersonnel ? CBZ.militaryPersonnel() : (CBZ.cityMilitaryPersonnel || []);
+    for (let i = 0; i < roster.length; i++) {
+      const p = roster[i];
+      if (!p || !p._milBoarding) continue;
+      if (live && live.has(p)) continue;
+      p._milBoarding = false; p._boardRun = false;
+    }
+  }
+
+  // He is at the door: hand him to the seat code that already existed. Anybody
+  // who did NOT make it is dropped from the crew and handed back to the base —
+  // an empty seat is an honest empty seat, and crewLost() prices it.
+  function boardSeat(craft, solo) {
+    // SEAT FIRST, PRUNE AFTER. seatCrew reads GUNSHIP_SEATS[i] by the crew
+    // row's INDEX, so dropping the men who did not make it before the seat
+    // call would slide a door gunner into the weapons officer's chair. It
+    // skips a row that is not `aboard` on its own; we only prepare the ones
+    // that are.
+    for (let i = 0; i < craft.crew.length; i++) {
+      const c = craft.crew[i], p = c && c.actor;
+      if (!p || p.dead || c.seated || !c.aboard) continue;
+      p._boardRun = false; p._milBoarding = false;
+      p.state = "pilot"; p.inCar = true; p.speed = 0;
+      p.path = null; p.finalGoal = null;
+      if (!solo) p.group.visible = false;               // seatCrew shows it again in the seat
+    }
+    if (solo) {
+      // seatCrew stamps `seated` on each row it attaches; seatSolo (the cockpit
+      // generator path a fighter uses) only ever returned a bool, so the jet's
+      // one row stayed false forever and airCrewAudit reported a man in a seat
+      // as still boarding. Stamp it from the call's own answer.
+      const ok = seatSolo(craft, craft.pilot);
+      if (ok && craft.crew[0]) craft.crew[0].seated = true;
+    } else seatCrew(craft);
+    // ANYBODY STILL ON THE APRON GOES BACK TO BEING A SOLDIER. The aeroplane
+    // is leaving without him; he must not keep a claim on it, a pilot's job
+    // title, or the boarding yield island_military.js honours.
+    for (let i = craft.crew.length - 1; i >= 0; i--) {
+      const c = craft.crew[i], p = c && c.actor;
+      if (c && c.seated && p && !p.dead) continue;
+      if (p) {
+        p._boardRun = false; p._milBoarding = false; p._milPilot = null; p.inCar = false;
+        if (p._airCrewPrevJob != null) { p.job = p._airCrewPrevJob; p._airCrewPrevJob = null; }
+        if (!p.dead) { p.state = "walk"; p.pause = 0; p.path = null; p.finalGoal = null; }
+      }
+      craft.crew.splice(i, 1);
+    }
+    _boardStat.walked++;
+  }
+
   function claimMilitary(kind) {
     const rec = parkedMilitary(kind); if (!rec) return null;
     const pilot = militaryPilot(rec); if (!pilot) return null;
     if (!CBZ.cityClaimMilitaryVehicle || !CBZ.cityClaimMilitaryVehicle(rec, pilot)) return null;
     const crew = [];
+    const walkIn = boardOn() && playerNear(rec, BOARD_VIEW);
     const enlist = function (p, job) {
       if (!p) return;
       p._milPilot = rec; p._milPilotPrev = { state: p.state, pause: p.pause };
       p.rage = null; p.targetActor = null; p.speed = 0;
-      p.state = "pilot"; p.inCar = true; p.group.visible = false;
+      if (walkIn) {
+        // HE IS STILL A MAN ON THE GROUND. `_milPilot` is already set, so
+        // island_military.js's 5-star loop and this file's own pilot search
+        // both skip him — he is spoken for — but nothing hides him and nothing
+        // seats him until his feet get him there.
+        //
+        // `_milBoarding` is the yield island_military.js's own troop tick needs:
+        // its `_milPilot` branch zeroes speed and force-HIDES any unseated
+        // aircrew every frame (correct when a "crew" was an invisible
+        // bookkeeping entry parked at the origin, fatal for a man running
+        // across the apron). One flag, read in one place there.
+        p._milBoarding = true;
+        p.state = "walk"; p.pause = 0; p._boardRun = true;
+        p.path = null; p.finalGoal = null;
+        if (p.group) p.group.visible = true;
+        _boardStat.started++;
+      } else {
+        p.state = "pilot"; p.inCar = true; p.group.visible = false;
+        // Two different facts, counted apart, because only one of them is a
+        // bug: a seat taken with nobody inside 420 m is bookkeeping, and a seat
+        // taken in front of the player is the thing this wave deleted.
+        if (boardOn()) _boardStat.unwatched++; else _boardStat.teleported++;
+      }
       // TRUTHFUL JOB: cityTitle() reads a.job, so the overhead pill and the
       // dossier say what this person actually does. Nothing is hardcoded near
       // the HUD and level.js needs no edit for these to flow through.
       p._airCrewPrevJob = p.job;
       p.job = job;
-      crew.push({ actor: p, job: job, seated: false });
+      crew.push({ actor: p, job: job, seated: false, aboard: !walkIn, mark: null });
     };
     enlist(pilot, "Pilot");
     // a gunship is crewed, not solo — WSO + door gunner, if the base has bodies
@@ -488,8 +770,23 @@
       const p = list[i];
       if (!p) continue;
       unseat(p, { state: p.dead ? "dead" : "walk" });
-      p._milPilot = null; p.inCar = false;
+      p._milPilot = null; p.inCar = false; p._boardRun = false; p._milBoarding = false;
       if (p._airCrewPrevJob != null) { p.job = p._airCrewPrevJob; p._airCrewPrevJob = null; }
+      // A MAN WHO NEVER GOT IN IS ALREADY SOMEWHERE REAL. The teleport-home
+      // below exists because the crew had no position of their own while they
+      // were bookkeeping entries inside the airframe; a crewman released
+      // DURING the walk is on the apron on his own two feet — alive and
+      // running, or dead where he fell — and snapping either one to the pad
+      // would be the very bug this wave deleted. (A CRASH still places the
+      // crew at the wreck: that is the airframe's own arc and it is right.)
+      if (!crashed && craft.phase === "board") {
+        if (!p.dead) {
+          p.state = "walk"; p.pause = 0; p.path = null; p.finalGoal = null;
+          p.rage = null; p.targetActor = null;
+          if (p.group) p.group.visible = true;
+        }
+        continue;
+      }
       p.pos.set(crashed ? craft.pos.x + (i - 1) * 1.4 : craft.home.x + 3 + i * 1.6,
         0,
         crashed ? craft.pos.z + (i - 1) * 1.1 : craft.home.z + 2);
@@ -1192,9 +1489,12 @@
       hp: 140, maxHp: 140, downed: false,           // armoured — ~2 rockets / a sustained burst
       spin: 0, vy: 0, yawRate: 0, smokeCD: 0,
       sourceRec: claim.rec, pilot: claim.pilot, crew: claim.crew || [], home: claim.home,
-      phase: "spool", launchT: 4.5, _worldCone: true,
+      // THE CREW HAS TO GET HERE FIRST. "board" precedes "spool" — the rotors
+      // do not turn until somebody is in the left seat, which is what makes a
+      // scramble something you can watch (and interrupt).
+      phase: boardOn() ? "board" : "spool", boardT: 0, launchT: 4.5, _worldCone: true,
     };
-    seatCrew(craft);
+    if (!boardOn()) seatCrew(craft);
     return craft;
   }
 
@@ -1458,11 +1758,31 @@
     }
     const stars = g.wanted | 0;
     if (!heli) {
+      if (heliBoardCD > 0) { heliBoardCD -= dt; return; }
       if (stars < HELI_STAR || g.state !== "playing") return;
       heli = makeHeli(); if (!heli) return;
     }
     if ((stars < HELI_STAR || g.state !== "playing") && heli.phase !== "return") {
+      // A GUNSHIP NOBODY HAS BOARDED YET IS NOT AIRBORNE. Flipping it to
+      // "return" flew an aeroplane home that had never left its pad and stranded
+      // its crew mid-apron: they kept `_milBoarding`, so island_military.js went
+      // on yielding to a boarding beat that was no longer running, and the
+      // record was only cleaned up if the return leg happened to finish. Give
+      // the airframe back instead — which is what despawnHeli/releaseMilitary
+      // already do correctly, and what the jet branch below already did.
+      // MEASURED: this is why a 50 s run at 5 stars ended with the gunship in
+      // phase "return" holding two crew who had never been seated.
+      if (heli.phase === "board") { despawnHeli(false); heliBoardCD = 3; return; }
       heli.phase = "return"; heli.pool.visible = false; heli.cone.visible = false;
+    }
+    // THE CREW IS STILL RUNNING. Nothing on the airframe moves; the aircraft
+    // sits on its pad and three real bodies cross the apron to it.
+    if (heli.phase === "board") {
+      if (stars < HELI_STAR || g.state !== "playing") { despawnHeli(false); return; }
+      const r2 = boardTick(heli, dt);
+      if (r2 === "lost") { despawnHeli(false); heliBoardCD = 6; return; }
+      if (r2 === "aboard") { boardSeat(heli, false); heli.phase = "spool"; }
+      return;
     }
     // Real spool at the authored helipad: the rotors gather speed for several
     // seconds before the skids ever leave the concrete.
@@ -1869,12 +2189,14 @@
       // Lighter than the heli: one rocket splash (90) or a sustained rifle rake
       // drops it, which is fair for a target you only have a ~6s window on.
       hp: 70, maxHp: 70, downed: false, vy: 0, rollRate: 0, smokeCD: 0, crashSpd: JET_SPEED,
-      sourceRec: claim.rec, pilot: claim.pilot, home: claim.home,
-      phase: "spool", launchT: 3.2, heading: claim.home.heading,
+      sourceRec: claim.rec, pilot: claim.pilot, home: claim.home, crew: claim.crew || [],
+      phase: boardOn() ? "board" : "spool", boardT: 0, launchT: 3.2, heading: claim.home.heading,
       speed: 0, phaseT: 0,
     };
-    // put the man in the cockpit before the aeroplane moves
-    seatSolo(j, claim.pilot);
+    // put the man in the cockpit before the aeroplane moves — but only once he
+    // has WALKED to it (see AIR_CREW_BOARD). With boarding off this is the
+    // original same-frame seat, byte-for-byte.
+    if (!boardOn()) seatSolo(j, claim.pilot);
     return j;
   }
 
@@ -1947,11 +2269,20 @@
         continue;
       }
       if ((stars < JET_STAR || g.state !== "playing") && j.phase !== "return" && j.phase !== "landing" && j.phase !== "taxiHome") {
-        if (j.phase === "spool") { despawnJet(j, false); jets.splice(i, 1); continue; }
+        if (j.phase === "spool" || j.phase === "board") { despawnJet(j, false); jets.splice(i, 1); continue; }
         j.phase = "return"; j.phaseT = 0;
       }
 
       j.phaseT = (j.phaseT || 0) + dt;
+      // THE PILOT IS STILL RUNNING TO IT. The fighter does not spool, does not
+      // taxi and does not exist to the ordnance bus until he is in the seat —
+      // and if he is shot on the way, the fighter never leaves the line.
+      if (j.phase === "board") {
+        const r2 = boardTick(j, dt);
+        if (r2 === "lost") { despawnJet(j, false); jets.splice(i, 1); continue; }
+        if (r2 === "aboard") { boardSeat(j, true); j.phase = "spool"; j.phaseT = 0; }
+        continue;
+      }
       if (j.phase === "spool") {
         j.launchT -= dt;
         plume(j, 0.15 + (1 - Math.max(0, j.launchT) / 3.2) * 0.55);
@@ -2060,9 +2391,20 @@
     jetCD = 6;
   }
   function recall() {
-    if (heli && !heli.downed) { heli.phase = "return"; heli.pool.visible = false; heli.cone.visible = false; }
+    // "board" IS A STILL-ON-THE-PAD PHASE, exactly like "spool", and this
+    // function predates it. MEASURED, and it is the bug the ratchet's own
+    // instrumentation caught: a wanted reset flew a gunship and a fighter
+    // "home" from pads they had never left while their named crews — Hank
+    // Adeyemi, Yara Novak — were still on foot halfway across the apron,
+    // permanently flagged `_milBoarding`, so island_military.js went on
+    // yielding to a boarding beat nobody was running. A craft nobody has
+    // boarded is not recalled; it is GIVEN BACK.
+    if (heli && !heli.downed) {
+      if (heli.phase === "board") { despawnHeli(false); heliBoardCD = 3; }
+      else { heli.phase = "return"; heli.pool.visible = false; heli.cone.visible = false; }
+    }
     for (let i = 0; i < jets.length; i++) if (jets[i] && !jets[i].downed) {
-      if (jets[i].phase === "spool") {
+      if (jets[i].phase === "spool" || jets[i].phase === "board") {
         // Still on its parking spot: shut it down immediately; nothing moved.
         despawnJet(jets[i], false); jets.splice(i--, 1);
       } else { jets[i].phase = "return"; jets[i].phaseT = 0; }
@@ -2104,6 +2446,7 @@
     }
     updateJets(dt, r);
     updateMissiles(dt, r);
+    sweepBoarders();
   });
 
   // ---- THE RATCHET --------------------------------------------------------
@@ -2116,6 +2459,53 @@
   // claim in a comment. Every fleet owner pushes ONE provider into
   // CBZ.heliFleet, so a new rotorcraft appears here with no edit to this
   // function — and a fleet whose module did not load simply is not counted.
+  /* CBZ.airCrewAudit() — DID ANYBODY WALK? The ratchet this wave exists to
+     drive: `teleported` is the number of aircrew this session that went from
+     the ground to a seat without crossing the distance between, and it is
+     pinned at 0 in tools/math-gate.mjs. It is a COUNTER, not a snapshot, so a
+     "fix" that simply stops scrambling anybody cannot pass — `walked` has to
+     climb for the response to exist at all.
+
+     `remaining` is the census of scramble paths that still seat a body
+     instantly, counted file by file rather than guessed (the propUseAudit
+     lesson). One is left and it is named, not hidden: strategic.js's nuclear
+     sortie repositions the B-2 to its run-in point in the same call that seats
+     the pilot, so a boarding beat there is a change to the sortie's geometry,
+     not a change to its crewing — the next wave that opens that file owes it. */
+  const AIR_CREW_INSTANT = [
+    "strategic:nuclear-sortie",     // strategic.js:2836 — airSeatActor on the ordering frame
+  ];
+  CBZ.airCrewAudit = function () {
+    let boarding = 0, seated = 0;
+    const count = function (c) {
+      if (!c || !c.crew) return;
+      for (let i = 0; i < c.crew.length; i++) {
+        const k = c.crew[i];
+        if (!k || !k.actor || k.actor.dead) continue;
+        // ASK THE SEAT, NOT THE PHASE. Counting "this craft is past the board
+        // phase" as seated reported two men in a cockpit they had never
+        // reached, which is precisely the fiction this wave exists to delete.
+        if (k.seated) seated++; else boarding++;
+      }
+    };
+    count(heli);
+    for (let i = 0; i < jets.length; i++) count(jets[i]);
+    return {
+      // THE RATCHET: a seat taken in front of the player without the walk.
+      // `unwatched` is the deliberate out-of-view shortcut and is census, not
+      // a fail — see BOARD_VIEW.
+      teleportedInView: _boardStat.teleported,
+      teleported: _boardStat.teleported,          // legacy name, same number
+      unwatched: _boardStat.unwatched,
+      started: _boardStat.started, walked: _boardStat.walked,
+      timedOut: _boardStat.timedOut, killedBoarding: _boardStat.killed,
+      boarding: boarding, seated: seated,
+      viewRadius: BOARD_VIEW,
+      instantSites: AIR_CREW_INSTANT.length, remaining: AIR_CREW_INSTANT.slice(),
+      enabled: boardOn(),
+    };
+  };
+
   CBZ.heliAudit = function () {
     const out = { helis: 0, crewed: 0, uncrewed: 0, meanAGL: 0, meanSpeed: 0, orbitR: 0, belowRoofline: 0, byRole: {} };
     let aglSum = 0, spdSum = 0, rSum = 0, rN = 0;

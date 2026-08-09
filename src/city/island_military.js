@@ -1944,6 +1944,15 @@
           // hiding it here would erase the crew the owner asked for. Only an
           // UNSEATED aircrew — the legacy bookkeeping case — still hides.
           if (t._milPilot) {
+            // HE IS RUNNING TO THE AIRCRAFT, NOT SITTING IN IT.
+            // city/aircraft.js's AIR_CREW_BOARD beat claims a man BEFORE he has
+            // crossed the apron (that is the whole point: the owner wants to
+            // SEE the scramble), and the two lines below — speed 0, and hide
+            // any unseated aircrew — would have made him an invisible statue
+            // for the entire walk. `_milBoarding` is set only for that window
+            // and cleared the moment he is in the seat or the sortie is given
+            // up, after which everything here behaves exactly as it did.
+            if (t._milBoarding) continue;
             t.speed = 0;
             if (!t._npcAttached) t.group.visible = false;
             else {
@@ -1963,6 +1972,13 @@
           }
           const combat = !!(t.rage || t.npcWanted || t.state === "fight" || t.state === "flee" || t.state === "shoot");
           if (combat) { t.pause = 0; t.activityState = t.state; continue; }
+          // THE BASE IS ANSWERING AN ALARM. city/fortresponse.js drives this
+          // body this frame (converging on a mark, or holding a stand-to slot
+          // on the wire) and it ticks at 38.72, AFTER us — so without this
+          // yield we would walk him back to his parade anchor every frame and
+          // he would jitter between the two orders forever. Same yield, and
+          // for the same reason, as the `_post` branch below.
+          if (t._fortResp) { t.pause = 0; continue; }
           if (t._stationed) {
             // THE SHARED BRAIN OWNS THE NON-DRILL POSTS. A body carrying a
             // garrison.js record gets the full stationed arc there (scare,
@@ -1994,35 +2010,46 @@
           }
         }
 
-        // Military escalation is deliberately the rare top tier.  Soldiers do
-        // not care about a 1–4 star city police case; at 5★ (or the base's own
-        // incursion floor, which is also 5★) a LIMITED squad receives the order
-        // and physically travels from wherever it was already standing.
-        const stars = (window.CBZ.game && window.CBZ.game.wanted) | 0;
+        // ================================================================
+        //  THE ORDER NOBODY COULD OBEY — DELETED 2026-08-09.
+        //
+        //  What stood here handed up to eight riflemen `rage = playerActor`
+        //  the moment the meter hit 5★, wherever the player was. MEASURED
+        //  (seed 90210, 5★ pinned, live world): the base centre is 1520 m west
+        //  and 480 m north of the arena centre, the nearest trooper starts
+        //  1332 m from the city, and `combat_iq.posture` — the only thing
+        //  steering a body in state "fight" — is LOCAL tactical positioning
+        //  that explicitly nulls `ped.path`. There is no route across the sea.
+        //  After twenty seconds: nine men ordered, nearest still 1086 m away,
+        //  ZERO on the causeway, three grinding against the east wire, one had
+        //  moved 1.1 m. After eighty seconds the gunship had flown out,
+        //  orbited and come home and both fighters were on final — and not one
+        //  rifleman had left the island.
+        //
+        //  An order that cannot be obeyed does not read as an order. It reads
+        //  as stupidity, which is exactly the word the owner used.
+        //
+        //  city/fortresponse.js owns the answer now, and it is the honest one:
+        //  trouble ON the reservation is converged on and fought; a manhunt a
+        //  kilometre away puts the base on STAND-TO (the wire manned, weapons
+        //  out) and lets the air response — whose crews now RUN to their
+        //  airframes, city/aircraft.js AIR_CREW_BOARD — prosecute it. Getting
+        //  infantry off the island needs a road convoy down the causeway; that
+        //  is declared, unimplemented and named in fortresponse.js's header
+        //  and in `CBZ.fortAudit().convoy`, not quietly faked here.
+        //
+        //  `_milResponding` is still CLEARED below, and deliberately: a body
+        //  carrying it from a save, a hot-reload or an older build must be let
+        //  go rather than left holding a target forever.
+        // ================================================================
         const playerActor = CBZ.city && CBZ.city.playerActor;
-        let responders = 0;
         for (let i = 0; i < troops.length; i++) {
           const t = troops[i];
-          if (!t || t.dead || t._milPilot) continue;
-          if (t._milResponding) responders++;
-        }
-        if (stars >= 5 && playerActor) {
-          for (let i = 0; i < troops.length && responders < 8; i++) {
-            const t = troops[i];
-            if (!t || t.dead || t._milPilot || t._milResponding) continue;
-            t._milResponding = true; t.rage = playerActor; t.state = "fight";
-            t.pause = 0; t.targetActor = playerActor; t.alarmed = Math.max(t.alarmed || 0, 20);
-            responders++;
-          }
-        } else {
-          for (let i = 0; i < troops.length; i++) {
-            const t = troops[i];
-            if (!t || !t._milResponding) continue;
-            t._milResponding = false;
-            if (t.rage === playerActor) t.rage = null;
-            if (t.targetActor === playerActor) t.targetActor = null;
-            if (!t.dead) { t.state = t._stationed ? "walk" : "idle"; t.pause = 0; }
-          }
+          if (!t || !t._milResponding) continue;
+          t._milResponding = false;
+          if (t.rage === playerActor) t.rage = null;
+          if (t.targetActor === playerActor) t.targetActor = null;
+          if (!t.dead) { t.state = t._stationed ? "walk" : "idle"; t.pause = 0; }
         }
       });
     }

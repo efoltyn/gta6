@@ -274,6 +274,34 @@ const PASS = `(() => {
     if (ba.targets < 1) out.fails.push("breach registry EMPTY - no door or vault declared a price");
   } catch (e) { out.fails.push("breachAudit threw: " + (e && e.message)); } }
   else out.fails.push("breachAudit MISSING (systems/breach.js not loaded)");
+  // ---- THE BASE ANSWERS FOR ITSELF (city/fortresponse.js + city/aircraft.js).
+  // impossibleOrders counts soldiers holding a rage target on ground they have
+  // no route to - the 1.3 km beeline island_military.js used to order at 5
+  // stars, measured at nine men grinding a fence for eighty seconds while the
+  // jets flew, attacked and landed again. It reads the WHOLE military roster,
+  // not just the bodies fortresponse drives, so any future file that
+  // re-introduces the beeline trips it. Pinned at 0.
+  // airCrewAudit.teleported counts aircrew that went from the ground into a
+  // seat without crossing the distance between - the owner's own complaint
+  // ("they don't run and get in the fighter"). A session counter, so it cannot
+  // be satisfied by simply never scrambling. Pinned at 0.
+  if (CBZ.fortAudit) { try { const fa = CBZ.fortAudit();
+    out.fort = "soldiers=" + fa.soldiers + " rousable=" + fa.rousable +
+      " impossible=" + fa.impossibleOrders + " sites=" + fa.sites.length +
+      " hooked=" + fa.hooked + " convoy=" + fa.convoy;
+    if (fa.impossibleOrders > 0) out.fails.push("SOLDIERS ORDERED AT A TARGET THEY CANNOT REACH: " + fa.impossibleOrders + " (ratchet 0)");
+    if (fa.soldiers < 1) out.fails.push("fortAudit: military roster EMPTY - no soldier in the world");
+    if (!fa.hooked) out.fails.push("fortAudit: the alert bus never installed its hooks (cityAlarm/cityCrime wrap)");
+  } catch (e) { out.fails.push("fortAudit threw: " + (e && e.message)); } }
+  else out.fails.push("fortAudit MISSING (city/fortresponse.js not loaded)");
+  if (CBZ.airCrewAudit) { try { const ac = CBZ.airCrewAudit();
+    out.airCrew = "inView=" + ac.teleportedInView + " unwatched=" + ac.unwatched +
+      " started=" + ac.started + " walked=" + ac.walked + " timedOut=" + ac.timedOut +
+      " instantSites=" + ac.instantSites;
+    if (ac.teleportedInView > 0) out.fails.push("AIRCREW SEATED WITHOUT WALKING, IN VIEW: " + ac.teleportedInView + " (ratchet 0)");
+    if (ac.instantSites > 1) out.fails.push("airCrew instant-seat sites rose to " + ac.instantSites + " (ratchet 1: strategic.js nuclear sortie)");
+  } catch (e) { out.fails.push("airCrewAudit threw: " + (e && e.message)); } }
+  else out.fails.push("airCrewAudit MISSING (city/aircraft.js not loaded)");
   // ---- volcano block (volcanofx.js): lava is OPAQUE crusted rock, never a
   // translucent box - transparent lava and legacy stream paths pinned at 0.
   if (CBZ.volcanoAudit) { try { const va = CBZ.volcanoAudit();

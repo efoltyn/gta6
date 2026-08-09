@@ -17,6 +17,106 @@ the repo root of `main`, so **pushing to main IS the deploy** and anything in
 
 Also `GAMEPLAN.md`, `docs/plan/`, `PROCGEN.md`.
 
+## A BASE ANSWERS FOR ITSELF — `src/city/fortresponse.js`
+
+**"The soldiers there are dumb. Dumb. Dumb. … I'd see them run towards fire
+like a real NPC"** (owner, 2026-08-09). Three faults, all the same fault:
+nothing on Fort Brandt was ever *told* anything.
+
+**NOTHING RAN TOWARD GUNFIRE.** `cityAlarm` sets `alarmed`/`fear` — a
+jumpiness-and-report gate. `cityPostAlert` widens a sentry's senses 35%.
+Neither MOVES anybody. The one primitive that does the right thing —
+`rallyGang` (peds.js): 25 m, six bodies, rage + target — was filtered on
+`o.gang !== ped.gang`, and **a soldier has an `organization`, not a gang**. So
+shooting one man in a formation of thirty-two rallied nobody, and sizeup's
+`backupLevels` (also gang-keyed) read him as a man standing ALONE — which
+could make him fold. Both now ask for the same SIDE (`CITY_ORG_RALLY`); `gang`
+still wins where it exists, so every street set is byte-identical.
+
+**THE 5★ ORDER WAS IMPOSSIBLE TO OBEY, AND IS DELETED.** island_military.js
+handed eight riflemen `rage = playerActor` at a target **1.3 km** away, steered
+only by `combat_iq.posture` — local tactical positioning that explicitly nulls
+`ped.path`. There is no route across the sea. **Measured** (seed 90210, 5★
+pinned): after 20 s, nine men ordered, nearest still **1086 m** away, **0** on
+the causeway, 3 grinding the east wire, one had moved **1.1 m**; after 80 s the
+gunship had flown out, orbited and come home and both fighters were on final —
+and not one rifleman had left the island. An order nobody can obey reads as
+stupidity because it is. Trouble ON the reservation is now converged on and
+fought (through `cityShapeSquad` + `combat_iq`, leashed to the wire); a manhunt
+a kilometre away puts the base on **stand-to** and lets the air response
+prosecute it.
+
+**ONE BUS, NO CALL SITES EDITED.** `CBZ.fortAlert(x, z, {level, by})` is rung
+from `cityAlarm` and `cityCrime` by the same WRAP precedent wildlife.js and
+social.js already use on those exact two names. `CBZ.militaryPersonnel()` is
+the merged roster — the island's 44 **plus** garrison posts **plus** any
+`organization === "military"` body; `cityMilitaryPersonnel` was the only list
+aircrew selection had ever read, so a gate sentry could never fly.
+
+Flags `FORT_RESPONSE` · `FORT_ALERT` · `FORT_STANDTO` · `CITY_ORG_RALLY`.
+**`FORT_CONVOY` is declared and OFF**: getting infantry off the island needs a
+road convoy, the causeway is already a real road record in `arena.roads`, and
+police.js:2560-2640 already ships the whole arc (vehicle at its home station →
+`ai:true` lane AI → `destX/destZ` retargeted → brake at 28 m → dismount) — it
+is cop-shaped, and generalising it is a change to police.js. Declaring the gap
+beats shipping a half-driven truck. Ratchet `CBZ.fortAudit().impossibleOrders`
+pinned at 0.
+
+## THE CREW RUNS TO THE AIRCRAFT — `AIR_CREW_BOARD` in `city/aircraft.js`
+
+**"They don't run and get in the fighter when you have five stars."** They
+never did. `claimMilitary` set `inCar = true; group.visible = false` on the
+same frame it claimed the airframe, then seated the body — a man on the parade
+ground ceased to exist and reappeared behind the canopy. `phase:"spool"` is
+ENGINE spool; there was never a boarding beat.
+
+A `board` phase now precedes `spool`. The crewman stays an **ordinary ped** —
+we write `target`/`state`/`pause` and set `_boardRun`, which is boarding.js's
+OWN flag (a ×1.9 multiplier on the shared mover), so context steering, the
+vault probe, depenetration and animChar's run layer all still run. Rotors do
+not turn until somebody is in the left seat. **Shoot the pilot crossing the
+apron and no aircraft launches** — the airframe is released and the next
+request retries on its own cooldown, the same honest refusal strategic.js
+already prints for "No aircrew left on the base".
+
+**THREE THINGS THE MEASUREMENT FORCED, none of them guessable from the desk:**
+
+- **Claim the NEAREST machine, not the first free record.** The fort parks four
+  helicopters 30 m apart and five fighters 34 m apart; "first free" routinely
+  sat at the far end with every other airframe's collider in between. Measured:
+  a weapons officer stopped dead, **speed 0**, 26 m short, wedged against the
+  neighbouring helicopter. peds.js steers around obstacles; it does not path
+  around a wall of them.
+- **Approach from the side he is already on.** A fixed port-beam mark points
+  *along* the flight line — through the next aircraft. The bearing from the man
+  to the machine is by construction the open side. Offset comes from the
+  record's own `footW`/`footL`, so a 3 m mark never again lands under a wing.
+- **The aircraft leaves on the PILOT, not the last man.** Waiting for a whole
+  gunship crew made it only as fast as its slowest gunner. Anybody still on the
+  apron is dropped from the crew and goes back to being a soldier; `crewLost()`
+  already prices the empty seat.
+
+**`BOARD_VIEW` (420 m) is the repo's no-spawn-in-view discipline applied to a
+BEAT.** Fort Brandt is 1.3 km from the city and peds.js time-slices a body that
+far out, so a crewman whose `speed` reads 3.5 m/s actually covers ~2 — holding a
+fighter on the line for 90 s of a manhunt nobody can see is pure downside. Inside
+the radius they run and you watch; outside it the seat is taken at once, counted
+as `unwatched` (census), never as `teleportedInView` (the ratchet).
+
+Ratchet `CBZ.airCrewAudit().teleportedInView` pinned at 0 (a session counter, so
+"never scramble anybody" cannot satisfy it — `walked` has to climb).
+`instantSites` pinned at **1** and named, not hidden: strategic.js's nuclear
+sortie repositions the B-2 to its run-in point in the same call that seats the
+pilot, so a boarding beat there is a change to that sortie's geometry — the next
+wave that opens that file owes it.
+
+**AND HE GIVES UP THE CHASE.** garrison.js gives a sentry that rule; an ordinary
+ped never had it, because `rage` is sticky until the target dies. Survivable
+until something rallied a soldier — now `CITY_ORG_RALLY` does, and the ratchet
+caught the consequence immediately: one rifleman in state `fight` holding a
+player **3816 m** away. `fortresponse.js` sweeps the military roster at 1 Hz and
+drops any target past 300 m, well beyond the longest weapon in the game (240 m).
+
 ## THE STUDIO — `src/core/studio.js`, one script tag
 
 **GANG CITY IS THE BACK END; THE HTML IS ADDITION** (owner, 2026-08-07). A
