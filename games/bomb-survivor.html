@@ -1,2596 +1,858 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-<link rel="icon" href="data:," />
-<title>BOMB SURVIVOR — Basin City</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>Bomb Survivor</title>
 <!-- ============================================================
-  BOMB SURVIVOR — 10 v 10, twenty minutes, both sides of the same fight.
+  BOMB SURVIVOR — the one version.
 
-  THIS FILE IS THE GAME. IT IS NOT THE ENGINE.
-  Everything below the script tags is RULES: who is on which side, what
-  scores, what the AI wants, what the HUD says. Every noun it needs was
-  asked for from the engine and none of it was rebuilt here:
+  There used to be two of these, and both were the same mistake wearing
+  different loaders: a purpose-built desert of box towers standing in for a
+  city this repo already ships. This page deletes the fake world and stands
+  the game on GANG CITY'S OWN MAP:
 
-    src/core/seed.js          determinism (one world seed, named streams)
-    src/core/microboot.js     scene · renderer · camera · loop · input ·
-                              colliders + slide · procedural SFX
-    src/world/materials.js    the real shared material factory
-    src/world/desertcity.js   the basin: 200 towers, the park, the dunes,
-                              the inland sea, the salt, the mountain rim,
-                              the civil-defence shelters
-    src/world/airbase.js      the installation + the flying wing + the
-                              fighters standing on its apron
-    src/city/strategic.js     the B-2, and CBZ.nukeWarhead — the B61 casing
-    src/city/nukefx.js        the detonation: whiteout, Taylor-Sedov dome,
-                              mushroom stages, and the researched ring model
-    src/systems/airframe.js   how an aeroplane moves (and how an AI flies)
-    src/systems/ordnance.js   the fall, the prediction, the blast, the
-                              cover question, the threat ring
-    src/modes/teammatch.js    two sides · a clock · the SWAP · the score
+    • the REAL military island at its authored place (-620,-700) — fence,
+      airstrip, parked fighters, the heavy bomber — raised by the same
+      builder the full game runs, via CBZ.studio.raise("militaryisland");
+    • a REAL downtown across the strait at the mainland's own coordinates
+      (0,-700) — CBZ.studio.town() calls city/towngen.js + the one shell
+      mint (cityMakeBuilding), so every tower is the enterable, instanced-
+      glass, stairs-inside building the mainland is made of, and a runner
+      ducks through a REAL door for cover;
+    • Halloran Field, the REAL civil airport island, north across the water
+      (?airport=0 to skip it);
+    • civilians who WALK, on the shipped gait, sliding along the real
+      colliders — because forty statues never read as a city.
 
-  If something in here reads like engine work, it is a bug in the split
-  and it belongs in src/. The rule this file was written under: the game
-  may CHOOSE and COMPOSE, it may not INVENT.
+  What is left in this file is the game: who bombs, who runs, what a tower
+  is worth, what a civilian costs, and what the clock decides. The world is
+  an afterthought. That is the whole point.
 
-  THE MATCH
-    Half 1 (10:00) — you are TALON, the bombers. You spawn on foot on the
-      apron at Kestrel Field, in the desert 1.9 km from the city. Walk to
-      the flying wing, board it, take the runway, and go and find them.
-    Half 2 (10:00) — sides swap. You are on the ground in the city with
-      nine teammates and 200 empty towers, and the bombs are coming.
-
-    BOMBERS score 250 a kill. RUNNERS score 0.4 a second for every one of
-    them still breathing. Ten minutes each way; the aggregate wins it.
-    That is why the swap is in the framework and not in this file: an
-    asymmetric fight scored from one side is not a score.
-
-  THE ONE REWARD. Six kills inside a half, still standing, and the bomber
-    is holding a 16 kiloton weapon. There is no ladder under it: a bomber
-    has one verb — release — and every rung below a nuke would be that
-    same verb with a bigger number on it. Going down loses the count, and
-    it is one a half, so a nuke can never buy the next one. The runners
-    get a white ring 2.2 km across and fifteen seconds on the clock, which
-    is the whole reason it is a decision and not a coin flip. Under a roof
-    past 600 m you live. It is `kind:"nuke"` and nothing else: same bay,
-    same integrator, same pipper, same cover question.
-
-  WHY THE COVER RULE IS THE WHOLE GAME. systems/ordnance.js asks whether
-  the target could SEE the detonation before it applies damage — a wall,
-  a shelter roof, a park canopy is worth 75%. Running in the open is the
-  mistake; the threat ring on the ground is the warning you get; the
-  shelters are the answer. Take those away and the running half is a
-  coin flip.
-
-  Tech: three.js r128 (vendored UMD global, the only external file), no
-  build step, no CDN, no images — every texture is canvas-generated.
-  Debug: window.__bomb (match, world, base, units, warp, audit).
+  THE HEADING CONVENTION, restated because getting it wrong cost a session:
+  systems/airframe.js publishes heading() as atan2(-fx,-fz) — the nose is
+  -Z, so for heading h the aeroplane's forward is (-sin h, -cos h).
+    fly toward p from q:   h = atan2(q.x - p.x, q.z - p.z)
+    d metres ahead:        (pos.x - sin h * d, pos.z - cos h * d)
 ============================================================ -->
 <style>
+  :root{color-scheme:dark}
   *{box-sizing:border-box}
-  /* ============ THE PAGE IS A HANDHELD FIRST ============================
-     Two things this block owns and nothing below it may undo:
-     1. THE SAFE AREA IS A VARIABLE. Every fixed edge in the file is
-        calc(gap + var(--sa*)), so a notch and a home indicator move the
-        whole interface instead of eating a corner of it. The meta tag
-        carries viewport-fit=cover, which is what makes env() non-zero.
-     2. THE PAGE NEVER SCROLLS SIDEWAYS. Only the two overlay screens
-        scroll, and only on one axis.
-  ==================================================================== */
-  :root{
-    --sat:env(safe-area-inset-top,0px);
-    --sar:env(safe-area-inset-right,0px);
-    --sab:env(safe-area-inset-bottom,0px);
-    --sal:env(safe-area-inset-left,0px);
-  }
-  html,body{margin:0;padding:0;height:100%;width:100%;overflow:hidden;background:#0b0d10;
-    overscroll-behavior:none;touch-action:manipulation;
-    font-family:'Trebuchet MS',Verdana,sans-serif;color:#e8e4d8;-webkit-font-smoothing:antialiased;
-    -webkit-text-size-adjust:100%}
+  html,body{margin:0;height:100%;background:#0b0d10;overflow:hidden;
+    font:600 15px/1.35 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#f2efe8;
+    -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
   canvas{display:block}
-  /* the engine's thumb layer is fixed to inset:0 — pull it inside the safe
-     area so a button never sits under the home indicator */
-  #microTouch{inset:var(--sat) var(--sar) var(--sab) var(--sal)!important}
-  /* ============ THE HUD IS AN INSTRUMENT PANEL, NOT A PARAGRAPH ============
-     Nothing here spells out a state the screen can show. The clock is a
-     number because a clock IS a number; everything else is a bar, a ring,
-     a pip or a lamp. What used to be four lines of prose:
-       "GHOST RUNNER 25 / TALON ◄ BOMBER 8"  → one split score bar
-       "RUNNERS ALIVE 7 / 10"                → seven lit pips of ten
-       "HALF 1 OF 2"                         → one filled dot of two
-       "YOU: BOMBER"                         → the panel's accent colour
-                                               and a single wing glyph
-       "COVER: OPEN GROUND"                  → a shield lamp that is dark
-       "SPEED 176 m/s ALT 420 m ..."         → three tapes, values only
-       "INCOMING"                            → the screen edge goes red and
-                                               an arrow points off the ring
-  ======================================================================== */
-  #hud{position:fixed;inset:0;pointer-events:none;z-index:5}
-  .pane{position:absolute;background:rgba(10,14,18,.55);border:1px solid rgba(255,255,255,.09);
-    border-radius:12px;padding:8px 12px;backdrop-filter:blur(3px)}
-
-  /* ---- HEALTH OWNS THE TOP LEFT. Owner's law: "Health should always go
-     top left". It is the first thing the eye finds on any screen, in the
-     air and on foot, and nothing else is allowed into that corner — the
-     feed and the test rig both used to open there and both were moved
-     DOWN rather than moving health. ---- */
-  #vitals{top:calc(10px + var(--sat));left:calc(10px + var(--sal));
-    display:flex;flex-direction:column;gap:7px;padding:9px 12px}
-
-  /* ---- top cluster: clock · half · score · lives ---- */
-  #topPane{top:calc(10px + var(--sat));left:50%;transform:translateX(-50%);text-align:center;
-    width:300px;padding:9px 14px}
-  #clockRow{display:flex;align-items:center;justify-content:center;gap:10px}
-  /* THE ROLE IS A SILHOUETTE, DRAWN. It used to be two emoji, which on iOS
-     arrive full-colour, at the font's size, in somebody else's art style.
-     Two clip-paths: a flying wing for the bombing half, a shelter roof for
-     the running half. They take the panel's accent colour and nothing else. */
-  #roleGlyph{width:19px;height:19px;position:relative;flex:0 0 19px;color:#ffb15c}
-  /* the glow used to be written from script as a hard-coded hex per role, which
-     is the same colour twice in two languages — currentColor takes it from the
-     class that already decides the shape */
-  #roleGlyph:after{content:'';position:absolute;inset:0;background:currentColor;
-    filter:drop-shadow(0 0 6px currentColor);
-    clip-path:polygon(50% 4%,98% 94%,50% 72%,2% 94%)}
-  #roleGlyph.run{color:#7fe0ff}
-  #roleGlyph.run:after{clip-path:polygon(50% 6%,100% 52%,84% 52%,84% 94%,16% 94%,16% 52%,0 52%)}
-  #clock{font-size:33px;font-weight:800;letter-spacing:2px;line-height:1;font-variant-numeric:tabular-nums}
-  #clock.low{color:#ff6a5a;animation:pulse .9s infinite}
-  @keyframes pulse{50%{opacity:.35}}
-  #halfDots{display:flex;gap:5px;align-items:center}
-  #halfDots span{width:7px;height:7px;border-radius:50%;background:rgba(255,255,255,.22)}
-  #halfDots span.on{background:#fff}
-  #timeBar{height:3px;border-radius:2px;background:rgba(255,255,255,.14);margin:7px 0 6px;overflow:hidden}
-  #timeBar>i{display:block;height:100%;background:#fff;opacity:.8}
-  /* A RATIO LIES EARLY. The running side banks points every second from the
-     first second, so a share-of-total bar reads "you are being destroyed"
-     before anybody has done anything. These are two ABSOLUTE bars growing
-     out from the centre against the same reference, so the seam only moves
-     when somebody actually earns something. */
-  #scoreBar{display:flex;height:9px;border-radius:5px;overflow:hidden;background:rgba(255,255,255,.10)}
-  #scoreBar>i{position:relative;height:100%;width:50%}
-  #scoreBar>i>u{position:absolute;top:0;bottom:0;display:block;transition:width .3s}
-  #scoreBar>i:first-child>u{right:0}
-  #scoreBar>i:last-child>u{left:0}
-  #lifePips{display:flex;gap:3px;justify-content:center;margin-top:7px}
-  #lifePips span{width:14px;height:5px;border-radius:2px;background:rgba(255,255,255,.13)}
-  /* THE NUKE ROW. One lamp and one plain value, the same instrument grammar
-     as the STALL and COVER lamps — caps label, tabular number, no emoji. It
-     lives under the life pips because it belongs to the MATCH cluster (it is
-     earned from kills and lost on a death), and because health owns the top
-     left and nothing is allowed to move into that corner. Three states, and
-     only ever one of them: counting up (3/6), armed (READY), inbound (a
-     countdown in seconds, which outranks the other two because a nuke in the
-     air is the only thing on this HUD that can kill you in nine seconds). */
-  #nukeRow{display:none;align-items:center;justify-content:center;gap:8px;margin-top:7px}
-  .lamp.nuke.on{background:rgba(255,186,84,.9);color:#241400}
-  .lamp.nuke.inbound.on{background:rgba(255,70,54,.92);color:#fff;animation:pulse .7s infinite}
-  #nukeVal{font:700 11px/1 monospace;letter-spacing:1.5px;opacity:.85;font-variant-numeric:tabular-nums;
-    white-space:nowrap}
-  /* A KEY CAP ON A TOUCHSCREEN IS A LIE — the same law the briefing's
-     .keys.desk block runs under, applied to the one <kbd> that lives in the
-     HUD. body.is-touch is stamped at LOAD on a coarse pointer, so a phone
-     never renders this at all. */
-  #nukeKey{opacity:.62}
-  body.is-touch #nukeKey{display:none}
-
-  /* ---- feed: three lines, and they leave ---- */
-  #feed{bottom:calc(14px + var(--sab));left:calc(12px + var(--sal));width:290px;font-size:12px;
-    line-height:1.5;background:none;border:none;padding:0;backdrop-filter:none}
-  .fl{opacity:.85;text-shadow:0 1px 4px rgba(0,0,0,.9);animation:fadeout 7s forwards}
-  @keyframes fadeout{0%,72%{opacity:.9}100%{opacity:0}}
-  .fl.kill{color:#ffb08a}
-  .fl.phase{color:#7fe0ff;font-weight:800;letter-spacing:1px}
-  .fl.good{color:#8bf08b}
-  .fl.bad{color:#ff8a7a}
-
-  /* ---- minimap ---- */
-  #mapPane{bottom:calc(12px + var(--sab));right:calc(12px + var(--sar));padding:6px}
-  #radar{display:block;border-radius:50%}
-
-  /* ---- instruments ----
-     HEALTH IS A METER. One horizontal bar, graticuled into five cells, a
-     caps label and a plain number. It reads the way the tapes read: a
-     quantity against a scale. Stamina is the same instrument, one row
-     down. No glyph sits inside either of them. */
-  #inst{bottom:calc(16px + var(--sab));left:50%;transform:translateX(-50%);display:flex;gap:16px;
-    align-items:flex-end;padding:10px 16px 12px}
-  .vitals{display:flex;flex-direction:column;gap:7px;justify-content:flex-end}
-  .gauges{display:flex;gap:14px;align-items:flex-end}
-  .meter{display:flex;align-items:center;gap:8px}
-  .meter>b{font:700 9px/1 'Trebuchet MS',sans-serif;letter-spacing:1.6px;opacity:.55;width:24px}
-  .meter>s{text-decoration:none;font:700 11px/1 monospace;width:24px;text-align:right;opacity:.8;
-    font-variant-numeric:tabular-nums}
-  .bar{position:relative;width:104px;height:11px;border-radius:3px;
-    background:rgba(255,255,255,.10);overflow:hidden}
-  .bar>i{display:block;height:100%;width:100%;background:var(--c);transition:width .12s linear}
-  .bar:after{content:'';position:absolute;inset:0;pointer-events:none;
-    background:repeating-linear-gradient(90deg,rgba(0,0,0,0) 0 19.6px,rgba(8,12,16,.8) 19.6px 20.8px)}
-  .meter.low>s{color:#ff6a5a}
-  .meter.low>.bar>i{animation:pulse 1.1s infinite}
-  .tape{width:13px;height:88px;border-radius:7px;background:rgba(255,255,255,.10);position:relative;overflow:hidden}
-  .tape>i{position:absolute;left:0;right:0;bottom:0;background:var(--c);transition:height .1s linear}
-  .tapeWrap{display:flex;flex-direction:column;align-items:center;gap:5px}
-  .tapeWrap>b{font:700 11px/1 monospace;opacity:.75;font-variant-numeric:tabular-nums}
-  #lamps{display:flex;flex-direction:column;gap:6px;justify-content:flex-end;height:88px}
-  .lamp{width:46px;height:20px;border-radius:5px;background:rgba(255,255,255,.08);
-    display:flex;align-items:center;justify-content:center;opacity:.35;
-    font:700 8px/1 'Trebuchet MS',sans-serif;letter-spacing:1.4px}
-  .lamp.on{opacity:1}
-  .lamp.stall.on{background:rgba(255,70,54,.85)}
-  .lamp.cover.on{background:rgba(120,220,150,.8);color:#0b1a10}
-
-  /* ---- crosshair ---- */
-  #cross{position:absolute;left:50%;top:50%;width:24px;height:24px;margin:-12px 0 0 -12px;opacity:.7}
-  #cross:before,#cross:after{content:'';position:absolute;background:#fff}
-  #cross:before{left:11px;top:0;width:2px;height:24px}
-  #cross:after{top:11px;left:0;height:2px;width:24px}
-
-  /* ---- danger: the screen tells you, not a word ---- */
-  #vignette{position:absolute;inset:0;box-shadow:inset 0 0 200px 40px rgba(190,20,10,0);transition:box-shadow .18s}
-  #dangerArrow{position:absolute;left:50%;top:50%;width:0;height:0;opacity:0;transition:opacity .15s}
-  #dangerArrow>i{position:absolute;left:-13px;top:-128px;width:0;height:0;
-    border-left:13px solid transparent;border-right:13px solid transparent;
-    border-bottom:24px solid #ff4636;filter:drop-shadow(0 0 8px rgba(255,70,54,.8))}
-
-  /* ---- the one surface that keeps WORDS: an interaction verb ---- */
-  #prompt{position:absolute;left:50%;bottom:29%;transform:translateX(-50%);font-size:15px;font-weight:700;
-    letter-spacing:2px;background:rgba(10,14,18,.72);border:1px solid rgba(255,255,255,.15);
-    padding:8px 16px;border-radius:8px;display:none;white-space:nowrap}
-  #banner{position:absolute;left:0;right:0;top:34%;text-align:center;display:none}
-  #banner h2{margin:0;font-size:40px;letter-spacing:7px;font-weight:900;opacity:.92}
-  #banner p{margin:6px 0 0;font-size:13px;letter-spacing:4px;opacity:.6}
-
-  @media (max-width:820px){
-    /* health keeps the corner, so the clock starts to the RIGHT of it and
-       the radar sits beyond the clock. Three panes, one row, no overlap. */
-    #topPane{width:auto;left:calc(128px + var(--sal));right:calc(136px + var(--sar));
-      transform:none;padding:7px 10px}
-    #clock{font-size:26px}
-    /* THE FEED STARTS BELOW THE TOP PANE, and 84 px was inside it: the pane is
-       79 px tall from y=10, so the feed overlapped it by 5 px at 760x420 (and
-       by more with the test rig open, which shifts the feed right into the
-       pane's own column). The pane grows to ~106 px when the NUKE row lights,
-       so the feed clears both states. */
-    #feed{width:auto;right:auto;left:calc(10px + var(--sal));font-size:11px;bottom:auto;
-      top:calc(122px + var(--sat));max-width:52%}
-    #vitals{padding:7px 9px}
-    /* the top pane is only ~126 px between health and the radar on a 390 px
-       phone, and IMPACT 05 wrapped onto a second line there. Shrink the row's
-       own lamp and type rather than the shared instrument lamps. */
-    #nukeRow .lamp{width:38px;letter-spacing:1px}
-    #nukeVal{font-size:10px;letter-spacing:.8px}
-    .bar{width:64px}
-    .meter>b{width:20px}
-    .meter>s{display:none}          /* the bar IS the reading at this size */
-    #mapPane{padding:4px;bottom:auto;top:10px;right:10px}
-    #radar{width:104px;height:104px}
-    #inst{bottom:auto;top:126px;left:auto;right:10px;transform:none;gap:9px;padding:7px 9px}
-    .tape{height:62px}
-    #lamps{height:62px}
-    #banner h2{font-size:24px;letter-spacing:4px}
-    #prompt{bottom:38%;font-size:13px}
-  }
-
-  /* overlays */
-  /* short windows exist: the briefing must scroll rather than hide its
-     own PLAY button below the fold */
-  .screen{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;
-    background:radial-gradient(ellipse at 50% 30%,#1c2733 0%,#080a0d 70%);padding:24px;overflow:auto}
-  @media (max-width:760px){ .cols{grid-template-columns:1fr} h1{font-size:34px;letter-spacing:5px} }
-  .card{max-width:820px;width:100%}
-  h1{margin:0 0 4px;font-size:54px;letter-spacing:9px;font-weight:900;
-     background:linear-gradient(90deg,#ffb15c,#ff5f4a 55%,#7fe0ff);-webkit-background-clip:text;
-     background-clip:text;color:transparent}
-  .sub{font-size:13px;letter-spacing:5px;opacity:.65;margin-bottom:18px}
-  .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin:14px 0 18px}
-  .box{background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.10);border-radius:12px;padding:14px 16px}
-  .box h3{margin:0 0 8px;font-size:14px;letter-spacing:3px;color:#ffb15c}
-  .box.b2 h3{color:#7fe0ff}
-  .box p,.box li{font-size:13px;line-height:1.65;opacity:.88;margin:0 0 6px}
-  .box ul{margin:0;padding-left:16px}
-  .box.b3 h3{color:#8bf0a8}
-  .line{font-size:12.5px;line-height:1.5;opacity:.62;margin:0 0 8px}
-  .keys{display:flex;flex-direction:column;gap:5px;margin:0 0 10px}
-  /* A KEY CAP ON A TOUCHSCREEN IS A LIE. body.is-touch is stamped by
-     buildTouch(); one of these two blocks is on, never both. */
-  .keys.touch{display:none}
-  body.is-touch .keys.desk{display:none}
-  body.is-touch .keys.touch{display:flex}
-  .keys div{font-size:12px;opacity:.82}
-  .stat{font-size:13px;line-height:1.5;opacity:.9;margin:0 0 5px}
-  .stat b{color:#ffb15c;letter-spacing:1px}
-  .box.b2 .stat b{color:#7fe0ff}
-  .box.b3 .stat b{color:#8bf0a8}
-  #credit{margin-top:14px;display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline;
-    font-size:11px;letter-spacing:1px;opacity:.5}
-  #credit b{color:#8bf0a8;letter-spacing:2px;opacity:.9}
-  #credit code{opacity:.75}
-  kbd{background:rgba(255,255,255,.13);border:1px solid rgba(255,255,255,.2);border-radius:4px;
-    padding:1px 6px;font:700 11px monospace}
-  button{pointer-events:auto;cursor:pointer;font:800 17px 'Trebuchet MS',sans-serif;letter-spacing:3px;
-    padding:14px 40px;border-radius:11px;border:1px solid rgba(255,255,255,.22);
-    background:linear-gradient(180deg,#ff8a4c,#e2452f);color:#fff;box-shadow:0 8px 26px rgba(226,69,47,.3)}
-  button:hover{filter:brightness(1.12)}
-  button.ghost{background:linear-gradient(180deg,#3a4756,#232c37);box-shadow:none}
-  .foot{font-size:11px;opacity:.5;letter-spacing:1.6px;margin-top:14px}
-  #loadNote{font-size:14px;letter-spacing:3px;opacity:.8;margin-top:14px}
-  table{width:100%;border-collapse:collapse;font-size:14px}
-  th,td{padding:7px 10px;text-align:left;border-bottom:1px solid rgba(255,255,255,.09)}
-  th{font-size:10px;letter-spacing:2px;opacity:.55}
-  td.n{text-align:right;font-variant-numeric:tabular-nums;font-weight:800}
-  .win{color:#8bf08b}
+  #gate{position:fixed;inset:0;display:grid;place-items:center;padding:26px;z-index:60;
+    background:radial-gradient(120% 90% at 50% 0%,#1b2330,#0b0d10 70%)}
+  #gate .in{text-align:center;max-width:480px;width:100%}
+  #gate h1{margin:0 0 8px;font-size:clamp(32px,10vw,58px);letter-spacing:-.02em;line-height:.92}
+  #gate h1 em{font-style:normal;color:#ff7a45}
+  #gate p{margin:0 0 30px;opacity:.6;letter-spacing:.16em;font-size:11px}
+  #gate button{-webkit-appearance:none;appearance:none;border:0;cursor:pointer;width:100%;
+    padding:22px;border-radius:18px;background:#4fbf6a;color:#07130b;font:800 21px/1 inherit;
+    letter-spacing:.14em;box-shadow:0 6px 0 #2f8a4a}
+  #gate button:active{transform:translateY(3px);box-shadow:0 3px 0 #2f8a4a}
+  #gate .st{margin-top:22px;font-size:11px;letter-spacing:.18em;opacity:.4;min-height:15px}
+  #role{position:fixed;left:50%;top:calc(58px + env(safe-area-inset-top,0px));transform:translateX(-50%);
+    z-index:41;font-size:11px;letter-spacing:.28em;opacity:.7;pointer-events:none;white-space:nowrap}
+  #streak{position:fixed;left:50%;bottom:calc(96px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);
+    z-index:41;font-size:12px;letter-spacing:.22em;color:#ffc46a;opacity:0;transition:opacity .3s;pointer-events:none}
+  #streak.on{opacity:.95}
+  #swap{position:fixed;inset:0;display:grid;place-items:center;z-index:58;pointer-events:none;
+    background:rgba(9,11,14,.82);opacity:0;transition:opacity .45s;font-size:clamp(26px,8vw,52px);
+    letter-spacing:.06em;text-align:center;line-height:1.15}
+  #swap.on{opacity:1}
+  #swap small{display:block;font-size:12px;letter-spacing:.3em;opacity:.55;margin-top:14px}
+  #radar{position:fixed;right:calc(14px + env(safe-area-inset-right,0px));
+    bottom:calc(14px + env(safe-area-inset-bottom,0px));width:132px;height:132px;z-index:41;
+    opacity:.82;pointer-events:none;display:none}
+  #flash{position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none;z-index:55;transition:opacity .5s}
+  #over{position:fixed;inset:0;display:none;place-items:center;z-index:62;background:rgba(9,11,14,.92);padding:26px}
+  #over .in{text-align:center}
+  #over h2{margin:0 0 16px;font-size:clamp(26px,7vw,42px)}
+  #over table{margin:0 auto 24px;border-collapse:collapse;font-variant-numeric:tabular-nums}
+  #over td{padding:7px 18px;opacity:.85}
+  #over button{-webkit-appearance:none;appearance:none;border:1px solid rgba(255,255,255,.25);
+    background:transparent;color:inherit;padding:15px 32px;border-radius:999px;font:700 15px/1 inherit;
+    letter-spacing:.16em;cursor:pointer}
 </style>
 </head>
 <body>
 
-<div id="hud" style="display:none">
-  <div id="cross"></div>
-  <div class="pane" id="topPane">
-    <div id="clockRow">
-      <span id="roleGlyph"></span>
-      <span id="clock">10:00</span>
-      <span id="halfDots"><span class="on"></span><span></span></span>
-    </div>
-    <div id="timeBar"><i style="width:0%"></i></div>
-    <div id="scoreBar"><i><u></u></i><i><u></u></i></div>
-    <div id="lifePips"></div>
-    <div id="nukeRow">
-      <div class="lamp nuke" id="lampNuke">NUKE</div>
-      <span id="nukeVal"></span><span id="nukeKey"><kbd>N</kbd></span>
-    </div>
-  </div>
-  <div class="pane" id="feed"></div>
-  <div class="pane" id="mapPane"><canvas id="radar" width="176" height="176"></canvas></div>
-  <div class="pane vitals" id="vitals">
-    <div class="meter" id="mHp"><b>HP</b><div class="bar" style="--c:#6fd08a"><i></i></div><s>100</s></div>
-    <div class="meter" id="mSt"><b>SPR</b><div class="bar" style="--c:#e0c060"><i></i></div><s>100</s></div>
-  </div>
-  <div class="pane" id="inst">
-    <div class="tapeWrap" id="tapeT"><div class="tape" style="--c:#7fb6ff"><i style="height:60%"></i></div><b>60</b></div>
-    <div class="tapeWrap" id="tapeS"><div class="tape" style="--c:#ffb15c"><i style="height:0%"></i></div><b>0</b></div>
-    <div class="tapeWrap" id="tapeA"><div class="tape" style="--c:#9fd4ff"><i style="height:0%"></i></div><b>0</b></div>
-    <div id="lamps">
-      <div class="lamp stall" id="lampStall">STALL</div>
-      <div class="lamp cover" id="lampCover">COVER</div>
-    </div>
-  </div>
-  <div id="vignette"></div>
-  <div id="dangerArrow"><i></i></div>
-  <div id="prompt"></div>
-  <div id="banner"><h2></h2><p></p></div>
-</div>
+<div id="gate"><div class="in">
+  <h1>BOMB <em>SURVIVOR</em></h1>
+  <p>THREE MINUTES BOMBING. THREE MINUTES BOMBED. THE REAL CITY.</p>
+  <button id="go">PLAY</button>
+  <div class="st" id="st"></div>
+</div></div>
 
-<div class="screen" id="title">
-  <div class="card">
-    <h1>BOMB SURVIVOR</h1>
-    <div class="sub">BASIN CITY · KESTREL FIELD · 10 v 10 · TWO HALVES OF TEN MINUTES</div>
-    <div class="cols">
-      <div class="box">
-        <h3>HALF 1 · YOU BOMB</h3>
-        <div class="line">Apron at Kestrel Field. Wing on the centre stand.</div>
-        <div class="keys desk">
-          <div><kbd>WASD</kbd> walk <kbd>SHIFT</kbd> sprint <kbd>SPACE</kbd> jump</div>
-          <div><kbd>E</kbd> board the wing</div>
-          <div><kbd>MOUSE</kbd> pitch roll <kbd>A</kbd><kbd>D</kbd> rudder <kbd>W</kbd><kbd>S</kbd> throttle</div>
-          <div><kbd>SPACE</kbd> release. hold for a stick</div>
-          <div><kbd>N</kbd> the nuke, once it is yours</div>
-          <div><kbd>C</kbd> bomb cam <kbd>V</kbd> cockpit <kbd>R</kbd> radar range <kbd>T</kbd> rig</div>
-        </div>
-        <div class="keys touch">
-          <div>LEFT STICK walk · rim to sprint</div>
-          <div>RIGHT HALF drag to look</div>
-          <div>BOARD button at the wing</div>
-          <div>STICK pitch roll · THR slider · rudder pads</div>
-          <div>Big round button releases. Hold for a stick</div>
-          <div>NUKE button, once it is yours</div>
-        </div>
-        <div class="stat"><b>250</b> a kill</div>
-        <div class="stat"><b>GREEN PIPPER</b> impact point</div>
-        <div class="stat"><b>6 KILLS</b> one half, still standing, and the nuke is yours</div>
-        <div class="line">Going down loses it. One a half.</div>
-      </div>
-      <div class="box b2">
-        <h3>HALF 2 · THEY BOMB</h3>
-        <div class="line">Sides swap. Street level, nine teammates, 200 towers.</div>
-        <div class="stat"><b>0.4</b> a second, every runner alive</div>
-        <div class="stat"><b>RED RINGS</b> inbound. tighten as impact closes</div>
-        <div class="stat"><b>COVER</b> cuts blast 75%</div>
-        <div class="line">Walls. Shelter roofs. Park canopy. Concrete stands on the corners.</div>
-        <div class="stat"><b>WHITE RING</b> 16 kilotons. fifteen seconds. run</div>
-        <div class="line">A roof is worth your life past 600 m. Inside that, distance is the only answer.</div>
-        <div class="stat"><b>NO RESPAWNS</b></div>
-      </div>
-      <div class="box b3">
-        <h3>RADAR · BOTTOM RIGHT</h3>
-        <div class="stat">Heading up. Sweeps.</div>
-        <div class="stat">Paints aircraft and falling ordnance.</div>
-        <div class="stat">Neutral traffic is up there. Sort it.</div>
-      </div>
-    </div>
-    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-      <button id="playBtn">BUILD THE BASIN</button>
-      <button id="testBtn" class="ghost">TEST RIG</button>
-      <a href="bomb-survivor-assets.html" style="color:#7fe0ff;font-size:12px;letter-spacing:2px;
-         text-decoration:none;border-bottom:1px solid rgba(127,224,255,.4);padding-bottom:2px">EVERY ASSET →</a>
-      <a href="../index.html" style="color:#9aa4ad;font-size:12px;letter-spacing:2px;
-         text-decoration:none;border-bottom:1px solid rgba(154,164,173,.35);padding-bottom:2px">← GANG CITY</a>
-    </div>
-    <div id="credit">
-      <b>SHIPPED ASSETS</b>
-      <span>B-2 <code>city/strategic.js</code></span>
-      <span>warhead <code>city/strategic.js</code></span>
-      <span>the flash <code>city/nukefx.js</code></span>
-      <span>fleet <code>city/island_military.js</code></span>
-      <span>people <code>entities/character.js</code></span>
-      <span>park <code>world/vegetation.js</code></span>
-    </div>
-    <div id="loadNote"></div>
-    <div class="foot" id="ctlNote">Click to capture the mouse, or hold left and drag · <kbd>ESC</kbd> release · <kbd>P</kbd> pause</div>
-  </div>
-</div>
+<div id="role"></div>
+<div id="swap"></div>
+<div id="streak"></div>
+<canvas id="radar" width="264" height="264"></canvas>
+<div id="flash"></div>
 
-<div class="screen" id="results" style="display:none">
-  <div class="card">
-    <h1 id="resTitle">RESULT</h1>
-    <div class="sub" id="resSub"></div>
-    <div class="box"><table id="resTable"></table></div>
-    <div style="margin-top:18px;display:flex;gap:12px">
-      <button id="againBtn">PLAY AGAIN</button>
-    </div>
-  </div>
-</div>
+<div id="over"><div class="in">
+  <h2 id="overTitle">RESULT</h2>
+  <table id="overTable"></table>
+  <button id="again">AGAIN</button>
+</div></div>
 
-<script src="../src/vendor/three.r128.min.js"></script>
-<script src="../src/core/seed.js"></script>
-<script src="../src/core/microboot.js"></script>
-<script src="../src/world/materials.js"></script>
-<!-- ============ THE REAL GANG-CITY MODULES ============================
-  Loaded ahead of the world builders on purpose: world/airbase.js asks for
-  CBZ.strategicModels / CBZ.milModels at BUILD time and only falls back to
-  its own primitives if they are absent, and world/desertcity.js does the
-  same with CBZ.vegetationKit. So these six tags are what upgrade the field
-  from "two extruded planforms" to the engine's actual B-2, fighters,
-  helicopters, tanks and trucks — and the game code below did not change a
-  line to get them.
-
-  Each one had to earn a seam first (see their headers): island_military.js
-  and strategic.js now publish their model factories and guard their
-  CBZ.addLandmass registration, so the hardware is reachable without
-  booting the archipelago that used to own it.
-============================================================ -->
-<script src="../src/world/carfx.js"></script>
-<script src="../src/world/vegetation.js"></script>
-<script src="../src/entities/character.js"></script>
-<script src="../src/entities/poses.js"></script>
-<script src="../src/city/island_military.js"></script>
-<script src="../src/city/strategic.js"></script>
-<!-- city/nukefx.js is here for ONE reason: this game earned a nuclear round
-  and refuses to draw one. 4700 lines of the actual event already ship — the
-  DOM whiteout, the double flash, the Taylor-Sedov white dome (R ∝ t^2/5), the
-  mushroom's rise/bloom/flatten stages, the base surge, and the researched ring
-  model (nukeYield · nukeRings · nukeLethalAt · nukeDims) that systems/ordnance
-  .js now sizes its kill radius from. It needs CBZ.scene at MODULE LOAD, which
-  is why it sits after microboot's tag and not next to the game code, and it
-  registers its own per-frame updater through CBZ.onAlways — the frame-hook
-  bridge microboot already stands up for slice pages. Nothing else in the file
-  had to change to get it. -->
-<script src="../src/city/nukefx.js"></script>
-<script src="../src/world/desertcity.js"></script>
-<script src="../src/world/airbase.js"></script>
-<script src="../src/systems/airframe.js"></script>
-<script src="../src/systems/ordnance.js"></script>
-<script src="../src/systems/radarscope.js"></script>
-<script src="../src/modes/teammatch.js"></script>
+<!-- ONE TAG. Everything this game draws, Gang City already draws. -->
+<script src="../src/core/studio.js"></script>
 <script>
 (function () {
 "use strict";
+const Q = new URLSearchParams(location.search);
+const WANT_AIRPORT = Q.get("airport") !== "0";
+const WORLD_SEED = Q.get("seed") || "talloran";
+
+const NEEDS = [
+  "caps",           // be reachable: modeHas, worldActors, blast damage
+  "green",          // instanced trees
+  "people",         // the shipped 1.82 m rig, gait, poses
+  "military",       // the real fleet models: jets, the B-2, tanks, trucks
+  "militaryisland", // the REAL base from the map, raisable
+  "citycore",       // the REAL city fabric: cityMakeBuilding + buildTown
+  "airbase",        // model seating (wheels on concrete), used by fly()
+  "air",            // flight with derived coefficients
+  "ordnance",       // bombs and the one shared ballistic integrator
+  "damage",         // fireball, wall ruin, building collapse
+  "nukefx",         // the researched mushroom
+  "radar",          // PPI scope
+  "match",          // two sides, a clock, the half-time swap
+];
+if (WANT_AIRPORT) NEEDS.push("airport");
+
+CBZ.studio.need(NEEDS).then(function () {
 const CBZ = window.CBZ, THREE = window.THREE;
+const el = function (id) { return document.getElementById(id); };
+const st = function (t) { const n = el("st"); if (n) n.textContent = t; };
 
 // ============================================================ THE RULES
-const SQUAD        = 10;      // per side
-const HALF_SECONDS = 600;     // ten minutes, each way
-const PTS_KILL     = 250;     // a bomber's whole income
-const PTS_ALIVE_S  = 0.4;     // per living runner, per second
-const BOMB_KIND    = "iron";
-const STICK_GAP    = 0.22;    // seconds between stores while SPACE is held
-const BOMBER_ALT   = 360;     // where the AI bombers work. Lower than it
-                              // wants to be, on purpose: a store dropped from
-                              // 520 m falls for eleven seconds and travels two
-                              // kilometres downrange, so the release happens
-                              // so far out that the runners never see an
-                              // aeroplane. 360 m keeps the lead honest (~1.3 km)
-                              // and keeps the bomber in the runner's sky.
-// ---- WHAT AN AI BOMBER FLIES LIKE. Every number here is a turn-radius
-// argument and they were all measured, not chosen (see THE HUNT in aiBomber).
-// r = v² / (g·tan φ): at the old 170 m/s on the bomber preset's own 30° limit
-// that is 5103 m, and the basin is 1050 m across — the aeroplane could not
-// manoeuvre inside its own target area, which is why the old brain released
-// twice in 200 s. At 122 m/s (the preset's cruise) and 54° it is 1102 m, and
-// a re-attack fits in the map.
-const BOMB_SPEED   = 122;     // m/s on the run and in the turn
-const AI_BANK_TURN = 0.95;    // ~54°, 1.7 g — repositioning
-const AI_BANK_RUN  = 0.50;    // ~29° — the run-in, still enough to trim
-const AI_STICK     = 7;       // stores in an AI stick: 7 × 26 m = 160 m of
-                              // street, which is what covers a man who has
-                              // five seconds of threat ring to run in
-const RUN_LOOK     = 1150;    // carrot down the run-in line while capturing it
-const AI_CORRIDOR  = 24;      // m off the street centreline a man has to
-                              // be inside to be worth the stick. The stick's
-                              // own lethal corridor is ±18.5 m at 26 m
-                              // spacing, and a 26 m road is narrower than
-                              // that — the street IS the weapon.
-const AI_XT_GATE   = 26;      // m of CROSS-track the solution must be inside
-                              // to pickle. Along-track is a timing question
-                              // the stick's own length answers; cross-track
-                              // is the whole difference between this street
-                              // and the next one.
-const RESPAWN_AIR  = 6;       // a downed bomber is back in the air in this
-// ---- THE ONE REWARD. Not a ladder: the bomber has exactly one verb, and
-// every rung below a nuke would be that same verb with a bigger number on it.
-// So there is one, it costs SIX KILLS INSIDE ONE HALF, and going down at any
-// point resets the count to zero — which is the only thing that makes the
-// bomber's own survival matter in a half where he respawns in six seconds.
-// One a half, so a nuke can never pay for the next nuke.
-// Six is tuned against the half: the AI bombers average four or five kills in
-// ten minutes, so six is a good half, not a routine one.
-const NUKE_KIND    = "nuke";
-const NUKE_ARM     = 6;
-// what a full bar means. A bombing side that kills the whole squad banks
-// SQUAD × PTS_KILL; a running side that keeps everyone alive for the whole
-// half banks SQUAD × PTS_ALIVE_S × HALF_SECONDS. They are within 4% of each
-// other by design, so ONE reference serves both ends of the score bar.
-const SCORE_REF    = SQUAD * PTS_KILL;
+const SQUAD        = 6;        // per side
+const HALVES       = 2;
+const HALF_SECONDS = 180;      // three minutes each way; ten was a siege
+const PTS_KILL     = 250;
+const PTS_TOWER    = 150;      // a building brought down — the city is the scoreboard
+const PTS_ALIVE    = 0.5;      // per second, per living runner
+const CIV_PENALTY  = 250;      // a civilian is not a target; the ledger says so
+const BOMB_ALT     = 320;
+const ALT_MIN      = 170, ALT_MAX = 640;
+const RELEASE_MIN  = 120;      // press the attack below this and the stick is yours
+const RUN_SPEED    = 6.4;
+const STICK        = 7;        // stores per press
+const NUKE_ARM     = 5;        // kills that earn the one round
+const RESPAWN_AIR  = 8;
+const CIVILIANS    = 20;
+
+function headingToward(fromX, fromZ, toX, toZ) { return Math.atan2(fromX - toX, fromZ - toZ); }
 
 const TEAMS = [
   { id: "talon", name: "TALON", color: 0xff6a3d },
   { id: "ghost", name: "GHOST", color: 0x49c6ff },
 ];
-const NAMES = ["VOSS","MERCER","ROYCE","KANE","DELACROIX","OKONKWO","HALE","BRANDT","SOLIS","NAKAMURA",
-               "RIVERA","ASH","COLE","DUNN","EVERS","FONG","GRAVES","HOLT","IVES","JARRAH"];
 
-// ============================================================ STATE
-let world = null, base = null, match = null, cam = null;
-let units = [], me = null, myUnit = null;
-let started = false, paused = false;
-let camMode = "chase";        // chase · cockpit · bomb · spectate
-let shake = 0, shakeT = 0;
-let spectateOf = null;
-// the reward, and the whole of its state. `spent` is per HALF, `kills` is per
-// LIFE — that pair is the entire rule and it is why neither is on the unit.
-const nuke = { kills: 0, armed: false, spent: false, warned: false };
-// systems/ordnance.js declares the row behind CBZ.CONFIG.ORDNANCE_NUKE. With
-// the flag off there is no such kind, so there is no reward to offer either —
-// one line reverts the weapon AND its whole UI.
-const NUKE_ON = !!(CBZ.ordnance && CBZ.ordnance.kinds && CBZ.ordnance.kinds.nuke);
-const rngGame = CBZ.seedStream ? CBZ.seedStream("bombsurvivor") : Math.random;
-function rr(a, b) { return a + rngGame() * (b - a); }
-function pick(a) { return a[Math.floor(rngGame() * a.length) % a.length]; }
+let town = null, base = null, port = null;
+let hud, match, cam, chase, sight, scope, eng;
+let ctlFly, ctlWalk, ctl;
+let units = [], civs = [], me = null, started = false;
+const nuke = { kills: 0, armed: false, spent: false };
+const _v = new THREE.Vector3();
 
-const el = function (id) { return document.getElementById(id); };
-const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3();
+// ============================================================ BOOT
+st("RAISING THE STRAIT");
+CBZ.micro.boot({
+  fov: 74, far: 15000, exposure: 0.92,
+  sky: { top: 0x6ea7d8, bottom: 0xdfe6ea, fogNear: 1500, fogFar: 8500, radius: 11000 },
+  lights: { sun: 0.95, hemi: 0.5, shadowSpan: 900, groundColor: 0x7a828a },
+});
+cam = CBZ.camera;
 
-// the ONE ground question, asked the same way by every system in the game
-function floorAt(x, z) {
-  const t = world ? world.heightAt(x, z) : 0;
-  return base ? base.floorAt(x, z, t) : t;
+// ============================================================ THE WORLD
+// Gang City's own geography. The military island and Halloran Field build at
+// their AUTHORED map coordinates; downtown stands at the mainland's slot.
+// Everything else is the strait. groundAt answers from the rects the builders
+// themselves own — no heightfield, no fake terrain, just the map.
+const SEA_Y = -0.4;
+const BASE_RECT = { minX: -860, maxX: -380, minZ: -950, maxZ: -450 };          // island_military.js's own extents
+const BASE_CW   = { minX: -380, maxX: -133, minZ: -712, maxZ: -688 };          // its causeway toward the mainland
+const PORT_RECT = { minX: -900, maxX: 290, minZ: -280, maxZ: 40 };             // island_airport.js A_MINX..A_MAXZ
+const PORT_CW   = { minX: -12,  maxX: 12,  minZ: -566, maxZ: -280 };
+const TOWN_AT   = { x: 0, z: -700 };                                           // the mainland core's slot
+let   TOWN_RECT = { minX: -180, maxX: 180, minZ: -880, maxZ: -520 };           // replaced by town.rect after build
+
+function inRect(r, x, z) { return x >= r.minX && x <= r.maxX && z >= r.minZ && z <= r.maxZ; }
+function groundAt(x, z) {
+  if (inRect(TOWN_RECT, x, z)) return 0.03;
+  if (inRect(BASE_RECT, x, z) || inRect(BASE_CW, x, z)) return 0.05;
+  if (WANT_AIRPORT && (inRect(PORT_RECT, x, z) || inRect(PORT_CW, x, z))) return 0.05;
+  return -2.2;                                        // the sea floor
+}
+function waterAt(x, z) { return groundAt(x, z) < SEA_Y; }
+CBZ.studio.setWorld({ groundAt: groundAt, waterAt: waterAt, seaLevel: SEA_Y });
+
+// the sea: one deep plate under everything, fog does the rest
+(function sea() {
+  const g = new THREE.PlaneGeometry(24000, 24000);
+  g.rotateX(-Math.PI / 2); g.translate(0, SEA_Y, -400);
+  const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: 0x2e4c66 }));
+  m.receiveShadow = true; m.matrixAutoUpdate = false; m.updateMatrix();
+  m.userData.terrain = true;
+  CBZ.scene.add(m);
+})();
+
+// BE REACHABLE. One call and every shared verb can find these people. The
+// blastActors cap is 0 ON PURPOSE: systems/ordnance.js already sweeps this
+// roster through addTarget WITH the cover rules (wall trace + overhead lid);
+// a second sweep would kill the same man twice and skip the roof test.
+CBZ.studio.join({
+  id: "bombsurvivor", label: "Bomb Survivor",
+  caps: { traverse: 1, stepLedge: 1, blast: 1, blastActors: 0, breach: 1 },
+  actors: function (out) {
+    for (let i = 0; i < units.length; i++) if (units[i].alive) out.push(units[i]);
+    for (let i = 0; i < civs.length; i++) if (!civs[i].dead) out.push(civs[i]);
+    return out;
+  },
+  hurt: function (u, dmg, imp) { if (u.civ) { hurtCiv(u, dmg, imp); } else { hurt(u, dmg, imp); } return true; },
+  hurtPlayer: function (dmg, x, z, cause) { if (!me || !me.alive) return false; hurt(me, dmg, { cause: cause }); return true; },
+  route: "bomb survivor units + hurt()",
+});
+
+// THE BASE — the real island, its own builder, its authored place.
+st("THE MILITARY ISLAND");
+base = CBZ.studio.raise("militaryisland");
+
+// DOWNTOWN — the real fabric at the mainland's coordinates. Marked streets,
+// sidewalks, shops with signs, and a cluster of real glass towers. The base's
+// own causeway (built above) already points at this rect's west edge.
+st("DOWNTOWN, THE REAL FABRIC");
+town = CBZ.studio.town({
+  at: TOWN_AT, seed: WORLD_SEED, name: "Talloran",
+  cols: 6, rows: 6, blockW: 42, blockD: 42, roadW: 14,
+});
+if (town && town.rect) {
+  TOWN_RECT = { minX: town.rect.minX - 26, maxX: town.rect.maxX + 26,
+                minZ: town.rect.minZ - 26, maxZ: town.rect.maxZ + 26 };
+}
+// a shore apron so the town reads as an island, not a raft
+(function apron() {
+  const g = new THREE.PlaneGeometry(TOWN_RECT.maxX - TOWN_RECT.minX + 40, TOWN_RECT.maxZ - TOWN_RECT.minZ + 40);
+  g.rotateX(-Math.PI / 2);
+  g.translate((TOWN_RECT.minX + TOWN_RECT.maxX) / 2, 0.005, (TOWN_RECT.minZ + TOWN_RECT.maxZ) / 2);
+  const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: 0x8d9198 }));
+  m.receiveShadow = true; m.matrixAutoUpdate = false; m.updateMatrix();
+  m.userData.terrain = true;
+  CBZ.scene.add(m);
+})();
+
+// HALLORAN FIELD — the real airport, north across the water. Optional, and
+// try/caught inside raise(): a bad builder costs the island, never the game.
+if (WANT_AIRPORT) {
+  st("HALLORAN FIELD");
+  port = CBZ.studio.raise("airport");
 }
 
-// ============================================================ BODIES
-// THE ENGINE'S OWN PEOPLE FIRST. `entities/character.js` publishes
-// CBZ.makeCharacter({legs,torso,arms,skin,hair,shoes,…}) — the voxel rig the
-// whole game runs on, human-scaled to 1.82 m, with CBZ.animChar driving its
-// gait — and CBZ.charProfile behind it. There is no reason a match should
-// wear a different body from the city.
-//
-// The six boxes below stay as the fallback for a page that does not load
-// character.js. That is the pattern everywhere in this file now: ask the
-// engine, fall back to primitives, never fork.
-const CHAR_KITS = [
-  { legs: 0x2f3a2a, torso: 0x46543a, arms: 0x46543a, skin: 0xc09070, hair: 0x241c14, shoes: 0x1a1a1c },
-  { legs: 0x2a2f3a, torso: 0x3a465a, arms: 0x3a465a, skin: 0x8b6544, hair: 0x140f0a, shoes: 0x1a1a1c },
-];
-function makeSoldier(color, kitIndex) {
-  if (CBZ.makeCharacter) {
-    try {
-      const kit = CHAR_KITS[(kitIndex || 0) % CHAR_KITS.length];
-      const ch = CBZ.makeCharacter({
-        legs: kit.legs, torso: color, collar: color, arms: kit.arms,
-        skin: kit.skin, hair: kit.hair, shoes: kit.shoes, cap: color,
-      });
-      const g = (ch && ch.isObject3D) ? ch : (ch && ch.group);
-      if (g) { g.userData.charRig = ch; return g; }
-    } catch (e) { /* fall through to the primitive body */ }
-  }
-  const g = new THREE.Group();
-  const skin = CBZ.cmat(0xb98f6a), kit = CBZ.cmat(color), dark = CBZ.cmat(0x2c3038);
-  const torso = new THREE.Mesh(CBZ.boxGeom(0.62, 0.78, 0.34), kit);
-  torso.position.y = 1.18; torso.castShadow = true; g.add(torso);
-  const head = new THREE.Mesh(CBZ.boxGeom(0.30, 0.30, 0.30), skin);
-  head.position.y = 1.74; g.add(head);
-  const helm = new THREE.Mesh(CBZ.boxGeom(0.36, 0.14, 0.38), dark);
-  helm.position.y = 1.90; g.add(helm);
-  const legL = new THREE.Mesh(CBZ.boxGeom(0.22, 0.80, 0.24), dark);
-  legL.position.set(-0.16, 0.42, 0); g.add(legL);
-  const legR = legL.clone(); legR.position.x = 0.16; g.add(legR);
-  const armL = new THREE.Mesh(CBZ.boxGeom(0.17, 0.66, 0.20), kit);
-  armL.position.set(-0.40, 1.18, 0); g.add(armL);
-  const armR = armL.clone(); armR.position.x = 0.40; g.add(armR);
-  g.userData.limbs = { legL: legL, legR: legR, armL: armL, armR: armR };
-  return g;
-}
-function animateSoldier(g, speed, t, dt) {
-  // the real rig animates through the engine's own gait solver
-  if (g.userData.charRig && CBZ.animChar) {
-    try { CBZ.animChar(g.userData.charRig, speed, dt || 0.016); return; } catch (e) {}
-  }
-  const L = g.userData.limbs;
-  if (!L) return;
-  const sw = Math.sin(t * (6 + speed * 0.5)) * Math.min(0.9, speed * 0.14);
-  L.legL.rotation.x = sw; L.legR.rotation.x = -sw;
-  L.armL.rotation.x = -sw * 0.8; L.armR.rotation.x = sw * 0.8;
-}
+CBZ.ordnance.init({ scene: CBZ.scene, groundAt: groundAt });
 
-// ============================================================ UNITS
-// One record per combatant. `role` decides which body it wears this half,
-// so the swap is a rebuild, not a pile of conditionals.
-function makeUnit(o) {
-  return {
-    id: o.id, name: o.name, team: o.team, human: !!o.human,
-    role: null, kind: null,
-    pos: new THREE.Vector3(), vel: new THREE.Vector3(),
-    yaw: 0, pitch: 0, onGround: true, stamina: 1,
-    hp: 100, alive: true, group: null, af: null,
-    boarded: false, dropCd: 0, respawnIn: 0, stick: 0, stickT: 0,
-    goal: null, goalT: 0, targetId: null, orbit: rr(0, Math.PI * 2),
-    rec: null, tgt: null,
-    // the planned attack (see aiBomber): a frozen run-in heading, the street
-    // it walks down, and how old the plan is
-    run: null, runAge: 0, wing: false,
-  };
-}
-
-// ---- EVERY BODY THIS FILE THROWS AWAY OWNS GPU MEMORY, and taking it out of
-// the scene frees none of it. Measured over one half, 45 aircraft destroyed and
-// rebuilt: renderer.info.memory.geometries 2212 → 2740, monotonic, +11.7 per
-// aircraft — invisible to scene.children (flat at 242) and to the JS heap,
-// because CBZ.airbase.bomber()/.fighter() extrude a fresh planform per call and
-// af.dispose() only flips a flag. A full match leaked ~3000 geometries.
-//
-// WHAT THIS WALK MUST NOT TOUCH: the engine shares deliberately. CBZ.boxGeom()
-// and CBZ.cmat() hand out CACHED resources tagged `_shared`, city/clothes.js
-// hands out painted cloth tagged `_cbzClothKey` (a per-rig clone is a legal
-// door into the one texture every wearer samples), and r128 sprites share a
-// geometry singleton. Disposing any of those corrupts every other object still
-// using it — the city's towers, the other nine soldiers, the whole field. Skip
-// them by name, which is the same guard city/peds.js and city/regimes.js use.
-function disposeBody(g) {
-  if (!g) return;
-  g.traverse(function (o) {
-    if (o.isSprite) return;
-    const geo = o.geometry;
-    if (geo && !geo._shared && geo.dispose) { try { geo.dispose(); } catch (e) {} }
-    const m = o.material;
-    if (!m) return;
-    const list = Array.isArray(m) ? m : [m];
-    for (let i = 0; i < list.length; i++) {
-      const mm = list[i];
-      if (mm && !mm._shared && !mm._cbzClothKey && mm.dispose) { try { mm.dispose(); } catch (e) {} }
+// ============================================================ INSTRUMENTS
+// Score and feed are ON. The old page shipped them off in the name of a bare
+// HUD and the result was a game where nothing you did was ever said back to
+// you — bombing with no feedback is weather, not play.
+hud   = CBZ.studio.hud({ health: true, clock: true, score: true, feed: true, note: false });
+chase = CBZ.studio.chase({ groundAt: groundAt, camera: cam });
+sight = CBZ.studio.bombsight({ kind: "iron", outer: 9 });
+ctlFly  = CBZ.studio.controls("fly",  { buttons: { fire: "DROP", nuke: "NUKE" } });
+ctlWalk = CBZ.studio.controls("walk", { buttons: { sprint: "RUN" } });
+ctl = ctlFly;
+eng = CBZ.studio.engineSound({ vRef: 260, earshot: 300 });
+scope = CBZ.radar.create({
+  canvas: el("radar"), range: 1600, label: "AIR",
+  self: function () {
+    if (!me) return { x: 0, z: 0, y: 0, heading: 0 };
+    return { x: me.pos.x, z: me.pos.z, y: me.pos.y, heading: me.af ? me.af.heading() : me.yaw };
+  },
+  contacts: function () {
+    const out = [];
+    if (!me) return out;
+    for (let i = 0; i < units.length; i++) {
+      const u = units[i];
+      if (!u.alive || u === me) continue;
+      out.push({ id: u.id, x: u.pos.x, z: u.pos.z, y: u.pos.y, hostile: u.team !== me.team });
     }
+    return out;
+  },
+});
+
+// ============================================================ CIVILIANS
+// They walk the streets on the shipped gait, they slide along the real
+// colliders, and they are worth NEGATIVE points. A city you are afraid to
+// hit carelessly is a city that matters.
+const civRoll = CBZ.seedStream ? CBZ.seedStream("bs-civ") : function () { return 0.5; };
+(function castCivilians() {
+  const roads = (town && town.roads) || [];
+  const bodies = CBZ.studio.crowd(CIVILIANS, "civilian", {
+    at: function (i) {
+      if (roads.length) {
+        const seg = roads[(i * 7) % roads.length];
+        const t = (civRoll() - 0.5) * seg.len * 0.8;
+        const side = (i % 2 ? 1 : -1) * (seg.w / 2 + 2.2);
+        const x = seg.vertical ? seg.x + side : seg.x + t;
+        const z = seg.vertical ? seg.z + t : seg.z + side;
+        return { x: x, z: z, y: groundAt(x, z) };
+      }
+      const a = (i / CIVILIANS) * Math.PI * 2;
+      return { x: TOWN_AT.x + Math.cos(a) * 60, z: TOWN_AT.z + Math.sin(a) * 60, y: 0.03 };
+    },
+    wander: { range: 52, speed: 1.25, pause: 2.2, groundAt: groundAt },
   });
-}
-
-function clearBody(u) {
-  if (u.group) { CBZ.scene.remove(u.group); disposeBody(u.group); u.group = null; }
-  if (u.af) { u.af.dispose(); u.af = null; }
-  if (u.tgt) { CBZ.ordnance.removeTarget(u.tgt); u.tgt = null; }
-  u.stick = 0;          // a dead bomber's stick dies with him (see aiBomber)
-  u.run = null;         // and so does his attack plan
-}
-
-// ---- put a unit into the world in the shape its role demands
-function spawnRunner(u) {
-  clearBody(u);
-  u.kind = "foot";
-  u.alive = true; u.hp = 100; u.stamina = 1;
-  const p = world.streetPoint(rngGame, world.rings.city * 0.80);
-  u.pos.set(p.x, floorAt(p.x, p.z), p.z);
-  u.vel.set(0, 0, 0);
-  u.yaw = rr(0, Math.PI * 2);
-  u.goal = null; u.goalT = 0;
-  if (!u.human) {
-    u.group = makeSoldier(teamColor(u.team), units.indexOf(u));
-    u.group.position.copy(u.pos);
-    CBZ.scene.add(u.group);
+  for (let i = 0; i < bodies.length; i++) {
+    const g = bodies[i];
+    const c = {
+      civ: true, id: "civ" + i, group: g, pos: g.position, dead: false, hp: 60,
+      team: null, alive: true,
+    };
+    c.tgt = CBZ.ordnance.addTarget({
+      pos: c.pos, team: "civilian", unit: c,
+      onDamage: function (dmg, info) { hurtCiv(c, dmg, info); },
+    });
+    civs.push(c);
   }
-  // register with the blast bus — this is what makes a runner killable
-  u.tgt = CBZ.ordnance.addTarget({
-    pos: u.pos, team: u.team, unit: u,
-    onDamage: function (dmg, info) { hurt(u, dmg, info); },
-  });
+})();
+
+function hurtCiv(c, dmg, info) {
+  if (!c || c.dead || !(dmg > 0)) return;
+  c.hp -= dmg;
+  if (c.hp > 0) return;
+  c.dead = true; c.alive = false;
+  c.group.userData.dead = true;                     // the wander tick lets go
+  c.group.rotation.z = Math.PI / 2;                 // down, not despawned
+  c.group.position.y = groundAt(c.pos.x, c.pos.z) + 0.45;
+  if (c.tgt && CBZ.ordnance.removeTarget) CBZ.ordnance.removeTarget(c.tgt);
+  const killer = info && info.by ? unitById(info.by) : null;
+  if (killer) {
+    match.addScore(killer.team, -CIV_PENALTY, "civilian");
+    hud.feed("CIVILIAN KILLED · " + teamOf(killer.team).name + " −" + CIV_PENALTY);
+    if (killer === me && CBZ.micro.sfx) CBZ.micro.sfx.tone(190, 0.5, { type: "sine", gain: 0.14 });
+  }
 }
 
-function spawnBomber(u, opts) {
-  clearBody(u);
-  opts = opts || {};
-  u.kind = "air";
-  u.alive = true; u.hp = 100;
-  u.dropCd = 0;
-  u.run = null; u.runAge = 0; u.targetId = null;
-  // WHICH AEROPLANE HE FLIES IS DECIDED ONCE A HALF, NOT ONCE A LIFE. The
-  // respawn path passed `wing: u.human`, so every AI bomber came back as a
-  // FIGHTER — different preset, different bank limit, 403 m/s top end, a
-  // different model in the sky — and the half quietly turned into a
-  // fighter-bomber half after the first casualty. `opts.wing` is honoured
-  // when it is given; otherwise the unit keeps what it started the half with.
-  const wing = opts.wing != null ? !!(u.human || opts.wing) : !!u.wing;
-  u.wing = wing;
-  const onApron = !!(u.human && opts.onApron);
-  // THE APRON START HAS NO AEROPLANE ATTACHED TO IT, so it must not build one.
-  // This used to extrude a whole bomber, add it to the scene and drop it two
-  // lines later — a set of geometries nobody ever saw, leaked once a half.
-  if (!onApron) {
-    u.group = wing ? CBZ.airbase.bomber({}) : CBZ.airbase.fighter({ color: 0x6a727c });
-    CBZ.scene.add(u.group);
-  }
-  u.af = CBZ.airframe.make({ preset: wing ? "bomber" : "fighter", groundAt: floorAt });
+// ============================================================ THE CAST
+// Nobody here is drawn by this file. A runner is the shipped body. A bomber
+// is the shipped B-2 with the derived-coefficient airframe. The human's one
+// starts ON the island's own airstrip with speed already on the clock,
+// because a 25-second unpiloted crawl was the old game's first impression.
+const RW_Z = BASE_RECT.maxZ - 70;                    // the island's strip: z = -520, along X
+const RW_X0 = BASE_RECT.minX + 40;                   // threshold
+const RW_HDG = -Math.PI / 2;                         // forward = (+1, 0): east, toward downtown
 
-  if (onApron) {
-    // THE BRIEF: the player starts ON FOOT at the base, beside the wing.
-    u.kind = "foot";
-    u.boarded = false;
-    u.af.place(base.bomber.x, base.bomber.y, base.bomber.z, base.bomber.heading);
-    u.pos.set(base.spawn.x, base.spawn.y, base.spawn.z);
-    u.yaw = base.spawn.heading;
-    u.vel.set(0, 0, 0);
+function spawnUnit(rec, role, i) {
+  const team = teamOf(rec.team);
+  const u = {
+    rec: rec, id: rec.id, team: rec.team, role: role, human: !!rec.human,
+    alive: true, hp: 100, pos: new THREE.Vector3(), yaw: 0, hdg: 0,
+    group: null, af: null, tgt: null, cool: 0, respawnIn: 0, rolling: false,
+  };
+  if (role === "bomber") {
+    const flown = CBZ.studio.fly("bomber", { groundAt: groundAt });
+    if (flown) { u.group = flown.group; u.af = flown.af; }
+    if (u.human && u.af) {
+      u.af.place(RW_X0, groundAt(RW_X0, RW_Z) + (u.af.spec.gearHeight || 3.4), RW_Z, RW_HDG, 64);
+      u.af.throttle = 1;
+      u.rolling = true;
+      u.hdg = RW_HDG;
+    } else if (u.af) {
+      const a = (i / SQUAD) * Math.PI * 2 + (rec.team === TEAMS[1].id ? Math.PI : 0);
+      const r = 900 + (i % 4) * 220;
+      const x = TOWN_AT.x + Math.cos(a) * r, z = TOWN_AT.z + Math.sin(a) * r;
+      u.hdg = headingToward(x, z, TOWN_AT.x, TOWN_AT.z);
+      u.af.launch(x, BOMB_ALT + (i % 3) * 45, z, u.hdg, 168);
+    }
+    if (u.af) u.pos.copy(u.af.pos);
+    u.trail = CBZ.studio.trail({ length: 70, color: team.color, opacity: 0.4, minStep: 22 });
   } else {
-    // everyone else is already up and inbound
-    const a = rr(0, Math.PI * 2);
-    const r = world.rings.city + 900 + rr(0, 700);
-    const x = Math.cos(a) * r, z = Math.sin(a) * r;
-    const alt = BOMBER_ALT + rr(-40, 90);
-    // inbound: the airframe's nose is −Z, so a heading that flies from (x,z)
-    // toward the origin is atan2(x, z) — not a compass bearing
-    u.af.launch(x, alt, z, Math.atan2(x, z), BOMB_SPEED);
-    u.boarded = true;
-    u.pos.copy(u.af.pos);
-    u.af.applyTo(u.group);
+    u.group = CBZ.studio.cast("runner", { color: team.color, variant: i });
+    if (u.group) CBZ.scene.add(u.group);
+    // dust so a man is findable from altitude; it fades when he holds still,
+    // so standing quiet under a real roof is a choice, not a lost cause
+    u.trail = CBZ.studio.trail({ length: 26, color: 0xc9cdd3, opacity: 0.5, minStep: 3.5 });
+    const sq = (town && town.square && town.square.bx != null) ? { x: town.square.bx, z: town.square.bz } : TOWN_AT;
+    const a = (i / SQUAD) * Math.PI * 2 + (rec.team === TEAMS[1].id ? 0.4 : 0);
+    const r = 40 + (i % 4) * 34;
+    u.pos.set(sq.x + Math.cos(a) * r, 0, sq.z + Math.sin(a) * r);
+    u.pos.y = groundAt(u.pos.x, u.pos.z);
+    if (CBZ.micro.resolveCircle) CBZ.micro.resolveCircle(u.pos, 0.55, u.pos.y, 1.8);
   }
-  // a bomber can be hurt too — by its own stick, which is the honest
-  // punishment for pressing the attack below release altitude
   u.tgt = CBZ.ordnance.addTarget({
     pos: u.pos, team: u.team, unit: u,
-    onDamage: function (dmg, info) { hurt(u, dmg * 0.55, info); },
+    onDamage: function (dmg, info) { hurt(u, role === "bomber" ? dmg * 0.55 : dmg, info); },
   });
+  units.push(u);
+  return u;
 }
 
-function teamColor(id) {
-  for (let i = 0; i < TEAMS.length; i++) if (TEAMS[i].id === id) return TEAMS[i].color;
-  return 0xffffff;
+function teamOf(id) { for (let i = 0; i < TEAMS.length; i++) if (TEAMS[i].id === id) return TEAMS[i]; return TEAMS[0]; }
+function unitById(id) { for (let i = 0; i < units.length; i++) if (units[i].id === id) return units[i]; return null; }
+function clearUnits() {
+  for (let i = 0; i < units.length; i++) {
+    const u = units[i];
+    if (u.tgt && CBZ.ordnance.removeTarget) CBZ.ordnance.removeTarget(u.tgt);
+    // drop(), not remove(): a bare remove leaves geometry resident on the GPU,
+    // measured at +11.7 MB per aircraft in a game that respawns on a timer
+    if (u.group) CBZ.studio.drop(u.group);
+    if (u.af && u.af.dispose) u.af.dispose();
+    if (u.trail) u.trail.dispose();
+  }
+  units = [];
+  me = null;
 }
-function isMyTeam(u) { return myUnit && u.team === myUnit.team; }
 
-// ---- damage → death, routed through the match so the feed and the
-//      scoreboard cannot disagree with the world
+// ============================================================ DAMAGE
 function hurt(u, dmg, info) {
-  if (!u.alive) return;
-  if (godMode && u === myUnit) return;
+  if (!u || !u.alive || !(dmg > 0)) return;
   u.hp -= dmg;
-  if (u === myUnit) {
-    shake = Math.max(shake, Math.min(1, dmg / 90));
-    flashVignette(Math.min(0.9, dmg / 70));
-  }
+  if (u === me && CBZ.micro.shake) CBZ.micro.shake(Math.min(1, dmg / 80));
   if (u.hp > 0) return;
-  killUnit(u, info);
-}
-
-function killUnit(u, info) {
-  if (!u.alive) return;
-  u.alive = false;
-  const killer = info && info.team ? unitsOfTeam(info.team).find(function (k) { return k.id === info.by; }) : null;
-  // A CRASH IS NOT A KILL. teammatch prints "<killer, or the cause> → <victim>"
-  // when nobody is credited, so hardcoding "ordnance" printed 173 self-inflicted
-  // crashes as `ordnance → MERCER` — a weapon nobody fired, in a feed whose only
-  // job is to say what happened. The airframe meeting the ground says so.
+  u.alive = false; u.hp = 0;
+  const killer = info && info.by ? unitById(info.by) : null;
   match.kill(u.rec, killer ? killer.rec : null, (info && info.crash) ? "CRASH" : "ORDNANCE");
-  // THE REWARD IS COUNTED HERE, at the one place a body actually stops, and
-  // only for a RUNNER — the neutral traffic and a bomber caught by his own
-  // stick are not the thing being asked for.
-  if (killer === myUnit && u.role === "runner") nukeCredit();
-  if (u === myUnit) nukeLost();
-
   if (u.role === "runner") {
-    probe.kills++;
-    // the bombing side gets paid, once, here
     const enemy = match.enemyOf(u.team);
-    if (enemy) match.addScore(enemy.id, PTS_KILL, "kill");
-    boom(u.pos, 6);
-    clearBody(u);
-    if (u === myUnit) enterSpectate();
+    if (enemy) {
+      match.addScore(enemy.id, PTS_KILL, "kill");
+      hud.feed(u.rec.name + " DOWN · +" + PTS_KILL);
+    }
+    if (killer === me) earnKill();
+    CBZ.studio.boom(u.pos, { radius: 5, power: 0.45, structural: false });
+    if (u.trail) u.trail.cut();
+    if (u.group) CBZ.studio.drop(u.group);
+    if (u === me) hud.health(0);
   } else {
-    // a downed bomber is back in the air shortly — the bombing half is
-    // about pressure, and pressure that stops when you die is not pressure
-    if (u.af) boom(u.af.pos, 22);
-    u.respawnIn = RESPAWN_AIR;
-    clearBody(u);
-    if (u === myUnit) { camMode = "spectate"; spectateOf = null; }
+    if (u.af) CBZ.studio.boom(u.af.pos, { radius: 22, power: 1.5, structural: false });
+    if (u.group) u.group.visible = false;
+    if (u.trail) u.trail.cut();
+    u.respawnIn = RESPAWN_AIR;        // pressure that stops when you die is not pressure
   }
 }
-function unitsOfTeam(id) { return units.filter(function (u) { return u.team === id; }); }
 
-function boom(p, r) {
-  CBZ.ordnance.blast(p.x, p.y, p.z, r, 0, {});   // FX + sound only: power 0
+// A STORE THAT LANDS ON A BUILDING TAKES THE BUILDING DOWN — the REAL
+// building. The town's lots carry real extents, so the collapse verb gets the
+// true footprint and roofline instead of guessing, the team is PAID for the
+// tower, and anyone standing inside learns why the shelter rules matter.
+function lotNear(x, z, reach) {
+  const lots = (town && town.lots) || [];
+  let best = null, bd = 1e18;
+  for (let i = 0; i < lots.length; i++) {
+    const L = lots[i];
+    if (!L.building) continue;
+    const dx = Math.max(L.cx - L.w / 2 - x, 0, x - (L.cx + L.w / 2));
+    const dz = Math.max(L.cz - L.d / 2 - z, 0, z - (L.cz + L.d / 2));
+    const d = dx * dx + dz * dz;
+    if (d < bd) { bd = d; best = L; }
+  }
+  return best && bd <= reach * reach ? best : null;
 }
-
-// ============================================================ THE NUKE
-// The game side of it is four small functions, and that is the point: the
-// WEAPON is a row in systems/ordnance.js (which took its 1100 m kill radius
-// from city/nukefx.js's own 5 psi contour for the 16 kt device it draws), the
-// BODY is city/strategic.js's B61 casing, the FLASH is city/nukefx.js's whole
-// sequence. Nothing below this line knows what any of that looks like. What
-// it owns is the RULE: who earns it, who loses it, and when it may fly.
-function nukeCredit() {
-  if (!NUKE_ON || nuke.spent || nuke.armed) return;
-  nuke.kills++;
-  if (nuke.kills < NUKE_ARM) return;
-  nuke.armed = true;
-  match.log("NUKE ARMED", { tone: "good" });
-  // the touch build never names a key and the desktop build always does —
-  // one string each, chosen from the same test the CSS uses
-  showBanner("NUKE ARMED", TOUCH.active ? "NUKE BUTTON" : "PRESS N");
-  if (CBZ.micro.sfx) CBZ.micro.sfx.tone(140, 0.9, { type: "sawtooth", gain: 0.16, slideTo: 300 });
+function crushInside(L, byId) {
+  // the building came down; the people in and against it come down with it
+  const pad = 6;
+  const hitRect = { minX: L.cx - L.w / 2 - pad, maxX: L.cx + L.w / 2 + pad,
+                    minZ: L.cz - L.d / 2 - pad, maxZ: L.cz + L.d / 2 + pad };
+  for (let i = 0; i < units.length; i++) {
+    const u = units[i];
+    if (u.alive && u.role === "runner" && inRect(hitRect, u.pos.x, u.pos.z)) hurt(u, 95, { by: byId, cause: "collapse" });
+  }
+  for (let i = 0; i < civs.length; i++) {
+    const c = civs[i];
+    if (!c.dead && inRect(hitRect, c.pos.x, c.pos.z)) hurtCiv(c, 95, { by: byId });
+  }
 }
-// GOING DOWN LOSES IT, ARMED OR NOT. A bomber is back in the air in six
-// seconds, so his death costs him almost nothing — this is the one thing it
-// costs him, and it is what makes pressing the attack below release altitude
-// a decision instead of a free ride.
-function nukeLost() {
-  if (!NUKE_ON || (!nuke.armed && nuke.kills === 0)) return;
-  const had = nuke.armed;
-  nuke.armed = false;
-  nuke.kills = 0;
-  if (had) match.log("NUKE LOST", { tone: "bad" });
-}
-function nukeReset() { nuke.kills = 0; nuke.armed = false; nuke.spent = false; nuke.warned = false; }
-
-// [N] on the desk, the NUKE pill under the right thumb — both arrive here,
-// because the touch layer synthesises the same key code and this is polled off
-// the input floor rather than off a DOM keydown. ONE handler per verb.
-function callNuke() {
-  const u = myUnit;
-  if (!NUKE_ON || !nuke.armed) return;
-  if (!u || !u.alive || u.kind !== "air" || !u.af) return;   // it is a bomb; it needs a bomb bay
-  nuke.armed = false;
-  nuke.spent = true;
-  nuke.kills = 0;
-  releaseFrom(u, NUKE_KIND);
-  match.log("NUKE AWAY", { tone: "phase" });
-  showBanner("NUKE AWAY", "");
-  if (CBZ.micro.sfx) CBZ.micro.sfx.siren(3.2, { gain: 0.15 });
+function onStoreLands(b) {
+  if (!b || !b.impact) return;
+  const L = lotNear(b.impact.x, b.impact.z, Math.max(16, (b.radius || 12) * 1.2));
+  if (L && CBZ.cityAirstrikeCollapse) {
+    try { CBZ.cityAirstrikeCollapse(L, { at: b.impact, power: b.power || 1, radius: b.radius || 14 }); } catch (e) {}
+    if (!L._down) {
+      L._down = true;
+      const owner = b.owner ? unitById(b.owner) : null;
+      if (owner) {
+        match.addScore(owner.team, PTS_TOWER, "tower");
+        hud.feed((L.building.name || "TOWER").toUpperCase() + " DOWN · +" + PTS_TOWER);
+        if (owner === me) streak("TOWER DOWN");
+      }
+      crushInside(L, b.owner);
+    }
+  } else {
+    CBZ.studio.collapseAt(b.impact, { radius: b.radius, power: b.power });
+  }
 }
 
 // ============================================================ THE MATCH
-function buildMatch() {
-  match = CBZ.teammatch.create({
-    teams: TEAMS,
-    roles: ["bomber", "runner"],
-    halves: 2,
-    halfSeconds: HALF_SECONDS,
-    intermissionSeconds: 9,
-    respawnSeconds: 0,                 // runners stay down; that IS the half
-    onHalfStart: startHalf,
-    onHalfEnd: function (h) { showBanner("HALF " + (h + 1) + " OVER", "SIDES SWAP"); },
-    onEnd: showResults,
-    onTick: matchTick,
-    autoStep: true,
-  });
-
-  // the roster: you, nine with you, ten against
-  const shuffled = NAMES.slice();
-  units = [];
-  for (let t = 0; t < TEAMS.length; t++) {
-    for (let i = 0; i < SQUAD; i++) {
-      const human = (t === 0 && i === 0);
-      const id = TEAMS[t].id + i;
-      const u = makeUnit({
-        id: id, team: TEAMS[t].id, human: human,
-        name: human ? "YOU" : shuffled[(t * SQUAD + i) % shuffled.length] + (t ? "-2" : ""),
-      });
-      u.rec = match.addPlayer({ id: id, name: u.name, team: TEAMS[t].id, human: human, ref: u });
-      units.push(u);
-      if (human) myUnit = u;
+match = CBZ.teammatch.create({
+  teams: TEAMS, roles: ["bomber", "runner"], halves: HALVES, halfSeconds: HALF_SECONDS,
+  onHalfStart: function (half, m) {
+    clearUnits();
+    nuke.kills = 0; nuke.armed = false; nuke.spent = false;
+    ctlFly.button("nuke", false);
+    ctlFly.button("fire", true);
+    const players = m.players;
+    for (let i = 0; i < players.length; i++) {
+      const p = players[i];
+      const u = spawnUnit(p, m.roleOf(p.team), i % SQUAD);
+      if (p.human) me = u;
     }
-  }
-  match.start();
-}
-
-function startHalf(half) {
-  CBZ.ordnance.clear();
-  spectateOf = null;
-  nukeReset();          // the count is a HALF's count, and so is the one shot
-  for (let i = 0; i < units.length; i++) {
-    const u = units[i];
-    u.role = match.roleOf(u.team, half);
-    u.rec.alive = true;
-    u.rec.hp = 100;
-    u.respawnIn = 0;
-    if (u.role === "runner") spawnRunner(u);
-    else spawnBomber(u, { onApron: u.human, wing: u.human || (i % 4 === 0) });
-  }
-  camMode = myUnit.role === "bomber" ? "chase" : "chase";
-  showBanner(myUnit.role === "bomber" ? "YOU BOMB" : "YOU RUN",
-    myUnit.role === "bomber" ? "KESTREL FIELD · BOARD THE WING" : "BASIN CITY · TEN MINUTES");
-  if (CBZ.micro.sfx) CBZ.micro.sfx.siren(2.4, { gain: 0.12 });
-}
-
-let aliveAccum = 0;
-function matchTick(dt) {
-  // the running side is paid by the second, for everyone still breathing
-  const runners = match.teamsWithRole("runner");
-  for (let i = 0; i < runners.length; i++) {
-    const n = units.filter(function (u) { return u.team === runners[i].id && u.role === "runner" && u.alive; }).length;
-    if (n > 0) match.addScore(runners[i].id, n * PTS_ALIVE_S * dt, null);
-  }
-  // bombers back in the air
-  for (let i = 0; i < units.length; i++) {
-    const u = units[i];
-    if (u.alive || u.role !== "bomber") continue;
-    u.respawnIn -= dt;
-    if (u.respawnIn <= 0) {
-      u.rec.alive = true;
-      spawnBomber(u, {});    // no `wing`: he comes back in the aeroplane he had
-      if (u === myUnit) { camMode = "chase"; showBanner("AIRBORNE", "REPLACEMENT AIRFRAME"); }
-    }
-  }
-  // an early finish: if every runner is down, the half is decided
-  const rTeam = runners[0];
-  if (rTeam && units.filter(function (u) { return u.team === rTeam.id && u.role === "runner" && u.alive; }).length === 0) {
-    match.log("EVERY RUNNER DOWN · HALF CALLED", { tone: "phase" });
-    match.endHalf();
-  }
-}
-
-// ============================================================ PLAYER
-const KEY = CBZ.micro.input;
-const TOUCH = CBZ.micro.touch;
-let dropHeld = 0;
-
-// ---- THE THUMB LAYOUT. core/microboot.js owns the grammar (fixed left
-// stick, rim-to-sprint, right-half look, latches never second holds); this
-// is only which controls this game hangs on it. Every button synthesises the
-// key the desktop build already reads, so there is ONE handler per verb and
-// the two input methods cannot drift apart.
-const TB = {};
-function buildTouch() {
-  TOUCH.init();
-  if (!TOUCH.active) return;
-  document.body.classList.add("is-touch");
-  // right thumb, bottom-right: the trigger. A HOLD, because holding it is
-  // what walks a stick — so nothing else that must be held sits near it.
-  TB.drop = TOUCH.addButton({ id: "drop", glyph: "◉", key: "Space", size: 84, right: 22, bottom: 26 });
-  // latches (never holds — they would fight the trigger for the same thumb)
-  TB.cam = TOUCH.addButton({ id: "cam", glyph: "⌖", key: "KeyC", latch: true, size: 54, right: 118, bottom: 34 });
-  TB.view = TOUCH.addButton({ id: "view", glyph: "◱", key: "KeyV", latch: true, size: 54, right: 118, bottom: 100 });
-  // rudder: two taps, not a stick — the left stick is already pitch and roll
-  TB.rudL = TOUCH.addButton({ id: "rudL", glyph: "↰", key: "KeyA", size: 50, right: 186, bottom: 30 });
-  TB.rudR = TOUCH.addButton({ id: "rudR", glyph: "↱", key: "KeyD", size: 50, right: 186, bottom: 92 });
-  // throttle is CONTINUOUSLY SET and cannot be a second hold → a slider
-  TB.thr = TOUCH.addSlider({ label: "THR", right: 24, bottom: 124, height: 168, value: 1 });
-  // interaction verbs carry WORDS (the one place the HUD is allowed to talk)
-  TB.act = TOUCH.addButton({ id: "act", word: true, label: "BOARD", key: "KeyE", size: 52, right: 22, bottom: 130 });
-  TB.next = TOUCH.addButton({ id: "next", word: true, label: "NEXT", key: "KeyQ", size: 46, right: 22, bottom: 130 });
-  // THE ONE REWARD GETS A WORD, and it is LATCHED — a nuke is a single
-  // decision, never a thing you lean on. It sits at bottom 172, clear of the
-  // rudder pads (they top out at 142) and inboard of the throttle slider
-  // (right 24..70), because the only control it must never be mistaken for is
-  // the trigger under the same thumb. Hidden until it is actually yours: a
-  // greyed-out button is a promise the interface cannot keep.
-  TB.nuke = TOUCH.addButton({ id: "nuke", word: true, label: "NUKE", key: "KeyN", latch: true, size: 46, right: 108, bottom: 172 });
-  syncTouch();
-}
-// show only the controls this role can actually use
-function syncTouch() {
-  if (!TOUCH.active || !TB.drop) return;
-  const u = myUnit;
-  const flying = !!(u && u.alive && u.kind === "air");
-  const boarding = !!(u && u.alive && u.role === "bomber" && !u.boarded);
-  // ONE contextual button under the right thumb: on the ground it jumps, in
-  // the air it releases. Same key on the desktop build, same button here.
-  TB.drop.set(!!(u && u.alive), null, flying ? "◉" : "⤒");
-  TB.cam.set(flying);
-  TB.view.set(flying);
-  TB.rudL.set(flying);
-  TB.rudR.set(flying);
-  TB.thr.show(flying);
-  TB.act.set(boarding);
-  TB.next.set(!!(u && !u.alive));
-  TB.nuke.set(!!(NUKE_ON && nuke.armed && flying), true);
-}
-
-// ---- THE PROMPT HAS ONE OWNER PER FRAME. It used to have two, and they fought
-// every frame of a takeoff roll: updateFlight wrote "PULL BACK TO ROTATE" and
-// set the element to block, then the boarding branch's `else` set it straight
-// back to none on the same frame, because myUnit.boarded had just become true.
-// Measured mid-roll: {"spd":55,"g":true,"disp":"none","html":"PULL BACK TO
-// ROTATE · 55 m/s"} — written sixty times a second and shown never, so a
-// first-time player got no rotation cue at all. Now nothing writes the element
-// directly: a system CLAIMS the line, and the frame applies the last claim once
-// at the end. No claim means no prompt.
-let promptClaim = null, promptShown = null;
-function claimPrompt(html) { promptClaim = html; }
-function applyPrompt() {
-  const p = el("prompt");
-  if (promptClaim == null) {
-    if (promptShown !== null) { promptShown = null; p.style.display = "none"; }
-    return;
-  }
-  if (promptClaim !== promptShown) { promptShown = promptClaim; p.innerHTML = promptClaim; }
-  p.style.display = "block";
-}
-
-function updatePlayer(dt) {
-  const u = myUnit;
-  if (!u) return;
-  // polled, not listened for: the touch pill synthesises KeyN into the input
-  // floor and never fires a DOM keydown, so a window listener would answer
-  // the desk build only
-  if (KEY.pressed("KeyN")) callNuke();
-  if (!u.alive) { updateSpectate(dt); return; }
-  if (u.kind === "foot") updateFoot(u, dt, true);
-  else updateFlight(u, dt, true);
-}
-
-// ---- on foot: shared by the apron walk and the whole running half
-function updateFoot(u, dt, human) {
-  if (human) {
-    u.yaw -= KEY.mx * KEY.sensitivity;
-    u.pitch = Math.max(-1.35, Math.min(1.35, u.pitch - KEY.mz * KEY.sensitivity));
-  }
-  // the stick and the keys feed the SAME two numbers — nothing below here
-  // knows which one moved
-  let fwd = human ? KEY.axis("KeyS", "KeyW") : 0;
-  let str = human ? KEY.axis("KeyA", "KeyD") : 0;
-  if (human && TOUCH.active && TOUCH.stick.mag > 0.06) {
-    fwd = -TOUCH.stick.y; str = TOUCH.stick.x;
-  }
-  const sprint = human && u.stamina > 0.02 && fwd > 0 &&
-    (KEY.isDown("ShiftLeft") || (TOUCH.active && TOUCH.stick.rim));
-  const spd = sprint ? 10.6 : 5.6;
-  u.stamina = Math.max(0, Math.min(1, u.stamina + (sprint ? -0.22 : 0.16) * dt));
-
-  const sin = Math.sin(u.yaw), cos = Math.cos(u.yaw);
-  const mx = (-sin * fwd + cos * str), mz = (-cos * fwd - sin * str);
-  const len = Math.hypot(mx, mz);
-  const vx = len > 0.001 ? (mx / len) * spd : 0;
-  const vz = len > 0.001 ? (mz / len) * spd : 0;
-
-  u.pos.x += vx * dt;
-  u.pos.z += vz * dt;
-  CBZ.micro.resolveCircle(u.pos, 0.55, u.pos.y, 1.8);
-
-  const g = floorAt(u.pos.x, u.pos.z);
-  if (human && KEY.pressed("Space") && u.onGround) { u.vel.y = 6.4; u.onGround = false; }
-  u.vel.y -= 22 * dt;
-  u.pos.y += u.vel.y * dt;
-  if (u.pos.y <= g) { u.pos.y = g; u.vel.y = 0; u.onGround = true; }
-
-  if (u.group) {
-    u.group.position.copy(u.pos);
-    u.group.rotation.y = u.yaw;
-    animateSoldier(u.group, len > 0.001 ? spd : 0, CBZ.micro.elapsed, dt);
-  }
-  u.speed = len > 0.001 ? spd : 0;
-}
-
-// ---- boarding: walk to the wing and press E. This is the one place the
-//      base and the aeroplane meet, and it is three lines because
-//      world/airbase.js published where the aeroplane stands.
-function updateBoarding() {
-  const u = myUnit;
-  if (!u || u.role !== "bomber" || u.boarded || !u.alive || !base) return;
-  const d = Math.hypot(u.pos.x - base.bomber.x, u.pos.z - base.bomber.z);
-  if (d < 34) {
-    claimPrompt(TOUCH.active ? "AT THE WING" : "<kbd>E</kbd>  BOARD");
-    if (KEY.pressed("KeyE")) {
-      u.boarded = true;
-      u.kind = "air";
-      u.group = CBZ.airbase.bomber({});
-      CBZ.scene.add(u.group);
-      // rolling start on the runway threshold: taxiing 1.8 km is not the
-      // game, and the runway is right there to take off down
-      // airHeading, not heading — world/airbase.js publishes both because the
-      // base and the airframe disagree about which way a nose points
-      const rw = base.runway;
-      u.af.place(rw.startX, base.y + (u.af.spec.gearHeight || 3.4), rw.startZ, rw.airHeading, 0);
-      u.af.throttle = 1;
-      u.pos.copy(u.af.pos);
-      camMode = "chase";
-      claimPrompt(null);                 // boarded: the line belongs to nobody now
-      match.log("YOU · airborne", { tone: "good" });
-      if (CBZ.micro.sfx) CBZ.micro.sfx.tone(180, 0.5, { type: "sawtooth", gain: 0.2, slideTo: 420 });
-    }
-  } else {
-    claimPrompt("FLYING WING · " + Math.round(d) + " m");
-  }
-}
-
-// ---- flying
-function updateFlight(u, dt, human) {
-  const af = u.af;
-  if (!af) return;
-  let ctrl;
-  if (human) {
-    const st = TOUCH.active ? TOUCH.stick : null;
-    const onStick = !!(st && st.mag > 0.04);
-    const boost = KEY.isDown("ShiftLeft") ? 1 : 0;
-    let thr = af.throttle + KEY.axis("KeyS", "KeyW") * 0.55 * dt;
-    if (boost) thr = 1;
-    if (TOUCH.active && TB.thr) thr = TB.thr.value;
-    ctrl = {
-      // stick down = nose up, exactly as mouse-back is nose up
-      pitch: onStick ? st.y : Math.max(-1, Math.min(1, KEY.mz * 0.032)),
-      roll: onStick ? st.x : Math.max(-1, Math.min(1, KEY.mx * 0.030)),
-      yaw: KEY.axis("KeyA", "KeyD"),
-      throttle: Math.max(0, Math.min(1, thr)),
-      brake: KEY.isDown("KeyB") ? 1 : 0,
-    };
-  } else {
-    ctrl = u.aiCtrl || { pitch: 0, roll: 0, yaw: 0, throttle: 0.8 };
-  }
-  af.step(dt, ctrl);
-  u.pos.copy(af.pos);
-  if (u.group) af.applyTo(u.group);
-
-  // THE GROUND IS NOT A SUGGESTION — but a takeoff roll is also on the
-  // ground at 70 m/s, so speed alone cannot be the test. Two things kill an
-  // aeroplane here: arriving too fast VERTICALLY (airframe.js reports the
-  // touchdown rate and leaves the threshold to us, because "too hard" is a
-  // game rule), or meeting the ground at speed anywhere that is not the
-  // airfield. Rolling out on Kestrel's concrete is neither.
-  if (af.grounded) {
-    const hard = af.touchdownSpeed > 14;
-    const offField = !base.contains(af.pos.x, af.pos.z);
-    if (hard || (offField && af.speed > 30)) {
-      af.touchdownSpeed = 0;
-      // `crash` is what stops the feed crediting a weapon nobody fired — see
-      // killUnit. This is the only way a unit in this game kills itself.
-      killUnit(u, { team: null, crash: true });
-      if (human) match.log("YOU · into the deck", { tone: "bad" });
-      return;
-    }
-  }
-  af.touchdownSpeed = 0;
-
-  // ---- the takeoff cue. A wing does not leave the ground because it is
-  //      fast, it leaves because somebody rotates it, and a player who has
-  //      never flown one will hold the throttle open down 1.8 km of concrete
-  //      waiting for something to happen. Say the word at the speed it
-  //      becomes true, and only then.
-  if (human && af.grounded && af.speed > 52) {
-    claimPrompt("PULL BACK TO ROTATE · " + Math.round(af.speed) + " m/s");
-  }
-
-  // ---- release
-  if (human) {
-    if (KEY.isDown("Space")) {
-      dropHeld += dt;
-      if (u.dropCd <= 0) { releaseFrom(u); u.dropCd = STICK_GAP; }
-    } else dropHeld = 0;
-    u.dropCd -= dt;
-  }
-}
-
-// WHAT THE PLAYER HIMSELF DROPPED. CBZ.ordnanceAudit().released counts every
-// store in the match — ten AI bombers, the test rig and him — so the results
-// screen read a whole match's ordnance back as his: a player who never boarded
-// was credited with 730 stores. Counted here because this is the one door every
-// release of his goes through, the stick and the nuke alike.
-let myStores = 0;
-function releaseFrom(u, kind) {
-  const af = u.af;
-  if (!af) return;
-  if (u === myUnit) myStores++;
-  // released with the AEROPLANE's velocity — the header's whole point. `kind`
-  // is the ONLY thing that differs between the stick and the nuke: same bay,
-  // same integrator, same pipper, same cover question on the far end.
-  CBZ.ordnance.release({
-    pos: _v.copy(af.pos).addScaledVector(af.up(_v2), -2.2),
-    vel: af.vel,
-    kind: kind || BOMB_KIND,
-    team: u.team,
-    owner: u.id,
-  });
-  if (u === myUnit && CBZ.micro.sfx) CBZ.micro.sfx.tone(320, 0.12, { type: "square", gain: 0.09, slideTo: 140 });
-}
-
-// ---- spectate: a dead runner still has a stake in the ten minutes
-function enterSpectate() {
-  camMode = "spectate";
-  spectateOf = null;
-  showBanner("DOWN", "YOUR SIDE PLAYS ON");
-}
-function updateSpectate(dt) {
-  if (!spectateOf || !spectateOf.alive) {
-    const mates = units.filter(function (u) { return u !== myUnit && u.alive && u.team === myUnit.team; });
-    spectateOf = mates.length ? mates[0] : null;
-  }
-  if (KEY.pressed("KeyQ")) {
-    const mates = units.filter(function (u) { return u !== myUnit && u.alive && u.team === myUnit.team; });
-    if (mates.length) spectateOf = mates[(mates.indexOf(spectateOf) + 1) % mates.length];
-  }
-}
-
-// ============================================================ THE PROBE
-// WHY THIS IS IN THE SHIPPED FILE. The bombing half was measured at one kill
-// per 104 stores and nobody could say which link was broken, because the only
-// numbers the game published were RELEASED and KILLS — the two ends of a
-// chain with four joints in it. These counters are the joints: how often the
-// release gate is even ASKED, how often it passes, how far off the solution
-// was when it did not, and how close the resulting bang actually landed to a
-// living man. They cost six increments a frame and they are the difference
-// between tuning and guessing. `__bomb.probe.snap()` reads them.
-const probe = {
-  asks: 0,        // aiBomber frames that had a target and a solution
-  runIn: 0,       // ... of which were on a settled run-in (see aiBomber)
-  ready: 0,       // ... of which were also off cooldown
-  win: 0,         // ... of which were in the along-track pickle window
-  pass: 0,        // ... of which were also inside the cross-track gate
-  miss: [0, 0, 0, 0, 0, 0, 0],   // miss buckets: 25 50 85 150 300 600 more
-  missSum: 0, missN: 0, missMin: 1e9,
-  blasts: 0, near: [0, 0, 0, 0, 0],  // blast→nearest-live-runner: 13 25 46 100 more
-  kills: 0,
-  reset: function () {
-    probe.asks = probe.runIn = probe.ready = probe.win = probe.pass = 0;
-    probe.miss = [0, 0, 0, 0, 0, 0, 0];
-    probe.missSum = 0; probe.missN = 0; probe.missMin = 1e9;
-    probe.blasts = 0; probe.near = [0, 0, 0, 0, 0]; probe.kills = 0;
+    if (chase) chase.reset();
+    const flying = !!(me && me.role === "bomber");
+    ctl = flying ? ctlFly : ctlWalk;
+    ctlFly.show(flying);
+    ctlWalk.show(!flying);
+    el("radar").style.display = flying ? "block" : "none";
+    setRole();
+    if (me) showSwap(half);
   },
-  logMiss: function (m) {
-    const b = m < 25 ? 0 : m < 50 ? 1 : m < 85 ? 2 : m < 150 ? 3 : m < 300 ? 4 : m < 600 ? 5 : 6;
-    probe.miss[b]++; probe.missSum += m; probe.missN++;
-    if (m < probe.missMin) probe.missMin = m;
-  },
-  snap: function () {
-    return {
-      asks: probe.asks, runIn: probe.runIn, ready: probe.ready, win: probe.win, pass: probe.pass,
-      missAvg: probe.missN ? Math.round(probe.missSum / probe.missN) : 0,
-      missMin: probe.missMin < 1e9 ? Math.round(probe.missMin) : null,
-      miss: probe.miss.slice(), blasts: probe.blasts, near: probe.near.slice(),
-      kills: probe.kills,
-    };
-  },
-};
+  onEnd: function (result, m) { finish(result, m); },
+});
 
-// ============================================================ THE AI
-// Two brains, both small on purpose: the engine already answers the hard
-// questions (steerTo, dangerAt, nearestShelter), so a brain here is a
-// choice of GOAL, not a controller.
-
-function updateAI(dt) {
-  for (let i = 0; i < units.length; i++) {
-    const u = units[i];
-    if (u === myUnit || !u.alive) continue;
-    if (u.role === "runner") aiRunner(u, dt);
-    else aiBomber(u, dt);
-  }
-}
-
-function aiRunner(u, dt) {
-  // 1. AM I ABOUT TO BE HIT? Everything else is subordinate to this.
-  const danger = CBZ.ordnance.dangerAt(u.pos.x, u.pos.z, 6);
-  const sh = world.nearestShelter(u.pos.x, u.pos.z);
-  if (danger > 0.12) {
-    // run for a roof if one is close, otherwise run out of the ring
-    if (sh && sh.dist < 130) u.goal = { x: sh.shelter.x, z: sh.shelter.z, urgent: true };
-    else {
-      const th = CBZ.ordnance.activeThreats();
-      let best = null, bd = 1e9;
-      for (let i = 0; i < th.length; i++) {
-        const d = Math.hypot(th[i].x - u.pos.x, th[i].z - u.pos.z);
-        if (d < bd) { bd = d; best = th[i]; }
-      }
-      if (best) {
-        const ang = Math.atan2(u.pos.z - best.z, u.pos.x - best.x);
-        u.goal = { x: best.x + Math.cos(ang) * (best.radius * 1.9), z: best.z + Math.sin(ang) * (best.radius * 1.9), urgent: true };
-      }
-    }
-    u.goalT = 2.5;
-  }
-  // 2. otherwise drift between shelters — being NEAR a roof is the plan
-  u.goalT -= dt;
-  if (!u.goal || u.goalT <= 0) {
-    if (sh && sh.dist > 60 && rngGame() < 0.6) u.goal = { x: sh.shelter.x + rr(-8, 8), z: sh.shelter.z + rr(-8, 8) };
-    else {
-      const p = world.streetPoint(rngGame, world.rings.city * 0.8);
-      u.goal = { x: p.x, z: p.z };
-    }
-    u.goalT = rr(5, 12);
-  }
-  driveFoot(u, dt, u.goal, u.goal.urgent ? 10.4 : 5.4);
-}
-
-// walk a foot unit toward a goal, sliding off whatever it meets
-function driveFoot(u, dt, goal, spd) {
-  const dx = goal.x - u.pos.x, dz = goal.z - u.pos.z;
-  const d = Math.hypot(dx, dz);
-  if (d > 1.5) {
-    const want = Math.atan2(-dx, -dz);
-    let diff = want - u.yaw;
-    while (diff > Math.PI) diff -= Math.PI * 2;
-    while (diff < -Math.PI) diff += Math.PI * 2;
-    u.yaw += Math.max(-4 * dt, Math.min(4 * dt, diff));
-    u.pos.x += (dx / d) * spd * dt;
-    u.pos.z += (dz / d) * spd * dt;
-    CBZ.micro.resolveCircle(u.pos, 0.55, u.pos.y, 1.8);
-    // published so a bomber can LEAD him: a store falls for nine seconds
-    // and a man walks forty metres in that time
-    u.velX = (dx / d) * spd; u.velZ = (dz / d) * spd;
-  } else { u.velX = 0; u.velZ = 0; }
-  u.pos.y = floorAt(u.pos.x, u.pos.z);
-  if (u.group) {
-    u.group.position.copy(u.pos);
-    u.group.rotation.y = u.yaw;
-    animateSoldier(u.group, d > 1.5 ? spd : 0, CBZ.micro.elapsed + u.orbit, dt);
-  }
-}
-
-// ---------------------------------------------------------------- THE HUNT
-// Three measured facts decided the shape of everything below.
-//
-//  1. THE AEROPLANE COULD NOT MANOEUVRE INSIDE ITS OWN TARGET AREA. A 30°
-//     bank at 170 m/s is a 5103 m turn radius; the basin is 1050 m across.
-//     The old brain re-aimed at the man EVERY FRAME — pure pursuit — which
-//     at a turn radius five times the range is a limit cycle it can never
-//     close. Measured, 200 s of sim, ten bombers: 61,155 solutions asked,
-//     TWO releases, mean miss 2249 m, closest approach ever seen 76 m, zero
-//     stores inside 46 m of a living man, zero kills. So the run-in is
-//     PLANNED now: pick a heading once, fly the LINE and not the point.
-//
-//  2. LEADING A FLEEING MAN IS UNSOLVABLE, not merely hard. aiRunner runs
-//     AWAY FROM THE THREAT — so "aim where he will be" has no fixed point:
-//     write a = p + flee(a) and it has no solution, every aim point pushes
-//     him off itself. What can be aimed at is ground he cannot leave. The
-//     basin is a GRID — 88 m blocks, 26 m roads — and a man in a street who
-//     runs from a ring runs into a tower and slides ALONG the street. So a
-//     bomber runs in down a STREET AXIS and walks the stick down the road.
-//     The road is 26 m wide; the stick's own lethal corridor is ±18.5 m at
-//     26 m spacing. The street is the weapon; the man is only the reason to
-//     pick that street.
-//
-//  3. ONE 500 lb STORE KILLS A 100 hp MAN AT 12.6 m AND NO FURTHER —
-//     190 × (1 − d/46)² = 100 solves at d = 12.6. Under a roof the same
-//     store peaks at 47.5 and CANNOT kill him at any distance. That is not
-//     a bug to fix, it is the running side's whole contract, and it is why
-//     the answer is stick length and street choice rather than a bigger
-//     warhead: seven stores 26 m apart is 160 m of lethal street, against a
-//     man who can cover ~57 m in the five seconds of ring he is owed.
-//
-// The counterplay is untouched: nine seconds of fall, five of threat ring,
-// a roof still worth 75%, and a man who gets under one — or simply turns a
-// corner out of the street — does not die. That IS the hunt.
-
-const _axes = [];
-function streetAxes(x, z) {
-  // Which street is this man standing in, and which way does it run? The
-  // city publishes its own skeleton (world.grid: block · road · pitch ·
-  // origin), so this is arithmetic and not a search. Lot centres sit on the
-  // pitch; the roads are the gaps halfway between them.
-  _axes.length = 0;
-  const g = world && world.grid;
-  if (!g) return _axes;
-  const h = g.pitch / 2;
-  const cx = Math.round((x - g.origin - h) / g.pitch) * g.pitch + g.origin + h;
-  const cz = Math.round((z - g.origin - h) / g.pitch) * g.pitch + g.origin + h;
-  const w = g.road * 0.5 + 8;      // the road, plus the kerb he slides along
-  if (Math.abs(x - cx) < w) _axes.push({ hx: 0, hz: 1, ox: cx, oz: z });
-  if (Math.abs(z - cz) < w) _axes.push({ hx: 1, hz: 0, ox: x, oz: cz });
-  return _axes;
-}
-
-// how far downrange a store released RIGHT NOW would travel. Asked of the
-// same integrator the bomb uses, so it cannot disagree with the pipper.
-function releaseRange(af) {
-  const sol = CBZ.ordnance.predict(af.pos, af.vel, BOMB_KIND);
-  if (!sol.hit) return 1000;
-  return Math.max(500, Math.min(1700, Math.hypot(sol.x - af.pos.x, sol.z - af.pos.z)));
-}
-
-// Choose the STREET, not the man. A street is worth a pass when several of
-// them are standing in it, none of them is beside a roof, and it does not
-// cost half the clock to get onto. The man is only how the street got
-// nominated — by the time the stick leaves the bay a minute later, the aim
-// has been re-taken from whoever is actually down there (see aiBomber).
-function planAttack(u) {
-  const af = u.af;
-  u.run = null; u.runAge = 0; u.targetId = null;
-  const foes = units.filter(function (x) { return x.alive && x.role === "runner" && x.team !== u.team; });
-  if (!foes.length) return;
-  const psi = af.heading();
-  const range = releaseRange(af);
-
-  let best = null, bestC = -1e9;
-  for (let i = 0; i < foes.length; i++) {
-    const ax = streetAxes(foes[i].pos.x, foes[i].pos.z);
-    for (let a = 0; a < ax.length; a++) {
-      for (let sgn = -1; sgn <= 1; sgn += 2) {
-        const hx = ax[a].hx * sgn, hz = ax[a].hz * sgn;
-        const ox = ax[a].ox, oz = ax[a].oz;
-        const nx = -hz, nz = hx;
-        // who else is in this street, and how exposed are they? A ROOF BEATS
-        // THIS WEAPON OUTRIGHT — 190 × 0.25 is 47.5 at point blank against
-        // 100 hp — so a man standing beside a shelter is not a target, he is
-        // a wasted pass. This is where the shelters push back on the bombing
-        // side, and it is deliberate.
-        let worth = 0;
-        for (let j = 0; j < foes.length; j++) {
-          const fx = foes[j].pos.x - ox, fz = foes[j].pos.z - oz;
-          if (Math.abs(fx * nx + fz * nz) > AI_CORRIDOR) continue;
-          const sh = world.nearestShelter(foes[j].pos.x, foes[j].pos.z);
-          worth += 1 - (sh ? Math.max(0, 1 - sh.dist / 140) : 0) * 0.8;
-        }
-        if (worth <= 0) continue;
-        // don't let ten aeroplanes queue up behind one street
-        let taken = 0;
-        for (let k = 0; k < units.length; k++) {
-          const o = units[k];
-          if (o !== u && o.run && Math.abs(o.run.ox - ox) < 60 && Math.abs(o.run.oz - oz) < 60) taken++;
-        }
-        // the flying: distance to the release point, plus the arc the turn
-        // onto the run-in heading actually costs at this turn radius
-        const al = (foes[i].pos.x - ox) * hx + (foes[i].pos.z - oz) * hz;
-        const rx = ox + hx * (al - range), rz = oz + hz * (al - range);
-        let dh = Math.atan2(-hx, -hz) - psi;
-        while (dh > Math.PI) dh -= Math.PI * 2;
-        while (dh < -Math.PI) dh += Math.PI * 2;
-        const fly = Math.hypot(rx - af.pos.x, rz - af.pos.z) + 1100 * Math.abs(dh);
-        const c = worth * 900 - fly * 0.30 - taken * 500;
-        if (c > bestC) {
-          bestC = c;
-          best = { hx: hx, hz: hz, ox: ox, oz: oz, al: al, tid: foes[i].id };
-        }
-      }
-    }
-  }
-  if (!best) return;
-  u.targetId = best.tid;
-  u.run = {
-    hx: best.hx, hz: best.hz,
-    ox: best.ox, oz: best.oz,       // a fixed point ON the line
-    al: best.al,                    // the aim's place along it
-    ax: best.ox + best.hx * best.al,
-    az: best.oz + best.hz * best.al,
-    range: range, spent: false, sideT: 0,
-  };
-}
-
-function aiBomber(u, dt) {
-  const af = u.af;
-  if (!af) return;
-  u.dropCd -= dt;
-
-  // re-plan when the run is spent: the man is dead, we have gone past him
-  // dry, or the plan is simply old
-  if (!u.run || u.run.spent || u.runAge > 140) planAttack(u);
-  else u.runAge += dt;
-
-  let aim, lim = AI_BANK_TURN;
-  const run = u.run;
-  if (run) {
-    const nx = -run.hz, nz = run.hx;
-    // THE LINE'S OWN FRAME. Everything below is (along, cross) measured from
-    // a FIXED point on the street. The approach geometry never reads the aim
-    // point: a first cut re-took the aim every frame and fed it back into
-    // the carrot, and the discontinuity when it jumped from one man to
-    // another knocked the aeroplane off its own run — 98 releases at a 7 m
-    // mean solution error became 33 at 55 m. Geometry is frozen; only the
-    // PICKLE is live.
-    const rx = af.pos.x - run.ox, rz = af.pos.z - run.oz;
-    const sPl = rx * run.hx + rz * run.hz;
-    const cP = rx * nx + rz * nz;                  // cross-track from the street
-    const sP = sPl - run.al;                       // -ve = still inbound
-    let hErr = Math.atan2(-run.hx, -run.hz) - af.heading();
-    while (hErr > Math.PI) hErr -= Math.PI * 2;
-    while (hErr < -Math.PI) hErr += Math.PI * 2;
-    // ---- THE BANK LIMIT IS NOT A PHASE, IT IS A QUESTION ABOUT THE LINE.
-    // First cut of this had it keyed to range - inside 2 km, fly the run -
-    // and measured 18,871 frames "on final" against ONE release in 200 s:
-    // the aeroplane dropped to 20 deg of bank while still 400 m to one side,
-    // and a 20 deg bank at 122 m/s is a 4.3 km turn, which cannot recover
-    // 400 m in the 8 s of run-in that is left. So the aeroplane keeps its
-    // whole turn until it is ESTABLISHED, and only then flies wings-near-
-    // level, which is what makes the solution mean anything.
-    const settled = Math.abs(cP) < 140 && Math.abs(hErr) < 0.30;
-    lim = settled ? AI_BANK_RUN : AI_BANK_TURN;
-    // ---- THE CARROT: a point ON the line, a lookahead ahead of where we
-    // are along it. Chasing a point on the path is what captures the path;
-    // the old brain chased the MAN, which at a 5 km turn radius is a limit
-    // cycle it can never close.
-    //
-    // TWO NUMBERS HERE ARE A CONTROL LOOP AND THEY WERE SOLVED, NOT GUESSED.
-    // Carrot tracking closes as s^2 + Ks + Kv/L, with K = g*gain*bankLimit/v.
-    // The first cut flew gain 2.0 at a 700 m lookahead: w = 0.12 rad/s, a
-    // 53-SECOND period, against a final leg of twelve seconds - so the
-    // aeroplane arrived at the pickle point still 40-85 m to one side, and
-    // 208 pickle windows in 200 s produced ONE release. At gain 9 and a
-    // 420 m lookahead it is w ~ 0.42, zeta ~ 0.7: settled inside eight
-    // seconds, no hunting. Measured after: mean solution error 7 m, worst 25.
-    const look = settled
-      ? Math.max(420, Math.min(900, Math.abs(cP) * 1.6 + 420))
-      : RUN_LOOK;
-    // ---- THE JOIN, AND THE WAY BACK TO IT. This was worth more than the
-    // gains. Traced, one bomber, 260 s: every plan STARTED between 250 and
-    // 650 m short of the aim point - inside its own release range - so the
-    // solution was already a kilometre past the man before the aeroplane was
-    // ever wings-level, and the pickle window could not be reached at all. A
-    // bomb run has to begin where the bomb does: the JOIN sits a release
-    // range plus a mile upstream, and an aeroplane downstream of it GOES
-    // ROUND rather than pressing on.
-    //
-    // The go-around is one expression rather than a state machine: while we
-    // are downstream of the join the carrot slides ABEAM, onto the side the
-    // aeroplane is already on, by up to two and a half turn diameters. That
-    // is a downwind leg - it flies out, the offset shrinks as the join comes
-    // back, and the carrot walks itself onto the line. No mode to be stuck
-    // in, and a plan made in the wrong place fixes itself.
-    const joinS = -(run.range + 2000);
-    const need = sP - joinS;
-    let cs, off = 0;
-    if (settled) cs = sP + look;
-    else {
-      cs = Math.min(sP + look, joinS);
-      if (need > 0) off = Math.min(2600, need * 1.25) * (cP >= 0 ? 1 : -1);
-    }
-    _v.set(run.ax + run.hx * cs + nx * off, BOMBER_ALT, run.az + run.hz * cs + nz * off);
-    aim = af.steerTo(_v, { gain: settled ? 9.0 : 2.0, bankLimit: lim });
-    // flown the whole street and found nobody: go and pick another one
-    if (u.runAge > 6 && sP > 900) run.spent = true;
-    // NOT RE-PICKED ON THE WAY OUT, and that was measured. A street goes
-    // stale while you fly to it, so re-planning every 12 s on the downwind
-    // leg looks free — it is not: `need > 0` covers most of the pattern, so
-    // the aeroplane re-decides where it is going before it has finished
-    // getting anywhere. Settled frames fell 12,625 -> 4,979 and five sticks
-    // became one. A plan that is a minute old and pointed at the right city
-    // block beats a fresh plan the aeroplane never flies.
-
-    // ---- THE SIDESTEP, AND THE BOTTLENECK IT EXISTS FOR. Established on a
-    // street, off cooldown, wings level: 13,957 such frames in 200 s of sim,
-    // and 34 of them had a living man inside the stick's own footprint. A
-    // street chosen ninety seconds ago is an empty street by the time the
-    // aeroplane gets to it, and that — not the aiming, not the release rate
-    // — was what the half was actually short of.
-    //
-    // The HEADING is a decision made a minute ago and cannot be revisited.
-    // WHICH STREET is not: the grid puts the next one 114 m away, and 114 m
-    // of lateral displacement is about four seconds of a 29 deg bank. So the
-    // aeroplane keeps choosing its street right up to the last mile, and
-    // slides one block over when the block over has people in it. It is what
-    // a bomber does with a target of opportunity, and it costs the runners
-    // nothing they were promised: the ring, the roof and the corner are all
-    // still there.
-    run.sideT -= dt;
-    if (settled && u.runAge > 3 && run.sideT <= 0 && sP < -(run.range + 500) && world.grid) {
-      const pitch = world.grid.pitch;
-      let bestK = 0, bestW = -1e9;
-      for (let k = -3; k <= 3; k++) {
-        const kx = run.ox + nx * k * pitch, kz = run.oz + nz * k * pitch;
-        let w = 0;
-        for (let i = 0; i < units.length; i++) {
-          const f = units[i];
-          if (!f.alive || f.role !== "runner" || f.team === u.team) continue;
-          const fx = f.pos.x - kx, fz = f.pos.z - kz;
-          if (Math.abs(fx * nx + fz * nz) > AI_CORRIDOR) continue;
-          const fal = fx * run.hx + fz * run.hz;
-          // only men this pass can still reach: ahead of the solution, and
-          // not past the far kerb of the city
-          if (fal < sPl + run.range * 0.7 || fal > sPl + run.range + 1500) continue;
-          const sh = world.nearestShelter(f.pos.x, f.pos.z);
-          w += 1 - (sh ? Math.max(0, 1 - sh.dist / 140) : 0) * 0.8;
-        }
-        if (k === 0) w += 0.4;                 // hysteresis: stay put on a tie
-        w -= Math.abs(k) * 0.12;               // and a slide is not free
-        if (w > bestW) { bestW = w; bestK = k; }
-      }
-      if (bestK !== 0) {
-        run.ox += nx * bestK * pitch; run.oz += nz * bestK * pitch;
-        run.ax = run.ox + run.hx * run.al; run.az = run.oz + run.hz * run.al;
-        run.sideT = 2.5;                       // let the aeroplane fly it
-      }
-    }
-
-    // ---- THE PICKLE, AND WHY IT IS A FOOTPRINT AND NOT A POINT. A stick of
-    // seven at 26 m is 160 m of street, and the question is not "is the
-    // solution on the man" - it is "will this stick land ON somebody". So
-    // the solution is turned into the strip of road the seven stores will
-    // actually cover, and the trigger is a living man standing in the middle
-    // third of it. That is also what makes the aim honest against a man who
-    // runs: he gets his five seconds of ring and ~57 m of sprint, the strip
-    // is 160 m long, and the towers either side of a 26 m road are what stop
-    // him leaving it sideways. A roof still saves him outright, and so does
-    // turning a corner.
-    const sol = CBZ.ordnance.predict(af.pos, af.vel, BOMB_KIND);
-    if (sol.hit) {
-      probe.asks++;
-      if (settled) probe.runIn++;
-      if (settled && u.dropCd <= 0) {
-        probe.ready++;
-        const sx = sol.x - run.ox, sz = sol.z - run.oz;
-        const sAl = sx * run.hx + sz * run.hz;
-        const sCr = sx * nx + sz * nz;
-        const len = (AI_STICK - 1) * STICK_GAP * Math.max(60, af.speed);
-        let on = false;
-        for (let i = 0; i < units.length && !on; i++) {
-          const f = units[i];
-          if (!f.alive || f.role !== "runner" || f.team === u.team) continue;
-          const fx = f.pos.x - run.ox, fz = f.pos.z - run.oz;
-          if (Math.abs(fx * nx + fz * nz) > AI_CORRIDOR) continue;
-          const fal = fx * run.hx + fz * run.hz;
-          if (fal > sAl + len * 0.28 && fal < sAl + len * 0.72) on = true;
-        }
-        if (on) {
-          probe.win++; probe.logMiss(Math.abs(sCr));
-          if (Math.abs(sCr) < AI_XT_GATE) {
-            probe.pass++;
-            u.stick = AI_STICK; u.stickT = 0;
-            // the run is NOT spent: the aeroplane is already down the street
-            // wings-level, and if a second man walks into the footprint
-            // before it runs out of road that is a second stick for free
-            u.dropCd = 7;
-          }
-        }
-      }
-    }
-  } else {
-    // nothing to hit: orbit the city so the sky is never empty
-    u.orbit += dt * 0.16;
-    _v.set(Math.cos(u.orbit) * 900, BOMBER_ALT, Math.sin(u.orbit) * 900);
-    aim = af.steerTo(_v, { gain: 2.0, bankLimit: lim });
-  }
-
-  // ---- THE STICK IS PART OF THE SIMULATION. It used to be five setTimeouts on
-  // the wall clock — `for k<5: setTimeout(release, k*200)` — which nothing in
-  // the game could reach: the pause key could not stop it, no clock the rig
-  // owned could reach it, and it fired ACROSS THE HALF BOUNDARY, putting
-  // stores into the air during the intermission after startHalf's
-  // ordnance.clear() had already run. Counted down in dt here, it stops when
-  // the frame stops, it dies with the bomber (clearBody zeroes it), and the
-  // spacing is the SAME constant the player's held trigger uses.
-  if (u.stick > 0) {
-    u.stickT -= dt;
-    if (u.stickT <= 0) { releaseFrom(u); u.stick--; u.stickT = STICK_GAP; }
-  }
-  // A bomber turns with BANK and holds its altitude with pitch — so the
-  // steering solution keeps its roll and surrenders its pitch entirely.
-  // The SAME limit goes to both halves of the autopilot: holdAltitude fades
-  // nose-up authority out past the limit it is given, so an altitude hold
-  // still on the preset's 30° while the turn is flying at 54° is an
-  // aeroplane commanded to bank and forbidden to pull.
-  aim.pitch = 0;
-  af.holdAltitude(BOMBER_ALT, aim, { bankLimit: lim });
-  aim.pitch = Math.max(-0.40, Math.min(0.85, aim.pitch));
-  // hold a bombing SPEED, not a throttle setting. 122 m/s is the bomber
-  // preset's own cruise and it is the number the whole hunt rests on: at
-  // 170 m/s a 30° bank is a 5.1 km turn and the basin is 1.05 km across, so
-  // the aeroplane could not manoeuvre inside its own target area.
-  aim.throttle = Math.max(0, Math.min(1, 0.20 + (BOMB_SPEED - af.speed) * 0.03));
-  u.aiCtrl = aim;
-  updateFlight(u, dt, false);
-}
-
-// ============================================================ CAMERA
-const camTarget = new THREE.Vector3(), camWant = new THREE.Vector3();
-function updateCamera(dt) {
-  const u = myUnit;
-  if (!u) return;
-
-  if (!u.alive || camMode === "spectate") {
-    const s = spectateOf;
-    if (s && s.alive) {
-      const h = s.kind === "air" ? 26 : 4.2;
-      camWant.set(s.pos.x - Math.sin(s.yaw || 0) * -14, s.pos.y + h, s.pos.z - Math.cos(s.yaw || 0) * -14);
-      if (s.kind === "air" && s.af) camWant.copy(s.af.pos).addScaledVector(s.af.forward(_v2), -46).add(_v3.set(0, 14, 0));
-      cam.position.lerp(camWant, Math.min(1, dt * 3));
-      cam.lookAt(s.pos.x, s.pos.y + 1.4, s.pos.z);
-    } else {
-      // nobody left to watch: hang over the city and let the clock run
-      const a = CBZ.micro.elapsed * 0.05;
-      cam.position.set(Math.cos(a) * 1400, 620, Math.sin(a) * 1400);
-      cam.lookAt(0, 60, 0);
-    }
-    applyShake(dt);
-    return;
-  }
-
-  if (u.kind === "foot") {
-    cam.position.set(u.pos.x, u.pos.y + 1.66, u.pos.z);
-    cam.rotation.set(0, 0, 0);
-    cam.rotateY(u.yaw);
-    cam.rotateX(u.pitch);
-    applyShake(dt);
-    return;
-  }
-
-  const af = u.af;
-  if (!af) return;
-  if (camMode === "bomb") {
-    // straight down from the bay: the bomb camera is a real instrument and
-    // it exists because a level run means you cannot see what you are on
-    cam.position.copy(af.pos).add(_v.set(0, -3, 0));
-    cam.up.set(0, 0, -1);
-    cam.lookAt(af.pos.x, af.pos.y - 200, af.pos.z);
-    cam.up.set(0, 1, 0);
-  } else if (camMode === "cockpit") {
-    cam.position.copy(af.pos).addScaledVector(af.forward(_v2), -5.5).addScaledVector(af.up(_v3), 1.9);
-    cam.quaternion.copy(af.quat);
-  } else {
-    af.forward(_v2); af.up(_v3);
-    camWant.copy(af.pos).addScaledVector(_v2, -42).addScaledVector(_v3, 12);
-    cam.position.lerp(camWant, Math.min(1, dt * 4.5));
-    cam.lookAt(_v.copy(af.pos).addScaledVector(_v2, 34));
-  }
-  applyShake(dt);
-}
-function applyShake(dt) {
-  if (shake <= 0.001) return;
-  shakeT += dt * 42;
-  const s = shake * 0.9;
-  cam.position.x += Math.sin(shakeT * 1.7) * s;
-  cam.position.y += Math.sin(shakeT * 2.3) * s;
-  cam.position.z += Math.cos(shakeT * 1.3) * s;
-  shake = Math.max(0, shake - dt * 1.8);
-}
-
-// ============================================================ THE PIPPER
-// Where MY next store lands, drawn on the ground. It comes from
-// CBZ.ordnance.predict — the same integrator the bomb uses — so it is
-// structurally incapable of lying about the impact point.
-let pipper = null;
-function buildPipper() {
-  const g = new THREE.RingGeometry(0.86, 1, 36, 1);
-  g.rotateX(-Math.PI / 2);
-  pipper = new THREE.Mesh(g, new THREE.MeshBasicMaterial({
-    color: 0x7dff9a, transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false,
-  }));
-  pipper.visible = false;
-  pipper.renderOrder = 6;
-  CBZ.scene.add(pipper);
-}
-function updatePipper() {
-  const u = myUnit;
-  if (!pipper) return;
-  if (!u || !u.alive || u.kind !== "air" || !u.af || u.role !== "bomber") { pipper.visible = false; return; }
-  const sol = CBZ.ordnance.predict(u.af.pos, u.af.vel, BOMB_KIND);
-  pipper.visible = !!sol.hit;
-  if (!sol.hit) return;
-  pipper.position.set(sol.x, sol.y + 0.2, sol.z);
-  const R = CBZ.ordnance.kinds[BOMB_KIND].radius;
-  pipper.scale.set(R, 1, R);
-  pipper.material.opacity = 0.45 + 0.4 * Math.max(0, 1 - sol.t / 14);
-}
-
-// ============================================================ DESIGNATION
-// A man on a street is four pixels from four hundred metres. Without a mark
-// on him the bombing half is not hard, it is blind — you would fly the whole
-// ten minutes without knowing you had passed over anybody. So the bombing
-// side gets DESIGNATION: a thin column of light standing over every enemy
-// still alive, and it is theirs alone. The running side never sees a bomber
-// marked, which is the asymmetry the swap exists to make you feel twice.
-let marks = [];
-function buildMarks() {
-  // tall enough to clear the skyline: a 90 m column beside a 270 m tower is
-  // a mark you only see when you are already on top of him
-  const geo = new THREE.CylinderGeometry(1.5, 1.5, 300, 5, 1, true);
+for (let t = 0; t < TEAMS.length; t++) {
   for (let i = 0; i < SQUAD; i++) {
-    const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-      color: 0xff5a3c, transparent: true, opacity: 0.30, side: THREE.DoubleSide, depthWrite: false,
-    }));
-    m.visible = false;
-    m.renderOrder = 4;
-    CBZ.scene.add(m);
-    marks.push(m);
+    match.addPlayer({
+      id: TEAMS[t].id + i, name: TEAMS[t].name + " " + (i + 1),
+      team: TEAMS[t].id, human: t === 0 && i === 0,
+    });
   }
 }
-function updateMarks() {
-  const u = myUnit;
-  const on = u && u.alive && u.role === "bomber";
-  let k = 0;
-  if (on) {
-    for (let i = 0; i < units.length && k < marks.length; i++) {
-      const x = units[i];
-      if (!x.alive || x.role !== "runner" || x.team === u.team) continue;
-      const m = marks[k++];
-      m.visible = true;
-      m.position.set(x.pos.x, x.pos.y + 150, x.pos.z);
-      // brightens as you close: a column at full strength from ten kilometres
-      // would make the city an aquarium
-      const d = Math.hypot(x.pos.x - u.pos.x, x.pos.z - u.pos.z);
-      m.material.opacity = 0.11 + 0.38 * Math.max(0, Math.min(1, 1 - d / 2400));
-    }
-  }
-  for (; k < marks.length; k++) marks[k].visible = false;
+
+let swapT = 0;
+function showSwap(half) {
+  const n = el("swap");
+  const rows = match.standings();
+  let line = "";
+  for (let i = 0; i < rows.length; i++) line += (i ? "   " : "") + rows[i].name + " " + Math.round(rows[i].total);
+  n.innerHTML = (me.role === "bomber" ? "YOU BOMB" : "YOU RUN") +
+    "<small>HALF " + (half + 1) + " OF " + HALVES + (half > 0 ? "   ·   " + line : "") + "</small>";
+  n.classList.add("on");
+  swapT = 2.4;
 }
 
-// ============================================================ HUD
-let feedSig = "", pipsBuilt = 0;
-const HUD = {};
-function hudCache() {
-  HUD.clock = el("clock"); HUD.glyph = el("roleGlyph"); HUD.dots = el("halfDots");
-  HUD.timeBar = el("timeBar").firstElementChild;
-  HUD.sbA = el("scoreBar").children[0].firstElementChild;
-  HUD.sbB = el("scoreBar").children[1].firstElementChild;
-  HUD.pips = el("lifePips");
-  HUD.vitals = el("vitals"); HUD.mHp = el("mHp"); HUD.mSt = el("mSt");
-  HUD.tapeT = el("tapeT"); HUD.tapeS = el("tapeS"); HUD.tapeA = el("tapeA");
-  HUD.lampStall = el("lampStall"); HUD.lampCover = el("lampCover");
-  HUD.vig = el("vignette"); HUD.arrow = el("dangerArrow");
-  HUD.nukeRow = el("nukeRow"); HUD.lampNuke = el("lampNuke");
-  HUD.nukeVal = el("nukeVal"); HUD.nukeKey = el("nukeKey");
-  for (let i = 0; i < SQUAD; i++) HUD.pips.appendChild(document.createElement("span"));
-}
-function setTape(wrap, frac, value, show) {
-  wrap.style.display = show ? "flex" : "none";
-  if (!show) return;
-  wrap.firstElementChild.firstElementChild.style.height = Math.round(Math.max(0, Math.min(1, frac)) * 100) + "%";
-  wrap.lastElementChild.textContent = value;
-}
-function setMeter(row, frac, value, show) {
-  row.style.display = show ? "flex" : "none";
-  if (!show) return;
-  const f = Math.max(0, Math.min(1, frac));
-  row.querySelector("i").style.width = Math.round(f * 100) + "%";
-  row.querySelector("s").textContent = value;
-  row.classList.toggle("low", f < 0.3);
+function setRole() {
+  if (!me) { el("role").textContent = ""; return; }
+  el("role").textContent = me.role === "bomber"
+    ? (me.rolling ? "FULL POWER · ROTATE" : "YOU BOMB")
+    : "YOU RUN";
 }
 
-function updateHUD() {
-  const u = myUnit;
-  const role = u && u.role ? u.role : null;
-  const flying = !!(u && u.alive && u.kind === "air" && u.af);
-
-  // ---- clock, half, and the role: a colour and a glyph, not a sentence
-  HUD.clock.textContent = match.clock();
-  HUD.clock.className = (match.phase === "live" && match.timeLeft < 60) ? "low" : "";
-  // THE GLYPH IS THE CLIP-PATH, AND ONLY THE CLIP-PATH. Two emoji were still
-  // being written into this element behind the drawn shape (measured on the
-  // running half: a runner emoji as textContent, class "(none)"), and the `.run`
-  // class the stylesheet defines was never added by anybody — so the running
-  // half wore the orange WING. One class now carries both the shape and the
-  // colour, and nothing writes text into the element at all.
-  HUD.glyph.className = role === "runner" ? "run" : "";
-  for (let i = 0; i < HUD.dots.children.length; i++) {
-    HUD.dots.children[i].className = i <= match.half ? "on" : "";
+// ============================================================ A BOMBING RUN
+function dropStick(u) {
+  if (!u.af || u.cool > 0) return;
+  const agl = u.af.pos.y - groundAt(u.af.pos.x, u.af.pos.z);
+  if (agl < RELEASE_MIN && u.human) {
+    if (CBZ.micro.sfx) CBZ.micro.sfx.tone(140, 0.18, { type: "square", gain: 0.16 });
   }
-  HUD.timeBar.style.width = Math.round((match.phase === "intermission" ? 1 : (1 - match.timeLeft / HALF_SECONDS)) * 100) + "%";
-
-  // ---- score: one bar, split by share. Your side is the left half always,
-  //      so "am I winning" is answered by which way the seam has moved.
-  const mine = u ? u.team : TEAMS[0].id;
-  const foe = match.enemyOf(mine);
-  const a = match.total(mine), b = foe ? match.total(foe.id) : 0;
-  HUD.sbA.style.width = Math.min(100, a / SCORE_REF * 100) + "%";
-  HUD.sbA.style.background = "#" + (match.team(mine).color).toString(16).padStart(6, "0");
-  HUD.sbB.style.width = Math.min(100, b / SCORE_REF * 100) + "%";
-  HUD.sbB.style.background = foe ? "#" + foe.color.toString(16).padStart(6, "0") : "#555";
-
-  // ---- lives: one pip per runner, lit while he breathes
-  const rTeam = match.teamsWithRole("runner")[0];
-  const rList = rTeam ? units.filter(function (x) { return x.team === rTeam.id && x.role === "runner"; }) : [];
-  const rc = rTeam ? "#" + rTeam.color.toString(16).padStart(6, "0") : "#fff";
-  for (let i = 0; i < HUD.pips.children.length; i++) {
-    const live = rList[i] && rList[i].alive;
-    HUD.pips.children[i].style.background = live ? rc : "rgba(255,255,255,.13)";
-  }
-
-  updateNukeHud(role);
-
-  // ---- feed
-  const sig = match.feed.length + "|" + (match.feed[0] ? match.feed[0].text : "");
-  if (sig !== feedSig) {
-    feedSig = sig;
-    let f = "";
-    for (let i = 0; i < Math.min(3, match.feed.length); i++) {
-      f += '<div class="fl ' + match.feed[i].tone + '">' + match.feed[i].text + "</div>";
-    }
-    el("feed").innerHTML = f;
-  }
-
-  // ---- instruments
-  if (flying) {
-    const af = u.af;
-    HUD.vitals.style.display = "flex";
-    setMeter(HUD.mHp, Math.max(0, u.hp) / 100, Math.round(Math.max(0, u.hp)), true);
-    setMeter(HUD.mSt, 0, 0, false);
-    setTape(HUD.tapeT, af.throttle, Math.round(af.throttle * 100), true);
-    setTape(HUD.tapeS, af.speed / af.spec.maxSpeed, Math.round(af.speed), true);
-    setTape(HUD.tapeA, af.pos.y / 900, Math.round(af.pos.y), true);
-    HUD.lampStall.className = "lamp stall" + (af.stalled ? " on" : "");
-    HUD.lampCover.className = "lamp cover";
-  } else if (u && u.alive) {
-    HUD.vitals.style.display = "flex";
-    setMeter(HUD.mHp, Math.max(0, u.hp) / 100, Math.round(Math.max(0, u.hp)), true);
-    setMeter(HUD.mSt, u.stamina, Math.round(u.stamina * 100), true);
-    setTape(HUD.tapeT, 0, 0, false);
-    setTape(HUD.tapeS, 0, 0, false);
-    setTape(HUD.tapeA, 0, 0, false);
-    HUD.lampStall.className = "lamp stall";
-    HUD.lampCover.className = "lamp cover" + (world.inShelter(u.pos.x, u.pos.z) ? " on" : "");
-  } else {
-    HUD.vitals.style.display = "none";
-    setTape(HUD.tapeT, 0, 0, false); setTape(HUD.tapeS, 0, 0, false); setTape(HUD.tapeA, 0, 0, false);
-    HUD.lampStall.className = "lamp stall"; HUD.lampCover.className = "lamp cover";
-  }
-
-  // ---- danger: the SCREEN says it. Edge glow for how bad, and an arrow on
-  //      the ring pointing at the ordnance so you know which way NOT to run.
-  const danger = (u && u.alive) ? CBZ.ordnance.dangerAt(u.pos.x, u.pos.z, 7) : 0;
-  if (danger > 0.04 && role === "runner") {
-    HUD.vig.style.boxShadow = "inset 0 0 200px 40px rgba(190,20,10," + (0.12 + danger * 0.5).toFixed(2) + ")";
-    let near = null, nd = 1e9;
-    const th = CBZ.ordnance.activeThreats();
-    for (let i = 0; i < th.length; i++) {
-      const d = Math.hypot(th[i].x - u.pos.x, th[i].z - u.pos.z);
-      if (d < nd) { nd = d; near = th[i]; }
-    }
-    if (near) {
-      // relative bearing in the player's own frame: 0 = dead ahead (arrow at
-      // twelve o'clock), positive = to his right (clockwise on screen)
-      const dx = near.x - u.pos.x, dz = near.z - u.pos.z;
-      const s = Math.sin(u.yaw), c = Math.cos(u.yaw);
-      const fwd = -s * dx - c * dz, rgt = c * dx - s * dz;
-      HUD.arrow.style.opacity = String(0.55 + danger * 0.45);
-      HUD.arrow.style.transform = "rotate(" + (Math.atan2(rgt, fwd) * 180 / Math.PI) + "deg)";
-    }
-    if (!warnPlaying && danger > 0.28) {
-      warnPlaying = true;
-      CBZ.micro.sfx.tone(880, 0.16, { type: "square", gain: 0.10 });
-      setTimeout(function () { warnPlaying = false; }, 400);
-    }
-  } else {
-    HUD.arrow.style.opacity = "0";
-    if (vigFlash <= 0) HUD.vig.style.boxShadow = "inset 0 0 200px 40px rgba(190,20,10,0)";
-  }
-
-  el("inst").style.display = flying ? "flex" : "none";
-  el("cross").style.display = (u && u.alive && u.kind === "foot") ? "block" : "none";
-}
-// ---- the nuke row, and the countdown that is the runners' whole answer.
-// THE WARNING IS PROPORTIONATE, and that is a rule and not a nicety: the
-// threat ring already paints a white circle wider than the weapon from the
-// moment the round leaves the bay, closing onto its true 2.2 km reach as it
-// falls (systems/ordnance.js sizes both the ring's brightness and
-// dangerAt's horizon off the kind's own `warn`, so the vignette and every AI
-// runner start reacting fifteen seconds out instead of six). This adds the one
-// thing a ring on the ground cannot say while you are looking the other way:
-// how many seconds are left. Ordered so INBOUND always wins — an armed nuke in
-// your own bay is not news while one is falling on you.
-function updateNukeHud(role) {
-  const row = HUD.nukeRow;
-  if (!NUKE_ON) { row.style.display = "none"; return; }
-  let inbound = null;
-  const th = CBZ.ordnance.activeThreats();
-  for (let i = 0; i < th.length; i++) {
-    if (th[i].kind === NUKE_KIND && (!inbound || th[i].t < inbound.t)) inbound = th[i];
-  }
-  if (inbound) {
-    row.style.display = "flex";
-    HUD.lampNuke.className = "lamp nuke inbound on";
-    HUD.nukeVal.textContent = "IMPACT " + String(Math.max(0, Math.ceil(inbound.t))).padStart(2, "0");
-    HUD.nukeKey.style.visibility = "hidden";
-    // once per round, and only to the side it is falling on
-    if (!nuke.warned && role === "runner") {
-      nuke.warned = true;
-      showBanner("NUKE INBOUND", "GET UNDER A ROOF");
-      if (CBZ.micro.sfx) CBZ.micro.sfx.siren(4.5, { gain: 0.2 });
-    }
-    return;
-  }
-  nuke.warned = false;
-  HUD.nukeKey.style.visibility = "";
-  if (nuke.armed) {
-    row.style.display = "flex";
-    HUD.lampNuke.className = "lamp nuke on";
-    HUD.nukeVal.textContent = "READY";
-    return;
-  }
-  // COUNTING UP IS THE POINT. A reward nobody can see coming is a surprise,
-  // and a surprise is not a gradient — 3/6 on the glass is what makes the
-  // fourth kill worth flying back for.
-  if (role === "bomber" && !nuke.spent && nuke.kills > 0) {
-    row.style.display = "flex";
-    HUD.lampNuke.className = "lamp nuke";
-    HUD.nukeVal.textContent = nuke.kills + "/" + NUKE_ARM;
-    HUD.nukeKey.style.visibility = "hidden";
-    return;
-  }
-  row.style.display = "none";
-}
-
-let warnPlaying = false, vigFlash = 0;
-function flashVignette(v) {
-  vigFlash = v;
-  el("vignette").style.boxShadow = "inset 0 0 220px 60px rgba(200,25,10," + v.toFixed(2) + ")";
-  setTimeout(function () { vigFlash = 0; }, 260);
-}
-
-let bannerT = 0;
-function showBanner(a, b) {
-  const n = el("banner");
-  n.querySelector("h2").textContent = a;
-  n.querySelector("p").textContent = b || "";
-  n.style.display = "block";
-  bannerT = 3.4;
-}
-
-// ---- THE SCOPE. What replaced the minimap, and why: a top-down plan of
-// the city with every shelter, every tower and every enemy printed on it is
-// a GOD VIEW, and a bomber holding one is never searching for anything —
-// the whole strike becomes "fly to the marker". systems/radarscope.js draws
-// the instrument an aircraft actually carries: heading-up, sweeping, and it
-// only knows what the sensor returns. Contacts are AIRCRAFT and INBOUND
-// ORDNANCE. Nothing else. The ground is not a radar return.
-let scope = null;
-function buildScope() {
-  scope = CBZ.radar.create({
-    canvas: el("radar"),
-    range: 3000,
-    label: "AIR",
-    self: function () {
-      const u = myUnit;
-      if (!u) return { x: 0, z: 0, y: 0, heading: 0 };
-      return {
-        x: u.pos.x, z: u.pos.z, y: u.pos.y,
-        heading: (u.kind === "air" && u.af) ? u.af.heading() : u.yaw,
-      };
-    },
-    contacts: radarContacts,
+  u.cool = 2.4;
+  CBZ.ordnance.stick({
+    count: STICK, interval: 0.13, kind: "iron", team: u.team, owner: u.id, by: u.id,
+    getState: function () { return u.alive && u.af ? { pos: u.af.pos, vel: u.af.vel } : null; },
+    onDetonate: onStoreLands,
   });
 }
 
-function radarContacts() {
-  const out = [];
-  const u = myUnit;
-  if (!u) return out;
-  const mine = u.team;
-  // ON FOOT you are not carrying a radar set — you are carrying eyes and a
-  // siren. So the ground scope only shows what a man in a street could
-  // actually know about: aircraft low and close enough to see or hear, and
-  // the ordnance already falling toward him.
-  const airborne = u.kind === "air";
-  const eyeshot = airborne ? Infinity : 1500;
+function fireNuke(u) {
+  if (!u || !u.af || !nuke.armed || nuke.spent) return;
+  nuke.spent = true; nuke.armed = false;
+  ctlFly.button("nuke", false);
+  CBZ.ordnance.release({
+    pos: u.af.pos, vel: u.af.vel, kind: "nuke", team: u.team, owner: u.id,
+    onDetonate: function (b) {
+      const f = el("flash");
+      f.style.transition = "none"; f.style.opacity = "1";
+      setTimeout(function () { f.style.transition = "opacity 2.4s"; f.style.opacity = "0"; }, 90);
+      if (CBZ.cityNukeFX) { try { CBZ.cityNukeFX(b.impact.x, b.impact.y, b.impact.z, {}); } catch (e) {} }
+      // the mushroom is nukefx's, the kill sweep is ordnance's; what is owed
+      // here is the CITY coming down, and it comes down by the same scored
+      // path a single store uses — a nuke is not exempt from the ledger
+      for (let r = 0; r < 9; r++) {
+        const a = (r / 9) * Math.PI * 2, d = (b.radius || 120) * 0.55;
+        onStoreLands({ impact: { x: b.impact.x + Math.cos(a) * d, y: b.impact.y, z: b.impact.z + Math.sin(a) * d },
+          radius: d * 0.5, power: 3, owner: u.id });
+      }
+    },
+  });
+  streak("ROUND AWAY");
+}
+
+function earnKill() {
+  if (nuke.spent) return;
+  nuke.kills++;
+  if (nuke.kills >= NUKE_ARM && !nuke.armed) { nuke.armed = true; streak("NUKE ARMED"); ctlFly.button("nuke", true, true); }
+  else streak(nuke.kills + " OF " + NUKE_ARM);
+}
+let streakT = 0;
+function streak(t) { el("streak").textContent = t; el("streak").classList.add("on"); streakT = 2.6; }
+
+// ============================================================ THE FRAME
+CBZ.micro.onFrame(function (rawDt) {
+  if (!started) return;
+  const dt = Math.min(rawDt || 0, 0.05);            // a slow phone frame must not slingshot the sim
+  match.step(dt);
+  if (streakT > 0 && (streakT -= dt) <= 0) el("streak").classList.remove("on");
+  if (swapT > 0 && (swapT -= dt) <= 0) el("swap").classList.remove("on");
+  if (match.phase === "over") return;
+
+  ctl.step(dt);
 
   for (let i = 0; i < units.length; i++) {
-    const x = units[i];
-    if (x === u || !x.alive || x.kind !== "air") continue;
-    if (!airborne && Math.hypot(x.pos.x - u.pos.x, x.pos.z - u.pos.z) > eyeshot) continue;
-    out.push({
-      id: x.id, x: x.pos.x, z: x.pos.z, y: x.pos.y,
-      heading: x.af ? x.af.heading() : null,
-      friend: x.team === mine, foe: x.team !== mine,
-    });
-  }
-  for (let i = 0; i < jets.length; i++) {
-    const j = jets[i];
-    if (!j.alive) continue;
-    if (!airborne && Math.hypot(j.af.pos.x - u.pos.x, j.af.pos.z - u.pos.z) > eyeshot) continue;
-    out.push({ id: j.id, x: j.af.pos.x, z: j.af.pos.z, y: j.af.pos.y, heading: j.af.heading() });
-  }
-  const th = CBZ.ordnance.activeThreats();
-  for (let i = 0; i < th.length; i++) {
-    // your OWN side's stores are not a threat to you and would bury the scope
-    if (th[i].team === mine && airborne) continue;
-    out.push({ id: "t" + i, x: th[i].x, z: th[i].z, y: th[i].y, threat: true, ttl: th[i].t });
-  }
-  return out;
-}
-
-// ============================================================ RESULTS
-function showResults(res) {
-  el("hud").style.display = "none";
-  CBZ.micro.unlock();
-  const r = el("results");
-  r.style.display = "flex";
-  const mine = myUnit ? myUnit.team : null;
-  const won = res.winner && res.winner.id === mine;
-  el("resTitle").textContent = res.draw ? "DRAW" : (won ? "YOU WIN" : res.winner.name + " WINS");
-  el("resSub").textContent = res.summary || "";
-  let t = "<tr><th>SIDE</th><th>HALF 1</th><th>HALF 2</th><th>TOTAL</th></tr>";
-  for (let i = 0; i < res.standings.length; i++) {
-    const s = res.standings[i];
-    t += "<tr><td style='color:#" + s.color.toString(16).padStart(6, "0") + ";font-weight:800'>" + s.name +
-      (s.id === mine ? " (you)" : "") + "</td><td class='n'>" + Math.round(s.halves[0]) +
-      "</td><td class='n'>" + Math.round(s.halves[1] || 0) + "</td><td class='n" +
-      (res.winner && s.id === res.winner.id ? " win" : "") + "'>" + Math.round(s.total) + "</td></tr>";
-  }
-  const meRec = match.human();
-  t += "<tr><td colspan='4' style='opacity:.6;font-size:12px;border:0;padding-top:12px'>YOU · " +
-    meRec.kills + " kills · " + meRec.deaths + " deaths · " +
-    myStores + " stores released</td></tr>";
-  el("resTable").innerHTML = t;
-}
-
-// ============================================================ NPC JETS
-// The basin is CONTESTED AIRSPACE, not a private range. These are neutral
-// traffic — a patrol pair on a racetrack, a high transit, a couple of
-// interceptors working a wide orbit — and they earn their frame time for one
-// reason: a scope carrying only ten hostile returns teaches you nothing
-// about reading a scope. You have to SORT it. Neutral returns are what make
-// "is that him?" a question worth asking.
-//
-// They are composed, not authored: world/airbase.js's airframes flying on
-// systems/airframe.js with the same autopilot the AI bombers use. They are
-// killable (a blast will take one down) and they score nothing.
-let jets = [];
-function buildJets(n) {
-  const N = n != null ? n : 7;
-  for (let i = 0; i < N; i++) {
-    const heavy = i >= N - 2;
-    const grp = heavy ? CBZ.airbase.bomber({}) : CBZ.airbase.fighter({ color: 0x9aa3ad });
-    CBZ.scene.add(grp);
-    const af = CBZ.airframe.make({ preset: heavy ? "bomber" : "fighter", groundAt: floorAt });
-    const R = 1500 + rr(0, 1700);
-    const alt = 430 + rr(0, 760);
-    const a0 = rr(0, Math.PI * 2);
-    af.launch(Math.cos(a0) * R, alt, Math.sin(a0) * R, a0, heavy ? 132 : 180);
-    const j = {
-      id: "jet" + i + "_" + jets.length, group: grp, af: af, alive: true,
-      R: R, alt: alt, a: a0, w: (heavy ? 0.055 : 0.10) * (i % 2 ? -1 : 1),
-      heavy: heavy, cruise: heavy ? 135 : 185,
-    };
-    j.tgt = CBZ.ordnance.addTarget({
-      pos: af.pos, team: null, unit: j,
-      onDamage: function (d) { if (d > 55) downJet(j); },
-    });
-    jets.push(j);
-  }
-}
-function updateJets(dt) {
-  for (let i = 0; i < jets.length; i++) {
-    const j = jets[i];
-    if (!j.alive) continue;
-    j.a += j.w * dt;
-    // aim AHEAD along the circuit, never at your own position — steering at
-    // where you already are is how an orbit turns into a spiral
-    const lead = j.a + (j.w > 0 ? 0.45 : -0.45);
-    _v.set(Math.cos(lead) * j.R, j.alt, Math.sin(lead) * j.R);
-    const aim = j.af.steerTo(_v, { gain: 1.9 });
-    aim.pitch = 0;
-    j.af.holdAltitude(j.alt, aim);
-    aim.pitch = Math.max(-0.40, Math.min(0.85, aim.pitch));
-    aim.throttle = Math.max(0, Math.min(1, 0.35 + (j.cruise - j.af.speed) * 0.02));
-    j.af.step(dt, aim);
-    j.af.applyTo(j.group);
-    if (j.af.grounded) downJet(j);
-  }
-}
-function downJet(j) {
-  if (!j.alive) return;
-  j.alive = false;
-  CBZ.ordnance.blast(j.af.pos.x, j.af.pos.y, j.af.pos.z, 26, 0, {});
-  CBZ.ordnance.removeTarget(j.tgt);
-  CBZ.scene.remove(j.group);
-  disposeBody(j.group);       // neutral traffic leaks exactly like a bomber did
-  j.af.dispose();
-  match.log((j.heavy ? "HEAVY" : "PATROL") + " down · neutral", { tone: "bad" });
-}
-
-// ============================================================ DESERT LIFE
-// The brief asked for people out in the desert, and it is right to: a
-// basin with a city, a base and nothing living between them reads as a
-// diorama. These are a nomad camp and a stalled convoy — they are not
-// combatants, they do not score, and the ordnance bus never hears about
-// them. They exist so the sand is somewhere rather than nowhere.
-function buildDesertLife() {
-  const walkers = [];
-  const spots = [];
-  for (let i = 0; i < 3; i++) {
-    const p = world.desertPoint(rngGame, world.rings.city + 260, world.rings.dune - 400);
-    spots.push(p);
-    // tents
-    for (let k = 0; k < 4; k++) {
-      const tx = p.x + rr(-26, 26), tz = p.z + rr(-26, 26);
-      const tent = new THREE.Mesh(new THREE.ConeGeometry(5.4, 5, 6), CBZ.cmat(0xa8996f));
-      tent.position.set(tx, floorAt(tx, tz) + 2.5, tz);
-      tent.rotation.y = rr(0, 3);
-      tent.castShadow = true;
-      CBZ.scene.add(tent);
+    const u = units[i];
+    if (!u.alive) {
+      if (u.role === "bomber" && (u.respawnIn -= dt) <= 0) reflight(u);
+      continue;
     }
-    // a fire, because a camp has one
-    const fire = new THREE.Mesh(new THREE.SphereGeometry(1.5, 6, 5),
-      new THREE.MeshBasicMaterial({ color: 0xff9a3c }));
-    fire.position.set(p.x, floorAt(p.x, p.z) + 1, p.z);
-    CBZ.scene.add(fire);
-    // people
-    for (let k = 0; k < 5; k++) {
-      const g = makeSoldier(pick([0x8d7a55, 0x6f7a86, 0xa2724a, 0x5f6b52]), i * 5 + k);
-      const wx = p.x + rr(-30, 30), wz = p.z + rr(-30, 30);
-      g.position.set(wx, floorAt(wx, wz), wz);
-      CBZ.scene.add(g);
-      walkers.push({ g: g, home: p, ang: rr(0, 7), rad: 8 + rr(0, 22), spd: rr(0.1, 0.3) });
+    if (u.role === "bomber") stepBomber(u, dt, u === me);
+    else {
+      stepRunner(u, dt, u === me);
+      match.addScore(u.team, PTS_ALIVE * dt, "alive");
     }
   }
-  CBZ.micro.onFrame(function (dt, t) {
-    for (let i = 0; i < walkers.length; i++) {
-      const w = walkers[i];
-      w.ang += w.spd * dt;
-      const x = w.home.x + Math.cos(w.ang) * w.rad;
-      const z = w.home.z + Math.sin(w.ang) * w.rad;
-      w.g.position.set(x, floorAt(x, z), z);
-      w.g.rotation.y = -w.ang + Math.PI / 2;
-      animateSoldier(w.g, 3, t + i, dt);
-    }
-  }, { id: "desertlife", order: 5 });
-}
 
-// ============================================================ THE TEST RIG
-// A twenty-minute match is a terrible way to check a five-second thing. This
-// is the door into every state the game can be in, without playing to it:
-// jump the clock, put yourself in the air, drop one on your own head, thin
-// the runners out, and read every subsystem's audit in one place.
-// Open it with ?test=1, the TEST RIG button on the briefing, or [T].
-let testOpen = false, godMode = false;
-function buildTestRig() {
-  const box = document.createElement("div");
-  box.id = "testRig";
-  box.style.cssText =
-    "position:fixed;left:10px;top:86px;z-index:30;width:216px;padding:10px;border-radius:12px;" +
-    "background:rgba(8,12,16,.92);border:1px solid rgba(255,255,255,.16);color:#dfe6ea;" +
-    "font:600 11px 'Trebuchet MS',sans-serif;display:none;backdrop-filter:blur(4px);" +
-    "max-height:94vh;overflow:auto";
-  document.body.appendChild(box);
+  CBZ.ordnance.step(dt);
 
-  const ROWS = [
-    ["MATCH", [
-      ["half 2 now", function () { match.timeLeft = 0.05; setTimeout(function () { match.intermissionLeft = 0.05; }, 400); }],
-      ["skip 60s", function () { match.timeLeft = Math.max(1, match.timeLeft - 60); }],
-      ["end match", function () { match.timeLeft = 0.05; match.half = match.halves - 1; }],
-    ]],
-    ["YOU", [
-      ["airborne", function () { forceAirborne(); }],
-      ["at the wing", function () { const u = myUnit; if (u && base) { u.pos.set(base.bomber.x + 8, base.bomber.y, base.bomber.z + 8); } }],
-      ["into the city", function () { const u = myUnit; if (!u) return; const p = world.streetPoint(rngGame, 500); u.pos.set(p.x, floorAt(p.x, p.z), p.z); if (u.af) u.af.pos.copy(u.pos); }],
-      ["into the park", function () { const u = myUnit; if (!u) return; u.pos.set(world.park.x, floorAt(world.park.x, world.park.z), world.park.z); }],
-      ["nearest shelter", function () { const u = myUnit; if (!u) return; const s = world.nearestShelter(u.pos.x, u.pos.z); if (s) u.pos.set(s.shelter.x, floorAt(s.shelter.x, s.shelter.z), s.shelter.z); }],
-      ["god mode", function (b) { godMode = !godMode; b.classList.toggle("on", godMode); }],
-    ]],
-    ["ORDNANCE", [
-      ["one on my head", function () { const u = myUnit; if (u) CBZ.ordnance.release({ pos: _v.set(u.pos.x, u.pos.y + 320, u.pos.z), vel: _v2.set(0, 0, 0), kind: BOMB_KIND, team: "test" }); }],
-      // the six stores are spaced on the WALL clock because the rig is a hand,
-      // not a bomber — but each one still asks whether the match wants it, so a
-      // paused or swapped-over world cannot be rained on from four seconds ago
-      ["walk a stick", function () { const u = myUnit; if (!u) return; for (let k = 0; k < 6; k++) (function (k) { setTimeout(function () { if (paused || match.phase !== "live") return; CBZ.ordnance.release({ pos: _v.set(u.pos.x + k * 40 - 120, u.pos.y + 320, u.pos.z), vel: _v2.set(0, 0, 0), kind: BOMB_KIND, team: "test" }); }, k * 120); })(k); }],
-      ["clear the air", function () { CBZ.ordnance.clear(); }],
-    ]],
-    ["NUKE", [
-      // the two states worth reaching in a hurry: holding one, and being
-      // under one. Neither skips the real path — "arm" only sets the flag the
-      // sixth kill would have set, and "call" is the same callNuke() the key
-      // and the touch pill go through.
-      ["arm it", function () { nuke.spent = false; nuke.kills = NUKE_ARM - 1; nukeCredit(); }],
-      ["call it", function () { callNuke(); }],
-      ["one on my head", function () {
-        const u = myUnit;
-        if (u) CBZ.ordnance.release({ pos: _v.set(u.pos.x, u.pos.y + 900, u.pos.z), vel: _v2.set(0, 0, 0), kind: NUKE_KIND, team: "test" });
-      }],
-    ]],
-    ["ROSTER", [
-      ["thin runners (5)", function () { const live = units.filter(function (x) { return x.role === "runner" && x.alive && x !== myUnit; }); for (let i = 0; i < 5 && i < live.length; i++) killUnit(live[i], { team: match.enemyOf(live[i].team).id }); }],
-      ["down one bomber", function () { const b = units.filter(function (x) { return x.role === "bomber" && x.alive && x !== myUnit; })[0]; if (b) killUnit(b, {}); }],
-      ["+4 neutral jets", function () { buildJets(4); }],
-    ]],
-    // NO TIME CONTROL LIVES HERE ANY MORE. "time x3" multiplied dt inside this
-    // file's own frame hook, which is the only clock this file owns — so units
-    // moved three times as fast while their bombs fell at 1x in ordnance.step
-    // and the match clock ticked at 1x in teammatch's. Measured: the world ran
-    // 0.6 s of travel against 0.2 s of engine time, a ratio of 2.99, and every
-    // CCIP solution, every lead and every stick interval was wrong by that
-    // factor. An honest fast-forward has to be the ENGINE's (microboot has no
-    // time scale, and this file is the game, not the engine), so the lever is
-    // gone rather than lying. MATCH · skip 60s moves the clock without touching
-    // physics, which is the honest half of what this was used for.
-    ["RIG", [
-      ["scope range", function () { if (scope) scope.cycleRange(1); }],
-      ["audit → console", function () { console.log(JSON.stringify(window.__bomb.audit(), null, 1)); }],
-    ]],
-  ];
-
-  const st = document.createElement("style");
-  st.textContent =
-    "#testRig h4{margin:8px 0 5px;font-size:9px;letter-spacing:2.2px;opacity:.5}" +
-    "#testRig h4:first-child{margin-top:0}" +
-    "#testRig button{display:block;width:100%;margin:0 0 4px;padding:6px 8px;text-align:left;" +
-      "font:600 11px 'Trebuchet MS',sans-serif;letter-spacing:.6px;border-radius:7px;cursor:pointer;" +
-      "background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.13);color:#dfe6ea;" +
-      "box-shadow:none;pointer-events:auto}" +
-    "#testRig button:hover{background:rgba(255,255,255,.15)}" +
-    "#testRig button.on{background:rgba(120,220,150,.3);border-color:#7fe0a0}" +
-    "#testRig pre{margin:8px 0 0;font:600 10px monospace;opacity:.6;white-space:pre-wrap;line-height:1.45}";
-  document.head.appendChild(st);
-
-  for (let i = 0; i < ROWS.length; i++) {
-    const h = document.createElement("h4");
-    h.textContent = ROWS[i][0];
-    box.appendChild(h);
-    const items = ROWS[i][1];
-    for (let k = 0; k < items.length; k++) {
-      const b = document.createElement("button");
-      b.textContent = items[k][0];
-      const fn = items[k][1];
-      b.addEventListener("click", function (e) { e.stopPropagation(); fn(b); });
-      box.appendChild(b);
+  if (me && !me.alive) hud.danger(0);
+  if (me && me.alive && eng) {
+    if (me.role === "bomber" && me.af) { eng.set(me.af.throttle, me.af.speed, 0); hud.danger(0); }
+    else {
+      eng.set(0, 0, 400);
+      const risk = CBZ.ordnance.dangerAt ? CBZ.ordnance.dangerAt(me.pos.x, me.pos.z, 10) : 0;
+      CBZ.studio.alarm(risk);
+      hud.danger(risk);
     }
   }
-  const out = document.createElement("pre");
-  box.appendChild(out);
-  window.__testOut = out;
-  window.__testBox = box;
+
+  aimAndFollow(dt);
+  hud.clock(match.clock());
+  if (me) hud.health(Math.max(0, me.hp) / 100);
+  const rows = match.standings();
+  const sc = {};
+  for (let i = 0; i < rows.length; i++) sc[rows[i].name] = Math.round(rows[i].total);
+  hud.score(sc);
+  if (scope && me && me.role === "bomber") scope.draw(dt);
+});
+
+const _reroll = CBZ.seedStream ? CBZ.seedStream("bs-reflight") : function () { return 0.5; };
+function reflight(u) {
+  u.alive = true; u.hp = 100; u.respawnIn = 0;
+  if (u.group) u.group.visible = true;
+  const a = _reroll() * Math.PI * 2;
+  const r = 1100;
+  const x = TOWN_AT.x + Math.cos(a) * r, z = TOWN_AT.z + Math.sin(a) * r;
+  u.hdg = headingToward(x, z, TOWN_AT.x, TOWN_AT.z);
+  if (u.af) u.af.launch(x, BOMB_ALT, z, u.hdg, 168);
+  if (u === me) setRole();
 }
-function forceAirborne() {
-  const u = myUnit;
-  if (!u) return;
-  if (u.role !== "bomber") { match.log("TEST · running side this half", { tone: "bad" }); return; }
-  if (!u.boarded) {
-    u.boarded = true; u.kind = "air";
-    u.group = CBZ.airbase.bomber({});
-    CBZ.scene.add(u.group);
+
+function nearestEnemyRunner(u) {
+  let best = null, bd = Infinity;
+  for (let i = 0; i < units.length; i++) {
+    const t = units[i];
+    if (!t.alive || t.role !== "runner" || t.team === u.team) continue;
+    const d = (t.pos.x - u.af.pos.x) * (t.pos.x - u.af.pos.x) + (t.pos.z - u.af.pos.z) * (t.pos.z - u.af.pos.z);
+    if (d < bd) { bd = d; best = t; }
   }
-  const a = rr(0, Math.PI * 2), R = 1700;
-  u.af.launch(Math.cos(a) * R, 430, Math.sin(a) * R, Math.atan2(Math.cos(a) * R, Math.sin(a) * R), 170);
+  return best;
+}
+
+function stepBomber(u, dt, mine) {
+  if (!u.af) return;
+  u.cool = Math.max(0, u.cool - dt);
+
+  if (u.rolling) {
+    // the roll is SHORT and it is YOURS: full power is set, the centreline
+    // hold flies the line, but the stick steers the nose wheel and pulling
+    // back past 85 rotates early. Watching an unpiloted crawl was the old
+    // game's first minute; this one is airborne inside seven seconds.
+    u.af.throttle = 1;
+    if (mine) u.hdg += ctl.move.x * 0.22 * dt;
+    const aim = u.af.steerTo(_v.set(
+      u.af.pos.x - Math.sin(u.hdg) * 3000, groundAt(u.af.pos.x, u.af.pos.z) + 4, u.af.pos.z - Math.cos(u.hdg) * 3000), { gain: 3.2 });
+    if (mine && ctl.move.y > 0.4 && u.af.speed > 85) u.af.vel.y += 3.2 * dt * u.af.speed / 90;
+    u.af.step(dt, aim);
+    u.pos.copy(u.af.pos);
+    if (u.group) u.af.applyTo(u.group);
+    if (u.af.pos.y - groundAt(u.af.pos.x, u.af.pos.z) > 40) { u.rolling = false; if (mine) setRole(); }
+    return;
+  }
+
+  if (mine) {
+    u.hdg += ctl.move.x * 0.95 * dt;
+    u.af.throttle = Math.max(0.3, ctl.throttle);
+    // the stick's Y walks the RUN ALTITUDE — lower is accurate and lethal and
+    // inside your own fragmentation, higher is safe and vague
+    u.alt = Math.max(ALT_MIN, Math.min(ALT_MAX, (u.alt || BOMB_ALT) - ctl.move.y * 130 * dt));
+    if (ctl.tapped("fire")) dropStick(u);
+    if (ctl.tapped("nuke")) fireNuke(u);
+  } else {
+    // hunt a MAN, not the middle of the map; commit to a run, re-pick slowly
+    u.pick = (u.pick || 0) - dt;
+    if (u.pick <= 0 || !u.mark || !u.mark.alive) { u.mark = nearestEnemyRunner(u); u.pick = 7; }
+    const mk = u.mark;
+    u.af.throttle = 0.85;
+    if (mk) {
+      u.hdg = headingToward(u.af.pos.x, u.af.pos.z, mk.pos.x, mk.pos.z);
+      // release when the SHARED integrator says the fall lands on him
+      const p = CBZ.ordnance.predict(u.af.pos, u.af.vel, "iron", 40);
+      if (p && Math.hypot(p.x - mk.pos.x, p.z - mk.pos.z) < 70) dropStick(u);
+    } else {
+      u.hdg = headingToward(u.af.pos.x, u.af.pos.z, TOWN_AT.x, TOWN_AT.z);
+    }
+  }
+
+  const alt = u.alt || BOMB_ALT;
+  _v.set(u.af.pos.x - Math.sin(u.hdg) * 2400, alt, u.af.pos.z - Math.cos(u.hdg) * 2400);
+  const aim = u.af.steerTo(_v, { gain: 2.0 });
+  u.af.holdAltitude(alt, aim);
+  u.af.step(dt, aim);
   u.pos.copy(u.af.pos);
-  camMode = "chase";
-}
-function toggleTestRig(on) {
-  testOpen = on != null ? on : !testOpen;
-  if (!window.__testBox) return;
-  window.__testBox.style.display = testOpen ? "block" : "none";
-  // the rig owns the left edge while it is open; the feed lives there too.
-  // Closing hands the position back to the stylesheet rather than pinning 12px
-  // over the small-screen rule.
-  el("feed").style.left = testOpen ? "244px" : "";
-}
-function testTick() {
-  if (!testOpen || !window.__testOut) return;
-  const a = CBZ.ordnanceAudit(), r = CBZ.radarAudit()[0] || {};
-  const u = myUnit;
-  window.__testOut.textContent =
-    "fps " + CBZ.micro.fps + "   phase " + match.phase + " h" + (match.half + 1) + "\n" +
-    "stores " + a.released + " → " + a.detonated + "  hits " + a.hits + "  air " + a.inAir + "\n" +
-    "scope " + (r.contacts || 0) + " returns @ " + ((r.range || 0) / 1000).toFixed(1) + "km\n" +
-    "jets " + jets.filter(function (j) { return j.alive; }).length +
-    "  runners " + units.filter(function (x) { return x.role === "runner" && x.alive; }).length + "\n" +
-    (u ? ("you " + Math.round(u.pos.x) + "," + Math.round(u.pos.y) + "," + Math.round(u.pos.z) +
-      "  hp " + Math.round(Math.max(0, u.hp)) + (godMode ? " [GOD]" : "")) : "") + "\n" +
-    "nuke " + nuke.kills + "/" + NUKE_ARM + (nuke.armed ? " ARMED" : "") + (nuke.spent ? " SPENT" : "") +
-      "  R" + a.nukeRadius + " " + (a.nukeKt != null ? a.nukeKt + "kt" : "?") +
-      "  body " + (a.nukeBody ? "real" : "prim") + " fx " + (a.nukeFx ? "real" : "pool");
+  if (u.group) u.af.applyTo(u.group);
+  if (u.trail && !u.rolling) u.trail.push(u.af.pos);
 }
 
-// ============================================================ BOOT
-function build() {
-  el("loadNote").textContent = "raising the basin";
-  CBZ.micro.boot({
-    fov: 72, far: 16000,
-    // exposure under 1 on purpose: a desert noon at sun 1.12 + hemi 0.60 with
-    // ACES on top blows every pale surface (concrete, salt, the park) to the
-    // same white and the city loses its silhouette. The basin should be HOT,
-    // not washed — the contrast is what makes 200 towers read as 200 towers.
-    exposure: 0.88,
-    sky: { top: 0x2a6bb2, bottom: 0xe3c893, fogNear: 1200, fogFar: 9000, radius: 12000 },
-    lights: { sun: 0.98, hemi: 0.46, shadowSpan: 700, groundColor: 0x8f7850 },
-  });
-  cam = CBZ.camera;
+// the runner half happens BETWEEN REAL BUILDINGS: cover is a wall the blast
+// trace already respects, and shelter is a real doorway in a real facade
+function nearestDoor(x, z, reach) {
+  const lots = (town && town.lots) || [];
+  let best = null, bd = reach * reach;
+  for (let i = 0; i < lots.length; i++) {
+    const L = lots[i];
+    const b = L.building;
+    if (!b || !b.door || L._down) continue;         // a collapsed shell shelters nobody
+    const d = (b.door.x - x) * (b.door.x - x) + (b.door.z - z) * (b.door.z - z);
+    if (d < bd) { bd = d; best = L; }
+  }
+  return best;
+}
 
-  // ---- JOIN THE ENGINE. One call, from the game, and every shared verb in
-  // Gang City starts working here: the vault, the ledge step, the blast, the
-  // wall breach, the collapse. Before this line microboot's default mode
-  // ("slice") was in nobody's capability table, so `modeHas` answered false
-  // at every gate and the whole shared layer was politely doing nothing to a
-  // world with two hundred towers in it.
-  //
-  // What we hand over is POINTERS, never a second ledger — `units` is the
-  // roster this file already keeps and `hurt` is the same funnel the
-  // scoreboard and the kill feed read. So a blast lit by ordnance.js kills
-  // through the identical path a bomb does, and the two cannot disagree.
-  const MODE = (CBZ.game && CBZ.game.mode) || "slice";
-  if (CBZ.registerMode) CBZ.registerMode(MODE, {
-    id: MODE, label: "Bomb Survivor",
-    caps: { traverse: 1, stepLedge: 1, blast: 1, blastActors: 1, breach: 1 },
-    actors: function (out) {
-      for (let i = 0; i < units.length; i++) if (units[i].alive) out.push(units[i]);
-      return out;
-    },
-    hurt: function (u, dmg, imp) { hurt(u, dmg, imp || {}); return true; },
-    hurtPlayer: function (dmg, x, z, cause) {
-      if (!myUnit || !myUnit.alive) return false;
-      hurt(myUnit, dmg, { cause: cause });
-      return true;
-    },
-    route: "bomb-survivor units + hurt()",
-  });
-
-  world = CBZ.desertCity.build({ seed: "basincity" });
-
-  // The base goes in the dunes with the runway pointed at the city, so the
-  // first thing a takeoff sees is the target.
-  //
-  // THE Z SIGN IS THE WHOLE OF IT, AND IT WAS MIRRORED. world/airbase.js lays
-  // its runway along the base's local +X, which THREE's rotation.y = HEAD puts
-  // on world (cos HEAD, −sin HEAD) — that file publishes the convention in its
-  // runway() block and says why. This call read it as a standard (cos, sin)
-  // angle and asked for atan2(−bz, −bx), which mirrors the runway about the
-  // base's own X axis. Measured: runwayDir [−0.660, +0.751] against toCity
-  // [−0.660, −0.751], 97.4° apart, and a manual takeoff flew to (−1746, 5223)
-  // — closest approach to the city 2132 m — and into the mountain rim. The
-  // comment above it claimed the opposite for as long as it existed.
-  // Solve (cos H, −sin H) = (−bx, −bz)/r: cos H = −bx, sin H = bz.
-  const ba = 0.85, brad = 1980;
-  const bx = Math.cos(ba) * brad, bz = Math.sin(ba) * brad;
-  base = CBZ.airbase.build({
-    x: bx, z: bz, heading: Math.atan2(bz, -bx),
-    groundAt: world.heightAt, seed: "kestrel", runwayLength: 1800,
-  });
-
-  CBZ.ordnance.init({ scene: CBZ.scene, groundAt: floorAt });
-  CBZ.ordnance.onShake = function (v) { shake = Math.max(shake, v * 0.7); };
-  // the far end of the chain: how close a store that actually went off came
-  // to a living man. A release rate means nothing without this number.
-  CBZ.ordnance.onBlast = function (x, y, z) {
-    probe.blasts++;
-    let best = 1e9;
-    for (let i = 0; i < units.length; i++) {
-      const u = units[i];
-      if (!u.alive || u.role !== "runner") continue;
-      const d = Math.hypot(u.pos.x - x, u.pos.z - z);
-      if (d < best) best = d;
+function stepRunner(u, dt, mine) {
+  let mx = 0, mz = 0;
+  if (mine) {
+    mx = ctl.move.x; mz = ctl.move.y;
+    const s = Math.hypot(mx, mz);
+    if (s > 0.01) {
+      // move relative to where the camera looks — the only third-person
+      // scheme anybody finds natural
+      const c = Math.cos(u.camYaw || 0), sn = Math.sin(u.camYaw || 0);
+      const wx = mx * c + mz * sn, wz = -mx * sn + mz * c;
+      mx = wx; mz = wz;
     }
-    probe.near[best < 13 ? 0 : best < 25 ? 1 : best < 46 ? 2 : best < 100 ? 3 : 4]++;
-  };
-
-  hudCache();
-  buildTestRig();
-  if (/[?&]test=1/.test(location.search) || wantTest) toggleTestRig(true);
-  buildScope();
-  buildTouch();
-  buildPipper();
-  buildMarks();
-  buildJets();
-  buildDesertLife();
-  buildMatch();
-
-  // ---- the game's own frame: units, then camera, then the glass
-  CBZ.micro.onFrame(function (dt) {
-    // `paused` is belt-and-braces: [P] stops the whole loop at CBZ.micro.paused,
-    // so this hook is not running at all while it is set.
-    if (paused || match.phase === "over") return;
-    promptClaim = null;
-    if (match.phase === "live") {
-      updatePlayer(dt);
-      updateAI(dt);
-      if (myUnit && myUnit.role === "bomber" && !myUnit.boarded) updateBoarding();
+    // look.x is already a per-frame delta — do NOT scale by dt
+    u.camYaw = (u.camYaw || 0) + ctl.look.x * 58;
+  } else {
+    // ordnance publishes a danger field; a runner walks down the gradient,
+    // and under fire he makes for a REAL door — the town is the shelter
+    let best = 1e9, bx = Math.cos(u.yaw), bz = Math.sin(u.yaw);
+    const here = CBZ.ordnance.dangerAt ? CBZ.ordnance.dangerAt(u.pos.x, u.pos.z, 10) : 0;
+    let lid = null;
+    if (here > 0.05) {
+      const L = nearestDoor(u.pos.x, u.pos.z, 80);
+      if (L) {
+        const b = L.building;
+        // the point just INSIDE the doorway — through the real gap in the
+        // real collider, which resolveCircle politely allows
+        lid = { x: b.door.x - b.door.nx * 3.2, z: b.door.z - b.door.nz * 3.2 };
+      }
     }
-    applyPrompt();
-    updatePipper();
-    updateMarks();
-    // traffic flies through the intermission too — the sky does not stop
-    // because the match did
-    updateJets(dt);
-  }, { id: "bomb-game", order: 0 });
+    for (let a = 0; a < 8; a++) {
+      const th = (a / 8) * Math.PI * 2;
+      const cx = Math.cos(th), cz = Math.sin(th);
+      const sx = u.pos.x + cx * 16, sz = u.pos.z + cz * 16;
+      let cost = CBZ.ordnance.dangerAt ? CBZ.ordnance.dangerAt(sx, sz, 10) : 0;
+      cost += Math.abs(Math.atan2(Math.sin(th - u.yaw), Math.cos(th - u.yaw))) * 0.03;
+      if (lid) {
+        const dx = lid.x - u.pos.x, dz = lid.z - u.pos.z, n2 = Math.hypot(dx, dz) || 1;
+        cost -= (cx * dx / n2 + cz * dz / n2) * 0.55;
+      }
+      if (cost < best) { best = cost; bx = cx; bz = cz; }
+    }
+    mx = bx; mz = bz;
+    // near the door and the sky is quiet again: drift back out
+    if (lid && Math.hypot(lid.x - u.pos.x, lid.z - u.pos.z) < 1.4 && here < 0.04) { mx = -bx; mz = -bz; }
+  }
+  const n = Math.hypot(mx, mz);
+  const spd = RUN_SPEED * ((mine && ctl.held("sprint")) ? 1.7 : 1);
+  if (n > 0.01) {
+    u.pos.x += (mx / n) * spd * dt;
+    u.pos.z += (mz / n) * spd * dt;
+    u.yaw = Math.atan2(mx, mz);
+    // the engine's own slide resolver: the city is cover, not scenery
+    if (CBZ.micro.resolveCircle) CBZ.micro.resolveCircle(u.pos, 0.55, u.pos.y, 1.8);
+  }
+  u.pos.y = groundAt(u.pos.x, u.pos.z);
+  if (u.trail && n > 0.01) u.trail.push(u.pos);
+  if (u.group) {
+    u.group.position.copy(u.pos);
+    u.group.rotation.y = u.yaw;
+    if (CBZ.animChar && u.group.userData.charRig) {
+      try { CBZ.animChar(u.group.userData.charRig, dt, { speed: n > 0.01 ? spd : 0 }); } catch (e) {}
+    }
+  }
+}
 
-  CBZ.micro.onFrame(function (dt) {
-    updateCamera(dt);
-    if (bannerT > 0) { bannerT -= dt; if (bannerT <= 0) el("banner").style.display = "none"; }
-  }, { id: "bomb-camera", order: 10 });
+function aimAndFollow(dt) {
+  // spectate the nearest living friend rather than a black screen
+  let look = me;
+  if (!look || !look.alive) {
+    for (let i = 0; i < units.length; i++) if (units[i].alive && (!me || units[i].team === me.team)) { look = units[i]; break; }
+  }
+  if (!look) return;
+  const air = look.role === "bomber";
+  if (air && look.af) {
+    chase.followAir(look.af, dt, { back: look.rolling ? 34 : 66, up: look.rolling ? 9 : 18 });
+    if (look === me && !look.rolling) sight.aim(look.af.pos, look.af.vel); else sight.hide();
+  } else {
+    chase.follow(look.pos, look.camYaw || look.yaw, dt, { air: false });
+    sight.hide();
+  }
+}
 
-  let hudT = 0, radT = 0;
-  CBZ.micro.onFrame(function (dt) {
-    hudT += dt; radT += dt;
-    if (hudT > 0.1) { hudT = 0; updateHUD(); syncTouch(); }
-    // the scope redraws at 15 Hz: any slower and the sweep judders, any
-    // faster and it is 2-D canvas work nobody can see
-    if (radT > 0.066) { if (scope) scope.draw(radT); radT = 0; }
-    testTick();
-  }, { id: "bomb-hud", order: 60 });
+// ============================================================ START / END
+function finish(result, m) {
+  el("over").style.display = "grid";
+  el("overTitle").textContent = (result && result.winner) ? (result.winner.name + " TAKE IT") : "DRAW";
+  const rows = m.standings();
+  let h = "";
+  for (let i = 0; i < rows.length; i++) h += "<tr><td>" + rows[i].name + "</td><td>" + Math.round(rows[i].total) + "</td></tr>";
+  el("overTable").innerHTML = h;
+  if (scope) el("radar").style.display = "none";
+}
+el("again").addEventListener("click", function () { location.reload(); });
 
-  el("title").style.display = "none";
-  el("hud").style.display = "block";
+st("READY");
+el("go").addEventListener("click", function () {
+  el("gate").style.display = "none";
   started = true;
-  CBZ.micro.lock();
-}
-
-// ---- keys the page owns rather than the units
-window.addEventListener("keydown", function (e) {
-  if (!started) return;
-  if (e.code === "KeyT") toggleTestRig();
-  // one line, not two: this handler carried the same cycleRange twice, so one
-  // press of R stepped the scope through two ranges and skipped one
-  if (e.code === "KeyR" && scope) scope.cycleRange(1);
-  // ---- PAUSE IS THE ENGINE'S LEVER, NOT THIS FILE'S FLAG. `paused` gated only
-  // the hook this file registered, and the match is not in that hook: teammatch
-  // autoStep is its own hook at order −50 and ordnance.step is another at order
-  // 20. So the banner said PAUSED while the clock ran 487.3 → 476.8 over ten
-  // seconds and bombs kept falling and detonating; only player, AI and jet
-  // motion stopped. CBZ.micro.paused stops EVERY micro.onFrame hook at once —
-  // the match, the ordnance, this game and the HUD — while the renderer keeps
-  // drawing (microboot renders outside the pause gate) and the `always` band
-  // keeps running by contract, so the banner stays on screen and the frozen
-  // frame stays lit. dt is clamped at 0.1 s upstream, so the resume cannot
-  // teleport anything.
-  if (e.code === "KeyP" && match && match.phase !== "over") {
-    paused = !paused;
-    CBZ.micro.paused = paused;
-    showBanner(paused ? "PAUSED" : "RESUMED", "");
-  }
-  if (e.code === "KeyC" && myUnit && myUnit.kind === "air") camMode = camMode === "bomb" ? "chase" : "bomb";
-  if (e.code === "KeyV" && myUnit && myUnit.kind === "air") camMode = camMode === "cockpit" ? "chase" : "cockpit";
-  if (e.code === "KeyQ" && myUnit && myUnit.role === "bomber" && myUnit.alive && myUnit.kind === "air") {
-    const foes = units.filter(function (x) { return x.alive && x.role === "runner" && x.team !== myUnit.team; });
-    if (foes.length) {
-      const f = foes[Math.floor(rngGame() * foes.length) % foes.length];
-      match.log("VECTOR · " + Math.round(Math.hypot(f.pos.x - myUnit.pos.x, f.pos.z - myUnit.pos.z)) + " m", { tone: "info" });
-    }
-  }
+  match.start();
+  ctl.lock();
 });
-document.addEventListener("click", function () {
-  if (started && !CBZ.micro.input.locked && match.phase !== "over") CBZ.micro.lock();
-  if (CBZ.micro.sfx) CBZ.micro.sfx.resume();
-});
-// no banner on unlock: core/microboot.js falls back to drag-look, so the
-// camera still answers and there is nothing to announce
-CBZ.micro.onUnlock = function () {};
 
-/* STAMP THE BODY AT LOAD, NOT AT BOOT. buildTouch() adds `is-touch`, but it
-   does not run until PLAY is pressed — and the briefing is on screen for the
-   whole minute before that. Detecting the device here means a phone never
-   sees the desktop key list at all, rather than seeing it and having it swap
-   out underneath. */
-if (CBZ.micro.touch && ((window.matchMedia && window.matchMedia("(pointer: coarse)").matches) ||
-    (navigator.maxTouchPoints || 0) > 0)) {
-  document.body.classList.add("is-touch");
-  el("ctlNote").textContent = "LEFT THUMB stick · rim to sprint · RIGHT HALF drag to look";
-}
-
-let wantTest = /[?&]test=1/.test(location.search);
-el("testBtn").addEventListener("click", function () {
-  wantTest = true;
-  el("testBtn").classList.add("on");
-  el("testBtn").textContent = "TEST RIG ✓";
-  if (started) toggleTestRig(true);
-});
-el("playBtn").addEventListener("click", function () {
-  el("playBtn").disabled = true;
-  el("loadNote").textContent = "200 towers · a park · a runway";
-  setTimeout(build, 60);
-});
-el("againBtn").addEventListener("click", function () { location.reload(); });
-
-// ---- the debug door
+// a probe surface, so the reuse claim can be checked rather than asserted
 window.__bomb = {
-  get match() { return match; },
-  get world() { return world; },
-  get base() { return base; },
-  get units() { return units; },
-  get me() { return myUnit; },
-  get nuke() { return nuke; },
-  // the aeroplanes, which nothing else exposes: a bomber's whole state is on
-  // its airframe and there is no way to look at one from outside without this
-  get jets() { return units.filter(function (u) { return u.alive && u.af; }); },
-  probe: probe,
-  callNuke: callNuke,
-  warp: function (x, z) { if (myUnit) { myUnit.pos.set(x, floorAt(x, z) + 2, z); if (myUnit.af) myUnit.af.pos.copy(myUnit.pos); } },
-  board: function () { if (myUnit) { myUnit.pos.set(base.bomber.x + 6, base.bomber.y, base.bomber.z); } },
   audit: function () {
+    const towers = ((town && town.lots) || []).filter(function (L) { return L.skylineStoreys; }).length;
     return {
-      micro: CBZ.microAudit(), city: CBZ.desertCityAudit(), base: CBZ.airbaseAudit(),
-      ordnance: CBZ.ordnanceAudit(), airframe: CBZ.airframeAudit(), match: CBZ.teammatchAudit(),
-      radar: CBZ.radarAudit(),
-      // which assets are the SHIPPED gang-city models and which are local
-      // primitives — the one number this whole refactor was about
-      reuse: Object.assign({}, CBZ.airbase.usingReal(), {
-        people: !!CBZ.makeCharacter, gait: !!CBZ.animChar,
-        trees: CBZ.desertCity.world ? CBZ.desertCity.world.stats.treeSource : null,
-      }),
+      tags: document.querySelectorAll("script[src]").length,
+      studio: CBZ.studio.audit(),
+      caps: CBZ.modeHas ? {
+        traverse: CBZ.modeHas("traverse"), blast: CBZ.modeHas("blast"),
+        blastActors: CBZ.modeHas("blastActors"), breach: CBZ.modeHas("breach"),
+      } : null,
+      route: CBZ.modeCapsAudit ? CBZ.modeCapsAudit().routes[CBZ.game.mode] : null,
+      colliders: (CBZ.colliders && CBZ.colliders.length) || 0,
+      world: { town: !!town, lots: ((town && town.lots) || []).length, towers: towers,
+               base: !!(base && base.regions && base.regions.length), baseRoads: (base && base.roads.length) || 0,
+               airport: !!(port && port.regions && port.regions.length) },
+      civs: { cast: civs.length, alive: civs.filter(function (c) { return !c.dead; }).length },
+      units: units.length, alive: units.filter(function (u) { return u.alive; }).length,
+      nuke: { kills: nuke.kills, armed: nuke.armed, spent: nuke.spent },
     };
   },
 };
+});
 })();
 </script>
 </body>

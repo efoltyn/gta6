@@ -6,9 +6,10 @@
 
    The only measurement that means anything for src/core/studio.js is whether
    a page that names its packs BOOTS. Not whether the manifest parses. So this
-   loads games/bomb-survivor-b.html, the page that carries ONE script tag where
-   games/bomb-survivor.html carries seventeen, in a real headless browser and
-   asks:
+   loads games/bomb-survivor.html — THE studio page: one script tag, and since
+   the A/B bet was settled it is also the one bomb game, standing on the real
+   military island and a real towngen downtown — in a real headless browser
+   and asks:
 
      1. ONE TAG. The document really does carry a single authored <script src>,
         and the studio really did inject the rest.
@@ -157,14 +158,14 @@ const chrome = spawn(CHROME_BIN, [
   "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
   "--enable-webgl", "--mute-audio", "--window-size=480,300",
   `--remote-debugging-port=${dbg}`, `--user-data-dir=${profile}`,
-  `${origin}games/bomb-survivor-b.html`,
+  `${origin}games/bomb-survivor.html`,
 ], { stdio: "ignore" });
 
 let page = null;
 for (let i = 0; i < 240 && !page; i++) {
   try {
     const ps = await (await fetch(`http://127.0.0.1:${dbg}/json/list`)).json();
-    page = ps.find((p) => p.type === "page" && p.url.indexOf("bomb-survivor-b") >= 0);
+    page = ps.find((p) => p.type === "page" && p.url.indexOf("bomb-survivor") >= 0);
   } catch (_) {}
   if (!page) await sleep(100);
 }
@@ -194,7 +195,7 @@ await send("Runtime.enable");
 // the studio has to finish loading before anything is true
 let ready = false;
 for (let i = 0; i < 300 && !ready; i++) {
-  ready = await evl("!!(window.CBZ && CBZ.studio && CBZ.micro && window.__bombB)");
+  ready = await evl("!!(window.CBZ && CBZ.studio && CBZ.micro && window.__bomb)");
   if (!ready) await sleep(500);
 }
 if (!ready) done(1, "STUDIO: FAIL the page never finished loading (studio/micro/__bomb absent)");
