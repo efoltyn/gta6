@@ -51,7 +51,18 @@
                                // a VIP's paid detail backs the principal (vips.js):
                                // the magnate reads untouchable BECAUSE of the suits
                                // (proximity is the link — the detail walks WITH them)
-                               : (a.vipLvl ? !!o._vipGuard : false));
+                               : a.vipLvl ? !!o._vipGuard
+                               // A UNIFORM IS BACKUP TOO. This asked only about
+                               // gangs and VIP details, so a rifleman standing in
+                               // a formation of thirty-two read as a man ALONE —
+                               // and effLevel() then let sizeup FOLD him.
+                               // `organization` is the membership field
+                               // factions.of() already reads (factions.js:968),
+                               // and it is worn by exactly the bodies for which
+                               // this is true: soldiers, federal agents, a cell.
+                               : (a.organization && CBZ.CONFIG.CITY_ORG_RALLY !== false)
+                                 ? o.organization === a.organization
+                               : false);
       if (!mine) continue;
       const dx = o.pos.x - ax, dz = o.pos.z - az;
       if (dx * dx + dz * dz >= R2) continue;
@@ -113,13 +124,23 @@
   CBZ.citySizeUpHit = function (tgt, att) {
     if (!tgt || tgt.dead || !att || att.dead) return true;
     if (tgt.kind === "cop" || tgt.kind === "security") return true;
-    // you never jump ONE ganger — their people pile in (team fight, every time)
-    if (tgt.gang && CBZ.cityRallyGang && (tgt._rallyT || 0) <= 0 && att.gang !== tgt.gang) {
+    // you never jump ONE ganger — their people pile in (team fight, every time).
+    // NOR ONE SOLDIER. `organization` is the same membership field
+    // factions.of() has always read, and cityRallyGang answers for both sides
+    // now (peds.js, CITY_ORG_RALLY) — so the thirty-two men on Fort Brandt's
+    // parade ground stop being thirty-two men who each stand alone. The
+    // same-side test is the rally's own; here we only need "is he ONE OF a
+    // body of people, and is the attacker not one of them too".
+    const tSide = tgt.gang || (CBZ.CONFIG.CITY_ORG_RALLY !== false ? tgt.organization : null);
+    const aSide = att.gang || (CBZ.CONFIG.CITY_ORG_RALLY !== false ? att.organization : null);
+    if (tSide && CBZ.cityRallyGang && (tgt._rallyT || 0) <= 0 && aSide !== tSide) {
       CBZ.cityRallyGang(tgt, att);
       tgt._rallyT = 6;
       // …and the set arrives with SHAPE, not as a blob (gangs.js war-shape:
-      // shooters fan to a firing arc, melee press in pairs, top rank calls it)
-      if (CBZ.cityGangShapeUp) CBZ.cityGangShapeUp(tgt.gang);
+      // shooters fan to a firing arc, melee press in pairs, top rank calls it).
+      // gangs.js owns GANGS; an organisation's shape is squadai.js's, applied
+      // by city/fortresponse.js when it drives the section.
+      if (tgt.gang && CBZ.cityGangShapeUp) CBZ.cityGangShapeUp(tgt.gang);
     }
     const dare = CBZ.citySizeUp(tgt, att);
     if (!dare) CBZ.citySizeUpFold(tgt, att);

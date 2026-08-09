@@ -5373,21 +5373,57 @@
   // the whole block converges on the threat (GTA-style turf swarm). Bounded scan
   // (~25m, n-capped); only flips calm members so we never stomp a busy brain. The
   // response is louder when the gangs are at open war (more bodies, even the wary).
+  /* YOU NEVER JUMP ONE OF THEM — YOU JUMP THE BLOCK, OR THE UNIT.
+
+     This rallied a GANG and only a gang (`o.gang !== ped.gang`), which meant
+     the one primitive in the repo that actually makes bystanders run TOWARD a
+     fight was blind to every organised body that is not a street set. Measured
+     consequence, and it is the owner's 2026-08-09 complaint about Fort Brandt
+     in one line: shooting a soldier standing in a formation of thirty-two
+     rallied nobody, because a soldier carries `organization:"military"` (the
+     field `factions.of()` has read since factions.js:968) and no `gang` at all.
+
+     An ORGANISATION rallies on two changes and no new bookkeeping:
+
+       · the side test asks for the same SIDE, not the same gang. `gang` still
+         wins where it exists, so every street set behaves byte-identically.
+       · the nerve test asks whether he is ARMED. The gang thresholds are
+         written for civilians who happen to run with a crew — `crook` is 0.72
+         — and a rifleman is cast at aggr 0.35-0.5, so an org rally gated on
+         aggr would have been code that could never once fire. A man with a
+         rifle whose mate has just been shot comes. That is the whole rule.
+
+     Flag CITY_ORG_RALLY (declared here, in the owning file). Off → the exact
+     gang-only behaviour above. */
+  function rallySideOf(a) {
+    if (!a) return null;
+    if (a.gang) return "gang:" + a.gang;
+    if (CBZ.CONFIG.CITY_ORG_RALLY === false) return null;
+    if (a.organization) return "org:" + a.organization;
+    return null;
+  }
+  if (CBZ.CONFIG.CITY_ORG_RALLY == null) CBZ.CONFIG.CITY_ORG_RALLY = true;
+
   function rallyGang(ped, intruder) {
     if (!intruder || intruder.dead) return;
+    const side = rallySideOf(ped);
+    if (!side) return;
+    const org = !ped.gang;                                        // an ORGANISATION, not a street set
     const peds = CBZ.cityPeds, R2 = 25 * 25;
     // is the intruder's gang at war with ours? → a bigger, angrier turnout
     const iGang = intruder.gang || (intruder.isPlayer ? playerGangId() : null);
-    const war = !!(iGang && CBZ.cityAtWar && CBZ.cityAtWar(ped.gang, iGang));
-    const cap = war ? 6 : 4;
+    const war = !!(iGang && !org && CBZ.cityAtWar && CBZ.cityAtWar(ped.gang, iGang));
+    const cap = war ? 6 : org ? 6 : 4;
     let called = 0;
     for (let i = 0; i < peds.length && called < cap; i++) {
       const o = peds[i];
       if (o === ped || o.dead || o.vendor || o.ko > 0 || o.controlled || o.companion) continue;
-      if (o.gang !== ped.gang) continue;                          // only our own crew
+      if (rallySideOf(o) !== side) continue;                      // only our own people
       if (o.rage || o.state === "fight" || o.surrender) continue; // already busy
-      // war pulls the wary too; a normal incursion only rouses the bold+
-      if (o.aggr < (war ? (A0().bold || 0.5) : (A0().crook || 0.72))) continue;
+      // war pulls the wary too; a normal incursion only rouses the bold+.
+      // A UNIFORM AND A RIFLE ARE THE NERVE — see the note above.
+      if (org) { if (!o.armed && o.aggr < (A0().bold || 0.5)) continue; }
+      else if (o.aggr < (war ? (A0().bold || 0.5) : (A0().crook || 0.72))) continue;
       const dx = o.pos.x - ped.pos.x, dz = o.pos.z - ped.pos.z;
       if (dx * dx + dz * dz >= R2) continue;
       o.rage = intruder; o.state = "fight";
