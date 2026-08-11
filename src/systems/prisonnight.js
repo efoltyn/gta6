@@ -92,6 +92,21 @@
   }
   function inWing(x, z) { return x > CB.x0 && x < CB.x1 && z > CB.z0 && z < CB.z1; }
 
+  /* WHICH ROOM A POINT IS IN — one answer, used twice below. WING is a
+     sentinel so the cell wing can be compared by identity beside the room
+     objects; `null` is the open compound. */
+  const WING = { id: "wing" };
+  function regionAt(x, z) { return inWing(x, z) ? WING : roomAt(x, z); }
+  // A fixture's own region, cached. ROOMS.length is the version stamp: this
+  // list GROWS at runtime (world/adminwing.js pushes its wing on the first
+  // tick, long after the fittings inside it registered), so a value cached
+  // before that push has to be re-asked — which is exactly what a length
+  // comparison costs nothing to do.
+  function regionOf(f) {
+    if (f._regN !== ROOMS.length) { f._regN = ROOMS.length; f._reg = regionAt(f.x, f.z); }
+    return f._reg;
+  }
+
   /* ==========================================================
      2. THE FIXTURE REGISTRY. One record per light, one `kind` per schedule
         behaviour. `level` is written by the driver below and read by
@@ -141,9 +156,10 @@
   const _p = { x: 0, y: 0, z: 0 };
   function lightAt(x, z) {
     const sky = dayLevel();
+    const here = regionAt(x, z);
     let L;
-    if (inWing(x, z)) L = Math.max(wingLevel, sky * 0.55);      // barred windows
-    else if (roomAt(x, z)) L = Math.max(roomLevel, sky * 0.35); // small windows
+    if (here === WING) L = Math.max(wingLevel, sky * 0.55);     // barred windows
+    else if (here) L = Math.max(roomLevel, sky * 0.35);         // small windows
     else {
       L = sky;
       if (L < 0.9 && CBZ.litBySearchlight) {
@@ -155,6 +171,16 @@
     for (let i = 0; i < fixtures.length; i++) {
       const f = fixtures[i];
       if (f.level <= 0.02) continue;
+      /* A LAMP DOES NOT SHINE THROUGH A WALL. This loop was a pure radius
+         test, so the yard flood mast at (15,1) — 4 m outside the gun room's
+         west wall, r = 13 — lit the sealed armoury to 0.9 all night, and
+         CBZ.sightScale handed every sensor in there full range on the
+         strength of it. The one room in the prison whose darkness is the
+         point was the brightest room in it. Same fault reaches the mess, the
+         lounge and the admin corridor from the masts either side of them.
+         Light crosses a region boundary only through a window, and windows
+         are already priced above (sky * 0.35 / 0.55). */
+      if (regionOf(f) !== here) continue;
       const dx = x - f.x, dz = z - f.z;
       const d2 = dx * dx + dz * dz;
       if (d2 > f.r * f.r) continue;

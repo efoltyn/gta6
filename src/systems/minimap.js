@@ -30,6 +30,67 @@
     ctx.beginPath(); ctx.arc(mx(x), mz(z), r || 2.2, 0, 7); ctx.fill();
   }
 
+  /* ============================================================
+     A PRISON MAP, NOT A COLLIDER DUMP.
+
+     This drew EVERY entry in CBZ.colliders as a filled rectangle, and
+     CBZ.colliders is not "walls" — it is every solid AABB in the world. A
+     trash bag, a traffic cone, a bench, a bunk-room stool, a crate, the three
+     colliders each cell face is built from and all thirteen door leaves each
+     got a `Math.max(1, …)` px stamp, so a 0.4 m cone weighed exactly as much
+     on a 112x168 canvas as a 76 m perimeter wall. At 112 px across the whole
+     compound that is not a map of anything: it is a grey field.
+
+     Two facts already in the collider records separate structure from litter,
+     and neither needs a new tag on anyone:
+
+       · `pieceId` — systems/pieces.js stamps it on every collider it makes.
+         A piece IS a prop (crates, tables, the yard furniture). Dropped.
+       · HEIGHT — world/materials.js's addBox contract: a collider with no
+         y-span is a full-height wall, one with y0/y1 is height-gated, and a
+         mesh-backed collider knows its own box. Under 1.9 m is furniture you
+         step over or round, never a thing that shapes a route. Dropped.
+
+     What survives is classified by FOOTPRINT: a run of 2.2 m or more is a
+     wall or a building and gets a filled rect; anything shorter that is still
+     tall is a leaf, a jamb or a tower stilt and gets a 2 px mark. That is
+     "doors as dots" for free — and doors OPEN as gaps for free too, because
+     world/door.js, cellblock.setDoor, the armory gate and world/adminwing.js
+     all splice their collider out of CBZ.colliders when they open. The map
+     shows you which doors are shut because the shut ones are the only ones in
+     the array.
+
+     Cheap: the classification is O(n) and cached, re-derived only when the
+     array LENGTH moves (which is exactly when a door opens or closes) — the
+     same invalidation world/roofs.js uses for its fixture queue.
+     ============================================================ */
+  const MIN_TOP = 1.9;     // m — under this it is furniture, not architecture
+  const WALL_SPAN = 2.2;   // m — the shortest run that reads as a wall
+  let structure = [], leaves = [], seenLen = -1;
+
+  function topOf(c) {
+    if (c.y1 != null) return c.y1;
+    const r = c.ref, p = r && r.geometry && r.geometry.parameters;
+    if (p && p.height != null) return (r.position ? r.position.y : 0) + p.height / 2;
+    return 99;             // no vertical contract at all = full-height wall
+  }
+
+  function classify() {
+    const cols = CBZ.colliders || [];
+    seenLen = cols.length;
+    structure = []; leaves = [];
+    for (let i = 0; i < cols.length; i++) {
+      const c = cols[i];
+      if (!c || c.pieceId != null) continue;
+      // off-map geometry (the city, when it has been built this session) is
+      // not clipped by the canvas for free — every rect still costs a fill.
+      if (c.maxX < X0 || c.minX > X1 || c.maxZ < Z0 || c.minZ > Z1) continue;
+      if (topOf(c) < MIN_TOP) continue;
+      const w = c.maxX - c.minX, d = c.maxZ - c.minZ;
+      (Math.max(w, d) >= WALL_SPAN ? structure : leaves).push(c);
+    }
+  }
+
   let drawAcc = 0;
   CBZ.onUpdate(47, function (dt) {
     if (CBZ.game.mode !== "escape") return; // survival draws its own minimap
@@ -42,10 +103,17 @@
     ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = "rgba(10,18,30,.55)"; ctx.fillRect(0, 0, W, H);
 
-    // walls (LOS blockers approximate the layout well)
-    ctx.fillStyle = "rgba(180,190,200,.35)";
-    for (const c of CBZ.colliders) {
+    // walls and buildings, then the doors still shut across them
+    if ((CBZ.colliders || []).length !== seenLen) classify();
+    ctx.fillStyle = "rgba(186,196,208,.40)";
+    for (let i = 0; i < structure.length; i++) {
+      const c = structure[i];
       ctx.fillRect(mx(c.minX), mz(c.minZ), Math.max(1, (c.maxX - c.minX) * sx), Math.max(1, (c.maxZ - c.minZ) * sz));
+    }
+    ctx.fillStyle = "rgba(255,179,71,.62)";        // the admin-wing lock amber
+    for (let i = 0; i < leaves.length; i++) {
+      const c = leaves[i];
+      ctx.fillRect(mx((c.minX + c.maxX) / 2) - 1, mz((c.minZ + c.maxZ) / 2) - 1, 2, 2);
     }
 
     // objective

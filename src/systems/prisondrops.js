@@ -673,7 +673,10 @@
     if (promptBest && !promptBest.data.taken) {
       const label = "Take " + (promptBest.data.item || "it");
       // touch → the shared prison pill row; desktop → our own walk-up div.
-      const pilled = CBZ.prisonPrompt ? CBZ.prisonPrompt("prisondrop", "e", label, null, 0.3) : false;
+      // promptD2 (squared metres to the winning pile) is handed on so the
+      // shared pill row can arbitrate a drop at your feet against a vent or a
+      // breaker you are also stood beside — see ONE PILL in interactions.js.
+      const pilled = CBZ.prisonPrompt ? CBZ.prisonPrompt("prisondrop", "e", label, null, 0.3, promptD2) : false;
       if (pilled) hidePrompt(); else showPrompt("[E] " + label);
       if (takeEdge) takeDrop(promptBest);
     } else {

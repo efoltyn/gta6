@@ -58,8 +58,20 @@
       target: new THREE.Vector3(),
     };
     CBZ.searchlights.push(sl);
+    MINE.push(sl);
     return sl;
   }
+  /* THE TOWERS THIS FILE BUILT, and only those. CBZ.searchlights is a SHARED
+     registry — src/games/military.js:489-495 pushes its own beam records into
+     it to reuse CBZ.litBySearchlight as a sensor, and those records carry a
+     cone and a pool but no `spot`, no head and no sweep fields, because that
+     package drives them in its own updateBeams(). update() below walked the
+     shared array, so the first frame of escape mode after a city session that
+     had mounted the military venue threw on `sl.spot.intensity` — every
+     frame, forever, taking the four real searchlights and everything ordered
+     after them down with it. A driver drives what it BUILT; a sensor may
+     still ask the whole registry (litBySearchlight does, defensively). */
+  const MINE = [];
 
   // north exercise yard — two lights sweeping from opposite corners
   makeLight(-30, 52, 0, 18, 28, 16);
@@ -69,7 +81,7 @@
   makeLight(44, 128, -Math.PI / 2, 30, 92, 26);
 
   function update(dt) {
-    for (const sl of CBZ.searchlights) {
+    for (const sl of MINE) {
       if (sl.disabled > 0) {
         sl.disabled = Math.max(0, sl.disabled - dt);
         sl.spot.intensity = 0.15;
@@ -124,7 +136,7 @@
   // detection query: is this position inside any searchlight pool?
   CBZ.litBySearchlight = function (pos, crouch) {
     for (const sl of CBZ.searchlights) {
-      if (sl.disabled > 0) continue;
+      if (!sl || !sl.pool || sl.disabled > 0) continue;   // a foreign record may carry neither
       const dx = pos.x - sl.pool.position.x;
       const dz = pos.z - sl.pool.position.z;
       // crouching effectively shrinks how far into the pool you can be caught

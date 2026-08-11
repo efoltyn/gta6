@@ -215,6 +215,15 @@
       // longer the dark gets, the more that beam is worth killing.)
       if (sl.disabled > 0) continue;
       if (sl.spot) sl.spot.intensity = 0.4 + nightAmt * 1.8;
+      // ...AND A BEAM THAT IS HOLDING THE PLAYER OWNS ITS OWN OPACITY. The
+      // other half of the same fault, found by the same route: searchlight.js
+      // flushes the pool that has caught you to red and throbs it (its
+      // JAIL_SEARCHLIGHT_DETECT feedback, the visible half of the heat
+      // detection.js is applying), and this loop wrote the flat night ramp
+      // straight back over both every frame. Being lit up looked exactly like
+      // not being lit up. The lamp's GAIN still follows the night here; only
+      // the caught-beam throb is left to the file that owns it.
+      if (sl._hot) continue;
       if (sl.cone) sl.cone.material.opacity = 0.05 + nightAmt * 0.14;
       if (sl.pool) sl.pool.material.opacity = 0.12 + nightAmt * 0.22;
     }

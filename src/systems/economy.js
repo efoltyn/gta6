@@ -398,7 +398,12 @@
         if (CBZ.addRacketStanding) CBZ.addRacketStanding(-5);
       }
       noteRead(guardish ? "badge" : "wealth", guardish ? 8 + loot * 0.35 : 4 + loot * 0.7, nm(actor), guardish ? 15 : 12);
-      CBZ.sfx("coin");
+      // A POCKET IS NOT A TILL. `coin` is handleCoins — right for the payoff
+      // above, wrong for a hand going into a guard's belt pouch and coming
+      // back with his keys. `loot` IS that recording (beltHandle/drop, 45 dB),
+      // and it is the only physical tell a successful lift has: there is no
+      // pickpocket ARM ANIMATION on the rig — see the note in the failure leg.
+      CBZ.sfx("loot");
       // pickpocket the BEST thing they're carrying (a guard's KEY, a gold
       // chain) — so it's worth doing even when you're already flush with cigs.
       let lifted = "";
@@ -414,6 +419,17 @@
       }
       return { ok: true, msg: lifted ? `Lifted a ${lifted}${loot ? ` + ${loot}` : ""} clean.` : `Lifted ${loot} unseen.` };
     }
+    /* A FAILED LIFT WAS COMPLETELY SILENT. You reached into a screw's pocket,
+       he caught you, 55 points of heat landed — and the only evidence any of
+       it happened was a line of text. `whoosh` is the bank's cloth-and-sleeve
+       cue (35 dB, the quietest thing in it): a hand that moved and came back
+       empty. Your own hand, so the global surface.
+       NOT DONE HERE, and it is the honest gap: there is no pickpocket ARM
+       ANIMATION anywhere on the rig — entities/character.js has punch/kick/
+       block layers and nothing between "idle" and "strike". Adding a reach is
+       a change to the SHARED character rig and belongs with the phase that
+       reworks stealing itself, not with a popup sweep. */
+    CBZ.sfx("whoosh");
     // caught in the act
     if (guardish) {
       CBZ.reportCrime(55, { type: "steal", actorRole: g.role });

@@ -103,8 +103,12 @@
        desktop  the exact legacy hint string (null = caller draws its own text)
        ttl      seconds the pill survives without a refresh (callers re-arm it
                 every frame, exactly like the hintTimer they already run)
+       d2       OPTIONAL squared metres from the player to the thing this
+                prompt is about. See ONE PILL below.
      Returns true when the pill took the prompt (touch), false on desktop. */
-  function prisonPrompt(id, act, label, desktop, ttl) {
+  const DEFAULT_D2 = 4;
+  let pillSeq = 0;
+  function prisonPrompt(id, act, label, desktop, ttl, d2) {
     if (!PTP() || !onTouch() || !act) {
       if (desktop != null) CBZ.showHint(desktop);
       return false;
@@ -112,13 +116,45 @@
     let p = pills.get(id);
     if (!p || p.act !== act || p.label !== label) {
       if (p && p.el.parentNode) p.el.parentNode.removeChild(p.el);
-      p = { el: makePill(act, label), act: act, label: label, ttl: 0 };
+      p = { el: makePill(act, label), act: act, label: label, ttl: 0, d2: 0, seq: 0 };
       pills.set(id, p);
       ensureWrap().appendChild(p.el);
     }
     p.ttl = ttl || 0.25;
+    // Unranked callers sit at 2 m — the range nearly every prison prompt arms
+    // itself at — so a site that never learns about d2 still competes fairly
+    // and is never permanently outranked by one that does.
+    p.d2 = (d2 == null || !isFinite(d2)) ? DEFAULT_D2 : d2;
+    p.seq = ++pillSeq;
     pillWrap.style.display = "flex";
     return true;
+  }
+
+  /* ---- ONE PILL, THE NEAREST -----------------------------------------------
+     OWNER'S LAW 5: "Fewer button popups on both desktop and touch, not more."
+     Desktop has enforced that for free since this block was written — every
+     desktop prompt is CBZ.showHint, which is one DOM node where the last
+     writer wins. TOUCH had no such floor: #prisonPrompts is a flex-WRAP row
+     and every id got its own pill, so standing on a vent beside a dropped
+     pistol next to the breaker built a three-button wall across the bottom of
+     an iPad — the exact chrome the pill row was invented to stop.
+
+     The arbitration is the one a walk-up prompt has always implied: the
+     thing you are STOOD ON is the thing you meant. Losers are hidden rather
+     than removed, so their owners' TTL re-arm loops are untouched and the
+     winner can change on any frame without a DOM rebuild. */
+  function arbitrate() {
+    let best = null;
+    pills.forEach(function (p) {
+      if (!best || p.d2 < best.d2 - 1e-6 || (p.d2 <= best.d2 + 1e-6 && p.seq > best.seq)) best = p;
+    });
+    pills.forEach(function (p) {
+      const show = p === best;
+      if (p._shown === show) return;
+      p._shown = show;
+      p.el.style.display = show ? "" : "none";
+    });
+    return best;
   }
 
   function prisonPromptClear(id) {
@@ -142,6 +178,7 @@
       if (dead || p.ttl <= 0) ids.push(id);
     });
     for (let i = 0; i < ids.length; i++) prisonPromptClear(ids[i]);
+    if (pills.size) arbitrate();
   });
 
   CBZ.prisonPrompt = prisonPrompt;
@@ -161,9 +198,13 @@
     const s = CBZ._prisonPromptSites || [];
     const pilled = [], textOnly = [];
     for (let i = 0; i < s.length; i++) (s[i].act ? pilled : textOnly).push(s[i].id);
+    // `shown` is the ONE PILL ratchet: however many prompts are live, at most
+    // one may be on screen. It can only ever be 0 or 1.
+    let shown = 0;
+    pills.forEach(function (p) { if (p._shown) shown++; });
     return {
       sites: s.length, pilled: pilled.length, textOnly: textOnly.length,
-      legacy: 0, live: pills.size, touch: onTouch(),
+      legacy: 0, live: pills.size, shown: shown, touch: onTouch(),
       pilledIds: pilled, textOnlyIds: textOnly,
     };
   };
@@ -191,8 +232,12 @@
       CBZ.ceilingLamp.material.color.setHex(0x2b2b2b);
       CBZ.ceilingLamp.material.emissive.setHex(0x000000);
     }
-    CBZ.flashToast("POWER OUT!");
-    CBZ.flashHint("Sabotaged power! All cameras and Cell Block lights are deactivated for 20s.", 3.2);
+    // NINETEEN LAMPS AND THREE CAMERAS GO OUT ON THIS FRAME. "POWER OUT!" was
+    // a caption on the single most visible event in the prison, and the
+    // explainer under it ("…deactivated for 20s") was the mechanic reading
+    // itself out. What was missing is the only thing a hand on a breaker
+    // actually makes: the THROW. Your own hand, so the global surface.
+    if (CBZ.sfx) CBZ.sfx("switch");
   }
 
   function crawlVent(vent) {
@@ -214,6 +259,36 @@
   // router resolves data-tfn straight off the namespace.
   CBZ.prisonSabotagePower = sabotagePower;
   CBZ.prisonVentCrawl = function () { crawlVent(armedVent); };
+
+  /* ---- THE READER ANSWERS FOR THE DOOR -------------------------------------
+     world/door.js already bolts a card reader with a status light beside the
+     yard checkpoint — red locked, green open — the same lamp world/adminwing.js
+     puts on its locks and entities/security.js now puts on a camera. So
+     "Locked checkpoint - find a keycard or crawl through maintenance." was
+     narrating a machine that was already speaking, at head height, on the
+     slab you are stood against.
+
+     What the panel genuinely LACKED was a refusal. A reader that never reacts
+     is scenery; a reader that beats amber the moment you step onto it and
+     clicks its solenoid once is a door telling you it saw you and said no.
+     Red returns when you walk away. Cached on a key so a Lambert material is
+     not rewritten every frame. ---- */
+  let readerK = "", readerRung = false;
+  function readerLamp(key, rate) {
+    const d = CBZ.door, lamp = d && d.readerLight;
+    if (!lamp) return;
+    const lit = !rate || Math.sin((CBZ.now || 0) * rate) > 0;
+    const k = key + (lit ? "1" : "0");
+    if (readerK === k) return;
+    readerK = k;
+    if (key === "deny") {
+      lamp.material.color.setHex(lit ? 0xffb347 : 0x7a4f18);
+      lamp.material.emissive.setHex(lit ? 0xff7a1a : 0x2a1a06);
+    } else {
+      lamp.material.color.setHex(0xff3b3b);
+      lamp.material.emissive.setHex(0xff0000);
+    }
+  }
 
   function updateInteractions(dt) {
     // ---- keycard ----
@@ -246,14 +321,21 @@
     const ddx = player.pos.x, ddz = player.pos.z + 8;
     const nearDoor = ddx * ddx + ddz * ddz < 16;
     if (!door.open) {
-      if (nearDoor) {
-        if (g.hasKey) {
-          CBZ.openDoor();
-          CBZ.setObjective("Cross the yard, dodge the searchlights, reach the glowing exit.");
-        } else {
-          CBZ.showHint("Locked checkpoint - find a keycard or crawl through maintenance.");
-          hintTimer = 0.4;
+      if (nearDoor && g.hasKey) {
+        CBZ.openDoor();
+        readerK = ""; readerRung = false;
+        CBZ.setObjective("Cross the yard, dodge the searchlights, reach the glowing exit.");
+      } else if (nearDoor) {
+        readerLamp("deny", 0.013);
+        if (!readerRung) {
+          readerRung = true;
+          // the solenoid, from the reader itself (2.6, 3.8, -7.5): a 50 dB
+          // click that is not even requested from across the yard.
+          if (CBZ.worldSfx) CBZ.worldSfx("switch", 2.6, -7.5, { y: 3.8, ref: 6, volume: 0.45, gap: 0.5 });
         }
+      } else {
+        readerRung = false;
+        readerLamp("lock", 0);
       }
     } else if (door.t < 1) {
       door.t = Math.min(1, door.t + dt * 1.6);
@@ -273,14 +355,17 @@
             CBZ.ceilingLamp.material.color.setHex(0xffe9a8);
             CBZ.ceilingLamp.material.emissive.setHex(0xffcf66);
           }
-          CBZ.sfx("key");
-          CBZ.flashToast("POWER RESTORED");
+          // The lights coming back on IS "POWER RESTORED". The old `key` cue
+          // was a lock opening, played for a breaker closing, from nowhere in
+          // particular; the breaker is a fixed object across the yard, so the
+          // contactor slams from ITS position and fades with distance.
+          if (CBZ.worldSfx) CBZ.worldSfx("switch", breaker.x, breaker.z, { y: 1.6, ref: 7, volume: 0.6, gap: 0.5 });
         }
       } else {
         const bdx = player.pos.x - breaker.x, bdz = player.pos.z - breaker.z;
         if (bdx * bdx + bdz * bdz < 1.8) {
           CBZ.prisonPrompt("breaker", "@prisonSabotagePower", "Sabotage Power",
-            "Press [E] to Sabotage Power");
+            "Press [E] to Sabotage Power", 0.25, bdx * bdx + bdz * bdz);
           hintTimer = 0.2;
           if (CBZ.keys && CBZ.keys["e"]) sabotagePower();
         }
@@ -295,11 +380,16 @@
 
         if (cam.destroyed) continue;
 
-        // Player punching/attacking near the camera to smash it
+        // Player punching/attacking near the camera to smash it. YOUR fist,
+        // so the impact is CBZ.sfx (global — you are where the listener is);
+        // the lens cracking is the same player-direct exception the pane in
+        // city/buildings.js takes, at a third of the level because a 4 cm
+        // lens is not a shop window. The camera then HANGS off its mount
+        // (entities/security.js) — that is the receipt, not a popup.
         if (dist < 2.0 && CBZ.playerChar && CBZ.playerChar.punchT > 0) {
           cam.destroyed = true;
           CBZ.sfx("punch");
-          CBZ.flashHint("Security camera destroyed!", 2.2);
+          CBZ.sfx("glass", { volume: 0.3 });
           continue;
         }
 
@@ -317,18 +407,23 @@
           diff = (diff + Math.PI) % (Math.PI * 2) - Math.PI;
           diff = Math.abs(diff);
 
+          /* THIS BLOCK OWNS THE GEOMETRY AND NOTHING ELSE. It used to also
+             paint the lens — two files writing one material, which is how the
+             dot ended up meaning "camera" instead of meaning "you". It now
+             writes the two FACTS and entities/security.js paints them:
+
+               diff < 0.32   dead centre of frame — it has you (red, heat)
+               diff < 0.62   in frame, off centre — the sweep is closing (amber)
+
+             The amber band is not a new sensor: it is the same cone, doubled,
+             and it exists so the escalation has a rung you can act on. The
+             deleted popup said "CAMERA DETECTING YOU!" at the instant heat
+             started — by then the only useful information was already spent. */
           if (diff < 0.32) {
-            // inside detection field
             CBZ.addHeat(dt * 38);
-            CBZ.showHint("CAMERA DETECTING YOU!");
-            hintTimer = 0.2;
-            // Blink lens rapidly
-            cam.lens.material.color.setHex(CBZ.now % 200 < 100 ? 0xffea00 : 0xff3b3b);
-            cam.lens.material.emissive.setHex(CBZ.now % 200 < 100 ? 0xccbb00 : 0xff0000);
-          } else {
-            // Restore default colors
-            cam.lens.material.color.setHex(0xff3b3b);
-            cam.lens.material.emissive.setHex(0xff0000);
+            cam.seenT = 0.3;          // re-armed every frame; security.js decays it
+          } else if (diff < 0.62) {
+            cam.watchT = 0.3;
           }
         }
       }
@@ -338,12 +433,13 @@
     if (CBZ.vents && !CBZ.crawling) {
       for (const vent of CBZ.vents) {
         const vdx = player.pos.x - vent.x, vdz = player.pos.z - vent.z;
-        if (vdx * vdx + vdz * vdz < 1.6) {
+        const vd2 = vdx * vdx + vdz * vdz;
+        if (vd2 < 1.6) {
           armedVent = vent;                       // what a pill tap would enter
           armedVentT = 0.25;
           if (player.crouch) {
             CBZ.prisonPrompt("vent", "@prisonVentCrawl", "Crawl to " + vent.dest.name,
-              `Press [E] to Crawl to ${vent.dest.name}`);
+              `Press [E] to Crawl to ${vent.dest.name}`, 0.25, vd2);
             hintTimer = 0.2;
             if (CBZ.keys && CBZ.keys["e"]) crawlVent(vent);
           } else {
@@ -359,7 +455,7 @@
             // The corrected key name is FLAG-GATED, so PRISON_TOUCH_PROMPTS=false
             // restores the legacy (wrong) string byte-for-byte.
             CBZ.prisonPrompt("vent", "@prisonVentCrawl", "Crouch & Crawl to " + vent.dest.name,
-              PTP() ? "Crouch [C] to enter vent / hatch" : "Crouch [Shift] to enter vent / hatch");
+              PTP() ? "Crouch [C] to enter vent / hatch" : "Crouch [Shift] to enter vent / hatch", 0.25, vd2);
             hintTimer = 0.2;
           }
         }
