@@ -35,17 +35,73 @@
 
   const rng = function () { return CBZ.econ && CBZ.econ.rng ? CBZ.econ.rng() : Math.random(); };
 
+  /* ============================================================
+     "X FREEZES UP — [G] TO ROB" IS DELETED.
+
+     OWNER (2026-08-11), verbatim: "the worst thing ever is in the prison game,
+     the pop up 'X froze up. Rob him.' This spams and it's horrible and should
+     be deleted." He is right, and the file had already agreed with him in
+     writing: the `_prisonPromptSites` declaration at the bottom of this file
+     records this exact string under `was:` — i.e. CONVERTED, history, replaced
+     by the targeted `CBZ.prisonPrompt("rob", …, "Rob <name>")` a few lines
+     above. The prompt shipped. The popup was never removed. Both ran.
+
+     MEASURED (seed 90210, mode escape, rAF frozen, aim driven across the
+     densest cluster of live inmates through the real CBZ.aimedActor path):
+     ONE pan across five men produced 5 popups — while `Rob <name>` was armed
+     THIRTY times over the same span, because the prompt re-arms every frame
+     the shakedown is possible and the popup fires on top of it. FOUR pans over
+     THE SAME FIVE MEN produced 20 popups in 16.8 s = 71 per minute, the same
+     order as the 90/min punch spam docs/claude/sound.md was written to kill.
+
+     WHY IT REPEATED FOREVER. `_reactHinted` looks like a one-shot latch, but
+     `endIntimid()` clears it — and endIntimid runs HOLD (0.85 s) after you
+     look away. So glancing off a man and back is a brand new encounter and a
+     brand new popup, for the same man, at no cost, all day.
+
+     WHAT SHOWS IT INSTEAD — all of it already shipped, which is the point:
+       · he THROWS HIS HANDS UP, hunches, and goes wide-eyed and terrified
+         (systems/reactions.js poses him). That IS "freezes up", rendered on
+         the body the sentence was describing.
+       · `Rob <name>` appears as a real prompt ON HIM, for exactly as long as
+         the shakedown is actually possible, on desktop AND touch. The popup
+         named a key ([G]) that a touch player does not have — the same
+         fourth-wall control legend hud.js's CITY_CONTROL_RE already refuses.
+
+     The other two lines in this file are not deleted, because they are not
+     captions: one is a man DOING something to you and one is the ANSWER to a
+     button you just pressed. Both go through the gate below and both get a
+     MOUTH, the way entities/ai.js's narration sink demands.
+     ============================================================ */
+  // THE ONE GATE (systems/capture.js), degrade-safe, in the shape
+  // lockdown.js:44 / killstreaks.js:11 / detection.js:17 already use. Returns
+  // TRUE when the line was SUPPRESSED, so a caller with a diegetic replacement
+  // runs it and `JAIL_SHOW_DONT_TELL=false` still restores the popup.
+  function tellHint(m, s) { if (CBZ.jailTell) return CBZ.jailTell.hint(m, s); if (CBZ.flashHint) try { CBZ.flashHint(m, s); } catch (e) {} return false; }
+  // systems/interact.js loads after this file: resolve prisonSay at CALL time.
+  // Out of earshot (16 m) it returns false and we are silent, which is honest.
+  function sayIt(actor, line, secs) {
+    if (!actor || typeof CBZ.prisonSay !== "function") return false;
+    try {
+      return CBZ.prisonSay(actor, line, {
+        rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1,
+        secs: secs || 2.0,
+      });
+    } catch (e) { return false; }
+  }
+
   const HOLD = 0.85;        // how long a reaction lingers after you look away
   const ROB_RANGE = 6.5;    // max distance to shake someone down
+  // One man, one "he pulled on me" line per this many seconds of run time.
+  // Measured against the shipped behaviour: a 16.8 s four-pan over five men
+  // fired 20 popups (71/min); at 12 s the same sweep cannot exceed one per man.
+  const DRAW_SAY_CD = 12;
 
-  // PRISON_TOUCH_PROMPTS (declared in systems/interactions.js): "[G] to rob"
-  // names a key a touch player does not have. The CUE loses the glyph on touch
-  // and a real ROB pill is armed for as long as the shakedown is actually
-  // possible — see the tick loop. Desktop and flag-off are unchanged.
-  const PTP = () => !CBZ.CONFIG || CBZ.CONFIG.PRISON_TOUCH_PROMPTS !== false;
-  const onTouch = () => !!(CBZ.touchMode ||
-    (document.body && document.body.classList.contains("touch")));
-  const robCue = () => (PTP() && onTouch() ? "rob him" : "[G] to rob");
+  // PRISON_TOUCH_PROMPTS (systems/interactions.js) used to be read HERE, to
+  // strip the "[G]" glyph out of the popup on touch. The popup is gone, and
+  // with it the whole problem: `CBZ.prisonPrompt` renders the key or the pill
+  // per surface, once, in the place that owns that decision. Nothing in this
+  // file has to know what a player is holding any more.
 
   function alive(a) { return a && !a.dead && !(a.ko > 0) && !a.escaped; }
   function playerDist(n) {
@@ -95,7 +151,7 @@
     n.intimidFireT = 0;
     n.poseHandsUp = false;
     n.poseAimBack = false;
-    n._reactHinted = false;
+    n._drewSayT = -1e9;      // never spoken yet (run-elapsed stamp, see DRAW_SAY_CD)
     // reflect the gun into their loot so a frisk / takedown can yield it
     if (n.hasGun && CBZ.econ && CBZ.econ.rollLoadout) {
       const ld = CBZ.econ.rollLoadout(n);
@@ -131,10 +187,9 @@
       n.intimidMode = "scared";
       n.poseHandsUp = true; n.poseAimBack = false;
       if (CBZ.npcEmote) CBZ.npcEmote(n, "");
-      if (!n._reactHinted) {
-        n._reactHinted = true;
-        CBZ.flashHint && CBZ.flashHint("" + shortName(n) + " freezes up — " + robCue(), 1.7);
-      }
+      // NO POPUP HERE. The hands going up is the report, and `Rob <name>` is
+      // armed on him a few lines below for exactly as long as it is true.
+      // See the block at the top of this file.
     }
   }
 
@@ -160,7 +215,9 @@
     n.intimidT = 0;
     n.poseHandsUp = false;
     n.poseAimBack = false;
-    n._reactHinted = false;
+    // _drewSayT is deliberately NOT cleared here: this function runs 0.85 s
+    // after you look away, and clearing the latch is precisely what let the
+    // same man re-shout on every pan.
     // someone who drew on you stays wary and bolts with the gun still out;
     // hands-up folks just go back to their day.
     if (wasArmed && alive(n) && n.aiState !== "fight" && n.aiState !== "snitch") {
@@ -210,7 +267,25 @@
             n.poseAimBack = true;
             n.intimidFireT = 0.8 + ((n.personality && n.personality.nerve) || 0.5) * 1.7;
             CBZ.sfx && CBZ.sfx("switch");
-            CBZ.flashHint && CBZ.flashHint("" + shortName(n) + " pulls a gun on you!", 1.5);
+            // A MAN AIMING BACK IS NOT A CAPTION — reactions.js already poses
+            // him aiming at you and the "switch" above is the gun clearing his
+            // waistband. But this one is a person ACTING ON YOU, so it keeps a
+            // voice: he talks, over his own head, in earshot or not at all.
+            //
+            // THE COOLDOWN IS THE ANTI-SPAM, and it deliberately does NOT live
+            // on the encounter. `endIntimid` wipes the per-encounter flags 0.85 s
+            // after you look away, so an encounter-scoped latch let the same man
+            // re-shout on every pan — measured at 3 of the 5 popups in a single
+            // sweep. This rides run-elapsed instead, so it survives endIntimid
+            // and one man is one line per DRAW_SAY_CD seconds no matter how many
+            // times you glance at him.
+            const now = (CBZ.game && CBZ.game.elapsed) || 0;
+            if (now - (n._drewSayT || -1e9) >= DRAW_SAY_CD) {
+              n._drewSayT = now;
+              if (tellHint("" + shortName(n) + " pulls a gun on you!", 1.5)) {
+                sayIt(n, "Back off! Back the fuck off!", 1.6);
+              }
+            }
           }
         } else if (n.intimidMode === "standoff") {
           if (aimedHere) {
@@ -269,7 +344,14 @@
       let r = null;
       try { r = CBZ.cityTake(target, { by: "player", site: "intimidate:gunpoint" }); } catch (e) { r = null; }
       if (!r || (!r.units && (!r.items || !r.items.length))) {
-        CBZ.flashHint && CBZ.flashHint(shortName(target) + " has nothing left — you already took it.", 1.6);
+        // NOT a caption: this is the ANSWER to a button the player just
+        // pressed, and without it a second shakedown does nothing, silently.
+        // It is also the one line here guaranteed to be in earshot — you
+        // cannot rob past ROB_RANGE (6.5 m) and prisonSay reaches 16 — so the
+        // man you just frisked tells you himself.
+        if (tellHint(shortName(target) + " has nothing left — you already took it.", 1.6)) {
+          sayIt(target, "I've got nothing — you already took it.", 1.8);
+        }
       }
     } else if (!target.looted) {
       if (CBZ.cityTakeLegacy) { try { CBZ.cityTakeLegacy("intimidate:gunpoint"); } catch (e) {} }
@@ -297,6 +379,10 @@
   CBZ.intimidate = intimidate;
 
   // ---- ratchet declaration (see CBZ.prisonPromptAudit in interactions.js) ----
+  // `was:` now means what it says. Until 2026-08-11 this declared the popup as
+  // converted while decideReaction was still firing it every encounter — the
+  // census counted a prompt that existed and never noticed the caption beside
+  // it. The caption is deleted; the prompt is the only surface.
   (CBZ._prisonPromptSites || (CBZ._prisonPromptSites = [])).push(
     { id: "rob", act: "@prisonRobTarget", was: "… freezes up — [G] to rob" }
   );

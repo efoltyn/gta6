@@ -29,6 +29,72 @@
   const g = CBZ.game;
   if (!g) return;
 
+  /* ============================================================
+     THE TOWERS SHOUTED TWICE, AND KEPT SHOUTING.
+
+     Measured (seed 90210, mode escape, heat pinned at 100, rAF frozen and the
+     sim stepped by hand): at t=1.6 s this file fired BOTH popups on the SAME
+     TICK — `flashToast("REINFORCEMENTS!")` landing at y 174-233 of a 608 px
+     viewport and `flashHint("The towers called it in — riot squad incoming!")`
+     at y 372-412. Two mid-screen cards, stacked down the middle of the screen,
+     saying one thing twice. Then it did it AGAIN at t=4.82, with nothing
+     killed and nothing changed, and again after every squad wipe: 7 pairs =
+     14 popups in a 70 s manhunt, for a squad that never numbered more than 3.
+
+     THREE FAULTS, and the third is the one that made it repeat:
+
+     · NEITHER LINE WENT THROUGH THE GATE. systems/capture.js publishes
+       `CBZ.jailTell` — "THE ONE GATE, shared with every other file in the
+       prison's territory" — and lockdown · killstreaks · detection · gunroom ·
+       games/jail all adopted it in one line each. This file was missed, so it
+       kept writing raw `CBZ.flashToast`/`CBZ.flashHint`. Worse, capture.js's
+       ratchet counts RAW EMITTERS off `CBZ._jailShowRaw`, which a file has to
+       DECLARE — so `CBZ.jailShowAudit()` reported `toasts: 0` while this file
+       was slamming one over the crosshair. The ratchet was not wrong; it was
+       blind, exactly as capture.js:875 warns. Adopted here, so it is neither.
+
+     · `announced` WAS CLEARED BY A STALE READ. `live` is computed at the top
+       of the tick, BEFORE the spawn block; the `if (live)` at the bottom then
+       used that stale 0 on the very tick the first responder arrived, undoing
+       the `announced = true` set eight lines earlier. Hence the second shout
+       exactly SPAWN_CD (3.2 s) later, every single surge.
+
+     · A WIPE IS NOT A NEW CALL. Clearing `announced` whenever the roster hit
+       zero meant killing the squad re-ran the whole announcement while the
+       towers were still on the radio from the first time. `recallAll()` — the
+       one place a surge actually ENDS (stand-down, new run, state exit) — is
+       now the only thing that clears it, which is what line 63's "one-shot per
+       surge" comment always claimed and never did.
+
+     WHAT SAYS IT INSTEAD. Nothing that carried state is lost: detection.js's
+     meter is already pinned red at `HUNTED!` for the whole surge (a bounded
+     readout, not a popup), and the event itself is three officers sprinting at
+     you from the tower corners with `hunt` primed. The line gets a MOUTH the
+     way entities/ai.js's narration sink demands — the officer who just came
+     down the stairs says it through `CBZ.prisonSay`, which is ranged (16 m),
+     ranked and refuses for the downed. Out of earshot it says nothing at all,
+     because a man 40 m away shouting into your ear was the bug.
+     ============================================================ */
+  // THE ONE GATE (systems/capture.js), degrade-safe in the exact shape
+  // lockdown.js:44 / killstreaks.js:11 / detection.js:17 already use: both
+  // return TRUE when the line was SUPPRESSED, so a caller with a diegetic
+  // replacement can run it, and `JAIL_SHOW_DONT_TELL=false` still restores the
+  // popups byte for byte.
+  function tellToast(m) { if (CBZ.jailTell) return CBZ.jailTell.toast(m); if (CBZ.flashToast) try { CBZ.flashToast(m); } catch (e) {} return false; }
+  function tellHint(m, s) { if (CBZ.jailTell) return CBZ.jailTell.hint(m, s); if (CBZ.flashHint) try { CBZ.flashHint(m, s); } catch (e) {} return false; }
+  // systems/interact.js loads AFTER this file, so prisonSay is resolved at CALL
+  // time, never captured at boot. No actor, or an actor out of earshot -> false
+  // and we are silent, which is the honest answer.
+  function sayIt(actor, line, secs) {
+    if (!actor || typeof CBZ.prisonSay !== "function") return false;
+    try {
+      return CBZ.prisonSay(actor, line, {
+        rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1,
+        secs: secs || 2.0,
+      });
+    } catch (e) { return false; }
+  }
+
   // ---- tuning ----------------------------------------------------------
   const HEAT_CALL = 70;      // heat at/above which the "call it in" timer builds
   const HEAT_STAND = 20;     // heat at/below which the "stand down" timer builds
@@ -114,11 +180,14 @@
   }
 
   // ---- spawn one reinforcement from a tower corner ---------------------
+  // Returns the OFFICER (falsy on refusal, so `if (spawnOne())` is unchanged).
+  // The caller needs him: an announcement has to come out of a mouth, and the
+  // man who just came down the tower stairs is the one with it.
   function spawnOne() {
-    if (typeof CBZ.spawnGuard !== "function") return false;
+    if (typeof CBZ.spawnGuard !== "function") return null;
     // respect both our own cap and the overall roster ceiling
-    if (countLive() >= MAX_REINF) return false;
-    if (CBZ.guards && CBZ.guards.length >= MAX_GUARDS) return false;
+    if (countLive() >= MAX_REINF) return null;
+    if (CBZ.guards && CBZ.guards.length >= MAX_GUARDS) return null;
 
     const slot = SPAWNS[nextSlot % SPAWNS.length];
     nextSlot++;
@@ -130,7 +199,7 @@
       gd = CBZ.spawnGuard(slot.route.map((p) => [p[0], p[1]]),
                           REINF_SPEED, REINF_VIEW, REINF_HALF, {});
     } catch (e) { gd = null; }
-    if (!gd || !gd.group) return false;
+    if (!gd || !gd.group) return null;
 
     gd._reinf = true;              // OUR tag — the only guards we ever touch
     gd._enterT = ENTER_GRACE;      // brief arrival flair window
@@ -149,7 +218,7 @@
 
     // ---- arrival juice ----
     if (CBZ.shake) { try { CBZ.shake(0.35); } catch (e) {} }
-    return true;
+    return gd;
   }
 
   // how many of ours are still alive & on the roster (prune stragglers)
@@ -199,12 +268,17 @@
         // try to add one more responder when off cooldown and under cap
         if (spawnCd <= 0 && live < MAX_REINF &&
             (!CBZ.guards || CBZ.guards.length < MAX_GUARDS)) {
-          if (spawnOne()) {
+          const officer = spawnOne();
+          if (officer) {
             spawnCd = SPAWN_CD;
             if (!announced) {
               announced = true;
-              if (CBZ.flashToast) { try { CBZ.flashToast("REINFORCEMENTS!"); } catch (e) {} }
-              if (CBZ.flashHint) { try { CBZ.flashHint("The towers called it in — riot squad incoming!", 2.4); } catch (e) {} }
+              tellToast("REINFORCEMENTS!");
+              // suppressed -> the man who just arrived says it himself, in
+              // earshot or not at all
+              if (tellHint("The towers called it in — riot squad incoming!", 2.4)) {
+                sayIt(officer, "Riot squad on the yard — get down!", 2.0);
+              }
             }
           }
         }
@@ -228,19 +302,35 @@
     }
 
     // ---- LOW HEAT: build the stand-down timer, then recall everyone ----
-    if (live) {
+    // `live` was read BEFORE the spawn block above, so it is stale on exactly
+    // the tick a wave arrives — using it here is what cleared `announced` on
+    // the same tick it was set and re-shouted the pair 3.2 s later. Re-read it:
+    // `mine` is capped at 3, so the second count is free.
+    const held = countLive();
+    if (held) {
       if (heat <= HEAT_STAND) {
         standT += dt;
         if (standT >= STAND_HOLD) {
+          // SPEAK FIRST, THEN RECALL. recallAll() flags every man dead and
+          // frees his rig, and prisonSay refuses the dead — saying it after
+          // the recall is a line that can never be delivered.
+          const speaker = mine[0];
+          if (tellHint("The riot squad stands down.", 2.0)) {
+            sayIt(speaker, "Stand down. Back to your posts.", 2.0);
+          }
           recallAll();
-          if (CBZ.flashHint) { try { CBZ.flashHint("The riot squad stands down.", 2.0); } catch (e) {} }
         }
       } else {
         standT = 0;                        // still warm — hold the line
       }
     } else {
-      // nobody fielded: nothing to recall, and let the surge announce again
-      standT = 0; announced = false;
+      // Nobody fielded: nothing to recall. `announced` is deliberately NOT
+      // cleared here. A surge ends at STAND-DOWN (or a new run / a state exit),
+      // and recallAll() is the one place all three meet — so it owns the reset.
+      // Clearing on an empty roster meant wiping the squad re-ran the entire
+      // announcement while the towers were still on the radio from the first
+      // time: measured at 4 extra double-popups across 4 wipes.
+      standT = 0;
     }
   });
 
