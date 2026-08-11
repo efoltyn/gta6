@@ -202,9 +202,33 @@
   }
   function inTransition(a) { return !!(CBZ.propArcActive && CBZ.propArcActive(a)); }
 
-  // the walk-rate hazard (see the header)
-  function keepRate(a) { if (a._restRate == null && a.speed > 0) a._restRate = a.speed; }
-  function giveRate(a) { if (a._restRate != null) { a.speed = a._restRate; a._restRate = null; } }
+  /* ---- the walk-rate hazard (see the header) — AND THE OTHER HALF OF THE
+       SAME STATEMENT. city/propuse.js:1170 and :1302 both read
+
+           actor.speed = 0; actor.path = null;
+
+       and this file repaired only the first clause. For a peds.js ped that is
+       right twice: `speed` is recomputed and `path` is a route its own brain
+       rebuilds. For a PLAIN actor with its own mover — which is the entire
+       case this layer exists to serve — the second clause destroys a field the
+       caller owns and typed. Measured in games/night-watch.html: a body sat
+       down during `closing`, and the first frame of `night` its game touched
+       `actor.path.length` and threw. Three consecutive throws and microboot
+       RETIRES the updater, so the museum's staff and its thieves both stopped
+       existing, with no error anywhere and no dead hook to find.
+
+       Put back what we found, in the SHAPE we found it: an actor whose path
+       was an array gets an empty array, never a null. Every read of `path` in
+       city/peds.js is `!ped.path || !ped.path.length`, so a ped is unaffected. */
+  function keepRate(a) {
+    if (a._restRate == null && a.speed > 0) a._restRate = a.speed;
+    if (a._restPath == null) a._restPath = Array.isArray(a.path) ? 1 : 0;
+  }
+  function giveRate(a) {
+    if (a._restRate != null) { a.speed = a._restRate; a._restRate = null; }
+    if (a._restPath) { if (!Array.isArray(a.path)) a.path = []; a._restPath = null; }
+    else if (a._restPath === 0) a._restPath = null;
+  }
 
   /* ==========================================================
      4. THE VERBS

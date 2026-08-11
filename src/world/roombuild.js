@@ -2,8 +2,9 @@
    world/roombuild.js — the ROOM helper. Two layers:
 
      CBZ.roomShell(cfg)                    — stamps the SHELL: a tinted
-       floor slab and four open-top walls with an optional doorway gap.
-       Used by cafeteria / gunroom / lounge. UNCHANGED.
+       floor slab and four open-top walls with any number of doorway gaps
+       (`doors: [{side,center,width}…]`; the old single `door` still works
+       and is just a list of one). Used by cafeteria / gunroom / lounge.
 
      CBZ.roomPlan(rect, program, opts)     — the LAYOUT PLANNER: turns a
        rectangle into "a room somebody chose the furniture for". Returns
@@ -77,7 +78,9 @@
   function roomShell(cfg) {
     const { x0, x1, z0, z1 } = cfg;
     const h = cfg.h || 6;
-    const wall = cfg.wall != null ? cfg.wall : CBZ.COL.WALL_D;
+    // CBZ.COL lives in config.js, which a one-shot page never loads — and this
+    // was a bare dereference, so roomShell threw on the first wall it drew.
+    const wall = cfg.wall != null ? cfg.wall : ((CBZ.COL && CBZ.COL.WALL_D) || 0x7d8794);
     const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
     const w = x1 - x0, d = z1 - z0;
 
@@ -86,24 +89,35 @@
       addBox(cx, 0.02, cz, w, 0.08, d, cfg.floor, { solid: false, cast: false });
     }
 
-    const door = cfg.door;
-    // build one wall, splitting it if the doorway sits on this side
+    /* A ROOM WITH TWO DOORS IS NOT EXOTIC. `cfg.door` was ONE doorway for the
+       whole shell, so a corridor, a hall between two wings, or any room you
+       both enter and leave could not be stamped — the caller either drew its
+       own walls (the fork this file exists to prevent) or accepted a dead end.
+       `cfg.doors` is the same record in a list, any number, any side, and the
+       old single `door` is just a list of one. The wall is now emitted as the
+       runs BETWEEN the sorted gaps, which is the general case the two-segment
+       version was a special case of. */
+    const doors = cfg.doors && cfg.doors.length ? cfg.doors : (cfg.door ? [cfg.door] : []);
     function wallRun(side, fixed, from, to, horizontal) {
-      const hasDoor = door && door.side === side;
-      if (!hasDoor) {
-        if (horizontal) addBox((from + to) / 2, h / 2, fixed, to - from, h, T, wall, { solid: true, blockLOS: true });
-        else addBox(fixed, h / 2, (from + to) / 2, T, h, to - from, wall, { solid: true, blockLOS: true });
-        return;
+      const gaps = [];
+      for (let i = 0; i < doors.length; i++) {
+        const d = doors[i];
+        if (!d || d.side !== side) continue;
+        const w2 = (d.width > 0 ? d.width : 3) / 2;
+        gaps.push([Math.max(from, d.center - w2), Math.min(to, d.center + w2)]);
       }
-      const gap0 = door.center - door.width / 2, gap1 = door.center + door.width / 2;
-      // two segments either side of the gap
-      if (horizontal) {
-        if (gap0 > from) addBox((from + gap0) / 2, h / 2, fixed, gap0 - from, h, T, wall, { solid: true, blockLOS: true });
-        if (to > gap1) addBox((gap1 + to) / 2, h / 2, fixed, to - gap1, h, T, wall, { solid: true, blockLOS: true });
-      } else {
-        if (gap0 > from) addBox(fixed, h / 2, (from + gap0) / 2, T, h, gap0 - from, wall, { solid: true, blockLOS: true });
-        if (to > gap1) addBox(fixed, h / 2, (gap1 + to) / 2, T, h, to - gap1, wall, { solid: true, blockLOS: true });
+      gaps.sort(function (a, b) { return a[0] - b[0]; });
+      const seg = function (a, b) {
+        if (b - a <= 0.02) return;                // a run the door ate entirely
+        if (horizontal) addBox((a + b) / 2, h / 2, fixed, b - a, h, T, wall, { solid: true, blockLOS: true });
+        else addBox(fixed, h / 2, (a + b) / 2, T, h, b - a, wall, { solid: true, blockLOS: true });
+      };
+      let cur = from;
+      for (let i = 0; i < gaps.length; i++) {
+        seg(cur, gaps[i][0]);
+        if (gaps[i][1] > cur) cur = gaps[i][1];
       }
+      seg(cur, to);
     }
 
     wallRun("N", z0, x0, x1, true);   // north (z0)

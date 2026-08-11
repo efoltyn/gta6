@@ -246,6 +246,16 @@
       files: ["systems/fixtures.js"],
       publishes: ["fixtures", "fixtureAudit"],
     },
+    /* THE PACK THAT PROMISED A POSE AND SHIPPED A FACADE. systems/rest.js is
+       the six verbs — claim, walk, hand over, hold, get up, step clear — and
+       every one of them ends in a call to city/propuse.js: propRegisterSeat,
+       propEntryPoint, propSit, propSleep, propWake, propArcActive. That file
+       was in no pack at all, so on a one-shot page `rest.seat()` queued into a
+       registry that would never exist and `rest.sit()` returned false forever.
+       Measured on a bare page before this line: audit().pending 1,
+       flushed false, registered 0, and nobody could sit on anything. The
+       manifest's own ratchet could not see it — rest.js publishes `CBZ.rest`
+       whatever happens, so the promise was kept and the capability was not. */
     rest: {
       gives: "bodies USING furniture: claim a place, walk there, take the " +
              "pose, get up, step clear. CBZ.rest also carries the three " +
@@ -253,8 +263,22 @@
              "deferred registration, a late re-flush, and a loud count of " +
              "anchors refused for sharing a coordinate key",
       needs: ["people"],
-      files: ["systems/rest.js"],
-      publishes: ["rest", "restAudit", "restWatch"],
+      files: ["city/propuse.js", "systems/rest.js"],
+      publishes: ["rest", "restAudit", "restWatch", "propRegisterSeat", "propSit", "propSleep"],
+    },
+    rooms: {
+      gives: "FURNITURE, and the grammar of a room. CBZ.furnish is the one " +
+             "vocabulary — chair, stool, bench, sofa, bed, desk, table, " +
+             "counter, shelf, locker, lamp — where one call DRAWS the piece " +
+             "at real metric proportions, REGISTERS its sit/sleep anchor and " +
+             "hands back the meshes; CBZ.roomShell stamps a floor and four " +
+             "open-top walls with a doorway, and CBZ.roomFurnish lays out a " +
+             "named program (office, breakroom, bedroom, lounge, mess) and " +
+             "then FLOODS the floor from the door to drop anything nobody " +
+             "could walk to",
+      needs: ["look", "rest"],
+      files: ["city/furniture.js", "world/roombuild.js"],
+      publishes: ["furnish", "roomShell", "roomFurnish"],
     },
     push: {
       gives: "furniture that MOVES when you walk into it. CBZ.pushables.add" +
@@ -847,8 +871,15 @@
             moving = true;
           }
           if (groundAt) g.position.y = groundAt(g.position.x, g.position.z);
+          // animChar(ch, SPEED, DT) — entities/character.js:1430. This call had
+          // the last two arguments swapped, which is not a no-op and is not
+          // caught by the try/catch: `speed` read the frame dt (0.016, always
+          // below the 0.2 walk threshold, so a walking crowd never animated)
+          // and `ch.breath += dt` added an OBJECT to a number, turning the
+          // rig's own phase accumulator into the string "2.28…[object Object]"
+          // on the first frame and NaN on every trig call after it.
           if (CBZ.animChar && g.userData.charRig) {
-            try { CBZ.animChar(g.userData.charRig, dt, { speed: moving ? speed : 0 }); } catch (e) {}
+            try { CBZ.animChar(g.userData.charRig, moving ? speed : 0, dt); } catch (e) {}
           }
         }
       });

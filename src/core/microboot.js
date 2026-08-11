@@ -242,6 +242,35 @@
     scene.add(sun.target);
     micro.sun = sun;
     micro.hemiLight = hemi;
+
+    /* PUBLISHED UNDER THE NAMES THE ENGINE READS, AND RE-ASSERTED EVERY FRAME.
+       `CBZ.sun` / `CBZ.hemi` are what core/daynight.js drives and what every
+       light-modifying pass in this repo reaches for — systems/fixtures.js's
+       darken() (the whole "somewhere meant to be black between sweeps") among
+       them. A slice page published neither, so a rig's nightFloor was a no-op
+       and a night existed only as a NUMBER: rig.level() said dark, the screen
+       said noon.
+
+       The restore is not decoration, it is the contract. Those passes are
+       MULTIPLIES — daynight.js re-writes the base intensity every frame and
+       they scale it. With nobody re-writing the base, one multiply per frame
+       is a geometric decay: the sun fades to zero over a few seconds and never
+       comes back, which reads as "the page slowly broke". So this file takes
+       daynight.js's other half too: order 9, before anything that shapes it. */
+    if (!CBZ.sun) CBZ.sun = sun;
+    if (!CBZ.hemi) CBZ.hemi = hemi;
+    if (CBZ.onAlways) {
+      const baseSun = sun.intensity, baseHemi = hemi.intensity;
+      const skyC = hemi.color.clone(), gndC = hemi.groundColor.clone();
+      const fogC = scene.fog ? scene.fog.color.clone() : null;
+      CBZ.onAlways(9, function () {
+        sun.intensity = baseSun;
+        hemi.intensity = baseHemi;
+        hemi.color.copy(skyC);
+        hemi.groundColor.copy(gndC);
+        if (fogC && scene.fog) scene.fog.color.copy(fogC);
+      });
+    }
     // A shadow map that spans 600 u cannot also span a 12 km world; the sun
     // rig FOLLOWS the camera so the shadowed box is always where the player
     // is. One line here saves every page from the "shadows vanish when I walk"
@@ -397,6 +426,39 @@
   micro.start = function () { if (!_raf) { _last = 0; _raf = requestAnimationFrame(tick); } };
   micro.stop = function () { if (_raf) { cancelAnimationFrame(_raf); _raf = 0; } };
 
+  /* ---- HEADLESS SIM STEP (tools only — inert in normal play) --------------
+     core/loop.js publishes CBZ.stepSim for exactly this and a slice page has
+     no loop.js, so every one-shot game in games/ was verifiable only by
+     WAITING on software-rasterized frames at roughly 60x slow: a three-minute
+     game costs three hours of probe, which means in practice nobody ever
+     tested one to its end. The whole point of docs/claude/verification.md is
+     that a gate reads state and steps time by hand.
+
+     Same shape and the same order as tick() above, minus the renderer, with
+     the same per-hook try/catch so a throw surfaces without killing the burst.
+     `micro.elapsed` advances, because cooldowns and phases are read off it. */
+  micro.stepSim = function (dt) {
+    dt = dt > 0 ? dt : 1 / 60;
+    if (bridgeDirty) {
+      bridgeDirty = false;
+      CBZ.always.sort(function (a, b) { return a.order - b.order; });
+      CBZ.updaters.sort(function (a, b) { return a.order - b.order; });
+    }
+    _shakeDecay(dt);
+    for (let i = 0; i < CBZ.always.length; i++) runBridged(CBZ.always[i], dt, "always");
+    if (!micro.paused) {
+      micro.elapsed += dt;
+      micro.frames++;
+      for (let i = 0; i < CBZ.updaters.length; i++) runBridged(CBZ.updaters[i], dt, "update");
+      for (let i = 0; i < frameHooks.length; i++) {
+        try { frameHooks[i].fn(dt, micro.elapsed); }
+        catch (e) { console.error("[micro frame " + (frameHooks[i].id || i) + "]", e); }
+      }
+    }
+    input.endFrame();
+  };
+  if (!CBZ.stepSim) CBZ.stepSim = micro.stepSim;
+
   // -------------------------------------------------------------- the input
   // One key map, one mouse delta, one pointer lock, blur-safe. The rule the
   // games/ copies all got wrong at least once: a page that loses focus mid
@@ -471,7 +533,12 @@
       input.locked = document.pointerLockElement === el;
       if (!input.locked) { input.clear(); if (micro.onUnlock) micro.onUnlock(); }
     });
-    micro.lock = function () { try { el.requestPointerLock(); } catch (e) {} };
+    micro.lock = function () {
+      // requestPointerLock returns a PROMISE in current Chrome, so a page that
+      // asks outside a user gesture (a programmatic start, a probe) gets an
+      // UNHANDLED rejection — a console error in a game that did nothing wrong.
+      try { const r = el.requestPointerLock(); if (r && r.catch) r.catch(function () {}); } catch (e) {}
+    };
     micro.unlock = function () { try { document.exitPointerLock(); } catch (e) {} };
   }
 
@@ -765,7 +832,7 @@
     if (b.minX > b.maxX) { const t = b.minX; b.minX = b.maxX; b.maxX = t; }
     if (b.minZ > b.maxZ) { const t = b.minZ; b.minZ = b.maxZ; b.maxZ = t; }
     boxes.push(b);
-    gridAdd(b, boxes.length - 1);
+    if (gridN === boxes.length - 1 && !gridDirty) { gridAdd(b, boxes.length - 1); gridN = boxes.length; }
     return b;
   };
   micro.addBoxCollider = function (x, y, z, w, h, d, extra) {
@@ -797,11 +864,80 @@
      slice page that already made one keeps it, so adoption cannot clobber. */
   if (!CBZ.colliders) CBZ.colliders = boxes;
 
-  micro.clearColliders = function () { boxes.length = 0; grid.clear(); };
+  /* ---- THE DOORBELL, AND THE THREE NAMES A MOVING SOLID NEEDS -------------
+     systems/physics.js owns these in the full engine and NOTHING owned them on
+     a slice page, which made two failures that both look like "the feature does
+     not work" and neither of which says anything:
+
+       • THE GRID STORES INDICES, AND `CBZ.colliders` IS `boxes`. A caller that
+         pushes straight onto the array — world/materials.js's addBox with
+         {solid:true}, systems/pushables.js when it mints a prop's own box —
+         lands in `boxes` and never in `grid`. The collider is registered and
+         you walk through it. Measured: every wall a one-shot page drew through
+         CBZ.addBox was scenery.
+       • A COLLIDER TRANSLATED IN PLACE keeps the bucket it was filed under, so
+         a pushed stool is solid where it used to be. Every sliding door in the
+         engine already rings markCollidersDirty for exactly this; on a slice
+         page the bell was not connected to anything.
+
+     One flag and one rebuild answer both. The length check is the belt: a page
+     that never rings the bell still gets a correct grid the moment it pushes. */
+  let gridN = 0, gridDirty = false;
+  function ensureGrid() {
+    if (!gridDirty && gridN === boxes.length) return;
+    grid.clear();
+    for (let i = 0; i < boxes.length; i++) gridAdd(boxes[i], i);
+    gridN = boxes.length;
+    gridDirty = false;
+  }
+  micro.rebuildColliderGrid = ensureGrid;
+  if (!CBZ.markCollidersDirty) CBZ.markCollidersDirty = function () { gridDirty = true; };
+  // the name every shared verb in the engine asks by (physics.js's own)
+  if (!CBZ.queryCollidersNear) CBZ.queryCollidersNear = function (x, z, r, out) { return micro.queryColliders(x, z, r, out); };
+
+  /* ---- WALK SURFACES ------------------------------------------------------
+     `CBZ.platforms` is the engine's ONE contract for "the top of this thing is
+     ground": systems/pieces.js's walkTop, city/buildings.js's stairs and
+     systems/pushables.js's `stand:true` prop all write that record, and
+     physics.js's groundAt() reads it. A slice page has no physics.js, so the
+     array did not exist — and `if (spec.stand && CBZ.platforms)` is a silent
+     guard, so a pushable declared standable created no record at all and the
+     crate you shoved under the vent was scenery you could walk through the top
+     of. Same rule as CBZ.colliders above: publish under the name the engine
+     already reads, and yield to anything that made one first.
+
+     `platformTop` is the read side, so a page's own groundAt() is one max()
+     away from honouring every walk surface in the world. Linear: the records a
+     slice page owns are a handful of props, not a city's stairwells. */
+  if (!CBZ.platforms) CBZ.platforms = [];
+  if (!CBZ.markPlatformsDirty) CBZ.markPlatformsDirty = function () {};
+  micro.stepUp = 0.45;                    // physics.js's own riser/curb/sill climb
+  micro.platformTop = function (x, z, fromY, floor) {
+    const plats = CBZ.platforms;
+    let best = floor || 0;
+    if (!plats || !plats.length) return best;
+    const reach = (fromY != null ? fromY : best) + micro.stepUp;
+    for (let i = 0; i < plats.length; i++) {
+      const p = plats[i];
+      if (x < p.minX || x > p.maxX || z < p.minZ || z > p.maxZ) continue;
+      let top = p.top;
+      if (p.ramp) {
+        const r = p.ramp;
+        let t = (r.axis === "x") ? (x - r.x0) / (r.x1 - r.x0) : (z - r.z0) / (r.z1 - r.z0);
+        if (t < 0) t = 0; else if (t > 1) t = 1;
+        top = r.y0 + t * (r.y1 - r.y0);
+      }
+      if (top <= reach && top > best) best = top;
+    }
+    return best;
+  };
+
+  micro.clearColliders = function () { boxes.length = 0; grid.clear(); gridN = 0; gridDirty = false; };
 
   micro.queryColliders = function (x, z, r, out) {
     out = out || [];
     out.length = 0;
+    ensureGrid();
     const x0 = Math.floor((x - r) / CELL), x1 = Math.floor((x + r) / CELL);
     const z0 = Math.floor((z - r) / CELL), z1 = Math.floor((z + r) / CELL);
     const seen = micro._qseen || (micro._qseen = new Set());

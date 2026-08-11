@@ -1458,8 +1458,23 @@
   // camera reads the group (onAlways 50) — so both the arc and the pin win the
   // frame. Runs only while g.state === "playing".
   if (CBZ.onUpdate) CBZ.onUpdate(42, function (dt) {
-    const P = CBZ.player, ch = CBZ.playerChar, g = CBZ.game;
-    if (!P || !ch) return;
+    const P = CBZ.player || null, ch = CBZ.playerChar || null, g = CBZ.game;
+    /* THE GUARD USED TO BE `if (!P || !ch) return`, AND IT GATED THE WHOLE
+       UPDATER — every NPC's transition arc and every NPC's seat/bed hold —
+       ON THE PLAYER'S OWN RIG EXISTING. In the city that is always true and
+       the bug is invisible. Anywhere else it is fatal and SILENT: nothing
+       throws, nothing logs, `CBZ.propArcActive` simply latches true forever,
+       so systems/rest.js (which correctly refuses to touch a body mid-arc)
+       deadlocks and no NPC ever sits or lies down again. Measured in
+       games/night-watch.html, whose player is a plain object with no
+       CBZ.playerChar: a night porter stood beside his cot for the whole of a
+       260-second museum day with inTransition() true the entire time.
+
+       Sections 1 and 2 below need no player at all — they walk `arcs` and
+       `claimed`. Section 3 is the player pin and already returns unless the
+       PLAYER holds a seat or a bed. So the guard is now "is there anything to
+       do", and P/ch are dereferenced only behind the checks that imply them. */
+    if (!arcs.length && !claimed.length && !(P && (P._propSeat || P._propBed))) return;
     // NOTE: the `on()` gate lives INSIDE the loop below, never above it.
     // Flipping PROPS_PURPOSE off mid-arc used to skip the whole updater, which
     // left the arc un-advanced and `_doorArc` latched true forever — the
@@ -1514,8 +1529,8 @@
       }
     }
 
-    const pArc = arcOf(P);
-    const seat = P._propSeat, bed = P._propBed;
+    const pArc = P ? arcOf(P) : null;
+    const seat = P ? P._propSeat : null, bed = P ? P._propBed : null;
 
     // ---- 2. NPC holds ---------------------------------------------------
     // These used to sweep EVERY seat and EVERY bed in the world once a frame

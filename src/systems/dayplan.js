@@ -44,6 +44,12 @@
    six script tags — the plan runs its own 150-second day off whatever `dt`
    the poll is handed. Either way `hour()` is 0..24 with sunrise at 6.
 
+   AND WITH `sun: true` IT BECOMES THAT SUN. A self-clocked plan publishes
+   `CBZ.dayness` / `duskness` / `sunHeight` off its own phase, under the names
+   core/daynight.js uses and only while nothing else owns them — which is what
+   makes the advertised `day` + `light` pairing actually produce a dark night
+   on a page that loaded no world. See driveSun().
+
    Flag DAY_PLAN_V1. Ratchet CBZ.dayPlanAudit().gaps pinned at 0 — across
    EVERY plan defined, every one of the 24 hours belongs to exactly one block,
    so nothing can fall through into "no schedule".
@@ -85,6 +91,34 @@
         if (L > 0 && dt > 0) priv = (priv + dt / L) % 1;
       },
     };
+  }
+
+  /* ---- ...AND BEING THE SUN WHEN THERE ISN'T ONE ------------------------
+     The header promises this file READS the world's sun. The other half was
+     missing and it is the half a one-shot page lives in: with no
+     core/daynight.js, `CBZ.dayness` is undefined, and every reader of it —
+     systems/fixtures.js's sky() first among them, since `day` and `light` are
+     sold as a pair — falls back to FULL DAYLIGHT. Measured on a bare page: a
+     plan sitting in its `night` block while the fixture rig reported sky 1.0,
+     every dusk fitting dark and `scale()` returning 1 everywhere. Lights-out
+     with no dark in it.
+
+     `sun: true` on define() closes that seam with the SAME arithmetic
+     core/daynight.js uses (`up = sin(phase·2π)`, dayness = max(0, up),
+     duskness = the glow near the horizon), under the same names, and only
+     when nothing else owns them — a real sun always wins. Opt-in, so no
+     existing plan changes by a byte. */
+  const TAU = Math.PI * 2;
+  let sunOwner = null;
+  function driveSun(plan, phase) {
+    if (sunOwner && sunOwner !== plan) return;
+    if (CBZ.dayPhase) return;                    // a real sun is loaded: never fight it
+    sunOwner = plan;
+    const up = Math.sin(phase * TAU);            // -1 deep night .. 1 noon
+    CBZ.dayness = Math.max(0, up);
+    CBZ.duskness = Math.max(0, 1 - Math.abs(up) * 3);
+    CBZ.sunHeight = up;
+    CBZ.nightAmount = 1 - CBZ.dayness;
   }
 
   /* ==========================================================
@@ -139,6 +173,7 @@
     function poll(dt) {
       if (!enabled()) return null;
       clock.advance(dt || 0);
+      if (spec.sun) driveSun(plan, clock.phase());
       const b = blockAt(hourNow());
       if (!armed) { armed = true; const p = cur; cur = b; fire(b, p, true); }
       else if (b !== cur) { const p = cur; cur = b; fire(b, p, false); }

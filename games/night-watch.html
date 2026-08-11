@@ -1,0 +1,1184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>Night Watch</title>
+<!-- ============================================================
+  NIGHT WATCH — the Aldercroft Museum, one shift.
+
+  THIS PAGE IS A DOGFOOD. The prison wave promoted four services out of a
+  32k-line escape game into the engine layer — systems/dayplan.js,
+  systems/fixtures.js, systems/rest.js, systems/pushables.js — sold as studio
+  packs `day` / `light` / `rest` / `push`. The claim under that promotion was
+  that a NEW game now gets a working day, scheduled lights, seated and
+  sleeping NPCs and shovable furniture for free. So this is a game that is
+  neither a prison nor a city and whose ENTIRE mechanic is those four things:
+
+    `day`    the museum runs on a timetable and the timetable IS the game.
+             open → closing → night → dawn. Reaching dawn is winning.
+    `light`  a fixture rig with a region per room, so a gallery lamp does not
+             shine through a wall. rig.level(x,z) decides whether a thief will
+             work at all; rig.scale(sensor,x,z) decides how far he can see YOU
+             and how far you can see HIM, and the lamp buys both back at once.
+    `rest`   the day staff sit at their desks and on the gallery benches, walk
+             to the break room at closing, and the night porter LIES DOWN on
+             the cot. Wake him and he walks the galleries with you.
+    `push`   crates are mass on a floor. Two of them seal the loading door the
+             thieves come through. A third is the only way to reach the master
+             breaker, because it is mounted deliberately out of arm's reach.
+
+  Nothing here draws a person, a HUD, a camera, a room, a bench, a desk, a
+  cot or a light: cast() / hud() / chase() / controls() / roomShell() /
+  roomFurnish() / furnish() / fixtures already do. What this file owns is the
+  RULES — who steals what, what the dark is worth, and what a watchman can do
+  about it — plus the one thing the studio has no verb for yet, a walking
+  player, which is measured and reported rather than hidden.
+
+  THE CONVENTION, stated once: the camera is fixed-yaw (π) and looks north, so
+  screen-up is -Z and the control stick maps straight onto the world with no
+  rotation anywhere. A body's forward is (sin yaw, cos yaw), repo-wide.
+============================================================ -->
+<style>
+  :root{color-scheme:dark}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:#07090c;overflow:hidden;
+    font:600 15px/1.35 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#efeae0;
+    -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+  canvas{display:block}
+  #gate{position:fixed;inset:0;display:grid;place-items:center;padding:26px;z-index:60;
+    background:radial-gradient(120% 90% at 50% 0%,#1d2129,#07090c 72%)}
+  #gate .in{text-align:center;max-width:460px;width:100%}
+  #gate h1{margin:0 0 6px;font-size:clamp(30px,9vw,54px);letter-spacing:-.02em;line-height:.94}
+  #gate h1 em{font-style:normal;color:#e8b25a}
+  #gate p{margin:0 0 22px;opacity:.55;letter-spacing:.18em;font-size:11px}
+  #gate ul{list-style:none;margin:0 0 26px;padding:0;text-align:left;font-size:13px;opacity:.82}
+  #gate li{margin:0 0 7px;padding-left:16px;position:relative}
+  #gate li:before{content:"";position:absolute;left:0;top:.52em;width:6px;height:6px;border-radius:50%;background:#e8b25a}
+  #gate button{-webkit-appearance:none;appearance:none;border:0;cursor:pointer;width:100%;
+    padding:21px;border-radius:17px;background:#e8b25a;color:#1a1206;font:800 20px/1 inherit;
+    letter-spacing:.16em;box-shadow:0 6px 0 #a97c33}
+  #gate button:active{transform:translateY(3px);box-shadow:0 3px 0 #a97c33}
+  #gate .st{margin-top:20px;font-size:11px;letter-spacing:.18em;opacity:.4;min-height:15px}
+  #over{position:fixed;inset:0;display:none;place-items:center;z-index:62;background:rgba(7,9,12,.93);padding:26px}
+  #over .in{text-align:center}
+  #over h2{margin:0 0 6px;font-size:clamp(25px,7vw,40px)}
+  #over h2 em{font-style:normal;color:#e8b25a}
+  #over p{margin:0 0 22px;opacity:.55;letter-spacing:.16em;font-size:11px}
+  #over table{margin:0 auto 24px;border-collapse:collapse;font-variant-numeric:tabular-nums;font-size:14px}
+  #over td{padding:6px 18px;opacity:.88}
+  #over td:first-child{opacity:.5;letter-spacing:.14em;font-size:11px;text-align:right}
+  #over button{-webkit-appearance:none;appearance:none;border:1px solid rgba(255,255,255,.25);
+    background:transparent;color:inherit;padding:14px 30px;border-radius:999px;font:700 14px/1 inherit;
+    letter-spacing:.16em;cursor:pointer}
+</style>
+</head>
+<body>
+
+<div id="gate"><div class="in">
+  <h1>NIGHT <em>WATCH</em></h1>
+  <p>ALDERCROFT MUSEUM. ONE SHIFT.</p>
+  <ul>
+    <li>Six pieces on show. Keep four until dawn.</li>
+    <li>Shove crates. Seal the loading door before dark.</li>
+    <li>The breaker is out of reach. Stand on something.</li>
+    <li>Your lamp finds them. It shows them you.</li>
+  </ul>
+  <button id="go">START THE SHIFT</button>
+  <div class="st" id="st"></div>
+</div></div>
+
+<div id="over"><div class="in">
+  <h2 id="overTitle">DAWN</h2>
+  <p id="overSub"></p>
+  <table id="overTable"></table>
+  <button id="again">AGAIN</button>
+</div></div>
+
+<!-- ONE TAG. Everything below is the rules. -->
+<script src="../src/core/studio.js"></script>
+<script>
+(function () {
+"use strict";
+
+const NEEDS = [
+  "caps",   // be reachable by the shared verbs at all
+  "people", // the shipped 1.82 m rig, its gait and its poses
+  "rooms",  // roomShell + CBZ.furnish + roomFurnish (pulls `rest`, pulls `look`)
+  "day",    // the timetable
+  "light",  // fixtures: level(x,z) and scale(sensor,x,z)
+  "push",   // crates as mass on a floor
+  "sound",  // the shared bank, so this page ships no oscillators
+];
+
+CBZ.studio.need(NEEDS).then(function () {
+const CBZ = window.CBZ, THREE = window.THREE;
+const el = function (id) { return document.getElementById(id); };
+const st = function (t) { const n = el("st"); if (n) n.textContent = t; };
+
+/* ============================================================ THE RULES */
+const DAY_SECONDS  = 280;    // one museum day in real seconds
+const KEEP_TO_WIN  = 4;      // pieces still on their plinths at dawn
+const N_THIEVES    = 3;
+const LIFT_TIME    = 4.2;    // seconds a thief spends prising a piece off
+const CATCH_R      = 2.4;    // how close a watchman gets before he has him
+const SHOVE_R      = 1.6;
+const SHOVE_DMG    = 20;
+const SHOVE_GAP    = 3.2;
+const WALK         = 3.2;
+const SPRINT       = 5.1;
+const THIEF_SPD    = 2.85;
+const SEE_R        = 26;     // your sight in full light, metres
+const THIEF_SEE_R  = 14;     // his
+const WORK_LIGHT   = 0.5;    // rig.level above this and a thief will not work
+const BREAKER_UP   = 0.55;   // you must be STANDING this high to reach the panel
+const BREAKER_BURN = 13;     // seconds the panic lights hold
+const BREAKER_COOL = 34;
+const PORTER_EYES  = 12;     // how far a woken porter marks a thief for you
+const HEAL_RATE    = 1.6;    // hp/s — a watchman gets his breath back
+
+/* ============================================================ BOOT */
+st("OPENING THE DOORS");
+/* THE LIGHT BUDGET IS PART OF THE GAME, not a look. A museum whose daylight
+   already reads 1.0 has nowhere to go when six pooled point lights are added
+   on top: measured at exposure 1.02 with sun 0.95, the open-hours atrium was a
+   white card with a white man standing on it. The rig below leaves headroom
+   for the fittings to be the brightest thing in the room, which is the whole
+   point of a game about who can see whom. */
+CBZ.micro.boot({
+  fov: 58, far: 900, exposure: 0.84,
+  sky: { top: 0x2b3b50, bottom: 0x5c656e, fogNear: 140, fogFar: 460, radius: 800 },
+  lights: { sun: 0.58, hemi: 0.38, skyColor: 0x9fb4cc, groundColor: 0x3a3d42, shadowSpan: 90, sunDist: 300 },
+});
+const scene = CBZ.scene;
+
+/* ============================================================ THE PLAN OF THE BUILDING
+   Rooms are rects and doors are gaps in the rects, which is all a room is.
+   Every wall below is stamped by CBZ.roomShell — the same helper the prison
+   cafeteria, gunroom and lounge are made of — so this file draws no walls. */
+const ROOMS = {
+  atrium:  { x0: -9,  x1: 9,  z0: -12, z1: 12,  floor: 0x54504a, wall: 0x6b6862 },
+  north:   { x0: -18, x1: 18, z0: -30, z1: -12, floor: 0x42444a, wall: 0x585a5e },
+  west:    { x0: -32, x1: -9, z0: -12, z1: 12,  floor: 0x3f444b, wall: 0x565b62 },
+  east:    { x0: 9,   x1: 32, z0: -12, z1: 12,  floor: 0x3f444b, wall: 0x565b62 },
+  corridor:{ x0: -6,  x1: 6,  z0: 12,  z1: 22,  floor: 0x3a3d43, wall: 0x4e5259 },
+  office:  { x0: -24, x1: -6, z0: 13,  z1: 27,  floor: 0x373b42, wall: 0x4a4f57 },
+  breakrm: { x0: 6,   x1: 24, z0: 13,  z1: 27,  floor: 0x413d38, wall: 0x55504a },
+};
+const WALL_H = 3.2;
+
+// every doorway, named, because both the shell and the route graph need it
+const DOOR = {
+  load:   { a: "outside",  b: "north",    x: 10, z: -30, w: 3.2 },   // the way in
+  n_a:    { a: "north",    b: "atrium",   x: 0,  z: -12, w: 4.0 },
+  a_w:    { a: "atrium",   b: "west",     x: -9, z: 0,   w: 4.0 },
+  a_e:    { a: "atrium",   b: "east",     x: 9,  z: 0,   w: 4.0 },
+  a_c:    { a: "atrium",   b: "corridor", x: 0,  z: 12,  w: 3.0 },
+  c_o:    { a: "corridor", b: "office",   x: -6, z: 17,  w: 3.0 },
+  c_b:    { a: "corridor", b: "breakrm",  x: 6,  z: 17,  w: 3.0 },
+};
+
+st("STAMPING THE GALLERIES");
+(function shells() {
+  // one shell per room; `doors` is the multi-gap form, so a corridor with
+  // three ways out is one call rather than three hand-drawn wall runs
+  const doorsFor = function (room) {
+    const out = [];
+    for (const k in DOOR) {
+      const d = DOOR[k];
+      if (d.a !== room && d.b !== room) continue;
+      const R = ROOMS[room];
+      if (Math.abs(d.z - R.z0) < 0.01) out.push({ side: "N", center: d.x, width: d.w });
+      else if (Math.abs(d.z - R.z1) < 0.01) out.push({ side: "S", center: d.x, width: d.w });
+      else if (Math.abs(d.x - R.x0) < 0.01) out.push({ side: "W", center: d.z, width: d.w });
+      else if (Math.abs(d.x - R.x1) < 0.01) out.push({ side: "E", center: d.z, width: d.w });
+    }
+    return out;
+  };
+  for (const id in ROOMS) {
+    const R = ROOMS[id];
+    CBZ.roomShell({ x0: R.x0, x1: R.x1, z0: R.z0, z1: R.z1, h: WALL_H,
+      wall: R.wall, floor: R.floor, doors: doorsFor(id) });
+  }
+  // the ground the building stands on, and the yard the thieves cross
+  const g = new THREE.PlaneGeometry(600, 600);
+  g.rotateX(-Math.PI / 2);
+  const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: 0x22262b }));
+  m.position.y = -0.02; m.receiveShadow = true;
+  m.matrixAutoUpdate = false; m.updateMatrix();
+  scene.add(m);
+})();
+
+/* ---- where am I. One rect test, used by the route graph and by the light
+     rig's regions, so a body and a lamp always agree about which room they
+     are in. ---- */
+function roomAt(x, z) {
+  for (const id in ROOMS) {
+    const R = ROOMS[id];
+    if (x > R.x0 && x < R.x1 && z > R.z0 && z < R.z1) return id;
+  }
+  return "outside";
+}
+
+/* ---- THE ROUTE GRAPH. Rooms are nodes, doorways are edges, and a walk from
+     one room to another is the list of doorways between them. Twenty lines,
+     and without them a thief walks into a wall and the game is a bug report.
+     (systems/rest.js's send() writes a STRAIGHT-LINE target, so bodies are
+     routed here until they are in the same room as the thing they want.) ---- */
+const ADJ = {};
+const THRU = 2.0;                      // how far off a threshold its two marks sit
+for (const k in DOOR) {
+  const d = DOOR[k];
+  (ADJ[d.a] || (ADJ[d.a] = [])).push({ to: d.b, at: d });
+  (ADJ[d.b] || (ADJ[d.b] = [])).push({ to: d.a, at: d });
+  /* A DOORWAY IS A THRESHOLD, NOT A POINT. Routed to the middle of the gap and
+     released there, a body turns for its next destination WHILE STILL IN THE
+     WALL and walks into the masonry beside the opening: measured, a thief
+     released at the loading door tracked 20 m west along the outside of the
+     north wall and stood there for the rest of the night. So every door hands
+     out TWO marks, one either side, and crossing it means visiting both. */
+  const R = ROOMS[d.b] || ROOMS[d.a];
+  const inner = ROOMS[d.b] ? d.b : d.a, outer = ROOMS[d.b] ? d.a : d.b;
+  const cx = (R.x0 + R.x1) / 2, cz = (R.z0 + R.z1) / 2;
+  const onZ = Math.abs(d.z - R.z0) < 0.01 || Math.abs(d.z - R.z1) < 0.01;
+  const nx = onZ ? 0 : Math.sign(cx - d.x), nz = onZ ? Math.sign(cz - d.z) : 0;
+  d.side = {};
+  d.side[inner] = { x: d.x + nx * THRU, z: d.z + nz * THRU };
+  d.side[outer] = { x: d.x - nx * THRU, z: d.z - nz * THRU };
+}
+function route(fromRoom, toRoom) {
+  if (fromRoom === toRoom) return [];
+  const prev = { [fromRoom]: null }, q = [fromRoom];
+  while (q.length) {
+    const r = q.shift();
+    if (r === toRoom) break;
+    const list = ADJ[r] || [];
+    for (let i = 0; i < list.length; i++) {
+      if (prev[list[i].to] !== undefined) continue;
+      prev[list[i].to] = { room: r, at: list[i].at };
+      q.push(list[i].to);
+    }
+  }
+  if (prev[toRoom] === undefined) return [];
+  const out = [];
+  let cur = toRoom;
+  while (prev[cur]) { out.unshift(prev[cur].at); cur = prev[cur].room; }
+  return out;
+}
+
+/* ============================================================ THE TIMETABLE — pack `day`
+   Four named blocks. Everything else in this file asks the plan what time it
+   is rather than keeping a clock of its own, which is the whole point of it.
+   `sun: true` makes this plan the world's sun as well, so the fixture rig
+   below has a real sky to answer to on a page that loaded no daylight system. */
+/* AUTHORED IN ASCENDING `from`, and the LAST block wraps through midnight
+   into the first — which is why `night` runs from 19 to 5 without a row at 0.
+   Written the other way round first (open, closing, night, dawn-at-5) it
+   reported block "dawn" at ten in the morning, because the wrap-seeded lookup
+   seeds with the LAST entry and only a later `from` can beat it. Nothing in
+   the game misbehaved; the clock simply lied. CBZ.dayPlanAudit().ordered went
+   to 0 on the first probe and named it. */
+const plan = CBZ.dayPlan.define("museum", [
+  { id: "dawn",    from: 5 },
+  { id: "open",    from: 8,  public: 1 },
+  { id: "closing", from: 16 },
+  { id: "night",   from: 19, dark: 1 },
+], { dayLength: DAY_SECONDS, sun: true });
+
+/* ============================================================ THE LIGHT — pack `light`
+   A kind is a SCHEDULE, not a shape. Four of them carry the whole museum:
+   the gallery ceiling runs while the place is awake and dies at lights-out;
+   the case lights hold at a museum's real overnight level, which is why an
+   unlit gallery still has six glowing islands in it; the emergency fittings
+   only exist after hours; the back-of-house strip stays low all night. */
+const rig = CBZ.fixtures.rig("museum", {
+  kinds: {
+    ceiling:   { day: 1, out: 0.0 },
+    showcase:  { day: 1, out: 0.40 },
+    emergency: { day: 0, out: 0.62 },
+    backhouse: { day: 1, out: 0.22 },
+    carried:   { day: 1, out: 1.0 },        // the watchman's own lamp — see below
+  },
+  lightsOut: function () { return plan.is("night") || plan.is("dawn"); },
+  window: 0,                 // a gallery is sealed: no daylight reaches it
+  ambient: 0,                // ...and no room lights itself. Fittings do it all.
+  minSight: 0.34,            // what a man still sees in true black, as a ratio
+  torchThrow: 15,
+  nightFloor: 0.10,          // and the SCREEN goes dark with the numbers
+  probe: { x: 120, z: 120 }, // a spot outside every region, for the audit
+});
+// a region per room, in the same rects the walls were stamped from
+for (const id in ROOMS) {
+  const R = ROOMS[id];
+  rig.region({ id: id, x0: R.x0, x1: R.x1, z0: R.z0, z1: R.z1, window: id === "atrium" ? 0.55 : 0 });
+}
+
+/* ---- the fittings. A registered mesh is DRIVEN for free: colour, emissive,
+     intensity, and the opacity of the floor pool under it. This page writes no
+     light updater at all. ---- */
+const bulbGeom = new THREE.BoxGeometry(0.9, 0.12, 0.9);
+const poolGeom = new THREE.CircleGeometry(1, 20); poolGeom.rotateX(-Math.PI / 2);
+function fitting(x, z, kind, r, opts) {
+  opts = opts || {};
+  const mesh = new THREE.Mesh(opts.geom || bulbGeom,
+    new THREE.MeshLambertMaterial({ color: 0x2b2b2b, emissive: 0x000000 }));
+  mesh.position.set(x, opts.y != null ? opts.y : WALL_H - 0.22, z);
+  scene.add(mesh);
+  let pool = null;
+  if (opts.pool !== false) {
+    // ADDITIVE, so a pool of light reads as light. Alpha-blended it is paint:
+    // a pale disc that greys the floor it sits on and looks like fog.
+    pool = new THREE.Mesh(poolGeom, new THREE.MeshBasicMaterial({
+      color: opts.poolColor != null ? opts.poolColor : 0xffe3a6,
+      transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending,
+    }));
+    pool.position.set(x, 0.07, z);
+    pool.scale.setScalar(r * 0.82);
+    pool.renderOrder = 2;
+    scene.add(pool);
+  }
+  return rig.register({ x: x, z: z, r: r, kind: kind, mesh: mesh, pool: pool,
+    poolPeak: opts.poolPeak != null ? opts.poolPeak : 0.12,
+    color: opts.color, emissive: opts.emissive });
+}
+// gallery ceilings
+[[-24, -6], [-24, 6], [-16, 0], [24, -6], [24, 6], [16, 0],
+ [-11, -22], [11, -22], [0, -18], [0, 0], [0, 7], [0, -7]].forEach(function (p) {
+  fitting(p[0], p[1], "ceiling", 9, { poolPeak: 0.10 });
+});
+// back of house
+[[-15, 20], [-10, 24], [15, 20], [11, 24], [0, 17]].forEach(function (p) {
+  fitting(p[0], p[1], "backhouse", 8, { poolPeak: 0.10 });
+});
+// emergency fittings, one over every doorway, green and low
+for (const k in DOOR) {
+  const d = DOOR[k];
+  fitting(d.x, d.z, "emergency", 5.5, {
+    y: 2.5, color: 0x9dffc0, emissive: 0x2fd97a, poolColor: 0x6effb0, poolPeak: 0.13,
+  });
+}
+// real point lights, pooled: six, aimed at whichever fittings you are nearest
+// ...and the DYNAMIC ones only after hours. A pooled point light on top of a
+// fitting that is already at full daylight is pure over-exposure; at night it
+// is the only thing that makes a pool of light read as a pool of light.
+rig.pointPool(6, {
+  height: 2.7, distance: 17, radius: 44, intensity: 1.25, color: 0xffe9c4,
+  filter: function (f) { return f.level > 0.05 && rig.lightsOut(); },
+});
+
+/* ---- THE LAMP IS A FIXTURE, and it has to be ---------------------------
+   `fixtures.scale(sensor, x, z)` already knows about a sensor's own torch: it
+   restores the sensor's full range inside the beam. That is one direction of
+   the trade. The other direction — the lamp makes YOU the brightest thing in
+   the gallery — is not expressible that way at all, because `level(x, z)` sums
+   FIXTURES and a carried light is not one. Without this the watchman's lamp
+   was pure profit: he saw further and nobody saw him.
+
+   So the lamp is registered as an ordinary fixture that MOVES. Two things the
+   registry does not expect and a caller has to do by hand, both noted:
+     • `powered` is the on/off (the schedule cannot express "when he presses F");
+     • `f._regN` is the cache stamp on which region a fixture is in, and it is
+       only re-solved when the REGION COUNT changes — right for a lamp bolted to
+       a ceiling, wrong for one being carried through a doorway, so it is
+       invalidated here every time the light moves. */
+const lamp = rig.register({ x: 0, z: 0, r: 8.5, kind: "carried", powered: false });
+
+/* ============================================================ THE COLLECTION */
+const PIECES = [
+  { name: "Ashkar Mask",     x: -24, z: -5,  c: 0xd9b44a },
+  { name: "Salt Bronze",     x: -24, z: 5,   c: 0xa8b48c },
+  { name: "Rill Diadem",     x: 24,  z: -5,  c: 0xe4d7a2 },
+  { name: "Kestrel Reliquary", x: 24, z: 5,  c: 0xc7b3d6 },
+  { name: "Hallow Chalice",  x: -12, z: -22, c: 0xe0c26a },
+  { name: "Tessin Codex",    x: 12,  z: -22, c: 0xb98a5e },
+];
+const plinthGeom = new THREE.BoxGeometry(1.1, 0.95, 1.1);
+const treasureGeom = new THREE.BoxGeometry(0.42, 0.42, 0.42);
+const exhibits = PIECES.map(function (P, i) {
+  const base = new THREE.Mesh(plinthGeom, new THREE.MeshLambertMaterial({ color: 0x2f333a }));
+  base.position.set(P.x, 0.475, P.z);
+  base.castShadow = true; base.receiveShadow = true;
+  scene.add(base);
+  CBZ.micro.addCollider({ minX: P.x - 0.55, maxX: P.x + 0.55, minZ: P.z - 0.55, maxZ: P.z + 0.55, y0: 0, y1: 0.95, ref: base });
+  const art = new THREE.Mesh(treasureGeom, new THREE.MeshLambertMaterial({
+    color: P.c, emissive: P.c, emissiveIntensity: 0.9,
+  }));
+  art.position.set(P.x, 1.18, P.z);
+  art.castShadow = true;
+  scene.add(art);
+  // its own case light, on the `showcase` schedule: this is what still burns
+  // after the ceilings die, and it is how you navigate a dark museum
+  const lamp = fitting(P.x, P.z, "showcase", 5.2, { y: 2.55, poolPeak: 0.26 });
+  return { i: i, name: P.name, x: P.x, z: P.z, art: art, base: base, lamp: lamp,
+    home: new THREE.Vector3(P.x, 1.18, P.z), gone: false, held: null, spin: 0 };
+});
+function onDisplay() { let n = 0; for (let i = 0; i < exhibits.length; i++) if (!exhibits[i].gone && !exhibits[i].held) n++; return n; }
+function stillHere() { let n = 0; for (let i = 0; i < exhibits.length; i++) if (!exhibits[i].gone) n++; return n; }
+
+/* ============================================================ THE FURNITURE — packs `rooms` + `push`
+   Every stick of it is CBZ.furnish, which draws the piece at real metric
+   proportions AND registers its sit/sleep anchor AND (since this wave) hands
+   back the meshes — so a bench can be handed straight to CBZ.pushables and
+   become a bench somebody can shove, with its seat anchor riding along. */
+st("FURNISHING");
+const benches = [];
+[[-20, -8, 0], [-20, 8, Math.PI], [20, -8, 0], [20, 8, Math.PI], [0, -20, 0]].forEach(function (b) {
+  const piece = CBZ.furnish.bench(b[0], 0, b[1], b[2], { solid: true, len: 1.7 });
+  const rec = CBZ.pushables.add({
+    parts: piece.parts, x: b[0], z: b[1], hx: 0.9, hz: 0.34, y0: 0, y1: 0.46,
+    mass: 52, leash: 5.5, kind: "bench",
+    seat: piece.seats[0] ? { x: piece.seats[0].x, z: piece.seats[0].z } : null,
+  });
+  benches.push({ rec: rec, seats: piece.seats });
+});
+
+// the crates. FOUR of them and THREE jobs, which is the whole shape of the
+// opening hours: two seal the loading door, one gets you up to the breaker.
+const CRATE_H = 0.86;
+const crateGeom = new THREE.BoxGeometry(1.5, CRATE_H, 1.5);
+const crates = [];
+[[5.6, -26], [14.4, -26], [-4, -6], [15, 7]].forEach(function (c, i) {
+  const m = new THREE.Mesh(crateGeom, new THREE.MeshLambertMaterial({ color: i < 2 ? 0x7a5c33 : 0x6d5a3e }));
+  m.position.set(c[0], CRATE_H / 2, c[1]);
+  m.castShadow = true; m.receiveShadow = true;
+  scene.add(m);
+  crates.push(CBZ.pushables.add({
+    parts: [m], x: c[0], z: c[1], hx: 0.75, hz: 0.75, y0: 0, y1: CRATE_H,
+    mass: 30, leash: 26, kind: "crate", stand: true,
+  }));
+});
+
+// the back of house, laid out by the shared planner rather than by hand
+const officePlan = CBZ.roomFurnish({ x0: ROOMS.office.x0 + 1, x1: ROOMS.office.x1 - 1,
+  z0: ROOMS.office.z0 + 1, z1: ROOMS.office.z1 - 1 }, "office", { door: { side: "E" }, solid: true });
+const breakPlan = CBZ.roomFurnish({ x0: ROOMS.breakrm.x0 + 1, x1: ROOMS.breakrm.x1 - 1,
+  z0: ROOMS.breakrm.z0 + 1, z1: ROOMS.breakrm.z1 - 1 }, "breakroom", { door: { side: "W" }, solid: true });
+// ...and the cot the night porter actually sleeps on
+const cot = CBZ.furnish.bed(20, 0, 24.5, -Math.PI / 2, { solid: true });
+
+// every seat and bed the museum owns, however it got registered
+CBZ.rest.ready();
+const SEATS = (CBZ.propSeats || []).slice();
+const BEDS = (CBZ.propBeds || []).slice();
+
+/* ---- the master breaker, on the atrium's north wall and OUT OF REACH ---- */
+const BREAKER = { x: 0, z: -11.4, y: 2.35 };
+const breakerMesh = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.9, 0.22),
+  new THREE.MeshLambertMaterial({ color: 0x3b4148, emissive: 0x101418 }));
+breakerMesh.position.set(BREAKER.x, BREAKER.y, BREAKER.z);
+scene.add(breakerMesh);
+const breaker = { burn: 0, cool: 0 };
+
+/* ---- the loading door, and whether anything is standing in it ---- */
+const LOAD = DOOR.load;
+const LOAD_X0 = LOAD.x - LOAD.w / 2, LOAD_X1 = LOAD.x + LOAD.w / 2;
+const BODY_W = 0.92;                       // a man's shoulders, doorway-wise
+function doorGap() {
+  /* THE WIDEST CLEAR SPAN LEFT IN THE DOORWAY, read straight out of the
+     pushable registry so a crate shoved back out un-seals the door on the same
+     frame. This is deliberately the SAME question the thief's own body already
+     asks of the colliders — he is a 0.44 m circle and the crates are real
+     boxes, so the rule and the physics cannot disagree and "sealed" is never a
+     flag the world contradicts. */
+  const props = CBZ.pushProps || [];
+  const spans = [];
+  for (let i = 0; i < props.length; i++) {
+    const p = props[i];
+    if (Math.abs(p.z - LOAD.z) > p.hz + 0.95) continue;
+    const a = Math.max(LOAD_X0, p.x - p.hx), b = Math.min(LOAD_X1, p.x + p.hx);
+    if (b > a) spans.push([a, b]);
+  }
+  spans.sort(function (u, v) { return u[0] - v[0]; });
+  let gap = 0, cur = LOAD_X0;
+  for (let i = 0; i < spans.length; i++) {
+    if (spans[i][0] > cur) gap = Math.max(gap, spans[i][0] - cur);
+    if (spans[i][1] > cur) cur = spans[i][1];
+  }
+  return Math.max(gap, LOAD_X1 - cur);
+}
+function doorSealed() { return doorGap() < BODY_W; }
+
+/* ============================================================ BODIES
+   One helper, because a thief, a curator and a porter are the same thing to
+   everything below: a shipped rig with a target and a walk rate. This is the
+   actor shape systems/rest.js and systems/pushables.js both already read
+   (group / target / pause / speed), so neither needs telling about this game. */
+function body(role, x, z, variant, color) {
+  const g = CBZ.studio.cast(role, { variant: variant, color: color });
+  g.position.set(x, 0, z);
+  scene.add(g);
+  const a = {
+    group: g, char: g.userData.charRig, role: role,
+    target: new THREE.Vector3(x, 0, z), pause: 0, speed: WALK,
+    yaw: 0, path: [], _spd: 0,
+  };
+  return a;
+}
+
+// walk a body along its route, then straight at its target. Returns true on
+// arrival. Uses the engine's own slide resolver, so a body uses the doorways.
+function stepBody(a, dt, spd) {
+  const g = a.group.position;
+  if (a.pause > 0) { a.pause -= dt; a._spd = 0; anim(a, dt, 0); return false; }
+  let tx = a.target.x, tz = a.target.z;
+  if (a.path && a.path.length) { tx = a.path[0].x; tz = a.path[0].z; }
+  const dx = tx - g.x, dz = tz - g.z;
+  const d = Math.hypot(dx, dz);
+  const onPath = !!(a.path && a.path.length);
+  // a mark you can be depenetrated off is a mark you might never reach, so a
+  // waypoint has a deadline as well as a radius
+  if (onPath) a.wpT = (a.wpT || 0) + dt;
+  if (d < (onPath ? 0.75 : 0.55) || (onPath && a.wpT > 6)) {
+    if (onPath) { a.path.shift(); a.wpT = 0; a._spd = 0; anim(a, dt, spd * 0.6); return false; }
+    a._spd = 0; anim(a, dt, 0);
+    return true;
+  }
+  const v = spd == null ? a.speed : spd;
+  g.x += (dx / d) * v * dt;
+  g.z += (dz / d) * v * dt;
+  CBZ.micro.resolveCircle(g, 0.44, g.y + 0.2, 1.5);
+  g.y = CBZ.micro.platformTop(g.x, g.z, g.y, 0);
+  const want = Math.atan2(dx, dz);
+  let dy = want - a.yaw;
+  while (dy > Math.PI) dy -= Math.PI * 2;
+  while (dy < -Math.PI) dy += Math.PI * 2;
+  a.yaw += dy * Math.min(1, dt * 7);
+  a.group.rotation.y = a.yaw;
+  a._spd = v;
+  anim(a, dt, v);
+  return false;
+}
+function anim(a, dt, spd) {
+  // the arc that owns a body mid-sit/mid-lie also owns its transform; writing
+  // a gait over it is the two-systems-one-Vector3 fault systems/rest.js warns
+  // about, so the pose is left alone while it is running.
+  if (a._propBed || a._propSeat || CBZ.rest.inTransition(a)) return;
+  if (CBZ.animChar && a.char) { try { CBZ.animChar(a.char, spd, dt); } catch (e) {} }
+}
+function sendTo(a, x, z) {
+  const here = roomAt(a.group.position.x, a.group.position.z);
+  const there = roomAt(x, z);
+  const legs = here === there ? [] : route(here, there);
+  const path = [];
+  let cur = here;
+  for (let i = 0; i < legs.length; i++) {
+    const d = legs[i], next = d.a === cur ? d.b : d.a;
+    if (d.side[cur]) path.push(d.side[cur]);
+    if (d.side[next]) path.push(d.side[next]);
+    cur = next;
+  }
+  a.path = path;
+  a.wpT = 0;
+  a.target.set(x, 0, z);
+  a.pause = 0;
+}
+
+/* ============================================================ THE PLAYER
+   THE ONE THING THE STUDIO HAS NO VERB FOR. Everything else on this page is a
+   call into the engine; a walking, jumping, collided, ground-clamped body on
+   foot is written here from scratch, because `controls()` gives the intent and
+   `resolveCircle`/`platformTop` give the world, and nothing joins them up.
+   Reported as the top promotion candidate rather than hidden. */
+const me = {
+  pos: new THREE.Vector3(0, 0, 6),
+  vy: 0, radius: 0.48, hp: 100, yaw: Math.PI,
+  moveX: 0, moveZ: 0, speed: WALK,
+  onGround: true, flashlightOn: false, stun: 0,
+};
+const meRig = CBZ.studio.cast("security", { variant: 4, color: 0x35506e });
+scene.add(meRig);
+// systems/pushables.js sweeps CBZ.player for the shove, and reads pos +
+// moveX/moveZ (the DESIRED velocity, before a wall has an opinion). That is
+// physics.js's own contract; on a page with no physics.js the page keeps it.
+CBZ.player = me;
+CBZ.pushables.pushers = function () { return [thieves, staff]; };
+
+// the lamp: a real spotlight, plus the one flag systems/fixtures.js reads
+const torch = new THREE.SpotLight(0xfff0d0, 0, 21, 0.44, 0.42, 1.1);
+torch.position.set(0, 1.6, 0);
+scene.add(torch);
+scene.add(torch.target);
+
+/* ============================================================ THE STAFF — pack `rest`
+   Three of them, and their whole day is the plan's four blocks. During `open`
+   they SIT — the curator at an office desk, an attendant on a gallery bench.
+   At `closing` they walk to the break room. At `night` the porter LIES DOWN on
+   the cot, and getting him up again is a thing the player can do. */
+const staff = [];
+function makeStaff() {
+  const curator = body("exec", -14, 20, 1);
+  curator.job = "desk"; curator.name = "curator";
+  const attendant = body("worker", -20, -6, 3);
+  attendant.job = "bench"; attendant.name = "attendant";
+  const porter = body("guard", 14, 20, 5);
+  porter.job = "porter"; porter.name = "porter"; porter.awake = false; porter.patrol = 0;
+  staff.push(curator, attendant, porter);
+}
+makeStaff();
+// the invariant this layer exists for, measured against THIS game's own beds
+CBZ.restWatch("museum", function () { return BEDS; }, function () { return staff; });
+
+const BREAK_SEATS = SEATS.filter(function (s) { return roomAt(s.x, s.z) === "breakrm"; });
+const DESK_SEATS = SEATS.filter(function (s) { return roomAt(s.x, s.z) === "office"; });
+const GALLERIES = { west: 1, east: 1, north: 1 };
+const BENCH_SEATS = SEATS.filter(function (s) { return !!GALLERIES[roomAt(s.x, s.z)]; });
+const PATROL = [[-20, 0], [0, -20], [20, 0], [0, 0]];
+
+function runStaff(a, dt) {
+  const g = a.group.position;
+  const block = plan.blockId();
+
+  // the porter, asleep, is the one body the player can change the mind of
+  if (a.job === "porter" && a.awake) {
+    if (stepBody(a, dt, WALK * 0.85)) {
+      a.patrol = (a.patrol + 1) % PATROL.length;
+      sendTo(a, PATROL[a.patrol][0], PATROL[a.patrol][1]);
+    }
+    return;
+  }
+
+  let want = null;      // {room, kind, pool}
+  if (block === "open") {
+    want = a.job === "desk" ? { room: "office", pool: DESK_SEATS, kind: "sit" }
+      : a.job === "bench" ? { room: null, pool: BENCH_SEATS, kind: "sit" }
+      : { room: "atrium", kind: "walk", at: [0, 4] };
+  } else if (block === "closing") {
+    want = { room: "breakrm", pool: BREAK_SEATS, kind: "sit" };
+  } else {
+    want = a.job === "porter" ? { room: "breakrm", pool: BEDS, kind: "sleep" }
+      : { room: "breakrm", pool: BREAK_SEATS, kind: "sit" };
+  }
+
+  if (want.kind === "walk") {
+    if (a._propSeat || a._propBed) { CBZ.rest.up(a); CBZ.rest.unclaim(a); }
+    if (a.target.x !== want.at[0]) sendTo(a, want.at[0], want.at[1]);
+    stepBody(a, dt, WALK * 0.7);
+    return;
+  }
+
+  /* CBZ.rest.claim is stable for the whole RUN by design ("re-picking every
+     night is a game of musical chairs") — it hands back the held record even
+     when you ask against a different pool. These staff change job with the
+     block, so the pool is part of what the claim MEANS here, and a change of
+     pool has to release it or the attendant walks to the break room and sits
+     back down on a gallery bench forty metres away. */
+  if (a._pool !== want.pool) { if (a._restPlace) CBZ.rest.unclaim(a); a._pool = want.pool; }
+  const place = CBZ.rest.claim(a, want.pool || []);
+  if (!place) { stepBody(a, dt, WALK * 0.7); return; }
+  if (a._propSeat || a._propBed) {
+    // already resting: is it still the right kind of resting?
+    const lying = !!a._propBed;
+    if ((want.kind === "sleep") !== lying) { CBZ.rest.up(a); CBZ.rest.unclaim(a); }
+    else { anim(a, dt, 0); return; }
+  }
+  const near = roomAt(g.x, g.z) === roomAt(place.x, place.z);
+  if (!near) {
+    if (!a.path.length) sendTo(a, place.x, place.z);
+    stepBody(a, dt, WALK * 0.8);
+    return;
+  }
+  // in the room: rest.sit / rest.sleep write the target themselves and commit
+  // when the body is close enough, which is what the mover below then honours
+  const done = want.kind === "sleep" ? CBZ.rest.sleep(a, place) : CBZ.rest.sit(a, place);
+  // rest.sit/sleep write a STRAIGHT-LINE target, so the route is finished with
+  // and must be dropped rather than followed past the furniture. (Assigned,
+  // never mutated: the pose verbs null this field on the way in.)
+  if (!done) { a.path = []; stepBody(a, dt, WALK * 0.8); }
+  else anim(a, dt, 0);
+}
+
+/* ============================================================ THE THIEVES
+   They come through the loading door once it is dark, take the nearest piece
+   nobody is already on, and carry it back out. Three things stop them, and all
+   three are the packs: LIGHT (they will not work in it), a SEALED DOOR (push),
+   and a watchman's hands. */
+const thieves = [];
+let entered = 0, caught = 0, stolen = 0;
+function makeThief(i) {
+  const t = body("thug", LOAD.x + (i - 1) * 1.4, -38 - i * 3, 7 + i, 0x2a2f38);
+  t.speed = THIEF_SPD;
+  t.state = "wait"; t.wait = 6 + i * 9;
+  t.mark = null; t.lift = 0; t.carry = null; t.done = false; t.seen = false; t.spook = 0;
+  t.lastShoveAt = -99;
+  t.group.visible = false;
+  thieves.push(t);
+  return t;
+}
+for (let i = 0; i < N_THIEVES; i++) makeThief(i);
+
+function detach(o) { if (o && o.parent) o.parent.remove(o); }
+function dropCarry(t) {
+  if (!t.carry) return;
+  const e = t.carry;
+  e.held = null; t.carry = null;
+  scene.add(e.art);                          // reparents: three removes it from the thief
+  e.art.position.copy(e.home);
+  e.art.visible = true;
+}
+function loseCarry(t) {
+  const e = t.carry;
+  if (!e) return;
+  stolen++;
+  e.gone = true;
+  e.lamp.powered = false;                    // the case light dies with the piece
+  detach(e.art);                             // ...and it was parented to HIM, not the scene
+  e.held = null; t.carry = null;
+}
+function leave(t) {
+  t.state = "flee";
+  sendTo(t, LOAD.x, LOAD.z - 3);
+}
+function pickTarget(t) {
+  let best = null, bd = Infinity;
+  const g = t.group.position;
+  for (let i = 0; i < exhibits.length; i++) {
+    const e = exhibits[i];
+    if (e.gone || e.held || e.claimBy) continue;
+    const d = (e.x - g.x) * (e.x - g.x) + (e.z - g.z) * (e.z - g.z);
+    if (d < bd) { bd = d; best = e; }
+  }
+  if (best) {
+    best.claimBy = t;
+    t.mark = best;
+    /* APPROACH FROM THE SIDE HE IS ALREADY ON. A fixed stand-off point (the
+       first draft used mark.z + 1.4) puts the plinth BETWEEN the body and its
+       own destination half the time, and peds steer around obstacles rather
+       than pathing around them: measured, a thief oscillated 2.4 m south of
+       the Tessin Codex for forty seconds, shoved back by the plinth collider
+       every frame. The bearing from the man to the thing is by construction
+       the open side — the same lesson city/aircraft.js's AIR_CREW_BOARD had
+       to learn about a flight line. */
+    const bx = g.x - best.x, bz = g.z - best.z, bl = Math.hypot(bx, bz) || 1;
+    sendTo(t, best.x + (bx / bl) * 1.6, best.z + (bz / bl) * 1.6);
+  }
+  return best;
+}
+
+function runThief(t, dt) {
+  const g = t.group.position;
+  if (t.done) return;
+
+  if (t.state === "wait") {
+    if (!plan.is("night")) return;           // the clock only runs after dark
+    t.wait -= dt;
+    if (t.wait > 0) return;
+    if (doorSealed()) { t.wait = 4; return; }      // the barricade holds him out
+    t.state = "enter"; t.group.visible = true;
+    g.set(LOAD.x, 0, LOAD.z - 1.5);
+    entered++;
+    if (CBZ.worldSfx) CBZ.worldSfx("door_open", g.x, g.z);
+    sendTo(t, LOAD.x, LOAD.z + 4);
+    return;
+  }
+
+  // HOW MUCH LIGHT IS ON HIM — the number every branch below asks
+  const litHere = rig.level(g.x, g.z);
+
+  if (t.state === "flee") {
+    if (stepBody(t, dt, THIEF_SPD * 1.25)) {
+      t.done = true; t.group.visible = false;
+      if (t.mark) { t.mark.claimBy = null; t.mark = null; }
+      loseCarry(t);
+    }
+    return;
+  }
+
+  if (t.state === "carry") {
+    if (litHere > WORK_LIGHT) { t.spook += dt; } else t.spook = 0;
+    if (t.spook > 0.7) { dropCarry(t); leave(t); return; }   // caught in the light
+    if (doorSealed()) { sendTo(t, 0, -20); t.state = "hunt"; t.mark = null; return; }
+    if (stepBody(t, dt, THIEF_SPD)) {
+      loseCarry(t);
+      t.done = true; t.group.visible = false;
+      if (CBZ.worldSfx) CBZ.worldSfx("door_close", g.x, g.z);
+    }
+    return;
+  }
+
+  if (t.state === "lift") {
+    const e = t.mark;
+    if (!e || e.gone) { t.state = "hunt"; t.mark = null; return; }
+    if (litHere > WORK_LIGHT) {                    // he will not work in the light
+      t.spook += dt;
+      if (t.spook > 0.5) { e.claimBy = null; t.mark = null; t.state = "hunt"; t.spook = 0; }
+      anim(t, dt, 0);
+      return;
+    }
+    t.spook = 0;
+    t.lift += dt;
+    anim(t, dt, 0);
+    if (t.lift >= LIFT_TIME) {
+      e.held = t; t.carry = e; e.claimBy = null;
+      t.group.add(e.art);
+      e.art.position.set(0, 1.05, 0.42);
+      if (CBZ.worldSfx) CBZ.worldSfx("glass", g.x, g.z);
+      t.state = "carry";
+      sendTo(t, LOAD.x, LOAD.z - 4);
+    }
+    return;
+  }
+
+  // hunt / enter
+  if (!t.mark || t.mark.gone || t.mark.held) {
+    if (t.mark) t.mark.claimBy = null;
+    t.mark = null;
+    if (!pickTarget(t)) { leave(t); return; }
+  }
+  t.state = "hunt";
+  const arrived = stepBody(t, dt, THIEF_SPD);
+  // BOTH, because either alone has a hole in it. A pure distance test misses by
+  // the arrival radius (measured: a stand-off 1.60 m off the plinth, reached to
+  // within 0.53 m, leaves the body 2.13 m out and a 2.10 m threshold never
+  // fires — he stood there for the rest of the night). A pure arrival test
+  // misses when the plinth's own collider parks him a hand short.
+  if (t.mark && (arrived || Math.hypot(t.mark.x - g.x, t.mark.z - g.z) < 2.4)) {
+    t.state = "lift"; t.lift = 0; t.spook = 0;
+  }
+  if (t.state !== "lift" && plan.is("night")) {
+    // walking through a lit gallery is survivable; standing in one is not. The
+    // decay matters: without it the 0.6 s he spends under the lit doorway on
+    // the way in is banked forever and the third gallery he crosses bolts him.
+    if (litHere > WORK_LIGHT) t.spook += dt;
+    else t.spook = Math.max(0, t.spook - dt * 0.8);
+    if (t.spook > 2.6) { if (t.mark) t.mark.claimBy = null; t.mark = null; t.spook = 0; leave(t); }
+  }
+}
+
+/* ============================================================ BE REACHABLE
+   One call and every shared verb in the engine can find these people. Placed
+   HERE, below the rosters it hands over, because `actors` closes over them and
+   anything that asks before they exist is a temporal-dead-zone throw. */
+CBZ.studio.join({
+  id: "nightwatch", label: "Night Watch",
+  caps: { traverse: 1, stepLedge: 1 },
+  actors: function (out) {
+    for (let i = 0; i < thieves.length; i++) if (!thieves[i].done) out.push(thieves[i]);
+    for (let i = 0; i < staff.length; i++) out.push(staff[i]);
+    return out;
+  },
+  hurtPlayer: function (dmg) { hurtMe(dmg); return true; },
+  route: "night watch roster",
+});
+
+/* ============================================================ SEEING
+   The one number that runs the whole night, from `light`. `scale(sensor,x,z)`
+   is what a sensor's range is worth at a point: near 1 in a lit gallery, down
+   to `minSight` in the black — and a sensor carrying a lamp buys the whole
+   range back INSIDE the beam. So the same function answers both directions,
+   and the trade is that the lamp lights you up for him at the same moment. */
+function iCanSee(t) {
+  const g = t.group.position;
+  const d = Math.hypot(g.x - me.pos.x, g.z - me.pos.z);
+  if (d > SEE_R * rig.scale(me, g.x, g.z)) return false;
+  return !CBZ.micro.segmentBlocked(me.pos.x, 1.5, me.pos.z, g.x, 1.5, g.z);
+}
+function heCanSee(t) {
+  const g = t.group.position;
+  const d = Math.hypot(g.x - me.pos.x, g.z - me.pos.z);
+  if (d > THIEF_SEE_R * rig.scale(t, me.pos.x, me.pos.z)) return false;
+  return !CBZ.micro.segmentBlocked(g.x, 1.5, g.z, me.pos.x, 1.5, me.pos.z);
+}
+function porterSees(t) {
+  for (let i = 0; i < staff.length; i++) {
+    const s = staff[i];
+    if (s.job !== "porter" || !s.awake) continue;
+    const g = s.group.position, tg = t.group.position;
+    if (Math.hypot(g.x - tg.x, g.z - tg.z) < PORTER_EYES) return true;
+  }
+  return false;
+}
+
+/* ============================================================ THE INTERFACE */
+const hud = CBZ.studio.hud({ healthLabel: "WATCHMAN" });
+const ctl = CBZ.studio.controls("walk", {
+  buttons: { use: "GRAB", torch: "LAMP", jump: "UP" },
+  keys: { use: "KeyE", torch: "KeyF", jump: "Space", sprint: "ShiftLeft" },
+});
+const cam = CBZ.studio.chase({ groundAt: function (x, z) { return CBZ.micro.platformTop(x, z, 4, 0); } });
+
+let running = false, ended = false;
+function hurtMe(dmg) {
+  if (!running || ended) return;
+  me.hp = Math.max(0, me.hp - dmg);
+  CBZ.micro.shake(0.6);
+  if (CBZ.sfxAt) CBZ.sfxAt("hit", me.pos.x, me.pos.z);
+  if (me.hp <= 0) finish(false, "KNOCKED DOWN");
+}
+
+/* ---- what [E] is for, right now. One answer, so the prompt and the press can
+     never disagree. The label goes to studio's hud(), which decides on its own
+     whether that is a key cap or a tap target. ---- */
+function verbHere() {
+  // 1. a thief within arm's reach
+  let best = null, bd = CATCH_R;
+  for (let i = 0; i < thieves.length; i++) {
+    const t = thieves[i];
+    if (t.done || t.state === "wait") continue;
+    const d = Math.hypot(t.group.position.x - me.pos.x, t.group.position.z - me.pos.z);
+    if (d < bd) { bd = d; best = t; }
+  }
+  if (best) return { label: "GRAB HIM", fn: function () { grab(best); } };
+  // 2. the sleeping porter
+  for (let i = 0; i < staff.length; i++) {
+    const s = staff[i];
+    if (s.job !== "porter" || s.awake || !s._propBed) continue;
+    if (Math.hypot(s.group.position.x - me.pos.x, s.group.position.z - me.pos.z) < 2.6)
+      return { label: "WAKE HIM", fn: function () { wakePorter(s); } };
+  }
+  // 3. the breaker, if you are standing high enough to reach it
+  const db = Math.hypot(BREAKER.x - me.pos.x, BREAKER.z - me.pos.z);
+  if (db < 1.9 && me.pos.y >= BREAKER_UP && me.onGround && breaker.cool <= 0)
+    return { label: "ALL LIGHTS", fn: pullBreaker };
+  return null;
+}
+function grab(t) {
+  if (t.carry) dropCarry(t);
+  if (t.mark) t.mark.claimBy = null;
+  t.done = true; t.group.visible = false;
+  caught++;
+  if (CBZ.sfx) CBZ.sfx("punch");
+}
+function wakePorter(s) {
+  CBZ.rest.up(s);
+  CBZ.rest.unclaim(s);
+  s.awake = true;
+  s.patrol = 0;
+  sendTo(s, PATROL[0][0], PATROL[0][1]);
+  if (CBZ.worldSfx) CBZ.worldSfx("switch", s.group.position.x, s.group.position.z);
+}
+function pullBreaker() {
+  breaker.burn = BREAKER_BURN;
+  breaker.cool = BREAKER_COOL;
+  if (CBZ.sfx) CBZ.sfx("switch");
+}
+
+/* ---- the light rig's own override. `kinds` are LIVE records: the panic
+     breaker is one number, written once, and every ceiling fitting in the
+     building answers to it on the next drive. No fixture is touched. ---- */
+function driveBreaker(dt) {
+  if (breaker.burn > 0) breaker.burn -= dt;
+  if (breaker.cool > 0) breaker.cool -= dt;
+  rig.kinds.ceiling.out = breaker.burn > 0 ? 1 : 0;
+  breakerMesh.material.emissive.setHex(breaker.burn > 0 ? 0xffe08a : (breaker.cool > 0 ? 0x3a1010 : 0x101418));
+}
+
+/* ============================================================ THE SHIFT */
+function finish(won, why) {
+  if (ended) return;
+  ended = true; running = false;
+  CBZ.micro.paused = true;
+  if (won && CBZ.sfx) CBZ.sfx("win");
+  el("overTitle").innerHTML = won ? "SHIFT <em>HELD</em>" : "SHIFT <em>LOST</em>";
+  el("overSub").textContent = why;
+  el("overTable").innerHTML =
+    "<tr><td>STILL ON SHOW</td><td>" + stillHere() + " of " + exhibits.length + "</td></tr>" +
+    "<tr><td>HELD</td><td>" + caught + "</td></tr>" +
+    "<tr><td>TAKEN</td><td>" + stolen + "</td></tr>" +
+    "<tr><td>CAME IN</td><td>" + entered + " of " + N_THIEVES + "</td></tr>";
+  el("over").style.display = "grid";
+  hud.prompt(null);
+}
+plan.on(function (b, prev, first) {
+  if (first || !running) return;
+  if (b.id === "night" && CBZ.sfx) CBZ.sfx("lockdown");
+  if (b.id === "dawn") {
+    const kept = stillHere();
+    finish(kept >= KEEP_TO_WIN, kept + " OF " + exhibits.length + " STILL ON SHOW");
+  }
+});
+
+/* ============================================================ THE FRAME
+   order 10 is the physics band, which is where the player's DRIVE has to be
+   written: systems/pushables.js sweeps at 23 and reads moveX/moveZ as this
+   frame's real intent. The crowd goes at 22, above it, for the same reason. */
+const _v = new THREE.Vector3();
+CBZ.onUpdate(10, function (dt) {
+  if (!running || ended) return;
+  plan.poll(dt);
+  driveBreaker(dt);
+
+  // ---- the player ----------------------------------------------------
+  ctl.step(dt);
+  const sprinting = ctl.held("sprint");
+  const spd = me.stun > 0 ? 0 : (sprinting ? SPRINT : WALK);
+  me.stun = Math.max(0, me.stun - dt);
+  // fixed-yaw camera: the stick IS world space, no rotation anywhere
+  let wx = ctl.move.x, wz = -ctl.move.y;
+  const wl = Math.hypot(wx, wz);
+  if (wl > 1) { wx /= wl; wz /= wl; }
+  me.moveX = wx * spd; me.moveZ = wz * spd;
+  me.pos.x += me.moveX * dt;
+  me.pos.z += me.moveZ * dt;
+  CBZ.micro.resolveCircle(me.pos, me.radius, me.pos.y + 0.25, 1.5);
+
+  // vertical: the world's own walk surfaces, which is what makes a shoved
+  // crate somewhere you can actually stand
+  const floor = CBZ.micro.platformTop(me.pos.x, me.pos.z, me.pos.y, 0);
+  // 6.0 m/s against 15.5 m/s^2 is a 1.16 m apex — measured against the 0.86 m
+  // crate it has to clear, not chosen by feel. At 4.6 the apex was 0.68 m and
+  // the crate you had just shoved under the breaker was unclimbable, which
+  // reads as the push feature being broken rather than the jump.
+  if (ctl.tapped("jump") && me.onGround) { me.vy = 6.0; me.onGround = false; if (CBZ.sfx) CBZ.sfx("jump"); }
+  me.vy -= 15.5 * dt;
+  me.pos.y += me.vy * dt;
+  if (me.pos.y <= floor) { me.pos.y = floor; me.vy = 0; me.onGround = true; }
+  else me.onGround = false;
+  if (wl > 0.02) {
+    const want = Math.atan2(wx, wz);
+    let dy = want - me.yaw;
+    while (dy > Math.PI) dy -= Math.PI * 2;
+    while (dy < -Math.PI) dy += Math.PI * 2;
+    me.yaw += dy * Math.min(1, dt * 12);
+  }
+  meRig.position.copy(me.pos);
+  meRig.rotation.y = me.yaw;
+  if (CBZ.animChar) { try { CBZ.animChar(meRig.userData.charRig, wl > 0.02 ? spd : 0, dt); } catch (e) {} }
+  if (me.hp < 100) me.hp = Math.min(100, me.hp + HEAL_RATE * dt);
+
+  // the lamp
+  if (ctl.tapped("torch")) { me.flashlightOn = !me.flashlightOn; if (CBZ.sfx) CBZ.sfx("switch"); }
+  torch.intensity = me.flashlightOn ? 1.9 : 0;
+  torch.visible = me.flashlightOn;
+  lamp.powered = me.flashlightOn;
+  lamp.x = me.pos.x; lamp.z = me.pos.z;
+  lamp._regN = -1;                          // it moved: re-solve which room it is in
+
+  /* AND THE RIG IS DRIVEN LAST, not first. systems/fixtures.js offers a `tick`
+     that drives itself and says in its own header that a caller takes the drive
+     over "whenever a fitting's own ambient has to be computed in a particular
+     order against its neighbours". This is that case and it is not subtle: the
+     watchman's lamp is a fixture whose position and power are written HERE, so
+     a drive above this line publishes last frame's lamp — measured as a lamp
+     that lit nothing on the frame you switched it on, and the pooled point
+     lights trailing the player by a frame for the whole game. */
+  rig.drive(true);
+  if (me.flashlightOn) {
+    torch.position.set(me.pos.x, me.pos.y + 1.55, me.pos.z);
+    torch.target.position.set(me.pos.x + Math.sin(me.yaw) * 12, me.pos.y + 0.2, me.pos.z + Math.cos(me.yaw) * 12);
+    torch.target.updateMatrixWorld();
+  }
+});
+
+CBZ.onUpdate(22, function (dt) {
+  if (!running || ended) return;
+  for (let i = 0; i < staff.length; i++) runStaff(staff[i], dt);
+  for (let i = 0; i < thieves.length; i++) runThief(thieves[i], dt);
+
+  // ---- what is visible, and what that costs -------------------------
+  let danger = 0, lifting = 0;
+  for (let i = 0; i < thieves.length; i++) {
+    const t = thieves[i];
+    if (t.done || t.state === "wait") { continue; }
+    // SHOW DON'T TELL: an unseen thief is not drawn. In a dark museum the
+    // galleries are empty and a lamp sweep finds a man.
+    t.seen = iCanSee(t) || porterSees(t);
+    t.group.visible = t.seen;
+    if (t.carry) t.carry.art.visible = t.seen;
+    const d = Math.hypot(t.group.position.x - me.pos.x, t.group.position.z - me.pos.z);
+    if (t.state === "lift") lifting = Math.max(lifting, 1 - Math.abs(t.lift / LIFT_TIME - 1));
+    if (d < 6) danger = Math.max(danger, 1 - d / 6);
+    // he shoves past a watchman who gets in his way and can see him coming
+    if (d < SHOVE_R && heCanSee(t) && CBZ.micro.elapsed - t.lastShoveAt > SHOVE_GAP) {
+      t.lastShoveAt = CBZ.micro.elapsed;
+      me.stun = 0.55;
+      const nx = (me.pos.x - t.group.position.x) / Math.max(0.01, d);
+      const nz = (me.pos.z - t.group.position.z) / Math.max(0.01, d);
+      me.pos.x += nx * 1.1; me.pos.z += nz * 1.1;
+      hurtMe(SHOVE_DMG);
+    }
+    if (heCanSee(t) && t.state === "lift") { t.spook += dt * 2.2; if (t.spook > 1.2) { if (t.mark) t.mark.claimBy = null; t.mark = null; t.state = "hunt"; t.spook = 0; } }
+  }
+  hud.danger(danger);
+  if (lifting > 0.12) CBZ.studio.alarm(lifting * 0.9);
+
+  // ---- the ledger ----------------------------------------------------
+  if (stolen >= exhibits.length - KEEP_TO_WIN + 1) finish(false, stolen + " PIECES GONE");
+  else if (caught + stolen >= N_THIEVES && entered >= N_THIEVES) finish(stillHere() >= KEEP_TO_WIN, "ALL THREE ACCOUNTED FOR");
+});
+
+// order 60: after everything has moved, so the camera and the HUD read the
+// frame that was actually simulated
+CBZ.onUpdate(60, function (dt) {
+  if (!running) return;
+  cam.follow(me.pos, Math.PI, dt, { back: 5.6, up: 14.2 });
+  hud.health(me.hp / 100);
+  const c = plan.clock();
+  hud.clock((c.h < 10 ? "0" : "") + c.h + ":" + (c.m < 10 ? "0" : "") + c.m);
+  hud.score({ "ON SHOW": stillHere() + "/" + exhibits.length, "HELD": caught });
+  for (let i = 0; i < exhibits.length; i++) {
+    const e = exhibits[i];
+    if (e.gone || e.held) continue;
+    e.art.rotation.y += dt * 0.5;
+  }
+  const v = verbHere();
+  hud.prompt(v ? v.label : null, v ? v.fn : null, "E");
+  if (v && ctl.tapped("use")) v.fn();
+});
+
+/* ============================================================ START
+   The world behind the card is the same world: arm the plan (silently, which
+   is what dayPlan's `first` beat is for) and drive the fittings once, so the
+   museum is lit before anybody presses anything rather than snapping on. */
+plan.poll(0);
+rig.drive(false);
+CBZ.micro.paused = true;
+st("READY");
+el("go").addEventListener("click", function () {
+  el("gate").style.display = "none";
+  CBZ.micro.paused = false;
+  running = true;
+  ctl.lock();
+  // audio contexts want a gesture; this is the gesture
+  if (CBZ.sfx) CBZ.sfx("door_open");
+});
+el("again").addEventListener("click", function () { location.reload(); });
+
+/* ============================================================ WHAT A PROBE READS
+   Everything a headless check needs, and the three shipped ratchets this game
+   is now a consumer of, in one place. */
+window.__watch = {
+  ready: true,
+  plan: plan, rig: rig, me: me, thieves: thieves, staff: staff, exhibits: exhibits,
+  rooms: ROOMS, doorSealed: doorSealed, doorGap: doorGap, breaker: breaker, crates: crates,
+  see: iCanSee, seenBy: heCanSee, verb: verbHere, level: function (x, z) { return rig.level(x, z); },
+  roomAt: roomAt, route: route,
+  start: function () { el("go").click(); },
+  state: function () {
+    return {
+      block: plan.blockId(), hour: +plan.hour().toFixed(2),
+      dayness: +(CBZ.dayness || 0).toFixed(3), sky: +rig.sky().toFixed(3),
+      onShow: stillHere(), stolen: stolen, caught: caught, entered: entered,
+      hp: Math.round(me.hp), y: +me.pos.y.toFixed(2), sealed: doorSealed(),
+      seated: staff.filter(function (s) { return !!s._propSeat; }).length,
+      asleep: staff.filter(function (s) { return !!s._propBed; }).length,
+      awakePorter: staff.some(function (s) { return s.job === "porter" && s.awake; }),
+      running: running, ended: ended,
+    };
+  },
+  audits: function () {
+    return {
+      studio: CBZ.studio.audit().missing,
+      dayGaps: CBZ.dayPlanAudit().gaps,
+      dayOrdered: CBZ.dayPlanAudit().ordered,
+      lightUnknown: CBZ.fixtureAudit().unknownKinds,
+      lightNoon: CBZ.fixtureAudit().sightAtNoon,
+      restStanders: CBZ.restAudit().standers,
+      restDupes: CBZ.restAudit().dupes,
+      pushEscaped: CBZ.pushPropAudit().escaped,
+      pushStandLost: CBZ.pushPropAudit().standLost,
+      pushUnbatched: CBZ.pushPropAudit().unbatched,
+      furnishMismatch: CBZ.furnishAudit ? CBZ.furnishAudit().mismatched : null,
+      propBlocked: CBZ.propUseAudit ? CBZ.propUseAudit().blocked : null,
+    };
+  },
+};
+st("");
+}).catch(function (e) {
+  const n = document.getElementById("st");
+  if (n) n.textContent = "FAILED: " + (e && e.message || e);
+  console.error(e);
+});
+})();
+</script>
+</body>
+</html>

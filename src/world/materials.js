@@ -185,6 +185,15 @@
     return g;
   }
 
+  /* THE TWO BUSES addBox WRITES HAVE TO EXIST BEFORE IT DOES. config.js
+     declares both and a one-shot page never loads config.js, so `{solid:true}`
+     was already safe (core/microboot.js publishes CBZ.colliders) while
+     `{blockLOS:true}` THREW — which is every wall world/roombuild.js's
+     roomShell stamps, so a slice page could not raise a room at all. Declared
+     here, beside the only writer, yielding to whoever declared it first. */
+  if (!CBZ.colliders) CBZ.colliders = [];
+  if (!CBZ.losBlockers) CBZ.losBlockers = [];
+
   // the workhorse: place a box, optionally make it a collider / LOS blocker
   function addBox(x, y, z, w, h, d, color, opts) {
     opts = opts || {};

@@ -55,13 +55,16 @@
      opts.tone   palette variant: "warm" | "cool" | "exec" | "clinic" | "auto"
                  ("auto" = deterministic per-position pick via CBZ.hash01).
 
-     Returned  { w, d, h, seats, top }
+     Returned  { w, d, h, seats, top, parts }
        w   extent along the piece's own LATERAL axis
        d   extent along the piece's own FORWARD axis
        h   overall height above `y`
        top world/host Y of the USABLE surface (cushion, mattress, worktop…)
        seats [{x, y, z, face, yaw, kind, cushion, rec}] — WORLD coords, ready
              to hand straight to CBZ.interiorStaff (it reads x/y/z/yaw).
+       parts every mesh this call drew, sub-pieces included — hand it straight
+             to CBZ.pushables.add({parts, seat}) and the bench you just drew is
+             a bench somebody can SHOVE, with its seat anchor riding along.
 
    PROPORTIONS ARE REAL METRES and are the contract with the character rig:
      chair seat 0.45 · stool 0.68 · sofa cushion 0.40 (back 0.85) ·
@@ -262,6 +265,15 @@
       lot: opts.lot || null,
       seats: [],
       beds: [],
+      /* THE MESHES, HANDED BACK. A piece already returns what it IS (w/d/h/top)
+         and what it MEANS (seats/beds) and had no way to say what it DREW — so
+         a caller could not hand a bench to systems/pushables.js, which takes
+         `parts`. Two services that are both about furniture could not be
+         composed, and the workaround is the one this repo bans: draw the bench
+         again out of boxes so you own the meshes. Collected here, where every
+         box already passes through. A host `box` fn that returns something
+         other than an Object3D contributes nothing and costs nothing. */
+      parts: [],
       col: function (key) { return (tone && tone[key] != null) ? tone[key] : P[key]; },
       // host-space world position of a local (lat, fwd)
       wx: function (lat, fwd) { return x + lat * c + fwd * s; },
@@ -281,7 +293,8 @@
             if (!hostBox) nSolid++;
           }
         }
-        draw(p.wx(lat, fwd), cy, p.wz(lat, fwd), w, h, d, color, oo);
+        const m = draw(p.wx(lat, fwd), cy, p.wz(lat, fwd), w, h, d, color, oo);
+        if (m && m.isObject3D) p.parts.push(m);
         return cy + h / 2;
       },
       // register a SEAT. `cushion` is the declared height above the floor;
@@ -327,7 +340,7 @@
         // `beds` is handed back for the same reason `seats` is: a caller that
         // wants to PUT SOMEBODY on the thing it just drew should not have to
         // re-find the anchor by coordinate search.
-        return { w: w, d: d, h: h, top: top, seats: p.seats, beds: p.beds };
+        return { w: w, d: d, h: h, top: top, seats: p.seats, beds: p.beds, parts: p.parts };
       },
     };
     return p;
@@ -335,12 +348,17 @@
 
   // opts pass-through for a sub-piece (a desk's own chair, a table's ring) —
   // the sub-piece must never inherit `len`/`seats`/`solid` sizing knobs.
-  function sub(opts) {
+  function sub(opts, parent) {
     opts = opts || {};
     // `solid` rides along: a cluster's own chairs (desk chair, table ring, the
     // boss's guest chairs) must be as solid as the cluster asked to be, or you
     // walk straight through the chairs in front of the boss's desk.
-    return { box: opts.box, ox: opts.ox, oz: opts.oz, oy: opts.oy, lot: opts.lot, tone: opts.tone, solid: opts.solid };
+    // ...and so does the parent's MESH SINK, for the same reason its seats are
+    // merged upward six lines below every call site: a caller handed a desk
+    // whose `seats` includes the chair's anchor and whose `parts` did not
+    // include the chair would be holding a contract that contradicts itself.
+    return { box: opts.box, ox: opts.ox, oz: opts.oz, oy: opts.oy, lot: opts.lot, tone: opts.tone, solid: opts.solid,
+      _parts: parent ? parent.parts : null };
   }
 
   const F = {};
@@ -654,7 +672,7 @@
     p.put(0, 0.80, D / 2 - (0.245 + SCREEN_GAP + 0.01), 0.52, 0.32, 0.02, P.screen,
       { emissive: P.screen, ei: 0.35 });                                  // glass proud of bezel
     // the chair behind the desk, facing it (= facing along yaw, over the top)
-    const so = sub(opts);
+    const so = sub(opts, p);
     const cr = F.chair(p.wx(0, -(D / 2 + 0.42)), y, p.wz(0, -(D / 2 + 0.42)), yaw, so);
     for (let i = 0; i < cr.seats.length; i++) p.seats.push(cr.seats[i]);
     return p.done(L, D + 0.94, 1.20, top);
@@ -684,7 +702,7 @@
     const top = p.put(0, 0.66, 0, L, 0.08, D, wood);                                  // top → 0.74
     // ring: half the chairs down each long side, the remainder at the +x end
     const perSide = Math.floor(n / 2), ends = n - perSide * 2;
-    const so = sub(opts);
+    const so = sub(opts, p);
     const place = function (lat, fwd, face) {
       const cr = F.chair(p.wx(lat, fwd), y, p.wz(lat, fwd), face, so);
       for (let i = 0; i < cr.seats.length; i++) p.seats.push(cr.seats[i]);
@@ -747,7 +765,7 @@
       { emissive: P.screen, ei: 0.35 });                                  // staff-facing glass
     if (opts.stools) {
       const n = Math.max(1, Math.floor(L / 0.9));
-      const so = sub(opts);
+      const so = sub(opts, p);
       for (let i = 0; i < n; i++) {
         const lat = -L / 2 + L * (i + 0.5) / n;
         const sr = F.stool(p.wx(lat, D / 2 + 0.50), y, p.wz(lat, D / 2 + 0.50), yaw + Math.PI, so);
@@ -844,7 +862,7 @@
     p.seat(0, tf, yaw, "throne", 0.50, tTop);                                // looks out over the desk
 
     // TWO LOWER GUEST CHAIRS, facing the desk across it.
-    const so = sub(opts), gf = D / 2 + 0.55;
+    const so = sub(opts, p), gf = D / 2 + 0.55;
     for (let a = -1; a <= 1; a += 2) {
       const cr = F.chair(p.wx(a * 0.62, gf), y, p.wz(a * 0.62, gf), yaw + Math.PI, so);
       for (let i = 0; i < cr.seats.length; i++) p.seats.push(cr.seats[i]);

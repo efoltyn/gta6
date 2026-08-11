@@ -59,7 +59,12 @@ Gives you: `CBZ.fixtures`, `CBZ.fixtureAudit`
 ### `rest`
 bodies USING furniture: claim a place, walk there, take the pose, get up, step clear. CBZ.rest also carries the three load-order repairs that make furniture anchors exist at all — deferred registration, a late re-flush, and a loud count of anchors refused for sharing a coordinate key.
 Pulls: `people`
-Gives you: `CBZ.rest`, `CBZ.restAudit`, `CBZ.restWatch`
+Gives you: `CBZ.rest`, `CBZ.restAudit`, `CBZ.restWatch`, `CBZ.propRegisterSeat`, `CBZ.propSit`, `CBZ.propSleep`
+
+### `rooms`
+FURNITURE, and the grammar of a room. CBZ.furnish is the one vocabulary — chair, stool, bench, sofa, bed, desk, table, counter, shelf, locker, lamp — where one call DRAWS the piece at real metric proportions, REGISTERS its sit/sleep anchor and hands back the meshes; CBZ.roomShell stamps a floor and four open-top walls with a doorway, and CBZ.roomFurnish lays out a named program (office, breakroom, bedroom, lounge, mess) and then FLOODS the floor from the door to drop anything nobody could walk to.
+Pulls: `look`, `rest`
+Gives you: `CBZ.furnish`, `CBZ.roomShell`, `CBZ.roomFurnish`
 
 ### `push`
 furniture that MOVES when you walk into it. CBZ.pushables.add({parts, mass, leash, stand}) makes a drawn prop a mass on a floor: contact slides it, its collider and its standable top go with it, and the broadphase is dirtied — so the stool you shoved under the vent is really there to climb.

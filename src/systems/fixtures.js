@@ -219,8 +219,17 @@
     function scale(sensor, x, z) {
       if (!enabled()) return 1;
       let L = level(x, z);
-      if (L < 0.95 && sensor && sensor.flashlightOn && sensor.group) {
-        const dx = x - sensor.group.position.x, dz = z - sensor.group.position.z;
+      /* WHERE THE SENSOR IS, whatever shape it came in. This read used to be
+         `sensor.group.position` only — the shape a ped or a guard has. The
+         engine's own PLAYER is not that shape: systems/physics.js's player
+         carries `.pos` and no group, and so does every one-shot page that
+         writes its own body. So the one clause that makes a carried light
+         WORTH carrying silently did nothing for the only actor who carries
+         one. Measured in games/night-watch.html: lamp on, thief at 10.4 m in
+         a black gallery, still invisible. */
+      const sp = sensor && ((sensor.group && sensor.group.position) || sensor.pos);
+      if (L < 0.95 && sensor && sensor.flashlightOn && sp) {
+        const dx = x - sp.x, dz = z - sp.z;
         if (dx * dx + dz * dz < TORCH2) L = 0.95;
       }
       if (L >= 0.95) return 1;
