@@ -7,6 +7,42 @@
    surface as undisturbed as a photograph, and a body hitting the water made a
    noise and nothing else.
 
+   WHY THE SPRITES ARE OFF (owner, 2026-08-11: "anything that renders as
+   camera facing is slop")
+   -------------------------------------------------------------------------
+   THE BILLBOARD POOL DESCRIBED BELOW NO LONGER DRAWS. WATER_WAKE_SPRITES
+   defaults to false and every path into it is dead. Read the rest of this
+   header as the record of what was built and why it was wrong, not as a
+   description of what you see in the game.
+
+   The fault is one sentence: a THREE.Points sprite is ALWAYS screen-aligned,
+   and surface foam is a thing that LIES IN THE WATER PLANE. Everything this
+   pool spawned with ride:true — the Kelvin bow rings, the transom boil, the
+   prop wash, the splash collapse rings, the rain dimples — was correctly
+   re-seated onto the live swell every frame and then drawn as a flat disc
+   facing the camera. You play with your eye 1.5-3 m over the sea, so a ring
+   15 m out is seen at about a 6 degree grazing angle: its minor axis should
+   project to roughly a tenth of its major axis, a sliver lying on the water.
+   The billboard drew it at full height. A perfect upright white circle
+   standing on the sea IS a bubble, and that is exactly what the owner saw.
+   Close range made it worse — gl_PointSize clamps at 220 px, so a swimmer's
+   own collapse ring filled a fifth of the screen with one soft white disc
+   (world/water_underwater.js's preset author hit this too and wrote it down:
+   "photographed his own splash sprites from 20 cm away — the frame was foam,
+   not water"). Nothing broke up the shape either: one flat tint, no noise, no
+   rotation (point sprites cannot rotate), depthWrite off, so they stacked as
+   identical translucent discs.
+
+   THE PROOF THE ANSWER WAS ALREADY HERE: the RIBBON below is real geometry
+   whose every vertex re-reads CBZ.citySeaHeightAt, so it lies IN the surface,
+   foreshortens correctly and takes UVs. It is the one part of this file that
+   never read as a bubble, and it still runs. If surface foam is ever rebuilt,
+   it is rebuilt the ribbon's way — flat quads in the water plane, not sprites.
+   The only thing here a billboard was ever honest about is genuinely AIRBORNE
+   spray (chine sheet, rooster tail, ballistic droplets), and that is the one
+   thing worth reviving if the sea ever looks empty.
+
+   -------------------------------------------------------------------------
    This is one pooled THREE.Points system — ONE draw call, one texture, one
    custom shader — serving four emitters:
 
@@ -128,6 +164,11 @@
    persistent trail survives budget pressure intact.
 
    FLAGS
+     CBZ.CONFIG.WATER_WAKE_SPRITES (default OFF, here) the billboard pool. OFF
+                                   -> no buffers, no texture, no Points object,
+                                   and spawn() refuses every caller including
+                                   world/water_impact.js. The ribbon is NOT
+                                   affected. Revert: ?cfg_WATER_WAKE_SPRITES=1
      CBZ.CONFIG.WATER_WAKE_FX      (default ON, declared in world/water_spec.js)
                                    OFF -> nothing is created and nothing ticks.
      CBZ.CONFIG.WATER_WAKE_V2      (default ON, here) OFF -> the four-component
@@ -165,6 +206,24 @@
   // carried by the current) gets the same wake vocabulary at a small scale.
   // One-line revert: ?cfg_WATER_WAKE_DRIFT=0
   if (CFG.WATER_WAKE_DRIFT == null) CFG.WATER_WAKE_DRIFT = true;
+
+  // WATER_WAKE_SPRITES — THE BILLBOARD POOL, DEFAULT OFF (owner, 2026-08-11).
+  // See "WHY THE SPRITES ARE OFF" in the header. A THREE.Points sprite is
+  // always screen-aligned, and surface foam is a thing that LIES IN THE WATER
+  // PLANE, so every ring this pool drew was a perfect upright white circle
+  // where the geometry demands a foreshortened ellipse — bubbles standing on
+  // the sea. OFF: nothing is built, nothing is spawned, nothing is drawn; the
+  // emitters still run because they also drive the RIBBON, which is real flat
+  // geometry and is untouched.
+  // One-line revert: ?cfg_WATER_WAKE_SPRITES=1
+  if (CFG.WATER_WAKE_SPRITES == null) CFG.WATER_WAKE_SPRITES = false;
+
+  // The one gate every billboard path asks. Kept separate from WATER_WAKE_FX
+  // so turning the sprites off cannot take the ribbon down with them.
+  function spritesOn() {
+    return CFG.WATER_WAKE_SPRITES !== false &&
+      CFG.WATER_WAKE_FX !== false && CFG.WATER_V2 !== false;
+  }
 
   const MAX = 640;                 // buffer size (tier-4 cap), allocated once
   function budget() { return Math.max(0, (CBZ.qScale ? CBZ.qScale(120, MAX) : 360) | 0); }
@@ -225,6 +284,10 @@
 
   function build() {
     if (built) return;
+    // WATER_WAKE_SPRITES off: never allocate the buffers, never build the
+    // texture, never add a Points object to the scene. NOT latched, so the
+    // flag can be flipped back on live and the pool builds on the next call.
+    if (!spritesOn()) return;
     built = true;
     if (typeof document === "undefined") return;
 
@@ -306,6 +369,10 @@
 
   // ---- spawning -----------------------------------------------------------
   function spawn(x, y, z, vx, vy, vz, size, growPerSec, ttl, kind, rideSurface, alpha, dragV) {
+    // THE ONE CHOKE POINT. Every emitter in this file and every impact
+    // vocabulary in world/water_impact.js reaches the billboards through here,
+    // so one gate kills all of them and no caller needs to know.
+    if (!spritesOn()) return false;
     if (!pos || count >= budget()) return false;
     const i = count++;
     pos[i * 3] = x; pos[i * 3 + 1] = y; pos[i * 3 + 2] = z;
@@ -374,7 +441,10 @@
   // this so a depth charge borrows from the SAME tier-scaled budget the wakes
   // and rain live in instead of starving them.
   CBZ.waterEmitFree = function () {
-    if (CFG.WATER_WAKE_FX === false || CFG.WATER_V2 === false) return 0;
+    // Zero with the sprites off, so an impact vocabulary sizes its burst at
+    // nothing and never runs the loop at all, instead of computing a hundred
+    // ballistic beads for a spawn() that will refuse every one.
+    if (!spritesOn()) return 0;
     return Math.max(0, budget() - count);
   };
 
@@ -1244,6 +1314,22 @@
       return;
     }
     build();
+    // SPRITES OFF: the emitters below STILL RUN, because CBZ.waterWakeFor also
+    // feeds the ribbon — real geometry whose vertices sit in the water surface,
+    // which is the one part of this system that was never a billboard. Only
+    // spawn() is dead. Skipping the emitters here would have taken every boat's
+    // trail with the bubbles.
+    if (!spritesOn()) {
+      if (points) points.visible = false;
+      count = 0;
+      dt = Math.min(0.1, dt || 0);
+      emitBoatWakes(dt);
+      emitSwim(dt);
+      emitDriftWakes(dt);
+      emitRain(dt);
+      ribTick(dt);
+      return;
+    }
     if (!points || !pos) return;
     if (budget() <= 0) { points.visible = false; ribClearAll(); return; }
 
