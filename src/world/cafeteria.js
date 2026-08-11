@@ -516,12 +516,23 @@
       const d = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.32, 0.9, 10), CBZ.cmat(b[2]));
       d.position.set(b[0], 0.45, b[1]); d.castShadow = false; d.receiveShadow = true;
       (CBZ.prisonRoot || CBZ.scene).add(d);
-      addBox(b[0], 0.93, b[1], 0.78, 0.06, 0.78, 0x232a32, { cast: false });
-      if (CBZ.colliders) CBZ.colliders.push({ minX: b[0] - 0.36, maxX: b[0] + 0.36, minZ: b[1] - 0.36, maxZ: b[1] + 0.36, ref: d });
+      const lid = addBox(b[0], 0.93, b[1], 0.78, 0.06, 0.78, 0x232a32, { cast: false });
+      const bcol = { minX: b[0] - 0.36, maxX: b[0] + 0.36, minZ: b[1] - 0.36, maxZ: b[1] + 0.36, y0: 0, y1: 0.96, ref: d };
+      if (CBZ.colliders) CBZ.colliders.push(bcol);
+      // a wheelie bin half full of trays is ~22 kg and rolls when you walk into
+      // it — the dish-return end of a mess hall is where things get shoved
+      if (CBZ.pushProp) CBZ.pushProp({
+        parts: [d, lid], x: b[0], z: b[1], hx: 0.36, hz: 0.36, y1: 0.96,
+        mass: 22, kind: "barrel", col: bcol, leash: 5.0,
+      });
     }
     // mop bucket + wringer, parked where the wet floor is
-    addBox(-22.6, 0.22, 20.2, 0.5, 0.44, 0.4, 0xe8b93c, { cast: false });
-    addBox(-22.6, 0.52, 20.35, 0.44, 0.18, 0.16, 0x9aa3ad, { cast: false });
+    const mopB = addBox(-22.6, 0.22, 20.2, 0.5, 0.44, 0.4, 0xe8b93c, { cast: false });
+    const mopW = addBox(-22.6, 0.52, 20.35, 0.44, 0.18, 0.16, 0x9aa3ad, { cast: false });
+    if (CBZ.pushProp) CBZ.pushProp({
+      parts: [mopB, mopW], x: -22.6, z: 20.2, hx: 0.25, hz: 0.22, y1: 0.62,
+      mass: 16, kind: "mopbucket", solid: true, leash: 5.0,
+    });
     PD.pipe(-22.6, 0.85, 20.1, 1.3, "y", 0.03, 0x9a7a4e);                          // mop handle
     // wet-floor A-frame beside it
     for (const s of [-1, 1]) {

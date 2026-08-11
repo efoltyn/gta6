@@ -233,24 +233,60 @@
   if (CFG.PRISON_REAL_PROPS == null) CFG.PRISON_REAL_PROPS = true;
   const PP = (CBZ._prisonProps = CBZ._prisonProps || { props: 0, seats: 0, beds: 0, plain: 0 });
   function propsOn() { return CFG.PRISON_REAL_PROPS !== false; }
-  // a bunk you can lie on. (hx,hz) is the lie-axis heading, `top` the mattress.
-  function useBed(x, z, along, top, len) {
+
+  /* ---- LOAD ORDER WAS EATING ALL OF IT (measured 2026-08-11) ------------
+     A live escape run read `CBZ._prisonProps = {props:21, seats:0, beds:0,
+     plain:21}`. Not one bunk and not one stool had EVER become a propuse
+     anchor: `city/propuse.js` is index.html:817 and this file is :469, so
+     `CBZ.propRegisterBed` simply does not exist when fitOutCell runs and
+     every call took the degrade branch and counted itself `plain`. The whole
+     block above described a system that had never once run — which is the
+     real reason an inmate in a cell stood in his bunk instead of lying on it.
+
+     world/roombuild.js already solved this for SEATS with a queue flushed on
+     `load` (roomSeatAnchor/roomBedAnchor) — but roombuild is :531, also after
+     us, so we cannot call it at parse time either. The queue therefore lives
+     here and is drained from the wing's OWN first tick, the same deferral
+     dealCast() below and crates.js:205 already use. Degrade is unchanged: no
+     propuse at flush time and every fitting still counts `plain`. */
+  const pendFit = [];
+  let fitFlushed = false;
+  function flushFittings() {
+    if (!pendFit.length) return 0;
+    const okB = propsOn() && !!CBZ.propRegisterBed, okS = propsOn() && !!CBZ.propRegisterSeat;
+    let n = 0;
+    for (let i = 0; i < pendFit.length; i++) {
+      const j = pendFit[i];
+      let rec = null;
+      try {
+        if (j.bed) { if (okB) rec = CBZ.propRegisterBed.apply(null, j.a); }
+        else if (okS) rec = CBZ.propRegisterSeat.apply(null, j.a);
+      } catch (e) { rec = null; }
+      if (rec) { n++; if (j.bed) PP.beds++; else PP.seats++; if (j.own) j.own[j.slot] = rec; }
+      else PP.plain++;
+    }
+    pendFit.length = 0;
+    fitFlushed = true;
+    return n;
+  }
+  // a bunk you can lie on. (hx,hz) points at the PILLOW, `top` the mattress.
+  // bunkRig draws the pillow at -lon, so a bunk laid out "along z" has its
+  // head at -z: this said +1 for its whole life and would have laid every
+  // sleeper in head-first at the FOOT of his own bunk the moment anything
+  // actually used the record.
+  function useBed(x, z, along, top, len, own, slot) {
     PP.props++;
-    if (!propsOn() || !CBZ.propRegisterBed) { PP.plain++; return null; }
-    const hx = along === "z" ? 0 : 1, hz = along === "z" ? 1 : 0;
-    let rec = null;
-    try { rec = CBZ.propRegisterBed(x, 0, z, hx, hz, len, top, "bunk", null); } catch (e) { rec = null; }
-    if (rec) PP.beds++; else PP.plain++;
-    return rec;
+    const hx = along === "z" ? 0 : -1, hz = along === "z" ? -1 : 0;
+    pendFit.push({ bed: 1, a: [x, 0, z, hx, hz, len, top, "bunk", null], own: own || null, slot: slot || "bed" });
+    if (fitFlushed) flushFittings();
+    return null;
   }
   // a stool you can sit on. `face` looks at the table.
   function useSeat(x, z, face, cushion) {
     PP.props++;
-    if (!propsOn() || !CBZ.propRegisterSeat) { PP.plain++; return null; }
-    let rec = null;
-    try { rec = CBZ.propRegisterSeat(x, 0, z, face, "stool", null, { cushion: cushion, floorBelow: 0 }); } catch (e) { rec = null; }
-    if (rec) PP.seats++; else PP.plain++;
-    return rec;
+    pendFit.push({ a: [x, 0, z, face, "stool", null, { cushion: cushion, floorBelow: 0 }] });
+    if (fitFlushed) flushFittings();
+    return null;
   }
 
   function h01(x, z, salt) { return CBZ.hash01 ? CBZ.hash01(x, z, salt) : 0.5; }
@@ -561,7 +597,8 @@
     c.bunk = bunkRig(c, bx, bz, "z", north, blanket);
     // THE BUNK IS A BED. Its own returned mattress top (0.79) is the declared
     // cushion, so the anchor can never drift off the mesh it belongs to.
-    c.bed = useBed(c.bunk.x, c.bunk.z, "z", c.bunk.top, 2.60);
+    // `c` + "bed" is where the record lands once the queue above is drained.
+    useBed(c.bunk.x, c.bunk.z, "z", c.bunk.top, 2.60, c, "bed");
 
     // TOILET + SINK at the back corner opposite the bunk, its back to masonry.
     const tx = north ? c.x + (c.hx - 0.55) : backX;
@@ -571,8 +608,19 @@
     shelf(tx, 1.62, tz, north ? 0.78 : 0.44, north ? 0.44 : 0.78);
     addBox(tx + inx * 0.24, 2.02, tz + inz * 0.24, north ? 0.44 : 0.06, 0.52, north ? 0.06 : 0.44, 0xd6e2ea, { cast: false }); // mirror
     // a stool, only where the 5.5 m north cells have the depth for one — and
-    // deliberately 1.4 m clear of CBZ.SPAWN so the player never boots inside it
-    if (north) addBox(c.x + 1.15, 0.22, c.z + 1.00, 0.44, 0.44, 0.44, 0x6b6152, { cast: false });
+    // deliberately 1.4 m clear of CBZ.SPAWN so the player never boots inside it.
+    // IT IS THE FIRST THING IN THIS PRISON YOU CAN SHOVE. 7 kg of moulded
+    // plastic on a concrete floor: walk into it and it slides, and its collider
+    // and its sit anchor go with it (systems/pushprops.js).
+    if (north) {
+      const st = addBox(c.x + 1.15, 0.22, c.z + 1.00, 0.44, 0.44, 0.44, 0x6b6152, { cast: false });
+      useSeat(c.x + 1.15, c.z + 1.00, Math.atan2(-1.15, -1.00), 0.44);
+      if (CBZ.pushProp) CBZ.pushProp({
+        parts: [st], x: c.x + 1.15, z: c.z + 1.00, hx: 0.22, hz: 0.22, y1: 0.44,
+        mass: 7, kind: "stool", solid: true, leash: 3.2, seat: { x: c.x + 1.15, z: c.z + 1.00 },
+        room: { x0: c.x - c.hx + 0.4, x1: c.x + c.hx - 0.4, z0: c.z - c.hz + 0.4, z1: c.z + c.hz - 0.4 },
+      });
+    }
 
     // CEILING STRIP — every cell is lit. Mirrored by the wing lamp driver so
     // systems/interactions.js's breaker sabotage takes the whole block dark.
@@ -754,14 +802,21 @@
         matter: the spine at x = 0 (guards.js patrol) and the south
         throat x[-3,3] at z = -8 (world/door.js).
      ========================================================== */
+  // The table is BOLTED (sbox → a real collider that never moves). The four
+  // stools are not: a day-room stool is a loose 9 kg pedestal and the block
+  // rearranges them all day, so each one is a pushable with its own collider
+  // and carries its propuse sit anchor with it when it slides.
   function dayTable(x, z) {
     sbox(x, 0.74, z, 2.2, 0.10, 1.0, 0x8a939d, { solid: true });
     addBox(x, 0.37, z, 0.28, 0.74, 0.28, C_STEEL_D, { cast: false });
-    for (let i = -1; i <= 1; i += 2) {
-      addBox(x + i * 0.85, 0.44, z + 0.85, 0.42, 0.08, 0.42, 0x6b7480, { cast: false });
-      addBox(x + i * 0.85, 0.22, z + 0.85, 0.14, 0.44, 0.14, C_STEEL_D, { cast: false });
-      addBox(x + i * 0.85, 0.44, z - 0.85, 0.42, 0.08, 0.42, 0x6b7480, { cast: false });
-      addBox(x + i * 0.85, 0.22, z - 0.85, 0.14, 0.44, 0.14, C_STEEL_D, { cast: false });
+    for (let i = -1; i <= 1; i += 2) for (const j of [1, -1]) {
+      const sx = x + i * 0.85, sz = z + j * 0.85;
+      const pad = addBox(sx, 0.44, sz, 0.42, 0.08, 0.42, 0x6b7480, { cast: false });
+      const post = addBox(sx, 0.22, sz, 0.14, 0.44, 0.14, C_STEEL_D, { cast: false });
+      if (CBZ.pushProp) CBZ.pushProp({
+        parts: [pad, post], x: sx, z: sz, hx: 0.21, hz: 0.21, y1: 0.48,
+        mass: 9, kind: "stool", solid: true, leash: 3.0, seat: { x: sx, z: sz },
+      });
     }
   }
   dayTable(-6.6, -26.0);
@@ -886,9 +941,15 @@
   }
   function barsSpot(c) { return facePoint(c, (c.oa + c.ob) / 2, -0.85); }
   function bunkSpot(c) {
-    // the near LONG edge of the bunk, facing out of the cell
+    // THE NEAR LONG EDGE OF THE BUNK — and it is always an X offset, because
+    // every bunk in this wing is laid out ALONG Z (fitOutCell passes "z" for
+    // both rows). The side-row branch used to offset in Z, which is offsetting
+    // ALONG the mattress: the body landed 0.62 m up the bed with the frame
+    // through his shins, and that is precisely the owner's "they stand
+    // overlapping them". The lateral sign points INTO the room, away from the
+    // wall the bunk's back is against (north/west rows +x, east row -x).
     const b = c.bunk;
-    return c.dz !== 0 ? { x: b.x + 0.62, z: b.z } : { x: b.x, z: b.z + (c.dx > 0 ? 0.62 : -0.62) };
+    return { x: b.x + (c.dz !== 0 ? 1 : c.dx) * 0.62, z: b.z };
   }
 
   let cast = false;
@@ -948,6 +1009,10 @@
     if (el < lastElapsed - 0.5) resetDoors();
     lastElapsed = el;
 
+    // every script tag has run by now — the bunks and stools become real
+    // propuse anchors here (see flushFittings' note on the load order)
+    if (!fitFlushed) flushFittings();
+
     if (!cast) dealCast();
 
     // ---- sliding leaves (only the ones actually moving cost anything) ----
@@ -969,6 +1034,13 @@
       const c = cells[i], n = c.owner;
       if (!n || n === "player") continue;
       if (n.dead || n.escaped) { unseat(n); continue; }
+      // A BODY IN ITS BUNK IS NOT A BODY TO BE CLAMPED. Once systems/
+      // prisonrest.js has put a man to bed (or a propuse arc is walking him
+      // to it) the transform belongs to that hold: propuse re-pins the lie
+      // spot at order 42, and an AABB clamp or a target write here would be
+      // two systems arguing over one Vector3 — the exact way a body vibrates
+      // in place that prisonschedule.js's herd() already warns about.
+      if (n._propLie || n._propBed || (CBZ.propArcActive && CBZ.propArcActive(n))) continue;
       const p = n.group.position;
       const x0 = c.x - c.hx + 0.62, x1 = c.x + c.hx - 0.62;
       const z0 = c.z - c.hz + 0.62, z1 = c.z + c.hz - 0.62;

@@ -191,6 +191,15 @@
     // dead: stay sprawled forever (flop into place)
     if (n.dead) { n.group.rotation.z = CBZ.damp(n.group.rotation.z, Math.PI / 2, 9, dt); return; }
 
+    // ASLEEP IN A BUNK (systems/prisonrest.js → city/propuse.js). The same
+    // shape as the KO branch below and for the same reason: another system
+    // owns this transform for as long as the flag is set, so the mover must
+    // not integrate and — the one that actually shows — the roll-recovery
+    // damp two lines down must not spend every frame pulling a sleeping man
+    // back upright against propuse's π/2 lie roll. The rig still animates,
+    // which is what runs the breathing.
+    if (n._propLie) { if (near) animChar(n.char, 0, dt); return; }
+
     // knocked out: topple to the floor, skip AI, then climb back up
     if (n.ko > 0) {
       n.ko -= dt;

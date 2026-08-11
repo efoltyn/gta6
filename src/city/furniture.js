@@ -303,8 +303,18 @@
       bed: function (len, topY, kind, drawnTop) {
         const bx = ox + x, bz = oz + z, by = y + oy;
         if (drawnTop == null || Math.abs(drawnTop - topY) > EPS_CUSHION) led.mismatched++;
+        // ...and when propuse has not parsed yet, the QUEUE. Every world/*
+        // furnisher outside the city runs before city/propuse.js (index.html
+        // :817), so `propRegisterBed` is simply absent there and this line
+        // used to return null and drop the anchor on the floor — measured in
+        // the prison: the warden's quarters had a drawn bed and no bed record,
+        // so nothing could ever be put in it. world/roombuild.js's shim exists
+        // for exactly this and the SEAT path three lines below already uses it.
+        // A queued anchor returns null (it registers at `load`), so `p.beds`
+        // is unchanged for every caller that had one.
         const rec = CBZ.propRegisterBed
-          ? CBZ.propRegisterBed(bx, by, bz, s, c, len, topY + oy, kind, p.lot) : null;
+          ? CBZ.propRegisterBed(bx, by, bz, s, c, len, topY + oy, kind, p.lot)
+          : (CBZ.roomBedAnchor ? CBZ.roomBedAnchor(bx, by, bz, s, c, len, topY + oy, kind, p.lot) : null);
         led.beds++;
         if (rec) p.beds.push(rec);
         return rec;

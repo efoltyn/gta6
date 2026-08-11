@@ -464,6 +464,17 @@
      call. After materials.js (resolves addBox at call time); before its consumers
      lounge.js / cafeteria.js / clutter.js. -->
 <script src="src/city/furniture.js?v=furnish2"></script>
+<!-- FURNITURE MOVES WHEN YOU WALK INTO IT (owner: "physics, not another
+     f***ing button"). CBZ.pushProp(spec) makes a drawn prop a mass on a floor:
+     contact from a moving body slides it, its collider is translated with it
+     and the broadphase dirtied, so the moved prop is instantly real to the
+     player's depenetration, every guard's steering and the vault probe. The
+     tag MUST precede every world file that registers at parse time
+     (cellblock/clutter/cafeteria/yardfurniture below) — a prop registered
+     after core/batch.js has run would already be welded into a static buffer.
+     Runtime deps (markCollidersDirty, queryCollidersNear, propNearestSeat) are
+     all resolved inside the per-frame driver, never at parse. -->
+<script src="src/systems/pushprops.js?v=push1"></script>
 <script src="src/world/carfx.js?v=carfx1"></script>
 <script src="src/world/ground.js"></script>
 <script src="src/world/cellblock.js"></script>
@@ -576,6 +587,17 @@
      detection sweep that consumes the result. -->
 <script src="src/systems/prisonschedule.js?v=clock1"></script>
 <script src="src/systems/prisonnight.js?v=clock1"></script>
+<!-- BODIES USE THE FURNITURE. The bunks in this wing had never once become
+     propuse anchors (city/propuse.js loads 337 tags after world/cellblock.js,
+     so every useBed() call silently degraded — measured: 21 props, 0 beds),
+     and nothing outside src/city/ had ever called CBZ.propSleep. This drives
+     the wing off CBZ.prisonSchedule: lights-out puts every inmate horizontal
+     in a bunk or on an issue mat, wake gets them up, mess and yard get sat at,
+     and the warden sleeps in his own bed until somebody walks into the room.
+     AFTER prisonschedule.js (it reads that clock and never its own) and after
+     cellblock/guards/npc; propuse.js is in the CITY block far below, so every
+     call into it happens inside the per-frame sweep, never at parse. -->
+<script src="src/systems/prisonrest.js?v=rest1"></script>
 
 <!-- FOUR SECURITY LEVELS OVER ONE COMPOUND. Getting caught escaping used to
      end the run on a card that said TRANSFERRED and then handed you the same

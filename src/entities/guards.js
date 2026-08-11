@@ -586,7 +586,7 @@
   }
 
   function shouldUseFlashlight(g) {
-    if (g.dead || g.ko > 0 || g.bribed > 0) return false;
+    if (g.dead || g.ko > 0 || g.asleep || g.bribed > 0) return false;
     // GONE MEANS GONE. systems/economy.js's pickpocket takes the TORCH off the
     // belt as a real item, and this is what that theft is worth: the officer
     // you robbed walks his half of the yard in the dark for the rest of the
@@ -878,6 +878,22 @@
     if (g.bribed > 0) g.bribed -= dt;
     considerPayoffApproach(g, dt);
 
+    // OFF SHIFT AND ASLEEP (systems/prisonrest.js sets and clears `asleep`;
+    // city/propuse.js owns the body while it is set). Exactly the shape of the
+    // KO branch below — an inert body this function does not steer and whose
+    // roll it must not damp back upright, because the sleeper's own π/2 lie
+    // roll is being written by propuse's hold at order 42 and two writers on
+    // one channel is a man twitching in his bed all night. The warden is the
+    // only guard this is ever true for today: adminwing.js already sends him
+    // to his quarters at 21:00, where he used to stand beside the bed.
+    if (g.asleep) {
+      noteState(g, "asleep");
+      g.hunt = 0; g.alert = 0; g.investigate = null;
+      updateFlashlight(g, dt);
+      animChar(g.char, 0, dt);
+      return;
+    }
+
     // knocked out: topple over, do nothing, then climb back up
     if (g.ko > 0) {
       noteState(g, "ko");
@@ -1012,7 +1028,10 @@
   // read like a prison instead of a pit: violence happens where the screws
   // aren't looking. Same geometry, same LOS raycast, same blind conditions.
   function guardSeesPoint(g, x, y, z, shrink) {
-    if (g.dead || g.ko > 0 || g.bribed > 0) return false;   // dead, down, or bribed = blind
+    // dead, down, ASLEEP or bribed = blind. A sleeping man is the one sensor
+    // in this prison you beat by picking the hour, which is the whole reason
+    // time of day is the pillar.
+    if (g.dead || g.ko > 0 || g.asleep || g.bribed > 0) return false;
     if (g.corrupt && CBZ.game && (CBZ.game.racketProtectionT || 0) > 0) return false;
     const gx = g.group.position.x, gz = g.group.position.z;
     const dx = x - gx, dz = z - gz;

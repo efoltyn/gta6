@@ -1406,6 +1406,14 @@
       desX = st.dirX * v; desZ = st.dirZ * v;
     } else if (len > 0) { desX = mx * moveSpeed; desZ = mz * moveSpeed; }
     player.speed = Math.hypot(desX, desZ);
+    // ...and the DIRECTION that speed is aimed in. `player.speed` has always
+    // been the DESIRED speed — what the body is trying to do, before a wall
+    // has an opinion — and that is exactly the right quantity for anything
+    // asking "is this body pressing into something": the realized frame delta
+    // of a blocked body is zero, so it can never answer. Published in the same
+    // shape and the same breath (systems/pushprops.js is the first reader:
+    // furniture moves by the component of your drive that points at it).
+    player.moveX = desX; player.moveZ = desZ;
     if (stanceOn) {
       // sprint memory: the slide's entry speed + the grace window that lets the
       // touch thumb lift off the stick to tap L3 without losing the sprint.

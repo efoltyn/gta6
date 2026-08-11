@@ -210,8 +210,15 @@
     // The base doubles as the collider (bench's own trick: opts.solid on a
     // real mesh instead of a separate invisible box) — light and small, same
     // treatment as the bag/scrap above.
-    addBox(x, 0.42, z, 0.42, 0.1, 0.42, 0xf2f2f2, { cast: false });
-    addBox(x, 0.04, z, 0.62, 0.08, 0.62, 0xe25c12, { cast: false, solid: true });
+    const band = addBox(x, 0.42, z, 0.42, 0.1, 0.42, 0xf2f2f2, { cast: false });
+    const base = addBox(x, 0.04, z, 0.62, 0.08, 0.62, 0xe25c12, { cast: false, solid: true });
+    // 2.5 kg of hollow PVC: the one thing in the yard that MUST move, because
+    // a cone you cannot kick is the clearest possible statement that the world
+    // is scenery (systems/pushprops.js).
+    if (CBZ.pushProp) CBZ.pushProp({
+      parts: [c, band, base], x: x, z: z, hx: 0.31, hz: 0.31, y1: 0.78,
+      mass: 2.5, kind: "cone", col: base.userData.collider, leash: 8.0,
+    });
   }
 
   // ---------------- wooden benches (solid + SITTABLE) ----------------

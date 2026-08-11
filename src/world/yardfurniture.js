@@ -119,15 +119,32 @@
       addBox(x + s * 1.0, 1.5, z - 0.44, 0.13, 0.52, 0.52, 0x14181d, {});
       addBox(x + s * 0.86, 1.5, z - 0.44, 0.12, 0.44, 0.44, 0x14181d, { cast: false });
     }
-    // the bench under it, solid so it is real cover and a real obstacle
-    addBox(x, 0.46, z + 0.55, 0.62, 0.16, 1.9, 0x222831, { solid: true });
-    for (const s of [-1, 1]) addBox(x, 0.23, z + 0.55 + s * 0.7, 0.44, 0.46, 0.4, C_STEEL, { cast: false });
-    // plate tree
-    addBox(x + 2.0, 0.55, z + 0.4, 0.5, 1.1, 0.5, C_STEEL_D, { solid: true });
+    // THE THREE LOOSE THINGS IN THE WEIGHT PILE. The rack is bolted through
+    // the mat and stays; the bench, the plate tree and the chalk bucket are
+    // free-standing kit and every one of them prices its own shove. This is
+    // where the differential is easiest to feel: the bucket skitters off your
+    // shin, the bench takes a shoulder, and a loaded plate tree barely gives.
+    const wBench = addBox(x, 0.46, z + 0.55, 0.62, 0.16, 1.9, 0x222831, { solid: true });
+    const wFeet = [];
+    for (const s of [-1, 1]) wFeet.push(addBox(x, 0.23, z + 0.55 + s * 0.7, 0.44, 0.46, 0.4, C_STEEL, { cast: false }));
+    if (CBZ.pushProp) CBZ.pushProp({
+      parts: [wBench].concat(wFeet), x: x, z: z + 0.55, hx: 0.31, hz: 0.95, y1: 0.54,
+      mass: 45, kind: "bench", leash: 4.0,
+    });
+    // plate tree — four 20 kg plates on a steel post: it moves, grudgingly
+    const tree = [addBox(x + 2.0, 0.55, z + 0.4, 0.5, 1.1, 0.5, C_STEEL_D, { solid: true })];
     for (let i = 0; i < 4; i++)
-      addBox(x + 2.0, 0.42 + (i % 2) * 0.44, z + 0.4 + (i < 2 ? -0.3 : 0.3), 0.5, 0.5, 0.13, 0x14181d, { cast: false });
-    // chalk bucket
-    addBox(x - 1.9, 0.18, z + 1.0, 0.36, 0.36, 0.36, 0xd8d2c4, { cast: false });
+      tree.push(addBox(x + 2.0, 0.42 + (i % 2) * 0.44, z + 0.4 + (i < 2 ? -0.3 : 0.3), 0.5, 0.5, 0.13, 0x14181d, { cast: false }));
+    if (CBZ.pushProp) CBZ.pushProp({
+      parts: tree, x: x + 2.0, z: z + 0.4, hx: 0.25, hz: 0.28, y1: 1.10,
+      mass: 110, kind: "platetree", leash: 2.5,
+    });
+    // chalk bucket — 4 kg, and it is the lightest thing in the compound
+    const bucket = addBox(x - 1.9, 0.18, z + 1.0, 0.36, 0.36, 0.36, 0xd8d2c4, { cast: false });
+    if (CBZ.pushProp) CBZ.pushProp({
+      parts: [bucket], x: x - 1.9, z: z + 1.0, hx: 0.18, hz: 0.18, y1: 0.36,
+      mass: 4, kind: "bucket", solid: true, leash: 6.0,
+    });
   })(8, 28);
 
   /* ==========================================================
