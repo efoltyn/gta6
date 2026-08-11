@@ -212,14 +212,20 @@
     if (a.reportedPlayerCred > 0.78) return "solid ";
     return "";
   }
+  /* THE READ LINE IS A THING YOU NOTICE, NOT A RECORD YOU QUERY.
+     This is the strip under the actor's name on the interaction card, and it
+     was printing the snitch ledger as a database row: "KNOWN SNITCH - solid
+     reported to Officer #3 · cred 62% · 14s · 3 heard · visual". Same five
+     facts, said the way you would say them about a man across a yard. Nothing
+     is hidden — credibility, spread and freshness each still change the words. */
   function reportDetail(a) {
     const base = `${reportTone(a)}${a.reportedPlayerKind || "reported"} to ${a.reportedPlayerGuard || "a guard"}`;
     const parts = [];
-    if (a.reportedPlayerCred != null) parts.push(`cred ${Math.round(a.reportedPlayerCred * 100)}%`);
-    if (a.reportedPlayerT > 0) parts.push(`${Math.ceil(a.reportedPlayerT)}s`);
-    if (a.reportedPlayerSpread > 0) parts.push(`${a.reportedPlayerSpread} heard`);
-    if (a.reportedPlayerLastKnown && a.reportedPlayerLastKnown.type) parts.push(a.reportedPlayerLastKnown.type);
-    return `KNOWN SNITCH - ${base}${parts.length ? " · " + parts.join(" · ") : ""}`;
+    if (a.reportedPlayerCred != null) parts.push(a.reportedPlayerCred > 0.78 ? "believed" : (a.reportedPlayerCred < 0.45 ? "doubted" : "half-believed"));
+    if (a.reportedPlayerT > 0) parts.push("still fresh");
+    if (a.reportedPlayerSpread > 1) parts.push("word got round");
+    if (a.reportedPlayerLastKnown && a.reportedPlayerLastKnown.type) parts.push(a.reportedPlayerLastKnown.type === "visual" ? "saw you himself" : "only heard it");
+    return `talks to the screws — ${base}${parts.length ? " · " + parts.join(" · ") : ""}`;
   }
   function cleanName(a) {
     return a && a.data && a.data.name ? a.data.name.replace(/^the |^a |^an /, "") : "someone";
@@ -249,7 +255,7 @@
       const guardBits = [];
       if (a.kind === "warden") guardBits.push("warden leverage");
       else guardBits.push(a.corrupt ? "bent cop" : "clean guard");
-      if (a.bribed > 0) guardBits.push(`paid ${Math.ceil(a.bribed)}s`);
+      if (a.bribed > 0) guardBits.push("bought");
       else if (a.corrupt) guardBits.push("wants payoff");
       if (a.flashlightOn) guardBits.push("flashlight up");
       return guardBits.slice(0, 3).join(" | ");
@@ -277,7 +283,7 @@
       const crew = gangShort(a);
       const standing = CBZ.gangStanding ? CBZ.gangStanding(a.gang) : 0;
       const debt = CBZ.gangDebt ? CBZ.gangDebt(a.gang) : 0;
-      if (debt >= 10) bits.push(`${crew} debt ${Math.ceil(debt)}`);
+      if (debt >= 10) bits.push(`${crew} want paying`);
       else if (standing >= 35) bits.push(`${crew} cover`);
       else if (standing <= -22) bits.push(`${crew} hostile`);
       else if (CBZ.player && CBZ.player.gang === a.gang) bits.push(`${crew} crew`);
@@ -291,14 +297,21 @@
     }
     return bits.slice(0, 3).join(" | ");
   }
+  /* THE ALL-CAPS LABELS WERE A QUEST LOG WEARING A PERSON'S FACE.
+     "TASK: Rough up Officer #3" · "FRIEND - Befriend to walk free" ·
+     "LOVER - Romance to walk free" · "TIP TARGET - search or detain with
+     cleaner cause": four category headers and two of them naming the BUTTON
+     the player should press next. The state behind each is unchanged and each
+     still shows — as the thing about that person that a man standing in front
+     of them would actually notice. */
   function panelNote(a) {
     const priority = a.quest
-      ? "TASK: " + a.quest.text
+      ? "waiting on you: " + a.quest.text
       : (a.approach && a.approach.msg ? a.approach.msg
         : ((a.reportedPlayerT || 0) > 0 ? reportDetail(a)
-        : (CBZ.game.role === "cop" && a.copMarked > 0 ? "TIP TARGET - search or detain with cleaner cause"
-        : (a.rep >= (CBZ.quests ? CBZ.quests.FRIEND : 100) ? "FRIEND - Befriend to walk free"
-        : (a.love >= 100 ? "LOVER - Romance to walk free" : "")))));
+        : (CBZ.game.role === "cop" && a.copMarked > 0 ? "somebody put his name in"
+        : (a.rep >= (CBZ.quests ? CBZ.quests.FRIEND : 100) ? "owes you, and knows it"
+        : (a.love >= 100 ? "would take the risk for you" : "")))));
     const read = actorRead(a);
     const motive = a.approach && a.approach.motive ? `motive: ${shortText(a.approach.motive, 24)}` : "";
     if (!priority) return read;
@@ -369,11 +382,29 @@
     // for pure STATUS only (meters, "armed", "clean/risk"), never a price echo.
     if (v === "accept" || v === "join" || v === "trade" || v === "bribe" ||
         v === "payoff" || v === "pay" || v === "paySilence" || v === "respect") return "";
-    if (v === "romance") return "" + Math.round(a.love || 0);
+    /* NO METERS ON A PERSON. `"" + Math.round(a.love)` and `"♥ " + a.rep` were
+       the two floating numbers in this menu — a relationship printed as a
+       percentage beside somebody's face. The state is unchanged and so are the
+       thresholds; what the chip shows is now the WORD for where you stand, out
+       of economy.js's one social accessor so the chip and the dialogue can
+       never disagree about the same person. */
+    if (v === "romance") {
+      const l = a.love || 0;
+      if (l >= 82) return "close";
+      if (l >= 55) return "warm";
+      if (l >= 25) return "friendly";
+      return "";
+    }
     if (v === "befriend") {
-      if ((a.playerTrust || 0) >= 6) return "trust+";
       if ((a.playerGrudge || 0) >= 6) return "repair";
-      return "♥ " + (a.rep || 0);
+      const S = CBZ.econ && CBZ.econ.socialRead ? CBZ.econ.socialRead(a) : null;
+      if (S) {
+        if (S.busy) return "counting";           // he is not talking to you right now
+        if (S.standing === "stranger") return "";
+        return S.standing;                       // known / solid / friend / sour / enemy
+      }
+      if ((a.playerTrust || 0) >= 6) return "trust+";
+      return "";
     }
     if (v === "insult") {
       if ((a.playerGrudge || 0) >= 6) return "bad blood";
@@ -386,13 +417,17 @@
       return CBZ.econ.hasItem("Shiv") ? "armed" : "";
     }
     if (v === "trade") return a.data.offer ? (CBZ.econ.offerLine ? CBZ.econ.offerLine(a) : `${a.data.offer.item}·${a.data.offer.price}`) : "";
-    if (v === "bribe") return a.kind === "warden" ? "25" : (a.corrupt ? "5" : "10");
+    // A PRICE THE MENU COMPUTES SEPARATELY FROM THE TILL IS A PRICE THAT
+    // LIES. economy.js's bribeCost is loyalty- and schedule-aware now (a man
+    // you have already paid is cheaper; a man standing a count is dearer), so
+    // the chip and the label both ask IT rather than re-deriving 25/5/10.
+    if (v === "bribe") return (CBZ.econ.bribeCost ? CBZ.econ.bribeCost(a) : (a.kind === "warden" ? 25 : (a.corrupt ? 5 : 10))) + "";
     if (v === "payoff") return (CBZ.econ.payoffCost ? CBZ.econ.payoffCost(a) : Math.max(6, Math.ceil((CBZ.game.detection || 0) / 8) + Math.ceil((CBZ.game.complaints || 0) / 12) + (CBZ.game.gangJob ? 4 : 0) + (a.kind === "warden" ? 14 : 5))) + "";
     if (v === "pay") return a.approach && a.approach.cost ? a.approach.cost + "" : "";
     if (v === "paySilence") return CBZ.knownSnitchCost ? CBZ.knownSnitchCost(a) + "" : "";
     if (v === "haggle") return a.approach && a.approach.haggled ? "done" : ((a.playerTrust || 0) >= 6 ? "trust helps" : "");
     if (v === "threaten" || v === "threatenSnitch") return CBZ.playerArmed && CBZ.playerArmed() ? "armed" : "";
-    if (v === "confrontReport") return a.reportedPlayerCred != null ? `cred ${Math.round(a.reportedPlayerCred * 100)}%` : "";
+    if (v === "confrontReport") return a.reportedPlayerCred == null ? "" : (a.reportedPlayerCred > 0.78 ? "believed" : (a.reportedPlayerCred < 0.45 ? "doubted" : "heard"));
     if (v === "question") {
       if ((a.playerTrust || 0) >= 5) return "talks";
       if ((a.playerFear || 0) >= 6) return "shaky";
@@ -404,6 +439,15 @@
     if (v === "search") return a.copMarked > 0 || a.huntPlayer > 0 || a.aiState === "fight" ? "cause" : "complaint";
     if (v === "steal") {
       if ((a.playerGrudge || 0) >= 5) return "watching";
+      // THE HOUR IS PART OF THE READ. economy.js prices a lift off
+      // CBZ.prisonSchedule (a count is arithmetic done with the eyes; the
+      // tier after lights-out is dark), so the chip says which it is — a word
+      // about the world, not the odds printed as a percentage.
+      const S = CBZ.prisonSchedule;
+      if (S && S.enabled()) {
+        if ((a.kind === "guard" || a.kind === "warden") && (S.is("count") || S.is("secure") || S.is("wake"))) return "counting";
+        if (S.is("night")) return "dark";
+      }
       if (a.blockRead && a.blockRead.kind === "wealth" && (a.blockRead.t || 0) > 0) return "hot";
       return "";
     }
@@ -457,7 +501,7 @@
       case "befriend": return (a.playerGrudge || 0) >= 6 ? `Square things with ${nm}` : ((a.rep || 0) >= 45 ? `Catch up with ${nm}` : `Chat up ${nm}`);
       case "fight":    return `Throw hands with ${nm}`;
       case "trade":    { const o = a.data && a.data.offer; return o ? `Buy ${shortText(o.item, 16)} — ${o.price}` : "Browse their goods"; }
-      case "bribe":    { const c = a.kind === "warden" ? 25 : (a.corrupt ? 5 : 10); return `Slip ${c} to look away`; }
+      case "bribe":    { const c = CBZ.econ.bribeCost ? CBZ.econ.bribeCost(a) : (a.kind === "warden" ? 25 : (a.corrupt ? 5 : 10)); return `Slip ${c} to look away`; }
       case "payoff":   { const c = CBZ.econ.payoffCost ? CBZ.econ.payoffCost(a) : 6; return `Pay ${c} to clear your heat`; }
       case "steal":    return (a.kind === "guard" || a.kind === "warden") ? `Lift ${nm}'s keys` : `Pick ${nm}'s pocket`;
       case "join":     return `Run with the ${gangShort(a) || "crew"}`;
@@ -506,15 +550,78 @@
     sayLine = sayEl.querySelector(".pi-subtitle-line");
     return sayEl;
   }
+  /* =========================================================================
+     ONE CONVENTION FOR EVERY SPOKEN LINE IN THE PRISON
+
+     THE BUG THIS REPLACES, exactly. The line below used to be:
+
+         sayLine.textContent = String(msg).replace(/^[“"]|[”"]$/g, "");
+
+     and systems/quests.js built every negotiation line as
+     `${actor.data.name}: "${text}"`. The `^[“"]` alternative can NEVER match a
+     string that begins with a name, so the alternation only ever fired on the
+     `[”"]$` side and stripped the CLOSING quote off all four of them:
+
+         Marcus: "Rough up Officer #3 for me.
+
+     Name, colon, an opening quote and no close — on a surface whose speaker
+     element is already carrying that same name (aria-only, because you can SEE
+     who is in front of you). Two other truncators could eat a closing quote
+     the same way (shortText, panelNote), and entities/guards.js had a second
+     instance of the whole shape inside a HUD hint.
+
+     THE CONVENTION, and it is enforced HERE so no caller can get it wrong:
+       1. the LINE is words a person said, and nothing else;
+       2. the SPEAKER's name lives in the speaker slot, never in the sentence —
+          a `Name:` prefix is stripped when it names this speaker;
+       3. QUOTES ARE DROPPED, both of them, always. The surface is the quote.
+          Stripping is symmetric, so an unbalanced quote (the old bug's own
+          output, or anything a truncator chewed) can never survive either.
+     Interior quotation — a man quoting somebody else — is untouched, because
+     only the first and last characters are ever considered.
+     ========================================================================= */
+  const QUOTE_OPEN = "“‘\"'";
+  const QUOTE_CLOSE = "”’\"'";
+  function speechText(who, msg) {
+    let s = String(msg == null ? "" : msg).trim();
+    if (!s) return "";
+    // 2. drop a `Speaker:` / `the Speaker:` prefix naming the person talking
+    const colon = s.indexOf(":");
+    if (colon > 0 && colon <= 34) {
+      const head = s.slice(0, colon).trim().toLowerCase().replace(/^(the|a|an)\s+/, "");
+      const me = String(who || "").trim().toLowerCase().replace(/^(the|a|an)\s+/, "");
+      if (me && head === me) s = s.slice(colon + 1).trim();
+    }
+    /* 3. QUOTE STRIP, AND THE ASYMMETRY IS THE WHOLE LESSON OF THE BUG.
+       A leading quote is always the wrapper opening (the surface is the
+       quote), so it goes — with its partner if it has one, which also cleans
+       up the shipped bug's own unterminated output. A TRAILING quote with no
+       opener is not a wrapper at all: it is somebody closing a quotation
+       inside the sentence, and eating it is exactly the mistake the old
+       `/^[“"]|[”"]$/g` made on `Officer #3 mutters, "Fine. 8 cigs."`. So a
+       lone closer is left alone. Verified both ways by the phase probe. */
+    for (let pass = 0; pass < 2 && s.length > 1; pass++) {
+      if (QUOTE_OPEN.indexOf(s.charAt(0)) < 0) break;      // no opener -> nothing to unwrap
+      const last = s.charAt(s.length - 1);
+      s = s.slice(1);
+      if (QUOTE_CLOSE.indexOf(last) >= 0) s = s.slice(0, -1);
+      s = s.trim();
+    }
+    return s;
+  }
+  CBZ.prisonSpeechText = speechText;   // published so nothing re-derives it
+
   // EVERY verb result goes through here. Flag off → the legacy CBZ.flashHint
   // panel, byte-identical to what shipped.
   function sayResult(who, msg, secs, rank) {
     if (!msg) return;
-    if (!subtitleOn()) { if (CBZ.flashHint) CBZ.flashHint(msg, secs || 2.8); return; }
+    const line = speechText(who, msg);
+    if (!line) return;                 // a result with nothing to SAY says nothing
+    if (!subtitleOn()) { if (CBZ.flashHint) CBZ.flashHint(line, secs || 2.8); return; }
     ensureSay();
     sayRank = rank != null ? rank : SAY_ANSWER;
     saySpeaker.textContent = who || "";
-    sayLine.textContent = String(msg).replace(/^[“"]|[”"]$/g, "");
+    sayLine.textContent = line;
     sayEl.classList.add("show");
     sayT = secs || 2.8;
     // Enrol in hud.css's ONE subtitle ladder for the life of the line, exactly

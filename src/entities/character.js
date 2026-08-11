@@ -2643,6 +2643,79 @@
       if (ch.blockT <= 0) ch.blockK = 0;                // clean slate for the next guard
     }
 
+    /* ---- REACH: the hand that goes somewhere it should not be.
+       THE GAP THIS FILLS, stated by the file that hit it (systems/economy.js's
+       failed-lift comment): "there is no pickpocket ARM ANIMATION anywhere on
+       the rig — punch/kick/block and nothing between idle and strike." A lift
+       was therefore a sound and a number: the one physical act in the prison
+       nobody could SEE happen.
+
+       It is deliberately NOT a strike. A strike chambers, drives and snaps
+       back; a reach is slow at the wrist, quiet in the torso and the head
+       looks AWAY from the hand — the whole tell of a pickpocket is that he is
+       looking at your face while his hand is at your hip. Envelope: extend →
+       DWELL (the grab, `reachHold`) → withdraw, so the pause in the middle is
+       the beat where the thing changes hands.
+
+       Additive and flag-free like every layer above: one falsy check when the
+       director sets nothing, and the gait/idle damps restore the arm by
+       themselves the frame after the timer clears. Callers use CBZ.charReach.
+         ch.reachT/reachDur   timer + total length (default 0.62 s)
+         ch.reachArm          "l" | "r" (default "r")
+         ch.reachSide         -1 across the body / +1 out to the side / 0 front
+         ch.reachHigh         0 hip pocket (default) .. 1 chest/collar
+         ch.reachAmt          0..1 how far the body commits (default 1) */
+    if (ch.reachT > 0) {
+      ch.reachT -= dt;
+      const rdur = ch.reachDur || 0.62;
+      const rprog = 1 - Math.max(0, ch.reachT) / rdur;
+      // extend over the first 30%, hold flat through the middle, withdraw last
+      const rout = Math.min(1, rprog / 0.30);
+      const rback = Math.max(0, (rprog - 0.62) / 0.38);
+      const renv = Math.max(0, rout - rback) * (ch.reachAmt == null ? 1 : ch.reachAmt);
+      const rleft = ch.reachArm === "l";
+      const rarm = rleft ? ch.parts.la : ch.parts.ra;
+      const rother = rleft ? ch.parts.ra : ch.parts.la;
+      const rarmJ = rleft ? J.la : J.ra;
+      const rsgn = rleft ? 1 : -1;
+      const high = ch.reachHigh || 0;               // 0 = hip pocket, 1 = collar
+      const across = ch.reachSide == null ? -1 : ch.reachSide;
+      if (rarm) {
+        // upper arm swings forward and slightly down; the elbow stays soft so
+        // the hand hangs at pocket height instead of pointing like a salute
+        rarm.rotation.x = (-0.62 - 0.55 * high) * renv;
+        rarm.rotation.y = rsgn * across * 0.30 * renv;
+        rarm.rotation.z = rsgn * (0.20 - 0.26 * high) * renv;
+        rarm.position.z = 0.16 * renv;
+      }
+      if (rarmJ) rarmJ.rotation.x = -(0.85 - 0.30 * high) * renv;
+      // the OTHER hand drifts up and out — the distraction, the friendly touch
+      if (rother) {
+        rother.rotation.x = -0.34 * renv;
+        rother.rotation.z = -rsgn * 0.22 * renv;
+      }
+      // torso turns a little INTO the reach and leans in; nothing dramatic
+      ch.body.rotation.y = rsgn * across * 0.22 * renv;
+      ch.body.rotation.x = ch.lean + (0.13 + 0.06 * high) * renv;
+      ch.body.position.y -= 0.05 * renv * (1 - high);
+      // and the head looks the other way. This is the whole animation.
+      if (ch.neck) {
+        ch.neck.rotation.y = -rsgn * across * 0.42 * renv;
+        ch.neck.rotation.x = -0.10 * renv;
+        ch._reached = 1;
+      }
+    } else if (ch._reached) {
+      /* THE NECK IS THE ONE CHANNEL NOTHING ELSE OWNS. Every other value the
+         block above writes is pulled home by the gait/idle damps the frame
+         after the timer clears — but in the ordinary standing/walking path
+         `neck.rotation` is written by no one, so an interrupted reach (a KO, a
+         pose that returns early mid-lift) would leave a man looking over his
+         shoulder for the rest of the run. One falsy check, and it is the only
+         bookkeeping this layer needs. */
+      ch._reached = 0;
+      if (ch.neck) { ch.neck.rotation.y = 0; ch.neck.rotation.x = 0; }
+    }
+
     // ---- DODGE / SLIP: a quick weave to dodgeDir (-1 left, +1 right) that
     // peaks mid-timer and eases back out by itself (sin envelope -> 0 at end).
     if (ch.dodgeT > 0) {
@@ -3273,6 +3346,27 @@
       if (u && u.charChild) return true;
     }
     return false;
+  };
+  /* CBZ.charReach(ch, opts) — arm the reach layer above on any rig built by
+     makeCharacter (player, guard, inmate, city ped: it is one rig).
+     Returns the duration so a caller can time a consequence to the DWELL —
+     the grab lands at ~55% of it, not on the first frame.
+       opts.arm "l"|"r"  · opts.dur seconds · opts.side -1 across / +1 out
+       opts.high 0 hip .. 1 collar · opts.amt 0..1 commitment
+     No-ops on a rig that is mid-strike or down, so a lift can never cancel a
+     punch and a KO'd body never reaches for anything. */
+  CBZ.charReach = function (ch, opts) {
+    if (!ch || !ch.parts) return 0;
+    if (ch.punchT > 0 || ch.kickT > 0 || ch.koT > 0 || ch.koPose || ch.staggerT > 0) return 0;
+    opts = opts || {};
+    const dur = Math.max(0.2, +opts.dur || 0.62);
+    ch.reachArm = opts.arm === "l" ? "l" : "r";
+    ch.reachDur = dur;
+    ch.reachT = dur;
+    ch.reachSide = opts.side == null ? -1 : +opts.side;
+    ch.reachHigh = Math.max(0, Math.min(1, +opts.high || 0));
+    ch.reachAmt = opts.amt == null ? 1 : Math.max(0, Math.min(1, +opts.amt));
+    return dur;
   };
   CBZ.animChar = animChar;
   CBZ.poseSkydiver = poseSkydiver;

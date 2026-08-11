@@ -4431,14 +4431,14 @@
         addGangDebt(n.gang, mode === "truce" ? -4 : -1);
         if (CBZ.player.gang === n.gang || mode === "truce") addGangProtection(n.gang, 14);
         clearApproach(n);
-        return { ok: true, msg: `${who} accepts the respect. ${gangName(n.gang)} standing ${gangStanding(n.gang)}.` };
+        return { ok: true, msg: `${who} accepts the respect. The ${gangName(n.gang)} will remember who backed down first.` };
       }
       if (a.kind === "favor") {
         const gift = a.gift || 3;
         clearApproach(n);
         CBZ.econ.addCigs(gift);
         addGangStanding(n.gang, -1);
-        return { ok: true, msg: `${who} slips you ${gift} cigs. Respect ${gangStanding(n.gang)}.` };
+        return { ok: true, msg: `${who} slips you ${gift} cigs and calls it square.` };
       }
       if (a.kind === "buyItem") {
         if (!CBZ.econ.hasItem(a.item)) {
@@ -4470,7 +4470,7 @@
         if (n.gang >= 0) addGangStanding(n.gang, 1);
         addBuzz("heat", -6, "heads-up");
         clearApproach(n);
-        return { ok: true, msg: `${who} points you away from the sweep. Search shifts ${Math.round(Math.hypot(lead.x - CBZ.player.pos.x, lead.z - CBZ.player.pos.z))}m off you.` };
+        return { ok: true, msg: `${who} points you away from the sweep, and the search goes the other way.` };
       }
       if (a.kind === "crewBackup") {
         const standing = n.gang >= 0 ? Math.max(0, gangStanding(n.gang)) : 0;
@@ -4496,7 +4496,7 @@
         addGangStanding(n.gang, 3);
         addGangProtection(n.gang, 10 + Math.min(18, standing * 0.25));
         clearApproach(n);
-        return { ok: true, msg: `${who} gives guards a cover story ${Math.round(Math.hypot(lead.x - CBZ.player.pos.x, lead.z - CBZ.player.pos.z))}m away. ${gangName(n.gang)} respect ${gangStanding(n.gang)}.` };
+        return { ok: true, msg: `${who} gives the guards a story that puts you on the far side of the yard.` };
       }
       if (a.kind === "copBribe") {
         const price = a.price || 3;
@@ -4527,7 +4527,7 @@
         clearApproach(n);
         if (bully && markCopSuspect(n, bully, 22)) {
           if (CBZ.addComplaint) CBZ.addComplaint(-7);
-          return { ok: true, msg: `You take the complaint. ${gangName(gang)} pressure is now on your radar.` };
+          return { ok: true, msg: `You take the complaint. The ${gangName(gang)} will be watching how you carry it.` };
         }
         if (CBZ.addComplaint) CBZ.addComplaint(-4);
         return { ok: true, msg: `${who} calms down. The block sees you handle it.` };
@@ -4546,7 +4546,7 @@
       if (a.kind === "turfWarning") {
         clearApproach(n);
         addGangStanding(n.gang, 4);
-        return { ok: true, msg: `You give ${gangName(n.gang)} space. Respect ${gangStanding(n.gang)}.` };
+        return { ok: true, msg: `You give the ${gangName(n.gang)} their space, and they see you do it.` };
       }
       if (a.kind === "gangParley") {
         const mode = a.parleyMode || "warning";
@@ -4556,7 +4556,7 @@
         n.playerTrust = Math.min(14, (n.playerTrust || 0) + 1);
         n.playerGrudge = Math.max(0, (n.playerGrudge || 0) - 1);
         clearApproach(n);
-        return { ok: true, msg: `You show respect. ${gangName(n.gang)} standing ${gangStanding(n.gang)}, debt ${gangDebt(n.gang)}.` };
+        return { ok: true, msg: `You show respect. The ${gangName(n.gang)} take note of it.` };
       }
       clearApproach(n);
       return { ok: true, msg: `${who} lets it go.` };
@@ -4564,7 +4564,7 @@
 
     if (action === "pay") {
       if (a.cost <= 0) return { ok: false, msg: "They don't want money for this." };
-      if ((CBZ.game.cigs || 0) < a.cost) return { ok: false, msg: `Need ${a.cost} cigs.` };
+      if ((CBZ.game.cigs || 0) < a.cost) return { ok: false, msg: `${a.cost}. Come back when you have it.` };
       if (a.kind === "witnessFix" && !((a.reporter && alive(a.reporter) && a.reporter.reportedPlayerT > 0) || findKnownReporter(n))) {
         clearApproach(n);
         return { ok: false, msg: "That witness trail has already gone cold." };
@@ -4577,7 +4577,7 @@
         addGangProtection(n.gang, 35 + a.cost * 4);
         for (const m of CBZ.npcs) if (m.gang === n.gang) m.huntPlayer = 0;
         clearApproach(n);
-        return { ok: true, msg: `${gangName(n.gang)} cover you for a while. Standing ${gangStanding(n.gang)}.` };
+        return { ok: true, msg: `The ${gangName(n.gang)} put themselves between you and trouble for a while.` };
       }
       if (a.kind === "debtCollect") {
         addGangDebt(n.gang, -Math.max(a.cost * 2, 4));
@@ -4586,7 +4586,7 @@
         for (const m of CBZ.npcs) if (m.gang === n.gang) m.huntPlayer = 0;
         n.playerTrust = Math.min(12, (n.playerTrust || 0) + 1);
         clearApproach(n);
-        return { ok: true, msg: `${gangName(n.gang)} mark the debt down to ${gangDebt(n.gang)}.` };
+        return { ok: true, msg: `The ${gangName(n.gang)} strike some of what you owe off the wall.` };
       }
       if (a.kind === "gangParley") {
         const mode = a.parleyMode || "truce";
@@ -4600,7 +4600,7 @@
         addBuzz("debt", -Math.max(4, a.cost), "parley-pay");
         clearApproach(n);
         CBZ.sfx && CBZ.sfx("coin");
-        return { ok: true, msg: `${who} takes the truce money. ${gangName(n.gang)} debt ${gangDebt(n.gang)}, standing ${gangStanding(n.gang)}.` };
+        return { ok: true, msg: `${who} takes the truce money and the crew stands down.` };
       }
       if (a.kind === "snitchThreat") {
         n.snitchHeat = 0; n.snitchT = 0;
@@ -4655,7 +4655,7 @@
         coolWanted(5 + a.cost * 1.2);
         addBuzz("debt", -Math.max(4, a.cost), "crew-dues");
         CBZ.sfx && CBZ.sfx("coin");
-        return { ok: true, msg: `${who} marks dues paid. ${gangName(n.gang)} cover you for ${Math.ceil(gangProtection(n.gang))}s.` };
+        return { ok: true, msg: `${who} marks the dues paid, and the ${gangName(n.gang)} keep an eye out for you.` };
       }
       if (a.kind === "stickUp") {
         const racketGuard = a.racketGuard;
@@ -4676,7 +4676,7 @@
         addBuzz("wealth", -6, "stick-up-paid");
         clearApproach(n);
         CBZ.sfx && CBZ.sfx("coin");
-        return { ok: true, msg: racketGuard ? `${who} takes the racket cut. Bent debt ${Math.ceil(CBZ.game.racketDebt || 0)}.` : `${who} takes the cut and leaves your pockets alone for now.` };
+        return { ok: true, msg: racketGuard ? `${who} takes the racket cut and writes nothing down.` : `${who} takes the cut and leaves your pockets alone for now.` };
       }
       if (a.kind === "diversion") {
         n.playerTrust = Math.min(12, (n.playerTrust || 0) + 1);
@@ -4696,7 +4696,7 @@
         n.playerGrudge = Math.max(0, (n.playerGrudge || 0) - 1);
         if (n.gang >= 0) addGangStanding(n.gang, 1);
         clearApproach(n);
-        return { ok: true, msg: `${who} spreads word that your pockets are dry. Wealth buzz drops for ${Math.ceil(CBZ.game.lowProfileT)}s.` };
+        return { ok: true, msg: `${who} spreads word that your pockets are dry, and the block loses interest.` };
       }
       if (a.kind === "racketCover") {
         const cut = Math.max(5, a.cost * 2 + Math.ceil((a.racketDebt || 0) * 0.35));
@@ -4716,7 +4716,7 @@
         for (const gd of CBZ.guards || []) if (gd.corrupt) gd.bribed = Math.max(gd.bribed || 0, 7 + a.cost);
         clearApproach(n);
         CBZ.sfx && CBZ.sfx("coin");
-        return { ok: true, msg: `${who} muddies the bent-cop ledger. Bent debt ${Math.ceil(CBZ.game.racketDebt || 0)}, cover ${Math.ceil(CBZ.game.racketProtectionT || 0)}s.` };
+        return { ok: true, msg: `${who} muddies the bent-cop ledger until nobody can read it.` };
       }
       if (a.kind === "coverDebt") {
         n.coverDebt = null;
@@ -4745,7 +4745,7 @@
         if (CBZ.game.lastKnown && (!a.source || CBZ.game.lastKnown.source === a.source || CBZ.game.lastKnown.type !== "visual")) CBZ.game.lastKnown = null;
         CBZ.game.lowProfileT = Math.max(CBZ.game.lowProfileT || 0, 10 + a.cost * 1.5);
         clearApproach(n);
-        return { ok: true, msg: `${who} gives guards an alibi and points them ${Math.round(Math.hypot(lead.x - CBZ.player.pos.x, lead.z - CBZ.player.pos.z))}m away.` };
+        return { ok: true, msg: `${who} gives the guards an alibi and points them at the wrong end of the block.` };
       }
       if (a.kind === "jobThreat") {
         const job = a.job || CBZ.game.gangJob;
@@ -4767,7 +4767,7 @@
         n.playerGrudge = Math.max(0, (n.playerGrudge || 0) - 1);
         addGangStanding(n.gang, n.gang >= 0 ? 1 : 0);
         clearApproach(n);
-        return { ok: true, msg: `${who} plants a false lead ${Math.round(Math.hypot(lead.x - CBZ.player.pos.x, lead.z - CBZ.player.pos.z))}m away. Wanted pressure drops.` };
+        return { ok: true, msg: `${who} plants a false lead across the yard and the heat follows it.` };
       }
       if (a.kind === "witnessFix") {
         const reporter = (a.reporter && alive(a.reporter) && a.reporter.reportedPlayerT > 0) ? a.reporter : findKnownReporter(n);
@@ -4870,7 +4870,7 @@
       if (a.kind === "buyItem") a.price = Math.max(1, (a.price || 1) - 1);
       else a.cost += a.kind === "snitchThreat" || a.kind === "tax" ? 1 : 0;
       n.playerGrudge = Math.min(12, (n.playerGrudge || 0) + 1);
-      return { ok: false, msg: a.kind === "buyItem" ? `${who} lowers the offer to ${a.price} cigs.` : `${who} doesn't like bargaining. Price ${a.cost} cigs.` };
+      return { ok: false, msg: a.kind === "buyItem" ? `${who} lowers the offer to ${a.price} cigs.` : `${who} doesn't like bargaining. It stays ${a.cost}.` };
     }
 
     if (action === "threaten") {
@@ -5183,7 +5183,7 @@
         CBZ.game.racketDebt = Math.min(60, (CBZ.game.racketDebt || 0) + Math.max(3, Math.ceil((a.cost || 3) * 0.75)));
         if (CBZ.addCasePressure) CBZ.addCasePressure(8 + (a.cost || 3), { type: "racket cover threat", heardOnly: true }, n, { corruptHold: true });
         addBuzz("badge", 8, "failed-racket-cover-threat");
-        return { ok: false, msg: `${who} sells the threat back to the racket. Bent debt ${Math.ceil(CBZ.game.racketDebt || 0)}.` };
+        return { ok: false, msg: `${who} sells the threat straight back to the racket, and you are the one who pays for it.` };
       }
       if (a.kind === "coverDebt") {
         n.coverDebt = null;

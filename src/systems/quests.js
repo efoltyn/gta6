@@ -76,16 +76,26 @@
     const names = allNames().filter((nm) => nm !== actor.data.name);
     const victim = names[Math.floor(econ.rng() * names.length)] || "anyone";
 
+    /* THE REWARDS WENT UP BECAUSE THE FLOOR WENT AWAY.
+       entities/coins.js used to scatter 153 cigarettes across the compound in
+       nineteen packs — the yard, the lounge, the south block, and three stacks
+       inside the armoury — and the owner's rule is that cigarettes are EARNED,
+       not collected off the ground like coins. Killing that spawn removes the
+       game's largest single income, so it comes back through the three seams
+       where it belongs: what a favour pays (here), what a man is actually
+       carrying (economy.js's loadouts), and what a friend hands you
+       (onTalk below). Same magnitudes — a favour still costs less than a
+       Gun-Room Key and more than a bribe — so nothing in the price list moves. */
     if (roll < 0.40) {
-      return { type: "beat", target: victim, text: `Rough up ${victim} for me.`, reward: 8 };
+      return { type: "beat", target: victim, text: `Rough up ${victim} for me.`, reward: 12 };
     } else if (roll < 0.68) {
       const need = 1 + Math.floor(econ.rng() * 2);
-      return { type: "steal", need, start: g.stealsDone || 0, text: `Pull off ${need} clean heist${need > 1 ? "s" : ""}.`, reward: 10 };
+      return { type: "steal", need, start: g.stealsDone || 0, text: `Pull off ${need} clean heist${need > 1 ? "s" : ""}.`, reward: 15 };
     } else if (roll < 0.90 && armoryFavorLive()) {
       // THE STAR. Not "fetch me N of something" — the one errand in the block
       // that ends with you holding a gun, which is a change of CATEGORY and
       // the only reward CLAUDE.md's gun-room grammar counts.
-      return { type: "armory", text: "Get past the gun-room gate and come back with a piece.", reward: 14 };
+      return { type: "armory", text: "Get past the gun-room gate and come back with a piece.", reward: 22 };
     }
     const need = 6 + Math.floor(econ.rng() * 8);
     return { type: "gift", need, text: `Bring me ${need} cigs as tribute.`, reward: 0 };
@@ -101,46 +111,120 @@
     return false;
   }
 
+  /* ==========================================================================
+     THE `Name: "` BUG WAS THIS FILE'S FAULT, NOT THE RENDERER'S
+
+     Every line below used to be assembled as `${actor.data.name}: "${text}"`
+     and handed to systems/interact.js's .pi-subtitle — a SPEECH surface whose
+     speaker element (.pi-subtitle-speaker) is deliberately screen-reader-only
+     because you can see who is standing in front of you. So the name was
+     printed twice (once invisibly, once with a colon stapled to the sentence)
+     and interact.js:517's `String(msg).replace(/^[“"]|[”"]$/g, "")` then ate
+     the CLOSING quote — its leading alternative can never match a string that
+     starts with a name — leaving:
+
+         Marcus: "Rough up Officer #3 for me.
+
+     Fixed at BOTH ends and only one of them is the bug. Here: a spoken line is
+     the words and nothing else — no name, no colon, no quotation marks, and no
+     reward arithmetic ("+34 rep, +8 cigs") in a sentence a human being says.
+     What the favour paid is shown by the pickup feed and the cig counter, the
+     way every other payment in this game is shown.
+     ========================================================================== */
   function complete(actor) {
     const q = actor.quest;
     if (q.type === "gift") econ.addCigs(-q.need);          // tribute is consumed
-    if (q.reward) econ.addCigs(q.reward);
+    if (q.reward) {
+      econ.addCigs(q.reward);
+      // the payment is a payment: one row in the corner feed, same as a lift
+      if (CBZ.pickupNote) CBZ.pickupNote("Cigarettes", { count: q.reward });
+    }
     actor.rep = (actor.rep || 0) + 34;
     actor.quest = null;
     CBZ.sfx("key");
-    if (actor.rep >= FRIEND) return `${actor.data.name} grins: "You're alright. Come find me — I'll get you out."`;
-    return `${actor.data.name}: "Nice work." (+34 rep${q.reward ? ", +" + q.reward + " cigs" : ""})`;
+    if (actor.rep >= FRIEND) return "You're alright. Come find me — I'll get you out of here.";
+    if (q.type === "armory") return "You actually did it. There's people in here who'll want to know that.";
+    if (q.type === "gift") return "That'll do. You're good for it, I'll say that much.";
+    return "Nice work. I don't forget who does what I ask.";
   }
 
   // the [1] Talk handler
   function onTalk(actor) {
     actor.rep = actor.rep || 0;
 
+    // A COUNT OUTRANKS A CONVERSATION. CBZ.prisonSchedule (systems/
+    // prisonschedule.js) is the one clock; a screw standing on a number is not
+    // taking your favour, and econ.talk already owns what he says about it.
+    const S = CBZ.prisonSchedule;
+    const counting = !!(S && S.enabled() && (S.is("count") || S.is("secure") || S.is("wake")));
+    if (counting && (actor.kind === "guard" || actor.kind === "warden")) return econ.talk(actor);
+
     // befriended enough? they spring you — alternative victory.
     if (actor.rep >= FRIEND) {
       CBZ.winGame("befriend", actor);
-      return { ok: true, msg: `${actor.data.name} slips you out a side gate. You're free!` };
+      return { ok: true, msg: "Side gate. Walk, don't run, and don't look back at me." };
     }
 
     // active quest: report progress or complete it
     if (actor.quest) {
       if (questDone(actor)) return { ok: true, msg: complete(actor) };
-      return { ok: true, msg: `${actor.data.name}: "${actor.quest.text}"` };
+      return { ok: true, msg: actor.quest.text };
     }
 
-    // sometimes hand out a new task, otherwise just chat
-    if (econ.rng() < 0.6) {
-      actor.quest = assignQuest(actor);
-      return { ok: true, msg: `${actor.data.name}: "Do me a favor — ${actor.quest.text}"` };
+    /* RESPECT DECIDES WHETHER YOU ARE EVEN ASKED. A man does not hand his dirty
+       work to somebody he met a minute ago, and he does not hand it to somebody
+       who has picked his pocket. econ's respect ledger (a.rep, the same number
+       this file has always paid into) now gates the offer instead of a flat
+       60% die: strangers get chatter, regulars get favours, enemies get
+       nothing. Absent econ.socialRead (a mode without it), the old flat roll. */
+    const social = CBZ.econ.socialRead ? CBZ.econ.socialRead(actor) : null;
+    let offerOdds = 0.6;
+    if (social) {
+      if (social.standing === "enemy") offerOdds = 0;
+      else if (social.standing === "sour") offerOdds = 0.18;
+      else if (social.standing === "stranger") offerOdds = 0.42;
+      else if (social.standing === "known") offerOdds = 0.68;
+      else offerOdds = 0.82;                       // solid — they come to you
+      // a favour is business, and business happens in the yard or after dark
+      if (S && S.enabled()) {
+        if (S.is("yard") || S.is("work")) offerOdds += 0.10;
+        else if (S.is("night")) offerOdds += 0.06;
+      }
     }
+    if (econ.rng() < offerOdds) {
+      actor.quest = assignQuest(actor);
+      return { ok: true, msg: `Do me a favour. ${actor.quest.text}` };
+    }
+
+    /* A FRIEND SHARES, AND HE SHARES HIS OWN. Ground cigarettes are gone from
+       this prison (entities/coins.js) because currency you find on a floor is
+       not currency. This is one of the seams the income moved into, and it is
+       an honest one: the smokes come OFF HIS LOADOUT, so a man with empty
+       pockets is generous with nothing, and he can only do it once in a while. */
+    if (social && social.respect >= 34 && !(actor._friendGift > CBZ.now - 60000)) {
+      const load = CBZ.econ.rollLoadout(actor);
+      const give = Math.min(load.cigs, 2 + Math.floor(econ.rng() * 4));
+      if (give > 0) {
+        actor._friendGift = CBZ.now;
+        load.cigs -= give;
+        econ.addCigs(give);
+        if (CBZ.pickupNote) CBZ.pickupNote("Cigarettes", { count: give });
+        CBZ.sfx("loot");
+        return { ok: true, msg: "Take these. You'll need them more than me." };
+      }
+    }
+
     /* THE TEACHING LINE, and it deliberately lives in the FALLBACK slot. Put
        ahead of the favor roll it would have halved quest assignment; here it
        only ever replaces generic filler, so the block's idle chatter is what
        tells you the game has a spine — and it goes quiet the moment you are
        actually holding the card, because a hint you have already acted on is
-       nagging. */
-    if (SPINE && !g.hasKey && !armoryOpen() && econ.rng() < 0.55) {
-      return { ok: true, msg: `${actor.data.name}: "${chainLine(actor)}"` };
+       nagging. AT NIGHT IT COMES OUT MORE READILY: the tier is dark, the
+       screws are on the far side of a locked grille, and this is the hour men
+       in a prison actually say what they are thinking. */
+    const nightWhisper = !!(S && S.enabled() && S.is("night"));
+    if (SPINE && !g.hasKey && !armoryOpen() && econ.rng() < (nightWhisper ? 0.8 : 0.55)) {
+      return { ok: true, msg: chainLine(actor) };
     }
     return econ.talk(actor);
   }

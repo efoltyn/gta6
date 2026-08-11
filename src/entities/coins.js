@@ -17,6 +17,43 @@
   const CBZ = window.CBZ;
   const mat = CBZ.mat;
 
+  /* ==========================================================================
+     CIGARETTES ARE THE CURRENCY, SO THEY ARE NOT LYING ON THE FLOOR
+
+     OWNER, binding: "no cigarettes lying on the ground. Cigarettes are the
+     prison currency and are EARNED — stolen, traded, won — not collected off
+     the floor like coins."
+
+     MEASURED before this flag: NINETEEN packs worth 153 cigarettes spawned at
+     parse time and sat there for the whole run — 8 here (yard + cells), 6 in
+     world/southblock.js, 2 in world/lounge.js and 3 inside the armoury in
+     world/gunroom.js — plus one 6-cig pack per NPC-vs-NPC death from
+     entities/ai.js. That is not pocket change beside the economy; at the time
+     it WAS the economy: a bribe is 10, a Cell Key is 25, a Gun-Room Key is 40.
+     A player could fund the entire game by walking a circuit and never speak
+     to a living soul, which is the exact opposite of a prison where the only
+     thing anybody has is what they can take off somebody else.
+
+     ONE FLAG, ONE CHOKE POINT, FOUR FILES UNEDITED. Every pack in the game is
+     born in `addPack()` below, so the rule lives there: with
+     PRISON_GROUND_CIGS false it returns null and each of those nineteen call
+     sites (and ai.js's death pack) becomes a no-op that needed no edit. The
+     prop TYPE, the mesh, the pickup and `CBZ.coins` all stay exactly as they
+     were — systems/state.js still iterates an (empty) CBZ.coins on respawn and
+     a build that sets the flag true gets the old prison back byte for byte.
+
+     WHERE THE 153 WENT (systems/quests.js and systems/economy.js own these):
+       · favour payouts   8/10/14 → 12/15/22 cigs
+       · a lift takes the mark's REAL pocket, and guards carry 6-20 rather
+         than the 5-18 a lazily-minted loadout used to hold
+       · inmate pockets are personality-weighted, so a greedy man is a score
+       · a friend hands you 2-5 off his own loadout, once a minute
+       · a downed man spills what he HAD instead of minting 2-8 from nothing
+     Net: the same order of money, none of it free, all of it off a person.
+     ========================================================================== */
+  if (CBZ.CONFIG && CBZ.CONFIG.PRISON_GROUND_CIGS == null) CBZ.CONFIG.PRISON_GROUND_CIGS = false;
+  function groundCigs() { return !!(CBZ.CONFIG && CBZ.CONFIG.PRISON_GROUND_CIGS); }
+
   // planar proximity radius for pickup: the original block tested
   // dx*dx + dz*dz < 1.4, i.e. radius = sqrt(1.4).
   const PICKUP_R = Math.sqrt(1.4);
@@ -83,13 +120,17 @@
       c.collected = true; c.anim = 0;
       if (c.ring) c.ring.visible = false;
       CBZ.econ.addCigs(c.value);
-      CBZ.flashHint(`+${c.value}`, 1.0);
+      // (flag-on path only) one quiet row in the bounded pickup feed, the same
+      // place a lifted keycard and a frisked wallet land — never a "+N" hint.
+      if (CBZ.pickupNote) CBZ.pickupNote("Cigarettes", { count: c.value });
+      else if (CBZ.flashHint) CBZ.flashHint(`+${c.value}`, 1.0);
       CBZ.sfx("coin");
       return false;   // never structurally removed — state.js resets it on respawn
     },
   });
 
   function addPack(x, z, value) {
+    if (!groundCigs()) return null;      // THE RULE, and every caller obeys it for free
     const inst = CBZ.spawnProp("coin", x, 1.0, z, {
       value: value || 5,
       parent: CBZ.prisonRoot || CBZ.scene,
@@ -101,6 +142,19 @@
   // scattered around the cells and yard — bigger stashes further from spawn
   [[8, -30, 4], [-8, -20, 4], [-14, 12, 6], [14, 12, 6], [0, 30, 6], [-12, 40, 8], [12, 40, 8], [0, 48, 10]]
     .forEach((p) => addPack(p[0], p[1], p[2]));
+
+  /* Ratchet: `ground` is the number of cigarette packs standing on the floor
+     of this prison and it is meant to be ZERO. `sites` is printed beside it so
+     that "fixing" the count by deleting the spawn tables cannot pass — the
+     nineteen call sites are still there, still addressed, still one flag away. */
+  CBZ.prisonCigAudit = function () {
+    return {
+      allowed: groundCigs(),
+      ground: (CBZ.coins || []).length,
+      sites: 19,          // coins.js 8 · southblock 6 · lounge 2 · gunroom 3
+      deathPacks: 0,      // entities/ai.js's per-kill pack, same choke point
+    };
+  };
 
   CBZ.addPack = addPack;
 })();

@@ -100,10 +100,26 @@
     if (a._crowd && a._id >= 0 && CBZ.ambient && CBZ.ambient.grudge) {
       CBZ.ambient.grudge[a._id] = Math.min(255, (CBZ.ambient.grudge[a._id] + 28 + severity * 72) | 0);
     }
-    if (level >= 0.63) {
-      a.huntPlayer = Math.max(a.huntPlayer || 0, 3.5 + level * 5);
-      if (CBZ.provokeGang && a.gang >= 0) CBZ.provokeGang(a, 4 + level * 4);
-    } else if (level >= 0.35) {
+    /* AN INVENTORY IS A CAPABILITY, AND THIS FILE ALREADY SAID SO.
+       The header states the contract — "an angry NPC can only draw a gun they
+       carry" — and inventoryOf() below has always read `a.loadout.items`. In
+       the prison that list was EMPTY until somebody frisked the man, because
+       loadouts were minted lazily on first loot; so temperament decided every
+       reaction and what a man was actually carrying decided nothing.
+       systems/economy.js mints real pockets for the whole cast now, so the
+       contract finally has something to read in escape mode too: a man with a
+       shank in his waistband squares up where an empty-handed one backs off.
+       Degrades exactly as before for anyone whose pockets are still a promise. */
+    const inv = inventoryOf(a);
+    let nerve = level;
+    for (let i = 0; i < inv.items.length; i++) {
+      const it = inv.items[i];
+      if (it === "Shiv" || it === "Brass Knuckles" || it === "Baton") { nerve = Math.min(1, nerve + 0.18); break; }
+    }
+    if (nerve >= 0.63) {
+      a.huntPlayer = Math.max(a.huntPlayer || 0, 3.5 + nerve * 5);
+      if (CBZ.provokeGang && a.gang >= 0) CBZ.provokeGang(a, 4 + nerve * 4);
+    } else if (nerve >= 0.35) {
       a.aiState = "flee"; a.fleeT = Math.max(a.fleeT || 0, 1.8 + severity * 2);
     }
   }

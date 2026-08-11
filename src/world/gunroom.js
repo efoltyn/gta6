@@ -900,7 +900,11 @@
       bespoke: 0,
       rackSlots: armory.slots.length,
       gatedSlots: gated,
-      cigPacks: PACKS.length,
+      // what actually SPAWNED, not what the table lists: entities/coins.js's
+      // PRISON_GROUND_CIGS turns every addPack in the game into a no-op
+      // (cigarettes are earned, not swept off a floor), and an audit that
+      // reports three stashes nobody can pick up is a lie a later phase reads.
+      cigPacks: PACKS.filter(function () { return !!(CBZ.CONFIG && CBZ.CONFIG.PRISON_GROUND_CIGS); }).length,
       outerOpen: !!armory.open,
       innerOpen: !!inner.open,
     };

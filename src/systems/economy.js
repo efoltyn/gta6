@@ -46,7 +46,20 @@
     "Gold Tooth":      { value: 28, tag: "valuables", rarity: "rare" },
     "Gold Chain":      { value: 55, tag: "valuables", rarity: "epic" },
     "Luxury Watch":    { value: 70, tag: "valuables", rarity: "epic" },
+    // --- duty kit: what a screw is ACTUALLY wearing ---
+    // A guard's pockets used to be a lucky dip of handcuff keys and gold teeth.
+    // These three are the things every one of them carries every shift, so a
+    // lift takes something REAL off the man — and each has a consequence you
+    // can see: the baton arms you, the torch goes dark on his side of the yard
+    // (entities/guards.js reads `flashlightLost`), the card opens the door his
+    // post is there to hold.
+    Baton:             { value: 12, tag: "duty",      rarity: "uncommon" },
+    "Guard Torch":     { value: 10, tag: "duty",      rarity: "common" },
     // --- keys / weapon ---
+    // The KEYCARD is the yard door. entities/keycard.js lies one on a duty
+    // desk; this row is the same card on the belt of the officer whose post
+    // is that door — an answer you take off a person instead of a table.
+    Keycard:           { value: 45, tag: "key",       rarity: "rare" },
     // THE CELL KEY EXISTS BECAUSE THE CELL LOCKS. systems/prisonschedule.js
     // racks the wing shut at 21:00 and kills the lights at 22:00; the brass on
     // a screw's belt is the only thing that opens your own door from the
@@ -99,6 +112,154 @@
     return name.replace(/^the |^a |^an /, "");
   }
   function clamp100(v) { return Math.max(0, Math.min(100, v)); }
+
+  /* ==========================================================================
+     WHY THEY ANSWER THE WAY THEY DO — RESPECT · LOYALTY · THE CLOCK
+
+     Every negotiation in this file used to read exactly two things: how many
+     cigarettes you were holding and what die came up. Three answers were
+     missing, and all three already half-existed somewhere in the repo:
+
+     RESPECT is `a.rep` — the number systems/quests.js has always paid +34 into
+     for a finished favor and FRIEND=100 has always cashed for a way out. It is
+     NOT a second field. What is new is that the rest of the block now feeds it
+     (a gift, a trade honoured, a fight you win in front of them) and spends it
+     (prices, whether a favor is even offered, what they will talk about). The
+     drip is CAPPED at RESPECT_CEIL: side business earns you standing in here,
+     but only doing somebody's dirty work makes you a friend — otherwise the
+     befriend ending becomes a shopping trip.
+
+     LOYALTY is what `a.bribed` could never be. `bribed` is a countdown in
+     SECONDS of blindness; the owner's ask is a screw who STAYS BOUGHT. So
+     loyalty is persistent for the run, bought by bribes and payoffs, and it
+     buys exactly one thing worth having: a guard you have paid does not put a
+     caught pickpocket on the radio. He tells you off instead. Pick his pocket
+     anyway and it goes to zero — you cannot buy a man twice with the hand you
+     just had in his belt.
+
+     THE CLOCK is CBZ.prisonSchedule (systems/prisonschedule.js), never a
+     second timetable. A screw standing a COUNT is doing arithmetic with his
+     eyes on bodies: he will not trade, he will not take money, and he is a
+     far worse mark. YARD is when business happens. NIGHT is when the block
+     whispers — better lifts, softer prices, and the things nobody says in
+     daylight. Every one of these is surfaced as a LINE or a PRICE, never as a
+     meter; interact.js's chips read words off socialRead(), not numbers.
+     ========================================================================== */
+  const RESPECT_CEIL = 45;     // the most side business alone can ever earn
+  function respectOf(a) { return a ? Math.max(-50, Math.min(100, a.rep || 0)) : 0; }
+  function loyaltyOf(a) { return a ? Math.max(0, Math.min(100, a.loyalty || 0)) : 0; }
+  // n>0 is a drip and obeys the ceiling; n<0 always lands (you can always
+  // lose standing, and being disliked is not capped by anything).
+  function addRespect(a, n) {
+    if (!a || !n) return 0;
+    const cur = a.rep || 0;
+    if (n > 0 && cur >= RESPECT_CEIL) return cur;
+    a.rep = n > 0 ? Math.min(RESPECT_CEIL, cur + n) : Math.max(-50, cur + n);
+    return a.rep;
+  }
+  function addLoyalty(a, n) {
+    if (!a || !n) return 0;
+    a.loyalty = Math.max(0, Math.min(100, (a.loyalty || 0) + n));
+    return a.loyalty;
+  }
+  function bought(a) { return loyaltyOf(a) >= 35; }
+
+  function sched() {
+    const S = CBZ.prisonSchedule;
+    return S && S.enabled && S.enabled() ? S : null;
+  }
+  function blockId() { const S = sched(); return S ? S.id() : ""; }
+  // a body count is arithmetic done with the eyes — no business gets done
+  function counting() { const b = blockId(); return b === "count" || b === "secure" || b === "wake"; }
+  function yardTime() { const b = blockId(); return b === "yard" || b === "work"; }
+  function chowTime() { const b = blockId(); return b === "mess" || b === "supper"; }
+  function afterDark() { const b = blockId(); return b === "night"; }
+  // one number the verbs share: how well business goes at this hour
+  function hourMood() {
+    if (counting()) return -1;
+    if (yardTime()) return 1;
+    if (afterDark()) return 1;
+    if (chowTime()) return 0.5;
+    return 0;
+  }
+
+  /* THE POST IS THE SENIORITY. A guard record carries no rank — but it carries
+     a PATROL, and in a prison the patrol IS the rank: the man on the sally
+     port holds the gate, the man inside the wing holds the wing, and the two
+     dozen walking the wire hold nothing but a baton. Derived once from the
+     waypoints the roster already authored (entities/guards.js), stamped on the
+     actor as `post` + `rank`, and published — PHASE 5's security tiers want a
+     seniority axis and this is it, already true of every guard in the game.
+       3 warden  · 2 gate/wing/admin (carries a keycard) · 1 yard · 1 bent      */
+  function guardPost(a) {
+    if (!a) return { post: "none", rank: 0 };
+    if (a.post) return { post: a.post, rank: a.rank || 0 };
+    let post = "yard", rank = 1;
+    if (a.kind === "warden") { post = "warden"; rank = 3; }
+    else {
+      const W = CBZ.WORLD;
+      const wps = a.waypoints || [];
+      let minZ = 1e9, maxZ = -1e9, minX = 1e9, maxX = -1e9, nearExit = 1e9;
+      const ex = W && W.exit ? W.exit.x : 0, ez = W && W.exit ? W.exit.z : 128;
+      for (let i = 0; i < wps.length; i++) {
+        const p = wps[i];
+        if (p.z < minZ) minZ = p.z; if (p.z > maxZ) maxZ = p.z;
+        if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+        nearExit = Math.min(nearExit, Math.hypot(p.x - ex, p.z - ez));
+      }
+      const wingZ = W && W.cellBlock ? W.cellBlock.maxZ : -8;
+      const yardZ = W && W.northYard ? W.northYard.minZ : -8;
+      /* DISTANCE TO THE THING HE IS GUARDING, not a z band. A z band called
+         four south-block wire patrols "the sally port" because they happened
+         to walk as far down the map as the men who actually stand on it — the
+         gate detail is the loop whose waypoints are ON the exit, so measure
+         that. Same correction for the checkpoint: it is the SHORT inner loop
+         between the wing and the yard, not everything with a low z. */
+      if (nearExit <= 16) { post = "gate"; rank = 2; }               // the sally port itself
+      else if (maxZ <= wingZ + 1) { post = "wing"; rank = 2; }       // inside the block
+      else if (maxX - minX <= 26 && maxZ <= yardZ + 28 && minZ >= yardZ) { post = "checkpoint"; rank = 2; }
+      else { post = "yard"; rank = 1; }
+    }
+    /* BEING BENT IS NOT A DEMOTION — IT IS THE OPPOSITE OF ONE HERE.
+       The shipped roster's second bent officer (entities/guards.js marks
+       CBZ.guards[3] and [5]) IS the checkpoint patrol: the short inner loop
+       between the wing and the yard. He keeps the rank his post carries, so
+       the cheapest man in the prison to bribe is also one of the few with a
+       card on him — which is the whole game in one guard. `post` records the
+       corruption; `rank` records the door he is trusted with. */
+    if (a.corrupt) post = "bent";
+    a.post = post; a.rank = rank;
+    return { post, rank };
+  }
+
+  /* socialRead(actor) — the ONE accessor every surface reads instead of doing
+     its own arithmetic on rep/love/trust. Words, never numbers: interact.js's
+     status chips and the lines below both come from here, so "what the game
+     thinks of you" can only ever be said one way. */
+  function socialRead(a) {
+    if (!a) return { respect: 0, loyalty: 0, standing: "stranger", mood: "", bought: false, busy: false };
+    const r = respectOf(a), l = loyaltyOf(a);
+    const grudge = a.playerGrudge || 0, trust = a.playerTrust || 0, fear = a.playerFear || 0;
+    let standing = "stranger";
+    if (r >= 100) standing = "friend";
+    else if (r >= 62) standing = "solid";
+    else if (r >= 28 || trust >= 6) standing = "known";
+    else if (r <= -20 || grudge >= 9) standing = "enemy";
+    else if (r < 0 || grudge >= 5) standing = "sour";
+    let mood = "";
+    if (fear >= 7) mood = "scared";
+    else if (grudge >= 6) mood = "angry";
+    else if (trust >= 8) mood = "open";
+    const guardish = a.kind === "guard" || a.kind === "warden";
+    return {
+      respect: r, loyalty: l, standing, mood,
+      bought: bought(a),
+      busy: guardish && counting(),        // mid-count: he is not talking to you
+      post: guardish ? guardPost(a).post : "",
+      rank: guardish ? guardPost(a).rank : 0,
+    };
+  }
+
   function buzz(kind, amount, source) {
     if (!kind || !CBZ.blockRumor) return;
     const r = CBZ.blockRumor();
@@ -264,20 +425,170 @@
     return Math.max(5, cost);
   }
 
+  /* ==========================================================================
+     WHAT COMES BACK IS A THING A PERSON SAID
+
+     `.pi-subtitle` (systems/interact.js) is a SPEECH surface — hud.css's
+     world-subtitle grammar, the speaker's name in an aria-only slot because
+     you can see who is in front of you. Every verb below returned its `msg`
+     into it, and most of those messages were the game talking about itself:
+     "Lifted a Cell Key + 7 clean." · "Bought Shiv for 12  (heat tax)" ·
+     "Bribe costs 10 ." · "blushes (34/100)". A number in a speech bubble is
+     the fourth wall with a mouth drawn on it.
+
+     THE CONVENTION, applied to every line this file emits:
+       · the LINE is only ever words a character speaks. No name prefix (the
+         speaker slot has it), no quotation marks (the surface IS the quote),
+         no state read out as digits.
+       · a RESULT that is not speech does not become a line at all. It becomes
+         the thing that already happens: the pickup feed row, the sfx, the
+         heat, the hand you can see move. A successful lift says NOTHING —
+         that is the entire point of a successful lift.
+       · prices stay numeric where a price belongs (the button label, the
+         status chip), and a person may SAY a number the way people do
+         ("Ten smokes, and I never saw you") — that is speech, not a readout.
+     ========================================================================== */
+  function pick(list) { return (list && list.length) ? list[Math.floor(rng() * list.length)] : ""; }
+  const VOICE = {
+    // a screw standing a count is doing arithmetic with his eyes
+    guardBusy: ["Not during the count. Move.",
+                "I'm counting bodies. Yours is one of them.",
+                "Stand on your number and shut up."],
+    wardenBusy: ["The count is running. Whatever it is, it waits.",
+                 "Not while my officers are counting."],
+    guardShort: ["That's not enough and you know it.",
+                 "Come back when your hand's fuller.",
+                 "You're short. I'm not."],
+    guardClean: ["Try that again and you'll be doing it in the hole.",
+                 "I don't take anything off inmates. Walk on.",
+                 "Wrong officer, wrong day."],
+    guardPaid: ["I'm looking at the wall for the next while.",
+                "Never saw you. Keep it that way.",
+                "Two minutes of blind. Use them."],
+    wardenPaid: ["I have paperwork to be very absorbed in.",
+                 "My office is closed to what you do next."],
+    guardCaught: ["Hand. Out. Of my belt.",
+                  "You just bought yourself a shakedown.",
+                  "Radio's already in my hand, boy."],
+    // he is on your payroll — that changes what happens, not just what he says
+    guardCaughtBought: ["I'm paid to look away, not to be robbed. Don't.",
+                        "That belt is where our arrangement ends.",
+                        "I'll forget the hand. Not twice."],
+    inmateCaught: ["Get off me.", "Try that again, see what happens.",
+                   "You're going in my pocket next, is that it?",
+                   "Hands. Now."],
+    inmateCaughtNight: ["Quiet — screws are on the tier. And get off me.",
+                        "You want the whole wing awake? Off."],
+    inmateSour: ["I've got nothing to say to you.",
+                 "Walk. Before I make it a thing."],
+    inmateWarm: ["Anything you need, you ask.",
+                 "You've been straight with me. That counts.",
+                 "You're alright. Most in here aren't."],
+    // night in a cellblock is a whisper, and whispers are where the truth is
+    nightTalk: ["Keep it down. Sound carries on the tier at night.",
+                "Nights are the only hours in here that belong to us.",
+                "Lights out is when you learn who's really awake.",
+                "Screws hate the dark as much as we do. Remember that."],
+    yardTalk: ["Yard's the only market in here. Everything moves out here.",
+               "You want business done, you do it in daylight, in the open.",
+               "Nobody looks twice at two men talking in a yard."],
+    noStock: ["Nothing on me worth your smokes.",
+              "Sold out. Come back when the yard's open."],
+    notNow: ["Not now. Wrong hour for it.",
+             "Ask me at yard time like a normal person."],
+  };
+
+  /* SHOW THE HAND — the missing physical half of a pickpocket.
+     entities/character.js now carries a `reach` layer on the SHARED rig
+     (CBZ.charReach); this is the escape-gated call site the layer's comment
+     asks for. The city has its own frisk verb (city/take.js) with its own
+     staging, so it is not armed from here. Degrades to nothing if the rig or
+     the layer is absent. */
+  function showReach(ch, opts) {
+    if (!ch || CBZ.game.mode !== "escape" || !CBZ.charReach) return 0;
+    return CBZ.charReach(ch, opts || {});
+  }
+  function playerReach(actor, high) {
+    const a = actor && (actor.group && actor.group.position);
+    const P = CBZ.player;
+    let side = -1;
+    if (a && P && P.pos && CBZ.playerChar && CBZ.playerChar.group) {
+      // reach across the body or out to the side, whichever the mark is on
+      const yaw = CBZ.playerChar.group.rotation.y || 0;
+      const dx = a.x - P.pos.x, dz = a.z - P.pos.z;
+      side = (dx * Math.cos(yaw) - dz * -Math.sin(yaw)) >= 0 ? 1 : -1;
+    }
+    return showReach(CBZ.playerChar, { arm: side > 0 ? "r" : "l", side: side, high: high || 0, dur: 0.62 });
+  }
+
+  /* A KEY YOU TOOK OFF A MAN IS THE SAME KEY THAT WAS LYING ON THE DESK.
+     entities/keycard.js's world card sets g.hasKey (the door/AI truth) beside
+     the bag item; a card lifted off the officer whose POST is that door has to
+     do exactly the same or the theft is a souvenir. Same three writes, same
+     order, feature-detected so nothing here depends on the HUD existing. */
+  function grantKeyItem(name) {
+    if (name !== "Keycard") return;
+    if (g.hasKey) return;
+    g.hasKey = true;
+    if (CBZ.el && CBZ.el.keycard) CBZ.el.keycard.classList.add("have");
+    if (CBZ.setObjective) CBZ.setObjective("Keycard opens staff checkpoints. Cross the yard or scout tunnels for another way out.");
+  }
+
   // ---------- TALK: free flavour / hints ----------
+  // The hour picks the register. A block at night whispers about the night; a
+  // yard at ten in the morning talks business; a screw mid-count talks about
+  // the count. Same actor, same data.talk pool underneath — the schedule just
+  // decides whether this is an hour for their own words at all.
   function talk(actor) {
+    const guardish = actor.kind === "guard" || actor.kind === "warden";
+    if (guardish && counting()) {
+      return { ok: true, msg: pick(actor.kind === "warden" ? VOICE.wardenBusy : VOICE.guardBusy), sfx: null };
+    }
+    if (!guardish) {
+      const S = socialRead(actor);
+      if (S.standing === "enemy" || S.standing === "sour") return { ok: false, msg: pick(VOICE.inmateSour), sfx: null };
+      if (S.respect >= 62 && rng() < 0.45) return { ok: true, msg: pick(VOICE.inmateWarm), sfx: null };
+      if (afterDark() && rng() < 0.5) return { ok: true, msg: pick(VOICE.nightTalk), sfx: null };
+      if (yardTime() && rng() < 0.28) return { ok: true, msg: pick(VOICE.yardTalk), sfx: null };
+    }
     const lines = actor.data.talk || ["…"];
     const line = lines[Math.floor(rng() * lines.length)];
     return { ok: true, msg: line, sfx: null };
   }
 
+  /* THE PRICE TAG WAS THE SELLER READING HIS OWN SPREADSHEET OUT.
+     `priceTag()` still feeds the menu CHIP, which is where a price belongs.
+     What comes out of the seller's MOUTH is the reason in his own words —
+     same reasons, same order of importance, no parentheses. */
+  const WHY = {
+    "heat tax":   "Price goes up when you're this hot.",
+    "search risk": "They're turning pockets out today. That's in the price.",
+    "cash loud":  "You're rattling when you walk. Costs extra.",
+    "crew price": "Crew price. Don't go telling people.",
+    "respect cut": "You've been straight with me. So has the price.",
+    "bad blood":  "That's what it costs you. Just you.",
+    "debt tax":   "You owe. It's baked in.",
+    trust:        "For you, cheap.",
+    grudge:       "I haven't forgotten. Neither has the price.",
+    scared:       "Just — take it and go.",
+    "racket tab": "You're behind with us. Price says so.",
+    "bent trust": "You've been good for it. So am I.",
+    "bent heat":  "You're bad for my health. Pay for it.",
+  };
+  function whyLine(reasons) { return (reasons && reasons.length && WHY[reasons[0]]) || ""; }
+
   // ---------- TRADE: buy the actor's current offer for cigarettes ----------
   function trade(actor) {
+    const guardish = actor.kind === "guard" || actor.kind === "warden";
     const offer = actor.data.offer; // { item, price }
-    if (!offer) return { ok: false, msg: "Nothing to trade." };
+    if (guardish && counting()) return { ok: false, msg: pick(actor.kind === "warden" ? VOICE.wardenBusy : VOICE.guardBusy) };
+    if (!offer) return { ok: false, msg: pick(VOICE.noStock) };
     const priced = offerPrice(actor);
     const price = priced.price;
-    if (g.cigs < price) return { ok: false, msg: `Need ${price} for ${offer.item}${priceTag(priced.reasons) ? " (" + priceTag(priced.reasons) + ")" : ""}.` };
+    if (g.cigs < price) {
+      const why = whyLine(priced.reasons);
+      return { ok: false, msg: `${price}. ${why || pick(VOICE.guardShort)}` };
+    }
     addCigs(-price);
     addItem(offer.item, 1);
     g.trades++;
@@ -293,17 +604,46 @@
     // refresh their offer to something else next time, from their own stock
     actor.data.offer = pickOffer(actor.data.pool);
     CBZ.sfx("coin");
-    const why = priceTag(priced.reasons);
-    return { ok: true, msg: `Bought ${offer.item} for ${price} ${why ? " (" + why + ")" : ""}` };
+    // A HONOURED TRADE IS STANDING. Small, capped, and the reason prices soften
+    // for a regular — you become someone this person does business with.
+    addRespect(actor, 1);
+    if (actor.corrupt || guardish) addLoyalty(actor, 2);
+    // The thing you bought lands where every other thing you pick up lands.
+    // The seller SPEAKS; the transaction is shown, not narrated.
+    if (CBZ.pickupNote) CBZ.pickupNote(offer.item, { rare: isRare(offer.item) });
+    const why = whyLine(priced.reasons);
+    return { ok: true, msg: why || (yardTime() ? "Yard's open. Come back if you need more." : "That's the last one I've got on me.") };
+  }
+
+  /* A MAN YOU HAVE ALREADY PAID IS CHEAPER, AND HE STAYS CHEAPER.
+     Published because systems/interact.js prints this number on the button
+     ("Slip 10 to look away") — a price the menu computes separately from the
+     till is a price that lies the moment loyalty moves it. One function. */
+  function bribeCost(actor) {
+    if (!actor) return 10;
+    const base = actor.kind === "warden" ? 25 : (actor.corrupt ? 5 : 10); // bent screws come cheap
+    const l = loyaltyOf(actor);
+    // up to 40% off a standing arrangement; a count makes everything dearer
+    let cost = Math.round(base * (1 - Math.min(0.40, l / 250)));
+    if (counting()) cost += actor.kind === "warden" ? 8 : 4;
+    return Math.max(2, cost);
   }
 
   // ---------- BRIBE: pay cigarettes to make a guard look away ----------
   function bribe(actor) {
     if (actor.kind === "guard" || actor.kind === "warden") {
-      const cost = actor.kind === "warden" ? 25 : (actor.corrupt ? 5 : 10); // bent cops come cheap
-      if (g.cigs < cost) return { ok: false, msg: `Bribe costs ${cost} .` };
+      // THE COUNT OUTRANKS MONEY. He is standing on a number with a clipboard
+      // and a supervisor; there is no price at which he turns round right now.
+      if (counting() && !bought(actor)) return { ok: false, msg: pick(actor.kind === "warden" ? VOICE.wardenBusy : VOICE.guardBusy) };
+      const cost = bribeCost(actor);
+      if (g.cigs < cost) return { ok: false, msg: `${cost}. ${pick(VOICE.guardShort)}` };
       addCigs(-cost);
-      actor.bribed = actor.kind === "warden" ? 22 : 14; // seconds of blindness
+      // A BOUGHT MAN LOOKS AWAY LONGER. `bribed` stays what it always was —
+      // seconds of blindness — and `loyalty` is the thing that persists, so a
+      // second visit to the same officer buys more than the first did.
+      const hold = actor.kind === "warden" ? 22 : 14;
+      actor.bribed = Math.round(hold * (1 + loyaltyOf(actor) / 160));
+      addLoyalty(actor, actor.kind === "warden" ? 10 : 14);
       actor.alert = 0;
       const who = nm(actor);
       if (actor.corrupt) {
@@ -317,39 +657,51 @@
         noteRead("heat", actor.kind === "warden" ? 5 : 3, who, 11);
       }
       CBZ.sfx("coin");
-      // a generous warden bribe coughs up the gun-room key
+      // A generous warden bribe coughs up the gun-room key. The KEY lands in
+      // the pickup feed like everything else you come away holding; the warden
+      // says a warden thing. He does not narrate his own hand.
       if (actor.kind === "warden" && !hasItem("Gun-Room Key") && rng() < 0.5) {
         addItem("Gun-Room Key", 1);
-        return { ok: true, msg: "Warden looks away… and palms you a Gun-Room Key!" };
+        if (CBZ.pickupNote) CBZ.pickupNote("Gun-Room Key", { rare: true });
+        CBZ.sfx("key");
+        return { ok: true, msg: "You were never in my wing. Put that away before somebody sees it." };
       }
-      return { ok: true, msg: actor.corrupt ? `${actor.data.name} looks away. Wanted ${Math.round(g.detection || 0)}%.` : `${actor.data.name} looks the other way.` };
+      return { ok: true, msg: pick(actor.kind === "warden" ? VOICE.wardenPaid : VOICE.guardPaid) };
     }
     // inmates: a small gift earns goodwill + sometimes a free item/tip
     const cost = 3;
-    if (g.cigs < cost) return { ok: false, msg: `Gift costs ${cost} .` };
+    if (g.cigs < cost) return { ok: false, msg: `Three smokes. ${pick(VOICE.guardShort)}` };
     addCigs(-cost);
     actor.playerTrust = (actor.playerTrust || 0) + 1.2;
+    addRespect(actor, 2);            // standing, capped — a gift is not a favor
     nudgeGang(actor, 4, -2);
     if (actor.gang >= 0 && CBZ.noteGangIncident) CBZ.noteGangIncident(actor, "gift", 4, { source: "gift" });
     noteRead(actor.gang >= 0 ? "debt" : "wealth", actor.gang >= 0 ? -3 : -2, nm(actor), 10);
-    if (rng() < 0.5) { const it = SELLABLE[Math.floor(rng() * 4)]; addItem(it, 1); return { ok: true, msg: `Grateful, they slip you a ${it}.` }; }
-    return { ok: true, msg: actor.gang >= 0 ? `${actor.data.tip || "Thanks, friend."} Gang respect +4.` : (actor.data.tip || "Thanks, friend.") };
+    if (rng() < 0.5) {
+      const it = SELLABLE[Math.floor(rng() * 4)];
+      addItem(it, 1);
+      if (CBZ.pickupNote) CBZ.pickupNote(it, { rare: isRare(it) });
+      return { ok: true, msg: "Here. Don't say I never gave you anything." };
+    }
+    return { ok: true, msg: actor.data.tip || "Thanks, friend." };
   }
 
   // ---------- PAYOFF: corrupt authority can clean up heat ----------
   function payoff(actor) {
     const guardish = actor.kind === "guard" || actor.kind === "warden";
-    if (!guardish) return { ok: false, msg: "They can't fix your wanted level." };
+    if (!guardish) return { ok: false, msg: "Do I look like I write the paperwork in here?" };
+    if (counting() && !bought(actor)) return { ok: false, msg: pick(actor.kind === "warden" ? VOICE.wardenBusy : VOICE.guardBusy) };
     if (!actor.corrupt && actor.kind !== "warden") {
       if (CBZ.addHeat) CBZ.addHeat(6);
       actor.alert = Math.max(actor.alert || 0, 1.2);
-      return { ok: false, msg: `${actor.data.name} won't take a payoff.` };
+      addLoyalty(actor, -6);        // you just offered a clean screw money
+      return { ok: false, msg: pick(VOICE.guardClean) };
     }
 
     const heat = g.detection || 0;
     const complaints = g.complaints || 0;
     const cost = payoffCost(actor);
-    if (g.cigs < cost) return { ok: false, msg: `Payoff costs ${cost} .` };
+    if (g.cigs < cost) return { ok: false, msg: `${cost}. ${pick(VOICE.guardShort)}` };
 
     addCigs(-cost);
     actor.bribed = Math.max(actor.bribed || 0, actor.kind === "warden" ? 28 : 20);
@@ -377,16 +729,83 @@
       }
     }
     CBZ.sfx("coin");
-    return { ok: true, msg: g.role === "cop" ? `${actor.data.name} buries the complaint. Reports ${Math.round(g.complaints || 0)}%.` : `${actor.data.name} buries the paperwork. Wanted ${Math.round(g.detection || 0)}%.` };
+    // PAYING A MAN OFF IS THE PUREST FORM OF BUYING HIM. It is the one act in
+    // the game that makes a screw yours for the rest of the run.
+    addLoyalty(actor, actor.kind === "warden" ? 16 : 22);
+    return {
+      ok: true,
+      msg: g.role === "cop"
+        ? "The complaint goes in the wrong drawer. Nobody reads that drawer."
+        : "Your name comes off the sheet. It goes back on if you make me look stupid.",
+    };
   }
 
-  // ---------- STEAL: risky pickpocket ----------
+  /* ---------- STEAL: a hand in somebody else's pocket ----------
+     THE HALF THAT WAS A LIE. The old lift spliced the best item out of the
+     mark's own loadout — a genuine transfer — and then MINTED 3-15 cigarettes
+     out of nothing beside it. A guard carrying four smokes could be robbed of
+     fifteen, twice, and still be carrying four. Both halves come off the man
+     now: cigs leave `load.cigs`, the item leaves `load.items`, and when the
+     pockets are empty your hand comes back empty. What you steal is what he
+     HAD, and a mark you have already stripped is a mark you have stripped.
+
+     Three things decide whether you get away with it, and every one is
+     something the player can see for themselves without a number:
+       THE HOUR — a screw standing a count is staring at bodies (harder);
+                  after lights-out the tier is dark (easier). CBZ.prisonSchedule.
+       THE MARK — a man who already dislikes you watches your hands; a man who
+                  trusts you, or one you have paid, does not.
+       THE KIT  — a torch that is LIT is in his fist, not in his pocket.
+     SUCCESS SAYS NOTHING. The reach, the `loot` cue and one row in the pickup
+     feed are the entire report; a line of prose about a lift you got away
+     with is the game applauding itself. Failure is the half that speaks,
+     because failure is the half where somebody talks to you. */
+  function stealOdds(actor) {
+    const guardish = actor.kind === "guard" || actor.kind === "warden";
+    let chance = guardish ? 0.4 : 0.7;               // guards are harder marks
+    if (counting()) chance *= guardish ? 0.55 : 0.82;  // eyes up, bodies counted
+    else if (afterDark()) chance *= 1.22;              // the tier is dark
+    else if (chowTime()) chance *= 1.08;               // a crowded hall is cover
+    const S = socialRead(actor);
+    if (S.standing === "friend" || S.standing === "solid") chance += 0.12;
+    else if (S.standing === "known") chance += 0.06;
+    else if (S.standing === "enemy") chance -= 0.16;
+    else if (S.standing === "sour") chance -= 0.08;
+    chance -= Math.min(0.18, (actor.playerGrudge || 0) * 0.02);
+    if (S.bought) chance += 0.08;                    // he is relaxed around you
+    if (actor.bribed > 0) chance += 0.12;            // already looking away
+    if ((actor.alert || 0) > 0.6 || (actor.hunt || 0) > 0) chance -= 0.22;
+    return Math.max(0.05, Math.min(0.95, chance));
+  }
+  // he can only lose what is in a POCKET. A lit torch is in his hand and a
+  // stripped man has nothing left — both are refusals the world can show.
+  function liftBest(actor, load) {
+    let bi = -1, bv = -1;
+    for (let i = 0; i < load.items.length; i++) {
+      const it = load.items[i];
+      if (it === "Guard Torch" && actor.flashlightOn) continue;   // it's lit, it's in his fist
+      const val = ((ITEMS[it] && ITEMS[it].value) || 1) + (/key|card/i.test(it) ? 1000 : 0); // keys are the prize
+      if (val > bv) { bv = val; bi = i; }
+    }
+    if (bi < 0) return "";
+    const lifted = load.items.splice(bi, 1)[0];
+    // GONE MEANS GONE, and the world has to be able to tell. A screw without
+    // his torch walks his side of the yard dark for the rest of the run —
+    // entities/guards.js's shouldUseFlashlight reads this flag.
+    if (lifted === "Guard Torch") { actor.flashlightLost = true; actor.flashlightOn = false; }
+    return lifted;
+  }
   function steal(actor) {
     const guardish = actor.kind === "guard" || actor.kind === "warden";
-    const chance = guardish ? 0.4 : 0.7;             // guards are harder marks
+    const load = rollLoadout(actor);
+    const chance = stealOdds(actor);
+    playerReach(actor, guardish ? 0 : 0.15);     // the hand moves either way
     if (rng() < chance) {
-      const loot = 3 + Math.floor(rng() * (guardish ? 12 : 6));
-      addCigs(loot);
+      // the grab is bounded by the ROLL and by his actual pockets
+      const grab = 3 + Math.floor(rng() * (guardish ? 12 : 6));
+      const loot = Math.max(0, Math.min(load.cigs, grab));
+      load.cigs -= loot;
+      if (loot) addCigs(loot);
       g.stealsDone = (g.stealsDone || 0) + 1;   // feeds "pull off N heists" quests
       if (actor.gang >= 0) {
         nudgeGang(actor, -8, Math.max(1, Math.floor(loot / 4)));
@@ -403,50 +822,91 @@
       // back with his keys. `loot` IS that recording (beltHandle/drop, 45 dB),
       // and it is the only physical tell a successful lift has: there is no
       // pickpocket ARM ANIMATION on the rig — see the note in the failure leg.
-      CBZ.sfx("loot");
-      // pickpocket the BEST thing they're carrying (a guard's KEY, a gold
-      // chain) — so it's worth doing even when you're already flush with cigs.
-      let lifted = "";
-      const load = rollLoadout(actor);
-      if (load.items.length) {
-        let bi = 0, bv = -1;
-        for (let i = 0; i < load.items.length; i++) {
-          const it = load.items[i];
-          const val = ((ITEMS[it] && ITEMS[it].value) || 1) + (/key/i.test(it) ? 1000 : 0); // keys are the prize
-          if (val > bv) { bv = val; bi = i; }
-        }
-        lifted = load.items.splice(bi, 1)[0]; addItem(lifted, 1);
+      // A POCKET IS NOT A TILL. `coin` is handleCoins — right for the payoff
+      // above, wrong for a hand going into a guard's belt pouch and coming
+      // back with his keys. `loot` IS that recording (beltHandle/drop, 45 dB).
+      // Beside it now: the REACH (character.js's shared layer, armed above)
+      // and one row per thing in the corner feed. Three physical tells and no
+      // sentence — because a lift you got away with is a thing nobody says.
+      const lifted = liftBest(actor, load);
+      if (lifted) { addItem(lifted, 1); grantKeyItem(lifted); }
+      if (lifted || loot) {
+        CBZ.sfx(lifted === "Keycard" || lifted === "Cell Key" || lifted === "Gun-Room Key" ? "key" : "loot");
+        announceLoot(loot, lifted ? [lifted] : []);
+      } else {
+        // his pockets were already empty. The hand came back with nothing and
+        // the feed stays blank — that IS the answer, and it is the truthful one.
+        CBZ.sfx("whoosh");
       }
-      return { ok: true, msg: lifted ? `Lifted a ${lifted}${loot ? ` + ${loot}` : ""} clean.` : `Lifted ${loot} unseen.` };
+      return { ok: true, msg: "" };
     }
-    /* A FAILED LIFT WAS COMPLETELY SILENT. You reached into a screw's pocket,
-       he caught you, 55 points of heat landed — and the only evidence any of
-       it happened was a line of text. `whoosh` is the bank's cloth-and-sleeve
-       cue (35 dB, the quietest thing in it): a hand that moved and came back
-       empty. Your own hand, so the global surface.
-       NOT DONE HERE, and it is the honest gap: there is no pickpocket ARM
-       ANIMATION anywhere on the rig — entities/character.js has punch/kick/
-       block layers and nothing between "idle" and "strike". Adding a reach is
-       a change to the SHARED character rig and belongs with the phase that
-       reworks stealing itself, not with a popup sweep. */
+    /* THE FAILED LIFT IS THE HALF THAT TALKS. `whoosh` is the bank's
+       cloth-and-sleeve cue (35 dB, the quietest thing in it): a hand that
+       moved and came back empty. The reach above already played, so what the
+       player sees is their own arm going in and a man turning round. */
     CBZ.sfx("whoosh");
     // caught in the act
     if (guardish) {
+      // A SCREW YOU HAVE BOUGHT DOES NOT PUT YOU ON THE RADIO. This is the one
+      // thing loyalty buys that is worth buying, and it is a decision he makes
+      // out loud: he warns you, the arrangement takes the hit instead of your
+      // heat, and doing it again is what spends it.
+      if (bought(actor)) {
+        addLoyalty(actor, -30);
+        actor.alert = Math.max(actor.alert || 0, 0.5);
+        addRespect(actor, -4);
+        // the head icon entities/ai.js already ships for "this person is
+        // reacting to you" — an existing world signal, not a new one.
+        if (CBZ.npcEmote) CBZ.npcEmote(actor, "!");
+        return { ok: false, msg: pick(VOICE.guardCaughtBought) };
+      }
       CBZ.reportCrime(55, { type: "steal", actorRole: g.role });
       if (actor.corrupt && CBZ.addRacketStanding) CBZ.addRacketStanding(-8);
       noteRead("heat", 14, nm(actor), 16);
       actor.bribed = 0;
-      return { ok: false, msg: "Caught red-handed! They're onto you!" };
+      addLoyalty(actor, -40);
+      addRespect(actor, -8);
+      if (CBZ.npcEmote) CBZ.npcEmote(actor, "!");
+      return { ok: false, msg: pick(VOICE.guardCaught) };
     }
     CBZ.reportCrime(16, { type: "steal", actorRole: g.role });
     actor.playerGrudge = (actor.playerGrudge || 0) + 2;
+    addRespect(actor, -6);
     if (actor.gang >= 0) nudgeGang(actor, -5, 1);
     if (actor.gang >= 0 && CBZ.noteGangIncident) CBZ.noteGangIncident(actor, "steal", 5, { source: "failed theft" });
     noteRead("snitch", 10, nm(actor), 14);
-    return { ok: false, msg: "They shove you off — eyes turn your way." };
+    if (CBZ.npcEmote) CBZ.npcEmote(actor, "!");
+    return { ok: false, msg: pick(afterDark() ? VOICE.inmateCaughtNight : VOICE.inmateCaught) };
+  }
+
+  /* RESPECT IS EARNED IN FRONT OF PEOPLE. Winning a fight raises your standing
+     with everyone who watched it — except the man on the floor and his crew,
+     who now have a different opinion entirely. Nobody is told a number; what
+     changes is what the yard says to you afterwards and what it charges you. */
+  function witnessRespect(victim, amount, range) {
+    if (!CBZ.npcs || !CBZ.player) return 0;
+    const px = CBZ.player.pos.x, pz = CBZ.player.pos.z;
+    range = range || 14;
+    let n = 0;
+    for (let i = 0; i < CBZ.npcs.length; i++) {
+      const a = CBZ.npcs[i];
+      if (!a || a === victim || a.dead || (a.ko || 0) > 0 || !a.group) continue;
+      if (victim && a.gang >= 0 && a.gang === victim.gang) continue;   // his crew saw it too
+      if (Math.hypot(a.group.position.x - px, a.group.position.z - pz) > range) continue;
+      addRespect(a, amount);
+      n++;
+    }
+    return n;
   }
 
   // ---------- ROMANCE: a relationship that can spring you out ----------
+  const LOVE_LINES = [
+    "You're alright to talk to. That's rare in here.",
+    "Come find me at yard time. I'll be around.",
+    "Careful. People notice who you stand next to.",
+    "Keep talking to me like that and I'll start expecting it.",
+    "Don't get caught looking at me like that.",
+  ];
   function romance(actor) {
     actor.love = (actor.love || 0) + 11 + rng() * 8;
     actor.playerTrust = (actor.playerTrust || 0) + 0.7;
@@ -454,27 +914,40 @@
     if (actor.gang >= 0 && CBZ.noteGangIncident) CBZ.noteGangIncident(actor, "romance", 2, { source: "rapport", silent: true });
     if (actor.love >= 100) {
       CBZ.winGame("romance", actor);
-      return { ok: true, msg: `${nm(actor)} can't stand to see you caged — busts you out!` };
+      return { ok: true, msg: "I'm not watching them take another year off you. Walk with me." };
     }
-    if (rng() < 0.22) { actor.love = Math.max(0, actor.love - 7); return { ok: false, msg: `${nm(actor)} brushes you off.` }; }
+    if (rng() < 0.22) { actor.love = Math.max(0, actor.love - 7); return { ok: false, msg: "Not today. Go on." }; }
     CBZ.sfx("coin");
-    return { ok: true, msg: `${nm(actor)} blushes (${Math.round(actor.love)}/100)` };
+    // the ladder is the LINE, never a meter: where you are shows in how they
+    // answer, and the last rung is somebody making plans with you.
+    const l = actor.love;
+    if (l >= 82) return { ok: true, msg: "If a door ever went open for you, I'd walk through it too." };
+    if (l >= 55) return { ok: true, msg: "I look for you out here now. That's your fault." };
+    if (l >= 30) return { ok: true, msg: pick(LOVE_LINES) };
+    return { ok: true, msg: pick(LOVE_LINES) };
   }
 
   // ---------- INSULT: lower rep, maybe start a fight / a hunt ----------
+  const INSULT_BACK = ["Say it again. Slower.", "That's twice. There isn't a third.",
+                       "You just made this personal.", "Alright. Alright."];
+  const INSULT_TAKEN = ["Keep talking. See where it gets you.",
+                        "I'll remember that one.",
+                        "You're going to want a friend in here. It won't be me.",
+                        "Big words from a man with no cell key."];
   function insult(actor) {
     actor.rep = Math.max(-50, (actor.rep || 0) - 15);
     actor.love = Math.max(0, (actor.love || 0) - 12);
     actor.playerGrudge = (actor.playerGrudge || 0) + 1.2;
+    addLoyalty(actor, -12);          // you do not insult a man you are paying
     if (actor.gang >= 0) nudgeGang(actor, -4, 1);
     if (actor.gang >= 0 && CBZ.noteGangIncident) CBZ.noteGangIncident(actor, "insult", 4, { source: "insult" });
     noteRead("fear", 3, nm(actor), 11);
     if (rng() < 0.5) {
       if (actor.kind === "guard" || actor.kind === "warden") { actor.hunt = 3; CBZ.addHeat(25); }
       else if (CBZ.provokeGang) CBZ.provokeGang(actor, 10);
-      return { ok: false, msg: `${nm(actor)} squares up — you've made an enemy!` };
+      return { ok: false, msg: pick(INSULT_BACK) };
     }
-    return { ok: true, msg: `${nm(actor)} scowls at you. (rep ${actor.rep})` };
+    return { ok: true, msg: pick(INSULT_TAKEN) };
   }
 
   // ---------- BEAT UP / FIGHT: knock an actor out (drives most quests) ----------
@@ -485,7 +958,9 @@
     // throwing hands has consequences either way: guards hunt, gangs retaliate
     if (guardish) actor.hunt = 3;
     else if (CBZ.provokeGang) CBZ.provokeGang(actor, 12);
-    const armed = hasItem("Shiv");
+    // a lifted BATON is a real weapon in a fist-fight — the point of taking
+    // one off a screw is that you are now the one holding it.
+    const armed = hasItem("Shiv") || hasItem("Baton");
     let chance = guardish ? 0.45 : 0.8;
     if (armed) chance += 0.2;                   // a shiv makes you scary
     if (actor.bribed > 0) chance += 0.15;       // already off-guard
@@ -502,10 +977,19 @@
       if (actor.gang >= 0 && CBZ.noteGangIncident) CBZ.noteGangIncident(actor, "ko", 9, { source: "beatdown" });
       if (guardish && actor.corrupt) g.racketDebt = Math.max(0, Math.min(80, (g.racketDebt || 0) + 4));
       if (guardish && rng() < 0.5 && !hasItem("Gun-Room Key") && actor.kind === "warden") addItem("Gun-Room Key", 1);
-      // a downed mark often drops loot
-      if (rng() < 0.6) addCigs(2 + Math.floor(rng() * 6));
+      // A DOWNED MARK DROPS WHAT HE HAD, not what the die felt like minting.
+      // Same odds, same magnitude, taken off HIS pile — so beating the same
+      // man twice does not print money, and a poor man is a poor score.
+      if (rng() < 0.6) {
+        const load = rollLoadout(actor);
+        const spill = Math.max(0, Math.min(load.cigs, 2 + Math.floor(rng() * 6)));
+        if (spill) { load.cigs -= spill; addCigs(spill); announceLoot(spill, []); }
+      }
+      // the yard saw it. Standing goes up with everyone but his crew.
+      addLoyalty(actor, -25);
+      witnessRespect(actor, guardish ? 3 : 2, 14);
       if (CBZ.knockback) CBZ.knockback(actor, CBZ.player.pos.x, CBZ.player.pos.z, 0.9);
-      return { ok: true, msg: `You laid out ${actor.data.name}!`, beat: actor.data.name };
+      return { ok: true, msg: "", beat: actor.data.name };
     }
     // whiffed it
     CBZ.reportCrime(guardish ? 40 : 14, { type: "melee", actorRole: g.role });
@@ -513,7 +997,7 @@
     if (actor.gang >= 0) nudgeGang(actor, -4, 1);
     if (actor.gang >= 0 && CBZ.noteGangIncident) CBZ.noteGangIncident(actor, "attack", 4, { source: "swing" });
     actor.alert = guardish ? 2.5 : 0;
-    return { ok: false, msg: `${actor.data.name} fights back — bad idea!` };
+    return { ok: false, msg: pick(INSULT_BACK) };
   }
 
   // ---------- ambient: thief inmates lift cigs off you when close ----------
@@ -536,31 +1020,71 @@
     if (covered && rng() < 0.62) return null;
     const taken = Math.min(g.cigs, Math.max(1, (covered ? 1 : 2) + Math.floor(rng() * (covered ? 2 : 4))));
     addCigs(-taken);
-    actor._loot = (actor._loot || 0) + taken;   // they'll "sell it all for cigs" later (flavour)
+    // WHAT HE TOOK IS NOW ON HIM. It used to become `_loot`, a flavour tally
+    // nobody could ever get back; it is his pocket money now, so the man who
+    // robbed you is worth robbing — which is the only satisfying answer to
+    // being pickpocketed in a prison.
+    const load = rollLoadout(actor);
+    load.cigs += taken;
+    actor._loot = (actor._loot || 0) + taken;
     actor.playerGrudge = (actor.playerGrudge || 0) + 0.7;
     noteRead("wealth", Math.min(8, 2 + taken * 1.4), nm(actor), 10);
-    CBZ.sfx("jump");
-    return `A thief swiped ${taken} from your pocket!`;
+    // SHOW THE HAND — the same reach layer the player's lift plays, on him.
+    // You see an arm come out of your pocket; the counter drops; the sleeve
+    // cue sells it. There is nothing left for a caption to add.
+    showReach(actor.char, { arm: rng() < 0.5 ? "l" : "r", side: -1, high: 0.1, dur: 0.55 });
+    CBZ.sfx("whoosh");
+    return "";
   }
 
-  // ---------- LOADOUTS: what each actor is realistically carrying ----------
-  // Generated once per actor and remembered, so a dealer always has product,
-  // a fighter has a shank, the warden is loaded — and you loot exactly that.
+  /* ---------- LOADOUTS: what each actor is realistically carrying ----------
+     Generated once per actor and remembered, so a dealer always has product, a
+     fighter has a shank, the warden is loaded — and you loot exactly that.
+
+     WHAT THIS PHASE ADDED, and why it is not a bigger loot table. A guard's
+     pockets were a lucky dip: sixty percent of a handcuff key, a third of a
+     cash roll, and nothing that had anything to do with being a prison
+     officer. So the answer to "what did I just take off that man" was always
+     a valuables list, never HIS KIT. Every screw now carries the three things
+     every screw carries — a BATON, a TORCH and smokes — and the keys he
+     carries are the keys HIS POST needs (guardPost above: the wing and the
+     gate hold a KEYCARD; only the warden holds the gun room). That is the
+     whole of it: the table did not get longer, it got true.
+
+     PHASE 5 READS THIS. Security tiers want guard seniority and keycard tiers;
+     `guardPost()` already answers both for every guard in the game, and the
+     rank→key rows below are the one place a new tier adds a row.
+
+     CITY SAFETY. city/take.js frisks city peds through econ.lootActor →
+     rollDrops → here. City cops are kind "cop" and city peds have no `kind`,
+     so the guard branch and the `inmate` gate below cannot fire on them: a
+     city frisk rolls exactly what it rolled before this phase. */
+  function jailInmate(a) { return !!a && a.kind === "inmate"; }
   function rollLoadout(actor) {
     if (actor.loadout) return actor.loadout;
     const items = [];
     const role = actor.role;
     const guardish = actor.kind === "guard" || actor.kind === "warden";
     const fight = (actor.ratings && actor.ratings.fighting) || 40;
+    const P = actor.personality || {};
     let cigs = 1 + Math.floor(rng() * 5);
     const add = (n) => items.push(n);
     const maybe = (n, p) => { if (rng() < p) add(n); };
 
     if (guardish) {
-      cigs += 4 + Math.floor(rng() * 9);
+      const rank = guardPost(actor).rank;
+      cigs += 5 + Math.floor(rng() * 10);
+      // THE KIT EVERY OFFICER WEARS. Not rolled — worn. The torch is why a
+      // stolen torch leaves a dark patrol; the baton is why a stolen baton
+      // arms you; the lighter and the smokes are why a screw is worth a lift
+      // even when he is holding no keys at all.
+      add("Baton"); add("Guard Torch"); maybe("Lighter", 0.7);
       maybe("Handcuff Key", 0.6); maybe("Cash Roll", 0.35); maybe("Burner Phone", 0.3); maybe("Painkillers", 0.3);
       maybe("Cell Key", 0.4);     // the wing keys ride on a screw's belt — steal the belt
-      if (actor.corrupt) { maybe("Cash Roll", 0.6); maybe("Burner SIM", 0.4); maybe("Gold Tooth", 0.2); }
+      // KEYS BY POST. The man whose whole job is the door is the man with the
+      // card for it, so the yard door has a second answer that is a PERSON.
+      if (rank >= 2) maybe("Keycard", actor.post === "gate" || actor.post === "wing" ? 0.75 : 0.6);
+      if (actor.corrupt) { maybe("Cash Roll", 0.6); maybe("Burner SIM", 0.4); maybe("Gold Tooth", 0.2); maybe("Cigarette Carton", 0.45); }
       // Guns are a CITY thing now — the jail is mostly shivs and fists. The
       // warden still rarely carries one, but firearms moved out to the streets.
       if (actor.kind === "warden") { cigs += 22; maybe("Gun-Room Key", 0.7); maybe("Luxury Watch", 0.5); maybe("Gold Chain", 0.35); maybe("Gun", 0.05); }
@@ -580,6 +1104,28 @@
       else if (fight > 50) maybe("Shiv", 0.3);
       maybe("Pruno Hooch", 0.3); maybe("Cigarette Carton", 0.2); maybe("Tattoo Gun", 0.15);
       maybe("Bedsheet Rope", 0.2); maybe("Lighter", 0.3); maybe("Soap", 0.2); maybe("Contraband Map", 0.1);
+      /* CONTRABAND BY CHARACTER, not by coin flip. entities/npc.js has spent
+         the whole game authoring personalities (greed / nerve / loyalty /
+         snitch) and behaviors ("predator", "opportunist", "pacifist") that
+         NOTHING in the economy ever read — so a pacifist chaplain and a yard
+         predator carried statistically identical pockets. A man's pockets are
+         a character sheet; these four lines make them one. Gated to prison
+         inmates so a city frisk is untouched. */
+      if (jailInmate(actor)) {
+        const greed = P.greed == null ? 0.5 : P.greed;
+        const nerve = P.nerve == null ? 0.5 : P.nerve;
+        const loyal = P.loyalty == null ? 0.5 : P.loyalty;
+        const rat = P.snitch == null ? 0.5 : P.snitch;
+        const b = actor.behavior || "";
+        cigs += Math.floor(greed * 6);                                   // a greedy man hoards
+        if (nerve > 0.62 || b === "predator" || b === "bully") { maybe("Shiv", 0.55); maybe("Brass Knuckles", 0.3); }
+        if (greed > 0.6 || b === "opportunist") { maybe("Stolen Wallet", 0.45); maybe("Cash Roll", 0.22); }
+        if (rat > 0.6) maybe("Burner SIM", 0.35);                        // somebody he calls
+        if (loyal > 0.7 || b === "protector") maybe("Cigarette Carton", 0.3); // he carries for the crew
+        if (b === "pacifist") { maybe("Soap", 0.5); maybe("Energy Bar", 0.35); }
+        if ((actor.ratings && actor.ratings.cunning) > 70) maybe("Lockpick", 0.3);
+        if ((actor.ratings && actor.ratings.stealth) > 65) maybe("Contraband Map", 0.28);
+      }
     }
     if (actor.gang >= 0) { cigs += 2 + Math.floor(rng() * 6); maybe("Shiv", 0.4); maybe("Cash Roll", 0.25); maybe("Burner SIM", 0.2); }
     // a rare jackpot on anyone
@@ -588,6 +1134,41 @@
     actor.loadout = { cigs, items };
     return actor.loadout;
   }
+
+  /* A POCKET THAT ONLY EXISTS ONCE SOMEBODY REACHES INTO IT IS NOT A POCKET.
+     rollLoadout has always been LAZY — minted on first frisk and cached — which
+     is invisible to the player but wrong for everything that wants to ASK what
+     a person is carrying without taking it: a guard who has lost his torch
+     patrols dark (entities/guards.js reads `flashlightLost`), a phase that
+     wants to know which officer holds a card, a probe that wants to count the
+     prison's money. So every body in the jail gets its real pockets on the
+     first tick after the cast is built, once, and the lazy path stays as the
+     fallback for anyone spawned later (crowd rigs bring their own).
+     Escape only: city peds are city/take.js's business and stay lazy. */
+  let _minted = 0;
+  function mintLoadouts() {
+    const lists = [CBZ.guards, CBZ.npcs];
+    let n = 0;
+    for (let q = 0; q < lists.length; q++) {
+      const arr = lists[q]; if (!arr) continue;
+      for (let i = 0; i < arr.length; i++) {
+        const a = arr[i];
+        if (!a || a._crowd || a.loadout) continue;
+        rollLoadout(a);
+        if (a.kind === "guard" || a.kind === "warden") guardPost(a);   // stamp post+rank
+        n++;
+      }
+    }
+    _minted = n;
+    return n;
+  }
+  let _mintPending = true;
+  CBZ.onUpdate(44.5, function () {
+    if (!_mintPending || g.mode !== "escape") return;
+    if (!CBZ.guards || !CBZ.npcs || !CBZ.npcs.length) return;   // cast not built yet
+    _mintPending = false;
+    mintLoadouts();
+  });
 
   /* ------------------------------------------------------------------
      THE ONE DROP ROLL.
@@ -702,9 +1283,17 @@
         // real one with a generic re-roll.
         if (a._crowd) { n++; continue; }
         a.loadout = null; a.looted = false; n++;
+        // AND THE SOCIAL LEDGER GOES WITH THE POCKETS. Loyalty is the one
+        // thing in this file that is deliberately permanent WITHIN a run — a
+        // bought screw stays bought — so the new run is the only place it can
+        // possibly be cleared. `flashlightLost` is the same shape: a stolen
+        // torch is gone until the man is issued a new one, which is a restart.
+        a.loyalty = 0; a.flashlightLost = false; a._friendGift = 0;
       }
     }
     _deathFrisks = 0; _koFrisks = 0; _pickpockets = 0; _rolls = 0;
+    // re-arm the cast-time mint so the fresh run has real pockets from frame one
+    _mintPending = true;
     return n;
   }
 
@@ -755,5 +1344,39 @@
     };
   }
 
-  CBZ.econ = { talk, trade, bribe, payoff, steal, beat, romance, insult, thiefTick, addCigs, addItem, hasItem, takeItem, itemStore, pickOffer, offerPrice, offerLine, payoffCost, rollLoadout, rollDrops, lootActor, resetLoadouts, lootAudit, announceLoot, isRare, ITEMS, SELLABLE, DRUGS, VALUABLES, rng, reseed };
+  /* CBZ.socialAudit() — the phase's own diagnostics, and one number that is
+     meant to stay at zero: `unminted` counts bodies in the jail whose pockets
+     are still a promise instead of a fact. If it climbs, somebody is spawning
+     actors after the cast-time mint without going through rollLoadout. */
+  CBZ.socialAudit = function () {
+    const lists = [CBZ.guards, CBZ.npcs];
+    let unminted = 0, bodies = 0, cigsHeld = 0, keysHeld = 0, torches = 0, loyal = 0, bought_ = 0;
+    for (let q = 0; q < lists.length; q++) {
+      const arr = lists[q]; if (!arr) continue;
+      for (let i = 0; i < arr.length; i++) {
+        const a = arr[i]; if (!a) continue;
+        bodies++;
+        if (!a.loadout) { if (!a._crowd) unminted++; continue; }
+        cigsHeld += a.loadout.cigs | 0;
+        for (let k = 0; k < a.loadout.items.length; k++) {
+          const it = a.loadout.items[k];
+          if (/key|card/i.test(it)) keysHeld++;
+          if (it === "Guard Torch") torches++;
+        }
+        if (loyaltyOf(a) > 0) loyal++;
+        if (bought(a)) bought_++;
+      }
+    }
+    return {
+      bodies, unminted, minted: _minted, cigsHeld, keysHeld, torches,
+      loyal, bought: bought_, respectCeil: RESPECT_CEIL,
+      block: blockId(), counting: counting(), night: afterDark(),
+      groundCigs: (CBZ.coins || []).length,
+    };
+  };
+
+  CBZ.econ = { talk, trade, bribe, payoff, steal, beat, romance, insult, thiefTick, addCigs, addItem, hasItem, takeItem, itemStore, pickOffer, offerPrice, offerLine, payoffCost, bribeCost, rollLoadout, rollDrops, lootActor, resetLoadouts, mintLoadouts, lootAudit, announceLoot, isRare, ITEMS, SELLABLE, DRUGS, VALUABLES, rng, reseed,
+    // the social layer — read these, never re-derive them
+    socialRead, respectOf, loyaltyOf, addRespect, addLoyalty, guardPost, stealOdds, witnessRespect, voice: VOICE, pickLine: pick };
+  CBZ.socialRead = socialRead;     // the one accessor other systems adopt
 })();

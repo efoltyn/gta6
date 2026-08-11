@@ -279,7 +279,10 @@
       CBZ.addHeat && CBZ.addHeat(a.kind === "racketOffer" ? (reason === "refuse" ? 18 : 11) : (reason === "refuse" ? 14 : 8));
       nudgeCleanGuard(g);
     }
-    if (near && CBZ.flashHint) CBZ.flashHint(`${nameOf(g)} stops being friendly.`, 1.7);
+    // He is a man ending a conversation, so he ends it out loud. prisonSay is
+    // the prison's ONE mouth (systems/interact.js) and it puts the name in the
+    // speaker slot instead of stapling it to the front of the sentence.
+    if (near && CBZ.prisonSay) CBZ.prisonSay(g, "We're done talking.", { rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
   }
 
   function considerPayoffApproach(g, dt) {
@@ -423,19 +426,23 @@
 
   function resolveGuardApproach(g, action) {
     const a = g && g.approach;
-    if (!a) return { ok: false, msg: "They have no offer right now." };
+    if (!a) return { ok: false, msg: "Nothing doing. Not right now." };
     if (action === "listen") {
+      // NO NAME, NO COLON. These four were the last of the `Name: line` shape
+      // in the prison: .pi-subtitle (systems/interact.js) carries the speaker
+      // in its own element and shows only the words, so a name stapled to the
+      // front is the same man introduced twice.
       return { ok: true, msg: a.kind === "witnessBlackmail"
-        ? `${nameOf(g)}: ${a.source || "Somebody"} gave me a trail. Pay and it never reaches the log.`
+        ? `${a.source || "Somebody"} gave me a trail. Pay and it never reaches the log.`
         : a.kind === "racketOffer"
-        ? `${nameOf(g)}: pay the cut and your contraband stays invisible.`
+        ? "Pay the cut and your contraband stays invisible."
         : a.kind === "snitchIntel"
-        ? `${nameOf(g)}: pay and I point you at the mouth feeding the log. Handle them yourself.`
-        : `${nameOf(g)}: ${a.cost} cigs and the paperwork gets lost.` };
+        ? "Pay, and I point you at the mouth feeding the log. What you do about it is yours."
+        : `${a.cost}, and the paperwork gets lost.` };
     }
     if (action === "pay") {
       if (a.kind === "snitchIntel") {
-        if ((CBZ.game.cigs || 0) < a.cost) return { ok: false, msg: `Need ${a.cost} cigs.` };
+        if ((CBZ.game.cigs || 0) < a.cost) return { ok: false, msg: `${a.cost}. Come back with it or don't come back.` };
         CBZ.econ.addCigs(-a.cost);
         const snitch = (a.snitch && !a.snitch.dead && !a.snitch.escaped) ? a.snitch : findSnitchLead();
         g.bribed = Math.max(g.bribed || 0, 14);
@@ -463,16 +470,16 @@
           addRacketStanding(1);
           CBZ.sfx && CBZ.sfx("coin");
           clearGuardApproach(g);
-          return { ok: true, msg: `${nameOf(g)} names ${nameOf(snitch)}. They are marked until you deal with them.` };
+          return { ok: true, msg: `It was ${nameOf(snitch)}. Do what you like with that — I never said it.` };
         }
         if (CBZ.addHeat) CBZ.addHeat(-3);
         addRacketStanding(1);
         CBZ.sfx && CBZ.sfx("coin");
         clearGuardApproach(g);
-        return { ok: true, msg: `${nameOf(g)} takes the cigs, but the trail has gone cold.` };
+        return { ok: true, msg: "Trail's cold. I'll keep the smokes for the trouble." };
       }
       if (a.kind === "witnessBlackmail") {
-        if ((CBZ.game.cigs || 0) < a.cost) return { ok: false, msg: `Need ${a.cost} cigs.` };
+        if ((CBZ.game.cigs || 0) < a.cost) return { ok: false, msg: `${a.cost}. Come back with it or don't come back.` };
         CBZ.econ.addCigs(-a.cost);
         g.bribed = Math.max(g.bribed || 0, 22);
         g.alert = 0; g.hunt = 0; g.investigate = null;
@@ -493,10 +500,10 @@
         addRacketStanding(3);
         CBZ.sfx && CBZ.sfx("coin");
         clearGuardApproach(g);
-        return { ok: true, msg: `${nameOf(g)} buries the witness report. Bent trust ${racketStanding()}.` };
+        return { ok: true, msg: "That statement never got typed up. Nobody remembers taking it." };
       }
       if (a.kind === "racketOffer") {
-        if ((CBZ.game.cigs || 0) < a.cost) return { ok: false, msg: `Need ${a.cost} cigs.` };
+        if ((CBZ.game.cigs || 0) < a.cost) return { ok: false, msg: `${a.cost}. Come back with it or don't come back.` };
         CBZ.econ.addCigs(-a.cost);
         g.bribed = Math.max(g.bribed || 0, 24);
         g.alert = 0; g.hunt = 0;
@@ -516,14 +523,14 @@
         addRacketStanding(6);
         CBZ.sfx && CBZ.sfx("coin");
         clearGuardApproach(g);
-        return { ok: true, msg: `${nameOf(g)} pockets the cut. Bent trust ${racketStanding()}, cover ${Math.ceil(CBZ.game.racketProtectionT)}s.` };
+        return { ok: true, msg: "You're under my wing for a while. Don't make me regret the arithmetic." };
       }
       const res = CBZ.econ.payoff(g);
       if (res && res.ok) { addRacketStanding(3); clearGuardApproach(g); }
       return res;
     }
     if (action === "haggle") {
-      if (a.haggled || a.cost <= 3) return { ok: false, msg: `${nameOf(g)} won't move on the price.` };
+      if (a.haggled || a.cost <= 3) return { ok: false, msg: "The price is the price." };
       a.haggled = true;
       const heat = (CBZ.game && CBZ.game.detection) || 0;
       const chance = Math.max(0.18, Math.min(0.72, (g.corrupt ? 0.45 : 0.24) - heat * 0.002 + ((CBZ.game.cigs || 0) < a.cost ? 0.12 : 0)));
@@ -531,13 +538,13 @@
         a.cost = Math.max(3, a.cost - 2 - Math.floor(CBZ.econ.rng() * 3));
         a.t = Math.max(a.t || 0, 7);
         addRacketStanding(-1);
-        return { ok: true, msg: `${nameOf(g)} mutters, "Fine. ${a.cost} cigs."` };
+        return { ok: true, msg: `Fine. ${a.cost}, and we never had this conversation.` };
       }
       a.cost += 2;
       if (a.kind === "racketOffer") CBZ.game.racketDebt = Math.min(40, (CBZ.game.racketDebt || 0) + 1);
       addRacketStanding(-2);
       if (CBZ.addHeat) CBZ.addHeat(4);
-      return { ok: false, msg: `${nameOf(g)} raises it to ${a.cost}.` };
+      return { ok: false, msg: `Now it's ${a.cost}. Haggle again and see what happens.` };
     }
     if (action === "threaten") {
       const armed = (CBZ.playerArmed && CBZ.playerArmed()) || (CBZ.econ && CBZ.econ.hasItem && CBZ.econ.hasItem("Shiv"));
@@ -569,17 +576,23 @@
       }
       if (CBZ.addHeat) CBZ.addHeat(g.corrupt ? 12 : 28);
       nudgeCleanGuard(g);
-      return { ok: false, msg: `${nameOf(g)} reaches for the radio.` };
+      return { ok: false, msg: "Wrong answer. Control, this is post one —" };
     }
     if (action === "refuse") {
       expireGuardApproach(g, "refuse");
-      return { ok: false, msg: `${nameOf(g)} smiles like that was the wrong answer.` };
+      return { ok: false, msg: "Suit yourself. I've got a long memory and a short shift." };
     }
     return { ok: false, msg: "" };
   }
 
   function shouldUseFlashlight(g) {
     if (g.dead || g.ko > 0 || g.bribed > 0) return false;
+    // GONE MEANS GONE. systems/economy.js's pickpocket takes the TORCH off the
+    // belt as a real item, and this is what that theft is worth: the officer
+    // you robbed walks his half of the yard in the dark for the rest of the
+    // run. Nothing is announced — you simply notice, later, that one beam is
+    // missing from the wire. Cleared only by resetLoadouts on a new run.
+    if (g.flashlightLost) return false;
     const dayness = CBZ.dayness == null ? 1 : CBZ.dayness;
     const sunY = CBZ.sun && CBZ.sun.position ? CBZ.sun.position.y : 80;
     const nightAmount = CBZ.nightAmount == null ? (1 - dayness) : CBZ.nightAmount;
@@ -734,7 +747,7 @@
       };
       n.approachCD = Math.min(n.approachCD || 2, 0.9 + rng() * 2.0);
       if (CBZ.npcEmote) CBZ.npcEmote(n, "?");
-      if (nearPlayer && CBZ.flashHint) CBZ.flashHint(`${who} misdirects ${nameOf(g)}.`, 1.5);
+      if (nearPlayer && CBZ.prisonSay) CBZ.prisonSay(n, "Boss — I saw him going the other way. Towards the south gate.", { rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
       return;
     }
 
@@ -787,7 +800,7 @@
       n.approachCD = Math.min(n.approachCD || 2.5, 1.0 + rng() * 2.4);
       n.playerGrudge = Math.min(14, grudge + 1);
       if (CBZ.npcEmote) CBZ.npcEmote(n, "!");
-      if (nearPlayer && CBZ.flashHint) CBZ.flashHint(`${who} points ${nameOf(g)} your way.`, 1.6);
+      if (nearPlayer && CBZ.prisonSay) CBZ.prisonSay(n, "Boss. Boss! He's right there.", { rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
       return;
     }
 
@@ -820,7 +833,13 @@
     const dx = player.pos.x - g.group.position.x, dz = player.pos.z - g.group.position.z;
     if (dx * dx + dz * dz > 26 * 26) return;   // out of earshot
     barkCD = 6;
-    if (CBZ.flashHint) CBZ.flashHint(`${nameOf(g)}: “${pool[(Math.random() * pool.length) | 0]}”`, 1.7);
+    // A bark is speech. It was rendered as `Name: "line"` inside a HUD hint —
+    // name, colon and a pair of curly quotes drawn over the world. prisonSay
+    // is the surface that already speaks for this prison; the name lives in
+    // its speaker slot and the quotes are the surface itself.
+    const line = pool[(Math.random() * pool.length) | 0];
+    if (CBZ.prisonSay) CBZ.prisonSay(g, line, { rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
+    else if (CBZ.flashHint) CBZ.flashHint(line, 1.7);
   }
 
   function noteState(g, s) {
@@ -894,7 +913,11 @@
         animChar(g.char, 0, dt);
         if (!a.greeted) {
           a.greeted = true;
-          CBZ.flashHint && CBZ.flashHint(a.msg + " Walk up to answer.", 2.1);
+          // " Walk up to answer." was an instruction bolted onto a man's dialogue.
+          // He has walked over to you and the head icon is up (systems/markers.js,
+          // proximity-gated in phase 3) — the invitation is already on screen.
+          if (CBZ.prisonSay) CBZ.prisonSay(g, a.msg, { secs: 2.6, rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
+          else if (CBZ.flashHint) CBZ.flashHint(a.msg, 2.1);
         }
       }
       updateFlashlight(g, dt);
