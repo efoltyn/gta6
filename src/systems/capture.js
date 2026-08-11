@@ -257,12 +257,16 @@
     if (!(CBZ.CONFIG && CBZ.CONFIG.JAIL_STRIKES)) return;
     if (g.mode !== "escape" || g.role === "cop") return;
     const campaign = !!(CBZ.cityCampaignActive && CBZ.cityCampaignActive());
-    /* THE TOP OF THE LADDER HAS NO FOURTH STRIKE (systems/prisontiers.js).
-       Below ULTRA-MAX a third capture ships you UP a security level; at
-       ULTRA-MAX there is nowhere left to send you, so the count is held at
-       the final-warning rung and every further capture is what a segregation
-       unit actually does with you — the door of your own cell. The regime IS
-       the punishment there, which is the whole point of having built one. */
+    /* THE LADDER MOVES ON EVERY CAPTURE (systems/prisontiers.js). OWNER:
+       "each time you get caught escaping you go to the higher level" — so
+       below ULTRA-MAX any capture ships you UP a security level, not just
+       the third; the in-tier strike squeeze now belongs to the campaign and
+       to the top of the ladder. At ULTRA-MAX there is nowhere left to send
+       you, so the count is held at the final-warning rung and every further
+       capture is what a segregation unit actually does with you — the door
+       of your own cell. The regime IS the punishment there, which is the
+       whole point of having built one. With the ladder OFF this file is the
+       legacy three-strikes-then-loss it always was. */
     const T = CBZ.prisonTier;
     const tiered = !!(T && T.enabled());
     if (tiered && T.top()) g.caughtCount = Math.min(g.caughtCount || 0, 2);
@@ -290,11 +294,11 @@
        quarter into HIGH, nothing at all into segregation. Skipping the wing
        shakedown here is what keeps the tier table's own rule TRUE rather than
        silently a half of a half. */
-    const transferring = tiered && !T.top() && strike >= 3 && !campaign;
+    const transferring = tiered && !T.top() && !campaign;
     const taken = transferring ? 0 : Math.floor((g.cigs || 0) / 2);
     if (taken > 0 && CBZ.econ && CBZ.econ.addCigs) CBZ.econ.addCigs(-taken);
 
-    if (strike >= 3 && !campaign) {
+    if (transferring || (!tiered && strike >= 3 && !campaign)) {
       // TRANSFERRED TO MAX SECURITY — the run is over. Clean up any capture
       // theatrics first so the lose screen isn't hidden under the fade.
       escortT = 0; escorted = false;
@@ -320,10 +324,13 @@
       g.detection = Math.max(g.detection, g.strikeHeatFloor);
       g.cellWatch = true;               // extra sweeps past your cell (below)
       confineT = 7;
-      tellToast(campaign && strike >= 3 ? "STRIKE — THE WARDEN KEEPS YOU" : "STRIKE 2 — FINAL WARNING");
+      tellToast(campaign && strike >= 3 ? "STRIKE — THE WARDEN KEEPS YOU"
+        : (tiered && T.top() ? "STRIKE — SEGREGATION" : "STRIKE 2 — FINAL WARNING"));
       tellHint(campaign && strike >= 3
         ? `The warden blocks your transfer${taken ? ` — but the screws take ${taken} cigs` : ""} and the block stays hot.`
-        : `${taken ? taken + " cigs confiscated. " : ""}One more capture = TRANSFER TO MAX SECURITY. Guards now sweep your block.`, 3.4);
+        : (tiered && T.top()
+          ? `${taken ? taken + " cigs confiscated. " : ""}Nowhere left to send you. The block stays hot.`
+          : `${taken ? taken + " cigs confiscated. " : ""}One more capture = TRANSFER TO MAX SECURITY. Guards now sweep your block.`), 3.4);
     } else {
       confineT = 4;
       tellToast("STRIKE 1 — SHAKEDOWN");
