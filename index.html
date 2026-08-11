@@ -577,6 +577,20 @@
 <script src="src/systems/prisonschedule.js?v=clock1"></script>
 <script src="src/systems/prisonnight.js?v=clock1"></script>
 
+<!-- FOUR SECURITY LEVELS OVER ONE COMPOUND. Getting caught escaping used to
+     end the run on a card that said TRANSFERRED and then handed you the same
+     prison back; now it transfers you — LOW -> MEDIUM -> HIGH -> ULTRA-MAX,
+     and at the top the regime itself is the punishment. World geometry is
+     parse-time, so a level is a REGIME turned over the same jail: guard posts
+     and quality, which of the nine lenses are wired, the block timetable, the
+     lights that stay on, searchlight reach, lock discipline, loadouts, steal
+     odds and how fast anybody trusts you. Every one of those lands on a
+     surface somebody else published. Tagged after prisonschedule/prisonnight
+     (it turns their tables), after entities/guards.js, entities/security.js
+     and systems/economy.js (it turns their records), and BEFORE capture.js
+     and state.js, which call CBZ.prisonTier at runtime. -->
+<script src="src/systems/prisontiers.js?v=tier1"></script>
+
 <!-- 4b. remaining systems -->
 <script src="src/systems/quests.js"></script>
 <script src="src/systems/input.js"></script>

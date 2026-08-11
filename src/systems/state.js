@@ -231,25 +231,43 @@
     const disEl = document.getElementById("slDis");
     const timeLabel = timeEl && timeEl.nextElementSibling;
     const disLabel = disEl && disEl.nextElementSibling;
+    const againBtn = document.getElementById("loseAgainBtn");
     if (jail) {
-      if (logo) logo.textContent = "TRANSFERRED";
-      if (sub) sub.textContent = reason === "transferred"
+      /* SECURITY TIERS (systems/prisontiers.js): a third capture is a
+         TRANSFER UP A LEVEL, not the end of the game, and this card is the
+         between-levels beat — a state-transition screen, which is the one
+         place words are legitimate. The tier owns the copy so the regime and
+         the sentence describing it cannot drift apart; when the ladder is
+         off (or this is a plain death) the original lines below still run. */
+      const T = CBZ.prisonTier && CBZ.prisonTier.card ? CBZ.prisonTier.card() : null;
+      if (logo) logo.textContent = T ? T.logo : "TRANSFERRED";
+      if (sub) sub.textContent = T ? T.sub : (reason === "transferred"
         ? "Strike three — shipped to max security"
-        : "The escape is over";
-      setText("slPlace", String(Math.min(3, g.caughtCount || 3)));
-      setText("slTotal", "strikes");
+        : "The escape is over");
+      setText("slPlace", T ? T.place : String(Math.min(3, g.caughtCount || 3)));
+      setText("slTotal", T ? T.total : "strikes");
       setText("slTime", CBZ.fmtTime(g.elapsed));
       if (timeLabel) timeLabel.textContent = "On the run";
-      setText("slDis", g.cigs || 0);
-      if (disLabel) disLabel.textContent = "Cigs left";
+      setText("slDis", T ? T.kept : (g.cigs || 0));
+      if (disLabel) disLabel.textContent = T ? T.keptLabel : "Cigs left";
+      // the button is part of the scene: you are not retrying, you are being
+      // walked into the next wing.
+      if (againBtn) againBtn.textContent = T ? T.button : "Try Again";
+      // WHOSE COPY IS ON THIS CARD, recorded as a fact rather than guessed at
+      // by string-matching it below. Same semantics the equality test had —
+      // "is OUR line still the one showing" — but it now covers transfer copy
+      // the tier authored, which a hard-coded pair of strings never could.
+      if (sub) sub.dataset.jailText = sub.textContent;
     } else {
+      if (againBtn) againBtn.textContent = "Try Again";
       if (logo) logo.textContent = "ELIMINATED";
       // survival owns its own .sub line (modes/survival.js finishRound writes
       // the cause/winner/record flavor BEFORE calling loseGame) — only clear
       // it if a previous JAIL loss left our transfer copy behind.
-      if (sub && (sub.textContent === "Strike three — shipped to max security" || sub.textContent === "The escape is over")) {
+      if (sub && sub.dataset.jailText && sub.textContent === sub.dataset.jailText) {
         sub.textContent = "The disasters claimed you";
       }
+      if (sub) delete sub.dataset.jailText;
       if (timeLabel) timeLabel.textContent = "Survived";
       if (disLabel) disLabel.textContent = "Disasters";
     }
@@ -281,11 +299,19 @@
       CBZ.cityEvent("jail-escape", { respect: 4, panic: 2 }, { noWanted: true });
     }
     const who = actor ? actor.data.name.replace(/^the |^a |^an /, "") : "Someone";
-    const sub = reason === "befriend" ? `${who} walked you out`
+    let sub = reason === "befriend" ? `${who} walked you out`
       : reason === "romance" ? `${who} busted you out for love`
       : reason === "nuke" ? "Tactical nuke ended the run"
       : reason === "route" ? "Through a hidden escape route"
       : "Through the gate";
+    // THE CROWN IS THE CLASSIFICATION YOU BEAT (systems/prisontiers.js).
+    // Walking off a county farm and breaking out of segregation were the same
+    // three words on this card; the tier relabels the logo and adds the wing
+    // to the reason. On LOW (or with the ladder off) it is byte-identical.
+    if (CBZ.prisonTier && CBZ.prisonTier.crown) {
+      CBZ.prisonTier.crown(screens.win);
+      sub = CBZ.prisonTier.winLine(sub);
+    }
     document.getElementById("wReason").textContent = sub;
     document.getElementById("wTime").textContent = CBZ.fmtTime(g.elapsed);
     document.getElementById("wCigs").textContent = g.cigs;

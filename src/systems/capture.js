@@ -257,6 +257,15 @@
     if (!(CBZ.CONFIG && CBZ.CONFIG.JAIL_STRIKES)) return;
     if (g.mode !== "escape" || g.role === "cop") return;
     const campaign = !!(CBZ.cityCampaignActive && CBZ.cityCampaignActive());
+    /* THE TOP OF THE LADDER HAS NO FOURTH STRIKE (systems/prisontiers.js).
+       Below ULTRA-MAX a third capture ships you UP a security level; at
+       ULTRA-MAX there is nowhere left to send you, so the count is held at
+       the final-warning rung and every further capture is what a segregation
+       unit actually does with you — the door of your own cell. The regime IS
+       the punishment there, which is the whole point of having built one. */
+    const T = CBZ.prisonTier;
+    const tiered = !!(T && T.enabled());
+    if (tiered && T.top()) g.caughtCount = Math.min(g.caughtCount || 0, 2);
     const strike = g.caughtCount || 0;
 
     // a capture closes the manhunt that led to it — the strike IS the payback
@@ -274,8 +283,15 @@
       tellHint("+" + STRIKE_TIME + "s on your sentence.", 2.2);
     }
 
-    // shakedown: the screws pocket half your cigs on every strike
-    const taken = Math.floor((g.cigs || 0) / 2);
+    /* Shakedown: the screws pocket half your cigs on every strike — EXCEPT
+       the capture that is a transfer. A man cannot be robbed twice for one
+       arrest, and the destination's reception search (systems/prisontiers.js
+       packs it as you leave) is a strictly harder one: half into MEDIUM, a
+       quarter into HIGH, nothing at all into segregation. Skipping the wing
+       shakedown here is what keeps the tier table's own rule TRUE rather than
+       silently a half of a half. */
+    const transferring = tiered && !T.top() && strike >= 3 && !campaign;
+    const taken = transferring ? 0 : Math.floor((g.cigs || 0) / 2);
     if (taken > 0 && CBZ.econ && CBZ.econ.addCigs) CBZ.econ.addCigs(-taken);
 
     if (strike >= 3 && !campaign) {
@@ -288,6 +304,12 @@
       CBZ.playerChar.group.rotation.z = 0;
       confineT = 0; confineShown = -1;
       releasePlayerCell();        // a transferred man leaves no door of ours shut
+      // TRANSFERRED, and now it means it. The tier owns the whole beat from
+      // here — it packs what survives a reception shakedown, moves you up the
+      // ladder and shows the between-levels card through CBZ.loseGame, which
+      // is the same result screen this line always ended on. It only declines
+      // when the ladder is off, and then this is the flat loss it always was.
+      if (tiered && T.transfer()) return;
       if (CBZ.loseGame) CBZ.loseGame("transferred");
       return;
     }

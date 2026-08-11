@@ -166,6 +166,20 @@
         continue;
       }
 
+      // NOT ON THIS CLASSIFICATION'S CIRCUIT (systems/prisontiers.js). Nine
+      // bodies are bolted up; how many are WIRED is what a security level
+      // means here. The prop stays exactly where it is and its lens goes
+      // dark — so counting live dots in a corridor is how you read the tier
+      // off the world instead of off a HUD line. Same paint state as a
+      // breaker cut, because it is the same fact: no power at this lens.
+      if (cam.offline) {
+        cam.active = false;
+        cam.seenT = cam.watchT = 0;
+        cam._wasSeen = false;
+        setLamp(cam, "out", 0);
+        continue;
+      }
+
       // Restore camera function if power is back
       if (!cam.active) cam.active = true;
 
@@ -199,6 +213,14 @@
       cam.body.rotation.z = 0;
     }
   });
+
+  // THE FACTORY, not just the list. systems/prisontiers.js bolts six more
+  // bodies up (yard door, gun-room door, admin corridor, office door, sally
+  // port, yard throat) so a higher classification has lenses to wire — and
+  // building them through THIS function is what keeps every pixel of every
+  // lens painted by the state machine above. A second camera builder would
+  // be a second opinion about what a dot means.
+  CBZ.makeCamera = makeCamera;
 
   CBZ.resetCameras = function () {
     for (const cam of CBZ.cameras) {

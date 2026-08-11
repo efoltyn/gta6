@@ -150,8 +150,20 @@
   function loyaltyOf(a) { return a ? Math.max(0, Math.min(100, a.loyalty || 0)) : 0; }
   // n>0 is a drip and obeys the ceiling; n<0 always lands (you can always
   // lose standing, and being disliked is not capped by anything).
+  /* THE SECURITY LEVEL PRICES THE SOCIAL GAME TOO (systems/prisontiers.js).
+     A county farm talks: word gets round, screws take a drink, and standing
+     forms fast. A segregation unit is thirty-two strangers who rotate — the
+     same favour buys a little over half as much, and a screw there stays
+     bought for about a third as long. Only the GAIN is scaled: losing
+     standing is never discounted by anybody's classification, which is the
+     same asymmetry the ceiling below already states. */
+  function tierGain(k) {
+    const T = CBZ.prisonTier;
+    return T && T.enabled() ? T.knob(k) : 1;
+  }
   function addRespect(a, n) {
     if (!a || !n) return 0;
+    if (n > 0) n *= tierGain("respectMul");
     const cur = a.rep || 0;
     if (n > 0 && cur >= RESPECT_CEIL) return cur;
     a.rep = n > 0 ? Math.min(RESPECT_CEIL, cur + n) : Math.max(-50, cur + n);
@@ -159,6 +171,7 @@
   }
   function addLoyalty(a, n) {
     if (!a || !n) return 0;
+    if (n > 0) n *= tierGain("loyaltyMul");
     a.loyalty = Math.max(0, Math.min(100, (a.loyalty || 0) + n));
     return a.loyalty;
   }
@@ -207,8 +220,19 @@
         if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
         nearExit = Math.min(nearExit, Math.hypot(p.x - ex, p.z - ez));
       }
-      const wingZ = W && W.cellBlock ? W.cellBlock.maxZ : -8;
-      const yardZ = W && W.northYard ? W.northYard.minZ : -8;
+      /* THESE TWO LINES READ FIELDS CBZ.WORLD DOES NOT HAVE (fixed phase 5).
+         config.js:117 authors every rectangle as x0/x1/z0/z1 — there is no
+         `maxZ` on cellBlock and no `minZ` on northYard, so both constants were
+         `undefined`, both comparisons below were NaN, and the `wing` and
+         `checkpoint` branches could never fire. Measured on the shipped
+         roster: ONE rank-2 post in the whole prison (the sally-port gate,
+         which is found by distance and was never affected) instead of three.
+         The wing officer standing at the head of the tier and the checkpoint
+         patrol — the two men this file's own comment calls out by name as the
+         reason "the yard door has a second answer that is a PERSON" — both
+         read as rank-1 yard screws carrying no card at all. */
+      const wingZ = W && W.cellBlock ? W.cellBlock.z1 : -8;
+      const yardZ = W && W.northYard ? W.northYard.z0 : -8;
       /* DISTANCE TO THE THING HE IS GUARDING, not a z band. A z band called
          four south-block wire patrols "the sally port" because they happened
          to walk as far down the map as the men who actually stand on it — the
@@ -775,6 +799,11 @@
     if (S.bought) chance += 0.08;                    // he is relaxed around you
     if (actor.bribed > 0) chance += 0.12;            // already looking away
     if ((actor.alert || 0) > 0.6 || (actor.hunt || 0) > 0) chance -= 0.22;
+    // THE CLASSIFICATION IS THE LAST TERM. A high-security screw is a harder
+    // mark than a farm screw in exactly the way the tier table says, and it
+    // multiplies rather than subtracts so every reason above (the hour, the
+    // mark, his kit) still counts for what it is worth.
+    chance *= tierGain("stealMul");
     return Math.max(0.05, Math.min(0.95, chance));
   }
   // he can only lose what is in a POCKET. A lit torch is in his hand and a
@@ -1080,10 +1109,18 @@
       // even when he is holding no keys at all.
       add("Baton"); add("Guard Torch"); maybe("Lighter", 0.7);
       maybe("Handcuff Key", 0.6); maybe("Cash Roll", 0.35); maybe("Burner Phone", 0.3); maybe("Painkillers", 0.3);
-      maybe("Cell Key", 0.4);     // the wing keys ride on a screw's belt — steal the belt
-      // KEYS BY POST. The man whose whole job is the door is the man with the
-      // card for it, so the yard door has a second answer that is a PERSON.
-      if (rank >= 2) maybe("Keycard", actor.post === "gate" || actor.post === "wing" ? 0.75 : 0.6);
+      /* KEYS BY POST, AND KEYS BY CLASSIFICATION (systems/prisontiers.js).
+         The man whose whole job is the door is the man with the card for it,
+         so the yard door has a second answer that is a PERSON. The tier's
+         `keyMul` is the row a new level adds, exactly as this block's header
+         promised: a higher wing runs MORE keys on MORE belts (every door is
+         carded, so every officer is issued) while `stealOdds` above makes
+         those belts far harder to reach. Richer marks, worse odds — that is
+         what a security level is supposed to cost you. */
+      const keyMul = CBZ.prisonTier && CBZ.prisonTier.enabled() ? CBZ.prisonTier.knob("keyMul") : 1;
+      const key = (p) => Math.max(0, Math.min(0.95, p * keyMul));
+      maybe("Cell Key", key(0.4));   // the wing keys ride on a screw's belt — steal the belt
+      if (rank >= 2) maybe("Keycard", key(actor.post === "gate" || actor.post === "wing" ? 0.75 : 0.6));
       if (actor.corrupt) { maybe("Cash Roll", 0.6); maybe("Burner SIM", 0.4); maybe("Gold Tooth", 0.2); maybe("Cigarette Carton", 0.45); }
       // Guns are a CITY thing now — the jail is mostly shivs and fists. The
       // warden still rarely carries one, but firearms moved out to the streets.

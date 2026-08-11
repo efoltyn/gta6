@@ -393,13 +393,17 @@
           continue;
         }
 
-        if (!cam.active) continue;
+        if (!cam.active || cam.offline) continue;
 
         // A LENS IS AN EYE. The 9 m reach is a lit-room figure; after
         // lights-out the cell-wing camera is staring into the same black the
         // guards are. Same hook the vision cone uses (systems/prisonnight.js),
         // so darkness is priced once for every sensor in the prison.
-        const camReach = 9.0 * (CBZ.sightScale ? CBZ.sightScale(cam, player.pos.x, player.pos.z) : 1);
+        // ...and the SECURITY LEVEL is the third term (systems/prisontiers.js):
+        // a county farm runs tired analogue kit that has to be walked up to,
+        // a segregation unit runs cameras that pick you up across the hall.
+        const camTier = CBZ.prisonTier ? CBZ.prisonTier.knob("camReach") : 1;
+        const camReach = 9.0 * camTier * (CBZ.sightScale ? CBZ.sightScale(cam, player.pos.x, player.pos.z) : 1);
         if (dist < camReach) {
           const yaw = cam.body.rotation.y;
           const targetAngle = Math.atan2(cdx, cdz);
@@ -420,7 +424,9 @@
              deleted popup said "CAMERA DETECTING YOU!" at the instant heat
              started — by then the only useful information was already spent. */
           if (diff < 0.32) {
-            CBZ.addHeat(dt * 38);
+            // how fast a locked lens builds the case against you is also the
+            // classification's business — same tier knob table, one lookup.
+            CBZ.addHeat(dt * 38 * (CBZ.prisonTier ? CBZ.prisonTier.knob("camHeat") : 1));
             cam.seenT = 0.3;          // re-armed every frame; security.js decays it
           } else if (diff < 0.62) {
             cam.watchT = 0.3;
