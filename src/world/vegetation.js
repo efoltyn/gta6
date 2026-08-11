@@ -19,6 +19,14 @@
   const THREE = window.THREE;
   const CFG = (CBZ.CONFIG = CBZ.CONFIG || {});
   if (CFG.SCENERY_VEGETATION == null) CFG.SCENERY_VEGETATION = true;
+  // VEG_VARIANTS — see "NO TWO TREES ARE THE SAME MESH" below. Off → every
+  // archetype has exactly one variant and every consumer gets the geometry it
+  // always got, byte for byte.
+  if (CFG.VEG_VARIANTS == null) CFG.VEG_VARIANTS = true;
+  // VEG_VARIANT_MAX — the ceiling on variants per archetype at full quality.
+  // The live count is quality-scaled through CBZ.qScale (1 at tier 0), because
+  // a variant costs one InstancedMesh per consumer that splits per instance.
+  if (CFG.VEG_VARIANT_MAX == null) CFG.VEG_VARIANT_MAX = 3;
 
   const cache = Object.create(null);
   const mats = Object.create(null);
@@ -259,13 +267,261 @@
     thicket: thicket,
   };
 
-  function geometry(kind) {
-    if (!cache[kind]) {
-      const fn = builders[kind];
-      if (!fn) throw new Error("unknown vegetation archetype: " + kind);
-      cache[kind] = fn();
+  /* ======================================================================
+     NO TWO TREES ARE THE SAME MESH — the variant set.
+
+     Until now this file published exactly ONE geometry per archetype, so
+     every mature crown in Redhollow, every canopy across the whole
+     Backcountry and every conifer on the massif was the SAME five lobes,
+     varied only by rotation and scale. That is the oldest tell of a
+     generated world and the reason a wood reads as a crop: the eye finds
+     the repeat long before it can name it.
+
+     THE SHAPE OF THE FIX IS NOT "GROW A UNIQUE TREE PER INSTANCE". This
+     renderer draws vegetation as InstancedMesh — one geometry, thousands of
+     matrices — so per-instance meshes would cost thousands of draw calls.
+     The affordable form is a small VARIANT SET: K structurally different
+     crowns per archetype, dealt out by a POSITION hash, so a stand is a mix
+     and a consumer pays K draw calls instead of one. K is quality-scaled and
+     is 1 at tier 0, where the whole question is invisible anyway.
+
+     THE GRAMMAR. A crown is a core lobe over the trunk axis plus arms placed
+     on a golden-angle spiral, their length set by a CROWN ENVELOPE (the
+     radius profile of the species read as a function of height) and skewed
+     by a per-variant LIGHT-COMPETITION bias, so one flank carries the long
+     arms exactly as a real tree that grew beside a gap does. Same idea the
+     branching grammar in treeaudit.js uses one level down.
+
+     TWO INVARIANTS, both load-bearing, both enforced by normalise():
+       1. EVERY VARIANT SHARES VARIANT 0's BOUNDING BOX. Consumers scale a
+          crown by (folR, folH, folR) and seat it at folY; the tree CONNECTION
+          LAW (TREES_V2, world/treeaudit.js) then proves the canopy AABB
+          overlaps the trunk's. A variant that were taller or wider would
+          silently break both. So each variant is scaled to the archetype's
+          nominal height and radius after growth.
+       2. EVERY VARIANT COVERS ITS OWN AXIS. The core lobe is centred on
+          (0, ·, 0) with a radius of at least ~0.2 R, which is far wider than
+          any trunk this kit publishes — a crown can never end up hovering
+          beside its own bole.
+     Variant 0 is the hand-authored arrangement each archetype already
+     shipped, untouched, so flag-off and tier-0 are the old world exactly.
+
+     TRUNKS ARE DELIBERATELY NOT VARIED. `mature-wood` / `landscape-wood`
+     size the BIOME_SOLID_TRUNKS collider from the geometry's own base radius
+     (CBZ.treeGeoBounds), so a per-variant bole would need a per-variant
+     collider radius threaded through four biome owners. A crown is where the
+     silhouette lives; the bole is a cylinder at every distance that matters.
+  ====================================================================== */
+
+  // Which archetypes can be grown, and the nominal box every variant of them
+  // must land in. `shape` picks the envelope; `n` is the base arm count.
+  const VARIABLE = {
+    "mature-crown":    { r: 9.3,  h: 12.8, n: 5, shape: "dome",      floor: 0.40, pow: 0.62, salt: 0x1a3 },
+    "landscape-crown": { r: 8.1,  h: 11.4, n: 3, shape: "dome",      floor: 0.39, pow: 0.64, salt: 0x1a7 },
+    subcanopy:         { r: 4.8,  h: 5.9,  n: 3, shape: "ellipsoid", floor: 0.36, pow: 0.68, salt: 0x1ab },
+    "canopy-patch":    { r: 7.8,  h: 5.6,  n: 4, shape: "flat",      floor: 0.31, pow: 0.58, salt: 0x1af },
+    thicket:           { r: 4.0,  h: 4.3,  n: 4, shape: "irregular", floor: 0.28, pow: 0.75, salt: 0x1b3 },
+    krummholz:         { r: 2.15, h: 1.24, n: 3, shape: "flat",      floor: 0.30, pow: 0.80, salt: 0x1b7 },
+    // the spire is grown through the ONE TREE GRAMMAR instead of lobes — see
+    // spireVariant() — but it is variable all the same.
+    "conifer-spire":   { spire: true, r: 3.15, h: 23, salt: 0x1bb },
+  };
+
+  // Deterministic per-variant stream. Never Math.random: a variant set that
+  // differed between two clients would desync nothing but would make every
+  // screenshot comparison a lie.
+  function vrng(seed) {
+    let s = (seed | 0) >>> 0;
+    return function () {
+      s = (s + 0x6d2b79f5) | 0;
+      let t = Math.imul(s ^ (s >>> 15), 1 | s);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  // CROWN ENVELOPE — radius as a fraction of the crown's widest, at height
+  // fraction t (0 = crown base, 1 = crown top). The floor on each keeps the
+  // profile from pinching to nothing at the top, where a lobe still has to be
+  // wide enough to read.
+  function envelope(shape, t) {
+    if (t < 0) t = 0; else if (t > 1) t = 1;
+    switch (shape) {
+      case "cone":      return 0.20 + 0.80 * Math.pow(1 - t, 0.9);
+      case "ellipsoid": return Math.max(0.30, Math.sin(Math.PI * (0.10 + 0.86 * t)));
+      case "column":    return 0.62 + 0.38 * Math.sin(Math.PI * Math.min(1, t * 1.15));
+      case "flat":      return Math.max(0.34, Math.sqrt(Math.max(0, 1 - Math.pow(t, 2.6))));
+      case "irregular": return 0.34 + 0.66 * Math.abs(Math.sin(t * 9.7 + 1.3)) * (1 - t * 0.4);
+      default:          return Math.max(0.32, Math.sqrt(Math.max(0, 1 - t * t * 0.92)));  // dome
     }
-    return cache[kind];
+  }
+
+  const GOLDEN = 2.39996323;
+
+  function growCrown(spec, seed) {
+    const rnd = vrng(seed);
+    const R = spec.r, H = spec.h;
+    // arm count wobbles ±1 so variants differ in MASS, not only in placement
+    let n = spec.n + (rnd() < 0.42 ? 1 : 0) - (rnd() < 0.28 ? 1 : 0);
+    if (n < 2) n = 2;
+    // light competition: the flank facing `bias` grew into the gap
+    const bias = rnd() * Math.PI * 2;
+    const asym = 0.16 + rnd() * 0.30;
+    const parts = [];
+    // INVARIANT 2 — the core lobe stands on the axis.
+    const coreT = 0.28 + rnd() * 0.14;
+    const coreR = R * envelope(spec.shape, coreT) * (0.64 + rnd() * 0.12);
+    parts.push(lobe(0, H * coreT, 0, coreR, H * (0.32 + rnd() * 0.12), coreR * (0.90 + rnd() * 0.18)));
+    let az = rnd() * Math.PI * 2;
+    for (let i = 1; i < n; i++) {
+      az += GOLDEN + (rnd() - 0.5) * 0.9;                       // phyllotaxis
+      const t = Math.min(0.94, Math.max(0.10, 0.20 + (i / n) * 0.66 + (rnd() - 0.5) * 0.14));
+      const env = envelope(spec.shape, t);
+      const k = 1 + asym * Math.cos(az - bias);                 // the long flank
+      const lr = R * env * (0.40 + rnd() * 0.18) * k;
+      const off = Math.max(0, R * env * k - lr * 0.60);
+      parts.push(lobe(
+        Math.cos(az) * off, H * t + (rnd() - 0.5) * H * 0.07, Math.sin(az) * off,
+        lr, H * (0.24 + rnd() * 0.14), lr * (0.84 + rnd() * 0.30),
+      ));
+    }
+    return normalise(merged(parts, parts[0]), spec);
+  }
+
+  // INVARIANT 1 — seat the crown on y=0 and squeeze it into the archetype's
+  // nominal box. Uniform in x/z (an anisotropic squeeze would print an
+  // ellipse from above); y independently, because height and spread are
+  // separate silhouette facts.
+  function normalise(g, spec) {
+    g.computeBoundingBox();
+    let bb = g.boundingBox;
+    const rx = Math.max(Math.abs(bb.min.x), Math.abs(bb.max.x));
+    const rz = Math.max(Math.abs(bb.min.z), Math.abs(bb.max.z));
+    const rad = Math.max(1e-4, Math.max(rx, rz));
+    const hgt = Math.max(1e-4, bb.max.y - bb.min.y);
+    g.scale(spec.r / rad, spec.h / hgt, spec.r / rad);
+    g.computeBoundingBox(); bb = g.boundingBox;
+    g.translate(0, -bb.min.y, 0);
+    return shadeByHeight(g, spec.floor, spec.pow);
+  }
+
+  // The spire keeps its ONE TREE GRAMMAR provenance (treeCrownGeo lands the
+  // tip exactly at h with the widest radius exactly r, so INVARIANT 1 holds
+  // for free) and varies in the three numbers that actually change a
+  // conifer's outline: how many whorls, how fast it tapers, how deep each
+  // whorl bites into the one below.
+  function spireVariant(spec, seed) {
+    const rnd = vrng(seed);
+    const g = CBZ.treeCrownGeo && CBZ.treeCrownGeo({
+      tiers: 3 + Math.floor(rnd() * 3), r: spec.r, h: spec.h, seg: 5,
+      taper: 0.74 + rnd() * 0.13, hRatio: 0.88 + rnd() * 0.08, bite: 0.24 + rnd() * 0.14,
+      ao: true, aoLow: 0.42, site: "vegetation-kit",
+    });
+    if (!g) return null;
+    g.name = "cbz-conifer-spire";
+    g.userData.vegetationArchetype = "conifer-spire";
+    return g;
+  }
+
+  // ---- the public variant surface ---------------------------------------
+  const counts = Object.create(null);
+  function variantCount(kind) {
+    if (counts[kind] != null) return counts[kind];
+    let k = 1;
+    if (CFG.VEG_VARIANTS !== false && VARIABLE[kind]) {
+      const hi = Math.max(1, CFG.VEG_VARIANT_MAX | 0);
+      k = CBZ.qScale ? Math.round(CBZ.qScale(1, hi)) : hi;
+      if (k < 1) k = 1; else if (k > hi) k = hi;
+    }
+    counts[kind] = k;
+    return k;
+  }
+
+  // WHICH variant stands here. A pure position hash, so it consumes nothing
+  // from any caller's sequential rng stream (adding this call to a builder
+  // cannot re-deal a single cabin, trail or animal downstream of it) and two
+  // biomes meeting at a border agree about the tree on the seam.
+  function variantAt(x, z, kind) {
+    const k = variantCount(kind);
+    if (k <= 1) return 0;
+    const spec = VARIABLE[kind];
+    const h = CBZ.hash01 ? CBZ.hash01(x, z, (spec && spec.salt) || 0x1c1) : 0.5;
+    const v = Math.floor(h * k);
+    return v < 0 ? 0 : (v >= k ? k - 1 : v);
+  }
+
+  const usage = Object.create(null);   // site → kind → Set(variant) + count
+  function noteUse(site, kind, variant, count) {
+    if (!site) return;
+    const bySite = usage[site] || (usage[site] = Object.create(null));
+    const rec = bySite[kind] || (bySite[kind] = { used: Object.create(null), n: 0 });
+    rec.used[variant | 0] = true;
+    rec.n += count == null ? 1 : count;
+  }
+
+  function geometry(kind, variant) {
+    const v = variant == null ? 0 : (variant | 0);
+    if (v <= 0 || variantCount(kind) <= 1) {
+      if (!cache[kind]) {
+        const fn = builders[kind];
+        if (!fn) throw new Error("unknown vegetation archetype: " + kind);
+        cache[kind] = fn();
+      }
+      return cache[kind];
+    }
+    const key = kind + "#" + v;
+    if (!cache[key]) {
+      const spec = VARIABLE[kind];
+      let g = null;
+      // salt by BOTH archetype and index: two archetypes must never grow the
+      // same variant geometry under a different name.
+      const seed = (spec.salt * 2654435761 + v * 0x9e3779b1) | 0;
+      if (spec.spire) g = spireVariant(spec, seed);
+      else {
+        g = growCrown(spec, seed);
+        g.name = "cbz-" + kind + "-v" + v;
+        g.userData.vegetationArchetype = kind;
+      }
+      // A generator that could not build (no BufferGeometryUtils, no
+      // treeCrownGeo) degrades to variant 0 rather than to a hole in the wood.
+      cache[key] = g || geometry(kind, 0);
+      cache[key].userData.vegetationVariant = v;
+    }
+    return cache[key];
+  }
+
+  /* THE RATCHET. `cloned` counts SITES that drew a real stand out of a single
+     variant while the kit was offering more than one — the exact failure this
+     block exists to end, named rather than assumed. It may only go down. */
+  const CLONE_MIN = 40;
+  function variantAudit() {
+    const out = {
+      // enabled/tier are reported so a gate can tell "nobody cloned anything"
+      // apart from "the variant set was switched off" — a ratchet that cannot
+      // see the difference is satisfied by deleting the feature.
+      enabled: CFG.VEG_VARIANTS !== false,
+      tier: CBZ.qualityLevel == null ? 4 : CBZ.qualityLevel,
+      archetypes: 0, variants: 0, sites: 0, instances: 0, cloned: 0, clonedSites: [], byKind: {},
+    };
+    for (const kind in VARIABLE) {
+      out.archetypes++;
+      out.byKind[kind] = variantCount(kind);
+      out.variants += variantCount(kind);
+    }
+    for (const site in usage) {
+      out.sites++;
+      for (const kind in usage[site]) {
+        const rec = usage[site][kind];
+        out.instances += rec.n;
+        let used = 0;
+        for (const k in rec.used) if (rec.used[k]) used++;
+        if (rec.n >= CLONE_MIN && variantCount(kind) > 1 && used < 2) {
+          out.cloned++;
+          out.clonedSites.push(site + ":" + kind + " (" + rec.n + " from 1 of " + variantCount(kind) + ")");
+        }
+      }
+    }
+    return out;
   }
 
   function material(kind) {
@@ -323,6 +579,9 @@
     geometry: geometry,
     material: material,
     instanceLayer: instanceLayer,
+    variantCount: variantCount,
+    variantAt: variantAt,
+    noteUse: noteUse,
     nominal: {
       matureWoodHeight: 20,
       matureCrownBase: 13,
@@ -337,4 +596,5 @@
     },
   };
   CBZ.vegetationInstanceLayer = instanceLayer;
+  CBZ.vegetationVariantAudit = variantAudit;
 })();

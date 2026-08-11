@@ -757,6 +757,20 @@ const PASS = `(() => {
       if (fl.legacy > 0) out.fails.push("HAND-TYPED FOLIAGE COLOURS: " + fl.legacy + " " + JSON.stringify(fl.legacySites));
       if (fl.on && !fl.tinted) out.fails.push("forestLook is on and nothing adopted it");
     }
+    // NO TWO TREES ARE THE SAME MESH (world/vegetation.js). cloned counts
+    // SITES that drew a real stand out of a single crown variant while the
+    // kit was offering more than one - the cloned-tree tell, named rather
+    // than assumed. Pinned at 0. variants/instances print beside it so a
+    // "fix" that just stops asking (K forced to 1, or nobody registering)
+    // cannot pass for an adoption.
+    if (CBZ.vegetationVariantAudit) {
+      const vv = CBZ.vegetationVariantAudit();
+      out.vegVariants = "arch " + vv.archetypes + " variants " + vv.variants +
+        " sites " + vv.sites + " inst " + vv.instances + " cloned " + vv.cloned + " tier " + vv.tier;
+      if (vv.cloned > 0) out.fails.push("CLONED CROWNS: " + vv.cloned + " " + JSON.stringify(vv.clonedSites));
+      if (vv.enabled && vv.tier >= 1 && vv.variants <= vv.archetypes) out.fails.push("VEG VARIANT SET COLLAPSED: " + vv.variants + " variants for " + vv.archetypes + " archetypes at tier " + vv.tier);
+      if (!vv.instances) out.fails.push("veg variant kit is live and nothing registered a use");
+    }
     if (CBZ.backcountrySolids && CBZ.backcountrySolids.carpet) {
       const bs = CBZ.backcountrySolids;
       out.backcountry = "trees " + bs.trees + " (conifer " + bs.conifers + ")" +
@@ -1122,7 +1136,7 @@ async function runSeed(seed, label) {
   tmark(`${label}: street ${r.street || "-"} | stunts ${r.stunts || "-"}`);
   tmark(`${label}: ground ${r.ground || "-"} | backdrop ${r.backdrop || "-"} | peaks ${r.peaks || "-"} | swim ${r.swim || "-"} | waterShared ${r.waterShared || "-"}`);
   tmark(`${label}: pools ${r.pools || "-"}`);
-  tmark(`${label}: forestLook ${r.forestLook || "-"} | backcountry ${r.backcountry || "-"}`);
+  tmark(`${label}: forestLook ${r.forestLook || "-"} | backcountry ${r.backcountry || "-"} | vegVariants ${r.vegVariants || "-"}`);
   tmark(`${label}: arena ${r.arena || "-"} | frontGlass ${r.frontGlass || "-"} | elevators ${r.elevators || "-"}`);
   tmark(`${label}: map ${r.map || "-"} | crowdSpawn ${r.crowdSpawn || "-"} | platforms ${r.platforms == null ? "-" : r.platforms}`);
   tmark(`${label}: cockpit ${r.cockpit || "-"} | wounds ${r.wounds || "-"} | cabin ${r.cabin || "-"} | power ${r.power || "-"}`);

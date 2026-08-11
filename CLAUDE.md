@@ -17,6 +17,57 @@ the repo root of `main`, so **pushing to main IS the deploy** and anything in
 
 Also `GAMEPLAN.md`, `docs/plan/`, `PROCGEN.md`.
 
+## EVERY TREE WAS THE SAME TREE — `CBZ.vegetationKit` variants
+
+Owner handed over `Braffolk/fable5-world-demo` (LAAS): *"READ THIS ENTIRELY WE
+NEED MOUNTIAN AND TREE IMPROVEMENT"*. Two entries on its **banned-outcomes**
+list described this repo exactly — *cloned trees (shared mesh, varied only by
+rotation/scale)* and *distant mountains as smooth fBm humps*. None of LAAS is
+liftable (TypeScript/WebGPU/TSL against r185; we are r128 script tags); the
+DIAGNOSES are, and both were measurably true here.
+
+**53,807 TREES, NINE SHAPES.** `world/vegetation.js` published ONE geometry per
+archetype. Now K seeded variants each (LAAS's D5, in this kit's idiom): a core
+lobe over the trunk axis plus arms on a golden-angle spiral, length from a CROWN
+ENVELOPE, skewed by a per-variant **light-competition bias**. Two invariants
+make it consequence-free — every variant shares **variant 0's bounding box**
+(`folR/folH` scaling and TREES_V2's connection law both depend on it) and every
+variant **covers its own axis**. Variant 0 is the hand-authored arrangement, so
+flag-off and tier 0 are the old world byte for byte. Trunks are NOT varied:
+`BIOME_SOLID_TRUNKS` sizes its collider from the bole's own base radius.
+
+Dealt by a POSITION hash, never a draw on a caller's rng — so adoption moved not
+one cabin, trail or deer. Per-INSTANCE where you walk (`biome_forest.js`:
+2593 crowns → 1265/1328, spires 381 → 180/201, subcanopy 662 → 335/327);
+per-CHUNK where you don't (`continent.js` already builds a mesh set per 1.6 km
+chunk, so 122 chunks split 61/60 for **zero** extra draws). Ratchet
+`CBZ.vegetationVariantAudit().cloned` pinned at 0 — and the gate also fails a
+collapsed variant set or a kit nobody used, so switching it off is not a pass.
+
+**A RANGE IS BUILT ALONG A LINE — `CBZ.mtnStrikeOf`.** Every field in the
+geology kit was isotropic. Measured on Mount Mercy, mean |Δridge| over 40 m
+along vs across the summit axis: **0.077/0.074, ratio 0.96** — no grain at all.
+`mtnErode`/`mtnRidgeMF` now take `{strike, aniso}` (one rotation into the strike
+frame + a scale across it, applied ONCE so the per-octave rotation still
+decorrelates the fine detail). **Nobody types a bearing**: `mtnStrikeOf(peaks)`
+is the principal axis of the range's own summits, so moving a peak moves the
+grain. Mercy solves to 4.0°; anisotropy **0.96 → 1.387**.
+
+**SNOW RESTS ON THE MOUNTAIN, NOT ON THE BOULDERS.** The shed term read the
+RENDERED normal, which carries the 9–27 u chipped rock relief biome_snow adds:
+mean fine slope **0.265** against mean landform slope **0.218**, so a car-sized
+boulder was shedding a snowfield. `o.slopeHold` uses the same 14 m/30 m stencil
+the callers already walk for `mtnConcavity`. Plus LEDGE ACCUMULATION (a spec
+floor we had never built): `o.ledge`/`o.bedSalt` load the bench TREADS
+`mtnTerrace` already cuts, in the same bedding field the colour bands use.
+Mercy 0.210 → 0.313 mean cover; Greater Range 0.298 → 0.385.
+
+Flags `VEG_VARIANTS` · `VEG_VARIANT_MAX` · `MOUNT_RIDGE_STRIKE` ·
+`MOUNT_SNOW_LANDFORM` · `MOUNT_SNOW_LEDGES`. **NOT TAKEN AND WHY:** LAAS's
+hydraulic pipe-model erosion is structurally unavailable — our terrain must stay
+a PURE FUNCTION of (x,z) because `mtnGridCache` hands one closure to both the
+mesh loop and the physics floor oracle, and a simulation has no closed form.
+
 ## A BASE ANSWERS FOR ITSELF — `src/city/fortresponse.js`
 
 **"The soldiers there are dumb. Dumb. Dumb. … I'd see them run towards fire

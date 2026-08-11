@@ -475,32 +475,88 @@
     for (let i = 0; i < N; i++) if (trees[i].conifer) nSpire++;
     const spireGeo = (FMIX && nSpire) ? KIT.geometry("conifer-spire") : null;
     const trunkInst = new THREE.InstancedMesh(trunkGeo, trunkMat, N);
-    const foliInst = new THREE.InstancedMesh(conGeo, foliMat, Math.max(1, N - (spireGeo ? nSpire : 0)));
-    const spireInst = spireGeo ? new THREE.InstancedMesh(spireGeo, foliMat, nSpire) : null;
     const treeShadows = !SCENERY || (CBZ.qualityLevel == null ? 2 : CBZ.qualityLevel) >= 2;
-    trunkInst.castShadow = treeShadows; foliInst.castShadow = treeShadows;
-    trunkInst.receiveShadow = true; foliInst.receiveShadow = true;
+    trunkInst.castShadow = treeShadows;
+    trunkInst.receiveShadow = true;
     trunkInst.name = SCENERY ? "redhollow-mature-wood" : "redhollow-tree-trunks";
-    foliInst.name = SCENERY ? "redhollow-mature-crowns" : "redhollow-tree-foliage";
-    trunkInst.frustumCulled = foliInst.frustumCulled = false;
+    trunkInst.frustumCulled = false;
     trunkInst.userData.vegetationLayer = "mature-wood";
-    foliInst.userData.vegetationLayer = "mature-crown";
-    trunkInst.userData.sceneryScale = foliInst.userData.sceneryScale = SCENERY;
+    trunkInst.userData.sceneryScale = SCENERY;
     trunkInst.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(trunkColors), 3);
-    const foliCol = new Float32Array(foliInst.count * 3);
-    const spireCol = spireInst ? new Float32Array(nSpire * 3) : null;
-    if (spireInst) {
-      spireInst.castShadow = treeShadows; spireInst.receiveShadow = true;
-      spireInst.name = "redhollow-conifer-spires";
-      spireInst.frustumCulled = false;
-      spireInst.userData.vegetationLayer = "conifer-spire";
-      spireInst.userData.sceneryScale = SCENERY;
+
+    /* ---- ONE WOOD, MANY CROWNS ---------------------------------------
+       This stand used to draw every one of its ~2,600 crowns from a SINGLE
+       geometry — the cloned-tree tell, and the loudest thing separating a
+       generated wood from a photographed one. world/vegetation.js now grows
+       K structurally different crowns per archetype (see NO TWO TREES ARE
+       THE SAME MESH there); a pool is one InstancedMesh per variant, sized
+       to exactly the trees that chose it.
+
+       WHICH variant a tree wears is a POSITION hash, not a draw on this
+       file's sequential rng — so adopting this re-deals nothing downstream
+       (every cabin, trail, tent and deer stays where it was), and a conifer
+       on the biome's edge agrees with the backcountry conifer across the
+       seam. Every variant shares variant 0's bounding box by construction,
+       so the folR/folH/folY scaling below and TREES_V2's connection law are
+       untouched. K is 1 at quality tier 0 and whenever the kit is absent, in
+       which case a pool is exactly the single InstancedMesh this was. */
+    function crownPool(kind, baseGeo, list, nameBase, layer, mat) {
+      mat = mat || foliMat;
+      const K = (SCENERY && KIT.variantCount && baseGeo === null) ? KIT.variantCount(kind) : 1;
+      const caps = new Array(K).fill(0);
+      const vOf = K > 1
+        ? function (x, z) { return KIT.variantAt(x, z, kind); }
+        : function () { return 0; };
+      for (let i = 0; i < list.length; i++) caps[vOf(list[i].x, list[i].z)]++;
+      const meshes = [], cols = [], bbs = [], n = new Array(K).fill(0);
+      for (let v = 0; v < K; v++) {
+        // a variant nobody drew builds nothing: no geometry, no mesh, no draw
+        if (!caps[v]) { meshes.push(null); cols.push(null); bbs.push(null); continue; }
+        const g = K > 1 ? KIT.geometry(kind, v) : (baseGeo || KIT.geometry(kind));
+        const m = new THREE.InstancedMesh(g, mat, caps[v]);
+        m.name = nameBase + (K > 1 ? "-v" + v : "");
+        m.castShadow = treeShadows; m.receiveShadow = true; m.frustumCulled = false;
+        m.userData.vegetationLayer = layer || kind;
+        m.userData.sceneryScale = SCENERY;
+        m.userData.vegetationVariant = v;
+        meshes.push(m);
+        cols.push(new Float32Array(caps[v] * 3));
+        bbs.push(TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(g) : null);
+      }
+      return {
+        kind: kind, K: K, meshes: meshes,
+        // returns the geometry bounds of the mesh this instance landed in, so
+        // the caller can push the RIGHT canopy AABB into the audit chain.
+        add: function (x, z, matrix, r, g2, b) {
+          const v = vOf(x, z);
+          const i = n[v]++;
+          meshes[v].setMatrixAt(i, matrix);
+          cols[v][i * 3] = r; cols[v][i * 3 + 1] = g2; cols[v][i * 3 + 2] = b;
+          return bbs[v];
+        },
+        finish: function () {
+          for (let v = 0; v < K; v++) {
+            if (!meshes[v] || !n[v]) continue;
+            meshes[v].count = n[v];
+            meshes[v].instanceColor = new THREE.InstancedBufferAttribute(cols[v], 3);
+            meshes[v].instanceMatrix.needsUpdate = true;
+            root.add(meshes[v]);
+            if (KIT.noteUse) KIT.noteUse("forest", kind, v, n[v]);
+          }
+        },
+      };
     }
+    const broadList = [], spireList = [];
+    for (let i = 0; i < N; i++) {
+      if (trees[i].conifer && spireGeo) spireList.push(trees[i]); else broadList.push(trees[i]);
+    }
+    const foliPool = crownPool("mature-crown", SCENERY ? null : conGeo, broadList,
+      SCENERY ? "redhollow-mature-crowns" : "redhollow-tree-foliage", "mature-crown");
+    const spirePool = spireGeo
+      ? crownPool("conifer-spire", null, spireList, "redhollow-conifer-spires", "conifer-spire")
+      : null;
 
     const tbb = TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(trunkGeo) : null;
-    const fbb = TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(conGeo) : null;
-    const sbb = spireInst && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(spireGeo) : null;
-    let fi = 0, si = 0;
     for (let i = 0; i < N; i++) {
       const t = trees[i];
       // trunk (V2: base sunk V2SINK below the floor, top unchanged at t.h)
@@ -518,42 +574,29 @@
       // crown (rides above, same lean). The spire is authored 23 m tall with
       // its foliage running down the bole, so it is seated LOW and stretched
       // to land its tip above the rounded roof — the reference's skyline.
-      let bb = fbb, dst = foliCol, idx = fi;
-      if (t.conifer && spireInst) {
+      let bb;
+      if (t.conifer && spirePool) {
         dummy.position.set(t.x, KIT.nominal.matureCrownBase * t.sc * 0.30, t.z);
         dummy.rotation.set(t.lean, t.rot, t.lean * 0.5);
         dummy.scale.set(t.sc * 0.92, t.sc * (KIT.nominal.matureWoodHeight / KIT.nominal.spireHeight) * 1.34, t.sc * 0.92);
         dummy.updateMatrix();
-        spireInst.setMatrixAt(si, dummy.matrix);
-        bb = sbb; dst = spireCol; idx = si; si++;
+        bb = spirePool.add(t.x, t.z, dummy.matrix, foliColors[i * 3], foliColors[i * 3 + 1], foliColors[i * 3 + 2]);
       } else {
         dummy.position.set(t.x, t.folY, t.z);
         dummy.rotation.set(t.lean, t.rot, t.lean * 0.5);
         dummy.scale.set(t.folR, t.folH, t.folR);
         dummy.updateMatrix();
-        foliInst.setMatrixAt(fi, dummy.matrix);
-        idx = fi; fi++;
+        bb = foliPool.add(t.x, t.z, dummy.matrix, foliColors[i * 3], foliColors[i * 3 + 1], foliColors[i * 3 + 2]);
       }
-      dst[idx * 3] = foliColors[i * 3];
-      dst[idx * 3 + 1] = foliColors[i * 3 + 1];
-      dst[idx * 3 + 2] = foliColors[i * 3 + 2];
       if (parts && bb) {
         CBZ.treeAabbPush(parts, dummy.matrix, bb.min.x, bb.min.y, bb.min.z, bb.max.x, bb.max.y, bb.max.z);
         CBZ.treeRegisterTree("forest", 0, parts);      // flat biome floor (plane top at 0.02)
       }
     }
-    foliInst.count = fi;
-    foliInst.instanceColor = new THREE.InstancedBufferAttribute(foliCol, 3);
     trunkInst.instanceMatrix.needsUpdate = true;
-    foliInst.instanceMatrix.needsUpdate = true;
     root.add(trunkInst);
-    root.add(foliInst);
-    if (spireInst) {
-      spireInst.count = si;
-      spireInst.instanceColor = new THREE.InstancedBufferAttribute(spireCol, 3);
-      spireInst.instanceMatrix.needsUpdate = true;
-      root.add(spireInst);
-    }
+    foliPool.finish();
+    if (spirePool) spirePool.finish();
 
     // ---- SUBCANOPY trees: a separate, lower storey beneath the detached roof.
     const RN = roundTrees.length;
@@ -567,19 +610,19 @@
     const roundTrunkMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
     roundTrunkMat._shared = true;
     const roundTrunkInst = new THREE.InstancedMesh(roundTrunkGeo, roundTrunkMat, RN);
-    const roundCrownInst = new THREE.InstancedMesh(roundGeo, roundMat, RN);
-    roundTrunkInst.castShadow = treeShadows; roundCrownInst.castShadow = treeShadows;
-    roundTrunkInst.receiveShadow = true; roundCrownInst.receiveShadow = true;
+    // The subcanopy storey is the one you actually brush past, so it gets the
+    // same variant pool the mature crowns do. `roundMat` is flat-shaded where
+    // the mature crown's is not, so this pool carries its own material.
+    const roundPool = crownPool("subcanopy", SCENERY ? null : roundGeo, roundTrees,
+      SCENERY ? "redhollow-subcanopy-crowns" : "redhollow-round-crowns", "subcanopy", roundMat);
+    roundTrunkInst.castShadow = treeShadows;
+    roundTrunkInst.receiveShadow = true;
     roundTrunkInst.name = SCENERY ? "redhollow-subcanopy-wood" : "redhollow-round-trunks";
-    roundCrownInst.name = SCENERY ? "redhollow-subcanopy-crowns" : "redhollow-round-crowns";
-    roundTrunkInst.frustumCulled = roundCrownInst.frustumCulled = false;
+    roundTrunkInst.frustumCulled = false;
     roundTrunkInst.userData.vegetationLayer = "subcanopy-wood";
-    roundCrownInst.userData.vegetationLayer = "subcanopy";
-    roundTrunkInst.userData.sceneryScale = roundCrownInst.userData.sceneryScale = SCENERY;
+    roundTrunkInst.userData.sceneryScale = SCENERY;
     roundTrunkInst.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(roundTrunkColors), 3);
-    roundCrownInst.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(roundColors), 3);
     const rtbb = TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(roundTrunkGeo) : null;
-    const rcbb = TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(roundGeo) : null;
     for (let i = 0; i < RN; i++) {
       const t = roundTrees[i];
       dummy.position.set(t.x, TREES2 ? -V2SINK : 0, t.z);
@@ -605,16 +648,16 @@
         SCENERY ? (t.folH || t.folR) : (ROUND_STACK ? t.folR * 2 : t.folR),
         t.folR);
       dummy.updateMatrix();
-      roundCrownInst.setMatrixAt(i, dummy.matrix);
+      const rcbb = roundPool.add(t.x, t.z, dummy.matrix,
+        roundColors[i * 3], roundColors[i * 3 + 1], roundColors[i * 3 + 2]);
       if (parts && rcbb) {
         CBZ.treeAabbPush(parts, dummy.matrix, rcbb.min.x, rcbb.min.y, rcbb.min.z, rcbb.max.x, rcbb.max.y, rcbb.max.z);
         CBZ.treeRegisterTree("forest", 0, parts);
       }
     }
     roundTrunkInst.instanceMatrix.needsUpdate = true;
-    roundCrownInst.instanceMatrix.needsUpdate = true;
     root.add(roundTrunkInst);
-    root.add(roundCrownInst);
+    roundPool.finish();
 
     // ---- DETACHED CANOPY ROOF --------------------------------------------
     // Trees alone preserve one complete silhouette per trunk. These two
@@ -908,8 +951,11 @@
         roofCoveragePotential: usableArea > 0 ? +(patchArea / usableArea).toFixed(3) : 0,
         physicalTreeSpacing: STEP,
         completeConeCrowns: SCENERY ? 0 : N,
-        layers: [trunkInst, foliInst, roundTrunkInst, roundCrownInst, lowerRoofMesh, upperRoofMesh, bushInst, farThicketMesh]
-          .filter(Boolean).map(function (m) { return { name: m.name, count: m.count, visible: m.visible !== false }; }),
+        crownVariants: foliPool.K,
+        layers: [trunkInst].concat(foliPool.meshes, spirePool ? spirePool.meshes : [],
+          [roundTrunkInst], roundPool.meshes, [lowerRoofMesh, upperRoofMesh, bushInst, farThicketMesh])
+          .filter(function (m) { return m && m.parent; })
+          .map(function (m) { return { name: m.name, count: m.count, visible: m.visible !== false }; }),
       };
     };
 

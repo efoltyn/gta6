@@ -54,6 +54,11 @@
                                       +1 = couloir/hollow, -1 = ridge/spine.
                                       Slope cannot tell those apart, which is
                                       why snow used to paint contour bands.
+     CBZ.mtnStrikeOf(peaks)           the STRIKE of a range read off its own
+                                      summits (principal axis). Feed it to
+                                      mtnErode/mtnRidgeMF as {strike, aniso}
+                                      and isotropic humps become a RANGE:
+                                      long parallel crests with spurs.
 
    Shading (so colour and geometry agree instead of a sine ripple):
      CBZ.mtnStrataTint(out, x, z, y, slope, faceLight, opts)
@@ -145,6 +150,19 @@
   // coarse grid and bilinearly interpolate it. The mesh vertex loop and the
   // physics floor oracle call the SAME memo, so they cannot disagree.
   if (CFG.MOUNT_HEIGHT_CACHE == null) CFG.MOUNT_HEIGHT_CACHE = true;
+  // MOUNT_RIDGE_STRIKE — a range has a GRAIN. See §1's STRIKE note: the ridged
+  // and eroded fields may be squashed ACROSS an axis so crests run parallel to
+  // the orogen instead of wandering isotropically. Off → both fields ignore
+  // `strike`/`aniso` and are byte-identical to before.
+  if (CFG.MOUNT_RIDGE_STRIKE == null) CFG.MOUNT_RIDGE_STRIKE = true;
+  // MOUNT_SNOW_LANDFORM — the snow shed test reads the LANDFORM slope a caller
+  // passes in (`slopeHold`), not the metre-scale crag slope. Off → the shed
+  // term keeps using the fine slope, as it always did.
+  if (CFG.MOUNT_SNOW_LANDFORM == null) CFG.MOUNT_SNOW_LANDFORM = true;
+  // MOUNT_SNOW_LEDGES — snow loads the TREAD of every bedding bench this kit
+  // already cuts (see mtnTerrace). Keyed on an option defaulting to zero, so a
+  // caller that passes none is unchanged either way.
+  if (CFG.MOUNT_SNOW_LEDGES == null) CFG.MOUNT_SNOW_LEDGES = true;
 
   // ======================================================================
   //  0. PRIMITIVES
@@ -187,6 +205,60 @@
   function hiGate(h) { return sm((h - 45) / 25); }
   CBZ.mtnHiGate = hiGate;
 
+  /* ---- STRIKE — THE GRAIN OF A RANGE ----------------------------------
+     Every noise field in this kit was ISOTROPIC: rotated per octave so it
+     never locked to the world grid, but with no preferred direction at all.
+     Real mountains have one. A range is built by a force acting along a
+     LINE, and the ridges and the valleys between them run PARALLEL to that
+     line — the strike of the orogen. Isotropic ridged noise gives you a
+     field of unrelated humps; the same noise squashed across a strike gives
+     you a RANGE: long connected crests, parallel valleys, spurs coming off
+     the crest at an angle.
+
+     The transform is one rotation into the strike frame plus a scale ACROSS
+     it: multiplying the across-strike coordinate by aniso > 1 shortens the
+     feature wavelength in that direction only, so a blob becomes a ridge.
+     It is applied ONCE, before the octave loop, so the per-octave rotation
+     that follows progressively decorrelates the FINE detail — which is what
+     you want: the grain is a landform fact, and metre-scale crags on a
+     cliff face have no strike.
+
+     Both mtnErode and mtnRidgeMF take it, because the grain belongs to the
+     bedrock and not to one function. `aniso` 1 (the default) is the exact
+     old behaviour, which is what makes adopting it free. */
+  function applyStrike(o, px, pz, out) {
+    const aniso = o.aniso == null ? 1 : o.aniso;
+    if (CFG.MOUNT_RIDGE_STRIKE === false || !(aniso > 0) || aniso === 1) {
+      out[0] = px; out[1] = pz; return out;
+    }
+    const a = o.strike == null ? 0 : o.strike;
+    const cs = Math.cos(a), sn = Math.sin(a);
+    out[0] = px * cs + pz * sn;              // along strike — left alone
+    out[1] = (pz * cs - px * sn) * aniso;    // across strike — compressed
+    return out;
+  }
+  const _st = [0, 0];
+
+  /* The strike of a range READ OFF ITS OWN SUMMITS, so nobody has to type a
+     bearing and nobody's typed bearing can go stale when a peak moves. The
+     principal axis of the summit scatter (the 2x2 covariance's major
+     eigenvector, in closed form) IS the crest line by definition. Falls back
+     to 0 for a degenerate set — one peak, or peaks on a perfect circle,
+     have no axis and must not invent one. */
+  CBZ.mtnStrikeOf = function (peaks) {
+    if (!peaks || peaks.length < 2) return 0;
+    let mx = 0, mz = 0;
+    for (let i = 0; i < peaks.length; i++) { mx += peaks[i].x; mz += peaks[i].z; }
+    mx /= peaks.length; mz /= peaks.length;
+    let sxx = 0, sxz = 0, szz = 0;
+    for (let i = 0; i < peaks.length; i++) {
+      const dx = peaks[i].x - mx, dz = peaks[i].z - mz;
+      sxx += dx * dx; sxz += dx * dz; szz += dz * dz;
+    }
+    if (!(sxx + szz > 1e-6)) return 0;
+    return 0.5 * Math.atan2(2 * sxz, sxx - szz);
+  };
+
   // ======================================================================
   //  1. EROSION — derivative-damped fbm ("Quilez"), domain warp, rotation
   // ======================================================================
@@ -215,6 +287,7 @@
       px += (n2(x + 131.7, z + 719.3, wc, salt + 811) - 0.5) * warp;
       pz += (n2(x + 523.1, z + 137.9, wc, salt + 823) - 0.5) * warp;
     }
+    applyStrike(o, px, pz, _st); px = _st[0]; pz = _st[1];
     let sum = 0, norm = 0, amp = 1, dX = 0, dZ = 0;
     for (let i = 0; i < oct; i++) {
       const step = cell * 0.3;
@@ -253,6 +326,7 @@
       px += (n2(x - 311.3, z + 97.1, wc, salt + 907) - 0.5) * o.warp;
       pz += (n2(x + 71.9, z - 449.7, wc, salt + 911) - 0.5) * o.warp;
     }
+    applyStrike(o, px, pz, _st); px = _st[0]; pz = _st[1];
     let sum = 0, norm = 0, amp = 1, prev = 1;
     for (let i = 0; i < oct; i++) {
       let n = n2(px, pz, cell, salt + i * 23);
@@ -333,6 +407,7 @@
            (n2(x, z, o.dipCell2 == null ? 170 : o.dipCell2, salt + 57) - 0.5) * dipAmp * 0.42;
   }
   CBZ.mtnBeddingDip = beddingDip;
+  const _bedO = { salt: 0, dip: undefined, dipCell: undefined, dipCell2: undefined };
 
   CBZ.mtnTerrace = function (h, x, z, o) {
     o = o || {};
@@ -529,10 +604,28 @@
     if (conc > 1) conc = 1; else if (conc < -1) conc = -1;
     const gully = GUL ? (o.gully == null ? 0 : o.gully) : 0;
     let cover = sm((y - (line + aspectShift + feather - gully * conc)) / Math.max(1, band));
-    // steep faces shed: above ~45° almost nothing holds, below ~20° it all does
+    /* THE SHED TEST IS A LANDFORM QUESTION, NOT A CRAG QUESTION.
+       `slope` here is read off the RENDERED normal, which on these massifs
+       carries the 9-27u chipped rock-face relief the mesh resolves. That
+       micro-relief is steep almost everywhere on a mountain face, so the
+       shed term was stripping cover off ground whose LANDFORM is a 25°
+       bench — the field only ever closed over the few genuinely smooth
+       shoulders, and the result was a summit wearing dirty grey paint
+       instead of snow. Snow rests on the shape of the mountain; a boulder
+       the size of a car does not shed a snowfield, it gets buried by one.
+       `slopeHold` is the same slope measured over a LANDFORM support (the
+       caller already samples its own height memo at that stencil for
+       mtnConcavity, so it is four array reads). Absent → the fine slope, as
+       before. The fine slope still drives rock exposure in mtnStrataTint,
+       where it is exactly the right signal. */
     const sh0 = o.shed0 == null ? 0.16 : o.shed0;
     const sh1 = o.shed1 == null ? 0.52 : o.shed1;
-    const hold = 1 - sm((slope - sh0) / Math.max(1e-3, sh1 - sh0));
+    let shedS = slope;
+    if (CFG.MOUNT_SNOW_LANDFORM !== false && o.slopeHold != null) {
+      const sHold = +o.slopeHold;
+      if (sHold === sHold) shedS = sHold;              // NaN-strict: terrain gate
+    }
+    const hold = 1 - sm((shedS - sh0) / Math.max(1e-3, sh1 - sh0));
     cover *= 0.10 + 0.90 * hold;
     // wind-loading: lee gullies pack deep even on a steep face
     const load = n2(x, z, 90, salt + 141);
@@ -575,6 +668,38 @@
       const thr = 0.5 + pn * (0.55 + 0.35 * pa);
       const k = 1 / Math.max(0.12, 1 - 0.82 * pa);
       cover = clamp01((cover - thr) * k + 0.5);
+    }
+    /* LEDGE ACCUMULATION. mtnTerrace cuts this ground into bedding benches;
+       a bench has a flat TREAD and a steep RISER, and in every photograph of
+       a banded cliff the white is a stack of horizontal lines on the treads
+       with bare rock between them. Nothing here knew that: the cover field
+       and the bench geometry were computed from the same bedding number and
+       never introduced.
+
+       They are introduced now. `fr` is the height's fraction through its own
+       bed, in the SAME warped, non-parallel field mtnTerrace cut and
+       mtnStrataTint painted — so a caller passing one set of {step, dip,
+       dipCell, dipCell2, salt} to all three gets snow on the ledge it can
+       stand on, under the colour band that belongs to it. mtnTerrace removes
+       most material at mid-`fr` and least near 0, so the tread is LOW fr.
+       Written as a fill of the REMAINING headroom (1 - cover), so bare rock
+       can gain a ledge line but a deep field cannot exceed 1. */
+    if (CFG.MOUNT_SNOW_LEDGES !== false && o.ledge) {
+      const step = o.step == null ? 17 : o.step;
+      // beddingDip keys its warps off `salt`, and THIS function's salt is the
+      // snow-feather stream — a caller must be able to name the BEDDING salt
+      // its mtnTerrace/mtnStrataTint calls used without moving its own snow
+      // noise. Reused scratch: this runs per terrain vertex.
+      _bedO.salt = o.bedSalt == null ? salt : o.bedSalt;
+      _bedO.dip = o.dip; _bedO.dipCell = o.dipCell; _bedO.dipCell2 = o.dipCell2;
+      const hb = (y + beddingDip(x, z, _bedO)) / step;
+      const fr = hb - Math.floor(hb);
+      const tread = 1 - sm((fr - 0.05) / 0.32);
+      // a tread that is itself a cliff is not a ledge; and there is no snow
+      // to drift onto one far below the line the open slope holds.
+      const flat = 1 - sm((slope - 0.34) / 0.34);
+      const alt = sm((y - (o.line == null ? 60 : o.line) * 0.55) / Math.max(1, band));
+      cover = clamp01(cover + clamp01(o.ledge) * tread * flat * alt * (1 - cover));
     }
     return cover;
   };
