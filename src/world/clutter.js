@@ -53,14 +53,22 @@
     { minX: -30, maxX: -18, minZ: 5, maxZ: 23 },  // cafeteria x[-29,-19] z[6,22] (+pad)
     { minX: -5, maxX: 5, minZ: 49, maxZ: 53 },    // exit gap mouth
   ];
-  // existing flavour props (hoop, picnic table, barrels) + crate cover —
-  // a coarse blocklist so new clutter doesn't pile on top of them.
+  // existing flavour props (hoop, picnic table, barrels) + the five yard
+  // installations — a coarse blocklist so new clutter doesn't pile on top of
+  // them. The last five used to be 2.2 m packing cases; world/yardfurniture.js
+  // replaced each with the thing a real yard has there, and the radii grew
+  // with the footprints (a 6 m handball wall is not a 2.2 m box). Reverting
+  // PRISON_YARD_FURNITURE puts the crates back INSIDE these circles, which is
+  // where they always were, so the wider keep-out is harmless either way.
   const OBSTACLES = [
     { x: -28, z: 14, r: 2.2 },  // basketball hoop
     { x: 18, z: 30, r: 2.4 },   // picnic table
     { x: -19.6, z: 44, r: 2.4 },// barrel cluster
-    { x: -9, z: 22, r: 2.2 }, { x: 8, z: 28, r: 2.2 },
-    { x: -12, z: 36, r: 2.2 }, { x: 11, z: 17, r: 2.2 }, { x: 0, z: 11, r: 2.0 },
+    { x: -9, z: 22, r: 4.4 },   // handball wall (6.0 x 3.2 + its pad)
+    { x: 8, z: 28, r: 3.6 },    // weight pile (rack + bench + plate tree)
+    { x: -12, z: 36, r: 4.4 },  // shade pavilion (6.4 x 5.0 + two tables)
+    { x: 11, z: 17, r: 3.0 },   // phone bank
+    { x: 3.6, z: 11, r: 2.6 }, { x: -4, z: 11, r: 3.4 },   // notice board / chow tables
   ];
 
   function inZones(x, z, pad) {

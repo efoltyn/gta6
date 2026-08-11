@@ -119,6 +119,25 @@
   if (CBZ.CONFIG.PRISON_NO_CHESTS == null) CBZ.CONFIG.PRISON_NO_CHESTS = true;
   const NOCHEST = CBZ.CONFIG.PRISON_NO_CHESTS !== false;
 
+  /* ---- …AND THE CRATES ARE NOT YARD FURNITURE EITHER --------------------
+     The block above is right that the CONTAINER was the sin and the COVER
+     was load-bearing, and it kept five packing cases standing to hold the
+     cover. It never answered the other half of the owner's rule: nothing
+     bolts a packing case to the middle of an exercise yard, and five of them
+     in a row is still a prop dump — one that has been told to stop talking.
+
+     world/yardfurniture.js now stands a real handball wall, weight pile,
+     shade pavilion, phone bank and notice board on those same five spots,
+     each of them at least as much of a sightline blocker as the 2.6 m case
+     it replaces, and it re-homes the two tools into the workshop and the
+     laundry. So the cases stand down. EVERYTHING ELSE IN THIS FILE IS
+     UNTOUCHED — the pry beat, the chip, the payout and the key handler are
+     still here, still dead behind PRISON_NO_CHESTS, and
+     ?cfg_PRISON_YARD_FURNITURE=0 puts all five crates back exactly where
+     they were with their tools on top. */
+  if (CBZ.CONFIG.PRISON_YARD_FURNITURE == null) CBZ.CONFIG.PRISON_YARD_FURNITURE = true;
+  const FURNISHED = CBZ.CONFIG.PRISON_YARD_FURNITURE !== false;
+
   const REACH = 2.2;          // [E] pry reach — a hair tighter than roofloot (ground-level, tighter yard)
   const CRACK_T = 0.9;        // the SAME pry-beat timing roofloot.js's CRACK_T uses
 
@@ -186,14 +205,16 @@
     return piece;
   }
 
-  crate(-9, 22);
-  crate(8, 28);
-  crate(-12, 36);
-  // the two on the armory approach. The blade is the one that matters: it is
-  // the second route through world/gunroom.js's inner cage, and until now
-  // "Hacksaw Blade" was an item with a fence price and no verb anywhere.
-  crate(11, 17, 2.6, "Hacksaw Blade");
-  crate(0, 11, 2.2, "Lockpick");
+  if (!FURNISHED) {
+    crate(-9, 22);
+    crate(8, 28);
+    crate(-12, 36);
+    // the two on the armory approach. The blade is the one that matters: it is
+    // the second route through world/gunroom.js's inner cage, and until now
+    // "Hacksaw Blade" was an item with a fence price and no verb anywhere.
+    crate(11, 17, 2.6, "Hacksaw Blade");
+    crate(0, 11, 2.2, "Lockpick");
+  }
 
   // ---- THE TOOLS, LYING ON THE CRATES THEY USED TO BE INSIDE ---------------
   // Deferred one frame: systems/prisondrops.js parses at index.html:446 but its
@@ -363,11 +384,17 @@
       if (crateList[i].placed) laidOut++;
     }
     const pl = (CBZ.prisonPlacedAudit && CBZ.prisonPlacedAudit()) || null;
+    // COVER IS LOAD-BEARING AND IT MOVED HOUSE. With PRISON_YARD_FURNITURE on
+    // there are no crates, so counting crates would report the yard's whole
+    // stealth layer as deleted; the blockers world/yardfurniture.js stood up
+    // in their place are the honest number, and this reads it rather than
+    // asserting it.
+    const yf = (CBZ.yardFurnitureAudit && CBZ.yardFurnitureAudit()) || null;
     return {
-      spine: SPINE, noChests: NOCHEST,
+      spine: SPINE, noChests: NOCHEST, furnished: FURNISHED,
       crates: crateList.length,
       containers: NOCHEST ? 0 : crateList.length,   // MUST be 0
-      losBlockers: crateList.length,                // cover is load-bearing — must hold
+      losBlockers: crateList.length || ((yf && yf.cover) | 0),   // cover must hold
       toolCrates: tools, worldTools: laidOut,
       placedStanding: pl ? pl.standing : 0,
       cracked: cracked, muted: SPINE,

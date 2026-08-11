@@ -143,6 +143,34 @@
     CBZ.prisonShells = CBZ.prisonShells || [];
     K.shell = function (rec) { CBZ.prisonShells.push(rec); return rec; };
 
+    /* ---- EVERY LAMP THIS KIT DRAWS IS A LIGHT ON THE CLOCK ----------------
+       A ROOM WITH A LID NEEDS FIXTURES THAT OBEY LIGHTS-OUT. Before roofs
+       existed, a caged lamp was a permanently-emissive box: harmless in an
+       open-topped room lit by the sun, a lie the moment the room has a
+       ceiling and the schedule turns the block dark at 22:00.
+
+       systems/prisonnight.js already owns the answer — CBZ.prisonLights
+       .register drives any mesh with a PRIVATE material for free — but it
+       parses ~25 tags after every file that draws a lamp, so nothing could
+       register at draw time. So the kit QUEUES what it drew, with the exact
+       colours it drew them in, and world/roofs.js flushes the queue on the
+       first tick. Result: the thirty-odd caged lamps and strip lights already
+       standing in the cafeteria, the dayroom and the south block join the
+       timetable without one of those files being edited.
+
+       `mover` keeps core/batch.js's static merge off a mesh whose material is
+       written every 0.2 s — the same tag systems/prisonnight.js puts on its
+       own driven fittings. */
+    K.fixtures = [];
+    function fixture(mesh, x, z, color, emissive, r, kind) {
+      if (!mesh) return mesh;
+      mesh.userData.mover = true;
+      K.fixtures.push({ mesh: mesh, x: x, z: z, r: r || 7, kind: kind || "room",
+        color: color, emissive: emissive, off: 0x2b2b2b });
+      return mesh;
+    }
+    K.fixture = fixture;
+
     // ---- a line of paint / wear on a wall (1 mesh) ------------------------
     // The cheapest "this place is used" signal in the game: a scuff at
     // shoulder height, a wainscot band, a wayfinding stripe. Same primitive,
@@ -199,24 +227,31 @@
       const tone = o.tone != null ? o.tone : 0xffe9a8;
       const em = o.emissive != null ? o.emissive : 0xffcf66;
       addBox(x, y, z, nx ? 0.12 : w, hh + 0.18, nx ? w : 0.12, 0x3c424d, { cast: false });
-      addBox(x + nx * 0.13, y, z + nz * 0.13, nx ? 0.14 : w - 0.1, hh, nx ? w - 0.1 : 0.14,
+      const glass = addBox(x + nx * 0.13, y, z + nz * 0.13, nx ? 0.14 : w - 0.1, hh, nx ? w - 0.1 : 0.14,
         tone, { emissive: em, ei: o.ei != null ? o.ei : 0.85, cast: false });
       for (const i of [-1, 1])
         addBox(x + nx * 0.21, y + i * hh * 0.3, z + nz * 0.21,
           nx ? 0.04 : w - 0.06, 0.035, nx ? w - 0.06 : 0.04, 0x252a32, { cast: false });
+      // a wall lamp lights the metre or two around it, not the room
+      return fixture(glass, x, z, tone, em, o.r || 5.5, o.kind || "room");
     };
 
     // ---- fluorescent strip (2 meshes, 1 emissive) -------------------------
-    // Hung UNDER the open wall top, never on a ceiling: the prison rooms are
-    // deliberately open-topped so the follow camera can see in, and a roof
-    // would be a camera trap. Beams + strips give the enclosed read for free.
+    // Hung under the ceiling. (It used to be hung under an OPEN wall top: the
+    // prison rooms had no lids so the follow camera could see in. world/
+    // roofs.js closed them — the camera's own room probes, CAM_ROOM_BOOM and
+    // CAM_TIGHT_FP, are what handle an interior now — so a strip light is a
+    // ceiling fitting again, and it is on the schedule's circuit.)
     K.strip = function (x, y, z, len, axis, o) {
       o = o || {};
       addBox(x, y, z, axis === "x" ? len : 0.2, 0.09, axis === "x" ? 0.2 : len,
         0x4a525c, { cast: false });
-      addBox(x, y - 0.07, z, axis === "x" ? len - 0.24 : 0.13, 0.05,
+      const em = o.emissive != null ? o.emissive : 0xffe9a8;
+      const tube = addBox(x, y - 0.07, z, axis === "x" ? len - 0.24 : 0.13, 0.05,
         axis === "x" ? 0.13 : len - 0.24, 0xfdf6d8,
-        { emissive: o.emissive != null ? o.emissive : 0xffe9a8, ei: o.ei != null ? o.ei : 0.85, cast: false });
+        { emissive: em, ei: o.ei != null ? o.ei : 0.85, cast: false });
+      // r derived from the tube: a 4 m fitting throws further than a 1.5 m one
+      return fixture(tube, x, z, 0xfdf6d8, em, o.r || (2.6 + len * 0.55), o.kind || "room");
     };
     // an open roof beam (1 mesh) — structure without a lid
     K.beam = function (x, y, z, len, axis, o) {

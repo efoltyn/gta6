@@ -535,6 +535,14 @@
 <script src="src/world/ventilation.js"></script>
 <script src="src/world/escape_routes.js?v=mapflow2"></script>
 <script src="src/world/southblock.js?v=bigmap1"></script>
+<!-- THE PRISON GETS A LID. Every interior above was open-topped (roomShell
+     builds four walls and no ceiling), so you could stand in the mess hall and
+     watch the crows. roofs.js lays a real ceiling over each of them and hangs
+     the fittings that keep a roofed room from being a cave — and it is also
+     what flushes CBZ.prisonDress's fixture queue into CBZ.prisonLights, so
+     every caged lamp in the compound joins the schedule. AFTER every file that
+     draws a room; BEFORE world/adminwing.js, which asks it for its own roof. -->
+<script src="src/world/roofs.js?v=lid1"></script>
 
 <!-- 3b. actors that depend on economy -->
 <script src="src/entities/vision.js"></script>
@@ -547,6 +555,14 @@
 <script src="src/entities/npclife.js?v=allmain3"></script>
 <script src="src/entities/npc.js?v=notags1"></script>
 <script src="src/entities/ai.js?v=gore1"></script>
+<!-- ADMINISTRATION, and a warden who lives somewhere. Builds the block north
+     of the cell wing (CBZ.WORLD.adminWing) behind the staff door cellblock.js
+     now opens, and puts the Warden on a day: rounds, his desk, his quarters.
+     AFTER guards.js (it borrows CBZ.jailBoost's run watcher at parse, and the
+     warden it schedules is spawned there) and after roofs.js (it asks
+     CBZ.prisonRoof for its own ceiling); BEFORE prisonschedule.js, whose
+     block ids it reads at runtime. -->
+<script src="src/world/adminwing.js?v=warden1"></script>
 
 <!-- TIME OF DAY IS THE PILLAR (escape mode). prisonschedule.js carves the day
      into the blocks a real prison runs — unlock/count, yard, chow, evening
@@ -762,6 +778,15 @@
      towers.js): they now need spawnPiece to exist at parse time. -->
 <script src="src/world/crates.js"></script>
 <script src="src/world/props.js"></script>
+<!-- THE YARD IS A PRISON YARD. crates.js already killed the loot verb on its
+     five packing cases; this stands the cases DOWN and puts what a real
+     exercise yard contains on the same five spots — handball wall, weight
+     pile, shade pavilion, phone bank, notice board — keeping every metre of
+     the line-of-sight cover the stealth layer is built on. It also re-homes
+     the Hacksaw Blade and the Lockpick into the workshop and the laundry,
+     which is where a saw and a pick would actually be. AFTER crates.js
+     (whose PRISON_YARD_FURNITURE flag it shares) and props.js. -->
+<script src="src/world/yardfurniture.js?v=yard1"></script>
 <!-- SETTLEMENT COMPOSITION — flavored anchor plan + registry + cityWorldGeo
      wrapper; loads before towngen.js (which consumes CBZ.settlementsCompose)
      and after worldmap.js (whose cityWorldGeo it wraps). -->

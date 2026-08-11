@@ -80,7 +80,41 @@
         so world/yard.js, world/ground.js, escape_routes.js and the actor
         clamp in CBZ.WORLD.cellBlock stay true whichever branch runs.
      ========================================================== */
-  addBox(0, WH / 2, -44, 32, WH, 1, WALL, { solid: true, blockLOS: true });   // north
+  /* THE HEAD OF THE WING IS A DOOR, NOT A DEAD END (CBZ.cellblockStaffGap).
+     The north wall was one unbroken 32 m slab, so the only way out of this
+     building was the south throat every guard in the game watches. A real
+     wing hangs off the ADMINISTRATION block — staff walk in at the top, past
+     the officer's post, and never cross the yard to do it — and world/
+     adminwing.js now builds that block on the far side of this wall.
+
+     The opening is placed WEST OF THE DUTY DESK on purpose: the officer post
+     (§6) puts a 3.4 m desk on the centreline at x[-1.7,1.7] and its key board
+     at x[1.05,1.95], so x[-4.2,-2.2] is the only 2 m of this wall that is
+     free floor on both faces — and it is 5 m from the officer's own patrol
+     waypoint (0,-39), which is the point: the first door you can try is the
+     one with a screw standing next to it.
+
+     This file draws the HOLE and publishes it. The leaf, the collider, the
+     lock and the reader belong to whoever owns the other side — and if that
+     side is not being built, THERE IS NO HOLE: a 2 m gap in the compound's
+     northern face with no door in it is not a shortcut, it is the end of the
+     escape game. The flag is declared with the same idempotent `== null`
+     idiom world/southblock.js documents, so whichever of the two files
+     parses first sets it and the other no-ops. */
+  if (CFG.PRISON_ADMIN_WING == null) CFG.PRISON_ADMIN_WING = true;
+  const SG = CFG.PRISON_ADMIN_WING !== false ? { x0: -4.2, x1: -2.2, z: -44, h: 2.6, t: 1 } : null;
+  CBZ.cellblockStaffGap = SG;
+  if (!SG) {
+    addBox(0, WH / 2, -44, 32, WH, 1, WALL, { solid: true, blockLOS: true });   // north, unbroken
+  } else {
+    addBox((-16 + SG.x0) / 2, WH / 2, -44, SG.x0 + 16, WH, 1, WALL, { solid: true, blockLOS: true });  // west of the gap
+    addBox((SG.x1 + 16) / 2, WH / 2, -44, 16 - SG.x1, WH, 1, WALL, { solid: true, blockLOS: true });   // east of the gap
+    // the door HEAD: wall above the opening. Never solid — a full-height AABB
+    // here would seal the doorway for every body in the game (systems/
+    // actorcollide.js clamps NPCs with no vertical span, so a y-gated collider
+    // still reads full height to them). It blocks LOS, which is all a lintel owes.
+    addBox((SG.x0 + SG.x1) / 2, (SG.h + WH) / 2, -44, SG.x1 - SG.x0, WH - SG.h, 1, WALL, { cast: false, blockLOS: true });
+  }
   addBox(-16, WH / 2, -26, 1, WH, 36, WALL, { solid: true, blockLOS: true });  // west
   addBox(16, WH / 2, -26, 1, WH, 36, WALL, { solid: true, blockLOS: true });   // east
   addBox(-9.5, WH / 2, -8, 13, WH, 1, WALL, { solid: true, blockLOS: true });  // south-left  (door gap x[-3,3])
@@ -676,7 +710,20 @@
   function officerPost(cx, cz, w, d) {
     // NO window here: this bay's back is a panelled duty board, and a pane
     // behind a panel is a pane nobody will ever see.
-    addBox(cx, 1.5, cz - d / 2 + 0.3, w - 0.6, 3.0, 0.12, C_PART_D, { cast: false });   // back panel
+    // …except where the STAFF DOOR passes through it (see §0). The panel is
+    // drawn as the run east of the opening plus whatever stub survives west
+    // of it, so the duty board never hangs across the doorway.
+    const pz = cz - d / 2 + 0.3, p0 = cx - (w - 0.6) / 2, p1 = cx + (w - 0.6) / 2;
+    if (SG.x1 > p0 && SG.x0 < p1) {
+      if (SG.x0 - p0 > 0.2) addBox((p0 + SG.x0) / 2, 1.5, pz, SG.x0 - p0, 3.0, 0.12, C_PART_D, { cast: false });
+      if (p1 - SG.x1 > 0.2) addBox((SG.x1 + p1) / 2, 1.5, pz, p1 - SG.x1, 3.0, 0.12, C_PART_D, { cast: false });
+      // reveal: the jambs of the opening, so the hole reads as a doorway
+      for (const jx of [SG.x0, SG.x1])
+        addBox(jx, SG.h / 2, cz - d / 2 - 0.05, 0.16, SG.h, 0.72, C_PART_D, { cast: false });
+      addBox((SG.x0 + SG.x1) / 2, SG.h + 0.09, cz - d / 2 - 0.05, SG.x1 - SG.x0 + 0.32, 0.18, 0.72, C_PART_D, { cast: false });
+    } else {
+      addBox(cx, 1.5, pz, w - 0.6, 3.0, 0.12, C_PART_D, { cast: false });               // back panel
+    }
     sbox(cx, 0.55, cz - d / 2 + 1.1, 3.4, 1.1, 0.9, 0x33200f, { solid: true });         // desk
     addBox(cx, 1.16, cz - d / 2 + 1.1, 3.6, 0.12, 1.0, 0x4a3a22, { cast: false });
     addBox(cx - 0.9, 1.34, cz - d / 2 + 1.0, 0.7, 0.42, 0.06, 0x9fd6ff, { emissive: 0x2a6ea5, ei: 0.7, cast: false }); // monitor

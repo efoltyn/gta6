@@ -91,8 +91,20 @@
   makeGuard([[30, 74], [30, 112], [22, 112]], 3.2, 13, 0.58);
   // the sally-port detail watching the freedom gate
   makeGuard([[-12, 122], [12, 122], [12, 114], [-12, 114]], 3.0, 15, 0.64);
-  // the Warden — slow, sharp-eyed patrol in the courtyard; bribe him for the gun-room key
-  makeGuard([[14, 2], [2, 2], [2, -4], [14, -4]], 2.4, 16, 0.7, { kind: "warden" });
+  /* THE WARDEN — slow, sharp-eyed; bribe him for the gun-room key.
+     He used to patrol a 12 x 6 m rectangle of open yard outside the gun-room
+     door and never leave it: the man with the highest key in the prison spent
+     every hour of every day standing in a car park. world/adminwing.js now
+     gives him a building and a DAY (rounds on the tier at unlock and count,
+     his own office through the working hours, his quarters after 21:00), and
+     it drives him off CBZ.prisonSchedule.
+     These waypoints are only where he STARTS — the wing's staff checkpoint,
+     inside the block. They matter because systems/state.js resets every guard
+     to `g.start` on a new run, and every leg of his route is a straight walk
+     through a real opening (entities/guards.js's patrol mover has no steering
+     at all, :952). Starting him in the courtyard would strand him on the far
+     side of the locked yard door with no way to walk home. */
+  makeGuard([[-5, -11], [5, -11], [5, -12.5], [-5, -12.5]], 2.4, 16, 0.7, { kind: "warden" });
 
   // a couple of bent cops: they run their own contraband racket, take
   // tiny bribes, and conveniently don't see as much (smaller cone).

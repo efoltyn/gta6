@@ -116,11 +116,20 @@
   // consistent in one place.
   CBZ.WORLD = {
     cellBlock:  { x0: -16, x1: 16, z0: -44, z1: -8 },
+    // ADMINISTRATION — north of the wing, the other side of the staff door at
+    // the head of the tier (world/cellblock.js's CBZ.cellblockStaffGap).
+    // The warden works here; the compound's own perimeter wraps it, so
+    // getting in is a break-in and getting OUT of it is still the long walk
+    // south to the gate. world/adminwing.js builds it.
+    adminWing:  { x0: -20, x1: 20, z0: -64, z1: -44 },
     northYard:  { x0: -30, x1: 30, z0: -8,  z1: 52 },   // original yard (kept intact)
     southBlock: { x0: -44, x1: 44, z0: 52,  z1: 128 },  // new, wider lower complex
     exit: { x: 0, z: 128, gap: 4 },                     // freedom gate at the far south
-    // overall extents used by the actor clamp + minimap (a touch of margin)
-    minX: -46, maxX: 46, minZ: -45, maxZ: 131,
+    // overall extents used by the actor clamp + minimap (a touch of margin).
+    // minZ reaches past the admin wing's own north wall (-64) so the radar,
+    // the full map and the strategic overview all frame the building that is
+    // now the northern end of the compound.
+    minX: -46, maxX: 46, minZ: -66, maxZ: 131,
   };
 
   // ---- NPC ratings (CAPABILITY) — what an inmate is *good at*, 0..100.
