@@ -27,6 +27,18 @@
    a death screen. */
 
 const subjects = [
+  /* THE WHOLE COMPOUND, AND THE REASON THIS SUBJECT EXISTS SEPARATELY.
+     `compound-aerial` below is framed at y=300 on (0,0,60), which fitted the
+     92 x 195 m prison exactly and now crops the wings off both sides. It is
+     deliberately LEFT ALONE — it is the shot every earlier jail wave was judged
+     against, and rebasing its camera would silently invalidate that history.
+     This one sits high enough for the 248 x 244 m outer wire (world/prisonwings.js)
+     and is the shot to read for scale: the old compound is the bright spine down
+     the middle, the wings and the new perimeter are everything around it. */
+  { id: "compound-aerial-wide", label: "The whole compound from above", hud: false,
+    focus: "Top-down over the FULL outer wire (x +-124, z -116..128). Read for scale and for joins: the new perimeter must close on the old south wall at z=128, the wings must be paved to the wall, and the four sally gates must read as gaps with gates in them, never holes.",
+    act: {},
+    cam: { x: 0, y: 560, z: 20, ax: 0, ay: 0, az: 12 } },
   { id: "compound-aerial", label: "The compound from above", hud: false,
     focus: "Top-down establishing shot. The owner's road-through-the-jail should be visible here on the before side and gone on the after side.",
     act: {},

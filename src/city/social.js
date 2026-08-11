@@ -428,15 +428,25 @@
     const cur = reg && reg.current ? reg.current() : null;
     return !!(cur && cur.target === ped);              // the ped you're mid-interaction with
   }
+  /* SAY REPORTS WHETHER IT SPOKE (2026-08-11). Every early return below is a
+     silent drop — out of earshot, mid-flight, driving — and the caller could
+     not tell a delivered line from a swallowed one. That is fine for a bark
+     that does not care, and wrong for anything that COUNTS: city/read.js was
+     incrementing its contact audit on lines this function had already thrown
+     away, which is the "an audit nobody has executed is not a measurement"
+     failure one layer down. It now returns true only when a line reached the
+     element. Backward-compatible: every existing caller ignores the value, and
+     the old behaviour was `undefined` — which is falsy, same as the new
+     `false`. systems/interact.js's prisonSay has always done this. */
   function say(ped, text, color, secs) {
-    if (!ped || ped.dead || !ped.group || !text) return;
+    if (!ped || ped.dead || !ped.group || !text) return false;
     // only show near the camera so we don't pay for the whole map
     const P = CBZ.player;
     if (P && ped !== P) {
       const d = Math.hypot(ped.pos.x - P.pos.x, ped.pos.z - P.pos.z);
       const lim = CBZ.CONFIG.SPEECH_CLOSE_RANGE === false ? SPEECH_D_WIDE
         : speechEngaged(ped) ? SPEECH_D_ENGAGED : SPEECH_D_AMBIENT;
-      if (d > lim) return;
+      if (d > lim) return false;
     }
     // DIALOGUE IS A FACE-TO-FACE THING (owner: "I shouldn't see passenger
     // dialogue popups when I'm flying a plane — dialogue is when a character is
@@ -446,10 +456,10 @@
     // in a conversation with anyone while you are flying an aeroplane, driving,
     // falling under a canopy, or dead.
     if (P && ped !== P) {
-      if (P._aircraft || P.dead) return;
-      if (CBZ.cityChuteState && CBZ.cityChuteState()) return;
+      if (P._aircraft || P.dead) return false;
+      if (CBZ.cityChuteState && CBZ.cityChuteState()) return false;
       // In a vehicle, only the person you are sharing it with gets to talk.
-      if (P.driving && ped._vehicle !== P._vehicle) return;
+      if (P.driving && ped._vehicle !== P._vehicle) return false;
     }
     ensureSpeech();
     speechPed = ped;
@@ -458,6 +468,7 @@
     speechTextEl.textContent = String(text).replace(/^[“\"]|[”\"]$/g, "");
     speechEl.style.setProperty("--speaker-color", color || "#dfe7ff");
     speechEl.classList.add("show");
+    return true;
   }
   function tickBubbles(dt) {
     if (speechT <= 0) return;

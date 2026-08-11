@@ -79,7 +79,7 @@ const subjects = [
     view: "front", wear: { outfit: "police" } },
 ];
 
-async function stageOutfit(input) {
+export async function stageOutfit(input) {
   const CBZ = window.CBZ;
   const T = window.THREE;
   if (!CBZ || !T) return { ok: false, missing: "CBZ/THREE" };
@@ -174,7 +174,34 @@ async function stageOutfit(input) {
 
   // ---- dress the player through the real wardrobe calls -----------------
   let wornName = "spawn composite";
-  if (sub.wear) {
+  if (sub.cast) {
+    const spec = Object.assign({
+      archetype: "resident",
+      band: "adult",
+      age: 32,
+      sex: sub.sex || "m",
+      seed: sub.seed == null ? 90210 : sub.seed,
+    }, sub.cast);
+    const catalog = CBZ.cityOutfitCatalog ? CBZ.cityOutfitCatalog() : null;
+    const rec = (CBZ.cityOutfitFor && CBZ.cityOutfitFor(spec)) || (catalog && catalog.street);
+    if (!rec || !rec.colors) return { ok: false, err: "no cast outfit for " + (spec.job || spec.archetype || sub.id) };
+    // Every frame is an isolated fitting. Deployed builds predate the direct
+    // cityClearComposite hook, so reset through their public empty-composite
+    // path before putting on the next role; otherwise an accountant's tie can
+    // linger on the janitor photographed after it.
+    if (CBZ.cityApplyComposite && CBZ.playerChar) {
+      CBZ.cityApplyComposite(CBZ.playerChar, {
+        shirt: 0xf2f2f2,
+        legs: 0x39414f,
+        items: [],
+      });
+    }
+    CBZ.game.cityWornOutfit = rec;
+    CBZ.game.cityOutfitId = rec.id;
+    if (CBZ.cityOutfitApplyPlayer) CBZ.cityOutfitApplyPlayer();
+    else if (CBZ.cityRecolorRig) CBZ.cityRecolorRig(CBZ.playerChar, rec.colors, rec);
+    wornName = rec.name + " [" + rec.id + "]";
+  } else if (sub.wear) {
     let compId = sub.wear.comp || null;
     if (sub.wear.compByStyleName && Array.isArray(CBZ.citySuitStyles)) {
       const idx = CBZ.citySuitStyles.findIndex((st) =>

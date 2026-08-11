@@ -578,6 +578,21 @@
      block ids it reads at runtime. -->
 <script src="src/world/adminwing.js?v=warden1"></script>
 
+<!-- THE COMPOUND'S REAL SIZE (owner 2026-08-11: "the prison should be bigger…
+     think of scale of human vs prison size"). 92x195 m of authored prison was
+     1.79 ha — fifty body-lengths across a yard, against 300-400 m a side for a
+     real perimeter. world/prisonwings.js throws the outer wire at x +-124,
+     z -116..128 (6.05 ha) WITHOUT moving one authored coordinate, and fills it
+     with six rooms whose locks hang off the three keys the game already has:
+     the Keycard (four sally gates + segregation), the Lockpick (tool crib,
+     knife cage, property cage) and the Warden's Gun-Room Key (central control,
+     which throws every lock in the house at once).
+     AFTER roofs.js (asks CBZ.prisonRoof for its lids), roombuild.js (roomShell)
+     and cafeteria.js (CBZ.prisonDress fittings); AFTER guards.js + adminwing.js
+     so it borrows the same CBZ.jailBoost run watcher; and it must follow
+     world/yard.js, which cuts the four gate gaps this file stands gates in. -->
+<script src="src/world/prisonwings.js?v=wings1"></script>
+
 <!-- ============ THE ENGINE LAYER THE PRISON WAVE PROVED WAS MISSING ==========
      Four services promoted OUT of the prison files below, because a hospital,
      a school, a heist and an asylum need every one of them and none of them is
@@ -949,6 +964,14 @@
      this tag children get correct proportions but never grow. -->
 <script src="src/city/childhood.js?v=child1"></script>
 <script src="src/city/level.js?v=allmain3"></script>
+<!-- WHO YOU ARE TO THEM, IN WORDS. The street's port of the prison's
+     socialRead: the five relationship axes + the cover-aware level + the role
+     become a standing, a mood and a LEVEL GAP, and the gap picks the line.
+     After level.js (cityLevel/cityRole/cityPlayerTitle) and social.js
+     (cityRel/cityBond/citySay); every consumer resolves it lazily at call
+     time, so nothing below needs reordering. Consumers: humancontact.js (the
+     bump), peds.js (trade + greet), interactions_rich.js (insult scaling). -->
+<script src="src/city/read.js?v=read1"></script>
 <script src="src/city/sizeup.js?v=lvl1y"></script>
 <script src="src/city/bling.js?v=fit3"></script>
 <script src="src/city/club.js?v=fortress1"></script>

@@ -141,6 +141,15 @@
     if (mode === "city") reactCity(a, event.source, level, severity);
     else if (mode === "escape") reactEscape(a, event.source, level, severity);
     else if (mode === "survival") reactSurvival(a, event.source, level, severity);
+    // CONTACT HAS A VOICE. This file has classified every body-to-body contact
+    // since it shipped and never made a sound — the kind and the severity were
+    // computed, remembered, and spent entirely on flee/rage flags. city/read.js
+    // turns the same two values, plus the level gap and their role, into a line
+    // out of that person's mouth. Player-initiated only: a crowd jostling
+    // itself is not talking to you. Degrade-safe — absent read.js, unchanged.
+    if (event.source && isPlayer(event.source) && CBZ.cityContactReact) {
+      try { CBZ.cityContactReact(a, event.kind || "bump", severity); } catch (e) {}
+    }
   }
 
   function knockdown(a, event) {

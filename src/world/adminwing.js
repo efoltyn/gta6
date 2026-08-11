@@ -63,7 +63,17 @@
    does. The warden walks through them four times a day, which makes
    tailgating a real answer and makes his routine legible from the corridor.
 
-   Flags PRISON_ADMIN_WING · PRISON_WARDEN_ROUTINE · PRISON_WARDEN_SUIT.
+   ---- AND HE IS NOT ALWAYS THERE ----------------------------------------
+   OWNER (2026-08-11): "the warden should not always be in the office — of
+   course sometimes you should see the warden, but it's too common now." The
+   desk used to own three of the eight schedule blocks and the chair then
+   nailed him inside it. Now `work` is the only block that CAN be his desk,
+   `mess` and `supper` put him on the tier and at the checkpoint where you can
+   see him, and even the desk block rolls against the day (deterministic — see
+   DUTY below). He is at that desk about one working block in three days.
+
+   Flags PRISON_ADMIN_WING · PRISON_WARDEN_ROUTINE · PRISON_WARDEN_SUIT ·
+   PRISON_WARDEN_SEATED.
    Ratchet CBZ.adminWingAudit(): `unreachable` (a locked thing with no route)
    and `keyBothPlaces` (the key on his hip AND in the safe) both pinned at 0.
 ============================================================ */
@@ -79,6 +89,20 @@
   if (CBZ.CONFIG.PRISON_ADMIN_WING == null) CBZ.CONFIG.PRISON_ADMIN_WING = true;
   if (CBZ.CONFIG.PRISON_WARDEN_ROUTINE == null) CBZ.CONFIG.PRISON_WARDEN_ROUTINE = true;
   if (CBZ.CONFIG.PRISON_WARDEN_SUIT == null) CBZ.CONFIG.PRISON_WARDEN_SUIT = true;
+  /* HE SITS DOWN (owner 2026-08-11: "the warden should be seated at his own
+     locked office"). He had the office, the lock and the routine, and then
+     PACED it: POST.office was a three-point walking cycle, so the man whose
+     whole design is "getting the key means getting to the man at his desk"
+     spent his working day doing laps of his own carpet. A boss who is walking
+     is a boss you can meet in a corridor; a boss in a CHAIR, behind a desk, at
+     the far end of a room whose door needs a lockpick, is the approach the
+     bossoffice program (world/roombuild.js) was drawn for.
+     CBZ.furnish.bossDesk already reports the throne's seat anchor and
+     city/propuse.js already owns the seated rig (entities/character.js's
+     `ch.sitting` branch owns the whole body). Nothing new is authored here:
+     this finds his own chair and puts him in it. Flag off -> the pacing cycle
+     returns byte for byte. */
+  if (CBZ.CONFIG.PRISON_WARDEN_SEATED == null) CBZ.CONFIG.PRISON_WARDEN_SEATED = true;
   if (!CBZ.CONFIG.PRISON_ADMIN_WING) return;
 
   const AW = CBZ.WORLD.adminWing || { x0: -20, x1: 20, z0: -64, z1: -44 };
@@ -522,6 +546,13 @@
     office:   { at: 2, post: [[12.95, -53.6], [17.6, -52.2], [9.2, -52.2]], speed: 1.9 },
     wing:     { at: 6, post: [[0, -36], [0, -26], [0, -39]], speed: 2.6 },
     check:    { at: 8, post: [[-5, -11], [5, -11], [5, -12.5], [-5, -12.5]], speed: 2.4 },
+    /* ROUNDS. Node 3 is the corridor's east end, and the corridor is the one
+       run in this building that crosses it end to end: the two partitions
+       (PX_A -7, PX_B 6) stop at CORR_Z, so z = -46.6 is clear from x 11.4 to
+       x -13.6 and every leg below is a straight walk through open floor —
+       which is the whole constraint on a post here (entities/guards.js's
+       patrol mover walks straight at its waypoint with no steering at all). */
+    rounds:   { at: 3, post: [[11.4, -46.6], [-13.6, -46.6], [-13.6, -47.8], [11.4, -47.8]], speed: 2.1 },
   };
   // the walk between two posts is the slice of the spine between them
   function route(from, to) {
@@ -538,23 +569,129 @@
      does not know is DECLARED rather than guessed at: it lands him at his
      desk and is counted, so a future block added next door shows up as a
      number instead of a warden quietly standing in the wrong room. */
+  /* ---- HE IS NOT ALWAYS AT HIS DESK -------------------------------------
+     OWNER (2026-08-11, on the first cut of the seated warden): "the warden
+     should not always be in the office — of course sometimes you should see
+     the warden, but it's too common now."
+
+     He was right and the fault was mine: THREE of the eight schedule blocks
+     (mess, work, supper) parked him in that room, and the seating change then
+     nailed him to the chair inside it — so the whole working day was one
+     reliable answer at one address. A prize you can collect whenever you like
+     is not a prize, it is a shop; the safe next door already states the
+     opposite design in this same file (the key is on his hip OR on the hook,
+     and WHICH decides what game you have to play).
+
+     Two things fix it, and neither is a timer:
+       1. THE DESK IS ONE BLOCK, NOT THREE. `mess` and `supper` put him on the
+          tier and at the checkpoint — where a warden actually is at chow and
+          at yard call, and where you can SEE him from the block. Only `work`
+          is his desk. That is the "sometimes you should see him" half.
+       2. EVEN THAT BLOCK IS NOT A PROMISE. An office block rolls against the
+          DAY (deterministic — CBZ.hash01 of the block id and the day count, no
+          Math.random, so a run replays identically and every client agrees)
+          and better than half the time he is walking his corridor instead.
+     Net: he is at the desk in roughly one working block in three days rather
+     than every hour of every day, and the office door is worth picking when
+     the light behind it says somebody is in.                              */
   const DUTY = {
     wake: "wing",       // unlock and count: he is on the tier for it
     yard: "check",      // yard call: at the checkpoint, watching them go out
-    mess: "office", work: "office", supper: "office",
+    mess: "wing",       // chow: a warden walks his own serving line
+    work: "office",     // the ONE block that can be his desk — and only might be
+    supper: "check",    // evening feed: back at the checkpoint
     count: "wing",      // evening count: on the tier again
     secure: "quarters", night: "quarters",
   };
-  let unknownBlocks = 0;
+  const DESK_ODDS = 0.42;     // how often an office block is actually the desk
+  let unknownBlocks = 0, deskBlocks = 0, roundsBlocks = 0;
   function dutyFor(id) {
-    if (!id) return "office";
-    const k = String(id).toLowerCase().replace(/[^a-z]/g, "");
-    if (!DUTY[k]) { unknownBlocks++; return "office"; }
-    return DUTY[k];
+    let want;
+    if (!id) want = "office";
+    else {
+      const k = String(id).toLowerCase().replace(/[^a-z]/g, "");
+      if (!DUTY[k]) { unknownBlocks++; want = "office"; } else want = DUTY[k];
+    }
+    if (want !== "office") return want;
+    // deterministic per (block, day): the same day always plays the same, and
+    // two clients in a session agree without sending anything.
+    const day = (CBZ.dayCount ? (CBZ.dayCount() | 0) : 0);
+    const h = CBZ.hash01 ? CBZ.hash01(day * 131 + 7, String(id || "").length * 17 + 3) : 0.5;
+    if (h < DESK_ODDS) { deskBlocks++; return "office"; }
+    roundsBlocks++;
+    return "rounds";
   }
 
   const V3 = function (p) { return new THREE.Vector3(p[0], 0, p[1]); };
-  const warden = { g: null, at: null, transit: 0, suited: false, dressT: 0 };
+  const warden = { g: null, at: null, transit: 0, suited: false, dressT: 0, seat: null, seatTries: 0 };
+
+  /* ---- HIS CHAIR ---------------------------------------------------------
+     Asked for, never typed. The office is furnished by CBZ.roomFurnish's
+     "bossoffice" program, which places CBZ.furnish.bossDesk against the far
+     wall and registers its THREE seats — the throne behind the desk and two
+     lower supplicant chairs across it. Typing a coordinate here would be a
+     copy of a layout that is planned at build time against real clearances
+     and can legitimately move; asking city/propuse.js for the seats inside
+     the office rect cannot go stale. `boss`/`throne` wins so he takes his own
+     chair and not the one a visitor sits in; if the kit named it something
+     else we fall back to the seat FURTHEST from the door, which is the same
+     chair by the bossoffice program's own construction (the desk is at the
+     far end and the throne is behind it).                                   */
+  function findChair() {
+    if (!CBZ.propSeatsIn) return null;
+    let list = [];
+    try { list = CBZ.propSeatsIn(PX_B, IX1, QZ, CORR_Z, 0, []) || []; } catch (e) { list = []; }
+    if (!list.length) return null;
+    for (let i = 0; i < list.length; i++) {
+      const k = String(list[i].kind || "").toLowerCase();
+      if (k.indexOf("boss") >= 0 || k.indexOf("throne") >= 0) return list[i];
+    }
+    let best = null, bd = -1;
+    for (let i = 0; i < list.length; i++) {
+      const d = Math.abs(list[i].z - CORR_Z);        // the door is on the corridor plane
+      if (d > bd) { bd = d; best = list[i]; }
+    }
+    return best;
+  }
+  // A SEATED MAN STANDS UP WHEN SOMETHING HAPPENS. entities/guards.js's own
+  // branches (approach / hunt / alert / investigate) all move the body, and a
+  // rig held in `sitting` while its owner sprints at you is the exact defect
+  // the propuse arc engine exists to prevent — so the seat is released the
+  // instant he has anything to do, and retaken when he settles again.
+  function busy(g) {
+    return !!(g.hunt > 0 || g.alert > 0 || g.approach || (g.investigate && g.investigate.t > 0) ||
+      g.dead || (g.ko | 0) > 0 || g.asleep);
+  }
+  function sitAtDesk(g) {
+    if (CBZ.CONFIG.PRISON_WARDEN_SEATED === false || !CBZ.propSit) return false;
+    if (g._propSeat) return true;
+    if (!warden.seat) {
+      if (warden.seatTries > 30) return false;       // the kit never furnished it; stop asking
+      warden.seatTries++;
+      warden.seat = findChair();
+      if (!warden.seat) return false;
+    }
+    const s = warden.seat;
+    // park the patrol mover ON the chair: one waypoint, at zero distance, so
+    // guards.js's straight-line walker has nothing left to walk to and cannot
+    // drag a seated body off its own cushion.
+    g.waypoints = [new THREE.Vector3(s.x, 0, s.z)];
+    g.wi = 0;
+    g.group.position.set(s.x, s.y || 0, s.z);
+    let ok = false;
+    try { ok = CBZ.propSit(g, s, { instant: true }); } catch (e) { ok = false; }
+    if (!ok) return false;
+    g.group.rotation.y = s.face;
+    g.flashlightPatrol = false;
+    return true;
+  }
+  function standUp(g) {
+    if (!g || !g._propSeat) return;
+    try { CBZ.propStand(g, { instant: true }); } catch (e) {}
+    // propStand writes state="walk" for a ped brain; the warden is a GUARD and
+    // guards.js owns his movement, so all that is owed here is the pose.
+    if (g.char) g.char.sitting = false;
+  }
   function findWarden() {
     const list = CBZ.guards || [];
     for (let i = 0; i < list.length; i++) if (list[i].kind === "warden") return list[i];
@@ -563,6 +700,7 @@
   function sendTo(g, want) {
     const P = POST[want];
     if (!P) return;
+    standUp(g);                                    // leaving a post means leaving the chair
     const chain = warden.at ? route(warden.at, want) : [];
     warden.at = want;
     g.waypoints = chain.concat(P.post).map(V3);
@@ -713,6 +851,17 @@
       w.waypoints = POST[warden.at].post.map(V3);
       w.wi = 0; warden.transit = 0;
     }
+    /* ---- AND AT HIS DESK, HE SITS. The office post is the only one that is
+         a CHAIR rather than a beat — his quarters cycle is him pacing before
+         bed, the wing and the checkpoint are him supervising, and those are
+         all things a man does on his feet. This runs every frame rather than
+         once on arrival because guards.js can take the body away at any
+         instant (a shout, a sighting, a hunt) and the honest answer is that
+         he gets up, deals with it, and sits back down when it is over. ---- */
+    if (!warden.transit && warden.at === "office") {
+      if (busy(w)) standUp(w);
+      else if (!w._propSeat) sitAtDesk(w);
+    } else if (w._propSeat) standUp(w);
     const S = CBZ.prisonSchedule;
     const block = S && S.id ? S.id() : null;
     if (block !== lastBlock) {
@@ -821,6 +970,9 @@
       unreachable: unreachable,                       // MUST be 0
       keyBothPlaces: (SAFE.fob.visible && !offShift()) ? 1 : 0,   // MUST be 0
       unknownBlocks: unknownBlocks,                   // schedule ids DUTY has no post for
+      seated: !!(warden.g && warden.g._propSeat),
+      deskOdds: DESK_ODDS, deskBlocks: deskBlocks, roundsBlocks: roundsBlocks,
+      chair: warden.seat ? { x: Math.round(warden.seat.x * 10) / 10, z: Math.round(warden.seat.z * 10) / 10, kind: warden.seat.kind } : null,
       warden: warden.g ? {
         post: warden.at, transit: warden.transit, suited: warden.suited,
         x: Math.round(warden.g.group.position.x * 10) / 10,

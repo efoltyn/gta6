@@ -85,7 +85,7 @@
     // said navy — so the flat fallback described a different uniform and the
     // shoulder yoke stamped a navy band across a white shirt. Same class as the
     // suit collar, one row up the file.
-    pilot:     { id: "pilot",     name: "Captain's Stripes", tier: "work",  who: "pilots",           price: 0,    drip: 2,
+    pilot:     { id: "pilot",     name: "Captain's Stripes", tier: "work",  who: "pilots",           price: 0,    drip: 2, cap: true, capColor: 0x151c2e,
                  colors: { legs: 0x1a1c24, torso: 0xeef0f2, collar: 0xd6d9dd, arms: 0xeef0f2, shoes: 0x101216 } },
     janitor:   { id: "janitor",   name: "Custodian Greys",  tier: "work",   who: "custodians",       price: 0,    drip: 0,
                  colors: { legs: 0x3a3f46, torso: 0x4a5560, collar: 0x363b42, arms: 0x4a5560, shoes: 0x2b2b2b } },
@@ -95,6 +95,45 @@
                  colors: { legs: 0x24304a, torso: 0x2f5a6b, collar: 0x1c3a44, arms: 0x2f5a6b, shoes: 0x101216 } },
     coveralls: { id: "coveralls", name: "Work Coveralls",   tier: "work",   who: "grease monkeys",   price: 0,    drip: 0,
                  colors: { legs: 0x3a4150, torso: 0x3a4150, collar: 0x2a2f3a, arms: 0x3a4150, shoes: 0x2b241c } },
+    // ---- PLACE-SPECIFIC WORK: small, recognizable additions for jobs that
+    //      already exist in the world but previously fell through to a tee.
+    //      These stay in the one catalog/caster/painter path used by every ped.
+    hunter:   { id: "hunter",    name: "Hunter Field Gear", tier: "work", who: "hunters", price: 0, drip: 0, cap: true, capColor: 0xe86d16,
+                 colors: { legs: 0x4a4d32, torso: 0x465038, collar: 0xe86d16, arms: 0x465038, shoes: 0x2b241c } },
+    ranger:   { id: "ranger",    name: "Park Ranger Uniform", tier: "law", who: "park rangers", price: 0, drip: 0, cap: true, capColor: 0x3f4b2e,
+                 colors: { legs: 0x3f4b2e, torso: 0xb19a6a, collar: 0x4a5835, arms: 0xb19a6a, shoes: 0x352a1d } },
+    hiker:    { id: "hiker",     name: "Trail Layers", tier: "work", who: "hikers", price: 0, drip: 0,
+                 colors: { legs: 0x3d4650, torso: 0xb94f2f, collar: 0x27313a, arms: 0xb94f2f, shoes: 0x3a2e20 } },
+    farmer:   { id: "farmer",    name: "Farm Overalls", tier: "work", who: "farm crews", price: 0, drip: 0,
+                 colors: { legs: 0x3d5872, torso: 0x76543a, collar: 0xd2b58b, arms: 0x76543a, shoes: 0x3b2c1d } },
+    fisherman:{ id: "fisherman", name: "Fisherman's Oilskins", tier: "work", who: "fishing crews", price: 0, drip: 0,
+                 colors: { legs: 0xc99928, torso: 0x283d50, collar: 0xe1bd45, arms: 0x283d50, shoes: 0x1d2924 } },
+    mariner:  { id: "mariner",   name: "Mariner Whites", tier: "work", who: "captains and harbour crews", price: 0, drip: 1, cap: true, capColor: 0xf0f1ed,
+                 colors: { legs: 0x19283d, torso: 0xf0f1ed, collar: 0x213a5a, arms: 0xf0f1ed, shoes: 0x10151d } },
+    lifeguard:{ id: "lifeguard", name: "Lifeguard Reds", tier: "work", who: "lifeguards", price: 0, drip: 0, cap: true, capColor: 0xc8342f,
+                 colors: { legs: 0xc8342f, torso: 0xf1eee7, collar: 0xc8342f, arms: 0xf1eee7, shoes: 0xe8e8e2 } },
+    ski:      { id: "ski",       name: "Ski Instructor Jacket", tier: "work", who: "ski crews", price: 0, drip: 1,
+                 colors: { legs: 0x202936, torso: 0x286ba6, collar: 0xe67925, arms: 0x286ba6, shoes: 0x171b22 } },
+    ski_patrol:{ id: "ski_patrol", name: "Ski Patrol Shell", tier: "law", who: "ski patrol", price: 0, drip: 0,
+                 colors: { legs: 0x202936, torso: 0xc83232, collar: 0xf2f0e8, arms: 0xc83232, shoes: 0x171b22 } },
+    groundcrew:{ id: "groundcrew", name: "Airside Hi-Vis", tier: "work", who: "airport ground crews", price: 0, drip: 0, cap: true, capColor: 0xe2cf31,
+                 colors: { legs: 0x24344d, torso: 0xd8ca2f, collar: 0x24344d, arms: 0x24344d, shoes: 0x171b22 } },
+    cabincrew:{ id: "cabincrew", name: "Cabin Crew Tailoring", tier: "work", who: "flight attendants", price: 0, drip: 2,
+                 colors: { legs: 0x18243a, torso: 0x223552, collar: 0xb52d3c, arms: 0x223552, shoes: 0x10151d } },
+    bartender:{ id: "bartender", name: "Bartender Blacks", tier: "work", who: "bartenders", price: 0, drip: 1,
+                 colors: { legs: 0x15181d, torso: 0x24282d, collar: 0xd9d7cf, arms: 0x24282d, shoes: 0x101216 } },
+    driver:   { id: "driver",    name: "Professional Driver", tier: "work", who: "drivers and chauffeurs", price: 0, drip: 1, cap: true, capColor: 0x202733,
+                 colors: { legs: 0x202733, torso: 0xc9d3dc, collar: 0x27354a, arms: 0xc9d3dc, shoes: 0x101216 } },
+    housekeeping:{ id: "housekeeping", name: "Housekeeping Tunic", tier: "work", who: "household staff", price: 0, drip: 0,
+                 colors: { legs: 0x34434b, torso: 0x71939a, collar: 0xe5e2d9, arms: 0x71939a, shoes: 0x20262a } },
+    athletic: { id: "athletic",  name: "Trainer Warm-Up Kit", tier: "work", who: "trainers and fighters", price: 0, drip: 1,
+                 colors: { legs: 0x1f2936, torso: 0x315f9b, collar: 0xe6e7e3, arms: 0x315f9b, shoes: 0xe8e8e3 } },
+    pitcrew:  { id: "pitcrew",   name: "Pit Crew Coveralls", tier: "work", who: "pit crews", price: 0, drip: 1, cap: true, capColor: 0x17253a,
+                 colors: { legs: 0x17253a, torso: 0x17253a, collar: 0xc93632, arms: 0x17253a, shoes: 0x11151b } },
+    marshal:  { id: "marshal",   name: "Track Marshal Hi-Vis", tier: "work", who: "track marshals", price: 0, drip: 0, cap: true, capColor: 0xe36f22,
+                 colors: { legs: 0x26313e, torso: 0xe36f22, collar: 0xf0e44c, arms: 0x26313e, shoes: 0x151a20 } },
+    racer:    { id: "racer",     name: "Racing Suit", tier: "work", who: "professional racers", price: 0, drip: 3,
+                 colors: { legs: 0xb52d32, torso: 0xb52d32, collar: 0xf1eee7, arms: 0xb52d32, shoes: 0x15171b } },
     // ---- NIGHTLIFE / DRESSES (sprinkled onto a fraction of civilians near the
     //      club; painted dress/sundress in clothes.js when present) ----
     dress:     { id: "dress",     name: "Evening Dress",    tier: "fit",    who: "the night crowd",  price: 640,  drip: 8,
@@ -147,8 +186,8 @@
     //      yellow trim, county khaki-over-brown. sheriff carries NO cop
     //      flag on purpose: the trust/impersonation machinery stays city
     //      PD's — khaki off a corpse is a look, not a skeleton key. ----
-    construction: { id: "construction", name: "Site Hi-Vis", tier: "work",  who: "construction crews", price: 0, drip: 0,
-                 colors: { legs: 0x2e4a6b, torso: 0xe8821a, collar: 0xfff06b, arms: 0x8a939c, shoes: 0x4a3a26 } },
+    construction: { id: "construction", name: "Site Hi-Vis", tier: "work",  who: "construction crews", price: 0, drip: 0, cap: true, capColor: 0xf0c51b,
+                 colors: { legs: 0x2e4a6b, torso: 0xff5f08, collar: 0xbfc6c5, arms: 0x1d3352, shoes: 0x4a3a26 } },
     scrubs:    { id: "scrubs",    name: "Hospital Scrubs",  tier: "work",   who: "nurses",           price: 0,    drip: 0,
                  colors: { legs: 0x3d8a86, torso: 0x3d8a86, collar: 0x2e6b68, arms: 0x3d8a86, shoes: 0xd8d8d8 } },
     doctor:    { id: "doctor",    name: "White Coat",       tier: "work",   who: "doctors",          price: 0,    drip: 1,
@@ -159,9 +198,9 @@
                  colors: { legs: 0xb09a6e, torso: 0xb09a6e, collar: 0xe8d44a, arms: 0xb09a6e, shoes: 0x16110d } },
     security:  { id: "security",  name: "Guard Blacks",     tier: "work",   who: "security guards",  price: 0,    drip: 0,
                  colors: { legs: 0x1c1f26, torso: 0x1c1f26, collar: 0xe8e8e8, arms: 0x1c1f26, shoes: 0x101216 } },
-    sheriff:   { id: "sheriff",   name: "Sheriff Khakis",   tier: "law",    who: "county deputies",  price: 0,    drip: 0,
+    sheriff:   { id: "sheriff",   name: "Sheriff Khakis",   tier: "law",    who: "county deputies",  price: 0,    drip: 0, cap: true, capColor: 0x8a7752,
                  colors: { legs: 0x5a4632, torso: 0xb8a070, collar: 0x7a6a4a, arms: 0xb8a070, shoes: 0x2b241c, belt: 0x1a140c } },
-    soldier:   { id: "soldier",   name: "Olive Fatigues",   tier: "work",   who: "soldiers",         price: 0,    drip: 0,
+    soldier:   { id: "soldier",   name: "Olive Fatigues",   tier: "work",   who: "soldiers",         price: 0,    drip: 0, cap: true, capColor: 0x44503a,
                  colors: { legs: 0x4a5238, torso: 0x4a5238, collar: 0x3a4030, arms: 0x4a5238, shoes: 0x2b2a22 } },
     office:    { id: "office",    name: "Office Slacks",    tier: "work",   who: "accountants",      price: 0,    drip: 1,
                  colors: { legs: 0x39414f, torso: 0x9ab4c8, collar: 0x7d97ab, arms: 0x9ab4c8, shoes: 0x23262b } },
@@ -574,6 +613,10 @@
       if (ch._bandana && CBZ.cityAttachBandana) CBZ.cityAttachBandana(ch, null);
       return true;
     }
+    // A direct catalog role must also remove any tie/collar/blazer meshes left
+    // by a previous composed business fit. This matters for live recasting and
+    // keeps the visual census from photographing yesterday's job on today's.
+    if (rec && CBZ.cityClearComposite) CBZ.cityClearComposite(ch);
     const pp = CBZ.cityApplyClothes ? CBZ.cityApplyClothes(ch, rec || null, opts) : null;
     // The PELVIS goes with the legs — it is the top of the trousers, not a
     // separate garment. character.js gives it its own recolor slot and nothing
@@ -636,6 +679,14 @@
     if (CBZ.cityAttachBandana) {
       if (rec && rec.gang) CBZ.cityAttachBandana(ch, c.torso != null ? c.torso : 0xb079ea);
       else if (ch._bandana) CBZ.cityAttachBandana(ch, null);
+    }
+    // Role headwear is still the rig's existing cap slot: cheap silhouette,
+    // no parallel prop system. Every following outfit explicitly clears it.
+    if (rec) {
+      const cap = !!(rec.cop || rec.cap);
+      paint(s.cap, rec.capColor != null ? rec.capColor : null, cap);
+      paint(s.hair, null, !cap);
+      paint(s.badge, null, !!rec.cop);
     }
     return true;
   }
@@ -784,8 +835,9 @@
     paint(s.stripes, null, false);                                   // no city fit has jail stripes
     paint(s.belt, w.colors.belt != null ? w.colors.belt : 0x17191f, true);
     paint(s.badge, null, !!w.cop);                                   // the badge rides the uniform
-    paint(s.cap, null, !!w.cop);
-    paint(s.hair, null, !w.cop);
+    const cap = !!(w.cop || w.cap);
+    paint(s.cap, w.capColor != null ? w.capColor : null, cap);
+    paint(s.hair, null, !cap);
     _appliedId = w.id;
     if (CBZ.cityBlingPlayerDirty) CBZ.cityBlingPlayerDirty();        // chains re-seat over the new fit
   }
@@ -1243,6 +1295,9 @@
     police: 1, swat: 1, sheriff: 1, soldier: 1, security: 1, firefighter: 1, ems: 1,
     doctor: 1, scrubs: 1, hivis: 1, construction: 1, coveralls: 1, janitor: 1, valet: 1,
     busdriver: 1, mailman: 1, pilot: 1, office: 1, chef: 1, dress: 1,
+    hunter: 1, ranger: 1, hiker: 1, farmer: 1, fisherman: 1, mariner: 1, lifeguard: 1,
+    ski: 1, ski_patrol: 1, groundcrew: 1, cabincrew: 1, bartender: 1, driver: 1,
+    housekeeping: 1, athletic: 1, pitcrew: 1, marshal: 1, racer: 1,
     leather: 1, tactical: 1, designer: 1, suit: 1, tuxedo: 1,
   };
   function minorBanned(rec) {
@@ -1459,10 +1514,32 @@
   function jobFit(job) {
     if (!job) return null;
     // specific new uniforms first (they'd otherwise be eaten by broader lines)
+    if (/\bhunter\b/i.test(job)) return CAT.hunter;
+    if (/park ranger|\branger\b/i.test(job)) return CAT.ranger;
+    if (/\bhiker\b/i.test(job)) return CAT.hiker;
+    if (/farmer|farmhand|rancher|groundskeeper/i.test(job)) return CAT.farmer;
+    if (/fisherman|trawlerman|net hand|\bbosun\b|deckhand/i.test(job)) return CAT.fisherman;
+    if (/yacht captain|harbourmaster|harbormaster|first mate|\bskipper\b|chief steward|stewardess|\bsteward\b/i.test(job)) return CAT.mariner;
+    if (/lifeguard/i.test(job)) return CAT.lifeguard;
+    if (/ski patrol/i.test(job)) return CAT.ski_patrol;
+    if (/ski instructor|\bskier\b|lift operator/i.test(job)) return CAT.ski;
+    if (/ground crew|baggage handler|ramp agent|aircraft marshaller|refueller|catering driver|pushback driver|airfield driver|fuel attendant/i.test(job)) return CAT.groundcrew;
+    if (/flight attendant|cabin crew|gate agent|ticket agent/i.test(job)) return CAT.cabincrew;
+    if (/\bbartender\b|\bbarkeep\b/i.test(job)) return CAT.bartender;
+    if (/cab driver|chauffeur/i.test(job)) return CAT.driver;
+    if (/housekeeper|\bnanny\b/i.test(job)) return CAT.housekeeping;
+    if (/personal trainer|\bboxer\b/i.test(job)) return CAT.athletic;
+    if (/pit crew|crew chief|race mechanic/i.test(job)) return CAT.pitcrew;
+    if (/track marshal|gate steward/i.test(job)) return CAT.marshal;
+    if (/pro racer|race driver|racing driver|driver for /i.test(job)) return CAT.racer;
+    if (/bodyguard|close protection|secret service|intelligence agent|bureau agent/i.test(job)) return CAT.tactical;
+    if (/bank teller|bank manager|count clerk|pit boss|air traffic controller|yacht broker|receptionist/i.test(job)) return CAT.office;
+    if (/cage cashier/i.test(job)) return CAT.waiter || CAT.vendor;
+    if (/\bbutler\b/i.test(job)) return CAT.waiter || CAT.vendor;
     if (/\bchef\b|line cook|cook\b|kitchen/i.test(job)) return CAT.chef || CAT.vendor;
     if (/waiter|waitress|server|wait staff|barista/i.test(job)) return CAT.waiter || CAT.vendor;
     if (/mail\s?man|mail carrier|postal|postman|letter carrier/i.test(job)) return CAT.mailman || CAT.hivis;
-    if (/pilot|aviator|first officer|flight crew|captain/i.test(job)) return CAT.pilot || CAT.office;
+    if (/pilot|aviator|first officer|flight crew|airline captain/i.test(job)) return CAT.pilot || CAT.office;
     if (/janitor|custodian|cleaner|sanitation/i.test(job)) return CAT.janitor || CAT.security;
     if (/\bvalet\b|parking attendant/i.test(job)) return CAT.valet || CAT.security;
     if (/bus driver|transit|trolley|tram driver/i.test(job)) return CAT.busdriver || CAT.security;
@@ -1471,18 +1548,18 @@
     // terms only, so a street "dealer" (drugs) never trips this. (pit boss keeps
     // the suit via the archetype path — no jobFit here.)
     if (/croupier|card dealer|casino dealer|blackjack dealer|casino floor/i.test(job)) return CAT.waiter || CAT.vendor;
-    if (/clerk|cashier|vendor|barber/i.test(job)) return CAT.vendor;
-    if (/construction|builder|hardhat|roadwork/i.test(job)) return CAT.construction;
-    if (/mechanic|auto shop|garage/i.test(job)) return CAT.coveralls || CAT.construction;
-    if (/dock|warehouse|laborer|courier|delivery/i.test(job)) return CAT.hivis;
+    if (/clerk|cashier|vendor|barber|retail worker|shopkeeper|ticket seller/i.test(job)) return CAT.vendor;
+    if (/construction|builder|hardhat|roadwork|quarry worker/i.test(job)) return CAT.construction;
+    if (/mechanic|auto shop|garage|chief engineer/i.test(job)) return CAT.coveralls || CAT.construction;
+    if (/dock|warehouse|laborer|courier|delivery|yard hand/i.test(job)) return CAT.hivis;
     if (/paramedic|ambulance|\bems\b/i.test(job)) return CAT.ems;
     if (/nurse|scrubs/i.test(job)) return CAT.scrubs;
     if (/doctor|surgeon|physician/i.test(job)) return CAT.doctor;
     if (/firefight/i.test(job)) return CAT.firefighter;
     if (/sheriff|deputy/i.test(job)) return CAT.sheriff;
     if (/soldier|military/i.test(job)) return CAT.soldier;
-    if (/security|guard|bouncer/i.test(job)) return CAT.security;
-    if (/accountant|office|banker|analyst|lawyer/i.test(job)) return CAT.office;
+    if (/security|guard|bouncer|doorman/i.test(job)) return CAT.security;
+    if (/accountant|office|banker|bank manager|analyst|lawyer|air traffic controller|yacht broker|receptionist/i.test(job)) return CAT.office;
     return null;
   }
   // THE GATE: age first, everything else after. A child must never reach the

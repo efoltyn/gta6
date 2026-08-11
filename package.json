@@ -30,7 +30,8 @@
     "visual:disasters": "node tools/visual-compare.mjs --preset disaster-sequence --keep-going --before https://efoltyn.github.io/gta6/",
     "visual:race-stadium": "node tools/visual-compare.mjs --preset race-stadium --before https://efoltyn.github.io/gta6/",
     "visual:interiors": "node tools/visual-compare.mjs --preset interiors --before https://efoltyn.github.io/gta6/",
-    "visual:npc-gestures": "node tools/visual-compare.mjs --preset npc-gestures --keep-going --before https://efoltyn.github.io/gta6/"
+    "visual:npc-gestures": "node tools/visual-compare.mjs --preset npc-gestures --keep-going --before https://efoltyn.github.io/gta6/",
+    "visual:role-outfits": "node tools/visual-compare.mjs --preset role-outfit-gallery --keep-going --before https://efoltyn.github.io/gta6/"
   },
   "devDependencies": {
     "three": "^0.164.1",

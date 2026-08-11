@@ -2598,6 +2598,58 @@
             const WARHEAD_LB = 2.2;
             try { CBZ.breachDeliver(pt.x, pt.y, pt.z, WARHEAD_LB, false, { byPlayer: true }); } catch (e) {}
           }
+          /* ---- THE TWO HALVES THAT WERE NEVER CITY-SHAPED -----------------
+             OWNER (2026-08-11): "make RPGs and explosions work in the prison
+             game like how they work in Gang City."
+
+             The 2026-08-06 split (see the top of this closure) moved the
+             fireball, the sound, the shake and the blast damage out onto the
+             capability, and MEASURED in escape mode they all fire — a rocket
+             in the yard kills the men in the yard and carves the wall it hits
+             (cityFracture.blastAt asks CBZ.modeHas("breach"), so the prison's
+             room walls open and its `noBreach` perimeter refuses). What stayed
+             behind in the city block was the part you SEE at the wall: the
+             facade coming down, and the ground-level widening that turns a
+             hole into a doorway. Neither is city-shaped, and one of them says
+             so in its own header — city/crashfx.js:1789 opens cityBlastWall
+             with "NO MODE GATE. fpsmode.js calls this on every rocket that
+             finds a wall, in every mode; outside the city it was the silent
+             half of the RPG the owner filmed. Reads CBZ.colliders for the
+             roofline and nothing else." It then sat inside `if (cityWorld)`.
+             cityBreach (city/buildings.js:2194) is the same: colliders,
+             carveHole, cityChunk, and a self-dedup against the fracture ledger
+             it shares — no lot, no building record, no arena.
+
+             So both now ask for `breach`, the capability that already decides
+             whether a blast may open a wall here at all. City mode is
+             byte-identical (modeHas("breach") is 1 there and always was); the
+             prison, Gun Game and the disaster island get the avalanche and the
+             doorway they were always meant to have. ---- */
+          const mayOpen = CBZ.modeHas ? CBZ.modeHas("breach") : cityWorld;
+          // a DIRECT hit on a ground-floor wall widens into a real, WALKABLE
+          // hole. Self-dedups via cityFracture.recent() (armed synchronously by
+          // blastAt a tick ago), so it never double-carves the wall the
+          // explosion chain already opened.
+          if (mayOpen && !cityWorld && groundHit && CBZ.cityBreach) {
+            try { CBZ.cityBreach(pt.x, pt.z, (w.blastRadius || 7) * 0.28); } catch (e) {}
+          }
+          // detonated ON a face → the facade REACTS: debris avalanche pouring
+          // down it, concrete dust out of the wound, a parapet block near the
+          // roofline. Flavor only — the real hole is the carve above.
+          if (mayOpen && !cityWorld && wallStruck && canLeaveBlastScar(wallStruck) && CBZ.cityBlastWall) {
+            const sd0 = new THREE.Vector3(-launchDir.x, 0, -launchDir.z);
+            if (sd0.lengthSq() < 1e-6) sd0.set(0, 1, 0); else sd0.normalize();
+            const wf0 = wallStruck.face, wo0 = wallStruck.object;
+            if (wf0 && wo0 && wo0.getWorldQuaternion) {
+              const wn0 = wf0.normal.clone().applyQuaternion(wo0.getWorldQuaternion(wallQ));
+              if (wn0.lengthSq() > 0.25) {
+                if (wn0.dot(launchDir) > 0) wn0.multiplyScalar(-1);
+                sd0.copy(wn0.normalize());
+              }
+            }
+            try { CBZ.cityBlastWall(wallPoint || pt, sd0, { power: w.blastPower || 1.4 }); } catch (e) {}
+          }
+
           // ---- everything below reads a CITY record ------------------------
           if (cityWorld) {
           // a guest's blast never reaches the host's sim otherwise — the host

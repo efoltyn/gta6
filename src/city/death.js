@@ -194,7 +194,13 @@
     if (roll < 0.34) {
       P._legSide = Math.random() < 0.5 ? 1 : -1;
       P._legWound = Math.min(1, (P._legWound || 0) + 0.35 + sev * 0.55);
-      if (CBZ.flashHint && (P._legWound > 0.45)) CBZ.flashHint("LEG HIT — you're limping", 1.6);
+      // NO POPUP. The caption on the camera cone (owner, 2026-08-11: "I like
+      // that my leg can get hit and I can limp, but I want to SEE the limp as I
+      // walk, not as a popup"). It is already four carriers deep, ~50 lines
+      // below: _moveScale slows you, sprint is locked out above 0.4, the leg
+      // goes stiff and dragging, and the body dips onto the good side in sync
+      // with the walk phase. A line of text announcing your own gait is the
+      // "pure duplicate" case guards.js:346 already deleted once.
     } else if (roll < 0.55) {
       P._armWound = Math.min(1, (P._armWound || 0) + 0.3 + sev * 0.5);
     } else {

@@ -1042,7 +1042,8 @@
     // CANONICAL WARDROBE (outfits.js): people whose POSITION dictates their
     // cloth dress the part — a street tycoon wears the actual tux (not a
     // random bright shirt under a bow tie), mobsters wear suits, dealers
-    // tracksuits, dock workers hi-vis. Caster-chosen outfits still win.
+    // tracksuits, dock workers hi-vis. A role record wins over a raw spawn tint;
+    // the tint still wins when the role caster deliberately has no answer.
     // The RECORD rides along so clothes.js can paint the garment structure
     // (lapels/badge/apron) onto the rig, not just tint it; everybody else
     // gets the painted STREET BASICS pass (collar line/print/waistband) so
@@ -1059,7 +1060,7 @@
     // the flag false to bring the painted basics seams back for nobodies.
     const _plain = !CBZ.CONFIG || CBZ.CONFIG.CITY_PLAIN_CIVVIES == null || !!CBZ.CONFIG.CITY_PLAIN_CIVVIES;
     let _castFit = null;
-    if (!opts.outfit && CBZ.cityOutfitFor && CBZ.cityRecolorRig) {
+    if (CBZ.cityOutfitFor && CBZ.cityRecolorRig) {
       // age/band ride along so the wardrobe can refuse to put a four-year-old
       // in a tailored suit or a hi-vis work vest. Absent = adult, as before.
       const fit = CBZ.cityOutfitFor({ archetype, job: opts.job, gang: opts.gang, vendor: opts.vendor, rng: r, seed: (skin ^ outfit) | 0, sex: gender, age: ageYears, band: ch.band || "adult" });
@@ -1071,7 +1072,7 @@
       // ONLY when the plain switch is off (the old "nobody is a flat slab" look);
       // the painted pass repaints ARMS, so skip it on short-sleeve bodies so the
       // bare forearm survives.
-      else if (!_plain && CBZ.cityApplyClothes && !shortSleeve) CBZ.cityApplyClothes(ch, { id: "basics", colors: { torso: outfit } });
+      else if (!opts.outfit && !_plain && CBZ.cityApplyClothes && !shortSleeve) CBZ.cityApplyClothes(ch, { id: "basics", colors: { torso: outfit } });
     }
     // cash: econ.rollCashFor(archetype, wealth, r) when present, else a who-aware
     // fallback (boss/tycoon fat, dealer big, ordinary modest). Guarded per contract.
@@ -4408,7 +4409,12 @@
       ped.pause = Math.max(ped.pause, 0.8 + rng() * 0.7); ped.speed = 0;
       ped.group.rotation.y = lerpAngle(ped.group.rotation.y, Math.atan2(P.pos.x - ped.pos.x, P.pos.z - ped.pos.z), 0.5);
       const title = CBZ.cityPlayerTitle ? CBZ.cityPlayerTitle() : "big man";
-      const line = pick(["“Yo, " + title + "!”", "“Ayy — " + title + "! Good to see you.”", "“" + title + "! You good out here?”"], rng());
+      // The greeting is picked by STANDING, not by a die (city/read.js): the
+      // same man says the same thing until how he feels about you changes. The
+      // street name still rides on it — that part was already right.
+      const gl = CBZ.cityLine && CBZ.cityLine(ped, "greet");
+      const line = gl ? "“" + gl.replace(/\.$/, "") + ", " + title + ".”"
+                      : pick(["“Yo, " + title + "!”", "“Ayy — " + title + "! Good to see you.”", "“" + title + "! You good out here?”"], rng());
       if (CBZ.citySay) CBZ.citySay(ped, line, "#7ed957", 2.2); else citySayBark(ped, line, 1.8);
       if (CBZ.cityRelShift) CBZ.cityRelShift(ped, "greeted", 1);
       return true;
@@ -4549,7 +4555,12 @@
     }
     if (picked === "trade") {
       ped.approach = "trade"; ped._approachT = 4; ped.reactCD = 15;
-      citySayBark(ped, pick(["Yo, you buying or selling?", "I got a little something if you're interested.", "Let's talk business a sec."], rng()), 2);
+      // WHAT THEY PITCH DEPENDS ON WHO YOU ARE (owner: "if I'm a hitman they
+      // offer me jobs"). city/read.js sizes the pitch to the level gap and, if
+      // the street knows you as somebody who takes work, offers work instead of
+      // product. Falls back to the old flat line if read.js is absent.
+      const rl = CBZ.cityLine && CBZ.cityLine(ped, "trade");
+      citySayBark(ped, rl || pick(["Yo, you buying or selling?", "I got a little something if you're interested.", "Let's talk business a sec."], rng()), 2);
       return true;
     }
     if (picked === "deal") {

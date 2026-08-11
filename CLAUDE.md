@@ -17,6 +17,135 @@ the repo root of `main`, so **pushing to main IS the deploy** and anything in
 
 Also `GAMEPLAN.md`, `docs/plan/`, `PROCGEN.md`.
 
+## THE PRISON IS 6 HECTARES NOW — `src/world/prisonwings.js`
+
+**"The prison game should be bigger … think of scale of human vs prison size and
+really make it bigger, adding rooms — don't worry too much about design of
+rooms, worry about SCALE and interactable things that matter. The armoury is a
+great example of something that matters hugely: you need a key to get in and
+then you get guns, it's awesome"** (owner, 2026-08-11).
+
+**A MAN IS 1.82 m AND THE COMPOUND WAS 1.79 ha.** Measured before a wall moved:
+admin 40x20, wing 32x36, north yard 60x60, south block 88x76 — 92 m across,
+195 m deep, **fifty body-lengths** of yard, when a real medium-security
+perimeter runs 300-400 m a side. No amount of room dressing fixes that; it is
+arithmetic.
+
+**NOT ONE AUTHORED COORDINATE MOVED.** world/layout.js's stage-5 desert states
+the discipline (a 10x basin worked because it grew off a HELD corner), and it is
+the only reason this is one new file instead of a rewrite of five. The cell wing,
+admin wing, both yards, every room, `CBZ.SPAWN`, every escape route, every vent
+crawl, every patrol waypoint and every propuse anchor are byte-identical. The
+compound grew *around* them: a new outer wire at x +-124, z -116..128, and what
+used to be the yard's boundary wall is now an **internal division fence** — which
+is what a real prison has, and the only reason a gate through one is worth a key.
+The freedom gate does not move either; the new south wall is the same line
+carried out to the corners.
+
+    inside the wire   92 x 195  ->  248 x 244      1.79 ha -> 6.05 ha
+
+**IT INVENTS NO ITEM. The three keys the game already has each got more to
+open**, which is the opposite of diluting the spine:
+
+| key | what it now opens |
+|---|---|
+| **Keycard** (the one you already hunt) | the FOUR sally gates + segregation — the card used to open one door, it now opens the map |
+| **Lockpick** | tool crib 3.2 s · knife cage 4.4 s · property cage 5.6 s |
+| **Gun-Room Key** (off the warden) | **CENTRAL CONTROL** — the console throws the yard door and every gate in the house at once, and brings every screw with it |
+
+Six rooms, each a shell + roof + the thing it is actually for: **industries**
+(tool crib: Hacksaw, Lockpick, Pickaxe), **powerhouse** (deliberately unlocked —
+an empty-handed room is a legitimate outcome), **segregation** (16 singles, the
+Contraband Map), **kitchen** (knife cage + a walk-in cooler that is a hiding
+place, not a prize), **visitation** (property cage), **control**. Every cage is
+BARS on a transparent pane — gun-room rule (a), you must see the prize — and
+every lock also states a price in pounds of C4 (`systems/breach.js`).
+
+**AND HE IS NOT ALWAYS AT HIS DESK.** `world/adminwing.js`: the warden now SITS
+(`CBZ.propSit` on the throne `CBZ.furnish.bossDesk` already registered — measured,
+he finds `kind:"throne"` and lands on it). The first cut then nailed him there
+for three of eight schedule blocks and the owner said so immediately — *"should
+not always be in the office, of course sometimes you should see the warden, but
+it's too common now."* `work` is now the only block that CAN be his desk, `mess`
+and `supper` put him on the tier and at the checkpoint where you can see him, and
+even that block rolls against the DAY (`CBZ.hash01`, deterministic, no
+`Math.random`). **Desk time 29% of the day -> ~8%.** He stands up the instant
+anything happens (hunt/alert/approach/investigate) and sits back down after.
+
+**RPGs AND EXPLOSIONS: TWO HALVES WERE NEVER CITY-SHAPED.** The 2026-08-06 split
+moved the fireball and the damage onto the capability; MEASURED in escape mode a
+rocket already killed the men in the yard and carved the wall it hit. What stayed
+behind in `if (cityWorld)` was the part you SEE at the wall — and one of them
+says so in its own header (`city/crashfx.js:1789`: *"NO MODE GATE. fpsmode.js
+calls this on every rocket that finds a wall, in every mode"*), then sat inside
+the gate. `cityBlastWall` (facade avalanche, concrete dust, parapet) and
+`cityBreach` (the walkable widening) now ask `modeHas("breach")`; neither reads a
+city record. City mode is byte-identical.
+
+**THE PERIMETER STILL HOLDS.** Every outer segment declares `noBreach`; measured,
+a 1.9-power blast on the chapel/industries/kitchen walls carves (band [0,6..7.5])
+and the same blast on the outer wire returns *"no eligible wall"*. `breach-check`
+reports `perimeterHeldAt100lb: true`.
+
+Flags `PRISON_WINGS_V1` · `PRISON_WARDEN_SEATED`. Ratchet
+`CBZ.prisonWingsAudit()` — `unreachable` (a locked thing with no route) and
+`orphanGates` (a gap cut in a wall with no gate in it, i.e. a hole in the prison)
+both pinned at 0. Gates green: `math-gate`, `prison-polish-check` 38/38,
+`breach-check`.
+
+## WHO YOU ARE TO THEM — `src/city/read.js`, the street's one social read
+
+**"They don't just talk to me based on my role, also based on theirs — it's a
+simple table"**, and **"roles and levels matter for what they say to me: if I'm
+a hitman they offer me jobs"** (owner, 2026-08-11). Also his standing complaint
+about the dialogue area: **"you don't get popups in real life."**
+
+The city already kept a five-axis `relPlayer`, a cover-aware 1..100 `cityLevel`,
+a `{title, kind}` role and a ±12 gap test — and read every one of them as a RAW
+NUMBER at the call site, so the lines that came out were flat arrays picked with
+`rng()`. A Lv.3 bum and a Lv.74 shot-caller greeted a Kingpin with the same
+sentence off the same die. The prison had solved this (`systems/economy.js:263`
+`socialRead()` → words, and its law at :145: *"surfaced as a LINE or a PRICE,
+never as a meter"*); the street never got the port.
+
+**FOUR AXES, ONE TABLE.** `TABLE[topic][theirRole][yourRole]`, and inside a cell
+the LEVEL GAP — because that is where level actually changes the sentence: a
+Lv.60 lieutenant and a Lv.8 corner kid are both `gang`. A cell is a flat array
+(same at every weight class) or a gap-keyed object; gap lookup walks outward to
+the nearest defined band. Resolution is most-specific-first, and STANDING beats
+the table — a friend is a friend before he is a dealer.
+
+    CBZ.cityReadGap(them)        -2..+2   (±1 at 12 levels, ±2 at 28)
+    CBZ.citySocialRead(ped)      standing · mood · gap · level · title · kind
+    CBZ.cityPlayerRole()         civilian | hitman | boss | crew | cop | security
+    CBZ.cityLine(ped, topic)     contact | trade | greet  -> a string, or null
+    CBZ.cityContactReact(p,k,s)  the bump, with a voice
+
+**IT AUTHORS NO STAT.** Every number it reads is written by somebody else, and
+it never forces a pose: contact moves the scalars through `cityRelShift` and
+stops, because `city/tells.js` already maps fear → guarded hands and grudge →
+folded arms on its own tick. Line choice is hashed off the person's own spawn
+cell folded with the gap and the standing, so **the same man says the same thing
+until the relationship changes** — never `Math.random`.
+
+**`citySay` NOW REPORTS DELIVERY** (`social.js:431`). Every early return was a
+silent drop, and read.js was counting contact lines the range gate had already
+thrown away. It returns `true` only when a line reached the element; the old
+return was `undefined`, so every existing caller is unaffected.
+
+Flag `CITY_READ_V1`. Audit `CBZ.cityReadAudit()` — `mute` (asks it could not
+answer) may only go DOWN, `lines`/`contacts` only UP. Gate
+`tools/dialogue-read-check.mjs`, and it runs **two-sided**: `--revert` asserts
+the flat fallback comes back and no contact speaks with the flag off.
+Consumers migrated with it: `humancontact.js` (the bump had never made a sound),
+`peds.js` (trade pitch + greeting), `interactions_rich.js` (insult now scales on
+the shared band — it was the only verb reading the gap, in one place).
+
+**THE LIMP LOST ITS CAPTION** (`death.js:197`, deleted). The limp was already
+four carriers deep — `_moveScale`, the sprint lock, the stiff dragging leg, and
+a body dip synced to the walk phase. A line of text announcing your own gait is
+the "pure duplicate" case `guards.js:346` already deleted once.
+
 ## A BASE ANSWERS FOR ITSELF — `src/city/fortresponse.js`
 
 **"The soldiers there are dumb. Dumb. Dumb. … I'd see them run towards fire

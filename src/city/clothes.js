@@ -806,6 +806,55 @@
     return { torso: 1, arms: 1, legs: 1 };
   };
 
+  // Construction has its own vest grammar. It used to borrow PAINT.hivis,
+  // whose two short shoulder tabs read like white chest buttons when site
+  // orange was substituted for dock yellow. Keep the dock outfit intact and
+  // paint the familiar Class 2 vest over a navy work shirt: long shoulder
+  // reflectors joined by two uninterrupted waist bands.
+  PAINT.construction = function (P, c) {
+    const vest = (c && c.torso != null) ? c.torso : 0xff5f08;
+    const shirt = (c && c.arms != null) ? c.arms : 0x1d3352;
+    const denim = (c && c.legs != null) ? c.legs : 0x2e4a6b;
+    const silver = (c && c.collar != null) ? hx(c.collar) : "#bfc6c5";
+    const bright = "#e5e9e6", seam = tone(vest, -0.30);
+    const T = P.T, A = P.A, L = P.L;
+
+    T.fill(hx(vest));
+    // Deep front opening exposes the navy polo instead of a pair of square
+    // tabs. The back stays fully orange like the reference vest.
+    T.poly("front", [[0.29, 0], [0.71, 0], [0.5, 0.34]], hx(shirt));
+    T.poly("front", [[0.36, 0], [0.64, 0], [0.5, 0.20]], tone(shirt, -0.18));
+
+    // Two continuous shoulder reflectors. A brighter inset gives the broad
+    // bands a reflective centre without breaking them into little patches.
+    for (const col of ["front", "back"]) {
+      for (const x of [0.12, 0.76]) {
+        T.rect(col, x, 0.03, 0.12, 0.54, silver);
+        T.rect(col, x + 0.025, 0.03, 0.07, 0.54, bright);
+      }
+    }
+    // The two waist bands run around every face as one unbroken safety read.
+    for (const y of [0.52, 0.72]) for (const col of ["front", "back", "side"]) {
+      T.rect(col, 0, y, 1, 0.11, silver);
+      T.rect(col, 0, y + 0.025, 1, 0.06, bright);
+    }
+    T.rect("front", 0.487, 0.30, 0.026, 0.70, seam);               // vest zip
+    T.rect("front", 0.10, 0.86, 0.30, 0.10, tone(vest, -0.14));    // low pockets
+    T.rect("front", 0.60, 0.86, 0.30, 0.10, tone(vest, -0.14));
+    T.shade();
+
+    A.fill(hx(shirt));
+    A.rect("front", 0, 0.84, 1, 0.08, tone(shirt, -0.24));
+    A.rect("side", 0, 0.84, 1, 0.08, tone(shirt, -0.24));
+    A.shade();
+
+    L.fill(hx(denim));
+    L.rect("side", 0.44, 0, 0.12, 1, tone(denim, -0.20));
+    L.rect("front", 0.16, 0.45, 0.68, 0.13, tone(denim, -0.12));
+    L.shade();
+    return { torso: 1, arms: 1, legs: 1 };
+  };
+
   PAINT.vendor = function (P, c) {
     const shirt = (c && c.torso != null) ? c.torso : 0xc8553a, apron = 0xf0ead8;
     const T = P.T, A = P.A, sc = hx(shirt), apc = hx(apron);
@@ -1426,6 +1475,255 @@
     return parts;
   };
 
+  // ============================================================
+  //  ROLE READS — compact uniforms for jobs that already exist in the world.
+  //  They deliberately reuse the same four atlas rows and existing cap slot;
+  //  no special rig, prop tree, or per-biome dresser is introduced here.
+  // ============================================================
+  PAINT.mailman = function (P, c) {
+    const blue = (c && c.torso != null) ? c.torso : 0x3a6a96, dark = tone(blue, -0.3);
+    const T = P.T, A = P.A, L = P.L;
+    T.fill(hx(blue));
+    T.rect("front", 0.49, 0, 0.025, 1, dark);
+    T.rect("front", 0.12, 0.25, 0.22, 0.14, dark); T.rect("front", 0.66, 0.25, 0.22, 0.14, dark);
+    T.poly("front", [[0.1, 0], [0.2, 0], [0.82, 1], [0.7, 1]], "#6b4c2d"); // mailbag strap
+    T.rect("front", 0.68, 0.1, 0.18, 0.055, "#e5e0cf"); T.shade();
+    A.fill(hx(blue)); A.rect("front", 0.22, 0.12, 0.56, 0.16, dark); A.shade();
+    L.fill(hx((c && c.legs != null) ? c.legs : 0x2f4a6b)); L.rect("side", 0.4, 0, 0.2, 1, dark); L.shade();
+    return { torso: 1, arms: 1, legs: 1 };
+  };
+
+  PAINT.janitor = function (P, c) {
+    const grey = (c && c.torso != null) ? c.torso : 0x4a5560, lo = tone(grey, -0.25);
+    const T = P.T, A = P.A, L = P.L;
+    T.fill(hx(grey)); T.rect("front", 0.48, 0, 0.04, 1, lo);
+    T.rect("front", 0.12, 0.24, 0.23, 0.15, lo); T.rect("front", 0.66, 0.24, 0.22, 0.15, lo);
+    T.rect("front", 0.14, 0.27, 0.18, 0.045, "#d9d5c8"); T.shade();
+    A.fill(hx(grey)); A.rect("front", 0, 0.84, 1, 0.08, lo); A.shade();
+    L.fill(hx((c && c.legs != null) ? c.legs : 0x3a3f46)); L.rect("front", 0.18, 0.47, 0.64, 0.14, lo); L.shade();
+    return { torso: 1, arms: 1, legs: 1 };
+  };
+
+  PAINT.valet = function (P, c) {
+    const red = (c && c.torso != null) ? c.torso : 0x8a1f24;
+    const T = P.T, A = P.A, L = P.L;
+    T.fill("#eceae4");
+    T.poly("front", [[0.08, 0], [0.42, 0], [0.48, 0.28], [0.4, 1], [0.08, 1]], hx(red));
+    T.poly("front", [[0.92, 0], [0.58, 0], [0.52, 0.28], [0.6, 1], [0.92, 1]], hx(red));
+    T.rect("front", 0.47, 0.02, 0.06, 0.58, "#17191f");
+    for (let y = 0.34; y < 0.8; y += 0.18) T.dot("front", 0.5, y, 0.018, "#e8c454");
+    T.shade(); A.fill("#eceae4"); A.shade();
+    L.fill(hx((c && c.legs != null) ? c.legs : 0x16171c)); L.shade();
+    return { torso: 1, arms: 1, legs: 1 };
+  };
+
+  PAINT.busdriver = function (P, c) {
+    const teal = (c && c.torso != null) ? c.torso : 0x2f5a6b, lo = tone(teal, -0.3);
+    const T = P.T, A = P.A, L = P.L;
+    T.fill(hx(teal)); T.rect("front", 0.49, 0, 0.02, 1, lo);
+    T.rect("front", 0.06, 0, 0.18, 0.11, tone(teal, 0.18)); T.rect("front", 0.76, 0, 0.18, 0.11, tone(teal, 0.18));
+    T.rect("front", 0.14, 0.24, 0.2, 0.13, lo); T.rect("front", 0.66, 0.24, 0.2, 0.13, lo);
+    T.rect("front", 0.62, 0.12, 0.2, 0.045, "#d7d9d4"); T.shade();
+    A.fill(hx(teal)); A.rect("front", 0.16, 0.08, 0.68, 0.16, lo); A.shade();
+    L.fill(hx((c && c.legs != null) ? c.legs : 0x24304a)); L.shade();
+    return { torso: 1, arms: 1, legs: 1 };
+  };
+
+  PAINT.hunter = function (P, c) {
+    const field = (c && c.torso != null) ? c.torso : 0x465038, orange = (c && c.collar != null) ? c.collar : 0xe86d16;
+    const T = P.T, A = P.A, L = P.L, chips = [0x303a28, 0x5c6344, 0x756447, 0x3b432e];
+    function camo(R, n, base) {
+      R.fill(hx(base)); let s = 0x51f15e ^ base;
+      const rnd = () => { s = (Math.imul(s, 1664525) + 1013904223) | 0; return (s >>> 0) / 4294967296; };
+      for (const col of ["front", "back", "side"]) for (let i = 0; i < n; i++) R.rect(col, rnd(), rnd(), 0.1 + rnd() * 0.16, 0.05 + rnd() * 0.1, hx(chips[(rnd() * chips.length) | 0]));
+      R.shade();
+    }
+    camo(T, 15, field);
+    for (const col of ["front", "back", "side"]) T.rect(col, 0.08, 0.08, 0.84, 0.86, hx(orange));
+    T.rect("front", 0.47, 0.08, 0.06, 0.86, tone(orange, -0.3));
+    T.rect("front", 0.14, 0.57, 0.28, 0.23, tone(orange, -0.13)); T.rect("front", 0.58, 0.57, 0.28, 0.23, tone(orange, -0.13));
+    T.rect("front", 0.14, 0.57, 0.28, 0.04, tone(orange, -0.35)); T.rect("front", 0.58, 0.57, 0.28, 0.04, tone(orange, -0.35)); T.shade();
+    camo(A, 8, field); camo(L, 10, (c && c.legs != null) ? c.legs : 0x4a4d32);
+    L.rect("side", 0.18, 0.34, 0.64, 0.22, tone(field, -0.28));
+    return { torso: 1, arms: 1, legs: 1 };
+  };
+
+  PAINT.ranger = function (P, c) {
+    const khaki = (c && c.torso != null) ? c.torso : 0xb19a6a, green = (c && c.collar != null) ? c.collar : 0x4a5835;
+    const T = P.T, A = P.A, L = P.L;
+    T.fill(hx(khaki)); T.rect("front", 0.49, 0, 0.02, 1, tone(khaki, -0.25));
+    T.rect("front", 0.06, 0, 0.18, 0.11, hx(green)); T.rect("front", 0.76, 0, 0.18, 0.11, hx(green));
+    T.rect("front", 0.13, 0.26, 0.23, 0.14, tone(khaki, -0.15)); T.rect("front", 0.64, 0.26, 0.23, 0.14, tone(khaki, -0.15));
+    T.dot("front", 0.26, 0.17, 0.03, "#d9b94f"); T.rect("front", 0.66, 0.15, 0.18, 0.045, hx(green)); T.shade();
+    A.fill(hx(khaki)); A.rect("front", 0.2, 0.07, 0.6, 0.18, hx(green)); A.shade();
+    L.fill(hx((c && c.legs != null) ? c.legs : 0x3f4b2e)); L.rect("side", 0.36, 0, 0.28, 1, tone(green, -0.24)); L.shade();
+    return { torso: 1, arms: 1, legs: 1 };
+  };
+
+  PAINT.hiker = function (P, c) {
+    const shell = (c && c.torso != null) ? c.torso : 0xb94f2f, dark = (c && c.collar != null) ? c.collar : 0x27313a;
+    const T = P.T, A = P.A, L = P.L;
+    T.fill(hx(shell));
+    for (const col of ["front", "back", "side"]) T.rect(col, 0, 0, 1, 0.22, hx(dark));
+    T.rect("front", 0.48, 0, 0.04, 1, tone(shell, -0.38));
+    T.rect("front", 0.1, 0.52, 0.28, 0.18, tone(shell, -0.2)); T.rect("front", 0.62, 0.52, 0.28, 0.18, tone(shell, -0.2)); T.shade();
+    A.fill(hx(shell)); A.rect("front", 0, 0, 1, 0.28, hx(dark)); A.rect("front", 0, 0.88, 1, 0.08, hx(dark)); A.shade();
+    L.fill(hx((c && c.legs != null) ? c.legs : 0x3d4650)); L.rect("side", 0.18, 0.34, 0.64, 0.22, hx(dark)); L.rect("front", 0.14, 0.48, 0.72, 0.14, tone(dark, 0.12)); L.shade();
+    return { torso: 1, arms: 1, legs: 1 };
+  };
+
+  PAINT.farmer = function (P, c) {
+    const shirt = (c && c.torso != null) ? c.torso : 0x76543a, denim = (c && c.legs != null) ? c.legs : 0x3d5872;
+    const T = P.T, A = P.A, L = P.L;
+    T.fill(hx(shirt));
+    for (const x of [0.2, 0.5, 0.8]) for (const col of ["front", "back", "side"]) T.rect(col, x, 0, 0.035, 1, tone(shirt, -0.22));
+    for (const y of [0.22, 0.5, 0.78]) for (const col of ["front", "back", "side"]) T.rect(col, 0, y, 1, 0.03, tone(shirt, 0.18));
+    T.rect("front", 0.2, 0.26, 0.6, 0.74, hx(denim)); T.rect("front", 0.18, 0, 0.12, 0.42, hx(denim)); T.rect("front", 0.7, 0, 0.12, 0.42, hx(denim));
+    T.rect("front", 0.34, 0.42, 0.32, 0.2, tone(denim, -0.16)); T.shade();
+    A.fill(hx(shirt)); A.rect("front", 0, 0.76, 1, 0.06, tone(shirt, -0.2)); A.shade();
+    L.fill(hx(denim)); L.rect("front", 0.16, 0.46, 0.68, 0.15, tone(denim, -0.2)); L.shade();
+    return { torso: 1, arms: 1, legs: 1 };
+  };
+
+  PAINT.fisherman = function (P, c) {
+    const knit = (c && c.torso != null) ? c.torso : 0x283d50, oil = (c && c.collar != null) ? c.collar : 0xe1bd45;
+    const T = P.T, A = P.A, L = P.L;
+    T.fill(hx(knit));
+    T.rect("front", 0.2, 0.3, 0.6, 0.7, hx(oil)); T.rect("front", 0.18, 0, 0.13, 0.5, hx(oil)); T.rect("front", 0.69, 0, 0.13, 0.5, hx(oil));
+    T.rect("front", 0.32, 0.48, 0.36, 0.2, tone(oil, -0.15)); T.rect("back", 0.18, 0.3, 0.64, 0.7, hx(oil)); T.shade();
+    A.fill(hx(knit)); A.rect("front", 0, 0.85, 1, 0.08, tone(knit, -0.25)); A.shade();
+    L.fill(hx((c && c.legs != null) ? c.legs : 0xc99928)); L.rect("front", 0, 0.88, 1, 0.12, "#1d2924"); L.rect("side", 0, 0.88, 1, 0.12, "#1d2924"); L.shade();
+    return { torso: 1, arms: 1, legs: 1 };
+  };
+
+  PAINT.mariner = function (P, c) {
+    const white = (c && c.torso != null) ? c.torso : 0xf0f1ed, navy = (c && c.collar != null) ? c.collar : 0x213a5a;
+    const T = P.T, A = P.A, L = P.L;
+    T.fill(hx(white)); T.rect("front", 0.49, 0, 0.02, 0.9, tone(white, -0.18));
+    T.rect("front", 0.05, 0, 0.2, 0.12, hx(navy)); T.rect("front", 0.75, 0, 0.2, 0.12, hx(navy));
+    for (const x of [0.08, 0.14]) { T.rect("front", x, 0.03, 0.03, 0.055, "#d5b24a"); T.rect("front", 0.78 + (x - 0.08), 0.03, 0.03, 0.055, "#d5b24a"); }
+    T.rect("front", 0.65, 0.19, 0.16, 0.045, "#d5b24a"); T.shade();
+    A.fill(hx(white)); A.rect("front", 0, 0.86, 1, 0.06, hx(navy)); A.shade();
+    L.fill(hx((c && c.legs != null) ? c.legs : 0x19283d)); L.rect("side", 0.4, 0, 0.2, 1, tone(navy, -0.3)); L.shade();
+    return { torso: 1, arms: 1, legs: 1 };
+  };
+
+  PAINT.lifeguard = function (P, c) {
+    const red = (c && c.collar != null) ? c.collar : 0xc8342f, white = (c && c.torso != null) ? c.torso : 0xf1eee7;
+    const T = P.T, A = P.A, L = P.L, ctx = P.ctx;
+    T.fill(hx(white));
+    for (const col of ["front", "back", "side"]) T.rect(col, 0, 0, 1, 0.2, hx(red));
+    T.rect("front", 0.47, 0.3, 0.06, 0.26, hx(red)); T.rect("front", 0.39, 0.39, 0.22, 0.07, hx(red));
+    T.rect("back", 0.46, 0.26, 0.08, 0.32, hx(red)); T.rect("back", 0.36, 0.38, 0.28, 0.08, hx(red)); T.shade();
+    if (ctx && ctx.fillText) { ctx.save(); ctx.fillStyle = "#c8342f"; ctx.font = "bold 7px Arial"; ctx.textAlign = "center"; ctx.fillText("GUARD", 16, ROWS.torso[0] + 31); ctx.restore(); }
+    A.fill(hx(red)); A.rect("front", 0, 0.5, 1, 0.5, hx(white)); A.shade();
+    L.fill(hx((c && c.legs != null) ? c.legs : 0xc8342f)); L.rect("side", 0.38, 0, 0.24, 1, hx(white)); L.shade();
+    return { torso: 1, arms: 1, legs: 1 };
+  };
+
+  function skiShell(P, c, patrol) {
+    const body = (c && c.torso != null) ? c.torso : (patrol ? 0xc83232 : 0x286ba6), accent = (c && c.collar != null) ? c.collar : (patrol ? 0xf2f0e8 : 0xe67925);
+    const T = P.T, A = P.A, L = P.L;
+    T.fill(hx(body)); T.rect("front", 0.48, 0, 0.04, 1, tone(body, -0.35));
+    for (const col of ["front", "back", "side"]) { T.rect(col, 0, 0, 1, 0.22, hx(accent)); T.rect(col, 0, 0.84, 1, 0.09, tone(body, -0.28)); }
+    T.rect("front", 0.1, 0.55, 0.27, 0.16, tone(body, -0.18)); T.rect("front", 0.63, 0.55, 0.27, 0.16, tone(body, -0.18));
+    if (patrol) { T.rect("front", 0.47, 0.32, 0.06, 0.25, "#f2f0e8"); T.rect("front", 0.39, 0.4, 0.22, 0.07, "#f2f0e8"); }
+    T.shade();
+    A.fill(hx(body)); A.rect("front", 0, 0, 1, 0.25, hx(accent)); A.rect("front", 0, 0.84, 1, 0.1, tone(body, -0.3)); A.shade();
+    L.fill(hx((c && c.legs != null) ? c.legs : 0x202936)); L.rect("front", 0.12, 0.44, 0.76, 0.17, tone(0x202936, 0.12)); L.rect("side", 0, 0.88, 1, 0.12, "#171b22"); L.shade();
+    return { torso: 1, arms: 1, legs: 1 };
+  }
+  PAINT.ski = function (P, c) { return skiShell(P, c, false); };
+  PAINT.ski_patrol = function (P, c) { return skiShell(P, c, true); };
+
+  PAINT.groundcrew = function (P, c) {
+    const hi = (c && c.torso != null) ? c.torso : 0xd8ca2f, navy = (c && c.arms != null) ? c.arms : 0x24344d;
+    const T = P.T, A = P.A, L = P.L;
+    T.fill(hx(navy));
+    for (const col of ["front", "back", "side"]) { T.rect(col, 0.08, 0.05, 0.84, 0.9, hx(hi)); T.rect(col, 0.08, 0.38, 0.84, 0.09, "#eef0e9"); T.rect(col, 0.08, 0.42, 0.84, 0.025, "#afb7bd"); }
+    T.poly("back", [[0.08, 0.52], [0.5, 0.8], [0.92, 0.52], [0.92, 0.64], [0.5, 0.92], [0.08, 0.64]], "#eef0e9");
+    T.rect("front", 0.47, 0.05, 0.06, 0.9, tone(hi, -0.3)); T.shade();
+    A.fill(hx(navy)); A.rect("front", 0, 0.3, 1, 0.09, "#eef0e9"); A.shade();
+    L.fill(hx((c && c.legs != null) ? c.legs : 0x24344d)); L.rect("side", 0.2, 0.35, 0.6, 0.2, tone(navy, -0.22)); L.shade();
+    return { torso: 1, arms: 1, legs: 1 };
+  };
+
+  PAINT.cabincrew = function (P, c) {
+    const navy = (c && c.torso != null) ? c.torso : 0x223552, scarf = (c && c.collar != null) ? c.collar : 0xb52d3c;
+    const T = P.T, A = P.A, L = P.L;
+    T.fill(hx(navy)); T.poly("front", [[0.28, 0], [0.5, 0.24], [0.72, 0]], "#eef0ec");
+    T.poly("front", [[0.3, 0], [0.44, 0], [0.57, 0.32], [0.49, 0.38]], hx(scarf));
+    T.rect("front", 0.13, 0.31, 0.2, 0.13, tone(navy, -0.18)); T.rect("front", 0.67, 0.31, 0.2, 0.13, tone(navy, -0.18));
+    T.rect("front", 0.66, 0.18, 0.16, 0.045, "#d5b24a"); T.shade();
+    A.fill(hx(navy)); A.rect("front", 0, 0.86, 1, 0.06, hx(scarf)); A.shade();
+    L.fill(hx((c && c.legs != null) ? c.legs : 0x18243a)); L.shade();
+    return { torso: 1, arms: 1, legs: 1 };
+  };
+
+  PAINT.bartender = function (P, c) {
+    const black = (c && c.torso != null) ? c.torso : 0x24282d, cloth = (c && c.collar != null) ? c.collar : 0xd9d7cf;
+    const T = P.T, A = P.A, L = P.L;
+    T.fill(hx(black)); T.poly("front", [[0.38, 0], [0.5, 0.13], [0.62, 0]], hx(cloth));
+    for (const col of ["front", "back", "side"]) T.rect(col, 0, 0.55, 1, 0.45, "#15181d");
+    T.rect("front", 0.3, 0.68, 0.4, 0.22, tone(0x15181d, 0.2)); T.rect("front", 0.8, 0.56, 0.12, 0.36, hx(cloth)); T.shade();
+    A.fill(hx(black)); A.rect("front", 0, 0.62, 1, 0.06, hx(cloth)); A.shade();
+    L.fill(hx((c && c.legs != null) ? c.legs : 0x15181d)); L.shade();
+    return { torso: 1, arms: 1, legs: 1 };
+  };
+
+  PAINT.driver = function (P, c) {
+    const shirt = (c && c.torso != null) ? c.torso : 0xc9d3dc, vest = (c && c.collar != null) ? c.collar : 0x27354a;
+    const T = P.T, A = P.A, L = P.L;
+    T.fill(hx(shirt)); T.poly("front", [[0.08, 0], [0.42, 0], [0.48, 0.25], [0.4, 1], [0.08, 1]], hx(vest));
+    T.poly("front", [[0.92, 0], [0.58, 0], [0.52, 0.25], [0.6, 1], [0.92, 1]], hx(vest));
+    T.rect("front", 0.47, 0, 0.06, 0.64, tone(vest, -0.2)); T.rect("front", 0.64, 0.17, 0.18, 0.045, "#d1b14d"); T.shade();
+    A.fill(hx(shirt)); A.rect("front", 0, 0.84, 1, 0.07, tone(shirt, -0.18)); A.shade();
+    L.fill(hx((c && c.legs != null) ? c.legs : 0x202733)); L.shade();
+    return { torso: 1, arms: 1, legs: 1 };
+  };
+
+  PAINT.housekeeping = function (P, c) {
+    const teal = (c && c.torso != null) ? c.torso : 0x71939a, cream = (c && c.collar != null) ? c.collar : 0xe5e2d9;
+    const T = P.T, A = P.A, L = P.L;
+    T.fill(hx(teal)); T.poly("front", [[0.36, 0], [0.5, 0.16], [0.64, 0]], hx(cream));
+    T.rect("front", 0.18, 0.34, 0.64, 0.66, hx(cream)); T.rect("front", 0.18, 0.34, 0.64, 0.05, tone(cream, -0.18));
+    T.rect("front", 0.3, 0.65, 0.4, 0.2, tone(cream, -0.1)); T.shade();
+    A.fill(hx(teal)); A.rect("front", 0, 0.82, 1, 0.07, hx(cream)); A.shade();
+    L.fill(hx((c && c.legs != null) ? c.legs : 0x34434b)); L.shade();
+    return { torso: 1, arms: 1, legs: 1 };
+  };
+
+  PAINT.athletic = function (P, c) {
+    const blue = (c && c.torso != null) ? c.torso : 0x315f9b, white = (c && c.collar != null) ? c.collar : 0xe6e7e3;
+    const T = P.T, A = P.A, L = P.L;
+    T.fill(hx(blue)); T.rect("front", 0.48, 0, 0.04, 1, tone(blue, -0.32));
+    for (const col of ["front", "back", "side"]) T.rect(col, 0, 0.86, 1, 0.1, hx(white));
+    T.poly("front", [[0.12, 0], [0.28, 0], [0.46, 0.48], [0.38, 0.55]], hx(white)); T.poly("front", [[0.88, 0], [0.72, 0], [0.54, 0.48], [0.62, 0.55]], hx(white)); T.shade();
+    A.fill(hx(blue)); A.rect("front", 0.08, 0, 0.1, 1, hx(white)); A.rect("side", 0.08, 0, 0.1, 1, hx(white)); A.shade();
+    L.fill(hx((c && c.legs != null) ? c.legs : 0x1f2936)); L.rect("side", 0.12, 0, 0.13, 1, hx(white)); L.shade();
+    return { torso: 1, arms: 1, legs: 1 };
+  };
+
+  function raceWork(P, c, kind) {
+    const body = (c && c.torso != null) ? c.torso : 0x17253a, accent = (c && c.collar != null) ? c.collar : 0xc93632;
+    const T = P.T, A = P.A, L = P.L, hi = kind === "marshal" ? 0xf0e44c : 0xf1eee7;
+    T.fill(hx(body)); T.rect("front", 0.48, 0, 0.04, 1, tone(body, -0.35));
+    if (kind === "marshal") {
+      for (const col of ["front", "back", "side"]) { T.rect(col, 0.07, 0.08, 0.86, 0.84, hx(accent)); T.rect(col, 0.07, 0.38, 0.86, 0.1, hx(hi)); }
+      T.rect("front", 0.47, 0.08, 0.06, 0.84, tone(accent, -0.3));
+    } else {
+      for (const col of ["front", "back", "side"]) T.rect(col, 0, 0.28, 1, 0.16, hx(accent));
+      T.rect("front", 0.12, 0.12, 0.22, 0.07, hx(hi)); T.rect("front", 0.66, 0.12, 0.22, 0.07, hx(hi));
+      T.rect("front", 0, 0.76, 1, 0.08, "#11151b");
+    }
+    T.shade(); A.fill(hx(body)); A.rect("front", 0, 0.22, 1, 0.18, hx(accent)); A.shade();
+    L.fill(hx((c && c.legs != null) ? c.legs : body)); L.rect("side", 0.1, 0, 0.14, 1, hx(accent)); L.rect("front", 0, 0.9, 1, 0.1, "#11151b"); L.shade();
+    return { torso: 1, arms: 1, legs: 1 };
+  }
+  PAINT.pitcrew = function (P, c) { return raceWork(P, c, "pit"); };
+  PAINT.marshal = function (P, c) { return raceWork(P, c, "marshal"); };
+  PAINT.racer = function (P, c) { return raceWork(P, c, "racer"); };
+
   // DRESS — an A-line dress: fitted bodice, FLARED hem painted onto the LEG row
   // (the skirt sweeps out at the bottom). color via key/torso → many colors.
   PAINT.dress = function (P, c) {
@@ -2017,7 +2315,7 @@
       if (si < 0 || si >= SUIT_STYLES.length) si = 0;
       return "suit|" + si;
     }
-    if (id === "construction") return "hivis|" + (c.torso != null ? c.torso | 0 : 0xffb43a); // same painter, site-orange default
+    if (id === "construction") return "construction|" + (c.torso != null ? c.torso | 0 : 0xff5f08);
     // skin-showing garments: the bare shoulders/arms/shins in the atlas must
     // match the WEARER's actual skin, so the tone joins the cache key (one
     // atlas per tone actually seen — a handful, not per-rig). Garment color
@@ -2146,7 +2444,8 @@
       parts = st.tux ? PAINT.tuxedo(P, c, st) : PAINT.suit(P, c, st);
     }
     else if (kind === "basics") parts = PAINT.basics(P, { torso: key.split("|")[1] | 0 });
-    else if (kind === "hivis") parts = PAINT.hivis(P, { torso: key.split("|")[1] | 0, legs: c.legs, arms: c.arms }); // shared by construction key
+    else if (kind === "hivis") parts = PAINT.hivis(P, { torso: key.split("|")[1] | 0, legs: c.legs, arms: c.arms });
+    else if (kind === "construction") parts = PAINT.construction(P, { torso: key.split("|")[1] | 0, collar: c.collar, legs: c.legs, arms: c.arms });
     else if (kind === "gang") { const seg = key.split("|"); parts = PAINT.gang(P, { torso: seg[1] | 0, collar: seg[2] | 0, legs: c.legs }); }
     // the WEARER's skin tone isn't in rec.colors (it comes off the rig), so it
     // rides the cache key and is handed back to the painter here. The garment
@@ -2840,6 +3139,7 @@
     }
     ch._compMeshes = [];
   }
+  CBZ.cityClearComposite = clearComposite;
   function cityApplyComposite(ch, comp) {
     if (!ch || !ch.skinSlots || !comp) return false;
     const items = comp.items || [];

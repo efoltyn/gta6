@@ -52,6 +52,7 @@ if (args.help) {
     `  --keep-going         a failed subject becomes an error page instead of aborting the run\n` +
     `  --width N --height N capture viewport (defaults: preset or 960x600)\n` +
     `  --only before|after  capture one side only, skip the report (fast look iteration)\n` +
+    `  --no-pdf            write screenshots/HTML/metadata but skip Chrome PDF printing\n` +
     `  --before-label S     override the BEFORE banner/caption (for flag-A/B runs\n` +
     `                       where --before is the same local build with ?cfg_X=0)\n` +
     `  --after-label S      override the AFTER banner/caption\n`);
@@ -518,6 +519,15 @@ try {
     })),
     browserMessages,
   }, null, 2));
+
+  // Large galleries can exceed Chrome's print compositor budget even though
+  // every capture and the HTML report are already complete. Keep that useful
+  // state and let callers assemble the PDF with a local image/PDF fallback.
+  if (args["no-pdf"]) {
+    pdfPath = null;
+    process.stdout.write(`\nVisual screenshots and HTML complete (PDF skipped)\nHTML: ${htmlPath}\nShots: ${shotDir}\n`);
+    throw { _earlyExit: true };
+  }
 
   await send("Page.navigate", { url: pathToFileURL(htmlPath).href }, 90000);
   const reportDeadline = Date.now() + 30000;

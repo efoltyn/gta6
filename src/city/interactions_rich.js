@@ -136,12 +136,23 @@
   function insult(p) {
     meet(p);
     note(INSULTS[(Math.random() * INSULTS.length) | 0], 1.8);
-    relShift(p, "snubbed", 1);
+    // AN INSULT SCALES WITH WHO IS THROWING IT (owner: "insults scaling to
+    // bigger reactions"). intimidate() has always read the level gap and insult
+    // never did, so the same words from a Kingpin and from a nobody landed
+    // identically. One shared band now (city/read.js cityReadGap, ±1 at 12
+    // levels and ±2 at 28): being talked down to by somebody far above you
+    // stings, and mouthing off to somebody far above you emboldens them.
+    const gap = CBZ.cityReadGap ? CBZ.cityReadGap(p) : 0;   // + = you outrank them
+    relShift(p, "snubbed", gap >= 1 ? 1.45 : gap <= -1 ? 0.7 : 1);
     if (p.mood != null) p.mood = Math.max(-1, (p.mood || 0) - 0.5);
     // bold/armed/aggressive marks bristle and confront; the timid just sour and
     // peel off. We bend the existing brain inputs, never invent new state.
+    // A man who plainly out-reads you squares up almost regardless of nerve;
+    // one you tower over needs real aggression to try it.
     const aggr = p.aggr || 0.3, r = rel(p);
-    const bold = p.armed || aggr >= 0.6 || (r && r.respect > r.fear + 15);
+    const bold = gap <= -1 ? true
+               : gap >= 2 ? (p.armed && aggr >= 0.75)
+               : (p.armed || aggr >= 0.6 || (r && r.respect > r.fear + 15));
     if (bold && CBZ.city && CBZ.city.playerActor) {
       relShift(p, "threatened", 0.5);
       p.rage = CBZ.city.playerActor; p.state = "confront"; p.fear = 0;

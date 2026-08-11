@@ -36,11 +36,46 @@
     else addBox(x, YH - 0.5, z, len, 0.4, 0.4, TRIM, { cast: false });
   }
 
+  /* ---- THESE TWO WALLS ARE NOT THE PERIMETER ANY MORE ---------------------
+     world/prisonwings.js throws a new outer wire at x +-124, z -116..128, so
+     the four side walls below became INTERNAL division fences between the old
+     compound and the new wings — which is what a real prison has, and which is
+     the only reason a gate through one is worth a keycard.
+
+     A wall with a gate in it is drawn as the runs BETWEEN the gaps, exactly
+     like the south wall below has always been drawn around the freedom gate.
+     Each gap is PUBLISHED (CBZ.prisonWallGaps) and prisonwings.js stands a
+     barred gate in it; if that file is absent the gap is never cut, because a
+     6 m hole in a prison wall with nothing in it is not a shortcut, it is the
+     end of the escape game. Same contract world/cellblock.js states about its
+     own staff gap, and prisonwings.js's ratchet counts exactly this
+     (`orphanGates`, pinned at 0).
+
+     They keep `noBreach`. A division fence you could blow through with one
+     brick would hand you the whole map for the price of the cheapest charge in
+     the table; the gate is the answer, and the gate costs 5 lb like every other
+     man-sized opening in the compound. ---- */
+  CBZ.CONFIG = CBZ.CONFIG || {};
+  if (CBZ.CONFIG.PRISON_WINGS_V1 == null) CBZ.CONFIG.PRISON_WINGS_V1 = true;
+  const WINGS = CBZ.CONFIG.PRISON_WINGS_V1 !== false;
+  const GATE_W = 6;
+  const gaps = CBZ.prisonWallGaps = [];
+  // a run along z at x=`x`, split around an optional gate centred on `gc`
+  function wallZ(x, z0, z1, gc) {
+    if (WINGS && gc != null && gc - GATE_W / 2 > z0 && gc + GATE_W / 2 < z1) {
+      wall(x, (z0 + gc - GATE_W / 2) / 2, 1, (gc - GATE_W / 2) - z0);
+      wall(x, (gc + GATE_W / 2 + z1) / 2, 1, z1 - (gc + GATE_W / 2));
+      gaps.push({ x: x, z: gc, w: GATE_W, axis: "z" });
+      return;
+    }
+    wall(x, (z0 + z1) / 2, 1, z1 - z0);
+  }
+
   // ---- north exercise yard (original footprint, x[-30,30] z[-8,52]) ----
   const nW = N.x1 - N.x0, nCx = (N.x0 + N.x1) / 2;
   const nLen = N.z1 - N.z0, nCz = (N.z0 + N.z1) / 2;
-  wall(N.x0, nCz, 1, nLen);  // west
-  wall(N.x1, nCz, 1, nLen);  // east
+  wallZ(N.x0, N.z0, N.z1, 22);   // west  + the west yard gate
+  wallZ(N.x1, N.z0, N.z1, 22);   // east  + the east yard gate
   trim(N.x0, nCz, nLen, "z");
   trim(N.x1, nCz, nLen, "z");
 
@@ -57,8 +92,11 @@
 
   // ---- south block (wider + longer, x[-44,44] z[52,128]) ----
   const sLen = S.z1 - S.z0, sCz = (S.z0 + S.z1) / 2;
-  wall(S.x0, sCz, 1, sLen);  // west
-  wall(S.x1, sCz, 1, sLen);  // east
+  // z=84 is the one clear band on both faces: the workshop ends at z=80 and the
+  // laundry starts at z=88 on the west, the chapel ends at 80 and the infirmary
+  // starts at 88 on the east. A gate anywhere else opens into a room wall.
+  wallZ(S.x0, S.z0, S.z1, 84);   // west  + the lower west gate
+  wallZ(S.x1, S.z0, S.z1, 84);   // east  + the lower east gate
   trim(S.x0, sCz, sLen, "z");
   trim(S.x1, sCz, sLen, "z");
 

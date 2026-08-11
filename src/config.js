@@ -125,11 +125,25 @@
     northYard:  { x0: -30, x1: 30, z0: -8,  z1: 52 },   // original yard (kept intact)
     southBlock: { x0: -44, x1: 44, z0: 52,  z1: 128 },  // new, wider lower complex
     exit: { x: 0, z: 128, gap: 4 },                     // freedom gate at the far south
+    // THE OUTER COMPOUND (world/prisonwings.js). Owner 2026-08-11: "the prison
+    // should be bigger — think of scale of human vs prison size." Measured, the
+    // rects above enclose 92 x 195 m (1.79 ha): fifty body-lengths across, when
+    // a real medium-security perimeter runs 300-400 m a side. This rect is the
+    // new wire, and NOTHING above it moved to make room — the wings grow AROUND
+    // the authored compound (the held-corner discipline world/layout.js's
+    // stage-5 desert states), so every spawn, route, waypoint and anchor in the
+    // old prison is byte-identical and what was the yard's boundary wall is now
+    // an internal division fence with four gates cut in it.
+    //   92 x 195 (1.79 ha)  ->  248 x 244 (6.05 ha)
+    // PRISON_WINGS_V1 = false -> prisonwings.js draws nothing, yard.js closes
+    // its gaps, and the clamp below falls back to the inner extents.
+    wings: { x0: -124, x1: 124, z0: -116, z1: 128 },
     // overall extents used by the actor clamp + minimap (a touch of margin).
-    // minZ reaches past the admin wing's own north wall (-64) so the radar,
-    // the full map and the strategic overview all frame the building that is
-    // now the northern end of the compound.
-    minX: -46, maxX: 46, minZ: -66, maxZ: 131,
+    // They frame the OUTER wire now: the minimap, the full map, the strategic
+    // overview, systems/navigation.js and entities/ambientstate.js's density
+    // grid all read these, so a compound that is three times the size has to
+    // say so here or half of it is off every map in the game.
+    minX: -126, maxX: 126, minZ: -118, maxZ: 131,
   };
 
   // ---- NPC ratings (CAPABILITY) — what an inmate is *good at*, 0..100.
