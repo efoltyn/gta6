@@ -129,7 +129,7 @@
     for (const s of [-1, 1]) wFeet.push(addBox(x, 0.23, z + 0.55 + s * 0.7, 0.44, 0.46, 0.4, C_STEEL, { cast: false }));
     if (CBZ.pushProp) CBZ.pushProp({
       parts: [wBench].concat(wFeet), x: x, z: z + 0.55, hx: 0.31, hz: 0.95, y1: 0.54,
-      mass: 45, kind: "bench", leash: 4.0,
+      mass: 45, kind: "bench", leash: 4.0, stand: true,
     });
     // plate tree — four 20 kg plates on a steel post: it moves, grudgingly
     const tree = [addBox(x + 2.0, 0.55, z + 0.4, 0.5, 1.1, 0.5, C_STEEL_D, { solid: true })];

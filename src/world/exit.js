@@ -48,22 +48,52 @@
   if (CBZ.CONFIG.PRISON_GATE_PACE == null) CBZ.CONFIG.PRISON_GATE_PACE = true;
   const PACE_HEX = 0xffd166;                       // css --gold, the record colour
   let paceOn = null;                               // tri-state: null = never set
+  /* ---- AND WHETHER IT IS YOURS AT ALL ------------------------------------
+     Only the ESCAPING role wins by crossing this wire; a player on the COP
+     side is just on shift, and systems/interactions.js said so in words —
+     `flashHint("You're on shift — the gate clocks you right back in.")` on a
+     10-second throttle, the last narration line left at the exit.
+
+     It does not need words, because this gate is already a lamp. The pad and
+     the shaft have carried live machine state since the pace cue shipped, and
+     the prison speaks one colour language everywhere else it has to refuse
+     somebody: red locked / amber denied / green open, on the admin door
+     plates, on the checkpoint card reader and on every camera lens. So a cop
+     who steps on the pad watches the way out go RED under his boots and clear
+     again when he walks off — the same sentence world/door.js's reader says,
+     said by the gate itself, in the place it applies.
+
+     DENY_R is deliberately wider (6 m) than interactions.js's win radius (3 m):
+     the gate has to have said no BEFORE you are standing in it, or the signal
+     arrives at the same instant as the non-event it is explaining. */
+  const DENY_HEX = 0xff3b3b;
+  const DENY_R2 = 6.0 * 6.0;
+  let denyOn = null;
   CBZ.onAlways(6, function () {
+    const g = CBZ.game;
+    let deny = false;
+    if (g && g.mode === "escape" && g.role === "cop" && CBZ.player && CBZ.player.pos) {
+      const dx = CBZ.player.pos.x - EX, dz = CBZ.player.pos.z - EZ;
+      deny = dx * dx + dz * dz < DENY_R2;
+    }
     let ahead = false;
-    if (CBZ.CONFIG.PRISON_GATE_PACE && CBZ.runStatsPace) {
+    if (!deny && CBZ.CONFIG.PRISON_GATE_PACE && CBZ.runStatsPace) {
       const p = CBZ.runStatsPace();
       ahead = !!(p && p.ahead);
     }
     // colour is written only on the FLIP, not every frame
-    if (ahead !== paceOn) {
-      paceOn = ahead;
-      const hex = ahead ? PACE_HEX : GLOW;
+    if (ahead !== paceOn || deny !== denyOn) {
+      paceOn = ahead; denyOn = deny;
+      const hex = deny ? DENY_HEX : (ahead ? PACE_HEX : GLOW);
       pad.material.color.setHex(hex);
       beam.material.color.setHex(hex);
     }
     // on pace the pulse also runs a touch hotter and quicker — the same cue
-    // read twice, so it still lands for a colour-blind player.
-    pad.material.opacity = (ahead ? 0.5 : 0.4) + 0.2 * Math.sin(CBZ.now * (ahead ? 0.0062 : 0.004));
+    // read twice, so it still lands for a colour-blind player. A refusal beats
+    // faster still and harder, which is what an amber-deny lamp does.
+    pad.material.opacity = deny
+      ? 0.42 + 0.30 * Math.sin(CBZ.now * 0.011)
+      : (ahead ? 0.5 : 0.4) + 0.2 * Math.sin(CBZ.now * (ahead ? 0.0062 : 0.004));
   });
 
   CBZ.EXIT = new THREE.Vector3(EX, 0, EZ);

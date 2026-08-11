@@ -26,14 +26,26 @@
       the per-body back/side style and the mattress-clearance solve), had no
       caller anywhere outside src/city/.
 
-   3. THERE WERE NOT ENOUGH BEDS TO LIE IN. Thirteen cells against ~32 live
-      inmates. That is the prison's own published arithmetic — CBZ.prisonBeds()
-      puts this wing at 185% of design capacity, deliberately, citing Brown v.
-      Plata — and the answer a real overcrowded prison gives is the one in the
-      photographs from that case: ISSUE MATS ON THE FLOOR OF THE WING. So the
-      overflow gets mats, the mats are registered beds like any other, and at
-      two in the morning the block is rows of horizontal men instead of a
-      standing crowd in the dark.
+   3. THERE WERE NOT ENOUGH BEDS TO LIE IN. Thirteen registered mattresses
+      against 42 live inmates. That is the prison's own published arithmetic —
+      CBZ.prisonBeds() puts this wing at 185% of design capacity, deliberately,
+      citing Brown v. Plata — and the answer a real overcrowded prison gives is
+      the one in the photographs from that case: ISSUE MATS ON THE FLOOR OF THE
+      WING. So the overflow gets mats, the mats are registered beds like any
+      other, and at two in the morning the block is rows of horizontal men
+      instead of a standing crowd in the dark.
+      (Integration wave: the wing now DRAWS and registers both racks of every
+      stack — 26 — and the mats close the remainder against the live headcount
+      rather than against a claim. See §1.)
+
+   ...AND A FOURTH, FOUND BY THE RATCHET ITSELF. `CBZ.propWake` clears a pose
+      and never moves a body, which is right while its rise ARC is walking the
+      man off the mattress and wrong the instant that arc is skipped — i.e. on
+      a RESET, when the whole wing gets up on one frame. Measured: a security
+      transfer taken at lights-out put 25 men on their feet INSIDE the beds
+      they had been asleep in, which is the owner's original sentence restored
+      by a restart. `stepOffBunk` (§3) is the answer, and it runs on every wake
+      rather than only on that one.
 
    WHAT DRIVES IT: `CBZ.prisonSchedule`, and never a second clock.
 
@@ -88,24 +100,33 @@
   let built = false, wardenBed = null;
 
   /* ==========================================================
-     1. THE MATS, AND THE COUNT IS DERIVED, NOT TYPED.
+     1. THE MATS, AND THE COUNT IS DERIVED FROM THE POPULATION.
 
-        `CBZ.prisonBeds()` (world/cellblock.js) is the number every population
-        constant in this game is a subtraction against: THE BUILDING SLEEPS 26,
-        thirteen cells at two bunks each. Measured, the wing draws four DOUBLE
-        bunks (the north row) and nine SINGLES — `bunkRig(..., dbl = north)` —
-        so thirteen of the twenty-six places the prison has always claimed do
-        not physically exist, and thirteen men had nowhere to lie down. That is
-        not a reason to shrink the claim: this compound is deliberately run at
-        185% of design capacity, citing Brown v. Plata, and what a real prison
-        at that number does is exactly what the photographs from that case
-        show — ISSUE MATS ON THE FLOOR.
+        THE FIRST DRAFT OF THIS FILE SUBTRACTED AGAINST A CLAIM, AND A CLAIM IS
+        NOT A BED. It read `prisonBeds().beds − bunks` — 26 minus the 13 lower
+        mattresses that were all the wing had ever registered — and issued 13
+        mats. Thirteen of the twenty-six places the prison advertised did not
+        physically exist (four double stacks in the north row, nine singles
+        beside), so the arithmetic was a shortfall chasing a fiction. That is
+        fixed at the source: world/cellblock.js now DRAWS the second rack in
+        every cell and registers both, and `prisonBeds()` counts mattresses
+        instead of asserting a constant. Twenty-six racks, and the number is
+        true.
 
-        So the mat count is `prisonBeds().beds − bunks`. It cannot drift: draw
-        a second bunk in the side cells and the mats disappear on their own;
-        add a cell and they reappear. `CBZ.prisonRestAudit().sleepGap` is that
-        subtraction, pinned at 0 — the wing physically sleeps what it says it
-        sleeps.
+        Twenty-six racks against FORTY-TWO live inmates. So the mats stop
+        answering to the building and answer to the men in it:
+
+            mats = live inmates − racks
+
+        which is the only subtraction that can make the sentence "every man in
+        this prison has a place to lie down" true, and the only one that stays
+        true when either side moves. Build a housing unit and the mats retreat
+        on their own; put twenty more men in the yard and they come back out.
+        This compound runs at 185% of design capacity on purpose, citing Brown
+        v. Plata, and what a real prison at that number does is exactly what
+        the photographs from that case show — MATS ON THE FLOOR between the
+        stacks. `CBZ.prisonRestAudit().sleepGap` is that subtraction, pinned at
+        0 or below: nobody sleeps standing up.
 
         Placement is the two lanes the muster already uses: clear of the
         x[-3,3] patrol spine, of the day tables at (±6.6,−26) and of
@@ -115,8 +136,37 @@
         at every hour and not only at lights out.
      ========================================================== */
   const MAT_LEN = 1.95, MAT_W = 0.72, MAT_TOP = 0.075;
+  // The mattress footprint a body may not be standing inside — read by the
+  // `bunkStanders` ratchet AND by stepOffBunk, so the number that DEFINES the
+  // fault and the number that PREVENTS it can never drift apart.
+  const MAT_HX = 0.52, MAT_HZ = 1.18;
   const MAT_X = [-7.9, -4.6, 4.6, 7.9];
-  const MAT_Z = [-13.0, -16.2, -19.4, -22.6, -30.0, -33.2];   // −26 is the day tables
+  // −26 is the day tables. Two rows added at the head of the wing (−36.2,
+  // −39.4) because the grid is now sized by the population and 24 places was
+  // one row short of housing the compound at its own headcount.
+  const MAT_Z = [-13.0, -16.2, -19.4, -22.6, -30.0, -33.2, -36.2, -39.4];
+  /* A MAT ONLY GOES WHERE A MAN COULD ACTUALLY LIE. The grid above is authored
+     against the wing's open lanes, but it is now sized by the POPULATION, so it
+     reaches further up the tier than the first draft's did — and a mat drawn
+     inside a partition is a place nobody can be sent to and one more record on
+     `propUseAudit().blocked`. One broadphase probe per slot, at build time,
+     using the mattress's own footprint: no collider through the body band, no
+     mat. Cheap (a few dozen probes, once) and self-limiting — the grid can be
+     extended freely because the world refuses the slots it does not have. */
+  const mprobe = [];
+  function matFits(x, z) {
+    if (!CBZ.queryCollidersNear) return true;
+    const list = CBZ.queryCollidersNear(x, z, MAT_LEN * 0.5 + 0.4, mprobe);
+    for (let i = 0; i < list.length; i++) {
+      const c = list[i];
+      if (c.y1 != null && c.y1 <= 0.30) continue;         // something you lie beside
+      if (c.y0 != null && c.y0 >= 1.10) continue;         // overhead
+      if (x > c.minX - MAT_W * 0.5 && x < c.maxX + MAT_W * 0.5
+        && z > c.minZ - MAT_LEN * 0.5 && z < c.maxZ + MAT_LEN * 0.5) return false;
+    }
+    return true;
+  }
+  let matsRefused = 0;
   function buildMats(want) {
     if (!CFG.PRISON_REST_MATS || !CBZ.addBox || want <= 0) return;
     const reg = CBZ.propRegisterBed || CBZ.roomBedAnchor;
@@ -125,6 +175,7 @@
     for (let r = 0; r < MAT_Z.length && i < want; r++) {
       for (let c = 0; c < MAT_X.length && i < want; c++) {
         const x = MAT_X[c], z = MAT_Z[r];
+        if (!matFits(x, z)) { matsRefused++; continue; }
         const tone = [0x3d4753, 0x44505c, 0x39434e][i % 3];
         CBZ.addBox(x, MAT_TOP / 2, z, MAT_W, MAT_TOP, MAT_LEN, tone, { cast: false });
         // the rolled blanket at the head end — the one detail that stops it
@@ -145,6 +196,15 @@
         drift off the mesh); seats come from propuse's rect query, once,
         by room — never a per-frame scan of the city's 3,375 chairs.
      ========================================================== */
+  // every body this file is responsible for finding a place for
+  function inmateOf(a) { return a && !a._crowd && a.role === "inmate" && a.group; }
+  function population() {
+    const list = CBZ.npcs || [];
+    let n = 0;
+    for (let i = 0; i < list.length; i++) { const a = list[i]; if (inmateOf(a) && !a.dead && !a.escaped) n++; }
+    return n;
+  }
+
   function build() {
     built = true;
     /* THE PRISON'S FURNITURE ANCHORS ARE WIPED BY THE CITY, AND NOBODY EVER
@@ -161,10 +221,15 @@
     const cb = CBZ.cellblock;
     if (cb && cb.cells) for (let i = 0; i < cb.cells.length; i++) {
       const c = cb.cells[i];
+      // THE LOWER RACK IS THE CELL OWNER'S — that is what owning a cell means,
+      // and `_cell` is how §4 reserves it for him. The TOP rack is a cellmate's
+      // and belongs to nobody in particular, so it is left unmarked and the
+      // nearest man without a place takes it.
       if (c.bed) { c.bed._cell = c; beds.push(c.bed); }
+      if (c.bedTop) beds.push(c.bedTop);
     }
-    const claim = (CBZ.prisonBeds && CBZ.prisonBeds().beds) | 0;
-    buildMats(claim - beds.length);
+    // MATS CLOSE THE GAP TO THE POPULATION, not to a published claim — see §1.
+    buildMats(population() - beds.length);
     if (CBZ.propSeatsIn) {
       try {
         CBZ.propSeatsIn(-28.8, -19.2, 6.2, 21.8, 0, messSeats);        // chow hall
@@ -232,11 +297,68 @@
     if (!ok) giveRate(a);
     return ok;
   }
-  function getUp(a) {
+  /* ---- A MAN WHO GETS UP STANDS BESIDE HIS BUNK, NOT IN IT ---------------
+     `CBZ.propWake` clears the pose and NEVER MOVES THE BODY — read it: it
+     releases the seat, drops the arc, un-curls the rig, and every line touches
+     rotation or a flag. That is right for a city ped, because the rise ARC it
+     starts first walks him off the mattress. It is wrong the moment the arc is
+     skipped, and the arc is skipped exactly when the whole wing gets up at
+     once: a reset.
+
+     MEASURED, in the whole-game smoke: a transfer taken at lights-out landed
+     25 bodies standing inside mattress rectangles — `bunkStanders`, the one
+     number this file exists to keep at zero, straight back to the owner's
+     original complaint by way of a restart. So the step off the bed is taken
+     here, at the wake, for every wake: if the arc owns him it will move him
+     and we keep our hands off; if it does not, he is put on the bed's own
+     entry point — the walkable side propuse already solved for getting IN. */
+  function stepOffBunk(a, bed) {
+    if (!bed || bed.kind === "mat" || !a.group) return;
+    if (CBZ.propArcActive && CBZ.propArcActive(a)) return;      // the rise arc owns him
+    const g = a.group.position;
+    if (Math.abs(g.x - bed.x) >= MAT_HX || Math.abs(g.z - bed.z) >= MAT_HZ) return;   // already clear
+    let e = null;
+    try { e = CBZ.propEntryPoint ? CBZ.propEntryPoint(bed) : null; } catch (err) { e = null; }
+    if (!e || !e.ok) return;
+    g.x = e.x; g.z = e.z;
+    if (a.target) a.target.set(e.x, 0, e.z);
+  }
+  /* THE SWEEP THAT ANSWERS TO THE RATCHET, IN THE RATCHET'S OWN WORDS. Doing
+     the step-off per body as it wakes took the reset's standers from 25 to 2,
+     and 2 is not 0: a body can be left inside a mattress it was never assigned
+     — one it merely walked into and was standing in when the world reset, or
+     one belonging to the OTHER rack of a stack it did not sleep on. Rather
+     than enumerate those cases, this sweep asks the identical question
+     `bunkStanders` asks, and moves anyone it finds. When the invariant and the
+     thing enforcing it are the same test, the ratchet cannot pass by luck. */
+  function clearBunks() {
+    const list = CBZ.npcs || [];
+    for (let i = 0; i < list.length; i++) {
+      const a = list[i];
+      if (!inmateOf(a) || a.dead || a._propLie) continue;
+      const g = a.group.position;
+      for (let k = 0; k < beds.length; k++) {
+        const b = beds[k];
+        if (b.kind === "mat") continue;                 // you may stand on a floor mat
+        if (Math.abs(g.x - b.x) >= MAT_HX || Math.abs(g.z - b.z) >= MAT_HZ) continue;
+        let e = null;
+        try { e = CBZ.propEntryPoint ? CBZ.propEntryPoint(b) : null; } catch (err) { e = null; }
+        if (e && e.ok) { g.x = e.x; g.z = e.z; if (a.target) a.target.set(e.x, 0, e.z); }
+        break;
+      }
+    }
+  }
+
+  function getUp(a, instant) {
     if (!a || (!a._propBed && !a._propSeat && !a._propLie)) return false;
-    try { if (a._propBed) CBZ.propWake(a); else CBZ.propStand(a); } catch (e) {}
+    const bed = a._propBed;
+    try {
+      if (a._propBed) CBZ.propWake(a, instant ? { instant: true } : null);
+      else CBZ.propStand(a, instant ? { instant: true } : null);
+    } catch (e) {}
     giveRate(a);
     a.pause = 0;
+    stepOffBunk(a, bed);
     return true;
   }
 
@@ -247,7 +369,6 @@
         free bed once and keeps it, so the wing does not reshuffle at 22:00
         every night like a game of musical chairs.
      ========================================================== */
-  function inmateOf(a) { return a && !a._crowd && a.role === "inmate" && a.group; }
   function assign(a) {
     if (a._restBed && !a._restBed.occupant) return a._restBed;
     if (a._restBed && a._restBed.occupant === a) return a._restBed;
@@ -269,6 +390,30 @@
     return best;
   }
 
+  /* ---- THE PLACE IS PUBLIC, because the MUSTER needs it -------------------
+     systems/prisonschedule.js walks every inmate indoors at secure/lights-out
+     and used to park him on a hash of a floor grid — a patch of concrete that
+     had nothing to do with where he sleeps, so a man was herded to one spot
+     and then, seconds later, walked to a bed somewhere else. Two systems
+     aiming one body at two places is how a body vibrates in a doorway.
+
+     So the schedule asks THIS file where the man lives, and there is exactly
+     one answer for the whole run. `place()` is deliberately allowed to assign
+     on demand: the first caller wins the claim and every later caller — this
+     file's own sweep included — gets the same record back. Beds are laid on
+     the first tick, so a caller before that gets null and falls back to its
+     own floor spot, which is the correct answer for "the wing isn't built". */
+  CBZ.prisonRest = {
+    place: function (a) {
+      if (!on() || !inmateOf(a) || a.dead || a.escaped) return null;
+      if (!built) return null;
+      return assign(a) || null;
+    },
+    beds: beds,
+    capacity: function () { return beds.length; },
+    population: population,
+  };
+
   /* ==========================================================
      5. THE SWEEP. 2 Hz, and it only ever touches bodies whose state it is
         allowed to touch. Bounded work per tick: at most MAX_ACT hand-offs,
@@ -283,9 +428,14 @@
     const g = CBZ.game;
     const el = +g.elapsed || 0;
     if (el < lastElapsed - 0.5) {                 // a fresh run: let everybody go
+      // INSTANT, not arced. A new run is not a morning — animating forty rise
+      // arcs on the frame the world resets is how a body ends up half-unrolled
+      // inside a bunk with nothing driving it. `getUp(a, true)` skips the arc,
+      // which is also what makes its step-off fire (see stepOffBunk).
       const list = CBZ.npcs || [];
-      for (let i = 0; i < list.length; i++) { getUp(list[i]); list[i]._restBed = null; }
+      for (let i = 0; i < list.length; i++) { getUp(list[i], true); list[i]._restBed = null; }
       for (let i = 0; i < beds.length; i++) beds[i]._claim = null;
+      if (built) clearBunks();
       lastBlock = "";
     }
     lastElapsed = el;
@@ -436,7 +586,6 @@
         the wing's population at 02:00 and zero at noon, and they exist so a
         probe can prove the pose is reachable at all.
      ========================================================== */
-  const MAT_HX = 0.52, MAT_HZ = 1.18;         // the mattress a body may not stand in
   CBZ.prisonRestAudit = function () {
     let standers = 0, housedIn = 0, inBed = 0, sat = 0, matBeds = 0, bunkBeds = 0, taken = 0;
     for (let i = 0; i < beds.length; i++) {
@@ -464,8 +613,13 @@
     return {
       on: on(), block: S && S.enabled() ? S.id() : null,
       beds: beds.length, bunks: bunkBeds, mats: matBeds, claimed: taken,
-      // the wing must physically sleep what CBZ.prisonBeds() says it sleeps
-      sleepGap: built ? claim - beds.length : null, capacity: claim,
+      matsRefused: matsRefused,
+      // EVERY MAN HAS A PLACE. Not "the wing sleeps what it claims" — that is
+      // world/cellblock.js's job now and it counts its own mattresses — but the
+      // thing the muster depends on: a body ordered to bed has a bed to be
+      // ordered to. Positive = men with nowhere to lie down.
+      sleepGap: built ? housedIn - beds.length : null,
+      racks: claim, capacity: beds.length,
       inmates: housedIn, lying: inBed, seated: sat,
       bunkStanders: standers,
       messSeats: messSeats.length, yardSeats: yardSeats.length,

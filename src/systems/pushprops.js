@@ -93,9 +93,10 @@
   const ACTIVE_R2 = ACTIVE_R * ACTIVE_R;
   const MAX_STEP = 0.22;      // m per frame: a shove can never tunnel a prop through a wall
   const BODY_LOW = 0.10, BODY_HIGH = 1.75;   // the band a standing body pushes with
+  const SHOE = 0.10;          // m the standable top is inset from the collider face
 
   const qnear = [];
-  let dirty = false, movingCount = 0, escaped = 0;
+  let dirty = false, platDirty = false, movingCount = 0, escaped = 0;
 
   function meshCollider(m) {
     return (m && m.userData && m.userData.collider) || null;
@@ -113,6 +114,7 @@
      spec.leash   metres it may stray from where it was built (default 4)
      spec.room    hard rect it may never leave
      spec.seat    {x,z} of a propuse sit anchor that rides along
+     spec.stand   this prop's top holds a man — see STANDABLE below
      Returns the record, or null when the flag is off / the spec is empty. */
   CBZ.pushProp = function (spec) {
     if (!CFG.PUSH_PROPS_V1 || !spec) return null;
@@ -153,11 +155,37 @@
       m.matrixAutoUpdate = true;
     }
 
+    /* ---- STANDABLE ------------------------------------------------------
+       OWNER's dream case, in his words: shove a stool to a wall, climb it,
+       reach the vent. That needs the prop's TOP to be ground — and the engine
+       has had exactly one contract for that since systems/pieces.js shipped
+       `walkTop:true`: a record in `CBZ.platforms`, which physics.js's
+       groundAt() raises the floor to when it is within STEP_UP of your feet.
+       So a standable pushable is not a new mechanic either; it is that record,
+       translated by the same delta as the mesh, the collider and the seat.
+
+       WHY IT IS DECLARED AND NOT SNIFFED. "Anything with a flat top" would
+       enrol the traffic cones (tapered), the chalk bucket (0.36 m square — a
+       foot, not a stance) and the plate tree (a post). The rule is the one a
+       carpenter would use and the call site is the only place that knows it:
+       a bench, a stool, a barrel end. Everything else stays furniture you
+       kick, and the difference is the point — same argument as the mass table.
+
+       The platform is inset by SHOE from the collider footprint so the man
+       standing on a stool is standing INSIDE it, never balanced on the lip
+       where his own capsule is being depenetrated sideways off the box. */
+    let plat = null;
+    if (spec.stand && CBZ.platforms) {
+      const ix = Math.max(0.06, hx - SHOE), iz = Math.max(0.06, hz - SHOE);
+      plat = { minX: x - ix, maxX: x + ix, minZ: z - iz, maxZ: z + iz, top: y1, pushProp: true };
+      CBZ.platforms.push(plat);
+    }
+
     const rec = {
       parts: parts, col: col, kind: spec.kind || "prop",
       mass: Math.max(1, spec.mass || 12),
       x: x, z: z, hx: hx, hz: hz, y0: y0, y1: y1,
-      vx: 0, vz: 0,
+      vx: 0, vz: 0, plat: plat,
       homeX: x, homeZ: z, leash: spec.leash != null ? spec.leash : 4.0,
       room: spec.room || null,
       seatAt: spec.seat || null, seat: null, seatSolved: false,
@@ -251,6 +279,10 @@
     }
     const c = rec.col;
     if (c) { c.minX += dx; c.maxX += dx; c.minZ += dz; c.maxZ += dz; dirty = true; }
+    // THE GROUND GOES WITH IT TOO. Without this the stool you just pushed under
+    // the vent is solid where it stands and standable where it used to be.
+    const pl = rec.plat;
+    if (pl) { pl.minX += dx; pl.maxX += dx; pl.minZ += dz; pl.maxZ += dz; platDirty = true; }
     // THE ANCHOR MOVES WITH THE FURNITURE. `_ex/_ez` is propuse's cached
     // standing spot, solved against the colliders — clearing it makes the next
     // body that sits re-solve which side of the stool is now walkable.
@@ -365,8 +397,14 @@
       else movingCount++;
     }
 
-    if (dirty) { dirty = false; if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); }
+    flushDirty();
   });
+
+  // both broadphases, at most once per frame no matter how many props moved
+  function flushDirty() {
+    if (dirty) { dirty = false; if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); }
+    if (platDirty) { platDirty = false; if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty(); }
+  }
 
   /* ---- the sit anchors, resolved once ------------------------------------
      The propuse registries are filled on the first escape tick (world/
@@ -391,7 +429,7 @@
       if (dx || dz) translate(r, dx, dz);
       r.moved = 0;
     }
-    if (dirty) { dirty = false; if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); }
+    flushDirty();
   }
   CBZ.pushPropsReset = resetProps;
 
@@ -404,10 +442,19 @@
      welded into a static buffer — checked here rather than trusted. */
   CBZ.pushPropAudit = function () {
     escaped = 0;
-    let unbatched = 0, movedNow = 0, totalMoved = 0, minted = 0;
+    let unbatched = 0, movedNow = 0, totalMoved = 0, minted = 0, stands = 0, standLost = 0;
     const byKind = {};
     for (let i = 0; i < props.length; i++) {
       const r = props[i];
+      // A STANDABLE TOP THAT DRIFTED OFF ITS OWN PROP is the silent failure this
+      // feature can have: you walk onto thin air where the stool used to be.
+      // The record is translated by the same delta, so the two centres must
+      // agree to the millimetre — and if they ever do not, this says so.
+      if (r.plat) {
+        stands++;
+        if (Math.abs((r.plat.minX + r.plat.maxX) / 2 - r.x) > 0.01
+          || Math.abs((r.plat.minZ + r.plat.maxZ) / 2 - r.z) > 0.01) standLost++;
+      }
       const d = Math.hypot(r.x - r.homeX, r.z - r.homeZ);
       if (d > r.leash + 0.05) escaped++;
       if (r.room && (r.x < r.room.x0 - 0.05 || r.x > r.room.x1 + 0.05
@@ -422,6 +469,7 @@
     return {
       on: !!CFG.PUSH_PROPS_V1, props: props.length, kinds: byKind,
       withCollider: minted, seats: props.filter(function (r) { return !!r.seat; }).length,
+      standable: stands, standLost: standLost,
       escaped: escaped, unbatched: unbatched,
       sliding: movedNow, shoved: totalMoved,
       refMass: PUSH_REF, damp: DAMP, minSpeed: MIN_V, activeR: ACTIVE_R,

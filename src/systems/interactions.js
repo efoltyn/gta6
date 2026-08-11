@@ -12,7 +12,6 @@
   const g = CBZ.game;
 
   let hintTimer = 0;
-  let copGateHintT = 0;   // throttles the cop-role "not your exit" flavor line
   const fadeEl = document.getElementById("fade");
 
   /* ============================================================
@@ -478,15 +477,13 @@
     // other direction. Previously a cop, or even a city/survival run whose
     // coordinates drifted over the jail EXIT, triggered the inmate escape.)
     if (g.mode !== "escape") return;
-    if (g.role === "cop") {
-      if (copGateHintT > 0) copGateHintT -= dt;
-      const cx = player.pos.x - CBZ.EXIT.x, cz = player.pos.z - CBZ.EXIT.z;
-      if (cx * cx + cz * cz < 9 && copGateHintT <= 0) {
-        copGateHintT = 10;
-        CBZ.flashHint("You're on shift — the gate clocks you right back in.", 2.2);
-      }
-      return;
-    }
+    // A COP DOES NOT WIN BY WALKING OUT, and this used to say so in words on a
+    // 10-second throttle. world/exit.js now refuses him with the gate itself:
+    // the pad and the light shaft go RED under a cop inside 6 m and clear when
+    // he steps off, which is the same red/amber/green the checkpoint reader,
+    // the admin door plates and every camera lens already speak. Nothing to
+    // print here any more — just no win.
+    if (g.role === "cop") return;
     const ex = player.pos.x - CBZ.EXIT.x, ez = player.pos.z - CBZ.EXIT.z;
     let routeWin = false;
     if (CBZ.altExitZones) {

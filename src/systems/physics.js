@@ -832,7 +832,32 @@
   // any building floor/stair/roof platform whose top is within reach. `fromY`
   // is the feet height we're testing from — a platform only counts as support
   // if it's no more than STEP_UP above us (so you can't walk up a sheer wall,
-  // only stairs). In the prison there are no platforms, so this is just terrain.
+  // only stairs).
+  /* ---- WHY THE PRISON USED TO BE EXEMPT, AND WHY IT IS NOT ANY MORE -------
+     This test read `&& CBZ.game.mode !== "escape"` for its whole life, on the
+     stated grounds that "in the prison there are no platforms, so this is just
+     terrain". That was true the day it was written and has been false for a
+     long time, silently:
+
+       • world/towers.js registers a rung ladder + cabin deck per tower as
+         CBZ.platforms ramp/landing records — and its own header has admitted
+         since it shipped that they are INERT because of this one line.
+       • world/props.js's picnic table is a systems/pieces.js `walkTop:true`
+         piece, which is the engine's ONE standable-top contract; pieces.js
+         pushes the platform record and this line threw it away.
+
+     MEASURED, not assumed. In escape mode CBZ.platforms holds 17 records and
+     every one of them is the prison's own (16 tower + 1 table). The adversarial
+     case — play the CITY first, whose lazy build takes the array to 3,278, then
+     come back — still leaves exactly those 17 inside the compound's AABB: the
+     city is built nowhere near the yard, and nothing wider than PLAT_GIANT
+     spans in. So the gate protected nothing that could be stood on by accident.
+     The performance argument died earlier still: the bucket grid twenty lines
+     up turned this from a linear scan into one Map lookup.
+
+     What it cost: every "stand on the furniture" verb in the prison. A prop
+     that moves keeps its support because systems/pushprops.js translates its
+     platform record with its collider and calls markPlatformsDirty(). */
   /* ---- THE PLATFORM GRID -------------------------------------------------
      groundAt LINEARLY SCANNED every platform record — and it is called per
      vehicle per frame, plus by the player, plus by every ground query in the
@@ -864,7 +889,7 @@
   const platBuckets = new Map();
   const platGiant = [];
   const EMPTY_PLATS = [];
-  let platCount = -1;
+  let platCount = -1, platDirty = true;
 
   function rebuildPlatformGrid() {
     platBuckets.clear(); platGiant.length = 0;
@@ -883,11 +908,19 @@
       }
     }
     platCount = plats.length;
+    platDirty = false;
   }
+  /* A PLATFORM THAT MOVES NEEDS THE SAME DOORBELL A COLLIDER HAS. The grid
+     above re-buckets when the ARRAY LENGTH changes, which catches every build
+     and despawn — and misses the one case a pushable prop is: a record mutated
+     in place. Its AABB is right and its bucket is stale, so a query at the
+     prop's NEW position looks in a cell the record was never filed under and
+     finds nothing. Same fix, same name, same one-liner as markCollidersDirty. */
+  CBZ.markPlatformsDirty = function () { platDirty = true; };
   // The candidate list under a point: one Map lookup plus the giants.
   function platsAt(x, z) {
     const plats = CBZ.platforms;
-    if (platCount !== plats.length) rebuildPlatformGrid();
+    if (platDirty || platCount !== plats.length) rebuildPlatformGrid();
     const b = platBuckets.get(colKey(Math.floor(x / PLAT_CELL), Math.floor(z / PLAT_CELL)));
     if (!b) return platGiant.length ? platGiant : EMPTY_PLATS;
     if (!platGiant.length) return b;
@@ -895,7 +928,7 @@
   }
   CBZ.platformGridAudit = function () {
     const plats = CBZ.platforms || [];
-    if (platCount !== plats.length) rebuildPlatformGrid();
+    if (platDirty || platCount !== plats.length) rebuildPlatformGrid();
     let maxBucket = 0, total = 0;
     platBuckets.forEach(function (b) { total += b.length; if (b.length > maxBucket) maxBucket = b.length; });
     return {
@@ -908,7 +941,7 @@
   function groundAt(x, z, fromY) {
     let best = CBZ.floorAt ? CBZ.floorAt(x, z) : 0;
     const plats = CBZ.platforms;
-    if (plats.length && CBZ.game.mode !== "escape") {
+    if (plats.length) {
       const reach = (fromY != null ? fromY : best) + STEP_UP;
       const cand = platsAt(x, z);
       for (let i = 0; i < cand.length; i++) {

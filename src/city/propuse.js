@@ -452,10 +452,26 @@
       ];
     } else {
       // SEAT: straight out front (back into it), then either side, then behind.
+      // …then the SAME FOUR AGAIN, one body further out. The bed branch above
+      // has had that second, wider pass since it shipped, for exactly the
+      // reason a seat needs it too: ENTRY_R is one fixed offset, and a piece
+      // whose authored footprint is bigger than the offset assumes puts its own
+      // body inside every candidate. Measured — the staff lounge's armchair
+      // (world/lounge.js:128) is 0.94 x 0.88 of solid kit; its corner half-
+      // diagonal (0.64) plus propuse's own BODY_R (0.30) needs 0.94 m of
+      // clearance and ENTRY_R is 0.78, so all four marks landed in the chair
+      // and it was the ONE anchor in the whole prison that `blocked` counted.
+      // Purely additive: the loop below returns on the first clear candidate,
+      // so every anchor that already resolves keeps the identical entry point
+      // and only a would-be `blocked` record ever reaches these four.
       const f = rec.face;
-      cand = [f, f + HALF, f - HALF, f + Math.PI].map(function (a) {
-        return [rec.x + Math.sin(a) * ENTRY_R, rec.z + Math.cos(a) * ENTRY_R];
-      });
+      const dirs = [f, f + HALF, f - HALF, f + Math.PI];
+      cand = [];
+      for (let r = 0; r < 2; r++) {
+        const R = r === 0 ? ENTRY_R : ENTRY_R + 0.42;
+        for (let i = 0; i < dirs.length; i++)
+          cand.push([rec.x + Math.sin(dirs[i]) * R, rec.z + Math.cos(dirs[i]) * R]);
+      }
     }
     for (let i = 0; i < cand.length; i++) {
       if (clearAt(cand[i][0], cand[i][1], rec.y)) {

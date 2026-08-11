@@ -274,10 +274,15 @@
   // head at -z: this said +1 for its whole life and would have laid every
   // sleeper in head-first at the FOOT of his own bunk the moment anything
   // actually used the record.
-  function useBed(x, z, along, top, len, own, slot) {
+  // `anchorY` separates the two racks of one stack. city/propuse.js dedupes a
+  // bed on (x, y, z), so the upper rack registered at the lower one's y is
+  // silently thrown away — the stack would draw two mattresses and register
+  // one. It is the anchor's own floor reference, not the cushion (that is
+  // `top`), and it is what makes "which rack" a coordinate rather than a flag.
+  function useBed(x, z, along, top, len, own, slot, anchorY) {
     PP.props++;
     const hx = along === "z" ? 0 : -1, hz = along === "z" ? -1 : 0;
-    pendFit.push({ bed: 1, a: [x, 0, z, hx, hz, len, top, "bunk", null], own: own || null, slot: slot || "bed" });
+    pendFit.push({ bed: 1, a: [x, anchorY || 0, z, hx, hz, len, top, "bunk", null], own: own || null, slot: slot || "bed" });
     if (fitFlushed) flushFittings();
     return null;
   }
@@ -544,7 +549,12 @@
       bb(0, 1.98, -1.00, 0.90, 0.14, 0.42, 0xdfe3ea);                    // upper pillow
       for (const a of [-1, 1]) bb(a * 0.60, 1.05, a * 1.28, 0.10, 1.40, 0.10, C_DARK);   // corner posts
     }
-    return { x: x, z: z, top: 0.79, along: along };
+    // `topBunk` is the UPPER mattress surface, and it is null when there is no
+    // upper rack — so "does this stack sleep two" is answered by the geometry
+    // that drew it and never by a constant somewhere else. The 1.97 matches the
+    // `bb(0, 1.88, 0, MLAT, 0.18, …)` upper mattress above, exactly the way
+    // `top: 0.79` matches the lower one.
+    return { x: x, z: z, top: 0.79, topBunk: dbl ? 1.97 : null, along: along };
   }
 
   // the combined steel toilet/sink every cell in the world actually has.
@@ -589,16 +599,36 @@
     const backX = c.x + inx * (c.hx - BACK_IN), backZ = c.z + inz * (c.hz - BACK_IN);
     const blanket = c.player ? 0xa8442f : pick([0x5c6470, 0x4a5b46, 0x6b6152, 0x53535e], c.x, c.z, 3311);
 
-    // BUNK — against the cell's "left" wall as seen from the door, head to the
-    // back. The north row is 5.5 m deep and gets a DOUBLE; the 3.8 m side cells
-    // get a single, because a stack in a small cell is what "reads fake" means.
+    /* BUNK — against the cell's "left" wall as seen from the door, head to the
+       back.
+
+       EVERY CELL IS A DOUBLE NOW, AND THAT IS A CORRECTION, NOT A CHANGE OF
+       MIND. This line read `bunkRig(..., north, ...)` — the 5.5 m north row got
+       a stack and the nine 3.8 m side cells got a single, on the stated grounds
+       that "a stack in a small cell is what reads fake means". Meanwhile the
+       arithmetic every population number in this game is a subtraction against
+       — CBZ.prisonBeds() below — has published `perCell: 2` since the day it
+       was written. Thirteen of the twenty-six places this prison claims to have
+       did not physically exist, and systems/prisonrest.js measured the
+       consequence: 42 live inmates against 13 registered mattresses.
+
+       Of the two ways to reconcile that, shrinking the claim shrinks the game
+       (houses -> cast) and shrinking a prison's design capacity to make an
+       overcrowding statistic look better is the exact move Brown v. Plata was
+       about. So the geometry is what moves: a 3.8 m cell with a stack in it is
+       not "fake", it is the single most photographed object in American
+       corrections. `bunkRig` already draws the whole upper rack — frame,
+       mattress, bedding, guard rail, ladder — so this costs one argument. */
     const bx = north ? c.x - (c.hx - 0.70) : c.x - c.dx * (c.hx - 0.70);
     const bz = north ? c.z - c.dz * (c.hz - 1.55) : c.z - (c.hz - 1.40);
-    c.bunk = bunkRig(c, bx, bz, "z", north, blanket);
-    // THE BUNK IS A BED. Its own returned mattress top (0.79) is the declared
-    // cushion, so the anchor can never drift off the mesh it belongs to.
-    // `c` + "bed" is where the record lands once the queue above is drained.
-    useBed(c.bunk.x, c.bunk.z, "z", c.bunk.top, 2.60, c, "bed");
+    c.bunk = bunkRig(c, bx, bz, "z", true, blanket);
+    // THE BUNK IS A BED — BOTH RACKS. Each returns its own mattress top (0.79
+    // and 1.97) as the declared cushion, so an anchor can never drift off the
+    // mesh it belongs to. `c` + "bed"/"bunkTop" is where the records land once
+    // the queue above is drained. A man on the top rack is a man who is not on
+    // a floor mat, which is the whole point of drawing it.
+    useBed(c.bunk.x, c.bunk.z, "z", c.bunk.top, 2.60, c, "bed", 0);
+    if (c.bunk.topBunk) useBed(c.bunk.x, c.bunk.z, "z", c.bunk.topBunk, 2.60, c, "bedTop", 1.18);
 
     // TOILET + SINK at the back corner opposite the bunk, its back to masonry.
     const tx = north ? c.x + (c.hx - 0.55) : backX;
@@ -616,8 +646,11 @@
       const st = addBox(c.x + 1.15, 0.22, c.z + 1.00, 0.44, 0.44, 0.44, 0x6b6152, { cast: false });
       useSeat(c.x + 1.15, c.z + 1.00, Math.atan2(-1.15, -1.00), 0.44);
       if (CBZ.pushProp) CBZ.pushProp({
+        // `stand`: THE CELL STOOL IS THE OWNER'S OWN EXAMPLE. 7 kg, a 0.44 m
+        // flat pad — shove it against a wall and stand on it. The leash keeps
+        // it inside the cell, so what it buys you is height in YOUR OWN ROOM.
         parts: [st], x: c.x + 1.15, z: c.z + 1.00, hx: 0.22, hz: 0.22, y1: 0.44,
-        mass: 7, kind: "stool", solid: true, leash: 3.2, seat: { x: c.x + 1.15, z: c.z + 1.00 },
+        mass: 7, kind: "stool", solid: true, leash: 3.2, stand: true, seat: { x: c.x + 1.15, z: c.z + 1.00 },
         room: { x0: c.x - c.hx + 0.4, x1: c.x + c.hx - 0.4, z0: c.z - c.hz + 0.4, z1: c.z + c.hz - 0.4 },
       });
     }
@@ -815,7 +848,7 @@
       const post = addBox(sx, 0.22, sz, 0.14, 0.44, 0.14, C_STEEL_D, { cast: false });
       if (CBZ.pushProp) CBZ.pushProp({
         parts: [pad, post], x: sx, z: sz, hx: 0.21, hz: 0.21, y1: 0.48,
-        mass: 9, kind: "stool", solid: true, leash: 3.0, seat: { x: sx, z: sz },
+        mass: 9, kind: "stool", solid: true, leash: 3.0, stand: true, seat: { x: sx, z: sz },
       });
     }
   }
@@ -1193,11 +1226,30 @@
      housing unit — the south block has a chow hall and a dayroom and no beds
      at all — and the population follows on its own, everywhere, at once.
      ========================================================== */
-  const BUNKS_PER_CELL = 2;          // bunkRig draws and beds the top rack
+  /* THE NUMBER IS COUNTED, NOT TYPED. `BUNKS_PER_CELL = 2` was a constant that
+     asserted what the wing sleeps, and for its whole life the wing drew
+     something else: four doubles and nine singles, seventeen racks against a
+     published twenty-six. A constant cannot notice that. So the capacity is
+     now a sum over the CELL RECORDS — each stack reports its own racks from
+     the mattresses bunkRig actually drew — and the only way to change this
+     prison's capacity is to change its furniture, which is the sentence the
+     block above has always ended on ("THE LEVER IS CELLS, NOT A CONSTANT").
+     `perCell` survives as a REPORTED average so anything reading it still
+     gets a number, and it is now a measurement. */
   const OCCUPANCY = 1.85;            // design capacity multiplier — see above
+  function rackCount() {
+    let n = 0;
+    for (let i = 0; i < cells.length; i++) {
+      const b = cells[i].bunk;
+      if (!b) continue;
+      n += b.topBunk ? 2 : 1;
+    }
+    return n;
+  }
   CBZ.prisonBeds = function () {
-    const beds = cells.length * BUNKS_PER_CELL;
-    return { cells: cells.length, perCell: BUNKS_PER_CELL, beds: beds,
+    const beds = rackCount();
+    return { cells: cells.length, perCell: cells.length ? +(beds / cells.length).toFixed(2) : 0,
+      beds: beds, racks: beds,
       occupancy: OCCUPANCY, houses: Math.round(beds * OCCUPANCY) };
   };
 

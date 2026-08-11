@@ -122,6 +122,11 @@
       loyaltyMul: 1.25,     // how fast a screw stays bought
       keep: { cigs: 1, items: "all" },   // never used: nobody is transferred INTO low
       arrive: "",
+      // ---- MUSTER: how hard the wing is closed. LOW is a county farm — the
+      //      horn goes, the screws stand at the apron, and a man who is slow
+      //      about it drifts in over the next few minutes. Nobody comes to get
+      //      you until you are practically standing on a guard.
+      muster: { herdR: 6.0, grace: 0.55, sweep: false },
       blocks: {
         //          hour  cells   home     pa torches
         wake:   { from: 5.0,  cells: "open", home: "block", pa: 1, torches: true },
@@ -144,6 +149,7 @@
       stealMul: 1.00, keyMul: 1.00, respectMul: 1.00, loyaltyMul: 1.00,
       keep: { cigs: 0.5, items: "personal" },
       arrive: "Medium Security. New wing, new screws, half your property.",
+      muster: { herdR: 8.0, grace: 0.35, sweep: false },   // the shipped behaviour
       blocks: {   // ---- THE SHIPPED TIMETABLE, unchanged ----
         wake:   { from: 5.0,  cells: "open", home: "block", pa: 2, torches: true },
         yard:   { from: 7.0,  cells: null,   home: null,    pa: 1, torches: false },
@@ -165,6 +171,7 @@
       stealMul: 0.80, keyMul: 1.15, respectMul: 0.85, loyaltyMul: 0.75,
       keep: { cigs: 0.25, items: "harmless" },
       arrive: "High Security. Longer nights, shorter yard, and they kept most of it.",
+      muster: { herdR: 11.0, grace: 0.18, sweep: true },
       blocks: {   // the evening COUNT is taken in the cells, not on the tier
         wake:   { from: 5.5,  cells: "open", home: "block", pa: 2, torches: true },
         yard:   { from: 8.0,  cells: null,   home: null,    pa: 1, torches: false },
@@ -186,6 +193,9 @@
       stealMul: 0.60, keyMul: 1.35, respectMul: 0.60, loyaltyMul: 0.45,
       keep: { cigs: 0, items: "none" },
       arrive: "Segregation. You arrive with what you stand up in.",
+      // Everyone in, at the horn, and the screws WALK THE COMPOUND for anyone
+      // who is not. There is no grace at all — segregation counts bodies.
+      muster: { herdR: 15.0, grace: 0.0, sweep: true },
       blocks: {   // 5 3/4 hours out of the cell; 14 1/4 locked in it
         wake:   { from: 6.0,  cells: "open", home: "block", pa: 3, torches: true },
         yard:   { from: 10.0, cells: null,   home: null,    pa: 1, torches: false },

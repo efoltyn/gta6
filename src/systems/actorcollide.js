@@ -47,6 +47,34 @@
   function posOf(a) { return a._p ? a.pos : a.group.position; }
   function radOf(a) { return a._p ? a.r : R; }
 
+  /* ---- THE BAND. CBZ.collide's FOUR-argument contract, honoured -----------
+     Both clamps in this file called `CBZ.collide(pos, radius)` and stopped
+     there. Inside collide, the height-gate line reads
+
+         if (c.y0 != null && (headY <= c.y0 || feetY >= c.y1)) continue;
+
+     and with both undefined BOTH comparisons are false, so the skip never
+     fires: every height-banded collider in the prison — the stools, the mess
+     tables, the cones, the crates, the cell fittings — was a FULL-HEIGHT WALL
+     to this file. physics.js resolves the player correctly at order 10 with
+     the real band and this file UNDID that answer at order 25.
+
+     It cost nothing visible while nobody could get above knee height. The
+     moment a prop's top became real ground (systems/pushprops.js `stand`),
+     it cost everything: measured, a man standing on a stool was ejected
+     0.59 m — his radius plus the stool's half-width, the signature of a
+     depenetration — and dropped to the floor within a fifth of a second.
+
+     Same numbers physics.js uses for the player it owns: feet+0.25 (so a kerb
+     is stepped, not walled) up to a 1.7 m body. Escape-mode only — the updater
+     below returns for every other mode — so nothing outside the prison moves. */
+  const BODY_H = 1.7, FOOT_CLEAR = 0.25;
+  function clampOut(a) {
+    const p = posOf(a);
+    const feet = (p.y || 0) + FOOT_CLEAR;
+    CBZ.collide(p, radOf(a), feet, (p.y || 0) + BODY_H);
+  }
+
   // reused every frame — no per-frame allocation
   let grid = null;
   const list = [];
@@ -132,7 +160,7 @@
     if (CBZ.humanContact) {
       CBZ.humanContact.resolve(list, dt, {
         mode: "escape",
-        clamp(a) { CBZ.collide(posOf(a), radOf(a)); },
+        clamp: clampOut,
       });
       for (let i = 0; i < list.length; i++) if (!list[i]._p) stampRest(list[i]);
       return;
@@ -164,7 +192,7 @@
     }
 
     // then clamp everyone back out of walls (including the player)
-    for (let i = 0; i < list.length; i++) CBZ.collide(posOf(list[i]), radOf(list[i]));
+    for (let i = 0; i < list.length; i++) clampOut(list[i]);
     // AFTER the clamp: this settled position is next frame's reference, so the
     // difference the probe reads is the step the mover TRIED to take, not the
     // one the wall allowed. See the note on stampRest.

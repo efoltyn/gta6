@@ -522,8 +522,12 @@
       // a wheelie bin half full of trays is ~22 kg and rolls when you walk into
       // it — the dish-return end of a mess hall is where things get shoved
       if (CBZ.pushProp) CBZ.pushProp({
+        // `stand`: a closed 0.72 m drum with a lid is the tallest thing in the
+        // prison a man can get on top of unaided — 0.96 m, which is two stools.
+        // The mop bucket below is NOT: 0.5 x 0.4 of sloshing plastic is a
+        // twisted ankle, and the cones outside are tapered.
         parts: [d, lid], x: b[0], z: b[1], hx: 0.36, hz: 0.36, y1: 0.96,
-        mass: 22, kind: "barrel", col: bcol, leash: 5.0,
+        mass: 22, kind: "barrel", col: bcol, leash: 5.0, stand: true,
       });
     }
     // mop bucket + wringer, parked where the wet floor is

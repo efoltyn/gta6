@@ -405,15 +405,49 @@
         the merchant stay out, which is also what keeps the dark yard worth
         crossing. Regions are saved and restored, never overwritten.
      ========================================================== */
+  /* LOCKDOWN MEANS LOCKDOWN. This predicate read
+         n.gang == null && n._cellIdx == null
+     and the comment above it explained that the gangs keep their night hustle.
+     MEASURED, at 02:00 on a fresh run: 42 live inmates, 32 of them carrying a
+     gang, and every one of the other TEN already holding a cell — so the
+     conjunction selected ZERO BODIES OUT OF FORTY-TWO. The muster was not
+     lenient, it was empty, and the yard held 32 awake men in the dark because
+     nothing had ever been told to move them.
+
+     A prison closes on everybody. What the gangs keep is the NIGHT ITSELF —
+     the wing is where the hustle happens after dark, not the exercise yard —
+     and that is now enforced by the same clock rather than by an exemption
+     nobody could see. The one class still excluded is the wing's own
+     residents (`_cellIdx`): world/cellblock.js's order-22.6 leash already owns
+     those bodies, and a second system writing their `target` is two movers on
+     one Vector3, which is a man vibrating in his own doorway. */
   function housed(n) {
     return n && !n._crowd && !n.dead && !n.escaped && n.role === "inmate" &&
-      n.gang == null && n._cellIdx == null && n.group;
+      n._cellIdx == null && n.group;
   }
-  // a deterministic patch of open wing floor, clear of the x = 0 patrol spine
+  // a deterministic patch of open wing floor, clear of the x = 0 patrol spine.
+  // THE FALLBACK ONLY: a man is sent to the place he actually sleeps whenever
+  // systems/prisonrest.js can name one (see muster()).
   function musterSpot(i) {
     const side = (i & 1) ? 1 : -1;
     const row = (i / 2) | 0;
     return { x: side * (3.0 + (row % 4) * 2.6), z: -11.5 - ((row / 4) | 0) * 3.1 };
+  }
+  /* WHERE HE IS SENT IS WHERE HE SLEEPS. The first draft parked every mustered
+     man on a hash of a floor grid, and systems/prisonrest.js then walked him
+     off it to a bed — one body, two destinations, seconds apart. prisonrest
+     owns the housing (racks, then mats, one stable claim for the whole run),
+     so it is asked, and the fallback grid is for the frames before the wing's
+     fittings have been drained (index.html: this file 588, prisonrest 600). */
+  function bedSpotFor(n) {
+    const R = CBZ.prisonRest;
+    if (!R || !R.place) return null;
+    let bed = null;
+    try { bed = R.place(n); } catch (e) { bed = null; }
+    if (!bed) return null;
+    let e = null;
+    try { e = CBZ.propEntryPoint ? CBZ.propEntryPoint(bed) : null; } catch (err) { e = null; }
+    return (e && e.ok) ? { x: e.x, z: e.z } : { x: bed.x, z: bed.z };
   }
   let mustered = false;
   function muster(on) {
@@ -426,7 +460,7 @@
       if (!housed(n)) continue;
       if (on) {
         if (!n._dayRegion) n._dayRegion = n.region;
-        const s = musterSpot(i++);
+        const s = bedSpotFor(n) || musterSpot(i++);
         if (s.z < CB.z0 + 2) continue;                     // ran out of wing floor
         n.region = [s.x - 1.1, s.x + 1.1, s.z - 1.1, s.z + 1.1];
         n.target.set(s.x, 0, s.z);
@@ -444,25 +478,78 @@
      drops the stand/idle routine and the pause on any loose inmate inside
      8 m of an apron guard, and nothing here fights the mover for the target
      — two systems writing one Vector3 is how a body vibrates in place. */
-  function herd() {
+  /* HOW HARD THE WING CLOSES IS THE SECURITY LEVEL, and it is two numbers a
+     player can feel without a word on screen:
+
+       herdR  how close a screw has to be before you stop dawdling. On the
+              county farm (6 m) you have to be almost standing on him; in
+              segregation (15 m) his being anywhere near the lane is enough.
+       grace  what fraction of the muster block may elapse before a straggler
+              is actively COLLECTED. LOW spends more than half the block
+              tolerating men drifting in; ULTRA has none — the horn is the
+              order and the screws walk the compound on the next breath.
+       sweep  whether anybody comes to get you at all. Off below HIGH: at the
+              easy end being late is simply being late.
+
+     The sweep reuses the investigate plumbing entities/guards.js already has,
+     so a "sweep" is one able screw walking to the furthest man still outside
+     and looking at him. No new AI state, no narration, and it reads exactly
+     like what it is: an officer coming to collect you. */
+  // how far through the current block we are, 0..1 (hoisted off the public
+  // object so the sweep's grace window can read it without a round trip)
+  function progress() {
+    const b = live(), n = nextOf(b);
+    const span = ((n.from - b.from) % 24 + 24) % 24 || 24;
+    return 1 - hoursUntilNext(hourNow()) / span;
+  }
+  function musterRule() {
+    const T = CBZ.prisonTier;
+    const m = (T && T.knob) ? T.knob("muster") : null;
+    return m || { herdR: 8.0, grace: 0.35, sweep: false };
+  }
+  let sweepCd = 0;
+  function herd(dt) {
     if (!mustered) return;
+    const rule = musterRule();
+    const R2 = rule.herdR * rule.herdR;
     const list = CBZ.npcs || [];
     const gl = CBZ.guards || [];
+    let worst = null, wd = 0;
     for (let k = 0; k < list.length; k++) {
       const n = list[k];
       if (!housed(n) || !n._muster || n.ko > 0) continue;
       if (n.aiState === "fight" || n.aiState === "flee") continue;
       const p = n.group.position;
       if (inBlock(p.x, p.z, -0.5)) continue;
+      const far = (p.x - n._muster.x) * (p.x - n._muster.x) + (p.z - n._muster.z) * (p.z - n._muster.z);
+      if (far > wd) { wd = far; worst = n; }
       for (let j = 0; j < gl.length; j++) {
         const gd = gl[j];
         if (!gd._dayRoute || gd.dead || gd.ko > 0) continue;
         const dx = gd.group.position.x - p.x, dz = gd.group.position.z - p.z;
-        if (dx * dx + dz * dz > 64) continue;
+        if (dx * dx + dz * dz > R2) continue;
         n.pause = 0;
         n._lifeActivity = null; n._lifeT = 0;              // move, inmate
         break;
       }
+    }
+    // ---- THE SWEEP -------------------------------------------------------
+    sweepCd -= dt || 0;
+    if (!rule.sweep || !worst || sweepCd > 0) return;
+    if (progress() < rule.grace) return;                   // still inside the grace window
+    sweepCd = 5;
+    const p = worst.group.position;
+    let best = null, bd = Infinity;
+    for (let j = 0; j < gl.length; j++) {
+      const gd = gl[j];
+      if (gd.dead || gd.ko > 0 || gd.corrupt || (gd.hunt || 0) > 0) continue;
+      const d = (gd.group.position.x - p.x) * (gd.group.position.x - p.x)
+        + (gd.group.position.z - p.z) * (gd.group.position.z - p.z);
+      if (d < bd) { bd = d; best = gd; }
+    }
+    if (best) {
+      best.investigate = { x: p.x, z: p.z, t: 9, scan: 0, type: "muster" };
+      best.alert = Math.max(best.alert || 0, 0.55);
     }
   }
 
@@ -535,7 +622,7 @@
     driveDoors(dt);
     tryCellKey();
     enforceCurfew(dt);
-    herd();
+    herd(dt);
     pumpPA(dt);
   });
   // the horn's own lamp fades on menus too, so a paused game does not freeze
@@ -559,11 +646,7 @@
     next: function () { return nextOf(live()); },
     // real seconds until the next block starts
     until: function () { return hoursUntilNext(hourNow()) * secsPerHour(); },
-    progress: function () {
-      const b = live(), n = nextOf(b);
-      const span = ((n.from - b.from) % 24 + 24) % 24 || 24;
-      return 1 - hoursUntilNext(hourNow()) / span;
-    },
+    progress: progress,
     dayLength: daySecs,
     hourLength: secsPerHour,
     curfew: function () { return isCurfew(live()); },

@@ -340,13 +340,41 @@
     return best;
   }
 
-  function racketHint(text) {
+  /* ---- THE RACKET SPEAKS FOR ITSELF ---------------------------------------
+     This was `racketHint(text)` — a `flashHint` caption narrating, in the
+     third person, what a named guard standing in front of you was doing. It
+     was the last third-person narration lane left in the prison after the
+     show-don't-tell sweep, and its two callers wanted opposite things:
+
+       "X leans on the racket tab."  A PURE DUPLICATE. It fired on the same
+       line as startPayoffApproach(), which already writes `g.approach.msg`
+       and sends the man WALKING AT YOU with a bubble over his head. The
+       approach is the signal; a caption on it is the caption on the camera
+       cone. Deleted outright, nothing put in its place.
+
+       "X leaks your trail to clean guards."  A REAL EVENT WITH AN INVISIBLE
+       CAUSE. startCleanSweep already produces the consequence — the nearest
+       clean screw turns and walks to where you were — but nothing said WHO
+       sold you, so a sweep arrived out of a clear sky. That one needs a
+       carrier, and there is a man standing right there who did it. He says
+       it, out of his own mouth, through the shipped in-world speech surface
+       (CBZ.prisonSay: 16 m, ranked, silent when he is dead or out cold) —
+       and what he says is what a bent screw actually says, into his radio,
+       rather than a description of the mechanic. Out of earshot you get the
+       sweep with no explanation, which is correct: you were not there. */
+  const RADIO = [
+    "Post four, got a sighting for you. Sending it now.",
+    "Yeah — he's yours. Same spot I called in.",
+    "Control, I've got eyes. Passing it up the line.",
+  ];
+  function racketBark(g) {
     const game = CBZ.game || {};
-    if (!CBZ.flashHint) return;
     game.racketHintT = Math.max(0, (game.racketHintT || 0) - 1);
     if (game.racketHintT > 0) return;
     game.racketHintT = 3;
-    CBZ.flashHint(text, 1.7);
+    if (!CBZ.prisonSay || !g) return;
+    const i = ((g.id || 0) + ((game.caughtCount || 0) | 0)) % RADIO.length;
+    try { CBZ.prisonSay(g, RADIO[i]); } catch (e) {}
   }
 
   function tagNearbyBadgeRumor(source, strength) {
@@ -402,7 +430,8 @@
         startPayoffApproach(bent, "payoffOffer", { thresholdPressure: true });
       }
       tagNearbyBadgeRumor(bent, 18 + Math.min(20, debt + Math.max(0, -ledger) * 0.5));
-      racketHint(`${nameOf(bent)} leans on the racket tab.`);
+      // no caption: startPayoffApproach above already sends him at you with a
+      // bubble and his own line. See racketBark's note.
       game.racketPressureT = 8.5 + CBZ.econ.rng() * 5;
       return;
     }
@@ -411,7 +440,7 @@
       startCleanSweep(bent, 16 + Math.min(18, debt * 0.45 + Math.max(0, -ledger) * 0.28));
       addRacketStanding(-2);
       tagNearbyBadgeRumor(bent, 24);
-      racketHint(`${nameOf(bent)} leaks your trail to clean guards.`);
+      racketBark(bent);                       // he says it into his radio, in the world
       game.racketPressureT = 11 + CBZ.econ.rng() * 7;
       return;
     }

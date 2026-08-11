@@ -292,11 +292,27 @@
     return extra ? { name: shout.charAt(0) + shout.slice(1).toLowerCase(), rarity: extra } : null;
   }
 
-  // Mode banners keep a red-tinted EDGE so danger still reads as danger — a
-  // border and a faint bloom, not the old four-layer red text ladder. Built
-  // from the real caller list (capture.js / lockdown.js / disasters.js /
-  // killstreaks.js / reinforcements.js / interactions.js); "ALL CLEAR",
-  // "POWER RESTORED" and "TIME SERVED — GATE'S OPEN" are deliberately not in it.
+  /* Mode banners keep a red-tinted EDGE so danger still reads as danger — a
+     border and a faint bloom, not the old four-layer red text ladder. Built
+     from the real caller list (capture.js / lockdown.js / disasters.js /
+     killstreaks.js / reinforcements.js).
+
+     RE-DERIVED FROM THE LIVE CALLERS. This comment claimed "POWER RESTORED"
+     was a toast this pattern deliberately excluded, and named interactions.js
+     as a caller. Neither is true any more: the show-don't-tell sweep deleted
+     BOTH breaker captions outright — interactions.js:234 and :357 now say, in
+     as many words, that nineteen lamps going out is the "POWER OUT!" and the
+     lights coming back on is the "POWER RESTORED" — so that file shouts
+     nothing at all. A pattern is allowed to be conservative, but a comment
+     that names dead strings as live ones is how the next sweep re-litigates
+     something already settled.
+
+     STILL LIVE AND STILL DELIBERATELY UNSTYLED: lockdown.js:431 "ALL CLEAR"
+     and capture.js:640 "TIME SERVED — GATE'S OPEN". Both are the END of a
+     danger, so a danger skin on them would be the opposite of the truth.
+     POWER OUT stays in the pattern as a dead-string guard — it costs one
+     alternation and it means a future caller that DOES shout it is styled
+     correctly instead of silently plain. */
   const TOAST_ALARM_RE = /\b(?:LOCKDOWN|STRIKE|CUFFED|BACK TO|BUSTED|ALARM|MANHUNT|INCOMING|BRACE|SWEPT|NUKE|POWER OUT|REINFORCEMENTS)\b/i;
 
   function flashToast(t) {
