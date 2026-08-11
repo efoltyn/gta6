@@ -108,6 +108,9 @@
      WATER_MUFFLE     — the CBZ.sfx muffle wrap.
      WATER_CAM_UW     — the underwater lens pinch + sway.
      WATER_BREATH_HUD — the low-air vignette.
+     WATER_UW_SKY_SEAM — repaint core/sky.js's dome with the SUBMERGED fog
+                       colour, so a hole in the geometry falls back to water
+                       instead of sky. See the seam-law note by exitFog().
 ============================================================ */
 (function () {
   "use strict";
@@ -132,6 +135,11 @@
   // WATER_BREATH_HUD — the low-air edge vignette (reads city/swim.js's meter).
   // OFF (?cfg_WATER_BREATH_HUD=0) → no visual air warning at all.
   if (CFG.WATER_BREATH_HUD == null) CFG.WATER_BREATH_HUD = true;
+  // WATER_UW_SKY_SEAM — repaint core/sky.js's dome with the SUBMERGED fog
+  // colour, so the background behind a hole in the geometry is water and not
+  // sky. See "THE SEAM LAW IS ALSO A SUBMERGED LAW" below.
+  // OFF (?cfg_WATER_UW_SKY_SEAM=0) → the exact prior look, white line and all.
+  if (CFG.WATER_UW_SKY_SEAM == null) CFG.WATER_UW_SKY_SEAM = true;
 
   function off() {
     return CFG.WATER_UNDERWATER === false || CFG.WATER_V2 === false;
@@ -707,6 +715,65 @@
     savedFog.far = savedFar;
     myFog = null; savedFog = null;
     lastNear = lastFar = -1;
+    // Surfacing must put the sky back in the same breath the fog goes back —
+    // we are the ones who moved it, so we are the ones who restore it. Behind
+    // the same flag as the descent half, so OFF is a true byte-for-byte
+    // revert and not "the old look plus one stray repaint".
+    lastSeamHex = -1;
+    if (CFG.WATER_UW_SKY_SEAM !== false && CBZ.skySync) {
+      try { CBZ.skySync(); } catch (_) {}
+    }
+  }
+
+  /* ---- THE SEAM LAW IS ALSO A SUBMERGED LAW -------------------------------
+     core/sky.js paints the dome so that everything below its horizon row IS
+     scene.fog.color exactly (paintSky's final fillRect) — that is the law that
+     makes the sky/fog join invisible above water. The dome is the BACKGROUND:
+     fog:false, depthTest:false, depthWrite:false, renderOrder -10000, drawn
+     first and expected to be overwritten by every real surface. So the law is
+     not decoration; it is what a pixel with NOTHING in it falls back to.
+
+     Underwater that fallback was still the sky. Two facts collide:
+
+       1. sky.js reads the fog at ORDER 99. This module installs myFog at
+          ORDER 99.6 — deliberately last, so nothing overwrites the range we
+          just wrote. The sky therefore reads the fog we are about to replace,
+          and its repaint gate (a colour-moved test against what it last
+          painted) never re-fires on a value it never saw move.
+       2. fog:false means the water column cannot reach the dome at all, and
+          depthTest:false means a hole in the geometry is a BRIGHT seam rather
+          than a dark one.
+
+     MEASURED (eye 11.6 m under, fp-deep-horizon, seed 90210): the sky canvas
+     below its horizon row sat at (187,201,207) — #bac8ce, the ABOVE-water fog
+     colour — while scene.fog was #041e50 at far 17.3 m. Looking up toward the
+     shore, where the ocean shader and terrain_overhaul's shelf cutout BOTH
+     discard over dry land, that left a 9-row hole through which the dome drew
+     (239,240,239) across a water column reading (6,112,190): the owner's
+     "fake horizon" line, tracing the coastline. One CBZ.skySync() moved the
+     canvas to (5,31,81) and those rows to (6,113,190) — the water, to within
+     4/255.
+
+     So we hand the sky the colour it should have had. skySync() FORCES a
+     repaint (a 1024x512 canvas fill plus its upload) — it exists for the
+     frozen-rAF tools, which render by hand and need the sky rebuilt on
+     demand, so it deliberately bypasses sky.js's own gate. That is right for
+     a tool and wrong for a swimmer: the colour rides a continuous depth ramp,
+     so an unguarded call repaints the sky EVERY FRAME while you move. We
+     therefore re-impose sky.js's own two conditions rather than inventing new
+     ones — the colour must actually differ at 8-bit texel resolution, and at
+     most one repaint per 100 ms, which is the exact throttle sky.js applies
+     to itself. Same cost as the sky already agreed to pay, same worst-case
+     latency, and holding still at one depth it fires never. */
+  let lastSeamHex = -1, lastSeamAt = -1e9;
+  function syncSkySeam() {
+    if (CFG.WATER_UW_SKY_SEAM === false || !CBZ.skySync || !myFog) return;
+    const hex = myFog.color.getHex();
+    if (hex === lastSeamHex) return;
+    const now = CBZ.now == null ? 0 : CBZ.now;
+    if (now - lastSeamAt < 100) return;
+    lastSeamHex = hex; lastSeamAt = now;
+    try { CBZ.skySync(); } catch (_) {}
   }
 
   // How deep is the camera below the live water surface? <= 0 means above it.
@@ -936,6 +1003,7 @@
     // ref 5's whole subject, the bright rippling ceiling, is never drawn.
     myFog.far = farK * (1 + glow * 0.9) * q / density;
     lastNear = myFog.near; lastFar = myFog.far;
+    syncSkySeam();
   });
 
   // How far UP the camera is looking: +1 straight at the surface, 0 level,
