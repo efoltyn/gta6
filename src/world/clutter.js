@@ -217,7 +217,7 @@
     // is scenery (systems/pushprops.js).
     if (CBZ.pushProp) CBZ.pushProp({
       parts: [c, band, base], x: x, z: z, hx: 0.31, hz: 0.31, y1: 0.78,
-      mass: 2.5, kind: "cone", col: base.userData.collider, leash: 8.0,
+      mass: 2.5, kind: "cone", col: base.userData.collider, leash: 8.0, mode: "escape",
     });
   }
 

@@ -44,8 +44,9 @@
       a RESET, when the whole wing gets up on one frame. Measured: a security
       transfer taken at lights-out put 25 men on their feet INSIDE the beds
       they had been asleep in, which is the owner's original sentence restored
-      by a restart. `stepOffBunk` (§3) is the answer, and it runs on every wake
-      rather than only on that one.
+      by a restart. `CBZ.rest.up()` steps the body clear on EVERY wake rather
+      than only on that one, and `CBZ.rest.sweep()` catches the bodies that
+      were never assigned the bed they are standing in.
 
    WHAT DRIVES IT: `CBZ.prisonSchedule`, and never a second clock.
 
@@ -55,6 +56,14 @@
        count             the muster owns them; this file keeps its hands off
        secure            drift to your own bunk
        night             LIGHTS OUT — everybody horizontal
+
+   WHAT IS NO LONGER HERE. The verbs — claim a place, send a body to it, hand
+   it to the pose, hold it, get it up, step it clear — and the three load-order
+   repairs that make any of it reach a registry at all are systems/rest.js's
+   now, because a ward, a barracks and a dormitory need every one of them and
+   none of them is about a prison. What stays is the arithmetic below: how many
+   places this wing owes the men in it, where the overflow lies down, and which
+   block of the day means bed, bench or hands-off.
 
    HOW IT HOLDS A BODY. A prison NPC is entities/npc.js's actor, not a
    city/peds.js ped: it has `group`/`target`/`pause` and no `pos`, no `path`,
@@ -85,7 +94,12 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
-  if (!CBZ || typeof CBZ.onUpdate !== "function") return;
+  // systems/rest.js owns the VERBS (claim a place, send a body, hand it to the
+  // pose, get it up, step it clear) and the load-order repairs that make any
+  // of it reach a registry at all. This file owns the POPULATION MATH: how
+  // many places a wing owes its men, where the overflow lies down, which block
+  // of the day means bed and which means bench. Tagged before us in index.html.
+  if (!CBZ || typeof CBZ.onUpdate !== "function" || !CBZ.rest) return;
   const CFG = (CBZ.CONFIG = CBZ.CONFIG || {});
   if (CFG.PRISON_REST_V1 == null) CFG.PRISON_REST_V1 = true;
   if (CFG.PRISON_REST_MATS == null) CFG.PRISON_REST_MATS = true;
@@ -137,9 +151,14 @@
      ========================================================== */
   const MAT_LEN = 1.95, MAT_W = 0.72, MAT_TOP = 0.075;
   // The mattress footprint a body may not be standing inside — read by the
-  // `bunkStanders` ratchet AND by stepOffBunk, so the number that DEFINES the
+  // `bunkStanders` ratchet AND by the step-off, so the number that DEFINES the
   // fault and the number that PREVENTS it can never drift apart.
   const MAT_HX = 0.52, MAT_HZ = 1.18;
+  // ...and it is declared to the shared layer, so the sweep that PREVENTS a
+  // body standing in a mattress and the count that MEASURES it are one box.
+  CBZ.rest.box.hx = MAT_HX; CBZ.rest.box.hz = MAT_HZ;
+  // a floor mat is a place you may legitimately stand on; a rack is not
+  function isMat(b) { return b.kind === "mat"; }
   const MAT_X = [-7.9, -4.6, 4.6, 7.9];
   // −26 is the day tables. Two rows added at the head of the wing (−36.2,
   // −39.4) because the grid is now sized by the population and 24 places was
@@ -169,8 +188,9 @@
   let matsRefused = 0;
   function buildMats(want) {
     if (!CFG.PRISON_REST_MATS || !CBZ.addBox || want <= 0) return;
-    const reg = CBZ.propRegisterBed || CBZ.roomBedAnchor;
-    if (!reg) return;
+    // nothing to register into at all (the purpose layer is off) — draw no
+    // mats rather than a floor of places nobody can be sent to
+    if (!CBZ.propRegisterBed && !CBZ.roomBedAnchor) return;
     let i = 0;
     for (let r = 0; r < MAT_Z.length && i < want; r++) {
       for (let c = 0; c < MAT_X.length && i < want; c++) {
@@ -182,8 +202,10 @@
         // reading as a painted rectangle on the floor
         CBZ.addBox(x, 0.135, z - MAT_LEN / 2 + 0.22, MAT_W - 0.08, 0.19, 0.34,
           [0x6b7280, 0x5d6470, 0x767d8a][i % 3], { cast: false });
-        let rec = null;
-        try { rec = reg(x, 0, z, 0, -1, MAT_LEN, MAT_TOP, "mat", null); } catch (e) { rec = null; }
+        // through CBZ.rest.bed: it queues when the registry has not parsed
+        // yet and counts any refusal, so a mat that loses its coordinate key
+        // to a neighbour says so on restAudit().dupes instead of vanishing.
+        const rec = CBZ.rest.bed(x, 0, z, 0, -1, MAT_LEN, MAT_TOP, "mat", null);
         if (rec) beds.push(rec);
         i++;
       }
@@ -217,7 +239,7 @@
        anchors. It is idempotent by construction (propuse dedupes on a
        decimetre coordinate key), so calling it here costs nothing when the
        anchors are already live. */
-    if (CBZ.roomAnchorsFlush) { try { CBZ.roomAnchorsFlush(); } catch (e) {} }
+    CBZ.rest.ready();
     const cb = CBZ.cellblock;
     if (cb && cb.cells) for (let i = 0; i < cb.cells.length; i++) {
       const c = cb.cells[i];
@@ -230,17 +252,13 @@
     }
     // MATS CLOSE THE GAP TO THE POPULATION, not to a published claim — see §1.
     buildMats(population() - beds.length);
-    if (CBZ.propSeatsIn) {
-      try {
-        CBZ.propSeatsIn(-28.8, -19.2, 6.2, 21.8, 0, messSeats);        // chow hall
-        CBZ.propSeatsIn(-30, 30, -8, 52, 0, yardSeats);                // the north yard
-      } catch (e) {}
-    }
-    if (CFG.PRISON_REST_WARDEN && CBZ.propNearestBed) {
+    CBZ.rest.seatsIn(-28.8, -19.2, 6.2, 21.8, 0, messSeats);         // chow hall
+    CBZ.rest.seatsIn(-30, 30, -8, 52, 0, yardSeats);                 // the north yard
+    if (CFG.PRISON_REST_WARDEN) {
       // world/adminwing.js furnishes the warden's quarters through the shared
       // kit, which registers its own bed anchor; find it rather than typing a
       // coordinate that a re-furnish would silently invalidate.
-      try { wardenBed = CBZ.propNearestBed(11.5, -59.5, 7.0, 0) || null; } catch (e) { wardenBed = null; }
+      wardenBed = CBZ.rest.nearestBed(11.5, -59.5, 7.0, 0);
     }
   }
 
@@ -250,116 +268,40 @@
         brain outranks a bed — the same precedence entities/poses.js states
         and cellblock.js's leash already honours.
      ========================================================== */
-  // A REAL BRAIN STATE OUTRANKS THE FURNITURE (entities/poses.js's precedence,
-  // and cellblock.js's leash honours the same list). NOTE what is deliberately
-  // NOT in here: `propArcActive`. A live arc is this file's OWN hand-off in
-  // progress, and treating it as "busy" is how the first draft woke every man
-  // on the sweep after it put him to bed — the settle beat had not finished, so
-  // the next tick read the arc, called it a brain state and stood him back up.
-  // An arc is checked separately, and the answer there is "leave him alone",
-  // never "get him up".
-  function busy(a) {
-    return !a || a.dead || a.escaped || (a.ko | 0) > 0 || a._npcAttached || a.intimidMode
-      || (a.huntPlayer || 0) > 0 || a.aiState === "fight" || a.aiState === "flee";
-  }
-  function inTransition(a) { return !!(CBZ.propArcActive && CBZ.propArcActive(a)); }
-  function keepRate(a) { if (a._restRate == null && a.speed > 0) a._restRate = a.speed; }
-  function giveRate(a) { if (a._restRate != null) { a.speed = a._restRate; a._restRate = null; } }
+  /* Every verb below is systems/rest.js's, and every one of them carries a
+     lesson this file paid for:
 
-  function goTo(a, x, z) {
-    if (!a.target) return false;
-    a.target.set(x, 0, z);
-    a.pause = 0;
-    const g = a.group.position;
-    return (g.x - x) * (g.x - x) + (g.z - z) * (g.z - z) < 2.6 * 2.6;
-  }
-
-  // walk him to it, then let propuse's own arc do the last two metres
-  function bedDown(a, bed) {
-    if (busy(a) || inTransition(a) || !bed || bed.occupant) return false;
-    const e = (CBZ.propEntryPoint && CBZ.propEntryPoint(bed)) || null;
-    const tx = (e && e.ok) ? e.x : bed.x, tz = (e && e.ok) ? e.z : bed.z;
-    if (!goTo(a, tx, tz)) return false;
-    keepRate(a);
-    let ok = false;
-    try { ok = !!CBZ.propSleep(a, bed); } catch (err) { ok = false; }
-    if (!ok) giveRate(a);
-    return ok;
-  }
-  function sitAt(a, seat) {
-    if (busy(a) || inTransition(a) || !seat || seat.occupant) return false;
-    const e = (CBZ.propEntryPoint && CBZ.propEntryPoint(seat)) || null;
-    const tx = (e && e.ok) ? e.x : seat.x, tz = (e && e.ok) ? e.z : seat.z;
-    if (!goTo(a, tx, tz)) return false;
-    keepRate(a);
-    let ok = false;
-    try { ok = !!CBZ.propSit(a, seat); } catch (err) { ok = false; }
-    if (!ok) giveRate(a);
-    return ok;
-  }
-  /* ---- A MAN WHO GETS UP STANDS BESIDE HIS BUNK, NOT IN IT ---------------
-     `CBZ.propWake` clears the pose and NEVER MOVES THE BODY — read it: it
-     releases the seat, drops the arc, un-curls the rig, and every line touches
-     rotation or a flag. That is right for a city ped, because the rise ARC it
-     starts first walks him off the mattress. It is wrong the moment the arc is
-     skipped, and the arc is skipped exactly when the whole wing gets up at
-     once: a reset.
-
-     MEASURED, in the whole-game smoke: a transfer taken at lights-out landed
-     25 bodies standing inside mattress rectangles — `bunkStanders`, the one
-     number this file exists to keep at zero, straight back to the owner's
-     original complaint by way of a restart. So the step off the bed is taken
-     here, at the wake, for every wake: if the arc owns him it will move him
-     and we keep our hands off; if it does not, he is put on the bed's own
-     entry point — the walkable side propuse already solved for getting IN. */
-  function stepOffBunk(a, bed) {
-    if (!bed || bed.kind === "mat" || !a.group) return;
-    if (CBZ.propArcActive && CBZ.propArcActive(a)) return;      // the rise arc owns him
-    const g = a.group.position;
-    if (Math.abs(g.x - bed.x) >= MAT_HX || Math.abs(g.z - bed.z) >= MAT_HZ) return;   // already clear
-    let e = null;
-    try { e = CBZ.propEntryPoint ? CBZ.propEntryPoint(bed) : null; } catch (err) { e = null; }
-    if (!e || !e.ok) return;
-    g.x = e.x; g.z = e.z;
-    if (a.target) a.target.set(e.x, 0, e.z);
-  }
+       busy(a)          a real brain state outranks the furniture — and a live
+                        TRANSITION ARC is deliberately NOT in that list, because
+                        an arc is our own hand-off in progress and calling it
+                        "busy" is how a first draft woke every man on the sweep
+                        after it put him to bed.
+       sleep/sit        walk to the piece's own solved entry point, then hand
+                        over at arm's length — and save the actor's WALK RATE
+                        across a pose verb that zeroes `speed` (for a plain
+                        actor that is the constant it was spawned with, so
+                        letting it be zeroed freezes the body for the run).
+       up(a, instant)   the only correct way to end a pose: rate back, pause
+                        cleared, and the body STEPPED OFF the bedding.
+       sweep/standers   one footprint, asked identically by the thing that
+                        fixes the fault and the thing that measures it. */
+  const busy = CBZ.rest.busy;
+  const inTransition = CBZ.rest.inTransition;
+  const keepRate = CBZ.rest.keepRate, giveRate = CBZ.rest.giveRate;
+  function goTo(a, x, z) { return CBZ.rest.send(a, x, z); }
+  function bedDown(a, bed) { return CBZ.rest.sleep(a, bed); }
+  function sitAt(a, seat) { return CBZ.rest.sit(a, seat); }
+  function getUp(a, instant) { return CBZ.rest.up(a, instant, { skip: isMat }); }
   /* THE SWEEP THAT ANSWERS TO THE RATCHET, IN THE RATCHET'S OWN WORDS. Doing
-     the step-off per body as it wakes took the reset's standers from 25 to 2,
+     the step-off per body as it wakes took a reset's standers from 25 to 2,
      and 2 is not 0: a body can be left inside a mattress it was never assigned
      — one it merely walked into and was standing in when the world reset, or
      one belonging to the OTHER rack of a stack it did not sleep on. Rather
-     than enumerate those cases, this sweep asks the identical question
+     than enumerate those cases, the sweep asks the identical question
      `bunkStanders` asks, and moves anyone it finds. When the invariant and the
      thing enforcing it are the same test, the ratchet cannot pass by luck. */
   function clearBunks() {
-    const list = CBZ.npcs || [];
-    for (let i = 0; i < list.length; i++) {
-      const a = list[i];
-      if (!inmateOf(a) || a.dead || a._propLie) continue;
-      const g = a.group.position;
-      for (let k = 0; k < beds.length; k++) {
-        const b = beds[k];
-        if (b.kind === "mat") continue;                 // you may stand on a floor mat
-        if (Math.abs(g.x - b.x) >= MAT_HX || Math.abs(g.z - b.z) >= MAT_HZ) continue;
-        let e = null;
-        try { e = CBZ.propEntryPoint ? CBZ.propEntryPoint(b) : null; } catch (err) { e = null; }
-        if (e && e.ok) { g.x = e.x; g.z = e.z; if (a.target) a.target.set(e.x, 0, e.z); }
-        break;
-      }
-    }
-  }
-
-  function getUp(a, instant) {
-    if (!a || (!a._propBed && !a._propSeat && !a._propLie)) return false;
-    const bed = a._propBed;
-    try {
-      if (a._propBed) CBZ.propWake(a, instant ? { instant: true } : null);
-      else CBZ.propStand(a, instant ? { instant: true } : null);
-    } catch (e) {}
-    giveRate(a);
-    a.pause = 0;
-    stepOffBunk(a, bed);
-    return true;
+    CBZ.rest.sweep(beds, CBZ.npcs || [], { skip: isMat, eligible: inmateOf });
   }
 
   /* ==========================================================
@@ -369,25 +311,17 @@
         free bed once and keeps it, so the wing does not reshuffle at 22:00
         every night like a game of musical chairs.
      ========================================================== */
+  // a rack inside somebody else's cell is not on offer, however near it is
+  function someoneElses(b, a) { return !!(b._cell && b._cell.owner && b._cell.owner !== a); }
   function assign(a) {
-    if (a._restBed && !a._restBed.occupant) return a._restBed;
-    if (a._restBed && a._restBed.occupant === a) return a._restBed;
+    const held = a._restBed;
+    if (held && (!held.occupant || held.occupant === a)) return held;
     const cb = CBZ.cellblock;
     if (a._cellIdx != null && cb && cb.cells[a._cellIdx] && cb.cells[a._cellIdx].bed) {
       const own = cb.cells[a._cellIdx].bed;
       if (!own.occupant || own.occupant === a) { a._restBed = own; return own; }
     }
-    const g = a.group.position;
-    let best = null, bd = Infinity;
-    for (let i = 0; i < beds.length; i++) {
-      const b = beds[i];
-      if (b.occupant || b._claim) continue;
-      if (b._cell && b._cell.owner && b._cell.owner !== a) continue;   // somebody's own cell
-      const d = (b.x - g.x) * (b.x - g.x) + (b.z - g.z) * (b.z - g.z);
-      if (d < bd) { bd = d; best = b; }
-    }
-    if (best) { best._claim = a; a._restBed = best; }
-    return best;
+    return CBZ.rest.claim(a, beds, { key: "_restBed", reserved: someoneElses });
   }
 
   /* ---- THE PLACE IS PUBLIC, because the MUSTER needs it -------------------
@@ -431,7 +365,7 @@
       // INSTANT, not arced. A new run is not a morning — animating forty rise
       // arcs on the frame the world resets is how a body ends up half-unrolled
       // inside a bunk with nothing driving it. `getUp(a, true)` skips the arc,
-      // which is also what makes its step-off fire (see stepOffBunk).
+      // which is also what makes its step-off fire (CBZ.rest.up).
       const list = CBZ.npcs || [];
       for (let i = 0; i < list.length; i++) { getUp(list[i], true); list[i]._restBed = null; }
       for (let i = 0; i < beds.length; i++) beds[i]._claim = null;
@@ -485,8 +419,8 @@
         else if (bed) {
           // still walking: keep him aimed at it, which is all the wing's own
           // mover needs. He will be offered the bed again next sweep.
-          const e = (CBZ.propEntryPoint && CBZ.propEntryPoint(bed)) || null;
-          goTo(a, (e && e.ok) ? e.x : bed.x, (e && e.ok) ? e.z : bed.z);
+          const p2 = CBZ.rest.approach(bed);
+          goTo(a, p2.x, p2.z);
         }
         continue;
       }
@@ -533,7 +467,7 @@
 
     if (changed && !bedTime) {
       // a block that empties the beds also drops every stale claim
-      for (let i = 0; i < beds.length; i++) if (!beds[i].occupant) beds[i]._claim = null;
+      CBZ.rest.dropClaims(beds);
     }
 
     wardenTick(id);
@@ -586,6 +520,11 @@
         the wing's population at 02:00 and zero at noon, and they exist so a
         probe can prove the pose is reachable at all.
      ========================================================== */
+  // …and the same question, registered with the shared layer, so CBZ.restAudit()
+  // answers for every game at once without knowing what any of them is.
+  CBZ.restWatch("prison", function () { return beds; }, function () { return CBZ.npcs || []; },
+    { skip: isMat, eligible: inmateOf });
+
   CBZ.prisonRestAudit = function () {
     let standers = 0, housedIn = 0, inBed = 0, sat = 0, matBeds = 0, bunkBeds = 0, taken = 0;
     for (let i = 0; i < beds.length; i++) {
@@ -599,14 +538,9 @@
       housedIn++;
       if (a._propLie) inBed++;
       if (a._propSeat) sat++;
-      if (a._propLie) continue;
-      const g = a.group.position;
-      for (let k = 0; k < beds.length; k++) {
-        const b = beds[k];
-        if (b.kind === "mat") continue;                 // you may stand on a floor mat
-        if (Math.abs(g.x - b.x) < MAT_HX && Math.abs(g.z - b.z) < MAT_HZ) { standers++; break; }
-      }
     }
+    // the identical question the sweep above asks, asked by the shared layer
+    standers = CBZ.rest.standers(beds, list, { skip: isMat, eligible: inmateOf });
     const S = sched();
     const w = warden();
     const claim = (CBZ.prisonBeds && CBZ.prisonBeds().beds) | 0;

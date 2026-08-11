@@ -650,7 +650,7 @@
         // flat pad — shove it against a wall and stand on it. The leash keeps
         // it inside the cell, so what it buys you is height in YOUR OWN ROOM.
         parts: [st], x: c.x + 1.15, z: c.z + 1.00, hx: 0.22, hz: 0.22, y1: 0.44,
-        mass: 7, kind: "stool", solid: true, leash: 3.2, stand: true, seat: { x: c.x + 1.15, z: c.z + 1.00 },
+        mass: 7, kind: "stool", solid: true, leash: 3.2, stand: true, mode: "escape", seat: { x: c.x + 1.15, z: c.z + 1.00 },
         room: { x0: c.x - c.hx + 0.4, x1: c.x + c.hx - 0.4, z0: c.z - c.hz + 0.4, z1: c.z + c.hz - 0.4 },
       });
     }
@@ -848,7 +848,7 @@
       const post = addBox(sx, 0.22, sz, 0.14, 0.44, 0.14, C_STEEL_D, { cast: false });
       if (CBZ.pushProp) CBZ.pushProp({
         parts: [pad, post], x: sx, z: sz, hx: 0.21, hz: 0.21, y1: 0.48,
-        mass: 9, kind: "stool", solid: true, leash: 3.0, stand: true, seat: { x: sx, z: sz },
+        mass: 9, kind: "stool", solid: true, leash: 3.0, stand: true, mode: "escape", seat: { x: sx, z: sz },
       });
     }
   }

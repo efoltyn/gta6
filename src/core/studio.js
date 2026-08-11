@@ -223,6 +223,50 @@
       publishes: ["modeHas", "worldActors", "hurtWorldActor", "blastWorldActors"],
     },
 
+    // ---- the four services the prison wave proved every game needs ---------
+    // Each is standalone: no world, no city file, no mode. `day` and `light`
+    // are the pair that make a night mean something; `rest` and `push` are the
+    // pair that make furniture mean something.
+    day: {
+      gives: "a DAY made of named blocks. CBZ.dayPlan.define(id, [{id,from}...]) " +
+             "answers what block it is, how long until the next and fires a " +
+             "callback when it turns over — wrapping midnight, silent on the " +
+             "arm, and reading the world's own sun when one is loaded",
+      needs: [],
+      files: ["systems/dayplan.js"],
+      publishes: ["dayPlan", "dayPlanAudit"],
+    },
+    light: {
+      gives: "light as a FACT. CBZ.fixtures.rig(id, spec) registers fixtures " +
+             "with a per-kind schedule and drives their materials for free, " +
+             "answers level(x,z) region-aware (a lamp does not shine through " +
+             "a wall) and scale(sensor,x,z) — what a sensor's range is worth " +
+             "in this much dark. Pair it with `day` for lights-out",
+      needs: [],
+      files: ["systems/fixtures.js"],
+      publishes: ["fixtures", "fixtureAudit"],
+    },
+    rest: {
+      gives: "bodies USING furniture: claim a place, walk there, take the " +
+             "pose, get up, step clear. CBZ.rest also carries the three " +
+             "load-order repairs that make furniture anchors exist at all — " +
+             "deferred registration, a late re-flush, and a loud count of " +
+             "anchors refused for sharing a coordinate key",
+      needs: ["people"],
+      files: ["systems/rest.js"],
+      publishes: ["rest", "restAudit", "restWatch"],
+    },
+    push: {
+      gives: "furniture that MOVES when you walk into it. CBZ.pushables.add" +
+             "({parts, mass, leash, stand}) makes a drawn prop a mass on a " +
+             "floor: contact slides it, its collider and its standable top go " +
+             "with it, and the broadphase is dirtied — so the stool you shoved " +
+             "under the vent is really there to climb",
+      needs: ["boot"],
+      files: ["systems/pushables.js"],
+      publishes: ["pushables", "pushProp", "pushPropAudit"],
+    },
+
     // ---- vehicles and aircraft, as shipped models --------------------------
     military: {
       gives: "the shipped military models: fighter jet, bomber, cargo plane, " +

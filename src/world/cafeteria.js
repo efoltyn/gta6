@@ -527,7 +527,7 @@
         // The mop bucket below is NOT: 0.5 x 0.4 of sloshing plastic is a
         // twisted ankle, and the cones outside are tapered.
         parts: [d, lid], x: b[0], z: b[1], hx: 0.36, hz: 0.36, y1: 0.96,
-        mass: 22, kind: "barrel", col: bcol, leash: 5.0, stand: true,
+        mass: 22, kind: "barrel", col: bcol, leash: 5.0, stand: true, mode: "escape",
       });
     }
     // mop bucket + wringer, parked where the wet floor is
@@ -535,7 +535,7 @@
     const mopW = addBox(-22.6, 0.52, 20.35, 0.44, 0.18, 0.16, 0x9aa3ad, { cast: false });
     if (CBZ.pushProp) CBZ.pushProp({
       parts: [mopB, mopW], x: -22.6, z: 20.2, hx: 0.25, hz: 0.22, y1: 0.62,
-      mass: 16, kind: "mopbucket", solid: true, leash: 5.0,
+      mass: 16, kind: "mopbucket", solid: true, leash: 5.0, mode: "escape",
     });
     PD.pipe(-22.6, 0.85, 20.1, 1.3, "y", 0.03, 0x9a7a4e);                          // mop handle
     // wet-floor A-frame beside it

@@ -59,7 +59,9 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
-  if (!CBZ || typeof CBZ.onUpdate !== "function") return;
+  // systems/dayplan.js owns the CLOCK; this file owns the TIMETABLE. Tagged
+  // before us in index.html, so its absence is a mis-wired page, not a mode.
+  if (!CBZ || typeof CBZ.onUpdate !== "function" || !CBZ.dayPlan) return;
   const CFG = (CBZ.CONFIG = CBZ.CONFIG || {});
   if (CFG.PRISON_SCHEDULE_V1 == null) CFG.PRISON_SCHEDULE_V1 = true;
   if (CFG.PRISON_SCHEDULE_DOORS == null) CFG.PRISON_SCHEDULE_DOORS = true;
@@ -94,30 +96,23 @@
   // widen it without re-reading the table.
   function isCurfew(b) { return !!b && b.home === "cell"; }
 
-  /* ---- the clock. Same convention city/schedule.js uses so the two agree
-       on what "09:00" means: the sun's own arc, sunrise 6, noon 12, sunset
-       18, midnight 0. Reading CBZ.dayPhase (not a private accumulator) is
-       what makes a saved/restored world land in the right block. ---- */
-  function phase() {
-    const t = CBZ.dayPhase ? CBZ.dayPhase() : 0.18;
-    return isFinite(t) ? ((t % 1) + 1) % 1 : 0.18;
-  }
-  function hourNow() { return (phase() * 24 + 6) % 24; }
-  function daySecs() { return (CBZ.dayCycleSeconds ? CBZ.dayCycleSeconds() : 150) || 150; }
-  function secsPerHour() { return daySecs() / 24; }
+  /* ---- THE CLOCK IS NOT OURS. systems/dayplan.js owns the arithmetic every
+       game with a day in it needs and gets subtly wrong: the last block
+       wrapping through midnight, "how long until the next one" wrapping with
+       it, the SILENT arm when a run begins mid-block (a klaxon for an hour
+       that passed while nobody was playing is a lie) and the day length,
+       which is the world's own sun (CBZ.dayPhase, sunrise 6) and never a
+       private accumulator — that is what makes a saved/restored world land in
+       the right block.
 
-  // which block owns this hour (the table is authored in ascending `from`,
-  // and the last entry wraps through midnight to the first)
-  function blockAt(h) {
-    let best = BLOCKS[BLOCKS.length - 1];
-    for (let i = 0; i < BLOCKS.length; i++) if (h >= BLOCKS[i].from) best = BLOCKS[i];
-    return best;
-  }
+       THE TABLE ABOVE IS HANDED OVER BY REFERENCE AND IS NEVER COPIED.
+       systems/prisontiers.js mutates `from`/`cells`/`home`/`pa` in place per
+       regime, and the plan reads the new numbers on the next question. ---- */
+  const PLAN = CBZ.dayPlan.define("prison", BLOCKS, { enabled: on });
+  function hourNow() { return PLAN.hour(); }
+  function daySecs() { return PLAN.dayLength(); }
+  function secsPerHour() { return PLAN.hourLength(); }
   function nextOf(b) { return BLOCKS[(BLOCKS.indexOf(b) + 1) % BLOCKS.length]; }
-  function hoursUntilNext(h) {
-    const n = nextOf(blockAt(h));
-    return ((n.from - h) % 24 + 24) % 24;
-  }
 
   /* ==========================================================
      2. THE PA. A klaxon that comes from nowhere is a HUD line you cannot
@@ -495,13 +490,9 @@
      so a "sweep" is one able screw walking to the furthest man still outside
      and looking at him. No new AI state, no narration, and it reads exactly
      like what it is: an officer coming to collect you. */
-  // how far through the current block we are, 0..1 (hoisted off the public
-  // object so the sweep's grace window can read it without a round trip)
-  function progress() {
-    const b = live(), n = nextOf(b);
-    const span = ((n.from - b.from) % 24 + 24) % 24 || 24;
-    return 1 - hoursUntilNext(hourNow()) / span;
-  }
+  // how far through the current block we are, 0..1 — the plan's, so the
+  // sweep's grace window and the public `progress()` cannot disagree
+  function progress() { return PLAN.progress(); }
   function musterRule() {
     const T = CBZ.prisonTier;
     const m = (T && T.knob) ? T.knob("muster") : null;
@@ -556,11 +547,9 @@
   /* ==========================================================
      7. APPLYING A BLOCK
      ========================================================== */
-  let cur = null;
-  function live() { return cur || blockAt(hourNow()); }
+  function live() { return PLAN.block(); }
 
   function apply(b, announce) {
-    cur = b;
     if (b.cells === "lock") wantLocked = true;
     else if (b.cells === "open") {
       wantLocked = false;
@@ -584,10 +573,14 @@
      8. THE TICK
      ========================================================== */
   const pollNewRun = CBZ.jailBoost ? CBZ.jailBoost.newRunWatcher(0.5) : null;
-  let armed = false;
+
+  /* A RUN CAN START AT ANY HOUR — the sky clock runs on the title screen — so
+     the plan lands in the block that is ACTUALLY running and tells us it was
+     not a change (`first`). Every later transition announces itself. */
+  PLAN.on(function (b, prev, first) { apply(b, !first); });
 
   function reset() {
-    armed = false; cur = null; blasts = 0;
+    PLAN.rearm(); blasts = 0;
     const list = cells();
     if (list) for (let i = 0; i < list.length; i++) list[i]._keyed = false;
     muster(false);
@@ -608,16 +601,7 @@
     if (!on()) return;
     if (pollNewRun && pollNewRun()) reset();
 
-    const b = blockAt(hourNow());
-    if (!armed) {
-      // A run can start at any hour (the sky clock runs on the title screen).
-      // Land in the block that is ACTUALLY running, silently — a klaxon for
-      // an hour that passed while nobody was playing is a lie.
-      armed = true;
-      apply(b, false);
-    } else if (b !== cur) {
-      apply(b, true);
-    }
+    PLAN.poll(dt);            // fires apply() through the listener above
 
     driveDoors(dt);
     tryCellKey();
@@ -645,7 +629,7 @@
     is: function (id) { return live().id === id; },
     next: function () { return nextOf(live()); },
     // real seconds until the next block starts
-    until: function () { return hoursUntilNext(hourNow()) * secsPerHour(); },
+    until: function () { return PLAN.until(); },
     progress: progress,
     dayLength: daySecs,
     hourLength: secsPerHour,
@@ -670,10 +654,10 @@
      system's whole design is that it never prints — if it ever grows a
      toast, this number is where it shows up. */
   CBZ.prisonScheduleAudit = function () {
-    let gaps = 0;
-    for (let h = 0; h < 24; h += 0.25) if (!blockAt(h)) gaps++;
-    let sorted = 1;
-    for (let i = 1; i < BLOCKS.length; i++) if (BLOCKS[i].from <= BLOCKS[i - 1].from) sorted = 0;
+    // both invariants are the shared plan's, measured on the LIVE table, so a
+    // regime that rewrites `from` is checked by the same test as the default
+    const pa = PLAN.audit();
+    const gaps = pa.gaps, sorted = pa.ordered;
     const list = cells();
     let locked = 0, keyed = 0;
     if (list) for (let i = 0; i < list.length; i++) { if (list[i].locked) locked++; if (list[i]._keyed) keyed++; }

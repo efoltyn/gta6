@@ -129,7 +129,7 @@
     for (const s of [-1, 1]) wFeet.push(addBox(x, 0.23, z + 0.55 + s * 0.7, 0.44, 0.46, 0.4, C_STEEL, { cast: false }));
     if (CBZ.pushProp) CBZ.pushProp({
       parts: [wBench].concat(wFeet), x: x, z: z + 0.55, hx: 0.31, hz: 0.95, y1: 0.54,
-      mass: 45, kind: "bench", leash: 4.0, stand: true,
+      mass: 45, kind: "bench", leash: 4.0, stand: true, mode: "escape",
     });
     // plate tree — four 20 kg plates on a steel post: it moves, grudgingly
     const tree = [addBox(x + 2.0, 0.55, z + 0.4, 0.5, 1.1, 0.5, C_STEEL_D, { solid: true })];
@@ -137,13 +137,13 @@
       tree.push(addBox(x + 2.0, 0.42 + (i % 2) * 0.44, z + 0.4 + (i < 2 ? -0.3 : 0.3), 0.5, 0.5, 0.13, 0x14181d, { cast: false }));
     if (CBZ.pushProp) CBZ.pushProp({
       parts: tree, x: x + 2.0, z: z + 0.4, hx: 0.25, hz: 0.28, y1: 1.10,
-      mass: 110, kind: "platetree", leash: 2.5,
+      mass: 110, kind: "platetree", leash: 2.5, mode: "escape",
     });
     // chalk bucket — 4 kg, and it is the lightest thing in the compound
     const bucket = addBox(x - 1.9, 0.18, z + 1.0, 0.36, 0.36, 0.36, 0xd8d2c4, { cast: false });
     if (CBZ.pushProp) CBZ.pushProp({
       parts: [bucket], x: x - 1.9, z: z + 1.0, hx: 0.18, hz: 0.18, y1: 0.36,
-      mass: 4, kind: "bucket", solid: true, leash: 6.0,
+      mass: 4, kind: "bucket", solid: true, leash: 6.0, mode: "escape",
     });
   })(8, 28);
 

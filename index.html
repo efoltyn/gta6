@@ -465,16 +465,19 @@
      lounge.js / cafeteria.js / clutter.js. -->
 <script src="src/city/furniture.js?v=furnish2"></script>
 <!-- FURNITURE MOVES WHEN YOU WALK INTO IT (owner: "physics, not another
-     f***ing button"). CBZ.pushProp(spec) makes a drawn prop a mass on a floor:
+     f***ing button"). CBZ.pushables.add(spec) — still exported as CBZ.pushProp —
+     makes a drawn prop a mass on a floor:
      contact from a moving body slides it, its collider is translated with it
      and the broadphase dirtied, so the moved prop is instantly real to the
      player's depenetration, every guard's steering and the vault probe. The
      tag MUST precede every world file that registers at parse time
-     (cellblock/clutter/cafeteria/yardfurniture below) — a prop registered
+     (cellblock/clutter/cafeteria/yardfurniture below, each declaring
+     mode:"escape" so its furniture is inert in the city that shares those
+     coordinates) — a prop registered
      after core/batch.js has run would already be welded into a static buffer.
      Runtime deps (markCollidersDirty, queryCollidersNear, propNearestSeat) are
      all resolved inside the per-frame driver, never at parse. -->
-<script src="src/systems/pushprops.js?v=push1"></script>
+<script src="src/systems/pushables.js?v=push2"></script>
 <script src="src/world/carfx.js?v=carfx1"></script>
 <script src="src/world/ground.js"></script>
 <script src="src/world/cellblock.js"></script>
@@ -574,6 +577,33 @@
      CBZ.prisonRoof for its own ceiling); BEFORE prisonschedule.js, whose
      block ids it reads at runtime. -->
 <script src="src/world/adminwing.js?v=warden1"></script>
+
+<!-- ============ THE ENGINE LAYER THE PRISON WAVE PROVED WAS MISSING ==========
+     Four services promoted OUT of the prison files below, because a hospital,
+     a school, a heist and an asylum need every one of them and none of them is
+     about a prison. Each is mode-agnostic, feature-detects everything, and
+     works on a games/*.html page that loads no city file at all.
+
+       dayplan.js   CBZ.dayPlan.define(id, blocks) — named blocks over a day,
+                    block()/until()/progress()/on(transition). Owns the wrap
+                    through midnight, the silent arm on a run that starts
+                    mid-block, and the day length (the world's own sun).
+       fixtures.js  CBZ.fixtures.rig(id, spec) — a light-fixture registry with
+                    a per-kind schedule, driven materials, region-aware
+                    level(x,z) (a lamp does not shine through a wall) and the
+                    sensor curve scale(sensor,x,z).
+       rest.js      CBZ.rest — assign a body a place, walk it there, hand it to
+                    the pose, get it up and step it CLEAR; plus the three
+                    load-order repairs that make furniture anchors exist at all.
+
+     TAGGED BEFORE THEIR CALLERS, which is the whole reason the order of this
+     file matters: prisonschedule.js/prisonnight.js/prisonrest.js each hard-
+     require its service and return early without it. (pushables.js, the fourth,
+     is up at the top of the world block — it has to precede the parse-time
+     world files that register props.) -->
+<script src="src/systems/dayplan.js?v=eng1"></script>
+<script src="src/systems/fixtures.js?v=eng1"></script>
+<script src="src/systems/rest.js?v=eng1"></script>
 
 <!-- TIME OF DAY IS THE PILLAR (escape mode). prisonschedule.js carves the day
      into the blocks a real prison runs — unlock/count, yard, chow, evening

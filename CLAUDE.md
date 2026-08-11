@@ -134,9 +134,10 @@ survivor's seventeen tags were found by failure, and the one it needed most
 <script>CBZ.studio.need("people","desert","air").then(function(){ /* your game */ });</script>
 ```
 
-**18 packs.** `three` · `seed` · `boot` · `look` · `green` · `people` · `caps` ·
-`military` · `desert` · `airbase` · `air` · `ordnance` · `nukefx` · `fx` ·
-`damage` · `sound` · `radar` · `match`. The manifest owns dependencies, the load
+**25 packs.** `three` · `seed` · `boot` · `look` · `green` · `people` · `caps` ·
+`day` · `light` · `rest` · `push` · `military` · `desert` · `airbase` ·
+`citycore` · `militaryisland` · `airport` · `air` · `ordnance` · `nukefx` ·
+`fx` · `damage` · `sound` · `radar` · `match`. The manifest owns dependencies, the load
 ORDER measured to work, and what each publishes. `src/` is derived from
 studio.js's own URL. Files a page lists by hand are never re-injected.
 
