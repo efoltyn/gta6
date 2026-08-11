@@ -1,0 +1,679 @@
+/* ============================================================
+   world/terrain.js — PROCEDURAL BACKDROP TERRAIN.
+
+   The whole playable archipelago (city + 3 islands + 4 biomes +
+   every causeway) is a FLAT plane at y=0 by contract — cars, NPCs,
+   buildings and spawns all assume it. This file does NOT touch that.
+   It paints a DRAMATIC snow-capped mountain range + rolling hills in
+   the FAR BACKDROP RING that encircles the map, so the horizon stops
+   being flat sea-into-fog and becomes a real landscape you look out
+   AT but never walk on.
+
+   HOW IT STAYS SAFE (owner's untested-ship rule):
+     CBZ.terrainHeight(x,z) returns EXACTLY 0 over a generous flat
+     region (cityFalloff == 0) that encloses every walkable footprint
+     plus a ~150u margin. Relief only switches on past that ring. So
+     CBZ.floorAt (which world.js routes to terrainHeight) is byte-for-
+     byte 0 anywhere a person or vehicle can actually be — physics is
+     unchanged, nothing can fall off a hill.
+
+   DRAW CALLS (engine is draw-call bound, ~1000 NPCs):
+     • ONE big non-indexed PlaneGeometry mesh carries the entire relief
+       field with per-vertex height-band vertex colours (sea→sand→grass
+       →rock→snow), flat-shaded for crisp facets = 1 draw call.
+     • A handful of hand-placed HERO PEAKS (rock cones + snow caps) are
+       merged via BufferGeometryUtils into ONE mesh = 1 draw call.
+     Total backdrop cost: 2 draw calls. frustumCulled=false so the ring
+     never pops as the camera turns.
+
+   Analytic + allocation-free: terrainHeight/terrainNormal are pure math
+   (no per-call allocation) because they're sampled per-vertex at build
+   AND potentially per floorAt() query.
+
+   Gated behind CBZ.PROC_TERRAIN (default ON). Set CBZ.PROC_TERRAIN=false
+   before world build to disable entirely (terrainHeight then absent →
+   world.js falls back to flat 0).
+============================================================ */
+(function () {
+  "use strict";
+  // This script loads BEFORE config.js/seed.js (index.html order), so it must
+  // self-create the namespace (core/seed.js's exact idiom). The old
+  // `if (!CBZ) return;` guard silently killed this whole module — and with it
+  // terrain_overhaul.js, which needs the oracle/builder defined here.
+  const CBZ = (window.CBZ = window.CBZ || {});
+  if (!window.THREE) return;
+  const THREE = window.THREE;
+  if (!window.noise) { /* noise.js must load first */ }
+
+  // ----------------------------------------------------------------------
+  //  SEED — fixed constant (deterministic world, matching the repo style).
+  // ----------------------------------------------------------------------
+  // derived from the one world-seed knob (core/seed.js); 1337 is the legacy
+  // fallback so a partial load without seed.js still builds the same backdrop.
+  // NOTE: window.noise.seed(SEED) is deliberately NOT called at parse time —
+  // seed.js hasn't loaded yet and re-seeding the shared simplex perm table is
+  // a side effect only this file's legacy build path wants (it seeds inside
+  // buildTerrain, right before displacing).
+  const SEED = (window.CBZ && CBZ.hashN) ? (CBZ.hashN(1337) % 65536) : 1337;
+
+  // ----------------------------------------------------------------------
+  //  THE FLAT (PLAYABLE) REGION — the union AABB of every walkable
+  //  footprint registered in the archipelago, padded by a generous margin.
+  //  Computed from:
+  //    city mainland ......... ~ x[-176,176]  z[-876,524-]  (centre 0,-700)
+  //    commerce annex ........ x[228,469]      z[-820,-580]
+  //    speedway island ....... x[270,670]      z[-530,-130]
+  //    airport island ........ x[-900,290]     z[-280,40]
+  //    military island ....... x[-860,-380]    z[-950,-450]
+  //    desert biome .......... x[670,1560]     z[-320,620]   (MASSIVE south basin)
+  //    forest biome .......... x[-950,-170]    z[-1680,-1020]
+  //    farmland biome ........ x[780,1580]     z[-1280,-480]
+  //    snow biome ............ x[-70,770]      z[-1780,-1120]
+  //    + every causeway between them.
+  //  Union: x[-960,1580]  z[-1790,760].  We KEEP IT FLAT generously —
+  //  when unsure, flat wins (owner rule). Margin pushes the relief ring
+  //  well clear of anywhere anyone can stand. maxZ was pushed 290→760 to
+  //  hold the enlarged desert basin; the backdrop rings sit at radius
+  //  1900-2380 from the field centre so the south flat edge (z760, ~1510
+  //  from centre) stays well clear of them.
+  // ----------------------------------------------------------------------
+  const FLAT = { minX: -960, maxX: 1580, minZ: -1790, maxZ: 760 };
+  const MARGIN = 150;        // dead-flat for this much PAST the union edge
+  const RAMP = 460;          // smoothstep distance from flat edge → full relief
+
+  // expose the flat extents for tooling / other agents
+  CBZ.TERRAIN_FLAT = FLAT;
+
+  // Map-enlargement stage 2: world/layout.js publishes the spread world's
+  // seed union (nations included) as CBZ.WORLD_ENLARGE_FLAT. Grow-only, so
+  // with the flag off (null) today's rect above survives byte-identical.
+  // Applied inside syncTerrainFlat (i.e. at BUILD time, after config.js has
+  // parsed URL overrides — this file itself loads before config.js).
+  function growToEnlargeSeed() {
+    const E = CBZ.WORLD_ENLARGE_FLAT;
+    if (!E) return;
+    FLAT.minX = Math.min(FLAT.minX, E.minX); FLAT.maxX = Math.max(FLAT.maxX, E.maxX);
+    FLAT.minZ = Math.min(FLAT.minZ, E.minZ); FLAT.maxZ = Math.max(FLAT.maxZ, E.maxZ);
+    // PLATE ⊆ relief-clear law. The continent plate extends
+    // CONTINENT_COUNTRY_MARGIN past the region union and every metre of it
+    // is WALKABLE backcountry — THIS file's hills must be exactly 0 there,
+    // or grassy foothills stand on wilds land (the mountains-outside-snow
+    // violation the math gate caught on the east/west/south dry belts).
+    // CRITICAL: the extra clearance is PRIVATE to this file's falloff and
+    // ring math (PLATE_G below) — it must NOT be folded into the shared
+    // FLAT rect, because terrain_overhaul.js anchors the whole snow massif
+    // to FLAT's edges (heroes at FLAT.minZ-720, range masks on
+    // FLAT.minZ - z, centre on FLAT's midpoint): growing the shared object
+    // teleported the massif field and dropped mountains on the city
+    // (city-on-mountain 2323 — the gate caught that too). Same PAD
+    // derivation as continent.js, kept in lockstep, +120u guard.
+    const CFG2 = CBZ.CONFIG || {};
+    const reqMargin = Number(CFG2.CONTINENT_COUNTRY_MARGIN);
+    const PAD = CFG2.CONTINENT_EXPANSION_V2 === false ? 40
+      : Math.max(180, Math.min(2400, Number.isFinite(reqMargin) ? reqMargin : 2200));
+    PLATE_G = PAD + 120;
+    CBZ.TERRAIN_PLATE_CLEAR = PLATE_G;   // terrain_overhaul's V3 oracle reads this (its own falloff/ring gates)
+  }
+  // Private plate clearance for this file's relief falloff + ring radii:
+  // 0 in the authored world (flag off → growToEnlargeSeed never runs), so
+  // the compact world stays byte-identical.
+  let PLATE_G = 0;
+
+  // The backdrop ring radii, derived from the live FLAT so the mountains
+  // stand clear of walkable land no matter how far the world spreads. The
+  // stage-1 numbers (1900/2250, span 6000) return exactly when the flat is
+  // small (halfExtent+380 ≤ 1900) — today's compact world is byte-identical;
+  // the enlarged world pushes the ring out proportionally. The bespoke titan
+  // radii (colossus/everest) are GONE with their peaks — owner order: the
+  // super-tall one-off mountains die entirely, no consumer reads them.
+  // Shared with terrain_overhaul.js's builders for CBZ.TERRAIN_RING_DEBUG.
+  CBZ.terrainRingRadii = function (flat) {
+    const f = flat || FLAT;
+    const half = Math.max((f.maxX - f.minX) / 2, (f.maxZ - f.minZ) / 2) + PLATE_G;
+    const near = Math.max(1900, half + 380);
+    const k = near / 1900;                    // keep the authored ratios
+    const far = Math.round(2250 * k);
+    // span: at the authored ring (k=1) return EXACTLY the authored 6000 —
+    // deriving it there would silently resize the compact world's tile field
+    // and break flag-off byte-identity. Only a ring that actually grew
+    // derives its span (the far ring + 900u of sea).
+    const span = (k <= 1) ? 6000 : Math.max(6000, 2 * (far + 900));
+    return {
+      near: Math.round(near), far,
+      span, halfExtent: Math.round(half),
+    };
+  };
+
+  // The world no longer fits inside the original hand-written archipelago
+  // rectangle: countries and settlements register live regions well beyond it.
+  // Grow (never shrink) the flat oracle to the actual built world before the
+  // visual terrain is sampled. Mutating this shared object is deliberate — both
+  // this fallback terrain and terrain_overhaul.js close over the same bounds.
+  CBZ.syncTerrainFlat = function (city) {
+    growToEnlargeSeed();               // stage-2 seed union first (grow-only)
+    city = city || (CBZ.city && CBZ.city.arena);
+    if (!city) return FLAT;
+    function grow(x0, x1, z0, z1) {
+      if (![x0, x1, z0, z1].every(Number.isFinite)) return;
+      FLAT.minX = Math.min(FLAT.minX, x0); FLAT.maxX = Math.max(FLAT.maxX, x1);
+      FLAT.minZ = Math.min(FLAT.minZ, z0); FLAT.maxZ = Math.max(FLAT.maxZ, z1);
+    }
+    grow(city.minX, city.maxX, city.minZ, city.maxZ);
+    const annex = city.annex;
+    if (annex && Number.isFinite(annex.cx) && Number.isFinite(annex.cz) && Number.isFinite(annex.radius)) {
+      grow(annex.cx - annex.radius, annex.cx + annex.radius,
+        annex.cz - annex.radius, annex.cz + annex.radius);
+    }
+    const regs = city.regions || [];
+    for (let i = 0; i < regs.length; i++) {
+      const r = regs[i];
+      if (!r) continue;
+      if (r.kind === "circle" && Number.isFinite(r.cx) && Number.isFinite(r.cz) && Number.isFinite(r.r)) {
+        grow(r.cx - r.r, r.cx + r.r, r.cz - r.r, r.cz + r.r);
+      } else grow(r.minX, r.maxX, r.minZ, r.maxZ);
+    }
+    return FLAT;
+  };
+
+  // ----------------------------------------------------------------------
+  //  ANALYTIC NOISE FIELD — all pure functions, zero allocation.
+  // ----------------------------------------------------------------------
+  function s2(x, z) { return window.noise ? window.noise.simplex2(x, z) : 0; }
+
+  // smoothstep(0..1)
+  function smooth(e0, e1, x) {
+    if (e1 === e0) return x < e0 ? 0 : 1;
+    let t = (x - e0) / (e1 - e0);
+    if (t < 0) t = 0; else if (t > 1) t = 1;
+    return t * t * (3 - 2 * t);
+  }
+
+  // signed-ish distance from a point to the FLAT rectangle: 0 inside,
+  // grows positive as you move away (Chebyshev/box distance to the rect).
+  function distOutsideFlat(x, z) {
+    // PLATE_G inflates the relief-clear zone past the walkable plate edge —
+    // private to this file; the shared FLAT rect itself is NOT grown.
+    const dx = Math.max((FLAT.minX - PLATE_G) - x, 0, x - (FLAT.maxX + PLATE_G));
+    const dz = Math.max((FLAT.minZ - PLATE_G) - z, 0, z - (FLAT.maxZ + PLATE_G));
+    // Euclidean box distance (rounds the corners — no hard square ridge).
+    return Math.sqrt(dx * dx + dz * dz);
+  }
+
+  // cityFalloff: 0 across the whole playable region (+ margin), smoothly
+  // rising to 1 only in the far ring. EXACTLY 0 inside flat → relief can't
+  // leak under anyone.
+  CBZ.terrainFalloff = function (x, z) {
+    const d = distOutsideFlat(x, z);
+    if (d <= MARGIN) return 0;
+    return smooth(MARGIN, MARGIN + RAMP, d);
+  };
+
+  // fractal Brownian motion — rolling hills (4 octaves, analytic).
+  const HILL_AMP = 46;       // hill relief amplitude (u)
+  const HILL_FREQ = 1 / 620; // base wavelength (~620u features)
+  function fbm(x, z) {
+    let f = HILL_FREQ, a = 0.5, sum = 0, norm = 0;
+    for (let o = 0; o < 4; o++) {
+      sum += a * s2(x * f + o * 13.7, z * f - o * 7.3);
+      norm += a;
+      f *= 2.03; a *= 0.5;
+    }
+    return (sum / norm) * HILL_AMP;
+  }
+
+  // ridged multifractal — sharp mountain crests for the OUTER band only.
+  const RIDGE_AMP = 150;       // peak height contribution (u) → ~150u peaks (raised so foothills cap white)
+  const RIDGE_FREQ = 1 / 900;  // big mountain wavelength
+  function ridged(x, z) {
+    let f = RIDGE_FREQ, a = 1.0, sum = 0, norm = 0;
+    for (let o = 0; o < 4; o++) {
+      let n = s2(x * f - o * 21.1, z * f + o * 17.9);
+      n = 1 - Math.abs(n);       // crease → ridge
+      n = n * n;                 // sharpen
+      sum += a * n;
+      norm += a;
+      f *= 2.07; a *= 0.5;
+    }
+    return (sum / norm) * RIDGE_AMP;
+  }
+
+  // the OUTER mountain band: ridges only really kick in further out than the
+  // hills, so you get rolling foothills first, then a dramatic peak wall.
+  function mountainMask(x, z) {
+    const d = distOutsideFlat(x, z);
+    // foothills start ~at the ramp, big peaks ~RAMP further still.
+    return smooth(MARGIN + RAMP * 0.6, MARGIN + RAMP * 2.2, d);
+  }
+
+  // ----------------------------------------------------------------------
+  //  THE ORACLE — CBZ.terrainHeight(x,z). Returns 0 over the flat region.
+  // ----------------------------------------------------------------------
+  CBZ.terrainHeight = function (x, z) {
+    if (CBZ.PROC_TERRAIN === false) return 0;
+    const fo = CBZ.terrainFalloff(x, z);
+    if (fo <= 0) return 0;                 // dead flat — physics-safe
+    const hills = fbm(x, z);
+    const mtn = ridged(x, z) * mountainMask(x, z);
+    return (hills + mtn) * fo;
+  };
+
+  // central-difference normal (for slope keep-outs / the nature agent).
+  const _EPS = 2.0;
+  CBZ.terrainNormal = function (x, z, out) {
+    out = out || new THREE.Vector3();
+    const hL = CBZ.terrainHeight(x - _EPS, z), hR = CBZ.terrainHeight(x + _EPS, z);
+    const hD = CBZ.terrainHeight(x, z - _EPS), hU = CBZ.terrainHeight(x, z + _EPS);
+    out.set(hL - hR, 2 * _EPS, hD - hU).normalize();
+    return out;
+  };
+
+  // ----------------------------------------------------------------------
+  //  HEIGHT-BAND COLOUR — pick a vertex colour from elevation.
+  // ----------------------------------------------------------------------
+  const COL_WATER = new THREE.Color(0x2f6f9e);  // matches the sea plane tone
+  const COL_SAND  = new THREE.Color(0xc8b385);
+  const COL_GRASS = new THREE.Color(0x4f7d3f);
+  const COL_GRASS2= new THREE.Color(0x3c6a33);
+  const COL_ROCK  = new THREE.Color(0x6f6a63);
+  const COL_ROCKH = new THREE.Color(0x4d4b48);   // HIGH alpine rock: dark, cold, wet — was 0x8a8378, a light warm tan that read as sand
+  const COL_SNOW  = new THREE.Color(0xeef3f8);
+  const COL_SNOW_SHADE = new THREE.Color(0xc3d2e4);   // snow on a shaded face is blue, not white
+  const _snowMix = new THREE.Color();
+  const _c = new THREE.Color();
+  /* ======================================================================
+     SNOW IS NOT AN ELEVATION. IT IS AN ACCUMULATION.
+
+     The old model painted a HEIGHT BAND: everything above y=52 became
+     near-white, snow crept in from y=34, and only the very steepest faces
+     recovered any rock. That is why every hill in the world looked bleached —
+     and no threshold tweak could have fixed it, because the band itself was
+     the bug. A contour line is not what snow does.
+
+     What snow actually does, and what this now models:
+
+     1. TEMPERATURE — a soft freezing gradient, not a step. Nothing in nature
+        has a hard edge at one altitude.
+
+     2. SLOPE SHEDDING — the big one. Snow has an angle of repose around
+        50-55 degrees; past that it sloughs off and the face stays BARE ROCK.
+        This is precisely why a real peak is white on its shoulders and black
+        down its cliffs and gullies, and it is the single detail that makes a
+        mountain read as rock-with-snow-on-it instead of a scoop of ice cream.
+        The old code had a weak version of this bolted on after the fact
+        (slope > 0.7); here it is a first-class multiplier, so it applies at
+        EVERY altitude rather than only on the summit band.
+
+     3. ASPECT / INSOLATION — sun-facing faces melt out, shaded faces hold.
+        Baked against a fixed prevailing sun azimuth rather than the live sun,
+        which is not a shortcut: real aspect patterns record accumulated
+        SEASONAL insolation, not this afternoon's light. This is what gives a
+        range its asymmetry — one flank white, the other bare — and it is the
+        "physics lighting" half of the problem.
+
+     4. PATCHINESS — a real snowline is ragged, torn up by wind scour and
+        drift. A deterministic position hash breaks the contour so the
+        transition is a mottled edge instead of a drawn line.
+
+     The rock underneath was also wrong. The old ramp went from COL_ROCK to
+     the LIGHTER COL_ROCKH with altitude — brightening as it rose, which is
+     backwards and is what made bare peaks read as sand dunes. High alpine
+     rock is DARKER and colder-toned than valley stone: wet, shadowed,
+     lichen-stained. The ramp now runs that way.
+     ====================================================================== */
+  // Prevailing sun azimuth used for the aspect bake (unit, world XZ). Faces
+  // pointing along this melt out; faces pointing away hold their snow.
+  const SUN_AZ_X = -0.38, SUN_AZ_Z = 0.92;
+  // SCALED WITH THE RANGE. These were 46/96, tuned when the rings peaked at
+  // 360. With the near ring at 900 and the far at 1250, leaving them there
+  // would have put the snowline at 8% of the mountain and re-created the exact
+  // bleaching this model was written to kill — every peak white again, just
+  // bigger. A snowline sits well UP a real mountain: roughly a third to a half
+  // of the way, with a long ragged transition. 380 -> 720 is that band.
+  const SNOW_WARM = 380;    // below this, no lasting snow at any angle
+  const SNOW_COLD = 720;    // by this height it is cold enough everywhere
+  const SHED_LO = 0.42;     // slope where snow starts sliding (~25 deg)
+  const SHED_HI = 0.74;     // slope where nothing can stay (~45 deg+)
+
+  function snowCover(y, slope, nx, nz, x, z) {
+    const cold = smooth(SNOW_WARM, SNOW_COLD, y);
+    if (cold <= 0.001) return 0;
+    // it cannot lie on a cliff, at any altitude
+    const shed = 1 - smooth(SHED_LO, SHED_HI, slope);
+    if (shed <= 0.001) return 0;
+    // sun-facing melts; the horizontal component of the face normal is aspect
+    const face = nx * SUN_AZ_X + nz * SUN_AZ_Z;
+    const melt = 1 - 0.5 * (face > 0 ? face : 0);
+    // ragged edge — deterministic, never Math.random (this is a build path)
+    const h = CBZ.hash01 ? CBZ.hash01(x, z, 0x5107) : 0.5;
+    const patch = 0.72 + 0.56 * h;
+    const c = cold * shed * melt * patch;
+    return c < 0 ? 0 : (c > 1 ? 1 : c);
+  }
+
+  function bandColor(y, slope, out, nx, nz, x, z) {
+    // slope (0 flat .. 1 vertical-ish) darkens grass toward rock on steeps.
+    if (y < 0.5) { out.copy(COL_WATER); return; }
+    if (y < 6)   { out.copy(COL_SAND).lerp(COL_GRASS, smooth(2, 6, y)); return; }
+    if (y < 150)  {
+      // vegetation runs a long way up a 900-unit peak — a treeline at 30 on a
+      // mountain this tall is a green skirt on a bare cone.
+      out.copy(COL_GRASS).lerp(COL_GRASS2, smooth(8, 120, y));
+      if (slope > 0.45) out.lerp(COL_ROCK, smooth(0.45, 0.8, slope));
+      return;
+    }
+    // ---- ROCK, and then whatever snow can hold onto it --------------------
+    // grass gives way to stone, and stone DARKENS as it climbs
+    out.copy(COL_ROCK).lerp(COL_ROCKH, smooth(60, 520, y));   // scaled with the range (was 30->74)
+    const s = snowCover(y, slope, nx || 0, nz || 0, x || 0, z || 0);
+    if (s > 0.002) {
+      // snow lying on a shaded face is blue, not white — the shade tone is
+      // already in the palette and was only ever used by the snow biome.
+      _snowMix.copy(COL_SNOW);
+      const face = (nx || 0) * SUN_AZ_X + (nz || 0) * SUN_AZ_Z;
+      if (face < 0) _snowMix.lerp(COL_SNOW_SHADE, Math.min(1, -face) * 0.55);
+      out.lerp(_snowMix, s);
+    }
+  }
+
+  // ----------------------------------------------------------------------
+  //  BUILD — ONE relief mesh + ONE merged hero-peaks mesh. Called by
+  //  world.js at city-build time (guarded). Idempotent.
+  // ----------------------------------------------------------------------
+  let _built = null;
+  CBZ.buildTerrain = function (parent) {
+    if (CBZ.PROC_TERRAIN === false) return null;     // gate (default ON)
+    if (_built) return _built;
+    if (!window.noise) { console.warn("[terrain] window.noise missing — skipped"); return null; }
+    window.noise.seed(SEED);
+
+    const root = parent || CBZ.scene;
+    if (!root) return null;
+    CBZ.syncTerrainFlat(CBZ.city && CBZ.city.arena);
+
+    // --- 1) the big relief field --------------------------------------
+    // PERF: this used to be ONE 6000×6000 mesh at 280×280 segments —
+    // ~157k flat-shaded triangles (~470k de-indexed verts) with
+    // frustumCulled=false, so the ENTIRE relief was vertex-processed
+    // every frame no matter where the camera looked. It's now a 4×4 grid
+    // of tiles with the SAME vertex spacing (1500/70 == 6000/280 → the
+    // geometry is byte-identical where tiles meet, flat shading keeps
+    // per-face normals so there is no seam), each with a real bounding
+    // sphere and default frustum culling: looking down a street submits
+    // ~a third of the verts the monolith did, for +15 draw calls.
+    // Ring radii + tile span derive from the post-sync FLAT (see
+    // terrainRingRadii): a fixed 1900u ring would sit ON walkable coast once
+    // the world spreads. Identical to the old constants while FLAT is small.
+    const RING = CBZ.terrainRingRadii(FLAT);
+    CBZ.TERRAIN_RING_DEBUG = RING;            // probes assert land clears the ring
+    const SPAN = RING.span, TILES = 4, TSPAN = SPAN / TILES, TSEG = 70; // 4×(70·4)=280 → same density
+    // centre the field over the archipelago (the sea plane sits ~(150,-900)).
+    const CX = (FLAT.minX + FLAT.maxX) / 2;   // ~310
+    const CZ = (FLAT.minZ + FLAT.maxZ) / 2;   // ~-750
+
+    // Always supply the white base multiplier for r128's vertex-colour path.
+    // Without it, a driver/compatibility path can multiply every terrain band
+    // by black even though the geometry has valid per-vertex colours.
+    const terrMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, flatShading: true });
+    const terrainTiles = [];
+    for (let tj = 0; tj < TILES; tj++) for (let ti = 0; ti < TILES; ti++) {
+      const tcx = CX - SPAN / 2 + (ti + 0.5) * TSPAN;
+      const tcz = CZ - SPAN / 2 + (tj + 0.5) * TSPAN;
+      const geo = new THREE.PlaneGeometry(TSPAN, TSPAN, TSEG, TSEG);
+      // lay it flat in XZ and centre this tile.
+      geo.rotateX(-Math.PI / 2);
+      geo.translate(tcx, 0, tcz);
+
+      const pos = geo.attributes.position;
+      const vcount = pos.count;
+      // displace every vertex by terrainHeight (same sampler as before —
+      // shared edges get identical heights on both tiles).
+      for (let i = 0; i < vcount; i++) {
+        pos.setY(i, CBZ.terrainHeight(pos.getX(i), pos.getZ(i)));
+      }
+      pos.needsUpdate = true;
+
+      // flat-shaded crisp facets: drop the index so each tri owns its verts,
+      // then recompute per-face normals.
+      const flatGeo = geo.toNonIndexed();
+      flatGeo.computeVertexNormals();
+
+      // colour per (now de-indexed) vertex from its height + local slope.
+      const fp = flatGeo.attributes.position;
+      const fn = flatGeo.attributes.normal;
+      const fcount = fp.count;
+      const fcolors = new Float32Array(fcount * 3);
+      for (let i = 0; i < fcount; i++) {
+        const y = fp.getY(i);
+        // slope from the face normal (1 = flat-up, 0 = vertical) → invert.
+        const ny = fn.getY(i);
+        const slope = 1 - Math.min(1, Math.max(0, ny));
+        bandColor(y, slope, _c, fn.getX(i), fn.getZ(i), fp.getX(i), fp.getZ(i));
+        fcolors[i * 3] = _c.r; fcolors[i * 3 + 1] = _c.g; fcolors[i * 3 + 2] = _c.b;
+      }
+      flatGeo.setAttribute("color", new THREE.BufferAttribute(fcolors, 3));
+      geo.dispose();   // the indexed source is no longer needed
+      flatGeo.computeBoundingSphere();       // real bounds → frustum culling works
+
+      const tile = new THREE.Mesh(flatGeo, terrMat);
+      // The relief is coincident with the city ground plane at y=0 across the
+      // flat region (both are exactly 0 there). Nudge the WHOLE relief down a
+      // hair so the city's textured ground always wins the depth fight; the
+      // far ring (where it actually rises) is unaffected at any visible scale.
+      tile.position.y = -0.06;
+      tile.receiveShadow = true;
+      tile.castShadow = false;
+      tile.matrixAutoUpdate = false; tile.updateMatrix();
+      tile.userData.terrain = true;          // spares it from batch + farcull
+      root.add(tile);
+      terrainTiles.push(tile);
+    }
+    const terrain = terrainTiles[0];         // legacy return value (first tile)
+
+    // --- 2) HERO PEAKS — a dramatic snow-capped MOUNTAIN RANGE in the
+    //        backdrop ring, merged into ONE mesh. These are pure backdrop,
+    //        placed well OUTSIDE the flat region (radius ~1850-2300) so they
+    //        tower on the skyline without ever being reachable — NO valleyGuard
+    //        and the playable floor (terrainHeight over the flat region) is
+    //        untouched. Technique + math are the SHARED window.noise.buildRidgedRange
+    //        helper (src/vendor/noise.js) — the exact same ridged-fbm + altitude/
+    //        slope vertex shading city/biome_snow.js's range uses (consolidated
+    //        so the two can't silently drift apart), with a far-distance fog
+    //        desaturation baked into the vertex colors via the palette.fog term
+    //        so the peaks recede (a feature only this caller uses).
+    const BGU = THREE.BufferGeometryUtils;
+    const buildRidge = window.noise && window.noise.buildRidgedRange;
+
+    // -- palette (rock / ragged snow / cliff + this caller's distance haze) -
+    const heroPalette = {
+      rock: new THREE.Color(0x6f6a63),
+      rockDark: new THREE.Color(0x4a463f),
+      snow: new THREE.Color(0xeef3f8),
+      snowShade: new THREE.Color(0xd6e0ea),
+      fog: new THREE.Color(0x9fb4c4),   // distance haze tint (sky/sea-ish)
+    };
+
+    // -- RANGE LAYOUT: ridge spines on the backdrop ring (radius ~1850-2300
+    //    around the field centre). Each spine is an arc segment; depthDir
+    //    points radially outward. A near foreground ring + a taller, farther
+    //    (foggier) backdrop ring give layered depth.
+    const RING_SEG = 9;            // arc segments around the ring
+    const heroGeoms = [];
+    const heroSpines = [];         // crest sample arrays [{x,z,h}, ...] per segment — reused below for rock scatter candidates
+    function ringSpines(radius, span, cfg, fogBase, fogDepth) {
+      if (!buildRidge) return;
+      for (let i = 0; i < RING_SEG; i++) {
+        const a0 = (i / RING_SEG) * Math.PI * 2;
+        const a1 = ((i + span) / RING_SEG) * Math.PI * 2;
+        const p0 = { x: CX + Math.cos(a0) * radius, z: CZ + Math.sin(a0) * radius };
+        const p1 = { x: CX + Math.cos(a1) * radius, z: CZ + Math.sin(a1) * radius };
+        // outward radial direction at the segment midpoint
+        const am = (a0 + a1) / 2;
+        const dir = { x: Math.cos(am), z: Math.sin(am) };
+        const c = Object.assign({}, cfg, {
+          seedOff: cfg.seedBase + i * 137.1,
+          fogBase: fogBase, fogDepth: fogDepth,
+          // taper the front edge to the ground so the range meets the relief
+          // field smoothly (NO valleyGuard needed — pure backdrop, far out).
+          footGuard: 0.18,
+          palette: heroPalette,
+        });
+        const built = buildRidge(THREE, p0, p1, dir, c);
+        if (built) { heroGeoms.push(built.geo); if (built.spine) heroSpines.push(built.spine); }
+      }
+    }
+    // ================================================================
+    //  SCALE (owner: "make the scale of everything much much more massive
+    //  versus human — really consider that for mountains").
+    //
+    //  He is right and the numbers say so. A person in this game stands about
+    //  1.8 units. The near ring topped out at 360 — call it 200 people stacked
+    //  up, which sounds like a lot and reads as a big hill, because what your
+    //  eye actually judges is the peak against the horizon and against how far
+    //  away it is. A real coastal range is 2000-4000 m against a 1.8 m human:
+    //  a thousand to two thousand times your height.
+    //
+    //  Pushing the rings to 900 / 1250 puts the near ring at ~500x human and
+    //  the far ring at ~700x — still conservative against reality, but it is
+    //  the difference between a hill you look ACROSS at and a wall of rock you
+    //  have to look UP at. It also finally gives the snow model something to
+    //  work with: the accumulation field needs real altitude and real steep
+    //  faces before shedding and aspect have anything to bite on, so the
+    //  snowline and the bare cliffs only become legible at this size.
+    //
+    //  Free of gameplay risk: this is the BACKDROP RING, outside
+    //  CBZ.TERRAIN_FLAT, where terrainHeight is exactly 0 by contract. Nothing
+    //  walkable moves by a millimetre.
+    // ================================================================
+    // near ring — the dominant craggy peaks
+    ringSpines(RING.near, 1.04, {
+      cols: 40, rows: 7, depthLen: 280, peakAmp: 900, noiseScale: 0.0055, seedBase: 1000,
+    }, 0.04, 0.10);
+    // far ring — taller, pushed out, hazier (recedes into the sky)
+    ringSpines(RING.far, 1.04, {
+      cols: 38, rows: 5, depthLen: 360, peakAmp: 1250, noiseScale: 0.0045, seedBase: 5000,
+    }, 0.22, 0.22);
+
+    // ====================================================================
+    //  NO BESPOKE TITANS. Mount Colossus ("one super tall super skinny
+    //  mountain") and Mount Everest (the bespoke wide giant) are REMOVED by
+    //  owner order — the range is ONLY the standard near/far ring spines
+    //  above, all built from the one shared buildRidgedRange recipe. If a
+    //  taller accent is ever wanted, scale a ring segment's peakAmp on the
+    //  SAME cfg — never a new one-off shape.
+    // ====================================================================
+
+    // The distant range is authored entirely by its vertex palette. Lambert
+    // lighting made it depend on one-sided normals and a sun that can be below
+    // the horizon, which produced the solid black mountain wall in aircraft
+    // views. Basic shading preserves the authored rock/snow palette; fog still
+    // recedes it naturally into the sky.
+    const heroMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      vertexColors: true,
+      flatShading: true,
+      side: THREE.DoubleSide,
+      fog: true,
+    });
+    // PERF: the spines used to be merged into ONE frustumCulled=false mesh —
+    // the whole 360° mountain ring was vertex-processed every frame. Each
+    // spine is now its OWN mesh with a real bounding sphere: the ridges
+    // behind the camera cull away (same pixels on screen, ~20 extra draw
+    // calls, most of the ring's verts skipped whenever you aren't panning).
+    const heroMeshes = [];
+    function addHeroSpines(geoms) {
+      for (const g of geoms) {
+        g.computeVertexNormals();                // crisp flat facets w/ flatShading
+        g.computeBoundingSphere();               // real bounds → frustum culling works
+        const m = new THREE.Mesh(g, heroMat);
+        m.castShadow = false; m.receiveShadow = true;
+        m.matrixAutoUpdate = false; m.updateMatrix();
+        m.userData.terrain = true;
+        root.add(m);
+        heroMeshes.push(m);
+      }
+    }
+    addHeroSpines(heroGeoms);
+
+    // --- 3) BOULDER SCATTER — a modest field of fractured rocks (world/
+    //        rockscliffs.js) dressing the mountain ring's slopes. WHY: the
+    //        hero-peak facets alone read as a smooth folded surface; a
+    //        scatter of chipped boulders sitting IN the slope (not glued on
+    //        top) sells "this is a real rockfall-strewn mountainside" from
+    //        the vantage points the player actually sees it from (city
+    //        edges looking out). Candidates are drawn from the ridge
+    //        spine samples every ringSpines() call already computed (free —
+    //        no extra sampling pass), jittered around each spine point so
+    //        rocks scatter near the crest instead of sitting in a dead-
+    //        straight line. Slope-aware exclusion (scatterRocks' angle-of-
+    //        repose cutoff) throws out anything on a cliff face too steep to
+    //        hold a loose rock — using THIS file's own terrainNormal, so the
+    //        scatter always agrees with the actual relief mesh it sits on.
+    //        Pure backdrop: every candidate is already outside the flat
+    //        playable region (spine points come from the ring layout, which
+    //        starts at radius ~1900) — nothing here can land on walkable
+    //        ground. One extra InstancedMesh cluster (a couple variants),
+    //        not a new draw-call category.
+    if (CBZ.scatterRocks) {
+      // gather every spine sample from both rings as jittered candidates —
+      // reuses the ridge builder's own crest data instead of re-deriving it.
+      const spinePts = [];
+      for (const g of heroSpines) {
+        for (const s of g) spinePts.push(s);
+      }
+      if (spinePts.length) {
+        function pickNearSpine(rng) {
+          const p = spinePts[(rng() * spinePts.length) | 0];
+          if (!p) return null;
+          // jitter around the crest sample so rocks don't line up in a row
+          return { x: p.x + (rng() - 0.5) * 90, z: p.z + (rng() - 0.5) * 90 };
+        }
+        const scat = CBZ.scatterRocks(root, {
+          count: 90,
+          pick: pickNearSpine,
+          heightAt: CBZ.terrainHeight,
+          normalAt: CBZ.terrainNormal,
+          repeatAngleDeg: 38,             // angle of repose — matches the requested 35-40deg band
+          minSize: 3, maxSize: 9,          // mountain-scale boulders, bigger than desert clutter
+          baseRadius: 1, detail: 1,
+          variants: 3,
+          colorHex: 0x716b60,             // dark weathered granite, close to terrain's COL_ROCK band
+          seed: 4242,
+          // SOLID: these sit on the REAL terrain height field near the spine —
+          // ground you walk and drive — and at 3-9 m across, running through
+          // one is the most obvious decoy on the mountain. The two
+          // terrain_overhaul.js scatters deliberately DO NOT opt in: those
+          // dress the offshore backdrop range, which is collision-free on
+          // purpose ("decorative mountains are not geography") and is already
+          // pinned unreachable by CBZ.backdropAudit().onPlate === 0.
+          solidMin: 1.5,
+        });
+        if (scat && scat.meshes) for (const m of scat.meshes) heroMeshes.push(m);
+      }
+    }
+
+    // ---- perf/quality tier gate -----------------------------------------
+    // At tiers 0-1 the city fog is pulled in to ~170-260u (core/quality.js)
+    // while the mountain ring starts at radius ~1900: every hero peak +
+    // boulder is 100% fog-dissolved — invisible — yet still costs its full
+    // vertex/raster pass. Hide them outright there; tiers 2-4 (fog ≥ 350)
+    // keep today's skyline byte-identical. Shadow RECEIVE on the relief is
+    // also dropped at tiers 0-1 (the shadow pass is off/minimal there
+    // anyway) — one material flip for all tiles, not per-mesh churn.
+    function applyTerrainTier() {
+      const q = CBZ.qualityLevel == null ? 4 : CBZ.qualityLevel;
+      const showBackdrop = q >= 2;
+      for (const m of heroMeshes) m.visible = showBackdrop;
+      const recv = q >= 2;
+      if (terrMat.userData._recv !== recv) {
+        terrMat.userData._recv = recv;
+        for (const t of terrainTiles) t.receiveShadow = recv;
+        for (const m of heroMeshes) if (m.receiveShadow !== undefined && !m.isInstancedMesh) m.receiveShadow = recv;
+        terrMat.needsUpdate = true; heroMat.needsUpdate = true;
+      }
+    }
+    if (CBZ.onQualityChange) CBZ.onQualityChange(applyTerrainTier);
+
+    _built = terrain;
+    return terrain;
+  };
+})();
