@@ -482,6 +482,12 @@
     }
     // never rack a wing open in the middle of a facility lockdown
     if (!wantLocked && (CBZ.game.detection || 0) >= 90) wantLocked = true;
+    // THE DOORS MOVE ON THE KLAXON, not up to a retry interval later. The
+    // 0.35 s gate below exists for the deferred case (a body in the opening),
+    // and core/loop.js clamps world dt to 0.10 s — so on a slow frame that
+    // gate is many real seconds, and a wing that racks shut long after the
+    // horn reads as two unrelated events instead of one order being obeyed.
+    doorRetry = 0;
     drivePosts(b.home !== null);
     muster(b.home !== null);
     if (announce) soundPA(b.pa);
@@ -502,7 +508,12 @@
     wantLocked = false;
     if (list && CBZ.cellblock.resetDoors) CBZ.cellblock.resetDoors();
   }
-  if (CBZ.jailBoost && CBZ.jailBoost.onStateExit) CBZ.jailBoost.onStateExit(reset);
+  // Tear down when the RUN ends, never on a PAUSE: `paused` is a state exit
+  // like any other to the shared dispatcher, and unlocking the wing there
+  // would slide thirteen leaves open behind the pause card and slam them shut
+  // again the instant you resumed. (states: title/playing/paused/won/lost —
+  // systems/state.js setState.)
+  if (CBZ.jailBoost && CBZ.jailBoost.onStateExit) CBZ.jailBoost.onStateExit(reset, ["title", "won", "lost"]);
 
   function on() { return CFG.PRISON_SCHEDULE_V1 !== false && CBZ.game && CBZ.game.mode === "escape"; }
 

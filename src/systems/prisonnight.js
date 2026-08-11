@@ -459,12 +459,18 @@
      no schedule entry (impossible by construction — register() coerces —
      and therefore 0 forever). */
   CBZ.prisonNightAudit = function () {
+    // (0,55) is the ONE bare patch the measurement can trust: the throat
+    // between the two yards, outside every room shell, more than a flood
+    // mast's radius from all eight, and — the trap the first draft fell into
+    // — outside the sweep of all four searchlight pools, whose beams roam the
+    // whole of both yards and were reading "midnight" as fully lit.
+    const SX = 0, SZ = 55;
     const held = CBZ.dayness, heldK = CBZ.duskness;
     CBZ.dayness = 1; CBZ.duskness = 0;
-    const noon = sightScale(null, 0, 30);
+    const noon = sightScale(null, SX, SZ);
     CBZ.dayness = 0; CBZ.duskness = 0;
-    const midnight = sightScale(null, 0, 30);
-    const torchLit = sightScale({ flashlightOn: true, group: { position: { x: 0, z: 30 } } }, 0, 34);
+    const midnight = sightScale(null, SX, SZ);
+    const torchLit = sightScale({ flashlightOn: true, group: { position: { x: SX, z: SZ } } }, SX, SZ + 4);
     CBZ.dayness = held; CBZ.duskness = heldK;
     let unknown = 0;
     for (let i = 0; i < fixtures.length; i++) if (!LEVELS[fixtures[i].kind]) unknown++;

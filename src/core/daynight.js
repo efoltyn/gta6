@@ -206,6 +206,14 @@
     CBZ.nightAmount = nightAmt;
     CBZ.sunHeight = up; // signed (-1 deep night .. 1 noon) — sky.js palettes
     for (const sl of CBZ.searchlights) {
+      // A KNOCKED-OUT LIGHT STAYS OUT. entities/searchlight.js drops a
+      // sabotaged beam to 0.15/0.02/0.04 in its own updater — and core/loop.js
+      // walks CBZ.updaters BEFORE CBZ.always, so this loop ran afterwards and
+      // put every disabled tower straight back on full night gain. Sabotaging
+      // a searchlight did nothing you could see, which is the whole point of
+      // sabotaging one. (Found while giving escape mode a real night: the
+      // longer the dark gets, the more that beam is worth killing.)
+      if (sl.disabled > 0) continue;
       if (sl.spot) sl.spot.intensity = 0.4 + nightAmt * 1.8;
       if (sl.cone) sl.cone.material.opacity = 0.05 + nightAmt * 0.14;
       if (sl.pool) sl.pool.material.opacity = 0.12 + nightAmt * 0.22;
