@@ -45,9 +45,40 @@
   const sun = CBZ.sun, hemi = CBZ.hemi, scene = CBZ.scene, dome = CBZ.skyDome;
   const rig = CBZ.lightRig;
 
-  const CYCLE = 150;        // seconds for a full day
-                            // NOTE: city/schedule.js DAY_SECS mirrors this
-                            // literal — change them together.
+  /* ============================================================
+     HOW LONG A DAY IS — and why it is not one number any more.
+
+     150 s is a TOY day: the sun crosses the sky faster than a lap of the
+     prison yard, so "night" was a lighting effect that swept past rather
+     than a part of the world you could plan around. The city wants that
+     pace (you are driving; a whole day between two errands is the point).
+     The PRISON does not: time of day is the escape game's pillar — your
+     cell locks at lights-out, the block wakes for count, the yard opens
+     and closes — and none of that is playable at 6 seconds an hour.
+
+     So the length of a day is a PER-MODE fact, stated here, once, where
+     the clock lives. `escape` gets a 12-minute day (30 s per in-game
+     hour), which gives ~3.5 real minutes of true lights-out night to
+     break out into and still turns the whole compound over twice in a
+     long session. Every other mode keeps the 150 s it shipped with, so
+     city/survival/gungame pacing is byte-identical.
+
+     NOTE: city/schedule.js's DAY_SECS mirrors the 150 literal for the
+     CITY only (it derives its hour from CBZ.sunAngle, which is correct
+     whatever the cycle is) — change them together if the city's changes.
+     ============================================================ */
+  const CYCLE = 150;        // seconds for a full day — every mode but escape
+  const MODE_CYCLE = { escape: 720 };   // THE PRISON DAY: 12 min = 30 s/hour
+  CBZ.DAY_SECONDS = MODE_CYCLE;         // the dial, published where it is read
+  function cycleSecs() {
+    const m = CBZ.game && CBZ.game.mode;
+    const v = m ? MODE_CYCLE[m] : 0;
+    return v > 0 ? v : CYCLE;
+  }
+  // "how long is a day here" — systems/prisonschedule.js turns block lengths
+  // in in-game hours into real seconds with this, so a change above moves the
+  // whole timetable and nothing has to be retyped.
+  CBZ.dayCycleSeconds = cycleSecs;
   let t = 0.18;             // start mid-morning
   // the sky clock, exposed for the multiplayer world save (net/netpersist.js):
   // no arg reads the phase 0..1; a number sets it (host restoring a saved day)
@@ -88,8 +119,9 @@
   const sunTarget = CBZ.sunTarget;
 
   CBZ.onAlways(2, function (dt) {
-    if (t + dt / CYCLE >= 1) dayN++;          // midnight wrap → next calendar day
-    t = (t + dt / CYCLE) % 1;
+    const cyc = cycleSecs();
+    if (t + dt / cyc >= 1) dayN++;            // midnight wrap → next calendar day
+    t = (t + dt / cyc) % 1;
 
     // sun arcs across the sky; height drives "how day" it is
     const ang = t * Math.PI * 2;

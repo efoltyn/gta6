@@ -305,7 +305,12 @@
 
         if (!cam.active) continue;
 
-        if (dist < 9.0) {
+        // A LENS IS AN EYE. The 9 m reach is a lit-room figure; after
+        // lights-out the cell-wing camera is staring into the same black the
+        // guards are. Same hook the vision cone uses (systems/prisonnight.js),
+        // so darkness is priced once for every sensor in the prison.
+        const camReach = 9.0 * (CBZ.sightScale ? CBZ.sightScale(cam, player.pos.x, player.pos.z) : 1);
+        if (dist < camReach) {
           const yaw = cam.body.rotation.y;
           const targetAngle = Math.atan2(cdx, cdz);
           let diff = Math.abs(targetAngle - yaw);

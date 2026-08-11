@@ -574,9 +574,19 @@
     const trueNight = (dayness < 0.045 && sunY < -8) || nightAmount > 0.965;
     const activeSearch = g.hunt > 0 || (g.investigate && g.investigate.t > 0);
     if (activeSearch) return "search";
-    if (trueNight && g.flashlightPatrol) {
+    // A NIGHT SHIFT CARRIES A TORCH. The 34% duty cycle below is an idle-hours
+    // habit; during the schedule's own dark blocks (unlock, evening return,
+    // secure, lights out — systems/prisonschedule.js) a screw walking a wing
+    // he cannot see has his light ON, and the ones not detailed to a torch
+    // draw one half the time. Without this, the darkness price this wave adds
+    // to the vision cone would just make every guard blind instead of making
+    // the lit ones dangerous.
+    const S = CBZ.prisonSchedule;
+    const torchBlock = !!(S && S.enabled() && S.torches());
+    if (trueNight && (g.flashlightPatrol || torchBlock)) {
       const period = g.kind === "warden" ? 15 : 22;
-      const duty = g.kind === "warden" ? 0.58 : 0.34;
+      const duty = torchBlock ? (g.flashlightPatrol ? 0.86 : 0.5)
+        : (g.kind === "warden" ? 0.58 : 0.34);
       const phase = (((CBZ.now || 0) * 0.001 + (g.flashlightPhase || 0)) % period + period) % period;
       if (phase < period * duty) return "night";
     }
@@ -978,6 +988,15 @@
     const yaw = g.group.rotation.y;
     const dot = (Math.sin(yaw) * dx + Math.cos(yaw) * dz) / dist;
     if (dot < Math.cos(g.half)) return false; // outside the cone angle
+    // ...AND SO DOES THE DARK. One hook, in the file that owns the cone math,
+    // so every caller (the detection sweep, an inmate asking guardWatching,
+    // the investigate branch three functions up) gets the same answer.
+    // systems/prisonnight.js publishes it off the prison's own light state —
+    // undefined everywhere else, so nothing outside escape mode changes.
+    // Placed AFTER the range and angle tests on purpose: the scale can only
+    // ever shrink the cone, so a point already outside it never pays for a
+    // light lookup, and only the handful that survive reach the raycast.
+    if (CBZ.sightScale && dist > vd * CBZ.sightScale(g, x, z)) return false;
     _ro.set(gx, 1.5, gz);
     _rd.set(dx, y + 1.0 - 1.5, dz).normalize();
     raycaster.set(_ro, _rd);

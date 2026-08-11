@@ -548,6 +548,19 @@
 <script src="src/entities/npc.js?v=notags1"></script>
 <script src="src/entities/ai.js?v=gore1"></script>
 
+<!-- TIME OF DAY IS THE PILLAR (escape mode). prisonschedule.js carves the day
+     into the blocks a real prison runs — unlock/count, yard, chow, evening
+     return, secure, lights out — and enforces them physically: a PA klaxon off
+     a real horn, cell doors racking on world/cellblock.js's own leaves, guards
+     changing post, inmates walked in for count. prisonnight.js is the other
+     half: the lights that are ON that schedule, an actually dark prison night,
+     and CBZ.sightScale — the one hook guards.js's vision cone and
+     interactions.js's cameras multiply by, so darkness is priced once.
+     After cellblock/guards/searchlight/npc (all read at parse), before the
+     detection sweep that consumes the result. -->
+<script src="src/systems/prisonschedule.js?v=clock1"></script>
+<script src="src/systems/prisonnight.js?v=clock1"></script>
+
 <!-- 4b. remaining systems -->
 <script src="src/systems/quests.js"></script>
 <script src="src/systems/input.js"></script>

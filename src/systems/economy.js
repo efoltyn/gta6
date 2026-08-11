@@ -47,6 +47,12 @@
     "Gold Chain":      { value: 55, tag: "valuables", rarity: "epic" },
     "Luxury Watch":    { value: 70, tag: "valuables", rarity: "epic" },
     // --- keys / weapon ---
+    // THE CELL KEY EXISTS BECAUSE THE CELL LOCKS. systems/prisonschedule.js
+    // racks the wing shut at 21:00 and kills the lights at 22:00; the brass on
+    // a screw's belt is the only thing that opens your own door from the
+    // inside during those hours (walk into the door holding one — no prompt).
+    // Worth less than the gun-room key because it buys you a NIGHT, not a room.
+    "Cell Key":        { value: 25, tag: "key",       rarity: "uncommon" },
     "Gun-Room Key":    { value: 40, tag: "key",       rarity: "rare" },
     Gun:               { value: 50, tag: "key",       rarity: "epic" },
     // --- B7: catalog parity with city/economy.js's harvest-node resources +
@@ -537,6 +543,7 @@
     if (guardish) {
       cigs += 4 + Math.floor(rng() * 9);
       maybe("Handcuff Key", 0.6); maybe("Cash Roll", 0.35); maybe("Burner Phone", 0.3); maybe("Painkillers", 0.3);
+      maybe("Cell Key", 0.4);     // the wing keys ride on a screw's belt — steal the belt
       if (actor.corrupt) { maybe("Cash Roll", 0.6); maybe("Burner SIM", 0.4); maybe("Gold Tooth", 0.2); }
       // Guns are a CITY thing now — the jail is mostly shivs and fists. The
       // warden still rarely carries one, but firearms moved out to the streets.
