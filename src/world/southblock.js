@@ -225,6 +225,102 @@
   cart(-31, 92); cart(-29.5, 99);
 
   // ============================================================
+  //  HOUSING D — controlled open-bay dormitory, 16 real beds
+  // ============================================================
+  /* The playable cast needs forty-two places to sleep. The cell house owns
+     twenty-six; the old answer was sixteen loose mats scattered through its
+     dayroom and the route to the yard gate. This room closes that exact gap
+     with eight double stacks, using cellblock.js's own bunk builder and bed
+     registration. It also puts the beds where a jail puts beds: inside one
+     bounded, observable housing unit with sanitation, a bolted table, a
+     controlled opening, and a clear sightline from the staffed sally-port
+     side. Nothing below is generic yard garnish.
+
+     GEOMETRY: the former water-tower corner, x[-42,-24] z[106,124]. Its north
+     entrance faces the program yard; the west observation bay lets staff see
+     the central aisle without stepping inside; the 3.4 m door lane remains
+     clear through the first third of the room. */
+  const HD = { id: "south-dorm", x0: -42, x1: -24, z0: 106, z1: 124, doorX: -33, doorZ: 106 };
+  roomShell({
+    x0: HD.x0, x1: HD.x1, z0: HD.z0, z1: HD.z1, h: 6,
+    wall: 0x76818c, floor: 0x626b74,
+    doors: [
+      { side: "N", center: HD.doorX, width: 3.4 },
+      { side: "N", center: -38.5, width: 3.0 },
+    ],
+  });
+  // Human-scale entrance head + jambs. Like the main housing gate, the head
+  // is visual/LOS structure only: a solid overhead box would be a full-height
+  // 2-D collider to the actor system.
+  addBox(HD.doorX, 4.65, HD.z0, 3.4, 2.7, 0.5, 0x76818c, { cast: false, blockLOS: true });
+  addBox(HD.doorX - 1.78, 1.65, HD.z0 - 0.02, 0.18, 3.3, 0.62, 0x39424e, { cast: false });
+  addBox(HD.doorX + 1.78, 1.65, HD.z0 - 0.02, 0.18, 3.3, 0.62, 0x39424e, { cast: false });
+  addBox(HD.doorX, 3.28, HD.z0 - 0.02, 3.74, 0.18, 0.62, 0x39424e, { cast: false });
+  addBox(HD.doorX, 5.45, HD.z0 - 0.28, 3.2, 0.52, 0.08, 0x244665, { cast: false });
+
+  // Observation opening: real gap in roomShell, rebuilt as wall below/above a
+  // clear pane and a security grille. The pane's collider is the wall here;
+  // staff can see through it, nobody can walk through it.
+  addBox(-38.5, 0.67, HD.z0, 3.0, 1.34, 0.5, 0x76818c, { solid: true, blockLOS: true });
+  addBox(-38.5, 4.30, HD.z0, 3.0, 3.40, 0.5, 0x76818c, { cast: false, blockLOS: true });
+  const dormPane = addBox(-38.5, 2.05, HD.z0 - 0.03, 2.82, 1.42, 0.16, 0xa9d9ea,
+    { solid: true, cast: false });
+  dormPane.material.transparent = true; dormPane.material.opacity = 0.34; dormPane.material.depthWrite = false;
+  for (let i = -2; i <= 2; i++)
+    addBox(-38.5 + i * 0.55, 2.05, HD.z0 - 0.16, 0.08, 1.46, 0.08, 0x39424e, { cast: false });
+  addBox(-38.5, 1.36, HD.z0 - 0.16, 2.9, 0.10, 0.10, 0x39424e, { cast: false });
+  addBox(-38.5, 2.74, HD.z0 - 0.16, 2.9, 0.10, 0.10, 0x39424e, { cast: false });
+
+  const housing = {
+    id: HD.id, bounds: HD, beds: [],
+    route: { x: HD.doorX, z: HD.z0 + 1.1 },
+    contains: function (x, z, pad) {
+      pad = pad || 0;
+      return x > HD.x0 - pad && x < HD.x1 + pad && z > HD.z0 - pad && z < HD.z1 + pad;
+    },
+  };
+  CBZ.prisonHousing = housing;
+  const dormZ = [109.2, 113.1, 117.0, 120.9];
+  const blankets = [0x4a5b46, 0x5c6470, 0x6b6152, 0x53535e];
+  if (CBZ.prisonBunk) {
+    for (let side = 0; side < 2; side++) for (let i = 0; i < dormZ.length; i++) {
+      const stack = CBZ.prisonBunk({
+        id: "D-" + (side ? "E" : "W") + (i + 1), unit: housing,
+        x: side ? -26.0 : -40.0, z: dormZ[i], along: "z", double: true,
+        blanket: blankets[(i + side) % blankets.length],
+      });
+      if (stack) housing.beds.push(stack);
+    }
+  }
+
+  // One bolted day table, offset from the entrance lane. It is a housing-unit
+  // activity, not bedding in a common corridor; four declared cushions make
+  // the furniture usable by the same shared sitting solve as the cell house.
+  addBox(-36.0, 0.74, 116.0, 2.4, 0.10, 1.15, 0x8a939d, { solid: true });
+  addBox(-36.0, 0.37, 116.0, 0.28, 0.74, 0.28, 0x5b6470, { cast: false });
+  for (const p of [[-37.0, 116.0, Math.PI / 2], [-35.0, 116.0, -Math.PI / 2],
+    [-36.0, 114.95, 0], [-36.0, 117.05, Math.PI]]) {
+    addBox(p[0], 0.44, p[1], 0.44, 0.08, 0.44, 0x52606d, { cast: false });
+    addBox(p[0], 0.22, p[1], 0.14, 0.44, 0.14, 0x9aa0a8, { cast: false });
+    if (CBZ.roomSeatAnchor)
+      CBZ.roomSeatAnchor(p[0], 0, p[1], p[2], "stool", null, { cushion: 0.48, floorBelow: 0 });
+  }
+
+  // Sanitation on the back wall, screened from the bunks but open to staff
+  // observation above shoulder height. Each fixture is a combined stainless
+  // toilet/sink, not a decorative bathroom prop.
+  function dormSanitary(x) {
+    addBox(x, 0.30, 122.75, 0.64, 0.60, 0.72, 0xc7ccd2, { cast: false });
+    addBox(x, 0.62, 122.75, 0.60, 0.10, 0.68, 0xe6e9ed, { cast: false });
+    addBox(x, 1.02, 123.02, 0.66, 0.70, 0.16, 0x9aa0a8, { cast: false });
+    addBox(x, 1.18, 122.92, 0.44, 0.10, 0.34, 0xd7dce2, { cast: false });
+  }
+  dormSanitary(-34.4); dormSanitary(-31.6);
+  addBox(-35.55, 1.05, 122.75, 0.08, 2.10, 2.0, 0xc7ccd2, { cast: false });
+  addBox(-30.45, 1.05, 122.75, 0.08, 2.10, 2.0, 0xc7ccd2, { cast: false });
+  addBox(-33.0, 0.035, 112.0, 2.2, 0.02, 10.2, 0xd7dde2, { cast: false }); // clear circulation spine
+
+  // ============================================================
   //  LOWER-YARD FITTINGS — hoop, weights, pull-up rig, bleachers
   // ============================================================
   // basketball hoop on the painted court
@@ -271,34 +367,12 @@
   function barrier(x, z) { addBox(x, 0.55, z, 3.0, 1.1, 0.8, 0xd8d2c4, { solid: true }); addBox(x, 0.16, z, 3.4, 0.2, 1.1, 0xb9b3a4, { cast: false }); }
   barrier(-10, 124); barrier(10, 124);
 
-  // ---- water tower in the south-west corner (a tall landmark) ----
-  (function waterTower() {
-    const x = -38, z = 116;
-    // THE LEGS are what you walk into — four 8 m steel columns you used to
-    // stroll straight through under the compound's tallest landmark. The TANK
-    // deliberately stays open: it spans y 7.9-10.9, so a full-height AABB on it
-    // would be a 5.2 m invisible wall standing on the ground under a tank
-    // that is three storeys over your head.
-    for (const dx of [-1.4, 1.4]) for (const dz of [-1.4, 1.4]) addBox(x + dx, 4.0, z + dz, 0.3, 8.0, 0.3, 0x6b7480, { cast: false, solid: true });
-    addBox(x, 9.4, z, 5.2, 3.0, 5.2, 0x9aa3ad, {});
-    addBox(x, 11.0, z, 4.0, 1.4, 4.0, 0x7d8794, { cast: false }); // conical-ish top
-    addBox(x, 9.4, z + 2.65, 3.0, 1.0, 0.1, 0xc94d3a, { cast: false }); // painted band
-  })();
-
-  // ---- scatter: dumpsters, barrels, crates, cones across the apron ----
+  // ---- service waste belongs at the workshop, not across circulation ----
   function dumpster(x, z) {
     addBox(x, 0.7, z, 3.0, 1.3, 1.7, 0x2f6b3a, { solid: true });
     addBox(x, 1.45, z, 3.1, 0.2, 1.8, 0x274f2c, { cast: false });
   }
-  function barrel(x, z, c) {
-    const b = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 1.2, 12), CBZ.mat(c || 0xc94d3a));
-    b.position.set(x, 0.6, z); b.castShadow = true; scene.add(b);
-  }
-  dumpster(-21, 64); dumpster(22, 110);
-  barrel(20, 84, 0x3b7bff); barrel(21, 85.4, 0xc94d3a); barrel(-21, 104, 0x4aa14a);
-  addBox(-15, 0.5, 78, 1.4, 1.0, 1.4, CBZ.COL.CRATE, { solid: true });
-  addBox(14, 0.5, 76, 1.4, 1.0, 1.4, CBZ.COL.CRATE, { solid: true });
-  addBox(14, 1.5, 76, 1.2, 1.0, 1.2, CBZ.COL.CRATE_D, { solid: true });
+  dumpster(-21, 64);
 
   // ---- a few cigarette packs to reward exploring the new wing ----
   if (CBZ.addPack) {
@@ -502,5 +576,6 @@
     PD.shell({ id: "chapel", x0: 24, x1: 42, z0: 58, z1: 80, h: 6.5, door: "W", dc: 69, dw: 4.2, tone: 0xbfb6a4, face: "W", quiet: true });
     PD.shell({ id: "infirmary", x0: 26, x1: 42, z0: 88, z1: 104, h: 6, door: "W", dc: 96, dw: 4.0, tone: 0xd7dde2, face: "W" });
     PD.shell({ id: "laundry", x0: -42, x1: -26, z0: 88, z1: 104, h: 6, door: "E", dc: 96, dw: 4.0, tone: 0x8a929c, face: "E" });
+    PD.shell({ id: "south-dorm", x0: -42, x1: -24, z0: 106, z1: 124, h: 6, door: "N", dc: -33, dw: 3.4, tone: 0x76818c, face: "N", quiet: true });
   }
 })();

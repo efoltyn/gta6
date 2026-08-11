@@ -160,6 +160,7 @@
     { id: "chapel",    r: rect("chapel", 24, 42, 58, 80, 6.5), lights: 4, deck: 0x8a7f6a },
     { id: "infirmary", r: rect("infirmary", 26, 42, 88, 104, 6), lights: 4 },
     { id: "laundry",   r: rect("laundry", -42, -26, 88, 104, 6), lights: 4 },
+    { id: "south-dorm", r: rect("south-dorm", -42, -24, 106, 124, 6), lights: 4 },
     // the sally-port booth ALREADY had a roof (world/southblock.js draws its
     // own slab at y 3.4). It gets a fitting and a light region, never a
     // second lid — two roofs on one hut is z-fighting, not architecture.

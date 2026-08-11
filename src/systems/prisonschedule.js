@@ -278,6 +278,18 @@
     pad = pad || 0;
     return x > CB.x0 - pad && x < CB.x1 + pad && z > CB.z0 - pad && z < CB.z1 + pad;
   }
+  function inHousing(x, z, pad) {
+    if (inBlock(x, z, pad)) return true;
+    const h = CBZ.prisonHousing;
+    return !!(h && h.contains && h.contains(x, z, pad));
+  }
+  function inAssignedHousing(n, x, z, pad) {
+    const m = n && n._muster;
+    const h = CBZ.prisonHousing;
+    if (m && m.unit && h && h.id === m.unit && h.contains)
+      return !!h.contains(x, z, pad);
+    return inBlock(x, z, pad);
+  }
   function inOwnCell(x, z) {
     const cb = CBZ.cellblock;
     if (!cb || !cb.v2 || !cb.playerCell) return inBlock(x, z);
@@ -442,7 +454,13 @@
     if (!bed) return null;
     let e = null;
     try { e = CBZ.propEntryPoint ? CBZ.propEntryPoint(bed) : null; } catch (err) { e = null; }
-    return (e && e.ok) ? { x: e.x, z: e.z } : { x: bed.x, z: bed.z };
+    const unit = bed._housingUnit || null;
+    const spot = (e && e.ok) ? { x: e.x, z: e.z } : { x: bed.x, z: bed.z };
+    if (unit) {
+      spot.unit = unit.id || null;
+      spot.route = unit.route ? { x: unit.route.x, z: unit.route.z } : null;
+    }
+    return spot;
   }
   let mustered = false;
   function muster(on) {
@@ -511,7 +529,7 @@
       if (!housed(n) || !n._muster || n.ko > 0) continue;
       if (n.aiState === "fight" || n.aiState === "flee") continue;
       const p = n.group.position;
-      if (inBlock(p.x, p.z, -0.5)) continue;
+      if (inAssignedHousing(n, p.x, p.z, -0.5)) continue;
       const far = (p.x - n._muster.x) * (p.x - n._muster.x) + (p.z - n._muster.z) * (p.z - n._muster.z);
       if (far > wd) { wd = far; worst = n; }
       for (let j = 0; j < gl.length; j++) {
@@ -642,6 +660,8 @@
     belongs: belongs,
     where: whereIs,
     inBlock: inBlock,
+    inHousing: inHousing,
+    inAssignedHousing: inAssignedHousing,
     // the PA, for anything that legitimately announces itself (a later
     // security tier, a recapture): n blasts from the nearest real horn
     announce: soundPA,

@@ -328,9 +328,12 @@
         readerLamp("deny", 0.013);
         if (!readerRung) {
           readerRung = true;
-          // the solenoid, from the reader itself (2.6, 3.8, -7.5): a 50 dB
-          // click that is not even requested from across the yard.
-          if (CBZ.worldSfx) CBZ.worldSfx("switch", 2.6, -7.5, { y: 3.8, ref: 6, volume: 0.45, gap: 0.5 });
+          // The solenoid speaks from the reader's published hardware point: a
+          // 50 dB click that is not even requested from across the yard.
+          if (CBZ.worldSfx) {
+            const rp = door.readerPos || { x: 2.6, y: 3.8, z: -7.5 };
+            CBZ.worldSfx("switch", rp.x, rp.z, { y: rp.y, ref: 6, volume: 0.45, gap: 0.5 });
+          }
         }
       } else {
         readerRung = false;
@@ -338,7 +341,7 @@
       }
     } else if (door.t < 1) {
       door.t = Math.min(1, door.t + dt * 1.6);
-      door.mesh.position.y = door.closedY + door.t * 8; // slide up into the wall
+      door.mesh.position.y = door.closedY + door.t * (door.travel || 8); // slide into its authored wall pocket
     }
 
     // ---- breaker box power sabotage ----

@@ -1,5 +1,5 @@
 /* ============================================================
-   world/escape_routes.js - checkpoint dressing + alternate routes.
+   world/escape_routes.js - cell-block services + alternate routes.
 
    The keycard still matters because it opens staff checkpoints, but
    the block now has maintenance crawls, ceiling hatches, drainage, and
@@ -81,16 +81,11 @@
     addBox(x, 6.82, -17.9, 0.08, 0.72, 0.08, 0x6b7480, { cast: false });
   }
 
-  // ---- make the red door read as a checkpoint, not a random common-room lock ----
-  sign("STAFF CHECKPOINT", 0, 7.35, -7.45, 5.4, 1.05, 0, "#ffd451", "#3a1f1a");
-  addBox(-3.2, 1.15, -10.5, 0.18, 2.3, 3.8, 0x2a2f38, { cast: false });
-  addBox(3.2, 1.15, -10.5, 0.18, 2.3, 3.8, 0x2a2f38, { cast: false });
-  addBox(-1.5, 1.0, -10.6, 0.18, 2.0, 0.18, 0x4f5663, { cast: false });
-  addBox(1.5, 1.0, -10.6, 0.18, 2.0, 0.18, 0x4f5663, { cast: false });
-  addBox(-2.45, 1.7, -9.35, 0.38, 2.4, 0.42, 0x222831, { cast: false });
-  addBox(2.45, 1.7, -9.35, 0.38, 2.4, 0.42, 0x222831, { cast: false });
-  addBox(-2.45, 2.25, -9.08, 0.18, 0.18, 0.08, 0xff3b3b, { emissive: 0xff0000, ei: 1.0, cast: false });
-  addBox(2.45, 2.25, -9.08, 0.18, 0.18, 0.08, 0xffd451, { emissive: 0x7a5100, ei: 0.8, cast: false });
+  // The housing gate already owns its jambs, reader, signal and moving leaf.
+  // The old "checkpoint dressing" duplicated all of that with freestanding
+  // rails, posts and two fake reader pylons in the clear route. Keep one
+  // literal, wall-mounted identifier; circulation in front of it stays empty.
+  sign("HOUSING UNIT A", 0, 4.30, -8.38, 4.6, 0.78, Math.PI, "#e8edf2", "#202833");
 
   // ---- route 1: cell utility crawl to the west drainage ditch ----
   const cellCrawl = floorHatch(-12.2, -38.2, "Cell Utility Crawl", 0x6b7480);

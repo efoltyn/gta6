@@ -279,20 +279,16 @@
   const armory = { gate, lamp, collider: gate.userData.collider, open: false, t: 0, slots: [] };
 
   // ------------------------------------------------------------------
-  //  THE RACK (unchanged geometry — the owner already likes this)
+  //  THE RACK — a weapon is supported by the hardware it is displayed on.
   //
-  //  ...and the geometry stays unchanged, which is the whole point of how the
-  //  "all the guns" ask below is answered. The backboard has ALWAYS carried two
-  //  shelf runs at y 2.38 and 1.38, and only the top one ever held anything —
-  //  five weapons on a rack built for ten. The lower shelf is now stocked
-  //  instead of the pitch being tightened, so not one bracket, board or
-  //  coordinate in this block moves.
+  //  The old "shelves" sat ABOVE the weapon receivers while a second glowing
+  //  pad floated half a metre below. Nothing touched anything. Keep the warm
+  //  backboard and two-row inventory, but give every slot one slotted upright
+  //  and one measured shelf whose top is used to seat that model's own bounds.
   // ------------------------------------------------------------------
   addBox(27.8, 1.75, 1, 0.55, 2.7, 11.6, 0x3c2f22, {});
-  for (let i = -2; i <= 2; i++) {
-    addBox(27.38, 2.38, 1 + i * 2.0, 0.5, 0.08, 1.35, 0x14181d, { cast: false });
-    addBox(27.38, 1.38, 1 + i * 2.0, 0.5, 0.08, 1.35, 0x14181d, { cast: false });
-  }
+  for (let i = -2; i <= 2; i++)
+    addBox(27.44, 1.75, 1 + i * 2.0, 0.09, 2.30, 0.08, 0x11161c, { cast: false });
 
   function fallbackGun() {
     const g = new THREE.Group();
@@ -309,9 +305,23 @@
   function rackScale(id) { return SMALL[id] ? 1.25 : 1.05; }
   function buildRackModel(id) {
     const builder = CBZ.weaponAppearance && CBZ.weaponAppearance[id];
-    const model = builder ? builder({ THREE, box, cyl, mat: mats }) : fallbackGun();
+    // Appearance builders serve held weapons too, and many deliberately add a
+    // skin-coloured hand around the grip. A display context reuses the same
+    // canonical gun geometry while refusing that held-only material. The
+    // traverse is a defensive backstop for a future builder that bypasses the
+    // supplied helpers.
+    const displayBox = function () {
+      if (arguments[4] === mats.skin) return null;
+      return box.apply(null, arguments);
+    };
+    const displayCyl = function () {
+      if (arguments[3] === mats.skin) return null;
+      return cyl.apply(null, arguments);
+    };
+    const model = builder ? builder({ THREE, box: displayBox, cyl: displayCyl, mat: mats, display: true }) : fallbackGun();
+    model.traverse(function (o) { if (o.material === mats.skin) o.visible = false; });
     model.scale.setScalar(rackScale(id));
-    model.rotation.set(0.04, 0, 0);
+    model.rotation.set(0, 0, 0);
     return model;
   }
 
@@ -343,30 +353,44 @@
   const FULL = SPINE && CBZ.CONFIG.PRISON_ARMORY_FULL_RACK !== false;
 
   const rackData = [
-    // ---- TOP shelf run (y 2.38): the five this rack always held ----
-    { id: "sidearm", z: -3.0, y: 2.35, name: "9MM SIDEARM" },
-    { id: "shotgun", z: -1.0, y: 2.18, name: "12G PUMP" },
-    { id: "carbine", z: 1.0, y: 2.18, name: "M4 CARBINE" },
-    { id: "smg", z: 3.0, y: 2.20, name: "COMPACT SMG" },
-    { id: "taser", z: 5.0, y: 2.35, name: "X26 TASER" },
+    // ---- TOP row: shelfY is the physical top each model is seated onto ----
+    { id: "sidearm", z: -3.0, shelfY: 1.82, name: "9MM SIDEARM" },
+    { id: "shotgun", z: -1.0, shelfY: 1.82, name: "12G PUMP" },
+    { id: "carbine", z: 1.0, shelfY: 1.82, name: "M4 CARBINE" },
+    { id: "smg", z: 3.0, shelfY: 1.82, name: "COMPACT SMG" },
+    { id: "taser", z: 5.0, shelfY: 1.82, name: "X26 TASER" },
   ];
   if (FULL) {
-    // ---- LOWER shelf run (y 1.38): the four that had no home ----
+    // ---- LOWER row -----------------------------------------------------
     rackData.push(
-      { id: "revolver", z: -3.0, y: 1.35, name: ".357 MAGNUM" },
-      { id: "ak47", z: -1.0, y: 1.18, name: "AK-47" },
-      { id: "uzi", z: 1.0, y: 1.35, name: "MICRO UZI" },
-      { id: "deagle", z: 3.0, y: 1.35, name: ".50 DESERT EAGLE" }
+      { id: "revolver", z: -3.0, shelfY: 0.62, name: ".357 MAGNUM" },
+      { id: "ak47", z: -1.0, shelfY: 0.62, name: "AK-47" },
+      { id: "uzi", z: 1.0, shelfY: 0.62, name: "MICRO UZI" },
+      { id: "deagle", z: 3.0, shelfY: 0.62, name: ".50 DESERT EAGLE" }
     );
   }
 
   function makeSlot(data) {
-    const pad = addBox(27.25, data.y - 0.52, data.z, 0.12, 0.09, 1.55, 0x202833, { cast: false, emissive: 0x080b10, ei: 0.5 });
     const model = buildRackModel(data.id);
+    model.updateMatrixWorld(true);
+    const bounds = new THREE.Box3().setFromObject(model);
+    const spanZ = Math.max(0.70, bounds.max.z - bounds.min.z);
+    const shelfLen = Math.min(1.76, spanZ + 0.18);
+    const pad = addBox(27.13, data.shelfY, data.z, 0.64, 0.07, shelfLen,
+      0x11161c, { cast: false, emissive: 0x030507, ei: 0.35 });
+    // Two turned-up retainers make the support legible at rack distance and
+    // stop it reading as another stripe painted behind the gun.
+    const end = Math.max(0.18, shelfLen / 2 - 0.10);
+    addBox(26.83, data.shelfY + 0.09, data.z - end, 0.07, 0.18, 0.09, 0x11161c, { cast: false });
+    addBox(26.83, data.shelfY + 0.09, data.z + end, 0.07, 0.18, 0.09, 0x11161c, { cast: false });
     // Slot ownership toggles this model's VISIBILITY at runtime. Keep its parent
     // matrix live when the rest of the static prison set is frozen.
     model.userData.dynamic = true;
-    model.position.set(27.18, data.y, data.z + 0.46);
+    // Back surface is x=27.525. Seat the model from its own AABB: bottom on the
+    // shelf, longitudinal centre in the bay, rear-most part just proud of the
+    // board. No per-weapon eyeballed offsets and no intersections by accident.
+    model.position.set(27.42 - bounds.max.x, data.shelfY + 0.045 - bounds.min.y,
+      data.z - (bounds.min.z + bounds.max.z) * 0.5);
     ROOT.add(model);
     const slot = { id: data.id, name: data.name, pad, model, taken: false, cool: 0, x: 26.2, z: data.z };
     armory.slots.push(slot);
@@ -394,7 +418,7 @@
     const owned = !!(CBZ.hasWeapon && CBZ.hasWeapon(slot.id));
     slot.taken = owned;
     if (CBZ.CONFIG.PRISON_RACK_EMPTIES === false) {
-      slot.pad.material.color.setHex(owned ? 0x254f35 : 0x202833);
+      slot.pad.material.color.setHex(owned ? 0x254f35 : 0x11161c);
       slot.pad.material.emissive.setHex(owned ? 0x0b3b1b : 0x080b10);
       slot.model.visible = true;
       slot.model.scale.setScalar(rackScale(slot.id) * (owned ? 0.92 : 1));
@@ -402,7 +426,7 @@
     }
     slot.model.visible = !owned;
     slot.model.scale.setScalar(rackScale(slot.id));
-    slot.pad.material.color.setHex(owned ? 0x14181d : 0x202833);
+    slot.pad.material.color.setHex(owned ? 0x0b0e12 : 0x11161c);
     slot.pad.material.emissive.setHex(owned ? 0x000000 : 0x080b10);
   }
 

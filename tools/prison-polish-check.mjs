@@ -118,8 +118,9 @@ function why(r) { return (r && r.__err) ? ("threw: " + String(r.__err).split("\n
   `);
   if (bad(r) || r.no) check("population: the wing publishes what it sleeps", false, why(r));
   else {
-    check("population: the building states its own capacity",
-      r.w.cells > 0 && r.w.beds === r.w.cells * r.w.perCell && r.w.houses > 0,
+    check("population: the housing units state their own capacity",
+      r.w.cells > 0 && r.w.beds === r.w.racks &&
+        r.w.beds === r.w.cells * r.w.perCell + r.w.housingStacks * 2 && r.w.houses > 0,
       JSON.stringify(r.w));
     check("population: the headcount is derived, not typed",
       r.a.derived === true && r.a.explicit === false,
@@ -235,7 +236,7 @@ async function doorCast(label, setup, expr) {
   const r = await doorCast("yard", `
     var o = new T.Vector3(0, 1.6, -5), d = new T.Vector3(0, 0, -1);
     var closedHit = cast(o, d, 9);
-    CBZ.openDoor(); CBZ.door.t = 1; CBZ.door.mesh.position.y = CBZ.door.closedY + 7;
+    CBZ.openDoor(); CBZ.door.t = 1; CBZ.door.mesh.position.y = CBZ.door.closedY + (CBZ.door.travel || 8);
     CBZ.door.mesh.updateMatrixWorld(true);
     var openHit = cast(o, d, 9);
   `, "CBZ.door.mesh");

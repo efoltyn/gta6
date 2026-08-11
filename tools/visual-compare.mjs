@@ -362,6 +362,8 @@ function reportHtml(before, after) {
   const generated = new Date().toLocaleString("en-US", { dateStyle: "long", timeStyle: "short" });
   const pairNote = preset.pairNote || "Same model recipe · seed · camera · light · viewport";
   const method = preset.method || "Every pair uses the actual registered model builder from its source URL. The runner holds subject, random seed, viewport, camera framing, backdrop, and lighting constant so the source change is the variable.";
+  const metricPage = metricsPageHtml(before, after);
+  const reportPageCount = subjects.length + 1 + (metricPage ? 1 : 0);
   const pages = subjects.map((subject, index) => {
     const focus = subject.focus || preset.defaultFocus || "Compare silhouette, seams, and physical continuity.";
     const side = (result, cls, caption, sub) => {
@@ -419,11 +421,11 @@ function reportHtml(before, after) {
   </style></head><body>
     <section class="page cover">
       <div><div class="eyebrow">DETERMINISTIC VISUAL COMPARISON</div><h1>${htmlEscape(preset.title)}</h1><p class="dek">${htmlEscape(preset.description || "Before and after captures from two real browser builds.")}</p></div>
-      <div class="stats"><div class="stat"><strong>${subjects.length}</strong><span>matched subjects</span></div><div class="stat"><strong>${subjects.length * 2}</strong><span>browser screenshots</span></div><div class="stat"><strong>${subjects.length + 1}</strong><span>report pages</span></div></div>
+      <div class="stats"><div class="stat"><strong>${subjects.length}</strong><span>matched subjects</span></div><div class="stat"><strong>${subjects.length * 2}</strong><span>browser screenshots</span></div><div class="stat"><strong>${reportPageCount}</strong><span>report pages</span></div></div>
       <div class="sources"><div class="source"><b>BEFORE · deployed baseline</b><code>${htmlEscape(before.navigation.final)}</code></div><div class="source after"><b>AFTER · current checkout</b><code>${htmlEscape(after.navigation.final)}</code></div></div>
       <p class="method">Generated ${htmlEscape(generated)}. ${htmlEscape(method)}</p>
     </section>
-    ${metricsPageHtml(before, after)}
+    ${metricPage}
     ${pages}
   </body></html>`;
 }

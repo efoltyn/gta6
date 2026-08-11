@@ -7,22 +7,89 @@
   const CBZ = window.CBZ;
   const { addBox } = CBZ;
 
-  const mesh = addBox(0, 3.5, -8, 6, 7, 0.7, 0xb43b2c, {
+  /* A HOUSING-UNIT GATE, not a red wall that disappears into the ceiling.
+     The armory and Gang City doors both use the same readable grammar:
+     structural jambs stay with the wall; one leaf owns every piece of leaf
+     hardware; access control stays on the jamb. The old door violated all
+     three — its two "window slats" were scene-level boxes, so opening the
+     slab left them floating across the clear route, while its reader was
+     visually stranded on the leaf edge.
+
+     Keep the established vertical-slide mechanism and collider contract, but
+     make the moving object a coherent 3.35 m detention leaf. The opaque wall
+     above is its pocket, so the raised leaf has somewhere physical to go. */
+  const CLOSED_Y = 1.68;
+  const TRAVEL = 4.35;
+  const LEAF_W = 5.72, LEAF_H = 3.36;
+  const mesh = addBox(0, CLOSED_Y, -8, LEAF_W, LEAF_H, 0.34, 0x39424e, {
     solid: true, blockLOS: true, emissive: 0x3a0d06, ei: 0.4,
   });
   mesh.userData.mover = true;
 
-  // window slats + a keycard reader panel beside it
-  addBox(0, 5.0, -7.6, 3.2, 0.3, 0.1, 0x2a2f38, { cast: false });
-  addBox(0, 4.4, -7.6, 3.2, 0.3, 0.1, 0x2a2f38, { cast: false });
-  const reader = addBox(2.6, 3.6, -7.6, 0.5, 0.7, 0.12, 0x222831, { cast: false });
-  const readerLight = addBox(2.6, 3.8, -7.5, 0.18, 0.18, 0.06, 0xff3b3b, { emissive: 0xff0000, ei: 1.0, cast: false });
-  readerLight.userData.mover = true;
+  // The parent is the transparent physics/LOS pane. Every visible fitting is
+  // local to it, exactly like the armory's welded barred leaf, so one transform
+  // moves the whole door and bullet marks inherit the same coordinate space.
+  mesh.material.transparent = true;
+  mesh.material.opacity = 0.035;
+  mesh.material.depthWrite = false;
+  mesh.material.emissive.setHex(0x000000);
+  mesh.castShadow = false;
+  mesh.receiveShadow = false;
+  function leafBox(w, h, d, color, x, y, z, opts) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), CBZ.cmat(color));
+    m.position.set(x || 0, y || 0, z || 0);
+    m.castShadow = !(opts && opts.cast === false);
+    m.receiveShadow = true;
+    mesh.add(m);
+    return m;
+  }
+  const STEEL = 0x3d4651, EDGE = 0x20262d, KICK = 0x66717d;
+  leafBox(5.28, 1.48, 0.28, STEEL, 0, -0.70, 0);             // lower armor plate
+  leafBox(5.28, 0.22, 0.30, EDGE, 0, 0.17, 0);              // vision sill
+  leafBox(5.28, 0.48, 0.28, STEEL, 0, 1.30, 0);             // upper armor band
+  leafBox(0.24, 0.92, 0.30, EDGE, 0, 0.70, 0);              // window divider
+  for (const x of [-1.36, 1.36]) {
+    const pane = leafBox(2.42, 0.72, 0.12, 0x9fd6e8, x, 0.69, -0.02, { cast: false });
+    pane.material.transparent = true;
+    pane.material.opacity = 0.38;
+    pane.material.depthWrite = false;
+    leafBox(2.52, 0.10, 0.31, EDGE, x, 0.30, 0);
+    leafBox(2.52, 0.10, 0.31, EDGE, x, 1.08, 0);
+  }
+  leafBox(0.28, 3.22, 0.34, EDGE, -2.67, 0, 0);              // perimeter stiles
+  leafBox(0.28, 3.22, 0.34, EDGE, 2.67, 0, 0);
+  leafBox(5.48, 0.22, 0.34, EDGE, 0, -1.55, 0);              // head / sill rails
+  leafBox(5.48, 0.22, 0.34, EDGE, 0, 1.55, 0);
+  leafBox(4.82, 0.08, 0.04, 0xb44534, 0, -1.10, -0.18, { cast: false }); // earned warning stripe
+  leafBox(1.58, 0.54, 0.04, KICK, 1.56, -0.55, -0.18, { cast: false });  // replaceable kick plate
+  leafBox(0.12, 0.54, 0.14, 0xaeb7c0, 2.31, 0.03, -0.23);                // pull handle
+
+  // Static structure: the 9 m wall now closes over a human-scale opening and
+  // visibly contains the lifted leaf. These are not colliders — actors in this
+  // game are 2-D AABBs, so a solid overhead lintel would invisibly seal the
+  // doorway — but the masonry and header still block sight.
+  const WALL = CBZ.COL && CBZ.COL.WALL != null ? CBZ.COL.WALL : 0x9aa0a8;
+  addBox(0, 6.38, -8, 6.35, 5.24, 0.72, WALL, { cast: false, blockLOS: true });
+  addBox(-3.10, 1.78, -8, 0.34, 3.56, 0.72, EDGE, { cast: false });
+  addBox(3.10, 1.78, -8, 0.34, 3.56, 0.72, EDGE, { cast: false });
+  addBox(0, 3.50, -8, 6.54, 0.34, 0.78, EDGE, { cast: false });
+  addBox(-2.78, 5.70, -7.60, 0.10, 4.00, 0.12, KICK, { cast: false });
+  addBox(2.78, 5.70, -7.60, 0.10, 4.00, 0.12, KICK, { cast: false });
+
+  // Access control is bolted to the housing-side jamb. It changes material at
+  // runtime but never changes transform, so it is dynamic, not a mover.
+  const reader = addBox(3.52, 1.48, -8.42, 0.48, 0.78, 0.18, 0x222831, { cast: false });
+  reader.userData.dynamic = true;
+  addBox(3.52, 1.35, -8.53, 0.24, 0.08, 0.04, 0xaeb7c0, { cast: false });
+  const readerLight = addBox(3.52, 1.72, -8.54, 0.18, 0.18, 0.06, 0xff3b3b,
+    { emissive: 0xff0000, ei: 1.0, cast: false });
+  readerLight.userData.dynamic = true;
 
   const door = {
     mesh, reader, readerLight,
     collider: mesh.userData.collider,
-    open: false, closedY: 3.5, t: 0,
+    open: false, closedY: CLOSED_Y, travel: TRAVEL, t: 0,
+    readerPos: { x: 3.52, y: 1.72, z: -8.54 },
   };
 
   CBZ.door = door;

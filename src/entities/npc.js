@@ -230,9 +230,10 @@
     // NPC_SCHEDULES — jail nights: ordinary named inmates drift to the cell-
     // block side of their own patch after dark and post up there (long
     // pauses), so the yard reads asleep instead of pacing at 3am. The gang
-    // crews and the merchant/dealer/thief cast keep their night hustle
-    // (owner's rule: gangsters stay out), and any real brain state — fight,
-    // flee, hunt, snitch — outranks the curfew via the calm-state gate.
+    // crews used to be exempted here even after prisonschedule.js began
+    // assigning every inmate a bed. That left assigned bodies awake in the
+    // yard while their beds sat empty. A real brain state — fight, flee, hunt,
+    // snitch — still outranks curfew; gang membership does not erase housing.
     // THE CLOCK IS NOW A SCHEDULE, NOT A BRIGHTNESS. `nightAmount > 0.72` was
     // this file's own guess at "is it late" — a lighting number standing in for
     // a prison timetable, which meant the yard emptied when the sky got dark
@@ -240,11 +241,10 @@
     // (evening return, secure, lights out) and hands each housed inmate a
     // patch of wing floor to stand count on (`_muster`); the brightness test
     // stays as the fallback for a build where that file is absent.
-    // `n.gang == null` (not `!n.gang`) is the owner's rule stated correctly:
-    // gang 0 — the Reds — are gangsters too, and `!0` was curfewing them.
     const SCH = CBZ.prisonSchedule;
     const schedIn = SCH && SCH.enabled() ? SCH.indoors() : (CBZ.nightAmount || 0) > 0.72;
-    const curfew = !!(CBZ.CONFIG && CBZ.CONFIG.NPC_SCHEDULES && n.role === "inmate" && n.gang == null && !imp &&
+    const hasHousing = !!(n._muster || n._cellIdx != null);
+    const curfew = !!(CBZ.CONFIG && CBZ.CONFIG.NPC_SCHEDULES && n.role === "inmate" && hasHousing && !imp &&
         schedIn &&
         (!n.aiState || n.aiState === "wander" || n.aiState === "socialize"));
     if (curfew) {
@@ -254,12 +254,16 @@
         n._bedX = m ? m.x : (r ? r[0] + 0.5 + Math.random() * Math.max(1, r[1] - r[0] - 1) : gp.x);
         n._bedZ = m ? m.z : (r ? r[2] + 0.6 + Math.random() * 1.6 : gp.z);   // low-z edge = the cell-block side
       }
-      // A MAN WALKS THROUGH THE DOOR, NOT THROUGH THE WALL. The wing's only
-      // opening is the x[-3,3] throat at z = -8, so anyone still outside aims
-      // 1.8 m PAST it: a straight line from anywhere in the yard to (0,-9.8)
-      // passes through the gap, and the mover needs no path finding to do it.
-      const outside = n._muster && SCH && !SCH.inBlock(gp.x, gp.z, -0.5);
-      if (outside) n.target.set(0, 0, -9.8);
+      // A MAN WALKS THROUGH HIS UNIT'S DOOR, NOT THROUGH ITS wall. Cell-house
+      // beds route through the x[-3,3] throat; a south-dorm record publishes
+      // its own north entrance. Both destinations came from the same bed claim.
+      const outside = n._muster && SCH && (SCH.inAssignedHousing
+        ? !SCH.inAssignedHousing(n, gp.x, gp.z, -0.5)
+        : !SCH.inBlock(gp.x, gp.z, -0.5));
+      if (outside) {
+        const route = n._muster.route;
+        n.target.set(route ? route.x : 0, 0, route ? route.z : -9.8);
+      }
       else n.target.set(n._bedX, 0, n._bedZ);
       const bdx = n.target.x - gp.x, bdz = n.target.z - gp.z;
       if (!outside && bdx * bdx + bdz * bdz < 1.2) n.pause = Math.max(n.pause || 0, 2.0); // settled in for the night

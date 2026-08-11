@@ -43,6 +43,42 @@ const subjects = [
     focus: "Inside the block: cells, bunks, and the aisle vent. Bunks should read as usable furniture, not painted boxes; any leftover loot chest is a bug.",
     act: {},
     cam: { x: -6, y: 2.1, z: -31, ax: -16, ay: 0.9, az: -31 } },
+  { id: "venue-door-closed", label: "STEP 1 · Housing-unit gate · closed", hud: false,
+    focus: "Spawn-side view of the checkpoint between housing and the yard. The opening needs one coherent leaf, a structural frame, and wall-mounted access control.",
+    act: { yardDoor: "closed", secs: 0.1 },
+    cam: { x: 0.0, y: 2.85, z: -17.0, ax: 0, ay: 1.75, az: -8 } },
+  { id: "venue-door-open", label: "STEP 1 · Housing-unit gate · open", hud: false,
+    focus: "The same checkpoint after opening. Every leaf fitting must travel with the leaf; reader and jamb stay on the wall; the route stays clear.",
+    act: { yardDoor: "open", secs: 1.2 },
+    cam: { x: 0.0, y: 2.85, z: -17.0, ax: 0, ay: 1.75, az: -8 } },
+  { id: "venue-armory-rack", label: "STEP 2 · Armory issue rack", hud: false,
+    focus: "All issued weapons should be bare display models, physically supported by their rack, readable through the excellent armory gate.",
+    act: {},
+    cam: { x: 20.3, y: 2.25, z: 1.0, ax: 27.2, ay: 1.8, az: 1.0 } },
+  { id: "venue-armory-rack-detail", label: "STEP 2 · Armory rack · seating detail", hud: false,
+    focus: "Close inspection of hands, intersections, shelf contact, muzzle direction, and individual retention hardware.",
+    act: {},
+    cam: { x: 24.1, y: 2.1, z: 0.8, ax: 27.3, ay: 1.75, az: 0.8 } },
+  { id: "venue-bunk-lower", label: "STEP 3 · Lower bunk · inmate asleep", hud: false,
+    focus: "A real inmate placed by the shared bed solve. Head belongs on the pillow, body on the mattress, limbs inside the frame, and no standing overlap.",
+    act: { poseBed: "lower" },
+    cam: { x: -8.95, y: 1.58, z: -41.55, ax: -12.15, ay: 0.90, az: -41.55 } },
+  { id: "venue-bunk-upper", label: "STEP 3 · Upper bunk · inmate asleep", hud: false,
+    focus: "The same body on the upper rack. Mattress height, rail clearance, pillow alignment, and the lying pose must agree.",
+    act: { poseBed: "upper" },
+    cam: { x: -8.95, y: 2.72, z: -41.55, ax: -12.15, ay: 2.04, az: -41.55 } },
+  { id: "venue-dayroom-seat", label: "STEP 3 · Dayroom table · inmate seated", hud: false,
+    focus: "An inmate uses a bolted dayroom table: hips on the stool, feet on the floor, body facing the table, circulation lane still open.",
+    act: { poseSeat: true },
+    cam: { x: -2.3, y: 1.85, z: -21.9, ax: -6.6, ay: 0.76, az: -26.0 } },
+  { id: "venue-housing-overflow", label: "STEP 3 · Housing and dayroom zoning", hud: false,
+    focus: "Sleep space must be inside housing, not loose bedding scattered through the dayroom or the route to the yard gate.",
+    act: { secs: 0.1 },
+    cam: { x: 0, y: 5.4, z: -11.2, ax: 0, ay: 0.65, az: -28.0 } },
+  { id: "venue-south-dorm", label: "STEP 3 · Overflow housing unit", hud: false,
+    focus: "The exact sixteen-bed shortfall becomes a controlled dorm: observable entrance, clear aisle, real double bunks, sanitation, and usable day furniture.",
+    act: {},
+    cam: { x: -33, y: 2.45, z: 107.3, ax: -33, ay: 1.25, az: 120.4 } },
   { id: "vent-mess", label: "The mess-hall vent (outside)", hud: false,
     focus: "The old cafeteria grate sat proud of an exterior wall at a hard-coded coordinate. After: nothing arbitrary on this wall.",
     act: {},
@@ -59,6 +95,10 @@ const subjects = [
     focus: "The wider lower complex — workshops, chapel, infirmary, the freedom gate. Scene quality check.",
     act: {},
     cam: { x: 0, y: 32, z: 158, ax: 0, ay: 3, az: 92 } },
+  { id: "venue-south-apron", label: "STEP 4 · Program yard and sally port", hud: false,
+    focus: "Ground-level combined scene: rooms have program, circulation has sightlines, service objects live at service rooms, and the sally port reads as transport security.",
+    act: {},
+    cam: { x: 11, y: 8.2, z: 116, ax: -2, ay: 1.2, az: 80 } },
   { id: "hud-idle", label: "The screen, just playing", hud: true,
     focus: "Six sim-seconds of ordinary play with the HUD up. Before: hints/objective prose narrating the mode at you. After: game state only.",
     act: { secs: 6 },
@@ -169,6 +209,58 @@ async function stageJail(input) {
     }
   };
 
+  if (act.yardDoor === "closed" && typeof CBZ.closeDoor === "function") {
+    try { CBZ.closeDoor(); } catch (_) {}
+  } else if (act.yardDoor === "open" && typeof CBZ.openDoor === "function") {
+    try { CBZ.openDoor(); } catch (_) {}
+  }
+  // Restore any near-lens actors hidden for the previous doorway frame.
+  for (const group of S.doorHiddenActors || []) if (group) group.visible = true;
+  S.doorHiddenActors = [];
+  // Move the live player off the doorway proof axis. The report camera is a
+  // detached inspection view, not the game camera, so its own actor should
+  // not masquerade as part of the hardware.
+  if (act.yardDoor && CBZ.player && CBZ.player.pos) {
+    CBZ.player.pos.set(8.0, 0, -14.5);
+    if (CBZ.playerChar && CBZ.playerChar.group) {
+      CBZ.playerChar.group.position.copy(CBZ.player.pos);
+      // A detached inspection camera should not render the local player's
+      // third-person rig through its near plane. The next non-door subject
+      // restores it, so this affects the proof frame only.
+      CBZ.playerChar.group.visible = false;
+    }
+  } else if (CBZ.playerChar && CBZ.playerChar.group) {
+    CBZ.playerChar.group.visible = true;
+  }
+  if (act.yardDoor && CBZ.guards) {
+    // The indoor patrol starts at the proof camera itself. Stage the same
+    // ordinary patrol beat on both builds with him beside, not inside, the lens.
+    const sentry = CBZ.guards.find((g) => g && g.group && Math.abs(g.start && g.start.x || 0) < 0.2 &&
+      Math.abs((g.start && g.start.z || 0) + 13) < 0.2);
+    if (sentry) {
+      sentry.group.position.set(5.2, 0, -14.5);
+      sentry.target && sentry.target.set && sentry.target.set(5.2, 0, -14.5);
+      sentry.pause = Math.max(sentry.pause || 0, 5);
+      if (sentry.waypoints && sentry.waypoints[0]) sentry.wi = 0;
+    }
+  }
+  if (act.yardDoor) {
+    // The proof camera is detached from gameplay. Keep any unrelated body
+    // whose origin is within the camera's near-lens bubble out of this one
+    // inspection frame; yard actors farther through the gate remain visible.
+    const actors = [
+      ...(CBZ.guards || []).map((actor) => actor && actor.group),
+      ...(CBZ.npcs || []).map((actor) => actor && actor.group),
+    ];
+    for (const group of actors) {
+      if (!group || !group.position || group === (CBZ.playerChar && CBZ.playerChar.group)) continue;
+      if (Math.hypot(group.position.x - subject.cam.x, group.position.z - subject.cam.z) < 8.5) {
+        group.visible = false;
+        S.doorHiddenActors.push(group);
+      }
+    }
+  }
+
   if (act.arm && typeof CBZ.unlockWeapon === "function") {
     for (const id of act.arm) { try { CBZ.unlockWeapon(id, { select: true }); } catch (_) {} }
   }
@@ -231,7 +323,73 @@ async function stageJail(input) {
     }
   }
   if (act.secs) step(act.secs);
+  // Character LOD can legitimately re-enable a hidden near-lens rig during
+  // the open-door simulation beat. Re-apply the inspection mask only after
+  // stepping; the yard beyond the gate is untouched.
+  if (act.yardDoor) for (const group of S.doorHiddenActors || []) if (group) group.visible = false;
   if (act.holdJumper && window.__jailSeq.jumper) holdNear(window.__jailSeq.jumper);
+
+  // Furniture proof beats use the real registered anchors and the real shared
+  // pose solver. They commit instantly only so the screenshot is the settled
+  // contact state rather than a timer's guess at the middle of an arc.
+  const visualActor = () => {
+    if (S.poseActor && S.poseActor.group && !S.poseActor.dead) return S.poseActor;
+    const resident = CBZ.cellblock && CBZ.cellblock.cells &&
+      CBZ.cellblock.cells.map((c) => c && c.owner).find((n) => n && n !== "player" && n.group && n.char && !n.dead);
+    const pool = (CBZ.npcs || []).filter((n) => n && !n._crowd && n.role === "inmate" && n.group && n.char && !n.dead);
+    S.poseActor = resident || pool[0] || null;
+    return S.poseActor;
+  };
+  const releaseVisualActor = (actor) => {
+    if (!actor) return;
+    try { if (CBZ.propWake) CBZ.propWake(actor, { instant: true }); } catch (_) {}
+    try { if (CBZ.propStand) CBZ.propStand(actor, { instant: true }); } catch (_) {}
+    if (actor._restRate != null) { actor.speed = actor._restRate; actor._restRate = null; }
+  };
+  const settleRig = (actor, n) => {
+    if (!actor || !actor.char || !CBZ.animChar) return;
+    for (let i = 0; i < (n || 90); i++) CBZ.animChar(actor.char, 0, 1 / 60);
+  };
+  if (act.poseBed) {
+    try { if (CBZ.rest && CBZ.rest.ready) CBZ.rest.ready(); } catch (_) {}
+    const actor = visualActor();
+    const cell = CBZ.cellblock && CBZ.cellblock.playerCell;
+    const bed = cell && (act.poseBed === "upper" ? cell.bedTop : cell.bed);
+    if (actor && bed && CBZ.propSleep) {
+      releaseVisualActor(actor);
+      if (bed.occupant && bed.occupant !== actor && CBZ.propWake) {
+        try { CBZ.propWake(bed.occupant, { instant: true }); } catch (_) {}
+      }
+      const entry = CBZ.propEntryPoint ? CBZ.propEntryPoint(bed) : null;
+      if (entry && entry.ok) actor.group.position.set(entry.x, bed.y || 0, entry.z);
+      if (actor.target) actor.target.copy(actor.group.position);
+      CBZ.propSleep(actor, bed, { instant: true });
+      const lie = CBZ.propLiePlace ? CBZ.propLiePlace(actor, bed, {}) : null;
+      if (lie) actor.group.position.set(lie.x, lie.y, lie.z);
+      actor.group.rotation.y = bed.face || 0;
+      actor.group.rotation.z = Math.PI / 2;
+      settleRig(actor, 120);
+      S.poseBed = bed;
+    }
+  }
+  if (act.poseSeat) {
+    try { if (CBZ.rest && CBZ.rest.ready) CBZ.rest.ready(); } catch (_) {}
+    const actor = visualActor();
+    let seat = null;
+    try { seat = CBZ.propNearestSeat && CBZ.propNearestSeat(-7.45, -25.15, 4, 0); } catch (_) {}
+    if (!seat && CBZ.propSeats) seat = CBZ.propSeats.find((s) => s && s.x < -4 && s.z < -22 && s.z > -29) || null;
+    if (actor && seat && CBZ.propSit) {
+      releaseVisualActor(actor);
+      if (seat.occupant && seat.occupant !== actor && CBZ.propStand) {
+        try { CBZ.propStand(seat.occupant, { instant: true }); } catch (_) {}
+      }
+      CBZ.propSit(actor, seat, { instant: true });
+      actor.group.position.set(seat.x, seat.y || 0, seat.z);
+      actor.group.rotation.y = seat.face || 0;
+      settleRig(actor, 120);
+      S.poseSeat = seat;
+    }
+  }
 
   // ---- measure HUD pressure with the HUD as the game left it ------------
   setHud(true);
@@ -245,6 +403,10 @@ async function stageJail(input) {
   camera.near = 0.3;
   camera.far = 20000;
   const cam = subject.cam || {};
+  // Every fixed venue frame uses a detached inspection camera. Do not let the
+  // local avatar's third-person rig intersect that lens; player-follow combat
+  // and HUD beats opt back in through cam.player.
+  if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.visible = !!cam.player;
   if (cam.player && CBZ.player && CBZ.player.pos) {
     const p = CBZ.player.pos;
     camera.position.set(p.x, p.y + (cam.up || 3), p.z + (cam.back || 8));
@@ -271,9 +433,9 @@ async function stageJail(input) {
   query("side").textContent = before ? input.beforeLabel : input.afterLabel;
   query("side").style.cssText = `position:absolute;top:22px;left:26px;padding:7px 11px;border-radius:7px;background:${before ? "#c94c4c" : "#218b60"};font-size:12px;font-weight:900;letter-spacing:.12em`;
   query("name").textContent = subject.label;
-  query("name").style.cssText = "position:absolute;top:212px;left:26px;font-size:22px;font-weight:800;letter-spacing:-.02em;max-width:340px";
+  query("name").style.cssText = "position:absolute;top:72px;left:26px;font-size:22px;font-weight:800;letter-spacing:-.02em;max-width:340px";
   query("focus").textContent = `mode ${CBZ.game.mode} · weapons ${(CBZ.weaponInventory || []).length}`;
-  query("focus").style.cssText = "position:absolute;top:244px;left:27px;color:#c0cfda;font-size:12px;font-weight:550";
+  query("focus").style.cssText = "position:absolute;top:104px;left:27px;color:#c0cfda;font-size:12px;font-weight:550";
   query("perf").textContent = ticks
     ? `sim ${ticks} ticks · avg ${(totalMs / ticks).toFixed(1)}ms · HUD ${hudChars} chars`
     : `HUD ${hudChars} chars`;
@@ -289,6 +451,15 @@ async function stageJail(input) {
     drawCalls: Number(render.calls || 0),
   };
   try {
+    if (typeof CBZ.prisonRestAudit === "function") {
+      const rest = CBZ.prisonRestAudit();
+      metrics.beds = Number(rest.beds || 0);
+      metrics.floorMats = Number(rest.mats || 0);
+      metrics.bunkStanders = Number(rest.bunkStanders || 0);
+      metrics.sleepGap = Number(rest.sleepGap || 0);
+    }
+  } catch (_) {}
+  try {
     if (typeof CBZ.jailShowAudit === "function") {
       const audit = CBZ.jailShowAudit();
       for (const key of Object.keys(audit || {})) {
@@ -297,30 +468,73 @@ async function stageJail(input) {
     }
   } catch (_) {}
 
+  // Kept in the report metadata for doorway regressions: a centreline ray is
+  // enough to identify any mesh that visually hangs in the clear opening.
+  let doorwayProbe = null;
+  if (subject.id === "venue-door-open" || subject.id === "venue-door-closed") {
+    try {
+      const ray = new T.Raycaster();
+      ray.setFromCamera(new T.Vector2(0, 0.12), camera);
+      doorwayProbe = ray.intersectObjects(CBZ.scene.children, true).slice(0, 12).map((hit) => {
+        const o = hit.object, p = new T.Vector3();
+        o.getWorldPosition(p);
+        const g = o.geometry && o.geometry.parameters || {};
+        const chain = [];
+        for (let q = o; q && chain.length < 5; q = q.parent) chain.push(q.name || q.type || "Object3D");
+        return {
+          distance: Number(hit.distance.toFixed(2)),
+          x: Number(p.x.toFixed(2)), y: Number(p.y.toFixed(2)), z: Number(p.z.toFixed(2)),
+          w: g.width == null ? null : Number(g.width),
+          h: g.height == null ? null : Number(g.height),
+          d: g.depth == null ? null : Number(g.depth),
+          color: o.material && o.material.color ? o.material.color.getHexString() : null,
+          chain: chain.join(" > "),
+        };
+      });
+    } catch (_) {}
+  }
+
   return {
     ok: true,
     captureState: CBZ.player ? CBZ.player.captureState || null : null,
+    poseDebug: S.poseActor && S.poseActor.group ? {
+      actor: S.poseActor.data && S.poseActor.data.name || S.poseActor.role || "inmate",
+      x: Number(S.poseActor.group.position.x.toFixed(2)),
+      y: Number(S.poseActor.group.position.y.toFixed(2)),
+      z: Number(S.poseActor.group.position.z.toFixed(2)),
+      roll: Number(S.poseActor.group.rotation.z.toFixed(2)),
+      bed: !!S.poseActor._propBed,
+      lie: !!S.poseActor._propLie,
+      sitting: !!(S.poseActor.char && S.poseActor.char.sitting),
+      lying: !!(S.poseActor.char && S.poseActor.char.lying),
+      bedTop: S.poseBed ? Number(S.poseBed.top || 0) : null,
+    } : null,
+    doorwayProbe,
     metrics,
   };
 }
 
 export default {
   id: "jail-scene",
-  title: "Prison Escape: Show, Don't Tell",
-  description: "The same seeded prison photographed on both builds at the same simulated seconds. Establishing shots hunt the road-through-the-jail and fake props; vent close-ups check that grates belong to their rooms; HUD beats keep the interface visible and measure hudTextChars — the narration being deleted while real guard takedowns, real punches and a real inventory strip carry the information instead.",
+  title: "Prison Escape Venue: Improvement Steps",
+  description: "The same seeded prison photographed on the deployed and local builds. Numbered pages move from the housing gate to the armory display, furniture contact and housing zoning, then the combined program yard and sally port.",
   beforeLabel: "BEFORE · DEPLOYED",
   afterLabel: "AFTER · LOCAL",
   viewport: { width: 1100, height: 680 },
   readyExpression: "window.THREE && window.CBZ && CBZ.CONFIG",
   urlParams: { seed: 90210 },
   stageTimeoutMs: 480000,
-  metricsNote: "hudTextChars = rendered HUD text at the beat (show-don't-tell is this falling while the scene still explains itself). weaponsHeld crosses the strip shot: the strip should show every weapon held.",
+  metricsNote: "Furniture pages report authored beds, loose floor mats, sleepers left standing in bunks, and any live inmate-to-bed shortfall. Combat/HUD pages retain the existing HUD and inventory gauges.",
   metrics: {
     hudTextChars: { label: "HUD text", unit: "chars", better: "lower" },
     weaponsHeld: { label: "Weapons held" },
     tickAvgMs: { label: "Sim tick avg", unit: "ms", better: "lower" },
     tickMaxMs: { label: "Sim tick worst", unit: "ms", better: "lower" },
     drawCalls: { label: "Draw calls", better: "lower" },
+    beds: { label: "Authored beds" },
+    floorMats: { label: "Dayroom floor mats", better: "lower" },
+    bunkStanders: { label: "Bodies standing in bunks", better: "lower" },
+    sleepGap: { label: "Inmates without beds", better: "lower" },
   },
   subjects,
   stage: stageJail,

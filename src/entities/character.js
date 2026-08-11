@@ -1212,9 +1212,10 @@
   };
 
   /* ---- HOW FAR A SLEEPER IS ROLLED ------------------------------------
-     propuse.js parks a lying body with group.rotation.z = π/2, which puts the
-     rig's LATERAL axis (local +X, the body's right) straight up — i.e. every
-     sleeper is on their LEFT SIDE. Rolling further is done INSIDE the rig
+     propuse.js parks a lying body with group.rotation.z = π/2, putting the
+     rig's local +X lateral side straight up. The arm sockets are semantically
+     mirrored for the chase-camera view (la is +X, ra is -X), a distinction the
+     joint pose below must preserve. Rolling further is done INSIDE the rig
      (body.rotation.y, about the body's own feet→head axis) so the placement
      machinery in propuse never has to change: +y turns the chest toward local
      +X, which is up. These two numbers are the contract, and propuse reads
@@ -1624,8 +1625,8 @@
       ch.body.rotation.y = damp(ch.body.rotation.y, roll, sr, dt);
       ch.body.rotation.z = damp(ch.body.rotation.z, br * 0.012, sr, dt);
 
-      // LEGS. The TOP leg (rl — local +X is the body's right, which the roll
-      // points at the ceiling) draws up further and its knee falls forward
+      // LEGS. The TOP leg is rl: unlike the mirrored arm sockets, legs keep
+      // semantic right on local +X. Its knee draws up and falls forward
       // across the other; the bottom leg stays long against the mattress.
       const kneeFor = (a) => Math.max(0.10, Math.min(1.95,
         a + Math.asin(Math.max(-1, Math.min(1, (THIGH / SHIN) * Math.sin(a))))));
@@ -1649,25 +1650,24 @@
       setKnee(J.rl, kneeFor(aTop), sr);
       setKnee(J.ll, kneeFor(aBot), sr);
 
-      // ARMS. The NEAR arm is the upper one (ra, the body's right): folded in
-      // against the chest, or laid down the side. The FAR arm lies along the
-      // trunk with the forearm across the belly — it is the arm the body is
-      // resting ON, so it never gets a pose that would put it inside the
-      // mattress. Both shoulders ride the breath.
+      // ARMS. The lower-side ra is rooted on local -X; positive Z carries it
+      // out of the mattress and across the chest. The upper-side la is +X and
+      // uses the opposite sign to relax inward. The old signs sent both arms
+      // farther OUTBOARD and left a detached-looking hand above the sleeper.
       if (ch.parts.ra) {
-        ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, (fold ? -0.62 : -0.14) + br * 0.020, sr, dt);
+        ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, (fold ? -0.46 : -0.14) + br * 0.020, sr, dt);
         ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, 0, sr, dt);
-        ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, (fold ? -0.44 : -0.12) + dv * 0.06, sr, dt);
+        ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, (fold ? 0.68 : 0.18) + dv * 0.06, sr, dt);
         ch.parts.ra.position.z = damp(ch.parts.ra.position.z, fold ? 0.05 : 0.02, sr, dt);
       }
-      setElbow(J.ra, fold ? -1.62 : -0.40, sr);
+      setElbow(J.ra, fold ? -1.10 : -0.40, sr);
       if (ch.parts.la) {
         ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, -0.30 + br * 0.016, sr, dt);
         ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, 0, sr, dt);
-        ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, 0.10 - dv * 0.05, sr, dt);
+        ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, -0.18 - dv * 0.05, sr, dt);
         ch.parts.la.position.z = damp(ch.parts.la.position.z, 0.04, sr, dt);
       }
-      setElbow(J.la, -0.72, sr);
+      setElbow(J.la, -0.58, sr);
 
       // HEAD. Chin tucks toward the chest (the universal sleeping curl) and
       // the crown tips toward the mattress so the cheek actually meets the

@@ -262,7 +262,20 @@
         if (j.bed) { if (okB) rec = CBZ.propRegisterBed.apply(null, j.a); }
         else if (okS) rec = CBZ.propRegisterSeat.apply(null, j.a);
       } catch (e) { rec = null; }
-      if (rec) { n++; if (j.bed) PP.beds++; else PP.seats++; if (j.own) j.own[j.slot] = rec; }
+      if (rec) {
+        n++;
+        if (j.bed) PP.beds++; else PP.seats++;
+        if (j.own) {
+          j.own[j.slot] = rec;
+          // A housing stack outside this cell row still registers through the
+          // same canonical bunk builder. Carry its unit record onto the anchor
+          // so schedules can route a body to the building that owns its bed.
+          if (j.own._housingUnit) {
+            rec._housingUnit = j.own._housingUnit;
+            rec._housingStack = j.own;
+          }
+        }
+      }
       else PP.plain++;
     }
     pendFit.length = 0;
@@ -556,6 +569,28 @@
     // `top: 0.79` matches the lower one.
     return { x: x, z: z, top: 0.79, topBunk: dbl ? 1.97 : null, along: along };
   }
+
+  /* The cell is already the venue's best furniture. South-block housing must
+     compound that owner, not redraw a cheaper bunk beside it. This is the one
+     narrow construction seam: identical frame/bedding/rail/ladder geometry,
+     identical deferred registration, and records returned on the stack that
+     drew them. world/southblock.js supplies only placement and unit ownership. */
+  const housingStacks = (CBZ.prisonHousingStacks = CBZ.prisonHousingStacks || []);
+  CBZ.prisonBunk = function (spec) {
+    spec = spec || {};
+    const stack = {
+      id: spec.id || ("housing-bunk-" + housingStacks.length),
+      _housingUnit: spec.unit || null,
+      bed: null, bedTop: null, bunk: null,
+    };
+    stack.bunk = bunkRig(stack, +spec.x || 0, +spec.z || 0, spec.along === "x" ? "x" : "z",
+      spec.double !== false, spec.blanket == null ? 0x5c6470 : spec.blanket);
+    useBed(stack.bunk.x, stack.bunk.z, stack.bunk.along, stack.bunk.top, 2.60, stack, "bed", 0);
+    if (stack.bunk.topBunk)
+      useBed(stack.bunk.x, stack.bunk.z, stack.bunk.along, stack.bunk.topBunk, 2.60, stack, "bedTop", 1.18);
+    housingStacks.push(stack);
+    return stack;
+  };
 
   // the combined steel toilet/sink every cell in the world actually has.
   // (nx,nz) points INTO the cell's back wall, so the cistern and the tap are
@@ -1196,48 +1231,22 @@
   };
 
   /* ==========================================================
-     WHAT THIS PRISON CAN SLEEP — the fact every population number owes.
+     WHAT THIS PRISON CAN SLEEP — counted from actual mattresses.
 
-     OWNER, 2026-08-09: "There's too many fucking people." He had said it
-     before: MASS_CROWD was cut 900 -> 140 for the same complaint. Cutting it
-     again would have been the third guess at a number that was never
-     answerable to anything, and that is the actual bug. Measured, the prison
-     ran ~207 bodies — 140 instanced ambient + ~55 rigs + 12 guards — set by
-     five constants in four files (MASS_CROWD, JAIL_CROWD, npc.js's 30-name
-     ROSTER, this wing's cast, guards.js's posts). Not one of them could see
-     the building.
+     The named playable cast is the population to house. Treating a 26-bed
+     cell wing as permission to scatter sixteen permanent floor mats through
+     its dayroom made the arithmetic pass and the venue fail. The compound now
+     has two authored housing units: these thirteen double cells and the
+     south-block open-bay dorm. Both call the same bunk builder above; both
+     publish the records they actually draw; every population/rest consumer
+     reads their sum.
 
-     THE BUILDING SLEEPS 26. Thirteen cells, each drawn double-bunked (the
-     top bunk gets its own bedding in bunkRig, which is what makes it a bunk
-     rather than a bed). So the yard was running at ~800% of the only housing
-     in the world — not "overcrowded", IMPOSSIBLE: there was nowhere for a
-     hundred and eighty of them to lie down.
-
-     A prison is the one place where this is a measured, litigated ratio.
-     Population is stated against DESIGN CAPACITY: Brown v. Plata (563 U.S.
-     493, 2011) put California's system at ~156k against an 85k design — about
-     185% — and the three-judge order capped it at 137.5%, which is the
-     constitutional ceiling a US prison may legally run at. So OCCUPANCY is
-     not taste; 1.85 is the worst real system anyone has had to litigate, and
-     this wing is deliberately at that end because an overcrowded prison is
-     the setting. Beyond it the number stops describing a prison.
-
-     THE LEVER IS CELLS, NOT A CONSTANT. Want a packed yard again? Build a
-     housing unit — the south block has a chow hall and a dayroom and no beds
-     at all — and the population follows on its own, everywhere, at once.
+     Design occupancy is therefore 1.0 here. Overcrowding can still be a live
+     simulation fact (the audit reports bodies minus beds), but it is no longer
+     used as a content generator that adds people or bedding to circulation.
      ========================================================== */
-  /* THE NUMBER IS COUNTED, NOT TYPED. `BUNKS_PER_CELL = 2` was a constant that
-     asserted what the wing sleeps, and for its whole life the wing drew
-     something else: four doubles and nine singles, seventeen racks against a
-     published twenty-six. A constant cannot notice that. So the capacity is
-     now a sum over the CELL RECORDS — each stack reports its own racks from
-     the mattresses bunkRig actually drew — and the only way to change this
-     prison's capacity is to change its furniture, which is the sentence the
-     block above has always ended on ("THE LEVER IS CELLS, NOT A CONSTANT").
-     `perCell` survives as a REPORTED average so anything reading it still
-     gets a number, and it is now a measurement. */
-  const OCCUPANCY = 1.85;            // design capacity multiplier — see above
-  function rackCount() {
+  const OCCUPANCY = 1.0;
+  function cellRackCount() {
     let n = 0;
     for (let i = 0; i < cells.length; i++) {
       const b = cells[i].bunk;
@@ -1246,10 +1255,19 @@
     }
     return n;
   }
+  function rackCount() {
+    let n = cellRackCount();
+    for (let i = 0; i < housingStacks.length; i++) {
+      const b = housingStacks[i] && housingStacks[i].bunk;
+      if (b) n += b.topBunk ? 2 : 1;
+    }
+    return n;
+  }
   CBZ.prisonBeds = function () {
     const beds = rackCount();
-    return { cells: cells.length, perCell: cells.length ? +(beds / cells.length).toFixed(2) : 0,
-      beds: beds, racks: beds,
+    const cellBeds = cellRackCount();
+    return { cells: cells.length, perCell: cells.length ? +(cellBeds / cells.length).toFixed(2) : 0,
+      beds: beds, racks: beds, housingStacks: housingStacks.length,
       occupancy: OCCUPANCY, houses: Math.round(beds * OCCUPANCY) };
   };
 

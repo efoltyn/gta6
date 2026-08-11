@@ -156,13 +156,14 @@ try {
     const before = new THREE.Vector3(), after = new THREE.Vector3();
     stamped.mark.getWorldPosition(before);
     CBZ.openDoor();
-    CBZ.door.mesh.position.y = CBZ.door.closedY + 8;
+    CBZ.door.mesh.position.y = CBZ.door.closedY + (CBZ.door.travel || 8);
     CBZ.door.mesh.updateWorldMatrix(true, true);
     stamped.mark.getWorldPosition(after);
     return {
       stamped: true,
       mountedOnDoor: stamped.parentArg === CBZ.door.mesh && stamped.mark.parent === CBZ.door.mesh,
       beforeY: before.y, afterY: after.y, rise: after.y - before.y,
+      travel: CBZ.door.travel || 8,
     };
   })())`));
 
@@ -174,7 +175,7 @@ try {
   if (city.afterMelee.name !== "Shotgun" || !city.afterMelee.cityHasGun || !city.afterMelee.engineArmed) failures.push("Q did not draw shared gun after melee");
   if (!city.legacyCityWeapon) failures.push("legacy city gun source of truth still populated");
   if (!(jail.muzzleDistanceFromCamera > 0.7)) failures.push("jail FPS muzzle remains at camera/face");
-  if (!doorMark.stamped || !doorMark.mountedOnDoor || Math.abs(doorMark.rise - 8) > 0.01)
+  if (!doorMark.stamped || !doorMark.mountedOnDoor || Math.abs(doorMark.rise - doorMark.travel) > 0.01)
     failures.push("Prison Escape keycard-door bullet mark did not move with the opened door");
   console.log(JSON.stringify({ city, jail, doorMark, failures }, null, 2));
   if (failures.length) process.exitCode = 1;

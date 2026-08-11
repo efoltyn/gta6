@@ -186,14 +186,19 @@
 
   // ---- the wing's NIGHT LIGHTS. A real block is not pitch black at 3 a.m.:
   //      low blue-white fittings burn all night so staff can walk the tier.
-  //      They are what keeps lights-out playable instead of a black screen,
-  //      and they are dim enough that a body two cells away is a shape.
+  //      These used to be bare 34 cm bars floating at eye height down the
+  //      centreline — including one directly inside the yard gate. They are
+  //      now small ceiling-bolted cages beside the existing main luminaires;
+  //      the light regions/pools stay at the same authored floor coordinates.
   (function wingNightLights() {
     const spots = [[0, -12], [0, -20], [0, -28], [0, -36], [-9.5, -30], [9.5, -30]];
     for (let i = 0; i < spots.length; i++) {
       const x = spots[i][0], z = spots[i][1];
-      const m = addBox(x, 2.55, z, 0.34, 0.10, 0.16, 0x2b2b2b, { cast: false });
+      addBox(x, 8.58, z, 0.44, 0.24, 0.34, 0x3c424d, { cast: false }); // ceiling backbox
+      const m = addBox(x, 8.34, z, 0.34, 0.10, 0.20, 0x2b2b2b, { cast: false });
       m.userData.mover = true;                       // keep the static batcher off it
+      for (const sx of [-1, 1])
+        addBox(x + sx * 0.19, 8.35, z, 0.04, 0.28, 0.25, 0x3c424d, { cast: false });
       const pool = new THREE.Mesh(new THREE.CircleGeometry(2.6, 14),
         new THREE.MeshBasicMaterial({ color: 0xbcd8ff, transparent: true, opacity: 0, depthWrite: false }));
       pool.rotation.x = -Math.PI / 2;
