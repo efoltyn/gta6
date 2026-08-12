@@ -13,7 +13,7 @@
       --before https://example.test/old/ --after http://127.0.0.1:4173/
 */
 
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -21,6 +21,26 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Chrome's CDP Page.printToPDF can stall after a long WebGL capture session,
+// and on some Chrome builds it can even stall again in a fresh CDP session.
+// The standalone headless print path uses a clean renderer and has proved much
+// faster for these image-heavy, already-written reports.
+async function printReportFresh(htmlPath, pdfPath) {
+  const printerDir = await mkdtemp(path.join(tmpdir(), "cbz-visual-print-"));
+  const freshPdf = path.join(printerDir, "report.pdf");
+  try {
+    await new Promise((resolve, reject) => {
+      execFile(chromeBin, [
+        "--headless=new", "--no-sandbox", "--disable-gpu",
+        "--no-pdf-header-footer", `--print-to-pdf=${freshPdf}`,
+        pathToFileURL(htmlPath).href,
+      ], { cwd: ROOT, timeout: 120000, maxBuffer: 1024 * 1024 }, (err) => err ? reject(err) : resolve());
+    });
+    await copyFile(freshPdf, pdfPath);
+  }
+  finally { await rm(printerDir, { recursive: true, force: true }).catch(() => {}); }
+}
 
 function parseArgs(argv) {
   const result = {};
@@ -55,6 +75,7 @@ if (args.help) {
     `  --width N --height N capture viewport (defaults: preset or 960x600)\n` +
     `  --only before|after  capture one side only, skip the report (fast look iteration)\n` +
     `  --no-pdf            write screenshots/HTML/metadata but skip Chrome PDF printing\n` +
+    `  --print-only        reprint an existing report.html in --out without recapturing\n` +
     `  --before-label S     override the BEFORE banner/caption (for flag-A/B runs\n` +
     `                       where --before is the same local build with ?cfg_X=0)\n` +
     `  --after-label S      override the AFTER banner/caption\n`);
@@ -117,8 +138,35 @@ const startsLocalServer = !args.after && !process.env.CBZ_VISUAL_AFTER;
 const chromeBin = process.env.CBZ_CHROME || (process.platform === "darwin"
   ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
   : "/opt/pw-browsers/chromium");
+
+// Printing an existing report needs no server, DevTools connection, or WebGL
+// capture browser. Exit before allocating any of those resources so the fresh
+// standalone renderer is genuinely fresh.
+if (args["print-only"]) {
+  const htmlPath = path.join(outputDir, "report.html");
+  const pdfPath = path.join(outputDir, "before-after.pdf");
+  await printReportFresh(htmlPath, pdfPath);
+  process.stdout.write(`\nPDF reprinted: ${pdfPath}\n`);
+  if (!args["no-open"] && process.platform === "darwin") {
+    const opener = spawn("open", [pdfPath], { detached: true, stdio: "ignore" });
+    opener.unref();
+  }
+  process.exit(0);
+}
+
 const profileDir = await mkdtemp(path.join(tmpdir(), "cbz-visual-compare-"));
 const children = [];
+let captureResourcesClosed = false;
+
+async function closeCaptureResources() {
+  if (captureResourcesClosed) return;
+  captureResourcesClosed = true;
+  if (ws && ws.readyState <= 1) ws.close();
+  for (const child of children.reverse()) {
+    if (!child.killed) child.kill("SIGTERM");
+  }
+  await rm(profileDir, { recursive: true, force: true }).catch(() => {});
+}
 
 if (startsLocalServer) {
   children.push(spawn("python3", [path.join(ROOT, "tools", "devserver.py")], {
@@ -590,28 +638,6 @@ try {
   await send("Page.enable");
   await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
 
-  // --print-only: re-print an existing run's report.html to PDF without
-  // re-shooting anything (Page.printToPDF is the one step that can time out
-  // after 20 good captures; the shots are already on disk).
-  if (args["print-only"]) {
-    const htmlPath = path.join(outputDir, "report.html");
-    pdfPath = path.join(outputDir, "before-after.pdf");
-    await send("Page.navigate", { url: pathToFileURL(htmlPath).href }, 90000);
-    const deadline = Date.now() + 30000;
-    while (Date.now() < deadline) {
-      if (await evaluate("document.readyState === 'complete' && Array.from(document.images).every((image) => image.complete && image.naturalWidth > 0)")) break;
-      await sleep(100);
-    }
-    const pdf = await send("Page.printToPDF", {
-      printBackground: true, landscape: true, preferCSSPageSize: true,
-      paperWidth: 11.69, paperHeight: 8.27,
-      marginTop: 0, marginBottom: 0, marginLeft: 0, marginRight: 0,
-    }, 600000);
-    await writeFile(pdfPath, Buffer.from(pdf.data, "base64"));
-    process.stdout.write(`\nPDF reprinted: ${pdfPath}\n`);
-    throw { _earlyExit: true };
-  }
-
   const onlySide = args.only ? String(args.only) : null;
   if (onlySide === "after") {
     const reference = reuseBeforeDir ? await reuseBeforeResult() : null;
@@ -643,37 +669,17 @@ try {
     throw { _earlyExit: true };
   }
 
-  await send("Page.navigate", { url: pathToFileURL(htmlPath).href }, 90000);
-  const reportDeadline = Date.now() + 30000;
-  while (Date.now() < reportDeadline) {
-    if (await evaluate("document.readyState === 'complete' && Array.from(document.images).every((image) => image.complete && image.naturalWidth > 0)")) break;
-    await sleep(100);
-  }
-  // 600s: sixteen-plus full-viewport PNGs can outlast the old budgets on a
-  // machine that is also simulating two cities (a 300s print once timed out
-  // AFTER 20 good captures — hence --print-only above).
-  const pdf = await send("Page.printToPDF", {
-    printBackground: true,
-    landscape: true,
-    preferCSSPageSize: true,
-    paperWidth: 11.69,
-    paperHeight: 8.27,
-    marginTop: 0,
-    marginBottom: 0,
-    marginLeft: 0,
-    marginRight: 0,
-  }, 600000);
-  await writeFile(pdfPath, Buffer.from(pdf.data, "base64"));
+  // The capture browser is carrying two complete simulated cities and is the
+  // worst possible renderer to ask for a 20-image print. Release it first,
+  // then use the same clean standalone path as --print-only.
+  await closeCaptureResources();
+  await printReportFresh(htmlPath, pdfPath);
 
   process.stdout.write(`\nVisual report complete\nPDF: ${pdfPath}\nHTML: ${htmlPath}\nShots: ${shotDir}\n`);
 } catch (err) {
   if (!err || err._earlyExit !== true) throw err;
 } finally {
-  if (ws && ws.readyState <= 1) ws.close();
-  for (const child of children.reverse()) {
-    if (!child.killed) child.kill("SIGTERM");
-  }
-  await rm(profileDir, { recursive: true, force: true }).catch(() => {});
+  await closeCaptureResources();
 }
 
 if (pdfPath && !args["no-open"] && process.platform === "darwin") {

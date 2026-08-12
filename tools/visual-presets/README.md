@@ -21,6 +21,11 @@ metadata instead of reopening the baseline build. The reuse directory and new
 output directory must differ. Run `npm run visual:compare -- --help` for the
 complete short reference.
 
+PDF output is rendered by a clean standalone Chrome process after the capture
+browser and its simulated worlds are released. `--print-only` uses that same
+path to rebuild an existing report PDF without navigating or recapturing; this
+keeps large galleries from inheriting WebGL memory or a stalled CDP printer.
+
 A preset is an ES module whose default export contains:
 
 - `id`, `title`, `description`, and optional `viewport`

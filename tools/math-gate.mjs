@@ -523,10 +523,12 @@ const PASS = `(() => {
     }
     if (CBZ.presidencyAudit) {
       const pa = CBZ.presidencyAudit();
-      out.presidency = pa.sitRoomButtons + "btn moveless=" + pa.buttonsMoveless + " terror=" + pa.terrorOrgs + " ladderCopies=" + pa.ladderCopies + " producers=" + pa.govTypeProducers;
+      out.presidency = pa.sitRoomButtons + "btn moveless=" + pa.buttonsMoveless + " office=" + pa.officeOrderZones + "/" + pa.officeOrderProps + " terror=" + pa.terrorOrgs + " ladderCopies=" + pa.ladderCopies + " producers=" + pa.govTypeProducers;
       if (pa.buttonsMoveless !== 0) out.fails.push("SITUATION ROOM BUTTON WITH NO WORLD EFFECT: " + pa.buttonsMoveless);
       if (pa.ladderCopies > 3) out.fails.push("political title ladder copies rose to " + pa.ladderCopies + " (ratchet 3, down from 8)");
       if (pa.sitRoomBuilt && pa.sitRoomButtons < 9) out.fails.push("situation room buttons fell to " + pa.sitRoomButtons);
+      if (pa.officeOrderZones !== pa.officeOrderProps || pa.officeOrderZones < 3)
+        out.fails.push("PRESIDENTIAL OFFICE PROP WITHOUT INTERACTION ZONE: " + pa.officeOrderZones + "/" + pa.officeOrderProps);
     }
     if (CBZ.captainAudit) {
       const cpt = CBZ.captainAudit();
