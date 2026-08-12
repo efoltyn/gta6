@@ -228,7 +228,7 @@
         <button class="origin-btn active" type="button" data-origin="exec"><b>The Executive</b><span>Top floor. Crash. Street. Jail if you slip.</span></button>
         <button class="origin-btn" type="button" data-origin="pilot"><b>The Pilot</b><span>You start airborne. Pick the airframe.</span></button>
         <button class="origin-btn" type="button" data-origin="racer"><b>The Racer</b><span>Back row at Diamond. Locked doors all the way to APEX.</span></button>
-        <button class="origin-btn" type="button" data-origin="captain"><b>The Captain</b><span>A diesel trawler, a crew of three, and open water.</span></button>
+        <button class="origin-btn" type="button" data-origin="captain"><b>The Captain</b><span>Your own hull, a crew, and open water. Pick the boat.</span></button>
         <button class="origin-btn" type="button" data-origin="president"><b>The President</b><span>Sworn in this morning. Wall, war, crown, or a cell.</span></button>
         <button class="origin-btn" type="button" data-origin="hustler"><b>The Hustler</b><span>A corner, $60, and a mouth on you.</span></button>
         <button class="origin-btn" type="button" data-origin="debtor"><b>The Debtor</b><span>$48,000 down. The collector is walking.</span></button>
@@ -244,6 +244,16 @@
       <div id="originPlaneWrap" class="origin-plane-wrap" style="display:none">
         <div class="origin-label origin-sublabel">CHOOSE YOUR AIRCRAFT</div>
         <div id="originPlaneSelect" class="origin-plane-select" aria-label="Choose your aircraft"></div>
+      </div>
+      <!-- CAPTAIN sub-select. The same strip, drawn by the same renderSub() in
+           systems/state.js, filled from CBZ.cityOriginBoats() — world/
+           water_hulls.js's live hull registry. That one is populated at PARSE
+           time, so unlike the aircraft list above this is the REAL fleet with
+           real lengths before a world exists, and a hull registered tomorrow
+           appears here with no edit. -->
+      <div id="originBoatWrap" class="origin-plane-wrap" style="display:none">
+        <div class="origin-label origin-sublabel">CHOOSE YOUR BOAT</div>
+        <div id="originBoatSelect" class="origin-plane-select" aria-label="Choose your boat"></div>
       </div>
       <div class="origin-hint">Every story is a roll of the same six dice — who, where, purse, arms, heat, and the opening move. Talk is YES / NO / PUNCH. <span class="kbd">U</span> switches life.</div>
       <details class="controls">
