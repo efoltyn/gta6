@@ -320,8 +320,18 @@
     // the hook (see the tvView handler) — because a thumb should not have to
     // learn that an aeroplane's inside view is a different button from a car's.
     const VIEW_BTN = pill("tvView", "VIEW", "tv-sm");
+    // SEAT is the thumb's half of [G]. It is a small utility pill in the seat
+    // you drive from and a big primary one in the seat you ride in, because in
+    // the passenger seat taking the wheel back IS the main verb.
+    const SEAT_BTN = paxOn() ? pill("tvSeat", "SEAT", "tv-sm") : "";
     let html = "";
-    if (next === "drive") {
+    if (next === "pax") {
+      // EXIT here is the door: at speed cityVehicleGetOut turns it into a jump,
+      // which is why the pill wears the verb the speed will actually produce
+      // (repainted per frame by the watcher below).
+      html = pill("tvSeat", "TAKE THE WHEEL", "tv-big tv-go") +
+        pill("tvExit", "JUMP OUT", "tv-big tv-warn") + LOOK_BTN + VIEW_BTN;
+    } else if (next === "drive") {
       html =
         '<div class="tv-car-steer">' +
           pill("tvLeft", "LEFT", "tv-big tv-steer") + pill("tvRight", "RIGHT", "tv-big tv-steer") +
@@ -330,13 +340,13 @@
           pill("tvCarBrake", "BRAKE", "tv-big tv-warn") + pill("tvGas", "GAS", "tv-big tv-go") +
         "</div>" +
         '<div class="tv-car-utils">' +
-          pill("tvTilt", "TILT OFF", "tv-sm tv-tilt") + LOOK_BTN + VIEW_BTN + pill("tvExit", "EXIT", "tv-sm") +
+          pill("tvTilt", "TILT OFF", "tv-sm tv-tilt") + SEAT_BTN + LOOK_BTN + VIEW_BTN + pill("tvExit", "EXIT", "tv-sm") +
         "</div>";
       resetTiltCenter();
     } else if (next === "boat") {
       // Boats keep the exact joystick helm the owner likes. Space is the
       // water_helm crash-stop / astern path, not a road-car service brake.
-      html = pill("tvBrake", "ASTERN", "tv-big tv-warn") + LOOK_BTN + pill("tvExit", "EXIT", "tv-sm");
+      html = pill("tvBrake", "ASTERN", "tv-big tv-warn") + SEAT_BTN + LOOK_BTN + pill("tvExit", "EXIT", "tv-sm");
     } else if (next === "armor") {
       // A TANK IS A GUN ON TRACKS AND A TRUCK IS NOT. The FIRE button is built
       // only for the turreted hull — militaryvehicles.js's own fire path refuses
@@ -371,6 +381,7 @@
     btnWrap.innerHTML = html;
     const q = (id) => btnWrap.querySelector("#" + id);
     if (q("tvExit")) tapBtn(q("tvExit"), doExit);
+    if (q("tvSeat")) tapBtn(q("tvSeat"), () => { if (CBZ.citySeatShift) CBZ.citySeatShift(); });
     if (q("tvBrake")) holdBtn(q("tvBrake"), " ");
     if (q("tvLeft")) holdBtn(q("tvLeft"), "a");
     if (q("tvRight")) holdBtn(q("tvRight"), "d");
@@ -514,9 +525,18 @@
     if (car._playerCarFeel) return !!car._playerCarFeel.marine;
     return !!(car._hullSpec || (car.model && car.model.body === "boat"));
   }
+  // city/passengerseat.js, feature-detected end to end: without that file the
+  // SEAT pill is never built and this layer is byte-identical to before.
+  const paxOn = () => !!(CBZ.citySeatShift && (!CBZ.CONFIG || CBZ.CONFIG.PASSENGER_SEAT_V1 !== false));
   function rideMode(P) {
     if (!P) return "";
     if (P._aircraft) return P._aircraft.kind === "heli" ? "heli" : "wing";
+    /* RIDING SHOTGUN IS ITS OWN CONTEXT. A thumb column with GAS, BRAKE, LEFT
+       and RIGHT on it while nobody is driving is four buttons that lie, and
+       hiding them one by one leaves a car layout with a hole in it. One
+       context, three honest verbs: take the wheel, jump out, look back. Same
+       for a hull — you are not at the helm, so there is no ASTERN. */
+    if (paxOn() && CBZ.cityPaxRiding && CBZ.cityPaxRiding()) return "pax";
     if (P.driving && P._vehicle) return marine(P._vehicle) ? "boat" : "drive";
     return "";
   }
@@ -538,6 +558,11 @@
     // P._vehicle, so cityExitVehicle has nothing to step out of — it was the
     // one seat in the game a thumb could enter and not leave.
     else if (armorOn() && CBZ.cityExitArmor) CBZ.cityExitArmor();
+    // THE DOOR, NOT THE HANDBRAKE. Above walking pace this is a jump — the
+    // same split [E]/[F] gets on a keyboard, because a thumb should never be
+    // offered a different physics from a finger. Falls back to the plain exit
+    // when city/passengerseat.js is absent.
+    else if (P.driving && CBZ.cityVehicleGetOut) CBZ.cityVehicleGetOut();
     else if (P.driving && CBZ.cityExitVehicle) CBZ.cityExitVehicle();
   }
   function doFire() {
@@ -721,9 +746,26 @@
       // in the aux rail and leaves #tbtns exactly where it is.
       document.body.classList.toggle("tveh-on", !!next && next !== "mount");
       document.body.classList.toggle("tveh-car", next === "drive");
+      /* A PASSENGER HAS NO STICK EITHER. A joystick in the shotgun seat moves
+         nothing — the same lie the GAS pedal would be — so the stick stands
+         down. Its own class rather than `.tveh-car`, because that class ALSO
+         re-places the dial for the car's two-column pedal grid and the
+         passenger set is an ordinary column. */
+      document.body.classList.toggle("tveh-pax", next === "pax");
     }
     if (!next) return;
 
+    // THE EXIT PILL WEARS THE VERB IT WILL ACTUALLY PRODUCE. Standing still it
+    // is a step out; at speed the same tap throws you through the door, and a
+    // button that does not say which of those is about to happen is the pill
+    // version of an unlabelled key.
+    const xb = btnWrap.querySelector("#tvExit");
+    if (xb && paxOn() && (mode === "drive" || mode === "boat" || mode === "pax")) {
+      const v = Math.abs((P._vehicle && P._vehicle.v) || 0);
+      const want = (v > 2.4 && CBZ.CONFIG.VEHICLE_BAIL !== false) ? "JUMP OUT" : "EXIT";
+      if (xb.textContent !== want) xb.textContent = want;
+      xb.classList.toggle("tv-warn", want === "JUMP OUT");
+    }
     // LOOK BACK appears only once the camera agent's API exists (merge-order safe)
     const lb = btnWrap.querySelector("#tvLook");
     if (lb) {

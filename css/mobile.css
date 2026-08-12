@@ -364,6 +364,10 @@ body.touch #interact .iopt.tverb.tno .ilab { font-size: 13.5px; font-weight: 700
    the left and brake/gas pedals on the right. Boats and aircraft never receive
    .tveh-car, so every existing joystick layout remains byte-for-byte intact. */
 body.tveh-car #tstick { display: none !important; }
+/* THE SHOTGUN SEAT (city/passengerseat.js): nobody is steering, so the stick
+   goes with the pedals. It keeps its own class rather than borrowing
+   .tveh-car, whose other job is re-placing the dial for the pedal grid. */
+body.tveh-pax #tstick { display: none !important; }
 #tveh #tvBtns.tv-car { display: block; }
 #tveh #tvBtns.tv-car .tv-car-steer {
   position: fixed; display: flex; gap: 10px;

@@ -1470,7 +1470,24 @@
     label: (car) => aboard(car) > 1 ? "Drag them out (" + aboard(car) + " aboard)" : "Drag the driver out",
     onSelect: (car) => CBZ.cityEnterVehicle(car),
   });
-  I.register("vehicle:inside", { id: "car-out", slot: "e", canShow: (car, ctx) => ctx.driving && ctx.vehicle === car, label: "Step out", onSelect: () => CBZ.cityExitVehicle() });
+  // Above walking pace this is a JUMP, and the label says so before you press
+  // it (city/passengerseat.js owns the split; feature-detected both ways).
+  const rideSpeed = (car) => Math.abs((car && car.v) || 0);
+  I.register("vehicle:inside", {
+    id: "car-out", slot: "e",
+    canShow: (car, ctx) => ctx.driving && ctx.vehicle === car,
+    label: (car) => (CBZ.cityVehicleGetOut && rideSpeed(car) > 2.4) ? "Jump out" : "Step out",
+    onSelect: () => { if (CBZ.cityVehicleGetOut) CBZ.cityVehicleGetOut(); else CBZ.cityExitVehicle(); },
+  });
+  /* NO SEAT-SWAP ROW LIVES HERE, ON PURPOSE. This is where a verb belongs,
+     but read interactions.js's SILENT_RIDE fold first: "vehicle:inside" is in
+     that set, so while you are driving the whole card is hidden and NONE of
+     these rows reaches a key or a pill — including the three below it
+     ("Let them out", "Everyone out", "run it to the warehouse"). Registering
+     a seat-swap on one of their slots would therefore buy nothing today and
+     SHADOW a hostage-release verb the day that fold learns to admit in-car
+     crew verbs. The live controls are [G] and the touch SEAT pill, both owned
+     by city/passengerseat.js, which is also where that gap is written up. */
   // SOMEBODY IS STILL IN THE BACK. A passenger who froze when you took the car
   // is riding with you, and once you have driven off he is a hostage on the
   // record (vehicles.js files it through social.js's own hostage entry). The

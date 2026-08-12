@@ -3595,3 +3595,135 @@ thing under test and the check must not share its blind spots. `overlapPeak` ·
 `embedded` · `blindFire` · `throughMate` · `stuck` all pinned at 0.
 `--revert` (`?sep=old&fire=old`) asserts they come back: 3 overlapping pairs and
 214 ghost rounds. A fix nobody can turn off has not been measured.
+
+## 2026-08-12 — THERE WAS ONE SEAT IN A CAR AND IT WAS THE DRIVER'S
+
+Owner: *"When in vehicles in gang city like boat plane car etc on desktop a
+button should move me to passenger and same with touch and then if I go to the
+door I can eve jump out etc."*
+
+Two sentences, and both of them name the same shape of fault: the vehicle had a
+cabin full of chairs and exactly one of them was reachable.
+
+### The other seat existed, for everybody except you
+
+`cityEnterVehicle` sets `P.driving`; vehicles.js's CAR_DRIVER_VISIBLE block
+seats the player's real dressed rig at `+ci.seatX` and animates it; boarding.js
+walks companions, hostages and cuffed captives to the other three chairs and
+seats them where you can see them through the glass. `carCabinInfo` has
+published `seatX` — the seat HALF-TRACK, i.e. the distance either side of the
+centreline — since the cabin wave. Nothing had to be built to sit in the
+passenger seat; a sign had to be flipped.
+
+    seat solve            +ci.seatX  ->  -ci.seatX      (seatSideX)
+    hands on the wheel    driveSteer eases to 0, because there is no wheel
+
+The controls are the other half, and they are not gated in four places. The
+driving loop reads its keys out of a **frozen empty object**, so `k["w"]`,
+`k["s"]`, `k["a"]`, `k["d"]` and `k[" "]` are all false and the car runs the
+coast-and-friction branch it already owns for a driver who is touching nothing.
+Nobody is driving, so it rolls to a stop. That is not a special case, it is the
+arithmetic. `water_helm.js`'s hull loop takes the same empty bag in one line.
+The player stays `P.driving` with the same `P._vehicle` throughout, so the
+camera, the HUD, the minimap, the fuel burn, the audio, the damage stager and
+every exit path keep believing exactly what they already believed.
+
+### Getting out was a parking manoeuvre
+
+`cityExitVehicle` reads, in order, `car.v = 0; car.vx = car.vz = 0` and then
+stands you 1.6 m off the driver's flank. **Measured before this wave:** a
+Ferrari at 26 m/s, one press of the step-out verb —
+
+    car speed after the exit    0.00 m/s     distance it then travelled   0.0 m
+    player damage                    0       player airborne              no
+
+— the car stationary on the same frame, the player standing beside it unhurt.
+That is a handbrake with a teleport attached, and it is why the second half of
+the ask was impossible. Both halves of a real jump already shipped, in two
+places nobody had connected:
+
+  * **the body** — `CBZ.body.fling` (systems/grapple.js) is the shared launch a
+    blast, a throw and a disaster all use. It sets `_phys.air`, and from that
+    frame systems/physics.js owns the body: it integrates the tumble, lands it,
+    and pins `_phys.down` so you lie there before getting up. We choose a
+    direction (the car's own velocity, plus outward through the door) and a
+    force, and write nothing else.
+  * **the car** — vehicles.js's AI loop has had a driverless-motion path since
+    the day a cop could shoot a driver at the wheel: `wreckT` bleeds speed,
+    slides real lateral momentum against the real surface, collides with
+    buildings, crumples on a hard hit and settles as abandoned.
+
+The second one was locked behind `c.ai && c.road`, and **a car you have been
+driving has neither** — driving clears the AI flag and promotion clears the
+lane. So the whole path was unreachable from the one situation that most wanted
+it. `_runaway` opens that same branch to a car whose driver simply left, with a
+coast decay of 0.62/s instead of a spin-out's 0.04/s scrub, because nothing hit
+it. Measured after: **left at 26 m/s, ran 37.8 m on its own in two and a half
+seconds; and with the player merely riding rather than jumping, a car set
+rolling at 22 m/s covered 124.7 m and stopped at exactly 0.**
+
+    speed the car kept   0 -> 26 m/s     ground it covered in 2.5 s   0 -> 37.8 m
+
+Below walking pace (2.4 m/s) the same verb is the ordinary step-out, undamaged,
+and a passenger steps out onto the kerb rather than through the driver — the
+exit offset is mirrored by the same sign the seat is. The door swings open as
+you go through it: boarding.js's own leaf, posed through a seam it already
+sweeps, so *"a car door is only ever open because somebody is going through it"*
+stays structurally true rather than becoming a promise.
+
+### The verb was routed, not wrapped
+
+`cityExitVehicle` is also how a mission, a chop shop, a sold car, a drowned
+engine and a death put you on the pavement, and none of those is you deciding
+to throw yourself out of a moving door. So the split lives on the INPUT paths —
+`cityTryNearestRide` (the [E]/[F] router), the touch EXIT pill and the interact
+row all call `CBZ.cityVehicleGetOut()` — and every programmatic caller keeps the
+exit it has always had.
+
+### "Have them run it to the warehouse" put you on the kerb
+
+boarding.js's companion errand opened with `cityExitVehicle()`: it threw you out
+and drove off with your money. It now slides you into the shotgun seat, which is
+what handing somebody the keys has always meant. Its driver loop then becomes
+the only integrator on that car — vehicles.js's player loop stands down for the
+frame (`cityPaxChauffeured`) rather than moving the car twice — and the
+passenger file re-seats the rig, the player position and the camera behind it.
+
+### [G], because it was already dead in this seat
+
+The doctrine is that verbs live in the interaction registry, and the registry
+deliberately shows no card while you are in a vehicle (`SILENT_RIDE`) — a ride
+is a thing you press E to take, not a menu. So an in-vehicle toggle is a key,
+exactly as [C] cycles the body style and [V] swaps to the driver's-seat view.
+[G] is the one letter already dead in this seat **by design rather than by
+luck**: city/combat.js's grenade throw refuses outright while
+`CBZ.player.driving`, which covers cars, boats and aircraft alike. On touch it
+is a SEAT pill in the drive/boat sets and a whole context of its own — TAKE THE
+WHEEL / JUMP OUT — once you are riding, because a thumb column with GAS, BRAKE,
+LEFT and RIGHT on it while nobody is driving is four buttons that lie. The EXIT
+pill repaints itself JUMP OUT above walking pace, so the button says which of
+the two things it is about to do.
+
+### The aircraft gap is declared, not faked
+
+A plane is not a `P._vehicle`; it is `P._aircraft`, flown by playeraircraft.js,
+and its passenger deck is a different already-built thing — `CBZ.vehicleHold`'s
+walk-in room and island_airport's cabin seats, which ticketing.js already rides
+you across the map in. Leaving the controls in the air is bailout.js's subject
+and it answers it well (the graveyard spiral, or *"someone else has the
+controls"* when there is a crew). Wiring a ride-in-the-cabin state to a machine
+the player is flying is that file's wave, not this one's. `PAX_AIRCRAFT` is
+declared and OFF, the button says so out loud, and the audit reports it —
+FORT_CONVOY's precedent.
+
+### The instrument
+
+`tools/passenger-check.mjs` boots headless once and drives the real sim with
+`CBZ.stepSim`. The ratchet is `ghostThrottle`: frames on which the player was a
+passenger, with nobody at the wheel, and the vehicle GAINED speed anyway. A dead
+keyboard that is not actually dead is the entire failure mode of doing this with
+a sign instead of a mode, so it is measured directly and pinned at **0** — from
+the audit's own counter and again from outside, against measured speed.
+`orphanRides` is pinned at 0. `--revert` (`?cfg_PASSENGER_SEAT_V1=0`) asserts
+the old world comes back: the seat verb refuses, holding W drives the car, and
+stepping out at speed parks it on the spot.
