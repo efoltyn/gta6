@@ -10,6 +10,42 @@
    BEFORE side. Hull, seed, viewport, light, waterline and camera are held
    constant; production source is the variable. */
 
+const superSpecs = [
+  { key: "yacht46", name: "Verano 150", tiers: 2, garage: false },
+  { key: "yacht88", name: "Corveline 290", tiers: 3, garage: true },
+  { key: "yacht156", name: "Vosswerft Aurora 512", tiers: 4, garage: true },
+];
+let superPlate = 33;
+const superSubjects = superSpecs.flatMap((spec) => {
+  const out = [];
+  const bridgeTier = Math.max(1, spec.tiers - 1);
+  for (let tier = 0; tier <= spec.tiers; tier++) {
+    const room = tier === 0 ? "super-saloon" : (tier === bridgeTier ? "super-bridge" : `super-tier-${tier}`);
+    const roomName = tier === 0 ? "main saloon" : (tier === bridgeTier ? "bridge" : (tier === spec.tiers ? "observation lounge" : `upper lounge ${tier}`));
+    out.push({
+      id: `${spec.key}-${room.replace("super-", "")}`,
+      key: spec.key,
+      kind: "room",
+      room,
+      label: `${superPlate++} · ${spec.name} — ${roomName}`,
+      focus: tier === bridgeTier
+        ? "Bridge from behind the chairs: human-sized console bays, navigation displays, charting, glazing and bridge-wing access."
+        : "This complete enclosed deck tier needs distinct lounge/dining anatomy, human-scale furniture, lighting, glazing, an open aisle and a real doorway.",
+    });
+  }
+  if (spec.garage) {
+    ["port", "starboard"].forEach((side) => out.push({
+      id: `${spec.key}-garage-${side}`,
+      key: spec.key,
+      kind: "room",
+      room: `super-garage-${side}`,
+      label: `${superPlate++} · ${spec.name} — ${side} garage`,
+      focus: `${side[0].toUpperCase()}${side.slice(1)} side-shell garage: tender, cradle, sole, service locker, lighting and launch door must form one supported room.`,
+    }));
+  }
+  return out;
+});
+
 const subjects = [
   // Every canonical marine-hull registry row, exactly once from outside.
   { id: "captain-trawler-exterior", key: "trawler", liveCaptain: true, kind: "exterior", label: "01 · Captain flagship — Bergen Fisher 60", focus: "The actual Captain-origin trawler with its live crew and fittings. Judge hull sheer, wheelhouse, gantry, mast support, work-deck hierarchy, and whether every vertical element visibly lands on structure." },
@@ -53,17 +89,9 @@ const subjects = [
   { id: "sloop-cabin", key: "sloop", kind: "room", room: "sloop-cabin", label: "31 · Marlow 44 — cabin", focus: "Standing/seated eye below the coachroof. Berth, table, galley, navigation seat and companionway must use the small volume honestly." },
   { id: "sloop-rig", key: "sloop", kind: "room", room: "sloop-rig", label: "32 · Marlow 44 — mast and standing rigging", focus: "Close rig inspection: mast foot, boom gooseneck, forestay, backstay and furled sails must meet real endpoints." },
 
-  // The procedural superyacht builder exposes the same three enclosed room
-  // classes at each scale; photographing all three boats catches scale drift.
-  ...["yacht46", "yacht88", "yacht156"].flatMap((key, i) => {
-    const names = ["Verano 150", "Corveline 290", "Vosswerft Aurora 512"];
-    const n = 33 + i * 3;
-    return [
-      { id: `${key}-saloon`, key, kind: "room", room: "super-saloon", label: `${n} · ${names[i]} — main saloon`, focus: "Main saloon at human eye height: lounge, dining, bar/galley, glazing, doors and circulation must scale with the hull." },
-      { id: `${key}-bridge`, key, kind: "room", room: "super-bridge", label: `${n + 1} · ${names[i]} — bridge`, focus: "Bridge from behind the chairs: believable console depth, navigation displays, wheel, glazing and bridge-wing access." },
-      { id: `${key}-garage`, key, kind: "room", room: "super-garage", label: `${n + 2} · ${names[i]} — tender garage`, focus: "Side-shell garage from inside: tender cradle, structural deck, door and launch opening must read as one room." },
-    ];
-  }),
+  // Every enclosed tier on every procedural superyacht, plus both physical
+  // side-shell garages where the solve actually creates them.
+  ...superSubjects,
 ];
 
 async function stageCaptainFleet(input) {
@@ -184,7 +212,14 @@ async function stageCaptainFleet(input) {
   if (sub.liveCaptain) {
     const boat = await ensureCaptain();
     if (boat && boat.group) {
-      try { root = boat.group.clone(true); actualCaptain = true; } catch (_) { root = null; }
+      // Use the actual runtime graph. A recursive Object3D.clone() is not an
+      // honest option here: crew/hold nodes carry circular ownership records
+      // in userData, and JSON-cloning those records either throws or silently
+      // drops the very Captain fittings this plate exists to inspect. The sim
+      // is frozen, so reparenting the live graph into the studio is safe and
+      // preserves every attached body, chart, gate and cargo node verbatim.
+      root = boat.group;
+      actualCaptain = true;
     }
   }
   if (!root) {
@@ -211,50 +246,62 @@ async function stageCaptainFleet(input) {
 
   const roomCamera = (room) => {
     const fixed = {
-      "captain-workdeck": { pos: [4.5, 5.2, -8.6], target: [0, 3.0, -3.2], fov: 54 },
-      "captain-wheelhouse": { pos: [-1.35, 3.92, 1.55], target: [0.35, 3.70, 4.25], fov: 61 },
-      "captain-hold": { pos: [0.25, 4.25, -8.15], target: [0, 2.95, -3.65], fov: 60 },
-      "dinghy-helm": { pos: [-0.88, 1.18, -1.55], target: [0, 0.62, 0.18], fov: 61 },
+      "captain-workdeck": { pos: [0, 4.92, 0.62], target: [0, 2.82, -6.55], fov: 56 },
+      "captain-wheelhouse": { pos: [0, 3.84, 1.55], target: [0, 3.46, 4.26], fov: 56 },
+      "captain-hold": { pos: [0, 3.62, -6.15], target: [0, 2.78, -2.75], fov: 59 },
+      "dinghy-helm": { pos: [0, 1.14, -1.42], target: [0, 0.62, 0.18], fov: 61 },
       "speedboat-cockpit": { pos: [-1.28, 1.62, -2.55], target: [0, 1.02, 0.05], fov: 62 },
       "skiff-helm": { pos: [-1.02, 1.43, -1.75], target: [0, 0.76, 0.22], fov: 61 },
       "cruiser-cockpit": { pos: [1.72, 2.72, -6.85], target: [0, 1.85, -3.65], fov: 59 },
-      "cruiser-saloon": { pos: [-0.92, 2.62, -1.78], target: [0, 2.20, 2.25], fov: 64 },
-      "cruiser-flybridge": { pos: [-1.38, 4.88, -1.62], target: [0, 4.42, 1.92], fov: 59 },
-      "yacht34-saloon": { pos: [-1.72, 4.05, -7.85], target: [0, 3.60, -0.65], fov: 66 },
-      "yacht34-skylounge": { pos: [-1.62, 7.05, -5.75], target: [0, 6.55, 1.35], fov: 65 },
-      "yacht34-wheelhouse": { pos: [-1.42, 6.96, 4.05], target: [0, 6.48, 6.65], fov: 60 },
-      "yacht34-garage": { pos: [0, 2.12, -13.55], target: [0, 1.62, -16.08], fov: 62 },
+      "cruiser-saloon": { pos: [0, 2.48, -1.78], target: [0, 2.18, 1.95], fov: 59 },
+      "cruiser-flybridge": { pos: [0, 4.82, -1.48], target: [0, 4.36, 1.92], fov: 59 },
+      "yacht34-saloon": { pos: [0, 3.78, -6.92], target: [0.18, 3.38, -1.35], fov: 59 },
+      "yacht34-skylounge": { pos: [0, 6.82, -4.98], target: [0.15, 6.42, -1.15], fov: 59 },
+      "yacht34-wheelhouse": { pos: [0, 6.88, 3.35], target: [0, 6.46, 5.72], fov: 56 },
+      "yacht34-garage": { pos: [2.55, 2.18, -13.85], target: [0, 1.50, -15.20], fov: 63 },
       "yacht34-sundeck": { pos: [-3.25, 10.65, -5.25], target: [0, 8.78, 0.15], fov: 61 },
       "sportfish-cockpit": { pos: [1.70, 2.86, -5.92], target: [0, 2.05, -3.28], fov: 60 },
-      "sportfish-saloon": { pos: [-1.10, 2.86, -1.36], target: [0, 2.42, 1.62], fov: 63 },
+      "sportfish-saloon": { pos: [0, 2.72, -1.34], target: [0, 2.35, 1.68], fov: 59 },
       "sportfish-flybridge": { pos: [-1.32, 4.78, -1.40], target: [0, 4.15, 1.72], fov: 59 },
       "sportfish-tower": { pos: [2.28, 6.42, -0.92], target: [0, 6.00, 0.92], fov: 55 },
       "sloop-cockpit": { pos: [1.52, 2.32, -5.55], target: [0, 1.62, -3.05], fov: 60 },
-      "sloop-cabin": { pos: [-1.05, 1.98, -0.82], target: [0, 1.58, 2.62], fov: 65 },
+      "sloop-cabin": { pos: [-0.62, 1.55, -0.72], target: [0.20, 1.08, 2.35], fov: 59 },
       "sloop-rig": { pos: [7.8, 9.0, -7.8], target: [0, 8.4, 1.35], fov: 45 },
     };
     if (fixed[room]) return fixed[room];
     if (solve && room === "super-saloon") {
       const z0 = solve.supZ0[0], span = Math.abs(solve.supZ1[0] - z0);
-      return { pos: [-Math.min(2.4, beam * 0.12), solve.deckY[0] + 1.68, z0 + Math.min(2.2, span * 0.12)], target: [0, solve.deckY[0] + 1.32, z0 + Math.min(9, span * 0.48)], fov: 64 };
+      return { pos: [-Math.min(1.4, beam * 0.08), solve.deckY[0] + 1.62, z0 + Math.min(1.45, span * 0.08)], target: [Math.min(0.6, beam * 0.04), solve.deckY[0] + 1.18, z0 + Math.min(5.5, span * 0.30)], fov: 58 };
     }
     if (solve && room === "super-bridge") {
       const tier = Math.max(1, solve.tiers - 1), y = solve.deckY[tier], z = solve.supZ1[tier];
-      return { pos: [-Math.min(2.4, beam * 0.10), y + 1.72, z - loa * 0.090], target: [0, y + 1.35, z - loa * 0.032], fov: 61 };
+      const consoleZ = z - Math.max(1.65, Math.min(4.25, 0.032 * loa));
+      return { pos: [-Math.min(1.6, beam * 0.08), y + 1.66, consoleZ - 3.0], target: [0, y + 1.20, consoleZ], fov: 57 };
     }
-    if (solve && room === "super-garage" && solve.garage) {
+    if (solve && /^super-tier-\d+$/.test(room)) {
+      const tier = Math.max(1, Math.min(solve.tiers, Number(room.split("-").pop()) || 1));
+      const z0 = solve.supZ0[tier], span = Math.abs(solve.supZ1[tier] - z0), y = solve.deckY[tier];
+      return { pos: [-Math.min(1.4, beam * 0.08), y + 1.62, z0 + Math.min(1.45, span * 0.08)], target: [Math.min(0.6, beam * 0.04), y + 1.18, z0 + Math.min(5.5, span * 0.30)], fov: 58 };
+    }
+    if (solve && /^super-garage-(port|starboard)$/.test(room) && solve.garage) {
       const G = solve.garage;
-      return { pos: [0, G.y + 1.55, G.z - G.len * 0.31], target: [-(solve.halfBeam - 1.5), G.y + 1.05, G.z], fov: 63 };
+      const side = room.endsWith("port") ? 1 : -1;
+      const bayDepth = Math.max(3.2, Math.min(6.6, 0.060 * loa));
+      return {
+        pos: [side * (solve.halfBeam - 0.58), G.y + Math.min(1.48, G.h * 0.54), G.z - G.len * 0.34],
+        target: [side * (solve.halfBeam - bayDepth * 0.55), G.y + Math.min(0.92, G.h * 0.36), G.z],
+        fov: 64,
+      };
     }
     return { pos: [-beam * 0.7, Math.max(1.6, height * 0.35), -loa * 0.35], target: [0, Math.max(1, height * 0.24), 0], fov: 58 };
   };
 
   let desired;
   if (sub.kind === "exterior") {
-    const distance = Math.max(loa * 0.82, beam * 3.5, 6.5);
+    const distance = Math.max(loa * 0.82, beam * 3.5, height * 1.45, 6.5);
     desired = {
-      pos: [distance * 0.72, Math.max(2.2, height * 0.48), -distance * 0.72],
-      target: [0, Math.max(0.45, height * 0.28), 0], fov: loa > 80 ? 35 : 39,
+      pos: [distance * 0.72, Math.max(2.2, height * 0.60), -distance * 0.72],
+      target: [0, Math.max(0.45, height * 0.37), 0], fov: loa > 80 ? 35 : 39,
     };
   } else desired = roomCamera(sub.room);
   const ref = input.referenceStage && input.referenceStage.camera;
@@ -283,7 +330,11 @@ async function stageCaptainFleet(input) {
   });
   root.traverse((o) => {
     if (o.userData && Array.isArray(o.userData.marineRooms)) rooms = Math.max(rooms, o.userData.marineRooms.length);
-    if (o.userData && o.userData.marineRigAudit && Number.isFinite(Number(o.userData.marineRigAudit.gaps))) rigGaps += Number(o.userData.marineRigAudit.gaps);
+    if (o.userData && Number.isFinite(Number(o.userData.marineFixtureCount))) fixtures = Math.max(fixtures, Number(o.userData.marineFixtureCount));
+    if (o.userData && o.userData.marineRigAudit) {
+      if (Number.isFinite(Number(o.userData.marineRigAudit.anchors))) rigAnchors = Math.max(rigAnchors, Number(o.userData.marineRigAudit.anchors));
+      if (Number.isFinite(Number(o.userData.marineRigAudit.gaps))) rigGaps = Math.max(rigGaps, Number(o.userData.marineRigAudit.gaps));
+    }
   });
 
   const side = ST.overlay.querySelector("[data-side]");
@@ -298,7 +349,7 @@ async function stageCaptainFleet(input) {
   name.style.cssText = "position:absolute;left:24px;top:66px;font-size:27px;font-weight:900";
   focus.textContent = sub.focus || "Inspect structure, scale and room anatomy.";
   focus.style.cssText = "position:absolute;left:25px;top:105px;max-width:650px;color:#d5e2e8;font-size:13px;line-height:1.35";
-  state.textContent = `${sub.kind === "exterior" ? "WHOLE VESSEL" : `ROOM · ${sub.room}`} · ${round(loa, 1)} m × ${round(beam, 1)} m${actualCaptain ? " · LIVE CAPTAIN ORIGIN" : ""}`;
+  state.textContent = `${sub.kind === "exterior" ? "WHOLE VESSEL" : `ROOM · ${sub.room}`} · ${round(loa, 1)} m × ${round(beam, 1)} m${actualCaptain ? " · LIVE CAPTAIN ORIGIN" : (sub.liveCaptain && ST.bootError ? ` · FALLBACK: ${ST.bootError}` : "")}`;
   state.style.cssText = "position:absolute;left:24px;bottom:57px;padding:7px 10px;background:rgba(6,13,18,.78);border:1px solid rgba(255,255,255,.25);border-radius:6px;font:700 12px ui-monospace,SFMono-Regular,Menlo,monospace";
   detail.textContent = `${meshes} meshes · ${triangles.toLocaleString()} triangles · ${fixtures} tagged fixtures · ${rooms} declared rooms · ${rigAnchors} solved rig anchors`;
   detail.style.cssText = "position:absolute;left:24px;bottom:27px;color:#d5e2e8;font:11px ui-monospace,SFMono-Regular,Menlo,monospace";
@@ -318,8 +369,8 @@ async function stageCaptainFleet(input) {
 
 export default {
   id: "captain-fleet",
-  title: "Captain Fleet — Every Boat, Every Modelled Space",
-  description: "Eleven canonical boats and every occupied/modelled interior zone, including the real Captain-origin trawler. Exact deployed-before tripods are reused by the current checkout.",
+  title: "Captain Fleet — Every Boat, Every Room",
+  description: "Eleven canonical boats and every occupied/modelled room, including every enclosed superyacht tier, both side garages and the real Captain-origin trawler. Exact deployed-before tripods are reused by the current checkout.",
   beforeLabel: "BEFORE · DEPLOYED",
   afterLabel: "AFTER · CURRENT",
   readyExpression: "window.THREE && window.CBZ && CBZ.CONFIG && CBZ.marineHulls && CBZ.marineHulls.keys && CBZ.marineHulls.keys().length >= 11 && CBZ.captainStart",
@@ -327,7 +378,7 @@ export default {
   stageTimeoutMs: 900000,
   urlParams: { seed: "captain-fleet-2026-08-11" },
   pairNote: "Same registry row · Captain origin · seed · local tripod · waterline · light · viewport",
-  method: "Every exterior is built by CBZ.marineHulls. Captain plates boot the real Captain origin and clone its live flagship after crew, chart table and hold fittings attach. Room cameras stand inside the authored volume; the AFTER side inherits the exact BEFORE camera.",
+  method: "Every exterior is built by CBZ.marineHulls. Captain plates boot the real Captain origin and use its live flagship after crew, chart table and hold fittings attach. Room cameras stand inside every authored volume; the AFTER side inherits the exact BEFORE camera.",
   metricsNote: "Live builder census. Tagged fixtures, declared rooms and solved rig anchors intentionally start at zero on the deployed build and rise only when the production builders publish real anatomy.",
   metrics: {
     meshes: { label: "Rendered mesh nodes", better: "lower" },

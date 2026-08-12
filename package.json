@@ -17,6 +17,8 @@
     "test:wildlife-mount": "node tools/test-wildlife-mount-browser.mjs",
     "test:aquatic-mount": "node tools/test-aquatic-mount-browser.mjs",
     "test:shark-mouth": "node tools/test-shark-mouth-browser.mjs",
+    "test:battle": "node tools/battle-check.mjs",
+    "test:battle-revert": "node tools/battle-check.mjs --revert",
     "test:bailout-presentation": "node tools/test-bailout-presentation-browser.mjs",
     "visual:compare": "node tools/visual-compare.mjs",
     "visual:wildlife": "node tools/visual-compare.mjs --preset wildlife-attachments --before https://efoltyn.github.io/gta6/",
@@ -29,9 +31,11 @@
     "visual:jail": "node tools/visual-compare.mjs --preset jail-scene --keep-going --before https://efoltyn.github.io/gta6/",
     "visual:disasters": "node tools/visual-compare.mjs --preset disaster-sequence --keep-going --before https://efoltyn.github.io/gta6/",
     "visual:race-stadium": "node tools/visual-compare.mjs --preset race-stadium --before https://efoltyn.github.io/gta6/",
+    "visual:president": "node tools/visual-compare.mjs --preset president-compound --before https://efoltyn.github.io/gta6/",
     "visual:interiors": "node tools/visual-compare.mjs --preset interiors --before https://efoltyn.github.io/gta6/",
     "visual:npc-gestures": "node tools/visual-compare.mjs --preset npc-gestures --keep-going --before https://efoltyn.github.io/gta6/",
-    "visual:role-outfits": "node tools/visual-compare.mjs --preset role-outfit-gallery --keep-going --before https://efoltyn.github.io/gta6/"
+    "visual:role-outfits": "node tools/visual-compare.mjs --preset role-outfit-gallery --keep-going --before https://efoltyn.github.io/gta6/",
+    "visual:captain-fleet": "node tools/visual-compare.mjs --preset captain-fleet --keep-going --before https://efoltyn.github.io/gta6/"
   },
   "devDependencies": {
     "three": "^0.164.1",

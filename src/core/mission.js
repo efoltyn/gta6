@@ -186,18 +186,30 @@
     if (ring) { if (ring.parent) ring.parent.remove(ring); if (ring.geometry) ring.geometry.dispose(); if (ring.material) ring.material.dispose(); ring = null; }
     beaconKey = "";
   }
-  function setBeacon(x, z, color) {
-    if (!CBZ.CONFIG.MISSION_BEACON || !THREE) return;
+  function setBeacon(x, z, color, style) {
+    if (!CBZ.CONFIG.MISSION_BEACON || !THREE || style === false || style === "none") {
+      if (beacon || ring) clearBeacon();
+      return;
+    }
     const root = arenaRoot(); if (!root) return;
-    const key = color + "";
-    if (beacon && beaconKey === key && beacon.parent === root) { moveBeacon(x, z); return; }
+    style = style || "column";
+    const key = color + "|" + style;
+    const live = ring && ring.parent === root && (style === "ground" || (beacon && beacon.parent === root));
+    if (live && beaconKey === key) { moveBeacon(x, z); return; }
     clearBeacon();
     const hgt = 34;
-    beacon = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.0, 1.0, hgt, 12, 1, true),
-      new THREE.MeshBasicMaterial({ color: color, transparent: true, opacity: 0.30, side: THREE.DoubleSide, depthWrite: false }));
-    beacon.position.set(x, hgt / 2, z); beacon.userData.transient = true;
-    root.add(beacon);
+    // Some objectives live INSIDE a landmark. A 34 m column over an interior
+    // door punches straight through its roof and visually replaces the
+    // architecture it is meant to lead the player into. `marker:"ground"`
+    // keeps the shared waypoint and physical arrival ring, but omits only the
+    // skyline column. Every existing caller defaults to the original column.
+    if (style !== "ground") {
+      beacon = new THREE.Mesh(
+        new THREE.CylinderGeometry(1.0, 1.0, hgt, 12, 1, true),
+        new THREE.MeshBasicMaterial({ color: color, transparent: true, opacity: 0.30, side: THREE.DoubleSide, depthWrite: false }));
+      beacon.position.set(x, hgt / 2, z); beacon.userData.transient = true;
+      root.add(beacon);
+    }
     ring = new THREE.Mesh(
       new THREE.RingGeometry(2.2, 3.0, 24),
       new THREE.MeshBasicMaterial({ color: color, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false }));
@@ -317,6 +329,7 @@
         onDone: s.onDone || null,
         label: s.label || null,
         color: s.color != null ? s.color : (def.color != null ? def.color : 0x7ed957),
+        marker: s.marker != null ? s.marker : def.marker,
         t: 0, complete: false, failed: false,
       };
     });
@@ -581,7 +594,7 @@
       return;
     }
     if (inCity()) {
-      setBeacon(t.x, t.z, st.color);
+      setBeacon(t.x, t.z, st.color, st.marker);
       moveBeacon(t.x, t.z);
       const label = (st.label || st.text || m.def.title || "OBJECTIVE").toString().toUpperCase();
       const key = label + "|" + Math.round(t.x) + "|" + Math.round(t.z);

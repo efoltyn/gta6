@@ -109,6 +109,7 @@ const WORLD_SEED = Q.get("seed") || "talloran";
 
 const NEEDS = [
   "caps",           // be reachable: modeHas, worldActors, blast damage
+  "batch",          // the two passes that make the real fabric affordable
   "green",          // instanced trees
   "people",         // the shipped 1.82 m rig, gait, poses
   "military",       // the real fleet models: jets, the B-2, tanks, trucks
@@ -252,6 +253,15 @@ if (WANT_AIRPORT) {
   st("HALLORAN FIELD");
   port = CBZ.studio.raise("airport");
 }
+
+// THE MAP IS FINISHED — settle it before a single body goes in. The real
+// fabric is authored one wall-box at a time because the mainland's colliders
+// and LOS rays need those identities; city/mode.js then merges the render
+// copies and freezes their matrices, and a slice page never ran that. Same
+// two passes, same order, and everything added after this line keeps its own
+// live matrix, which is why it goes here and not at the end.
+st("SETTLING THE MAP");
+CBZ.studio.settle(CBZ.scene);
 
 CBZ.ordnance.init({ scene: CBZ.scene, groundAt: groundAt });
 

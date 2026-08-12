@@ -189,6 +189,9 @@
   if (CFG.GOV_COMPLEX == null) CFG.GOV_COMPLEX = true;
   if (CFG.GOV_COMPLEX_STAFF == null) CFG.GOV_COMPLEX_STAFF = true;
   if (CFG.GOV_COMPLEX_ROADS == null) CFG.GOV_COMPLEX_ROADS = true;
+  // One landmark-specific switch: monumental facade + authored presidential
+  // room programs. It does not revive the retired citywide building extras.
+  if (CFG.PRESIDENT_COMPOUND_V2 == null) CFG.PRESIDENT_COMPOUND_V2 = true;
   // How near the player must be before a seated principal's floor ladder is
   // built. occupy.js has a citywide body budget (OCCUPY_MAX_PEDS) and nine
   // simultaneous seats would eat most of it at boot for buildings nobody is
@@ -932,7 +935,9 @@
       // "residence AND workplace", made literal: the house is a state entrance
       // hall under the family's floor, and the WEST WING is the work — a real
       // office over the ground floor's staff room, both laid out by roomPlan.
-      interiors: { main: ["lobby", "bosssuite"], aux: ["deskfarm", "room:bossoffice"] },
+      interiors: CFG.PRESIDENT_COMPOUND_V2 !== false
+        ? { main: ["statehall", "stateresidence"], aux: ["cabinetroom", "ovaloffice"] }
+        : { main: ["lobby", "bosssuite"], aux: ["deskfarm", "room:bossoffice"] },
       // THE RESIDENCE HALF OF "residence AND workplace". Five words per job,
       // no coordinates — §5b derives every station from the rect, the gate
       // and the threshold this builder already published.
@@ -948,21 +953,42 @@
         pad(root, R, M.lawn, "execmansion");
         perimeter(root, R, { style: "wall", h: 3.4, thick: 0.7, hex: M.stoneD, gate: 1, gateW: 24 });
         gatehouse(root, cx, R.maxZ - 6, true, M.stone);
-        const main = civic(root, cx, cz - 34, 56, 34, 2, M.marble, 1,
-          { kind: "mansion", crown: "dome", order: "doric", motto: "EXECUTIVE MANSION", stone: true }, "Executive Mansion");
+        const mansionSpec = { kind: "mansion", crown: "dome", order: "doric", motto: "EXECUTIVE MANSION", stone: true };
+        if (CFG.PRESIDENT_COMPOUND_V2 !== false) {
+          mansionSpec.monumental = true;       // landmark opt-in; ordinary masonry stays disabled
+          mansionSpec.externalPerron = true;   // this builder's 9 m state stair remains authoritative
+        }
+        const main = civic(root, cx, cz - 34, 56, 34, 2, M.marble, 1, mansionSpec, "Executive Mansion");
         c.main = main;
         perron(root, cx, cz - 17, 30, 9, M.stone, 1);              // facade z -17, out to -8
         // the WEST WING: the office half of "residence and workplace"
-        civic(root, cx - 58, cz - 30, 34, 22, 2, M.stone, 3,
-          { kind: "federal", crown: "flat", order: "pilaster", motto: "WEST WING", stone: true }, "West Wing");
+        const wingSpec = { kind: "federal", crown: "flat", order: "pilaster", motto: "WEST WING", stone: true };
+        if (CFG.PRESIDENT_COMPOUND_V2 !== false) wingSpec.monumental = true;
+        civic(root, cx - 58, cz - 30, 34, 22, 2, M.stone, 3, wingSpec, "West Wing");
         // the motor court — a ring of paving round a fountain, which is what
         // the front of a state residence actually is
         disc(root, cx, cz + 18, 34, M.paving, YS, 28);
         disc(root, cx, cz + 18, 9, M.lawn, YM, 20);
-        cyl(root, cx, 0.55, cz + 18, 3.4, 3.8, 1.1, M.stone, 16);
-        cyl(root, cx, 1.9, cz + 18, 0.5, 0.7, 1.6, M.stoneD, 10);
-        disc(root, cx, cz + 18, 3.0, M.pool, 1.14, 18);
-        col(cx, cz + 18, 7.6, 7.6, 0, 1.1);
+        if (CFG.PRESIDENT_COMPOUND_V2 !== false) {
+          // A low, tiered state fountain: it terminates the arrival axis but
+          // never hides the Mansion behind the old 3.8 m stone stump.
+          cyl(root, cx, 0.28, cz + 18, 3.8, 4.1, 0.56, M.stone, 20);
+          disc(root, cx, cz + 18, 3.45, M.pool, 0.59, 24);
+          cyl(root, cx, 0.88, cz + 18, 0.62, 0.78, 1.18, M.stoneD, 14);
+          cyl(root, cx, 1.52, cz + 18, 1.36, 1.55, 0.18, M.marble, 18);
+          disc(root, cx, cz + 18, 1.15, M.pool, 1.63, 20);
+          cyl(root, cx, 2.08, cz + 18, 0.28, 0.42, 1.10, M.stoneD, 12);
+          // four water arcs read as jets from the approach, while remaining
+          // low enough to preserve the ceremonial facade sightline.
+          for (const q of [[-0.7, 0], [0.7, 0], [0, -0.7], [0, 0.7]])
+            cyl(root, cx + q[0], 1.95, cz + 18 + q[1], 0.055, 0.075, 1.0, M.pool, 7);
+          col(cx, cz + 18, 8.2, 8.2, 0, 0.58);
+        } else {
+          cyl(root, cx, 0.55, cz + 18, 3.4, 3.8, 1.1, M.stone, 16);
+          cyl(root, cx, 1.9, cz + 18, 0.5, 0.7, 1.6, M.stoneD, 10);
+          disc(root, cx, cz + 18, 3.0, M.pool, 1.14, 18);
+          col(cx, cz + 18, 7.6, 7.6, 0, 1.1);
+        }
         // formal parterre gardens either flank of the house — instanced hedge,
         // set back to z -78..-51 so the west wing (which reaches cz-19) is clear
         const hedge = [];

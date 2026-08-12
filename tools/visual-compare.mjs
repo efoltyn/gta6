@@ -14,7 +14,7 @@
 */
 
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -46,6 +46,8 @@ if (args.help) {
     `  --before URL         baseline build URL (required)\n` +
     `  --after URL          changed build URL (default: temporary local server)\n` +
     `  --out DIR            report directory (default: artifacts/visual-comparisons/...)\n` +
+    `  --reuse-before DIR   reuse a completed run's before shots + stage metadata\n` +
+    `                       (fast visual iteration without reopening deployed)\n` +
     `  --subjects a,b,c     capture only these subject ids\n` +
     `  --limit N            capture only the first N subjects\n` +
     `  --no-open            do not open the generated PDF\n` +
@@ -69,7 +71,18 @@ if (!preset || !Array.isArray(preset.subjects) || typeof preset.stage !== "funct
   throw new Error(`Invalid visual preset: ${presetPath}`);
 }
 
-const beforeUrl = String(args.before || process.env.CBZ_VISUAL_BEFORE || "");
+const reuseBeforeDir = args["reuse-before"]
+  ? path.resolve(ROOT, String(args["reuse-before"]))
+  : null;
+let reuseMetadata = null;
+if (reuseBeforeDir) {
+  try {
+    reuseMetadata = JSON.parse(await readFile(path.join(reuseBeforeDir, "metadata.json"), "utf8"));
+  } catch (err) {
+    throw new Error(`--reuse-before needs a completed visual run with metadata.json: ${reuseBeforeDir}`);
+  }
+}
+const beforeUrl = String(args.before || process.env.CBZ_VISUAL_BEFORE || reuseMetadata?.before?.final || "");
 if (!beforeUrl) throw new Error("--before URL is required");
 const width = Number(args.width || preset.viewport?.width || 960);
 const height = Number(args.height || preset.viewport?.height || 600);
@@ -90,6 +103,9 @@ if (!subjects.length) throw new Error("No visual subjects selected");
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 const outputDir = path.resolve(ROOT, String(args.out || path.join("artifacts", "visual-comparisons", `${preset.id || presetName}-${stamp}`)));
 const shotDir = path.join(outputDir, "shots");
+if (reuseBeforeDir && path.resolve(reuseBeforeDir) === path.resolve(outputDir)) {
+  throw new Error("--reuse-before and --out must be different directories");
+}
 await mkdir(path.join(shotDir, "before"), { recursive: true });
 await mkdir(path.join(shotDir, "after"), { recursive: true });
 
@@ -140,6 +156,19 @@ let ws;
 let sequence = 1;
 const pending = new Map();
 const browserMessages = [];
+const browserMessageIndex = new Map();
+let activeSide = null;
+
+function recordBrowserMessage(type, value) {
+  const text = String(value || "");
+  const side = activeSide || "setup";
+  const key = `${side}\u0000${type}\u0000${text}`;
+  const prior = browserMessageIndex.get(key);
+  if (prior) { prior.count++; return; }
+  const rec = { side, type, text, count: 1 };
+  browserMessageIndex.set(key, rec);
+  browserMessages.push(rec);
+}
 
 function send(method, params = {}, timeoutMs = 60000) {
   return new Promise((resolve, reject) => {
@@ -205,6 +234,7 @@ function cacheBusted(url, side) {
 }
 
 async function navigate(url, side) {
+  activeSide = side;
   const requested = cacheBusted(url, side);
   await send("Page.navigate", { url: requested }, 90000);
   const deadline = Date.now() + 90000;
@@ -225,12 +255,64 @@ function safeName(value) {
   return String(value).replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase();
 }
 
+async function reuseBeforeResult() {
+  if (!reuseBeforeDir || !reuseMetadata) return null;
+  if (reuseMetadata.preset?.id && preset.id && reuseMetadata.preset.id !== preset.id) {
+    throw new Error(`--reuse-before preset mismatch: ${reuseMetadata.preset.id} != ${preset.id}`);
+  }
+  if (Number(reuseMetadata.viewport?.width) !== width || Number(reuseMetadata.viewport?.height) !== height) {
+    throw new Error(`--reuse-before viewport mismatch: expected ${width}x${height}`);
+  }
+  const priorSubjects = Array.isArray(reuseMetadata.subjects) ? reuseMetadata.subjects : [];
+  const priorCaptures = Array.isArray(reuseMetadata.captures) ? reuseMetadata.captures : [];
+  const captures = [];
+  for (let index = 0; index < subjects.length; index++) {
+    const subject = subjects[index];
+    const priorIndex = priorSubjects.findIndex((candidate) => candidate && candidate.id === subject.id);
+    const priorCapture = priorCaptures.find((candidate) => candidate && candidate.id === subject.id);
+    if (priorIndex < 0 || !priorCapture || !priorCapture.before) {
+      throw new Error(`--reuse-before is missing subject ${subject.id}`);
+    }
+    const oldFilename = `${String(priorIndex + 1).padStart(2, "0")}-${safeName(subject.id)}.png`;
+    const filename = `${String(index + 1).padStart(2, "0")}-${safeName(subject.id)}.png`;
+    try {
+      await copyFile(path.join(reuseBeforeDir, "shots", "before", oldFilename), path.join(shotDir, "before", filename));
+    } catch (err) {
+      throw new Error(`--reuse-before is missing shots/before/${oldFilename}`);
+    }
+    // Keep the recorded baseline stage as baseline truth. Any deliberate
+    // before→after coordinate-frame change is applied only when the after side
+    // consumes this reference (captureSide's transformReferenceStage hook),
+    // so metadata never lies about where the copied before pixels came from.
+    captures.push({ subject, filename, stage: priorCapture.before });
+  }
+  process.stdout.write(`[before] reused ${captures.length} matched shots from ${reuseBeforeDir}\n`);
+  return {
+    navigation: reuseMetadata.before || { requested: beforeUrl, final: beforeUrl },
+    captures,
+    reusedFrom: reuseBeforeDir,
+  };
+}
+
 async function captureSide(side, sourceUrl, referenceResult = null) {
   const nav = await navigate(sourceUrl, side);
   const captures = [];
   for (let index = 0; index < subjects.length; index++) {
     const subject = subjects[index];
     process.stdout.write(`[${side}] ${index + 1}/${subjects.length} ${subject.label || subject.id}\n`);
+    let referenceStage = referenceResult?.captures?.[index]?.stage || null;
+    // Repairs can move the SUBJECT while preserving the tripod relationship:
+    // a room leaves a stairwell, a grounded vehicle returns to its road, etc.
+    // This hook runs for both fresh and --reuse-before baselines. Keeping it in
+    // the comparator (rather than hidden inside a preset's stage function)
+    // makes the changed world camera explicit and prevents double transforms.
+    if (side === "after" && referenceStage && typeof preset.transformReferenceStage === "function") {
+      const adjusted = preset.transformReferenceStage({
+        subject, stage: referenceStage,
+        viewport: { width, height }, referenceResult,
+      });
+      if (adjusted) referenceStage = adjusted;
+    }
     const stageInput = {
       subject,
       side,
@@ -243,7 +325,7 @@ async function captureSide(side, sourceUrl, referenceResult = null) {
       afterLabel: String(args["after-label"] || preset.afterLabel || "AFTER · LOCAL"),
       // The after side can reuse exact staging data (especially the camera)
       // returned by the matching before capture. Presets opt in by reading it.
-      referenceStage: referenceResult?.captures?.[index]?.stage || null,
+      referenceStage,
     };
     let stageResult;
     try {
@@ -262,8 +344,12 @@ async function captureSide(side, sourceUrl, referenceResult = null) {
       process.stdout.write(`[${side}] ${subject.id} FAILED (kept going): ${err.message}\n`);
       stageResult = { ok: false, error: String(err.message || err) };
     }
-    await evaluate(`(() => {
-      if (window.__cbzVisualCompare && window.__cbzVisualCompare.render) window.__cbzVisualCompare.render();
+    await evaluate(`(async () => {
+      // A deterministic preset may freeze window.requestAnimationFrame after
+      // staging its simulation. Await a preset's explicit compositor render
+      // here: otherwise metadata can describe the new camera while Chrome's
+      // canvas layer still contains the previous player view.
+      if (window.__cbzVisualCompare && window.__cbzVisualCompare.render) await window.__cbzVisualCompare.render();
       // Force style/layout now; the two-frame barrier below then guarantees
       // both DOM labels and the WebGL surface reached Chrome's compositor.
       void document.documentElement.offsetHeight;
@@ -326,7 +412,23 @@ function metricsRows(before, after) {
       });
     }
   });
-  return rows;
+  // A preset often exposes one global live audit on every camera. Printing
+  // that identical snapshot once per subject made a ten-view report grow a
+  // forty-row metrics page whose bottom rows were literally off the PDF.
+  // Coalesce only byte-identical key/before/after rows; genuinely per-subject
+  // measurements remain separate.
+  const grouped = new Map();
+  for (const row of rows) {
+    const key = JSON.stringify([row.key, row.before, row.after]);
+    const group = grouped.get(key);
+    if (group) group.subjects.push(row.subject);
+    else grouped.set(key, Object.assign({}, row, { subjects: [row.subject] }));
+  }
+  return [...grouped.values()].map((row) => Object.assign(row, {
+    subjectLabel: row.subjects.length === subjects.length
+      ? `All ${subjects.length} matched views`
+      : row.subjects.map((subject) => subject.label || subject.id).join(", "),
+  }));
 }
 
 function metricsPageHtml(before, after) {
@@ -349,7 +451,7 @@ function metricsPageHtml(before, after) {
         deltaCell = `<td class="${tone}">${diff > 0 ? "+" : ""}${formatMetric(diff)}</td>`;
       }
     }
-    return `<tr><td>${htmlEscape(row.subject.label || row.subject.id)}</td>` +
+    return `<tr><td>${htmlEscape(row.subjectLabel)}</td>` +
       `<td>${htmlEscape(row.spec.label || row.key)}${row.spec.unit ? ` <small>${htmlEscape(row.spec.unit)}</small>` : ""}</td>` +
       `<td>${formatMetric(row.before)}</td><td>${formatMetric(row.after)}</td>${deltaCell}</tr>`;
   }).join("\n");
@@ -431,6 +533,30 @@ function reportHtml(before, after) {
   </body></html>`;
 }
 
+// Keep one-sided look iterations inspectable. Previously `--only after`
+// wrote pixels and threw away the stage result that explains those pixels,
+// which made a fast failed-view loop impossible to debug without rerunning a
+// full report. The same metadata shape is used everywhere; a skipped side is
+// simply null.
+async function writeRunMetadata(before, after, only = null) {
+  await writeFile(path.join(outputDir, "metadata.json"), JSON.stringify({
+    preset: { id: preset.id, title: preset.title, path: path.relative(ROOT, presetPath) },
+    generatedAt: new Date().toISOString(),
+    only,
+    reusedBeforeFrom: before?.reusedFrom || null,
+    viewport: { width, height },
+    before: before?.navigation || null,
+    after: after?.navigation || null,
+    subjects,
+    captures: subjects.map((subject, index) => ({
+      id: subject.id,
+      before: before?.captures?.[index]?.stage || null,
+      after: after?.captures?.[index]?.stage || null,
+    })),
+    browserMessages,
+  }, null, 2));
+}
+
 let beforeResult;
 let afterResult;
 let pdfPath;
@@ -445,14 +571,12 @@ try {
   ws.addEventListener("message", (event) => {
     const message = JSON.parse(event.data);
     if (message.method === "Runtime.exceptionThrown") {
-      browserMessages.push({ type: "exception", text: message.params?.exceptionDetails?.text || "runtime exception" });
+      recordBrowserMessage("exception", message.params?.exceptionDetails?.text || "runtime exception");
       return;
     }
     if (message.method === "Runtime.consoleAPICalled" && ["error", "warning"].includes(message.params?.type)) {
-      browserMessages.push({
-        type: message.params.type,
-        text: (message.params.args || []).map((item) => item.value || item.description || "").join(" "),
-      });
+      recordBrowserMessage(message.params.type,
+        (message.params.args || []).map((item) => item.value || item.description || "").join(" "));
       return;
     }
     if (!message.id || !pending.has(message.id)) return;
@@ -490,35 +614,25 @@ try {
 
   const onlySide = args.only ? String(args.only) : null;
   if (onlySide === "after") {
-    afterResult = await captureSide("after", afterUrl);
+    const reference = reuseBeforeDir ? await reuseBeforeResult() : null;
+    afterResult = await captureSide("after", afterUrl, reference);
+    await writeRunMetadata(reference, afterResult, "after");
     process.stdout.write(`\nAfter-side shots only (no report): ${path.join(shotDir, "after")}\n`);
     throw { _earlyExit: true };
   }
   if (onlySide === "before") {
     beforeResult = await captureSide("before", beforeUrl);
+    await writeRunMetadata(beforeResult, null, "before");
     process.stdout.write(`\nBefore-side shots only (no report): ${path.join(shotDir, "before")}\n`);
     throw { _earlyExit: true };
   }
-  beforeResult = await captureSide("before", beforeUrl);
+  beforeResult = reuseBeforeDir ? await reuseBeforeResult() : await captureSide("before", beforeUrl);
   afterResult = await captureSide("after", afterUrl, beforeResult);
 
   const htmlPath = path.join(outputDir, "report.html");
   pdfPath = path.join(outputDir, "before-after.pdf");
   await writeFile(htmlPath, reportHtml(beforeResult, afterResult));
-  await writeFile(path.join(outputDir, "metadata.json"), JSON.stringify({
-    preset: { id: preset.id, title: preset.title, path: path.relative(ROOT, presetPath) },
-    generatedAt: new Date().toISOString(),
-    viewport: { width, height },
-    before: beforeResult.navigation,
-    after: afterResult.navigation,
-    subjects,
-    captures: subjects.map((subject, index) => ({
-      id: subject.id,
-      before: beforeResult.captures[index].stage,
-      after: afterResult.captures[index].stage,
-    })),
-    browserMessages,
-  }, null, 2));
+  await writeRunMetadata(beforeResult, afterResult);
 
   // Large galleries can exceed Chrome's print compositor budget even though
   // every capture and the HTML report are already complete. Keep that useful

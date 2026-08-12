@@ -364,18 +364,25 @@
   // roughly 1 storey + entablature per two storeys, six to eight columns
   // across a monumental front, a pediment whose rise is ~1/5 its span.
   CBZ.bldCivicOrder = function (ctx) {
-    if (!flag("BLD_MASONRY_V1") || !flag("BLD_CIVIC_PODIUM")) return;
+    const spec = ctx.civic || {};
+    // `monumental` is a landmark opt-in, not a back door for citywide brick.
+    // The Executive Mansion keeps its declared order while BLD_MASONRY_V1
+    // remains off for every ordinary lot.
+    if ((!flag("BLD_MASONRY_V1") && spec.monumental !== true) || !flag("BLD_CIVIC_PODIUM")) return;
     const { w, d, FH, storeys, doorSide } = ctx;
     const pal = ctx.pal;
     const STONE = pal.stone, SHAFT = shade(pal.stone, 0.98), CAP = shade(pal.stone, 1.08);
     const f = faceOf(ctx, doorSide);
-    const spec = ctx.civic || {};
 
     // A drive-in APPARATUS BAY (the fire house) cannot have a flight of steps
     // and a colonnade across its opening — the engine has to get out. Those
     // buildings keep the pilaster order, entablature and tower but skip the
     // podium entirely, and the column rhythm opens a bay-width gap.
     const driveIn = !!(spec.showroom || ctx.showroom);
+    // govcomplex.js already owns a broad, walkable perron derived from the
+    // Mansion threshold. Keep that one and add only the architectural order;
+    // stacking the generic 2.5 m civic stair over it would make two entrances.
+    const externalPerron = spec.externalPerron === true;
     const doorGap = driveIn ? 6.0 : 2.6;
     // clear height above the doorway/apparatus opening — anything hung on the
     // wall over the entrance must start above this or it covers the door head.
@@ -395,7 +402,7 @@
     const terrW = Math.max(3.0, f.span - 0.6);
     const halfN = (f.horiz ? d : w) / 2;
     // terrace slab
-    if (driveIn) { /* apparatus bay: no podium, no steps, no cheek walls */ }
+    if (driveIn || externalPerron) { /* the host owns the arrival platform */ }
     else if (f.horiz) {
       ctx.dbox(0, TERR_TOP / 2, f.out * (halfN + terrD / 2), terrW, TERR_TOP, terrD, shade(STONE, 0.96));
       ctx.plat(-terrW / 2, terrW / 2, f.out > 0 ? halfN : -(halfN + terrD), f.out > 0 ? halfN + terrD : -halfN, TERR_TOP, null);
@@ -407,14 +414,14 @@
     // fast runner can never sample a seam between tread AABBs (the exact bug
     // the interior switchback rig documents).
     const sw = terrW - 1.2;
-    for (let i = 0; !driveIn && i < nSteps; i++) {
+    for (let i = 0; !driveIn && !externalPerron && i < nSteps; i++) {
       const th = TERR_TOP * (nSteps - i) / nSteps;
       const dOff = terrD + (i + 0.5) * (stepD / nSteps);
       const td = stepD / nSteps + 0.02;
       if (f.horiz) ctx.dbox(0, th / 2, f.out * (halfN + dOff), sw, th, td, shade(STONE, 0.92 + i * 0.03));
       else ctx.dbox(f.out * (halfN + dOff), th / 2, 0, td, th, sw, shade(STONE, 0.92 + i * 0.03));
     }
-    if (!driveIn) {
+    if (!driveIn && !externalPerron) {
       const o0 = halfN + terrD, o1 = halfN + terrD + stepD;     // inner→outer
       if (f.horiz) {
         const z0 = f.out * o0, z1 = f.out * o1;
@@ -427,7 +434,7 @@
       }
     }
     // cheek walls flanking the flight, each capped with a stone ball finial
-    for (const sg of (driveIn ? [] : [-1, 1])) {
+    for (const sg of ((driveIn || externalPerron) ? [] : [-1, 1])) {
       const t = sg * (sw / 2 + 0.35);
       const cD = terrD + stepD;
       if (f.horiz) {
@@ -444,7 +451,7 @@
     // ---------- ENGAGED COLUMN / PILASTER ORDER ----------
     // Runs the full height of the "principal" storeys (all but the attic), so
     // the front reads as one monumental order rather than stacked floors.
-    const colBase = driveIn ? 0 : TERR_TOP;   // no podium under an apparatus bay
+    const colBase = driveIn ? 0 : TERR_TOP;   // host perron shares TERR_TOP
     // Sized so the ENTABLATURE lands clear BELOW the corbelled cornice
     // bldMasonryDress puts at rTop-0.62 — otherwise a tall order would drive
     // its cornice straight through the roofline trim. Solve backwards from
@@ -565,8 +572,8 @@
   //  4. CIVIC CROWN — dome / clock tower / lantern
   // ============================================================
   CBZ.bldCivicCrown = function (ctx) {
-    if (!flag("BLD_MASONRY_V1") || !flag("BLD_CIVIC_PODIUM")) return;
     const spec = ctx.civic || {};
+    if ((!flag("BLD_MASONRY_V1") && spec.monumental !== true) || !flag("BLD_CIVIC_PODIUM")) return;
     const pal = ctx.pal;
     const STONE = pal.stone, CAP = shade(pal.stone, 1.08);
     const cx = ctx.slabCx, cz = ctx.slabCz, top = ctx.rTop + ctx.pp;

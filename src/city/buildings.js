@@ -2717,7 +2717,14 @@
       (opts.retail || opts.showroom ? "retail"
         : "office");
     if (FACADE === "residential") FACADE = MASONRY_ON ? "brick" : "office";
-    if (!MASONRY_ON && (FACADE === "brick" || FACADE === "civic" || FACADE === "fortified")) FACADE = "office";
+    // A civic owner may opt one landmark back into the monumental grammar
+    // without reviving the retired citywide brick/masonry pass. This is the
+    // narrow seam used by the Executive Mansion: a declared dome and Doric
+    // order must not collapse into a curtain-wall office merely because
+    // residential masonry is disabled globally.
+    const landmarkCivic = FACADE === "civic" && opts.civic && opts.civic.monumental === true;
+    if (!MASONRY_ON && !landmarkCivic &&
+        (FACADE === "brick" || FACADE === "civic" || FACADE === "fortified")) FACADE = "office";
     // Callers that express NO facade preference at all — town/village prefabs
     // routed through towngen.js, island annex shells, minicity fill — get a
     // deterministic masonry SHARE, so the brick vocabulary reaches the whole
@@ -3095,6 +3102,9 @@
       const faces = [
         { s: 0, x: 0, z: -d / 2 + WT / 2, w: w, dd: WT, horiz: true },
         { s: 1, x: 0, z: d / 2 - WT / 2, w: w, dd: WT, horiz: true },
+        // For ±x faces `w` is the wall's X thickness and `dd` is its Z span.
+        // Do not feed `dd` into lbox's width slot: on a 34 m civic shell that
+        // turns each side facade into a 34 m-thick slab across the whole room.
         { s: 2, x: -w / 2 + WT / 2, z: 0, w: WT, dd: d, horiz: false },
         { s: 3, x: w / 2 - WT / 2, z: 0, w: WT, dd: d, horiz: false },
       ];
@@ -3182,7 +3192,7 @@
           const fBox = (cT, segLen, cy, ch) => {
             if (segLen <= 0.02) return;
             if (f.horiz) lbox(cT, cy, f.z, segLen, ch, f.dd, color, wallOpt);
-            else lbox(f.x, cy, cT, f.dd, ch, segLen, color, wallOpt);
+            else lbox(f.x, cy, cT, f.w, ch, segLen, color, wallOpt);
           };
           fBox(0, span, fy0b + sillH / 2, sillH);                 // spandrel below the sills
           fBox(0, span, fy1b - hdrH / 2, hdrH);                   // header above the heads
@@ -3407,7 +3417,7 @@
             const faceBox = (centerT, segLen, cy, ch) => {
               if (segLen <= 0.02) return;
               if (f.horiz) lbox(centerT, cy, f.z, segLen, ch, f.dd, color, wallOpt);
-              else lbox(f.x, cy, centerT, f.dd, ch, segLen, color, wallOpt);
+              else lbox(f.x, cy, centerT, f.w, ch, segLen, color, wallOpt);
             };
             // spandrel (floor → sill) + header (window top → ceiling), full width
             faceBox(0, span, fy0 + sillH / 2, sillH);
@@ -3494,7 +3504,7 @@
             const fBoxC = (centerT, segLen, cy, ch) => {
               if (segLen <= 0.02) return;
               if (f.horiz) lbox(centerT, cy, f.z, segLen, ch, f.dd, color, wallOpt);
-              else lbox(f.x, cy, centerT, f.dd, ch, segLen, color, wallOpt);
+              else lbox(f.x, cy, centerT, f.w, ch, segLen, color, wallOpt);
             };
             fBoxC(0, span, fy0 + sillH / 2, sillH);            // podium/spandrel course
             fBoxC(0, span, fy1 - hdrH / 2, hdrH);              // frieze course
@@ -3565,7 +3575,7 @@
             const fBox = (centerT, segLen, cy, ch) => {
               if (segLen <= 0.02) return;
               if (f.horiz) lbox(centerT, cy, f.z, segLen, ch, f.dd, color, wallOpt);
-              else lbox(f.x, cy, centerT, f.dd, ch, segLen, color, wallOpt);
+              else lbox(f.x, cy, centerT, f.w, ch, segLen, color, wallOpt);
             };
             // solid wall everywhere EXCEPT the window band height; in the band,
             // solid between/around the slots.

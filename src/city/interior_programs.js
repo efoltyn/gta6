@@ -963,6 +963,17 @@
         (o && o.emissive) ? { emissive: o.emissive, ei: o.ei || 0.45, cast: false } : { cast: false });
       return true;
     }
+    // Built-in architecture is allowed on a reserved perimeter or partition.
+    // `clearFloorPoint` is a placement guard for loose furniture; applying it
+    // to a wall seal, portal casing or wainscot silently deletes exactly the
+    // hierarchy the room needs whenever a stair/egress reserve crosses that
+    // wall. Keep the bounds check, but deliberately skip floor clearance.
+    function fitbox(p, ly, across, hh, deep, c, o) {
+      if (!inRect(r, p.x, p.z, 0.08)) return false;
+      h.b.lbox(p.x, y + ly, p.z, along ? deep : across, hh, along ? across : deep, c,
+        (o && o.emissive) ? { emissive: o.emissive, ei: o.ei || 0.45, cast: false } : { cast: false });
+      return true;
+    }
     // face BACK toward the arrival (a guard watching the way in)
     const faceIn = Math.atan2(-nx, -nz);
     // face AWAY from the arrival (someone with their back to the door)
@@ -975,7 +986,7 @@
     }
     // clamp a lateral offset so anything hung off it stays on the plate
     function lat(v, margin) { const m = span / 2 - (margin == null ? 1.4 : margin); return Math.max(-m, Math.min(m, v)); }
-    return { at, obox, divider, lat, gapLat, depth, span, along, y, faceIn, faceOut, nx, nz, tx, tz, r, h };
+    return { at, obox, fitbox, divider, lat, gapLat, depth, span, along, y, faceIn, faceOut, nx, nz, tx, tz, r, h };
   }
   // an anchor in the approach frame, tagged with the ROLE the occupier should
   // cast there. Programs describe the room; occupy.js casts the people.
@@ -2009,11 +2020,494 @@
     crackTick(dt || 0);
   });
 
+  // ========================================================================
+  //  PRESIDENTIAL ROOMS — four declared programs, no procedural prop scatter.
+  //
+  //  These are in the shared interior owner because govcomplex.js should only
+  //  say WHICH program occupies a floor. Every chair/sofa/table goes through
+  //  CBZ.furnish, so the props expose the same sit/lie interaction grammar as
+  //  an apartment or a shop. Three visibly placed decision objects publish
+  //  their coordinates for presidency.js to wire into the one interaction
+  //  registry; the room program does not implement political state itself.
+  // ========================================================================
+  const PRESIDENTIAL = { rooms: [], props: [], usable: 0, symbols: 0, emptyDecor: 0 };
+
+  function presidentialReset() {
+    PRESIDENTIAL.rooms.length = 0;
+    PRESIDENTIAL.props.length = 0;
+    PRESIDENTIAL.usable = 0;
+    PRESIDENTIAL.symbols = 0;
+    PRESIDENTIAL.emptyDecor = 0;
+  }
+  function presidentialPiece(name, r, h, x, z, yaw, opts) {
+    const F = CBZ.furnish;
+    const fn = F && F[name];
+    if (typeof fn !== "function") return null;
+    const o = Object.assign({}, opts || {}, {
+      box: h.b.lbox, ox: h.ox, oz: h.oz, oy: 0, lot: null, solid: false,
+    });
+    try {
+      return name === "lamp" ? fn(x, r.y, z, o) : fn(x, r.y, z, yaw || 0, o);
+    } catch (e) { return null; }
+  }
+  function presidentialUse(rec) {
+    if (!rec) return 0;
+    return ((rec.seats && rec.seats.length) | 0) + ((rec.beds && rec.beds.length) | 0);
+  }
+  function presidentialRoom(key, name, h, r, usable, symbols, A, landmarks) {
+    const rec = {
+      key: key, name: name, floorY: r.y,
+      x: h.ox + cx(r), z: h.oz + cz(r),
+      w: r.x1 - r.x0, d: r.z1 - r.z0,
+      usable: usable | 0, symbols: symbols | 0,
+    };
+    // Publish the authored spatial grammar, not just a room count. Visual QA
+    // and future occupants can now target the actual dining table, secure
+    // portal, presidential desk, etc. even when two stacked floors approach
+    // the same plate from opposite stair directions.
+    if (A) {
+      const entry = A.at(0, 0);
+      rec.approach = {
+        x: h.ox + entry.x, z: h.oz + entry.z,
+        nx: A.nx, nz: A.nz, tx: A.tx, tz: A.tz,
+        depth: A.depth, span: A.span,
+      };
+    }
+    rec.landmarks = {};
+    Object.keys(landmarks || {}).forEach(function (landmark) {
+      const p = landmarks[landmark];
+      if (!p) return;
+      rec.landmarks[landmark] = {
+        x: h.ox + p.x, y: r.y + (p.y || 0), z: h.oz + p.z,
+      };
+    });
+    PRESIDENTIAL.rooms.push(rec);
+    PRESIDENTIAL.usable += usable | 0;
+    PRESIDENTIAL.symbols += symbols | 0;
+  }
+  function presidentialProp(key, label, order, h, r, p) {
+    const rec = { key: key, label: label, order: order, x: h.ox + p.x, y: r.y, z: h.oz + p.z };
+    PRESIDENTIAL.props.push(rec);
+    return rec;
+  }
+  function presidentialZoneRect(A, r, d0, d1, lat0, lat1) {
+    const pts = [A.at(d0, lat0), A.at(d0, lat1), A.at(d1, lat0), A.at(d1, lat1)];
+    return {
+      x0: Math.min.apply(null, pts.map(function (p) { return p.x; })),
+      x1: Math.max.apply(null, pts.map(function (p) { return p.x; })),
+      z0: Math.min.apply(null, pts.map(function (p) { return p.z; })),
+      z1: Math.max.apply(null, pts.map(function (p) { return p.z; })),
+      y: r.y,
+    };
+  }
+  function presidentialPortal(A, depth, lateral, gapW) {
+    const edge = gapW / 2 + 0.18;
+    for (const s of [-1, 1]) {
+      A.fitbox(A.at(depth - 0.04, lateral + s * edge), 1.45, 0.30, 2.62, 0.38, P.marble);
+      A.fitbox(A.at(depth - 0.10, lateral + s * edge), 1.45, 0.07, 2.38, 0.42, P.gold);
+    }
+    A.fitbox(A.at(depth - 0.04, lateral), 2.76, gapW + 0.72, 0.18, 0.40, P.marble);
+    A.fitbox(A.at(depth - 0.10, lateral), 2.70, gapW + 0.46, 0.06, 0.44, P.gold);
+  }
+
+  function progStateHall(r, h, opts) {
+    // This is always the first presidential program built, so it is also the
+    // world-rebuild boundary for the tiny room/prop ledger below.
+    presidentialReset();
+    shell(h, r);
+    const A = approach(r, h, opts);
+    const dep = A.depth, half = A.span / 2 - 0.8;
+    let usable = 0;
+
+    // One ceremonial axis from threshold to the state seal. The gold edge is
+    // structural hierarchy, not loose decor; everything else stays off it.
+    const run = Math.max(8, dep - 4.0), mid = 2.0 + run / 2;
+    A.obox(A.at(mid, 0), 0.18, 5.2, 0.05, run, P.rug, { pad: 0.4 });
+    for (const s of [-1, 1]) A.obox(A.at(mid, s * 2.52), 0.215, 0.08, 0.025, run, P.gold, { pad: 0.3 });
+
+    // A state hall this wide needs architecture, not more loose furniture.
+    // Four paired piers and their ceiling ties turn the carpet into a real
+    // processional gallery while preserving a 5 m clear presidential axis.
+    const pierLat = Math.min(half - 2.0, 4.45);
+    for (const d of [6.5, 13.2, 19.9, 26.6]) {
+      if (d > dep - 3.0) continue;
+      for (const s of [-1, 1]) {
+        const pp = A.at(d, s * pierLat);
+        A.obox(pp, 0.15, 0.82, 0.18, 0.82, P.marble, { pad: 0.36 });
+        A.obox(pp, 1.55, 0.52, 2.62, 0.52, P.marble, { pad: 0.30 });
+        A.obox(pp, 2.86, 0.88, 0.16, 0.88, P.gold, { pad: 0.32 });
+      }
+      A.obox(A.at(d, 0), h.fh - 0.20, pierLat * 2 + 1.0, 0.16, 0.34, P.marble, { pad: 0.25 });
+    }
+    // Recessed light panels continue that bay rhythm overhead. They are
+    // attached fixtures; no floor lamp is allowed to compete with a doorway.
+    for (const d of [9.8, 16.5, 23.2])
+      A.obox(A.at(d, 0), h.fh - 0.10, 2.8, 0.055, 0.34, P.lamp, { emissive: P.lamp, ei: 0.62, pad: 0.2 });
+
+    // Waiting belongs by the entrance, square to the axis. These are real
+    // benches, so the room offers an action before it offers exposition.
+    for (const s of [-1, 1]) {
+      const p = A.at(6.0, s * Math.min(half - 1.1, 7.2));
+      usable += presidentialUse(presidentialPiece("bench", r, h, p.x, p.z,
+        s > 0 ? A.faceIn - Math.PI / 2 : A.faceIn + Math.PI / 2,
+        { len: 2.4, tone: "exec" }));
+    }
+
+    // Diplomatic reception is one conversational group on the EAST side:
+    // sofa → coffee table → two chairs, all facing one another. No duplicates.
+    const salonD = Math.min(dep - 7.0, Math.max(13.0, dep * 0.57));
+    const salonLat = Math.min(half - 2.2, 8.0);
+    const sofa = A.at(salonD, salonLat);
+    const coffee = A.at(salonD, salonLat - 1.75);
+    A.obox(A.at(salonD + 0.25, salonLat - 1.0), 0.17, 5.0, 0.035, 4.8, P.glow, { pad: 0.25 });
+    usable += presidentialUse(presidentialPiece("sofa", r, h, sofa.x, sofa.z, A.faceIn, { len: 2.6, tone: "exec" }));
+    presidentialPiece("coffee", r, h, coffee.x, coffee.z, A.faceIn, { len: 1.4, deep: 0.75, tone: "exec" });
+    for (const q of [-1, 1]) {
+      const cp = A.at(salonD + q * 1.45, salonLat - 1.9);
+      const face = Math.atan2(coffee.x - cp.x, coffee.z - cp.z);
+      usable += presidentialUse(presidentialPiece("armchair", r, h, cp.x, cp.z, face, { tone: "exec" }));
+    }
+    // Opposite the salon, a press/waiting bench gives the other half of the
+    // hall one legible use without mirroring the entire furniture group.
+    const press = A.at(salonD + 1.2, -Math.min(half - 1.4, 8.5));
+    usable += presidentialUse(presidentialPiece("bench", r, h, press.x, press.z,
+      A.faceIn + Math.PI / 2, { len: 3.0, tone: "exec" }));
+
+    // The far wall terminates the walk with one large state seal and two framed
+    // portraits. They are attached architectural signals, never floor clutter.
+    A.fitbox(A.at(dep - 0.28, 0), 1.65, 4.2, 2.25, 0.10, P.gold);
+    A.fitbox(A.at(dep - 0.38, 0), 1.65, 3.6, 1.72, 0.05, P.glow, { emissive: P.glow, ei: 0.35 });
+    A.fitbox(A.at(dep - 0.44, 0), 1.68, 1.75, 0.15, 0.025, P.gold);
+    A.fitbox(A.at(dep - 0.44, 0), 1.47, 0.22, 0.78, 0.025, P.gold);
+    for (const s of [-1, 1])
+      A.fitbox(A.at(dep - 0.44, s * 0.72), 1.86, 0.62, 0.14, 0.025, P.gold);
+    for (const s of [-1, 1]) {
+      A.fitbox(A.at(dep - 0.26, s * 5.2), 1.65, 1.45, 1.85, 0.08, P.gold);
+      A.fitbox(A.at(dep - 0.37, s * 5.2), 1.65, 1.16, 1.52, 0.04, P.marble);
+    }
+    presidentialRoom("statehall", "State Entrance Hall", h, r, usable, 3, A, {
+      diplomaticSalon: coffee,
+      stateSeal: A.at(dep - 0.25, 0),
+    });
+    return { anchors: [] };
+  }
+
+  function progStateResidence(r, h, opts) {
+    shell(h, r);
+    const A = approach(r, h, opts);
+    const dep = A.depth, half = A.span / 2 - 0.8;
+    let diningUsable = 0, salonUsable = 0, suiteUsable = 0;
+    // Three actual rooms in sequence: state dining, family salon, private
+    // suite. Alternating wide portals preserve a clear route while ensuring a
+    // bed never reads as another prop in the dining hall.
+    const publicDoor = A.lat(-5.2, 2.2), privateDoor = A.lat(5.2, 2.2);
+    const publicWall = dep * 0.38, privateWall = dep * 0.70;
+    if (dep > 22) {
+      A.divider(publicWall, publicDoor, 2.6, h.fh - 0.1);
+      A.divider(privateWall, privateDoor, 2.2, h.fh - 0.1);
+      presidentialPortal(A, publicWall, publicDoor, 2.6);
+      presidentialPortal(A, privateWall, privateDoor, 2.2);
+    } else if (dep > 10) A.divider(dep * 0.57, A.gapLat, 2.0, h.fh - 0.1);
+
+    // A narrow gallery runner connects those staggered portals and makes the
+    // upper floor's circulation intentional rather than leftover carpet.
+    const galleryRun = Math.max(5, dep - 4.4);
+    A.obox(A.at(2.2 + galleryRun / 2, 0), 0.17, 2.6, 0.035, galleryRun, P.rug, { pad: 0.3 });
+    for (const d of [6.2, dep * 0.54, dep - 4.2])
+      A.obox(A.at(d, 0), h.fh - 0.10, 2.2, 0.05, 0.30, P.lamp, { emissive: P.lamp, ei: 0.55, pad: 0.2 });
+
+    // A state dining room near the stairs, sized by the plate and ringed with
+    // seats from the shared furniture kit.
+    const dining = A.at(Math.min(6.2, dep * 0.24), Math.min(half - 2.2, 7.0));
+    A.obox(dining, 0.17, 7.4, 0.035, 4.6, P.rug, { pad: 0.32 });
+    diningUsable += presidentialUse(presidentialPiece("table", r, h, dining.x, dining.z,
+      A.faceIn + Math.PI / 2, { len: Math.min(5.4, A.span * 0.34), deep: 1.25, seats: 8, tone: "warm" }));
+    // A fitted serving credenza and state triptych make this a dining room,
+    // not merely a large table near a partition.
+    const servingD = Math.max(2.4, publicWall - 0.75), servingLat = Math.min(half - 2.0, 7.2);
+    A.obox(A.at(servingD, servingLat), 0.48, 4.0, 0.66, 0.62, P.wood, { pad: 0.3 });
+    A.obox(A.at(servingD - 0.06, servingLat), 0.84, 4.15, 0.08, 0.72, P.marble, { pad: 0.28 });
+    for (const s of [-1, 0, 1]) {
+      A.fitbox(A.at(publicWall - 0.17, servingLat + s * 1.38), 1.78, 1.10, 1.28, 0.045, P.gold);
+      A.fitbox(A.at(publicWall - 0.23, servingLat + s * 1.38), 1.78, 0.84, 1.00, 0.025,
+        s === 0 ? P.glow : P.marble, s === 0 ? { emissive: P.glow, ei: 0.30 } : null);
+    }
+    // The private salon is the opposite half, not furniture sprinkled between
+    // the dining chairs.
+    const lounge = A.at(Math.min(dep - 7.8, dep * 0.52), -Math.min(half - 2.0, 6.8));
+    A.obox(A.at(Math.min(dep - 7.0, dep * 0.55), -Math.min(half - 2.0, 6.8)), 0.17, 6.2, 0.035, 5.4, P.glow, { pad: 0.3 });
+    salonUsable += presidentialUse(presidentialPiece("sofa", r, h, lounge.x, lounge.z, A.faceIn, { len: 2.8, tone: "warm" }));
+    const low = A.at(Math.min(dep - 6.4, dep * 0.52 + 1.5), -Math.min(half - 2.0, 6.8));
+    presidentialPiece("coffee", r, h, low.x, low.z, A.faceIn, { len: 1.5, deep: 0.8, tone: "warm" });
+    for (const s of [-1, 1]) {
+      const cp = A.at(Math.min(dep - 6.2, dep * 0.52 + 1.5), -Math.min(half - 3.0, 6.8) + s * 1.6);
+      salonUsable += presidentialUse(presidentialPiece("armchair", r, h, cp.x, cp.z,
+        Math.atan2(low.x - cp.x, low.z - cp.z), { tone: "warm" }));
+    }
+    // Paired built-in portraits sit on the private threshold, giving the salon
+    // a terminating wall instead of another blank white span.
+    for (const s of [-1, 1]) {
+      const portraitLat = privateDoor - s * 3.15;
+      A.fitbox(A.at(privateWall - 0.16, portraitLat), 1.72, 1.42, 1.62, 0.05, P.gold);
+      A.fitbox(A.at(privateWall - 0.22, portraitLat), 1.72, 1.12, 1.30, 0.025, P.marble);
+    }
+    // The far room is unequivocally residential: one bed with a real lie
+    // anchor and two bedside lamps, not the boss-suite aquarium/crate roll.
+    const bed = A.at(dep - 3.2, 0);
+    A.obox(A.at(dep - 3.5, 0), 0.17, 5.4, 0.035, 6.0, P.rug, { pad: 0.3 });
+    suiteUsable += presidentialUse(presidentialPiece("bed", r, h, bed.x, bed.z, A.faceIn, { len: 2.15, wide: 1.65, tone: "warm" }));
+    for (const s of [-1, 1]) {
+      const lp = A.at(dep - 3.0, s * 1.55);
+      presidentialPiece("lamp", r, h, lp.x, lp.z, 0, { h: 1.25, ei: 0.55 });
+      // Fitted wardrobes bookend the headboard and give the suite useful
+      // storage without adding loose prop scatter.
+      A.fitbox(A.at(dep - 0.48, s * 4.30), 1.32, 1.70, 2.34, 0.62, P.wood);
+      A.fitbox(A.at(dep - 0.55, s * 4.30), 1.30, 0.06, 1.86, 0.68, P.gold);
+    }
+    A.fitbox(A.at(dep - 0.34, 0), 1.62, 4.1, 1.82, 0.10, P.wood);
+    A.fitbox(A.at(dep - 0.43, 0), 1.62, 3.35, 1.28, 0.045, P.gold);
+    const foot = A.at(dep - 6.0, 0);
+    suiteUsable += presidentialUse(presidentialPiece("bench", r, h, foot.x, foot.z, A.faceOut,
+      { len: 2.2, tone: "warm" }));
+
+    // The ledger mirrors the architecture: dining room, family salon and
+    // private suite are three named spaces separated by real partitions.
+    const lat0 = -A.span / 2, lat1 = A.span / 2;
+    presidentialRoom("statedining", "State Dining Room", h,
+      presidentialZoneRect(A, r, 0, publicWall, lat0, lat1), diningUsable, 3, A, {
+      stateDiningTable: dining,
+      publicPortal: A.at(publicWall, publicDoor),
+    });
+    presidentialRoom("familysalon", "Family Salon", h,
+      presidentialZoneRect(A, r, publicWall, privateWall, lat0, lat1), salonUsable, 2, A, {
+      familySalon: low,
+      privatePortal: A.at(privateWall, privateDoor),
+    });
+    presidentialRoom("privatesuite", "Private Presidential Suite", h,
+      presidentialZoneRect(A, r, privateWall, dep, lat0, lat1), suiteUsable, 1, A, {
+      presidentialBed: bed,
+    });
+    return { anchors: [], beds: [] };
+  }
+
+  function progCabinetRoom(r, h, opts) {
+    shell(h, r);
+    const A = approach(r, h, opts);
+    const dep = A.depth, half = A.span / 2 - 0.7;
+    let usable = 0;
+    const divider = Math.min(7.0, Math.max(4.8, dep * 0.27));
+    if (dep > 11) A.divider(divider, 0, 2.2, h.fh - 0.1);
+
+    // The public-to-secure gradient is built into the room: a runner reaches
+    // a framed clearance portal, then the material shifts to command carpet.
+    const entryRun = Math.max(2.0, divider - 1.4);
+    A.obox(A.at(0.7 + entryRun / 2, 0), 0.17, 2.8, 0.035, entryRun, P.rug, { pad: 0.3 });
+    for (const s of [-1, 1]) {
+      A.obox(A.at(divider, s * 1.28), 1.43, 0.30, 2.70, 0.34, P.marble, { pad: 0.25 });
+      A.obox(A.at(divider - 0.02, s * 1.28), 1.43, 0.07, 2.36, 0.39, P.gold, { pad: 0.20 });
+    }
+    A.obox(A.at(divider, 0), 2.76, 2.85, 0.16, 0.38, P.marble, { pad: 0.25 });
+    A.obox(A.at(divider - 0.10, 0), 2.50, 1.75, 0.34, 0.06, P.glow, { emissive: P.glow, ei: 0.45, pad: 0.2 });
+    // The reception wall carries two fitted information panels instead of
+    // remaining a blank partition around a decorated doorway.
+    for (const s of [-1, 1]) {
+      const panelLat = s * Math.min(half - 1.8, 4.8);
+      A.obox(A.at(divider - 0.10, panelLat), 1.72, 2.65, 1.42, 0.055, P.gold, { pad: 0.24 });
+      A.obox(A.at(divider - 0.16, panelLat), 1.72, 2.34, 1.12, 0.03,
+        s < 0 ? P.glow : P.marble, s < 0 ? { emissive: P.glow, ei: 0.32, pad: 0.22 } : { pad: 0.22 });
+    }
+
+    // A compact staff reception before the secure portal.
+    const reception = A.at(Math.max(2.7, divider - 2.2), -Math.min(half - 1.4, 3.8));
+    usable += presidentialUse(presidentialPiece("desk", r, h, reception.x, reception.z, A.faceIn, { len: 1.6, tone: "exec" }));
+    const wait = A.at(Math.max(2.2, divider - 2.7), Math.min(half - 1.4, 3.8));
+    usable += presidentialUse(presidentialPiece("bench", r, h, wait.x, wait.z, A.faceIn, { len: 2.0, tone: "exec" }));
+
+    // One duty officer works the secure side of the portal. This is a real
+    // terminal and seat, but deliberately not a copied desk farm.
+    const duty = A.at(Math.min(dep - 4.2, divider + 3.0), -Math.min(half - 1.6, 4.6));
+    usable += presidentialUse(presidentialPiece("desk", r, h, duty.x, duty.z, A.faceIn, { len: 1.75, tone: "exec" }));
+
+    // Beyond it: ONE cabinet table, aligned down the length of the wing. The
+    // table builder owns all ten chairs and their sit anchors.
+    const tableD = divider + Math.max(4.5, (dep - divider) * 0.48);
+    const table = A.at(Math.min(dep - 3.5, tableD), 0);
+    A.obox(table, 0.17, Math.min(9.0, A.span - 2.0), 0.04, Math.min(8.0, dep - divider - 1.5), P.glow, { pad: 0.28 });
+    usable += presidentialUse(presidentialPiece("table", r, h, table.x, table.z,
+      A.faceIn + Math.PI / 2, { len: Math.min(7.0, dep - divider - 2.4), deep: 1.45, seats: 10, tone: "exec" }));
+    // Continuous acoustic wainscot and brass datum bind the secure half into
+    // one briefing chamber. These are fitted wall surfaces, not more props.
+    const chamberRun = Math.max(5.0, dep - divider - 1.2);
+    for (const s of [-1, 1]) {
+      const wallLat = s * (half - 0.22);
+      A.fitbox(A.at(divider + 0.6 + chamberRun / 2, wallLat), 0.72, 0.07, 1.10, chamberRun, P.steel);
+      A.fitbox(A.at(divider + 0.6 + chamberRun / 2, wallLat), 1.26, 0.08, 0.055, chamberRun, P.gold);
+    }
+    A.fitbox(A.at(dep - 0.25, 0), 1.62, Math.min(7.8, A.span - 2.4), 1.45, 0.08, P.bezel);
+    for (const s of [-1, 0, 1])
+      A.fitbox(A.at(dep - 0.36, s * 2.25), 1.62, 1.8, 1.12, 0.035, P.glow, { emissive: P.glow, ei: 0.52 });
+    for (const d of [3.3, divider + 4.0, dep - 4.0])
+      A.obox(A.at(d, 0), h.fh - 0.10, 2.4, 0.05, 0.30, P.light, { emissive: P.light, ei: 0.48, pad: 0.2 });
+
+    // A physical intelligence folio on the table is the room's verb. The
+    // geometry owner publishes position+intent; presidency.js performs the
+    // real Bureau order through its existing button seam.
+    const folio = A.at(Math.min(dep - 4.0, tableD + 1.0), 0);
+    A.obox(folio, 0.82, 0.72, 0.06, 0.48, P.gold, { pad: 0.25 });
+    presidentialProp("cabinet-bureau", "Authorize Bureau raid", "bureau", h, r, folio);
+    presidentialRoom("cabinetroom", "Cabinet and Briefing Room", h, r, usable + 1, 1, A, {
+      reception: reception,
+      clearancePortal: A.at(divider, 0),
+      dutyStation: duty,
+      cabinetTable: table,
+      briefingWall: A.at(dep - 0.25, 0),
+      bureauFolio: folio,
+    });
+    return { anchors: [] };
+  }
+
+  function progOvalOffice(r, h, opts) {
+    shell(h, r);
+    const A = approach(r, h, opts);
+    const dep = A.depth, half = A.span / 2 - 0.7;
+    let usable = 0;
+
+    // A wide, framed antechamber makes this an office you ARRIVE in. The
+    // opening stays broad enough for the stair route and puts every command
+    // object beyond one deliberate threshold.
+    const portalD = Math.min(7.0, Math.max(5.8, dep * 0.22));
+    if (dep > 14) A.divider(portalD, 0, 4.2, h.fh - 0.1);
+    for (const s of [-1, 1]) {
+      A.obox(A.at(portalD, s * 2.28), 1.42, 0.34, 2.68, 0.36, P.marble, { pad: 0.24 });
+      A.obox(A.at(portalD - 0.02, s * 2.28), 1.42, 0.07, 2.34, 0.40, P.gold, { pad: 0.2 });
+    }
+    A.obox(A.at(portalD, 0), 2.75, 4.9, 0.16, 0.40, P.marble, { pad: 0.22 });
+
+    // A warm rug establishes the office destination and leaves a clean walk
+    // from the stair portal all the way to the desk.
+    const rugStart = portalD + 0.8, rugD = Math.max(4.8, dep - rugStart - 2.2);
+    A.obox(A.at(rugStart + rugD / 2, 0), 0.17, Math.min(A.span - 3.2, 9.2), 0.04, rugD, P.rug, { pad: 0.4 });
+    for (const s of [-1, 1]) A.obox(A.at(rugStart + rugD / 2, s * Math.min(4.42, half - 0.5)), 0.205, 0.07, 0.02, rugD, P.gold, { pad: 0.25 });
+
+    // The presidential desk is square to the long approach with its throne
+    // facing the door. No generic boss-suite dice and no duplicate guest seats.
+    const deskD = dep - 5.0;
+    const desk = A.at(deskD, 0);
+    A.obox(A.at(deskD + 0.15, 0), 0.17, 5.7, 0.035, 4.2, P.glow, { pad: 0.32 });
+    usable += presidentialUse(presidentialPiece("bossDesk", r, h, desk.x, desk.z, A.faceIn,
+      { len: 3.15, deep: 1.2, tone: "exec" }));
+
+    // One coherent conversation group on the side, all aimed at one low table.
+    const loungeD = Math.max(portalD + 4.5, dep * 0.48), loungeLat = Math.min(half - 1.5, 4.6);
+    const sofa = A.at(loungeD, loungeLat);
+    const low = A.at(loungeD + 1.5, loungeLat - 1.55);
+    A.obox(A.at(loungeD + 1.25, loungeLat - 1.0), 0.17, 5.2, 0.035, 4.8, P.marble, { pad: 0.28 });
+    usable += presidentialUse(presidentialPiece("sofa", r, h, sofa.x, sofa.z, A.faceIn, { len: 2.7, tone: "exec" }));
+    presidentialPiece("coffee", r, h, low.x, low.z, A.faceIn, { len: 1.35, deep: 0.72, tone: "exec" });
+    for (const s of [-1, 1]) {
+      const cp = A.at(loungeD + 1.5 + s * 1.35, loungeLat - 1.75);
+      usable += presidentialUse(presidentialPiece("armchair", r, h, cp.x, cp.z,
+        Math.atan2(low.x - cp.x, low.z - cp.z), { tone: "exec" }));
+    }
+    for (const s of [-1, 1]) {
+      const flagLat = s * Math.min(half - 1.0, 4.25);
+      // These are wall-mounted standards: cloth spans sideways and is only
+      // centimetres deep. The old argument order projected each flag almost a
+      // metre into the room, where it read as a freestanding red slab.
+      A.fitbox(A.at(dep - 0.34, flagLat), 1.38, 0.07, 2.58, 0.07, P.gold);
+      A.fitbox(A.at(dep - 0.40, flagLat - s * 0.34), 2.04, 0.90, 1.05, 0.045,
+        s < 0 ? 0x2f4f86 : 0x8f3434);
+    }
+    // Seal behind the chair: framed, inset, and centred on the desk axis.
+    A.fitbox(A.at(dep - 0.25, 0), 1.68, 3.4, 2.25, 0.10, P.gold);
+    A.fitbox(A.at(dep - 0.39, 0), 1.68, 2.85, 1.72, 0.035, P.glow, { emissive: P.glow, ei: 0.42 });
+    // A small relief reads as an emblem at room distance; the prior blank blue
+    // inset was technically a symbol but visually just another screen.
+    A.fitbox(A.at(dep - 0.45, 0), 1.70, 1.72, 0.15, 0.022, P.gold);
+    A.fitbox(A.at(dep - 0.45, 0), 1.47, 0.22, 0.78, 0.022, P.gold);
+    for (const s of [-1, 1])
+      A.fitbox(A.at(dep - 0.45, s * 0.70), 1.88, 0.60, 0.14, 0.022, P.gold);
+    // Monumental desk wall: paired stone pilasters and a brass entablature
+    // frame the flags/seal as one architectural composition.
+    for (const s of [-1, 1]) {
+      A.fitbox(A.at(dep - 0.30, s * 5.25), 1.45, 0.48, 2.62, 0.42, P.marble);
+      A.fitbox(A.at(dep - 0.38, s * 5.25), 1.45, 0.08, 2.34, 0.46, P.gold);
+    }
+    A.fitbox(A.at(dep - 0.30, 0), 2.78, 11.1, 0.18, 0.42, P.marble);
+    A.fitbox(A.at(dep - 0.38, 0), 2.70, 10.5, 0.06, 0.46, P.gold);
+
+    // Warm fitted wainscot makes the office perimeter feel occupied even when
+    // all staff are elsewhere. It stops at the arrival portal and desk wall.
+    const officeRun = Math.max(5.0, dep - portalD - 1.2);
+    for (const s of [-1, 1]) {
+      const wallLat = s * (half - 0.22);
+      A.fitbox(A.at(portalD + 0.6 + officeRun / 2, wallLat), 0.72, 0.07, 1.10, officeRun, P.wood);
+      A.fitbox(A.at(portalD + 0.6 + officeRun / 2, wallLat), 1.26, 0.08, 0.055, officeRun, P.gold);
+    }
+
+    // Low fitted credenzas occupy the otherwise dead side wall and read as
+    // document storage, while paired portraits terminate the visitor salon.
+    const credLat = -Math.min(half - 0.55, 8.0);
+    for (const d of [portalD + 4.0, portalD + 7.0]) {
+      A.obox(A.at(d, credLat), 0.18, 1.95, 0.58, 0.52, P.wood, { pad: 0.30 });
+      A.obox(A.at(d, credLat), 0.78, 2.05, 0.06, 0.58, P.marble, { pad: 0.28 });
+      A.obox(A.at(d, credLat - 0.03), 1.72, 1.35, 1.38, 0.055, P.gold, { pad: 0.24 });
+      A.obox(A.at(d, credLat - 0.06), 1.72, 1.08, 1.10, 0.03, P.glow, { emissive: P.glow, ei: 0.28, pad: 0.22 });
+    }
+    for (const d of [portalD + 4.0, deskD - 1.8, dep - 2.2])
+      A.obox(A.at(d, 0), h.fh - 0.10, 2.3, 0.05, 0.30, P.lamp, { emissive: P.lamp, ei: 0.58, pad: 0.2 });
+
+    // Two small, visually distinct desk objects turn the office into a second
+    // command surface. Their actions call the SAME presidency orders as the
+    // Situation Room; this room never invents parallel political state.
+    const phone = A.at(deskD, -0.82), folder = A.at(deskD, 0.82);
+    A.obox(phone, 0.84, 0.48, 0.14, 0.28, P.bezel, { pad: 0.2 });
+    A.obox(A.at(deskD - 0.03, -0.82), 0.96, 0.38, 0.08, 0.10, P.gold, { pad: 0.2 });
+    A.obox(folder, 0.82, 0.62, 0.05, 0.42, P.gold, { pad: 0.2 });
+    presidentialProp("oval-address", "Address the nation", "address", h, r, phone);
+    presidentialProp("oval-pardon", "Sign a pardon", "pardon", h, r, folder);
+    presidentialRoom("ovaloffice", "The President's Office", h, r, usable + 2, 3, A, {
+      arrivalPortal: A.at(portalD, 0),
+      presidentialDesk: desk,
+      visitorSofa: sofa,
+      visitorTable: low,
+      stateSeal: A.at(dep - 0.25, 0),
+      securePhone: phone,
+      pardonFolder: folder,
+    });
+    return { anchors: [] };
+  }
+
+  CBZ.presidentInteriorRooms = function () {
+    return PRESIDENTIAL.rooms.map(function (r) {
+      const copy = Object.assign({}, r);
+      copy.approach = r.approach ? Object.assign({}, r.approach) : null;
+      copy.landmarks = {};
+      Object.keys(r.landmarks || {}).forEach(function (key) {
+        copy.landmarks[key] = Object.assign({}, r.landmarks[key]);
+      });
+      return copy;
+    });
+  };
+  CBZ.presidentInteriorProps = function () { return PRESIDENTIAL.props.map(function (r) { return Object.assign({}, r); }); };
+  CBZ.presidentInteriorAudit = function () {
+    return {
+      namedRooms: PRESIDENTIAL.rooms.length,
+      usableProps: PRESIDENTIAL.usable,
+      stateSymbols: PRESIDENTIAL.symbols,
+      emptyDecor: PRESIDENTIAL.emptyDecor,
+      roomNames: PRESIDENTIAL.rooms.map(function (r) { return r.name; }),
+      orderProps: PRESIDENTIAL.props.map(function (r) { return r.key; }),
+    };
+  };
+
   // ---- dispatch -----------------------------------------------------------
   const PROGRAMS = {
     empty: progEmpty, deskfarm: progDeskFarm, meeting: progMeeting, storage: progStorage, lobby: progLobby,
     checkpoint: progCheckpoint, quarters: progQuarters, bosssuite: progBossSuite,
     residential: progResidential, breakroom: progBreakroom,
+    statehall: progStateHall, stateresidence: progStateResidence,
+    cabinetroom: progCabinetRoom, ovaloffice: progOvalOffice,
   };
   const PROG_TALLY = Object.create(null);
   CBZ.interiorProgram = function (name, room, ctx) {
@@ -2036,7 +2530,8 @@
     return out;
   };
   CBZ.interiorProgramNames = ["empty", "deskfarm", "meeting", "storage", "lobby", "checkpoint",
-    "quarters", "bosssuite", "residential", "breakroom"];
+    "quarters", "bosssuite", "residential", "breakroom", "statehall", "stateresidence",
+    "cabinetroom", "ovaloffice"];
   // THE PARTITION ALONE — one thin full-run wall with ONE doorway and a lintel
   // over it, in the host's local frame. It is the only wall this kit draws and
   // it was private to `meeting` and `bosssuite`; a caller that wants to make a

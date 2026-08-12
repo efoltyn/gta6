@@ -14,8 +14,12 @@ npm run visual:compare -- \
 ```
 
 Useful flags are `--after URL`, `--out DIR`, `--limit N`, `--no-open`, and
-`--width N --height N`. Run `npm run visual:compare -- --help` for the complete
-short reference.
+`--width N --height N`. For fast look iteration, `--only after` writes the
+screenshots **and** their stage data to `metadata.json`. A later matched run can
+use `--reuse-before DIR` to copy an earlier run's deployed pixels and camera
+metadata instead of reopening the baseline build. The reuse directory and new
+output directory must differ. Run `npm run visual:compare -- --help` for the
+complete short reference.
 
 A preset is an ES module whose default export contains:
 
@@ -32,6 +36,14 @@ On the `after` pass, `input.referenceStage` is the complete result returned by
 the matching `before` stage. Return camera/framing data from the baseline and
 reuse it from `referenceStage` when exact camera matching matters.
 
+If a repair deliberately moves the photographed subject to a new coordinate
+frame, a preset may export `transformReferenceStage({subject, stage, viewport})`.
+The runner applies that transform once, only while handing baseline metadata to
+the after side, whether the baseline was captured fresh or supplied through
+`--reuse-before`. Keep the transform explicit here instead of silently moving a
+reference camera inside `stage`; the copied before metadata must continue to
+describe the pixels that were actually captured.
+
 Optional preset fields for live-world and performance comparisons:
 
 - `urlParams`: object merged into both source URLs (e.g. `{seed: 90210}` or
@@ -41,6 +53,10 @@ Optional preset fields for live-world and performance comparisons:
 - `stage` may be `async`: the runner awaits its promise, so a stage can click
   through the title screen, wait for `CBZ.bootComplete`, burst
   `CBZ.stepSim(1/60)` to advance sim time, then render
+- a deterministic stage that freezes animation may install
+  `window.__cbzVisualCompare.render`; the runner awaits its result before the
+  compositor barrier, so the screenshot cannot retain a stale WebGL camera
+  after stage metadata has already advanced
 - **Sequenced subjects**: subjects run in declaration order inside one page
   per side, so a preset can treat them as a storyboard — detonate/trigger once
   in the first stage, then each later stage advances the same live event

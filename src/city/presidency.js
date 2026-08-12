@@ -108,6 +108,7 @@
 
   if (CFG.PRESIDENCY_V1 == null) CFG.PRESIDENCY_V1 = true;
   if (CFG.PRESIDENCY_SITROOM == null) CFG.PRESIDENCY_SITROOM = true;
+  if (CFG.PRESIDENCY_ROOMS_V2 == null) CFG.PRESIDENCY_ROOMS_V2 = true;
   if (CFG.PRESIDENCY_TERROR == null) CFG.PRESIDENCY_TERROR = true;
   if (CFG.PRESIDENCY_RAIDS == null) CFG.PRESIDENCY_RAIDS = true;
   if (CFG.PRESIDENCY_FALLS == null) CFG.PRESIDENCY_FALLS = true;
@@ -264,8 +265,11 @@
       try {
         CBZ.mission.start({
           id: "pres_sitroom", title: "Enter the Situation Room", goal: "reach",
-          at: { x: site.seatPoint ? site.seatPoint.x : site.cx, z: site.seatPoint ? site.seatPoint.z : site.cz },
-          radius: 10, reward: 0,
+          // Resolve live: the room is built lazily after the Mansion shell.
+          // This points at the actual steel threshold instead of dropping the
+          // generic objective column through the landmark's dome.
+          at: function () { return ROOM.doorPt || (site.seatPoint ? site.seatPoint : { x: site.cx, z: site.cz }); },
+          radius: 3.4, marker: "ground", reward: 0,
         });
       } catch (e) {}
     }
@@ -295,7 +299,7 @@
     builtFor: null,     // the govComplexes array identity this room was built against
     group: null, cols: [], door: null, doorCol: null, doorOpen: 0, board: null,
     pads: [],           // [{key, x, z, mesh}]
-    rect: null, doorPt: null, zonesWired: false,
+    rect: null, doorPt: null, zonesWired: false, seats: 0, stateSymbols: 0,
   };
   // canvasTexLive — core/packages.js:110's exact shape; that helper is only
   // handed to mounted game packages via ctx, so the nine lines are copied
@@ -312,6 +316,11 @@
   function cmat(hex) { return (CBZ.cmat || CBZ.mat) ? (CBZ.cmat || CBZ.mat)(hex) : new THREE.MeshLambertMaterial({ color: hex }); }
   function addBox(parent, x, y, z, w, h, d, hex) {
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), cmat(hex));
+    m.position.set(x, y, z); parent.add(m);
+    return m;
+  }
+  function addCylinder(parent, x, y, z, r0, r1, h, hex, seg) {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(r0, r1, h, seg || 12), cmat(hex));
     m.position.set(x, y, z); parent.add(m);
     return m;
   }
@@ -333,11 +342,13 @@
     if (CBZ.markCollidersDirty) { try { CBZ.markCollidersDirty(); } catch (e) {} }
     ROOM.group = null; ROOM.cols = []; ROOM.door = null; ROOM.doorCol = null;
     ROOM.board = null; ROOM.pads = []; ROOM.rect = null; ROOM.doorPt = null; ROOM.builtFor = null;
+    ROOM.seats = 0; ROOM.stateSymbols = 0;
   }
   // is THIS person entitled through the door? The sitting head of state.
   function doorOpensFor() { return !!seat(); }
 
   const WALLC = 0x3a4250, STEEL = 0x2b3038, TRIM = 0x8b96a6, TABLE = 0x243244, PADC = 0x18202c;
+  const NAVY = 0x17283f, BRASS = 0xb99347, LEATHER = 0x3b2b27, CARPET = 0x263c58, PAPER = 0xd8d2c4;
   function buildRoom() {
     if (!CFG.PRESIDENCY_SITROOM || !window.THREE) return false;
     const site = mansionSite();
@@ -352,32 +363,70 @@
     // ground floor spans x cx±28, z cz-51..cz-17, front door on +z. The room
     // takes the west end of that hall. All offsets fixed => deterministic.
     const cx = site.cx, cz = site.cz;
-    const x0 = cx - 24, x1 = cx - 13, z0 = cz - 45, z1 = cz - 37;
+    const intentional = CFG.PRESIDENCY_ROOMS_V2 !== false;
+    // V2 is still entirely inside the published 56x34 mansion floorplate, but
+    // it is a real 13x13 command room instead of an 11x8 closet around a slab.
+    // V1 occupied x cx-24..cx-13 — exactly the shell's reserved stair strip.
+    // Its 0.92 m console hid the flight in screenshots, but the stair wall
+    // physically crossed the room. V2 uses the clear east bay instead.
+    const x0 = intentional ? cx + 12.5 : cx - 24;
+    const x1 = intentional ? cx + 25.5 : cx - 13;
+    const z0 = intentional ? cz - 47.5 : cz - 45;
+    const z1 = intentional ? cz - 34.5 : cz - 37;
     const zc = (z0 + z1) / 2;
     ROOM.rect = { minX: x0, maxX: x1, minZ: z0, maxZ: z1 };
     const grp = new THREE.Group();
     root.add(grp); ROOM.group = grp;
     const H = 3.0, T = 0.24;
 
+    if (intentional) {
+      // A fitted floor and a waist-height acoustic wainscot make the room read
+      // as deliberately embedded in the state residence, not a gray box that
+      // appeared on top of its lobby.
+      addBox(grp, (x0 + x1) / 2, 0.165, zc, x1 - x0 - 0.32, 0.05, z1 - z0 - 0.32, CARPET);
+      addBox(grp, (x0 + x1) / 2, 0.72, z0 + T + 0.035, x1 - x0 - 0.6, 1.22, 0.07, NAVY);
+      addBox(grp, (x0 + x1) / 2, 0.72, z1 - T - 0.035, x1 - x0 - 0.6, 1.22, 0.07, NAVY);
+      for (let i = 0; i < 7; i++) {
+        const px = x0 + 1.1 + i * ((x1 - x0 - 2.2) / 6);
+        addBox(grp, px, 0.74, z0 + T + 0.09, 0.05, 1.12, 0.045, BRASS);
+        addBox(grp, px, 0.74, z1 - T - 0.09, 0.05, 1.12, 0.045, BRASS);
+      }
+    }
+
     // walls (real colliders — the room is a fact, not a texture)
-    addBox(grp, x0 + T / 2, H / 2, zc, T, H, (z1 - z0), WALLC); addCol(x0 + T / 2, zc, T, z1 - z0, 0, H);
     addBox(grp, (x0 + x1) / 2, H / 2, z0 + T / 2, (x1 - x0), H, T, WALLC); addCol((x0 + x1) / 2, z0 + T / 2, x1 - x0, T, 0, H);
     addBox(grp, (x0 + x1) / 2, H / 2, z1 - T / 2, (x1 - x0), H, T, WALLC); addCol((x0 + x1) / 2, z1 - T / 2, x1 - x0, T, 0, H);
-    // east wall carries the DOOR: two jamb segments with a 2.2 m gap at zc
+    // V2 faces its door WEST into the state hall. Legacy keeps the old east-
+    // facing door so the feature flag remains a complete one-line rollback.
+    const doorX = intentional ? x0 : x1;
+    const solidX = intentional ? x1 : x0;
+    const doorOut = intentional ? -1 : 1;
+    addBox(grp, solidX + doorOut * T / 2, H / 2, zc, T, H, (z1 - z0), WALLC);
+    addCol(solidX + doorOut * T / 2, zc, T, z1 - z0, 0, H);
+    // door wall: two jamb segments with a 2.2 m gap at zc
     const gz0 = zc - 1.1, gz1 = zc + 1.1;
-    addBox(grp, x1 - T / 2, H / 2, (z0 + gz0) / 2, T, H, (gz0 - z0), WALLC); addCol(x1 - T / 2, (z0 + gz0) / 2, T, gz0 - z0, 0, H);
-    addBox(grp, x1 - T / 2, H / 2, (gz1 + z1) / 2, T, H, (z1 - gz1), WALLC); addCol(x1 - T / 2, (gz1 + z1) / 2, T, z1 - gz1, 0, H);
+    addBox(grp, doorX - doorOut * T / 2, H / 2, (z0 + gz0) / 2, T, H, (gz0 - z0), WALLC); addCol(doorX - doorOut * T / 2, (z0 + gz0) / 2, T, gz0 - z0, 0, H);
+    addBox(grp, doorX - doorOut * T / 2, H / 2, (gz1 + z1) / 2, T, H, (z1 - gz1), WALLC); addCol(doorX - doorOut * T / 2, (gz1 + z1) / 2, T, z1 - gz1, 0, H);
+    if (intentional) {
+      // The wainscot belongs to the two wall leaves, never across the door
+      // opening. The former full-span panel left a navy waist-high slab in a
+      // physically open doorway even after the steel leaf slid away.
+      const southA = z0 + 0.30, southB = gz0 - 0.08;
+      const northA = gz1 + 0.08, northB = z1 - 0.30;
+      if (southB > southA) addBox(grp, x0 + T + 0.035, 0.72, (southA + southB) / 2, 0.07, 1.22, southB - southA, NAVY);
+      if (northB > northA) addBox(grp, x0 + T + 0.035, 0.72, (northA + northB) / 2, 0.07, 1.22, northB - northA, NAVY);
+    }
     // lintel over the gap
-    addBox(grp, x1 - T / 2, 2.8, zc, T, 0.4, 2.4, WALLC);
+    addBox(grp, doorX - doorOut * T / 2, 2.8, zc, T, 0.4, 2.4, WALLC);
 
     // THE DOOR — a steel slab that slides north for the President and stays
     // shut for everyone else. Its collider is added/removed as it moves.
-    const door = addBox(grp, x1 - T / 2, 1.3, zc, 0.16, 2.6, 2.2, STEEL);
+    const door = addBox(grp, doorX - doorOut * T / 2, 1.3, zc, 0.16, 2.6, 2.2, STEEL);
     ROOM.door = door;
-    ROOM.doorHome = { x: x1 - T / 2, z: zc };
-    ROOM.doorCol = { minX: x1 - T / 2 - 0.2, maxX: x1 - T / 2 + 0.2, minZ: zc - 1.1, maxZ: zc + 1.1, y0: 0, y1: 2.6, ref: door };
+    ROOM.doorHome = { x: doorX - doorOut * T / 2, z: zc };
+    ROOM.doorCol = { minX: doorX - 0.2, maxX: doorX + 0.2, minZ: zc - 1.1, maxZ: zc + 1.1, y0: 0, y1: 2.6, ref: door };
     CBZ.colliders.push(ROOM.doorCol);
-    ROOM.doorPt = { x: x1 + 1.2, z: zc };
+    ROOM.doorPt = { x: doorX + doorOut * 1.2, z: zc };
     // the seal + nameplate — a door with something visibly behind it
     const plate = canvasTexLive(256, 64);
     plate.cc.fillStyle = "#11151c"; plate.cc.fillRect(0, 0, 256, 64);
@@ -385,51 +434,169 @@
     plate.cc.fillStyle = "#d8e2f2"; plate.cc.font = "bold 26px monospace"; plate.cc.textAlign = "center";
     plate.cc.fillText("SITUATION ROOM", 128, 41); plate.paint();
     const plateMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.375), new THREE.MeshBasicMaterial({ map: plate.tex }));
-    plateMesh.position.set(x1 + 0.005, 2.15, zc); plateMesh.rotation.y = Math.PI / 2;
+    // The room name belongs to the threshold, not to the moving leaf. It stays
+    // readable while the President's door slides open.
+    plateMesh.position.set(doorX + doorOut * 0.19, 2.48, zc); plateMesh.rotation.y = doorOut * Math.PI / 2;
     grp.add(plateMesh);
 
-    // THE CONSOLE — the map table. Craft is spent HERE on purpose (doctrine:
-    // polish asymmetrically on the room that matters).
-    const tx = (x0 + x1) / 2, tz = zc;
-    addBox(grp, tx, 0.46, tz, 5.5, 0.92, 1.7, TABLE);
-    addBox(grp, tx, 0.94, tz, 5.62, 0.06, 1.82, TRIM);
-    addCol(tx, tz, 5.5, 1.7, 0, 0.98);
-    // the live map face on the table top — SCREEN_GAP law: the face sits
-    // 0.03 proud of the trim (>= 0.025), never coplanar.
-    ROOM.board = canvasTexLive(1024, 512);
-    const face = new THREE.Mesh(new THREE.PlaneGeometry(5.1, 1.5), new THREE.MeshBasicMaterial({ map: ROOM.board.tex }));
-    face.rotation.x = -Math.PI / 2;
-    face.position.set(tx, 1.0, tz);            // 0.97 trim top + 0.03 gap
-    grp.add(face);
-    // the wall board (same texture, read standing up), on the west wall,
-    // face 0.03 proud of its frame slab
-    addBox(grp, x0 + T + 0.05, 1.8, zc, 0.1, 2.0, 3.6, STEEL);
-    const wface = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 1.7), new THREE.MeshBasicMaterial({ map: ROOM.board.tex }));
-    wface.position.set(x0 + T + 0.13, 1.8, zc); wface.rotation.y = Math.PI / 2;
-    grp.add(wface);
-
-    // THE BUTTONS — physical pads. Five on the table's south rail, four on
-    // the north wall panel. Each is its own interactions zone below; the
-    // labels are one-shot canvas plates.
-    ROOM.pads = [];
-    const rail = ["address", "emergency", "crackdown", "wall", "bureau"];
-    for (let i = 0; i < rail.length; i++) {
-      const px = tx - 2.2 + i * 1.1, pz = tz + 1.0;
-      addBox(grp, px, 0.99, pz, 0.34, 0.1, 0.3, PADC);
-      const cap = addBox(grp, px, 1.05, pz, 0.2, 0.05, 0.18, 0xb5443a);
-      ROOM.pads.push({ key: rail[i], x: px, z: pz, cap: cap });
-      padLabel(grp, rail[i], px, 1.0, pz + 0.28, 0);
+    if (intentional) {
+      // Deep frame, vision panel, clearance reader and the seal: the lock now
+      // advertises both what is behind it and why this player can cross it.
+      addBox(grp, doorX + doorOut * 0.02, 1.35, zc - 1.22, 0.34, 2.7, 0.22, TRIM);
+      addBox(grp, doorX + doorOut * 0.02, 1.35, zc + 1.22, 0.34, 2.7, 0.22, TRIM);
+      addBox(grp, doorX + doorOut * 0.02, 2.73, zc, 0.34, 0.22, 2.66, TRIM);
+      // Vision glass and seal are hardware ON the leaf, so they travel with it
+      // rather than hovering in the opening after the collider has moved.
+      const vision = addBox(door, doorOut * 0.215, 0.16, 0, 0.035, 0.52, 0.82, 0x8fb0c4);
+      vision.material = new THREE.MeshBasicMaterial({ color: 0x8fb0c4, transparent: true, opacity: 0.42 });
+      addBox(grp, doorX + doorOut * 0.16, 1.18, zc + 1.55, 0.18, 0.52, 0.30, STEEL);
+      addBox(grp, doorX + doorOut * 0.27, 1.20, zc + 1.55, 0.035, 0.20, 0.16, 0x66d89c);
+      addCylinder(door, doorOut * 0.24, 0.38, -0.58, 0.24, 0.24, 0.045, BRASS, 18).rotation.z = Math.PI / 2;
+      ROOM.stateSymbols++;
     }
-    const panel = ["pardon", "fascism", "communism", "crown"];
-    addBox(grp, tx, 1.35, z0 + T + 0.08, 4.8, 0.9, 0.12, STEEL);
-    for (let i = 0; i < panel.length; i++) {
-      const px = tx - 1.65 + i * 1.1, pz = z0 + T + 0.17;
-      const cap = addBox(grp, px, 1.35, pz, 0.22, 0.22, 0.08, 0xb5443a);
-      ROOM.pads.push({ key: panel[i], x: px, z: pz, cap: cap });
-      padLabel(grp, panel[i], px, 1.58, pz + 0.02, 0);
+
+    // THE CONSOLE. V1 was a 5.5 m illuminated keyboard with no chairs. V2 is
+    // a real ten-seat command table: the shared furniture owner draws it and
+    // registers every sit anchor, while this file owns only the state orders.
+    const tx = (x0 + x1) / 2, tz = zc;
+    ROOM.board = canvasTexLive(1024, 512);
+    ROOM.pads = [];
+    if (!intentional) {
+      addBox(grp, tx, 0.46, tz, 5.5, 0.92, 1.7, TABLE);
+      addBox(grp, tx, 0.94, tz, 5.62, 0.06, 1.82, TRIM);
+      addCol(tx, tz, 5.5, 1.7, 0, 0.98);
+      const face = new THREE.Mesh(new THREE.PlaneGeometry(5.1, 1.5), new THREE.MeshBasicMaterial({ map: ROOM.board.tex }));
+      face.rotation.x = -Math.PI / 2;
+      face.position.set(tx, 1.0, tz);
+      grp.add(face);
+      addBox(grp, x0 + T + 0.05, 1.8, zc, 0.1, 2.0, 3.6, STEEL);
+      const wface = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 1.7), new THREE.MeshBasicMaterial({ map: ROOM.board.tex }));
+      wface.position.set(x0 + T + 0.13, 1.8, zc); wface.rotation.y = Math.PI / 2;
+      grp.add(wface);
+      const rail = ["address", "emergency", "crackdown", "wall", "bureau"];
+      for (let i = 0; i < rail.length; i++) {
+        const px = tx - 2.2 + i * 1.1, pz = tz + 1.0;
+        addBox(grp, px, 0.99, pz, 0.34, 0.1, 0.3, PADC);
+        const cap = addBox(grp, px, 1.05, pz, 0.2, 0.05, 0.18, 0xb5443a);
+        cap.material = new THREE.MeshLambertMaterial({ color: 0xb5443a });
+        ROOM.pads.push({ key: rail[i], x: px, z: pz, cap: cap });
+        padLabel(grp, rail[i], px, 1.0, pz + 0.28, 0);
+      }
+      const panel = ["pardon", "fascism", "communism", "crown"];
+      addBox(grp, tx, 1.35, z0 + T + 0.08, 4.8, 0.9, 0.12, STEEL);
+      for (let i = 0; i < panel.length; i++) {
+        const px = tx - 1.65 + i * 1.1, pz = z0 + T + 0.17;
+        const cap = addBox(grp, px, 1.35, pz, 0.22, 0.22, 0.08, 0xb5443a);
+        cap.material = new THREE.MeshLambertMaterial({ color: 0xb5443a });
+        ROOM.pads.push({ key: panel[i], x: px, z: pz, cap: cap });
+        padLabel(grp, panel[i], px, 1.58, pz + 0.02, 0);
+      }
+    } else {
+      let tableRec = null;
+      if (CBZ.furnish && CBZ.furnish.table) {
+        try {
+          tableRec = CBZ.furnish.table(tx, 0.18, tz, 0, {
+            box: function (x, y, z, w, h, d, color) { return addBox(grp, x, y, z, w, h, d, color); },
+            ox: 0, oz: 0, oy: 0, solid: false,
+            len: 6.4, deep: 1.65, seats: 10, tone: "exec",
+          });
+        } catch (e) { tableRec = null; }
+      }
+      if (!tableRec) {
+        addBox(grp, tx, 0.52, tz, 6.4, 0.68, 1.65, LEATHER);
+        addBox(grp, tx, 0.89, tz, 6.55, 0.08, 1.80, TABLE);
+      }
+      ROOM.seats = tableRec && tableRec.seats ? tableRec.seats.length : 0;
+      addCol(tx, tz, 6.4, 1.65, 0.18, 0.94);
+      // A leather writing inset, bound briefing books and two red phones make
+      // the table read as a place where people work, without pretending those
+      // props are separate political systems.
+      addBox(grp, tx, 0.935, tz, 4.55, 0.025, 0.78, LEATHER);
+      for (const s of [-1, 1]) {
+        addBox(grp, tx + s * 2.25, 0.97, tz, 0.48, 0.055, 0.34, PAPER);
+        addBox(grp, tx + s * 2.78, 0.99, tz + 0.14, 0.34, 0.12, 0.22, 0x8f3434);
+        addBox(grp, tx + s * 2.78, 1.075, tz + 0.14, 0.28, 0.07, 0.09, BRASS);
+      }
+
+      // The country's live state belongs on the far wall, readable by every
+      // chair. It is not a duplicate glowing texture across the table top.
+      addBox(grp, tx, 1.76, z1 - T - 0.07, 7.30, 2.18, 0.11, STEEL);
+      addBox(grp, tx, 1.76, z1 - T - 0.145, 7.02, 1.90, 0.035, TRIM);
+      const wallFace = new THREE.Mesh(new THREE.PlaneGeometry(6.78, 1.68), new THREE.MeshBasicMaterial({ map: ROOM.board.tex }));
+      wallFace.position.set(tx, 1.76, z1 - T - 0.17); wallFace.rotation.y = Math.PI;
+      grp.add(wallFace);
+
+      // Two communications stations flank the main briefing screen. Their
+      // screens, rack slots and handsets give the walls a specific purpose.
+      let stationSeats = 0;
+      for (const s of [-1, 1]) {
+        const sx = tx + s * 4.75;
+        addBox(grp, sx, 0.54, z1 - T - 0.45, 1.55, 0.72, 0.72, STEEL);
+        addBox(grp, sx, 0.94, z1 - T - 0.45, 1.64, 0.08, 0.80, TRIM);
+        addBox(grp, sx, 1.42, z1 - T - 0.26, 1.20, 0.70, 0.08, PADC);
+        addBox(grp, sx, 1.43, z1 - T - 0.31, 1.02, 0.52, 0.025, 0x7ba2b8);
+        for (let i = -1; i <= 1; i++) addBox(grp, sx + i * 0.38, 0.65, z1 - T - 0.86, 0.22, 0.05, 0.12, i === 0 ? BRASS : PADC);
+        addCol(sx, z1 - T - 0.45, 1.55, 0.72, 0, 1.02);
+        // Each communications console is a station someone can actually sit
+        // at, using the same shared seat grammar as the command table.
+        if (CBZ.furnish && CBZ.furnish.chair) {
+          try {
+            const cr = CBZ.furnish.chair(sx, 0.18, z1 - T - 1.42, 0, {
+              box: function (x, y, z, w, h, d, color) { return addBox(grp, x, y, z, w, h, d, color); },
+              ox: 0, oz: 0, oy: 0, solid: false, tone: "exec",
+            });
+            stationSeats += cr && cr.seats ? cr.seats.length : 0;
+          } catch (e) {}
+        }
+      }
+      ROOM.seats += stationSeats;
+
+      // Acoustic panels give the otherwise blank secure wall a deliberate
+      // material rhythm. They are wall treatment, not another prop row.
+      for (const px of [tx - 3.1, tx, tx + 3.1]) {
+        addBox(grp, px, 1.82, z0 + T + 0.08, 2.35, 1.22, 0.06, NAVY);
+        addBox(grp, px, 1.82, z0 + T + 0.115, 2.05, 0.92, 0.025, CARPET);
+      }
+
+      // The orders are compact physical keys on the two writing rails. Their
+      // unique materials let paintBoard show live state without recolouring a
+      // shared material bucket elsewhere in the city.
+      const front = ["address", "emergency", "crackdown", "wall", "bureau"];
+      for (let i = 0; i < front.length; i++) {
+        const px = tx - 2.40 + i * 1.20, pz = tz - 0.70;
+        addBox(grp, px, 0.97, pz, 0.72, 0.07, 0.36, PADC);
+        const cap = addBox(grp, px, 1.035, pz, 0.20, 0.06, 0.16, 0xb5443a);
+        cap.material = new THREE.MeshLambertMaterial({ color: 0xb5443a });
+        ROOM.pads.push({ key: front[i], x: px, z: pz, cap: cap });
+        padLabel(grp, front[i], px, 1.005, pz - 0.30, Math.PI);
+      }
+      const rear = ["pardon", "fascism", "communism", "crown"];
+      for (let i = 0; i < rear.length; i++) {
+        const px = tx - 1.80 + i * 1.20, pz = tz + 0.70;
+        addBox(grp, px, 0.97, pz, 0.76, 0.07, 0.36, PADC);
+        const cap = addBox(grp, px, 1.035, pz, 0.20, 0.06, 0.16, 0xb5443a);
+        cap.material = new THREE.MeshLambertMaterial({ color: 0xb5443a });
+        ROOM.pads.push({ key: rear[i], x: px, z: pz, cap: cap });
+        padLabel(grp, rear[i], px, 1.005, pz + 0.30, 0);
+      }
+
+      // Paired standards and an inset seal terminate the room. They are wall-
+      // attached state symbols, never another row of loose floor props.
+      for (const s of [-1, 1]) {
+        const fx = tx + s * 5.10;
+        addBox(grp, fx, 1.48, z0 + T + 0.10, 0.06, 2.62, 0.06, BRASS);
+        addBox(grp, fx - s * 0.22, 1.94, z0 + T + 0.16, 0.50, 0.92, 0.06, s < 0 ? 0x2f4f86 : 0x8f3434);
+      }
+      const seal = addCylinder(grp, tx, 1.86, z0 + T + 0.10, 0.48, 0.48, 0.06, BRASS, 24);
+      seal.rotation.x = Math.PI / 2;
+      ROOM.stateSymbols += 3;
+      // Recessed warm strips establish a ceiling rhythm without spawning
+      // point lights or adding an unrelated decorative object to the floor.
+      for (const lx of [-3.4, 0, 3.4]) addBox(grp, tx + lx, 2.83, tz, 1.75, 0.05, 0.18, 0xffe6b0);
     }
     ROOM.builtFor = CBZ.govComplexes;
     wireZones();
+    wireOfficeZones();
     paintBoard();
     return true;
   }
@@ -638,6 +805,65 @@
     return r || { ok: true, why: "" };
   }
 
+  // The Cabinet folio and the two desk objects are published by the shared
+  // room-program owner. These zones only bind those physical objects to the
+  // SAME orders as the Situation Room; no office-only state is introduced.
+  const OFFICE_PROP_KEYS = ["cabinet-bureau", "oval-address", "oval-pardon"];
+  let officeZonesWired = false;
+  function officeProp(key) {
+    if (!CBZ.presidentInteriorProps) return null;
+    let list = [];
+    try { list = CBZ.presidentInteriorProps() || []; } catch (e) { list = []; }
+    for (let i = 0; i < list.length; i++) if (list[i] && list[i].key === key) return list[i];
+    return null;
+  }
+  function wireOfficeZones() {
+    if (officeZonesWired || !CBZ.interactions || !CBZ.interactions.registerZone) return;
+    officeZonesWired = true;
+    OFFICE_PROP_KEYS.forEach(function (key) {
+      CBZ.interactions.registerZone({
+        id: "pres-office-" + key, kind: "presprop", radius: 1.75, prio: 14,
+        find: function (px, pz) {
+          if (!on() || CFG.PRESIDENT_COMPOUND_V2 === false) return null;
+          const mine = officeProp(key);
+          if (!mine) return null;
+          const P = CBZ.player;
+          if (P && P.pos && isFinite(P.pos.y) && isFinite(mine.y) && Math.abs(P.pos.y - mine.y) > 2.2) return null;
+          let nearest = null, bestAll = Infinity;
+          for (let i = 0; i < OFFICE_PROP_KEYS.length; i++) {
+            const p = officeProp(OFFICE_PROP_KEYS[i]);
+            if (!p) continue;
+            const d = (p.x - px) * (p.x - px) + (p.z - pz) * (p.z - pz);
+            if (d < bestAll) { bestAll = d; nearest = p.key; }
+          }
+          const d = (mine.x - px) * (mine.x - px) + (mine.z - pz) * (mine.z - pz);
+          return d < 1.75 * 1.75 && nearest === key
+            ? { x: mine.x, y: mine.y, z: mine.z, kind: "presprop", propKey: key }
+            : null;
+        },
+        options: [{
+          id: "pres-office-use-" + key, slot: "e",
+          label: function () {
+            const p = officeProp(key);
+            const B = p && BUTTONS[p.order];
+            const h = seat();
+            if (!p || !B) return "Presidential order unavailable";
+            if (!h) return p.label + " (not yours)";
+            const gt = B.gate(h);
+            return p.label + (gt.ok ? "" : " — " + gt.why);
+          },
+          onSelect: function () {
+            const p = officeProp(key);
+            if (p && BUTTONS[p.order]) pressButton(p.order);
+          },
+        }],
+      });
+    });
+    if (CBZ.interactions.describe) {
+      try { CBZ.interactions.describe("presprop", function () { return { label: "Presidential desk", note: "a physical state order" }; }); } catch (e) {}
+    }
+  }
+
   // ---- the interaction zones: the door + one per pad ---------------------
   function wireZones() {
     if (ROOM.zonesWired || !CBZ.interactions || !CBZ.interactions.registerZone) return;
@@ -713,6 +939,17 @@
     const h = seat();
     const rec = h ? h.rec : countryRecAny();
     const p = politics();
+    // Each cap owns its material so this event-driven status pass can show a
+    // live order in green, an available one in brass and a refused one in
+    // muted red without recolouring any shared material elsewhere.
+    for (let i = 0; i < ROOM.pads.length; i++) {
+      const pad = ROOM.pads[i], B = BUTTONS[pad.key];
+      if (!pad.cap || !pad.cap.material || !pad.cap.material.color || !B) continue;
+      let active = false, ready = false;
+      try { active = !!B.live(); } catch (e) {}
+      if (h) { try { ready = !!B.gate(h).ok; } catch (e) {} }
+      pad.cap.material.color.setHex(active ? 0x4fc487 : (ready ? BRASS : 0x873d3d));
+    }
     const cc = b.cc;
     cc.fillStyle = "#0b1018"; cc.fillRect(0, 0, b.w, b.h);
     cc.strokeStyle = "#2c3a4e"; cc.lineWidth = 3; cc.strokeRect(6, 6, b.w - 12, b.h - 12);
@@ -1256,6 +1493,10 @@
     if (!on() || !g || g.mode !== "city") return;
     // build lazily once the govcomplex site exists (worldgen order)
     if (CFG.PRESIDENCY_SITROOM && (!ROOM.group || ROOM.builtFor !== CBZ.govComplexes)) buildRoom();
+    // interactions.js parses after this file in some entry paths. Retry the
+    // two idempotent registrations even when the room itself is already built.
+    wireZones();
+    wireOfficeZones();
     declareCell();
     // the door — slides for the sitting head of state, seals behind anyone
     // else. The collider IS the lock; there is no invisible wall.
@@ -1366,6 +1607,11 @@
     const h = seat();
     const S = st();
     const W = CBZ.stateWall && CBZ.stateWall.status ? CBZ.stateWall.status() : null;
+    let IA = { namedRooms: 0, usableProps: 0, stateSymbols: 0, emptyDecor: 0, roomNames: [], orderProps: [] };
+    if (CBZ.presidentInteriorAudit) { try { IA = CBZ.presidentInteriorAudit() || IA; } catch (e) {} }
+    const architecture = (CFG.PRESIDENT_COMPOUND_V2 !== false && mansionSite())
+      ? ["monumental order", "state dome", "carved mansion seal", "state standard", "ceremonial fountain"]
+      : [];
     let buttons = 0, live = 0, moveless = 0;
     for (const k in BUTTONS) {
       buttons++;
@@ -1406,6 +1652,18 @@
         dictator: !!(CBZ.gov && CBZ.gov.decree && CBZ.regimes),          // emergency decree -> regimes ladder
         king: !!(CBZ.crown && CBZ.crown.selfCrown),                       // dictatorship -> monarchy
         jail: !!(CBZ.cityArrestToPrison || CBZ.setMode),                  // impeachment/junta -> transport
+      },
+      // The visual comparator reads this live ledger. Furniture counts only
+      // when it carries a real sit/lie/order use; attached seals, flags and
+      // architectural hierarchy are counted separately from usable props.
+      visual: {
+        namedRooms: (IA.namedRooms | 0) + (ROOM.group ? 1 : 0),
+        usableProps: (IA.usableProps | 0) + (ROOM.seats | 0) + buttons,
+        stateSymbols: (IA.stateSymbols | 0) + (ROOM.stateSymbols | 0) + architecture.length,
+        emptyDecor: IA.emptyDecor | 0,
+        roomNames: (IA.roomNames || []).concat(ROOM.group ? ["Situation Room"] : []),
+        orderProps: (IA.orderProps || []).concat(ROOM.pads.map(function (p) { return p.key; })),
+        architecture: architecture,
       },
     };
   }

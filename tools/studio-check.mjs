@@ -101,6 +101,11 @@ if (process.argv.includes("--print")) {
   for (const [sig, what] of [
     ["CBZ.studio.join({actors, hurt})", "declare and BECOME a mode. Until you call this, every shared engine verb declines: no vault, no ledge step, no blast damage, no wall breach. `actors` hands over your roster, `hurt` your kill funnel, so the engine cannot kill somebody your score does not hear about."],
     ["CBZ.studio.world(name)", "build a named world. `desert` today."],
+    ["CBZ.studio.town({at, seed, cols, rows, palette})", "a real downtown: marked streets, sidewalks, crosswalks, shops with signs, and a cluster of enterable glass towers. Returns `.lots`, `.roads`, `.rect` — spawn people on the roads, not on a grid."],
+    ["CBZ.studio.raise(pack)", "build a real piece of the Gang City map at its authored coordinates. `militaryisland` · `airport`."],
+    ["CBZ.studio.settle(root)", "the world is finished: merge the static geometry and stop recomputing its matrices. Needs the `batch` pack. Call it ONCE, after the ground and BEFORE the actors — measured at 17 041 draw calls down to 817 on one real downtown. Anything added afterwards stays live."],
+    ["CBZ.studio.prefetch(...packs) / warm(files)", "fetch without executing. `need()` must run files one at a time (the load order is a contract), which also downloaded them one at a time; preloading first keeps the order and removes the round trips. Measured 911 ms off a 40 ms link. Warm a map from your menu and START stops being a download."],
+    ["CBZ.studio.onProgress(cb)", "cb({file, done, total, frac}) as each file lands, so a page can draw a real bar instead of three words."],
     ["CBZ.studio.crowd(n, role, {at})", "n shipped bodies, placed and parented."],
     ["CBZ.studio.boom(pos, {radius, power})", "fireball, blast damage against your roster, building collapse, and attenuated sound. Never grow your own explosion."],
     ["CBZ.studio.structureAt(x, z, reach)", "what is standing here: the building record under a point, or null."],

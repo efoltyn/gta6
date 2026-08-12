@@ -317,6 +317,32 @@
       files: ["world/airbase.js"],
       publishes: ["airbase"],
     },
+    /* THE PACK THAT MAKES THE REAL CITY AFFORDABLE ON A ONE-SHOT PAGE.
+
+       Measured, games/battle.html standing on one CBZ.studio.town(): 17 041
+       draw calls and 21 912 colliders for eight blocks of the real fabric.
+       That is not the town being extravagant — it is the mainland's own
+       number before city/mode.js runs the two passes that fix it, and a
+       slice page never runs city/mode.js. core/batch.js collapses the
+       provably-static shell into a handful of merged meshes (originals kept,
+       invisible, so colliders and every LOS ray still hit them), and
+       core/staticfreeze.js stops r128 recomposing a matrix per frame for a
+       wall that will never move again. Neither file reads a city record;
+       both were simply behind a door only the full engine had a key to.
+
+       Call it, once, after the world is built and BEFORE the actors go in:
+         CBZ.batchStaticUnder(CBZ.scene); CBZ.freezeStaticUnder(CBZ.scene);
+       or just CBZ.studio.settle() below, which does both in the right order
+       and is idempotent. */
+    batch: {
+      gives: "the two one-time passes that make a real city fabric cheap: " +
+             "static geometry merged into a handful of draw calls, and " +
+             "per-frame matrix recomputation switched off for everything " +
+             "that will never move. CBZ.studio.settle() runs both in order",
+      needs: ["boot"],
+      files: ["core/batch.js", "core/staticfreeze.js"],
+      publishes: ["batchStaticUnder", "freezeStaticUnder"],
+    },
     citycore: {
       gives: "THE REAL CITY FABRIC: cityMakeBuilding, the one mint every shell " +
              "in Gang City comes from — enterable glass towers with pooled " +
@@ -344,7 +370,14 @@
       gives: "the REAL civil airport island from the Gang City map (Halloran " +
              "Field, x -900..290, z -280..40): terminal, gates, tower, aprons " +
              "and parked airliners. Load it, then CBZ.studio.raise('airport')",
-      needs: ["look", "military", "seed"],
+      // citycore, because the TERMINAL is a real shell: island_airport.js calls
+      // cityMakeBuilding to raise it. Measured as a live fault — a page that
+      // asked for `airport` alone got "[studio.raise] airport TypeError:
+      // CBZ.cityMakeBuilding is not a function" and an airfield with no
+      // terminal on it. bomb-survivor never saw it because it happens to name
+      // citycore for its own downtown, which is exactly how an under-declared
+      // dependency hides.
+      needs: ["look", "military", "seed", "citycore"],
       files: ["city/island_airport.js"],
       publishes: ["cityCivilAircraftRayTest"],
     },
@@ -484,6 +517,56 @@
     return planFor(names, Object.create(null), { files: [], packs: [], unknown: [] });
   };
 
+  /* ---- WARM AND PROGRESS ---------------------------------------------------
+     THE LOAD ORDER IS THE CONTRACT AND THE LOAD *TIME* WAS AN ACCIDENT.
+
+     need() executes files one at a time and awaits each, which is right —
+     several of these throw if loaded early, and the addLandmass stamp above
+     depends on exactly one file being in flight when it fires. But awaiting
+     each file also DOWNLOADS them one at a time, so a page naming ten packs
+     paid ten serial round trips before the first line of its game ran. On the
+     deployed site (GitHub Pages, one hop per file) that is the whole boot.
+
+     warm() separates the two. A `<link rel=preload as=script>` fetches a file
+     into the HTTP cache and does NOT execute it, so the chain below keeps its
+     exact serial execution and finds every file already in hand. Downloads go
+     wide; execution stays single file. Nothing about ORDER changes, which is
+     why this is safe to do for every page at once.
+
+     A page also cannot draw a progress bar for a load it cannot see, so
+     onProgress reports each file as it lands. Both are additive: a page that
+     ignores them behaves exactly as before. */
+  const warmed = Object.create(null);
+  CBZ.studio.warm = function (rels) {
+    if (!rels || !rels.length || CBZ.CONFIG.STUDIO_V1 === false) return 0;
+    let n = 0;
+    for (let i = 0; i < rels.length; i++) {
+      const rel = rels[i];
+      if (!rel || loaded[rel] || inflight[rel] || warmed[rel] || alreadyInDocument(rel)) continue;
+      warmed[rel] = 1;
+      const l = document.createElement("link");
+      l.rel = "preload"; l.as = "script"; l.href = ROOT + rel;
+      document.head.appendChild(l);
+      n++;
+    }
+    return n;
+  };
+  /* prefetch(packs...) — warm everything those packs WOULD load, without
+     loading any of it. A menu can warm the map the player is hovering. */
+  CBZ.studio.prefetch = function () {
+    const plan = CBZ.studio.plan.apply(null, arguments);
+    CBZ.studio.warm(plan.files);
+    return plan;
+  };
+  const progressCbs = [];
+  CBZ.studio.onProgress = function (cb) {
+    if (typeof cb === "function") progressCbs.push(cb);
+    return CBZ.studio;
+  };
+  function tellProgress(info) {
+    for (let i = 0; i < progressCbs.length; i++) { try { progressCbs[i](info); } catch (e) {} }
+  }
+
   CBZ.studio.need = function () {
     const names = [];
     for (let i = 0; i < arguments.length; i++) {
@@ -497,8 +580,17 @@
       return Promise.reject(new Error("studio: no such pack: " + plan.unknown.join(", ") +
         ". Known packs: " + Object.keys(PACKS).join(" ")));
     }
+    // wide download, narrow execution
+    CBZ.studio.warm(plan.files);
+    const total = plan.files.length;
+    let done = 0;
     let chain = Promise.resolve();
-    plan.files.forEach(function (f) { chain = chain.then(function () { return loadFile(f); }); });
+    plan.files.forEach(function (f) {
+      chain = chain.then(function () { return loadFile(f); }).then(function () {
+        done++;
+        tellProgress({ file: f, done: done, total: total, frac: total ? done / total : 1 });
+      });
+    });
     return chain.then(function () { return plan; });
   };
 
@@ -653,6 +745,25 @@
     return null;
   };
   CBZ.studio.worlds = function () { return CBZ.desertCity ? ["desert"] : []; };
+
+  /* settle(root) — THE WORLD IS FINISHED; STOP PAYING FOR IT EVERY FRAME.
+
+     Two passes, in the one order that works: merge first (batch rewrites the
+     graph), freeze second (freeze locks what merge left). Call it once the
+     ground is built and BEFORE the people go in — anything added afterwards
+     keeps its own live matrix and is never baked, which is exactly why the
+     order is "world, settle, actors" and not "everything, settle".
+
+     Silent and safe when the `batch` pack is not loaded: a page that never
+     asks for it behaves as it always did, just more expensively. */
+  CBZ.studio.settle = function (root) {
+    const r = root || CBZ.scene;
+    if (!r) return null;
+    const out = { merged: null, frozen: null };
+    if (CBZ.batchStaticUnder) { try { out.merged = CBZ.batchStaticUnder(r); } catch (e) { try { console.warn("[studio.settle] batch", e); } catch (e2) {} } }
+    if (CBZ.freezeStaticUnder) { try { out.frozen = CBZ.freezeStaticUnder(r); } catch (e) { try { console.warn("[studio.settle] freeze", e); } catch (e2) {} } }
+    return out;
+  };
 
   /* ==========================================================================
      THE WORLD CONTRACT — a pack never asks WHICH world it landed in.

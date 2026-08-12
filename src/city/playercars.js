@@ -2285,11 +2285,12 @@
     const root = new THREE.Group();
     const hull = roleMat("boat-hull", "paint", 0xeceff2);
     const stripe = roleMat("boat-stripe", "paint", 0x1574d6);
-    const deck = roleMat("boat-deck", "plastic", 0xb4885c);      // teak-ish deck
-    const pad = roleMat("boat-pad", "interior", 0xd8dde4);       // white vinyl
+    const deck = sharedMat("boat-deck", 0xb4885c, { emissive: 0x2b1a0d, ei: 0.20 }); // teak-ish deck
+    const pad = sharedMat("boat-pad", 0xd8dde4, { emissive: 0x363b42, ei: 0.30 });    // white vinyl
     const glass = glassMat();
-    const dark = roleMat("boat-dark", "plastic", 0x101317);
+    const dark = sharedMat("boat-dark", 0x101317);
     const chrome = chromeMat();
+    const screen = sharedMat("boat-screen", 0x183b50, { emissive: 0x0d5f7a, ei: 0.72 });
     const w = 2.1, len = 6.2;
     const baseY = 0.22;
     const H = 0.58;                                              // freeboard
@@ -2332,6 +2333,10 @@
     addPrism(root, w * 0.56, [[len * 0.06, 0.0], [len * 0.06, 0.30], [len * 0.16, 0.34], [len * 0.20, 0.0]], baseY + H, dark);
     const wheel = addBox(root, 0.26, 0.26, 0.04, 0.30, baseY + H + 0.34, len * 0.05, dark);
     wheel.rotation.x = -0.5;
+    const nav = addBox(root, 0.30, 0.18, 0.035, -0.24, baseY + H + 0.34, len * 0.055, screen);
+    nav.rotation.x = -0.36;
+    addBox(root, 0.055, 0.24, 0.055, -0.54, baseY + H + 0.22, -len * 0.015, chrome);  // throttle
+    addBox(root, 0.20, 0.035, 0.20, 0, baseY + H + 0.09, -len * 0.14, dark);           // cockpit drain / hatch
     const centerGlass = addBox(root, w * 0.58, 0.34, 0.03, 0, baseY + H + 0.44, len * 0.20, glass);
     centerGlass.rotation.x = -0.42;                              // raked back
     [1, -1].forEach(function (side) {
@@ -2377,6 +2382,10 @@
     root.add(prop);
     root.userData.boatProp = prop;
     root.userData.vehicleDims = { width: w, length: len, height: 1.35, wheelbase: len * 0.6 };
+    root.userData.marineLivery = true;
+    root.userData.marineRooms = [{ id: "speedboat-cockpit", label: "Open runabout cockpit" }];
+    root.userData.marineFixtureCount = 11;
+    root.userData.marineRigAudit = { anchors: 0, segments: 0, gaps: 0 };
     return root;
   }
 
@@ -2386,6 +2395,7 @@
   // refs, so we swap those meshes onto a per-car cloned material (one per unique
   // source paint) and tag it `_playerCarOwned` so detach()/dispose can clean up.
   function recolorBody(root, color) {
+    if (root && root.userData && root.userData.marineLivery) return;
     const c = new THREE.Color(color);
     const swapped = new Map();
     root.traverse(function (o) {

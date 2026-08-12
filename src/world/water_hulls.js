@@ -174,6 +174,103 @@
     root.add(m);
     return m;
   }
+  // Rigging authored as "a long box near the mast, then rotate until it looks
+  // close" is how a stay or outrigger winds up floating at both ends. This is
+  // the marine primitive instead: two real attachment points are the input and
+  // the cylinder is solved between them. The audit lives on the unmerged body
+  // because finish() deliberately batches same-material meshes afterwards.
+  function addTubeBetween(root, a, b, r, material, seg) {
+    const p0 = Array.isArray(a) ? new THREE.Vector3(a[0], a[1], a[2]) : new THREE.Vector3(a.x, a.y, a.z);
+    const p1 = Array.isArray(b) ? new THREE.Vector3(b[0], b[1], b[2]) : new THREE.Vector3(b.x, b.y, b.z);
+    const delta = p1.clone().sub(p0), len = delta.length();
+    const audit = root.userData.marineRigAudit || (root.userData.marineRigAudit = { anchors: 0, segments: 0, gaps: 0 });
+    if (!(len > 0.001)) { audit.gaps++; return null; }
+    const m = new THREE.Mesh(cylGeo(r, r, len, seg || 8), material);
+    m.position.copy(p0).add(p1).multiplyScalar(0.5);
+    m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), delta.normalize());
+    m.castShadow = false;
+    m.userData.marineRigSegment = true;
+    root.add(m);
+    audit.anchors += 2;
+    audit.segments++;
+    return m;
+  }
+
+  function declareRoom(root, id, label) {
+    const rooms = root.userData.marineRooms || (root.userData.marineRooms = []);
+    if (!rooms.some(function (r) { return r.id === id; })) rooms.push({ id: id, label: label || id });
+  }
+  function markFixture(root, mesh, kind) {
+    root.userData.marineFixtureCount = (root.userData.marineFixtureCount || 0) + 1;
+    if (mesh) mesh.userData.marineFixture = kind || true;
+    return mesh;
+  }
+  function addFixtureBox(root, kind, w, h, d, x, y, z, material) {
+    return markFixture(root, addBox(root, w, h, d, x, y, z, material), kind);
+  }
+  function addFixtureCyl(root, kind, r, h, x, y, z, material, seg) {
+    return markFixture(root, addCyl(root, r, h, x, y, z, material, seg), kind);
+  }
+  // Compact, human-scale furniture shared by every enclosed boat. These are
+  // intentionally low-poly, but their anatomy is explicit: bases meet floors,
+  // backs meet seats, tables have pedestals, and screens sit on consoles.
+  function addSeat(root, x, y, z, yaw, pad, frame) {
+    const g = new THREE.Group();
+    g.position.set(x, y, z); g.rotation.y = yaw || 0;
+    addBox(g, 0.58, 0.16, 0.58, 0, 0.48, 0, pad);
+    addBox(g, 0.58, 0.58, 0.14, 0, 0.78, -0.25, pad);
+    addBox(g, 0.10, 0.48, 0.10, 0, 0.24, 0, frame);
+    root.add(g);
+    return markFixture(root, g, "seat");
+  }
+  function addTable(root, x, y, z, w, d, top, frame) {
+    addBox(root, w, 0.10, d, x, y + 0.75, z, top);
+    const leg = addBox(root, 0.16, 0.72, 0.16, x, y + 0.36, z, frame);
+    return markFixture(root, leg, "table");
+  }
+  function addCabinet(root, x, y, z, w, h, d, material) {
+    return addFixtureBox(root, "cabinet", w, h, d, x, y + h * 0.5, z, material);
+  }
+  function addScreen(root, x, y, z, w, h, yaw, material) {
+    const m = addFixtureBox(root, "display", w, h, 0.035, x, y, z, material);
+    m.rotation.y = yaw || 0;
+    return m;
+  }
+  // An enterable deckhouse. Old boat cabins were closed prisms with dark glass
+  // pasted over opaque paint; their collision could have a doorway, but their
+  // pixels still showed a solid wall. This draws the actual shell surfaces and
+  // leaves a central aft opening. `z0` is aft, `z1` forward.
+  function addCabinShell(root, o) {
+    const w = o.width, hb = w * 0.5, z0 = o.z0, z1 = o.z1;
+    const y0 = o.y0, y1 = o.y1, h = y1 - y0, span = z1 - z0, mid = (z0 + z1) * 0.5;
+    const body = o.body, liner = o.liner || o.body, glass = o.glass;
+    const doorW = Math.min(o.doorW || 1.10, w * 0.48);
+    const lowerH = h * 0.30, upperH = h * 0.18, winH = h * 0.42;
+    const winY = y0 + h * 0.57;
+    addBox(root, w, 0.16, span, 0, y1 - 0.08, mid, body);            // landed roof
+    [1, -1].forEach(function (side) {
+      addBox(root, 0.14, lowerH, span, side * hb, y0 + lowerH * 0.5, mid, liner);
+      addBox(root, 0.14, upperH, span, side * hb, y1 - upperH * 0.5, mid, liner);
+      addBox(root, 0.07, winH, span * 0.88, side * (hb + 0.015), winY, mid, glass);
+      const bays = Math.max(2, Math.min(7, Math.round(span / 2.6)));
+      for (let i = 1; i < bays; i++) {
+        addBox(root, 0.10, winH + 0.08, 0.08, side * (hb + 0.025), winY, z0 + (span * i) / bays, liner);
+      }
+    });
+    // Aft wall pieces stop at the doorway; the glass sliders are parked to the
+    // sides, making the opening visible from the cockpit as well as walkable.
+    const sideW = Math.max(0.18, (w - doorW) * 0.5);
+    [1, -1].forEach(function (side) {
+      addBox(root, sideW, h, 0.14, side * (doorW * 0.5 + sideW * 0.5), y0 + h * 0.5, z0, body);
+      addBox(root, doorW * 0.46, h * 0.68, 0.055, side * (doorW * 0.52), y0 + h * 0.40, z0 - 0.075, glass);
+    });
+    addBox(root, doorW, h * 0.18, 0.14, 0, y1 - h * 0.09, z0, liner); // doorway header
+    // Forward face: low dash-height coaming, broad screen, light roof header.
+    addBox(root, w, lowerH, 0.14, 0, y0 + lowerH * 0.5, z1, body);
+    addBox(root, w * 0.90, winH, 0.075, 0, winY, z1 + 0.015, glass);
+    addBox(root, w, upperH, 0.14, 0, y1 - upperH * 0.5, z1, liner);
+    return { width: w, z0: z0, z1: z1, y0: y0, y1: y1, doorW: doorW };
+  }
   // A railed run of stanchions + a top rail along one side, z0..z1 at x.
   function addRail(root, x, z0, z1, y, mat, spacing) {
     const len = Math.abs(z1 - z0), mid = (z0 + z1) * 0.5;
@@ -256,6 +353,13 @@
     const root = new THREE.Group();
     root.add(body);
     root.userData.vehicleDims = dims;
+    // Fleet liveries are authored identity (working-blue trawler, cream yacht,
+    // white sportfisher), not random car paint. playercars.js respects this on
+    // procedural clones instead of turning every Captain trawler black.
+    root.userData.marineLivery = true;
+    root.userData.marineRooms = (body.userData.marineRooms || []).slice();
+    root.userData.marineFixtureCount = body.userData.marineFixtureCount || 0;
+    root.userData.marineRigAudit = Object.assign({ anchors: 0, segments: 0, gaps: 0 }, body.userData.marineRigAudit || {});
     const prop = body.getObjectByName("boat_prop");
     if (prop) root.userData.boatProp = prop;
     return root;
@@ -512,14 +616,21 @@
   const M = {
     hull: () => roleMat("mh-hull", "paint", 0xf1f4f7),        // gelcoat white
     hullDark: () => roleMat("mh-hulldark", "paint", 0x1d2b3a), // navy topsides
-    boot: () => roleMat("mh-boot", "plastic", 0x14181d),       // boot stripe / antifoul
+    boot: () => sharedMat("mh-boot", 0x14181d),                 // boot stripe / antifoul
     stripe: () => roleMat("mh-stripe", "paint", 0x1574d6),
-    teak: () => roleMat("mh-teak", "plastic", 0xb4885c),
-    teakDk: () => roleMat("mh-teakdk", "plastic", 0x8c6743),
-    pad: () => roleMat("mh-pad", "interior", 0xd8dde4),
-    dark: () => roleMat("mh-dark", "plastic", 0x101317),
-    grey: () => roleMat("mh-grey", "metal", 0x6d757e),
-    tube: () => roleMat("mh-tube", "plastic", 0x2b3138),       // hypalon collar
+    // carfx's generic plastic/interior roles intentionally collapse to one
+    // dark cabin material. Marine teak, vinyl and headliners need their actual
+    // authored colours, so these use the shared Lambert pool directly.
+    teak: () => sharedMat("mh-teak", 0xb4885c, { emissive: 0x2b1a0d, ei: 0.20 }),
+    teakDk: () => sharedMat("mh-teakdk", 0x8c6743, { emissive: 0x241408, ei: 0.18 }),
+    pad: () => sharedMat("mh-pad", 0xd8dde4, { emissive: 0x363b42, ei: 0.30 }),
+    liner: () => sharedMat("mh-liner", 0xe7e0d2, { emissive: 0x4a4336, ei: 0.34, double: true }),
+    wood: () => sharedMat("mh-wood", 0x6f4b30, { emissive: 0x24150b, ei: 0.22 }),
+    screen: () => sharedMat("mh-screen", 0x183b50, { emissive: 0x0d5f7a, ei: 0.72 }),
+    warm: () => sharedMat("mh-warm", 0xe8c889, { emissive: 0x9a6830, ei: 0.28 }),
+    dark: () => sharedMat("mh-dark", 0x101317),
+    grey: () => sharedMat("mh-grey", 0x6d757e, { emissive: 0x121519, ei: 0.18 }),
+    tube: () => sharedMat("mh-tube", 0x2b3138),                 // hypalon collar
     glass: glassMat,
     chrome: chromeMat,
     // NAV LIGHTS — colours/emissives copied verbatim from makeBoat():1483-1484.
@@ -591,6 +702,11 @@
     roleMat: roleMat, sharedMat: sharedMat, glassMat: glassMat, chromeMat: chromeMat,
     boxGeo: boxGeo, prismGeo: prismGeo, cylGeo: cylGeo,
     addBox: addBox, addPrism: addPrism, addCyl: addCyl,
+    addTubeBetween: addTubeBetween,
+    declareRoom: declareRoom, markFixture: markFixture,
+    addFixtureBox: addFixtureBox, addFixtureCyl: addFixtureCyl,
+    addSeat: addSeat, addTable: addTable, addCabinet: addCabinet, addScreen: addScreen,
+    addCabinShell: addCabinShell,
     addRail: addRail, addStairs: addStairs, stairDecks: stairDecks,
     mergeByMaterial: mergeByMaterial, finish: finish,
     M: M, propGroup: propGroup, navLights: navLights,
@@ -626,7 +742,8 @@
     const b = new THREE.Group();
     const len = 4.5, w = 2.0, hw = w * 0.5;
     const hull = M.hull(), tube = M.tube(), dark = M.dark(), grey = M.grey();
-    const chrome = M.chrome(), pad = M.pad(), teak = M.teakDk();
+    const chrome = M.chrome(), pad = M.pad(), teak = M.teakDk(), screen = M.screen();
+    declareRoom(b, "dinghy-helm", "Open helm");
     // GRP pan: waterline at y=0, keel 0.34 below, sheer 0.30 above.
     addPrism(b, w * 0.86, [[-len * 0.5, -0.30], [-len * 0.5, 0.30], [len * 0.18, 0.30], [len * 0.24, -0.30]], 0, hull);
     addPrism(b, w * 0.62, [[len * 0.16, -0.26], [len * 0.16, 0.32], [len * 0.42, 0.36], [len * 0.44, -0.14]], 0, hull);
@@ -660,6 +777,10 @@
     addBox(b, 0.20, 0.20, 0.03, 0.13, 0.70, 0.02, dark);                                    // wheel
     addBox(b, 0.44, 0.14, 0.52, 0, 0.44, -0.62, pad);                                       // jockey seat
     addBox(b, 0.44, 0.34, 0.10, 0, 0.68, -0.90, pad);
+    addScreen(b, -0.13, 0.70, 0.015, 0.17, 0.12, 0, screen);                                  // chart / sounder
+    addFixtureBox(b, "throttle", 0.06, 0.24, 0.06, -0.30, 0.62, -0.05, chrome);
+    markFixture(b, scr, "windscreen");
+    b.userData.marineFixtureCount += 2;                                                        // wheel + jockey seat
     // grab rail on the console + bow towing eye + cleats
     addBox(b, 0.50, 0.04, 0.04, 0, 0.74, 0.28, chrome);
     addBox(b, 0.06, 0.06, 0.12, 0, 0.16, len * 0.49, chrome);
@@ -685,7 +806,11 @@
     const len = 14, w = 4.2, hw = w * 0.5;
     const hull = M.hull(), topside = M.hullDark(), boot = M.boot(), teak = M.teak();
     const dark = M.dark(), glass = M.glass(), chrome = M.chrome(), pad = M.pad();
+    const liner = M.liner(), wood = M.wood(), screen = M.screen(), warm = M.warm();
     const SHEER = 1.30, KEEL = -1.10;
+    declareRoom(b, "cruiser-cockpit", "Aft cockpit");
+    declareRoom(b, "cruiser-saloon", "Main saloon and lower helm");
+    declareRoom(b, "cruiser-flybridge", "Flybridge");
     // HULL in width steps: full-beam transom, carried beam amidships, fine bow.
     addPrism(b, w, [[-7.0, KEEL], [-7.0, SHEER], [-0.2, SHEER], [0.4, KEEL * 0.9]], 0, hull);
     addPrism(b, w * 0.90, [[-0.6, KEEL * 0.92], [-0.6, SHEER], [3.6, SHEER + 0.10], [4.0, KEEL * 0.62]], 0, hull);
@@ -713,19 +838,29 @@
     // SALOON / superstructure. Half-width 1.40 so the side decks (1.40..2.10)
     // stay clear — that gap IS the circulation loop.
     const SUP = 3.60;
-    addPrism(b, 2.80, [[-2.2, SHEER], [-2.2, SUP], [2.6, SUP], [3.2, SHEER + 0.10]], 0, hull);
-    // aft sliding glass + long side windows + raked windscreen
-    addBox(b, 2.5, 1.5, 0.06, 0, SHEER + 1.05, -2.18, glass);
+    addCabinShell(b, { width: 2.80, z0: -2.20, z1: 2.85, y0: SHEER, y1: SUP,
+      doorW: 1.05, body: hull, liner: liner, glass: glass });
     [1, -1].forEach(function (side) {
-      const win = addBox(b, 0.06, 0.62, 4.0, side * 1.41, SHEER + 1.35, 0.2, glass);
-      win.rotation.x = 0;
       // side deck sole + bulwark + rail
       addBox(b, 0.70, 0.10, 7.2, side * 1.75, SHEER + 0.15, 1.4, teak);
       addBox(b, 0.10, 0.55, 7.2, side * 2.08, SHEER + 0.42, 1.4, hull);
       addRail(b, side * 2.05, -2.0, 6.0, SHEER + 0.20, chrome, 1.8);
     });
-    const wsc = addBox(b, 2.7, 1.05, 0.08, 0, SHEER + 1.75, 2.85, glass);
-    wsc.rotation.x = -0.40;
+    // A real saloon inside the shell: warm sole and headliner, a clear central
+    // aisle from the sliding door, lounge/dinette, compact galley and a lower
+    // helm. Keeping furniture to the sides makes the room traversable.
+    addBox(b, 2.58, 0.08, 4.72, 0, SHEER + 0.08, 0.22, wood);
+    addBox(b, 2.54, 0.06, 4.55, 0, SUP - 0.20, 0.22, liner);
+    addFixtureBox(b, "settee", 0.58, 0.52, 2.10, 0.98, SHEER + 0.36, -0.55, pad);
+    addFixtureBox(b, "settee-back", 0.12, 0.74, 2.10, 1.23, SHEER + 0.73, -0.55, pad);
+    addTable(b, 0.28, SHEER + 0.08, -0.55, 0.82, 1.05, wood, chrome);
+    addCabinet(b, -1.02, SHEER + 0.08, 0.25, 0.46, 0.88, 1.35, liner);
+    addFixtureBox(b, "galley-counter", 0.52, 0.10, 1.42, -0.98, SHEER + 1.00, 0.25, wood);
+    addFixtureBox(b, "helm-console", 2.10, 0.72, 0.55, 0, SHEER + 0.48, 2.20, dark);
+    addScreen(b, -0.48, SHEER + 1.03, 1.91, 0.48, 0.27, 0, screen);
+    addScreen(b, 0.10, SHEER + 1.03, 1.91, 0.48, 0.27, 0, screen);
+    addSeat(b, 0.62, SHEER + 0.08, 1.25, 0, pad, chrome);
+    addFixtureBox(b, "saloon-light", 0.75, 0.04, 0.28, 0, SUP - 0.25, 0.0, warm);
     // FOREDECK + sunpad + windlass
     addBox(b, 3.0, 0.10, 3.0, 0, SHEER + 0.25, 4.7, teak);
     addBox(b, 2.2, 0.16, 1.9, 0, SHEER + 0.38, 4.4, pad);
@@ -745,13 +880,14 @@
     addBox(b, 2.6, 0.14, 1.4, 0, 3.90, -1.1, pad);                          // aft sunpad
     addRail(b, 1.48, -1.5, 2.4, 3.81, chrome, 1.4);
     addRail(b, -1.48, -1.5, 2.4, 3.81, chrome, 1.4);
-    // radar arch over the flybridge aft edge
+    // radar arch over the flybridge aft edge, solved from deck sockets to the
+    // cross member so neither leg can float after a proportion change.
     [1, -1].forEach(function (side) {
-      const leg = addBox(b, 0.14, 1.5, 0.14, side * 1.30, 4.55, -1.6, M.grey());
-      leg.rotation.z = side * 0.10;
+      addTubeBetween(b, [side * 1.30, 3.82, -1.35], [side * 1.10, 5.28, -1.60], 0.075, M.grey(), 8);
     });
-    addBox(b, 2.9, 0.16, 0.24, 0, 5.28, -1.6, M.grey());
+    addTubeBetween(b, [-1.10, 5.28, -1.60], [1.10, 5.28, -1.60], 0.09, M.grey(), 8);
     addCyl(b, 0.30, 0.10, 0, 5.42, -1.6, M.grey(), 10);                     // radome
+    b.userData.marineFixtureCount += 8;                                      // cockpit + flybridge authored fittings
     // twin sterndrives under the transom
     b.add(propGroup(1.5, [[0.85, -0.95, -7.15], [-0.85, -0.95, -7.15]]));
     navLights(b, hw, SHEER + 0.55, 5.6, -6.9, 5.42);
@@ -780,8 +916,13 @@
     const L = Y.LEN, hw = Y.HB;
     const hull = M.hull(), topside = M.hullDark(), boot = M.boot(), teak = M.teak();
     const dark = M.dark(), glass = M.glass(), chrome = M.chrome(), pad = M.pad();
-    const grey = M.grey();
+    const grey = M.grey(), liner = M.liner(), wood = M.wood(), screen = M.screen(), warm = M.warm();
     const FB = Y.MAIN;    // freeboard: main deck sits 2.30 above the waterline
+    declareRoom(b, "yacht34-saloon", "Main saloon and dining room");
+    declareRoom(b, "yacht34-skylounge", "Upper skylounge");
+    declareRoom(b, "yacht34-wheelhouse", "Wheelhouse");
+    declareRoom(b, "yacht34-garage", "Tender garage");
+    declareRoom(b, "yacht34-sundeck", "Sun deck");
 
     // ---- HULL: full-beam transom, carried beam, fine flared bow. Freeboard
     // tapers to near water level at the transom (research §F).
@@ -806,7 +947,22 @@
     // ---- TENDER GARAGE just forward of it, hinged transom door.
     addBox(b, 4.6, 0.14, 2.4, 0, Y.GAR, -15.4, grey);
     addBox(b, 4.8, 1.30, 0.12, 0, Y.GAR + 0.75, -16.55, topside);    // transom door
-    addBox(b, 2.4, 0.55, 1.5, 0, Y.GAR + 0.36, -15.2, M.tube());     // the RIB inside
+    // The tender is the actual registry RIB builder, stowed athwartships—not a
+    // blue box labelled "RIB". Rename its prop so the yacht's own screws remain
+    // the animated boatProp selected by finish().
+    const storedTender = buildDinghy();
+    storedTender.name = "yacht34_stowed_tender";
+    storedTender.position.set(0, Y.GAR + 0.30, -15.20);
+    storedTender.rotation.y = Math.PI / 2;
+    storedTender.scale.setScalar(0.86);
+    const storedProp = storedTender.getObjectByName("boat_prop");
+    if (storedProp) storedProp.name = "yacht34_stowed_prop";
+    delete storedTender.userData.boatProp;
+    b.add(storedTender);
+    addFixtureBox(b, "tender-cradle", 0.18, 0.28, 1.80, 0.86, Y.GAR + 0.17, -15.2, chrome);
+    addFixtureBox(b, "tender-cradle", 0.18, 0.28, 1.80, -0.86, Y.GAR + 0.17, -15.2, chrome);
+    addCabinet(b, -1.80, Y.GAR + 0.07, -14.65, 0.48, 0.82, 1.25, liner);
+    addFixtureBox(b, "garage-light", 1.25, 0.05, 0.24, 0, Y.GAR + 2.05, -15.25, warm);
     // TRANSOM STAIRS, swim platform -> beach club, one flight each side of the
     // garage door. 1.93m in one step is far past physics.js's 0.45m STEP_UP:
     // without these the boarding point is a dead end and a swimmer who hauls
@@ -829,16 +985,31 @@
     // 0.90m wide) run clear the full length. That is the critical loop.
     addBox(b, 6.4, 0.14, 3.0, 0, Y.MAIN, -10.0, teak);               // cockpit sole
     addBox(b, 2.6, 0.10, 1.6, 0, Y.MAIN + 0.72, -10.0, teak);        // dining table
-    addPrism(b, 5.20, [[-8.6, Y.MAIN], [-8.6, Y.SUP1], [9.4, Y.SUP1], [10.6, Y.MAIN + 0.35]], 0, hull);
-    addBox(b, 4.6, 2.10, 0.10, 0, Y.MAIN + 1.20, -8.55, glass);   // aft sliding glass
+    addCabinShell(b, { width: 5.20, z0: -8.60, z1: 9.40, y0: Y.MAIN, y1: Y.SUP1,
+      doorW: 1.65, body: hull, liner: liner, glass: glass });
     [1, -1].forEach(function (side) {
-      // saloon long windows
-      addBox(b, 0.10, 1.05, 9.0, side * 2.61, Y.MAIN + 1.35, -3.4, glass);
-      addBox(b, 0.10, 0.85, 4.2, side * 2.52, Y.MAIN + 1.30, 6.2, glass);
       // SIDE DECKS both sides, full length, railed.
       addBox(b, 0.90, 0.12, 20.0, side * 3.05, Y.MAIN + 0.14, 0.4, teak);
       addBox(b, 0.14, 0.75, 20.0, side * 3.48, Y.MAIN + 0.50, 0.4, hull);      // bulwark
       addRail(b, side * 3.42, -9.4, 10.4, Y.MAIN + 0.20, chrome, 2.0);
+    });
+    // Main saloon: the shell now contains a deliberate room with an open
+    // centre aisle. The long lounge, dining zone and galley each occupy a side
+    // instead of being one giant console-shaped obstruction.
+    addBox(b, 4.96, 0.08, 17.0, 0, Y.MAIN + 0.08, 0.35, wood);
+    addBox(b, 4.84, 0.06, 16.3, 0, Y.SUP1 - 0.20, 0.15, liner);
+    addFixtureBox(b, "saloon-settee", 0.68, 0.50, 4.1, 1.88, Y.MAIN + 0.35, -4.4, pad);
+    addFixtureBox(b, "saloon-settee-back", 0.14, 0.78, 4.1, 2.18, Y.MAIN + 0.72, -4.4, pad);
+    addTable(b, 0.72, Y.MAIN + 0.08, -4.4, 1.35, 1.25, wood, chrome);
+    addTable(b, 0, Y.MAIN + 0.08, 1.25, 2.1, 1.25, wood, chrome);
+    [[-1.30, 0.45], [1.30, 0.45], [-1.30, 2.05], [1.30, 2.05]].forEach(function (p) {
+      addSeat(b, p[0], Y.MAIN + 0.08, p[1], p[1] < 1 ? Math.PI : 0, pad, chrome);
+    });
+    addCabinet(b, -2.05, Y.MAIN + 0.08, 4.05, 0.62, 0.94, 3.0, liner);
+    addFixtureBox(b, "galley-counter", 0.72, 0.10, 3.0, -2.00, Y.MAIN + 1.07, 4.05, wood);
+    addScreen(b, 2.28, Y.MAIN + 1.45, -1.5, 1.15, 0.72, Math.PI / 2, screen);
+    [-5.0, 0.0, 5.0].forEach(function (z) {
+      addFixtureBox(b, "ceiling-light", 0.95, 0.04, 0.28, 0, Y.SUP1 - 0.25, z, warm);
     });
     // ---- FOREDECK: windlass, anchor locker, forward sunpad.
     addBox(b, 5.0, 0.14, 4.4, 0, Y.MAIN + 0.30, 12.6, teak);
@@ -857,23 +1028,35 @@
     // ---- UPPER DECK: skylounge aft, WHEELHOUSE FORWARD ON THIS DECK (§F: not
     // at the very top on a hull this size).
     addBox(b, 5.6, 0.16, 17.6, 0, Y.UPPER, 0.2, teak);
-    addPrism(b, 4.60, [[-6.6, Y.UPPER], [-6.6, Y.SUP2], [7.4, Y.SUP2], [8.2, Y.UPPER + 0.30]], 0, hull);
-    addBox(b, 4.2, 1.60, 0.10, 0, Y.UPPER + 1.05, -6.55, glass);
+    addCabinShell(b, { width: 4.60, z0: -6.60, z1: 7.40, y0: Y.UPPER, y1: Y.SUP2,
+      doorW: 1.45, body: hull, liner: liner, glass: glass });
     [1, -1].forEach(function (side) {
-      addBox(b, 0.10, 1.10, 8.0, side * 2.31, Y.UPPER + 1.30, -2.0, glass);
       // upper side decks
       addBox(b, 0.80, 0.12, 12.0, side * 2.65, Y.UPPER + 0.16, 1.0, teak);
       addRail(b, side * 3.00, -6.0, 8.0, Y.UPPER + 0.22, chrome, 2.0);
     });
+    // Skylounge aft of the bridge, distinct in palette and arrangement from
+    // the main saloon below.
+    addBox(b, 4.30, 0.06, 12.8, 0, Y.SUP2 - 0.20, 0.15, liner);
+    addFixtureBox(b, "skylounge-settee", 3.45, 0.48, 0.72, 0, Y.UPPER + 0.34, -4.95, pad);
+    addFixtureBox(b, "skylounge-settee-back", 3.45, 0.78, 0.14, 0, Y.UPPER + 0.72, -5.26, pad);
+    addTable(b, 0, Y.UPPER + 0.08, -3.25, 1.45, 1.1, wood, chrome);
+    addCabinet(b, 1.88, Y.UPPER + 0.08, -1.8, 0.54, 0.92, 2.6, liner);
+    addFixtureBox(b, "skylounge-bar", 0.65, 0.10, 2.6, 1.85, Y.UPPER + 1.08, -1.8, wood);
     // wheelhouse: raked screen, console, two helm chairs
     const wh = addBox(b, 4.2, 1.30, 0.12, 0, Y.UPPER + 1.75, 7.05, glass);
     wh.rotation.x = -0.32;
     addPrism(b, 3.60, [[5.2, Y.UPPER + 0.16], [5.3, Y.UPPER + 1.05], [6.6, Y.UPPER + 1.10], [6.8, Y.UPPER + 0.16]], 0, dark);
     addBox(b, 0.34, 0.34, 0.06, 0.0, Y.UPPER + 1.28, 5.9, dark);
+    [-1.10, 0, 1.10].forEach(function (x) {
+      addScreen(b, x, Y.UPPER + 1.32, 5.36, 0.82, 0.42, 0, screen);
+    });
     [0.85, -0.85].forEach(function (x) {
       addBox(b, 0.56, 0.18, 0.56, x, Y.UPPER + 0.55, 4.9, pad);
       addBox(b, 0.56, 0.50, 0.14, x, Y.UPPER + 0.90, 4.62, pad);
     });
+    addTable(b, 1.65, Y.UPPER + 0.08, 3.55, 0.90, 1.20, wood, chrome);     // chart table
+    addCabinet(b, -1.92, Y.UPPER + 0.08, 3.45, 0.46, 0.88, 1.55, liner);
 
     // ---- SECOND STAIRCASE, upper -> sun deck.
     addStairs(b, 0, 1.30, -6.4, 1, Y.UPPER + 0.16, Y.SUN, 8, teak);
@@ -888,14 +1071,14 @@
     [1, -1].forEach(function (side) {
       addRail(b, side * 2.30, -5.6, 4.4, Y.SUN + 0.08, chrome, 1.8);
     });
-    // mast / radar arch above the sun deck, forward
+    // mast / radar arch: sockets on the sun deck, exact crossbar endpoints.
     [1, -1].forEach(function (side) {
-      const leg = addBox(b, 0.16, 2.0, 0.16, side * 1.10, Y.SUN + 1.05, 4.6, grey);
-      leg.rotation.z = side * 0.09;
+      addTubeBetween(b, [side * 1.20, Y.SUN + 0.08, 4.28], [side * 1.02, Y.SUN + 2.05, 4.60], 0.085, grey, 8);
     });
-    addBox(b, 2.6, 0.18, 0.28, 0, Y.SUN + 2.05, 4.6, grey);
+    addTubeBetween(b, [-1.02, Y.SUN + 2.05, 4.60], [1.02, Y.SUN + 2.05, 4.60], 0.10, grey, 8);
     addCyl(b, 0.34, 0.14, 0, Y.SUN + 2.22, 4.6, grey, 10);
-    addBox(b, 0.10, 1.30, 0.10, 0, Y.SUN + 2.75, 4.6, grey);         // masthead post
+    addTubeBetween(b, [0, Y.SUN + 2.05, 4.60], [0, Y.SUN + 3.40, 4.60], 0.055, grey, 8);
+    b.userData.marineFixtureCount += 9;                               // exterior social/helm fittings
 
     // twin shafts + screws well under the counter
     b.add(propGroup(2.6, [[1.55, Y.KEEL * 0.72, -15.6], [-1.55, Y.KEEL * 0.72, -15.6]]));
@@ -911,6 +1094,7 @@
       { x: 0, z: -4.4, w: 3.6, d: 4.4, top: SHEER + 0.05 },       // cockpit sole
       { x: 1.75, z: 1.4, w: 0.70, d: 7.2, top: SHEER + 0.20 },    // side deck port
       { x: -1.75, z: 1.4, w: 0.70, d: 7.2, top: SHEER + 0.20 },   // side deck stbd
+      { x: 0, z: 0.2, w: 2.58, d: 4.72, top: SHEER + 0.12 },      // enterable saloon sole
       { x: 0, z: 4.7, w: 3.0, d: 3.0, top: SHEER + 0.30 },        // foredeck
       { x: 0, z: 0.5, w: 3.0, d: 4.2, top: 3.81 },                // flybridge
     ];
@@ -919,7 +1103,13 @@
     return {
       decks: decks,
       walls: [
-        { x: 0, z: 0.2, w: 2.80, d: 5.4, y0: SHEER, y1: 3.60 },     // saloon block
+        // Saloon perimeter, not one solid blocker. The 1.0 m opening in the
+        // aft face matches the sliding door and makes the authored room real.
+        { x: 1.40, z: 0.2, w: 0.10, d: 4.8, y0: SHEER + 0.12, y1: 3.60 },
+        { x: -1.40, z: 0.2, w: 0.10, d: 4.8, y0: SHEER + 0.12, y1: 3.60 },
+        { x: 0.92, z: -2.18, w: 0.84, d: 0.10, y0: SHEER + 0.12, y1: 3.60 },
+        { x: -0.92, z: -2.18, w: 0.84, d: 0.10, y0: SHEER + 0.12, y1: 3.60 },
+        { x: 0, z: 2.82, w: 2.70, d: 0.10, y0: SHEER + 0.12, y1: 3.60 },
         { x: 2.08, z: 1.4, w: 0.10, d: 7.2, y0: SHEER + 0.15, y1: SHEER + 1.15 },
         { x: -2.08, z: 1.4, w: 0.10, d: 7.2, y0: SHEER + 0.15, y1: SHEER + 1.15 },
         { x: 1.48, z: 0.45, w: 0.08, d: 3.9, y0: 3.81, y1: 4.75 },  // flybridge rails
@@ -937,6 +1127,7 @@
       { x: 0, z: -10.0, w: 6.4, d: 3.0, top: Y.MAIN + 0.07 },       // dining cockpit
       { x: 3.05, z: 0.4, w: 0.90, d: 20.0, top: Y.MAIN + 0.20 },    // side deck port
       { x: -3.05, z: 0.4, w: 0.90, d: 20.0, top: Y.MAIN + 0.20 },   // side deck stbd
+      { x: 0, z: 0.35, w: 4.96, d: 17.0, top: Y.MAIN + 0.12 },      // enterable main saloon
       { x: 0, z: 12.6, w: 5.0, d: 4.4, top: Y.MAIN + 0.37 },        // foredeck
       { x: 0, z: 0.2, w: 5.6, d: 17.6, top: Y.UPPER + 0.08 },       // upper deck
       { x: 2.65, z: 1.0, w: 0.80, d: 12.0, top: Y.UPPER + 0.22 },   // upper side deck
@@ -951,8 +1142,18 @@
     return {
       decks: decks,
       walls: [
-        { x: 0, z: 0.4, w: 5.20, d: 18.0, y0: Y.MAIN, y1: Y.SUP1 },     // main superstructure
-        { x: 0, z: 0.4, w: 4.60, d: 14.0, y0: Y.UPPER, y1: Y.SUP2 },    // upper superstructure
+        // Main saloon perimeter with an aft double-door opening.
+        { x: 2.60, z: 0.4, w: 0.12, d: 18.0, y0: Y.MAIN + 0.12, y1: Y.SUP1 },
+        { x: -2.60, z: 0.4, w: 0.12, d: 18.0, y0: Y.MAIN + 0.12, y1: Y.SUP1 },
+        { x: 1.75, z: -8.56, w: 1.70, d: 0.12, y0: Y.MAIN + 0.12, y1: Y.SUP1 },
+        { x: -1.75, z: -8.56, w: 1.70, d: 0.12, y0: Y.MAIN + 0.12, y1: Y.SUP1 },
+        { x: 0, z: 9.38, w: 5.10, d: 0.12, y0: Y.MAIN + 0.12, y1: Y.SUP1 },
+        // Upper skylounge / wheelhouse perimeter, also entered at the aft glass.
+        { x: 2.30, z: 0.4, w: 0.12, d: 14.0, y0: Y.UPPER + 0.12, y1: Y.SUP2 },
+        { x: -2.30, z: 0.4, w: 0.12, d: 14.0, y0: Y.UPPER + 0.12, y1: Y.SUP2 },
+        { x: 1.55, z: -6.56, w: 1.45, d: 0.12, y0: Y.UPPER + 0.12, y1: Y.SUP2 },
+        { x: -1.55, z: -6.56, w: 1.45, d: 0.12, y0: Y.UPPER + 0.12, y1: Y.SUP2 },
+        { x: 0, z: 7.38, w: 4.50, d: 0.12, y0: Y.UPPER + 0.12, y1: Y.SUP2 },
         { x: 3.48, z: 0.4, w: 0.14, d: 20.0, y0: Y.MAIN + 0.20, y1: Y.MAIN + 1.30 },
         { x: -3.48, z: 0.4, w: 0.14, d: 20.0, y0: Y.MAIN + 0.20, y1: Y.MAIN + 1.30 },
         { x: 3.00, z: 1.0, w: 0.10, d: 12.0, y0: Y.UPPER + 0.22, y1: Y.UPPER + 1.20 },

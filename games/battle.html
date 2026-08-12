@@ -77,6 +77,9 @@
     border:1px solid rgba(255,255,255,.22);background:transparent;font:700 14px/1 inherit;letter-spacing:.14em}
   #maxline{margin-top:10px;font-size:11px;letter-spacing:.16em;opacity:.5;text-align:center;min-height:14px}
   #bootst{margin-top:14px;font-size:11px;letter-spacing:.2em;opacity:.45;text-align:center;min-height:14px}
+  #boottrack{margin:8px auto 0;max-width:280px;height:2px;border-radius:2px;background:rgba(255,255,255,.1)}
+  #bootbar{height:100%;width:0;border-radius:2px;background:#4fbf6a;transition:width .18s linear}
+  #boottrack.done{opacity:0;transition:opacity .5s}
 
   /* ---- battle chrome ---- */
   #top{position:fixed;left:50%;top:calc(10px + env(safe-area-inset-top,0px));transform:translateX(-50%);
@@ -164,6 +167,7 @@
   <button id="bench">FIND MY MAX</button>
   <div id="maxline"></div>
   <div id="bootst"></div>
+  <div id="boottrack"><div id="bootbar"></div></div>
 </div></div>
 
 <div id="top">
@@ -227,6 +231,13 @@ const SET = {
   bench: Q.get("bench") === "1",
   auto:  Q.get("auto") === "1",
 };
+/* The quality counters cost a segment test and a lane scan on every trigger
+   pull, which is worth paying when a tool is watching and worth nothing when
+   a person is. On for ?auto=1 and ?bench=1 (both are tools), on for ?probe=1,
+   off otherwise. */
+const PROBE = Q.get("probe") === "1" || (Q.get("probe") !== "0" && (SET.auto || SET.bench));
+const SEP_OLD = Q.get("sep") === "old";      // the revert switch — see separateOld()
+const FIRE_OLD = Q.get("fire") === "old";    // ditto, for fire discipline
 const SUPPORTS = [
   { id: "none", label: "NO AIR" },
   { id: "bomber", label: "ONE BOMBER" },
@@ -236,11 +247,34 @@ const SUPPORTS = [
 if (SET.redN < 1) SET.redN = 1;
 if (SET.blueN < 1) SET.blueN = 1;
 
+/* ============================================================ THE GROUND
+   FOUR OF THESE ARE PLACES IN GANG CITY, AT THEIR OWN COORDINATES.
+
+   The first build fought its wars in a procedural desert: 200 box towers on a
+   grid standing in for a city this repo already ships, whole. That is the
+   exact mistake games/bomb-survivor.html deleted a wave earlier, and the note
+   at the top of that page is the whole argument — the studio can RAISE the
+   real map, so a stage flat is a choice nobody has to make.
+
+     city    CBZ.studio.town()  — the real fabric: marked streets, sidewalks,
+             crosswalks, shops with lit signs, and a cluster of the enterable
+             instanced-glass towers the mainland is made of. A man takes cover
+             behind a REAL doorway and a rocket brings down a REAL floor.
+     island  CBZ.studio.raise("militaryisland") — the base at its authored
+             place (-620,-700): fence, airstrip, parked fighters, motor pool.
+     field   CBZ.studio.raise("airport") — Halloran Field: terminal, aprons,
+             the airliners on their stands.
+     dunes   the desert basin, kept, because an open firing line is a
+             different game and worth having.
+     arena   the kill box, kept, because it is the control: no world at all,
+             so anything that goes wrong there is the men, not the map. */
+const TOWN_AT = { x: 0, z: -700 };       // the mainland coordinates bomb-survivor stands on
 const MAPS = {
-  city:  { label: "DESERT CITY", note: "200 towers. streets. hard cover", packs: ["desert"] },
-  dunes: { label: "OPEN DUNES", note: "bare sand. firing lines", packs: ["desert"] },
-  arena: { label: "KILL BOX", note: "flat yard. crates. walls", packs: [] },
-  base:  { label: "AIRBASE", note: "runway. hangars. parked jets", packs: ["desert", "airbase"] },
+  city:   { label: "GANG CITY", note: "the real downtown. streets, glass, doors", packs: ["citycore"] },
+  island: { label: "MILITARY ISLAND", note: "the real base. fence, strip, jets", packs: ["militaryisland", "airbase"] },
+  field:  { label: "HALLORAN FIELD", note: "the real airport. aprons, terminal", packs: ["airport"] },
+  dunes:  { label: "OPEN DUNES", note: "bare sand. firing lines", packs: ["desert"] },
+  arena:  { label: "KILL BOX", note: "flat yard. crates. walls", packs: [] },
 };
 if (!MAPS[SET.map]) SET.map = "city";
 
@@ -272,7 +306,7 @@ const MIX_RIFLES = ["ak47", "carbine", "lmg", "smg", "shotgun", "sniper"];
    Base packs first; the armoury after, in dependency order. Every file in
    the second list is engine source loaded verbatim — the page adds nothing
    to any of them. */
-const NEED = ["caps", "people", "fx", "damage", "sound"].concat(MAPS[SET.map].packs);
+const NEED = ["caps", "people", "fx", "damage", "sound", "batch"];
 const ARMOURY = [
   "weapons/weapon-data.js",
   "weapons/appearances/sidearm.js", "weapons/appearances/shotgun.js",
@@ -287,23 +321,83 @@ const ARMOURY = [
   "systems/combat_iq.js",      // HOW WELL A PERSON FIGHTS — the whole point
   "systems/wounds.js",         // bodies remember hits (optional, self-capping)
 ];
-function loadSrc(rel) {
+/* THE LOAD USED TO BE THIRTY-ONE ROUND TRIPS IN A ROW.
+
+   Both halves waited on one file at a time: studio.need() awaits each pack
+   file before appending the next (it must — the load ORDER is a contract),
+   and the armoury chain above it did the same by hand, one Promise per gun.
+   Serial execution is right; serial DOWNLOADING was never asked for and cost
+   the whole boot on a hop-per-file host.
+
+   So: everything this page could want is FETCHED at once, and executed in
+   exactly the order it always was.
+     • studio.warm()/prefetch() emit <link rel=preload as=script>, which fills
+       the HTTP cache without running a line — need()'s serial chain then
+       finds every file already in hand.
+     • the armoury goes in as one batch of tags with async=false, which is the
+       spec's "execute in order as soon as possible" list. That is safe HERE
+       and not in the studio, because none of these files calls addLandmass,
+       so nothing depends on exactly one script being in flight.
+     • and the person watching gets a real bar instead of three words. */
+const PLAN = CBZ.studio.plan(NEED);
+let TOTAL_FILES = PLAN.files.length + ARMOURY.length;
+let filesIn = 0;
+function bar(label) {
+  const b = el("bootbar");
+  if (b) b.style.width = Math.round(filesIn / Math.max(1, TOTAL_FILES) * 100) + "%";
+  if (label) bootst(label + "  " + filesIn + "/" + TOTAL_FILES);
+}
+CBZ.studio.onProgress(function (p) {
+  filesIn++;
+  bar("LOADING " + p.file.replace(/^.*\//, "").replace(/\.js$/, "").toUpperCase());
+});
+function loadArmoury() {
   return new Promise(function (resolve) {
-    const s = document.createElement("script");
-    s.src = CBZ.studio.root + rel;
-    s.async = false;
-    s.onload = resolve;
-    s.onerror = function () { console.warn("[war] optional file failed:", rel); resolve(); };
-    document.head.appendChild(s);
+    let left = ARMOURY.length;
+    if (!left) return resolve();
+    ARMOURY.forEach(function (rel) {
+      const s = document.createElement("script");
+      s.src = CBZ.studio.root + rel;
+      s.async = false;                        // ordered execution, parallel download
+      const tick = function () {
+        filesIn++; bar("ARMOURY");
+        if (--left === 0) resolve();
+      };
+      s.onload = tick;
+      s.onerror = function () { console.warn("[war] optional file failed:", rel); tick(); };
+      document.head.appendChild(s);
+    });
   });
 }
 
+/* the armoury the way it used to arrive — one file, one round trip, wait,
+   repeat. Kept only so ?warm=0 can put a number on what the change bought. */
+function loadArmourySerial() {
+  let chain = Promise.resolve();
+  ARMOURY.forEach(function (rel) {
+    chain = chain.then(function () {
+      return new Promise(function (resolve) {
+        const s = document.createElement("script");
+        s.src = CBZ.studio.root + rel;
+        s.async = false;
+        s.onload = function () { filesIn++; bar("ARMOURY"); resolve(); };
+        s.onerror = function () { filesIn++; resolve(); };
+        document.head.appendChild(s);
+      });
+    });
+  });
+  return chain;
+}
+
+const WARM = Q.get("warm") !== "0";           // the revert switch for the load
 bootst("OPENING THE STUDIO");
+if (WARM) {
+  CBZ.studio.warm(ARMOURY);                   // in the air before the studio starts
+  CBZ.studio.prefetch(NEED);
+}
 CBZ.studio.need(NEED).then(function () {
   bootst("OPENING THE ARMOURY");
-  let chain = Promise.resolve();
-  ARMOURY.forEach(function (f) { chain = chain.then(function () { return loadSrc(f); }); });
-  return chain;
+  return WARM ? loadArmoury() : loadArmourySerial();
 }).then(function () {
   const THREE = window.THREE;
 
@@ -321,19 +415,27 @@ CBZ.studio.need(NEED).then(function () {
   const COARSE = CBZ.studio.touchDevice;
   if (COARSE) document.body.classList.add("coarse");
 
-  /* ============================================================ MENU */
+  /* ============================================================ MENU
+     THE GROUND IS FETCHED WHILE YOU ARE STILL CHOOSING IT. Picking a map (or
+     buying air support) warms exactly that pack set, so START is a build and
+     not a download. Hover counts too, on anything with a pointer: by the time
+     the finger arrives the city is already in the cache. */
   const mapsEl = el("maps");
   Object.keys(MAPS).forEach(function (id) {
     const b = document.createElement("button");
     b.innerHTML = "<b>" + MAPS[id].label + "</b><i>" + MAPS[id].note + "</i>";
     b.className = id === SET.map ? "on" : "";
-    b.addEventListener("click", function () {
+    const pick = function () {
       SET.map = id;
       mapsEl.querySelectorAll("button").forEach(function (x) { x.className = ""; });
       b.className = "on";
-    });
+      CBZ.studio.prefetch(MAPS[id].packs);
+    };
+    b.addEventListener("click", pick);
+    b.addEventListener("pointerenter", function () { CBZ.studio.prefetch(MAPS[id].packs); });
     mapsEl.appendChild(b);
   });
+  CBZ.studio.prefetch(MAPS[SET.map].packs);       // whatever was chosen last time
   function fillGuns(sel, cur) {
     let h = "";
     GUN_ORDER.forEach(function (id) {
@@ -397,11 +499,23 @@ CBZ.studio.need(NEED).then(function () {
     if (SET.redS === "nuke" || SET.blueS === "nuke") p.push("nukefx");
     return p;
   }
+  // buying air is a decision that costs four packs; warm them on the change,
+  // not on the START press
+  ["redS", "blueS"].forEach(function (k) {
+    el(k).addEventListener("change", function () {
+      SET[k] = el(k).value;
+      CBZ.studio.prefetch(packsFor());
+    });
+  });
   el("start").addEventListener("click", function () {
     readMenu();
     const need = packsFor();
     if (need.length) {
-      bootst("LOADING THE GROUND");
+      filesIn = 0;
+      const groundPlan = CBZ.studio.plan(need);
+      TOTAL_FILES = Math.max(1, groundPlan.files.length);
+      el("boottrack").classList.remove("done");
+      bar("BUILDING THE GROUND");
       CBZ.studio.need(need).then(function () { begin(false); });
     } else begin(false);
   });
@@ -409,12 +523,13 @@ CBZ.studio.need(NEED).then(function () {
     readMenu();
     begin(true);
   });
+  el("boottrack").classList.add("done");
   bootst("READY");
 
   /* ============================================================ STATE */
   const V = function () { return new THREE.Vector3(); };
   const _v = V(), _v2 = V(), _muz = V();
-  let world = null, base = null, MAP = null, hud = null;
+  let world = null, base = null, town = null, MAP = null, hud = null;
   let men = [], corpses = [], rockets = [], dropGuns = [], planes = [];
   const squads = { red: [], blue: [] };
   const AIR = { on: false, nuke: false, nukeAt: 42 };   // nukeAt rescaled at begin: it must land ON a battle, not after one
@@ -451,10 +566,87 @@ CBZ.studio.need(NEED).then(function () {
     CBZ.micro.addBoxCollider(x, h / 2, z, w, h, d);
     return m;
   }
+  /* One deep plate under the ISLAND maps, so a raised island reads as an
+     island and the horizon is water rather than the inside of the sky dome.
+
+     DEEP is the operative word, and the first draft got it wrong at -1.2 m:
+     measured from a street-level camera, the sea won the depth test against
+     the road surface and the whole downtown rendered as open water with lane
+     markings floating on it. A 26 km plane and a 16 km far plane leave very
+     little depth resolution to separate two surfaces a metre apart. At -9 m
+     it is unambiguous at every camera range, and the apron edge below reads
+     as the quay it now is. */
+  function seaPlate(y) {
+    const g = new THREE.PlaneGeometry(26000, 26000);
+    g.rotateX(-Math.PI / 2); g.translate(0, y == null ? -9 : y, 0);
+    const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: 0x2e4c66 }));
+    m.receiveShadow = true; m.matrixAutoUpdate = false; m.updateMatrix();
+    m.userData.terrain = true;
+    CBZ.scene.add(m);
+  }
+  function apron(minX, maxX, minZ, maxZ, color) {
+    const g = new THREE.PlaneGeometry(maxX - minX, maxZ - minZ);
+    g.rotateX(-Math.PI / 2);
+    g.translate((minX + maxX) / 2, 0.004, (minZ + maxZ) / 2);
+    const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: color || 0x8d9198 }));
+    m.receiveShadow = true; m.matrixAutoUpdate = false; m.updateMatrix();
+    m.userData.terrain = true;
+    CBZ.scene.add(m);
+  }
+
+  /* NOBODY SPAWNS INSIDE A BUILDING. The desert maps could get away without
+     this — a dune has nothing in it — but the moment the ground is a real
+     downtown, a ranked column drawn on paper puts a third of an army inside
+     the Exchange Bank, where nothing can see them and nothing can shoot them.
+     A golden-angle spiral, so the search is a spiral and not a ring: the
+     first free point is genuinely the nearest one, and it is deterministic. */
+  const _fs = [];
+  function blockedAt(x, z) {
+    const cols = CBZ.micro.queryColliders(x, z, 0.9, _fs);
+    for (let c = 0; c < cols.length; c++) {
+      const b = cols[c];
+      if (x < b.minX - 0.55 || x > b.maxX + 0.55) continue;
+      if (z < b.minZ - 0.55 || z > b.maxZ + 0.55) continue;
+      if (b.y0 != null && b.y1 != null && (b.y1 < 0.35 || b.y0 > 1.7)) continue;  // a kerb is not a wall
+      return true;
+    }
+    return false;
+  }
+  function freeSpot(x, z) {
+    if (!blockedAt(x, z)) return { x: x, z: z };
+    for (let r = 1; r < 40; r++) {
+      const a = r * 2.399963229728653, d = r * 1.35;      // golden angle
+      const px = x + Math.cos(a) * d, pz = z + Math.sin(a) * d;
+      if (!blockedAt(px, pz)) return { x: px, z: pz };
+    }
+    return { x: x, z: z };
+  }
+
+  /* SPAWN ON THE STREET, NOT ON A GRID. Given the town's own road records,
+     each side forms up in the outermost north-south streets on its half and
+     walks in. That is one lookup per man and it is the reason an urban fight
+     reads as an assault down avenues instead of two blocks of men shuffling
+     through masonry. */
+  function streetSpawner(roads, cx, cz, side) {
+    const lanes = (roads || []).filter(function (r) {
+      return r.vertical && (r.x - cx) * side > 24;
+    }).sort(function (a, b) { return Math.abs(b.x - cx) - Math.abs(a.x - cx); }).slice(0, 3);
+    if (!lanes.length) return null;
+    return function (i) {
+      const L = lanes[i % lanes.length];
+      const k = (i / lanes.length) | 0;
+      const row = k % 11, rank = (k / 11) | 0;
+      const t = (row - 5) * (L.len / 13);
+      const off = ((rank % 2) ? 1 : -1) * Math.min(L.w * 0.3, 3.4) + (sWorld() - 0.5) * 1.4;
+      const along = ((rank / 2) | 0) * 3.2 * side;         // ranks stack BEHIND
+      return { x: L.x + off + along, z: L.z + t + (sWorld() - 0.5) * 1.4 };
+    };
+  }
+
   function buildMap(id) {
-    const gap = { city: 190, dunes: 150, arena: 120, base: 170 }[id] || 150;
+    const gap = { city: 300, island: 230, field: 260, dunes: 150, arena: 120 }[id] || 150;
     let groundAt = function () { return 0; };
-    let cx = 0, cz = 0;
+    let cx = 0, cz = 0, spawners = null;
 
     if (id === "arena") {
       flatDisc(260, 0x6b6657, 0);
@@ -469,28 +661,64 @@ CBZ.studio.need(NEED).then(function () {
         crate(x, z, 2.4 + sWorld() * 4.4, tall ? 1.9 + sWorld() * 0.6 : 1.15,
           1.6 + sWorld() * 2.6, sWorld() < 0.5 ? 0x7a5f43 : 0x5d6a70);
       }
-    } else {
+    } else if (id === "dunes") {
       world = CBZ.studio.world("desert", { seed: "npcwar" });
       groundAt = (world && world.heightAt) || groundAt;
-      if (id === "dunes") { cx = (world.rings && world.rings.city ? world.rings.city : 900) + 650; cz = 0; }
-      if (id === "base") {
-        const R = (world.rings && world.rings.city ? world.rings.city : 900);
-        cx = R + 780; cz = R * 0.3;
-        base = CBZ.airbase && CBZ.airbase.build
-          ? CBZ.airbase.build({ x: cx, z: cz, heading: Math.atan2(cz, -cx), groundAt: groundAt, seed: "npcwar-base" })
-          : null;
+      cx = (world && world.rings && world.rings.city ? world.rings.city : 900) + 650; cz = 0;
+    } else if (id === "city") {
+      // THE REAL FABRIC. Eight blocks square is 490 m of street — big enough
+      // that an army has to cross ground it does not own, small enough that
+      // the two sides find each other without a search party.
+      cx = TOWN_AT.x; cz = TOWN_AT.z;
+      town = CBZ.studio.town({
+        at: TOWN_AT, seed: "npcwar-" + (Q.get("seed") || "talloran"), name: "Talloran",
+        cols: 8, rows: 8, blockW: 44, blockD: 44, roadW: 15,
+        // the studio's default downtown palette is authored for the mainland's
+        // own light. Under this map's sun the sidewalks and the square came
+        // out as paper — a white field with a road painted on it — so the
+        // stone comes down to something a camera can still see men against.
+        palette: {
+          ground: 0x5f636a, sidewalk: 0x6d7278, road: 0x2b2e34,
+          plaza: 0x6f747b, wood: 0x4c545d, accent: 0x616a75,
+        },
+      });
+      if (town && town.rect) {
+        // a WIDE apron and no water: the downtown is inland, and the sea plate
+        // this map used to carry was the thing fighting the road for the depth
+        // buffer. Ground that runs out to the fog is the honest answer here.
+        apron(town.rect.minX - 900, town.rect.maxX + 900, town.rect.minZ - 900, town.rect.maxZ + 900, 0x555a61);
+        spawners = {
+          red: streetSpawner(town.roads, cx, cz, -1),
+          blue: streetSpawner(town.roads, cx, cz, 1),
+        };
       }
+    } else if (id === "island") {
+      seaPlate();
+      base = CBZ.studio.raise("militaryisland");
+      cx = -620; cz = -700;                       // the island's authored centre
+      apron(cx - 400, cx + 400, cz - 300, cz + 300, 0x7d7a6c);
+    } else if (id === "field") {
+      seaPlate();
+      base = CBZ.studio.raise("airport");
+      cx = -305; cz = -120;                       // mid-field, x -900..290 / z -280..40
+      apron(-960, 350, -340, 100, 0x8a8d8f);
     }
+
+    const grid = function (team, i) {
+      const side = team === "red" ? -1 : 1;
+      const col = (i / 10) | 0, row = i % 10;
+      const x = cx + side * (gap / 2 + 8 + col * 3.1) + (sWorld() - 0.5) * 1.8;
+      const z = cz + (row - 4.5) * 3.4 + (col % 2) * 1.7 + (sWorld() - 0.5) * 1.8;
+      return { x: x, z: z };
+    };
     return {
       id: id, gap: gap, cx: cx, cz: cz, groundAt: groundAt,
-      // team spawn: ranked columns either side of the centre, jittered so a
-      // thousand men do not form a copied lattice
+      // team spawn: down the streets where there are streets, ranked columns
+      // where there are not, and in both cases OUT of the geometry
       spawnAt: function (team, i) {
-        const side = team === "red" ? -1 : 1;
-        const col = Math.floor(i / 10), row = i % 10;
-        const x = cx + side * (gap / 2 + 8 + col * 3.1) + (sWorld() - 0.5) * 1.8;
-        const z = cz + (row - 4.5) * 3.4 + (col % 2) * 1.7 + (sWorld() - 0.5) * 1.8;
-        return { x: x, z: z };
+        const s = spawners && spawners[team];
+        const p = (s && s(i)) || grid(team, i);
+        return freeSpot(p.x, p.z);
       },
     };
   }
@@ -667,11 +895,136 @@ CBZ.studio.need(NEED).then(function () {
     }
     return best;
   }
-  // BODIES ARE NOT GHOSTS. Goal-level spacing is not enough once a column
-  // converges on one point, so overlapping pairs get pushed apart for real,
-  // cell by cell. Grid cells are rebuilt on a slow tick; a push a few frames
-  // stale still points the right way.
+  /* THE NEAREST MAN IS NOT THE MAN YOU CAN SHOOT. On open sand those are the
+     same sentence and the old code was right; put a city under it and the
+     nearest enemy is routinely three buildings away, so every soldier locked
+     onto somebody he could not see, waited out 2.6 s of `losBadT`, and
+     assaulted a facade while a clean target stood in the street beside him.
+     So: gather the near candidates, and prefer one there is a line to. The
+     LOS tests only happen on a RE-target — a man keeps his mark until it dies
+     or the dead-end timer gives up on it — so this is a handful of segment
+     tests per casualty, not per frame. */
+  const _cand = [];
+  function pickTarget(m, range) {
+    const cx = Math.floor(m.pos.x / GRID_CELL), cz = Math.floor(m.pos.z / GRID_CELL);
+    const maxR = Math.ceil(range / GRID_CELL);
+    _cand.length = 0;
+    for (let r = 0; r <= maxR; r++) {
+      for (let dx = -r; dx <= r; dx++) for (let dz = -r; dz <= r; dz++) {
+        if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+        const a = grid.get(gridKey(cx + dx, cz + dz));
+        if (!a) continue;
+        for (let i = 0; i < a.length; i++) {
+          const o = a[i];
+          if (o.team === m.team || o.dead) continue;
+          const d2 = (o.pos.x - m.pos.x) * (o.pos.x - m.pos.x) + (o.pos.z - m.pos.z) * (o.pos.z - m.pos.z);
+          if (d2 < range * range) _cand.push(o, d2);
+        }
+      }
+      if (_cand.length >= 12 && r > 1) break;
+    }
+    if (!_cand.length) return null;
+    // nearest first, then the first four get asked whether they can be seen
+    let bestO = null, bestD = 1e18;
+    for (let i = 0; i < _cand.length; i += 2) if (_cand[i + 1] < bestD) { bestD = _cand[i + 1]; bestO = _cand[i]; }
+    let tries = 0;
+    while (tries < 4) {
+      let o = null, od = 1e18, oi = -1;
+      for (let i = 0; i < _cand.length; i += 2) {
+        if (_cand[i] && _cand[i + 1] < od) { od = _cand[i + 1]; o = _cand[i]; oi = i; }
+      }
+      if (!o) break;
+      _cand[oi] = null;
+      tries++;
+      if (eyeLos(m, o)) return o;
+    }
+    return bestO;               // nobody visible: take the nearest and go to him
+  }
+  /* ============================================================ BODIES
+     A MAN IS 0.52 m ACROSS THE SHOULDERS AND THE GRID WAS 14 m WIDE.
+
+     The old separation pass ran on the TARGET-SEARCH grid, and the two jobs
+     want opposite cells: target search wants cells big enough that a 175 m
+     look is a handful of lookups, separation wants cells at BODY scale. On a
+     14 m cell it could only ever be wrong in three ways at once, and all
+     three were measured:
+
+       • it never compared across a cell boundary, so two men 0.2 m apart on
+         opposite sides of an invisible line interpenetrated forever;
+       • it capped the inner loop at five neighbours (`i + 6`), so in the
+         press of a real fight most pairs in the same cell were skipped, and
+         WHICH five depended on spawn order;
+       • it fired at 1.0 m, which for a 0.52 m body is contact, not clearance.
+
+     So bodies get their own grid at 2.4 m — wide enough that a 0.9 m
+     clearance test only ever needs the cell and its four FORWARD neighbours,
+     which visits every pair exactly once — rebuilt every sub-step, because a
+     stale body grid is exactly the thing that lets two men swap cells and
+     stop seeing each other. */
+  const SEP = 0.9;               // centre-to-centre clearance two men keep
+  const FINE = 2.4;              // cell: > SEP, so a 3x3 sweep is complete
+  const fine = new Map();
+  function rebuildFine() {
+    fine.clear();
+    for (let i = 0; i < men.length; i++) {
+      const m = men[i];
+      if (m.dead) continue;
+      const k = gridKey(Math.floor(m.pos.x / FINE), Math.floor(m.pos.z / FINE));
+      let a = fine.get(k);
+      if (!a) { a = []; fine.set(k, a); }
+      a.push(m);
+    }
+  }
+  // the four cells that make each pair appear once: same cell (j > i), then
+  // E, NE, N, NW. Anything closer than one cell is inside this fan.
+  const FAN = [[1, 0], [1, 1], [0, 1], [-1, 1]];
   function separatePass(k) {
+    if (SEP_OLD) return separateOld(k);
+    fine.forEach(function (a, key) {
+      for (let i = 0; i < a.length; i++) {
+        const m = a[i];
+        if (m.dead) continue;
+        for (let j = i + 1; j < a.length; j++) push2(m, a[j], k);
+        const cx = Math.floor(m.pos.x / FINE), cz = Math.floor(m.pos.z / FINE);
+        for (let f = 0; f < 4; f++) {
+          const b = fine.get(gridKey(cx + FAN[f][0], cz + FAN[f][1]));
+          if (!b) continue;
+          for (let j = 0; j < b.length; j++) push2(m, b[j], k);
+        }
+      }
+    });
+  }
+  function push2(m, o, k) {
+    if (o.dead || o === m) return;
+    const dx = o.pos.x - m.pos.x, dz = o.pos.z - m.pos.z;
+    const d2 = dx * dx + dz * dz;
+    if (d2 > SEP * SEP) return;
+    let d = Math.sqrt(d2), ux, uz;
+    if (d < 1e-4) {
+      // exactly co-located: a deterministic bearing off the pair's own ids,
+      // never Math.random — two men in the same spot must part the same way
+      // every run or the battle stops being reproducible
+      const a = ((m.i * 37 + o.i * 91) % 360) * Math.PI / 180;
+      ux = Math.cos(a); uz = Math.sin(a); d = 1e-4;
+    } else { ux = dx / d; uz = dz / d; }
+    // A DEEP OVERLAP IS NOT A SPRING. Relaxation at k≈0.4 walks two men apart
+    // over a few frames, which is right for a crowd easing itself out and
+    // wrong for two bodies genuinely inside each other — that has to be gone
+    // THIS step or it is on screen. Inside shoulder width the correction is
+    // full; outside it, the soft pass keeps the crowd from jittering.
+    const push = (SEP - d) * 0.5 * (d < 0.62 ? 1 : k);
+    m.pos.x -= ux * push; m.pos.z -= uz * push;
+    o.pos.x += ux * push; o.pos.z += uz * push;
+    // a shove is a move, and a move has to answer to the walls. Marking them
+    // makes the NEXT step resolve them instead of every one of them now: a
+    // body squeezed into a crate is invisible to every line of sight, so it
+    // is immortal, and a battle with an immortal in it cannot end.
+    m.resT = 0; o.resT = 0;
+  }
+  /* THE PASS THIS ONE REPLACED, kept so the claim is two-sided: ?sep=old and
+     the overlap count has to come BACK. A fix that cannot be turned off has
+     not been measured, it has been asserted. */
+  function separateOld(k) {
     grid.forEach(function (a) {
       for (let i = 0; i < a.length; i++) {
         const m = a[i];
@@ -691,6 +1044,131 @@ CBZ.studio.need(NEED).then(function () {
       }
     });
   }
+  // NEIGHBOURS, for anything that needs to ask about bodies rather than push
+  // them: the fire-discipline lane test, and the director.
+  const _fine1 = [];
+  function fineNear(x, z, r, out) {
+    out = out || _fine1;
+    out.length = 0;
+    const x0 = Math.floor((x - r) / FINE), x1 = Math.floor((x + r) / FINE);
+    const z0 = Math.floor((z - r) / FINE), z1 = Math.floor((z + r) / FINE);
+    for (let cx = x0; cx <= x1; cx++) for (let cz = z0; cz <= z1; cz++) {
+      const a = fine.get(gridKey(cx, cz));
+      if (a) for (let i = 0; i < a.length; i++) out.push(a[i]);
+    }
+    return out;
+  }
+  /* ============================================================ THE WAY THROUGH
+     A MAN IS NOT A PATHFINDER — AND IN A CITY THAT IS NOT SURVIVABLE.
+
+     Measured, first build on the real downtown: 25 of 40 men in slot "push",
+     `cool` at -28 s, both armies 135 m apart with eight blocks of masonry
+     between them and not a shot fired for half a minute. The wall-slide
+     detour is the right instinct for a crate and hopeless against a city
+     block: a man walks into the Exchange Bank, slides 1.5 s along the
+     facade, turns back into it, and does that until the clock runs out.
+
+     So the ground gets a FLOW FIELD, and it is multi-source on purpose. Seed
+     Dijkstra from EVERY living enemy at once and the resulting field is
+     "path distance to the nearest enemy" — one solve, and each man descending
+     it walks toward whichever opponent is genuinely closest THROUGH the
+     streets, not the one closest as the crow flies. Seeding from a centre of
+     mass instead funnels an army into a single point, which is what the first
+     draft did and what the corner-bunching in the measurement was.
+
+     Cells are 4 m: a 15 m street is three of them wide, and a 490 m town is
+     22 500 cells, which Dial's bucket queue clears in about a millisecond.
+     The blocked map is built ONCE, because buildings do not move; the field
+     is re-solved on a slow tick, because men do. */
+  const NAV = { cell: 4, x0: 0, z0: 0, w: 0, h: 0, block: null, on: false,
+    dist: { red: null, blue: null }, at: { red: -9, blue: -9 }, solves: 0, blocked: 0 };
+  const NBX = [1, -1, 0, 0, 1, 1, -1, -1], NBZ = [0, 0, 1, -1, 1, -1, 1, -1];
+  const NAV_MAXD = 6000;                        // ~2.4 km of path; past that, no route
+  function navBuild(cx, cz, radius) {
+    const C = NAV.cell;
+    const w = Math.max(8, Math.ceil(radius * 2 / C));
+    NAV.x0 = cx - radius; NAV.z0 = cz - radius; NAV.w = w; NAV.h = w;
+    const block = new Uint8Array(w * w);
+    let blocked = 0;
+    for (let iz = 0; iz < w; iz++) for (let ix = 0; ix < w; ix++) {
+      if (blockedAt(NAV.x0 + (ix + 0.5) * C, NAV.z0 + (iz + 0.5) * C)) { block[iz * w + ix] = 1; blocked++; }
+    }
+    NAV.block = block; NAV.blocked = blocked;
+    // NOTHING IN THE WAY MEANS NO FIELD. On open sand a gradient is a worse
+    // straight line than a straight line, and the solve is pure cost.
+    NAV.on = blocked > 24;
+    NAV.dist.red = new Uint16Array(w * w);
+    NAV.dist.blue = new Uint16Array(w * w);
+    NAV.at.red = NAV.at.blue = -9;
+    return NAV.on;
+  }
+  const _bk = [];
+  function navSolve(team) {
+    const w = NAV.w, C = NAV.cell, blk = NAV.block, d = NAV.dist[team];
+    if (!d) return 0;
+    d.fill(65535);
+    for (let i = 0; i < NAV_MAXD; i++) { if (!_bk[i]) _bk[i] = []; else _bk[i].length = 0; }
+    let seeded = 0;
+    for (let i = 0; i < men.length; i++) {
+      const m = men[i];
+      if (m.dead || m.team === team) continue;
+      const ix = ((m.pos.x - NAV.x0) / C) | 0, iz = ((m.pos.z - NAV.z0) / C) | 0;
+      if (ix < 0 || iz < 0 || ix >= w || iz >= w) continue;
+      const k = iz * w + ix;
+      if (d[k] !== 0) { d[k] = 0; _bk[0].push(k); seeded++; }
+    }
+    NAV.at[team] = simT;
+    if (!seeded) return 0;
+    for (let b = 0; b < NAV_MAXD; b++) {
+      const q = _bk[b];
+      if (!q.length) continue;
+      for (let qi = 0; qi < q.length; qi++) {
+        const k = q[qi];
+        if (d[k] !== b) continue;                       // a cheaper route already claimed it
+        const ix = k % w, iz = (k / w) | 0;
+        for (let n = 0; n < 8; n++) {
+          const nx = ix + NBX[n], nz = iz + NBZ[n];
+          if (nx < 0 || nz < 0 || nx >= w || nz >= w) continue;
+          const nk = nz * w + nx;
+          if (blk[nk]) continue;
+          const nd = b + (n < 4 ? 10 : 14);
+          if (nd < d[nk] && nd < NAV_MAXD) { d[nk] = nd; _bk[nd].push(nk); }
+        }
+      }
+      q.length = 0;
+    }
+    NAV.solves++;
+    return seeded;
+  }
+  /* Descend the field a few cells and hand back where that lands. Three steps
+     rather than one because a single-cell goal is 4 m away and makes a column
+     walk in stair steps; three is far enough to read as a direction and near
+     enough that the next think re-asks. */
+  function navStep(m, out) {
+    if (!NAV.on) return false;
+    const w = NAV.w, C = NAV.cell, d = NAV.dist[m.team];
+    if (!d) return false;
+    let ix = ((m.pos.x - NAV.x0) / C) | 0, iz = ((m.pos.z - NAV.z0) / C) | 0;
+    if (ix < 1 || iz < 1 || ix >= w - 1 || iz >= w - 1) return false;
+    if (d[iz * w + ix] === 65535) return false;         // no route from here
+    let moved = false;
+    for (let s = 0; s < 3; s++) {
+      let best = d[iz * w + ix], bx = -1, bz = -1;
+      for (let n = 0; n < 8; n++) {
+        const nx = ix + NBX[n], nz = iz + NBZ[n];
+        if (nx < 1 || nz < 1 || nx >= w - 1 || nz >= w - 1) continue;
+        const v = d[nz * w + nx];
+        if (v < best) { best = v; bx = nx; bz = nz; }
+      }
+      if (bx < 0) break;
+      ix = bx; iz = bz; moved = true;
+      if (best === 0) break;                            // standing on him
+    }
+    if (!moved) return false;
+    out.set(NAV.x0 + (ix + 0.5) * C, 0, NAV.z0 + (iz + 0.5) * C);
+    return true;
+  }
+
   const teamCOM = { red: { x: 0, z: 0 }, blue: { x: 0, z: 0 } };
   const HUNT = { red: false, blue: false };
   let comAt = -1;
@@ -719,6 +1197,54 @@ CBZ.studio.need(NEED).then(function () {
   function eyeLos(m, o) {
     return !CBZ.micro.segmentBlocked(m.pos.x, m.pos.y + 1.52, m.pos.z, o.pos.x, o.pos.y + 1.35, o.pos.z);
   }
+  /* IS ONE OF MINE STANDING IN THIS LANE? Only the near end is asked: past
+     about twelve metres the round has cleared the firing line and anybody it
+     meets is the enemy's problem. Cheap enough to ask on every trigger pull,
+     which is what makes it a rule and not a report. */
+  function mateInLane(m, tgt) {
+    const dx = tgt.pos.x - m.pos.x, dz = tgt.pos.z - m.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d < 0.5) return 0;
+    const nx = dx / d, nz = dz / d, reach = Math.min(d - 0.6, 12);
+    if (reach <= 1) return 0;
+    const a = fineNear(m.pos.x + nx * reach * 0.5, m.pos.z + nz * reach * 0.5, reach * 0.5 + 1.2);
+    let worst = 0, worstOff = 9;
+    for (let i = 0; i < a.length; i++) {
+      const o = a[i];
+      if (o === m || o.dead || o.team !== m.team) continue;
+      const ox = o.pos.x - m.pos.x, oz = o.pos.z - m.pos.z;
+      const along = ox * nx + oz * nz;
+      if (along < 0.8 || along > reach) continue;
+      const off = ox * nz - oz * nx;                 // SIGNED: which side he is on
+      if (Math.abs(off) < 0.62 && Math.abs(off) < worstOff) {
+        worstOff = Math.abs(off);
+        worst = off >= 0 ? 1 : -1;                   // 0 means clear, ±1 the side
+      }
+    }
+    return worst;
+  }
+  /* AND THE MAN GETS OUT OF THE WAY. Measured before this rule: 167 of 776
+     rounds — one in five — fired down a lane one of the shooter's own men was
+     standing in, and because a friendly round in this game passes through a
+     friendly body, the result was not fratricide, it was GHOST BULLETS. Worse
+     to watch than a friendly-fire kill and impossible to read.
+
+     Holding fire alone would produce a rank of men who never shoot, so the
+     answer is the one a rifleman actually uses: step off the line. He moves
+     to the side the mate is NOT on — moving a shoulder-width perpendicular
+     grows the mate's offset from the new line by (1 - along/d) of the step,
+     so away-from-him is the direction that clears fastest — and he keeps his
+     mark the whole time. */
+  function stepOffLine(m, tgt, side) {
+    const dx = tgt.pos.x - m.pos.x, dz = tgt.pos.z - m.pos.z;
+    const d = Math.hypot(dx, dz) || 1;
+    const nx = dx / d, nz = dz / d;
+    const s = -side;                                  // away from the man in the way
+    m.target.set(m.pos.x + nz * s * 2.4, 0, m.pos.z - nx * s * 2.4);
+    m.slot = "sidestep";
+    m.stepAsideT = 0.55;
+    m.cool = Math.max(m.cool, 0.18);                  // and he does NOT fire through him
+  }
   function camDist2(p) {
     const c = CBZ.camera.position;
     return (p.x - c.x) * (p.x - c.x) + (p.y - c.y) * (p.y - c.y) + (p.z - c.z) * (p.z - c.z);
@@ -728,6 +1254,12 @@ CBZ.studio.need(NEED).then(function () {
     const w = CBZ.weaponById(m.wid);
     m.mag--; m.lastShotT = simT;
     stats[m.team].shots++;
+    if (PROBE) {
+      // both counters are asked AT THE TRIGGER and with a fresh test, because
+      // a cached answer from the last think is exactly the thing being checked
+      if (!eyeLos(m, tgt)) QUAL.blindFire++;
+      if (mateInLane(m, tgt)) QUAL.throughMate++;
+    }
     if (shotsRing.length > 90) shotsRing.shift();
     shotsRing.push({ x: m.pos.x, z: m.pos.z, t: simT, m: m });
 
@@ -1085,25 +1617,35 @@ CBZ.studio.need(NEED).then(function () {
     const crowd = men.length;
     m.thinkAt = now + 0.14 + Math.min(0.42, crowd / 2600) + lcg() * 0.06;
     m.hunt = HUNT[m.team];
+    // a man stepping off his own man's firing line finishes the step. Half a
+    // second of not re-deciding is the whole point: re-deciding is what put
+    // him back in the lane.
+    if (m.stepAsideT > 0 && m.tgt && !m.tgt.dead) { m.stepAsideT -= thinkDt; return; }
 
-    if (!m.tgt || m.tgt.dead) { m.tgt = nearestEnemy(m, m.hunt ? SIGHT * 2 : SIGHT); m.losBadT = 0; }
+    if (!m.tgt || m.tgt.dead) { m.tgt = pickTarget(m, m.hunt ? SIGHT * 2 : SIGHT); m.losBadT = 0; }
     const tgt = m.tgt;
     if (!tgt) {
       // nobody in sight: MARCH. Squads move as ranked columns behind their
       // senior man — the approach reads as an army, and it costs one lookup
       // per follower. Contact dissolves the parade: the moment anyone has a
       // mark, combat_iq owns him.
+      //
+      // THE SENIOR MAN IS THE ONLY ONE WHO NAVIGATES. He descends the flow
+      // field, the column trails him on his own bearing, and a squad rounds a
+      // block as a squad. Before this, every follower solved the same wall
+      // independently and the formation came apart on the first corner.
       const com = teamCOM[m.team === "red" ? "blue" : "red"];
       const sq = squads[m.team][m.sq];
       let lead = null;
       if (sq) for (let i = 0; i < sq.length; i++) if (!sq[i].dead) { lead = sq[i]; break; }
       if (lead && lead !== m) {
-        const my = Math.atan2(com.x - lead.pos.x, com.z - lead.pos.z);
+        const ahead = lead.target;
+        const my = Math.atan2(ahead.x - lead.pos.x, ahead.z - lead.pos.z);
         const row = ((m.sqSlot / 2) | 0) + 1, col = (m.sqSlot & 1) ? 1.25 : -1.25;
         m.target.set(
           lead.pos.x - Math.sin(my) * row * 2.0 + Math.cos(my) * col, 0,
           lead.pos.z - Math.cos(my) * row * 2.0 - Math.sin(my) * col);
-      } else {
+      } else if (!navStep(m, m.target)) {
         const j = m.hunt ? 0 : 14;      // a hunt marches STRAIGHT at them
         m.target.set(com.x + (lcg() - 0.5) * j, 0, com.z + (lcg() - 0.5) * j);
       }
@@ -1116,13 +1658,14 @@ CBZ.studio.need(NEED).then(function () {
       m.losBadT += thinkDt;
       // a wall has held this line too long: push up on the mark instead of
       // trading nothing with a facade. The assault around the corner IS the
-      // readable behaviour.
+      // readable behaviour — and "around" is the field's word, not a straight
+      // line into the facade, which is what it used to mean.
       if (m.losBadT > 2.6) {
         // and a mark that stays unseeable even at arm's length is a dead end
         // (a body wedged in geometry, a hole nobody can shoot into) — let it
         // go and take the next fight rather than freezing the war on it
         if (m.losBadT > 7) { m.tgt = null; m.losBadT = 0; return; }
-        m.target.set(tgt.pos.x, 0, tgt.pos.z);
+        if (!navStep(m, m.target)) m.target.set(tgt.pos.x, 0, tgt.pos.z);
         m.slot = "push";
         return;
       }
@@ -1263,8 +1806,21 @@ CBZ.studio.need(NEED).then(function () {
     let fireMax = p ? Math.min(125, p.hi * 2.6 + 8) : 60;
     if (m.hunt) fireMax *= 1.6;          // running a man down includes shooting at him
     if (!m.sees || dist > fireMax) return;
-    if (m.slot !== "fire" && m.slot !== "peek" && m.slot !== "push" && dist > 12) return;
+    if (m.slot !== "fire" && m.slot !== "peek" && m.slot !== "push" && m.slot !== "sidestep" && dist > 12) return;
     if (m.cool > 0) return;
+    /* THE LINE IS CHECKED WHEN THE TRIGGER IS PULLED, NOT WHEN HE LAST THOUGHT.
+       `m.sees` is up to half a second old — a think-tick answer about two men
+       who have both been moving since — and stale LOS is how rounds get fired
+       into a wall that closed in between (measured: 2 in the kill box, and it
+       is the walls that move the count, not the men). This test only runs
+       once the cooldown has already expired, so it costs about one segment
+       trace per shot and it is what makes the blind-fire counter honest. */
+    if (!FIRE_OLD) {
+      m.sees = eyeLos(m, tgt);
+      if (!m.sees) { m.cool = 0.12; return; }
+      const side = mateInLane(m, tgt);
+      if (side) { stepOffLine(m, tgt, side); return; }
+    }
     const w = CBZ.weaponById(m.wid);
     const r = CBZ.combatIQ && CBZ.combatIQ.shot
       ? CBZ.combatIQ.shot(m, tgt, dist, 0, w ? w.damage : 14) : null;
@@ -1292,6 +1848,19 @@ CBZ.studio.need(NEED).then(function () {
     wFocus: V(), wYaw: 0.9, wPitch: 0.62, wDist: 64,
     followM: null, cutAt: 0, shot: "crane", craneSpin: 0.05,
   };
+  /* THE CAMERA DOES NOT GO THROUGH A WALL.
+
+     On sand and in the kill box the only thing between the lens and the fight
+     was air, so the orbit arm never had to ask. Put the same director in the
+     real downtown and it parks inside the Exchange Bank every other cut —
+     measured, the first city capture of this wave is a screenshot of an
+     office interior with a battle somewhere outside it.
+
+     One segment test from the focus outward, and the arm shortens until the
+     line is clear. It SNAPS in (a frame of masonry across the lens is worse
+     than a jump) and eases back out, which is the ordinary third-person
+     answer and the reason a pillar does not make the shot pump. */
+  let camOccl = 1;
   function camApply(dt) {
     const k = 1 - Math.pow(0.002, dt);
     cam.focus.lerp(cam.wFocus, k);
@@ -1300,13 +1869,29 @@ CBZ.studio.need(NEED).then(function () {
     cam.dist += (cam.wDist - cam.dist) * k;
     const c = CBZ.camera;
     const cp = Math.max(0.12, Math.min(1.42, cam.pitch));
-    const x = cam.focus.x + Math.sin(cam.yaw) * Math.cos(cp) * cam.dist;
-    const z = cam.focus.z + Math.cos(cam.yaw) * Math.cos(cp) * cam.dist;
-    let y = cam.focus.y + Math.sin(cp) * cam.dist;
+    const sx = Math.sin(cam.yaw) * Math.cos(cp), sz = Math.cos(cam.yaw) * Math.cos(cp), sy = Math.sin(cp);
+    const fy = cam.focus.y + 1.2;
+    let want = 1;
+    if (CBZ.micro.segmentBlocked) {
+      for (let t = 0; t < 6; t++) {
+        const d = cam.dist * want;
+        const px = cam.focus.x + sx * d, pz = cam.focus.z + sz * d;
+        let py = cam.focus.y + sy * d;
+        const g = MAP.groundAt(px, pz) + 1.6;
+        if (py < g) py = g;
+        if (!CBZ.micro.segmentBlocked(cam.focus.x, fy, cam.focus.z, px, py, pz)) break;
+        want *= 0.62;
+        if (cam.dist * want < 2.6) { want = 2.6 / Math.max(0.001, cam.dist); break; }
+      }
+    }
+    camOccl = want < camOccl ? want : camOccl + (want - camOccl) * Math.min(1, dt * 1.6);
+    const dist = cam.dist * camOccl;
+    const x = cam.focus.x + sx * dist, z = cam.focus.z + sz * dist;
+    let y = cam.focus.y + sy * dist;
     const g = MAP.groundAt(x, z) + 1.6;
     if (y < g) y = g;
     c.position.set(x, y, z);
-    c.lookAt(cam.focus.x, cam.focus.y + 1.2, cam.focus.z);
+    c.lookAt(cam.focus.x, fy, cam.focus.z);
   }
   function hotspot() {
     if (!shotsRing.length) return null;
@@ -1545,20 +2130,42 @@ CBZ.studio.need(NEED).then(function () {
   /* ============================================================ BEGIN */
   function begin(asBench) {
     el("menu").style.display = "none";
-    const arena = SET.map === "arena";
-    CBZ.micro.boot(arena ? {
-      fov: 72, far: 3200, exposure: 0.92,
-      sky: { top: 0x46586c, bottom: 0xb4ac96, fogNear: 260, fogFar: 1500, radius: 2600 },
-      lights: { sun: 0.9, hemi: 0.5, shadowSpan: 320, groundColor: 0x6b6657 },
-    } : {
-      fov: 72, far: 16000, exposure: 0.88,
-      sky: { top: 0x2a6bb2, bottom: 0xe3c893, fogNear: 1100, fogFar: 8600, radius: 12000 },
-      lights: { sun: 0.98, hemi: 0.46, shadowSpan: 620, groundColor: 0x8f7850 },
-    });
+    /* THE AIR BELONGS TO THE PLACE. One desert haze over all five grounds put
+       an orange dust horizon behind a glass downtown and washed the streets
+       out to paper. Three skies: a hard flat light for the kill box, a clean
+       maritime one for the city and the two islands, and the original basin
+       haze for the dunes, which is the only map it was ever describing. */
+    const SKY = {
+      arena: {
+        fov: 72, far: 3200, exposure: 0.92,
+        sky: { top: 0x46586c, bottom: 0xb4ac96, fogNear: 260, fogFar: 1500, radius: 2600 },
+        lights: { sun: 0.9, hemi: 0.5, shadowSpan: 320, groundColor: 0x6b6657 },
+      },
+      city: {
+        fov: 70, far: 9000, exposure: 0.8,
+        sky: { top: 0x27528c, bottom: 0x9fb6cc, fogNear: 420, fogFar: 3400, radius: 7000 },
+        lights: { sun: 0.86, hemi: 0.52, shadowSpan: 420, groundColor: 0x6a6f76 },
+      },
+      dunes: {
+        fov: 72, far: 16000, exposure: 0.88,
+        sky: { top: 0x2a6bb2, bottom: 0xe3c893, fogNear: 1100, fogFar: 8600, radius: 12000 },
+        lights: { sun: 0.98, hemi: 0.46, shadowSpan: 620, groundColor: 0x8f7850 },
+      },
+    };
+    SKY.island = SKY.field = SKY.city;
+    CBZ.micro.boot(SKY[SET.map] || SKY.dunes);
     CBZ.micro.pauseKey = null;                       // the clock is ours (Space)
     if (!CBZ.groundAt) CBZ.groundAt = function (x, z) { return MAP ? MAP.groundAt(x, z) : 0; };
 
     MAP = buildMap(SET.map);
+    // THE GROUND IS FINISHED — settle it before a single man walks on. The
+    // real fabric costs 17 000 draw calls raw and a fraction of that merged,
+    // and the pass must run while the scene is still nothing but scenery:
+    // anything added afterwards keeps its own live matrix, which is how the
+    // men and the aircraft stay animated through it.
+    if (Q.get("settle") !== "0") CBZ.studio.settle(CBZ.scene);
+    // the walkable map, once, off the colliders the ground just registered
+    navBuild(MAP.cx, MAP.cz, { city: 330, island: 340, field: 540, arena: 150, dunes: 220 }[SET.map] || 260);
     AIR.on = SET.redS !== "none" || SET.blueS !== "none";
     // a small war is short: the warhead arms early enough to matter
     AIR.nukeAt = 20 + Math.min(22, (SET.redN + SET.blueN) / 36);
@@ -1658,8 +2265,15 @@ CBZ.studio.need(NEED).then(function () {
         CBZ.now += sdt * 1000;             // combat_iq's clocks follow the dial
         if (simT - gridAt > 0.35) rebuildGrid();
         if (simT - comAt > 0.6) updateCOM();
+        // the field is re-solved on a slow, STAGGERED tick: two solves in the
+        // same sub-step is a visible hitch on a big battle and buys nothing
+        if (NAV.on) {
+          if (simT - NAV.at.red > 1.4) navSolve("red");
+          else if (simT - NAV.at.blue > 1.4) navSolve("blue");
+        }
         for (let i = 0; i < men.length; i++) stepMan(men[i], sdt);
-        separatePass(Math.min(1, sdt * 9));
+        rebuildFine();                       // bodies moved: the body grid is stale
+        separatePass(Math.min(0.9, sdt * 26));
         stepRockets(sdt);
         if (AIR.on) {
           if (simT - airAimT > 3) {
@@ -1682,6 +2296,13 @@ CBZ.studio.need(NEED).then(function () {
       m.animF = (m.animF + 1) & 1023;
       const every = d2 < 70 * 70 ? 1 : d2 < 150 * 150 ? 2 : 4;
       if ((m.animF % every) === 0 && CBZ.animChar && m.char) {
+        // A MAN IN COVER GETS SMALL. `ch.crouch` is the rig's own flag —
+        // animChar damps `_cb` and folds the thighs off it, and nothing here
+        // had ever set it, so combat_iq could send a soldier to a real piece
+        // of cover and he would stand up straight behind it. One boolean, and
+        // the posture the fight brain already chose is finally visible.
+        m.char.crouch = m.slot === "cover" || m.slot === "peek" ||
+          (m.slot === "fire" && m.speed < 0.2 && m.hp < m.maxHp * 0.5);
         try { CBZ.animChar(m.char, m.speed * speed, dt * every); } catch (e) {}
       }
       const engaged = m.tgt && !m.tgt.dead && m.sees;
@@ -1729,7 +2350,71 @@ CBZ.studio.need(NEED).then(function () {
   /* ============================================================ PROBE
      The reuse claim, checkable instead of asserted. */
   let dbgWall = 0, dbgN = 0;
+
+  /* THE FAULTS YOU CAN SEE, COUNTED. A battle you WATCH has exactly one class
+     of bug that matters: the kind that shows. Each of these is a thing a
+     person would point at on the screen, turned into an integer, so
+     tools/battle-check.mjs can hold it at zero instead of somebody squinting.
+     Read-only: it never touches a man. */
+  const QUAL = { overlapPeak: 0, embeddedEver: 0, blindFire: 0, throughMate: 0,
+    fratricide: 0, bodyW: 0, stuckSeen: 0 };
+  function bodyWidth() {
+    if (QUAL.bodyW) return QUAL.bodyW;
+    for (let i = 0; i < men.length; i++) {
+      const m = men[i];
+      if (m.dead || !m.group) continue;
+      try {
+        const b = new THREE.Box3().setFromObject(m.group);
+        QUAL.bodyW = Math.round(Math.max(b.max.x - b.min.x, b.max.z - b.min.z) * 1000) / 1000;
+      } catch (e) { QUAL.bodyW = -1; }
+      break;
+    }
+    return QUAL.bodyW;
+  }
+  const BODY_CLEAR = 0.62;      // centres closer than this are drawing through each other
+  function quality() {
+    const live = [];
+    for (let i = 0; i < men.length; i++) if (!men[i].dead) live.push(men[i]);
+    let pairs = 0, worst = 9;
+    // O(n^2) is fine in a probe and honest in a way a grid pass is not: the
+    // grid is the thing under test, so the check must not share its blind spots
+    for (let i = 0; i < live.length; i++) {
+      for (let j = i + 1; j < live.length; j++) {
+        const dx = live[j].pos.x - live[i].pos.x, dz = live[j].pos.z - live[i].pos.z;
+        const d = Math.hypot(dx, dz);
+        if (d < BODY_CLEAR) { pairs++; if (d < worst) worst = Math.round(d * 100) / 100; }
+      }
+    }
+    if (pairs > QUAL.overlapPeak) QUAL.overlapPeak = pairs;
+    let embedded = 0, stuck = 0, engaged = 0;
+    const buf = [];
+    for (let i = 0; i < live.length; i++) {
+      const m = live[i];
+      if (m.tgt && !m.tgt.dead && m.sees) engaged++;
+      if ((m.stuckT || 0) > 3.5) stuck++;
+      const cols = CBZ.micro.queryColliders(m.pos.x, m.pos.z, 0.1, buf);
+      for (let c = 0; c < cols.length; c++) {
+        const b = cols[c];
+        if (m.pos.x < b.minX || m.pos.x > b.maxX || m.pos.z < b.minZ || m.pos.z > b.maxZ) continue;
+        if (b.y0 != null && (m.pos.y + 0.9 < b.y0 || m.pos.y + 0.9 > b.y1)) continue;
+        embedded++; break;
+      }
+    }
+    if (embedded > QUAL.embeddedEver) QUAL.embeddedEver = embedded;
+    if (stuck > QUAL.stuckSeen) QUAL.stuckSeen = stuck;
+    return {
+      alive: live.length, bodyW: bodyWidth(),
+      overlapNow: pairs, overlapWorst: pairs ? worst : null, overlapPeak: QUAL.overlapPeak,
+      embedded: embedded, embeddedEver: QUAL.embeddedEver,
+      stuck: stuck, stuckPeak: QUAL.stuckSeen,
+      blindFire: QUAL.blindFire, throughMate: QUAL.throughMate, fratricide: QUAL.fratricide,
+      shots: stats.red.shots + stats.blue.shots, engaged: engaged,
+      colliders: (CBZ.colliders && CBZ.colliders.length) || 0,
+    };
+  }
+
   window.__battle = {
+    quality: quality,
     audit: function () {
       return {
         clock: { frames: dbgN, wallSum: Math.round(dbgWall * 100) / 100 },
@@ -1751,6 +2436,8 @@ CBZ.studio.need(NEED).then(function () {
         caps: CBZ.modeHas ? { blast: CBZ.modeHas("blast"), blastActors: CBZ.modeHas("blastActors") } : null,
         unrouted: CBZ.modeCapsAudit ? CBZ.modeCapsAudit().unrouted : null,
         colliders: (CBZ.colliders && CBZ.colliders.length) || 0,
+        nav: { on: NAV.on, cells: NAV.w * NAV.h, blocked: NAV.blocked, solves: NAV.solves },
+        town: town ? { lots: town.lots && town.lots.length, roads: town.roads && town.roads.length } : null,
         reuse: {
           iq: !!(CBZ.combatIQ && CBZ.combatIQ.shot), gunfx: !!CBZ.tracer,
           rig: !!CBZ.makeCharacter, guns: !!(CBZ.weaponAppearance && CBZ.weaponAppearance.ak47),
@@ -1760,6 +2447,17 @@ CBZ.studio.need(NEED).then(function () {
       };
     },
     speed: setSpeed,
+    // park the camera on the hottest fight at a chosen range — the seam a
+    // screenshot tool needs, and the one the director already computes
+    look: function (dist, pitch, yaw) {
+      const hs = hotspot();
+      cam.mode = "free";
+      if (hs) { cam.wFocus.set(hs.x, MAP.groundAt(hs.x, hs.z), hs.z); cam.focus.copy(cam.wFocus); }
+      cam.wDist = cam.dist = dist || 40;
+      cam.wPitch = cam.pitch = pitch == null ? 0.4 : pitch;
+      if (yaw != null) cam.wYaw = cam.yaw = yaw;
+      return hs;
+    },
     reinforce: function (n) { queueMen(n || 10); },
     debugMen: function (n) {
       const out = [];

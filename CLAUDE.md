@@ -246,6 +246,81 @@ caught the consequence immediately: one rifleman in state `fight` holding a
 player **3816 m** away. `fortresponse.js` sweeps the military roster at 1 Hz and
 drops any target past 300 m, well beyond the longest weapon in the game (240 m).
 
+## THE WAR IS FOUGHT IN GANG CITY NOW — `games/battle.html`
+
+**"Put it in gang city with all of gang city's buildings, not the current fake
+scene … really massively improve this minigame, and the logic of them — right
+now the NPCs can overlap and it's just not perfect"** (owner, 2026-08-11).
+
+**IT WAS FIGHTING IN A DESERT MADE OF BOXES.** Its `city` map was 200
+procedural towers on a grid — the exact stage flat bomb-survivor deleted a wave
+earlier, in a repo whose studio can RAISE the real map. Five grounds now, four
+of them places in Gang City at their own coordinates: **city** (`studio.town()`
+at the mainland's (0,-700) — eight blocks, marked streets, crosswalks, shops
+with signs, enterable instanced-glass towers), **island**
+(`raise("militaryisland")`, -620,-700), **field** (`raise("airport")`, Halloran),
+**dunes** (the basin, kept — an open firing line is a different game), **arena**
+(the kill box, kept as the CONTROL: no world, so a fault there is the men).
+
+**THE REAL FABRIC COST 17 041 DRAW CALLS AND THAT IS NOT THE TOWN'S FAULT.**
+It is the mainland's own number before `city/mode.js` runs `batchStaticUnder` +
+`freezeStaticUnder`, and a slice page never runs city/mode.js. Neither file
+reads a city record; they were behind a door only the full engine had a key to.
+New pack **`batch`** and one verb, `CBZ.studio.settle(root)` — merge, then
+freeze, in that order, after the ground and **before** the actors.
+**17 041 → 817**, measured, with the batched and unbatched frames visually
+identical. bomb-survivor.html adopted it in the same wave.
+
+**A MAN IS NOT A PATHFINDER AND IN A CITY THAT IS NOT SURVIVABLE.** Measured on
+the first real-downtown build: **25 of 40 men in slot `push`**, `cool` at −28 s,
+both armies 135 m apart with eight blocks between them, **5 shots in 30 s**. The
+wall-slide detour is right for a crate and hopeless against a block. The ground
+now carries a **multi-source flow field** (4 m cells, Dial's bucket queue,
+re-solved 1.4 s per side): seed Dijkstra from EVERY living enemy and the field
+is *path distance to the nearest enemy*, so each man walks toward whoever is
+genuinely closest THROUGH the streets. Seeding from a centre of mass instead
+funnels an army into one corner — that was the first draft, and the corner was
+in the measurement. Only the SENIOR man in a squad navigates; the column trails
+him, so a squad rounds a block as a squad. **push 25 → 1, engaged 0 → 20+.**
+
+**THE OVERLAP WAS A CELL SIZE.** Separation ran on the TARGET-SEARCH grid, and
+the two jobs want opposite cells. On 14 m cells it was wrong three ways at once:
+it never compared **across a boundary** (two men 0.2 m apart either side of an
+invisible line interpenetrated forever), it capped the inner loop at five
+neighbours (`i + 6`, and *which* five depended on spawn order), and it fired at
+1.0 m, which for a 0.52 m body is contact. Bodies now have their own **2.4 m
+grid**, rebuilt every sub-step, swept cell + four FORWARD neighbours so every
+pair is visited exactly once, clearance 0.9 m, and a **deep** overlap
+(< shoulder width) is corrected in full THAT step rather than sprung apart over
+several. A shove marks both men for a collider re-resolve, because a body
+squeezed into a crate is invisible to every ray, therefore immortal, therefore
+a battle that cannot end.
+
+**ONE ROUND IN FIVE WAS A GHOST BULLET.** Measured: **167 of 776 rounds** fired
+down a lane one of the shooter's own men was standing in — and because a
+friendly round passes through a friendly body, the result was not fratricide,
+it was rounds going through your own people. Worse to watch than a friendly-fire
+kill and impossible to read. The trigger now asks two questions with FRESH
+answers (`m.sees` is up to half a second old, which is how rounds got fired into
+a wall that closed in between): is the line clear, and is one of mine in it. If
+a mate is in it the man **steps off the line** — away from the mate's side,
+because moving perpendicular grows the mate's offset by (1 − along/d) of the
+step — and keeps his mark. **throughMate 167 → 0, blindFire → 0.**
+
+Also: targets are picked LOS-first (the nearest man is not the man you can
+shoot); nobody spawns inside a building (golden-angle spiral to the nearest free
+point, and in a town they form up **in the outermost streets** off `town.roads`);
+the spectator camera shortens its arm instead of parking inside the Exchange
+Bank; `ch.crouch` — the rig's own flag, never once set — now makes combat_iq's
+cover choice visible; and each map gets its own sky, because one desert haze
+over a glass downtown washed the streets to paper.
+
+Ratchet **`tools/battle-check.mjs`** — `overlapPeak` · `embedded` · `blindFire` ·
+`throughMate` · `stuck` all pinned at **0** across five maps, and it runs
+**two-sided**: `--revert` (`?sep=old&fire=old`) asserts the faults COME BACK
+(3 overlapping pairs, 214 ghost rounds), because a fix nobody can turn off has
+not been measured. Page probe `window.__battle.quality()`.
+
 ## THE STUDIO — `src/core/studio.js`, one script tag
 
 **GANG CITY IS THE BACK END; THE HTML IS ADDITION** (owner, 2026-08-07). A
@@ -263,20 +338,41 @@ survivor's seventeen tags were found by failure, and the one it needed most
 <script>CBZ.studio.need("people","desert","air").then(function(){ /* your game */ });</script>
 ```
 
-**25 packs.** `three` · `seed` · `boot` · `look` · `green` · `people` · `caps` ·
-`day` · `light` · `rest` · `push` · `military` · `desert` · `airbase` ·
-`citycore` · `militaryisland` · `airport` · `air` · `ordnance` · `nukefx` ·
-`fx` · `damage` · `sound` · `radar` · `match`. The manifest owns dependencies, the load
-ORDER measured to work, and what each publishes. `src/` is derived from
-studio.js's own URL. Files a page lists by hand are never re-injected.
+**27 packs.** `three` · `seed` · `boot` · `look` · `green` · `people` · `caps` ·
+`day` · `light` · `rest` · `rooms` · `push` · `military` · `desert` · `airbase` ·
+`batch` · `citycore` · `militaryisland` · `airport` · `air` · `ordnance` ·
+`nukefx` · `fx` · `damage` · `sound` · `radar` · `match`. The manifest owns
+dependencies, the load ORDER measured to work, and what each publishes. `src/`
+is derived from studio.js's own URL. Files a page lists by hand are never
+re-injected.
+
+**`airport` NEEDS `citycore` AND DID NOT SAY SO.** The terminal is a real shell
+— island_airport.js calls `cityMakeBuilding` to raise it — so a page that named
+`airport` alone got `[studio.raise] airport TypeError: CBZ.cityMakeBuilding is
+not a function` and an airfield with no terminal on it. bomb-survivor never saw
+it because it happens to name citycore for its own downtown, which is exactly
+how an under-declared dependency hides. Found by battle.html's `field` map.
 
 **The verbs, all routes to what exists.** `join()` declare and become a mode ·
-`world(name)` · `cast(role)` the shipped 1.82 m rig · `crowd(n, role)` ·
-`model(name)` / `fly(kind)` shipped geometry, asking `airbase.js` first because
-its factories fall back and seat wheels · `boom(pos)` fireball + damage +
-collapse + attenuated sound · `bombsight()` the impact mark off the SHARED
-integrator · `chase()` a smoothed, ground-clamped camera · `controls(kind)` one
-surface for keyboard, mouse and touch · `hud()`.
+`world(name)` · `town()` a real downtown · `raise(pack)` a real piece of the map
+at its authored coordinates · **`settle(root)` the world is finished: merge the
+static geometry and stop recomputing its matrices** · `cast(role)` the shipped
+1.82 m rig · `crowd(n, role)` · `model(name)` / `fly(kind)` shipped geometry,
+asking `airbase.js` first because its factories fall back and seat wheels ·
+`boom(pos)` fireball + damage + collapse + attenuated sound · `bombsight()` the
+impact mark off the SHARED integrator · `chase()` a smoothed, ground-clamped
+camera · `controls(kind)` one surface for keyboard, mouse and touch · `hud()`.
+
+**A CONTRACTUALLY SERIAL LOAD WAS ALSO A SERIALLY DOWNLOADED ONE.** `need()`
+executes files one at a time and must — several throw if loaded early, and the
+addLandmass stamp depends on exactly one script being in flight — but awaiting
+each file also fetched them one at a time, so a page naming ten packs paid ten
+round trips before its first line ran. `warm(files)` / `prefetch(...packs)` emit
+`<link rel=preload as=script>`, which fills the cache without executing a line:
+downloads go wide, execution stays exactly as ordered as it was. **Measured 4.0 s
+→ 3.1 s to READY on a 40 ms link — 911 ms, almost exactly the 23 round trips
+removed.** `onProgress(cb)` reports each file so a page can draw a real bar.
+battle.html also warms a map on hover, so START is a build and not a download.
 
 **THE HUD RULES LIVE IN `hud()` NOW**, so the next one-shot cannot get them
 wrong: health is always top left and is one meter; no emoji in HUD space; and a

@@ -297,8 +297,11 @@
     const grey = M.grey();
     const dark = M.dark();
     const pad = M.pad();
+    const liner = M.liner(), wood = M.wood(), screen = M.screen(), warm = M.warm();
     const white = K.roleMat("yc-white", "paint", 0xf2f4f5);             // radomes, deck markings
-    const pool = K.roleMat("yc-pool", "plastic", 0x2f93b8);
+    const pool = K.sharedMat("yc-pool", 0x2f93b8, { emissive: 0x0b2631, ei: 0.20 });
+    const bTier = Math.max(1, S.tiers - 1);
+    const garageBayDepth = S.garage ? clamp(0.060 * L, 3.2, 6.6) : 0;
 
     // ---- 1) HULL. Six width steps down the length, each an extruded prism in
     // the (z,y) plane. Sheer RISES toward the bow (the reference's pronounced
@@ -312,7 +315,36 @@
       // sheer: main deck edge rises 0.055L from amidships to the stem
       const sh0 = FB + sheerRise(S, t0), sh1 = FB + sheerRise(S, t1);
       const k0 = KEEL * keelFrac(t0), k1 = KEEL * keelFrac(t1);
-      K.addPrism(b, w, [[z0, k0], [z0, sh0], [z1, sh1], [z1, k1]], 0, cream);
+      const addRun = function (a, c, cutGarage) {
+        if (!(c > a + 0.001)) return;
+        const ua = (a - z0) / (z1 - z0), uc = (c - z0) / (z1 - z0);
+        const ka = k0 + (k1 - k0) * ua, kc = k0 + (k1 - k0) * uc;
+        const sha = sh0 + (sh1 - sh0) * ua, shc = sh0 + (sh1 - sh0) * uc;
+        if (!cutGarage) {
+          K.addPrism(b, w, [[a, ka], [a, sha], [c, shc], [c, kc]], 0, cream);
+          return;
+        }
+        const GA = S.garage, garageTop = GA.y + GA.h;
+        // Full-width shell below and above the bay; a narrower full-height
+        // centre spine leaves one real rectangular opening in each flank.
+        K.addPrism(b, w, [[a, ka], [a, GA.y], [c, GA.y], [c, kc]], 0, cream);
+        K.addPrism(b, w, [[a, garageTop], [a, sha], [c, shc], [c, garageTop]], 0, cream);
+        K.addPrism(b, Math.max(1.8, w - garageBayDepth * 2),
+          [[a, ka], [a, sha], [c, shc], [c, kc]], 0, cream);
+      };
+      if (!S.garage) {
+        addRun(z0, z1, false);
+      } else {
+        const gz0 = S.garage.z - S.garage.len * 0.47;
+        const gz1 = S.garage.z + S.garage.len * 0.47;
+        const ca = Math.max(z0, gz0), cc = Math.min(z1, gz1);
+        if (!(cc > ca)) addRun(z0, z1, false);
+        else {
+          addRun(z0, ca, false);
+          addRun(ca, cc, true);
+          addRun(cc, z1, false);
+        }
+      }
     }
     // boot stripe at the waterline + a bulbous forefoot (a real ship has one and
     // it is visible on the reference at the bow when she is light)
@@ -383,17 +415,54 @@
     for (let k = 0; k <= S.tiers; k++) {
       const y0 = S.deckY[k], y1 = S.deckY[k] + S.deckH - 0.22;
       const hb = S.supHB[k], z0 = S.supZ0[k], z1 = S.supZ1[k];
-      // The block, chamfered fore and aft AT THE TOP ONLY. The bottom edge must
-      // run flat from z1 to z0 along y0 — raising the forward bottom corner
-      // (an earlier draft put it at 0.30 of the block height) leaves the whole
-      // deckhouse hovering above the deck it stands on.
-      K.addPrism(b, hb * 2, [[z0, y0], [z0 + 0.012 * L, y1], [z1 - 0.020 * L, y1], [z1, y0]], 0, cream);
-      // horizontal window band, both flanks + the aft face
-      const winY = y0 + (y1 - y0) * 0.56, winH = (y1 - y0) * 0.42;
-      [1, -1].forEach(function (side) {
-        K.addBox(b, 0.10, winH, (z1 - z0) * 0.82, side * (hb + 0.01), winY, (z0 + z1) * 0.5, glass);
-      });
-      K.addBox(b, hb * 1.68, winH, 0.10, 0, winY, z0 - 0.01, glass);
+      // A real shell with windows and an aft doorway. This replaces the old
+      // closed prism whose paint sat directly behind every pane of glass.
+      K.addCabinShell(b, { width: hb * 2, z0: z0, z1: z1, y0: y0, y1: y1,
+        doorW: Math.min(1.9, hb * 0.58), body: cream, liner: liner, glass: glass });
+      // Each tier is a real room, not just an opaque wedding-cake block. The
+      // same tier index names the room, furnishes it and feeds the visual census.
+      const roomId = k === 0 ? "super-saloon" : (k === bTier ? "super-bridge" : "super-tier-" + k);
+      const roomLabel = k === 0 ? "Main saloon" : (k === bTier ? "Bridge" : (k === S.tiers ? "Observation lounge" : "Upper lounge " + k));
+      const span = Math.abs(z1 - z0), midZ = (z0 + z1) * 0.5;
+      K.declareRoom(b, roomId, roomLabel);
+      K.addBox(b, hb * 1.90, 0.10, span * 0.985, 0, y0 + 0.10, midZ, wood);
+      K.addBox(b, hb * 1.86, 0.06, span * 0.98, 0, y1 - 0.20, midZ, liner);
+      if (k !== bTier) {
+        const loungeZ = z0 + Math.min(4.4, span * 0.24);
+        const setteeD = Math.min(5.2, span * 0.28);
+        K.addFixtureBox(b, "settee", 0.72, 0.50, setteeD, hb * 0.63, y0 + 0.36, loungeZ, pad);
+        K.addFixtureBox(b, "settee-back", 0.14, 0.78, setteeD, hb * 0.86, y0 + 0.72, loungeZ, pad);
+        K.addTable(b, hb * 0.18, y0 + 0.10, loungeZ, Math.min(2.1, hb * 0.55), 1.25, wood, chrome);
+        const diningZ = z0 + span * 0.62;
+        K.addTable(b, 0, y0 + 0.10, diningZ, Math.min(3.0, hb * 0.92), 1.35, wood, chrome);
+        [-1, 1].forEach(function (side) {
+          K.addSeat(b, side * Math.min(1.45, hb * 0.42), y0 + 0.10, diningZ - 0.92, Math.PI, pad, chrome);
+          K.addSeat(b, side * Math.min(1.45, hb * 0.42), y0 + 0.10, diningZ + 0.92, 0, pad, chrome);
+        });
+        K.addCabinet(b, -hb * 0.78, y0 + 0.10, z0 + span * 0.40, Math.min(0.72, hb * 0.18), 0.96, Math.min(3.8, span * 0.20), liner);
+        K.addFixtureBox(b, "bar-counter", Math.min(0.82, hb * 0.20), 0.10, Math.min(3.8, span * 0.20), -hb * 0.76, y0 + 1.12, z0 + span * 0.40, wood);
+        K.addScreen(b, -hb + 0.14, y0 + 1.48, loungeZ, Math.min(1.8, span * 0.12), 0.82, Math.PI / 2, screen);
+        K.addFixtureBox(b, "ceiling-light", Math.min(1.4, hb * 0.35), 0.04, 0.32, 0, y1 - 0.25, loungeZ, warm);
+        // Long ships need room rhythm, not a single sofa stranded in an 80 m
+        // corridor. Repeat human-scale seating bays and open bulkhead frames;
+        // the count derives from room length and caps at five zones.
+        const zoneCount = clamp(Math.round(span / 14), 1, 5);
+        for (let q = 1; q < zoneCount; q++) {
+          const z = z0 + span * (0.16 + (0.68 * q) / zoneCount);
+          const side = q % 2 ? -1 : 1;
+          const sx = side * hb * 0.54;
+          K.addFixtureBox(b, "lounge-settee", Math.min(3.4, hb * 0.72), 0.48, 0.72, sx, y0 + 0.35, z, pad);
+          K.addFixtureBox(b, "lounge-settee-back", Math.min(3.4, hb * 0.72), 0.76, 0.14, sx, y0 + 0.70, z - 0.30, pad);
+          K.addTable(b, sx - side * Math.min(1.55, hb * 0.28), y0 + 0.10, z, 1.25, 0.92, wood, chrome);
+          K.addFixtureBox(b, "area-rug", Math.min(4.8, hb * 1.05), 0.025, 3.0, sx * 0.45, y0 + 0.17, z, teakDk);
+          [-1, 1].forEach(function (frameSide) {
+            K.addBox(b, 0.16, S.deckH * 0.72, 0.16, frameSide * hb * 0.72,
+              y0 + S.deckH * 0.40, z - span * 0.045, liner);
+          });
+          K.addBox(b, hb * 1.44, 0.16, 0.18, 0, y1 - 0.30, z - span * 0.045, liner);
+          K.addFixtureBox(b, "ceiling-light", Math.min(1.4, hb * 0.35), 0.04, 0.32, 0, y1 - 0.25, z, warm);
+        }
+      }
       // this tier's own open deck: the walkable strip forward and aft of the
       // block above it, plus a rail all round
       if (k < S.tiers) {
@@ -419,27 +488,36 @@
     for (let k = 0; k < S.tiers; k++) {
       const y0 = S.deckY[k] + 0.10, y1 = S.deckY[k + 1] + 0.08;
       const n = Math.max(6, Math.round((y1 - y0) / 0.32));
-      K.addStairs(b, 0, 1.5, S.supZ0[k] + 0.6, 1, y0, y1, n, teak);
+      const stairX = Math.max(1.05, S.supHB[k] * 0.56);
+      K.addStairs(b, stairX, 1.5, S.supZ0[k] + 0.6, 1, y0, y1, n, teak);
       [1, -1].forEach(function (side) {
-        K.addBox(b, 0.07, 1.00, n * 0.36, side * 0.80, y0 + (y1 - y0) * 0.5 + 0.5, S.supZ0[k] + 0.6 + n * 0.18, chrome);
+        K.addBox(b, 0.07, 1.00, n * 0.36, stairX + side * 0.80, y0 + (y1 - y0) * 0.5 + 0.5, S.supZ0[k] + 0.6 + n * 0.18, chrome);
       });
     }
 
     // ---- 5) THE BRIDGE. On a hull this size the wheelhouse is NOT at the very
     // top: it takes the forward face of the second-from-top tier, which is what
     // the reference shows and what a real 156 m yacht does.
-    const bTier = Math.max(1, S.tiers - 1);
     const bY = S.deckY[bTier], bHB = S.supHB[bTier], bZ = S.supZ1[bTier];
     const scr = K.addBox(b, bHB * 1.86, S.deckH * 0.44, 0.14, 0, bY + S.deckH * 0.62, bZ - 0.03 * L, glass);
     scr.rotation.x = -0.30;                                  // raked wheelhouse screen
-    // the console, a real helm wheel, and two helm chairs behind it
-    K.addPrism(b, bHB * 1.5, [[bZ - 0.055 * L, bY + 0.16], [bZ - 0.052 * L, bY + 1.06],
-      [bZ - 0.030 * L, bY + 1.10], [bZ - 0.028 * L, bY + 0.16]], 0, dark);
-    K.addBox(b, 0.42, 0.42, 0.08, 0, bY + 1.30, bZ - 0.048 * L, dark);
-    [0.95, -0.95].forEach(function (x) {
-      K.addBox(b, 0.60, 0.20, 0.60, x, bY + 0.56, bZ - 0.072 * L, pad);
-      K.addBox(b, 0.60, 0.56, 0.16, x, bY + 0.94, bZ - 0.087 * L, pad);
+    // Human-sized bridge furniture. The old console depth was a percentage of
+    // LOA, so on the 156 m ship it became a monolithic room-sized slab.
+    const consoleZ = bZ - clamp(0.032 * L, 1.65, 4.25);
+    const consoleW = Math.min(bHB * 1.62, 10.5);
+    K.addFixtureBox(b, "bridge-console", consoleW, 0.78, 0.82, 0, bY + 0.55, consoleZ, dark);
+    const nDisplay = clamp(Math.round(consoleW / 1.75), 3, 6);
+    for (let i = 0; i < nDisplay; i++) {
+      const x = nDisplay === 1 ? 0 : -consoleW * 0.38 + (consoleW * 0.76 * i) / (nDisplay - 1);
+      K.addScreen(b, x, bY + 1.08, consoleZ - 0.43, Math.min(1.25, consoleW / nDisplay * 0.78), 0.48, 0, screen);
+    }
+    K.addFixtureCyl(b, "helm-wheel", 0.28, 0.07, 0, bY + 1.18, consoleZ + 0.43, dark, 12).rotation.x = Math.PI / 2;
+    [-1.0, 1.0].forEach(function (x) {
+      K.addSeat(b, x, bY + 0.10, consoleZ - 1.25, 0, pad, chrome);
     });
+    K.addTable(b, Math.min(2.35, bHB * 0.55), bY + 0.10, consoleZ - 1.25, 1.15, 1.45, wood, chrome);
+    K.addCabinet(b, -bHB * 0.78, bY + 0.10, consoleZ - 1.20, Math.min(0.72, bHB * 0.18), 0.92, 2.2, liner);
+    K.addFixtureBox(b, "bridge-light", Math.min(1.8, bHB * 0.40), 0.04, 0.34, 0, bY + S.deckH - 0.34, consoleZ - 0.4, warm);
     // bridge wings — the overhangs a big ship berths from
     [1, -1].forEach(function (side) {
       K.addBox(b, (S.halfBeam - bHB) * 0.9, 0.14, 0.045 * L, side * (bHB + (S.halfBeam - bHB) * 0.45),
@@ -447,42 +525,38 @@
       K.addRail(b, side * (S.halfBeam - 0.2), bZ - 0.068 * L, bZ - 0.022 * L, bY + 0.07, chrome, 1.6);
     });
 
-    // ---- 6) THE SALOON, one deck below the bridge: a real room behind the
-    // aft glass with a floor, a long settee, a table and a bar.
-    const sY = S.deckY[0], sHB = S.supHB[0];
-    K.addBox(b, sHB * 1.9, 0.10, Math.abs(S.supZ1[0] - S.supZ0[0]) * 0.55, 0, sY + 0.10,
-      S.supZ0[0] + Math.abs(S.supZ1[0] - S.supZ0[0]) * 0.30, teakDk);
-    K.addBox(b, sHB * 1.5, 0.46, 0.70, 0, sY + 0.40, S.supZ0[0] + 1.4, pad);
-    K.addBox(b, sHB * 1.1, 0.12, 1.5, 0, sY + 0.80, S.supZ0[0] + 3.4, teak);
-    K.addBox(b, 1.6, 1.05, 0.60, sHB * 0.55, sY + 0.62, S.supZ0[0] + 6.0, dark);
-    // and the sliding glass that closes it, aft
-    K.addBox(b, sHB * 1.55, S.deckH * 0.62, 0.10, 0, sY + S.deckH * 0.40, S.supZ0[0] - 0.02, glass);
-
-    // ---- 7) THE MAST CLUSTER: white radomes of varying size on a lattice, and
-    // a bank of four slim exhaust stacks. Straight from the reference photo.
+    // ---- 7) THE MAST CLUSTER. Dimensions are equipment dimensions, not a raw
+    // percentage of hull length: a radar dome does not become a 5 m boulder
+    // merely because the ship beneath it is 156 m long.
     const topY = S.deckY[S.tiers] + S.deckH - 0.22;
     const mastZ = 0.02 * L, mastHB = S.supHB[S.tiers];
+    const mastH = clamp(3.2 + L * 0.011, 3.7, 5.0);
+    const mastBaseY = topY + 0.10, mastBarY = mastBaseY + mastH * 0.62;
     [1, -1].forEach(function (side) {
-      const leg = K.addBox(b, 0.20, 0.075 * L, 0.20, side * mastHB * 0.52, topY + 0.037 * L, mastZ, grey);
-      leg.rotation.z = side * 0.10;
+      K.addTubeBetween(b,
+        [side * mastHB * 0.58, mastBaseY, mastZ - 0.55],
+        [side * mastHB * 0.38, mastBarY, mastZ], 0.10, grey, 8);
     });
-    K.addBox(b, mastHB * 1.05, 0.20, 0.30, 0, topY + 0.070 * L, mastZ, grey);
-    K.addBox(b, 0.16, 0.055 * L, 0.16, 0, topY + 0.098 * L, mastZ, grey);       // masthead pole
+    K.addTubeBetween(b, [-mastHB * 0.38, mastBarY, mastZ], [mastHB * 0.38, mastBarY, mastZ], 0.11, grey, 8);
+    K.addTubeBetween(b, [0, mastBarY, mastZ], [0, mastBaseY + mastH, mastZ], 0.08, grey, 8);
     // three radomes of DIFFERENT size — one idea, three scales
-    const rr = 0.0135 * L;
-    [[0, 0.060, 1.25], [0.62, 0.046, 0.85], [-0.62, 0.046, 0.85]].forEach(function (o) {
+    const rr = clamp(0.50 + L * 0.0022, 0.58, 0.86);
+    [[0, 0.72, 1.12], [0.62, 0.30, 0.78], [-0.62, 0.30, 0.78]].forEach(function (o) {
       const r = rr * o[2];
       const dome = new THREE.Mesh(sphGeo(K, r, 10), white);
-      dome.position.set(o[0] * mastHB, topY + o[1] * L + r * 0.4, mastZ - r * 0.6);
+      dome.position.set(o[0] * mastHB, mastBarY + o[1] + r * 0.4, mastZ - r * 0.6);
       dome.castShadow = false; b.add(dome);
-      K.addCyl(b, r * 0.45, r * 0.7, o[0] * mastHB, topY + o[1] * L - r * 0.5, mastZ - r * 0.6, grey, 8);
+      K.addCyl(b, r * 0.34, r * 0.62, o[0] * mastHB, mastBarY + o[1] - r * 0.31, mastZ - r * 0.6, grey, 8);
     });
-    // four slim stacks, angled aft, in a bank
+    // Four genuinely slim stacks, each landed on a common exhaust plinth.
+    const stackR = clamp(0.24 + L * 0.0009, 0.27, 0.38);
+    const stackH = clamp(1.65 + L * 0.005, 1.85, 2.45);
+    K.addFixtureBox(b, "exhaust-plinth", mastHB * 1.35, 0.28, 1.35, 0, mastBaseY + 0.14, mastZ - 1.45, grey);
     for (let i = 0; i < 4; i++) {
-      const sx = (i - 1.5) * (mastHB * 0.42);
-      const st = K.addCyl(b, 0.021 * L, 0.055 * L, sx, topY + 0.030 * L, mastZ - 0.045 * L, grey, 8);
+      const sx = (i - 1.5) * Math.max(stackR * 2.7, mastHB * 0.24);
+      const st = K.addCyl(b, stackR, stackH, sx, mastBaseY + 0.28 + stackH * 0.5, mastZ - 1.45, grey, 10);
       st.rotation.x = 0.16;
-      K.addCyl(b, 0.019 * L, 0.008 * L, sx, topY + 0.058 * L, mastZ - 0.049 * L, dark, 8);
+      K.addCyl(b, stackR * 0.84, 0.18, sx, mastBaseY + 0.28 + stackH, mastZ - 1.45 - Math.sin(0.16) * stackH * 0.5, dark, 10);
     }
 
     // ---- 8) THE HELIDECKS.
@@ -516,10 +590,16 @@
     const doors = [], stowed = [];
     if (C.YACHT_GARAGE !== false && S.garage) {
       const GA = S.garage;
+      K.declareRoom(b, "super-garage-port", "Port tender garage");
+      K.declareRoom(b, "super-garage-starboard", S.carDeck ? "Starboard tender and vehicle garage" : "Starboard tender garage");
       [1, -1].forEach(function (side, i) {
         const hbAt = HB * beamFrac(GA.z / (0.5 * L));
-        // the recess behind the door (dark, so an open door reads as a hole)
-        K.addBox(b, 0.30, GA.h * 0.94, GA.len * 0.94, side * (hbAt - 0.22), GA.y + GA.h * 0.5, GA.z, dark);
+        const bayCenterX = hbAt - garageBayDepth * 0.55;
+        const innerX = hbAt - garageBayDepth;
+        // The dark surface is the real inner bulkhead, not a fake black panel
+        // immediately behind the shell door. The full bay depth stays visible.
+        K.addBox(b, 0.22, GA.h * 0.94, GA.len * 0.94,
+          side * innerX, GA.y + GA.h * 0.5, GA.z, dark);
         // addBox is (w=x, h=y, d=z): the garage runs FORE AND AFT for GA.len and
         // across the beam for the hull's width there. An earlier draft had these
         // two swapped, which drew a 21 m sole athwart a 22 m hull.
@@ -533,7 +613,7 @@
         const stow = new THREE.Group();
         stow.name = "yacht_tender_" + (side > 0 ? "p" : "s");
         stow.userData.noMerge = true;
-        stow.position.set(side * (hbAt - 1.5), GA.y + 0.45, GA.z);
+        stow.position.set(side * bayCenterX, GA.y + 0.45, GA.z);
         stow.rotation.y = Math.PI / 2;
         const tl = Math.min(GA.len * 0.42, 6.4);
         const tub = K.roleMat("yc-tender", "plastic", 0x2b3138);
@@ -548,6 +628,17 @@
         cr.position.set(0, -0.42, 0); stow.add(cr);
         b.add(stow);
         stowed.push(stow.name);
+
+        // Cradle rails, service locker and a landed overhead light make this a
+        // launch room instead of a tender suspended in a dark void.
+        K.addFixtureBox(b, "tender-cradle", Math.min(2.8, hbAt * 0.42), 0.20, 0.18,
+          side * bayCenterX, GA.y + 0.16, GA.z - tl * 0.28, chrome);
+        K.addFixtureBox(b, "tender-cradle", Math.min(2.8, hbAt * 0.42), 0.20, 0.18,
+          side * bayCenterX, GA.y + 0.16, GA.z + tl * 0.28, chrome);
+        K.addCabinet(b, side * (innerX + 0.45), GA.y + 0.07, GA.z + GA.len * 0.34,
+          Math.min(1.0, hbAt * 0.18), Math.min(1.8, GA.h * 0.70), Math.min(2.2, GA.len * 0.18), liner);
+        K.addFixtureBox(b, "garage-light", Math.min(1.8, hbAt * 0.34), 0.05, 0.28,
+          side * bayCenterX, GA.y + GA.h - 0.28, GA.z, warm);
 
         const d = new THREE.Mesh(K.boxGeo(0.16, GA.h, GA.len), cream);
         d.position.set(side * hbAt, GA.y + GA.h * 0.5, GA.z);
@@ -642,12 +733,18 @@
     decks.push({ x: 0, z: 0.36 * L, w: HB * 2 * beamFrac(0.72) * 0.86, d: L * 0.20, top: fdTop + 0.16 });
     K_stairDecks(decks, HB * beamFrac(0.66) * 0.55, 1.1, 0.252 * L, 1, FB + 0.16, fdTop + 0.16, 4);
     K_stairDecks(decks, -HB * beamFrac(0.66) * 0.55, 1.1, 0.252 * L, 1, FB + 0.16, fdTop + 0.16, 4);
-    // one open deck per tier + the superstructure blocks as walls
+    // Every tier gets an interior sole and perimeter walls with an aft doorway.
+    // A previous solid block made the furnished room impossible to enter.
     for (let k = 0; k <= S.tiers; k++) {
-      walls.push({
-        x: 0, z: (S.supZ0[k] + S.supZ1[k]) * 0.5, w: S.supHB[k] * 2,
-        d: Math.abs(S.supZ1[k] - S.supZ0[k]), y0: S.deckY[k], y1: S.deckY[k] + S.deckH - 0.22,
-      });
+      const hb = S.supHB[k], z0 = S.supZ0[k], z1 = S.supZ1[k];
+      const span = Math.abs(z1 - z0), y0 = S.deckY[k] + 0.10, y1 = S.deckY[k] + S.deckH - 0.22;
+      const doorW = Math.min(1.9, hb * 0.58), sideW = Math.max(0.25, hb - doorW * 0.5);
+      decks.push({ x: 0, z: (z0 + z1) * 0.5, w: hb * 1.86, d: span * 0.94, top: y0 + 0.05 });
+      walls.push({ x: hb, z: (z0 + z1) * 0.5, w: 0.14, d: span, y0: y0, y1: y1 });
+      walls.push({ x: -hb, z: (z0 + z1) * 0.5, w: 0.14, d: span, y0: y0, y1: y1 });
+      walls.push({ x: doorW * 0.5 + sideW * 0.5, z: z0, w: sideW, d: 0.14, y0: y0, y1: y1 });
+      walls.push({ x: -(doorW * 0.5 + sideW * 0.5), z: z0, w: sideW, d: 0.14, y0: y0, y1: y1 });
+      walls.push({ x: 0, z: z1, w: hb * 2, d: 0.14, y0: y0, y1: y1 });
       if (k < S.tiers) {
         const y = S.deckY[k + 1] + 0.08;
         decks.push({ x: 0, z: (S.supZ0[k] + S.supZ0[k + 1]) * 0.5, w: S.supHB[k] * 2, d: Math.abs(S.supZ0[k + 1] - S.supZ0[k]), top: y });
@@ -688,7 +785,7 @@
     for (let k = 0; k < S.tiers; k++) {
       const y0 = S.deckY[k] + 0.10, y1 = S.deckY[k + 1] + 0.08;
       const n = Math.max(6, Math.round((y1 - y0) / 0.32));
-      K_stairDecks(decks, 0, 1.5, S.supZ0[k] + 0.6, 1, y0, y1, n);
+      K_stairDecks(decks, Math.max(1.05, S.supHB[k] * 0.56), 1.5, S.supZ0[k] + 0.6, 1, y0, y1, n);
     }
     return {
       decks: decks, walls: walls,
@@ -789,8 +886,9 @@
   function buildSkiff(K, THREE) {
     const b = new THREE.Group(), M = K.M;
     const L = 5.5, W = 1.9, hw = W * 0.5;
-    const hull = K.roleMat("sk-hull", "paint", 0xdfe6ea), inner = K.roleMat("sk-in", "plastic", 0x9aa6ad);
-    const dark = M.dark(), chrome = M.chrome(), teak = M.teakDk(), grey = M.grey();
+    const hull = K.roleMat("sk-hull", "paint", 0xdfe6ea), inner = K.sharedMat("sk-in", 0x9aa6ad);
+    const dark = M.dark(), chrome = M.chrome(), teak = M.teakDk(), grey = M.grey(), screen = M.screen();
+    K.declareRoom(b, "skiff-helm", "Open fishing cockpit");
     K.addPrism(b, W * 0.92, [[-L * 0.5, -0.34], [-L * 0.5, 0.42], [L * 0.20, 0.44], [L * 0.26, -0.30]], 0, hull);
     K.addPrism(b, W * 0.60, [[L * 0.18, -0.28], [L * 0.18, 0.46], [L * 0.44, 0.54], [L * 0.46, -0.10]], 0, hull);
     K.addPrism(b, W * 0.20, [[L * 0.42, -0.08], [L * 0.42, 0.54], [L * 0.50, 0.58], [L * 0.49, 0.12]], 0, hull);
@@ -801,9 +899,10 @@
     K.addPrism(b, 0.50, [[-0.22, 0.14], [-0.20, 0.86], [0.18, 0.90], [0.24, 0.14]], 0, dark);
     const scr = K.addBox(b, 0.44, 0.22, 0.03, 0, 1.04, 0.18, M.glass()); scr.rotation.x = -0.32;
     K.addBox(b, 0.19, 0.19, 0.03, 0.11, 0.90, 0.0, dark);
+    K.addScreen(b, -0.12, 0.88, 0.01, 0.18, 0.13, 0, screen);
     for (let i = 0; i < 4; i++) {
-      const rod = K.addBox(b, 0.035, 1.35, 0.035, (i < 2 ? 1 : -1) * (hw - 0.16), 0.80, -0.30 - (i % 2) * 0.26, grey);
-      rod.rotation.x = 0.42; rod.rotation.z = (i < 2 ? -0.22 : 0.22);
+      const side = i < 2 ? 1 : -1, z = -0.30 - (i % 2) * 0.26;
+      K.addTubeBetween(b, [side * (hw - 0.16), 0.18, z], [side * (hw - 0.32), 1.48, z + 0.52], 0.018, grey, 6);
     }
     K.addBox(b, 0.62, 0.36, 0.52, 0, 0.32, -L * 0.18, inner);                      // fish box
     // outboard
@@ -812,6 +911,7 @@
     K.addBox(b, 0.24, 0.03, 0.24, 0, -0.06, -L * 0.5 - 0.15, dark);
     b.add(K.propGroup(0.6, [[0, -0.16, -L * 0.5 - 0.26]]));
     K.navLights(b, hw, 0.46, L * 0.40, -L * 0.46, null);
+    b.userData.marineFixtureCount += 5;                                    // console, wheel, fish box, casting and stern seats
     return K.finish(b, { width: W, length: L, height: 1.2, wheelbase: L * 0.6 });
   }
 
@@ -821,8 +921,12 @@
     const b = new THREE.Group(), M = K.M;
     const L = 18, W = 5.6, hw = W * 0.5, KEEL = -2.4, SHEER = 2.35;
     const hull = K.roleMat("tr-hull", "paint", 0x2a4c6a), house = K.roleMat("tr-house", "paint", 0xe4e7e6);
-    const rust = K.roleMat("tr-rust", "plastic", 0x8a5a3a);
+    const rust = K.sharedMat("tr-rust", 0x8a5a3a, { emissive: 0x211108, ei: 0.18 });
     const teak = M.teakDk(), dark = M.dark(), grey = M.grey(), chrome = M.chrome(), glass = M.glass();
+    const liner = M.liner(), wood = M.wood(), screen = M.screen(), warm = M.warm(), pad = M.pad();
+    K.declareRoom(b, "captain-workdeck", "Working deck");
+    K.declareRoom(b, "captain-wheelhouse", "Wheelhouse");
+    K.declareRoom(b, "captain-hold", "Open fish hold");
     K.addPrism(b, W, [[-9.0, KEEL], [-9.0, SHEER], [-2.0, SHEER], [-1.0, KEEL]], 0, hull);
     K.addPrism(b, W * 0.94, [[-2.4, KEEL], [-2.4, SHEER], [4.4, SHEER + 0.25], [5.0, KEEL * 0.80]], 0, hull);
     K.addPrism(b, W * 0.62, [[4.2, KEEL * 0.84], [4.2, SHEER + 0.22], [7.6, SHEER + 0.70], [7.9, KEEL * 0.34]], 0, hull);
@@ -830,37 +934,60 @@
     [1, -1].forEach(function (side) {
       K.addBox(b, 0.07, 0.30, 15.5, side * (hw - 0.03), 0.10, -0.5, K.roleMat("tr-boot", "plastic", 0x14181d));
       K.addBox(b, 0.16, 0.95, 12.0, side * (hw - 0.08), SHEER + 0.42, -2.2, hull);   // bulwark
+      K.addBox(b, 0.06, 0.13, 13.6, side * (hw - 0.015), SHEER - 0.36, -1.2, house); // working sheer stripe
+      K.addRail(b, side * (hw - 0.12), -8.3, 0.9, SHEER + 0.02, chrome, 1.8);
+      [-4.6, -2.4, -0.2].forEach(function (z) {
+        K.addBox(b, 0.07, 0.34, 0.58, side * (hw - 0.01), SHEER - 0.78, z, glass);
+      });
     });
     K.addBox(b, W * 0.86, 0.14, 9.0, 0, SHEER, -4.2, teak);                          // work deck
     // wheelhouse forward, raised on a whaleback
-    K.addPrism(b, W * 0.74, [[1.2, SHEER], [1.4, SHEER + 2.9], [4.6, SHEER + 2.9], [5.0, SHEER + 0.3]], 0, house);
-    [1, -1].forEach(function (side) {
-      K.addBox(b, 0.10, 0.95, 2.6, side * (W * 0.37 + 0.01), SHEER + 1.95, 3.0, glass);
-    });
-    const ws = K.addBox(b, W * 0.66, 1.0, 0.10, 0, SHEER + 1.98, 4.62, glass); ws.rotation.x = -0.26;
+    K.addCabinShell(b, { width: W * 0.74, z0: 1.25, z1: 4.65, y0: SHEER + 0.08, y1: SHEER + 2.90,
+      doorW: 1.08, body: house, liner: liner, glass: glass });
+    K.addBox(b, W * 0.82, 0.16, 3.75, 0, SHEER + 2.96, 3.02, house);                  // roof overhang
     K.addBox(b, W * 0.60, 0.14, 2.2, 0, SHEER + 0.16, 3.0, teak);                    // wheelhouse sole
-    K.addPrism(b, W * 0.5, [[3.7, SHEER + 0.16], [3.8, SHEER + 1.10], [4.5, SHEER + 1.12], [4.6, SHEER + 0.16]], 0, dark);
-    K.addBox(b, 0.34, 0.34, 0.06, 0, SHEER + 1.30, 3.72, dark);                      // helm wheel
-    // GANTRY over the stern ramp + net drum + outriggers: the trawler read
-    [1, -1].forEach(function (side) {
-      const leg = K.addBox(b, 0.24, 4.6, 0.24, side * (hw - 0.55), SHEER + 2.3, -7.4, rust);
-      leg.rotation.z = side * 0.06;
-      // outrigger booms, stowed up
-      const out = K.addBox(b, 0.16, 7.4, 0.16, side * (W * 0.30), SHEER + 4.4, 1.0, rust);
-      out.rotation.z = side * 0.60; out.rotation.x = 0.16;
+    K.addBox(b, W * 0.58, 0.05, 2.0, 0, SHEER + 2.70, 3.0, liner);                   // headliner
+    K.addFixtureBox(b, "helm-console", 3.15, 0.72, 0.58, 0, SHEER + 0.55, 4.05, dark);
+    [-0.78, 0, 0.78].forEach(function (x) {
+      K.addScreen(b, x, SHEER + 1.08, 3.75, 0.62, 0.36, 0, screen);
     });
-    K.addBox(b, W * 0.92, 0.30, 0.34, 0, SHEER + 4.55, -7.4, rust);                  // gantry head
-    const drum = K.addCyl(b, 0.85, W * 0.70, 0, SHEER + 1.15, -5.6, grey, 10);
+    K.addFixtureCyl(b, "helm-wheel", 0.30, 0.07, -0.48, SHEER + 1.20, 3.72, dark, 12).rotation.x = Math.PI / 2;
+    [-0.06, 0.10].forEach(function (x) {
+      const lever = K.addFixtureBox(b, "engine-lever", 0.055, 0.30, 0.055, x, SHEER + 1.04, 3.62, chrome);
+      lever.rotation.x = -0.28;
+    });
+    K.addSeat(b, -0.82, SHEER + 0.22, 3.05, 0, pad, chrome);
+    K.addCabinet(b, -1.66, SHEER + 0.22, 2.05, 0.42, 0.92, 1.2, liner);
+    K.addFixtureBox(b, "wheelhouse-light", 0.88, 0.04, 0.28, 0, SHEER + 2.62, 3.0, warm);
+    // GANTRY over the stern ramp + net drum + outriggers. Every spar begins at
+    // a deck/roof socket and ends at the cross member or boom tip.
+    [1, -1].forEach(function (side) {
+      K.addTubeBetween(b, [side * (hw - 0.52), SHEER + 0.08, -7.25], [side * (hw - 0.72), SHEER + 4.55, -7.40], 0.13, rust, 8);
+      K.addTubeBetween(b, [side * 1.55, SHEER + 2.78, 2.05], [side * 4.15, SHEER + 6.25, -0.85], 0.09, rust, 8);
+      K.addTubeBetween(b, [side * 1.55, SHEER + 2.78, 2.05], [side * 1.95, SHEER + 4.55, -0.35], 0.045, chrome, 8);
+    });
+    K.addTubeBetween(b, [-(hw - 0.72), SHEER + 4.55, -7.40], [(hw - 0.72), SHEER + 4.55, -7.40], 0.15, rust, 8);
+    // Net drum is stern-mounted and human-scaled, leaving the centre work lane
+    // and Captain hold sightline clear.
+    const drum = K.addCyl(b, 0.58, W * 0.52, 0, SHEER + 0.78, -7.10, grey, 10);
     drum.rotation.z = Math.PI / 2;
-    K.addCyl(b, 0.95, 0.14, 0, SHEER + 1.15, -5.6, dark, 10).rotation.z = Math.PI / 2;
+    K.addCyl(b, 0.66, 0.14, 0, SHEER + 0.78, -7.10, dark, 10).rotation.z = Math.PI / 2;
+    [-1.65, 1.65].forEach(function (x) {
+      K.addFixtureBox(b, "drum-pedestal", 0.26, 0.74, 0.44, x, SHEER + 0.38, -7.10, rust);
+    });
     // deck floods on the gantry, and the masthead
     [0.8, -0.8].forEach(function (s) {
       K.addBox(b, 0.26, 0.20, 0.16, s * W * 0.3, SHEER + 4.35, -7.2, M.navWhite());
     });
-    K.addBox(b, 0.14, 2.4, 0.14, 0, SHEER + 4.9, 3.4, grey);
-    // stacked crates and a coil of warp on the work deck
-    for (let i = 0; i < 3; i++) K.addBox(b, 0.9, 0.55, 0.7, (i - 1) * 1.2, SHEER + 0.42, -2.6, rust);
-    K.addCyl(b, 0.55, 0.34, -1.6, SHEER + 0.31, -8.0, dark, 10);
+    K.addTubeBetween(b, [0, SHEER + 2.88, 3.40], [0, SHEER + 6.40, 3.40], 0.075, grey, 8);
+    K.addTubeBetween(b, [-0.82, SHEER + 5.25, 3.40], [0.82, SHEER + 5.25, 3.40], 0.065, grey, 8);
+    K.addCyl(b, 0.28, 0.12, 0, SHEER + 5.38, 3.40, grey, 10);                       // radar on mast crossbar
+    // Fish totes and net bins hug the bulwarks; the central work lane stays open.
+    [-1.70, 1.70].forEach(function (x) {
+      K.addFixtureBox(b, "fish-tote", 1.05, 0.62, 1.15, x, SHEER + 0.38, -3.0, rust);
+      K.addFixtureBox(b, "net-bin", 1.10, 0.74, 1.30, x, SHEER + 0.44, -5.1, dark);
+    });
+    K.addFixtureCyl(b, "warp-coil", 0.46, 0.26, -1.85, SHEER + 0.25, -8.05, dark, 10);
     b.add(K.propGroup(2.0, [[0, KEEL * 0.72, -8.8]]));
     K.navLights(b, hw, SHEER + 0.9, 7.2, -8.8, SHEER + 5.9);
     return K.finish(b, { width: W, length: L, height: 8.4, wheelbase: L * 0.6 });
@@ -874,7 +1001,11 @@
     return {
       decks: decks,
       walls: [
-        { x: 0, z: 3.1, w: 4.14, d: 3.8, y0: SHEER + 0.24, y1: SHEER + 2.9 },
+        { x: 2.07, z: 3.1, w: 0.12, d: 3.6, y0: SHEER + 0.24, y1: SHEER + 2.9 },
+        { x: -2.07, z: 3.1, w: 0.12, d: 3.6, y0: SHEER + 0.24, y1: SHEER + 2.9 },
+        { x: 1.36, z: 1.34, w: 1.36, d: 0.12, y0: SHEER + 0.24, y1: SHEER + 2.9 },
+        { x: -1.36, z: 1.34, w: 1.36, d: 0.12, y0: SHEER + 0.24, y1: SHEER + 2.9 },
+        { x: 0, z: 4.76, w: 4.04, d: 0.12, y0: SHEER + 0.24, y1: SHEER + 2.9 },
         { x: 2.72, z: -2.2, w: 0.16, d: 12.0, y0: SHEER + 0.08, y1: SHEER + 1.0 },
         { x: -2.72, z: -2.2, w: 0.16, d: 12.0, y0: SHEER + 0.08, y1: SHEER + 1.0 },
       ],
@@ -889,6 +1020,11 @@
     const L = 12.5, W = 4.3, hw = W * 0.5, KEEL = -1.15, SHEER = 1.42;
     const hull = K.roleMat("sf-hull", "paint", 0xf2f5f7), navy = K.roleMat("sf-navy", "paint", 0x14314f);
     const teak = M.teak(), dark = M.dark(), chrome = M.chrome(), glass = M.glass(), pad = M.pad(), grey = M.grey();
+    const liner = M.liner(), wood = M.wood(), screen = M.screen(), warm = M.warm();
+    K.declareRoom(b, "sportfish-cockpit", "Fishing cockpit");
+    K.declareRoom(b, "sportfish-saloon", "Convertible saloon");
+    K.declareRoom(b, "sportfish-flybridge", "Flybridge");
+    K.declareRoom(b, "sportfish-tower", "Tuna tower helm");
     K.addPrism(b, W, [[-6.25, KEEL], [-6.25, SHEER], [-0.4, SHEER], [0.3, KEEL * 0.92]], 0, hull);
     K.addPrism(b, W * 0.90, [[-0.8, KEEL * 0.94], [-0.8, SHEER], [3.2, SHEER + 0.16], [3.7, KEEL * 0.60]], 0, hull);
     K.addPrism(b, W * 0.58, [[3.0, KEEL * 0.64], [3.0, SHEER + 0.14], [5.5, SHEER + 0.44], [5.7, KEEL * 0.20]], 0, hull);
@@ -908,30 +1044,43 @@
     K.addBox(b, 0.70, 0.68, 0.08, 1.0, SHEER + 0.34, -5.72, navy);
     K.addBox(b, 0.9, 0.5, 0.6, -1.2, SHEER + 0.25, -5.3, grey);
     // saloon + raised helm
-    K.addPrism(b, W * 0.66, [[-1.6, SHEER], [-1.6, SHEER + 2.05], [2.4, SHEER + 2.05], [3.0, SHEER + 0.20]], 0, hull);
-    K.addBox(b, W * 0.60, 1.05, 0.08, 0, SHEER + 1.10, -1.62, glass);
+    K.addCabinShell(b, { width: W * 0.66, z0: -1.60, z1: 2.60, y0: SHEER, y1: SHEER + 2.05,
+      doorW: 1.02, body: hull, liner: liner, glass: glass });
     [1, -1].forEach(function (side) {
-      K.addBox(b, 0.08, 0.52, 3.4, side * (W * 0.33 + 0.01), SHEER + 1.34, 0.4, glass);
       K.addBox(b, 0.62, 0.10, 5.6, side * 1.68, SHEER + 0.14, 1.6, teak);            // side deck
       K.addRail(b, side * 1.98, -1.4, 5.2, SHEER + 0.18, chrome, 1.7);
     });
-    const ws = K.addBox(b, W * 0.62, 0.85, 0.08, 0, SHEER + 1.66, 2.60, glass); ws.rotation.x = -0.38;
+    // Compact convertible saloon with a clear aft threshold and forward aisle.
+    K.addBox(b, 2.68, 0.08, 3.82, 0, SHEER + 0.08, 0.42, wood);
+    K.addBox(b, 2.60, 0.05, 3.60, 0, SHEER + 1.85, 0.42, liner);
+    K.addFixtureBox(b, "saloon-settee", 0.55, 0.46, 1.75, 1.02, SHEER + 0.34, -0.10, pad);
+    K.addFixtureBox(b, "saloon-settee-back", 0.12, 0.70, 1.75, 1.27, SHEER + 0.68, -0.10, pad);
+    K.addTable(b, 0.28, SHEER + 0.08, -0.10, 0.72, 0.92, wood, chrome);
+    K.addCabinet(b, -1.05, SHEER + 0.08, 0.70, 0.46, 0.86, 1.45, liner);
+    K.addFixtureBox(b, "galley-counter", 0.54, 0.09, 1.45, -1.02, SHEER + 0.99, 0.70, wood);
+    K.addScreen(b, -0.38, SHEER + 1.08, 2.02, 0.54, 0.30, 0, screen);
+    K.addFixtureBox(b, "saloon-light", 0.72, 0.04, 0.25, 0, SHEER + 1.79, 0.35, warm);
     // FLYBRIDGE helm + the TUNA TOWER above it
     K.addStairs(b, 1.45, 0.7, -1.5, 1, SHEER + 0.14, SHEER + 2.20, 6, chrome);
     K.addBox(b, W * 0.62, 0.12, 3.2, 0, SHEER + 2.20, 0.6, teak);
     K.addPrism(b, 1.7, [[1.5, SHEER + 2.20], [1.6, SHEER + 3.05], [2.3, SHEER + 3.08], [2.4, SHEER + 2.20]], 0, dark);
+    K.addScreen(b, 0, SHEER + 2.98, 1.72, 0.62, 0.30, 0, screen);
     [0.55, -0.55].forEach(function (x) { K.addBox(b, 0.48, 0.16, 0.48, x, SHEER + 2.40, -0.4, pad); });
     K.addRail(b, 1.30, -1.0, 2.2, SHEER + 2.26, chrome, 1.4);
     K.addRail(b, -1.30, -1.0, 2.2, SHEER + 2.26, chrome, 1.4);
     [1, -1].forEach(function (side) {
-      const leg = K.addBox(b, 0.09, 2.6, 0.09, side * 1.05, SHEER + 3.5, 0.5, grey);
-      leg.rotation.z = side * 0.05;
-      // OUTRIGGERS, swept back and up
-      const rig = K.addBox(b, 0.07, 6.4, 0.07, side * 1.15, SHEER + 3.6, 0.2, grey);
-      rig.rotation.z = side * 1.02; rig.rotation.x = -0.22;
+      // Four tube ends land on the flybridge and tower platform.
+      K.addTubeBetween(b, [side * 1.05, SHEER + 2.26, -0.12], [side * 0.78, SHEER + 4.80, -0.10], 0.055, grey, 8);
+      K.addTubeBetween(b, [side * 1.05, SHEER + 2.26, 1.12], [side * 0.78, SHEER + 4.80, 1.10], 0.055, grey, 8);
+      // Outriggers sweep outboard and aft from visible roof sockets.
+      K.addTubeBetween(b, [side * 1.10, SHEER + 3.12, 0.55], [side * 4.25, SHEER + 6.25, -2.25], 0.045, grey, 8);
+      K.addTubeBetween(b, [side * 1.10, SHEER + 3.12, 0.55], [side * 1.62, SHEER + 4.15, -0.25], 0.028, chrome, 8);
     });
     K.addBox(b, 1.9, 0.10, 1.7, 0, SHEER + 4.8, 0.5, grey);                          // tower platform
     K.addBox(b, 0.9, 0.55, 0.10, 0, SHEER + 5.12, 1.24, dark);                        // tower helm
+    K.addScreen(b, 0, SHEER + 5.18, 1.17, 0.50, 0.24, 0, screen);
+    K.addSeat(b, 0, SHEER + 4.86, 0.20, 0, pad, chrome);
+    b.userData.marineFixtureCount += 7;                                                  // cockpit + flybridge work fittings
     b.add(K.propGroup(1.4, [[0.75, -0.95, -6.3], [-0.75, -0.95, -6.3]]));
     K.navLights(b, hw, SHEER + 0.5, 5.1, -6.1, SHEER + 5.4);
     return K.finish(b, { width: W, length: L, height: 6.9, wheelbase: L * 0.6 });
@@ -942,6 +1091,7 @@
       { x: 0, z: -3.6, w: 3.44, d: 4.2, top: SHEER + 0.06 },
       { x: 1.68, z: 1.6, w: 0.62, d: 5.6, top: SHEER + 0.19 },
       { x: -1.68, z: 1.6, w: 0.62, d: 5.6, top: SHEER + 0.19 },
+      { x: 0, z: 0.42, w: 2.68, d: 3.82, top: SHEER + 0.12 },
       { x: 0, z: 0.6, w: 2.67, d: 3.2, top: SHEER + 2.26 },
     ];
     K_stairDecks(decks, 1.15, 0.7, -6.15, 1, 0.35, SHEER + 0.06, 4);
@@ -949,7 +1099,11 @@
     return {
       decks: decks,
       walls: [
-        { x: 0, z: 0.5, w: 2.84, d: 4.4, y0: SHEER, y1: SHEER + 2.05 },
+        { x: 1.42, z: 0.5, w: 0.10, d: 4.2, y0: SHEER + 0.12, y1: SHEER + 2.05 },
+        { x: -1.42, z: 0.5, w: 0.10, d: 4.2, y0: SHEER + 0.12, y1: SHEER + 2.05 },
+        { x: 0.96, z: -1.58, w: 0.92, d: 0.10, y0: SHEER + 0.12, y1: SHEER + 2.05 },
+        { x: -0.96, z: -1.58, w: 0.92, d: 0.10, y0: SHEER + 0.12, y1: SHEER + 2.05 },
+        { x: 0, z: 2.58, w: 2.74, d: 0.10, y0: SHEER + 0.12, y1: SHEER + 2.05 },
         { x: 1.30, z: 0.6, w: 0.08, d: 3.2, y0: SHEER + 2.26, y1: SHEER + 3.2 },
         { x: -1.30, z: 0.6, w: 0.08, d: 3.2, y0: SHEER + 2.26, y1: SHEER + 3.2 },
       ],
@@ -966,7 +1120,11 @@
     const L = 13.5, W = 4.0, hw = W * 0.5, KEEL = -0.95, SHEER = 1.10;
     const hull = K.roleMat("sl-hull", "paint", 0xf4f6f7), stripe = K.roleMat("sl-stripe", "paint", 0x1b3f63);
     const teak = M.teak(), chrome = M.chrome(), glass = M.glass(), grey = M.grey(), dark = M.dark();
-    const sail = K.roleMat("sl-sail", "plastic", 0xe6e8e6);
+    const pad = M.pad(), liner = M.liner(), wood = M.wood(), screen = M.screen(), warm = M.warm();
+    const sail = K.sharedMat("sl-sail", 0xe6e8e6, { emissive: 0x3c3d3c, ei: 0.28, double: true });
+    K.declareRoom(b, "sloop-cockpit", "Sailing cockpit");
+    K.declareRoom(b, "sloop-cabin", "Main cabin");
+    K.declareRoom(b, "sloop-rig", "Standing rigging");
     K.addPrism(b, W * 0.86, [[-6.75, KEEL * 0.6], [-6.75, SHEER], [-1.0, SHEER], [-0.2, KEEL]], 0, hull);
     K.addPrism(b, W, [[-1.4, KEEL], [-1.4, SHEER], [3.4, SHEER + 0.14], [4.0, KEEL * 0.74]], 0, hull);
     K.addPrism(b, W * 0.56, [[3.2, KEEL * 0.78], [3.2, SHEER + 0.12], [5.8, SHEER + 0.42], [6.0, KEEL * 0.22]], 0, hull);
@@ -980,23 +1138,69 @@
     K.addBox(b, 0.55, 0.30, 3.0, 0, KEEL - 1.46, -0.2, dark);          // bulb
     K.addBox(b, 0.14, 1.20, 0.70, 0, KEEL - 0.55, -4.6, dark);
     // coachroof + cockpit + wheel
-    K.addPrism(b, W * 0.56, [[-1.0, SHEER], [-0.9, SHEER + 0.78], [3.4, SHEER + 0.82], [3.8, SHEER + 0.10]], 0, hull);
-    [1, -1].forEach(function (side) {
-      K.addBox(b, 0.08, 0.34, 3.6, side * (W * 0.28 + 0.01), SHEER + 0.52, 1.2, glass);
-    });
+    K.addCabinShell(b, { width: W * 0.56, z0: -1.00, z1: 3.45, y0: 0.48, y1: SHEER + 0.82,
+      doorW: 0.86, body: hull, liner: liner, glass: glass });
     K.addBox(b, W * 0.52, 0.10, 3.2, 0, SHEER - 0.28, -3.4, teak);     // cockpit sole
     K.addBox(b, 0.10, 0.90, 0.10, 0, SHEER + 0.10, -2.6, chrome);
     K.addCyl(b, 0.44, 0.06, 0, SHEER + 0.52, -2.6, chrome, 12).rotation.x = Math.PI / 2;
-    // THE RIG: mast, boom, furled main, forestay, backstay
-    K.addCyl(b, 0.13, 17.0, 0, SHEER + 8.6, 1.4, grey, 8);
-    K.addCyl(b, 0.10, 5.2, 0, SHEER + 1.55, -1.0, grey, 8).rotation.x = Math.PI / 2;
-    K.addCyl(b, 0.26, 4.6, 0, SHEER + 1.90, -0.9, sail, 8).rotation.x = Math.PI / 2;   // furled main
-    const fs = K.addBox(b, 0.05, 16.4, 0.05, 0, SHEER + 8.3, 3.6, grey); fs.rotation.x = 0.20;
-    const bs = K.addBox(b, 0.05, 16.4, 0.05, 0, SHEER + 8.3, -1.2, grey); bs.rotation.x = -0.10;
-    K.addCyl(b, 0.30, 5.4, 0, SHEER + 5.0, 3.9, sail, 6).rotation.x = 0.20;            // furled headsail
+    // Cabin sole and companionway below the coachroof. The camera/player has a
+    // clear centre aisle between paired settees, with a berth forward and real
+    // galley/nav stations aft.
+    K.addBox(b, 2.02, 0.08, 4.25, 0, 0.48, 1.15, wood);
+    K.addBox(b, 1.94, 0.05, 3.90, 0, SHEER + 0.62, 1.20, liner);
+    [1, -1].forEach(function (side) {
+      K.addFixtureBox(b, "cabin-settee", 0.54, 0.38, 1.70, side * 0.72, 0.72, 0.65, pad);
+      K.addFixtureBox(b, "cabin-settee-back", 0.12, 0.62, 1.70, side * 0.96, 1.02, 0.65, pad);
+    });
+    K.addTable(b, 0, 0.52, 0.65, 0.72, 0.90, wood, chrome);
+    K.addFixtureBox(b, "v-berth", 1.65, 0.28, 1.55, 0, 0.72, 2.75, pad);
+    K.addCabinet(b, -0.92, 0.52, -0.42, 0.42, 0.72, 0.92, liner);
+    K.addFixtureBox(b, "galley-counter", 0.50, 0.08, 0.92, -0.90, 1.29, -0.42, wood);
+    K.addScreen(b, 0.86, 1.38, -0.30, 0.44, 0.27, Math.PI / 2, screen);
+    K.addSeat(b, 0.68, 0.52, -0.45, 0, pad, chrome);
+    for (let i = 0; i < 3; i++) K.addBox(b, 0.82, 0.08, 0.30, 0, 0.56 + i * 0.14, -1.05 - i * 0.30, teak);
+    K.addFixtureBox(b, "cabin-light", 0.65, 0.04, 0.22, 0, SHEER + 0.56, 0.75, warm);
+    // THE RIG. Every stay, spar and furled sail is solved between exact deck,
+    // masthead or gooseneck anchors; none are rotated around an arbitrary centre.
+    const mastFoot = [0, SHEER + 0.08, 1.40], mastTop = [0, SHEER + 17.05, 1.40];
+    const goose = [0, SHEER + 1.62, 1.38], boomEnd = [0, SHEER + 1.62, -3.82];
+    K.addTubeBetween(b, mastFoot, mastTop, 0.13, grey, 10);
+    K.addTubeBetween(b, goose, boomEnd, 0.10, grey, 8);
+    K.addTubeBetween(b, [0, SHEER + 1.88, 1.22], [0, SHEER + 1.88, -3.42], 0.18, sail, 8);
+    K.addTubeBetween(b, mastTop, [0, SHEER + 0.42, 6.20], 0.030, grey, 7);
+    K.addTubeBetween(b, mastTop, [0, SHEER + 0.34, -6.20], 0.030, grey, 7);
+    K.addTubeBetween(b, [0, SHEER + 15.75, 1.78], [0, SHEER + 0.58, 6.12], 0.16, sail, 8);
+    // Spreaders and paired shrouds stop the mast reading as a pole balanced on deck.
+    K.addTubeBetween(b, [-1.18, SHEER + 8.65, 1.40], [1.18, SHEER + 8.65, 1.40], 0.040, grey, 7);
+    [1, -1].forEach(function (side) {
+      K.addTubeBetween(b, [side * 1.18, SHEER + 8.65, 1.40], [side * 1.78, SHEER + 0.16, 0.65], 0.025, grey, 7);
+    });
+    b.userData.marineFixtureCount += 6;                                  // cockpit helm/benches/companionway
     b.add(K.propGroup(0.9, [[0, KEEL - 0.10, -4.9]]));
     K.navLights(b, hw, SHEER + 0.30, 6.1, -6.5, SHEER + 17.0);
     return K.finish(b, { width: W, length: L, height: 19.0, wheelbase: L * 0.6 });
+  }
+  function sloopDeck() {
+    const SHEER = 1.10, decks = [
+      { x: 0, z: -3.4, w: 2.08, d: 3.2, top: SHEER - 0.23 },
+      { x: 0, z: 1.15, w: 2.02, d: 4.25, top: 0.52 },
+      { x: 1.62, z: 1.6, w: 0.55, d: 8.2, top: SHEER + 0.08 },
+      { x: -1.62, z: 1.6, w: 0.55, d: 8.2, top: SHEER + 0.08 },
+      { x: 0, z: 4.75, w: 2.65, d: 2.8, top: SHEER + 0.15 },
+    ];
+    K_stairDecks(decks, 0, 0.82, -1.05, -1, 0.52, SHEER - 0.23, 3);
+    return {
+      decks: decks,
+      walls: [
+        { x: 1.12, z: 1.20, w: 0.10, d: 4.35, y0: 0.52, y1: SHEER + 0.82 },
+        { x: -1.12, z: 1.20, w: 0.10, d: 4.35, y0: 0.52, y1: SHEER + 0.82 },
+        { x: 0.76, z: -0.96, w: 0.72, d: 0.10, y0: 0.52, y1: SHEER + 0.82 },
+        { x: -0.76, z: -0.96, w: 0.72, d: 0.10, y0: 0.52, y1: SHEER + 0.82 },
+        { x: 0, z: 3.38, w: 2.18, d: 0.10, y0: 0.52, y1: SHEER + 0.82 },
+      ],
+      riders: true, yaw: true, camYaw: false, bodyYaw: true, tilt: true,
+      onLeave: "upward", id: "sloop-decks",
+    };
   }
 
   if (C.YACHT_FLEET !== false) {
@@ -1060,7 +1264,7 @@
     });
     queue({
       key: "sloop", label: "Marlow 44 Sloop", marque: "Marlow", model: "Marlow 44 Sloop",
-      price: 480000, build: smallBuilder(buildSloop),
+      price: 480000, build: smallBuilder(buildSloop), deck: sloopDeck(),
       hull: {
         // Under auxiliary diesel only — this game has no sail model and a boat
         // that claims to sail and does not would be a stat fiction.

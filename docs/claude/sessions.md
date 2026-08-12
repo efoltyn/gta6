@@ -3443,3 +3443,155 @@ END of that suite and read 227%, because by then the suite had spawned test
 actors and switched into gungame, whose bots live in `CBZ.npcs`. A population
 assertion has to be taken before the suite starts editing the world it means to
 measure.
+
+## 2026-08-11 — THE WAR WAS FOUGHT IN A DESERT MADE OF BOXES
+
+**"Put it in gang city with all of gang city's buildings … not the current fake
+scene … really massively improve this minigame, and the logic of them — right
+now the NPCs can overlap and it's just not perfect"** (owner).
+
+`games/battle.html` is a battle you WATCH, which means every fault that matters
+is one you can point at on the screen. So each was turned into an integer first
+and fixed second, and `tools/battle-check.mjs` holds all of them at zero across
+five maps — two-sided, because `--revert` has to bring them back.
+
+### The ground was the wrong ground
+
+Its `city` map was `studio.world("desert")`: 200 procedural towers on a grid,
+standing in for a city this repo ships whole. That is the exact stage flat
+games/bomb-survivor.html deleted a wave earlier, in a repo whose studio can
+RAISE the real map. Five grounds now, four of them real places at their own
+coordinates — `studio.town()` downtown at the mainland's (0,-700), the military
+island at (-620,-700), Halloran Field, the desert basin (kept: an open firing
+line is a different game), and the kill box (kept as the CONTROL — no world, so
+a fault there is the men and not the map).
+
+### 17 041 draw calls, and it was never the town's fault
+
+That is the mainland's own number before `city/mode.js` runs `batchStaticUnder`
++ `freezeStaticUnder`. A slice page never runs city/mode.js, so it never ran
+them. Neither `core/batch.js` nor `core/staticfreeze.js` reads a city record;
+they were simply behind a door only the full engine had a key to. New studio
+pack **`batch`**, one verb **`CBZ.studio.settle(root)`** — merge, then freeze,
+in that order, after the ground and BEFORE the actors, because anything added
+afterwards keeps its own live matrix and that is what keeps the men animated.
+
+    draw calls, one real downtown      17 041 -> 817
+
+A/B captured both ways at three camera ranges: visually identical. bomb-survivor
+adopted it in the same wave.
+
+### A man is not a pathfinder, and in a city that is not survivable
+
+First build on the real fabric, measured: **25 of 40 men in slot `push`**, their
+`cool` at −28 s, both armies 135 m apart with eight blocks of masonry between
+them, **5 shots in 30 seconds**. The wall-slide detour is the right instinct for
+a crate and hopeless against a city block — walk into the Exchange Bank, slide
+1.5 s along the facade, turn back into it, repeat until the clock runs out.
+
+The ground now carries a **multi-source flow field**: 4 m cells (a 15 m street
+is three of them wide, a 490 m town is 22 500), Dial's bucket queue, re-solved
+every 1.4 s per side and staggered so two solves never land in one sub-step.
+Seed Dijkstra from EVERY living enemy at once and the field is *path distance to
+the nearest enemy*, so one solve steers each man toward whoever is genuinely
+closest THROUGH the streets. Seeding from a centre of mass instead funnels an
+army into a single point — that was the first draft, and the corner-bunching was
+in the measurement. Only the SENIOR man of a squad navigates; the column trails
+his heading, so a squad rounds a block as a squad instead of coming apart on the
+first corner.
+
+    men in `push`, real downtown        25 -> 1
+    men with a mark they can SEE         0 -> 20+
+    shots in the first 30 s              5 -> 300+
+
+### The overlap was a cell size
+
+Separation ran on the TARGET-SEARCH grid, and the two jobs want opposite cells:
+target search wants cells big enough that a 175 m look is a handful of lookups,
+separation wants cells at BODY scale. On 14 m cells it could only be wrong in
+three ways, and it was all three:
+
+  * it never compared across a cell boundary, so two men 0.2 m apart on opposite
+    sides of an invisible line interpenetrated forever;
+  * it capped the inner loop at five neighbours (`i + 6`) — and *which* five
+    depended on spawn order;
+  * it fired at 1.0 m, which for a 0.52 m body is contact, not clearance.
+
+Bodies got their own grid at 2.4 m, rebuilt every sub-step (a stale body grid is
+exactly what lets two men swap cells and stop seeing each other), swept as
+cell + four FORWARD neighbours so every pair is visited exactly once, clearance
+0.9 m. A deep overlap — inside shoulder width — is corrected in FULL that step
+rather than sprung apart over several, because relaxation is right for a crowd
+easing itself out and wrong for two bodies already inside each other. Every
+shove marks both men for a collider re-resolve: a body squeezed into a crate is
+invisible to every ray, therefore immortal, therefore a battle that cannot end.
+
+### One round in five was a ghost bullet
+
+Measured: **167 of 776 rounds** fired down a lane one of the shooter's own men
+was standing in. Because a friendly round in this game passes through a friendly
+body, the result was not fratricide — it was rounds going through your own
+people, which is worse to watch than a friendly-fire kill and impossible to
+read. The trigger now asks two questions with FRESH answers, once the cooldown
+has already expired so it costs about one segment trace per shot:
+
+  * **is the line clear** — `m.sees` is a think-tick answer up to half a second
+    old about two men who have both been moving since, and stale LOS is how
+    rounds got fired into a wall that closed in between (2 of them in the kill
+    box; it is the walls that move the count, not the men);
+  * **is one of mine in it** — and if so he does not hold fire and do nothing,
+    he **steps off the line**, away from the mate's side, because moving a
+    shoulder-width perpendicular grows the mate's offset from the new line by
+    (1 − along/d) of the step. He keeps his mark the whole time.
+
+    rounds through a mate      167/776  ->  0
+    rounds at an unseen mark         2  ->  0
+
+### The rest of it
+
+Targets are picked LOS-first (the nearest man is not the man you can shoot — on
+sand those are the same sentence, and in a city they are not). Nobody spawns
+inside a building: a golden-angle spiral to the nearest free point, and in a
+town the two sides form up in the outermost streets off `town.roads` and walk
+in. The spectator camera shortens its arm instead of parking inside the Exchange
+Bank — it SNAPS in and eases out, so a pillar does not make the shot pump.
+`ch.crouch`, the rig's own flag, had never once been set by anything, so
+combat_iq could send a soldier to real cover and he would stand up straight
+behind it. Each map got its own sky, because one desert haze over a glass
+downtown washed the streets to paper.
+
+### `airport` needed `citycore` and did not say so
+
+The terminal is a real shell — island_airport.js calls `cityMakeBuilding` to
+raise it — so a page naming `airport` alone got `[studio.raise] airport
+TypeError: CBZ.cityMakeBuilding is not a function` and an airfield with no
+terminal on it. bomb-survivor never saw it because it happens to name citycore
+for its own downtown, which is exactly how an under-declared dependency hides.
+Found by the new `field` map on the first sweep.
+
+### The load was contractually serial and accidentally slow
+
+`studio.need()` executes one file at a time and must: several throw if loaded
+early, and the addLandmass stamp depends on exactly one script being in flight.
+But awaiting each file also DOWNLOADED them one at a time, so a page naming ten
+packs paid ten round trips before its first line ran. `warm(files)` /
+`prefetch(...packs)` emit `<link rel=preload as=script>`, which fills the HTTP
+cache without executing anything — downloads go wide, execution order is
+untouched. The armoury (fourteen files, none of which registers a landmass)
+additionally goes in as one batch of `async=false` tags, the spec's
+execute-in-order list. `onProgress(cb)` reports each file so the page draws a
+real bar instead of three words, and the menu warms a map on hover so START is
+a build and not a download.
+
+    time to READY, 40 ms per request      4.04 s -> 3.13 s   (911 ms)
+
+911 ms against 23 round trips at 40 ms is 920 ms. The mechanism is not inferred.
+
+### The instrument
+
+`tools/battle-check.mjs` boots the page per map, runs the war, and reads
+`window.__battle.quality()` — an O(n²) pass on purpose, because the grid is the
+thing under test and the check must not share its blind spots. `overlapPeak` ·
+`embedded` · `blindFire` · `throughMate` · `stuck` all pinned at 0.
+`--revert` (`?sep=old&fire=old`) asserts they come back: 3 overlapping pairs and
+214 ghost rounds. A fix nobody can turn off has not been measured.

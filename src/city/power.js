@@ -752,6 +752,12 @@
   function reactionTo(a) {
     const rec = recOf(a);
     if (!on() || !rec) return "welcome";        // not a principal: nothing changes
+    // Government residences embody a player-held office with a posted actor
+    // whose canonical sid is officials.PLAYER_SID. That body is the player's
+    // address in the world, not a second stranger: its own detail must never
+    // challenge or shoot the officeholder it represents.
+    const playerSid = (CBZ.officials && CBZ.officials.PLAYER_SID) || "player";
+    if (a && a._sid === playerSid) return "welcome";
     if (rec.audienceT > 0) return "welcome";    // you were let through
     if (rec.hostileT > 0) return "hostile";     // you already did something
     const k = rec.kit;
