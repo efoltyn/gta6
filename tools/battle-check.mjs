@@ -20,6 +20,11 @@
      node tools/battle-check.mjs --map city --n 40   one map, one size
      node tools/battle-check.mjs --seconds 90        longer watch
      node tools/battle-check.mjs --keep              leave chrome up
+     node tools/battle-check.mjs --url https://efoltyn.github.io/gta6/
+                                                    check the DEPLOYED site
+                                                    rather than this checkout,
+                                                    which is the only way to
+                                                    know a wave actually shipped
    Exit 0 = ok.                                                              */
 import { spawn } from "node:child_process";
 import { rm } from "node:fs/promises";
@@ -42,16 +47,25 @@ const SPEED = arg("--speed", "4");
 const REVERT = has("--revert");
 const EXTRA = REVERT ? "&sep=old&fire=old" : "";
 
-/* ---- one browser, one dev server, every map through it ------------------ */
+/* ---- one browser, one origin, every map through it ----------------------
+   The origin is normally a devserver on this checkout. --url points the same
+   sweep at a real host: "the bytes are on the server" and "the game runs on
+   the server" are different claims, and only the second one is a deploy. */
 async function claimPort(lo, n, probe) {
   for (let p = lo; p < lo + n; p++) { try { await probe(p); } catch (_) { return p; } }
   throw new Error("no free port");
 }
-const port = await claimPort(9780, 150, (p) => fetch(`http://127.0.0.1:${p}/`));
-const server = spawn("python3", [path.join(ROOT, "tools/devserver.py")],
-  { env: { ...process.env, PORT: String(port) }, stdio: "ignore" });
-const origin = `http://127.0.0.1:${port}/`;
-{
+const REMOTE = arg("--url", "");
+let server = { kill() {} };
+let origin;
+if (REMOTE) {
+  origin = REMOTE.endsWith("/") ? REMOTE : REMOTE + "/";
+  try { await fetch(origin); } catch (e) { console.error("BATTLE: FAIL cannot reach " + origin); process.exit(1); }
+} else {
+  const port = await claimPort(9780, 150, (p) => fetch(`http://127.0.0.1:${p}/`));
+  server = spawn("python3", [path.join(ROOT, "tools/devserver.py")],
+    { env: { ...process.env, PORT: String(port) }, stdio: "ignore" });
+  origin = `http://127.0.0.1:${port}/`;
   let up = false;
   for (let i = 0; i < 40 && !up; i++) { try { await fetch(origin); up = true; } catch (_) { await sleep(100); } }
   if (!up) { console.error("BATTLE: FAIL devserver never came up"); process.exit(1); }
