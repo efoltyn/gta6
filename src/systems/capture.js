@@ -608,7 +608,18 @@
     if (sentCallT <= 0) {
       sentCallT = 1;
       if (CBZ.setObjective) {
-        CBZ.setObjective("Serving " + s + "s" + (sentCall ? " · " + sentCall : "") +
+        /* STRIKES BELONG HERE, NOT IN A TOAST.
+           Being caught is the one piece of prison bookkeeping that is both
+           invisible and permanent: three and you are shipped to max security.
+           It was announced by a popup you could be looking away from, and then
+           never shown again — so the fact that decides your run lived for two
+           seconds and then only inside a variable.
+           This line already rewrites every second on the readout the mode
+           always has, so the count rides it. A standing fact on a standing
+           surface, instead of a warning you had to catch. */
+        const st = CBZ.game.caughtCount || 0;
+        const strikes = st > 0 ? " · caught " + st + "/3" : "";
+        CBZ.setObjective("Serving " + s + "s" + strikes + (sentCall ? " · " + sentCall : "") +
           " — or find a keycard, a vent or a tunnel and don't wait.");
       }
     }

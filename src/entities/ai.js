@@ -116,20 +116,45 @@
   const APPROACH_NEAR = 2.35;
   const APPROACH_FAR = 13.5;
 
-  // cached emote-bubble textures
-  const emoteTex = {};
+  /* FLOATING EMOJI OVER HEADS: DELETED. (OWNER: the hearts, the dollar signs
+     and the question marks above people's heads.)
+
+     44 call sites painted one character to a 64px canvas and pinned it over
+     the head with depthTest:false — so it drew THROUGH WALLS, which the
+     prison's other icon system (systems/markers.js) deliberately refuses to
+     do: that one gates on 3.8m, a 72-degree facing cone, an LOS raycast and a
+     0.22s fade, and its header states the law — "hostility is communicated by
+     actor behavior, sound, and the map, never by a floating marker."
+
+     THIRTEEN OF THE 44 ALREADY DREW NOTHING. The emoji were destroyed by a
+     lossy edit: commit 801dd96 has emote(ally, mode === "snitch" ? "snake" :
+     "fist") where the source now holds two empty strings, and the heart at
+     ~4187 is the last survivor on its own line. So a third of this system was
+     already building a canvas, drawing nothing on it, and holding an invisible
+     sprite over somebody's head for 1.6 seconds.
+
+     Gutted rather than deleted at the 44 call sites for one specific reason:
+     several pass an rng() expression as the glyph (`emote(n, rng() < 0.4 ? ...
+     : "heart")`). Those draws are evaluated BEFORE the call, so leaving the
+     call sites intact keeps the shared rng stream byte-identical — removing
+     them would shift every later draw and break determinism (doctrine: never
+     add/remove draws on a shared stream). The sprite, the canvas and the
+     texture cache are all gone; only the sprite is.
+
+     THE "!" BECAME A STARE. 27 of the call sites (19 here, 8 more through
+     CBZ.npcEmote in economy.js and guards.js) passed "!" and every one of them
+     means the same thing: this man just CLOCKED you. That is not a symbol, it
+     is a head turning — so the glyph is swapped for the gesture at the one
+     place the glyph used to be drawn, rather than editing 27 call sites.
+     systems/reactions.js already owned a finished damped head-track (aimK /
+     aimY / aimP, yaw-clamped, shoulders opening after it) that was gated to
+     armed shooters following a rage target; npcStare opens it to anybody.
+
+     The other glyphs stay silent: "?" "$" "+" are the approach vocabulary and
+     systems/markers.js still draws those properly — 3.8m, a facing cone, an
+     LOS raycast and a fade, instead of through a wall. */
   function emote(actor, ch) {
-    if (!emoteTex[ch]) {
-      const c = document.createElement("canvas"); c.width = c.height = 64;
-      const x = c.getContext("2d"); x.font = "44px serif"; x.textAlign = "center"; x.textBaseline = "middle";
-      x.fillText(ch, 32, 36); emoteTex[ch] = new THREE.CanvasTexture(c);
-    }
-    if (!actor._emote) {
-      actor._emote = new THREE.Sprite(new THREE.SpriteMaterial({ depthTest: false, transparent: true }));
-      actor._emote.scale.set(0.9, 0.9, 1); actor._emote.position.y = CBZ.charHeadY ? CBZ.charHeadY(actor) : 1.97; actor.group.add(actor._emote);
-    }
-    actor._emote.material.map = emoteTex[ch];
-    actor._emote.visible = true; actor._emoteT = 1.6;
+    if (ch === "!" && CBZ.npcStare) CBZ.npcStare(actor, 1.7);
   }
 
   let inited = false;
@@ -317,7 +342,7 @@
     if (!actor || actor.gang == null || actor.gang < 0 || !actor.group) return null;
     const gang = actor.gang;
     severity = Math.max(1, severity || 1);
-    const helpful = kind === "help" || kind === "gift" || kind === "trade" || kind === "cover" || kind === "romance";
+    const helpful = kind === "help" || kind === "gift" || kind === "trade" || kind === "cover";
     const sameCrew = CBZ.player && CBZ.player.gang === gang;
     const source = opts.source || actorName(actor);
     const standingDelta = helpful
@@ -3706,8 +3731,6 @@
   function aiThink(n, dt) {
     if (!inited) initWorld();
     if (n.hp == null) initActor(n);
-    // fade any emote bubble
-    if (n._emoteT > 0) { n._emoteT -= dt; if (n._emoteT <= 0 && n._emote) n._emote.visible = false; }
     if (n.memory && n.memory.t > 0) {
       n.memory.t -= dt;
       if (n.memory.t <= 0) n.memory = null;
@@ -3866,7 +3889,25 @@
           n.group.rotation.y = CBZ.lerpAngle(n.group.rotation.y, Math.atan2(px - n.group.position.x, pz - n.group.position.z), 1 - Math.pow(0.0001, dt));
           if (!a.greeted) {
             a.greeted = true;
-            nar(a.msg + " Walk up to answer.", 2.2);
+            /* HE ARRIVES AND HE SPEAKS. This used to be
+                 nar(a.msg + " Walk up to answer.", 2.2)
+               which did two wrong things at once: it bolted an INSTRUCTION
+               onto a man's dialogue ("walk up to answer" — you are stood in
+               front of him, he walked to YOU), and it sent the line through
+               the narration sink, which drops it. So the whole approach played
+               out silently: he jogged across the yard at 1.15-1.45x speed,
+               stopped at arm's length, turned to face you, and said nothing.
+               The only thing that ever told you what he wanted was the "$" or
+               "?" glyph over his head — which is exactly why deleting that
+               glyph without this fix would have left the approach mute.
+
+               A man who has walked over to talk to you TALKS. prisonSay is the
+               prison's one mouth, and it is ranked, so his opener yields to a
+               louder line rather than stomping it. The instruction half is
+               gone; the offer itself is the whole message. */
+            if (CBZ.prisonSay) CBZ.prisonSay(n, a.msg, { secs: 2.6, rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
+            else nar(a.msg, 2.2);
+            if (CBZ.npcStare) CBZ.npcStare(n, 2.2);   // and he holds your eye while he says it
           }
           return 0;
         }
