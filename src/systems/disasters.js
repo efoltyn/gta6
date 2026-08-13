@@ -444,11 +444,25 @@
     o = o || {};
     const y = o.y != null ? o.y : floor(x, z) + (o.up || 1.2);
     let priced = false;
-    if (CBZ.CONFIG.SURV_SHARED_STRUCTURE !== false && CBZ.detonate) {
+    /* A CALLER WITH ITS OWN RENDERER (`o.draw` — the lightning bolt) MUST NOT
+       DEGRADE TO A FIREBALL, because that fireball is the exact bug it was
+       written to delete. CBZ.detonate answers an unknown kind by drawing a
+       generic cityExplosion, and IMPACT_BUS=false makes every kind draw one —
+       so a load-order slip or a master revert would have quietly put the RPG
+       back. Such a caller therefore only reaches for the bus when the bus can
+       actually route its row, and its own draw is the fallback. */
+    const busRoutes = !o.draw || !!(CBZ.CONFIG.IMPACT_BUS !== false &&
+      CBZ.impact && CBZ.impact.row && CBZ.impact.row(kind));
+    if (busRoutes && CBZ.CONFIG.SURV_SHARED_STRUCTURE !== false && CBZ.detonate) {
       try {
         CBZ.detonate(x, y, z, kind, {
           noDamage: true, scale: o.scale, mass: o.mass, speed: o.speed,
           dirx: o.dirx, dirz: o.dirz, quiet: o.quiet,
+          // `fx` is an opaque bag for the COMPOSER, not for the bus: the bus's
+          // own option list is a fixed whitelist, and a caller whose composer
+          // needs to know something the table cannot express (here: how much of
+          // this strike reaches the turf) had nowhere to put it.
+          fx: o.fx,
         });
         detonateAdopted++; priced = true;
       } catch (e) { priced = false; }
@@ -459,7 +473,8 @@
       // size for callers whose lethal radius is 0 because they price their own
       // wave — the nuke, mainly, whose fallback must not be a 4 m puff.
       blastLegacy++;
-      CBZ.fx.blast(x, z, { maxR: (o.fxR || o.r) + 4, color: o.color || 0xffcaa0, shake: 0.6, flash: o.flash != null ? o.flash : 0.3, sfx: o.sfx || "shoot_shotgun" });
+      if (o.draw) { try { o.draw(x, y, z); } catch (e) {} }
+      else CBZ.fx.blast(x, z, { maxR: (o.fxR || o.r) + 4, color: o.color || 0xffcaa0, shake: 0.6, flash: o.flash != null ? o.flash : 0.3, sfx: o.sfx || "shoot_shotgun" });
     }
     // the mode's own roster, priced by the mode's own model
     if (o.r > 0) surv().hurtRadius(x, z, o.r, o.dmg != null ? o.dmg : 1e6, {
@@ -510,25 +525,118 @@
           let tx, tz; const acts = surv().actors();
           if (acts.length && rnd() < 0.7) { const a = acts[(rnd() * acts.length) | 0]; tx = a.pos.x + (rnd() - 0.5) * 10; tz = a.pos.z + (rnd() - 0.5) * 10; }
           else { const p = ctx.arena.randomPoint(0, ctx.R); tx = p.x; tz = p.z; }
-          ctx.st.pending.push({ x: tx, z: tz, t: 0.95, m: CBZ.fx.groundMarker(tx, tz, 4.5, 0x9fd0ff) });
+          // WHAT IT WILL ACTUALLY HIT — resolved now, not at the moment of the
+          // strike, so the leader spends its whole descent pointing at the real
+          // termination and the bolt lands where the warning said it would.
+          // Skipped entirely on the revert path, which aims at bare coordinates.
+          const at = (CBZ.CONFIG.LIGHTNING_FX_V2 !== false) ? attachPoint(tx, tz, ctx) : null;
+          if (at) { tx = at.x; tz = at.z; }
+          /* THE TELEGRAPH IS THE BOLT'S OWN APPROACH, not a decal (2026-08-13).
+             This was CBZ.fx.groundMarker(tx, tz, 4.5, 0x9fd0ff) — a pulsing
+             blue disc painted on the ground where the strike would land, which
+             nothing in the world casts and which announces the bolt from the
+             one place you cannot see the sky. It is now the STEPPED LEADER:
+             the dim branching channel that really does grope down out of the
+             cloud before a stroke, seeded off these coordinates so the return
+             stroke runs up the same path. Same handle, so the pending list
+             below — and the threat model and bot scatter that read it — did
+             not change by a line. Falls back to the disc if the renderer is
+             absent or LIGHTNING_FX_V2 is off. */
+          const tele = (CBZ.CONFIG.LIGHTNING_FX_V2 !== false && CBZ.lightningLeader)
+            ? CBZ.lightningLeader(tx, tz)
+            : CBZ.fx.groundMarker(tx, tz, 4.5, 0x9fd0ff);
+          ctx.st.pending.push({ x: tx, z: tz, t: 0.95, m: tele, at: at });
         }
         for (let i = ctx.st.pending.length - 1; i >= 0; i--) {
           const p = ctx.st.pending[i]; p.t -= dt; p.m.set(1 - p.t / 0.95);
-          if (p.t <= 0) { strike(p.x, p.z, ctx); p.m.dispose(); ctx.st.pending.splice(i, 1); }
+          if (p.t <= 0) { strike(p.x, p.z, ctx, p.at); p.m.dispose(); ctx.st.pending.splice(i, 1); }
         }
         for (let i = ctx.st.bolts.length - 1; i >= 0; i--) { const b = ctx.st.bolts[i]; b.life -= dt; b.mesh.material.opacity = Math.max(0, b.life / 0.16); if (b.life <= 0) { rmMesh(b.mesh); ctx.st.bolts.splice(i, 1); } }
       },
-      end(ctx) { weatherOff(); (ctx.st.pending || []).forEach((p) => p.m.dispose()); (ctx.st.bolts || []).forEach((b) => rmMesh(b.mesh)); },
+      // `st.bolts` only ever fills on the LIGHTNING_FX_V2=false path; the live
+      // renderer pools its own meshes and hands them back through its reset.
+      end(ctx) { weatherOff(); (ctx.st.pending || []).forEach((p) => p.m.dispose()); (ctx.st.bolts || []).forEach((b) => rmMesh(b.mesh)); if (CBZ.lightningFxReset) CBZ.lightningFxReset(); },
       threat(x, z, ctx) { let t = 0.1; (ctx.st.pending || []).forEach((p) => { const d = Math.hypot(x - p.x, z - p.z); if (d < 7) t = Math.max(t, 0.95 * (1 - d / 7)); }); return t; },
       // in the sirens the smart move is OFF the exposed high ground and out of
       // the open, so the crowd visibly scatters toward the town before the
       // first bolt lands
       warnThreat(x, z, ctx) { return Math.min(0.75, 0.2 + floor(x, z) * 0.05); },
+      /* PART OF THE CROWD RUNS FOR THE TREES, AND THAT IS WHAT KILLS THEM.
+
+         Side flash is 30-35% of real lightning casualties and the textbook
+         sentence explaining why is always the same: "most often, side flash
+         victims have taken shelter under a tree to avoid the rain." It is the
+         single most human thing about the whole phenomenon — the shelter that
+         feels safest is the one that is about to become the highest point in
+         reach of a leader — and without it `conduct()`'s side flash and its
+         body-to-body chain almost never fire, because nobody is ever standing
+         close enough to the thing that gets hit.
+
+         So SOME trees are shelter, not some bots: the hash is on the TREE's own
+         coordinates, which makes the choice stable as a bot walks (a rule keyed
+         to the bot's position flips underneath it and it oscillates) and makes
+         the crowd CLUSTER — several people under one canopy, which is both the
+         real photograph and the reason one strike takes a group.
+
+         The rest still do the sensible thing and get off the high ground. */
       warnSafeDir(x, z, ctx) {
+        const tr = ctx.arena.flammable || [];
+        let best = null, bd = 1e9;
+        for (let i = 0; i < tr.length; i++) {
+          const t = tr[i];
+          if (t.burnt) continue;
+          /* WHICH TREES PEOPLE SHELTER UNDER — decided once per tree, cached on
+             it, because this runs per bot per frame through the warn phase.
+
+             Two conditions, and the second one is what makes the whole feature
+             work. A tree in the shadow of a tower is not where anybody shelters
+             (there is a doorway right there) and it is not what a leader
+             attaches to either — `attachPoint`'s cone hands a 30 m building
+             every strike within reach of it. The trees that matter are the ones
+             standing in the OPEN: they are where people go, and they are the
+             high point for fifty metres, so they are what gets hit. Those two
+             facts are the same fact, which is exactly why sheltering under a
+             tree in a field is the most dangerous thing you can do in a
+             thunderstorm. */
+          if (t._shelterTree == null) {
+            const key = ((Math.round(t.x * 4) * 73856093) ^ (Math.round(t.z * 4) * 19349663)) >>> 0;
+            let open = key % 100 < 62;
+            if (open) {
+              const fr = ctx.arena.fragile || [];
+              for (let k = 0; k < fr.length; k++) {
+                if (Math.hypot(fr[k].x - t.x, fr[k].z - t.z) < 20) { open = false; break; }
+              }
+            }
+            t._shelterTree = open;
+          }
+          if (!t._shelterTree) continue;
+          const d = Math.hypot(t.x - x, t.z - z);
+          if (d < bd) { bd = d; best = t; }
+        }
+        if (best && bd < 22 && bd > 1.1) return { x: (best.x - x) / bd, z: (best.z - z) / bd };
         const h = ctx.arena.hills[0], dx = x - h.x, dz = z - h.z, d = Math.hypot(dx, dz) || 1;
         return { x: dx / d, z: dz / d };
       },
-      safeDir(x, z, ctx) { let bx = 0, bz = 0; (ctx.st.pending || []).forEach((p) => { const dx = x - p.x, dz = z - p.z, d = Math.hypot(dx, dz); if (d < 8 && d > 0.1) { bx += dx / d; bz += dz / d; } }); return (bx || bz) ? { x: bx, z: bz } : null; },
+      /* SHELTER IS A DECISION, NOT A POSITION. Someone who has got in under a
+         canopy out of a downpour does not sprint back out into it because the
+         sky flickered — they stay, because the tree is where it is dry and
+         because standing under it FEELS like the safe move. That belief is the
+         mechanism: it is why side flash is a third of all lightning casualties
+         and why the safety literature spends its whole first paragraph telling
+         people not to do it. Without this the crowd shelters during the warn,
+         reads the leader, scatters, and the bolt hits an empty tree.
+
+         Everyone NOT under a tree still scatters from the pending strikes. */
+      safeDir(x, z, ctx) {
+        const tr = ctx.arena.flammable || [];
+        for (let i = 0; i < tr.length; i++) {
+          const t = tr[i];
+          if (!t.burnt && Math.hypot(t.x - x, t.z - z) < 2.6) return null;
+        }
+        let bx = 0, bz = 0;
+        (ctx.st.pending || []).forEach((p) => { const dx = x - p.x, dz = z - p.z, d = Math.hypot(dx, dz); if (d < 8 && d > 0.1) { bx += dx / d; bz += dz / d; } });
+        return (bx || bz) ? { x: bx, z: bz } : null;
+      },
     },
 
     // ---- TSUNAMI: assigned right after this roster (DEFS.flood, below).
@@ -3186,11 +3294,286 @@
     if (CBZ.fx) CBZ.fx.dropDebris({ x: t.x, z: t.z, fromY: floor(t.x, t.z) + 3, vy: 2, size: 0.5, color: 0x2a2622, linger: 0.6 });
   }
 
-  function strike(x, z, ctx) {
-    // the bolt is drawn here (it is not ordnance) but the GROUND EFFECT is —
-    // `kinetic` is the bus's generic "something heavy arrived at speed" row,
-    // and routing through it buys the shake, the ejecta cone and the sfx that
-    // used to be re-typed at this site.
+  /* ============================================================
+     WHAT A BOLT HITS, AND WHO THAT KILLS (2026-08-13)
+
+     OWNER: "make lightning realer — how it can go from tree to person, or
+     person to nearby person." It can, and the way it does is the single most
+     load-bearing fact about lightning casualties. From the epidemiology
+     (Cooper & Holle; National Lightning Safety Council; NWS):
+
+       ground current / step voltage   50-55%   THE leading killer
+       side flash / side splash        30-35%
+       upward streamer                 10-15%
+       direct strike                    3-5%
+       contact injury                   3-5%
+
+     Ground current and side flash together are about 60% of all casualties.
+     The bolt landing ON someone — the only mechanism this file used to model —
+     is the RAREST one at 3-5%.
+
+     ATTACHMENT. Lightning does not choose a patch of grass; it connects to
+     whatever the descending leader reaches first, which in the open is the
+     tallest thing around (the rolling-sphere model: strike distance
+     R ≈ 10·I^0.65 m, ~90 m for a nominal 30 kA stroke, so over a wide area the
+     high point wins). `attachPoint` is that, at arena scale: the tallest
+     candidate inside ATTRACT_R of where the storm aimed — a tree, a building
+     roof, or a person if they happen to be the high point of open ground.
+
+     SIDE FLASH. The bolt hits a TREE, and a tree is a bad conductor. Part of
+     the current jumps the air to something better on its way to earth — the
+     person sheltering under it. (It is worse for trees than for metal towers
+     for exactly that reason: high trunk resistance pushes current to find
+     another path.) Real jumps are a foot or two; SIDE_R below is generous
+     because this game's people and trees are metre-scale blocks and the beat
+     has to read on screen.
+
+     PERSON TO PERSON. The jump does not stop at the first body. It goes on to
+     the next one close enough to be a better path than the ground, which is
+     why groups go down together — and why one strike can kill a whole herd.
+     CHAIN_HOPS limits how far, and each hop is weaker than the last.
+
+     GROUND CURRENT. Current spreads radially through the soil; what hurts you
+     is the potential difference between your two feet. Lethal close in, merely
+     bad further out, ~zero by about 20 m — measured danger radii are ~5-8 m
+     for humans, further in wet ground, and far worse for four-legged animals
+     whose feet are further apart (323 reindeer died to one strike in Norway in
+     2016, over ~50 m). Modelled here as a falloff, not a step function, so
+     standing 8 m away hurts and standing 15 m away does not.
+
+     Every one of these gets its own kill-feed cause, because "struck by
+     lightning" is wrong for four out of five of them.
+     ============================================================ */
+  const ATTRACT_R = 14;    // m — how far a bolt will reach for a high point
+  const SIDE_R = 2.4;      // m — side flash off the struck object
+  const CHAIN_R = 2.8;     // m — and on from one body to the next
+  const CHAIN_HOPS = 2;
+  const GROUND_LETHAL = 4.5;
+  const GROUND_R = 11;     // m — outer edge of the step-voltage field
+
+  /* WHAT THE LEADER REACHES FIRST — and that is a CONE, not a height contest.
+
+     The first version of this took the tallest candidate within ATTRACT_R, and
+     it was wrong in a way that quietly broke the whole feature: trees here vary
+     by about 1.5 m, so a tree twelve metres away routinely out-ranked the one
+     the crowd was actually huddled under, the bolt landed twelve metres from
+     anybody, and the side flash never fired once in eleven strikes.
+
+     A descending leader attaches to whichever object it enters the striking
+     distance of first, which depends on height AND on how far it has to reach
+     sideways — the same geometry behind the protective angle a lightning rod
+     covers. So the score is `height − distance × PROTECT_SLOPE`: a 0.8 slope is
+     roughly a 50° cone, which means a distant object must be about as much
+     taller as it is further away. A tower still dominates its whole block, as
+     it should. A tree two metres from where the leader came down beats an
+     identical tree twelve metres away, as it should. */
+  const PROTECT_SLOPE = 0.8;
+
+  function attachPoint(tx, tz, ctx) {
+    const A = ctx.arena;
+    let bestScore = floor(tx, tz) - 0.4;    // bare ground, as the baseline
+    let best = { x: tx, z: tz, y: floor(tx, tz), top: 0, kind: "ground", ref: null };
+    const consider = (x, z, top, kind, ref) => {
+      const score = top - Math.hypot(x - tx, z - tz) * PROTECT_SLOPE;
+      if (score <= bestScore) return;
+      bestScore = score;
+      best = { x: x, z: z, y: top, top: top, kind: kind, ref: ref };
+    };
+    const tr = A.flammable || [];
+    for (let i = 0; i < tr.length; i++) {
+      const t = tr[i];
+      if (t.burnt || Math.hypot(t.x - tx, t.z - tz) > ATTRACT_R) continue;
+      // canopy top: the foliage box is 2.6 tall about its own centre
+      const top = (t.foliage ? t.foliage.position.y + 1.3 : floor(t.x, t.z) + 4);
+      consider(t.x, t.z, top, "tree", t);
+    }
+    const fr = A.fragile || [];
+    for (let i = 0; i < fr.length; i++) {
+      const b = fr[i];
+      if (b.fallen) continue;
+      const cx = Math.max(b.x - b.w * 0.42, Math.min(b.x + b.w * 0.42, tx));
+      const cz = Math.max(b.z - b.d * 0.42, Math.min(b.z + b.d * 0.42, tz));
+      if (Math.hypot(cx - tx, cz - tz) > ATTRACT_R) continue;
+      consider(cx, cz, (b.gy || 0) + b.h, "building", b);
+    }
+    /* A PERSON CAN BE THE HIGH POINT — scored by the same cone as everything
+       else, which is what makes the answer come out right on its own. Standing
+       in the open with nothing within reach, you ARE the tallest object and the
+       bolt takes you: the real 3-5% direct strike. Standing under a canopy two
+       metres away, the tree outranks you every time — and then it kills you
+       anyway, sideways, which is the 30-35%. */
+    const acts = surv().actors();
+    for (let i = 0; i < acts.length; i++) {
+      const a = acts[i];
+      if (a.dead) continue;
+      if (Math.hypot(a.pos.x - tx, a.pos.z - tz) > 8) continue;
+      consider(a.pos.x, a.pos.z, floor(a.pos.x, a.pos.z) + 1.8, "actor", a);
+    }
+    return best;
+  }
+
+  /* WHO THE CURRENT REACHES, once it is in the ground. Returns the number of
+     casualties so the audit can report that a strike killed more than the one
+     person it landed on — which is the whole point of the model. */
+  function conduct(at, ctx) {
+    const acts = surv().actors();
+    const hit = [];                       // actors already carrying current
+    const arc = CBZ.lightningArc || null;
+    const bx = at.x, bz = at.z, bgy = floor(bx, bz);
+    let kills = 0, sideFlashes = 0, chained = 0;
+
+    const zap = (a, dmg, cause, fromX, fromZ) => {
+      const was = a.dead;
+      surv().hurt(a, dmg, { fromX: fromX, fromZ: fromZ, fling: dmg >= 1e5 ? 1.4 : 0, cause: cause });
+      if (!was && a.dead) kills++;
+      hit.push(a);
+    };
+
+    // ---- 1) DIRECT. The bolt terminated on a person. ----------------------
+    if (at.kind === "actor" && at.ref && !at.ref.dead) {
+      zap(at.ref, 1e6, "struck by lightning", bx, bz);
+    }
+
+    // ---- 2) SIDE FLASH off whatever the bolt hit. -------------------------
+    if (at.kind === "tree" || at.kind === "building") {
+      for (let i = 0; i < acts.length; i++) {
+        const a = acts[i];
+        if (a.dead || hit.indexOf(a) >= 0) continue;
+        const d = Math.hypot(a.pos.x - bx, a.pos.z - bz);
+        if (d > SIDE_R) continue;
+        // the jump leaves the trunk about head height and lands on the body
+        if (arc) arc(bx, bgy + 1.9, bz, a.pos.x, floor(a.pos.x, a.pos.z) + 1.15, a.pos.z, { w: 0.05 });
+        sideFlashes++;
+        zap(a, 1e6, at.kind === "tree"
+          ? "caught the side flash off a tree"
+          : "caught the side flash off a building", bx, bz);
+      }
+    }
+
+    /* ---- 3) PERSON TO PERSON, BEFORE the ground current gets a say.
+       The two mechanisms overlap in the real world and they overlap here, so
+       the ORDER decides which one claims a casualty — and the specific, local
+       one should win over the diffuse one. Run the other way round, the 11 m
+       step-voltage field claims everyone the 2.8 m body-to-body jump could
+       have reached, the chain never fires at all, and the kill feed says
+       "ground current" for a row of people who visibly went down off the man
+       next to them. ---- */
+    let front = hit.slice();
+    for (let hop = 0; hop < CHAIN_HOPS && front.length; hop++) {
+      const next = [];
+      for (let i = 0; i < front.length; i++) {
+        const src = front[i];
+        for (let j = 0; j < acts.length; j++) {
+          const a = acts[j];
+          if (a.dead || hit.indexOf(a) >= 0 || next.indexOf(a) >= 0) continue;
+          const d = Math.hypot(a.pos.x - src.pos.x, a.pos.z - src.pos.z);
+          if (d > CHAIN_R) continue;
+          const sy = floor(src.pos.x, src.pos.z) + 1.2;
+          if (arc) arc(src.pos.x, sy, src.pos.z, a.pos.x, floor(a.pos.x, a.pos.z) + 1.2, a.pos.z, { w: 0.042, life: 0.11 });
+          chained++;
+          // each hop is a weaker path than the last
+          const dmg = hop === 0 ? 1e6 : 55;
+          surv().hurt(a, dmg, { fromX: src.pos.x, fromZ: src.pos.z, cause: "the current jumped from the body beside them" });
+          if (a.dead) kills++;
+          next.push(a);
+        }
+      }
+      for (let i = 0; i < next.length; i++) hit.push(next[i]);
+      front = next;
+    }
+
+    // ---- 4) GROUND CURRENT — the leading killer, and a falloff not a step --
+    for (let i = 0; i < acts.length; i++) {
+      const a = acts[i];
+      if (a.dead || hit.indexOf(a) >= 0) continue;
+      const d = Math.hypot(a.pos.x - bx, a.pos.z - bz);
+      if (d > GROUND_R) continue;
+      if (d <= GROUND_LETHAL) zap(a, 1e6, "killed by the ground current", bx, bz);
+      else {
+        // step voltage falls away with distance: survivable, and it hurts
+        const k = 1 - (d - GROUND_LETHAL) / (GROUND_R - GROUND_LETHAL);
+        surv().hurt(a, 18 + 62 * k * k, { fromX: bx, fromZ: bz, cause: "killed by the ground current" });
+        if (a.dead) kills++;
+        hit.push(a);
+      }
+    }
+
+    boltLedger.strikes++;
+    boltLedger.last = { x: at.x, z: at.z, y: at.y, kind: at.kind, kills: kills, side: sideFlashes, chain: chained };
+    boltLedger.kills += kills;
+    boltLedger.sideFlashes += sideFlashes;
+    boltLedger.chained += chained;
+    boltLedger.byKind[at.kind] = (boltLedger.byKind[at.kind] || 0) + 1;
+    if (kills > boltLedger.worstStrike) boltLedger.worstStrike = kills;
+    return kills;
+  }
+  const boltLedger = { strikes: 0, kills: 0, sideFlashes: 0, chained: 0, worstStrike: 0, byKind: {}, last: null };
+
+  /* ---- A STRIKE IS NOT AN EXPLOSION (2026-08-13) --------------------------
+     OWNER: "lightning currently looks like an RPG on impact, which is dumb."
+     It did, and for a reason you can point at. This site routed the strike
+     through the bus's `kinetic` row — the generic "something heavy arrived at
+     speed" row — and `kinetic` names no composer, so it fell through to
+     COMPOSERS.heavy, i.e. cityAirstrikeExplosion. Every ground strike drew a
+     literal airstrike: orange fireball, smoke column, debris ejecta cone. It
+     then priced 60 kg at 120 m/s through THE KINETIC LAW, flung bodies 5 m and
+     swept nine metres of structural damage, because that is what a warhead
+     does. And the bolt itself was BoxGeometry(0.5, 40, 0.5) — a white fence
+     post, dead straight, on screen for one sixth of a second.
+
+     Lightning has no fuel, no fragments and no chemistry. Nothing at the
+     contact point can burn and there is nothing there to throw. What it does
+     have is a forked channel, three-to-five RETURN STROKES that make it strobe
+     rather than fade, surface flashover crawling out across the ground, steam
+     off wet earth, and a burn that stays. All of that now lives in
+     systems/lightningfx.js as a `lightning` ordnance row + FX composer, so the
+     city can fire one too and nobody re-types a bolt.
+
+     What is left HERE is what was always this file's business: who it kills —
+     and that is now `conduct()` above rather than one flat radius. The bolt
+     terminates on the tallest thing in reach, and the casualties come from side
+     flash, ground current and the jump from body to body, which between them
+     are ~85% of real lightning deaths. `r: 0` on the blast below is deliberate:
+     the bus must not ALSO sweep a radius, or everyone inside it dies twice and
+     the kill feed says the wrong thing about how.
+
+     LIGHTNING_FX_V2=false restores the legacy fireball verbatim, below. ------ */
+  function strike(x, z, ctx, at) {
+    if (CBZ.CONFIG.LIGHTNING_FX_V2 !== false && CBZ.lightningStrike) {
+      at = at || attachPoint(x, z, ctx);
+      // The bus still owns the draw and this mode still owns the ledger. No
+      // `quiet` flag is needed — the row carries no shake, no rumble and no cue
+      // of its own, so the bus's feel stage is a no-op and the composer owns
+      // the crack and the flicker.
+      /* HOW MUCH OF IT REACHES THE TURF. Open ground: all of it. A tree: the
+         current runs to earth down the trunk and out through the roots, so the
+         base scorches but less. A building: it goes to earth inside the
+         structure and the lawn outside is untouched. */
+      const gScale = at.kind === "tree" ? 0.5 : (at.kind === "ground" || at.kind === "actor" ? 1 : 0);
+      survBlast("lightning", at.x, at.z, {
+        r: 0, ctx: ctx, up: 0.6, y: at.kind === "ground" ? undefined : at.y,
+        struct: 0.06, structR: 4.5, fx: { groundScale: gScale },
+        // and if the bus cannot route it — script order, or IMPACT_BUS off —
+        // draw the bolt directly rather than let it degrade to a fireball
+        draw: function (bx, by, bz) { CBZ.lightningStrike(bx, bz, { y: by, groundScale: gScale }); },
+      });
+      // A TREE THAT IS STRUCK EXPLODES. The sap inside the trunk flashes to
+      // steam and blows the bark off in strips — the one piece of genuine
+      // blunt-trauma debris a strike produces, and nothing like an ejecta cone.
+      if (at.kind === "tree" && CBZ.fx && CBZ.fx.dropDebris) {
+        const t = at.ref, base = floor(at.x, at.z);
+        for (let i = 0; i < 4; i++) {
+          CBZ.fx.dropDebris({ x: at.x + (rnd() - 0.5) * 2.4, z: at.z + (rnd() - 0.5) * 2.4,
+            fromY: base + 2 + rnd() * 2.5, vy: 3 + rnd() * 3, size: 0.28 + rnd() * 0.3,
+            color: 0x4a3520, linger: 5 });
+        }
+        if (t && t.trunk && t.trunk.material) t.trunk.material.color.setHex(0x2a1c10);
+      }
+      conduct(at, ctx);
+      return;
+    }
+
+    // ---- LEGACY (LIGHTNING_FX_V2=false): the airstrike-composer fireball ----
     survBlast("kinetic", x, z, {
       r: 5, cause: "struck by lightning", ctx: ctx, up: 0.6,
       mass: 60, speed: 120, struct: 0.18, structR: 9, flash: 0, quiet: true,
@@ -3756,6 +4139,8 @@
     // the volcano's own ratchet, exported by world/volcanofx.js
     const volA = CBZ.volcanoAudit ? CBZ.volcanoAudit() : null;
     const sw = CBZ.citySwimState ? CBZ.citySwimState() : null;
+    // the storm's own ratchet, exported by systems/lightningfx.js
+    const boltA = CBZ.lightningFxAudit ? CBZ.lightningFxAudit() : null;
     return {
       // ---- SHOW DON'T TELL: lines this run actually spoke ----
       banners: said.banners, hints: said.hints, toasts: said.toasts,
@@ -3772,6 +4157,36 @@
       surge: CBZ.waterSurge ? +CBZ.waterSurge().toFixed(3) : 0,
       // ---- ONE SWIM ----
       privateSwim: privateSwim,
+      /* ---- THE STORM'S BOLTS. `boltStrokes / boltStrikes` is the whole
+         before/after in one ratio: the old strike drew ONE flat frame per
+         strike, so a build still on the fireball reports exactly 1.0 (or 0
+         strokes, if it never had a renderer at all). A real flash is 3-5. ---- */
+      boltFxV2: !!(boltA && boltA.on && boltA.wired),
+      /* WHERE THE NEXT BOLTS ARE GOING, and how long is left on each. Published
+         because the telegraph stopped being a mesh: tools/visual-presets/
+         lightning-strike.mjs used to find the ground marker by fingerprinting
+         its geometry, and a leader in the sky is not a thing you can pick out
+         of a scene graph by radius and colour. `dir.curId` gates it because the
+         meteor def keeps its own `st.pending` of a different shape. */
+      stormPending: dir.curId === "storm" && st.pending
+        ? st.pending.map(function (p) { return { x: +(+p.x).toFixed(2), z: +(+p.z).toFixed(2), t: +(+p.t).toFixed(3) }; })
+        : null,
+      /* HOW THE CURRENT GOT THERE. The old strike had exactly one mechanism —
+         the bolt landed on you — which is the RAREST one in the real
+         epidemiology (3-5%). These count the other four: boltSideFlash is the
+         jump off a struck tree or wall, boltChained is the jump onward from one
+         body to the next, and boltWorst is the most people a single strike has
+         killed this run, which is >1 the moment the model is working. */
+      boltAttach: Object.assign({}, boltLedger.byKind),
+      boltLast: boltLedger.last,
+      boltSideFlash: boltLedger.sideFlashes,
+      boltChained: boltLedger.chained,
+      boltKills: boltLedger.kills,
+      boltWorst: boltLedger.worstStrike,
+      boltStrikes: boltA ? boltA.strikes : 0,
+      boltStrokes: boltA ? boltA.strokes : 0,
+      boltScars: boltA ? boltA.scarsCut : 0,
+      boltLive: boltA ? boltA.live : 0,
       /* ---- THE TSUNAMI'S FOUR: what the water was carrying, what it hit
          with, how dirty it was and how hard it pulled on the way out. Zero
          unless a tsunami is actually running, which is the point.

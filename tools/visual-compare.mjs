@@ -176,6 +176,20 @@ if (startsLocalServer) {
   }));
 }
 
+/* THE BEFORE-SIDE IS ON THE INTERNET, and some environments only reach it
+   through an HTTP proxy — a CI runner, a corporate network, an agent sandbox.
+   curl and node read HTTPS_PROXY from the environment; Chrome does not, it
+   needs --proxy-server on the command line, and then the local dev server
+   (which is the AFTER side) has to be excluded or it gets tunnelled too.
+   Auto-wired from the standard variables, so the common case needs no flag,
+   and CBZ_CHROME_ARGS is there for anything else the host needs to pass. */
+const envProxy = process.env.CBZ_CHROME_PROXY || process.env.HTTPS_PROXY || process.env.https_proxy || "";
+const proxyArgs = envProxy ? [
+  `--proxy-server=${envProxy}`,
+  `--proxy-bypass-list=${process.env.CBZ_CHROME_PROXY_BYPASS || "127.0.0.1;localhost;[::1]"}`,
+] : [];
+const extraChromeArgs = String(process.env.CBZ_CHROME_ARGS || "").split(/\s+/).filter(Boolean);
+
 const chrome = spawn(chromeBin, [
   "--headless=new",
   "--no-sandbox",
@@ -196,6 +210,8 @@ const chrome = spawn(chromeBin, [
   `--window-size=${width},${height}`,
   `--remote-debugging-port=${debugPort}`,
   `--user-data-dir=${profileDir}`,
+  ...proxyArgs,
+  ...extraChromeArgs,
   "about:blank",
 ], { cwd: ROOT, stdio: "ignore" });
 children.push(chrome);

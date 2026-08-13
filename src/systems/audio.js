@@ -422,6 +422,22 @@
     win: fx([R + "jingle3.mp3", R + "chime1.mp3", R + "chime2.mp3"], 0.095, 0.5), // 55 dB
 
     thunder: fx([O + "sfx100v2_thunder_01.m4a"], 0.46, 0.8),           // 120 dB
+    /* A STRIKE YOU ARE STANDING NEXT TO. `thunder` is the same energy heard
+       after a kilometre of atmosphere has smeared it into a roll; at twenty
+       metres none of that smearing has happened yet and what arrives is a
+       broadband CRACK off the channel — the rifle-shot report, then the tearing
+       hiss of the return strokes, and only then the low end. Re-voiced from
+       recordings already in the bank (no new asset): the cannon high-passed
+       hard and pitched up for the report, the taser resonance for the electric
+       tear, the thunder recording pitched down underneath for the body.
+       systems/lightningfx.js plays this AND schedules `thunder` behind it at
+       the speed of sound, so a far strike still rolls. 125 dB. */
+    thunder_crack: layers([
+      part([R + "cannon1.mp3"], 0.60, 1.34, 1.56, 0, { hp: 260, decay: 0.09 }),
+      part([R + "resonance2.mp3"], 0.15, 1.70, 1.95, 0.012, { hp: 700 }),
+      part([O + "sfx100v2_thunder_01.m4a"], 0.52, 1.05, 1.22, 0.03, { hp: 120 }),
+      part([O + "sfx100v2_thunder_01.m4a"], 0.34, 0.50, 0.60, 0.19, { lp: 800, bass: 5 }),
+    ], 0.1),
     rumble: fx([O + "sfx100v2_loop_machine_02.m4a", O + "sfx100v2_stones_01.m4a"], 0.24, 0.5), // 100 dB
     collapse: layers([
       part([R + "cannon1.mp3"], 0.25, 0.72, 0.86),                     // 110 dB

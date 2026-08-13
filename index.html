@@ -748,6 +748,15 @@
      its world lazily, so the prison game above is untouched. Must load
      BEFORE loop.js so its frame-work is included in the sort. -->
 <script src="src/systems/fx.js?v=glass1"></script>
+<!-- REAL LIGHTNING. Registers a `lightning` row + FX composer on the impact
+     bus, so a cloud-to-ground strike draws a forked channel with return
+     strokes, ground flashover, steam and a burn scar instead of falling
+     through to COMPOSERS.heavy — which is cityAirstrikeExplosion, i.e. an
+     orange fireball with a debris cone. WITHOUT THIS TAG systems/disasters.js
+     detects the missing CBZ.lightningStrike and keeps the old blast, so the
+     page still runs; it just looks like an RPG again. Needs only config.js +
+     scene; it wires itself to the bus lazily, in any script order. -->
+<script src="src/systems/lightningfx.js?v=bolt1"></script>
 <script src="src/world/disaster_arena.js?v=snowbury1"></script>
 <script src="src/systems/grapple.js?v=trauma2"></script>
 <script src="src/entities/survivorbot.js?v=trauma2"></script>
