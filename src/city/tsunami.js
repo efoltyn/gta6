@@ -405,9 +405,18 @@
     const k = (fs + 34) / 74;
     return Math.max(0.18, 1.45 * Math.exp(-k * k) * (fs > 0 ? Math.max(0.15, 1 - fs / 90) : 1));
   }
+  /* AND IT SPENDS ITSELF FROM THE SHORE. The old ramp did not start losing
+     height until the front was 40 m INSIDE the town and never fell below 30%,
+     so the wall crossed the whole waterfront at very nearly its landfall
+     height and left still standing — a wave touring a city rather than
+     breaking on one. A bore stops being a wall the moment it is over land:
+     what it gives up in height is the flood rising behind it, which the surge
+     is already doing on this same span. Landfall is fs ~ -10 (where turbidAt
+     saturates), so that is where the collapse begins. */
   function faceHeight(peak, fs) {
     const shoal = Math.max(0.42, Math.min(1, 0.42 + 0.58 * Math.exp(-Math.pow((fs + 26) / 96, 2))));
-    return (5.5 + peak * 1.75) * shoal * (fs > 40 ? Math.max(0.3, 1 - (fs - 40) / 130) : 1);
+    const inland = Math.max(0, Math.min(1, (fs + 10) / (FRONT_TO + 10)));
+    return (5.5 + peak * 1.75) * shoal * Math.max(0.1, Math.pow(1 - inland, 1.45));
   }
 
   function seaSurface() {
