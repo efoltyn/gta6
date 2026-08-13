@@ -260,6 +260,139 @@ try {
     return {grade:grade,on:on,off:off};
   `);
 
+  // ---- 4b: THE CORPSE TELLS YOU HOW IT DIED ------------------------------
+  // Every bloodless cause must leave its own readable mark on the body, and
+  // the marks must be visually DISTINCT from each other and from the living
+  // rig — otherwise "no blood" has just made five deaths identical.
+  const marks = await json(`
+    ${STAGE}
+    function hexOf(b){
+      const ch=b.char,S=ch&&ch.skinSlots;
+      if(!S)return null;
+      const t=S.torso&&S.torso[0], h=S.head&&S.head[0];
+      return [t&&t.material.color.getHex(), h&&h.material.color.getHex()];
+    }
+    const out={};
+    for (const [cause,want] of ${JSON.stringify([
+      ["frozen solid in the blizzard", "frost"],
+      ["incinerated by lava", "char"],
+      ["choked by volcanic ash", "ash"],
+      ["drowned in the floodwater", "soak"],
+      ["killed by nuclear fallout", "pallor"],
+      ["starved", "pallor"],
+      ["torn apart by the tornado", null],
+    ])}) {
+      const b=CBZ.bots.find(function(x){return !x.dead;});
+      if(!b){out[cause]={err:"no live bot"};continue;}
+      b.pos.set(kx,ky,kz); if(b.group) b.group.position.set(kx,ky,kz);
+      b._trauma=null;b._noBlood=false;
+      const before=hexOf(b);
+      stage();
+      CBZ.surv.killBot(b,{fromX:kx-1,fromZ:kz},cause);
+      out[cause]={want:want,mark:CBZ.corpseMark(b),before:before,after:hexOf(b)};
+      CBZ.stepSim(1/60);
+    }
+    CBZ.clearGore();
+    return out;
+  `);
+
+  // ---- 4c: WATER TAKES THE BLOOD BACK ------------------------------------
+  // Stamp pools on low ground, raise the sea over them (the same
+  // CBZ.waterSurgeSet every flood on this island uses), and they must go.
+  const wash = await json(`
+    const A=CBZ.surv.arena,C=A.center;
+    // a low, flat spot near the shore — ground under a metre, so a modest
+    // surge actually covers it
+    let sx=null,sz=null;
+    for(let r=A.radius*0.55;r<A.radius*0.95&&sx===null;r+=6){
+      for(let k=0;k<24;k++){
+        const th=k/24*Math.PI*2, x=C.x+Math.cos(th)*r, z=C.z+Math.sin(th)*r;
+        if(A.groundHeightAt(x,z)>=0 && A.groundHeightAt(x,z)<0.4){sx=x;sz=z;break;}
+      }
+    }
+    if(sx===null)return {err:"no low ground found"};
+    CBZ.player.pos.set(sx+4,A.groundHeightAt(sx+4,sz),sz);
+    if(CBZ.playerChar&&CBZ.playerChar.group)CBZ.playerChar.group.position.copy(CBZ.player.pos);
+    CBZ.clearGore();
+    CBZ.camera.position.set(sx+5,A.groundHeightAt(sx,sz)+3,sz+5);CBZ.camera.updateMatrixWorld(true);
+    for(let k=0;k<6;k++)CBZ.goreImpact(sx+(k-3)*1.5,A.groundHeightAt(sx,sz)+0.9,sz,{amount:1.5,pool:true});
+    for(let i=0;i<40;i++)CBZ.stepSim(1/60);
+    const dry=CBZ.goreAudit().pools;
+    const depthDry=+CBZ.survFloodDepthMeanAt(sx,sz).toFixed(2);
+    // flood it: raise mean sea level over the spot, exactly as a flood does
+    CBZ.waterSurgeSet(4.5);
+    for(let i=0;i<70;i++)CBZ.stepSim(1/60);
+    const depthWet=+CBZ.survFloodDepthMeanAt(sx,sz).toFixed(2);
+    const flooded=CBZ.goreAudit().pools;
+    for(let i=0;i<130;i++)CBZ.stepSim(1/60);
+    const after=CBZ.goreAudit().pools;
+    CBZ.waterSurgeSet(0);CBZ.clearGore();
+    return {at:[+sx.toFixed(1),+sz.toFixed(1)],dry:dry,flooded:flooded,after:after,
+      depthDry:depthDry,depthWet:depthWet};
+  `);
+
+  // ---- 4d: AN OPEN WOUND FOLLOWS YOU -------------------------------------
+  const trail = await json(`
+    ${STAGE}
+    CBZ.clearGore();
+    const b=CBZ.bots.find(function(x){return !x.dead;});
+    b.pos.set(kx,ky,kz);if(b.group)b.group.position.set(kx,ky,kz);
+    b._trauma=null;b._noBlood=false;b.hp=1e6;
+    stage();
+    // a hard landing opens them up
+    CBZ.trauma.slam(b,26,{dir:{x:0,y:1,z:0}});
+    const openedAt=CBZ.goreAudit().pools;
+    const trailing=CBZ.trauma.bleeding(b);
+    // now walk them 12 m past the lens
+    for(let i=0;i<70;i++){
+      b.pos.x+=0.18; if(b.group)b.group.position.x=b.pos.x;
+      CBZ.player.pos.set(b.pos.x-3,A.groundHeightAt(b.pos.x-3,kz+4),kz+4);
+      CBZ.camera.position.set(b.pos.x-3,ky+3,kz+5);CBZ.camera.updateMatrixWorld(true);
+      CBZ.stepSim(1/60);
+    }
+    const walked=CBZ.goreAudit().pools;
+    // AND IT MUST CLOSE, or the trail is a permanent paint roller. Park the
+    // sim out of "playing" for this stretch: stepSim still runs the always
+    // chain (where the trail lives) but skips the updaters, so the disaster
+    // director cannot land a fresh hit and re-open the wound we are timing.
+    const st=CBZ.game.state; CBZ.game.state="probe";
+    for(let i=0;i<20*60;i++){
+      b.pos.x+=0.05; if(b.group)b.group.position.x=b.pos.x;
+      CBZ.stepSim(1/60);
+    }
+    CBZ.game.state=st;
+    const stillBleeding=CBZ.trauma.bleeding(b);
+    const closed=!stillBleeding;
+    CBZ.clearGore();
+    return {openedAt:openedAt,trailing:trailing,walked:walked,closed:closed};
+  `);
+
+  // ---- 4e: corpses stop popping at arm's length --------------------------
+  const corpses = await json(`
+    ${STAGE}
+    stage();
+    const near=[],far=[];
+    for(let k=0;k<3;k++){
+      const b=CBZ.bots.find(function(x){return !x.dead;});
+      b.pos.set(kx+k*1.5,ky,kz);if(b.group)b.group.position.set(kx+k*1.5,ky,kz);
+      CBZ.surv.killBot(b,{fromX:kx,fromZ:kz},"frozen solid in the blizzard");
+      near.push(b);
+    }
+    for(let k=0;k<3;k++){
+      const b=CBZ.bots.find(function(x){return !x.dead && near.indexOf(x)<0;});
+      b.pos.set(kx+300,ky,kz+300);if(b.group)b.group.position.set(kx+300,ky,kz+300);
+      CBZ.surv.killBot(b,{fromX:kx,fromZ:kz},"frozen solid in the blizzard");
+      far.push(b);
+    }
+    function culled(l){let n=0;for(const b of l)if(b.culled)n++;return n;}
+    const out={};
+    for(let i=0;i<9*60;i++){stage();CBZ.stepSim(1/60);}       // ~9 s: past the old flat 6 s
+    out.at9={near:culled(near),far:culled(far)};
+    for(let i=0;i<20*60;i++){stage();CBZ.stepSim(1/60);}      // ~29 s: past the near window too
+    out.at29={near:culled(near),far:culled(far)};
+    return out;
+  `);
+
   // ---- 5: the master switch still reverts to the old behaviour ------------
   const revert = await json(`
     ${STAGE}
@@ -320,6 +453,36 @@ try {
   }
   if (!(slope.on.streaks > 0)) failures.push("no downhill run-off was drawn on a 36-degree slope");
 
+  // the corpse must be MARKED, and the marks must not all look the same
+  const seenTorso = new Map();
+  for (const [cause, m] of Object.entries(marks)) {
+    if (m.want === null) continue;                    // a bloody death: no mark expected
+    if (m.mark !== m.want) failures.push(`"${cause}" left mark ${m.mark}, expected ${m.want}`);
+    if (!m.after || m.after[0] === m.before[0]) failures.push(`"${cause}" left the body unchanged (torso ${m.before && m.before[0]})`);
+    if (!m.after || m.after[1] === m.before[1]) failures.push(`"${cause}" left the head unchanged`);
+    if (m.after) {
+      const prior = seenTorso.get(m.after[0]);
+      if (prior && marks[prior].want !== m.want) failures.push(`"${cause}" and "${prior}" produced the same body colour — the marks must be distinguishable`);
+      seenTorso.set(m.after[0], cause);
+    }
+  }
+  if (marks["torn apart by the tornado"].mark !== null) failures.push("a bloody death should not also tint the corpse");
+
+  if (wash.err) failures.push(`wash probe: ${wash.err}`);
+  else {
+    if (!(wash.dry > 0)) failures.push("no pools were stamped for the wash test");
+    if (!(wash.depthWet > 0.09)) failures.push(`the surge did not actually cover the pools (depth ${wash.depthWet})`);
+    if (!(wash.after < wash.dry * 0.35)) failures.push(`floodwater did not wash the blood away (${wash.dry} pools → ${wash.after} after the surge)`);
+  }
+
+  if (!trail.trailing) failures.push("a hard landing did not open a bleeding wound");
+  if (!(trail.walked > trail.openedAt + 2)) failures.push(`a bleeding survivor left no trail (${trail.openedAt} → ${trail.walked} marks over 12 m)`);
+  if (!trail.closed) failures.push("the wound never closed — the trail would be a permanent paint roller behind every bot");
+
+  if (!(corpses.at9.near === 0)) failures.push(`a corpse at arm's length still vanished at 6 s (${corpses.at9.near}/3 culled by 9 s)`);
+  if (!(corpses.at9.far === 3)) failures.push(`far corpses did not clear on the original 6 s budget (${corpses.at9.far}/3 culled by 9 s)`);
+  if (!(corpses.at29.near === 3)) failures.push(`near corpses never cleared (${corpses.at29.near}/3 culled by 29 s) — that is a leak`);
+
   if (!(revert.bits > 0)) failures.push("SURV_TRAUMA=false did not restore the original unconditional gore");
 
   if (browserErrors.length) failures.push(`browser errors: ${browserErrors.slice(0, 4).join(" | ")}`);
@@ -329,6 +492,10 @@ try {
   console.log("beating         ", JSON.stringify(beating));
   console.log("impacts         ", JSON.stringify(impacts));
   console.log("slope           ", JSON.stringify({ grade: slope.grade, on: { float: slope.on.float, pools: slope.on.pools, streaks: slope.on.streaks }, off: { float: slope.off.float, pools: slope.off.pools } }));
+  console.log("marks           ", JSON.stringify(marks, null, 1));
+  console.log("wash            ", JSON.stringify(wash));
+  console.log("trail           ", JSON.stringify(trail));
+  console.log("corpses         ", JSON.stringify(corpses));
   console.log("revert          ", JSON.stringify(revert));
 
   if (failures.length) {

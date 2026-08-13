@@ -114,15 +114,29 @@
   //   destroyed-tissue row before the /blast/ in the ordnance row sees it, and
   //   "killed by nuclear fallout" must be caught before /\bfall\b/ reads it as
   //   a fall. Both are live cause strings in systems/disasters.js.
+  //
+  // EVERY ROW CARRIES A `mark` (gore.js's CBZ.corpseTreat). Cutting the blood
+  // off the bloodless causes was only half the answer: it left the man who
+  // FROZE SOLID looking exactly like the man who STARVED, who CHOKED, who
+  // DROWNED and who was INCINERATED — five different deaths, one
+  // factory-fresh body, told apart only by a line of text in the corner. The
+  // blood was wrong because it was the only evidence the engine had. Deleting
+  // it without replacing it just moves the problem, so each cause now leaves
+  // its OWN mark on the body and the bloodless ones are the point of it.
   const CAUSES = [
-    // ---- NOTHING BLEEDS ----
-    // tissue destroyed rather than opened: nothing is left to pump
-    [/vaporiz|nuclear blast|incinerat|\blava\b|burned alive|wildfire|lightning/, null],
-    // systemic deaths: the skin is never broken
-    [/fallout|radiation|frozen|blizzard|hypotherm|choked|\bash\b|asphyx|starv|dehydr/, null],
-    // the water took them — and gore.js's own water medium would only bloom for
-    // a WOUND, which a drowning isn't
-    [/drown|swept|undertow|\bflood\b|tsunami/, null],
+    // ---- NOTHING BLEEDS: THE BODY IS MARKED INSTEAD ----
+    // tissue destroyed rather than opened — nothing left to pump, and what is
+    // left is burned through. (Must precede the ordnance row: "nuclear blast".)
+    [/vaporiz|nuclear blast/, { mark: "char" }],
+    [/incinerat|\blava\b|burned alive|wildfire|\bfire\b/, { mark: "char" }],
+    [/lightning/, { mark: "char" }],                  // before /struck/ in the debris row
+    [/fallout|radiation/, { mark: "pallor" }],        // before /\bfall\b/ in the splat row
+    [/frozen|blizzard|hypotherm|\bcold\b/, { mark: "frost" }],
+    [/choked|\bash\b|asphyx|smoke/, { mark: "ash" }],
+    [/starv|dehydr|thirst/, { mark: "pallor" }],
+    // the water took them — gore.js's water medium would only bloom for a
+    // WOUND, which a drowning isn't. The body comes out dark and sodden.
+    [/drown|swept|undertow|\bflood\b|tsunami/, { mark: "soak" }],
     // ---- THESE BLEED ----
     // `gib` prices the flying CHUNKS (gore.js LAYER 3, 1 = its stock count).
     // It is a separate axis from `amount` on purpose: a beating is bloody and
@@ -151,7 +165,9 @@
     for (let i = 0; i < CAUSES.length; i++) if (CAUSES[i][0].test(c)) return CAUSES[i][1];
     return null;                      // unrecognised → no blood. The inversion.
   }
-  function bloodless(cause) { return !profile(cause); }
+  // a cause draws blood only if it has a gore STYLE — a row with only a `mark`
+  // is one of the deaths that never breaks skin.
+  function bloodless(cause) { const p = profile(cause); return !p || !p.style; }
 
   // ---- the ledger ------------------------------------------------------------
   // Lives on the actor (the player adapter proxies onto CBZ.player), decays
@@ -228,7 +244,63 @@
     // hit. A sixth punch trickles; a twenty-six-metre fall does not.
     const sev = Math.min(2, (r.v - FIRST_BLOOD) * 0.9 + lone * 1.15);
     bleed(a, sev, o);
+    openWound(a, r, sev);
     return sev;
+  }
+
+  /* ---- AN OPEN WOUND FOLLOWS YOU -------------------------------------------
+     A survivor who has just been opened up should not walk away spotless. The
+     wound bleeds for a while and marks the ground it crosses, so you can read
+     where a beaten man ran to, and the player can look back at their own trail
+     after taking a fall. It stops on its own — the wound closes — which is
+     what keeps it from becoming a permanent paint-roller behind every bot.
+
+     Cost is bounded three ways and none of them is a per-frame sweep of the
+     roster: only actors that have actually BLED are ever in the list, the list
+     is hard-capped, and a drip is spent on DISTANCE MOVED rather than on time,
+     so someone standing still costs one vector subtraction a tick. */
+  const TRAIL_CAP = 8;             // simultaneous bleeders
+  const DRIP_EVERY = 0.85;         // metres of travel per mark
+  const bleeders = [];
+  function openWound(a, r, sev) {
+    if (sev < 0.45) return;                       // a graze does not trail
+    r.bleedFor = Math.max(r.bleedFor || 0, 4 + Math.min(9, sev * 5.5));
+    r.drop = 0;
+    if (r.trailing) return;
+    if (bleeders.length >= TRAIL_CAP) {
+      // evict the driest — never the man who was just opened up
+      let worst = 0;
+      for (let i = 1; i < bleeders.length; i++) if ((rec(bleeders[i]) || { bleedFor: 0 }).bleedFor < (rec(bleeders[worst]) || { bleedFor: 0 }).bleedFor) worst = i;
+      const drop = rec(bleeders[worst]); if (drop) drop.trailing = false;
+      bleeders.splice(worst, 1);
+    }
+    r.trailing = true;
+    r.lx = a.pos.x; r.lz = a.pos.z;
+    bleeders.push(a);
+  }
+  function updateTrails(dt) {
+    for (let i = bleeders.length - 1; i >= 0; i--) {
+      const a = bleeders[i];
+      const r = a && (a.isPlayer ? CBZ.player : a)._trauma;
+      const p = a && a.pos;
+      if (!r || !p || (!a.isPlayer && a.culled)) { if (r) r.trailing = false; bleeders.splice(i, 1); continue; }
+      r.bleedFor -= dt;
+      if (r.bleedFor <= 0) { r.trailing = false; bleeders.splice(i, 1); continue; }
+      const dx = p.x - r.lx, dz = p.z - r.lz;
+      const moved = Math.sqrt(dx * dx + dz * dz);
+      if (moved < 0.05) continue;                 // standing still: no trail, no cost
+      r.lx = p.x; r.lz = p.z;
+      r.drop += moved;
+      if (r.drop < DRIP_EVERY) continue;
+      r.drop = 0;
+      // a fresh wound runs; a closing one only spots. Jittered off the exact
+      // footfall line so the trail wanders the way a real one does.
+      const heavy = Math.min(1, r.bleedFor / 6);
+      if (CBZ.goreDrip) {
+        CBZ.goreDrip(p.x + (Math.random() - 0.5) * 0.5, p.z + (Math.random() - 0.5) * 0.5,
+          0.12 + heavy * 0.24 + Math.random() * 0.08);
+      }
+    }
   }
 
   const T = {
@@ -268,7 +340,11 @@
       if (!on() || !a || !a.pos || !CBZ.gore) return false;
       const pr = profile(cause);
       const o = a.isPlayer ? CBZ.player : a;
-      if (!pr) { if (o) o._noBlood = true; return false; }   // and it stays sealed as it lands
+      // THE MARK IS THE POINT FOR THE BLOODLESS ROWS — frost, char, ash, soak,
+      // pallor. It runs before the blood branch so a death that draws no blood
+      // still leaves a body you can read from across the slope.
+      if (pr && pr.mark && CBZ.corpseTreat) { try { CBZ.corpseTreat(a, pr.mark); } catch (e) {} }
+      if (!pr || !pr.style) { if (o) o._noBlood = true; return false; }   // and it stays sealed as it lands
       const p = a.pos;
       let dir = null;
       if (imp && (imp.fromX != null || imp.dir)) {
@@ -308,14 +384,32 @@
     },
 
     bloodless,
+    /* WHAT A DEATH DOES TO A BODY, without firing it — so anything else that
+       needs to know (a corpse the disasters recycle, a test) can ask. */
+    mark(cause) { const p = profile(cause); return (p && p.mark) || null; },
     of(a) { const r = rec(a); return r ? r.v : 0; },
+    bleeding(a) { const r = a && (a.isPlayer ? CBZ.player : a)._trauma; return !!(r && r.trailing); },
     reset(a) {
       const o = a && a.isPlayer ? CBZ.player : a;
       if (o) { o._trauma = null; o._noBlood = false; }
+      const i = bleeders.indexOf(a);
+      if (i >= 0) bleeders.splice(i, 1);
+      // the player's rig SURVIVES a match reset (the bots are rebuilt), so a
+      // charred or frost-white body would carry its death into the next round.
+      if (CBZ.corpseUntreat) { try { CBZ.corpseUntreat(a); } catch (e) {} }
+    },
+    audit() {
+      return { on: on(), bleeders: bleeders.length, mark: CBZ.corpseMark ? CBZ.corpseMark(CBZ.surv && CBZ.surv.playerActor) : null };
     },
   };
   CBZ.trauma = T;
 
-  // the module clock the lazy decay reads. One updater, no per-actor sweep.
-  if (CBZ.onAlways) CBZ.onAlways(7.5, function (dt) { if (dt > 0) clock += dt; });
+  // the module clock the lazy decay reads, plus the bleed trails. One updater,
+  // no per-actor sweep — only bodies that have actually bled are in the list.
+  if (CBZ.onAlways) CBZ.onAlways(7.5, function (dt) {
+    if (dt <= 0) return;
+    clock += dt;
+    if (bleeders.length && on()) updateTrails(dt);
+    else if (bleeders.length) bleeders.length = 0;      // left survival → drop the list
+  });
 })();

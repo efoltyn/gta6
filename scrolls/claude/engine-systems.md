@@ -487,6 +487,44 @@ Before building anything adjacent, wire into the existing system:
   each: `grapple.js` (punch, push, landing, wall slam), `physics.js` (the
   player's landing), `survival.js` (`reportDeath`). Scoped to survival inside
   `on()`. Flag `SURV_TRAUMA`.
+- **The corpse tells you how it died** — `CBZ.corpseTreat(actor, kind)` /
+  `corpseUntreat` / `corpseMark` in `systems/gore.js`, driven off the same
+  cause table. Cutting the blood off the bloodless causes was only half an
+  answer: it left the man who FROZE SOLID looking exactly like the man who
+  STARVED, CHOKED, DROWNED or was INCINERATED — five deaths, one
+  factory-fresh body, told apart only by a line of killfeed text. Blood was
+  wrong because it was the only evidence the engine had, so deleting it
+  without replacing it just moved the problem. Five reads —
+  `frost` / `char` / `ash` / `soak` / `pallor` — each ONE shared-material swap
+  per corpse (the device `stainCorpse` has always used), never a per-frame
+  tint, never a new mesh. Colours desaturate before they mix and quantise to
+  16/channel so 99 survivors cannot mint a material each; the head takes its
+  own target because skin does not go the colour cloth does. Reversible
+  (`ch._treated` records what it replaced) because `CBZ.playerChar` outlives a
+  match reset. Also re-points `ch.skinTone`, or `grapple.js`'s `normalizeHead`
+  would snap a charred face back to living skin on the next hit. Flag
+  `GORE_DEATH_MARKS`.
+- **Water takes the blood back** — `GORE_WASH` in `systems/gore.js`. The
+  island's headline events are a tsunami and a flash flood, and blood used to
+  sit through both: the sea rose eight metres over a street, drained, and
+  every pool was still there, crisp, on ground that had just been underwater.
+  A submerged decal is pushed straight into its fade and stays washed — the
+  receding tide leaving CLEAN ground is the whole read. Survival asks
+  `survFloodDepthMeanAt` (the FLAT column), not the live crest, for the same
+  reason the swimmer's entry test went flat: a passing swell would otherwise
+  strobe decals in and out of washing.
+- **An open wound follows you** — the ledger trails `CBZ.goreDrip` marks
+  behind a body that has actually bled, spent on DISTANCE MOVED rather than on
+  time (someone standing still costs one vector subtraction), hard-capped at 8
+  bleeders, and it CLOSES on its own so it never becomes a paint roller.
+  `CBZ.trauma.bleeding(a)` reports it.
+- **Survival corpses linger where you can see them** — `entities/survivorbot.js`
+  used to delete every body at a flat 6 s wherever it was, which is long enough
+  to watch someone die and nowhere near long enough to walk over and look at
+  what killed them. Distance decides now: out of sight still goes at 6 s (the
+  budget is unchanged where it matters — a field of 99), near bodies lie ~22 s,
+  and only 12 may linger at once so a mass-casualty disaster can never stack
+  the lobby in front of the lens.
 - **Ground decals follow the GROUND** — `systems/gore.js` fits every blood pool
   and smear to the local surface NORMAL (sampled off the same `CBZ.floorAt`
   everything stands on) instead of stamping a hard horizontal `rotation.x =

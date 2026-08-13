@@ -1073,36 +1073,182 @@
     }
     return s;
   }
-  function stainCorpse(ped) {
-    ped._goreStained = true;
-    const ch = ped.char; if (!ch || !ch.skinSlots) return;
-    const slots = ch.skinSlots;
-    const lists = [slots.torso, slots.legs, slots.arms, slots.collar, slots.legsLower, slots.armsLower];
-    for (let li = 0; li < lists.length; li++) {
-      const list = lists[li]; if (!list) continue;
+  // walk every body slot of a rig and hand each mesh's current colour to `fn`,
+  // swapping in the shared lambert `fn` names back. The ONE place that knows
+  // which slots make up a body — stainCorpse and corpseTreat both ride it.
+  const BODY_SLOTS = ["torso", "collar", "legs", "legsLower", "pelvis", "shoes",
+    "arms", "armsLower", "hands", "stripes", "belt", "cap", "hair"];
+  function eachBodyMesh(ch, slots, fn) {
+    const S = ch.skinSlots;
+    for (let li = 0; li < slots.length; li++) {
+      const list = S[slots[li]]; if (!list) continue;
       for (let mi = 0; mi < list.length; mi++) {
         const mesh = list[mi];
         if (!mesh || !mesh.material || !mesh.material.color) continue;
-        mesh.material = lambert(stainHex(mesh.material.color.getHex()));
+        fn(mesh);
       }
     }
   }
+  const STAIN_SLOTS = ["torso", "legs", "arms", "collar", "legsLower", "armsLower"];
+  function stainCorpse(ped) {
+    ped._goreStained = true;
+    const ch = ped.char || (ped.isPlayer ? CBZ.playerChar : null);
+    if (!ch || !ch.skinSlots) return;
+    eachBodyMesh(ch, STAIN_SLOTS, function (mesh) {
+      mesh.material = lambert(stainHex(mesh.material.color.getHex()));
+    });
+  }
   let stainT = 0;
-  function stainScan() {
-    const peds = CBZ.cityPeds;
-    if (!peds || !splats.length) return;
-    for (let i = 0; i < peds.length; i++) {
-      const p = peds[i];
+  function stainRoster(list) {
+    if (!list) return;
+    for (let i = 0; i < list.length; i++) {
+      const p = list[i];
       if (!p || !p.dead || p._goreStained || p.culled || !p.pos || (p.deadT || 0) < 2.5) continue;
       if (dist2Cam(p.pos.x, p.pos.z) > 45 * 45) continue;     // only stain where it can be seen
       for (let j = 0; j < splats.length; j++) {
         const s = splats[j];
-        if (s.streak || s.max < 0.85 || s.t < 1.2) continue;  // settled kill-pools only
+        if (s.streak || s.water || s.max < 0.85 || s.t < 1.2) continue;  // settled kill-pools only
         const dx = s.m.position.x - p.pos.x, dz = s.m.position.z - p.pos.z;
         if (dx * dx + dz * dz < 1.8) { stainCorpse(p); break; }
       }
     }
   }
+  function stainScan() {
+    if (!splats.length) return;
+    stainRoster(CBZ.cityPeds);
+    // THE ISLAND'S DEAD SOAK TOO. This scan only ever looked at CBZ.cityPeds,
+    // so a survival corpse could lie face-down in its own kill pool for the
+    // whole round and stay factory-clean. Same test, same throttle, same
+    // camera gate — the survival roster was simply never asked.
+    if (CBZ.game && CBZ.game.mode === "survival") stainRoster(CBZ.bots);
+  }
+
+  /* ============================================================
+     THE CORPSE TELLS YOU HOW IT DIED — CBZ.corpseTreat(actor, kind).
+
+     OWNER, second pass: "you bleed when you freeze to death — dumb tiny things
+     with blood, make them way more realistic."
+
+     Cutting the blood off the bloodless causes (systems/trauma.js) was only
+     half an answer. It left a man who froze solid in a blizzard looking
+     EXACTLY like a man who starved, who choked on ash, who drowned, who was
+     incinerated — five completely different deaths, one factory-fresh body,
+     distinguishable only by a line of text in the corner. The blood was wrong
+     because it was the ONLY evidence the engine had, so it got used for
+     everything. Deleting it without replacing it just moves the problem.
+
+     So each cause gets its own honest read, and it is the SAME cheap device
+     stainCorpse has always used: one shared-material swap per corpse, never a
+     per-frame tint, never a new mesh, never a shader.
+       frost  — rime-pale, blue-white, the colour drained out (blizzard)
+       char   — blackened through (lava, wildfire, a nuclear flash, lightning)
+       ash    — buried under grey volcanic dust (an ashfall death)
+       soak   — dark and sodden, the way clothing goes in water (drowning)
+       pallor — grey-green and waxy (radiation sickness, starvation)
+
+     The head takes its OWN target: skin does not go the same colour cloth
+     does. Colours are desaturated first (death takes the chroma out before it
+     adds anything) and quantised to 16 per channel before hitting the shared
+     lambert cache, so ninety-nine survivors in a dozen outfits cannot mint a
+     material per body.
+
+     REVERSIBLE, because CBZ.playerChar is not rebuilt between matches the way
+     the bots are: every swap records the material it replaced, and
+     CBZ.corpseUntreat puts them back (modes/survival.js's reset calls it
+     through CBZ.trauma.reset). Also re-points ch.skinTone at the treated head
+     colour, because grapple.js's normalizeHead re-asserts skinTone on every
+     hit — without that, a charred corpse caught in the next blast would snap
+     its face back to living skin.
+  ============================================================ */
+  if (CBZ.CONFIG.GORE_DEATH_MARKS == null) CBZ.CONFIG.GORE_DEATH_MARKS = true;
+  // TUNED AGAINST THE GROUND THEY LAND ON. The blizzard turns the island white
+  // (systems/disasters.js progressively whitens the terrain) and the grass is
+  // pale — so frost and pallor deliberately stop well short of white, keeping
+  // enough of the victim's own colour that the body still reads as a BODY
+  // against snow, just a rimed and bloodless one. char is the opposite problem
+  // and goes nearly all the way: a burned body should be unmistakable at
+  // distance. `desat` runs before the mix — death takes the chroma out before
+  // it puts anything on.
+  const TREATS = {
+    frost:  { to: 0xbcd6ea, k: 0.50, desat: 0.60, head: 0xa8c6de, hk: 0.62 },
+    char:   { to: 0x211b17, k: 0.85, desat: 0.88, head: 0x1a1512, hk: 0.88 },
+    ash:    { to: 0xa09d95, k: 0.70, desat: 0.82, head: 0x94918a, hk: 0.74 },
+    soak:   { to: 0x2f4049, k: 0.45, desat: 0.30, head: 0x3a4c55, hk: 0.40 },
+    pallor: { to: 0x8f9c8c, k: 0.42, desat: 0.70, head: 0x9aa695, hk: 0.56 },
+  };
+  function treatHex(hex, to, k, desat) {
+    let r = (hex >> 16) & 255, g = (hex >> 8) & 255, b = hex & 255;
+    if (desat > 0) {
+      const l = r * 0.299 + g * 0.587 + b * 0.114;
+      r += (l - r) * desat; g += (l - g) * desat; b += (l - b) * desat;
+    }
+    r += (((to >> 16) & 255) - r) * k;
+    g += (((to >> 8) & 255) - g) * k;
+    b += ((to & 255) - b) * k;
+    const q = (v) => Math.max(0, Math.min(255, Math.round(v / 16) * 16));
+    return (q(r) << 16) | (q(g) << 8) | q(b);
+  }
+  CBZ.corpseTreat = function (actor, kind) {
+    if (!actor || CBZ.CONFIG.GORE_DEATH_MARKS === false) return false;
+    const T = TREATS[kind]; if (!T) return false;
+    const ch = actorChar(actor);
+    if (!ch || !ch.skinSlots || ch._treated) return false;
+    const undo = [];
+    eachBodyMesh(ch, BODY_SLOTS, function (mesh) {
+      undo.push({ m: mesh, mat: mesh.material });
+      mesh.material = lambert(treatHex(mesh.material.color.getHex(), T.to, T.k, T.desat));
+    });
+    const head = ch.skinSlots.head && ch.skinSlots.head[0];
+    if (head && head.material && head.material.color) {
+      const hx = treatHex(head.material.color.getHex(), T.head, T.hk, T.desat);
+      undo.push({ m: head, mat: head.material, tone: ch.skinTone });
+      head.material = lambert(hx);
+      ch.skinTone = hx;                 // so normalizeHead re-asserts the DEAD tone
+    }
+    ch._treated = { kind, undo };
+    return true;
+  };
+  CBZ.corpseUntreat = function (actor) {
+    const ch = actorChar(actor);
+    const t = ch && ch._treated; if (!t) return false;
+    for (let i = 0; i < t.undo.length; i++) {
+      const u = t.undo[i];
+      u.m.material = u.mat;
+      if (u.tone !== undefined) ch.skinTone = u.tone;
+    }
+    ch._treated = null;
+    return true;
+  };
+  CBZ.corpseMark = function (actor) {
+    const ch = actorChar(actor);
+    return (ch && ch._treated && ch._treated.kind) || null;
+  };
+
+  // GORE_WASH — how deep the standing water over (x,z) is, 0 on dry land.
+  // Survival asks the MEAN column, not the live crest: during a tsunami the
+  // wavy surface swings by metres at wave frequency (see disaster_arena.js's
+  // note on why the swimmer's entry test went flat), and reading it here would
+  // strobe decals in and out of washing as each swell passed. Elsewhere it
+  // falls back to the same submergence query the water medium already uses.
+  if (CBZ.CONFIG.GORE_WASH == null) CBZ.CONFIG.GORE_WASH = true;
+  function washOn() { return CBZ.CONFIG.GORE_WASH !== false; }
+  function washDepthAt(x, z) {
+    if (CBZ.game && CBZ.game.mode === "survival") {
+      if (!CBZ.survFloodDepthMeanAt) return 0;
+      try { const d = CBZ.survFloodDepthMeanAt(x, z); return isFinite(d) ? d : 0; } catch (e) { return 0; }
+    }
+    const d = submRaw(x, floorAt(x, z), z);
+    return (d === DRY || !isFinite(d)) ? 0 : d;
+  }
+
+  // A SINGLE DRIP. Deliberately not goreImpact: a man walking with an open
+  // wound leaves marks, not a spray and a pool at every footfall. One tiny
+  // short-lived splat, seated on the terrain like every other ground decal.
+  CBZ.goreDrip = function (x, z, size) {
+    if (!CBZ.scene) return;
+    if (dist2Cam(x, z) > 55 * 55) return;
+    spawnSplat(x, z, Math.max(0.1, Math.min(0.5, size == null ? 0.22 : size)), BLOOD_D, false);
+  };
 
   // ============================================================
   //  REAL DISMEMBERMENT — the body that hits the ground is genuinely MISSING
@@ -1809,6 +1955,28 @@
 
     for (let i = splats.length - 1; i >= 0; i--) {
       const s = splats[i]; s.t += dt;
+      /* WATER TAKES THE BLOOD BACK (GORE_WASH). The island's headline events
+         are a tsunami and a flash flood, and blood used to sit through both:
+         the sea would rise eight metres over a street, drain away again, and
+         every pool would still be there, crisp, on ground that had just been
+         under water. Standing water lifts blood off a surface in seconds, so a
+         submerged decal is pushed straight into its fade instead of holding
+         its full clock. Once washed it stays washed — blood does not come back
+         when the flood goes out, and that receding tide leaving CLEAN ground
+         is the whole read. Throttled on a jittered ~0.6 s stagger (this runs
+         for every live decal) and skipped for surface slicks, which ARE the
+         water. */
+      if (!s.water && s.washT !== -1 && washOn()) {
+        s.washT = (s.washT || 0) - dt;
+        if (s.washT <= 0) {
+          s.washT = 0.5 + Math.random() * 0.35;
+          if (washDepthAt(s.m.position.x, s.m.position.z) > 0.09) {
+            s.hold = Math.min(s.hold, s.t);      // straight into the fade window
+            s.fade = Math.min(s.fade, 2.4);      // and gone in a couple of seconds
+            s.washT = -1;                        // decided; stop paying for the query
+          }
+        }
+      }
       if (s.water) {
         // A SURFACE SLICK, not a ground pool: the sea MOVES, so the decal
         // re-seats on the live swell every frame instead of on a floorAt seat
