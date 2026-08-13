@@ -37,7 +37,14 @@ const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
 const arg = (f, d) => { const i = argv.indexOf(f); return i >= 0 && argv[i + 1] != null ? argv[i + 1] : d; };
 
-const MAPS = arg("--map", "city,streets,dunes,arena").split(",");
+/* EVERY MAP THE PAGE OFFERS, OR THE SWEEP IS DECORATION.
+
+   This list used to read "city,streets,dunes,arena". `streets` is not a map
+   and never was — the sweep spent a quarter of its run booting a fallback and
+   calling it a pass — while island and field, the two venues that were
+   actually broken, were never checked at all. A checker whose map list can
+   drift from the page's is a checker that certifies the maps nobody plays. */
+const MAPS = arg("--map", "city,island,field,gov,harbor,marina,speedway,dunes,arena").split(",");
 const N = parseInt(arg("--n", "26"), 10);
 const SECONDS = parseInt(arg("--seconds", "70"), 10);
 const SPEED = arg("--speed", "4");
@@ -165,9 +172,36 @@ for (const map of MAPS) {
     embedded: q.embedded, embeddedEver: q.embeddedEver,
     stuck: q.stuck, blindFire: q.blindFire, throughMate: q.throughMate,
     shots: q.shots, fratricide: q.fratricide, engaged: q.engaged,
+    ground: audit && audit.ground, centre: audit && audit.centre, gap: audit && audit.gap,
     errors: errors.filter((e) => !/ProgressEvent|favicon|preload/i.test(e)).slice(0, 6),
   };
   report.push(row);
+
+  /* IS THERE ANY GROUND UNDER THIS BATTLE?
+
+     The fault this exists for makes NO noise: a venue whose builder returns
+     early (an under-declared dependency, a site walk that finds no water) is
+     raised into an empty group, the men stand on the fallback plane, and every
+     other measurement here passes — nobody overlaps, nobody is embedded, and
+     the war ends on schedule, on a featureless grey plate. It was found by
+     looking at a screenshot, which is not a test.
+
+     The heightfield reports what it measured, so a raised venue can be held to
+     it: geometry has to exist, it has to be big enough to fight on, and the
+     grid has to mostly HIT something. `miss` is grid points where a ray found
+     nothing at all — a venue that misses everywhere did not get built. */
+  const G = row.ground;
+  if (audit && audit.raises) {
+    if (!G) {
+      fails.push(`${map}: declares a venue but NOTHING was raised — the men are standing on the fallback plane`);
+    } else if (Math.min(G.spanX, G.spanZ) < 40) {
+      fails.push(`${map}: venue measured only ${G.spanX}x${G.spanZ} m — it raised almost nothing`);
+    }
+    /* NOT a miss-fraction assertion. The marina's grid misses 92% of its own
+       box and is completely correct to: a basin is mostly water, and a venue
+       is not required to be dense. What is NOT allowed is measuring nothing
+       at all, which is the failure that has no other symptom. */
+  }
 
   if (row.overlapPeak > 0) fails.push(`${map}: ${row.overlapPeak} overlapping pairs (worst ${row.overlapWorst} m apart)`);
   if (row.embeddedEver > 0) fails.push(`${map}: ${row.embeddedEver} bodies inside geometry`);

@@ -382,6 +382,74 @@
       publishes: ["cityCivilAircraftRayTest"],
     },
 
+    /* THE REST OF GANG CITY'S VENUES, BY NAME.
+
+       Every file below already registers a landmass builder and has since the
+       day it was written — they were only ever reachable through a full world
+       build, which a slice page never runs. raise() was the door; these are
+       the handles. A venue costs one declaration here because the geometry is
+       ALREADY BUILT: nothing in this block authors a wall.
+
+       The rule the airport learned the hard way is the only trap: name every
+       pack whose publishes/ the builder actually calls, or the venue raises
+       half-built with a TypeError in the console and nobody notices. The
+       `needs` below were read off the builders, not guessed. */
+    govcomplex: {
+      gives: "the REAL government complex: the seat of state with its wings, " +
+             "secure perimeter, strongrooms and the presidential office. Sites " +
+             "are computed at build time (CBZ.govComplexes lists them once " +
+             "raised), so measure the footprint rather than assuming a centre",
+      needs: ["look", "citycore"],           // buildStrongroom raises real shells
+      files: ["city/govcomplex.js"],
+      publishes: ["govComplexes", "govComplexAudit"],
+    },
+    marina: {
+      gives: "the REAL marina: basin, pontoons, moored boats and the quay. " +
+             "Floating pontoons follow the water when MARINA_FLOAT is on",
+      // marina.js will not build on grass: its site walk needs cityWaterAt to
+      // find navigable water east of the seawall, and returns null rather than
+      // put a basin on a field. waterfield.js is where that answer lives, so
+      // it is part of the venue, not an optional extra.
+      needs: ["look"],
+      files: ["city/waterfield.js", "city/marina.js"],
+      publishes: ["cityWaterAt"],
+    },
+    capeharbor: {
+      gives: "Cape Harbor airfield — the small coastal strip with its apron " +
+             "and helipads, authored well away from Halloran Field so a page " +
+             "can raise both and have two airfields to fight over",
+      // TWO under-declared dependencies, both silent. capeharbor's builder is
+      // one `if (!CBZ.buildAirfield) return;` so without airport_kit.js it
+      // raises NOTHING and says nothing; and the kit's own line 73 calls
+      // CBZ.registerAirport UNGUARDED, so without systems/airports.js it
+      // throws into raise()'s try/catch and the venue is just as empty.
+      // registerCityRegion is fine — studio stubs it above — and
+      // cityStaffPost is guarded at the call site.
+      needs: ["look"],
+      files: ["systems/airports.js", "city/airport_kit.js", "city/airport_capeharbor.js"],
+      publishes: ["buildAirfield", "airportKit", "registerAirport"],
+    },
+    speedway: {
+      gives: "the REAL speedway island: banked oval with a measured centreline, " +
+             "grandstands and the pit lane. The track surface is a genuine " +
+             "height field, which makes it the one venue where flat ground lies",
+      needs: ["look"],
+      files: ["city/island_speedway.js"],
+      publishes: [],
+    },
+    bank: {
+      gives: "the REAL bank: banking hall, the vault and its approach",
+      needs: ["look", "citycore"],
+      files: ["city/bank.js"],
+      publishes: [],
+    },
+    casino: {
+      gives: "the REAL casino: floor, tables and the back of house",
+      needs: ["look"],
+      files: ["city/casino.js"],
+      publishes: [],
+    },
+
     // ---- flight and weapons -------------------------------------------------
     air: {
       gives: "flight for a bomber, a fighter or a transport. Coefficients are " +
@@ -823,12 +891,193 @@
     if (!city.roads) city.roads = [];
     if (!city.regions) city.regions = [];
     if (!city.note) city.note = opts.note || function () {};
+    /* THE BOUNDS ARE NOT OPTIONAL, EVEN WHEN THERE IS NO CITY.
+
+       88 reads of city.minX / maxX / minZ / maxZ / center are spread across
+       the venue builders, because on the mainland a landmass builder is
+       handed a world that already knows how big it is. A slice page hands it
+       nothing, and `city.maxX + 26` is NaN — which does not throw. It builds:
+       the marina raised its seawall at NaN and the venue came back EMPTY with
+       a clean console, indistinguishable from a pack that failed to load.
+
+       A finite default is the difference between a venue that works and a
+       venue that silently is not there. Override via opts.city for a page
+       that has real bounds. */
+    const R = opts.extent == null ? 1200 : opts.extent;
+    if (city.center == null) city.center = { x: 0, y: 0, z: 0 };
+    if (city.minX == null) city.minX = city.center.x - R;
+    if (city.maxX == null) city.maxX = city.center.x + R;
+    if (city.minZ == null) city.minZ = city.center.z - R;
+    if (city.maxZ == null) city.maxZ = city.center.z + R;
+    if (city.radius == null) city.radius = R;
     for (let i = 0; i < list.length; i++) {
       list[i]._raised = true;             // an island raised twice is two islands
       try { list[i].fn(city); }
       catch (e) { try { console.error("[studio.raise]", name, e); } catch (e2) {} }
     }
     return city;
+  };
+
+  /* ==========================================================================
+     heightfield(root, opts) — WHERE IS THE GROUND? MEASURE IT, DO NOT DECLARE IT.
+
+     A slice page that raises a venue has to answer one question for every man
+     it puts on it: what is the surface height at (x,z)? Until now each page
+     answered it by hand, and games/battle.html shows what that costs — four
+     of its five maps declared `groundAt = () => 0` and the fifth borrowed the
+     desert's analytic terrain. Flat is right until a venue has a banked track,
+     a raised deck or a sloped apron, and then every man on it stands at the
+     wrong height with nothing in the repo able to see it: the page's own
+     checker measures overlap in XZ and never looks at Y.
+
+     So: build the venue, then ASK IT. One downward ray per grid point, once,
+     against the venue's own subtree, and bilinear interpolation between them.
+     The field is measured from the same geometry the player sees, which means
+     it cannot drift from it — the class of bug is gone, not fixed.
+
+     Cost is one-time and bounded: `step` metres apart over the venue's own
+     footprint, capped at MAX_CELLS rays no matter how large the venue, and
+     cast against a subtree rather than the scene (pass the group you raised
+     into, not CBZ.scene, or you will pay for the skybox).
+
+       const g = CBZ.studio.raise("militaryisland", { parent: venue });
+       const H = CBZ.studio.heightfield(venue);
+       H.heightAt(x, z)   // metres, interpolated
+       H.miss             // grid points where no ray hit anything
+
+     Returns null when there is nothing under the root to measure.           */
+  const MAX_CELLS = 96;                       // 96×96 = 9216 rays, ~one frame
+  CBZ.studio.heightfield = function (root, opts) {
+    opts = opts || {};
+    root = root || CBZ.scene;
+    // bare `THREE` would ReferenceError on a page that never loaded it; every
+    // other reference in this file goes through window for the same reason.
+    const T = window.THREE;
+    if (!root || !T) return null;
+
+    /* FOOTPRINT. Box3 over the subtree, except that one 26 km sea plate would
+       swallow the grid and spend every ray on open water, so anything wider
+       than `maxSpan` is measured for its Y and excluded from the bounds. */
+    /* WORLD MATRICES FIRST, OR EVERY VENUE MEASURES AT THE ORIGIN.
+
+       A venue is raised and measured in the same tick, before any render, so
+       nothing has propagated matrixWorld down the new subtree yet — and most
+       of this geometry is matrixAutoUpdate:false with a hand-called
+       updateMatrix(), which sets the LOCAL matrix only. r128's expandByObject
+       refreshes each object against its parent's EXISTING matrixWorld, so a
+       stale parent silently reports every child at 0,0. Measured: island,
+       speedway and gov all came back centred on the origin with a 40 m span
+       until this line existed. */
+    root.updateMatrixWorld(true);
+
+    const maxSpan = opts.maxSpan == null ? 4000 : opts.maxSpan;
+    const parts = [];
+    const one = new T.Box3();
+    root.traverse(function (o) {
+      if (!o.isMesh || !o.visible) return;
+      one.setFromObject(o);
+      if (!isFinite(one.min.x) || !isFinite(one.max.x)) return;
+      if (one.max.x - one.min.x > maxSpan || one.max.z - one.min.z > maxSpan) return;
+      parts.push(one.clone());
+    });
+    if (!parts.length) return null;
+
+    /* THE BOUNDING BOX IS THE WRONG FOOTPRINT FOR A VENUE THAT BUILDS IN MORE
+       THAN ONE PLACE. govcomplex raises every seat of state on the map: the
+       union of them spans 3.1 km, 94% of which is empty air between compounds.
+       Measured over that box the grid is mostly misses, the ray budget is
+       spent on nothing, and a page that centres an event on it puts the two
+       halves of a fight a kilometre apart with a field between them.
+
+       So find where the geometry actually IS. Histogram the parts into cells,
+       take the densest one, and keep only what lies within `focus` metres of
+       it. One venue is unaffected (everything is in the cluster); a scattered
+       pack resolves to its biggest site, which is the one worth standing on. */
+    const focus = opts.focus == null ? 320 : opts.focus;
+    let cxc = 0, czc = 0;
+    if (focus > 0 && parts.length > 1) {
+      const cell = Math.max(20, focus / 3);
+      const bins = new Map();
+      for (let i = 0; i < parts.length; i++) {
+        const px = (parts[i].min.x + parts[i].max.x) / 2, pz = (parts[i].min.z + parts[i].max.z) / 2;
+        const k = Math.round(px / cell) + ":" + Math.round(pz / cell);
+        const b = bins.get(k);
+        if (b) { b.n++; b.x += px; b.z += pz; } else bins.set(k, { n: 1, x: px, z: pz });
+      }
+      let best = null;
+      bins.forEach(function (b) { if (!best || b.n > best.n) best = b; });
+      cxc = best.x / best.n; czc = best.z / best.n;
+    } else {
+      cxc = (parts[0].min.x + parts[0].max.x) / 2;
+      czc = (parts[0].min.z + parts[0].max.z) / 2;
+    }
+    const box = new T.Box3();
+    let any = false;
+    const r2 = focus > 0 ? focus * focus : Infinity;
+    for (let i = 0; i < parts.length; i++) {
+      const px = (parts[i].min.x + parts[i].max.x) / 2, pz = (parts[i].min.z + parts[i].max.z) / 2;
+      const dx = px - cxc, dz = pz - czc;
+      if (dx * dx + dz * dz > r2) continue;
+      box.union(parts[i]); any = true;
+    }
+    if (!any || !isFinite(box.min.x)) return null;
+
+    const pad = opts.pad == null ? 40 : opts.pad;
+    const minX = box.min.x - pad, maxX = box.max.x + pad;
+    const minZ = box.min.z - pad, maxZ = box.max.z + pad;
+    const spanX = Math.max(1, maxX - minX), spanZ = Math.max(1, maxZ - minZ);
+    let step = opts.step == null ? 6 : opts.step;
+    // never exceed the ray budget, whatever the venue's size
+    step = Math.max(step, spanX / MAX_CELLS, spanZ / MAX_CELLS);
+    const cols = Math.max(2, Math.ceil(spanX / step) + 1);
+    const rows = Math.max(2, Math.ceil(spanZ / step) + 1);
+
+    const ray = new T.Raycaster();
+    ray.far = opts.far == null ? 1200 : opts.far;
+    const org = new T.Vector3(), down = new T.Vector3(0, -1, 0);
+    const top = box.max.y + 50;
+    const floor = opts.floor == null ? box.min.y : opts.floor;
+    const h = new Float32Array(cols * rows);
+    let miss = 0, lo = Infinity, hi = -Infinity;
+    for (let j = 0; j < rows; j++) {
+      for (let i = 0; i < cols; i++) {
+        const x = minX + i * step, z = minZ + j * step;
+        org.set(x, top, z);
+        ray.set(org, down);
+        const hit = ray.intersectObject(root, true);
+        /* THE FIRST HIT IS NOT ALWAYS THE FLOOR. A ray dropped on a hangar
+           hits its roof, and a man does not stand on the roof. Take the
+           LOWEST hit above the venue's floor plane: that is the surface you
+           walk on, and a roof stops being an answer. */
+        let y = null;
+        for (let k = 0; k < hit.length; k++) {
+          const py = hit[k].point.y;
+          if (py < floor - 0.5) continue;
+          if (y == null || py < y) y = py;
+        }
+        if (y == null) { y = floor; miss++; }
+        h[j * cols + i] = y;
+        if (y < lo) lo = y;
+        if (y > hi) hi = y;
+      }
+    }
+
+    function heightAt(x, z) {
+      const fx = (x - minX) / step, fz = (z - minZ) / step;
+      let i = Math.floor(fx), j = Math.floor(fz);
+      if (i < 0) i = 0; else if (i > cols - 2) i = cols - 2;
+      if (j < 0) j = 0; else if (j > rows - 2) j = rows - 2;
+      const tx = Math.min(1, Math.max(0, fx - i)), tz = Math.min(1, Math.max(0, fz - j));
+      const a = h[j * cols + i], b = h[j * cols + i + 1];
+      const c = h[(j + 1) * cols + i], d = h[(j + 1) * cols + i + 1];
+      return (a * (1 - tx) + b * tx) * (1 - tz) + (c * (1 - tx) + d * tx) * tz;
+    }
+    return {
+      heightAt: heightAt, box: box, cols: cols, rows: rows, step: step,
+      minX: minX, minZ: minZ, minY: lo, maxY: hi, miss: miss,
+      cx: (box.min.x + box.max.x) / 2, cz: (box.min.z + box.max.z) / 2,
+      spanX: box.max.x - box.min.x, spanZ: box.max.z - box.min.z,
+    };
   };
 
   /* ==========================================================================

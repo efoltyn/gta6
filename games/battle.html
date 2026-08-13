@@ -269,12 +269,28 @@ if (SET.blueN < 1) SET.blueN = 1;
      arena   the kill box, kept, because it is the control: no world at all,
              so anything that goes wrong there is the men, not the map. */
 const TOWN_AT = { x: 0, z: -700 };       // the mainland coordinates bomb-survivor stands on
+/* THE VENUES.
+
+   Gang City is already built. Every entry with a `raise` list is a real place
+   from the map — the same geometry the mainland uses — and costs exactly this
+   one row, because studio.raise() runs the builders the file already
+   registered and studio.heightfield() measures the ground they left behind.
+   Nothing below authors a wall, a floor or a height function.
+
+   raise:  studio packs to RAISE as the ground (order is the build order)
+   packs:  what must LOAD for that to work (raise packs plus anything the
+           venue's own props need); studio resolves each pack's `needs`
+   sea:    lay the deep sea plate under it, for a venue that reads as coastal */
 const MAPS = {
-  city:   { label: "GANG CITY", note: "the real downtown. streets, glass, doors", packs: ["citycore"] },
-  island: { label: "MILITARY ISLAND", note: "the real base. fence, strip, jets", packs: ["militaryisland", "airbase"] },
-  field:  { label: "HALLORAN FIELD", note: "the real airport. aprons, terminal", packs: ["airport"] },
-  dunes:  { label: "OPEN DUNES", note: "bare sand. firing lines", packs: ["desert"] },
-  arena:  { label: "KILL BOX", note: "flat yard. crates. walls", packs: [] },
+  city:     { label: "GANG CITY", note: "the real downtown. streets, glass, doors", packs: ["citycore"] },
+  island:   { label: "MILITARY ISLAND", note: "the real base. fence, strip, jets", packs: ["militaryisland", "airbase"], raise: ["militaryisland"], sea: true },
+  field:    { label: "HALLORAN FIELD", note: "the real airport. aprons, terminal", packs: ["airport"], raise: ["airport"], sea: true },
+  gov:      { label: "THE SEAT OF STATE", note: "the real complex. wings, strongrooms", packs: ["govcomplex"], raise: ["govcomplex"] },
+  harbor:   { label: "CAPE HARBOR", note: "the coastal strip. apron, helipads", packs: ["capeharbor"], raise: ["capeharbor"], sea: true },
+  marina:   { label: "THE MARINA", note: "basin, pontoons, moored boats", packs: ["marina"], raise: ["marina"], sea: true },
+  speedway: { label: "THE SPEEDWAY", note: "banked oval. a ground that is NOT flat", packs: ["speedway"], raise: ["speedway"], sea: true },
+  dunes:    { label: "OPEN DUNES", note: "bare sand. firing lines", packs: ["desert"] },
+  arena:    { label: "KILL BOX", note: "flat yard. crates. walls", packs: [] },
 };
 if (!MAPS[SET.map]) SET.map = "city";
 
@@ -584,10 +600,10 @@ CBZ.studio.need(NEED).then(function () {
     m.userData.terrain = true;
     CBZ.scene.add(m);
   }
-  function apron(minX, maxX, minZ, maxZ, color) {
+  function apron(minX, maxX, minZ, maxZ, color, y) {
     const g = new THREE.PlaneGeometry(maxX - minX, maxZ - minZ);
     g.rotateX(-Math.PI / 2);
-    g.translate((minX + maxX) / 2, 0.004, (minZ + maxZ) / 2);
+    g.translate((minX + maxX) / 2, (y == null ? 0 : y) + 0.004, (minZ + maxZ) / 2);
     const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: color || 0x8d9198 }));
     m.receiveShadow = true; m.matrixAutoUpdate = false; m.updateMatrix();
     m.userData.terrain = true;
@@ -612,14 +628,32 @@ CBZ.studio.need(NEED).then(function () {
     }
     return false;
   }
+  /* AND NOT ON TOP OF EACH OTHER EITHER. The spiral above only ever asked the
+     geometry. On an open field that is enough, because the ranked grid never
+     puts two men in the same square — but on a DENSE venue (the seat of state
+     is walls, planters and steps) many grid points are blocked, several men
+     spiral out of their own square and converge on the same first free metre,
+     and they start the battle interpenetrating. Measured on `gov`: one
+     overlapping pair at t=0, which the sweep counts as a fault and should.
+     Claimed points are remembered for the length of one build. */
+  const _claim = [];
+  const CLAIM_R2 = 1.15 * 1.15;
+  function crowdedAt(x, z) {
+    for (let i = 0; i < _claim.length; i++) {
+      const dx = x - _claim[i].x, dz = z - _claim[i].z;
+      if (dx * dx + dz * dz < CLAIM_R2) return true;
+    }
+    return false;
+  }
   function freeSpot(x, z) {
-    if (!blockedAt(x, z)) return { x: x, z: z };
+    const take = function (px, pz) { _claim.push({ x: px, z: pz }); return { x: px, z: pz }; };
+    if (!blockedAt(x, z) && !crowdedAt(x, z)) return take(x, z);
     for (let r = 1; r < 40; r++) {
       const a = r * 2.399963229728653, d = r * 1.35;      // golden angle
       const px = x + Math.cos(a) * d, pz = z + Math.sin(a) * d;
-      if (!blockedAt(px, pz)) return { x: px, z: pz };
+      if (!blockedAt(px, pz) && !crowdedAt(px, pz)) return take(px, pz);
     }
-    return { x: x, z: z };
+    return take(x, z);
   }
 
   /* SPAWN ON THE STREET, NOT ON A GRID. Given the town's own road records,
@@ -643,8 +677,12 @@ CBZ.studio.need(NEED).then(function () {
     };
   }
 
+  let MEASURED = null;        // what the heightfield found, for the audit
   function buildMap(id) {
-    const gap = { city: 300, island: 230, field: 260, dunes: 150, arena: 120 }[id] || 150;
+    const M = MAPS[id] || MAPS.arena;
+    _claim.length = 0;          // spawn claims belong to ONE build
+    let gap = { city: 300, island: 230, field: 260, dunes: 150, arena: 120 }[id] || 150;
+    let gapOverride = 0;      // measured venues size their own no-man's land
     let groundAt = function () { return 0; };
     let cx = 0, cz = 0, spawners = null;
 
@@ -692,18 +730,44 @@ CBZ.studio.need(NEED).then(function () {
           blue: streetSpawner(town.roads, cx, cz, 1),
         };
       }
-    } else if (id === "island") {
-      seaPlate();
-      base = CBZ.studio.raise("militaryisland");
-      cx = -620; cz = -700;                       // the island's authored centre
-      apron(cx - 400, cx + 400, cz - 300, cz + 300, 0x7d7a6c);
-    } else if (id === "field") {
-      seaPlate();
-      base = CBZ.studio.raise("airport");
-      cx = -305; cz = -120;                       // mid-field, x -900..290 / z -280..40
-      apron(-960, 350, -340, 100, 0x8a8d8f);
+    } else if (M.raise) {
+      /* A REAL GANG CITY VENUE, MEASURED RATHER THAN DECLARED.
+
+         Every raised venue took the same three hand-written constants before
+         this: a centre, an apron rectangle and a flat groundAt. All three were
+         guesses that nothing checked, and all three are readable from the
+         geometry once it exists. Raise into our OWN group so the heightfield
+         casts against the venue and not the skybox, then ask it where it is
+         and how high it stands. A venue that is flat measures flat; the
+         speedway's banking measures as banking, for free. */
+      if (M.sea) seaPlate();
+      const venue = new THREE.Group();
+      CBZ.scene.add(venue);
+      for (let i = 0; i < M.raise.length; i++) {
+        const got = CBZ.studio.raise(M.raise[i], { parent: venue });
+        if (!base) base = got;
+        if (!got) console.error("[battle] nothing raised for pack:", M.raise[i]);
+      }
+      const H = CBZ.studio.heightfield(venue, { step: 6, pad: 30 });
+      if (H) {
+        groundAt = H.heightAt;
+        cx = H.cx; cz = H.cz;
+        // ground out to the fog under the venue's own floor, so its edge is a
+        // quay and not the inside of the sky dome
+        apron(H.box.min.x - 420, H.box.max.x + 420, H.box.min.z - 420, H.box.max.z + 420,
+              M.apronColor || 0x7d7a6c, H.minY);
+        // the armies start half the venue apart, clamped to a distance two
+        // sides can actually cross before the watcher loses interest
+        gapOverride = Math.max(90, Math.min(320, Math.min(H.spanX, H.spanZ) * 0.5));
+        MEASURED = { cols: H.cols, rows: H.rows, step: +H.step.toFixed(1), miss: H.miss,
+                     minY: +H.minY.toFixed(2), maxY: +H.maxY.toFixed(2),
+                     spanX: Math.round(H.spanX), spanZ: Math.round(H.spanZ) };
+      } else {
+        console.error("[battle] heightfield measured nothing for", id, "— falling back to flat");
+      }
     }
 
+    if (gapOverride) gap = gapOverride;
     const grid = function (team, i) {
       const side = team === "red" ? -1 : 1;
       const col = (i / 10) | 0, row = i % 10;
@@ -2381,6 +2445,15 @@ CBZ.studio.need(NEED).then(function () {
     for (let i = 0; i < live.length; i++) {
       for (let j = i + 1; j < live.length; j++) {
         const dx = live[j].pos.x - live[i].pos.x, dz = live[j].pos.z - live[i].pos.z;
+        /* TWO MEN ON DIFFERENT LEVELS ARE NOT OVERLAPPING. This probe measured
+           XZ alone, which was exactly right while every venue was a flat
+           plate. Now that the ground is measured, `gov` has a terrace 3.4 m
+           above its lawn and the speedway is banked 11 m: a man on the steps
+           and a man below him share a square metre of map and nothing else.
+           A body is 1.8 m tall, so anything further apart in Y than that is
+           two men in the same footprint on different floors — which is what a
+           real venue is FOR. */
+        if (Math.abs(live[j].pos.y - live[i].pos.y) >= 1.8) continue;
         const d = Math.hypot(dx, dz);
         if (d < BODY_CLEAR) { pairs++; if (d < worst) worst = Math.round(d * 100) / 100; }
       }
@@ -2419,6 +2492,17 @@ CBZ.studio.need(NEED).then(function () {
       return {
         clock: { frames: dbgN, wallSum: Math.round(dbgWall * 100) / 100 },
         map: SET.map, started: started, over: over,
+        // the ground, as MEASURED off the raised venue (null for the maps that
+        // author their own: city, dunes, arena). A checker can finally assert
+        // that the surface men stand on is the surface that got built.
+        ground: MEASURED,
+        // whether this map CLAIMS to raise a venue. `ground: null` means one
+        // thing on arena (it authors its own flat yard) and something else
+        // entirely on marina (the venue failed to build) — without this flag a
+        // checker cannot tell an honest null from a silent failure.
+        raises: !!(MAPS[SET.map] && MAPS[SET.map].raise),
+        gap: MAP ? Math.round(MAP.gap) : null,
+        centre: MAP ? [Math.round(MAP.cx), Math.round(MAP.cz)] : null,
         men: men.length, red: aliveCount("red"), blue: aliveCount("blue"),
         queued: spawnQueue.length, corpses: corpses.length, rockets: rockets.length,
         planes: planes.length, air: AIR.on, sticks: AIR.sticks || 0, nukes: AIR.nukes || 0,
