@@ -1,5 +1,14 @@
 # BATTLE GRAND PLAN — chain of command, beasts, water, and every asset Gang City owns
 
+> **STATUS (2026-08-13, owner redirect):** Phase BEASTS shipped FIRST and is
+> live — bestiary/beasts studio packs, the wildlife_rig extraction, the
+> gorilla and the dog, beast armies + matchup presets in battle.html, unarmed
+> men, and the wall-aware goal projection (the honest slice of "smarter").
+> The command hierarchy / generals / intel / banners are ON ICE by owner
+> instruction until those roles exist in Gang City proper — no command
+> theater, no HUD popups standing in for intelligence. Water/boats/vehicles
+> phases remain as planned below, unstarted.
+
 *(games/battle.html — analysis 2026-08-13, written before the build wave so the
 build wave has a map. The owner's ask, verbatim where it matters: "make the
 npcs significantly smarter and actually have a chain of command and actually go

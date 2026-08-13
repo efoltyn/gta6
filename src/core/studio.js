@@ -450,6 +450,35 @@
       publishes: [],
     },
 
+    // ---- the living assets: every animal Gang City owns ---------------------
+    bestiary: {
+      gives: "THE WHOLE BESTIARY: 54 species as CBZ.WILDLIFE_SPECIES — lions, " +
+             "wolves, bears, the gorilla, elephants, dogs, the sea's sharks and " +
+             "orcas — each with its authored stats (hp, speed, danger, bite, " +
+             "herd) and a low-poly build() that returns the posed body. Data " +
+             "and geometry only: no engine, no spawning, no hunt",
+      needs: ["look"],
+      files: ["city/wildlife_species.js",
+        "city/wildlife/forest_deer.js", "city/wildlife/bears.js",
+        "city/wildlife/canines.js", "city/wildlife/apes.js",
+        "city/wildlife/bigcats.js", "city/wildlife/megafauna.js",
+        "city/wildlife/farm.js", "city/wildlife/snow_ungulates.js",
+        "city/wildlife/small_game.js", "city/wildlife/snakes.js",
+        "city/wildlife/aquatic.js"],
+      publishes: ["WILDLIFE_SPECIES", "defineSpecies"],
+    },
+    beasts: {
+      gives: "animals that WALK and FIGHT without the full city: the shared " +
+             "discovered gait rig (wildlife_rig), the one animal-attack driver " +
+             "creatureFight (lunge, pounce, maul, gore, stomp — windup, strike, " +
+             "recover, flinch), and the land body layer that poses jaws and " +
+             "legs through a strike. The same three files the mainland's " +
+             "wildlife runs on",
+      needs: ["look"],
+      files: ["city/wildlife_rig.js", "city/creature_combat.js", "systems/predator_anim.js"],
+      publishes: ["wildlifeRig", "creatureFight", "faceAnimalHeading"],
+    },
+
     // ---- flight and weapons -------------------------------------------------
     air: {
       gives: "flight for a bomber, a fighter or a transport. Coefficients are " +
