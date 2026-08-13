@@ -53,6 +53,13 @@ const beats = [
     shot: { mode: "front", back: -96, side: 104, alt: 42, aimAhead: -10, aimY: 9 },
   },
   {
+    id: "crossing",
+    label: "Mid-crossing — the wall spending itself",
+    focus: "Halfway over the island. THE QUESTION THIS BEAT ASKS: is there still a wall here? A bore that has run 130 m inland has been climbing and tearing through a town the whole way, and what is left of it should be a fast, deep, dirty flood with an edge — not the same tower that broke on the beach. Watch faceH against the landfall frame.",
+    wait: { untilFrontPast: 130 },
+    shot: { mode: "front", back: -104, side: 118, alt: 44, aimAhead: -12, aimY: 8 },
+  },
+  {
     id: "inundation",
     label: "Inundation — roofs as islands",
     focus: "The town is under. Concrete towers and their roofs stand clear and dry (vertical evacuation works); light wood-frame footprints are gone. Debris drifts between the buildings that are left.",
@@ -256,6 +263,7 @@ async function stageTsunami(input) {
   query("focus").style.cssText = "position:absolute;top:96px;left:28px;color:#c0cfda;font-size:12.5px;font-weight:550;max-width:660px;line-height:1.45";
   query("perf").textContent =
     `phase ${a2.phase || "—"} · front ${fs.toFixed(0)}m · turbid ${(a2.sediment != null ? a2.sediment : 0).toFixed(2)}`
+    + ` · faceH ${a2.faceH != null ? a2.faceH.toFixed(1) + "m" : "—"} (spent ${a2.spent != null ? a2.spent.toFixed(2) : "—"})`
     + ` · debris ${a2.debrisEntrained || 0} (${a2.debrisStrikes || 0} strikes)`
     + ` · undertow ${(a2.undertowPull || 0).toFixed(1)}`
     + ` · refuges ${a2.refugesStanding != null ? a2.refugesStanding + "/" + a2.refugesTotal : "—"}`;
@@ -268,6 +276,12 @@ async function stageTsunami(input) {
     debrisStrikes: Number(a2.debrisStrikes || 0),
     debrisKills: Number(a2.debrisKills || 0),
     sediment: Number((a2.sediment || 0).toFixed(3)),
+    /* THE WALL'S LIVE HEIGHT, so "did it come down as it crossed" is a number
+       and not an argument about a screenshot. Neither reading has a good
+       direction on its own — tall is right at landfall and wrong halfway over
+       the island — so they are reported plainly and read per beat. */
+    faceH: Number(a2.faceH || 0),
+    spent: Number(a2.spent != null ? a2.spent : 0),
     undertowPull: Math.abs(Number(a2.undertowPull || 0)),
     refugesStanding: Number(a2.refugesStanding || 0),
     lightSwept: Number(a2.lightSwept || 0),
@@ -296,12 +310,14 @@ export default {
   readyExpression: "window.THREE && window.CBZ && CBZ.CONFIG",
   urlParams: { seed: 90210 },
   stageTimeoutMs: 600000,
-  metricsNote: "Debris counts and the undertow are read from CBZ.disasters.tsunamiAudit() at the moment of the shot: what the water was carrying, how often it hit somebody, and how hard it pulled on the way out. refugesStanding is the invariant — the wave may wound a concrete tower but must never take one down.",
+  metricsNote: "Debris counts and the undertow are read from CBZ.disasters.tsunamiAudit() at the moment of the shot: what the water was carrying, how often it hit somebody, and how hard it pulled on the way out. refugesStanding is the invariant — the wave may wound a concrete tower but must never take one down. NOTE: faceH and spent are NEW audit fields — a build that predates them reports 0, which means 'not measured', not 'no wave'. For those two the pictures at LANDFALL and MID-CROSSING are the comparison; the numbers only speak within a side.",
   metrics: {
     debrisEntrained: { label: "Debris entrained", better: "higher" },
     debrisStrikes: { label: "Debris strikes", better: "higher" },
     debrisKills: { label: "Debris kills", better: "higher" },
     sediment: { label: "Turbidity", better: "higher" },
+    faceH: { label: "Face height", unit: "m" },
+    spent: { label: "Bore left", },
     undertowPull: { label: "Undertow", unit: "m/s", better: "higher" },
     refugesStanding: { label: "Refuges standing", better: "higher" },
     lightSwept: { label: "Light frames swept", better: "higher" },
