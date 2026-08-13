@@ -170,7 +170,7 @@
     // creatureSeizeStyleFor().
     if (/crocodile|alligator|gator/.test(id)) return 'maul';
     if (/cat|leopard|cheetah|lion|tiger|panther|jaguar|cougar|puma|lynx/.test(id)) return 'pounce';
-    if (/wolf|dog|coyote|fox|bear|hyena/.test(id)) return 'maul';
+    if (/wolf|dog|coyote|fox|bear|hyena|gorilla|ape/.test(id)) return 'maul';
     // Heavy horned/shouldered animals do not "bite" at contact: they lower the
     // head, drive through the target and hand the actual body impulse to their
     // caller. Keep boars/elephants on the shorter gore animation; the big bovine

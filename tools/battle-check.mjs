@@ -52,7 +52,12 @@ const SPEED = arg("--speed", "4");
    discipline restored, and asserts the faults COME BACK. A fix nobody can
    turn off has not been measured. */
 const REVERT = has("--revert");
-const EXTRA = REVERT ? "&sep=old&fire=old" : "";
+/* --extra appends raw query params to every battle URL, so the sweep can put
+   BEAST armies (or any roster the page's menu can) under the same counters:
+     node tools/battle-check.mjs --map city --extra "ru=lion&bu=dog"
+   URLSearchParams takes the FIRST occurrence, so --n keeps owning the counts. */
+const EXTRAQ = arg("--extra", "");
+const EXTRA = (REVERT ? "&sep=old&fire=old" : "") + (EXTRAQ ? "&" + EXTRAQ : "");
 
 /* ---- one browser, one origin, every map through it ----------------------
    The origin is normally a devserver on this checkout. --url points the same
