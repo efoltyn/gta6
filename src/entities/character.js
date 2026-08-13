@@ -2835,6 +2835,35 @@
       ch.koLift = 0;
       ch.koK = 0;
     }
+    // ---- TASER CONTACT: a short involuntary whole-body lock over whichever
+    // locomotion/KO pose already owns the actor. systems/taserfx.js raises only
+    // this timer; the character rig remains the sole limb writer. The high-rate
+    // alternating offsets read as muscle contraction while the larger opposing
+    // arm/leg angles keep the silhouette tense instead of a generic loose fall.
+    if (ch.taserT > 0) {
+      const td = Math.max(0.18, ch.taserDur || 0.72);
+      ch.taserT = Math.max(0, ch.taserT - dt);
+      const strength = Math.min(1, ch.taserT / Math.min(0.16, td));
+      const buzz = Math.sin((td - ch.taserT) * 92) * strength;
+      ch.body.rotation.x -= 0.14 * strength;
+      ch.body.rotation.z += buzz * 0.055;
+      if (ch.parts.la) {
+        ch.parts.la.rotation.x -= 0.38 * strength;
+        ch.parts.la.rotation.z += 0.42 * strength + buzz * 0.05;
+      }
+      if (ch.parts.ra) {
+        ch.parts.ra.rotation.x -= 0.42 * strength;
+        ch.parts.ra.rotation.z -= 0.44 * strength + buzz * 0.05;
+      }
+      if (J.la) J.la.rotation.x -= 0.50 * strength;
+      if (J.ra) J.ra.rotation.x -= 0.54 * strength;
+      if (ch.parts.ll) ch.parts.ll.rotation.x -= 0.18 * strength + buzz * 0.025;
+      if (ch.parts.rl) ch.parts.rl.rotation.x += 0.16 * strength - buzz * 0.025;
+      if (ch.neck) {
+        ch.neck.rotation.x -= 0.16 * strength;
+        ch.neck.rotation.z -= buzz * 0.065;
+      }
+    }
     // LAST inside the base animator: KO, stagger, punch and surrender all get
     // their final Euler before the shared socket is solved.
     lockCharacterHips(ch);

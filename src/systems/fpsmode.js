@@ -391,6 +391,20 @@
     x.fillStyle = g; x.fillRect(0, 0, 48, 48);
     return new THREE.CanvasTexture(c);
   })();
+  // A taser has a tight blue-white cartridge snap, not burning propellant.
+  // Keep a separate map so tinting the shared orange firearm texture cannot
+  // turn its yellow/red pixels into a muddy pseudo-electric flash.
+  const taserFlashTex = (function () {
+    const c = document.createElement("canvas"); c.width = c.height = 48;
+    const x = c.getContext("2d");
+    const g = x.createRadialGradient(24, 24, 1, 24, 24, 23);
+    g.addColorStop(0, "rgba(255,255,255,1)");
+    g.addColorStop(0.28, "rgba(165,235,255,.96)");
+    g.addColorStop(0.66, "rgba(50,155,255,.46)");
+    g.addColorStop(1, "rgba(20,70,255,0)");
+    x.fillStyle = g; x.fillRect(0, 0, 48, 48);
+    return new THREE.CanvasTexture(c);
+  })();
   const muzzle = new THREE.Sprite(new THREE.SpriteMaterial({
     map: flashTex, transparent: true, depthTest: false, blending: THREE.AdditiveBlending,
   }));
@@ -2394,17 +2408,20 @@
     pumpT = w.pump ? 1 : pumpT;
 
     // a suppressor chokes the muzzle flash down to a dim spit and clips the tail
-    const flashScale = w.flash * (0.9 + rng() * 0.28) * (modSupp ? 0.2 : 1);
-    const flashT = modSupp ? 0.02 : (w.key === "shotgun" ? 0.065 : 0.04);
+    const taserShot = w.key === "taser";
+    const flashScale = (taserShot ? 0.14 : w.flash) * (0.9 + rng() * 0.28) * (modSupp ? 0.2 : 1);
+    const flashT = taserShot ? 0.07 : (modSupp ? 0.02 : (w.key === "shotgun" ? 0.065 : 0.04));
     if (fps.active) {
       const activeModel = weaponModels[fps.weapon];
       if (!setMuzzleSpriteFromModel(muzzle, activeModel)) muzzle.position.copy(activeModel.userData.muzzle);
+      muzzle.material.map = taserShot ? taserFlashTex : flashTex;
       muzzle.scale.setScalar(flashScale);
       muzzle.rotation.z = rng() * Math.PI * 2;
       muzzle.visible = flashScale > 0.02;
       muzzleT = flashT;
     } else {
       worldMuzzle.position.copy(muzzleWorld(tmp2));
+      worldMuzzle.material.map = taserShot ? taserFlashTex : flashTex;
       worldMuzzle.scale.setScalar(flashScale * 1.2);
       worldMuzzle.material.opacity = 1;
       worldMuzzle.visible = flashScale > 0.02;
@@ -2423,7 +2440,8 @@
     CBZ.shake && CBZ.shake(w.shake);
     CBZ.doHitstop && CBZ.doHitstop(w.key === "shotgun" ? 0.028 : 0.014);
     if (CBZ.game.mode !== "city") CBZ.reportCrime && CBZ.reportCrime(w.heat, { type: w.nonlethal ? "taser" : "gunfire", actorRole: CBZ.game.role, weapon: w.key });
-    ejectCasing(w);
+    // A taser expends a front cartridge; there is no hot brass case to eject.
+    if (!taserShot) ejectCasing(w);
 
     const origin = muzzleWorld(tmp2);
     // Two-ray shoulder aim: camera ray establishes intent, then the actual ray
@@ -2853,7 +2871,10 @@
       // round's real flight time, so a 200m headshot doesn't feel instant
       // without touching the deterministic hit-resolution timing at all.
       if (i < 5 || pellets === 1) {
-        if (sniperShot.delay > 0) deferCall(sniperShot.delay, function () { fireTracer(origin, end, w.tracer, w.key === "shotgun" ? 0.045 : 0.055); });
+        if (w.key === "taser" && CBZ.taserFx && CBZ.taserFx.fire) {
+          // Twin physical probe wires + body arc replace the firearm tracer.
+          CBZ.taserFx.fire(origin, end, { target: hit.actor || null });
+        } else if (sniperShot.delay > 0) deferCall(sniperShot.delay, function () { fireTracer(origin, end, w.tracer, w.key === "shotgun" ? 0.045 : 0.055); });
         else fireTracer(origin, end, w.tracer, w.key === "shotgun" ? 0.045 : 0.055);
       }
       // city: a window in this pellet's path shatters (glass never blocks the
@@ -2907,7 +2928,9 @@
         const r = gunHit(hit, w, shotDir);
         head = head || r.head;
         down = down || r.down;
-        spawnImpact(hit.point, !w.nonlethal, w.key === "shotgun", cal);
+        // taserfx owns the contact glow/arcs; the generic round impact is a
+        // large white bullet spark that visually erases the two probe contacts.
+        if (w.key !== "taser") spawnImpact(hit.point, !w.nonlethal, w.key === "shotgun", cal);
         // One small flesh response per round/pellet. The death path already emits
         // its single full gore event; calling that here as well used to create a
         // pool-sized explosion for every pellet in a shotgun blast.
@@ -3977,7 +4000,7 @@
 
     if (muzzleT > 0) {
       muzzleT -= dt;
-      muzzle.material.opacity = Math.max(0, muzzleT / (w.key === "shotgun" ? 0.065 : 0.04));
+      muzzle.material.opacity = Math.max(0, muzzleT / (w.key === "taser" ? 0.07 : (w.key === "shotgun" ? 0.065 : 0.04)));
       if (muzzleT <= 0) muzzle.visible = false;
     }
 

@@ -462,6 +462,10 @@
     player.subdue = (player.subdue || 0) + 1;
     if (player.subdue === 1) {
       player.stun = 1.85; setCaptureState("tased", 1.35);
+      // The guard visibly draws the shared taser, launches its twin probes and
+      // energizes the same body-pose signal used when the player fires one.
+      // Capture still owns stun/state; taserfx owns only what that event looks like.
+      if (CBZ.taserFx && CBZ.taserFx.actorTasePlayer) CBZ.taserFx.actorTasePlayer(gd);
       tellHint("TASED — you hit the floor!", 1.6);
       CBZ.sfx("tase"); CBZ.shake && CBZ.shake(0.55);
       if (CBZ.el && CBZ.el.flash) { CBZ.el.flash.classList.remove("go"); void CBZ.el.flash.offsetWidth; CBZ.el.flash.classList.add("go"); }
