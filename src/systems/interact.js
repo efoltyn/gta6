@@ -3,7 +3,7 @@
    anyone and the options fade in beside them. Four social verbs on the
    home-row cluster (the numbers belong to the inventory hotbar):
 
-       [I] Romance   [J] Insult   [K] Befriend   [L] Steal
+       [J] Romance   [K] Insult   [L] Befriend   [;] Steal
        (fight is left-click / the touch trigger, never a menu row)
 
    Merchants, the dealer and bent cops swap a row for Trade, guards for
@@ -33,7 +33,7 @@
   //  say press g or shift DUH i can't do that... like turning tips off is a key
   //  I can't press."
   //
-  //  This card was a keyboard artefact end to end: four [I][J][K][L] chips, a
+  //  This card was a keyboard artefact end to end: four [J][K][L][;] chips, a
   //  fifth verb silently DROPPED by cap4 because there were only four keys to
   //  reach it with, and an "[H] Tips: ON" footer whose only affordance was a key
   //  no tablet has. On touch it becomes:
@@ -48,7 +48,8 @@
   //      grammar rather than a HUD hint panel (desktop gets this too — it is the
   //      one part of the ask that is not touch-specific);
   //    • a tappable TIPS pill replacing the "[H]" footer.
-  //  Desktop keyboard play is untouched: same panel, same rows, same I/J/K/L.
+  //  Desktop keeps the same panel and rows; J/K/L/; leave I exclusively owned
+  //  by the Prison stash, even while a contextual card is visible.
   //
   //  Flags (one-line reverts, declared here rather than in config.js so a
   //  parallel wave never races this file against that one):
@@ -131,6 +132,21 @@
       CBZ.sfx("coin");
       return { ok: true, msg: justified ? `Good tip. Found ${found} cigs with clean cause.` : `Found ${found} cigs in the shakedown.` };
     } },
+    // ---- held at gunpoint (systems/intimidate.js owns the state) ----------
+    // Both dispatch back into intimidate rather than reimplementing the
+    // shakedown here: it re-validates range and mode, routes the transfer
+    // through city/take.js, and keeps him terrified afterwards.
+    rob:      { label: "Rob",             fn: (a) => {
+      if (CBZ.prisonRobTarget) CBZ.prisonRobTarget(a);
+      return { ok: true, msg: "" };
+    } },
+    release:  { label: "Let him go",      fn: (a) => {
+      // Lowering the gun is the other half of holding it up. Ending the hold
+      // here (rather than making the player walk away) means the panel can
+      // always be closed by a decision instead of by distance.
+      if (CBZ.intimidateRelease) CBZ.intimidateRelease(a);
+      return { ok: true, msg: "" };
+    } },
   };
 
   // one-line teaching text per verb; shown until the player has used it
@@ -158,6 +174,8 @@
     warn:     "Make them scatter",
     detain:   "Drop them without an arrest meter",
     search:   "Confiscate pocket loot",
+    rob:      "Empty his pockets at gunpoint",
+    release:  "Lower the gun and let him go",
   };
   // TIPS ARE OFF UNTIL ASKED FOR (JAIL_SHOW_DONT_TELL, declared entities/ai.js).
   //
@@ -327,6 +345,15 @@
       const authored = CBZ.cityCampaignPrisonVerbs(a);
       if (authored && authored.length) return authored;
     }
+    /* HELD AT GUNPOINT. A man with his hands over his head is not available
+       for "romance / insult / befriend", and the thing you CAN do to him used
+       to arrive as a separate pill that popped into frame to announce he was
+       frozen. He is visibly frozen; the popup and the pill both said so twice.
+       So this is one more context in the list below rather than a new surface:
+       the same panel, the same four keys, different verbs — which is exactly
+       what happens when a man walks up with an offer. Outranks every approach
+       kind because a drawn gun outranks a conversation. */
+    if (a.intimidMode === "scared") return ["rob", "release"];
     if (a.approach && a.approach.t > 0) {
       if (a.approach.kind === "gangInvite") return ["listen", "accept", "refuse"];
       if (a.approach.kind === "gangJob") return ["listen", "accept", "refuse"];
@@ -863,11 +890,11 @@
     if (piRoot) piRoot.classList.toggle("show", on);
   }
   // On touch the legacy card is replaced, not decorated: it stops rendering
-  // rows entirely (so no [I]/[J]/[K]/[L] chip and no "[H]" footer can survive
+  // rows entirely (so no [J]/[K]/[L]/[;] chip and no "[H]" footer can survive
   // the switch) and css/interact_touch.css collapses it. `.show` is still
   // added/removed exactly as before, because CBZ.interactionMenuOpen() — which
-  // inventory.js and dashboard.js read to know who owns I/J/K/L — is keyed off
-  // that class and must keep meaning the same thing.
+  // touch/controller consumers read to know whether context is live — is keyed
+  // off that class and must keep meaning the same thing.
   //
   // SCOPED TO ESCAPE MODE ON PURPOSE. #interact is a SHARED element: city/
   // interactions.js raises the very same card in the open city, and there is no
@@ -904,6 +931,26 @@
       const d2 = dx * dx + dz * dz;
       if (d2 < bd) { bd = d2; best = a; }
     }
+    /* WHO THE PANEL IS ABOUT, WHEN A GUN IS OUT.
+       This picks the CLOSEST body; systems/intimidate.js picks whoever is
+       under the crosshair. Those are different selectors and they disagree
+       often enough to matter: hold a man at gunpoint three metres away while
+       another stands at your elbow, and the panel locks onto the elbow — so
+       the verbs for the man with his hands up are unreachable, and the ones
+       on screen belong to somebody who is not part of what is happening.
+       The man you are pointing a gun at wins, but ONLY if he is already
+       inside RANGE. That is deliberate: the panel's short reach is the
+       design, not a limitation to route around. His hands go up from across
+       the yard and you can read that at any distance; the things you can DO
+       to a person still wait until you have walked over to him. */
+    if (CBZ.intimidate && CBZ.intimidate.target) {
+      const held = CBZ.intimidate.target();
+      if (held && held !== best && held.group && !held.dead && !held.escaped && !(held.ko > 0) &&
+          held.intimidMode === "scared") {
+        const hx = px - held.group.position.x, hz = pz - held.group.position.z;
+        if (hx * hx + hz * hz < RANGE * RANGE) best = held;
+      }
+    }
     return best;
   }
 
@@ -918,7 +965,7 @@
       // this context offers is thrown away. cap4 exists because there are only four keys —
       // a thumb has no fifth key, so on touch its overflow would be UNREACHABLE
       // rather than merely unlisted, which is a different (and worse) thing.
-      // _verbs keeps the four core verbs at indices 0-3, so I/J/K/L and every
+      // _verbs keeps the four core verbs at indices 0-3, so J/K/L/; and every
       // existing doAction caller still mean exactly what they meant.
       const all = verbsFor(a);
       const core = cap4(all);
@@ -961,10 +1008,10 @@
     el.interactOpts.innerHTML = html;
   }
 
-  // interaction options live on a home-row cluster now (numbers are reserved
-  // for the inventory hotbar in every mode). EXACTLY four slots → I J K L.
-  // Nothing else in the game may bind I/J/K/L; these are the interaction keys.
-  const OPT_KEYS = ["i", "j", "k", "l"];
+  // Interaction options live on a home-row cluster (numbers are reserved for
+  // the hotbar, and I is the invariant Prison stash key). Exactly four slots:
+  // J K L ;. Touch buttons retain their direct doAction indices.
+  const OPT_KEYS = ["j", "k", "l", ";"];
   // contexts can offer more verbs than four slots — when they overflow, keep
   // the FOUR most important and never silently strand a game-critical verb
   // (refuse=decline, steal=lift keys/loot, trade=commerce, befriend/join/
@@ -974,6 +1021,8 @@
     join: 82, romance: 80, paySilence: 80, bribe: 78, threatenSnitch: 78, payoff: 76,
     pay: 74, detain: 72, listen: 70, search: 70, warn: 66, threaten: 64, respect: 60,
     question: 60, haggle: 50, insult: 40,
+    // gunpoint pair — only ever offered together, so the cap never sees them
+    rob: 96, release: 94,
   };
   function cap4(v) {
     if (v.length <= 4) return v;
@@ -981,7 +1030,7 @@
     const keep = v.slice().sort((a, b) => score(b) - score(a)).slice(0, 4);
     return v.filter((x) => keep.indexOf(x) >= 0);   // back to original menu order
   }
-  // exposed so other systems can tell when a contextual panel owns I/J/K/L.
+  // Exposed so touch/controller surfaces can tell when context is live.
   CBZ.interactionMenuOpen = function () { return !!(el.interact.classList.contains("show") && CBZ.game.state === "playing"); };
 
   function update(dt) {

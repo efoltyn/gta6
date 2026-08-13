@@ -306,7 +306,10 @@
         // above keeps the flag-off revert byte-identical. hasKey stays the
         // door/AI truth; the item is display, never a second key check.
         if (CBZ.CONFIG && CBZ.CONFIG.JAIL_HUD_UNIFIED !== false && CBZ.econ && CBZ.econ.addItem) CBZ.econ.addItem("Keycard", 1);
-        CBZ.sfx("key"); CBZ.flashToast("KEYCARD!");
+        // The chip above lit up, the bag took the item, and the key sound
+        // plays. "KEYCARD!" was a fourth telling of the same pickup. Deleted,
+        // not muted — there is no string left to turn back on.
+        CBZ.sfx("key");
         CBZ.setObjective("Keycard opens staff checkpoints. Cross the yard or scout tunnels for another way out.");
       }
     }
