@@ -30,7 +30,9 @@
     box(g, 0.052, 0.022, 0.045, mat.black, -0.030, 0.105, -0.50);
     // slim barrel + three-lug stub at the muzzle
     cyl(g, 0.018, 0.18, mat.black, 0, 0.055, -0.67, Math.PI / 2);
-    cyl(g, 0.026, 0.045, mat.steel, 0, 0.055, -0.73, Math.PI / 2);
+    cyl(g, 0.026, 0.045, mat.black, 0, 0.055, -0.73, Math.PI / 2);
+    const bore = cyl(g, 0.011, 0.008, mat.bore || mat.black, 0, 0.055, -0.757, Math.PI / 2);
+    bore.userData.weaponBore = true;
     // HOODED DRUM front sight: a ring around a thin post (the MP5-maker)
     cyl(g, 0.040, 0.035, mat.black, 0, 0.135, -0.595, Math.PI / 2);
     box(g, 0.012, 0.050, 0.012, mat.black, 0, 0.125, -0.595);

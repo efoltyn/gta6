@@ -33,7 +33,10 @@
     // thick BARREL + gas tube beneath it + slotted muzzle device
     cyl(g, 0.030, 0.66, mat.black, 0, 0.045, -0.78, Math.PI / 2);
     cyl(g, 0.020, 0.50, mat.dark, 0, -0.015, -0.72, Math.PI / 2);
-    cyl(g, 0.038, 0.10, mat.steel, 0, 0.045, -1.14, Math.PI / 2);
+    cyl(g, 0.038, 0.10, mat.black, 0, 0.045, -1.14, Math.PI / 2);
+    // recessed bore disk: the tip reads as an opening, never a flat grey cap
+    const bore = cyl(g, 0.021, 0.009, mat.bore || mat.black, 0, 0.045, -1.198, Math.PI / 2);
+    bore.userData.weaponBore = true;
     // hooded FRONT sight post + rear sight block on the feed cover
     box(g, 0.020, 0.075, 0.020, mat.black, 0, 0.115, -1.04);
     box(g, 0.055, 0.045, 0.055, mat.black, 0, 0.145, -0.06);
@@ -74,7 +77,7 @@
     box(g, 0.090, 0.175, 0.040, mat.black, 0, -0.015, 0.415);
     // hand on the grip
     box(g, 0.160, 0.105, 0.14, mat.skin, 0, -0.155, 0.025, -0.12);
-    g.userData.muzzle = new THREE.Vector3(0, 0.045, -1.20);
+    g.userData.muzzle = new THREE.Vector3(0, 0.045, -1.204);
     return g;
   };
 })();

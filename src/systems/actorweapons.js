@@ -56,6 +56,7 @@
   const mat = {
     dark: new THREE.MeshLambertMaterial({ color: 0x161a20 }),
     black: new THREE.MeshLambertMaterial({ color: 0x080a0c }),
+    bore: new THREE.MeshLambertMaterial({ color: 0x010203 }),
     steel: new THREE.MeshLambertMaterial({ color: 0x48515c }),
     worn: new THREE.MeshLambertMaterial({ color: 0x747f8c }),
     tan: new THREE.MeshLambertMaterial({ color: 0x8b6a42 }),
@@ -131,6 +132,7 @@
     const model = builder ? builder({ THREE, box, cyl, mat }) : fallbackWeapon();
     model.userData.weaponId = id;
     model.userData.weaponSlot = meta.slot || "pistol";
+    model.userData.weaponHold = Object.assign({ heavy: 0, support: 0, stance: "" }, meta.hold || {});
     model.scale.setScalar((meta.slot === "pistol" || meta.slot === "utility") ? 0.92 : 0.82);
     model.position.set(0.02, 0.02, 0.03);
     // barrel runs ALONG the forearm (grip in the hand, muzzle past the fingers)
@@ -579,27 +581,50 @@
     }
     const ch = actor.char;
     if (!ch || !ch.parts) return;
-    const slot = actor._weaponProp && actor._weaponProp.userData && actor._weaponProp.userData.weaponSlot;
-    setReadyPose(ch, slot === "long" || slot === "rifle" || slot === "auto");
+    setReadyPose(ch, actor._weaponProp || syncActorWeapon(actor));
   }
 
   // hold the gun FORWARD at chest height (not dangling at the hip). The right arm
   // swings up to roughly horizontal so the muzzle reads as "weapon ready".
   // mirror the PLAYER's known-good forward-aim arm pose (fpsmode third-person)
   // so NPC guns point forward at chest height — not at the hip, not up at the sky.
-  function setReadyPose(ch, longGun) {
+  function setReadyPose(ch, prop) {
     if (!ch || !ch.parts) return;
+    const ud = prop && prop.userData ? prop.userData : {};
+    const slot = ud.weaponSlot || "pistol";
+    const longGun = slot === "long" || slot === "rifle" || slot === "auto";
+    const hold = ud.weaponHold || {};
+    const heavy = Math.max(0, Math.min(1, hold.heavy || 0));
+    const support = Math.max(0, Math.min(0.5, hold.support || 0));
+    const shoulder = hold.stance === "shoulder";
+    const elbow = function (part, angle) {
+      const low = part && part.userData && part.userData.low;
+      if (low) low.rotation.x = angle;
+    };
     // gun arm raised to ~horizontal-forward, NO y/z twist (twist was throwing the
     // muzzle off). With the prop's +π/2 mount this points the barrel forward.
     if (ch.parts.ra) {
-      ch.parts.ra.rotation.set(longGun ? -1.50 : -1.45, 0, 0);
+      ch.parts.ra.rotation.set((longGun ? -1.54 : -1.50) + heavy * 0.10, longGun ? 0.12 : 0.18, longGun ? 0.30 : 0.34);
       ch.parts.ra.position.z = 0.14;
+      elbow(ch.parts.ra, shoulder ? -0.28 : (longGun ? -0.10 - heavy * 0.12 : -0.16));
     }
-    // support hand comes up under a long gun; a pistol stays one-handed (let the
-    // left arm swing naturally with the walk).
-    if (longGun && ch.parts.la) {
-      ch.parts.la.rotation.set(-1.20, 0.20, 0.22);
-      ch.parts.la.position.z = 0.20;
+    // Every firearm is a two-hand object while presented. Pistols meet at the
+    // firing wrist; long guns move the left hand forward by the weapon's own
+    // support measurement. A shoulder launcher stays close to the receiver.
+    if (ch.parts.la) {
+      if (longGun) {
+        ch.parts.la.rotation.set(
+          (shoulder ? -1.38 : -1.55) - heavy * 0.10,
+          shoulder ? -0.18 : -0.34 - heavy * 0.08,
+          shoulder ? -0.34 : -0.42 - support * 0.18
+        );
+        ch.parts.la.position.z = (shoulder ? 0.16 : 0.24) + support * 0.5;
+        elbow(ch.parts.la, shoulder ? -0.48 : -0.72 - heavy * 0.26);
+      } else {
+        ch.parts.la.rotation.set(-1.56, -0.32, -0.68);
+        ch.parts.la.position.z = 0.20;
+        elbow(ch.parts.la, -0.22 - heavy * 0.12);
+      }
     }
   }
 
@@ -642,7 +667,7 @@
       // already attached with the right id, only rebuilding when the weapon changed.
       const prop = syncActorWeapon(a);
       if (!prop) continue;
-      setReadyPose(a.char, prop.userData && prop.userData.weaponSlot === "long");
+      setReadyPose(a.char, prop);
     }
   }
   if (CBZ.onUpdate) CBZ.onUpdate(36, function () {
@@ -675,4 +700,9 @@
   CBZ.actorHolster = actorHolster;
   CBZ.actorMuzzle = actorMuzzle;
   CBZ.actorAimAt = actorAimAt;
+  CBZ.actorReadyPose = function (actor) {
+    const prop = syncActorWeapon(actor);
+    if (prop && actor && actor.char) setReadyPose(actor.char, prop);
+    return prop;
+  };
 })();
