@@ -2139,15 +2139,36 @@
         turbid = Math.max(turbid, Math.pow(shoal, 1.5) * 0.62);
         st.sediment = turbid;
         st.shoal = shoal;
+        /* ---- AND THEN IT SPENDS ITSELF, FROM THE SHORELINE ----------------
+           The collapse used to begin at `st.frontS > 0` — the island's
+           CENTRE. A 240 m crossing therefore held the full landfall height
+           for its entire first half and was still floored at 40% of it as it
+           left the far side: a wall of water touring an island rather than a
+           bore breaking on one, which is exactly what it looked like.
+
+           A bore stops being a wall the moment it is over land. It is
+           climbing, and it is spending itself on every metre of ground,
+           building and tree it runs through — the wall becomes a fast, deep,
+           dirty flood, and the flood is the surge, which is already rising
+           underneath it on the very same span. So the decay is measured
+           against `land`, the crossing fraction surgeSet is built from: as
+           the wall gives its height up, the water it was carrying is the
+           water filling in behind it, and the two can never disagree because
+           they are the same number. Nothing here touches wetness, depth or
+           the catch height — the face has never owned any of those. */
+        const spent = Math.max(0.08, Math.pow(1 - land, 1.45));
+        st.spent = spent;
         const grp = st.wave;
         if (st.face) {
           // tallest at the instant it breaks (shoal 1), then falling away as
           // it spends itself crossing the island
-          const hs = (0.46 + 0.68 * shoal) * (st.frontS > 0 ? Math.max(0.4, 1 - st.frontS / (ctx.R * 1.25)) : 1);
+          const hs = (0.46 + 0.68 * shoal) * spent;
+          st.faceH = st.H * hs;
           CBZ.tsuFaceUpdate(st.face, {
             t: CBZ.waterClock ? CBZ.waterClock() : CBZ.now * 0.001, dt: dt,
-            height: st.H * hs, turbid: turbid,
-            curl: (0.22 + 1.35 * shoal) * (1 - turbid * 0.62),
+            height: st.faceH, turbid: turbid,
+            // a spent surge does not overhang: the curl goes with the height
+            curl: (0.22 + 1.35 * shoal) * (1 - turbid * 0.62) * Math.max(0.22, spent),
             foam: st.foamGain,
             x: fx0, y: st.level - 2.4 + Math.sin(CBZ.now * 0.005) * 0.4, z: fz0,
             dirX: st.dx, dirZ: st.dz,
@@ -2163,9 +2184,11 @@
           const sk = st.waveStreaks;
           if (sk) for (let i = 0; i < sk.length; i++) { const s = sk[i]; s.material.opacity = 0.16 + 0.2 * Math.abs(Math.sin(CBZ.now * 0.013 + i)); s.position.y = st.H * (0.42 + 0.05 * Math.sin(CBZ.now * 0.01 + i * 2)); }
         }
-        // the spray-torn crest: thicker the harder the wave is curling
-        st.spray.setActive(0.6 + 0.4 * shoal);
-        st.spray.update(dt, fx0, st.level + st.H * 0.9, fz0);
+        // the spray-torn crest: thicker the harder the wave is curling, and it
+        // rides the LIVE crest — spray hanging at the height of a wave that is
+        // no longer there is the tell that the wave never really came down
+        st.spray.setActive((0.6 + 0.4 * shoal) * Math.max(0.18, spent));
+        st.spray.update(dt, fx0, st.level + (st.faceH || st.H) * 0.9, fz0);
         tsuPublish(ctx, 2.2);
         if (!st.landfall && st.frontS > -(ctx.R - 6)) {
           st.landfall = true;
@@ -4023,6 +4046,12 @@
         sediment: st.sediment != null ? +(+st.sediment).toFixed(3) : 0,
         shaderSediment: U && U.uDwSediment ? +U.uDwSediment.value.toFixed(3) : null,
         shoal: st.shoal != null ? +(+st.shoal).toFixed(3) : null,
+        /* How much of itself the bore has left, and how tall the wall
+           actually is right now. `spent` is 1 at the beach and runs to nearly
+           nothing at the far shore, so "did the wave come down as it crossed"
+           stops being an opinion about a screenshot. */
+        spent: st.spent != null ? +(+st.spent).toFixed(3) : null,
+        faceH: st.faceH != null ? +(+st.faceH).toFixed(1) : null,
         debrisEntrained: dbg ? dbg.entrained : 0,
         debrisLive: dbg ? dbg.live : 0,
         debrisStrikes: dbg ? dbg.strikes : 0,
