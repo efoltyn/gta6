@@ -472,6 +472,34 @@ Before building anything adjacent, wire into the existing system:
   brown → **green-black** with depth. No caller changed a line; every existing
   death in water got this for free. `CBZ.goreChumList()` publishes live blood
   sources so AI can smell them. Flag `GORE_WATER`.
+- **Blood is EARNED, not announced** — `systems/trauma.js` (`CBZ.trauma`).
+  `modes/survival.js` used to fire `CBZ.gore()` on EVERY disaster death at a
+  flat amount, so a man who FROZE SOLID, DROWNED, CHOKED on ash or was
+  VAPORIZED sprayed exactly as much arterial red as one torn apart by a
+  tornado — while beatings, twenty-six-metre falls and being thrown into a
+  building drew nothing at all. Blood is MECHANICAL TRAUMA, so this file owns
+  two things: a per-actor **ledger** (`CBZ.trauma.strike(a, force, o)` /
+  `CBZ.trauma.slam(a, speed, {wall})`, decaying over ~30 s, bleeding only past
+  `FIRST_BLOOD` — so the third punch splits skin and the first two only bruise)
+  and a **cause table** (`CBZ.trauma.deathGore(a, cause, imp)`), which fires the
+  gore a death's PHYSICS calls for — tear / crush / splat / burst / blunt / boom
+  — and **nothing at all** for an unrecognised cause. Feed sites are one line
+  each: `grapple.js` (punch, push, landing, wall slam), `physics.js` (the
+  player's landing), `survival.js` (`reportDeath`). Scoped to survival inside
+  `on()`. Flag `SURV_TRAUMA`.
+- **Ground decals follow the GROUND** — `systems/gore.js` fits every blood pool
+  and smear to the local surface NORMAL (sampled off the same `CBZ.floorAt`
+  everything stands on) instead of stamping a hard horizontal `rotation.x =
+  -PI/2` disc. On the survival island's 26 m × 36 m refuge cone (~36°) a flat
+  2 m pool hung its uphill rim 1.4 m in the air — the owner's "flats that
+  float". Past `STEEP` blood does not pool at all: the disc is cut back and a
+  downhill trickle is drawn out of it. Flat ground is byte-identical (n =
+  (0,1,0) → the old rotation). Ratchet `CBZ.goreAudit().float` — worst rim-to-
+  ground gap in metres, measured by `tools/test-survival-gore-browser.mjs`;
+  0.27 fitted vs 2.08 unfitted on the mountain. It may only go DOWN. Flag
+  `GORE_SLOPE_DECALS`. Sibling flag `GORE_GIB_MEAT` soaks flying chunks toward
+  wound-dark so a hillside reads as gore rather than as pastel confetti, and
+  `opts.gib` prices the chunk count per kill (a beating throws none).
 - **Held bodies** — `CBZ.ragdollPin(target, {point, at, until})` in
   `city/ragdoll.js` pins one verlet mass point to a moving transform so the rest
   of the skeleton whips off it (a body thrashed in jaws). Plus buoyancy: a corpse

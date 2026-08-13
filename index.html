@@ -1340,6 +1340,15 @@
      always-updater is in the sort -->
 <script src="src/systems/gore.js?v=bloodwarm1w9"></script>
 <script src="src/systems/wounds.js?v=soak4w9"></script>
+<!-- BLOOD IS EARNED — the disaster island's trauma ledger + cause table.
+     Owner-filmed: gore fired on EVERY survival death (a man who FROZE SOLID
+     sprayed arterial red) and never for the violent, physical, player-caused
+     things — beatings, long falls, being driven into a wall. This decides WHEN
+     blood is warranted and WHICH gore the death's physics calls for; it draws
+     nothing itself. After gore.js + wounds.js (routes through CBZ.goreImpact,
+     CBZ.gore and CBZ.bodyWound), before core/loop.js so its clock makes the
+     boot sort. Consumers: grapple.js, physics.js, modes/survival.js. -->
+<script src="src/systems/trauma.js?v=trauma1"></script>
 <!-- PREDATOR GRAMMAR — the shared answer to "a thing hunts you and takes you":
      predatorHunt (stalking FSM w/ menace gauge), predatorSeize (the grab),
      predatorDread (tension bus). Medium-agnostic, so a shark and a bear run the

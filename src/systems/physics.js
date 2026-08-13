@@ -1084,7 +1084,19 @@
     let v = impactSpeed;
     if (player._fallPeak && player._fallPeak > v) v = player._fallPeak;
     player._fallPeak = 0;
-    if (CBZ.game.mode !== "city") return;        // escape/survival: no fall damage
+    // SURVIVAL: no fall DAMAGE (the disasters fling you constantly — charging
+    // for every landing would decide rounds by physics noise), but a long drop
+    // is one of the three things the owner named as having to draw blood, and
+    // the island's refuge mountain is a 26 m cone you can be shoved off. The
+    // impact speed is already in hand, so hand it to the trauma ledger and let
+    // systems/trauma.js decide whether that landing opened you up. It is the
+    // same call grapple.js makes for a bot's landing, so player and bot bleed
+    // off one rule. Everything below stays city-only, byte for byte.
+    if (CBZ.game.mode === "survival") {
+      if (CBZ.trauma && CBZ.surv && !player.dead) CBZ.trauma.slam(CBZ.surv.playerActor, v, { dir: { x: 0, y: 1, z: 0 } });
+      return;
+    }
+    if (CBZ.game.mode !== "city") return;        // escape: no fall damage
     if (player.dead || (CBZ.game.invuln || 0) > 0) return;
     if (v <= FALL_SAFE) return;                  // a hop / step-down / normal jump
     const excess = v - FALL_SAFE;
