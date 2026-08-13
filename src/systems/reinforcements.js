@@ -201,11 +201,12 @@
             (!CBZ.guards || CBZ.guards.length < MAX_GUARDS)) {
           if (spawnOne()) {
             spawnCd = SPAWN_CD;
-            if (!announced) {
-              announced = true;
-              if (CBZ.flashToast) { try { CBZ.flashToast("REINFORCEMENTS!"); } catch (e) {} }
-              if (CBZ.flashHint) { try { CBZ.flashHint("The towers called it in — riot squad incoming!", 2.4); } catch (e) {} }
-            }
+            // NO TOAST. The surge announces itself diegetically: guards vault
+            // out of the tower corners and converge. A "REINFORCEMENTS!"
+            // banner over that is the game narrating what the player can
+            // already see. `announced` still latches so the run-reset path
+            // below keeps its one-shot-per-surge shape.
+            announced = true;
           }
         }
       }
@@ -233,7 +234,7 @@
         standT += dt;
         if (standT >= STAND_HOLD) {
           recallAll();
-          if (CBZ.flashHint) { try { CBZ.flashHint("The riot squad stands down.", 2.0); } catch (e) {} }
+          // NO HINT either — the squad walking off IS the stand-down.
         }
       } else {
         standT = 0;                        // still warm — hold the line
