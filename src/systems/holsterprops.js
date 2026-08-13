@@ -43,6 +43,13 @@
     hip: { prop: null, id: null },
     hand: { prop: null, id: null, long: false },
   };
+  let transfer = null;
+  let lastTransitionSeq = 0;
+  const TRANSFER_POS_A = new THREE.Vector3(), TRANSFER_POS_B = new THREE.Vector3(), TRANSFER_POS = new THREE.Vector3();
+  const TRANSFER_SCALE_A = new THREE.Vector3(), TRANSFER_SCALE_B = new THREE.Vector3(), TRANSFER_SCALE = new THREE.Vector3();
+  const TRANSFER_Q_A = new THREE.Quaternion(), TRANSFER_Q_B = new THREE.Quaternion(), TRANSFER_Q = new THREE.Quaternion();
+  const TRANSFER_WORLD = new THREE.Matrix4(), TRANSFER_LOCAL = new THREE.Matrix4(), TRANSFER_INV = new THREE.Matrix4();
+  const TRANSFER_STATE_A = new THREE.Vector3(), TRANSFER_STATE_B = new THREE.Vector3(), TRANSFER_STATE_C = new THREE.Vector3();
 
   function disposeProp(m) {
     if (!m.prop) return;
@@ -103,7 +110,7 @@
     prop.rotateOnWorldAxis(new THREE.Vector3(0, 0, 1), -0.62); // then tip it diagonal
   }
   function placeHipLegacy(prop) {
-    prop.position.set(0.24, 1.08, -0.3);
+    prop.position.set(-0.24, 1.08, -0.3);
     prop.rotation.set(-Math.PI / 2, 0, 0);     // barrel straight down
     prop.rotateZ(0.28);                        // canted toward the spine
   }
@@ -128,13 +135,167 @@
     return { back: longs[0] || null, back2: longs[1] || null, hip };
   }
 
-  if (CBZ.onUpdate) CBZ.onUpdate(37, function () {
+  function transferZone(stow, id) {
+    if (!id) return null;
+    if (stow.hip === id) return "hip";
+    if (stow.back === id) return "back";
+    if (stow.back2 === id) return "back2";
+    return null;
+  }
+
+  function endTransfer() {
+    if (!transfer) return;
+    if (transfer.prop && transfer.prop.parent) transfer.prop.parent.remove(transfer.prop);
+    if (transfer.source && transfer.source.parent) transfer.source.parent.remove(transfer.source);
+    transfer = null;
+  }
+
+  function beginTransfer(rec, ch, stow, mp) {
+    if (!rec || !rec.from || !ch || !mp) return false;
+    // First person owns its deliberately short near-field dip in fpsmode.js.
+    // Consume that transition here so leaving FP later cannot replay an old
+    // third-person reach after the gun is already away.
+    if (CBZ.fps && CBZ.fps.active) return true;
+    const zone = transferZone(stow, rec.from);
+    const target = zone && mp[zone];
+    if (!target) return true;
+    let source = mounts.hand.prop;
+
+    // Prison normally auto-enters first person on the first gun pickup. If the
+    // player returns to third person and immediately presses 1, the holster
+    // transition can reach this update before the later hand-render pass has
+    // built its prop. Materialize the SAME canonical actor model at the live
+    // hand socket here, so even that first frame has a physical source to move
+    // to the back/hip instead of silently consuming the stow event.
+    if (!source || mounts.hand.id !== rec.from || !source.parent) {
+      const socket = ch.sockets && (ch.sockets.thirdPersonWeapon || ch.sockets.weapon || ch.sockets.rightHand);
+      if (!socket || !CBZ.buildActorWeapon) return false;
+      if (source) disposeProp(mounts.hand);
+      source = CBZ.buildActorWeapon(rec.from);
+      if (!source) return false;
+      mounts.hand.prop = source;
+      mounts.hand.id = rec.from;
+      mounts.hand.long = isLongSlot(source.userData && source.userData.weaponSlot);
+      socket.add(source);
+      source.position.set(0.02, 0.02, 0.03);
+      source.scale.setScalar(mounts.hand.long ? 1.25 : 1.15);
+      source.visible = true;
+    }
+    endTransfer();
+
+    // Clone the exact visible hand model, including this weapon's dimensions
+    // and materials. It lives under the common world root while every frame
+    // recomputes BOTH moving endpoints: animated wrist and live body mount.
+    // That is what keeps the weapon in the hand while the hand reaches.
+    source.parent.updateWorldMatrix(true, true);
+    target.updateWorldMatrix(true, true);
+    const moving = source.clone(true);
+    source.parent.add(moving);
+    moving.position.copy(source.position);
+    moving.quaternion.copy(source.quaternion);
+    moving.scale.copy(source.scale);
+    // Track the hand with a geometry-free anchor. A gun-to-gun switch replaces
+    // the old visible hand prop later in this same frame; retaining that prop
+    // as the endpoint made the outgoing transfer die on the next update.
+    const sourceAnchor = new THREE.Group();
+    sourceAnchor.name = "weapon-stow-hand-anchor";
+    source.parent.add(sourceAnchor);
+    sourceAnchor.position.copy(source.position);
+    sourceAnchor.quaternion.copy(source.quaternion);
+    sourceAnchor.scale.copy(source.scale);
+    (CBZ.prisonRoot || CBZ.scene).attach(moving);
+    moving.visible = true;
+    moving.traverse((o) => { if (o.isMesh) o.castShadow = false; });
+
+    const meta = CBZ.weaponById && CBZ.weaponById(rec.from);
+    const heavy = meta && meta.hold ? Math.max(0, Math.min(1, meta.hold.heavy || 0)) : 0;
+    const dur = (zone === "hip" ? 0.56 : 0.74) + heavy * (zone === "hip" ? 0.08 : 0.16);
+    transfer = {
+      seq: rec.seq,
+      id: rec.from,
+      to: rec.to || null,
+      zone,
+      prop: moving,
+      source: sourceAnchor,
+      target,
+      t: 0,
+      dur,
+      progress: 0,
+    };
+    if (CBZ.charReach) {
+      CBZ.charReach(ch, {
+        arm: "r", dur, amt: 1,
+        kind: zone === "hip" ? "holster-hip" : "holster-back",
+        high: zone === "hip" ? 0.12 : 0.92,
+        side: zone === "hip" ? 1 : -1,
+        target,
+      });
+    }
+    return true;
+  }
+
+  function updateTransfer(dt) {
+    if (!transfer || !transfer.prop || !transfer.prop.parent) { transfer = null; return; }
+    transfer.t = Math.min(transfer.dur, transfer.t + Math.max(0, dt || 0));
+    const p = transfer.t / transfer.dur;
+    // Keep the gun physically welded to the animated grip through the reach.
+    // At the reach dwell (62%) the hand begins handing it into the mount; only
+    // that short final leg blends from the live wrist to the live back/hip
+    // socket. Interpolating for the full duration made the gun visibly leave
+    // the hand while the arm was still moving, especially on the short hip arc.
+    const handoff = Math.max(0, Math.min(1, (p - 0.62) / 0.38));
+    const e = handoff * handoff * (3 - 2 * handoff);
+    transfer.progress = p;
+    const source = transfer.source, target = transfer.target, parent = transfer.prop.parent;
+    if (!source || !source.parent || !target || !target.parent || !parent) { endTransfer(); return; }
+    source.updateWorldMatrix(true, false);
+    target.updateWorldMatrix(true, false);
+    parent.updateWorldMatrix(true, false);
+    source.matrixWorld.decompose(TRANSFER_POS_A, TRANSFER_Q_A, TRANSFER_SCALE_A);
+    target.matrixWorld.decompose(TRANSFER_POS_B, TRANSFER_Q_B, TRANSFER_SCALE_B);
+    TRANSFER_SCALE_B.multiplyScalar(0.92);
+    TRANSFER_POS.lerpVectors(TRANSFER_POS_A, TRANSFER_POS_B, e);
+    TRANSFER_Q.slerpQuaternions(TRANSFER_Q_A, TRANSFER_Q_B, e);
+    TRANSFER_SCALE.lerpVectors(TRANSFER_SCALE_A, TRANSFER_SCALE_B, e);
+    TRANSFER_WORLD.compose(TRANSFER_POS, TRANSFER_Q, TRANSFER_SCALE);
+    TRANSFER_INV.copy(parent.matrixWorld).invert();
+    TRANSFER_LOCAL.multiplyMatrices(TRANSFER_INV, TRANSFER_WORLD);
+    TRANSFER_LOCAL.decompose(transfer.prop.position, transfer.prop.quaternion, transfer.prop.scale);
+    if (p >= 1) endTransfer();
+  }
+
+  CBZ.weaponTransferState = function () {
+    if (!transfer) return { active: false };
+    let handGunGap = null, handMountGap = null, gunMountGap = null;
+    if (transfer.source && transfer.source.parent && transfer.prop && transfer.prop.parent && transfer.target && transfer.target.parent) {
+      transfer.source.getWorldPosition(TRANSFER_STATE_A);
+      transfer.prop.getWorldPosition(TRANSFER_STATE_B);
+      transfer.target.getWorldPosition(TRANSFER_STATE_C);
+      handGunGap = TRANSFER_STATE_A.distanceTo(TRANSFER_STATE_B);
+      handMountGap = TRANSFER_STATE_A.distanceTo(TRANSFER_STATE_C);
+      gunMountGap = TRANSFER_STATE_B.distanceTo(TRANSFER_STATE_C);
+    }
+    return {
+      active: true,
+      id: transfer.id,
+      to: transfer.to,
+      zone: transfer.zone === "back2" ? "back" : transfer.zone,
+      progress: transfer.progress,
+      duration: transfer.dur,
+      handGunGap,
+      handMountGap,
+      gunMountGap,
+    };
+  };
+
+  if (CBZ.onUpdate) CBZ.onUpdate(37, function (dt) {
     const ch = CBZ.playerChar;
     if (!ch || !ch.body) return;
     const g = CBZ.game;
     // survival/battle-royale keeps its own loadout drama; jail + city show steel.
     const show = g && (g.mode === "city" || g.mode === "escape") && !(CBZ.player && CBZ.player.dead);
     if (!show) {
+      endTransfer();
       if (mounts.back.prop) mounts.back.prop.visible = false;
       if (mounts.back2.prop) mounts.back2.prop.visible = false;
       if (mounts.hip.prop) mounts.hip.prop.visible = false;
@@ -145,6 +306,10 @@
     const heldId = armed ? CBZ.currentWeaponId : null;
     const stow = pickStowed(heldId);
     const mp = (CBZ.CONFIG.CHAR_WEAPON_MOUNTS !== false && CBZ.charMounts) ? CBZ.charMounts(ch) : null;
+    const rec = CBZ.weaponTransition;
+    if (mp && rec && rec.seq !== lastTransitionSeq) {
+      if (beginTransfer(rec, ch, stow, mp)) lastTransitionSeq = rec.seq;
+    }
     if (mp) {
       if (stow.back) mountTo(mounts.back, stow.back, mp.back, 0.92);
       else if (mounts.back.prop) mounts.back.prop.visible = false;
@@ -158,6 +323,12 @@
       if (mounts.back2.prop) mounts.back2.prop.visible = false;   // legacy shows one long gun only
       if (stow.hip) mountLegacy(mounts.hip, stow.hip, ch.body, placeHipLegacy);
       else if (mounts.hip.prop) mounts.hip.prop.visible = false;
+    }
+    updateTransfer(dt);
+    // The destination copy yields to the moving copy until contact. There is
+    // one gun travelling, never a static gun already on the back underneath it.
+    if (transfer && mounts[transfer.zone] && mounts[transfer.zone].prop) {
+      mounts[transfer.zone].prop.visible = false;
     }
   });
 
@@ -269,7 +440,11 @@
     }
     if (!hand.prop) return;
     if (hand.prop.parent !== socket) socket.add(hand.prop);
-    hand.prop.visible = true;
+    // During a gun-to-gun swap the outgoing piece reaches its mount before the
+    // incoming piece appears. Gameplay selection is already live, but visually
+    // this prevents two guns occupying the same hand halfway through a stow.
+    const drawingBlocked = !!(transfer && transfer.to && transfer.t < transfer.dur * 0.62);
+    hand.prop.visible = !drawingBlocked;
     hand.prop.position.set(0.02, 0.02, 0.03);
     const presenting = CBZ.tpPresenting && CBZ.tpPresenting();
     if (presenting && CBZ.camera) {

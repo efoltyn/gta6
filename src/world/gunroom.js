@@ -103,6 +103,7 @@
   const mats = {
     dark: new THREE.MeshLambertMaterial({ color: 0x161a20 }),
     black: new THREE.MeshLambertMaterial({ color: 0x080a0c }),
+    bore: new THREE.MeshLambertMaterial({ color: 0x010203 }),
     steel: new THREE.MeshLambertMaterial({ color: 0x48515c }),
     worn: new THREE.MeshLambertMaterial({ color: 0x747f8c }),
     tan: new THREE.MeshLambertMaterial({ color: 0x8b6a42 }),

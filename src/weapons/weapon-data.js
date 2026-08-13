@@ -70,6 +70,7 @@
       recenter: 0.12, rampMax: 1.5, yawWeave: 0.45,
       shake: 0.26, heat: 44, knock: 1.35, flash: 0.34,
       sfx: "shoot_pistol", tracer: 0.018, auto: false,
+      hold: { heavy: 0.08, support: 0, stance: "pistol" },
     },
     {
       id: "shotgun", key: "shotgun", label: "12G PUMP", short: "12G", slot: "long",
@@ -82,6 +83,7 @@
       shake: 0.74, heat: 64, knock: 2.45, flash: 0.70,
       sfx: "shoot_shotgun", tracer: 0.014, shellReload: true, pump: true,
       auto: false,
+      hold: { heavy: 0.38, support: 0.28, stance: "long" },
     },
     {
       id: "carbine", key: "carbine", label: "M4 CARBINE", short: "556", slot: "rifle",
@@ -93,6 +95,7 @@
       recenter: 0.18, rampMax: 1.8, yawWeave: 1.0,
       shake: 0.20, heat: 39, knock: 1.08, flash: 0.42,
       sfx: "shoot_carbine", tracer: 0.012, auto: true,
+      hold: { heavy: 0.26, support: 0.27, stance: "long" },
     },
     {
       id: "smg", key: "smg", label: "COMPACT SMG", short: "SMG", slot: "auto",
@@ -104,6 +107,7 @@
       recenter: 0.15, rampMax: 1.8, yawWeave: 1.4,
       shake: 0.17, heat: 34, knock: 0.90, flash: 0.36,
       sfx: "shoot_smg", tracer: 0.010, auto: true,
+      hold: { heavy: 0.20, support: 0.19, stance: "compact" },
     },
     {
       id: "revolver", key: "revolver", label: ".357 MAGNUM", short: "357", slot: "pistol",
@@ -115,6 +119,7 @@
       recenter: 0.14, rampMax: 1.5, yawWeave: 0.4,
       shake: 0.5, heat: 52, knock: 2.4, flash: 0.5,
       sfx: "shoot_deagle", tracer: 0.02, auto: false,   // big-bore voice (real .45 recording)
+      hold: { heavy: 0.24, support: 0, stance: "pistol" },
     },
     {
       id: "deagle", key: "deagle", label: ".50 DESERT EAGLE", short: "50AE", slot: "pistol",
@@ -126,6 +131,7 @@
       recenter: 0.15, rampMax: 1.5, yawWeave: 0.4,
       shake: 0.56, heat: 56, knock: 2.7, flash: 0.56,
       sfx: "shoot_deagle", tracer: 0.022, auto: false,  // big-bore voice (real .45 recording)
+      hold: { heavy: 0.34, support: 0, stance: "pistol" },
     },
     {
       // The status rifle: out-damages the carbine per round but handles LAZY —
@@ -140,6 +146,7 @@
       recenter: 0.2, rampMax: 1.9, yawWeave: 1.1,
       shake: 0.28, heat: 46, knock: 1.4, flash: 0.5, equip: 0.5,
       sfx: "shoot_ak47", tracer: 0.013, auto: true,   // dedicated layered voice (audio.js) owns the pitch/weight
+      hold: { heavy: 0.54, support: 0.31, stance: "long" },
     },
     {
       id: "uzi", key: "uzi", label: "MICRO UZI", short: "UZI", slot: "auto",
@@ -151,6 +158,7 @@
       recenter: 0.15, rampMax: 1.8, yawWeave: 1.5,
       shake: 0.15, heat: 30, knock: 0.7, flash: 0.3,
       sfx: "shoot_smg", tracer: 0.009, auto: true,
+      hold: { heavy: 0.12, support: 0.10, stance: "compact" },
     },
     {
       id: "sniper", key: "sniper", label: "BOLT SNIPER", short: "SNIP", slot: "rifle",
@@ -170,7 +178,7 @@
       // fired — the "real flight" feel — without making the round an actual
       // simulated projectile other systems would need to track).
       sniperDrop: { start: 90, perM: 0.0095, maxDrop: 1.6, flightPerM: 0.0011 },
-      hold: { heavy: 0.6, support: 0.24 },              // long heavy barrel, support hand well forward
+      hold: { heavy: 0.6, support: 0.36, stance: "long" }, // long heavy barrel, support hand well forward
     },
     {
       id: "lmg", key: "lmg", label: "M249 LMG", short: "LMG", slot: "auto",
@@ -185,7 +193,7 @@
       // The legs in the model are hardware, not decoration: prone or braced
       // they carry the gun, and the body rests it on them.
       bipod: true,
-      hold: { heavy: 1.0, support: 0.34 },              // 7.5 kg belt-fed — the heaviest carry in the game
+      hold: { heavy: 1.0, support: 0.46, stance: "heavy" }, // 7.5 kg belt-fed — the heaviest carry in the game
     },
     {
       id: "bazooka", key: "bazooka", label: "RPG / ROCKET LAUNCHER", short: "RPG", slot: "long",
@@ -224,7 +232,7 @@
       projSpeed: 95, projGravity: 6,
       // The tube rides the SHOULDER, so the support hand stays close to the
       // body: heavy, but with almost none of the LMG's forward reach.
-      hold: { heavy: 0.8, support: 0.10 },
+      hold: { heavy: 0.8, support: 0.10, stance: "shoulder" },
     },
     {
       id: "taser", key: "taser", label: "X26 TASER", short: "TASER", slot: "utility",
@@ -236,6 +244,7 @@
       recenter: 0.12, rampMax: 1.0, yawWeave: 0.2,
       shake: 0.12, heat: 14, knock: 0.40, flash: 0.22,
       sfx: "shoot_taser", tracer: 0.006, auto: false, nonlethal: true,
+      hold: { heavy: 0.04, support: 0, stance: "pistol" },
     },
     {
       // GRENADE LAUNCHER (owner ask): the RPG's beautiful explosion, less
@@ -267,6 +276,7 @@
       dumbfire: true, projPlain: true,
       ammoTypes: [{ id: "standard", label: "40MM HE", homing: false, speed: 42 }],
       projSpeed: 42, projGravity: 24,
+      hold: { heavy: 0.58, support: 0.29, stance: "long" },
     },
   ];
 
@@ -324,6 +334,16 @@
   CBZ.weaponInventory = CBZ.weaponInventory || [];
   CBZ.currentWeaponId = CBZ.currentWeaponId || null;
 
+  // Prison Escape owns ten physical number slots: 1 is permanently the
+  // player's empty hands, while 2..0 are a reorderable firearm loadout. Keep
+  // the mapping beside weaponInventory (the ownership truth) so the HUD, stash,
+  // keyboard and touch surfaces cannot each invent a different order.
+  const PRISON_SLOT_KEYS = Object.freeze(["2", "3", "4", "5", "6", "7", "8", "9", "0"]);
+  const prisonSlots = CBZ.prisonWeaponSlots = Array.isArray(CBZ.prisonWeaponSlots)
+    ? CBZ.prisonWeaponSlots.slice(0, PRISON_SLOT_KEYS.length)
+    : [];
+  while (prisonSlots.length < PRISON_SLOT_KEYS.length) prisonSlots.push(null);
+
   function normalizeId(id) {
     const w = CBZ.FPS_WEAPONS.find((x) => x.id === id || x.key === id);
     return w ? w.id : null;
@@ -332,6 +352,59 @@
   function weaponById(id) {
     const nid = normalizeId(id);
     return nid ? CBZ.FPS_WEAPONS.find((w) => w.id === nid) : null;
+  }
+
+  function reconcilePrisonSlots() {
+    const owned = new Set();
+    for (let i = 0; i < CBZ.weaponInventory.length; i++) {
+      const id = normalizeId(CBZ.weaponInventory[i]);
+      if (id) owned.add(id);
+    }
+    const seen = new Set();
+    for (let i = 0; i < prisonSlots.length; i++) {
+      const id = normalizeId(prisonSlots[i]);
+      if (!id || !owned.has(id) || seen.has(id)) prisonSlots[i] = null;
+      else { prisonSlots[i] = id; seen.add(id); }
+    }
+    // A new pickup becomes usable immediately, but never disturbs a player's
+    // existing arrangement. Once all nine slots are occupied, later pickups
+    // wait in the stash's UNASSIGNED row until the player chooses a home.
+    for (let i = 0; i < CBZ.weaponInventory.length; i++) {
+      const id = normalizeId(CBZ.weaponInventory[i]);
+      if (!id || seen.has(id)) continue;
+      const free = prisonSlots.indexOf(null);
+      if (free < 0) break;
+      prisonSlots[free] = id;
+      seen.add(id);
+    }
+    return prisonSlots;
+  }
+
+  function assignPrisonWeaponSlot(slot, id) {
+    slot = slot | 0;
+    if (slot < 0 || slot >= prisonSlots.length) return false;
+    const nid = id == null ? null : normalizeId(id);
+    if (nid && CBZ.weaponInventory.indexOf(nid) < 0) return false;
+    reconcilePrisonSlots();
+    const from = nid ? prisonSlots.indexOf(nid) : -1;
+    const displaced = prisonSlots[slot] || null;
+    if (from === slot) return true;
+    prisonSlots[slot] = nid;
+    if (from >= 0) prisonSlots[from] = displaced;
+    return true;
+  }
+
+  function swapPrisonWeaponSlots(a, b) {
+    a |= 0; b |= 0;
+    if (a < 0 || a >= prisonSlots.length || b < 0 || b >= prisonSlots.length) return false;
+    reconcilePrisonSlots();
+    const t = prisonSlots[a]; prisonSlots[a] = prisonSlots[b]; prisonSlots[b] = t;
+    return true;
+  }
+
+  function prisonUnslottedWeapons() {
+    reconcilePrisonSlots();
+    return CBZ.weaponInventory.filter((id) => prisonSlots.indexOf(normalizeId(id)) < 0);
   }
 
   function syncLegacyGunItem() {
@@ -349,6 +422,7 @@
     if (!nid) return false;
     const first = CBZ.weaponInventory.indexOf(nid) < 0;
     if (first) CBZ.weaponInventory.push(nid);
+    reconcilePrisonSlots();
     if (opts.select !== false || !CBZ.currentWeaponId) CBZ.currentWeaponId = nid;
     syncLegacyGunItem();
     if (CBZ.onWeaponInventoryChanged) CBZ.onWeaponInventoryChanged(nid, first);
@@ -379,6 +453,7 @@
   function resetWeaponInventory(role) {
     CBZ.weaponInventory.length = 0;
     CBZ.currentWeaponId = null;
+    prisonSlots.fill(null);
     if (role === "cop") {
       unlockWeapon("sidearm", { select: true });
       unlockWeapon("taser", { select: false });
@@ -386,6 +461,23 @@
   }
 
   CBZ.weaponById = weaponById;
+  CBZ.PRISON_WEAPON_SLOT_KEYS = PRISON_SLOT_KEYS;
+  CBZ.prisonWeaponLoadout = reconcilePrisonSlots;
+  CBZ.assignPrisonWeaponSlot = assignPrisonWeaponSlot;
+  CBZ.swapPrisonWeaponSlots = swapPrisonWeaponSlots;
+  CBZ.prisonUnslottedWeapons = prisonUnslottedWeapons;
+  CBZ.prisonWeaponLoadoutAudit = function () {
+    const slots = reconcilePrisonSlots().slice();
+    const assigned = slots.filter(Boolean);
+    return {
+      fistsKey: "1",
+      gunKeys: PRISON_SLOT_KEYS.join(""),
+      slots,
+      assigned: assigned.length,
+      unique: new Set(assigned).size,
+      unassigned: prisonUnslottedWeapons().length,
+    };
+  };
   CBZ.unlockWeapon = unlockWeapon;
   CBZ.hasWeapon = hasWeapon;
   CBZ.hasAnyWeapon = hasAnyWeapon;

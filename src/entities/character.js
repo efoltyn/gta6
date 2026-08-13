@@ -1133,6 +1133,45 @@
       roll: Math.max(-0.48, Math.min(0.48, inward)),
     };
   }
+  const _reachMountGrip = new THREE.Vector3();
+  // The holster target already exists as a live rig mount. Solve the same
+  // shoulder/elbow chain used by mantle grips against that point instead of
+  // guessing one pose for every torso and arm length. Because the mount and
+  // shoulder are siblings under `body`, body lean/bob cancels out naturally.
+  function reachMountArmSolve(ch, target, arm) {
+    const P = ch && ch.profile;
+    const part = ch && ch.parts && (arm === "l" ? ch.parts.la : ch.parts.ra);
+    if (!P || !part || !target || !target.parent || !ch.body || !ch.group ||
+        typeof target.getWorldPosition !== "function" || typeof ch.body.worldToLocal !== "function") return null;
+    ch.group.updateMatrixWorld(true);
+    target.getWorldPosition(_reachMountGrip);
+    ch.body.worldToLocal(_reachMountGrip);
+    const dx = _reachMountGrip.x - part.position.x;
+    let dy = _reachMountGrip.y - part.position.y;
+    let dz = _reachMountGrip.z - part.position.z;
+    const l1 = Math.max(0.12, P.armUp - 0.02);
+    const l2 = Math.max(0.12, P.armLo + 0.01);
+    let reach = Math.hypot(dy, dz);
+    const maxReach = (l1 + l2) * 0.965;
+    const minReach = Math.abs(l1 - l2) + 0.035;
+    if (reach > maxReach) {
+      const k = maxReach / reach;
+      dy *= k; dz *= k; reach = maxReach;
+    } else if (reach < minReach) {
+      const k = minReach / Math.max(0.001, reach);
+      dy *= k; dz *= k; reach = minReach;
+    }
+    const elbow = Math.acos(Math.max(-1, Math.min(1,
+      (reach * reach - l1 * l1 - l2 * l2) / (2 * l1 * l2))));
+    const fromDown = Math.atan2(dz, -dy);
+    const shoulder = fromDown - Math.atan2(l2 * Math.sin(elbow), l1 + l2 * Math.cos(elbow));
+    const lateral = Math.atan2(dx, Math.max(0.16, reach));
+    return {
+      shoulder: -shoulder,
+      elbow: -elbow,
+      roll: Math.max(-0.72, Math.min(0.72, lateral)),
+    };
+  }
 
   // The torso and legs are siblings authored from the feet, but anatomically
   // meet at this socket. Every pose writer may rotate the torso; these two
@@ -2684,7 +2723,43 @@
       const rsgn = rleft ? 1 : -1;
       const high = ch.reachHigh || 0;               // 0 = hip pocket, 1 = collar
       const across = ch.reachSide == null ? -1 : ch.reachSide;
-      if (rarm) {
+      const mountReach = (ch.reachKind === "holster-back" || ch.reachKind === "holster-hip")
+        ? reachMountArmSolve(ch, ch.reachTarget, ch.reachArm) : null;
+      if (rarm && mountReach) {
+        // Exact target solve for this body's real arm lengths and live mount.
+        // The gun remains welded to this hand during the extend/dwell phase.
+        rarm.rotation.x = mountReach.shoulder * renv;
+        rarm.rotation.y = 0;
+        rarm.rotation.z = mountReach.roll * renv;
+        rarm.position.z = 0;
+        if (rarmJ) rarmJ.rotation.x = mountReach.elbow * renv;
+        if (rother && ch.reachKind === "holster-back") {
+          rother.rotation.x = -0.24 * renv;
+          rother.rotation.z = -rsgn * 0.12 * renv;
+        }
+      } else if (rarm && ch.reachKind === "holster-back") {
+        // Reach BEHIND and over the shoulder while the weapon prop travels to
+        // the live back mount. Positive X swings this rig's arm backward;
+        // positive Z lifts the right elbow away from the ribs so the hand does
+        // not pass through the torso on its way to the sling.
+        rarm.rotation.x = 1.18 * renv;
+        rarm.rotation.y = -0.46 * renv;
+        rarm.rotation.z = -0.78 * renv;
+        rarm.position.z = -0.10 * renv;
+        if (rarmJ) rarmJ.rotation.x = -1.68 * renv;
+        if (rother) {
+          rother.rotation.x = -0.24 * renv;
+          rother.rotation.z = -rsgn * 0.12 * renv;
+        }
+      } else if (rarm && ch.reachKind === "holster-hip") {
+        // The hand falls back and out to the actual right-hip mount. This is a
+        // shorter, lower action than a back sling and keeps the elbow close.
+        rarm.rotation.x = 0.46 * renv;
+        rarm.rotation.y = -0.12 * renv;
+        rarm.rotation.z = -0.34 * renv;
+        rarm.position.z = -0.05 * renv;
+        if (rarmJ) rarmJ.rotation.x = -0.62 * renv;
+      } else if (rarm) {
         // upper arm swings forward and slightly down; the elbow stays soft so
         // the hand hangs at pocket height instead of pointing like a salute
         rarm.rotation.x = (-0.62 - 0.55 * high) * renv;
@@ -2692,9 +2767,11 @@
         rarm.rotation.z = rsgn * (0.20 - 0.26 * high) * renv;
         rarm.position.z = 0.16 * renv;
       }
-      if (rarmJ) rarmJ.rotation.x = -(0.85 - 0.30 * high) * renv;
+      if (rarmJ && ch.reachKind !== "holster-back" && ch.reachKind !== "holster-hip") {
+        rarmJ.rotation.x = -(0.85 - 0.30 * high) * renv;
+      }
       // the OTHER hand drifts up and out — the distraction, the friendly touch
-      if (rother) {
+      if (rother && ch.reachKind !== "holster-back") {
         rother.rotation.x = -0.34 * renv;
         rother.rotation.z = -rsgn * 0.22 * renv;
       }
@@ -2969,9 +3046,9 @@
                LEFT shoulder), staggered 0.06 lower and 0.06 further out so
                two stowed rifles read as a clean X with no z-fighting where
                they cross.
-       hip   — pistol holster ON the right hip: muzzle down with a ~12°
+       hip   — pistol holster ON the semantic right hip: muzzle down with a ~12°
                forward cant, grip to the rear, outboard of the thigh
-               (x .46 > leg span .40) so it never buries in the leg.
+               (|x| .46 > leg span .40) so it never buries in the leg.
      Consumers must OVERWRITE the hand-mount transform CBZ.buildActorWeapon
      ships on its props: prop.position.set(0,0,0); prop.rotation.set(0,0,0);
      then their own scale. Prop convention: barrel -Z, rail +Y, grip -Y;
@@ -2999,7 +3076,10 @@
     rig._mounts = {
       back:  mk(-0.14 * s, 1.44 * s, -0.36 * s, 1.571, -0.698, -1.271),
       back2: mk( 0.14 * s, 1.38 * s, -0.42 * s, 1.571,  0.698, -1.271),
-      hip:   mk( 0.46 * s, 1.05 * s, -0.20 * s, -1.781, -0.26, Math.PI),
+      // The shoulder roots were corrected to semantic right = local -X in
+      // makeCharacter. Keep the holster on that SAME side so a right-hand
+      // stow does not cross the pelvis toward the obsolete +X hip.
+      hip:   mk(-0.46 * s, 1.05 * s, -0.20 * s, -1.781, 0.26, Math.PI),
     };
     return rig._mounts;
   }
@@ -3385,7 +3465,9 @@
      Returns the duration so a caller can time a consequence to the DWELL —
      the grab lands at ~55% of it, not on the first frame.
        opts.arm "l"|"r"  · opts.dur seconds · opts.side -1 across / +1 out
-       opts.high 0 hip .. 1 collar · opts.amt 0..1 commitment
+       opts.high 0 hip .. 1 collar · opts.amt 0..1 commitment · opts.kind for
+       a registered physical reach such as holster-back / holster-hip
+       opts.target live Object3D mount for a physical hand-to-target solve
      No-ops on a rig that is mid-strike or down, so a lift can never cancel a
      punch and a KO'd body never reaches for anything. */
   CBZ.charReach = function (ch, opts) {
@@ -3399,6 +3481,8 @@
     ch.reachSide = opts.side == null ? -1 : +opts.side;
     ch.reachHigh = Math.max(0, Math.min(1, +opts.high || 0));
     ch.reachAmt = opts.amt == null ? 1 : Math.max(0, Math.min(1, +opts.amt));
+    ch.reachKind = opts.kind || "";
+    ch.reachTarget = opts.target && opts.target.isObject3D ? opts.target : null;
     return dur;
   };
   CBZ.animChar = animChar;
