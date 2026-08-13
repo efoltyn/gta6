@@ -760,22 +760,32 @@ CBZ.studio.need(NEED).then(function () {
      and they start the battle interpenetrating. Measured on `gov`: one
      overlapping pair at t=0, which the sweep counts as a fault and should.
      Claimed points are remembered for the length of one build. */
+  /* AND THE CLAIM IS THE BODY'S OWN SIZE. A flat 1.15 m is the right answer
+     for a man and a fiction for a bull elephant: an army of them spawned
+     INSIDE one another and spent the opening seconds of the battle shoving
+     itself apart. Each claim carries the radius that took it, so a pair only
+     has to clear what the two of them actually occupy. */
   const _claim = [];
-  const CLAIM_R2 = 1.15 * 1.15;
-  function crowdedAt(x, z) {
+  const CLAIM_R = 0.575;         // a man's half of the old 1.15 m pair
+  function crowdedAt(x, z, r) {
     for (let i = 0; i < _claim.length; i++) {
-      const dx = x - _claim[i].x, dz = z - _claim[i].z;
-      if (dx * dx + dz * dz < CLAIM_R2) return true;
+      const c = _claim[i];
+      const dx = x - c.x, dz = z - c.z, need = r + c.r;
+      if (dx * dx + dz * dz < need * need) return true;
     }
     return false;
   }
-  function freeSpot(x, z) {
-    const take = function (px, pz) { _claim.push({ x: px, z: pz }); return { x: px, z: pz }; };
-    if (!blockedAt(x, z) && !crowdedAt(x, z)) return take(x, z);
-    for (let r = 1; r < 40; r++) {
-      const a = r * 2.399963229728653, d = r * 1.35;      // golden angle
+  function freeSpot(x, z, r) {
+    r = r || CLAIM_R;
+    const take = function (px, pz) { _claim.push({ x: px, z: pz, r: r }); return { x: px, z: pz }; };
+    if (!blockedAt(x, z) && !crowdedAt(x, z, r)) return take(x, z);
+    // the search walks outward in the body's OWN units, so a big animal is
+    // not condemned to test forty man-sized rings it can never fit in
+    const step = 1.35 * Math.max(1, r / CLAIM_R * 0.72);
+    for (let k = 1; k < 40; k++) {
+      const a = k * 2.399963229728653, d = k * step;      // golden angle
       const px = x + Math.cos(a) * d, pz = z + Math.sin(a) * d;
-      if (!blockedAt(px, pz) && !crowdedAt(px, pz)) return take(px, pz);
+      if (!blockedAt(px, pz) && !crowdedAt(px, pz, r)) return take(px, pz);
     }
     return take(x, z);
   }
@@ -903,10 +913,10 @@ CBZ.studio.need(NEED).then(function () {
       id: id, gap: gap, cx: cx, cz: cz, groundAt: groundAt,
       // team spawn: down the streets where there are streets, ranked columns
       // where there are not, and in both cases OUT of the geometry
-      spawnAt: function (team, i) {
+      spawnAt: function (team, i, r) {
         const s = spawners && spawners[team];
         const p = (s && s(i)) || grid(team, i);
-        return freeSpot(p.x, p.z);
+        return freeSpot(p.x, p.z, r);
       },
     };
   }
@@ -1017,14 +1027,26 @@ CBZ.studio.need(NEED).then(function () {
     // measure the body once: separation radius, aim heights, the collar seat
     const bb = new THREE.Box3().setFromObject(group);
     const H = Math.max(0.5, bb.max.y - bb.min.y);
-    const wide = Math.max(0.4, Math.min(bb.max.x - bb.min.x, (bb.max.z - bb.min.z) * 1.6));
+    /* THE FOOTPRINT AN ANIMAL ACTUALLY OCCUPIES.
+
+       The first pass took 0.3 of the SMALLER of (length, 1.6 x width) and
+       capped it at 1.1 m, which asked a 2.2 m dog to keep 0.84 m from the
+       next dog and a lion 1.26 m — so a pack closed up and drew straight
+       through itself, exactly as reported. A body's separation circle has to
+       account for the length as well as the beam, because an animal is long
+       and it turns: half the mean of the two spans is the honest radius for a
+       circle standing in for a body that can face any way. */
+    const spanX = Math.max(0.3, bb.max.x - bb.min.x);     // nose to tail (+X authored)
+    const spanZ = Math.max(0.3, bb.max.z - bb.min.z);     // across the shoulders
+    const rad = Math.min(3.4, Math.max(0.45, (spanX + spanZ) * 0.28));
+    noteBodyRadius(rad);
     // the coat stays the animal's own — a thin team collar says whose side,
     // seated on the neck line the box measured rather than a guessed height
-    const collar = new THREE.Mesh(CBZ.boxGeom(0.18 / s, 0.12 / s, Math.min(0.9, (bb.max.z - bb.min.z) * 0.85) / s),
+    const collar = new THREE.Mesh(CBZ.boxGeom(0.18 / s, 0.12 / s, Math.min(0.9, spanZ * 0.85) / s),
       CBZ.cmat(T.color));
     collar.position.set((bb.max.x * 0.55) / s, (H * 0.7) / s, 0);
     group.add(collar);
-    const at = MAP.spawnAt(teamId, i);
+    const at = MAP.spawnAt(teamId, i, rad);
     group.position.set(at.x, MAP.groundAt(at.x, at.z), at.z);
     CBZ.scene.add(group);
     const tn = beastTuning(sp);
@@ -1036,12 +1058,15 @@ CBZ.studio.need(NEED).then(function () {
       hp: bench ? 1e9 : sp.hp || 40, maxHp: bench ? 1e9 : sp.hp || 40,
       armed: false, weapon: null, launcher: false, mag: 0, magSize: 0,
       cool: 0, reloadT: 0,
-      rad: Math.max(0.42, Math.min(1.1, wide * 0.3)),
-      // reach must CLEAR the men's own melee circle (IQ.melee orbits at
-      // ~1.8 m) or the beast idles at the boundary of its own strike gate,
-      // approaching by centimetres while the brawler dances — measured as
-      // the 30-gorillas-lose-to-30-thugs run before this line
-      reach: 1.2 + s * 1.1,
+      rad: rad,
+      /* REACH IS A DISTANCE BETWEEN CENTRES, so it has to clear whatever the
+         separation pass will hold this body away from — the men's melee
+         circle (IQ.melee orbits at ~1.8 m; measured as the run where thirty
+         gorillas lost to thirty thugs by idling at the edge of their own
+         strike gate) AND, now that bodies keep their real footprints, a
+         second animal of its own kind. Two lions holding 2.6 m apart with a
+         2.47 m reach would have circled each other forever. */
+      reach: Math.max(1.2 + s * 1.1, rad * 2 + 0.55),
       eyeH: Math.max(0.5, H * 0.8), losY: Math.max(0.35, H * 0.55),
       aimY: Math.max(0.3, H * 0.5), headY: Math.max(0.45, H * 0.8),
       tgt: null, losBadT: 0, slot: "hold", thinkAt: simT + lcg() * 0.3, lastThink: simT,
@@ -1063,10 +1088,33 @@ CBZ.studio.need(NEED).then(function () {
     }
     return m;
   }
+  /* HOW CLOSE TWO BODIES CAN GET, so a fist can always land on what it is
+     standing next to. The separation pass holds a pair `radA + radB` apart;
+     an arm swung at a fixed 1.9 m connects with a man and whiffs forever at
+     a bear, which is not a difficulty setting, it is a bug. Man on man this
+     answers 1.85 — the number it always used — and it grows with whatever is
+     actually in front of him. */
+  function meleeReach(a, b) {
+    return 0.95 + (a.rad || 0.45) + (b.rad || 0.45);
+  }
   // one mover for the strike bubble: creature_combat decides where, this page
   // answers to its own walls and ground — the exact locomotion seam the file
   // published for water, used here for a city
   function beastMove(a, dx, dz, step) {
+    /* AND IT DOES NOT WALK INTO THE BODY IT IS BITING. creature_combat closes
+       to 70% of the reach it was handed — right for a driver that cannot know
+       how wide either party is, and a guaranteed overlap once both parties are
+       lions: 0.7 x 3.13 m is 2.19 m, and two lions owe each other 2.58 m. The
+       locomotion seam is the honest place to say so, because the seam exists
+       exactly so the caller can own what "moving" means in its own world. */
+    const t = a.tgt;
+    if (t && !t.dead) {
+      const cx = t.pos.x - a.pos.x, cz = t.pos.z - a.pos.z;
+      const d = Math.hypot(cx, cz);
+      const keep = (a.rad || 0.5) + (t.rad || 0.45);
+      if (d - step < keep) step = Math.max(0, d - keep);
+    }
+    if (step <= 0) return;
     a.pos.x += dx * step;
     a.pos.z += dz * step;
     CBZ.micro.resolveCircle(a.pos, a.rad || 0.6, a.pos.y, 1.8);
@@ -1286,7 +1334,27 @@ CBZ.studio.need(NEED).then(function () {
      stale body grid is exactly the thing that lets two men swap cells and
      stop seeing each other. */
   const SEP = 0.9;               // centre-to-centre clearance two men keep
-  const FINE = 2.4;              // cell: > SEP, so a 3x3 sweep is complete
+  /* AND THE CELL FOLLOWS THE BIGGEST BODY ON THE FIELD.
+
+     2.4 m is "wider than two men", which is what makes the four-neighbour fan
+     below a COMPLETE sweep: two bodies further apart than one cell can never
+     be touching, so they never need comparing. The moment an army is lions
+     that arithmetic breaks — a lion pair owes each other 2.6 m of clearance,
+     more than the cell, so the pairs that mattered most were exactly the ones
+     the sweep was allowed to skip. Measured on 120 lions v 400 dogs before
+     this: 32 overlapping pairs at peak, the worst pair 84% inside each other.
+
+     So the cell is sized off the widest body that has actually spawned, and
+     the completeness bound holds by construction: FINE > 2 * maxRadius >=
+     every pair clearance. An army of men never grows it (the max stays 0.45)
+     and pays nothing. */
+  let FINE = 2.4;
+  let bodyRadMax = 0.45;
+  function noteBodyRadius(r) {
+    if (!(r > bodyRadMax)) return;
+    bodyRadMax = r;
+    FINE = Math.max(2.4, r * 2 + 0.25);
+  }
   const fine = new Map();
   function rebuildFine() {
     fine.clear();
@@ -1302,8 +1370,10 @@ CBZ.studio.need(NEED).then(function () {
   // the four cells that make each pair appear once: same cell (j > i), then
   // E, NE, N, NW. Anything closer than one cell is inside this fan.
   const FAN = [[1, 0], [1, 1], [0, 1], [-1, 1]];
+  let sepFixed = 0;
   function separatePass(k) {
-    if (SEP_OLD) return separateOld(k);
+    if (SEP_OLD) { separateOld(k); return 0; }
+    sepFixed = 0;
     fine.forEach(function (a, key) {
       for (let i = 0; i < a.length; i++) {
         const m = a[i];
@@ -1317,6 +1387,32 @@ CBZ.studio.need(NEED).then(function () {
         }
       }
     });
+    return sepFixed;
+  }
+  /* ONE SWEEP IS NOT A SOLVER.
+
+     A single relaxation pass fixes any pair it looks at — and then the next
+     pair moves one of them back. In open order that is invisible (a man's
+     residual is under a shoulder width); in a crush of four hundred dogs
+     converging on a pride it is not, because every body is inside several
+     constraints at once and each correction partly cancels the last. The
+     probe proved it was this and not a hole in the grid: instrumented with
+     the grid's OWN sweep, the survivors after one pass matched the O(n^2)
+     count exactly, 33 for 33 — nothing was being missed, everything was
+     being undone.
+
+     So the pass runs until it converges, up to three sweeps, rebuilding the
+     body grid between them because the bodies have moved. It stops the
+     instant a sweep corrects nothing, so open order still costs exactly one
+     sweep, and a battle of men — whose radii never grow past 0.45 — never
+     enters the loop at all. */
+  function separateSolve(k) {
+    const fixed = separatePass(k);
+    if (!fixed || bodyRadMax <= 0.5) return;
+    for (let it = 0; it < 2; it++) {
+      rebuildFine();
+      if (!separatePass(k)) return;
+    }
   }
   function push2(m, o, k) {
     if (o.dead || o === m) return;
@@ -1343,6 +1439,7 @@ CBZ.studio.need(NEED).then(function () {
     const push = (clr - d) * 0.5 * (d < clr * 0.69 ? 1 : k);
     m.pos.x -= ux * push; m.pos.z -= uz * push;
     o.pos.x += ux * push; o.pos.z += uz * push;
+    sepFixed++;
     // a shove is a move, and a move has to answer to the walls. Marking them
     // makes the NEXT step resolve them instead of every one of them now: a
     // body squeezed into a crate is invisible to every line of sight, so it
@@ -1371,6 +1468,39 @@ CBZ.studio.need(NEED).then(function () {
         }
       }
     });
+  }
+  /* DID THE PASS ACTUALLY DO ITS JOB? The probe's overlap count is O(n^2) and
+     deliberately shares none of the grid's assumptions, which makes it honest
+     about the RESULT and silent about the CAUSE: a pair can survive because
+     the pass never visited it (a grid that is not complete) or because it was
+     visited and something moved it back. This counts the survivors using the
+     grid's OWN sweep immediately after the pass — so a residual of zero here
+     beside a non-zero probe means the grid is missing pairs, and a residual
+     that matches the probe means the pass is being fought. */
+  let sepResid = 0;
+  function sepResidual() {
+    let n = 0;
+    fine.forEach(function (a) {
+      for (let i = 0; i < a.length; i++) {
+        const m = a[i];
+        if (m.dead) continue;
+        const cx = Math.floor(m.pos.x / FINE), cz = Math.floor(m.pos.z / FINE);
+        for (let j = i + 1; j < a.length; j++) n += tooClose(m, a[j]);
+        for (let f = 0; f < 4; f++) {
+          const b = fine.get(gridKey(cx + FAN[f][0], cz + FAN[f][1]));
+          if (!b) continue;
+          for (let j = 0; j < b.length; j++) n += tooClose(m, b[j]);
+        }
+      }
+    });
+    return n;
+  }
+  function tooClose(m, o) {
+    if (o.dead || o === m) return 0;
+    if (Math.abs(m.pos.y - o.pos.y) >= 1.8) return 0;
+    const need = 0.69 * ((m.rad || 0.45) + (o.rad || 0.45));
+    const dx = o.pos.x - m.pos.x, dz = o.pos.z - m.pos.z;
+    return (dx * dx + dz * dz) < need * need ? 1 : 0;
   }
   // NEIGHBOURS, for anything that needs to ask about bodies rather than push
   // them: the fire-discipline lane test, and the director.
@@ -1980,6 +2110,9 @@ CBZ.studio.need(NEED).then(function () {
       const j = m.hunt ? 0 : 14;      // a hunt marches STRAIGHT at them
       m.target.set(com.x + (lcg() - 0.5) * j, 0, com.z + (lcg() - 0.5) * j);
     }
+    // a pack marching in also spreads: the column-follow above is a MAN's
+    // formation, and animals that ignore it would otherwise walk in a stack
+    if (m.beast) spreadGoal(m);
     m.slot = "march";
   }
   /* THE WALL RULE — the fix this wave is actually for. A combat goal is only
@@ -2005,6 +2138,36 @@ CBZ.studio.need(NEED).then(function () {
       m.target.x += ((m.i % 5) - 2) * 0.8;
       m.target.z += (((m.i * 7) % 5) - 2) * 0.8;
     }
+  }
+  /* A CHARGE IS NOT A QUEUE.
+
+     The men have had a goal-level anti-clump since the first build: after
+     combat_iq picks a spot, the goal is pushed off whichever mates are
+     already standing near it, so two riflemen are never sent to the same
+     metre of street. The beasts had NOTHING — every lion in the pride was
+     steered at the same enemy body, so a hundred goals stacked on one point
+     and the separation pass spent every frame shoving apart bodies that the
+     steering shoved straight back together. Measured on 120 lions v 400 dogs:
+     70 overlapping pairs at peak, and the probe named them for what they were
+     — same team, both charging, mostly not even fighting anybody yet.
+
+     Same rule as the men's, in the pair's own units: two lions need more room
+     than two dogs, and the fine grid already knows who is nearby. */
+  const _bn = [];
+  function spreadGoal(m) {
+    const reach = (m.rad + bodyRadMax) * 1.3;
+    const a = fineNear(m.target.x, m.target.z, reach, _bn);
+    let ox = 0, oz = 0, n = 0;
+    for (let i = 0; i < a.length && n < 5; i++) {
+      const o = a[i];
+      if (o === m || o.dead || o.team !== m.team) continue;
+      const want = (m.rad + (o.rad || 0.45)) * 1.1;
+      const dx = m.target.x - o.pos.x, dz = m.target.z - o.pos.z;
+      const d = Math.hypot(dx, dz);
+      if (d > want || d < 0.001) continue;
+      ox += (dx / d) * (want - d); oz += (dz / d) * (want - d); n++;
+    }
+    if (n) { m.target.x += ox; m.target.z += oz; }
   }
   // the beast's slow tick: pick the fight, close on it, surround it. The
   // strike itself is creature_combat's, in the bubble stepMan owns.
@@ -2036,17 +2199,35 @@ CBZ.studio.need(NEED).then(function () {
     } else m.losBadT = 0;
     const d = Math.hypot(tgt.pos.x - m.pos.x, tgt.pos.z - m.pos.z);
     if (d < 14) {
-      // THE SURROUND: a pack does not queue single file behind the prey.
-      // Each pack index takes a bearing around the mark — the same slot idea
-      // the gunmen's fire arcs use, at claw range.
-      const slot = ((m.i % 7) - 3) * 0.5;
+      /* THE SURROUND: a pack does not queue single file behind the prey.
+         Each pack index takes a bearing around the mark — the same slot idea
+         the gunmen's fire arcs use, at claw range.
+
+         The ring is the two BODIES' own sizes, not a fraction of the reach.
+         Sizing it off reach put every attacker inside the clearance the
+         separation pass was simultaneously trying to keep them at, so the two
+         rules fought each other and the pack shimmered through itself — 25 of
+         the 32 overlapping pairs in the lions-and-dogs measurement were on a
+         surround ring. Twelve bearings around the WHOLE circle, too: seven
+         slots across 172 degrees left the far side of the prey empty. */
+      /* AND THE RING HAS A CAPACITY. One ring at touching distance holds
+         2*pi*r / (bodies wide) animals and no more — for dogs on a lion that
+         is eight — so when four hundred dogs pick the same lion, the ring
+         itself was ordering three hundred of them to stand inside each other.
+         Twelve bearings on THREE concentric rings, assigned off the animal's
+         own stable index: the front rank bites, the ranks behind wait their
+         turn at a body's distance back, and a pack reads as a pack closing in
+         rather than a single pile. */
+      const slot = (m.i % 12) * (Math.PI / 6);
+      const ringN = (((m.i / 12) | 0) % 3);
       const base = Math.atan2(m.pos.x - tgt.pos.x, m.pos.z - tgt.pos.z) + slot;
-      const r = Math.max(m.reach * 0.55, 0.7);
+      const r = m.rad + (tgt.rad || 0.45) + 0.12 + ringN * m.rad * 1.9;
       m.target.set(tgt.pos.x + Math.sin(base) * r, 0, tgt.pos.z + Math.cos(base) * r);
     } else {
       m.target.set(tgt.pos.x, 0, tgt.pos.z);
       steerAroundWalls(m);
     }
+    spreadGoal(m);
     m.slot = "push";
   }
 
@@ -2119,7 +2300,7 @@ CBZ.studio.need(NEED).then(function () {
       // an unarmed man has one range: his arms. Close on the mark; inside it
       // IQ.melee (stepMan) owns the footwork, the guard and the swing.
       const d = Math.hypot(tgt.pos.x - m.pos.x, tgt.pos.z - m.pos.z);
-      if (d > 2.2) {
+      if (d > meleeReach(m, tgt)) {
         m.target.set(tgt.pos.x, 0, tgt.pos.z);
         steerAroundWalls(m);
       }
@@ -2316,11 +2497,12 @@ CBZ.studio.need(NEED).then(function () {
       // guard, windup, swing — the same beat structure every brawler in the
       // city fights with. It writes m.target for the footwork; "swing" is
       // the one frame a blow lands, through the same funnel as a bullet.
-      if (dist < 3.6 && CBZ.combatIQ && CBZ.combatIQ.melee) {
+      const mr = meleeReach(m, tgt);
+      if (dist < mr * 1.9 && CBZ.combatIQ && CBZ.combatIQ.melee) {
         // `incoming` is how a brawler reads the other man's windup and gets
         // his guard up — without it two NPCs never block each other
         const st = CBZ.combatIQ.melee(m, tgt, sdt,
-          { reach: 1.9, incoming: (tgt._windup || 0) > 0 || (tgt._iqM && tgt._iqM.st === "windup") });
+          { reach: mr, incoming: (tgt._windup || 0) > 0 || (tgt._iqM && tgt._iqM.st === "windup") });
         if (st === "swing") {
           hurtMan(tgt, m.punch * (0.85 + lcg() * 0.4), { by: m });
           stats[m.team].shots++; stats[m.team].hits++;   // the ledger counts blows thrown and landed
@@ -3083,7 +3265,7 @@ CBZ.studio.need(NEED).then(function () {
         }
         for (let i = 0; i < men.length; i++) stepMan(men[i], sdt);
         rebuildFine();                       // bodies moved: the body grid is stale
-        separatePass(Math.min(0.9, sdt * 26));
+        separateSolve(Math.min(0.9, sdt * 26));
         stepRockets(sdt);
         if (AIR.on) {
           if (simT - airAimT > 3) {
@@ -3096,6 +3278,14 @@ CBZ.studio.need(NEED).then(function () {
         }
       }
     }
+
+    /* THE SOLVER'S OWN VERDICT, ONCE A FRAME. It has to sweep where the
+       bodies ARE — a residual read off the pre-push grid silently
+       under-reports and would have exonerated the pass. Once per FRAME
+       rather than per sub-step, and never during a benchmark: the benchmark
+       exists to report what this machine can really carry, and an audit that
+       only runs while you are measuring is an audit that changes the answer. */
+    if (PROBE && !bench && simDt > 0) { rebuildFine(); sepResid = sepResidual(); }
 
     // ---- render-side work at real time: gait, aim pose, camera ----
     const camP = CBZ.camera.position;
@@ -3205,7 +3395,18 @@ CBZ.studio.need(NEED).then(function () {
     }
     return QUAL.bodyW;
   }
-  const BODY_CLEAR = 0.62;      // centres closer than this are drawing through each other
+  /* OVERLAP IS A PAIR'S QUESTION, NOT A CONSTANT.
+
+     0.62 m is the number for two MEN — 0.52 m across the shoulders plus a
+     little. Applied to a lion it is meaningless and applied to an elephant it
+     is a joke: this probe reported "0 overlap" for armies of animals visibly
+     standing inside each other, because it was measuring them with a man's
+     shoulders. The threshold is now a FRACTION of the pair's own radii, and
+     the fraction is chosen so two men still resolve to exactly 0.62 —
+     0.69 * (0.45 + 0.45) — which keeps every number this probe has ever
+     reported for a man's war comparable with the ones before it. */
+  const OVERLAP_K = 0.69;
+  const BODY_CLEAR = 0.62;      // two men, for the audit line that names it
   function quality() {
     const live = [];
     for (let i = 0; i < men.length; i++) if (!men[i].dead) live.push(men[i]);
@@ -3225,7 +3426,14 @@ CBZ.studio.need(NEED).then(function () {
            real venue is FOR. */
         if (Math.abs(live[j].pos.y - live[i].pos.y) >= 1.8) continue;
         const d = Math.hypot(dx, dz);
-        if (d < BODY_CLEAR) { pairs++; if (d < worst) worst = Math.round(d * 100) / 100; }
+        const need = OVERLAP_K * ((live[i].rad || 0.45) + (live[j].rad || 0.45));
+        if (d < need) {
+          pairs++;
+          // how deep, as a FRACTION of what this pair owed each other, so a
+          // lion pair and a man pair are comparable numbers
+          const bite = Math.round((d / need) * 100) / 100;
+          if (bite < worst) worst = bite;
+        }
       }
     }
     if (pairs > QUAL.overlapPeak) QUAL.overlapPeak = pairs;
@@ -3250,6 +3458,9 @@ CBZ.studio.need(NEED).then(function () {
       overlapNow: pairs, overlapWorst: pairs ? worst : null, overlapPeak: QUAL.overlapPeak,
       embedded: embedded, embeddedEver: QUAL.embeddedEver,
       stuck: stuck, stuckPeak: QUAL.stuckSeen,
+      // the separation pass's own verdict, and the cell it was run on
+      sepResid: sepResid, fineCell: Math.round(FINE * 100) / 100,
+      radMax: Math.round(bodyRadMax * 100) / 100,
       wallSeconds: Math.round(QUAL.wallSeconds * 10) / 10,
       blindFire: QUAL.blindFire, throughMate: QUAL.throughMate, fratricide: QUAL.fratricide,
       shots: stats.red.shots + stats.blue.shots, engaged: engaged,
@@ -3342,6 +3553,37 @@ CBZ.studio.need(NEED).then(function () {
       return hs;
     },
     reinforce: function (n) { queueMen(n || 10); },
+    /* WHICH PAIRS, AND WHAT WERE THEY DOING. An overlap COUNT tells you the
+       bodies are wrong; it never tells you which rule put them there, and
+       three rules can produce the same number. This lists the live offenders
+       with the state of both parties, which is how the surround ring and the
+       strike approach were each caught. Read-only, probe-only. */
+    overlaps: function (n) {
+      const live = [];
+      for (let i = 0; i < men.length; i++) if (!men[i].dead) live.push(men[i]);
+      const out = [];
+      for (let i = 0; i < live.length && out.length < (n || 12); i++) {
+        for (let j = i + 1; j < live.length && out.length < (n || 12); j++) {
+          const a = live[i], b = live[j];
+          if (Math.abs(a.pos.y - b.pos.y) >= 1.8) continue;
+          const d = Math.hypot(b.pos.x - a.pos.x, b.pos.z - a.pos.z);
+          const need = OVERLAP_K * ((a.rad || 0.45) + (b.rad || 0.45));
+          if (d >= need) continue;
+          out.push({
+            a: a.id, b: b.id, d: Math.round(d * 100) / 100,
+            need: Math.round(need * 100) / 100,
+            same: a.team === b.team,
+            kind: (a.beast ? "beast" : "man") + "/" + (b.beast ? "beast" : "man"),
+            slotA: a.slot, slotB: b.slot,
+            striking: [(a._atkAnim >= 0), (b._atkAnim >= 0)],
+            tgtA: a.tgt && !a.tgt.dead ? a.tgt.id : null,
+            tgtB: b.tgt && !b.tgt.dead ? b.tgt.id : null,
+            sameTgt: !!(a.tgt && a.tgt === b.tgt),
+          });
+        }
+      }
+      return out;
+    },
     debugMen: function (n) {
       const out = [];
       for (let i = 0; i < men.length && out.length < (n || 4); i++) {
