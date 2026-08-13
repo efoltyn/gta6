@@ -119,6 +119,27 @@
   #nflash{position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none;z-index:55}
   #hint{position:fixed;left:calc(14px + env(safe-area-inset-left,0px));bottom:calc(14px + env(safe-area-inset-bottom,0px));
     z-index:41;font-size:10px;letter-spacing:.14em;opacity:.45;pointer-events:none;display:none;max-width:26vw;line-height:1.6}
+
+  /* ---- THE MAN ON THE LENS: who the camera is on, and how his fight is
+     going. Ammo is the reason this exists — a magazine emptying and a man
+     reloading is the beat the war is made of, and it was invisible. ---- */
+  #who{position:fixed;left:calc(14px + env(safe-area-inset-left,0px));top:calc(64px + env(safe-area-inset-top,0px));
+    z-index:41;display:none;pointer-events:none;padding:9px 12px 10px;border-radius:12px;min-width:172px;
+    background:rgba(12,14,17,.55);border:1px solid rgba(255,255,255,.12);backdrop-filter:blur(6px);
+    font-variant-numeric:tabular-nums}
+  #who.down{opacity:.55}
+  #whoN{font-size:13px;letter-spacing:.16em;font-weight:800}
+  #whoN i{font-style:normal;opacity:.5;font-weight:600;letter-spacing:.1em}
+  #whoHp{height:3px;border-radius:2px;background:rgba(255,255,255,.14);margin:6px 0 8px;overflow:hidden}
+  #whoHp s{display:block;height:100%;background:#4fbf6a;transition:width .12s linear}
+  #whoG{font-size:11px;letter-spacing:.14em;opacity:.75;display:flex;justify-content:space-between;gap:10px}
+  #whoG b{font-weight:800;opacity:.95}
+  #whoMagT{height:5px;border-radius:3px;background:rgba(255,255,255,.14);margin:5px 0 7px;overflow:hidden}
+  #whoMagT s{display:block;height:100%;background:#e8dcc0;transition:width .1s linear}
+  #whoMagT.rl s{background:#ff9a3d}
+  #whoK{font-size:11px;letter-spacing:.14em;opacity:.7}
+  #whoK b{color:#ffd08a;font-weight:800}
+  body.coarse #who{min-width:150px;padding:7px 10px 8px}
 </style>
 </head>
 <body>
@@ -194,6 +215,13 @@
 <div id="banner"></div>
 <div id="nflash"></div>
 <div id="hint"></div>
+<div id="who">
+  <div id="whoN"></div>
+  <div id="whoHp"><s></s></div>
+  <div id="whoG"><span id="whoGun"></span><b id="whoAmmo"></b></div>
+  <div id="whoMagT"><s></s></div>
+  <div id="whoK"></div>
+</div>
 
 <div id="end"><div class="in">
   <h2 id="endT">RESULT</h2>
@@ -636,6 +664,18 @@ CBZ.studio.need(NEED).then(function () {
   let started = false, over = false, simT = 0, speed = 1, lastSpeed = 1;
   let bench = null;
   const stats = { red: { kills: 0, shots: 0, hits: 0 }, blue: { kills: 0, shots: 0, hits: 0 } };
+  /* THE LEDGER, PER MAN AND PER GUN. The team totals above answer "who won";
+     they cannot answer "how is THIS man doing", which is the only question a
+     camera parked on his shoulder makes you ask. Every man carries his own
+     kills/shots/hits/reloads (see makeMan), and each gun keeps the same four
+     across everyone carrying it — so MIXED and EVERYTHING finally settle the
+     argument they were always implicitly starting. */
+  const GUNS = {};
+  function gunLedger(wid) {
+    let g = GUNS[wid];
+    if (!g) g = GUNS[wid] = { shots: 0, hits: 0, kills: 0, reloads: 0, men: 0 };
+    return g;
+  }
   const shotsRing = [];          // recent fire positions, feeds the director
   const spawnQueue = [];
   let spawnTotal = 0;
@@ -909,6 +949,7 @@ CBZ.studio.need(NEED).then(function () {
       tgt: null, losBadT: 0, slot: "hold", thinkAt: simT + lcg() * 0.3, lastThink: simT,
       dead: false, dieT: 0, dieDir: 1, animF: (i % 4),
       lastShotT: -9, sq: Math.floor(i / 10), sqSlot: i % 10,
+      kills: 0, shotsF: 0, hitsF: 0, reloads: 0,
     };
     man.target.set(at.x, 0, at.z);
     (squads[teamId][man.sq] = squads[teamId][man.sq] || []).push(man);
@@ -1006,6 +1047,7 @@ CBZ.studio.need(NEED).then(function () {
       tgt: null, losBadT: 0, slot: "hold", thinkAt: simT + lcg() * 0.3, lastThink: simT,
       dead: false, dieT: 0, dieDir: 1, animF: (i % 4),
       lastShotT: -9, sq: Math.floor(i / 10), sqSlot: i % 10,
+      kills: 0, shotsF: 0, hitsF: 0, reloads: 0,
     };
     CBZ.faceAnimalHeading(m, m.heading);
     if (CBZ.wildlifeRig) CBZ.wildlifeRig.buildGait(m);
@@ -1092,6 +1134,12 @@ CBZ.studio.need(NEED).then(function () {
     if (byT && byT !== m.team) stats[byT].kills++;
     else if (!byT) stats[m.team === "red" ? "blue" : "red"].kills++;   // blast with no author still scores the other side
     // fratricide (a bomb is a blunt tool) credits nobody
+    // and the man who did it keeps his own tally, with his gun
+    const by = imp && imp.by;
+    if (by && by.team && by.team !== m.team) {
+      by.kills = (by.kills || 0) + 1;
+      if (by.wid) gunLedger(by.wid).kills++;
+    }
     // sprawl: the rig's own death variety; the topple is ours (caller owns it)
     if (m.char && CBZ.deathPose) { try { CBZ.deathPose(m.char, m.i * 3.7 + 1.3, lcg()); } catch (e) {} }
     m.dieT = 0.0001;
@@ -1538,6 +1586,7 @@ CBZ.studio.need(NEED).then(function () {
     const w = CBZ.weaponById(m.wid);
     m.mag--; m.lastShotT = simT;
     stats[m.team].shots++;
+    m.shotsF++; gunLedger(m.wid).shots++;
     if (PROBE) {
       // both counters are asked AT THE TRIGGER and with a fresh test, because
       // a cached answer from the last think is exactly the thing being checked
@@ -1592,6 +1641,7 @@ CBZ.studio.need(NEED).then(function () {
 
     if (hit) {
       stats[m.team].hits++;
+      m.hitsF++; gunLedger(m.wid).hits++;
       if (CBZ.bodyWound && cd2 < 90 * 90) { try { CBZ.bodyWound(tgt, _v, {}); } catch (e) {} }
       // combat_iq's ladder is authored for fights against the PLAYER, whose
       // fairness cap this page has no player to need. Army-on-army trades at
@@ -1639,6 +1689,7 @@ CBZ.studio.need(NEED).then(function () {
     const w = CBZ.weaponById(m.wid);
     m.mag--; m.lastShotT = simT;
     stats[m.team].shots++;
+    m.shotsF++; gunLedger(m.wid).shots++;
     shotsRing.push({ x: m.pos.x, z: m.pos.z, t: simT, m: m });
     let from = null;
     if (camDist2(m.pos) < 150 * 150 && CBZ.actorMuzzle) from = CBZ.actorMuzzle(m, _muz);
@@ -1684,6 +1735,12 @@ CBZ.studio.need(NEED).then(function () {
         CBZ.studio.boom({ x: r.pos.x, y: Math.max(r.pos.y, MAP.groundAt(r.pos.x, r.pos.z) + 0.6), z: r.pos.z }, {
           radius: r.w.blastRadius || 13, power: (r.w.blastPower || 1.9) * 0.55,
           structural: MAP.id !== "arena" && spawnTotal < 700,
+          // THE MAN WHO FIRED IT. blastWorldActors has forwarded `opts.by` to
+          // every hurt call since it was written; this page simply never told
+          // it whose rocket that was, so a launcher crew's kills credited
+          // nobody — measured on an EVERYTHING roster where the bazooka ended
+          // the battle and finished the ledger with 0 kills against its name.
+          by: r.by,
         });
       }
     }
@@ -2267,6 +2324,7 @@ CBZ.studio.need(NEED).then(function () {
         if (st === "swing") {
           hurtMan(tgt, m.punch * (0.85 + lcg() * 0.4), { by: m });
           stats[m.team].shots++; stats[m.team].hits++;   // the ledger counts blows thrown and landed
+          m.shotsF++; m.hitsF++; gunLedger("fists").shots++; gunLedger("fists").hits++;
         }
       }
       return;
@@ -2275,7 +2333,7 @@ CBZ.studio.need(NEED).then(function () {
       if (m.cool <= 0 && m.sees && dist > 16 && dist < 95) {
         const w = CBZ.weaponById(m.wid);
         fireRocket(m, tgt);
-        if (m.mag <= 0) { m.reloadT = w.reloadTime || w.reload || 2; m.mag = 0; }
+        if (m.mag <= 0) { m.reloadT = w.reloadTime || w.reload || 2; m.mag = 0; m.reloads++; gunLedger(m.wid).reloads++; }
         m.cool = (w.fireDelay || w.interval || 1.2) + 0.6 + lcg() * 0.8;
       }
       return;
@@ -2308,6 +2366,7 @@ CBZ.studio.need(NEED).then(function () {
     fireShot(m, tgt, r);
     if (m.mag <= 0) {
       m.reloadT = (w && (w.reloadTime || w.reload)) || 1.6;
+      m.reloads++; gunLedger(m.wid).reloads++;
       const dCam = Math.sqrt(camDist2(m.pos));
       if (dCam < 60 && CBZ.audioManifest && CBZ.audioManifest.effects && CBZ.audioManifest.effects.reload) {
         try { CBZ.sfx("reload", { dist: dCam, ghost: true }); } catch (e) {}
@@ -2325,6 +2384,7 @@ CBZ.studio.need(NEED).then(function () {
     focus: V(), yaw: 0.9, pitch: 0.62, dist: 64,
     wFocus: V(), wYaw: 0.9, wPitch: 0.62, wDist: 64,
     followM: null, cutAt: 0, shot: "crane", craneSpin: 0.05,
+    followTeam: "red", holdT: 0, reptT: 0,
   };
   /* THE CAMERA DOES NOT GO THROUGH A WALL.
 
@@ -2392,38 +2452,198 @@ CBZ.studio.need(NEED).then(function () {
     }
     return best;
   }
-  function directorCut() {
-    cam.cutAt = simT + 5.5 + lcg() * 3.5;
-    const hs = hotspot();
-    cam.shot = lcg() < 0.45 && hottestMan() ? "shoulder" : "crane";
-    if (cam.shot === "shoulder") {
-      cam.followM = hottestMan();
-    } else if (hs) {
-      cam.wFocus.set(hs.x, MAP.groundAt(hs.x, hs.z), hs.z);
-      cam.wYaw = lcg() * Math.PI * 2;
-      cam.wPitch = 0.4 + lcg() * 0.5;
-      cam.wDist = 26 + lcg() * 46;
-      cam.craneSpin = (lcg() < 0.5 ? -1 : 1) * (0.03 + lcg() * 0.05);
+  /* ============================================================ THE POINT MAN
+     THE CAMERA WAS RIDING THE BACK OF THE ARMY.
+
+     "Whoever shot last" sounds like the action and is not: with five hundred
+     men firing, the most recent trigger pull is a coin toss across the whole
+     line, and because a column's REAR ranks have the clearest lanes past
+     their own mates, the coin landed behind the army more often than in front
+     of it. You watched shoulders and backpacks while the war happened three
+     hundred metres up the street.
+
+     The front of the group is a different man and a better one: he is the one
+     in contact, he is the one being shot at, and he is the one who is about to
+     die — which is exactly why the shot is worth taking. He is found as the
+     living man CLOSEST TO THE ENEMY'S MASS, with one guard that matters: he
+     must have his own group around him. Without it the pick is always the
+     lunatic who broke ranks and sprinted forty metres ahead of everybody —
+     the front of NOTHING, alone in a street, the least interesting man alive.
+     So the deepest dozen are ranked, and the first one with mates at his
+     shoulder takes the lens. */
+  const POINT = { red: null, blue: null, at: -9 };
+  const _pc = [];
+  const _pn = [];
+  function pointMan(team) {
+    const foe = teamCOM[team === "red" ? "blue" : "red"];
+    _pc.length = 0;
+    for (let i = 0; i < men.length; i++) {
+      const m = men[i];
+      if (m.dead || m.team !== team) continue;
+      // depth INTO the enemy, plus a nudge for a man who is actually in a
+      // fight — at equal depth the engaged man is the one to watch
+      const d = Math.hypot(m.pos.x - foe.x, m.pos.z - foe.z) - (m.tgt && !m.tgt.dead ? 5 : 0);
+      _pc.push(m, d);
     }
+    if (!_pc.length) return null;
+    let first = null;
+    for (let pass = 0; pass < 12; pass++) {
+      let bi = -1, bd = 1e18;
+      for (let i = 0; i < _pc.length; i += 2) {
+        if (_pc[i] && _pc[i + 1] < bd) { bd = _pc[i + 1]; bi = i; }
+      }
+      if (bi < 0) break;
+      const m = _pc[bi];
+      _pc[bi] = null;
+      if (!first) first = m;
+      // does he have his group with him? three mates inside fifteen metres is
+      // a spearhead; nobody inside fifteen metres is a man who has run away
+      const near = fineNear(m.pos.x, m.pos.z, 15, _pn);
+      let mates = 0;
+      for (let k = 0; k < near.length; k++) {
+        if (near[k] !== m && !near[k].dead && near[k].team === team && ++mates >= 3) break;
+      }
+      if (mates >= 3) return m;
+    }
+    return first;               // a squad of two left: the deepest IS the front
+  }
+  function updatePoint() {
+    POINT.red = pointMan("red");
+    POINT.blue = pointMan("blue");
+    POINT.at = simT;
+  }
+  // who the lens should be on for a team: its point man, and never a corpse
+  // (except for the death beat the director deliberately holds — see below)
+  function subjectFor(team) {
+    const p = POINT[team];
+    if (p && !p.dead) return p;
+    updatePoint();
+    return POINT[team] && !POINT[team].dead ? POINT[team] : null;
+  }
+  /* THE FIGHT AXIS: the bearing from one army's mass to the other. Every shot
+     below is framed off it, which is the whole difference between this
+     director and the one that rolled `lcg() * 2PI` for its yaw and pointed the
+     lens at a car park half the time. */
+  function fightAxis() {
+    const a = teamCOM.red, b = teamCOM.blue;
+    const dx = b.x - a.x, dz = b.z - a.z;
+    if (Math.abs(dx) + Math.abs(dz) < 0.001) return 0;
+    return Math.atan2(dx, dz);              // camera-yaw convention: (sin, cos)
+  }
+  // is there sky between this focus and a camera parked on this bearing? The
+  // arm-shortening in camApply saves a shot that is BLOCKED; it cannot save a
+  // shot that is blocked in every direction because nobody checked before
+  // committing. Four candidate bearings, one segment test each, per cut.
+  function clearYaw(fx, fz, want, dist, spread) {
+    const fy = MAP.groundAt(fx, fz) + 1.2;
+    const tries = [0, spread, -spread, spread * 2, -spread * 2, Math.PI];
+    for (let i = 0; i < tries.length; i++) {
+      const y = want + tries[i];
+      const px = fx + Math.sin(y) * dist * 0.86, pz = fz + Math.cos(y) * dist * 0.86;
+      const py = Math.max(MAP.groundAt(px, pz) + 1.6, fy + dist * 0.4);
+      if (!CBZ.micro.segmentBlocked || !CBZ.micro.segmentBlocked(fx, fy, fz, px, py, pz)) return y;
+    }
+    return want;
+  }
+  /* THE SHOT DECK. Four framings, all of them ABOUT something:
+       point — over the point man's shoulder, looking where he is looking,
+               which is at the men trying to kill him. The default, and the
+               one the death beat belongs to.
+       push  — planted in front of the advancing front rank, looking back
+               INTO it: the shot that makes five hundred men read as five
+               hundred men instead of a texture.
+       line  — broadside of the contact, across the fight axis, both armies
+               in frame trading fire.
+       crane — high and wide down the axis, for the shape of the whole thing.
+     Weights favour the point man because he is where the war is. */
+  function directorCut() {
+    const alive = aliveCount("red") + aliveCount("blue");
+    const r = lcg();
+    const subjTeam = lcg() < 0.5 ? "red" : "blue";
+    const subj = subjectFor(subjTeam) || subjectFor(subjTeam === "red" ? "blue" : "red");
+    cam.shot = !subj ? "crane" : r < 0.5 ? "point" : r < 0.7 ? "push" : r < 0.88 ? "line" : "crane";
+    cam.followM = subj;
+    cam.craneSpin = (lcg() < 0.5 ? -1 : 1) * (0.02 + lcg() * 0.035);
+    // a good shot is held; a wide is a punctuation mark
+    cam.cutAt = simT + (cam.shot === "point" ? 8 + lcg() * 5 : 5 + lcg() * 3);
+    const ax = fightAxis();
+    if (cam.shot === "line" || cam.shot === "crane") {
+      const hs = (subj ? { x: subj.pos.x, z: subj.pos.z } : hotspot()) || { x: MAP.cx, z: MAP.cz };
+      cam.wFocus.set(hs.x, MAP.groundAt(hs.x, hs.z), hs.z);
+      if (cam.shot === "line") {
+        // across the axis: both firing lines in profile
+        cam.wDist = 22 + Math.min(46, Math.sqrt(alive) * 3.4);
+        cam.wPitch = 0.3 + lcg() * 0.22;
+        cam.wYaw = clearYaw(hs.x, hs.z, ax + (lcg() < 0.5 ? 1 : -1) * Math.PI / 2, cam.wDist, 0.5);
+      } else {
+        cam.wDist = 46 + Math.min(150, Math.sqrt(alive) * 9);
+        cam.wPitch = 0.62 + lcg() * 0.4;
+        cam.wYaw = clearYaw(hs.x, hs.z, ax + Math.PI + (lcg() - 0.5) * 0.8, cam.wDist, 0.6);
+      }
+    }
+  }
+  // the death beat: when the man on the lens goes down, the camera STAYS on
+  // him for a moment. He is the point man — watching him fall IS the shot, and
+  // cutting away on the frame he dies is throwing away the only moment the
+  // whole follow was built to catch.
+  function subjectDied() {
+    cam.holdT = 1.5;
+    cam.wPitch = 0.22;
+    cam.wDist = 7.5;
+  }
+  function frameSubject(m, dt) {
+    cam.wFocus.set(m.pos.x, m.pos.y, m.pos.z);
+    if (cam.shot === "push") {
+      // ahead of him, walking backwards as the army comes on
+      cam.wYaw = m.yaw + (lcg() - 0.5) * 0.02;
+      cam.wPitch = 0.2; cam.wDist = 13;
+    } else {
+      cam.wYaw = m.yaw + Math.PI + 0.35;
+      cam.wPitch = 0.28; cam.wDist = 9.5;
+    }
+    if (cam.holdT > 0) cam.holdT -= dt;
   }
   function stepCamera(dt) {
     const IN = CBZ.micro.input;
+    if (simT - POINT.at > 0.5) updatePoint();
     if (cam.mode === "auto") {
-      if (simT >= cam.cutAt || (cam.shot === "shoulder" && (!cam.followM || cam.followM.dead))) directorCut();
-      if (cam.shot === "shoulder" && cam.followM && !cam.followM.dead) {
-        const m = cam.followM;
-        cam.wFocus.set(m.pos.x, m.pos.y, m.pos.z);
-        cam.wYaw = m.yaw + Math.PI + 0.35;
-        cam.wPitch = 0.3; cam.wDist = 10.5;
-      } else cam.wYaw += cam.craneSpin * dt * 8;
+      const subj = cam.followM;
+      const subjGone = (cam.shot === "point" || cam.shot === "push") &&
+        (!subj || (subj.dead && cam.holdT <= 0));
+      if (subj && subj.dead && cam.holdT === 0) subjectDied();
+      if (simT >= cam.cutAt || subjGone) directorCut();
+      if ((cam.shot === "point" || cam.shot === "push") && cam.followM) frameSubject(cam.followM, dt);
+      else cam.wYaw += cam.craneSpin * dt * 8;
     } else if (cam.mode === "follow") {
-      if (!cam.followM || cam.followM.dead) cam.followM = hottestMan();
+      /* FOLLOW IS THE FRONT OF THE GROUP, ALWAYS — and "always" is the word
+         the first build got wrong. Latching onto the point man once and
+         riding him until he died measured at frontness 0.55 over a 150-a-side
+         city fight: the man the camera picked at the start of the advance was
+         mid-pack by the time the armies met, because the FRONT MOVED and the
+         camera did not. Half the army was ahead of the lens, which is the
+         original complaint wearing a new hat.
+
+         So the lens also hands over while he lives — but only when the front
+         has genuinely left him behind (twelve metres, on a three-second
+         cadence), never on the metre-to-metre jostle of a firing line. He
+         dies, the camera holds the beat, then it takes the man who stepped
+         over him. */
       const m = cam.followM;
-      if (m) {
-        cam.wFocus.set(m.pos.x, m.pos.y, m.pos.z);
-        cam.wYaw = m.yaw + Math.PI + 0.3;
-        cam.wPitch = 0.26; cam.wDist = 8.5;
+      if (m && m.dead && cam.holdT === 0) subjectDied();
+      if (!m || (m.dead && cam.holdT <= 0)) {
+        const next = subjectFor(cam.followTeam);
+        if (next) { cam.followM = next; cam.holdT = 0; cam.reptT = simT + 3; }
+      } else if (!m.dead && simT >= cam.reptT) {
+        cam.reptT = simT + 3;
+        const p = POINT[cam.followTeam];
+        if (p && p !== m && !p.dead) {
+          const foe = teamCOM[cam.followTeam === "red" ? "blue" : "red"];
+          const dm = Math.hypot(m.pos.x - foe.x, m.pos.z - foe.z);
+          const dp = Math.hypot(p.pos.x - foe.x, p.pos.z - foe.z);
+          if (dm - dp > 12) cam.followM = p;
+        }
       }
+      if (cam.followM) frameSubject(cam.followM, dt);
     } else if (IN) {
       const fwd = 46 * dt * (cam.dist / 60 + 0.4);
       const mx = IN.axis("KeyA", "KeyD"), mz = IN.axis("KeyS", "KeyW");
@@ -2435,11 +2655,82 @@ CBZ.studio.need(NEED).then(function () {
     }
     camApply(dt);
   }
-  function setCamMode(mode) {
+  /* ============================================================ THE CARD
+     What the man on the lens is doing, in the only four numbers that matter
+     while you are watching him: how hurt he is, what he is holding, how many
+     rounds are left in it, and how many men he has killed. The magazine is
+     the point — a rifle emptying and a man reloading behind a wall is the
+     rhythm of the whole fight and it was happening invisibly.
+
+     Every write is guarded by a cached string: this runs at 10 Hz on a page
+     that is already drawing a thousand bodies, so it must not touch the DOM
+     when nothing has changed. */
+  const whoC = { n: "", g: "", a: "", k: "", hp: -1, mag: -1, rl: null, on: null, down: null };
+  function stepWho() {
+    const m = (cam.mode === "follow" || cam.shot === "point" || cam.shot === "push")
+      ? cam.followM : null;
+    const on = !!m;
+    if (on !== whoC.on) { whoC.on = on; el("who").style.display = on ? "block" : "none"; }
+    if (!m) return;
+    const down = !!m.dead;
+    if (down !== whoC.down) { whoC.down = down; el("who").classList.toggle("down", down); }
+    const name = m.beast ? String(m.species.name).toUpperCase()
+      : TEAMS[m.team].name + " " + (m.i + 1);
+    const n = name + (down ? " <i>DOWN</i>" : "");
+    if (n !== whoC.n) { whoC.n = n; el("whoN").innerHTML = n;
+      el("whoN").style.color = "#" + TEAMS[m.team].color.toString(16).padStart(6, "0"); }
+    const hp = m.maxHp > 1e8 ? 1 : Math.max(0, Math.min(1, m.hp / m.maxHp));
+    if (Math.abs(hp - whoC.hp) > 0.01) {
+      whoC.hp = hp;
+      const s = el("whoHp").firstElementChild;
+      s.style.width = (hp * 100) + "%";
+      s.style.background = hp > 0.6 ? "#4fbf6a" : hp > 0.3 ? "#e2c14a" : "#ff5a3d";
+    }
+    const gun = m.beast ? "CLAWS AND TEETH" : m.fists ? "FISTS"
+      : ((CBZ.weaponById(m.wid) || {}).label || m.weapon || "").toUpperCase();
+    if (gun !== whoC.g) { whoC.g = gun; el("whoGun").textContent = gun; }
+    // ammo: rounds left, or the reload counting itself down
+    const reloading = m.reloadT > 0;
+    const ammo = m.magSize > 0
+      ? (reloading ? "RELOADING" : m.mag + "/" + m.magSize) : "—";
+    if (ammo !== whoC.a) { whoC.a = ammo; el("whoAmmo").textContent = ammo; }
+    const w = m.magSize > 0 ? (CBZ.weaponById(m.wid) || {}) : null;
+    const full = w ? ((w.reloadTime || w.reload) || 1.6) : 1;
+    const frac = m.magSize > 0
+      ? (reloading ? Math.max(0, Math.min(1, 1 - m.reloadT / full)) : m.mag / m.magSize) : 0;
+    if (Math.abs(frac - whoC.mag) > 0.01 || reloading !== whoC.rl) {
+      whoC.mag = frac; whoC.rl = reloading;
+      const t = el("whoMagT");
+      t.style.display = m.magSize > 0 ? "block" : "none";
+      t.classList.toggle("rl", reloading);
+      t.firstElementChild.style.width = (frac * 100) + "%";
+    }
+    const k = "<b>" + (m.kills || 0) + "</b> KILLS" +
+      (m.magSize > 0 ? " &middot; " + (m.reloads || 0) + " RELOADS" : "") +
+      (m.shotsF ? " &middot; " + Math.round((m.hitsF / m.shotsF) * 100) + "% HIT" : "");
+    if (k !== whoC.k) { whoC.k = k; el("whoK").innerHTML = k; }
+  }
+
+  function setCamMode(mode, team) {
     cam.mode = mode;
-    el("cCam").textContent = mode === "auto" ? "AUTO CAM" : mode === "follow" ? "FOLLOW" : "FREE CAM";
+    if (team) cam.followTeam = team;
+    el("cCam").textContent = mode === "auto" ? "AUTO CAM"
+      : mode === "follow" ? "FOLLOW " + TEAMS[cam.followTeam].name : "FREE CAM";
     el("cCam").classList.toggle("on", mode === "auto");
-    if (mode === "follow") cam.followM = hottestMan();
+    if (mode === "follow") {
+      updatePoint();
+      cam.followM = subjectFor(cam.followTeam) || hottestMan();
+      cam.holdT = 0; cam.reptT = simT + 3;
+      cam.shot = "point";          // else a stale AUTO framing rides along
+    }
+  }
+  // AUTO -> FOLLOW RED -> FOLLOW BLUE -> FREE. Both armies have a front, and
+  // which one you want to ride is the whole question a spectator has.
+  function cycleCam() {
+    if (cam.mode === "auto") setCamMode("follow", "red");
+    else if (cam.mode === "follow" && cam.followTeam === "red") setCamMode("follow", "blue");
+    else if (cam.mode === "follow") setCamMode("free");
+    else setCamMode("auto");
   }
   // manual orbit: pointers on the page, ignored while the UI owns them
   let drag = null;
@@ -2523,7 +2814,7 @@ CBZ.studio.need(NEED).then(function () {
     b.addEventListener("click", function () { setSpeed(parseFloat(b.dataset.s)); });
   });
   el("cCam").addEventListener("click", function () {
-    setCamMode(cam.mode === "auto" ? "follow" : cam.mode === "follow" ? "free" : "auto");
+    cycleCam();
   });
 
   /* ============================================================ BENCH
@@ -2584,6 +2875,18 @@ CBZ.studio.need(NEED).then(function () {
     el("banner").classList.add("on");
     bannerT = 3.4;
   }
+  // the man with the most kills, alive or dead — the ledger's whole point
+  function topKiller() {
+    let best = null;
+    for (let i = 0; i < men.length; i++) {
+      if ((men[i].kills || 0) > (best ? best.kills : 0)) best = men[i];
+    }
+    return best;
+  }
+  function gunLabel(wid) {
+    if (wid === "fists") return "FISTS";
+    return ((CBZ.weaponById(wid) || {}).label || wid || "").toUpperCase();
+  }
   function endWar(winner) {
     over = true;
     const rows = [
@@ -2593,6 +2896,26 @@ CBZ.studio.need(NEED).then(function () {
       ["BLUE SHOTS", stats.blue.shots + "  (" + pct(stats.blue.hits, stats.blue.shots) + " HIT)"],
       ["LEFT STANDING", aliveCount("red") + aliveCount("blue")],
     ];
+    const tk = topKiller();
+    if (tk && tk.kills) {
+      rows.push(["TOP KILLER", (tk.beast ? String(tk.species.name).toUpperCase()
+        : TEAMS[tk.team].name + " " + (tk.i + 1)) + " &middot; " + tk.kills + " KILLS" +
+        (tk.beast || tk.fists ? "" : " &middot; " + gunLabel(tk.wid))]);
+    }
+    // and the guns, ranked by what they actually did — the row MIXED and
+    // EVERYTHING were always secretly asking for. A launcher lands NO hits by
+    // construction (its damage is blast, through studio.boom), so printing it
+    // a hit rate reads as a broken weapon rather than an honest column.
+    const wids = Object.keys(GUNS).sort(function (a, b) { return GUNS[b].kills - GUNS[a].kills; });
+    const gunRow = function (wid) {
+      const g = GUNS[wid];
+      let s = g.kills + " KILLS";
+      if (g.hits > 0) s += " &middot; " + pct(g.hits, g.shots) + " HIT";
+      if (g.reloads > 0) s += " &middot; " + g.reloads + " RELOADS";
+      return [gunLabel(wid), s];
+    };
+    if (wids.length > 1) wids.slice(0, 5).forEach(function (wid) { rows.push(gunRow(wid)); });
+    else if (wids.length === 1) rows.push(gunRow(wids[0]));
     el("endT").textContent = winner ? TEAMS[winner].name + " TAKE IT" : "NOBODY LEFT";
     el("endTable").innerHTML = rows.map(function (r) {
       return "<tr><td>" + r[0] + "</td><td>" + r[1] + "</td></tr>";
@@ -2684,7 +3007,7 @@ CBZ.studio.need(NEED).then(function () {
     el("ctl").style.display = "flex";
     if (!COARSE) {
       el("hint").style.display = "block";
-      el("hint").innerHTML = "DRAG ORBIT &middot; WHEEL ZOOM &middot; WASD PAN<br>SPACE PAUSE &middot; 1-5 SPEED &middot; F FOLLOW";
+      el("hint").innerHTML = "DRAG ORBIT &middot; WHEEL ZOOM &middot; WASD PAN<br>SPACE PAUSE &middot; 1-5 SPEED &middot; F FRONT CAM";
     }
     setSpeed(1);
     setCamMode(asBench ? "free" : "auto");
@@ -2707,7 +3030,7 @@ CBZ.studio.need(NEED).then(function () {
   }
 
   /* ============================================================ FRAME */
-  let uiT = 0, winCheckT = 0, lastWall = 0;
+  let uiT = 0, winCheckT = 0, lastWall = 0, whoT = 0;
   function frame(dt) {
     if (!started) return;
     // THE SIM CLOCK IS WALL TIME, NOT RENDER TIME. microboot clamps its dt
@@ -2732,7 +3055,10 @@ CBZ.studio.need(NEED).then(function () {
       if (IN.pressed("Digit3")) setSpeed(4);
       if (IN.pressed("Digit4")) setSpeed(8);
       if (IN.pressed("Digit5")) setSpeed(0.25);
-      if (IN.pressed("KeyF")) setCamMode("follow");
+      // F rides the front rank; pressing it again crosses to the other army
+      if (IN.pressed("KeyF")) {
+        setCamMode("follow", cam.mode === "follow" && cam.followTeam === "red" ? "blue" : "red");
+      }
       if (IN.pressed("KeyC")) setCamMode(cam.mode === "auto" ? "free" : "auto");
     }
 
@@ -2827,6 +3153,10 @@ CBZ.studio.need(NEED).then(function () {
     if (bannerT > 0 && (bannerT -= dt) <= 0) el("banner").classList.remove("on");
 
     // ---- chrome on a slow tick ----
+    // the card runs faster than the rest of the chrome: a magazine draining
+    // and a reload filling are the two things on it that MOVE
+    whoT -= dt;
+    if (whoT <= 0) { whoT = 0.1; if (started) stepWho(); }
     uiT -= dt;
     if (uiT <= 0) {
       uiT = 0.25;
@@ -2961,6 +3291,31 @@ CBZ.studio.need(NEED).then(function () {
         calls: (CBZ.renderer && CBZ.renderer.info) ? CBZ.renderer.info.render.calls : null,
         speed: speed, simT: Math.round(simT * 10) / 10,
         stats: JSON.parse(JSON.stringify(stats)),
+        guns: JSON.parse(JSON.stringify(GUNS)),
+        // the camera, checkable: which shot is up, who it is on, and whether
+        // that man is genuinely at the front of his own army
+        cam: (function () {
+          const m = cam.followM;
+          const foe = m ? teamCOM[m.team === "red" ? "blue" : "red"] : null;
+          let ahead = null;
+          if (m && foe) {
+            const md = Math.hypot(m.pos.x - foe.x, m.pos.z - foe.z);
+            let n = 0, tot = 0;
+            for (let i = 0; i < men.length; i++) {
+              const o = men[i];
+              if (o.dead || o.team !== m.team) continue;
+              tot++;
+              if (Math.hypot(o.pos.x - foe.x, o.pos.z - foe.z) < md) n++;
+            }
+            // the fraction of his own army standing BEHIND him: 1 = the very
+            // front of the group, 0 = the back rank the old camera rode
+            ahead = tot ? Math.round((1 - n / tot) * 100) / 100 : null;
+          }
+          return { mode: cam.mode, shot: cam.shot, team: cam.followTeam,
+            on: m ? m.id : null, onDead: m ? !!m.dead : null, frontness: ahead,
+            kills: m ? (m.kills || 0) : null, mag: m ? m.mag : null,
+            reloads: m ? (m.reloads || 0) : null };
+        })(),
         caps: CBZ.modeHas ? { blast: CBZ.modeHas("blast"), blastActors: CBZ.modeHas("blastActors") } : null,
         unrouted: CBZ.modeCapsAudit ? CBZ.modeCapsAudit().unrouted : null,
         colliders: (CBZ.colliders && CBZ.colliders.length) || 0,
