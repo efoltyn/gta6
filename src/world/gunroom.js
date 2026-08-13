@@ -415,8 +415,11 @@
      weapon here". Flag false = the old shrink-and-glow, byte for byte. */
   if (CBZ.CONFIG.PRISON_RACK_EMPTIES == null) CBZ.CONFIG.PRISON_RACK_EMPTIES = true;
   function refreshSlotVisual(slot) {
-    const owned = !!(CBZ.hasWeapon && CBZ.hasWeapon(slot.id));
-    slot.taken = owned;
+    // weapon slots read ownership off the weapon roster; an ITEM slot (the
+    // demolition crate) owns its own `taken` — items live in the bag, and the
+    // bag emptying (a charge SPENT) must not restock the crate mid-run.
+    const owned = slot.item ? !!slot.taken : !!(CBZ.hasWeapon && CBZ.hasWeapon(slot.id));
+    if (!slot.item) slot.taken = owned;
     if (CBZ.CONFIG.PRISON_RACK_EMPTIES === false) {
       slot.pad.material.color.setHex(owned ? 0x254f35 : 0x11161c);
       slot.pad.material.emissive.setHex(owned ? 0x0b3b1b : 0x080b10);
@@ -431,6 +434,21 @@
   }
 
   function pickupSlot(slot) {
+    if (slot.item) {
+      // an ITEM slot: a COUNT into the mode's bag (systems/economy.js
+      // itemStore — g.inventory here, g.cityInv in a city), never a weapon
+      // unlock. Stocked once; the crate refills with the rack on a new run.
+      if (slot.taken) return;
+      const S = CBZ.econ && CBZ.econ.itemStore ? CBZ.econ.itemStore() : null;
+      if (!S) return;
+      S.add(slot.item, slot.grant || 1);
+      slot.taken = true;
+      refreshSlotVisual(slot);
+      CBZ.sfx("pickup");
+      if (CBZ.pickupNote) { try { CBZ.pickupNote(slot.name + " ×" + (slot.grant || 1), { rare: true }); } catch (e) {} }
+      else tellHint("Took " + (slot.grant || 1) + " charges — [B] plants, hold [B] fires.", 2.2);
+      return;
+    }
     const owned = CBZ.hasWeapon && CBZ.hasWeapon(slot.id);
     if (owned && CBZ.currentWeaponId === slot.id) return;
     const first = owned ? false : (CBZ.unlockWeapon && CBZ.unlockWeapon(slot.id, { select: true }));
@@ -682,6 +700,32 @@
     addBox(24.62, 0.22, -4.86, 0.72, 0.44, 0.52, 0x3f4a33, {});
     addBox(24.62, 0.46, -4.86, 0.76, 0.06, 0.56, 0x2f3a26, { cast: false });
     for (let i = 0; i < 4; i++) cyl(ROOT, 0.024, 0.075, mats.brass, 24.36 + i * 0.17, 0.52, -4.86, Math.PI / 2, 0, 0);
+    // ---- THE DEMOLITION CRATE. world/door.js has promised for a week that
+    // the yard door's 5 lb price is paid with "a charge you had to steal from
+    // the armory", and adminwing.js offers "or 5 lb of C4" on three of its
+    // locks — while no C4 existed anywhere in the pen. This is that charge:
+    // an ITEM slot (a count into the bag via systems/economy.js itemStore,
+    // not a weapon unlock), behind the same two cage routes as the rifle.
+    // Three bricks: one for the yard door with two to decide with — the
+    // 7 lb control console needs a pair set together (det cord adds).
+    addBox(22.15, 0.26, -3.30, 0.72, 0.52, 0.52, 0x2e3328, {});               // olive crate
+    addBox(22.15, 0.55, -3.30, 0.76, 0.06, 0.56, 0x232919, { cast: false });  // lid
+    const c4Pad = addBox(22.15, 0.30, -2.80, 0.60, 0.11, 0.05, 0x202833, { cast: false, emissive: 0x080b10, ei: 0.5 });
+    const c4Disp = new THREE.Group();
+    for (let i = 0; i < 3; i++) {
+      const brick = CBZ.cityC4Mesh ? CBZ.cityC4Mesh()
+        : new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.1, 0.24), new THREE.MeshLambertMaterial({ color: 0x2e3328 }));
+      brick.position.set((i - 1) * 0.06, 0.62 + i * 0.12, (i - 1) * 0.04);
+      brick.rotation.y = -0.4 + i * 0.45;
+      c4Disp.add(brick);
+    }
+    c4Disp.position.set(22.15, 0, -3.30);
+    c4Disp.userData.dynamic = true;
+    ROOT.add(c4Disp);
+    armory.slots.push({
+      id: "c4", name: "C4 CHARGES", item: "C4 Charge", grant: 3,
+      pad: c4Pad, model: c4Disp, taken: false, cool: 0, x: 22.15, z: -2.80, gated: true,
+    });
     // a warm shrine light so the prize reads from outside two sets of bars
     addBox(23.40, 2.86, -4.50, 0.34, 0.14, 0.90, 0x2b313a, { cast: false });
     addBox(23.40, 2.75, -4.50, 0.28, 0.07, 0.76, 0xffe6b0, { emissive: 0xffb347, ei: 1.0, cast: false });
@@ -727,7 +771,9 @@
   CBZ.gunroomInner = inner;
 
   armory.resetSlots = function () {
-    armory.slots.forEach((slot) => { slot.cool = 0; refreshSlotVisual(slot); });
+    // a new run restocks the crate exactly as it re-arms the rack (the bag it
+    // fed, g.inventory, was reset by the same state.js pass that calls this)
+    armory.slots.forEach((slot) => { slot.cool = 0; if (slot.item) slot.taken = false; refreshSlotVisual(slot); });
     // state.js resets the OUTER gate through this same hook (it calls
     // a.resetSlots() at the end of its armory block), so the inner cage rides
     // the existing seam and systems/state.js needs no edit at all.
@@ -895,7 +941,8 @@
         // Only AUTO-COLLECT weapons you don't own yet. Standing on a rack you
         // already own must NOT keep re-equipping it — that was overriding the
         // Q / scroll weapon switch every frame (switch, then snap back).
-        if (CBZ.hasWeapon && CBZ.hasWeapon(slot.id)) continue;
+        // (an emptied ITEM slot is out of the running the same way)
+        if (slot.item ? slot.taken : (CBZ.hasWeapon && CBZ.hasWeapon(slot.id))) continue;
         const dx = CBZ.player.pos.x - slot.x, dz = CBZ.player.pos.z - slot.z;
         const d2 = dx * dx + dz * dz;
         if (d2 < bestD && slot.cool <= 0) { best = slot; bestD = d2; }
