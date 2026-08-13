@@ -249,7 +249,14 @@
       if (!a._alertMarker) { a._alertMarker = makeAlertMarker(); a.group.add(a._alertMarker); }
       if (!a._approachMarker) { a._approachMarker = makeApproachMarker(); a.group.add(a._approachMarker); }
 
-      const hostile = hunting(a) && (!guardish(a) || !!a.flashlightOn);
+      // A HUNT IS THE THREAT, NOT THE TORCH. This used to require a guard's
+      // flashlight to be ON before his hunt counted as hostile — which only
+      // ever worked because entities/guards.js lit the beam for every hunt,
+      // including a midday sprint across the yard. Now that a torch is a
+      // dark-hours tool again, a guard chasing you under the sun would have
+      // fallen through to `softAlert` and grown a friendly "walk up and talk"
+      // marker over his head mid-charge. Ask the brain state directly.
+      const hostile = hunting(a);
       const softAlert = !hostile && guardish(a) && (a.alert || 0) > 0.15 && !a.flashlightOn && !a.dead && !(a.ko > 0);
       const tip = !hostile && CBZ.game && CBZ.game.role === "cop" && a.copMarked > 0 && !a.dead && !(a.ko > 0) && !a.escaped;
       const knownReport = (a.reportedPlayerT || 0) > 0;

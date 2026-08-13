@@ -253,6 +253,21 @@
   function restoreField(actor, key, value) {
     if (value === undefined) delete actor[key]; else actor[key] = value;
   }
+  /* AIM, THEN POSE — and the POSE is the half that has to work for a screw.
+     CBZ.actorAimAt reads `actor.pos`, which is the shape a city ped carries;
+     a prison guard is `{ group, char, … }` with no `.pos` at all, so that call
+     has been throwing into the swallow below since the day it was written and
+     setReadyPose never ran on a guard. The taser still APPEARED in his fist
+     (syncActorWeapon only needs a socket) and it still looked presented — but
+     only because entities/guards.js was holding that same arm out in front of
+     him for the flashlight. Take the torch away and the truth showed up in the
+     storyboard: a guard tasing a man at arm's length with the weapon hanging
+     at his hip. CBZ.actorReadyPose is the same setReadyPose with no `.pos`
+     read in it, and the guard's yaw is already owned by his own hunt turn. */
+  function presentTaser(actor, dt) {
+    try { if (CBZ.actorAimAt) CBZ.actorAimAt(actor, { pos: CBZ.player.pos }, dt); } catch (_) {}
+    try { if (CBZ.actorReadyPose) CBZ.actorReadyPose(actor); } catch (_) {}
+  }
   function actorTasePlayer(actor) {
     if (!actor || !CBZ.player || !CBZ.playerChar || !CBZ.playerChar.group) return false;
     let draw = drawn.find((d) => d.actor === actor);
@@ -271,8 +286,7 @@
     actor._holstered = false;
     actor._gunLowered = false;
     actor._gunHidden = false;
-    try { if (CBZ.actorAimAt) CBZ.actorAimAt(actor, { pos: CBZ.player.pos }, 1); } catch (_) {}
-    try { if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(actor); } catch (_) {}
+    presentTaser(actor, 1);
     const from = CBZ.actorMuzzle ? CBZ.actorMuzzle(actor, tmpA) : tmpA.set(actor.group.position.x, actor.group.position.y + 1.35, actor.group.position.z);
     CBZ.playerChar.group.updateWorldMatrix(true, false);
     const to = CBZ.playerChar.group.localToWorld(tmpB.set(0, 1.18, 0.08));
@@ -284,7 +298,7 @@
     for (let i = drawn.length - 1; i >= 0; i--) {
       const d = drawn[i]; d.t -= dt;
       if (d.t > 0 && d.actor && !d.actor.dead) {
-        try { if (CBZ.actorAimAt) CBZ.actorAimAt(d.actor, { pos: CBZ.player.pos }, dt); } catch (_) {}
+        presentTaser(d.actor, dt);
         continue;
       }
       const a = d.actor, p = d.prev;
