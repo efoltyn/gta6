@@ -202,7 +202,13 @@
     o = o || {};
     const s = o.size || (0.6 + rng() * 1.4);
     const w = s, h = s * (0.6 + rng() * 0.8), d = s;
-    const geo = new THREE.BoxGeometry(w, h, d);
+    /* A BOX IS RUBBLE; A ROCK IS NOT A BOX. `shape:"rock"` gets a lumpy solid
+       instead — the volcano's bombs are the caller that needed it, because a
+       bomb lands with keep:true and sits there for the rest of the match, and
+       twenty cubes scattered over an island read as exactly that. */
+    const geo = o.shape === "rock"
+      ? new THREE.DodecahedronGeometry(s * 0.62, 0)
+      : new THREE.BoxGeometry(w, h, d);
     const mat = CBZ.mat ? CBZ.mat(o.color != null ? o.color : 0x6b7079) : new THREE.MeshLambertMaterial({ color: 0x6b7079 });
     const m = new THREE.Mesh(geo, mat);
     const x = o.x, z = o.z;

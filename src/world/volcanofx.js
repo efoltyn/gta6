@@ -129,6 +129,44 @@
   /* ---- ONE SOFT RADIAL TEXTURE for every additive glow in this file.
      Built once, shared by heat haze and by the pyroclastic front's dust,
      so the whole volcano costs exactly one texture upload. ---- */
+  /* ---- THE ASH PATCH SHAPE, AS AN ALPHA CUTOUT. -----------------------
+     OWNER, 2026-08-13: "floating flat gray squares all around". They floated
+     because the quads were horizontal (fixed at the writer), and they were
+     SQUARES because a four-vertex quad has four straight edges and nothing
+     was hiding them. Below full coverage the patches do not touch, so a light
+     dusting rendered as a few thousand rotated tiles lying on the grass.
+
+     A deposit's boundary is eroded, not ruled. This is a white texture whose
+     ALPHA is a lumpy blob, cut out with alphaTest — so the patch keeps a hard
+     opaque edge (no blending, no sorting, no double-darkening across five
+     thousand overlapping quads) but that edge is an irregular coastline
+     instead of a straight line. Same geometry, same one draw call; the square
+     simply stops being a square.
+     -------------------------------------------------------------------- */
+  let _ashTex = null;
+  function ashTex() {
+    if (_ashTex) return _ashTex;
+    const S = 64, cv = document.createElement("canvas");
+    cv.width = cv.height = S;
+    const g = cv.getContext("2d");
+    let seed = 0x6151a3d7 >>> 0;
+    const rnd = function () { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+    const lobe = function (lx, ly, r) {
+      const rg = g.createRadialGradient(lx, ly, r * 0.45, lx, ly, r);
+      rg.addColorStop(0, "rgba(255,255,255,1)");
+      rg.addColorStop(1, "rgba(255,255,255,0)");
+      g.fillStyle = rg;
+      g.beginPath(); g.arc(lx, ly, r, 0, 6.2832); g.fill();
+    };
+    lobe(S * 0.5, S * 0.5, S * 0.34);
+    for (let i = 0; i < 14; i++) {
+      const a = rnd() * 6.2832, d = S * (0.12 + rnd() * 0.24);
+      lobe(S * 0.5 + Math.cos(a) * d, S * 0.5 + Math.sin(a) * d, S * (0.09 + rnd() * 0.13));
+    }
+    _ashTex = new THREE.CanvasTexture(cv);
+    return _ashTex;
+  }
+
   let _glowTex = null;
   function glowTex() {
     if (_glowTex) return _glowTex;
@@ -322,8 +360,16 @@
      owner's black ribbon swapped for a neon one, with no more structure than
      it had before. Nine columns and a station every ~2.2 m give roughly seven
      samples per plate, which is the point at which the plates exist. */
-  const LAVA_COLS = 9;              // columns across the flow
+  const LAVA_COLS = 9;              // columns across a broad flow
   const LAVA_U = [-1, -0.78, -0.55, -0.3, 0, 0.3, 0.55, 0.78, 1];
+  /* A THREAD DOES NOT NEED NINE COLUMNS. Once the flows narrowed to match the
+     reference photograph, nine columns over two metres of width was a vertex
+     every twenty centimetres — detail no camera can resolve, on nine times as
+     many flows. Narrow flows take the five-column table; the grid across the
+     ribbon only has to carry the channel's meander, and the plates ride along
+     the LENGTH, where the resolution still matters. */
+  const LAVA_COLS_N = 5;
+  const LAVA_U_N = [-1, -0.55, 0, 0.55, 1];
   const MELT_INSET = 0.82;          // the lit crust shows outboard of this
   // lit crust: dark basalt at the levee, scorched red-brown inboard. Not
   // BLACK — a crust photographs as very dark grey-brown, and pure black in
@@ -331,7 +377,7 @@
   const CRUST_A = 0x2a2320, CRUST_B = 0x412c22, CRUST_C = 0x74371a;
   // the unlit lid over the melt, and the melt itself (1150 C to dull red)
   const _LID_D = new THREE.Color(0x241d19), _LID_W = new THREE.Color(0x502513);
-  const MELT_A = 0x8c1e02, MELT_B = 0xe85a08, MELT_C = 0xffcf7a;
+  const MELT_A = 0x7d1601, MELT_B = 0xdd5106, MELT_C = 0xffa63a;
 
   /* THE LID, as a smooth field that TRAVELS.
 
@@ -358,10 +404,17 @@
     const groundAt = o.groundAt || flatGround;
     const width = o.width > 0 ? +o.width : 5.5;
     const halfW = width * 0.5;
+    const narrow = width < 4.2;
+    const COLS = narrow ? LAVA_COLS_N : LAVA_COLS;
+    const UU = narrow ? LAVA_U_N : LAVA_U;
     const len = o.len > 0 ? +o.len : 40;
     const speed = o.speed > 0 ? +o.speed : 5;
     const salt = o.salt != null ? (o.salt | 0) : 4711;
-    const seg = clamp(width * 0.4, 1.9, 2.8);
+    /* Station spacing is set by the LID, not by the width. LID_K maps metres
+       to field phase, so ~5 samples a plate wants seg near 2.3; tying it to
+       the flow's width instead put a narrow thread on a 0.8 m grid and paid
+       for thirty-five stations to draw two metres of rock. */
+    const seg = clamp(width * 0.4, 2.3, 2.9);
     /* A STATION EVERY seg METRES IS A DECISION EVERY seg METRES. Halving the
        wander and the turn rate (against fallLine's 0.45/0.16 defaults) is the
        other half of the anti-zig-zag fix: lava has momentum and a metre of
@@ -401,9 +454,9 @@
        solved once here and costs nothing per frame — the per-frame writer
        only adds the thickness on top.
        -------------------------------------------------------------------- */
-    const cGY = new Float32Array(N * LAVA_COLS);   // crust bed
-    const mGY = new Float32Array(N * LAVA_COLS);   // melt bed (inset)
-    const grain = new Float32Array(N * LAVA_COLS); // per-vertex rock grain
+    const cGY = new Float32Array(N * COLS);   // crust bed
+    const mGY = new Float32Array(N * COLS);   // melt bed (inset)
+    const grain = new Float32Array(N * COLS); // per-vertex rock grain
     const nX = new Float32Array(N), nZ = new Float32Array(N);
     for (let i = 0; i < N; i++) {
       const p = path.pts[i];
@@ -412,8 +465,8 @@
       const nl = Math.hypot(nx, nz) || 1;
       nX[i] = nx / nl; nZ[i] = nz / nl;
       const hw = halfW * wProf[i];
-      for (let c = 0; c < LAVA_COLS; c++) {
-        const u = LAVA_U[c], k = i * LAVA_COLS + c;
+      for (let c = 0; c < COLS; c++) {
+        const u = UU[c], k = i * COLS + c;
         const x = p.x + nX[i] * u * hw, z = p.z + nZ[i] * u * hw;
         cGY[k] = Math.max(groundAt(x, z), p.y);
         const mx = p.x + nX[i] * u * MELT_INSET * hw;
@@ -424,13 +477,13 @@
     }
 
     // ---- CRUST: opaque, lit, flat-shaded, thickening ----
-    const cPos = new Float32Array(N * LAVA_COLS * 3);
-    const cCol = new Float32Array(N * LAVA_COLS * 3);
-    const cIdx = new Uint16Array(Math.max(1, (N - 1) * (LAVA_COLS - 1) * 6));
+    const cPos = new Float32Array(N * COLS * 3);
+    const cCol = new Float32Array(N * COLS * 3);
+    const cIdx = new Uint16Array(Math.max(1, (N - 1) * (COLS - 1) * 6));
     let ii = 0;
     for (let i = 0; i < N - 1; i++) {
-      for (let c = 0; c < LAVA_COLS - 1; c++) {
-        const a = i * LAVA_COLS + c, b2 = a + 1, d = a + LAVA_COLS, e = d + 1;
+      for (let c = 0; c < COLS - 1; c++) {
+        const a = i * COLS + c, b2 = a + 1, d = a + COLS, e = d + 1;
         cIdx[ii++] = a; cIdx[ii++] = d; cIdx[ii++] = b2;
         cIdx[ii++] = b2; cIdx[ii++] = d; cIdx[ii++] = e;
       }
@@ -455,13 +508,13 @@
     parent.add(crust);
 
     // ---- MELT: opaque, UNLIT (= incandescent), same grid, inset footprint ----
-    const kPos = new Float32Array(N * LAVA_COLS * 3);
-    const kCol = new Float32Array(N * LAVA_COLS * 3);
-    const kIdx = new Uint16Array(Math.max(1, (N - 1) * (LAVA_COLS - 1) * 6));
+    const kPos = new Float32Array(N * COLS * 3);
+    const kCol = new Float32Array(N * COLS * 3);
+    const kIdx = new Uint16Array(Math.max(1, (N - 1) * (COLS - 1) * 6));
     ii = 0;
     for (let i = 0; i < N - 1; i++) {
-      for (let c = 0; c < LAVA_COLS - 1; c++) {
-        const a = i * LAVA_COLS + c, b2 = a + 1, d = a + LAVA_COLS, e = d + 1;
+      for (let c = 0; c < COLS - 1; c++) {
+        const a = i * COLS + c, b2 = a + 1, d = a + COLS, e = d + 1;
         kIdx[ii++] = a; kIdx[ii++] = d; kIdx[ii++] = b2;
         kIdx[ii++] = b2; kIdx[ii++] = d; kIdx[ii++] = e;
       }
@@ -515,18 +568,18 @@
     }
 
     let adv = Math.min(seg * 1.05, len);   // metres of flow laid down
-    let age = 0, dead = false;
+    let age = 0, dead = false, lidT = 0, lastSt = -1;
     const _v = new THREE.Vector3();
     /* THE SURFACE RUNS FASTER THAN THE FRONT. The nose is braked by the crust
        it is pushing; the melt behind it is not. ~2.4x is the ratio that reads
        as "a river with a lid on it" rather than as a conveyor belt. */
     const skinV = speed * 2.4;
 
-    // one ring of LAVA_COLS vertices, at a given centre / normal / width
+    // one ring of COLS vertices, at a given centre / normal / width
     function ring(i, cx, cy0, cz, nx, nz, hw, thick, hot, s, ph, bedC, bedM) {
       const u01 = N > 1 ? clamp(s / Math.max(0.001, (N - 1) * seg), 0, 1) : 0;
-      for (let c = 0; c < LAVA_COLS; c++) {
-        const u = LAVA_U[c], au = Math.abs(u), k = i * LAVA_COLS + c, off = k * 3;
+      for (let c = 0; c < COLS; c++) {
+        const u = UU[c], au = Math.abs(u), k = i * COLS + c, off = k * 3;
         /* FLAT-TOPPED, STEEP-SIDED. A quadratic crown is a half-cylinder, and
            a half-cylinder with a bright middle is a fluorescent tube; an 'a'a
            flow is a broad flat raft riding between two steep levees. The cubic
@@ -614,7 +667,7 @@
        along the path and tapered to a snout. It slides continuously between
        stations and the flow noses forward instead of teleporting. Its bed is
        sampled live — five ground probes for the one ring that moves. */
-    const _noseC = new Float32Array(LAVA_COLS), _noseM = new Float32Array(LAVA_COLS);
+    const _noseC = new Float32Array(COLS), _noseM = new Float32Array(COLS);
     function writeNose(i) {
       if (i < 1) return;
       pathAt(path, adv, _v);
@@ -625,8 +678,8 @@
       const frac = clamp((adv - i0 * seg) / seg, 0, 1);
       // a flow front is a blunt snout, not a point: it bulges as it is fed
       const hw = halfW * wProf[i] * (0.34 + 0.66 * frac);
-      for (let c = 0; c < LAVA_COLS; c++) {
-        const u = LAVA_U[c], k = i * LAVA_COLS + c;
+      for (let c = 0; c < COLS; c++) {
+        const u = UU[c], k = i * COLS + c;
         _noseC[c] = cGY[k]; _noseM[c] = mGY[k];
         cGY[k] = Math.max(groundAt(_v.x + nx * u * hw, _v.z + nz * u * hw), _v.y);
         mGY[k] = Math.max(groundAt(_v.x + nx * u * MELT_INSET * hw, _v.z + nz * u * MELT_INSET * hw), _v.y);
@@ -635,8 +688,8 @@
       ring(i, _v.x, _v.y, _v.z, nx, nz, hw, st.t * (0.55 + 0.45 * frac),
         hot0[i] * (1 - 0.72 * st.cool), adv, age * skinV * LID_K, cGY, mGY);
       // put the station's own bed back — the nose borrowed those slots
-      for (let c = 0; c < LAVA_COLS; c++) {
-        const k = i * LAVA_COLS + c;
+      for (let c = 0; c < COLS; c++) {
+        const k = i * COLS + c;
         cGY[k] = _noseC[c]; mGY[k] = _noseM[c];
       }
     }
@@ -673,14 +726,24 @@
            lid field is a function of TIME, so a skipped frame is a frozen
            river — the exact failure the owner reported. N is a dozen-odd
            stations; this is a few hundred floats. */
-        writeStations(0, Math.max(0, st - 1));
+        /* THE RIBBON REWRITES AT 30 Hz; THE NOSE EVERY FRAME. Nine threads
+           instead of four tripled the per-frame vertex work, and the lid is a
+           colour animation — it does not need 60 Hz. The full pass still runs
+           immediately whenever the front reaches a new station, so the ring
+           that was the tapered nose gets its full width on the same frame it
+           stops being the front. */
+        lidT += dt;
+        if (st !== lastSt || lidT >= 0.033) {
+          lidT = 0; lastSt = st;
+          writeStations(0, Math.max(0, st - 1));
+        }
         writeNose(st);
         crustGeo.attributes.position.needsUpdate = true;
         crustGeo.attributes.color.needsUpdate = true;
         chGeo.attributes.position.needsUpdate = true;
         chGeo.attributes.color.needsUpdate = true;
-        crustGeo.setDrawRange(0, Math.max(0, st) * (LAVA_COLS - 1) * 6);
-        chGeo.setDrawRange(0, Math.max(0, st) * (LAVA_COLS - 1) * 6);
+        crustGeo.setDrawRange(0, Math.max(0, st) * (COLS - 1) * 6);
+        chGeo.setDrawRange(0, Math.max(0, st) * (COLS - 1) * 6);
         /* NO computeVertexNormals(). r128 FACT, checked in the shipped build:
            `normal_fragment_begin` takes the #ifdef FLAT_SHADED branch and
            rebuilds the normal from dFdx/dFdy of the view position — the
@@ -787,7 +850,25 @@
      the way to white. The first sprite pass used the old lit-material greys
      unchanged and produced cotton wool. These are picked for where they LAND,
      not for where they read in a swatch. */
-  const PYRO_ASH = [0x272320, 0x322d27, 0x3d362e, 0x494036];
+  /* THREE TIERS, DARK TO LIT, AND THE PUFF PICKS ITS TIER BY HOW HIGH IT SITS.
+
+     OWNER, 2026-08-13: "smoke still looks 2d". It did, and swapping geometry
+     for billboards is exactly the trade that causes it: a Sprite is unlit, so
+     every puff in the cloud came out the SAME value no matter where it sat in
+     the mass, and a shape with no internal light gradient is a sticker. Real
+     smoke is legible as a volume for one reason — the top of it is in the
+     light and the underside is in its own shadow, and the eye reconstructs the
+     form from that ramp alone.
+
+     So the cloud carries its own lighting, baked: the deep base is nearly
+     black, the shoulders are mid, the crown catches the eruption. It costs
+     nothing at runtime (the tier is fixed per puff at build) and it is the
+     single thing that turns a scatter of discs back into a mass. */
+  const PYRO_ASH = [
+    0x1a1715, 0x211d1a,   // 0-1  base, in the cloud's own shadow
+    0x39322b, 0x433b32,   // 2-3  shoulders
+    0x6a5f51, 0x7d7161,   // 4-5  crown, catching the light
+  ];
   const PYRO_BODY = 6;              // body materials; the rest are the fringe
   const _puffTex = [];
   /* THE PUFF. A single soft radial gradient is a ball, not a cloud — the
@@ -831,7 +912,7 @@
     _pyroMats = [];
     for (let i = 0; i < PYRO_BODY; i++) {
       _pyroMats.push(new THREE.SpriteMaterial({
-        map: puffTex(i % 3), color: PYRO_ASH[i % 4],
+        map: puffTex(i % 3), color: PYRO_ASH[i],
         transparent: true, opacity: 1, depthWrite: false, fog: true,
         blending: THREE.NormalBlending, rotation: i * 1.03,
       }));
@@ -883,13 +964,17 @@
       // the HEAD carries most of the mass: bias lags toward zero
       const lag = Math.pow(Math.random(), 1.7) * tail;
       const basal = i % 8 === 0 && lag < tail * 0.3;
-      const m = new THREE.Sprite(basal ? mats[PYRO_BODY + (i % 2)] : mats[i % PYRO_BODY]);
+      // how high in the mass this puff rides — and therefore how much light
+      // reaches it. Sampled BEFORE the material is chosen, because that is
+      // the whole point: the tier is the lighting.
+      const hf = basal ? 0.04 + Math.random() * 0.11 : Math.random();
+      const tier = Math.min(2, Math.floor(Math.pow(hf, 0.85) * 3));
+      const m = new THREE.Sprite(basal ? mats[PYRO_BODY + (i % 2)] : mats[tier * 2 + (i & 1)]);
       m.renderOrder = 7;
       grp.add(m);
       blobs.push({
-        m: m, lag: lag, basal: basal,
+        m: m, lag: lag, basal: basal, hf: hf,
         lat: (Math.random() * 2 - 1) * 1.1,
-        hf: basal ? 0.04 + Math.random() * 0.11 : Math.random(),
         ph: Math.random() * 6.28,
         sz: (basal ? 0.17 : 0.15) + Math.pow(Math.random(), 1.4) * (basal ? 0.17 : 0.42),
       });
@@ -1241,14 +1326,41 @@
            a +-18% size jitter per cell is the whole fix, and it is free:
            the patches still tile the same area, they just stop agreeing
            about where their edges are. */
-        cells.push({
+        const ang = h01(x, z, salt + 71) * Math.PI * 0.5;
+        // wide size spread: patches that are all one size read as leopard
+        // print no matter how organic each individual outline is
+        const jit = 0.58 + 0.92 * h01(x, z, salt + 89);
+        const C = {
           x: x, z: z, y: groundAt(x, z), w: cell, d: cell, depth: 0, roof: false,
-          ang: h01(x, z, salt + 71) * Math.PI * 0.5,
-          jit: 0.80 + 0.40 * h01(x, z, salt + 89),
+          ang: ang, jit: jit,
           // per-cell coverage gain: the drift does not arrive as a straight
           // edge, it mottles, and one hashed multiplier is the whole effect
           gain: 0.55 + 0.95 * h01(x, z, salt + 103),
-        });
+        };
+        /* ---- THE DEPOSIT LIES ON THE GROUND. ------------------------------
+           OWNER, 2026-08-13: "ash is the worst, theres random cubes and
+           floating flat gray squares all around". Exactly right, and it was
+           one line: every quad took ONE height — the ground under its centre —
+           for all four of its corners. A horizontal three-metre plate on the
+           side of a cone buries one edge and hangs the other a metre in the
+           air, and there are five thousand of them. On the flat it still
+           floated, because the surface was also being lifted by 0.6 x the
+           depth: half a metre of ash put the sheet a third of a metre above
+           the grass it was supposed to be sitting on.
+
+           Each corner now stands on the ground under ITSELF. The four ground
+           probes are taken once, here, at the quad's full extent — the cell
+           never moves, and the only thing that changes with coverage is how
+           far out along that fixed diagonal the corner currently sits, which
+           is a lerp. So the blanket drapes the mountain for no per-frame cost
+           at all. ------------------------------------------------------- */
+        const hw0 = cell * 0.78 * jit, ca = Math.cos(ang), sa = Math.sin(ang);
+        const ox = [-hw0, hw0, hw0, -hw0], oz = [-hw0, -hw0, hw0, hw0];
+        C.cy = new Float32Array(4);
+        for (let k = 0; k < 4; k++) {
+          C.cy[k] = groundAt(x + ox[k] * ca - oz[k] * sa, z + ox[k] * sa + oz[k] * ca);
+        }
+        cells.push(C);
       }
     }
     const groundCells = cells.length;
@@ -1264,16 +1376,31 @@
       idx[k] = v; idx[k + 1] = v + 2; idx[k + 2] = v + 1;
       idx[k + 3] = v; idx[k + 4] = v + 3; idx[k + 5] = v + 2;
     }
-    /* EVERY ASH QUAD IS HORIZONTAL, FOREVER. So its normal is a constant, and
-       recomputing 18,000 of them every rewrite is pure waste — it was the
-       single most expensive thing in the ash field. Written once here, and
-       the update path never calls computeVertexNormals() again. */
+    /* EVERY ASH QUAD'S NORMAL POINTS UP, and it keeps pointing up now that the
+       quads themselves drape the terrain. That is deliberate, not leftover: a
+       deposit is a thin dust layer whose micro-surface faces the sky whatever
+       it is lying on, so lighting it off the slope beneath would make the
+       blanket read as painted-on rock. It also means the constant is still a
+       constant — written once here, and the update path never calls
+       computeVertexNormals() again, which was the single most expensive thing
+       in the ash field before. */
     const nrm = new Float32Array(MAXC * 4 * 3);
     for (let i = 1; i < nrm.length; i += 3) nrm[i] = 1;
+    // UVs are constant too — the patch shape lives in the alpha cutout, and
+    // every quad maps the whole texture once
+    const uvs = new Float32Array(MAXC * 4 * 2);
+    for (let i = 0; i < MAXC; i++) {
+      const u = i * 8;
+      uvs[u] = 0; uvs[u + 1] = 0;
+      uvs[u + 2] = 1; uvs[u + 3] = 0;
+      uvs[u + 4] = 1; uvs[u + 5] = 1;
+      uvs[u + 6] = 0; uvs[u + 7] = 1;
+    }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
     geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
     geo.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
+    geo.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
     geo.setIndex(new THREE.BufferAttribute(idx, 1));
     /* OPAQUE. Ash is a solid deposit; the fade-in is coverage, not alpha.
        The small cool emissive is not decoration: an eruption drives the scene
@@ -1283,7 +1410,19 @@
        the eruption light it. */
     const mat = new THREE.MeshLambertMaterial({
       vertexColors: true, side: THREE.DoubleSide,
-      emissive: 0x101216, emissiveIntensity: 1,
+      // ALPHA CUTOUT, NOT BLENDING. alphaTest keeps the deposit genuinely
+      // opaque — no transparency sorting over thousands of overlapping quads,
+      // no seams where two patches darken each other — while the texture
+      // gives every patch an eroded outline instead of four straight edges.
+      map: ashTex(), alphaTest: 0.45, transparent: false,
+      /* THE NEUTRAL FLOOR HAS TO STAY TINY, and this is why: emissive is
+         SELF-LIT. Raised far enough to cancel the eruption's orange cast by
+         day, it also ignores the day cycle — so a midnight island came out
+         covered in pale grey blobs glowing on black ground. The tint is
+         fought with PIGMENT instead (the colours below are blue-shifted so an
+         orange sun lands them neutral), and the emissive is back to being
+         what it was for: keeping deep shadow off pure black. */
+      emissive: 0x090b0e, emissiveIntensity: 1,
       polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
     });
     const mesh = new THREE.Mesh(geo, mat);
@@ -1300,15 +1439,24 @@
       // quads grow from a point at their cell centre; neighbours overlap at
       // full coverage, which is what welds them into one blanket
       const jit = C.roof ? 1 : (C.jit || 1);
-      const hw = C.w * 0.78 * cov * jit, hd = C.d * 0.78 * cov * jit;
-      const y = C.y + (C.roof ? 0.03 : 0.025) + Math.min(0.5, C.depth) * 0.6;
+      /* The patch never shrinks to a point, and at full coverage it is WIDER
+         than its cell so neighbours weld. The alpha cutout eats ~20% of the
+         quad, so the geometry has to overshoot for the deposit to close up. */
+      const grow = 0.28 + 0.72 * cov;
+      const hw = C.w * 1.05 * grow * jit, hd = C.d * 1.05 * grow * jit;
+      /* The deposit stands a FEW CENTIMETRES proud of what it covers — it is
+         a layer of dust, not a plinth. The old 0.6 x depth lift was reading
+         the ledger's metres as if they were the sheet's own thickness. */
+      const lift = (C.roof ? 0.03 : 0.02) + Math.min(0.3, C.depth) * 0.15;
       const v = n * 4 * 3;
       // roofs keep their footprint; ground patches spin on their own hash
       const ca = C.roof ? 1 : Math.cos(C.ang || 0), sa = C.roof ? 0 : Math.sin(C.ang || 0);
       const qx = [-hw, hw, hw, -hw], qz = [-hd, -hd, hd, hd];
       for (let k = 0; k < 4; k++) {
         pos[v + k * 3] = C.x + qx[k] * ca - qz[k] * sa;
-        pos[v + k * 3 + 1] = y;
+        // drape: the corner rides from the cell centre out to its own ground
+        // as the patch grows. Roofs are flat, so they keep one height.
+        pos[v + k * 3 + 1] = (C.cy ? C.y + (C.cy[k] - C.y) * cov : C.y) + lift;
         pos[v + k * 3 + 2] = C.z + qx[k] * sa + qz[k] * ca;
       }
       /* A THIN DUSTING IS NOT A WHITE PATCH. Coverage alone gave every fleck
@@ -1319,8 +1467,17 @@
          deposit builds — and then back DOWN as it goes deep and damp. */
       const deep = clamp(C.depth / 0.35, 0, 1);
       const grain = 0.86 + 0.2 * h01(C.x, C.z, salt);
-      _c3.setHex(0x585a54).lerp(_c1.setHex(0x9a968e), Math.min(1, cov * 1.15));
-      _c3.lerp(_c1.setHex(0x726c63), deep * 0.7);
+      // cooler and a stop darker than the first pass: an eruption drives the
+      // scene sun to 0xff6a3a, and pale warm grey under that comes out pink
+      /* AND IT IS DARK. Fresh fall on a volcano's flank is a dark grey — the
+         reference photograph the owner sent is a BLACK cone, and a pale
+         blanket over the whole island is what was stopping this one from
+         reading as rock at all. The old top stop was near-white; a deposit
+         that bright only exists under snow. */
+      // blue-shifted on purpose: these are multiplied by a warm sun, and an
+      // albedo picked to look grey in a swatch comes out pink on the ground
+      _c3.setHex(0x26282a).lerp(_c1.setHex(0x4b4e52), Math.min(1, cov * 1.15));
+      _c3.lerp(_c1.setHex(0x35373a), deep * 0.7);
       for (let k = 0; k < 4; k++) {
         col[v + k * 3] = _c3.r * grain;
         col[v + k * 3 + 1] = _c3.g * grain;

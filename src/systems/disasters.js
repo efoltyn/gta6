@@ -2534,18 +2534,32 @@
 
     ctx.st.erLava = null; ctx.st.erStreams = null; ctx.st.erPools = null;
     if (V) {
-      /* ---- LAVA: opaque crusted flows down the fall line ---- */
-      const n = 4;
+      /* ---- LAVA: opaque crusted flows down the fall line ----
+
+         OWNER, 2026-08-13, holding up a photograph of Arenal: the magma is
+         "fake". The photograph is the argument. A stratovolcano at night is a
+         BLACK CONE with a dozen narrow incandescent threads fanning down its
+         face — each one a metre or two wide, braided, and bright precisely
+         because it is thin. Four ribbons at seven metres on a thirty-six
+         metre cone is a fifth of the mountain's width painted orange, and no
+         amount of surface detail rescues that proportion: it reads as a
+         glowing road because it is the size of one.
+
+         Nine threads at a third of the width put the same amount of light on
+         the mountain through nine times as many edges, and edges are what the
+         eye reads as lava. The cone stays dark, which is the other half of
+         the photograph. */
+      const n = 9;
       ctx.st.erLava = [];
       for (let i = 0; i < n; i++) {
         // never straight down the pyroclastic lane — the two hazards want
         // separate faces of the cone so the mountain reads as having sides
-        const a = ctx.st.pyroBear + 1.1 + (i / n) * 5.0 + (CBZ.hash01 ? CBZ.hash01(h.x + i, h.z, 91) : 0.5) * 0.3;
-        const p = vent(h, a, 2.8);
+        const a = ctx.st.pyroBear + 1.0 + (i / n) * 5.2 + (CBZ.hash01 ? CBZ.hash01(h.x + i, h.z, 91) : 0.5) * 0.34;
+        const p = vent(h, a, 2.2);
         ctx.st.erLava.push(V.lavaFlow({
           x: p.x, z: p.z, groundAt: gAt(ctx), parent: root(), bearing: a,
           len: h.r * 1.35 + 16 * ctx.intensity,
-          width: 5.2 + 2.4 * ctx.intensity,
+          width: 1.9 + 1.1 * ctx.intensity,
           /* YOU WALK AWAY FROM LAVA — that is this file's own doctrine two
              hundred lines up, and at 4.2-6.8 m/s the flows were outrunning a
              SPRINT. A basaltic channel on a slope this size does about walking
@@ -2553,7 +2567,11 @@
              you lose ground to slowly and lose your house to entirely. */
           speed: 1.7 + 1.3 * ctx.intensity,
           salt: 4700 + i * 137,
-          light: i < 2,        // BUDGET: two real lights for four flows
+          // BUDGET: three real lights for nine threads, and the haze belongs
+          // to the mountain rather than to each thread — nine sets of it over
+          // narrow flows is a fog bank, which is what buried the last look
+          light: i % 3 === 0,
+          haze: i % 3 === 0,
         }));
       }
       /* ---- ASHFALL AS A LOAD: one field, plus every standing roof ---- */
@@ -2612,8 +2630,14 @@
        dayK() is the sun's own elevation off core/daynight.js. */
     const dk = dayK();
     ctx.env.fog = lerpHex(0x120b08, 0x2e211c, dk); ctx.env.fogNear = 40; ctx.env.fogFar = 300;
-    ctx.env.sunInt = 0.5 * dk; ctx.env.sunColor = 0xff6a3a;
-    ctx.env.hemiInt = 0.14 + 0.46 * dk; ctx.env.hemiColor = 0xff7a4a;
+    /* AND IT MUST NOT PAINT THE ISLAND PEACH. 0xff6a3a is a fully saturated
+       orange; run through every diffuse surface on the map it turned grey ash,
+       grey concrete and green grass into one warm pastel, which is the
+       opposite of the reference photograph the owner sent — that mountain is
+       DARK. An ash-shrouded eruption sky is a dirty brown, not a sodium lamp,
+       so the sun keeps its warmth and loses most of its saturation. */
+    ctx.env.sunInt = 0.5 * dk; ctx.env.sunColor = 0xd9714a;
+    ctx.env.hemiInt = 0.14 + 0.42 * dk; ctx.env.hemiColor = 0x9c7461;
     // the ash rains where the wind carries it — the fallout wedge is VISIBLE
     if (ctx.st.erWindX != null) ctx.st.erAsh.update(dt, h.x + ctx.st.erWindX * 40, 0, h.z + ctx.st.erWindZ * 40);
     else ctx.st.erAsh.update(dt, camPos().x, 0, camPos().z);
@@ -2910,7 +2934,7 @@
       bombsThrown++;
       CBZ.fx.dropDebris({
         x: bx, z: bz, fromX: vp.x, fromZ: vp.z, fromY: h.peak + 3.5,
-        size: 1.7, color: 0xff5a1a, dmg: 999, keep: true,
+        size: 1.7, color: 0x2e2622, shape: "rock", dmg: 999, keep: true,
         onLand: function (x, z) {
           mk.dispose();
           /* A LAVA BOMB IS A ROCK ARRIVING AT SPEED — the bus's `kinetic` row,
