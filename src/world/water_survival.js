@@ -2,7 +2,7 @@
    world/water_survival.js — ONE WATER ORACLE, BOTH WORLDS.
 
    THE PROBLEM THIS SOLVES, and it is a naming accident rather than a design.
-   `docs/claude/engine-systems.md` says there is ONE water oracle and every
+   `scrolls/claude/engine-systems.md` says there is ONE water oracle and every
    consumer asks it; the three names it means are CBZ.cityWaterAt,
    CBZ.citySeaHeightAt and CBZ.citySeaBedYAt. They are published by
    city/waterfield.js and city/swim.js, and they answer for the CITY only. So

@@ -166,7 +166,7 @@
 
   /* ---- SEA LEVEL IS ONE NUMBER -------------------------------------------
      CBZ.waterSurgeSet is THE only way water rises in this game (see
-     docs/claude/engine-systems.md). The arena's ocean plane follows it every
+     scrolls/claude/engine-systems.md). The arena's ocean plane follows it every
      frame (world/disaster_arena.js), so raising the surge floods the island:
      no rising mesh, no second flood sheet, and the swimmer, the buoyant
      corpses, the drifting debris and the submergence query all move together

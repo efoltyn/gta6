@@ -55,7 +55,7 @@
     return "#e6ecf5";
   }
   /* ---- ONE DEATH BUS ------------------------------------------------------
-     OWNER DOCTRINE (docs/claude/engine-systems.md): every death funnels
+     OWNER DOCTRINE (scrolls/claude/engine-systems.md): every death funnels
      through city/killfeed.js, and it owns the ONLY sanctioned HUD popup —
      the corner feed. This mode used to run a FIFTH parallel text channel
      instead: CBZ.pushKill (systems/hud.js) rewriting the prison objective

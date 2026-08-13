@@ -295,7 +295,7 @@
 
      So the bank is now DERIVED, not tuned. Each cue names the real-world sound
      pressure level of the thing it depicts (dB SPL at 1 m, sourced in
-     docs/claude/sound.md — 3M's Noise Navigator database of 1700+ measurements
+     scrolls/claude/sound.md — 3M's Noise Navigator database of 1700+ measurements
      where one exists, anchored between two measured neighbours where it does
      not), and the mix maps that onto:
 

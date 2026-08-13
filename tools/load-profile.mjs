@@ -28,7 +28,7 @@
      node tools/load-profile.mjs --cfg OFFICIAL_IFC_LAZY=0    # A/B a build flag
 
    WHY --cfg AND NOT A LIVE TOGGLE: build-time flags are read while the world
-   is generated, so flipping one after boot proves nothing (docs/claude/
+   is generated, so flipping one after boot proves nothing (scrolls/claude/
    verification.md). Every --cfg becomes a ?cfg_NAME=VALUE on the URL.
 
    NOTE ON THE NUMBERS: this runs SwiftShader, so anything GPU-side (the FRAME
@@ -80,7 +80,7 @@ const dbg = await claimPort(10300, 250, (p) => fetch(`http://127.0.0.1:${p}/json
 const profileDir = `/tmp/cbz-loadprofile-${dbg}`;
 await rm(profileDir, { recursive: true, force: true });
 // macOS (the owner's machine) has no /opt/pw-browsers — same resolution every
-// other tool on the shelf uses. See docs/claude/verification.md.
+// other tool on the shelf uses. See scrolls/claude/verification.md.
 const CHROME = process.env.CBZ_CHROME ||
   (process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "/opt/pw-browsers/chromium");
 const query = cfgs.map((c) => {
@@ -336,7 +336,7 @@ if (booted) {
 
 if (consoleErrors.length) {
   // One ProgressEvent is the documented pre-existing baseline; anything else
-  // is a real fault (docs/claude/verification.md).
+  // is a real fault (scrolls/claude/verification.md).
   const tally = new Map();
   for (const e of consoleErrors) tally.set(e, (tally.get(e) || 0) + 1);
   console.log("\nPAGE EXCEPTIONS (" + consoleErrors.length + ", " + tally.size + " distinct):");

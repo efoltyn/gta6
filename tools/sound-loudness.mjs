@@ -18,7 +18,7 @@
      5. prints the trim, in dB, that would put it there.
 
    The real-world column comes from measured databases, not vibes — see
-   docs/claude/sound.md for every value's source (3M Noise Navigator, 1700+
+   scrolls/claude/sound.md for every value's source (3M Noise Navigator, 1700+
    measurements; sengpielaudio's SPL table). Values marked `est` there have no
    published measurement and are anchored between two that do.
 
@@ -123,7 +123,7 @@ if (!measured || measured.__err) { console.error("FAIL: measurement threw — " 
 const { files, bank } = JSON.parse(measured);
 
 /* ---- the real world, and the scheme ------------------------------------- */
-// dB SPL at 1 m for the event each cue depicts. Sourced in docs/claude/sound.md.
+// dB SPL at 1 m for the event each cue depicts. Sourced in scrolls/claude/sound.md.
 const SPL = {
   coin: 50, key: 55, loot: 45, pickup: 40, equip: 45,
   door_open: 70, door_close: 85, glass: 95, siren: 120, lockdown: 125,
@@ -229,7 +229,7 @@ for (const r of rows) {
   }
 }
 const unpriced = Object.keys(bank).filter((c) => SPL[c] == null);
-for (const c of unpriced) bad.push(`${c}: in the bank with no real-world dB SPL — price it in docs/claude/sound.md`);
+for (const c of unpriced) bad.push(`${c}: in the bank with no real-world dB SPL — price it in scrolls/claude/sound.md`);
 console.log("");
 if (bad.length) {
   for (const b of bad) console.log("FAIL  " + b);

@@ -159,7 +159,7 @@ Both are `CBZ.CONFIG` flags with a one-line URL revert, per doctrine. Gated:
    on it.
 
 Not worth doing: bundling. The no-build-step rule is load-bearing —
-**pushing to main IS the deploy** (`docs/claude/project.md`).
+**pushing to main IS the deploy** (`scrolls/claude/project.md`).
 
 ---
 

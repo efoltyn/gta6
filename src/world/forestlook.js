@@ -33,7 +33,7 @@
    must not change its stream's shape; nothing here consumes one.
 
    Flags (declared here, not config.js — see the Edit-race note in
-   docs/claude/verification.md):
+   scrolls/claude/verification.md):
      FOREST_LOOK             master; off = every caller's legacy inline value
      FOREST_SPECIES_MIX      conifer spires among the broadleaf
      FOREST_CANOPY_CARPET    stand mask + closure-driven density

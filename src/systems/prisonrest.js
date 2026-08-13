@@ -57,7 +57,7 @@
 
    SHOW, DON'T TELL: this file prints nothing and adds no prompt. There is no
    snore, either — `systems/audio.js` has no such cue, and inventing one
-   without a measured SPL is exactly the fake-prop fault docs/claude/sound.md
+   without a measured SPL is exactly the fake-prop fault scrolls/claude/sound.md
    exists to stop. The night is quiet because the men are asleep.
 
    Flags PRISON_REST_V1 · PRISON_REST_WARDEN.

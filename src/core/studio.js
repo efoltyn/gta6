@@ -63,7 +63,7 @@
    than six boxes. What a page cannot get by name, it may still build — but it
    must be told what it already has first.
 
-   THE FIVE-POINT BLOCK LAW COMPLIANCE (docs/claude/doctrine.md):
+   THE FIVE-POINT BLOCK LAW COMPLIANCE (scrolls/claude/doctrine.md):
    1. ONE-LINE ADOPTION — `CBZ.studio.need(...)` replaces a hand-typed list of
       script tags, and a page may adopt it for SOME packs while keeping its own
       tags for the rest: files already in the document are never re-injected.

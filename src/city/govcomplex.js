@@ -1512,7 +1512,7 @@
        its own land, with a road you drive up, a dock you back a truck
        into and an apron a freighter can sit on. That is this file's whole
        job description, which is why this is a `COMPLEXES` ROW AND NOT A
-       SECOND PLACER (the law in docs/claude/engine-systems.md).
+       SECOND PLACER (the law in scrolls/claude/engine-systems.md).
 
        WHAT IS DIFFERENT ABOUT IT, and it is only two things:
          • `principal: null` — nobody sits here. Every other row is a seat
@@ -2571,7 +2571,7 @@
      ANYWHERE INSIDE IT THAT WAS SHUT. `keepOut` is a spawn zone. `access` is a
      trespass query. occupy.js states the gap in its own header — "it does not
      lock doors, because nothing in this engine has a lockable door yet" — and
-     docs/claude/engine-systems.md books it as the NEXT OWED. A building with
+     scrolls/claude/engine-systems.md books it as the NEXT OWED. A building with
      no closed door in it cannot make a gradient, and a building that makes no
      gradient is a prop with a marker on it, which is doctrine LAW 1's exact
      complaint.

@@ -680,7 +680,7 @@
 
      One-line adoption, degrade-safe: a caller that has no actor, or whose actor
      is out of range, gets `false` and behaves exactly as it does today. Named
-     in docs/claude/, counted by CBZ.aiNarrationAudit().
+     in scrolls/claude/, counted by CBZ.aiNarrationAudit().
      =========================================================================== */
   const SAY_AMBIENT = 0, SAY_ACT = 1, SAY_ANSWER = 2;
   const SAY_NEAR = 16, SAY_ENGAGED = 24;
