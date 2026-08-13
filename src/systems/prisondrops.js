@@ -83,7 +83,7 @@
   const SPAWN_Y = 1.06;      // m — pockets are at the chest, not at the feet
 
   // ---- audit counters -------------------------------------------------------
-  let spawned = 0, taken = 0, expired = 0, evicted = 0, bodies = 0, gunsDropped = 0;
+  let spawned = 0, taken = 0, expired = 0, evicted = 0, bodies = 0, gunsDropped = 0, torchesDropped = 0;
 
   function floorY(x, z, fromY) {
     if (CBZ.groundAt) { const y = CBZ.groundAt(x, z, fromY); if (isFinite(y)) return y; }
@@ -139,7 +139,7 @@
 
   // name -> shape overrides. Everything else falls through to its ITEMS tag.
   const SHAPE_BY_NAME = {
-    "Gun": "gun",
+    "Gun": "gun", "Guard Torch": "torch",
     "Shiv": "blade", "Razor Blade": "blade", "Hacksaw Blade": "blade",
     "Brass Knuckles": "blade", "Hatchet": "blade", "Pickaxe": "blade",
     "Handcuff Key": "card", "Contraband Map": "card", "Burner SIM": "card",
@@ -159,6 +159,7 @@
     const it = CBZ.econ && CBZ.econ.ITEMS && CBZ.econ.ITEMS[name];
     return (it && SHAPE_BY_TAG[it.tag]) || "pouch";
   }
+  function rigidShape(shape) { return shape === "gun" || shape === "torch"; }
 
   // A tint per rarity, so a gold chain in the dirt reads differently from a
   // bar of soap without anybody typing a colour per item.
@@ -193,6 +194,20 @@
         put(g, bgeo(0.10, 0.06, 0.30), cmat(0x30363f), 0, 0, 0);   // no actorweapons.js loaded
       }
       hh = 0.05; r = 0.13;
+    } else if (shape === "torch") {
+      // The exact held model, with the hand-socket rotation removed. Released
+      // torches join the same measured side-rest solver as firearms, so their
+      // reflector/body—not a guessed half-height—decides where the ground is.
+      if (CBZ.buildFlashlight) {
+        const model = CBZ.buildFlashlight({ lit: false });
+        model.position.set(0, 0, 0);
+        model.rotation.set(0, 0, 0);
+        model.scale.setScalar(1.08);
+        g.add(model);
+      } else {
+        put(g, cgeo(0.055, 0.44), cmat(0x20262d), 0, 0, 0, Math.PI / 2);
+      }
+      hh = 0.055; r = 0.12;
     } else if (shape === "blade") {
       put(g, bgeo(0.05, 0.04, 0.20), cmat(0x1b1f26), 0, 0, -0.02);           // taped grip
       put(g, bgeo(0.035, 0.02, 0.26), cmat(0xb9c2cc), 0, 0.005, 0.20);       // ground edge
@@ -310,7 +325,7 @@
     if (d.cigs > 0) { CBZ.econ && CBZ.econ.addCigs(d.cigs); note("Cigarettes", false, d.cigs); CBZ.sfx && CBZ.sfx("coin"); return; }
     CBZ.econ && CBZ.econ.addItem && CBZ.econ.addItem(d.item, 1);
     note(d.item, CBZ.econ && CBZ.econ.isRare ? CBZ.econ.isRare(d.item) : false, 1);
-    CBZ.sfx && CBZ.sfx(d.shape === "gun" ? "equip" : "pickup");
+    CBZ.sfx && CBZ.sfx(rigidShape(d.shape) ? "equip" : "pickup");
   }
 
   function takeDrop(inst) {
@@ -537,7 +552,7 @@
   function spawnDrop(item, cigs, x, y, z, vx, vy, vz) {
     const shape = cigs > 0 ? "cigs" : shapeOf(item);
     // A GUN AND A KEY ARE REACHED FOR, NOT SWEPT UP.
-    const hold = shape === "gun" || shape === "card" || shape === "blade";
+    const hold = rigidShape(shape) || shape === "card" || shape === "blade";
     enforceCap();
     const inst = CBZ.spawnProp("prisondrop", x, y, z, {
       item: item, cigs: cigs, shape: shape, hold: hold,
@@ -554,8 +569,8 @@
     // walls, bounces, and sets the model's MEASURED lowest vertex on the
     // highest support under its footprint. Never a second gun physics.
     // The mesh must already be parented for this — spawnProp did that above.
-    if (shape === "gun") {
-      gunsDropped++;
+    if (rigidShape(shape)) {
+      if (shape === "gun") gunsDropped++; else torchesDropped++;
       if (C.PRISON_DROPS_PHYSICS !== false && CBZ.weaponPhysics && CBZ.weaponPhysics.drop) {
         try {
           inst.data.body = CBZ.weaponPhysics.drop(inst.data.mesh, {
@@ -659,7 +674,7 @@
     if (el + 0.001 < lastEl) {
       CBZ.prisonDropClear();
       CBZ.econ && CBZ.econ.resetLoadouts && CBZ.econ.resetLoadouts();
-      spawned = 0; taken = 0; expired = 0; evicted = 0; bodies = 0; gunsDropped = 0;
+      spawned = 0; taken = 0; expired = 0; evicted = 0; bodies = 0; gunsDropped = 0; torchesDropped = 0;
       replaceWorldItems();      // a placed tool is part of the world, not of the run
     }
     lastEl = el;
@@ -726,7 +741,7 @@
         // measured lowest vertex and audits that itself (weaponPhysicsAudit's
         // `underground`); re-deriving a half-height for it would only invent a
         // second, worse answer to a question that already has one.
-        if (d.shape === "gun") continue;
+        if (rigidShape(d.shape)) continue;
         const fy = floorY(d.mesh.position.x, d.mesh.position.z, d.mesh.position.y + 0.4);
         if (d.mesh.position.y - d.hh < fy - 0.06) underfloor++;
       }
@@ -734,7 +749,7 @@
     return {
       live: live.length, cap: CAP, spawned: spawned, taken: taken,
       expired: expired, evicted: evicted, bodies: bodies,
-      physicalGuns: gunsDropped, resting: resting,
+      physicalGuns: gunsDropped, physicalTorches: torchesDropped, resting: resting,
       gunSolver: !!(CBZ.weaponPhysics && CBZ.weaponPhysics.drop && C.PRISON_DROPS_PHYSICS !== false),
       orphans: orphans, underfloor: underfloor,
       deathFrisks: la.deathFrisks, itemToasts: la.itemToasts,

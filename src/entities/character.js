@@ -2255,14 +2255,18 @@
       ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, 0.18 - recoilSide * 0.22, ar, dt);
       ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, 0.34, ar, dt);
       ch.parts.ra.position.z = damp(ch.parts.ra.position.z, 0.14, ar, dt);
-      ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, (longGun ? -1.55 : -1.45) - 0.14 * hv - pitch * 0.8, ar - 1, dt);
-      ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, (longGun ? -0.34 : -0.22) - 0.10 * hv, ar - 1, dt);
-      ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, longGun ? -0.42 : -0.30, ar - 1, dt);
-      ch.parts.la.position.z = damp(ch.parts.la.position.z, (longGun ? 0.24 : 0.14) + hsup * 0.5, ar - 1, dt);
+      // A pistol is still a TWO-HAND shot. The old sidearm targets left the
+      // support fist beside the left shoulder while the gun floated in the
+      // right hand (visible from the prison chase camera). Cross and extend the
+      // support arm onto the firing wrist; long guns keep their handguard pose.
+      ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, (longGun ? -1.55 : -1.56) - 0.14 * hv - pitch * 0.8, ar - 1, dt);
+      ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, (longGun ? -0.34 : -0.32) - 0.10 * hv, ar - 1, dt);
+      ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, longGun ? -0.42 : -0.68, ar - 1, dt);
+      ch.parts.la.position.z = damp(ch.parts.la.position.z, (longGun ? 0.24 : 0.20) + hsup * 0.5, ar - 1, dt);
       // gun arm nearly locked; the support elbow closes onto the handguard.
       // recoil folds the elbow a touch — the arm absorbs the kick.
       setElbow(J.ra, -0.10 - recoil * 0.25, ar);
-      setElbow(J.la, (longGun ? -0.72 : -0.48) - 0.26 * hv, ar - 1);
+      setElbow(J.la, (longGun ? -0.72 : -0.22) - 0.26 * hv, ar - 1);
     } else if (ch.cuffed) {
       ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, 0.5, 10, dt);
       ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, 0.5, 10, dt);

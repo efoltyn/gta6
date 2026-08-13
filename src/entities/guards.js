@@ -13,19 +13,15 @@
 
   let guardNo = 0;
   function addFlashlight(ch) {
-    const group = new THREE.Group();
-    group.position.set(0.02, -0.06, 0.08);
-
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 0.52), CBZ.mat(0x171b22));
-    body.position.z = 0.02;
-    body.castShadow = true;
-    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.34, 0.13), CBZ.mat(0x0b0d12));
-    grip.position.set(0, -0.08, -0.12);
-    grip.castShadow = true;
-    const lensMat = CBZ.mat(0xe8f6ff, { emissive: 0x000000, ei: 0 });
-    const lens = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.18, 0.05), lensMat);
-    lens.position.z = 0.30;
-    group.add(body, grip, lens);
+    // ONE MODEL at every scale: weapons/flashlight.js also feeds the physical
+    // death drop and the inventory thumbnail.  Its +Z is the light direction;
+    // rotate that axis onto the hand socket's -Y (down the forearm), so the
+    // reflector sits beyond the fingers and the parented beam leaves the lens.
+    const group = CBZ.buildFlashlight ? CBZ.buildFlashlight() : new THREE.Group();
+    group.position.set(0.01, -0.025, 0.025);
+    group.rotation.x = Math.PI / 2;
+    const lens = group.userData.lens || null;
+    const lensMat = group.userData.lensMat || (lens && lens.material) || CBZ.mat(0xe8f6ff, { emissive: 0x000000, ei: 0 });
     group.visible = false;
     ch.sockets.rightHand.add(group);
     return { group, lens, lensMat };

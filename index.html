@@ -503,7 +503,7 @@
 <script src="src/systems/proptypes.js?v=arch2"></script>
 
 <!-- 3. entities -->
-  <script src="src/entities/character.js?v=mount1chute1"></script>
+  <script src="src/entities/character.js?v=prisonaim1"></script>
 <script src="src/entities/poses.js?v=pose1"></script>
 <script src="src/entities/player.js?v=scale1y"></script>
 <script src="src/entities/coins.js"></script>
@@ -537,10 +537,13 @@
 <script src="src/weapons/appearances/uzi.js"></script>
 <script src="src/weapons/appearances/sniper.js?v=optic2"></script>
 <script src="src/weapons/appearances/lmg.js?v=bipod3"></script>
+<!-- ONE prison flashlight model: held guard tool, physical death drop and
+     inventory thumbnail all consume this factory. -->
+<script src="src/weapons/flashlight.js?v=duty1"></script>
 <script src="src/systems/actorweapons.js?v=traversal1"></script>
-<script src="src/city/weapon_thumbnails.js?v=gunthumb1"></script>
+<script src="src/city/weapon_thumbnails.js?v=duty1"></script>
 <script src="src/systems/holsterprops.js?v=weaponphysics1"></script>
-<script src="src/systems/prisondrops.js?v=drops1"></script>
+<script src="src/systems/prisondrops.js?v=duty1"></script>
 
 <!-- 2c. rooms (use addBox + addPack) -->
 <script src="src/world/roombuild.js"></script>
@@ -561,7 +564,7 @@
 
 <!-- 3b. actors that depend on economy -->
 <script src="src/entities/vision.js"></script>
-<script src="src/entities/guards.js?v=scale1"></script>
+<script src="src/entities/guards.js?v=duty1"></script>
 <script src="src/entities/searchlight.js"></script>
 <script src="src/entities/ambientlife.js"></script>
 <script src="src/entities/keycard.js"></script>
@@ -632,7 +635,7 @@
      After cellblock/guards/searchlight/npc (all read at parse), before the
      detection sweep that consumes the result. -->
 <script src="src/systems/prisonschedule.js?v=clock1"></script>
-<script src="src/systems/prisonnight.js?v=clock1"></script>
+<script src="src/systems/prisonnight.js?v=duty1"></script>
 <!-- BODIES USE THE FURNITURE. The bunks in this wing had never once become
      propuse anchors (city/propuse.js loads 337 tags after world/cellblock.js,
      so every useBed() call silently degraded — measured: 21 props, 0 beds),
@@ -703,7 +706,7 @@
 <script src="src/systems/reinforcements.js?v=allmain2"></script>
 <script src="src/systems/lockdown.js"></script>
 <script src="src/systems/difficulty.js"></script>
-<script src="src/systems/reactions.js?v=traversal1"></script>
+<script src="src/systems/reactions.js?v=prisonhit1"></script>
 <script src="src/systems/facial.js?v=glance1"></script>
 <script src="src/systems/ambient.js"></script>
 <script src="src/systems/weather.js?v=annulus1"></script>
@@ -726,7 +729,7 @@
      before every consumer: systems/inventory.js, city/hud.js, charpanel.js,
      city/inventory.js. Only needs CBZ + CBZ.CONFIG. -->
 <script src="src/city/itemicons.js?v=allmain1"></script>
-<script src="src/systems/inventory.js?v=onebar1"></script>
+<script src="src/systems/inventory.js?v=duty1"></script>
 <script src="src/systems/state.js?v=arrest4w10"></script>
 <script src="src/systems/save.js"></script>
 <script src="src/systems/runstats.js"></script>
@@ -736,7 +739,7 @@
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
 <script src="src/systems/gamepad.js?v=seamount1"></script>
-<script src="src/systems/fpsmode.js?v=onebar1"></script>
+<script src="src/systems/fpsmode.js?v=prisonhit1"></script>
 <script src="src/systems/gunfx.js?v=shotwarm1w9"></script>
 <script src="src/systems/intimidate.js?v=npc-react1"></script>
 

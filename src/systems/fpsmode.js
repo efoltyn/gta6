@@ -2229,6 +2229,22 @@
     if (lethalHeadshot) a.hp = 0;
     else a.hp -= dmg;
 
+    // A surviving prison target now enters the SAME directional body-impulse
+    // contract as a surviving city target. Previously jail rounds exposed only
+    // root knockback, then reactions.js guessed a 0.55-rad torso hinge from the
+    // player's position—the torch hand folded through the face and the real ray
+    // direction was lost. Keep the established root shove below; this record
+    // supplies the missing direction/energy to the pose without changing travel.
+    if (!w.nonlethal && !lethalHeadshot && a.hp > 0 && CBZ.body && CBZ.body.hit) {
+      const cal = caliber(w);
+      const force = (3.0 + ((w.knock || 1) * 2.7)) * (0.72 + cal * 0.28) * Math.sqrt(Math.max(0.25, fall));
+      const dir = shotDir ? { x: shotDir.x, y: shotDir.y, z: shotDir.z } : null;
+      CBZ.body.hit(a, {
+        fromX: CBZ.player.pos.x, fromZ: CBZ.player.pos.z,
+        dir: dir, force: force, cal: cal, wkey: w.key,
+        dist: hit.dist, point: hit.point, byPlayer: true,
+      });
+    }
     if (CBZ.knockback) CBZ.knockback(a, CBZ.player.pos.x, CBZ.player.pos.z, w.knock * (hit.head ? 1.25 : 1));
     if (guardish) a.hunt = 3;
     else if (CBZ.provokeGang) CBZ.provokeGang(a, 12);
