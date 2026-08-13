@@ -444,7 +444,16 @@
     o = o || {};
     const y = o.y != null ? o.y : floor(x, z) + (o.up || 1.2);
     let priced = false;
-    if (CBZ.CONFIG.SURV_SHARED_STRUCTURE !== false && CBZ.detonate) {
+    /* A CALLER WITH ITS OWN RENDERER (`o.draw` — the lightning bolt) MUST NOT
+       DEGRADE TO A FIREBALL, because that fireball is the exact bug it was
+       written to delete. CBZ.detonate answers an unknown kind by drawing a
+       generic cityExplosion, and IMPACT_BUS=false makes every kind draw one —
+       so a load-order slip or a master revert would have quietly put the RPG
+       back. Such a caller therefore only reaches for the bus when the bus can
+       actually route its row, and its own draw is the fallback. */
+    const busRoutes = !o.draw || !!(CBZ.CONFIG.IMPACT_BUS !== false &&
+      CBZ.impact && CBZ.impact.row && CBZ.impact.row(kind));
+    if (busRoutes && CBZ.CONFIG.SURV_SHARED_STRUCTURE !== false && CBZ.detonate) {
       try {
         CBZ.detonate(x, y, z, kind, {
           noDamage: true, scale: o.scale, mass: o.mass, speed: o.speed,
@@ -459,7 +468,8 @@
       // size for callers whose lethal radius is 0 because they price their own
       // wave — the nuke, mainly, whose fallback must not be a 4 m puff.
       blastLegacy++;
-      CBZ.fx.blast(x, z, { maxR: (o.fxR || o.r) + 4, color: o.color || 0xffcaa0, shake: 0.6, flash: o.flash != null ? o.flash : 0.3, sfx: o.sfx || "shoot_shotgun" });
+      if (o.draw) { try { o.draw(x, y, z); } catch (e) {} }
+      else CBZ.fx.blast(x, z, { maxR: (o.fxR || o.r) + 4, color: o.color || 0xffcaa0, shake: 0.6, flash: o.flash != null ? o.flash : 0.3, sfx: o.sfx || "shoot_shotgun" });
     }
     // the mode's own roster, priced by the mode's own model
     if (o.r > 0) surv().hurtRadius(x, z, o.r, o.dmg != null ? o.dmg : 1e6, {
@@ -518,7 +528,9 @@
         }
         for (let i = ctx.st.bolts.length - 1; i >= 0; i--) { const b = ctx.st.bolts[i]; b.life -= dt; b.mesh.material.opacity = Math.max(0, b.life / 0.16); if (b.life <= 0) { rmMesh(b.mesh); ctx.st.bolts.splice(i, 1); } }
       },
-      end(ctx) { weatherOff(); (ctx.st.pending || []).forEach((p) => p.m.dispose()); (ctx.st.bolts || []).forEach((b) => rmMesh(b.mesh)); },
+      // `st.bolts` only ever fills on the LIGHTNING_FX_V2=false path; the live
+      // renderer pools its own meshes and hands them back through its reset.
+      end(ctx) { weatherOff(); (ctx.st.pending || []).forEach((p) => p.m.dispose()); (ctx.st.bolts || []).forEach((b) => rmMesh(b.mesh)); if (CBZ.lightningFxReset) CBZ.lightningFxReset(); },
       threat(x, z, ctx) { let t = 0.1; (ctx.st.pending || []).forEach((p) => { const d = Math.hypot(x - p.x, z - p.z); if (d < 7) t = Math.max(t, 0.95 * (1 - d / 7)); }); return t; },
       // in the sirens the smart move is OFF the exposed high ground and out of
       // the open, so the crowd visibly scatters toward the town before the
@@ -3186,11 +3198,51 @@
     if (CBZ.fx) CBZ.fx.dropDebris({ x: t.x, z: t.z, fromY: floor(t.x, t.z) + 3, vy: 2, size: 0.5, color: 0x2a2622, linger: 0.6 });
   }
 
+  /* ---- A STRIKE IS NOT AN EXPLOSION (2026-08-13) --------------------------
+     OWNER: "lightning currently looks like an RPG on impact, which is dumb."
+     It did, and for a reason you can point at. This site routed the strike
+     through the bus's `kinetic` row — the generic "something heavy arrived at
+     speed" row — and `kinetic` names no composer, so it fell through to
+     COMPOSERS.heavy, i.e. cityAirstrikeExplosion. Every ground strike drew a
+     literal airstrike: orange fireball, smoke column, debris ejecta cone. It
+     then priced 60 kg at 120 m/s through THE KINETIC LAW, flung bodies 5 m and
+     swept nine metres of structural damage, because that is what a warhead
+     does. And the bolt itself was BoxGeometry(0.5, 40, 0.5) — a white fence
+     post, dead straight, on screen for one sixth of a second.
+
+     Lightning has no fuel, no fragments and no chemistry. Nothing at the
+     contact point can burn and there is nothing there to throw. What it does
+     have is a forked channel, three-to-five RETURN STROKES that make it strobe
+     rather than fade, surface flashover crawling out across the ground, steam
+     off wet earth, and a burn that stays. All of that now lives in
+     systems/lightningfx.js as a `lightning` ordnance row + FX composer, so the
+     city can fire one too and nobody re-types a bolt.
+
+     What is left HERE is what was always this file's business: who it kills.
+     The lethal radius is unchanged at 5 m (a direct strike plus the ground
+     current around it); the knockback is cut to something a body actually does
+     rather than something a shaped charge does; and the structural term drops
+     from 0.18 over 9 m to a scorch over 4.5 m, because a strike cracks masonry
+     and does not open a hole in it.
+
+     LIGHTNING_FX_V2=false restores the legacy fireball verbatim, below. ------ */
   function strike(x, z, ctx) {
-    // the bolt is drawn here (it is not ordnance) but the GROUND EFFECT is —
-    // `kinetic` is the bus's generic "something heavy arrived at speed" row,
-    // and routing through it buys the shake, the ejecta cone and the sfx that
-    // used to be re-typed at this site.
+    if (CBZ.CONFIG.LIGHTNING_FX_V2 !== false && CBZ.lightningStrike) {
+      // The bus still owns the roster sweep and this mode still owns the
+      // ledger; only the DRAW changed. No `quiet` flag is needed — the row
+      // carries no shake, no rumble and no cue of its own, so the bus's feel
+      // stage is a no-op and the composer owns the crack and the flicker.
+      survBlast("lightning", x, z, {
+        r: 5, cause: "struck by lightning", ctx: ctx, up: 0.6,
+        struct: 0.06, structR: 4.5, knockback: 5, fling: 1.6,
+        // and if the bus cannot route it — script order, or IMPACT_BUS off —
+        // draw the bolt directly rather than let it degrade to a fireball
+        draw: function (bx, by, bz) { CBZ.lightningStrike(bx, bz, {}); },
+      });
+      return;
+    }
+
+    // ---- LEGACY (LIGHTNING_FX_V2=false): the airstrike-composer fireball ----
     survBlast("kinetic", x, z, {
       r: 5, cause: "struck by lightning", ctx: ctx, up: 0.6,
       mass: 60, speed: 120, struct: 0.18, structR: 9, flash: 0, quiet: true,
@@ -3756,6 +3808,8 @@
     // the volcano's own ratchet, exported by world/volcanofx.js
     const volA = CBZ.volcanoAudit ? CBZ.volcanoAudit() : null;
     const sw = CBZ.citySwimState ? CBZ.citySwimState() : null;
+    // the storm's own ratchet, exported by systems/lightningfx.js
+    const boltA = CBZ.lightningFxAudit ? CBZ.lightningFxAudit() : null;
     return {
       // ---- SHOW DON'T TELL: lines this run actually spoke ----
       banners: said.banners, hints: said.hints, toasts: said.toasts,
@@ -3772,6 +3826,15 @@
       surge: CBZ.waterSurge ? +CBZ.waterSurge().toFixed(3) : 0,
       // ---- ONE SWIM ----
       privateSwim: privateSwim,
+      /* ---- THE STORM'S BOLTS. `boltStrokes / boltStrikes` is the whole
+         before/after in one ratio: the old strike drew ONE flat frame per
+         strike, so a build still on the fireball reports exactly 1.0 (or 0
+         strokes, if it never had a renderer at all). A real flash is 3-5. ---- */
+      boltFxV2: !!(boltA && boltA.on && boltA.wired),
+      boltStrikes: boltA ? boltA.strikes : 0,
+      boltStrokes: boltA ? boltA.strokes : 0,
+      boltScars: boltA ? boltA.scarsCut : 0,
+      boltLive: boltA ? boltA.live : 0,
       /* ---- THE TSUNAMI'S FOUR: what the water was carrying, what it hit
          with, how dirty it was and how hard it pulled on the way out. Zero
          unless a tsunami is actually running, which is the point.

@@ -306,6 +306,18 @@
   let flashT = 0;          // remaining flash time
   let strikeCD = 5;        // cooldown before next possible strike
   let pendingThunder = 0;  // seconds until thunder follows the flash (delay)
+  let strobeS = 0, strobeT = 0;  // an externally-requested flash (see CBZ.weatherStrobe)
+
+  /* PUBLISHED so a real drawn bolt can light the real scene. See the block in
+     tryLightning that consumes it. Deliberately a REQUEST rather than a direct
+     write: this file owns the daynight-relative baseline and the decay curve,
+     and a caller that wrote hemi.intensity itself would be overwritten by
+     daynight.js on the very next frame. */
+  CBZ.weatherStrobe = function (strength, secs) {
+    if (!(strength > 0)) return;
+    strobeS = Math.max(strobeS, Math.min(3, strength));
+    strobeT = Math.max(strobeT, Math.min(1, secs > 0 ? secs : 0.1));
+  };
 
   function tryLightning(dt) {
     if (!hemi && !sunL) return;
@@ -336,6 +348,21 @@
         // double-flicker on big strikes
         if (rng() < 0.5) flashT += 0.06;
       }
+    }
+
+    /* A STRIKE SOMEONE ELSE DREW. systems/lightningfx.js draws real bolts with
+       real RETURN STROKES, and what a stroke does to a scene is LIGHT it — not
+       tint a rectangle over the lens. That is exactly the hemi+sun bump this
+       file already owns for its ambient sky flashes, so the bolt renderer pokes
+       THIS, once per stroke, rather than opening a second lighting path that
+       could disagree with daynight.js about what the baseline is. Applied here
+       — after the baseline capture at the top, before the animation below — so
+       a strobe lights the world on the frame it was asked for. Strength and
+       duration are max-combined, so overlapping strikes never cancel. */
+    if (strobeS > 0) {
+      flash = Math.max(flash, strobeS);
+      flashT = Math.max(flashT, strobeT);
+      strobeS = 0; strobeT = 0;
     }
 
     // animate the active flash (fast attack, quick decay)
@@ -901,8 +928,11 @@
     // DARK-PATH EARLY-OUT: with the ambient storm off and nothing driving,
     // the whole tick is skipped — the throttled indoor test used to scan
     // CBZ.platforms and raycast 5×/sec for a cloud that could never appear.
+    // (`strobeS` is in the test because a drawn bolt can strike under a clear
+    // sky — a scripted beat, a test harness — and the tick that consumes the
+    // request must not be the one thing that got skipped.)
     if (!AUTO && drvHold <= 0 && intensity === 0 && drv.fog <= 0 &&
-        drv.lightning <= 0 && flashT <= 0 && pendingThunder <= 0 && !groundLive) return;
+        drv.lightning <= 0 && flashT <= 0 && strobeS <= 0 && pendingThunder <= 0 && !groundLive) return;
 
     // camera forward (XZ) for seedDrop's lead bias — matrix z-basis, once per
     // tick. Looking straight down leaves the previous bearing standing.
