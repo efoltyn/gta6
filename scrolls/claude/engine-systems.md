@@ -513,6 +513,42 @@ Before building anything adjacent, wire into the existing system:
   `survFloodDepthMeanAt` (the FLAT column), not the live crest, for the same
   reason the swimmer's entry test went flat: a passing swell would otherwise
   strobe decals in and out of washing.
+- **Snow buries blood** — `GORE_SNOW_BURY` in `systems/gore.js`. `weather.js`
+  already lies snow on the world (`cover`, a live 0..1 scalar), and gore decals
+  missed it entirely — they are small unlit transparent planes, so the coat scan
+  skips them by design (`COAT_MIN_R`). A whiteout ended with crisp arterial red
+  on a white island. Each decal remembers the coverage that was down when it
+  LANDED and buries against what falls after, so blood spilled onto snow still
+  reads at full strength — the shot a blizzard actually wants. Per-decal
+  jittered depth so a field goes under raggedly. Buried is gone, not hidden
+  (melt dilutes and drains — same answer `GORE_WASH` gives standing water).
+  Vertical wall splatter is never buried: snow does not lie on a wall, so the
+  ground clears and the walls keep the record. Ratchet
+  `CBZ.goreAudit().bloodVisible` across the arc, in
+  `tools/test-survival-gore-browser.mjs`.
+- **`userData.coat` — "this is ground, coat it"** in `systems/weather.js`, the
+  twin of its `noCoat` opt-out. `COAT_MIN_R` (34 m bounding radius) is the right
+  instinct in a city full of small props and the wrong answer for terrain: the
+  disaster island's three outlying hills are r 16-22 with 7-11 m peaks, so every
+  one of them failed the bar and a blizzard left **three green hills standing in
+  the middle of a white island**. A size heuristic cannot answer "is this the
+  ground"; the file that built it can.
+- **NO GENERIC GIB CUBES ON THE ISLAND** (owner: "I hate the blood blocks").
+  The city deleted them a wave earlier for the same complaint; survival kept
+  them, so a few deaths on a green hillside left a scatter of red boxes.
+  Recolouring them wound-dark only made them read as meat bricks. A cube was
+  only ever a stand-in for a body part and `severBody` has had the real thing
+  all along — it clones the ACTUAL limb mesh off the ACTUAL rig, its own comment
+  says "Never a generic red cube". It was unreachable outside the city because
+  it hung off the `cityKillPed` tap, so **`CBZ.gore(opts.actor)`** (the seam
+  `childsafe.js` already named) states the victim explicitly; `opts.limbs`
+  states how many come off, and an explicit count is AUTHORITATIVE over the
+  blast-proximity inference (without that precedence the tornado's `explosion`
+  styling silently severed a third limb). Ratchet `CBZ.goreAudit().gibs` pinned
+  at **0** on the island, with `severed` counting real limbs. Sibling: spray
+  droplets were scaled up to 36 cm across — a 5x4 sphere at that size is a
+  flying rock, not spatter — now ~8-16 cm through one `DROP_R()` constant
+  (`GORE_DROP_SCALE`).
 - **An open wound follows you** — the ledger trails `CBZ.goreDrip` marks
   behind a body that has actually bled, spent on DISTANCE MOVED rather than on
   time (someone standing still costs one vector subtraction), hard-capped at 8

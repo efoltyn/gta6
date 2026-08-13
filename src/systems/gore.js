@@ -72,6 +72,7 @@
   // and despawns over a few seconds so the battlefield clears. Jail/survival
   // gore stays byte-identical (this flag is read live at every spawn site).
   function cityMode() { return !!(CBZ.game && CBZ.game.mode === "city"); }
+  function survMode() { return !!(CBZ.game && CBZ.game.mode === "survival"); }
   const GRAV = 24;
   const BLOOD = 0x8a0b10, BLOOD_D = 0x5e070b, BLOOD_BRT = 0xb01218;
   const BONE = 0xe6ddc8, BONE_D = 0xcfc3ad, TOOTH = 0xf2ead8;
@@ -126,6 +127,19 @@
 
   // ---- shared geometry (one allocation, reused by every bit/decal) ----
   const G_DROP = new THREE.SphereGeometry(1, 5, 4);   // blood droplet (scaled per-bit)
+  /* A DROPLET IS A DROPLET, NOT A PEBBLE (owner, on the blood blocks). G_DROP
+     is a 5x4 sphere — deliberately, it is cheap — but a 5x4 sphere is a
+     FACETED POLYHEDRON, and the spray was scaling it to a 0.07-0.18 radius:
+     up to 36 cm across. Three simultaneous kills filled the air with what read
+     as flying red rocks, which is the same complaint as the cubes wearing a
+     different geometry. Real spatter is millimetres; at this art scale ~8-16 cm
+     is the honest read, still visible in flight and still stamping its landing
+     mark. One constant, so every emitter in this file moves together.
+     GORE_DROP_SCALE dials it back up (1.9 restores the old spray exactly). */
+  if (CBZ.CONFIG.GORE_DROP_SCALE == null) CBZ.CONFIG.GORE_DROP_SCALE = 1;
+  function DROP_R(k) {
+    return (0.038 + Math.random() * 0.052) * (k || 1) * (+CBZ.CONFIG.GORE_DROP_SCALE || 1);
+  }
   const G_MIST = new THREE.SphereGeometry(1, 4, 3);   // fine mist puff (low poly)
   const G_GIB = new THREE.BoxGeometry(1, 1, 1);       // chunky gib (scaled per-bit)
   const G_PLANE = new THREE.PlaneGeometry(1, 1);      // smears + drip streaks
@@ -682,6 +696,10 @@
       // colored cube. Jail/survival gibs PERSIST (true world model — evidence
       // you walk back past). Blood/mist are brief in every mode.
       fade: kind === "gib" && city,
+      // the coverage already down when this piece was thrown, + how much NEW
+      // snow it takes to vanish under (see the SNOW BURIES BLOOD block)
+      snow0: kind === "gib" ? snowCover() : 0,
+      snowNeed: kind === "gib" ? 0.26 + Math.random() * 0.24 : null,
       life: kind === "blood" ? 0.7 + Math.random() * 0.8
         : (kind === "mist" ? 0.45 + Math.random() * 0.45
           : (city ? 5 + Math.random() * 4 : 7 + Math.random() * 6)),
@@ -790,6 +808,9 @@
       m, t: 0, grow: g, max: g, growT: linger ? 3.4 : 0.5,
       hold: linger ? (near ? 75 : 26) : (near ? 16 : 10), fade: linger ? 16 : 8,
       ax: 0.82 + Math.random() * 0.36, az: 0.82 + Math.random() * 0.36,  // per-pool stretch
+      // snow that falls FROM NOW buries it; a big pool takes more of it than a
+      // droplet mark, and the jitter is what makes a field go under raggedly.
+      snow0: snowCover(), snowNeed: 0.22 + Math.min(0.30, g * 0.12) + Math.random() * 0.22,
     });
     // THE RUN-OFF: what the hillside wouldn't hold leaves down the fall line.
     // The threshold is above every droplet mark (the landing splats top out at
@@ -827,6 +848,7 @@
       // does, so it keys off the GROUND, not off which caller asked.
       slope: !!(s && s.grade >= FLATISH), spin: Math.atan2(-dx, -dz),
       w: 0.55 + Math.random() * 0.25, hold: near ? 60 : 28, fade: 14,
+      snow0: snowCover(), snowNeed: 0.24 + Math.random() * 0.22,
     });
   }
 
@@ -1050,7 +1072,7 @@
               dx * (2.2 + Math.random() * 2.4) * fade + (Math.random() - 0.5) * 1.6,
               (4.6 + Math.random() * 2.6) * fade,
               dz * (2.2 + Math.random() * 2.4) * fade + (Math.random() - 0.5) * 1.6,
-              0.055 + Math.random() * 0.06, Math.random() < 0.6 ? BLOOD_BRT : BLOOD, "blood");
+              DROP_R(0.85), Math.random() < 0.6 ? BLOOD_BRT : BLOOD, "blood");
           }
         });
       })(s);
@@ -1241,6 +1263,60 @@
     return (d === DRY || !isFinite(d)) ? 0 : d;
   }
 
+  /* ============================================================
+     SNOW BURIES BLOOD (GORE_SNOW_BURY).
+
+     systems/weather.js already lies snow on the world: `cover` is a live 0..1
+     coverage scalar that whitens every large up-facing surface through one
+     shared uniform, and the blizzard drives it from a dusting during the
+     warning to a buried island by the end of the event. Every ground decal in
+     this file missed that entirely — gore pools are small unlit transparent
+     planes, so the coat scan skips them by design (COAT_MIN_R) — and the
+     result was the one thing a whiteout cannot have in it: an island going
+     white under fresh snow with crisp arterial red still sitting on top of it,
+     un-dimmed, through the whole storm and out the far side.
+
+     THE MODEL IS "SNOW THAT FALLS AFTER YOU BLEED". Each decal remembers the
+     coverage that was already on the ground when it landed, and buries against
+     the coverage gained SINCE. That is the difference between a physical
+     model and a global fade: blood spilled onto an already-white island still
+     reads at full strength — which is the shot the blizzard actually wants,
+     a red pool on fresh snow — and only the next fall of snow takes it.
+
+     Each decal needs its own depth to disappear under (jittered), so a field
+     of pools goes under raggedly the way real drifting does, instead of the
+     whole island's gore dimming in lockstep on one number.
+
+     Buried is GONE, not hidden: once it is under, melt does not give it back.
+     Meltwater dilutes and drains, which is the same answer GORE_WASH already
+     gives standing water, and a resurrect path would mean a storm that leaves
+     the battlefield exactly as it found it.
+
+     Vertical wall splatter is deliberately NOT buried — snow does not lie on a
+     wall — so after a blizzard the ground is clean and the walls still carry
+     what happened. That asymmetry is free here and it is the correct one.
+
+     NOT MODE-GATED, on purpose. `cover` is the shared weather scalar and it is
+     zero unless it is actually snowing, so this is inert everywhere it should
+     be. Gating it to the island would be the exact disease scrolls/CLAUDE.md
+     names — a shared verb fenced behind a mode that has no say in it.
+  ============================================================ */
+  if (CBZ.CONFIG.GORE_SNOW_BURY == null) CBZ.CONFIG.GORE_SNOW_BURY = true;
+  function snowCover() {
+    if (CBZ.CONFIG.GORE_SNOW_BURY === false || !CBZ.weather) return 0;
+    const c = CBZ.weather.snowCover;
+    return typeof c === "number" && isFinite(c) ? c : 0;
+  }
+  // 0 = untouched, 1 = fully under. `snow0` is the coverage at spawn, `snowNeed`
+  // how much NEW snow this particular decal needs to disappear beneath.
+  function buriedBy(rec, cover) {
+    if (rec.snowNeed == null) return 0;
+    const gained = cover - rec.snow0;
+    if (gained <= 0) return 0;
+    const k = gained / rec.snowNeed;
+    return k > 1 ? 1 : k;
+  }
+
   // A SINGLE DRIP. Deliberately not goreImpact: a man walking with an open
   // wound leaves marks, not a spray and a pool at every footfall. One tiny
   // short-lived splat, seated on the terrain like every other ground decal.
@@ -1320,7 +1396,9 @@
     // The open joint pumps a couple of diminishing pulses while the corpse is
     // still present. This is tied to the real stump transform and stops the
     // instant the part is restored/recycled; it never creates free-floating FX.
-    if (stump && cityMode()) {
+    // an open joint pumps wherever it happens — the island tears limbs off now
+    // too (opts.limbs), and a stump that just sits there is the tell.
+    if (stump && (cityMode() || survMode())) {
       [0.38, 0.92].forEach(function (delay, pulse) {
         after(delay, function () {
           if (!stump.parent || part.visible !== false || (actor && actor.culled)) return;
@@ -1379,6 +1457,12 @@
         kind: "gib", mat: null, mistFade: 0,
         sx: (Math.random() - 0.5) * 12, sy: (Math.random() - 0.5) * 12, sz: (Math.random() - 0.5) * 12,
         landed: false, bled: false, baseScale: 1, rad: key === "head" ? 0.3 : 0.2,
+        // THIS IS A REAL BODY PART, NOT A GENERIC BOX. The flag is what lets
+        // CBZ.goreAudit() tell the two apart, and `gibs` (anonymous cubes) is
+        // pinned at 0 on the island — see the LAYER 3 block.
+        limb: true,
+        // and snow lies on a severed arm exactly as it lies on a pool
+        snow0: snowCover(), snowNeed: 0.26 + Math.random() * 0.24,
         wet: wetEvent,                        // a limb torn off underwater sinks, it doesn't fly
         // fade against the clone's OWN scale (a limb mesh isn't unit-scaled) so
         // the shrink reads right; vScale captures that base. City-only.
@@ -1389,7 +1473,7 @@
       for (let i = 0; i < 4; i++) {
         spawnBit(fly.position.x, fly.position.y, fly.position.z,
           dx * 2 + (Math.random() - 0.5) * 3, 3 + Math.random() * 3, dz * 2 + (Math.random() - 0.5) * 3,
-          0.06 + Math.random() * 0.06, BLOOD_BRT, "blood");
+          DROP_R(0.9), BLOOD_BRT, "blood");
       }
     }
     return true;
@@ -1486,6 +1570,14 @@
     // consumed once so the explosion-stump second burst keeps stock treatment.
     let ctx = null;
     if (killCtx && !killCtx.used) { killCtx.used = true; ctx = killCtx; }
+    /* EXPLICIT VICTIM (opts.actor) — the seam systems/childsafe.js already
+       names. The kill-context tap only exists in the CITY: it wraps
+       cityKillPed, so a city death arrives here knowing WHO died and gets a
+       wound stamped on the body and real dismemberment for free, while every
+       survival death arrived anonymous. That is why the island's deaths could
+       only ever be drawn with generic flying boxes — there was no body to take
+       anything off. A caller that knows its victim now simply says so. */
+    if (!ctx && opts.actor) ctx = { ped: opts.actor, imp: opts.imp || null, cause: "", used: true };
     const cause = ctx ? ("" + (ctx.cause || "")).toLowerCase() : "";
     // headshot / explosion get a heavier, mistier, gorier treatment. Callers
     // signal a headshot either explicitly (opts.head) or with a fat amount(>=1.3).
@@ -1550,6 +1642,26 @@
     let popHead = !!opts.pop;          // explicit (death.js drives the player's corpse)
     if (ctx && ctx.ped && !ctx.ped.isPlayer) {
       const sevDir = hasDir ? { x: dx, z: dz } : null;
+      /* opts.limbs — HOW MANY LIMBS THIS DEATH ACTUALLY TEARS OFF, stated by
+         the caller instead of inferred from a weapon. The city infers it from
+         the kill (a blast's proximity, a muzzle-close shotgun) because it has
+         a weapon to infer from; a tornado does not. systems/trauma.js's cause
+         table prices it per cause, and this is what replaced the island's
+         generic flying boxes: a tornado takes an ARM off — the real mesh,
+         cloned from the real rig with the real clothing on it, tumbling and
+         leaving a stump — rather than throwing anonymous red cubes. */
+      if (opts.limbs != null) {
+        // AN EXPLICIT COUNT IS AUTHORITATIVE and skips the inference below.
+        // The tornado asks for `explosion` styling (omnidirectional spray, no
+        // shot line) AND states its own limb count — without this precedence
+        // the blast branch fired as well and severed a third limb off the back
+        // of the proximity roll, so "2" quietly meant "2 or 3 or 4".
+        const want = Math.min(4, Math.round(opts.limbs));
+        const pool = SEV_LIMBS.slice();
+        for (let i = 0; i < want && pool.length; i++) {
+          severBody(ctx.ped, pool.splice((Math.random() * pool.length) | 0, 1)[0], { dir: sevDir, boom: !!boom });
+        }
+      } else
       // NOTE: the local `head` flag also trips on amount>=1.3 (a heat heuristic
       // for the mist/spray) — severing the actual head trusts only the explicit
       // signals, or an RPG would decapitate every victim it ALSO de-limbs.
@@ -1634,7 +1746,7 @@
         omni ? Math.cos(a) * sp * 0.7 : fanX,
         (omni ? 3 + Math.random() * 7 : 2 + Math.random() * 5) + (boom ? 4 : 0),
         omni ? Math.sin(a) * sp * 0.7 : fanZ,
-        0.07 + Math.random() * 0.11, Math.random() < 0.5 ? BLOOD : BLOOD_D, "blood");
+        DROP_R(), Math.random() < 0.5 ? BLOOD : BLOOD_D, "blood");
     }
 
     // --- LAYER 2: fine MIST — high-velocity aerosol (headshot/rifle/explosion) -
@@ -1663,6 +1775,18 @@
     // tornado throws more than a blast does. Absent → stock, byte for byte.
     let ng = Math.round((big ? 7 : 5) * amt * lod * (opts.gib == null ? 1 : Math.max(0, opts.gib)));
     if (cityMode()) ng = boom ? Math.round(6 * amt * lod) : 0;
+    /* THE DISASTER ISLAND GETS THE CITY'S ANSWER (owner: "I hate the blood
+       blocks"). The city deleted these for exactly this complaint a wave ago —
+       "a shootout buried the floor in permanent clothing-colored boxes, not
+       realistic" — and survival kept them, so a handful of deaths on a green
+       hillside left a scatter of red LEGO on it. Recolouring them wound-dark
+       last round made them read as MEAT bricks, which is not better.
+       A generic cube was only ever a stand-in for a body part, and this file
+       has had the real thing all along: severBody clones the ACTUAL limb mesh
+       off the ACTUAL rig ("Never a generic red cube", its own comment). So the
+       island stops throwing boxes and starts taking arms off — see opts.limbs
+       above. Jail/escape is untouched, byte for byte. */
+    else if (survMode()) ng = 0;
     // A TORN-OFF PIECE IS NOT CLEAN LAUNDRY (owner-filmed on the island: the
     // hillside after a disaster read as pastel confetti, not as gore). Four of
     // the seven palette entries were the victim's RAW skin and shirt colours —
@@ -1821,7 +1945,7 @@
         hasDir ? dx * (2.2 + Math.random() * 4.5 * amt) + px * side * 2.6 : Math.cos(a) * sp,
         (hasDir ? dy * 3.5 : 0) + 1.4 + Math.random() * 3.4 * amt,
         hasDir ? dz * (2.2 + Math.random() * 4.5 * amt) + pz * side * 2.6 : Math.sin(a) * sp,
-        0.05 + Math.random() * 0.09, Math.random() < 0.45 ? BLOOD_BRT : BLOOD, "blood");
+        DROP_R(), Math.random() < 0.45 ? BLOOD_BRT : BLOOD, "blood");
     }
     if (opts.mist) {
       const nm2 = Math.max(2, Math.round(6 * amt * lod));
@@ -1873,6 +1997,10 @@
     // CITY drives the realistic fade/settle/cull path; jail/survival fall back
     // to the original byte-identical gib physics (read once per frame).
     const gibCity = cityMode();
+    // read the shared snow coverage ONCE for the whole sweep (see the burial
+    // block) — it is a getter over one integrator, but this loop runs over
+    // every live bit and every live decal.
+    const snowCoverNow = snowCover();
     for (let i = bits.length - 1; i >= 0; i--) {
       const b = bits[i], m = b.m;
       if (b.kind === "mist") {
@@ -1886,6 +2014,14 @@
         if (b.mat) b.mat.opacity = 0.5 * Math.min(1, k * 2.2);
         if (b.life <= 0) { rm(m); bits.splice(i, 1); }
         continue;
+      }
+      // AND SNOW COVERS WHAT IS LYING ON IT. A landed chunk is a small solid
+      // on the ground, so the same fall of snow that takes the pools takes it
+      // — otherwise a whiteout ends with a pristine field and a scatter of red
+      // boxes still sitting on top. Each piece carries its own jittered depth,
+      // so they go under one at a time rather than blinking out together.
+      if (b.landed && b.kind === "gib" && snowCoverNow > 0 && buriedBy(b, snowCoverNow) >= 1) {
+        rm(m); bits.splice(i, 1); continue;
       }
       // CITY only: a LANDED gib has come to rest ON the ground — it stops
       // simulating (no jitter) and counts down, FADING/SINKING out near
@@ -2029,8 +2165,10 @@
       }
       const fadeIn = Math.min(1, s.t * 4);
       const fadeOut = s.t > s.hold ? Math.max(0, 1 - (s.t - s.hold) / s.fade) : 1;
-      s.m.material.opacity = (s.water ? 0.42 : 0.66) * fadeIn * fadeOut;   // a slick is a film, not a pool
-      if (s.t > s.hold + s.fade) { freeSlick(s); splats.splice(i, 1); }
+      // GOING UNDER: a surface slick is ON the water and is never snowed on.
+      const under = s.water ? 0 : buriedBy(s, snowCoverNow);
+      s.m.material.opacity = (s.water ? 0.42 : 0.66) * fadeIn * fadeOut * (1 - under);
+      if (under >= 1 || s.t > s.hold + s.fade) { freeSlick(s); splats.splice(i, 1); }
     }
 
     for (let i = walls.length - 1; i >= 0; i--) {
@@ -2078,11 +2216,32 @@
         if (gap > worst) { worst = gap; worstAt = [+_rv.x.toFixed(1), +_rv.z.toFixed(1)]; }
       }
     }
+    // how much of what is still on the ground is currently under snow — the
+    // ratchet for "a whiteout does not leave crisp red on a white island".
+    const cov = snowCover();
+    let visible = 0, buried = 0;
+    for (let i = 0; i < splats.length; i++) {
+      const s = splats[i];
+      if (s.water) continue;
+      const u = buriedBy(s, cov);
+      if (u >= 1) buried++; else visible += (1 - u);
+    }
     return {
       bits: bits.length, pools, streaks, slicks: water, walls: walls.length,
+      // `gibs` is the count of GENERIC flying boxes still alive, and on the
+      // island it may only ever be 0 — the ratchet for "I hate the blood
+      // blocks". `severed` counts rigs currently missing a real body part.
+      gibs: (function () { let n = 0; for (let i = 0; i < bits.length; i++) if (bits[i].kind === "gib" && !bits[i].limb) n++; return n; })(),
+      // LIMBS off, not rigs affected — one body missing an arm and a leg is two
+      severed: (function () { let n = 0; for (let i = 0; i < severed.length; i++) n += severed[i].items.length; return n; })(),
+      severedRigs: severed.length,
       puffs: puffs.length, pending: later.length,
       float: +worst.toFixed(3), floatAt: worstAt,
       slopeDecals: slopeOn(),
+      snowCover: +cov.toFixed(3), buried,
+      // sum of per-decal visibility: 0 means the ground reads clean even
+      // though records may still exist mid-bury.
+      bloodVisible: +visible.toFixed(2),
     };
   };
 

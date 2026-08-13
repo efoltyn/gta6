@@ -153,7 +153,8 @@ try {
       stage();
       CBZ.surv.killBot(b,{fromX:kx-1,fromZ:kz},cause);
       const a0=CBZ.goreAudit();
-      out[cause]={bits:a0.bits,pools:a0.pools,puffs:a0.puffs,walls:a0.walls};
+      out[cause]={bits:a0.bits,pools:a0.pools,puffs:a0.puffs,walls:a0.walls,
+        severed:a0.severed,gibs:a0.gibs};
       CBZ.stepSim(1/60);
     }
     CBZ.clearGore();
@@ -393,6 +394,59 @@ try {
     return out;
   `);
 
+  // ---- 4f: SNOW BURIES BLOOD, ACROSS THE WHOLE BLIZZARD ARC --------------
+  // Driven through the REAL director (CBZ.disasters.force("blizzard")), not by
+  // poking the coverage scalar — the point is that the arc the player sees
+  // (dusting during the warning, half-white mid-storm, buried by the end,
+  // still white afterwards) is the arc the blood answers to. Also asserts the
+  // half that is easy to lose: blood spilled ONTO snow still reads at full
+  // strength, because burial is measured from the coverage at spawn.
+  const blizzard = await json(`
+    const A=CBZ.surv.arena,C=A.center;
+    const kx=C.x+40,kz=C.z+40,ky=A.groundHeightAt(kx,kz);
+    function stand(){
+      CBZ.player.pos.set(kx+5,A.groundHeightAt(kx+5,kz+5),kz+5);
+      if(CBZ.playerChar&&CBZ.playerChar.group)CBZ.playerChar.group.position.copy(CBZ.player.pos);
+      CBZ.camera.position.set(kx+6,ky+3,kz+6);CBZ.camera.updateMatrixWorld(true);
+    }
+    function pools(n){
+      for(let k=0;k<n;k++)CBZ.goreImpact(kx+(k-n/2)*1.6,ky+0.9,kz,{amount:1.5,pool:true});
+    }
+    function snap(){const a=CBZ.goreAudit();return {cover:a.snowCover,pools:a.pools,buried:a.buried,visible:a.bloodVisible};}
+    CBZ.clearGore();stand();
+    pools(8);
+    for(let i=0;i<40;i++){stand();CBZ.stepSim(1/60);}
+    const before=snap();
+    // run the real event. force() only ARMS the director — the phase turns
+    // over on the next tick, so every wait below is "step until", never
+    // "sample immediately after".
+    const forced=CBZ.disasters.force("blizzard");
+    let guard=0;
+    while(CBZ.disasters.state()!=="warn"&&guard++<600){stand();CBZ.stepSim(1/60);}
+    // late in the warning, where the first dusting is meant to be down
+    for(let i=0;i<4*60&&CBZ.disasters.state()==="warn";i++){stand();CBZ.stepSim(1/60);}
+    const warn=snap();warn.phase=CBZ.disasters.state();
+    guard=0;
+    while(CBZ.disasters.state()!=="active"&&guard++<900){stand();CBZ.stepSim(1/60);}
+    // halfway through the active phase
+    for(let i=0;i<9*60&&CBZ.disasters.state()==="active";i++){stand();CBZ.stepSim(1/60);}
+    const mid=snap();mid.phase=CBZ.disasters.state();
+    // run the storm out — measured on the ORIGINAL, pre-storm blood, because
+    // that is the claim ("a whiteout does not leave the battlefield showing").
+    guard=0;
+    while(CBZ.disasters.state()!=="idle"&&guard++<3000){stand();CBZ.stepSim(1/60);}
+    const after=snap();after.phase=CBZ.disasters.state();
+    // BLOOD SPILLED ON SNOW must still read at full strength — burial counts
+    // only the snow that falls AFTER a decal lands, so a kill on a white
+    // island is not born half-buried.
+    const freshMark=CBZ.goreAudit().bloodVisible;
+    pools(6);
+    for(let i=0;i<30;i++){stand();CBZ.stepSim(1/60);}
+    const fresh={gained:+(CBZ.goreAudit().bloodVisible-freshMark).toFixed(2)};
+    CBZ.clearGore();
+    return {forced:forced,before:before,warn:warn,mid:mid,fresh:fresh,after:after};
+  `);
+
   // ---- 5: the master switch still reverts to the old behaviour ------------
   const revert = await json(`
     ${STAGE}
@@ -430,6 +484,16 @@ try {
   }
   if (!(causes["torn apart by the tornado"].bits > causes["beaten to death"].bits)) {
     failures.push("a tornado dismemberment did not outdraw a beating");
+  }
+  // NO GENERIC CUBES ON THE ISLAND (owner: "I hate the blood blocks"). A death
+  // either takes a REAL limb off the rig or it takes nothing; the anonymous
+  // flying box is gone, so the severed count is the only dismemberment there is.
+  for (const c of BLOODY) {
+    const want = c.indexOf("tornado") >= 0 ? 2 : 0;
+    if (causes[c].severed !== want) failures.push(`"${c}" severed ${causes[c].severed} limbs, expected ${want}`);
+  }
+  if (causes["torn apart by the tornado"].gibs !== 0) {
+    failures.push(`the tornado still threw ${causes["torn apart by the tornado"].gibs} generic blood blocks — survival must throw none`);
   }
 
   if (beating.two.bits !== 0 || beating.two.pools !== 0) failures.push(`two punches drew blood (${JSON.stringify(beating.two)}) — they must only bruise`);
@@ -483,6 +547,17 @@ try {
   if (!(corpses.at9.far === 3)) failures.push(`far corpses did not clear on the original 6 s budget (${corpses.at9.far}/3 culled by 9 s)`);
   if (!(corpses.at29.near === 3)) failures.push(`near corpses never cleared (${corpses.at29.near}/3 culled by 29 s) — that is a leak`);
 
+  if (!blizzard.forced) failures.push("the blizzard would not start through CBZ.disasters.force");
+  else {
+    if (!(blizzard.before.cover < 0.02 && blizzard.before.visible > 4)) failures.push(`the pre-storm baseline is wrong: ${JSON.stringify(blizzard.before)}`);
+    if (!(blizzard.warn.cover > blizzard.before.cover)) failures.push("the warning phase laid no dusting at all");
+    if (!(blizzard.mid.cover > 0.3)) failures.push(`mid-storm coverage never got going (${blizzard.mid.cover})`);
+    if (!(blizzard.mid.visible < blizzard.before.visible * 0.6)) failures.push(`blood did not start going under mid-storm (${blizzard.before.visible} → ${blizzard.mid.visible} at cover ${blizzard.mid.cover})`);
+    if (!(blizzard.fresh.gained > 2)) failures.push(`blood spilled ONTO snow did not read (visibility gained ${blizzard.fresh.gained} from 6 fresh pools) — burial must be measured from the coverage at spawn`);
+    if (!(blizzard.after.visible < 0.6)) failures.push(`the storm ended with blood still on a white island (visible ${blizzard.after.visible} at cover ${blizzard.after.cover})`);
+    if (!(blizzard.after.cover > 0.25)) failures.push(`the snow melted away instantly (${blizzard.after.cover}) — the test is not measuring a covered island`);
+  }
+
   if (!(revert.bits > 0)) failures.push("SURV_TRAUMA=false did not restore the original unconditional gore");
 
   if (browserErrors.length) failures.push(`browser errors: ${browserErrors.slice(0, 4).join(" | ")}`);
@@ -496,6 +571,7 @@ try {
   console.log("wash            ", JSON.stringify(wash));
   console.log("trail           ", JSON.stringify(trail));
   console.log("corpses         ", JSON.stringify(corpses));
+  console.log("blizzard        ", JSON.stringify(blizzard));
   console.log("revert          ", JSON.stringify(revert));
 
   if (failures.length) {

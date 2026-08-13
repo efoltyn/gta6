@@ -648,7 +648,17 @@
       if (!g.attributes || !g.attributes.normal || !g.attributes.position) return;
       if (!g.boundingSphere) { try { g.computeBoundingSphere(); } catch (e) { return; } }
       const bs = g.boundingSphere;
-      if (!bs || !(bs.radius * Math.max(Math.abs(o.scale.x), Math.abs(o.scale.z)) >= COAT_MIN_R)) return;
+      // `userData.coat` is the author's OPT-IN, and it is the twin of the
+      // `noCoat` opt-out three lines up: this is ground, coat it whatever size
+      // it is. COAT_MIN_R exists to keep a scan of a whole city off ten
+      // thousand small props, and it is exactly right for that — but it has no
+      // way to know that the disaster island's outlying hills (bounding radius
+      // 16-23 m against a 34 m bar) are TERRAIN. Measured: a blizzard whitened
+      // the sea-level plate and the central refuge cone and left three green
+      // hills standing in the middle of a white island. A size heuristic
+      // cannot answer "is this the ground"; the file that built it can.
+      const forced = !!(ud && ud.coat);
+      if (!forced && (!bs || !(bs.radius * Math.max(Math.abs(o.scale.x), Math.abs(o.scale.z)) >= COAT_MIN_R))) return;
       const ms = Array.isArray(o.material) ? o.material : [o.material];
       for (let i = 0; i < ms.length; i++) {
         const m = ms[i];
