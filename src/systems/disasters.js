@@ -2384,6 +2384,12 @@
   const ASH_VISUAL_FULL = 0.16;  // continuous grey blanket on screen
   const ASH_ROOF_FAIL = 0.055;   // the roof starts failing under the load
   let pyroRuns = 0, laharRuns = 0, ashRoofCollapses = 0, lavaLegacy = 0, whiteouts = 0;
+  /* THE BODY COUNT, because the owner's "kills way too many people" deserves
+     a number that a later edit cannot quietly undo. `volcanoDeaths` is the
+     drop in the live roster across an eruption — measured off the mode's own
+     aliveCount() rather than by instrumenting six kill sites, so nothing can
+     kill someone by a path this counter does not see. */
+  let bombsThrown = 0, volcanoDeaths = 0, volAliveAtStart = -1;
   let nukeFxRuns = 0;
   const volScars = [];           // set lahar + ash blanket: they OUTLIVE the eruption
 
@@ -2491,6 +2497,7 @@
     if (ctx.st.erupting) return; ctx.st.erupting = true;
     const h = ctx.arena.hills[0];
     const V = vfx();
+    try { volAliveAtStart = surv().aliveCount(); } catch (e) { volAliveAtStart = -1; }
     narrate("banner", "VOLCANIC ERUPTION");
     narrate("hint", "THE MOUNTAIN ERUPTS — stay off the lava!", 3);
     if (CBZ.shake) CBZ.shake(0.9); sound("explosion"); sound("rumble");
@@ -2538,8 +2545,13 @@
         ctx.st.erLava.push(V.lavaFlow({
           x: p.x, z: p.z, groundAt: gAt(ctx), parent: root(), bearing: a,
           len: h.r * 1.35 + 16 * ctx.intensity,
-          width: 4.6 + 2.2 * ctx.intensity,
-          speed: 4.2 + 2.6 * ctx.intensity,
+          width: 5.2 + 2.4 * ctx.intensity,
+          /* YOU WALK AWAY FROM LAVA — that is this file's own doctrine two
+             hundred lines up, and at 4.2-6.8 m/s the flows were outrunning a
+             SPRINT. A basaltic channel on a slope this size does about walking
+             pace, so at 1.7-3.0 a flow is what it is supposed to be: a thing
+             you lose ground to slowly and lose your house to entirely. */
+          speed: 1.7 + 1.3 * ctx.intensity,
           salt: 4700 + i * 137,
           light: i < 2,        // BUDGET: two real lights for four flows
         }));
@@ -2649,7 +2661,13 @@
     if (V && CBZ.CONFIG.VOLCANO_PYRO !== false) {
       ctx.st.pyroCd -= dt;
       if (!ctx.st.pyro && ctx.st.pyroCd <= 0) {
-        const a = ctx.st.pyroBear + (pyroRuns % 2 ? 0.55 : -0.35) * (pyroRuns > 0 ? 1 : 0);
+        /* THE WARNED CORRIDOR HAS TO BE THE CORRIDOR. warn() telegraphs ONE
+           lane — it is the whole reason the hazard is survivable — and the
+           second and third collapses then fanned +-0.55 rad off it, which at
+           this island's scale walks the flow sixty metres sideways and lands
+           it on people who had correctly cleared the lane they were shown.
+           +-0.18 keeps every run inside the corridor that was announced. */
+        const a = ctx.st.pyroBear + (pyroRuns % 2 ? 0.18 : -0.12) * (pyroRuns > 0 ? 1 : 0);
         const p = vent(h, a, 3.0);
         ctx.st.pyro = V.pyroclastic({
           x: p.x, z: p.z, groundAt: gAt(ctx), parent: root(), bearing: a,
@@ -2660,7 +2678,9 @@
           tail: 58, salt: 8100 + pyroRuns * 311,
         });
         pyroRuns++;
-        ctx.st.pyroCd = 7.5 - 2.5 * ctx.prog;
+        // a cone has to rebuild a column before it can drop another one; at
+        // 7.5 s it was collapsing three or four times inside one 20 s window
+        ctx.st.pyroCd = 12 - 3 * ctx.prog;
         if (CBZ.shake) CBZ.shake(1.15);
         soundAt("explosion", p.x, p.z); sound("rumble");
       }
@@ -2754,11 +2774,27 @@
         if (zone) {
           if (a.isPlayer) incinerate(1, zone === 1 ? 1.9 : 2.6);
           const fp = P.frontPos();
-          surv().hurt(a, 1e6, {
-            cause: zone === 1 ? "incinerated by the pyroclastic flow" : "asphyxiated in the ash cloud",
-            fromX: fp.x, fromZ: fp.z, fling: zone === 1 ? 9 : 4,
+          /* THE HEAD IS ABSOLUTE. THE TAIL IS NOT.
+             Both zones used to be 1e6, which made the whole ~50 m lane behind
+             the front an instant kill and turned one pass of one flow into
+             most of a lobby. The head keeps its 1e6 and should: there is no
+             surviving a wall of 600 C rock at 130 m/s, and pretending a roof
+             helps would be the worst lie in the file. The trailing cloud is
+             hot gas — lethal, quickly, but it is the kind of lethal you can
+             be dragged out of, so it prices as damage over time. Clipped by
+             the edge as it sweeps past, you live and you are wrecked; stood
+             in it, you die in about a second and a half. */
+          if (zone === 1) {
+            surv().hurt(a, 1e6, {
+              cause: "incinerated by the pyroclastic flow",
+              fromX: fp.x, fromZ: fp.z, fling: 9,
+            });
+            return;
+          }
+          surv().hurt(a, scale(30, ctx) * dt, {
+            cause: "asphyxiated in the ash cloud", fromX: fp.x, fromZ: fp.z,
           });
-          return;
+          if (a.dead) return;
         }
       }
       // 2) the vent itself
@@ -2788,42 +2824,118 @@
           return;
         }
       }
-      // 5) ASHFALL — glass in the lungs, and a roof is a real answer to it
+      /* 5) ASHFALL — glass in the lungs, and a roof is a real answer to it.
+         THE ASH FIELD IS THE ONLY AUTHORITY ON WHERE THERE IS ASH. The
+         geometric downwind wedge below it used to fire whenever the ash
+         LEDGER had not yet built up — a cone-and-radius test that choked
+         everyone standing 8 to 80 m downwind of the vent whether or not a
+         single grey quad had appeared there. That is death by arithmetic
+         with nothing on screen to explain it, which is the "randomly" half
+         of the owner's note. It now only runs when there is no ash field at
+         all (the VOLCANO_ASH_LOAD revert), where it is the whole feature
+         rather than a phantom second opinion. */
       if (!sheltered(a)) {
         let choke = 0;
-        if (AL && AL.depthAt(ax, az) > ASH_DOT_DEPTH) choke = 1;
-        else if (wX != null) {
+        /* AND IT IS A GRADIENT, NOT A SWITCH. The measurement that found this:
+           with the bombs throttled and the flow's tail made survivable, ONE
+           beat of the storyboard still killed 68 of the 100 in eleven seconds
+           — and it was this line. A binary test at 6 mm meant a DUSTING did
+           the same 11 damage a second as half a metre of the stuff, so within
+           a few seconds of the plume establishing, every unsheltered actor on
+           the downwind half of the island was on the same clock and the island
+           emptied. That is the owner's "kills way too many people" with no
+           hazard on screen doing it.
+
+           A gradient makes the ash a place you leave rather than a timer you
+           are on: nothing at the edge of the fall, and even standing in the
+           worst of it you have the better part of the eruption to move. The
+           roofs are still what actually kills indoors, through the ledger. */
+        if (AL) {
+          /* THE RAMP HAS TO OUTRUN THE FALL. This plume lays down ~0.2 m on
+             its axis inside eight seconds — the rate is calibrated so roofs
+             actually reach ASH_ROOF_FAIL inside one event, and that feature is
+             worth keeping — so a gradient that saturated at 10 cm was back to
+             being a switch by the time anyone could walk out of it. At 35 cm
+             the worst ground on the island still leaves you most of the
+             eruption, and everywhere else is a real gradient you can read off
+             the colour of the ground you are standing on. */
+          const d = AL.depthAt(ax, az);
+          choke = Math.max(0, Math.min(1, (d - ASH_DOT_DEPTH) / 0.35));
+        } else if (wX != null) {
           const dx = ax - h.x, dz = az - h.z, d = Math.hypot(dx, dz);
           if (d > 8 && d < 80 && (dx * wX + dz * wZ) / d > 0.72) choke = 0.7;
         }
-        if (choke > 0) surv().hurt(a, scale(6, ctx) * choke * dt, { cause: "choked by volcanic ash" });
+        if (choke > 0) surv().hurt(a, scale(3.4, ctx) * choke * dt, { cause: "choked by volcanic ash" });
       }
     });
 
-    // lava bombs arc out of the summit and crash down across the island
+    /* ---------------- LAVA BOMBS ----------------
+       OWNER, 2026-08-13: the volcano "kills way too many people and randomly
+       not even with physics". This block was the single worst offender and it
+       was wrong in all three of those ways at once.
+
+       ONE BOMB EVERY 0.6-1.0 s, for the whole twenty-second window, is
+       twenty-odd bombs. Each was placed at arena.randomPoint(8, R) — a
+       UNIFORM draw over the entire island, so a bomb was as likely to land on
+       the far beach as on the mountain's own flank. Each then materialised at
+       y = 34 directly above that point and fell straight down: there was no
+       trajectory to read, no direction to run from, and nothing on screen
+       connecting the rock to the volcano that supposedly threw it. And each
+       killed twice over — `dmg: 999` is instakill on contact, and the landing
+       called survBlast with r: 7 and no dmg, which hurtRadius resolves to 1e6
+       with NO falloff. A guaranteed seven-metre circle of death, twenty times,
+       everywhere.
+
+       So: it is thrown, from the crater, on a real arc that you can watch
+       (fx.dropDebris solves vx/vy/vz for the range against the shared
+       gravity); it lands where ballistics puts it, which is CLUSTERED ON THE
+       MOUNTAIN and thinning with distance, not spread evenly over the sea's
+       edge; there are a third as many; the telegraph outlives the flight; and
+       only a direct hit is fatal — the blast around it is now a real number
+       that falls off, so being near one is an injury and standing under one
+       is a death. */
     ctx.st.erBombCd -= dt;
     if (ctx.st.erBombCd <= 0) {
-      ctx.st.erBombCd = 1.0 - 0.4 * ctx.prog;
-      const p = ctx.arena.randomPoint(8, ctx.R);
-      const mk = CBZ.fx.groundMarker(p.x, p.z, 5.5, 0xff7a30); mk.set(1);   // bigger + longer telegraph: bomb deaths are dodgeable, not "nothing"
-      setTimeout0(ctx, 0.85, function () {
-        mk.dispose();
-        CBZ.fx.dropDebris({ x: p.x, z: p.z, fromY: 34, vy: -8, size: 1.7, color: 0xff5a1a, dmg: 999, keep: true, onLand: function (x, z) {
-          // A LAVA BOMB IS A ROCK ARRIVING AT SPEED — the bus's `kinetic` row,
-          // priced by mass and impact velocity, which is why a late-round bomb
-          // hits harder without a second number typed here.
+      ctx.st.erBombCd = 3.4 - 1.1 * ctx.prog;
+      /* BALLISTICS DECIDES WHERE IT LANDS. Bearing is uniform, range is not:
+         `pow(rnd, 1.7)` piles the throws up on the cone's own flanks and lets
+         only the rare one carry to the town. That distribution IS the
+         physics — a vent throws most of its mass short. */
+      const ba = rnd() * 6.28;
+      const rng2 = h.r * 0.5 + Math.pow(rnd(), 1.7) * (ctx.R * 0.82);
+      const bx = h.x + Math.cos(ba) * rng2, bz = h.z + Math.sin(ba) * rng2;
+      const mk = CBZ.fx.groundMarker(bx, bz, 5.5, 0xff7a30); mk.set(1);
+      const vp = vent(h, ba, 2.2);
+      const flight = Math.max(0.9, 0.75 + rng2 / 26);
+      bombsThrown++;
+      CBZ.fx.dropDebris({
+        x: bx, z: bz, fromX: vp.x, fromZ: vp.z, fromY: h.peak + 3.5,
+        size: 1.7, color: 0xff5a1a, dmg: 999, keep: true,
+        onLand: function (x, z) {
+          mk.dispose();
+          /* A LAVA BOMB IS A ROCK ARRIVING AT SPEED — the bus's `kinetic` row,
+             priced by mass and impact velocity, which is why a late-round bomb
+             hits harder without a second number typed here. What changed is
+             the ROSTER damage: an explicit dmg means hurtRadius stops
+             resolving to 1e6, so the splash maims and the rock kills. */
           survBlast("kinetic", x, z, {
-            r: 7, cause: "crushed by a volcanic bomb", ctx: ctx,
+            r: 8, dmg: scale(34, ctx), cause: "caught by a volcanic bomb", ctx: ctx,
             mass: 900, speed: 55, struct: 0.4, structR: 12,
             color: 0xff7a30, sfx: "punch", flash: 0.25, knockback: 12, fling: 6,
           });
-        } });
+        },
       });
+      // the marker outlives the flight even if the rock never lands cleanly
+      setTimeout0(ctx, flight + 1.2, function () { mk.dispose(); });
     }
   }
 
   function endEruption(ctx) {
     if (!ctx.st.erupting) return;
+    if (volAliveAtStart >= 0) {
+      try { volcanoDeaths += Math.max(0, volAliveAtStart - surv().aliveCount()); } catch (e) {}
+      volAliveAtStart = -1;
+    }
     if (ctx.st.erFountain) ctx.st.erFountain.dispose();
     if (ctx.st.erSmoke) ctx.st.erSmoke.dispose();
     if (ctx.st.erAsh) ctx.st.erAsh.dispose();
@@ -4267,6 +4379,14 @@
       pyroRuns: pyroRuns,
       pyroLive: volA ? volA.pyroLive : 0,
       laharRuns: laharRuns,
+      /* THE OWNER'S SECOND COMPLAINT AS TWO NUMBERS. `volcanoDeaths` is the
+         drop in the live roster across every eruption this run finished, and
+         it is the one to watch: an eruption that empties a 100-player island
+         is not a disaster, it is a reset. `volcanoBombs` is how many rocks the
+         mountain actually threw — the thing that used to run at one a second
+         from a uniform draw over the whole map. */
+      volcanoDeaths: volcanoDeaths,
+      volcanoBombs: bombsThrown,
       ashRoofCollapses: ashRoofCollapses,
       // the two numbers that say WHY a roof did or did not go: how many roofs
       // are actually carrying a load, and the heaviest load any of them has

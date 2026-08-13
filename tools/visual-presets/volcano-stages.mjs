@@ -35,14 +35,29 @@
    Metrics ride the two ratchets: CBZ.volcanoAudit() (lavaTransparent MUST be
    0 — that is the owner's "see thru" complaint as a number) and
    CBZ.disasterAudit() (pyroRuns / laharRuns / ashRoofCollapses /
-   nukeUsedNukefx / cameraFar). */
+   nukeUsedNukefx / cameraFar).
 
-/* EACH HAZARD BEAT RE-FORCES THE ERUPTION. The volcano's active window is
-   20 s and there are five things to photograph in it; a single run cannot
-   hold all five at the age each one wants, and a beat that arrives after the
+   AND THE BODY COUNT, which is the owner's OTHER complaint — "the volcano
+   kills way too many people and randomly" — as a number. `aliveNow` and
+   `killedThisBeat` are read off CBZ.surv.aliveCount(), which the DEPLOYED
+   build already exports, so this is a like-for-like measurement of the same
+   seeded lobby rather than a new counter that only the after side can answer.
+   The preset heals the PLAYER every tick, so every death in these numbers is
+   a bot the eruption actually killed. */
+
+/* EVERY HAZARD BEAT RE-FORCES THE ERUPTION. The volcano's active window is
+   20 s and there are seven things to photograph in it; a single run cannot
+   hold all seven at the age each one wants, and a beat that arrives after the
    event ended photographs an empty hillside (it did, twice, before this).
    Forcing per beat costs ~6 s of warn each time and buys every beat its own
-   correctly-aged eruption on both sides of the comparison. */
+   correctly-aged eruption on both sides of the comparison.
+
+   EVERY, not most. Two of the lava beats used to inherit the eruption their
+   PREDECESSOR had forced, and that quietly made the storyboard order
+   load-bearing: `--subjects lava-day` on its own photographed an idle island
+   with a fallback tripod and cheerfully reported ok:true, which is the one
+   thing this preset's header promises it will not do. A beat that cannot
+   stage its own subject is not a beat. */
 const subjects = [
   { id: "warn-lane", label: "Warning — the lane announces itself", hud: false,
     focus: "Warn phase, no words. The crater glows, ash starts, and ROCK is already coming down the corridor the pyroclastic flow will take. Before-side: a glowing disc and nothing about direction.",
@@ -56,13 +71,23 @@ const subjects = [
 
   { id: "lava-day", label: "Lava close-up — opaque crust", hud: false,
     focus: "OPAQUE crusted flow: dark basalt levees standing proud of the ground with a white-yellow incandescent channel cracking through, cooling to dull red downstream. Before-side: an additive box you can see the grass through. vol_lavaTransparent must read 0.",
-    act: { extraSecs: 2.2 },
-    cam: { lava: true, side: 15, alt: 8, back: 19, fallback: { x: 26, y: 12, z: 626, ax: 4, ay: 4, az: 606 } } },
+    act: { force: "volcano", untilState: "active", extraSecs: 12 },
+    cam: { lava: true, frame: 0.55, out: 22, alt: 11, behind: 3, fallback: { x: 26, y: 12, z: 626, ax: 4, ay: 4, az: 606 } } },
+
+  { id: "lava-front", label: "The advancing nose — does it FLOW?", hud: false,
+    focus: "OWNER: the magma 'doesn't flow like magma, it just glitches down weirdly and zig-zaggy'. This is the diagnostic shot: the leading nose at close range. The front must nose forward CONTINUOUSLY and the channel pattern must travel downstream — before-side steps the tip one whole ~5 m station at a time and its ribbon saw-tooths across the hillside on the station-centre ground height.",
+    act: { force: "volcano", untilState: "active", extraSecs: 7.5 },
+    cam: { lava: true, frame: 1, out: 11, alt: 5.5, behind: -5, fallback: { x: 22, y: 9, z: 620, ax: 4, ay: 3, az: 604 } } },
 
   { id: "pyroclastic", label: "Pyroclastic flow — mid-descent", hud: false,
     focus: "THE KILLER. A ground-hugging avalanche of 600 C rock and gas boiling down the fall line at 6x sprinting speed, engulfing its lane. Opaque overlapping billows with an incandescent basal fringe — not translucent orange rocks. Before-side has no such hazard at all.",
     act: { force: "volcano", untilState: "active", extraSecs: 5.4, needLine: true },
     cam: { lane: true, ahead: 44, side: 15, alt: 34, fallback: { x: 96, y: 34, z: 664, ax: 0, ay: 16, az: 604 } } },
+
+  { id: "pyro-close", label: "The cloud at reading distance", hud: false,
+    focus: "OWNER: 'there's big rocks looking of smoke — smoke doesn't look like big bouncing boulders'. Close enough that INDIVIDUAL elements are legible, which is exactly where the before-side falls apart: lit low-poly icosahedra up to ~21 m across, visibly tumbling on their own axes. It has to read as a churning ash cloud with soft irregular edges, not as a rockslide.",
+    act: { force: "volcano", untilState: "active", extraSecs: 4.3, needLine: true },
+    cam: { lane: true, ahead: 20, side: 30, alt: 13, fallback: { x: 74, y: 22, z: 646, ax: 10, ay: 12, az: 610 } } },
 
   { id: "lahar", label: "Lahar in the channel", hud: false,
     focus: "Wet concrete: a matte grey-brown mud river down the VALLEY rather than the fall line, carrying boulders and logs. Slower than the flow, and it sets where it stops.",
@@ -76,8 +101,8 @@ const subjects = [
 
   { id: "lava-night", label: "Lava at night — it lights the hill", hud: false,
     focus: "The same flow after dark. The channel is an UNLIT material, so it stays exactly as bright as it was at noon (that IS incandescence), and its pooled point lights paint the hillside around it. The eruption's own sky tint now follows the day cycle instead of overriding night into noon.",
-    act: { night: true, force: "volcano", untilState: "active", extraSecs: 4.5 },
-    cam: { lava: true, side: 15, alt: 8, back: 19, fallback: { x: 26, y: 12, z: 626, ax: 4, ay: 4, az: 606 } } },
+    act: { night: true, force: "volcano", untilState: "active", extraSecs: 12 },
+    cam: { lava: true, frame: 0.55, out: 22, alt: 11, behind: 3, fallback: { x: 26, y: 12, z: 626, ax: 4, ay: 4, az: 606 } } },
 
   { id: "nuke-fireball", label: "The finale — t+7s, the fireball", hud: false,
     focus: "Seven seconds in: still the incandescent phase, hot billows and the cap glow. Orange here is CORRECT — it is a fireball. The complaint was about the end stage, which is the next two beats.",
@@ -200,6 +225,13 @@ async function stageVolcano(input) {
   if (act.night && CBZ.dayPhase) { try { CBZ.dayPhase(0.93); } catch (_) {} }
   if (act.day && CBZ.dayPhase) { try { CBZ.dayPhase(0.42); } catch (_) {} }
 
+  /* THE BODY COUNT. Read the lobby BEFORE this beat simulates anything, so
+     `killedThisBeat` is the deaths those exact simulated seconds caused and
+     not a running total. aliveCount() is on the deployed build too, which is
+     the only reason the two sides can be compared at all here. */
+  const aliveOf = () => { try { return CBZ.surv.aliveCount(); } catch (_) { return -1; } };
+  const aliveBefore = aliveOf();
+
   if (act.force) { CBZ.disasters.force(act.force); step(0.1); }
   if (act.untilState) stepUntilState(act.untilState, 30);
   if (act.extraSecs) step(act.extraSecs);
@@ -245,26 +277,47 @@ async function stageVolcano(input) {
     }
   } else if (cam.lava) {
     // THE FLOW TELLS THE CAMERA WHERE IT IS. volcanoAudit publishes the live
-    // fronts; frame the one furthest down the hill, from downslope, so the
-    // shot looks UP the channel at the incandescent core.
+    // fronts and their axes; frame the one that has run furthest.
     try {
       const A = CBZ.volcanoAudit ? CBZ.volcanoAudit() : null;
       const tips = (A && A.lavaTips) || [];
+      const mids = (A && A.lavaMids) || [];
       const hill = (CBZ.surv && CBZ.surv.arena) ? CBZ.surv.arena.hills[0] : { x: 0, z: 600 };
-      let best = null, bd = -1;
-      for (const t of tips) {
-        const d = Math.hypot(t.x - hill.x, t.z - hill.z);
-        if (d > bd) { bd = d; best = t; }
+      let best = null, bd = -1, bi = -1;
+      for (let i = 0; i < tips.length; i++) {
+        const d = Math.hypot(tips[i].x - hill.x, tips[i].z - hill.z);
+        if (d > bd) { bd = d; best = tips[i]; bi = i; }
       }
-      if (best && bd > 4) {
-        const dx = (best.x - hill.x) / bd, dz = (best.z - hill.z) / bd;
+      const mid = bi >= 0 ? mids[bi] : null;
+      if (best && mid) {
+        /* TWO POINTS ON THE FLOW BEAT ONE POINT AND A GUESS.
+
+           Three tripods failed here before this one. The last of them framed
+           the ribbon as the straight line from the vent to its toe — which is
+           right only for a flow that never turned, and a fall line's whole
+           job is to turn. On a cone that shoulders away under it, the point
+           "55% of the way from the vent to the tip" sits out on open
+           hillside with the actual lava thirty metres to one side, which is
+           precisely what the last set of shots photographed.
+
+           world/volcanofx.js now publishes `lavaMids` beside `lavaTips`, so
+           the axis is measured off two points that are both ON the flow.
+           `frame` slides the look-at from the middle of the river (0) to its
+           advancing nose (1), and the camera stands square to that axis. */
+        let fx = best.x - mid.x, fz = best.z - mid.z;
+        const fl = Math.hypot(fx, fz) || 1; fx /= fl; fz /= fl;
+        const f = cam.frame != null ? cam.frame : 0.2;
+        const mx = mid.x + (best.x - mid.x) * f, mz = mid.z + (best.z - mid.z) * f;
+        const gAtP = (x, z) => (CBZ.surv && CBZ.surv.arena ? CBZ.surv.arena.groundHeightAt(x, z) : 0);
+        const my = gAtP(mx, mz);
+        const out = cam.out != null ? cam.out : 24;
+        const cxp = mx - fz * out - fx * (cam.behind || 0);
+        const czp = mz + fx * out - fz * (cam.behind || 0);
         aimed = {
-          x: best.x + dx * (cam.back || 10) - dz * (cam.side || 11),
-          y: best.y + (cam.alt || 6),
-          z: best.z + dz * (cam.back || 10) + dx * (cam.side || 11),
-          ax: best.x - dx * 6, ay: best.y + 1.2, az: best.z - dz * 6,
+          x: cxp, y: Math.max(gAtP(cxp, czp), my) + (cam.alt || 12), z: czp,
+          ax: mx, ay: my + 1.2, az: mz,
         };
-        aimNote = "lava front";
+        aimNote = "lava flank";
       }
     } catch (_) {}
   }
@@ -328,12 +381,15 @@ async function stageVolcano(input) {
   query("source").textContent = new URL(input.sourceUrl).host + new URL(input.sourceUrl).pathname;
   query("source").style.cssText = "position:absolute;bottom:10px;left:27px;color:#9cb0bf;font:10px ui-monospace,SFMono-Regular,Menlo,monospace";
 
+  const aliveNow = aliveOf();
   const metrics = {
     tickAvgMs: ticks ? Number((totalMs / ticks).toFixed(2)) : 0,
     tickMaxMs: Number(maxMs.toFixed(1)),
     ticksOver33: over33,
     drawCalls: Number(render.calls || 0),
     cameraFar: Math.round(camera.far),
+    aliveNow: aliveNow,
+    killedThisBeat: Math.max(0, aliveBefore - aliveNow),
   };
   const carry = (obj, prefix) => {
     if (!obj) return;
@@ -366,6 +422,13 @@ export default {
   stageTimeoutMs: 480000,
   metricsNote: "vol_* comes from CBZ.volcanoAudit() (world/volcanofx.js) and audit_* from CBZ.disasterAudit(). lavaTransparent counts LIVE lava materials that are transparent or additively blended — the thing the owner could see through. cameraFar is the finale's frustum: below ~2600 the mushroom's cap is clipped off.",
   metrics: {
+    /* THE OWNER'S SECOND COMPLAINT AS A NUMBER. A stratovolcano is supposed to
+       be survivable by getting off its side; "kills way too many people" means
+       the lobby is being deleted by hazards nobody could read or dodge. Lower
+       is better here for the same reason higher is better for pyroRuns — the
+       hazard should still HAPPEN, it just should not be a lottery. */
+    killedThisBeat: { label: "Bots killed in this beat", better: "lower" },
+    aliveNow: { label: "Lobby still alive", better: "higher" },
     vol_lavaTransparent: { label: "See-through lava materials", better: "lower" },
     vol_lavaFlows: { label: "Live lava flows", better: "higher" },
     vol_pyroLive: { label: "Pyroclastic flows live", better: "higher" },

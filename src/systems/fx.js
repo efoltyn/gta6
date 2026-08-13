@@ -185,6 +185,18 @@
   // ---------------------------------------------------------------
   // dropDebris: a box that falls under gravity onto the arena floor,
   // optionally crushing actors on landing, then lingers as rubble.
+  //
+  // IT CAN ALSO BE THROWN. Give it `fromX`/`fromZ` (with `fromY`) and it
+  // launches from there on a real ballistic arc that LANDS on (x, z): the
+  // flight time is picked off the range, and vx/vy/vz are then solved for
+  // that time against the same gravity every other body in the game uses.
+  // Without those two fields the behaviour is exactly what it always was —
+  // a vertical drop — so every existing caller is untouched.
+  //
+  // The volcano is why. A lava bomb that materialises directly above its
+  // victim and drops is the "not even with physics" the owner reported; a
+  // lava bomb has to come OUT OF THE MOUNTAIN, and you have to be able to
+  // watch it come.
   // ---------------------------------------------------------------
   fx.dropDebris = function (o) {
     o = o || {};
@@ -194,12 +206,27 @@
     const mat = CBZ.mat ? CBZ.mat(o.color != null ? o.color : 0x6b7079) : new THREE.MeshLambertMaterial({ color: 0x6b7079 });
     const m = new THREE.Mesh(geo, mat);
     const x = o.x, z = o.z;
-    m.position.set(x, o.fromY != null ? o.fromY : 26, z);
+    const sy = o.fromY != null ? o.fromY : 26;
+    let vx = 0, vz = 0, vy = o.vy || 0, px = x, pz = z;
+    if (o.fromX != null && o.fromZ != null) {
+      px = o.fromX; pz = o.fromZ;
+      const dx = x - px, dz = z - pz;
+      const range = Math.hypot(dx, dz);
+      // long throws hang longer, and nothing arrives before you can look up
+      const T = Math.max(0.9, 0.75 + range / 26);
+      const ty = (CBZ.floorAt ? CBZ.floorAt(x, z) : 0) + h / 2;
+      vx = dx / T; vz = dz / T;
+      // the same gravity the updater below integrates with, defaulted rather
+      // than assumed: a throw solved against a different g lands somewhere else
+      const gg = (CBZ.TUNE && CBZ.TUNE.gravity) || 20;
+      vy = ((ty - sy) + 0.5 * gg * T * T) / T;
+    }
+    m.position.set(px, sy, pz);
     m.castShadow = true;
     m.rotation.set(rng() * 3, rng() * 3, rng() * 3);
     scene.add(m);
     debris.push({
-      mesh: m, geo, mat, x, z, vy: o.vy || 0, h,
+      mesh: m, geo, mat, x: px, z: pz, vy: vy, vx: vx, vz: vz, h,
       spin: { x: (rng() - 0.5) * 4, z: (rng() - 0.5) * 4 },
       landed: false, lingerT: o.linger != null ? o.linger : 6,
       radius: Math.max(w, d) * 0.6, dmg: o.dmg || 0, onLand: o.onLand || null,
@@ -250,6 +277,12 @@
       if (!b.landed) {
         b.vy -= g * dt;
         b.mesh.position.y += b.vy * dt;
+        // a thrown piece carries its horizontal velocity, and b.x/b.z follow
+        // it so the floor probe and the landing damage stay under the rock
+        if (b.vx || b.vz) {
+          b.x += b.vx * dt; b.z += b.vz * dt;
+          b.mesh.position.x = b.x; b.mesh.position.z = b.z;
+        }
         b.mesh.rotation.x += b.spin.x * dt;
         b.mesh.rotation.z += b.spin.z * dt;
         const floor = (CBZ.floorAt ? CBZ.floorAt(b.x, b.z) : 0) + b.h / 2;

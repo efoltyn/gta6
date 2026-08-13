@@ -24,13 +24,29 @@
               the margins. It is LIT, so it takes the scene's sun and
               reads as ground, and it THICKENS with age (the levees
               build up and the flow stands proud of the grass).
-     CHANNEL  MeshBasicMaterial, vertexColors, OPAQUE. Unlit on
+     MELT     MeshBasicMaterial, vertexColors, OPAQUE. Unlit on
               purpose — an unlit material IS incandescence: it ignores
               the sun, so at night it stays exactly as bright as it was
               at noon, which is what self-luminous rock does. White-
               yellow (1150 C) at the vent, cooling through orange to a
-              deep dull red at the toe. Its width breathes and pinches
-              shut where the crust has welded over.
+              deep dull red at the toe.
+
+   OWNER AGAIN, 2026-08-13: "the magma has black on it and doesn't flow
+   like magma, it just glitches down weirdly and zig zaggy". Three
+   separate defects wearing one coat, and all three are answered inside
+   V.lavaFlow with their own long note at the point of repair:
+
+     BLACK    the melt was a narrow SECOND MESH — under a quarter of the
+              ribbon — so the flow was mostly crust. It is now a FIELD
+              over the same footprint, and the field's time term advects
+              downstream, which is also what makes it look alive.
+     GLITCHES the drawn front was quantised to whole stations and jumped
+              a segment at a time. The leading ring is now planted at the
+              exact live length.
+     ZIG-ZAG  fallLine steers by a seven-way probe re-decided every step
+              and saw-tooths on faceted ground; smoothPath() gives the
+              momentum back, and each vertex now stands on the ground
+              under itself instead of the one under the centreline.
 
    The only TRANSPARENT thing in a lava flow here is the heat haze
    ABOVE it — additive sprites, never the flow itself — plus one or two
@@ -99,6 +115,7 @@
   function q(lo, hi) { return CBZ.qScale ? CBZ.qScale(lo, hi) : hi; }
   function qi(lo, hi) { return Math.max(1, Math.round(q(lo, hi))); }
   const _c1 = new THREE.Color(), _c2 = new THREE.Color(), _c3 = new THREE.Color();
+  const _c4 = new THREE.Color();
 
   // hex ramp: three stops, t in 0..1
   function ramp3(t, a, b, c, out) {
@@ -194,6 +211,46 @@
   }
   V.fallLine = fallLine;
 
+  /* ---- SMOOTH THE WALK -------------------------------------------------
+     OWNER, 2026-08-13: the magma "doesn't flow like magma, it just glitches
+     down weirdly and zig zaggy".
+
+     Half of that is right here. fallLine steers by probing a fan of seven
+     headings against the height field and taking the lowest — a decision
+     that is QUANTISED to seven directions and re-taken from scratch every
+     step. On a faceted low-poly cone the winner alternates between two
+     neighbouring probes step after step, and the walk saw-tooths: a
+     ruler-straight zig, then a zag, then a zig. Nothing downstream can hide
+     it, because the ribbon is built ON these points.
+
+     A fluid has momentum and cannot corner like that, so the walk gets it
+     back afterwards: two passes of a [1 2 1] filter on x/z, endpoints
+     pinned (the vent must not move), then every point re-seated on the
+     ground it now sits over. The line still goes where the mountain sends
+     it — it just stops changing its mind twice a metre.
+
+     Arc length shrinks a percent or two under the filter. That is fine and
+     deliberately not corrected: pathAt() and pathCoord() BOTH address the
+     polyline as `index * seg`, so they stay consistent with each other, and
+     a flow whose front is 2% slower than its nominal speed is a flow.
+     ---------------------------------------------------------------------- */
+  function smoothPath(path, passes, groundAt) {
+    const P = path.pts;
+    if (!P || P.length < 3) return path;
+    for (let k = 0; k < (passes || 1); k++) {
+      let px = P[0].x, pz = P[0].z;               // the pre-filter neighbour
+      for (let i = 1; i < P.length - 1; i++) {
+        const cx = P[i].x, cz = P[i].z;
+        P[i].x = cx * 0.5 + (px + P[i + 1].x) * 0.25;
+        P[i].z = cz * 0.5 + (pz + P[i + 1].z) * 0.25;
+        px = cx; pz = cz;
+      }
+    }
+    for (let i = 0; i < P.length; i++) P[i].y = groundAt(P[i].x, P[i].z);
+    return path;
+  }
+  V.smoothPath = smoothPath;
+
   // arc-length sample of a fall line at distance s (metres from the vent)
   function pathAt(path, s, out) {
     const P = path.pts, seg = path.seg;
@@ -226,12 +283,74 @@
   V.pathCoord = pathCoord;
 
   /* ============================================================
-     LAVA FLOW — opaque crust + incandescent channel.
+     LAVA FLOW — a molten river under a chilling lid.
+
+     OWNER, 2026-08-13: "the magma has black on it and doesn't flow like
+     magma". Both halves were true of the first build and both had one
+     cause: the incandescence was GEOMETRY.
+
+     The channel was its own narrow mesh, 16-50% of the flow's HALF width —
+     8 to 25% of the ribbon — so seven eighths of every flow was the dark
+     basalt crust and the thing read as a black snake with an orange pin
+     stripe down it. And because the melt was a shape rather than a state,
+     nothing about it could move: the crust could only cool, so a flow that
+     had finished growing was a painted rock.
+
+     So the melt stopped being a mesh and became a FIELD. Both meshes now
+     share one footprint and one set of columns; what decides whether a
+     given square metre is glowing rock or chilled lid is a smooth function
+     of (distance down the flow, distance across it, TIME) — and the time
+     term advects downstream at the surface velocity. Plates of cooled crust
+     ride down the channel, tear open, and let the melt through, which is
+     what a basaltic channel actually does and what "flowing" looks like at
+     any frame rate. It costs three sines a vertex and no geometry at all.
+
+       CRUST   MeshPhongMaterial (shininess 0, flatShading) — LIT, opaque,
+               full width. It is the levees, the thickness, and the only
+               part of the flow that answers to the sun.
+       MELT    MeshBasicMaterial — UNLIT (= incandescent), opaque, inset to
+               0.82 so the lit levees show along both banks. Its vertex
+               colours carry the whole story: molten where the lid has torn,
+               dark where it has welded, white-yellow at the vent, dull red
+               at the toe.
      ============================================================ */
-  const LAVA_COLS = 5;              // crust columns across the flow
-  const LAVA_U = [-1, -0.56, 0, 0.56, 1];
-  const CH_COLS = 3;
-  const CH_U = [-1, 0, 1];
+  /* THE GRID HAS TO BE FINE ENOUGH TO HOLD THE PATTERN, and the first cut of
+     the lid field was not: at one station every ~5 m the along-flow term
+     advanced 2.2 radians a step, so a wave meant to draw crust plates was
+     sampled three times a cycle and linear interpolation smeared what was
+     left into a gradient. The flow came out a smooth glowing tube — the
+     owner's black ribbon swapped for a neon one, with no more structure than
+     it had before. Nine columns and a station every ~2.2 m give roughly seven
+     samples per plate, which is the point at which the plates exist. */
+  const LAVA_COLS = 9;              // columns across the flow
+  const LAVA_U = [-1, -0.78, -0.55, -0.3, 0, 0.3, 0.55, 0.78, 1];
+  const MELT_INSET = 0.82;          // the lit crust shows outboard of this
+  // lit crust: dark basalt at the levee, scorched red-brown inboard. Not
+  // BLACK — a crust photographs as very dark grey-brown, and pure black in
+  // a dim orange scene is a hole in the picture.
+  const CRUST_A = 0x2a2320, CRUST_B = 0x412c22, CRUST_C = 0x74371a;
+  // the unlit lid over the melt, and the melt itself (1150 C to dull red)
+  const _LID_D = new THREE.Color(0x241d19), _LID_W = new THREE.Color(0x502513);
+  const MELT_A = 0x8c1e02, MELT_B = 0xe85a08, MELT_C = 0xffcf7a;
+
+  /* THE LID, as a smooth field that TRAVELS.
+
+     CBZ.hash01 is a hash, not a noise: sampled along a line it is white
+     static, so plates cannot be built from it. Three incommensurate sines
+     in (along, across) give a smooth, non-repeating, organic crust for the
+     price of three sin() a vertex — and shifting their common phase is what
+     makes the whole pattern slide downstream. `ph` IS the flow. */
+  /* One constant ties the field's along-flow scale to the advection phase, so
+     "the pattern travels downstream at the surface velocity" stays TRUE
+     instead of being two numbers that have to be kept in step by hand. */
+  const LID_K = 0.55;
+  function lidField(s, u, ph) {
+    const a = s * LID_K - ph;
+    return 0.5 + 0.5 * (
+      0.60 * Math.sin(a + u * 3.1) +
+      0.27 * Math.sin(a * 1.43 - u * 5.2 + 1.7) +
+      0.13 * Math.sin(a * 0.71 + u * 8.6 + 4.1));
+  }
 
   V.lavaFlow = function (o) {
     o = o || {};
@@ -242,27 +361,66 @@
     const len = o.len > 0 ? +o.len : 40;
     const speed = o.speed > 0 ? +o.speed : 5;
     const salt = o.salt != null ? (o.salt | 0) : 4711;
-    const seg = Math.max(2.2, width * 0.85);
-    const path = fallLine({
+    const seg = clamp(width * 0.4, 1.9, 2.8);
+    /* A STATION EVERY seg METRES IS A DECISION EVERY seg METRES. Halving the
+       wander and the turn rate (against fallLine's 0.45/0.16 defaults) is the
+       other half of the anti-zig-zag fix: lava has momentum and a metre of
+       lateral wobble per four metres travelled is not momentum, it is noise.
+       smoothPath then files off what survives. */
+    const path = smoothPath(fallLine({
       x: o.x, z: o.z, groundAt: groundAt, bearing: o.bearing,
-      step: seg, count: Math.ceil(len / seg) + 1, salt: salt, wander: 0.2,
-    });
+      step: seg, count: Math.ceil(len / seg) + 1, salt: salt,
+      turn: 0.3, wander: 0.06,
+    }), 2, groundAt);
     const N = path.pts.length;
 
     // ---- per-station shape, hashed off the station's own world position so
     //      the river's outline is identical on every client ----
-    const wProf = new Float32Array(N);     // crust half-width multiplier
-    const chProf = new Float32Array(N);    // channel half-width multiplier
+    const wProf = new Float32Array(N);     // half-width multiplier
     const hot0 = new Float32Array(N);      // incandescence at birth
     for (let i = 0; i < N; i++) {
       const p = path.pts[i], u = i / (N - 1);
       // a flow LEAVES the vent narrow and FANS OUT as the ground flattens
       wProf[i] = (0.5 + 0.72 * Math.pow(u, 0.7)) * (0.84 + 0.32 * h01(p.x, p.z, salt + 11));
-      // the channel pinches shut where the crust has welded across it
-      const gap = h01(p.x, p.z, salt + 23);
-      chProf[i] = gap < 0.19 ? 0.05 : (0.16 + 0.34 * gap);
       // temperature falls downstream — this is the whole colour story
-      hot0[i] = clamp(1.06 - 0.85 * u + (h01(p.x, p.z, salt + 37) - 0.5) * 0.16, 0.06, 1);
+      hot0[i] = clamp(1.06 - 0.72 * u + (h01(p.x, p.z, salt + 37) - 0.5) * 0.16, 0.1, 1);
+    }
+
+    /* ---- THE BED, SOLVED ONCE ------------------------------------------
+       The other half of "glitches down weirdly": every vertex across the
+       ribbon used to take its height from the ground under the STATION
+       CENTRE. On a cone that is wrong by the cross-slope times the half
+       width — several metres on the steep upper face — so one bank of the
+       flow hung in the air and the other was buried in the hillside, and
+       the seam crawled as the flow turned. It looked like tearing because
+       it was tearing.
+
+       Each vertex now stands on the ground under ITSELF, floored at the
+       channel centre's height so the sheet PONDS across a hollow instead of
+       draping into it. The path never moves after construction, so this is
+       solved once here and costs nothing per frame — the per-frame writer
+       only adds the thickness on top.
+       -------------------------------------------------------------------- */
+    const cGY = new Float32Array(N * LAVA_COLS);   // crust bed
+    const mGY = new Float32Array(N * LAVA_COLS);   // melt bed (inset)
+    const grain = new Float32Array(N * LAVA_COLS); // per-vertex rock grain
+    const nX = new Float32Array(N), nZ = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+      const p = path.pts[i];
+      const a = path.pts[Math.max(0, i - 1)], b2 = path.pts[Math.min(N - 1, i + 1)];
+      let nx = -(b2.z - a.z), nz = (b2.x - a.x);
+      const nl = Math.hypot(nx, nz) || 1;
+      nX[i] = nx / nl; nZ[i] = nz / nl;
+      const hw = halfW * wProf[i];
+      for (let c = 0; c < LAVA_COLS; c++) {
+        const u = LAVA_U[c], k = i * LAVA_COLS + c;
+        const x = p.x + nX[i] * u * hw, z = p.z + nZ[i] * u * hw;
+        cGY[k] = Math.max(groundAt(x, z), p.y);
+        const mx = p.x + nX[i] * u * MELT_INSET * hw;
+        const mz = p.z + nZ[i] * u * MELT_INSET * hw;
+        mGY[k] = Math.max(groundAt(mx, mz), p.y);
+        grain[k] = h01(x, z, salt + 5);
+      }
     }
 
     // ---- CRUST: opaque, lit, flat-shaded, thickening ----
@@ -296,14 +454,14 @@
     crust.renderOrder = 2;
     parent.add(crust);
 
-    // ---- CHANNEL: opaque, UNLIT (= incandescent) ----
-    const kPos = new Float32Array(N * CH_COLS * 3);
-    const kCol = new Float32Array(N * CH_COLS * 3);
-    const kIdx = new Uint16Array(Math.max(1, (N - 1) * (CH_COLS - 1) * 6));
+    // ---- MELT: opaque, UNLIT (= incandescent), same grid, inset footprint ----
+    const kPos = new Float32Array(N * LAVA_COLS * 3);
+    const kCol = new Float32Array(N * LAVA_COLS * 3);
+    const kIdx = new Uint16Array(Math.max(1, (N - 1) * (LAVA_COLS - 1) * 6));
     ii = 0;
     for (let i = 0; i < N - 1; i++) {
-      for (let c = 0; c < CH_COLS - 1; c++) {
-        const a = i * CH_COLS + c, b2 = a + 1, d = a + CH_COLS, e = d + 1;
+      for (let c = 0; c < LAVA_COLS - 1; c++) {
+        const a = i * LAVA_COLS + c, b2 = a + 1, d = a + LAVA_COLS, e = d + 1;
         kIdx[ii++] = a; kIdx[ii++] = d; kIdx[ii++] = b2;
         kIdx[ii++] = b2; kIdx[ii++] = d; kIdx[ii++] = e;
       }
@@ -321,17 +479,25 @@
     chan.renderOrder = 3;
     parent.add(chan);
 
-    // ---- HEAT HAZE: the ONLY transparent thing here, and it floats ABOVE
-    //      the rock rather than being made of it ----
-    const hazeN = o.haze === false ? 0 : qi(3, Math.max(4, Math.min(12, Math.round(N * 0.6))));
+    /* ---- HEAT HAZE: the ONLY transparent thing here, and it floats ABOVE
+       the rock rather than being made of it.
+
+       AND IT HAS TO STAY OUT OF THE WAY. At opacity 0.3, additive, ten deep,
+       at 1.6x the flow's own width, this was not a shimmer — it was an opaque
+       orange sheet parked over the subject, and a camera brought close enough
+       to photograph the magma ended up INSIDE it, which whited out the frame
+       completely. Convection over a lava channel is a distortion you notice
+       at the edges of things, not a light source: a third of the size and a
+       third of the opacity. ---- */
+    const hazeN = o.haze === false ? 0 : qi(2, Math.max(2, Math.min(5, Math.round(N * 0.22))));
     const hazeMat = new THREE.SpriteMaterial({
-      map: glowTex(), color: 0xff8636, transparent: true, opacity: 0.3,
+      map: glowTex(), color: 0xff8636, transparent: true, opacity: 0.06,
       blending: THREE.AdditiveBlending, depthWrite: false, fog: true,
     });
     const haze = [];
     for (let i = 0; i < hazeN; i++) {
       const s = new THREE.Sprite(hazeMat);
-      s.scale.set(width * 1.6, width * 1.6, 1);
+      s.scale.set(width * 0.6, width * 0.6, 1);
       s.renderOrder = 8;
       s.visible = false;
       parent.add(s);
@@ -349,57 +515,135 @@
     }
 
     let adv = Math.min(seg * 1.05, len);   // metres of flow laid down
-    let age = 0, dead = false, colT = 0;
+    let age = 0, dead = false;
     const _v = new THREE.Vector3();
+    /* THE SURFACE RUNS FASTER THAN THE FRONT. The nose is braked by the crust
+       it is pushing; the melt behind it is not. ~2.4x is the ratio that reads
+       as "a river with a lid on it" rather than as a conveyor belt. */
+    const skinV = speed * 2.4;
+
+    // one ring of LAVA_COLS vertices, at a given centre / normal / width
+    function ring(i, cx, cy0, cz, nx, nz, hw, thick, hot, s, ph, bedC, bedM) {
+      const u01 = N > 1 ? clamp(s / Math.max(0.001, (N - 1) * seg), 0, 1) : 0;
+      for (let c = 0; c < LAVA_COLS; c++) {
+        const u = LAVA_U[c], au = Math.abs(u), k = i * LAVA_COLS + c, off = k * 3;
+        /* FLAT-TOPPED, STEEP-SIDED. A quadratic crown is a half-cylinder, and
+           a half-cylinder with a bright middle is a fluorescent tube; an 'a'a
+           flow is a broad flat raft riding between two steep levees. The cubic
+           keeps the top honest and puts all the fall-off in the last fifth. */
+        const crown = 0.25 + 0.75 * (1 - Math.pow(au, 3.2));
+        const gr = 0.84 + 0.30 * grain[k];
+
+        // ---- CRUST: lit, full width, the levees and the thickness ----
+        cPos[off] = cx + nx * u * hw;
+        cPos[off + 2] = cz + nz * u * hw;
+        cPos[off + 1] = (bedC ? bedC[k] : cy0) + 0.05 + thick * crown;
+        ramp3(clamp((1 - au) * (0.3 + 0.7 * hot), 0, 1), CRUST_A, CRUST_B, CRUST_C, _c3);
+        cCol[off] = _c3.r * gr; cCol[off + 1] = _c3.g * gr; cCol[off + 2] = _c3.b * gr;
+
+        // ---- MELT: unlit, inset, and the field decides what is showing ----
+        const mu = u * MELT_INSET, amu = Math.abs(mu);
+        kPos[off] = cx + nx * mu * hw;
+        kPos[off + 2] = cz + nz * mu * hw;
+        kPos[off + 1] = (bedM ? bedM[k] : cy0) + 0.05 + thick * (0.25 + 0.75 * (1 - Math.pow(amu, 3.2))) + 0.04;
+        /* HOW MUCH MELT IS SHOWING HERE, and it is the whole look:
+             across  the open channel is a mid-flow feature that narrows and
+                     finally closes as the levees grow inward downstream
+             open    the lid thickens with distance from the vent
+             lid     the travelling crust plates — the term that MOVES */
+        const across = 1 - Math.pow(amu, 2.6 + 2.1 * u01);
+        const open = 0.98 - 0.42 * u01;
+        /* CONTRAST THE FIELD, OR IT IS NOT A CRUST.
+           Three summed sines are Gaussian-ish: almost every sample lands near
+           0.5, so the lid spent its whole life half-open and the flow rendered
+           as one smooth bright band with no plates in it — which photographs
+           as a glowing tube, which is just the owner's complaint wearing a
+           brighter colour. Stretching the field about its own midpoint drives
+           most of it to the rails, and rock either has a skin over it or it
+           does not. */
+        const torn = clamp((lidField(s, u, ph) - 0.5) * 1.8 + 0.5, 0, 1);
+        /* THE TOE STILL GLOWS. An earlier balance drove the downstream half to
+           melt≈0 and simply moved the owner's black flow further down the
+           hill; a cooling toe is dark rock with a RED CRACK NETWORK in it, so
+           the floor here is deliberately above zero. */
+        /* AND THE PLATES HAVE TO WIN SOMEWHERE. With a 0.34 floor under the
+           torn term the lid never fully closed and the whole ribbon glowed at
+           some level, which trades the owner's black flow for a neon one. A
+           near-zero floor means the crust genuinely welds shut in places, and
+           THAT is the contrast the eye reads as molten rock under a skin. */
+        /* AND THE LID IS THE DEFAULT. The subtraction sets where the balance
+           sits: at 0.1 the average square metre of the flow was still molten
+           and the crust was the exception, which is backwards — a flow chills
+           over in seconds and the melt is what shows THROUGH it. */
+        let melt = clamp((0.12 + 1.05 * torn) * across * open * (0.42 + 0.85 * hot) - 0.3, 0, 1);
+        melt = melt * melt * (3 - 2 * melt);      // smoothstep: plates get EDGES
+        ramp3(clamp(melt * (0.34 + 0.82 * hot), 0, 1), MELT_A, MELT_B, MELT_C, _c3);
+        // the lid itself is not black — it is dark rock still holding heat
+        _c4.copy(_LID_D).lerp(_LID_W, clamp(hot * (0.3 + 0.7 * torn), 0, 1));
+        _c4.lerp(_c3, melt);
+        kCol[off] = _c4.r * gr; kCol[off + 1] = _c4.g * gr; kCol[off + 2] = _c4.b * gr;
+      }
+    }
+
+    function stationThick(i) {
+      const bornAt = i * seg / Math.max(0.001, speed);
+      const localAge = clamp(age - bornAt, 0, 40);
+      return { t: 0.18 + 0.5 * (localAge / (localAge + 6)) + 0.1 * wProf[i], cool: clamp(localAge / 26, 0, 1) };
+    }
 
     function writeStations(from, to) {
+      const ph = age * skinV * LID_K;
       for (let i = from; i <= to && i < N; i++) {
-        const p = path.pts[i];
-        // thickness: a flow builds LEVEES and stands proud of the ground.
-        // Older stations (nearer the vent, laid down first) are thicker.
-        const bornAt = i * seg / Math.max(0.001, speed);
-        const localAge = clamp(age - bornAt, 0, 40);
-        const thick = 0.18 + 0.5 * (localAge / (localAge + 6)) + 0.4 * wProf[i] * 0.25;
-        const hw = halfW * wProf[i];
-        const cool = clamp(localAge / 26, 0, 1);
-        const hot = hot0[i] * (1 - 0.78 * cool);
-        // heading normal for the lateral offset
-        const a = path.pts[Math.max(0, i - 1)], b2 = path.pts[Math.min(N - 1, i + 1)];
-        let nx = -(b2.z - a.z), nz = (b2.x - a.x);
-        const nl = Math.hypot(nx, nz) || 1; nx /= nl; nz /= nl;
+        const p = path.pts[i], st = stationThick(i);
+        ring(i, p.x, p.y, p.z, nX[i], nZ[i], halfW * wProf[i], st.t,
+          hot0[i] * (1 - 0.72 * st.cool), i * seg, ph, cGY, mGY);
+      }
+    }
 
-        for (let c = 0; c < LAVA_COLS; c++) {
-          const u = LAVA_U[c], off = (i * LAVA_COLS + c) * 3;
-          const au = Math.abs(u);
-          cPos[off] = p.x + nx * u * hw;
-          cPos[off + 2] = p.z + nz * u * hw;
-          // convex cross-section: crown in the middle, feathered at the levee
-          cPos[off + 1] = p.y + 0.05 + thick * (0.28 + 0.72 * (1 - au * au));
-          // COLOUR: black basalt at the levee, scorched red-brown inboard.
-          // A rock crust never goes bright — the brightness lives in the
-          // channel mesh, which is the whole point of the split.
-          const grain = 0.82 + 0.36 * h01(cPos[off], cPos[off + 2], salt + 5);
-          ramp3(clamp((1 - au) * (0.35 + 0.65 * hot), 0, 1), 0x241b16, 0x3b241a, 0x6d2f12, _c3);
-          cCol[off] = _c3.r * grain;
-          cCol[off + 1] = _c3.g * grain;
-          cCol[off + 2] = _c3.b * grain;
-        }
-        // the channel: white-yellow at 1150 C, orange, then dull red as it cools
-        const chw = halfW * chProf[i] * (1 - 0.55 * cool);
-        const cy = p.y + 0.05 + thick * 1.0 + 0.03;
-        for (let c = 0; c < CH_COLS; c++) {
-          const u = CH_U[c], off = (i * CH_COLS + c) * 3;
-          kPos[off] = p.x + nx * u * chw;
-          kPos[off + 2] = p.z + nz * u * chw;
-          kPos[off + 1] = cy;
-          // edges of the channel are cooler than its middle
-          const edge = 1 - Math.abs(u) * 0.42;
-          ramp3(clamp(hot * edge, 0, 1), 0x4a1103, 0xe8560a, 0xfff3c4, _c3);
-          kCol[off] = _c3.r; kCol[off + 1] = _c3.g; kCol[off + 2] = _c3.b;
-        }
+    /* THE NOSE, AND WHY IT IS ITS OWN FUNCTION.
+
+       The front used to be wherever the last WHOLE station happened to be:
+       drawRange was quantised to complete quads, so the tip sat at a
+       multiple of `seg` and jumped forward four to six metres at a stroke
+       every time `adv` crossed a boundary — then held perfectly still while
+       `adv` caught up. That stutter is the "glitches down" in the owner's
+       note, and no amount of speed tuning could have fixed it because the
+       tip was never actually AT `adv`.
+
+       So the leading ring is written separately, planted at exactly `adv`
+       along the path and tapered to a snout. It slides continuously between
+       stations and the flow noses forward instead of teleporting. Its bed is
+       sampled live — five ground probes for the one ring that moves. */
+    const _noseC = new Float32Array(LAVA_COLS), _noseM = new Float32Array(LAVA_COLS);
+    function writeNose(i) {
+      if (i < 1) return;
+      pathAt(path, adv, _v);
+      const i0 = i - 1;
+      const a = path.pts[i0], b2 = path.pts[Math.min(N - 1, i)];
+      let nx = -(b2.z - a.z), nz = (b2.x - a.x);
+      const nl = Math.hypot(nx, nz) || 1; nx /= nl; nz /= nl;
+      const frac = clamp((adv - i0 * seg) / seg, 0, 1);
+      // a flow front is a blunt snout, not a point: it bulges as it is fed
+      const hw = halfW * wProf[i] * (0.34 + 0.66 * frac);
+      for (let c = 0; c < LAVA_COLS; c++) {
+        const u = LAVA_U[c], k = i * LAVA_COLS + c;
+        _noseC[c] = cGY[k]; _noseM[c] = mGY[k];
+        cGY[k] = Math.max(groundAt(_v.x + nx * u * hw, _v.z + nz * u * hw), _v.y);
+        mGY[k] = Math.max(groundAt(_v.x + nx * u * MELT_INSET * hw, _v.z + nz * u * MELT_INSET * hw), _v.y);
+      }
+      const st = stationThick(i);
+      ring(i, _v.x, _v.y, _v.z, nx, nz, hw, st.t * (0.55 + 0.45 * frac),
+        hot0[i] * (1 - 0.72 * st.cool), adv, age * skinV * LID_K, cGY, mGY);
+      // put the station's own bed back — the nose borrowed those slots
+      for (let c = 0; c < LAVA_COLS; c++) {
+        const k = i * LAVA_COLS + c;
+        cGY[k] = _noseC[c]; mGY[k] = _noseM[c];
       }
     }
     writeStations(0, 1);
+    // the crust's normal attribute exists for the shader's sake and never
+    // changes after this: FLAT_SHADED derives its own (see update()).
+    crustGeo.computeVertexNormals();
 
     const handle = {
       kind: "lava", group: crust, path: path, mesh: crust, channel: chan,
@@ -408,29 +652,46 @@
         pathAt(path, adv, _v);
         return { x: _v.x, y: _v.y, z: _v.z };
       },
+      /* A FLOW IS A CURVE, AND THE TIP ALONE DOES NOT SAY WHICH WAY IT RUNS.
+         Anything framing or fencing this thing — a camera, a threat overlay,
+         a bot's flee vector — has been guessing the axis by drawing a straight
+         line from the vent to the tip, and a fall line that has followed the
+         mountain around a shoulder is nowhere near that line. `mid` plus `tip`
+         is the cheapest honest answer: two points that are both ON the flow. */
+      get mid() {
+        pathAt(path, adv * 0.5, _v);
+        return { x: _v.x, y: _v.y, z: _v.z };
+      },
       update(dt) {
         if (dead) return handle;
         age += dt;
-        const was = adv;
         adv = Math.min(len, adv + speed * dt);
         const st = Math.min(N - 1, Math.floor(adv / seg) + 1);
-        // rewrite the whole live ribbon: N is a couple of dozen stations, so
-        // this is cheaper than tracking dirty ranges and it lets the ENTIRE
-        // flow cool and thicken instead of only its front
-        colT += dt;
-        if (adv !== was || colT > 0.12) { colT = 0; writeStations(0, st); }
+        /* REWRITE EVERY FRAME, ALWAYS. The old build skipped the rewrite when
+           the front had stopped moving, which was correct when the only thing
+           a written vertex could express was "cooler than last time". Now the
+           lid field is a function of TIME, so a skipped frame is a frozen
+           river — the exact failure the owner reported. N is a dozen-odd
+           stations; this is a few hundred floats. */
+        writeStations(0, Math.max(0, st - 1));
+        writeNose(st);
         crustGeo.attributes.position.needsUpdate = true;
         crustGeo.attributes.color.needsUpdate = true;
         chGeo.attributes.position.needsUpdate = true;
         chGeo.attributes.color.needsUpdate = true;
         crustGeo.setDrawRange(0, Math.max(0, st) * (LAVA_COLS - 1) * 6);
-        chGeo.setDrawRange(0, Math.max(0, st) * (CH_COLS - 1) * 6);
-        crustGeo.computeVertexNormals();
+        chGeo.setDrawRange(0, Math.max(0, st) * (LAVA_COLS - 1) * 6);
+        /* NO computeVertexNormals(). r128 FACT, checked in the shipped build:
+           `normal_fragment_begin` takes the #ifdef FLAT_SHADED branch and
+           rebuilds the normal from dFdx/dFdy of the view position — the
+           attribute is not even varied to the fragment shader. Recomputing a
+           few hundred normals a frame for a flat-shaded material fed exactly
+           nothing. It is computed ONCE at build so the attribute exists. */
         // runtime-only flicker (allowed to be non-deterministic): the whole
-        // channel breathes as one, which costs one uniform instead of a
+        // melt breathes as one, which costs one uniform instead of a
         // per-vertex rewrite
-        const fl = 0.9 + 0.12 * Math.sin(age * 5.3) + Math.random() * 0.04;
-        chMat.color.setScalar(clamp(fl, 0.7, 1.08));
+        const fl = 0.92 + 0.1 * Math.sin(age * 5.3) + Math.random() * 0.04;
+        chMat.color.setScalar(clamp(fl, 0.75, 1.1));
 
         for (let i = 0; i < haze.length; i++) {
           const H = haze[i], s = adv * H.u;
@@ -442,7 +703,7 @@
             _v.y + 1.4 + 0.7 * Math.sin(age * 1.6 + H.ph),
             _v.z + Math.cos(age * 0.8 + H.ph) * width * 0.3
           );
-          const sc = width * (1.2 + 0.35 * Math.sin(age * 1.1 + H.ph));
+          const sc = width * (0.42 + 0.13 * Math.sin(age * 1.1 + H.ph));
           H.sp.scale.set(sc, sc, 1);
         }
         if (light) {
@@ -488,34 +749,102 @@
      mitigation — the survival verb is EVACUATION, which is why the
      path is drawn along the fall line and telegraphed before it moves.
 
-     THE LOOK, and why it is not the "orange floating rocks" the owner
-     rightly hates: many HEAVILY OVERLAPPING smooth-shaded billows, all
-     OPAQUE and LIT, sizes spread over 3x, each churning about its own
-     anchor on its own phase. Overlap is what turns spheres into a
-     cloud; separation is what turns them into rocks. The only hot
-     colour is a small basal fringe (emissive) — the incandescence sits
-     UNDER the front where the entrained air is burning, exactly where
-     the photographs put it.
+     THE LOOK — and this is the second thing the owner sent back.
+
+     "there's big rocks looking of smoke, smoke doesn't look like big
+     bouncing boulders" (2026-08-13). It did, and the previous note in
+     this spot explains exactly why while getting the conclusion wrong:
+     the fix for "translucent orange rocks" was OPAQUE LIT GEOMETRY, and
+     opaque lit geometry is what a boulder is made of. Four things
+     compounded, and every one of them says "rock" on its own:
+
+       a low-poly IcosahedronGeometry(1,1) has a FACETED silhouette, and
+       an eye that can count the facets has resolved a solid;
+       a Lambert surface takes a hard light/dark terminator, which is how
+       you read curvature on a stone and not on a gas;
+       rotation.x/y advanced every frame, so each one visibly TUMBLED —
+       smoke does not have an axis to tumble about;
+       and at 0.22-0.84 of a 26 m half-width they were up to twenty
+       metres across, which is individually legible at any distance.
+
+     Smoke in a rasteriser is soft-edged camera-facing billboards, and so
+     this is: many overlapping Sprites carrying a cauliflower alpha, no
+     lighting term, no tumble, sizes down by roughly half and counts up,
+     each one growing and lofting as it ages the way an expanding gas
+     does. They stay effectively opaque where the cloud is dense because
+     the alpha core is solid and they overlap five deep — so this is not
+     a return to the see-through look; it is the same solidity built out
+     of soft edges instead of hard ones.
+
+     The one hot colour is still a small basal fringe, and it is now
+     ADDITIVE rather than emissive geometry, which is honest: that glow
+     is incandescent gas under the front — it is light, not matter.
      ============================================================ */
-  const _pyroGeo = { s: null };
-  function billowGeo() {
-    if (!_pyroGeo.s) _pyroGeo.s = new THREE.IcosahedronGeometry(1, 1);
-    return _pyroGeo.s;
+  /* A DENSITY CURRENT IS PULVERISED ROCK: cool grey-brown, not chocolate,
+     and DARK. A Sprite is unlit, so these pigments are the final colour with
+     no diffuse term to knock them down — and they go through the renderer's
+     output encoding on the way to the screen, which lifts a mid grey most of
+     the way to white. The first sprite pass used the old lit-material greys
+     unchanged and produced cotton wool. These are picked for where they LAND,
+     not for where they read in a swatch. */
+  const PYRO_ASH = [0x272320, 0x322d27, 0x3d362e, 0x494036];
+  const PYRO_BODY = 6;              // body materials; the rest are the fringe
+  const _puffTex = [];
+  /* THE PUFF. A single soft radial gradient is a ball, not a cloud — the
+     silhouette has to be irregular at more than one scale before the eye
+     stops reading a sphere. One core lobe, a ring of mediums and a scatter
+     of smalls, all drawn white so the sprite's own colour tints them. */
+  function puffTex(k) {
+    if (_puffTex[k]) return _puffTex[k];
+    const S = 128, cv = document.createElement("canvas");
+    cv.width = cv.height = S;
+    const g = cv.getContext("2d");
+    let seed = (0x2f6e2b1d + k * 0x9e3779b9) >>> 0;
+    const rnd = function () { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+    const lobe = function (lx, ly, r, a0) {
+      const rg = g.createRadialGradient(lx, ly, 0, lx, ly, r);
+      rg.addColorStop(0, "rgba(255,255,255," + a0 + ")");
+      rg.addColorStop(0.58, "rgba(255,255,255," + (a0 * 0.8).toFixed(3) + ")");
+      rg.addColorStop(1, "rgba(255,255,255,0)");
+      g.fillStyle = rg;
+      g.beginPath(); g.arc(lx, ly, r, 0, 6.2832); g.fill();
+    };
+    // the core is deliberately fat: a puff whose alpha dies at a third of its
+    // quad leaves visible gaps between neighbours, and gaps are what made the
+    // first pass read as separate balls of cotton instead of one mass
+    lobe(S * 0.5, S * 0.52, S * 0.36, 1);
+    const n = 8 + (k % 3);
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * 6.2832 + rnd() * 0.9, d = S * (0.17 + rnd() * 0.12);
+      lobe(S * 0.5 + Math.cos(a) * d, S * 0.52 + Math.sin(a) * d, S * (0.15 + rnd() * 0.12), 1);
+    }
+    for (let i = 0; i < 11; i++) {
+      const a = rnd() * 6.2832, d = S * (0.27 + rnd() * 0.13);
+      lobe(S * 0.5 + Math.cos(a) * d, S * 0.52 + Math.sin(a) * d, S * (0.06 + rnd() * 0.08), 0.8);
+    }
+    _puffTex[k] = new THREE.CanvasTexture(cv);
+    return _puffTex[k];
   }
-  // A density current is pulverised ROCK: cool grey-brown, not chocolate. The
-  // warmth in the shot comes from the eruption's own orange sun, which is
-  // correct — so the pigment itself has to start neutral or it compounds.
-  const PYRO_ASH = [0x3d3a37, 0x4b4640, 0x5a534b, 0x6d6459];
   let _pyroMats = null;
   function pyroMats() {
     if (_pyroMats) return _pyroMats;
-    _pyroMats = PYRO_ASH.map(function (c) {
-      return new THREE.MeshLambertMaterial({ color: c });
-    });
-    // the basal incandescence — hot gas, not hot rock, so it is dim and red
-    _pyroMats.push(new THREE.MeshLambertMaterial({
-      color: 0x4d2a1c, emissive: 0x8a2c06, emissiveIntensity: 1,
-    }));
+    _pyroMats = [];
+    for (let i = 0; i < PYRO_BODY; i++) {
+      _pyroMats.push(new THREE.SpriteMaterial({
+        map: puffTex(i % 3), color: PYRO_ASH[i % 4],
+        transparent: true, opacity: 1, depthWrite: false, fog: true,
+        blending: THREE.NormalBlending, rotation: i * 1.03,
+      }));
+    }
+    // the fringe is a GLOW under the front, not a fire in it — additive and
+    // dim, or it turns the base of an ash cloud into a burning haystack
+    for (let i = 0; i < 2; i++) {
+      _pyroMats.push(new THREE.SpriteMaterial({
+        map: puffTex(i), color: i ? 0x9e3806 : 0x6d1f02,
+        transparent: true, opacity: 0.5, depthWrite: false, fog: true,
+        blending: THREE.AdditiveBlending, rotation: i * 2.1,
+      }));
+    }
     return _pyroMats;
   }
 
@@ -535,16 +864,17 @@
       step: 6, count: Math.ceil(len / 6) + 1, salt: salt, turn: 0.4, wander: 0.1,
     });
 
-    const geo = billowGeo();
     const mats = pyroMats();
-    /* MANY SMALL BILLOWS, NOT A FEW BIG ONES. The first build used ~40 blobs
-       at 0.4-1.0 of the flow's half-width and it read as brown balloons: at
-       that size each sphere is individually legible and the eye counts them.
-       Tripling the count and spreading the sizes over 3x makes the silhouette
-       lumpy at every scale, which is the only thing that separates "a cloud"
-       from "some spheres". They are still opaque and still overlap heavily —
-       that part was right. */
-    const N = qi(26, 72);
+    /* DENSITY IS THE POINT, and it is a balance the first sprite pass got
+       wrong in the other direction. Too big and hard-edged reads as boulders;
+       too small and too few reads as steam, which is what a first cut at
+       roughly half the old size produced — a scatter of separate white puffs
+       with sky between them. A density current is OPAQUE. So: sizes back up
+       (a sprite's alpha core is only ~60% of its quad, where the old
+       icosahedron filled a full diameter of TWICE its scale, which is most of
+       why the naive size match came out small), and the count up by half
+       again so the mass is five deep everywhere instead of one. */
+    const N = qi(58, 136);
     const grp = new THREE.Group();
     grp.frustumCulled = false;
     parent.add(grp);
@@ -552,18 +882,16 @@
     for (let i = 0; i < N; i++) {
       // the HEAD carries most of the mass: bias lags toward zero
       const lag = Math.pow(Math.random(), 1.7) * tail;
-      const basal = i % 7 === 0 && lag < tail * 0.34;
-      const m = new THREE.Mesh(geo, basal ? mats[4] : mats[i % 4]);
-      m.castShadow = false;
-      m.receiveShadow = false;
+      const basal = i % 8 === 0 && lag < tail * 0.3;
+      const m = new THREE.Sprite(basal ? mats[PYRO_BODY + (i % 2)] : mats[i % PYRO_BODY]);
+      m.renderOrder = 7;
       grp.add(m);
       blobs.push({
         m: m, lag: lag, basal: basal,
-        lat: (Math.random() * 2 - 1) * 1.15,
-        hf: basal ? 0.1 + Math.random() * 0.18 : Math.random(),
+        lat: (Math.random() * 2 - 1) * 1.1,
+        hf: basal ? 0.04 + Math.random() * 0.11 : Math.random(),
         ph: Math.random() * 6.28,
-        sz: (basal ? 0.20 : 0.22) + Math.pow(Math.random(), 1.6) * 0.62,
-        spin: (Math.random() - 0.5) * 0.6,
+        sz: (basal ? 0.17 : 0.15) + Math.pow(Math.random(), 1.4) * (basal ? 0.17 : 0.42),
       });
     }
 
@@ -579,6 +907,13 @@
         if (dead) return handle;
         t += dt;
         front += speed * dt;
+        /* THE CHURN LIVES IN THE MATERIALS. A sprite's rotation is a material
+           uniform in r128 (checked: `uniform float rotation` in sprite_vert),
+           so per-puff spin would cost a material per puff. Eight materials
+           turning at eight rates, shuffled across a hundred puffs, is
+           indistinguishable and costs eight uniform writes. Assigned, not
+           accumulated, so a second live flow cannot double the rate. */
+        for (let i = 0; i < mats.length; i++) mats[i].rotation = i * 1.03 + t * (0.05 + i * 0.016);
         for (let i = 0; i < blobs.length; i++) {
           const B = blobs[i];
           const s = front - B.lag;
@@ -593,31 +928,43 @@
           // the cloud SPREADS as it runs out and rises behind the head
           const ageK = clamp(B.lag / Math.max(1, tail), 0, 1);
           const spread = halfW * (0.55 + 0.75 * ageK);
-          const churn = 1 + 0.35 * Math.sin(t * 2.3 + B.ph);
+          const churn = 1 + 0.3 * Math.sin(t * 1.9 + B.ph);
           const gy = groundAt(_v.x, _v.z);
+          // an expanding gas GROWS as it ages — the single cue that most
+          // separates a puff of smoke from an object being carried along
+          const sc = width * B.sz * (0.62 + 0.7 * ageK) * (0.92 + 0.13 * Math.sin(t * 1.6 + B.ph));
           B.m.position.set(
-            _v.x + nx * B.lat * spread + Math.sin(t * 1.7 + B.ph) * 2.2,
-            gy + height * B.hf * (0.32 + 0.85 * ageK) * churn + 1.2,
-            _v.z + nz * B.lat * spread + Math.cos(t * 1.9 + B.ph) * 2.2
+            _v.x + nx * B.lat * spread + Math.sin(t * 1.1 + B.ph) * 2.4,
+            gy + height * B.hf * (0.22 + 0.95 * ageK) * churn + sc * 0.42,
+            _v.z + nz * B.lat * spread + Math.cos(t * 1.3 + B.ph) * 2.4
           );
-          const sc = width * B.sz * (0.42 + 0.5 * ageK) * (0.9 + 0.16 * Math.sin(t * 2.9 + B.ph));
-          B.m.scale.set(sc, sc * (B.basal ? 0.62 : 0.86), sc);
-          B.m.rotation.y += B.spin * dt;
-          B.m.rotation.x += B.spin * 0.5 * dt;
+          B.m.scale.set(sc, sc * (B.basal ? 0.72 : 0.92), 1);
         }
         return handle;
       },
-      /* INSIDE THE FLOW THERE IS NO SURVIVAL. This is the whole rule, and
-         the return value is WHICH death it was: 1 = the head (600 C rock at
-         180 km/h — instant incineration), 2 = the trailing ash cloud (still
-         lethal, but it is the gas that gets you). 0 = outside, and outside
-         is the only survival there is. */
+      /* WHAT PART OF THE FLOW IS THIS, and the answer has to be measured
+         against the DRAWN cloud, because a hazard that kills outside its own
+         picture is the "randomly, not even with physics" the owner reported.
+
+           1  the head — 600 C rock at 130 m/s. No survival, no cover, no
+              mitigation; evacuation is the mechanic. This part is not
+              negotiable and is not what was wrong.
+           2  the trailing ash cloud. STILL LETHAL, but it is hot gas rather
+              than a wall of rock, and the caller now prices it as damage
+              over time instead of as an instant kill: someone clipped by the
+              edge as it sweeps past gets the second and a half it takes to
+              fall out of it. That is the difference between a hazard and a
+              cull, and the tail is 50-odd metres of the lane.
+           0  outside. The leading edge sat 3 m AHEAD of the frontmost drawn
+              puff, so the first thing the flow did to anyone in the lane was
+              kill them before it arrived. */
       contains(x, z) {
         const c = pathCoord(path, x, z, Math.min(front + 6, path.total));
-        if (c.s > front + 3 || c.s < front - tail * 0.9) return 0;
-        // the lane widens behind the head, same as the geometry
+        if (c.s > front + 1 || c.s < front - tail * 0.9) return 0;
+        // the lane widens behind the head, same as the geometry — and stays
+        // just inside the puffs' own spread so the picture is the hitbox
         const ageK = clamp((front - c.s) / Math.max(1, tail), 0, 1);
-        if (c.perp >= halfW * (0.62 + 0.6 * ageK)) return 0;
+        if (c.perp >= halfW * (0.55 + 0.55 * ageK)) return 0;
         return ageK < 0.42 ? 1 : 2;
       },
       // 0..1 threat for the bot flee field / minimap, ahead of the front too
@@ -632,6 +979,8 @@
       dispose() {
         if (dead) return;
         dead = true;
+        // the puff materials and their textures are module-shared and outlive
+        // every individual flow — remove the sprites, never dispose the mats
         for (let i = 0; i < blobs.length; i++) grp.remove(blobs[i].m);
         parent.remove(grp);
         const k = LIVE.pyro.indexOf(handle); if (k >= 0) LIVE.pyro.splice(k, 1);
@@ -766,6 +1115,7 @@
       }
     }
     writeStations(1);
+    geo.computeVertexNormals();     // once, so the attribute exists
 
     const handle = {
       kind: "lahar", mesh: mesh, path: path,
@@ -781,7 +1131,9 @@
         geo.attributes.position.needsUpdate = true;
         geo.attributes.color.needsUpdate = true;
         geo.setDrawRange(0, Math.max(0, st) * (LAHAR_COLS - 1) * 6);
-        geo.computeVertexNormals();
+        // no computeVertexNormals() — flatShading rebuilds the normal from
+        // screen-space derivatives in r128 and never reads the attribute.
+        // Same finding as the lava crust; see V.lavaFlow's update().
         for (let i = 0; i < riders.length; i++) {
           const R = riders[i];
           if (hardT < 0) {
@@ -1080,10 +1432,10 @@
      ============================================================ */
   CBZ.volcanoAudit = function () {
     let lavaTransparent = 0, lavaMeshes = 0, lavaTris = 0;
-    const lavaTips = [];
+    const lavaTips = [], lavaMids = [];
     for (let i = 0; i < LIVE.lava.length; i++) {
       const f = LIVE.lava[i];
-      try { lavaTips.push(f.tip); } catch (e) {}
+      try { lavaTips.push(f.tip); lavaMids.push(f.mid); } catch (e) {}
       const ms = [f.mesh, f.channel];
       for (let k = 0; k < ms.length; k++) {
         const m = ms[k]; if (!m || !m.material) continue;
@@ -1110,9 +1462,12 @@
       lavaTransparent: lavaTransparent,        // MUST be 0
       lavaOpaque: lavaTransparent === 0,
       lavaTris: Math.round(lavaTris),
-      // where the live fronts actually are — so a camera (or a threat map)
-      // can aim at the flow instead of guessing a hillside
+      // where the live fronts actually are, AND which way each one runs — so
+      // a camera (or a threat map) can aim at the flow instead of guessing a
+      // hillside, and can do it without assuming the flow went in a straight
+      // line from the vent (it did not; that is what a fall line is for)
       lavaTips: lavaTips,
+      lavaMids: lavaMids,
       pyroLive: LIVE.pyro.length, pyroBlobs: pyroBlobs,
       laharLive: LIVE.lahar.length,
       ashFields: LIVE.ash.length, ashCells: ashCells,
