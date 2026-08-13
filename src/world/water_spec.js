@@ -1955,6 +1955,169 @@
   ];
   const TSU_COLS = 30;
 
+  /* ============================================================
+     THE WHITECAP — WHAT A BREAKING CREST IS ACTUALLY MADE OF.
+
+     The first pass drew the crest as a row of sloped quads and tripled the
+     patch count when it read badly. The render says what the count could not:
+     144 cards of the same width, at the same height, at the same z, tilted
+     the same way and pulsing in unison is not spray — it is a strip of torn
+     tape laid along the top of the wave, and adding cards to it only makes
+     the tape finer. REGULARITY is the tell, and no amount of it is fixed by
+     more of it.
+
+     A whitecap is also not a LINE. It is three different materials, and they
+     want three different treatments:
+
+       SHREDS   dense white water on and just over the lip. This is MATTER:
+                normal-blended, because additive white over a bright horizon
+                blows out to nothing. It is also NEVER shaded — see the crest
+                block below for why a shaded shred is a card.
+       SHOULDER the older foam already lying on top of the wave BEHIND the
+                lip. This is what makes the crest a BAND with depth you can
+                look across, instead of an edge you can only look at.
+       TORN     the bits actually breaking off, and the mist above them. Both
+                additive, so a dark vertex is an ABSENT one and a shred can
+                dissolve at its tail instead of fading to dirt.
+
+     Every shred carries its own yaw, roll, taper, reach, drop and brightness,
+     so no two present the same silhouette from any camera; density is clumped
+     by a low-frequency wobble, because spray comes off a crest in bursts with
+     holes between them, never at a constant rate per metre.
+
+     And the band RIDES THE CURL. tsuFaceUpdate throws the wall's lip forward
+     by up*up*curl*6.2, so foam pinned to a fixed z tears away from the very
+     lip it is supposed to be breaking off — which is exactly what the old
+     shots show at full curl. Every foam layer takes the same offset, every
+     frame, from the same number.
+     ============================================================ */
+  const SHRED_T = [0, 0.55, 1];              // top edge · thrown middle · tail
+
+  function foamLayerNew(nv) { return { p: [], c: [], i: [], a: [], nv: nv }; }
+
+  /* One shred: a bent, tapered strip, NOT a card. Top edge sits on the lip,
+     the middle is thrown forward, the tail narrows and falls down the face.
+     `yaw` swings it out of the front's plane and `roll` lifts one end, which
+     between them are what stop a hundred of these reading as one ribbon. */
+  function pushShred(F, s) {
+    const q = F.p.length / 3;
+    const cy = Math.cos(s.yaw), sy = Math.sin(s.yaw);
+    for (let r = 0; r < 3; r++) {
+      const t = SHRED_T[r];
+      // The tail runs OUT, ideally to a point: a shred that ends on a flat
+      // edge is a trapezoid, and a trapezoid is cut paper. A scrap of torn
+      // water ends in a tear.
+      const wide = s.wid * (1 - t * s.taper);
+      const fwd = s.reach * t * t;                       // throws, accelerating
+      const down = s.drop * t * (0.5 + 0.5 * t);         // and falls away
+      const b = s.bright * (1 - t * s.fade);
+      for (let e = 0; e < 2; e++) {
+        const u = e ? 1 : -1;
+        F.p.push(
+          s.x + u * wide * cy - fwd * sy * 0.3,
+          s.y - down + u * wide * s.roll,
+          s.z + u * wide * sy * 0.5 + fwd
+        );
+        F.c.push(b, b, b);
+      }
+    }
+    F.i.push(q, q + 2, q + 1, q + 1, q + 2, q + 3,
+      q + 2, q + 4, q + 3, q + 3, q + 4, q + 5);
+    F.a.push(s.ph, s.ampX, s.ampY, s.ampZ, s.rate);
+  }
+
+  /* One puff of airborne mist: a fan, bright at the centre and ZERO at every
+     rim vertex. Additive, so the rim is literally invisible and the puff has
+     no edge to catch the eye — the one shape a quad cannot make, and the
+     reason spray used to end on a straight line against the sky. */
+  const BLOB_RIM = 8;                 // fewer points and the puff reads as a polygon
+  function pushBlob(F, s) {
+    const q = F.p.length / 3;
+    F.p.push(s.x, s.y, s.z); F.c.push(s.bright, s.bright, s.bright);
+    for (let k = 0; k < BLOB_RIM; k++) {
+      const a = (k / BLOB_RIM) * 6.2832 + s.spin;
+      const rx = Math.cos(a) * s.r * (0.7 + 0.3 * ((k * 5) % 3)), ry = Math.sin(a) * s.r * 0.82;
+      F.p.push(s.x + rx, s.y + ry, s.z + rx * s.lean);
+      F.c.push(0, 0, 0);
+    }
+    for (let k = 0; k < BLOB_RIM; k++) F.i.push(q, q + 1 + k, q + 1 + ((k + 1) % BLOB_RIM));
+    F.a.push(s.ph, s.ampX, s.ampY, s.ampZ, s.rate);
+  }
+
+  /* A vertical tear of aerated water down the face. Fades to nothing at BOTH
+     ends: the old streaks were flat PlaneGeometry cards, and a card additive-
+     blended against the sea reads as a white POLE standing on the wave. */
+  function pushTear(F, s) {
+    const q = F.p.length / 3;
+    for (let r = 0; r < 5; r++) {
+      const t = r / 4;
+      const b = s.bright * Math.pow(Math.sin(Math.PI * t), 0.7);
+      const wide = s.wid * (0.45 + 0.55 * Math.sin(Math.PI * t));
+      for (let e = 0; e < 2; e++) {
+        const u = e ? 1 : -1;
+        F.p.push(s.x + u * wide + s.slant * t, s.y - s.len * t, s.z + s.rake * t);
+        F.c.push(b, b, b);
+      }
+    }
+    for (let r = 0; r < 4; r++) {
+      const a0 = q + r * 2;
+      F.i.push(a0, a0 + 2, a0 + 1, a0 + 1, a0 + 2, a0 + 3);
+    }
+    F.a.push(s.ph, s.ampX, s.ampY, s.ampZ, s.rate);
+  }
+
+  function foamLayerBuild(F, opts) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(F.p, 3));
+    g.setAttribute("color", new THREE.Float32BufferAttribute(F.c, 3));
+    g.setIndex(F.i);
+    // No computeVertexNormals: every foam material here is MeshBasicMaterial,
+    // which never reads a normal. The old ribbons paid for them anyway.
+    const m = new THREE.MeshBasicMaterial({
+      color: opts.color, vertexColors: true, transparent: true, opacity: opts.opacity,
+      side: THREE.DoubleSide, depthWrite: false,
+      blending: opts.additive ? THREE.AdditiveBlending : THREE.NormalBlending,
+    });
+    const mesh = new THREE.Mesh(g, m);
+    mesh.renderOrder = opts.order || 5;
+    mesh.frustumCulled = false;     // vertices move and the group flies with the front
+    return { mesh: mesh, geo: g, mat: m, base: new Float32Array(F.p), anim: new Float32Array(F.a), nv: F.nv };
+  }
+
+  /* Per-frame, per-layer. Each shred moves RIGIDLY on its own phase — three
+     sines per shred, not per vertex — so a 240-shred crest costs ~700 sines
+     and a flat run of adds, and the churn is per-patch rather than the whole
+     band breathing in unison the way one shared opacity pulse made it. */
+  function foamLayerAnim(L, t, zOff, dt) {
+    if (!L || !L.mesh) return;
+    const at = L.mesh.geometry.attributes.position, p = at.array, b = L.base, an = L.anim;
+    const stride = L.nv * 3;
+    // A STREAMING layer (the wake) also travels: each ribbon slides seaward on
+    // its own rate and respawns at the front, so the whitewater behind the
+    // bore reads as water being LEFT BEHIND rather than a pattern painted on.
+    const flow = L.flow, off = L.off, span = L.span || 200;
+    let vi = 0, si = 0;
+    for (let s = 0; s < an.length; s += 5) {
+      const ph = t * an[s + 4] + an[s];
+      const dx = Math.sin(ph * 0.91) * an[s + 1];
+      const dy = Math.sin(ph) * an[s + 2];
+      let dz = Math.cos(ph * 1.17) * an[s + 3] + zOff;
+      if (flow) {
+        let o = off[si] - flow[si] * (dt || 0);
+        if (o < -span) o = ((si * 37) % 23) - 4;    // respawn at the front
+        off[si] = o; dz += o;
+      }
+      si++;
+      for (let k = 0; k < stride; k += 3) {
+        p[vi + k] = b[vi + k] + dx;
+        p[vi + k + 1] = b[vi + k + 1] + dy;
+        p[vi + k + 2] = b[vi + k + 2] + dz;
+      }
+      vi += stride;
+    }
+    at.needsUpdate = true;
+  }
+
   CBZ.tsuFaceBuild = function (opts) {
     opts = opts || {};
     const H = Number.isFinite(opts.height) ? +opts.height : 34;
@@ -2008,110 +2171,233 @@
     wall.renderOrder = 3;
     grp.add(wall);
 
-    /* Broken ribbons, not billboard rectangles. Each patch is an independent
-       sloped quad with deterministic gaps, so from below or above the crest
-       reads as churning white water rather than a white roof card. */
-    function foamRibbon(kind, color, opacity, blend) {
-      const fp = [], fi = [];
-      // The crest gets THREE TIMES the patch count of the first pass. At 48
-      // across a 320 m front each shred was seven metres wide, which from any
-      // camera close enough to matter read as a row of paper kites floating
-      // clear of the wave. Spray tears small.
-      const cnt = kind === "crest" ? 144 : (kind === "boil" ? 62 : 48);
-      for (let c = 0; c < cnt; c++) {
-        if ((c * 7 + (kind === "crest" ? 3 : 1)) % 11 < 2) continue;
-        const x0 = (c / cnt - 0.5) * W, x1 = ((c + 1.12) / cnt - 0.5) * W;
-        /* TWO OCTAVES, and the low one has to dominate. A single sin() at 2.31
-           rad per patch flips every neighbour to the opposite extreme, so at
-           144 patches the "torn" crest came out as a perfect origami sawtooth
-           — regular is the one thing spray never is. A slow swell carrying a
-           small chop reads as water tearing. */
-        const kph = kind === "crest" ? 0.7 : 2.1;
-        const w0 = Math.sin(c * 0.53 + kph) * 0.74 + Math.sin(c * 2.31 + kph * 3.1) * 0.26;
-        const w1 = Math.sin((c + 1) * 0.53 + kph) * 0.74 + Math.sin((c + 1) * 2.31 + kph * 3.1) * 0.26;
-        let y0, y1, z0, z1, depth;
-        if (kind === "crest") {
-          // A SPRAY-TORN LIP, not a white roof. The old patches lay nearly
-          // flat across the top of the wave, so from any elevated camera the
-          // crest read as a row of paper plates. These hang DOWN the front of
-          // the lip (drop > depth) and wander far more in height, so the
-          // silhouette is ragged from above and from below.
-          y0 = H * 0.975 + w0 * 1.25; y1 = H * 0.975 + w1 * 1.25;
-          z0 = 3.9 * zs + w0 * 0.8; z1 = 3.9 * zs + w1 * 0.8;
-          depth = 1.5 + ((c * 13) % 7) * 0.34;
-        } else if (kind === "boil") {
-          // THE BOILING LEADING EDGE. Low, wide, way out in FRONT of the foot,
-          // heaving up and down in big irregular blobs — the shredded white
-          // water a bore pushes ahead of itself as it scours the ground.
-          y0 = 0.55 + Math.abs(w0) * 2.2 * (H / 34); y1 = 0.55 + Math.abs(w1) * 2.2 * (H / 34);
-          z0 = (6.4 + Math.abs(w0) * 3.4) * zs; z1 = (6.4 + Math.abs(w1) * 3.4) * zs;
-          depth = 5.5 + ((c * 17) % 9) * 0.75;
-        } else {
-          y0 = 1.15 + w0 * 0.18; y1 = 1.15 + w1 * 0.18;
-          z0 = 4.8 * zs + w0 * 0.45; z1 = 4.8 * zs + w1 * 0.45;
-          depth = 4.0 + ((c * 13) % 7) * 0.32;
+    /* ---- THE CREST: A MASS, A TORN EDGE, AND MIST -----------------------
+       Three populations, and the split between the first two is a BLEND MODE,
+       not a tuning number. r128 has no per-vertex alpha (that arrives in
+       r132), so a vertex colour is the only per-vertex control there is, and
+       what it does depends entirely on how the material blends:
+
+         MASS (normal-blended)  the dense white water. Vertex colour = shade,
+              so a dark vertex is dark MATTER — and the thing BEHIND a piece
+              of crest foam is nearly always brighter foam or lit water, so
+              any vertex much under ~0.75 comes out as a gray card lying on
+              the whitecap. That is the paper-plate read arriving by the back
+              door, and it is why nothing in this layer is allowed to shade
+              itself: the mass varies by overlap and coverage, never by tone.
+         TORN (additive)        the bits actually breaking off the lip. Here a
+              dark vertex is an ABSENT one, so a shred can dissolve at its
+              tail instead of fading to dirt. This is the only way to get a
+              silhouette that ends in nothing rather than in an edge.
+         MIST (additive blobs)  what is already airborne.
+
+       The SHOULDER shreds in the mass — flat, further back, on top of the
+       wave — are what give the band a depth you can look ACROSS from an
+       elevated camera, instead of a tape edge you can only look at.
+
+       Count scales with the front now. The old fixed 144 meant a 320 m island
+       bore and a 520 m city bore got the same number of shreds, so the city's
+       were 60% wider — the same tuning could not be right in both worlds. */
+    const crestF = foamLayerNew(6);
+    const tornF = foamLayerNew(6);
+    const sprayF = foamLayerNew(1 + BLOB_RIM);
+    /* FOAM SITS ON THE LIP THIS FILE ACTUALLY BUILT. The wall's top row is
+       jittered per column (hJit lifts it, zJit throws it forward), so a crest
+       laid along a constant y and z leaves shreds hanging in mid-air over the
+       low columns — the stray white flecks floating clear of the water in the
+       before shots. Reading the SAME two arrays welds the band to the wave and
+       hands it the wave's own raggedness for free. */
+    const lipH = (x) => hJit[Math.max(0, Math.min(COLS, Math.round((x / W + 0.5) * COLS)))];
+    const lipZ = (x) => zJit[Math.max(0, Math.min(COLS, Math.round((x / W + 0.5) * COLS)))];
+    const shredCnt = Math.max(110, Math.min(330, Math.round(W / 1.15)));
+    for (let c = 0; c < shredCnt; c++) {
+      const x = (c / shredCnt - 0.5) * W + (rnd() - 0.5) * (W / shredCnt) * 1.7;
+      /* CLUMPED, NOT DEALT. Two slow wobbles beating against each other give
+         runs of dense spray and runs of bare crest, which is how a breaking
+         wave actually tears. A per-shred coin flip alone gives even grit. */
+      const dens = 0.62 + 0.24 * Math.sin(x * 0.052 + 1.7) + 0.18 * Math.sin(x * 0.017 - 0.6);
+      if (rnd() > dens) continue;
+      const back = rnd() < 0.3;
+      if (back) {
+        pushShred(crestF, {
+          x: x, y: H * (0.862 + rnd() * 0.098) * lipH(x), z: (0.9 + rnd() * 2.6) * zs + lipZ(x) * 0.86,
+          wid: 0.8 + rnd() * 1.6, taper: 0.6 + rnd() * 0.4,
+          reach: (0.3 + rnd() * 1.4) * zs, drop: (0.4 + rnd() * 1.3) * zs,
+          yaw: (rnd() - 0.5) * 2.1, roll: (rnd() - 0.5) * 0.42,
+          bright: 0.78 + rnd() * 0.18, fade: 0.05 + rnd() * 0.12,
+          ph: rnd() * 6.283, ampX: 0.14 + rnd() * 0.26, ampY: 0.2 + rnd() * 0.4,
+          ampZ: 0.16 + rnd() * 0.34, rate: 1.5 + rnd() * 1.5,
+        });
+      } else {
+        /* THE WALL ALREADY HAS A WHITE CAP. Its top two colour rows are very
+           nearly white, so a slab of white foam laid across the lip adds no
+           whiteness at all — it only adds its own straight edges, which is
+           the entire reason a metre-scale shred up here reads as a card. The
+           mass shreds are therefore SMALL and their job is the OUTLINE: they
+           break the boundary between cap and sky, and they thicken the band
+           where two or three of them overlap. Anything bigger is repainting
+           a white wall white and charging a silhouette for it. */
+        pushShred(crestF, {
+          x: x, y: H * (0.93 + rnd() * 0.05) * lipH(x), z: (3.3 + rnd() * 1.4) * zs + lipZ(x),
+          wid: 0.35 + rnd() * 0.9, taper: 0.78 + rnd() * 0.22,
+          reach: (0.4 + rnd() * 1.2) * zs, drop: (0.5 + rnd() * 1.6) * zs,
+          yaw: (rnd() - 0.5) * 1.6, roll: (rnd() - 0.5) * 0.5,
+          bright: 0.88 + rnd() * 0.12, fade: 0.04 + rnd() * 0.12,
+          ph: rnd() * 6.283, ampX: 0.2 + rnd() * 0.4, ampY: 0.35 + rnd() * 0.75,
+          ampZ: 0.25 + rnd() * 0.55, rate: 2.0 + rnd() * 2.2,
+        });
+        /* THE TORN EDGE IS FIZZ, NOT FLAGS. One metre-wide shred per lip is
+           big enough to be seen as an OBJECT — a row of little white pennants
+           standing above the crest, which is the paper-plate failure wearing a
+           different hat. Three tearings a third the size, hugging the lip,
+           give a fringe that dissolves the silhouette instead of decorating
+           it, and at any distance where one of them is a single pixel the
+           whole fringe is still doing its job. */
+        for (let k = 0; k < 2; k++) {
+          if (rnd() > 0.82) continue;
+          pushShred(tornF, {
+            x: x + (rnd() - 0.5) * 2.6,
+            y: H * (0.962 + Math.pow(rnd(), 1.6) * 0.062) * lipH(x),
+            z: (2.9 + rnd() * 2.4) * zs + lipZ(x),
+            wid: 0.22 + rnd() * 0.62, taper: 0.88 + rnd() * 0.12,
+            reach: (0.5 + rnd() * 1.9) * zs, drop: (0.7 + rnd() * 2.4) * zs,
+            yaw: (rnd() - 0.5) * 2.4, roll: (rnd() - 0.5) * 1.2,
+            bright: 0.4 + rnd() * 0.5, fade: 0.85 + rnd() * 0.15,
+            ph: rnd() * 6.283, ampX: 0.3 + rnd() * 0.6, ampY: 0.5 + rnd() * 0.9,
+            ampZ: 0.35 + rnd() * 0.7, rate: 2.4 + rnd() * 2.6,
+          });
         }
-        const drop = kind === "crest" ? depth * 0.85 : (kind === "boil" ? 0.35 : 0.05);
-        const q = fp.length / 3;
-        fp.push(x0, y0, z0, x1, y1, z1, x0, y0 - drop, z0 + depth, x1, y1 - drop, z1 + depth);
-        fi.push(q, q + 2, q + 1, q + 1, q + 2, q + 3);
       }
-      const fg = new THREE.BufferGeometry();
-      fg.setAttribute("position", new THREE.Float32BufferAttribute(fp, 3));
-      fg.setIndex(fi); fg.computeVertexNormals();
-      const fm = new THREE.MeshBasicMaterial({
-        color: color, transparent: true, opacity: opacity, side: THREE.DoubleSide,
-        depthWrite: false, blending: blend === false ? THREE.NormalBlending : THREE.AdditiveBlending,
-      });
-      geoms.push(fg); mats.push(fm);
-      const mesh = new THREE.Mesh(fg, fm); mesh.renderOrder = 5; return mesh;
+      /* MIST, AND IT HAS TO STAY SMALL. The first cut let a blob reach five
+         metres and threw one off two shreds in three: a hundred five-metre
+         additive puffs is not spray, it is fog, and it bleached the blue-green
+         body the open-sea beat exists to show. Small, sparse, and fading fast
+         with height is what reads as torn water in air. */
+      if (!back && rnd() < 0.45) {
+        const up = Math.pow(rnd(), 1.7);                 // most of it stays low
+        pushBlob(sprayF, {
+          x: x + (rnd() - 0.5) * 3.4, y: H * (0.985 + up * 0.34) * lipH(x),
+          z: (2.4 + rnd() * 4.0 - up * 2.6) * zs + lipZ(x) * 0.9,
+          r: (0.42 + rnd() * 0.8 + up * 0.9) * zs, lean: (rnd() - 0.5) * 0.6, spin: rnd() * 6.283,
+          bright: (0.3 + rnd() * 0.34) * (1 - up * 0.62),
+          ph: rnd() * 6.283, ampX: 0.5 + rnd() * 1.5, ampY: 0.5 + rnd() * 1.7,
+          ampZ: 0.4 + rnd() * 1.3, rate: 0.8 + rnd() * 1.3,
+        });
+      }
     }
-    const crest = foamRibbon("crest", 0xffffff, 0.82);
-    const foot = foamRibbon("foot", 0xeaf8ff, 0.66);
+
+    // ---- THE FOOT: the wash where the face meets the water it is running on
+    const footF = foamLayerNew(6);
+    const footCnt = Math.max(60, Math.min(190, Math.round(W / 2.9)));
+    for (let c = 0; c < footCnt; c++) {
+      const x = (c / footCnt - 0.5) * W + (rnd() - 0.5) * (W / footCnt) * 1.5;
+      pushShred(footF, {
+        x: x, y: 0.9 + rnd() * 0.7, z: (4.2 + rnd() * 1.5) * zs,
+        wid: 1.0 + rnd() * 2.2, taper: 0.55 + rnd() * 0.4,
+        reach: (0.9 + rnd() * 2.2) * zs, drop: 0.1 + rnd() * 0.35,
+        yaw: (rnd() - 0.5) * 1.1, roll: (rnd() - 0.5) * 0.12,
+        bright: 0.72 + rnd() * 0.28, fade: 0.14 + rnd() * 0.22,
+        ph: rnd() * 6.283, ampX: 0.2 + rnd() * 0.4, ampY: 0.12 + rnd() * 0.22,
+        ampZ: 0.3 + rnd() * 0.7, rate: 1.6 + rnd() * 1.6,
+      });
+    }
+
+    /* ---- THE BOILING LEADING EDGE (turbid only) -------------------------
+       Low, wide and way out in FRONT of the foot — the shredded white water a
+       bore pushes ahead of itself as it scours the ground. Nothing to tear up
+       in deep water, so it is faded out entirely at turbid 0. */
+    const boilF = foamLayerNew(6);
+    const boilCnt = Math.max(26, Math.min(90, Math.round(W / 6.4)));
+    for (let c = 0; c < boilCnt; c++) {
+      const x = (c / boilCnt - 0.5) * W + (rnd() - 0.5) * (W / boilCnt) * 1.8;
+      pushShred(boilF, {
+        x: x, y: (0.4 + rnd() * 2.4) * (H / 34), z: (5.6 + rnd() * 4.4) * zs,
+        wid: 2.6 + rnd() * 5.0, taper: 0.5 + rnd() * 0.45,
+        reach: (2.0 + rnd() * 5.5) * zs, drop: 0.2 + rnd() * 0.5,
+        yaw: (rnd() - 0.5) * 1.5, roll: (rnd() - 0.5) * 0.2,
+        bright: 0.7 + rnd() * 0.3, fade: 0.12 + rnd() * 0.24,
+        ph: rnd() * 6.283, ampX: 0.3 + rnd() * 0.7, ampY: 0.3 + rnd() * 0.8,
+        ampZ: 0.5 + rnd() * 1.1, rate: 2.4 + rnd() * 2.4,
+      });
+    }
+
+    /* ---- FACE STREAKS: vertical tears of aerated water down the face -----
+       ONE merged geometry instead of eleven meshes, and each tear now fades
+       to nothing at both ends. The old ones were flat PlaneGeometry cards,
+       and an additive card standing on a wave reads as a white POLE — which
+       is exactly what the before shots have planted across the face. */
+    const tearF = foamLayerNew(10);
+    for (let i = 0; i < 14; i++) {
+      // Below the lip, always: a tear that starts at the crest reads as a
+      // white mast standing ABOVE the wave's silhouette, which is how the old
+      // cards drew attention to themselves in the first place. And they are
+      // faint — aerated water on a face is a hint of texture, not a stripe.
+      const tx = (rnd() - 0.5) * W * 0.94;
+      pushTear(tearF, {
+        x: tx, y: H * (0.6 + rnd() * 0.18) * lipH(tx), z: (1.3 + rnd() * 1.2) * zs + lipZ(tx) * 0.7,
+        wid: 0.28 + rnd() * 0.5, len: H * (0.1 + rnd() * 0.18),
+        slant: (rnd() - 0.5) * 4.2, rake: (rnd() - 0.5) * 1.6 * zs,
+        bright: 0.24 + rnd() * 0.3,
+        ph: rnd() * 6.283, ampX: 0.1 + rnd() * 0.3, ampY: 0.25 + rnd() * 0.6,
+        ampZ: 0.1 + rnd() * 0.3, rate: 1.2 + rnd() * 1.4,
+      });
+    }
+
+    const crestL = foamLayerBuild(crestF, { color: 0xffffff, opacity: 0.8, order: 5 });
+    const tornL = foamLayerBuild(tornF, { color: 0xf4fbff, opacity: 0.5, order: 6, additive: true });
+    const sprayL = foamLayerBuild(sprayF, { color: 0xeaf6ff, opacity: 0.4, order: 6, additive: true });
+    const footL = foamLayerBuild(footF, { color: 0xeaf8ff, opacity: 0.62, order: 5 });
     // Not additive: dirty foam over a dark sky must still read as WHITE MATTER,
     // and additive white over a bright horizon just blows out to nothing.
-    const boil = foamRibbon("boil", 0xf1f4f2, 0.0, false);
-    grp.add(crest, foot, boil);
-
-    // FACE STREAKS: the vertical tears of aerated water down the wave's face.
-    const streaks = [];
-    for (let i = 0; i < 11; i++) {
-      const sg = new THREE.PlaneGeometry(0.55 + rnd() * 0.95, H * (0.26 + rnd() * 0.4));
-      const sm = new THREE.MeshBasicMaterial({
-        color: 0xdff1fb, transparent: true, opacity: 0.18, side: THREE.DoubleSide,
-        depthWrite: false, blending: THREE.AdditiveBlending,
-      });
-      geoms.push(sg); mats.push(sm);
-      const s = new THREE.Mesh(sg, sm);
-      s.position.set((rnd() - 0.5) * W * 0.9, H * 0.45, 1.6 * zs);
-      s.renderOrder = 4; grp.add(s); streaks.push(s);
+    const boilL = foamLayerBuild(boilF, { color: 0xf1f4f2, opacity: 0.0, order: 5 });
+    const tearL = foamLayerBuild(tearF, { color: 0xdff1fb, opacity: 0.2, order: 4, additive: true });
+    const layers = [crestL, tornL, sprayL, footL, boilL, tearL];
+    for (let i = 0; i < layers.length; i++) {
+      geoms.push(layers[i].geo); mats.push(layers[i].mat); grp.add(layers[i].mesh);
     }
+    const crest = crestL.mesh, foot = footL.mesh, boil = boilL.mesh;
+    const streaks = [tearL.mesh];
 
-    /* THE WAKE: flat torn ribbons of whitewater lying on the surface BEHIND
-       the front and streaming back toward the sea. This is what tells you at a
-       glance which way the water is going — on the survival island the shader
-       draws it too, but the city ocean is a different material entirely and
-       this is what carries the same read into the real world. */
-    const wake = [];
-    for (let i = 0; i < 14; i++) {
-      const len = 26 + rnd() * 74, wid = 1.1 + rnd() * 3.2;
-      const wg = new THREE.PlaneGeometry(wid, len);
-      wg.rotateX(-Math.PI / 2);
-      const wm = new THREE.MeshBasicMaterial({
-        color: 0xe8eee9, transparent: true, opacity: 0.3, side: THREE.DoubleSide, depthWrite: false,
+    /* ---- THE WAKE -------------------------------------------------------
+       Torn whitewater lying on the surface BEHIND the front and streaming
+       back toward the sea. This is what tells you at a glance which way the
+       water is going — on the survival island the shader draws it too, but
+       the city ocean is a different material entirely and this is what
+       carries the same read into the real world.
+
+       It was fourteen PlaneGeometry rectangles, which is the crest's old
+       failure lying down: from any side view they are fourteen straight white
+       BARS on the water, and being flat is not a defence — a rectangle reads
+       as a rectangle from every angle it is visible from. Same shreds as
+       everything else, laid flat (no drop, so the strip runs out along the
+       surface), tapered to a point, in ONE draw call instead of fourteen. */
+    const wakeF = foamLayerNew(6);
+    const wakeRate = [];
+    const wakeCnt = Math.max(16, Math.min(60, Math.round(W / 11)));
+    for (let i = 0; i < wakeCnt; i++) {
+      pushShred(wakeF, {
+        x: (rnd() - 0.5) * W * 0.94, y: 0.28 + rnd() * 0.22, z: -(6 + rnd() * 90),
+        wid: 0.7 + rnd() * 2.4, taper: 0.6 + rnd() * 0.4,
+        reach: 22 + rnd() * 70, drop: 0,                 // drop 0 → it lies flat
+        yaw: (rnd() - 0.5) * 0.5, roll: 0,
+        bright: 0.66 + rnd() * 0.34, fade: 0.45 + rnd() * 0.4,
+        ph: rnd() * 6.283, ampX: 0.1 + rnd() * 0.3, ampY: 0.1 + rnd() * 0.18,
+        ampZ: 0.2 + rnd() * 0.5, rate: 1.1 + rnd() * 1.2,
       });
-      geoms.push(wg); mats.push(wm);
-      const m = new THREE.Mesh(wg, wm);
-      m.position.set((rnd() - 0.5) * W * 0.94, 0.35, -(10 + rnd() * 70));
-      m.renderOrder = 4; grp.add(m);
-      wake.push({ m, ph: rnd() * 6.28, len: len, base: m.position.z, rate: 9 + rnd() * 22 });
+      wakeRate.push(9 + rnd() * 22);
     }
+    const wakeL = foamLayerBuild(wakeF, { color: 0xe8eee9, opacity: 0.3, order: 4 });
+    wakeL.flow = new Float32Array(wakeRate);
+    wakeL.off = new Float32Array(wakeRate.length);
+    wakeL.span = 200;
+    geoms.push(wakeL.geo); mats.push(wakeL.mat); grp.add(wakeL.mesh);
 
     return {
       group: grp, wall: wall, basePos: new Float32Array(pos),
       cols: COLS, rows: ROWS, baseH: H, width: W,
       colClean: colClean, colMud: colMud, mudMix: -1,
-      foams: [crest, foot], boil: boil, streaks: streaks, wake: wake,
+      crestL: crestL, tornL: tornL, sprayL: sprayL, footL: footL, boilL: boilL,
+      tearL: tearL, wakeL: wakeL,
+      foams: [crest, foot], boil: boil, streaks: streaks, wake: [],
       geoms: geoms, mats: mats,
     };
   };
@@ -2171,35 +2457,83 @@
       m.emissiveIntensity = 0.18 * (1 - turbid);
     }
 
-    const fl = h.foams;
-    for (let i = 0; i < fl.length; i++) {
-      fl[i].scale.set(1, hs, hs);
-      fl[i].material.opacity = (0.42 + 0.34 * Math.abs(Math.sin(t * 3.1 + i * 1.7))) * (0.6 + foamGain * 0.7);
-    }
-    if (h.boil) {
-      // the boil only exists once the bore is scouring something — in deep
-      // water there is nothing under it to tear up
-      h.boil.scale.set(1, hs, hs);
-      h.boil.position.y = Math.sin(t * 2.3) * 0.5 * hs;
-      h.boil.material.opacity = Math.min(0.95, turbid * (0.62 + 0.33 * Math.abs(Math.sin(t * 4.3))));
-      h.boil.visible = turbid > 0.03;
-    }
-    const sk = h.streaks;
-    for (let i = 0; i < sk.length; i++) {
-      sk[i].material.opacity = (0.13 + 0.2 * Math.abs(Math.sin(t * 2.0 + i))) * (1 - turbid * 0.35);
-      sk[i].position.y = H * (0.42 + 0.05 * Math.sin(t * 1.6 + i * 2));
-      sk[i].scale.y = hs;
-    }
-    const wk = h.wake;
-    for (let i = 0; i < wk.length; i++) {
-      const w = wk[i];
-      // ribbons stream back toward the sea and recycle at the front
-      w.base -= w.rate * (Number.isFinite(s.dt) ? +s.dt : 1 / 60);
-      if (w.base < -190) w.base = -(6 + Math.random() * 20);
-      w.m.position.z = w.base;
-      w.m.position.y = 0.28 + Math.sin(t * 2.4 + w.ph) * 0.16;
-      w.m.material.opacity = turbid * (0.16 + 0.26 * Math.abs(Math.sin(t * 1.3 + w.ph)));
-      w.m.visible = turbid > 0.05;
+    /* ---- THE WHITECAP ----------------------------------------------------
+       Every foam layer churns per SHRED (foamLayerAnim) rather than by one
+       shared opacity pulse: a band that brightens and dims in unison is the
+       same regularity tell as a band of identical cards, only in time instead
+       of in space. The material-level pulse that is left is deliberately
+       small — the geometry is doing the work now.
+
+       THE CURL OFFSET IS THE FIX THAT MATTERS. The wall's lip row is thrown
+       forward by curl*6.2 above; foam sitting at a fixed z simply came off
+       the wave as it curled. Every layer is handed the SAME number, scaled by
+       how far up the face it lives, so the crest stays welded to the lip, the
+       tears stay on the face, and the foot stays at the foot. */
+    if (h.crestL) {
+      const dt = Number.isFinite(s.dt) ? +s.dt : 1 / 60;
+      const lipZ = curl * 6.2;
+      foamLayerAnim(h.crestL, t, lipZ, dt);
+      foamLayerAnim(h.tornL, t, lipZ, dt);
+      foamLayerAnim(h.sprayL, t, lipZ * 0.9, dt);
+      foamLayerAnim(h.tearL, t, lipZ * 0.3, dt);
+      foamLayerAnim(h.footL, t, 0, dt);
+      if (turbid > 0.14) foamLayerAnim(h.boilL, t, 0, dt);
+      if (turbid > 0.05) foamLayerAnim(h.wakeL, t, 0, dt);
+
+      /* FOAM IS NOT WHITE WHEN THE WATER IS MUD. A bore that has already
+         eaten a town throws tan-gray spray, not the clean blue-white of an
+         open-sea whitecap — the before shots have pure white lace riding on
+         top of Miyako's gray-black soup, and that one mismatch is what makes
+         the landfall frame read as two unrelated objects. */
+      const gain = 0.62 + foamGain * 0.42;
+      const pulse = 1 + 0.06 * Math.sin(t * 2.7);
+      /* THE DIRT RAMPS WITH THE SQUARE OF THE SEDIMENT, and that is a fix for
+         a real artefact, not a taste call. A linear ramp made the foam 34%
+         gray at turbid 0.26 — water still counted as open sea — and a shred
+         a shade darker than the blown-out crest it is lying on does not read
+         as foam at all: it reads as a CARD ON the foam. Clean water gets
+         white foam, and the mud arrives when there is actually mud. */
+      const mud = turbid * turbid;
+      const cm = h.crestL.mat;
+      cm.color.setRGB(1 - mud * 0.34, 1 - mud * 0.4, 1 - mud * 0.47);
+      cm.opacity = Math.min(0.95, (0.72 + mud * 0.14) * gain * pulse);
+      const tm = h.tornL.mat;
+      tm.color.setRGB(0.96 - mud * 0.34, 0.98 - mud * 0.42, 1 - mud * 0.52);
+      tm.opacity = Math.min(0.62, (0.22 + curl * 0.12) * gain * pulse);
+      h.tornL.mesh.scale.set(1, hs, hs);
+      const sm = h.sprayL.mat;
+      sm.color.setRGB(0.92 - mud * 0.3, 0.96 - mud * 0.4, 1 - mud * 0.53);
+      // mist is thrown by the CURL: a wave standing up hard tears far more of
+      // itself into the air than one already collapsed across a town
+      sm.opacity = Math.min(0.5, (0.13 + curl * 0.17) * gain * (1 + 0.12 * Math.sin(t * 3.3)));
+      const fm = h.footL.mat;
+      fm.color.setRGB(0.92 - mud * 0.3, 0.97 - mud * 0.38, 1 - mud * 0.45);
+      fm.opacity = Math.min(0.85, (0.38 + turbid * 0.2) * gain);
+      h.crestL.mesh.scale.set(1, hs, hs);
+      h.sprayL.mesh.scale.set(1, hs, hs);
+      h.footL.mesh.scale.set(1, hs, hs);
+      h.tearL.mesh.scale.set(1, hs, hs);
+      // aerated water shows on a blue-green face; on a mud wall there is very
+      // little air left to catch the light, and a bright white streak on
+      // Miyako's black soup reads as a stick lying on the wave
+      h.tearL.mat.color.setRGB(0.87 - mud * 0.3, 0.94 - mud * 0.38, 0.98 - mud * 0.46);
+      h.tearL.mat.opacity = (0.085 + 0.045 * Math.sin(t * 2.0)) * (1 - turbid * 0.72);
+      if (h.wakeL) {
+        // whitewater the bore has already left behind it, and it carries the
+        // same sediment the front does — clean water leaves no wake to see
+        h.wakeL.mat.color.setRGB(0.91 - mud * 0.3, 0.93 - mud * 0.34, 0.91 - mud * 0.36);
+        h.wakeL.mat.opacity = turbid * (0.18 + 0.14 * Math.abs(Math.sin(t * 1.3)));
+        h.wakeL.mesh.visible = turbid > 0.05;
+      }
+      if (h.boilL) {
+        // the boil only exists once the bore is scouring something — in deep
+        // water there is nothing under it to tear up
+        h.boilL.mesh.scale.set(1, hs, hs);
+        h.boilL.mesh.position.y = Math.sin(t * 2.3) * 0.5 * hs;
+        const scour = Math.max(0, turbid - 0.12) / 0.88;
+        h.boilL.mat.opacity = Math.min(0.95, scour * (0.62 + 0.33 * Math.abs(Math.sin(t * 4.3))));
+        h.boilL.mesh.visible = scour > 0.02;
+      }
     }
     if (Number.isFinite(s.x) && Number.isFinite(s.z)) h.group.position.set(s.x, +s.y || 0, s.z);
     if (Number.isFinite(s.dirX) && Number.isFinite(s.dirZ)) h.group.rotation.y = Math.atan2(s.dirX, s.dirZ);
