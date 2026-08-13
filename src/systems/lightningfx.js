@@ -27,13 +27,25 @@
      3. FLASHOVER at the ground. Surface arcs crawling radially out from the
         contact for a sixth of a second. Unmistakably electrical, and the one
         cue no fireball can fake.
-     4. NO FIREBALL. A white-hot contact point that dies in 90 ms, a thin ring
-        of LIGHT (not smoke) running out across the ground, a spray of sparks,
-        and a pale STEAM puff — because the ground a storm strikes is soaked,
-        and what comes off it is steam, not petrol smoke.
+     4. NO FIREBALL. A white-hot contact point that dies in 90 ms, a spray of
+        sparks, and a pale STEAM puff — because the ground a storm strikes is
+        soaked, and what comes off it is steam, not petrol smoke.
      5. A SCAR that stays. The strike leaves a fulgurite burn — a dark star
-        scorched into the ground — whose rim cools white → amber → black inside
-        a second. The arena accumulates its own strike history.
+        scorched into the ground — which simply fades in, cold. The arena
+        accumulates its own strike history.
+
+   TWO THINGS THAT WERE HERE AND ARE NOT (2026-08-13, owner review).
+     · An expanding ground RING. It was written as "a rim of light, not a shock
+       front", but a bright circle racing outward from an impact is explosion
+       grammar whatever colour it is drawn in, and it read as one. Deleted
+       rather than tuned: the flashover arcs already say "electricity" at the
+       ground, and they say it better without a shockwave drawn over them.
+     · The scar's COOLING RIM — an additive overlay running white → amber as it
+       faded. Physically defensible (struck ground really is incandescent) and
+       wrong on screen: against grass, a dark star with a red-orange edge reads
+       as a POOL OF BLOOD, which is a thing this game draws elsewhere and must
+       not be confused with. The scorch is now cold from the first frame and
+       neutral charcoal rather than warm brown, so it can only be a burn.
 
    WHY IT IS A FILE AND NOT A DISASTER DEF. systems/disasters.js owns the
    survival island's storm, but the bus that draws it is global: this file
@@ -48,7 +60,15 @@
        scale), ground (false = an in-cloud/air stroke: no scar, no sparks),
        sfx (false = silent, caller owns audio), flash (0..1 multiplier),
        seed (deterministic jitter).
-     CBZ.lightningFxReset() — drop every live bolt and every scar.
+     CBZ.lightningArc(ax, ay, az, bx, by, bz, opts) — a SIDE FLASH: the jump
+       from a struck object to a person beside it, or on from that person to
+       the next. opts: w (ribbon half-width), life (seconds), seed.
+     CBZ.lightningLeader(x, z, opts) — the STEPPED LEADER that precedes a
+       strike, as a drop-in replacement for CBZ.fx.groundMarker's handle:
+       .set(progress 0..1) / .move(x, z) / .dispose(). Silent, unlit, and
+       invisible for the first 45% of the countdown. Seeded from the strike
+       COORDINATES, so the return stroke that follows runs up the same channel.
+     CBZ.lightningFxReset() — drop every live bolt, every leader and every scar.
      CBZ.lightningFxAudit() — { strikes, live, scars, strokes, boltMeshes }.
 
    FLAG: CBZ.CONFIG.LIGHTNING_FX_V2 (default true). False makes
@@ -93,7 +113,7 @@
     };
   }
 
-  const audit = { strikes: 0, strokes: 0, scars: 0 };
+  const audit = { strikes: 0, strokes: 0, scars: 0, flashes: 0 };
 
   /* A ROUND MOTE. THREE.PointsMaterial with no map draws a hard SQUARE, and at
      these sizes an ember and a steam puff both came out as opaque tiles —
@@ -121,10 +141,11 @@
   // X and Z axes are stable perpendiculars and no per-frame billboarding is
   // needed. 12 verts a segment; the whole channel is one draw call.
   // ============================================================
-  function channelMesh(color, opacity) {
+  function channelMesh(color, opacity, segCap) {
+    const cap = segCap || SEG_MAX;
     const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(SEG_MAX * 12 * 3), 3));
-    geo.setAttribute("color", new THREE.BufferAttribute(new Float32Array(SEG_MAX * 12 * 3), 3));
+    geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(cap * 12 * 3), 3));
+    geo.setAttribute("color", new THREE.BufferAttribute(new Float32Array(cap * 12 * 3), 3));
     geo.setDrawRange(0, 0);
     const mat = new THREE.MeshBasicMaterial({
       color: color, vertexColors: true, transparent: true, opacity: opacity,
@@ -134,6 +155,7 @@
     m.frustumCulled = false;   // positions are rewritten every stroke
     m.renderOrder = 9;
     m.visible = false;
+    m.userData.segCap = cap;
     scene.add(m);
     return m;
   }
@@ -142,13 +164,14 @@
   // path into the outer glow sheath, so core and sheath are one path solved
   // twice rather than two paths that can disagree about where the bolt is.
   function bake(mesh, paths, widthMul, brightMul) {
+    const CAP = (mesh.userData.segCap || SEG_MAX) * 12;
     const pos = mesh.geometry.attributes.position.array;
     const col = mesh.geometry.attributes.color.array;
     let v = 0;
     for (let p = 0; p < paths.length; p++) {
       const path = paths[p], pts = path.pts, n = pts.length;
       if (n < 2) continue;
-      for (let i = 0; i < n - 1 && v < SEG_MAX * 12; i++) {
+      for (let i = 0; i < n - 1 && v < CAP; i++) {
         const a = pts[i], b = pts[i + 1];
         const ta = i / (n - 1), tb = (i + 1) / (n - 1);
         // t = 0 at the cloud, 1 at the tip. Slightly fatter up top so
@@ -157,8 +180,10 @@
         const wb = path.w * (1.3 - 0.5 * tb) * widthMul;
         // The head fades INTO the cloud instead of ending on a hard cap, and
         // a fork fades out along its length because it never reaches ground.
-        const fa = Math.min(1, ta / 0.18) * (path.fork ? 1 - ta * 0.92 : 0.75 + 0.4 * ta);
-        const fb = Math.min(1, tb / 0.18) * (path.fork ? 1 - tb * 0.92 : 0.75 + 0.4 * tb);
+        // `flat` opts out of both: a side flash is a metre-long jump between
+        // two solid things and is equally bright at both ends.
+        const fa = path.flat ? 1 : Math.min(1, ta / 0.18) * (path.fork ? 1 - ta * 0.92 : 0.75 + 0.4 * ta);
+        const fb = path.flat ? 1 : Math.min(1, tb / 0.18) * (path.fork ? 1 - tb * 0.92 : 0.75 + 0.4 * tb);
         const ca = fa * brightMul * path.b, cb = fb * brightMul * path.b;
         // two quads: one spanning X, one spanning Z
         for (let axis = 0; axis < 2; axis++) {
@@ -272,17 +297,15 @@
       const geo = new THREE.BufferGeometry();
       geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(SCAR_VERTS * 3), 3));
       geo.setDrawRange(0, 0);
+      // COLD CHARCOAL, not warm brown: a dark star with any red in it reads as
+      // a blood pool on grass, and this game draws real ones.
       const dark = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-        color: 0x140f0b, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide,
+        color: 0x15171b, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide,
       }));
-      const hot = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-        color: 0xffffff, transparent: true, opacity: 0, depthWrite: false,
-        blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-      }));
-      dark.frustumCulled = hot.frustumCulled = false;
-      dark.renderOrder = 5; hot.renderOrder = 6;
-      scene.add(dark); scene.add(hot);
-      const slot = { geo, dark, hot, hotT: 0, fade: 0 };
+      dark.frustumCulled = false;
+      dark.renderOrder = 5;
+      scene.add(dark);
+      const slot = { geo, dark, fade: 0 };
       scars.push(slot);
       return slot;
     }
@@ -324,9 +347,7 @@
     slot.geo.setDrawRange(0, v);
     slot.geo.attributes.position.needsUpdate = true;
     slot.dark.material.opacity = 0;
-    slot.hot.material.opacity = 1;
-    slot.hot.material.color.setHex(0xffffff);
-    slot.hotT = 0.8; slot.fade = 0.55;
+    slot.fade = 0.5;
     audit.scars++;
   }
 
@@ -351,15 +372,6 @@
       line.frustumCulled = false; line.visible = false; line.renderOrder = 8;
       scene.add(line); arcs.push(line);
     }
-
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.975, 1.0, 56),
-      new THREE.MeshBasicMaterial({
-        color: 0xcfe6ff, transparent: true, opacity: 0, depthWrite: false,
-        blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-      }));
-    ring.rotation.x = -Math.PI / 2; ring.visible = false; ring.renderOrder = 8;
-    scene.add(ring);
 
     const hot = new THREE.Mesh(
       new THREE.SphereGeometry(1, 10, 8),
@@ -392,7 +404,7 @@
     steam.frustumCulled = false; steam.visible = false; scene.add(steam);
 
     return {
-      core, glow, arcs, ring, hot, sparks, steam,
+      core, glow, arcs, hot, sparks, steam,
       sparkVel: new Float32Array(SPARKS * 3), steamVel: new Float32Array(STEAM * 3),
       live: false, age: 0, life: 0, fired: 0, strokes: [], anchors: null,
       x: 0, z: 0, gy: 0, power: 1, ground: true, flash: 1, att: 1, rnd: null,
@@ -409,7 +421,7 @@
   function hideBolt(r) {
     r.live = false;
     r.core.visible = r.glow.visible = false;
-    r.ring.visible = r.hot.visible = false;
+    r.hot.visible = false;
     r.sparks.visible = r.steam.visible = false;
     for (let i = 0; i < r.arcs.length; i++) r.arcs[i].visible = false;
   }
@@ -453,6 +465,16 @@
     r.fired++;
   }
 
+  /* THE SEED IS THE PLACE. A leader and the return stroke that follows it are
+     the SAME channel — the stroke runs back up the path the leader ionised —
+     so both derive their jitter from the strike coordinates rather than from a
+     counter. No plumbing between them, no shared handle through the bus, and
+     the bolt still lands exactly where the warning said it would. */
+  function posSeed(x, z) {
+    const a = Math.round(x * 8) | 0, b = Math.round(z * 8) | 0;
+    return ((a * 73856093) ^ (b * 19349663) ^ 0x9e3779b9) >>> 0;
+  }
+
   // ============================================================
   // THE STRIKE
   // ============================================================
@@ -460,11 +482,19 @@
     if (CBZ.CONFIG.LIGHTNING_FX_V2 === false) return null;
     o = o || {};
     const r = boltSlot();
-    const rnd = lcg(o.seed != null ? (o.seed | 0) : (seedCounter = (seedCounter * 1664525 + 1013904223) >>> 0));
+    const rnd = lcg(o.seed != null ? (o.seed | 0) : posSeed(x, z));
     const gy = o.y != null ? o.y : floorAt(x, z);
     r.rnd = rnd; r.x = x; r.z = z; r.gy = gy;
     r.power = Math.max(0.35, Math.min(2, o.power != null ? o.power : 1));
     r.ground = o.ground !== false;
+    /* WHERE THE CHANNEL ENDS AND WHERE THE GROUND IS ARE NOT THE SAME PLACE.
+       A bolt that terminates on a treetop ends six metres up; the turf burn,
+       the flashover and the steam still belong on the floor beneath it, and
+       they belong there SMALLER, because the current is running to earth down
+       the trunk instead of vaporising the ground. A building takes it all the
+       way down through the structure, so it gets none. */
+    r.fy = floorAt(x, z);
+    r.gScale = o.groundScale != null ? Math.max(0, Math.min(1, o.groundScale)) : 1;
     r.flash = o.flash != null ? o.flash : 1;
     r.anchors = anchors(x, z, gy, rnd);
     r.age = 0; r.fired = 0; r.live = true;
@@ -494,12 +524,21 @@
     fireStroke(r, r.strokes[0]);
     if (CBZ.shake) { try { CBZ.shake(0.35 * r.att * r.power); } catch (e) {} }
 
-    if (r.ground) {
+    if (r.ground && r.gScale > 0.02) {
       groundBurst(r, rnd);
       const slot = scarSlot();
-      writeScar(slot, x, z, 0.55 + 0.5 * r.power, rnd);
+      writeScar(slot, x, z, (0.55 + 0.5 * r.power) * (0.5 + 0.5 * r.gScale), rnd);
+    } else if (r.ground) {
+      // struck a building: the current goes to earth inside the structure, so
+      // nothing is scorched outside it. The channel and the flash still happen.
+      r.hot.position.set(x, r.gy + 0.35, z);
+      r.hot.scale.setScalar(0.3 * r.power);
+      r.hot.material.opacity = 0.95;
+      r.hot.visible = true;
+      r.sparks.visible = r.steam.visible = false;
+      for (let i = 0; i < r.arcs.length; i++) r.arcs[i].visible = false;
     } else {
-      r.ring.visible = r.hot.visible = r.sparks.visible = r.steam.visible = false;
+      r.hot.visible = r.sparks.visible = r.steam.visible = false;
     }
 
     if (o.sfx !== false) {
@@ -520,23 +559,17 @@
   }
 
   function groundBurst(r, rnd) {
-    const x = r.x, z = r.z, gy = r.gy;
-    // the contact point itself: white-hot, gone in 90 ms
-    r.hot.position.set(x, gy + 0.35, z);
+    const x = r.x, z = r.z, gy = r.fy;
+    // the contact point itself: white-hot, gone in 90 ms. This one sits at the
+    // TERMINATION — on the treetop if that is what the bolt found.
+    r.hot.position.set(x, r.gy + 0.35, z);
     r.hot.scale.setScalar(0.3 * r.power);
     r.hot.material.opacity = 0.95;
     r.hot.visible = true;
 
-    // a thin ring of LIGHT running out over the ground. Not a shock front:
-    // nothing is being thrown, this is the flash lighting what it touches.
-    r.ring.position.set(x, gy + 0.14, z);
-    r.ring.scale.setScalar(0.6);
-    r.ring.material.opacity = 0.55;
-    r.ring.visible = true;
-
     // FLASHOVER. Surface arcs crawling out from the contact — the cue that
     // says "electricity" in one frame and that no explosion can borrow.
-    const arcN = Math.max(2, Math.round((CBZ.qScale ? CBZ.qScale(0.4, 1) : 1) * ARCS));
+    const arcN = Math.max(2, Math.round((CBZ.qScale ? CBZ.qScale(0.4, 1) : 1) * ARCS * r.gScale));
     for (let i = 0; i < r.arcs.length; i++) {
       const line = r.arcs[i];
       if (i >= arcN) { line.visible = false; continue; }
@@ -559,7 +592,7 @@
     // SPARKS: vaporised ground thrown up the channel. Bright white at the
     // root, cooling to ember orange at the tips.
     const q = CBZ.qScale ? CBZ.qScale(0.4, 1) : 1;
-    const sn = Math.max(8, Math.round(SPARKS * q));
+    const sn = Math.max(8, Math.round(SPARKS * q * r.gScale));
     const sp = r.sparks.geometry.attributes.position.array;
     const sc = r.sparks.geometry.attributes.color.array;
     for (let i = 0; i < sn; i++) {
@@ -578,7 +611,7 @@
     r.sparkN = sn;
 
     // STEAM off wet ground: slow, pale, rising, no fire in it anywhere.
-    const tn = Math.max(6, Math.round(STEAM * q));
+    const tn = Math.max(6, Math.round(STEAM * q * r.gScale));
     const tp = r.steam.geometry.attributes.position.array;
     for (let i = 0; i < tn; i++) {
       const o = i * 3, a = rnd() * 6.2832, rr = rnd() * 1.3 * r.power;
@@ -642,14 +675,6 @@
             r.hot.material.opacity = 0.95 * (1 - u);
           }
         }
-        if (r.ring.visible) {
-          const u = r.age / 0.26;
-          if (u >= 1) r.ring.visible = false;
-          else {
-            r.ring.scale.setScalar((0.6 + u * 5.4) * r.power);
-            r.ring.material.opacity = 0.55 * (1 - u) * (1 - u);
-          }
-        }
         for (let i = 0; i < r.arcs.length; i++) {
           const line = r.arcs[i];
           if (!line.visible) continue;
@@ -696,27 +721,196 @@
         }
       }
 
-      if (r.age >= r.life && !r.hot.visible && !r.ring.visible && !r.sparks.visible && !r.steam.visible) hideBolt(r);
+      if (r.age >= r.life && !r.hot.visible && !r.sparks.visible && !r.steam.visible) hideBolt(r);
     }
 
-    // ---- scars cool: white → orange → out, and the burn stays -----------
+    // ---- side flashes: on, then gone. They flicker rather than fade,
+    //      because an arc is either struck or it is not. ------------------
+    for (let i = 0; i < flashes.length; i++) {
+      const f = flashes[i];
+      if (!f.live) continue;
+      f.age += dt;
+      if (f.age >= f.life) { hideFlash(f); continue; }
+      const k = 1 - f.age / f.life;
+      const on = (f.age * 110 % 1) > 0.3 ? 1 : 0.3;
+      f.core.material.opacity = k * on;
+      f.glow.material.opacity = k * on * 0.45;
+    }
+
+    // ---- scars fade in and stay. Nothing glows: see the header. ---------
     for (let i = 0; i < scars.length; i++) {
       const s = scars[i];
       if (s.fade > 0) {
         s.dark.material.opacity = Math.min(s.fade, s.dark.material.opacity + dt * 3);
       }
-      if (s.hotT > 0) {
-        s.hotT -= dt;
-        // white → amber → out. The first pass ran this to 1.5 s and let the
-        // green channel fall to zero, which left a saturated LAVA-RED star
-        // burning in the grass a second and a half after the bolt.
-        const u = 1 - Math.max(0, s.hotT) / 0.8;
-        s.hot.material.color.setRGB(1, Math.max(0.35, 1 - u * 0.7), Math.max(0.05, 1 - u * 1.6));
-        s.hot.material.opacity = Math.max(0, 1 - u) * (u < 0.08 ? 0.9 : 0.42);
-        if (s.hotT <= 0) s.hot.material.opacity = 0;
-      }
     }
   });
+
+  /* ============================================================
+     THE SIDE FLASH — an arc between two things, both of which are solid.
+
+     This is the second-biggest killer in the real phenomenon (30-35% of
+     casualties; ground current is 50-55% and the two together are about 60% of
+     everything). Lightning attaches to a tree, the trunk turns out to be a poor
+     conductor, and part of the current jumps the air to something better on its
+     way to earth — the person sheltering under it. It jumps a foot or two, and
+     it can jump onward from that person to the next one, which is why groups go
+     down together rather than one at a time.
+
+     Drawn by the same ribbon baker as the channel, at a fraction of the width,
+     `flat` so it is equally bright at both ends (it is a jump between two solid
+     objects, not something fading into a cloud), and gone in about a tenth of a
+     second. systems/disasters.js decides WHO — this only draws the jump.
+     ============================================================ */
+  const ARC_SEG = 24;
+  const FLASHES = 10;
+  const flashes = [];
+  let flashNext = 0;
+
+  function flashArc(ax, ay, az, bx, by, bz, o) {
+    if (CBZ.CONFIG.LIGHTNING_FX_V2 === false) return null;
+    o = o || {};
+    let r = null;
+    for (let i = 0; i < flashes.length; i++) if (!flashes[i].live) { r = flashes[i]; break; }
+    if (!r) {
+      if (flashes.length < FLASHES) {
+        r = { core: channelMesh(0xeaf5ff, 1, ARC_SEG), glow: channelMesh(0x74b0ff, 0.45, ARC_SEG), live: false, age: 0, life: 0 };
+        flashes.push(r);
+      } else { r = flashes[flashNext % flashes.length]; flashNext++; }
+    }
+    const rnd = lcg(o.seed != null ? (o.seed | 0) : posSeed(ax + bz, az + bx));
+    const span = Math.hypot(bx - ax, by - ay, bz - az) || 0.5;
+    const pts = subdivide([{ x: ax, y: ay, z: az }, { x: bx, y: by, z: bz }], 3, 0.34, rnd);
+    const w = (o.w || 0.055) * Math.max(0.6, Math.min(1.6, span / 2));
+    const paths = [{ pts: pts, w: w, b: 1, fork: false, flat: true }];
+    bake(r.core, paths, 1, 1);
+    bake(r.glow, paths, 3, 0.45);
+    r.core.material.opacity = 1;
+    r.glow.material.opacity = 0.45;
+    r.core.visible = r.glow.visible = true;
+    r.live = true; r.age = 0; r.life = o.life || 0.13;
+    audit.flashes++;
+    return r;
+  }
+
+  function hideFlash(r) { r.live = false; r.core.visible = r.glow.visible = false; }
+
+  /* ============================================================
+     THE STEPPED LEADER — the telegraph, and a real one.
+
+     The storm used to warn you with CBZ.fx.groundMarker: a pulsing blue disc
+     4.5 m across, painted on the ground where the bolt would land. It is a
+     video-game floor decal. Nothing in the world casts it, and it announces
+     the strike from directly above the one place you cannot see the sky.
+
+     What actually precedes a cloud-to-ground stroke is the STEPPED LEADER: a
+     dim, branching channel that gropes down out of the cloud in ~50 µs jumps,
+     far too faint to light anything, and when it reaches the ground the return
+     stroke runs back up it. So the warning is now the bolt's own approach —
+     you read it by looking UP, it points at where it is going to land, and it
+     gets brighter and lower the less time you have.
+
+     Deliberately shaped as the SAME HANDLE the ground marker returned
+     (`.set(progress 0..1)`, `.move(x, z)`, `.dispose()`), so systems/
+     disasters.js swaps one constructor and keeps every other line — including
+     the pending list its threat model and its bot-scatter AI read.
+
+     It is silent, it does not flash, and for the first 45% of the countdown it
+     is not drawn at all: a leader you can see for a full second is a floor
+     decal wearing a costume.
+     ============================================================ */
+  const LEADERS = 4;
+  const leaders = [];
+  let leaderNext = 0;
+
+  function makeLeader() {
+    return {
+      core: channelMesh(0xcfe7ff, 1), glow: channelMesh(0x4f8bff, 0.4),
+      live: false, anchors: null, paths: null, rnd: null, seed: 0,
+      x: 0, z: 0, gy: 0, h: 1, power: 1, tick: 0,
+    };
+  }
+
+  // Cut a cloud→ground path off at a height, interpolating the last step, so
+  // the leader has a descending TIP instead of appearing all at once.
+  function sliceTo(pts, cy) {
+    const out = [];
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i];
+      if (p.y >= cy) { out.push(p); continue; }
+      const a = pts[i - 1];
+      if (a) {
+        const t = (a.y - cy) / ((a.y - p.y) || 1);
+        out.push({ x: a.x + (p.x - a.x) * t, y: cy, z: a.z + (p.z - a.z) * t });
+      }
+      break;
+    }
+    return out.length > 1 ? out : null;
+  }
+
+  function hideLeader(r) {
+    r.live = false;
+    r.core.visible = r.glow.visible = false;
+  }
+
+  function leader(x, z, o) {
+    o = o || {};
+    let r = null;
+    for (let i = 0; i < leaders.length; i++) if (!leaders[i].live) { r = leaders[i]; break; }
+    if (!r) {
+      if (leaders.length < LEADERS) { r = makeLeader(); leaders.push(r); }
+      else { r = leaders[leaderNext % leaders.length]; leaderNext++; }
+    }
+    r.seed = o.seed != null ? (o.seed | 0) : posSeed(x, z);
+    r.rnd = lcg(r.seed);
+    r.x = x; r.z = z;
+    r.gy = o.y != null ? o.y : floorAt(x, z);
+    r.power = Math.max(0.35, Math.min(2, o.power != null ? o.power : 1));
+    r.anchors = anchors(x, z, r.gy, r.rnd);
+    r.h = Math.max(1, r.anchors[0].y - r.gy);
+    r.tick = 0; r.live = true;
+    hideLeader(r); r.live = true;
+
+    const handle = {
+      set(p) {
+        p = Math.max(0, Math.min(1, p));
+        const START = 0.45;
+        if (p < START) { r.core.visible = r.glow.visible = false; return; }
+        const u = (p - START) / (1 - START);
+        // the tip accelerates: a leader dawdles high up and covers the last
+        // twenty metres in the blink before the stroke
+        const cy = r.gy + r.h * (1 - u) * (1 - u);
+        // re-roll the fine detail every third frame — a leader CRACKLES down in
+        // discrete steps, it does not glide
+        if ((r.tick % 3) === 0 || !r.paths) r.paths = buildPaths(r, r.rnd);
+        r.tick++;
+        const cut = [];
+        for (let i = 0; i < r.paths.length; i++) {
+          const path = r.paths[i];
+          const pts = sliceTo(path.pts, cy);
+          if (pts) cut.push({ pts: pts, w: path.w, b: path.b, fork: path.fork });
+        }
+        if (!cut.length) { r.core.visible = r.glow.visible = false; return; }
+        bake(r.core, cut, 0.5, 1);
+        bake(r.glow, cut, 1.9, 0.35);
+        // faint, and flickering step to step. Never bright enough to be
+        // mistaken for the stroke, always bright enough to be a warning.
+        const op = (0.09 + 0.17 * u) * (r.tick % 3 === 1 ? 0.55 : 1);
+        r.core.material.opacity = op;
+        r.glow.material.opacity = op * 0.5;
+        r.core.visible = r.glow.visible = true;
+      },
+      move(nx, nz) {
+        r.x = nx; r.z = nz; r.gy = floorAt(nx, nz);
+        r.anchors = anchors(nx, nz, r.gy, lcg(posSeed(nx, nz)));
+        r.h = Math.max(1, r.anchors[0].y - r.gy);
+        r.paths = null;
+      },
+      dispose() { hideLeader(r); },
+    };
+    handle.set(0);
+    return handle;
+  }
 
   // ============================================================
   // BUS REGISTRATION — `lightning` becomes an ordnance row like any other,
@@ -734,8 +928,10 @@
     wired = true;
     try {
       CBZ.impact.fx("lightning", function (x, y, z, row, opts) {
+        const bag = (opts && opts.fx) || null;
         strike(x, z, {
           y: y - 0.4,
+          groundScale: bag && bag.groundScale != null ? bag.groundScale : 1,
           power: 0.85 + 0.5 * ((opts && opts.scale) || 1),
           sfx: !(opts && opts.quiet),
           flash: opts && opts.flash != null ? opts.flash : 1,
@@ -759,11 +955,13 @@
   // ============================================================
   function reset() {
     for (let i = 0; i < bolts.length; i++) hideBolt(bolts[i]);
+    for (let i = 0; i < leaders.length; i++) hideLeader(leaders[i]);
+    for (let i = 0; i < flashes.length; i++) hideFlash(flashes[i]);
     for (let i = 0; i < scars.length; i++) {
       const s = scars[i];
       s.geo.setDrawRange(0, 0);
-      s.dark.material.opacity = 0; s.hot.material.opacity = 0;
-      s.hotT = 0; s.fade = 0;
+      s.dark.material.opacity = 0;
+      s.fade = 0;
     }
     scarNext = 0;
   }
@@ -778,6 +976,8 @@
   });
 
   CBZ.lightningStrike = strike;
+  CBZ.lightningLeader = leader;
+  CBZ.lightningArc = flashArc;
   CBZ.lightningFxAudit = function () {
     let live = 0, litScars = 0;
     for (let i = 0; i < bolts.length; i++) if (bolts[i].live) live++;
@@ -785,7 +985,8 @@
     return {
       on: CBZ.CONFIG.LIGHTNING_FX_V2 !== false,
       strikes: audit.strikes, strokes: audit.strokes, scarsCut: audit.scars,
-      live: live, scars: litScars, boltPool: bolts.length, wired: wired,
+      live: live, scars: litScars, boltPool: bolts.length,
+      leaders: leaders.length, flashes: audit.flashes, wired: wired,
     };
   };
 })();

@@ -51,9 +51,9 @@
    false and photographs the fireball, which is exactly the comparison wanted. */
 
 const subjects = [
-  { id: "telegraph", label: "The telegraph", atFrames: -18,
-    focus: "The strike marker on wet ground about a third of a second before the bolt. Unchanged by this work and shot deliberately: it is the shared clock both builds are photographed against, and it proves the two frames below are the same moment of the same event.",
-    cam: { back: 13, up: 5.5, look: 0.4 } },
+  { id: "telegraph", label: "The warning", atFrames: -14,
+    focus: "About a quarter of a second before the bolt. BEFORE: a pulsing blue disc 4.5 m across painted on the ground — a floor decal nothing in the world casts, announcing the strike from the one place you cannot see the sky. AFTER: the STEPPED LEADER, the dim branching channel that really does grope down out of the cloud before a stroke, seeded off the strike coordinates so the return stroke runs back up the same path. You read this one by looking up.",
+    cam: { back: 20, up: 8, look: 14 } },
 
   { id: "contact", label: "The strike frame", atFrames: 0,
     focus: "The frame the bolt arrives, from street level. BEFORE: cityAirstrikeExplosion — an orange chemical fireball with an ejecta cone, plus a straight white post 0.5 m square. AFTER: a forked channel with a blue sheath running into a white-hot contact point, a thin ring of light on the ground, and no fire anywhere, because there is nothing at a lightning strike to burn.",
@@ -74,6 +74,10 @@ const subjects = [
   { id: "aftermath", label: "Aftermath, +1.2 s", atFrames: 72,
     focus: "What the strike LEAVES. After: pale steam boiling off ground that a storm has soaked, and a fulgurite burn scorched into the turf whose rim is still cooling orange. Before: a petrol-black smoke column and blast rubble, from a warhead that was never there.",
     cam: { back: 9, up: 3.4, look: 0.6 } },
+
+  { id: "sideflash", label: "Tree to person", wantSide: true, atFrames: 2,
+    focus: "THE mechanism the old model could not express. The bolt did not land on anybody — it attached to the tree, which is the tallest thing for fifty metres and the reason the crowd is standing under it. A tree is a poor conductor, so part of the current jumps the air to the better path beside it, and from that body on to the next. Side flash is 30-35% of real lightning casualties and the textbook line explaining why is always 'the victim had taken shelter under a tree'. BEFORE: one flat lethal circle centred on a coordinate, and everyone in it dies of the same thing.",
+    cam: { back: 11, up: 3.6, look: 2.4 } },
 
   { id: "scars", label: "What the storm wrote", atFrames: 360,
     focus: "Six seconds and several strikes later, from above. The ground now carries the storm's history — a burn star at every place a bolt came down. The before-side keeps nothing: its fireballs cleaned up after themselves and the arena is exactly as it started.",
@@ -132,7 +136,7 @@ async function stageLightning(input) {
     overlay.innerHTML = "<div data-side></div><div data-name></div><div data-focus></div><div data-perf></div><div data-source></div>";
     document.body.appendChild(overlay);
 
-    S = window.__boltSeq = { overlay, frames: 0, strikeFrame: null, hit: null };
+    S = window.__boltSeq = { overlay, frames: 0, strikeFrame: null, hit: null, pendKey: null };
     window.__cbzVisualCompare = {
       render() { try { CBZ.renderer.render(CBZ.scene, CBZ.camera); } catch (_) {} },
     };
@@ -155,13 +159,20 @@ async function stageLightning(input) {
   };
   const step = (n) => { for (let i = 0; i < n; i++) step1(); };
 
-  /* THE SHARED FINGERPRINT. Both builds telegraph with the identical
-     unchanged call CBZ.fx.groundMarker(x, z, 4.5, 0x9fd0ff) — the only
-     CircleGeometry of radius 4.5 in that colour anywhere in the scene. Finding
-     it is how this preset knows where a bolt is about to land WITHOUT either
-     build having to export a test hook the other one lacks. Several are alive
-     at once (the storm schedules faster than the 0.95 s telegraph runs), so
-     what is tracked is the ONE object that was not there a frame ago. */
+  /* WHERE THE NEXT BOLT IS GOING — asked of each build in the way that build
+     can answer, because the telegraph is no longer the same object in both.
+
+       AFTER  — CBZ.disasterAudit().stormPending, the storm's own scheduled
+                list. The warning is now a stepped leader in the sky, and a
+                leader is not something you can pick out of a scene graph by
+                radius and colour.
+       BEFORE — the ground marker it still draws: the only CircleGeometry of
+                radius exactly 4.5 in exactly 0x9fd0ff anywhere in the scene.
+
+     Either way the countdown is the same 0.95 s, so a frame offset means the
+     same moment on both sides. Several are live at once (the storm schedules
+     faster than one telegraph runs), so what gets tracked is the entry that
+     was not there a frame ago. */
   const MARKER_FRAMES = 57;   // 0.95 s of telegraph at 60 Hz — see DEFS.storm
   const markerSet = () => {
     const out = [];
@@ -174,6 +185,18 @@ async function stageLightning(input) {
       out.push(o);
     });
     return out;
+  };
+  const pendings = () => {
+    const da = (typeof CBZ.disasterAudit === "function") ? CBZ.disasterAudit() : null;
+    if (da && da.stormPending) {
+      return da.stormPending.map((p) => ({ x: p.x, z: p.z, key: p.x + "," + p.z }));
+    }
+    return markerSet().map((m) => ({ x: m.position.x, z: m.position.z, key: m.uuid, mesh: m }));
+  };
+  const stillPending = (key) => {
+    const now = pendings();
+    for (let i = 0; i < now.length; i++) if (now[i].key === key) return true;
+    return false;
   };
 
   /* IS THERE ANY ANGLE FROM WHICH YOU CAN SEE THIS BOLT? The strike point is
@@ -270,25 +293,25 @@ async function stageLightning(input) {
     // photograph one that cannot be seen: skip past boxed-in strikes and take
     // the first with a clear line. Tries are bounded, and the last candidate is
     // used regardless so a frame always comes back.
-    let seen = new Set(markerSet());
+    let seen = new Set(pendings().map((p) => p.key));
     let fresh = null;
     for (let attempt = 0; attempt < 8; attempt++) {
       fresh = null;
       let guard = 900;
       while (guard-- > 0 && !fresh) {
         step1();
-        const now = markerSet();
-        for (let i = 0; i < now.length; i++) if (!seen.has(now[i])) { fresh = now[i]; break; }
+        const now = pendings();
+        for (let i = 0; i < now.length; i++) if (!seen.has(now[i].key)) { fresh = now[i]; break; }
       }
       if (!fresh) break;
-      if (solveSwing(fresh.position.x, fresh.position.z, 24, 8)) break;
-      seen = new Set(markerSet());   // boxed in — wait for the next one
+      if (solveSwing(fresh.x, fresh.z, 24, 8)) break;
+      seen = new Set(pendings().map((p) => p.key));   // boxed in — take the next
     }
     if (!fresh) return false;
-    S.marker = fresh;
+    S.pendKey = fresh.key;
     S.markerFrame = S.frames;      // this telegraph is ~0 frames old
     S.strikeFrame = null;          // not measured yet; predicted at +57
-    S.hit = { x: fresh.position.x, z: fresh.position.z };
+    S.hit = { x: fresh.x, z: fresh.z };
     return true;
   };
 
@@ -304,13 +327,14 @@ async function stageLightning(input) {
   const seekTo = (want) => {
     if (want < 0) {
       let guard = 200;
-      while (guard-- > 0 && S.marker && S.marker.parent && posNow() < want) step1();
+      while (guard-- > 0 && stillPending(S.pendKey) && posNow() < want) step1();
       return;
     }
     if (S.strikeFrame == null) {
+      // the entry leaving the pending list IS the strike, on both builds
       let guard = 250;
-      while (guard-- > 0 && S.marker && S.marker.parent) step1();
-      S.strikeFrame = S.frames;    // measured, to the frame, on both builds
+      while (guard-- > 0 && stillPending(S.pendKey)) step1();
+      S.strikeFrame = S.frames;    // measured, to the frame
     }
     const d = want - (S.frames - S.strikeFrame);
     if (d > 0) step(d);
@@ -318,13 +342,45 @@ async function stageLightning(input) {
 
   const subject = input.subject;
   const want = subject.atFrames || 0;
+
+  /* A BEAT THAT WAITS FOR A MECHANISM, not for a clock. The side flash needs a
+     bolt that attached to a TREE with somebody under it, and that is a genuinely
+     stochastic event — a storm throws a dozen strikes and two or three of them
+     find a sheltering tree. So this beat steps the storm until the ledger says
+     one actually happened and photographs THAT, rather than pinning a camera to
+     the next strike and hoping. A build with no such mechanism to report (the
+     before side has one lethal circle and no ledger) falls straight through to
+     the ordinary strike seek, which is the honest comparison. */
+  if (subject.wantSide && (typeof CBZ.disasterAudit === "function") &&
+      CBZ.disasterAudit().boltSideFlash != null) {
+    if (CBZ.disasters.current() !== "LIGHTNING STORM" || CBZ.disasters.state() !== "active") {
+      CBZ.disasters.force("storm"); step(6);
+      let g = 600; while (g-- > 0 && CBZ.disasters.state() !== "active") step(6);
+    }
+    let prev = CBZ.disasterAudit().boltSideFlash || 0, found = null, guard = 2400;
+    while (guard-- > 0 && !found) {
+      step1();
+      const d = CBZ.disasterAudit();
+      if ((d.boltSideFlash || 0) > prev) {
+        prev = d.boltSideFlash;
+        if (d.boltLast && d.boltLast.kind === "tree") found = d.boltLast;
+      }
+    }
+    if (found) {
+      S.hit = { x: found.x, z: found.z };
+      S.strikeFrame = S.frames; S.markerFrame = null; S.pendKey = null;
+      if (want > 0) step(want);
+      S.sideNote = "side " + found.side + " · chain " + found.chain + " · killed " + found.kills;
+    }
+  }
   // ORDER-INDEPENDENCE: a `--subjects` subset must land on the same moment as
   // the full storyboard, so re-arm whenever the requested offset is behind us.
   const at = posNow();
-  if (at == null || at > want || (want < 0 && !(S.marker && S.marker.parent))) {
+  if (!(subject.wantSide && S.strikeFrame != null && S.pendKey == null) &&
+      (at == null || at > want || (want < 0 && !stillPending(S.pendKey)))) {
     if (!armStrike()) return { ok: false, err: "no strike telegraph found" };
   }
-  seekTo(want);
+  if (!(subject.wantSide && S.pendKey == null)) seekTo(want);
 
   // ---- camera, solved onto the bolt --------------------------------------
   const hit = S.hit || { x: A.cx, z: A.cz, y: 0 };
@@ -409,7 +465,7 @@ async function stageLightning(input) {
   };
 
   return { ok: true, disaster: CBZ.disasters.current(), state: CBZ.disasters.state(),
-    note: `hit ${hit.x.toFixed(1)}, ${hit.z.toFixed(1)} · +${want}f · eye ${camera.position.x.toFixed(0)},${camera.position.y.toFixed(0)},${camera.position.z.toFixed(0)}${cam.top || camClear ? "" : " · no clear angle"}`, metrics };
+    note: `${S.sideNote ? S.sideNote + " · " : ""}hit ${hit.x.toFixed(1)}, ${hit.z.toFixed(1)} · +${want}f · eye ${camera.position.x.toFixed(0)},${camera.position.y.toFixed(0)},${camera.position.z.toFixed(0)}${cam.top || camClear ? "" : " · no clear angle"}`, metrics };
 }
 
 export default {
