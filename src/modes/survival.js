@@ -81,6 +81,25 @@
       const verb = actor.isPlayer ? "were" : "was";
       CBZ.pushKill(who + " " + verb + " " + label, actor.isPlayer ? "#ff6b6b" : causeColor(cause), actor.isPlayer);
     }
+    /* ---- BLOOD IS EARNED, NOT ANNOUNCED --------------------------------
+       This used to be an unconditional CBZ.gore() on EVERY death at a flat
+       amount, which made blood the engine's way of saying "someone died".
+       Nine of this island's causes do not break skin at all — a man who FROZE
+       SOLID, DROWNED, CHOKED on ash, took a fatal dose of FALLOUT, was
+       INCINERATED BY LAVA or VAPORIZED by the nuke sprayed exactly as much
+       arterial red as one torn apart by a tornado. So the whole point of gore
+       (this death was VIOLENT) was gone, and the owner's read was simply
+       correct: "it shows for nothing… it shows too easily."
+
+       systems/trauma.js owns the cause table now: it decides whether this
+       death opened a body, and fires the gore that matches its PHYSICS
+       (tear / crush / splat / burst / blunt / boom) rather than one generic
+       burst for all of them. It also carries the beating that got them here,
+       so a survivor you punched six times dies gorier than a clean kill.
+       An unrecognised cause draws no blood — silence is the default now.
+
+       CBZ.CONFIG.SURV_TRAUMA=false restores the original line below verbatim. */
+    if (CBZ.trauma && CBZ.CONFIG.SURV_TRAUMA !== false) { CBZ.trauma.deathGore(actor, label, imp); return; }
     if (CBZ.gore && actor.pos) {
       let dir = null;
       if (imp && (imp.fromX != null || imp.dir)) {
@@ -412,6 +431,10 @@
       CBZ.player.vy = 0; CBZ.player.grounded = true;
       CBZ.player.hp = 100; CBZ.player.dead = false; CBZ.player.ko = 0; CBZ.player.stun = 0;
       CBZ.player._death = null;                 // clear any prior death ragdoll
+      // last match's beatings/falls (and the "this body was charred/frozen, it
+      // never bleeds again" seal) must not follow you into this one. Bots are
+      // built fresh by spawnSurvivorBots, so only the player carries state over.
+      if (CBZ.trauma) CBZ.trauma.reset(playerActor);
       if (CBZ.player._phys) { CBZ.player._phys.air = false; CBZ.player._phys.down = 0; CBZ.player._phys.kx = CBZ.player._phys.kz = 0; }
       surv.spectating = false; if (CBZ.clearSpectate) CBZ.clearSpectate();
       CBZ.playerChar.group.rotation.x = 0; CBZ.playerChar.group.rotation.z = 0;

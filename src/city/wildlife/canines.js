@@ -123,6 +123,45 @@
   });
 
   // ============================================================
+  //  Dog — the shepherd silhouette: tan coat under a black saddle, black
+  //  mask on a wedge muzzle, erect triangular ears, deep chest carried
+  //  higher than the rump, bushy low tail. The farm's own guard; herds
+  //  run bigger than the wolves', because dogs come in numbers.
+  // ============================================================
+  S({
+    id: "dog", name: "Dog", biome: "farmland", rarity: "common",
+    hp: 40, fur: "Dog Pelt", furValue: 20,
+    scale: 0.82, herd: [2, 5], packs: 2, spd: 3.1, danger: 0.45, bite: 12,
+    color: 0x8a6134,
+    build: function (ctx) {
+      const T = ctx.THREE, m = ctx.mat, r = ctx.rng;
+      const g = new T.Group();
+      function box(w, h, d, mm) { return new T.Mesh(CBZ.boxGeom(w, h, d), mm); }
+      const tan = m(0x9a6a38), saddle = m(0x23201c), mask = m(0x2b2620), belly = m(0xc4a274);
+      // deep chest, rump a touch lower — the shepherd's sloped topline
+      const chest = box(0.85, 0.6, 0.52, tan); chest.position.set(0.25, 0.86, 0); g.add(chest);
+      const rear = box(0.7, 0.52, 0.48, tan); rear.position.set(-0.5, 0.8, 0); g.add(rear);
+      const back = box(1.15, 0.2, 0.5, saddle); back.position.set(-0.1, 1.12, 0); g.add(back);
+      const under = box(0.8, 0.2, 0.44, belly); under.position.set(0.1, 0.6, 0); g.add(under);
+      // neck up to a wedge head, black-masked muzzle, PRICKED ears
+      const neck = box(0.34, 0.5, 0.36, tan); neck.position.set(0.72, 1.14, 0); g.add(neck);
+      const head = box(0.44, 0.36, 0.36, tan); head.position.set(0.98, 1.4, 0); g.add(head);
+      const muzz = box(0.34, 0.22, 0.24, mask); muzz.position.set(1.28, 1.32, 0); g.add(muzz);
+      [0.12, -0.12].forEach(function (z) {
+        const ear = box(0.1, 0.22, 0.08, saddle); ear.position.set(0.9, 1.66, z); g.add(ear);
+      });
+      // slender working legs
+      [[0.42, 0.18], [0.42, -0.18], [-0.55, 0.18], [-0.55, -0.18]].forEach(function (o) {
+        const l = box(0.13, 0.62, 0.13, tan); l.position.set(o[0], 0.31, o[1]); g.add(l);
+      });
+      // bushy tail, carried low
+      const tail = box(0.5, 0.14, 0.14, saddle); tail.position.set(-0.95, 0.72, 0); tail.rotation.z = 0.5; g.add(tail);
+      g.rotation.y = (r() - 0.5) * 0.1;
+      return g;
+    },
+  });
+
+  // ============================================================
   //  Wild Boar — compact bristly hog, dark brown-black coat, muscular
   //  HUMPED shoulders rising above a low-carried wedge head, long flat
   //  rooting snout, small upward-curving ivory TUSKS, short stout legs,

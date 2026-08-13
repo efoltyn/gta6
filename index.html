@@ -669,7 +669,7 @@
 <script src="src/systems/reality.js?v=support1"></script>
 <script src="src/systems/npcgrid.js?v=scale2"></script>
 <script src="src/systems/camera.js?v=norecen1"></script>
-<script src="src/systems/physics.js?v=seamount1"></script>
+<script src="src/systems/physics.js?v=trauma2"></script>
 <!-- THE MOVING-PLATFORM PRIMITIVE. Nothing in this engine could carry a
      standing actor on a surface that moves — 30+ CBZ.platforms sites, none
      re-centring on a moving parent. CBZ.movingPlatform(parent, spec) carries
@@ -709,7 +709,7 @@
 <script src="src/systems/reactions.js?v=prisonhit1"></script>
 <script src="src/systems/facial.js?v=glance1"></script>
 <script src="src/systems/ambient.js"></script>
-<script src="src/systems/weather.js?v=annulus1"></script>
+<script src="src/systems/weather.js?v=snowbury1"></script>
 <script src="src/systems/compass.js"></script>
 <script src="src/systems/minimap.js?v=route1"></script>
 <script src="src/systems/dashboard.js?v=ranks1"></script>
@@ -757,10 +757,10 @@
      page still runs; it just looks like an RPG again. Needs only config.js +
      scene; it wires itself to the bus lazily, in any script order. -->
 <script src="src/systems/lightningfx.js?v=bolt1"></script>
-<script src="src/world/disaster_arena.js?v=tsuwater1"></script>
-<script src="src/systems/grapple.js?v=intact1"></script>
-<script src="src/entities/survivorbot.js?v=nozone1"></script>
-<script src="src/modes/survival.js?v=nozone1"></script>
+<script src="src/world/disaster_arena.js?v=snowbury1"></script>
+<script src="src/systems/grapple.js?v=trauma2"></script>
+<script src="src/entities/survivorbot.js?v=trauma2"></script>
+<script src="src/modes/survival.js?v=trauma2"></script>
 <!-- GUN GAME borrows worlds it never builds: the prison (escape), the disaster
      island (survival). Loads AFTER both so their builders exist. -->
 <script src="src/modes/gungame.js?v=gg1"></script>
@@ -923,10 +923,12 @@
 <!-- 4d-4. WILDLIFE + HUNTING + DOGS. The bestiary (defineSpecies) loads FIRST,
      then every biome batch of species, then the hunting engine and the dog
      companion system (both self-register as high-order landmasses). -->
+<script src="src/city/wildlife_rig.js?v=beasts1"></script>
 <script src="src/city/wildlife_species.js?v=attach1"></script>
 <script src="src/city/wildlife/forest_deer.js?v=attach1"></script>
 <script src="src/city/wildlife/bears.js?v=attach1"></script>
-<script src="src/city/wildlife/canines.js?v=attach1"></script>
+<script src="src/city/wildlife/canines.js?v=beasts1"></script>
+<script src="src/city/wildlife/apes.js?v=beasts1"></script>
 <script src="src/city/wildlife/bigcats.js?v=attach1"></script>
 <script src="src/city/wildlife/megafauna.js?v=attach1"></script>
 <script src="src/city/wildlife/farm.js?v=attach1"></script>
@@ -1347,8 +1349,17 @@
 
 <!-- cinematic death gore — shared by both games; loads before loop.js so its
      always-updater is in the sort -->
-<script src="src/systems/gore.js?v=bloodwarm1w9"></script>
+<script src="src/systems/gore.js?v=snowbury1"></script>
 <script src="src/systems/wounds.js?v=soak4w9"></script>
+<!-- BLOOD IS EARNED — the disaster island's trauma ledger + cause table.
+     Owner-filmed: gore fired on EVERY survival death (a man who FROZE SOLID
+     sprayed arterial red) and never for the violent, physical, player-caused
+     things — beatings, long falls, being driven into a wall. This decides WHEN
+     blood is warranted and WHICH gore the death's physics calls for; it draws
+     nothing itself. After gore.js + wounds.js (routes through CBZ.goreImpact,
+     CBZ.gore and CBZ.bodyWound), before core/loop.js so its clock makes the
+     boot sort. Consumers: grapple.js, physics.js, modes/survival.js. -->
+<script src="src/systems/trauma.js?v=trauma2"></script>
 <!-- PREDATOR GRAMMAR — the shared answer to "a thing hunts you and takes you":
      predatorHunt (stalking FSM w/ menace gauge), predatorSeize (the grab),
      predatorDread (tension bus). Medium-agnostic, so a shark and a bear run the
