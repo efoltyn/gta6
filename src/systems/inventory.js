@@ -128,6 +128,9 @@
     // Same last-resort rule for the duty flashlight: normal play renders the
     // canonical 3D model; this only covers a failed/offscreen WebGL context.
     torch: "<path d='M3 9h11v6H3z'/><path d='M14 7l7-2v14l-7-2z'/><path d='M5.5 9V6.5h5V9'/><path d='M5.5 15v2.5h5V15'/>",
+    // Last-resort demolition charge (same rule): body, three taped demo
+    // sticks, the LED. Normal play renders the real brick via CBZ.c4Thumbnail.
+    c4: "<rect x='3.4' y='11' width='17.2' height='7.6' rx='1.2'/><rect x='5.6' y='6.2' width='3.6' height='4.8' rx='.8'/><rect x='10.2' y='6.2' width='3.6' height='4.8' rx='.8'/><rect x='14.8' y='6.2' width='3.6' height='4.8' rx='.8'/><path d='M3.4 14.8h17.2' opacity='.5'/><circle cx='17.8' cy='16.4' r='1.1' fill='currentColor' stroke='none'/>",
     wood: "<rect x='2.6' y='8.6' width='18.8' height='6.8' rx='3.4'/><ellipse cx='5.4' cy='12' rx='1.7' ry='3.4'/><ellipse cx='5.4' cy='12' rx='.6' ry='1.3'/><path d='M12 8.6v6.8' opacity='.45'/>",
     stone: "<path d='M3.6 15.6l3.2-8.2 6.2-3 7.4 5.2-2.2 8.4H6z'/><path d='M6.8 7.4l4.2 5.2 9-2.8M11 12.6l-1 5.4'/>",
     scrap: "<path d='M3.6 6.2l6 2.2 4-4.2 6.4 3-2 6.2 3 5.4-8.2-1-5.2 3.2-2.2-6.2z'/>",
@@ -158,7 +161,7 @@
     "Stolen Wallet": "wallet", "Cash Roll": "cash", "Gold Tooth": "tooth",
     "Gold Chain": "chain", "Luxury Watch": "watch",
     // --- keys / weapon (Gun renders as the MESH; this is its fallback) ---
-    "Gun-Room Key": "key", "Gun": "gun", "Guard Torch": "torch",
+    "Gun-Room Key": "key", "Gun": "gun", "Guard Torch": "torch", "C4 Charge": "c4",
     // B7: resource/tool catalog parity (systems/economy.js) — see city/hud.js
     // + city/charpanel.js for the city-mode equivalents.
     "Wood": "wood", "Stone": "stone", "Scrap": "scrap", "Hatchet": "hatchet", "Pickaxe": "pickaxe",
@@ -226,6 +229,20 @@
       // This is the same model factory used by the guard hand and death drop.
       // If the thumbnail GL context is unavailable, fall through to ART.torch;
       // a torch must still never masquerade as the generic unknown-item dot.
+      if (src) return "<img class='islot-img' src='" + src + "' alt=''>";
+    }
+    if (name === "C4 Charge") {
+      // THE SAME PHOTOGRAPH THE CITY BAG SHOWS: city/itemicons.js classifies
+      // the c4 row (registered by explosives.js) as kind "bomb" and shoots
+      // the real demolition-charge asset under the icon rig's lamps. A
+      // weapon_thumbnails side-shot of the planted mesh was tried first and
+      // washed out at slot size (MEASURED — pale slab, no silhouette); the
+      // icon rig exists for exactly this, and borrowing it keeps one C4 face
+      // across both bags. GL miss falls through to ART.c4, never the dot.
+      let src = "";
+      try {
+        if (CBZ.itemIcon) src = CBZ.itemIcon(name, (CBZ.cityEcon && CBZ.cityEcon.ITEMS && CBZ.cityEcon.ITEMS[name]) || { c4: true, tag: "throwable" });
+      } catch (e) { src = ""; }
       if (src) return "<img class='islot-img' src='" + src + "' alt=''>";
     }
     const gid = gunIdFor(name);
