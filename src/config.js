@@ -1289,6 +1289,26 @@
   // corpse still flows through the normal kill bus/killfeed. Flip false → a
   // close shotgun headshot keeps the head on (intact ragdoll + wound), revert.
   if (CBZ.CONFIG.GORE_DECAP_SHOTGUN == null) CBZ.CONFIG.GORE_DECAP_SHOTGUN = true;
+  // GORE_REALISM_V2 (systems/gore.js) — OWNER, on the PRISON shootout: "remove
+  // the cubes of blood, it looks so unrealistic." The city already had this
+  // pass (its own filmed complaint: "a shootout buried the floor in permanent
+  // clothing-colored boxes"); escape/survival never got it, and the geometry
+  // underneath was wrong in EVERY mode. Three separate things were cubes:
+  //   1. GIBS — 5-7 BoxGeometry(1,1,1) chunks per kill, scaled 0.2-0.5, tinted
+  //      with the victim's skin/shirt colours. Literal 20-50 cm coloured dice.
+  //   2. DROPLETS — SphereGeometry(1,5,4) is radius ONE, so `size` 0.07-0.18
+  //      put 14-36 cm faceted balls in the air and called them blood.
+  //   3. MIST — SphereGeometry(1,4,3) is barely a polyhedron; at 50% opaque and
+  //      growing 3.2x it was a swarm of 20-70 cm lit lumps, not an aerosol.
+  // ON (default), in every mode: a gunshot throws NO generic chunks (an
+  // explosion or a real sever still does, and those now use torn irregular
+  // silhouettes instead of boxes); droplets are 4-10 cm and STRETCH along their
+  // own flight vector so they read as moving blood; aerosol is a soft
+  // camera-facing puff on the existing feathered blood texture; a landing
+  // droplet stamps a hand-sized splash instead of a 1.6 m blot; and whatever
+  // does fly settles, fades and clears the floor instead of lying there.
+  // OFF → the exact pre-pass behaviour in all three layers, one line.
+  if (CBZ.CONFIG.GORE_REALISM_V2 == null) CBZ.CONFIG.GORE_REALISM_V2 = true;
   // CHAR_BELT_V2 (entities/character.js): the 3D belt band was a fixed
   // boxGeom(0.96,0.16,0.54) that ignored the `fem` build gate — on a fem torso
   // (0.78 wide) the 0.96 band flared 0.09/side into a clown ring, and even on

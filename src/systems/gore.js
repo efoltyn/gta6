@@ -47,9 +47,17 @@
    swimmer and a boat crash all bleed correctly with ZERO caller changes. See
    the WATER MEDIUM block below for the colour science and the chum seam.
 
+   NOTHING HERE IS A CUBE (CBZ.CONFIG.GORE_REALISM_V2, default on — see the
+   block at the top of the IIFE): a gunshot throws no generic chunks in any
+   mode, the chunks an explosion DOES throw are torn irregular solids, droplets
+   are centimetres and stretch along their own velocity, aerosol is a soft
+   camera-facing puff, and a drop's landing mark is a splash rather than a
+   metre-and-a-half blot. One flag reverts all of it.
+
    PRESERVED public API: CBZ.gore(x,y,z,opts), CBZ.clearGore().
    ADDED public API: CBZ.goreMedium(x,y,z), CBZ.goreBloom(x,y,z,opts),
-   CBZ.goreSlick(x,z,amount), CBZ.goreChum/goreChumStop/goreChumList.
+   CBZ.goreSlick(x,z,amount), CBZ.goreChum/goreChumStop/goreChumList,
+   CBZ.goreAudit().
 
    opts: { dir:{x,z}, amount:0.5..2, skin, cloth, slowmo:secs,
            player:bool, sfx:bool|string, head:bool, explosion:bool,
@@ -72,9 +80,73 @@
   // and despawns over a few seconds so the battlefield clears. Jail/survival
   // gore stays byte-identical (this flag is read live at every spawn site).
   function cityMode() { return !!(CBZ.game && CBZ.game.mode === "city"); }
+
+  // ---- THE BODY IS NOT MADE OF CUBES (CBZ.CONFIG.GORE_REALISM_V2) -----------
+  // The city gate above fixed the city's DEBRIS. It never touched the geometry,
+  // and it never reached the prison — where the owner filmed the same shootout
+  // and said the same thing: "remove the cubes of blood, it looks so
+  // unrealistic." He is describing three different meshes, all of them cubes or
+  // near-cubes, and only the first one was ever about the mode:
+  //   GIB     BoxGeometry(1,1,1) at scale 0.2-0.5 = a 20-50 cm die, tinted with
+  //           the victim's shirt colour, 5-7 of them per gunshot.
+  //   DROPLET SphereGeometry(1,5,4) — radius ONE. `size` 0.07-0.18 is therefore
+  //           a 14-36 cm faceted ball. A real drop is millimetres; even a
+  //           stylised one is a few centimetres, and it is not a sphere in
+  //           flight, it is a streak pointing where it is going.
+  //   MIST    SphereGeometry(1,4,3) is 12 triangles. At opacity 0.5, lit, and
+  //           growing 3.2x, an "aerosol" was a cloud of hard-edged lumps.
+  // So the fix is two laws, both live-read so ?cfg_GORE_REALISM_V2=0 reverts
+  // the whole pass in one line:
+  //   realism()  — the LOOK. Torn irregular chunks instead of boxes, droplets
+  //                at real scale stretched along their own velocity, aerosol as
+  //                a soft camera-facing puff on the feathered blood texture,
+  //                and a droplet's landing mark sized like a splash and not
+  //                like a puddle. Mode-blind: the city's blood was the same
+  //                blood, so the city gets it too.
+  //   debrisLaw() — the CITY's death-realism rule, promoted to every mode: a
+  //                bullet DROPS a person (ragdoll.js already leaves an intact
+  //                body), so it throws no generic chunks at all; an explosion
+  //                or an actual sever still does; and anything that does fly
+  //                settles, fades and clears instead of decorating the yard.
+  function realism() { return !CBZ.CONFIG || CBZ.CONFIG.GORE_REALISM_V2 !== false; }
+  function debrisLaw() { return cityMode() || realism(); }
+  // A droplet's authored `size` is read as a sphere RADIUS. DROP_R below (the
+  // island wave) already pulled the call-site magnitudes down for a ROUND drop;
+  // this is the extra factor a STRETCHED one needs, because the same volume of
+  // blood drawn out along its flight has to be thinner across. Composed, the
+  // two land a spray at ~4-10 cm across and 3-6x that long. Keeps every call
+  // site's relative weighting (a stump vent is still finer than an exit spray).
+  const DROP_K = 0.55;
+  // Body-drain pools have the same unit bug as the droplets: spawnSplat's
+  // `grow` is a RADIUS, so the authored 1.87 for an ordinary kill stamped a
+  // 3.7 m lake under one man. Measured against the rig it lies next to, a
+  // bled-out body owns something closer to a metre and a half.
+  const POOL_K = 0.42;
+  // Aerosol: a soft quad hides nothing behind it, so it needs a FRACTION of the
+  // reach a hard lump could get away with. `size` is still the authored sphere
+  // radius; these turn a 7-puff burst into a knee-high haze at the wound rather
+  // than a four-metre pink cloud over the yard.
+  const MIST_K = 2.4, MIST_A = 0.24;
   function survMode() { return !!(CBZ.game && CBZ.game.mode === "survival"); }
   const GRAV = 24;
+  // DECALS ARE UNLIT, AND THE PRISON FLOOR IS WHITE. A pool/wall/streak decal
+  // is MeshBasicMaterial: no light touches it, and the renderer's sRGB output
+  // lifts a dark hex a long way (0x5e070b measured out at (208,41,78) on the
+  // yard — cherry, with a pink cast, because that hex's BLUE outranks its
+  // green). Blood on a pale floor is a dark red-brown, so the decal palette
+  // gets its own darker, blue-suppressed rungs. Flying droplets are NOT in
+  // here: those are lit meshes seen against sky and wall, and they should stay
+  // bright — arterial blood in the air really is.
   const BLOOD = 0x8a0b10, BLOOD_D = 0x5e070b, BLOOD_BRT = 0xb01218;
+  // see the DECAL note above: same three rungs, re-authored for an unlit decal
+  // lying on a bright floor. Unknown colours pass through untouched.
+  const DECAL_C = { 0x5e070b: 0x300203, 0x8a0b10: 0x420305, 0xb01218: 0x550408 };
+  function decalCol(c) { return realism() ? (DECAL_C[c] != null ? DECAL_C[c] : c) : c; }
+  // Droplets stay LIT and stay bright — they have to be findable at 20 m — but
+  // the old rungs came out of the sRGB pass as pillar-box red. One stop down is
+  // still legible against sky and concrete and stops reading as cherry candy.
+  const DROP_C = { 0x5e070b: 0x4b060a, 0x8a0b10: 0x6e090d, 0xb01218: 0x8c0e13 };
+  function dropCol(c) { return realism() ? (DROP_C[c] != null ? DROP_C[c] : c) : c; }
   const BONE = 0xe6ddc8, BONE_D = 0xcfc3ad, TOOTH = 0xf2ead8;
   const bits = [];     // flying gibs + blood droplets + mist
   const splats = [];   // ground blood pools + tire-smear streaks
@@ -126,7 +198,7 @@
   function rm(m) { if (!m) return; if (m.parent) m.parent.remove(m); if (m.material && !m.material._shared && m.material.dispose) m.material.dispose(); }
 
   // ---- shared geometry (one allocation, reused by every bit/decal) ----
-  const G_DROP = new THREE.SphereGeometry(1, 5, 4);   // blood droplet (scaled per-bit)
+  const G_DROP = new THREE.SphereGeometry(1, 7, 5);   // blood droplet (scaled + stretched per-bit)
   /* A DROPLET IS A DROPLET, NOT A PEBBLE (owner, on the blood blocks). G_DROP
      is a 5x4 sphere — deliberately, it is cheap — but a 5x4 sphere is a
      FACETED POLYHEDRON, and the spray was scaling it to a 0.07-0.18 radius:
@@ -140,9 +212,48 @@
   function DROP_R(k) {
     return (0.038 + Math.random() * 0.052) * (k || 1) * (+CBZ.CONFIG.GORE_DROP_SCALE || 1);
   }
-  const G_MIST = new THREE.SphereGeometry(1, 4, 3);   // fine mist puff (low poly)
-  const G_GIB = new THREE.BoxGeometry(1, 1, 1);       // chunky gib (scaled per-bit)
-  const G_PLANE = new THREE.PlaneGeometry(1, 1);      // smears + drip streaks
+  const G_MIST = new THREE.SphereGeometry(1, 4, 3);   // legacy aerosol lump (realism OFF)
+  const G_GIB = new THREE.BoxGeometry(1, 1, 1);       // legacy chunk (realism OFF) + every stump cap
+  const G_PLANE = new THREE.PlaneGeometry(1, 1);      // smears, drip streaks, aerosol billboards
+  // TORN FLESH, NOT DICE: three irregular chunk silhouettes baked ONCE at
+  // startup and picked at random per piece, so no two chunks share an outline
+  // and none of them has a flat square face to catch the light like a box.
+  //
+  // The jitter is a function of the vertex's DIRECTION, not its index. r128
+  // builds every PolyhedronGeometry non-indexed — each triangle carries its own
+  // copy of its three corners — so index-keyed jitter would tear the solid open
+  // along every edge. Same direction in, same displacement out, seams closed by
+  // construction. (blobGeo() below plays the identical trick in 2D on the
+  // pools, for the identical reason.)
+  function chunkGeo() {
+    const g = new THREE.IcosahedronGeometry(0.5, 0);
+    const pos = g.attributes.position;
+    const p1 = Math.random() * 6.28, p2 = Math.random() * 6.28, p3 = Math.random() * 6.28;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+      const l = Math.hypot(x, y, z) || 1;
+      const nx = x / l, ny = y / l, nz = z / l;
+      const k = 1 + 0.30 * Math.sin(nx * 5.1 + p1) + 0.24 * Math.sin(ny * 6.3 + p2) + 0.19 * Math.sin(nz * 4.4 + p3);
+      pos.setXYZ(i, nx * 0.5 * k, ny * 0.5 * k, nz * 0.5 * k);
+    }
+    pos.needsUpdate = true;
+    g.computeVertexNormals();
+    return g;
+  }
+  const G_CHUNK = [chunkGeo(), chunkGeo(), chunkGeo()];
+  function chunk() { return G_CHUNK[(Math.random() * 3) | 0]; }
+
+  // A DROPLET POINTS WHERE IT IS GOING. One quaternion off the velocity vector
+  // turns a stretched sphere into a streak of blood in flight — the single
+  // cheapest thing that stops a spray reading as a handful of thrown beads.
+  const _UP = new THREE.Vector3(0, 1, 0), _aim = new THREE.Vector3();
+  function aimDrop(m, vx, vy, vz) {
+    _aim.set(vx, vy, vz);
+    const l = _aim.length();
+    if (l < 0.001) return;
+    _aim.multiplyScalar(1 / l);
+    m.quaternion.setFromUnitVectors(_UP, _aim);
+  }
   // ground pools + wall splats: IRREGULAR blob outlines — a circle with
   // per-vertex radial jitter (sum of randomly-phased sines) baked ONCE at
   // startup. 3 shared geometries, randomly picked + spun + stretched per
@@ -564,7 +675,10 @@
   // stop — so a wet gib puffs where it settles instead.
   function landBleed(b, m) {
     if (b.wet) CBZ.goreBloom(m.position.x, m.position.y, m.position.z, { amount: 0.4 });
-    else spawnSplat(m.position.x, m.position.z, 0.4 + Math.random() * 0.4, BLOOD_D, false);
+    // a chunk bleeds where it stops, but `grow` is a RADIUS: the authored
+    // 0.4-0.8 was a 1.6 m pool under a piece of forearm.
+    else spawnSplat(m.position.x, m.position.z,
+      realism() ? 0.16 + Math.random() * 0.16 : 0.4 + Math.random() * 0.4, BLOOD_D, false);
   }
 
   // ---- CHUM: a sustained bleed source, and the seam the shark AI reads ------
@@ -647,10 +761,12 @@
       puffFromBit(x, y, z, vx, vy, vz, size, kind === "mist");
       return null;
     }
-    // CITY: standing gibs are FADING debris now, not permanent evidence, so the
-    // pool can be far smaller — a shootout can never leave a huge persistent
-    // pile. Jail/survival keep the original "true world" 520-gib budget.
-    const city = cityMode();
+    // Standing gibs are FADING debris now, not permanent evidence, so the pool
+    // can be far smaller — a shootout can never leave a huge persistent pile.
+    // With the debris law off (pre-pass revert) jail/survival keep the original
+    // "true world" 520-gib budget.
+    const city = debrisLaw();
+    const real = realism();
     // pool caps now ride the quality tier — read LIVE per spawn (the slider can
     // move mid-run); fallbacks = the old constants for qScale-less test runs.
     const cap = kind === "mist" ? (CBZ.qScale ? CBZ.qScale(310, 1100) : 620)
@@ -664,37 +780,67 @@
       else return null;
     }
     let geo, mat;
-    if (kind === "gib") { geo = G_GIB; mat = lambert(color); }
-    else if (kind === "mist") { geo = G_MIST; mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5, depthWrite: false }); }
-    else { geo = G_DROP; mat = lambert(color); }
+    if (kind === "gib") { geo = real ? chunk() : G_GIB; mat = lambert(color); }
+    else if (kind === "mist") {
+      // AEROSOL IS NOT A SOLID. A camera-facing quad on the same feathered
+      // blood texture the pools use has no silhouette to give itself away, so
+      // it can be bigger AND fainter than the old lump and still read as a
+      // hanging cloud instead of a floating polyhedron.
+      geo = real ? G_PLANE : G_MIST;
+      mat = new THREE.MeshBasicMaterial({
+        color, map: real ? bloodTexture() : null,
+        transparent: true, opacity: real ? MIST_A : 0.5, depthWrite: false,
+      });
+    }
+    else { geo = G_DROP; mat = lambert(dropCol(color)); }
     const m = new THREE.Mesh(geo, mat);
-    // gibs are boxy with random proportions; drops/mist are scaled spheres
-    let hh = 0.06;
+    // gibs are lumpy with random proportions; drops stretch along their flight;
+    // aerosol is a flat billboard sized off the same authored number.
+    let hh = 0.06, dropR = 0, billScale = 0;
     if (kind === "gib") {
       if (city) {
-        // CITY rest-height: track the box's half-Y so its BOTTOM rests on the road.
+        // rest-height: track the piece's half-Y so its BOTTOM rests on the road.
         const sy = size * (0.5 + Math.random());
         m.scale.set(size, sy, size * (0.7 + Math.random() * 0.6));
         hh = sy * 0.5;
       } else {
-        // jail/survival: original boxy scale, original 0.06 rest radius.
+        // pre-pass jail/survival: original boxy scale, original 0.06 rest radius.
         m.scale.set(size, size * (0.5 + Math.random()), size * (0.7 + Math.random() * 0.6));
       }
+    } else if (real && kind === "blood") {
+      // ~4-10 cm across, 2-4x that along the shot line. The stretch is what
+      // sells it: a sphere in the air is a bead, a streak is blood moving.
+      // Don't overdo it — a UV sphere's POLES are points, and the stretch axis
+      // runs through them, so a long drop sharpens into a dart. 2-4x reads as
+      // motion; past that it reads as a red arrow. (The extra ring on G_DROP is
+      // for the same reason: it rounds the two tips the stretch pulls on.)
+      dropR = size * DROP_K;
+      m.scale.set(dropR, dropR * (2.0 + Math.random() * 2.0), dropR);
+      aimDrop(m, vx, vy, vz);
+    } else if (real && kind === "mist") {
+      billScale = size * MIST_K;
+      m.scale.setScalar(billScale);
     } else m.scale.setScalar(size);
     m.position.set(x, y, z); m.castShadow = false; m.renderOrder = kind === "mist" ? 5 : 0;
     scene().add(m);
     const rec = {
       m, vx, vy, vz, kind, mat: kind === "mist" ? mat : null, mistFade: 0,
       sx: (Math.random() - 0.5) * 18, sy: (Math.random() - 0.5) * 18, sz: (Math.random() - 0.5) * 18,
-      landed: false, bled: false, baseScale: size, rad: kind === "gib" ? hh : 0.06,
+      landed: false, bled: false,
+      baseScale: billScale || size,
+      rad: kind === "gib" ? hh : (dropR ? Math.max(0.015, dropR) : 0.06),
+      // a stretched droplet is steered by its velocity every frame instead of
+      // tumbling on three random axes; a billboard puff faces the lens.
+      drop: !!dropR, bill: !!billScale,
       // sunk in water at spawn → the updater sinks it slowly with drag instead
       // of dropping it like a rock, and it blooms where it settles instead of
       // stamping a ground pool on the seabed. Always false on land.
       wet: wetEvent,
-      // CITY: a landed gib is short-lived debris that SHRINKS/SINKS to nothing
-      // (see the updater) so the ground clears after combat — not a permanent
-      // colored cube. Jail/survival gibs PERSIST (true world model — evidence
-      // you walk back past). Blood/mist are brief in every mode.
+      // a landed chunk is short-lived debris that SHRINKS/SINKS to nothing (see
+      // the updater) so the ground clears after combat — not a permanent
+      // coloured lump lying in the yard. With the debris law off, jail/survival
+      // chunks PERSIST again (the original "true world" model). Blood/mist are
+      // brief in every mode.
       fade: kind === "gib" && city,
       // the coverage already down when this piece was thrown, + how much NEW
       // snow it takes to vanish under (see the SNOW BURIES BLOOD block)
@@ -709,9 +855,9 @@
   }
 
   // recycle the oldest pool that is FAR from the lens (never one underfoot).
-  // CITY-only behaviour — jail/survival keep the original drop-the-oldest shift.
+  // With the debris law off, jail/survival keep the original drop-the-oldest shift.
   function recycleFarSplat() {
-    if (!cityMode()) { freeSlick(splats.shift()); return; }
+    if (!debrisLaw()) { freeSlick(splats.shift()); return; }
     for (let i = 0; i < splats.length; i++) {
       if (dist2Cam(splats[i].m.position.x, splats[i].m.position.z) > 50 * 50) { freeSlick(splats.splice(i, 1)[0]); return; }
     }
@@ -796,7 +942,7 @@
     const steep = !!(s && s.grade > STEEP);
     const g = steep ? grow * (0.42 + 0.28 * (STEEP / s.grade)) : grow;
     const m = new THREE.Mesh(blob(),
-      new THREE.MeshBasicMaterial({ color: color || BLOOD_D, map: bloodTexture(), transparent: true, opacity: 0, depthWrite: false }));
+      new THREE.MeshBasicMaterial({ color: decalCol(color || BLOOD_D), map: bloodTexture(), transparent: true, opacity: 0, depthWrite: false }));
     seatDecal(m, x, z, Math.random() * 6.28, 0.04 + Math.random() * 0.02, s);
     m.renderOrder = 3; m.scale.set(0.1, 0.1, 1);
     scene().add(m);
@@ -833,7 +979,7 @@
     if (splats.length > (CBZ.qScale ? CBZ.qScale(85, 300) : 170)) recycleFarSplat();
     const s = slopeOn() ? groundGrad(x0, z0) : null;
     const m = new THREE.Mesh(G_PLANE,
-      new THREE.MeshBasicMaterial({ color: BLOOD_D, map: bloodTexture(), transparent: true, opacity: 0, depthWrite: false }));
+      new THREE.MeshBasicMaterial({ color: decalCol(BLOOD_D), map: bloodTexture(), transparent: true, opacity: 0, depthWrite: false }));
     seatDecal(m, x0, z0, Math.atan2(-dx, -dz), 0.045, s);   // local +y axis → world (dx,dz)
     m.renderOrder = 3; m.scale.set(0.55, 0.1, 1);
     scene().add(m);
@@ -926,7 +1072,7 @@
     if (!best) return;
     const hx = x + dx * best.t, hz = z + dz * best.t;
     const m = new THREE.Mesh(blob(),
-      new THREE.MeshBasicMaterial({ color: BLOOD_D, map: bloodTexture(), transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
+      new THREE.MeshBasicMaterial({ color: decalCol(BLOOD_D), map: bloodTexture(), transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
     let nx = 0, nz = 0, off = 0.03;
     if (best.face === "xmin") { nx = -1; } else if (best.face === "xmax") { nx = 1; }
     else if (best.face === "zmin") { nz = -1; } else { nz = 1; }
@@ -945,7 +1091,7 @@
     const drips = Math.min(3, 1 + Math.round(amt));
     for (let d = 0; d < drips; d++) {
       const dm = new THREE.Mesh(G_PLANE,
-        new THREE.MeshBasicMaterial({ color: BLOOD_D, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
+        new THREE.MeshBasicMaterial({ color: decalCol(BLOOD_D), transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
       dm.position.copy(m.position); dm.rotation.copy(m.rotation);
       dm.position.x += nx ? 0 : (Math.random() - 0.5) * sz * 1.3;
       dm.position.z += nx ? (Math.random() - 0.5) * sz * 1.3 : 0;
@@ -1049,11 +1195,50 @@
     }
   }
 
+  // ---- WHERE THE BODY ACTUALLY LIES ----------------------------------------
+  // The kill pool is stamped where the ROUND landed, but a ragdoll slides a
+  // metre or two before it stops — so a corpse routinely ends up sitting NEXT
+  // TO its own blood, which is the other half of "it looks fake". A second,
+  // later pool seated under wherever the body came to rest ties the scene back
+  // into one event (and it is what actually happens: a man bleeds where he was
+  // hit, then keeps bleeding where he falls).
+  //
+  // Deliberately actor-LESS: gore() is positional and only city kills carry a
+  // victim through the kill tap, so this finds the nearest corpse itself. Every
+  // mode's actor list publishes a position, so no caller changes.
+  const CORPSE_LISTS = ["guards", "npcs", "cityPeds", "cityCops", "bots"];
+  const _rp = { x: 0, z: 0 };
+  function corpsePos(a, out) {
+    if (!a || !a.dead || a.culled) return null;
+    if (a.group && a.group.position) { out.x = a.group.position.x; out.z = a.group.position.z; return out; }
+    if (a.pos) { out.x = a.pos.x; out.z = a.pos.z; return out; }
+    return null;
+  }
+  function restingPool(x, z, amt) {
+    if (!realism()) return;
+    after(1.5, function () {
+      let bx = 0, bz = 0, best = 3.6 * 3.6, found = false;
+      for (let L = 0; L < CORPSE_LISTS.length; L++) {
+        const list = CBZ[CORPSE_LISTS[L]];
+        if (!list || !list.length) continue;
+        for (let i = 0; i < list.length; i++) {
+          const p = corpsePos(list[i], _rp);
+          if (!p) continue;
+          const dx = p.x - x, dz = p.z - z, d2 = dx * dx + dz * dz;
+          if (d2 < best) { best = d2; bx = p.x; bz = p.z; found = true; }
+        }
+      }
+      // only worth a second decal if the body genuinely travelled away from it
+      if (found && best > 0.18) spawnSplat(bx, bz, (0.55 + amt * 0.3) * POOL_K * 1.35, BLOOD_D, true);
+    });
+  }
+
   // a beaten body doesn't gush — it BLEEDS OUT: the pool arrives in waves a
   // couple of seconds after the body drops, spreading under wherever it lies.
   function delayedBleedPool(ped) {
-    after(1.5, function () { if (ped && ped.pos && !ped.culled) spawnSplat(ped.pos.x, ped.pos.z, 0.9, BLOOD_D, true); });
-    after(3.3, function () { if (ped && ped.pos && !ped.culled) spawnSplat(ped.pos.x, ped.pos.z, 1.5, BLOOD_D, true); });
+    const pk = realism() ? POOL_K : 1;
+    after(1.5, function () { if (ped && ped.pos && !ped.culled) spawnSplat(ped.pos.x, ped.pos.z, 0.9 * pk, BLOOD_D, true); });
+    after(3.3, function () { if (ped && ped.pos && !ped.culled) spawnSplat(ped.pos.x, ped.pos.z, 1.5 * pk, BLOOD_D, true); });
   }
 
   // ---- BLADE KILL: 2-3 timed ARTERIAL spurts as the heart dies ----------------
@@ -1123,13 +1308,17 @@
   let stainT = 0;
   function stainRoster(list) {
     if (!list) return;
+    // "a real kill pool, not a droplet splash" — the threshold has to ride
+    // POOL_K with the pools it is filtering, or the realism pass silently
+    // stops every corpse in the game from ever soaking dark.
+    const kmin = 0.85 * (realism() ? POOL_K : 1);
     for (let i = 0; i < list.length; i++) {
       const p = list[i];
       if (!p || !p.dead || p._goreStained || p.culled || !p.pos || (p.deadT || 0) < 2.5) continue;
       if (dist2Cam(p.pos.x, p.pos.z) > 45 * 45) continue;     // only stain where it can be seen
       for (let j = 0; j < splats.length; j++) {
         const s = splats[j];
-        if (s.streak || s.water || s.max < 0.85 || s.t < 1.2) continue;  // settled kill-pools only
+        if (s.streak || s.water || s.max < kmin || s.t < 1.2) continue;  // settled kill-pools only
         const dx = s.m.position.x - p.pos.x, dz = s.m.position.z - p.pos.z;
         if (dx * dx + dz * dz < 1.8) { stainCorpse(p); break; }
       }
@@ -1398,7 +1587,7 @@
     // instant the part is restored/recycled; it never creates free-floating FX.
     // an open joint pumps wherever it happens — the island tears limbs off now
     // too (opts.limbs), and a stump that just sits there is the tell.
-    if (stump && (cityMode() || survMode())) {
+    if (stump && (debrisLaw() || survMode())) {
       [0.38, 0.92].forEach(function (delay, pulse) {
         after(delay, function () {
           if (!stump.parent || part.visible !== false || (actor && actor.culled)) return;
@@ -1447,11 +1636,11 @@
       else { dx /= dl; dz /= dl; }
       const sp = opts.boom ? 4 + Math.random() * 4.5 : 4.5 + Math.random() * 3;
       const up = key === "head" ? 4.5 + Math.random() * 2.5 : (opts.boom ? 5 + Math.random() * 4 : 3 + Math.random() * 2);
-      // CITY: even a severed limb clears eventually so a blast doesn't leave a
+      // Even a severed limb clears eventually so a blast doesn't leave a
       // permanent limb field — it lingers a good while (real body part, not a
-      // generic cube), then sinks/shrinks away. Jail/survival keep the ORIGINAL
-      // short limb life (byte-identical) and no fade.
-      const cityLimb = cityMode();
+      // generic cube), then sinks/shrinks away. Flag off → the ORIGINAL short
+      // jail/survival limb life and no fade.
+      const cityLimb = debrisLaw();
       bits.push({
         m: fly, vx: dx * sp + (Math.random() - 0.5) * 1.5, vy: up, vz: dz * sp + (Math.random() - 0.5) * 1.5,
         kind: "gib", mat: null, mistFade: 0,
@@ -1732,7 +1921,9 @@
     // push so the spray is a LINE on the ground, not a blot.
     const spread = boom ? 1.0 : (head ? 0.42 : 0.6);
     const fwd = boom ? 1.5 : (head ? 9 : 6.5);  // forward push along dir (exit wound)
-    const nb = Math.round((head ? 24 : 16) * amt * lod);
+    // finer drops need MORE of them to read as one wet event rather than as a
+    // handful of thrown objects — the old count was sized for grapefruits.
+    const nb = Math.round((head ? 24 : 16) * (realism() ? 1.35 : 1) * amt * lod);
     for (let i = 0; i < nb; i++) {
       const side = (Math.random() - 0.5) * 2;          // -1..1 across the fan
       const fanX = dx * (fwd + Math.random() * 6) + px * side * spread * (2.5 + Math.random() * 3.5);
@@ -1765,7 +1956,7 @@
     }
 
     // --- LAYER 3: chunky GIBS — limbs/torso, heavier, tumble then settle ------
-    // CITY REALISM: a normal gunshot DROPS the person (ragdoll.js leaves an
+    // THE DEBRIS LAW: a normal gunshot DROPS the person (ragdoll.js leaves an
     // intact body) — it does not blow them into clothing cubes. So reserve the
     // multi-gib spray for EXPLOSIONS. Actual close-shotgun severing launches the
     // cloned body part above; an ordinary kill gets ZERO generic flying boxes.
@@ -1774,7 +1965,12 @@
     // systems/trauma.js says that a BEATING throws no body chunks while a
     // tornado throws more than a blast does. Absent → stock, byte for byte.
     let ng = Math.round((big ? 7 : 5) * amt * lod * (opts.gib == null ? 1 : Math.max(0, opts.gib)));
-    if (cityMode()) ng = boom ? Math.round(6 * amt * lod) : 0;
+    // THE PRISON GETS THE SAME ANSWER (owner, on the escape shootout: "remove
+    // the cubes of blood"). debrisLaw() is cityMode() || GORE_REALISM_V2, so the
+    // rule the city and then the island each arrived at separately is now one
+    // rule for every mode; the survMode() line below still stands for a build
+    // that turns the realism flag off.
+    if (debrisLaw()) ng = boom ? Math.round(6 * amt * lod) : 0;
     /* THE DISASTER ISLAND GETS THE CITY'S ANSWER (owner: "I hate the blood
        blocks"). The city deleted these for exactly this complaint a wave ago —
        "a shootout buried the floor in permanent clothing-colored boxes, not
@@ -1785,7 +1981,9 @@
        has had the real thing all along: severBody clones the ACTUAL limb mesh
        off the ACTUAL rig ("Never a generic red cube", its own comment). So the
        island stops throwing boxes and starts taking arms off — see opts.limbs
-       above. Jail/escape is untouched, byte for byte. */
+       above. (Jail/escape used to be exempt here; the owner filmed the prison
+       yard with the same complaint, so debrisLaw() above now covers it too and
+       this line only stands for a build running GORE_REALISM_V2=0.) */
     else if (survMode()) ng = 0;
     // A TORN-OFF PIECE IS NOT CLEAN LAUNDRY (owner-filmed on the island: the
     // hillside after a disaster read as pastel confetti, not as gore). Four of
@@ -1813,8 +2011,10 @@
     // a blunt kill barely pools NOW (the bleed-out arrives in waves, below);
     // everything else drains immediately and forward of the body.
     const pgx = hasDir ? x + dx * 0.4 : x, pgz = hasDir ? z + dz * 0.4 : z;
-    spawnSplat(pgx, pgz, blunt ? 0.45 : (1.1 + amt * 0.9 + (big ? 0.6 : 0)), BLOOD_D, true);
-    if (big) spawnSplat(x - dx * 0.5, z - dz * 0.5, 0.6 + amt * 0.4, BLOOD, true);
+    const pk = realism() ? POOL_K : 1;
+    spawnSplat(pgx, pgz, (blunt ? 0.45 : (1.1 + amt * 0.9 + (big ? 0.6 : 0))) * pk, BLOOD_D, true);
+    if (big) spawnSplat(x - dx * 0.5, z - dz * 0.5, (0.6 + amt * 0.4) * pk, BLOOD, true);
+    if (!blunt) restingPool(pgx, pgz, amt);   // blunt already drains in waves below
 
     // --- LAYER 5: WALL SPLATTER — vertical decal on a surface behind the body -
     // headshots paint the wall INSTANTLY (pre-grown decal) and half-again bigger.
@@ -1864,7 +2064,8 @@
     }
     let dx = dir ? (+dir.x || 0) : 0, dy = dir ? (+dir.y || 0) : 0, dz = dir ? (+dir.z || 0) : 0;
     const dl = Math.hypot(dx, dy, dz) || 1; dx /= dl; dy /= dl; dz /= dl;
-    const drops = Math.max(2, Math.round(5 * amt));
+    const real = realism();
+    const drops = real ? Math.max(4, Math.round(11 * amt)) : Math.max(2, Math.round(5 * amt));
     for (let i = 0; i < drops; i++) {
       spawnBit(point.x, point.y, point.z,
         dx * (2.2 + Math.random() * 3.2) + (Math.random() - 0.5) * 1.8,
@@ -1872,7 +2073,7 @@
         dz * (2.2 + Math.random() * 3.2) + (Math.random() - 0.5) * 1.8,
         0.035 + Math.random() * 0.045, Math.random() < 0.35 ? BLOOD_BRT : BLOOD, "blood");
     }
-    const mist = Math.max(1, Math.round(2 * amt));
+    const mist = Math.max(1, Math.round((real ? 3.5 : 2) * amt));
     for (let i = 0; i < mist; i++) {
       spawnBit(point.x, point.y, point.z,
         dx * (1.5 + Math.random() * 2) + (Math.random() - 0.5),
@@ -1994,9 +2195,9 @@
     stainT -= dt;
     if (stainT <= 0) { stainT = 0.85; stainScan(); if (severed.length) severAudit(); }
 
-    // CITY drives the realistic fade/settle/cull path; jail/survival fall back
-    // to the original byte-identical gib physics (read once per frame).
-    const gibCity = cityMode();
+    // The debris law drives the realistic fade/settle/cull path; with it off,
+    // jail/survival fall back to the original gib physics (read once per frame).
+    const gibCity = debrisLaw();
     // read the shared snow coverage ONCE for the whole sweep (see the burial
     // block) — it is a getter over one integrator, but this loop runs over
     // every live bit and every live decal.
@@ -2008,10 +2209,13 @@
         b.vy -= GRAV * 0.12 * dt;
         b.vx *= Math.pow(0.04, dt); b.vz *= Math.pow(0.04, dt);
         m.position.x += b.vx * dt; m.position.y += b.vy * dt; m.position.z += b.vz * dt;
+        // a billboard puff turns to face the lens — the whole point of the quad
+        // is that it never shows the viewer an edge or a corner.
+        if (b.bill && CBZ.camera) m.quaternion.copy(CBZ.camera.quaternion);
         b.life -= dt;
         const k = Math.max(0, b.life);
         m.scale.setScalar(b.baseScale * (1 + (1 - Math.min(1, b.life)) * 2.2));  // expand as it dissipates
-        if (b.mat) b.mat.opacity = 0.5 * Math.min(1, k * 2.2);
+        if (b.mat) b.mat.opacity = (b.bill ? MIST_A : 0.5) * Math.min(1, k * 2.2);
         if (b.life <= 0) { rm(m); bits.splice(i, 1); }
         continue;
       }
@@ -2056,13 +2260,25 @@
         b.sx *= wd; b.sy *= wd; b.sz *= wd;   // the tumble drags out too
       } else b.vy -= GRAV * dt;
       m.position.x += b.vx * dt; m.position.y += b.vy * dt; m.position.z += b.vz * dt;
-      m.rotation.x += b.sx * dt; m.rotation.y += b.sy * dt; m.rotation.z += b.sz * dt;
+      // a droplet is STEERED, not tumbled: it keeps pointing down its own
+      // velocity, so the arc of a spray is legible as it falls.
+      if (b.drop) aimDrop(m, b.vx, b.vy, b.vz);
+      else { m.rotation.x += b.sx * dt; m.rotation.y += b.sy * dt; m.rotation.z += b.sz * dt; }
       const fl = floorAt(m.position.x, m.position.z);
       // rr = the bit's half-height. CITY adds a hair so the piece clears the
       // road paint; jail/survival keep the original bare radius.
       const rr = gibCity ? (b.rad || 0.06) + 0.012 : (b.rad || 0.06);
       if (m.position.y <= fl + rr && b.vy < 0) {
-        if (b.kind === "blood") { spawnSplat(m.position.x, m.position.z, 0.3 + Math.random() * 0.5, BLOOD_D, false); rm(m); bits.splice(i, 1); continue; }
+        if (b.kind === "blood") {
+          // A LANDING DROPLET LEAVES A SPLASH, NOT A PUDDLE. spawnSplat's
+          // `grow` is the decal's RADIUS in world units, so the authored
+          // 0.3-0.8 stamped a 60-160 cm blot for every single drop — two dozen
+          // of them per kill, overlapping into one red carpet. Hand-sized marks
+          // let the SPRAY PATTERN read: you can see which way the round went.
+          const g = realism() ? 0.08 + Math.random() * 0.13 : 0.3 + Math.random() * 0.5;
+          spawnSplat(m.position.x, m.position.z, g, BLOOD_D, false);
+          rm(m); bits.splice(i, 1); continue;
+        }
         if (gibCity) {
           // CITY SETTLE: clamp to ground, kill vertical, bleed off horizontal +
           // spin. A slow piece comes to REST this frame; a still-fast one keeps a
@@ -2165,9 +2381,12 @@
       }
       const fadeIn = Math.min(1, s.t * 4);
       const fadeOut = s.t > s.hold ? Math.max(0, 1 - (s.t - s.hold) / s.fade) : 1;
+      // a slick is a film, not a pool. And a pool is nearly OPAQUE: at 0.66 the
+      // white prison concrete came through it and the blood rendered as bright
+      // paint-pink; blood sitting on a light floor reads dark.
       // GOING UNDER: a surface slick is ON the water and is never snowed on.
       const under = s.water ? 0 : buriedBy(s, snowCoverNow);
-      s.m.material.opacity = (s.water ? 0.42 : 0.66) * fadeIn * fadeOut * (1 - under);
+      s.m.material.opacity = (s.water ? 0.42 : (realism() ? 0.88 : 0.66)) * fadeIn * fadeOut * (1 - under);
       if (under >= 1 || s.t > s.hold + s.fade) { freeSlick(s); splats.splice(i, 1); }
     }
 
@@ -2218,6 +2437,28 @@
     }
     // how much of what is still on the ground is currently under snow — the
     // ratchet for "a whiteout does not leave crisp red on a white island".
+      // ---- the cube ratchet: how big is what is in the air right now? ----
+      let boxGibs = 0, drops = 0, mist = 0, maxGib = 0, maxDrop = 0, fatDrop = 0;
+      for (let i = 0; i < bits.length; i++) {
+        const b = bits[i], bm = b.m, bg = bm && bm.geometry;
+        let span = 0, thick = 0;
+        if (bg) {
+          if (!bg.boundingBox) bg.computeBoundingBox();
+          const bb = bg.boundingBox;
+          const wx = (bb.max.x - bb.min.x) * Math.abs(bm.scale.x);
+          const wy = (bb.max.y - bb.min.y) * Math.abs(bm.scale.y);
+          const wz = (bb.max.z - bb.min.z) * Math.abs(bm.scale.z);
+          span = Math.max(wx, wy, wz);
+          // a stretched droplet's LENGTH is the point of it; what used to read as
+          // a floating ball is its CROSS-SECTION, so that is the honest number.
+          thick = Math.min(wx, wy, wz);
+        }
+        if (b.kind === "gib") {
+          if (bg && bg.type === "BoxGeometry") boxGibs++;
+          if (span > maxGib) maxGib = span;
+        } else if (b.kind === "mist") mist++;
+        else { drops++; if (span > maxDrop) maxDrop = span; if (thick > fatDrop) fatDrop = thick; }
+      }
     const cov = snowCover();
     let visible = 0, buried = 0;
     for (let i = 0; i < splats.length; i++) {
@@ -2228,6 +2469,10 @@
     }
     return {
       bits: bits.length, pools, streaks, slicks: water, walls: walls.length,
+      realism: realism(), debrisLaw: debrisLaw(), mode: (CBZ.game && CBZ.game.mode) || null,
+      boxGibs, drops, mist,
+      maxGibCm: Math.round(maxGib * 100), maxDropCm: Math.round(maxDrop * 100),
+      maxDropThickCm: Math.round(fatDrop * 100),
       // `gibs` is the count of GENERIC flying boxes still alive, and on the
       // island it may only ever be 0 — the ratchet for "I hate the blood
       // blocks". `severed` counts rigs currently missing a real body part.
