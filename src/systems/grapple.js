@@ -460,7 +460,36 @@
       const sdt = dt / n;
       for (let sub = 0; sub < n; sub++) {
         grp.position.x += p.vx * sdt; grp.position.y += p.vy * sdt; grp.position.z += p.vz * sdt;
-        if (CBZ.collide) CBZ.collide(grp.position, BOT_R);
+        if (CBZ.collide) {
+          // WHAT COLLIDE() PUSHED BACK IS WHAT YOU HIT. The substep above exists
+          // so a launched body can't tunnel through a wall; the delta it leaves
+          // behind is also the only evidence in this file that the body was
+          // DRIVEN INTO something — the owner's "pushed hard into something".
+          // Direction of the push is the surface normal, and the speed along it
+          // is the speed of the collision. Free: no ray, no extra query.
+          const bx = grp.position.x, bz = grp.position.z;
+          CBZ.collide(grp.position, BOT_R);
+          const cdx = grp.position.x - bx, cdz = grp.position.z - bz;
+          const cd = Math.hypot(cdx, cdz);
+          if (cd > 0.004) {
+            const nx = cdx / cd, nz = cdz / cd;
+            const into = -(p.vx * nx + p.vz * nz);      // closing speed on the face
+            if (into > 1) {
+              if (CBZ.trauma) CBZ.trauma.slam(a, into, { wall: true, dir: { x: nx, z: nz } });
+              // and it actually STOPS you: the old path kept full velocity and
+              // ground along the wall, so a body thrown into a building slid up
+              // it. Kill the normal component, keep a little rebound, and let
+              // the impact stir the tumble.
+              if (into > 4) {
+                p.vx += nx * into * 1.22; p.vz += nz * into * 1.22;
+                p.spin += (Math.random() * 2 - 1) * Math.min(8, into * 0.35);
+                p.shock = Math.max(p.shock, Math.min(1.8, 0.4 + into * 0.07));
+                if (CBZ.sfx && near(grp.position, 14)) CBZ.sfx("hit");
+                if (CBZ.shake && a.isPlayer) CBZ.shake(Math.min(0.8, 0.15 + into * 0.04));
+              }
+            }
+          }
+        }
       }
       const fl = floorAt(grp.position.x, grp.position.z);
       if (grp.position.y <= fl && p.vy <= 0) {
@@ -470,6 +499,15 @@
         grp.position.y = (CBZ.game.mode === "city") ? cityRestY(grp) : fl;
         const impact = -p.vy;                       // how hard it hit
         const speed = Math.hypot(p.vx, p.vz);
+        // THE LANDING IS THE TRAUMA, and it is measured on the FIRST contact —
+        // above the bounce, deliberately. `impact` is already the speed the body
+        // met the ground at, so the owner's "falls from far" needs no new
+        // tracking; but the bounce below returns early and bleeds ~2/3 of the
+        // speed, so reading it after the bounce would score a 34 m/s fall off
+        // the refuge mountain as an 11 m/s stumble. systems/trauma.js decides
+        // whether this speed opened anyone up; the bounce cooldown in there
+        // stops the second and third touch re-reporting the same fall.
+        if (CBZ.trauma) CBZ.trauma.slam(a, Math.max(impact, speed * 0.6), { dir: { x: 0, y: 1, z: 0 } });
         // BOUNCE: a hard landing kicks the body back up once or twice (it
         // doesn't stick instantly — euphoria bodies skip and tumble). Bleed a
         // lot of energy each bounce so it converges quickly and never loops.
@@ -662,8 +700,16 @@
     CBZ.sfx && CBZ.sfx("whoosh");
     if (!t) return;
     const knockdown = Math.random() < 0.4 ? 1.2 : 0;
-    hit(t, { fromX: CBZ.player.pos.x, fromZ: CBZ.player.pos.z, force: PUNCH_FORCE, knockdown });
-    if (CBZ.surv) CBZ.surv.hurt(t, 18, { cause: "beaten to death", fromX: CBZ.player.pos.x, fromZ: CBZ.player.pos.z });
+    const P = CBZ.player.pos;
+    hit(t, { fromX: P.x, fromZ: P.z, force: PUNCH_FORCE, knockdown });
+    // A BEATING ADDS UP. The first two land as bruises (systems/wounds.js); the
+    // third or fourth splits skin and the face starts wearing it. That ramp is
+    // the ledger's job — this line just reports the blow.
+    if (CBZ.trauma) {
+      const L = lookDir();
+      CBZ.trauma.strike(t, PUNCH_FORCE, { dir: { x: L.x, y: 0.35, z: L.z }, fromX: P.x, fromZ: P.z, y: 1.5 });
+    }
+    if (CBZ.surv) CBZ.surv.hurt(t, 18, { cause: "beaten to death", fromX: P.x, fromZ: P.z });
     CBZ.sfx && CBZ.sfx("punch");
     CBZ.shake && CBZ.shake(0.18);
     CBZ.doHitstop && CBZ.doHitstop(0.04);
@@ -671,7 +717,16 @@
   function push() {
     const t = aimTarget();
     if (!t) return;
-    hit(t, { fromX: CBZ.player.pos.x, fromZ: CBZ.player.pos.z, force: PUSH_FORCE, knockdown: Math.random() < 0.5 ? 1.0 : 0 });
+    const P = CBZ.player.pos;
+    hit(t, { fromX: P.x, fromZ: P.z, force: PUSH_FORCE, knockdown: Math.random() < 0.5 ? 1.0 : 0 });
+    // A SHOVE IS A BIG FORCE THAT BARELY BREAKS SKIN — it's flat palms across a
+    // wide area. What makes a push bloody is WHAT IT PUTS YOU INTO, and that
+    // arrives later through the wall-slam / landing hooks in step(). So the
+    // knockback number stays at 12 and the flesh weight is cut to a fifth.
+    if (CBZ.trauma) {
+      const L = lookDir();
+      CBZ.trauma.strike(t, PUSH_FORCE, { flesh: 0.2, dir: { x: L.x, y: 0.2, z: L.z }, fromX: P.x, fromZ: P.z, y: 1.2 });
+    }
     CBZ.sfx && CBZ.sfx("punch");
     CBZ.shake && CBZ.shake(0.12);
   }

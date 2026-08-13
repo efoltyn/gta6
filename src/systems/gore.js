@@ -157,6 +157,25 @@
     return m;
   }
 
+  // GORE_GIB_MEAT — drag a body colour toward wound-dark, so a flying chunk
+  // reads as flesh rather than as a piece of the shirt it came off. `k` is how
+  // soaked it is. Channels are quantised to 16 before the hex is rebuilt: the
+  // lambert() cache is keyed on the colour, and 99 survivors in 12 outfits would
+  // otherwise mint a fresh shared material per outfit per soak level.
+  // (written through CBZ.CONFIG rather than the `CFG` alias — that alias is
+  // declared with the water block further down and is still in its temporal
+  // dead zone up here. The alias binds the SAME object, so both agree.)
+  CBZ.CONFIG = CBZ.CONFIG || {};
+  if (CBZ.CONFIG.GORE_GIB_MEAT == null) CBZ.CONFIG.GORE_GIB_MEAT = true;
+  function meatOn() { return CBZ.CONFIG.GORE_GIB_MEAT !== false; }
+  function bloodied(hex, k) {
+    const q = (a, b) => (Math.min(255, Math.round((a + (b - a) * k) / 16) * 16)) & 255;
+    const r = q((hex >> 16) & 255, (BLOOD_D >> 16) & 255);
+    const g = q((hex >> 8) & 255, (BLOOD_D >> 8) & 255);
+    const b = q(hex & 255, BLOOD_D & 255);
+    return (r << 16) | (g << 8) | b;
+  }
+
   // a soft radial blood texture, generated once, used by pools + wall splats so
   // edges feather instead of showing a hard polygon rim (much more convincing).
   let bloodTex = null;
@@ -680,14 +699,87 @@
     }
     freeSlick(splats.shift());
   }
+  // ============================================================
+  //  GROUND DECALS FOLLOW THE GROUND  (CBZ.CONFIG.GORE_SLOPE_DECALS, default on)
+  //
+  //  OWNER-FILMED, disaster island: "if you're on the mountain it shows FLATS
+  //  that FLOAT." Every ground decal in this file was stamped with a hard
+  //  `rotation.x = -PI/2` — a horizontal disc — and seated at floorAt(x,z).
+  //  That is right on a street and WRONG on terrain: the survival island's
+  //  refuge mountain is a 26 m cone over a 36 m radius (world/disaster_arena.js
+  //  — about 36 degrees), so a 2 m pool laid flat on it hangs its uphill edge
+  //  1.4 m in the air and buries the downhill edge in the hill. What you see is
+  //  a red plate floating on the hillside, which is exactly the report.
+  //
+  //  The fix is geometric, not cosmetic: sample the LOCAL SURFACE NORMAL out of
+  //  the same floorAt() field every body in the game already stands on, align
+  //  the decal's plane to it, and seat it a few centimetres ALONG that normal.
+  //  Flat ground gives n = (0,1,0), whose minimal rotation from the plane's
+  //  local +Z is exactly the old `rotation.x = -PI/2` — so streets, roads, jail
+  //  floors and the ocean slick are byte-identical, and only terrain changes.
+  //
+  //  And blood on a real slope does not pool: it RUNS. Past STEEP the disc is
+  //  cut back and a downhill TRICKLE is drawn out of its low edge, reusing the
+  //  run-over streak record, which already knows how to draw a growing smear.
+  //
+  //  COST: two extra floorAt() samples per decal SPAWN. The gradient is memoised
+  //  on a 4 m grid for one frame — the droplet layer stamps ~20 splats per kill
+  //  within a couple of metres of one another, so it is ~one sample per kill.
+  //  The HEIGHT is never cached (it moves 3 m across one mountain cell); only
+  //  the slowly-varying gradient is.
+  // ============================================================
+  if (CFG.GORE_SLOPE_DECALS == null) CFG.GORE_SLOPE_DECALS = true;
+  function slopeOn() { return CBZ.CONFIG.GORE_SLOPE_DECALS !== false; }
+  const STEEP = 0.42;              // rise/run past which blood runs instead of pooling
+  const FLATISH = 0.025;           // below this the old flat path runs, untouched
+  const SLOPE_CELL = 4;            // metres per memo cell
+  const slopeMemo = new Map();
+  const _V_Z = new THREE.Vector3(0, 0, 1);
+  const _V_N = new THREE.Vector3();
+  // dH/dx, dH/dz and the unit normal at (x,z). Forward differences — a decal
+  // does not need a centred stencil, and the one-sided pair halves the cost.
+  function groundGrad(x, z) {
+    const key = (Math.floor(x / SLOPE_CELL) + 8192) * 65536 + (Math.floor(z / SLOPE_CELL) + 8192);
+    let s = slopeMemo.get(key);
+    if (s) return s;
+    const e = 1.1, h0 = floorAt(x, z);
+    let gx = (floorAt(x + e, z) - h0) / e, gz = (floorAt(x, z + e) - h0) / e;
+    // a sinkhole lip / cliff edge is a CLIFF, not a slope: a wall-steep gradient
+    // would tip the decal onto its side and read as a floating flag. Clamp the
+    // fit to something a pool could plausibly cling to and let it lie flatter.
+    if (!isFinite(gx)) gx = 0; if (!isFinite(gz)) gz = 0;
+    const g2 = Math.hypot(gx, gz);
+    if (g2 > 1.4) { gx *= 1.4 / g2; gz *= 1.4 / g2; }
+    const inv = 1 / Math.sqrt(gx * gx + gz * gz + 1);
+    s = { gx, gz, nx: -gx * inv, ny: inv, nz: -gz * inv, grade: Math.min(g2, 1.4) };
+    if (slopeMemo.size < 96) slopeMemo.set(key, s);
+    return s;
+  }
+  // lay a plane decal ON the surface at (x,z), spun by `spin` about its own
+  // normal and lifted `lift` clear of it. `s` may be null → the original flat
+  // stamp, byte for byte.
+  function seatDecal(m, x, z, spin, lift, s) {
+    if (!s || s.grade < FLATISH) {
+      m.rotation.set(-Math.PI / 2, 0, spin);
+      m.position.set(x, floorAt(x, z) + lift, z);
+      return;
+    }
+    m.quaternion.setFromUnitVectors(_V_Z, _V_N.set(s.nx, s.ny, s.nz));
+    m.rotateZ(spin);                                     // local +Z is the normal now
+    m.position.set(x + s.nx * lift, floorAt(x, z) + s.ny * lift, z + s.nz * lift);
+  }
+
   function spawnSplat(x, z, grow, color, linger) {
     // splat cap rides the quality tier (read live; fallback = old 170)
     if (splats.length > (CBZ.qScale ? CBZ.qScale(85, 300) : 170)) recycleFarSplat();
+    const s = slopeOn() ? groundGrad(x, z) : null;
+    // a slope cannot hold a pool — the steeper it is, the less stays put (and
+    // the rest leaves as the trickle below).
+    const steep = !!(s && s.grade > STEEP);
+    const g = steep ? grow * (0.42 + 0.28 * (STEEP / s.grade)) : grow;
     const m = new THREE.Mesh(blob(),
       new THREE.MeshBasicMaterial({ color: color || BLOOD_D, map: bloodTexture(), transparent: true, opacity: 0, depthWrite: false }));
-    m.rotation.x = -Math.PI / 2;
-    m.rotation.z = Math.random() * 6.28;
-    m.position.set(x, floorAt(x, z) + 0.04 + Math.random() * 0.02, z);
+    seatDecal(m, x, z, Math.random() * 6.28, 0.04 + Math.random() * 0.02, s);
     m.renderOrder = 3; m.scale.set(0.1, 0.1, 1);
     scene().add(m);
     // pools GROW over a few seconds (a body keeps draining) and the ones near
@@ -695,28 +787,45 @@
     // Far pools keep the short clock so the cap budget stays where it matters.
     const near = dist2Cam(x, z) < 24 * 24;
     splats.push({
-      m, t: 0, grow, max: grow, growT: linger ? 3.4 : 0.5,
+      m, t: 0, grow: g, max: g, growT: linger ? 3.4 : 0.5,
       hold: linger ? (near ? 75 : 26) : (near ? 16 : 10), fade: linger ? 16 : 8,
       ax: 0.82 + Math.random() * 0.36, az: 0.82 + Math.random() * 0.36,  // per-pool stretch
     });
+    // THE RUN-OFF: what the hillside wouldn't hold leaves down the fall line.
+    // The threshold is above every droplet mark (the landing splats top out at
+    // 0.8) and below every real pool (a kill pool starts at 2.0), so a body
+    // bleeding on a slope trails ONE streak instead of twenty — the difference
+    // between a run-off and a red spiderweb, and ~20 draw calls per kill.
+    if (steep && grow > 0.9) {
+      const dl = Math.hypot(s.gx, s.gz) || 1;
+      spawnStreak(x, z, -s.gx / dl, -s.gz / dl, Math.min(5.5, grow * (0.9 + s.grade * 1.9)));
+    }
   }
 
-  // a long, thin blood smear dragged along a travel line (run-over kills):
-  // the wheel pulls the pool with it, so the decal stretches out over ~half a
-  // second along the car's direction instead of blooming in place.
+  // a long, thin blood smear dragged along a travel line (run-over kills, and
+  // the downhill run-off above): the wheel pulls the pool with it, so the decal
+  // stretches out over ~half a second along the direction given instead of
+  // blooming in place. On terrain it re-seats as it draws (see the record
+  // below), so a smear across a hillside follows the hillside.
   function spawnStreak(x0, z0, dx, dz, len) {
     // splat cap rides the quality tier (read live; fallback = old 170)
     if (splats.length > (CBZ.qScale ? CBZ.qScale(85, 300) : 170)) recycleFarSplat();
+    const s = slopeOn() ? groundGrad(x0, z0) : null;
     const m = new THREE.Mesh(G_PLANE,
       new THREE.MeshBasicMaterial({ color: BLOOD_D, map: bloodTexture(), transparent: true, opacity: 0, depthWrite: false }));
-    m.rotation.x = -Math.PI / 2;
-    m.rotation.z = Math.atan2(-dx, -dz);          // local +y axis → world (dx,dz)
-    m.position.set(x0, floorAt(x0, z0) + 0.045, z0);
+    seatDecal(m, x0, z0, Math.atan2(-dx, -dz), 0.045, s);   // local +y axis → world (dx,dz)
     m.renderOrder = 3; m.scale.set(0.55, 0.1, 1);
     scene().add(m);
     const near = dist2Cam(x0, z0) < 24 * 24;
     splats.push({
       m, streak: true, x0, z0, dx, dz, t: 0, grow: len, max: len,
+      // A STREAK IS DRAWN, NOT STAMPED: its centre slides metres down-range as
+      // it grows, so on terrain the seat it was born on is wrong by the time it
+      // finishes. Any streak on a real gradient re-seats per frame while it
+      // draws (the updater stops the moment it reaches full length) — a tire
+      // smear down a hill needs this every bit as much as a downhill trickle
+      // does, so it keys off the GROUND, not off which caller asked.
+      slope: !!(s && s.grade >= FLATISH), spin: Math.atan2(-dx, -dz),
       w: 0.55 + Math.random() * 0.25, hold: near ? 60 : 28, fade: 14,
     });
   }
@@ -964,36 +1073,182 @@
     }
     return s;
   }
-  function stainCorpse(ped) {
-    ped._goreStained = true;
-    const ch = ped.char; if (!ch || !ch.skinSlots) return;
-    const slots = ch.skinSlots;
-    const lists = [slots.torso, slots.legs, slots.arms, slots.collar, slots.legsLower, slots.armsLower];
-    for (let li = 0; li < lists.length; li++) {
-      const list = lists[li]; if (!list) continue;
+  // walk every body slot of a rig and hand each mesh's current colour to `fn`,
+  // swapping in the shared lambert `fn` names back. The ONE place that knows
+  // which slots make up a body — stainCorpse and corpseTreat both ride it.
+  const BODY_SLOTS = ["torso", "collar", "legs", "legsLower", "pelvis", "shoes",
+    "arms", "armsLower", "hands", "stripes", "belt", "cap", "hair"];
+  function eachBodyMesh(ch, slots, fn) {
+    const S = ch.skinSlots;
+    for (let li = 0; li < slots.length; li++) {
+      const list = S[slots[li]]; if (!list) continue;
       for (let mi = 0; mi < list.length; mi++) {
         const mesh = list[mi];
         if (!mesh || !mesh.material || !mesh.material.color) continue;
-        mesh.material = lambert(stainHex(mesh.material.color.getHex()));
+        fn(mesh);
       }
     }
   }
+  const STAIN_SLOTS = ["torso", "legs", "arms", "collar", "legsLower", "armsLower"];
+  function stainCorpse(ped) {
+    ped._goreStained = true;
+    const ch = ped.char || (ped.isPlayer ? CBZ.playerChar : null);
+    if (!ch || !ch.skinSlots) return;
+    eachBodyMesh(ch, STAIN_SLOTS, function (mesh) {
+      mesh.material = lambert(stainHex(mesh.material.color.getHex()));
+    });
+  }
   let stainT = 0;
-  function stainScan() {
-    const peds = CBZ.cityPeds;
-    if (!peds || !splats.length) return;
-    for (let i = 0; i < peds.length; i++) {
-      const p = peds[i];
+  function stainRoster(list) {
+    if (!list) return;
+    for (let i = 0; i < list.length; i++) {
+      const p = list[i];
       if (!p || !p.dead || p._goreStained || p.culled || !p.pos || (p.deadT || 0) < 2.5) continue;
       if (dist2Cam(p.pos.x, p.pos.z) > 45 * 45) continue;     // only stain where it can be seen
       for (let j = 0; j < splats.length; j++) {
         const s = splats[j];
-        if (s.streak || s.max < 0.85 || s.t < 1.2) continue;  // settled kill-pools only
+        if (s.streak || s.water || s.max < 0.85 || s.t < 1.2) continue;  // settled kill-pools only
         const dx = s.m.position.x - p.pos.x, dz = s.m.position.z - p.pos.z;
         if (dx * dx + dz * dz < 1.8) { stainCorpse(p); break; }
       }
     }
   }
+  function stainScan() {
+    if (!splats.length) return;
+    stainRoster(CBZ.cityPeds);
+    // THE ISLAND'S DEAD SOAK TOO. This scan only ever looked at CBZ.cityPeds,
+    // so a survival corpse could lie face-down in its own kill pool for the
+    // whole round and stay factory-clean. Same test, same throttle, same
+    // camera gate — the survival roster was simply never asked.
+    if (CBZ.game && CBZ.game.mode === "survival") stainRoster(CBZ.bots);
+  }
+
+  /* ============================================================
+     THE CORPSE TELLS YOU HOW IT DIED — CBZ.corpseTreat(actor, kind).
+
+     OWNER, second pass: "you bleed when you freeze to death — dumb tiny things
+     with blood, make them way more realistic."
+
+     Cutting the blood off the bloodless causes (systems/trauma.js) was only
+     half an answer. It left a man who froze solid in a blizzard looking
+     EXACTLY like a man who starved, who choked on ash, who drowned, who was
+     incinerated — five completely different deaths, one factory-fresh body,
+     distinguishable only by a line of text in the corner. The blood was wrong
+     because it was the ONLY evidence the engine had, so it got used for
+     everything. Deleting it without replacing it just moves the problem.
+
+     So each cause gets its own honest read, and it is the SAME cheap device
+     stainCorpse has always used: one shared-material swap per corpse, never a
+     per-frame tint, never a new mesh, never a shader.
+       frost  — rime-pale, blue-white, the colour drained out (blizzard)
+       char   — blackened through (lava, wildfire, a nuclear flash, lightning)
+       ash    — buried under grey volcanic dust (an ashfall death)
+       soak   — dark and sodden, the way clothing goes in water (drowning)
+       pallor — grey-green and waxy (radiation sickness, starvation)
+
+     The head takes its OWN target: skin does not go the same colour cloth
+     does. Colours are desaturated first (death takes the chroma out before it
+     adds anything) and quantised to 16 per channel before hitting the shared
+     lambert cache, so ninety-nine survivors in a dozen outfits cannot mint a
+     material per body.
+
+     REVERSIBLE, because CBZ.playerChar is not rebuilt between matches the way
+     the bots are: every swap records the material it replaced, and
+     CBZ.corpseUntreat puts them back (modes/survival.js's reset calls it
+     through CBZ.trauma.reset). Also re-points ch.skinTone at the treated head
+     colour, because grapple.js's normalizeHead re-asserts skinTone on every
+     hit — without that, a charred corpse caught in the next blast would snap
+     its face back to living skin.
+  ============================================================ */
+  if (CBZ.CONFIG.GORE_DEATH_MARKS == null) CBZ.CONFIG.GORE_DEATH_MARKS = true;
+  // TUNED AGAINST THE GROUND THEY LAND ON. The blizzard turns the island white
+  // (systems/disasters.js progressively whitens the terrain) and the grass is
+  // pale — so frost and pallor deliberately stop well short of white, keeping
+  // enough of the victim's own colour that the body still reads as a BODY
+  // against snow, just a rimed and bloodless one. char is the opposite problem
+  // and goes nearly all the way: a burned body should be unmistakable at
+  // distance. `desat` runs before the mix — death takes the chroma out before
+  // it puts anything on.
+  const TREATS = {
+    frost:  { to: 0xbcd6ea, k: 0.50, desat: 0.60, head: 0xa8c6de, hk: 0.62 },
+    char:   { to: 0x211b17, k: 0.85, desat: 0.88, head: 0x1a1512, hk: 0.88 },
+    ash:    { to: 0xa09d95, k: 0.70, desat: 0.82, head: 0x94918a, hk: 0.74 },
+    soak:   { to: 0x2f4049, k: 0.45, desat: 0.30, head: 0x3a4c55, hk: 0.40 },
+    pallor: { to: 0x8f9c8c, k: 0.42, desat: 0.70, head: 0x9aa695, hk: 0.56 },
+  };
+  function treatHex(hex, to, k, desat) {
+    let r = (hex >> 16) & 255, g = (hex >> 8) & 255, b = hex & 255;
+    if (desat > 0) {
+      const l = r * 0.299 + g * 0.587 + b * 0.114;
+      r += (l - r) * desat; g += (l - g) * desat; b += (l - b) * desat;
+    }
+    r += (((to >> 16) & 255) - r) * k;
+    g += (((to >> 8) & 255) - g) * k;
+    b += ((to & 255) - b) * k;
+    const q = (v) => Math.max(0, Math.min(255, Math.round(v / 16) * 16));
+    return (q(r) << 16) | (q(g) << 8) | q(b);
+  }
+  CBZ.corpseTreat = function (actor, kind) {
+    if (!actor || CBZ.CONFIG.GORE_DEATH_MARKS === false) return false;
+    const T = TREATS[kind]; if (!T) return false;
+    const ch = actorChar(actor);
+    if (!ch || !ch.skinSlots || ch._treated) return false;
+    const undo = [];
+    eachBodyMesh(ch, BODY_SLOTS, function (mesh) {
+      undo.push({ m: mesh, mat: mesh.material });
+      mesh.material = lambert(treatHex(mesh.material.color.getHex(), T.to, T.k, T.desat));
+    });
+    const head = ch.skinSlots.head && ch.skinSlots.head[0];
+    if (head && head.material && head.material.color) {
+      const hx = treatHex(head.material.color.getHex(), T.head, T.hk, T.desat);
+      undo.push({ m: head, mat: head.material, tone: ch.skinTone });
+      head.material = lambert(hx);
+      ch.skinTone = hx;                 // so normalizeHead re-asserts the DEAD tone
+    }
+    ch._treated = { kind, undo };
+    return true;
+  };
+  CBZ.corpseUntreat = function (actor) {
+    const ch = actorChar(actor);
+    const t = ch && ch._treated; if (!t) return false;
+    for (let i = 0; i < t.undo.length; i++) {
+      const u = t.undo[i];
+      u.m.material = u.mat;
+      if (u.tone !== undefined) ch.skinTone = u.tone;
+    }
+    ch._treated = null;
+    return true;
+  };
+  CBZ.corpseMark = function (actor) {
+    const ch = actorChar(actor);
+    return (ch && ch._treated && ch._treated.kind) || null;
+  };
+
+  // GORE_WASH — how deep the standing water over (x,z) is, 0 on dry land.
+  // Survival asks the MEAN column, not the live crest: during a tsunami the
+  // wavy surface swings by metres at wave frequency (see disaster_arena.js's
+  // note on why the swimmer's entry test went flat), and reading it here would
+  // strobe decals in and out of washing as each swell passed. Elsewhere it
+  // falls back to the same submergence query the water medium already uses.
+  if (CBZ.CONFIG.GORE_WASH == null) CBZ.CONFIG.GORE_WASH = true;
+  function washOn() { return CBZ.CONFIG.GORE_WASH !== false; }
+  function washDepthAt(x, z) {
+    if (CBZ.game && CBZ.game.mode === "survival") {
+      if (!CBZ.survFloodDepthMeanAt) return 0;
+      try { const d = CBZ.survFloodDepthMeanAt(x, z); return isFinite(d) ? d : 0; } catch (e) { return 0; }
+    }
+    const d = submRaw(x, floorAt(x, z), z);
+    return (d === DRY || !isFinite(d)) ? 0 : d;
+  }
+
+  // A SINGLE DRIP. Deliberately not goreImpact: a man walking with an open
+  // wound leaves marks, not a spray and a pool at every footfall. One tiny
+  // short-lived splat, seated on the terrain like every other ground decal.
+  CBZ.goreDrip = function (x, z, size) {
+    if (!CBZ.scene) return;
+    if (dist2Cam(x, z) > 55 * 55) return;
+    spawnSplat(x, z, Math.max(0.1, Math.min(0.5, size == null ? 0.22 : size)), BLOOD_D, false);
+  };
 
   // ============================================================
   //  REAL DISMEMBERMENT — the body that hits the ground is genuinely MISSING
@@ -1402,10 +1657,24 @@
     // intact body) — it does not blow them into clothing cubes. So reserve the
     // multi-gib spray for EXPLOSIONS. Actual close-shotgun severing launches the
     // cloned body part above; an ordinary kill gets ZERO generic flying boxes.
-    // Jail/survival keep the original chunky spray on every kill.
-    let ng = Math.round((big ? 7 : 5) * amt * lod);
+    // Jail/survival keep the original chunky spray on every kill, UNLESS the
+    // caller prices it: `opts.gib` (0 = none, 1 = stock, >1 = more) is how
+    // systems/trauma.js says that a BEATING throws no body chunks while a
+    // tornado throws more than a blast does. Absent → stock, byte for byte.
+    let ng = Math.round((big ? 7 : 5) * amt * lod * (opts.gib == null ? 1 : Math.max(0, opts.gib)));
     if (cityMode()) ng = boom ? Math.round(6 * amt * lod) : 0;
-    const cols = [skin, cloth, BLOOD, cloth, skin, 0xb8443a, BLOOD_D];
+    // A TORN-OFF PIECE IS NOT CLEAN LAUNDRY (owner-filmed on the island: the
+    // hillside after a disaster read as pastel confetti, not as gore). Four of
+    // the seven palette entries were the victim's RAW skin and shirt colours —
+    // cream, pale blue, pale pink — so on a white mountain the chunks looked
+    // like litter. Every piece now comes off the body already soaked: the skin
+    // and cloth entries are dragged most of the way to wound-dark, so the
+    // silhouette still says "that was their jacket" while the colour says meat.
+    // Quantised before caching so a hundred distinct outfits cannot mint a
+    // hundred distinct shared materials.
+    const cols = meatOn()
+      ? [BLOOD_D, bloodied(cloth, 0.62), BLOOD, bloodied(skin, 0.78), 0xb8443a, BLOOD_D, bloodied(cloth, 0.82)]
+      : [skin, cloth, BLOOD, cloth, skin, 0xb8443a, BLOOD_D];
     for (let i = 0; i < ng; i++) {
       const side = (Math.random() - 0.5) * 2, a = Math.random() * 6.28, sp = 3 + Math.random() * 5;
       const omni = boom || !hasDir;
@@ -1489,10 +1758,98 @@
     }
   };
 
+  /* ============================================================
+     CBZ.goreImpact(x, y, z, opts) — BLUNT TRAUMA. NOT A DEATH.
+
+     Everything above this line is a KILL event: it pools, gibs, dismembers,
+     flashes the lens, consumes the kill context and can trip slow-mo. There
+     was no way to say "this body is BLEEDING, not dying", so every caller who
+     wanted blood had to fire a kill — which is precisely how the disaster
+     island ended up opening the same red faucet for a man who FROZE TO DEATH,
+     and never once for the man you threw off the mountain on the way there.
+
+     So trauma gets its own emitter and its own physics:
+       • a WET SPRAY off the struck side, thrown along the surface normal —
+         the direction you were driven, mirrored back out of the flesh
+       • a MIST puff only when the impact was hard enough to atomise anything
+         (a shove that splits a lip does not aerosolise)
+       • a GROUND POOL only once the wound is genuinely open (opts.pool) —
+         a bruise leaves nothing behind, and that restraint is the whole point
+       • the WALL SPLAT you earn by being driven INTO the wall (opts.wall),
+         which reuses the same opaque/wall-sized scan a headshot does
+     No gibs, no dismemberment, no kill-context consumption, no slow-mo, and
+     the lens jolt only for the player. Water-aware for free: a wound taken
+     under the sea blooms instead of raining droplets on the seabed.
+
+     opts: { dir:{x,y,z} (away from the surface), amount:0.2..2, mist:bool,
+             pool:bool, wall:bool, player:bool, sfx:bool|string }
+  ============================================================ */
+  CBZ.goreImpact = function (x, y, z, opts) {
+    if (!CBZ.scene) return;
+    opts = opts || {};
+    const d2 = dist2Cam(x, z);
+    if (CBZ.camera && CBZ.camera.position && d2 > 70 * 70) return;
+    const lod = d2 > 40 * 40 ? 0.5 : 1;
+    const amt = Math.max(0.2, Math.min(2, opts.amount == null ? 0.7 : opts.amount));
+
+    let dx = opts.dir ? (+opts.dir.x || 0) : 0;
+    let dy = opts.dir ? (+opts.dir.y || 0) : 0;
+    let dz = opts.dir ? (+opts.dir.z || 0) : 0;
+    const dl = Math.hypot(dx, dy, dz);
+    const hasDir = dl > 0.001;
+    if (hasDir) { dx /= dl; dy /= dl; dz /= dl; }
+
+    // WATER: a body slammed into a reef or beaten in the surf blooms. Same
+    // branch gore() takes, for the same reason — droplets are air physics.
+    if (waterOn() && woundInWater(x, y, z)) {
+      _wdir.x = dx; _wdir.y = dy; _wdir.z = dz;
+      CBZ.goreBloom(x, y, z, { amount: 0.5 + amt, dir: hasDir ? _wdir : null });
+      if (opts.pool) CBZ.goreSlick(x, z, 0.4 + amt * 0.6);
+      if (opts.sfx && CBZ.sfx) CBZ.sfx(typeof opts.sfx === "string" ? opts.sfx : "hit");
+      return;
+    }
+
+    // THE SPRAY. A blunt impact does not have a shot line to exit along, so the
+    // fan is wide and the throw is short: blood leaves the wound at the speed
+    // the body arrived, not at the speed of a round.
+    const px = -dz, pz = dx;
+    const nb = Math.max(3, Math.round(11 * amt * lod));
+    for (let i = 0; i < nb; i++) {
+      const a = Math.random() * 6.28, sp = 1.6 + Math.random() * 4.6;
+      const side = (Math.random() - 0.5) * 2;
+      spawnBit(x + (Math.random() - 0.5) * 0.3, y + (Math.random() - 0.5) * 0.5, z + (Math.random() - 0.5) * 0.3,
+        hasDir ? dx * (2.2 + Math.random() * 4.5 * amt) + px * side * 2.6 : Math.cos(a) * sp,
+        (hasDir ? dy * 3.5 : 0) + 1.4 + Math.random() * 3.4 * amt,
+        hasDir ? dz * (2.2 + Math.random() * 4.5 * amt) + pz * side * 2.6 : Math.sin(a) * sp,
+        0.05 + Math.random() * 0.09, Math.random() < 0.45 ? BLOOD_BRT : BLOOD, "blood");
+    }
+    if (opts.mist) {
+      const nm2 = Math.max(2, Math.round(6 * amt * lod));
+      for (let i = 0; i < nm2; i++) {
+        const a = Math.random() * 6.28, sp = 0.8 + Math.random() * 2.4;
+        spawnBit(x + (Math.random() - 0.5) * 0.35, y + 0.15 + Math.random() * 0.6, z + (Math.random() - 0.5) * 0.35,
+          dx * 2.4 * amt + Math.cos(a) * sp, 1.2 + Math.random() * 2,
+          dz * 2.4 * amt + Math.sin(a) * sp,
+          0.045 + Math.random() * 0.06, BLOOD, "mist");
+      }
+    }
+    // the pool is the RESTRAINT: only an open wound leaves evidence on the
+    // ground, so a bruising hit passes pool:false and stains nothing.
+    if (opts.pool) spawnSplat(x + dx * 0.3, z + dz * 0.3, 0.5 + amt * 0.75, BLOOD_D, true);
+    // driven INTO something → it wears the hit. Same wall-sized/opaque gate.
+    if (opts.wall && hasDir && lod === 1) spawnWallSplat(x, y, z, -dx, -dz, amt * 0.85, true);
+    if (opts.player) flashV = Math.max(flashV, 0.12 + 0.22 * amt);
+    if (opts.sfx && CBZ.sfx) CBZ.sfx(typeof opts.sfx === "string" ? opts.sfx : "hit");
+  };
+
   // one always-updater drives gibs + mist + pools + wall splats + the red jolt
   CBZ.onAlways(8, function (dt) {
     if (dt <= 0) return;
     wetEvent = false;                    // bound any leaked wet event to one frame
+    // the terrain-gradient memo is a ONE-FRAME cache: a sinkhole opening or a
+    // crater collapsing rewrites floorAt under us, and a decal stamped next
+    // frame must fit the ground that is there NOW.
+    if (slopeMemo.size) slopeMemo.clear();
     if (!killTapped) installKillTap();   // peds.js loads after us — tap once it exists
     if (flashV > 0.002) { ensureFlash().style.opacity = String(Math.min(0.5, flashV)); flashV *= Math.pow(0.0012, dt); }
     else if (flashEl && flashEl.style.opacity !== "0") { flashEl.style.opacity = "0"; flashV = 0; }
@@ -1598,6 +1955,28 @@
 
     for (let i = splats.length - 1; i >= 0; i--) {
       const s = splats[i]; s.t += dt;
+      /* WATER TAKES THE BLOOD BACK (GORE_WASH). The island's headline events
+         are a tsunami and a flash flood, and blood used to sit through both:
+         the sea would rise eight metres over a street, drain away again, and
+         every pool would still be there, crisp, on ground that had just been
+         under water. Standing water lifts blood off a surface in seconds, so a
+         submerged decal is pushed straight into its fade instead of holding
+         its full clock. Once washed it stays washed — blood does not come back
+         when the flood goes out, and that receding tide leaving CLEAN ground
+         is the whole read. Throttled on a jittered ~0.6 s stagger (this runs
+         for every live decal) and skipped for surface slicks, which ARE the
+         water. */
+      if (!s.water && s.washT !== -1 && washOn()) {
+        s.washT = (s.washT || 0) - dt;
+        if (s.washT <= 0) {
+          s.washT = 0.5 + Math.random() * 0.35;
+          if (washDepthAt(s.m.position.x, s.m.position.z) > 0.09) {
+            s.hold = Math.min(s.hold, s.t);      // straight into the fade window
+            s.fade = Math.min(s.fade, 2.4);      // and gone in a couple of seconds
+            s.washT = -1;                        // decided; stop paying for the query
+          }
+        }
+      }
       if (s.water) {
         // A SURFACE SLICK, not a ground pool: the sea MOVES, so the decal
         // re-seats on the live swell every frame instead of on a floorAt seat
@@ -1636,8 +2015,11 @@
         const k = Math.min(1, s.t / 0.45);
         const L = Math.max(0.2, s.grow * k);
         s.m.scale.set(s.w, L, 1);
-        s.m.position.x = s.x0 + s.dx * L * 0.5;
-        s.m.position.z = s.z0 + s.dz * L * 0.5;
+        const cx = s.x0 + s.dx * L * 0.5, cz = s.z0 + s.dz * L * 0.5;
+        // a smear crossing TERRAIN re-seats on the surface as its centre slides
+        // (only while it is still growing — once drawn it never moves again).
+        if (s.slope && k < 1) seatDecal(s.m, cx, cz, s.spin, 0.045, groundGrad(cx, cz));
+        else { s.m.position.x = cx; s.m.position.z = cz; }
       } else {
         // pools GROW over seconds: a fast initial blot, then a slow creep out
         // to full size as the body drains (growT: ~3.4s for kill pools).
@@ -1668,6 +2050,41 @@
       if (w.t > w.hold + w.fade) { rm(w.m); walls.splice(i, 1); }
     }
   });
+
+  /* ---- CBZ.goreAudit() — THE RATCHET FOR "FLATS THAT FLOAT" -----------------
+     `float` is the worst vertical gap, in metres, between any live ground pool's
+     RIM and the ground under that rim. It is the owner's report expressed as a
+     number: a 2 m pool laid horizontally on the island's 36-degree refuge
+     mountain reports ~1.4; a decal that actually lies ON the hillside reports
+     the seat lift (~0.06) plus whatever the surface curves away by across its
+     own radius. It may only ever go DOWN — pin it in the disaster gate.
+     Populations come along for free (a live budget read during a shootout). */
+  const _RIM = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  const _rv = new THREE.Vector3();
+  CBZ.goreAudit = function () {
+    let pools = 0, streaks = 0, water = 0, worst = 0, worstAt = null;
+    for (let i = 0; i < splats.length; i++) {
+      const s = splats[i];
+      if (s.water) { water++; continue; }
+      if (s.streak) { streaks++; } else { pools++; }
+      const m = s.m;
+      m.updateMatrixWorld(true);
+      for (let k = 0; k < _RIM.length; k++) {
+        // a blob's geometry is a unit circle, so local (±1,0)/(0,±1) IS the rim;
+        // the plane used by streaks is a unit quad, so ±0.5 — near enough for a
+        // conformance probe, and deliberately the same four samples for both.
+        _rv.set(_RIM[k][0], _RIM[k][1], 0).applyMatrix4(m.matrixWorld);
+        const gap = Math.abs(_rv.y - floorAt(_rv.x, _rv.z));
+        if (gap > worst) { worst = gap; worstAt = [+_rv.x.toFixed(1), +_rv.z.toFixed(1)]; }
+      }
+    }
+    return {
+      bits: bits.length, pools, streaks, slicks: water, walls: walls.length,
+      puffs: puffs.length, pending: later.length,
+      float: +worst.toFixed(3), floatAt: worstAt,
+      slopeDecals: slopeOn(),
+    };
+  };
 
   // wipe all gore (called on a match reset / scene swap)
   CBZ.clearGore = function () {

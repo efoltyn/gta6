@@ -189,18 +189,54 @@
     if (animate) animChar(b.char, b.speed, dt);
   }
 
+  // ---- corpse persistence (see the block in the update loop) ----
+  // Read live so a quality slider or a console tweak lands mid-round.
+  const CORPSE_NEAR2 = 46 * 46;    // "near enough to walk over and look at"
+  const CORPSE_FAR_T = 6;          // out of sight: the original flat lifetime, unchanged
+  const CORPSE_NEAR_T = 22;        // in sight: long enough to read the body and its pool
+  const CORPSE_CAP = 12;           // how many may linger at once
+  let lingering = 0;
+
   // ---- per-frame update (order 23: after player @10, prison npc @22 is gated off) ----
   CBZ.onUpdate(23, function (dt) {
     if (CBZ.game.mode !== "survival") return;
     frame++;
     const camx = CBZ.camera.position.x, camz = CBZ.camera.position.z;
     const bots = CBZ.bots;
+    lingering = 0;                                   // recounted in the pass below
     for (let i = 0; i < bots.length; i++) {
       const b = bots[i];
       if (b.dead) {                                    // corpse: body.js poses the ragdoll; just count + cull
         if (b.tag) b.tag.visible = false;
         b.deadT = (b.deadT || 0) + dt;
-        if (b.deadT > 6 && !b.culled) { b.culled = true; if (b.group.parent) b.group.parent.remove(b.group); }
+        /* THE BODY DOESN'T VANISH WHILE YOU'RE LOOKING AT IT (SURV_CORPSE_LINGER).
+           Every corpse used to be deleted at a flat 6 seconds, wherever it was
+           — which is long enough to see someone die and nowhere near long
+           enough to walk over and look. Half the evidence this mode now puts
+           on a body arrives in that window and then blinks out at arm's length:
+           the frost on a man who froze, the char on one the lava took, the pool
+           he soaked into. Worse, it POPPED — the rig was simply removed from the
+           scene mid-view.
+
+           So distance decides, the way it does everywhere else in this engine:
+           a corpse you cannot see still goes at 6 s (the budget is unchanged
+           where it matters, which is a field of 99), a corpse near you lies
+           there long enough to be read, and only a bounded number of them do
+           — past the cap the newest death takes the oldest one's place, so a
+           mass-casualty disaster can never stack the whole lobby in front of
+           the lens. */
+        if (!b.culled) {
+          const cdx = b.pos.x - camx, cdz = b.pos.z - camz;
+          const seen = (cdx * cdx + cdz * cdz) < CORPSE_NEAR2;
+          if (b._linger) lingering++;
+          if (b.deadT > CORPSE_FAR_T && !b._linger && seen && lingering <= CORPSE_CAP) { b._linger = true; lingering++; }
+          const life = b._linger ? CORPSE_NEAR_T : CORPSE_FAR_T;
+          if (b.deadT > life || (b._linger && !seen && b.deadT > CORPSE_FAR_T * 2)) {
+            b.culled = true;
+            if (b._linger) { b._linger = false; lingering--; }
+            if (b.group.parent) b.group.parent.remove(b.group);
+          }
+        }
         continue;
       }
       const dx = b.pos.x - camx, dz = b.pos.z - camz;

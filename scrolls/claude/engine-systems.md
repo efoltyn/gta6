@@ -472,6 +472,72 @@ Before building anything adjacent, wire into the existing system:
   brown → **green-black** with depth. No caller changed a line; every existing
   death in water got this for free. `CBZ.goreChumList()` publishes live blood
   sources so AI can smell them. Flag `GORE_WATER`.
+- **Blood is EARNED, not announced** — `systems/trauma.js` (`CBZ.trauma`).
+  `modes/survival.js` used to fire `CBZ.gore()` on EVERY disaster death at a
+  flat amount, so a man who FROZE SOLID, DROWNED, CHOKED on ash or was
+  VAPORIZED sprayed exactly as much arterial red as one torn apart by a
+  tornado — while beatings, twenty-six-metre falls and being thrown into a
+  building drew nothing at all. Blood is MECHANICAL TRAUMA, so this file owns
+  two things: a per-actor **ledger** (`CBZ.trauma.strike(a, force, o)` /
+  `CBZ.trauma.slam(a, speed, {wall})`, decaying over ~30 s, bleeding only past
+  `FIRST_BLOOD` — so the third punch splits skin and the first two only bruise)
+  and a **cause table** (`CBZ.trauma.deathGore(a, cause, imp)`), which fires the
+  gore a death's PHYSICS calls for — tear / crush / splat / burst / blunt / boom
+  — and **nothing at all** for an unrecognised cause. Feed sites are one line
+  each: `grapple.js` (punch, push, landing, wall slam), `physics.js` (the
+  player's landing), `survival.js` (`reportDeath`). Scoped to survival inside
+  `on()`. Flag `SURV_TRAUMA`.
+- **The corpse tells you how it died** — `CBZ.corpseTreat(actor, kind)` /
+  `corpseUntreat` / `corpseMark` in `systems/gore.js`, driven off the same
+  cause table. Cutting the blood off the bloodless causes was only half an
+  answer: it left the man who FROZE SOLID looking exactly like the man who
+  STARVED, CHOKED, DROWNED or was INCINERATED — five deaths, one
+  factory-fresh body, told apart only by a line of killfeed text. Blood was
+  wrong because it was the only evidence the engine had, so deleting it
+  without replacing it just moved the problem. Five reads —
+  `frost` / `char` / `ash` / `soak` / `pallor` — each ONE shared-material swap
+  per corpse (the device `stainCorpse` has always used), never a per-frame
+  tint, never a new mesh. Colours desaturate before they mix and quantise to
+  16/channel so 99 survivors cannot mint a material each; the head takes its
+  own target because skin does not go the colour cloth does. Reversible
+  (`ch._treated` records what it replaced) because `CBZ.playerChar` outlives a
+  match reset. Also re-points `ch.skinTone`, or `grapple.js`'s `normalizeHead`
+  would snap a charred face back to living skin on the next hit. Flag
+  `GORE_DEATH_MARKS`.
+- **Water takes the blood back** — `GORE_WASH` in `systems/gore.js`. The
+  island's headline events are a tsunami and a flash flood, and blood used to
+  sit through both: the sea rose eight metres over a street, drained, and
+  every pool was still there, crisp, on ground that had just been underwater.
+  A submerged decal is pushed straight into its fade and stays washed — the
+  receding tide leaving CLEAN ground is the whole read. Survival asks
+  `survFloodDepthMeanAt` (the FLAT column), not the live crest, for the same
+  reason the swimmer's entry test went flat: a passing swell would otherwise
+  strobe decals in and out of washing.
+- **An open wound follows you** — the ledger trails `CBZ.goreDrip` marks
+  behind a body that has actually bled, spent on DISTANCE MOVED rather than on
+  time (someone standing still costs one vector subtraction), hard-capped at 8
+  bleeders, and it CLOSES on its own so it never becomes a paint roller.
+  `CBZ.trauma.bleeding(a)` reports it.
+- **Survival corpses linger where you can see them** — `entities/survivorbot.js`
+  used to delete every body at a flat 6 s wherever it was, which is long enough
+  to watch someone die and nowhere near long enough to walk over and look at
+  what killed them. Distance decides now: out of sight still goes at 6 s (the
+  budget is unchanged where it matters — a field of 99), near bodies lie ~22 s,
+  and only 12 may linger at once so a mass-casualty disaster can never stack
+  the lobby in front of the lens.
+- **Ground decals follow the GROUND** — `systems/gore.js` fits every blood pool
+  and smear to the local surface NORMAL (sampled off the same `CBZ.floorAt`
+  everything stands on) instead of stamping a hard horizontal `rotation.x =
+  -PI/2` disc. On the survival island's 26 m × 36 m refuge cone (~36°) a flat
+  2 m pool hung its uphill rim 1.4 m in the air — the owner's "flats that
+  float". Past `STEEP` blood does not pool at all: the disc is cut back and a
+  downhill trickle is drawn out of it. Flat ground is byte-identical (n =
+  (0,1,0) → the old rotation). Ratchet `CBZ.goreAudit().float` — worst rim-to-
+  ground gap in metres, measured by `tools/test-survival-gore-browser.mjs`;
+  0.27 fitted vs 2.08 unfitted on the mountain. It may only go DOWN. Flag
+  `GORE_SLOPE_DECALS`. Sibling flag `GORE_GIB_MEAT` soaks flying chunks toward
+  wound-dark so a hillside reads as gore rather than as pastel confetti, and
+  `opts.gib` prices the chunk count per kill (a beating throws none).
 - **Held bodies** — `CBZ.ragdollPin(target, {point, at, until})` in
   `city/ragdoll.js` pins one verlet mass point to a moving transform so the rest
   of the skeleton whips off it (a body thrashed in jaws). Plus buoyancy: a corpse
