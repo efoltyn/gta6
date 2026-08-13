@@ -25,6 +25,28 @@ html, body { touch-action: none; -webkit-user-select: none; user-select: none; }
 /* kill double-tap zoom / scroll-bounce over the 3D canvas itself (iPad Pro) */
 #game, #game > canvas { touch-action: none; }
 
+/* ---- NO BROWSER DOUBLE-TAP ZOOM, ANYWHERE --------------------------------
+   (owner, on an iPhone: "when I double tap fast it doesn't zoom in — this
+   isn't in-game zoom, I'm saying browser.")
+
+   index.html already carries `maximum-scale=1, user-scalable=no`, and iOS
+   Safari has DELIBERATELY IGNORED both since iOS 10 — that meta tag has never
+   done anything about this on a phone. The one lever Safari does honour is
+   `touch-action`, and the catch is that touch-action DOES NOT INHERIT. The
+   `none` two lines up covers the document background and the canvas, and the
+   `@media (pointer: coarse)` block further down covers an enumerated list of
+   buttons — but every HUD panel, pill, card, label and plain <div> between
+   them is still at the initial `auto`, and a fast double tap that lands on one
+   of those is exactly what zooms the page.
+
+   `manipulation` is `auto` minus double-tap zoom (and the other non-standard
+   gestures); panning and pinch are untouched, so scrollable panels still
+   scroll and a deliberate pinch-zoom still works. The universal selector has
+   specificity 0, so EVERY other rule in this codebase — including the `none`
+   above — still beats it: this only fills in the elements that declared
+   nothing, which are the ones that were zooming. */
+* { touch-action: manipulation; }
+
 #touch { position: fixed; inset: 0; z-index: 22; pointer-events: none; display: none; }
 /* Only the on-screen buttons capture touches. The joystick is a WINDOW-level
    gesture (touch.js listens on window, not on #tstick), so #tstick must NOT
@@ -186,6 +208,85 @@ html, body { touch-action: none; -webkit-user-select: none; user-select: none; }
 .tbtn.tfire { background: rgba(226,74,58,.5); border-color: rgba(255,120,100,.65);
   position: relative; overflow: visible; }
 .tbtn.on { transform: translateY(3px); background: rgba(255,122,26,.62); box-shadow: 0 1px 0 rgba(0,0,0,.3); }
+
+/* ---- THE LANDSCAPE PHONE: THE COLUMN IS TALLER THAN THE SCREEN ------------
+   (owner, on an iPhone: "the reload button is invisible… this is only in
+   landscape, not in portrait.")
+
+   Nothing was hiding it. #tbtns is a bottom-anchored column with no height of
+   its own, so it grows UPWARD and whatever runs past the top of the glass is
+   simply never drawn. Armed and on foot the flow is
+
+     FIRE 84 + JUMP 72 + VIEW/SWAP/RELOAD/AIM 52x4 + five 12px gaps = 424px
+
+   standing on a 22px + safe-area floor — 467px of column. A phone in PORTRAIT
+   has ~850px to spend and never notices. The SAME phone in LANDSCAPE has ~390,
+   so the fifth button up is already past the top edge: RELOAD, and AIM above
+   it. That is the whole bug, and it is why it is orientation-only.
+
+   Two rules, and the second is the one that actually holds:
+     1. shrink the cluster on a short viewport — a landscape phone is not an
+        iPad and 84px roundels are a tablet's budget, not a 390px one;
+     2. let the column WRAP into a second one to the LEFT. Shrinking alone
+        cannot win: six buttons that still clear a 44px thumb target need
+        ~344px of the ~350 available, which leaves the top button sharing
+        pixels with #topright — and the moment a situational pill turns up
+        (SCOPE on a sniper, HOMING on an RPG, RECENTER) it overflows again.
+        Wrapping is a backstop that does not care how many are live.
+
+   column-reverse + wrap-reverse = lines fill from the BOTTOM-RIGHT, so FIRE
+   keeps the corner it has always had and the spillover lands inboard of it,
+   still under the same thumb. It only ever engages when the column genuinely
+   does not fit; on an iPad, and on the same phone in portrait, max-height is
+   never reached and this block changes nothing but the sizes.
+
+   max-height is measured in svh — the SMALL viewport, toolbars SHOWN, which is
+   the height that is really on the glass. 100vh in iOS landscape is the
+   toolbar-HIDDEN height, so wrapping against it would under-wrap by exactly
+   the height of the bar and put a button back under the chrome. (vh first as
+   the fallback for engines without svh.) The 86px reserve is the 22px floor
+   plus 64px of headroom, which is what keeps the tallest column clear of the
+   #topright timer/cash stack. */
+@media (max-height: 560px) {
+  #tbtns {
+    gap: 9px;
+    flex-wrap: wrap-reverse;
+    align-content: flex-start;
+    max-height: calc(100vh  - 86px - env(safe-area-inset-bottom, 0px) - env(safe-area-inset-top, 0px));
+    max-height: calc(100svh - 86px - env(safe-area-inset-bottom, 0px) - env(safe-area-inset-top, 0px));
+  }
+  /* flex-shrink:0 is the difference between wrapping and SQUASHING. A capped
+     column flex container shrinks its items before it does anything else, so
+     without this a very short landscape phone would keep one column and quietly
+     grind the 46px pills down past a thumb target instead of starting a second
+     one. A control that is on screen but too small to hit is the same bug in a
+     better disguise. */
+  .tbtn { width: 56px; height: 56px; flex: 0 0 auto; }
+  .tbtn.tsm { width: 46px; height: 46px; }
+  .tbtn.tjump { width: 58px; height: 58px; }
+  .tbtn.tbig { width: 70px; height: 70px; }
+  /* WHICH buttons spill is not left to chance. Wrapping in DOM order would put
+     RELOAD in the outer column on a 375px SE and keep VIEW — the third-person
+     toggle — in the corner, which is the wrong verb to have promoted on the
+     screen where this bug was reported. `order` (short viewports ONLY, so the
+     iPad and this same phone in portrait keep the column they have) lifts
+     RELOAD to third from the thumb, where it is inside the corner column on
+     every landscape phone; what spills is the situational half — AIM, SCOPE,
+     HOMING, RECENTER — which is what should be a reach. */
+  #tbtns #tfire   { order: 1; }
+  #tbtns #tjump   { order: 2; }
+  #tbtns #treload { order: 3; }
+  #tbtns #tswap   { order: 4; }
+  #tbtns #tview   { order: 5; }
+  #tbtns #taim    { order: 6; }
+  #tbtns #tscope  { order: 7; }
+  #tbtns #thoming { order: 8; }
+  #tbtns #trecen  { order: 9; }
+  /* #tfire.tpad::after (the drag ring) is deliberately NOT rescaled: it is
+     drawn from PAD_MAXR, so it states how far the held thumb may actually
+     roam. Shrinking it to match the smaller roundel would make it a decoration
+     that lies. It is absolute + pointer-events:none, so it costs no layout. */
+}
 
 /* TOUCH_AIM_TOGGLE (.tlatch, touch.js): AIM and SCOPE are LATCHES, not holds —
    tap on, tap off. A latch must not borrow the momentary "pressed" look (that

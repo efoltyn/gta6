@@ -3378,6 +3378,13 @@
   CBZ.fpsWeaponIdOf = weaponIdOf;
   CBZ.fpsWeaponCount = function () { return WEAPONS.length; };
   CBZ.fpsWeaponIndex = function () { return fps.weapon; };
+  // DO YOU ACTUALLY OWN A GUN — not "is first person on". fps.weapon is only
+  // ever an INDEX into WEAPONS; it is 0 (the first slot) on a player who has
+  // never picked anything up, so reading it as a weapon says "armed" to an
+  // empty-handed inmate. availableIndices() is the same ownership test the
+  // swap/reload paths already normalise against, so this cannot drift from
+  // what those verbs would actually do.
+  CBZ.fpsHasWeapon = function () { return availableIndices().length > 0; };
   // re-seed the current mag/reserve display after a mod purchase changes capacity
   CBZ.fpsResyncAmmo = function () { syncAmmo(); setAmmoHud(); };
   // TRUE while the player is HOLDING RMB to aim down sights, with a gun out and

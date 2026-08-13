@@ -1495,7 +1495,17 @@
     // If the player entered a road car while still holding the on-foot stick,
     // release it before another frame can leak its WASD into the car.
     if (carButtonsActive() && stick.id !== null) releaseStick();
-    const armed = !!((CBZ.cityHasGun && CBZ.cityHasGun()) || (CBZ.fps && CBZ.fps.active));
+    // ARMED MEANS HOLDING A GUN, NOT LOOKING DOWN THE BARREL OF THE CAMERA.
+    // (owner: "reload and gunswitch show even before I get a gun.")
+    // `fps.active` is FIRST-PERSON MODE — a view, not an inventory. The prison
+    // opening is played in first person with empty hands, so this term alone
+    // was true from the first frame and RELOAD / SWAP / AIM / SCOPE were all
+    // on the glass before the player had ever touched a weapon. cityHasGun()
+    // was never the problem; it correctly returns false until equippedWeapon()
+    // finds something you own. First person now has to answer the same
+    // question the city path does, via fpsmode's own ownership test.
+    const armed = !!((CBZ.cityHasGun && CBZ.cityHasGun()) ||
+      (CBZ.fps && CBZ.fps.active && CBZ.fpsHasWeapon && CBZ.fpsHasWeapon()));
     const sw = document.getElementById("tswap"), rl = document.getElementById("treload");
     if (sw) sw.style.display = armed ? "" : "none";
     if (rl) rl.style.display = armed ? "" : "none";

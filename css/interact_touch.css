@@ -82,6 +82,33 @@
 @media (max-width:900px),(max-height:560px){
   :root{ --pi-sub-floor: calc(env(safe-area-inset-bottom, 0px) + 186px); }
 }
+/* ---- THE MIRROR HAS TO FOLLOW THE THING IT MIRRORS ------------------------
+   The derivation above is exact for the cluster mobile.css lays out on an iPad
+   — 84px FIRE, one column, #tview parked at a constant 180px. On a LANDSCAPE
+   PHONE that cluster is now a different object: mobile.css shrinks it (FIRE 70)
+   and lets it WRAP into a second column, because one column of full-size
+   roundels is taller than the screen and RELOAD was being drawn off the top
+   edge. So these constants have to change with it or this block anchors to a
+   cluster that is not there.
+
+   And on exactly these screens nothing corrects the mistake at runtime:
+   touch.js's syncInteractionDock() re-measures the real rects, but it is gated
+   on `innerWidth >= 700 && innerHeight >= 550`, so on a phone in landscape
+   (h ≈ 390) it never runs and THIS is the only geometry there is.
+
+     cluster width = col1 (FIRE 70) + gap 9 + col2 (a .tsm pill 46) = 125px
+     vertical      = the wrapped column's own mid-height, ~124px up from the
+                     cluster floor, since #tview is no longer a fixed slot
+
+   Height-only query: a phone in PORTRAIT keeps the tall single column and must
+   keep the original numbers with it. */
+@media (max-height: 560px){
+  :root{
+    --pi-cluster-w: 125px;
+    --pi-eye-offset: 124px;
+    --pi-eye-size: 46px;
+  }
+}
 
 /* ============================================================
    1. THE BLOCK — name/read/tip stacked over the button row
