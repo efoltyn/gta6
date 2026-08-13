@@ -301,20 +301,34 @@
     island.receiveShadow = true; root.add(island);
 
     // ---- mountains as cones sitting on the floor ----
+    /* EVERY ONE OF THESE IS TERRAIN, SO EVERY ONE OF THEM TAKES SNOW.
+       systems/weather.js's coat scan qualifies a surface by BOUNDING RADIUS
+       (COAT_MIN_R = 34 m), which is the right instinct in a city full of small
+       props and the wrong answer here: the three outlying hills are r 16-22
+       with peaks of 7-11, so their bounding spheres come out at 16-23 m and
+       every one of them failed the bar. Measured during a blizzard: the island
+       plate went white, the central refuge cone (r 36 → 38 m) went white, and
+       three green hills sat in the middle of it. `userData.coat` is that file's
+       author opt-in — the twin of its `noCoat` opt-out — and it says the one
+       thing a size test cannot work out on its own: this is the ground. */
     hills.forEach((hl, i) => {
       // central refuge = rocky grey-brown peak; smaller ones = grassy hills
       const cone = new THREE.Mesh(new THREE.ConeGeometry(hl.r, hl.peak, i === 0 ? 9 : 6),
         mat(i === 0 ? 0x8a8175 : 0x7faa5e));
       cone.position.set(hl.x, hl.peak / 2, hl.z);
       cone.castShadow = true; cone.receiveShadow = true;
+      cone.userData.coat = true;
       root.add(cone);
       if (i === 0) {
         // a grassy skirt around the rocky base so it rises out of the island
         const skirt = new THREE.Mesh(new THREE.ConeGeometry(hl.r * 1.04, hl.peak * 0.4, 9), mat(0x6fa552));
-        skirt.position.set(hl.x, hl.peak * 0.2, hl.z); skirt.receiveShadow = true; root.add(skirt);
-        // snow cap on the refuge peak
+        skirt.position.set(hl.x, hl.peak * 0.2, hl.z); skirt.receiveShadow = true;
+        skirt.userData.coat = true; root.add(skirt);
+        // snow cap on the refuge peak — already white, and coating white with
+        // white is a wasted material patch, so this one stays out of the scan.
         const cap = new THREE.Mesh(new THREE.ConeGeometry(hl.r * 0.32, hl.peak * 0.3, 9), mat(0xf2f6ff));
-        cap.position.set(hl.x, hl.peak * 0.86, hl.z); cap.castShadow = true; root.add(cap);
+        cap.position.set(hl.x, hl.peak * 0.86, hl.z); cap.castShadow = true;
+        cap.userData.noCoat = true; root.add(cap);
       }
     });
 

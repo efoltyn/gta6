@@ -138,26 +138,28 @@
     // WOUND, which a drowning isn't. The body comes out dark and sodden.
     [/drown|swept|undertow|\bflood\b|tsunami/, { mark: "soak" }],
     // ---- THESE BLEED ----
-    // `gib` prices the flying CHUNKS (gore.js LAYER 3, 1 = its stock count).
-    // It is a separate axis from `amount` on purpose: a beating is bloody and
-    // dismembers nothing, a tornado dismembers more than a bomb does. Before
-    // this, every survival death threw the same five body chunks — which is
-    // how a hillside ended up littered after people died of falls and beatings.
+    // `limbs` IS A LIMB COUNT, NOT A PARTICLE BUDGET (owner: "I hate the blood
+    // blocks"). It used to price gore.js's generic flying CUBES; the island
+    // does not throw cubes any more, it takes real body parts off the real rig
+    // (severBody), so the honest question is how many a given death actually
+    // detaches. Most detach none — that restraint is the point, and it is why
+    // a beating and a long fall now leave a whole body on the ground.
     //
     // the island's worst: a tornado does not kill you, it disassembles you
-    [/torn apart|tornado/, { amount: 1.75, gib: 1.5, style: "tear", slowmo: 0.45 }],
-    // crushed: burst and pooled, with the ground wearing most of it
-    [/crush|rubble|collaps|lahar|flatten|meteor|volcanic bomb/, { amount: 1.5, gib: 1, style: "crush" }],
+    [/torn apart|tornado/, { amount: 1.75, limbs: 2, style: "tear", slowmo: 0.45 }],
+    // crushed: burst and pooled, with the ground wearing most of it. Rubble
+    // breaks a body, it rarely takes pieces OFF one.
+    [/crush|rubble|collaps|lahar|flatten|meteor|volcanic bomb/, { amount: 1.5, limbs: 0, style: "crush" }],
     // a long drop onto rock — radial, low, and very wide. A fall does not throw
     // pieces of you around; it flattens you where you land.
-    [/sinkhole|crater|\bfell\b|\bfall\b|\bfalls\b/, { amount: 1.35, gib: 0, style: "splat" }],
+    [/sinkhole|crater|\bfell\b|\bfall\b|\bfalls\b/, { amount: 1.35, limbs: 0, style: "splat" }],
     // struck by something thrown fast: directional, off the impact side
-    [/debris|hurricane|impaled|struck|thrown|hit by/, { amount: 1.1, gib: 0.35, style: "burst" }],
+    [/debris|hurricane|impaled|struck|thrown|hit by/, { amount: 1.1, limbs: 0, style: "burst" }],
     // beaten: bruise, split, then a slow bleed-out under the body. Fists take
-    // nothing off a person, so this throws no chunks at all.
-    [/beaten|punch|melee|fists/, { amount: 1.0, gib: 0, style: "blunt" }],
+    // nothing off a person.
+    [/beaten|punch|melee|fists/, { amount: 1.0, limbs: 0, style: "blunt" }],
     // ordnance proper (never reached by the nuke rows above)
-    [/explosion|ordnance|\bbomb\b|\bblast\b|shell/, { amount: 1.3, gib: 1.2, style: "boom" }],
+    [/explosion|ordnance|\bbomb\b|\bblast\b|shell/, { amount: 1.3, limbs: 1, style: "boom" }],
   ];
   function profile(cause) {
     const c = ("" + (cause || "")).toLowerCase();
@@ -357,7 +359,11 @@
       const carried = r ? Math.min(0.55, r.v * 0.3) : 0;
       const amount = pr.amount + carried + (a.isPlayer ? 0.25 : 0);
       const opts = {
-        dir, amount, gib: pr.gib, cloth: a.outfit, skin: a.skin, player: !!a.isPlayer,
+        dir, amount, cloth: a.outfit, skin: a.skin, player: !!a.isPlayer,
+        // WHO died, so gore.js can stamp the wound on the real body and take a
+        // real limb off it instead of throwing anonymous boxes. The player's
+        // own corpse is never dismembered (gore.js refuses isPlayer).
+        actor: a, imp: imp || null, limbs: a.isPlayer ? 0 : (pr.limbs || 0),
         slowmo: a.isPlayer ? (pr.slowmo || 0.4) : (pr.slowmo || 0),
       };
       switch (pr.style) {
