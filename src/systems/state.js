@@ -300,7 +300,6 @@
     }
     const who = actor ? actor.data.name.replace(/^the |^a |^an /, "") : "Someone";
     let sub = reason === "befriend" ? `${who} walked you out`
-      : reason === "romance" ? `${who} busted you out for love`
       : reason === "nuke" ? "Tactical nuke ended the run"
       : reason === "route" ? "Through a hidden escape route"
       : "Through the gate";

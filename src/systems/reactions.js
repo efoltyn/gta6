@@ -148,6 +148,11 @@
   const AIM_RANGE2 = 60 * 60;   // shooters visibly track a mark inside 60u
   const AIM_HEAD_YAW = 0.75;    // believable neck turn cap
   const AIM_HEAD_PIT = 0.38;
+  // STARE (CBZ.npcStare): how far a neck turns onto you, and how far away
+  // somebody can still clock you. Wider than the aim cap because a look is
+  // not a shoulder-committed aim.
+  const STARE_YAW = 1.05;
+  const STARE_RANGE2 = 26 * 26;
   const AIM_ELEV = 0.55;        // max gun-arm elevation correction (rad)
 
   // per-actor reaction record, keyed by the actor object.
@@ -196,6 +201,7 @@
         clutchT: 0, clutchSide: 0, clutchAmp: 0,   // wound-clutch (non-fatal): timer / which hand (±1) / caliber weight
         jailHitT: 0, jailHitX: 0, jailHitZ: 1, jailHitAmp: 0,
         headAmp: 0, headKind: "cross", headLf: 1, headLs: 0, hsX: 0, hsY: 0, hsZ: 0,  // HEAD SNAP (CBZ.reactPunch)
+        stK: 0, stOff: 0,                          // STARE (CBZ.npcStare) — eased neck yaw + last frame's offset
         aimK: 0, aimY: 0, aimP: 0, aimA: 0, hyOff: 0,
         swingT: 0, swingArm: 1, dazeK: 0, guardK: 0,
         // seed the detectors from the CURRENT values so an actor first seen
@@ -421,6 +427,56 @@
           if (r.hsZ) neck.rotation.z -= r.hsZ;
         }
         r.hsX = 0; r.hsY = 0; r.hsZ = 0;
+
+        /* HE LOOKS AT YOU. (CBZ.npcStare — what the floating "!" became.)
+
+           27 call sites used to hang an exclamation mark over the head of
+           anyone who clocked you, painted on a canvas with depthTest:false so
+           it showed through walls. A man noticing you is not a symbol, it is a
+           head turning.
+
+           This sits HERE, beside the head-snap back-out, rather than with the
+           aim head-track further down — because that whole block lives inside
+           `if (isCity && parts && body)` and the prison never reaches it. Same
+           shape as the hands-up bug: finished machinery, gated away from the
+           mode that needed it. Rather than widen a city branch (and risk
+           double-driving a channel the city already writes), the stare owns a
+           small offset of its own, backed out here the same way every other
+           damped channel in this file is.
+
+           `.pos` goes through the group fallback because a jail actor keeps
+           its position on `.group.position` — the trap that had citySay
+           silently failing for the whole prison and crashed every landed punch
+           in systems/combat.js until this wave. */
+        if (neck && r.stOff) neck.rotation.y -= r.stOff;
+        r.stOff = 0;
+        if ((a.stareT || 0) > 0) {
+          a.stareT -= dt;
+          // `live`/`down` are declared further down this function, so the test is
+          // spelled out here rather than reaching forward into them.
+          const looking = !a.dead && !a.escaped && !(a.ko > 0) && !(a.koT > 0) &&
+            !a.surrender && !(a.char.handsUp || a.char.surrender);
+          const me = a.pos || (a.group && a.group.position);
+          const tgt = a.stareAt || CBZ.player;
+          const tp = tgt && (tgt.pos || (tgt.group && tgt.group.position));
+          let want = 0;
+          if (looking && neck && me && tp && !tgt.dead) {
+            const sdx = tp.x - me.x, sdz = tp.z - me.z;
+            if (sdx * sdx + sdz * sdz < STARE_RANGE2) {
+              let rel = Math.atan2(sdx, sdz) - a.group.rotation.y;
+              rel = ((rel + Math.PI) % (Math.PI * 2)) - Math.PI;
+              if (rel < -Math.PI) rel += Math.PI * 2;
+              // a neck only turns so far; past that he would have to step round
+              want = rel > STARE_YAW ? STARE_YAW : (rel < -STARE_YAW ? -STARE_YAW : rel);
+            }
+          }
+          r.stK = damp(r.stK || 0, want, 11, dt);   // snap on, ease off
+          if (neck && Math.abs(r.stK) > 0.001) { r.stOff = r.stK; neck.rotation.y += r.stOff; }
+        } else if (r.stK) {
+          r.stK = damp(r.stK, 0, 11, dt);
+          if (Math.abs(r.stK) < 0.002) r.stK = 0;
+          if (neck && r.stK) { r.stOff = r.stK; neck.rotation.y += r.stOff; }
+        }
 
         // Directional fight-read channels share the same back-out dance: neck
         // pitch + body yaw + joints are DAMPED by animChar (feedback if left
@@ -836,16 +892,17 @@
             const adx = a.rage.pos.x - a.pos.x, adz = a.rage.pos.z - a.pos.z;
             if (adx * adx + adz * adz < AIM_RANGE2) aimT = a.rage;
           }
-          r.aimK = damp(r.aimK, aimT ? 1 : 0, 14, dt);
-          if (aimT) {
-            const tdx = aimT.pos.x - a.pos.x, tdz = aimT.pos.z - a.pos.z;
+          // a jail actor has no `.pos` — read through the group
+          const apos = a.pos || (a.group && a.group.position);
+          if (aimT && apos) {
+            const tdx = aimT.pos.x - apos.x, tdz = aimT.pos.z - apos.z;
             const th = Math.hypot(tdx, tdz) || 0.001;
             const ty = (aimT.pos.y || 0) + (aimT.isPlayer ? 1.05 : 0.95);  // chest height × HUMAN_SCALE 0.70 (was 1.5 / 1.35)
             let relY = Math.atan2(tdx, tdz) - ry;
             relY = ((relY + Math.PI) % (Math.PI * 2)) - Math.PI;
             if (relY < -Math.PI) relY += Math.PI * 2;
             if (relY > AIM_HEAD_YAW) relY = AIM_HEAD_YAW; else if (relY < -AIM_HEAD_YAW) relY = -AIM_HEAD_YAW;
-            const elev = Math.atan2(ty - ((a.pos.y || 0) + 1.29), th);  // shoulder → target (1.84 local collar × HUMAN_SCALE 0.70)
+            const elev = Math.atan2(ty - ((apos.y || 0) + 1.29), th);  // shoulder → target (1.84 local collar × HUMAN_SCALE 0.70)
             let hp2 = -elev * 0.7;                                      // facial convention: -x looks up
             if (hp2 > AIM_HEAD_PIT) hp2 = AIM_HEAD_PIT; else if (hp2 < -AIM_HEAD_PIT) hp2 = -AIM_HEAD_PIT;
             let armC = -elev;                                           // more negative = barrel raised
@@ -1119,6 +1176,17 @@
     }
   }
   CBZ.reactPunch = reactPunch;
+
+  /* CBZ.npcStare(actor, secs, at) — make somebody LOOK at you.
+     The replacement for the floating "!" that used to hang over the head of
+     anyone who noticed you. One line at a call site, degrade-safe (a build
+     without this file just does nothing), and it costs no new state beyond a
+     timer: the head-track above does the rest. `at` defaults to the player. */
+  CBZ.npcStare = function (actor, secs, at) {
+    if (!actor) return;
+    actor.stareT = Math.max(actor.stareT || 0, secs || 1.6);
+    if (at) actor.stareAt = at;
+  };
 
   // LATE (89): after animChar (20/22) and facial.js (88) have posed the
   // rig this frame, so our additive offsets sit on a fresh base.

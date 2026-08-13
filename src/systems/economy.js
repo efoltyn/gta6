@@ -928,33 +928,24 @@
     return n;
   }
 
-  // ---------- ROMANCE: a relationship that can spring you out ----------
-  const LOVE_LINES = [
-    "You're alright to talk to. That's rare in here.",
-    "Come find me at yard time. I'll be around.",
-    "Careful. People notice who you stand next to.",
-    "Keep talking to me like that and I'll start expecting it.",
-    "Don't get caught looking at me like that.",
-  ];
-  function romance(actor) {
-    actor.love = (actor.love || 0) + 11 + rng() * 8;
-    actor.playerTrust = (actor.playerTrust || 0) + 0.7;
-    if (actor.gang >= 0) nudgeGang(actor, 1, -1);
-    if (actor.gang >= 0 && CBZ.noteGangIncident) CBZ.noteGangIncident(actor, "romance", 2, { source: "rapport", silent: true });
-    if (actor.love >= 100) {
-      CBZ.winGame("romance", actor);
-      return { ok: true, msg: "I'm not watching them take another year off you. Walk with me." };
-    }
-    if (rng() < 0.22) { actor.love = Math.max(0, actor.love - 7); return { ok: false, msg: "Not today. Go on." }; }
-    CBZ.sfx("coin");
-    // the ladder is the LINE, never a meter: where you are shows in how they
-    // answer, and the last rung is somebody making plans with you.
-    const l = actor.love;
-    if (l >= 82) return { ok: true, msg: "If a door ever went open for you, I'd walk through it too." };
-    if (l >= 55) return { ok: true, msg: "I look for you out here now. That's your fault." };
-    if (l >= 30) return { ok: true, msg: pick(LOVE_LINES) };
-    return { ok: true, msg: pick(LOVE_LINES) };
-  }
+  /* ROMANCE / FLIRT: DELETED. (OWNER, 2026-08-13: "remove all flirt shit from
+     the game, its stupid.")
+
+     This was a `love` scalar you raised by pressing a verb at somebody until it
+     hit 100, at which point they broke you out of prison. It was the purest
+     form of the thing this whole wave is against: a relationship expressed as a
+     number that goes up when you press a button, with the person supplying
+     dialogue lines at fixed rungs to prove the number moved.
+
+     Nothing physical ever happened. No one ever walked over, waited for you,
+     stood between you and anybody, or acted differently in a way you could see
+     — the entire relationship was the counter and its captions. Escaping via
+     `winGame("romance")` is gone with it; the gate, the vents, the tunnels,
+     befriend and time served are all still there.
+
+     `actor.love` is left readable where insult() still decrements it, because
+     other reads are harmless and removing the field would touch save state.
+  */
 
   // ---------- INSULT: lower rep, maybe start a fight / a hunt ----------
   const INSULT_BACK = ["Say it again. Slower.", "That's twice. There isn't a third.",
@@ -1412,7 +1403,7 @@
     };
   };
 
-  CBZ.econ = { talk, trade, bribe, payoff, steal, beat, romance, insult, thiefTick, addCigs, addItem, hasItem, takeItem, itemStore, pickOffer, offerPrice, offerLine, payoffCost, bribeCost, rollLoadout, rollDrops, lootActor, resetLoadouts, mintLoadouts, lootAudit, announceLoot, isRare, ITEMS, SELLABLE, DRUGS, VALUABLES, rng, reseed,
+  CBZ.econ = { talk, trade, bribe, payoff, steal, beat, insult, thiefTick, addCigs, addItem, hasItem, takeItem, itemStore, pickOffer, offerPrice, offerLine, payoffCost, bribeCost, rollLoadout, rollDrops, lootActor, resetLoadouts, mintLoadouts, lootAudit, announceLoot, isRare, ITEMS, SELLABLE, DRUGS, VALUABLES, rng, reseed,
     // the social layer — read these, never re-derive them
     socialRead, respectOf, loyaltyOf, addRespect, addLoyalty, guardPost, stealOdds, witnessRespect, voice: VOICE, pickLine: pick };
   CBZ.socialRead = socialRead;     // the one accessor other systems adopt

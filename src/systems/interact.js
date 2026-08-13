@@ -3,14 +3,15 @@
    anyone and the options fade in beside them. Four social verbs on the
    home-row cluster (the numbers belong to the inventory hotbar):
 
-       [J] Romance   [K] Insult   [L] Befriend   [;] Steal
+       [J] Insult   [K] Befriend   [;] Steal
        (fight is left-click / the touch trigger, never a menu row)
+       (Romance was the fourth and is DELETED — see economy.js)
 
    Merchants, the dealer and bent cops swap a row for Trade, guards for
    Bribe / Pay off, a cop player for Question / Warn / Cuff / Search,
    and an approaching NPC replaces the lot with its own offer. Befriend
    routes through systems/quests.js (favors, rep, and the "they let you
-   walk out" win); Romance is its own way out.
+   walk out" win).
 
    ON TOUCH the whole card is REPLACED rather than restyled — on iPad,
    every choice is a vertical row docked beside Reload with its full
@@ -81,7 +82,6 @@
   }
 
   const VERB = {
-    romance:  { label: "Romance",         fn: (a) => CBZ.econ.romance(a) },
     insult:   { label: "Insult",          fn: (a) => CBZ.econ.insult(a) },
     fight:    { label: "Fight",           fn: (a) => (CBZ.punch ? CBZ.punch(a) : CBZ.econ.beat(a)) },
     befriend: { label: "Befriend",        fn: (a) => (CBZ.quests ? CBZ.quests.onTalk(a) : CBZ.econ.talk(a)) },
@@ -151,7 +151,6 @@
 
   // one-line teaching text per verb; shown until the player has used it
   const DESC = {
-    romance:  "Flirt — max it and they'll break you out",
     insult:   "Talk trash — drops rep, may start a brawl",
     fight:    "Throw hands — chain hits for a K.O. combo",
     befriend: "Do favors, build rep — friends walk you free",
@@ -329,7 +328,7 @@
         : ((a.reportedPlayerT || 0) > 0 ? reportDetail(a)
         : (CBZ.game.role === "cop" && a.copMarked > 0 ? "somebody put his name in"
         : (a.rep >= (CBZ.quests ? CBZ.quests.FRIEND : 100) ? "owes you, and knows it"
-        : (a.love >= 100 ? "would take the risk for you" : "")))));
+        : ""))));
     const read = actorRead(a);
     const motive = a.approach && a.approach.motive ? `motive: ${shortText(a.approach.motive, 24)}` : "";
     if (!priority) return read;
@@ -346,7 +345,7 @@
       if (authored && authored.length) return authored;
     }
     /* HELD AT GUNPOINT. A man with his hands over his head is not available
-       for "romance / insult / befriend", and the thing you CAN do to him used
+       for "insult / befriend", and the thing you CAN do to him used
        to arrive as a separate pill that popped into frame to announce he was
        frozen. He is visibly frozen; the popup and the pill both said so twice.
        So this is one more context in the list below rather than a new surface:
@@ -394,7 +393,9 @@
       if (!a.data || !a.data.offer) return gverbs.filter((v) => v !== "trade");
       return gverbs;
     }
-    const base = ["romance", "insult", "befriend"];   // fight = left-click
+    // FLIRT IS GONE (see economy.js). A relationship that was a rising
+    // counter with dialogue rungs is not a relationship.
+    const base = ["insult", "befriend"];              // fight = left-click
     if (a.data && a.data.offer) base.push("trade");                       // merchants/bent cops
     base.push("steal");                                                   // pickpocket ANYONE — lift cigs, a chain, even a key
     if (a.gang >= 0 && CBZ.player.gang == null && (a.rep || 0) >= 40) base.push("join"); // recruit you
@@ -415,13 +416,6 @@
        thresholds; what the chip shows is now the WORD for where you stand, out
        of economy.js's one social accessor so the chip and the dialogue can
        never disagree about the same person. */
-    if (v === "romance") {
-      const l = a.love || 0;
-      if (l >= 82) return "close";
-      if (l >= 55) return "warm";
-      if (l >= 25) return "friendly";
-      return "";
-    }
     if (v === "befriend") {
       if ((a.playerGrudge || 0) >= 6) return "repair";
       const S = CBZ.econ && CBZ.econ.socialRead ? CBZ.econ.socialRead(a) : null;
@@ -523,7 +517,6 @@
     }
     const nm = shortText(cleanName(a), 14);
     switch (v) {
-      case "romance":  return (a.love || 0) >= 60 ? `Get closer to ${nm}` : `Flirt with ${nm}`;
       case "insult":   return `Talk trash to ${nm}`;
       case "befriend": return (a.playerGrudge || 0) >= 6 ? `Square things with ${nm}` : ((a.rep || 0) >= 45 ? `Catch up with ${nm}` : `Chat up ${nm}`);
       case "fight":    return `Throw hands with ${nm}`;
@@ -1018,7 +1011,7 @@
   // romance=win+progression). Selection is by priority; menu order preserved.
   const VERB_PRIORITY = {
     refuse: 100, accept: 92, trade: 88, steal: 86, befriend: 84, confrontReport: 84,
-    join: 82, romance: 80, paySilence: 80, bribe: 78, threatenSnitch: 78, payoff: 76,
+    join: 82, paySilence: 80, bribe: 78, threatenSnitch: 78, payoff: 76,
     pay: 74, detain: 72, listen: 70, search: 70, warn: 66, threaten: 64, respect: 60,
     question: 60, haggle: 50, insult: 40,
     // gunpoint pair — only ever offered together, so the cap never sees them

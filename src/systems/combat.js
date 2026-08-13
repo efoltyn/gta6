@@ -37,33 +37,30 @@
     spark.material.opacity = 1; spark.visible = true; sparkLife = 0.16;
   }
 
-  /* ---------- enemy health bar (billboard) ---------- */
-  const hc = document.createElement("canvas"); hc.width = 100; hc.height = 16;
-  const hx = hc.getContext("2d");
-  const hpTex = new THREE.CanvasTexture(hc);
-  const hpBar = new THREE.Sprite(new THREE.SpriteMaterial({ map: hpTex, depthTest: false, transparent: true }));
-  hpBar.scale.set(2.0, 0.32, 1); hpBar.visible = false; scene.add(hpBar);
-  let hpTarget = null, hpShownT = 0;
-  function drawHP(ratio) {
-    hx.clearRect(0, 0, 100, 16);
-    hx.fillStyle = "rgba(0,0,0,.6)"; hx.fillRect(0, 0, 100, 16);
-    const col = ratio > 0.5 ? "#3ad17a" : ratio > 0.25 ? "#ffb020" : "#ff3b3b";
-    hx.fillStyle = col; hx.fillRect(2, 2, Math.max(0, 96 * ratio), 12);
-    hx.strokeStyle = "rgba(255,255,255,.5)"; hx.lineWidth = 2; hx.strokeRect(1, 1, 98, 14);
-    hpTex.needsUpdate = true;
-  }
-  function showHP(actor) {
-    hpTarget = actor; hpShownT = 3;
-    drawHP(Math.max(0, actor.hp) / maxHpOf(actor));
-  }
+  /* FLOATING HEALTH BAR OVER PEOPLE: DELETED.
+
+     A green-to-red meter pinned above whoever you were punching, drawn with
+     depthTest:false so it hung through walls, for three seconds after every
+     hit. It is the same object as the emoji this wave just removed and the
+     "love 47%" chip interact.js already deleted with the note "NO METERS ON A
+     PERSON" — a number about somebody printed beside their face.
+
+     A beaten man already reads without it: systems/reactions.js flinches and
+     staggers him, gore.js bleeds him, wound decals accumulate on the body
+     (guard._woundN), the knockback moves him and he goes down when he is
+     done. That IS the health bar, drawn on the person instead of above him.
+
+     showHP() stays as a no-op so the four call sites keep working. */
+  function showHP() {}
+
+  // The impact spark shared the deleted bar's tick — it still needs one, or it
+  // flashes on at the first punch and hangs there for the rest of the run.
   CBZ.onAlways(59, function (dt) {
-    if (sparkLife > 0) { sparkLife -= dt; spark.material.opacity = Math.max(0, sparkLife / 0.16); spark.scale.multiplyScalar(1 + dt * 6); if (sparkLife <= 0) spark.visible = false; }
-    if (hpShownT > 0 && hpTarget && !hpTarget.dead) {
-      hpShownT -= dt;
-      hpBar.visible = true;
-      hpBar.position.set(hpTarget.group.position.x, (hpTarget.group.position.y || 0) + 2.1, hpTarget.group.position.z);
-      hpBar.material.opacity = Math.min(1, hpShownT);
-    } else hpBar.visible = false;
+    if (sparkLife <= 0) return;
+    sparkLife -= dt;
+    spark.material.opacity = Math.max(0, sparkLife / 0.16);
+    spark.scale.multiplyScalar(1 + dt * 6);
+    if (sparkLife <= 0) spark.visible = false;
   });
 
   /* ---------- launched bodies (uppercut pop-up) ---------- */
@@ -149,9 +146,14 @@
   function punch(actor) {
     const hasTarget = punchable(actor);
     if (actor && !hasTarget) return { ok: false, msg: "" };
-    if (pendingPunch) return { ok: false, msg: "Finish the swing." };
+    // NO "Finish the swing." — the arm is mid-arc on screen. A caption telling
+    // you that the punch you are watching has not landed yet is the clearest
+    // case in the game of narrating an animation.
+    if (pendingPunch) return { ok: false, msg: "" };
     if (CBZ.player.dead || (CBZ.player.stun || 0) > 0) return { ok: false, msg: "" };
-    if (stamina < 0.18) return { ok: false, msg: "Catch your breath." };
+    // Fists never stop working. Tired means WEAKER, not blocked — the damage
+    // scales off stamina below, and the guard visibly drops (ch.winded). There
+    // is nothing left to explain, so there is no line to print.
     if (hasTarget && actor.hp == null) actor.hp = maxHpOf(actor);
 
     if (CBZ.now - lastPunch < 980) combo++; else combo = 1;
@@ -174,11 +176,17 @@
 
     pendingPunch = {
       actor: hasTarget ? actor : null, heavy, yaw, kind, reach, arcDot,
-      dmg: baseDmg * (heavy ? 1.8 : (kind === "cross" ? 1.16 : 1)),
+      // gassed punches land soft: 100% fresh down to 35% empty
+      dmg: baseDmg * (heavy ? 1.8 : (kind === "cross" ? 1.16 : 1)) * (0.35 + 0.65 * stamina),
       t: heavy ? 0.19 : 0.15,
       max: heavy ? 0.42 : 0.34,
     };
-    return { ok: true, msg: heavy ? "Heavy swing..." : "Swing..." };
+    // NO "Swing..." / "Heavy swing...". Eight lines above, this function set
+    // punchArm, punchKind, punchDur and punchT — entities/character.js:2509
+    // drives a real jab / cross / hook / uppercut off those, with its own
+    // wind-up and follow-through. The popup captioned the animation it had
+    // just triggered. A punch IS a motion; that was the whole point.
+    return { ok: true, msg: "" };
   }
 
   function landPunch(attack) {
@@ -207,8 +215,22 @@
 
     const dmg = attack.dmg;
     actor.hp -= dmg;
-    // punches BRUISE (wounds.js) — the face you beat carries it
-    if (CBZ.bodyWound) CBZ.bodyWound(actor, { x: actor.pos.x, y: (actor.pos.y || 0) + 1.55, z: actor.pos.z }, { melee: "blunt", fromX: CBZ.player.pos.x, fromZ: CBZ.player.pos.z });
+    /* punches BRUISE (wounds.js) — the face you beat carries it.
+
+       THIS THREW ON EVERY LANDED PUNCH. `actor.pos` does not exist on a prison
+       actor — they keep their position on `.group.position` (the same trap
+       city/social.js's citySay hit, documented in entities/ai.js). Reading
+       `.pos.x` off undefined raised mid-landPunch, so NOTHING below this line
+       ever ran: no hit-stop, no shake, no knockback, no spark, no KO, no
+       downConsequences. Melee had no impact at all, and the "Swing..." popup
+       was the only evidence a punch had happened — which is exactly why the
+       caption felt load-bearing. Fix the body and the caption is redundant;
+       delete the caption first and you have neither. */
+    const wp = actor.pos || (actor.group && actor.group.position) || null;
+    if (CBZ.bodyWound && wp) {
+      CBZ.bodyWound(actor, { x: wp.x, y: (wp.y || 0) + 1.55, z: wp.z },
+        { melee: "blunt", fromX: CBZ.player.pos.x, fromZ: CBZ.player.pos.z });
+    }
     stamina = Math.min(1, stamina + 0.05);
     showHP(actor);
 
@@ -238,8 +260,11 @@
       popup(heavy ? "WHAM!" : "DOWN!", combo);
       if (CBZ.knockback) CBZ.knockback(actor, CBZ.player.pos.x, CBZ.player.pos.z, 1.5);
       CBZ.sfx("ko"); downConsequences(actor, guardish);
-      const c = combo; combo = 0;
-      return { ok: true, msg: `${nm(actor)} drops!${c >= 3 ? "  (" + c + "-hit combo!)" : ""}` };
+      combo = 0;
+      // NO LINE. He is on the floor, the ko sound played, the knockback threw
+      // him and showHP drew the hit. The combo count was the only part not on
+      // screen, and you counted it by throwing the punches.
+      return { ok: true, msg: "" };
     }
 
     popup(heavy ? "WHAM!" : WORDS[Math.floor(CBZ.econ.rng() * WORDS.length)], combo);
@@ -268,18 +293,31 @@
     if (CBZ.game.koLog && actor.data) CBZ.game.koLog[actor.data.name] = true;
     if (CBZ.killstreakOnDown) CBZ.killstreakOnDown(actor, "melee");
     showHP(actor);
-    const c = combo; combo = 0;
-    return { ok: true, msg: `You drop ${nm(actor)} cold.${c >= 3 ? "  (" + c + "-hit combo)" : ""}` };
+    combo = 0;
+    // A DEATH ALREADY HAS ITS SURFACE and it is not a hint line: aiKill above
+    // routes to city/killfeed.js and drops the body's real loadout on the floor
+    // (systems/prisondrops.js). This said the same thing, worse, over the top
+    // of a man falling down.
+    return { ok: true, msg: "" };
   }
 
   CBZ.onUpdate(58, function (dt) {
     stamina = Math.min(1, stamina + dt * 0.42);
+    /* STAMINA GETS A BODY. This value gated every punch and lived and died
+       inside this file — nothing read it, nothing drew it, and the bar in
+       #survBars is display:none outside survival/gungame. Publishing it as
+       `winded` (0 fresh → 1 gassed) lets entities/character.js's fight stance
+       drop the guard, slow the weave and start the chest heaving, which is
+       what the deleted "Catch your breath." was standing in for. The ramp
+       starts at the same 0.45 the punch gate lives under, so the guard is
+       already visibly sagging by the time the fists actually refuse. */
+    const ch = CBZ.playerChar;
+    if (ch) ch.winded = Math.min(1, Math.max(0, 1 - stamina));
     if (!pendingPunch) return;
     pendingPunch.t -= dt;
     if (pendingPunch.t > 0) return;
-    const res = landPunch(pendingPunch);
+    landPunch(pendingPunch);
     pendingPunch = null;
-    if (res && res.msg) CBZ.flashHint(res.msg, 2.4);
   });
 
   CBZ.punch = punch;
@@ -297,7 +335,6 @@
     if (CBZ.game.state !== "playing" || !document.pointerLockElement) return;
     if (CBZ.fps && CBZ.fps.active) return;
     if (CBZ.playerArmed && CBZ.playerArmed()) return;
-    const r = punch();
-    if (r && r.msg) CBZ.flashHint(r.msg, 1.4);
+    punch();   // the swing is the feedback; there is no line left to print
   });
 })();

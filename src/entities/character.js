@@ -2594,26 +2594,49 @@
     if (ch.fightStance && !(ch.punchT > 0) && !(ch.kickT > 0) && !(ch.blockT > 0) &&
         !(ch.dodgeT > 0) && !(ch.staggerT > 0) && !(ch.koT > 0) && !ch.koPose &&
         !ch.aimingPose && !ch.carryPose && !ch.cuffed && !ch.surrender && !ch.handsUp) {
-      ch.fightPh = (ch.fightPh || 0) + dt;              // own phase: weave, don't walk
+      /* GASSED — the guard comes down. (`ch.winded`, 0..1, written by
+         systems/combat.js from the punch stamina it used to keep private.)
+
+         Punch stamina gated every attack you threw and had NO body: the bar in
+         #survBars is display:none outside survival/gungame (hud.css), and the
+         value itself was a module-local `let` nobody could read. So the only
+         way the prison could tell you why your fists stopped working was a
+         popup that said "Catch your breath." — narration standing in for an
+         animation that was never built.
+
+         A tired fighter is one of the most legible things a body can do, and
+         it needs no new rig: the arms sink out of the chin-guard, the weave
+         goes slow and heavy, the chest starts heaving on the breath channel,
+         and the knees give up the sprung crouch. Every one of those is a
+         channel this block already drives. At winded = 0 the arithmetic below
+         reduces EXACTLY to the values above it, so a fresh fighter is
+         untouched, byte for byte. */
+      const gas = Math.min(1, Math.max(0, ch.winded || 0));
+      // the weave itself slows as he tires — a gassed man does not bounce
+      ch.fightPh = (ch.fightPh || 0) + dt * (1 - gas * 0.45);
       const w = Math.sin(ch.fightPh * 2.6);             // slow weave
       const w2 = Math.sin(ch.fightPh * 5.2 + 1.3);      // faster forearm pump
-      // forearms up near the chin, tucked slightly inward, a touch forward
-      ch.parts.la.rotation.x = -0.9 + w2 * 0.05;
-      ch.parts.la.rotation.z = -0.26;
+      const pump = 1 - gas * 0.6;                       // the pump dies off too
+      // forearms up near the chin, tucked slightly inward, a touch forward —
+      // and sagging toward the ribs as he gasses out
+      ch.parts.la.rotation.x = (-0.9 + gas * 0.62) + w2 * 0.05 * pump;
+      ch.parts.la.rotation.z = -0.26 + gas * 0.10;
       ch.parts.la.rotation.y = 0.1;
-      ch.parts.la.position.z = 0.1;
-      ch.parts.ra.rotation.x = -0.98 - w2 * 0.05;
-      ch.parts.ra.rotation.z = 0.26;
+      ch.parts.la.position.z = 0.1 - gas * 0.06;
+      ch.parts.ra.rotation.x = (-0.98 + gas * 0.66) - w2 * 0.05 * pump;
+      ch.parts.ra.rotation.z = 0.26 - gas * 0.10;
       ch.parts.ra.rotation.y = -0.1;
-      ch.parts.ra.position.z = 0.1;
-      // bladed torso + subtle rhythmic weave; soft knees when standing still
+      ch.parts.ra.position.z = 0.1 - gas * 0.06;
+      // bladed torso + subtle rhythmic weave; soft knees when standing still.
+      // The heave rides ch.breath (the same channel idle/carry already use), so
+      // a winded man visibly sucks air where a fresh one is still.
       ch.body.rotation.y = -0.18 + w * 0.1;
-      ch.body.rotation.x = ch.lean + 0.08;
+      ch.body.rotation.x = ch.lean + 0.08 + gas * (0.10 + Math.sin(ch.breath * 4.6) * 0.055);
       ch.body.rotation.z = ch.sway + w * 0.04;
       if (!moving) {
-        ch.body.position.y -= 0.05 + w * 0.02;          // sit into the stance, bob
-        ch.parts.ll.scale.y = 0.96;
-        ch.parts.rl.scale.y = 0.96;
+        ch.body.position.y -= (0.05 + w * 0.02) * (1 - gas * 0.8);  // stands up out of the crouch
+        ch.parts.ll.scale.y = 0.96 + gas * 0.04;
+        ch.parts.rl.scale.y = 0.96 + gas * 0.04;
       }
     }
 
