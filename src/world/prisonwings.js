@@ -87,7 +87,8 @@
 
    Ratchet: CBZ.prisonWingsAudit() — `unreachable` (a locked thing with no
    route in the build) and `orphanGates` (a gap cut in a wall with no gate
-   in it, i.e. a hole in the perimeter) both pinned at 0.
+   in it, i.e. a hole in the perimeter) both pinned at 0, and `doorsInWalls`
+   (a leaf that swings inside somebody else's collider) pinned at 1.
 ============================================================ */
 (function () {
   "use strict";
@@ -370,7 +371,21 @@
 
   /* ---- THE CAGE. Gun-room grammar rule (a) made into a primitive: bars on
        a transparent collider pane, so the prize is visible from outside and
-       unreachable until the lock gives. Used three times below. ---- */
+       unreachable until the lock gives. Used three times below.
+
+       `gap: {a0, a1}` IS THE DOORWAY, and it is not dressing — it is the
+       difference between a cage and a sealed box. The pane below is ONE solid
+       collider spanning the whole face, and `makeDoor` only ever splices out
+       its own 0.2 m leaf (see :239) — it never cuts the wall the leaf stands
+       in, because every other door in this file stands in a gap `roomShell`
+       already left. A cage paned across its own door therefore stays shut
+       after the lock gives, which is exactly what the knife cage and the
+       property cage were: 116 m2 and 137 m2 of floor and seven placed items
+       with no route in by key, pick or charge. Measured by flood-filling the
+       compound's collider set at 0.25 m, not by reading walls.
+
+       So the paned face is built as the RUNS EITHER SIDE of the door span.
+       The head rail stays one piece — it rides above the 2.6 m leaf. ---- */
   function cage(cfg) {
     const { x0, x1, z0, z1 } = cfg, ch = cfg.h || 2.9;
     const pane = function (x, z, w, d) {
@@ -379,13 +394,27 @@
       p.castShadow = false; p.receiveShadow = false;
       return p;
     };
+    // the door span, subtracted from whichever run it falls in. No gap
+    // declared -> one unbroken run, byte-identical to before.
+    const gap = cfg.gap || null;
+    function runs(a0, a1) {
+      if (!gap || !(gap.a1 > a0) || !(gap.a0 < a1)) return [[a0, a1]];
+      const out = [];
+      if (gap.a0 > a0) out.push([a0, gap.a0]);
+      if (gap.a1 < a1) out.push([gap.a1, a1]);
+      return out;
+    }
     // only the two faces that look INTO the room are drawn; the other two are
     // the host room's own walls, which is how a real crib is built.
     const openS = cfg.open || "S";                 // which side faces the room
     if (openS === "S" || openS === "N") {
       const zf = openS === "S" ? z1 : z0;
-      pane((x0 + x1) / 2, zf, x1 - x0, 0.12);
-      for (let i = 0; i * 0.44 < x1 - x0 - 0.2; i++) addBox(x0 + 0.2 + i * 0.44, ch / 2, zf, 0.08, ch - 0.04, 0.08, 0x2a2f38, { cast: false });
+      for (const r of runs(x0, x1)) {
+        const w = r[1] - r[0];
+        if (w <= 0.02) continue;
+        pane((r[0] + r[1]) / 2, zf, w, 0.12);
+        for (let i = 0; i * 0.44 < w - 0.2; i++) addBox(r[0] + 0.2 + i * 0.44, ch / 2, zf, 0.08, ch - 0.04, 0.08, 0x2a2f38, { cast: false });
+      }
       addBox((x0 + x1) / 2, ch + 0.02, zf, x1 - x0, 0.12, 0.12, 0x2a2f38, { cast: false });
     }
     const xf = cfg.side === "W" ? x0 : x1;
@@ -431,11 +460,18 @@
     addBox(-81.8, 0.4, z, 0.22, 0.8, 1.1, 0x5b6470, { cast: false });
   }
   for (let i = 0; i < 6; i++) addBox(-70, 1.3, -1 + i * 7.6, 2.2, 2.6, 2.4, 0x6b7480, { solid: true });  // stock racks
-  cage({ x0: -116, x1: -104, z0: 28, z1: 44, side: "E", open: "S", h: 2.9 });
+  /* The crib sits in the shop's SOUTH-WEST corner, so its host walls are the
+     room's own x=-116 and z=44 and the faces that look INTO the shop are
+     x=-104 and z=28. `open:"S"` paned z=44 — the exterior wall it already
+     had — and left z=28, the face a man walks at, with nothing on it: the
+     3.2 s pick gated an open doorway. `open:"N"` panes the face that needs
+     it, and the door moves onto that same face with it. */
+  const CRIB_DOOR = { a0: -110.4, a1: -107.4, fixed: 28 };
+  cage({ x0: -116, x1: -104, z0: 28, z1: 44, side: "E", open: "N", h: 2.9, gap: CRIB_DOOR });
   stockCage([["Hacksaw Blade", -110, 0.80, 36], ["Lockpick", -108.4, 0.80, 34.6], ["Pickaxe", -111.6, 0.80, 34.6]]);
   const cribDoor = makeDoor({
     id: "prison-tool-crib", label: "The tool crib", pick: 3.2, bars: true, lb: 5,
-    axis: "x", a0: -110.4, a1: -107.4, fixed: 44, color: 0x39424e,
+    axis: "x", a0: CRIB_DOOR.a0, a1: CRIB_DOOR.a1, fixed: CRIB_DOOR.fixed, color: 0x39424e,
   });
 
   /* POWERHOUSE — deliberately UNLOCKED. An empty-handed room is a legitimate
@@ -504,11 +540,12 @@
   addBox(58.15, 1.55, 88.6, 0.3, 3.1, 7.2, 0x9aa2aa, { solid: true, blockLOS: true });
   addBox(70, 1.55, 88.6, 0.3, 3.1, 7.2, 0x9aa2aa, { solid: true, blockLOS: true });
   addBox(64, 3.2, 90.4, 12, 0.2, 7.4, 0x8892a0, { cast: false, blockLOS: true });
-  cage({ x0: 98, x1: 110, z0: 84, z1: 96, side: "W", open: "N", h: 2.9 });
+  const KNIFE_DOOR = { a0: 102.2, a1: 105.2, fixed: 84 };
+  cage({ x0: 98, x1: 110, z0: 84, z1: 96, side: "W", open: "N", h: 2.9, gap: KNIFE_DOOR });
   stockCage([["Shiv", 104, 0.80, 90], ["Razor Blade", 105.6, 0.80, 91.4], ["Hatchet", 102.4, 0.80, 91.4]]);
   const knifeDoor = makeDoor({
     id: "prison-knife-cage", label: "The knife cage", pick: 4.4, bars: true, lb: 5,
-    axis: "x", a0: 102.2, a1: 105.2, fixed: 84, color: 0x39424e,
+    axis: "x", a0: KNIFE_DOOR.a0, a1: KNIFE_DOOR.a1, fixed: KNIFE_DOOR.fixed, color: 0x39424e,
   });
 
   /* VISITATION & PROPERTY. The room a man is processed through, and the room
@@ -529,12 +566,13 @@
     }
     for (const s of [-1, 1]) { addBox(x, 0.42, 110 + s * 1.6, 0.44, 0.08, 0.44, 0x52606d, { cast: false }); addBox(x, 0.21, 110 + s * 1.6, 0.14, 0.42, 0.14, 0x9aa0a8, { cast: false }); }
   }
-  cage({ x0: 96, x1: 110, z0: 104, z1: 116, side: "W", open: "S", h: 2.9 });
+  const PROP_DOOR = { a0: 101.5, a1: 104.5, fixed: 116 };
+  cage({ x0: 96, x1: 110, z0: 104, z1: 116, side: "W", open: "S", h: 2.9, gap: PROP_DOOR });
   stockCage([["Stolen Wallet", 102, 0.80, 110], ["Cash Roll", 104, 0.80, 111.4],
     ["Luxury Watch", 100.4, 0.80, 108.6], ["Burner Phone", 105.6, 0.80, 109.2]]);
   const propDoor = makeDoor({
     id: "prison-property", label: "The property cage", pick: 5.6, bars: true, lb: 5,
-    axis: "x", a0: 101.5, a1: 104.5, fixed: 116, color: 0x39424e,
+    axis: "x", a0: PROP_DOOR.a0, a1: PROP_DOOR.a1, fixed: PROP_DOOR.fixed, color: 0x39424e,
   });
 
   // -------------------------------------------------------------- THE BUBBLE
@@ -731,6 +769,20 @@
                          and it is the one way this file can fail silently.
         `insideHa`     — the compound's area, reported so a future change that
                          quietly shrinks it is visible as a number.
+        `doorsInWalls` — GEOMETRY, and the one this file was missing. Every
+                         check above asks about INVENTORY: do you own a card,
+                         a pick, a charge. None of them can see a leaf that
+                         swings inside a solid wall, so `unreachable` read 0
+                         while the knife cage and the property cage had no
+                         route in by any means and the tool crib had no wall
+                         at all. This counts leaves whose own opening is still
+                         occupied by somebody else's collider. It is REPORTED,
+                         not thrown: `prison-segregation` is a known standing
+                         instance (its leaf sits in the seg block's south
+                         exterior wall, behind the cell backs — the room is
+                         entered by its west doorway and the gate gates
+                         nothing), so the honest pin today is 1, and a 2 means
+                         a new one was just built.
      ========================================================== */
   CBZ.prisonWingsAudit = function () {
     const econ = CBZ.econ;
@@ -755,6 +807,24 @@
       }
       if (!found) orphan++;
     }
+    /* A LEAF THAT SWINGS INSIDE A WALL. Test the middle 60% of each opening
+       so a jamb or the host room's wall meeting the span at its very end is
+       not counted; anything else standing there is concrete the lock cannot
+       move, because setOpen only ever splices out the leaf's own collider. */
+    const cols = CBZ.colliders || [];
+    const inWall = [];
+    for (let i = 0; i < doors.length; i++) {
+      const d = doors[i];
+      const ax = d.axis === "x";
+      const mid = (d.a0 + d.a1) / 2, half = (d.a1 - d.a0) * 0.3;
+      const x0 = ax ? mid - half : d.fixed - 0.2, x1 = ax ? mid + half : d.fixed + 0.2;
+      const z0 = ax ? d.fixed - 0.2 : mid - half, z1 = ax ? d.fixed + 0.2 : mid + half;
+      for (let j = 0; j < cols.length; j++) {
+        const c = cols[j];
+        if (!c || c._city || c === d.collider || !isFinite(c.minX)) continue;
+        if (c.minX < x1 && c.maxX > x0 && c.minZ < z1 && c.maxZ > z0) { inWall.push(d.id); break; }
+      }
+    }
     const w = OUT.x1 - OUT.x0, dz = OUT.z1 - OUT.z0;
     return {
       on: true,
@@ -765,6 +835,8 @@
       wallGapsCut: cut.length,
       unreachable: unreachable,                   // MUST be 0
       orphanGates: orphan,                        // MUST be 0
+      doorsInWalls: inWall.length,                // pinned at 1 (see the header)
+      doorsInWallsIds: inWall,
       stocked: stock.length, laid: laid,
       consoleThrown: RELEASE.thrown,
       openNow: doors.filter(function (d) { return d.open; }).length,
