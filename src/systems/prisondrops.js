@@ -671,6 +671,24 @@
      new-run sweep below (a hacksaw on a workbench does not vanish because you
      restarted) and it never counts against the death-drop cap.
      ============================================================ */
+  /* ONE ITEM, OUT OF A LIVING MAN'S HAND. `prisonDrop` above empties a CORPSE
+     — it consumes the whole rolled loadout and is tagged `_dropped` so a body
+     can only be emptied once. Neither is right for a man who is still standing
+     and has just decided to let go of the thing he was holding, which is what
+     a shiv hitting the concrete at gunpoint is. Same spawn, same physics, same
+     walk-over pickup; one item, a small toss so it lands beside him rather than
+     inside his shoes, and no corpse bookkeeping. */
+  CBZ.prisonDropOne = function (item, x, y, z, opts) {
+    opts = opts || {};
+    if (!item || !CBZ.spawnProp) return null;
+    const g = CBZ.game;
+    if (g && g.mode !== "escape") return null;
+    const a = opts.dir != null ? opts.dir : Math.random() * 6.283;
+    const sp = opts.speed != null ? opts.speed : 0.55 + Math.random() * 0.5;
+    return spawnDrop(item, 0, x, (y == null ? 0.9 : y) + SPAWN_Y, z,
+      Math.sin(a) * sp, opts.up != null ? opts.up : 0.7, Math.cos(a) * sp);
+  };
+
   const placed = [];
   CBZ.prisonPlaceItem = function (item, x, y, z) {
     if (!item) return null;

@@ -165,6 +165,32 @@
            quarters is where chancing it starts to make sense, because at
            arm's length a grab is a real option and the shot is not.
        The modifiers that were already reading right (taser, backup) stand. */
+    /* A MAN WITH A BLADE ANSWERS FIRST, because he is holding something and
+       has to do something with it. systems/prisonshanks.js owns that decision
+       (stats-driven, no rng, distance as a hard gate) and performs the stow or
+       the drop itself; this file only learns which of the three he picked.
+
+       CHARGE is the branch the header above has promised since the owner said
+       "you raise your hands or charge at me or run away" — it has never once
+       run, because `decideGun` returns false and the only defiance this
+       module knew was pulling a gun nobody has. A shank is a weapon a man can
+       plausibly chance it with, so it is the one that brings the branch back.
+
+       The other two land in the SAME `scared` body as an empty-handed man: he
+       put the thing away (or on the floor) and got his hands up, which is
+       exactly what the surrender pose already draws. Nothing to special-case. */
+    if (CBZ.prisonShankGunpoint) {
+      let blade = null;
+      try { blade = CBZ.prisonShankGunpoint(n, { lethal: lethal, dist: playerDist(n) }); } catch (e) {}
+      if (blade === "charge") {
+        n.intimidMode = "charge";
+        n.poseHandsUp = false; n.poseAimBack = false;
+        if (n.char) n.char.handsUp = false;
+        // NO POPUP. A man walking at you with a blade out is the message.
+        return;
+      }
+    }
+
     let draw = 0;
     if (n.hasGun) {
       draw = 0.04 + nerve * 0.26 + fight * 0.15 + guts * 0.12;
@@ -223,6 +249,8 @@
 
   function endIntimid(n) {
     const wasArmed = n.intimidMode === "draw" || n.intimidMode === "standoff";
+    const wasCharging = n.intimidMode === "charge";
+    if (CBZ.prisonShankGunpointEnd) { try { CBZ.prisonShankGunpointEnd(n); } catch (e) {} }
     n.intimidMode = null;
     n.intimidT = 0;
     n.poseHandsUp = false;
@@ -233,7 +261,11 @@
     n._reactHinted = false;
     // someone who drew on you stays wary and bolts with the gun still out;
     // hands-up folks just go back to their day.
-    if (wasArmed && alive(n) && n.aiState !== "fight" && n.aiState !== "snitch") {
+    // A man who CHARGED is not finished because you looked away — that is the
+    // moment he wanted. His hunt is left running (entities/ai.js owns it and
+    // times it out on its own), so lowering the gun on someone who decided to
+    // come at you does not cancel him.
+    if (wasArmed && !wasCharging && alive(n) && n.aiState !== "fight" && n.aiState !== "snitch") {
       n.aiState = "flee"; n.fleeT = 1.5 + rng() * 1.5;
     }
   }
@@ -247,8 +279,14 @@
       return;
     }
 
-    const aiming = !!(CBZ.isAimingWeapon && CBZ.isAimingWeapon());
     const gun = CBZ.currentGun && CBZ.currentGun();
+    /* THIS MODULE IS ABOUT A MUZZLE. Holding a blade out at a man is a threat,
+       but it is not the threat this file models — nobody puts his hands over
+       his head because someone across the yard is holding a sharpened strip of
+       bed frame. `currentGun()` answers with whatever is equipped, and since
+       the shank shipped that can be a weapon with no barrel, which would have
+       had the whole wing surrendering to a knife at nine metres. */
+    const aiming = !!(CBZ.isAimingWeapon && CBZ.isAimingWeapon()) && !(gun && gun.melee);
     const lethal = !!(gun && !gun.nonlethal);
 
     // who is directly in the player's gun sights? (inmates only — guards keep
@@ -273,7 +311,14 @@
         if (!alive(n)) { endIntimid(n); continue; }
         if (n.intimidMode == null) decideReaction(n, lethal);
 
-        if (n.intimidMode === "draw") {
+        if (n.intimidMode === "charge") {
+          // Nothing to run here. entities/ai.js's huntPlayer brain is already
+          // walking him at you and swinging when he arrives, and
+          // systems/prisonshanks.js keeps the blade drawn because it reads the
+          // same field. Re-arming the hunt each frame is the whole of it, so
+          // that holding the gun on him does not time out his approach.
+          n.huntPlayer = Math.max(n.huntPlayer || 0, 6);
+        } else if (n.intimidMode === "draw") {
           n.intimidDrawT -= dt;
           if (n.intimidDrawT <= 0) {
             n.intimidMode = "standoff";

@@ -100,6 +100,19 @@
     // what keeps entities/character.js's boxing fightStance off this body, and
     // that has to hold through the swing too or the guard pops back between hits.
     ch.bladeCarry = true;
+    /* HANDS UP MEANS BOTH HANDS. A man with a gun on him who is complying
+       raises TWO arms, and entities/character.js's surrender layer owns them
+       both while `ch.handsUp` is set. This pass runs from `always`, after
+       every updater, so a blind write here beat that layer on the weapon arm
+       only — one hand overhead, one hand down at the belt still holding the
+       shiv. That is the exact two-writers-one-arm bug this file's own carry
+       comment warns about, committed by this file.
+
+       The resolution below (`gunpoint`) normally means there is no blade in
+       the hand to pose by the time a surrender starts. This guard is the
+       belt-and-braces for every path that does not go through it — cuffed,
+       seized, or a surrender raised by some future system. */
+    if (ch.handsUp || ch.surrender || ch.cuffed) return;
     // The stab owns the arm outright while it is running (character.js's punch
     // block hard-assigns it). Writing over a live thrust would flatten it into
     // a twitch — this is the two-writers-one-arm bug that d82675d unpicked.
@@ -196,12 +209,224 @@
     }
   }
 
+  /* ============================================================
+     A KNIFE AT A GUNFIGHT (CBZ.CONFIG.PRISON_SHANK_GUNPOINT, =0 and a man
+     with a blade answers a gun exactly as an empty-handed one does).
+
+     THE BUG THAT STARTED IT. Point a gun at a man holding a shank and he put
+     ONE hand up. The other stayed at his belt, still holding it, because this
+     file kept writing the weapon arm straight through
+     entities/character.js's surrender layer. The pose guard in carry() above
+     stops that — but a guard alone would only have produced a man with both
+     hands up and a blade still in his fist, which is not a surrender either.
+     What was missing is the DECISION: a man with a weapon in his hand and a
+     muzzle in his face has to do something with it.
+
+     THREE ANSWERS, AND THEY ARE NOT A COIN FLIP. systems/intimidate.js already
+     decides draw-vs-surrender from stats, and its header carries the owner's
+     own note: "i hold a gun at you far away you raise your hands or charge at
+     me or run away USUALLY RAISE HANDS." Charge was never built — `decideGun`
+     returns false, so in the prison every single man surrendered and the
+     defiance branch was dead code. The shank is the weapon that makes charging
+     mean something, so it is the weapon that brings it back:
+
+       DROP   he lets go of it. It hits the concrete as a real prop you can
+              walk over and take — so pointing a gun at armed men is how you
+              disarm a wing, and a frightened man is visibly different from a
+              merely compliant one.
+       STOW   into the waistband, hands up clean. He complies and KEEPS it,
+              which matters the moment you lower the gun.
+       CHARGE he doesn't comply at all. He closes with it out.
+
+     WHY DISTANCE IS A GATE AND NOT A TERM. This is the whole "knife to a
+     gunfight" question and it deserves a hard edge rather than a soft one. A
+     blade inside a few metres is a genuine bet — the gun has to be on target
+     and the trigger has to break before he arrives. At ten metres it is
+     suicide and every man in this yard knows it. Written as one more weighted
+     term it would smear into noise and the player would read it as randomness;
+     written as a gate it is a LEVER he can learn: back up and the wing
+     complies, crowd them and the hard ones come. A taser widens the gate,
+     because against a taser a shank is a genuinely good trade.
+
+     NO rng() IN ANY OF THIS. Same man, same stats, same range, same answer —
+     every time, so the yard is something you can learn to read rather than
+     something you gamble against.
+     ============================================================ */
+  /* MEASURED AGAINST THE REAL CAST, not guessed. The first authoring set
+     these at 0.58 / 0.30 on intuition, and CBZ.prisonShankSteel's histogram
+     immediately showed what that bought: this roster's steel runs ~0.38-0.75
+     against a levelled gun, so 0.58 sat below the middle (most of the wing
+     charged) and 0.30 sat below the FLOOR — the drop branch was unreachable
+     and no man ever let go of anything. A stats rule whose thresholds live
+     outside the stats' actual range is a distance rule wearing a costume.
+     Placed now at roughly the top sixth and the bottom quarter of the real
+     distribution, which is what the owner's "USUALLY RAISE HANDS" asks for:
+     most comply, a hard minority comes, a frightened minority disarms. */
+  const CHARGE_STEEL = 0.68;   // above this he comes, if he is close enough
+  const DROP_STEEL = 0.45;     // below this he lets go of it
+  const CHARGE_R_LETHAL = 4.2; // m — inside this a blade beats a levelled gun
+  const CHARGE_R_TASER = 6.5;  // m — and a taser is a much worse thing to hold
+
+  let gpCharge = 0, gpStow = 0, gpDrop = 0;
+
+  function gunpointEnabled() {
+    return enabled() && (!CBZ.CONFIG || CBZ.CONFIG.PRISON_SHANK_GUNPOINT !== false);
+  }
+
+  /* HOW MUCH FIGHT HE HAS IN HIM, right now, 0..1. Stats carry ~70% of the
+     weight (the owner's call: "based not on random but on stats and
+     relationship... mostly stats"); the relationship terms move it at the
+     margin, and what you have already done to him moves it hardest of all —
+     a man you have shot once does not try you twice. */
+  function steelOf(n, lethal) {
+    const p = n.personality || {}, r = n.ratings || {};
+    const nerve = p.nerve != null ? p.nerve : 0.5;
+    const fight = Math.max(0, Math.min(1, (r.fighting || 40) / 100));
+    const beh = CBZ.BEHAVIORS && CBZ.BEHAVIORS[n.behavior];
+    const guts = beh && beh.guts != null ? beh.guts : 0.4;
+    const maxHp = n.maxHp || 100;
+    const hurt = Math.max(0, Math.min(1, 1 - (n.hp == null ? maxHp : n.hp) / maxHp));
+
+    let s = 0.10
+      + nerve * 0.30              // the single biggest stat: is he a nervy man
+      + fight * 0.22              // and can he actually do anything about it
+      + guts * 0.18;              // temperament — a pacifist never comes
+    s += Math.min(14, n.playerGrudge || 0) * 0.030;   // he wants YOU specifically
+    s -= Math.min(14, n.playerFear || 0) * 0.045;     // you have hurt him before
+    if (nearbyCrew(n)) s += 0.10;                     // folding in front of the crew
+    if (n.isLeader) s += 0.06;                        // costs a leader the most
+    s -= hurt * 0.30;                                 // a wounded man complies
+    if (n._bleed > 0) s -= 0.12;                      // and a leaking one folds
+    // A taser is a much better thing to face with a blade — but this used to
+    // add 0.22, which lifted the ENTIRE cast over the charge line and made
+    // "you're only holding a taser" mean "everyone charges you". The honest
+    // lever for a taser is REACH (CHARGE_R_TASER, well over half again the
+    // lethal gate), not turning every man in the yard into a hard case.
+    if (!lethal) s += 0.12;
+    return Math.max(0, Math.min(1, s));
+  }
+
+  // Any living crewmate close enough to be watching him fold.
+  function nearbyCrew(n) {
+    if (n.gang == null || n.gang < 0) return false;
+    const list = CBZ.npcs || [];
+    for (let i = 0; i < list.length; i++) {
+      const m = list[i];
+      if (!m || m === n || m.dead || m.ko > 0 || m.gang !== n.gang || !m.group) continue;
+      const dx = m.group.position.x - n.group.position.x;
+      const dz = m.group.position.z - n.group.position.z;
+      if (dx * dx + dz * dz < 64) return true;   // 8 m
+    }
+    return false;
+  }
+
+  /* Called by systems/intimidate.js the once, at first contact, before it
+     decides anything of its own. Returns the mode it chose, or null if this
+     man has no blade to have an opinion about. Does the stow/drop itself —
+     intimidate owns the man's REACTION, this file owns his WEAPON. */
+  CBZ.prisonShankGunpoint = function (n, opts) {
+    opts = opts || {};
+    if (!gunpointEnabled() || !n || !n.group) return null;
+    if (n.hasGun) return null;                 // a real gun outranks the blade
+    if (!carriesShank(n) && !n._shankOut) return null;
+    const lethal = opts.lethal !== false;
+    const dist = opts.dist != null ? opts.dist : (CBZ.player
+      ? Math.hypot(n.group.position.x - CBZ.player.pos.x, n.group.position.z - CBZ.player.pos.z)
+      : 99);
+    const steel = steelOf(n, lethal);
+    n._shankSteel = steel;                     // published for the audit/storyboard
+
+    if (steel >= CHARGE_STEEL && dist <= (lethal ? CHARGE_R_LETHAL : CHARGE_R_TASER)) {
+      // He is not putting it away and he is not putting his hands up. The
+      // brain already knows how to close on you and swing — entities/ai.js
+      // reads huntPlayer — and `committed()` above reads the same field, so
+      // the blade comes out and STAYS out for free. No new movement code.
+      n.huntPlayer = Math.max(n.huntPlayer || 0, 9);
+      n._shankT = DRAW_DELAY;                  // he is already reaching
+      if (n.char) { n.char.handsUp = false; n.char.surrender = false; }
+      gpCharge++;
+      n._shankGunpoint = "charge";
+      return "charge";
+    }
+
+    if (steel <= DROP_STEEL) {
+      // It goes on the floor, as a real object. Tossed a little away from his
+      // feet so it does not land inside his shoes, and toward the man holding
+      // the gun, which is where you throw a thing you want seen being dropped.
+      const wasOut = !!n._shankOut;
+      stow(n);
+      if (CBZ.prisonDropOne && (wasOut || carriesShank(n))) {
+        const g = n.group.position;
+        const toPlayer = CBZ.player
+          ? Math.atan2(CBZ.player.pos.x - g.x, CBZ.player.pos.z - g.z) : 0;
+        try {
+          CBZ.prisonDropOne("Shiv", g.x, 0.95, g.z, { dir: toPlayer, speed: 0.85, up: 0.6 });
+        } catch (e) {}
+        // the object left him, so his pockets must agree
+        const ld = n.loadout;
+        if (ld && ld.items) {
+          const i = ld.items.indexOf("Shiv");
+          if (i >= 0) ld.items.splice(i, 1);
+        }
+        if (CBZ.worldSfx) {
+          try { CBZ.worldSfx("switch", g.x, g.z, { ref: 7 }); } catch (e) {}
+        }
+      }
+      gpDrop++;
+      n._shankGunpoint = "drop";
+      return "drop";
+    }
+
+    stow(n);
+    gpStow++;
+    n._shankGunpoint = "stow";
+    return "stow";
+  };
+
+  // intimidate.js hands the encounter back when you look away.
+  CBZ.prisonShankGunpointEnd = function (n) {
+    if (n) n._shankGunpoint = null;
+  };
+
+  /* Read-only: what WOULD this man do, without making him do it. Exists so the
+     thresholds can be surveyed against the real cast rather than guessed at —
+     a spread that comes back all-drop or all-charge is a tuning failure you
+     want to see as a histogram, not discover in the yard. */
+  CBZ.prisonShankSteel = function (n, lethal, dist) {
+    if (!n) return null;
+    const s = steelOf(n, lethal !== false);
+    const gate = (lethal !== false) ? CHARGE_R_LETHAL : CHARGE_R_TASER;
+    const d = dist == null ? 0 : dist;
+    return {
+      steel: s,
+      would: (s >= CHARGE_STEEL && d <= gate) ? "charge" : (s <= DROP_STEEL ? "drop" : "stow"),
+      inRange: d <= gate,
+    };
+  };
+
   if (CBZ.onAlways) CBZ.onAlways(53, step);
 
   /* The complaint as a number, for tools/visual-presets/prison-shank.mjs.
      `carrying` is what the loot tables always said; `holding` is how many of
      those blades are geometry in a hand this frame. Before this file the second
      number was structurally zero — there was no code path that could raise it. */
+  /* THE COMPLAINT, COUNTED: men whose hands are going up while a blade is
+     still posed in one of them. Reads the RIG, not a flag — `handsUp` is what
+     character.js's surrender layer keys off, and a visible weapon prop on the
+     same body is the contradiction the owner watched happen. */
+  function oneHandUpNow() {
+    let bad = 0;
+    const list = CBZ.npcs || [];
+    for (let i = 0; i < list.length; i++) {
+      const n = list[i];
+      if (!n || n.dead || !n.char) continue;
+      if (!(n.char.handsUp || n.char.surrender)) continue;
+      const p = n._weaponProp;
+      if (p && p.visible && p.userData && p.userData.weaponId === "shank") bad++;
+    }
+    return bad;
+  }
+
   CBZ.prisonShankCarryAudit = function () {
     let carrying = 0, holding = 0, posed = 0;
     const list = CBZ.npcs || [];
@@ -214,6 +439,14 @@
       const prop = n._weaponProp;
       if (prop && prop.visible && prop.userData && prop.userData.weaponId === "shank") posed++;
     }
-    return { carrying, holding, posed, drawnThisFrame: drawn, scanned: carriers, draws };
+    return {
+      carrying, holding, posed, drawnThisFrame: drawn, scanned: carriers, draws,
+      // What men with blades did about the gun in their face. `oneHandUp` is
+      // the original complaint reduced to a number: a man mid-surrender with
+      // the shank still posed in his weapon hand. It is structurally 0 now —
+      // the pose yields to handsUp, and the decision empties the hand first.
+      gunpointCharge: gpCharge, gunpointStow: gpStow, gunpointDrop: gpDrop,
+      oneHandUp: oneHandUpNow(),
+    };
   };
 })();
