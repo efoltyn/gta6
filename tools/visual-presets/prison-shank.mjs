@@ -118,9 +118,32 @@ async function stagePrisonShank(input) {
 
     window.requestAnimationFrame = function () { return 0; };
     await wait(700);
+
     // Let the prison reveal rail finish. A camera staged during the reveal is
     // silently overwritten and photographs a wall.
     for (let i = 0; i < 360; i++) { CBZ.hitstop = 0; CBZ.slowmo = 0; CBZ.stepSim(1 / 60); }
+
+    /* HOW MANY MEN IN THIS WING ARE CARRYING. Taken once, here, off
+       `carriedRoster` — the whole cast the loot tables armed, dead or alive —
+       so it does not drift across the five marks as the after-side starts
+       stabbing people (a live read did: 23 -> 20).
+
+       IT IS NOT IDENTICAL ON THE TWO SIDES, and it cannot be made so. Three
+       attempts are on record: reading it later drifted, reading it as a
+       roster count still split 24 -> 21, and reading it before the first tick
+       split 25 -> 19. The reason is not a bug in the count — it is that
+       `rollLoadout` draws from the run's ONE seeded rng, and turning the
+       feature on genuinely changes the yard from the first tick (men draw
+       blades, brawls resolve differently), so the stream diverges and the
+       rolls land differently. Both numbers are true readings of their own
+       world and both say the same thing, which is the only thing this metric
+       is claiming: about half the wing is carrying one. It is context for the
+       rows underneath it, not the row that carries the argument. */
+    let carriedAtBoot = 0;
+    try {
+      const a0 = CBZ.prisonShankAudit ? CBZ.prisonShankAudit() : null;
+      if (a0) carriedAtBoot = a0.carriedRoster != null ? a0.carriedRoster : a0.carried;
+    } catch (_) {}
 
     // HUD is hidden per-subject rather than once at boot, because one of the
     // five marks IS the HUD. Remember the chrome so it can come back.
@@ -140,21 +163,6 @@ async function stagePrisonShank(input) {
     const stand = new T.Group();
     stand.name = "visual-proof-shank-stand";
     (CBZ.prisonRoot || CBZ.scene).add(stand);
-
-    /* HOW MANY MEN IN THIS WING ARE CARRYING — snapshotted ONCE, on the
-       untouched world, before any plate has been staged. The live audit
-       counts the living, and the five marks share one page per side: by the
-       fourth plate the after side has stabbed people, so a live read drifts
-       (measured 23 -> 20) and the one number that is explicitly NOT supposed
-       to move between sides looked like it had. `carriedRoster` counts the
-       whole cast the tables armed, dead or alive, so it cannot drift with the
-       yard's body count either — this is the loot tables' own answer to the
-       owner's question, and it is the same number on both sides. */
-    let carriedAtBoot = 0;
-    try {
-      const a = CBZ.prisonShankAudit ? CBZ.prisonShankAudit() : null;
-      if (a) carriedAtBoot = a.carriedRoster != null ? a.carriedRoster : a.carried;
-    } catch (_) {}
 
     S = window.__prisonShank = { overlay, chrome, stand, canvas, carriedAtBoot };
     window.__cbzVisualCompare = {
@@ -503,9 +511,9 @@ export default {
   stageTimeoutMs: 420000,
   pairNote: "Same escape mode · seed · roster · marks · camera · noon · one Shiv given through the real economy seam",
   method: "The runner boots the registered Prison Escape mode on both sources, freezes the game clock, and stages the LIVE player and one LIVE inmate whose own rolled loadout already held a Shiv. The draw runs prisonshanks.js's real commit test off a real huntPlayer; the stab runs systems/combat.js's real deferred hit, so the impact frame is the frame the damage lands. The held model on every plate is read back off the rig's hand socket, not off a flag. Both sides are the same build; the only difference is cfg_PRISON_SHANK.",
-  metricsNote: "Live from CBZ.prisonShankAudit() and CBZ.prisonShankCarryAudit() at the instant of capture. `carried` is the loot tables' own number and is NOT supposed to move — it was always right. Everything under it is the gap between what the tables said and what the world could do about it.",
+  metricsNote: "Live from CBZ.prisonShankAudit() and CBZ.prisonShankCarryAudit() at the instant of capture. `carried` is the loot tables' own number and is CONTEXT, not the claim: both sides read about half the wing, and they do not match exactly because rollLoadout draws from the run's one seeded rng and the flag genuinely changes the yard from the first tick. Every row under it is the claim. Everything under it is the gap between what the tables said and what the world could do about it.",
   metrics: {
-    carried: { label: "Inmates carrying a shiv" },
+    carried: { label: "Inmates the loot tables armed with a shiv (~half the wing, both sides)" },
     carriersHolding: { label: "…with the blade actually in a fist", better: "higher" },
     carriersPosed: { label: "…drawn as a real posed mesh", better: "higher" },
     handIsShank: { label: "Player's hand holds a shank", better: "higher" },
