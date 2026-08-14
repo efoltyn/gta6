@@ -2787,6 +2787,13 @@
     // together for core/batch.js. Position-hashed pick (never rng), so lot #23's
     // brick colour is decidable without building lots 0..22.
     const civicSpec = opts.civic || null;
+    // FACADE KIT: does the requested facade crown the roof? This has to be
+    // answered HERE, before the roofline code below, because the shell decides
+    // its own setback crown and corner finials long before dressFacade() runs.
+    // A dome, a minaret, a mansard or a setback tower must not have the host's
+    // own spire growing up through it.
+    const facadeTakesRoof = !!(CBZ.facadeCrownsRoof && CBZ.facadeCrownsRoof(
+      opts.dress || null, function (salt) { return CBZ.hash01 ? CBZ.hash01(ox, oz, salt) : 0.42; }));
     let MPAL = null;
     if (MASONRY && CBZ.masonryPalette) {
       // ashlar STONE for the monumental trades; the humbler civic kinds that
@@ -3942,7 +3949,9 @@
         belt(rTop + 0.12, 0.22, 0.14, shadeHex(color, 0.80));
       }
       // ---- CORNER PINNACLES: chunky parapet-corner caps (finials; storeys >= 3)
-      if (storeys >= 3) {
+      // Skipped when a facade owns the roofline: gothic pinnacles, a mosque's
+      // merlons or a mansard's cresting all land on these same four corners.
+      if (storeys >= 3 && !facadeTakesRoof) {
         const finH = 0.5 + h01(0x11e) * 0.5;
         for (const sxp of [-1, 1]) for (const szp of [-1, 1]) {
           dbox(sxp * (w / 2 - 0.06), rTop + pp + finH / 2, szp * (d / 2 - 0.06), 0.36, finH, 0.36, TRIM);
@@ -3954,7 +3963,9 @@
       // ONLY (cast shadow, no collider), seated ON the roof slab and inset from
       // it, so a walkable terrace remains around it (roofloot / helipad / snipers
       // keep working) and no interior floor is touched.
-      if (storeys >= 6) {
+      // Skipped outright when a facade crowns the roof — this volume plus its
+      // spire is exactly what was growing through the domes and mansards.
+      if (storeys >= 6 && !facadeTakesRoof) {
         // CENTRE THE CROWN ON THE ROOF SLAB (slabCx/slabCz/slabW/slabD — the solid
         // walkable roof, which already excludes the -x stairwell strip) and rise
         // from rTop, so the crown base sits ON the roof (never floating above the
@@ -4022,6 +4033,10 @@
         garageGround: !!opts.garageGround,
         showroom: !!opts.showroom,
         civic: civicSpec,
+        // THE FACADE KIT's spec, written at the CALL SITE exactly the way
+        // govcomplex.js writes {crown, order, motto} for the Capitol. Absent on
+        // every existing caller, so the kit is inert until someone asks for it.
+        dress: opts.dress || null,
         pal: MPAL || { wall: color, stone: TRIM, dirt: 0x2a2420, kind: "brick", id: null },
         color, TRIM, BASE, PIL, MULL,
         hash: bhash,
@@ -4103,11 +4118,21 @@
         if (CBZ.bldCivicOrder) CBZ.bldCivicOrder(ctxC);
         if (CBZ.bldCivicCrown) CBZ.bldCivicCrown(ctxC);
       }
+      // ---- THE FACADE KIT (city/facade_kit.js + city/facades/*.js) --------
+      // The generalisation of what govcomplex.js does to this same building:
+      // an object literal at the call site turns the base office shell into a
+      // brick loft / an ashlar bank / a mosque / a pagoda, deriving every
+      // dimension from w, d, storeys, FH and rTop. Emitted here so it lands in
+      // the merged deco buckets below — a dressed building is draw-call equal
+      // to a bare one. Returns the def so we can tell whether it took the roof.
+      const dressed = CBZ.dressFacade ? CBZ.dressFacade(ctxC) : null;
       // ROOF CLUTTER on every real building (not just masonry) — flat empty
       // roofs are the second-biggest "this is a box" tell after flat facades.
       // Skipped on civic anchors: their DOME / CLOCK TOWER already owns the
       // roof centre, and a water tank next to a courthouse dome is comedy.
-      if (CBZ.bldRoofClutter && !opts.boarded && !(civicF && civicSpec)) CBZ.bldRoofClutter(ctxC);
+      // Skipped for the same reason when a facade crowned its own roof.
+      if (CBZ.bldRoofClutter && !opts.boarded && !(civicF && civicSpec)
+          && !(dressed && dressed.crownsRoof)) CBZ.bldRoofClutter(ctxC);
     }
     flushDeco();
 
