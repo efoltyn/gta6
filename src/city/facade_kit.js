@@ -100,7 +100,15 @@
       // `crownsRoof` tells the host this facade puts something tall on the
       // roof, so a caller can skip its own roof furniture rather than have a
       // water tank grow through a minaret.
-      crownsRoof: !!def.crownsRoof });
+      crownsRoof: !!def.crownsRoof,
+      // STOREY RANGE. A grammar written for a 4-storey block does not become a
+      // skyscraper by being stretched, and a bundled-tube tower is nonsense on
+      // a corner shop. Tower facades declare minStoreys; low-rise ones declare
+      // maxStoreys. Only FACADE_KIT_CITY's automatic pick honours these — an
+      // explicit {dress:{style}} at a call site is always obeyed, because the
+      // author who wrote it knows something the registry does not.
+      minStoreys: def.minStoreys || 0,
+      maxStoreys: def.maxStoreys || Infinity });
   };
   CBZ.facadeList = function () { return Array.from(REG.values()).map((f) => ({ id: f.id, label: f.label })); };
   CBZ.facadeDef = function (id) { return REG.get(id) || null; };
@@ -299,14 +307,19 @@
   // this building crowned its own roof.
   // Which style does this caller get? Shared by dressFacade and the early
   // crown question below so the two can never disagree about it.
-  function resolve(dress, hash) {
+  function resolve(dress, hash, storeys) {
     if (!on("FACADE_KIT")) return null;
     let spec = dress || null;
     // CITY-WIDE MODE (off by default): give an undressed building a style by
     // position hash. Deterministic — lot #23's style is decidable without
-    // building lots 0..22 — and it never draws from the rng stream.
+    // building lots 0..22 — and it never draws from the rng stream. The
+    // candidate pool is filtered to grammars that suit the building's HEIGHT,
+    // so a tower gets a tower facade and a shop does not.
     if (!spec && on("FACADE_KIT_CITY") && REG.size && hash) {
-      const ids = Array.from(REG.keys()).sort();
+      const st = storeys || 1;
+      let ids = Array.from(REG.keys()).sort()
+        .filter(function (k) { const d = REG.get(k); return st >= d.minStoreys && st <= d.maxStoreys; });
+      if (!ids.length) ids = Array.from(REG.keys()).sort();
       spec = { style: ids[Math.min(ids.length - 1, (hash(0x7ac1) * ids.length) | 0)] };
     }
     if (!spec || !spec.style) return null;
@@ -318,13 +331,13 @@
   // buildings.js decides its own setback crown and corner finials hundreds of
   // lines before dressFacade() runs. Without this the host grows a spire
   // through a dome, a minaret or a mansard — two crowns on one roof.
-  CBZ.facadeCrownsRoof = function (dress, hash) {
-    const r = resolve(dress, hash);
+  CBZ.facadeCrownsRoof = function (dress, hash, storeys) {
+    const r = resolve(dress, hash, storeys);
     return !!(r && r.def.crownsRoof);
   };
 
   CBZ.dressFacade = function (ctx) {
-    const r = resolve(ctx.dress, ctx.hash);
+    const r = resolve(ctx.dress, ctx.hash, ctx.storeys);
     if (!r) return null;
     try { r.def.build(ctx, F, r.spec); }
     catch (e) { if (window.console) console.warn("facade " + r.spec.style + ": " + e.message); }

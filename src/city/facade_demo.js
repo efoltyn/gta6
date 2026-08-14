@@ -32,18 +32,30 @@
   // mid-block office: the exact shell the owner called "already great".
   const SUBJECT = { w: 22, d: 16, storeys: 4, color: 0xb9b3a6, doorSide: 1 };
 
-  CBZ.FACADE_SUBJECT = SUBJECT;
+  // THE STANDARD TOWER. buildings.js's own makeMegaTower is 52 storeys at
+  // ~166 m and is the tallest thing in the game, so a skyscraper grammar is
+  // judged near that: 40 storeys is 128 m, unmistakably a tower, and still
+  // leaves headroom to prove the same grammar at the 52-storey flagship.
+  // A tower footprint is squarer than a shop's — a slab this tall on a 16 m
+  // depth would be a wall, not a building.
+  const TOWER = { w: 34, d: 28, storeys: 40, color: 0x8d97a6, doorSide: 1 };
 
+  CBZ.FACADE_SUBJECT = SUBJECT;
+  CBZ.FACADE_TOWER = TOWER;
+
+  // style, opts. opts.tower picks the 40-storey subject instead of the shop;
+  // opts.subject overrides any field of whichever base was chosen.
   CBZ.facadeStudio = function (style, opts) {
     opts = opts || {};
     const g = new THREE.Group();
     if (!CBZ.cityMakeBuilding) return g;
-    const S = Object.assign({}, SUBJECT, opts.subject || {});
+    const S = Object.assign({}, opts.tower ? TOWER : SUBJECT, opts.subject || {});
     // Ground: a plain pad so the building is not floating in the void and the
     // podium/steps of a facade have something to meet.
     const pad = new THREE.Mesh(
       new THREE.BoxGeometry(S.w + 26, 0.2, S.d + 26),
       new THREE.MeshLambertMaterial({ color: 0x6d6f6a }));
+    pad.name = "facadePad";
     pad.position.set(0, -0.1, 0);
     pad.receiveShadow = true;
     g.add(pad);

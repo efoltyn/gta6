@@ -2793,7 +2793,8 @@
     // A dome, a minaret, a mansard or a setback tower must not have the host's
     // own spire growing up through it.
     const facadeTakesRoof = !!(CBZ.facadeCrownsRoof && CBZ.facadeCrownsRoof(
-      opts.dress || null, function (salt) { return CBZ.hash01 ? CBZ.hash01(ox, oz, salt) : 0.42; }));
+      opts.dress || null,
+      function (salt) { return CBZ.hash01 ? CBZ.hash01(ox, oz, salt) : 0.42; }, storeys));
     let MPAL = null;
     if (MASONRY && CBZ.masonryPalette) {
       // ashlar STONE for the monumental trades; the humbler civic kinds that
