@@ -288,10 +288,76 @@
     }
     function claimNature(x, z, r) { return !layout || layout.claimNature(x, z, r, { pad: 0.35 }); }
     function openNature(x, z, r) { return !layout || layout.canPlaceNature(x, z, r, { pad: 0.2 }); }
+    // ================================================================
+    //  THE CLEARING RIM — a keep-out circle must not READ as a circle.
+    //
+    //  A clearing is AUTHORED as a circle because a circle is the cheap
+    //  thing to reserve. It was also DRAWN as one: `d2 < r*r` is the gate
+    //  for every scatter pass below — mature wood, subcanopy, the two
+    //  canopy roof phases, near-thicket, rocks, far-thicket, fallen logs —
+    //  so ten instanced layers stopped dead on the same compass arc, and
+    //  roofAllowed's three different radii (r+7 / 0.70r / 0.48r) turned
+    //  that into concentric rings. Standing inside one, the owner saw a
+    //  drawn circle around him (2026-08-11). MEASURED at seed 90210, the
+    //  clearing at (-1672, -2195): 0 of 19,726 forest instances inside
+    //  45 m, then full stand density (~10 per 1000 m²) by 55 m.
+    //
+    //  The fringe grows OUTWARD ONLY. Everything inside the authored
+    //  radius is still cut absolutely, because these circles are
+    //  RESERVATIONS, not decoration — clearings[0] is the lake (shrink it
+    //  and a trunk stands in the water), and the cabin pad, campsite and
+    //  causeway landing each carry a building or a road that layout.js has
+    //  already reserved at exactly c.r. So the authored disc is untouched
+    //  and a ragged band is added beyond it, which is what the eye now
+    //  reads as the tree line; the perfect circle survives only where the
+    //  density is zero on both sides of it and nothing can see it.
+    //
+    //  The dither is a POSITION hash, so no new rng() draw is introduced.
+    //  It is NOT stream-neutral, and pretending otherwise would be a lie:
+    //  the mature/subcanopy loop tests inClearing at :442 and `continue`s
+    //  BEFORE its keepP roll at :450, so a candidate removed here skips the
+    //  three draws it would have made — exactly as a candidate inside a
+    //  clearing always has. Measured at seed 90210: mature 2974 -> 2898,
+    //  subcanopy 662 -> 689, lower roof 5447 -> 5388, thicket 656 -> 636.
+    //  The forest reshuffles by ~1-3%; the same seed still grows the same
+    //  forest every run, which is the law the gate actually pins.
+    // ================================================================
+    const SOFT_RIM = !(CBZ.CONFIG && CBZ.CONFIG.FOREST_SOFT_CLEARINGS === false);
+    const RIM_GROW = 0.45;              // fringe reaches up to +45% of the radius
+
+    // rimCut(x, z, dist, keep, i, c, salt) — true when this sample is removed.
+    // `keep` is the caller's own authored radius (the tree line uses c.r, the
+    // roof phases use their smaller windows), but the noise LOBE is keyed to
+    // the clearing, not to `keep` — one shape, sampled at three scales, so the
+    // sky window, the roof edge and the tree line all bulge the same way and
+    // the glade reads as one opening instead of three scribbled outlines.
+    function rimCut(x, z, dist, keep, i, c, salt) {
+      if (dist < keep) return true;                       // the authored core
+      if (!SOFT_RIM) return false;
+      const n = vh(x, z, Math.max(20, c.r * 0.6), 0x4f61 + i * 13);
+      const outer = keep * (1 + RIM_GROW * n);
+      if (dist >= outer) return false;                    // past the fringe
+      // ramp: certain to be cut at the core edge, certain to survive at `outer`
+      const t = (dist - keep) / (outer - keep);
+      return (CBZ.hash01 ? CBZ.hash01(x, z, salt) : 1) > t;
+    }
+
+    // THE BALD FLOOR IS NOT FIXED HERE, AND IT IS THE OTHER HALF OF THIS BUG.
+    // A real glade is an opening in the CANOPY, not a mown lawn: the tall wood
+    // stops but the ground cover walks in and thins toward the middle. Here
+    // nothing at all grows inside a clearing, so the interior is one flat pale
+    // disc, and that disc — not the trunks — is what carries the circle at eye
+    // height. Letting scrub in is NOT a change to this predicate: fillScatter
+    // (:865) also asks openNature(), and layout.reserveCircle(:287) has already
+    // reserved every clearing at the full c.r, so the low layer is blocked by
+    // the RESERVATION regardless of what this function says. MEASURED: routing
+    // the thicket through a 0.42r keep-out moved `nearThicket` 636 -> 636, not
+    // one instance. Opening the floor means shrinking the reservations other
+    // systems place against, which is a layout.js wave, not a biome one.
     function inClearing(x, z) {
       for (let i = 0; i < clearings.length; i++) {
         const c = clearings[i];
-        if (d2(x, z, c.x, c.z) < c.r * c.r) return true;
+        if (rimCut(x, z, Math.sqrt(d2(x, z, c.x, c.z)), c.r, i, c, 0x4f65)) return true;
       }
       // keep trees off the causeway corridor too.
       if (x > CW_MINX - 12 && x < CW_MAXX + 12 && z > CW_MINZ - 4 && z < MAXZ) return true;
@@ -649,7 +715,10 @@
       // controlled sky window, but upper crowns can lean over their margins.
       for (let i = 0; i < clearings.length; i++) {
         const c = clearings[i], keep = i === 0 ? c.r + 7 : c.r * (upper ? 0.48 : 0.70);
-        if (d2(x, z, c.x, c.z) < keep * keep) return false;
+        // same rim treatment as the tree line (see rimCut above) — the sky
+        // window has to lose its compass edge too, or the SHADOW it casts on
+        // the floor draws the circle the trunks no longer do.
+        if (rimCut(x, z, Math.sqrt(d2(x, z, c.x, c.z)), keep, i, c, upper ? 0x4f67 : 0x4f66)) return false;
       }
       if (x > CW_MINX - 9 && x < CW_MAXX + 9 && z > CW_MINZ - 4 && z < MAXZ) return false;
       return true;
@@ -910,6 +979,72 @@
         completeConeCrowns: SCENERY ? 0 : N,
         layers: [trunkInst, foliInst, roundTrunkInst, roundCrownInst, lowerRoofMesh, upperRoofMesh, bushInst, farThicketMesh]
           .filter(Boolean).map(function (m) { return { name: m.name, count: m.count, visible: m.visible !== false }; }),
+      };
+    };
+
+    // ================================================================
+    //  RIM AUDIT — the ratchet that keeps the clearings from going back to
+    //  being circles. A keep-out is honest; a VISIBLE keep-out is the bug.
+    //  For each clearing this walks the real instance matrices (the same
+    //  numbers a screenshot is made of), bins them into 5 m rings from the
+    //  clearing centre, and asks how many rings the stand takes to climb
+    //  from empty to established. One ring is a drawn circle; three or more
+    //  is a tree line. `razorEdges` is the pinned number — see docs/claude.
+    // ================================================================
+    CBZ.forestRimAudit = function () {
+      const layers = [trunkInst, roundTrunkInst, bushInst, farThicketMesh].filter(Boolean);
+      const m4 = new THREE.Matrix4(), v3 = new THREE.Vector3();
+      const pts = [];
+      for (const L of layers) {
+        L.updateMatrixWorld();
+        for (let i = 0; i < L.count; i++) {
+          L.getMatrixAt(i, m4);
+          v3.setFromMatrixPosition(m4).applyMatrix4(L.matrixWorld);
+          pts.push(v3.x, v3.z);
+        }
+      }
+      const RING = 5;
+      const rows = clearings.map(function (c, ci) {
+        // rings must reach past 2.2r or the "established stand" window folds
+        // back inside the clearing's own fringe and reports a bald forest.
+        // The lake (r=113) is what caught this: a fixed 24-ring table topped
+        // out at 120 m and measured the shoreline as if it were deep wood.
+        const NB = Math.ceil(c.r * 2.4 / RING) + 2;
+        const bins = new Array(NB).fill(0);
+        for (let i = 0; i < pts.length; i += 2) {
+          const b = (Math.hypot(pts[i] - c.x, pts[i + 1] - c.z) / RING) | 0;
+          if (b < NB) bins[b]++;
+        }
+        // per-ring density, instances per 1000 m² (annulus area, not raw count)
+        const dens = bins.map(function (n, b) {
+          const a = Math.PI * (Math.pow((b + 1) * RING, 2) - Math.pow(b * RING, 2));
+          return n / a * 1000;
+        });
+        // "established stand" = the rings well outside this clearing
+        const lo = Math.min(NB - 1, Math.ceil(c.r * 1.6 / RING));
+        const hi = Math.min(NB, Math.ceil(c.r * 2.2 / RING));
+        let deep = 0, dn = 0;
+        for (let b = lo; b < hi; b++) { deep += dens[b]; dn++; }
+        deep = dn ? deep / dn : 0;
+        const edgeBin = Math.ceil(c.r / RING);
+        // rings from the authored edge until the stand is back to 55% of deep
+        let ramp = 0;
+        for (let b = edgeBin; b < NB; b++) { ramp++; if (dens[b] >= deep * 0.55) break; }
+        return {
+          clearing: ci, r: c.r, x: +c.x.toFixed(1), z: +c.z.toFixed(1),
+          deepDensity: +deep.toFixed(2),
+          edgeDensity: +(dens[edgeBin] || 0).toFixed(2),
+          rampRings: ramp, rampMetres: ramp * RING,
+          // too little stand around it to judge (biome rim / causeway mouth)
+          judgeable: deep >= 2,
+          razor: deep >= 2 && ramp <= 1,
+        };
+      });
+      return {
+        owner: "forest", soft: SOFT_RIM, grow: RIM_GROW,
+        clearings: rows,
+        judged: rows.filter(function (r) { return r.judgeable; }).length,
+        razorEdges: rows.filter(function (r) { return r.razor; }).length,
       };
     };
 

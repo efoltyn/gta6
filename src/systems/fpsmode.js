@@ -1458,8 +1458,14 @@
     syncAmmo();
     // city/life mode shows ammo whenever you're holding a gun (third-person too),
     // not only while aiming — you always want to see your rounds.
-    if ((fps.active || shoulderActive() || CBZ.game.mode === "city") && armed()) {
-      const w = weapon();
+    // A MELEE WEAPON HAS NO MAGAZINE. Without this test the shank reads
+    // "0 / 0 · 0" over the crosshair — an ammo counter for a thing that has
+    // never had ammo, which is exactly the kind of gun-shaped assumption that
+    // let a blade be a pistol in the first place. The weapon strip below still
+    // runs, so the chip and its icon are unaffected.
+    const wAmmo = weapon();
+    if ((fps.active || shoulderActive() || CBZ.game.mode === "city") && armed() && !(wAmmo && wAmmo.melee)) {
+      const w = wAmmo;
       ammoEl.style.display = "block";
       // City play is always instrumentation-only.  This cannot depend on a
       // campaign mission being active: sandbox/side-job weapons were still
@@ -2399,6 +2405,22 @@
     else if (CBZ.flashHint) CBZ.flashHint(fps.reserve > 0 ? dry : "No reserve ammo", 1.0);
   }
 
+  /* A THRUST WITH THE DRAWN BLADE. Its own cooldown (`shotCD`, the same field
+     the guns use — one weapon rhythm, not two) and its own reach, both read
+     from the weapon row so the shank's speed is tuning data and not a constant
+     buried in a shooter. The first-person hand swings silently: the stab's
+     audio is the hit, and `triggerFistPunch`'s whoosh is a bare-knuckle cue. */
+  function meleeStrike(w) {
+    if (shotCD > 0) return;
+    shotCD = w.interval || 0.42;
+    const hit = aimedActor(w.range || MELEE);
+    triggerFistPunch(true);
+    const strike = CBZ.prisonStab || CBZ.punch;
+    if (!strike) { CBZ.sfx && CBZ.sfx("step"); return; }
+    const r = strike(hit && hit.actor);
+    if (r && r.msg) { if (CBZ.jailTell) CBZ.jailTell.hint(r.msg, 2.4); else if (CBZ.flashHint) CBZ.flashHint(r.msg, 2.4); }
+  }
+
   function shoot() {
     if (!(fps.active || shoulderActive()) || CBZ.game.state !== "playing" || CBZ.player.dead || (CBZ.player.stun || 0) > 0 || CBZ.player.driving || CBZ.player._swim) return;
     if (!armed()) {
@@ -2416,6 +2438,19 @@
     }
 
     const w = weapon();
+    /* ---- MELEE WEAPONS DO NOT FIRE -------------------------------------
+       The divert happens HERE, above every line that assumes a magazine:
+       the mod lookups, the shot cooldown, the reload interrupt, the dry
+       click, the round decrement, the recoil ladder, the tracer. A shank
+       has none of those and faking them (a 1-round mag that "reloads")
+       is how a melee weapon ends up behaving like a very short gun.
+
+       Everything a thrust needs already exists three lines above, in the
+       unarmed branch: aimedActor() finds the man in front of you and
+       CBZ.punch lands on the animation's drive frame. The stab is the same
+       two calls with the blade profile — systems/combat.js owns what a
+       blade does; this file only owns the trigger. */
+    if (w && w.melee) { meleeStrike(w); return; }
     // ---- attached weapon mods (city/gunmods.js): a suppressor kills the flash
     // + muffles the report, a muzzle brake / grip settles the recoil, a grip /
     // laser tightens the cone. All no-ops (mul 1, supp false) when nothing's on

@@ -73,10 +73,9 @@
                              // not have a thing blink out from under your feet.
   const KEEP_R2 = KEEP_R * KEEP_R;
   const EVICT_R2 = 12 * 12;  // the cap prefers to evict something far away
-  // A drop you can walk over and take by accident is a pickup; a drop you have
-  // to reach for is a decision. Guns, blades and keys are decisions.
-  const AUTO_R = 1.15;       // m — walk-over radius for small stackables
-  const HOLD_R = 2.10;       // m — reach radius for a gun / a blade / a key
+  // Floor loot is collected only when the player's feet actually cross it.
+  // One close radius for every shape: no long invisible reach and no pickup UI.
+  const AUTO_R = 1.15;       // m — tight walk-over radius for every floor item
   const FADE = 0.34;         // s of rise-and-shrink when a drop is taken
   const BLINK = 1.6;         // s of flicker before an expired drop is gone
   const GRAV = 19.0;         // m/s² for the small-prop ballistic
@@ -84,6 +83,8 @@
 
   // ---- audit counters -------------------------------------------------------
   let spawned = 0, taken = 0, expired = 0, evicted = 0, bodies = 0, gunsDropped = 0, torchesDropped = 0;
+  // guns that reached an inmate's hand off the floor (PRISON_GUN_PROVENANCE)
+  let npcArmed = 0;
 
   function floorY(x, z, fromY) {
     if (CBZ.groundAt) { const y = CBZ.groundAt(x, z, fromY); if (isFinite(y)) return y; }
@@ -140,7 +141,12 @@
   // name -> shape overrides. Everything else falls through to its ITEMS tag.
   const SHAPE_BY_NAME = {
     "Gun": "gun", "Guard Torch": "torch",
-    "Shiv": "blade", "Razor Blade": "blade", "Hacksaw Blade": "blade",
+    // "shank" is the Shiv's OWN shape, not the generic blade: it is the only
+    // improvised blade in the catalog with a real authored model, so the thing
+    // you see lying on the concrete is the thing that was in his fist a second
+    // earlier. The rest keep the two-box approximation until they earn a model.
+    "Shiv": "shank", "Shank": "shank",
+    "Razor Blade": "blade", "Hacksaw Blade": "blade",
     "Brass Knuckles": "blade", "Hatchet": "blade", "Pickaxe": "blade",
     "Handcuff Key": "card", "Contraband Map": "card", "Burner SIM": "card",
     "Phone Charger": "card", "Burner Phone": "card", "Tattoo Gun": "pouch",
@@ -159,7 +165,7 @@
     const it = CBZ.econ && CBZ.econ.ITEMS && CBZ.econ.ITEMS[name];
     return (it && SHAPE_BY_TAG[it.tag]) || "pouch";
   }
-  function rigidShape(shape) { return shape === "gun" || shape === "torch"; }
+  function rigidShape(shape) { return shape === "gun" || shape === "torch" || shape === "shank"; }
 
   // A tint per rarity, so a gold chain in the dirt reads differently from a
   // bar of soap without anybody typing a colour per item.
@@ -208,6 +214,23 @@
         put(g, cgeo(0.055, 0.44), cmat(0x20262d), 0, 0, 0, Math.PI / 2);
       }
       hh = 0.055; r = 0.12;
+    } else if (shape === "shank") {
+      // Same law as the gun and the torch above: the dropped object is the
+      // AUTHORED object with the hand-socket pose stripped off, so it lands on
+      // its real flat side under the shared measured-rest solver instead of on
+      // a guessed half-height. A shank that fell out of a dead man's waistband
+      // must be the same shank you pick up.
+      if (CBZ.buildActorWeapon) {
+        const model = CBZ.buildActorWeapon("Shiv");
+        model.position.set(0, 0, 0);
+        model.rotation.set(0, 0, 0);
+        model.scale.setScalar(1.05);
+        g.add(model);
+      } else {
+        put(g, bgeo(0.05, 0.04, 0.20), cmat(0x1b1f26), 0, 0, -0.02);
+        put(g, bgeo(0.035, 0.02, 0.26), cmat(0xb9c2cc), 0, 0.005, 0.20);
+      }
+      hh = 0.018; r = 0.10;
     } else if (shape === "blade") {
       put(g, bgeo(0.05, 0.04, 0.20), cmat(0x1b1f26), 0, 0, -0.02);           // taped grip
       put(g, bgeo(0.035, 0.02, 0.26), cmat(0xb9c2cc), 0, 0.005, 0.20);       // ground edge
@@ -257,8 +280,6 @@
      THE PROP TYPE — proptypes.js's second consumer.
      ============================================================ */
   const live = [];             // spawn-ordered, for the cap
-  let promptBest = null, promptD2 = Infinity;   // nearest reach-drop this frame
-  let takeEdge = false;        // an E press waiting to be spent (see below)
 
   function planarD2(inst) {
     const P = CBZ.player;
@@ -352,13 +373,13 @@
       m.position.set(pos.x, pos.y, pos.z);
       m.rotation.set(Math.random() * 6.283, Math.random() * 6.283, Math.random() * 6.283);
       return {
-        mesh: m, radius: HOLD_R,
+        mesh: m, radius: AUTO_R,
         data: {
           mesh: m, item: opts.item || "", cigs: opts.cigs || 0, shape: opts.shape,
-          hold: !!opts.hold, hh: built.hh, r: built.r,
+          hh: built.hh, r: built.r,
           vx: opts.vx, vy: opts.vy, vz: opts.vz,
           wx: (Math.random() - 0.5) * 9, wy: (Math.random() - 0.5) * 7, wz: (Math.random() - 0.5) * 9,
-          bounces: 0, rest: false, age: 0, age2: 0, far: 0, taken: false, fade: -1,
+          bounces: 0, rest: false, age2: 0, far: 0, taken: false, fade: -1,
           body: null, inst: null,
         },
       };
@@ -385,8 +406,11 @@
       // model — proptypes.js fixes inst.pos at spawn and a falling thing moves.
       if (d.body) {
         // the solver hands the model back the moment it comes to rest; from
-        // then on the drop IS at rest and must not be re-integrated by us.
-        if (d.body.settled || d.body.dead) { d.body = null; d.rest = true; }
+        // then on the drop IS at rest and must not be re-integrated by us. Keep
+        // the body reference while settled: the shared solver continues corpse
+        // contact, and pickup can release that tracking immediately.
+        if (d.body.dead) { d.body = null; d.rest = true; }
+        else if (d.body.settled) d.rest = true;
       } else if (!d.rest) {
         stepBallistic(d, Math.min(0.05, dt));
       }
@@ -397,7 +421,6 @@
       // out; a shiv dropped in a brawl on the far side of the yard does.
       const d2 = planarD2(inst);
       if (d2 > KEEP_R2) d.far += dt;
-      d.age += dt;
       if (d.far > TTL) {
         d.blink = (d.blink || 0) + dt;
         m.visible = Math.floor(d.blink * 7) % 2 === 0;
@@ -408,80 +431,108 @@
       // A DROP AT REST STAYS AT REST — no bob, no spin, no glow ring. OWNER's
       // standing note on glowing floor pickups is that they turn the game into
       // Subway Surfers; the object is the signal, and a settled body that goes
-      // on rotating is not settled. Findability is the reach radius's job.
+      // on rotating is not settled. Findability is the walk-over radius's job.
 
-      // PROXIMITY. Small stackables come off the floor by walking over them;
-      // a gun, a blade or a key is a REACH, and the nearest one wins the
-      // prompt. This is deliberately NOT proptypes' interactRadius/onInteract
-      // pair: the lifetime law above already needs the exact same squared
-      // distance, and nearest-wins arbitration needs a frame-scoped winner
-      // rather than a per-instance callback. One distance, both answers.
-      // ...and you cannot catch a thing in mid-air. Without this, a
+      // PROXIMITY. Every floor item uses the same close walk-over collection;
+      // there is no reach prompt and no device-specific button. The lifetime
+      // law above already needs this exact squared distance, so one measurement
+      // owns both answers. You still cannot catch a thing in mid-air. Without
+      // that guard, a
       // point-blank kill puts the pile inside the pickup radius on the frame
       // it spawns and the whole toss is swallowed — which is the invisible
       // frisk again, wearing a mesh.
-      if (!d.rest && d.age < 0.6) return;
-      if (!d.hold) { if (d2 <= AUTO_R * AUTO_R) takeDrop(inst); return; }
-      if (d2 <= HOLD_R * HOLD_R && d2 < promptD2) { promptD2 = d2; promptBest = inst; }
+      if (!d.rest) return;
+      if (d2 <= AUTO_R * AUTO_R) { takeDrop(inst); return; }
+
+      // A WEAPON ON THE FLOOR IS A WEAPON ANYONE CAN REACH.
+      npcTakeWeapon(inst, d);
     },
   });
+
+  /* ============================================================
+     THE FLOOR IS NOT THE PLAYER'S PRIVATE INVENTORY.
+     (PRISON_GUN_PROVENANCE — see systems/intimidate.js decideGun)
+
+     OWNER: "they need to actually run over a dead person who has a gun."
+
+     Inmates used to spawn holding concealed firearms from a dice roll. That
+     roll is gone, so this is now the FIRST way a gun legitimately reaches an
+     inmate's hand, and it reads on screen without a word: you shoot a guard,
+     his sidearm hits the dirt, and the man who was watching walks over and
+     picks it up. Nothing announces it. You were there.
+
+     Deliberately narrow, because a floor the whole yard hoovers up is worse
+     than one only the player can touch:
+       · WEAPONS ONLY. Cigarettes, torches and the rest stay the player's.
+         A gun is the one object whose owner changes the situation.
+       · LIVE, FREE INMATES ONLY. Not the downed, not the cuffed, not guards
+         (a screw who wants a gun already has one).
+       · ALREADY-ARMED MEN DON'T STOOP. One is enough.
+       · SAME WALK-OVER RADIUS the player uses, slightly widened for a body
+         that has no camera to aim with. No second loot path, no reach prompt.
+     The take routes through the same takeDrop bookkeeping, so the audit
+     counters and the fade stay honest about where the object went.
+     ============================================================ */
+  const NPC_TAKE_R2 = (AUTO_R * 1.5) * (AUTO_R * 1.5);
+  const ARMABLE = { "Gun": "Pistol", "Taser": "Taser" };
+
+  function npcTakeWeapon(inst, d) {
+    const want = ARMABLE[d.item];
+    if (!want) return;                       // only a weapon changes hands
+    const npcs = CBZ.npcs;
+    if (!npcs || !npcs.length) return;
+    const m = d.mesh;
+    if (!m) return;
+    const px = m.position.x, pz = m.position.z;
+    for (let i = 0; i < npcs.length; i++) {
+      const n = npcs[i];
+      if (!n || !n.group || n.dead || n.escaped || (n.ko || 0) > 0) continue;
+      if (n.hasGun || n.armed) continue;      // he already has one
+      if (n.restraint || n.cuffed) continue;  // cuffed hands take nothing
+      const dx = px - n.group.position.x, dz = pz - n.group.position.z;
+      if (dx * dx + dz * dz > NPC_TAKE_R2) continue;
+      armNpc(n, want, d.item);
+      d.taken = true; d.fade = 0;
+      if (d.body && CBZ.weaponPhysics && CBZ.weaponPhysics.release) {
+        try { CBZ.weaponPhysics.release(m); } catch (e) {}
+        d.body = null;
+      }
+      taken++; npcArmed++;
+      return;
+    }
+  }
+
+  /* Put the weapon in his hand for real. `weapon` + `armed` is the pair
+     systems/actorweapons.js reads to build and show the carried model and to
+     resolve a muzzle, and `hasGun` is what systems/intimidate.js reads when it
+     decides whether a man at gunpoint surrenders or draws. Setting all three
+     is what makes the pickup a fact about the world rather than a cosmetic. */
+  function armNpc(n, weaponName, itemName) {
+    n.weapon = weaponName;
+    n.armed = true;
+    n.hasGun = true;
+    n._intimidInit = true;                   // his answer is no longer "unarmed"
+    n._gunFrom = itemName === "Taser" ? "corpse:taser" : "corpse:gun";
+    if (CBZ.econ && CBZ.econ.rollLoadout) {
+      // reflect it into his loadout so a frisk or a takedown can yield the
+      // same gun back — the object keeps moving, it never evaporates.
+      const ld = CBZ.econ.rollLoadout(n);
+      if (ld && ld.items && ld.items.indexOf(itemName) < 0) ld.items.push(itemName);
+    }
+    if (CBZ.buildActorWeapon) { try { CBZ.buildActorWeapon(n); } catch (e) {} }
+    if (CBZ.syncActorWeapon) { try { CBZ.syncActorWeapon(n); } catch (e) {} }
+    if (CBZ.worldSfx && n.group) {
+      try { CBZ.worldSfx("switch", n.group.position.x, n.group.position.z, { ref: 10 }); } catch (e) {}
+    }
+  }
+  // Exported so the armory and tailgate paths (world/gunroom.js) arm a man the
+  // same way this does, instead of each growing its own version.
+  CBZ.prisonArmNpc = armNpc;
 
   function dropGone(inst) {
     const i = live.indexOf(inst);
     if (i >= 0) live.splice(i, 1);
   }
-
-  /* ============================================================
-     THE WALK-UP PROMPT — two surfaces, one per device, never both.
-
-     TOUCH goes through CBZ.prisonPrompt (systems/interactions.js), the
-     prison's shared pill row. That block exists because of the owner's
-     "a popup will say press G or shift — DUH i can't do that", and a second
-     pill row floating beside it would be exactly the duplicate chrome it was
-     built to prevent. It returns FALSE on desktop, which is where the div
-     below takes over — the same walk-up idiom city/storage.js and
-     city/swim.js already use, and the reason we do NOT hand our desktop
-     string to that block's showHint leg: showHint has no self-hiding timer
-     of its own, so a prompt handed to it lingers after you walk away.
-
-     THE PILL AND THE KEY RUN THE SAME PATH. The pill's act is the literal
-     "e", so a tap synthesises the same keydown a keyboard sends and lands in
-     the same edge latch below — a tap and a keypress cannot drift apart.
-     ============================================================ */
-  let _promptEl = null;
-  function promptEl() {
-    if (_promptEl) return _promptEl;
-    if (typeof document === "undefined" || !document.body) return null;
-    const el = document.createElement("div");
-    el.id = "prisonDropPrompt";
-    el.style.cssText = "position:fixed;left:50%;bottom:150px;transform:translateX(-50%);" +
-      "font:700 15px/1.4 ui-sans-serif,system-ui,sans-serif;color:#ffe9b8;text-align:center;" +
-      "background:rgba(10,9,6,0.62);padding:7px 16px;border-radius:9px;border:1px solid rgba(255,214,120,0.38);" +
-      "pointer-events:none;z-index:60;display:none;text-shadow:0 1px 3px #000";
-    document.body.appendChild(el);
-    _promptEl = el;
-    return el;
-  }
-  // textContent, not innerHTML: this leg is desktop-only and carries no pill
-  // markup at all, so an item name can never smuggle in a tag.
-  function showPrompt(text) {
-    const el = promptEl(); if (!el) return;
-    if (el.style.display !== "block") el.style.display = "block";
-    if (el._h !== text) { el._h = text; el.textContent = text; }
-  }
-  function hidePrompt() { if (_promptEl && _promptEl.style.display !== "none") _promptEl.style.display = "none"; }
-
-  // A verb-pill tap synthesises keydown+keyup in the SAME tick (touch.js's
-  // CBZ.touchKeyTap), so polling CBZ.keys["e"] would miss it every time.
-  // Latch the EDGE and spend it once — swim.js's climb-out learned this the
-  // hard way and the note there says the same thing.
-  if (typeof addEventListener === "function") addEventListener("keydown", function (e) {
-    if (e.repeat || !e.key) return;
-    if (String(e.key).toLowerCase() !== "e") return;
-    if (CBZ.game && CBZ.game.mode !== "escape") return;
-    if (CBZ.invOpen) return;
-    takeEdge = true;
-  });
 
   /* ============================================================
      CBZ.prisonDrop(actor, opts) — THE ONE DROP ROUTINE.
@@ -551,11 +602,9 @@
 
   function spawnDrop(item, cigs, x, y, z, vx, vy, vz) {
     const shape = cigs > 0 ? "cigs" : shapeOf(item);
-    // A GUN AND A KEY ARE REACHED FOR, NOT SWEPT UP.
-    const hold = rigidShape(shape) || shape === "card" || shape === "blade";
     enforceCap();
     const inst = CBZ.spawnProp("prisondrop", x, y, z, {
-      item: item, cigs: cigs, shape: shape, hold: hold,
+      item: item, cigs: cigs, shape: shape,
       vx: vx, vy: vy, vz: vz,
       parent: CBZ.prisonRoot || CBZ.scene,
     });
@@ -575,6 +624,7 @@
         try {
           inst.data.body = CBZ.weaponPhysics.drop(inst.data.mesh, {
             vx: vx, vy: vy, vz: vz, source: "prison-drop", sound: "shell",
+            corpseCollision: true,
           });
         } catch (e) { inst.data.body = null; }
       }
@@ -613,9 +663,9 @@
      genuinely needs, but the CHEST was a menu with a lid on it.
 
      Everything needed to answer that already lived in this file: a real prop
-     instance, a real mesh, the gun/blade "reached for" hold, the quiet
-     pickupNote and the E prompt. The only thing missing was a way to place one
-     that nobody had DIED for. That is this — the drop routine with no corpse.
+     instance, a real mesh, and the quiet walk-over pickup. The only thing
+     missing was a way to place one that nobody had DIED for. That is this —
+     the drop routine with no corpse.
 
      `world:true` marks it as a PLACED item rather than loot: it survives the
      new-run sweep below (a hacksaw on a workbench does not vanish because you
@@ -653,15 +703,11 @@
   CBZ.prisonDropClear = function () {
     for (let i = live.length - 1; i >= 0; i--) { CBZ.removeProp && CBZ.removeProp(live[i]); }
     live.length = 0;
-    promptBest = null; promptD2 = Infinity;
-    hidePrompt();
   };
 
   /* ============================================================
-     THE TICK — 40.08, immediately after proptypes' own pass at 40.05, so
-     every instance has had its say about the prompt before we draw it.
-     Three jobs and nothing else: resolve the prompt, spend the E press, and
-     notice a new run.
+     THE TICK — notice a new run. Pickup itself stays on each prop's 40.05
+     update so walking over an item collects it in the same simulation frame.
      ============================================================ */
   let lastEl = 0;
   CBZ.onUpdate(40.08, function () {
@@ -679,35 +725,7 @@
     }
     lastEl = el;
 
-    if (!g || g.mode !== "escape" || g.state !== "playing" || CBZ.invOpen) {
-      promptBest = null; promptD2 = Infinity; takeEdge = false;
-      hidePrompt();
-      CBZ.prisonPromptClear && CBZ.prisonPromptClear("prisondrop");
-      return;
-    }
-    if (promptBest && !promptBest.data.taken) {
-      const label = "Take " + (promptBest.data.item || "it");
-      // touch → the shared prison pill row; desktop → our own walk-up div.
-      // promptD2 (squared metres to the winning pile) is handed on so the
-      // shared pill row can arbitrate a drop at your feet against a vent or a
-      // breaker you are also stood beside — see ONE PILL in interactions.js.
-      const pilled = CBZ.prisonPrompt ? CBZ.prisonPrompt("prisondrop", "e", label, null, 0.3, promptD2) : false;
-      if (pilled) hidePrompt(); else showPrompt("[E] " + label);
-      if (takeEdge) takeDrop(promptBest);
-    } else {
-      hidePrompt();
-      CBZ.prisonPromptClear && CBZ.prisonPromptClear("prisondrop");
-    }
-    promptBest = null; promptD2 = Infinity;
-    takeEdge = false;
   });
-
-  // ---- ratchet declaration (see CBZ.prisonPromptAudit in interactions.js) ----
-  // Declared at LOAD, not on first use, so the census never depends on the
-  // player having stood over a body — that file's own rule.
-  (CBZ._prisonPromptSites || (CBZ._prisonPromptSites = [])).push(
-    { id: "prisondrop", act: "e", was: "[E] Take <item>" }
-  );
 
   /* ============================================================
      RATCHET — CBZ.prisonDropAudit()
@@ -751,6 +769,12 @@
       expired: expired, evicted: evicted, bodies: bodies,
       physicalGuns: gunsDropped, physicalTorches: torchesDropped, resting: resting,
       gunSolver: !!(CBZ.weaponPhysics && CBZ.weaponPhysics.drop && C.PRISON_DROPS_PHYSICS !== false),
+      pickupMode: "walkover", pickupRadius: AUTO_R, pickupPrompt: false,
+      // PRISON_GUN_PROVENANCE: guns that reached an inmate's hand off the
+      // floor. Nobody spawns armed any more, so this number IS the armed
+      // population's origin story — if it is 0, every gun in the yard is
+      // still in a guard's holster or behind the armory gate.
+      npcArmedFromFloor: npcArmed,
       orphans: orphans, underfloor: underfloor,
       deathFrisks: la.deathFrisks, itemToasts: la.itemToasts,
       registry: !!CBZ.registerPropType,

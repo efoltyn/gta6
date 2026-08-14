@@ -69,21 +69,54 @@
     return false;
   }
 
-  // does this inmate carry a concealed firearm? decided once, from profile —
-  // gang muscle / brawlers / bold types do; vendors and pacifists never.
+  /* ============================================================
+     NOBODY SPAWNS WITH A GUN. (PRISON_GUN_PROVENANCE)
+
+     OWNER, 2026-08-13: "nobody has a gun in prison unless it came from the
+     armoury!! this is dumb, they need to actually run over a dead person who
+     has a gun, they can steal a taser, or steal a keycard and access the
+     gunroom... or when i open the gun room if one sneaks in behind me while
+     door is open they could grab a gun."
+
+     This function used to ROLL for it: a typical gang inmate had a 27–40%
+     chance of a concealed firearm, capped at 0.6. A yard where every third man
+     is carrying, out of nowhere, decided at spawn.
+
+     It is the same law the rest of this block already runs on. city/take.js
+     does not MINT cigarettes, it TRANSFERS them; the comment forty lines below
+     is proud that a shakedown "was never minting". A gun appearing on a man
+     because a die came up short is minting, and worse than minting currency —
+     currency at least cannot shoot you.
+
+     So the roll is gone and the answer is always no. Every gun an inmate ever
+     holds now has exactly one origin, and the player can watch all of them
+     happen:
+
+       CORPSE      systems/prisondrops.js already lays a dead man's real "Gun"
+                   on the floor (ai.js kill() → prisonDrop). An inmate who
+                   walks over it picks it up — the same walk-over the player
+                   uses, no second loot path. LIVE (see npcTakeWeapon there).
+       ARMORY      a keycard opens world/gunroom.js. An inmate who gets one
+                   can go where the guns are. PLANNED.
+       TAILGATE    CBZ.armory.open is public. You raise the gate; whoever is
+                   behind you is inside it too. PLANNED.
+       TASER       taken off a guard, the non-lethal tier. PLANNED.
+
+     WHY THIS IS THE SAME WAVE AS THE POPUP DELETIONS, not a detour:
+     the block needed a caption track because too much of it happened without a
+     cause the player could observe. "X pulls a gun on you!" existed precisely
+     BECAUSE the gun came from a spawn roll — there was no earlier moment to
+     have watched, so the only way to tell you was to tell you. Give the gun a
+     history and the caption is not deleted, it is made redundant: you know he
+     is armed because you saw him take it off the body, or because you left the
+     armory gate up and saw him slip in behind you.
+
+     Kept as a function (rather than deleting the call in initN) so the
+     provenance rule has one obvious home, and so a build that wants the old
+     behaviour has one line to change rather than a system to reconstruct.
+     ============================================================ */
   function decideGun(n) {
-    if (n.role === "merchant" || n.role === "dealer") return false;
-    const beh = n.behavior || "";
-    if (beh === "pacifist") return false;
-    const r = n.ratings || {}, p = n.personality || {};
-    let c = 0.05;
-    if (n.gang != null) c += 0.12;
-    if (n.crewRole === "shotcaller" || n.crewRole === "enforcer" || n.crewRole === "collector") c += 0.20;
-    const f = r.fighting || 40;
-    if (f > 78) c += 0.20; else if (f > 58) c += 0.10;
-    if (beh === "predator" || beh === "bully" || beh === "hothead" || beh === "unpredictable") c += 0.12;
-    c += ((p.nerve != null ? p.nerve : 0.5) - 0.5) * 0.22;
-    return rng() < Math.min(0.6, Math.max(0, c));
+    return false;
   }
 
   function initN(n) {

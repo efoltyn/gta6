@@ -2524,7 +2524,60 @@
       guard.rotation.z = -sgn * 0.42;
       guard.position.z = 0.10;
       if (guardJ) guardJ.rotation.x = -1.85;
-      if (ch.punchKind === "upper") {                   // rising uppercut
+      if (ch.punchKind === "stab") {
+        /* SHANK THRUST — deliberately NOT a punch with a prop in the fist.
+           Everything that makes this read is a difference from the jab above:
+
+             · a shank CHAMBERS AT THE RIBS, not at the chin. You carry it
+               pinned against the forearm and low against the body, because
+               that is how it stays unseen until it is in someone. So the
+               wind pulls the elbow BACK past the hip (arm.rotation.x goes
+               positive) instead of stacking the fist by the jaw;
+             · the drive is a PISTON, not an arc — a short straight line
+               along the body's forward axis. The upper arm barely rotates
+               (-0.62 at peak, less than half the jab's travel); it is the
+               ELBOW snapping from folded to nearly straight that carries the
+               point, and the shoulder shoves through on position.z;
+             · the off hand does not sit at the jaw guarding. A shanking is a
+               GRAB and a stick: the free arm reaches out to hook the man and
+               hold him on the blade, which is also what keeps the two arms
+               from reading as a boxing stance;
+             · there is no follow-through. The body's yaw sweep is a third of
+               a hook's — you do not rotate through a stab, you plant and
+               drive and pull it straight back out, which is why `recover`
+               retracts hard on the same axis it drove on.
+
+           The blade prop hangs off the RIGHT hand socket, so combat.js pins
+           punchArm to "r" for a stab; `left` is still honoured here so the
+           block stays correct if anything ever puts a shank in the other fist. */
+        const grabArm = left ? ch.parts.ra : ch.parts.la;
+        const grabJ = left ? J.ra : J.la;
+        /* The travel is deliberately most of the shoulder's range. Authored at
+           -0.62 the "piston" barely left the hip: on the impact frame the hand
+           was still low and the point aimed at the concrete, so the plate read
+           as a man standing next to someone holding a shiv rather than putting
+           it in him. -1.05 lands the fist around the belly of a same-size
+           opponent (character.js's jab calls -1.42 chin height), which is
+           where a stab goes, and the elbow finishing near-straight is what
+           carries the point the last 30 cm. */
+        arm.rotation.x = 0.30 * wind - 1.05 * drive + 0.35 * recover;
+        arm.rotation.y = sgn * (-0.10 - 0.20 * drive);
+        arm.rotation.z = sgn * (0.30 - 0.18 * drive);
+        arm.position.z = -0.06 * wind + 0.32 * drive - 0.10 * recover;
+        // folded hard on the wind (the point is behind the hip), snapped
+        // almost straight at the peak — this is the joint doing the stabbing.
+        if (armJ) armJ.rotation.x = -(1.95 + 0.35 * wind) + 1.86 * Math.pow(drive, 1.25);
+        // the hooking hand: out and across, closing as the blade goes in
+        grabArm.rotation.x = -0.55 - 0.62 * drive;
+        grabArm.rotation.y = -sgn * (0.22 + 0.30 * drive);
+        grabArm.rotation.z = -sgn * 0.30;
+        grabArm.position.z = 0.06 + 0.14 * drive;
+        if (grabJ) grabJ.rotation.x = -(0.85 - 0.30 * drive);
+        // a low, committed body: drops into it, minimal rotation, no lean-back
+        ch.body.rotation.x = ch.lean + 0.10 * wind - 0.20 * drive;
+        ch.body.rotation.y = sgn * (0.18 * wind + 0.26 * drive - 0.10 * recover);
+        ch.body.position.y += -0.05 * wind - 0.07 * drive;
+      } else if (ch.punchKind === "upper") {            // rising uppercut
         // fist drops to the waist on the wind, then the hips+shoulder launch
         // it UP THE CENTERLINE to the chin — upper arm stops forward-low
         // (~-0.9) with the elbow folded so the forearm is vertical at impact.
@@ -2591,29 +2644,60 @@
 
     // ---- FIGHT STANCE idle: bladed, hands-up, ready. Only when not mid-move,
     // so any actual strike/reaction below (or the punch above) wins outright.
+    /* `bladeCarry` joins the exclusion list for the same reason aimingPose and
+       carryPose are on it: this is a BOXING guard — both fists up by the jaw,
+       weight bladed, hands ready to catch a punch — and it is the wrong body
+       for a man holding an edge. You do not put your dukes up with a shank;
+       you keep the hand low and lead with the point, which is what
+       systems/prisonshanks.js poses. Written as a rig flag rather than fought
+       over by update order, exactly like the two flags beside it. */
     if (ch.fightStance && !(ch.punchT > 0) && !(ch.kickT > 0) && !(ch.blockT > 0) &&
         !(ch.dodgeT > 0) && !(ch.staggerT > 0) && !(ch.koT > 0) && !ch.koPose &&
-        !ch.aimingPose && !ch.carryPose && !ch.cuffed && !ch.surrender && !ch.handsUp) {
-      ch.fightPh = (ch.fightPh || 0) + dt;              // own phase: weave, don't walk
+        !ch.aimingPose && !ch.carryPose && !ch.bladeCarry && !ch.cuffed &&
+        !ch.surrender && !ch.handsUp) {
+      /* GASSED — the guard comes down. (`ch.winded`, 0..1, written by
+         systems/combat.js from the punch stamina it used to keep private.)
+
+         Punch stamina gated every attack you threw and had NO body: the bar in
+         #survBars is display:none outside survival/gungame (hud.css), and the
+         value itself was a module-local `let` nobody could read. So the only
+         way the prison could tell you why your fists stopped working was a
+         popup that said "Catch your breath." — narration standing in for an
+         animation that was never built.
+
+         A tired fighter is one of the most legible things a body can do, and
+         it needs no new rig: the arms sink out of the chin-guard, the weave
+         goes slow and heavy, the chest starts heaving on the breath channel,
+         and the knees give up the sprung crouch. Every one of those is a
+         channel this block already drives. At winded = 0 the arithmetic below
+         reduces EXACTLY to the values above it, so a fresh fighter is
+         untouched, byte for byte. */
+      const gas = Math.min(1, Math.max(0, ch.winded || 0));
+      // the weave itself slows as he tires — a gassed man does not bounce
+      ch.fightPh = (ch.fightPh || 0) + dt * (1 - gas * 0.45);
       const w = Math.sin(ch.fightPh * 2.6);             // slow weave
       const w2 = Math.sin(ch.fightPh * 5.2 + 1.3);      // faster forearm pump
-      // forearms up near the chin, tucked slightly inward, a touch forward
-      ch.parts.la.rotation.x = -0.9 + w2 * 0.05;
-      ch.parts.la.rotation.z = -0.26;
+      const pump = 1 - gas * 0.6;                       // the pump dies off too
+      // forearms up near the chin, tucked slightly inward, a touch forward —
+      // and sagging toward the ribs as he gasses out
+      ch.parts.la.rotation.x = (-0.9 + gas * 0.62) + w2 * 0.05 * pump;
+      ch.parts.la.rotation.z = -0.26 + gas * 0.10;
       ch.parts.la.rotation.y = 0.1;
-      ch.parts.la.position.z = 0.1;
-      ch.parts.ra.rotation.x = -0.98 - w2 * 0.05;
-      ch.parts.ra.rotation.z = 0.26;
+      ch.parts.la.position.z = 0.1 - gas * 0.06;
+      ch.parts.ra.rotation.x = (-0.98 + gas * 0.66) - w2 * 0.05 * pump;
+      ch.parts.ra.rotation.z = 0.26 - gas * 0.10;
       ch.parts.ra.rotation.y = -0.1;
-      ch.parts.ra.position.z = 0.1;
-      // bladed torso + subtle rhythmic weave; soft knees when standing still
+      ch.parts.ra.position.z = 0.1 - gas * 0.06;
+      // bladed torso + subtle rhythmic weave; soft knees when standing still.
+      // The heave rides ch.breath (the same channel idle/carry already use), so
+      // a winded man visibly sucks air where a fresh one is still.
       ch.body.rotation.y = -0.18 + w * 0.1;
-      ch.body.rotation.x = ch.lean + 0.08;
+      ch.body.rotation.x = ch.lean + 0.08 + gas * (0.10 + Math.sin(ch.breath * 4.6) * 0.055);
       ch.body.rotation.z = ch.sway + w * 0.04;
       if (!moving) {
-        ch.body.position.y -= 0.05 + w * 0.02;          // sit into the stance, bob
-        ch.parts.ll.scale.y = 0.96;
-        ch.parts.rl.scale.y = 0.96;
+        ch.body.position.y -= (0.05 + w * 0.02) * (1 - gas * 0.8);  // stands up out of the crouch
+        ch.parts.ll.scale.y = 0.96 + gas * 0.04;
+        ch.parts.rl.scale.y = 0.96 + gas * 0.04;
       }
     }
 

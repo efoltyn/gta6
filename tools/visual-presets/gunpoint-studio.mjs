@@ -139,6 +139,28 @@ const subjects = [
     focus: "Same moment as the close surrender, with the HUD left on. hudTextChars is the show-don't-tell number: the popup and the pill that used to sit here are what this preset exists to watch disappear, while the pose above carries the same information.",
     act: { cast: { kind: "inmate", n: 1, dist: 3.2, arm: "none" }, secs: 1.5 },
     cam: fp(3.2) },
+
+  /* ---- FISTS: the punch, and the thing that gates the punch ------------
+     OWNER: "POPUP WHEN I PUNCH — PUNCHING LEGIT IS A MOTION."
+     He is right, and character.js:2509 has driven a real jab/cross/hook off
+     punchArm/punchKind/punchT the whole time. These two shots are the proof
+     for the deletion, and for the pose that had to be BUILT before the
+     second caption could go: punch stamina gated every swing and had no body
+     at all, so "Catch your breath." was standing in for an animation. */
+  { id: "fists-guard-fresh", label: "Fists up, fresh", hud: false,
+    focus: "The fight stance with a full tank: forearms up at the chin, bladed torso, sprung knees, a live weave. This is the BASELINE — winded is 0 here and the pose arithmetic must reduce to exactly what it always was.",
+    act: { cast: { kind: "inmate", n: 1, dist: 2.6, arm: "none" }, secs: 0.4, fists: true },
+    cam: profile(2.6, 3.4, 1.7) },
+
+  { id: "fists-gassed", label: "Fists up, gassed", hud: false,
+    focus: "THE POSE THAT REPLACED A POPUP. Same man, same camera, stamina spent. The guard should be visibly DOWN off the chin, the shoulders open, the knees straight and the chest heaving. If this frame looks like the one before it, the deletion of \"Catch your breath.\" left the player with no way to know why his fists stopped working.",
+    act: { cast: { kind: "inmate", n: 1, dist: 2.6, arm: "none" }, secs: 0.4, fists: true, punches: 20 },
+    cam: profile(2.6, 3.4, 1.7) },
+
+  { id: "fists-mid-punch", label: "Mid-swing", hud: true,
+    focus: "The punch itself, caught mid-arc, with the HUD ON. The arm is visibly thrown — that motion is the whole reason \"Swing...\" was deleted. hudTextChars is the number that should have dropped.",
+    act: { cast: { kind: "inmate", n: 1, dist: 2.2, arm: "none" }, secs: 0.4, fists: true, punch: 0.26 },
+    cam: profile(2.2, 3.2, 1.7) },
 ];
 
 async function stageGunpointStudio(input) {
@@ -303,6 +325,35 @@ async function stageGunpointStudio(input) {
     away.push(a); parked++;
   }
 
+  /* ---- FISTS MODE: stage the player's own fight stance ------------------
+     `fists` puts the player in the guard, `gas` forces the winded value the
+     pose reads (systems/combat.js normally publishes it from punch stamina),
+     and `punch` throws a real swing and steps to a named point in its arc so
+     the frame catches the arm mid-throw rather than at rest. Nothing here
+     authors a pose: every field written is one entities/character.js already
+     drives, and the punch goes through CBZ.punch so it is the real swing. */
+  const pchar = CBZ.playerChar;
+  if (act.fists && pchar) {
+    // A GUN BEATS THE GUARD. character.js gates the fight stance behind
+    // !aimingPose && !carryPose, and the studio hands the player a sidearm at
+    // boot for the gunpoint shots — so fists mode has to actually disarm him
+    // or the stance silently never runs and every frame shows arms at rest.
+    if (CBZ.weaponInventory) CBZ.weaponInventory.length = 0;
+    CBZ.currentWeaponId = null;
+    if (CBZ.onWeaponInventoryChanged) { try { CBZ.onWeaponInventoryChanged(null, false); } catch (_) {} }
+    if (CBZ.fps) CBZ.fps.active = false;    // fists are a third-person read
+    pchar.aimingPose = false; pchar.carryPose = false;
+    pchar.fightStance = true;
+    pchar.group.visible = true;
+  } else if (pchar) {
+    pchar.fightStance = false;
+    pchar.winded = 0;
+    if (!CBZ.weaponInventory || !CBZ.weaponInventory.length) {
+      if (CBZ.unlockWeapon) CBZ.unlockWeapon("sidearm");
+      if (CBZ.setCurrentWeapon) CBZ.setCurrentWeapon("sidearm");
+    }
+  }
+
   /* ---- pin the coin, run the decision, put the coin back --------------- */
   // decideReaction reads CBZ.econ.rng. Forcing it to 0 makes `rng() < draw`
   // true whenever draw > 0, so an armed man always draws and an unarmed man
@@ -319,6 +370,46 @@ async function stageGunpointStudio(input) {
     CBZ.hitstop = 0; CBZ.slowmo = 0;
     player.hp = 100;                         // a standoff must not end on a death screen
     CBZ.stepSim(1 / 60);
+  }
+
+  /* GAS HIM OUT FOR REAL. combat.js republishes `winded` from its own private
+     stamina every tick, so writing the value here is overwritten within a
+     frame. Throwing actual punches spends actual stamina, which means this
+     shot proves the shipped path — the guard drops because the man is tired,
+     not because the preset said so. */
+  if (act.punches && CBZ.punch) {
+    // Stamina regenerates at 0.42/s while a punch costs 0.22-0.34, so a lazy
+    // cadence breaks even and never gasses anyone. Re-throw as soon as the
+    // previous swing has RESOLVED (pendingPunch clears at ~0.15s) rather than
+    // waiting out the full animation, which is also how a real player mashes.
+    for (let p = 0; p < act.punches; p++) {
+      try { CBZ.punch(); } catch (_) {}
+      for (let i = 0; i < 14; i++) { CBZ.hitstop = 0; CBZ.slowmo = 0; CBZ.stepSim(1 / 60); }
+    }
+    // let the LAST swing finish, or the frame photographs an arm in flight and
+    // calls it a guard
+    for (let i = 0; i < 22; i++) { CBZ.hitstop = 0; CBZ.slowmo = 0; CBZ.stepSim(1 / 60); }
+  }
+
+  // THE SWING, caught in flight. CBZ.punch is the real entry point the mouse
+  // uses, so this photographs the shipped animation rather than a pose set by
+  // hand; the short step lands the camera inside the arc.
+  if (act.punch != null && CBZ.punch) {
+    // Reproduce the SHIPPED input path. combat.js's mousedown handler is
+    // `const r = punch(); if (r && r.msg) CBZ.flashHint(r.msg, 1.4);` — the
+    // popup never lived inside punch() itself, so calling punch() bare would
+    // measure a HUD the old build also never printed. Mirroring the handler
+    // makes hudTextChars honest on both sides: the deployed build still
+    // returns "Swing..." and shows it, this one returns "" and shows nothing.
+    try {
+      const r = CBZ.punch();
+      if (r && r.msg && CBZ.flashHint) CBZ.flashHint(r.msg, 1.4);
+    } catch (_) {}
+    const pf = Math.max(1, Math.round(act.punch * 60));
+    for (let i = 0; i < pf; i++) {
+      CBZ.hitstop = 0; CBZ.slowmo = 0;
+      CBZ.stepSim(1 / 60);
+    }
   }
 
   /* ---- compose the camera --------------------------------------------- */
@@ -338,8 +429,9 @@ async function stageGunpointStudio(input) {
     const rig = CBZ.skyDome && CBZ.skyDome.parent;
     if (rig && rig.position) rig.position.set(camera.position.x, 0, camera.position.z);
   }
-  // The player's own body would fill a first-person frame from the inside.
-  if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.visible = false;
+  // The player's own body would fill a first-person frame from the inside —
+  // except in fists mode, where his body IS the subject.
+  if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.visible = !!act.fists;
 
   /* ---- measure -------------------------------------------------------- */
   // Arm height is read as a world-space box so it needs no rig knowledge and
@@ -397,6 +489,16 @@ async function stageGunpointStudio(input) {
     camera.position.set(cam.x, cam.y, cam.z);
     camera.lookAt(cam.ax, cam.ay, cam.az);
     camera.updateProjectionMatrix();
+  }
+
+  // FISTS: measure the guard height directly, so "the guard came down" is a
+  // number and not an impression. Wrist-to-shoulder pitch is what a viewer
+  // reads as a guard, so the arm pitch IS the metric.
+  if (act.fists && pchar && pchar.parts) {
+    if (pchar.parts.la) metrics.guardPitchDeg = Number((pchar.parts.la.rotation.x * 180 / Math.PI).toFixed(1));
+    metrics.winded = Number((pchar.winded || 0).toFixed(2));
+    const at = armTop(pchar.parts ? { char: pchar } : null), ht = headTop({ char: pchar });
+    if (at != null && ht != null) metrics.guardVsHeadCm = Number(((at - ht) * 100).toFixed(1));
   }
 
   let scared = 0, drew = 0;
