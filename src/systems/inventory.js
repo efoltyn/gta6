@@ -184,13 +184,25 @@
      "@held" = the prison's legacy "Gun" item, which weapon-data.js keeps in
      sync with CBZ.weaponInventory (syncLegacyGunItem). It is not a pistol —
      it is whatever came off the armory rack, so it renders the weapon the
-     player actually has out. --------------------------------------------- */
+     player actually has out.
+
+     THE SHIV JOINS THE TABLE, and the reason it may is the reason it could
+     not before. This comment used to name the Shiv as the exact thing the
+     allowlist existed to keep a 9 mm off — because normalizeWeaponId() had no
+     row for it and answered "sidearm". It now HAS a row
+     (actorweapons.js NAME_TO_ID → "shank", weapons/appearances/shank.js), so
+     the thumbnail of a shiv is a photograph of a shiv. The allowlist is doing
+     its job either way: it is a list of names with a REAL MODEL BEHIND THEM,
+     and the fix was to give this one a model, not to widen the gate. "Hacksaw
+     Blade" and "Tattoo Gun" stay absent for precisely that reason — nothing
+     has drawn them yet. ------------------------------------------------- */
   const GUN_ID = {
     "Gun": "@held",
     "Pistol": "sidearm", "Sidearm": "sidearm", "Revolver": "revolver", "Desert Eagle": "deagle",
     "SMG": "smg", "Uzi": "uzi", "Shotgun": "shotgun", "Rifle": "carbine", "Carbine": "carbine",
     "AK-47": "ak47", "Sniper": "sniper", "LMG": "lmg", "Taser": "taser",
     "Bazooka": "bazooka", "Rocket Launcher": "bazooka", "Grenade Launcher": "glauncher",
+    "Shiv": "shank", "Shank": "shank",
   };
   function heldWeaponId() {
     const inv = CBZ.weaponInventory || [];
@@ -201,6 +213,14 @@
   function gunIdFor(name) {
     const gid = GUN_ID[name];
     if (!gid) return null;
+    /* The shiv's row leaves with its flag. PRISON_SHANK=0 sends
+       normalizeWeaponId back to answering "sidearm" for a blade name, so
+       letting this entry through on the off-side would hand the thumbnail
+       rig a pistol and paint a 9 mm on the Shiv — the precise failure the
+       allowlist above was written to prevent, reintroduced by the revert
+       rather than by the feature. Off-side, it falls to the drawn glyph,
+       which is what this bag actually shipped. */
+    if (gid === "shank" && CBZ.CONFIG && CBZ.CONFIG.PRISON_SHANK === false) return null;
     return gid === "@held" ? heldWeaponId() : gid;
   }
 

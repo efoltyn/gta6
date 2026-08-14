@@ -100,13 +100,42 @@
   function reseed() { _seed = (Math.floor(Math.random() * 2e9) | 1) & 0x7fffffff; }
 
   function addCigs(n) { g.cigs = Math.max(0, g.cigs + n); CBZ.el.cigText.textContent = g.cigs; }
+  /* ---- THE BAG IS ALSO A WEAPON RACK, FOR EXACTLY ONE ITEM ----------------
+     A Shiv is the only thing in this table that is both loot and a weapon the
+     player can draw (weapons/weapon-data.js `id:"shank"`). addItem/takeItem are
+     the ONE choke point every acquisition and every loss in the prison passes
+     through — the floor pickup, the frisk, the trade, the reception
+     confiscation, the shop — so hooking the weapon row here means there is no
+     second place that has to remember. hasItem stays the truth; the weapon rail
+     is just told about it.
+
+     Deliberately NOT `select:true`: finding a shiv in a drawer should not rip
+     the gun out of your hands mid-fight. It appears on the rail and you choose. */
+  function syncShankWeapon() {
+    if (CBZ.CONFIG && CBZ.CONFIG.PRISON_SHANK === false) return;
+    if (!CBZ.unlockWeapon || !CBZ.lockWeapon) return;
+    const owns = (g.inventory.Shiv || 0) > 0 || (g.inventory.Shank || 0) > 0;
+    if (owns) { if (!(CBZ.hasWeapon && CBZ.hasWeapon("shank"))) CBZ.unlockWeapon("shank", { select: false }); }
+    else if (CBZ.hasWeapon && CBZ.hasWeapon("shank")) CBZ.lockWeapon("shank");
+  }
+
   function addItem(name, n) {
     n = n || 1;
     g.inventory[name] = (g.inventory[name] || 0) + n;
+    if (name === "Shiv" || name === "Shank") syncShankWeapon();
     CBZ.refreshInventory && CBZ.refreshInventory();
   }
   function hasItem(name) { return (g.inventory[name] || 0) > 0; }
-  function takeItem(name) { if (hasItem(name)) { g.inventory[name]--; CBZ.refreshInventory && CBZ.refreshInventory(); return true; } return false; }
+  function takeItem(name) {
+    if (hasItem(name)) {
+      g.inventory[name]--;
+      if (name === "Shiv" || name === "Shank") syncShankWeapon();
+      CBZ.refreshInventory && CBZ.refreshInventory();
+      return true;
+    }
+    return false;
+  }
+  CBZ.prisonSyncShank = syncShankWeapon;
   function nm(a) {
     const name = a && a.data && a.data.name ? a.data.name : "someone";
     return name.replace(/^the |^a |^an /, "");

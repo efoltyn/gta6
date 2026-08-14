@@ -247,6 +247,54 @@
       hold: { heavy: 0.04, support: 0, stance: "pistol" },
     },
     {
+      /* SHANK — the first MELEE weapon in this table, and the reason `melee`
+         exists as a field.
+
+         Prison Escape is a mode about shivs, and the shiv was a number. It
+         lived at systems/combat.js's `11 + (hasItem("Shiv") ? 9 : 0)`: having
+         one IN THE BAG made your BARE FIST hit for nine more, and the wound it
+         opened was `melee:"blunt"` — a bruise. You could not hold it, draw it,
+         see it, drop it or stab with it, and `buildActorWeapon("Shiv")` fell
+         through NAME_TO_ID and handed back a 9 mm pistol.
+
+         Registering it HERE — rather than inventing a prison-local blade — is
+         what makes it physical for free, because every one of those consumers
+         is already keyed off this row: actorweapons builds the hand model,
+         holsterprops stows it in the waistband, prisondrops throws it on the
+         floor with real mass, itemicons PHOTOGRAPHS it for the bag icon, and
+         fpsmode gives it a first-person viewmodel. One row, six systems.
+
+         `melee: true` is the only new behaviour, and it means exactly one
+         thing: this weapon does not fire. fpsmode's shoot() diverts to the
+         stab before it touches a magazine, so every ammo/reload/recoil/tracer
+         field below would be dead weight — the ones that remain are the ones
+         a melee weapon genuinely has. `range` is the REACH (fists are 1.9;
+         a held blade buys ~20 cm) and `interval` is the time between thrusts:
+         fast, because that is a shank's whole character — you do not wind up
+         with one, you put it in someone four times before they answer.
+
+         slot "utility" is deliberate reuse, not laziness: it is the taser's
+         slot, and it already means "small, one-handed, rides the hip, poses
+         like a pistol" in setReadyPose / holsterprops / buildActorWeapon's
+         scale. That is a shank's carry exactly. A new slot value would have
+         meant auditing every `slot ===` branch in the tree for no gain. */
+      id: "shank", key: "shank", label: "PRISON SHANK", short: "SHANK", slot: "utility",
+      appearanceFactory: "shank", melee: true,
+      mag: 0, reserve: 0, reload: 0, interval: 0.42, range: 2.12,
+      damage: 26, headMult: 1.9, dropStart: 2.12, minDamage: 1.0, falloff: "flat",
+      spread: 0, bodyRadius: 0.70, headRadius: 0.34,
+      recoil: 0, maxRecoil: 0, climb: 0, sideKick: 0,
+      recenter: 0, rampMax: 1.0, yawWeave: 0,
+      shake: 0.30, heat: 9, knock: 0.55, flash: 0,
+      sfx: "punch", tracer: 0, auto: false,
+      // What the blade does that a fist cannot: it OPENS people. Consumed by
+      // systems/combat.js's stab (wounds.js draws the `blade` kind, gore.js's
+      // "stabbed" cause throws the arterial arcs) — both of which have existed
+      // in this engine for months with nothing in the prison able to reach them.
+      bleed: 0.55, woundKind: "blade",
+      hold: { heavy: 0, support: 0, stance: "pistol" },
+    },
+    {
       // GRENADE LAUNCHER (owner ask): the RPG's beautiful explosion, less
       // reloading. It is a pure REUSE weapon: `explosive: true` routes it
       // through fpsmode's existing rocket branch — SAME blastPower/blastRadius
@@ -434,6 +482,24 @@
     return !!nid && CBZ.weaponInventory.indexOf(nid) >= 0;
   }
 
+  /* The inverse of unlockWeapon, and it exists because the SHANK is the first
+     weapon in this table that is also a bag ITEM. A gun you own, you own; a
+     shiv can be confiscated at reception (systems/prisontiers.js's CONTRA
+     sweep), traded, or simply used up. Without a way to hand the row back, the
+     weapon rail would keep offering a blade the player no longer has — which is
+     the same class of lie as the blade that could not be held. */
+  function lockWeapon(id) {
+    const nid = normalizeId(id);
+    if (!nid) return false;
+    const i = CBZ.weaponInventory.indexOf(nid);
+    if (i < 0) return false;
+    CBZ.weaponInventory.splice(i, 1);
+    if (CBZ.currentWeaponId === nid) CBZ.currentWeaponId = CBZ.weaponInventory[0] || null;
+    reconcilePrisonSlots();
+    if (CBZ.onWeaponInventoryChanged) CBZ.onWeaponInventoryChanged(nid, false);
+    return true;
+  }
+
   function hasAnyWeapon() {
     return CBZ.weaponInventory.length > 0;
   }
@@ -479,6 +545,7 @@
     };
   };
   CBZ.unlockWeapon = unlockWeapon;
+  CBZ.lockWeapon = lockWeapon;
   CBZ.hasWeapon = hasWeapon;
   CBZ.hasAnyWeapon = hasAnyWeapon;
   CBZ.equippedWeapon = equippedWeapon;

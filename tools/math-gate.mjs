@@ -759,6 +759,20 @@ const PASS = `(() => {
       if (fl.legacy > 0) out.fails.push("HAND-TYPED FOLIAGE COLOURS: " + fl.legacy + " " + JSON.stringify(fl.legacySites));
       if (fl.on && !fl.tinted) out.fails.push("forestLook is on and nothing adopted it");
     }
+    // CLEARING RIMS: a keep-out circle is honest, a VISIBLE one is the bug.
+    // rampRings counts the 5 m rings the stand takes to climb from empty back
+    // to 55 percent of the surrounding density. One ring is a drawn compass
+    // arc - which is what the owner stood inside on 2026-08-11 - so razorEdges
+    // is pinned at 0. Clearings with no stand around them to compare against
+    // (biome rim, causeway mouth) are reported but not judged.
+    if (CBZ.forestRimAudit) {
+      const fr = CBZ.forestRimAudit();
+      out.forestRim = "soft " + fr.soft + " judged " + fr.judged + " razor " + fr.razorEdges +
+        " ramps " + fr.clearings.map(function (c) { return c.judgeable ? c.rampMetres + "m" : "-"; }).join("/");
+      if (fr.razorEdges > 0) out.fails.push("CLEARINGS READ AS CIRCLES: " + fr.razorEdges +
+        " with a one-ring tree line " + JSON.stringify(fr.clearings.filter(function (c) { return c.razor; })));
+      if (fr.judged < 3) out.fails.push("forestRim judged only " + fr.judged + " clearings - the ratchet stopped asking");
+    }
     if (CBZ.backcountrySolids && CBZ.backcountrySolids.carpet) {
       const bs = CBZ.backcountrySolids;
       out.backcountry = "trees " + bs.trees + " (conifer " + bs.conifers + ")" +
@@ -1124,7 +1138,7 @@ async function runSeed(seed, label) {
   tmark(`${label}: street ${r.street || "-"} | stunts ${r.stunts || "-"}`);
   tmark(`${label}: ground ${r.ground || "-"} | backdrop ${r.backdrop || "-"} | peaks ${r.peaks || "-"} | swim ${r.swim || "-"} | waterShared ${r.waterShared || "-"}`);
   tmark(`${label}: pools ${r.pools || "-"}`);
-  tmark(`${label}: forestLook ${r.forestLook || "-"} | backcountry ${r.backcountry || "-"}`);
+  tmark(`${label}: forestLook ${r.forestLook || "-"} | forestRim ${r.forestRim || "-"} | backcountry ${r.backcountry || "-"}`);
   tmark(`${label}: arena ${r.arena || "-"} | frontGlass ${r.frontGlass || "-"} | elevators ${r.elevators || "-"}`);
   tmark(`${label}: map ${r.map || "-"} | crowdSpawn ${r.crowdSpawn || "-"} | platforms ${r.platforms == null ? "-" : r.platforms}`);
   tmark(`${label}: cockpit ${r.cockpit || "-"} | wounds ${r.wounds || "-"} | cabin ${r.cabin || "-"} | power ${r.power || "-"}`);

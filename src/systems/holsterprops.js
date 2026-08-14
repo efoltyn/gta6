@@ -151,36 +151,11 @@
   }
 
   function beginTransfer(rec, ch, stow, mp) {
-    if (!rec || !rec.from || !ch || !mp) return false;
-    // First person owns its deliberately short near-field dip in fpsmode.js.
-    // Consume that transition here so leaving FP later cannot replay an old
-    // third-person reach after the gun is already away.
-    if (CBZ.fps && CBZ.fps.active) return true;
+    if (!rec || !rec.from || !ch || !mp || (CBZ.fps && CBZ.fps.active)) return;
     const zone = transferZone(stow, rec.from);
     const target = zone && mp[zone];
-    if (!target) return true;
-    let source = mounts.hand.prop;
-
-    // Prison normally auto-enters first person on the first gun pickup. If the
-    // player returns to third person and immediately presses 1, the holster
-    // transition can reach this update before the later hand-render pass has
-    // built its prop. Materialize the SAME canonical actor model at the live
-    // hand socket here, so even that first frame has a physical source to move
-    // to the back/hip instead of silently consuming the stow event.
-    if (!source || mounts.hand.id !== rec.from || !source.parent) {
-      const socket = ch.sockets && (ch.sockets.thirdPersonWeapon || ch.sockets.weapon || ch.sockets.rightHand);
-      if (!socket || !CBZ.buildActorWeapon) return false;
-      if (source) disposeProp(mounts.hand);
-      source = CBZ.buildActorWeapon(rec.from);
-      if (!source) return false;
-      mounts.hand.prop = source;
-      mounts.hand.id = rec.from;
-      mounts.hand.long = isLongSlot(source.userData && source.userData.weaponSlot);
-      socket.add(source);
-      source.position.set(0.02, 0.02, 0.03);
-      source.scale.setScalar(mounts.hand.long ? 1.25 : 1.15);
-      source.visible = true;
-    }
+    const source = mounts.hand.prop;
+    if (!target || !source || mounts.hand.id !== rec.from || !source.parent) return;
     endTransfer();
 
     // Clone the exact visible hand model, including this weapon's dimensions
@@ -231,7 +206,6 @@
         target,
       });
     }
-    return true;
   }
 
   function updateTransfer(dt) {
@@ -308,7 +282,8 @@
     const mp = (CBZ.CONFIG.CHAR_WEAPON_MOUNTS !== false && CBZ.charMounts) ? CBZ.charMounts(ch) : null;
     const rec = CBZ.weaponTransition;
     if (mp && rec && rec.seq !== lastTransitionSeq) {
-      if (beginTransfer(rec, ch, stow, mp)) lastTransitionSeq = rec.seq;
+      lastTransitionSeq = rec.seq;
+      beginTransfer(rec, ch, stow, mp);
     }
     if (mp) {
       if (stow.back) mountTo(mounts.back, stow.back, mp.back, 0.92);

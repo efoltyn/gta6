@@ -728,7 +728,15 @@
           const live = !flat && animated;
           const ry = a.group.rotation.y || 0;
           const seed = a._deathSeed || 0;
-          const gunArm = a.armed && a._weaponProp && a._weaponProp.visible; // actorweapons owns it
+          /* actorweapons owns this arm — but only when what is in it has a
+             BARREL. `armed && a visible prop` was a complete test right up
+             until a weapon existed with no muzzle: (3b) below elevates the arm
+             so the barrel LINE meets the target, and pointed at a shank it
+             holds a man's fist at head height aiming a sharpened strip of bed
+             frame like a pistol. The prop was stamped with the answer at build
+             time (systems/actorweapons.js), so this costs one property read. */
+          const gunArm = a.armed && a._weaponProp && a._weaponProp.visible &&
+            !(a._weaponProp.userData && a._weaponProp.userData.weaponMelee);
 
           // ---- (1) DIRECTIONAL STAGGER: lurch along the REAL push direction
           //      so a watcher reads who hit whom — head whipping harder than

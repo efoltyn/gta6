@@ -3611,6 +3611,11 @@
       CBZ.gore(vp.x, vp.y + 1.1, vp.z, {
         dir: kg ? { x: vp.x - kg.position.x, z: vp.z - kg.position.z } : null,
         amount: playerKill ? 1.2 : 0.85, player: false, sfx: playerKill ? "hit" : false,
+        // How he was killed, forwarded rather than guessed. gore.js already
+        // branches on this ("blade" → arterial arcs, "blunt" → a slow well);
+        // this choke point simply never passed it, so every death in the
+        // prison — shanking included — sprayed like a gunshot.
+        melee: opts.melee || null,
       });
     }
     victim.aiState = "dead";
@@ -3813,20 +3818,29 @@
           CBZ.addHeat(4);
           return n.baseSpeed * 1.5;
         }
-        // the swing itself, on the shared rig
+        /* the swing itself, on the shared rig — and if he pulled a shank
+           (systems/prisonshanks.js sets `_shankOut` when a carrier commits to
+           a fight), it is a THRUST, not a fist. The blade hand is the right
+           one because that is the socket his model hangs off; without pinning
+           it, every other blow would be an empty left fist thrown while the
+           shiv hung at his side. */
+        const stabbing = !!n._shankOut;
         if (n.char) {
-          n.char.punchArm = (n.jumpBlows & 1) ? "r" : "l";
-          n.char.punchKind = (n.jumpBlows % 3 === 0) ? "upper" : "";
+          n.char.punchArm = stabbing ? "r" : ((n.jumpBlows & 1) ? "r" : "l");
+          n.char.punchKind = stabbing ? "stab" : ((n.jumpBlows % 3 === 0) ? "upper" : "");
           n.char.punchT = n.char.punchDur || 0.28;
         }
         // face him at you so the fist travels the right way
         n.group.rotation.y = Math.atan2(px - n.group.position.x, pz - n.group.position.z);
         // AND YOUR HEALTH GOES DOWN. Routed through the mode's own damage entry
         // so a beating can put you on the floor exactly like a bullet does.
-        const swing = 7 + rng() * 5;
+        // Being shanked is roughly twice being punched, and it is meant to be:
+        // the answer to a man with a blade is not to trade blows with him.
+        const swing = stabbing ? (13 + rng() * 8) : (7 + rng() * 5);
         if (CBZ.hurtPlayer) {
           CBZ.hurtPlayer(swing, n.group.position.x, n.group.position.z,
-            { melee: true, stun: 0.5, heat: 4, shake: 0.45, sfx: "punch", by: n });
+            { melee: true, stun: stabbing ? 0.34 : 0.5, heat: 4, shake: stabbing ? 0.32 : 0.45,
+              sfx: stabbing ? "hit" : "punch", by: n });
         } else {
           CBZ.player.hp = (CBZ.player.hp == null ? 100 : CBZ.player.hp) - swing;
           CBZ.player.stun = Math.max(CBZ.player.stun || 0, 0.5);

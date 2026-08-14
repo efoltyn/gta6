@@ -537,6 +537,7 @@
 <script src="src/weapons/appearances/uzi.js"></script>
 <script src="src/weapons/appearances/sniper.js?v=bore1"></script>
 <script src="src/weapons/appearances/lmg.js?v=bore1"></script>
+<script src="src/weapons/appearances/shank.js"></script>
 <!-- ONE prison flashlight model: held guard tool, physical death drop and
      inventory thumbnail all consume this factory. -->
 <script src="src/weapons/flashlight.js?v=duty1"></script>
@@ -700,6 +701,12 @@
      launch its pooled twin probes/wires and electrical body arc; it also draws
      the shared taser appearance in a guard's real weapon socket for that beat. -->
 <script src="src/systems/taserfx.js?v=taser1"></script>
+<!-- The blades half the wing was already carrying. Owns only WHEN an inmate's
+     shank comes out of the waistband and how the one arm holding it is posed;
+     what a stab DOES lives in systems/combat.js. Loads beside taserfx for the
+     same reason: both re-assert a carried weapon every frame because
+     actorweapons' self-heal pass is city-only. -->
+<script src="src/systems/prisonshanks.js"></script>
 <script src="src/systems/capture.js?v=npc-react1"></script>
 <script src="src/systems/markers.js?v=allmain2"></script>
 <script src="src/systems/music.js?v=samples1"></script>
