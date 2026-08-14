@@ -280,7 +280,18 @@
             n.poseAimBack = true;
             n.intimidFireT = 0.8 + ((n.personality && n.personality.nerve) || 0.5) * 1.7;
             CBZ.sfx && CBZ.sfx("switch");
-            CBZ.flashHint && CBZ.flashHint("" + shortName(n) + " pulls a gun on you!", 1.5);
+            // NO LINE. `poseAimBack = true` two lines up is the whole message:
+            // systems/reactions.js levels his gun arm forward at you and sets
+            // the tense fear face, and the "switch" sound is the draw. This was
+            // the first popup the owner pointed at — "PUNCHING LEGIT IS A
+            // MOTION" applies double to a man raising a gun at your face.
+            //
+            // Deleted only after the pose was PHOTOGRAPHED (tools/visual-presets/
+            // gunpoint-studio.mjs, subject standoff-draw) rather than assumed:
+            // the hands-up pose next door looked equally fine in the source and
+            // was in fact fighting animChar to a half-raised stall. A caption is
+            // safe to remove when someone has looked at the screen, not when the
+            // code reads like it should work.
           }
         } else if (n.intimidMode === "standoff") {
           if (aimedHere) {
