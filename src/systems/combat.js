@@ -19,24 +19,24 @@
   const nm = (a) => a.data.name.replace(/^the |^a |^an /, "");
   const maxHpOf = (a) => (a.kind === "guard" || a.kind === "warden" ? 140 : 100);
 
-  /* ---------- impact spark ---------- */
-  const sc = document.createElement("canvas"); sc.width = sc.height = 64;
-  const sx = sc.getContext("2d");
-  const grd = sx.createRadialGradient(32, 32, 2, 32, 32, 30);
-  grd.addColorStop(0, "rgba(255,255,255,1)");
-  grd.addColorStop(0.4, "rgba(255,225,120,.9)");
-  grd.addColorStop(1, "rgba(255,150,40,0)");
-  sx.fillStyle = grd; sx.fillRect(0, 0, 64, 64);
-  const sparkTex = new THREE.CanvasTexture(sc);
-  const spark = new THREE.Sprite(new THREE.SpriteMaterial({ map: sparkTex, transparent: true, depthTest: false, blending: THREE.AdditiveBlending }));
-  spark.visible = false; scene.add(spark);
-  let sparkLife = 0;
-  function flashSpark(actor, big) {
-    spark.position.set((CBZ.player.pos.x + actor.group.position.x) / 2, 1.6, (CBZ.player.pos.z + actor.group.position.z) / 2);
-    spark.scale.setScalar(big ? 2.6 : 1.6);
-    spark.material.opacity = 1; spark.visible = true; sparkLife = 0.16;
-  }
+  /* THE IMPACT GLOW: DELETED. (OWNER: "glow on punch impact is super dumb...
+     just like the words on the screen saying Swing...")
 
+     An additive white-to-orange radial sprite, depthTest:false, flashed at the
+     midpoint between you and whoever you hit, every landed punch. He is right
+     that it is the same object as the caption: a symbol drawn on top of an
+     event to announce that the event happened. Knuckles do not emit light.
+
+     What it was sitting on top of, and hiding, is a full physical impact that
+     this file already fires on the same frame:
+       · CBZ.doHitstop  — the freeze that sells the weight
+       · CBZ.shake      — the camera takes the hit too
+       · CBZ.body.hit   — a real velocity-based knockback (force 4.5 / 8)
+       · CBZ.reactPunch — systems/reactions.js whips his head along the punch
+                          line, jab/cross/hook/upper each a different snap,
+                          plus the directional stagger
+       · CBZ.bodyWound  — the bruise stays on the face you beat
+     Taking the flare off is what lets any of that be seen. */
   /* FLOATING HEALTH BAR OVER PEOPLE: DELETED.
 
      A green-to-red meter pinned above whoever you were punching, drawn with
@@ -52,16 +52,6 @@
 
      showHP() stays as a no-op so the four call sites keep working. */
   function showHP() {}
-
-  // The impact spark shared the deleted bar's tick — it still needs one, or it
-  // flashes on at the first punch and hangs there for the rest of the run.
-  CBZ.onAlways(59, function (dt) {
-    if (sparkLife <= 0) return;
-    sparkLife -= dt;
-    spark.material.opacity = Math.max(0, sparkLife / 0.16);
-    spark.scale.multiplyScalar(1 + dt * 6);
-    if (sparkLife <= 0) spark.visible = false;
-  });
 
   /* ---------- launched bodies (uppercut pop-up) ---------- */
   const flying = [];
@@ -308,7 +298,7 @@
        actor — they keep their position on `.group.position` (the same trap
        city/social.js's citySay hit, documented in entities/ai.js). Reading
        `.pos.x` off undefined raised mid-landPunch, so NOTHING below this line
-       ever ran: no hit-stop, no shake, no knockback, no spark, no KO, no
+       ever ran: no hit-stop, no shake, no knockback, no KO, no
        downConsequences. Melee had no impact at all, and the "Swing..." popup
        was the only evidence a punch had happened — which is exactly why the
        caption felt load-bearing. Fix the body and the caption is redundant;
@@ -346,9 +336,34 @@
     // base juice + a real, velocity-based knockback so the hit reads physical
     CBZ.doHitstop(blade ? (heavy ? 0.09 : 0.05) : (heavy ? 0.11 : 0.06));
     CBZ.shake(blade ? (heavy ? 0.38 : 0.22) : (heavy ? 0.55 : 0.3));
-    // No bright orange impact spark off a body: that is a KNUCKLE hitting a
-    // jaw. A blade going in is quiet, and the wound decal is the flash.
-    if (!blade) flashSpark(actor, heavy);
+
+    /* BLOOD IS EARNED, AND IT IS NOT A DICE ROLL.
+       OWNER: "blood flying if it's a hard enough punch but no fake shit blood
+       on every punch or on Random punches is just as bad as the glow."
+
+       Both failure modes are the same failure the glow was: an effect that
+       fires because something happened rather than because of WHAT happened.
+       Blood on every punch is wallpaper; blood on a random 20% is a lie about
+       the punch you just threw, because the identical punch bleeds or doesn't
+       depending on a number you cannot see.
+
+       So the rule is a fact about the fight, checked not rolled: it has to be
+       a HEAVY blow (the third of a combo — the hook, the one you wound up for)
+       AND it has to land on a man already worn down past half. A first hook on
+       a fresh man bruises him; the same hook after you have taken him apart
+       opens him up. Both are repeatable — throw the same punches in the same
+       order and you get the same blood, every time.
+
+       A blade is exempt and always bleeds: `melee:"blade"` is a cut, and
+       wounds.js already routes it to the blade wound rather than a bruise. */
+    if (!blade && heavy && actor.hp > 0 && actor.hp < maxHpOf(actor) * 0.5 && CBZ.goreImpact && wp) {
+      const bdx = (wp.x - CBZ.player.pos.x), bdz = (wp.z - CBZ.player.pos.z);
+      const bl = Math.hypot(bdx, bdz) || 1;
+      CBZ.goreImpact(wp.x, (wp.y || 0) + 1.5, wp.z, {
+        amount: 0.45,                                   // a split lip, not a fountain
+        dir: { x: bdx / bl, y: 0.35, z: bdz / bl },     // it flies the way the fist went
+      });
+    }
     // A shank does not throw men. Almost all of a stab's energy goes IN — the
     // shove is what your other hand is doing, not what the weapon did.
     if (CBZ.body) CBZ.body.hit(actor, { fromX: CBZ.player.pos.x, fromZ: CBZ.player.pos.z, force: blade ? (heavy ? 3.4 : 2.2) : (heavy ? 8 : 4.5) });
@@ -401,11 +416,21 @@
     CBZ.doHitstop(blade ? 0.11 : 0.14);
     CBZ.doSlowmo(0.5);
     CBZ.shake(blade ? 0.55 : 0.85);
-    if (!blade) flashSpark(actor, true);
     CBZ.sfx("ko");
     // a real, heavy knockback (velocity-based via the body layer) instead of
     // flinging them into the air with a spin.
     if (CBZ.body) CBZ.body.hit(actor, { fromX: CBZ.player.pos.x, fromZ: CBZ.player.pos.z, force: blade ? 4.5 : 11 });
+    /* THE PUNCH THAT ENDS IT BLEEDS. Same rule as the one above, at its
+       extreme: this is the blow that takes a man off his feet for good, so it
+       is unambiguously "hard enough" and needs no threshold test. Fists only —
+       a blade's death spray is the arterial one aiKill already routes below. */
+    if (!blade && CBZ.goreImpact && actor.group) {
+      const ep = actor.group.position;
+      const edx = ep.x - CBZ.player.pos.x, edz = ep.z - CBZ.player.pos.z;
+      const el = Math.hypot(edx, edz) || 1;
+      CBZ.goreImpact(ep.x, (ep.y || 0) + 1.5, ep.z,
+        { amount: 1.1, dir: { x: edx / el, y: 0.45, z: edz / el } });
+    }
     else if (CBZ.knockback) CBZ.knockback(actor, CBZ.player.pos.x, CBZ.player.pos.z, blade ? 0.7 : 1.6);
     // `melee:"blade"` is what turns systems/gore.js's generic death spray into
     // the ARTERIAL one — 2-3 timed arcs off the body (gore.js:32/2028), which

@@ -157,6 +157,26 @@ const subjects = [
     act: { cast: { kind: "inmate", n: 1, dist: 2.6, arm: "none" }, secs: 0.4, fists: true, punches: 20 },
     cam: profile(2.6, 3.4, 1.7) },
 
+  /* ---- IMPACT: the glow, and what was under it -------------------------
+     OWNER: "glow on punch impact is super dumb... show physics of punch
+     landing instead better or even blood flying if it's a hard enough punch
+     but no fake shit blood on every punch or on Random punches."
+     Both directions, both photographed on the frame the blow lands. */
+  { id: "impact-player-hits-npc", label: "You land one on him", hud: false,
+    focus: "THE FRAME THE PUNCH LANDS, player to NPC. The deployed side has an additive white-orange flare hanging between the two bodies. This side should have no flare at all — instead the hit reads as hit-stop, the camera shake, a real velocity knockback and his head whipping along the punch line. If this frame looks empty, the flare was doing work the physics is not.",
+    act: { cast: { kind: "inmate", n: 1, dist: 1.6, arm: "none" }, secs: 0.3, fists: true, punchLand: true },
+    cam: profile(1.6, 3.1, 1.7) },
+
+  { id: "impact-npc-hits-player", label: "He lands one on you", hud: false,
+    focus: "THE SAME MOMENT REVERSED, NPC to player. His punch animation plays and your health drops through the mode's own damage entry. Read whether the blow lands as a physical event on YOUR body rather than as a screen effect.",
+    act: { cast: { kind: "inmate", n: 1, dist: 1.5, arm: "none" }, secs: 0.3, fists: true, npcPunch: true },
+    cam: profile(1.5, 3.4, 1.7) },
+
+  { id: "impact-blood-earned", label: "Hard enough to bleed", hud: false,
+    focus: "A HEAVY blow onto a man already worn past half health — the only fists case that draws blood now. It is a check, not a roll: the same punches in the same order bleed the same way every run. A jab on a fresh man must NOT bleed, which is what the first impact shot above proves.",
+    act: { cast: { kind: "inmate", n: 1, dist: 1.6, arm: "none" }, secs: 0.3, fists: true, punchLand: true, wearDown: true, blows: 3 },
+    cam: profile(1.6, 3.1, 1.7) },
+
   { id: "fists-mid-punch", label: "Mid-swing", hud: true,
     focus: "The punch itself, caught mid-arc, with the HUD ON. The arm is visibly thrown — that motion is the whole reason \"Swing...\" was deleted. hudTextChars is the number that should have dropped.",
     act: { cast: { kind: "inmate", n: 1, dist: 2.2, arm: "none" }, secs: 0.4, fists: true, punch: 0.26 },
@@ -389,6 +409,43 @@ async function stageGunpointStudio(input) {
     // let the LAST swing finish, or the frame photographs an arm in flight and
     // calls it a guard
     for (let i = 0; i < 22; i++) { CBZ.hitstop = 0; CBZ.slowmo = 0; CBZ.stepSim(1 / 60); }
+  }
+
+  /* IMPACT SHOTS. `punchLand` throws a real punch through CBZ.punch and steps
+     to the frame the blow actually connects (landPunch defers the hit to the
+     animation's drive frame, ~0.15s), so the camera catches the impact rather
+     than the wind-up. `wearDown` takes the target past half health first,
+     which is the condition the blood rule checks. `npcPunch` runs it the other
+     way: the inmate is pointed at the player and pushed into his own attack so
+     the reverse direction is photographed by the same rig. */
+  const maxHp = hero && (hero.kind === "guard" || hero.kind === "warden") ? 140 : 100;
+  if (act.punchLand && CBZ.punch && hero) {
+    if (act.wearDown) hero.hp = Math.round((hero.hp == null ? 100 : hero.hp) * 0.35);
+    /* HEAVY IS THE THIRD OF A COMBO (combo % 3), so a single punch is never
+       heavy and could never satisfy the blood rule — the first attempt at this
+       shot photographed a jab and concluded the blood was broken. Throw the
+       real chain: jab, cross, then the hook that is the blow the rule is about.
+       `blows` therefore also documents the rule — 3 to bleed, 1 to prove a
+       light hit does NOT. */
+    const blows = act.blows || 1;
+    for (let b = 0; b < blows; b++) {
+      if (act.wearDown) hero.hp = Math.min(hero.hp, Math.round(maxHp * 0.35));
+      try { CBZ.punch(); } catch (_) {}
+      const settle = (b === blows - 1) ? 11 : 26;   // stop ON the last impact
+      for (let i = 0; i < settle; i++) { CBZ.hitstop = 0; CBZ.slowmo = 0; CBZ.stepSim(1 / 60); }
+    }
+  }
+  if (act.npcPunch && hero) {
+    hero.foe = CBZ.player;
+    hero.aiState = "fight";
+    hero.huntPlayer = Math.max(hero.huntPlayer || 0, 6);
+    hero.attackCD = 0;
+    for (let i = 0; i < 90; i++) {
+      CBZ.hitstop = 0; CBZ.slowmo = 0;
+      if (CBZ.player.hp < 40) CBZ.player.hp = 100;   // keep the run alive, not the frame clean
+      CBZ.stepSim(1 / 60);
+      if (hero.char && hero.char.punchT > 0.12) break;   // caught mid-blow
+    }
   }
 
   // THE SWING, caught in flight. CBZ.punch is the real entry point the mouse
