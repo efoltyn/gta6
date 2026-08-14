@@ -810,6 +810,23 @@
      parse time and the bld* helpers at build time. -->
 <script src="src/city/buildings_civic.js?v=civic1"></script>
 <script src="src/city/buildings.js?v=masonry3"></script>
+<!-- THE FACADE KIT. facade_kit.js is the registry + the shared vocabulary and
+     the seam buildings.js calls (CBZ.dressFacade); city/facades/*.js each
+     register ONE style and must load after it. The generalisation of what
+     govcomplex.js does to this same office shell: a spec at the call site.
+     Inert until a caller passes {dress:{style}} (or ?cfg_FACADE_KIT_CITY=1). -->
+<script src="src/city/facade_kit.js?v=fk1"></script>
+<script src="src/city/facades/brick.js?v=fk1"></script>
+<script src="src/city/facades/stone.js?v=fk1"></script>
+<script src="src/city/facades/mosque.js?v=fk1"></script>
+<script src="src/city/facades/artdeco.js?v=fk1"></script>
+<script src="src/city/facades/brutalist.js?v=fk1"></script>
+<script src="src/city/facades/hightech.js?v=fk1"></script>
+<script src="src/city/facades/pagoda.js?v=fk1"></script>
+<script src="src/city/facades/gothic.js?v=fk1"></script>
+<script src="src/city/facades/adobe.js?v=fk1"></script>
+<script src="src/city/facades/victorian.js?v=fk1"></script>
+<script src="src/city/facade_demo.js?v=fk1"></script>
 <script src="src/city/interiormap.js?v=intmap1"></script>
 <script src="src/city/interiorlight.js?v=room1"></script>
 <script src="src/city/citynav.js?v=brains1"></script>
