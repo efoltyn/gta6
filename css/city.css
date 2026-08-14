@@ -23,23 +23,30 @@ body.mode-city .mode-survival-only { display: none; }
   margin: 14px 0 6px; font-size: 12px; font-weight: 700; letter-spacing: 1.5px;
   text-transform: uppercase; color: #7c5a3a; text-align: center;
 }
-/* Nine stories, not three. A stacked full-width column ran off the bottom of
-   a laptop screen the moment the roster grew, so the cards are a two-up grid
-   that collapses to one column on a phone — same card look, a third of the
-   height. `auto-fit` + a 210px floor means a future tenth story just flows in. */
+/* TWELVE ROLES, NAMED AND NOTHING ELSE (owner, 2026-08-14: "a hitman role
+   speaks for itself"). The blurbs are gone, and with them the reason a card
+   had to be 210px wide and two lines tall — a name fits in half of that. The
+   picker now packs two across a phone and six across a laptop instead of
+   running off the bottom of every screen it met. `auto-fit` still absorbs a
+   thirteenth story with no edit here. */
 .origin-select {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-  gap: 8px; width: min(560px, 100%); margin: 0 auto 4px;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(136px, 1fr));
+  gap: 8px; width: 100%; margin: 0 auto 4px;
 }
 .origin-btn {
-  pointer-events: auto; cursor: pointer; font-family: inherit; text-align: left;
+  pointer-events: auto; cursor: pointer; font-family: inherit; text-align: center;
   border: 2px solid #2a2622; border-bottom-width: 5px; border-radius: 12px;
-  background: #fff; color: #2a2622; padding: 9px 12px 8px;
-  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  background: #fff; color: #2a2622; padding: 10px 10px 9px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
   transition: transform .08s, border-color .12s, box-shadow .12s, background .12s;
 }
 .origin-btn b { font-size: 14px; letter-spacing: .3px; }
+/* The one surviving line of card copy is WRITTEN, not authored: state.js:467
+   fills #originRollLine with the life the dice actually rolled. It is feedback
+   after a choice, not a description before one, so it starts empty and an
+   empty span must not reserve a second line in every other card. */
 .origin-btn span { color: #7c5a3a; font-weight: 600; font-size: 11.5px; line-height: 1.25; }
+.origin-btn span:empty { display: none; }
 /* the generated story reads as the odd one out on purpose */
 .origin-btn-roll { border-style: dashed; }
 .origin-btn-roll.active { border-style: solid; }
@@ -78,10 +85,10 @@ body.mode-city .mode-survival-only { display: none; }
   background: linear-gradient(180deg,#fff6ee,#ffe9d6);
 }
 .origin-btn:active { transform: translateY(3px); border-bottom-width: 2px; }
-.origin-hint {
-  margin: 6px auto 0; width: min(460px, 100%); text-align: center;
-  font-size: 11px; font-weight: 600; color: #a08363; letter-spacing: .2px;
-}
+/* .origin-hint is gone with the blurbs. Everything it said — YES / NO / PUNCH,
+   and U to switch life — is a row in the Controls list two elements below it,
+   and it was also the only thing putting a [U] key cap on a phone's title
+   screen, on a device with no U to press. */
 
 /* Destructive by meaning, secondary by placement: PLAY stays the dominant
    action. The two-line copy makes it impossible to mistake this for another

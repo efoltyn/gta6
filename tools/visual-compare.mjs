@@ -59,6 +59,30 @@ function parseArgs(argv) {
   return result;
 }
 
+/* DEVICE FRAMES ------------------------------------------------------------
+   A layout regression is a shape, not a pixel: the same screen is right at
+   393pt and wrong at 852pt. One viewport per run could only ever photograph
+   one shape, so a responsive change had to be argued rather than shown.
+   A frame is a viewport WITH its device identity — pixel ratio, mobile flag,
+   touch, user agent, screen orientation — because the build branches on all
+   of them (`body.touch` alone decides whether the phone controls exist).
+   Known limit: Chrome cannot emulate safe-area insets, so a notch/home-bar
+   overlap is invisible here and still needs the simulator. */
+const IOS_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1";
+const IPAD_UA = "Mozilla/5.0 (iPad; CPU OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1";
+const ANDROID_UA = "Mozilla/5.0 (Linux; Android 15; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36";
+const DEVICE_FRAMES = {
+  "iphone-se": { label: "iPhone SE", width: 375, height: 667, dsf: 2, mobile: true, ua: IOS_UA },
+  "iphone-16": { label: "iPhone 16", width: 393, height: 852, dsf: 3, mobile: true, ua: IOS_UA },
+  "iphone-16-max": { label: "iPhone 16 Pro Max", width: 440, height: 956, dsf: 3, mobile: true, ua: IOS_UA },
+  "pixel-8": { label: "Pixel 8", width: 412, height: 915, dsf: 2.625, mobile: true, ua: ANDROID_UA },
+  "ipad-mini": { label: "iPad mini", width: 744, height: 1133, dsf: 2, mobile: true, ua: IPAD_UA },
+  "ipad-pro-11": { label: "iPad Pro 11\"", width: 834, height: 1194, dsf: 2, mobile: true, ua: IPAD_UA },
+  "laptop": { label: "Laptop", width: 1440, height: 900, dsf: 2, mobile: false, ua: null, rotates: false },
+  "desktop": { label: "Desktop", width: 1920, height: 1080, dsf: 1, mobile: false, ua: null, rotates: false },
+};
+const DEVICE_FAMILY_ALL = ["iphone-se", "iphone-16", "ipad-mini", "laptop"];
+
 const args = parseArgs(process.argv.slice(2));
 if (args.help) {
   process.stdout.write(`Visual before/after report\n\n` +
@@ -73,6 +97,13 @@ if (args.help) {
     `  --no-open            do not open the generated PDF\n` +
     `  --keep-going         a failed subject becomes an error page instead of aborting the run\n` +
     `  --width N --height N capture viewport (defaults: preset or 960x600)\n` +
+    `  --devices a,b,c      capture every subject once per DEVICE FRAME instead of one\n` +
+    `                       viewport. "all" = the standard family. Known ids:\n` +
+    `                       ${Object.keys(DEVICE_FRAMES).join(", ")}\n` +
+    `  --orientations p,l   portrait|landscape (default: portrait). Applies to every\n` +
+    `                       rotatable frame; laptop/desktop ignore it.\n` +
+    `  --frames a:landscape,b:portrait  explicit frame list, overrides the two above\n` +
+    `  --dsf N              force a device pixel ratio for every frame\n` +
     `  --only before|after  capture one side only, skip the report (fast look iteration)\n` +
     `  --no-pdf            write screenshots/HTML/metadata but skip Chrome PDF printing\n` +
     `  --print-only        reprint an existing report.html in --out without recapturing\n` +
@@ -105,11 +136,76 @@ if (reuseBeforeDir) {
 }
 const beforeUrl = String(args.before || process.env.CBZ_VISUAL_BEFORE || reuseMetadata?.before?.final || "");
 if (!beforeUrl) throw new Error("--before URL is required");
-const width = Number(args.width || preset.viewport?.width || 960);
-const height = Number(args.height || preset.viewport?.height || 600);
-if (!Number.isFinite(width) || !Number.isFinite(height) || width < 320 || height < 240) {
-  throw new Error("viewport must be at least 320x240");
+function makeFrame(deviceId, orientation) {
+  const device = DEVICE_FRAMES[deviceId];
+  if (!device) throw new Error(`Unknown device "${deviceId}". Known: ${Object.keys(DEVICE_FRAMES).join(", ")}`);
+  // A laptop has no portrait. Rotating it would photograph a shape no user
+  // ever sees, so fixed frames collapse both orientations into one capture.
+  const rotatable = device.rotates !== false;
+  const landscape = rotatable && orientation === "landscape";
+  return {
+    id: rotatable ? `${deviceId}-${landscape ? "landscape" : "portrait"}` : deviceId,
+    device: deviceId,
+    label: device.label,
+    orientation: rotatable ? (landscape ? "landscape" : "portrait") : "fixed",
+    width: landscape ? device.height : device.width,
+    height: landscape ? device.width : device.height,
+    dsf: Number(args.dsf || device.dsf || 1),
+    mobile: device.mobile === true,
+    ua: device.ua || null,
+    landscape,
+  };
 }
+const readOrientations = (value) => String(value).split(",")
+  .map((token) => token.trim().toLowerCase()).filter(Boolean)
+  .map((token) => (token.startsWith("l") ? "landscape" : "portrait"));
+
+let frames;
+// A UI preset knows which shapes it is a claim about, so it can ship its own
+// frame list and be rerun identically months later without CLI archaeology.
+const frameSpec = args.frames || (Array.isArray(preset.frameList) ? preset.frameList.join(",") : "");
+if (frameSpec) {
+  frames = String(frameSpec).split(",").map((token) => token.trim()).filter(Boolean).map((token) => {
+    const [deviceId, orientation] = token.split(":");
+    return makeFrame(deviceId, readOrientations(orientation || "portrait")[0]);
+  });
+} else if (args.devices || args.device || preset.devices) {
+  const requested = String(args.devices || args.device || (preset.devices || []).join(","));
+  const deviceIds = requested === "all"
+    ? DEVICE_FAMILY_ALL.slice()
+    : requested.split(",").map((token) => token.trim()).filter(Boolean);
+  const orientations = readOrientations(args.orientations || args.orientation || preset.orientations || "portrait");
+  frames = [];
+  const seen = new Set();
+  for (const deviceId of deviceIds) {
+    for (const orientation of orientations) {
+      const frame = makeFrame(deviceId, orientation);
+      if (seen.has(frame.id)) continue;
+      seen.add(frame.id);
+      frames.push(frame);
+    }
+  }
+} else {
+  // No device asked for: the historic single-viewport run, unchanged.
+  const customWidth = Number(args.width || preset.viewport?.width || 960);
+  const customHeight = Number(args.height || preset.viewport?.height || 600);
+  frames = [{
+    id: "custom", device: "custom", label: `${customWidth}x${customHeight}`, orientation: "fixed",
+    width: customWidth, height: customHeight, dsf: Number(args.dsf || 1),
+    mobile: false, ua: null, landscape: customWidth >= customHeight,
+  }];
+}
+if (!frames.length) throw new Error("No device frames selected");
+for (const frame of frames) {
+  if (!Number.isFinite(frame.width) || !Number.isFinite(frame.height) || frame.width < 320 || frame.height < 240) {
+    throw new Error(`frame ${frame.id} must be at least 320x240`);
+  }
+}
+// The browser window only has to be big enough for the largest frame; every
+// capture size comes from that frame's own emulation override.
+const width = Math.max(...frames.map((frame) => frame.width));
+const height = Math.max(...frames.map((frame) => frame.height));
+const frameSignature = frames.map((frame) => `${frame.id}@${frame.width}x${frame.height}`).join(",");
 
 let subjects = preset.subjects.slice();
 if (args.subjects) {
@@ -319,36 +415,78 @@ function safeName(value) {
   return String(value).replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase();
 }
 
+// A single-viewport run keeps its historic filenames so older --reuse-before
+// directories still match; only a real frame matrix takes the prefixed form.
+function shotName(frameIndex, frame, subjectIndex, subject) {
+  const base = `${String(subjectIndex + 1).padStart(2, "0")}-${safeName(subject.id)}`;
+  if (frames.length === 1 && frames[0].id === "custom") return `${base}.png`;
+  return `f${String(frameIndex + 1).padStart(2, "0")}-${safeName(frame.id)}__${base}.png`;
+}
+
+function captureAt(result, frameIndex, subjectIndex) {
+  if (!result || !Array.isArray(result.captures)) return null;
+  return result.captures.find((candidate) =>
+    candidate.frameIndex === frameIndex && candidate.subjectIndex === subjectIndex) || null;
+}
+
+let defaultUserAgent = "";
+// Device identity has to be in place BEFORE the navigation that boots the
+// build: `body.touch`, the quality tier and the control layout are all decided
+// once at startup, so flipping touch on an already-loaded page would photograph
+// a phone-sized window still wearing its desktop controls.
+async function applyFrame(frame) {
+  await send("Emulation.setDeviceMetricsOverride", {
+    width: frame.width,
+    height: frame.height,
+    deviceScaleFactor: frame.dsf,
+    mobile: frame.mobile,
+    screenWidth: frame.width,
+    screenHeight: frame.height,
+    screenOrientation: frame.landscape
+      ? { type: "landscapePrimary", angle: 90 }
+      : { type: "portraitPrimary", angle: 0 },
+  });
+  await send("Emulation.setTouchEmulationEnabled", {
+    enabled: frame.mobile,
+    maxTouchPoints: frame.mobile ? 5 : 1,
+  });
+  await send("Emulation.setUserAgentOverride", { userAgent: frame.ua || defaultUserAgent });
+}
+
 async function reuseBeforeResult() {
   if (!reuseBeforeDir || !reuseMetadata) return null;
   if (reuseMetadata.preset?.id && preset.id && reuseMetadata.preset.id !== preset.id) {
     throw new Error(`--reuse-before preset mismatch: ${reuseMetadata.preset.id} != ${preset.id}`);
   }
-  if (Number(reuseMetadata.viewport?.width) !== width || Number(reuseMetadata.viewport?.height) !== height) {
-    throw new Error(`--reuse-before viewport mismatch: expected ${width}x${height}`);
+  const priorSignature = reuseMetadata.frameSignature || (reuseMetadata.viewport
+    ? `custom@${reuseMetadata.viewport.width}x${reuseMetadata.viewport.height}` : "");
+  if (priorSignature !== frameSignature) {
+    throw new Error(`--reuse-before frame mismatch: recorded "${priorSignature}", now "${frameSignature}"`);
   }
-  const priorSubjects = Array.isArray(reuseMetadata.subjects) ? reuseMetadata.subjects : [];
   const priorCaptures = Array.isArray(reuseMetadata.captures) ? reuseMetadata.captures : [];
   const captures = [];
-  for (let index = 0; index < subjects.length; index++) {
-    const subject = subjects[index];
-    const priorIndex = priorSubjects.findIndex((candidate) => candidate && candidate.id === subject.id);
-    const priorCapture = priorCaptures.find((candidate) => candidate && candidate.id === subject.id);
-    if (priorIndex < 0 || !priorCapture || !priorCapture.before) {
-      throw new Error(`--reuse-before is missing subject ${subject.id}`);
+  for (let frameIndex = 0; frameIndex < frames.length; frameIndex++) {
+    const frame = frames[frameIndex];
+    for (let subjectIndex = 0; subjectIndex < subjects.length; subjectIndex++) {
+      const subject = subjects[subjectIndex];
+      const priorCapture = priorCaptures.find((candidate) => candidate
+        && candidate.id === subject.id && (candidate.frame || "custom") === frame.id);
+      if (!priorCapture || !priorCapture.before) {
+        throw new Error(`--reuse-before is missing ${frame.id}/${subject.id}`);
+      }
+      const filename = shotName(frameIndex, frame, subjectIndex, subject);
+      const sourceName = priorCapture.beforeFile || filename;
+      try {
+        await copyFile(path.join(reuseBeforeDir, "shots", "before", sourceName), path.join(shotDir, "before", filename));
+      } catch (err) {
+        throw new Error(`--reuse-before is missing shots/before/${sourceName}`);
+      }
+      // Keep the recorded baseline stage as baseline truth. Any deliberate
+      // before→after coordinate-frame change is applied only when the after side
+      // consumes this reference (captureSide's transformReferenceStage hook),
+      // so metadata never lies about where the copied before pixels came from.
+      captures.push({ frame, frameIndex, subject, subjectIndex, filename, stage: priorCapture.before });
     }
-    const oldFilename = `${String(priorIndex + 1).padStart(2, "0")}-${safeName(subject.id)}.png`;
-    const filename = `${String(index + 1).padStart(2, "0")}-${safeName(subject.id)}.png`;
-    try {
-      await copyFile(path.join(reuseBeforeDir, "shots", "before", oldFilename), path.join(shotDir, "before", filename));
-    } catch (err) {
-      throw new Error(`--reuse-before is missing shots/before/${oldFilename}`);
-    }
-    // Keep the recorded baseline stage as baseline truth. Any deliberate
-    // before→after coordinate-frame change is applied only when the after side
-    // consumes this reference (captureSide's transformReferenceStage hook),
-    // so metadata never lies about where the copied before pixels came from.
-    captures.push({ subject, filename, stage: priorCapture.before });
   }
   process.stdout.write(`[before] reused ${captures.length} matched shots from ${reuseBeforeDir}\n`);
   return {
@@ -359,12 +497,16 @@ async function reuseBeforeResult() {
 }
 
 async function captureSide(side, sourceUrl, referenceResult = null) {
-  const nav = await navigate(sourceUrl, side);
   const captures = [];
+  let nav = null;
+  for (let frameIndex = 0; frameIndex < frames.length; frameIndex++) {
+  const frame = frames[frameIndex];
+  await applyFrame(frame);
+  nav = await navigate(sourceUrl, side);
   for (let index = 0; index < subjects.length; index++) {
     const subject = subjects[index];
-    process.stdout.write(`[${side}] ${index + 1}/${subjects.length} ${subject.label || subject.id}\n`);
-    let referenceStage = referenceResult?.captures?.[index]?.stage || null;
+    process.stdout.write(`[${side}] ${frame.id} ${index + 1}/${subjects.length} ${subject.label || subject.id}\n`);
+    let referenceStage = captureAt(referenceResult, frameIndex, index)?.stage || null;
     // Repairs can move the SUBJECT while preserving the tripod relationship:
     // a room leaves a stairwell, a grounded vehicle returns to its road, etc.
     // This hook runs for both fresh and --reuse-before baselines. Keeping it in
@@ -373,7 +515,7 @@ async function captureSide(side, sourceUrl, referenceResult = null) {
     if (side === "after" && referenceStage && typeof preset.transformReferenceStage === "function") {
       const adjusted = preset.transformReferenceStage({
         subject, stage: referenceStage,
-        viewport: { width, height }, referenceResult,
+        viewport: { width: frame.width, height: frame.height }, frame, referenceResult,
       });
       if (adjusted) referenceStage = adjusted;
     }
@@ -381,8 +523,15 @@ async function captureSide(side, sourceUrl, referenceResult = null) {
       subject,
       side,
       sourceUrl: nav.final,
-      width,
-      height,
+      width: frame.width,
+      height: frame.height,
+      // Presets that lay out UI (rather than pose a model) branch on this to
+      // scroll to the right band or expand a collapsed section per device.
+      frame: {
+        id: frame.id, device: frame.device, label: frame.label,
+        orientation: frame.orientation, width: frame.width, height: frame.height,
+        dsf: frame.dsf, mobile: frame.mobile,
+      },
       // CLI overrides so a flag-A/B run (--before "…?cfg_X=0" against the same
       // local build) does not stamp its shots with a lying "DEPLOYED" banner.
       beforeLabel: String(args["before-label"] || preset.beforeLabel || "BEFORE · DEPLOYED"),
@@ -430,10 +579,11 @@ async function captureSide(side, sourceUrl, referenceResult = null) {
       captureBeyondViewport: false,
       fromSurface: true,
     });
-    const filename = `${String(index + 1).padStart(2, "0")}-${safeName(subject.id)}.png`;
+    const filename = shotName(frameIndex, frame, index, subject);
     const absolute = path.join(shotDir, side, filename);
     await writeFile(absolute, Buffer.from(screenshot.data, "base64"));
-    captures.push({ subject, filename, stage: stageResult });
+    captures.push({ frame, frameIndex, subject, subjectIndex: index, filename, stage: stageResult });
+  }
   }
   return { navigation: nav, captures };
 }
@@ -455,26 +605,38 @@ function formatMetric(value) {
 // Stage results may carry `metrics: {key: number}`. Rows pair each subject's
 // before/after numbers; `preset.metrics[key] = {label, unit, better}` names
 // them and says which direction is an improvement.
+function frameChip(frame) {
+  if (frame.id === "custom") return `${frame.width}x${frame.height}`;
+  const orientation = frame.orientation === "fixed" ? "" : ` · ${frame.orientation}`;
+  return `${frame.label} · ${frame.width}x${frame.height}${orientation}`;
+}
+
 function metricsRows(before, after) {
   const rows = [];
-  subjects.forEach((subject, index) => {
-    const beforeMetrics = before.captures[index]?.stage?.metrics || null;
-    const afterMetrics = after.captures[index]?.stage?.metrics || null;
-    if (!beforeMetrics && !afterMetrics) return;
-    const keys = [...new Set([
-      ...Object.keys(beforeMetrics || {}),
-      ...Object.keys(afterMetrics || {}),
-    ])];
-    for (const key of keys) {
-      const spec = (preset.metrics || {})[key] || {};
-      rows.push({
-        subject,
-        key,
-        spec,
-        before: beforeMetrics ? beforeMetrics[key] : null,
-        after: afterMetrics ? afterMetrics[key] : null,
-      });
-    }
+  frames.forEach((frame, frameIndex) => {
+    subjects.forEach((subject, subjectIndex) => {
+      const beforeMetrics = captureAt(before, frameIndex, subjectIndex)?.stage?.metrics || null;
+      const afterMetrics = captureAt(after, frameIndex, subjectIndex)?.stage?.metrics || null;
+      if (!beforeMetrics && !afterMetrics) return;
+      const keys = [...new Set([
+        ...Object.keys(beforeMetrics || {}),
+        ...Object.keys(afterMetrics || {}),
+      ])];
+      for (const key of keys) {
+        const spec = (preset.metrics || {})[key] || {};
+        rows.push({
+          subject,
+          frame,
+          cellLabel: frames.length > 1
+            ? `${subject.label || subject.id} · ${frame.label} ${frame.orientation}`
+            : (subject.label || subject.id),
+          key,
+          spec,
+          before: beforeMetrics ? beforeMetrics[key] : null,
+          after: afterMetrics ? afterMetrics[key] : null,
+        });
+      }
+    });
   });
   // A preset often exposes one global live audit on every camera. Printing
   // that identical snapshot once per subject made a ten-view report grow a
@@ -485,13 +647,14 @@ function metricsRows(before, after) {
   for (const row of rows) {
     const key = JSON.stringify([row.key, row.before, row.after]);
     const group = grouped.get(key);
-    if (group) group.subjects.push(row.subject);
-    else grouped.set(key, Object.assign({}, row, { subjects: [row.subject] }));
+    if (group) group.cells.push(row.cellLabel);
+    else grouped.set(key, Object.assign({}, row, { cells: [row.cellLabel] }));
   }
+  const total = frames.length * subjects.length;
   return [...grouped.values()].map((row) => Object.assign(row, {
-    subjectLabel: row.subjects.length === subjects.length
-      ? `All ${subjects.length} matched views`
-      : row.subjects.map((subject) => subject.label || subject.id).join(", "),
+    subjectLabel: row.cells.length === total
+      ? `All ${total} matched captures`
+      : row.cells.join(", "),
   }));
 }
 
@@ -530,26 +693,61 @@ function reportHtml(before, after) {
   const pairNote = preset.pairNote || "Same model recipe · seed · camera · light · viewport";
   const method = preset.method || "Every pair uses the actual registered model builder from its source URL. The runner holds subject, random seed, viewport, camera framing, backdrop, and lighting constant so the source change is the variable.";
   const metricPage = metricsPageHtml(before, after);
-  const reportPageCount = subjects.length + 1 + (metricPage ? 1 : 0);
-  const pages = subjects.map((subject, index) => {
-    const focus = subject.focus || preset.defaultFocus || "Compare silhouette, seams, and physical continuity.";
-    const side = (result, cls, caption, sub) => {
-      const capture = result.captures[index];
-      const stageError = capture?.stage?.ok !== true ? (capture?.stage?.error || "stage failed") : null;
-      const body = capture?.filename
-        ? `<img src="shots/${cls}/${htmlEscape(capture.filename)}">`
-        : `<div class="stageError">NOT CAPTURED</div>`;
-      const note = stageError ? `<div class="stageError">${htmlEscape(stageError)}</div>` : "";
-      return `<figure class="${cls}"><figcaption>${caption} <small>${sub}</small></figcaption>${body}${note}</figure>`;
-    };
-    return `<section class="page detail">
-      <header><div><span class="number">${String(index + 1).padStart(2, "0")}</span><h2>${htmlEscape(subject.label || subject.id)}</h2></div><p>${htmlEscape(focus)}</p></header>
-      <div class="pair">
-        ${side(before, "before", "BEFORE", htmlEscape(String(args["before-label"] || "DEPLOYED PAGE")))}
-        ${side(after, "after", "AFTER", htmlEscape(String(args["after-label"] || "LOCAL REPAIR")))}
-      </div>
-      <footer><span>${htmlEscape(subject.id)}</span><span>${htmlEscape(pairNote)}</span></footer>
+  const captureCount = subjects.length * frames.length;
+  const reportPageCount = captureCount + (frames.length > 1 ? subjects.length : 0) + 1 + (metricPage ? 1 : 0);
+  const beforeCaption = htmlEscape(String(args["before-label"] || "DEPLOYED PAGE"));
+  const afterCaption = htmlEscape(String(args["after-label"] || "LOCAL REPAIR"));
+  const shotOf = (result, cls, frameIndex, subjectIndex) => {
+    const capture = captureAt(result, frameIndex, subjectIndex);
+    return capture?.filename
+      ? `<img src="shots/${cls}/${htmlEscape(capture.filename)}">`
+      : `<div class="stageError">NOT CAPTURED</div>`;
+  };
+  // One page per subject showing the whole device family at once. A responsive
+  // change is a claim about every width simultaneously, and only this page can
+  // carry that claim; the detail pages that follow prove each width in full.
+  const overviewPage = (subject, subjectIndex) => {
+    if (frames.length < 2) return "";
+    const columns = Math.min(frames.length, 4);
+    const cells = frames.map((frame, frameIndex) => `<div class="frameCell">
+        <div class="frameName">${htmlEscape(frameChip(frame))}</div>
+        <div class="frameShots">
+          <figure class="before">${shotOf(before, "before", frameIndex, subjectIndex)}</figure>
+          <figure class="after">${shotOf(after, "after", frameIndex, subjectIndex)}</figure>
+        </div>
+      </div>`).join("\n");
+    return `<section class="page overview">
+      <header><div><span class="number">▦</span><h2>${htmlEscape(subject.label || subject.id)} · every frame</h2></div><p>Left red = before, right green = after, at ${frames.length} device frames.</p></header>
+      <div class="frameGrid" style="grid-template-columns:repeat(${columns},1fr)">${cells}</div>
+      <footer><span>${htmlEscape(subject.id)}</span><span>${htmlEscape(frames.map((frame) => frame.id).join(" · "))}</span></footer>
     </section>`;
+  };
+  const pages = subjects.map((subject, subjectIndex) => {
+    const focus = subject.focus || preset.defaultFocus || "Compare silhouette, seams, and physical continuity.";
+    const details = frames.map((frame, frameIndex) => {
+      const side = (result, cls, caption, sub) => {
+        const capture = captureAt(result, frameIndex, subjectIndex);
+        const stageError = capture?.stage?.ok !== true ? (capture?.stage?.error || "stage failed") : null;
+        const note = stageError ? `<div class="stageError">${htmlEscape(stageError)}</div>` : "";
+        return `<figure class="${cls}"><figcaption>${caption} <small>${sub}</small></figcaption>` +
+          `${shotOf(result, cls, frameIndex, subjectIndex)}${note}</figure>`;
+      };
+      const number = frames.length > 1
+        ? `${String(subjectIndex + 1).padStart(2, "0")}.${String(frameIndex + 1).padStart(2, "0")}`
+        : String(subjectIndex + 1).padStart(2, "0");
+      const heading = frames.length > 1
+        ? `${subject.label || subject.id} · ${frame.label}`
+        : (subject.label || subject.id);
+      return `<section class="page detail">
+      <header><div><span class="number">${number}</span><h2>${htmlEscape(heading)}</h2></div><p>${htmlEscape(focus)}</p></header>
+      <div class="pair">
+        ${side(before, "before", "BEFORE", beforeCaption)}
+        ${side(after, "after", "AFTER", afterCaption)}
+      </div>
+      <footer><span>${htmlEscape(subject.id)} · ${htmlEscape(frameChip(frame))}</span><span>${htmlEscape(pairNote)}</span></footer>
+    </section>`;
+    }).join("\n");
+    return overviewPage(subject, subjectIndex) + "\n" + details;
   }).join("\n");
   return `<!doctype html><html><head><meta charset="utf-8"><title>${htmlEscape(preset.title)}</title><style>
     @page { size: A4 landscape; margin: 0; }
@@ -571,12 +769,20 @@ function reportHtml(before, after) {
     .detail header > div { display:flex; align-items:baseline; gap:4mm; }
     .number { color:#547086; font-weight:800; font-size:18px; } h2 { margin:0; font-size:28px; }
     .detail header p { color:#9fb2c2; margin:0 0 1mm; font-size:12px; text-align:right; max-width:120mm; }
-    .pair { height: 148mm; display:grid; grid-template-columns:1fr 1fr; gap:5mm; align-items:center; }
-    figure { margin:0; background:#111a23; border:1px solid #35485a; border-radius:3mm; overflow:hidden; }
+    .pair { height: 148mm; display:grid; grid-template-columns:1fr 1fr; gap:5mm; align-items:stretch; }
+    figure { margin:0; background:#111a23; border:1px solid #35485a; border-radius:3mm; overflow:hidden; display:flex; flex-direction:column; }
     figure.before { border-top:2mm solid #f06464; } figure.after { border-top:2mm solid #59d59a; }
-    figcaption { height:11mm; padding:2.4mm 4mm; font-weight:850; font-size:13px; letter-spacing:.09em; }
+    figcaption { height:11mm; padding:2.4mm 4mm; font-weight:850; font-size:13px; letter-spacing:.09em; flex:0 0 auto; }
     figcaption small { float:right; color:#9babb8; font-size:9px; line-height:16px; }
-    figure img { width:100%; display:block; aspect-ratio:${width}/${height}; object-fit:cover; }
+    /* CONTAIN, never cover. A cropped screenshot hides the very edge where a
+       responsive layout breaks — the gutter, the clipped button, the overflow. */
+    figure img { display:block; margin:auto; max-width:100%; max-height:100%; width:auto; height:auto; object-fit:contain; min-height:0; }
+    .detail .pair figure img { max-height:135mm; }
+    .overview .frameGrid { height:150mm; display:grid; gap:4mm; align-items:start; }
+    .frameCell { height:100%; display:flex; flex-direction:column; gap:2mm; min-height:0; }
+    .frameName { color:#80c9ff; font-size:10px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; flex:0 0 auto; }
+    .frameShots { flex:1 1 auto; display:grid; grid-template-columns:1fr 1fr; gap:2mm; min-height:0; }
+    .frameShots figure { border-radius:2mm; border-top-width:1.2mm; }
     .stageError { padding:4mm; color:#ffb3b3; font:11px ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap:anywhere; }
     footer { position:absolute; left:14mm; right:14mm; bottom:6mm; display:flex; justify-content:space-between; color:#6f8496; font:10px ui-monospace, SFMono-Regular, Menlo, monospace; }
     .metrics table { width:100%; border-collapse:collapse; margin-top:4mm; font-size:11.5px; }
@@ -588,7 +794,8 @@ function reportHtml(before, after) {
   </style></head><body>
     <section class="page cover">
       <div><div class="eyebrow">DETERMINISTIC VISUAL COMPARISON</div><h1>${htmlEscape(preset.title)}</h1><p class="dek">${htmlEscape(preset.description || "Before and after captures from two real browser builds.")}</p></div>
-      <div class="stats"><div class="stat"><strong>${subjects.length}</strong><span>matched subjects</span></div><div class="stat"><strong>${subjects.length * 2}</strong><span>browser screenshots</span></div><div class="stat"><strong>${reportPageCount}</strong><span>report pages</span></div></div>
+      <div class="stats"><div class="stat"><strong>${subjects.length}</strong><span>matched subjects</span></div><div class="stat"><strong>${frames.length}</strong><span>device frames</span></div><div class="stat"><strong>${captureCount * 2}</strong><span>browser screenshots</span></div></div>
+      <p class="method">Frames: ${htmlEscape(frames.map((frame) => frameChip(frame)).join("  ·  "))}</p>
       <div class="sources"><div class="source"><b>BEFORE · deployed baseline</b><code>${htmlEscape(before.navigation.final)}</code></div><div class="source after"><b>AFTER · current checkout</b><code>${htmlEscape(after.navigation.final)}</code></div></div>
       <p class="method">Generated ${htmlEscape(generated)}. ${htmlEscape(method)}</p>
     </section>
@@ -609,14 +816,19 @@ async function writeRunMetadata(before, after, only = null) {
     only,
     reusedBeforeFrom: before?.reusedFrom || null,
     viewport: { width, height },
+    frameSignature,
+    frames,
     before: before?.navigation || null,
     after: after?.navigation || null,
     subjects,
-    captures: subjects.map((subject, index) => ({
+    captures: frames.flatMap((frame, frameIndex) => subjects.map((subject, subjectIndex) => ({
       id: subject.id,
-      before: before?.captures?.[index]?.stage || null,
-      after: after?.captures?.[index]?.stage || null,
-    })),
+      frame: frame.id,
+      beforeFile: captureAt(before, frameIndex, subjectIndex)?.filename || null,
+      afterFile: captureAt(after, frameIndex, subjectIndex)?.filename || null,
+      before: captureAt(before, frameIndex, subjectIndex)?.stage || null,
+      after: captureAt(after, frameIndex, subjectIndex)?.stage || null,
+    }))),
     browserMessages,
   }, null, 2));
 }
@@ -652,7 +864,10 @@ try {
   });
   await send("Runtime.enable");
   await send("Page.enable");
-  await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
+  // Remembered so a desktop frame can hand the UA back after a phone frame
+  // borrowed Safari's; captureSide applies a frame before every navigation.
+  defaultUserAgent = String(await evaluate("navigator.userAgent") || "");
+  process.stdout.write(`Frames: ${frames.map((frame) => `${frame.id} ${frame.width}x${frame.height}@${frame.dsf}x`).join(", ")}\n`);
 
   const onlySide = args.only ? String(args.only) : null;
   if (onlySide === "after") {

@@ -34,8 +34,10 @@
    stays in the DOM for compatibility, but it no longer presents parallel games. */
 body.campaign-canonical-title #title #modeSelect,
 body.campaign-canonical-title #title #originSelect,
+/* .origin-label carries the MORE GAMES rule above the mode strip too, so the
+   campaign title loses the switcher and its heading together. (.origin-hint
+   was here until the blurbs went; the element no longer exists.) */
 body.campaign-canonical-title #title .origin-label,
-body.campaign-canonical-title #title .origin-hint,
 body.campaign-canonical-title #title #roleSelect,
 body.campaign-canonical-title #title .controls,
 body.campaign-canonical-title #title .smallnote {
