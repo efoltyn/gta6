@@ -62,15 +62,15 @@ const subjects = [
 
   /* ---- COVER: the box between him and the gun --------------------------- */
   { id: "cover-peek", label: "A hurt man and a wall",
-    focus: "THE STUDIO BUILT A REAL BOX (mesh + collider + LOS blocker) twelve metres out, and hurt one of the two shooters below his nerve. Before: the hurt man drifts in the open, strafing on a band with the box beside him doing nothing. After: he gets the BOX between himself and the gun — tucked on its far side, stepping out past its EDGE only to shoot (the corner-peek), while his healthy partner holds the fire token from open ground. tuckedM is his distance from the hide point: small = behind the wall.",
-    act: { n: 2, dist: 21, weapons: ["Pistol", "Pistol"], pre: 3.5, sample: 1.5,
-      hurtIdx: 0, hurtHp: 0.3, coverBox: { off: -1.5, dist: 12, w: 3.2, h: 2.2, d: 0.9 } },
+    focus: "THE STUDIO BUILT A REAL BOX (mesh + collider + LOS blocker) twelve metres out and OFF the firing line, and hurt one of the two shooters below his nerve. Before: the hurt man drifts in the open, strafing on a band with the box beside him doing nothing — the dead cover scan this wave's predecessor fixed never sent anyone THERE. After: he gets the BOX between himself and the gun — tucked on its far side, stepping out past its EDGE to shoot (the corner-peek) while his healthy partner trades from open ground. tuckedM is his distance from the box's hide point: small = the wall is doing its job.",
+    act: { n: 2, dist: 16, weapons: ["Pistol", "Pistol"], pre: 3.5, sample: 1.5,
+      hurtIdx: 0, hurtHp: 0.3, coverBox: { off: -3.5, dist: 12, w: 3.2, h: 2.2, d: 0.9 } },
     strip: { frames: 4, stepSec: 0.8 },
-    cam: { dx: -7, dy: 3.2, dz: 3.5, adx: 0, ady: 1.1, adz: -13, fov: 50 } },
+    cam: { dx: -8, dy: 3.4, dz: 2.5, adx: -1.5, ady: 1.1, adz: -12, fov: 52 } },
 
   /* ---- HIDE: breaking contact when it goes wrong ------------------------ */
   { id: "hide-break", label: "Too hurt to trade — breaking contact",
-    focus: "A shooter cut to a third of his health with NO cover in reach. Before: his only move was nine metres STRAIGHT BACK — still in the open, still in the same firing lane the rounds are coming up. After: he BREAKS AWAY through the away hemisphere (distGainM), holding fire, and the strip shows a man leaving a fight he is losing instead of backpedaling inside it.",
+    focus: "A shooter cut to a third of his health. Before: his only move was nine metres STRAIGHT BACK — still in the open, still in the same firing lane the rounds are coming up, re-derived every frame so he backpedals forever. After: he breaks for somewhere the player CANNOT DRAW A LINE TO — real street cover if any is in reach, else away through the far hemisphere — and HOLDS it, watching the corner. hiddenEnd is the payoff as a bit: does the player's chest-height lane to him end in a wall when the window closes?",
     act: { n: 1, dist: 13, weapons: ["Pistol"], pre: 1.2, sample: 1.2, hurtIdx: 0, hurtHp: 0.32 },
     strip: { frames: 4, stepSec: 1.0 },
     cam: { dx: 9, dy: 7.5, dz: 4, adx: 0, ady: 1.1, adz: -16, fov: 60 } },
@@ -138,21 +138,44 @@ async function stageNpcTactics(input) {
 
     S = window.__npcTacticsStudio = { walls: [], cast: [], watch: null, cam: null, extra: null };
 
-    /* THE MARK: a clear circle of street near spawn — scanned, not assumed,
-       so every subject stages on ground with no stray geometry inside the
-       arena while the wall subjects add their own. Deterministic per seed. */
+    /* THE MARK: a clear stretch of OUTDOOR street near spawn — scanned, not
+       assumed. "No colliders in a circle" alone is a trap: a car showroom's
+       open floor passes it while its four walls surround the stage (the first
+       run photographed exactly that). So a candidate must also (a) not be
+       inside any indoor lot, (b) have its CAST CORRIDOR outdoors, and (c)
+       hold real chest-height firing lanes from the corridor back to the mark
+       — verified with the game's own clearLineOfFire, the same ray the guns
+       use. Deterministic per seed. */
     const P = CBZ.player;
+    const indoor = (x, z) => {
+      try { return !!(CBZ.cityNav && CBZ.cityNav.indoorLotAt && CBZ.cityNav.indoorLotAt(x, z)); }
+      catch (_) { return false; }
+    };
+    const laneClear = (fx, fz, tx, tz) => {
+      try { return !CBZ.clearLineOfFire || CBZ.clearLineOfFire(fx, 1.4, fz, tx, 1.5, tz); }
+      catch (_) { return true; }
+    };
+    const markOk = (x, z) => {
+      try {
+        if (CBZ.cityWaterAt && CBZ.cityWaterAt(x, z)) return false;
+        if (indoor(x, z)) return false;
+        const near = CBZ.queryCollidersNear ? CBZ.queryCollidersNear(x, z, 11, []) : [];
+        if (near.length) return false;
+        for (const off of [-3.4, 0, 3.4]) {
+          const cx = x + off, cz = z - 24;          // the cast corridor (CAST_DIR)
+          if (indoor(cx, cz)) return false;
+          if (!laneClear(cx, cz, x, z)) return false;
+        }
+        return true;
+      } catch (_) { return false; }
+    };
     let mark = { x: P.pos.x, z: P.pos.z };
     outer:
-    for (let r = 0; r <= 90; r += 6) {
+    for (let r = 0; r <= 150; r += 6) {
       for (let k = 0; k < Math.max(1, r); k += 3) {
         const a = (k / Math.max(1, r)) * Math.PI * 2;
         const x = P.pos.x + Math.cos(a) * r, z = P.pos.z + Math.sin(a) * r;
-        try {
-          if (CBZ.cityWaterAt && CBZ.cityWaterAt(x, z)) continue;
-          const near = CBZ.queryCollidersNear ? CBZ.queryCollidersNear(x, z, 13, []) : [];
-          if (!near.length) { mark = { x, z }; break outer; }
-        } catch (_) {}
+        if (markOk(x, z)) { mark = { x, z }; break outer; }
       }
     }
     S.mark = mark;
@@ -207,6 +230,22 @@ async function stageNpcTactics(input) {
         plantedEnd: S.cast.filter((m) => m && !m.dead && m._iqPlant).length,
       };
       if (S.extra) { try { Object.assign(out, S.extra() || {}); } catch (_) {} }
+      // the position layer's own audit — dry picks vs committed positions is
+      // the difference between "no reachable spot existed" and "never asked".
+      try {
+        const au = CBZ.combatIQAudit ? CBZ.combatIQAudit() : null;
+        if (au && au.posPicks != null) {
+          out.posPicks = au.posPicks; out.posDry = au.posDry; out.positioned = au.positioned;
+        }
+      } catch (_) {}
+      try {
+        const m0 = S.cast[0];
+        if (m0 && !m0.dead) {
+          out.c0state = (m0.state || "?") + (m0.sees === false ? "/blind" : "/sees") +
+            (m0._iqPos ? "/pos" : "/nopos") + (m0._iqPlant ? "/plant" : "");
+          out.c0goalD = Number(Math.hypot(m0.target.x - m0.pos.x, m0.target.z - m0.pos.z).toFixed(1));
+        }
+      } catch (_) {}
       return out;
     };
 
@@ -347,7 +386,14 @@ async function stageNpcTactics(input) {
   const hurt = act.hurtIdx != null ? S.cast[act.hurtIdx] : null;
   const startDist = hurt ? Math.hypot(hurt.pos.x - M.x, hurt.pos.z - M.z) : 0;
   if (subject.id === "hide-break" && hurt) {
-    S.extra = () => ({ distGainM: Number((Math.hypot(hurt.pos.x - M.x, hurt.pos.z - M.z) - startDist).toFixed(1)) });
+    S.extra = () => {
+      const geom = CBZ.combatIQ && CBZ.combatIQ.geom;
+      return {
+        distGainM: Number((Math.hypot(hurt.pos.x - M.x, hurt.pos.z - M.z) - startDist).toFixed(1)),
+        // hidden = the player's chest-height firing lane to him ends in a wall
+        hiddenEnd: geom ? (geom.fireBlocked(M.x, M.z, hurt.pos.x, hurt.pos.z) ? 1 : 0) : null,
+      };
+    };
   }
   if (subject.id === "cover-peek" && hurt && wallRef) {
     S.extra = () => {
@@ -441,7 +487,8 @@ export default {
     goalChurnMps: { label: "Steering-goal wander", unit: "m/s per man", better: "lower" },
     meanSpeed: { label: "Mean cast speed", unit: "m/s", better: "lower" },
     plantedEnd: { label: "Planted on a position at end", unit: "men", better: "higher" },
-    distGainM: { label: "Ground gained away from the gun", unit: "m", better: "higher" },
+    distGainM: { label: "Ground gained away from the gun", unit: "m" },
+    hiddenEnd: { label: "Out of the player's firing lanes at end", unit: "1=yes", better: "higher" },
     tuckedM: { label: "Hurt man's distance from the hide point", unit: "m", better: "lower" },
     wallHugPct: { label: "Time spent pressed against the wall", unit: "%", better: "lower" },
     laneClearEnd: { label: "Ended with a real firing lane", unit: "1=yes", better: "higher" },
