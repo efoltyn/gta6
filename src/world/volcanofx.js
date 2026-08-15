@@ -48,6 +48,26 @@
               momentum back, and each vertex now stands on the ground
               under itself instead of the one under the centreline.
 
+   OWNER, 2026-08-15, sending two photographs — Fuego erupting at night
+   and an Etna flow field at close range — "use these as, like, a bible...
+   don't make it look geometric". The bible says three things the previous
+   build did not do, and each got its own repair at its own site:
+
+     LACE     the close-up is not bright plates on darkness, it is a DARK
+              crust with a bright connected crack network through it.
+              lidField is now a ridge transform: filaments at the field's
+              zero-crossings, plates between them.
+     THE FAN  a flow FORKS. lavaFlow({branches:n}) arms fork points that
+              spawn narrower child flows when the front reaches them, so
+              a run ends in a fan of noses instead of one ruled ribbon.
+              The outline is lobed (slow waves, not per-station noise) and
+              the incandescent channel meanders between its own banks.
+     THE VENT the crater is the brightest thing in the frame: ventGlow()
+              is an opaque unlit spatter apron draped over the summit —
+              white throat, orange shoulder, dark rim, hash-lobed
+              coastline — replacing an additive disc that was see-through
+              AND a perfect circle, the two forbidden words at once.
+
    The only TRANSPARENT thing in a lava flow here is the heat haze
    ABOVE it — additive sprites, never the flow itself — plus one or two
    pooled PointLights so the thing actually illuminates the hillside at
@@ -107,8 +127,8 @@
 
   const V = {};
   // live census for CBZ.volcanoAudit() — measured, never counted in source
-  const census = { lava: 0, pyro: 0, lahar: 0, ash: 0, lights: 0, tris: 0 };
-  const LIVE = { lava: [], pyro: [], lahar: [], ash: [] };
+  const census = { lava: 0, pyro: 0, lahar: 0, ash: 0, lights: 0, tris: 0, branches: 0, vent: 0 };
+  const LIVE = { lava: [], pyro: [], lahar: [], ash: [], vent: [], column: [] };
 
   function h01(x, z, salt) { return CBZ.hash01 ? CBZ.hash01(x, z, salt | 0) : 0.5; }
   function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
@@ -377,25 +397,55 @@
   const CRUST_A = 0x2a2320, CRUST_B = 0x412c22, CRUST_C = 0x74371a;
   // the unlit lid over the melt, and the melt itself (1150 C to dull red)
   const _LID_D = new THREE.Color(0x241d19), _LID_W = new THREE.Color(0x502513);
-  const MELT_A = 0x7d1601, MELT_B = 0xdd5106, MELT_C = 0xffa63a;
+  // Authored DEEP on purpose — the same lesson the ash palette already
+  // teaches from the other direction: these go through the renderer's output
+  // encoding, which lifts a swatch-true orange to pale gold on screen. Deep
+  // saturated stops land as the bible photo's vivid orange-red; the throat's
+  // white-yellow belongs to ventGlow, not to this ramp.
+  const MELT_A = 0x6d1201, MELT_B = 0xc73e03, MELT_C = 0xff9226;
 
   /* THE LID, as a smooth field that TRAVELS.
 
      CBZ.hash01 is a hash, not a noise: sampled along a line it is white
      static, so plates cannot be built from it. Three incommensurate sines
-     in (along, across) give a smooth, non-repeating, organic crust for the
-     price of three sin() a vertex — and shifting their common phase is what
-     makes the whole pattern slide downstream. `ph` IS the flow. */
+     in (along, across) give a smooth, non-repeating field for the price of
+     three sin() a vertex — and shifting their common phase is what makes
+     the whole pattern slide downstream. `ph` IS the flow.
+
+     OWNER, 2026-08-15, with two reference photographs (Fuego by night, an
+     Etna flow field close up): "use these as a bible... don't make it look
+     geometric". The photographed close-up settles what the pattern IS, and
+     the previous field had it inverted. A flow field is not bright plates
+     drifting on darkness — it is a DARK crusted surface with a bright
+     anastomosing LACE cracked through it: thin connected filaments of melt
+     wrapping irregular black islands. Bands of any kind read as geometry;
+     a connected irregular network reads as rock coming apart.
+
+     A ridge transform gets exactly that from the same three sines. The sum
+     is a smooth signed field; its ZERO-CROSSINGS are guaranteed-connected
+     wandering curves, so `1 - |f|` lights precisely those curves and leaves
+     everything away from them as lid. A slow warp term bends the whole
+     lattice so no filament runs straight for long — the "zig-zaggy"
+     complaint was cured upstream in the walk, and it must not sneak back in
+     through the pattern. */
   /* One constant ties the field's along-flow scale to the advection phase, so
      "the pattern travels downstream at the surface velocity" stays TRUE
      instead of being two numbers that have to be kept in step by hand. */
   const LID_K = 0.55;
   function lidField(s, u, ph) {
     const a = s * LID_K - ph;
-    return 0.5 + 0.5 * (
-      0.60 * Math.sin(a + u * 3.1) +
-      0.27 * Math.sin(a * 1.43 - u * 5.2 + 1.7) +
-      0.13 * Math.sin(a * 0.71 + u * 8.6 + 4.1));
+    // the warp: bends filaments, and advects with them so the lace is not
+    // a fixed lattice the melt slides beneath
+    const w = Math.sin(a * 0.21 + u * 1.6) + 0.55 * Math.sin(a * 0.47 - u * 2.7 + 2.1);
+    const f =
+      0.55 * Math.sin(a + u * 3.1 + 1.1 * w) +
+      0.30 * Math.sin(a * 1.43 - u * 5.2 + 1.7 + 0.7 * w) +
+      0.15 * Math.sin(a * 0.71 + u * 8.6 + 4.1);
+    /* RIDGE: 1 on the zero-crossing curves, 0 on the plate interiors. The
+       3.2 sets filament width against plate size — lower and the lace fattens
+       back toward bands, higher and it thins to pinstripes the grid cannot
+       hold (stations are ~2.3 m apart; a filament has to survive sampling). */
+    return clamp(1 - Math.abs(f) * 3.2, 0, 1);
   }
 
   V.lavaFlow = function (o) {
@@ -427,16 +477,57 @@
     }), 2, groundAt);
     const N = path.pts.length;
 
+    /* ---- BRANCHING — THE FAN --------------------------------------------
+       The reference close-up is not a ribbon: it is an anastomosing FIELD,
+       a stem that forks into lobes that fork again, and the fan of noses at
+       the bottom is half of what makes it read as fluid finding its own way
+       rather than as a drawn stripe. `branches: n` arms up to n fork points
+       along the run; when the front actually REACHES one, a narrower child
+       flow is born there on a diverging bearing and steered by the same
+       mountain. Children are real lavaFlows — they register in the audit,
+       their hitTest is this handle's hitTest (what glows kills), and they
+       die with their parent. Deterministic: fork stations, sides and angles
+       are all h01 off world position, so every client grows the same tree.
+       LIVE.lava is capped before a spawn so a pathological cone cannot fork
+       itself into a frame drop. ---- */
+    const branchN = o.branches > 0 ? Math.min(3, o.branches | 0) : 0;
+    const branchPts = [];
+    for (let bi = 0; bi < branchN; bi++) {
+      const bt = 0.3 + 0.3 * bi + 0.16 * h01(o.x + bi * 13, o.z - bi * 7, salt + 77);
+      branchPts.push({ at: Math.min(len * 0.86, len * bt), done: false });
+    }
+    const children = [];
+
     // ---- per-station shape, hashed off the station's own world position so
     //      the river's outline is identical on every client ----
+    /* THE OUTLINE IS LOBED, NOT NOISY. The old width jitter was an
+       independent hash per station — white noise at 2.3 m wavelength, which
+       the eye reads as a ragged strip of the SAME average width. The bible
+       photograph's flow necks and bellies: tens-of-metres waves where it
+       narrows to a thread and then spills into a broad lobe. Two slow sines
+       with hash-seeded phases give that; the per-station hash survives only
+       as a small grain on top. */
+    const wPh1 = h01(o.x, o.z, salt + 51) * 6.28;
+    const wPh2 = h01(o.x, o.z, salt + 63) * 6.28;
+    /* AND THE CHANNEL WANDERS BETWEEN ITS BANKS. The melt used to sit dead
+       centre at every station, which made the bright core a stripe down the
+       middle of a strip — geometry again. A real channel is pushed around by
+       its own levees, so the inset footprint slides side to side on its own
+       slow wave. Applied identically to the bed probe below and to ring(),
+       or the meandering channel would float off its own bed. */
+    const mPh = h01(o.x, o.z, salt + 71) * 6.28;
     const wProf = new Float32Array(N);     // half-width multiplier
     const hot0 = new Float32Array(N);      // incandescence at birth
+    const meander = new Float32Array(N);   // channel offset, in u units
     for (let i = 0; i < N; i++) {
       const p = path.pts[i], u = i / (N - 1);
-      // a flow LEAVES the vent narrow and FANS OUT as the ground flattens
-      wProf[i] = (0.5 + 0.72 * Math.pow(u, 0.7)) * (0.84 + 0.32 * h01(p.x, p.z, salt + 11));
+      // a flow LEAVES the vent narrow and FANS OUT as the ground flattens —
+      // and along the way it necks and bellies on the two slow waves
+      const lobe = 1 + 0.24 * Math.sin(i * 0.52 + wPh1) + 0.13 * Math.sin(i * 1.27 + wPh2);
+      wProf[i] = (0.5 + 0.72 * Math.pow(u, 0.7)) * lobe * (0.9 + 0.2 * h01(p.x, p.z, salt + 11));
       // temperature falls downstream — this is the whole colour story
       hot0[i] = clamp(1.06 - 0.72 * u + (h01(p.x, p.z, salt + 37) - 0.5) * 0.16, 0.1, 1);
+      meander[i] = 0.13 * Math.sin(i * 0.44 + mPh) + 0.05 * Math.sin(i * 1.03 + mPh * 2);
     }
 
     /* ---- THE BED, SOLVED ONCE ------------------------------------------
@@ -469,8 +560,11 @@
         const u = UU[c], k = i * COLS + c;
         const x = p.x + nX[i] * u * hw, z = p.z + nZ[i] * u * hw;
         cGY[k] = Math.max(groundAt(x, z), p.y);
-        const mx = p.x + nX[i] * u * MELT_INSET * hw;
-        const mz = p.z + nZ[i] * u * MELT_INSET * hw;
+        // the same wandering-channel offset ring() draws with — the centre
+        // columns carry the full meander, the banks stay pinned
+        const mu = u * MELT_INSET + meander[i] * (1 - Math.abs(u));
+        const mx = p.x + nX[i] * mu * hw;
+        const mz = p.z + nZ[i] * mu * hw;
         mGY[k] = Math.max(groundAt(mx, mz), p.y);
         grain[k] = h01(x, z, salt + 5);
       }
@@ -586,6 +680,10 @@
            keeps the top honest and puts all the fall-off in the last fifth. */
         const crown = 0.25 + 0.75 * (1 - Math.pow(au, 3.2));
         const gr = 0.84 + 0.30 * grain[k];
+        /* the melt's grain must never exceed 1: a bright stop multiplied past
+           its own hex clips channel-by-channel and desaturates toward white —
+           this, plus the encoding lift, was most of the "pale gold laser" */
+        const grM = 0.8 + 0.2 * grain[k];
 
         // ---- CRUST: lit, full width, the levees and the thickness ----
         cPos[off] = cx + nx * u * hw;
@@ -595,46 +693,50 @@
         cCol[off] = _c3.r * gr; cCol[off + 1] = _c3.g * gr; cCol[off + 2] = _c3.b * gr;
 
         // ---- MELT: unlit, inset, and the field decides what is showing ----
-        const mu = u * MELT_INSET, amu = Math.abs(mu);
+        const mu = u * MELT_INSET + meander[i] * (1 - au), amu = Math.abs(mu);
         kPos[off] = cx + nx * mu * hw;
         kPos[off + 2] = cz + nz * mu * hw;
         kPos[off + 1] = (bedM ? bedM[k] : cy0) + 0.05 + thick * (0.25 + 0.75 * (1 - Math.pow(amu, 3.2))) + 0.04;
         /* HOW MUCH MELT IS SHOWING HERE, and it is the whole look:
-             across  the open channel is a mid-flow feature that narrows and
-                     finally closes as the levees grow inward downstream
+             across  melt lives inside the levees, and its reach narrows as
+                     the levees grow inward downstream
              open    the lid thickens with distance from the vent
-             lid     the travelling crust plates — the term that MOVES */
+             lace    the travelling crack network — the term that MOVES
+             flood   the vent apron: the first stretch has no lid at all */
         const across = 1 - Math.pow(amu, 2.6 + 2.1 * u01);
         const open = 0.98 - 0.42 * u01;
-        /* CONTRAST THE FIELD, OR IT IS NOT A CRUST.
-           Three summed sines are Gaussian-ish: almost every sample lands near
-           0.5, so the lid spent its whole life half-open and the flow rendered
-           as one smooth bright band with no plates in it — which photographs
-           as a glowing tube, which is just the owner's complaint wearing a
-           brighter colour. Stretching the field about its own midpoint drives
-           most of it to the rails, and rock either has a skin over it or it
-           does not. */
-        const torn = clamp((lidField(s, u, ph) - 0.5) * 1.8 + 0.5, 0, 1);
-        /* THE TOE STILL GLOWS. An earlier balance drove the downstream half to
-           melt≈0 and simply moved the owner's black flow further down the
-           hill; a cooling toe is dark rock with a RED CRACK NETWORK in it, so
-           the floor here is deliberately above zero. */
-        /* AND THE PLATES HAVE TO WIN SOMEWHERE. With a 0.34 floor under the
-           torn term the lid never fully closed and the whole ribbon glowed at
-           some level, which trades the owner's black flow for a neon one. A
-           near-zero floor means the crust genuinely welds shut in places, and
-           THAT is the contrast the eye reads as molten rock under a skin. */
-        /* AND THE LID IS THE DEFAULT. The subtraction sets where the balance
-           sits: at 0.1 the average square metre of the flow was still molten
-           and the crust was the exception, which is backwards — a flow chills
-           over in seconds and the melt is what shows THROUGH it. */
-        let melt = clamp((0.12 + 1.05 * torn) * across * open * (0.42 + 0.85 * hot) - 0.3, 0, 1);
-        melt = melt * melt * (3 - 2 * melt);      // smoothstep: plates get EDGES
-        ramp3(clamp(melt * (0.34 + 0.82 * hot), 0, 1), MELT_A, MELT_B, MELT_C, _c3);
-        // the lid itself is not black — it is dark rock still holding heat
-        _c4.copy(_LID_D).lerp(_LID_W, clamp(hot * (0.3 + 0.7 * torn), 0, 1));
+        /* THE LACE IS THE LOOK (the owner's reference close-up, 2026-08-15):
+           a dark crusted surface with thin CONNECTED filaments of melt
+           cracked through it, wrapping irregular black islands. lidField now
+           arrives here already ridge-transformed — 1 on the filament, 0 in
+           the plate — so no midpoint stretch is applied on top: stretching a
+           ridge only fattens it back into the smooth bright bands this
+           replaces, which was the whole "glowing road" failure. */
+        const lace = lidField(s, u, ph);
+        /* THE VENT FLOODS — BUT THE FLOOD IS STILL THREADED. In the wide
+           reference photograph the upper flank is one incandescent apron;
+           in the close-up even the flooded stretch keeps thin dark stringers
+           through it. A flood that simply forces melt=1 painted a solid
+           white band down the first quarter of every flow — a laser, which
+           is geometry again (the peek shots proved it). So the flood keeps
+           a floor of lace modulation: bright apron, dark threads surviving
+           inside it. `hot` keeps the handover from popping as a station
+           cools. */
+        const flood = clamp((0.21 - u01) * 4.5, 0, 1) * (0.5 + 0.5 * hot) * (0.6 + 0.4 * lace);
+        /* THE LID IS STILL THE DEFAULT, and the toe still glows along its
+           cracks. The -0.24 sets that balance: where the lace is thin the
+           lid wins outright and the surface is dark rock, but a cooling toe
+           keeps a dull red crack network in its seams instead of going flat
+           black — the reference close-up's margins exactly. */
+        let melt = clamp((0.08 + 1.1 * lace) * across * open * (0.42 + 0.85 * hot) - 0.24, 0, 1);
+        melt = Math.max(melt, flood * across);
+        melt = melt * melt * (3 - 2 * melt);   // smoothstep: filaments get EDGES
+        ramp3(clamp(melt * (0.32 + 0.8 * hot), 0, 1), MELT_A, MELT_B, MELT_C, _c3);
+        // the lid itself is not black — it is dark rock still holding heat,
+        // warmest right beside a filament (a crack heats its own rim)
+        _c4.copy(_LID_D).lerp(_LID_W, clamp(hot * (0.3 + 0.7 * lace), 0, 1));
         _c4.lerp(_c3, melt);
-        kCol[off] = _c4.r * gr; kCol[off + 1] = _c4.g * gr; kCol[off + 2] = _c4.b * gr;
+        kCol[off] = _c4.r * grM; kCol[off + 1] = _c4.g * grM; kCol[off + 2] = _c4.b * grM;
       }
     }
 
@@ -682,7 +784,9 @@
         const u = UU[c], k = i * COLS + c;
         _noseC[c] = cGY[k]; _noseM[c] = mGY[k];
         cGY[k] = Math.max(groundAt(_v.x + nx * u * hw, _v.z + nz * u * hw), _v.y);
-        mGY[k] = Math.max(groundAt(_v.x + nx * u * MELT_INSET * hw, _v.z + nz * u * MELT_INSET * hw), _v.y);
+        // the nose's melt bed rides the same wandering channel as ring()
+        const mun = u * MELT_INSET + meander[i] * (1 - Math.abs(u));
+        mGY[k] = Math.max(groundAt(_v.x + nx * mun * hw, _v.z + nz * mun * hw), _v.y);
       }
       const st = stationThick(i);
       ring(i, _v.x, _v.y, _v.z, nx, nz, hw, st.t * (0.55 + 0.45 * frac),
@@ -719,6 +823,26 @@
         if (dead) return handle;
         age += dt;
         adv = Math.min(len, adv + speed * dt);
+        // the front forks where a fork was armed — see BRANCHING above
+        for (let b = 0; b < branchPts.length; b++) {
+          const bp = branchPts[b];
+          if (bp.done || adv < bp.at) continue;
+          bp.done = true;
+          if (LIVE.lava.length >= 26) continue;
+          pathAt(path, bp.at, _v);
+          const i0 = clamp(Math.floor(bp.at / seg), 0, N - 2);
+          const A = path.pts[i0], B2 = path.pts[i0 + 1];
+          const side = h01(_v.x, _v.z, salt + 88) < 0.5 ? -1 : 1;
+          const a2 = Math.atan2(B2.z - A.z, B2.x - A.x) + side * (0.5 + 0.55 * h01(_v.x, _v.z, salt + 99));
+          children.push(V.lavaFlow({
+            x: _v.x, z: _v.z, groundAt: groundAt, parent: parent, bearing: a2,
+            width: width * 0.62, len: Math.max(11, (len - bp.at) * 0.85),
+            speed: speed * 0.9, salt: salt * 3 + 101 + b * 29,
+            light: false, haze: false, branches: 0,
+          }));
+          census.branches++;
+        }
+        for (let b = 0; b < children.length; b++) children[b].update(dt);
         const st = Math.min(N - 1, Math.floor(adv / seg) + 1);
         /* REWRITE EVERY FRAME, ALWAYS. The old build skipped the rewrite when
            the front had stopped moving, which was correct when the only thing
@@ -753,8 +877,10 @@
         // runtime-only flicker (allowed to be non-deterministic): the whole
         // melt breathes as one, which costs one uniform instead of a
         // per-vertex rewrite
+        // capped at 1.04: over-driving vertex colours through the output
+        // encoding is what bleached the melt toward white in the peek shots
         const fl = 0.92 + 0.1 * Math.sin(age * 5.3) + Math.random() * 0.04;
-        chMat.color.setScalar(clamp(fl, 0.75, 1.1));
+        chMat.color.setScalar(clamp(fl, 0.75, 1.04));
 
         for (let i = 0; i < haze.length; i++) {
           const H = haze[i], s = adv * H.u;
@@ -778,17 +904,23 @@
       },
       // is (x,z) ON the flow? The lethal corridor IS the drawn ribbon —
       // the same wProf the geometry used, so what kills you is what glows.
+      // A branch is part of the flow, so its ribbon kills through this same
+      // call and no caller has to know the tree exists.
       hitTest(x, z) {
         const c = pathCoord(path, x, z, adv);
-        if (c.s < 0 || c.s > adv) return false;
-        const i = clamp(Math.round(c.s / seg), 0, N - 1);
-        return c.perp < halfW * wProf[i] * 0.95;
+        if (c.s >= 0 && c.s <= adv) {
+          const i = clamp(Math.round(c.s / seg), 0, N - 1);
+          if (c.perp < halfW * wProf[i] * 0.95) return true;
+        }
+        for (let b = 0; b < children.length; b++) if (children[b].hitTest(x, z)) return true;
+        return false;
       },
       // 0..1 "how much of its run has it made" — for threat maps
       progress() { return adv / len; },
       dispose() {
         if (dead) return;
         dead = true;
+        for (let b = 0; b < children.length; b++) children[b].dispose();
         parent.remove(crust); parent.remove(chan);
         crustGeo.dispose(); crustMat.dispose();
         chGeo.dispose(); chMat.dispose();
@@ -800,6 +932,222 @@
     };
     census.lava++;
     LIVE.lava.push(handle);
+    return handle;
+  };
+
+  /* ============================================================
+     ASH COLUMN — the pillar over the vent.
+
+     The wide reference photograph's second subject after the lava: a FAT,
+     coherent, dark convective column standing kilometres over the crater,
+     bulging into a cauliflower head, leaning slightly downwind. The old
+     column was a THREE.Points cloud — a few hundred dots that photograph
+     as static in front of the sky, not as a thing with a silhouette.
+
+     Same construction as the pyroclastic current, because it is the same
+     physics upside down: overlapping camera-facing sprites wearing the
+     shared cauliflower alpha, sizes growing with height (a plume expands
+     as it entrains air), the whole column BUILDING over its first seconds
+     rather than appearing, churning in place, and bending downwind with
+     height squared (drag integrates). Dark tiers only — the photograph's
+     pillar is soot against sky; the rose light at its base is the separate
+     lit-underside cloud the director already owns.
+
+     Materials are OWNED, not the pyro pool's: the pyro drives its shared
+     materials' rotation every tick it is alive, and two systems steering
+     one uniform is a fight. A column costs its own four materials and
+     disposes them.
+     ============================================================ */
+  V.ashColumn = function (o) {
+    o = o || {};
+    const parent = o.parent || CBZ.scene;
+    const x = +o.x || 0, z = +o.z || 0;
+    const baseY = o.y != null ? +o.y : 0;
+    const height = o.height > 0 ? +o.height : 55;
+    const r0 = o.r > 0 ? +o.r : 7;
+    const mats = [];
+    // one step below where they should read: the eruption's warm fog and the
+    // output encoding both lift these on the way to the screen (same lesson
+    // as the melt ramp and the ash palette)
+    const COL_TIERS = [0x1a1713, 0x211d17, 0x28231c, 0x2f2921];
+    for (let i = 0; i < COL_TIERS.length; i++) {
+      mats.push(new THREE.SpriteMaterial({
+        map: puffTex(i % 3), color: COL_TIERS[i],
+        transparent: true, opacity: 1, depthWrite: false, fog: true,
+        blending: THREE.NormalBlending, rotation: i * 1.7,
+      }));
+    }
+    const N = qi(14, 26);
+    const grp = new THREE.Group();
+    grp.frustumCulled = false;
+    parent.add(grp);
+    const puffs = [];
+    for (let i = 0; i < N; i++) {
+      /* even column density with a crowd at the top: the head is where the
+         plume stops rising and spreads, so the highest band gets the extra
+         puffs and the extra size — that is the cauliflower bulge */
+      const h = i < N * 0.62 ? (i / Math.max(1, N * 0.62)) : (0.78 + Math.random() * 0.22);
+      const m = new THREE.Sprite(mats[Math.min(COL_TIERS.length - 1, (h * 3.2) | 0)]);
+      m.renderOrder = 7;
+      grp.add(m);
+      puffs.push({
+        m: m, h: h, ph: Math.random() * 6.28,
+        lat: (Math.random() * 2 - 1), la2: (Math.random() * 2 - 1),
+        sz: 0.8 + Math.random() * 0.5,
+      });
+    }
+    let t = 0, dead = false;
+    const handle = {
+      kind: "column", group: grp,
+      update(dt, wx, wz) {
+        if (dead) return handle;
+        t += dt;
+        const build = Math.min(1, t / 9);          // the column STANDS UP
+        const bx = wx || 0, bz = wz || 0;
+        for (let i = 0; i < puffs.length; i++) {
+          const P = puffs[i];
+          const hh = P.h * build;
+          // the plume widens as it climbs, and the head bulges hardest
+          const rad = r0 * (0.5 + 1.9 * hh) * (P.h > 0.78 ? 1.35 : 1);
+          const churn = Math.sin(t * 0.7 + P.ph);
+          // downwind lean integrates with height — drag works on the WHOLE climb
+          const lean = height * 0.3 * hh * hh;
+          P.m.position.set(
+            x + P.lat * rad * 0.55 + Math.sin(t * 0.5 + P.ph) * 1.6 + bx * lean,
+            baseY + hh * height + churn * 1.2,
+            z + P.la2 * rad * 0.55 + Math.cos(t * 0.45 + P.ph) * 1.6 + bz * lean
+          );
+          const sc = rad * P.sz * (1.55 + 0.14 * Math.sin(t * 0.8 + P.ph));
+          P.m.scale.set(sc, sc * 0.94, 1);
+          P.m.visible = hh > 0.01;
+        }
+        return handle;
+      },
+      dispose() {
+        if (dead) return;
+        dead = true;
+        for (let i = 0; i < puffs.length; i++) grp.remove(puffs[i].m);
+        parent.remove(grp);
+        for (let i = 0; i < mats.length; i++) mats[i].dispose();
+        const k = LIVE.column.indexOf(handle); if (k >= 0) LIVE.column.splice(k, 1);
+      },
+    };
+    LIVE.column.push(handle);
+    return handle;
+  };
+
+  /* ============================================================
+     VENT GLOW — the white heart of the mountain.
+
+     In the wide reference photograph (Fuego by night, 2026-08-15) the
+     crater is the single brightest thing in the frame: a saturated
+     white-yellow spatter apron that the lava threads visibly PORE OUT OF,
+     draped over the summit and cooling through orange to darkness at its
+     rim. The old build put an ADDITIVE DISC there — a translucent glowing
+     coin hovering on the peak, which is both of the forbidden words at
+     once (see-through, and geometric).
+
+     This is that apron as honest geometry: an opaque, unlit (= incandescent)
+     vertex-coloured fan whose rim radius is hash-lobed per sector — a
+     spatter field's coastline, not a circle — with every vertex standing on
+     the ground under itself so it drapes the cone tip. White core, orange
+     shoulder, near-black rim; one small pooled PointLight so the summit
+     paints its own glow onto the crater walls at night.
+
+     Same contract as every other builder here: groundAt + parent in,
+     update/dispose/hitTest out, LIVE-registered so the audit can count it.
+     ============================================================ */
+  V.ventGlow = function (o) {
+    o = o || {};
+    const parent = o.parent || CBZ.scene;
+    const groundAt = o.groundAt || flatGround;
+    const x = +o.x || 0, z = +o.z || 0;
+    const R = o.r > 0 ? +o.r : 7;
+    const salt = o.salt != null ? (o.salt | 0) : 4444;
+    const SEC = 20, RINGS = [0.34, 0.62, 1.0];
+    const VC = 1 + SEC * RINGS.length;
+    const pos = new Float32Array(VC * 3);
+    const col = new Float32Array(VC * 3);
+    // 1150 C at the throat, dark spatter at the rim — the entire ramp of the
+    // reference photograph, in four stops
+    const CORE = 0xfff4c8, RING_C = [0xffd677, 0xf07f1d, 0x66180a];
+    _c1.setHex(CORE);
+    pos[0] = x; pos[1] = groundAt(x, z) + 0.24; pos[2] = z;
+    col[0] = _c1.r; col[1] = _c1.g; col[2] = _c1.b;
+    for (let r = 0; r < RINGS.length; r++) {
+      _c1.setHex(RING_C[r]);
+      for (let s = 0; s < SEC; s++) {
+        const a = (s / SEC) * Math.PI * 2;
+        /* THE RIM IS A COASTLINE. One hashed radius per sector, strongest on
+           the outermost ring: the apron throws lobes down whichever flank
+           the hash says, and two vents never share an outline. */
+        const wob = 0.68 + 0.64 * h01(x + Math.cos(a) * 9, z + Math.sin(a) * 9, salt + r * 17);
+        const rr = R * RINGS[r] * (r === RINGS.length - 1 ? wob : (0.86 + 0.28 * (wob - 0.68)));
+        const px = x + Math.cos(a) * rr, pz = z + Math.sin(a) * rr;
+        const off = (1 + r * SEC + s) * 3;
+        pos[off] = px;
+        pos[off + 1] = groundAt(px, pz) + 0.2 - r * 0.04;   // drape, thin out
+        pos[off + 2] = pz;
+        const g2 = 0.9 + 0.2 * h01(px, pz, salt + 5);
+        col[off] = _c1.r * g2; col[off + 1] = _c1.g * g2; col[off + 2] = _c1.b * g2;
+      }
+    }
+    const idx = new Uint16Array((SEC + (RINGS.length - 1) * SEC * 2) * 3);
+    let ii = 0;
+    for (let s = 0; s < SEC; s++) {
+      idx[ii++] = 0; idx[ii++] = 1 + s; idx[ii++] = 1 + (s + 1) % SEC;
+    }
+    for (let r = 0; r < RINGS.length - 1; r++) {
+      for (let s = 0; s < SEC; s++) {
+        const a = 1 + r * SEC + s, b = 1 + r * SEC + (s + 1) % SEC;
+        idx[ii++] = a; idx[ii++] = a + SEC; idx[ii++] = b;
+        idx[ii++] = b; idx[ii++] = a + SEC; idx[ii++] = b + SEC;
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    geo.setIndex(new THREE.BufferAttribute(idx, 1));
+    // unlit and OPAQUE — incandescence is a material state here, never alpha
+    const mat = new THREE.MeshBasicMaterial({
+      vertexColors: true, side: THREE.DoubleSide, fog: true,
+      polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.frustumCulled = false;
+    mesh.renderOrder = 3;
+    parent.add(mesh);
+    let light = null;
+    if (o.light !== false) {
+      light = new THREE.PointLight(0xff8a2a, 1.8, Math.max(30, R * 6), 2);
+      light.castShadow = false;
+      light.position.set(x, groundAt(x, z) + 3, z);
+      parent.add(light);
+      census.lights++;
+    }
+    let t = 0, dead = false;
+    const handle = {
+      kind: "vent", mesh: mesh,
+      update(dt) {
+        if (dead) return handle;
+        t += dt;
+        // the throat breathes — one uniform, same trick as the melt flicker
+        const fl = 0.94 + 0.08 * Math.sin(t * 6.2) + Math.random() * 0.04;
+        mat.color.setScalar(clamp(fl, 0.8, 1.12));
+        if (light) light.intensity = 1.6 + 0.5 * Math.sin(t * 5.1) + Math.random() * 0.2;
+        return handle;
+      },
+      hitTest(px, pz) { return Math.hypot(px - x, pz - z) < R * 0.5; },
+      dispose() {
+        if (dead) return;
+        dead = true;
+        parent.remove(mesh); geo.dispose(); mat.dispose();
+        if (light) { parent.remove(light); census.lights--; }
+        const k = LIVE.vent.indexOf(handle); if (k >= 0) LIVE.vent.splice(k, 1);
+      },
+    };
+    census.vent++;
+    LIVE.vent.push(handle);
     return handle;
   };
 
@@ -1469,15 +1817,19 @@
       const grain = 0.86 + 0.2 * h01(C.x, C.z, salt);
       // cooler and a stop darker than the first pass: an eruption drives the
       // scene sun to 0xff6a3a, and pale warm grey under that comes out pink
-      /* AND IT IS DARK. Fresh fall on a volcano's flank is a dark grey — the
-         reference photograph the owner sent is a BLACK cone, and a pale
-         blanket over the whole island is what was stopping this one from
-         reading as rock at all. The old top stop was near-white; a deposit
-         that bright only exists under snow. */
+      /* AND IT IS DARK — DARKER THAN THE LAST DARKENING. The reference cone
+         is BLACK, and the 2026-08-15 report still photographed a pale
+         lavender mountain: the previous stops were picked in a swatch, and
+         the output encoding plus the eruption's own pooled lights lifted
+         them to the "snow-covered volcano" the owner keeps seeing. Fresh
+         basaltic fall is near-black scoria; these stops are authored a full
+         step below where they should read, the same trick the melt ramp
+         learned, so the screen lands on dark rock and the cone the flows
+         thread down is finally the photograph's. */
       // blue-shifted on purpose: these are multiplied by a warm sun, and an
       // albedo picked to look grey in a swatch comes out pink on the ground
-      _c3.setHex(0x26282a).lerp(_c1.setHex(0x4b4e52), Math.min(1, cov * 1.15));
-      _c3.lerp(_c1.setHex(0x35373a), deep * 0.7);
+      _c3.setHex(0x191b1d).lerp(_c1.setHex(0x33363a), Math.min(1, cov * 1.15));
+      _c3.lerp(_c1.setHex(0x212325), deep * 0.7);
       for (let k = 0; k < 4; k++) {
         col[v + k * 3] = _c3.r * grain;
         col[v + k * 3 + 1] = _c3.g * grain;
@@ -1625,13 +1977,19 @@
       // line from the vent (it did not; that is what a fall line is for)
       lavaTips: lavaTips,
       lavaMids: lavaMids,
+      // the fan: how many live flows are branch children, and the incandescent
+      // vent apron count — the two 2026-08-15 reference-photo features as
+      // numbers, so the ratchet can see them
+      lavaBranches: census.branches,
+      ventGlows: LIVE.vent.length,
+      ashColumns: LIVE.column.length,
       pyroLive: LIVE.pyro.length, pyroBlobs: pyroBlobs,
       laharLive: LIVE.lahar.length,
       ashFields: LIVE.ash.length, ashCells: ashCells,
       ashPeakDepth: +ashPeak.toFixed(3),
       lights: census.lights,
       builtLava: census.lava, builtPyro: census.pyro,
-      builtLahar: census.lahar, builtAsh: census.ash,
+      builtLahar: census.lahar, builtAsh: census.ash, builtVent: census.vent,
     };
   };
 

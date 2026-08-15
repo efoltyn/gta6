@@ -419,6 +419,9 @@
       wallRun(root, e[0], e[1], e[2], e[3], h, thick, hex, gapC, e[4] === gs ? gw : 0);
     }
   }
+  // collision thickness of a chain-link run — the same 0.32 the venue site kit
+  // uses, declared once so the two cannot drift apart
+  const FENCE_COL_T = 0.32;
   // the chain-link BAND + its colliders for one fence edge (split at the gate)
   function wallRunFence(root, e, horiz, gapC, gw, h, hex) {
     const a = horiz ? e[0] : e[1], b = horiz ? e[2] : e[3];
@@ -435,7 +438,15 @@
       const m = new THREE.Mesh(bg(w, h - 0.3, d), new THREE.MeshLambertMaterial({ color: hex, transparent: true, opacity: 0.26 }));
       m.position.set(x, h / 2 - 0.1, z); m.castShadow = false; m.receiveShadow = false;
       root.add(m);
-      col(x, z, horiz ? w : 0.5, horiz ? 0.5 : d, 0, h);
+      // COLLIDE THE FENCE, NOT A SLAB OF AIR AROUND IT. The band drawn two
+      // lines up is 0.08 m thick; this registered 0.5, so every compound
+      // perimeter in the game — the Freeport's bonded yard most visibly —
+      // held you 0.21 m off a chain-link you could see straight through, on
+      // both faces. 0.32 is the venue kit's own chain-link figure (a 0.16
+      // half-thickness, speedway_structures.js's fence()), which is thick
+      // enough that nothing steps across it in one 0.35 m collision slice and
+      // honest about where the metal is.
+      col(x, z, horiz ? w : FENCE_COL_T, horiz ? FENCE_COL_T : d, 0, h);
     }
   }
 
