@@ -676,7 +676,7 @@
     return parts;
   };
 
-  PAINT.swat = function (P, c) {
+  function paintSwat(P, c, wordmarks) {
     // SWAT REDESIGN — police-parity detail. Two-tone: graphite fatigues under a
     // dark-OLIVE plate carrier painted on the inflated JACKET shell (the same
     // silhouette trick the police duty jacket uses), so a SWAT reads as a
@@ -707,8 +707,10 @@
     J.clear("side", 0, 0.76, 1, 0.24);
     J.rect("front", 0.18, 0.14, 0.64, 0.48, plate);                 // chest plate bag (raised tone)
     J.rect("front", 0.18, 0.14, 0.64, 0.035, strap);                //   plate-bag top seam
-    J.rect("front", 0.3, 0.045, 0.4, 0.085, "#e9e7db");             // "SWAT" placard (front)
-    J.rect("back", 0.24, 0.08, 0.52, 0.13, "#e9e7db");              // "SWAT" placard (back)
+    if (wordmarks !== false) {
+      J.rect("front", 0.3, 0.045, 0.4, 0.085, "#e9e7db");           // "SWAT" placard (front)
+      J.rect("back", 0.24, 0.08, 0.52, 0.13, "#e9e7db");            // "SWAT" placard (back)
+    }
     J.rect("front", 0.24, 0.27, 0.26, 0.11, pouch);                 // admin pouch (wide, flapped)
     J.rect("front", 0.24, 0.27, 0.26, 0.032, strap);
     J.rect("front", 0.55, 0.38, 0.15, 0.21, pouch);                 // rifle-mag pouch (tall)
@@ -723,7 +725,7 @@
     J.shade();
     // block "SWAT" lettering stamped straight into the atlas (after shade so
     // the letters stay crisp) — guarded for stub canvases in the harness.
-    if (ctx && ctx.fillText) {
+    if (wordmarks !== false && ctx && ctx.fillText) {
       ctx.save();
       ctx.fillStyle = "#1a1c22";
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
@@ -757,6 +759,155 @@
     L.rect("side", 0, 0.92, 1, 0.08, tone(fat, -0.35));
     L.shade();
     return { torso: 1, arms: 1, legs: 1, jacket: 1 };
+  }
+  PAINT.swat = function (P, c) { return paintSwat(P, c, true); };
+  // Prison riot responders use Gang City's complete SWAT garment and armor
+  // silhouette, but the owner rejected uniform wordmarks. This is one painter
+  // with that cosmetic layer gated off, not a forked tactical outfit.
+  PAINT.swat_unmarked = function (P, c) { return paintSwat(P, c, false); };
+
+  // ---- PRISON ESCAPE: one painted-clothing language for both games --------
+  // The direct prison used flat orange/navy boxes long after Gang City uniforms
+  // had gained seams, pockets, patches, layered jackets and tactical carriers.
+  // These painters deliberately use this atlas rather than adding geometry in
+  // entities/player|guards|npc: one shared texture per fit, identical draw-call
+  // cost, and the same yoke/body-fit guarantees as every City outfit.
+  PAINT.inmate = function (P, c) {
+    const orange = (c && c.torso != null) ? c.torso : 0xf27a1f;
+    const oc = hx(orange), seam = tone(orange, -0.30), hi = tone(orange, 0.16);
+    const T = P.T, A = P.A, L = P.L;
+    T.fill(oc);
+    // one-piece coverall: undershirt, zip, chest/seat pockets, waist and ID.
+    T.poly("front", [[0.39, 0], [0.61, 0], [0.5, 0.14]], "#e8e2d4");
+    T.rect("front", 0.48, 0.08, 0.04, 0.72, seam);
+    T.rect("front", 0.12, 0.33, 0.23, 0.16, tone(orange, -0.12));
+    T.rect("front", 0.65, 0.33, 0.23, 0.16, tone(orange, -0.12));
+    T.rect("front", 0.12, 0.33, 0.23, 0.035, seam);
+    T.rect("front", 0.65, 0.33, 0.23, 0.035, seam);
+    T.rect("front", 0, 0.80, 1, 0.055, seam);
+    T.rect("back", 0.12, 0.63, 0.28, 0.17, tone(orange, -0.12));
+    T.rect("back", 0.60, 0.63, 0.28, 0.17, tone(orange, -0.12));
+    T.shade();
+    A.fill(oc);
+    A.rect("front", 0.08, 0.09, 0.84, 0.055, hi);                   // shoulder seam
+    A.rect("side", 0.08, 0.09, 0.84, 0.055, hi);
+    A.rect("front", 0, 0.88, 1, 0.12, seam);                        // coverall cuff
+    A.shade();
+    const leg = (c && c.legs != null) ? c.legs : tone2(orange, -0.04);
+    L.fill(hx(leg));
+    L.rect("side", 0.46, 0, 0.08, 1, seam);                         // outside seam
+    L.rect("front", 0.13, 0.44, 0.74, 0.22, tone(leg, -0.14));      // reinforced knee
+    L.rect("side", 0.16, 0.18, 0.68, 0.18, tone(leg, -0.12));      // thigh pocket
+    L.rect("front", 0, 0.92, 1, 0.08, seam);                       // ankle break
+    L.shade();
+    return { torso: 1, arms: 1, legs: 1 };
+  };
+  PAINT.inmate_cap = PAINT.inmate;
+
+  PAINT.inmate_orderly = function (P, c) {
+    const top = (c && c.torso != null) ? c.torso : 0xe7edf0;
+    const orange = (c && c.legs != null) ? c.legs : 0xe76518;
+    const T = P.T, A = P.A, L = P.L, tc = hx(top), trim = hx(orange);
+    T.fill(tc);
+    T.poly("front", [[0.36, 0], [0.50, 0.15], [0.64, 0]], tone(top, -0.18));
+    T.rect("front", 0.49, 0.12, 0.02, 0.72, tone(top, -0.22));
+    T.rect("front", 0.10, 0.62, 0.30, 0.20, tone(top, -0.10));
+    T.rect("front", 0.60, 0.62, 0.30, 0.20, tone(top, -0.10));
+    T.rect("front", 0.63, 0.18, 0.29, 0.13, trim);                  // institutional orange chest trim
+    T.rect("front", 0.16, 0.20, 0.14, 0.05, "#b73535");
+    T.rect("front", 0.205, 0.155, 0.05, 0.14, "#b73535");          // medical cross
+    T.shade();
+    A.fill(tc); A.rect("front", 0.06, 0.06, 0.88, 0.09, trim); A.rect("side", 0.06, 0.06, 0.88, 0.09, trim); A.shade();
+    L.fill(trim);
+    L.rect("side", 0.46, 0, 0.08, 1, tone(orange, -0.30));
+    L.rect("front", 0.13, 0.44, 0.74, 0.22, tone(orange, -0.12));
+    L.shade();
+    return { torso: 1, arms: 1, legs: 1 };
+  };
+
+  PAINT.inmate_chapel = function (P, c) {
+    const body = (c && c.torso != null) ? c.torso : 0x505c6b;
+    const legs = (c && c.legs != null) ? c.legs : 0x414a57;
+    const T = P.T, A = P.A, L = P.L, bc = hx(body), orange = "#e77724";
+    T.fill(bc);
+    T.rect("front", 0.49, 0, 0.02, 0.82, tone(body, -0.25));
+    T.rect("front", 0.43, 0, 0.14, 0.08, "#eee8dc");               // trustee/chapel collar tab
+    T.rect("front", 0.12, 0.33, 0.27, 0.16, tone(body, -0.12));
+    T.rect("front", 0.61, 0.33, 0.27, 0.16, tone(body, -0.12));
+    T.rect("front", 0.62, 0.17, 0.30, 0.13, orange);                 // institutional orange chest accent
+    T.shade();
+    A.fill(bc); A.rect("front", 0, 0.88, 1, 0.12, tone(body, -0.24)); A.shade();
+    L.fill(hx(legs));
+    L.rect("side", 0.38, 0, 0.24, 1, orange);                       // institutional orange stripe
+    L.rect("front", 0.13, 0.44, 0.74, 0.20, tone(legs, -0.12));
+    L.shade();
+    return { torso: 1, arms: 1, legs: 1 };
+  };
+
+  PAINT.corrections = function (P, c) {
+    const uni = (c && c.torso != null) ? c.torso : 0x34475d;
+    const legs = (c && c.legs != null) ? c.legs : 0x202936;
+    const shirt = tone(uni, 0.30), T = P.T, J = P.J, A = P.A, L = P.L;
+    T.fill(shirt);
+    T.rect("front", 0.49, 0, 0.02, 0.86, tone(shirt, -0.24));
+    T.rect("front", 0.12, 0.35, 0.27, 0.15, tone(shirt, -0.10));
+    T.rect("front", 0.61, 0.35, 0.27, 0.15, tone(shirt, -0.10));
+    T.rect("front", 0, 0.84, 1, 0.16, "#111419");                  // real duty belt under jacket
+    T.rect("side", 0.08, 0.78, 0.84, 0.21, "#111419");
+    T.shade();
+    J.fill(hx(uni));
+    J.clear("cap", 0, 0, 1, 1);
+    J.clearPoly("front", [[0.47, 0], [0.53, 0], [0.58, 1], [0.42, 1]]);
+    J.rect("front", 0.10, 0.25, 0.28, 0.15, tone(uni, -0.15));
+    J.rect("front", 0.62, 0.25, 0.28, 0.15, tone(uni, -0.15));
+    J.rect("front", 0.10, 0.25, 0.28, 0.04, tone(uni, -0.36));
+    J.rect("front", 0.62, 0.25, 0.28, 0.04, tone(uni, -0.36));
+    J.poly("front", [[0.19, 0.10], [0.29, 0.10], [0.29, 0.18], [0.24, 0.23], [0.19, 0.18]], "#d9b94b");
+    J.rect("front", 0.05, 0.60, 0.12, 0.20, "#151b24");             // radio
+    J.rect("side", 0.12, 0.74, 0.76, 0.24, "#111419");             // holster/cuff belt mass
+    J.shade();
+    A.fill(hx(uni));
+    A.rect("front", 0.15, 0.04, 0.70, 0.23, tone(uni, -0.28));
+    A.rect("front", 0.15, 0.04, 0.70, 0.04, "#d9b94b");
+    A.rect("side", 0.15, 0.04, 0.70, 0.23, tone(uni, -0.28));
+    A.rect("front", 0, 0.88, 1, 0.12, tone(uni, -0.28));
+    A.shade();
+    L.fill(hx(legs));
+    L.rect("side", 0.42, 0, 0.16, 1, tone(uni, 0.18));
+    L.rect("side", 0.12, 0.22, 0.76, 0.20, tone(legs, -0.16));       // cargo pocket
+    L.shade();
+    return { torso: 1, arms: 1, legs: 1, jacket: 1 };
+  };
+
+  PAINT.warden = function (P, c) {
+    const body = (c && c.torso != null) ? c.torso : 0x222b3d;
+    const legs = (c && c.legs != null) ? c.legs : 0x171c28;
+    const gold = "#d8b44b", shirt = "#e8e3d8", tie = 0x6c2430;
+    const T = P.T, J = P.J, A = P.A, L = P.L;
+    T.fill(shirt);
+    T.rect("front", 0.46, 0, 0.08, 0.72, hx(tie));
+    T.poly("front", [[0.46, 0.70], [0.54, 0.70], [0.50, 0.80]], hx(tie));
+    T.rect("front", 0, 0.84, 1, 0.16, "#111419");
+    T.shade();
+    J.fill(hx(body));
+    J.clear("cap", 0, 0, 1, 1);
+    J.clearPoly("front", [[0.47, 0], [0.53, 0], [0.59, 1], [0.41, 1]]);
+    J.rect("front", 0.10, 0.27, 0.27, 0.14, tone(body, -0.13));
+    J.rect("front", 0.63, 0.27, 0.27, 0.14, tone(body, -0.13));
+    J.poly("front", [[0.18, 0.10], [0.30, 0.10], [0.30, 0.18], [0.24, 0.24], [0.18, 0.18]], gold);
+    J.rect("front", 0.60, 0.12, 0.29, 0.055, gold);
+    J.rect("front", 0.06, 0.02, 0.30, 0.055, gold);                 // rank bars
+    J.rect("front", 0.64, 0.02, 0.30, 0.055, gold);
+    J.shade();
+    A.fill(hx(body));
+    A.rect("front", 0.03, 0.03, 0.94, 0.13, gold);                  // dress epaulettes
+    A.rect("side", 0.03, 0.03, 0.94, 0.13, gold);
+    A.rect("front", 0, 0.90, 1, 0.08, gold);                       // cuff braid
+    A.shade();
+    L.fill(hx(legs)); L.rect("side", 0.44, 0, 0.12, 1, gold); L.shade();
+    const parts = { torso: 1, arms: 1, legs: 1, jacket: 1 };
+    if (neckV2()) parts.neck = { tie: tie, w: 0.08 };
+    return parts;
   };
 
   PAINT.gang = function (P, c) {
@@ -2118,7 +2269,7 @@
   const YFACE = ["side", "side", "cap", "cap", "front", "back"];   // +x -x +y -y +z -z
   // the ONE look that must not get lapels: a plate carrier has none, and a
   // shirt-notch on a SWAT yoke would read as a tie under body armour.
-  const YOKE_NO_LAPEL = { swat: 1 };
+  const YOKE_NO_LAPEL = { swat: 1, swat_unmarked: 1 };
   function yokeCanvas(bodyHex, neckHex, lapels, neck) {
     if (typeof document === "undefined" || !document.createElement) return null;
     const cv = document.createElement("canvas");

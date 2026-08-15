@@ -85,6 +85,14 @@
     paint(s.cap, null, cop);
     paint(s.hair, null, !cop);
     CBZ.player.role = cop ? "cop" : "inmate";
+    // The base role swap happens before the shared painted wardrobe in the
+    // script-tag monolith. Invalidate its memo so systems/prisonoutfits.js can
+    // immediately lay the detailed correctional/jumpsuit garment back on top;
+    // otherwise applyClothes' "already wearing it" fast path preserves this
+    // temporary flat tint across a restart or inmate/officer role change.
+    playerChar._clothesKey = null;
+    playerChar._clothesMat = null;
+    playerChar._prisonOutfitKey = null;
   }
 
   const player = {

@@ -24,6 +24,9 @@
 
     const n = {
       char: ch, group: ch.group, kind: "inmate", role: opts.role,
+      // Outfit assignment is authored at the actor, while the actual garment
+      // remains city/outfits.js + city/clothes.js's shared responsibility.
+      prisonOutfit: opts.prisonOutfit || "inmate",
       gang: opts.gang == null ? null : opts.gang,
       crewRole: opts.crewRole || "",
       personality: opts.personality || null,
@@ -184,7 +187,10 @@
     if (n._detailOn !== wantDetail) {       // toggle only on tier change
       n._detailOn = wantDetail;
       const det = n.char.detail;
-      if (det) for (let k = 0; k < det.length; k++) det[k].visible = wantDetail;
+      if (det) for (let k = 0; k < det.length; k++) {
+        const part = det[k];
+        part.visible = wantDetail && !(part.userData && part.userData._cbzDetailSuppressed);
+      }
       if (n._tag) n._tag.visible = false;
     }
 
@@ -321,6 +327,7 @@
   // The Dealer — sells product (hangs out north of the armory)
   makeNpc({
     pos: [14, 18], region: [10, 17, 12, 24], role: "dealer", speed: 2.0,
+    prisonOutfit: "cap",
     tagText: "Dealer · product", tagColor: "#b07aff",
     skin: { legs: 0xff7a1a, torso: 0xff7a1a, collar: 0xff9747, arms: 0xff7a1a, skin: 0x6b4a32, cap: 0x222222, stripes: 0xc85c00, shoes: 0x111111 },
     data: {
@@ -436,7 +443,7 @@
       talk: ["Nobody gets jumped on my floor.", "We look out for our crew down here."] },
 
     // ===== CHAPEL (south-east) — the quiet wing =====
-    { name: "Brother Amos", tag: "Chapel", color: "#e7d8ff", pos: [33, 68], box: [25, 41, 60, 78], role: "inmate", neutral: true, speed: 1.3,
+    { name: "Brother Amos", tag: "Chapel", outfit: "chapel", color: "#e7d8ff", pos: [33, 68], box: [25, 41, 60, 78], role: "inmate", neutral: true, speed: 1.3,
       behavior: "pacifist", ratings: { fighting: 22, toughness: 40, cunning: 86, stealth: 60 }, skin: jump(0xd8a177, 0xdedede, { torso: 0x4a4f57, legs: 0x4a4f57, arms: 0x4a4f57, stripes: 0 }),
       talk: ["Peace, brother. Always peace.", "Even in here, grace finds a way."] },
     { name: "Deacon", tag: "Chapel", color: "#e7d8ff", pos: [37, 73], box: [28, 42, 62, 80], role: "inmate", neutral: true, speed: 1.7,
@@ -447,14 +454,14 @@
       talk: ["Let it go, son.", "Not here. Not in here."] },
 
     // ===== INFIRMARY (east) — the doc + the sick =====
-    { name: "Doc Mercer", tag: "Infirmary · meds", color: "#9fe6c0", pos: [33, 96], box: [26, 41, 88, 104], role: "merchant", neutral: true, speed: 1.4,
+    { name: "Doc Mercer", tag: "Infirmary · meds", outfit: "orderly", color: "#9fe6c0", pos: [33, 96], box: [26, 41, 88, 104], role: "merchant", neutral: true, speed: 1.4,
       behavior: "pacifist", ratings: { fighting: 28, toughness: 46, cunning: 90, stealth: 55 }, skin: jump(0xe8c39a, 0xcfcfcf, { torso: 0xeef2f5, arms: 0xeef2f5, legs: 0xeef2f5, collar: 0xeef2f5, stripes: 0 }),
       data: { name: "Doc Mercer", pool: "goods", tip: "Bad cut? I've patched worse for less.",
         talk: ["I keep folks breathing in here.", "Painkillers for cigs. Don't tell the Warden."] } },
     { name: "Patient Zero", tag: "Infirmary", color: "#9fe6c0", pos: [29, 100], box: [25, 40, 90, 104], role: "inmate", neutral: true, speed: 1.5,
       behavior: "unpredictable", ratings: { fighting: 22, toughness: 26, speed: 30 }, skin: jump(0xd0b08a, 0x6a6a6a),
       talk: ["...is it cold in here?", "They said I'd be out by spring. Which spring?"] },
-    { name: "Orderly Pratt", tag: "Infirmary", color: "#9fe6c0", pos: [37, 100], box: [28, 42, 90, 104], role: "inmate", neutral: true, speed: 1.9,
+    { name: "Orderly Pratt", tag: "Infirmary", outfit: "orderly", color: "#9fe6c0", pos: [37, 100], box: [28, 42, 90, 104], role: "inmate", neutral: true, speed: 1.9,
       behavior: "defensive", ratings: { fighting: 56, toughness: 64 }, skin: jump(0xc08a5a, 0x2a2018, { torso: 0xeef2f5, arms: 0xeef2f5 }),
       talk: ["No rough stuff near the beds.", "I'll sedate the next one who swings."] },
 
@@ -504,7 +511,7 @@
   ROSTER.forEach((m) => makeNpc({
     pos: m.pos, region: m.box, role: m.role, speed: m.speed,
     gang: m.gang == null ? null : m.gang, forceNeutral: !!m.neutral,
-    behavior: m.behavior, ratings: m.ratings,
+    behavior: m.behavior, ratings: m.ratings, prisonOutfit: m.outfit || "inmate",
     tagText: m.tag, tagColor: m.color, skin: m.skin,
     data: m.data || {
       name: m.name,
