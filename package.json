@@ -32,6 +32,7 @@
     "visual:prison-combat": "node tools/visual-compare.mjs --preset prison-combat-looks --keep-going --before https://efoltyn.github.io/gta6/",
     "visual:prison-blood": "node tools/visual-compare.mjs --preset prison-blood --keep-going --before https://efoltyn.github.io/gta6/",
     "visual:prison-shank": "node tools/visual-compare.mjs --preset prison-shank --keep-going --before https://efoltyn.github.io/gta6/",
+    "visual:prison-beds": "node tools/visual-compare.mjs --preset prison-beds --keep-going --before https://efoltyn.github.io/gta6/",
     "visual:prison-outfits": "node tools/visual-compare.mjs --preset prison-outfit-gallery --keep-going --before https://efoltyn.github.io/gta6/",
     "visual:disasters": "node tools/visual-compare.mjs --preset disaster-sequence --keep-going --before https://efoltyn.github.io/gta6/",
     "visual:race-stadium": "node tools/visual-compare.mjs --preset race-stadium --before https://efoltyn.github.io/gta6/",

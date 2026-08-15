@@ -60,9 +60,25 @@
    without a measured SPL is exactly the fake-prop fault scrolls/claude/sound.md
    exists to stop. The night is quiet because the men are asleep.
 
+   ...AND A FIFTH, WHICH WAS THE MEASURING INSTRUMENT ITSELF (2026-08-15).
+      OWNER: "Scale the number of cells so every single NPC has a bed."
+      `sleepGap` answered 0 — every single NPC already had one — and it was
+      wrong by eight men, because it asked `role === "inmate"` and `role` in
+      this game is a TRADE. The prison's dealer, its two merchants and its
+      five crew runners are convicts out of the same factory in the same
+      orange (entities/npc.js:26 stamps `kind: "inmate"` on all fifty), and
+      not one of them was in the count. §2's predicate now asks the factory,
+      the gap read +8 the moment it did, and world/cellblock.js answered it
+      with eleven more cells: 42 -> 66 beds against 50 -> 62 men, sleepGap -4
+      at the night block. A ratchet that cannot see the fault is not a
+      ratchet, and the men it could not see were the ones sleeping standing up.
+
    Flags PRISON_REST_V1 · PRISON_REST_WARDEN.
    Ratchet CBZ.prisonRestAudit().bunkStanders — bodies standing inside a
    mattress, which is the owner's complaint stated as a number — pinned at 0.
+   Ratchet CBZ.prisonRestAudit().sleepGap — prisoner rigs minus registered
+   mattresses, which is the 2026-08-15 ask stated as a number — pinned <= 0,
+   held by tools/prison-beds-check.mjs at the night block and not at spawn.
 ============================================================ */
 (function () {
   "use strict";
@@ -102,8 +118,28 @@
         drift off the mesh); seats come from propuse's rect query, once,
         by room — never a per-frame scan of the city's 3,375 chairs.
      ========================================================== */
-  // every body this file is responsible for finding a place for
-  function inmateOf(a) { return a && !a._crowd && a.role === "inmate" && a.group; }
+  /* EVERY BODY THIS FILE IS RESPONSIBLE FOR FINDING A PLACE FOR — and it used
+     to be `a.role === "inmate"`, which is how a capacity ratchet reported 0
+     while eight men had no bed.
+
+     MEASURED 2026-08-15, live escape run: 50 prisoner rigs in CBZ.npcs —
+     `inmate` x42, `thief` x5, `merchant` x2, `dealer` x1 — against 42
+     mattresses. `sleepGap` read 42 - 42 = 0 and the wing looked solved,
+     because `role` in this game is a TRADE (npc.js:315/329/345/380: the
+     infirmary's med seller, the yard's dealer, the crew's runners) and not a
+     statement about whether the man is doing time. Every one of those bodies
+     comes out of the same factory, wearing the same orange, and
+     entities/npc.js:26 stamps `kind: "inmate"` on all of them at birth.
+     A bed is owed to a man, not to his trade.
+
+     So the question is asked of the FACTORY, and the old `role` test is kept
+     as an OR purely so nothing that was counted before can fall out (npclife's
+     `jailInmate` sets both; entities/crowd.js sets both AND `_crowd`, which is
+     what still excludes the anonymous city tier). `kind` is the tight half:
+     modes/gungame.js:293 pushes its bots into this same CBZ.npcs and none of
+     them carries it. The number went 0 -> +8 the moment this line changed,
+     which is the whole reason world/cellblock.js then grew eleven cells. */
+  function inmateOf(a) { return a && !a._crowd && a.group && (a.kind === "inmate" || a.role === "inmate"); }
   function population() {
     const list = CBZ.npcs || [];
     let n = 0;
@@ -355,6 +391,26 @@
       CBZ.rest.dropClaims(beds);
     }
 
+    /* THE RATCHET, ENFORCED EVERY SWEEP AND NOT ONLY ON A RESET (2026-08-15).
+       `clearBunks()` lived in the fresh-run branch alone, so between restarts
+       nothing held `bunkStanders` down except `up()`'s per-body step-off — and
+       that only catches a man who was PUT in the bed. A man who merely walks
+       through a mattress on his way somewhere is the other half of the fault
+       and it was never swept. Measured on bfaccbd it read 2 during lock-up and
+       0 in daylight, which looked pinned; growing the wing from 42 racks to 66
+       and widening §2's predicate to all 50 rigs turned the same drift into 6
+       and 1, because both terms of an area-times-traffic problem got bigger.
+       The scan is 66 rectangles against ~70 bodies at 2 Hz and it is the
+       IDENTICAL call the audit makes, so the number cannot pass by luck.
+
+       NOT during a bed block: at secure/night the wing is converging on its
+       own bunks and a man standing at his rack a beat before propuse's arc
+       takes him is not a fault, he is arriving — stepping him off there would
+       be this file fighting its own hand-off. NOT during `count` either: the
+       muster owns the bodies then, which is the rule stated at the top of
+       this file and worth more than a number. */
+    if (!bedTime && id !== "count") clearBunks();
+
     wardenTick(id);
   });
 
@@ -436,7 +492,9 @@
       // EVERY MAN HAS A PLACE. Not "the wing sleeps what it claims" — that is
       // world/cellblock.js's job now and it counts its own mattresses — but the
       // thing the muster depends on: a body ordered to bed has a bed to be
-      // ordered to. Positive = men with nowhere to lie down.
+      // ordered to. Positive = men with nowhere to lie down. `housedIn` is
+      // every prisoner rig (§2), not every rig whose trade is "inmate": the
+      // narrow reading is what let this sit at 0 with eight men on their feet.
       sleepGap: built ? housedIn - beds.length : null,
       racks: claim, capacity: beds.length,
       inmates: housedIn, lying: inBed, seated: sat,
