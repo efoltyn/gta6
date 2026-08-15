@@ -716,7 +716,20 @@
   function solidAt(cx, cz, w, d, h) {
     solidBox(cx - w / 2, cx + w / 2, cz - d / 2, cz + d / 2, 0, h);
   }
-  // chain of AABBs following the racing line at across-track offset u
+  // A WALL THAT FOLLOWS A CIRCUIT IS NEVER AXIS-ALIGNED. Half-extents are on
+  // the box's OWN axes (hw along the tangent, hd through the thickness) and
+  // the yaw is the tangent's — so the barrier collides where it is drawn
+  // instead of where its bounding box happens to reach.
+  function solidYawAt(cx2, cz2, hw, hd, yaw, y0, y1) {
+    if (CBZ.orientedCollider) {
+      CBZ.colliders.push(CBZ.orientedCollider(cx2, cz2, hw, hd, yaw, y0 || 0, y1));
+      return;
+    }
+    const c = Math.abs(Math.cos(yaw)), s = Math.abs(Math.sin(yaw));   // degrade
+    const ex = hw * c + hd * s, ez = hw * s + hd * c;
+    solidBox(cx2 - ex, cx2 + ex, cz2 - ez, cz2 + ez, y0 || 0, y1);
+  }
+  // chain of oriented boxes following the racing line at across-track offset u
   function solidChain(t0, t1, u, thick, y0, yTop, step, skip) {
     const T = ensureTable();
     const arc = Math.abs(t1 - t0) * T.L;
@@ -727,10 +740,8 @@
       if (skip && skip(t)) continue;
       const f = trackFrame(t);
       const x = f.x + f.nx * u, z = f.z + f.nz * u;
-      const ex = Math.abs(f.tx) * half + Math.abs(f.nx) * thick / 2;
-      const ez = Math.abs(f.tz) * half + Math.abs(f.nz) * thick / 2;
       const top = yTop == null ? (heightAtTU(t, u) + WALL_H) : (typeof yTop === "function" ? yTop(t) : yTop);
-      solidBox(x - ex, x + ex, z - ez, z + ez, y0 || 0, top);
+      solidYawAt(x, z, half, thick / 2, Math.atan2(-f.tz, f.tx), y0 || 0, top);
     }
   }
 
@@ -774,6 +785,7 @@
     const S = {
       root: root, frame: trackFrame, heightAt: heightAtTU, bankAt: bankAtT,
       strip: strip, solid: solidAt, solidBox: solidBox, solidChain: solidChain,
+      solidYaw: solidYawAt,
       L: L, CX: CX, CZ: CZ, HALFW: HALFW, APRON_W: APRON_W, TRACK_W: TRACK_W,
       SHOULDER_W: SHOULDER_W, SKIRT_W: SKIRT_W, WALL_H: WALL_H, C: C,
       rng: rng, label: CBZ.makeLabelSprite ? function (s, o) { return CBZ.makeLabelSprite(s, o); } : null,
@@ -1621,14 +1633,21 @@
     function siteSolid(minX, minZ, maxX, maxZ, y0, y1) {
       solidBox(minX, maxX, minZ, maxZ, y0, y1);
     }
+    // The oriented form of the same ledger — no adapter needed, the argument
+    // order already matches. The site perimeter is a superellipse sampled
+    // every 6 deg, so all but a handful of its runs lie on a diagonal;
+    // registering those as bounding boxes put up to NINE METRES of invisible
+    // wall outside a 0.32 m chain-link fence.
+    const siteSolidYaw = solidYawAt;
 
     // --- the perimeter, one gap where the approach crosses it ---------------
     const f = VS.fence({
       root: grp, name: "speedway-perimeter", path: sitePerimeter(),
-      h: 2.5, pitch: 4.0, colliderPitch: 12, solid: siteSolid,
+      h: 2.5, pitch: 4.0, colliderPitch: 12,
+      solid: siteSolid, solidYaw: siteSolidYaw,
       gaps: [{ x: GATE.x, z: GATE.z, half: GATE_GAP }],
     });
-    if (f) SITE.fencePanels = f.panels;
+    if (f) { SITE.fencePanels = f.panels; SITE.fenceSlackSaved = f.aabbSlackSaved; }
 
     // --- the gate itself ----------------------------------------------------
     // yaw faces the outward normal (-x): whoever is arriving is driving east.

@@ -17,6 +17,7 @@
     "test:wildlife-mount": "node tools/test-wildlife-mount-browser.mjs",
     "test:aquatic-mount": "node tools/test-aquatic-mount-browser.mjs",
     "test:shark-mouth": "node tools/test-shark-mouth-browser.mjs",
+    "test:invisible-walls": "node tools/invisible-wall-check.mjs",
     "test:battle": "node tools/battle-check.mjs",
     "test:battle-revert": "node tools/battle-check.mjs --revert",
     "test:bailout-presentation": "node tools/test-bailout-presentation-browser.mjs",

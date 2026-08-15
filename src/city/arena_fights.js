@@ -370,12 +370,27 @@ CBZ.addLandmass(function(city){
     if(y0!=null){c.y0=y0;c.y1=y1;}
     (CBZ.colliders=CBZ.colliders||[]).push(c); return c;
   }
-  // AABB of an oriented (yaw-rotated) box, for the octagon/circle wall rings
-  function solidYaw(cx2,cz2,w,d,yaw,y0,y1){
-    var c=Math.abs(Math.cos(yaw)),s=Math.abs(Math.sin(yaw));
-    var ax=(w/2)*c+(d/2)*s, az=(w/2)*s+(d/2)*c;
-    return solid(cx2-ax,cz2-az,cx2+ax,cz2+az,y0,y1);
+  // AN OCTAGON IS NOT EIGHT BOXES, AND A PIT WALL IS NOT TWENTY.
+  // This used to hand physics.js the BOUNDING BOX of each rotated panel. On
+  // the beast pit that is a 0.6 m wall registered as a 2.1 m square on the
+  // diagonal quadrants — you could touch the wall due north and were held
+  // 1.9 m off it due north-east, which is what made a round pit feel like a
+  // box. The panel is now registered with the same yaw the mesh is drawn at.
+  // HALF-extents, matching CBZ.orientedCollider and CBZ.venueSite's o.solidYaw
+  // — one convention for rotated boxes, so a panel cannot be registered at
+  // twice or half the size it is drawn at by whoever calls it next.
+  function solidYaw(cx2,cz2,hw,hd,yaw,y0,y1){
+    if(!SOLID)return null;
+    if(!CBZ.orientedCollider){          // degrade: the old bounding box
+      var c=Math.abs(Math.cos(yaw)),s=Math.abs(Math.sin(yaw));
+      var ax=hw*c+hd*s, az=hw*s+hd*c;
+      return solid(cx2-ax,cz2-az,cx2+ax,cz2+az,y0,y1);
+    }
+    var rec=CBZ.orientedCollider(cx2,cz2,hw,hd,yaw,y0,y1);
+    if(rec.yaw&&CBZ.orientedSlack){ yawSlack+=CBZ.orientedSlack(hw,hd,yaw); yawOriented++; }
+    (CBZ.colliders=CBZ.colliders||[]).push(rec); return rec;
   }
+  var yawOriented=0, yawSlack=0;
   function plat(minX,minZ,maxX,maxZ,top,ramp){
     if(!SOLID)return null;
     var p={minX:Math.min(minX,maxX),maxX:Math.max(minX,maxX),
@@ -639,7 +654,7 @@ CBZ.addLandmass(function(city){
         });
         rail.push({x:mx,y:CGY+FENCE_H+0.06,z:mz,sx:pw,sy:0.18,sz:0.22,ry:yaw});    // padded top rail
         steel.push({x:mx,y:CGY+0.06,z:mz,sx:pw,sy:0.12,sz:0.14,ry:yaw});           // kick plate
-        solidYaw(mx,mz,pw,0.28,yaw,CGY,CGY+FENCE_H);                               // you cannot walk through it
+        solidYaw(mx,mz,pw/2,0.14,yaw,CGY,CGY+FENCE_H);                               // you cannot walk through it
       }
     }
     if(chainQ&&ctex){
@@ -691,7 +706,7 @@ CBZ.addLandmass(function(city){
       dark.push({x:wx,y:PY+WH+0.09,z:wz,sx:seg,sy:0.18,sz:0.8,ry:wyaw});           // coping
       rail.push({x:wx,y:PY+WH+0.95,z:wz,sx:seg,sy:0.09,sz:0.09,ry:wyaw});          // spectator rail
       steel.push({x:wx,y:PY+WH+0.5,z:wz,sx:0.08,sy:0.9,sz:0.08,ry:wyaw});
-      solidYaw(wx,wz,seg,0.6,wyaw,PY,PY+WH+1.05);
+      solidYaw(wx,wz,seg/2,0.3,wyaw,PY,PY+WH+1.05);
     }
     // four floodlight-style pylons around the pit so it reads at night
     for(var pl=0;pl<4;pl++){
@@ -859,7 +874,7 @@ CBZ.addLandmass(function(city){
     if(VS&&VS.fence){
       var fr=VS.fence({
         root:root, name:"ironjaw-perimeter", path:sitePath, closed:true,
-        y:PY, h:2.6, pitch:4.0, colliderPitch:12, solid:solid,
+        y:PY, h:2.6, pitch:4.0, colliderPitch:12, solid:solid, solidYaw:solidYaw,
         post:0x39404a, fabric:0xa8b0ba,
         gaps:[{x:GATE_X,z:CZ,half:11},{x:SVC_X,z:CZ,half:7}]
       });
@@ -1466,6 +1481,11 @@ if(CBZ.venueSite&&CBZ.venueSite.census){
       // go UP. Below FIRE_STANDOFF (4.6) the site is standing in the fire lane.
       faceClear:siteInfo?siteInfo.faceClear:0,
       fenceVerts:siteInfo?siteInfo.fenceVerts:0,
+      // The pit/cage/ring panels that carry a real yaw, and the metres of
+      // solid air they used to add as bounding boxes. Slack is a RATCHET and
+      // may only go down. (The perimeter fence is a STAIRCASE — every segment
+      // axis-aligned — so it contributes nothing here and never did.)
+      orientedPanels:yawOriented, aabbSlackSaved:+yawSlack.toFixed(1),
       onSiteBays:siteInfo?siteInfo.onSiteBays:0,
       overflowBays:siteInfo?siteInfo.overflowBays:0,
       // `parked` is capped on purpose (ARENA_PARK_CARS) — a 240-bay lot with
@@ -2268,6 +2288,14 @@ CBZ.arenaAudit=function(){
     misposed:misposed, shrugRoles:shrugs, attending:attending,
     spawnsInView:inView, spawnsDeferred:arenaSpawnBlocked,
     colliders:M.colliders|0, standColliders:M.standColliders|0,
+    // THE BOWL'S INVISIBLE WALL, AS A NUMBER. Every ring in this venue is an
+    // arc walked as short rotated chords; `orientedColliders` counts the ones
+    // on a corner, and `aabbSlackSaved` is the metres of solid air they added
+    // back when each was registered as its own bounding box. Slack is a
+    // RATCHET (down only), and orientedColliders reading 0 on a bowl that has
+    // corners means somebody re-typed a rotated chord as an AABB.
+    orientedColliders:M.orientedColliders|0,
+    aabbSlackSaved:+(M.aabbSlackSaved||0),
     platforms:M.platforms|0, aisleRamps:M.aisleRamps|0,
     seatCushion:M.seatCushion||0,
     realityBoxes:reality.available?(reality.total|0):0,

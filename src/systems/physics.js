@@ -121,6 +121,55 @@
   // one call. Per the cross-agent contract this function is shared with
   // the PLAYER — do NOT change its math/signature; add new helpers
   // instead.
+  //
+  // ---- ORIENTED COLLIDERS (c.yaw) -----------------------------------
+  // An AABB CANNOT DESCRIBE A DIAGONAL WALL, and pretending otherwise is
+  // where this game's invisible walls came from. A 5 m chord 0.24 m thick
+  // laid at 45 deg has an axis-aligned bounding box 3.7 m square: the
+  // player is stopped 2.5 m from a handrail they can see through. Measured
+  // on the shipped world the worst case was the speedway perimeter fence —
+  // a 0.32 m chain-link with a 12.7 m collider box, a NINE METRE invisible
+  // wall. Every curved ring in the game (arena bowl rails, the facade,
+  // the beast pit, venue fences, grandstands) walks its arc as short
+  // rotated chords and then re-typed each one as its own AABB.
+  //
+  // A collider may now carry an ORIENTED body: {cx, cz, hw, hd, yaw} where
+  // hw/hd are half-extents along the box's own local +x/+z. minX..maxZ
+  // stay on the record and stay the CONSERVATIVE outer AABB, so the
+  // broadphase, the camera sweep and the traversal probe are untouched and
+  // keep bucketing exactly as before — only the final resolve is exact.
+  // A record with no `yaw` takes the identical path it always did.
+  const oriHit = { x: 0, z: 0 };
+  function oriPush(pos, radius, c) {
+    // clamp the body centre inside the box, IN THE BOX'S OWN FRAME
+    // THREE's rotation.y sends local +x -> world (cos,-sin) and local +z ->
+    // world (sin,cos), so the inverse (this one) is its transpose. Getting
+    // these two the wrong way round is silently wrong at every angle except
+    // multiples of 45 deg, which is exactly the range a corner arc lives in.
+    const co = Math.cos(c.yaw), si = Math.sin(c.yaw);
+    const rx = pos.x - c.cx, rz = pos.z - c.cz;
+    const lx = rx * co - rz * si;            // world -> local
+    const lz = rx * si + rz * co;
+    const qx = lx < -c.hw ? -c.hw : (lx > c.hw ? c.hw : lx);
+    const qz = lz < -c.hd ? -c.hd : (lz > c.hd ? c.hd : lz);
+    let dx = lx - qx, dz = lz - qz;
+    const d2 = dx * dx + dz * dz;
+    if (d2 >= radius * radius) return false;
+    let px, pz;
+    if (d2 < 1e-8) {
+      // centre is INSIDE the box: shortest exit through the nearest face,
+      // solved on the local axes (the AABB branch below, one frame over)
+      const penX = c.hw - (lx < 0 ? -lx : lx), penZ = c.hd - (lz < 0 ? -lz : lz);
+      if (penX < penZ) { px = (lx < 0 ? -1 : 1) * (penX + radius); pz = 0; }
+      else { px = 0; pz = (lz < 0 ? -1 : 1) * (penZ + radius); }
+    } else {
+      const d = Math.sqrt(d2), push = (radius - d) / d;
+      px = dx * push; pz = dz * push;
+    }
+    oriHit.x = px * co + pz * si;             // local -> world
+    oriHit.z = -px * si + pz * co;
+    return true;
+  }
   function collide(pos, radius, feetY, headY) {
     const cols = nearbyColliders(pos);
     // city-owned colliders (stamped by city/mode.js's build) are only solid in
@@ -131,6 +180,10 @@
       const c = cols[i];
       if (c._city && !cityOn) continue;
       if (c.y0 != null && (headY <= c.y0 || feetY >= c.y1)) continue; // body clears this wall
+      if (c.yaw) {                        // oriented body — resolve in its own frame
+        if (oriPush(pos, radius, c)) { pos.x += oriHit.x; pos.z += oriHit.z; }
+        continue;
+      }
       const cx = Math.max(c.minX, Math.min(pos.x, c.maxX));
       const cz = Math.max(c.minZ, Math.min(pos.z, c.maxZ));
       let dx = pos.x - cx, dz = pos.z - cz;
@@ -155,6 +208,47 @@
     if (CBZ.mpCollide) CBZ.mpCollide(pos, radius, feetY, headY);
   }
   CBZ.collide = collide;
+
+  // ---- THE ONE PLACE A ROTATED WALL BECOMES A COLLIDER ----------------
+  // Builds the record `collide()` reads above: the oriented body PLUS the
+  // conservative AABB the broadphase needs. Every ring-walking builder in
+  // the game used to derive that AABB itself and then register it as the
+  // whole collider — same three lines of yaw-extent trig copied into
+  // arena_venue, arena_fights, speedway_structures and continent, each of
+  // them correct about the bounding box and wrong about the wall. Two
+  // numbers describing one object must never be typed independently.
+  //
+  //   cx,cz   centre of the box in world space
+  //   hw,hd   half-extents along the box's OWN local +x / +z
+  //   yaw     rotation about Y, matching THREE's mesh.rotation.y
+  //   y0,y1   optional vertical band (omit for a full-height wall)
+  //
+  // An axis-aligned box (yaw within a hair of a right angle) is returned as
+  // a PLAIN AABB with no `yaw`, because the exact path is already exact for
+  // those and a straight wall should not pay for the rotation.
+  const ORI_EPS = 1e-4;
+  CBZ.orientedCollider = function (cx, cz, hw, hd, yaw, y0, y1) {
+    yaw = +yaw || 0;
+    const co = Math.cos(yaw), si = Math.sin(yaw);
+    const ac = co < 0 ? -co : co, as = si < 0 ? -si : si;
+    const ex = hw * ac + hd * as, ez = hw * as + hd * ac;   // conservative AABB
+    const c = { minX: cx - ex, maxX: cx + ex, minZ: cz - ez, maxZ: cz + ez };
+    if (as > ORI_EPS && ac > ORI_EPS) {          // genuinely diagonal
+      c.cx = cx; c.cz = cz; c.hw = hw; c.hd = hd; c.yaw = yaw;
+    }
+    if (y0 != null) { c.y0 = y0; c.y1 = y1; }
+    return c;
+  };
+
+  // How much solid nothing would this box have added if it had been
+  // registered as its own AABB? Builders report it; the gate reads it.
+  // (worst-case outward reach past the wall face, on the box's normal)
+  CBZ.orientedSlack = function (hw, hd, yaw) {
+    const co = Math.cos(yaw), si = Math.sin(yaw);
+    const ac = co < 0 ? -co : co, as = si < 0 ? -si : si;
+    const ex = hw * ac + hd * as, ez = hw * as + hd * ac;
+    return (ex * as + ez * ac) - hd;   // AABB support along the wall normal, minus the wall
+  };
 
   // ---- CBZ.collideSlide — robust multi-pass form for NPC movers --------
   // The convenience entry the peds / crowd / gang movement should call to
