@@ -3050,7 +3050,7 @@
     // SIZE-UP (sizeup.js): rallies a gang victim's set, folds the outclassed
     // (hands up / run), and returns whether this person DARES to fight back.
     const dare = CBZ.citySizeUpHit ? CBZ.citySizeUpHit(tgt, att) : true;
-    if (!tgt.rage && dare && tgt.aggr >= (A0().bold || 0.5)) { tgt.rage = att; tgt.state = "fight"; }   // fight back
+    if (!tgt.rage && dare && !tgt.restraint && tgt.aggr >= (A0().bold || 0.5)) { tgt.rage = att; tgt.state = "fight"; }   // fight back — never with wrists tied (restrain.js owns him)
     if (tgt.hp <= 0) CBZ.cityKillPed(tgt, { fromX: fx, fromZ: fz, attacker: att, byPlayer: false, force: melee ? 6 : 5, fling: melee ? 3 : 4 });
     else {
       if (CBZ.body) CBZ.body.hit(tgt, { fromX: fx, fromZ: fz, force: melee ? 5 : 3, knockdown: melee && rng() < 0.3 ? 1 : 0 });
@@ -3129,7 +3129,11 @@
   })();
 
   function npcAttack(att, tgt, dt) {
-    if (att.attackCD > 0 || !tgt || tgt.dead) return;
+    // hands zip-tied behind the back can neither pull a trigger nor throw a
+    // punch — restrain.js's enum (ped.restraint) gates EVERY attack, whichever
+    // brain (crew, rage, reprisal) routed here. The grappled state already
+    // suppressed itself via attackCD; this covers cuffed/escorted/in_vehicle.
+    if (att.attackCD > 0 || !tgt || tgt.dead || att.restraint) return;
     const dx = att.pos.x - tgt.pos.x, dz = att.pos.z - tgt.pos.z;
     const dh = Math.hypot(dx, dz);                        // horizontal gap
     // A RIFLE'S RANGE IS THE RIFLE'S. The old flat 26 was the same for a
@@ -4714,7 +4718,10 @@
 
   // ---- the brain (time-sliced) ----
   function think(ped, dt, active) {
-    if (ped.companion) { companionThink(ped, dt, active); return; }
+    // a zip-tied companion is restrain.js's body, not the crew's: companionThink
+    // would re-arm him and wipe the surrender/rage fields every tick, which is
+    // how a cuffed crew member kept shooting with his hands behind his back.
+    if (ped.companion) { if (!ped.restraint) companionThink(ped, dt, active); return; }
     if (ped.dead || ped.vendor || ped.ko > 0) return;
     if (ped.controlled) return;     // city/social.js drives companions/hostages/kidnap victims
     if (ped.staffPost) { staffThink(ped, dt); return; }   // posted package staff: rooted brain, gunpoint-aware
@@ -5903,8 +5910,8 @@
       CBZ.combatIQ.meleeReset(ped);                        // fight's over — drop the beat state
     }
 
-    // loot pickup
-    if (st === "loot") {
+    // loot pickup (tied hands can't scoop a gun off the pavement)
+    if (st === "loot" && !ped.restraint) {
       const di = nearestDrop(ped.pos.x, ped.pos.z, 1.6);
       if (di >= 0) { const d = CBZ.cityDrops[di]; ped.armed = true; ped.weapon = d.weapon; ped.ammo = d.ammo; if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(ped); removeDrop(di); ped.state = "walk"; }
     }
