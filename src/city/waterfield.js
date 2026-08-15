@@ -656,6 +656,25 @@
   };
 
   CBZ.cityWaterAt = function (x, z) { return isSurfaceWater(x, z, 0); };
+  /* ---- CBZ.cityNavWaterAt — "is there water here FOR A HULL". -----------
+     THE SAME POINT IS BOTH, AND WHICH ONE IT IS DEPENDS ON WHO IS ASKING.
+     isSurfaceWater answers "not water" over any deck, because with no y in
+     the question a deck is the only proxy it has for "whoever is asking is
+     standing on the causeway". That is right for a road car — vehicles.js
+     floods anything on water — and wrong for the boat passing UNDER the same
+     bridge, which is what the bridge is for.
+
+     One oracle cannot answer both, so this is the second one, and the split
+     is by ASKER rather than by place: road cars and swimmers keep
+     cityWaterAt; marine hulls and anything asking "can a boat get there" ask
+     this. It differs from cityWaterAt in exactly one situation — inside a
+     registered navigable channel (city/river.js) that passes beneath a deck.
+     Feature-detected: no river in the build, and the two are identical. */
+  CBZ.cityNavWaterAt = function (x, z) {
+    if (isSurfaceWater(x, z, 0)) return true;
+    if (!CBZ.cityChannelAt || !CBZ.cityChannelAt(x, z)) return false;
+    return shoreAt(x, z) < 0;
+  };
   CBZ.citySeaHeightAt = surfaceY;
   CBZ.citySeaSlopeAt = surfaceSlope;
   CBZ.citySeaNormalAt = surfaceNormal;
