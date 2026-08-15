@@ -40,7 +40,8 @@
     "visual:npc-gestures": "node tools/visual-compare.mjs --preset npc-gestures --keep-going --before https://efoltyn.github.io/gta6/",
     "visual:role-outfits": "node tools/visual-compare.mjs --preset role-outfit-gallery --keep-going --before https://efoltyn.github.io/gta6/",
     "visual:captain-fleet": "node tools/visual-compare.mjs --preset captain-fleet --keep-going --before https://efoltyn.github.io/gta6/",
-    "test:tactics": "node tools/tactics-check.mjs"
+    "test:tactics": "node tools/tactics-check.mjs",
+    "visual:npc-tactics": "node tools/visual-compare.mjs --preset npc-tactics --no-open"
   },
   "devDependencies": {
     "three": "^0.164.1",

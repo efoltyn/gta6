@@ -278,6 +278,27 @@ function runConverge(seedX) {
   ok("drives() answers false off-city", CBZ.combatIQ.drives(a) === false);
 }
 
+/* ============================================================ 9b. THE ONE-LINE REVERT */
+{
+  console.log("[9b] cfg_NPC_IQ_POSITIONS=0 reverts EVERYTHING — in the city");
+  const CBZ = boot({ config: { NPC_IQ_POSITIONS: false } });
+  const IQ = CBZ.combatIQ;
+  const t = mark(0, 0);
+  const a = actor(CBZ, 0, 10, {});
+  for (let i = 0; i < 40; i++) { CBZ.now += 100; IQ.aimTick(a, t, 0.1); }
+  a.speed = 4.2;
+  CBZ.now += 16; const mv = IQ.shot(a, t, 10, 0.016, 14);
+  a.speed = 0;
+  CBZ.now += 16; const st = IQ.shot(a, t, 10, 0.016, 14);
+  ok("no moving penalty with the flag off", !!(mv && st) && Math.abs(mv.hit - st.hit) < 1e-9,
+    (mv && mv.hit.toFixed(3)) + " vs " + (st && st.hit.toFixed(3)));
+  ok("no plant window with the flag off", !(a._iqFiredT > 0));
+  ok("moveGate inert with the flag off", IQ.moveGate(a, t, 10, "fire") === null);
+  const b = actor(CBZ, 0, 30, {});
+  for (let i = 0; i < 120; i++) { CBZ.now += 16; IQ.posture(b, t, 1 / 60); }
+  ok("no positions with the flag off", b._iqPos == null && !b._iqPlant);
+}
+
 /* ============================================================ 10. THE COP BAND HALT */
 {
   console.log("[10] an officer with the token, eyes on, in band, stands to deliver");
@@ -293,4 +314,4 @@ function runConverge(seedX) {
 
 console.log("");
 if (fails) { console.error("TACTICS: FAIL — " + fails + " of " + (fails + passes) + " assertions"); process.exit(1); }
-console.log("TACTICS: ok — " + passes + " assertions across 10 scenarios");
+console.log("TACTICS: ok — " + passes + " assertions across 11 scenarios");

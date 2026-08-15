@@ -310,8 +310,10 @@
     // would stop to shoot" from advice into the best available play — a
     // planted man simply out-hits a running one, so the position layer's
     // plant is arithmetic self-interest, not choreography. City-only:
-    // battle.html balances its armies around trading on the move.
-    if (cityMode()) { const ms = a.speed || 0; if (ms > 2.4) h *= 0.55; else if (ms > 1.1) h *= 0.8; }
+    // battle.html balances its armies around trading on the move. Gated on
+    // NPC_IQ_POSITIONS with the rest of 3b/3c so ?cfg_NPC_IQ_POSITIONS=0 is
+    // a TRUE one-line revert (and the A/B rig's before side is honest).
+    if (cityMode() && C.NPC_IQ_POSITIONS !== false) { const ms = a.speed || 0; if (ms > 2.4) h *= 0.55; else if (ms > 1.1) h *= 0.8; }
     // suppressed shooters shoot worse. This is what makes covering fire mean
     // something instead of being a decorative word in a comment.
     if ((a._iqSupp || 0) > 0) h *= 0.62;
@@ -364,8 +366,9 @@
     if ((a._iqFiredT || 0) > 0) a._iqFiredT -= dt;             // the plant window (3c)
     // A RUNNER NEVER SETTLES. Sprinting between positions caps the aim settle
     // at 40% of full — the other half of the stop-to-shoot arithmetic (see
-    // hitChance). City-only for the same battle.html reason as there.
-    if (cityMode() && (a.speed || 0) > 2.4 && (a._iqAimT || 0) > p.settle * 0.4) a._iqAimT = p.settle * 0.4;
+    // hitChance). City-only for the same battle.html reason as there, and
+    // flag-gated with it so the revert reverts everything.
+    if (cityMode() && C.NPC_IQ_POSITIONS !== false && (a.speed || 0) > 2.4 && (a._iqAimT || 0) > p.settle * 0.4) a._iqAimT = p.settle * 0.4;
   };
 
   // dmg: whatever the CALLER was already going to deal. We return it scaled so
@@ -416,7 +419,8 @@
     // moveGate() (3c) hands this to every consumer's speed gate, which is the
     // literal "in general, you would stop to shoot". Harmless off-city — the
     // field decays in aimTick and nothing outside the city reads it.
-    a._iqFiredT = Math.min(0.9, 0.28 + (a._iqBurst | 0) * p.rate * (1.15 - p.disc * 0.25));
+    if (C.NPC_IQ_POSITIONS !== false)
+      a._iqFiredT = Math.min(0.9, 0.28 + (a._iqBurst | 0) * p.rate * (1.15 - p.disc * 0.25));
     return { fire: true, hit: hit, dmg: out, cd: cd, mul: mul, p: p };
   };
 
@@ -785,7 +789,7 @@
   const _mgOut = { halt: false, why: "" };
   function _mg(h, w) { _mgOut.halt = h; _mgOut.why = w; return _mgOut; }
   IQ.moveGate = function (a, tgt, dist, slotStr) {
-    if (!on() || !a) return null;
+    if (!on() || C.NPC_IQ_POSITIONS === false || !a) return null;
     if ((a._iqFiredT || 0) > 0) return _mg(true, "firing");
     const p = profile(a);
     if (!p || p.cls === "none") return null;

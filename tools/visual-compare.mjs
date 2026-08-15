@@ -87,7 +87,12 @@ const args = parseArgs(process.argv.slice(2));
 if (args.help) {
   process.stdout.write(`Visual before/after report\n\n` +
     `  --preset NAME|FILE   visual recipe (default: wildlife-attachments)\n` +
-    `  --before URL         baseline build URL (required)\n` +
+    `  --before URL         baseline build URL (required), or the word "local":\n` +
+    `                       both sides then serve from THIS checkout and only the\n` +
+    `                       per-side params differ — the honest A/B for a\n` +
+    `                       behavior flag (presets can set defaultBefore/beforeParams)\n` +
+    `  --before-params S    extra query params for the before side ("cfg_X=0&k=v")\n` +
+    `  --after-params S     extra query params for the after side\n` +
     `  --after URL          changed build URL (default: temporary local server)\n` +
     `  --out DIR            report directory (default: artifacts/visual-comparisons/...)\n` +
     `  --reuse-before DIR   reuse a completed run's before shots + stage metadata\n` +
@@ -134,8 +139,8 @@ if (reuseBeforeDir) {
     throw new Error(`--reuse-before needs a completed visual run with metadata.json: ${reuseBeforeDir}`);
   }
 }
-const beforeUrl = String(args.before || process.env.CBZ_VISUAL_BEFORE || reuseMetadata?.before?.final || "");
-if (!beforeUrl) throw new Error("--before URL is required");
+const beforeUrlRaw = String(args.before || process.env.CBZ_VISUAL_BEFORE || reuseMetadata?.before?.final || preset.defaultBefore || "");
+if (!beforeUrlRaw) throw new Error("--before URL is required (or preset.defaultBefore; the value \"local\" runs a same-checkout flag-A/B — see --before-params)");
 function makeFrame(deviceId, orientation) {
   const device = DEVICE_FRAMES[deviceId];
   if (!device) throw new Error(`Unknown device "${deviceId}". Known: ${Object.keys(DEVICE_FRAMES).join(", ")}`);
@@ -230,7 +235,16 @@ const webPort = 8700 + Math.floor(Math.random() * 500);
 const debugPort = 10400 + Math.floor(Math.random() * 500);
 const localUrl = `http://127.0.0.1:${webPort}/`;
 const afterUrl = String(args.after || process.env.CBZ_VISUAL_AFTER || localUrl);
-const startsLocalServer = !args.after && !process.env.CBZ_VISUAL_AFTER;
+/* "--before local" (or preset.defaultBefore = "local"): the SAME checkout
+   serves both sides and the per-side params (preset.beforeParams, usually one
+   cfg_* flag flipped OFF) are the only difference. That is the honest A/B for
+   a BEHAVIOR change — the deployed build differs by every commit since deploy,
+   a flag flip differs by exactly the change under test. The tool used to make
+   this impossible: the local port is random and chosen here, after --before
+   had to already be a concrete URL. */
+const beforeIsLocal = beforeUrlRaw === "local";
+const beforeUrl = beforeIsLocal ? localUrl : beforeUrlRaw;
+const startsLocalServer = (!args.after && !process.env.CBZ_VISUAL_AFTER) || beforeIsLocal;
 const chromeBin = process.env.CBZ_CHROME || (process.platform === "darwin"
   ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
   : "/opt/pw-browsers/chromium");
@@ -382,11 +396,35 @@ async function waitForLocalServer() {
   throw new Error(`local visual server did not start at ${localUrl}`);
 }
 
+function parseParamString(value) {
+  const out = {};
+  for (const pair of String(value || "").split("&")) {
+    if (!pair) continue;
+    const eq = pair.indexOf("=");
+    if (eq < 0) out[pair] = "1";
+    else out[pair.slice(0, eq)] = pair.slice(eq + 1);
+  }
+  return out;
+}
+
 function cacheBusted(url, side) {
   const parsed = new URL(url);
   // Presets may pin URL params (seed, cfg_* flags) so both sides boot the
   // exact same deterministic world.
   for (const [key, value] of Object.entries(preset.urlParams || {})) {
+    parsed.searchParams.set(key, String(value));
+  }
+  // PER-SIDE params — the flag-A/B mechanism. preset.beforeParams usually
+  // flips one cfg_* flag OFF so the before side runs the pre-wave code path
+  // from the same checkout; afterParams exists for symmetry. The CLI
+  // (--before-params/--after-params, "k=v&k2=v2") composes on top for
+  // one-off experiments without editing the preset.
+  const sidePreset = side === "before" ? preset.beforeParams : preset.afterParams;
+  for (const [key, value] of Object.entries(sidePreset || {})) {
+    parsed.searchParams.set(key, String(value));
+  }
+  const sideCli = side === "before" ? args["before-params"] : args["after-params"];
+  for (const [key, value] of Object.entries(parseParamString(sideCli))) {
     parsed.searchParams.set(key, String(value));
   }
   parsed.searchParams.set("visualCompare", `${side}-${Date.now()}`);
@@ -582,7 +620,51 @@ async function captureSide(side, sourceUrl, referenceResult = null) {
     const filename = shotName(frameIndex, frame, index, subject);
     const absolute = path.join(shotDir, side, filename);
     await writeFile(absolute, Buffer.from(screenshot.data, "base64"));
-    captures.push({ frame, frameIndex, subject, subjectIndex: index, filename, stage: stageResult });
+    /* FILM STRIP — motion photographed as stills. A still cannot show "he
+       stopped to shoot" or "he pressed his face into the wall"; a row of
+       frames can. A subject declares `strip: {frames, stepSec}` and the
+       page's __cbzVisualCompare.advance(stepSec) hook steps ITS OWN frozen
+       simulation between captures, so both sides photograph the identical
+       simulated seconds. After the strip, the optional metrics() hook merges
+       numbers the preset sampled over those exact photographed frames —
+       the metric and the pictures describe the same moment, by construction. */
+    let stripFiles = null;
+    const stripSpec = subject.strip;
+    if (stripSpec && Number(stripSpec.frames) > 1 && stageResult && stageResult.ok === true) {
+      stripFiles = [filename];
+      const stepSec = Number(stripSpec.stepSec) || 0.5;
+      for (let stepIndex = 1; stepIndex < Number(stripSpec.frames); stepIndex++) {
+        await evaluate(`(async () => {
+          const H = window.__cbzVisualCompare;
+          if (H && H.advance) await H.advance(${stepSec});
+          if (H && H.render) await H.render();
+          void document.documentElement.offsetHeight;
+          return true;
+        })()`, 120000);
+        await evaluate(`new Promise((resolve) => {
+          let done = false;
+          const finish = () => { if (!done) { done = true; resolve(true); } };
+          requestAnimationFrame(() => requestAnimationFrame(finish));
+          setTimeout(finish, 180);
+        })`);
+        const stripShot = await send("Page.captureScreenshot", {
+          format: "png",
+          captureBeyondViewport: false,
+          fromSurface: true,
+        });
+        const stripName = filename.replace(/\.png$/, `-t${stepIndex}.png`);
+        await writeFile(path.join(shotDir, side, stripName), Buffer.from(stripShot.data, "base64"));
+        stripFiles.push(stripName);
+      }
+      try {
+        const sampled = await evaluate(
+          "window.__cbzVisualCompare && window.__cbzVisualCompare.metrics ? window.__cbzVisualCompare.metrics() : null");
+        if (sampled && typeof sampled === "object") {
+          stageResult.metrics = Object.assign({}, stageResult.metrics || {}, sampled);
+        }
+      } catch (_) {}
+    }
+    captures.push({ frame, frameIndex, subject, subjectIndex: index, filename, stage: stageResult, stripFiles });
   }
   }
   return { navigation: nav, captures };
@@ -695,8 +777,11 @@ function reportHtml(before, after) {
   const metricPage = metricsPageHtml(before, after);
   const captureCount = subjects.length * frames.length;
   const reportPageCount = captureCount + (frames.length > 1 ? subjects.length : 0) + 1 + (metricPage ? 1 : 0);
-  const beforeCaption = htmlEscape(String(args["before-label"] || "DEPLOYED PAGE"));
-  const afterCaption = htmlEscape(String(args["after-label"] || "LOCAL REPAIR"));
+  // Captions follow the same precedence as the stage input: CLI override, then
+  // the preset's own labels, then the historic deployed-vs-local defaults —
+  // so a flag-A/B run never prints a lying "DEPLOYED" banner anywhere.
+  const beforeCaption = htmlEscape(String(args["before-label"] || preset.beforeLabel || "DEPLOYED PAGE"));
+  const afterCaption = htmlEscape(String(args["after-label"] || preset.afterLabel || "LOCAL REPAIR"));
   const shotOf = (result, cls, frameIndex, subjectIndex) => {
     const capture = captureAt(result, frameIndex, subjectIndex);
     return capture?.filename
@@ -720,6 +805,27 @@ function reportHtml(before, after) {
       <header><div><span class="number">▦</span><h2>${htmlEscape(subject.label || subject.id)} · every frame</h2></div><p>Left red = before, right green = after, at ${frames.length} device frames.</p></header>
       <div class="frameGrid" style="grid-template-columns:repeat(${columns},1fr)">${cells}</div>
       <footer><span>${htmlEscape(subject.id)}</span><span>${htmlEscape(frames.map((frame) => frame.id).join(" · "))}</span></footer>
+    </section>`;
+  };
+  /* FILM-STRIP PAGE: both sides' strips as two labeled rows over the same
+     simulated seconds, so a motion claim reads left-to-right like a contact
+     sheet — the before row melts (bodies in different places every frame),
+     the after row holds (a planted body is the same pixels four times). */
+  const stripPage = (subject, subjectIndex) => {
+    const beforeCapture = captureAt(before, 0, subjectIndex);
+    const afterCapture = captureAt(after, 0, subjectIndex);
+    const beforeFiles = beforeCapture?.stripFiles || null;
+    const afterFiles = afterCapture?.stripFiles || null;
+    if (!beforeFiles && !afterFiles) return "";
+    const stepSec = Number(subject.strip?.stepSec) || 0.5;
+    const columns = Math.max(beforeFiles?.length || 0, afterFiles?.length || 0, 1);
+    const row = (files, cls) => (files || []).map((file, i) =>
+      `<figure class="${cls}"><figcaption>t+${(i * stepSec).toFixed(1)}s</figcaption><img src="shots/${cls}/${htmlEscape(file)}"></figure>`).join("");
+    return `<section class="page filmstrip">
+      <header><div><span class="number">▶</span><h2>${htmlEscape(subject.label || subject.id)} · over time</h2></div><p>The same simulated seconds on both builds, photographed every ${stepSec.toFixed(1)}s. Motion is the claim; the strip is the proof.</p></header>
+      <div class="stripRow"><span class="stripTag">${beforeCaption}</span><div class="stripShots" style="grid-template-columns:repeat(${columns},1fr)">${row(beforeFiles, "before")}</div></div>
+      <div class="stripRow"><span class="stripTag after">${afterCaption}</span><div class="stripShots" style="grid-template-columns:repeat(${columns},1fr)">${row(afterFiles, "after")}</div></div>
+      <footer><span>${htmlEscape(subject.id)} · film strip</span><span>${htmlEscape(pairNote)}</span></footer>
     </section>`;
   };
   const pages = subjects.map((subject, subjectIndex) => {
@@ -747,7 +853,7 @@ function reportHtml(before, after) {
       <footer><span>${htmlEscape(subject.id)} · ${htmlEscape(frameChip(frame))}</span><span>${htmlEscape(pairNote)}</span></footer>
     </section>`;
     }).join("\n");
-    return overviewPage(subject, subjectIndex) + "\n" + details;
+    return overviewPage(subject, subjectIndex) + "\n" + details + "\n" + stripPage(subject, subjectIndex);
   }).join("\n");
   return `<!doctype html><html><head><meta charset="utf-8"><title>${htmlEscape(preset.title)}</title><style>
     @page { size: A4 landscape; margin: 0; }
@@ -791,12 +897,19 @@ function reportHtml(before, after) {
     .metrics td small { color:#8fa2b2; }
     .metrics td.good { color:#59d59a; font-weight:800; }
     .metrics td.bad { color:#f06464; font-weight:800; }
+    .filmstrip .stripRow { display:flex; gap:3mm; align-items:stretch; height:71mm; margin-top:3mm; }
+    .stripTag { writing-mode:vertical-rl; transform:rotate(180deg); text-align:center; font-weight:850; font-size:10px; letter-spacing:.12em; color:#f06464; flex:0 0 auto; }
+    .stripTag.after { color:#59d59a; }
+    .stripShots { flex:1 1 auto; display:grid; gap:2mm; min-width:0; }
+    .stripShots figure { border-top-width:1mm; }
+    .stripShots figcaption { height:7mm; font-size:9px; padding:1.6mm 2.4mm; }
+    .stripShots img { max-height:59mm; }
   </style></head><body>
     <section class="page cover">
       <div><div class="eyebrow">DETERMINISTIC VISUAL COMPARISON</div><h1>${htmlEscape(preset.title)}</h1><p class="dek">${htmlEscape(preset.description || "Before and after captures from two real browser builds.")}</p></div>
       <div class="stats"><div class="stat"><strong>${subjects.length}</strong><span>matched subjects</span></div><div class="stat"><strong>${frames.length}</strong><span>device frames</span></div><div class="stat"><strong>${captureCount * 2}</strong><span>browser screenshots</span></div></div>
       <p class="method">Frames: ${htmlEscape(frames.map((frame) => frameChip(frame)).join("  ·  "))}</p>
-      <div class="sources"><div class="source"><b>BEFORE · deployed baseline</b><code>${htmlEscape(before.navigation.final)}</code></div><div class="source after"><b>AFTER · current checkout</b><code>${htmlEscape(after.navigation.final)}</code></div></div>
+      <div class="sources"><div class="source"><b>${beforeCaption}</b><code>${htmlEscape(before.navigation.final)}</code></div><div class="source after"><b>${afterCaption}</b><code>${htmlEscape(after.navigation.final)}</code></div></div>
       <p class="method">Generated ${htmlEscape(generated)}. ${htmlEscape(method)}</p>
     </section>
     ${metricPage}
@@ -826,6 +939,8 @@ async function writeRunMetadata(before, after, only = null) {
       frame: frame.id,
       beforeFile: captureAt(before, frameIndex, subjectIndex)?.filename || null,
       afterFile: captureAt(after, frameIndex, subjectIndex)?.filename || null,
+      beforeStrip: captureAt(before, frameIndex, subjectIndex)?.stripFiles || null,
+      afterStrip: captureAt(after, frameIndex, subjectIndex)?.stripFiles || null,
       before: captureAt(before, frameIndex, subjectIndex)?.stage || null,
       after: captureAt(after, frameIndex, subjectIndex)?.stage || null,
     }))),

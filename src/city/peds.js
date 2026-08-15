@@ -3878,6 +3878,15 @@
         CBZ.combatIQ.posture(ped, threat, dt);
       }
       npcAttack(ped, threat, dt);
+      // STOP TO SHOOT applies to the payroll too (combat_iq 3c): mid-burst, or
+      // planted on the position posture just committed, a companion freezes
+      // its feet instead of strafing through its own tracer stream. Writing
+      // the goal onto the body is the companion-safe way to halt — move()'s
+      // fight branch (and its speed gate) never runs for a state-held 'walk'.
+      if (CBZ.combatIQ && CBZ.combatIQ.moveGate && ped.armed) {
+        const mg = CBZ.combatIQ.moveGate(ped, threat, d, "fire");
+        if (mg && mg.halt) ped.target.set(ped.pos.x, 0, ped.pos.z);
+      }
     } else {
       ped.state = "walk";
       const d = Math.hypot(P.pos.x - ped.pos.x, P.pos.z - ped.pos.z);
@@ -5921,6 +5930,16 @@
             ped.group.rotation.y = lerpAngle(ped.group.rotation.y, Math.atan2(fdx, fdz), 1 - Math.pow(0.002, dt));
         }
       }
+      // COMBAT FOOTWORK FACES THE MARK. A short tactical hop — a peek step,
+      // a separation shuffle, sliding one position over — is a SIDE-STEP, not
+      // a jog: the spine stays on the threat and the legs do the moving. Only
+      // short hops in engagement range qualify; a real reposition sprint still
+      // faces where it runs. The locomotion block reads _combatFace.
+      ped._combatFace = null;
+      if (gunner && spd > 0 && CBZ.CONFIG.NPC_IQ_POSITIONS !== false) {
+        const goalD2 = Math.hypot(ped.target.x - ped.pos.x, ped.target.z - ped.pos.z);
+        if (goalD2 < 4.5 && d < prf.hi * 1.15 + 4) ped._combatFace = ped.rage;
+      }
     } else {
       if (ped._iqM && CBZ.combatIQ && CBZ.combatIQ.meleeReset) CBZ.combatIQ.meleeReset(ped);   // fight's over — drop the beat state
       // release a held position ONLY when posture() has genuinely stopped
@@ -5930,6 +5949,7 @@
       if (ped._iqPos && !(CBZ.combatIQ && CBZ.combatIQ.drives && CBZ.combatIQ.drives(ped))) {
         ped._iqPos = null; ped._iqPlant = false;
       }
+      if (ped._combatFace) ped._combatFace = null;
     }
 
     // loot pickup (tied hands can't scoop a gun off the pavement)
@@ -6050,7 +6070,13 @@
       const limpMul = ped.char && ped.char.limpSpeedMul != null ? ped.char.limpSpeedMul : 1;
       ped.pos.x += mx * spd * dt * stepMul * limpMul;
       ped.pos.z += mz * spd * dt * stepMul * limpMul;
-      ped.group.rotation.y = lerpAngle(ped.group.rotation.y, Math.atan2(mx, mz), 1 - Math.pow(0.0009, dt));
+      // a fighter side-stepping a short tactical hop keeps facing the MARK
+      // (_combatFace, set in the fight branch) — legs go sideways, spine stays
+      // on the gunfight. Everyone else faces where they walk, exactly as before.
+      const _cf = ped._combatFace;
+      ped.group.rotation.y = lerpAngle(ped.group.rotation.y,
+        _cf && _cf.pos && !_cf.dead ? Math.atan2(_cf.pos.x - ped.pos.x, _cf.pos.z - ped.pos.z) : Math.atan2(mx, mz),
+        1 - Math.pow(0.0009, dt));
       ped.speed = spd;
     } else {
       ped.speed = 0;
