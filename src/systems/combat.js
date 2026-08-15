@@ -35,7 +35,6 @@
        · CBZ.reactPunch — systems/reactions.js whips his head along the punch
                           line, jab/cross/hook/upper each a different snap,
                           plus the directional stagger
-       · CBZ.bodyWound  — the bruise stays on the face you beat
      Taking the flare off is what lets any of that be seen. */
   /* FLOATING HEALTH BAR OVER PEOPLE: DELETED.
 
@@ -303,18 +302,45 @@
        was the only evidence a punch had happened — which is exactly why the
        caption felt load-bearing. Fix the body and the caption is redundant;
        delete the caption first and you have neither. */
+    /* A PUNCH LEAVES NO MARK. (OWNER, 2026-08-15: "i want the mark almost
+       completely gutted from the code i hate the purple mrk and dot from
+       punching... it shows up right away on the body over clothes its just a
+       terrible mark from punching.")
+
+       Every landed punch stamped a wound decal, and the decal it stamped was a
+       gunshot wearing a different colour: systems/wounds.js draws the "bruise"
+       kind with the same pit geometry as a bullet hole — its own comment says
+       so, "a bullet hole, a bite and a bruise all become pits from one change"
+       — so a saturated ink-purple disc with a hard rim and a dark core landed
+       on a man the first time you clipped him, ON HIS CLOTHES, and stayed
+       there for the rest of the run.
+
+       Three separate wrongs and only one of them was frequency, which is why
+       this is a deletion rather than a threshold: the mark appeared instantly
+       when real bruising takes hours, it appeared over fabric where a bruise
+       cannot be seen at all, and it was drawn as a puncture. Tuning how OFTEN
+       a wrong thing appears still leaves a wrong thing.
+
+       A beaten man still reads, and reads better without it: reactions.js
+       flinches and staggers him, the head whips along the punch line,
+       knockback moves him, hit-stop lands the weight, a heavy blow on a man
+       already worn past half draws blood, and he goes down when he is done.
+
+       A BLADE STILL CUTS. `melee:"blade"` is a different wound in wounds.js
+       (the narrow slit at :926, its own gentler limp at :867) and a knife
+       going into someone should absolutely leave something behind. A stab
+       lands low in the body, not at head height where a hook lands.
+
+       LATER, IF IT IS EARNED: the owner's own note is that "a black eye
+       eventually down the line is cool code" — a mark that arrives late, sits
+       on skin rather than cloth, and only after a real beating. That is a
+       different feature with different rules, and it starts from nothing
+       rather than from this. */
     const wp = actor.pos || (actor.group && actor.group.position) || null;
-    if (CBZ.bodyWound && wp) {
-      /* A BLADE DOES NOT BRUISE. `melee:"blade"` is a kind systems/wounds.js
-         has drawn since it was written (wounds.js:849 picks it, :926 draws the
-         narrow slit instead of the broad bruise patch, and :867 gives it its
-         own gentler limp because a puncture hobbles less than a slug) — and
-         until this pass nothing in the prison could ask for it. A stab lands
-         low, in the body, not at 1.55 m head-height where a hook lands. */
-      CBZ.bodyWound(actor, { x: wp.x, y: (wp.y || 0) + (blade ? 1.18 : 1.55), z: wp.z },
-        { melee: blade ? "blade" : "blunt", cal: blade ? 0.7 : 1,
-          fromX: CBZ.player.pos.x, fromZ: CBZ.player.pos.z });
-      if (blade) bladeWounds++;
+    if (blade && CBZ.bodyWound && wp) {
+      CBZ.bodyWound(actor, { x: wp.x, y: (wp.y || 0) + 1.18, z: wp.z },
+        { melee: "blade", cal: 0.7, fromX: CBZ.player.pos.x, fromZ: CBZ.player.pos.z });
+      bladeWounds++;
     }
     if (blade) stabHits++;
     /* IT KEEPS BLEEDING. The prison had no notion of a wound that goes on

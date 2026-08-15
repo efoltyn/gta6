@@ -177,6 +177,26 @@ const subjects = [
     act: { cast: { kind: "inmate", n: 1, dist: 1.6, arm: "none" }, secs: 0.3, fists: true, punchLand: true, wearDown: true, blows: 3 },
     cam: profile(1.6, 3.1, 1.7) },
 
+  /* ---- THE MARK A PUNCH LEAVES ----------------------------------------
+     OWNER: "punches don't leave a fucking bullet hole lol... the idea of a
+     mark in certain cases after a real beating is decent but the current mark
+     and oftenness of it is dumb af." Two shots: one jab (must leave NOTHING)
+     and a real beating (may mark, and must read as swelling not a puncture). */
+  { id: "mark-fresh-control", label: "Untouched — the control", hud: false,
+    focus: "THE CONTROL. Nobody has hit this man. Whatever his face looks like here is the baseline both other shots are read against — without it, 'no mark' and 'mark too subtle to see' are the same picture.",
+    act: { cast: { kind: "inmate", n: 1, dist: 1.6, arm: "none" }, secs: 0.3, fists: true, faceCam: true },
+    cam: profile(1.6, 2.6, 1.78) },
+
+  { id: "mark-one-jab", label: "One jab, close on the face", hud: false,
+    focus: "A SINGLE JAB on a fresh man. The deployed side stamps a wound decal on every landed punch, so one glancing hit marks a man for the rest of the run. This side must show NOTHING — and the control shot above is what proves 'nothing' rather than 'too subtle to see'.",
+    act: { cast: { kind: "inmate", n: 1, dist: 1.6, arm: "none" }, secs: 0.3, fists: true, punchLand: true, blows: 1, faceCam: true },
+    cam: profile(1.6, 2.6, 1.78) },
+
+  { id: "mark-real-beating", label: "After a real beating", hud: false,
+    focus: "THE SAME FACE after a full beating. The deployed side carries the purple disc — on the CLOTHES as often as the skin, arriving instantly when real bruising takes hours, and drawn with the same pit geometry as a bullet hole. This side must be clean: a punch leaves no mark at all now. A black eye that arrives late and sits on skin is a separate feature, and it starts from nothing rather than from this.",
+    act: { cast: { kind: "inmate", n: 1, dist: 1.6, arm: "none" }, secs: 0.3, fists: true, punchLand: true, blows: 6, faceCam: true },
+    cam: profile(1.6, 2.6, 1.78) },
+
   { id: "fists-mid-punch", label: "Mid-swing", hud: true,
     focus: "The punch itself, caught mid-arc, with the HUD ON. The arm is visibly thrown — that motion is the whole reason \"Swing...\" was deleted. hudTextChars is the number that should have dropped.",
     act: { cast: { kind: "inmate", n: 1, dist: 2.2, arm: "none" }, secs: 0.4, fists: true, punch: 0.26 },
@@ -475,11 +495,23 @@ async function stageGunpointStudio(input) {
   const locked = input.referenceStage && input.referenceStage.camera;
   const cam = locked || subject.cam;
   camera.aspect = input.width / input.height;
-  camera.fov = cam.fov || 50;
+  // faceCam tightens the lens right onto the head — a mark on a cheek cannot be
+  // judged from a shot that frames the whole man.
+  camera.fov = act.faceCam ? 34 : (cam.fov || 50);
   camera.near = 0.15;
   camera.far = 20000;
-  camera.position.set(cam.x, cam.y, cam.z);
-  camera.lookAt(cam.ax, cam.ay, cam.az);
+  /* faceCam is derived from the HERO, not from the mark: he stands facing the
+     player (+Z), so a `profile` camera sits dead side-on and photographs an ear
+     while every mark is on the front of his face. This is a three-quarter view
+     from over the player's shoulder — in front of him and offset — which is the
+     angle a fight is actually read from. */
+  if (act.faceCam && hero && hero.group) {
+    const hp2 = hero.group.position;
+    camera.position.set(hp2.x + 0.95, (hp2.y || 0) + 1.80, hp2.z + 1.25);
+    camera.lookAt(hp2.x, (hp2.y || 0) + 1.68, hp2.z);
+  } else camera.position.set(cam.x, cam.y, cam.z);
+  if (act.faceCam && hero && hero.group) { /* look already set above */ }
+  if (!act.faceCam) camera.lookAt(cam.ax, cam.ay, cam.az);
   camera.updateProjectionMatrix();
   if (typeof CBZ.skySync === "function") CBZ.skySync();
   else {
@@ -488,7 +520,9 @@ async function stageGunpointStudio(input) {
   }
   // The player's own body would fill a first-person frame from the inside —
   // except in fists mode, where his body IS the subject.
-  if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.visible = !!act.fists;
+  // faceCam is a close read of the TARGET's face — the player's own body is
+  // stood between the lens and it, and at 15deg he simply fills the frame.
+  if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.visible = !!act.fists && !act.faceCam;
 
   /* ---- measure -------------------------------------------------------- */
   // Arm height is read as a world-space box so it needs no rig knowledge and
