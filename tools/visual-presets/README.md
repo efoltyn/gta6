@@ -21,6 +21,31 @@ metadata instead of reopening the baseline build. The reuse directory and new
 output directory must differ. Run `npm run visual:compare -- --help` for the
 complete short reference.
 
+## Flag A/B — the honest before for a behavior change
+
+`--before local` serves **both** sides from this checkout and applies per-side
+query params as the only difference — usually one `cfg_*` flag flipped off so
+the before side runs the pre-wave code path byte for byte. The deployed build
+differs by every commit since deploy; a flag flip differs by exactly the change
+under test. A preset can make this its default shape with
+`defaultBefore: "local"` plus `beforeParams: { cfg_MY_FLAG: 0 }` (and
+`beforeLabel`/`afterLabel` so no banner lies about a deployed side); the CLI
+composes with `--before-params "cfg_X=0&k=v"` / `--after-params` for one-off
+experiments. `npm run visual:npc-tactics` is the working example: the NPC
+firing-position wave photographed against its own one-line revert.
+
+## Film strips — motion photographed as stills
+
+A still cannot show "he stopped to shoot"; a row of frames can. A subject may
+declare `strip: { frames: N, stepSec: s }` — after its staged frame is shot,
+the runner calls the page's `__cbzVisualCompare.advance(stepSec)` hook between
+`N-1` further captures, so both sides photograph the **identical simulated
+seconds**. The report grows a film-strip page per such subject: the before and
+after rows side by side over time. If the page exposes
+`__cbzVisualCompare.metrics()`, the numbers it returns after the strip are
+merged into that subject's metrics — sampled over exactly the photographed
+frames, so the pictures and the measurements describe the same moment.
+
 ## Device frames
 
 A layout regression is a shape, not a pixel: the same screen can be right at

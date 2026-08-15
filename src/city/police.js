@@ -3569,6 +3569,29 @@
           }
         }
 
+        // ---- STOP TO SHOOT (systems/combat_iq.js 3c). An officer does not
+        //      fire on the run: with the fire token, eyes on, and the range
+        //      his weapon wants he PLANTS — feet still, spine squared on the
+        //      mark — and moves again when the token passes or the mark
+        //      breaks the band. Mid-burst (he just pulled the trigger) the
+        //      halt applies to every officer, token or not. The old code let
+        //      a cop jog to 4–9 m while fireAt snapped his spine at you every
+        //      shot and the mover lerped it back — the exact run-and-gun
+        //      twitch the position wave removes from the gangs. Skips: close
+        //      quarters (arrest footwork), active cover-peek beats, wounded
+        //      officers (the cover-hold branch below owns them), flag-off.
+        if (M && M.moveGate && wantShoot && c.sees && dist > 2.6 && !(c._coverT > 0) &&
+            !(c.hp != null && c.maxHp && c.hp < c.maxHp * 0.34)) {
+          const mg = M.moveGate(c, tgt, dist, mayShoot ? "fire" : (c._iqSlot || ""));
+          if (mg && mg.halt) {
+            c.speed = 0;
+            c.group.rotation.y = lerpAngle(c.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(0.002, dt));
+            finalizeMove(c);
+            if (near) animChar(c.char, 0, dt);
+            continue;
+          }
+        }
+
         // ---- HOLD A POSITION SOMEBODY IS PAID TO HOLD. An officer without the
         //      fire token, or one below his nerve, gets a REAL wall between him
         //      and the gun instead of shuffling sideways in the open. The cover
