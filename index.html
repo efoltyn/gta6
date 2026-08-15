@@ -817,7 +817,7 @@
      shared water shading chunks. MUST load before city/world.js (its buildSea
      reads this) and before city/waterfield.js (its surfaceY delegates here). -->
 <script src="src/world/water_spec.js?v=shallow1"></script>
-<script src="src/city/world.js?v=shorecut1"></script>
+<script src="src/city/world.js?v=shorecut2curb"></script>
 <script src="src/city/interior_programs.js?v=fortress3"></script>
 <!-- Masonry + civic building grammar: the BLD_* flags, the civic trade table and
      the shared masonry / portico / roof-clutter geometry. MUST load BEFORE
@@ -864,7 +864,7 @@
 <script src="src/city/exec_office.js?v=fortress2"></script>
 <script src="src/city/escalators.js?v=esc2"></script>
 <script src="src/city/roofloot.js?v=roof1"></script>
-<script src="src/city/beach.js?v=beach1s"></script>
+<script src="src/city/beach.js?v=beach2lot"></script>
 <script src="src/city/expansion.js?v=allmain1"></script>
 <!-- 4d-2. ARCHIPELAGO — worldmap registry + 3 islands + 4 biomes (worldmap.js
      MUST precede every island/biome; world.js runs them via CBZ.cityWorldGeo) -->
@@ -872,7 +872,7 @@
 <!-- Shared signed shoreline/depth/current oracle. Loaded immediately after
      the landmass registry so rendering, swimmers, boats and aquatic wildlife
      all consult the same coast instead of inventing separate radius tests. -->
-<script src="src/city/waterfield.js?v=marinefix1"></script>
+<script src="src/city/waterfield.js?v=riverchan1"></script>
 <!-- Reflective-ocean FX: swaps CBZ.citySea for a THREE.WaterReflect plane when
      CBZ.CONFIG.WATER_REFLECT is on (default). Reads the sea lazily at runtime,
      so load order past config.js + WaterReflect.js is all it needs. -->
@@ -1061,7 +1061,7 @@
 <script src="src/city/crashdeform.js?v=deform1"></script>
 <script src="src/systems/skidmarks.js?v=skid1"></script>
 <script src="src/systems/dustfx.js?v=dust1"></script>
-<script src="src/city/vehicles.js?v=racepaint1"></script>
+<script src="src/city/vehicles.js?v=racepaint2nav"></script>
 <script src="src/city/playerair.js?v=air3"></script>
 <script src="src/city/playeraircraft.js?v=swepthull3w9w11u"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
@@ -1323,8 +1323,19 @@
      persistence and net worth work with zero new save code. After storage.js
      — CBZ.cityBerth wraps citySpawnOwnedCar so every existing retrieval path
      became water-aware without a caller changing. -->
-<script src="src/city/marina.js?v=marina1s"></script>
+<script src="src/city/marina.js?v=marina3basin"></script>
 <script src="src/city/boatyard.js?v=marina1s"></script>
+<!-- THE APPROACH: how you get IN and OUT of a property. Every block in the
+     city was ringed by an UNBROKEN kerb and every home's retrieved car was
+     delivered at the pedestrian door on a hard-coded heading of 0 — sideways
+     across the street. This solves ONE crossing per parcel, splits world.js's
+     kerb ring around it (one author, two consumers: the gap and the driveway
+     laid through it), fills in the `lot.building.garage` field realestate.js
+     ALREADY reads, and wraps citySpawnOwnedCar so a delivered car faces down
+     the near lane. After marina.js/boatyard.js — marina wraps the same spawn
+     for boats first, and this wrapper passes every marine hull straight
+     through to it. Revert with ?cfg_LOT_APPROACH=0. -->
+<script src="src/city/approach.js?v=approach1"></script>
 <!-- FISHING (owner: the world had a "Fisherman" title and nobody wearing it;
      a mackerel was harvested by SHOOTING it through the hunting pipeline).
      Registers water-side spots that SELF-VALIDATE against CBZ.cityWaterAt — a
@@ -1585,9 +1596,20 @@
      seats + an "[E] Sit at the table" that opens the casino floor. Loads after
      countries.js and its deps (interactions.js, activities.js, worldmap). -->
 <script src="src/city/casino.js?v=casino1s"></script>
+<!-- THE RIVER: the marina's way to the sea. The harbour pass in continent.js
+     opens a 67 m bay ring around the city rect and closes it on all four
+     sides, so every boat in the game floated in a moat — a flood fill from a
+     berth reached 314 m and stopped, with the nearest real coast 7 km away.
+     This routes ONE channel from the ring to open water, avoiding POIs and
+     bridging the roads it must cross, and registers it as a single polyline
+     water body so continent.js's own shore field carves it — same water as
+     the ocean, no second oracle. MUST load and run (order 96.5) BEFORE
+     continent.js at 97, which snapshots city.waterBodies once.
+     Revert with ?cfg_CITY_RIVER=0. -->
+<script src="src/city/river.js?v=river1"></script>
 <!-- THE CONTINENT: runs after every landmass builder (order 97) and fills the
      ocean between POIs with walkable backcountry — one world, not circles. -->
-<script src="src/city/continent.js?v=allmain1"></script>
+<script src="src/city/continent.js?v=allmain2river"></script>
 <script src="src/city/demographics.js?v=world1"></script>
 <!-- X6: the affinity matrix (country/state/city relations) — after
      countries.js (CBZ.COUNTRIES) and officials.js/polity.js (both already
@@ -1729,7 +1751,7 @@
      marina hard stand. Loads after piracy.js (marineAutopilot, pirateProvoke)
      and before water_helm; every cross-read is feature-detected.
      Revert with ?cfg_CAPTAIN_V1=0. -->
-<script src="src/city/captain.js?v=capt1"></script>
+<script src="src/city/captain.js?v=capt2order"></script>
 
 <!-- SEATS OF POWER — the standalone complexes that do NOT fit inside a city
      block: the capitol, the executive mansion, the agency headquarters, the
@@ -1739,7 +1761,7 @@
      staffs itself through power.js's protection layer rather than authoring
      guards. After power.js and the biome/continent builders whose empty land
      it claims. Revert with ?cfg_GOV_COMPLEX=0. -->
-<script src="src/city/govcomplex.js?v=gov2xt"></script>
+<script src="src/city/govcomplex.js?v=gov3lots"></script>
 
 <!-- THE PRESIDENCY — one spine over organs built above: the President origin
      (candidacy's swearIn fast-forward), the Situation Room inside govcomplex's
