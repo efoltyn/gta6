@@ -70,8 +70,8 @@ const subjects = [
 
   /* ---- HIDE: breaking contact when it goes wrong ------------------------ */
   { id: "hide-break", label: "Too hurt to trade — breaking contact",
-    focus: "A shooter cut to a third of his health, with a kiosk the studio built OFF his lane — a real hidden pocket in his away hemisphere. Before: his only move was nine metres STRAIGHT BACK — still in the open, still in the same firing lane the rounds are coming up, re-derived every frame so he backpedals forever. After: he breaks for somewhere the player CANNOT DRAW A LINE TO and holds it, watching the corner. hiddenEnd is the payoff as a bit: does the player's chest-height lane to him end in a wall when the window closes?",
-    act: { n: 1, dist: 13, weapons: ["Pistol"], pre: 1.2, sample: 1.2, hurtIdx: 0, hurtHp: 0.32,
+    focus: "Three guns, and the one cut to a third of his health — with a kiosk the studio built OFF his lane, a real hidden pocket in his away hemisphere. His two partners keep the fire tokens, so he owes the fight nothing. Before: a hurt man's only move was nine metres STRAIGHT BACK — still in the open, still in the same firing lane the rounds are coming up, re-derived every frame so he backpedals forever. After: he breaks for somewhere the player CANNOT DRAW A LINE TO and holds it while his partners trade. hiddenEnd is the payoff as a bit: does the player's chest-height lane to him end in a wall when the window closes?",
+    act: { n: 3, dist: 13, weapons: ["Pistol", "Pistol", "Pistol"], pre: 1.2, sample: 1.2, hurtIdx: 0, hurtHp: 0.32,
       wall: { off: 8, dist: 20, w: 2.6, h: 2.4, d: 2.6 } },
     strip: { frames: 4, stepSec: 1.0 },
     cam: { dx: 9, dy: 7.5, dz: 4, adx: 0, ady: 1.1, adz: -16, fov: 60 } },
@@ -215,6 +215,10 @@ async function stageNpcTactics(input) {
         for (const m of S.cast) {
           if (!m || m.dead) continue;
           if (PA && (!m.rage || m.rage.dead)) { m.rage = PA; m.state = "fight"; }
+          // a scare path (cityScare, panic contagion, sizeup fold) can flip a
+          // timid archetype to flee mid-take; the cast is CAST — committed
+          // fighters — so the studio re-pins the role every frame.
+          if (m.state === "flee" || m.state === "confront") { m.state = "fight"; if (PA) m.rage = PA; }
           m.fear = 0; m.surrender = false; m.surrenderT = 0;
           if (m.ammo < 40) m.ammo = 400;
         }
