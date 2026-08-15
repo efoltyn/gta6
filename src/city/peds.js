@@ -5906,8 +5906,30 @@
         const goalD = Math.hypot(ped.target.x - ped.pos.x, ped.target.z - ped.pos.z);
         if (goalD < (gunner ? 0.9 : 0.5) || (!prf && !ped._iqM)) spd = 0;
       }
-    } else if (ped._iqM && CBZ.combatIQ && CBZ.combatIQ.meleeReset) {
-      CBZ.combatIQ.meleeReset(ped);                        // fight's over — drop the beat state
+      // STOP TO SHOOT (systems/combat_iq.js 3b/3c). A gunner PLANTED on the
+      // position it picked — or mid-burst anywhere — stands still and keeps
+      // the spine on the mark. The old glitch lived exactly on this seam:
+      // the mover lerped the body toward its goal heading every frame while
+      // actorAimAt snapped it back at the target on every shot, and the
+      // fighter ran-and-gunned through the tug-of-war. One contract now.
+      if (gunner && IQ && IQ.moveGate) {
+        const mg = IQ.moveGate(ped, ped.rage, d, slot);
+        if (mg && mg.halt) {
+          spd = 0;
+          const fdx = ped.rage.pos.x - ped.pos.x, fdz = ped.rage.pos.z - ped.pos.z;
+          if (fdx * fdx + fdz * fdz > 0.01)
+            ped.group.rotation.y = lerpAngle(ped.group.rotation.y, Math.atan2(fdx, fdz), 1 - Math.pow(0.002, dt));
+        }
+      }
+    } else {
+      if (ped._iqM && CBZ.combatIQ && CBZ.combatIQ.meleeReset) CBZ.combatIQ.meleeReset(ped);   // fight's over — drop the beat state
+      // release a held position ONLY when posture() has genuinely stopped
+      // driving this body (drives() = fresh stamp). A COMPANION's posture runs
+      // from companionThink while its state is force-held at 'walk' — clearing
+      // unconditionally here would wipe its committed spot every frame.
+      if (ped._iqPos && !(CBZ.combatIQ && CBZ.combatIQ.drives && CBZ.combatIQ.drives(ped))) {
+        ped._iqPos = null; ped._iqPlant = false;
+      }
     }
 
     // loot pickup (tied hands can't scoop a gun off the pavement)
@@ -6085,7 +6107,11 @@
              don't forget where you were going because you clipped a bollard. */
           const held = !!(CBZ.boardingHolds && CBZ.boardingHolds(ped));
           if (ped.state === "fight" || ped.state === "flee" || held) {
-            // wall in the way of a chase/flee/order — sidestep to slip around it
+            // wall in the way of a chase/flee/order — sidestep to slip around it.
+            // A POSITIONED fighter also drops its spot: the wall just proved the
+            // pick unreachable, so clearing it forces a fresh wall-aware pick on
+            // the next posture tick (combat_iq 3b) instead of re-grinding here.
+            if (ped.state === "fight" && ped._iqPos) { ped._iqPos = null; ped._iqPlant = false; ped._iqRepoT = 0; }
             const a = ped.group.rotation.y + (rng() < 0.5 ? 1.5 : -1.5);
             ped.target.set(ped.pos.x + Math.sin(a) * 6, 0, ped.pos.z + Math.cos(a) * 6);
           } else { ped.path = null; pickRoutineGoal(ped); }   // abandon the blocked goal, pick a reachable one

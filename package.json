@@ -39,7 +39,8 @@
     "visual:interiors": "node tools/visual-compare.mjs --preset interiors --before https://efoltyn.github.io/gta6/",
     "visual:npc-gestures": "node tools/visual-compare.mjs --preset npc-gestures --keep-going --before https://efoltyn.github.io/gta6/",
     "visual:role-outfits": "node tools/visual-compare.mjs --preset role-outfit-gallery --keep-going --before https://efoltyn.github.io/gta6/",
-    "visual:captain-fleet": "node tools/visual-compare.mjs --preset captain-fleet --keep-going --before https://efoltyn.github.io/gta6/"
+    "visual:captain-fleet": "node tools/visual-compare.mjs --preset captain-fleet --keep-going --before https://efoltyn.github.io/gta6/",
+    "test:tactics": "node tools/tactics-check.mjs"
   },
   "devDependencies": {
     "three": "^0.164.1",
