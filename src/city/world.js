@@ -793,6 +793,33 @@
       return Math.max(0, Math.min(1, distScore * 0.6 + waterBonus + jitter));
     }
 
+    // ---- WHERE A DECAL SITS (the drawn ground, not the walkable floor) ----
+    //  groundHeightAt below is the WALKABLE floor, and across the flat city
+    //  that is 0 everywhere. But the ground is DRAWN as a stack of thin slabs
+    //  ABOVE it — avenues 0.040, cross streets 0.065, the block sidewalk slab
+    //  0.08, lot pads and grass yards 0.10 (see the road/block passes above).
+    //  So anything seated on floorAt() + a few centimetres (blood pools, tyre
+    //  smears) lands INSIDE that stack: on the road it clears the asphalt and
+    //  shows, on a block it is 2-6 cm UNDER the sidewalk slab and the depth
+    //  test eats it whole. Fall off a tower onto the kerb and the blood is
+    //  simply not there — which is exactly the report.
+    //  This returns the top of whatever is actually drawn at (x,z). On real
+    //  terrain (Mount Mercy) none of these slabs exist, so the walkable floor
+    //  is the answer and the old behaviour stands.
+    const GY_ROAD = 0.065, GY_WALK = 0.08, GY_LOT = 0.10;
+    function groundDecalYAt(x, z) {
+      const real = Math.max(0, CBZ.cityGroundHeightAt ? (+CBZ.cityGroundHeightAt(x, z) || 0) : 0);
+      if (real > 0.2) return real;                                  // raised terrain: no slabs
+      if (x < minX || x > maxX || z < minZ || z > maxZ) return real; // off the grid entirely
+      // distance to the nearest block centre on each axis (blocks sit halfway
+      // between two road centre-lines, one `step` apart)
+      const dx = Math.abs((((x - xLines[0]) % step) + step) % step - step / 2);
+      const dz = Math.abs((((z - zLines[0]) % step) + step) % step - step / 2);
+      if (dx > BLK / 2 || dz > BLK / 2) return GY_ROAD;              // carriageway
+      const lotHalf = (BLK - 4) / 2;                                 // the lot/yard pad
+      return (dx <= lotHalf && dz <= lotHalf) ? GY_LOT : GY_WALK;    // pad, else sidewalk band
+    }
+
     city = {
       root, center: { x: cx, z: cz },
       N, step, BLK, ROAD, xLines, zLines, minX, maxX, minZ, maxZ,
@@ -811,6 +838,9 @@
         const real = CBZ.cityGroundHeightAt ? (+CBZ.cityGroundHeightAt(x, z) || 0) : 0;
         return Math.max(0, real);
       },
+      // top of the DRAWN ground stack — what a ground decal seats on. See the
+      // note on groundDecalYAt above; never feed this to physics or footing.
+      groundDecalY: groundDecalYAt,
       // land-value field (PROCGEN.md roadmap #3): distance-to-centre falloff +
       // waterfront proximity bonus + low-freq deterministic noise, ~[0,1].
       // Sampled by buildings.js (height gradient, abandoned-lot gate) — cheap

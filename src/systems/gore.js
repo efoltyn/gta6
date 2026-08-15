@@ -925,12 +925,28 @@
   function seatDecal(m, x, z, spin, lift, s) {
     if (!s || s.grade < FLATISH) {
       m.rotation.set(-Math.PI / 2, 0, spin);
-      m.position.set(x, floorAt(x, z) + lift, z);
+      m.position.set(x, decalFloorAt(x, z) + lift, z);
       return;
     }
     m.quaternion.setFromUnitVectors(_V_Z, _V_N.set(s.nx, s.ny, s.nz));
     m.rotateZ(spin);                                     // local +Z is the normal now
-    m.position.set(x + s.nx * lift, floorAt(x, z) + s.ny * lift, z + s.nz * lift);
+    m.position.set(x + s.nx * lift, decalFloorAt(x, z) + s.ny * lift, z + s.nz * lift);
+  }
+  // A DECAL SEATS ON THE DRAWN GROUND, NOT ON THE WALKABLE FLOOR.
+  //  floorAt() is 0 all across the flat city, but the city DRAWS its ground as
+  //  a stack of slabs on top of that zero — roads at 0.040/0.065, the block
+  //  sidewalk slab at 0.08, lot pads at 0.10 (city/world.js groundDecalY).
+  //  A pool stamped at floorAt()+0.05 therefore cleared the asphalt and showed
+  //  on the road, but sat 3 cm UNDER the sidewalk and was swallowed by it: land
+  //  a fall from a tower on the kerb and you bled invisibly. Ask the city where
+  //  its ground is actually drawn; every other mode still answers floorAt.
+  //  NOTE the gradient in groundGrad() deliberately keeps sampling floorAt —
+  //  the 2 cm slab steps are kerb edges, not slopes, and reading them as
+  //  gradient would tip every pool at a block edge onto its side.
+  function decalFloorAt(x, z) {
+    const A = cityMode() && CBZ.city ? CBZ.city.arena : null;
+    if (A && A.groundDecalY) { const v = +A.groundDecalY(x, z); if (isFinite(v)) return v; }
+    return floorAt(x, z);
   }
 
   function spawnSplat(x, z, grow, color, linger) {
@@ -2264,7 +2280,9 @@
       // velocity, so the arc of a spray is legible as it falls.
       if (b.drop) aimDrop(m, b.vx, b.vy, b.vz);
       else { m.rotation.x += b.sx * dt; m.rotation.y += b.sy * dt; m.rotation.z += b.sz * dt; }
-      const fl = floorAt(m.position.x, m.position.z);
+      // the DRAWN ground (see decalFloorAt) — a gib resting on floorAt=0 was
+      // buried to its eyeballs in the 8 cm sidewalk slab, same bug as the pools
+      const fl = decalFloorAt(m.position.x, m.position.z);
       // rr = the bit's half-height. CITY adds a hair so the piece clears the
       // road paint; jail/survival keep the original bare radius.
       const rr = gibCity ? (b.rad || 0.06) + 0.012 : (b.rad || 0.06);
@@ -2431,7 +2449,10 @@
         // the plane used by streaks is a unit quad, so ±0.5 — near enough for a
         // conformance probe, and deliberately the same four samples for both.
         _rv.set(_RIM[k][0], _RIM[k][1], 0).applyMatrix4(m.matrixWorld);
-        const gap = Math.abs(_rv.y - floorAt(_rv.x, _rv.z));
+        // measured against the DRAWN ground (decalFloorAt), which is what the
+        // eye compares the pool to — outside the city it IS floorAt, so the
+        // island's ratcheted numbers are unchanged.
+        const gap = Math.abs(_rv.y - decalFloorAt(_rv.x, _rv.z));
         if (gap > worst) { worst = gap; worstAt = [+_rv.x.toFixed(1), +_rv.z.toFixed(1)]; }
       }
     }
