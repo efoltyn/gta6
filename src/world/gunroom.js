@@ -765,6 +765,27 @@
     return v;
   };
 
+  /* ---- ONE OWNER FOR THE OUTER GATE'S STATE -------------------------------
+     The tick below used to inline the open — flip the flag, splice the
+     collider, paint the lamp, ring the cue — as five statements inside an
+     `if (L.open)`. That is precisely why this door had no close: the verb
+     existed only as a branch. Same five statements, named, and they now run
+     BOTH ways. systems/state.js's reset still pokes the fields directly and
+     is unaffected (it snaps the gate to y=3, which is t=0's own position). */
+  armory.setOpen = function (v, quiet) {
+    v = !!v;
+    if (v === armory.open) return v;
+    armory.open = v;
+    const i = CBZ.colliders.indexOf(armory.collider);
+    if (v && i >= 0) CBZ.colliders.splice(i, 1);
+    else if (!v && i < 0) CBZ.colliders.push(armory.collider);
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    armory.lamp.material.color.setHex(v ? 0x39ff88 : 0xff3b3b);
+    armory.lamp.material.emissive.setHex(v ? 0x14c258 : 0xff0000);
+    if (!quiet && CBZ.sfx) CBZ.sfx(v ? "door_open" : "door_close");
+    return v;
+  };
+
   armory.inner = inner;
   // The contract the rest of the game may hold on the second door. Anything
   // that earns the right to open it (a scripted beat, a warden's death, a
@@ -801,9 +822,24 @@
       CBZ.cityLockRegister("prison-armory");
       if (inner.gate) CBZ.cityLockRegister("prison-armory-cage");
     }
+    /* THE LEAF TRAVELS BOTH WAYS. This ramp used to live inside the "already
+       open" branch and only ever counted UP, so a gate that closed would have
+       stayed drawn in its pocket six metres overhead. Same 1.6 rate, same
+       authored 6 m of travel, one direction added. */
+    {
+      const want = armory.open ? 1 : 0;
+      if (armory.t !== want) {
+        const step = dt * 1.6;
+        armory.t = want > armory.t ? Math.min(want, armory.t + step) : Math.max(want, armory.t - step);
+        armory.gate.position.y = 3 + armory.t * 6;
+      }
+    }
     if (!armory.open) {
       const dx = CBZ.player.pos.x - 19, dz = CBZ.player.pos.z - 1;
-      const near = dx * dx + dz * dz < 14;
+      // LAW 3 (systems/interactions.js): a gate the player shut himself is not
+      // re-opened by the fact that he is still standing on its reader.
+      const latched = !!(CBZ.prisonDoorLatched && CBZ.prisonDoorLatched("prison-armory"));
+      const near = dx * dx + dz * dz < 14 && !latched;
       if (near) {
         /* §THE ORIGINAL GUN ROOM, MIGRATED TO THE SHARED LOCK.
            OWNER (the keycard story, CLAUDE.md LAW 1): "the jail is dumb but I
@@ -828,13 +864,7 @@
           ? CBZ.cityLock({ id: "prison-armory", verb: "press", label: "The armory door", have: have, keys: ["Keycard"], orgs: ["police"], power: LOCK_POWER })
           : { open: have, line: "The armory door needs a Keycard." };
         if (L.open) {
-          armory.open = true;
-          const i = CBZ.colliders.indexOf(armory.collider);
-          if (i >= 0) CBZ.colliders.splice(i, 1);
-          if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
-          armory.lamp.material.color.setHex(0x39ff88);
-          armory.lamp.material.emissive.setHex(0x14c258);
-          if (CBZ.sfx) CBZ.sfx("door_open");
+          armory.setOpen(true);
           // the cage swinging open in front of you is the line.
           tellHint("The armory rack's open — take what you need.", 2.6);
         } else {
@@ -845,10 +875,7 @@
           CBZ.flashHint(L.line || "The armory door needs a Keycard.", 1.4);
         }
       }
-    } else if (armory.t < 1) {
-      armory.t = Math.min(1, armory.t + dt * 1.6);
-      armory.gate.position.y = 3 + armory.t * 6;
-    } else {
+    } else if (armory.t >= 1) {   // still travelling = the room is not open yet
       // ---- THE SECOND DOOR ------------------------------------------------
       // Only live once you are actually inside the armory, which is what makes
       // it a LADDER and not two locks on the same threshold.
@@ -864,11 +891,14 @@
             const L = CBZ.cityLock
               ? CBZ.cityLock({ id: "prison-armory-cage", verb: "press", label: "The inner cage", have: keyed, keys: ["Gun-Room Key"], power: LOCK_POWER })
               : { open: keyed, line: "" };
-            if (L.open) {
+            // LAW 3 again: the key still works, it just does not work BY
+            // ITSELF on a cage you deliberately shut and are still stood at.
+            const latched = !!(CBZ.prisonDoorLatched && CBZ.prisonDoorLatched("prison-armory-cage"));
+            if (L.open && !latched) {
               inner.setOpen(true);
               // the lock turning and the door opening say both halves of this.
               tellHint("The Warden's key turns. There's a rifle in there.", 2.6);
-            } else {
+            } else if (!L.open) {
               // ROUTE TWO — graft. A hacksaw blade is the only item in the
               // prison's tool list that had never had a verb; it has one now,
               // and it is what makes the yard crates serve this door.
@@ -892,6 +922,11 @@
                 }
                 if (inner.saw >= 6) {
                   if (econ && econ.takeItem) econ.takeItem("Hacksaw Blade");   // the blade snaps
+                  // THE BLADE IS GONE BUT THE PADLOCK IS TOO. Remembered
+                  // because the close verb asks "would you have been allowed
+                  // to open this" — and a man who cut the shackle off is
+                  // allowed, for the rest of the run, with nothing in his bag.
+                  inner.sawed = true;
                   inner.setOpen(true);
                   // the shackle falling off the hasp is the event.
                   tellHint("The padlock drops. The blade's finished — worth it.", 2.6);
@@ -989,6 +1024,39 @@
   (CBZ._prisonPromptSites || (CBZ._prisonPromptSites = [])).push(
     { id: "gunroom-cage", act: "e", was: "hold [E] to saw the padlock" }
   );
+
+  /* ---- AND A WAY TO SHUT THEM (systems/interactions.js's door registry) ----
+     Two declarations, one per leaf of the ladder. Both credentials are the
+     tick's own: the outer gate reads the Keycard (or the uniform), the inner
+     cage wants the Warden's key — or the memory of the hacksaw that already
+     beat it, since the blade snaps and a man who cut a padlock off does not
+     lose the right to swing the gate he opened. `autoR` values are the square
+     roots of this file's own proximity tests (14 and 5.3). */
+  (CBZ._prisonDoorSpecs || (CBZ._prisonDoorSpecs = [])).push({
+    id: "prison-armory", label: "the armory door", autoR: 3.75,
+    at: function () { return { x: 19, y: 2.0, z: 1 }; },
+    pick: function () { return [gate]; },
+    col: function () { return armory.collider; },
+    isOpen: function () { return !!armory.open; },
+    permanent: function () { return false; },
+    canUse: function () { return !!(CBZ.game && (CBZ.game.hasKey || CBZ.game.role === "cop")); },
+    set: function (v) { armory.setOpen(v); return armory.open === !!v; },
+  });
+  if (inner.gate) {
+    (CBZ._prisonDoorSpecs || (CBZ._prisonDoorSpecs = [])).push({
+      id: "prison-armory-cage", label: "the inner cage", autoR: 2.3,
+      at: function () { return { x: 23.40, y: 1.4, z: -1.55 }; },
+      pick: function () { return [inner.gate]; },
+      col: function () { return inner.collider; },
+      isOpen: function () { return !!inner.open; },
+      permanent: function () { return false; },
+      canUse: function () {
+        const econ = CBZ.econ;
+        return !!(inner.sawed || (econ && econ.hasItem && econ.hasItem("Gun-Room Key")));
+      },
+      set: function (v) { inner.setOpen(v); return inner.open === !!v; },
+    });
+  }
 
   CBZ.armory = armory;
   /* THE TWO LINES THIS FILE KEEPS, DECLARED. CBZ.jailShowAudit().hints reads

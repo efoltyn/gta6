@@ -441,6 +441,26 @@
       if (!v) d.picked = 0;
       return v;
     };
+    /* ---- AND A WAY TO SHUT IT: the shared registry in
+       systems/interactions.js, declared exactly as world/prisonwings.js does
+       it. The credential is the tick's own test — the staff door reads the
+       Keycard (or the uniform), the Warden's office is picked, so its spec
+       wants the Lockpick and refuses to be OPENED by a tap: three and a half
+       seconds of picking is the door, and a finger must not skip it. */
+    (CBZ._prisonDoorSpecs || (CBZ._prisonDoorSpecs = [])).push({
+      id: d.id, label: d.label, autoR: 2.3, openByTap: !d.pick,   // tick opens at d2 < 5.2
+      at: function () { return { x: d.x, y: 1.4, z: d.z }; },
+      pick: function () { return [pivot]; },
+      col: function () { return d.collider; },
+      isOpen: function () { return !!d.open; },
+      permanent: function () { return !!d.blown; },
+      canUse: function () {
+        if (d.keys) return !!(CBZ.game && (CBZ.game.hasKey || CBZ.game.role === "cop"));
+        const econ = CBZ.econ;
+        return !!(econ && econ.hasItem && econ.hasItem("Lockpick"));
+      },
+      set: function (v) { d.setOpen(v); return d.open === !!v; },
+    });
     doors.push(d);
     return d;
   }
@@ -792,7 +812,10 @@
     if (!staffDoor.open) {
       const s = staffNear(staffDoor);
       if (s) staffDoor.setOpen(true);
-      else {
+      else if (!(CBZ.prisonDoorLatched && CBZ.prisonDoorLatched("prison-admin-staff"))) {
+        // LAW 3 (systems/interactions.js): a door shut by hand stays shut
+        // while you stand on its reader. Staff above are exempt — the warden
+        // opening his own door is the routine this wing is legible by.
         const dx = P.x - staffDoor.x, dz = P.z - staffDoor.z;
         if (dx * dx + dz * dz < 5.2) {
           const have = !!(g.hasKey || g.role === "cop");

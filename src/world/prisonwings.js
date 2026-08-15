@@ -266,6 +266,30 @@
         defeat: function () { d.setOpen(true); d.blown = true; d.leaf.visible = false; },
       });
     }
+    /* ---- AND A WAY TO SHUT IT ------------------------------------------
+       One declaration per leaf into systems/interactions.js's shared door
+       registry, so a tap on the bars and the polled [E] both end in the
+       setOpen above — this file gains no second implementation of "open".
+       The credential is the SAME test the tick below runs: a card door wants
+       the Keycard (or the uniform), a cage wants the Lockpick that picks it.
+       `openByTap` is false for the cages: their opening is a hold-to-defeat
+       beat and a tap must not shortcut 3.2-5.6 seconds of work.
+       `permanent` covers both irreversible states — a blown leaf and the
+       control-room release, which are holes, not doors. */
+    (CBZ._prisonDoorSpecs || (CBZ._prisonDoorSpecs = [])).push({
+      id: d.id, label: d.label, autoR: 2.5, openByTap: !d.pick,   // tick opens at near2 < 6.2
+      at: function () { return { x: d.x, y: 1.4, z: d.z }; },
+      pick: function () { return [pivot]; },
+      col: function () { return d.collider; },
+      isOpen: function () { return !!d.open; },
+      permanent: function () { return !!(d.blown || RELEASE.thrown); },
+      canUse: function () {
+        if (d.keys) return !!(CBZ.game && (CBZ.game.hasKey || CBZ.game.role === "cop"));
+        const econ = CBZ.econ;
+        return !!(econ && econ.hasItem && econ.hasItem("Lockpick"));
+      },
+      set: function (v) { d.setOpen(v); return d.open === !!v; },
+    });
     doors.push(d);
     return d;
   }
@@ -708,6 +732,11 @@
         if (d.keys && staffNear(d)) { d.setOpen(true); continue; }
         if (near2 < 6.2) {
           if (d.keys) {
+            // LAW 3: a door the player deliberately shut stays shut while he
+            // is still inside this radius. Only the PROXIMITY open is latched
+            // out — staffNear above is untouched, because a guard with a card
+            // opens his own door and that is the tailgating window.
+            if (CBZ.prisonDoorLatched && CBZ.prisonDoorLatched(d.id)) continue;
             const have = !!(g.hasKey || g.role === "cop");
             const L = CBZ.cityLock
               ? CBZ.cityLock({ id: d.id, verb: "press", label: d.label, have: have,

@@ -925,9 +925,23 @@
     c.bars.position.x = c.leafClosed.x + (c.leafOpen.x - c.leafClosed.x) * c.slide;
     c.bars.position.z = c.leafClosed.z + (c.leafOpen.z - c.leafClosed.z) * c.slide;
   }
+  /* LAW 3, the cell-front instance. systems/prisonschedule.js drives EVERY
+     leaf in this wing to the block plan every 0.35 s — which during the day
+     means "open" — so a cell the player pulled shut by hand was slid back
+     open under him within a third of a second. That is the auto-open owner
+     for a cell, and it is answered the same way every other door in the
+     compound answers it: the shared latch (CBZ.prisonDoorLatched, declared in
+     systems/interactions.js) out-ranks an automatic UNLOCK while the man who
+     shut it is still standing there, and stops mattering the moment he walks
+     away. A LOCK is never refused — a lockdown, an intake and the schedule's
+     lights-out must always be able to shut a door on you. */
+  function handLatched(c) {
+    return !!(CBZ.prisonDoorLatched && CBZ.prisonDoorLatched("prison-cell-" + c.i));
+  }
   function setDoor(which, locked) {
     const c = typeof which === "number" ? cells[which] : which;
     if (!c || !c.doorCol) return false;
+    if (!locked && handLatched(c)) return false;
     const arr = CBZ.colliders || (CBZ.colliders = []);
     const i = arr.indexOf(c.doorCol);
     if (locked && i < 0) arr.push(c.doorCol);
@@ -951,6 +965,44 @@
       CBZ.worldSfx(locked ? "door_close" : "door_open", c.leafClosed.x, c.leafClosed.z, { ref: 14 });
     }
     return true;
+  }
+
+  /* ---- AND A WAY TO SHUT ONE BY HAND --------------------------------------
+     systems/interactions.js's shared door registry: a tap on the bars and the
+     polled [E] both end in setDoor above, which stays the only code in this
+     file that moves a leaf or a collider.
+
+     A CELL FRONT HAS NO CREDENTIAL ON EITHER SIDE. Nothing here checks a key
+     to open one — they all stand open at build and the schedules/lockdowns
+     that shut them are systems, not the player — so the close must not invent
+     a key the open never asked for. Same test in both directions, which here
+     is no test. `autoR` is 6 m and that number is NOT a reader radius: a cell
+     has no approach-open, its re-opener is systems/prisonschedule.js driving
+     the whole wing to the block plan, which has no radius at all. So the
+     latch's own release distance is the ROOM — shut your cell and stand in
+     it, or in the aisle outside it, and it stays shut; leave the wing and the
+     day plan gets its door back. Measured: a cell is 3.2 m across, so 6 + 2 m
+     of release pad covers the cell and its aisle and nothing else.
+     Not reversible-proof by luck either: a man who shuts himself in can shut
+     it open again, because the credential is the same both ways. */
+  for (let i = 0; i < cells.length; i++) {
+    (function (c) {
+      if (!c.doorCol || !c.bars || !c.leafClosed) return;
+      (CBZ._prisonDoorSpecs || (CBZ._prisonDoorSpecs = [])).push({
+        id: "prison-cell-" + c.i, label: c.player ? "your cell door" : "the cell door",
+        autoR: 6.0,
+        at: function () { return { x: c.leafClosed.x, y: 1.4, z: c.leafClosed.z }; },
+        pick: function () { return [c.bars]; },
+        col: function () { return c.doorCol; },
+        isOpen: function () { return !c.locked; },
+        permanent: function () { return false; },
+        canUse: function () { return true; },
+        // OPENING IT AGAIN IS ALSO DELIBERATE, so it drops its own latch
+        // before asking — otherwise the guard above would refuse the very
+        // man it exists to protect.
+        set: function (v) { if (v) this._latch = false; setDoor(c, !v); return c.locked === !v; },
+      });
+    })(cells[i]);
   }
 
   // Build state: every door OPEN, and the LEAF SNAPPED INTO ITS POCKET — a
