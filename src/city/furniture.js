@@ -304,8 +304,20 @@
         const sx = ox + p.wx(lat, fwd), sz = oz + p.wz(lat, fwd), sy = y + oy;
         if (drawnTop == null || Math.abs((drawnTop - y) - cushion) > EPS_CUSHION) led.mismatched++;
         const geom = { cushion: cushion, floorBelow: 0 };
+        /* ...and when propuse has not parsed yet, THE QUEUE — the same shim
+           the bed path below uses, for the same load-order reason. The bed
+           path's comment already claimed "the SEAT path three lines below
+           already uses it"; it did not. propuse.js parses at index.html:1007,
+           so for every world/* furnisher outside the city `propRegisterSeat`
+           is simply absent and this line dropped the anchor on the floor. The
+           rooms that kept their seating kept it only because propuse's own
+           `reseat()` re-files anchors afterwards — delete one reseat() call
+           and a room silently loses every chair in it. A queued anchor
+           registers at `load` and returns null, so `a.rec` is null for those
+           callers exactly as it was before. */
         const rec = CBZ.propRegisterSeat
-          ? CBZ.propRegisterSeat(sx, sy, sz, face, kind, p.lot, geom) : null;
+          ? CBZ.propRegisterSeat(sx, sy, sz, face, kind, p.lot, geom)
+          : (CBZ.roomSeatAnchor ? CBZ.roomSeatAnchor(sx, sy, sz, face, kind, p.lot, geom) : null);
         led.seats++;
         const a = { x: sx, y: sy, z: sz, face: face, yaw: face, kind: kind, cushion: cushion, rec: rec };
         p.seats.push(a);
