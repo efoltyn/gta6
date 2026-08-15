@@ -198,6 +198,25 @@
                  colors: { legs: 0xb09a6e, torso: 0xb09a6e, collar: 0xe8d44a, arms: 0xb09a6e, shoes: 0x16110d } },
     security:  { id: "security",  name: "Guard Blacks",     tier: "work",   who: "security guards",  price: 0,    drip: 0,
                  colors: { legs: 0x1c1f26, torso: 0x1c1f26, collar: 0xe8e8e8, arms: 0x1c1f26, shoes: 0x101216 } },
+    // ---- the penitentiary (shared with direct Prison Escape) ---------------
+    // These are ordinary catalog records, not a second prison-only renderer.
+    // systems/prisonoutfits.js casts the live Escape-mode rigs through the same
+    // cityRecolorRig -> cityApplyClothes seam used by Gang City's police/SWAT.
+    inmate:    { id: "inmate", name: "DOC Orange Jumpsuit", tier: "institution", who: "general-population inmates", price: 0, drip: 0,
+                 colors: { legs: 0xe76518, torso: 0xf27a1f, collar: 0xffa14a, arms: 0xf27a1f, shoes: 0x25282d, belt: 0x5b351f } },
+    inmate_cap: { id: "inmate_cap", name: "DOC Jumpsuit and Yard Cap", tier: "institution", who: "yard inmates with issued caps", price: 0, drip: 0,
+                 cap: true, capColor: 0x22252b,
+                 colors: { legs: 0xe76518, torso: 0xf27a1f, collar: 0xffa14a, arms: 0xf27a1f, shoes: 0x25282d, belt: 0x5b351f } },
+    inmate_orderly: { id: "inmate_orderly", name: "Inmate Medical Orderly", tier: "institution", who: "infirmary orderlies", price: 0, drip: 0,
+                 colors: { legs: 0xe76518, torso: 0xe7edf0, collar: 0xf27a1f, arms: 0xe7edf0, shoes: 0x30363d, belt: 0x5b351f } },
+    inmate_chapel: { id: "inmate_chapel", name: "Chapel Trustee Greys", tier: "institution", who: "chapel trustees", price: 0, drip: 0,
+                 colors: { legs: 0x414a57, torso: 0x505c6b, collar: 0xe8e3d8, arms: 0x505c6b, shoes: 0x25282d, belt: 0x252b33 } },
+    corrections: { id: "corrections", name: "Correctional Officer Uniform", tier: "law", who: "prison officers", price: 0, drip: 0,
+                 cap: true, capColor: 0x202b3b, badge: true,
+                 colors: { legs: 0x202936, torso: 0x34475d, collar: 0xaab7c2, arms: 0x34475d, shoes: 0x111419, belt: 0x111419 } },
+    warden:    { id: "warden", name: "Warden Dress Uniform", tier: "law", who: "the prison warden", price: 0, drip: 1,
+                 cap: true, capColor: 0x171d29, badge: true,
+                 colors: { legs: 0x171c28, torso: 0x222b3d, collar: 0xe8e3d8, arms: 0x222b3d, shoes: 0x090b0f, belt: 0x111419 } },
     sheriff:   { id: "sheriff",   name: "Sheriff Khakis",   tier: "law",    who: "county deputies",  price: 0,    drip: 0, cap: true, capColor: 0x8a7752,
                  colors: { legs: 0x5a4632, torso: 0xb8a070, collar: 0x7a6a4a, arms: 0xb8a070, shoes: 0x2b241c, belt: 0x1a140c } },
     soldier:   { id: "soldier",   name: "Olive Fatigues",   tier: "work",   who: "soldiers",         price: 0,    drip: 0, cap: true, capColor: 0x44503a,
@@ -686,7 +705,7 @@
       const cap = !!(rec.cop || rec.cap);
       paint(s.cap, rec.capColor != null ? rec.capColor : null, cap);
       paint(s.hair, null, !cap);
-      paint(s.badge, null, !!rec.cop);
+      paint(s.badge, null, !!(rec.cop || rec.badge));
     }
     return true;
   }
@@ -1292,7 +1311,8 @@
   // hoodie, the tracksuit, a summer dress, an apron at a counter job — but
   // never a badge, crew colors, turnout gear or a $7500 tuxedo.
   const MINOR_BAN_ID = {
-    police: 1, swat: 1, sheriff: 1, soldier: 1, security: 1, firefighter: 1, ems: 1,
+    police: 1, swat: 1, sheriff: 1, soldier: 1, security: 1, corrections: 1, warden: 1,
+    inmate: 1, inmate_cap: 1, inmate_orderly: 1, inmate_chapel: 1, firefighter: 1, ems: 1,
     doctor: 1, scrubs: 1, hivis: 1, construction: 1, coveralls: 1, janitor: 1, valet: 1,
     busdriver: 1, mailman: 1, pilot: 1, office: 1, chef: 1, dress: 1,
     hunter: 1, ranger: 1, hiker: 1, farmer: 1, fisherman: 1, mariner: 1, lifeguard: 1,
@@ -1514,6 +1534,11 @@
   function jobFit(job) {
     if (!job) return null;
     // specific new uniforms first (they'd otherwise be eaten by broader lines)
+    if (/inmate medical|inmate orderly|prison orderly|prison medic/i.test(job)) return CAT.inmate_orderly;
+    if (/chapel trustee|inmate chaplain/i.test(job)) return CAT.inmate_chapel;
+    if (/prison inmate|\binmate\b|\bconvict\b|\bprisoner\b/i.test(job)) return CAT.inmate;
+    if (/prison warden|corrections warden|penitentiary warden|^warden$/i.test(job)) return CAT.warden;
+    if (/correctional officer|corrections officer|prison guard|\bjailer\b/i.test(job)) return CAT.corrections;
     if (/\bhunter\b/i.test(job)) return CAT.hunter;
     if (/park ranger|\branger\b/i.test(job)) return CAT.ranger;
     if (/\bhiker\b/i.test(job)) return CAT.hiker;

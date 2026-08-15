@@ -83,6 +83,13 @@
     if (!gd) return;
     // make absolutely sure it can't be doing anything this frame
     gd.hunt = 0; gd.alert = 0; gd.ko = 0; gd.dead = true;
+    // Prison outfits mount Gang City's pooled SWAT carrier + helmet on riot
+    // responders. Return those pieces through their real pool before this
+    // module recursively disposes the ordinary one-shot guard rig.
+    if (gd._prisonRiotArmorRig && CBZ.cityArmorDressPed) {
+      try { CBZ.cityArmorDressPed(gd, []); } catch (e) {}
+      gd._prisonRiotArmorRig = null;
+    }
     // release any boost-ledger entries other jail systems hold on this guard
     // (harmless field restore on a rig we're about to free; without it the
     // shared ledger would retain the disposed guard until the next restoreAll)
