@@ -614,30 +614,65 @@
   // a guess is exactly how you end up with a sedan inside a wall.
   const _bays = [];
   let _curSite = null;
+  /* THE LOT WAS COMPACT-CAR SIZED AND IT DID NOT KNOW WHERE ITS OWN STALLS
+     WERE (2026-08-15). Two separate faults, and they compounded:
+
+     1. THE DIMENSIONS. STALL 2.6 x ROWD 15.0 are compact-car numbers with a
+        5 m aisle. ULI (Dimensions of Parking) puts a standard 90-degree stall
+        at 2.74 x 5.49 m on a 7.32 m two-way aisle, so a double-loaded module
+        is 18.30 m deep, not 15. The old lot therefore painted stalls that a
+        pickup overhangs, down aisles a pickup cannot turn out of, and claimed
+        more capacity than the tarmac it drew could hold. island_speedway.js
+        had already been through exactly this and solved it to those three
+        numbers; this is the second consumer of the same solve, not a second
+        opinion about it.
+
+     2. THE BAY RECORD. `_bays` filed an x RANGE and a list of row z's, so §8
+        parked cars at a CONTINUOUS random x — cars landing half a metre apart,
+        straddling their own painted stripes, in a lot whose whole visual point
+        is the grid. It now files the actual STALL CENTRES the stripes were
+        drawn from, so a parked car stands in a bay by construction.
+
+     `d` is the lot's declared depth; the module count is floored out of it and
+     the surplus becomes the perimeter drive aisle, which is what gives the lot
+     a way in from the road rather than cars materialising inside the grid. */
+  const P_STALL_W = 2.74, P_STALL_D = 5.49, P_AISLE = 7.32;
+  const P_MODULE = P_STALL_D * 2 + P_AISLE;             // 18.30 m, double-loaded
   function parkingSea(root, cx, cz, w, d, hex) {
     slab(root, cx, cz, w, d, M.asphalt, YG);
-    const STALL = 2.6, ROWD = 15.0;
-    const rows = Math.max(1, Math.floor(d / ROWD));
-    const nStall = Math.max(1, Math.floor(w / STALL));
-    const stripes = [], rowZ = [];
+    // THE PERIMETER DRIVE. A sea of stalls with no lane around it is a sea
+    // you can only enter by driving over the painted rows. 6 m off each edge
+    // (a one-way lane plus a door's clearance) is taken out of the depth
+    // before any module is laid, and the modules are centred in what is left.
+    const RIM = Math.min(6, Math.max(0, (d - P_MODULE) / 2));
+    const usable = d - RIM * 2;
+    const rows = Math.max(1, Math.floor(usable / P_MODULE));
+    const grid = rows * P_MODULE;
+    const nStall = Math.max(1, Math.floor((w - 4) / P_STALL_W));
+    const gx0 = cx - (nStall * P_STALL_W) / 2;
+    const stripes = [], slots = [];
     for (let r = 0; r < rows; r++) {
-      const z0 = cz - d / 2 + ROWD * (r + 0.5);
-      rowZ.push(z0 - 2.6 - 2.5, z0 + 2.6 + 2.5);          // the two bays of the row
+      const z0 = cz - grid / 2 + P_MODULE * (r + 0.5);    // module centreline
+      const bayZ = [z0 - P_AISLE / 2 - P_STALL_D / 2, z0 + P_AISLE / 2 + P_STALL_D / 2];
       for (let i = 0; i <= nStall; i++) {
-        const x0 = cx - w / 2 + i * STALL;
-        stripes.push({ x: x0, z: z0 - 2.6 });
-        stripes.push({ x: x0, z: z0 + 2.6 });
+        const x0 = gx0 + i * P_STALL_W;
+        stripes.push({ x: x0, z: bayZ[0] });
+        stripes.push({ x: x0, z: bayZ[1] });
+        // the stall BETWEEN this stripe and the next one along
+        if (i < nStall) for (let k = 0; k < 2; k++) slots.push({ x: x0 + P_STALL_W / 2, z: bayZ[k] });
       }
     }
     // kerbed planting islands down the middle of each row — the thing that
     // stops a car park reading as one flat rectangle of tarmac. Laid BEFORE
-    // the stripes so the paint is the topmost rung.
+    // the stripes so the paint is the topmost rung. They sit in the AISLE
+    // centreline, which is where a real lot's island is; the old ones sat on
+    // top of the stall rows the cars were meant to be parked in.
     for (let r = 0; r < rows; r++) {
-      const z0 = cz - d / 2 + ROWD * (r + 0.5);
-      slab(root, cx, z0, w, 1.2, M.lawnD, YS);
+      const z0 = cz - grid / 2 + P_MODULE * (r + 0.5);
+      slab(root, cx, z0, nStall * P_STALL_W, 1.2, M.lawnD, YS);
     }
-    repeat(root, bg(0.16, 0.02, 5.0), hex || M.paint, stripes, function () { return YM; });
-    if (_curSite) _bays.push({ site: _curSite, x0: cx - w / 2 + 3, x1: cx + w / 2 - 3, rows: rowZ });
+    repeat(root, bg(0.16, 0.02, P_STALL_D), hex || M.paint, stripes, function () { return YM; });
+    if (_curSite) _bays.push({ site: _curSite, slots: slots, stalls: slots.length });
   }
 
   // WATCHTOWER — legs, a deck you can actually stand on, a roof.
@@ -929,9 +964,15 @@
         // a public building is protected by BOLLARDS, not by a wall. This is
         // the whole difference between the Capitol and the Agency.
         bollardLine(root, cx, cz + 20, 30.6, new THREE.CylinderGeometry(0.24, 0.28, 1.0, 8), 0.28, 1.0);
-        // visitor parking, off the ceremonial axis and 2 m clear of the west
-        // lawn's edge at -87 (two coplanar slabs is a z-fight, not a detail)
-        parkingSea(root, cx - 108, cz + 66, 38, 60);               // x -127..-89, z +36..+96
+        // VISITOR PARKING, off the ceremonial axis and 2 m clear of the west
+        // lawn's edge at -87 (two coplanar slabs is a z-fight, not a detail).
+        // TWO lots, one per flank: a legislature the public is invited to,
+        // with visitor parking on ONE side only, was a lot placed where there
+        // happened to be room rather than where the visitors are. The rect
+        // reaches x +/-132 and z +/-112, and the ceremonial lamps own x +/-26,
+        // so both flanks have 42 m of width and 88 m of depth going spare.
+        parkingSea(root, cx - 108, cz + 64, 42, 88);               // x -129..-87, z +20..+108
+        parkingSea(root, cx + 108, cz + 64, 42, 88);               // x  +87..+129, z +20..+108
         return { gate: { x: cx, z: R.maxZ }, seat: main };
       },
     },
@@ -1079,10 +1120,18 @@
         c.main = main;
         block(root, cx - 14, cz - 2, 118, 22, 3, M.blankD, 1, { facade: "office" });
         block(root, cx + 76, cz - 44, 32, 44, 4, M.blank, 2, { facade: "office" });
-        // the parking sea — two of them, because that is what the aerial
-        // photograph of every real one of these actually shows
-        parkingSea(root, cx - 50, cz + 70, 140, 74);               // x -120..+20, z +33..+107
-        parkingSea(root, cx + 92, cz + 34, 76, 76);                // x +54..+130, z -4..+72
+        // THE PARKING SEA — two of them, because that is what the aerial
+        // photograph of every real one of these actually shows, and it is the
+        // Agency's whole identity (see the header: "an ocean of parking").
+        // The old pair covered 190 x 74 and 76 x 76 inside a 308 x 264 rect,
+        // which is a car park, not an ocean. These take the ground that is
+        // actually free: the main slab's south wall is at cz-22 and the annex
+        // block's at cz+9, the perimeter fence sits on the rect edge, and the
+        // approach lamp row owns x +128. Everything between is tarmac.
+        // The two blocks are split on x (not overlapped on it) — two coplanar
+        // asphalt slabs sharing ground is a z-fight, not a bigger lot.
+        parkingSea(root, cx - 53, cz + 68, 184, 108);              // x -145..+39, z +14..+122
+        parkingSea(root, cx + 88, cz + 46, 78, 152);               // x  +49..+127, z -30..+122
         // the antenna farm along the north fence
         for (let i = 0; i < 3; i++) {
           const dx = cx - 110 + i * 26, dz = cz - 100;
@@ -1144,10 +1193,19 @@
         const main = civic(root, cx - 82, cz - 168, 40, 24, 3, M.concreteD, 0,
           { kind: "federal", crown: "flat", order: "pilaster", motto: "JOINT COMMAND", stone: true }, "Joint Command Annex");
         c.main = main;
-        // staff parking in the two southern rect corners, which are outside
-        // the 126-degree / 54-degree faces (see the geometry note above)
-        parkingSea(root, cx - 165, cz + 150, 50, 60);
-        parkingSea(root, cx + 165, cz + 150, 50, 60);
+        // STAFF PARKING in the two southern rect corners, which are outside
+        // the 126-degree / 54-degree faces (see the geometry note above).
+        // SOLVED AGAINST THE PENTAGON, not eyeballed: the south-east edge runs
+        // from the apex (0, +185) to the vertex (+176, +57.2), so at the lot's
+        // inner edge x=110 the ring reaches only z=+105 — a lot starting at
+        // z=+112 clears it along its whole width, and at the far corner
+        // (x=190, z=+190) it is 80 m outside the building. Two more sit in the
+        // NORTH strip, the full-width 44 m band north of the flat face at
+        // cz-150 that until now held one annex and two flagpoles.
+        parkingSea(root, cx - 150, cz + 151, 80, 78);              // x -190..-110, z +112..+190
+        parkingSea(root, cx + 150, cz + 151, 80, 78);              // x +110..+190, z +112..+190
+        parkingSea(root, cx - 156, cz - 170, 68, 40);              // x -190..-122, z -190..-150
+        parkingSea(root, cx + 156, cz - 170, 68, 40);              // x +122..+190, z -190..-150
         helipad(root, cx + 152, cz - 118, 13);
         helipad(root, cx + 152, cz - 86, 13);
         flagpole(root, cx - 16, cz - 164, 18);
@@ -1191,7 +1249,16 @@
         flagpole(root, cx - 18, cz + 6, 12);
         flagpole(root, cx + 18, cz + 6, 12);
         bollardLine(root, cx, cz + 12, 19.2, new THREE.CylinderGeometry(0.22, 0.26, 0.95, 8), 0.26, 0.95);
-        parkingSea(root, cx, cz + 44, 44, 34);                     // x -22..+22, z +27..+61
+        // PUBLIC PARKING. The forecourt lot was 44 x 34 — one module deep once
+        // it is given the drive aisle it always needed — for the building the
+        // whole city is supposed to be able to walk into. It now takes the
+        // forecourt to the rect edge (bollards at cz+12 are its north kerb,
+        // R.maxZ = cz+68 its south), staying inside the ceremonial lamp
+        // columns at x +/-28, and TWO more sit on the strip south of the two
+        // lawns, which end at cz+36 and left 28 m of empty pad behind them.
+        parkingSea(root, cx, cz + 42, 52, 50);                     // x -26..+26, z +17..+67
+        parkingSea(root, cx - 50, cz + 52, 40, 28);                // x -70..-30, z +38..+66
+        parkingSea(root, cx + 50, cz + 52, 40, 28);                // x +30..+70, z +38..+66
         const lamps = [];
         for (let i = 0; i < 4; i++) { lamps.push({ x: cx - 28, z: cz + 20 + i * 11 }); lamps.push({ x: cx + 28, z: cz + 20 + i * 11 }); }
         lampRow(root, lamps);
@@ -1479,8 +1546,12 @@
         }
 
         // ---- staff parking, the impound strip and the civic approach ------
-        parkingSea(root, cx - 51, cz - 4, 24, 44);        // staff, west of the court
-        parkingSea(root, cx + 50, cz - 4, 24, 44);        // impound, east — the way out runs through it
+        // The two flanks are 32 m of clear pad each, running the full 116 m of
+        // the rect: the jail block is only x +/-27 and the walled court x +/-YX
+        // (34), so nothing but the fence bounds these lots in z. They were 24
+        // x 44 in the middle of that, which is a quarter of the ground.
+        parkingSea(root, cx - 50, cz - 16, 28, 76);       // staff, west of the court
+        parkingSea(root, cx + 50, cz - 16, 28, 76);       // impound, east — the way out runs through it
         flagpole(root, cx - 13, YFZ + 12, 12);
         flagpole(root, cx + 13, YFZ + 12, 12);
         const lamps = [];
@@ -1731,7 +1802,9 @@
         const lamps = [];
         for (let i = 0; i < 4; i++) { lamps.push({ x: cx - 16, z: Z(42 - i * 11) }); lamps.push({ x: cx + 16, z: Z(42 - i * 11) }); }
         lampRow(root, lamps);
-        parkingSea(root, R.maxX - 26, Z(34), 22, 30);
+        // staff + collection parking down the east flank. A bonded yard runs
+        // shifts; 22 x 30 held one module and a fraction of a row.
+        parkingSea(root, R.maxX - 30, Z(32), 32, 52);
 
         /* ---- WHAT city/cashstore.js IS HANDED. Every number here is one
            this builder already committed to; cashstore.js re-derives none of
@@ -3322,24 +3395,40 @@
       const CARS = CBZ.cityEcon.CARS;
       if (!CARS.length) return;
       // one stream per BAY (not per site), so the draw count on any one stream
-      // cannot change when a site's parking layout does
+      // cannot change when a site's parking layout does.
+      //
+      // FILL RATE, NOT A FIXED SIX. Six cars was right for a 30-stall lot and
+      // is invisible in a 900-stall one; a rate keeps the lots reading as lots
+      // at every size. It is a rate AND a hard ceiling, because metal is the
+      // expensive part — the same rule island_speedway.js's PARK_CARS applies,
+      // and the ceiling bites in stall order so what does exist clusters near
+      // the building rather than scattering to the far fence.
+      const FILL = 0.18, PER_BAY = 22;
+      let _parked = 0;
       for (let b = 0; b < _bays.length; b++) {
         const bay = _bays[b];
-        if (!bay.rows.length) continue;
+        const slots = bay.slots;
+        if (!slots || !slots.length) continue;
         const r = streamFor(bay.site + ":cars:" + b);
-        const n = 6;
-        for (let k = 0; k < n; k++) {
-          const z = bay.rows[(r() * bay.rows.length) | 0];
-          const x = bay.x0 + r() * Math.max(1, bay.x1 - bay.x0);
+        const n = Math.min(PER_BAY, Math.max(1, Math.round(slots.length * FILL)));
+        // A STALL HOLDS ONE CAR. Walking the row with a stride drawn off the
+        // bay's own stream picks distinct stalls without a rejection loop —
+        // two cars in one stall is the failure the old continuous-x pick made
+        // routine, and it looks exactly like a crash nobody cleared.
+        const stride = Math.max(1, Math.floor(slots.length / n));
+        let idx = (r() * stride) | 0;
+        for (let k = 0; k < n && idx < slots.length; k++, idx += stride) {
+          const s = slots[idx];
           const model = CARS[(r() * CARS.length) | 0];
           try {
             // heading 0 = nose down the bay, which is the axis the painted
-            // stalls run on (the stripes are 5 m long in Z, 2.6 m apart in X)
-            const c = CBZ.cityMakeCar(x, z, 0, true, model, 0);
-            if (c) { c.ai = false; c.v = 0; c.baseV = 0; c.road = null; }
+            // stalls run on (stripes 5.49 m long in Z, 2.74 m apart in X)
+            const c = CBZ.cityMakeCar(s.x, s.z, 0, true, model, 0);
+            if (c) { c.ai = false; c.v = 0; c.baseV = 0; c.road = null; c._govParked = true; _parked++; }
           } catch (e) { /* no vehicle path in this build — the stalls stay empty */ }
         }
       }
+      AUDIT.parked = _parked;
     });
   }
 
@@ -3425,6 +3514,24 @@
       urbanAdjacentIds: (AUDIT.urbanAdjacentIds || []).slice(),
       staffed: AUDIT.staffed,
       roadless: AUDIT.roadless,
+      /* §8 — THE CAR PARKS. `stalls` is recounted from the bay records the
+         paint was drawn from, so it can never disagree with the stripes;
+         `parked` is what §8 actually managed to mint into them. A lot that
+         reports stalls and zero metal is the "reads abandoned" failure the
+         speedway's own audit was written to catch. */
+      lots: _bays.length,
+      stalls: _bays.reduce(function (n, b) { return n + (b.stalls | 0); }, 0),
+      // LIVE, not the mint-time counter. §8 runs once; spawnCityTraffic
+      // rebuilds cityCars, the player can blow a lot up, and a stored number
+      // would go on reporting the cars this file MEANT to put there. Read the
+      // stamp off the cars that are actually standing in the world.
+      parked: (function () {
+        const cars = CBZ.cityCars || [];
+        let n = 0;
+        for (let i = 0; i < cars.length; i++) if (cars[i] && cars[i]._govParked && !cars[i].dead) n++;
+        return n;
+      })(),
+      parkedMinted: AUDIT.parked | 0,
       // §5b — the residences' cooks/drivers/gardeners. `household` must equal
       // `householdWanted` on a world where every complex found ground.
       household: AUDIT.household,
