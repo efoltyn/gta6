@@ -76,7 +76,13 @@ const subjects = [
     strip: { frames: 4, stepSec: 1.0 },
     cam: { dx: 9, dy: 7.5, dz: 4, adx: 0, ady: 1.1, adz: -16, fov: 60 } },
 
-  /* ---- THE WALL RULE: the goal that used to be inside the masonry ------- */
+  /* ---- THE WALL RULE: the goal that used to be inside the masonry -------
+     NOT in the default sweep (npm run visual:npc-tactics runs the stable
+     four): the 30 m cast spot at the scanned mark lands in genuinely walled
+     pockets often enough to flake run-to-run, and the wall-projection claim
+     is already pinned deterministically by tools/tactics-check.mjs scenario
+     3. Kept for a future dense-downtown mark; run it explicitly with
+     --subjects wall-goal. */
   { id: "wall-goal", label: "A planter across the firing line",
     focus: "THE GLITCH ITSELF, STAGED WHERE IT LIVES. A waist-high planter run sits exactly where the old bearing math drops this rifleman's goal — he can SEE the player over it the whole time, but the spot he is steered at is INSIDE the masonry. Before: he walks into the planter and grinds his face on it while the stuck-timer twitches him sideways (wallHugPct is that loop as a number). After: the goal is PROJECTED onto reachable space before he is steered at it — he plants short of the planter with a clear lane OVER it (a low wall stops legs, not chest-height rounds) and shoots standing still.",
     act: { n: 1, dist: 30, weapons: ["AK-47"], pre: 5.0, sample: 1.5,
