@@ -268,16 +268,9 @@ async function stageNpcTactics(input) {
           out.posPicks = au.posPicks; out.posDry = au.posDry; out.positioned = au.positioned;
         }
       } catch (_) {}
-      try {
-        const m0 = S.cast[0];
-        if (m0 && !m0.dead) {
-          out.c0state = (m0.state || "?") + (m0.sees === false ? "/blind" : "/sees") +
-            (m0._iqPos ? "/pos" : "/nopos") + (m0._iqPlant ? "/plant" : "");
-          out.c0goalD = Number(Math.hypot(m0.target.x - m0.pos.x, m0.target.z - m0.pos.z).toFixed(1));
-          out.c0trace = (S.watch && S.watch.trace || []).join(" ");
-          out.extSteps = S.extSteps;
-        }
-      } catch (_) {}
+      // (deep diagnostics — the c0 goal trace and the external-tick counter —
+      // live on window.__npcTacticsStudio for a debugging session; the report
+      // table carries only numbers a reader can compare.)
       return out;
     };
 
@@ -525,6 +518,9 @@ export default {
     tuckedM: { label: "Hurt man's distance from the hide point", unit: "m", better: "lower" },
     wallHugPct: { label: "Time spent pressed against the wall", unit: "%", better: "lower" },
     laneClearEnd: { label: "Ended with a real firing lane", unit: "1=yes", better: "higher" },
+    posPicks: { label: "Positions picked (cumulative)", unit: "picks" },
+    posDry: { label: "Dry picks — no reachable spot (cumulative)", unit: "picks", better: "lower" },
+    positioned: { label: "Fighters holding a committed position", unit: "men", better: "higher" },
   },
   subjects,
   stage: stageNpcTactics,

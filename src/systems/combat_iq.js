@@ -946,6 +946,10 @@
     _engaged++;
     IQ.aimTick(a, tgt, dt);
 
+    // POSITION MODE availability (block 3b) — needed before the LOS block so
+    // a committed position can survive a blink (see below).
+    const posOn = C.NPC_IQ_POSITIONS !== false && cityMode() && !!CBZ.queryCollidersNear;
+
     // LOS + memory (shared primitives — never re-implemented here)
     const AT = CBZ.aiTactics;
     let sees = true;
@@ -960,6 +964,24 @@
         a.searchT = 0;
       }
       if (!sees && dist < 42) {
+        // A COMMITTED POSITION SURVIVES A BLINK. The instrumented probe
+        // caught the old behavior in the act: a man WALKING to his spot loses
+        // the mark behind a pole or a parked car for a quarter second, the
+        // blind branch dumps his position, sight returns, he picks a fresh
+        // one — goal jumps every second or two and he never arrives anywhere
+        // (posPicks 5 / plantedEnd 0 / an 11.6 m/s goal churn on a lone
+        // shooter). A person does not forget his plan because he blinked.
+        // COVER and HIDE positions hold indefinitely while blind — being
+        // unseen is what those spots are FOR — and a firing spot holds
+        // through 1.2 s of lost sight before the corner-work starts. The
+        // search escalation (giveUpT above) still clears everything when the
+        // mark is genuinely gone; npcAttack's own muzzle LOS gate keeps a
+        // blind man from firing either way.
+        if (posOn && a._iqPos && (a._iqPos.cls === "cover" || a._iqPos.cls === "hide" || (a.lostT || 0) < 1.2)) {
+          const cls = a._iqPos.cls;
+          driveToPos(a, a._iqPos.x, a._iqPos.z, tgt, cls);
+          return cls === "hide" ? "hide" : (cls === "cover" ? "cover" : "fire");
+        }
         const bf = AT.blindFlank(a, dx, dz, dist, dt, { period: 1.2, periodJitter: 0.8, sideAmt: 4.5, closeBias: 0.35, rng: rng });
         a._iqPos = null; a._iqPlant = false;   // no eyes, no held position — work the corner
         a.target.set(a.pos.x + bf.x, a.target.y || 0, a.pos.z + bf.z);
@@ -970,12 +992,10 @@
     const slot = IQ.slot(a, tgt, dt);
     if (slot === "fire") _tokens++;
 
-    // POSITION MODE (block 3b): city-only, flag-gated, needs the collider
-    // broadphase. Everything below keeps its exact old math when this is off.
+    // POSITION MODE timers (block 3b; posOn computed above the LOS block).
     // posDt is frame-gated exactly like aimTick's dt: garrison/piracy call
     // posture() on an actor move() also postures, and without the gate every
     // position timer would tick twice per frame for those bodies.
-    const posOn = C.NPC_IQ_POSITIONS !== false && cityMode() && !!CBZ.queryCollidersNear;
     let posDt = dt;
     if (posOn) {
       const fr2 = nowMs();

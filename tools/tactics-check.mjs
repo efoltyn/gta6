@@ -278,6 +278,40 @@ function runConverge(seedX) {
   ok("drives() answers false off-city", CBZ.combatIQ.drives(a) === false);
 }
 
+/* ============================================================ 8b. A POSITION SURVIVES A BLINK */
+{
+  console.log("[8b] a committed position survives a short LOS blink (a pole is not amnesia)");
+  const CBZ = boot();
+  const t = mark(0, 0);
+  const a = actor(CBZ, 0, 26, {});
+  // controllable line of sight: mimic aiTactics.updateLOS's lostT bookkeeping
+  let seesNow = true;
+  CBZ.aiTactics = {
+    updateLOS(actor, tx, tz, dt) {
+      if (seesNow) { actor.lostT = 0; actor.lkx = tx; actor.lkz = tz; }
+      else actor.lostT = (actor.lostT || 0) + dt;
+      return { sees: seesNow, justLost: actor.lostT > 3.5 };
+    },
+    searchStart() { return false; },
+    searchTick() { return null; },
+    blindFlank() { return { x: 4.5, z: 0 }; },
+  };
+  for (let i = 0; i < 240; i++) tick(CBZ, a, t, 1 / 60, 3.4);   // commit + walk toward a spot
+  const P0 = a._iqPos;
+  ok("position committed with eyes on", !!P0);
+  const px = P0 && P0.x, pz = P0 && P0.z;
+  seesNow = false;                                               // the pole blink: 0.6 s blind
+  for (let i = 0; i < 36; i++) tick(CBZ, a, t, 1 / 60, 3.4);
+  ok("blink did NOT dump the position", !!a._iqPos && a._iqPos.x === px && a._iqPos.z === pz);
+  ok("still steering at the committed spot", Math.hypot(a.target.x - px, a.target.z - pz) < 3.0);
+  seesNow = true;
+  for (let i = 0; i < 12; i++) tick(CBZ, a, t, 1 / 60, 3.4);
+  ok("same position after sight returns (no re-pick)", !!a._iqPos && a._iqPos.x === px && a._iqPos.z === pz);
+  seesNow = false;                                               // a REAL loss: past the 1.2 s hold
+  for (let i = 0; i < 100; i++) tick(CBZ, a, t, 1 / 60, 3.4);
+  ok("a sustained loss releases it (corner-work resumes)", a._iqPos == null);
+}
+
 /* ============================================================ 9b. THE ONE-LINE REVERT */
 {
   console.log("[9b] cfg_NPC_IQ_POSITIONS=0 reverts EVERYTHING — in the city");
@@ -314,4 +348,4 @@ function runConverge(seedX) {
 
 console.log("");
 if (fails) { console.error("TACTICS: FAIL — " + fails + " of " + (fails + passes) + " assertions"); process.exit(1); }
-console.log("TACTICS: ok — " + passes + " assertions across 11 scenarios");
+console.log("TACTICS: ok — " + passes + " assertions across 12 scenarios");
