@@ -105,7 +105,10 @@
   //
   //   CBZ.collide(pos, radius, feetY, headY)
   //     pos    — {x,z(,y)} mutated in place (the moving body's centre).
-  //     radius — the body's collision radius (player 0.55, ped/crowd 0.5).
+  //     radius — the body's collision radius. THE PLAYER IS 0.38, NOT 0.55:
+  //              TUNE.playerRadius (config.js) has shipped 0.38 the whole time
+  //              and three comments in this file said 0.55, including one the
+  //              substep sizing below reasons from. Peds/crowd are 0.5.
   //     feetY  — optional bottom of the body's vertical span.
   //     headY  — optional top of the body's vertical span.
   //
@@ -1091,7 +1094,7 @@
   //
   // ADVERSARIAL: a bigger feel-dt = a bigger position step. Max on-foot speed is
   // walkSpeed*sprintMul (~7*1.7=11.9 m/s); at fdt=0.1 that's a 1.19m step, but the
-  // player radius (0.55) only resolves overlaps up to radius+half-wall (~0.75m) —
+  // player radius (0.38) only resolves overlaps up to radius+half-wall (~0.58m) —
   // a single big step could TUNNEL a 0.4m-thick wall or overshoot a thin floor's
   // landing test. Fix (the canonical character-controller answer): SUB-STEP the
   // player's OWN movement+collision when the step is large. We split fdt into N
@@ -1099,7 +1102,14 @@
   // radius, capped at FEEL_SUBSTEP_MAX so a pathological frame can't multiply the
   // tiny player integrator into a spiral. Collision is resolved EVERY slice, so a
   // wall is caught mid-traverse exactly as it is at full FPS.
-  const FEEL_SAFE_STEP = 0.35;      // m — max horizontal move per collision slice (< player radius 0.55, so overlap always registers)
+  // m — max horizontal move per collision slice. THE MARGIN IS THINNER THAN
+  // THIS LINE USED TO CLAIM: it read "< player radius 0.55", but the shipped
+  // radius is 0.38 (config.js TUNE.playerRadius), so the cushion is 0.35 vs
+  // 0.38 — about 8%, not the ~36% the old number implied. Still sound (a step
+  // shorter than the radius cannot clear the body's own footprint, so an
+  // overlap always registers) but there is no room to raise this without
+  // raising the radius with it.
+  const FEEL_SAFE_STEP = 0.35;
   const FEEL_SUBSTEP_MAX = 5;       // hard cap on player slices/frame (player integ is ~µs; 5× is free vs the 27ms world sim).
                                     // Sized so even the raised loop FEEL_MAX (0.12s)
                                     // at max on-foot speed (11.9 m/s) slices to
