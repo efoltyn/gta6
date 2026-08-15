@@ -162,16 +162,32 @@ async function stageNpcTactics(input) {
       try { return !CBZ.clearLineOfFire || CBZ.clearLineOfFire(fx, 1.4, fz, tx, 1.5, tz); }
       catch (_) { return true; }
     };
+    // OPEN SKY is part of "outdoor": a covered walkway or fuel-canopy passes
+    // the ground tests while its roof swallows every elevated camera (the
+    // canopy run photographed one shooter and a ceiling). A candidate circle
+    // may hold nothing overhead between head height and crane height.
+    const openSky = (x, z) => {
+      try {
+        const near = CBZ.queryCollidersNear ? CBZ.queryCollidersNear(x, z, 9, []) : [];
+        for (const c of near) {
+          if (c.minX == null || c.y0 == null) continue;
+          if (c.y0 > 2.2 && c.y0 < 15) return false;   // an overhang, not a tower
+        }
+        return true;
+      } catch (_) { return true; }
+    };
     const markOk = (x, z) => {
       try {
         if (CBZ.cityWaterAt && CBZ.cityWaterAt(x, z)) return false;
         if (indoor(x, z)) return false;
         const near = CBZ.queryCollidersNear ? CBZ.queryCollidersNear(x, z, 11, []) : [];
         if (near.length) return false;
+        if (!openSky(x, z)) return false;
         for (const off of [-3.4, 0, 3.4]) {
           const cx = x + off, cz = z - 24;          // the cast corridor (CAST_DIR)
           if (indoor(cx, cz)) return false;
           if (!laneClear(cx, cz, x, z)) return false;
+          if (!openSky(cx, cz)) return false;
         }
         return true;
       } catch (_) { return false; }
