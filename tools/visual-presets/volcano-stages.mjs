@@ -65,19 +65,28 @@ const subjects = [
     cam: { lane: true, ahead: 60, side: 26, alt: 26, fallback: { x: 108, y: 46, z: 672, ax: 0, ay: 20, az: 600 } } },
 
   { id: "column", label: "The eruption column", hud: false,
-    focus: "First seconds of the active phase: lava fountain out of the vent, dark ash column standing up over it, flows starting down the cone.",
-    act: { untilState: "active", extraSecs: 3.2 },
+    focus: "First seconds of the active phase: lava fountain out of the vent, dark ash column standing on a rose-lit base (the vent lights its own smoke from below — the wide bible photo), the white-hot spatter apron draped over the summit, and glowing rockfall streaking the flanks. Before-side: dark column on an additive disc.",
+    /* force: this beat used to inherit whatever disaster the director
+       happened to be on — run alone (`--subjects column`) it photographed a
+       LIGHTNING STORM and reported ok:true, the exact order-dependence the
+       header note above forbids. The nuke-wide/landmark beats are the ONLY
+       deliberate inheritors (they continue nuke-fireball's cloud, and
+       re-forcing would reset its age). */
+    act: { force: "volcano", untilState: "active", extraSecs: 3.2 },
     cam: { x: 118, y: 40, z: 686, ax: 0, ay: 30, az: 600 } },
 
   { id: "lava-day", label: "Lava close-up — opaque crust", hud: false,
-    focus: "OPAQUE crusted flow: dark basalt levees standing proud of the ground with a white-yellow incandescent channel cracking through, cooling to dull red downstream. Before-side: an additive box you can see the grass through. vol_lavaTransparent must read 0.",
+    focus: "THE BIBLE SHOT (owner's Etna close-up, 2026-08-15): a DARK crusted surface with a bright connected LACE of melt cracked through it — thin filaments wrapping irregular black islands, meandering between the levees. Before-side: one smooth bright band of even orange, the 'glowing road'. Organic, never geometric. vol_lavaTransparent must read 0.",
     act: { force: "volcano", untilState: "active", extraSecs: 12 },
     cam: { lava: true, frame: 0.55, out: 22, alt: 11, behind: 3, fallback: { x: 26, y: 12, z: 626, ax: 4, ay: 4, az: 606 } } },
 
   { id: "lava-front", label: "The advancing nose — does it FLOW?", hud: false,
-    focus: "OWNER: the magma 'doesn't flow like magma, it just glitches down weirdly and zig-zaggy'. This is the diagnostic shot: the leading nose at close range. The front must nose forward CONTINUOUSLY and the channel pattern must travel downstream — before-side steps the tip one whole ~5 m station at a time and its ribbon saw-tooths across the hillside on the station-centre ground height.",
-    act: { force: "volcano", untilState: "active", extraSecs: 7.5 },
-    cam: { lava: true, frame: 1, out: 11, alt: 5.5, behind: -5, fallback: { x: 22, y: 9, z: 620, ax: 4, ay: 3, az: 604 } } },
+    focus: "The leading edge at close range. It must nose forward continuously, the lace must travel downstream, and — new with the 2026-08-15 bible — the run should FORK: vol_lavaBranches counts the children a stem has grown, and a fan of lobed noses is what 'organic' means here. Before-side: one uniform ribbon, no forks, smooth even glow.",
+    /* behind 6 (was -5): stand UP-flow of the nose, above it, looking down
+       the descent. Down-flow of a nose on a cone means below its own ridge
+       line, and the peek run photographed the ridge instead of the rock. */
+    act: { force: "volcano", untilState: "active", extraSecs: 9 },
+    cam: { lava: true, frame: 1, out: 13, alt: 9, behind: 6, fallback: { x: 22, y: 9, z: 620, ax: 4, ay: 3, az: 604 } } },
 
   { id: "pyroclastic", label: "Pyroclastic flow — mid-descent", hud: false,
     focus: "THE KILLER. A ground-hugging avalanche of 600 C rock and gas boiling down the fall line at 6x sprinting speed, engulfing its lane. Opaque overlapping billows with an incandescent basal fringe — not translucent orange rocks. Before-side has no such hazard at all.",
@@ -100,7 +109,7 @@ const subjects = [
     cam: { x: 46, y: 15, z: 662, ax: -6, ay: 3, az: 618 } },
 
   { id: "lava-night", label: "Lava at night — it lights the hill", hud: false,
-    focus: "The same flow after dark. The channel is an UNLIT material, so it stays exactly as bright as it was at noon (that IS incandescence), and its pooled point lights paint the hillside around it. The eruption's own sky tint now follows the day cycle instead of overriding night into noon.",
+    focus: "The wide bible photo's regime: a BLACK cone wearing a branching incandescent fan, the lace unchanged from noon (unlit IS incandescent), the vent apron the brightest thing in frame, pooled lights painting the hillside. Before-side: broad smooth orange tubes of even brightness.",
     act: { night: true, force: "volcano", untilState: "active", extraSecs: 12 },
     cam: { lava: true, frame: 0.55, out: 22, alt: 11, behind: 3, fallback: { x: 26, y: 12, z: 626, ax: 4, ay: 4, az: 606 } } },
 
@@ -283,11 +292,25 @@ async function stageVolcano(input) {
       const tips = (A && A.lavaTips) || [];
       const mids = (A && A.lavaMids) || [];
       const hill = (CBZ.surv && CBZ.surv.arena) ? CBZ.surv.arena.hills[0] : { x: 0, z: 600 };
-      let best = null, bd = -1, bi = -1;
+      /* PREFER A FLOW STILL ON THE CONE. "Furthest tip from the hill" used
+         to be the whole rule, and once the flows learned to branch and run
+         long it reliably elected a nose deep in the town — where the tripod
+         maths landed the camera inside somebody's stairwell (again). The
+         braid the shot exists to judge lives on the mountainside, so among
+         tips still within ~1.7 r of the peak take the furthest-run one, and
+         only fall back to the global winner when nothing is on the cone. */
+      /* 1.25 r, not more: the arena's town starts ~1.4 r out, and a radius
+         that reaches the town elects some flow's cold toe next to a road —
+         the night peek framed an ash-dusted street with the lava reduced to
+         orange crumbs at the margin. The braid lives on the flank. */
+      const onR = (hill.r || 30) * 1.25;
+      let best = null, bd = -1, bi = -1, bdOn = -1, biOn = -1;
       for (let i = 0; i < tips.length; i++) {
         const d = Math.hypot(tips[i].x - hill.x, tips[i].z - hill.z);
         if (d > bd) { bd = d; best = tips[i]; bi = i; }
+        if (d <= onR && d > bdOn) { bdOn = d; biOn = i; }
       }
+      if (biOn >= 0) { best = tips[biOn]; bi = biOn; }
       const mid = bi >= 0 ? mids[bi] : null;
       if (best && mid) {
         /* TWO POINTS ON THE FLOW BEAT ONE POINT AND A GUESS.
@@ -311,12 +334,57 @@ async function stageVolcano(input) {
         const gAtP = (x, z) => (CBZ.surv && CBZ.surv.arena ? CBZ.surv.arena.groundHeightAt(x, z) : 0);
         const my = gAtP(mx, mz);
         const out = cam.out != null ? cam.out : 24;
-        const cxp = mx - fz * out - fx * (cam.behind || 0);
-        const czp = mz + fx * out - fz * (cam.behind || 0);
-        aimed = {
-          x: cxp, y: Math.max(gAtP(cxp, czp), my) + (cam.alt || 12), z: czp,
-          ax: mx, ay: my + 1.2, az: mz,
+        /* THE TRIPOD PROVES ITS OWN SIGHTLINE. Every blind placement rule
+           tried here has been defeated by some seed's town: the fixed sign
+           parked the camera against the cone, the away-from-the-mountain
+           flip parked it inside a tower, and a photograph of an obstruction
+           is a failed beat that reports ok:true. So the flank is chosen the
+           way a photographer chooses it: candidate stands (near/far, both
+           sides, rising altitude) are tested with a real raycast at the
+           look-at point, and the first stand that can actually SEE the flow
+           wins. Sprites, particle motes and water do not count as walls; a
+           hit within 6 m of the subject IS the subject. Identical logic on
+           both sides of the comparison — it is pure scene geometry. */
+        /* Solids collected ONCE with the sprite/particle/water strata already
+           filtered out. Handing intersectObjects the raw scene children found
+           two failure modes at once: any exotic object that made the walk
+           throw turned the try/catch into "sure, that stand can see", and a
+           blocked tripod passed the audition — the full-run day beat shipped
+           a portrait of an office block that way. */
+        const solids = [];
+        CBZ.scene.traverse((ob) => {
+          if (ob.isMesh && ob.visible && !(ob.userData && ob.userData.waterSurface)) solids.push(ob);
+        });
+        const ray = new T.Raycaster();
+        const canSee = (px, py, pz) => {
+          const dir = new T.Vector3(mx - px, my + 1.2 - py, mz - pz);
+          const len = dir.length() || 1;
+          dir.multiplyScalar(1 / len);
+          ray.set(new T.Vector3(px, py, pz), dir);
+          ray.near = 0.1; ray.far = Math.max(0.2, len - 6);   // the last 6 m IS the subject
+          try { return ray.intersectObjects(solids, false).length === 0; }
+          catch (_) { return false; }                          // a stand that cannot be proved is not chosen
         };
+        const c1x = mx - fz * out, c1z = mz + fx * out;
+        const c2x = mx + fz * out, c2z = mz - fx * out;
+        const away = Math.hypot(c2x - hill.x, c2z - hill.z) > Math.hypot(c1x - hill.x, c1z - hill.z) ? 1 : -1;
+        const alt0 = cam.alt || 12;
+        /* the ladder climbs: same-side near, other side, then higher and
+           further on both sides. If every rung is blocked the HIGHEST stand
+           wins — over the rooftops beats behind a wall every time. */
+        const rungs = [
+          [away, 1, 1], [-away, 1, 1], [away, 1.45, 1.9], [-away, 1.45, 1.9],
+          [away, 2, 3.1], [-away, 2, 3.1],
+        ];
+        let cxp = null, czp = null, cyp = 0;
+        for (const [flip, oMul, aMul] of rungs) {
+          const tx = mx + flip * fz * out * oMul - fx * (cam.behind || 0);
+          const tz = mz - flip * fx * out * oMul - fz * (cam.behind || 0);
+          const ty = Math.max(gAtP(tx, tz), my) + alt0 * aMul;
+          cxp = tx; czp = tz; cyp = ty;                        // fallback: the last (highest) rung
+          if (canSee(tx, ty, tz)) break;
+        }
+        aimed = { x: cxp, y: cyp, z: czp, ax: mx, ay: my + 1.2, az: mz };
         aimNote = "lava flank";
       }
     } catch (_) {}
@@ -431,6 +499,11 @@ export default {
     aliveNow: { label: "Lobby still alive", better: "higher" },
     vol_lavaTransparent: { label: "See-through lava materials", better: "lower" },
     vol_lavaFlows: { label: "Live lava flows", better: "higher" },
+    /* The 2026-08-15 bible as numbers: a stem that forks is organic, a vent
+       that floods white is the photograph's brightest pixel. Both are 0 on
+       any build older than the bible. */
+    vol_lavaBranches: { label: "Lava forks grown", better: "higher" },
+    vol_ventGlows: { label: "Incandescent vent aprons", better: "higher" },
     vol_pyroLive: { label: "Pyroclastic flows live", better: "higher" },
     vol_ashPeakDepth: { label: "Peak ash depth", unit: "m", better: "higher" },
     audit_pyroRuns: { label: "Pyroclastic runs", better: "higher" },

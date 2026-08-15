@@ -209,7 +209,15 @@
     const geo = o.shape === "rock"
       ? new THREE.DodecahedronGeometry(s * 0.62, 0)
       : new THREE.BoxGeometry(w, h, d);
-    const mat = CBZ.mat ? CBZ.mat(o.color != null ? o.color : 0x6b7079) : new THREE.MeshLambertMaterial({ color: 0x6b7079 });
+    /* `glow: true` — incandescent debris. An unlit material IS incandescence
+       (the volcano's own doctrine: it ignores the sun, so it is exactly as
+       bright at night as at noon). The eruption's rolling embers are why:
+       a lit rock under an ash-dimmed sun is a grey dot, and the reference
+       photograph's flanks are streaked with fire, not gravel. Opaque, never
+       additive — glow is a material state here, not alpha. */
+    const mat = o.glow
+      ? new THREE.MeshBasicMaterial({ color: o.color != null ? o.color : 0xff8a2e })
+      : (CBZ.mat ? CBZ.mat(o.color != null ? o.color : 0x6b7079) : new THREE.MeshLambertMaterial({ color: 0x6b7079 }));
     const m = new THREE.Mesh(geo, mat);
     const x = o.x, z = o.z;
     const sy = o.fromY != null ? o.fromY : 26;

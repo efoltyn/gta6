@@ -278,7 +278,19 @@ if (startsLocalServer) {
    needs --proxy-server on the command line, and then the local dev server
    (which is the AFTER side) has to be excluded or it gets tunnelled too.
    Auto-wired from the standard variables, so the common case needs no flag,
-   and CBZ_CHROME_ARGS is there for anything else the host needs to pass. */
+   and CBZ_CHROME_ARGS is there for anything else the host needs to pass.
+
+   FIELD NOTES from a TLS-intercepting sandbox (2026-08-15), because the
+   failure is silent and the diagnosis took a netlog: a MITM proxy re-signs
+   every site, and Chromium trusts only its NSS store — the CA env vars that
+   satisfy curl/node do nothing for it. Import the proxy bundle first:
+     certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n proxy -i <ca.crt>
+   (one call per cert in the bundle). And if the tunnel then RESETS on every
+   ClientHello while curl works, the interceptor cannot parse Chrome's
+   TLS 1.3 hello — CBZ_CHROME_ARGS="--ssl-version-max=tls1.2" negotiates
+   around it with certificate verification fully intact. Never
+   --ignore-certificate-errors: a comparison photographed over broken TLS
+   proves nothing about either side. */
 const envProxy = process.env.CBZ_CHROME_PROXY || process.env.HTTPS_PROXY || process.env.https_proxy || "";
 const proxyArgs = envProxy ? [
   `--proxy-server=${envProxy}`,
@@ -408,7 +420,14 @@ async function navigate(url, side) {
     } catch (_) {}
     await sleep(250);
   }
-  throw new Error(`${side} build never satisfied preset readiness at ${url} (document: ${lastState})`);
+  /* Say WHY. This used to throw with no evidence, and diagnosing "readiness
+     never came true" meant re-driving the browser by hand over CDP. The
+     console/exception feed was already being recorded — surface its tail. */
+  const notes = browserMessages
+    .filter((m) => m.side === side || m.side === "setup")
+    .slice(-4).map((m) => `${m.type}: ${m.text.slice(0, 140)}`).join(" | ");
+  throw new Error(`${side} build never satisfied preset readiness at ${url} (document: ${lastState})` +
+    (notes ? ` — browser said: ${notes}` : " — no console errors recorded (page likely never loaded: check proxy/TLS, see header notes)"));
 }
 
 function safeName(value) {
