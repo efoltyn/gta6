@@ -278,7 +278,15 @@
   // Buildings condemned while the animated-collapse cap was full. Drained a
   // few per frame (see drainCondemned) so levelling a district costs a steady
   // trickle of geometry rather than one catastrophic frame.
+  //
+  // THE ARRAY STAYS (drainCondemned's nearest-first scan + swap-remove needs
+  // indexable order); the Set is a pure MEMBERSHIP MIRROR. beginCollapse's
+  // dedup used to be `condemned.indexOf(rec) < 0`, an O(n) scan on every push —
+  // O(n^2) over a district nuke, which is exactly the shape that queues here
+  // (a 329-lot city empties into this array a few hundred entries deep). Every
+  // add/remove below keeps the two in lockstep; the Set is never iterated.
   const condemned = [];
+  const condemnedSet = new Set();
   // A nuclear ring can discover a whole block in one admission pass. Discovery
   // is cheap; S.hit is not (ledger allocation, fire, stage FX and possible
   // condemnation). Deferred batches preserve the exact radial admission and
@@ -1040,11 +1048,22 @@
     // frame" loop before that loop was (correctly) deleted as duplication.
     // The budget belongs HERE, once, for every condemnation source.
     if (!CBZ.CONFIG.STRUCT_COLLAPSE_V1 || collapsing.length >= maxCollapses()) {
-      if (condemned.indexOf(rec) < 0) condemned.push(rec);
+      if (!condemnedSet.has(rec)) { condemnedSet.add(rec); condemned.push(rec); }
       return;
     }
 
-    const h = b.h || (b.storeys * (b.FH || 3.2));
+    /* `|| 12` is a NaN TRAP of exactly the class the seat guard at the top of
+       hit() documents (see the `Math.floor(...) || 0` note and why it exists).
+       A lot whose building record carries NEITHER `h` NOR `storeys` — a stub
+       from a mod, a partially-built record, a net-replayed lot — makes
+       `b.storeys * FH` NaN. NaN then travels: h -> initY -> tDown/tUp ->
+       job.fall, and `k = job.t / job.fall` is NaN, so the `k >= 1` test that
+       ENDS the fall (below, in stepCollapse) is never true. The job holds one
+       of the 1..4 concurrency slots FOREVER and the whole feature wedges after
+       a single malformed record — the identical failure mode that guard fixed.
+       12 m ~= a 4-storey block, the median of the city's lots.
+       NaN || 12 === 12; every real height passes straight through. */
+    const h = b.h || (b.storeys * (b.FH || 3.2)) || 12;
     const w = rec.wound || { nx: 1, nz: 0, floor: 0 };
     /* ---- CRUSH-DOWN / CRUSH-UP -----------------------------------------
        The collapse starts AT THE WOUND and eats the building both ways. This
@@ -1175,6 +1194,22 @@
     }
     arr.length = w;
   }
+  /* PUBLISHED, NOT COPIED (Block Law). city/demolition.js carried the exact
+     disease this primitive was written for — indexOf+splice per window pane,
+     per collider, per platform, per LOS mesh, against the same city-sized
+     shared arrays (CBZ.colliders held 123,332 entries at seed 90210). Measured:
+     ONE destroy() of the 52-storey flagship (831 colliders + 2,152 panes) cost
+     432.9 ms; all 328 lots cost 5,679 ms — and a nuke pays that per condemned
+     building per frame through finishCollapse() below, at the WORST case,
+     because hideReal() has already purged those colliders so every indexOf is
+     a full-length miss. This same loop measured 6.2 ms against indexOf+splice's
+     36.9 ms on 3,000 removals.
+     demolition.js resolves this LAZILY at call time (`CBZ.structuralPurge`),
+     never at module scope: index.html loads demolition.js at line 862 and this
+     file at 1133, so a load-time capture would always be undefined. It also
+     keeps its own indexOf loops verbatim behind CBZ.CONFIG.DEMO_FAST_PURGE, so
+     this file simply not being loaded degrades to the old behaviour. */
+  CBZ.structuralPurge = purge;
 
   function hideReal(rec) {
     const b = rec.b;
@@ -1498,6 +1533,7 @@
       const rec = condemned[best];
       condemned[best] = condemned[condemned.length - 1];
       condemned.pop();
+      condemnedSet.delete(rec);                      // keep the membership mirror in lockstep
       if (!rec || rec.stage === STAGE.RUBBLE) continue;
       // Promote back to the animated path if a slot has opened since — the
       // spectacle is free when the budget allows it.
@@ -1578,6 +1614,7 @@
     collapsing.length = 0;
     // queued-but-untouched condemnations never ran hideReal, so they just drop
     condemned.length = 0;
+    condemnedSet.clear();
     deferredSweeps.length = 0;
     deferredSweepHead = 0;
     deferredSweepCount = 0;
