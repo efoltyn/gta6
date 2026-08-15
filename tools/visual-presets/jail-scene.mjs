@@ -78,7 +78,10 @@ const subjects = [
   { id: "venue-bunk-upper", label: "STEP 3 · Upper bunk · inmate asleep", hud: false,
     focus: "The same body on the upper rack. Mattress height, rail clearance, pillow alignment, and the lying pose must agree.",
     act: { poseBed: "upper" },
-    cam: { x: -8.95, y: 2.72, z: -41.55, ax: -12.15, ay: 2.04, az: -41.55 } },
+    // Framed off the RACK, so it follows world/cellblock.js's UP_TOP: the eye
+    // rides 0.75 over the mattress and looks 0.07 above it. The literals used to
+    // be 2.72/2.04 against a 1.97 mattress; the stack is 2.40 now.
+    cam: { x: -8.95, y: 3.15, z: -41.55, ax: -12.15, ay: 2.47, az: -41.55 } },
   { id: "venue-dayroom-seat", label: "STEP 3 · Dayroom table · inmate seated", hud: false,
     focus: "An inmate uses a bolted dayroom table: hips on the stool, feet on the floor, body facing the table, circulation lane still open.",
     act: { poseSeat: true },

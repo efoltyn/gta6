@@ -515,6 +515,61 @@
        bunk and a solid toilet and stay walkable. What is SOLID in this wing
        is the STRUCTURE (partitions, grille, door) — the same call
        city/arena_venue.js made about its seat banks, for the same reason. */
+  /* ---------- HOW HIGH THE TOP RACK SITS. It is a solved number, not a taste.
+
+     OWNER: "the bunk beds should be much taller." He is right, and the cell
+     itself says by how much. Four measurements, all of them already in this
+     repo, box the answer in:
+
+       LOW_TOP  0.79  lower mattress top          (drawn below; the propuse
+                      anchor and the lying-body solve are both pinned to it)
+       DECK_T   0.41  upper frame underside -> upper mattress top (0.28 frame
+                      + 0.18 mattress, less the 0.05 they overlap)
+       CH       3.60  cell interior height, floor -> roof slab (line 187)
+       SIT_UP   0.95  seated vertex above the surface you are sitting on.
+                      Derived from this engine's own body, not a catalogue:
+                      systems/fpsmode.js puts the standing eye at 1.65, so
+                      stature ~= 1.65/0.936 = 1.76 m, and erect sitting height
+                      is ~0.52 of stature = 0.92 m. 0.95 carries the 95th
+                      percentile.
+
+     WHAT WAS WRONG WITH 1.97. Two clearances, and they were absurdly lopsided:
+
+       bottom man:  1.56 (old deck underside) - 0.79 = 0.77 m  -> 0.18 SHORT of
+                    sitting up. You could not sit on your own bed.
+       top man:     3.60 - 1.97                     = 1.63 m  -> an entire
+                    standing person of dead air (the engine's standing eye is
+                    1.65) doing nothing above the top rack.
+
+     THE SOLVE — give both men the same room, because neither has any claim on
+     the other's air. With T the upper mattress top:
+
+       bottom clearance  c1 = (T - DECK_T) - LOW_TOP = T - 1.20
+       top clearance     c2 = CH - T                 = 3.60 - T
+       c1 = c2   ->   2T = LOW_TOP + DECK_T + CH = 4.80   ->   T = 2.40
+
+     T = 2.40 m, and c1 = c2 = 1.20 m — 0.25 m of slack over SIT_UP for each.
+     Feasible band was T in [2.15, 2.65] (2.15 = the bottom man can just sit
+     up, 2.65 = the top man can just sit up); 2.40 is its midpoint, which is
+     what "equal clearance" means when the two constraints are symmetric.
+
+     THREE CHECKS IT ALSO PASSES, none of which drove it:
+       · deck underside 1.99 > stature 1.76 — a standing body now clears the
+         upper rack instead of having the camera clip through it at 1.56.
+       · rail head 2.74 < CH 3.60, so nothing touches the roof slab.
+       · 2.40 / STEP_UP(0.45, systems/physics.js) = 5.33 -> 6 steps of 0.40,
+         which is what the ladder below is rebuilt to. The old ladder's first
+         rung was at 1.05 — chest height, reachable by nobody.
+
+     Net: +0.43 m on the top mattress (1.97 -> 2.40, +22%), +0.43 on the
+     silhouette (2.31 -> 2.74, +19%), and +56% on the clearance that was
+     actually broken (0.77 -> 1.20). One stack, one number, every consumer
+     (cells here, south-block dorm via CBZ.prisonBunk) reads it off the rig. */
+  const LOW_TOP = 0.79, DECK_T = 0.41, SIT_UP = 0.95, STEP_UP = 0.45;
+  const UP_TOP = Math.min(CH - SIT_UP,
+    Math.max(LOW_TOP + DECK_T + SIT_UP, (LOW_TOP + DECK_T + CH) / 2));   // -> 2.40
+  const UP_LIFT = UP_TOP - 1.97;        // every upper-rack box moves by this
+
   function bunkRig(c, x, z, along, dbl, blanket) {
     // ONE local frame instead of eleven `along === "z" ? … : …` ternaries.
     // `lat` = across the bunk, `lon` = along the lie axis with the PILLOW at
@@ -548,26 +603,50 @@
       bb(a * 0.55, 0.25, b2 * 1.25, 0.12, 0.50, 0.12, C_DARK);
     }
     if (dbl) {
-      bb(0, 1.70, 0, LAT, 0.28, LON, C_BUNK, {});                        // upper frame
-      bb(0, 1.88, 0, MLAT, 0.18, MLON, C_MATT);                          // upper mattress → 1.97
+      // The whole upper rack is ONE rigid body, so it moves as one: every box
+      // keeps its old relative position and takes UP_LIFT. Nothing here is a
+      // re-tuned literal, which is why the bedding still reads the same.
+      bb(0, 1.70 + UP_LIFT, 0, LAT, 0.28, LON, C_BUNK, {});              // upper frame → underside 1.99
+      bb(0, 1.88 + UP_LIFT, 0, MLAT, 0.18, MLON, C_MATT);                // upper mattress → UP_TOP (2.40)
       if (DET) {
-        bb(0, 1.815, 0, MLAT + 0.10, 0.09, MLON + 0.08, C_MATT);         // tucked sheet
-        bb(0, 1.98, 0.55, MLAT * 0.94, 0.10, 1.30, blanket);             // the top bunk gets bedding too
-        bb(0, 2.00, -0.09, MLAT * 0.96, 0.12, 0.18, C_MATT);             // turned-down fold
-        // GUARD RAIL down the open side + a two-rung ladder at the foot: the
-        // two fittings that say "somebody sleeps up there" rather than "shelf".
-        bb(LAT / 2 - 0.06, 2.16, 0.30, 0.08, 0.30, 1.60, C_DARK);
-        for (let r = 0; r < 2; r++) bb(0, 1.05 + r * 0.42, LON / 2 - 0.02, 0.60, 0.07, 0.07, C_DARK);
+        bb(0, 1.815 + UP_LIFT, 0, MLAT + 0.10, 0.09, MLON + 0.08, C_MATT);   // tucked sheet
+        bb(0, 1.98 + UP_LIFT, 0.55, MLAT * 0.94, 0.10, 1.30, blanket);       // the top bunk gets bedding too
+        bb(0, 2.00 + UP_LIFT, -0.09, MLAT * 0.96, 0.12, 0.18, C_MATT);       // turned-down fold
+        // GUARD RAIL down the open side + the ladder at the foot: the two
+        // fittings that say "somebody sleeps up there" rather than "shelf".
+        bb(LAT / 2 - 0.06, 2.16 + UP_LIFT, 0.30, 0.08, 0.30, 1.60, C_DARK);  // rail head → 2.74
+        // A REAL FLIGHT, not two rungs starting at chest height. The rise is
+        // pinned to systems/physics.js's STEP_UP — the tallest riser a body in
+        // this engine takes in one step — so the count follows the height
+        // instead of being a literal: ceil(2.40/0.45) = 6 steps of 0.40, the
+        // sixth of which is the deck itself. Stiles carry them, because five
+        // rungs hanging off nothing is not a ladder. Clear of the lower foot
+        // rail (which ends at LON/2 - 0.05 + 0.05) by sitting outboard of it.
+        const RUNGS = Math.max(2, Math.ceil(UP_TOP / STEP_UP));
+        const LADZ = LON / 2 + 0.05;
+        for (let r = 1; r < RUNGS; r++)
+          bb(0, (UP_TOP / RUNGS) * r, LADZ, 0.60, 0.07, 0.07, C_DARK);
+        for (const a of [-1, 1]) bb(a * 0.28, UP_TOP / 2, LADZ, 0.07, UP_TOP, 0.07, C_DARK);
       }
-      bb(0, 1.98, -1.00, 0.90, 0.14, 0.42, 0xdfe3ea);                    // upper pillow
-      for (const a of [-1, 1]) bb(a * 0.60, 1.05, a * 1.28, 0.10, 1.40, 0.10, C_DARK);   // corner posts
+      bb(0, 1.98 + UP_LIFT, -1.00, 0.90, 0.14, 0.42, 0xdfe3ea);          // upper pillow
+      // FOUR corner posts, carried from the lower frame's underside all the way
+      // to the rail head. The old pair stopped at 1.75 and stood on opposite
+      // DIAGONAL corners — the same "the eye reads it as broken" fault the legs
+      // above were fixed for, and at this height a rail resting on nothing is
+      // the first thing you would notice.
+      const PY0 = 0.35, PH = (UP_TOP + 0.34) - PY0;
+      for (const a of [-1, 1]) for (const b2 of [-1, 1]) {
+        if (!DET && a !== b2) continue;
+        bb(a * 0.60, PY0 + PH / 2, b2 * 1.28, 0.10, PH, 0.10, C_DARK);
+      }
     }
     // `topBunk` is the UPPER mattress surface, and it is null when there is no
     // upper rack — so "does this stack sleep two" is answered by the geometry
-    // that drew it and never by a constant somewhere else. The 1.97 matches the
-    // `bb(0, 1.88, 0, MLAT, 0.18, …)` upper mattress above, exactly the way
-    // `top: 0.79` matches the lower one.
-    return { x: x, z: z, top: 0.79, topBunk: dbl ? 1.97 : null, along: along };
+    // that drew it and never by a constant somewhere else. UP_TOP is the same
+    // symbol the `bb(0, 1.88 + UP_LIFT, …)` upper mattress was drawn from,
+    // exactly the way `top: LOW_TOP` matches the lower one — so raising the
+    // stack can never leave an anchor floating where the mattress used to be.
+    return { x: x, z: z, top: LOW_TOP, topBunk: dbl ? UP_TOP : null, along: along };
   }
 
   /* The cell is already the venue's best furniture. South-block housing must
@@ -587,7 +666,8 @@
       spec.double !== false, spec.blanket == null ? 0x5c6470 : spec.blanket);
     useBed(stack.bunk.x, stack.bunk.z, stack.bunk.along, stack.bunk.top, 2.60, stack, "bed", 0);
     if (stack.bunk.topBunk)
-      useBed(stack.bunk.x, stack.bunk.z, stack.bunk.along, stack.bunk.topBunk, 2.60, stack, "bedTop", 1.18);
+      useBed(stack.bunk.x, stack.bunk.z, stack.bunk.along, stack.bunk.topBunk, 2.60, stack, "bedTop",
+        stack.bunk.topBunk - stack.bunk.top);
     housingStacks.push(stack);
     return stack;
   };
@@ -658,12 +738,17 @@
     const bz = north ? c.z - c.dz * (c.hz - 1.55) : c.z - (c.hz - 1.40);
     c.bunk = bunkRig(c, bx, bz, "z", true, blanket);
     // THE BUNK IS A BED — BOTH RACKS. Each returns its own mattress top (0.79
-    // and 1.97) as the declared cushion, so an anchor can never drift off the
+    // and UP_TOP) as the declared cushion, so an anchor can never drift off the
     // mesh it belongs to. `c` + "bed"/"bunkTop" is where the records land once
     // the queue above is drained. A man on the top rack is a man who is not on
     // a floor mat, which is the whole point of drawing it.
+    // The upper anchor's own floor reference is the STACK PITCH, and it is now
+    // subtracted from the two tops rather than written down as 1.18 — the pitch
+    // moved with the rack, and a hardcoded copy of it would have registered
+    // every top-bunk sleeper against a floor that no longer exists.
     useBed(c.bunk.x, c.bunk.z, "z", c.bunk.top, 2.60, c, "bed", 0);
-    if (c.bunk.topBunk) useBed(c.bunk.x, c.bunk.z, "z", c.bunk.topBunk, 2.60, c, "bedTop", 1.18);
+    if (c.bunk.topBunk)
+      useBed(c.bunk.x, c.bunk.z, "z", c.bunk.topBunk, 2.60, c, "bedTop", c.bunk.topBunk - c.bunk.top);
 
     // TOILET + SINK at the back corner opposite the bunk, its back to masonry.
     const tx = north ? c.x + (c.hx - 0.55) : backX;
@@ -721,9 +806,15 @@
     // THE PLAYER'S CELL IS MARKED AS OURS — a red blanket (above), three taped
     // photographs over the bunk head and a scratched tally by the door. No
     // prompt and no icon: you recognise your own cell, which is the whole point.
+    // The photographs ride with the rack they are taped beside. At 2.35 they
+    // used to sit just over a 1.97 mattress; against the raised stack that is
+    // level with the upper mattress itself, i.e. behind it. UP_TOP + 0.56 keeps
+    // them where they always were relative to the man who looks at them —
+    // above his own pillow, clear of the 2.74 rail, under the 3.46 light strip.
     if (c.player) {
+      const PHOTO_Y = (c.bunk.topBunk || 1.97) + 0.56;
       for (let i = 0; i < 3; i++)
-        addBox(oppX + (north ? 0.03 : 0), 2.35, oppZ + (north ? -0.34 + i * 0.34 : 0.03), north ? 0.03 : 0.24, 0.30, north ? 0.24 : 0.03,
+        addBox(oppX + (north ? 0.03 : 0), PHOTO_Y, oppZ + (north ? -0.34 + i * 0.34 : 0.03), north ? 0.03 : 0.24, 0.30, north ? 0.24 : 0.03,
           [0xe8e2cf, 0xd9cdb4, 0xefe8d6][i], { cast: false });
       for (let i = 0; i < 6; i++)
         addBox(sideX - (north ? 0.03 : 0), 1.62 - ((i / 4) | 0) * 0.24, sideZ + (north ? -0.9 + (i % 4) * 0.11 : -0.03),
