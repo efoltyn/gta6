@@ -53,10 +53,10 @@ const subjects = [
     strip: { frames: 5, stepSec: 0.8 },
     cam: { dx: 0, dy: 11, dz: 15, adx: 0, ady: 1.2, adz: -14, fov: 55 } },
 
-  /* ---- ONE MAN, PROFILE: the stop itself ------------------------------- */
-  { id: "stop-profile", label: "One rifleman, from the side",
-    focus: "ONE MAN, SIDE-ON, so the stop is unmissable. Before: he closes and trades on the move — legs mid-stride in every frame, body facing his goal while the gun-arm drags toward the player. After: he walks to the spot his rifle wants, PLANTS, squares his spine on the mark, and delivers standing still. The after strip should look like four copies of one photograph; that photograph is the fix.",
-    act: { n: 1, dist: 19, weapons: ["AK-47"], pre: 3.5, sample: 1.5 },
+  /* ---- TWO RIFLES, PROFILE: the stop itself ----------------------------- */
+  { id: "stop-profile", label: "Two riflemen, from the side",
+    focus: "SIDE-ON, so the stop is unmissable. Before: they close and trade on the move — legs mid-stride in every frame, body facing the goal while the gun-arm drags toward the player. After: each walks to the spot his rifle wants, PLANTS, squares his spine on the mark, and delivers standing still. The after strip should look like four copies of one photograph; that photograph is the fix.",
+    act: { n: 2, dist: 19, weapons: ["AK-47", "AK-47"], pre: 3.5, sample: 1.5 },
     strip: { frames: 4, stepSec: 0.7 },
     cam: { dx: 8.5, dy: 2.2, dz: -12, adx: 0, ady: 1.3, adz: -12, fov: 46 } },
 
@@ -70,8 +70,9 @@ const subjects = [
 
   /* ---- HIDE: breaking contact when it goes wrong ------------------------ */
   { id: "hide-break", label: "Too hurt to trade — breaking contact",
-    focus: "A shooter cut to a third of his health. Before: his only move was nine metres STRAIGHT BACK — still in the open, still in the same firing lane the rounds are coming up, re-derived every frame so he backpedals forever. After: he breaks for somewhere the player CANNOT DRAW A LINE TO — real street cover if any is in reach, else away through the far hemisphere — and HOLDS it, watching the corner. hiddenEnd is the payoff as a bit: does the player's chest-height lane to him end in a wall when the window closes?",
-    act: { n: 1, dist: 13, weapons: ["Pistol"], pre: 1.2, sample: 1.2, hurtIdx: 0, hurtHp: 0.32 },
+    focus: "A shooter cut to a third of his health, with a kiosk the studio built OFF his lane — a real hidden pocket in his away hemisphere. Before: his only move was nine metres STRAIGHT BACK — still in the open, still in the same firing lane the rounds are coming up, re-derived every frame so he backpedals forever. After: he breaks for somewhere the player CANNOT DRAW A LINE TO and holds it, watching the corner. hiddenEnd is the payoff as a bit: does the player's chest-height lane to him end in a wall when the window closes?",
+    act: { n: 1, dist: 13, weapons: ["Pistol"], pre: 1.2, sample: 1.2, hurtIdx: 0, hurtHp: 0.32,
+      wall: { off: 8, dist: 20, w: 2.6, h: 2.4, d: 2.6 } },
     strip: { frames: 4, stepSec: 1.0 },
     cam: { dx: 9, dy: 7.5, dz: 4, adx: 0, ady: 1.1, adz: -16, fov: 60 } },
 
@@ -257,21 +258,12 @@ async function stageNpcTactics(input) {
         goalChurnMps: W.secs > 0.2 && S.cast.length
           ? Number((W.churn / W.secs / S.cast.length).toFixed(2)) : null,
         meanSpeed: W.speedN ? Number((W.speedSum / W.speedN).toFixed(2)) : null,
-        plantedEnd: S.cast.filter((m) => m && !m.dead && m._iqPlant).length,
-        // CAST-scoped, not city-wide: the audit's global count picked up
-        // off-camera brawlers 160 m away and called them "positioned".
-        positioned: S.cast.filter((m) => m && !m.dead && m._iqPos).length,
       };
       if (S.extra) { try { Object.assign(out, S.extra() || {}); } catch (_) {} }
-      // the position layer's own audit — dry picks vs committed positions is
-      // the difference between "no reachable spot existed" and "never asked".
-      try {
-        const au = CBZ.combatIQAudit ? CBZ.combatIQAudit() : null;
-        if (au && au.posPicks != null) { out.posPicks = au.posPicks; out.posDry = au.posDry; }
-      } catch (_) {}
-      // (deep diagnostics — the c0 goal trace and the external-tick counter —
-      // live on window.__npcTacticsStudio for a debugging session; the report
-      // table carries only numbers a reader can compare.)
+      // (position-layer bookkeeping — plant/pick/dry audit counts, the c0
+      // goal trace, the external-tick counter — lives on CBZ.combatIQAudit()
+      // and window.__npcTacticsStudio for debugging sessions; the report
+      // table carries only movement truths a reader can weigh at a glance.)
       return out;
     };
 
@@ -365,7 +357,8 @@ async function stageNpcTactics(input) {
   // mark doing nothing for the whole shoot (the do-nothing rifleman of run 3).
   const pool = (CBZ.cityPeds || []).filter((p) => p && !p.dead && !p.vendor && !p.child &&
     !p.companion && !p.recruited && !p.controlled && p.char && p.group &&
-    !p._parked && !p.culled && !p._spawnHidden);
+    !p._parked && !p.culled && !p._spawnHidden &&
+    !p.inCar && !p.driving);   // a rider is the vehicle system's puppet — cast one and it stands inert
   if (pool.length < act.n) return { ok: false, err: "cast pool too small: " + pool.length };
   // a cast mark outside the scanned-clear arena circle can land inside real
   // downtown geometry — walk it back toward the mark until it stands free.
@@ -400,6 +393,7 @@ async function stageNpcTactics(input) {
     m.maxHp = m.maxHp || 100;
     m.hp = act.hurtIdx === i ? Math.round(m.maxHp * (act.hurtHp || 0.3)) : m.maxHp;
     m.fear = 0; m.surrender = false; m.ko = 0; m.path = null;
+    m.attackCD = 0; m.pause = 0; m.stun = 0; m._windup = 0;   // no stale combat locks from a past life
     m.rage = PA; m.state = "fight"; m.alarmed = 8;
     // fresh tactical memory so the previous subject can't leak into this one
     m._iqPos = null; m._iqPlant = false; m._iqBear = null; m._iqCov = null;
@@ -541,22 +535,18 @@ export default {
   stageTimeoutMs: 600000,
   pairNote: "Same checkout · seed · mark · cast · cameras · simulated seconds — cfg_NPC_IQ_POSITIONS is the variable",
   method: "Both sides are THIS checkout served by the same local server; the before side boots with cfg_NPC_IQ_POSITIONS=0 (the tactics wave's one-line revert). The city boots, the rAF clock freezes, and CBZ.stepSim is the only time. A cast of real cityPeds is armed and raged at the real player on a scanned-clear mark; cover boxes and walls are built as mesh + collider + LOS blocker so they are equally real to eyes, bullets and feet on both sides. Film strips advance the same frozen simulation on both builds and the metrics are sampled over exactly the photographed frames.",
-  metricsNote: "avgTriggerSpeed is the owner's sentence as a number — the shooter's movement speed at the instant each real round left the gun (ammo decrement, not an animation guess). firingOnMovePct is how many of those rounds were fired on the move. goalChurnMps is the steering goal's wander — the per-frame goal rewrite the position layer removed. plantedEnd counts men standing planted on a picked position when the window closed; the before build has no such state by construction.",
+  metricsNote: "avgTriggerSpeed is the owner's sentence as a number — the shooter's movement speed at the instant each real round left the gun (ammo decrement, not an animation guess). firingOnMovePct is how many of those rounds were fired on the move. goalChurnMps is the steering goal's wander per man — the per-frame goal rewrite the position layer removed. All of them are sampled over exactly the simulated frames the pictures photograph.",
   metrics: {
     shotsFired: { label: "Rounds actually fired", unit: "rounds" },
     avgTriggerSpeed: { label: "Speed at the trigger pull", unit: "m/s", better: "lower" },
     firingOnMovePct: { label: "Rounds fired while moving", unit: "%", better: "lower" },
     goalChurnMps: { label: "Steering-goal wander", unit: "m/s per man", better: "lower" },
     meanSpeed: { label: "Mean cast speed", unit: "m/s", better: "lower" },
-    plantedEnd: { label: "Planted on a position at end", unit: "men", better: "higher" },
     distGainM: { label: "Ground gained away from the gun", unit: "m" },
     hiddenEnd: { label: "Out of the player's firing lanes at end", unit: "1=yes", better: "higher" },
     tuckedM: { label: "Hurt man's distance from the hide point", unit: "m", better: "lower" },
     wallHugPct: { label: "Time spent pressed against the wall", unit: "%", better: "lower" },
     laneClearEnd: { label: "Ended with a real firing lane", unit: "1=yes", better: "higher" },
-    posPicks: { label: "Positions picked (cumulative)", unit: "picks" },
-    posDry: { label: "Dry picks — no reachable spot (cumulative)", unit: "picks", better: "lower" },
-    positioned: { label: "Fighters holding a committed position", unit: "men", better: "higher" },
   },
   subjects,
   stage: stageNpcTactics,
