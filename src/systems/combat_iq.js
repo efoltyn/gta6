@@ -718,8 +718,11 @@
     if (!P || P.cls !== cls || P.x !== x || P.z !== z) {
       P = a._iqPos = { x: x, z: z, tx: tgt.pos.x, tz: tgt.pos.z, cls: cls };
     }
+    // latch at 1.35: the mover parks on the SEPARATED goal, which can rest a
+    // stride short of the raw position — measured as men standing still at
+    // their spot, firing, while the stricter 1.05 latch never granted "planted".
     const d = Math.hypot(a.pos.x - x, a.pos.z - z);
-    a._iqPlant = d < (a._iqPlant ? 1.7 : 1.05);
+    a._iqPlant = d < (a._iqPlant ? 1.7 : 1.35);
     if (a._iqPlant) a.target.set(x, a.target.y || 0, z);
     else { const s = separate(a, x, z, tgt); a.target.set(s.x, a.target.y || 0, s.z); }
     a._iqPosF = nowMs();
@@ -803,7 +806,13 @@
     const p = profile(a);
     if (!p || p.cls === "none") return null;
     if (C.NPC_IQ_POSITIONS !== false && a._iqPos && a._iqPlant) return _mg(true, "planted");
-    if (slotStr === "fire" && dist != null && !a._iqPos &&
+    // the BAND halt exists for consumers with no position system of their own
+    // (police.js keeps its cover/flank machinery). A posture-driven body with
+    // no committed position is position-less for a REASON — dry pocket, lost
+    // sight — and freezing it in band parked one on a blocked lane, holding
+    // fire forever. Its maneuvering is posture's job; let it move.
+    const postured = a._iqBrainF && (nowMs() - a._iqBrainF) < 300;
+    if (slotStr === "fire" && dist != null && !a._iqPos && !postured &&
         dist >= Math.min(4, p.lo * 0.7) && dist <= p.hi * 1.02) return _mg(true, "band");
     return _mg(false, "");
   };
@@ -945,6 +954,7 @@
     const dist = Math.hypot(dx, dz) || 0.001;
     _engaged++;
     IQ.aimTick(a, tgt, dt);
+    a._iqBrainF = nowMs();   // this body is posture-driven (moveGate reads it)
 
     // POSITION MODE availability (block 3b) — needed before the LOS block so
     // a committed position can survive a blink (see below).
@@ -1011,6 +1021,16 @@
     const wantCover = slot === "cover" || hurt || (a._iqSupp || 0) > 0;
 
     if (wantCover) {
+      // HIDE HYSTERESIS. A hurt man who committed to breaking contact holds
+      // that commitment for its window even if a scrap of cover drifts in and
+      // out of probe range on the way — the measured failure was the goal
+      // flapping cover↔hide at ~1 Hz (24 m/s of churn) as the 12 m cover
+      // radius crossed and re-crossed while he ran.
+      if (posOn && hurt && a._iqPos && a._iqPos.cls === "hide" && (a._iqHideT || 0) > 0) {
+        driveToPos(a, a._iqPos.x, a._iqPos.z, tgt, "hide");
+        a._iqHold = true;
+        return "hide";
+      }
       const cv = IQ.cover(a, tx, tz);
       if (cv) {
         _covered++;

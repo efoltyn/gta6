@@ -258,15 +258,16 @@ async function stageNpcTactics(input) {
           ? Number((W.churn / W.secs / S.cast.length).toFixed(2)) : null,
         meanSpeed: W.speedN ? Number((W.speedSum / W.speedN).toFixed(2)) : null,
         plantedEnd: S.cast.filter((m) => m && !m.dead && m._iqPlant).length,
+        // CAST-scoped, not city-wide: the audit's global count picked up
+        // off-camera brawlers 160 m away and called them "positioned".
+        positioned: S.cast.filter((m) => m && !m.dead && m._iqPos).length,
       };
       if (S.extra) { try { Object.assign(out, S.extra() || {}); } catch (_) {} }
       // the position layer's own audit — dry picks vs committed positions is
       // the difference between "no reachable spot existed" and "never asked".
       try {
         const au = CBZ.combatIQAudit ? CBZ.combatIQAudit() : null;
-        if (au && au.posPicks != null) {
-          out.posPicks = au.posPicks; out.posDry = au.posDry; out.positioned = au.positioned;
-        }
+        if (au && au.posPicks != null) { out.posPicks = au.posPicks; out.posDry = au.posDry; }
       } catch (_) {}
       // (deep diagnostics — the c0 goal trace and the external-tick counter —
       // live on window.__npcTacticsStudio for a debugging session; the report
@@ -359,8 +360,12 @@ async function stageNpcTactics(input) {
   if (act.coverBox) wallRef = addWall(act.coverBox);
 
   /* ---- cast the shooters ------------------------------------------------ */
+  // LIVE bodies only: a pooled/parked/culled rig sits in cityPeds but the ped
+  // pass `continue`s straight past it — cast one and it stands frozen at its
+  // mark doing nothing for the whole shoot (the do-nothing rifleman of run 3).
   const pool = (CBZ.cityPeds || []).filter((p) => p && !p.dead && !p.vendor && !p.child &&
-    !p.companion && !p.recruited && !p.controlled && p.char && p.group);
+    !p.companion && !p.recruited && !p.controlled && p.char && p.group &&
+    !p._parked && !p.culled && !p._spawnHidden);
   if (pool.length < act.n) return { ok: false, err: "cast pool too small: " + pool.length };
   // a cast mark outside the scanned-clear arena circle can land inside real
   // downtown geometry — walk it back toward the mark until it stands free.
@@ -465,10 +470,41 @@ async function stageNpcTactics(input) {
   setHud(false);
   const locked = input.referenceStage && input.referenceStage.camera;
   const cam = subject.cam;
-  const camAbs = locked || {
-    x: M.x + cam.dx, y: cam.dy, z: M.z + cam.dz,
-    ax: M.x + cam.adx, ay: cam.ady, az: M.z + cam.adz, fov: cam.fov || 50,
+  /* SELF-CORRECTING TRIPOD. The mark scan proves the STREET is clear at body
+     height — it says nothing about a balcony or an upper floor overhanging
+     it, and run 3 photographed a couch because the elevated camera sat
+     inside somebody's apartment. A tripod spot must (a) not be inside any
+     collider at its own height and (b) hold a clear line to what it is
+     shooting; otherwise pull it in, lower it, until it does. */
+  const camInside = (x, y, z) => {
+    try {
+      const near = CBZ.queryCollidersNear ? CBZ.queryCollidersNear(x, z, 1.0, []) : [];
+      for (const c of near) {
+        if (c.minX == null) continue;
+        if (x > c.minX - 0.4 && x < c.maxX + 0.4 && z > c.minZ - 0.4 && z < c.maxZ + 0.4) {
+          if (c.y0 == null || c.y1 == null) return true;
+          if (y > c.y0 - 0.2 && y < c.y1 + 0.4) return true;
+        }
+      }
+      return false;
+    } catch (_) { return false; }
   };
+  const camSees = (x, y, z, ax2, ay2, az2) => {
+    try { return !CBZ.clearLineOfFire || CBZ.clearLineOfFire(x, y, z, ax2, ay2, az2); }
+    catch (_) { return true; }
+  };
+  const solveCam = () => {
+    const look = { x: M.x + cam.adx, y: cam.ady, z: M.z + cam.adz };
+    for (const t of [{ s: 1, y: cam.dy }, { s: 0.75, y: cam.dy }, { s: 1, y: Math.min(cam.dy, 4.2) },
+                     { s: 0.55, y: Math.min(cam.dy, 3.4) }, { s: 0.4, y: 2.4 }]) {
+      const x = M.x + cam.dx * t.s, z = M.z + cam.dz * t.s, y = t.y;
+      if (camInside(x, y, z)) continue;
+      if (!camSees(x, y, z, look.x, look.y, look.z)) continue;
+      return { x, y, z, ax: look.x, ay: look.y, az: look.z, fov: cam.fov || 50 };
+    }
+    return { x: M.x + cam.dx * 0.3, y: 2.2, z: M.z + cam.dz * 0.3, ax: look.x, ay: look.y, az: look.z, fov: cam.fov || 50 };
+  };
+  const camAbs = locked || solveCam();
   S.applyCam = function () {
     const camera = CBZ.camera;
     camera.aspect = input.width / input.height;
