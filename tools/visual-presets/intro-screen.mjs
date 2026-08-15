@@ -67,10 +67,15 @@ export default {
     wordmarkTop: { label: "Wordmark position down the card", unit: "% of content", better: "lower" },
     contentOverflow: { label: "Content below the card's visible box", unit: "px", better: "lower" },
     visibleKeycaps: { label: "Keyboard key caps shown on a touch device", unit: "caps", better: "lower" },
+    raggedCells: { label: "Holes at the end of a wrapped row", unit: "cells", better: "lower" },
+    playOffCentre: { label: "PLAY off the centre of its own box", unit: "px", better: "lower" },
   },
   metricsNote:
     "Measured live in the page at each device frame. fillPct is the card's border box against the viewport width; " +
-    "scrollsToPlay is the distance from the card's scroll top to the bottom of #playBtn, in viewport heights.",
+    "scrollsToPlay is the distance from the card's scroll top to the bottom of #playBtn, in viewport heights. " +
+    "raggedCells walks the two pickers row by row (children grouped by laid-out top) and counts the cells the short " +
+    "rows are missing against the longest row — a full rectangle scores 0, and a roster that wraps 7-then-5 scores 2. " +
+    "playOffCentre is the distance between the centre of #playBtn and the centre of the box it lives in.",
 
   // A named function expression, not a shorthand method: the runner ships this
   // to the page via stage.toString(), and a shorthand method does not survive
@@ -118,6 +123,37 @@ export default {
       ? ((logo.getBoundingClientRect().top - cardRect.top + card.scrollTop) / Math.max(1, card.scrollHeight)) * 100
       : 100;
 
+    // RAGGEDNESS. A wrapping grid is only as tidy as its last row: `auto-fit`
+    // fitted seven 136px roles across a laptop and printed 7 then 5, leaving a
+    // two-cell hole in the right-hand end of the roster. Rows are recovered
+    // from the laid-out boxes (grouped by top, 2px tolerance) rather than from
+    // the CSS, so this counts what the player sees at THIS width whatever rule
+    // produced it. A hidden container contributes nothing.
+    const raggedIn = (selector) => {
+      const box = document.querySelector(selector);
+      if (!box || box.getBoundingClientRect().height <= 0) return 0;
+      const rows = new Map();
+      Array.from(box.children).forEach((child) => {
+        const rect = child.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return;
+        const key = Math.round(rect.top / 2) * 2;
+        rows.set(key, (rows.get(key) || 0) + 1);
+      });
+      const counts = Array.from(rows.values());
+      if (counts.length < 2) return 0;
+      const widest = Math.max.apply(null, counts);
+      return counts.reduce((sum, n) => sum + (widest - n), 0);
+    };
+    const raggedCells = raggedIn("#originSelect") + raggedIn("#modeSelect");
+
+    // PLAY was an inline-block sitting on the same text line as an inline-flex
+    // New Life button, which pushed it off the centre of the card by half of
+    // New Life's width. Measured against the box PLAY actually lives in.
+    const playHost = play && play.parentElement ? play.parentElement.getBoundingClientRect() : null;
+    const playOffCentre = playRect && playHost
+      ? Math.abs((playRect.left + playRect.width / 2) - (playHost.left + playHost.width / 2))
+      : 0;
+
     const touch = document.body.classList.contains("touch");
     const visibleKeycaps = !touch ? 0 : Array.from(document.querySelectorAll("#title .kbd, #title .keycap"))
       .filter((node) => {
@@ -143,6 +179,8 @@ export default {
         wordmarkTop,
         contentOverflow,
         visibleKeycaps,
+        raggedCells,
+        playOffCentre,
       },
     };
   },

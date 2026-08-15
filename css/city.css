@@ -25,14 +25,21 @@ body.mode-city .mode-survival-only { display: none; }
 }
 /* TWELVE ROLES, NAMED AND NOTHING ELSE (owner, 2026-08-14: "a hitman role
    speaks for itself"). The blurbs are gone, and with them the reason a card
-   had to be 210px wide and two lines tall — a name fits in half of that. The
-   picker now packs two across a phone and six across a laptop instead of
-   running off the bottom of every screen it met. `auto-fit` still absorbs a
-   thirteenth story with no edit here. */
+   had to be 210px wide and two lines tall — a name fits in half of that.
+
+   THE COLUMN COUNT IS CHOSEN, NOT LEFT TO FIT (owner, 2026-08-15: the layout
+   was "fucking dumb"). `auto-fit` fitted as many 136px cards as the row would
+   take, which on a laptop was SEVEN — so the roster printed 7 then 5, a ragged
+   row with a hole punched in the right-hand end of it. Twelve divides by 2, 3,
+   4 and 6, and every count below is one of those, so the picker is always a
+   full rectangle. A thirteenth story would leave a short last row at any width;
+   that is a layout decision to make then, not something a `minmax` can hide. */
 .origin-select {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(136px, 1fr));
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px; width: 100%; margin: 0 auto 4px;
 }
+@media (min-width: 480px) { .origin-select { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (min-width: 700px) { .origin-select { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 .origin-btn {
   pointer-events: auto; cursor: pointer; font-family: inherit; text-align: center;
   border: 2px solid #2a2622; border-bottom-width: 5px; border-radius: 12px;

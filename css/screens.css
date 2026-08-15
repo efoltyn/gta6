@@ -98,13 +98,20 @@
   margin-top:22px; padding-top:16px;
   border-top:2px dashed rgba(124,90,58,.28);
 }
+/* SIX TILES, SIX EQUAL CELLS. Until 2026-08-15 this was `auto-fit` over six
+   things of two different shapes, and it came out lopsided at every desktop
+   width: the four mode tiles fitted four of the eight columns a 1100px card
+   offered and stopped two-thirds of the way across, while the two launchers
+   spanned the whole rule as 90px-tall bars holding one line of 12px type. Six
+   divides by 2 and 3; the grid uses those, and every tile is the same cell. */
 .mode-select{
-  display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px;
+  display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px;
   width:100%; margin:0 auto;
 }
-/* A launcher tile spans the grid: it leaves the page, so it must not read as
-   a fifth sibling of four modes that stay. */
-.mode-launch{ grid-column:1 / -1; background:linear-gradient(180deg,#fff,#ffeede); }
+@media (min-width:760px){ .mode-select{ grid-template-columns:repeat(3,minmax(0,1fr)); } }
+/* A launcher still reads as a different KIND of tile — warm fill and a trailing
+   arrow say it leaves the page — it just no longer says so by being enormous. */
+.mode-launch{ background:linear-gradient(180deg,#fff,#ffeede); }
 .mode-launch span::after{ content:" \2192"; opacity:.5; }
 .mode-btn{
   pointer-events:auto; cursor:pointer; font-family:inherit; text-align:center;
@@ -144,54 +151,78 @@
 .quality-btn:active{transform:translateY(2px); border-bottom-width:2px;}
 #qualityPreset + #playBtn{margin-top:16px;}
 
+/* PLAY BELONGS ON ITS OWN LINE. #playBtn is an inline-block and .new-life-btn
+   an inline-flex, so the two shared a text line and PLAY sat visibly left of
+   centre with New Life parked beside it — the most-pressed button on the game
+   was the one thing on the screen that was not aligned to anything. A flex
+   column puts one under the other and centres both, at every width. */
+.title-actions{display:flex; flex-direction:column; align-items:center;}
+
 @media (max-width:520px){
   .quality-select{gap:5px;}
   .quality-btn{padding-inline:3px;}
   .quality-btn small{font-size:9px;}
 }
 
-/* A PHONE ON ITS SIDE HAS ONE LONG AXIS AND ONE SHORT ONE, and the title card
-   used to stack everything down the short one: PLAY sat 2.26 screenfuls below
-   the fold on an iPhone 16 in landscape. Here the card becomes two columns —
-   the live mode card on the left, the three things you actually press on the
-   right — so the first screen ends with PLAY on it.
+/* ============================================================
+   TWO COLUMNS: THE ROSTER, THEN THE RAIL
+   ------------------------------------------------------------
+   The card was one column of THREE different widths (owner, 2026-08-15). The
+   roles ran the full 1100px; Graphics and PLAY shrank to a 460px strip down
+   the middle with 300px of empty paper either side of them; then MORE GAMES
+   went full width again. PLAY was not even centred in its own strip, because
+   New Life stood next to it. And the whole stack was tall enough that a 1100px
+   card scrolled INSIDE a 1512px display.
 
-   Placement is explicit (each item names its column and row) because
-   auto-placement would drop the right column BELOW the mode card instead of
-   beside it. Track SIZING stays auto — see the note inside. The mode cards are
-   matched as `div…-only:not(.smallnote)` because the same mode classes also
-   gate the footer notes and the New Life button, which belong elsewhere. */
-@media (orientation:landscape) and (max-height:600px){
+   So: what you are choosing from goes left, what you press goes right, and the
+   other games run along the bottom under their rule. Two very different
+   screens want that same shape — a desktop (lots of width, no reason to use a
+   third of it) and a phone on its side (one long axis, and PLAY was 2.26
+   screenfuls below the fold before it got one) — so they share the rule.
+
+   Placement is explicit because auto-placement drops the rail BELOW the mode
+   card rather than beside it. The mode cards are matched as
+   `div…-only:not(.smallnote)`: the same mode classes gate the footer notes,
+   and a .smallnote.mode-city-only landing in the card's cell prints itself
+   straight across the wordmark.
+============================================================ */
+@media (min-width:900px), (orientation:landscape) and (max-height:600px){
   #title .card-box{
     display:grid; align-content:start;
-    grid-template-columns:minmax(0,1.75fr) minmax(0,1fr);
-    /* Rows stay AUTO on purpose. A `1fr` middle row looks like the way to let
-       PLAY take up the slack, but with an indefinite container height it
-       resolves to nothing: the row collapses, rows 4+ start above the bottom of
-       the mode card that spans 1-3, and the MORE GAMES strip prints itself
-       through the role grid. Auto rows share the spanning card's height. */
-    column-gap:22px; padding:16px 22px 14px;
+    grid-template-columns:minmax(0,1.85fr) minmax(0,1fr);
+    column-gap:26px; padding:22px 26px 18px; text-align:center;
   }
-  /* `:not(.smallnote)` on EVERY mode class, not just three of them: the footer
-     notes wear the same mode-gating classes as the cards they belong to, and a
-     .smallnote.mode-city-only placed in the card's cell prints itself straight
-     across the wordmark. */
   #title .card-box > div.mode-city-only:not(.smallnote),
   #title .card-box > div.mode-escape-only:not(.smallnote),
   #title .card-box > div.mode-survival-only:not(.smallnote),
-  #title .card-box > div.mode-gungame-only:not(.smallnote){grid-column:1; grid-row:1 / span 3;}
-  #title .card-box > #qualityPreset{grid-column:2; grid-row:1; margin-top:0;}
-  #title .card-box > #playBtn{grid-column:2; grid-row:2; width:100%; margin-top:10px;}
-  #title .card-box > #newLifeBtn{grid-column:2; grid-row:3; width:100%; margin-top:10px; align-self:end;}
+  #title .card-box > div.mode-gungame-only:not(.smallnote){grid-column:1; grid-row:1;}
+  /* The rail is ONE grid item, so it stretches to the roster's height and can
+     lay itself out inside: presets at the top, PLAY pushed to the bottom by
+     `margin-top:auto` so it lands level with the last row of roles. */
+  #title .card-box > .title-actions{
+    grid-column:2; grid-row:1; align-items:stretch; gap:10px;
+  }
   #title .card-box > .mode-strip-label,
   #title .card-box > .mode-select,
   #title .card-box > .smallnote{grid-column:1 / -1;}
-  /* 8vw of an 852pt-wide phone is a 68px wordmark on a 393px-tall screen. */
+  #title .title-actions > #qualityPreset{width:100%; margin:0;}
+  /* Three across is a 460px control; the rail is ~350px and the labels stop
+     fitting. Stacked, each preset gets a full-width row and reads at a glance. */
+  #title .title-actions .quality-select{grid-template-columns:1fr; gap:7px;}
+  #title .title-actions .quality-btn small{white-space:normal;}
+  #title .title-actions > #playBtn{width:100%; margin:auto 0 0; padding-block:18px; font-size:24px;}
+  #title .title-actions > #newLifeBtn{width:100%; margin:0;}
+}
+
+/* The phone-on-its-side half of that rule, where vertical room is the scarce
+   thing: 8vw of an 852pt-wide phone is a 68px wordmark on a 393px-tall screen. */
+@media (orientation:landscape) and (max-height:600px){
+  #title .card-box{column-gap:22px; padding:16px 22px 14px;}
   #title .logo{font-size:clamp(28px,5.6vh,42px);}
   #title .origin-label{margin:9px 0 5px;}
   #title .origin-btn{padding:8px 8px 7px;}
   #title .mode-strip-label{margin-top:14px; padding-top:12px;}
-  #title .btn{padding:12px 26px; font-size:19px;}
+  #title .title-actions > #playBtn{padding-block:12px; font-size:19px;}
 }
 
 /* A 667pt phone is 185pt shorter than a 16 and carries the roster six rows

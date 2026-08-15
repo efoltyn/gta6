@@ -235,6 +235,15 @@
       </details>
     </div>
 
+    <!-- THE THINGS YOU PRESS, IN ONE BOX. Graphics, PLAY and New Life used to
+         be three loose children of the card, each picking its own width: the
+         roles above them ran the full 1100px, these shrank to a 460px strip
+         down the middle, and PLAY sat off-centre because New Life stood beside
+         it. Boxed together they become a rail — beside the roster on a wide
+         screen, under it on a phone — and PLAY is centred in it either way.
+         Nothing here is addressed by position: state.js, newlife.js, quality.js
+         and gamepad.js all reach these by id. -->
+    <div class="title-actions">
     <div id="qualityPreset" class="quality-preset" aria-label="Choose graphics quality">
       <div class="quality-preset-label">Graphics</div>
       <div class="quality-select">
@@ -248,6 +257,7 @@
     <button class="new-life-btn mode-city-only" id="newLifeBtn" type="button">
       <span>New Life</span><small>Clear every saved city character</small>
     </button>
+    </div><!-- /.title-actions -->
     <!-- THE OTHER GAMES, BELOW THE GAME. This strip used to be the first
          thing on the title card, which made the screen a menu of six
          products instead of one game you are about to play. It keeps every
@@ -484,7 +494,7 @@
      Runtime deps (markCollidersDirty, queryCollidersNear, propNearestSeat) are
      all resolved inside the per-frame driver, never at parse. -->
 <script src="src/systems/pushables.js?v=push2"></script>
-<script src="src/world/carfx.js?v=carfx1"></script>
+<script src="src/world/carfx.js?v=racepaint1"></script>
 <script src="src/world/ground.js"></script>
 <script src="src/world/cellblock.js"></script>
 <script src="src/world/yard.js"></script>
@@ -938,7 +948,7 @@
      frame island_speedway.js publishes; both run at world-build time so either
      order works — kept adjacent for readability. -->
 <script src="src/city/speedway_structures.js?v=circuit1"></script>
-<script src="src/city/island_speedway.js?v=touchclose1"></script>
+<script src="src/city/island_speedway.js?v=raceweekend1"></script>
 <script src="src/city/island_airport.js?v=aircraftroot4w9w11x"></script>
 <!-- THE AIRFIELD KIT + THE SECOND AIRPORT. buildAirfield() lays a complete
      field (runway, markings, edge lights, taxiway, apron, stands, terminal,
@@ -1046,12 +1056,12 @@
 <script src="src/city/aircraft.js?v=localheli2w11"></script>
 <script src="src/city/traffic.js?v=air911-1w9"></script>
 <script src="src/city/carparts.js?v=brands1"></script>
-<script src="src/city/playercars.js?v=b2cam2"></script>
+<script src="src/city/playercars.js?v=racepaint1"></script>
 <script src="src/city/crashfx.js?v=nukefix1"></script>
 <script src="src/city/crashdeform.js?v=deform1"></script>
 <script src="src/systems/skidmarks.js?v=skid1"></script>
 <script src="src/systems/dustfx.js?v=dust1"></script>
-<script src="src/city/vehicles.js?v=seamount1"></script>
+<script src="src/city/vehicles.js?v=racepaint1"></script>
 <script src="src/city/playerair.js?v=air3"></script>
 <script src="src/city/playeraircraft.js?v=swepthull3w9w11u"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
@@ -1169,7 +1179,7 @@
      read as a broken aircraft. One registry, declared next to the key tests that
      consume them; pops once per context and stays until dismissed; [?] reopens.
      Revert with ?cfg_CONTROLS_CARD=0. -->
-<script src="src/systems/controls.js?v=carbuttons1"></script>
+<script src="src/systems/controls.js?v=raceweekend1"></script>
 <script src="src/city/roadrules.js?v=rules2w9xt"></script>
 <!-- AIRSIDE GROUND TRAFFIC (owner: "cars spawning randomly inside airport near
      runway — it's dumb"). Two halves of one fix. roadrules.js now CLOSES the
@@ -1283,11 +1293,11 @@
 <script src="src/city/minicities.js?v=sim4w9x"></script>
 <script src="src/city/spawnplaces.js?v=sim2"></script>
 <script src="src/city/scenedirector.js?v=seawave1"></script>
-<script src="src/city/race_livery.js?v=sim2"></script>
-<script src="src/city/racing.js?v=sim4"></script>
+<script src="src/city/race_livery.js?v=racepaint1"></script>
+<script src="src/city/racing.js?v=raceweekend1"></script>
 <!-- THE RACING GAME: real driving opponents (one brain for oval + street) + race scorer + racing HUD -->
-<script src="src/city/racedrivers.js?v=race2"></script>
-<script src="src/city/racehud.js?v=touchclose1"></script>
+<script src="src/city/racedrivers.js?v=raceweekend1"></script>
+<script src="src/city/racehud.js?v=raceweekend1"></script>
 <script src="src/city/racecareer.js?v=ladder1"></script>
 <!-- custom dialogue + street talk (one contextual YES/NO decision) — after the registry -->
 <script src="src/systems/custom_dialogue.js?v=ce1"></script>
