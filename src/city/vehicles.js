@@ -4549,8 +4549,25 @@
     // MARINE: a hull on open water rides the water surface instead of the flat
     // car-height y=0. Position is never forced back into the walkable-land
     // union; quays are enforced only by their visible collision geometry.
-    const onWater = overWater(car.pos.x, car.pos.z);
-    const marine = isMarineCar(car) && onWater;
+    /* WHICH WATER TEST, AND IT DEPENDS ON THE HULL. The same point under a
+       bridge is water to the boat passing beneath and dry deck to the car
+       driving over — and waterfield.js's isSurfaceWater cannot tell them
+       apart, because the question carries no y and it has to keep the deck
+       dry or every car on a causeway floods. So the split is made HERE,
+       where the asker is known: a marine hull reads cityNavWaterAt (which
+       adds the registered river channel under a deck), everything with
+       wheels keeps cityWaterAt exactly as before.
+
+       Without this a river cannot pass under a highway, and this country
+       carries 31 link regions — city/river.js measured that there is no
+       route from the harbour to any coast that avoids them all. With it in
+       the shared oracle instead, the gate caught a car floating: CARS ON
+       WATER: 1. */
+    const isHull = isMarineCar(car);
+    const onWater = isHull && CBZ.cityNavWaterAt
+      ? !!CBZ.cityNavWaterAt(car.pos.x, car.pos.z)
+      : overWater(car.pos.x, car.pos.z);
+    const marine = isHull && onWater;
     // ---- BOAT_NO_LAND: the exact mirror of CARS_NO_WATER below. A road car
     // in the sea floods; a boat on the sand is AGROUND. water_helm.js keeps a
     // hull UNDER WAY from ever crossing the waterline, but a hull can still

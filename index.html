@@ -872,7 +872,7 @@
 <!-- Shared signed shoreline/depth/current oracle. Loaded immediately after
      the landmass registry so rendering, swimmers, boats and aquatic wildlife
      all consult the same coast instead of inventing separate radius tests. -->
-<script src="src/city/waterfield.js?v=marinefix1"></script>
+<script src="src/city/waterfield.js?v=riverchan1"></script>
 <!-- Reflective-ocean FX: swaps CBZ.citySea for a THREE.WaterReflect plane when
      CBZ.CONFIG.WATER_REFLECT is on (default). Reads the sea lazily at runtime,
      so load order past config.js + WaterReflect.js is all it needs. -->
@@ -1061,7 +1061,7 @@
 <script src="src/city/crashdeform.js?v=deform1"></script>
 <script src="src/systems/skidmarks.js?v=skid1"></script>
 <script src="src/systems/dustfx.js?v=dust1"></script>
-<script src="src/city/vehicles.js?v=racepaint1"></script>
+<script src="src/city/vehicles.js?v=racepaint2nav"></script>
 <script src="src/city/playerair.js?v=air3"></script>
 <script src="src/city/playeraircraft.js?v=swepthull3w9w11u"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
@@ -1596,9 +1596,20 @@
      seats + an "[E] Sit at the table" that opens the casino floor. Loads after
      countries.js and its deps (interactions.js, activities.js, worldmap). -->
 <script src="src/city/casino.js?v=casino1s"></script>
+<!-- THE RIVER: the marina's way to the sea. The harbour pass in continent.js
+     opens a 67 m bay ring around the city rect and closes it on all four
+     sides, so every boat in the game floated in a moat — a flood fill from a
+     berth reached 314 m and stopped, with the nearest real coast 7 km away.
+     This routes ONE channel from the ring to open water, avoiding POIs and
+     bridging the roads it must cross, and registers it as a single polyline
+     water body so continent.js's own shore field carves it — same water as
+     the ocean, no second oracle. MUST load and run (order 96.5) BEFORE
+     continent.js at 97, which snapshots city.waterBodies once.
+     Revert with ?cfg_CITY_RIVER=0. -->
+<script src="src/city/river.js?v=river1"></script>
 <!-- THE CONTINENT: runs after every landmass builder (order 97) and fills the
      ocean between POIs with walkable backcountry — one world, not circles. -->
-<script src="src/city/continent.js?v=allmain1"></script>
+<script src="src/city/continent.js?v=allmain2river"></script>
 <script src="src/city/demographics.js?v=world1"></script>
 <!-- X6: the affinity matrix (country/state/city relations) — after
      countries.js (CBZ.COUNTRIES) and officials.js/polity.js (both already
