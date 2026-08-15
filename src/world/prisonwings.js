@@ -104,6 +104,13 @@
   // world/yard.js parses BEFORE this file and reads the same flag for its gate
   // gaps, so whichever runs first sets it and the other no-ops.
   if (CBZ.CONFIG.PRISON_WINGS_V1 == null) CBZ.CONFIG.PRISON_WINGS_V1 = true;
+  /* PRISON_PROP_HONESTY_V1 (declared world/cellblock.js, which parses first)
+     is the one-line revert for the 2026-08-15 prop pass in this file: the
+     three cage racks, segregation's registered bunks, the powerhouse plant
+     and central control's video wall all fall back to the geometry they
+     shipped with. Read `!== false` so this file still degrades on its own if
+     the cell house is absent. */
+  const HONEST = CBZ.CONFIG.PRISON_PROP_HONESTY_V1 !== false;
   if (!CBZ.CONFIG.PRISON_WINGS_V1) return;
 
   const OUT = CBZ.WORLD.wings || { x0: -124, x1: 124, z0: -116, z1: 128 };
@@ -445,9 +452,57 @@
     pane(xf, (z0 + z1) / 2, 0.12, z1 - z0);
     for (let i = 0; i * 0.44 < z1 - z0 - 0.2; i++) addBox(xf, ch / 2, z0 + 0.2 + i * 0.44, 0.08, ch - 0.04, 0.08, 0x2a2f38, { cast: false });
     addBox(xf, ch + 0.02, (z0 + z1) / 2, 0.12, 0.12, z1 - z0, 0x2a2f38, { cast: false });
-    // shelving, so the cage is visibly holding something before you get in
-    for (let s = 0; s < 3; s++)
-      addBox((x0 + x1) / 2, 0.62 + s * 0.72, (z0 + z1) / 2, (x1 - x0) - 1.6, 0.07, (z1 - z0) - 1.6, 0xb9a184, { cast: false });
+    // the three room-sized "shelves" this used to end with — see cageRack below
+    if (!HONEST) for (let s2 = 0; s2 < 3; s2++)
+      addBox((x0 + x1) / 2, 0.62 + s2 * 0.72, (z0 + z1) / 2, (x1 - x0) - 1.6, 0.07, (z1 - z0) - 1.6, 0xb9a184, { cast: false });
+    return cfg;
+  }
+
+  /* ---- THE RACK THE CAGE IS ACTUALLY HOLDING SOMETHING ON ---------------
+     WHAT WAS HERE, and it was the worst thing in the compound. `cage()` ended
+     with three "shelves" sized to the WHOLE cage:
+         addBox(cx, 0.62 + s*0.72, cz, (x1-x0)-1.6, 0.07, (z1-z0)-1.6, 0xb9a184)
+     In the tool crib that is a 10.4 x 14.4 m cream plane, 7 cm thick, three of
+     them stacked, and it was the entire visible content of the room. Measured
+     by tools/visual-presets/prison-rooms.mjs against the baseline in
+     artifacts/visual-comparisons/prison-rooms-audit: deadPropVolume 10.48 m3
+     in the tool crib, 7.57 in the knife cage, 9.03 in the property cage —
+     27.08 m3 of "shelf" a body walked straight through, in three rooms that
+     exist to hold three or four placed items each.
+
+     What replaces it is sized to the ITEMS, not to the room. One steel rack
+     on the cage's back wall: four decks, four uprights, a back sheet, and ONE
+     collider over its own footprint, so a body is stopped by it and it is
+     cover. The deck at 0.80 m is the surface the cage's placed items lie on —
+     the same 0.80 m every stockCage() row below already declared, which is
+     what "standing where they lie" means here.
+
+     0.55 m DEEP IS THE LOAD-BEARING NUMBER. systems/prisondrops.js:78 picks a
+     floor item up inside AUTO_R = 1.15 m; with a 0.55 m rack and the items set
+     0.12 m proud of its centre line, a man stopped against the face stands
+     ~0.73 m from the prize. Deeper than that and making the rack solid would
+     lock the cage's own contents away behind it.
+
+     NOT blockLOS, deliberately: gun-room grammar rule (a) is that you can SEE
+     what the lock is holding, and a rack that occludes it removes the only
+     reason the 3.2-5.6 s pick is worth starting.                            */
+  const RACK_D = 0.55, RACK_DECKS = [0.40, 0.80, 1.24, 1.70], RACK_H = 1.86;
+  function cageRack(cfg) {
+    if (!HONEST) return cfg;
+    const L = cfg.len, F = cfg.face || 1;        // F: which way the back sheet faces
+    for (const y of RACK_DECKS)
+      addBox(cfg.x, y - 0.025, cfg.z, L - 0.16, 0.05, RACK_D - 0.08, 0x9aa2aa, { cast: false });
+    for (const s of [-1, 1]) for (const t of [-1, 1])
+      addBox(cfg.x + s * (L / 2 - 0.05), RACK_H / 2, cfg.z + t * (RACK_D / 2 - 0.05),
+        0.08, RACK_H, 0.08, 0x5b6470, { cast: false });
+    addBox(cfg.x, RACK_H / 2, cfg.z + F * (RACK_D / 2 - 0.025), L, RACK_H, 0.05, 0x6f7883, { cast: false });
+    // ONE collider for the unit. addBox's own `solid:` would give each deck a
+    // rect of its own and the frame none: a rack is one piece of furniture and
+    // is stopped against as one.
+    const col = { minX: cfg.x - L / 2, maxX: cfg.x + L / 2,
+      minZ: cfg.z - RACK_D / 2, maxZ: cfg.z + RACK_D / 2, y0: 0, y1: RACK_H };
+    CBZ.colliders.push(col);
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     return cfg;
   }
 
@@ -492,7 +547,12 @@
      it, and the door moves onto that same face with it. */
   const CRIB_DOOR = { a0: -110.4, a1: -107.4, fixed: 28 };
   cage({ x0: -116, x1: -104, z0: 28, z1: 44, side: "E", open: "N", h: 2.9, gap: CRIB_DOOR });
-  stockCage([["Hacksaw Blade", -110, 0.80, 36], ["Lockpick", -108.4, 0.80, 34.6], ["Pickaxe", -111.6, 0.80, 34.6]]);
+  // the rack stands on the crib's back wall (z=44, the shop's own), facing the
+  // door: the three tools are the first thing you see through the bars.
+  cageRack({ x: -110, z: 43.35, len: 5.0, face: 1 });
+  stockCage(HONEST
+    ? [["Hacksaw Blade", -110, 0.80, 43.23], ["Lockpick", -108, 0.80, 43.23], ["Pickaxe", -112, 0.80, 43.23]]
+    : [["Hacksaw Blade", -110, 0.80, 36], ["Lockpick", -108.4, 0.80, 34.6], ["Pickaxe", -111.6, 0.80, 34.6]]);
   const cribDoor = makeDoor({
     id: "prison-tool-crib", label: "The tool crib", pick: 3.2, bars: true, lb: 5,
     axis: "x", a0: CRIB_DOOR.a0, a1: CRIB_DOOR.a1, fixed: CRIB_DOOR.fixed, color: 0x39424e,
@@ -504,14 +564,61 @@
      it gives is COVER and a second way to cross the west wing at night. */
   room({ id: "powerhouse", x0: -112, x1: -84, z0: 62, z1: 94, h: 8,
     wall: 0x6f7883, floor: 0x5e656e, side: "E", dc: 78, dw: 5 });
-  for (let i = 0; i < 3; i++) {
-    addBox(-104 + i * 8, 2.0, 70, 4.0, 4.0, 4.0, 0x7d8794, { solid: true });         // boilers
-    addBox(-104 + i * 8, 4.6, 70, 1.1, 1.2, 1.1, 0x5b6470, { cast: false });
-    addBox(-104 + i * 8, 5.9, 70, 0.7, 1.4, 0.7, 0x4a525c, { cast: false });         // flue
+  /* PLANT A BODY MOVES THROUGH — not three cubes in 896 m2.
+     WHAT WAS MEASURED (prison-rooms baseline): 35 props, 10 solid, 15 dead.
+     Three 4 m grey cubes, each carrying a smaller cube and a "flue" that
+     started at 5.2 m, plus five 24 m pipe lines drawn at y 6.4. The comment
+     above states this room's whole purpose — COVER, and a second way to cross
+     the west wing at night — and NOTHING in it was cover: every piece a man
+     could have used was two metres over his head, and the walk from the door
+     to the far wall was a straight line across an empty 28 x 32 m slab.
+     The fix is not more boxes, it is the same boxes at body height. The flues
+     come down to the FLOOR as uptake columns standing beside their boilers,
+     and the pipe runs come down to chest height as three staggered banks. All
+     of it solid, the banks LOS-blocking, and laid so that straight line from
+     the door to the far wall no longer exists. Still unlocked, still
+     empty-handed: an authored outcome, now with authored geometry. */
+  if (!HONEST) {                                     // the shipped powerhouse, byte for byte
+    for (let i = 0; i < 3; i++) {
+      addBox(-104 + i * 8, 2.0, 70, 4.0, 4.0, 4.0, 0x7d8794, { solid: true });
+      addBox(-104 + i * 8, 4.6, 70, 1.1, 1.2, 1.1, 0x5b6470, { cast: false });
+      addBox(-104 + i * 8, 5.9, 70, 0.7, 1.4, 0.7, 0x4a525c, { cast: false });
+    }
+    for (let i = 0; i < 5; i++) addBox(-98, 6.4, 76 + i * 3.4, 24, 0.34, 0.34, 0x66717c, { cast: false });
+    addBox(-88, 1.1, 88, 2.4, 2.2, 1.2, 0x515a66, { solid: true });
+    addBox(-88, 1.7, 87.35, 1.8, 0.9, 0.08, 0x9fd6ff, { emissive: 0x3a6ea5, ei: 0.5, cast: false });
   }
-  for (let i = 0; i < 5; i++) addBox(-98, 6.4, 76 + i * 3.4, 24, 0.34, 0.34, 0x66717c, { cast: false });  // pipe runs
-  addBox(-88, 1.1, 88, 2.4, 2.2, 1.2, 0x515a66, { solid: true });                     // switchgear
-  addBox(-88, 1.7, 87.35, 1.8, 0.9, 0.08, 0x9fd6ff, { emissive: 0x3a6ea5, ei: 0.5, cast: false });
+  for (let i = 0; HONEST && i < 3; i++) {
+    const bx = -104 + i * 8;
+    addBox(bx, 2.0, 70, 4.0, 4.0, 4.0, 0x7d8794, { solid: true });                    // boiler
+    addBox(bx, 4.6, 70, 1.1, 1.2, 1.1, 0x5b6470, { cast: false });                    // header drum, on the boiler's own footprint
+    // the uptake: a full-height duct off the boiler's west shoulder. It used
+    // to be a 0.7 x 1.4 box floating at 5.9 m with four metres of air under it.
+    addBox(bx - 2.6, 4.0, 70, 0.8, 8.0, 0.8, 0x4a525c, { solid: true, blockLOS: true });
+  }
+  /* A PIPE BANK IS PIPES. Three runs stacked to 1.6 m on stanchions every
+     3.5 m, each run its own collider — cover you crouch behind and a wall you
+     cannot walk through, which is what the five overhead lines were pretending
+     to be. blockLOS only on the middle run: one blocker per bank is what a
+     guard's sight line needs, three would be two wasted rays per bank. */
+  function pipeBank(bx0, bx1, z) {
+    const len = bx1 - bx0, cx = (bx0 + bx1) / 2;
+    const ys = [0.62, 1.02, 1.42];
+    for (let i = 0; i < ys.length; i++)
+      addBox(cx, ys[i], z, len, 0.34, 0.34, i === 1 ? 0x5b6470 : 0x66717c,
+        { solid: true, blockLOS: i === 1 });
+    for (let s = 0; s * 3.5 <= len; s++)
+      addBox(bx0 + Math.min(s * 3.5, len), 0.80, z, 0.16, 1.60, 0.52, 0x515a66, { solid: true });
+  }
+  if (HONEST) { pipeBank(-110, -98, 76); pipeBank(-96, -85, 83); pipeBank(-110, -99, 89); }
+  // switchgear: a row, not a lone cabinet. Each carries its own live panel.
+  for (let i = 0; HONEST && i < 3; i++) {
+    const sx = -88 - i * 6;
+    addBox(sx, 1.1, 92, 2.4, 2.2, 1.1, 0x515a66, { solid: true });
+    // the live panel: 5 cm of emissive skin on the cabinet's own face, inside
+    // the cabinet's collider rect. A facing, like a sign band — not a prop.
+    addBox(sx, 1.7, 91.42, 1.8, 0.9, 0.05, 0x9fd6ff, { emissive: 0x3a6ea5, ei: 0.5, cast: false });
+  }
 
   // ---------------------------------------------------------------- EAST WING
   /* SEGREGATION. A second cell house, and the one place in the compound with
@@ -528,16 +635,39 @@
     const zf = r ? 34 : 6;                                  // the cell-front plane
     for (let i = 0; i < 8; i++) {
       const cx = 62 + i * 6.2;
-      addBox(cx - 3.1, (r ? 30.5 : 1.5) + 0, 0, 0.3, 0, 0, 0x000000, { cast: false });   // (no-op guard)
       addBox(cx - 3.1, 1.75, zf + (r ? 4 : -4), 0.3, 3.5, 8, 0x6f7883, { solid: true, blockLOS: true });
       // the barred front: a welded grille you can see the bunk through
       for (let b = 0; b < 6; b++) addBox(cx - 2.6 + b * 1.0, 1.6, zf, 0.09, 3.2, 0.09, 0x2a2f38, { cast: false });
       addBox(cx, 3.24, zf, 6.0, 0.14, 0.14, 0x2a2f38, { cast: false });
       addBox(cx, 1.75, zf, 6.0, 3.5, 0.16, 0x39424e, { solid: true, blockLOS: false });
-      // and what is inside it: a bunk, a stainless combo, nothing else.
-      addBox(cx - 1.5, 0.44, zf + (r ? 6.4 : -6.4), 1.9, 0.2, 0.86, 0x8a939d, { solid: true });
-      addBox(cx - 1.5, 0.60, zf + (r ? 6.4 : -6.4), 1.75, 0.14, 0.78, 0x4a5b46, { cast: false });
-      addBox(cx + 2.0, 0.36, zf + (r ? 7.2 : -7.2), 0.62, 0.72, 0.64, 0xc7ccd2, { cast: false });
+      /* and what is inside it: a bunk, a stainless combo, nothing else.
+
+         THE BUNK IS A BED NOW. It was two raw addBox slabs — a 1.9 x 0.2
+         "frame" and a 1.75 x 0.14 "mattress" — with no useBed, no
+         CBZ.propRegisterBed and no CBZ.prisonBunk anywhere near them: sixteen
+         mattresses no body in the game could lie on, which is the same fault
+         world/cellblock.js:300 records against its own thirteen and fixed by
+         registering the geometry it had already drawn. It goes through the
+         SAME canonical builder the cell house and world/southblock.js's dorm
+         use, so there is exactly one bunk in this game and one place it is
+         registered from. `unit` is deliberately left null: these racks are
+         real propuse anchors, but segregation is not a housing block a
+         schedule routes a body to, and `punitive` keeps sixteen isolation
+         racks out of the wing's published CAPACITY (see world/cellblock.js's
+         prisonBunk for why: `houses` is what becomes anonymous population, and
+         systems/prisonrest.js musters only the buildings men are housed in).
+         They stay singles, which is what a segregation cell is.
+         Degrade (no cellblock.js) redraws the two slabs it always was. */
+      const bz = zf + (r ? 6.4 : -6.4);
+      if (HONEST && CBZ.prisonBunk) CBZ.prisonBunk({ id: "seg-" + r + "-" + i, x: cx - 1.5, z: bz, along: "x", double: false, blanket: 0x4a5b46, punitive: true });
+      else {
+        addBox(cx - 1.5, 0.44, bz, 1.9, 0.2, 0.86, 0x8a939d, { solid: true });
+        addBox(cx - 1.5, 0.60, bz, 1.75, 0.14, 0.78, 0x4a5b46, { cast: false });
+      }
+      // the combo is SOLID here where it is not in the cell house: a seg cell
+      // is 6.2 x 8 m against the cell house's 3.8 m, so there is floor to
+      // spare and no reason a man should walk through the toilet.
+      addBox(cx + 2.0, 0.36, zf + (r ? 7.2 : -7.2), 0.62, 0.72, 0.64, 0xc7ccd2, { solid: HONEST });
     }
     addBox(87, 1.75, zf + (r ? 8 : -8), 54, 3.5, 0.3, 0x6f7883, { solid: true, blockLOS: true });  // back wall
   }
@@ -566,7 +696,10 @@
   addBox(64, 3.2, 90.4, 12, 0.2, 7.4, 0x8892a0, { cast: false, blockLOS: true });
   const KNIFE_DOOR = { a0: 102.2, a1: 105.2, fixed: 84 };
   cage({ x0: 98, x1: 110, z0: 84, z1: 96, side: "W", open: "N", h: 2.9, gap: KNIFE_DOOR });
-  stockCage([["Shiv", 104, 0.80, 90], ["Razor Blade", 105.6, 0.80, 91.4], ["Hatchet", 102.4, 0.80, 91.4]]);
+  cageRack({ x: 104, z: 95.35, len: 5.0, face: 1 });
+  stockCage(HONEST
+    ? [["Shiv", 104, 0.80, 95.23], ["Razor Blade", 105.6, 0.80, 95.23], ["Hatchet", 102.4, 0.80, 95.23]]
+    : [["Shiv", 104, 0.80, 90], ["Razor Blade", 105.6, 0.80, 91.4], ["Hatchet", 102.4, 0.80, 91.4]]);
   const knifeDoor = makeDoor({
     id: "prison-knife-cage", label: "The knife cage", pick: 4.4, bars: true, lb: 5,
     axis: "x", a0: KNIFE_DOOR.a0, a1: KNIFE_DOOR.a1, fixed: KNIFE_DOOR.fixed, color: 0x39424e,
@@ -592,8 +725,13 @@
   }
   const PROP_DOOR = { a0: 101.5, a1: 104.5, fixed: 116 };
   cage({ x0: 96, x1: 110, z0: 104, z1: 116, side: "W", open: "S", h: 2.9, gap: PROP_DOOR });
-  stockCage([["Stolen Wallet", 102, 0.80, 110], ["Cash Roll", 104, 0.80, 111.4],
-    ["Luxury Watch", 100.4, 0.80, 108.6], ["Burner Phone", 105.6, 0.80, 109.2]]);
+  // this cage opens SOUTH, so its back wall is z=104 and the rack faces -z.
+  cageRack({ x: 103, z: 104.65, len: 6.0, face: -1 });
+  stockCage(HONEST
+    ? [["Stolen Wallet", 102, 0.80, 104.77], ["Cash Roll", 104, 0.80, 104.77],
+      ["Luxury Watch", 100.4, 0.80, 104.77], ["Burner Phone", 105.6, 0.80, 104.77]]
+    : [["Stolen Wallet", 102, 0.80, 110], ["Cash Roll", 104, 0.80, 111.4],
+      ["Luxury Watch", 100.4, 0.80, 108.6], ["Burner Phone", 105.6, 0.80, 109.2]]);
   const propDoor = makeDoor({
     id: "prison-property", label: "The property cage", pick: 5.6, bars: true, lb: 5,
     axis: "x", a0: PROP_DOOR.a0, a1: PROP_DOOR.a1, fixed: PROP_DOOR.fixed, color: 0x39424e,
@@ -618,10 +756,26 @@
   for (let i = 0; i < 12; i++)
     addBox(-7.0 + i * 1.27, 1.36, -96.5, 0.55, 0.06, 0.34, [0x6fb7ff, 0x39ff88, 0xffb347][i % 3],
       { emissive: [0x2a5e85, 0x14c258, 0x7a4f18][i % 3], ei: 0.7, cast: false });
-  for (let i = 0; i < 8; i++) {                            // the monitor wall
+  /* THE VIDEO WALL. What was here: eight 3.0 x 1.0 x 0.1 black slabs (0x0d1117)
+     with an emissive face on each, hung at y 2.5 and y 3.9 on the north wall
+     with nothing behind them and nothing under them — sixteen boxes a body
+     walks straight through, and the upper row was four screens at 3.9 m that
+     nobody standing in the room can read.
+     The relay gear that throws every lock in the compound has to be somewhere,
+     and this is the room that claims to do it: it is a 2 m equipment run along
+     the north wall now, solid, four cabinets with a metre of service gap
+     between them, and ONE row of screens skinned onto their faces at 1.45 m —
+     the height a duty officer actually reads. The bezel is gone; a screen is
+     the lit face, the same way a sign band is a lit face. */
+  for (let i = 0; !HONEST && i < 8; i++) {          // the shipped monitor wall, byte for byte
     const x = -12.5 + (i % 4) * 8.4, y = i < 4 ? 3.9 : 2.5;
     addBox(x, y, -107.5, 3.0, 1.0, 0.1, 0x0d1117, { cast: false });
     addBox(x, y, -107.42, 2.7, 0.82, 0.05, 0x2f6b8f, { emissive: 0x1b4c6b, ei: 0.6, cast: false });
+  }
+  for (let i = 0; HONEST && i < 4; i++) {
+    const x = -12.6 + i * 8.4;
+    addBox(x, 1.0, -107.2, 7.4, 2.0, 1.0, 0x2a2f38, { solid: true });                // relay cabinet
+    addBox(x, 1.45, -106.68, 5.6, 1.05, 0.05, 0x2f6b8f, { emissive: 0x1b4c6b, ei: 0.6, cast: false });
   }
   const RELEASE = { x: 0, z: -95.0, thrown: false };
   const releaseLamp = addBox(0, 1.44, -95.0, 0.4, 0.16, 0.4, 0xff3b3b,

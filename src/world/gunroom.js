@@ -476,6 +476,37 @@
   // ones that cost a draw call, and they are the ones doing the pulling.
   const inner = { gate: null, leaf: null, lamp: null, collider: null, open: false, t: 0, saw: 0, sawMsg: 0 };
 
+  /* ---- A PIECE OF FURNITURE IS ONE COLLIDER ------------------------------
+     MEASURED (tools/visual-presets/prison-rooms.mjs, baseline
+     artifacts/visual-comparisons/prison-rooms-audit): this room was 221 props,
+     88 solid, 8 used and 125 DEAD in 140 m2 — the worst dead COUNT in the
+     compound. But the top of that list is not decoration, it is the
+     FURNITURE: the sniper's plinth (1.026 m3), the heavy rack's backboard
+     (0.849), the workbench apron (0.624) and the bench top itself (0.288)
+     were every one of them drawn with `{}` and no `solid`, so the best-made
+     room in the game was a room you walked straight through.
+     `unit()` puts ONE collider over a whole piece of furniture and everything
+     standing on it. That is the honest physics — a bench is one bench, not
+     eleven independent boxes — and it is what stops the vise, the stripped
+     gun, the parts tray and the ammunition being filed as scenery.
+     WHAT IT DELIBERATELY DOES NOT TOUCH: the five rack slots, the two gates,
+     the cage panes, the lock ladder, the pads or any weapon model.
+     tools/prison-polish-check.mjs measures those and they are the reason the
+     room exists. Nor the rubber matting (3 cm — the floor's own surface, the
+     same class as a painted line) or the luminaire housings and task strip
+     (they are the light; rule (b)'s whole pull is that wash over the guns). */
+  // PRISON_PROP_HONESTY_V1 (declared world/cellblock.js, which parses first)
+  // is the one-line revert: off, and every collider added below goes away and
+  // the room is walk-through dressing again exactly as it shipped.
+  const HONEST = CBZ.CONFIG && CBZ.CONFIG.PRISON_PROP_HONESTY_V1 !== false;
+  const unit = function (x0, z0, x1, z1, y1) {
+    if (!HONEST) return null;
+    const c = { minX: x0, maxX: x1, minZ: z0, maxZ: z1, y0: 0, y1: y1 };
+    (CBZ.colliders || (CBZ.colliders = [])).push(c);
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    return c;
+  };
+
   if (SPINE) {
     // ---- light. There are no real lights in this scene, so a luminaire is a
     // housing + an emissive lens + a translucent cone + a floor pool. Four
@@ -526,6 +557,7 @@
     // ---- the workbench, with a gun stripped down on it. A room reads as a
     // WORKED room when something on the table is mid-job, not when the table
     // is tidy.
+    unit(21.90, 6.65, 25.10, 7.55, 1.30);   // the bench, and the job laid out on it
     addBox(23.5, 0.92, 7.10, 3.20, 0.10, 0.90, 0x6e4a22, {});                 // top
     addBox(23.5, 0.74, 7.10, 3.00, 0.26, 0.80, 0x3c2f22, { cast: false });    // apron / drawer bank
     addBox(22.10, 0.44, 7.10, 0.14, 0.86, 0.80, 0x39424e, { cast: false });   // legs
@@ -545,6 +577,7 @@
     addBox(24.62, 1.00, 7.10, 0.22, 0.06, 0.30, 0x9d2523, { cast: false });   // rag
 
     // ---- ammo shelving, north wall beside the cage
+    unit(25.28, -5.75, 27.42, -5.05, 1.80);   // the shelving, and every crate on it
     addBox(26.35, 1.42, -5.40, 2.10, 0.07, 0.62, 0x39424e, { cast: false });
     addBox(26.35, 0.86, -5.40, 2.10, 0.07, 0.62, 0x39424e, { cast: false });
     addBox(25.34, 1.14, -5.40, 0.08, 1.32, 0.62, 0x39424e, { cast: false });
@@ -653,6 +686,10 @@
     // The rack gives you a sidearm, a pump, a carbine, an SMG and a taser —
     // every one of them a ~50 m gun in a yard the towers watch from 40 m up.
     // The cage gives you REACH, which is a different game.
+    // the plinth is furniture: one collider over it, its cap and the two
+    // cradle posts. The slot's own pickup point is (23.40, -3.30), a metre
+    // clear of it, so the prize does not get walled off by its own stand.
+    unit(22.40, -4.98, 24.40, -4.02, 1.10);
     addBox(23.40, 0.32, -4.50, 1.90, 0.60, 0.90, 0x2b313a, {});               // plinth
     addBox(23.40, 0.64, -4.50, 2.02, 0.06, 1.02, 0x39424e, { cast: false });  // plinth cap
     // cradle posts, set where the rifle ACTUALLY lies: the sniper model runs
@@ -677,7 +714,7 @@
     // clear of the plinth (z -4.95..-4.05) and inside the cage (z -5.75..-2.2).
     if (FULL) {
       const HX = 24.55, HZ = -3.10;
-      addBox(24.98, 1.66, HZ, 0.20, 2.62, 1.62, 0x3c2f22, {});               // backboard
+      addBox(24.98, 1.66, HZ, 0.20, 2.62, 1.62, 0x3c2f22, { solid: HONEST });  // backboard
       const heavy = [
         { id: "lmg", y: 2.42, name: "M249 LMG" },
         { id: "bazooka", y: 1.62, name: "RPG LAUNCHER" },
@@ -698,7 +735,7 @@
       }
     }
     // ammunition for it, because a locked rifle with no rounds is a prop
-    addBox(24.62, 0.22, -4.86, 0.72, 0.44, 0.52, 0x3f4a33, {});
+    addBox(24.62, 0.22, -4.86, 0.72, 0.44, 0.52, 0x3f4a33, { solid: HONEST });   // ammo crate
     addBox(24.62, 0.46, -4.86, 0.76, 0.06, 0.56, 0x2f3a26, { cast: false });
     for (let i = 0; i < 4; i++) cyl(ROOT, 0.024, 0.075, mats.brass, 24.36 + i * 0.17, 0.52, -4.86, Math.PI / 2, 0, 0);
     // ---- THE DEMOLITION CRATE. world/door.js has promised for a week that
@@ -709,7 +746,7 @@
     // not a weapon unlock), behind the same two cage routes as the rifle.
     // Three bricks: one for the yard door with two to decide with — the
     // 7 lb control console needs a pair set together (det cord adds).
-    addBox(22.15, 0.26, -3.30, 0.72, 0.52, 0.52, 0x2e3328, {});               // olive crate
+    addBox(22.15, 0.26, -3.30, 0.72, 0.52, 0.52, 0x2e3328, { solid: HONEST });  // olive crate
     addBox(22.15, 0.55, -3.30, 0.76, 0.06, 0.56, 0x232919, { cast: false });  // lid
     const c4Pad = addBox(22.15, 0.30, -2.80, 0.60, 0.11, 0.05, 0x202833, { cast: false, emissive: 0x080b10, ei: 0.5 });
     const c4Disp = new THREE.Group();

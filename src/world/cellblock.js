@@ -242,6 +242,33 @@
   if (!CFG.PRISON_CELLS_V2) { buildLegacy(); return; }
 
   /* ==========================================================
+     PRISON_PROP_HONESTY_V1 — THE ONE-LINE REVERT FOR THE 2026-08-15 PROP PASS.
+
+     OWNER: "there's chairs and tables that are real, but then there's … rooms
+     that have, like, random blocks, just very stupid stuff. I don't like
+     stupid details. Just leave an empty room if you want, or find a way to
+     make it used."
+
+     The rule this flag turns on: EVERY PROP IS EITHER USABLE OR IT GOES.
+     Usable means at least one of — a collider (you are stopped by it or take
+     cover behind it), a propuse seat or bed anchor, it holds a placed item,
+     it is a door/lock/breach target, or it is a light fitting. Deck paint and
+     signage (~2-5 cm surface graphics) are NOT props and are untouched.
+
+     Declared HERE because this file parses first of the four that read it
+     (index.html:499, then gunroom 568, adminwing 599, prisonwings 614), using
+     the idempotent `== null` idiom world/southblock.js documents. Set it false
+     and all four fall back to the geometry and the physics they shipped with.
+
+     Ratchets it must not move: CBZ.cellblockAudit().spawnBlocked 0,
+     doorGapBlocked 0, spineBlocked 0; tools/prison-doors-check.mjs 24/24;
+     tools/prison-beds-check.mjs sleepGap <= 0 and bunkStanders 0.
+     Measured by tools/visual-presets/prison-wing-props.mjs.
+     ========================================================== */
+  if (CFG.PRISON_PROP_HONESTY_V1 == null) CFG.PRISON_PROP_HONESTY_V1 = true;
+  const HONEST = CFG.PRISON_PROP_HONESTY_V1 !== false;
+
+  /* ==========================================================
      1. DIMENSIONS. Every length below is derived from the shell's own
         inner faces, so moving a shell wall moves the wing with it.
      ========================================================== */
@@ -695,11 +722,43 @@
      identical deferred registration, and records returned on the stack that
      drew them. world/southblock.js supplies only placement and unit ownership. */
   const housingStacks = (CBZ.prisonHousingStacks = CBZ.prisonHousingStacks || []);
+  /* PUNITIVE RACKS — REAL BEDS, NOT WING CAPACITY. world/prisonwings.js's
+     segregation block draws sixteen racks that were raw addBox slabs: no
+     useBed, no CBZ.propRegisterBed, no CBZ.prisonBunk. They come through this
+     file's canonical builder now, so they are real propuse anchors a body can
+     lie on and CBZ._prisonProps.beds counts them.
+     They are kept in their OWN list and out of everything CBZ.prisonBeds()
+     publishes, because segregation is ISOLATION and not housing:
+       · `houses` is what entities/npc.js:547 and entities/ambientstate.js turn
+         into ANONYMOUS BODIES. Counting the hole as capacity puts more men in
+         the yard because the punishment block has bunks in it, which is
+         backwards, and tools/prison-polish-check.mjs's population pair says so.
+       · systems/prisonrest.js builds its muster from the cell house and
+         CBZ.prisonHousing (the south dorm) — the buildings men are HOUSED in.
+         A rack the muster never assigns must not be counted as one it does, or
+         tools/prison-beds-check.mjs's `restAudit.beds === prisonBeds.beds`
+         goes red telling the truth.
+     So `prisonRestAudit().beds` deliberately does NOT move for these sixteen.
+     What moves is the thing the owner actually asked for: they stopped being
+     mattresses no body in the game can lie on. */
+  const punitiveStacks = (CBZ.prisonPunitiveStacks = CBZ.prisonPunitiveStacks || []);
   CBZ.prisonBunk = function (spec) {
     spec = spec || {};
     const stack = {
       id: spec.id || ("housing-bunk-" + housingStacks.length),
       _housingUnit: spec.unit || null,
+      /* `punitive` — A RACK IS NOT ALWAYS CAPACITY. world/prisonwings.js's
+         segregation block draws sixteen racks that are unquestionably beds:
+         they register through this exact path, they are propuse anchors, a
+         body lies on them, and CBZ.prisonRestAudit().beds counts them. But
+         segregation is ISOLATION, not general housing, and `houses` below is
+         the number entities/npc.js and entities/ambientstate.js turn into
+         ANONYMOUS BODIES. Counting the hole as capacity would put sixteen
+         more men in the yard because the punishment block has bunks in it,
+         which is backwards. So a punitive stack is counted in `beds`/`racks`
+         (the honest mattress count, and what prisonrest must agree with) and
+         excluded from `houses` (design occupancy). */
+      _punitive: !!spec.punitive,
       bed: null, bedTop: null, bunk: null,
     };
     stack.bunk = bunkRig(stack, +spec.x || 0, +spec.z || 0, spec.along === "x" ? "x" : "z",
@@ -707,16 +766,32 @@
     useBed(stack.bunk.x, stack.bunk.z, stack.bunk.along, stack.bunk.top, 2.60, stack, "bed", 0);
     if (stack.bunk.topBunk)
       useBed(stack.bunk.x, stack.bunk.z, stack.bunk.along, stack.bunk.topBunk, 2.60, stack, "bedTop", 1.18);
-    housingStacks.push(stack);
+    (stack._punitive ? punitiveStacks : housingStacks).push(stack);
     return stack;
   };
 
   // the combined steel toilet/sink every cell in the world actually has.
   // (nx,nz) points INTO the cell's back wall, so the cistern and the tap are
   // placed by ADDING it — the unit's back is always the masonry, never the room.
+  /* EVERY CELL IN THE PRISON HAD A WALK-THROUGH TOILET, and the comment above
+     is why — except the comment argues about a solid bunk AND a solid toilet
+     TOGETHER, and the bunk is not solid and never was. Re-derived at today's
+     sizes rather than trusting it: a north cell is 3.80 x 5.50 m and a side
+     cell 3.80 x ~3.0 m; the bunk stands 1.25 m across one wall, leaving a
+     2.55 m clear lane; the combo is 0.52-0.66 m and stands in the BACK
+     corner of that lane, so a 0.55 m player and a 0.50 m inmate still pass
+     each other with 1.3 m to spare. It is one collider for the whole unit —
+     pedestal, cistern, basin — because a stainless combo is one casting, and
+     0..1.27 m so a body is stopped by it at the height it actually exists.
+     CBZ.cellblockAudit().spawnBlocked is the ratchet that says this did not
+     land on top of CBZ.SPAWN; it must stay 0. */
   function toiletSink(x, z, nx, nz) {
     const side = Math.abs(nx) > 0.5;
     const bw = side ? 0.52 : 0.66, bd = side ? 0.66 : 0.52;
+    if (HONEST) solid(Math.min(x - bw / 2, x + nx * 0.26 - (side ? 0.08 : 0.33)),
+      Math.min(z - bd / 2, z + nz * 0.26 - (side ? 0.33 : 0.08)),
+      Math.max(x + bw / 2, x + nx * 0.26 + (side ? 0.08 : 0.33)),
+      Math.max(z + bd / 2, z + nz * 0.26 + (side ? 0.33 : 0.08)), 0, 1.27);
     addBox(x, 0.28, z, bw, 0.56, bd, C_STEEL, {});                                   // pedestal
     addBox(x, 0.58, z, bw * 0.95, 0.10, bd * 0.95, 0xe6e9ed, { cast: false });       // rim
     addBox(x + nx * 0.26, 0.92, z + nz * 0.26, side ? 0.16 : 0.66, 0.70, side ? 0.66 : 0.16, C_STEEL_D, { cast: false }); // cistern
@@ -945,24 +1020,70 @@
      6. THE ALCOVES — the three breaks in the cell line, each of them a
         thing the wing needs rather than a hole in the row.
      ========================================================== */
+  /* THE SHOWERS WERE 9 PROPS, 0 SOLID, 0 USED — measured, prison-rooms
+     baseline, room `cell-showers`. Every one of them was scenery: two shower
+     heads with their risers 0.33 m away from them, a curtain rail with no
+     curtain, and a 5 cm plank floating at y=1.0 with no legs called a bench.
+     Now: the riser stands where the rose is, so pipe, mixer and rose are one
+     solid column a body is stopped by; the rail with nothing on it is gone;
+     and the bench is a real bench with a propuse SEAT anchor on it, which is
+     what makes this alcove somewhere a man goes rather than a tiled hole.
+     The pan and the drain stay and are meant to: at 5 cm they are the floor's
+     own surface, the same class as a painted circulation line. */
   function showerAlcove(cx, cz, w, d) {
-    addBox(cx, 0.03, cz + 0.6, w - 0.1, 0.06, d - 1.6, 0x7c8894, { cast: false });     // tiled pan
-    addBox(cx, 0.05, cz + 0.6, 0.34, 0.10, 0.34, 0x5b6470, { cast: false });           // drain
-    for (let i = 0; i < 2; i++) {
-      const zz = cz - 1.5 + i * 2.6;
-      addBox(cx - w / 2 + 0.14, 2.35, zz, 0.14, 0.14, 0.14, C_STEEL_D, { cast: false });
-      addBox(cx - w / 2 + 0.45, 2.28, zz, 0.5, 0.10, 0.22, C_STEEL, { cast: false });  // head
-      addBox(cx - w / 2 + 0.12, 1.30, zz, 0.10, 2.00, 0.10, C_STEEL_D, { cast: false }); // riser
+    if (!HONEST) {                                     // the shipped alcove, byte for byte
+      addBox(cx, 0.03, cz + 0.6, w - 0.1, 0.06, d - 1.6, 0x7c8894, { cast: false });
+      addBox(cx, 0.05, cz + 0.6, 0.34, 0.10, 0.34, 0x5b6470, { cast: false });
+      for (let i = 0; i < 2; i++) {
+        const zz = cz - 1.5 + i * 2.6;
+        addBox(cx - w / 2 + 0.14, 2.35, zz, 0.14, 0.14, 0.14, C_STEEL_D, { cast: false });
+        addBox(cx - w / 2 + 0.45, 2.28, zz, 0.5, 0.10, 0.22, C_STEEL, { cast: false });
+        addBox(cx - w / 2 + 0.12, 1.30, zz, 0.10, 2.00, 0.10, C_STEEL_D, { cast: false });
+      }
+      addBox(cx, 2.9, cz + d / 2 - 0.2, w - 0.2, 0.16, 0.16, C_STEEL_D, { cast: false });
+      addBox(cx, 1.0, cz - d / 2 + 0.35, w - 0.6, 0.05, 0.3, 0xb9a184, { cast: false });
+      return;
     }
-    addBox(cx, 2.9, cz + d / 2 - 0.2, w - 0.2, 0.16, 0.16, C_STEEL_D, { cast: false }); // curtain rail
-    addBox(cx, 1.0, cz - d / 2 + 0.35, w - 0.6, 0.05, 0.3, 0xb9a184, { cast: false });  // bench
+    addBox(cx, 0.025, cz + 0.6, w - 0.1, 0.05, d - 1.6, 0x7c8894, { cast: false });    // tiled pan
+    addBox(cx, 0.05, cz + 0.6, 0.34, 0.05, 0.34, 0x5b6470, { cast: false });           // drain grating
+    for (let i = 0; i < 2; i++) {
+      const zz = cz - 1.5 + i * 2.6, rx = cx - w / 2 + 0.45;
+      addBox(rx, 1.14, zz, 0.12, 2.28, 0.12, C_STEEL_D, { solid: true });              // riser, floor to rose
+      addBox(rx, 1.35, zz, 0.17, 0.17, 0.17, C_STEEL_D, { cast: false });              // mixer, on the riser
+      addBox(rx, 2.36, zz, 0.40, 0.10, 0.30, C_STEEL, { cast: false });                // rose, over the riser
+    }
+    // the bench: a solid plinth with a seat anchor, not a plank in mid-air.
+    const bz = cz - d / 2 + 0.45;
+    sbox(cx, 0.21, bz, w - 0.6, 0.42, 0.42, 0xb9a184, { solid: true });
+    useSeat(cx, bz, 0, 0.42);
   }
+  /* THE LINEN STORE WAS 5 PROPS, 0 SOLID, 0 USED, 3.61 m3 — three cream planes
+     sized to the alcove and a 2.145 m3 laundry cart a body walked through,
+     which was the single biggest dead box in the whole cell house. The planes
+     become a real rack on the existing back frame; the cart becomes the thing
+     a wheeled cart obviously is — a SHOVABLE, through the same
+     systems/pushprops.js call the cell stool already uses, so it is `used` by
+     the only definition that matters: the player can move it. */
   function storeAlcove(cx, cz, w, d) {
-    for (let i = 0; i < 3; i++)
-      addBox(cx, 0.7 + i * 0.72, cz - 0.7, w - 0.3, 0.07, d - 2.6, 0xb9a184, { cast: false });
+    if (!HONEST) {                                     // the shipped alcove, byte for byte
+      for (let i = 0; i < 3; i++)
+        addBox(cx, 0.7 + i * 0.72, cz - 0.7, w - 0.3, 0.07, d - 2.6, 0xb9a184, { cast: false });
+      sbox(cx, 1.35, cz - d / 2 + 0.25, w - 0.3, 2.7, 0.10, C_PART_D, { solid: true });
+      addBox(cx, 0.55, cz + d / 2 - 1.1, 1.3, 1.1, 1.5, 0xe2e2e2, { cast: false });
+      addBox(cx, 1.12, cz + d / 2 - 1.1, 1.4, 0.12, 1.6, 0xd0d0d0, { cast: false });
+      return;
+    }
     sbox(cx, 1.35, cz - d / 2 + 0.25, w - 0.3, 2.7, 0.10, C_PART_D, { solid: true }); // back rack frame
-    addBox(cx, 0.55, cz + d / 2 - 1.1, 1.3, 1.1, 1.5, 0xe2e2e2, { cast: false });       // laundry cart
-    addBox(cx, 1.12, cz + d / 2 - 1.1, 1.4, 0.12, 1.6, 0xd0d0d0, { cast: false });
+    for (let i = 0; i < 3; i++)
+      sbox(cx, 0.42 + i * 0.62, cz - d / 2 + 0.62, w - 0.3, 0.05, 0.62, 0xb9a184, { solid: true });
+    const cartZ = cz + d / 2 - 1.1;
+    const tub = addBox(cx, 0.55, cartZ, 1.3, 1.1, 1.5, 0xe2e2e2, { cast: false });
+    const lip = addBox(cx, 1.12, cartZ, 1.4, 0.12, 1.6, 0xd0d0d0, { cast: false });
+    if (HONEST && CBZ.pushProp) CBZ.pushProp({
+      parts: [tub, lip], x: cx, z: cartZ, hx: 0.7, hz: 0.8, y1: 1.18,
+      mass: 34, kind: "cart", solid: true, leash: 3.0, mode: "escape",
+      room: { x0: cx - w / 2 + 0.8, x1: cx + w / 2 - 0.8, z0: cz - d / 2 + 1.6, z1: cz + d / 2 - 0.9 },
+    });
   }
   // The wing's control point. Open to the floor on purpose: guards.js:79
   // patrols to (0,-39), which is 3.6 m south of this desk.
@@ -989,8 +1110,13 @@
     addBox(cx + 1.5, 1.75, cz - d / 2 + 0.42, 0.9, 1.1, 0.10, 0x2a2f38, { cast: false });   // key board
     for (let i = 0; i < 8; i++)
       addBox(cx + 1.15 + (i % 4) * 0.24, 1.95 - ((i / 4) | 0) * 0.36, cz - d / 2 + 0.36, 0.07, 0.20, 0.04, 0xd9b64c, { cast: false });
-    addBox(cx, 0.45, cz - d / 2 + 2.0, 0.6, 0.9, 0.6, C_DARK, { cast: false });         // chair
-    addBox(cx, 1.05, cz - d / 2 + 2.25, 0.6, 0.7, 0.1, C_DARK, { cast: false });
+    // the duty chair. It was two dead boxes in front of a solid desk; it is a
+    // propuse seat now, so the post is somewhere a body sits and not a prop
+    // shaped like one. `face` looks north at the desk.
+    const chZ = cz - d / 2 + 2.0;
+    sbox(cx, 0.45, chZ, 0.6, 0.9, 0.6, C_DARK, { solid: HONEST });                     // chair
+    addBox(cx, 1.05, cz - d / 2 + 2.25, 0.6, 0.7, 0.1, C_DARK, { cast: false });       // back
+    if (HONEST) useSeat(cx, chZ, Math.PI, 0.45);
     // WING SIGN — the block announces itself over the post.
     addBox(cx, 3.6, cz + d / 2 - 0.1, 5.0, 0.7, 0.14, 0x11151b, { cast: false });
     addBox(cx, 3.6, cz + d / 2 - 0.2, 4.4, 0.34, 0.06, 0xe8b64c, { emissive: 0x6a4f10, ei: 0.6, cast: false });
@@ -1492,11 +1618,21 @@
     }
     return n;
   }
+  // reported, never added to `beds` — see `_punitive` above.
+  function punitiveRackCount() {
+    let n = 0;
+    for (let i = 0; i < punitiveStacks.length; i++) {
+      const b = punitiveStacks[i] && punitiveStacks[i].bunk;
+      if (b) n += b.topBunk ? 2 : 1;
+    }
+    return n;
+  }
   CBZ.prisonBeds = function () {
     const beds = rackCount();
     const cellBeds = cellRackCount();
     return { cells: cells.length, perCell: cells.length ? +(cellBeds / cells.length).toFixed(2) : 0,
       beds: beds, racks: beds, housingStacks: housingStacks.length,
+      punitiveRacks: punitiveRackCount(),      // real beds, deliberately not capacity
       occupancy: OCCUPANCY, houses: Math.round(beds * OCCUPANCY) };
   };
 

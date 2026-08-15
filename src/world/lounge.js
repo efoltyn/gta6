@@ -11,17 +11,30 @@
    FURNITURE VOCABULARY. The seating routes through CBZ.furnish
    (city/furniture.js) — the ONE shared kit — which owns the geometry AND
    registers the propuse sit anchors, so a cop can actually be sat on that
-   couch. Feature-detected: when the kit is absent (it currently parses
-   AFTER this file — see the LOAD ORDER note below) the authored boxes
-   below run instead, now solid and with their own seat anchors, so the
-   room is correct either way. The layout, footprint and palette are
-   unchanged: this is an authored prison space, not a generated one.
+   couch. Feature-detected: when the kit is absent the authored boxes below
+   run instead, solid and with their own seat anchors, so the room is
+   correct either way. The layout, footprint and palette are unchanged:
+   this is an authored prison space, not a generated one.
 
-   LOAD ORDER: index.html parses this file at :406, but city/furniture.js
-   and city/propuse.js live in the CITY block (:629+). CBZ.roomSeatAnchor
-   (world/roombuild.js, :404) is the pipe that makes seat registration
-   survive that gap — it queues and flushes on `load`. Move furniture.js
-   above roombuild.js and the CBZ.furnish path lights up with no edit here.
+   LOAD ORDER — CORRECTED 2026-08-15, MEASURED AT RUNTIME. This header used
+   to say the kit "currently parses AFTER this file" and that the authored
+   fallback was therefore what ran. That has not been true since the kit
+   moved: index.html tags city/furniture.js at :482 (its own comment names
+   "lounge.js / cafeteria.js / clutter.js" as the consumers it must precede)
+   and this file at :567. CBZ.furnish IS up when this file parses, so the
+   KIT PATH is what draws the couch, the armchair and the coffee table, and
+   the authored blocks below are the degrade path only.
+
+   What is still true is the OTHER half of the gap, and it is the half that
+   matters: city/propuse.js is at :1007, so CBZ.propRegisterSeat is absent
+   when the kit runs and city/furniture.js's p.seat() (:303) has no queue
+   fallback — it returns a null record. The anchors survive only because the
+   kit still reports them on `rec.seats` and reseat() below re-files every
+   one of them through CBZ.roomSeatAnchor (world/roombuild.js:141), the
+   queue-and-flush shim. Delete the reseat() calls and this room silently
+   loses every seat in it. tools/visual-presets/prison-yard-props.mjs prints
+   `furnish`, `seatAnchors` and `kitSeatsQueued` per run so the next reader
+   does not have to take this paragraph's word for it.
 
    ------------------------------------------------------------------
    PRISON_DRESS_V2 (2026-07-30) — IT IS THE DAYROOM NOW, AND THAT IS
@@ -56,6 +69,13 @@
   if (CBZ.CONFIG.PRISON_DRESS_V2 == null) CBZ.CONFIG.PRISON_DRESS_V2 = true;
   const DRESS = !!CBZ.CONFIG.PRISON_DRESS_V2;
   const PD = CBZ.prisonDress || null;   // degrade-safe: no kit → no dressing
+  // PRISON_PROP_USE_V1 — canonical declaration + doctrine: world/southblock.js.
+  // Here: 67 dead props in a 140 m2 dayroom. The phone bank goes (18 boxes,
+  // none of them usable, duplicating the yard's) and the book shelf gets the
+  // collider a 1.9 m unit of furniture should always have had. What stays and
+  // why is written at each site.
+  if (CBZ.CONFIG.PRISON_PROP_USE_V1 == null) CBZ.CONFIG.PRISON_PROP_USE_V1 = true;
+  const USE = !!CBZ.CONFIG.PRISON_PROP_USE_V1;
 
   roomShell({
     x0: 19, x1: 29, z0: 30, z1: 44, h: 6,
@@ -190,19 +210,34 @@
     addBox(TV_X + 0.19, 2.16, TV_Z, 0.02, 0.22, 2.0, 0x16324a,
       { emissive: 0x0d2436, ei: 0.5, cast: false });
 
-    // ---- 2. PHONE BANK (north wall) ---------------------------------------
-    // Three kiosks with dividers: the one fitting that says "this is where you
-    // are allowed to talk to the outside" without a line of dialogue.
-    for (let i = 0; i < 3; i++) {
-      const x = 21.3 + i * 1.7;
-      addBox(x, 1.35, WZ0 + 0.14, 0.9, 1.5, 0.14, 0x5b6470, { cast: false });        // backboard
-      addBox(x, 1.42, WZ0 + 0.3, 0.26, 0.5, 0.2, 0x1e232b, { cast: false });         // phone body
-      addBox(x - 0.19, 1.42, WZ0 + 0.34, 0.1, 0.34, 0.12, 0x2f3641, { cast: false }); // handset
-      addBox(x - 0.19, 1.16, WZ0 + 0.3, 0.03, 0.22, 0.03, 0x14181f, { cast: false }); // cord
-      addBox(x, 1.0, WZ0 + 0.32, 0.62, 0.06, 0.24, 0x8b95a1, { cast: false });        // shelf
+    // ---- 2. PHONE BANK — DELETED (PRISON_PROP_USE_V1) ---------------------
+    // Eighteen boxes: three kiosks of five (backboard, body, handset, cord,
+    // shelf) and three 0.66 m privacy dividers, EVERY ONE of them drawn
+    // cast:false with no collider, no anchor and no verb. There is no phone
+    // verb in this game, so a payphone is only ever worth its silhouette —
+    // and the compound already spends that silhouette where it earns
+    // something: world/yardfurniture.js:183 stands the canonical three-kiosk
+    // bank on the ARMOURY APPROACH and says in its own header why ("a man on
+    // the phone is a man standing still with his back to the yard — the one
+    // legitimate reason to be stationary within sight of the gun-room door").
+    // That is level design. A second bank 20 m away on a staff-lounge wall is
+    // the same fitting with the reason removed, and the dividers were the one
+    // part of it a body could meet: 0.56 m proud of the wall at chest height,
+    // walked straight through.
+    // The owner's line was "they could put couches or something, but not in
+    // everything". The couches stay and are sittable. This does not.
+    if (!USE) {
+      for (let i = 0; i < 3; i++) {
+        const x = 21.3 + i * 1.7;
+        addBox(x, 1.35, WZ0 + 0.14, 0.9, 1.5, 0.14, 0x5b6470, { cast: false });        // backboard
+        addBox(x, 1.42, WZ0 + 0.3, 0.26, 0.5, 0.2, 0x1e232b, { cast: false });         // phone body
+        addBox(x - 0.19, 1.42, WZ0 + 0.34, 0.1, 0.34, 0.12, 0x2f3641, { cast: false }); // handset
+        addBox(x - 0.19, 1.16, WZ0 + 0.3, 0.03, 0.22, 0.03, 0x14181f, { cast: false }); // cord
+        addBox(x, 1.0, WZ0 + 0.32, 0.62, 0.06, 0.24, 0x8b95a1, { cast: false });        // shelf
+      }
+      for (let i = 0; i < 3; i++)                                                        // privacy dividers
+        addBox(22.15 + i * 1.7, 1.5, WZ0 + 0.48, 0.08, 1.7, 0.66, 0x3c424d, { cast: false });
     }
-    for (let i = 0; i < 3; i++)                                                        // privacy dividers
-      addBox(22.15 + i * 1.7, 1.5, WZ0 + 0.48, 0.08, 1.7, 0.66, 0x3c424d, { cast: false });
 
     // ---- 3. CARD TABLE (south-west, out of the door lane) -----------------
     // The one thing a dayroom is FOR. A round bolted table with four stools
@@ -222,7 +257,21 @@
     addBox(21.55, 0.83, 41.2, 0.16, 0.04, 0.16, 0xd9b23c, { cast: false });   // the pot: a few cigs
 
     // ---- 4. BOOK SHELF (south wall) ---------------------------------------
-    addBox(26.9, 0.95, WZ1 - 0.2, 1.9, 0.08, 0.34, 0x6a563c, { cast: false });
+    // PRISON_PROP_USE_V1: this is a 1.9 m wide, 1.53 m tall unit of furniture
+    // standing on the floor and it had no collider, so the shelf, its two
+    // uprights and ten paperbacks were fifteen boxes you walked through. It
+    // keeps its geometry exactly — a dayroom shelf is a dayroom shelf — and
+    // gets ONE collider over the whole carcass, the way CBZ.prisonDress's
+    // roundTable gives one rect to a welded table rather than one per plank.
+    // Solid, it is also the only cover on the south wall.
+    const shelfMid = addBox(26.9, 0.95, WZ1 - 0.2, 1.9, 0.08, 0.34, 0x6a563c, { cast: false });
+    if (USE && CBZ.colliders) {
+      CBZ.colliders.push({
+        minX: 25.95, maxX: 27.85, minZ: WZ1 - 0.37, maxZ: WZ1 - 0.03,
+        y0: 0, y1: 1.53, ref: shelfMid,
+      });
+      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    }
     addBox(26.9, 1.45, WZ1 - 0.2, 1.9, 0.08, 0.34, 0x6a563c, { cast: false });
     addBox(26.9, 0.45, WZ1 - 0.2, 1.9, 0.08, 0.34, 0x6a563c, { cast: false });
     for (const s of [-1, 1])

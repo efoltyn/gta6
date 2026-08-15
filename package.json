@@ -42,7 +42,9 @@
     "visual:role-outfits": "node tools/visual-compare.mjs --preset role-outfit-gallery --keep-going --before https://efoltyn.github.io/gta6/",
     "visual:captain-fleet": "node tools/visual-compare.mjs --preset captain-fleet --keep-going --before https://efoltyn.github.io/gta6/",
     "visual:prison-rooms": "node tools/visual-compare.mjs --preset prison-rooms --keep-going --before https://efoltyn.github.io/gta6/",
-    "visual:prison-doors": "node tools/visual-compare.mjs --preset prison-doors --keep-going --before https://efoltyn.github.io/gta6/"
+    "visual:prison-doors": "node tools/visual-compare.mjs --preset prison-doors --keep-going --before https://efoltyn.github.io/gta6/",
+    "visual:prison-wing-props": "node tools/visual-compare.mjs --preset prison-wing-props --keep-going --before https://efoltyn.github.io/gta6/",
+    "visual:prison-yard-props": "node tools/visual-compare.mjs --preset prison-yard-props --keep-going --before https://efoltyn.github.io/gta6/"
   },
   "devDependencies": {
     "three": "^0.164.1",

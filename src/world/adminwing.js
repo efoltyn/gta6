@@ -280,13 +280,39 @@
     for (let i = 0; i < 11; i++) addBox(x1, 1.35, z0 + 0.2 + i * 0.44, 0.08, 2.62, 0.08, 0x2a2f38, { cast: false });
     addBox((x0 + x1) / 2, 2.72, z1, x1 - x0, 0.12, 0.12, 0x2a2f38, { cast: false });
     addBox(x1, 2.72, (z0 + z1) / 2, 0.12, 0.12, z1 - z0, 0x2a2f38, { cast: false });
-    // property shelves inside it, stacked with sealed bags
+    /* PROPERTY SHELVES, AND THEY WERE THE SAME LIE THE CAGES TOLD. This drew
+       three 3.4 x 3.6 m cream planes 7 cm thick — one per level, sized to the
+       WHOLE cage — and scattered twelve bags across them. Measured
+       (prison-rooms baseline, room `admin-records`): the two upper planes are
+       the block's two biggest dead boxes at 0.857 m3 EACH, 1.71 m3 of the
+       admin wing's 3.11 m3 total, and a body walked through all of it.
+       One rack instead: 0.70 m deep against the cage's back wall, three decks,
+       four uprights, ONE collider over its own footprint. The bags stand on
+       the decks in a row where a property clerk would actually put them, and
+       every one of them is inside reach from the aisle. */
+    // PRISON_PROP_HONESTY_V1 (world/cellblock.js) — one-line revert.
+    if (!(CBZ.CONFIG && CBZ.CONFIG.PRISON_PROP_HONESTY_V1 !== false)) {
+      for (let s2 = 0; s2 < 3; s2++) {                 // the shipped shelves, byte for byte
+        addBox(-17.6, 0.6 + s2 * 0.72, -61.0, 3.4, 0.07, 3.6, 0xb9a184, { cast: false });
+        for (let i = 0; i < 4; i++)
+          addBox(-18.8 + i * 0.82, 0.78 + s2 * 0.72, -61.0 + (i % 2) * 0.9, 0.6, 0.28, 0.5,
+            [0xc9c2a8, 0x9aa8b4, 0xbfae8c, 0xa7b09a][i], { cast: false });
+      }
+      return;
+    }
+    const RX0 = -19.20, RX1 = -16.00, RZ = -63.00, RD = 0.70, RH = 2.32;
     for (let s = 0; s < 3; s++) {
-      addBox(-17.6, 0.6 + s * 0.72, -61.0, 3.4, 0.07, 3.6, 0xb9a184, { cast: false });
+      addBox((RX0 + RX1) / 2, 0.58 + s * 0.72, RZ, RX1 - RX0 - 0.14, 0.05, RD - 0.10, 0x9aa2aa, { cast: false });
       for (let i = 0; i < 4; i++)
-        addBox(-18.8 + i * 0.82, 0.78 + s * 0.72, -61.0 + (i % 2) * 0.9, 0.6, 0.28, 0.5,
+        addBox(RX0 + 0.5 + i * 0.73, 0.75 + s * 0.72, RZ, 0.6, 0.28, 0.5,
           [0xc9c2a8, 0x9aa8b4, 0xbfae8c, 0xa7b09a][i], { cast: false });
     }
+    for (const ux of [RX0 + 0.05, RX1 - 0.05]) for (const uz of [RZ - RD / 2 + 0.05, RZ + RD / 2 - 0.05])
+      addBox(ux, RH / 2, uz, 0.08, RH, 0.08, 0x5b6470, { cast: false });
+    addBox((RX0 + RX1) / 2, RH / 2, RZ - RD / 2 + 0.03, RX1 - RX0, RH, 0.05, 0x6f7883, { cast: false });
+    (CBZ.colliders || (CBZ.colliders = [])).push({
+      minX: RX0, maxX: RX1, minZ: RZ - RD / 2, maxZ: RZ + RD / 2, y0: 0, y1: RH });
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
   })();
 
   // ---- RECORDS: the key board. Every door in this prison hangs here, and

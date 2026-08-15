@@ -98,12 +98,15 @@ function why(r) { return (r && r.__err) ? ("threw: " + String(r.__err).split("\n
 
      Owner: "There's too many fucking people" — the second time, MASS_CROWD
      having already been cut 900 -> 140 for the first. The headcount was five
-     constants in four files and not one of them could see that the wing has
+     constants in four files and not one of them could see that the wing had
      thirteen cells; measured, the yard ran ~207 bodies against 26 bunks, about
      800% of the only housing in the world. These assertions exist so the
      number can never go back to being typed: what the building sleeps is a
      FACT it publishes, and the anonymous tiers are the remainder of a
-     subtraction against it.
+     subtraction against it. (The wing has since grown to twenty-five cells
+     and sixty-six racks; the thirteen above is the state that produced the
+     fault, and the 26 is its arithmetic. That these assertions still pass
+     unchanged across that growth is the point of writing them this way.)
 
      `occupancy` is reported rather than merely bounded, because it is the
      honest number: the NAMED cast alone runs this wing at ~185%, which is
