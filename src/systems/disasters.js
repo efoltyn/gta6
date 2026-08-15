@@ -2627,12 +2627,42 @@
     if (CBZ.shake) CBZ.shake(0.9); sound("explosion"); sound("rumble");
     // a fountain of glowing lava bursting UP out of the summit vent
     ctx.st.erFountain = CBZ.fx.particleCloud({ mode: "rise", color: 0xff6a1a, count: 260, radius: 7, top: 22, size: 0.3, opacity: 0.85, vMin: 12, vMax: 22, drift: 3 }); ctx.st.erFountain.setActive(0.95);
-    // a towering dark ash/smoke column above the fountain
-    ctx.st.erSmoke = CBZ.fx.particleCloud({ mode: "rise", color: 0x2a2420, count: 200, radius: 15, top: 52, size: 0.62, opacity: 0.4, vMin: 5, vMax: 10, drift: 9 }); ctx.st.erSmoke.setActive(0.6);
+    /* a towering dark ash column above the fountain. V2 gets the SPRITE
+       column (volcanofx ashColumn — a pillar with a silhouette, built like
+       the pyroclastic current's mass); the flag revert keeps the old dotted
+       Points cloud verbatim. */
+    if (V && V.ashColumn) {
+      ctx.st.erColumn = V.ashColumn({
+        x: h.x, z: h.z, y: h.peak + 3,
+        height: 52 + 16 * ctx.intensity, r: 6.5 + 2.5 * ctx.intensity,
+        parent: root(),
+      });
+      ctx.st.erSmoke = null;
+    } else {
+      ctx.st.erSmoke = CBZ.fx.particleCloud({ mode: "rise", color: 0x2a2420, count: 200, radius: 15, top: 52, size: 0.62, opacity: 0.4, vMin: 5, vMax: 10, drift: 9 }); ctx.st.erSmoke.setActive(0.6);
+    }
+    /* THE COLUMN STANDS ON LIGHT. In the reference night photograph the ash
+       pillar is dark — but its BASE is rose-orange, lit from below by the
+       vent it is standing on. A second short rising cloud in ember colours
+       under the dark one is that underside; without it the column reads as
+       a grey smudge that merely starts near the mountain. */
+    ctx.st.erSmokeLit = CBZ.fx.particleCloud({ mode: "rise", color: 0xd06a35, count: 110, radius: 8, top: 15, size: 0.5, opacity: 0.32, vMin: 4, vMax: 8, drift: 3 }); ctx.st.erSmokeLit.setActive(0.75);
     // fine ash raining back down over the island
     ctx.st.erAsh = CBZ.fx.particleCloud({ mode: "fall", color: 0x4a4038, count: 300, radius: 26, top: 30, size: 0.24, opacity: 0.45, vMin: 6, vMax: 12 }); ctx.st.erAsh.setActive(0.85);
-    // the glowing crater rim sitting on the peak
-    ctx.st.erCrater = disc(h.x, h.z, 0xff5210, 0.9, h.peak + 0.3); ctx.st.erCrater.material.blending = THREE.AdditiveBlending; ctx.st.erCrater.scale.set(5, 5, 1);
+    /* The crater itself: the V2 path gets the OPAQUE draped spatter apron
+       (world/volcanofx.js ventGlow — the reference photo's white-hot summit).
+       The additive disc survives only as the flag revert's crater, because a
+       glowing translucent coin is both halves of the owner's complaint —
+       see-through AND geometric. */
+    if (V && V.ventGlow) {
+      ctx.st.erVent = V.ventGlow({
+        x: h.x, z: h.z, r: 5.5 + 2.5 * ctx.intensity,
+        groundAt: gAt(ctx), parent: root(), salt: 4747,
+      });
+      ctx.st.erCrater = null;
+    } else {
+      ctx.st.erCrater = disc(h.x, h.z, 0xff5210, 0.9, h.peak + 0.3); ctx.st.erCrater.material.blending = THREE.AdditiveBlending; ctx.st.erCrater.scale.set(5, 5, 1);
+    }
 
     // THE WIND IS THE WEATHER'S WIND — the warn phase already set a bearing
     // and drove it into systems/weather.js, so the ash falls the same way the
@@ -2658,22 +2688,25 @@
 
     ctx.st.erLava = null; ctx.st.erStreams = null; ctx.st.erPools = null;
     if (V) {
-      /* ---- LAVA: opaque crusted flows down the fall line ----
+      /* ---- LAVA: braided, branching flow fields down the fall line ----
 
-         OWNER, 2026-08-13, holding up a photograph of Arenal: the magma is
-         "fake". The photograph is the argument. A stratovolcano at night is a
-         BLACK CONE with a dozen narrow incandescent threads fanning down its
-         face — each one a metre or two wide, braided, and bright precisely
-         because it is thin. Four ribbons at seven metres on a thirty-six
-         metre cone is a fifth of the mountain's width painted orange, and no
-         amount of surface detail rescues that proportion: it reads as a
-         glowing road because it is the size of one.
+         OWNER, 2026-08-15, sending the two reference photographs that are
+         now this eruption's bible: "magma should be way better... organic
+         ... don't make it look geometric". The last wave answered an
+         earlier photo with NINE separate uniform threads, and the shots
+         proved the problem with that: nine parallel worms of even width and
+         even glow are still geometry, just thinner geometry.
 
-         Nine threads at a third of the width put the same amount of light on
-         the mountain through nine times as many edges, and edges are what the
-         eye reads as lava. The cone stays dark, which is the other half of
-         the photograph. */
-      const n = 9;
+         The close-up bible photo is ONE THING that branches: a stem that
+         forks into lobes, a dark crusted surface laced with connected
+         bright filaments, margins that neck and belly. So the count goes
+         DOWN and the structure goes UP: five broad flows, each carrying
+         the lace field (the braid now lives in the surface, where the
+         photograph has it, instead of in the flow count), each forking
+         into narrower children as its front advances. The mountain ends up
+         wearing a fan of fifteen-odd noses grown from five stems — organic
+         because it is grown, not drawn. */
+      const n = 5;
       ctx.st.erLava = [];
       for (let i = 0; i < n; i++) {
         // never straight down the pyroclastic lane — the two hazards want
@@ -2682,8 +2715,10 @@
         const p = vent(h, a, 2.2);
         ctx.st.erLava.push(V.lavaFlow({
           x: p.x, z: p.z, groundAt: gAt(ctx), parent: root(), bearing: a,
-          len: h.r * 1.35 + 16 * ctx.intensity,
-          width: 1.9 + 1.1 * ctx.intensity,
+          len: h.r * 1.5 + 18 * ctx.intensity,
+          // broad enough for the nine-column braid grid (narrow cutoff is
+          // 4.2); the children fork off at 0.62x and take the five-column one
+          width: 4.5 + 1.1 * ctx.intensity,
           /* YOU WALK AWAY FROM LAVA — that is this file's own doctrine two
              hundred lines up, and at 4.2-6.8 m/s the flows were outrunning a
              SPRINT. A basaltic channel on a slope this size does about walking
@@ -2691,11 +2726,12 @@
              you lose ground to slowly and lose your house to entirely. */
           speed: 1.7 + 1.3 * ctx.intensity,
           salt: 4700 + i * 137,
-          // BUDGET: three real lights for nine threads, and the haze belongs
-          // to the mountain rather than to each thread — nine sets of it over
-          // narrow flows is a fog bank, which is what buried the last look
-          light: i % 3 === 0,
-          haze: i % 3 === 0,
+          branches: 2,
+          // BUDGET: three real lights for five stems (the vent apron carries
+          // its own), haze on the same three — a full set on every stem plus
+          // every child is a fog bank, which is what buried an earlier look
+          light: i % 2 === 0,
+          haze: i % 2 === 0,
         }));
       }
       /* ---- ASHFALL AS A LOAD: one field, plus every standing roof ---- */
@@ -2766,7 +2802,12 @@
     if (ctx.st.erWindX != null) ctx.st.erAsh.update(dt, h.x + ctx.st.erWindX * 40, 0, h.z + ctx.st.erWindZ * 40);
     else ctx.st.erAsh.update(dt, camPos().x, 0, camPos().z);
     ctx.st.erFountain.update(dt, h.x, h.peak, h.z);
-    ctx.st.erSmoke.update(dt, h.x + (ctx.st.erWindX || 0) * 14, h.peak + 6, h.z + (ctx.st.erWindZ || 0) * 14);
+    if (ctx.st.erSmoke) ctx.st.erSmoke.update(dt, h.x + (ctx.st.erWindX || 0) * 14, h.peak + 6, h.z + (ctx.st.erWindZ || 0) * 14);
+    // the sprite pillar leans with the same wind the ash falls on
+    if (ctx.st.erColumn) ctx.st.erColumn.update(dt, ctx.st.erWindX || 0, ctx.st.erWindZ || 0);
+    // the lit underside rides just over the fountain, beneath the dark column
+    if (ctx.st.erSmokeLit) ctx.st.erSmokeLit.update(dt, h.x + (ctx.st.erWindX || 0) * 5, h.peak + 1.5, h.z + (ctx.st.erWindZ || 0) * 5);
+    if (ctx.st.erVent) ctx.st.erVent.update(dt);
     if (ctx.st.erCrater) ctx.st.erCrater.material.opacity = 0.7 + 0.25 * (0.5 + 0.5 * Math.sin(CBZ.now * 0.012));
     // ash is weather: it dims the sun, it blows downwind, and it is the same
     // wind everything else in the game reads
@@ -2798,6 +2839,31 @@
         else P.r = Math.max(P.r, 1.2);
         P.m.scale.set(Math.max(0.6, P.r), Math.max(0.6, P.r), 1);
         P.m.material.opacity = 0.6 + 0.3 * (0.5 + 0.5 * Math.sin(CBZ.now * 0.014 + i * 2.1));
+      }
+    }
+
+    /* ---------------- INCANDESCENT ROCKFALL ----------------
+       The wide reference photograph's flanks are STREAKED with fine fire:
+       spatter thrown from the vent, bouncing and rolling down the cone,
+       each block a glowing tracer. fx.dropDebris already throws on a real
+       ballistic arc; `glow` makes the rock unlit ember-orange (incandescent
+       by the same doctrine as the melt), and a short linger leaves the
+       flank dotted with cooling embers that vanish on their own. Visual
+       only — dmg 0 — the bombs below are the ones that hurt, and they
+       telegraph. V2 only: the flag revert keeps its exact old look. */
+    if (V) {
+      ctx.st.erEmberCd = (ctx.st.erEmberCd || 0) - dt;
+      if (ctx.st.erEmberCd <= 0) {
+        ctx.st.erEmberCd = 0.4;
+        const ea = rnd() * 6.28;
+        const er = h.r * (0.35 + rnd() * 0.6);
+        CBZ.fx.dropDebris({
+          x: h.x + Math.cos(ea) * er, z: h.z + Math.sin(ea) * er,
+          fromX: h.x + Math.cos(ea) * 1.5, fromZ: h.z + Math.sin(ea) * 1.5,
+          fromY: h.peak + 2,
+          size: 0.22 + rnd() * 0.3, shape: "rock", color: 0xff7e22, glow: true,
+          dmg: 0, linger: 2 + rnd() * 2.5,
+        });
       }
     }
 
@@ -3086,7 +3152,10 @@
     }
     if (ctx.st.erFountain) ctx.st.erFountain.dispose();
     if (ctx.st.erSmoke) ctx.st.erSmoke.dispose();
+    if (ctx.st.erColumn) { ctx.st.erColumn.dispose(); ctx.st.erColumn = null; }
+    if (ctx.st.erSmokeLit) { ctx.st.erSmokeLit.dispose(); ctx.st.erSmokeLit = null; }
     if (ctx.st.erAsh) ctx.st.erAsh.dispose();
+    if (ctx.st.erVent) { ctx.st.erVent.dispose(); ctx.st.erVent = null; }
     if (ctx.st.erCrater) rmMesh(ctx.st.erCrater);
     (ctx.st.erStreams || []).forEach((s) => rmMesh(s.mesh));
     ctx.st.erStreams = null;
@@ -4098,11 +4167,27 @@
   // ============================================================
   // DIRECTOR
   // ============================================================
+  /* OWNER, 2026-08-15: "there doesn't need to be a finale... I never
+     mentioned nuke". He is right about the premise, not just the pacing:
+     this is a NATURAL disaster survival mode — eleven acts of nature and
+     then, for no reason the island knows about, somebody nukes it. The bomb
+     was only ever here because city/nukefx.js existed and the arc wanted a
+     closer. The arc does not need one: it already reshuffles and repeats
+     until the lobby resolves itself, which IS the battle royale.
+
+     So the nuke is out of the rotation. The def stays registered — the city
+     bomber still detonates through the same bus, debug/`force("nuke")` still
+     works, and the pyroclastic whiteout still borrows nukefx's flash sheet —
+     it is only no longer something the weather does to an island.
+     SURV_NUKE_FINALE=true is the one-line revert. */
+  if (CBZ.CONFIG.SURV_NUKE_FINALE == null) CBZ.CONFIG.SURV_NUKE_FINALE = false;
   // the classic arc — also the fallback when SURV_SHUFFLE is off
-  const SEQUENCE = ["quake", "storm", "flashflood", "flood", "wildfire", "tornado", "hurricane", "blizzard", "meteor", "sinkhole", "volcano", "nuke"];
-  // pacing classes for the shuffled order: a run OPENS gentle, and the three
-  // island-wreckers never land back-to-back (the nuke is pinned last, so a
-  // gentle opener also keeps every cycle boundary legal when the arc repeats)
+  const SEQUENCE_ALL = ["quake", "storm", "flashflood", "flood", "wildfire", "tornado", "hurricane", "blizzard", "meteor", "sinkhole", "volcano", "nuke"];
+  const SEQUENCE = CBZ.CONFIG.SURV_NUKE_FINALE ? SEQUENCE_ALL.slice() : SEQUENCE_ALL.filter((id) => id !== "nuke");
+  // pacing classes for the shuffled order: a run OPENS gentle, and the
+  // island-wreckers never land back-to-back; the gentle opener keeps every
+  // cycle boundary legal when the arc repeats (with the finale flag on, the
+  // nuke is pinned last exactly as before)
   const GENTLE = { storm: 1, wildfire: 1, blizzard: 1, sinkhole: 1 };
   const MEGA = { flood: 1, volcano: 1, nuke: 1 };
   let runNo = 0, orderRng = null;
@@ -4110,18 +4195,21 @@
 
   // per-run SEEDED order (CBZ.seedStream ⇒ deterministic per world seed +
   // run counter — never Math.random: the arc is shared run structure).
-  // Rejection-sample a Fisher–Yates shuffle of the 11 non-nuke hazards until
-  // the pacing constraints hold, then pin the nuke as the finale.
+  // Rejection-sample a Fisher–Yates shuffle of the natural hazards until the
+  // pacing constraints hold. Under SURV_NUKE_FINALE the nuke is pinned last,
+  // exactly as it always was; by default the arc is nature all the way.
   function buildOrder() {
     if (CBZ.CONFIG.SURV_SHUFFLE === false || !orderRng) return SEQUENCE.slice();
     const pool = SEQUENCE.filter((id) => id !== "nuke");
     for (let tries = 0; tries < 40; tries++) {
       for (let i = pool.length - 1; i > 0; i--) { const j = (orderRng() * (i + 1)) | 0; const t = pool[i]; pool[i] = pool[j]; pool[j] = t; }
       if (!GENTLE[pool[0]]) continue;                    // gentle opener
-      if (MEGA[pool[pool.length - 1]]) continue;         // nothing mega abuts the nuke
+      // no mega in the closing slot: it either abuts the pinned nuke or, in
+      // the natural arc, lands right before the next cycle's opener jolt
+      if (MEGA[pool[pool.length - 1]]) continue;
       let ok = true;
       for (let i = 1; i < pool.length; i++) if (MEGA[pool[i]] && MEGA[pool[i - 1]]) { ok = false; break; }
-      if (ok) return pool.concat("nuke");
+      if (ok) return CBZ.CONFIG.SURV_NUKE_FINALE ? pool.concat("nuke") : pool;
     }
     return SEQUENCE.slice();   // vanishingly unlikely — fall back to the classic arc
   }
