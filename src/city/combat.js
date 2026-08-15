@@ -673,6 +673,7 @@
     if (!a._weaponProp || !a._weaponProp.visible) return false;
     if (a._holstered || a._gunLowered || a._gunHidden) return false;
     if (a.surrender || (a.surrenderT || 0) > 0 || a.char.surrender || a.char.handsUp) return false;
+    if (a.restraint) return false;   // wrists zip-tied behind the back (restrain.js) — never lift the gun arm
     const ph = a._phys;
     if (ph && (ph.down > 0 || ph.air || ph.heldBy)) return false;   // ragdolling — body.js owns the limbs
     return true;

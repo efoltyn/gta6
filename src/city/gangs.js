@@ -877,7 +877,7 @@
     let lane = 0, callLead = null;
     for (const m of a.members) {
       if (sent >= count) break;
-      if (m.dead || m.rage || m.inCar || m.raidT > 0) continue;
+      if (m.dead || m.rage || m.inCar || m.raidT > 0 || m.restraint) continue;   // a zip-tied member can't roll out (or be handed the AK)
       // the HQ garrison HOLDS THE HOUSE — it never rolls out on a raid. It
       // physically can't (posted bodies don't walk), so committing one would
       // silently field half a squad and leave the raid short.
@@ -973,7 +973,7 @@
   function stageLtDefense(gang, lot) {
     let best = null;
     for (const m of gang.members) {
-      if (!m || m.dead || m.ko > 0 || m.inCar || m === gang.boss || m.rank === "boss") continue;
+      if (!m || m.dead || m.ko > 0 || m.inCar || m.restraint || m === gang.boss || m.rank === "boss") continue;
       if (!best || rankTier(m) > rankTier(best)) best = m;
     }
     if (!best) return;
@@ -2194,7 +2194,7 @@
     const sway = Math.min(1, ((g.respect || 0) / 140));
     let turned = 0;
     for (const m of gang.members) {
-      if (m === victim || !m || m.dead || m.ko > 0) continue;
+      if (m === victim || !m || m.dead || m.ko > 0 || m.restraint) continue;   // a tied man can't ride for anybody
       const love = (CBZ.cityMemberLoyalty ? CBZ.cityMemberLoyalty(m) : 0.5) + rankW + Math.random() * 0.25;
       if (love > 0.72 + sway * 0.45) {
         m.rage = PA; m.state = "fight"; m.alarmed = Math.max(m.alarmed || 0, 8);
@@ -2323,7 +2323,7 @@
     let sent = 0;
     for (const m of gang.members) {
       if (sent >= count) break;
-      if (m.dead || m.inCar || m.companion) continue;
+      if (m.dead || m.inCar || m.companion || m.restraint) continue;
       // pull them off the post to hunt — they path to the player and engage
       m.homeGuard = m.homeGuard || m.guard;
       m.rage = PA; m.state = "fight";
