@@ -5,11 +5,16 @@
    • truck.3mf is normalized only for game scale/orientation, then registered
      as an ordinary persistent city vehicle. E/Y can steal it and the standard
      driving, crash, booster and ownership systems operate on the same record.
-   • the baked IFC sample keeps its original merged geometry/materials and is
-     placed as Goldspire's adjoining civic campus. It is intentionally not
-     wrapped in a giant AABB: bullets raycast the visible mesh, but the player
-     never hits another invisible building-sized wall.
    • Blouberg HDR is lighting only; the authored game sky remains the sky.
+
+   The baked IFC "Goldspire Civic Campus" that used to live here — a 64.8 MB
+   GLB of a Revit sample building and its landscape trees, parked at
+   (-100, 470) — was DELETED on the owner's instruction (2026-08-15), along
+   with its pad, plaza link, road record, region, label, proximity streamer
+   and the OFFICIAL_IFC_LAZY/OFFICIAL_IFC_RADIUS flags. It is not archived and
+   not flagged off: the code and the assets are gone. Nothing else in the
+   world referenced it, so removal is confined to this file plus the tools
+   and notes that photographed or documented it.
 ============================================================ */
 (function () {
   "use strict";
@@ -17,28 +22,9 @@
   if (!CBZ || !window.THREE) return;
   const THREE = window.THREE;
   const state = CBZ.officialAssetState = CBZ.officialAssetState || {
-    truck: "idle", ifc: "idle", environment: "idle", errors: [],
+    truck: "idle", environment: "idle", errors: [],
   };
   let truckSourcePromise = null;
-  let ifcSourcePromise = null;
-
-  // ---- LOAD-COST FLAGS (declared here, not config.js — index.html/config.js
-  //      are the documented Edit-race files) ------------------------------
-  // OFFICIAL_IFC_LAZY: the baked BIM is a 64.8 MB GLB and buildIfcCampus used
-  // to kick its fetch off from inside the landmass build, i.e. on the critical
-  // path of EVERY run. Measured 2026-08-04: pressing PLAY issued 64.8 MB of
-  // GLB before the first frame, for one civic annex at (-100, 470) that most
-  // sessions never walk to — on a phone that is the single largest byte in the
-  // boot. With the flag ON the campus PAD, plaza link, road record and region
-  // are still built synchronously (cheap, deterministic, and lot/region counts
-  // depend on them); only the MODEL FILL waits until the player is actually
-  // within OFFICIAL_IFC_RADIUS of it. Nothing seeded moves, so the world is
-  // byte-identical either way. `?cfg_OFFICIAL_IFC_LAZY=0` restores the eager
-  // fetch verbatim; CBZ.loadOfficialIfcNow() forces it for tools.
-  if (CBZ.CONFIG) {
-    if (CBZ.CONFIG.OFFICIAL_IFC_LAZY == null) CBZ.CONFIG.OFFICIAL_IFC_LAZY = true;
-    if (CBZ.CONFIG.OFFICIAL_IFC_RADIUS == null) CBZ.CONFIG.OFFICIAL_IFC_RADIUS = 900;
-  }
 
   function fail(kind, err) {
     state[kind] = "error";
@@ -66,19 +52,6 @@
       }, undefined, reject);
     }).catch(function (e) { fail("truck", e); throw e; });
     return truckSourcePromise;
-  }
-
-  function loadIfcSource() {
-    if (ifcSourcePromise) return ifcSourcePromise;
-    ifcSourcePromise = new Promise(function (resolve, reject) {
-      if (!THREE.GLTFLoader) { reject(new Error("GLTFLoader unavailable")); return; }
-      state.ifc = "loading";
-      const loader = new THREE.GLTFLoader();
-      loader.load("assets/official/ifc/rac_advanced_sample_project.glb", function (gltf) {
-        state.ifc = "ready"; resolve(markShared(gltf.scene));
-      }, undefined, reject);
-    }).catch(function (e) { fail("ifc", e); throw e; });
-    return ifcSourcePromise;
   }
 
   // Fit without touching the asset's internal geometry or material assignment.
@@ -138,98 +111,6 @@
     });
     return holder;
   };
-
-  function buildIfcCampus(city) {
-    const root = city && city.root;
-    if (!root || root.getObjectByName("official-ifc-civic-campus")) return;
-    // The campus is Goldspire's civic annex (its plaza link touches the
-    // city's west edge), so it rides Goldspire's world-layout offset — a
-    // stage-2 spread moves them as one block.
-    const _GOFF = (CBZ.worldOff && CBZ.worldOff("goldspire")) || { dx: 0, dz: 0 };
-    const CX = -100 + _GOFF.dx, CZ = 470 + _GOFF.dz, W = 260, D = 136;
-    const padMat = new THREE.MeshLambertMaterial({ color: 0x8d9298, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
-    const pad = new THREE.Mesh(new THREE.PlaneGeometry(W, D), padMat);
-    pad.rotation.x = -Math.PI / 2; pad.position.set(CX, 0.012, CZ);
-    pad.receiveShadow = true; pad.userData.terrain = true; pad.userData.worldSurface = true;
-    pad.name = "official-ifc-campus-surface"; root.add(pad);
-
-    // The campus touches Goldspire's west edge with a short, open plaza link.
-    const link = new THREE.Mesh(new THREE.PlaneGeometry(16, 24), new THREE.MeshLambertMaterial({ color: 0x555a61 }));
-    const linkX = 35 + _GOFF.dx;               // plaza link stays on Goldspire's west edge
-    link.rotation.x = -Math.PI / 2; link.position.set(linkX, 0.026, CZ); link.receiveShadow = true; root.add(link);
-    if (city.roads) city.roads.push({ x: linkX, z: CZ, vertical: false, len: 16, district: "goldspire", w: 24, lanesPerDir: 1, laneW: 3.6 });
-    if (CBZ.registerCityRegion) CBZ.registerCityRegion(city, {
-      name: "Goldspire Civic Campus", subtitle: "BIM Civic Complex", biome: "goldspire",
-      kind: "rect", minX: CX - W / 2, maxX: CX + W / 2, minZ: CZ - D / 2, maxZ: CZ + D / 2,
-      pad: 4, mapLabel: false,
-    });
-
-    const holder = new THREE.Group();
-    holder.name = "official-ifc-civic-campus";
-    holder.position.set(CX, 0.035, CZ);
-    holder.userData.officialAsset = "threejs IFC advanced sample";
-    root.add(holder);
-    // Eager (flag off) fetches now, exactly as before. Lazy hands the holder
-    // to the proximity watcher below and returns immediately.
-    if (CBZ.CONFIG && CBZ.CONFIG.OFFICIAL_IFC_LAZY === false) fillIfcCampus(holder);
-    else armIfcCampus(holder, CX, CZ);
-  }
-
-  // ---- the model fill, split out so it can run now OR on approach --------
-  function fillIfcCampus(holder) {
-    if (!holder || holder._ifcFilling) return;
-    holder._ifcFilling = true;
-    loadIfcSource().then(function (source) {
-      if (!holder.parent) return;
-      const model = fitObject(source.clone(true), { x: 238, y: 18, z: 114 }, false);
-      model.traverse(function (o) {
-        if (!o.isMesh) return;
-        o.castShadow = false; o.receiveShadow = true;
-        o.userData.officialIfcSurface = true;
-        // Visible triangles, not a fake box, stop bullets/vision.
-        if (CBZ.losBlockers && CBZ.losBlockers.indexOf(o) < 0) CBZ.losBlockers.push(o);
-      });
-      holder.add(model);
-      if (CBZ.makeLabelSprite) {
-        const label = CBZ.makeLabelSprite("GOLDSPIRE CIVIC CAMPUS", { color: "#eaf3ff" });
-        label.scale.set(20, 4.4, 1); label.position.set(0, 15, -48); holder.add(label);
-      }
-    }).catch(function () {
-      if (holder.parent && !holder.children.length) holder.parent.remove(holder);
-    });
-  }
-
-  // ---- proximity stream ---------------------------------------------------
-  // ONE watcher for the page (onAlways has no unregister, so registering per
-  // world build would leak a tick per run). Each build re-arms `pending` with
-  // its fresh holder; loadIfcSource() memoizes, so a second run that reaches
-  // the campus re-clones an already-parsed source instead of re-downloading.
-  let pendingCampus = null;
-  function armIfcCampus(holder, cx, cz) { pendingCampus = { holder: holder, cx: cx, cz: cz }; }
-  function tickIfcCampus() {
-    const p = pendingCampus;
-    if (!p) return;
-    if (!p.holder.parent) { pendingCampus = null; return; }   // world was rebuilt
-    const P = CBZ.player && CBZ.player.pos;
-    if (!P) return;
-    const R = +(CBZ.CONFIG && CBZ.CONFIG.OFFICIAL_IFC_RADIUS) || 900;
-    const dx = P.x - p.cx, dz = P.z - p.cz;
-    if (dx * dx + dz * dz > R * R) return;
-    pendingCampus = null;
-    fillIfcCampus(p.holder);
-  }
-  // PRESENTATION band: this is a visual-only asset stream — it must never sit
-  // in front of physics or AI, and a dropped tick costs nothing but latency.
-  if (CBZ.onAlways) CBZ.onAlways((CBZ.PRIO && CBZ.PRIO.PRESENTATION) || 60, tickIfcCampus);
-
-  // Escape hatch for tools/probes that need the campus present regardless of
-  // where the player is standing (tools/visual-world-qa.mjs's ifc-campus pose).
-  CBZ.loadOfficialIfcNow = function () {
-    const p = pendingCampus;
-    if (p) { pendingCampus = null; fillIfcCampus(p.holder); return true; }
-    return state.ifc !== "idle";
-  };
-  if (CBZ.addLandmass) CBZ.addLandmass(buildIfcCampus, 34.6);
 
   // Use the supplied HDR as physically based reflection LIGHTING only. Keeping
   // it out of scene.background avoids a second photographic sky/cloud layer.

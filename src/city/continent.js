@@ -314,11 +314,11 @@
     //   pairs grows for free whenever the map does, so it is reported
     //   separately as evidence and is not the headline.
     // SAME-BIOME PAIRS ARE SKIPPED, for the reason the math gate's own
-    // overlap test skips them: "same biome = sibling, fine". A civic
-    // campus butted onto its own city, or three villages of one nation
-    // clustered together, is DESIGN — counting those would have pinned
-    // minPairDistance at 2u (Goldspire <-> its civic campus, measured)
-    // and the metric would never have moved again.
+    // overlap test skips them: "same biome = sibling, fine". An annex
+    // butted onto its own city, or three villages of one nation
+    // clustered together, is DESIGN — counting those pinned
+    // minPairDistance at 2u (measured, back when Goldspire still had its
+    // civic campus) and the metric would never have moved again.
     let minPair = Infinity, allSum = 0, allPairs = 0, closest = null;
     const nearest = new Array(regions.length).fill(Infinity);
     const tight = [];

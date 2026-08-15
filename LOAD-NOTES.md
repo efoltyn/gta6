@@ -112,7 +112,15 @@ Both are `CBZ.CONFIG` flags with a one-line URL revert, per doctrine. Gated:
 `MATHGATE: ok` (329/182/206, determinism ok, errors baseline-only) and
 `tools/smoke-play.mjs` invariants ok.
 
-- **`OFFICIAL_IFC_LAZY` (default ON)** — `city/official_assets.js`. The campus
+- **`OFFICIAL_IFC_LAZY`** — **GONE (2026-08-15).** The owner deleted the
+  Goldspire Civic Campus outright: the builder, the pad/link/road/region, the
+  proximity streamer, both flags, `tools/bake-official-ifc.mjs`, the `web-ifc`
+  dependency and all 103 MB of `assets/official/ifc/`. Finding #2 below is now
+  fixed by subtraction rather than by lazy-loading — PLAY issues **2**
+  `assets/official` requests and no IFC bytes exist to fetch. The original
+  entry is kept below for the record.
+
+  ~~**`OFFICIAL_IFC_LAZY` (default ON)** — `city/official_assets.js`. The campus
   PAD, plaza link, road record and region are still built synchronously (they
   are cheap, deterministic, and lot/region counts depend on them); only the
   MODEL FILL waits until the player is within `OFFICIAL_IFC_RADIUS` (900) of it.
@@ -121,7 +129,7 @@ Both are `CBZ.CONFIG` flags with a one-line URL revert, per doctrine. Gated:
   the boot path has no asset over 4 MB left on it.
   Revert: `?cfg_OFFICIAL_IFC_LAZY=0`. Tools that need the campus regardless of
   where the player stands call `CBZ.loadOfficialIfcNow()` (already wired into
-  `tools/visual-world-qa.mjs`).
+  `tools/visual-world-qa.mjs`).~~
 
 - **`CITY_BOOT_SCREEN` (default ON)** — `systems/state.js`. **This makes nothing
   faster.** It paints an honest card, waits two frames so the card has actually

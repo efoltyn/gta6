@@ -25,7 +25,7 @@
      node tools/load-profile.mjs --cpu 4              # throttle CPU 4x (phone-ish)
      node tools/load-profile.mjs --profile            # + V8 CPU profile of the build
      node tools/load-profile.mjs --url /games/casino.html --no-build
-     node tools/load-profile.mjs --cfg OFFICIAL_IFC_LAZY=0    # A/B a build flag
+     node tools/load-profile.mjs --cfg CITY_BOOT_SCREEN=0     # A/B a build flag
 
    WHY --cfg AND NOT A LIVE TOGGLE: build-time flags are read while the world
    is generated, so flipping one after boot proves nothing (scrolls/claude/

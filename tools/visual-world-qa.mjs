@@ -112,17 +112,6 @@ try {
     if (ready) break;
     await sleep(500);
   }
-  // The IFC is a large local model. Give it time to finish without making it a
-  // precondition for the rest of the world screenshots. Under OFFICIAL_IFC_LAZY
-  // (default on) the fetch only fires when the player walks near Goldspire, so
-  // ask for it explicitly — this pass photographs the campus from a fixed pose.
-  if (!only.size) await evaluate("!!(CBZ.loadOfficialIfcNow && CBZ.loadOfficialIfcNow())");
-  if (!only.size) for (let i = 0; i < 80; i++) {
-    const s = await evaluate("CBZ.officialAssetState && CBZ.officialAssetState.ifc");
-    if (s === "ready" || s === "error") break;
-    await sleep(500);
-  }
-
   // A focused CBZ_VISUAL_ONLY pass should photograph its requested terrain,
   // not first spend minutes traversing ~160k objects for unrelated global
   // metadata. The exhaustive audit still runs on the normal full suite.
@@ -154,7 +143,7 @@ try {
     return {regions:regs.map(r=>r.name),lots:lots.length,towers:towers.length,towersByDistrict:districts,
       mountainBuildings:mountainBuildings.slice(0,40),
       official:CBZ.officialAssetState,truck:!!CBZ.scene.getObjectByName("official-threejs-farm-truck"),
-      ifc:!!CBZ.scene.getObjectByName("official-ifc-civic-campus"),aircraftProbe:aircraftProbe,
+      aircraftProbe:aircraftProbe,
       stuntJumps:(CBZ.cityStuntJumps||[]).length,oneOcean:oceanCount,
       worldScale:CBZ.city&&CBZ.city.arena&&CBZ.city.arena.worldScale};
   })())`));
@@ -401,11 +390,6 @@ try {
     const x=best?best.cx:0,z=best?best.cz:0,h=best&&best.building.h||50;
     window.__visualQaPose=[x+165,Math.max(50,h*.72),z+180,x,Math.min(22,h*.35),z];CBZ.player.pos.set(x,0,z);if(CBZ.requestShadowUpdate)CBZ.requestShadowUpdate(true);
     return {cluster:bn,at:[x,z],district:best&&best.district,storeys:best&&best.building.storeys};`);
-
-  await pose("ifc-campus", `
-    const o=CBZ.scene.getObjectByName("official-ifc-civic-campus"),b=o?new THREE.Box3().setFromObject(o):null,c=b?b.getCenter(new THREE.Vector3()):new THREE.Vector3(-100,0,470),s=b?b.getSize(new THREE.Vector3()):new THREE.Vector3(238,18,114);
-    window.__visualQaPose=[c.x+s.x*.64,c.y+Math.max(34,s.y*1.6),c.z+s.z*.82,c.x,c.y+s.y*.25,c.z];CBZ.player.pos.set(c.x,0,c.z);if(CBZ.requestShadowUpdate)CBZ.requestShadowUpdate(true);
-    return {loaded:!!(o&&o.children.length>1),center:c.toArray(),size:s.toArray()};`);
 
   await pose("desert-ground", `
     const r=CBZ.city.arena.regions.find(x=>x.name==="The Saltlands");

@@ -3052,7 +3052,7 @@
      §6  THE BUILDER — one landmass step, order 42.
 
      AFTER: speedway(20) airport(21) military(22) snow(30) desert(31)
-     forest(32) farmland(33) minicities(34) official_assets(34.6)
+     forest(32) farmland(33) minicities(34)
      countries(35) bunkers(40) arena_fights(40) strategic(41).
      BEFORE: marina(66) highways(90) highwaynet(91) continent(97) and the
      nature scatter passes(98-99) — so the ground we claim is known to the

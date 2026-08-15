@@ -83,15 +83,12 @@ const LEGACY_COPY_DIRS = ["css", "assets", "src"];
 // they are AUTHORING SOURCES that no client ever fetches.
 //
 //   src/bootstrap.js ............ emitted by Rollup as assets/bootstrap.js
-//   ...ifc/rac_advanced_sample_project.ifc (40.8 MB) — the BIM source that
-//       tools/bake-official-ifc.mjs bakes into the .glb sitting next to it.
-//       city/official_assets.js loads ONLY the .glb ("Runtime IFC parsing is
-//       intentionally avoided"), so shipping the .ifc put 40.8 MB of
-//       never-fetched bytes in every deploy. The file stays in the repo — it
-//       is how the .glb gets re-baked — it just no longer rides to dist/.
+//
+// (assets/official/ifc/ used to be listed here — the 40.8 MB BIM source for
+//  the Goldspire Civic Campus. The campus was deleted 2026-08-15 and both the
+//  .ifc and its baked .glb went with it, so there is nothing left to skip.)
 const SKIP_RAW_COPY = new Set([
   "src/bootstrap.js",
-  "assets/official/ifc/rac_advanced_sample_project.ifc",
 ]);
 
 function copyRecursive(srcDir, destDir, relBase) {
