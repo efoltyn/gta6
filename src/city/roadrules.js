@@ -1288,7 +1288,7 @@
     }
   }
   let gapRuns = 0, gapSplitRuns = 0, gapCuts = 0, gapSwallowed = 0,
-    gapDeferred = 0, gapExempt = 0, trimmedColliders = 0;
+    gapDeferred = 0, gapExempt = 0, trimmedColliders = 0, orientedTrimmed = 0;
 
   function splitRun(x0, z0, x1, z1, opts) {
     opts = opts || {};
@@ -1523,6 +1523,16 @@
       if (colliderExempt(c)) { gapExempt++; continue; }
       const r = crossedBy(c, R);
       if (!r) continue;
+      // A CUT THIS SWEEP CANNOT ENFORCE IS NOT A CUT. Every edit below moves
+      // minX..maxZ, but physics.js resolves an ORIENTED record (one carrying
+      // c.yaw) against its own cx/cz/hw/hd instead — so trimming the bounding
+      // box of one would leave the wall standing in the road and report a
+      // trim that never happened. Shedding the orientation here degrades that
+      // one piece to the bounding box it already carries, which is what the
+      // whole world was before oriented colliders existed, and lets the cut
+      // land. A shallow-angle run (the only shape that reaches this line — a
+      // steep one is too square to pass isRun) barely widens.
+      if (c.yaw) { c.yaw = 0; c.cx = c.cz = c.hw = c.hd = undefined; orientedTrimmed++; }
       const vertRun = (c.maxZ - c.minZ) > (c.maxX - c.minX);
       const b = roadBox(r, !!r.vertical === vertRun, _rb);
       const lo0 = vertRun ? c.minZ : c.minX, hi0 = vertRun ? c.maxZ : c.maxX;
@@ -1633,6 +1643,9 @@
       crossingsRemaining: remaining, worldBlockers: blockers,
       tallCrossings: tall, exempt: exemptNow, exemptSeen: gapExempt,
       trimmed: trimmedColliders, colliderRuns: runs,
+      // of those trims, how many landed on an oriented collider and
+      // therefore shed its yaw to take effect (see sweepColliders)
+      orientedTrimmed: orientedTrimmed,
       ledger: gapLedger.length, segments: R.length,
       where: where, blockWhere: blockWhere, tallWhere: tallWhere,
     };

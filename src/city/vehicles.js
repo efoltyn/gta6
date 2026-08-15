@@ -4088,6 +4088,45 @@
   }
   const _sweepPt = { x: 0, y: 0, z: 0 };   // scratch — zero per-call allocation
   const _agroundN = { x: 0, z: 0 };        // ditto, for the aground shore normal
+
+  /* ---- THE HEIGHT GATE A CAR NEVER HAD ---------------------------------
+     THE OWNER'S BUG, AND IT IS ONLY A BUG WHEN YOU DRIVE. Every call below
+     used to be CBZ.collide(pos, radius) with NO feetY/headY, and physics.js
+     is explicit about what that means: "Omit both args and EVERY collider
+     acts full-height". Height-gated boxes are how this game draws anything
+     you are meant to pass UNDER or OVER — gantry beams, balconies, canopies,
+     upper-floor window bands, the arena's stand rails twenty metres up, the
+     marina travel-lift's 8.7 m cross-beams. On foot they correctly ignore
+     you. In a car every one of them was a wall standing in mid-air.
+
+     MEASURED on the shipped world before this change, on the port alone
+     (x -220..360, z -920..-480, sampled every 2 m): 68 ground points where a
+     car is stopped by geometry that sits ENTIRELY ABOVE ITS ROOF — the worst
+     a 16 x 12 m block of open ground you simply cannot drive across. Nothing
+     is drawn there at car height because there is nothing there.
+
+     The band is deliberately generous DOWNWARD (0.9 m below the chassis) so
+     nothing a car should hit stops catching it: kerbs (y1 0.22), the harbour
+     knee-wall (y1 0.55), the breakwater moles that start at y -1.4. Only
+     geometry above the roof is released, which is the whole bug.
+
+     The marine special-case above this function exists because of the same
+     defect — a boat "crunching to a stop at the dock like it hit a building"
+     on the harbour knee-wall — and it is left exactly as it is: it fires on
+     open water before any of this runs.
+
+     Revert: CBZ.CONFIG.VEH_HEIGHT_GATE = false (or ?cfg_VEH_HEIGHT_GATE=0). */
+  const _span = { feet: 0, head: 0 };
+  function wallSpan(car) {
+    const C = CBZ.CONFIG || (CBZ.CONFIG = {});
+    if (C.VEH_HEIGHT_GATE == null) C.VEH_HEIGHT_GATE = true;
+    if (C.VEH_HEIGHT_GATE === false) { _span.feet = undefined; _span.head = undefined; return _span; }
+    const base = car.pos.y || 0;
+    const h = +vehicleDims(car).height;
+    _span.feet = base - 0.9;
+    _span.head = base + (isFinite(h) && h > 0.8 ? h : 1.9) + 0.15;
+    return _span;
+  }
   function collideVehicle(car) {
     if (!CBZ.collide || !car || !car.pos) return 0;
     // MARINE: a boat out on open water has no buildings/seawall to bump — skip
@@ -4101,6 +4140,7 @@
       return 0;
     }
     const ox = car.pos.x, oz = car.pos.z, radius = wallRadius(car);
+    const span = wallSpan(car);          // the car's own vertical band (above)
     // ---- ANTI-TUNNEL SWEEP (VEH_COLLIDE_FIX): every caller integrates
     // position FIRST and only then depenetrates here, so a frame whose
     // displacement exceeds the body radius could jump clean over a thin
@@ -4118,7 +4158,7 @@
           for (let i = 1; i < n; i++) {
             _sweepPt.x = px0 + sdx * (i / n); _sweepPt.z = pz0 + sdz * (i / n); _sweepPt.y = car.pos.y || 0;
             const sx = _sweepPt.x, sz = _sweepPt.z;
-            CBZ.collide(_sweepPt, radius);
+            CBZ.collide(_sweepPt, radius, span.feet, span.head);
             if (_sweepPt.x !== sx || _sweepPt.z !== sz) {
               car.pos.x = _sweepPt.x; car.pos.z = _sweepPt.z;   // hit mid-frame: stop AT the obstacle
               break;
@@ -4127,7 +4167,7 @@
         }
       }
     }
-    CBZ.collide(car.pos, radius);
+    CBZ.collide(car.pos, radius, span.feet, span.head);
     const d = vehicleDims(car);
     const reach = Math.max(0, d.length * 0.5 - radius * 0.45);
     if (reach > 0.2) {
@@ -4135,7 +4175,7 @@
       const fx = Math.sin(car.heading || 0) * sign, fz = Math.cos(car.heading || 0) * sign;
       const probe = { x: car.pos.x + fx * reach, y: car.pos.y || 0, z: car.pos.z + fz * reach };
       const px = probe.x, pz = probe.z;
-      CBZ.collide(probe, radius * 0.75);
+      CBZ.collide(probe, radius * 0.75, span.feet, span.head);
       car.pos.x += probe.x - px;
       car.pos.z += probe.z - pz;
     }
