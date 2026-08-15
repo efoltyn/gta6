@@ -139,6 +139,62 @@ function why(r) { return (r && r.__err) ? ("threw: " + String(r.__err).split("\n
   }
 }
 
+/* ---- THE BUNK HOLDS A BODY -----------------------------------------------
+   OWNER, with a screenshot of an inmate's head standing out of the top of the
+   rack above him: "this is a head overlapping issue... they should be able to
+   sit on their bed. It should be tall enough... that shouldn't be able to
+   overlap."
+
+   THE OVERLAP WAS NEVER A LOOK, IT WAS AN UNCHECKED NUMBER. entities/character.
+   js's seat solve puts a seated crown hipPad + topOverHip = 1.141 above the
+   cushion (1.18 to the drawn box, hair included) and world/cellblock.js gave it
+   0.77 of clearance. Nothing measured the two against each other, so the wing
+   could not tell. These assertions are that measurement, taken on live bodies
+   in live cells, so the geometry can never drift back under the rig:
+
+     1. the tallest SEATED resident's bounding box is BELOW the deck he is
+        sitting under — signed, in metres, so a regression reports its size;
+     2. no cell resident is standing inside the bunk's (now solid) frame, which
+        is where every unseated body used to be left — fights included;
+     3. the wing's own collider invariants still hold with the bunk solid: the
+        player's spawn, the south door gap and the central spine all clear.
+   Numeric, never pixels. */
+{
+  await sleep(2500);          // dealCast + the pose hold settle
+  const r = await evl(`
+    const cells = (CBZ.cellblock && CBZ.cellblock.cells) || [];
+    const out = { audit: CBZ.cellblockAudit(), sat: 0, worstOver: -99, inFrame: 0, cells: cells.length };
+    const b0 = cells.length && cells[0].bunk;
+    if (b0) out.rig = { top: b0.top, deckY: b0.deckY, topBunk: b0.topBunk,
+                        headroom: +b0.headroom.toFixed(3), headroomTop: +b0.headroomTop.toFixed(3) };
+    for (const c of cells) {
+      const n = c.owner, b = c.bunk;
+      if (!n || n === "player" || !n.group || !b) continue;
+      if (n.char && n.char.sitting && b.deckY != null) {
+        out.sat++;
+        const over = new THREE.Box3().setFromObject(n.group).max.y - b.deckY;
+        if (over > out.worstOver) { out.worstOver = +over.toFixed(3); }
+      } else if (Math.abs(n.group.position.x - b.x) < b.latOut
+              && Math.abs(n.group.position.z - b.z) < b.lonOut) out.inFrame++;
+    }
+    return out;
+  `);
+  if (bad(r)) check("bunk: the wing reports its racks", false, why(r));
+  else {
+    check("bunk: a seated man's head clears the rack above him",
+      r.sat > 0 && r.worstOver < 0,
+      `${r.sat} seated, worst crown ${r.worstOver > 0 ? "+" : ""}${r.worstOver} m vs the deck ` +
+      `(berth ${r.rig && r.rig.headroom} / ${r.rig && r.rig.headroomTop})`);
+    check("bunk: nobody stands inside the frame",
+      r.inFrame === 0, `insideFrame=${r.inFrame} of ${r.cells} cells`);
+    check("bunk: a solid bunk did not block the wing",
+      r.audit.spawnBlocked === 0 && r.audit.doorGapBlocked === 0 && r.audit.spineBlocked === 0
+      && r.audit.spawnInPlayerCell === true,
+      JSON.stringify({ spawn: r.audit.spawnBlocked, gap: r.audit.doorGapBlocked,
+                       spine: r.audit.spineBlocked, colliders: r.audit.colliders }));
+  }
+}
+
 const step = (n) => evl(`for(var i=0;i<${n | 0};i++) CBZ.stepSim(1/60); return true;`);
 
 // ---- 0. THE HUD SAYS ONLY WHAT IS TRUE -----------------------------------

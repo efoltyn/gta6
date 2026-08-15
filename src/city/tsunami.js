@@ -60,10 +60,18 @@
        and being taken past the shoreline with the breath meter running is a
        death with its own name.
 
+   THE SLOW STAND AND THE CRASH (2026-08-15) — owner's second reference: the
+   towering frame is the wave at its PEAK HEIGHT, and the instinct that goes
+   with it is physics: c = √(g·d), so a tsunami is fastest in deep water and
+   trades that speed for height as it shoals. It arrives at its tallest,
+   steepest and SLOWEST in the last metres before the break — it visibly
+   STANDS over the waterfront — and then the lip comes down all at once and
+   the released bore charges the streets. TSU_SHOAL_V2, below, is that arc.
+
    Flags: TSUNAMI (whole file) · TSUNAMI_AUTO (does it ever fire on its own) ·
    TSUNAMI_PEAK (metres at the crest) · TSUNAMI_PERIOD (mean seconds between) ·
-   TSU_FACE_V2 · TSU_DEBRIS · TSU_UNDERTOW (each a one-line revert, and each
-   read by BOTH tsunamis).
+   TSU_FACE_V2 · TSU_DEBRIS · TSU_UNDERTOW · TSU_SHOAL_V2 (each a one-line
+   revert, and each read by BOTH tsunamis).
 ============================================================ */
 (function () {
   "use strict";
@@ -101,10 +109,16 @@
                   up at the front, tumbling INSIDE the flow, striking people as
                   battering rams, stranded where the drain leaves them.
      TSU_UNDERTOW the drain's seaward current, strong enough that swimming
-                  against it away from cover does not work. */
+                  against it away from cover does not work.
+     TSU_SHOAL_V2 the shoaling arc: the front DECELERATES as the water under
+                  it shallows (c = √(g·d)), stands at its full towering height
+                  for a held beat at the shoreline — the slowest moment of the
+                  whole event — then CRASHES, and the broken bore is released
+                  into the streets. false = the old constant-speed walk. */
   if (CBZ.CONFIG.TSU_FACE_V2 == null) CBZ.CONFIG.TSU_FACE_V2 = true;
   if (CBZ.CONFIG.TSU_DEBRIS == null) CBZ.CONFIG.TSU_DEBRIS = true;
   if (CBZ.CONFIG.TSU_UNDERTOW == null) CBZ.CONFIG.TSU_UNDERTOW = true;
+  if (CBZ.CONFIG.TSU_SHOAL_V2 == null) CBZ.CONFIG.TSU_SHOAL_V2 = true;
 
   function on() { return CBZ.CONFIG.TSUNAMI !== false && !!CBZ.waterSurgeSet; }
 
@@ -123,6 +137,18 @@
      does not drive, it rolls), they hit people at closing speed, and when the
      water leaves they are simply left where they stopped — which is the image
      everybody who has seen the aftermath footage remembers.
+
+     NOTHING IN THE WATER IS INVENTED (2026-08-15). The kit used to be able to
+     manufacture its own flotsam — a pooled cylinder that stood for "a log", a
+     flat brown box that stood for "a panel" — and the owner's verdict on that
+     was final: no fake debris. Spawned scenery in a soup of real objects reads
+     as exactly what it is, and it broke the only promise the field makes, that
+     everything battering you WAS STANDING IN THE WORLD A SECOND AGO. So the
+     manufacture path (`shed`) is gone. The kit now only ever TAKES: the
+     caller hands it a real object it has already pulled out of its own system
+     — a car group, the actual trunk-and-canopy meshes of an uprooted tree, a
+     wall torn off the swept house's own group with its own material — and the
+     field takes over where it is drawn, nothing more.
 
      ONE FIELD, TWO CONSUMERS. This file drives the city's;
      systems/disasters.js drives the island's with the same object and the same
@@ -148,26 +174,14 @@
     const seaY = cfg.seaY || function () { return 0; };
     const groundY = cfg.groundY || function () { return 0; };
     const items = [];
-    const owned = [];              // geometries/materials this field must dispose
     let entrained = 0, strikes = 0, kills = 0, checkPhase = 0;
-
-    // pooled shapes: one geometry + one material per debris class
-    let logGeo = null, logMat = null, panelGeo = null, panelMat = null, rubbleGeo = null, rubbleMat = null;
-    function pool() {
-      if (logGeo) return;
-      logGeo = new THREE.CylinderGeometry(0.34, 0.28, 5.4, 7);
-      logGeo.rotateZ(Math.PI / 2);
-      logMat = new THREE.MeshLambertMaterial({ color: 0x4a3a26 });
-      panelGeo = new THREE.BoxGeometry(2.6, 0.16, 1.5);
-      panelMat = new THREE.MeshLambertMaterial({ color: 0x7d6749 });
-      rubbleGeo = new THREE.BoxGeometry(0.9, 0.6, 0.8);
-      rubbleMat = new THREE.MeshLambertMaterial({ color: 0x6d7076 });
-      owned.push(logGeo, logMat, panelGeo, panelMat, rubbleGeo, rubbleMat);
-    }
 
     /* MASS IS THE WHOLE POINT. A plank rides on top and stings; a car is two
        tonnes moving at the speed of the water and it kills whatever it meets.
-       These three numbers are the only difference between the classes.       */
+       These numbers are the only difference between the classes — the classes
+       are BEHAVIOUR, never geometry: `log` is a real uprooted tree, `panel` a
+       wall off a real building, `rubble` a chunk of one. What each looks like
+       is whatever the world object the caller handed over looks like.        */
     const CLASS = {
       car:    { drift: 0.78, hitR: 2.5, dmg: 92, force: 17, sink: 0.55, spin: 1.5 },
       log:    { drift: 0.94, hitR: 1.9, dmg: 44, force: 11, sink: 0.18, spin: 3.0 },
@@ -194,28 +208,20 @@
       /* ENTRAIN A REAL WORLD OBJECT. The caller has already taken it out of
          whatever system owned it (pulled its collider, marked the record dead)
          — this only takes over where it is drawn. */
-      take(obj, x, z, kind) { return obj ? add(obj, x, z, kind) : null; },
+      take(obj, x, z, kind, opts) { return obj ? add(obj, x, z, kind, opts) : null; },
 
-      /* THE WRECKAGE OF SOMETHING THE WATER ALREADY TOOK: n pieces of a
-         wood-frame house at (x,z), joining the same flow that removed it. */
-      shed(x, z, n, kind) {
-        if (!root) return 0;
-        pool();
-        const k = kind || "panel";
-        const geo = k === "log" ? logGeo : (k === "rubble" ? rubbleGeo : panelGeo);
-        const mat = k === "log" ? logMat : (k === "rubble" ? rubbleMat : panelMat);
-        let made = 0;
-        for (let i = 0; i < n; i++) {
-          const m = new THREE.Mesh(geo, mat);
-          m.castShadow = false;
-          const px = x + (DEB_RAND() - 0.5) * 9, pz = z + (DEB_RAND() - 0.5) * 9;
-          m.position.set(px, seaY(px, pz), pz);
-          m.scale.setScalar(0.7 + DEB_RAND() * 0.9);
-          root.add(m);
-          add(m, px, pz, k, { dispose: true });
-          made++;
-        }
-        return made;
+      /* ENTRAIN A REAL OBJECT WHERE IT STANDS. Re-parents it to the field's
+         root with its world transform preserved (Object3D.attach), starts the
+         tumble from the pose it actually had, and drives it from there. This
+         is how a wall still bolted to its house or a trunk still planted in
+         the ground steps out of its builder's group and into the water. */
+      takeWorld(obj, kind, opts) {
+        if (!obj || !root) return null;
+        const wp = obj.getWorldPosition(new THREE.Vector3());
+        if (obj.parent !== root) root.attach(obj);
+        const it = add(obj, wp.x, wp.z, kind, opts);
+        it.yaw = obj.rotation.y; it.pitch = obj.rotation.x; it.roll = obj.rotation.z;
+        return it;
       },
 
       /* ONE FRAME OF THE FLOW. env: {dx, dz, flow (m/s, signed — negative is
@@ -301,15 +307,17 @@
       },
       count() { return items.length; },
       stats() { return { entrained: entrained, strikes: strikes, kills: kills, live: items.length }; },
+      /* Drops the field's TRACKING, not the world. Everything entrained was a
+         real object, and a real object stranded by the drain is aftermath —
+         it stays exactly where the water left it, owned again by the scene it
+         came from. Only items explicitly flagged `dispose` (none, today) are
+         removed; there are no pooled fakes left to destroy. */
       dispose() {
         for (let i = 0; i < items.length; i++) {
           const it = items[i];
           if (it.dispose && it.obj && it.obj.parent) it.obj.parent.remove(it.obj);
         }
         items.length = 0;
-        for (let i = 0; i < owned.length; i++) if (owned[i] && owned[i].dispose) owned[i].dispose();
-        owned.length = 0;
-        logGeo = null;
       },
     };
   };
@@ -393,7 +401,28 @@
      the level, so the face and the water arrive together and can never
      disagree. The face rides it; nothing samples it for wetness.            */
   const FRONT_FROM = -190, FRONT_TO = 130;
-  function frontAt(u) { return FRONT_FROM + (FRONT_TO - FRONT_FROM) * u; }
+  /* THE FRONT DOES NOT WALK AT ONE SPEED (TSU_SHOAL_V2). c = √(g·d): a
+     tsunami is fastest over deep water and spends that speed standing up as
+     it shoals, so the front comes in hard, DECELERATES to a crawl as the wall
+     reaches its full height at the seawall — the slowest moment of the event,
+     and the reference frame — and then the lip comes down and the released
+     bore takes the streets fast. The shape is still a pure function of the
+     level fraction, so the wall can never be somewhere the water is not: the
+     invariant survives, only the gearing between level and front changed.
+     LANDFALL_U is fs = -10 — exactly where turbidAt saturates and the
+     collapse in faceHeight() begins, so the stand, the soup and the spend all
+     hinge on the same spot. */
+  const LANDFALL_U = (-10 - FRONT_FROM) / (FRONT_TO - FRONT_FROM);
+  function frontShape(u) {
+    if (CBZ.CONFIG.TSU_SHOAL_V2 === false) return u;
+    if (u <= LANDFALL_U) {
+      const w = u / LANDFALL_U;
+      return LANDFALL_U * (1 - Math.pow(1 - w, 2.0));   // ease OUT: dead slow at the wall
+    }
+    const w = (u - LANDFALL_U) / (1 - LANDFALL_U);
+    return LANDFALL_U + (1 - LANDFALL_U) * Math.pow(w, 0.72);  // steep at 0: the release
+  }
+  function frontAt(u) { return FRONT_FROM + (FRONT_TO - FRONT_FROM) * frontShape(u); }
   // 0 in deep water, 1 once the bore is scouring the town: the sediment load,
   // the churn, the boil and the palette all hang off this one number.
   function turbidAt(fs) { return Math.max(0, Math.min(1, (fs + 105) / 95)); }
@@ -413,10 +442,18 @@
      what it gives up in height is the flood rising behind it, which the surge
      is already doing on this same span. Landfall is fs ~ -10 (where turbidAt
      saturates), so that is where the collapse begins. */
+  /* THE PEAK IS THE REFERENCE (2026-08-15). The owner's frame is a wall that
+     TOWERS over the waterfront — several times the buildings it is about to
+     take, not a nasty surf line — and the surge stays an honest few metres of
+     flood behind it, because run-up depth and face height are different
+     numbers in every piece of tsunami footage there is. So the face's scale
+     comes off the same TSUNAMI_PEAK knob but with reference gearing: peak 5.4
+     builds a ~32 m wall at full shoal, standing over the seawall at the stall,
+     and every metre of it is spent crossing the town exactly as before. */
   function faceHeight(peak, fs) {
     const shoal = Math.max(0.42, Math.min(1, 0.42 + 0.58 * Math.exp(-Math.pow((fs + 26) / 96, 2))));
     const inland = Math.max(0, Math.min(1, (fs + 10) / (FRONT_TO + 10)));
-    return (5.5 + peak * 1.75) * shoal * Math.max(0.1, Math.pow(1 - inland, 1.45));
+    return (8 + peak * 4.4) * shoal * Math.max(0.1, Math.pow(1 - inland, 1.45));
   }
 
   function seaSurface() {
@@ -444,6 +481,7 @@
       cx: P && P.pos ? P.pos.x : 0, cz: P && P.pos ? P.pos.z : 0,
       dx: dx, dz: dz, frontS: FRONT_FROM, u: 0,
       face: null, debris: null, structCd: 0, takeCd: 0, undertowT: 0,
+      crashed: false, crashT: 0,
     };
     noted = "";
     return true;
@@ -478,7 +516,7 @@
     if (ev.face) return ev.face;
     const root = (CBZ.city && CBZ.city.arena && CBZ.city.arena.root) || CBZ.scene;
     if (!root) return null;
-    ev.face = CBZ.tsuFaceBuild({ width: 520, height: 5.5 + ev.peak * 1.75 });
+    ev.face = CBZ.tsuFaceBuild({ width: 520, height: 8 + ev.peak * 4.4 });
     root.add(ev.face.group);
     return ev.face;
   }
@@ -488,9 +526,13 @@
     const visible = ev.phase === "lull" || ev.phase === "surge" || (ev.phase === "hold" && fs < FRONT_TO - 4);
     f.group.visible = visible;
     if (!visible) return;
+    // the crash folds the overhang down and drops the lip: for the first two
+    // seconds after the break the wall is a collapsing mass, not a curl
+    const crashDip = ev.crashed ? (1 - 0.26 * Math.exp(-ev.crashT * 1.15)) : 1;
+    const crashCurl = ev.crashed ? Math.max(0.3, 1 - ev.crashT * 1.1) : 1;
     CBZ.tsuFaceUpdate(f, {
       t: (CBZ.waterClock ? CBZ.waterClock() : (CBZ.now || 0) * 0.001), dt: dt,
-      height: faceHeight(ev.peak, fs), turbid: turbidAt(fs), curl: curlAt(fs),
+      height: faceHeight(ev.peak, fs) * crashDip, turbid: turbidAt(fs), curl: curlAt(fs) * crashCurl,
       foam: 0.55 + turbidAt(fs) * 0.5,
       x: ev.cx + ev.dx * fs, y: seaSurface() - 1.1, z: ev.cz + ev.dz * fs,
       dirX: ev.dx, dirZ: ev.dz,
@@ -583,7 +625,6 @@
     const A = CBZ.city && CBZ.city.arena;
     const P = CBZ.player;
     if (!A || !A.lots || !P || !P.pos || !CBZ.cityFloodDepthAt) return;
-    const field = ev.debris;
     for (let i = 0; i < A.lots.length; i++) {
       const lot = A.lots[i], b = lot && lot.building;
       if (!b || lot.demolished || lot._tsuSwept) continue;
@@ -598,7 +639,8 @@
           kind: "kinetic", sudden: true, lot: lot, dirx: ev.dx, dirz: ev.dz,
         });
       } catch (e) {}
-      if (field) field.shed(b.ox, b.oz, 5, "panel");
+      // no invented flotsam follows it: structural.js's own collapse lays the
+      // building's real rubble, and the water carries only real objects
       return;                                     // one house per beat, never a queue
     }
   }
@@ -730,6 +772,26 @@
     const frac = Math.max(0, Math.min(1, (s - ev.draw) / Math.max(0.001, ev.peak - ev.draw)));
     ev.u = frac;
     ev.frontS = frontAt(frac);
+    /* ---- THE CRASH -------------------------------------------------------
+       One beat, once: the stand ends, the lip comes down along the whole
+       front at once, and the bore is released. Presentation only — the level
+       is already rising on its own curve — but it is the loudest thing the
+       event does, and it happens exactly where the front's own gearing stalls
+       (LANDFALL_U), so the sound and the shape can never disagree. */
+    if (!ev.crashed && CBZ.CONFIG.TSU_SHOAL_V2 !== false && ev.frontS >= -10 &&
+        (ev.phase === "surge" || ev.phase === "hold")) {
+      ev.crashed = true; ev.crashT = 0;
+      const px = -ev.dz, pz = ev.dx;
+      const fx = ev.cx + ev.dx * ev.frontS, fz = ev.cz + ev.dz * ev.frontS;
+      if (CBZ.fx && CBZ.fx.blast) for (let i = -2; i <= 2; i++) {
+        try {
+          CBZ.fx.blast(fx + px * i * 34, fz + pz * i * 34,
+            { maxR: i === 0 ? 24 : 17, color: 0xd9f2ff, shake: i === 0 ? 1.15 : 0, life: 0.8 });
+        } catch (e) {}
+      }
+      if (CBZ.shake) CBZ.shake(1.1);
+    }
+    if (ev.crashed) ev.crashT += dt;
     const turbid = turbidAt(ev.frontS);
     // flow along the travel axis: shoved inland on the bore, standing on the
     // hold, and torn back out to sea on the drain
@@ -832,6 +894,8 @@
       debrisKills: dst ? dst.kills : 0,
       undertowPull: ev && ev.phase === "drain" && CBZ.CONFIG.TSU_UNDERTOW !== false ? SWEEP + UNDERTOW : 0,
       undertowSecs: ev ? +ev.undertowT.toFixed(2) : 0,
+      shoalV2: CBZ.CONFIG.TSU_SHOAL_V2 !== false,
+      crashed: !!(ev && ev.crashed),
       kitShared: !!(CBZ.tsuFaceBuild && CBZ.tsuDebrisField),
     };
   };
