@@ -2073,6 +2073,7 @@
   function tsuEnterFlood(ctx) {
     const st = ctx.st;
     st.phase = "flooded"; st.floodT = 0;
+    st.frontV = 0;                 // the front is gone; a stale sweep speed is a lie
     st.waveAmp = 1.38; st.chopAmp = 1.72; st.foamGain = 0.62;
     if (st.wave) st.wave.visible = false;
     if (st.spray) st.spray.setActive(0);
