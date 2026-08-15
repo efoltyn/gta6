@@ -224,6 +224,10 @@ var arenaRoot=null, venue=null;
 // stands — the ring, cage and pit were never inspected at all.
 var fightRealityData=null, fightSupportCache=null;
 var siteInfo=null;                   // {fencePanels, gates, bays, keepouts, park:[…]}
+// Rotated-panel census for the pit/cage/ring rings. MODULE scope, beside
+// siteInfo, because the audit that reports them lives out here too — declared
+// inside the landmass builder they read as undefined the moment anyone asks.
+var yawOriented=0, yawSlack=0;
 var redCh=null, blueCh=null, refCh=null;
 
 function note(msg,secs,opts){ if(CBZ.city&&typeof CBZ.city.note==="function")CBZ.city.note(msg,secs||3,opts); }
@@ -390,7 +394,6 @@ CBZ.addLandmass(function(city){
     if(rec.yaw&&CBZ.orientedSlack){ yawSlack+=CBZ.orientedSlack(hw,hd,yaw); yawOriented++; }
     (CBZ.colliders=CBZ.colliders||[]).push(rec); return rec;
   }
-  var yawOriented=0, yawSlack=0;
   function plat(minX,minZ,maxX,maxZ,top,ramp){
     if(!SOLID)return null;
     var p={minX:Math.min(minX,maxX),maxX:Math.max(minX,maxX),
@@ -1067,29 +1070,102 @@ CBZ.addLandmass(function(city){
     //          gate can move the wrong way) and a platform record makes the
     //          drawn slab the surface you actually stand on.
     if(CFG.ARENA_OVERFLOW_LOT&&VS&&VS.bays){
-      var OV_X0=487.0, OV_COLS=11, OV_ROWS=8;
+      var OV_X0=487.0, OV_COLS=11;
       var OV_W=OV_COLS*STALL_W;                        // 30.14
       var OV_GAP=13.0;                                 // clear of the causeway deck
-      var OV_D=(OV_ROWS/2)*(STALL_D*2+AISLE_W);        // 4 modules = 73.2
+      var MODULE=STALL_D*2+AISLE_W;                    // 18.30 — one double-loaded aisle
+      // OWNER: "needs huge parking lot". The depth was a flat 8 rows (4
+      // modules, 73.2 m, 88 bays a block) — a number, not a measurement, and
+      // the smallest thing on this approach. It is now MARCHED: modules are
+      // laid outward from the causeway one at a time and the lot stops at the
+      // first one the ground refuses, so it is exactly as big as the land
+      // allows and never one bay bigger. Refusing per MODULE instead of per
+      // BLOCK is the point — the old all-or-nothing test meant a single
+      // claimed metre anywhere in the footprint deleted the entire lot.
+      var OV_MODULES_MAX=14;                           // 256 m of lot per block
+      // NO WATER TEST HERE, AND THAT IS DELIBERATE. CBZ.cityWaterAt exists at
+      // this point but the water field behind it is not built until later in
+      // the landmass pass, so at BUILD TIME it answers "water" for ground that
+      // is dry — a probe of the whole approach (x 260..540) reads solid land
+      // once the world is up. Asking it here refused every module and put the
+      // lot back to zero bays, which is the bug this block is fixing. The
+      // approach is authored land beside an authored causeway; landFree plus
+      // terrainFlattenUnder are what decide whether the lot may stand on it.
+      function modulesAt(x0,ov){
+        var m,a,b;
+        for(m=0;m<OV_MODULES_MAX;m++){
+          a=(ov<0)?(CZ-OV_GAP-(m+1)*MODULE):(CZ+OV_GAP+m*MODULE);
+          b=a+MODULE;
+          if(!landFree(x0-3,x0+OV_W+3,a-3,b+3))break;
+        }
+        return m;
+      }
+      // THE LOT LOOKS FOR ITS OWN GROUND, and it had to start doing so because
+      // the strip it was told to use DOES NOT EXIST. `overflowBays` read 0 on
+      // the shipped world: the authored x0 (487, between the causeway kerb and
+      // the island edge) overlaps a claimed region, landFree refused the whole
+      // block, and the file's own comment claiming 176 bays was describing a
+      // lot nobody had ever counted. This is the govcomplex.js rule applied
+      // properly — walk candidate positions back down the approach and take
+      // the one that fits the most parking, rather than naming one coordinate
+      // and silently building nothing when it is taken.
+      function bestX0(ov){
+        var x,best=OV_X0,bestN=0,n;
+        for(x=OV_X0;x>=OV_X0-190;x-=(OV_W+6)){
+          n=modulesAt(x,ov);
+          if(n>bestN){bestN=n;best=x;}
+          if(bestN>=OV_MODULES_MAX)break;
+        }
+        return {x0:best,mods:bestN};
+      }
+      // A REGION THAT COVERS THE WHOLE CONTINENT IS NOT A CLAIM ON THIS LOT.
+      // This test used to refuse on ANY region overlap, and "The Backcountry"
+      // is registered as x 260..10364 — so every candidate position on earth
+      // failed and the overflow lot has built ZERO bays on every seed since it
+      // was written. (Its own comment claims 176. Nobody had run the number;
+      // `overflowBays` reads 0 in venueSiteAudit.) The exemptions are exactly
+      // govcomplex.js's `skipRegion`, which solved this same problem for the
+      // same reason: continent.js lays its biome/wilds bands OVER everything
+      // on purpose, and a causeway is a connector that is SUPPOSED to touch
+      // what it connects. The arena's own island and causeway are ours.
+      var LINKY=/bridge|causeway|link/i;
+      var blanketRegion=function(r){
+        if(r.underlay===true||r.biome==="wilds")return true;
+        var n=r.name||"";
+        if(LINKY.test(n))return true;
+        if(/^Ironjaw/.test(n))return true;                  // our own island + approach
+        return (r.maxX-r.minX)>1200||(r.maxZ-r.minZ)>1200;  // continent-scale band
+      };
+      // WHY IT REFUSED, not just that it did. A placement test that returns a
+      // bare false is how this lot stayed at zero bays without anybody noticing.
+      var refuseWhy=null;
       var landFree=function(a0,a1,b0,b1){
         var i,r,hx,hz,rr=(city&&city.regions)||[],lt=(city&&city.lots)||[];
         for(i=0;i<rr.length;i++){
           r=rr[i]; if(!r||r.minX==null)continue;
+          if(blanketRegion(r))continue;
           if(r.maxX<a0||r.minX>a1||r.maxZ<b0||r.minZ>b1)continue;
+          refuseWhy="region:"+(r.name||r.id||"?");
           return false;
         }
         for(i=0;i<lt.length;i++){
           r=lt[i]; if(!r||r.x==null)continue;
           hx=(r.w!=null?r.w:(r.width||0))/2+2; hz=(r.d!=null?r.d:(r.depth||0))/2+2;
           if(r.x+hx<a0||r.x-hx>a1||r.z+hz<b0||r.z-hz>b1)continue;
+          refuseWhy="lot";
           return false;
         }
         return true;
       };
       for(var ov=-1;ov<=1;ov+=2){
+        var pick=bestX0(ov), mods=pick.mods;
+        siteInfo.overflowWhy=(siteInfo.overflowWhy?siteInfo.overflowWhy+"|":"")+
+          (ov<0?"S":"N")+":"+mods+"mod@"+pick.x0.toFixed(0)+(mods?"":"/"+(refuseWhy||"?"));
+        if(mods<1)continue;                            // no ground anywhere: build nothing
+        var OV_X0B=pick.x0;
+        var OV_ROWS=mods*2, OV_D=mods*MODULE;
         var oz0=(ov<0)?(CZ-OV_GAP-OV_D):(CZ+OV_GAP);
-        if(!landFree(OV_X0-3,OV_X0+OV_W+3,oz0-3,oz0+OV_D+3))continue;
-        var ob=VS.bays({x0:OV_X0,z0:oz0,cols:OV_COLS,rows:OV_ROWS,
+        var ob=VS.bays({x0:OV_X0B,z0:oz0,cols:OV_COLS,rows:OV_ROWS,
                         stallW:STALL_W,stallD:STALL_D,aisle:AISLE_W});
         if(!ob)continue;
         // The ground first, then the paint. The slab is flush with the
@@ -1099,12 +1175,12 @@ CBZ.addLandmass(function(city){
         // between them is the same fall-through this whole change is about.
         var zNear=CZ+ov*7.0, zFar=oz0+((ov<0)?-2.5:(OV_D+2.5));
         var zLo=Math.min(zNear,zFar), zHi=Math.max(zNear,zFar);
-        concrete.push({x:OV_X0+OV_W/2,y:CW_Y-0.5,z:(zLo+zHi)/2,
+        concrete.push({x:OV_X0B+OV_W/2,y:CW_Y-0.5,z:(zLo+zHi)/2,
                        sx:OV_W+5.0,sy:1.0,sz:zHi-zLo});
-        plat(OV_X0-2.5,zLo,OV_X0+OV_W+2.5,zHi,CW_Y);
+        plat(OV_X0B-2.5,zLo,OV_X0B+OV_W+2.5,zHi,CW_Y);
         if(CBZ.terrainFlattenUnder){
           CBZ.terrainFlattenUnder({name:"Ironjaw overflow lot",
-            minX:OV_X0-4,maxX:OV_X0+OV_W+4,minZ:zLo-2,maxZ:zHi+2});
+            minX:OV_X0B-4,maxX:OV_X0B+OV_W+4,minZ:zLo-2,maxZ:zHi+2});
         }
         var os;
         for(os=0;os<ob.stripes.length;os++){
@@ -1116,15 +1192,17 @@ CBZ.addLandmass(function(city){
         siteInfo.overflowBays+=ob.slots.length;
         // kerbs on the two long edges, and a low fence line facing the road so
         // the lot has an EDGE instead of fading into the grass
-        dark.push({x:OV_X0-2.2,y:CW_Y+0.02,z:(zLo+zHi)/2,sx:0.35,sy:0.18,sz:zHi-zLo});
-        dark.push({x:OV_X0+OV_W+2.2,y:CW_Y+0.02,z:(zLo+zHi)/2,sx:0.35,sy:0.18,sz:zHi-zLo});
-        dark.push({x:OV_X0+OV_W/2,y:CW_Y+0.02,z:(ov<0)?zLo:zHi,
+        dark.push({x:OV_X0B-2.2,y:CW_Y+0.02,z:(zLo+zHi)/2,sx:0.35,sy:0.18,sz:zHi-zLo});
+        dark.push({x:OV_X0B+OV_W+2.2,y:CW_Y+0.02,z:(zLo+zHi)/2,sx:0.35,sy:0.18,sz:zHi-zLo});
+        dark.push({x:OV_X0B+OV_W/2,y:CW_Y+0.02,z:(ov<0)?zLo:zHi,
                    sx:OV_W+5.0,sy:0.18,sz:0.35});
         if(VS.lampRow){
-          var olp=[],ol;
-          for(ol=0;ol<5;ol++){
-            olp.push({x:OV_X0-1.4,z:oz0+OV_D*(ol+0.5)/5,fx:1,fz:0});
-            olp.push({x:OV_X0+OV_W+1.4,z:oz0+OV_D*(ol+0.5)/5,fx:-1,fz:0});
+          // one pair per ~24 m of lot, not a frozen five: a lot that grew to
+          // fourteen modules lit by five lamps is dark for 200 m of it
+          var olp=[],ol,nLamp=Math.max(4,Math.round(OV_D/24));
+          for(ol=0;ol<nLamp;ol++){
+            olp.push({x:OV_X0B-1.4,z:oz0+OV_D*(ol+0.5)/nLamp,fx:1,fz:0});
+            olp.push({x:OV_X0B+OV_W+1.4,z:oz0+OV_D*(ol+0.5)/nLamp,fx:-1,fz:0});
           }
           VS.lampRow({root:root,pts:olp,y:CW_Y,poleH:8.2,reach:2.4,rise:0.34,
                       poleR:0.14,solid:solid});
@@ -1487,6 +1565,7 @@ if(CBZ.venueSite&&CBZ.venueSite.census){
       // axis-aligned — so it contributes nothing here and never did.)
       orientedPanels:yawOriented, aabbSlackSaved:+yawSlack.toFixed(1),
       onSiteBays:siteInfo?siteInfo.onSiteBays:0,
+      overflowWhy:siteInfo?(siteInfo.overflowWhy||null):null,
       overflowBays:siteInfo?siteInfo.overflowBays:0,
       // `parked` is capped on purpose (ARENA_PARK_CARS) — a 240-bay lot with
       // 240 vehicle rigs in it is a frame budget spent on scenery, and a real

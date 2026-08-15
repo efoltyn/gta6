@@ -882,8 +882,15 @@ CBZ.arenaVenue = {
       // already beyond that deck's rear edge, leaving seven floating rail
       // components around the bowl.
       railRing(D_TOP - 0.08, TOP_Y, 1.04, false);
-      // solid back wall behind the top row — you cannot step off the bowl
-      ringSolid(D_TOP + 0.62, 0.6, TOP_Y, TOP_Y + 1.4, { pitch: 5.0, mesh: false });
+      // Solid back wall behind the top row — you cannot step off the bowl.
+      // IT USED TO BE DRAWN AS NOTHING AT ALL. `mesh: false` on a ring that
+      // has no other geometry standing in it is the literal definition of an
+      // invisible wall: 32 colliders, 92 m2, a metre and a half tall, in open
+      // air at the back of the gods. The guard rail one line up is a BAR on
+      // posts at a different radius, so it never covered this. Drawing it
+      // costs nothing new — ringSolid flushes into the same instanced
+      // concrete pool every other band in this bowl already uses.
+      ringSolid(D_TOP + 0.62, 0.6, TOP_Y, TOP_Y + 1.4, { pitch: 5.0, pool: "concrete" });
     })();
 
     // ---------------- aisle step treads (two half-risers per row) ------------
