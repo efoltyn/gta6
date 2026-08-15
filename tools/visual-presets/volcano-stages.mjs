@@ -2,8 +2,12 @@
 
    Boots the REAL survival mode (title → Disaster Survival → Play), freezes
    the rAF loop, forces the director to the volcano, and photographs the same
-   simulated seconds of the same seeded eruption on both sides. Then it forces
-   the NUKE and photographs the finale, wide and from inside.
+   simulated seconds of the same seeded eruption on both sides.
+
+   VOLCANO ONLY (owner, 2026-08-15: "I just wanted the volcano to be more
+   real... I never mentioned nuke"). The four nuke-finale beats this preset
+   used to end on are gone with the finale itself — the island's arc is
+   nature all the way now, and a volcano report photographs the volcano.
 
    Skeleton lifted from disaster-sequence.mjs (same boot, same rAF freeze,
    same stepSim clock, same HUD-hide sweep). What is different is the AIMING:
@@ -28,14 +32,10 @@
                   the load.
      lava-night   close-up. Opaque crust, incandescent channels, and the flow
                   lighting the hillside at night.
-     nuke-wide    the finale from off-island: the REAL gang-city mushroom
-                  (city/nukefx.js) standing over the arena.
-     nuke-pov     the death view. You see light, not geometry.
 
    Metrics ride the two ratchets: CBZ.volcanoAudit() (lavaTransparent MUST be
    0 — that is the owner's "see thru" complaint as a number) and
-   CBZ.disasterAudit() (pyroRuns / laharRuns / ashRoofCollapses /
-   nukeUsedNukefx / cameraFar).
+   CBZ.disasterAudit() (pyroRuns / laharRuns / ashRoofCollapses).
 
    AND THE BODY COUNT, which is the owner's OTHER complaint — "the volcano
    kills way too many people and randomly" — as a number. `aliveNow` and
@@ -113,25 +113,6 @@ const subjects = [
     act: { night: true, force: "volcano", untilState: "active", extraSecs: 12 },
     cam: { lava: true, frame: 0.55, out: 22, alt: 11, behind: 3, fallback: { x: 26, y: 12, z: 626, ax: 4, ay: 4, az: 606 } } },
 
-  { id: "nuke-fireball", label: "The finale — t+7s, the fireball", hud: false,
-    focus: "Seven seconds in: still the incandescent phase, hot billows and the cap glow. Orange here is CORRECT — it is a fireball. The complaint was about the end stage, which is the next two beats.",
-    act: { day: true, force: "nuke", untilState: "active", extraSecs: 7.0 },
-    cam: { x: 0, y: 460, z: 1850, ax: 0, ay: 700, az: 600 } },
-
-  { id: "nuke-wide", label: "The nuclear finale — the mature cloud", hud: false,
-    focus: "t+26s, THE END STAGE the owner was describing. This must be city/nukefx.js's RESEARCHED mushroom standing over the island — cap kilometres up, one coherent grey-brown body. Before-side clipped it off at the 1 km far plane and left the low ground-surge lobes hanging unfogged: the 'orange floating rocks'.",
-    act: { extraSecs: 19 },
-    cam: { x: 0, y: 620, z: 2950, ax: 0, ay: 1750, az: 600 } },
-
-  { id: "nuke-landmark", label: "The finale — the cloud as a landmark", hud: false,
-    focus: "t+70s. NUKE_FX_AFTERMATH keeps the cloud maturing over the island instead of deleting it. With the arena frustum open it is finally VISIBLE from the island; before, the far plane cut it off entirely.",
-    act: { extraSecs: 44 },
-    cam: { x: 0, y: 620, z: 3900, ax: 0, ay: 2300, az: 600 } },
-
-  { id: "nuke-pov", label: "The nuclear finale — from inside it", hud: true,
-    focus: "The death view. Standing in it you see LIGHT, not geometry: the #nukeFlash whiteout, the same sheet the gang city uses. HUD left on so the sheet is photographed where the player sees it.",
-    act: { atGroundZero: true, extraSecs: 0.35 },
-    cam: { player: true, back: 7, up: 3 } },
 ];
 
 async function stageVolcano(input) {
@@ -443,7 +424,7 @@ async function stageVolcano(input) {
   query("perf").textContent = ticks
     ? `sim ${ticks} ticks · avg ${(totalMs / ticks).toFixed(1)}ms · worst ${maxMs.toFixed(0)}ms\n` +
       `lava ${vol ? vol.lavaFlows : "-"} flows / ${vol ? vol.lavaTransparent : "-"} see-thru · pyro ${dis ? dis.pyroRuns : "-"} · lahar ${dis ? dis.laharRuns : "-"}\n` +
-      `ash ${vol ? vol.ashPeakDepth : "-"} m · roofs ${dis ? dis.ashRoofs : "-"} @ ${dis ? dis.ashRoofMax : "-"} m · lost ${dis ? dis.ashRoofCollapses : "-"} · nukefx ${dis && dis.nukeUsedNukefx ? "YES" : "no"}`
+      `ash ${vol ? vol.ashPeakDepth : "-"} m · roofs ${dis ? dis.ashRoofs : "-"} @ ${dis ? dis.ashRoofMax : "-"} m · lost ${dis ? dis.ashRoofCollapses : "-"}`
     : "—";
   query("perf").style.cssText = `position:absolute;right:24px;top:24px;text-align:right;white-space:pre-line;line-height:1.5;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:${maxMs > 100 ? "#ff9c9c" : "#9fe8c3"}`;
   query("source").textContent = new URL(input.sourceUrl).host + new URL(input.sourceUrl).pathname;
@@ -480,15 +461,16 @@ async function stageVolcano(input) {
 
 export default {
   id: "volcano-stages",
-  title: "The Stratovolcano (and an honest nuke)",
-  description: "One seeded survival match per build, the director forced through the volcano and then the nuclear finale, stepped to identical simulated seconds. The travelling beats aim themselves off CBZ.disasters.hazards() so the camera stands on the flank of the ACTUAL flow rather than a guessed hillside. vol_lavaTransparent is the owner's 'see thru' complaint as a number and must read 0; audit_nukeUsedNukefx says whether the finale drew city/nukefx.js's real mushroom or something standing in for it.",
+  title: "The Stratovolcano",
+  description: "One seeded survival match per build, the director forced through the volcano's beats and stepped to identical simulated seconds. The travelling beats aim themselves off CBZ.disasters.hazards() so the camera stands on the flank of the ACTUAL flow rather than a guessed hillside, and the lava tripod raycasts its own sightline. vol_lavaTransparent is the owner's 'see thru' complaint as a number and must read 0.",
   beforeLabel: "BEFORE · DEPLOYED",
   afterLabel: "AFTER · LOCAL",
   viewport: { width: 1100, height: 680 },
   readyExpression: "window.THREE && window.CBZ && CBZ.CONFIG",
   urlParams: { seed: 90210 },
   stageTimeoutMs: 480000,
-  metricsNote: "vol_* comes from CBZ.volcanoAudit() (world/volcanofx.js) and audit_* from CBZ.disasterAudit(). lavaTransparent counts LIVE lava materials that are transparent or additively blended — the thing the owner could see through. cameraFar is the finale's frustum: below ~2600 the mushroom's cap is clipped off.",
+  metricsNote: "vol_* comes from CBZ.volcanoAudit() (world/volcanofx.js) and audit_* from CBZ.disasterAudit(). lavaTransparent counts LIVE lava materials that are transparent or additively blended — the thing the owner could see through. Only the rows named below are printed; the full audit dump stays in metadata.json for debugging.",
+  metricsWhitelist: true,
   metrics: {
     /* THE OWNER'S SECOND COMPLAINT AS A NUMBER. A stratovolcano is supposed to
        be survivable by getting off its side; "kills way too many people" means
@@ -504,13 +486,12 @@ export default {
        any build older than the bible. */
     vol_lavaBranches: { label: "Lava forks grown", better: "higher" },
     vol_ventGlows: { label: "Incandescent vent aprons", better: "higher" },
+    vol_ashColumns: { label: "Sprite ash columns", better: "higher" },
     vol_pyroLive: { label: "Pyroclastic flows live", better: "higher" },
     vol_ashPeakDepth: { label: "Peak ash depth", unit: "m", better: "higher" },
     audit_pyroRuns: { label: "Pyroclastic runs", better: "higher" },
     audit_laharRuns: { label: "Lahar runs", better: "higher" },
     audit_ashRoofCollapses: { label: "Roofs lost to ash load", better: "higher" },
-    audit_nukeUsedNukefx: { label: "Finale used nukefx", better: "higher" },
-    cameraFar: { label: "Camera far plane", unit: "m", better: "higher" },
     tickAvgMs: { label: "Sim tick avg", unit: "ms", better: "lower" },
     tickMaxMs: { label: "Sim tick worst", unit: "ms", better: "lower" },
     drawCalls: { label: "Draw calls", better: "lower" },

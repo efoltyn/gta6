@@ -642,6 +642,12 @@ function metricsRows(before, after) {
         ...Object.keys(afterMetrics || {}),
       ])];
       for (const key of keys) {
+        // metricsWhitelist: a stage function often carries a full audit dump
+        // (dozens of vol_*/audit_* numbers) so metadata.json can answer any
+        // later question — but printed raw it turns the measurements page
+        // into a wall. A preset that sets the flag prints only the rows it
+        // names in `metrics`; everything else stays in the metadata.
+        if (preset.metricsWhitelist && !(preset.metrics || {})[key]) continue;
         const spec = (preset.metrics || {})[key] || {};
         rows.push({
           subject,

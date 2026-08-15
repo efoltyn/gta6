@@ -2503,8 +2503,20 @@
     if (CBZ.shake) CBZ.shake(0.9); sound("explosion"); sound("rumble");
     // a fountain of glowing lava bursting UP out of the summit vent
     ctx.st.erFountain = CBZ.fx.particleCloud({ mode: "rise", color: 0xff6a1a, count: 260, radius: 7, top: 22, size: 0.3, opacity: 0.85, vMin: 12, vMax: 22, drift: 3 }); ctx.st.erFountain.setActive(0.95);
-    // a towering dark ash/smoke column above the fountain
-    ctx.st.erSmoke = CBZ.fx.particleCloud({ mode: "rise", color: 0x2a2420, count: 200, radius: 15, top: 52, size: 0.62, opacity: 0.4, vMin: 5, vMax: 10, drift: 9 }); ctx.st.erSmoke.setActive(0.6);
+    /* a towering dark ash column above the fountain. V2 gets the SPRITE
+       column (volcanofx ashColumn — a pillar with a silhouette, built like
+       the pyroclastic current's mass); the flag revert keeps the old dotted
+       Points cloud verbatim. */
+    if (V && V.ashColumn) {
+      ctx.st.erColumn = V.ashColumn({
+        x: h.x, z: h.z, y: h.peak + 3,
+        height: 52 + 16 * ctx.intensity, r: 6.5 + 2.5 * ctx.intensity,
+        parent: root(),
+      });
+      ctx.st.erSmoke = null;
+    } else {
+      ctx.st.erSmoke = CBZ.fx.particleCloud({ mode: "rise", color: 0x2a2420, count: 200, radius: 15, top: 52, size: 0.62, opacity: 0.4, vMin: 5, vMax: 10, drift: 9 }); ctx.st.erSmoke.setActive(0.6);
+    }
     /* THE COLUMN STANDS ON LIGHT. In the reference night photograph the ash
        pillar is dark — but its BASE is rose-orange, lit from below by the
        vent it is standing on. A second short rising cloud in ember colours
@@ -2666,7 +2678,9 @@
     if (ctx.st.erWindX != null) ctx.st.erAsh.update(dt, h.x + ctx.st.erWindX * 40, 0, h.z + ctx.st.erWindZ * 40);
     else ctx.st.erAsh.update(dt, camPos().x, 0, camPos().z);
     ctx.st.erFountain.update(dt, h.x, h.peak, h.z);
-    ctx.st.erSmoke.update(dt, h.x + (ctx.st.erWindX || 0) * 14, h.peak + 6, h.z + (ctx.st.erWindZ || 0) * 14);
+    if (ctx.st.erSmoke) ctx.st.erSmoke.update(dt, h.x + (ctx.st.erWindX || 0) * 14, h.peak + 6, h.z + (ctx.st.erWindZ || 0) * 14);
+    // the sprite pillar leans with the same wind the ash falls on
+    if (ctx.st.erColumn) ctx.st.erColumn.update(dt, ctx.st.erWindX || 0, ctx.st.erWindZ || 0);
     // the lit underside rides just over the fountain, beneath the dark column
     if (ctx.st.erSmokeLit) ctx.st.erSmokeLit.update(dt, h.x + (ctx.st.erWindX || 0) * 5, h.peak + 1.5, h.z + (ctx.st.erWindZ || 0) * 5);
     if (ctx.st.erVent) ctx.st.erVent.update(dt);
@@ -3014,6 +3028,7 @@
     }
     if (ctx.st.erFountain) ctx.st.erFountain.dispose();
     if (ctx.st.erSmoke) ctx.st.erSmoke.dispose();
+    if (ctx.st.erColumn) { ctx.st.erColumn.dispose(); ctx.st.erColumn = null; }
     if (ctx.st.erSmokeLit) { ctx.st.erSmokeLit.dispose(); ctx.st.erSmokeLit = null; }
     if (ctx.st.erAsh) ctx.st.erAsh.dispose();
     if (ctx.st.erVent) { ctx.st.erVent.dispose(); ctx.st.erVent = null; }
@@ -4028,11 +4043,27 @@
   // ============================================================
   // DIRECTOR
   // ============================================================
+  /* OWNER, 2026-08-15: "there doesn't need to be a finale... I never
+     mentioned nuke". He is right about the premise, not just the pacing:
+     this is a NATURAL disaster survival mode — eleven acts of nature and
+     then, for no reason the island knows about, somebody nukes it. The bomb
+     was only ever here because city/nukefx.js existed and the arc wanted a
+     closer. The arc does not need one: it already reshuffles and repeats
+     until the lobby resolves itself, which IS the battle royale.
+
+     So the nuke is out of the rotation. The def stays registered — the city
+     bomber still detonates through the same bus, debug/`force("nuke")` still
+     works, and the pyroclastic whiteout still borrows nukefx's flash sheet —
+     it is only no longer something the weather does to an island.
+     SURV_NUKE_FINALE=true is the one-line revert. */
+  if (CBZ.CONFIG.SURV_NUKE_FINALE == null) CBZ.CONFIG.SURV_NUKE_FINALE = false;
   // the classic arc — also the fallback when SURV_SHUFFLE is off
-  const SEQUENCE = ["quake", "storm", "flashflood", "flood", "wildfire", "tornado", "hurricane", "blizzard", "meteor", "sinkhole", "volcano", "nuke"];
-  // pacing classes for the shuffled order: a run OPENS gentle, and the three
-  // island-wreckers never land back-to-back (the nuke is pinned last, so a
-  // gentle opener also keeps every cycle boundary legal when the arc repeats)
+  const SEQUENCE_ALL = ["quake", "storm", "flashflood", "flood", "wildfire", "tornado", "hurricane", "blizzard", "meteor", "sinkhole", "volcano", "nuke"];
+  const SEQUENCE = CBZ.CONFIG.SURV_NUKE_FINALE ? SEQUENCE_ALL.slice() : SEQUENCE_ALL.filter((id) => id !== "nuke");
+  // pacing classes for the shuffled order: a run OPENS gentle, and the
+  // island-wreckers never land back-to-back; the gentle opener keeps every
+  // cycle boundary legal when the arc repeats (with the finale flag on, the
+  // nuke is pinned last exactly as before)
   const GENTLE = { storm: 1, wildfire: 1, blizzard: 1, sinkhole: 1 };
   const MEGA = { flood: 1, volcano: 1, nuke: 1 };
   let runNo = 0, orderRng = null;
@@ -4040,18 +4071,21 @@
 
   // per-run SEEDED order (CBZ.seedStream ⇒ deterministic per world seed +
   // run counter — never Math.random: the arc is shared run structure).
-  // Rejection-sample a Fisher–Yates shuffle of the 11 non-nuke hazards until
-  // the pacing constraints hold, then pin the nuke as the finale.
+  // Rejection-sample a Fisher–Yates shuffle of the natural hazards until the
+  // pacing constraints hold. Under SURV_NUKE_FINALE the nuke is pinned last,
+  // exactly as it always was; by default the arc is nature all the way.
   function buildOrder() {
     if (CBZ.CONFIG.SURV_SHUFFLE === false || !orderRng) return SEQUENCE.slice();
     const pool = SEQUENCE.filter((id) => id !== "nuke");
     for (let tries = 0; tries < 40; tries++) {
       for (let i = pool.length - 1; i > 0; i--) { const j = (orderRng() * (i + 1)) | 0; const t = pool[i]; pool[i] = pool[j]; pool[j] = t; }
       if (!GENTLE[pool[0]]) continue;                    // gentle opener
-      if (MEGA[pool[pool.length - 1]]) continue;         // nothing mega abuts the nuke
+      // no mega in the closing slot: it either abuts the pinned nuke or, in
+      // the natural arc, lands right before the next cycle's opener jolt
+      if (MEGA[pool[pool.length - 1]]) continue;
       let ok = true;
       for (let i = 1; i < pool.length; i++) if (MEGA[pool[i]] && MEGA[pool[i - 1]]) { ok = false; break; }
-      if (ok) return pool.concat("nuke");
+      if (ok) return CBZ.CONFIG.SURV_NUKE_FINALE ? pool.concat("nuke") : pool;
     }
     return SEQUENCE.slice();   // vanishingly unlikely — fall back to the classic arc
   }

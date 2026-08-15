@@ -128,7 +128,7 @@
   const V = {};
   // live census for CBZ.volcanoAudit() — measured, never counted in source
   const census = { lava: 0, pyro: 0, lahar: 0, ash: 0, lights: 0, tris: 0, branches: 0, vent: 0 };
-  const LIVE = { lava: [], pyro: [], lahar: [], ash: [], vent: [] };
+  const LIVE = { lava: [], pyro: [], lahar: [], ash: [], vent: [], column: [] };
 
   function h01(x, z, salt) { return CBZ.hash01 ? CBZ.hash01(x, z, salt | 0) : 0.5; }
   function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
@@ -936,6 +936,107 @@
   };
 
   /* ============================================================
+     ASH COLUMN — the pillar over the vent.
+
+     The wide reference photograph's second subject after the lava: a FAT,
+     coherent, dark convective column standing kilometres over the crater,
+     bulging into a cauliflower head, leaning slightly downwind. The old
+     column was a THREE.Points cloud — a few hundred dots that photograph
+     as static in front of the sky, not as a thing with a silhouette.
+
+     Same construction as the pyroclastic current, because it is the same
+     physics upside down: overlapping camera-facing sprites wearing the
+     shared cauliflower alpha, sizes growing with height (a plume expands
+     as it entrains air), the whole column BUILDING over its first seconds
+     rather than appearing, churning in place, and bending downwind with
+     height squared (drag integrates). Dark tiers only — the photograph's
+     pillar is soot against sky; the rose light at its base is the separate
+     lit-underside cloud the director already owns.
+
+     Materials are OWNED, not the pyro pool's: the pyro drives its shared
+     materials' rotation every tick it is alive, and two systems steering
+     one uniform is a fight. A column costs its own four materials and
+     disposes them.
+     ============================================================ */
+  V.ashColumn = function (o) {
+    o = o || {};
+    const parent = o.parent || CBZ.scene;
+    const x = +o.x || 0, z = +o.z || 0;
+    const baseY = o.y != null ? +o.y : 0;
+    const height = o.height > 0 ? +o.height : 55;
+    const r0 = o.r > 0 ? +o.r : 7;
+    const mats = [];
+    // one step below where they should read: the eruption's warm fog and the
+    // output encoding both lift these on the way to the screen (same lesson
+    // as the melt ramp and the ash palette)
+    const COL_TIERS = [0x1a1713, 0x211d17, 0x28231c, 0x2f2921];
+    for (let i = 0; i < COL_TIERS.length; i++) {
+      mats.push(new THREE.SpriteMaterial({
+        map: puffTex(i % 3), color: COL_TIERS[i],
+        transparent: true, opacity: 1, depthWrite: false, fog: true,
+        blending: THREE.NormalBlending, rotation: i * 1.7,
+      }));
+    }
+    const N = qi(14, 26);
+    const grp = new THREE.Group();
+    grp.frustumCulled = false;
+    parent.add(grp);
+    const puffs = [];
+    for (let i = 0; i < N; i++) {
+      /* even column density with a crowd at the top: the head is where the
+         plume stops rising and spreads, so the highest band gets the extra
+         puffs and the extra size — that is the cauliflower bulge */
+      const h = i < N * 0.62 ? (i / Math.max(1, N * 0.62)) : (0.78 + Math.random() * 0.22);
+      const m = new THREE.Sprite(mats[Math.min(COL_TIERS.length - 1, (h * 3.2) | 0)]);
+      m.renderOrder = 7;
+      grp.add(m);
+      puffs.push({
+        m: m, h: h, ph: Math.random() * 6.28,
+        lat: (Math.random() * 2 - 1), la2: (Math.random() * 2 - 1),
+        sz: 0.8 + Math.random() * 0.5,
+      });
+    }
+    let t = 0, dead = false;
+    const handle = {
+      kind: "column", group: grp,
+      update(dt, wx, wz) {
+        if (dead) return handle;
+        t += dt;
+        const build = Math.min(1, t / 9);          // the column STANDS UP
+        const bx = wx || 0, bz = wz || 0;
+        for (let i = 0; i < puffs.length; i++) {
+          const P = puffs[i];
+          const hh = P.h * build;
+          // the plume widens as it climbs, and the head bulges hardest
+          const rad = r0 * (0.5 + 1.9 * hh) * (P.h > 0.78 ? 1.35 : 1);
+          const churn = Math.sin(t * 0.7 + P.ph);
+          // downwind lean integrates with height — drag works on the WHOLE climb
+          const lean = height * 0.3 * hh * hh;
+          P.m.position.set(
+            x + P.lat * rad * 0.55 + Math.sin(t * 0.5 + P.ph) * 1.6 + bx * lean,
+            baseY + hh * height + churn * 1.2,
+            z + P.la2 * rad * 0.55 + Math.cos(t * 0.45 + P.ph) * 1.6 + bz * lean
+          );
+          const sc = rad * P.sz * (1.55 + 0.14 * Math.sin(t * 0.8 + P.ph));
+          P.m.scale.set(sc, sc * 0.94, 1);
+          P.m.visible = hh > 0.01;
+        }
+        return handle;
+      },
+      dispose() {
+        if (dead) return;
+        dead = true;
+        for (let i = 0; i < puffs.length; i++) grp.remove(puffs[i].m);
+        parent.remove(grp);
+        for (let i = 0; i < mats.length; i++) mats[i].dispose();
+        const k = LIVE.column.indexOf(handle); if (k >= 0) LIVE.column.splice(k, 1);
+      },
+    };
+    LIVE.column.push(handle);
+    return handle;
+  };
+
+  /* ============================================================
      VENT GLOW — the white heart of the mountain.
 
      In the wide reference photograph (Fuego by night, 2026-08-15) the
@@ -1716,15 +1817,19 @@
       const grain = 0.86 + 0.2 * h01(C.x, C.z, salt);
       // cooler and a stop darker than the first pass: an eruption drives the
       // scene sun to 0xff6a3a, and pale warm grey under that comes out pink
-      /* AND IT IS DARK. Fresh fall on a volcano's flank is a dark grey — the
-         reference photograph the owner sent is a BLACK cone, and a pale
-         blanket over the whole island is what was stopping this one from
-         reading as rock at all. The old top stop was near-white; a deposit
-         that bright only exists under snow. */
+      /* AND IT IS DARK — DARKER THAN THE LAST DARKENING. The reference cone
+         is BLACK, and the 2026-08-15 report still photographed a pale
+         lavender mountain: the previous stops were picked in a swatch, and
+         the output encoding plus the eruption's own pooled lights lifted
+         them to the "snow-covered volcano" the owner keeps seeing. Fresh
+         basaltic fall is near-black scoria; these stops are authored a full
+         step below where they should read, the same trick the melt ramp
+         learned, so the screen lands on dark rock and the cone the flows
+         thread down is finally the photograph's. */
       // blue-shifted on purpose: these are multiplied by a warm sun, and an
       // albedo picked to look grey in a swatch comes out pink on the ground
-      _c3.setHex(0x26282a).lerp(_c1.setHex(0x4b4e52), Math.min(1, cov * 1.15));
-      _c3.lerp(_c1.setHex(0x35373a), deep * 0.7);
+      _c3.setHex(0x191b1d).lerp(_c1.setHex(0x33363a), Math.min(1, cov * 1.15));
+      _c3.lerp(_c1.setHex(0x212325), deep * 0.7);
       for (let k = 0; k < 4; k++) {
         col[v + k * 3] = _c3.r * grain;
         col[v + k * 3 + 1] = _c3.g * grain;
@@ -1877,6 +1982,7 @@
       // numbers, so the ratchet can see them
       lavaBranches: census.branches,
       ventGlows: LIVE.vent.length,
+      ashColumns: LIVE.column.length,
       pyroLive: LIVE.pyro.length, pyroBlobs: pyroBlobs,
       laharLive: LIVE.lahar.length,
       ashFields: LIVE.ash.length, ashCells: ashCells,
