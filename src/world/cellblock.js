@@ -1,6 +1,6 @@
 /* ============================================================
-   world/cellblock.js — THE CELL WING. Not set dressing: a real two-row
-   cell house with 13 individual cells, sliding barred doors on real
+   world/cellblock.js — THE CELL WING. Not set dressing: a real five-row
+   cell house with 25 individual cells, sliding barred doors on real
    colliders, and inmates living inside them.
 
    OWNER (verbatim): "player cell should be an actual cell and there
@@ -41,15 +41,79 @@
        at z = -31 (crawl point x = -14.2). The west row breaks there for a
        UTILITY ALCOVE, so the vent route can never be locked away.
      · the south door gap x[-3,3] at z = -8 (world/door.js) and the central
-       spine are left completely clear: nothing this file builds sits at
-       |x| < 11.7 south of z = -38, except the two bolted day tables at
-       |x| = 6.6 and the officer desk at z = -42.6.
+       spine are left completely clear. That USED to read "nothing this file
+       builds sits at |x| < 11.7 south of z = -38" — which was a statement
+       about the 23.4 m of empty aisle rows D and E now stand in. The live
+       statement is the CENTRE HALL x[-4.1,4.1], and the only things in it are
+       the two bolted day tables at |x| = 2.6 (their stools reach |x| = 1.29)
+       and, north of the rows, the officer desk at z = -42.6.
+       CBZ.cellblockAudit().spineBlocked measures the x[-0.55,0.55] patrol
+       lane over this file's own colliders and is pinned at 0.
+
+   ------------------------------------------------------------------
+   EVERY MAN HAS A BED (PRISON_CELL_ROWS_V3).
+
+   OWNER, 2026-08-15 (verbatim): "Scale the number of cells so every single
+   NPC has a bed."
+
+   MEASURED on bfaccbd, live escape run, at the night block: the compound
+   carried 50 prisoner rigs against 42 registered mattresses — 26 here (13
+   doubles) and 16 in world/southblock.js's dorm. Eight men were walked
+   indoors by systems/prisonschedule.js's muster every night with nowhere to
+   lie down. `CBZ.prisonRestAudit().sleepGap` did not say so: it counted
+   `role === "inmate"` and read 0, because 8 of the 50 carry a TRADE in that
+   field ("thief" x5, "merchant" x2, "dealer" x1) while being the same body
+   out of the same factory — entities/npc.js:26 stamps `kind: "inmate"` on
+   every one of them. A bed is owed to a man and not to his trade, so
+   systems/prisonrest.js's predicate was widened to the whole factory in this
+   same change and the honest gap is what this file is now sized against.
+
+   WHY ELEVEN MORE CELLS AND NOT EIGHT. A cell is not +2 beds. This file
+   deals a resident into every non-vacant cell, so a cell is +2 racks and +1
+   body — +1 NET PLACE. entities/npc.js:547 then sizes its anonymous tier as
+   `houses - npcs.length - cells`, which turns positive past 24 cells and
+   takes a place straight back. 13 -> 25 cells is therefore 42 -> 66 beds
+   against 50 -> 62 men, and sleepGap +8 -> -4.
+
+   WHERE THE ELEVEN WENT, AND WHY NOWHERE ELSE. Both ends of the shell are
+   spoken for: the north row is shower / A-1..A-4 / officer post / store with
+   the post pinned by guards.js's waypoint, and the side rows are pinned at
+   the top by the cross-aisle escape_routes.js's ceiling hatch sits in. What
+   the wing had instead was a 23.4 m AISLE — cells only 3.8 m deep against
+   each side wall and absolutely nothing between them. A 23 m corridor is not
+   a cell house, it is a hangar. So the wasted floor becomes what a real
+   double cell house puts there: a second PAIR of rows, D and E, backs to the
+   galleries and barred fronts onto the centre hall. And the side rows finally
+   run the last 4.5 m south to the day-room end they always stopped short of
+   (B-5, C-6). Three parallel runs come out of it — two 3.5 m galleries in
+   front of the outer cells, an 8.2 m centre hall with cell fronts down both
+   sides, and the patrol spine straight down the middle of that.
+
+   NOT ONE EXISTING PRISON COORDINATE MOVES. The discipline is world/
+   prisonwings.js's header, applied here. The shell is byte-for-byte what it
+   was; every number in NORTH_ROW, WEST_ROW and EAST_ROW is untouched, and the
+   two new side segments are APPENDED past the old ends so that no running
+   total is ever retyped. tools/prison-beds-check.mjs asserts it from a live
+   run rather than from this comment: CBZ.SPAWN (-11,-39) still on A-1's
+   centre-line 1.0 m north of its own door with spawnBlocked 0, the
+   ventilation crawl (-14.2,-31) and the officer-post waypoint (0,-39) still
+   outside every cell, the utility crawl (-12.2,-38.2) still inside A-1, the
+   ceiling hatch (11.6,-36.4) still in the cross-aisle, doorGapBlocked and
+   spineBlocked still 0.
+
+   THE TWO THINGS THAT DID MOVE ARE BOTH THIS FILE'S OWN. |x| = 6.6 is inside
+   row E now, so the day tables go to |x| = 2.6; and the two |x| = 7.5 cage
+   lamps, also inside row E, become four gallery lamps at |x| = 9.9.
+
+   REVERT: CBZ.CONFIG.PRISON_CELL_ROWS_V3 = false (or ?cfg_PRISON_CELL_ROWS_V3=0)
+   restores the 13-cell wing exactly — D and E are not built, B-5/C-6 are not
+   appended, and the tables and lamps go back to 6.6 and 7.5.
 
    DRAW-CALL BUDGET. Partitions carry colliders + LOS refs, so core/batch.js
    spares them (~20 draw calls, unavoidable — they are walls). Everything
    else is arranged so it MERGES: fixed grille bars, bunks, toilets, roofs
    and fittings are plain meshes with empty userData and go into the static
-   batch. Only the 13 SLIDING DOOR LEAVES stay live (userData.dynamic keeps
+   batch. Only the 25 SLIDING DOOR LEAVES stay live (userData.dynamic keeps
    both core/batch.js and core/staticfreeze.js off them), and each leaf is
    ONE merged BufferGeometry, not eleven bars.
 
@@ -169,8 +233,8 @@
       playerSpawn: function () { return { x: CBZ.SPAWN.x, z: CBZ.SPAWN.z }; },
     };
     CBZ.cellblockAudit = function () {
-      return { v2: false, cells: 0, occupied: 0, empty: 0, locked: 0,
-        spawnInPlayerCell: false, spawnMargin: 0, spawnBlocked: 0,
+      return { v2: false, rows3: false, cells: 0, rows: {}, occupied: 0, empty: 0, locked: 0,
+        vacantWanted: 0, spawnInPlayerCell: false, spawnMargin: 0, spawnBlocked: 0,
         doorGapBlocked: 0, spineBlocked: 0, colliders: 0 };
     };
   }
@@ -197,6 +261,25 @@
   const BAR = 0.09, BAR_P = 0.42;       // bar section / pitch (jail.js's pitch)
   const BACK_IN = 0.32;                 // how far a back-wall fitting's CENTRE sits
                                         // off the wall plane, so the unit lands flush
+
+  /* ---- ROWS D AND E, the centre hall's own pair (PRISON_CELL_ROWS_V3).
+     Depth is SD, the side rows' depth, so a D cell and a B cell are the same
+     room and share one bunk builder, one fit-out and one leash. The only
+     thing they do not share is the shell: these are the first cells in the
+     wing with no exterior wall behind them, so the row draws its OWN back —
+     IBT of concrete whose centre plane is IBACK, which is also where the
+     gallery in front of the outer cells ends. Every number is derived from
+     IFACE, so the hall's width is one figure and not four:
+
+        gallery   11.7 - 8.20 = 3.50 m   (outer cell fronts -> D/E backs)
+        D / E     8.20 -> 4.10           (0.30 back wall + 3.80 cell)
+        hall      4.10 -> -4.10 = 8.20 m (cell fronts both sides, spine in it)
+                                                     23.40 m, the full aisle */
+  const IFACE = 4.10;                   // inner rows' door plane, onto the centre hall
+  const IBT = 0.30;                     // inner row back-wall thickness
+  const IBACK = IFACE + SD + IBT / 2;   // 8.05 : that back wall's CENTRE plane
+  if (CFG.PRISON_CELL_ROWS_V3 == null) CFG.PRISON_CELL_ROWS_V3 = true;
+  const ROWS3 = CFG.PRISON_CELL_ROWS_V3 !== false;
 
   // palette
   const C_PART = 0x8f98a3;   // cell partition concrete
@@ -376,6 +459,42 @@
     { kind: "cell", a: -22.08, b: -18.28, tag: "C-4" },
     { kind: "wall", a: -18.28, b: -17.94 },
     { kind: "cell", a: -17.94, b: -14.14, tag: "C-5" },
+    { kind: "wall", a: -14.14, b: -13.80 },
+  ];
+
+  /* B-5 AND C-6 ARE APPENDED, NEVER RETYPED. Both side rows stopped at
+     z = -14.00 / -13.80 with the south wall's inner face still 5.5 m away at
+     -8.5 — floor the wing had never used. One more 3.80 cell and its 0.34
+     partition spend 4.14 of it. Only the two new segments are written here,
+     so nothing above is re-derived and no existing running total can drift:
+        west   -14.00 +3.80 = -10.20 +0.34 = -9.86   (1.36 clear of -8.5)
+        east   -13.80 +3.80 = -10.00 +0.34 = -9.66   (1.16 clear of -8.5) */
+  if (ROWS3) {
+    WEST_ROW.push({ kind: "cell", a: -14.00, b: -10.20, tag: "B-5" },
+      { kind: "wall", a: -10.20, b: -9.86 });
+    EAST_ROW.push({ kind: "cell", a: -13.80, b: -10.00, tag: "C-6" },
+      { kind: "wall", a: -10.00, b: -9.66 });
+  }
+
+  /* THE INNER ROWS' SEGMENT TABLE, read north->south and used TWICE — once
+     mirrored — because D and E are the same row on either side of the hall.
+     The span is the EAST row's own, to the centimetre, so a D cell lines up
+     rung for rung with a C cell across the gallery instead of sitting in a
+     sawtooth against it:
+       -34.84 +0.34 = -34.50 +3.80 = -30.70 +0.34 = -30.36 +3.80 = -26.56
+       +0.34 = -26.22 +3.80 = -22.42 +0.34 = -22.08 +3.80 = -18.28 +0.34
+       = -17.94 +3.80 = -14.14 +0.34 = -13.80   (exact, 21.04) */
+  const INNER_ROW = [
+    { kind: "wall", a: -34.84, b: -34.50 },
+    { kind: "cell", a: -34.50, b: -30.70, n: 1 },
+    { kind: "wall", a: -30.70, b: -30.36 },
+    { kind: "cell", a: -30.36, b: -26.56, n: 2 },
+    { kind: "wall", a: -26.56, b: -26.22 },
+    { kind: "cell", a: -26.22, b: -22.42, n: 3 },
+    { kind: "wall", a: -22.42, b: -22.08 },
+    { kind: "cell", a: -22.08, b: -18.28, n: 4 },
+    { kind: "wall", a: -18.28, b: -17.94 },
+    { kind: "cell", a: -17.94, b: -14.14, n: 5 },
     { kind: "wall", a: -14.14, b: -13.80 },
   ];
 
@@ -798,6 +917,30 @@
     else utilityAlcove(EX, cz, SD, len, -1);
   }
 
+  // ---- ROWS D + E: the centre hall's own pair, doors onto the hall --------
+  // Same depth, same cell record, same builder as the side rows — `addCell`
+  // and `fitOutCell` already read the row from `dx`, so a D cell needs no
+  // branch anywhere downstream. `side` is -1 west of the hall, +1 east; the
+  // door normal is -side, which is what points a leaf INTO the hall.
+  if (ROWS3) for (const side of [-1, 1]) {
+    const face = side * IFACE;                    // this row's door plane
+    const cx = side * (IFACE + SD / 2);           // its cells' centre line
+    const row = side < 0 ? "D" : "E";
+    for (const seg of INNER_ROW) {
+      const len = seg.b - seg.a, cz = (seg.a + seg.b) / 2;
+      if (seg.kind === "wall") sbox(cx, CH / 2, cz, SD, CH, len, C_PART, { solid: true, blockLOS: true });
+      else addCell({ tag: row + "-" + seg.n },
+        { x: cx, z: cz, hx: SD / 2, hz: len / 2, dx: -side, dz: 0, faceX: face, faceZ: cz });
+    }
+    // THE ROW'S OWN BACK. Every other cell in this wing backs onto the shell;
+    // these back onto a gallery, so the concrete has to be drawn. ONE slab and
+    // one collider for the whole run — it is a wall, not a partition, and
+    // splitting it per cell would buy nothing but colliders. sbox, so
+    // CBZ.cellblockAudit() judges it with the rest of our work.
+    const z0 = INNER_ROW[0].a, z1 = INNER_ROW[INNER_ROW.length - 1].b;
+    sbox(side * IBACK, CH / 2, (z0 + z1) / 2, IBT, CH, z1 - z0, C_PART_D, { solid: true, blockLOS: true });
+  }
+
   /* ==========================================================
      6. THE ALCOVES — the three breaks in the cell line, each of them a
         thing the wing needs rather than a hole in the row.
@@ -887,13 +1030,21 @@
       });
     }
   }
-  dayTable(-6.6, -26.0);
-  dayTable(6.6, -26.0);
+  /* THE TABLES MOVED, AND THAT IS THE ROWS' FAULT, NOT A RESTYLE. |x| = 6.6
+     is inside row E now, so the day room goes where a day room in a double
+     cell house goes: the CENTRE HALL, |x| = 2.6, cell fronts on both sides of
+     it. The inboard stool corner reaches |x| = 1.29 and the bolted top spans
+     |x| 1.50..3.70, so the x[-0.55,0.55] patrol lane guards.js walks is still
+     empty concrete and spineBlocked is still 0. Reverting the rows puts them
+     back on 6.6 exactly. */
+  const DTX = ROWS3 ? 2.6 : 6.6;
+  dayTable(-DTX, -26.0);
+  dayTable(DTX, -26.0);
   // ...and its four stools are seats. The day room is where a block SITS; two
   // tables with eight bolted stools nobody could use is the fake-prop fault in
   // its purest form. Stool cushion is 0.48 (the 0.44-thick pad on a 0.22 post,
   // matching dayTable's own numbers) and each looks at the table centre.
-  for (const tx of [-6.6, 6.6]) for (const i of [-1, 1]) for (const j of [-1, 1]) {
+  for (const tx of [-DTX, DTX]) for (const i of [-1, 1]) for (const j of [-1, 1]) {
     useSeat(tx + i * 0.85, -26.0 + j * 0.85, Math.atan2(-i * 0.85, -j * 0.85), 0.48);
   }
   // NO centre line down the spine. The dashed yellow one that lived here was
@@ -914,7 +1065,16 @@
   }
   const ceilingLamp = cageLamp(0, -30);
   CBZ.ceilingLamp = ceilingLamp;
-  lamps.push(cageLamp(0, -37.5), cageLamp(0, -22.5), cageLamp(0, -15), cageLamp(-7.5, -33), cageLamp(7.5, -33));
+  // The hall lamps sit on the spine; (0,-30) above is the published handle and
+  // never moves. The two |x| = 7.5 lamps are inside row E now, so with the
+  // rows built the light goes where the light is needed — over the two 3.5 m
+  // GALLERIES, at their centre line |x| = 9.9, one at each end of the run. A
+  // gallery with cell fronts down one side and unlit concrete down the other
+  // is where a wing goes dark, and interactions.js's breaker still owns all
+  // of them through the mirror below.
+  lamps.push(cageLamp(0, -37.5), cageLamp(0, -22.5), cageLamp(0, -15));
+  if (ROWS3) lamps.push(cageLamp(-9.9, -19), cageLamp(9.9, -19), cageLamp(-9.9, -30), cageLamp(9.9, -30));
+  else lamps.push(cageLamp(-7.5, -33), cageLamp(7.5, -33));
 
   /* ==========================================================
      8. THE DOOR — jail.js's setDoor, ported. The collider and the visual
@@ -993,7 +1153,14 @@
   // WHO GETS A CELL. The player's own cell plus the two lowest-hashing cells
   // stand empty — an all-full wing has nowhere to hide and nowhere to be moved
   // to, and an empty cell is the thing a lockdown can put you in.
-  const EMPTY_WANTED = 2;
+  // …and it is a SHARE of the wing, not a constant. Two empty cells in a
+  // thirteen-cell block is one in six; two in a twenty-five-cell block is one
+  // in twelve, which is a wing with nowhere left to move anybody — the exact
+  // property this line exists to protect, quietly halved by growing the rows.
+  // 1 in 8, floor 2: 13 cells -> 2 (byte-identical to what it always was),
+  // 25 -> 3. It is also the wing's only slack in the bed arithmetic — each
+  // vacant cell is two racks the cell house does not consume itself.
+  const EMPTY_WANTED = Math.max(2, Math.round(cells.length / 8));
   const order = cells.filter(function (c) { return !c.player; })
     .map(function (c) { return { c: c, h: h01(c.x, c.z, 4211) }; })
     .sort(function (a, b) { return a.h - b.h; });
@@ -1235,8 +1402,8 @@
 
      The named playable cast is the population to house. Treating a 26-bed
      cell wing as permission to scatter sixteen permanent floor mats through
-     its dayroom made the arithmetic pass and the venue fail. The compound now
-     has two authored housing units: these thirteen double cells and the
+     its dayroom made the arithmetic pass and the venue fail. The compound has
+     two authored housing units: these twenty-five double cells and the
      south-block open-bay dorm. Both call the same bunk builder above; both
      publish the records they actually draw; every population/rest consumer
      reads their sum.
@@ -1244,6 +1411,16 @@
      Design occupancy is therefore 1.0 here. Overcrowding can still be a live
      simulation fact (the audit reports bodies minus beds), but it is no longer
      used as a content generator that adds people or bedding to circulation.
+
+     AND THE SUM IS NOW BIGGER THAN THE CAST, WHICH IT WAS NOT. 25 cells x 2
+     racks + 8 dorm stacks x 2 = 66 beds against 62 prisoner rigs, measured
+     live at the night block: `CBZ.prisonRestAudit().sleepGap` -4. At 13 cells
+     it was 42 against 50 and the same figure read +8 the moment
+     systems/prisonrest.js stopped counting only the men whose `role` happened
+     to say "inmate". Every one of the 24 racks added is a real propuse anchor
+     through `useBed` above and the pending-fittings queue — `beds` rises with
+     `racks` or the wing is drawing mattresses nobody can lie on, which is
+     what tools/prison-beds-check.mjs asserts as two numbers on one line.
      ========================================================== */
   const OCCUPANCY = 1.0;
   function cellRackCount() {
@@ -1302,15 +1479,21 @@
       if (c.minX < R && c.maxX > -R && c.minZ < -12 && c.maxZ > -40) spine++;
     }
     let occupied = 0, empty = 0, locked = 0;
+    // cells per row, off the cells' OWN tags — so "how big is this wing"
+    // cannot be answered by a number typed anywhere but the row tables.
+    const rows = {};
     for (let i = 0; i < cells.length; i++) {
       const c = cells[i];
+      const r = String(c.tag || "?").split("-")[0];
+      rows[r] = (rows[r] | 0) + 1;
       if (c.locked) locked++;
       if (c.owner && c.owner !== "player") occupied++; else empty++;
     }
     const pc = playerCell;
     const margin = pc ? Math.min(pc.hx - Math.abs(s.x - pc.x), pc.hz - Math.abs(s.z - pc.z)) : 0;
     return {
-      v2: true, cells: cells.length, occupied: occupied, empty: empty, locked: locked,
+      v2: true, rows3: ROWS3, cells: cells.length, rows: rows,
+      occupied: occupied, empty: empty, locked: locked, vacantWanted: EMPTY_WANTED,
       castDealt: cast,
       spawnInPlayerCell: !!(pc && margin > 0),
       spawnMargin: Math.round(margin * 100) / 100,          // metres of cell around CBZ.SPAWN
