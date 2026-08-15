@@ -3595,3 +3595,89 @@ thing under test and the check must not share its blind spots. `overlapPeak` ·
 `embedded` · `blindFire` · `throughMate` · `stuck` all pinned at 0.
 `--revert` (`?sep=old&fire=old`) asserts they come back: 3 overlapping pairs and
 214 ghost rounds. A fix nobody can turn off has not been measured.
+
+## 2026-08-15 — THE NUKE: TWO-TONE ORGANIC CLOUD + THE DEMOLITION FREEZE DIES (orchestrator + two opus builders)
+
+Owner, verbatim: *"use before after tool and opus subagents to make nuke look
+realer in all stages and more cool and less geometric and en it also crashes
+game with city damage because it does it wrong to buildings blow up wrong idk
+figure it all out and make nuke look better and load able and this will
+improve the tool dogfioding"* — then, mid-wave, a reference plate of a real
+detonation: *"In gang city — Here a good screenshot of finish. Plus flash at
+the start realistically radius."* The plate's reads: dark self-shadowed cap
+over a MUCH lighter cream stem, ground still burning under a cold cloud, a
+flash with a real radius.
+
+- **THE CRASH WAS NEVER AN EXCEPTION — IT WAS indexOf AT CITY SCALE.**
+  Measured live (seed 90210, 329 lots, CBZ.colliders = 123,332):
+  `cityDemolition.destroy()` removed every member with indexOf+splice —
+  432.9 ms for ONE 52-storey tower, 5,679 ms city-wide, quadratic in city
+  size, and paid as guaranteed full-miss scans on the nuke path because
+  hideReal() had already purged the same colliders. The O(n) cure existed
+  IN THE SIBLING FILE the whole time (structural.js purge(), whose header
+  names the exact tower); demolition.js had never adopted it.
+  `DEMO_FAST_PURGE` (ef2cf9f): destroy/rebuild/releasePropCols/
+  cityGlassReset/condemned all batch through `CBZ.structuralPurge`. VM
+  harness: destroy-all 15,460→304 ms (51x), glass re-seat 104x.
+- **LOADABLE, THREE WAYS** (`DEMO_LOAD_V1`): D.apply() compacts once per
+  array for a whole blob (18,085→76 ms, 239x); netpersist restores the
+  saved CLOCK before the demolition ledger (healed rows were admitted
+  against the fresh-boot clock, then torn down by the next tick — the load
+  paid destroy+rebuild per healed row); and SP saves finally carry rubble —
+  cityDemolition.serialize() had exactly one caller (the MP host blob), so
+  a nuked SP city reloaded intact. Rode construction.js's stamp()/hydrate()
+  section pattern with AGE-REBASING against the save's own clock (the SP
+  ledger persists no calendar). Deliberate: a fresh run in the same page
+  session does not re-hydrate; a reload always does (demolition.js:1124).
+- **"BUILDINGS BLOW UP WRONG" WAS ALSO THE RUBBLE**: RUBBLE_DETAIL_CAP
+  latched by ledger.size at build time, so building #33+ got a permanent
+  2-slab stub (32 mounds / 296 stubs after a city nuke — erased, not
+  rubbled), and the light branch consumed FEWER rng draws, so the same lot
+  grew different rubble depending on insertion order — against the file's
+  own determinism header. `DEMO_RUBBLE_DET`: every pile draws the full
+  parameter stream (tier caps meshes only), light tier 2+1→5+1. Plus:
+  DEMO_MAX_STOREYS mirror read live (structural.js:318 claimed both files
+  already did), cityMegaTower() no longer reports a helipad on rubble, NaN
+  collapse-wedge guard, tween settle on mode exit.
+- **NUKE_FX_ORGANIC (c7a6eb2, one flag, 17 sites, off = 2026-08-05 build).**
+  cbzSmokeLobes2: pool's real tiling noise in world space (2200 m + 420 m,
+  drifting) instead of the sine plaid; per-lobe identity off a 900 m noise
+  field (0.84–1.16 brightness, ±6% tint — a hash STROBES on climbing lobes,
+  noise doesn't); cap shades its own belly (−35%) and lights its crown rim
+  (+12%) in the cap's own frame; per-material role uniform (shared program,
+  per-material VALUES) makes the stem pale where the cap stays dark — the
+  plate's two-tone. Ash endpoints: stem 0x292725→0xb8ab98 (cream), surge
+  →0x8f7f6e, cap near-dark. Ember clocks split from colour clocks (stem
+  80 s, surge 75 s, masked to the deck; hot billows walk down to the ground
+  fire, out at 58 s) — the ground burns under a cold cap. Wind seeded per
+  GZ (hash01), cap drift ≤6% capW, stem lean 3.5% + cross-wind S, surge
+  fingers ±7% and ovals downwind — OFFSETS ONLY, reported dims untouched.
+  Stem 48→64 / surge 76→88 lobes with alphas solved EXACTLY invariant
+  (a' = 1−(1−a)^(N/N'): 0.74→0.64, 0.44→0.39) — the smoke audit reads the
+  same density (live: stem 0.961 ≥ 0.93 floor at t=26). Fireball boils
+  (subdiv 3, 3-octave displacement 0.105R, mottled core; dome/veil stay
+  clean Sedov). Drawn flash radii to research: fireball 62→222 m (16 kt
+  band 200–240), white dome to 416 m @0.85 s (Sedov 576·t^0.4) — also
+  reconciled a veil and an opaque front that disagreed 3.5x. Sky gets its
+  air back by ~3.5 s (fog authority τ=2.6 after the untouched double-flash
+  window; light drive keeps τ=5.2). In-shader haze grounds the cloud at
+  range (28% @20 km — FOGPROOF stays dodged). Night stops lying: the ||1
+  floor read a driven-to-zero hemisphere as 1.0; icon beat now sits INTO
+  the dark. seedVolumes(seed) per GZ — a second nuke is no longer the first
+  nuke's sculpture replayed (debug: bodySeed/windDeg/windK).
+- **GATES, all green on the merged branch**: math-gate (det ok, twice),
+  test-nukefx-phases, test-nuke-freeze-node, nuke-smoke-check (one shared
+  program, coverage 0.96–1.0, no shader errors), api-lint, and
+  **demolition-check COMPLETED FOR THE FIRST TIME IN ITS EXISTENCE** — it
+  had died on line 18 (`OUT` for `OUTDIR`, ReferenceError) since the line
+  landed, which is why finding 1 shipped: the gate that owned the arc never
+  ran. Fixed as mkdir(OUTDIR) (the literal one-word fix would ENOENT on the
+  first screenshot — the exact failure its own comment warns about).
+  Full arc green: blast→rubble (0 floating)→cleared→scaffold→rebuilt,
+  round-trip re-derives phase.
+- **TOOL DOGFOODING NOTES**: the metrics-rider noise lesson reconfirmed —
+  the first after-capture ran beside a math gate and its early beats read
+  3x worse than truth; judge perf from isolated probes, re-capture solo for
+  the report. And the before/after loop itself (pristine-worktree before,
+  --reuse-before after, single navigation per side) dodges the known
+  second-navigate disc artifact by construction.
