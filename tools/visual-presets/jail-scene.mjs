@@ -74,11 +74,16 @@ const subjects = [
   { id: "venue-bunk-lower", label: "STEP 3 · Lower bunk · inmate asleep", hud: false,
     focus: "A real inmate placed by the shared bed solve. Head belongs on the pillow, body on the mattress, limbs inside the frame, and no standing overlap.",
     act: { poseBed: "lower" },
-    cam: { x: -8.95, y: 1.58, z: -41.55, ax: -12.15, ay: 0.90, az: -41.55 } },
+    // Framed off the RACK, like the upper shot below: eye 0.79 over the
+    // mattress, looking 0.11 above it. The old 1.58/0.90 was a 0.79 mattress.
+    cam: { x: -8.95, y: 1.41, z: -41.55, ax: -12.15, ay: 0.73, az: -41.55 } },
   { id: "venue-bunk-upper", label: "STEP 3 · Upper bunk · inmate asleep", hud: false,
     focus: "The same body on the upper rack. Mattress height, rail clearance, pillow alignment, and the lying pose must agree.",
     act: { poseBed: "upper" },
-    cam: { x: -8.95, y: 2.72, z: -41.55, ax: -12.15, ay: 2.04, az: -41.55 } },
+    // Framed off the RACK, so it follows world/cellblock.js's UP_TOP: the eye
+    // rides 0.75 over the mattress and looks 0.07 above it. The literals used to
+    // be 2.72/2.04 against a 1.97 mattress; the stack is 2.28 now.
+    cam: { x: -8.95, y: 3.03, z: -41.55, ax: -12.15, ay: 2.35, az: -41.55 } },
   { id: "venue-dayroom-seat", label: "STEP 3 · Dayroom table · inmate seated", hud: false,
     focus: "An inmate uses a bolted dayroom table: hips on the stool, feet on the floor, body facing the table, circulation lane still open.",
     act: { poseSeat: true },

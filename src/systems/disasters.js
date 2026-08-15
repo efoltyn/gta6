@@ -87,13 +87,17 @@
    real cloud was always being drawn, it was being clipped at a 1 km far
    plane and hung in front of a 220 m fog wall. See nukeFrustum().
 
-   THE SCARY WATER (2026-08-03). The tsunami's three new flags are declared in
+   THE SCARY WATER (2026-08-03). The tsunami's shared flags are declared in
    city/tsunami.js, not here, because there is ONE tsunami design and two
    places it happens and both read the same switch: TSU_FACE_V2 (the shared
    turbid bore face, CBZ.tsuFaceBuild in world/water_spec.js), TSU_DEBRIS (the
-   entrained cars/logs/house panels that do the actual killing, through
-   CBZ.tsuDebrisField) and TSU_UNDERTOW (the drain's seaward pull, and the
-   drowning that follows it out to sea).
+   entrained cars/trees/wall pieces that do the actual killing, through
+   CBZ.tsuDebrisField — every one of them a REAL world object, nothing
+   spawned), TSU_UNDERTOW (the drain's seaward pull, and the drowning that
+   follows it out to sea) and TSU_SHOAL_V2 (2026-08-15: the front decelerates
+   as it shoals — c = √(g·d) — stands at full towering height for a held beat
+   at the beach, the slowest moment of the event, then CRASHES and the
+   released bore charges the island).
 ============================================================ */
 (function () {
   "use strict";
@@ -1565,6 +1569,42 @@
   // signed sweep coordinate of a point along the travel direction
   function tsuS(ctx, x, z) { const st = ctx.st; return (x - ctx.cx) * st.dx + (z - ctx.cz) * st.dz; }
 
+  /* ---- THE WAVE'S SPEED OVER GROUND (TSU_SHOAL_V2) ------------------------
+     c = √(g·d): a tsunami is fastest over deep water and SPENDS that speed
+     standing up as the bottom rises. The only bathymetry this arena has is
+     the 52 m of open water in front of the beach — the same span shoal and
+     the approach easing already use — so the speed reads off it directly:
+     full speed far out, a crawl in the last metres (where the wall is at its
+     tallest and most overhung: the reference frame), and after the crash a
+     released bore over land that slows again as it spends itself. Relative
+     speeds only; start() integrates this profile and normalizes it so the
+     whole sweep still fits the director's same activeSecs budget. */
+  function tsuVRel(ctx, fs) {
+    const R = ctx.R;
+    const toShore = -(fs + R);
+    if (toShore > 0) return Math.max(0.085, Math.sqrt(Math.min(1, toShore / 52)));
+    const land = Math.max(0, Math.min(1, (fs + R) / (2 * R)));
+    const spent = Math.max(0.08, Math.pow(1 - land, 1.45));
+    return 1.18 * (0.5 + 0.5 * spent);
+  }
+
+  /* THE CRASH. The stand ends: the lip comes down along the whole front at
+     once — a line of white water, the roar, the hardest shake the event has —
+     and the bore is released into the town. This IS landfall now; the old
+     single-blast landfall beat stays behind the flag as the legacy read. */
+  function tsuCrash(ctx) {
+    const st = ctx.st;
+    st.landfall = true;
+    const fx0 = ctx.cx + st.dx * st.frontS, fz0 = ctx.cz + st.dz * st.frontS;
+    const px = -st.dz, pz = st.dx;
+    for (let i = -2; i <= 2; i++) {
+      CBZ.fx.blast(fx0 + px * i * (ctx.R * 0.28), fz0 + pz * i * (ctx.R * 0.28),
+        { maxR: i === 0 ? 26 : 18, color: 0xd9f2ff, shake: i === 0 ? 1.25 : 0, life: 0.8 });
+    }
+    narrate("toast", "BRACE!");
+    sound("collapse"); sound("water"); sound("rumble");
+  }
+
   // ---- THE WALL: one curling ribbon mesh (vertex-colored, lit) + additive
   //      crest/foot foam + face streaks. A real overhanging 3D curl — you can
   //      see up into the barrel as it breaks over you — instead of flat cards.
@@ -1747,10 +1787,14 @@
      So the front now PICKS UP THE ISLAND. The cars that were parked on the
      seafront are ripped loose through the same flingCar() the wave always
      used, and when they come down they do not stop being a hazard — they roll
-     inland inside the flow. The trees go with them as logs. The houses the
-     water takes come apart into panels that travel with it. Everything is a
-     REAL object that was standing there a second ago; nothing is spawned
-     scenery. And when the drain leaves, it leaves them where they stopped.
+     inland inside the flow. The trees go with them WHOLE — the actual trunk
+     and canopy meshes, re-parented into the water, not a stand-in cylinder.
+     The houses the water takes lose their own walls to it: the biggest real
+     pieces of the swept building's group travel with the flow wearing the
+     building's own materials, while the rest of the frame sinks. Everything
+     is a REAL object that was standing there a second ago; nothing is
+     spawned scenery (the kit's manufacture path is deleted — owner: no fake
+     debris). And when the drain leaves, it leaves them where they stopped.
 
      The motion, the tumble and the strike test are city/tsunami.js's
      CBZ.tsuDebrisField — one kit, both tsunamis. This file only says which of
@@ -1919,6 +1963,35 @@
     });
   }
 
+  /* THE WRECKAGE IS THE BUILDING'S OWN WALLS. A swept house sheds no invented
+     brown boxes any more: the biggest solid pieces of its actual group — the
+     walls and slabs the arena built it from, wearing the building's own
+     materials — are torn off (Object3D re-parent, world pose kept) and handed
+     to the water, while the rest of the frame sinks through the collapse
+     animation it always had. Glass is skipped (it shattered when the building
+     fell) and so is anything under panel size — stair treads and trim would
+     read as confetti, not wreckage. */
+  function tsuTearWalls(field, b) {
+    if (!field || !b.group || b._tsuTorn) return;
+    b._tsuTorn = 1;
+    const kids = b.group.children, picks = [];
+    for (let i = 0; i < kids.length && picks.length < 6; i++) {
+      const m = kids[i];
+      if (!m || !m.isMesh || !m.geometry || !m.geometry.parameters) continue;
+      const p = m.geometry.parameters;
+      if (p.width == null || p.height == null || p.depth == null) continue;   // walls and slabs are boxes
+      if (m.material && m.material.transparent) continue;                     // glass shatters; it does not float
+      const dims = [p.width, p.height, p.depth].sort(function (q, w) { return q - w; });
+      if (dims[1] < 1.1 || dims[2] < 2.2) continue;
+      picks.push(m);
+    }
+    for (let i = 0; i < picks.length; i++) {
+      const p = picks[i].geometry.parameters;
+      const thin = Math.min(p.width, p.height, p.depth) <= 0.45;
+      field.takeWorld(picks[i], thin ? "panel" : "rubble");
+    }
+  }
+
   // ---- the front wrecks the low town: cars tumble, small buildings go
   //      down, big ones lose their glass. High ground is spared. ----
   /* VERTICAL EVACUATION WORKS AND WOOD FRAMES DO NOT. This is the one piece of
@@ -1948,8 +2021,10 @@
     }
     /* THE TREES GO TOO, and they are the classic tsunami battering ram: a
        whole pine, trunk-first, at the speed of the water. The tree stops
-       existing where it stood (its trunk collider leaves CBZ.colliders with
-       it) and re-enters the world as a log inside the flow. */
+       being planted (its trunk collider leaves CBZ.colliders) but it never
+       stops being ITSELF: the actual trunk and canopy meshes are re-parented
+       into a group pivoted at the trunk's middle and handed to the flow —
+       the same tree you could weave around a second ago, now rolling. */
     if (field && A.flammable) for (let i = 0; i < A.flammable.length; i++) {
       const t = A.flammable[i];
       if (t._tsuUproot || t.burnt) continue;
@@ -1958,9 +2033,12 @@
       if (floor(t.x, t.z) > st.level + 3) continue;
       t._tsuUproot = 1;
       if (t.trunkCol) { const k = CBZ.colliders.indexOf(t.trunkCol); if (k >= 0) { CBZ.colliders.splice(k, 1); if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); } }
-      if (t.trunk) t.trunk.visible = false;
-      if (t.foliage) t.foliage.visible = false;
-      field.shed(t.x, t.z, 1, "log");
+      const g = new THREE.Group();
+      g.position.set(t.x, t.trunk ? t.trunk.position.y : floor(t.x, t.z) + 2, t.z);
+      root().add(g);
+      if (t.trunk) g.attach(t.trunk);
+      if (t.foliage) g.attach(t.foliage);
+      field.take(g, t.x, t.z, "log");
     }
     for (let i = 0; i < A.fragile.length; i++) {
       const b = A.fragile[i];
@@ -1972,7 +2050,7 @@
       // loads rather than one formula with a soft edge.
       if (b.h < TSU_LIGHT_H) {
         structureHit(b, 1.25, ctx, { kind: "kinetic", dirx: st.dx, dirz: st.dz });
-        if (field && b.fallen) field.shed(b.x, b.z, 6, "panel");
+        if (field && b.fallen) tsuTearWalls(field, b);
       } else {
         const room = Math.max(0, TSU_CONCRETE_CAP - (b._dmg || 0));
         const load = Math.min(room, 0.34 * (0.7 + 0.5 * ctx.intensity));
@@ -1995,6 +2073,7 @@
   function tsuEnterFlood(ctx) {
     const st = ctx.st;
     st.phase = "flooded"; st.floodT = 0;
+    st.frontV = 0;                 // the front is gone; a stale sweep speed is a lie
     st.waveAmp = 1.38; st.chopAmp = 1.72; st.foamGain = 0.62;
     if (st.wave) st.wave.visible = false;
     if (st.spray) st.spray.setActive(0);
@@ -2012,7 +2091,7 @@
       st.warnT = 0; st.phase = "warn";
       st.level = CBZ.survSeaMeanY ? CBZ.survSeaMeanY() : -0.8;
       st.waveAmp = 0.86; st.chopAmp = 0.72; st.foamGain = 0.34;
-      st.frontS = -1e9;
+      st.frontS = -1e9; st.frontV = 0; st.stallT = 0; st.broke = false; st.crashT = -1;
       tsuPublish(ctx, 0);
       narrate("hint", "TSUNAMI — the sea is PULLING BACK. GET HIGH!", 3.6);
       soundAt("siren", ctx.cx, ctx.cz);
@@ -2054,7 +2133,18 @@
       // stay dry — the refuges have to survive or the event has no answer
       st.floodSurge = Math.min(14.3, 8.3 + scale(2.4, ctx));
       st.frontS = -(R + 52);
-      st.speed = (2 * R + 104) / (ctx.activeSecs * 0.44);
+      st.speed = (2 * R + 104) / (ctx.activeSecs * 0.44);   // legacy constant walk
+      /* SHOALING (TSU_SHOAL_V2): integrate the relative-speed profile over
+         the whole travel and scale it so approach + stand + crash + crossing
+         land in the SAME sweep budget the constant speed used — the director's
+         clock, the flood phase and the drain cannot tell the difference. */
+      st.broke = false; st.stallT = 0; st.crashT = -1; st.frontV = st.speed;
+      if (CBZ.CONFIG.TSU_SHOAL_V2 !== false) {
+        st.stallSecs = 1.25;
+        let unit = 0;
+        for (let s0 = -(R + 52); s0 < R + 52; s0 += 0.5) unit += 0.5 / tsuVRel(ctx, s0);
+        st.speedK = unit / Math.max(2, ctx.activeSecs * 0.44 - st.stallSecs);
+      } else st.speedK = 0;
       st.waveAmp = 1.55; st.chopAmp = 2.15; st.foamGain = 0.82;
       st.waveId = "tsu" + CBZ.now + rnd();
       st.landfall = false;
@@ -2085,7 +2175,25 @@
       ctx.env.sunInt = 0.50; ctx.env.sunColor = 0xc9d2d6;
       ctx.env.hemiInt = 0.72; ctx.env.hemiColor = 0x707f88;
       if (st.phase === "sweep") {
-        st.frontS += st.speed * dt;
+        if (CBZ.CONFIG.TSU_SHOAL_V2 !== false && st.speedK) {
+          /* ---- SLOWEST AT ITS TALLEST, THEN THE CRASH ---------------------
+             The front decelerates up the shelf (tsuVRel), and in the last
+             metre and a half of open water it all but stops: the wall STANDS
+             at full height over the beach for stallSecs — the reference
+             frame, and the slowest the wave will ever move — still creeping,
+             still boiling, and then the lip comes down. */
+          let v = st.speedK * tsuVRel(ctx, st.frontS);
+          if (!st.broke && -(st.frontS + ctx.R) <= 1.6) {
+            if (st.stallT < st.stallSecs) { st.stallT += dt; v = st.speedK * 0.02; }
+            else { st.broke = true; st.crashT = 0; tsuCrash(ctx); }
+          }
+          if (st.crashT >= 0) st.crashT += dt;
+          st.frontV = v;
+          st.frontS += v * dt;
+        } else {
+          st.frontV = st.speed;
+          st.frontS += st.speed * dt;
+        }
         /* THE ARC IS MEASURED AGAINST THE ISLAND, NOT AGAINST THE WHOLE RUN.
            The first version of this walked one curve across the entire travel
            (-R-52 → +R+52) with a lag exponent, and the arithmetic of that was
@@ -2137,6 +2245,9 @@
            So shoaling alone carries it to 0.62, and the town takes it to 1. */
         let turbid = Math.max(0, Math.min(1, (st.frontS + ctx.R + 8) / 34));
         turbid = Math.max(turbid, Math.pow(shoal, 1.5) * 0.62);
+        // the crash aerates and muddies the whole face at once: a broken wave
+        // is foam and scoured bottom, whatever it was the instant before
+        if (st.broke) turbid = Math.max(turbid, Math.min(1, 0.78 + st.crashT * 0.4));
         st.sediment = turbid;
         st.shoal = shoal;
         /* ---- AND THEN IT SPENDS ITSELF, FROM THE SHORELINE ----------------
@@ -2160,15 +2271,21 @@
         st.spent = spent;
         const grp = st.wave;
         if (st.face) {
-          // tallest at the instant it breaks (shoal 1), then falling away as
-          // it spends itself crossing the island
-          const hs = (0.46 + 0.68 * shoal) * spent;
+          /* Tallest at the instant it breaks — and the GROWTH is concentrated
+             late (shoal^1.7): long and low over deep water, visibly STANDING
+             UP in the final approach as the speed drains out of it, which is
+             Green's law arriving on screen. The crash then drops the lip 26%
+             in one beat (recovering into the lower broken-bore face) and
+             folds the overhang away — a collapsing mass, not a curl. */
+          const crashDip = st.broke ? (1 - 0.26 * Math.exp(-Math.max(0, st.crashT) * 1.15)) : 1;
+          const crashCurl = st.broke ? Math.max(0.3, 1 - Math.max(0, st.crashT) * 1.1) : 1;
+          const hs = (0.40 + 0.74 * Math.pow(shoal, 1.7)) * spent * crashDip;
           st.faceH = st.H * hs;
           CBZ.tsuFaceUpdate(st.face, {
             t: CBZ.waterClock ? CBZ.waterClock() : CBZ.now * 0.001, dt: dt,
             height: st.faceH, turbid: turbid,
             // a spent surge does not overhang: the curl goes with the height
-            curl: (0.22 + 1.35 * shoal) * (1 - turbid * 0.62) * Math.max(0.22, spent),
+            curl: (0.22 + 1.35 * shoal) * (1 - turbid * 0.62) * Math.max(0.22, spent) * crashCurl,
             foam: st.foamGain,
             x: fx0, y: st.level - 2.4 + Math.sin(CBZ.now * 0.005) * 0.4, z: fz0,
             dirX: st.dx, dirZ: st.dz,
@@ -2187,13 +2304,17 @@
         // the spray-torn crest: thicker the harder the wave is curling, and it
         // rides the LIVE crest — spray hanging at the height of a wave that is
         // no longer there is the tell that the wave never really came down
-        st.spray.setActive((0.6 + 0.4 * shoal) * Math.max(0.18, spent));
+        // the crash tears the whole crest into the air for a beat; otherwise
+        // the mist follows the curl as before
+        st.spray.setActive(st.broke && st.crashT < 0.9 ? 1.5
+          : (0.6 + 0.4 * shoal) * Math.max(0.18, spent));
         st.spray.update(dt, fx0, st.level + (st.faceH || st.H) * 0.9, fz0);
         tsuPublish(ctx, 2.2);
+        // LEGACY LANDFALL (TSU_SHOAL_V2 off): the single blast + "BRACE!".
+        // With the flag on, tsuCrash() already fired at the end of the stand
+        // and set st.landfall, so this never runs twice.
         if (!st.landfall && st.frontS > -(ctx.R - 6)) {
           st.landfall = true;
-          // LANDFALL: a 26 m blast of white water, a hard shake and the roar.
-          // "BRACE!" was the HUD saying what your own screen was already doing.
           CBZ.fx.blast(fx0, fz0, { maxR: 26, color: 0xd9f2ff, shake: 1.15, life: 0.8 });
           narrate("toast", "BRACE!");
           sound("collapse"); sound("water");
@@ -2205,7 +2326,10 @@
         tsuSmash(ctx);
         tsuCarHandoff(ctx);
         floodActors(dt, ctx, 2.2, "drowned in the flood", st.dx, st.dz);
-        tsuFlotsam(dt, ctx, 5.4);
+        // the debris rides the BORE's speed, not a constant: near-still while
+        // the wave stands, then surging inland with the released front
+        tsuFlotsam(dt, ctx, CBZ.CONFIG.TSU_SHOAL_V2 !== false && st.frontV != null
+          ? Math.min(8.5, 2 + st.frontV * 0.12) : 5.4);
         if (st.frontS > ctx.R + 52) tsuEnterFlood(ctx);
       } else if (st.phase === "flooded") {
         st.floodT += dt;
@@ -2503,12 +2627,42 @@
     if (CBZ.shake) CBZ.shake(0.9); sound("explosion"); sound("rumble");
     // a fountain of glowing lava bursting UP out of the summit vent
     ctx.st.erFountain = CBZ.fx.particleCloud({ mode: "rise", color: 0xff6a1a, count: 260, radius: 7, top: 22, size: 0.3, opacity: 0.85, vMin: 12, vMax: 22, drift: 3 }); ctx.st.erFountain.setActive(0.95);
-    // a towering dark ash/smoke column above the fountain
-    ctx.st.erSmoke = CBZ.fx.particleCloud({ mode: "rise", color: 0x2a2420, count: 200, radius: 15, top: 52, size: 0.62, opacity: 0.4, vMin: 5, vMax: 10, drift: 9 }); ctx.st.erSmoke.setActive(0.6);
+    /* a towering dark ash column above the fountain. V2 gets the SPRITE
+       column (volcanofx ashColumn — a pillar with a silhouette, built like
+       the pyroclastic current's mass); the flag revert keeps the old dotted
+       Points cloud verbatim. */
+    if (V && V.ashColumn) {
+      ctx.st.erColumn = V.ashColumn({
+        x: h.x, z: h.z, y: h.peak + 3,
+        height: 52 + 16 * ctx.intensity, r: 6.5 + 2.5 * ctx.intensity,
+        parent: root(),
+      });
+      ctx.st.erSmoke = null;
+    } else {
+      ctx.st.erSmoke = CBZ.fx.particleCloud({ mode: "rise", color: 0x2a2420, count: 200, radius: 15, top: 52, size: 0.62, opacity: 0.4, vMin: 5, vMax: 10, drift: 9 }); ctx.st.erSmoke.setActive(0.6);
+    }
+    /* THE COLUMN STANDS ON LIGHT. In the reference night photograph the ash
+       pillar is dark — but its BASE is rose-orange, lit from below by the
+       vent it is standing on. A second short rising cloud in ember colours
+       under the dark one is that underside; without it the column reads as
+       a grey smudge that merely starts near the mountain. */
+    ctx.st.erSmokeLit = CBZ.fx.particleCloud({ mode: "rise", color: 0xd06a35, count: 110, radius: 8, top: 15, size: 0.5, opacity: 0.32, vMin: 4, vMax: 8, drift: 3 }); ctx.st.erSmokeLit.setActive(0.75);
     // fine ash raining back down over the island
     ctx.st.erAsh = CBZ.fx.particleCloud({ mode: "fall", color: 0x4a4038, count: 300, radius: 26, top: 30, size: 0.24, opacity: 0.45, vMin: 6, vMax: 12 }); ctx.st.erAsh.setActive(0.85);
-    // the glowing crater rim sitting on the peak
-    ctx.st.erCrater = disc(h.x, h.z, 0xff5210, 0.9, h.peak + 0.3); ctx.st.erCrater.material.blending = THREE.AdditiveBlending; ctx.st.erCrater.scale.set(5, 5, 1);
+    /* The crater itself: the V2 path gets the OPAQUE draped spatter apron
+       (world/volcanofx.js ventGlow — the reference photo's white-hot summit).
+       The additive disc survives only as the flag revert's crater, because a
+       glowing translucent coin is both halves of the owner's complaint —
+       see-through AND geometric. */
+    if (V && V.ventGlow) {
+      ctx.st.erVent = V.ventGlow({
+        x: h.x, z: h.z, r: 5.5 + 2.5 * ctx.intensity,
+        groundAt: gAt(ctx), parent: root(), salt: 4747,
+      });
+      ctx.st.erCrater = null;
+    } else {
+      ctx.st.erCrater = disc(h.x, h.z, 0xff5210, 0.9, h.peak + 0.3); ctx.st.erCrater.material.blending = THREE.AdditiveBlending; ctx.st.erCrater.scale.set(5, 5, 1);
+    }
 
     // THE WIND IS THE WEATHER'S WIND — the warn phase already set a bearing
     // and drove it into systems/weather.js, so the ash falls the same way the
@@ -2534,22 +2688,25 @@
 
     ctx.st.erLava = null; ctx.st.erStreams = null; ctx.st.erPools = null;
     if (V) {
-      /* ---- LAVA: opaque crusted flows down the fall line ----
+      /* ---- LAVA: braided, branching flow fields down the fall line ----
 
-         OWNER, 2026-08-13, holding up a photograph of Arenal: the magma is
-         "fake". The photograph is the argument. A stratovolcano at night is a
-         BLACK CONE with a dozen narrow incandescent threads fanning down its
-         face — each one a metre or two wide, braided, and bright precisely
-         because it is thin. Four ribbons at seven metres on a thirty-six
-         metre cone is a fifth of the mountain's width painted orange, and no
-         amount of surface detail rescues that proportion: it reads as a
-         glowing road because it is the size of one.
+         OWNER, 2026-08-15, sending the two reference photographs that are
+         now this eruption's bible: "magma should be way better... organic
+         ... don't make it look geometric". The last wave answered an
+         earlier photo with NINE separate uniform threads, and the shots
+         proved the problem with that: nine parallel worms of even width and
+         even glow are still geometry, just thinner geometry.
 
-         Nine threads at a third of the width put the same amount of light on
-         the mountain through nine times as many edges, and edges are what the
-         eye reads as lava. The cone stays dark, which is the other half of
-         the photograph. */
-      const n = 9;
+         The close-up bible photo is ONE THING that branches: a stem that
+         forks into lobes, a dark crusted surface laced with connected
+         bright filaments, margins that neck and belly. So the count goes
+         DOWN and the structure goes UP: five broad flows, each carrying
+         the lace field (the braid now lives in the surface, where the
+         photograph has it, instead of in the flow count), each forking
+         into narrower children as its front advances. The mountain ends up
+         wearing a fan of fifteen-odd noses grown from five stems — organic
+         because it is grown, not drawn. */
+      const n = 5;
       ctx.st.erLava = [];
       for (let i = 0; i < n; i++) {
         // never straight down the pyroclastic lane — the two hazards want
@@ -2558,8 +2715,10 @@
         const p = vent(h, a, 2.2);
         ctx.st.erLava.push(V.lavaFlow({
           x: p.x, z: p.z, groundAt: gAt(ctx), parent: root(), bearing: a,
-          len: h.r * 1.35 + 16 * ctx.intensity,
-          width: 1.9 + 1.1 * ctx.intensity,
+          len: h.r * 1.5 + 18 * ctx.intensity,
+          // broad enough for the nine-column braid grid (narrow cutoff is
+          // 4.2); the children fork off at 0.62x and take the five-column one
+          width: 4.5 + 1.1 * ctx.intensity,
           /* YOU WALK AWAY FROM LAVA — that is this file's own doctrine two
              hundred lines up, and at 4.2-6.8 m/s the flows were outrunning a
              SPRINT. A basaltic channel on a slope this size does about walking
@@ -2567,11 +2726,12 @@
              you lose ground to slowly and lose your house to entirely. */
           speed: 1.7 + 1.3 * ctx.intensity,
           salt: 4700 + i * 137,
-          // BUDGET: three real lights for nine threads, and the haze belongs
-          // to the mountain rather than to each thread — nine sets of it over
-          // narrow flows is a fog bank, which is what buried the last look
-          light: i % 3 === 0,
-          haze: i % 3 === 0,
+          branches: 2,
+          // BUDGET: three real lights for five stems (the vent apron carries
+          // its own), haze on the same three — a full set on every stem plus
+          // every child is a fog bank, which is what buried an earlier look
+          light: i % 2 === 0,
+          haze: i % 2 === 0,
         }));
       }
       /* ---- ASHFALL AS A LOAD: one field, plus every standing roof ---- */
@@ -2642,7 +2802,12 @@
     if (ctx.st.erWindX != null) ctx.st.erAsh.update(dt, h.x + ctx.st.erWindX * 40, 0, h.z + ctx.st.erWindZ * 40);
     else ctx.st.erAsh.update(dt, camPos().x, 0, camPos().z);
     ctx.st.erFountain.update(dt, h.x, h.peak, h.z);
-    ctx.st.erSmoke.update(dt, h.x + (ctx.st.erWindX || 0) * 14, h.peak + 6, h.z + (ctx.st.erWindZ || 0) * 14);
+    if (ctx.st.erSmoke) ctx.st.erSmoke.update(dt, h.x + (ctx.st.erWindX || 0) * 14, h.peak + 6, h.z + (ctx.st.erWindZ || 0) * 14);
+    // the sprite pillar leans with the same wind the ash falls on
+    if (ctx.st.erColumn) ctx.st.erColumn.update(dt, ctx.st.erWindX || 0, ctx.st.erWindZ || 0);
+    // the lit underside rides just over the fountain, beneath the dark column
+    if (ctx.st.erSmokeLit) ctx.st.erSmokeLit.update(dt, h.x + (ctx.st.erWindX || 0) * 5, h.peak + 1.5, h.z + (ctx.st.erWindZ || 0) * 5);
+    if (ctx.st.erVent) ctx.st.erVent.update(dt);
     if (ctx.st.erCrater) ctx.st.erCrater.material.opacity = 0.7 + 0.25 * (0.5 + 0.5 * Math.sin(CBZ.now * 0.012));
     // ash is weather: it dims the sun, it blows downwind, and it is the same
     // wind everything else in the game reads
@@ -2674,6 +2839,31 @@
         else P.r = Math.max(P.r, 1.2);
         P.m.scale.set(Math.max(0.6, P.r), Math.max(0.6, P.r), 1);
         P.m.material.opacity = 0.6 + 0.3 * (0.5 + 0.5 * Math.sin(CBZ.now * 0.014 + i * 2.1));
+      }
+    }
+
+    /* ---------------- INCANDESCENT ROCKFALL ----------------
+       The wide reference photograph's flanks are STREAKED with fine fire:
+       spatter thrown from the vent, bouncing and rolling down the cone,
+       each block a glowing tracer. fx.dropDebris already throws on a real
+       ballistic arc; `glow` makes the rock unlit ember-orange (incandescent
+       by the same doctrine as the melt), and a short linger leaves the
+       flank dotted with cooling embers that vanish on their own. Visual
+       only — dmg 0 — the bombs below are the ones that hurt, and they
+       telegraph. V2 only: the flag revert keeps its exact old look. */
+    if (V) {
+      ctx.st.erEmberCd = (ctx.st.erEmberCd || 0) - dt;
+      if (ctx.st.erEmberCd <= 0) {
+        ctx.st.erEmberCd = 0.4;
+        const ea = rnd() * 6.28;
+        const er = h.r * (0.35 + rnd() * 0.6);
+        CBZ.fx.dropDebris({
+          x: h.x + Math.cos(ea) * er, z: h.z + Math.sin(ea) * er,
+          fromX: h.x + Math.cos(ea) * 1.5, fromZ: h.z + Math.sin(ea) * 1.5,
+          fromY: h.peak + 2,
+          size: 0.22 + rnd() * 0.3, shape: "rock", color: 0xff7e22, glow: true,
+          dmg: 0, linger: 2 + rnd() * 2.5,
+        });
       }
     }
 
@@ -2962,7 +3152,10 @@
     }
     if (ctx.st.erFountain) ctx.st.erFountain.dispose();
     if (ctx.st.erSmoke) ctx.st.erSmoke.dispose();
+    if (ctx.st.erColumn) { ctx.st.erColumn.dispose(); ctx.st.erColumn = null; }
+    if (ctx.st.erSmokeLit) { ctx.st.erSmokeLit.dispose(); ctx.st.erSmokeLit = null; }
     if (ctx.st.erAsh) ctx.st.erAsh.dispose();
+    if (ctx.st.erVent) { ctx.st.erVent.dispose(); ctx.st.erVent = null; }
     if (ctx.st.erCrater) rmMesh(ctx.st.erCrater);
     (ctx.st.erStreams || []).forEach((s) => rmMesh(s.mesh));
     ctx.st.erStreams = null;
@@ -3974,11 +4167,27 @@
   // ============================================================
   // DIRECTOR
   // ============================================================
+  /* OWNER, 2026-08-15: "there doesn't need to be a finale... I never
+     mentioned nuke". He is right about the premise, not just the pacing:
+     this is a NATURAL disaster survival mode — eleven acts of nature and
+     then, for no reason the island knows about, somebody nukes it. The bomb
+     was only ever here because city/nukefx.js existed and the arc wanted a
+     closer. The arc does not need one: it already reshuffles and repeats
+     until the lobby resolves itself, which IS the battle royale.
+
+     So the nuke is out of the rotation. The def stays registered — the city
+     bomber still detonates through the same bus, debug/`force("nuke")` still
+     works, and the pyroclastic whiteout still borrows nukefx's flash sheet —
+     it is only no longer something the weather does to an island.
+     SURV_NUKE_FINALE=true is the one-line revert. */
+  if (CBZ.CONFIG.SURV_NUKE_FINALE == null) CBZ.CONFIG.SURV_NUKE_FINALE = false;
   // the classic arc — also the fallback when SURV_SHUFFLE is off
-  const SEQUENCE = ["quake", "storm", "flashflood", "flood", "wildfire", "tornado", "hurricane", "blizzard", "meteor", "sinkhole", "volcano", "nuke"];
-  // pacing classes for the shuffled order: a run OPENS gentle, and the three
-  // island-wreckers never land back-to-back (the nuke is pinned last, so a
-  // gentle opener also keeps every cycle boundary legal when the arc repeats)
+  const SEQUENCE_ALL = ["quake", "storm", "flashflood", "flood", "wildfire", "tornado", "hurricane", "blizzard", "meteor", "sinkhole", "volcano", "nuke"];
+  const SEQUENCE = CBZ.CONFIG.SURV_NUKE_FINALE ? SEQUENCE_ALL.slice() : SEQUENCE_ALL.filter((id) => id !== "nuke");
+  // pacing classes for the shuffled order: a run OPENS gentle, and the
+  // island-wreckers never land back-to-back; the gentle opener keeps every
+  // cycle boundary legal when the arc repeats (with the finale flag on, the
+  // nuke is pinned last exactly as before)
   const GENTLE = { storm: 1, wildfire: 1, blizzard: 1, sinkhole: 1 };
   const MEGA = { flood: 1, volcano: 1, nuke: 1 };
   let runNo = 0, orderRng = null;
@@ -3986,18 +4195,21 @@
 
   // per-run SEEDED order (CBZ.seedStream ⇒ deterministic per world seed +
   // run counter — never Math.random: the arc is shared run structure).
-  // Rejection-sample a Fisher–Yates shuffle of the 11 non-nuke hazards until
-  // the pacing constraints hold, then pin the nuke as the finale.
+  // Rejection-sample a Fisher–Yates shuffle of the natural hazards until the
+  // pacing constraints hold. Under SURV_NUKE_FINALE the nuke is pinned last,
+  // exactly as it always was; by default the arc is nature all the way.
   function buildOrder() {
     if (CBZ.CONFIG.SURV_SHUFFLE === false || !orderRng) return SEQUENCE.slice();
     const pool = SEQUENCE.filter((id) => id !== "nuke");
     for (let tries = 0; tries < 40; tries++) {
       for (let i = pool.length - 1; i > 0; i--) { const j = (orderRng() * (i + 1)) | 0; const t = pool[i]; pool[i] = pool[j]; pool[j] = t; }
       if (!GENTLE[pool[0]]) continue;                    // gentle opener
-      if (MEGA[pool[pool.length - 1]]) continue;         // nothing mega abuts the nuke
+      // no mega in the closing slot: it either abuts the pinned nuke or, in
+      // the natural arc, lands right before the next cycle's opener jolt
+      if (MEGA[pool[pool.length - 1]]) continue;
       let ok = true;
       for (let i = 1; i < pool.length; i++) if (MEGA[pool[i]] && MEGA[pool[i - 1]]) { ok = false; break; }
-      if (ok) return pool.concat("nuke");
+      if (ok) return CBZ.CONFIG.SURV_NUKE_FINALE ? pool.concat("nuke") : pool;
     }
     return SEQUENCE.slice();   // vanishingly unlikely — fall back to the classic arc
   }
@@ -4188,6 +4400,14 @@
            stops being an opinion about a screenshot. */
         spent: st.spent != null ? +(+st.spent).toFixed(3) : null,
         faceH: st.faceH != null ? +(+st.faceH).toFixed(1) : null,
+        /* THE SHOALING ARC (TSU_SHOAL_V2), as numbers: how fast the front is
+           actually moving over ground right now, whether the wave is in its
+           held stand at the beach, and how long ago the lip came down. A
+           build that predates these reports nothing, which reads as 0 /
+           false / null — "not measured", never "no wave". */
+        frontV: st.frontV != null ? +(+st.frontV).toFixed(2) : null,
+        stalled: !!(st.phase === "sweep" && st.stallT > 0 && !st.broke),
+        crashAge: st.crashT != null && st.crashT >= 0 ? +(+st.crashT).toFixed(2) : null,
         debrisEntrained: dbg ? dbg.entrained : 0,
         debrisLive: dbg ? dbg.live : 0,
         debrisStrikes: dbg ? dbg.strikes : 0,
