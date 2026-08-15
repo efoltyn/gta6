@@ -182,6 +182,13 @@ body.mode-city.state-playing > div[style*="bottom:132px"][style*="z-index:15"] {
   display: none !important;
 }
 
+/* The one exception to the declutter policy: #interact is not passive prose,
+   it is the verb card itself — the dialogue's two answers, the gun-stop
+   stand-off, the walk-up rows. Hiding it left keyboard players acting blind
+   (touch always had its own restore in mobile.css:410). Same contract as
+   touch: visible only while the interaction system marks it live. */
+body.mode-city.state-playing #interact.show { display: block !important; }
+
 /* Route guidance remains useful while moving, but only as direction + range.
    The destination sentence and the old "[M] map" legend belong on the map. */
 body.mode-city.state-playing #waypointLabel,
