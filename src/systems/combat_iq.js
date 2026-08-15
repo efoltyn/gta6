@@ -733,6 +733,13 @@
     const tx = tgt.pos.x, tz = tgt.pos.z;
     const cls = slot === "flank" ? "flank" : "fire";
     let P = a._iqPos && (a._iqPos.cls === "fire" || a._iqPos.cls === "flank") ? a._iqPos : null;
+    // DRY BACKOFF, actually honored. A dry pick used to schedule a 1.1 s
+    // retry and then re-scan the whole fan NEXT FRAME anyway, because "no
+    // position" re-triggered the pick unconditionally — measured as a
+    // 2-per-frame pick storm on any fighter in a walled pocket. The dry flag
+    // makes the backoff real; a fresh engagement (no flag) still picks
+    // immediately.
+    if (!P && a._iqPosDry && (a._iqRepoT || 0) > 0) return false;
     let pick = !P || P.cls !== cls;
     if (P && !pick) {
       if (Math.hypot(tx - P.tx, tz - P.tz) > Math.max(4.5, tol * 1.7)) pick = true;      // mark displaced
@@ -750,12 +757,14 @@
       _posPicks++;
       if (!cand) {
         // fully walled pocket — no honest spot. Fall back to the raw goal
-        // this beat (the mover's steering + stuck kick handle it) and retry.
+        // this beat (the mover's steering + stuck kick handle it) and retry
+        // after the backoff above.
         _posDry++;
-        a._iqPos = null; a._iqPlant = false; a._iqRepoT = 1.1;
+        a._iqPos = null; a._iqPlant = false; a._iqRepoT = 1.1; a._iqPosDry = true;
         return false;
       }
       P = a._iqPos = { x: cand.x, z: cand.z, tx: tx, tz: tz, cls: cls };
+      a._iqPosDry = false;
       a._iqRepoT = cls === "flank" ? 2.4 + trait(a, 0xF7A1) * 1.8 : 5.5 + trait(a, 0xF7A1) * 4.5;
     }
     driveToPos(a, P.x, P.z, tgt, P.cls);

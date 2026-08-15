@@ -182,13 +182,35 @@ async function stageNpcTactics(input) {
 
     /* the studio's shared clock step: pins the player, holds the peace with
        the law, keeps the cast committed, and samples the watch counters. */
+    /* DIAGNOSTIC: any sim tick we did not issue ourselves breaks the studio's
+       determinism claim — count them. (The rAF stub should make this zero.) */
+    S.extSteps = 0; S.inStep = false;
+    const realStepSim = CBZ.stepSim;
+    CBZ.stepSim = function () {
+      if (!S.inStep) S.extSteps++;
+      return realStepSim.apply(this, arguments);
+    };
+
+    S.castSet = new Set();
     S.baseStep = S.step = function (frames) {
       const PA = CBZ.city && CBZ.city.playerActor;
+      S.inStep = true;
       for (let i = 0; i < frames; i++) {
         CBZ.hitstop = 0; CBZ.slowmo = 0;
         CBZ.player.hp = 100;
         CBZ.game.wanted = 0;
         CBZ.player.pos.x = S.mark.x; CBZ.player.pos.z = S.mark.z; CBZ.player.pos.y = 0;
+        // KEEP THE EXTRAS OFF THE SET. Bodies parked shoulder-to-shoulder in
+        // the holding block pick fights with each other, and every one of
+        // those fights runs the same combat brain we are photographing —
+        // polluting the audit numbers with a brawl nobody frames. Sweep them
+        // calm on a slow cadence (they are 160 m away; nobody sees it).
+        if (i % 30 === 0) {
+          for (const p of CBZ.cityPeds || []) {
+            if (!p || p.dead || S.castSet.has(p)) continue;
+            if (p.rage || p.state === "fight") { p.rage = null; if (p.state === "fight") p.state = "walk"; p.alarmed = 0; }
+          }
+        }
         for (const m of S.cast) {
           if (!m || m.dead) continue;
           if (PA && (!m.rage || m.rage.dead)) { m.rage = PA; m.state = "fight"; }
@@ -199,6 +221,13 @@ async function stageNpcTactics(input) {
         const W = S.watch;
         if (W) {
           W.secs += 1 / 60;
+          // per-frame goal trace of cast[0] for the first ~14 sampled frames —
+          // the churn's shape (two alternating points vs a wandering point)
+          // names its author.
+          const c0 = S.cast[0];
+          if (c0 && !c0.dead && W.trace && W.trace.length < 14) {
+            W.trace.push(Math.round(c0.target.x * 10) / 10 + "," + Math.round(c0.target.z * 10) / 10);
+          }
           for (let c = 0; c < S.cast.length; c++) {
             const m = S.cast[c]; if (!m || m.dead) continue;
             const fired = W.prevAmmo[c] != null && m.ammo < W.prevAmmo[c];
@@ -214,9 +243,10 @@ async function stageNpcTactics(input) {
           }
         }
       }
+      S.inStep = false;
     };
     S.beginWatch = function () {
-      S.watch = { secs: 0, shots: 0, trigSpeed: 0, trigMoving: 0, speedSum: 0, speedN: 0, churn: 0, prevAmmo: [], prevTx: [], prevTz: [] };
+      S.watch = { secs: 0, shots: 0, trigSpeed: 0, trigMoving: 0, speedSum: 0, speedN: 0, churn: 0, prevAmmo: [], prevTx: [], prevTz: [], trace: [] };
     };
     S.metrics = function () {
       const W = S.watch || { secs: 0, shots: 0, trigSpeed: 0, trigMoving: 0, speedSum: 0, speedN: 0, churn: 0 };
@@ -244,6 +274,8 @@ async function stageNpcTactics(input) {
           out.c0state = (m0.state || "?") + (m0.sees === false ? "/blind" : "/sees") +
             (m0._iqPos ? "/pos" : "/nopos") + (m0._iqPlant ? "/plant" : "");
           out.c0goalD = Number(Math.hypot(m0.target.x - m0.pos.x, m0.target.z - m0.pos.z).toFixed(1));
+          out.c0trace = (S.watch && S.watch.trace || []).join(" ");
+          out.extSteps = S.extSteps;
         }
       } catch (_) {}
       return out;
@@ -377,6 +409,7 @@ async function stageNpcTactics(input) {
     if (CBZ.syncActorWeapon) { try { CBZ.syncActorWeapon(m); } catch (_) {} }
     S.cast.push(m);
   }
+  S.castSet = new Set(S.cast);
 
   /* ---- the player on his mark, facing the cast ------------------------- */
   P.pos.x = M.x; P.pos.z = M.z; P.pos.y = 0;
