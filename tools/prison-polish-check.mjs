@@ -174,6 +174,25 @@ function why(r) { return (r && r.__err) ? ("threw: " + String(r.__err).split("\n
       } else if (Math.abs(n.group.position.x - b.x) < b.latOut
               && Math.abs(n.group.position.z - b.z) < b.lonOut) out.inFrame++;
     }
+    /* WALKABILITY, SWEPT RATHER THAN ARGUED. Making the bunk solid reopened the
+       exact question the old non-solid doctrine settled by giving up: can you
+       still get around? So walk the two routes the escape actually uses and
+       every cell centre against every LIVE collider at the real 0.38 radius.
+       Overhead colliders (y0 > 1.7 — the upper deck is at 1.94) are skipped:
+       they are what a body walks UNDER, and counting them would fail the test
+       for the feature working. */
+    const R = 0.38;
+    function clear(x, z) {
+      for (const c of (CBZ.colliders || [])) {
+        if (c.y0 != null && c.y0 > 1.7) continue;
+        if (x > c.minX - R && x < c.maxX + R && z > c.minZ - R && z < c.maxZ + R) return false;
+      }
+      return true;
+    }
+    out.lanes = { dorm: 0, dormN: 0, aisle: 0, aisleN: 0, cellCentres: 0 };
+    for (let z = 107; z <= 123; z += 0.5) { out.lanes.dormN++; if (!clear(-33, z)) out.lanes.dorm++; }
+    for (let x = -6; x <= 6; x += 0.5) { out.lanes.aisleN++; if (!clear(x, -31)) out.lanes.aisle++; }
+    for (const c of cells) if (!clear(c.x, c.z)) out.lanes.cellCentres++;
     return out;
   `);
   if (bad(r)) check("bunk: the wing reports its racks", false, why(r));
@@ -189,6 +208,11 @@ function why(r) { return (r && r.__err) ? ("threw: " + String(r.__err).split("\n
       && r.audit.spawnInPlayerCell === true,
       JSON.stringify({ spawn: r.audit.spawnBlocked, gap: r.audit.doorGapBlocked,
                        spine: r.audit.spineBlocked, colliders: r.audit.colliders }));
+    check("bunk: every lane is still walkable at 0.38",
+      !!r.lanes && r.lanes.dorm === 0 && r.lanes.aisle === 0 && r.lanes.cellCentres === 0,
+      `dorm aisle ${r.lanes.dormN - r.lanes.dorm}/${r.lanes.dormN} · block aisle ` +
+      `${r.lanes.aisleN - r.lanes.aisle}/${r.lanes.aisleN} · cell centres ` +
+      `${r.cells - r.lanes.cellCentres}/${r.cells}`);
   }
 }
 
@@ -222,19 +246,63 @@ const step = (n) => evl(`for(var i=0;i<${n | 0};i++) CBZ.stepSim(1/60); return t
 
 // ---- 1. THE ARMORY HAS EVERY GUN, AND A TAKEN GUN LEAVES THE WALL ---------
 {
+  /* TWO OF THESE COUNTED THE WRONG SET FOR MONTHS, and both failures were the
+     assertion being stale rather than the room being broken:
+
+       · "every FPS weapon has a slot" listed `shank` missing. It should be
+         missing. A shank is the one weapon in the roster nobody issues —
+         weapons/appearances/shank.js opens "Nobody issued it" — and
+         systems/economy.js:118 makes it a BAG item: pick one up, trade for one,
+         get frisked for one, and syncShankWeapon un/locks the weapon rail off
+         the inventory row. A shank on a guard's rack would be the bug. So the
+         assertion is now over the weapons the armory ISSUES, and the shank's
+         own path is asserted separately below rather than quietly dropped —
+         "not in the armory" only means something if it is somewhere else.
+
+       · "the heavy tier is behind the cage" wanted 4 and read 5. The fifth is
+         the C4 crate, which is an ITEM slot (`slot.item`), not a gun, and it is
+         gated for the same reason the launchers are. Count weapon slots. */
   const r = await evl(`
     var a = CBZ.armory, aud = CBZ.gunroomAudit();
-    var have = {}; a.slots.forEach(function(s){ have[s.id] = s.gated ? "cage" : "rack"; });
-    var missing = CBZ.FPS_WEAPONS.filter(function(w){ return !have[w.id]; }).map(function(w){ return w.id; });
-    return { rackSlots: aud.rackSlots, gated: aud.gatedSlots, weapons: CBZ.FPS_WEAPONS.length,
-             missing: missing, where: have, bespoke: aud.bespoke, seeThrough: aud.seeThrough };
+    var guns = a.slots.filter(function(s){ return !s.item; });
+    var have = {}; guns.forEach(function(s){ have[s.id] = s.gated ? "cage" : "rack"; });
+    // ISSUED = every weapon the armory is meant to stock. Contraband is the
+    // complement, and it is named here so adding one to the roster without a
+    // source shows up as a failure rather than a silent exemption.
+    var CONTRABAND = { shank: 1 };
+    var missing = CBZ.FPS_WEAPONS.filter(function(w){ return !CONTRABAND[w.id] && !have[w.id]; }).map(function(w){ return w.id; });
+    var stray = guns.filter(function(s){ return CONTRABAND[s.id]; }).map(function(s){ return s.id; });
+    return { rackSlots: aud.rackSlots, gunSlots: guns.length, gated: aud.gatedSlots,
+             gatedGuns: guns.filter(function(s){ return s.gated; }).length,
+             weapons: CBZ.FPS_WEAPONS.length, missing: missing, stray: stray,
+             where: have, bespoke: aud.bespoke, seeThrough: aud.seeThrough };
   `);
   if (bad(r)) check("armory: audit reads", false, why(r));
   else {
-    check("armory: every FPS weapon has a slot", r.missing.length === 0, "missing=" + JSON.stringify(r.missing) + " slots=" + r.rackSlots + "/" + r.weapons);
-    check("armory: the heavy tier is behind the cage", r.gated === 4, "gated=" + r.gated + " " + JSON.stringify(["sniper", "lmg", "bazooka", "glauncher"].map((k) => k + ":" + r.where[k])));
+    check("armory: every ISSUED weapon has a slot", r.missing.length === 0 && r.stray.length === 0,
+      "missing=" + JSON.stringify(r.missing) + " contrabandOnRack=" + JSON.stringify(r.stray) +
+      " guns=" + r.gunSlots + "/" + (r.weapons - 1) + " (+" + (r.rackSlots - r.gunSlots) + " item)");
+    check("armory: the heavy tier is behind the cage", r.gatedGuns === 4,
+      "gatedGuns=" + r.gatedGuns + " (of " + r.gated + " gated slots) " +
+      JSON.stringify(["sniper", "lmg", "bazooka", "glauncher"].map((k) => k + ":" + r.where[k])));
     check("armory: ratchets hold (bespoke 0, seeThrough 1)", r.bespoke === 0 && r.seeThrough === 1, `bespoke=${r.bespoke} seeThrough=${r.seeThrough}`);
   }
+  // THE OTHER HALF OF THE SHANK CLAIM. Exempting it from the rack is only
+  // honest if the bag really is its rack: put the item in and the weapon must
+  // appear on the rail, take it out and it must go. That is economy.js's
+  // syncShankWeapon, driven through the same addItem/takeItem choke point every
+  // pickup, trade and confiscation uses — never by calling unlockWeapon here.
+  const s = await evl(`
+    if (!CBZ.econ || !CBZ.econ.addItem) return { no: true };
+    var had = !!(CBZ.hasWeapon && CBZ.hasWeapon("shank"));
+    CBZ.econ.addItem("Shiv", 1);
+    var armed = !!CBZ.hasWeapon("shank");
+    CBZ.econ.takeItem("Shiv");
+    return { had: had, armed: armed, disarmed: !CBZ.hasWeapon("shank") };
+  `);
+  if (bad(s) || s.no) check("armory: the shank's rack is the bag", false, why(s));
+  else check("armory: the shank's rack is the bag", s.armed === true && s.disarmed === true,
+    JSON.stringify(s));
 }
 {
   // TAKE one and read the wall. unlockWeapon is the same call the pickup makes.
