@@ -280,18 +280,41 @@ async function stageVipWardrobe(input) {
   }
   const audit = CBZ.outfitIntegrityAudit ? CBZ.outfitIntegrityAudit() : null;
 
-  // ---- fixed world-axis tripod, whole row, waist-up ------------------------
+  // ---- AIM AT WHERE THE BODIES ACTUALLY ARE (ped-lineup.mjs:218's law) -----
+  // The marks are REQUESTS; gravity, ground snapping and the brain answer
+  // them. Two contact sheets photographed an empty hillside because the lens
+  // was built from the requested coordinates while the bodies stood on real
+  // ground somewhere else. Read each body's live world position, frame the
+  // median cluster, and photograph their FRONTS (lens between row and mark).
   const camera = CBZ.camera;
   camera.aspect = input.width / input.height;
   camera.near = 0.05; camera.far = 4000;
   camera.fov = 34;
-  let lo = Infinity, hi = -Infinity, ry = S.gy, rz = S.gz + 7.5;
-  for (const m of row) { if (m.x < lo) lo = m.x; if (m.x > hi) hi = m.x; ry = m.y; rz = m.z; }
-  const cx = (lo + hi) / 2;
-  const dist = Math.max(2.6, (hi - lo) * 0.72 + 2.9);
-  camera.position.set(cx, ry + 1.62, rz - dist);
-  camera.lookAt(cx, ry + 1.02, rz);
+  const wv = new T.Vector3();
+  const placed = [];
+  for (const m of row) {
+    if (!m.p.group) continue;
+    m.p.group.updateWorldMatrix(true, false);
+    wv.setFromMatrixPosition(m.p.group.matrixWorld);
+    m.wx = wv.x; m.wy = wv.y; m.wz = wv.z;
+    placed.push(m);
+  }
+  placed.sort((a, b) => a.wy - b.wy);
+  const mid = placed[(placed.length / 2) | 0] || row[0];
+  const near = placed.filter((m) => Math.abs(m.wy - mid.wy) < 4 && Math.hypot(m.wx - mid.wx, m.wz - mid.wz) < 20);
+  let lo = Infinity, hi = -Infinity, czs = 0;
+  for (const m of near) { if (m.wx < lo) lo = m.wx; if (m.wx > hi) hi = m.wx; czs += m.wz; }
+  const cx = (lo + hi) / 2, cz = czs / Math.max(1, near.length), ry = mid.wy;
+  const dist = Math.max(3.2, (hi - lo) * 0.72 + 2.9);
+  // lens on the side the row FACES: they were turned toward the mark
+  let fdx = S.gx - cx, fdz = S.gz - cz;
+  const flen = Math.hypot(fdx, fdz) || 1;
+  fdx /= flen; fdz /= flen;
+  camera.position.set(cx + fdx * dist, ry + 1.62, cz + fdz * dist);
+  camera.lookAt(cx, ry + 1.02, cz);
   camera.updateProjectionMatrix();
+  const rz = cz;   // corridor clear below reads these
+  S.gyCam = ry;
   if (typeof CBZ.skySync === "function") CBZ.skySync();
   else {
     const skyRig = CBZ.skyDome && CBZ.skyDome.parent;
