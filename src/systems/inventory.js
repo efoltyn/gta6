@@ -532,17 +532,20 @@
   });
 
   // ---------- touch access (merge seam, rides PRISON_TOUCH_PROMPTS) ----------
-  // CBZ.toggleInventory existed with ZERO touch surfaces calling it — on an
-  // iPad the 27-slot stash was unreachable. The BAG cell is a CHILD of the
-  // hotbar so it inherits every show/hide the bar already has (mode gates,
-  // mode-survival hide) with no JS sync; body.touch is the only extra gate
-  // (css). The panel gets a real ✕ because Esc does not exist on glass.
+  // THE BAG BUTTON IS GONE (owner, 2026-08-16: "the bag button that opens up a
+  // whole stash screen, that should be gone — the way it looks when I have
+  // guns should be permanent, so I can see when I pickup a keycard etc it's
+  // just where the guns are"). On glass the BAR is the whole inventory now:
+  // an escape item cell shows itself the moment it holds something (the
+  // .filled class fill() stamps below; css/inventory.css keys the escape
+  // hide rule off it), so a keycard pickup surfaces beside the gun chips
+  // with no second screen behind a button. The stash overlay itself still
+  // exists for a keyboard's [I] — it is where WEAPON KEYS are rearranged —
+  // so the ✕ and the long-press stay wired for any touch session that can
+  // still reach it (a paired keyboard's I, or another mode's surface).
   const touchUI = !(CBZ.CONFIG && CBZ.CONFIG.PRISON_TOUCH_PROMPTS === false);
-  let bagBtn = null, invX = null;
+  let invX = null;
   if (touchUI) {
-    bagBtn = document.createElement("div"); bagBtn.id = "invBagBtn"; bagBtn.textContent = "BAG";
-    bar.appendChild(bagBtn);
-    bagBtn.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); toggle(); });
     invX = document.createElement("div"); invX.className = "invClose"; invX.textContent = "✕";
     panel.appendChild(invX);
     invX.addEventListener("mousedown", (e) => { e.preventDefault(); close(); });
@@ -605,6 +608,9 @@
   const LEGACY_FACE = '<span class="islot-ic">▪</span>';
   function fill(cell, s) {
     cell.classList.remove("r-uncommon", "r-rare", "r-epic");
+    // .filled is how the escape hotbar knows a cell EARNED its place on the
+    // bar (empty cells stay off the glass there — css/inventory.css).
+    cell.classList.toggle("filled", !!(s && s.item));
     if (s && s.item) {
       const n = s.item;
       const tally = s.count > 1 ? '<span class="islot-n">' + s.count + "</span>" : "";

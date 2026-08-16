@@ -602,7 +602,8 @@ async function moveTo(expr, ticks) {
         docked: !!(s && s.parentNode === h), floating: !!(s && s.parentNode && s.parentNode.id === "hud"),
         stripShown: !!(s && getComputedStyle(s).display !== "none"),
         cells: cells, hiddenCells: hidden,
-        bagHidden: getComputedStyle(document.getElementById("invBagBtn") || document.createElement("i")).display === "none",
+        bagHidden: (function(){ var b = document.getElementById("invBagBtn");
+          return !b || getComputedStyle(b).display === "none"; })(),   // gone-for-good counts as hidden
         panel: !!gg,
         panelFlag: !!(window.CBZ.CONFIG && window.CBZ.CONFIG.GUNGAME_HUD_PANEL),
         now: txt(".gg-now"), next: txt(".gg-next"), lead: txt(".gg-lead"),
