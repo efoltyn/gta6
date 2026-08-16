@@ -884,7 +884,12 @@
        colour, which is what the collar always used to be. */
     const top = opts.top != null ? opts.top : groundColorAt(x, z, gy);
     h.topColor = top != null ? top : h.surfaceColor;
-    h.topSampled = top != null && opts.top == null;
+    /* Carried, not re-derived. Every shaft is re-cut five or six times as it
+       grows and each re-cut passes the colour in, so deriving "was this
+       sampled" from `opts.top == null` reported false for every hole in the
+       game the moment it finished opening — the colour was the sampled one,
+       the flag had simply forgotten where it came from. */
+    h.topSampled = opts.topSampled != null ? !!opts.topSampled : (top != null && opts.top == null);
     if (CBZ.CONFIG.SHAFT_ESCAPE !== false) {
       h.stepN = Math.max(6, Math.min(34, Math.round(depth / 1.3)));
       h.stepA0 = (h.seed % 1) * TAU;
@@ -1271,9 +1276,9 @@
       // the props over the mouth are hidden and the ground under it is masked,
       // so a fresh sample could answer differently and the rim would change
       // colour mid-collapse
-      const keep = { x: h.x, z: h.z, gy: h.gy, depth: h.depth, seed: h.seed, born: h.born, surface: o.surface, top: h.topColor };
+      const keep = { x: h.x, z: h.z, gy: h.gy, depth: h.depth, seed: h.seed, born: h.born, surface: o.surface, top: h.topColor, topSampled: h.topSampled };
       disposeShaft(h);
-      seq.shaft = CBZ.groundShaft(keep.x, keep.z, { r: want, depth: keep.depth, gy: keep.gy, seed: keep.seed, surface: keep.surface, top: keep.top });
+      seq.shaft = CBZ.groundShaft(keep.x, keep.z, { r: want, depth: keep.depth, gy: keep.gy, seed: keep.seed, surface: keep.surface, top: keep.top, topSampled: keep.topSampled });
       if (seq.shaft) seq.shaft.born = keep.born;   // the burial clock is the HOLE's age, not this rebuild's
     }
     rimShear(seq, 3);
