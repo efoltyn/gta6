@@ -27,6 +27,11 @@
 <div id="hud">
   <div id="objective" class="panel"><span class="tag">Objective</span><div id="objText">Escape your cell and find the keycard.</div></div>
   <div id="topright">
+    <!-- SURVIVAL alive counter. It rides the top-right rail WITH the clock (it
+         used to be a wider, taller pill of its own floating top-centre) so the
+         two numbers that describe the match read as one instrument, and the
+         word "ALIVE" is a people glyph — the number is doing the talking. -->
+    <div id="survTop" class="pill panel"><b id="aliveCount">100</b><svg class="aliveIc" viewBox="0 0 24 24" role="img" aria-label="survivors alive"><circle cx="9" cy="7.1" r="3.4"/><path d="M2.5 20.5c0-3.7 2.9-6.3 6.5-6.3s6.5 2.6 6.5 6.3z"/><circle cx="17.6" cy="8.6" r="2.5" opacity=".7"/><path d="M16.1 13.3c3.2-.6 6 1.8 6 5.2h-4.4c0-1.9-.6-3.7-1.6-5.2z" opacity=".7"/></svg></div>
     <div id="timer" class="pill panel">00:00</div>
     <div id="cigs" class="pill panel"><span class="ic"></span><span id="cigText">0</span></div>
   </div>
@@ -55,8 +60,8 @@
 
   <div id="dashBtn" class="panel"><span>Ranks</span></div>
 
-  <!-- SURVIVAL mode HUD (shown only in disaster mode) -->
-  <div id="survTop" class="panel"><b id="aliveCount">100</b><span>ALIVE</span></div>
+  <!-- SURVIVAL mode HUD (shown only in disaster mode). #survTop moved up into
+       #topright beside the clock — see the comment there. -->
   <div id="survStatus" class="panel"><span id="survStatusText"></span></div>
   <div id="survBars">
     <div class="sbar"><span class="slab">HEALTH</span><div class="sbarbg"><div id="hpBar"></div></div></div>

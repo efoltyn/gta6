@@ -301,6 +301,26 @@
   // fire reticle (same glyph language as touch.js's icon cluster)
   const FIRE_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2.3" fill="currentColor" stroke="none"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/></svg>';
 
+  /* THE DISASTER SWIMMER HAS NO DIAL (owner, 2026-08-16: "when swimming in nat
+     disaster I don't want that meter thing").
+
+     Survival mode already prints the air tank as a BAR: systems/survivalhud.js
+     turns the STAMINA bar blue-then-red and feeds it the same P.breath the
+     gauge was reading, so the round instrument was a second copy of one number,
+     parked over the middle of the water. It stands down there.
+
+     CITY swimming keeps it, deliberately — nothing else in the city HUD reads
+     out breath, so on a phone the dial is the ONLY way to know how much air is
+     left, and deleting it outright would take that away from a mode the owner
+     was not talking about. */
+  const survSwim = () => !!(CBZ.game && CBZ.game.mode === "survival");
+  function dialOff(next) { return next === "mount" || (next === "swim" && survSwim()); }
+  function setDialOff(off) {
+    if (!dial) return;
+    const want = off ? "none" : "";
+    if (dial.style.display !== want) dial.style.display = want;
+  }
+
   function layout(next) {
     mode = next;
     clearHeld();
@@ -308,7 +328,7 @@
     if (!btnWrap) return;
     btnWrap.className = next === "drive" ? "tv-car" : "";
     if (auxWrap) { auxWrap.innerHTML = ""; lastPay = ""; lastAuxT = 0; }
-    if (!next) { btnWrap.innerHTML = ""; ammoEl = null; resetTiltCenter(); if (dial) dial.style.display = ""; return; }
+    if (!next) { btnWrap.innerHTML = ""; ammoEl = null; resetTiltCenter(); setDialOff(false); return; }
     // #tvBtns is column-REVERSE: the FIRST button here sits at the BOTTOM,
     // nearest the resting thumb — so the big primary hold goes first.
     const FIRE_BTN = '<button type="button" id="tvFire" class="tvbtn tv-fire" style="display:none">' + FIRE_SVG + '<span id="tvAmmo" class="tvAmmo"></span></button>';
@@ -407,8 +427,9 @@
     layoutAux(next);
     // The dial paints per CONTEXT and a mount publishes no speed, so rather than
     // leave the previous context's needle frozen on screen (a gauge that lies is
-    // worse than no gauge) the instrument stands down for the saddle.
-    if (dial) dial.style.display = (next === "mount") ? "none" : "";
+    // worse than no gauge) the instrument stands down for the saddle — and for
+    // the survival swimmer (see dialOff).
+    setDialOff(dialOff(next));
     lastSpeed = -1; lastSub = "";   // force a dial repaint for the new context
   }
 
@@ -817,6 +838,12 @@
       const key = Math.round(kmh), sub = isTank() ? "TANK" : "ARMOR";
       if (key !== lastSpeed || sub !== lastSub) { lastSpeed = key; lastSub = sub; drawDial(kmh, 120, "km/h", sub, false); }
     } else if (mode === "swim") {
+      // Survival's swimmer reads its air off the bar, not off a gauge. Re-checked
+      // here as well as at layout() because the match mode can change under a
+      // context that never re-lays out.
+      const off = survSwim();
+      setDialOff(off);
+      if (off) return;
       // Underwater the number that matters is air. Seconds left on the dial,
       // warning at the same 30% swim.js's own HUD threshold uses; the sub-line
       // says DIVING while the head is actually under so the gauge explains
