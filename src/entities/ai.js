@@ -713,6 +713,25 @@
     return job.label || "Gang job";
   }
 
+  // The job in a MOUTH, not in a menu. `job.label` ("Run package") is objective-
+  // readout text; splicing it into a sentence produced "has run package for the
+  // Reds" and "«gang» job accepted: Run package." — a system talking through a
+  // person. These two give speech surfaces something a human can actually say.
+  function jobNoun(job) {
+    if (!job) return "piece of work";
+    if (job.type === "rivalTurf") return "turf hold";
+    if (job.type === "delivery") return "package run";
+    if (job.type === "lookoutShift") return "lookout shift";
+    return "piece of work";
+  }
+  function jobPitch(job) {
+    if (!job) return "Got work if you want it.";
+    if (job.type === "rivalTurf") return `We need a body standing on ${job.targetName}.`;
+    if (job.type === "delivery") return `A package needs to reach the ${job.targetName}.`;
+    if (job.type === "lookoutShift") return `We need eyes around ${job.targetName} for a stretch.`;
+    return "Got work if you want it.";
+  }
+
   function startGangJob(job, actor) {
     if (!job || job.gang < 0) return { ok: false, msg: "No job available." };
     job.t = job.t || 45;
@@ -728,7 +747,13 @@
       if (actor.gang >= 0) addGangStanding(actor.gang, 2);
     }
     CBZ.setObjective && CBZ.setObjective(jobObjective(job));
-    return { ok: true, msg: `${gangName(job.gang)} job accepted: ${job.label}.` };
+    // The handoff is the giver's words. The objective readout above carries the
+    // mechanics; nobody in a prison says "job accepted".
+    const sendoff = job.type === "delivery" ? `Get it to the ${job.targetName}. Walk, don't run.`
+      : job.type === "rivalTurf" ? `Go stand on ${job.targetName} and stay standing. They'll feel it.`
+      : job.type === "lookoutShift" ? `Post up around ${job.targetName}. Whistle if a uniform moves.`
+      : "The work's yours now. See it done.";
+    return { ok: true, msg: sendoff };
   }
 
   // THE MOUTH A JOB SPEAKS THROUGH. The man who gave it to you if he is alive
@@ -1185,7 +1210,7 @@
     if (kind === "recantOffer") return `${name} can walk back their report for ${cost} cigs.`;
     if (kind === "debtCollect") return `${name} says ${gangName(n.gang)} want ${cost} cigs on your debt.`;
     if (kind === "buyItem") return `${name} wants to buy your ${extra.item || cost}.`;
-    if (kind === "gangJob") return `${name} has ${extra.job ? extra.job.label.toLowerCase() : "work"} for ${gangName(n.gang)}.`;
+    if (kind === "gangJob") return `${name} has ${extra.job ? `a ${jobNoun(extra.job)}` : "work"} for ${gangName(n.gang)}.`;
     if (kind === "gangParley") {
       if (extra.parleyMode === "recruit") return `${name} wants a sit-down about joining ${gangName(n.gang)}.`;
       if (extra.parleyMode === "work") return `${name} wants to talk crew work for ${gangName(n.gang)}.`;
@@ -1865,7 +1890,7 @@
     if (g.gangJob) {
       const job = g.gangJob;
       const remain = Math.ceil(job.t || 0);
-      if (n.gang === job.gang) return `${who}: Finish ${job.label.toLowerCase()} and ${gangName(job.gang)} cover gets stronger. ${remain}s left.`;
+      if (n.gang === job.gang) return `${who}: Finish the ${jobNoun(job)} and ${gangName(job.gang)} cover gets stronger. You've got ${remain} seconds.`;
       if (n.gang === job.rival) return `${who}: That job crosses ${gangName(n.gang)}. Expect pressure unless you pay or scare someone off.`;
       return `${who}: Jobs are how gangs decide if you are useful or just noise.`;
     }
@@ -1944,8 +1969,8 @@
     }
 
     if (suspect && p.snitch > 0.48 && d < 12 && rng() < (complaints > 25 ? 0.055 : 0.034)) {
-      const gangName = suspect.gang >= 0 ? gangName(suspect.gang) : "someone";
-      startApproach(n, "copTip", 0, { suspect, msg: `${n.data.name.replace(/^the |^a |^an /, "")} points you toward ${gangName} trouble.` });
+      const crew = suspect.gang >= 0 ? gangName(suspect.gang) : "someone";
+      startApproach(n, "copTip", 0, { suspect, msg: `${n.data.name.replace(/^the |^a |^an /, "")} points you toward ${crew} trouble.` });
       return true;
     }
 
@@ -4393,11 +4418,11 @@
       if (a.kind === "stickUp") return { ok: true, msg: `${who}: ${a.cost} cigs and nobody checks those loud pockets. Refuse and I take my chances.` };
       if (a.kind === "diversion") return { ok: true, msg: `${who}: I make noise near a guard. You move while they look away.` };
       if (a.kind === "buyItem") return { ok: true, msg: `${who}: ${a.price} cigs for your ${a.item}. Clean trade, no questions.` };
-      if (a.kind === "gangJob") return { ok: true, msg: `${who}: ${jobObjective(a.job)} Pay is ${a.job ? a.job.reward : 5} cigs, plus respect.` };
+      if (a.kind === "gangJob") return { ok: true, msg: `${who}: ${jobPitch(a.job)} Pay is ${a.job ? a.job.reward : 5} cigs, plus respect.` };
       if (a.kind === "gangParley") {
         if (a.parleyMode === "recruit") return { ok: true, msg: `${who}: join ${gangName(n.gang)} and your problems become crew business.` };
         if (a.parleyMode === "work") return { ok: true, msg: `${who}: ${gangName(n.gang)} can put you to work, cover heat, or call in favors if you respect the chain.` };
-        if (a.parleyMode === "truce") return { ok: true, msg: `${who}: ${a.cost || 0} cigs settles the disrespect. Current tab ${gangDebt(n.gang)}.` };
+        if (a.parleyMode === "truce") return { ok: true, msg: `${who}: ${a.cost || 0} cigs settles the disrespect. Your tab with us is ${gangDebt(n.gang)}.` };
         return { ok: true, msg: `${who}: ${gangName(n.gang)} are watching your next move. Respect buys room; threats buy trouble.` };
       }
       if (a.kind === "stashCover") return { ok: true, msg: `${who}: rich pockets make noise. Pay ${a.cost} and I tell thieves, buyers, and talkers you're dry for a while.` };
@@ -4434,8 +4459,13 @@
           clearApproach(n);
           return { ok: true, msg: `${who}: debt is a dinner bell. Gang collectors hear it first.` };
         }
+        if (a.repKind === "heat") {
+          clearApproach(n);
+          return { ok: true, msg: `${who}: guards are asking about you by name. Give them nothing to look at.` };
+        }
         clearApproach(n);
-        return { ok: true, msg: `${who}: the block buzz is ${buzz.kind}. People act on it.` };
+        // never speak the raw buzz token ("the block buzz is heat")
+        return { ok: true, msg: `${who}: your name is moving around the block. People act on what they hear.` };
       }
       if (a.kind === "rumor") {
         const msg = rumorLine(n);
@@ -4450,7 +4480,8 @@
       if (a.kind === "copTaunt") return { ok: true, msg: `${who}: badge looks heavy. You actually going to use it?` };
       clearApproach(n);
       addGangStanding(n.gang, n.gang >= 0 ? 2 : 0);
-      return { ok: true, msg: n.gang >= 0 ? `${n.data.tip || n.data.talk[(rng() * n.data.talk.length) | 0] || "Keep your eyes open."} ${gangName(n.gang)} respect +2.` : (n.data.tip || n.data.talk[(rng() * n.data.talk.length) | 0] || "Keep your eyes open.") };
+      // the +2 standing still lands above; it is felt, not read out loud
+      return { ok: true, msg: n.data.tip || n.data.talk[(rng() * n.data.talk.length) | 0] || "Keep your eyes open." };
     }
 
     if (action === "accept") {
@@ -4479,7 +4510,7 @@
           addGangProtection(n.gang, 18);
           n.playerTrust = Math.min(14, (n.playerTrust || 0) + 2);
           clearApproach(n);
-          return { ok: true, msg: `${who} marks you as useful. ${gangName(n.gang)} cover you while the current job stays active.` };
+          return { ok: true, msg: `${who} marks you as useful. ${gangName(n.gang)} cover you while you're on the job.` };
         }
         if (mode === "truce" && a.cost > 0) return { ok: false, msg: `${who} wants payment, not a handshake.` };
         addGangStanding(n.gang, mode === "truce" ? 7 : 3);
@@ -5170,7 +5201,7 @@
         addGangDebt(gang, Math.max(3, a.cost || 3));
         addGangStanding(gang, -10);
         if (gangStanding(gang) < -10 || gangDebt(gang) > 10) provokeGang(n, 5);
-        return { ok: false, msg: `${gangName(gang)} put interest on the dues. Debt ${gangDebt(gang)}.` };
+        return { ok: false, msg: `${gangName(gang)} put interest on the dues — your tab's at ${gangDebt(gang)} now.` };
       }
       if (a.kind === "stickUp") {
         const gang = n.gang;
@@ -5277,7 +5308,7 @@
         addGangDebt(gang, Math.max(3, a.cost || 4));
         addGangStanding(gang, -8);
         provokeGang(n, 7);
-        return { ok: false, msg: `${gangName(gang)} add interest. Debt ${gangDebt(gang)}.` };
+        return { ok: false, msg: `${gangName(gang)} add interest. Your tab's at ${gangDebt(gang)} now.` };
       }
       if (a.kind === "snitchThreat") {
         const heat = a.heat || a.cost * 9;
@@ -5342,7 +5373,7 @@
         addGangDebt(gang, mode === "truce" ? Math.max(4, a.cost || 4) : 2);
         addGangStanding(gang, mode === "recruit" ? -6 : -9);
         if (mode === "truce" || gangStanding(gang) < -16) provokeGang(n, 6 + (mode === "truce" ? 3 : 0));
-        return { ok: false, msg: mode === "recruit" ? `${gangName(gang)} mark you as outside the crew.` : `${gangName(gang)} leave with a worse opinion of you. Debt ${gangDebt(gang)}.` };
+        return { ok: false, msg: mode === "recruit" ? `${gangName(gang)} mark you as outside the crew.` : `${gangName(gang)} leave with a worse opinion of you, and your tab creeps to ${gangDebt(gang)}.` };
       }
       if (a.kind === "jobThreat") {
         const gang = n.gang;
@@ -5402,7 +5433,7 @@
         addGangDebt(gang, Math.max(2, Math.ceil((a.cost || 3) * 0.8)));
         addGangStanding(gang, -6);
         if (gangStanding(gang) < -12 || gangDebt(gang) > 12) provokeGang(n, 5);
-        return { ok: false, msg: `${gangName(gang)} mark dues unpaid. Debt ${gangDebt(gang)}.` };
+        return { ok: false, msg: `${gangName(gang)} chalk the unpaid dues onto your tab — ${gangDebt(gang)} now.` };
       }
       if (a.kind === "stickUp") {
         const gang = n.gang;
@@ -5445,7 +5476,7 @@
         n.playerGrudge = Math.min(12, (n.playerGrudge || 0) + 1);
         CBZ.game.racketDebt = Math.min(60, (CBZ.game.racketDebt || 0) + 2);
         addBuzz("badge", 5, "refused-racket-cover");
-        return { ok: false, msg: `${who} leaves the bent-cop tab alone. Debt ${Math.ceil(CBZ.game.racketDebt || 0)}.` };
+        return { ok: false, msg: `${who} leaves the bent-cop tab alone. It sits at ${Math.ceil(CBZ.game.racketDebt || 0)}.` };
       }
       if (a.kind === "favor") {
         clearApproach(n);
