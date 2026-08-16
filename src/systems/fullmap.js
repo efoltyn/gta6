@@ -2051,6 +2051,7 @@
         if (A.annex) drawPoiGlyphs(A.annex.lots, p);
       }
       if (!ICONS_V2()) drawRegionNames(p, A, settlementNames);
+      drawWaterNames(p, A);
       if (!MAP_V2()) { drawClimbMarks(p, A); drawBoardTicks(p); }
     });
   }
@@ -2090,6 +2091,44 @@
   //      with the zoom (a 14px name became 168px at 12x), so with MAP_ICONS_V2
   //      they draw LIVE at a fixed pixel size and tier by zoom — a region too
   //      small on screen to carry its name does not get one. ---------------
+  /* ---- NAMED WATER ON THE CHART -----------------------------------------
+     A river you cannot find is a river nobody uses. Every landmass on this
+     map has carried its name since MAP_V2; the water never has, because until
+     city/river.js there was no named water to draw — the sea is the sea and
+     the bay ring is unlabelled by design.
+
+     GENERAL, not river-specific: anything registered through
+     CBZ.registerCityWaterBody with a `name` gets it, so the lake a future
+     biome registers is labelled by this same pass with no edit here. Routed
+     through mapLabel like every other permanent word on the chart, so it
+     declutters against the region and town names and CBZ.mapAudit() counts
+     it rather than it being a word the audit cannot see. */
+  function drawWaterNames(p, A) {
+    const list = (A && A.waterBodies) || [];
+    for (let i = 0; i < list.length; i++) {
+      const b = list[i];
+      if (!b || !b.name || b.mapLabel === false) continue;
+      let x, z;
+      if (b.kind === "path" && b.pts && b.pts.length > 2) {
+        // a river is named at its MIDPOINT — the one place on a 9 km channel
+        // that is unambiguously the river rather than its mouth or its head.
+        // Deliberately NOT rotated along the bank: mapLabel's declutter works
+        // in axis-aligned boxes, so a rotated word would reserve the wrong
+        // rectangle and start overlapping the town names it is measured
+        // against. A horizontal name that declutters beats a tilted one that
+        // collides.
+        x = b.pts[(b.pts.length / 2) | 0].x; z = b.pts[(b.pts.length / 2) | 0].z;
+      } else if (b.kind === "circle") { x = b.cx; z = b.cz; }
+      else if (b.minX != null) { x = (b.minX + b.maxX) / 2; z = (b.minZ + b.maxZ) / 2; }
+      else continue;
+      const nx = p.x(x), ny = p.z(z);
+      if (nx < -60 || nx > W + 60 || ny < -40 || ny > H + 40) continue;
+      mapLabel(b.name, nx, ny, {
+        size: 11, fill: "rgba(150,215,240,.88)", haloC: "rgba(0,20,35,.75)",
+      });
+    }
+  }
+
   function drawRegionNames(p, A, settlementNames) {
     const cand = [];
     const seen = new Set();
@@ -2254,6 +2293,7 @@
       drawSettlementsLive(p);        // named towns (labels collision-avoided)
     }
     if (ICONS_V2()) { reserveIconBoxes(); drawRegionNames(p, A, settlementNameSet()); }
+    drawWaterNames(p, A);
     if (MAP_V2() && (map.view.z >= 2.6 || (map._cursor && !ICONS_V2()))) { drawClimbMarks(p, A); drawBoardTicks(p); }
     if (detail && !ICONS_V2()) drawCityLabels(p, A);
     if (detail) drawRentedBoards(p);
