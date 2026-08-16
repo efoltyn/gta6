@@ -23,7 +23,29 @@
    the arena inside the call). Both sides run the same seed, the same tripods,
    the same simulated seconds. */
 
+/* ORDER IS LOAD-BEARING (iter-1 lesson, measured with a raycast probe): the
+   page boots STRAIGHT INTO SURVIVAL and shoots the island FIRST, because
+   booting the city first builds the continent underlay and the world sea at
+   y≈0 across the whole map — global meshes state.js never hides — and the
+   island's shore (0 → -1.9) and its own ocean (-0.8) are simply UNDER them:
+   iter-1's island frames photographed the empty city sea. Survival-first is
+   the tsunami-stages boot, and switching city-ward AFTER is safe: the city
+   builds on demand and nothing of the island is in its frame. */
 const subjects = [
+  {
+    id: "island-shore",
+    label: "Natural Disaster — the island coast",
+    focus: "The survival island's south shore. BEFORE: an 8 m sand stripe painted flat at the grass edge. AFTER: a 26 m shore — berm, foreshore, and a waterline that belongs to the sea. The band is walkable the whole way down; what you see is the ground the physics uses.",
+    world: "survival", settleSecs: 3.0,
+    shot: { kind: "island", alt: 36, back: 96, aimIn: 16 },
+  },
+  {
+    id: "island-waterline",
+    label: "Natural Disaster — the walk into the water",
+    focus: "Low on the shore, looking along the coast's curve. The profile descends THROUGH the waterline — wadable foreshore, not a cliff with sand painted on it — and the wet band is live: the sea's breathing edge wets it instantly and it dries slowly behind.",
+    world: "survival", settleSecs: 2.0,
+    shot: { kind: "island-low", theta: 0.85, alt: 3.4, out: 30 },
+  },
   {
     id: "city-panorama",
     label: "Gang City — the whole shore",
@@ -44,20 +66,6 @@ const subjects = [
     focus: "From the boardwalk line looking seaward. BEFORE: one flat quad in one hex. AFTER: low wind dunes, mottled grain, crests bleaching and hollows shading — a surface, not a paint fill. The activity band by the umbrellas stays flat so towels and loungers still sit true.",
     world: "city", settleSecs: 0.6,
     shot: { kind: "city-back", atFrac: 0.58, alt: 4.6 },
-  },
-  {
-    id: "island-shore",
-    label: "Natural Disaster — the island coast",
-    focus: "The survival island's south shore. BEFORE: an 8 m sand stripe painted flat at the grass edge. AFTER: a 26 m shore — berm, foreshore, and a waterline that belongs to the sea. The band is walkable the whole way down; what you see is the ground the physics uses.",
-    world: "survival", settleSecs: 3.0,
-    shot: { kind: "island", alt: 42, back: 128, aimIn: 14 },
-  },
-  {
-    id: "island-waterline",
-    label: "Natural Disaster — the walk into the water",
-    focus: "Low on the shore, looking along the coast's curve. The profile descends THROUGH the waterline — wadable foreshore, not a cliff with sand painted on it — and the wet band is live: the sea's breathing edge wets it instantly and it dries slowly behind.",
-    world: "survival", settleSecs: 2.0,
-    shot: { kind: "island-low", theta: 0.85, alt: 3.4, out: 30 },
   },
 ];
 
@@ -84,13 +92,16 @@ async function stageBeach(input) {
 
   let S = window.__beachSeq;
   if (!S) {
-    // ---- one-time: boot the real game into city free play ----------------
+    // ---- one-time: boot the real game STRAIGHT into survival free play ----
+    // (see the ORDER IS LOAD-BEARING note above the subject list)
     const booted = await until(
-      () => CBZ.game && CBZ.stepSim && document.getElementById("playBtn"),
+      () => CBZ.game && CBZ.stepSim && document.getElementById("playBtn") &&
+        document.querySelector('[data-mode="survival"]'),
       300000
     );
     if (!booted) return { ok: false, err: "never booted" };
     if (CBZ.CONFIG) CBZ.CONFIG.CITY_HITMAN_CAMPAIGN = false;
+    document.querySelector('[data-mode="survival"]').click();
     const playing = await until(() => {
       if (CBZ.game.state === "playing") return true;
       const button = document.getElementById("playBtn");
@@ -116,13 +127,18 @@ async function stageBeach(input) {
 
   const subject = input.subject;
 
-  // ---- be in the right WORLD (city boots by default; survival is a call) --
+  // ---- be in the right WORLD (survival boots first; the city is a call) ---
   if (subject.world === "survival" && CBZ.game.mode !== "survival") {
     CBZ.setMode("survival");
     const up = await until(() => CBZ.game.mode === "survival" && CBZ.surv && CBZ.surv.arena, 120000, 200);
     if (!up) return { ok: false, err: "survival never built" };
   }
-  if (subject.world === "city" && CBZ.game.mode !== "city") CBZ.setMode("city");
+  if (subject.world === "city" && CBZ.game.mode !== "city") {
+    CBZ.setMode("city");
+    const up = await until(() => CBZ.game.mode === "city" && CBZ.city && CBZ.city.arena &&
+      CBZ.city.arena.shore, 240000, 300);
+    if (!up) return { ok: false, err: "city never built" };
+  }
 
   // park the player out of frame-critical spots and keep him alive
   if (CBZ.player && CBZ.player.pos && subject.world === "survival" && CBZ.surv && CBZ.surv.arena) {
@@ -225,7 +241,7 @@ async function stageBeach(input) {
 export default {
   id: "beach-shores",
   title: "The Beaches: Gang City + Natural Disaster",
-  description: "Both coasts, before and after BEACH_V2/SURV_BEACH_V2, with zero props added: Gang City's south shore grows 100 → 160 m and its sand becomes a vertex-coloured surface (micro-relief, grain, wrack line, damp band, higher-resolution swash); the survival island's 8 m painted stripe becomes a 26 m walkable shore with a berm, a foreshore that descends through the waterline, and a live wet line the tsunami's drawdown strands. Flag A/B by default: both sides are THIS checkout, the before side just boots with the flags off.",
+  description: "Both coasts, before and after BEACH_V2/SURV_BEACH_V2, with zero props added: the survival island's 8 m painted stripe becomes a 26 m walkable shore with a berm, a foreshore that descends through the waterline, and a live wet line the tsunami's drawdown strands; Gang City's south shore grows 100 → 160 m and its sand becomes a vertex-coloured surface (micro-relief, grain, wrack line, damp band, higher-resolution swash). Island first, city second — the boot order that keeps the city's global sea/underlay from burying the island. Flag A/B by default: both sides are THIS checkout, the before side just boots with the flags off.",
   defaultBefore: "local",
   beforeParams: { cfg_BEACH_V2: 0, cfg_SURV_BEACH_V2: 0 },
   beforeLabel: "BEFORE · FLAGS OFF",
