@@ -529,6 +529,22 @@ async function stageNpcTactics(input) {
       return { tuckedM: Number(Math.hypot(hurt.pos.x - hx, hurt.pos.z - hz).toFixed(1)) };
     };
   }
+  if (subject.id === "cops-standoff") {
+    // temporary trigger-chain diagnostics for officer zero (metadata-only)
+    S.extra = () => {
+      const c0 = S.cast[0];
+      if (!c0 || c0.dead) return {};
+      return {
+        dShootCD: Number((c0.shootCD || 0).toFixed(2)),
+        dSees: c0.sees ? 1 : 0,
+        dSpeed: Number((c0.speed || 0).toFixed(2)),
+        dHold: Number((c0._holdFireT || 0).toFixed(2)),
+        dPlant: c0._iqPlant ? 1 : 0,
+        dDist: Number(Math.hypot(c0.pos.x - M.x, c0.pos.z - M.z).toFixed(1)),
+        dHasTarget: c0.curTarget ? 1 : 0,
+      };
+    };
+  }
   if (subject.id === "wall-goal" && wallRef) {
     const shooter = S.cast[0];
     let hugFrames = 0, sampFrames = 0;
