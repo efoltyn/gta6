@@ -111,18 +111,22 @@ async function stageVipWardrobe(input) {
     overlay.innerHTML = "<div data-scrim></div><div data-side></div><div data-name></div>" +
       "<div data-focus></div><div data-read></div><div data-source></div>";
     document.body.appendChild(overlay);
-    // STUDIO MARK: the street outside the FIRST shop with a door — derived
-    // from the arena, so the same seed gives both sides the same kerb. The
-    // player's own spawn (npc-gestures' mark) can be INSIDE the campaign
-    // motel on this seed, which photographed the row against an interior.
+    // STUDIO MARK: a CORE-district sidewalk point drawn with a SEEDED rng
+    // (vips.js corePoint's own recipe) — deterministic per seed, so both
+    // sides shoot the same downtown kerb. Two rejected marks taught this:
+    // the player's own spawn can be INSIDE the campaign motel, and "the
+    // first shopLot with a door" turned out to live at the airport — both
+    // photographed a landscape instead of the row.
     let mx = CBZ.player.pos.x, mz = CBZ.player.pos.z;
     const A0 = CBZ.city && CBZ.city.arena;
-    if (A0 && A0.shopLots) {
-      for (const l of A0.shopLots) {
-        const d = l && l.building && l.building.door;
-        if (!d) continue;
-        mx = d.x - (d.nx || 0) * 7; mz = d.z - (d.nz || 0) * 7;   // 7 m out the door = the sidewalk
-        break;
+    if (A0 && (A0.weightedSidewalkPoint || A0.randomSidewalkPoint)) {
+      let seed0 = 424243;
+      const mrng = () => { seed0 = (seed0 * 1103515245 + 12345) & 0x7fffffff; return seed0 / 0x7fffffff; };
+      for (let t = 0; t < 24; t++) {
+        const p0 = A0.weightedSidewalkPoint ? A0.weightedSidewalkPoint(mrng) : A0.randomSidewalkPoint();
+        if (!p0) continue;
+        const d0 = A0.districtAt ? A0.districtAt(p0.x, p0.z) : null;
+        if (!d0 || d0.kind === "core" || d0.kind === "commercial") { mx = p0.x; mz = p0.z; break; }
       }
     }
     S = window.__vipWard = {
