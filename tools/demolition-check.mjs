@@ -15,7 +15,7 @@ const OUTDIR = ROOT + "/tools/shots";
 // tools/shots/ is gitignored, so on a FRESH CLONE it does not exist and the
 // screenshot write ENOENTs AFTER the whole run has already passed — which is
 // how this cost a green pre-deploy render gate. Create it, like touch-hud-check does.
-await mkdir(path.dirname(OUT), { recursive: true });
+await mkdir(OUTDIR, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const port = 8930 + Math.floor(Math.random() * 9);
 const server = spawn("python3", [path.join(ROOT, "tools/devserver.py")], { env: { ...process.env, PORT: String(port) }, stdio: "ignore" });

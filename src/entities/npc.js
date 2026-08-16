@@ -91,7 +91,15 @@
       s === "pressurePlayer" || s === "tailPlayer" || s === "interceptThreat" || s === "diversion");
   }
 
-  function recoverStuck(n, dt, speed, gp) {
+  function recoverStuck(n, dt, speed, gp, routed) {
+    /* NOT WHILE A ROUTE OWNS HIM. `pickTarget` samples his `region`, and at
+       lights-out systems/prisonschedule.js pins that region to a 2.2 m box
+       around the mattress — which is on the far side of a cell wall from a man
+       still in the corridor, so the "recovery" aims him through it and undoes
+       the leg he is walking. A man who is genuinely stuck on a route is caught
+       by that file's own stall detector, which gives his rack away rather than
+       jiggling him at a wall. */
+    if (routed) { n._lastX = gp.x; n._lastZ = gp.z; n._stuckT = 0; return; }
     if (n._lastX != null) {
       const dx = gp.x - n._lastX, dz = gp.z - n._lastZ;
       const tx = n.target.x - gp.x, tz = n.target.z - gp.z;
@@ -248,9 +256,18 @@
     // patch of wing floor to stand count on (`_muster`); the brightness test
     // stays as the fallback for a build where that file is absent.
     const SCH = CBZ.prisonSchedule;
+    const CFG2 = CBZ.CONFIG || {};
+    const V2 = CFG2.PRISON_LIGHTSOUT_V2 !== false;
     const schedIn = SCH && SCH.enabled() ? SCH.indoors() : (CBZ.nightAmount || 0) > 0.72;
     const hasHousing = !!(n._muster || n._cellIdx != null);
-    const curfew = !!(CBZ.CONFIG && CBZ.CONFIG.NPC_SCHEDULES && n.role === "inmate" && hasHousing && !imp &&
+    /* A BED IS OWED TO A MAN, NOT TO HIS TRADE — the third file to learn it.
+       systems/prisonrest.js's §2 was widened to the factory predicate on
+       2026-08-15 and this gate was not, so the wing's dealer, its merchants
+       and its thieves were exempt from curfew and stood in the yard all night
+       with racks reserved for them. `kind` is stamped at line 26 on every body
+       this factory makes; the old `role` test stays as an OR. */
+    const convict = V2 ? (n.kind === "inmate" || n.role === "inmate") : n.role === "inmate";
+    const curfew = !!(CFG2.NPC_SCHEDULES && convict && hasHousing && !imp &&
         schedIn &&
         (!n.aiState || n.aiState === "wander" || n.aiState === "socialize"));
     if (curfew) {
@@ -260,25 +277,49 @@
         n._bedX = m ? m.x : (r ? r[0] + 0.5 + Math.random() * Math.max(1, r[1] - r[0] - 1) : gp.x);
         n._bedZ = m ? m.z : (r ? r[2] + 0.6 + Math.random() * 1.6 : gp.z);   // low-z edge = the cell-block side
       }
-      // A MAN WALKS THROUGH HIS UNIT'S DOOR, NOT THROUGH ITS wall. Cell-house
-      // beds route through the x[-3,3] throat; a south-dorm record publishes
-      // its own north entrance. Both destinations came from the same bed claim.
-      const outside = n._muster && SCH && (SCH.inAssignedHousing
-        ? !SCH.inAssignedHousing(n, gp.x, gp.z, -0.5)
-        : !SCH.inBlock(gp.x, gp.z, -0.5));
-      if (outside) {
-        const route = n._muster.route;
-        n.target.set(route ? route.x : 0, 0, route ? route.z : -9.8);
+      /* A MAN WALKS THROUGH HIS UNIT'S DOOR, NOT THROUGH ITS WALL — and one
+         door is not enough, because this mover is a straight line to `target`
+         and systems/actorcollide.js is explicit that it will bump a wall the
+         target is behind. systems/prisonschedule.js hands over an ORDERED
+         ROUTE (`_muster.way`) authored off the wing's own records: the man's
+         own lane across the throat, the cross-passage, his gallery or the
+         centre hall, his own doorway, and only then the mattress. He walks the
+         first leg he has not reached; the index is sticky so a body shoved
+         backwards does not re-walk the compound. */
+      const way = V2 && n._muster ? n._muster.way : null;
+      if (way && way.length) {
+        let wi = n._wayI | 0;
+        if (wi >= way.length) wi = way.length - 1;
+        while (wi < way.length - 1) {
+          const w = way[wi];
+          const wdx = w.x - gp.x, wdz = w.z - gp.z;
+          if (wdx * wdx + wdz * wdz > 1.1 * 1.1) break;      // not on this leg yet
+          wi++;
+        }
+        n._wayI = wi;
+        const w = way[wi];
+        n.target.set(w.x, 0, w.z);
+        const ldx = w.x - gp.x, ldz = w.z - gp.z;
+        // only the LAST leg settles him; pausing on a corridor leg is a plug
+        if (wi === way.length - 1 && ldx * ldx + ldz * ldz < 1.2) n.pause = Math.max(n.pause || 0, 2.0);
+      } else {
+        const outside = n._muster && SCH && (SCH.inAssignedHousing
+          ? !SCH.inAssignedHousing(n, gp.x, gp.z, -0.5)
+          : !SCH.inBlock(gp.x, gp.z, -0.5));
+        if (outside) {
+          const route = n._muster.route;
+          n.target.set(route ? route.x : 0, 0, route ? route.z : -9.8);
+        }
+        else n.target.set(n._bedX, 0, n._bedZ);
+        const bdx = n.target.x - gp.x, bdz = n.target.z - gp.z;
+        if (!outside && bdx * bdx + bdz * bdz < 1.2) n.pause = Math.max(n.pause || 0, 2.0); // settled in for the night
       }
-      else n.target.set(n._bedX, 0, n._bedZ);
-      const bdx = n.target.x - gp.x, bdz = n.target.z - gp.z;
-      if (!outside && bdx * bdx + bdz * bdz < 1.2) n.pause = Math.max(n.pause || 0, 2.0); // settled in for the night
     } else if (n._bedX != null && !schedIn) {
       n._bedX = n._bedZ = null;       // dawn — back to the day routine
     }
 
     speed = purposefulRoutine(n, dt, speed, gp, imp, curfew);
-    recoverStuck(n, dt, speed, gp);
+    recoverStuck(n, dt, speed, gp, curfew && V2 && !!(n._muster && n._muster.way));
 
     if (n.pause > 0) { n.pause -= dt; if (near) animChar(n.char, 0, dt); }
     else {
@@ -531,7 +572,7 @@
 
      JAIL_CROWD is the same kind of body as MASS_CROWD — an anonymous inmate
      with no name, no history and no part in the story — so it answers to the
-     same fact, and for the same reason: the wing has thirteen cells, and the
+     same fact, and for the same reason: the wing has twenty-five cells, and the
      count that put ~207 men in front of them could not see that. Load order
      makes it exact (index.html: cellblock 456 -> this file 535): the wing is
      built, the named ROSTER above is already on the floor, and what is left is

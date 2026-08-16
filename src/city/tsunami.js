@@ -500,6 +500,8 @@
       // the debris does NOT vanish with the water — it is left exactly where
       // the drain put it, which is the entire aftermath
       if (ev.debris) { ev.debris.strandAll(); ev.debris.dispose(); }
+      // an event cancelled mid-stand must not leave the world muted
+      if (CBZ.audioHush) CBZ.audioHush(false);
     }
     ev = null;
     if (CBZ.waterSurgeSet) CBZ.waterSurgeSet(0);
@@ -590,23 +592,60 @@
     return ev.debris;
   }
 
-  // pick up whatever the front has just reached
+  // pick up whatever the front has just reached: parked cars, the beach's
+  // palms, and the light street furniture — every one a real world object
   function entrain(dt) {
     const field = debrisEnsure(); if (!field) return;
     ev.takeCd -= dt;
     if (ev.takeCd > 0) return;
     ev.takeCd = 0.25;
-    const P = CBZ.player; if (!P || !P.pos) return;
-    const cars = CBZ.cityCars;
-    if (!cars || !CBZ.cityFloodDepthAt) return;
+    const P = CBZ.player; if (!P || !P.pos || !CBZ.cityFloodDepthAt) return;
     let taken = 0;
-    for (let i = 0; i < cars.length && taken < 2; i++) {
+    const cars = CBZ.cityCars;
+    if (cars) for (let i = 0; i < cars.length && taken < 2; i++) {
       const c = cars[i];
       if (!c || c.player || c.dead || c._tsuTaken || !c.group || !c.pos) continue;
       if (Math.abs(c.pos.x - P.pos.x) > 230 || Math.abs(c.pos.z - P.pos.z) > 230) continue;
       if (CBZ.cityFloodDepthAt(c.pos.x, c.pos.z) < 0.7) continue;
       c._tsuTaken = 1; c.dead = true; c.abandoned = true; c.ai = false; c.v = 0; c.vx = 0; c.vz = 0;
       field.take(c.group, c.pos.x, c.pos.z, "car");
+      taken++;
+    }
+    /* THE PALMS GO WITH THE BEACH. They live in an instanced pool, so the
+       beach sells them out of it one at a time (city/beach.js
+       cityBeachPalms): the instance disappears, its trunk collider goes with
+       it, and the identical palm — same geometry, same pooled material —
+       re-enters the world as a whole tree rolling in the flow. */
+    const PB = CBZ.cityBeachPalms ? CBZ.cityBeachPalms() : null;
+    if (PB && PB.list) for (let i = 0; i < PB.list.length && taken < 2; i++) {
+      const p = PB.list[i];
+      if (!p || p._taken) continue;
+      if (Math.abs(p.x - P.pos.x) > 230 || Math.abs(p.z - P.pos.z) > 230) continue;
+      if (CBZ.cityFloodDepthAt(p.x, p.z) < 0.5) continue;
+      const t = PB.take(i);
+      if (t) { field.take(t.group, t.x, t.z, "log"); taken++; }
+    }
+    /* AND THE LIGHT STREET FURNITURE — bins, news boxes, cones: the things
+       that genuinely float, and the first junk every flood video is full of.
+       Marked `over` through the prop's own already-tipped flag (a prop the
+       water took can't be bullet-knocked twice), its bumper collider pulled,
+       the same real group handed to the flow. Bolted steel (meters,
+       mailboxes, hydrants) stays bolted. */
+    const SP = CBZ.cityStreetShootables ? CBZ.cityStreetShootables() : null;
+    if (SP) for (let i = 0; i < SP.length && taken < 3; i++) {
+      const s = SP[i];
+      if (!s || s.over || s._tsuTaken || !s.group) continue;
+      if (s.type !== "bin" && s.type !== "newsbox" && s.type !== "cone") continue;
+      if (Math.abs(s.x - P.pos.x) > 230 || Math.abs(s.z - P.pos.z) > 230) continue;
+      if (CBZ.cityFloodDepthAt(s.x, s.z) < 0.45) continue;
+      s._tsuTaken = 1; s.over = true;
+      if (CBZ.colliders) for (let c = CBZ.colliders.length - 1; c >= 0; c--) {
+        if (CBZ.colliders[c].ref !== s.group) continue;
+        CBZ.colliders.splice(c, 1);
+        if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+        break;
+      }
+      field.take(s.group, s.x, s.z, "panel");
       taken++;
     }
   }
@@ -778,9 +817,17 @@
        is already rising on its own curve — but it is the loudest thing the
        event does, and it happens exactly where the front's own gearing stalls
        (LANDFALL_U), so the sound and the shape can never disagree. */
+    // THE HELD BREATH: the front is crawling its last metres to the wall
+    // point — the world goes quiet, and stays quiet until the lip comes down
+    if (CBZ.CONFIG.TSU_SHOAL_V2 !== false && CBZ.audioHush && !ev.crashed &&
+        ev.phase === "surge" && ev.frontS >= -34 && ev.frontS < -10) {
+      CBZ.audioHush(true);
+    }
     if (!ev.crashed && CBZ.CONFIG.TSU_SHOAL_V2 !== false && ev.frontS >= -10 &&
         (ev.phase === "surge" || ev.phase === "hold")) {
       ev.crashed = true; ev.crashT = 0;
+      // the silence releases fast, so the break lands into it
+      if (CBZ.audioHush) CBZ.audioHush(false, { fade: 0.12 });
       const px = -ev.dz, pz = ev.dx;
       const fx = ev.cx + ev.dx * ev.frontS, fz = ev.cz + ev.dz * ev.frontS;
       if (CBZ.fx && CBZ.fx.blast) for (let i = -2; i <= 2; i++) {

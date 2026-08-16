@@ -6158,6 +6158,161 @@
   // per-ped local so the compensated value reaches every use below without
   // touching the body of the loop.
   if (CBZ.CONFIG.PED_BRAIN_STAGGER == null) CBZ.CONFIG.PED_BRAIN_STAGGER = true;
+
+  /* ============================================================
+     PED_SIM_BUDGET_MS — A DEADLINE ON THE CROWD'S DECISIONS, NOT ON THE CROWD.
+
+     THE MEASUREMENT (tools/probe-nuke-perf.mjs, seed 90210, city nuke at the
+     centroid). This updater costs 335 ms per simulated second on a calm street.
+     Panic spreads and it climbs through ~700 ms/s by s6-7. At s=28-30 — peak
+     simultaneous panic, before the fallout has finished killing everybody — it
+     measures 8,007 -> 10,432 ms per simulated second, with a worst SINGLE tick
+     of 4,070 ms. Every other updater in the game is sitting near 300 ms/s at
+     that exact moment (u:37 ~290, u:42 ~290, u:40.5 ~180, a:52 ~175). By s=33,
+     with most of the crowd dead, it falls back to 1,646 ms/s. That shape — a
+     hump that tracks the number of simultaneously ALIVE AND PANICKED bodies —
+     is the whole diagnosis: it is not the dying that is expensive, it is the
+     deciding. A dead ped `continue`s out of this loop in a dozen instructions.
+
+     WHERE THE COST ACTUALLY IS. Ranked, from reading every path this loop can
+     take at panic scale:
+
+       1. think() -> the `threatened` branch (:4947) -> fleeFrom (:5159).
+          fleeFrom is the single most expensive call in the file and it has NO
+          RATE GATE — unlike _groupT / _gangFearT / _microT, which the author
+          did gate, the flee recompute runs on EVERY think tick for EVERY
+          alarmed meek/wary body. One call is:
+            cityNav.indoorLotAt   — linear scan of every enclosing footprint
+            cityNav.nearestExit   — linear scan of EVERY door in the city for a
+                                    top-5, then up to 5x CBZ.clearLineOfFire,
+                                    and clearLineOfFire (los.js:108) is THREE
+                                    raycasts each (target probe + forward +
+                                    reverse). Up to FIFTEEN LOS raycasts.
+            cityNav.routeTo       — two more indoorLotAt scans, a doorFor scan
+                                    over every live door record, then the grid
+                                    route.
+          A panicked active ped thinks at stride 4 = 15 Hz. Hundreds of them
+          doing that is thousands of nav+LOS solves per second. This is the
+          8 seconds.
+       2. PED_BRAIN_STAGGER IS SWITCHED OFF BY THE VERY THING IT EXISTS FOR
+          (:6320). The far-band 1-in-3 skip exempts `p.alarmed > 0`, which was
+          right when "alarmed" meant one firefight across the street. A nuke
+          sets alarmed on the entire population (cityScare -> alarmed = 6), so
+          at s=28 the exemption covers everyone and the whole off-screen mass
+          reverts to full-rate loop entry and full-rate think cadence. The one
+          throttle we already had disables itself at the peak. Left ALONE here
+          on purpose (it is a behaviour contract for firefights at range) —
+          the budget below is what now holds that mass back.
+       3. The 4,070 ms TICK IS A CONVOY. Nothing in this loop is O(n^2) at
+          panic (the scan index routes group/mob, gang-fear and nearestActor
+          through bounded cell queries), so a 30x tick is not a different KIND
+          of work — it is the same work arriving all at once. Four synchronisers
+          stack in the blast frame: `_refugeT = 2.5` (:5221) is the ONLY gate in
+          this file with no rng jitter, so every body that took the refuge
+          branch in the detonation frame re-takes it on the same frame 2.5 s
+          later, and re-arms to 2.5 again — a convoy that never disperses;
+          `_rallyT = 6` (:5476, :5484) is likewise unjittered; cityScare's
+          `_scareUntil = now + 3400` (:5592) re-opens for the whole crowd on one
+          frame; and `p.slice` is 0..7 (:1250) against a far-tier `stride` of 20,
+          so the far crowd's thinks land on 8 of every 20 frames instead of
+          spreading over all 20. The budget below is the answer to all four at
+          once, because it does not care WHY the work bunched.
+
+     THE FIX IS THE ONE THIS REPO ALREADY WROTE. impactbus.js's
+     NUKE_DRAIN_BUDGET_MS bounds the nuclear drains with a per-frame deadline,
+     a rotating order and cursors that RESUME on the next frame. Nothing is
+     discarded there and nothing is discarded here: a deferral is arithmetically
+     the same event as a slow frame, which this loop already survives.
+
+     WHAT IS BUDGETED AND WHAT IS NOT. Everything a human eye can see stopping
+     runs EVERY frame for EVERY body regardless of the deadline: the timer
+     decrements that hold state (alarmed, ko, poseCower, npcHeat, deadT...),
+     movement integration and animation along the decision the body ALREADY
+     made (move()), the render LOD and spawn-hide handling, the phone-prop
+     stamp, and the whole of gunpointSweep (still every frame, at :6183 — an
+     instant hands-up is the feature). What is budgeted is exactly one thing:
+     think(), which IS the decision — flee-target recomputes, refuge picks,
+     group/mob rechecks, gang-fear scans, shoot-first rolls, archetype
+     micro-behaviour, routine goals. A body whose think is deferred keeps
+     running toward the place it was already running to.
+
+     GATES ARE HELD, NOT DRAINED. The _*T decision gates are decremented in the
+     same block as everything else, so a body deferred for K frames would arrive
+     at its next think with every gate expired and fire all of them at once —
+     the budget would have MANUFACTURED the convoy it was written to break. So
+     the decision gates only tick on frames the body is allowed to act on them;
+     a deferred frame extends them by dt. Cadence degrades, it does not bunch.
+
+     NOTHING IS DROPPED, NOT EVEN A CADENCE. If a body's stride tick lands on a
+     frame the deadline defers it, `_thinkDue` latches and it thinks on the
+     first frame it is served, off-phase, with the waiting time banked into its
+     dt (the same trick PED_BRAIN_STAGGER's `_dtBank` uses ten lines down). That
+     also removes the only way the cursor could alias against the stride pattern
+     and starve one body forever.
+
+     ON-SCREEN AND CLOSE IS NEVER LATE. Inside ANIM_D2 (58 m — the file's own
+     near band, and the distance at which you can read a face) the deadline is
+     bypassed entirely, so a body you are standing next to still reacts on the
+     frame you give it a reason to.
+
+     DETERMINISM, AND WHY LAW #12 IS NOT TOUCHED. Law #12 governs FACTS ABOUT A
+     BODY — its job, its role, its face — and its rule is that they are hashed
+     off the spawn point (roleHash / CBZ.hash01), never drawn from the shared
+     rng() stream, precisely because the order those paths run in already
+     depends on where the camera is. Nothing here draws a fact. What the budget
+     moves is the POSITION of the runtime rng() stream, which every gate jitter
+     and behaviour roll inside think() advances — and that position is already a
+     function of the frame rate (stride and gate boundaries land on different
+     frames at 30 fps than at 60) and already skipped wholesale by
+     PED_BRAIN_STAGGER. So the budget changes WHEN a decision is recomputed,
+     never WHICH decision the same inputs produce, and it is the same class of
+     variance the loop has shipped with since the stagger landed. The math
+     gate's stepSim(400 ticks) builds the world BEFORE any updater runs, so no
+     world-build count can move; and with an empty roster the budget switches
+     itself off rather than take a modulo of zero.
+
+     PED_SIM_BUDGET_MS = 0 (or null-ish) restores the pre-budget loop exactly:
+     `decide` is a constant true, every gate ticks, every stride tick thinks in
+     place, and the added statements collapse to the originals in the original
+     order. Read LIVE each frame so ?cfg_ overrides work mid-session.
+     ============================================================ */
+  if (CBZ.CONFIG.PED_SIM_BUDGET_MS == null) CBZ.CONFIG.PED_SIM_BUDGET_MS = 8;
+  // performance.now with a Date.now fallback — the headless harnesses that
+  // drive CBZ.stepSim (tools/*-node.mjs) do not always inject `performance`,
+  // and a budget that throws is strictly worse than no budget. Same shape as
+  // impactbus.js's drainNow(), for the same reason.
+  const simNow = (typeof performance !== "undefined" && performance.now)
+    ? function () { return performance.now(); }
+    : function () { return Date.now(); };
+  // THE CURSOR IS THE WHOLE DIFFERENCE BETWEEN A BUDGET AND A CULL. It is
+  // module-level because it must survive the frame: an over-budget frame stops
+  // here and the next frame picks the roster up at exactly this index, so every
+  // body is served once per sweep and no cohort can starve. At the measured
+  // panic peak the full-roster decision cost is ~133 ms/frame, so an 8 ms
+  // deadline serves ~6% of the roster per frame — a complete sweep in ~17
+  // frames (~0.28 s) for the bodies beyond 58 m, and zero latency inside it.
+  let _simCursor = 0;
+  // A deferred body banks the wall time it waited so its next think() gets the
+  // dt it actually missed. Clamped: the bank exists to preserve CADENCE, not to
+  // replay an arbitrary stretch of missed time in one tick if a body spent a
+  // minute inside a car with the latch still set. 1 s is already inside the
+  // range dt*stride reaches today (stride 20 x a compensated stagger tick).
+  const SIM_BANK_MAX = 1.0;
+  // A FLOOR UNDER THE ROTATION, because the near-camera bypass is a SECOND
+  // cohort competing for the same milliseconds and the deadline alone lets it
+  // win every time. A dense 58 m crowd at panic — a couple of dozen bodies, a
+  // quarter of them on a stride tick, each one a flee recompute — can spend the
+  // whole 8 ms before the rotation window is even reached, and then the window
+  // closes on its first body and the sweep crawls forward one index per frame
+  // (a modelled 8 s of decision latency for the far crowd on a 500-body
+  // roster). This is the same hazard impactbus.js answers by ROTATING its drain
+  // order so the shared budget cannot permanently starve the category listed
+  // last; the cohorts here are "near" and "the rotation", so the answer is a
+  // guaranteed minimum slice instead. Eight is impactbus's own per-frame floor,
+  // and it caps a 500-body sweep at ~63 frames (~1 s) in that pathological
+  // case while costing nothing at all in the normal one, where the deadline
+  // buys far more than eight.
+  const SIM_MIN_THINKS = 8;
   CBZ.onUpdate(34, function (dtFrame) {
     let dt = dtFrame;
     if (g.mode !== "city") return;
@@ -6184,9 +6339,53 @@
     panicDecay(dt);            // the contagion field forgets (cityScare)
     const camx = CBZ.camera.position.x, camz = CBZ.camera.position.z;
     const peds = CBZ.cityPeds;
+    // ---- THIS FRAME'S DECISION DEADLINE (see the block above the updater) ----
+    // Read LIVE, so a ?cfg_ped_sim_budget_ms override flips it mid-session.
+    const _budgetMs = Number(CBZ.CONFIG.PED_SIM_BUDGET_MS) || 0;
+    // An empty roster disables the budget rather than divide/modulo into it —
+    // the math gate's stepSim runs this updater against whatever the world
+    // built, and "no peds yet" is a legal state on the first frames.
+    const _budgetOn = _budgetMs > 0 && peds.length > 0;
+    const _deadline = _budgetOn ? simNow() + _budgetMs : 0;
+    // The roster can shrink under a cursor parked past its new end (crowd.js
+    // recycles pooled rigs); a stale cursor must wrap, never index nothing.
+    if (_simCursor >= peds.length) _simCursor = 0;
+    const _budFrom = _budgetOn ? _simCursor : 0;
+    let _budOver = false, _budStop = 0, _budDone = 0;
     for (let i = 0; i < peds.length; i++) {
       const p = peds[i];
       dt = dtFrame;              // a prior ped's compensated tick must not leak
+      // MAY THIS BODY DECIDE THIS FRAME? Settled here, at the top, because the
+      // gate block below has to know: a deferred body must HOLD its decision
+      // gates, not drain them (draining is how a budget manufactures a convoy).
+      // Pure function of the index, this frame's cursor and the deadline flag,
+      // so on a frame where nothing is late it is one compare for the whole
+      // crowd — and with the flag off it is a constant `true` that the added
+      // `decide &&` conjuncts below fold straight back into the original lines.
+      // `inWindow` is membership of THIS frame's slice of the rotation; `decide`
+      // is that OR the near-camera bypass. They have to be two different words,
+      // and the bug that proves it is worth the extra local: a bypassed body
+      // sits at an index BEHIND the cursor, so if it were allowed to close the
+      // window it would park the cursor at its own index + 1 — backwards —
+      // and the same near bodies would re-close it there every frame, pinning
+      // the sweep and starving the entire tail of the roster forever. Only a
+      // body inside the window may spend the window. A bypassed body still
+      // costs real milliseconds, which simply makes the window it did not close
+      // a shorter one — self-correcting, and the cursor still advances by at
+      // least one per frame because the deadline is charged after the work.
+      let inWindow = true, decide = true;
+      if (_budgetOn) {
+        inWindow = i >= _budFrom && !_budOver;
+        decide = inWindow;
+        if (!decide) {
+          // ON-SCREEN AND CLOSE IS NEVER LATE. ANIM_D2 (58 m) is this file's own
+          // near band — the range at which a body's reaction is something you
+          // WATCH rather than glimpse. camx/camz are this frame's camera, taken
+          // before anything moved.
+          const bdx = p.pos.x - camx, bdz = p.pos.z - camz;
+          if (bdx * bdx + bdz * bdz < ANIM_D2) decide = true;
+        }
+      }
       // A PROP MUST NOT OUTLIVE ITS GESTURE. The tell block at the bottom of
       // this loop stamps `_phoneFrame` on every frame it wants the phone drawn;
       // anything that stops the gesture — the call landing, a bullet, a KO, an
@@ -6211,11 +6410,19 @@
         }
       }
       if (p.alarmed > 0) p.alarmed -= dt;
-      if (p._rallyT > 0) p._rallyT -= dt;       // turf-rally re-call cooldown
-      if (p._refugeT > 0) p._refugeT -= dt;     // flee-toward-refuge recompute gate
-      if (p._microT > 0) p._microT -= dt;       // archetype micro-behaviour gate
-      if (p._groupT > 0) p._groupT -= dt;       // group/mob reaction recheck gate
-      if (p._gangFearT > 0) p._gangFearT -= dt; // civilian gang-fear scan rate gate
+      // THE FIVE DECISION GATES TICK ONLY ON FRAMES THIS BODY MAY ACT ON THEM.
+      // Every one of them is read in exactly one place — inside think() — and
+      // each guards a scan or a recompute, so letting them expire during frames
+      // the deadline has deferred would hand the body five simultaneously-open
+      // gates the moment it is served. That is the convoy, rebuilt by the fix.
+      // Holding them IS "extend the gate by the skipped dt": the cadence
+      // stretches, it never bunches. `decide` is constant true with the flag
+      // off, so these are the original five lines in the original order.
+      if (decide && p._rallyT > 0) p._rallyT -= dt;       // turf-rally re-call cooldown
+      if (decide && p._refugeT > 0) p._refugeT -= dt;     // flee-toward-refuge recompute gate
+      if (decide && p._microT > 0) p._microT -= dt;       // archetype micro-behaviour gate
+      if (decide && p._groupT > 0) p._groupT -= dt;       // group/mob reaction recheck gate
+      if (decide && p._gangFearT > 0) p._gangFearT -= dt; // civilian gang-fear scan rate gate
       if (p.poseCower > 0) p.poseCower -= dt;   // brief flinch/cringe at gunfire+blasts
       if (p._scareT > 0) p._scareT -= dt;       // hobo-jumpscare lunge marker (transient)
       if (p.tweakT > 0) p.tweakT -= dt;
@@ -6250,7 +6457,20 @@
         // reaps where you could be looking at it. Degrade-safe both ways: no
         // morgue.js and this is the exact pair of timers it always was.
         if (!CBZ.corpseMayReap && p.deadT > 4) p.needsPickup = true;
-        const mayCull = CBZ.corpseMayReap ? CBZ.corpseMayReap(p) : (p.collected || p.deadT > 75);
+        // THE REAP TEST IS A DECISION, AND A CORPSE A KILOMETRE AWAY CAN MAKE IT
+        // NEXT FRAME. Everything above this line still runs for every body every
+        // frame — deadT, the self-healing loot index, and above all the render
+        // LOD, because a corpse you can see must draw or not draw on the frame
+        // the camera says so. What the deadline may defer is only the question
+        // "may this body go now": corpseMayReap ends in npcTransitionSafe, a
+        // padded-screen projection paid PER CORPSE PER FRAME, and after a nuke
+        // there are hundreds of them. Deferring it is free of consequence by
+        // construction — the answer it defers is always "reap", the body simply
+        // persists one more frame, and corpseMayReap already refuses to reap
+        // anything the player could be looking at, so nothing can blink out late
+        // that would not have blinked out early. Short-circuit: a deferred body
+        // does not even pay the call. `decide` is true with the flag off.
+        const mayCull = decide && (CBZ.corpseMayReap ? CBZ.corpseMayReap(p) : (p.collected || p.deadT > 75));
         // A culled body was already invisible to cityNearestCorpse (`p.culled`);
         // dropping it here just keeps the corpse list bounded by the bodies that
         // are actually still lootable. crowd.js only ever clears `culled` while
@@ -6360,8 +6580,41 @@
       if (p._shadowOn !== wantShadow) { setRigShadow(p.char, wantShadow); p._shadowOn = wantShadow; }
       const far = d2 > FAR_D2;
       const stride = active ? 4 : (far ? 20 : 10);
-      if ((frame + p.slice) % stride === 0) {
-        think(p, dt * stride, active);
+      // ---- THE BUDGETED WORK, AND THE ONLY BUDGETED WORK ----------------------
+      // think() IS the decision: the flee-target recompute (fleeFrom -> up to
+      // fifteen LOS raycasts through cityNav.nearestExit, the measured 8 s/s),
+      // the refuge pick, the group/mob and gang-fear scans, the shoot-first
+      // roll, the archetype micro-behaviour, the routine goal. move() below is
+      // NOT budgeted — a body keeps walking, turning, animating and colliding
+      // along the decision it already holds, every frame, at every distance, so
+      // a deferral is invisible: nobody freezes, they just keep going the way
+      // they were already going for a fraction of a second longer.
+      //
+      // `_thinkDue` is the no-loss latch. A stride tick that lands on a deferred
+      // frame is not thrown away — it is owed, and it is paid on the first frame
+      // this body is served, off-phase if need be. Without it the cursor could
+      // beat against the stride pattern (slice 0..7 vs stride 20) and keep
+      // missing the same body's tick indefinitely; with it, the worst case is
+      // one sweep of latency. The banked dt is the same compensation
+      // PED_BRAIN_STAGGER's `_dtBank` pays a few lines above, for the same
+      // reason: the timers inside think() must see the time that really passed.
+      const _due = (frame + p.slice) % stride === 0;
+      if (_due || p._thinkDue) {
+        if (decide) {
+          think(p, dt * stride + (p._thinkBank || 0), active);
+          if (p._thinkDue) { p._thinkDue = false; p._thinkBank = 0; }
+          // Charged AFTER the work, never before: the deadline may be overrun by
+          // at most one think, exactly as impactbus.js's drains may be overrun by
+          // at most one item. Checking first would let a frame do nothing at all
+          // and the cursor would never advance. The SIM_MIN_THINKS floor short-
+          // circuits ahead of the clock read, so the guarantee costs no calls to
+          // simNow() — it saves the first seven of them every frame.
+          if (_budgetOn && inWindow && !_budOver &&
+              ++_budDone >= SIM_MIN_THINKS && simNow() > _deadline) { _budOver = true; _budStop = i + 1; }
+        } else {
+          p._thinkDue = true;
+          p._thinkBank = Math.min(SIM_BANK_MAX, (p._thinkBank || 0) + dt);
+        }
       }
       // ANIMATE THE WHOLE VISIBLE BAND, not just the near 58m. A rig drawn out to
       // VIS_D2 (95m) but BEYOND ANIM_D2 used to move with animate=false → the legs
@@ -6461,6 +6714,17 @@
         }
       }
     }
+    // WHERE THE NEXT SWEEP RESUMES. Reaching the end of the roster with budget
+    // still in hand is a COMPLETED sweep — wrap to 0 so the bodies sitting ahead
+    // of this frame's cursor are the first ones served next time, which is what
+    // makes "every ped gets decision time within a bounded number of frames"
+    // true rather than hopeful. An over-budget frame parks the cursor on the
+    // body AFTER the one that spent the last of it, so the roster is walked
+    // once per sweep with no body visited twice and none skipped. The cursor
+    // always advances by at least one when there was any decision work to do
+    // (the deadline is charged after the work), so a frame can never stall on
+    // the same body forever. Untouched when the flag is off.
+    if (_budgetOn) _simCursor = (_budOver && _budStop < peds.length) ? _budStop : 0;
 
     // age out / pick up dropped weapons (player auto-grabs by walking over)
     for (let i = CBZ.cityDrops.length - 1; i >= 0; i--) {
