@@ -218,17 +218,33 @@
   const rank = [];           // scratch for the ranking — syncMask runs per frame
   function eyeX() { return CBZ.camera ? CBZ.camera.position.x : (CBZ.player && CBZ.player.pos ? CBZ.player.pos.x : 0); }
   function eyeZ() { return CBZ.camera ? CBZ.camera.position.z : (CBZ.player && CBZ.player.pos ? CBZ.player.pos.z : 0); }
+  /* WHAT A SLOT IS RANKED ON. Distance to the EYE is the visual answer, and it
+     is the camera that renders, so the camera leads. But the camera and the
+     player come apart — a death cam, a cinematic, a chase cam left behind a
+     car — and it is the PLAYER who falls, through a floor query that has no
+     slot limit. So the score is the nearer of the two, and a shaft with the
+     player actually inside it is pinned to a slot outright: "you are standing
+     in a hole that is not being drawn" is the one state this cap must never be
+     allowed to produce, rather than merely be unlikely to. */
+  function slotScore(h, ex, ez, px, pz) {
+    const de = (h.x - ex) * (h.x - ex) + (h.z - ez) * (h.z - ez);
+    if (px == null) return de;
+    const dp = (h.x - px) * (h.x - px) + (h.z - pz) * (h.z - pz);
+    // inside the mouth: rank ahead of everything, closest-first among them
+    if (dp < h.mouth * h.mouth) return -1e9 + dp;
+    return de < dp ? de : dp;
+  }
   function syncMask() {
     slotted.length = 0;
     if (live.length <= SHAFT_SLOTS) {
       for (let i = 0; i < live.length; i++) slotted.push(live[i]);
     } else {
       const ex = eyeX(), ez = eyeZ();
+      const pp = CBZ.player && CBZ.player.pos;
+      const px = pp ? pp.x : null, pz = pp ? pp.z : null;
       rank.length = 0;
       for (let i = 0; i < live.length; i++) rank.push(live[i]);
-      rank.sort(function (a, b) {
-        return ((a.x - ex) * (a.x - ex) + (a.z - ez) * (a.z - ez)) - ((b.x - ex) * (b.x - ex) + (b.z - ez) * (b.z - ez));
-      });
+      rank.sort(function (a, b) { return slotScore(a, ex, ez, px, pz) - slotScore(b, ex, ez, px, pz); });
       for (let i = 0; i < SHAFT_SLOTS; i++) slotted.push(rank[i]);
     }
     for (let i = 0; i < SHAFT_SLOTS; i++) {
@@ -1297,6 +1313,11 @@
                             unbroken grass with the road running across it —
                             a hole you cannot see and fall into anyway, because
                             the floor query never had the mask's slot limit.
+       playerInUnslotted
+                       0  — HARD INVARIANT: the player standing inside a shaft
+                            that is not being drawn. The slot ranking pins an
+                            occupied shaft, so this is 0 by construction and
+                            not merely by luck.
        maskSlots          how many holes the ground can be cut for at once
        unslottedShafts    holes past that cap (hidden, not ringed)
        nearestUnslotted   metres from the eye to the closest hole that is NOT
@@ -1306,7 +1327,7 @@
      that "passes" by never opening a hole cannot look like a working one.
      ============================================================ */
   CBZ.shaftAudit = function () {
-    let worst = 0, onSlope = 0, dow = 0, deepest = 0, priv = 0, rings = 0, nearUn = Infinity;
+    let worst = 0, onSlope = 0, dow = 0, deepest = 0, priv = 0, rings = 0, nearUn = Infinity, inUn = 0;
     const ex = eyeX(), ez = eyeZ();
     for (let i = 0; i < live.length; i++) {
       const h = live[i];
@@ -1321,6 +1342,8 @@
         const d = Math.hypot(h.x - ex, h.z - ez);
         if (d < nearUn) nearUn = d;
         if (h.grp && h.grp.visible) rings++;      // drawn with the ground still over it
+        const pp = CBZ.player && CBZ.player.pos;
+        if (pp && Math.hypot(h.x - pp.x, h.z - pp.z) < h.mouth) inUn++;
       }
     }
     return {
@@ -1330,6 +1353,7 @@
       maskSlots: SHAFT_SLOTS,
       unslottedShafts: Math.max(0, live.length - slotted.length),
       ringsOnSolidGround: rings,
+      playerInUnslotted: inUn,
       nearestUnslotted: nearUn === Infinity ? null : +nearUn.toFixed(1),
       holeSlopeMax: +worst.toFixed(3),
       holesOnSlopes: onSlope,
