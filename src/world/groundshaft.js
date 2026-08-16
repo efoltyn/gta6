@@ -66,6 +66,16 @@
    Every one goes out through the caller's kill bus with its own cause string,
    so they read in the killfeed as four different deaths, which they are.
 
+   YOU CANNOT SEE INTO A HOLE YOU ARE NOT ABOVE
+   --------------------------------------------
+   OWNER: "sinkhole from far away looks like a ring still." The rim is the
+   whole picture at any normal viewing distance — at 9° above the ground the
+   near lip occludes everything below it — so a shaft is only as dark as its
+   first three metres, and those were its brightest surfaces. `skyOcc()` below
+   is the fix and carries the full account: ONE occlusion ladder for the wall,
+   the lip section and the stair, plus a collar that wears the colour of the
+   ground it sheared from. `shaftAudit().throatShade` is the ratchet.
+
    PLACEMENT LAW: A SINKHOLE IS NOT A MOUNTAIN FEATURE. OWNER: "sinkholes should
    only happen on the ground not on sides of mountain." `CBZ.groundShaftSlope`
    samples the host's own ground over the footprint and the site is REFUSED
@@ -487,6 +497,113 @@
     }
   }
 
+  /* ============================================================
+     ONE SKY-OCCLUSION LADDER FOR THE WHOLE SHAFT — AND IT IS MEASURED IN
+     RADII BELOW THE RIM, NOT IN FRACTIONS OF THE DEPTH
+
+     THE FAULT THIS FIXES: "the sinkhole from far away still looks like a ring."
+     It did, and the reason is pure geometry — you cannot see into a hole you
+     are not above. From a normal third-person camera a shaft 80 m away sits
+     about 9° below the horizon, and at 9° the near rim occludes everything
+     but the top ~3 m of the FAR wall: the black bottom this file works so hard
+     for is not dim at that range, it is not on the screen at all. Whatever
+     colour those first three metres are IS the sinkhole, at every distance
+     from which a player normally sees one.
+
+     Those three metres were the brightest surfaces in the shaft. Three
+     separate brightness ladders, authored independently — the wall's
+     `pow(1/(1+7t), 1.15)`, the lip cut face's hand-typed `k: 1, 0.55, 0.7`,
+     and the stair's own copy of the wall curve — all agreed that the top of
+     the shaft is fully lit, so a grazing viewer got a tan lip section, a tan
+     clay band and (worst of all) the top few STAIR TREADS, which are
+     horizontal and therefore face the distant camera square-on. Add the lip
+     collar, which was painted soil-brown across grass, and the whole thing
+     resolves at 80 m into exactly what the owner photographed: a brown ring
+     lying on green ground.
+
+     So the three ladders become ONE function — CLAUDE.md's utility-pole
+     lesson again: two constants describing one object, authored separately,
+     is how a wire ends up hanging beside its own insulator. And it takes its
+     argument in METRES BELOW THE RIM over the shaft's own RADIUS, because
+     that is what sky occlusion actually depends on. A fraction-of-depth curve
+     says the first 3 m of a 42 m shaft are 63% lit and the first 3 m of a
+     12 m shaft are 20% lit; the geometry says both are the same narrow slot
+     of sky, and it is the geometry that is right.
+
+       open      the sky the throat still sees, a reciprocal in u = d / r
+                 (what a narrowing cone of visible sky does), essentially
+                 black by two radii down
+       lipShade  the CONTACT SHADOW under the overhang. wallRadius() already
+                 cuts a real undercut just below the rim and a surface tucked
+                 under a cantilevered crust sees almost no sky — so the
+                 brightest thing in the shaft is 0.38, not 1.0, and the mouth
+                 reads as a void from the first millimetre of wall.
+     `shaftAudit().throatShade` is the ratchet: the brightness a distant
+     grazing camera actually receives, which is the number that was wrong. */
+  function skyOcc(h, d) {
+    const u = Math.max(0, d) / Math.max(0.5, h.r);
+    const open = Math.pow(1 / (1 + 2.6 * u), 1.35);
+    const lipShade = 1 - 0.62 * Math.exp(-u / 0.5);
+    return Math.max(0.02, open * lipShade);
+  }
+  // what a camera 80 m out at a normal depression angle sees of the far wall
+  const GRAZE_D = 0.35;      // radii below the rim — the sliver the near lip leaves
+  function throatShade(h) { return skyOcc(h, h.r * GRAZE_D); }
+
+  /* THE COLLAR IS GROUND, SO IT IS PAINTED IN THE GROUND'S OWN COLOUR.
+
+     The lip collar is the intact surface still standing at the rim — the
+     sliver between the removed floor and the wall, which the ground mask has
+     stopped drawing and which somebody therefore has to draw back. It was
+     painted `surfaceColor`, and survival passes `surface: "soil"`, so on the
+     island a 0x554129 brown annulus was laid across 0x53a84e grass out to
+     1.26 mouth radii. Flat on the ground, it is the one part of a sinkhole
+     that is fully visible from EVERY angle including the grazing one — which
+     made it, literally, a brown ring painted on the grass: the exact lie this
+     file's header says the legacy black-disc shaft told.
+
+     Ground is not soil. The collar now samples the colour of the surface it
+     was cut from (one raycast, the same one the mask uses) and wears it, so
+     it disappears into the ground it is part of and the only thing left to
+     see at the rim is the dark throat. `surfaceColor` still dresses the
+     things that really are a section — the cut face, the talus, the slabs. */
+  function faceTint(o, face, out) {
+    const geo = o.geometry, ca = geo && geo.getAttribute && geo.getAttribute("color");
+    if (!ca || !face) return false;
+    out[0] = (ca.getX(face.a) + ca.getX(face.b) + ca.getX(face.c)) / 3;
+    out[1] = (ca.getY(face.a) + ca.getY(face.b) + ca.getY(face.c)) / 3;
+    out[2] = (ca.getZ(face.a) + ca.getZ(face.b) + ca.getZ(face.c)) / 3;
+    return true;
+  }
+  function groundColorAt(x, z, gy) {
+    const t = [1, 1, 1];
+    try {
+      const rc = new THREE.Raycaster(new THREE.Vector3(x, gy + 50, z), new THREE.Vector3(0, -1, 0), 0, 100);
+      if (CBZ.camera) rc.camera = CBZ.camera;      // r128 Sprite.raycast derefs this
+      const hits = rc.intersectObject(root(), true) || [];
+      for (let i = 0; i < hits.length; i++) {
+        const o = hits[i].object;
+        if (!o || !o.isMesh || !o.visible || !o.material) continue;
+        let p = o, mine = false;
+        while (p) { if (p.userData && p.userData.groundShaft) { mine = true; break; } p = p.parent; }
+        if (mine) continue;
+        // a canopy, a roof or a sign is not the ground; the ground is the
+        // surface at the height the shaft's own rim was solved from
+        const py = hits[i].point.y;
+        if (py > gy + 2.5 || py < gy - 2.5) continue;
+        const mat = Array.isArray(o.material) ? o.material[0] : o.material;
+        if (!mat || !mat.color) continue;
+        let r = mat.color.r, g = mat.color.g, b = mat.color.b;
+        // a vertexColors ground (the island's beach ring is white × per-vertex
+        // sand) would answer "white" from the material alone
+        if (mat.vertexColors && faceTint(o, hits[i].face, t)) { r *= t[0]; g *= t[1]; b *= t[2]; }
+        const q = (v) => Math.max(0, Math.min(255, Math.round(v * 255)));
+        return (q(r) << 16) | (q(g) << 8) | q(b);
+      }
+    } catch (e) { /* no answer is not a crash: the caller falls back to soil */ }
+    return null;
+  }
+
   // The strata ladder: topsoil → clay → silt → weathered rock → bedrock, with
   // the band edges jittered per shaft so no two read as the same wallpaper.
   /* The ladder ALTERNATES IN VALUE, not just in hue: a band only reads as a
@@ -508,13 +625,11 @@
     for (let i = 0; i < STRATA.length; i++) if (tt >= STRATA[i][0]) c = STRATA[i][1];
     // DARK WITH DEPTH: no light reaches down a 30 m shaft. The floor of the
     // reference photograph is black, and that is not a shadow — it is the
-    // absence of a bounce. Multiplicative, so the strata still read near the top.
-    /* NO LIGHT GETS DOWN THERE. A Lambert wall under this game's hemisphere
-       reads as a bright tan tube at any depth, so the sky-occlusion a real
-       shaft has is put in by hand: a reciprocal falloff (what a narrowing
-       cone of visible sky actually does) rather than a linear fade — it bites
-       within the first few metres and is essentially black by half depth. */
-    const dark = Math.max(0.02, Math.pow(1 / (1 + 7 * t), 1.15));
+    // absence of a bounce. Multiplicative, so the strata still read near the
+    // top: at the rim the ladder is 0.38, which is dark enough to read as a
+    // void against sunlit ground and bright enough that the bands are still
+    // legible when you are standing at the edge looking down.
+    const dark = skyOcc(h, h.depth * t);
     const mot = 0.9 + hs(h, Math.cos(ang) * 9.7, Math.sin(ang) * 9.7 + t * 71) * 0.2;
     const k = dark * mot;
     out[0] = (((c >> 16) & 255) / 255) * k;
@@ -582,28 +697,39 @@
       inner[i] = h.mouth * (1.035 + (hs(h, Math.cos(a) * 4.1, Math.sin(a) * 4.1) - 0.5) * 0.09);
     }
     inner[seg] = inner[0];
-    const rows = [
-      { r: 1.0, y: 0, c: h.surfaceColor, k: 1 },
-      { r: 1.22, y: 0.0, c: h.surfaceColor, k: 1 },
-    ];
-    // collar (the intact surface, ragged edge) + cut face (the section)
+    /* The collar reaches just past the ground mask's discard radius (r × 1.06,
+       i.e. 1.14 mouth radii) and then STOPS. Every centimetre beyond that is
+       collar lying on ground that is still being drawn — invisible now that it
+       wears the ground's own colour, but there is no reason to paint it. */
+    const COLLAR_OUT = 1.17;
+    // cut face (the section under the crust). Its brightness is not typed: it
+    // is the SAME sky-occlusion ladder the wall below it uses, keyed on how far
+    // under the overhang each row sits, so the crust and the wall it hangs over
+    // can never disagree about how much light gets in there.
     const cutRows = [
-      { rf: 1.0, dy: 0.0, c: h.surfaceColor, k: 1 },
-      { rf: 1.0, dy: -0.32, c: h.surfaceColor, k: 0.55 },
-      { rf: 0.985, dy: -1.05, c: 0x4a3826, k: 0.7 },
-      { rf: 0.97, dy: -2.1, c: 0x6a5233, k: 0.55 },
+      { rf: 1.0, dy: 0.0, c: h.surfaceColor },
+      { rf: 1.0, dy: -0.32, c: h.surfaceColor },
+      { rf: 0.985, dy: -1.05, c: 0x4a3826 },
+      { rf: 0.97, dy: -2.1, c: 0x6a5233 },
     ];
-    const nR = rows.length + cutRows.length;
+    const nR = 2 + cutRows.length;
     const pos = new Float32Array((seg + 1) * nR * 3);
     const col = new Float32Array((seg + 1) * nR * 3);
     const idx = [];
     let p = 0, row = 0;
-    function emit(rf, dy, hex, k) {
+    /* `mv` is how much the row mottles. A section face wants the full 0.28 —
+       it is broken earth. The COLLAR wants almost none: it is undisturbed
+       ground wearing the ground's own colour, and a ±14% mottle across an
+       annulus 1.2 mouth radii wide is enough to bring the ring back at
+       distance in a different hue. The thing that has to be invisible has to
+       be invisible in value as well as in colour. */
+    function emit(rf, dy, hex, k, mv) {
+      const amp = mv != null ? mv : 0.28;
       for (let i = 0; i <= seg; i++) {
         const a = (i / seg) * TAU;
         const rad = inner[i] * rf;
         pos[p] = Math.cos(a) * rad; pos[p + 1] = h.gy + dy; pos[p + 2] = Math.sin(a) * rad;
-        const mot = (0.86 + hs(h, Math.cos(a) * 5.3, Math.sin(a) * 5.3 + dy * 11) * 0.28) * k;
+        const mot = ((1 - amp * 0.5) + hs(h, Math.cos(a) * 5.3, Math.sin(a) * 5.3 + dy * 11) * amp) * k;
         col[p] = (((hex >> 16) & 255) / 255) * mot;
         col[p + 1] = (((hex >> 8) & 255) / 255) * mot;
         col[p + 2] = ((hex & 255) / 255) * mot;
@@ -611,10 +737,13 @@
       }
       row++;
     }
-    // outward collar first (flat, on the ground), then downward cut face
-    emit(rows[1].r, 0.035, h.surfaceColor, 0.72);
-    emit(rows[0].r, 0.035, h.surfaceColor, 0.5);
-    for (let i = 0; i < cutRows.length; i++) emit(cutRows[i].rf, cutRows[i].dy, cutRows[i].c, cutRows[i].k);
+    // outward collar first — the intact ground, in the ground's own colour and
+    // at the ground's own brightness — then the cut face dropping into shadow.
+    // The whole read of the sheared lip is that 3 cm step: lit surface, then
+    // section. It STOPS, it does not slope in.
+    emit(COLLAR_OUT, 0.035, h.topColor, 0.97, 0.07);
+    emit(1.0, 0.035, h.topColor, 0.92, 0.07);
+    for (let i = 0; i < cutRows.length; i++) emit(cutRows[i].rf, cutRows[i].dy, cutRows[i].c, skyOcc(h, -cutRows[i].dy));
     for (let j = 0; j < row - 1; j++) {
       for (let i = 0; i < seg; i++) {
         const a = j * (seg + 1) + i, b = a + 1, d = a + (seg + 1), e = d + 1;
@@ -708,9 +837,14 @@
       const y = h.bottom + (i + 1) * (h.depth / h.stepN);
       const arc = dA * rm * 1.08;
       const t = 1 - (y - h.bottom) / h.depth;   // t is DEPTH fraction from the top
-      // the ledges take the SAME sky-occlusion curve as the wall behind them,
-      // so a step does not float out of a wall it is supposed to be part of
-      const k = Math.max(0.03, Math.pow(1 / (1 + 7 * t), 1.15)) * 0.95;
+      /* the ledges take the SAME sky-occlusion ladder as the wall behind them,
+         so a step does not float out of a wall it is supposed to be part of —
+         and it is now literally the same function rather than a second copy of
+         the same curve. This matters most at the TOP: a tread is horizontal,
+         so the topmost steps are the surfaces a distant grazing camera sees
+         square-on, and a bright slab under the rim is most of what made the
+         mouth read as filled-in rather than open. */
+      const k = skyOcc(h, h.depth * t) * 0.95;
       // yaw = a puts the box's local +x along the RADIUS, so `wide` is radial
       // and `arc` tangential — swap them and the stair spirals through its wall
       B.add(h.x + Math.cos(a) * rm, y - 0.22, h.z + Math.sin(a) * rm,
@@ -744,6 +878,13 @@
       stepN: 0, stepA0: 0, stepIn: r * 0.78,
       born: CBZ.now || 0,
     };
+    /* Sampled BEFORE the group joins the scene, so the raycast cannot find an
+       earlier row of our own collar and copy a copy. `opts.top` lets a caller
+       state the colour outright; a failed sample falls back to the section
+       colour, which is what the collar always used to be. */
+    const top = opts.top != null ? opts.top : groundColorAt(x, z, gy);
+    h.topColor = top != null ? top : h.surfaceColor;
+    h.topSampled = top != null && opts.top == null;
     if (CBZ.CONFIG.SHAFT_ESCAPE !== false) {
       h.stepN = Math.max(6, Math.min(34, Math.round(depth / 1.3)));
       h.stepA0 = (h.seed % 1) * TAU;
@@ -761,6 +902,9 @@
     dark.position.set(x, h.bottom - 0.2, z);
     wall.position.set(x, 0, z);
     lip.position.set(x, 0, z);
+    // the collar is ground, so it takes ground's shadows too: an unshadowed
+    // annulus inside a shadowed field is the ring again, drawn in light
+    lip.receiveShadow = true;
     h.grp.add(wall, lip, dark);
     if (rubble) h.grp.add(rubble);
     if (stair) h.grp.add(stair);
@@ -1123,9 +1267,13 @@
       // re-cut the shaft at the new radius. Six or seven rebuilds over four
       // seconds is cheaper than a vertex morph and lets the strata, the torn
       // lip and the stair all stay ONE solve.
-      const keep = { x: h.x, z: h.z, gy: h.gy, depth: h.depth, seed: h.seed, born: h.born, surface: o.surface };
+      // the collar's colour is carried, not re-sampled: by the second re-cut
+      // the props over the mouth are hidden and the ground under it is masked,
+      // so a fresh sample could answer differently and the rim would change
+      // colour mid-collapse
+      const keep = { x: h.x, z: h.z, gy: h.gy, depth: h.depth, seed: h.seed, born: h.born, surface: o.surface, top: h.topColor };
       disposeShaft(h);
-      seq.shaft = CBZ.groundShaft(keep.x, keep.z, { r: want, depth: keep.depth, gy: keep.gy, seed: keep.seed, surface: keep.surface });
+      seq.shaft = CBZ.groundShaft(keep.x, keep.z, { r: want, depth: keep.depth, gy: keep.gy, seed: keep.seed, surface: keep.surface, top: keep.top });
       if (seq.shaft) seq.shaft.born = keep.born;   // the burial clock is the HOLE's age, not this rebuild's
     }
     rimShear(seq, 3);
@@ -1318,6 +1466,18 @@
                             that is not being drawn. The slot ranking pins an
                             occupied shaft, so this is 0 by construction and
                             not merely by luck.
+       throatShade        the brightness of the only wall a camera at a normal
+                          depression angle can see (0.35 radii under the rim).
+                          Sunlit ground beside it is ~1.0, so this is the
+                          number that decides whether a sinkhole at 80 m reads
+                          as a hole or as a ring. It was 0.63.
+       rimShade           the ladder at the rim itself — the brightest surface
+                          anywhere in the shaft (was 1.0: fully lit)
+       collarSampled      shafts whose lip collar wears the colour of the
+                          ground it was cut from rather than generic soil
+       lidsOverMouth   0  HARD INVARIANT, and the only one that can catch a
+                          ground mask that silently did not take: a flat,
+                          visible, UNMASKED surface still spanning the mouth
        maskSlots          how many holes the ground can be cut for at once
        unslottedShafts    holes past that cap (hidden, not ringed)
        nearestUnslotted   metres from the eye to the closest hole that is NOT
@@ -1326,8 +1486,56 @@
      falls / crushed / buried / voidSaves are printed beside them so a build
      that "passes" by never opening a hole cannot look like a working one.
      ============================================================ */
+  /* HAS THE GROUND ACTUALLY STOPPED DRAWING? `ringsOnSolidGround` above only
+     checks the SLOT BOOKKEEPING — it says a drawn shaft was dealt a uniform,
+     never that the surface over the mouth was one the sweep could patch. A
+     material with no anchor we recognise is left alone by design, and that
+     degrade path is silent: the hole keeps its lid and nothing counts it. So
+     count it. Raycasting cannot answer (the discard is a fragment decision;
+     the geometry is still there to hit), so the question asked is the one that
+     actually decides it — is there a flat, visible, UNMASKED surface across
+     the mouth. Cheap enough for a tool, and it is the only number that would
+     have caught a mask that never took. */
+  /* The definition is tools/sinkhole-check.mjs's, deliberately verbatim in
+     spirit: a LID is a surface (under 3 m thick) that REACHES THE GROUND PLANE
+     and is at least 1.5 m across. Both clauses matter. The ground-plane test is
+     what separates a lid from a thing merely standing over a mouth — a parked
+     car above an open hole is not a lid, it is a car about to fall in, which is
+     the feature working — and the footprint test keeps a bolt-head off the
+     count. An actor's rig is never a lid either; bodies fall for real. */
+  function lidsOverMouth(h) {
+    let n = 0;
+    try {
+      const box = new THREE.Box3();
+      const rigs = [];
+      const bots = CBZ.bots || [];
+      for (let i = 0; i < bots.length; i++) if (bots[i] && bots[i].group) rigs.push(bots[i].group);
+      const peds = CBZ.cityPeds || [];
+      for (let i = 0; i < peds.length; i++) if (peds[i] && peds[i].group) rigs.push(peds[i].group);
+      if (CBZ.playerChar && CBZ.playerChar.group) rigs.push(CBZ.playerChar.group);
+      root().traverse(function (o) {
+        if (!o.isMesh || !o.visible || !o.geometry || !o.material) return;
+        for (let p = o; p; p = p.parent) {
+          if (p.userData && p.userData.groundShaft) return;
+          if (rigs.indexOf(p) >= 0) return;
+        }
+        const mat = Array.isArray(o.material) ? o.material[0] : o.material;
+        if (!mat || mat._shaftMasked) return;
+        if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+        box.copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld);
+        if (box.max.y - box.min.y > 3) return;
+        if (box.max.y < h.gy - 3 || box.min.y > h.gy + 0.35) return;
+        if (box.max.x < h.x - h.mouth || box.min.x > h.x + h.mouth) return;
+        if (box.max.z < h.z - h.mouth || box.min.z > h.z + h.mouth) return;
+        if (Math.max(box.max.x - box.min.x, box.max.z - box.min.z) < 1.5) return;
+        n++;
+      });
+    } catch (e) {}
+    return n;
+  }
   CBZ.shaftAudit = function () {
     let worst = 0, onSlope = 0, dow = 0, deepest = 0, priv = 0, rings = 0, nearUn = Infinity, inUn = 0;
+    let lids = 0, sampled = 0, throat = 0, rim = 0;
     const ex = eyeX(), ez = eyeZ();
     for (let i = 0; i < live.length; i++) {
       const h = live[i];
@@ -1337,6 +1545,10 @@
       dow += h.depth / (h.r * 2);
       if (h.depth > deepest) deepest = h.depth;
       if (pub.indexOf(h) < 0) priv++;
+      if (h.topSampled) sampled++;
+      throat += throatShade(h);
+      rim += skyOcc(h, 0);
+      if (i < 4) lids += lidsOverMouth(h);
       const hasSlot = slotted.indexOf(h) >= 0;
       if (!hasSlot) {
         const d = Math.hypot(h.x - ex, h.z - ez);
@@ -1354,6 +1566,14 @@
       unslottedShafts: Math.max(0, live.length - slotted.length),
       ringsOnSolidGround: rings,
       playerInUnslotted: inUn,
+      // THE DISTANT READ. throatShade is the brightness of the only wall a
+      // camera at a normal depression angle can see — the number that decided
+      // whether a sinkhole at 80 m was a hole or a ring. Ground around it sits
+      // near 1.0, so this has to stay well under it.
+      throatShade: live.length ? +(throat / live.length).toFixed(3) : 0,
+      rimShade: live.length ? +(rim / live.length).toFixed(3) : 0,
+      collarSampled: sampled,
+      lidsOverMouth: lids,
       nearestUnslotted: nearUn === Infinity ? null : +nearUn.toFixed(1),
       holeSlopeMax: +worst.toFixed(3),
       holesOnSlopes: onSlope,

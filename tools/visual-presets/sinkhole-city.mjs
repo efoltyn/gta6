@@ -28,6 +28,18 @@ const subjects = [
     focus: "The core plug goes at full depth with a dust burst and rim chunks shearing off the edge. Anything standing on it is entrained inward and DOWN — bots fall (CBZ.body owns them mid-air), they no longer teleport to the floor.",
     act: { untilState: "active", extraSecs: 1.4 },
     cam: { frame: "oblique", near: true } },
+  /* THE BEAT THE OWNER IS ACTUALLY LOOKING AT. Every other camera here is
+     raised and oblique, which is the one condition under which a shaft cannot
+     help reading as a shaft — you are above it, so you see down it. A player
+     is almost never above it: the third-person camera puts a hole 80 m away
+     about 9° below the horizon, the near rim occludes the whole interior, and
+     what reaches the screen is three metres of far wall plus the lip. If that
+     is bright, the sinkhole is a ring, and no oblique storyboard would ever
+     have shown it. This frame is that photograph. */
+  { id: "from-far-away", label: "From far away — the ring test", hud: false,
+    focus: "The player's own viewing angle: 80 m out, ~9° above the ground. The near rim hides the shaft's interior, so the ONLY thing on screen is the top few metres of the far wall, the lip collar and the topmost stair treads. BEFORE lights all three fully and paints the collar soil-brown across green grass — a ring. AFTER runs one sky-occlusion ladder from the rim down (throatShade) and gives the collar the ground's own colour, so the mouth reads as a void at the distance it is actually seen from.",
+    act: { extraSecs: 1 },
+    cam: { frame: "far" } },
   { id: "open-shaft", label: "The shaft — the Guatemala framing", hud: false,
     focus: "THE MONEY SHOT. Raised oblique: rim + depth + intact surroundings. Sheer stratified walls (topsoil→clay→silt→rock in vertex colour), a torn overhanging lip where the surface sheared, black at the bottom, and the ground beside it untouched.",
     act: { extraSecs: 9 },
@@ -217,9 +229,15 @@ async function stageSinkhole(input) {
   const gy = H ? H.gy : 0;
   const rr = H ? H.r : (warnAt ? warnAt.r || 9 : 9);
   const dep = H ? H.depth : 34;
+  // the clear-bearing sweep has to be run against the geometry the shot will
+  // actually use — a "far" beat cleared at the oblique beat's height and range
+  // is a different ray, and the tower it misses is the one in the picture
+  const farBack = Math.max(58, rr * 8);
   const bearing = (frame === "bottom")
     ? bearing0
-    : clearBearing(cx, cz, gy, rr, Math.max(18, dep * 0.8), rr * 2.4 + 6);
+    : (frame === "far")
+      ? clearBearing(cx, cz, gy, rr, farBack * Math.tan(9 * Math.PI / 180), farBack)
+      : clearBearing(cx, cz, gy, rr, Math.max(18, dep * 0.8), rr * 2.4 + 6);
   const cb = Math.cos(bearing), sb = Math.sin(bearing);
   let px, py, pz, ax, ay, az;
   if (frame === "bottom" && H) {
@@ -234,6 +252,14 @@ async function stageSinkhole(input) {
   } else if (frame === "warn") {
     px = cx + (rr * 3.0) * cb; py = gy + 6.5; pz = cz + (rr * 3.0) * sb;
     ax = cx; ay = gy + 0.2; az = cz;
+  } else if (frame === "far") {
+    // the player's own geometry, solved not typed: stand back 8 shaft radii
+    // and put the lens at the depression angle a third-person camera gives at
+    // that range (~9°), which is the angle at which the interior stops being
+    // visible at all and the rim decides the whole read
+    const back = farBack;
+    px = cx + back * cb; py = gy + back * Math.tan(9 * Math.PI / 180); pz = cz + back * sb;
+    ax = cx; ay = gy - 0.5; az = cz;
   } else if (frame === "wide") {
     px = cx + 78 * cb; py = gy + 44; pz = cz + 78 * sb;
     ax = cx; ay = gy - 6; az = cz;
@@ -328,8 +354,10 @@ export default {
   readyExpression: "window.THREE && window.CBZ && CBZ.CONFIG",
   urlParams: { seed: 90210 },
   stageTimeoutMs: 480000,
-  metricsNote: "deepOverWide is the reference photograph as arithmetic (a shaft reads far deeper than it is wide; a crater does not). shaft_holesOnSlopes is the owner's placement law — sinkholes on the ground, never on the side of a mountain — and may only ever read 0.",
+  metricsNote: "deepOverWide is the reference photograph as arithmetic (a shaft reads far deeper than it is wide; a crater does not). shaft_holesOnSlopes is the owner's placement law — sinkholes on the ground, never on the side of a mountain — and may only ever read 0. shaft_throatShade is the ring fault as one number: the brightness of the only wall a camera at a normal depression angle can see, against sunlit ground sitting near 1.0. shaft_lidsOverMouth is the ground mask actually taking — a flat unmasked surface still spanning the mouth is a hole with a lid on it, and may only ever read 0.",
   metrics: {
+    shaft_throatShade: { label: "Throat brightness at 9°", better: "lower" },
+    shaft_lidsOverMouth: { label: "Unmasked lids over mouth", better: "lower" },
     shaftDepth: { label: "Shaft depth", unit: "m", better: "higher" },
     deepOverWide: { label: "Depth / width", better: "higher" },
     shaft_holesOnSlopes: { label: "Holes on slopes", better: "lower" },
