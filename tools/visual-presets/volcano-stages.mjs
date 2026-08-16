@@ -60,12 +60,12 @@
    stage its own subject is not a beat. */
 const subjects = [
   { id: "warn-lane", label: "Warning — the lane announces itself", hud: false,
-    focus: "Warn phase, no words. The crater glows, ash starts, and ROCK is already coming down the corridor the pyroclastic flow will take. Before-side: a glowing disc and nothing about direction.",
+    focus: "Warn phase, no words. The crater glows and ROCK is already coming down the corridor the pyroclastic flow will take. Before-side: the same telegraph buried under a grey ash rain (owner, 2026-08-16: gone) and a heavier haze.",
     act: { force: "volcano", untilState: "warn", extraSecs: 4.2 },
     cam: { lane: true, ahead: 60, side: 26, alt: 26, fallback: { x: 108, y: 46, z: 672, ax: 0, ay: 20, az: 600 } } },
 
   { id: "column", label: "The eruption column", hud: false,
-    focus: "First seconds of the active phase: lava fountain out of the vent, dark ash column standing on a rose-lit base (the vent lights its own smoke from below — the wide bible photo), the white-hot spatter apron draped over the summit, and glowing rockfall streaking the flanks. Before-side: dark column on an additive disc.",
+    focus: "OWNER, 2026-08-16: the smoke 'looks like flat bouncing circle ish things'. It did — every puff was a fixture bobbing on three sinusoids. The column is now an emitter (the RPG-smoke lifecycle): puffs born small over the vent, growing as they climb, spreading into the cauliflower head, so the pillar visibly RISES instead of jittering in place.",
     /* force: this beat used to inherit whatever disaster the director
        happened to be on — run alone (`--subjects column`) it photographed a
        LIGHTNING STORM and reported ok:true, the exact order-dependence the
@@ -103,8 +103,8 @@ const subjects = [
     act: { force: "volcano", untilState: "active", extraSecs: 11.5 },
     cam: { lahar: true, ahead: 34, side: 22, alt: 24, fallback: { x: 62, y: 20, z: 660, ax: 0, ay: 6, az: 612 } } },
 
-  { id: "ash-street", label: "Ash with weight — the town", hud: false,
-    focus: "The blanket. Ash accumulates as COVERAGE, not as a translucent sheet: the downwind ground and roofs grey over while upwind stays green, and past ~9 cm the roofs start failing through the ONE structural ledger. audit_ashRoofCollapses is the number.",
+  { id: "ash-street", label: "The town late in the eruption — no blanket", hud: false,
+    focus: "OWNER, 2026-08-16: 'the ash covering the map is not needed... the ash covers everything in a dumb way.' Before-side: the downwind town greyed over by the quad blanket, deep in fog. After: the blanket, the ash rain and the choke are gone — the town keeps its own colour for the whole event and the eruption reads on the mountain, not as a map-wide grey filter.",
     act: { force: "volcano", untilState: "active", extraSecs: 17.5 },
     cam: { x: 46, y: 15, z: 662, ax: -6, ay: 3, az: 618 } },
 
@@ -488,10 +488,14 @@ export default {
     vol_ventGlows: { label: "Incandescent vent aprons", better: "higher" },
     vol_ashColumns: { label: "Sprite ash columns", better: "higher" },
     vol_pyroLive: { label: "Pyroclastic flows live", better: "higher" },
-    vol_ashPeakDepth: { label: "Peak ash depth", unit: "m", better: "higher" },
+    /* The ash blanket was deliberately REMOVED on 2026-08-16 (owner: "the
+       ash covering the map is not needed"), so its old higher-is-better
+       rows would paint the fix red. The depth stays printed — reading 0 on
+       the after side IS the feature — and the roof-collapse row goes with
+       the mechanic that fed it. */
+    vol_ashPeakDepth: { label: "Ash covering the map (removed)", unit: "m", better: "lower" },
     audit_pyroRuns: { label: "Pyroclastic runs", better: "higher" },
     audit_laharRuns: { label: "Lahar runs", better: "higher" },
-    audit_ashRoofCollapses: { label: "Roofs lost to ash load", better: "higher" },
     tickAvgMs: { label: "Sim tick avg", unit: "ms", better: "lower" },
     tickMaxMs: { label: "Sim tick worst", unit: "ms", better: "lower" },
     drawCalls: { label: "Draw calls", better: "lower" },
