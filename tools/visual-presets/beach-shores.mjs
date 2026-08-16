@@ -138,14 +138,27 @@ async function stageBeach(input) {
     const up = await until(() => CBZ.game.mode === "city" && CBZ.city && CBZ.city.arena &&
       CBZ.city.arena.shore, 240000, 300);
     if (!up) return { ok: false, err: "city never built" };
-    // survival's survEnv drives scene.fog every frame IN survival and nothing
-    // on the way out restores the city's own range — the second full run
-    // photographed a white city through survival fog. Re-apply the quality
-    // tier (it re-derives city fog) and floor the range in case a disaster
-    // env left it tighter still.
+    /* setMode only BUILDS a lazily-built world — the city arrives with its
+       root HIDDEN (the campaign builds it in the background from prison) and
+       only the mode's reset() shows it, batches it, installs the floor and
+       teleports the player. Real play always runs reset on run start; a
+       probe after run 3 measured the miss here: rootChainVisible
+       ["Group:false"], 334,585 meshes standing invisible, 45 draw calls of
+       white. Run the mode's OWN entry path, then belt-and-braces the root. */
+    try { if (CBZ.modes && CBZ.modes.city && CBZ.modes.city.reset) CBZ.modes.city.reset(CBZ.game); } catch (_) {}
+    if (CBZ.city.arena.root && CBZ.city.arena.root.visible === false) CBZ.city.arena.root.visible = true;
+    // survival's survEnv drove scene.fog every frame; re-derive the city's
+    // own range and floor it in case a disaster env left it tighter still
     try { if (CBZ.setQualityLevel) CBZ.setQualityLevel(3); } catch (_) {}
     const f2 = CBZ.scene.fog;
     if (f2 && f2.far < 900) { f2.near = Math.max(f2.near, 220); f2.far = 1400; }
+    // stand the player on the beach so the 170 m distance gates (lifeguard,
+    // vendors, anglers, sunbathers) man their stations before the shot
+    const SH2 = CBZ.city.arena.shore;
+    if (CBZ.player && CBZ.player.pos && SH2 && SH2.beach) {
+      CBZ.player.pos.set((SH2.beach.x0 + SH2.beach.x1) / 2, 0, SH2.ES + 12);
+      if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.position.copy(CBZ.player.pos);
+    }
   }
 
   // park the player out of frame-critical spots and keep him alive
