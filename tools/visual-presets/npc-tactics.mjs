@@ -293,6 +293,11 @@ async function stageNpcTactics(input) {
           if (m.state === "flee" || m.state === "confront") { m.state = "fight"; if (PA) m.rage = PA; }
           m.fear = 0; m.surrender = false; m.surrenderT = 0;
           if (m.ammo < 40) m.ammo = 400;
+          // and CAST HEALTH IS WARDROBE: partners' crossfire kept killing the
+          // staged 32%-hp man mid-take, and a dead pooled rig recycles to a
+          // far spawn (the deterministic "753 m gained" of v4/v5). Health
+          // holds at its staged level for the length of the take.
+          if (m._stageHp != null && m.hp < m._stageHp) m.hp = m._stageHp;
         }
         CBZ.stepSim(1 / 60);
         const W = S.watch;
@@ -395,7 +400,7 @@ async function stageNpcTactics(input) {
       continue;
     }
     m.rage = null; m.state = "walk";
-    m.armed = false; m.weapon = null;
+    m.armed = false; m.weapon = null; m._stageHp = null;
     if (CBZ.syncActorWeapon) { try { CBZ.syncActorWeapon(m); } catch (_) {} }
   }
   S.cast.length = 0;
@@ -513,6 +518,7 @@ async function stageNpcTactics(input) {
     m.hp = act.hurtIdx === i ? Math.round(m.maxHp * (act.hurtHp || 0.3)) : m.maxHp;
     m.fear = 0; m.surrender = false; m.ko = 0; m.path = null;
     m.attackCD = 0; m.pause = 0; m.stun = 0; m._windup = 0;   // no stale combat locks from a past life
+    m._stageHp = m.hp;                                        // health is wardrobe (see S.step)
     m.rage = PA; m.state = "fight"; m.alarmed = 8;
     // fresh tactical memory so the previous subject can't leak into this one
     m._iqPos = null; m._iqPlant = false; m._iqBear = null; m._iqCov = null;
