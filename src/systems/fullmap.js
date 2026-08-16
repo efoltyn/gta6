@@ -1934,8 +1934,10 @@
       }
       stats.icons++;
       pickAdd(mx, mz, sz + 2, "racket", s.name,
-        (s.mine ? "Pays YOU" : "Pays the " + ((CBZ.cityGangById && CBZ.cityGangById(s.gang)) || { name: "crew" }).name) +
-        (s.mine && s.owed > 0 ? " · $" + s.owed + " waiting" : ""), lot.cx, lot.cz);
+        (s.owner ? s.owner + " — " : "") +
+        (s.mine ? "pays you" : "pays the " + ((CBZ.cityGangById && CBZ.cityGangById(s.gang)) || { name: "crew" }).name) +
+        " $" + (s.trib || 0) + "/day" +
+        (s.mine && s.owed > 0 ? " · $" + s.owed + " in the drawer" : ""), lot.cx, lot.cz);
     }
   }
 

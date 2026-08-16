@@ -345,6 +345,15 @@ CBZ.step(6); CBZ.setDay(CBZ.dayCount() + 1); CBZ.step(6); CBZ.step(6);   // one 
 CBZ.setDay(CBZ.dayCount() + 1); CBZ.step(6); CBZ.step(6);                // two: accrue + delegate
 check("runners walk the rounds", (g.cityBank | 0) > 0, "$" + (g.cityBank | 0) + " banked by the crew");
 
+// ---- (e) THE WORLD HAS NAMES: a stable proprietor per store, a readable book
+const feed = CBZ.cityRacketStores();
+check("owners named", feed.length > 0 && feed.every((s) => s.owner && s.owner.indexOf(" ") > 0 && s.trib > 0),
+  feed[0] ? feed[0].owner + " runs " + feed[0].name + " ($" + feed[0].trib + "/day)" : "no feed");
+const keeper2 = circuit.building.vendor;
+check("keeper wears the name", keeper2 && keeper2.name && keeper2.name.indexOf(" ") > 0, keeper2 && keeper2.name);
+const book = CBZ.cityRacketBook();
+check("the book reads", !!book && book.stores >= 3, book ? book.stores + " stores, $" + book.owed + " in drawers" : "none");
+
 // ---- 10) PERSISTENCE roundtrip ----
 const blob = CBZ.cityRacket.serialize();
 check("blob", !!blob && blob.v === 1 && blob.seed === (CBZ.WORLD_SEED >>> 0) && blob.stores.length >= 2, (blob ? blob.stores.length : 0) + " stores ride");
