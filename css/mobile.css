@@ -371,7 +371,14 @@ body.touch .ikey { display: none !important; }
    under the #interact card. Container stops capturing: only pills tap. */
 body.touch #cityStoragePrompt, body.touch #cityAircraftPrompt, body.touch #bankPrompt,
 body.touch #pawnPrompt, body.touch #jewelryPrompt, body.touch #clothingPrompt,
-body.touch #gunstorePrompt, body.touch #shopliftPrompt {
+body.touch #gunstorePrompt, body.touch #shopliftPrompt,
+/* #citySwimPrompt was simply never added to this list. Its module div carries
+   the same desktop chrome every prompt div carries — a translucent slab, a 1px
+   blue border, 7x16 padding — which is correct behind a "[Space] climb out"
+   STRING and wrong behind a pill: on touch it drew a second box hugging the
+   CLIMB OUT button, so the button appeared to be sitting in a shadow. It is the
+   band's ninth tenant now, flattened like the other eight. */
+body.touch #citySwimPrompt {
   /* 158 -> 168: the spoken-word band (below) now occupies 120..~160 on a
      landscape tablet, which is where the pill's own top edge used to sit. Ten
      pixels is the whole correction — a 52px pill still runs 168..220 and the

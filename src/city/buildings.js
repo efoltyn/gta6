@@ -1561,6 +1561,17 @@
      already there. A collider with no mesh stays non-carvable, as before. */
   const carveBounds = window.THREE && THREE.Box3 ? new THREE.Box3() : null;
   const carveBand = { y0: 0, y1: 0, derived: false };
+  /* The LONG horizontal axis a band-less collider must span to count as a WALL
+     rather than a post (see the eligibility loop in carveHole). Deliberately
+     the plain "how wide is it" test and NOT an aspect ratio: a ratio veto
+     rejected the 1.4 m-thick × 2.5 m heavy wall that tools/breach-check.mjs
+     opens with the heavy explosive rows (2.5/1.4 = 1.79), which is a real wall
+     and must still open. Every band-less thing in the city that is ALSO thin
+     enough to reach this test is street furniture spanning ≤ 0.84 m (the
+     widest is a barrel), so 1.2 m clears the largest offender by 43% while
+     sitting well under the 2.5 m the probe itself uses to recognise a wall.
+     City facades never reach this test at all — they declare y0/y1. */
+  const POST_SPAN = 1.2;
   function wallBandOf(c) {
     if (c.y0 != null && c.y1 != null && isFinite(c.y0) && isFinite(c.y1)) return c;   // zero-alloc hot path
     if (!c.ref || c.ref.visible === false || !carveBounds) return null;
@@ -1581,7 +1592,11 @@
   // by a probe walking a body at the hole. Publishing them turns the next
   // "the hole doesn't work" into one call instead of another probe round.
   const carveDbg = {};
-  CBZ.cityBreachAudit = function () { return Object.assign({}, carveDbg); };
+  // `live` = how many carves are on the books right now. tools/prop-blast-check
+  // reads it across a detonation to prove a blast against a lamp post opens
+  // NOTHING — the count is the only way to tell "refused" from "carved
+  // something else nearby" without walking the scene graph.
+  CBZ.cityBreachAudit = function () { return Object.assign({ live: cityBreaches.length }, carveDbg); };
 
   function carveHole(x, y, z, r, opts) {
     opts = opts || {};
@@ -1614,6 +1629,28 @@
       // breach.js raises this ceiling as its ledger crosses the heavier rows,
       // so a thick wall opens when the POUNDS say it does. Default unchanged.
       if (Math.min(c.maxX - c.minX, c.maxZ - c.minZ) > maxThick) continue;   // thick = counters/plinths, skip
+      /* A POST IS NOT A WALL (owner-filmed: an RPG into a STREET LAMP).
+         Every street prop in the city — lamp masts, sign poles, hydrants,
+         bollards, parking meters, tree trunks — registers through props.js
+         solidCollider(x, z, r, ref), which pushes a SQUARE footprint box and
+         no y-band. The band therefore comes from `derived` above, off the
+         mesh, and a 5.6 m lamp mast on a 0.34 m box clears BOTH gates: taller
+         than 1.6, thinner than 0.9. So the rocket picked the lamp as its
+         "wall", hid the mast, and — because a lamp's parent group is
+         translated to the kerb, which is exactly what `freeStanding` reads as
+         "there is a building behind this" — dressed the full interior room
+         over the sidewalk: an ~8 m unlit-white pocket liner, a glowing
+         ceiling slab, furniture silhouettes, and a ~57-piece rubble heap on
+         the grass. None of it existed; it was a lamp.
+         A wall is a RUN: it spans. A footprint under POST_SPAN in BOTH
+         horizontal axes is a post, and the file already refuses to open piers.
+         Gated to DERIVED bands only, so every first-class wall collider (which
+         declares y0/y1) keeps its exact old eligibility — including the
+         measured 0.6 m facade segments — while the prison's 5.5 m band-less
+         wall boxes and the heavy-explosive test wall still pass. The blast
+         still scars, shakes, shatters glass and throws its debris at a post;
+         it just no longer remodels one into an apartment. */
+      if (band.derived && Math.max(c.maxX - c.minX, c.maxZ - c.minZ) < POST_SPAN) continue;
       const mt = c.ref.material; if (mt && mt.transparent) continue;    // glass/doors keep their own systems
       const sx = Math.max(c.minX, Math.min(c.maxX, x)), sz = Math.max(c.minZ, Math.min(c.maxZ, z));
       const dx = x - sx, dz = z - sz, dd = dx * dx + dz * dz;
@@ -1830,6 +1867,19 @@
       // but a carve on a wall NEAR it swept the perimeter collider out of the
       // opening — "PERIMETER BREACHED" through the side door.
       if (o.noBreach) continue;
+      /* AND NEITHER DOES A LAMP POST. This sweep exists to clear the WALL
+         SEGMENTS that sit inside the new opening — the sill course under it,
+         the neighbouring facade boxes it now spans. It clears them by splicing
+         the collider and hiding the mesh. A post standing on the pavement in
+         front of the facade is within `planeTol` of the wall plane and is
+         narrow enough to fall "wholly inside the hole", so a rocket into the
+         shopfront behind it deleted the lamp as collateral — measured by
+         tools/prop-blast-check.mjs, which caught a 7 m mast vanishing from a
+         blast that never carved it. Same rule as the eligibility loop: a
+         band-less collider that does not SPAN is street furniture, and street
+         furniture is not part of the wall it happens to stand near. */
+      if (o.y0 == null && o.y1 == null &&
+          Math.max(o.maxX - o.minX, o.maxZ - o.minZ) < POST_SPAN) continue;
       const oFixed = horiz ? (o.minZ + o.maxZ) / 2 : (o.minX + o.maxX) / 2;
       if (Math.abs(oFixed - fixed) > planeTol) continue;
       // a heightless collider is full-height, so it always overlaps
@@ -1936,8 +1986,20 @@
        behind: built there, the prefab stands proud in the open as a lit
        little house on the spot the rocket cleared. A lone slab keeps only
        what blasted concrete leaves — the remnant flanks, the fractured rim,
-       the scorch and the debris the fracture chain already throws. */
-    if (freeStanding) {
+       the scorch and the debris the fracture chain already throws.
+
+       AND `freeStanding` DOES NOT CATCH EVERY LONE SLAB. It infers "there is a
+       volume behind this wall" from the parent group being TRANSLATED — but
+       every street prop in the city is a group translated to its own kerb, so
+       a lamp mast, a sign post or a fence panel reads as facade and gets the
+       whole prefab built in the open air (owner-filmed: an RPG into a street
+       lamp). The collider gates above stop props being picked as walls at all
+       now; this is the second wall of that fence, and it asks the question
+       directly instead of inferring it — a building is metres across in BOTH
+       horizontal axes, a prop group is its own pole. Only walls too short to
+       be architecture on their own pay for the bounds traversal, so the
+       common city-facade path is untouched. */
+    if (freeStanding || propSized()) {
       buildRim();
       cityBreaches.push(rec);
       return rec;
@@ -2045,6 +2107,38 @@
 
     cityBreaches.push(rec);
     return rec;
+
+    // Is the thing we just carved PROP-SIZED rather than a building? A hoisted
+    // function so the free-standing early-out above can call it. Returns false
+    // fast for any wall long enough to be architecture on its own (the whole
+    // city-facade path), so the Box3 traversal only ever runs on the short,
+    // suspicious boxes — a lamp mast, a fence post, a sign.
+    function propSized() {
+      if (len >= 3.0) return false;              // a 3 m run is a wall, whatever it hangs off
+      if (!parent || !carveBounds) return false;
+      /* CHEAP ANSWER FIRST. A city facade is a RUN of short segments, so
+         `len < 3` is the COMMON case here, not the exotic one — and the bounds
+         traversal below walks a whole building's mesh tree. A building group
+         carries a collider per wall box per storey per face; a prop group
+         carries its own post and nothing else. Counting siblings is one pass
+         over a flat array with an early-out, so the ordinary facade carve
+         answers "yes, a building" almost immediately and never pays for the
+         traversal. Only the genuinely ambiguous few reach the Box3. */
+      let sib = 0;
+      for (let i = 0; i < CBZ.colliders.length; i++) {
+        const o = CBZ.colliders[i];
+        if (o !== c && o.ref && o.ref.parent === parent && ++sib >= 4) return false;
+      }
+      try {
+        carveBounds.setFromObject(parent);
+        if (carveBounds.isEmpty && carveBounds.isEmpty()) return false;
+        const bw = carveBounds.max.x - carveBounds.min.x;
+        const bd = carveBounds.max.z - carveBounds.min.z;
+        if (!isFinite(bw) || !isFinite(bd)) return false;
+        carveDbg.parentFootprint = [+bw.toFixed(2), +bd.toFixed(2)];
+        return Math.min(bw, bd) < 3.0;           // narrower than a corridor = furniture
+      } catch (e) { return false; }
+    }
 
     // --- FRACTURED RIM: 8-13 jittered concrete prisms ringing the opening in
     //     a radial crack pattern, a few HANGING into the gap as cracked
@@ -8407,7 +8501,11 @@
       const trunkH = TREES2 ? th + 0.15 : th;
       const trunk = add(new THREE.BoxGeometry(0.45, trunkH, 0.45), 0x6b4a2a, x, TREES2 ? th / 2 + 0.025 : th / 2 + 0.1, z);
       trunk.castShadow = true;
-      CBZ.colliders.push({ minX: x - 0.3, maxX: x + 0.3, minZ: z - 0.3, maxZ: z + 0.3, ref: trunk, noCam: true });
+      // noBreach: a plaza tree is a 0.6 m square box with a tall trunk mesh on
+      // it and no y-band — the exact profile carveHole's derived-band path
+      // mistakes for a wall panel (see the eligibility loop's POST_ASPECT note,
+      // and city/props.js:solidCollider for the filmed lamp-post case).
+      CBZ.colliders.push({ minX: x - 0.3, maxX: x + 0.3, minZ: z - 0.3, maxZ: z + 0.3, ref: trunk, noCam: true, noBreach: true });
       const parts = TREES2 ? [x - 0.225, -0.05, z - 0.225, x + 0.225, th + 0.1, z + 0.225] : null;
       if (vi++ % 2 === 0) {
         if (TREES2) {
