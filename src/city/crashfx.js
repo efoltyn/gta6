@@ -1338,12 +1338,27 @@
   // larger slab fragments, all seated on the true ground (floorAt).
   // cx,cz = the wall-base point under the wound; nx,nz = outward normal (the
   // heap spills onto the street side); spread/size scale with the hole width.
+  /* A HEAP IS STACKED, NOT SPRINKLED (owner: "a bunch of fake blocks that are
+     supposed to be rubble"). Every piece here is born `settled: true` — it
+     never falls — and the old placement put it at `ground + hh + rng()*mound`,
+     a height drawn at RANDOM up to the local mound ceiling. So a piece could
+     be handed 1.3 m of air under it with nothing beneath, and the "pile" came
+     out as boxes hanging at unrelated heights over the pavement. That is
+     exactly what reads as fake: real rubble is in contact — each lump rests on
+     the ground or on the lump below it.
+     So carry a coarse height-field over the footprint and seat every piece on
+     whatever is already there. Pieces still cluster against the wall and taper
+     outward (the r² draw below), but now the mound builds itself out of real
+     contacts instead of being faked with a random offset, and `mound` becomes
+     a CEILING on how high the pile may grow rather than a lottery. */
+  const HEAP_CELL = 0.55;               // height-field resolution (≈ one lump wide)
+  const heapTop = new Map();            // "i,j" -> current top of the pile in that cell
   function rubbleHeap(cx, cz, nx, nz, spread, size, count) {
     // tangent along the wall so the pile is wider than it is deep
     let tx = -nz, tz = nx; const tl = Math.hypot(tx, tz) || 1; tx /= tl; tz /= tl;
     const groundN = nNorm(nx, nz);
     const gx = groundN.x, gz = groundN.y;
-    const base = floorAt(cx, cz);
+    heapTop.clear();                    // one field per heap — piles don't stack across events
     for (let i = 0; i < count; i++) {
       while (chunks.length > CHUNK_CAP - 1) recycleChunk();
       // bias placement toward the wall + low; pieces farther out sit lower so the
@@ -1352,15 +1367,33 @@
       const along = (rng() - 0.5) * spread * 1.6;
       const px = cx + gx * (0.35 + out) + tx * along;
       const pz = cz + gz * (0.35 + out) + tz * along;
-      // mound height: tall against the wall, thinning outward, plus jitter
+      // how high the pile is ALLOWED to grow here: tall against the wall,
+      // thinning outward. A ceiling now, not the height itself.
       const mound = Math.max(0, (1 - out / (spread + 0.01))) * size * 0.9;
       const big = rng() < 0.28;
-      const sc = Math.min(1.8, (big ? 1.1 + rng() * 0.7 : 0.55 + rng() * 0.65) * Math.min(1.25, size));
+      /* MASONRY, NOT MASONRY BLOCKS. `sc` was capped at 1.8, which on rubbleGeo
+         is a 1.0 x 0.7 x 1.26 m box — waist-high on the player, so the heap
+         read as a stack of crates rather than shattered concrete. Capped to
+         sub-metre: the biggest fragment is now ~0.7 m on its long axis, which
+         is what a slab actually breaks into, and the pile gets its bulk from
+         the stacking above instead of from four enormous boxes. */
+      const sc = Math.min(1.15, (big ? 1.1 + rng() * 0.7 : 0.55 + rng() * 0.65) * Math.min(1.25, size));
       const mesh = new THREE.Mesh(big ? rubbleGeo : chunkGeo, rng() < 0.5 ? rubbleMat : rubbleMat2);
       mesh.scale.set(sc, sc * (0.6 + rng() * 0.5), sc * (0.8 + rng() * 0.5));
       const hh = (big ? 0.2 : CHUNK_HH) * sc;
-      mesh.position.set(px, floorAt(px, pz) + hh + rng() * mound, pz);
+      // SEAT IT ON WHAT IS ALREADY THERE. The cell's current top, or the ground
+      // if this is the first piece to land here — never on air.
+      const gy = floorAt(px, pz);
+      const key = Math.round(px / HEAP_CELL) + "," + Math.round(pz / HEAP_CELL);
+      const top = heapTop.has(key) ? heapTop.get(key) : gy;
+      // a full pile in this cell spills back down to the deck rather than
+      // growing a tower — that is what makes the mound taper instead of spike.
+      const seat = (top - gy) > mound ? gy : top;
+      mesh.position.set(px, seat + hh, pz);
       mesh.rotation.set(rng() * 3, rng() * 6.28, rng() * 3);
+      // lumps interlock, so the next piece rises by rather less than a full
+      // height — a loose-packed heap, not a neat column of boxes.
+      heapTop.set(key, seat + hh * (1.1 + rng() * 0.5));
       scene.add(mesh);
       // born SETTLED — it's a heap, it doesn't fly. Long rest = persistent prop.
       chunks.push({ mesh, vx: 0, vy: 0, vz: 0, hh, spin: 0, t: 0, life: 1,
@@ -1835,6 +1868,24 @@
   // still read 0. groundScorches / groundSmolders are printed BESIDE them so a
   // "fix" that quietly kills the legitimate pavement stain (or the smoking
   // crater) cannot pass as a win — they must stay NON-ZERO after a ground blast.
+  // ---- CBZ.cityDebrisDump() — every live chunk's seat, for QA -------------
+  // The rubble HEAP is the class the owner called "fake blocks": pieces born
+  // `settled: true` that never fall, so whatever height they are handed is
+  // where they stay forever. tools/prop-blast-check.mjs reads this to assert
+  // each settled piece is in contact with the ground or with another piece —
+  // a check you cannot make from outside, because the seat is baked into the
+  // mesh position at spawn and nothing ever revisits it. Debug/QA only; no
+  // gameplay path calls it, and it allocates only when asked.
+  CBZ.cityDebrisDump = function () {
+    const out = [];
+    for (let i = 0; i < chunks.length; i++) {
+      const c = chunks[i]; if (!c || !c.mesh) continue;
+      out.push({ x: c.mesh.position.x, y: c.mesh.position.y, z: c.mesh.position.z,
+        hh: c.hh, heap: !!c.heap, settled: !!c.settled });
+    }
+    return out;
+  };
+
   CBZ.wallMarkAudit = function () {
     return {
       wallScars: scars.length, wallWounds: wounds.length,

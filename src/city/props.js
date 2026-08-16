@@ -1477,9 +1477,21 @@
 
     // a tidy collider for solid props (cars crash, peds can't pass). noCam so the
     // chase camera never snaps in on a thin pole.
+    /* STREET FURNITURE IS NOT ARCHITECTURE. Every caller below is a lamp mast,
+       a signal pole, a sign, a meter, a bollard, a bin, a barrel, a bus
+       shelter, a tree trunk — a prop standing in the open. None of them
+       declare a y-band, so buildings.js's carve primitive DERIVES one off the
+       mesh, and a 5.6 m lamp mast on a 0.34 m box then reads as "tall, thin,
+       opaque" — the exact profile of a wall panel. Owner-filmed: an RPG into a
+       street lamp hid the mast and built the city's interior-room prefab in
+       mid-air over the sidewalk, with a rubble heap for a lamp that weighs
+       nothing. `noBreach` is the existing, honoured opt-out (world/yard.js's
+       perimeter uses it): the blast still scars, shakes, shatters glass and
+       throws its debris here — the prop just never gets carved open, and never
+       gets swept away as a "neighbour" of a real facade carve either. */
     function solidCollider(x, z, r, ref, noCam) {
       if (!CBZ.colliders) return;
-      CBZ.colliders.push({ minX: x - r, maxX: x + r, minZ: z - r, maxZ: z + r, ref, noCam: noCam !== false });
+      CBZ.colliders.push({ minX: x - r, maxX: x + r, minZ: z - r, maxZ: z + r, ref, noCam: noCam !== false, noBreach: true });
     }
 
     function doorLots() {

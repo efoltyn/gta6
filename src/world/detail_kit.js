@@ -756,7 +756,13 @@
     if (!CBZ.colliders) return;
     // noCam: the chase camera must never snap in on a bollard or a pole
     // (city/props.js:solidCollider sets the same flag for the same reason).
-    const c = { minX: x - rx, maxX: x + rx, minZ: z - rz, maxZ: z + rz, ref: ref || null, noCam: true };
+    // noBreach: same source, same reason — nothing this function registers is
+    // architecture, so nothing it registers may be carved open by a blast or
+    // swept away as a neighbour of one. A tall thin band-less collider with a
+    // mesh on it is indistinguishable from a wall panel to buildings.js's
+    // carve primitive, which is how an RPG turned a street lamp into a lit
+    // apartment (see city/props.js:solidCollider for the filmed case).
+    const c = { minX: x - rx, maxX: x + rx, minZ: z - rz, maxZ: z + rz, ref: ref || null, noCam: true, noBreach: true };
     // Only ATTACH the height gate when there is one — core/batch.js:376 keys
     // its carveable-wall test on `c.y1 == null`, so an explicit undefined is
     // equivalent but a missing key is what every other producer writes.
