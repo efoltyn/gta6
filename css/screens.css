@@ -398,10 +398,10 @@ body.mode-gungame #survBars .sbar{ gap:0; }
    game got the bottom-CENTRE hotbar AND the free-floating strip bottom-right,
    two readouts of the same one gun. The dock now covers gun game too (see
    dockWeaponStrip), and since a gun-game player carries no contraband at all,
-   the nine empty item cells and the BAG button come off with it: what is left
-   is a single chip showing the rung you are holding. */
-body.mode-gungame #hotbar .islot,
-body.mode-gungame #invBagBtn{ display:none !important; }
+   the nine item cells come off with it (the BAG button this rule once hid is
+   gone from every mode): what is left is a single chip showing the rung you
+   are holding. */
+body.mode-gungame #hotbar .islot{ display:none !important; }
 
 /* the ladder panel (gungamehud.js builds it; the NEXT line is the gradient) */
 #gungameHud{

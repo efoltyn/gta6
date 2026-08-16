@@ -282,6 +282,24 @@ html, body { touch-action: none; -webkit-user-select: none; user-select: none; }
   #tbtns #tscope  { order: 7; }
   #tbtns #thoming { order: 8; }
   #tbtns #trecen  { order: 9; }
+  /* AIM PRINTED ON TOP OF SWAP (owner screenshot, iPhone landscape,
+     2026-08-16). The .tslide seat parks AIM/SCOPE absolutely at
+     right:calc(100% + 12px) — just left of the #tbtns box. In THIS wrap
+     regime that strip of glass is where the spill column lands on the
+     browser the screenshot came from: WebKit does not widen a column flex
+     container's box for wrapped lines, so line 2 draws OUTSIDE the box
+     (cross-start being the right edge) and the absolutely-seated AIM
+     prints on the spill column's bottom cell — SWAP, per the order ladder
+     above. Two buttons, one spot. (Chromium grew the box when it fixed
+     intrinsic sizing of wrapped columns, so there the same CSS instead
+     strands AIM out past the spill column — wrong on both engines, just
+     differently.) On short viewports the pair simply rejoins the flow and
+     spills with everyone else per orders 6/7, which is what the ladder
+     always planned ("what spills is the situational half — AIM, SCOPE"),
+     and which no engine can misplace. Tall viewports never wrap
+     (flex-wrap exists only inside this media block), so the
+     beside-the-trigger seat survives everywhere it worked. */
+  #tbtns.tslide #taim, #tbtns.tslide #tscope { position: static; }
   /* #tfire.tpad::after (the drag ring) is deliberately NOT rescaled: it is
      drawn from PAD_MAXR, so it states how far the held thumb may actually
      roam. Shrinking it to match the smaller roundel would make it a decoration
