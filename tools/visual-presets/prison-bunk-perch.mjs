@@ -26,19 +26,23 @@
    +-0.525 m wide. */
 
 const subjects = [
-  { id: "perch-across", label: "Sitting on his bunk", hud: false,
-    focus: "Straight across the bed from inside the cell. The hips belong ON the mattress with the thighs coming off its near edge and the soles on the concrete. BEFORE: the whole body floats beside the frame at mattress height, sitting on nothing.",
+  { id: "perch-across", label: "Perched on the edge", style: "edge", hud: false,
+    focus: "Straight across the bed. The hips belong ON the mattress with the thighs coming off its near edge, the soles on the concrete, and the head clear of the rack above. BEFORE: the body floats beside the frame at mattress height with its skull inside the steel.",
     cam: { lat: 3.0, along: 1.25, y: 1.45, aimLat: 0.34, aimY: 0.82, aimAlong: 0.0 } },
-  { id: "perch-low", label: "Hips and mattress", hud: false,
-    focus: "Camera on the mattress plane. This is the contact test: is there bed under the man, or air between his weight and the frame?",
+  { id: "perch-low", label: "Hips and mattress", style: "edge", hud: false,
+    focus: "Camera on the mattress plane. The contact test: is there bed under the man, or air between his weight and the frame?",
     cam: { lat: 2.1, along: 1.9, y: 0.86, aimLat: 0.30, aimY: 0.78, aimAlong: 0.15 } },
-  { id: "perch-foot", label: "From the foot of the bed", hud: false,
-    focus: "Down the bed's long axis. Reads the FACING: a man perched on a bunk faces out of it across the short axis, never straddling it lengthways at the door.",
-    // Kept off the bunk's own foot post (lat 0.60, along 1.28 in this frame):
-    // a corner post through the subject reads as a staging accident.
-    cam: { lat: 1.9, along: 2.4, y: 1.35, aimLat: 0.30, aimY: 0.80, aimAlong: -0.1 } },
-  { id: "stack-whole", label: "The whole stack", hud: false,
-    focus: "Both racks and the ladder. Raising the upper rack has to leave a bunk, not a scaffold: the ladder grows the rung it needs, the rail and posts travel with the deck, and the top mattress stays well under a 3.6 m cell roof.",
+  { id: "sit-back", label: "Sat back in the bed", style: "back", hud: false,
+    focus: "The relaxed read the owner asked for: hips down the mattress, shoulders against the wall the pillow is under, legs run out ALONG the bed instead of hanging off it. Note the lean is backward and the head still clears the rack — the duck solve runs mirrored.",
+    cam: { lat: 2.7, along: 0.1, y: 1.42, aimLat: 0.06, aimY: 0.90, aimAlong: -0.40 } },
+  { id: "sit-back-side", label: "Sat back, from the foot", style: "back", hud: false,
+    focus: "Down the bed's own axis. Both shins should lie along the mattress with the heels on the bedding, not folded down through the frame.",
+    cam: { lat: 1.75, along: 2.5, y: 1.55, aimLat: 0.05, aimY: 0.86, aimAlong: -0.55 } },
+  { id: "sit-brace", label: "Braced back on his arms", style: "brace", hud: false,
+    focus: "Half relaxed: feet still on the concrete, weight thrown back onto straight arms planted behind the hips. The third posture exists so a row of cells does not read as one animation played thirteen times.",
+    cam: { lat: 2.8, along: 1.5, y: 1.40, aimLat: 0.34, aimY: 0.88, aimAlong: 0.1 } },
+  { id: "stack-whole", label: "The whole stack", style: "edge", hud: false,
+    focus: "Both racks and the ladder from the aisle. Raising the upper rack has to leave a bunk, not a scaffold: the ladder grows the rung it needs, rail and posts travel with the deck, and the top mattress stays well under a 3.6 m cell roof.",
     cam: { outside: true, lat: 2.6, y: 1.75, aimLat: 0.0, aimY: 1.42, aimAlong: 0.0 } },
 ];
 
@@ -114,21 +118,32 @@ async function stagePerch(input) {
      ambient pose is exactly what is under test. */
   const wing = CBZ.cellblock;
   if (!wing || !wing.cells) return { ok: false, err: "no cellblock" };
-  if (!S.cell) {
+  /* ONE CELL PER POSTURE, and a REAL one: the wing hashes each cell's posture
+     from its own coordinates (CBZ.cellblock.bunkStyle), independently of the
+     flags, so both sides of the comparison photograph the same man in the
+     same cell doing the same thing. Nothing here forces a pose that the live
+     wing would not have chosen by itself — the flag decides how it is played,
+     never who plays it. */
+  S.byStyle = S.byStyle || {};
+  const want = input.subject.style || "edge";
+  if (!S.byStyle[want]) {
     const live = wing.cells.filter((c) => c && c.bunk && c.owner && c.owner !== "player" &&
       c.owner.group && c.owner.char && !c.owner.dead && !c.owner.escaped);
-    const c = live.find((x) => x.owner._cellPose === "bunk") || live[0];
-    if (!c) return { ok: false, err: "no cell resident" };
+    const styleOf = (c) => (wing.bunkStyle ? wing.bunkStyle(c) : "edge");
+    const c = live.find((x) => styleOf(x) === want && x.owner._cellPose === "bunk") ||
+      live.find((x) => styleOf(x) === want) || live[0];
+    if (!c) return { ok: false, err: "no cell resident for " + want };
     const n = c.owner;
     n._cellPose = "bunk";
     try { if (n._propBed && CBZ.propWake) CBZ.propWake(n, { instant: true }); } catch (_) {}
     try { if (CBZ.propStand) CBZ.propStand(n, { instant: true }); } catch (_) {}
-    S.cell = c; S.actor = n;
+    S.byStyle[want] = { cell: c, actor: n };
     step(3.5);                       // walk him in and let the seat solve settle
   } else {
-    S.actor._cellPose = "bunk";
+    S.byStyle[want].actor._cellPose = "bunk";
     step(0.5);
   }
+  S.cell = S.byStyle[want].cell; S.actor = S.byStyle[want].actor;
   const cell = S.cell, actor = S.actor;
   /* The upper-rack beat borrows the same man: propuse owns him while he is in
      a bed, and the wing's leash stands aside for exactly that (`_propBed`), so
@@ -207,7 +222,7 @@ async function stagePerch(input) {
   q("side").style.cssText = `position:absolute;top:22px;left:26px;padding:7px 11px;border-radius:7px;background:${before ? "#c94c4c" : "#218b60"};font-size:12px;font-weight:900;letter-spacing:.12em`;
   q("name").textContent = input.subject.label;
   q("name").style.cssText = "position:absolute;top:72px;left:26px;font-size:22px;font-weight:800;letter-spacing:-.02em;max-width:360px";
-  q("focus").textContent = `cell ${cell.tag || cell.i} · ${(actor.data && actor.data.name) || "inmate"}` +
+  q("focus").textContent = `cell ${cell.tag || cell.i} · ${(actor.data && actor.data.name) || "inmate"} · posture "${actor._bunkStyle || "edge"}"` +
     (seated ? ` · hips ${Math.round(hipLat * 100)} cm from bunk centre (mattress edge 52.5 cm)` : "");
   q("focus").style.cssText = "position:absolute;top:104px;left:27px;color:#c0cfda;font-size:12px;font-weight:550";
   const bad = seated && (overhang > 0 || (headroom != null && headroom < 0));
@@ -231,6 +246,8 @@ async function stagePerch(input) {
       bunkX: Number(b.x.toFixed(3)), bunkZ: Number(b.z.toFixed(3)),
       sitting: !!(actor.char && actor.char.sitting),
       seatKind: (actor.char && actor.char.seatRef && actor.char.seatRef.kind) || null,
+      style: actor._bunkStyle || null,
+      styles: audit.styles || null,
       latCm: audit.latCm,
     },
     metrics: {
@@ -255,7 +272,7 @@ async function stagePerch(input) {
 
 export default {
   id: "prison-bunk-perch",
-  title: "Prison Escape: sitting ON the bunk",
+  title: "Prison Escape: sitting ON the bunk, three ways",
   description: "One cell resident in the ambient \"sit on your bunk\" pose, shot across, along and at mattress height, plus the stack he is sitting on. Before = the same local build with ?cfg_PRISON_BUNK_PERCH=0&cfg_PRISON_BUNK_HEADROOM=0.",
   beforeLabel: "BEFORE · in front of the bed, head in the rack",
   afterLabel: "AFTER · on the bed, under the rack",

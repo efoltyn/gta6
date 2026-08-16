@@ -1094,12 +1094,48 @@
      is against (north/west rows +x, east row -x); every bunk in this wing is
      laid out ALONG Z, so "across the bed" is always X. */
   const PERCH_LAT = 0.34;               // city/propuse.js's bed-edge perch
-  function bunkSpot(c) {
+
+  /* THREE WAYS TO SIT ON YOUR OWN BUNK (owner: "they should be laying back
+     sitting in the bed more relaxed... add more variants, not too many").
+
+     Perching on the edge is what you do when you are ABOUT to do something —
+     waiting for a door, talking through the bars, putting your boots on. It
+     is not what a man does with eight hours of his own bed and nowhere to be,
+     and thirteen cells of identical edge-perchers read as one animation
+     played thirteen times.
+
+     So the wing has three, and no more than three, because each has to earn
+     its geometry:
+
+       edge   perched on the near edge, feet on the concrete, ducked forward.
+       back   the one he asked for — sat INTO the bed at the head end, back
+              against the wall the pillow is under, legs out along the
+              mattress. The lean is BACKWARD; the duck solve below still
+              applies, it just leans the other way.
+       brace  edge again, but weight thrown back onto straight arms planted
+              behind the hips. Half-relaxed: the pose of a man mid-sentence.
+
+     It is a POSITION HASH like cellPose above, so a cell always holds the
+     same man doing the same thing — a trait, not a die re-rolled every few
+     seconds — and it is deliberately independent of PRISON_BUNK_PERCH so a
+     before/after harness can ask which cell is which with the flag off. */
+  function bunkStyle(c) {
+    const r = h01(c.x, c.z, 8451);
+    return r < 0.40 ? "edge" : (r < 0.74 ? "back" : "brace");
+  }
+  function bunkSpot(c, style) {
     const b = c.bunk;
     const lat = c.dz !== 0 ? 1 : c.dx;
-    const off = CFG.PRISON_BUNK_PERCH === false ? 0.62 : PERCH_LAT;
-    return { x: b.x + lat * off, z: b.z, face: Math.atan2(lat, 0) };
+    if (CFG.PRISON_BUNK_PERCH === false) return { x: b.x + lat * 0.62, z: b.z, face: null };
+    if (style === "back") {
+      // Hips a body's depth off the head end, so the shoulders land against
+      // the pillow and the wall behind it, and the legs run down the bed.
+      // Barely off centre laterally: he is IN the bed, not on its lip.
+      return { x: b.x + lat * 0.06, z: b.z - 0.72, face: Math.atan2(0, 1) };
+    }
+    return { x: b.x + lat * PERCH_LAT, z: b.z, face: Math.atan2(lat, 0) };
   }
+  const SEAT_KIND = { edge: "bunk", back: "bunk-back", brace: "bunk-brace" };
 
   let cast = false;
   function dealCast() {
@@ -1109,7 +1145,8 @@
       const c = cells[i];
       if (c.vacant || c.owner) continue;
       const pose = cellPose(c);
-      const seat = pose === "bars" ? barsSpot(c) : (pose === "bunk" ? bunkSpot(c) : { x: c.x, z: c.z });
+      const seat = pose === "bars" ? barsSpot(c)
+        : (pose === "bunk" ? bunkSpot(c, bunkStyle(c)) : { x: c.x, z: c.z });
       const hh = h01(c.x, c.z, 6001);
       let n = null;
       try {
@@ -1211,7 +1248,8 @@
           n.group.rotation.y = CBZ.lerpAngle(n.group.rotation.y, Math.atan2(c.dx, c.dz), 1 - Math.pow(0.02, dt));
         }
       } else if (n._cellPose === "bunk") {
-        const s = bunkSpot(c);
+        const style = n._bunkStyle || (n._bunkStyle = bunkStyle(c));
+        const s = bunkSpot(c, style);
         p.x = s.x; p.z = s.z;
         n.target.set(s.x, 0, s.z);
         n.pause = Math.max(n.pause || 0, 0.6);
@@ -1233,7 +1271,8 @@
           // this particular body needs.
           n.char.seatRef = n.char.seatRef || (CFG.PRISON_BUNK_PERCH === false
             ? { cushion: c.bunk.top, floorBelow: 0 }              // the original, exactly
-            : { cushion: c.bunk.top, floorBelow: 0, kind: "bunk", ceiling: c.bunk.rackUnder });
+            : { cushion: c.bunk.top, floorBelow: 0, ceiling: c.bunk.rackUnder,
+                kind: SEAT_KIND[style] || "bunk" });
           CBZ.setCharPose(n.char, "sit");
         }
       }
@@ -1322,6 +1361,7 @@
     lockAll: lockAll,
     resetDoors: resetDoors,
     playerSpawn: playerSpawn,
+    bunkStyle: bunkStyle,
     // geometry other systems may want without re-deriving it
     height: CH, doorWidth: DOOR_W,
     bounds: { minX: IX0, maxX: IX1, minZ: IZN, maxZ: -7.5 },
@@ -1333,17 +1373,23 @@
      (bunkRig), so anything beyond that is a body sitting on air in front of
      his own bed, and `offMattress` is the count of them. A storyboard can
      publish this beside the picture instead of arguing about the picture. */
-  const MATT_HALF = 0.525;
+  const MATT_HALF = 0.525, MATT_HALF_LON = 1.175;
   CBZ.cellSitAudit = function () {
-    const out = { seated: 0, offMattress: 0, worstOverhangCm: 0, latCm: [] };
+    const out = { seated: 0, offMattress: 0, worstOverhangCm: 0, latCm: [], styles: {} };
     for (let i = 0; i < cells.length; i++) {
       const c = cells[i], n = c.owner;
       if (!n || n === "player" || !c.bunk || !n.group) continue;
       if (n._cellPose !== "bunk" || !n.char || !n.char.sitting) continue;
       const lat = Math.abs(n.group.position.x - c.bunk.x);
+      // Both axes, because "back" sits down the bed rather than across it and
+      // an audit that only measured lateral drift would pass a man sitting on
+      // the pillow, in mid-air, at the head end.
+      const lon = Math.abs(n.group.position.z - c.bunk.z);
+      const st = n._bunkStyle || "edge";
+      out.styles[st] = (out.styles[st] || 0) + 1;
       out.seated++;
       out.latCm.push(Math.round(lat * 100));
-      const over = lat - MATT_HALF;
+      const over = Math.max(lat - MATT_HALF, lon - MATT_HALF_LON);
       if (over > 0) {
         out.offMattress++;
         if (over * 100 > out.worstOverhangCm) out.worstOverhangCm = Math.round(over * 100);
