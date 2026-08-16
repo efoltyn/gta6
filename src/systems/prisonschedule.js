@@ -608,7 +608,7 @@
   }
   // Tear down when the RUN ends, never on a PAUSE: `paused` is a state exit
   // like any other to the shared dispatcher, and unlocking the wing there
-  // would slide thirteen leaves open behind the pause card and slam them shut
+  // would slide twenty-five leaves open behind the pause card and slam them shut
   // again the instant you resumed. (states: title/playing/paused/won/lost —
   // systems/state.js setState.)
   if (CBZ.jailBoost && CBZ.jailBoost.onStateExit) CBZ.jailBoost.onStateExit(reset, ["title", "won", "lost"]);

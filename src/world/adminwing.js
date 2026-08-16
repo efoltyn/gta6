@@ -280,13 +280,39 @@
     for (let i = 0; i < 11; i++) addBox(x1, 1.35, z0 + 0.2 + i * 0.44, 0.08, 2.62, 0.08, 0x2a2f38, { cast: false });
     addBox((x0 + x1) / 2, 2.72, z1, x1 - x0, 0.12, 0.12, 0x2a2f38, { cast: false });
     addBox(x1, 2.72, (z0 + z1) / 2, 0.12, 0.12, z1 - z0, 0x2a2f38, { cast: false });
-    // property shelves inside it, stacked with sealed bags
+    /* PROPERTY SHELVES, AND THEY WERE THE SAME LIE THE CAGES TOLD. This drew
+       three 3.4 x 3.6 m cream planes 7 cm thick — one per level, sized to the
+       WHOLE cage — and scattered twelve bags across them. Measured
+       (prison-rooms baseline, room `admin-records`): the two upper planes are
+       the block's two biggest dead boxes at 0.857 m3 EACH, 1.71 m3 of the
+       admin wing's 3.11 m3 total, and a body walked through all of it.
+       One rack instead: 0.70 m deep against the cage's back wall, three decks,
+       four uprights, ONE collider over its own footprint. The bags stand on
+       the decks in a row where a property clerk would actually put them, and
+       every one of them is inside reach from the aisle. */
+    // PRISON_PROP_HONESTY_V1 (world/cellblock.js) — one-line revert.
+    if (!(CBZ.CONFIG && CBZ.CONFIG.PRISON_PROP_HONESTY_V1 !== false)) {
+      for (let s2 = 0; s2 < 3; s2++) {                 // the shipped shelves, byte for byte
+        addBox(-17.6, 0.6 + s2 * 0.72, -61.0, 3.4, 0.07, 3.6, 0xb9a184, { cast: false });
+        for (let i = 0; i < 4; i++)
+          addBox(-18.8 + i * 0.82, 0.78 + s2 * 0.72, -61.0 + (i % 2) * 0.9, 0.6, 0.28, 0.5,
+            [0xc9c2a8, 0x9aa8b4, 0xbfae8c, 0xa7b09a][i], { cast: false });
+      }
+      return;
+    }
+    const RX0 = -19.20, RX1 = -16.00, RZ = -63.00, RD = 0.70, RH = 2.32;
     for (let s = 0; s < 3; s++) {
-      addBox(-17.6, 0.6 + s * 0.72, -61.0, 3.4, 0.07, 3.6, 0xb9a184, { cast: false });
+      addBox((RX0 + RX1) / 2, 0.58 + s * 0.72, RZ, RX1 - RX0 - 0.14, 0.05, RD - 0.10, 0x9aa2aa, { cast: false });
       for (let i = 0; i < 4; i++)
-        addBox(-18.8 + i * 0.82, 0.78 + s * 0.72, -61.0 + (i % 2) * 0.9, 0.6, 0.28, 0.5,
+        addBox(RX0 + 0.5 + i * 0.73, 0.75 + s * 0.72, RZ, 0.6, 0.28, 0.5,
           [0xc9c2a8, 0x9aa8b4, 0xbfae8c, 0xa7b09a][i], { cast: false });
     }
+    for (const ux of [RX0 + 0.05, RX1 - 0.05]) for (const uz of [RZ - RD / 2 + 0.05, RZ + RD / 2 - 0.05])
+      addBox(ux, RH / 2, uz, 0.08, RH, 0.08, 0x5b6470, { cast: false });
+    addBox((RX0 + RX1) / 2, RH / 2, RZ - RD / 2 + 0.03, RX1 - RX0, RH, 0.05, 0x6f7883, { cast: false });
+    (CBZ.colliders || (CBZ.colliders = [])).push({
+      minX: RX0, maxX: RX1, minZ: RZ - RD / 2, maxZ: RZ + RD / 2, y0: 0, y1: RH });
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
   })();
 
   // ---- RECORDS: the key board. Every door in this prison hangs here, and
@@ -441,6 +467,26 @@
       if (!v) d.picked = 0;
       return v;
     };
+    /* ---- AND A WAY TO SHUT IT: the shared registry in
+       systems/interactions.js, declared exactly as world/prisonwings.js does
+       it. The credential is the tick's own test — the staff door reads the
+       Keycard (or the uniform), the Warden's office is picked, so its spec
+       wants the Lockpick and refuses to be OPENED by a tap: three and a half
+       seconds of picking is the door, and a finger must not skip it. */
+    (CBZ._prisonDoorSpecs || (CBZ._prisonDoorSpecs = [])).push({
+      id: d.id, label: d.label, autoR: 2.3, openByTap: !d.pick,   // tick opens at d2 < 5.2
+      at: function () { return { x: d.x, y: 1.4, z: d.z }; },
+      pick: function () { return [pivot]; },
+      col: function () { return d.collider; },
+      isOpen: function () { return !!d.open; },
+      permanent: function () { return !!d.blown; },
+      canUse: function () {
+        if (d.keys) return !!(CBZ.game && (CBZ.game.hasKey || CBZ.game.role === "cop"));
+        const econ = CBZ.econ;
+        return !!(econ && econ.hasItem && econ.hasItem("Lockpick"));
+      },
+      set: function (v) { d.setOpen(v); return d.open === !!v; },
+    });
     doors.push(d);
     return d;
   }
@@ -792,7 +838,10 @@
     if (!staffDoor.open) {
       const s = staffNear(staffDoor);
       if (s) staffDoor.setOpen(true);
-      else {
+      else if (!(CBZ.prisonDoorLatched && CBZ.prisonDoorLatched("prison-admin-staff"))) {
+        // LAW 3 (systems/interactions.js): a door shut by hand stays shut
+        // while you stand on its reader. Staff above are exempt — the warden
+        // opening his own door is the routine this wing is legible by.
         const dx = P.x - staffDoor.x, dz = P.z - staffDoor.z;
         if (dx * dx + dz * dz < 5.2) {
           const have = !!(g.hasKey || g.role === "cop");

@@ -34,6 +34,7 @@
     "visual:prison-combat": "node tools/visual-compare.mjs --preset prison-combat-looks --keep-going --before https://efoltyn.github.io/gta6/",
     "visual:prison-blood": "node tools/visual-compare.mjs --preset prison-blood --keep-going --before https://efoltyn.github.io/gta6/",
     "visual:prison-shank": "node tools/visual-compare.mjs --preset prison-shank --keep-going --before https://efoltyn.github.io/gta6/",
+    "visual:prison-beds": "node tools/visual-compare.mjs --preset prison-beds --keep-going --before https://efoltyn.github.io/gta6/",
     "visual:prison-outfits": "node tools/visual-compare.mjs --preset prison-outfit-gallery --keep-going --before https://efoltyn.github.io/gta6/",
     "visual:disasters": "node tools/visual-compare.mjs --preset disaster-sequence --keep-going --before https://efoltyn.github.io/gta6/",
     "visual:tsunami": "node tools/visual-compare.mjs --preset tsunami-stages --keep-going --before https://efoltyn.github.io/gta6/",
@@ -42,7 +43,13 @@
     "visual:interiors": "node tools/visual-compare.mjs --preset interiors --before https://efoltyn.github.io/gta6/",
     "visual:npc-gestures": "node tools/visual-compare.mjs --preset npc-gestures --keep-going --before https://efoltyn.github.io/gta6/",
     "visual:role-outfits": "node tools/visual-compare.mjs --preset role-outfit-gallery --keep-going --before https://efoltyn.github.io/gta6/",
-    "visual:captain-fleet": "node tools/visual-compare.mjs --preset captain-fleet --keep-going --before https://efoltyn.github.io/gta6/"
+    "visual:captain-fleet": "node tools/visual-compare.mjs --preset captain-fleet --keep-going --before https://efoltyn.github.io/gta6/",
+    "visual:prison-rooms": "node tools/visual-compare.mjs --preset prison-rooms --keep-going --before https://efoltyn.github.io/gta6/",
+    "visual:prison-doors": "node tools/visual-compare.mjs --preset prison-doors --keep-going --before https://efoltyn.github.io/gta6/",
+    "visual:prison-wing-props": "node tools/visual-compare.mjs --preset prison-wing-props --keep-going --before https://efoltyn.github.io/gta6/",
+    "visual:prison-yard-props": "node tools/visual-compare.mjs --preset prison-yard-props --keep-going --before https://efoltyn.github.io/gta6/",
+    "test:tactics": "node tools/tactics-check.mjs",
+    "visual:npc-tactics": "node tools/visual-compare.mjs --preset npc-tactics --subjects firefight,stop-profile,cover-peek,hide-break --no-open"
   },
   "devDependencies": {
     "three": "^0.164.1",

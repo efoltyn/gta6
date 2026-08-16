@@ -72,7 +72,7 @@ const beats = [
     focus: "End of the 34s formation window. The old build deletes the whole cloud right after this frame.",
     dist: 12500, alt: 650, aim: 4500 },
   { id: "landmark", t: 90.0, label: "t=1:30 — Maturing landmark",
-    focus: "NUKE_FX_AFTERMATH: the cloud keeps growing toward the researched mature object instead of vanishing. Before-side should be empty sky.",
+    focus: "NUKE_FX_AFTERMATH: the cloud keeps growing toward the researched mature object instead of vanishing. (Both sides carry the aftermath since 2026-08-02 — judge shading/haze, not presence.)",
     dist: 16000, alt: 650, aim: 5200 },
   { id: "icon",     t: 210.0, label: "t=3:30 — The icon",
     focus: "Fully matured: ~5.1km cap, centre at 8km, standing over the burning city. This is what a 16kt cloud looks like from across the map.",

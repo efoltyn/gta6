@@ -98,12 +98,15 @@ function why(r) { return (r && r.__err) ? ("threw: " + String(r.__err).split("\n
 
      Owner: "There's too many fucking people" — the second time, MASS_CROWD
      having already been cut 900 -> 140 for the first. The headcount was five
-     constants in four files and not one of them could see that the wing has
+     constants in four files and not one of them could see that the wing had
      thirteen cells; measured, the yard ran ~207 bodies against 26 bunks, about
      800% of the only housing in the world. These assertions exist so the
      number can never go back to being typed: what the building sleeps is a
      FACT it publishes, and the anonymous tiers are the remainder of a
-     subtraction against it.
+     subtraction against it. (The wing has since grown to twenty-five cells
+     and sixty-six racks; the thirteen above is the state that produced the
+     fault, and the 26 is its arithmetic. That these assertions still pass
+     unchanged across that growth is the point of writing them this way.)
 
      `occupancy` is reported rather than merely bounded, because it is the
      honest number: the NAMED cast alone runs this wing at ~185%, which is
@@ -174,6 +177,55 @@ function why(r) { return (r && r.__err) ? ("threw: " + String(r.__err).split("\n
       } else if (Math.abs(n.group.position.x - b.x) < b.latOut
               && Math.abs(n.group.position.z - b.z) < b.lonOut) out.inFrame++;
     }
+    /* WALKABILITY, SWEPT RATHER THAN ARGUED. Making the bunk solid reopened the
+       exact question the old non-solid doctrine settled by giving up: can you
+       still get around? Swept against every LIVE collider at the real 0.38
+       radius. Overhead colliders (y0 > 1.7 — the upper deck is at 1.94) are
+       skipped: they are what a body walks UNDER, and counting them would fail
+       the test for the feature working.
+
+       EVERY PROBE POINT IS DERIVED FROM THE WING, and that is not tidiness.
+       This block first shipped with the aisle typed in as "x -6..6 at z = -31",
+       which was an open cross-aisle when it was written and is cell D-1's
+       partition since the wing was rescaled to 25 cells. It failed 10 of 25
+       samples against a 3.8 x 0.34 wall and blamed the bunk — a test asserting
+       a coordinate nobody had promised to keep. The wing already answers all of
+       this about itself: cellblockAudit sweeps the spine and the door gap over
+       its OWN collider records (asserted above), the housing unit publishes its
+       bounds and its route, and a cell knows its own half-extents. So:
+         · every cell must hold at least one spot a body can stand in;
+         · every resident not sitting or lying must BE standing in a legal one
+           (a seated man legitimately overlaps his own bed, so he is exempt);
+         · the dorm's central lane, walked between the unit's published bounds
+           along the route it publishes. */
+    const R = 0.38;
+    function clear(x, z) {
+      for (const c of (CBZ.colliders || [])) {
+        if (c.y0 != null && c.y0 > 1.7) continue;
+        if (x > c.minX - R && x < c.maxX + R && z > c.minZ - R && z < c.maxZ + R) return false;
+      }
+      return true;
+    }
+    out.lanes = { dorm: 0, dormN: 0, cellsNoStand: 0, stuck: 0, standing: 0 };
+    for (const c of cells) {
+      let ok = false;
+      for (let ax = -0.6; ax <= 0.61 && !ok; ax += 0.3)
+        for (let az = -0.6; az <= 0.61 && !ok; az += 0.3)
+          if (clear(c.x + ax * c.hx, c.z + az * c.hz)) ok = true;
+      if (!ok) out.lanes.cellsNoStand++;
+      const n = c.owner;
+      if (!n || n === "player" || !n.group) continue;
+      if (n.char && n.char.sitting) continue;              // on his bed, by design
+      if (n._propBed || n._propLie) continue;              // in it, likewise
+      out.lanes.standing++;
+      if (!clear(n.group.position.x, n.group.position.z)) out.lanes.stuck++;
+    }
+    const H = CBZ.prisonHousing;
+    if (H && H.bounds && H.route) {
+      for (let z = H.bounds.z0 + 1; z <= H.bounds.z1 - 1; z += 0.5) {
+        out.lanes.dormN++; if (!clear(H.route.x, z)) out.lanes.dorm++;
+      }
+    }
     return out;
   `);
   if (bad(r)) check("bunk: the wing reports its racks", false, why(r));
@@ -189,6 +241,11 @@ function why(r) { return (r && r.__err) ? ("threw: " + String(r.__err).split("\n
       && r.audit.spawnInPlayerCell === true,
       JSON.stringify({ spawn: r.audit.spawnBlocked, gap: r.audit.doorGapBlocked,
                        spine: r.audit.spineBlocked, colliders: r.audit.colliders }));
+    check("bunk: every lane is still walkable at 0.38",
+      !!r.lanes && r.lanes.dorm === 0 && r.lanes.stuck === 0 && r.lanes.cellsNoStand === 0,
+      `cells with standing room ${r.cells - r.lanes.cellsNoStand}/${r.cells} · ` +
+      `residents on their feet, unstuck ${r.lanes.standing - r.lanes.stuck}/${r.lanes.standing} · ` +
+      `dorm lane ${r.lanes.dormN - r.lanes.dorm}/${r.lanes.dormN}`);
   }
 }
 
@@ -222,19 +279,63 @@ const step = (n) => evl(`for(var i=0;i<${n | 0};i++) CBZ.stepSim(1/60); return t
 
 // ---- 1. THE ARMORY HAS EVERY GUN, AND A TAKEN GUN LEAVES THE WALL ---------
 {
+  /* TWO OF THESE COUNTED THE WRONG SET FOR MONTHS, and both failures were the
+     assertion being stale rather than the room being broken:
+
+       · "every FPS weapon has a slot" listed `shank` missing. It should be
+         missing. A shank is the one weapon in the roster nobody issues —
+         weapons/appearances/shank.js opens "Nobody issued it" — and
+         systems/economy.js:118 makes it a BAG item: pick one up, trade for one,
+         get frisked for one, and syncShankWeapon un/locks the weapon rail off
+         the inventory row. A shank on a guard's rack would be the bug. So the
+         assertion is now over the weapons the armory ISSUES, and the shank's
+         own path is asserted separately below rather than quietly dropped —
+         "not in the armory" only means something if it is somewhere else.
+
+       · "the heavy tier is behind the cage" wanted 4 and read 5. The fifth is
+         the C4 crate, which is an ITEM slot (`slot.item`), not a gun, and it is
+         gated for the same reason the launchers are. Count weapon slots. */
   const r = await evl(`
     var a = CBZ.armory, aud = CBZ.gunroomAudit();
-    var have = {}; a.slots.forEach(function(s){ have[s.id] = s.gated ? "cage" : "rack"; });
-    var missing = CBZ.FPS_WEAPONS.filter(function(w){ return !have[w.id]; }).map(function(w){ return w.id; });
-    return { rackSlots: aud.rackSlots, gated: aud.gatedSlots, weapons: CBZ.FPS_WEAPONS.length,
-             missing: missing, where: have, bespoke: aud.bespoke, seeThrough: aud.seeThrough };
+    var guns = a.slots.filter(function(s){ return !s.item; });
+    var have = {}; guns.forEach(function(s){ have[s.id] = s.gated ? "cage" : "rack"; });
+    // ISSUED = every weapon the armory is meant to stock. Contraband is the
+    // complement, and it is named here so adding one to the roster without a
+    // source shows up as a failure rather than a silent exemption.
+    var CONTRABAND = { shank: 1 };
+    var missing = CBZ.FPS_WEAPONS.filter(function(w){ return !CONTRABAND[w.id] && !have[w.id]; }).map(function(w){ return w.id; });
+    var stray = guns.filter(function(s){ return CONTRABAND[s.id]; }).map(function(s){ return s.id; });
+    return { rackSlots: aud.rackSlots, gunSlots: guns.length, gated: aud.gatedSlots,
+             gatedGuns: guns.filter(function(s){ return s.gated; }).length,
+             weapons: CBZ.FPS_WEAPONS.length, missing: missing, stray: stray,
+             where: have, bespoke: aud.bespoke, seeThrough: aud.seeThrough };
   `);
   if (bad(r)) check("armory: audit reads", false, why(r));
   else {
-    check("armory: every FPS weapon has a slot", r.missing.length === 0, "missing=" + JSON.stringify(r.missing) + " slots=" + r.rackSlots + "/" + r.weapons);
-    check("armory: the heavy tier is behind the cage", r.gated === 4, "gated=" + r.gated + " " + JSON.stringify(["sniper", "lmg", "bazooka", "glauncher"].map((k) => k + ":" + r.where[k])));
+    check("armory: every ISSUED weapon has a slot", r.missing.length === 0 && r.stray.length === 0,
+      "missing=" + JSON.stringify(r.missing) + " contrabandOnRack=" + JSON.stringify(r.stray) +
+      " guns=" + r.gunSlots + "/" + (r.weapons - 1) + " (+" + (r.rackSlots - r.gunSlots) + " item)");
+    check("armory: the heavy tier is behind the cage", r.gatedGuns === 4,
+      "gatedGuns=" + r.gatedGuns + " (of " + r.gated + " gated slots) " +
+      JSON.stringify(["sniper", "lmg", "bazooka", "glauncher"].map((k) => k + ":" + r.where[k])));
     check("armory: ratchets hold (bespoke 0, seeThrough 1)", r.bespoke === 0 && r.seeThrough === 1, `bespoke=${r.bespoke} seeThrough=${r.seeThrough}`);
   }
+  // THE OTHER HALF OF THE SHANK CLAIM. Exempting it from the rack is only
+  // honest if the bag really is its rack: put the item in and the weapon must
+  // appear on the rail, take it out and it must go. That is economy.js's
+  // syncShankWeapon, driven through the same addItem/takeItem choke point every
+  // pickup, trade and confiscation uses — never by calling unlockWeapon here.
+  const s = await evl(`
+    if (!CBZ.econ || !CBZ.econ.addItem) return { no: true };
+    var had = !!(CBZ.hasWeapon && CBZ.hasWeapon("shank"));
+    CBZ.econ.addItem("Shiv", 1);
+    var armed = !!CBZ.hasWeapon("shank");
+    CBZ.econ.takeItem("Shiv");
+    return { had: had, armed: armed, disarmed: !CBZ.hasWeapon("shank") };
+  `);
+  if (bad(s) || s.no) check("armory: the shank's rack is the bag", false, why(s));
+  else check("armory: the shank's rack is the bag", s.armed === true && s.disarmed === true,
+    JSON.stringify(s));
 }
 {
   // TAKE one and read the wall. unlockWeapon is the same call the pickup makes.

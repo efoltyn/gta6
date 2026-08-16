@@ -214,7 +214,7 @@
   // 140 IS NO LONGER THE ANSWER — IT IS THE FALLBACK. The prison's population
   // is now derived from what the building can sleep (world/cellblock.js's
   // prisonBeds -> entities/ambientstate.js), because a typed headcount could
-  // never see that the wing has thirteen cells. This number is only reached
+  // never see that the wing has twenty-five cells. This number is only reached
   // when there is no wing at all. MASS_CROWD_EXPLICIT records that a HUMAN set
   // the count before us — the Settings "Total Population" slider or the
   // localStorage override index.html applies above — and that always wins over

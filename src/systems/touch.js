@@ -227,6 +227,8 @@
   const tapRay = window.THREE ? new THREE.Raycaster() : null;
   const tapNdc = window.THREE ? new THREE.Vector2() : null;
   const tapBox = window.THREE ? new THREE.Box3() : null;
+  const tapBox2 = window.THREE ? new THREE.Box3() : null;   // door silhouette pass
+  const tapHit = window.THREE ? new THREE.Vector3() : null;
   // TOUCH_AIM_ASSIST magnetism scratch (reused; no per-frame allocation).
   const _amEye = window.THREE ? new THREE.Vector3() : null;
   const _amDir = window.THREE ? new THREE.Vector3() : null;
@@ -920,12 +922,21 @@
 
   // ---- tap-to-interact target model ------------------------------------------
   function reachOf(kind) {
-    return kind === "car" ? 5.2 : kind === "machine" ? 6.2 : kind === "animal" ? 4.5 : 3.0;
+    return kind === "car" ? 5.2 : kind === "machine" ? 6.2 : kind === "animal" ? 4.5 :
+      kind === "door" ? 3.2 : 3.0;
   }
   // How close the player is to actually USING a target. Vehicles/animals measure
   // to the VISIBLE box (a plane's origin can be dozens of metres from its hull);
   // peds measure centre-to-centre and sit inside interactions.js's own REACH.
   function reachDist(kind, rec) {
+    // A DOOR IS MEASURED ON THE FLOOR, never through its Box3: the yard leaf
+    // slides 4.35 m straight up when it opens, so a Box3 distance would put an
+    // open door out of reach of the man standing directly under it.
+    if (kind === "door") {
+      const p = rec && rec.at ? (function () { try { return rec.at(); } catch (e) { return null; } })() : null;
+      if (!p || !CBZ.player.pos) return Infinity;
+      return Math.hypot(p.x - CBZ.player.pos.x, p.z - CBZ.player.pos.z);
+    }
     if (kind === "ped") {
       const p = rec.pos || (rec.group && rec.group.position);
       if (!p || !CBZ.player.pos) return Infinity;
@@ -938,6 +949,9 @@
   // Where to walk to reach it: the nearest point on a vehicle's footprint (so a
   // big hull is approached at its edge), or a ped's own position.
   function steerPoint(kind, rec) {
+    if (kind === "door" && rec && rec.at) {
+      try { const p = rec.at(); if (p) return { x: p.x, z: p.z }; } catch (e) {}
+    }
     if (kind !== "ped" && rec.group && tapBox) {
       tapBox.setFromObject(rec.group);
       const P = CBZ.player.pos;
@@ -969,6 +983,18 @@
     if (kind === "animal") return !!(CBZ.cityMountAnimal && CBZ.cityMountAnimal(rec));
     // a seat reached by walking finishes the same verb the direct tap fires
     if (kind === "seat") return !!(CBZ.propSit && CBZ.propSit(CBZ.player, rec));
+    /* THE DOOR IS THE BUTTON. Same doctrine as the chair below — you tap the
+       thing, no prompt narrates the possibility first — and the same
+       no-drift rule as the rides: this calls CBZ.prisonDoorToggle, which is
+       the ONE implementation systems/interactions.js's polled [E] also ends
+       in. It answers with a word, not a boolean, so a refusal can say why. */
+    if (kind === "door") {
+      const r = CBZ.prisonDoorToggle ? CBZ.prisonDoorToggle(rec) : null;
+      if (r === "denied") note((rec.label ? rec.label.charAt(0).toUpperCase() + rec.label.slice(1) : "That door") + " needs the key.");
+      // A tap that landed on a door is spent on the door either way: falling
+      // through to the seat/stand fallbacks would sit you down on the spot.
+      return true;
+    }
     if (kind === "ped") {
       const p = rec.pos || (rec.group && rec.group.position);
       if (p) faceToward(p.x, p.z);
@@ -1020,6 +1046,26 @@
       const a = wildlife[i];
       if (a && CBZ.cityCanRideAnimal && CBZ.cityCanRideAnimal(a)) add(a.group, "animal", a);
     }
+    /* ---- TAP THE DOOR TO SHUT IT ----------------------------------------
+       OWNER: "all doors should open or close when pressed… this is really
+       mostly adding CLOSE BY TAP ON MOBILE, no button needed."
+
+       So no button was added. Every prison door DECLARES its own pickable
+       meshes into systems/interactions.js's registry (CBZ.prisonDoorList),
+       and they join the raycast list here exactly like a car does — the
+       finger lands on the bars, the leaf or the collider pane and the leaf
+       is what answers. Escape mode only: the registry is prison hardware and
+       the city has its own tap vocabulary. */
+    if (CBZ.prisonDoorList && CBZ.game && CBZ.game.mode === "escape") {
+      const dspecs = CBZ.prisonDoorList();
+      for (let i = 0; i < dspecs.length; i++) {
+        const s = dspecs[i];
+        let ms = null;
+        try { ms = s.pick ? s.pick() : null; } catch (e) { ms = null; }
+        if (!ms) continue;
+        for (let j = 0; j < ms.length; j++) add(ms[j], "door", s);
+      }
+    }
     if (V2) {   // tapping a person opens the contextual card
       const peds = CBZ.cityPeds || [];
       for (let i = 0; i < peds.length; i++) {
@@ -1031,7 +1077,38 @@
       }
     }
     const hits = objects.length ? tapRay.intersectObjects(objects, true) : [];
-    const target = hits.length ? rootFor(hits[0].object, roots) : null;
+    let target = hits.length ? rootFor(hits[0].object, roots) : null;
+
+    /* ---- A GRILLE IS MOSTLY HOLES -------------------------------------
+       MEASURED: a cell front (world/cellblock.js) is one merged mesh of
+       0.09 m bars on a 0.36 m pitch, so an exact-mesh ray aimed at the
+       middle of the leaf passes straight between two bars and the tap
+       reports nothing. The armoury gate and the wing gates never showed
+       this because both are welded onto a full-span transparent collider
+       pane — they have a solid thing to hit and the cell door does not.
+       A finger is 8 mm wide, not a line, so when the precise pass finds
+       NOTHING at all, a door is allowed to answer for its own silhouette:
+       the nearest registered leaf whose world box the ray crosses. Runs
+       only on a miss, so it can never steal a tap from a car, a person or
+       a door that was hit properly. */
+    if (!target && tapBox2 && CBZ.prisonDoorList && CBZ.game.mode === "escape") {
+      const dspecs = CBZ.prisonDoorList();
+      let bestS = null, bestM = null, bestD = Infinity;
+      for (let i = 0; i < dspecs.length; i++) {
+        const s = dspecs[i];
+        if (reachDist("door", s) > 9) continue;          // the room you are in, not the wing
+        let ms = null;
+        try { ms = s.pick ? s.pick() : null; } catch (e) { ms = null; }
+        if (!ms || !ms.length) continue;
+        tapBox2.makeEmpty();
+        for (let j = 0; j < ms.length; j++) if (ms[j] && ms[j].visible !== false) tapBox2.expandByObject(ms[j]);
+        if (tapBox2.isEmpty()) continue;
+        if (!tapRay.ray.intersectBox(tapBox2, tapHit)) continue;
+        const d = tapHit.distanceTo(tapRay.ray.origin);
+        if (d < bestD) { bestD = d; bestS = s; bestM = ms[0]; }
+      }
+      if (bestS) target = { kind: "door", rec: bestS, group: bestM };
+    }
 
     // ---- TAP THE CHAIR TO SIT ON IT ------------------------------------
     // OWNER: "on iPad it pops up and says sit down / stand up. Good that the
@@ -1092,7 +1169,8 @@
     return true;
   }
   function farNote(kind) {
-    return kind === "machine" ? "Get closer to board it." :
+    return kind === "door" ? "Get closer to the door." :
+      kind === "machine" ? "Get closer to board it." :
       kind === "animal" ? "Get closer before you try to mount it." :
       kind === "ped" ? "Get closer to talk." : "Get closer to take that vehicle.";
   }

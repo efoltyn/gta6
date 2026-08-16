@@ -531,7 +531,7 @@
 
      JAIL_CROWD is the same kind of body as MASS_CROWD — an anonymous inmate
      with no name, no history and no part in the story — so it answers to the
-     same fact, and for the same reason: the wing has thirteen cells, and the
+     same fact, and for the same reason: the wing has twenty-five cells, and the
      count that put ~207 men in front of them could not see that. Load order
      makes it exact (index.html: cellblock 456 -> this file 535): the wing is
      built, the named ROSTER above is already on the floor, and what is left is
