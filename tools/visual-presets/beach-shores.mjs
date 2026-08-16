@@ -138,6 +138,14 @@ async function stageBeach(input) {
     const up = await until(() => CBZ.game.mode === "city" && CBZ.city && CBZ.city.arena &&
       CBZ.city.arena.shore, 240000, 300);
     if (!up) return { ok: false, err: "city never built" };
+    // survival's survEnv drives scene.fog every frame IN survival and nothing
+    // on the way out restores the city's own range — the second full run
+    // photographed a white city through survival fog. Re-apply the quality
+    // tier (it re-derives city fog) and floor the range in case a disaster
+    // env left it tighter still.
+    try { if (CBZ.setQualityLevel) CBZ.setQualityLevel(3); } catch (_) {}
+    const f2 = CBZ.scene.fog;
+    if (f2 && f2.far < 900) { f2.near = Math.max(f2.near, 220); f2.far = 1400; }
   }
 
   // park the player out of frame-critical spots and keep him alive
