@@ -345,6 +345,9 @@ const cityFiles = [
   // aigoals: the crowd PURPOSE / needs layer (onUpdate 33) + the lone-wolf rampage
   // director (onUpdate 35). Loaded so the headless sim exercises both.
   "aigoals",
+  // racket: the store protection layer (onUpdate 34.75) — rob/extort verbs,
+  // owner memory, the NPC racket director. Loaded so its tick runs headless.
+  "racket",
   // phone (action hub) + playerair (personal chopper/airstrike tick @42.5) — load
   // them so the headless loop exercises their per-frame ticks for crashes.
   "phone", "playerair",
