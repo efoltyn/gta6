@@ -312,6 +312,29 @@ function runConverge(seedX) {
   ok("a sustained loss releases it (corner-work resumes)", a._iqPos == null);
 }
 
+/* ============================================================ 8c. THE STALK */
+{
+  console.log("[8c] a flanker's walk prefers the mark's blind lanes (the sneak is the path)");
+  const kiosk = { minX: -5, maxX: -3, minZ: 5, maxZ: 7, y0: 0, y1: 2.4 };
+  const CBZ = boot({ boxes: [kiosk] });
+  const IQ = CBZ.combatIQ;
+  // ingredient truths the stalk bonus is built from: the same chest-height
+  // segment test says which walk samples the mark can and cannot draw on
+  ok("a mid-walk point behind the kiosk is blind to the mark", IQ.geom.fireBlocked(0, 0, -4, 6) === true);
+  ok("a mid-walk point in the open is not", IQ.geom.fireBlocked(0, 0, 4, 6) === false);
+  // and the composition still commits a legal flank position when the slot
+  // is a flank (slot pinned so the test is deterministic)
+  IQ.slot = function () { return "flank"; };
+  const t = mark(0, 0);
+  const a = actor(CBZ, 0, 14, {});
+  for (let i = 0; i < 300; i++) tick(CBZ, a, t, 1 / 60, 3.4);
+  ok("flank position committed", !!a._iqPos && a._iqPos.cls === "flank");
+  if (a._iqPos) {
+    ok("flank spot keeps a firing lane", IQ.geom.fireBlocked(a._iqPos.x, a._iqPos.z, 0, 0) === false);
+    ok("flank spot is not inside the kiosk", IQ.geom.pointBlocked(a._iqPos.x, a._iqPos.z) === false);
+  }
+}
+
 /* ============================================================ 9b. THE ONE-LINE REVERT */
 {
   console.log("[9b] cfg_NPC_IQ_POSITIONS=0 reverts EVERYTHING — in the city");
@@ -348,4 +371,4 @@ function runConverge(seedX) {
 
 console.log("");
 if (fails) { console.error("TACTICS: FAIL — " + fails + " of " + (fails + passes) + " assertions"); process.exit(1); }
-console.log("TACTICS: ok — " + passes + " assertions across 12 scenarios");
+console.log("TACTICS: ok — " + passes + " assertions across 13 scenarios");

@@ -109,6 +109,9 @@
      NPC_IQ_MELEE      the punch exchange
      NPC_IQ_POSITIONS  firing positions + stop-to-shoot + hide (CITY ONLY —
                        see block 3b; battle.html's posture path is untouched)
+     NPC_IQ_COP_POSITIONS  police.js routes its shoot-posture walk through
+                       posture()/positions too (arrest/challenge/tackle
+                       choreography untouched; needs NPC_IQ_POSITIONS)
 ============================================================ */
 (function () {
   "use strict";
@@ -122,6 +125,7 @@
   if (C.NPC_IQ_SHOOTFIRST == null) C.NPC_IQ_SHOOTFIRST = true;
   if (C.NPC_IQ_MELEE == null) C.NPC_IQ_MELEE = true;
   if (C.NPC_IQ_POSITIONS == null) C.NPC_IQ_POSITIONS = true;
+  if (C.NPC_IQ_COP_POSITIONS == null) C.NPC_IQ_COP_POSITIONS = true;   // police.js consumes (its shoot-posture walk)
 
   function on() { return C.NPC_COMBAT_IQ !== false; }
   // the position layer is a CITY brain: battle.html consumes posture() for its
@@ -649,7 +653,19 @@
         if (walkBlocked(a.pos.x, a.pos.z, x, z)) continue;       // can't get there straight
         const walk = Math.hypot(x - a.pos.x, z - a.pos.z);
         let score = walk + Math.abs(r - pref) * 0.55 + Math.abs(off) * 1.2;
-        if (slot === "flank") score -= Math.abs(off) * 3.2;      // a flanker is PAID to go wide
+        if (slot === "flank") {
+          score -= Math.abs(off) * 3.2;                          // a flanker is PAID to go wide
+          // ...and paid MORE to arrive unseen. THE SNEAK IS THE PATH: a flank
+          // spot needs a firing lane by construction (the fireBlocked gate
+          // above), so what separates a stalk from a stroll is whether the
+          // WALK stays out of the mark's lanes — sampled at two points of the
+          // journey, against the same chest-height geometry as everything
+          // else. Two extra segment tests, flank candidates only.
+          const mx1 = a.pos.x + (x - a.pos.x) * 0.45, mz1 = a.pos.z + (z - a.pos.z) * 0.45;
+          const mx2 = a.pos.x + (x - a.pos.x) * 0.8, mz2 = a.pos.z + (z - a.pos.z) * 0.8;
+          if (fireBlocked(tx, tz, mx1, mz1)) score -= 3.5;
+          if (fireBlocked(tx, tz, mx2, mz2)) score -= 2.5;
+        }
         if (guard) score += Math.max(0, Math.hypot(x - guard.x, z - guard.z) - 14) * 1.4;   // defenders hold the post
         if (cv && Math.hypot(x - cv.x, z - cv.z) < 3.5) score -= 3.2;   // fight from beside the wall
         if (score < bs) { bs = score; if (!best) best = { x: 0, z: 0 }; best.x = x; best.z = z; }

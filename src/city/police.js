@@ -3687,6 +3687,43 @@
           continue;
         }
 
+        // ---- POSITIONS FOR THE POLICE (combat_iq 3b, NPC_IQ_COP_POSITIONS).
+        //      The final shoot-posture walk used to be a flank-offset march to
+        //      a 4-9 m stop — run-and-gun with a badge. An officer with lethal
+        //      authority now takes a POSITION like every other gun in the
+        //      city: picked for a real chest-height firing lane, wall-
+        //      projected, committed, PLANTED — with the cover tuck, the
+        //      corner peek and the token discipline posture() already owns.
+        //      Everything above this block — arrest-first, challenges, the
+        //      tackle, gun-stops, cover-peek beats, glass breach, door
+        //      routing, blind flanks — runs exactly as before and `continue`s
+        //      past this when active; the legacy approach below remains the
+        //      fall-through for close quarters and for either flag off.
+        //      Bounded to the firing envelope (3..28 m): beyond it posture's
+        //      own LOS window (the weapon band + 8) is narrower than the
+        //      cop hunt's 48 m and would call a hunting officer "blind";
+        //      the legacy approach below closes the gap first, as ever.
+        if (M && M.posture && wantShoot && dist > 3 && dist < 28 &&
+            CBZ.CONFIG.NPC_IQ_POSITIONS !== false && CBZ.CONFIG.NPC_IQ_COP_POSITIONS !== false) {
+          // posture() steers a .target the cop rig never had — a plain vector
+          // with the one method posture calls (no THREE dependency).
+          if (!c.target) c.target = { x: c.pos.x, y: 0, z: c.pos.z, set(nx, ny, nz) { this.x = nx; this.y = ny; this.z = nz; } };
+          const pSlot = M.posture(c, tgt, dt) || "fire";
+          c._iqSlot = pSlot;
+          const gx2 = c.target.x - c.pos.x, gz2 = c.target.z - c.pos.z;
+          const gd2 = Math.hypot(gx2, gz2);
+          const mg2 = M.moveGate ? M.moveGate(c, tgt, dist, pSlot) : null;
+          if ((mg2 && mg2.halt) || gd2 < 0.9) {
+            c.speed = 0;
+            c.group.rotation.y = lerpAngle(c.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(0.002, dt));
+            finalizeMove(c);
+            if (near) animChar(c.char, 0, dt);
+          } else {
+            stepTo(c, gx2, gz2, c.baseSpeed * (c.sees ? 1 : 1.12), dt, near);
+          }
+          continue;
+        }
+
         // approach with a FLANK offset so the squad encircles, and hold a
         // firing-line distance once we're a threat-range shooter.
         const flankAmt = isPlayer && stars >= 3 ? 7 : 4;

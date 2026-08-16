@@ -70,11 +70,18 @@ const subjects = [
 
   /* ---- HIDE: breaking contact when it goes wrong ------------------------ */
   { id: "hide-break", label: "Too hurt to trade — breaking contact",
-    focus: "Three guns, and the one cut to a third of his health — with a kiosk the studio built OFF his lane, a real hidden pocket in his away hemisphere. His two partners keep the fire tokens, so he owes the fight nothing. Before: a hurt man's only move was nine metres STRAIGHT BACK — still in the open, still in the same firing lane the rounds are coming up, re-derived every frame so he backpedals forever. After: he breaks for somewhere the player CANNOT DRAW A LINE TO and holds it while his partners trade. hiddenEnd is the payoff as a bit: does the player's chest-height lane to him end in a wall when the window closes?",
+    focus: "Three guns, and the one cut to a third of his health — with a kiosk the studio built OFF his lane, a real hidden pocket in his away hemisphere. His two partners keep the fire tokens, so he owes the fight nothing. Before: a hurt man's only move was nine metres STRAIGHT BACK — still in the open, still in the same firing lane the rounds are coming up, re-derived every frame so he backpedals forever. After: he breaks for somewhere the player CANNOT DRAW A LINE TO and holds it while his partners trade. exposedPct is the payoff: the fraction of the photographed window the player could draw a chest-height lane to him at all.",
     act: { n: 3, dist: 13, weapons: ["Pistol", "Pistol", "Pistol"], pre: 1.2, sample: 1.2, hurtIdx: 0, hurtHp: 0.32,
       wall: { off: 8, dist: 20, w: 2.6, h: 2.4, d: 2.6 } },
     strip: { frames: 4, stepSec: 1.0 },
     cam: { dx: 9, dy: 7.5, dz: 4, adx: 0, ady: 1.1, adz: -16, fov: 60 } },
+
+  /* ---- THE LAW: officers under the same doctrine ------------------------- */
+  { id: "cops-standoff", label: "Four officers, weapons free",
+    focus: "THE OTHER HALF OF 'SHOOTING AT YOU'. Four real officers at four stars, lethal force authorized (NPC_IQ_COP_POSITIONS). Before: the department's final approach was a flank-offset march to a four-to-nine-metre stop — officers jogging while firing, spines twisted between run-heading and aim, exactly the gang glitch with a badge on it. After: they take POSITIONS like a trained unit — planted in band, wall-projected spots, tucks and corner peeks from posture()'s own doctrine — and every round leaves a standing body. The arrest, challenge and tackle choreography is untouched by construction.",
+    act: { cops: 4, dist: 24, pre: 3.0, sample: 1.5, wanted: 4 },
+    strip: { frames: 4, stepSec: 0.8 },
+    cam: { dx: 0, dy: 11, dz: 15, adx: 0, ady: 1.2, adz: -14, fov: 55 } },
 
   /* ---- THE WALL RULE: the goal that used to be inside the masonry -------
      NOT in the default sweep (npm run visual:npc-tactics runs the stable
@@ -192,13 +199,28 @@ async function stageNpcTactics(input) {
         return true;
       } catch (_) { return false; }
     };
+    // VISUAL sky probe — the canopy that ate the elevated cameras has no
+    // collider at all (a roof you never collide with from the street), so
+    // collider tests cannot see it. One vertical ray against the real scene
+    // per FINALIST candidate (cheap because finalists are few) settles it.
+    let skyRC = null;
+    const skyOpenVisual = (x, z) => {
+      try {
+        if (!T || !CBZ.scene) return true;
+        skyRC = skyRC || new T.Raycaster();
+        skyRC.set(new T.Vector3(x, 1.9, z), new T.Vector3(0, 1, 0));
+        skyRC.near = 0.4; skyRC.far = 26;
+        const hits = skyRC.intersectObjects(CBZ.scene.children, true);
+        return !hits || !hits.length;
+      } catch (_) { return true; }
+    };
     let mark = { x: P.pos.x, z: P.pos.z };
     outer:
     for (let r = 0; r <= 150; r += 6) {
       for (let k = 0; k < Math.max(1, r); k += 3) {
         const a = (k / Math.max(1, r)) * Math.PI * 2;
         const x = P.pos.x + Math.cos(a) * r, z = P.pos.z + Math.sin(a) * r;
-        if (markOk(x, z)) { mark = { x, z }; break outer; }
+        if (markOk(x, z) && skyOpenVisual(x, z) && skyOpenVisual(x, z - 24)) { mark = { x, z }; break outer; }
       }
     }
     S.mark = mark;
@@ -221,7 +243,7 @@ async function stageNpcTactics(input) {
       for (let i = 0; i < frames; i++) {
         CBZ.hitstop = 0; CBZ.slowmo = 0;
         CBZ.player.hp = 100;
-        CBZ.game.wanted = 0;
+        CBZ.game.wanted = S.wantedHold || 0;   // a COP subject fights at real stars
         CBZ.player.pos.x = S.mark.x; CBZ.player.pos.z = S.mark.z; CBZ.player.pos.y = 0;
         // KEEP THE EXTRAS OFF THE SET. Bodies parked shoulder-to-shoulder in
         // the holding block pick fights with each other, and every one of
@@ -236,6 +258,13 @@ async function stageNpcTactics(input) {
         }
         for (const m of S.cast) {
           if (!m || m.dead) continue;
+          if (m.kind === "cop") {
+            // an officer's brain owns his fight; the studio only keeps him ON
+            // it — no giving up, no wandering off to a search sweep offstage.
+            if (PA && !m.curTarget) { m.curTarget = PA; m.retarget = 1.5; }
+            m.giveUp = false;
+            continue;
+          }
           if (PA && (!m.rage || m.rage.dead)) { m.rage = PA; m.state = "fight"; }
           // a scare path (cityScare, panic contagion, sizeup fold) can flip a
           // timid archetype to flee mid-take; the cast is CAST — committed
@@ -248,32 +277,39 @@ async function stageNpcTactics(input) {
         const W = S.watch;
         if (W) {
           W.secs += 1 / 60;
+          if (S.frameSample) { try { S.frameSample(); } catch (_) {} }
           // per-frame goal trace of cast[0] for the first ~14 sampled frames —
           // the churn's shape (two alternating points vs a wandering point)
           // names its author.
           const c0 = S.cast[0];
-          if (c0 && !c0.dead && W.trace && W.trace.length < 14) {
+          if (c0 && !c0.dead && c0.target && W.trace && W.trace.length < 14) {
             W.trace.push(Math.round(c0.target.x * 10) / 10 + "," + Math.round(c0.target.z * 10) / 10);
           }
           for (let c = 0; c < S.cast.length; c++) {
             const m = S.cast[c]; if (!m || m.dead) continue;
-            const fired = W.prevAmmo[c] != null && m.ammo < W.prevAmmo[c];
+            // a trigger pull is an ammo decrement (peds) or a shootCD jump
+            // (police fireAt sets the next cooldown at the shot)
+            const fired = (W.prevAmmo[c] != null && m.ammo != null && m.ammo < W.prevAmmo[c]) ||
+                          (W.prevCD[c] != null && m.shootCD != null && m.shootCD > W.prevCD[c] + 0.05);
             if (fired) {
               W.shots++;
               W.trigSpeed += m.speed || 0;
               if ((m.speed || 0) > 1.1) W.trigMoving++;
             }
             W.prevAmmo[c] = m.ammo;
+            W.prevCD[c] = m.shootCD;
             W.speedSum += m.speed || 0; W.speedN++;
-            if (W.prevTx[c] != null) W.churn += Math.hypot(m.target.x - W.prevTx[c], m.target.z - W.prevTz[c]);
-            W.prevTx[c] = m.target.x; W.prevTz[c] = m.target.z;
+            if (m.target) {
+              if (W.prevTx[c] != null) W.churn += Math.hypot(m.target.x - W.prevTx[c], m.target.z - W.prevTz[c]);
+              W.prevTx[c] = m.target.x; W.prevTz[c] = m.target.z;
+            }
           }
         }
       }
       S.inStep = false;
     };
     S.beginWatch = function () {
-      S.watch = { secs: 0, shots: 0, trigSpeed: 0, trigMoving: 0, speedSum: 0, speedN: 0, churn: 0, prevAmmo: [], prevTx: [], prevTz: [], trace: [] };
+      S.watch = { secs: 0, shots: 0, trigSpeed: 0, trigMoving: 0, speedSum: 0, speedN: 0, churn: 0, prevAmmo: [], prevCD: [], prevTx: [], prevTz: [], trace: [] };
     };
     S.metrics = function () {
       const W = S.watch || { secs: 0, shots: 0, trigSpeed: 0, trigMoving: 0, speedSum: 0, speedN: 0, churn: 0 };
@@ -326,13 +362,25 @@ async function stageNpcTactics(input) {
   S.walls.length = 0;
   for (const m of S.cast) {
     if (!m) continue;
-    m.rage = null; m.state = "walk"; m._iqPos = null; m._iqPlant = false;
-    m._iqTgt = null; m._iqCov = null; m._iqBear = null; m._combatFace = null;
+    m._iqPos = null; m._iqPlant = false; m._iqTgt = null; m._iqCov = null;
+    m._iqBear = null; m._combatFace = null;
+    if (m.kind === "cop") {
+      // an officer goes back to the reserve line intact — stripping his gun
+      // or his state machine would break the department, not the shot.
+      m.curTarget = null; m.npcTarget = null; m.searchT = 0; m.giveUp = false;
+      m.speed = 0; m.arrestT = 0;
+      m.pos.x = M.x + 200; m.pos.z = M.z + 200;
+      m.group.position.set(m.pos.x, 0, m.pos.z);
+      continue;
+    }
+    m.rage = null; m.state = "walk";
     m.armed = false; m.weapon = null;
     if (CBZ.syncActorWeapon) { try { CBZ.syncActorWeapon(m); } catch (_) {} }
   }
   S.cast.length = 0;
   S.extra = null;
+  S.frameSample = null;
+  S.wantedHold = 0;
   if (S.baseStep) S.step = S.baseStep;   // undo any per-subject clock wrap
 
   /* ---- clear the arena: park every bystander out of the fight ----------- */
@@ -406,6 +454,27 @@ async function stageNpcTactics(input) {
     return { x, z };
   };
   const spread = 3.4;
+  /* ---- CAST THE LAW instead (act.cops): real officers, their own brains.
+     The studio only places them, points the hunt at the player, and holds
+     the stars (S.wantedHold) so lethal force stays authorized. ---- */
+  if (act.cops) {
+    const cpool = (CBZ.cityCops || []).filter((c2) => c2 && !c2.dead && !c2._airPilot &&
+      !c2._swatPassenger && !c2.inCar && !c2._seizing && c2.char && c2.group);
+    if (cpool.length < act.cops) return { ok: false, err: "cop pool too small: " + cpool.length };
+    for (let i = 0; i < act.cops; i++) {
+      const c2 = cpool[i];
+      const off = (i - (act.cops - 1) / 2) * spread;
+      const spot = freeSpot(M.x + off, M.z + CAST_DIR * (act.dist + (i % 2) * 2));
+      c2.pos.x = spot.x; c2.pos.z = spot.z; c2.pos.y = 0;
+      c2.group.position.set(spot.x, 0, spot.z);
+      c2.curTarget = PA; c2.sees = true; c2.retarget = 1.5; c2.lostT = 0;
+      c2.searchT = 0; c2.giveUp = false; c2.gunstop = false; c2.arrestT = 0;
+      c2.shootCD = 0.3 + i * 0.12; c2._coverT = 0; c2._challenged = false;
+      c2._iqPos = null; c2._iqPlant = false; c2._iqBear = null; c2._iqCov = null; c2._iqAimOn = null;
+      if (c2.target) { c2.target.x = spot.x; c2.target.z = spot.z; }
+      S.cast.push(c2);
+    }
+  } else
   for (let i = 0; i < act.n; i++) {
     const m = pool[i];
     const off = (i - (act.n - 1) / 2) * spread + (act.coverBox && i === act.hurtIdx ? (act.coverBox.off || 0) : 0);
@@ -437,14 +506,21 @@ async function stageNpcTactics(input) {
   const hurt = act.hurtIdx != null ? S.cast[act.hurtIdx] : null;
   const startDist = hurt ? Math.hypot(hurt.pos.x - M.x, hurt.pos.z - M.z) : 0;
   if (subject.id === "hide-break" && hurt) {
-    S.extra = () => {
+    // EXPOSURE, integrated over the photographed window — not a single frame.
+    // A single end-frame bit lied both ways (a peek beat reads exposed, a
+    // lucky backpedal frame reads hidden); the fraction of sampled frames the
+    // player could draw a chest-height lane to him is the honest number.
+    let sampN = 0, expN = 0;
+    S.frameSample = () => {
+      if (!hurt || hurt.dead) return;
+      sampN++;
       const geom = CBZ.combatIQ && CBZ.combatIQ.geom;
-      return {
-        distGainM: Number((Math.hypot(hurt.pos.x - M.x, hurt.pos.z - M.z) - startDist).toFixed(1)),
-        // hidden = the player's chest-height firing lane to him ends in a wall
-        hiddenEnd: geom ? (geom.fireBlocked(M.x, M.z, hurt.pos.x, hurt.pos.z) ? 1 : 0) : null,
-      };
+      if (!geom || !geom.fireBlocked(M.x, M.z, hurt.pos.x, hurt.pos.z)) expN++;
     };
+    S.extra = () => ({
+      distGainM: Number((Math.hypot(hurt.pos.x - M.x, hurt.pos.z - M.z) - startDist).toFixed(1)),
+      exposedPct: sampN ? Math.round((expN / sampN) * 100) : null,
+    });
   }
   if (subject.id === "cover-peek" && hurt && wallRef) {
     S.extra = () => {
@@ -480,6 +556,7 @@ async function stageNpcTactics(input) {
   }
 
   /* ---- roll the fight, then open the sampled window --------------------- */
+  S.wantedHold = act.wanted || 0;
   const pre = Math.max(0, (act.pre || 2) - (act.sample || 0));
   S.watch = null;
   S.step(Math.round(pre * 60));
@@ -569,7 +646,7 @@ export default {
     goalChurnMps: { label: "Steering-goal wander", unit: "m/s per man", better: "lower" },
     meanSpeed: { label: "Mean cast speed", unit: "m/s", better: "lower" },
     distGainM: { label: "Ground gained away from the gun", unit: "m" },
-    hiddenEnd: { label: "Out of the player's firing lanes at end", unit: "1=yes", better: "higher" },
+    exposedPct: { label: "Time in the player's firing lanes", unit: "%", better: "lower" },
     tuckedM: { label: "Hurt man's distance from the hide point", unit: "m", better: "lower" },
     wallHugPct: { label: "Time spent pressed against the wall", unit: "%", better: "lower" },
     laneClearEnd: { label: "Ended with a real firing lane", unit: "1=yes", better: "higher" },
