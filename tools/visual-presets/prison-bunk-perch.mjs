@@ -1,11 +1,19 @@
 /* "When NPCs sit on their bed, they sit in front, not actually sitting on
    anything." — the owner, 2026-08-15, with a screenshot.
 
-   This preset photographs ONE thing: a cell resident whose ambient pose is
-   "sitting on his bunk", shot from three angles that make hip-to-mattress
-   contact impossible to fudge. Both sides are the SAME local build; the only
-   difference is `?cfg_PRISON_BUNK_PERCH=0`, which restores the old 0.62 m
-   lateral offset and door-facing yaw exactly (world/cellblock.js).
+   "do you see how you really didnt fix shit because the head now intersects
+   with the bunk bed? does this mean the bunk bead has to be taller?" — the
+   same owner, the next morning. Yes: the two halves are the POSE (where his
+   hips go) and the GEOMETRY (whether there is room for his head there), and
+   this preset photographs both.
+
+   A cell resident in the ambient "sitting on his bunk" pose, from angles that
+   make hip-to-mattress contact and head-to-rack clearance impossible to fudge,
+   plus the stack itself and a sleeper on its upper rack. Both sides are the
+   SAME local build; the only difference is
+   `?cfg_PRISON_BUNK_PERCH=0&cfg_PRISON_BUNK_HEADROOM=0`, which restores the
+   old 0.62 m lateral offset, the door-facing yaw and the low rack exactly
+   (world/cellblock.js).
 
    Staging is jail-scene.mjs's: boot the real escape mode, stub rAF so
    CBZ.stepSim is the only clock, then step the live wing. The subject cell is
@@ -29,6 +37,9 @@ const subjects = [
     // Kept off the bunk's own foot post (lat 0.60, along 1.28 in this frame):
     // a corner post through the subject reads as a staging accident.
     cam: { lat: 1.9, along: 2.4, y: 1.35, aimLat: 0.30, aimY: 0.80, aimAlong: -0.1 } },
+  { id: "stack-whole", label: "The whole stack", hud: false,
+    focus: "Both racks and the ladder. Raising the upper rack has to leave a bunk, not a scaffold: the ladder grows the rung it needs, the rail and posts travel with the deck, and the top mattress stays well under a 3.6 m cell roof.",
+    cam: { outside: true, lat: 2.6, y: 1.75, aimLat: 0.0, aimY: 1.42, aimAlong: 0.0 } },
 ];
 
 async function stagePerch(input) {
@@ -119,6 +130,17 @@ async function stagePerch(input) {
     step(0.5);
   }
   const cell = S.cell, actor = S.actor;
+  /* The upper-rack beat borrows the same man: propuse owns him while he is in
+     a bed, and the wing's leash stands aside for exactly that (`_propBed`), so
+     the following subjects have to hand him back. */
+  /* A body propuse has put to bed is propuse's, and the wing's leash stands
+     aside for exactly that. Hand him back before photographing the pose. */
+  if (actor._propBed || actor._propLie) {
+    try { if (CBZ.propWake) CBZ.propWake(actor, { instant: true }); } catch (_) {}
+    try { if (CBZ.propStand) CBZ.propStand(actor, { instant: true }); } catch (_) {}
+    actor._cellPose = "bunk";
+    step(1.2);
+  }
   for (let i = 0; i < 90; i++) { try { CBZ.animChar(actor.char, 0, 1 / 60); } catch (_) {} }
 
   // Keep the player's own rig out of a detached inspection lens.
@@ -133,8 +155,13 @@ async function stagePerch(input) {
   const cam = input.subject.cam || {};
   const clampX = (x) => Math.max(cell.x - cell.hx + 0.30, Math.min(cell.x + cell.hx - 0.30, x));
   const clampZ = (z) => Math.max(cell.z - cell.hz + 0.30, Math.min(cell.z + cell.hz - 0.30, z));
-  const px = clampX(b.x + lat * (cam.lat || 2.4));
-  const pz = clampZ(b.z + (cam.along || 1.2));
+  // `outside` shoots from the aisle through the barred face — the only way to
+  // get a 2.5 m stack in frame, since the cell is 3.2 m wide and the clamp
+  // below (rightly) will not put a lens inside a partition.
+  const px = cam.outside ? cell.x + cell.dx * (cell.hx + (cam.lat || 2.4))
+    : clampX(b.x + lat * (cam.lat || 2.4));
+  const pz = cam.outside ? cell.z + cell.dz * (cell.hz + (cam.lat || 2.4))
+    : clampZ(b.z + (cam.along || 1.2));
   const ax = b.x + lat * (cam.aimLat || 0.34);
   const az = b.z + (cam.aimAlong || 0);
 
@@ -153,27 +180,50 @@ async function stagePerch(input) {
 
   const audit = (typeof CBZ.cellSitAudit === "function") ? CBZ.cellSitAudit()
     : { seated: 0, offMattress: 0, worstOverhangCm: 0, latCm: [] };
+  /* DOES HIS HEAD FIT UNDER THE RACK. Measured off the head MESH (the
+     nametag sprite rides at ~1.97 and would flatter every reading), against
+     the upper frame's own published underside. Negative headroom is steel
+     through a skull — the owner's second report. */
+  let headTop = null, headroom = null;
+  const headMesh = actor.char && actor.char.skinSlots && actor.char.skinSlots.head &&
+    actor.char.skinSlots.head[0];
+  const rackUnder = b.rackUnder != null ? b.rackUnder : (b.topBunk != null ? b.topBunk - 0.41 : null);
+  if (headMesh) {
+    try {
+      headMesh.updateWorldMatrix(true, false);
+      headTop = new T.Box3().setFromObject(headMesh).max.y;
+      if (rackUnder != null) headroom = rackUnder - headTop;
+    } catch (_) {}
+  }
   // This man specifically: how far his hips are from the bunk's centre line,
   // and how much of that is past the 0.525 m mattress edge.
   const hipLat = Math.abs(actor.group.position.x - b.x);
   const overhang = Math.max(0, hipLat - 0.525);
 
+  const seated = !!(actor.char && actor.char.sitting);
   const before = input.side === "before";
   const q = (name) => S.overlay.querySelector(`[data-${name}]`);
   q("side").textContent = before ? input.beforeLabel : input.afterLabel;
   q("side").style.cssText = `position:absolute;top:22px;left:26px;padding:7px 11px;border-radius:7px;background:${before ? "#c94c4c" : "#218b60"};font-size:12px;font-weight:900;letter-spacing:.12em`;
   q("name").textContent = input.subject.label;
   q("name").style.cssText = "position:absolute;top:72px;left:26px;font-size:22px;font-weight:800;letter-spacing:-.02em;max-width:360px";
-  q("focus").textContent = `cell ${cell.tag || cell.i} · ${(actor.data && actor.data.name) || "inmate"} · hips ${Math.round(hipLat * 100)} cm from bunk centre (mattress edge 52.5 cm)`;
+  q("focus").textContent = `cell ${cell.tag || cell.i} · ${(actor.data && actor.data.name) || "inmate"}` +
+    (seated ? ` · hips ${Math.round(hipLat * 100)} cm from bunk centre (mattress edge 52.5 cm)` : "");
   q("focus").style.cssText = "position:absolute;top:104px;left:27px;color:#c0cfda;font-size:12px;font-weight:550";
-  q("perf").textContent = `${overhang > 0 ? `OFF THE MATTRESS by ${Math.round(overhang * 100)} cm` : "ON the mattress"} · seated ${audit.seated} · off ${audit.offMattress}`;
-  q("perf").style.cssText = `position:absolute;right:24px;top:24px;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:${overhang > 0 ? "#ff9c9c" : "#9fe8c3"}`;
+  const bad = seated && (overhang > 0 || (headroom != null && headroom < 0));
+  q("perf").innerHTML = !seated
+    ? `upper rack ${Math.round((b.topBunk || 0) * 100)} cm · asleep on it`
+    : `${overhang > 0 ? `OFF THE MATTRESS by ${Math.round(overhang * 100)} cm` : "ON the mattress"}<br>` +
+      (headroom == null ? "" : `${headroom < 0 ? `HEAD ${Math.round(-headroom * 100)} cm INSIDE the rack` : `head clears the rack by ${Math.round(headroom * 100)} cm`}`);
+  q("perf").style.cssText = `position:absolute;right:24px;top:24px;text-align:right;line-height:1.7;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:${bad ? "#ff9c9c" : "#9fe8c3"}`;
   q("source").textContent = new URL(input.sourceUrl).host + new URL(input.sourceUrl).pathname + new URL(input.sourceUrl).search;
   q("source").style.cssText = "position:absolute;bottom:10px;left:27px;color:#9cb0bf;font:10px ui-monospace,SFMono-Regular,Menlo,monospace";
 
   return {
     ok: true,
     poseDebug: {
+      lying: !!(actor.char && actor.char.lying),
+      propBed: !!actor._propBed,
       cell: cell.tag || cell.i,
       x: Number(actor.group.position.x.toFixed(3)),
       z: Number(actor.group.position.z.toFixed(3)),
@@ -184,8 +234,18 @@ async function stagePerch(input) {
       latCm: audit.latCm,
     },
     metrics: {
-      hipLatCm: Math.round(hipLat * 100),
-      hipOverhangCm: Math.round(overhang * 100),
+      upperMattressCm: b.topBunk == null ? 0 : Math.round(b.topBunk * 100),
+      // Seated claims only. A sleeper on the upper rack is not "sitting on
+      // air" and has no rack over his head; reporting him against those gauges
+      // would put a made-up number in a table meant to settle an argument.
+      ...(seated ? {
+        hipLatCm: Math.round(hipLat * 100),
+        hipOverhangCm: Math.round(overhang * 100),
+        headroomCm: headroom == null ? 0 : Math.round(headroom * 100),
+        headTopCm: headTop == null ? 0 : Math.round(headTop * 100),
+      } : {}),
+      rackUnderCm: rackUnder == null ? 0 : Math.round(rackUnder * 100),
+      sitHeadroomCm: b.sitHeadroom == null ? 0 : Math.round(b.sitHeadroom * 100),
       seatedOnBunks: audit.seated,
       sittingOnAir: audit.offMattress,
       worstOverhangCm: audit.worstOverhangCm,
@@ -196,9 +256,9 @@ async function stagePerch(input) {
 export default {
   id: "prison-bunk-perch",
   title: "Prison Escape: sitting ON the bunk",
-  description: "One cell resident in the ambient \"sit on your bunk\" pose, shot across, along and at mattress height. Before = the same local build with ?cfg_PRISON_BUNK_PERCH=0.",
-  beforeLabel: "BEFORE · sits in front of the bed",
-  afterLabel: "AFTER · sits on the bed",
+  description: "One cell resident in the ambient \"sit on your bunk\" pose, shot across, along and at mattress height, plus the stack he is sitting on. Before = the same local build with ?cfg_PRISON_BUNK_PERCH=0&cfg_PRISON_BUNK_HEADROOM=0.",
+  beforeLabel: "BEFORE · in front of the bed, head in the rack",
+  afterLabel: "AFTER · on the bed, under the rack",
   viewport: { width: 1100, height: 680 },
   readyExpression: "window.THREE && window.CBZ && CBZ.CONFIG",
   urlParams: { seed: 90210 },
@@ -207,6 +267,8 @@ export default {
   metrics: {
     hipLatCm: { label: "Hips from bunk centre", unit: "cm" },
     hipOverhangCm: { label: "Hips past the mattress edge", unit: "cm", better: "lower" },
+    headroomCm: { label: "Head to the rack above", unit: "cm", better: "higher" },
+    sitHeadroomCm: { label: "Mattress to rack underside", unit: "cm", better: "higher" },
     sittingOnAir: { label: "Cells sitting on air", better: "lower" },
     worstOverhangCm: { label: "Worst overhang in the wing", unit: "cm", better: "lower" },
     seatedOnBunks: { label: "Bodies seated on bunks" },

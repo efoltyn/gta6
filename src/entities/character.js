@@ -1226,13 +1226,12 @@
     throne: "throne", boss: "throne", exec: "throne",
     // perched, no backrest, feet looking for the rail
     stool: "stool", counter: "stool", bar: "stool",
-    // a plank you lean forward off, elbows toward the knees. THE EDGE OF A
-    // BUNK IS THAT PLANK: nothing behind the shoulders, nothing under the
-    // elbows, and a man perched on his own mattress waiting out a lockdown
-    // sits exactly like a man waiting on a bench (world/cellblock.js's cell
-    // pose declares `kind: "bunk"` for this).
+    // a plank you lean forward off, elbows toward the knees
     bench: "bench", pew: "bench", park: "bench",
-    bunk: "bench", bed: "bench", mattress: "bench",
+    // A BOTTOM BUNK IS A BENCH WITH A CEILING. Same perch, but there is a
+    // steel rack ~90 cm over the mattress, so nobody sits up straight on one:
+    // they duck. world/cellblock.js declares `kind: "bunk"` for the cell pose.
+    bunk: "bunk", bed: "bunk", mattress: "bunk",
     // BEHIND A WHEEL. A driver is not a passenger who happens to be at the
     // front: the hands leave the lap and go OUT to a rim, the shins reach
     // forward for pedals instead of hanging, and the head stays up on the
@@ -1832,6 +1831,48 @@
           leanX = 0.22 + sv * 0.05;
           armX = -0.52; armZ = 0.16; elb = -1.15;
           neckX = 0.10;
+        } else if (post === "bunk") {
+          /* THE BOTTOM-BUNK DUCK. A bench-sitter can straighten up whenever he
+             likes; a man on a bottom bunk cannot, and every photograph of one
+             shows the same body — spine pitched forward, forearms on the
+             thighs, head down.
+
+             The lean is SOLVED, not styled, whenever the seat declares what is
+             overhead (`ref.ceiling`, the underside of the rack above, in world
+             units — world/cellblock.js publishes it as bunk.rackUnder). Pitch
+             the hips→crown segment forward by `lean` and the crown drops to
+             crown x cos(lean), so the angle that just fits under a ceiling is
+             acos(available / crown). Doing it from the body's OWN metric is
+             the whole point: a taller inmate ducks further, a child does not
+             duck at all, and neither of them has steel through his skull.
+
+             It cannot pay for everything — beyond ~0.62 rad a man is not
+             ducking, he is folded over his own knees, which photographs worse
+             than the clipping did. Geometry owns the rest of the gap, which is
+             why the rack in cellblock.js moved up as well. */
+          leanX = 0.34 + sv * 0.05;
+          sitY = -0.07;
+          armX = -0.58; armZ = 0.13; elb = -1.18;
+          neckX = 0.16;                        // looking at the floor, not the wall
+          if (ref.ceiling > 0) {
+            const met = ch.group && ch.group.userData && ch.group.userData.characterMetric;
+            // crown INCLUDING hair — the same +0.15 CBZ.charHeadY hangs
+            // nametags on, because the box that clips is the hair box.
+            const stand = (met && met.height > 0) ? met.height + 0.15 : 1.97;
+            // Crown above the SEATED hip line. Deliberately not
+            // (stand - hipYOf x hs): that is the standing hip pivot, and the
+            // seat solve has already moved the body onto the cushion — using
+            // it measured a 1.30 m torso on a rig whose head actually rides
+            // 1.07 m over its own seated hips, and the pose folded a man in
+            // half to clear a rack he was 12 cm under.
+            const crown = Math.max(0.40, stand - hipF);
+            const avail = ref.ceiling - 0.03 - hipF;     // hips → steel, 3 cm of daylight
+            const duck = Math.acos(Math.max(0.60, Math.min(1, avail / crown)));
+            if (duck > leanX) {
+              leanX = Math.min(0.62, duck);
+              neckX = 0.16 + (leanX - 0.34) * 0.5;       // the head follows the spine down
+            }
+          }
         } else if (post === "drive") {
           // BEHIND A WHEEL. A car seat's backrest is close to vertical, so the
           // spine barely leans; what makes a driver a driver is above the
