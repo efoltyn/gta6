@@ -20,6 +20,7 @@
     "test:invisible-walls": "node tools/invisible-wall-check.mjs",
     "test:ghost-colliders": "node tools/ghost-collider-check.mjs",
     "test:battle": "node tools/battle-check.mjs",
+    "test:c4-touch": "node tools/c4-touch-check.mjs",
     "test:battle-revert": "node tools/battle-check.mjs --revert",
     "test:bailout-presentation": "node tools/test-bailout-presentation-browser.mjs",
     "visual:compare": "node tools/visual-compare.mjs",

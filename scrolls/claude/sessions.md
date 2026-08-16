@@ -3849,3 +3849,39 @@ restrained. Landed via temp-index commit atop origin/main (shared dirty
 checkout), PR #27 merged; local main THEN fast-forwarded to bfaccbd after
 re-pointing the three files' index entries (ff refuses dirty-but-identical
 files otherwise), so this tree's copies are clean and safe from add -A.
+
+## 2026-08-16 — A THUMB COULD NOT USE THE C4, IN EITHER GAME
+
+Owner: "I can't use c4 on touch — prison game, prob can't in gang city
+either." He couldn't, anywhere: plant AND detonate lived on keyboard [B]
+alone (city/explosives.js's tap/hold state machine), and no touch file ever
+drew a control for either verb — the exact "keyboard verb with no thumb"
+failure touch.js's verb ledger exists to catch, except these two verbs were
+never even DECLARED into it, so no counter could say so. Inside the wire it
+was worse than the city: the phone's DEMOLITION card does not exist in the
+pen, so hold-[B] is the ONLY detonator the prison has — an iPad prisoner
+with a brick carried a stat fiction.
+
+ONE BUTTON, ONE PILL, ZERO REIMPLEMENTATION. #tbomb joins the on-foot icon
+cluster (bomb-with-spark glyph): tap plants, hold ~0.5 s detonates — by
+holding the module's own logical key down exactly as long as the finger is
+(CBZ.touchKeyHold, the edge-per-call sibling of touchKeyTap), so the arm
+delay, the det-cord clustering, the five-signal receiver cap, the yield to
+the B-2's bomb bay and every refusal line stay explosives.js's alone. Shown
+only when the verb can act (the keyboard's own claim test: bricks on foot,
+or charges out), and red once charges ARE out — the charge LED's own color.
+The vehicle layer gets the pill the plan ends on: body.tveh-on hides the
+on-foot cluster in a seat, so DETONATE (worded — that rail speaks verbs)
+joins the aux rail in drive/armor and now boat, wired through the same key
+hold, inheriting the 0.5 s arm that keeps a mis-brush of the glass from
+sending the street up.
+
+MEASURED (tools/c4-touch-check.mjs — headless touch session, both games):
+tap → exactly 1 planted and exactly 1 brick spent; 0.33 s of hold → nothing;
+0.7 s → every charge out fired, no brick spent; the drive context builds AND
+shows #tvBoom with a charge out (real car, real boarding arc) and the same
+hold detonates from the driver's seat; escape: plant + detonate inside the
+wire. touchAudit 42/42 covered — c4-plant / c4-detonate are ledger rows now,
+so the next thumbless verb cannot hide the way this one did. Also: the
+"[B]… Shift+B" stash hint is keyboard-only now (a touchscreen is never shown
+a keyboard key). Gate: npm run test:c4-touch.
