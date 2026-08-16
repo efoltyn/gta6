@@ -303,11 +303,17 @@
       const who = robberPed ? (robberPed.name || "somebody") : sideName(byId);
       note("" + storeName(lot) + " got hit by " + who + " — get the money back.", 4, { from: storeName(lot), app: "biz", urgent: true });
       if (robberPed && CBZ.cityMarkTarget) CBZ.cityMarkTarget(robberPed);
-      // your own soldiers give chase if any are posted near (founded crew)
+      // your soldiers give chase: the founded crew's, AND — when the store is
+      // on a crew you're patched into — that crew's own members. You get the
+      // call either way; the avenge job (crew career below) is the follow-up.
       const pg = gangRec("player") || (CBZ.cityGangs || []).find((x) => x && x.isPlayer);
       if (pg && robberPed) {
         const n = sendHunters(pg, robberPed, door.x, door.z, 2);
         if (n) robEntry.a = 1;                    // the crew moved — the owner saw it
+      }
+      if (prot !== "player" && robberPed) {
+        const crew = gangRec(prot);
+        if (crew && sendHunters(crew, robberPed, door.x, door.z, 2)) robEntry.a = 1;
       }
       return;
     }
@@ -464,7 +470,14 @@
 
   function extortCounter(lot) {
     if (!on() || !lot || g.mode !== "city") return false;
-    const mySide = playerSideId() || "player";   // solo extortion runs under your own name — founding a crew is where it leads
+    // WHOSE book does this store land on? A member's or boss's extortions sign
+    // to their crew; a solo hustler's to his own name (founding is where that
+    // leads). A PROSPECT is the special case that wires joining to the racket:
+    // while you're courting a crew, the store you lean on is a GIFT — it signs
+    // to THEM, and bringing the crew a paying business is worth more standing
+    // than any errand. Put-in-work, the racket way.
+    const courting = (!playerSideId() && CBZ.cityProspectGangId) ? CBZ.cityProspectGangId() : null;
+    const mySide = playerSideId() || courting || "player";
     const rec = recFor(lot);
     const v = vendorOf(lot);
     const door = lotDoor(lot);
@@ -472,6 +485,7 @@
     const prevGang = rec.gang;
 
     if (isPlayerSide(rec.gang)) { note(storeName(lot) + " already pays " + (rec.gang === "player" ? "you" : "your crew") + ".", 2); return true; }
+    if (rec.gang && rec.gang === mySide) { note(storeName(lot) + " already pays the " + sideName(mySide) + " — the crew you're courting.", 2.4); return true; }
 
     // the crime is the DEMAND, not the outcome — heat files either way
     if (CBZ.cityCrime) CBZ.cityCrime(50, { x: door.x, z: door.z, type: "extortion" });
@@ -508,10 +522,24 @@
     const trib = tributeOf(lot);
     if (v && CBZ.citySay) CBZ.citySay(v, "“…okay. Okay. " + money(trib) + " a day. Just keep the wolves off us.”", "#ffd9a8", 3);
     big(prevGang ? ("TERRITORY TAKEN — " + storeName(lot)) : ("PROTECTION SIGNED — " + storeName(lot)));
-    note(storeName(lot) + " kicks up " + money(trib) + "/day" + (mySide === "player" ? " to you" : " to the " + sideName(mySide)) + ". Collect at the counter.", 3.4);
     CBZ.city.addRespect(prevGang ? 8 : 4);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     if (CBZ.cityRefreshTurfHud) CBZ.cityRefreshTurfHud();  // zones re-derive with the new store
+
+    // THE CAREER READS THE DEED. A courting prospect just brought the crew a
+    // paying business — the loudest possible "let me in". A patched member
+    // grew the crew's book — contribution + an order filled, which is exactly
+    // what the rank ladder promotes on (cityMemberPutInWork runs the check).
+    if (courting && mySide === courting) {
+      if (CBZ.cityGangAddStanding) CBZ.cityGangAddStanding(courting, 12);
+      note("You brought the " + sideName(courting) + " a store. That's put-in-work they can COUNT.", 3.6, { from: "Crew" });
+    } else if (mySide !== "player" && g.cityMembership && g.cityMembership.gangId === mySide) {
+      if (CBZ.cityMemberPutInWork) { CBZ.cityMemberPutInWork("order", 1); CBZ.cityMemberPutInWork("cash", trib * 2); }
+      if (CBZ.cityGangAddStanding) CBZ.cityGangAddStanding(mySide, 6);
+      note(storeName(lot) + " kicks up " + money(trib) + "/day to the " + sideName(mySide) + " — your book, your collections.", 3.4);
+    } else {
+      note(storeName(lot) + " kicks up " + money(trib) + "/day" + (mySide === "player" ? " to you" : " to the " + sideName(mySide)) + ". Collect at the counter.", 3.4);
+    }
 
     // the crew you took it FROM answers — that's the war the owner asked for
     if (prevGang && !isPlayerSide(prevGang)) {
@@ -533,7 +561,10 @@
   //  COLLECT — walk your rounds. Tribute accrues daily as a PROMISE (owed);
   //  the cash only moves when you stand at the counter and the drawer can
   //  actually pay (cityTill.take, non-hostile → conservation holds).
+  //  RANK_CUT: the ladder is the pay grade — gangs.js's rank keys, a rising
+  //  share of every round you run for an NPC crew you're patched into.
   // ============================================================
+  const RANK_CUT = { prospect: 0.15, lookout: 0.2, runner: 0.25, soldier: 0.3, enforcer: 0.35, lt: 0.4 };
   function collectCounter(lot) {
     if (!on() || !lot) return false;
     const rec = state.get(lot);
@@ -551,14 +582,16 @@
     rec.trust = clamp(rec.trust + 0.04, 0, 1);             // a protector who SHOWS UP is believed
     const m = g.cityMembership;
     if (m && rec.gang === m.gangId) {
-      // riding with a crew: the collector keeps a cut, the rest kicks up —
-      // and the books remember who brought it in (rank progress).
-      const cut = Math.round(paid * 0.3);
+      // riding with a crew: the collector keeps a RANK-SCALED cut and the rest
+      // kicks up — the ladder is the pay grade (a prospect runs rounds for
+      // scraps, a lieutenant keeps 40 on the hundred), and the books remember
+      // who brought it in, which is what the promotion check reads.
+      const cut = Math.round(paid * (RANK_CUT[m.rank] != null ? RANK_CUT[m.rank] : 0.3));
       CBZ.city.addCash(cut);
       const gp = gangRec(m.gangId);
       if (gp) gp.treasury = Math.min(8000, (gp.treasury || 0) + (paid - cut));
       if (CBZ.cityMemberPutInWork) CBZ.cityMemberPutInWork("cash", paid - cut);
-      big("COLLECTED +$" + cut + " (crew cut $" + (paid - cut) + ")");
+      big("COLLECTED +$" + cut + " (kicked up $" + (paid - cut) + ")");
     } else {
       CBZ.city.addCash(paid);
       big("PROTECTION COLLECTED +$" + paid);
@@ -597,6 +630,138 @@
     note("You kick up $" + pay + " at the HQ. The books remember.", 2.8, { from: "Crew" });
     if (CBZ.sfx) CBZ.sfx("coin");
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+  }
+
+  // ============================================================
+  //  THE CREW CAREER — joining, rising and running a gang all route through
+  //  the racket now. A PROSPECT brings the crew a store (extortCounter's
+  //  courting path). A MEMBER gets WORK — one live job at a time, generated
+  //  from the crew's actual ledger, never invented (contracts.js doctrine):
+  //    avenge — a crew store was robbed and nobody answered; the robber still
+  //             walks, carrying the take. Drop him. (fights the exact failure
+  //             that loses stores — the member IS the pursuit)
+  //    sign   — a ripe business near crew turf; lean on it for the crew
+  //    rounds — your book's drawers are heavy; walk the collections
+  //  Every completion credits cityMemberPutInWork, which runs the PROMOTION
+  //  check itself — the rank ladder climbs on racket deeds. A FOUNDED boss
+  //  gets no jobs; he gets soldiers who defend the book (op defense below)
+  //  and runners who walk the rounds (runDailyBooks' delegation).
+  // ============================================================
+  let crewJob = null;           // {kind, gangId, lot, ped, made} — one at a time
+
+  function memberCrewId() { const m = g.cityMembership; return m ? m.gangId : null; }
+  function pedAlive(p) { return !!(p && !p.dead && (CBZ.cityPeds || []).indexOf(p) >= 0); }
+
+  function jobWaypoint(x, z, label) {
+    if (CBZ.fullMap && CBZ.fullMap.setWaypoint) { try { CBZ.fullMap.setWaypoint(x, z, label); } catch (e) {} }
+  }
+  function makeCrewJob() {
+    const gid = memberCrewId();
+    if (!gid || crewJob) return;
+    // 1) AVENGE — the standing insult: an unavenged rob with the robber alive
+    for (const [lot, rec] of state) {
+      if (rec.gang !== gid || lot.demolished) continue;
+      for (let i = rec.robs.length - 1; i >= 0; i--) {
+        const rb = rec.robs[i];
+        if (rb.a || !pedAlive(rb._ped)) continue;
+        crewJob = { kind: "avenge", gangId: gid, lot: lot, ped: rb._ped, entry: rb, made: dayNow() };
+        note("Crew work: " + (rb._ped.name || "the robber") + " hit " + storeName(lot) + " for " + money(rb.c) + " and is still breathing. Handle it.", 4, { from: sideName(gid), urgent: true });
+        if (CBZ.cityMarkTarget) CBZ.cityMarkTarget(rb._ped);
+        return;
+      }
+    }
+    // 2) SIGN — grow the book: the fattest unprotected business near the crew
+    const gp = gangRec(gid);
+    if (gp && gp.center) {
+      let best = null, bs = -1;
+      for (const lot of shopLots()) {
+        if (!racketable(lot)) continue;
+        const rec = state.get(lot);
+        if (rec && rec.gang) continue;
+        const d = Math.hypot(lot.cx - gp.center.x, lot.cz - gp.center.z);
+        if (d > 300) continue;
+        const s = (lot._rkFlow || 0) - d * 0.15;
+        if (s > bs) { bs = s; best = lot; }
+      }
+      if (best) {
+        crewJob = { kind: "sign", gangId: gid, lot: best, made: dayNow() };
+        note("Crew work: " + storeName(best) + " pays nobody. Make the offer — that book feeds all of us.", 3.6, { from: sideName(gid) });
+        jobWaypoint(best.cx, best.cz, "SIGN: " + storeName(best));
+        return;
+      }
+    }
+    // 3) ROUNDS — the drawers are heavy on your own book
+    let owed = 0;
+    for (const [lot, rec] of state) if (rec.gang === gid && rec.by === "player" && !lot.demolished) owed += rec.owed;
+    if (owed >= 150) {
+      crewJob = { kind: "rounds", gangId: gid, made: dayNow() };
+      note("Crew work: " + money(owed) + " is sitting in drawers on your book. Walk the rounds.", 3.2, { from: sideName(gid) });
+    }
+  }
+  function tickCrewJob() {
+    if (!crewJob) { makeCrewJob(); return; }
+    const gid = memberCrewId();
+    if (!gid || gid !== crewJob.gangId) { crewJob = null; return; }    // left the crew — the work went with it
+    if (dayNow() - crewJob.made > 3) { crewJob = null; return; }       // stale — the street moved on
+    if (crewJob.kind === "avenge") {
+      const p = crewJob.ped;
+      if (!p || (!p.dead && (CBZ.cityPeds || []).indexOf(p) < 0)) { crewJob = null; return; }   // despawned — gone for good
+      if (p.dead) {
+        const near = CBZ.player && Math.hypot(CBZ.player.pos.x - p.pos.x, CBZ.player.pos.z - p.pos.z) < 90;
+        crewJob.entry.a = 1;
+        const rec = state.get(crewJob.lot);
+        if (rec) rec.trust = clamp(rec.trust + (near ? 0.25 : 0.1), 0, 1);
+        if (near) {
+          if (CBZ.cityMemberPutInWork) { CBZ.cityMemberPutInWork("body", 1); CBZ.cityMemberPutInWork("standing", 0.15); }
+          if (CBZ.cityGangAddStanding) CBZ.cityGangAddStanding(gid, 8);
+          big("DEBT SETTLED — " + storeName(crewJob.lot));
+          note("The take is on the body, and " + storeName(crewJob.lot) + " saw the crew answer. That's rank-making work.", 3.6, { from: sideName(gid) });
+        } else {
+          note("The " + storeName(crewJob.lot) + " robber is down. The block heard.", 2.6, { from: sideName(gid) });
+        }
+        crewJob = null;
+      }
+    } else if (crewJob.kind === "sign") {
+      const rec = state.get(crewJob.lot);
+      if (crewJob.lot.demolished) { crewJob = null; return; }
+      if (rec && rec.gang === gid) {
+        if (CBZ.cityMemberPutInWork) CBZ.cityMemberPutInWork("order", 1);
+        note("Order filled — " + storeName(crewJob.lot) + " is on the book.", 2.8, { from: sideName(gid) });
+        crewJob = null;
+      } else if (rec && rec.gang) { crewJob = null; }                  // somebody else got there
+    } else if (crewJob.kind === "rounds") {
+      let owed = 0;
+      for (const [lot, rec] of state) if (rec.gang === gid && rec.by === "player" && !lot.demolished) owed += rec.owed;
+      if (owed < 60) {
+        if (CBZ.cityMemberPutInWork) CBZ.cityMemberPutInWork("order", 1);
+        note("Rounds walked, books square.", 2.4, { from: sideName(gid) });
+        crewJob = null;
+      }
+    }
+  }
+
+  // OWNERSHIP FOLLOWS THE CROWN. A crew that gets ABSORBED (you killed its
+  // boss and claimed it, or succeeded him from inside) stops existing — its
+  // protection book has to go somewhere. If you run a crew now, it's YOURS
+  // (the whole point of a takeover: the income comes with the turf); with no
+  // player crew standing, the stores shake loose and the map opens up.
+  function sweepAbsorbed() {
+    let inherited = 0, freed = 0;
+    const youRun = !!(CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists());
+    for (const [lot, rec] of state) {
+      if (!rec.gang || rec.gang === "player" || isPlayerSide(rec.gang)) continue;
+      const gp = gangRec(rec.gang);
+      if (gp && !gp.absorbed) continue;
+      if (youRun) { rec.gang = "player"; rec.by = "player"; rec.trust = Math.min(rec.trust, 0.4); inherited++; }
+      else { rec.gang = null; rec.owed = 0; freed++; }
+    }
+    if (inherited) {
+      news(inherited + " protected store" + (inherited > 1 ? "s" : "") + " changed hands with the crew — they kick up to YOU now.");
+      if (CBZ.cityRefreshTurfHud) CBZ.cityRefreshTurfHud();
+    } else if (freed) {
+      news(freed + " store" + (freed > 1 ? "s" : "") + " shook loose — their crew is gone and nobody collects there.");
+      if (CBZ.cityRefreshTurfHud) CBZ.cityRefreshTurfHud();
+    }
   }
 
   // ============================================================
@@ -841,6 +1006,29 @@
         continue;
       }
       const door = lotDoor(lot);
+      // THE BOOK DEFENDS ITSELF: an op moving on a player-side store wakes
+      // your soldiers — the founded crew's members near the store, and (when
+      // the store rides a crew you're patched into) that crew's own bodies.
+      // Once per op; the brain owns the fight from there.
+      if (!op._defCalled) {
+        const recD = state.get(lot);
+        if (recD && isPlayerSide(recD.gang)) {
+          op._defCalled = true;
+          const mine = CBZ.cityPlayerGangMembers ? CBZ.cityPlayerGangMembers() : [];
+          let woke = 0;
+          for (const s of mine) {
+            if (!s || s.dead || s.restraint || s._occupyGarrison || s.rage) continue;
+            if (Math.hypot(s.pos.x - door.x, s.pos.z - door.z) > 80) continue;
+            s.rage = m; s.state = "fight"; s.pause = 0; s.path = null; woke++;
+            if (woke >= 3) break;
+          }
+          if (recD.gang !== "player") {
+            const crew = gangRec(recD.gang);
+            if (crew) woke += sendHunters(crew, m, door.x, door.z, 2);
+          }
+          if (woke && nearPlayer(door.x, door.z, 200)) note("Your people are moving on the " + op.gang.name + " " + (op.kind === "rob" ? "robber" : "collector") + " at " + storeName(lot) + ".", 2.8);
+        } else op._defCalled = true;
+      }
       const d = Math.hypot(m.pos.x - door.x, m.pos.z - door.z);
       if (op.phase === "walk" && d < 3.2) {
         op.phase = "at"; op.hold = op.kind === "reclaim" ? 4 : 1.6;
@@ -909,7 +1097,7 @@
           if (d < 320 && h > bs) { bs = h; gp = cand; }
         }
       }
-      if (!gp || gp.playerFriendly) continue;
+      if (!gp || gp.absorbed || gp.playerFriendly) continue;   // a dead crew marches nobody
       if (rng() > 0.25) continue;                           // not every tick — a looming threat, not a metronome
       if (startOpWalk(gp, lot, "reclaim", null)) {
         rec.reclaim--;
@@ -927,14 +1115,32 @@
   let _lastBookDay = -1;
   function runDailyBooks(day) {
     if (!on() || g.mode !== "city") return;
+    // BOSS DELEGATION: a founded boss with soldiers doesn't walk every round
+    // himself — the crew runs them. Auto-collects HALF of what's owed on your
+    // stores into the BANK (the runner keeps the difference in shoe leather);
+    // walking the counter yourself still collects in full. This is what
+    // "running a gang" buys over freelancing, and it kills the chore at scale.
+    const founded = !!(g.playerGang && g.playerGang.founded);
+    const runners = founded && CBZ.cityPlayerGangMembers ? CBZ.cityPlayerGangMembers().length : 0;
+    let ran = 0;
     for (const [lot, rec] of state) {
       if (!rec.gang || lot.demolished) { continue; }
       const trib = tributeOf(lot);
-      if (isPlayerSide(rec.gang)) {
+      // YOUR book = stores you signed on a side you personally collect for
+      // (your own name, or the crew you're patched into). Crew-signed stores
+      // of that same crew stay THEIR collectors' problem — you didn't sign
+      // them, you don't hold their paper.
+      if (isPlayerSide(rec.gang) && rec.by === "player") {
         rec.owed = Math.min(trib * 4, rec.owed + trib);     // uncollected rounds pile up (and cap — drawers aren't bottomless)
+        if (founded && runners >= 2 && rec.owed > trib) {
+          const want = Math.round(rec.owed * 0.5);
+          const r = CBZ.cityTill.take(lot, { point: "register", max: want, by: "crew runner" });
+          const got = (r && r.taken) | 0;
+          if (got > 0) { rec.owed -= got; g.cityBank = (g.cityBank || 0) + got; ran += got; }
+        }
       } else {
         const gp = gangRec(rec.gang);
-        if (!gp || gp.absorbed) { rec.gang = null; continue; }
+        if (!gp || gp.absorbed) { continue; }               // ownership sweep below decides who inherits
         const r = CBZ.cityTill.take(lot, { point: "register", max: trib, by: gp.name });
         const paid = (r && r.taken) | 0;
         gp.treasury = Math.min(8000, (gp.treasury || 0) + paid);
@@ -945,6 +1151,7 @@
       // old wounds close: robbery memory ages out of the acceptance math
       while (rec.robs.length && (day - rec.robs[0].d) > 7) rec.robs.shift();
     }
+    if (ran > 0) note("Your runners did the rounds — $" + ran + " banked from the stores.", 3, { from: "Crew" });
   }
   let _newDayHooked = false;
   function ensureDayHook() {
@@ -1025,8 +1232,10 @@
       const r = recFor(lot);
       r.gang = row[1] || null;
       // a saved protector that no longer exists (absorbed between sessions)
-      // releases the store rather than haunting it
-      if (r.gang && r.gang !== "player" && !gangRec(r.gang) && !isPlayerSide(r.gang)) r.gang = null;
+      // releases the store rather than haunting it — sweepAbsorbed then hands
+      // it to your crew if the absorbing crown was yours
+      const gpA = r.gang && r.gang !== "player" ? gangRec(r.gang) : null;
+      if (r.gang && r.gang !== "player" && (!gpA || gpA.absorbed) && !isPlayerSide(r.gang)) r.gang = null;
       r.fear = clamp((row[2] | 0) / 100, 0, 1);
       r.trust = clamp((row[3] | 0) / 100, 0, 1);
       r.owed = row[4] | 0; r.paidDay = row[5] | 0; r.sinceDay = row[6] | 0; r.reclaim = row[7] | 0;
@@ -1129,7 +1338,7 @@
   //  frame pays for the whole racket. 34.75: after gangs (34.5/34.6) and
   //  gangops (34.7/34.72), so wars and reprisals are settled state.
   // ============================================================
-  let signT = 6, robT = 14, memT = 0, reclaimT = 8, dayT = 2, slice = 0;
+  let signT = 6, robT = 14, memT = 0, reclaimT = 8, dayT = 2, jobT = 4, slice = 0;
 
   CBZ.onUpdate(34.75, function (dt) {
     if (g.mode !== "city" || !on()) return;
@@ -1164,6 +1373,10 @@
     memT -= dt;
     if (memT <= 0) { memT = 0.8; applyOwnerMemory(); }
 
+    // the crew career: job generation/completion for a patched member
+    jobT -= dt;
+    if (jobT <= 0) { jobT = 2.2; tickCrewJob(); }
+
     // the directors, round-robined — one heavy job per tick at most
     signT -= dt; robT -= dt; reclaimT -= dt;
     slice = (slice + 1) % 3;
@@ -1187,6 +1400,7 @@
     } else if (slice === 2 && reclaimT <= 0) {
       reclaimT = 16 + rng() * 10;
       tickReclaims();
+      sweepAbsorbed();                                     // a claimed crew's book follows the crown
       // demolished stores fall off the ledger (and out of every crew's books)
       for (const [lot, rec] of state) {
         if (lot.demolished && rec.gang) {
@@ -1209,6 +1423,7 @@
     stores: function () { return CBZ.cityRacketStores(); },
     count: countFor,
     tribute: tributeOf,
+    job: function () { return crewJob; },
     hot: function () { return hotCash; },
     serialize: serialize,
     reset: CBZ.cityRacketReset,

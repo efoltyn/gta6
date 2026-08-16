@@ -106,7 +106,10 @@ function makeWorld() {
   CBZ.cityGangs = [vipers];
   CBZ.cityGangById = (id) => CBZ.cityGangs.find((x) => x.id === id) || null;
   CBZ.cityGangProvoke = (id, amt) => { const gg = CBZ.cityGangById(id); if (gg && !gg.playerFriendly) gg.provoke = Math.min(1, gg.provoke + (amt || 0.3)); };
-  CBZ.cityGangAddStanding = () => {};
+  const career = { standing: [], work: [] };
+  CBZ.cityGangAddStanding = (id, n) => career.standing.push([id, n]);
+  CBZ.cityMemberPutInWork = (kind, amount) => career.work.push([kind, amount]);
+  CBZ._career = career;
   const wars = new Set();
   CBZ.cityAtWar = (a, b) => wars.has(a + "|" + b) || wars.has(b + "|" + a);
   CBZ.cityDeclareWar = (a, b) => wars.add(a + "|" + b);
@@ -286,7 +289,63 @@ for (let i = 0; i < 600 && !npcSigned; i++) {
 }
 check("npc signs", npcSigned, npcSigned ? "vipers put Glint & Co under protection" : "director never signed");
 
-// ---- 9) PERSISTENCE roundtrip ----
+// ---- 9) THE CREW CAREER: member cut, avenge job, courting gift, crown ----
+// (a) patched in as a SOLDIER: collections pay a rank cut, the rest kicks up
+g.cityMembership = { gangId: "vipers", rank: "soldier" };
+const rcirc = CBZ.cityRacket.of(circuit);
+rcirc.gang = "vipers"; rcirc.by = "player"; rcirc.owed = 100;
+CBZ._bal.get(circuit).register = 400;
+const bank0 = CBZ.cityGangs[0].treasury, cash2 = g.cash, work0 = CBZ._career.work.length;
+CBZ.cityRacket.collect(circuit);
+check("rank cut", g.cash - cash2 === 30 && CBZ.cityGangs[0].treasury - bank0 === 70,
+  "soldier keeps $" + (g.cash - cash2) + ", crew banks $" + (CBZ.cityGangs[0].treasury - bank0));
+check("kick-up credited", CBZ._career.work.length > work0, "cityMemberPutInWork ran → promotion check ran");
+
+// (b) the AVENGE job: an unavenged rob with a live robber generates crew work,
+//     dropping him near the player settles it with body credit + trust back
+const robber = { gang: "x", pos: { x: circuit.cx + 4, z: circuit.cz + 4 }, dead: false, name: "Blinks" };
+CBZ.cityPeds.push(robber);
+rcirc.robs.push({ b: "npc", d: CBZ.dayCount(), c: 220, a: 0, _ped: robber });
+CBZ.step(3);                                               // jobT fires → job generated
+let job = CBZ.cityRacket.job();
+check("avenge job", !!job && job.kind === "avenge" && job.ped === robber, job ? job.kind : "none");
+const trust0 = rcirc.trust, bodies0 = CBZ._career.work.filter((w) => w[0] === "body").length;
+CBZ.player.pos.x = robber.pos.x; CBZ.player.pos.z = robber.pos.z;
+robber.dead = true;
+CBZ.step(3);                                               // completion tick
+check("avenge settles", !CBZ.cityRacket.job() && rcirc.robs[rcirc.robs.length - 1].a === 1 &&
+  rcirc.trust > trust0 && CBZ._career.work.filter((w) => w[0] === "body").length > bodies0,
+  "body credited, trust " + trust0.toFixed(2) + " → " + rcirc.trust.toFixed(2));
+
+// (c) COURTING: a prospect's extortion signs the store TO the crew (a gift)
+g.cityMembership = null;
+CBZ.cityProspectGangId = () => "vipers";
+const rspoon = CBZ.cityRacket.of(spoon);
+rspoon.gang = null; rspoon.owed = 0;                       // shake the diner loose again
+const standing0 = CBZ._career.standing.length;
+Math.random = () => 0.01;
+CBZ.cityRacket.extort(spoon);
+Math.random = mr;
+check("courting gift", CBZ.cityRacket.of(spoon).gang === "vipers" &&
+  CBZ._career.standing.some((s, i) => i >= standing0 && s[0] === "vipers" && s[1] >= 10),
+  "store signed to the courted crew + standing jumped");
+CBZ.cityProspectGangId = null;
+
+// (d) THE CROWN: the crew is absorbed (boss killed, you claimed it) — the
+//     whole protection book follows you; runners then walk your rounds
+g.playerGang = { founded: true };
+CBZ.cityPlayerGangExists = () => true;
+CBZ.cityPlayerGangMembers = () => [{ pos: { x: 0, z: 0 } }, { pos: { x: 1, z: 1 } }];
+CBZ.cityGangs[0].absorbed = true;
+for (let i = 0; i < 140; i++) CBZ.step(0.5);               // slice-2 sweep fires
+const inherited = CBZ.cityRacketStores().filter((s) => s.mine).length;
+check("crown inherits the book", inherited >= 3, inherited + " stores now kick up to you");
+g.cityBank = 0;
+CBZ.step(6); CBZ.setDay(CBZ.dayCount() + 1); CBZ.step(6); CBZ.step(6);   // one day: accrue
+CBZ.setDay(CBZ.dayCount() + 1); CBZ.step(6); CBZ.step(6);                // two: accrue + delegate
+check("runners walk the rounds", (g.cityBank | 0) > 0, "$" + (g.cityBank | 0) + " banked by the crew");
+
+// ---- 10) PERSISTENCE roundtrip ----
 const blob = CBZ.cityRacket.serialize();
 check("blob", !!blob && blob.v === 1 && blob.seed === (CBZ.WORLD_SEED >>> 0) && blob.stores.length >= 2, (blob ? blob.stores.length : 0) + " stores ride");
 const spoonRec = CBZ.cityRacket.of(spoon);

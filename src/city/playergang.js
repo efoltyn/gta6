@@ -510,6 +510,12 @@
     return true;
   };
 
+  // WHICH crew you're courting (or null) — city/racket.js reads this so a
+  // prospect can put in work the racket way: extort a store and BRING IT TO
+  // THE CREW (the store signs to them, your standing jumps). One read, no
+  // state exposed beyond the id.
+  CBZ.cityProspectGangId = function () { return prospecting ? prospecting.gangId : null; };
+
   // current prospect standing 0..1 (legacy read used by interact.js for the
   // "they're warming to you" standing line) — the OVERALL task-sequence progress.
   CBZ.cityProspectStanding = function () {
