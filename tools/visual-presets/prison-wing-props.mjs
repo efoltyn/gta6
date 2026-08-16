@@ -654,8 +654,15 @@ async function stageWingProps(input) {
          both cover and the thing holding the prize is both, and filing it as
          `solid` only would hide the prize.                                   */
       if (it.use && it.use.indexOf("-part") < 0) interactive++;
-      if (it.solid) { solidProps++; continue; }
-      if (it.use) { usedProps++; used.push(it); continue; }
+      /* `usedProps` had the same fault `interactive` was added to dodge, and
+         dodging it left the original number wrong: solid answered first and
+         stopped, so a solid rack, bench or bunk never reached the used branch.
+         Both are independent facts about one prop now — see the same repair in
+         prison-rooms.mjs, which this census is copied from so the two runs can
+         never disagree. `deadProps` is unchanged: neither solid nor used. */
+      if (it.solid) solidProps++;
+      if (it.use) { usedProps++; used.push(it); }
+      if (it.solid || it.use) continue;
       deadProps++;
       deadPropVolume += it.vol;
       if (Math.min(it.w, it.hh, it.d) <= 0.05) deadFlat++;
