@@ -1226,8 +1226,13 @@
     throne: "throne", boss: "throne", exec: "throne",
     // perched, no backrest, feet looking for the rail
     stool: "stool", counter: "stool", bar: "stool",
-    // a plank you lean forward off, elbows toward the knees
+    // a plank you lean forward off, elbows toward the knees. THE EDGE OF A
+    // BUNK IS THAT PLANK: nothing behind the shoulders, nothing under the
+    // elbows, and a man perched on his own mattress waiting out a lockdown
+    // sits exactly like a man waiting on a bench (world/cellblock.js's cell
+    // pose declares `kind: "bunk"` for this).
     bench: "bench", pew: "bench", park: "bench",
+    bunk: "bench", bed: "bench", mattress: "bench",
     // BEHIND A WHEEL. A driver is not a passenger who happens to be at the
     // front: the hands leave the lap and go OUT to a rim, the shins reach
     // forward for pedals instead of hanging, and the head stays up on the

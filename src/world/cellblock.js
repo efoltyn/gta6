@@ -1008,16 +1008,42 @@
     return r < 0.34 ? "bars" : (r < 0.72 ? "bunk" : "pace");
   }
   function barsSpot(c) { return facePoint(c, (c.oa + c.ob) / 2, -0.85); }
+  /* WHERE A MAN SITTING ON HIS BUNK ACTUALLY IS (PRISON_BUNK_PERCH).
+
+     OWNER: "when npcs sit on their bed, they sit in front, not actually
+     sitting on anything." He is describing two separate errors that compound
+     into one screenshot:
+
+     1. THE HIPS WERE OFF THE MATTRESS. This offset was 0.62 m from the bunk's
+        centre line. bunkRig draws the frame 1.25 m wide and the mattress 1.05
+        (LAT/MLAT above), so the near mattress edge is at 0.525 and the frame's
+        outer face at 0.625 — a body centred at 0.62 has its whole pelvis PAST
+        the mattress, hovering over the floor at cushion height. The seated
+        solve in entities/character.js does its job perfectly and lifts the
+        hips to c.bunk.top (0.79): a correct sit, at a place with no bed under
+        it. That is the "not sitting on anything" exactly.
+     2. HE WAS FACING ALONG THE BED. The leash below yawed him at the cell
+        door (atan2(c.dx, c.dz)), which for the whole north row points down
+        the mattress's own long axis — so even where the hips grazed the bed
+        he sat straddling it lengthways instead of perching off its side.
+
+     city/propuse.js already solved both for the real bed arcs: its `perch`
+     beat sits at 0.34 across the bed and yaws OUT of it (`outFace`), which is
+     why a scripted lie-down looks right and this ambient pose never did.
+     Rather than invent a third number, this returns propuse's — hips a
+     comfortable 0.19 m inside the mattress edge, thighs out over it, soles on
+     the concrete — plus the outward facing the caller must use.
+
+     The lateral sign points INTO the room, away from the wall the bunk's back
+     is against (north/west rows +x, east row -x); every bunk in this wing is
+     laid out ALONG Z, so "across the bed" is always X. */
+  if (CFG.PRISON_BUNK_PERCH == null) CFG.PRISON_BUNK_PERCH = true;
+  const PERCH_LAT = 0.34;               // city/propuse.js's bed-edge perch
   function bunkSpot(c) {
-    // THE NEAR LONG EDGE OF THE BUNK — and it is always an X offset, because
-    // every bunk in this wing is laid out ALONG Z (fitOutCell passes "z" for
-    // both rows). The side-row branch used to offset in Z, which is offsetting
-    // ALONG the mattress: the body landed 0.62 m up the bed with the frame
-    // through his shins, and that is precisely the owner's "they stand
-    // overlapping them". The lateral sign points INTO the room, away from the
-    // wall the bunk's back is against (north/west rows +x, east row -x).
     const b = c.bunk;
-    return { x: b.x + (c.dz !== 0 ? 1 : c.dx) * 0.62, z: b.z };
+    const lat = c.dz !== 0 ? 1 : c.dx;
+    const off = CFG.PRISON_BUNK_PERCH === false ? 0.62 : PERCH_LAT;
+    return { x: b.x + lat * off, z: b.z, face: Math.atan2(lat, 0) };
   }
 
   let cast = false;
@@ -1134,9 +1160,17 @@
         p.x = s.x; p.z = s.z;
         n.target.set(s.x, 0, s.z);
         n.pause = Math.max(n.pause || 0, 0.6);
-        n.group.rotation.y = CBZ.lerpAngle(n.group.rotation.y, Math.atan2(c.dx, c.dz), 1 - Math.pow(0.02, dt));
+        // FACE OUT OF THE BED, not at the door: the yaw is the perch's own,
+        // so the thighs leave the mattress across its short axis and the feet
+        // land on the floor beside it (see bunkSpot).
+        const face = (CFG.PRISON_BUNK_PERCH === false || s.face == null) ? Math.atan2(c.dx, c.dz) : s.face;
+        n.group.rotation.y = CBZ.lerpAngle(n.group.rotation.y, face, 1 - Math.pow(0.02, dt));
         if (n.char && CBZ.setCharPose) {
-          n.char.seatRef = n.char.seatRef || { cushion: c.bunk.top, floorBelow: 0 };
+          // `kind` is not decoration: entities/character.js's SEAT_POSTURE
+          // reads it, and a man on the edge of his own bunk is the BENCH
+          // read — perched forward, elbows toward the knees — not the
+          // office-chair upright a kindless seatRef falls through to.
+          n.char.seatRef = n.char.seatRef || { cushion: c.bunk.top, floorBelow: 0, kind: "bunk" };
           CBZ.setCharPose(n.char, "sit");
         }
       }
@@ -1228,6 +1262,31 @@
     // geometry other systems may want without re-deriving it
     height: CH, doorWidth: DOOR_W,
     bounds: { minX: IX0, maxX: IX1, minZ: IZN, maxZ: -7.5 },
+  };
+
+  /* IS THE MAN ON HIS BUNK ACTUALLY ON IT — measured, not eyeballed.
+     One number per seated body: how far his hips are from the bunk's centre
+     line, across the mattress. The mattress half-width is MLAT/2 = 0.525
+     (bunkRig), so anything beyond that is a body sitting on air in front of
+     his own bed, and `offMattress` is the count of them. A storyboard can
+     publish this beside the picture instead of arguing about the picture. */
+  const MATT_HALF = 0.525;
+  CBZ.cellSitAudit = function () {
+    const out = { seated: 0, offMattress: 0, worstOverhangCm: 0, latCm: [] };
+    for (let i = 0; i < cells.length; i++) {
+      const c = cells[i], n = c.owner;
+      if (!n || n === "player" || !c.bunk || !n.group) continue;
+      if (n._cellPose !== "bunk" || !n.char || !n.char.sitting) continue;
+      const lat = Math.abs(n.group.position.x - c.bunk.x);
+      out.seated++;
+      out.latCm.push(Math.round(lat * 100));
+      const over = lat - MATT_HALF;
+      if (over > 0) {
+        out.offMattress++;
+        if (over * 100 > out.worstOverhangCm) out.worstOverhangCm = Math.round(over * 100);
+      }
+    }
+    return out;
   };
 
   /* ==========================================================
