@@ -540,16 +540,26 @@ async function stageNpcTactics(input) {
     // A single end-frame bit lied both ways (a peek beat reads exposed, a
     // lucky backpedal frame reads hidden); the fraction of sampled frames the
     // player could draw a chest-height lane to him is the honest number.
-    let sampN = 0, expN = 0;
+    // RELOCATION GUARD. The city's crowd system can reclaim a pooled rig and
+    // respawn it across the map mid-take (five runs measured the same ~750 m
+    // "ground gained" — a corpse-walk or pool-recycle, not a retreat). A
+    // frame-to-frame jump no legs can make freezes the instrument at its
+    // last honest reading and raises castRelocated instead of lying.
+    let sampN = 0, expN = 0, lastX = null, lastZ = null, saneX = null, saneZ = null, relocated = 0;
     S.frameSample = () => {
-      if (!hurt || hurt.dead) return;
+      if (!hurt || hurt.dead || relocated) return;
+      if (lastX != null && Math.hypot(hurt.pos.x - lastX, hurt.pos.z - lastZ) > 20) { relocated = 1; return; }
+      lastX = saneX = hurt.pos.x; lastZ = saneZ = hurt.pos.z;
       sampN++;
       const geom = CBZ.combatIQ && CBZ.combatIQ.geom;
       if (!geom || !geom.fireBlocked(M.x, M.z, hurt.pos.x, hurt.pos.z)) expN++;
     };
     S.extra = () => ({
-      distGainM: Number((Math.hypot(hurt.pos.x - M.x, hurt.pos.z - M.z) - startDist).toFixed(1)),
+      distGainM: saneX != null
+        ? Number((Math.hypot(saneX - M.x, saneZ - M.z) - startDist).toFixed(1))
+        : Number((Math.hypot(hurt.pos.x - M.x, hurt.pos.z - M.z) - startDist).toFixed(1)),
       exposedPct: sampN ? Math.round((expN / sampN) * 100) : null,
+      castRelocated: relocated,
     });
   }
   if (subject.id === "cover-peek" && hurt && wallRef) {
@@ -677,6 +687,7 @@ export default {
     meanSpeed: { label: "Mean cast speed", unit: "m/s", better: "lower" },
     distGainM: { label: "Ground gained away from the gun", unit: "m" },
     exposedPct: { label: "Time in the player's firing lanes", unit: "%", better: "lower" },
+    castRelocated: { label: "Take voided by a crowd-rig recycle", unit: "1=yes", better: "lower" },
     tuckedM: { label: "Hurt man's distance from the hide point", unit: "m", better: "lower" },
     wallHugPct: { label: "Time spent pressed against the wall", unit: "%", better: "lower" },
     laneClearEnd: { label: "Ended with a real firing lane", unit: "1=yes", better: "higher" },

@@ -522,7 +522,13 @@
       if (!segBox(hx, hz, tx, tz, c)) continue;
       // prefer close cover, and cover that does not walk us INTO the gun
       const closing = Math.max(0, dThreatNow - Math.hypot(hx - tx, hz - tz));
-      const score = walk + closing * 1.4;
+      let score = walk + closing * 1.4;
+      // STICKY: the wall you are already using outbids a marginally better
+      // one. Re-probes used to flip a hurt man's chosen box every second or
+      // two as he moved (each flip re-derives the hide AND peek points — a
+      // goal-churn source the staged deaths were hiding), and no person
+      // changes walls because a different one came up 80 cm closer.
+      if (a._iqCov && a._iqCov.ref === c) score -= 4;
       if (score < bestScore) { bestScore = score; best = { x: hx, z: hz, d: walk, ref: c }; }
     }
     a._iqCov = best;
