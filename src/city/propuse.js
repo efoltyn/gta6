@@ -414,6 +414,16 @@
   // so it costs nothing until something sits.
   const ENTRY_R = 0.78;      // how far out from the cushion the stander's feet go
   const BED_SIDE = 0.95;     // half a mattress + a body
+  // One description of "sitting on this bed", shared by the perch beat going
+  // to sleep and the edge beat getting up, so the two can never disagree.
+  function bedSeatRef(rec) {
+    return {
+      cushion: Math.max(0.30, rec.top - rec.y),
+      floorBelow: 0,
+      kind: rec.kind || null,
+      ceiling: rec.ceiling != null ? rec.ceiling - (rec.y || 0) : null,
+    };
+  }
   const BODY_R = 0.30;
   const probe = [];
   function clearAt(x, z, y) {
@@ -1036,6 +1046,11 @@
       case "perch":
       case "edge": {
         // sit on the mattress EDGE, feet on the floor, facing out of the bed.
+        // The seat is DESCRIBED, not just measured: a bed anchor carries its
+        // own `kind` (a bunk is not a four-poster) and, when something is
+        // racked above it, the underside of that rack. entities/character.js
+        // turns the pair into a posture and, on a bottom bunk, into the duck
+        // that keeps this beat's head out of the steel.
         const sx = rec.hz, sz = -rec.hx;
         const side = ((ex - rec.x) * sx + (ez - rec.z) * sz) >= 0 ? 1 : -1;
         const px = rec.x + sx * side * (0.34), pz = rec.z + sz * side * (0.34);
@@ -1044,11 +1059,11 @@
         if (name === "perch") {
           place(actor, A.sx + (px - A.sx) * e, rec.y, A.sz + (pz - A.sz) * e, lerpA(A.syaw, outFace, e));
           ch.crouch = u > 0.06 && u < 0.35;
-          if (u >= 0.24 && !ch.sitting) { ch.sitting = true; ch.seatRef = { cushion: Math.max(0.30, rec.top - rec.y), floorBelow: 0 }; }
+          if (u >= 0.24 && !ch.sitting) { ch.sitting = true; ch.seatRef = bedSeatRef(rec); }
           grp.rotation.z = 0;
         } else {
           place(actor, px, rec.y, pz, outFace);
-          ch.sitting = true; ch.seatRef = { cushion: Math.max(0.30, rec.top - rec.y), floorBelow: 0 };
+          ch.sitting = true; ch.seatRef = bedSeatRef(rec);
           grp.rotation.z = 0;
           // the arc that follows is a plain stand-up FROM the edge: hand the
           // stand phases the perch position and the outward facing so they

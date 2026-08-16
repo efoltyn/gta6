@@ -3595,3 +3595,257 @@ thing under test and the check must not share its blind spots. `overlapPeak` ·
 `embedded` · `blindFire` · `throughMate` · `stuck` all pinned at 0.
 `--revert` (`?sep=old&fire=old`) asserts they come back: 3 overlapping pairs and
 214 ghost rounds. A fix nobody can turn off has not been measured.
+
+## 2026-08-15 — A RANK OF WHITE CARS, AND A RACE YOU COULD NOT READ
+
+Owner, on the Diamond Speedway grid: *"look at the garbage racer game in gang
+city game, make it way better, first with this gray whiteish car glitch and then
+just making that game legit rn its really really really thin logic and ui."*
+
+Two complaints, and they turned out to be four faults and one arithmetic error.
+
+### THE CARS WERE NEVER WHITE. THE PAINT WAS NOT MOST OF THE PIXEL.
+
+Every vehicle on the campus rendered the same pale grey-white off a catalog that
+is `0xe24b4b` red, `0xf2c43d` taxi yellow, `0x7d2bd6` purple and `0x1470e3`
+blue — and `material.color` was the right hex on every single one. A
+`MeshStandardMaterial` scales its DIFFUSE lobe (the only lobe carrying the car's
+own colour under a Lambert-lit world) by `1 - metalness` and reflects `envMap`
+with the rest. `world/carfx.js` ran the paint at metalness **0.55** and
+playercars.js's per-style table pushed it to **0.70**, with `envMapIntensity` up
+to **1.5**:
+
+    diffuse share    1 − 0.55 = 45%        (30% on a lowrider)
+    env share        0.55 × 1.0 = 55%      (105% on a lowrider)
+
+…and the env being reflected is `gradientCanvas()`'s **#9fc4ff sky-bright top**,
+which is exactly what an upward-facing roof, hood and boot lid sample. Then
+core/renderer.js pre-multiplies by `exposure/0.6 = 1.67×`. A red car was 45% red
+and 55% bright sky times 1.67, which is a white car.
+
+`CAR_PAINT_V2` scales the authored table rather than replacing it — a Veyron is
+still meant to read wetter than a hatchback, so only the absolute response
+moves: metalness ×0.40, envMapIntensity ×0.45, roughness ×0.92. **Measured,
+two-sided, over the live world:**
+
+                          CAR_PAINT_V2=0        V2 (shipped)
+    washed paints         14 of 16              0 of 16
+    min diffuse share     0.45                  0.78
+    max metal·env load    0.55                  0.099
+
+Ratchet `CBZ.carPaintAudit().washed` pinned at 0, `minDiffuseShare` may only go
+UP. Marine hulls are excluded and counted separately: `world/water_hulls.js`
+authors a boat's scheme itself and playercars' `recolorBody` returns early on
+`marineLivery`, so counting tenders as cars was a fault in the audit, not in the
+fleet.
+
+### TWO REPAINT PATHS WERE DEAD, AND ONE OF THEM HAD NO DEFINITION AT ALL.
+
+`playercars.js` `recolorBody()` cleared `_bodyPaint` on the per-car material it
+minted. But `_bodyPaint` is the only handle anything downstream has for finding
+a body, and two passes need it after that one runs:
+
+- **`race_livery.js recolorBase()`** — a byte-copy of the same traversal,
+  testing the flag the original had just cleared. It matched **zero materials on
+  every car ever built**, so `livery.base` was silently discarded and no AI
+  racer, loaner or pink-slip car ever wore its league colour. The copy is gone;
+  playercars publishes **`CBZ.cityRecolorCarBody`** and race_livery adopts it.
+- **`CBZ.cityRecolorCar`** — `cityAddParkedCar(x,z,h,{color})` has called this
+  since the day it was written and **nothing in the repo ever defined it**. Now
+  defined, in one line over the shared traversal.
+
+A material this instance already owns is repainted IN PLACE, so a second pass
+costs nothing and cannot leak.
+
+### THE POLE CAR WAS SCORED A LAP DOWN, AND NOTHING COULD SHOW IT.
+
+`racedrivers.js` seeds a driver's course param with `coarseParam`, a 96-sample
+nearest-point search — **8.3 m apart on an 800 m lap**. Pole sits **3.0 m**
+behind the start line, and the nearest of those samples to a point 3 m behind
+the line is the line itself. Pole came out at `t = 0.000` while the rest of the
+grid came out at `t ≈ 0.99`; all of them carry `laps = -1`, so pole's total was
+**−1.000 against the field's −0.01 — a full lap adrift before the lights went
+out.**
+
+`gridSlot()` had already computed the exact param (`back / L`) and thrown it
+away. It returns it now and `spawn()` takes `t0`. **DO NOT SEARCH FOR A NUMBER
+YOU AUTHORED.** Measured on the grid: totals `-0.0038 … -0.0264`, monotonic by
+slot, spread **0.0226 lap**, worst interval **0.5 s** (it read **+129.8 s**).
+
+It survived because the old HUD drew **two rows** — the car ahead and the car
+behind. An entire grid could be mis-ordered in front of you and the only symptom
+was a strange number in one cell.
+
+### THE HUD THREW AWAY EVERYTHING THE RACE ALREADY KNEW.
+
+`CBZ.raceKit` computes a complete running order with live intervals, and
+collects `e.lapTimes[]` / `e.lastLap` / `e.best` for **every** entrant on every
+crossing. Grep confirmed **nothing in the repo read `lapTimes` or `lastLap`,
+anywhere.** The full order went to the world jumbotron at 1.5 Hz — a sign you
+cannot read while driving.
+
+`racehud.js` is a broadcast overlay now: a **timing tower** (whole field, team
+colour chips, intervals not gaps-to-leader, lap-down and FIN markers), a **track
+map** sampled from the one authoritative frame function with a live dot per car,
+**three sector times** timed off the same centreline parameter the lap counter
+watches, **LAST vs BEST** with the delta coloured, and the **fastest lap of the
+field** in purple. Five more, all filmed:
+
+- the gap arrows were **coloured backwards** (ahead got red-vs-green inverted,
+  and the empty states inverted them again)
+- the strip **did not update during the countdown** — the grid, the one moment
+  you want the order, showed em-dashes
+- the lamp gantry had **three lamps against the world gantry's five**
+- `.rMap`/`.rDmg` carry `display:none` in the sheet, so `style.display = ""`
+  handed them back to it — the map was "mounted" and not on the screen, and
+  every `!== "none"` test agreed with the bug
+- the ENGINE bar was anchored at `top:50%` with a `-50%` transform, which is
+  where the timing tower is
+
+### THE CHEQUERED FLAG IS A PLACE, NOT THE END OF THE WORLD.
+
+`if (RACE.playerLaps >= RACE.laps) endRaceRD({})` — the instant the player
+crossed, six cars were deleted mid-corner and a results board appeared over an
+empty track. Rivals still on their last lap were classified on frozen progress,
+which is also why the order could disagree with what you had just watched. The
+player now takes the flag, his own race stops scoring, and the field keeps
+running until everyone is home, the cap expires, **or he parks it** — because
+waiting out a cool-down you did not ask for is the same mistake pointed the
+other way.
+
+Also at the flag: **a retirement is no longer classified ahead of a running
+car.** Only the PLAYER was ever demoted on a DNF, so the fault was invisible
+unless a rival crashed; `games/racing.js:372` already sorted retirements last
+and the two flows disagreed.
+
+### AND A FREE RACE MAY NOT BE THE BEST-PAID RACE IN THE GAME.
+
+    Speedway weekend   entry $0     win $22,500   LAST PLACE $500 floor
+    APEX Night         entry $250   win    $700
+    Street race        ante $50     pot = ante × runners, plus 1 star
+
+The one event that costs nothing and cannot pay less than $500 paid **thirty-two
+times** the prestige event you have to qualify for. `RACE_PURSE_V2`: the floor
+becomes START MONEY ($200 for taking the flag), a retirement still pays nothing,
+the win scales to $7,200 over three laps, and a **fastest-lap bonus** ($600)
+turns the last lap of a race you cannot win into a lap worth pushing on.
+
+### SLIPSTREAM — THE THING AN OVAL RACE IS ACTUALLY ABOUT.
+
+The word "draft" did not appear anywhere in the race code. The AI had racecraft
+(ATTACK swings to the free side of a slower car) with no mechanism that could
+ever make it work: a car with the same top speed cannot pass one in front of it
+on a straight. `RACE_SLIPSTREAM` is one sweep over every car on track — **the AI
+field AND the player**, because a tow the AI gets and you do not is a handicap,
+not a mechanic — feeding one `_draft` scalar that vehicles.js's `carDynamics`
+reads in one line. Measured over a race: **11,791 tows, peak 0.818.**
+
+Six drivers are six drivers now, too: `aggr` and `consistency` were straight-line
+functions of `skill`, so the fastest man was always also the bravest and the
+tidiest. They are spread around the skill line by a per-driver signature hashed
+off the name (deterministic, no `Math.random`). racedrivers.js already read all
+three independently — the AI was always ready for a field that differed. It
+shows up on the results board as **0:18.1 / 0:18.3 / 0:19.7 / 0:21.8**.
+
+### AND THE CARD CAME DOWN OFF THE GRID.
+
+`systems/controls.js` pops its reference card the first time you enter a car —
+which on a race day is the moment you sit on the grid, so "Driving: W/S
+accelerate" sat across the middle of the screen through the entire countdown.
+The auto-pop now DEFERS while `CBZ.raceLive()` (one new predicate, true for all
+four race flows), and `raceHud.show()` dismisses one that is already up.
+
+Flags `CAR_PAINT_V2` · `RACE_PURSE_V2` · `RACE_SLIPSTREAM` · `CAR_PAINT_HANDLE_V2`.
+Ratchets `CBZ.carPaintAudit()` · `CBZ.raceHud.audit().blindPanels` ·
+`CBZ.raceDraftAudit()`. Gate **`tools/race-weekend-check.mjs`**, two-sided on
+the paint. `tools/race-check.mjs` still green.
+
+### AND THE SPEEDOMETER WAS READING THE OTHER UNIT.
+
+Owner, same day: *"the normal cars in gang city show km/h on the speedometer
+not mph."* Three consumers, three different answers to "how fast is this car",
+none of them the world's own:
+
+    city/carcluster.js   v × 2.4   labelled MPH   (the instrument cluster)
+    city/hud.js          v × 3     labelled MPH   (the fallback readout)
+    city/roadrules.js    v × 2.4   the number that decides you are SPEEDING
+
+hud.js's own comment called its 3 a guess ("rough mph"), and 3 against 2.4 is a
+**25% disagreement between two numbers that have shared one corner of one
+screen** — the "TWO SPEEDS SHOWN IN BOTTOM RIGHT" the owner reported once
+before, fixed in the layout and still there in the arithmetic.
+
+And 2.4 is wrong too. A world unit in this game is a **metre** — a man is 1.82
+units, the prison is 248 × 244 units and is measured in hectares — and `car.v`
+is units per second, because `pos.x += vx * dt` is the only integration there
+is. So the conversions are not a taste knob: **1 u/s = 2.23694 mph = 3.6 km/h,
+exactly.**
+
+    v (u/s)   ×2.4 (cluster)   ×3 (fallback)   TRUE mph   TRUE km/h
+    35            84               105             78         126
+    50.7         122               152            113         183
+
+A sedan at its top speed drew **105 under an MPH label when the mph is 78 and
+the km/h is 126** — which is precisely how a speedometer comes to read like the
+other unit. `CBZ.speedRead(v)` / `speedMph(v)` / `speedLimitRead(mph)` in
+vehicles.js are the one conversion now; all three consumers adopt it with their
+own literal kept as the no-vehicles.js fallback arm, the fallback readout gained
+the unit label it never had, and `CAR_SPEED_UNIT` switches both the number and
+the word off the same metres-per-second so they can never disagree.
+`SPEED_UNIT_V2=false` restores the historical 2.4/3.0 pair.
+
+## 2026-08-15 — THE CITY HID THE ONE CARD THAT ASKS YOU A QUESTION (pushed 776b2b3)
+
+Owner report: on iPad the Gang City interaction options open; on Mac nothing
+shows. Root cause was CSS, not JS: every city interaction (walk-up verb, the
+dialogue's two answers, police gun-stop) renders into `#interact`, and
+`css/city.css`'s declutter block `display:none !important`-ed it in city play.
+The only restore rule was `body.touch...#interact.show` (mobile.css:410), so
+keyboards pressed E into an invisible panel. Fix: one rule in city.css —
+`body.mode-city.state-playing #interact.show { display:block !important }` —
+the same visible-only-while-live contract touch had. Verified by probe both
+ways before landing (desktop idle=none/shown=block).
+
+Also aligned survival_interact's menu REACH/CONE (was 3.4/0.2) with
+grapple.js's action constants (3.1/0.25) — the looser menu advertised
+Grab/Punch/Shove in a shell where aimTarget() was null and every verb no-oped.
+
+New tools: `tools/visual-presets/interaction-{city,prison,disaster}.mjs` —
+device-matrix presets (iphone-16 + ipad-mini portrait/landscape + laptop)
+staging the interaction beats of all three games (city walk-up/dialogue/
+hire-after; prison inmate/guard walk-up; survival free/carrying) with
+panelVisible/verbCount/minTapPx/optionChars metrics. Not yet captured — the
+machine was under load 31 with two other sessions' Chromes; run when quiet:
+`npm run visual:compare -- --preset interaction-city --before https://efoltyn.github.io/gta6/ --no-open`
+
+NOTE: commit 776b2b3 was built on a temp index atop origin/main and pushed
+directly (this checkout had another session's dirty tree + was behind 2);
+local main ref was deliberately left alone — pull when convenient.
+
+## 2026-08-15 — a man in zip ties could still shoot (and punch) — PR #27, merged
+
+Owner filmed a cuffed ped in gang city firing with his wrists pinned behind
+his back. Root cause: restrain.js's zip-tie state was pose-only — nothing on
+the trigger path ever read `ped.restraint`. Worst case was a tied COMPANION:
+think()'s crew branch ran BEFORE the `controlled` early-return, so
+companionThink re-armed him (Pistol, 999) and wiped surrender/rage every
+tick while the 38.5 restraint tick held the cuffed pose. The fist path was
+open too: npcAttack's melee branch + hurtActor's fight-back roll never
+checked restraint (grappled protected itself via attackCD; cuffed didn't).
+
+Fix (peds.js/gangs.js/combat.js): npcAttack refuses `att.restraint` (one
+gate, gun + fist, every caller); restrained companion falls through to
+restrain.js; fight-back roll, loot pickup, raid arming, Lt defense, loyalty
+battle, reprisal squads all skip restrained bodies; poseEligible treats zip
+ties like surrender so the aim pass never lifts a tied arm. Witnesses still
+count a tied man on purpose.
+
+Verified in an isolated probe world (stepSim in-page, one throwaway Chrome
+per probe-budget): cuffed companion disarmed across 240 ticks with a
+released control re-arming; cuffed ped force-raged every tick for 120 ticks
+= 0 dmg, released control = 57.3. math-gate deferred — another session's
+gate was mid-run at load ~135 and the change is inert unless something is
+restrained. Landed via temp-index commit atop origin/main (shared dirty
+checkout), PR #27 merged; local main THEN fast-forwarded to bfaccbd after
+re-pointing the three files' index entries (ff refuses dirty-but-identical
+files otherwise), so this tree's copies are clean and safe from add -A.

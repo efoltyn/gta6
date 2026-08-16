@@ -227,6 +227,21 @@
       else { part.rotation.x += node.rx + tr * Math.sin(s * 3 + i); part.rotation.z += node.rz; }
       i++;
     }
+    hipLock(ch);
+  }
+  /* THE TORSO GROUP PIVOTS AT THE FEET (entities/character.js: `ch.body` is a
+     SIBLING of the leg groups, origin y=0, while the legs pivot at y=hipY).
+     Any writer of body.rotation therefore has to re-solve the shared hip socket
+     or the pelvis slides hipY·sin(θ) ≈ 0.95·sin(θ) forward and uncovers the tops
+     of the thighs — the pelvis box only overlaps those caps by 0.07 units, so
+     four degrees is enough to show them. lateWrite() below already did this for
+     UPRIGHT bodies, but it early-outs on air/down/heldBy — precisely the bodies
+     this file owns outright, whose animChar is skipped and whose hip compensation
+     is therefore still solved for whatever lean they were carrying when they got
+     hit. Pure translation, delta-tracked, idempotent: safe to call from every
+     pose writer here. */
+  function hipLock(ch) {
+    if (ch && CBZ.lockCharacterHips) CBZ.lockCharacterHips(ch);
   }
   // ---- POSE-LOCK poses (SURV_THROW_INTACT): rigid, seeded, written as
   //      ABSOLUTE assignments every owned frame so nothing can accumulate.
@@ -242,6 +257,7 @@
     if (P.ra) P.ra.rotation.set(-0.40 + 0.1 * j(2.3), 0, -0.45 - 0.08 * j(1.2));
     if (P.ll) P.ll.rotation.set(0.32 + 0.08 * j(2.9), 0, 0.12);                  // legs a light scissor
     if (P.rl) P.rl.rotation.set(-0.12 + 0.08 * j(3.7), 0, -0.12);
+    hipLock(ch);
   }
   function hangPose(a) {
     const ch = a.char; if (!ch || !ch.parts) return;
@@ -253,6 +269,7 @@
     if (P.ra) P.ra.rotation.set(-0.16, 0, -0.3);
     if (P.ll) P.ll.rotation.set(0.14 + 0.05 * j(2.9), 0, 0.08);  // legs hanging
     if (P.rl) P.rl.rotation.set(-0.06, 0, -0.08);
+    hipLock(ch);
   }
   // convenience for the owned (air/down) path: integrate AND write in one go,
   // since no animChar competes for the rig on a frame we own the actor.
@@ -419,6 +436,7 @@
       const k = p.fl / 0.32;
       ch.body.rotation.x += -0.5 * k;          // recoil back
       ch.body.rotation.z += p.fdx * 0.3 * k;
+      hipLock(ch);   // foot-origin torso: see writeRag's note
     }
     // upright but still ringing from a hit → integrate the limb flail now, but
     // DEFER the rig write to the late pass: animChar runs after us (orders

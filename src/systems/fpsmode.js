@@ -1336,7 +1336,24 @@
   }
 
   function aimForward(out) {
-    if (shoulderActive()) return CBZ.camera.getWorldDirection(out).normalize();
+    if (shoulderActive()) {
+      // PINNED THIRD-PERSON FRAME (systems/camera.js, CAM_TP_FIXED_ANGLE): the
+      // lens is held at the rig's resting angle on purpose, so it is no longer
+      // the aim — reading it here would nail every round, the acquire cone and
+      // the reticle to that one angle and the gun could not be raised at all.
+      // Take the aim off the input the player is actually moving. Sign: in
+      // third person a POSITIVE cam.pitch is the camera above looking DOWN
+      // (the orbit is `oy = sin(pitch)·dist`), which is the opposite of the
+      // first-person fps.fp convention `forward()` uses two lines down — hence
+      // the -sin here and the +sin there. Degrades to the lens when the flag is
+      // off, when the frame is free (aiming down sights), or in any build where
+      // camera.js predates the hook.
+      if (CBZ.camAimDecoupled && CBZ.camAimDecoupled() && CBZ.cam) {
+        const y = CBZ.cam.yaw || 0, p = CBZ.cam.pitch || 0, cp = Math.cos(p);
+        return out.set(-Math.sin(y) * cp, -Math.sin(p), -Math.cos(y) * cp).normalize();
+      }
+      return CBZ.camera.getWorldDirection(out).normalize();
+    }
     return forward(out);
   }
 
@@ -3499,6 +3516,11 @@
   CBZ.weaponThirdPersonActive = shoulderActive;
   CBZ.playerArmed = armed;
   CBZ.playerMuzzleWorld = function (out) { return muzzleWorld(out || new THREE.Vector3()); };
+  // THE intent ray, for the other systems that used to re-derive it from the
+  // lens. Once the third-person frame can be pinned (CAM_TP_FIXED_ANGLE) the
+  // lens and the aim are two different directions, and every consumer that
+  // guesses gets a different answer than the round does.
+  CBZ.playerAimDir = function (out) { return aimForward(out || new THREE.Vector3()); };
   // ---- aim introspection for other systems (e.g. systems/intimidate.js) ----
   CBZ.currentGun = function () { return armed() ? weapon() : null; };   // equipped weapon or null
   CBZ.aimedActor = aimedActor;                                         // {actor,dist,head,point} | null
@@ -3700,7 +3722,14 @@
     if (fps.active) fps.fp = Math.max(-1.3, Math.min(1.3, fps.fp + dPitch * k));
     // CBZ.camPitchRange is the single owner of the third-person envelope, so the
     // lock can settle onto a target as high as the view is allowed to look.
-    else if (CBZ.cam) { const r = CBZ.camPitchRange ? CBZ.camPitchRange() : [-1.0, 0.9]; CBZ.cam.pitch = Math.max(r[0], Math.min(r[1], CBZ.cam.pitch + dPitch * k)); }
+    // SIGN (fixed 2026-08-15): dPitch is UP-positive — it is a difference of
+    // asin(y) terms — and so is fps.fp, but third-person cam.pitch is DOWN-
+    // positive (the orbit is `oy = sin(pitch)·dist`, so a positive pitch puts
+    // the lens ABOVE the pivot looking down). Adding it here drove the reticle
+    // the wrong way in every third-person soft-lock: a target above your sights
+    // pushed the aim further below them, then the lock re-measured a bigger
+    // error and pushed harder. Only the branch's sign was ever wrong.
+    else if (CBZ.cam) { const r = CBZ.camPitchRange ? CBZ.camPitchRange() : [-1.0, 0.9]; CBZ.cam.pitch = Math.max(r[0], Math.min(r[1], CBZ.cam.pitch - dPitch * k)); }
   }
   CBZ.aimLockTarget = function () { return lockTarget; };
 
@@ -4097,7 +4126,12 @@
       if (aim && carriedGun.parent && CBZ.camera) {
         carriedGun.parent.updateWorldMatrix(true, false);
         carriedGun.getWorldPosition(_blGunPos);
-        _blDir.set(0, 0, -1).applyQuaternion(CBZ.camera.quaternion);
+        // aimForward() rather than the lens quaternion: identical while the
+        // camera IS the aim (it is literally getWorldDirection), and the only
+        // correct answer once the frame is pinned (CAM_TP_FIXED_ANGLE) — a
+        // barrel locked to a lens that no longer follows the reticle would
+        // photograph a man firing level at something above his head.
+        aimForward(_blDir);
         _blTarget.copy(CBZ.camera.position).addScaledVector(_blDir, 120);
         _blDir.copy(_blTarget).sub(_blGunPos).normalize();
         // matrix with -Z along the aim dir (+Y kept upright) = barrel on target

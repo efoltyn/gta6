@@ -902,7 +902,10 @@
     if (CBZ.fps && CBZ.fps.active) CBZ.fps.fp = Math.max(-1.3, Math.min(1.3, CBZ.fps.fp + sp));
     // CBZ.camPitchRange (systems/camera.js) is the single owner of the third-person
     // envelope, so the assist can settle onto a target as high as the view can look.
-    else { const r = CBZ.camPitchRange ? CBZ.camPitchRange() : [-1.0, 0.9]; CBZ.cam.pitch = Math.max(r[0], Math.min(r[1], CBZ.cam.pitch + sp)); }
+    // SIGN: `sp` is UP-positive like fps.fp; third-person cam.pitch is DOWN-
+    // positive (see the same fix in fpsmode's applyAimLock). This branch pulled
+    // the iPad's reticle away from every target it was supposed to settle onto.
+    else { const r = CBZ.camPitchRange ? CBZ.camPitchRange() : [-1.0, 0.9]; CBZ.cam.pitch = Math.max(r[0], Math.min(r[1], CBZ.cam.pitch - sp)); }
   });
 
   function note(s) { if (CBZ.city && CBZ.city.note) CBZ.city.note(s, 1.5); }

@@ -1122,10 +1122,33 @@
           const ROLL = isJail ? 0.42 : 0.6;
           if (body.rotation.z > ROLL) body.rotation.z = ROLL;
           else if (body.rotation.z < -ROLL) body.rotation.z = -ROLL;
-          // Reactions run after animChar and legitimately replace the torso's
-          // final pitch/roll. Re-solve the shared hip socket after those late
-          // writes so a fleeing hit reaction cannot pull the waist off the legs.
-          if (CBZ.lockCharacterHips) CBZ.lockCharacterHips(a.char || (a.isPlayer ? CBZ.playerChar : null));
+        }
+        /* ---- RE-SOLVE THE HIP SOCKET (must NOT ride the `upright` gate) ----
+           OWNER BUG: "when NPCs are sprinting sometimes the top of their legs
+           shows, as if the torso came a couple of inches loose in front of the
+           legs." That is character.js's foot-origin torso group, exactly as the
+           comment at character.js:2437 describes it: `ch.body` is a SIBLING of
+           the leg groups with its origin at the FEET, so every radian of
+           body.rotation.x slides the pelvis hipY·sin(θ) ≈ 0.95·sin(θ) forward
+           unless lockCharacterHips converts it into a rotation about the shared
+           hip socket. The pelvis box overlaps the thigh caps by only 0.07 model
+           units (pelvisD 0.48 vs legW 0.34), so ~0.07 rad — FOUR DEGREES — of
+           uncompensated pitch is all it takes to uncover them.
+           The lock used to live inside the clamp's `if (upright)`, which is the
+           precise inverse of where it was needed: `upright` is ~!CBZ.body.busy(),
+           so it EXCLUDED every flung / knocked-down / mid-get-up body — and those
+           are exactly the bodies animChar is skipped for (city/peds.js's
+           `body.busy` continue), i.e. the ones whose torso pitch nothing else
+           re-solves. bodyOff itself is applied unconditionally at the `+=` above
+           (COWER_LEAN 0.4 fires on state==="flee", which IS the ped sprint state,
+           and RECOIL peaks at 0.55), so the hunch landed on the rig with the hip
+           compensation still solved for the previous, smaller angle.
+           Safe outside the gate where the clamp is not: lockCharacterHips writes
+           only body.POSITION, never a rotation, and is delta-tracked (_hipComp*),
+           so it cannot feed back into a damped channel or desync the get-up
+           branch's r.gbx back-out the way a rotation clamp would. */
+        if (body && CBZ.lockCharacterHips) {
+          CBZ.lockCharacterHips(a.char || (a.isPlayer ? CBZ.playerChar : null));
         }
 
         // ---- FLASH RETIRED (physics-only doctrine) ----

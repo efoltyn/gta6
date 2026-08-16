@@ -113,6 +113,47 @@
   if (CBZ.CONFIG.CAM_TOUCH_PITCH_FULL == null) CBZ.CONFIG.CAM_TOUCH_PITCH_FULL = true;
   const tpTouch = () => CBZ.CONFIG.TOUCH_TP_CAMERA_V2 !== false && !!CBZ.touchMode;
 
+  // ---- FIXED ANGLE (2026-08-15) — owner, with a photo of the frame he wants:
+  // "when I look around it isn't looking around only, it's also changing my
+  // camera angle — make it a FIXED angle like the one I'm showing."
+  //
+  // The RDR2 pass above answered the OTHER half of this. It made the view pitch
+  // 1:1 with the mouse and held the character's place in frame — but it did that
+  // with a PURE ORBIT, so the lens itself still swings a whole boom's worth: a
+  // full look-up drops the camera to your heels (by design — that is how you get
+  // sky in frame) and a look-down lifts it over your head into a top-down stare.
+  // Framing invariance is not the same promise as a fixed shot, and the shot is
+  // what the owner photographed: a lens a little above the shoulder, near level,
+  // the street running to the horizon. That frame should be the frame, always.
+  //
+  // So the city on-foot rig is pinned to its resting angle (CITY_TP.PITCH) and
+  // vertical look stops driving the CAMERA at all. It drives the GUN instead:
+  //   · cam.pitch still moves 1:1 with the finger/mouse, clamped to an aim band
+  //     sized so the impact point stays on screen (FIX_AIM_UP/FIX_AIM_DOWN vs a
+  //     60° vertical FOV — see the numbers at the constants);
+  //   · systems/fpsmode.js's aimForward() reads that pitch directly instead of
+  //     the lens (CBZ.camAimDecoupled below), so rounds, the acquire cone and
+  //     the reticle all agree — and the reticle, which is already drawn at the
+  //     projected impact point, SLIDES up and down the screen. That slide is the
+  //     feedback the camera used to give by tilting.
+  // The sky is not lost: pressing AIM releases the pin and the pure orbit is
+  // back, whole envelope included, so a helicopter overhead is still reachable
+  // exactly as the RDR2 pass made it (CAM_FIXED_ADS_FREE=0 pins that too).
+  // FIRST PERSON IS SACRED, as everywhere else in this file: fps.active returns
+  // long before the tier runs and tpFixedFrame() refuses outright.
+  if (CBZ.CONFIG.CAM_TP_FIXED_ANGLE == null) CBZ.CONFIG.CAM_TP_FIXED_ANGLE = true;
+  if (CBZ.CONFIG.CAM_FIXED_ADS_FREE == null) CBZ.CONFIG.CAM_FIXED_ADS_FREE = true;
+  // The aim band. Vertical half-FOV is 30° (CITY_TP.FOV 60), and the reticle is
+  // the PROJECTED impact point, so an aim of θ lands it tan θ / tan 30° of the
+  // way to the frame edge. 0.40 rad = 22.9° → 73% of the way up, comfortably on
+  // screen with the cone drawn around it; 0.36 rad down is past where the
+  // pavement takes the ray anyway. Wider than this and the crosshair leaves the
+  // picture, which is a worse bug than the one being fixed.
+  const FIX_AIM_UP = -0.40, FIX_AIM_DOWN = 0.36;
+  const FIX_BLEND = 7.5;      // 1/s — pin↔free ease when AIM is pressed/released
+  let fixedK = 0;             // 0 = free orbit (the RDR2 rig), 1 = pinned frame
+  let _rigPitch = 0;          // the angle the boom actually flew at last frame
+
   // ---- CITY THIRD-PERSON FRAMING (Fortnite over-shoulder) — guarded FALLBACK ----
   // src/city/camera.js IS loaded by index.html (later than this file) and is the
   // AUTHORITATIVE tuning surface: it re-assigns CBZ.CITY_TP unconditionally, so
@@ -210,11 +251,39 @@
   // and that is harmless: the tilt is a slow function of authored constants.
   // (Present-path only, like everything in this file — no sim state reads it.)
   let _frameTilt = 0;
+  // ---- IS THE FRAME PINNED RIGHT NOW? (CAM_TP_FIXED_ANGLE) -----------------
+  // Live state only — no cached edge, so every reader (the input clamps, the
+  // rig, fpsmode's aim) answers from the same one place and can never disagree
+  // by a frame. Deliberately narrow: the CITY on-foot third person is the tier
+  // the owner photographed. Driving has its own chase, jail/survival run the
+  // legacy boom, a parachute owns its own framing, and FIRST PERSON is sacred.
+  function tpFixedFrame() {
+    if (CBZ.CONFIG.CAM_TP_FIXED_ANGLE === false) return false;
+    if (CBZ.fps && CBZ.fps.active) return false;
+    if (!CBZ.game || CBZ.game.mode !== "city") return false;
+    const P = CBZ.player;
+    if (!P || P.driving || P.dead) return false;
+    // AIM releases the pin: the tight ADS frame IS a reframing on purpose, and
+    // it is the only way the sky stays reachable (see the flag comment).
+    if (CBZ.CONFIG.CAM_FIXED_ADS_FREE !== false && CBZ.isADS && CBZ.isADS()) return false;
+    try { if (CBZ.cityChuteState && CBZ.cityChuteState()) return false; } catch (e) {}
+    if (CBZ.playerChar && CBZ.playerChar.skydiving) return false;
+    return true;
+  }
+  // PUBLIC: systems/fpsmode.js asks this before it takes the aim direction off
+  // the lens. When the frame is pinned the lens is no longer the aim, so a
+  // getWorldDirection() there would nail every round to the resting pitch.
+  CBZ.camAimDecoupled = tpFixedFrame;
+  CBZ.camFixedFrameK = function () { return fixedK; };
   function pitchLimits() {
     if (CBZ.CONFIG.CAM_RDR2_ORBIT === false) return [MIN_PITCH, MAX_PITCH];
     // FIRST PERSON IS SACRED (owner mandate) — the eye keeps its shipped
     // envelope exactly; only the third-person boom opens up.
     if (CBZ.fps && CBZ.fps.active) return [MIN_PITCH, MAX_PITCH];
+    // PINNED FRAME: the envelope is the AIM band, not the orbit envelope —
+    // every input writer in the repo already routes through here (mouse, touch,
+    // gamepad, recoil), so the band lands on all four with nothing to declare.
+    if (tpFixedFrame()) return [FIX_AIM_UP, FIX_AIM_DOWN];
     const up = Math.max(0.6, VIEW_UP_MAX - Math.max(0, _frameTilt));
     return [Math.max(MIN_PITCH_TP, -up), MAX_PITCH];
   }
@@ -1189,6 +1258,30 @@
     // Non-city shoulder (jail/survival, TP=null) keeps the old gate exactly.
     const tpPresent = shoulder && (!TP || !CBZ.tpPresenting || CBZ.tpPresenting());
 
+    // ---- THE PIN (CAM_TP_FIXED_ANGLE) ---------------------------------------
+    // fixedK eases so pressing/releasing AIM is a short swing, not a cut. Only
+    // the city on-foot tier can hold it (TP): everywhere else the pin decays to
+    // 0 and every line below is the arithmetic it was.
+    const wantFixed = (TP && tpFixedFrame()) ? 1 : 0;
+    fixedK += (wantFixed - fixedK) * (1 - Math.exp(-FIX_BLEND * fdt));
+    if (fixedK < 0.0008) fixedK = 0;
+    if (fixedK > 0.9992) fixedK = 1;
+    // Coming OUT of an aim that reached for the sky, cam.pitch is outside the
+    // aim band and no input writer will re-clamp it until the player touches
+    // the stick — so the gun would stay pointed at a helicopter that isn't
+    // there. Ease it home instead of snapping (the reticle is visibly riding
+    // this number; a snap reads as the gun being yanked out of your hands).
+    if (wantFixed) {
+      const lo = FIX_AIM_UP, hi = FIX_AIM_DOWN;
+      const t = Math.max(lo, Math.min(hi, cam.pitch));
+      if (t !== cam.pitch) cam.pitch += (t - cam.pitch) * (1 - Math.exp(-9 * fdt));
+    }
+    // The angle the rig actually flies at. At fixedK=1 it is the tier's own
+    // resting pitch — the owner's photographed frame — no matter where the aim
+    // is pointed; at 0 it is cam.pitch and the pure orbit is untouched.
+    const rigPitch = TP ? cam.pitch + (((TP.PITCH != null) ? TP.PITCH : cam.pitch) - cam.pitch) * fixedK : cam.pitch;
+    _rigPitch = rigPitch;        // camAudit reads it; nothing in the sim does
+
     // ease the zoom distance toward its target. Normal third person is
     // a wider chase camera; armed third person becomes readable over-shoulder.
     // City scales the wheel-zoom around its own (much closer) default.
@@ -1290,8 +1383,12 @@
     const sK = TP ? shoulderK : 1;   // shoulder-swap ease; spent on the offsets below
     const baseY = ty + (!TP && shoulder ? 0.08 : 0);
 
-    // orbit offset from yaw/pitch
-    const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+    // orbit offset from yaw/pitch. rigPitch === cam.pitch unless the frame is
+    // pinned (CAM_TP_FIXED_ANGLE), in which case the whole boom — arm clamp,
+    // shoulder-angle scaling, view basis and tilt taper below, all of which
+    // read cp/sp — flies at the tier's resting angle and the aim is carried
+    // separately by cam.pitch.
+    const cp = Math.cos(rigPitch), sp = Math.sin(rigPitch);
     // ---- FLOOR-AWARE BOOM (CAM_RDR2_ORBIT) ----
     // Looking up swings the arm DOWN (oy = sin(pitch)·dist and up is negative
     // pitch), so a real sky look wants the camera metres UNDER the pavement.
@@ -1513,8 +1610,8 @@
       // catches a frame where the tilt grew under a moving arm. Without either,
       // survival's 0.46 rad resting tilt would carry a full up-pitch past
       // vertical and roll the world over.
-      const tilt = cam.pitch < 0
-        ? Math.min(tiltRaw, Math.max(0, VIEW_UP_MAX + cam.pitch))
+      const tilt = rigPitch < 0
+        ? Math.min(tiltRaw, Math.max(0, VIEW_UP_MAX + rigPitch))
         : tiltRaw;
       // view basis: V = the mouse direction; U = the view-plane up, = R × V.
       // (R is the horizontal right vector the side offsets already ride on, so
@@ -1531,10 +1628,10 @@
       // legacy look target (flag off, or under canopy): no tilt is being spent,
       // so hand the whole up-envelope back rather than leaving a stale one.
       _frameTilt = 0;
-      const aimLeadH = pitchFollow ? aimLead * Math.cos(cam.pitch) : aimLead;
+      const aimLeadH = pitchFollow ? aimLead * Math.cos(rigPitch) : aimLead;
       ltx = tx + vel.x * lead + rightVX * targetSide + fwdVX * aimLeadH;
       ltz = tz + vel.z * lead + rightVZ * targetSide + fwdVZ * aimLeadH;
-      lty = lookYFlat + (pitchFollow ? Math.sin(cam.pitch) * aimLead * pitchFollow : 0);
+      lty = lookYFlat + (pitchFollow ? Math.sin(rigPitch) * aimLead * pitchFollow : 0);
     }
 
     // ---- INTRO: far push-in, then orbit 180 degrees at the final zoom ----
@@ -1732,6 +1829,14 @@
       enclosure: encK, roomCeil: roomCeil, roomSpan: roomSpan, roomBoom: roomBoom(),
       orbit: CBZ.CONFIG.CAM_RDR2_ORBIT !== false,
       roomCam: CBZ.CONFIG.CAM_ROOM_BOOM !== false,
+      // CAM_TP_FIXED_ANGLE: the pin, and the split it creates. `aimPitch` is
+      // where the GUN points, `rigPitch` is where the BOOM flies. Pinned, the
+      // second is constant while the first sweeps — which is the whole claim,
+      // as one number a gate can pin instead of a screenshot.
+      fixed: fixedK, fixedOn: tpFixedFrame(),
+      aimPitch: cam.pitch, rigPitch: _rigPitch,
+      aimBandUp: FIX_AIM_UP, aimBandDown: FIX_AIM_DOWN,
+      aimDecoupled: CBZ.camAimDecoupled(),
     };
   };
 

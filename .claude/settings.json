@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "deny": [
+      "Workflow",
+      "mcp__claude_ai_market-search"
+    ]
+  }
+}

@@ -74,6 +74,13 @@
   // ONE-LINE REVERT. config.js's generic ?cfg_ sweep runs before this file,
   // so a URL override already sits in CONFIG and this guard leaves it alone.
   if (CFG.PRISON_CELLS_V2 == null) CFG.PRISON_CELLS_V2 = true;
+  // The two halves of "a man sits ON his bunk": where his hips go (the pose,
+  // see bunkSpot) and whether there is room for his head when they get there
+  // (the geometry, see bunkRig). Declared together and up here because the
+  // rack is BUILT at parse time — a default written further down the file
+  // would arrive after the bunk it governs.
+  if (CFG.PRISON_BUNK_PERCH == null) CFG.PRISON_BUNK_PERCH = true;
+  if (CFG.PRISON_BUNK_HEADROOM == null) CFG.PRISON_BUNK_HEADROOM = true;
 
   /* ==========================================================
      0. THE SHELL — identical on BOTH paths. The footprint never moves,
@@ -274,6 +281,13 @@
             rec._housingUnit = j.own._housingUnit;
             rec._housingStack = j.own;
           }
+          // WHAT IS OVER THIS BED. Only the LOWER rack of a stack has a
+          // ceiling, and it is the thing that decides whether a body sitting
+          // on the edge can hold its head up (entities/character.js reads it
+          // through seatRef.ceiling). Same frame as the anchor's own floor,
+          // which for both racks in this wing is y=0.
+          const bnk = j.own.bunk;
+          if (j.slot === "bed" && bnk && bnk.rackUnder != null) rec.ceiling = bnk.rackUnder;
         }
       }
       else PP.plain++;
@@ -530,6 +544,7 @@
         AZ ? wLat : wLon, h, AZ ? wLon : wLat, col, o || { cast: false });
     }
     const LAT = 1.25, LON = 2.60, MLAT = 1.05, MLON = 2.35;
+    let rackY = null;                    // upper frame centre, when there is one
     bb(0, 0.50, 0, LAT, 0.30, LON, C_BUNK, {});                          // frame
     bb(0, 0.70, 0, MLAT, 0.18, MLON, C_MATT);                            // mattress → 0.79
     if (DET) {
@@ -548,26 +563,62 @@
       bb(a * 0.55, 0.25, b2 * 1.25, 0.12, 0.50, 0.12, C_DARK);
     }
     if (dbl) {
-      bb(0, 1.70, 0, LAT, 0.28, LON, C_BUNK, {});                        // upper frame
-      bb(0, 1.88, 0, MLAT, 0.18, MLON, C_MATT);                          // upper mattress → 1.97
+      /* HOW HIGH THE UPPER RACK RIDES (PRISON_BUNK_HEADROOM).
+
+         OWNER, on the fixed sit: "the head now intersects with the bunk bed —
+         does this mean the bunk bed has to be taller?" Yes, and the number is
+         not a taste call. The upper frame's UNDERSIDE was RACK - 0.14 = 1.56
+         with the lower mattress at 0.79: 77 cm of sitting headroom. This rig
+         seated on that mattress carries its head top ~1.06 m above the
+         cushion, so 29 cm of skull lived inside the steel — and the old pose
+         hid it only because the body was parked beside the bed entirely.
+
+         Two things move, because one alone can't pay 29 cm: this rack goes up
+         (see RACK below) and entities/character.js gives the bunk posture a
+         real hunch. A man on a bottom bunk ducks — that is what bottom bunks
+         are like — but he does not fold in half, and steel does not pass
+         through his head either way.
+
+         Every fitting on the upper rack is now expressed against RACK, so the
+         mattress, bedding, rail, pillow, corner posts and the LADDER (which
+         grows a rung when the climb gets longer) all travel together. The
+         returned `rackUnder` is the clearance contract other systems measure
+         against instead of re-deriving 1.56 from three literals. */
+      const RACK = CFG.PRISON_BUNK_HEADROOM === false ? 1.70 : 2.02;    // upper frame CENTRE
+      bb(0, RACK, 0, LAT, 0.28, LON, C_BUNK, {});                        // upper frame
+      bb(0, RACK + 0.18, 0, MLAT, 0.18, MLON, C_MATT);                   // upper mattress → RACK+0.27
       if (DET) {
-        bb(0, 1.815, 0, MLAT + 0.10, 0.09, MLON + 0.08, C_MATT);         // tucked sheet
-        bb(0, 1.98, 0.55, MLAT * 0.94, 0.10, 1.30, blanket);             // the top bunk gets bedding too
-        bb(0, 2.00, -0.09, MLAT * 0.96, 0.12, 0.18, C_MATT);             // turned-down fold
-        // GUARD RAIL down the open side + a two-rung ladder at the foot: the
-        // two fittings that say "somebody sleeps up there" rather than "shelf".
-        bb(LAT / 2 - 0.06, 2.16, 0.30, 0.08, 0.30, 1.60, C_DARK);
-        for (let r = 0; r < 2; r++) bb(0, 1.05 + r * 0.42, LON / 2 - 0.02, 0.60, 0.07, 0.07, C_DARK);
+        bb(0, RACK + 0.115, 0, MLAT + 0.10, 0.09, MLON + 0.08, C_MATT);  // tucked sheet
+        bb(0, RACK + 0.28, 0.55, MLAT * 0.94, 0.10, 1.30, blanket);      // the top bunk gets bedding too
+        bb(0, RACK + 0.30, -0.09, MLAT * 0.96, 0.12, 0.18, C_MATT);      // turned-down fold
+        // GUARD RAIL down the open side + a ladder at the foot: the two
+        // fittings that say "somebody sleeps up there" rather than "shelf".
+        // The ladder is measured, not counted: rungs climb at a 0.42 pitch
+        // from 1.05 until the last one is a step below the deck, so a taller
+        // rack is a climbable rack and never a two-rung stub under a bed you
+        // cannot reach.
+        bb(LAT / 2 - 0.06, RACK + 0.46, 0.30, 0.08, 0.30, 1.60, C_DARK);
+        for (let y = 1.05; y <= RACK - 0.06; y += 0.42) bb(0, y, LON / 2 - 0.02, 0.60, 0.07, 0.07, C_DARK);
       }
-      bb(0, 1.98, -1.00, 0.90, 0.14, 0.42, 0xdfe3ea);                    // upper pillow
-      for (const a of [-1, 1]) bb(a * 0.60, 1.05, a * 1.28, 0.10, 1.40, 0.10, C_DARK);   // corner posts
+      bb(0, RACK + 0.28, -1.00, 0.90, 0.14, 0.42, 0xdfe3ea);             // upper pillow
+      // corner posts: foot on the floor, head a whisker above the frame
+      for (const a of [-1, 1]) bb(a * 0.60, (RACK + 0.05 + 0.35) / 2, a * 1.28, 0.10, RACK + 0.05 - 0.35, 0.10, C_DARK);
+      rackY = RACK;
     }
     // `topBunk` is the UPPER mattress surface, and it is null when there is no
     // upper rack — so "does this stack sleep two" is answered by the geometry
     // that drew it and never by a constant somewhere else. The 1.97 matches the
     // `bb(0, 1.88, 0, MLAT, 0.18, …)` upper mattress above, exactly the way
     // `top: 0.79` matches the lower one.
-    return { x: x, z: z, top: 0.79, topBunk: dbl ? 1.97 : null, along: along };
+    // `rackUnder` is the ceiling a man sitting on the lower mattress has over
+    // his head — the frame's own underside, derived from the rack it belongs
+    // to so raising the rack can never leave a stale clearance behind.
+    return {
+      x: x, z: z, top: 0.79, along: along,
+      topBunk: rackY != null ? rackY + 0.27 : null,
+      rackUnder: rackY != null ? rackY - 0.14 : null,
+      sitHeadroom: rackY != null ? (rackY - 0.14) - 0.79 : null,
+    };
   }
 
   /* The cell is already the venue's best furniture. South-block housing must
@@ -587,7 +638,7 @@
       spec.double !== false, spec.blanket == null ? 0x5c6470 : spec.blanket);
     useBed(stack.bunk.x, stack.bunk.z, stack.bunk.along, stack.bunk.top, 2.60, stack, "bed", 0);
     if (stack.bunk.topBunk)
-      useBed(stack.bunk.x, stack.bunk.z, stack.bunk.along, stack.bunk.topBunk, 2.60, stack, "bedTop", 1.18);
+      useBed(stack.bunk.x, stack.bunk.z, stack.bunk.along, stack.bunk.topBunk, 2.60, stack, "bedTop", stack.bunk.topBunk - 0.79);
     housingStacks.push(stack);
     return stack;
   };
@@ -663,7 +714,10 @@
     // the queue above is drained. A man on the top rack is a man who is not on
     // a floor mat, which is the whole point of drawing it.
     useBed(c.bunk.x, c.bunk.z, "z", c.bunk.top, 2.60, c, "bed", 0);
-    if (c.bunk.topBunk) useBed(c.bunk.x, c.bunk.z, "z", c.bunk.topBunk, 2.60, c, "bedTop", 1.18);
+    // The upper anchor's floor reference tracks its own rack (it was 1.18 for
+    // a 1.97 mattress); propuse reads `top - y` as the cushion, so this is the
+    // one arithmetic that must follow the rack up.
+    if (c.bunk.topBunk) useBed(c.bunk.x, c.bunk.z, "z", c.bunk.topBunk, 2.60, c, "bedTop", c.bunk.topBunk - 0.79);
 
     // TOILET + SINK at the back corner opposite the bunk, its back to masonry.
     const tx = north ? c.x + (c.hx - 0.55) : backX;
@@ -1037,7 +1091,6 @@
      The lateral sign points INTO the room, away from the wall the bunk's back
      is against (north/west rows +x, east row -x); every bunk in this wing is
      laid out ALONG Z, so "across the bed" is always X. */
-  if (CFG.PRISON_BUNK_PERCH == null) CFG.PRISON_BUNK_PERCH = true;
   const PERCH_LAT = 0.34;               // city/propuse.js's bed-edge perch
   function bunkSpot(c) {
     const b = c.bunk;
@@ -1170,7 +1223,12 @@
           // reads it, and a man on the edge of his own bunk is the BENCH
           // read — perched forward, elbows toward the knees — not the
           // office-chair upright a kindless seatRef falls through to.
-          n.char.seatRef = n.char.seatRef || { cushion: c.bunk.top, floorBelow: 0, kind: "bunk" };
+          // `ceiling` is what the rack above puts over his head; the seat
+          // solve ducks him under it by however much this particular body
+          // needs. Null on a single bunk, and the solve then leaves the
+          // posture alone.
+          n.char.seatRef = n.char.seatRef ||
+            { cushion: c.bunk.top, floorBelow: 0, kind: "bunk", ceiling: c.bunk.rackUnder };
           CBZ.setCharPose(n.char, "sit");
         }
       }
