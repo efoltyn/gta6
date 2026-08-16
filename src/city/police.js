@@ -3558,7 +3558,17 @@
           c._iqSlot = sl;
         }
         if (wantShoot && c.sees && dist < 30 && mayShoot) {
-          if (c.shootCD <= 0) {
+          // SET FEET, THEN FIRE (combat_iq 3c, cop half). With the position
+          // doctrine live an officer does not pull the trigger at a full
+          // stride — the measured before/after showed every round leaving at
+          // 3.9 m/s because the plant only ever happened AFTER the shot. He
+          // fires standing (or nearly), at point blank, or — the escape valve
+          // — after holding his trigger through 2.5 s of movement with a live
+          // line, so a dry position pocket can never mute the police.
+          const posLive = M && CBZ.CONFIG.NPC_IQ_POSITIONS !== false && CBZ.CONFIG.NPC_IQ_COP_POSITIONS !== false;
+          const setFeet = !posLive || (c.speed || 0) < 1.2 || dist < 6 || (c._holdFireT || 0) > 2.5;
+          if (c.shootCD <= 0 && setFeet) {
+            c._holdFireT = 0;
             c.shootCD = (c.swat ? 0.16 : 0.5) + rng() * 0.3;   // fireAt overwrites this when the tier layer is live
             fireAt(c, tgt, dist, dt);   // fireAt does the final muzzle→target clearLineOfFire gate
             // after a burst, an armed target may make a cop break to cover briefly
@@ -3566,6 +3576,8 @@
               if (AT) AT.coverArm(c, { dur: 1.0 + rng(), rng });
               else { c._coverT = 1.0 + rng(); c._coverDir = rng() < 0.5 ? -1 : 1; }
             }
+          } else if (c.shootCD <= 0) {
+            c._holdFireT = (c._holdFireT || 0) + dt;           // withholding on the move
           }
         }
 

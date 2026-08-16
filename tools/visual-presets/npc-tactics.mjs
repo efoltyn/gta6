@@ -71,7 +71,7 @@ const subjects = [
   /* ---- HIDE: breaking contact when it goes wrong ------------------------ */
   { id: "hide-break", label: "Too hurt to trade — breaking contact",
     focus: "Three guns, and the one cut to a third of his health — with a kiosk the studio built OFF his lane, a real hidden pocket in his away hemisphere. His two partners keep the fire tokens, so he owes the fight nothing. Before: a hurt man's only move was nine metres STRAIGHT BACK — still in the open, still in the same firing lane the rounds are coming up, re-derived every frame so he backpedals forever. After: he breaks for somewhere the player CANNOT DRAW A LINE TO and holds it while his partners trade. exposedPct is the payoff: the fraction of the photographed window the player could draw a chest-height lane to him at all.",
-    act: { n: 3, dist: 13, weapons: ["Pistol", "Pistol", "Pistol"], pre: 1.2, sample: 1.2, hurtIdx: 0, hurtHp: 0.32,
+    act: { n: 3, dist: 13, weapons: ["Pistol", "Pistol", "Pistol"], pre: 1.2, sample: 1.2, hurtIdx: 2, hurtHp: 0.32,
       wall: { off: 8, dist: 20, w: 2.6, h: 2.4, d: 2.6 } },
     strip: { frames: 4, stepSec: 1.0 },
     cam: { dx: 9, dy: 7.5, dz: 4, adx: 0, ady: 1.1, adz: -16, fov: 60 } },
@@ -79,7 +79,7 @@ const subjects = [
   /* ---- THE LAW: officers under the same doctrine ------------------------- */
   { id: "cops-standoff", label: "Four officers, weapons free",
     focus: "THE OTHER HALF OF 'SHOOTING AT YOU'. Four real officers at four stars, lethal force authorized (NPC_IQ_COP_POSITIONS). Before: the department's final approach was a flank-offset march to a four-to-nine-metre stop — officers jogging while firing, spines twisted between run-heading and aim, exactly the gang glitch with a badge on it. After: they take POSITIONS like a trained unit — planted in band, wall-projected spots, tucks and corner peeks from posture()'s own doctrine — and every round leaves a standing body. The arrest, challenge and tackle choreography is untouched by construction.",
-    act: { cops: 4, dist: 24, pre: 3.0, sample: 1.5, wanted: 4 },
+    act: { cops: 4, dist: 24, pre: 6.0, sample: 1.5, wanted: 4 },
     strip: { frames: 4, stepSec: 0.8 },
     cam: { dx: 0, dy: 11, dz: 15, adx: 0, ady: 1.2, adz: -14, fov: 55 } },
 
