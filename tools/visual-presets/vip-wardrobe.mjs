@@ -111,8 +111,23 @@ async function stageVipWardrobe(input) {
     overlay.innerHTML = "<div data-scrim></div><div data-side></div><div data-name></div>" +
       "<div data-focus></div><div data-read></div><div data-source></div>";
     document.body.appendChild(overlay);
+    // STUDIO MARK: the street outside the FIRST shop with a door — derived
+    // from the arena, so the same seed gives both sides the same kerb. The
+    // player's own spawn (npc-gestures' mark) can be INSIDE the campaign
+    // motel on this seed, which photographed the row against an interior.
+    let mx = CBZ.player.pos.x, mz = CBZ.player.pos.z;
+    const A0 = CBZ.city && CBZ.city.arena;
+    if (A0 && A0.shopLots) {
+      for (const l of A0.shopLots) {
+        const d = l && l.building && l.building.door;
+        if (!d) continue;
+        mx = d.x - (d.nx || 0) * 7; mz = d.z - (d.nz || 0) * 7;   // 7 m out the door = the sidewalk
+        break;
+      }
+    }
     S = window.__vipWard = {
-      gx: CBZ.player.pos.x, gz: CBZ.player.pos.z, gy: CBZ.player.pos.y,
+      gx: mx, gz: mz,
+      gy: (CBZ.floorAt && CBZ.floorAt(mx, mz)) || CBZ.player.pos.y,
       overlay, pinned: [],
     };
     window.__cbzVisualCompare = {
@@ -228,6 +243,12 @@ async function stageVipWardrobe(input) {
   };
   S.pinned = row;
   hold(); step(0.6); hold(); step(0.3); hold();
+  // ONE settling tick AFTER the final pin, and no position writes after it:
+  // entities/pedinstance.js draws most garment boxes from instance pools and
+  // syncs pool matrices on its own tick — render straight off a manual
+  // teleport and the pooled parts photograph at their PREVIOUS spot (the
+  // first contact sheet's scattered heads/torsos).
+  step(0.05);
 
   // ---- count what the plate is about --------------------------------------
   let skinArmedInRow = 0, armClash = 0, paintedBodies = 0, whiteTorsos = 0, kids = 0;
@@ -236,10 +257,15 @@ async function stageVipWardrobe(input) {
     if (!ss) continue;
     const band = p.band || (ch && ch.band);
     if (p.child || (band && band !== "adult")) kids++;
-    const torso = flat(ss.torso), arms = flat(ss.arms);
+    const torso = flat(ss.torso), arms = flat(ss.arms), head = flat(ss.head);
     if (torso === "painted") { paintedBodies++; continue; }
     if (torso === 0xffffff) whiteTorsos++;
-    if (arms != null && arms !== "painted" && ch.skinTone != null && arms === ch.skinTone && torso != null && torso !== ch.skinTone) skinArmedInRow++;
+    // naked arm = upper-arm flat hex EXACTLY the rig's built tone OR its live
+    // head color (crowd promotion paints head+arms with the imposter's own
+    // palette hex, not the built tone), under a real torso of another color.
+    const armIsSkin = arms != null && arms !== "painted" &&
+      ((ch.skinTone != null && arms === ch.skinTone) || (head != null && head !== "painted" && arms === head));
+    if (armIsSkin && torso != null && torso !== arms) skinArmedInRow++;
     const d = rgbd(arms, torso);
     if (d != null && d > 64) armClash++;
   }

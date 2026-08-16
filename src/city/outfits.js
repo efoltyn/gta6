@@ -782,10 +782,14 @@
     // A SWAP NEVER HANDS YOU NAKED ARMS. A body left over from the old crowd
     // promotion paint (or a pre-fix save) can still be wearing its own skin on
     // the whole arm; sampling that into the record would dress the PLAYER in
-    // it. Same exact-hex clamp as plainRedress: skin-on-upper-arm reads as the
-    // shirt. (Deliberate skin-arm garments — the painted tank — are canvas
-    // meshes, which readColor already skips.)
-    if (arms != null && ch.skinTone != null && arms === ch.skinTone) arms = torso;
+    // it. Same exact-hex clamp as plainRedress — against the built tone AND
+    // the live head color, because crowd promotion paints head+arms with the
+    // imposter's own palette hex, not the built tone. (Deliberate skin-arm
+    // garments — the painted tank — are canvas meshes, which readColor skips.)
+    if (arms != null) {
+      const headHex = readColor(s.head);
+      if ((ch.skinTone != null && arms === ch.skinTone) || (headHex != null && arms === headHex)) arms = torso;
+    }
     return {
       legs: legs != null ? legs : torso,
       torso,
@@ -2327,12 +2331,18 @@
         }
       }
       // naked-arm census (see the field doc above): exact-hex compares only.
+      // TWO skins to compare against, both exact: the rig's BUILT tone, and the
+      // LIVE head color — crowd promotion paints head+arms with the imposter's
+      // own palette hex (crowd.js SKINS), which is not the built tone, so an
+      // audit that only asked skinTone was blind to the most common producer.
       const tank = p._castFit === "wifebeater" ||
         (ch._clothesKey != null && String(ch._clothesKey).indexOf("wifebeater") === 0) ||
         (ch === CBZ.playerChar && g.cityOutfitId === "wifebeater");
-      if (!tank && ch.skinTone != null) {
-        const armHex = readColor(s.arms), torsoHex = readColor(s.torso);
-        if (armHex != null && armHex === ch.skinTone && torsoHex != null && torsoHex !== ch.skinTone) {
+      if (!tank) {
+        const armHex = readColor(s.arms), torsoHex = readColor(s.torso), headHex = readColor(s.head);
+        const armIsSkin = armHex != null &&
+          ((ch.skinTone != null && armHex === ch.skinTone) || (headHex != null && armHex === headHex));
+        if (armIsSkin && torsoHex != null && torsoHex !== armHex) {
           out.skinArms++;
           if (out.skinArmSample.length < 6) out.skinArmSample.push((p.name || p.job || p.kind || "?") + (p._crowd ? "/crowd" : ""));
         }
