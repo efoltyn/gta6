@@ -72,8 +72,8 @@
    deals a resident into every non-vacant cell, so a cell is +2 racks and +1
    body — +1 NET PLACE. entities/npc.js:547 then sizes its anonymous tier as
    `houses - npcs.length - cells`, which turns positive past 24 cells and
-   takes a place straight back. 13 -> 25 cells is therefore 42 -> 66 beds
-   against 50 -> 62 men, and sleepGap +8 -> -4.
+   takes a place straight back. 13 -> 24 cells is therefore 42 -> 64 beds
+   against 50 -> 59 men, and sleepGap +8 -> -5.
 
    WHERE THE ELEVEN WENT, AND WHY NOWHERE ELSE. Both ends of the shell are
    spoken for: the north row is shower / A-1..A-4 / officer post / store with
@@ -83,9 +83,10 @@
    each side wall and absolutely nothing between them. A 23 m corridor is not
    a cell house, it is a hangar. So the wasted floor becomes what a real
    double cell house puts there: a second PAIR of rows, D and E, backs to the
-   galleries and barred fronts onto the centre hall. And the side rows finally
-   run the last 4.5 m south to the day-room end they always stopped short of
-   (B-5, C-6). Three parallel runs come out of it — two 3.5 m galleries in
+   galleries and barred fronts onto the centre hall. And the WEST row finally
+   runs the last 4.5 m south to the day-room end it always stopped short of
+   (B-5) — the east row cannot, because the keycard duty post stands on that
+   floor; see the segment table. Three parallel runs come out of it — two 3.5 m galleries in
    front of the outer cells, an 8.2 m centre hall with cell fronts down both
    sides, and the patrol spine straight down the middle of that.
 
@@ -106,7 +107,7 @@
    lamps, also inside row E, become four gallery lamps at |x| = 9.9.
 
    REVERT: CBZ.CONFIG.PRISON_CELL_ROWS_V3 = false (or ?cfg_PRISON_CELL_ROWS_V3=0)
-   restores the 13-cell wing exactly — D and E are not built, B-5/C-6 are not
+   restores the 13-cell wing exactly — D and E are not built, B-5 is not
    appended, and the tables and lamps go back to 6.6 and 7.5.
 
    DRAW-CALL BUDGET. Partitions carry colliders + LOS refs, so core/batch.js
@@ -489,18 +490,32 @@
     { kind: "wall", a: -14.14, b: -13.80 },
   ];
 
-  /* B-5 AND C-6 ARE APPENDED, NEVER RETYPED. Both side rows stopped at
-     z = -14.00 / -13.80 with the south wall's inner face still 5.5 m away at
-     -8.5 — floor the wing had never used. One more 3.80 cell and its 0.34
-     partition spend 4.14 of it. Only the two new segments are written here,
-     so nothing above is re-derived and no existing running total can drift:
+  /* B-5 IS APPENDED, NEVER RETYPED. The west row stopped at z = -14.00 with
+     the south wall's inner face still 5.5 m away at -8.5 — floor the wing had
+     never used. One more 3.80 cell and its 0.34 partition spend 4.14 of it.
+     Only the new segments are written here, so nothing above is re-derived
+     and no existing running total can drift:
         west   -14.00 +3.80 = -10.20 +0.34 = -9.86   (1.36 clear of -8.5)
-        east   -13.80 +3.80 = -10.00 +0.34 = -9.66   (1.16 clear of -8.5) */
+
+     THE EAST ROW GETS NO C-6, AND THE REASON IS THE WHOLE GAME. That floor
+     is NOT unused: entities/keycard.js:111 stands THE DUTY POST there — the
+     guard's desk the KEYCARD rests on, a 1.90 x 0.95 steel top at
+     (13.9, -11.50) with its drawer bank, its lamp and the card itself. Its
+     own comment states why that corner: "clear of the bunks, the toilet
+     block and the cell bars". A C-6 spanning -13.80..-10.00 puts the card
+     the entire escape is built around INSIDE a cell, with the desk across
+     the cell's centre — measured, C-6 was the one cell in the wing whose
+     centre a 0.38 m body could not stand in, and it is the fault
+     prison-polish-check's walkable-lane sweep was reporting.
+
+     "Empty floor" in this wing means empty of CELL FURNITURE, never empty of
+     purpose. Checking the four coordinates the header lists is not the same
+     as checking the floor, and this one was not on that list. It is now:
+     the gate below asserts no cell contains the duty post. The west side has
+     no such tenant, so B-5 stands and the wing sleeps 64. */
   if (ROWS3) {
     WEST_ROW.push({ kind: "cell", a: -14.00, b: -10.20, tag: "B-5" },
       { kind: "wall", a: -10.20, b: -9.86 });
-    EAST_ROW.push({ kind: "cell", a: -13.80, b: -10.00, tag: "C-6" },
-      { kind: "wall", a: -10.00, b: -9.66 });
   }
 
   /* THE INNER ROWS' SEGMENT TABLE, read north->south and used TWICE — once
@@ -1825,6 +1840,14 @@
     playerSpawn: playerSpawn,
     // geometry other systems may want without re-deriving it
     height: CH, doorWidth: DOOR_W,
+    /* THE HALL PUBLISHES ITS OWN HALF-WIDTH. tools/prison-polish-check.mjs
+       sweeps the centre hall for walkability and used to hardcode +-6, which
+       was the wing when the middle was 23 m of nothing; rows D and E moved the
+       cell fronts to IFACE and the sweep started walking into their back walls
+       and reporting the block impassable. A route test may not retype the
+       route's width — it reads it here, minus the 0.38 body radius and a
+       little, so the samples stay inside the clear lane by construction. */
+    hallHalf: ROWS3 ? IFACE - 0.5 : 6,
     bounds: { minX: IX0, maxX: IX1, minZ: IZN, maxZ: -7.5 },
   };
 
@@ -1843,12 +1866,12 @@
      simulation fact (the audit reports bodies minus beds), but it is no longer
      used as a content generator that adds people or bedding to circulation.
 
-     AND THE SUM IS NOW BIGGER THAN THE CAST, WHICH IT WAS NOT. 25 cells x 2
-     racks + 8 dorm stacks x 2 = 66 beds against 62 prisoner rigs, measured
-     live at the night block: `CBZ.prisonRestAudit().sleepGap` -4. At 13 cells
+     AND THE SUM IS NOW BIGGER THAN THE CAST, WHICH IT WAS NOT. 24 cells x 2
+     racks + 8 dorm stacks x 2 = 64 beds against 59 prisoner rigs, measured
+     live at the night block: `CBZ.prisonRestAudit().sleepGap` -5. At 13 cells
      it was 42 against 50 and the same figure read +8 the moment
      systems/prisonrest.js stopped counting only the men whose `role` happened
-     to say "inmate". Every one of the 24 racks added is a real propuse anchor
+     to say "inmate". Every one of the 22 racks added is a real propuse anchor
      through `useBed` above and the pending-fittings queue — `beds` rises with
      `racks` or the wing is drawing mattresses nobody can lie on, which is
      what tools/prison-beds-check.mjs asserts as two numbers on one line.

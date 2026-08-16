@@ -192,10 +192,32 @@ function why(r) { return (r && r.__err) ? ("threw: " + String(r.__err).split("\n
       }
       return true;
     }
-    out.lanes = { dorm: 0, dormN: 0, aisle: 0, aisleN: 0, cellCentres: 0 };
+    out.lanes = { dorm: 0, dormN: 0, aisle: 0, aisleN: 0, cellCentres: 0, blocked: [] };
     for (let z = 107; z <= 123; z += 0.5) { out.lanes.dormN++; if (!clear(-33, z)) out.lanes.dorm++; }
-    for (let x = -6; x <= 6; x += 0.5) { out.lanes.aisleN++; if (!clear(x, -31)) out.lanes.aisle++; }
-    for (const c of cells) if (!clear(c.x, c.z)) out.lanes.cellCentres++;
+    /* THE CENTRE HALL IS 8.2 m WIDE, NOT 12. This swept x -6..+6 because the
+       middle of the wing used to be 23 m of nothing; rows D and E now stand in
+       it and the hall between their barred fronts is |x| < 4.1. Sampling to
+       +-6 walks into the rows' own back walls and calls the wing impassable
+       while a man has 8.2 m of clear concrete. Read the hall's half-width off
+       the wing itself so a future row change cannot strand this number again. */
+    const hall = (CBZ.cellblock && CBZ.cellblock.hallHalf) || 3.6;
+    for (let x = -hall; x <= hall; x += 0.5) { out.lanes.aisleN++; if (!clear(x, -31)) out.lanes.aisle++; }
+    for (const c of cells) if (!clear(c.x, c.z)) { out.lanes.cellCentres++; out.lanes.blocked.push(c.tag); }
+    /* THE DUTY POST IS NOT FURNITURE. entities/keycard.js stands the guard's
+       desk — and the KEYCARD, the item the whole escape is built around — on
+       the wing floor at (13.9, -11.5). A cell appended over that floor puts
+       the card inside a cell; it happened, and the only symptom was one
+       unwalkable cell centre above. Assert the thing itself rather than its
+       symptom: no cell may contain the post. */
+    // hx/hz are the cell's HALF-EXTENTS. (dx/dz are the direction the cell
+    // faces, -1/0/+1 — using those tests the post against zero on one axis and
+    // the assertion can never fire, which is how the first draft of this line
+    // passed against a wing that had the desk inside C-6.)
+    out.duty = { x: 13.9, z: -11.5, inCell: null };
+    for (const c of cells) {
+      const hx = c.hx || 1.9, hz = c.hz || 1.9;
+      if (Math.abs(c.x - 13.9) <= hx && Math.abs(c.z + 11.5) <= hz) { out.duty.inCell = c.tag; break; }
+    }
     return out;
   `);
   if (bad(r)) check("bunk: the wing reports its racks", false, why(r));
@@ -215,7 +237,12 @@ function why(r) { return (r && r.__err) ? ("threw: " + String(r.__err).split("\n
       !!r.lanes && r.lanes.dorm === 0 && r.lanes.aisle === 0 && r.lanes.cellCentres === 0,
       `dorm aisle ${r.lanes.dormN - r.lanes.dorm}/${r.lanes.dormN} · block aisle ` +
       `${r.lanes.aisleN - r.lanes.aisle}/${r.lanes.aisleN} · cell centres ` +
-      `${r.cells - r.lanes.cellCentres}/${r.cells}`);
+      `${r.cells - r.lanes.cellCentres}/${r.cells}` +
+      (r.lanes.blocked && r.lanes.blocked.length ? ` · blocked ${r.lanes.blocked.join(",")}` : ""));
+    check("keycard: no cell was built over the duty post",
+      !!r.duty && r.duty.inCell === null,
+      r.duty ? (r.duty.inCell ? `the desk at (13.9,-11.5) is inside cell ${r.duty.inCell}` : "post is wing floor, not a cell")
+             : "no reading");
   }
 }
 
