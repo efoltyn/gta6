@@ -303,7 +303,45 @@ try {
     await writeFile(path.join(captureDir, "first-person-canopy.png"), Buffer.from(shot.data, "base64"));
   }
 
+  // WARDROBE SEAM: the freefall hands used to be their own outfit (a hard-coded
+  // 0x2d79ad blue long-sleeve shirt and a 0xe7ae83 skin), so bailing out in a
+  // black suit put you in someone else's sleeves for the whole descent. Change
+  // clothes MID-FALL and read the viewmodel's own materials against the body's
+  // arm slots — the two must agree, and must not be the old literals.
+  const FAKE_SLEEVE = 0x2d79ad, FAKE_SKIN = 0xe7ae83, SUIT_BLACK = 0x0a0b0e;
+  await evaluate(`(() => CBZ.citySetFitShirt(${SUIT_BLACK}))()`);
+  await sleep(260);
+  const liveArms = await json(`(() => {
+    const rig = CBZ.camera.children.find((part) => part && part.userData && part.userData.bailoutFirstPerson);
+    const ss = CBZ.playerChar.skinSlots || {};
+    const slot = (list) => {
+      if (!list) return null;
+      for (const m of list) if (m && m.material && !m.material.map && m.material.color) return m.material.color.getHex();
+      return null;
+    };
+    const skinRec = rig && rig._bailoutSkin;
+    return {
+      dressed: !!skinRec,
+      rigSleeve: skinRec ? skinRec.sleeveMat.color.getHex() : null,
+      rigSkin: skinRec ? skinRec.skinMat.color.getHex() : null,
+      bodySleeve: slot(ss.armsLower),
+      bodyHand: slot(ss.hands),
+      skinTone: CBZ.playerChar.skinTone,
+    };
+  })()`);
+
   const failures = [];
+  if (!liveArms.dressed) failures.push("first-person freefall rig exposed no wardrobe record");
+  else {
+    if (liveArms.bodySleeve !== SUIT_BLACK)
+      failures.push("mid-fall clothing change did not reach the third-person arms (test premise broken)");
+    if (liveArms.rigSleeve !== liveArms.bodySleeve)
+      failures.push("first-person freefall sleeve did not follow the body's arms");
+    if (liveArms.rigSkin !== (liveArms.bodyHand != null ? liveArms.bodyHand : liveArms.skinTone))
+      failures.push("first-person freefall hands did not follow the body's skin");
+    if (liveArms.rigSleeve === FAKE_SLEEVE || liveArms.rigSkin === FAKE_SKIN)
+      failures.push("first-person freefall hands fell back to the old hard-coded blue-shirt wardrobe");
+  }
   if (result.canopy.name !== "bailout-ram-air-canopy" || result.canopy.cells !== 13)
     failures.push("canopy was not the authored ram-air cell wing");
   if (result.canopy.upperLines !== 20 || result.canopy.risers !== 4 || result.canopy.anchors !== 4)
@@ -339,7 +377,7 @@ try {
     failures.push("live first-person handoff did not show the parachute rig alone");
   if (browserErrors.length) failures.push(`${browserErrors.length} uncaught browser error(s)`);
 
-  console.log(JSON.stringify({ ...result, liveGenericFall, liveGenericFirstPerson, liveFreefall, liveCanopy, liveFirstPerson, browserErrors, failures }, null, 2));
+  console.log(JSON.stringify({ ...result, liveGenericFall, liveGenericFirstPerson, liveFreefall, liveCanopy, liveFirstPerson, liveArms, browserErrors, failures }, null, 2));
   if (failures.length) process.exitCode = 1;
 } finally {
   if (ws) ws.close();

@@ -787,6 +787,74 @@
     };
   }
 
+  // ---- WHAT ONE ARM IS ACTUALLY WEARING (first-person viewmodels) ---------
+  //  CBZ.cityArmColors(ch) → { sleeve, skin } — the two hexes a camera-child
+  //  pair of hands must paint itself with to be the SAME arms the world sees.
+  //
+  //  WHY IT EXISTS: every first-person hand rig in this game was born with its
+  //  own private wardrobe. bailout.js's freefall hands were a hard-coded
+  //  0x2d79ad blue long-sleeve shirt; fpsmode.js's punch fist is 0xff7a1a
+  //  jumpsuit orange. So you could bail out of a window in a black suit and
+  //  spend the whole fall looking down at sleeves nobody in the city owns.
+  //  This is NOT a third wardrobe — it only REPORTS what the body already has
+  //  on, so an adopting viewmodel cannot disagree with the third-person rig, a
+  //  store change, a disguise, armour or a corpse swap.
+  //
+  //  Order of truth, every step one this file already trusts:
+  //    1. the live rig, slot for slot. skinSlots.armsLower IS the forearm you
+  //       see down the lens (character.js paints it SKIN for a short-sleeve
+  //       tee, so bare forearms arrive for free) and skinSlots.hands IS the
+  //       hand cap (gloves, gore, any per-actor repaint — free too). readColor
+  //       skips canvas-PAINTED parts, whose flat colour is meaningless.
+  //    2. the worn record, for exactly those painted garments — clothes.js's
+  //       cityPaintedBodyHex is the one source for what a painter really laid
+  //       down — then colors.arms, then colors.torso. Player rigs only: a
+  //       stranger's arms are not described by the player's wardrobe.
+  //    3. the rig's build-time skinTone for the hand.
+  //  Returns null when there is nothing to read, so a caller keeps its own
+  //  literals and nothing ever hard-depends on this file being loaded.
+  //
+  //  SAFE TO CALL EVERY FRAME, which is the whole point — a viewmodel that has
+  //  to remember to re-ask is a viewmodel that will one day forget. The live
+  //  branch is a handful of property reads. The painted branch reaches
+  //  clothes.js's getSet, which documents itself as "a path that only runs when
+  //  a body changes clothes", so it is memoised on cityOutfitRev — the counter
+  //  applyPlayer already bumps on every single dress.
+  let _armPaint = null, _armPaintRev = null;
+  function cityArmColors(ch) {
+    if (ch === undefined) ch = CBZ.playerChar;
+    const s = (ch && ch.skinSlots) || null;
+    let sleeve = s ? readColor(s.armsLower) : null;
+    if (sleeve == null && s) sleeve = readColor(s.arms);
+    let skin = s ? readColor(s.hands) : null;
+    // A stranger's arms are not described by the PLAYER's wardrobe: for anyone
+    // else the live body is the only answer we are entitled to.
+    if (sleeve == null && (!ch || ch === CBZ.playerChar)) {
+      const rev = CBZ.cityOutfitRev != null ? CBZ.cityOutfitRev | 0 : 0;
+      if (_armPaintRev !== rev) {
+        _armPaintRev = rev;
+        _armPaint = null;
+        const w = (CBZ.cityOutfitGetEffective && CBZ.cityOutfitGetEffective()) ||
+                  (CBZ.cityOutfitGet && CBZ.cityOutfitGet()) || null;
+        if (w) {
+          const painted = CBZ.cityPaintedBodyHex ? CBZ.cityPaintedBodyHex(w, ch) : null;
+          const c = w.colors || {};
+          const hex = painted != null ? painted
+            : (c.arms != null ? c.arms : (c.torso != null ? c.torso : null));
+          if (hex != null) _armPaint = hex | 0;
+        }
+      }
+      sleeve = _armPaint;
+    }
+    if (skin == null && ch && ch.skinTone != null) skin = ch.skinTone;
+    if (sleeve == null && skin == null) return null;
+    return {
+      sleeve: sleeve != null ? sleeve | 0 : null,
+      skin: skin != null ? skin | 0 : null,
+    };
+  }
+  CBZ.cityArmColors = cityArmColors;
+
   // ============================================================
   //  PLAYER WARDROBE (contract [B]) — g.cityFit is the COMPOSITE the player
   //  builds at the clothing store / closet: a base shirt + legs color and a
