@@ -83,7 +83,7 @@ const subjects = [
   { id: "hide-break", label: "Too hurt to trade — breaking contact",
     focus: "Three guns, and the one cut to a third of his health — with a kiosk the studio built OFF his lane, a real hidden pocket in his away hemisphere. His two partners keep the fire tokens, so he owes the fight nothing. Before: a hurt man's only move was nine metres STRAIGHT BACK — still in the open, still in the same firing lane the rounds are coming up, re-derived every frame so he backpedals forever. After: he breaks for somewhere the player CANNOT DRAW A LINE TO and holds it while his partners trade. exposedPct is the payoff: the fraction of the photographed window the player could draw a chest-height lane to him at all.",
     act: { n: 3, dist: 13, weapons: ["Pistol", "Pistol", "Pistol"], pre: 1.2, sample: 1.2, hurtIdx: 2, hurtHp: 0.38,
-      wall: { off: 8, dist: 20, w: 2.6, h: 2.4, d: 2.6 } },
+      poolSkip: 10, wall: { off: 8, dist: 20, w: 2.6, h: 2.4, d: 2.6 } },
     strip: { frames: 4, stepSec: 1.0 },
     cam: { dx: 9, dy: 7.5, dz: 4, adx: 0, ady: 1.1, adz: -16, fov: 60 } },
 
@@ -505,7 +505,11 @@ async function stageNpcTactics(input) {
     }
   } else
   for (let i = 0; i < act.n; i++) {
-    const m = pool[i];
+    // poolSkip: a subject may cast from deeper in the roster — the ship run
+    // proved one specific early-pool rig is CROWD-RECLAIMED within a second
+    // of being cast (both sides, ~733 m, before sampling even opens).
+    const m = pool[i + (act.poolSkip || 0)];
+    if (!m) return { ok: false, err: "cast pool exhausted at skip " + (act.poolSkip || 0) };
     const off = (i - (act.n - 1) / 2) * spread + (act.coverBox && i === act.hurtIdx ? (act.coverBox.off || 0) : 0);
     const spot = freeSpot(M.x + off, M.z + CAST_DIR * (act.dist + (i % 2) * 2));
     const x = spot.x, z = spot.z;
