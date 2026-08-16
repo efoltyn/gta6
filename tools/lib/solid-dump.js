@@ -137,10 +137,29 @@
     // GROUND AT THE MIDPOINT, so the report can tell a fence you walk through
     // from a fascia panel eight metres up that nobody can reach. Without it
     // every un-collided soffit and sign face ranks alongside a real hole.
-    var gy = 0;
-    if (CBZ.groundAt) { try { gy = CBZ.groundAt((sx + tx) / 2, (sz + tz) / 2) || 0; } catch (e) { gy = 0; } }
+    var gy = groundNear((sx + tx) / 2, (sz + tz) / 2);
     segMap[k] = [owner, +sx.toFixed(3), +sz.toFixed(3), +tx.toFixed(3), +tz.toFixed(3),
                  +y0.toFixed(2), +y1.toFixed(2), +gy.toFixed(2)];
+  }
+
+  /* MEMOISED ON A 4 m GRID, and that is not a micro-optimisation. CBZ.groundAt
+     is a procedural heightfield query: out in the backcountry it BUILDS the
+     chunk it is asked about, so calling it once per wall segment wedged a
+     whole-map sweep for six minutes on one tile before it was capped. Ground
+     varies far more slowly than 4 m anyway — this only has to answer "does
+     this barrier start at your feet or above your head". */
+  var gCache = Object.create(null), gCalls = 0;
+  var G_CELL = 4, G_BUDGET = OPT.groundBudget || 20000;
+  function groundNear(x, z) {
+    if (!CBZ.groundAt) return 0;
+    var k = ((x / G_CELL) | 0) + "," + ((z / G_CELL) | 0);
+    var v = gCache[k];
+    if (v !== undefined) return v;
+    if (gCalls >= G_BUDGET) return 0;          // hard stop; never hang a tile
+    gCalls++;
+    try { v = CBZ.groundAt(x, z) || 0; } catch (e) { v = 0; }
+    gCache[k] = v;
+    return v;
   }
 
   function walkGeometry(geo, mat4, owner) {
@@ -232,6 +251,7 @@
     stats: { meshes: meshes, tris: tris, capped: capped, colliders: cols.length,
              solidsInBox: solids.length, wallSegs: walls.length, roadsInBox: roads.length,
              solidsSkipped: solidsSkipped, tallFaces: tall, tallM: +tallM.toFixed(0),
+             groundCalls: gCalls, groundCapped: gCalls >= G_BUDGET,
              maxWallH: MAXH, minWallH: MINH, flatCos: FLAT },
     solids: solids,
     walls: walls,       // [owner, x0,z0, x1,z1, y0,y1]
