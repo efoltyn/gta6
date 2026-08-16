@@ -311,8 +311,38 @@ async function stageSinkhole(input) {
   query("source").textContent = new URL(input.sourceUrl).host + new URL(input.sourceUrl).pathname;
   query("source").style.cssText = "position:absolute;bottom:10px;left:27px;color:#9cb0bf;font:10px ui-monospace,SFMono-Regular,Menlo,monospace";
 
+  /* THE RING FAULT, MEASURED THE SAME WAY ON BOTH BUILDS.
+     CBZ.shaftAudit().throatShade only exists on the fixed side, so a table
+     built from it would have nothing to compare against — the honest version
+     reads the shaft's OWN VERTEX COLOURS, which both builds have. The band
+     sampled is the one a camera at a normal depression angle can actually
+     see: from the rim down to 0.35 radii, across every surface in the shaft
+     group that carries colour — wall, lip section and the top stair treads,
+     which is the whole set of things that were bright. Sunlit ground beside
+     the hole sits near 1.0, so this number IS whether it reads as a hole. */
+  function throatLuma(H) {
+    if (!H || !H.grp) return null;
+    let sum = 0, n = 0;
+    const floorY = H.gy - H.r * 0.35;
+    H.grp.traverse((o) => {
+      if (!o.isMesh || !o.geometry) return;
+      const pos = o.geometry.getAttribute("position");
+      const col = o.geometry.getAttribute("color");
+      if (!pos || !col || col.count !== pos.count) return;
+      for (let i = 0; i < pos.count; i++) {
+        const y = pos.getY(i) + o.position.y;
+        if (y > H.gy - 0.01 || y < floorY) continue;
+        sum += 0.2126 * col.getX(i) + 0.7152 * col.getY(i) + 0.0722 * col.getZ(i);
+        n++;
+      }
+    });
+    return n ? Number((sum / n).toFixed(3)) : null;
+  }
+  const luma = throatLuma(H);
+
   const metrics = {
     holes: holes.length,
+    throatLuma: luma == null ? 0 : luma,
     shaftDepth: H ? Number((H.depth || 0).toFixed(1)) : 0,
     deepOverWide: H ? Number(((H.depth || 0) / (H.r * 2)).toFixed(2)) : 0,
     tickAvgMs: ticks ? Number((totalMs / ticks).toFixed(2)) : 0,
@@ -354,9 +384,9 @@ export default {
   readyExpression: "window.THREE && window.CBZ && CBZ.CONFIG",
   urlParams: { seed: 90210 },
   stageTimeoutMs: 480000,
-  metricsNote: "deepOverWide is the reference photograph as arithmetic (a shaft reads far deeper than it is wide; a crater does not). shaft_holesOnSlopes is the owner's placement law — sinkholes on the ground, never on the side of a mountain — and may only ever read 0. shaft_throatShade is the ring fault as one number: the brightness of the only wall a camera at a normal depression angle can see, against sunlit ground sitting near 1.0. shaft_lidsOverMouth is the ground mask actually taking — a flat unmasked surface still spanning the mouth is a hole with a lid on it, and may only ever read 0.",
+  metricsNote: "deepOverWide is the reference photograph as arithmetic (a shaft reads far deeper than it is wide; a crater does not). shaft_holesOnSlopes is the owner's placement law — sinkholes on the ground, never on the side of a mountain — and may only ever read 0. throatLuma is the ring fault as one number, and it is measured off each build's own shaft vertex colours rather than read from a field only one of them has: the mean brightness of every surface from the rim down to 0.35 radii — the only part of a shaft a camera at a normal depression angle can see — against sunlit ground sitting near 1.0. shaft_lidsOverMouth is the ground mask actually taking — a flat unmasked surface still spanning the mouth is a hole with a lid on it, and may only ever read 0.",
   metrics: {
-    shaft_throatShade: { label: "Throat brightness at 9°", better: "lower" },
+    throatLuma: { label: "Throat brightness (measured)", better: "lower" },
     shaft_lidsOverMouth: { label: "Unmasked lids over mouth", better: "lower" },
     shaftDepth: { label: "Shaft depth", unit: "m", better: "higher" },
     deepOverWide: { label: "Depth / width", better: "higher" },

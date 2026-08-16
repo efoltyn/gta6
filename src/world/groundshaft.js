@@ -1475,9 +1475,12 @@
                           anywhere in the shaft (was 1.0: fully lit)
        collarSampled      shafts whose lip collar wears the colour of the
                           ground it was cut from rather than generic soil
-       lidsOverMouth   0  HARD INVARIANT, and the only one that can catch a
-                          ground mask that silently did not take: a flat,
-                          visible, UNMASKED surface still spanning the mouth
+       lidsOverMouth   0  HARD INVARIANT once a hole has finished opening, and
+                          the only field that can catch a ground mask which
+                          silently did not take: a flat, visible, UNMASKED
+                          surface still spanning the mouth. Shafts still being
+                          widened are excluded — the sweep chases the growing
+                          radius by design and reads ~12 mid-collapse.
        maskSlots          how many holes the ground can be cut for at once
        unslottedShafts    holes past that cap (hidden, not ringed)
        nearestUnslotted   metres from the eye to the closest hole that is NOT
@@ -1503,6 +1506,11 @@
      car above an open hole is not a lid, it is a car about to fall in, which is
      the feature working — and the footprint test keeps a bolt-head off the
      count. An actor's rig is never a lid either; bodies fall for real. */
+  // is this shaft still being widened by a running collapse sequence?
+  function inCollapse(h) {
+    for (let i = 0; i < seqs.length; i++) if (seqs[i].shaft === h && seqs[i].phase !== "open") return true;
+    return false;
+  }
   function lidsOverMouth(h) {
     let n = 0;
     try {
@@ -1548,7 +1556,14 @@
       if (h.topSampled) sampled++;
       throat += throatShade(h);
       rim += skyOcc(h, 0);
-      if (i < 4) lids += lidsOverMouth(h);
+      /* ONLY A SETTLED HOLE IS ASKED. A shaft still growing is re-cut six or
+         seven times and maskGroundAt sweeps the new annulus on each pass, so
+         mid-collapse there are legitimately road and kerb meshes over the
+         mouth that have not been reached yet — measured at 12 on the first
+         drop, 0 by the time the radius stops. Counting those would make this
+         a number that is meant to be non-zero sometimes, which is not an
+         invariant at all, just a reading. */
+      if (i < 4 && !inCollapse(h)) lids += lidsOverMouth(h);
       const hasSlot = slotted.indexOf(h) >= 0;
       if (!hasSlot) {
         const d = Math.hypot(h.x - ex, h.z - ez);
