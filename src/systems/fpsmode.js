@@ -404,10 +404,11 @@
     const carried = buildWeaponModel(w);
     if (!carried.userData.muzzle) carried.userData.muzzle = new THREE.Vector3(0, 0.05, -0.58);
     carried.visible = i === 0;
-    // TP guns read BIGGER than FP-scale (standard third-person trick — the
-    // over-shoulder camera sits metres away; at 1.05 the held gun vanished
-    // into the blocky hand and the owner couldn't see it at all).
-    carried.scale.setScalar(1.45);
+    // REAL-DIMENSION SIZING (weapons/weapon-scale.js): same law as every
+    // other world display of a gun — real researched length × class READ.
+    // The legacy 1.45 (screenshot-tuned so the gun didn't vanish into the
+    // blocky hand) stays as the module-absent fallback.
+    carried.scale.setScalar((CBZ.weaponHeldScale && CBZ.weaponHeldScale(w.id)) || 1.45);
     carriedModels.push(carried);
     carriedGun.add(carried);
   });

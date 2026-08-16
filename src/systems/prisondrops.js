@@ -194,7 +194,11 @@
         const model = CBZ.buildActorWeapon(name);
         model.position.set(0, 0, 0);
         model.rotation.set(0, 0, 0);
-        model.scale.setScalar(1.05);
+        // REAL-DIMENSION SIZING (weapons/weapon-scale.js): the floor is world
+        // space, so the world scalar applies directly — the gun on the deck
+        // is the same length as the one that lands in the hand (it used to be
+        // ~40% longer and shrink on pickup).
+        model.scale.setScalar((CBZ.weaponWorldScale && CBZ.weaponWorldScale(name)) || 1.05);
         g.add(model);
       } else {
         put(g, bgeo(0.10, 0.06, 0.30), cmat(0x30363f), 0, 0, 0);   // no actorweapons.js loaded
@@ -224,7 +228,8 @@
         const model = CBZ.buildActorWeapon("Shiv");
         model.position.set(0, 0, 0);
         model.rotation.set(0, 0, 0);
-        model.scale.setScalar(1.05);
+        // same real-dimension law as the gun branch above
+        model.scale.setScalar((CBZ.weaponWorldScale && CBZ.weaponWorldScale("Shiv")) || 1.05);
         g.add(model);
       } else {
         put(g, bgeo(0.05, 0.04, 0.20), cmat(0x1b1f26), 0, 0, -0.02);

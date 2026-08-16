@@ -385,7 +385,14 @@
       // itself is already authored along the ground plane, so unmount it.
       model.position.set(0, 0, 0);
       model.rotation.set(0, 0, 0);
-      model.scale.setScalar(model.userData && model.userData.weaponSlot === "pistol" ? 1.2 : 1.0);
+      // REAL-DIMENSION SIZING (weapons/weapon-scale.js): ground drops live in
+      // world space, so the world scalar applies directly; the compact-class
+      // READ boost covers the old "pistols are missed on pavement" 1.2 nudge,
+      // which stays as the module-absent fallback.
+      model.scale.setScalar(
+        (CBZ.weaponWorldScale && CBZ.weaponWorldScale(model.userData.weaponId || nameOrId)) ||
+        (model.userData && model.userData.weaponSlot === "pistol" ? 1.2 : 1.0)
+      );
     }
     return model;
   }
