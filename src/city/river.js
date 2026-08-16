@@ -617,6 +617,36 @@
       merge(piers, 0x8b9097, true);
       merge(rails, 0xb4b9bf, false);
     }
+    /* ---- AND A REASON TO BE ON IT. 8.7 km of navigable water with nothing
+       on its banks is the same "geometry with nobody in it" this repo keeps
+       catching — the marina's own header is about exactly that. Three bank
+       stations, on alternating sides, at quarter/half/three-quarter of the
+       run: city/fishing.js validates each one against the water point it is
+       given and REFUSES a station whose water is not water, so a bank that a
+       future coastline moves out from under loses its angler rather than
+       lying about him. No new loop, no new body — fishSpotRegister is the
+       same call the marina quay and the fuel dock already use. */
+    if (CBZ.fishSpotRegister && pts.length > 8) {
+      const NAMES = ["Upper Reach", "The Oxbow", "River Mouth"];
+      [0.25, 0.55, 0.85].forEach(function (u, k) {
+        const i = Math.max(1, Math.min(pts.length - 2, Math.round(u * (pts.length - 1))));
+        const a = pts[i - 1], b = pts[i + 1];
+        const dx = b.x - a.x, dz = b.z - a.z, L = Math.hypot(dx, dz) || 1;
+        const nx = -dz / L, nz = dx / L;              // bank normal
+        const side = k % 2 ? 1 : -1;                  // alternate banks
+        const h = halves[i];
+        const bx = pts[i].x + nx * side * (h + 2.5), bz = pts[i].z + nz * side * (h + 2.5);
+        try {
+          CBZ.fishSpotRegister(bx, bz, {
+            name: body.name.replace(/^The /, "") + " · " + NAMES[k],
+            // face the water, which is back down the bank normal
+            face: Math.atan2(-nx * side, -nz * side),
+            water: { x: pts[i].x, z: pts[i].z },
+          });
+        } catch (e) {}
+      });
+    }
+
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     return body;
   };
@@ -674,6 +704,35 @@
     }
     out.cells = seen.size;
     out.reach = Math.round(reach);
+
+    /* ---- THE ONE THING A BOAT CAN DO HERE THAT A SWIMMER CANNOT, in
+       metres, measured live rather than described. Under a road deck this
+       engine answers "not water" to cityWaterAt (so a car on the causeway
+       does not flood) while cityNavWaterAt lets the hull through — so on the
+       shipping seed there is one 31 m stretch, the width of the road itself,
+       where you can drive a boat but not swim.
+
+       IT IS NOT PAPERED OVER, and deliberately. The honest fix is a y-gated
+       water test, and the y's are not there to gate on: at that crossing the
+       deck sits at grade (0.085) and the sea surface at -0.31, so "standing
+       on the bridge" and "swimming under it" are 0.4 m apart — closer than
+       the swell moves. A gate that tight is a guess wearing a fix's clothes,
+       and the failure mode is a pedestrian on a bridge who starts swimming.
+       So it is REPORTED: 31 m of 8675 is a known limit of a y-less water
+       oracle, and the number is here for whoever gets to fix that properly. */
+    if (river && CBZ.cityWaterAt && CBZ.cityNavWaterAt) {
+      let blocked = 0;
+      const p = river.pts;
+      for (let i = 0; i + 1 < p.length; i++) {
+        const L = Math.hypot(p[i + 1].x - p[i].x, p[i + 1].z - p[i].z);
+        const n = Math.max(1, Math.ceil(L / 8));
+        for (let k = 0; k < n; k++) {
+          const t = k / n, x = p[i].x + (p[i + 1].x - p[i].x) * t, z = p[i].z + (p[i + 1].z - p[i].z) * t;
+          if (!CBZ.cityWaterAt(x, z) && CBZ.cityNavWaterAt(x, z)) blocked += L / n;
+        }
+      }
+      out.swimBlocked = Math.round(blocked);
+    }
     if (!out.connected && !out.reason) out.reason = "flood fill from berth '" + start.id + "' stopped at " + out.reach + " m";
     return out;
   };
