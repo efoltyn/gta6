@@ -3849,3 +3849,51 @@ restrained. Landed via temp-index commit atop origin/main (shared dirty
 checkout), PR #27 merged; local main THEN fast-forwarded to bfaccbd after
 re-pointing the three files' index entries (ff refuses dirty-but-identical
 files otherwise), so this tree's copies are clean and safe from add -A.
+
+## 2026-08-16 — OPEN DUNES was a flat white plate (battle.html's dunes venue)
+
+Owner: "Look at NPC war open dunes." Looked, with screenshots and the checker.
+The war itself held (0 overlap / embedded / blindFire / stuck, ended on
+budget) but the venue did not: the label promised dunes and bare sand, and
+the field was a featureless near-white sheet with the desert city's towers
+filling the horizon. Three measured faults, three fixes — games/battle.html,
+tools/battle-check.mjs.
+
+- **THE CENTRE WAS A CONSTANT AND THE DUNES WERE 600 m FURTHER OUT.**
+  rings.city+650 sits a third of the way up the dune amplitude ramp:
+  measured 7.6 m of relief across the whole ±160 m fight window — one gentle
+  swell, no dune anywhere. The venue now SCANS the erg (2D — the erg is a
+  ring, not a bearing) for the first centre passing two measurements: ≥16 m
+  of relief in the window AND ≥2 of the 3 central spawn lanes crest-cut at
+  eye height. Relief alone was not enough — the best on-axis window put all
+  its sand on the flanks and the firing lines still saw each other spawn to
+  spawn. Lands at (2100,−350): relief 23.7 m, 3/3 lanes cut. The terrain
+  derives from WORLD_SEED only, so the same URL is the same war. (An offline
+  replica of heightAt using the FALLBACK hash landed the scan 200 m from
+  where the page's real Squirrel3 hash01 does — measure in the page, not in
+  a copy of the page.)
+
+- **A DUNE IS NOT MADE OF COLLIDERS.** eyeLos was micro.segmentBlocked —
+  boxes only — so on real dunes men would sight and fire through twenty
+  metres of sand. terrainBlocked() samples groundAt along the eye line at
+  3 m steps (a 420 m dune wavelength cannot be stepped over) and eyeLos asks
+  it on maps that declare terrainLos. Dunes only, deliberately: a RAISED
+  venue's groundAt is a raycast heightfield that cannot tell a roof from a
+  hill, and its buildings already block sight honestly through their own
+  colliders. Fire discipline inherits the honesty for free — the trigger
+  re-asks the same eyeLos. Revert `?tlos=0`.
+
+- **THE SAND RENDERED AS PAPER.** sun 0.98 clipped the terrain's own tan
+  vertex colours to white, and the hemisphere light's default pale-BLUE sky
+  side desaturated the rest (blue fill on tan sand is gray). sun 0.84,
+  exposure 0.8, lights.skyColor 0xcfc2a4 — desert ambience is the sand's own
+  bounce. Screenshot-verified: sand reads tan, dune shading carries the
+  aerials, men and corpses read against the ground.
+
+Ratchets: audit() states `relief` (the fight window's measured vertical
+span) and `terrainLos`; QUAL gains `throughSand`, counted at the trigger
+with the terrain test ALWAYS on for the dunes map — 0 armed, 2 in the
+26v26 sweep with `?tlos=0`, which is what makes the zero mean something.
+battle-check fails any map on throughSand>0, fails `dunes` under 12 m of
+relief (the flat-plate regression is now loud — it fired during the build
+when the first scan criterion missed), and --revert adds `&tlos=0`.

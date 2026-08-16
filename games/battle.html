@@ -301,8 +301,9 @@ if (SET.blueN < 1) SET.blueN = 1;
              place (-620,-700): fence, airstrip, parked fighters, motor pool.
      field   CBZ.studio.raise("airport") — Halloran Field: terminal, aprons,
              the airliners on their stands.
-     dunes   the desert basin, kept, because an open firing line is a
-             different game and worth having.
+     dunes   the desert erg, out where the dunes measure as dunes: an open
+             firing line is a different game and worth having, and here the
+             sight lines live and die on the crests.
      arena   the kill box, kept, because it is the control: no world at all,
              so anything that goes wrong there is the men, not the map. */
 const TOWN_AT = { x: 0, z: -700 };       // the mainland coordinates bomb-survivor stands on
@@ -326,7 +327,7 @@ const MAPS = {
   harbor:   { label: "CAPE HARBOR", note: "the coastal strip. apron, helipads", packs: ["capeharbor"], raise: ["capeharbor"], sea: true },
   marina:   { label: "THE MARINA", note: "basin, pontoons, moored boats", packs: ["marina"], raise: ["marina"], sea: true },
   speedway: { label: "THE SPEEDWAY", note: "banked oval. a ground that is NOT flat", packs: ["speedway"], raise: ["speedway"], sea: true },
-  dunes:    { label: "OPEN DUNES", note: "bare sand. firing lines", packs: ["desert"] },
+  dunes:    { label: "OPEN DUNES", note: "rolling sand. crests hide men", packs: ["desert"] },
   arena:    { label: "KILL BOX", note: "flat yard. crates. walls", packs: [] },
 };
 if (!MAPS[SET.map]) SET.map = "city";
@@ -836,7 +837,48 @@ CBZ.studio.need(NEED).then(function () {
     } else if (id === "dunes") {
       world = CBZ.studio.world("desert", { seed: "npcwar" });
       groundAt = (world && world.heightAt) || groundAt;
-      cx = (world && world.rings && world.rings.city ? world.rings.city : 900) + 650; cz = 0;
+      /* WALK OUT UNTIL THE GROUND MEASURES AS DUNES. The old centre was a
+         constant — rings.city + 650 — and nothing ever asked what the ground
+         there looked like. Measured: 7.6 m of relief across the whole field,
+         because the dune amplitude ramps up with radius and r=1700 is barely a
+         third of the way up the ramp. A map called OPEN DUNES was a flat plate
+         with the word "dunes" on the menu row.
+
+         So the venue scans the erg and takes the FIRST centre that passes TWO
+         measurements: the battlefield window (±160 m) holds at least 16 m of
+         relief, and the dunes STAND BETWEEN the armies — at least two of the
+         three central spawn lanes are crest-cut at eye height. Relief alone
+         is not enough (measured: the best on-axis window put all of its sand
+         on the flanks and the two firing lines still saw each other spawn to
+         spawn), and the scan is two-dimensional because the erg is a ring,
+         not a bearing — on the shipped terrain the qualifying ground lies off
+         the old axis entirely. The terrain derives from WORLD_SEED alone, so
+         the same URL lands the same war on the same sand. The fallback is the
+         old constant, so a retuned noise field can never strand the map with
+         no centre at all. High ground is not dealt evenly here; neither are
+         the city map's streets. A venue is a place, and a place has a better
+         side. */
+      const rings = (world && world.rings) || { city: 1050, dune: 2700 };
+      cx = rings.city + 650; cz = 0;
+      scan:
+      for (let x = rings.city + 550; x <= rings.dune - 250; x += 50) {
+        for (let z = -450; z <= 450; z += 50) {
+          if (Math.hypot(x, z) + 170 > rings.dune - 60) continue;
+          let lo = 1e9, hi = -1e9;
+          for (let sx = -160; sx <= 160; sx += 16) for (let sz = -160; sz <= 160; sz += 16) {
+            const y = groundAt(x + sx, z + sz);
+            if (y < lo) lo = y; if (y > hi) hi = y;
+          }
+          if (hi - lo < 16) continue;
+          let cut = 0;
+          for (let li = -1; li <= 1; li++) {
+            const lz = z + li * 12, ax = x - 83, bx = x + 83;
+            if (terrainBlocked(ax, groundAt(ax, lz) + 1.52, lz,
+                               bx, groundAt(bx, lz) + 1.35, lz, groundAt)) cut++;
+          }
+          if (cut >= 2) { cx = x; cz = z; break scan; }
+        }
+      }
     } else if (id === "city") {
       // THE REAL FABRIC. Eight blocks square is 490 m of street — big enough
       // that an army has to cross ground it does not own, small enough that
@@ -902,6 +944,20 @@ CBZ.studio.need(NEED).then(function () {
     }
 
     if (gapOverride) gap = gapOverride;
+    /* HOW MUCH GROUND IS THERE IN THIS GROUND? One number, measured off the
+       same groundAt the men will stand on, over the same window they will
+       fight in — so the audit can state it and the checker can hold the map
+       named OPEN DUNES to actually having dunes. */
+    let relief = 0;
+    (function () {
+      const span = gap * 0.5 + 120;
+      let lo = 1e9, hi = -1e9;
+      for (let sx = -span; sx <= span; sx += 12) for (let sz = -span; sz <= span; sz += 12) {
+        const y = groundAt(cx + sx, cz + sz);
+        if (y < lo) lo = y; if (y > hi) hi = y;
+      }
+      relief = Math.round((hi - lo) * 10) / 10;
+    })();
     const grid = function (team, i) {
       const side = team === "red" ? -1 : 1;
       const col = (i / 10) | 0, row = i % 10;
@@ -910,7 +966,18 @@ CBZ.studio.need(NEED).then(function () {
       return { x: x, z: z };
     };
     return {
-      id: id, gap: gap, cx: cx, cz: cz, groundAt: groundAt,
+      id: id, gap: gap, cx: cx, cz: cz, groundAt: groundAt, relief: relief,
+      /* TERRAIN JOINS THE SIGHT LINE — but only where groundAt is genuinely
+         TERRAIN. The dunes map's height function is the desert's own analytic
+         surface, so a sample along the eye line is sand and nothing else. A
+         RAISED venue's groundAt is a raycast heightfield, and a raycast from
+         above cannot tell a roof from a hill — arming terrain sight there
+         would wall off every lane that passes beside a building the grid
+         touched. The buildings already block sight the honest way, through
+         their own colliders. So: dunes only, until a map's ground is measured
+         by something that knows the difference. */
+      terrainTrue: id === "dunes",
+      terrainLos: id === "dunes" && relief > 6 && Q.get("tlos") !== "0",
       // team spawn: down the streets where there are streets, ranked columns
       // where there are not, and in both cases OUT of the geometry
       spawnAt: function (team, i, r) {
@@ -1652,12 +1719,36 @@ CBZ.studio.need(NEED).then(function () {
      token discipline, derived damage. This page only draws the round,
      plays the report and applies the number it was handed. */
   const SIGHT = 175;
+  /* A DUNE IS NOT MADE OF COLLIDERS. segmentBlocked answers for every box in
+     the world and nothing else, which was the whole truth while every venue
+     fought on a flat plate — and a lie the moment the war moved onto real
+     dunes, where a man would sight and fire straight through twenty metres
+     of sand. So on a map that declares terrainLos, the ground itself is
+     sampled along the eye line: 3 m steps against a 420 m dune wavelength
+     cannot step over a crest, and the first and last couple of metres are
+     the two bodies' own footing and never count. The colliders are asked
+     first because they are cheaper and usually the answer. ?tlos=0 turns the
+     sand transparent again, so the difference is measurable. */
+  function terrainBlocked(ax, ay, az, bx, by, bz, ground) {
+    const g = ground || MAP.groundAt;   // buildMap scans before MAP exists
+    const dx = bx - ax, dz = bz - az;
+    const d = Math.hypot(dx, dz);
+    if (d < 8) return false;
+    const dy = by - ay, n = Math.ceil(d / 3);
+    for (let i = 1; i < n; i++) {
+      const t = i / n, at = t * d;
+      if (at < 2 || d - at < 2) continue;
+      if (g(ax + dx * t, az + dz * t) > ay + dy * t + 0.35) return true;
+    }
+    return false;
+  }
   // eye and torso heights are PER BODY now: a man looks from 1.52 and is hit
   // at 1.35; a wolf looks from half a metre and a giraffe from four — the
   // measured box each beast carries says so, and the default is the man.
   function eyeLos(m, o) {
-    return !CBZ.micro.segmentBlocked(m.pos.x, m.pos.y + (m.eyeH || 1.52), m.pos.z,
-      o.pos.x, o.pos.y + (o.losY || 1.35), o.pos.z);
+    const ay = m.pos.y + (m.eyeH || 1.52), by = o.pos.y + (o.losY || 1.35);
+    if (CBZ.micro.segmentBlocked(m.pos.x, ay, m.pos.z, o.pos.x, by, o.pos.z)) return false;
+    return !(MAP.terrainLos && terrainBlocked(m.pos.x, ay, m.pos.z, o.pos.x, by, o.pos.z));
   }
   /* IS ONE OF MINE STANDING IN THIS LANE? Only the near end is asked: past
      about twelve metres the round has cleared the firing line and anybody it
@@ -1722,6 +1813,10 @@ CBZ.studio.need(NEED).then(function () {
       // a cached answer from the last think is exactly the thing being checked
       if (!eyeLos(m, tgt)) QUAL.blindFire++;
       if (mateInLane(m, tgt)) QUAL.throughMate++;
+      // asked with the TERRAIN test regardless of whether terrainLos is armed,
+      // which is what lets ?tlos=0 prove the sand goes transparent without it
+      if (MAP.terrainTrue && terrainBlocked(m.pos.x, m.pos.y + (m.eyeH || 1.52), m.pos.z,
+        tgt.pos.x, tgt.pos.y + (tgt.losY || 1.35), tgt.pos.z)) QUAL.throughSand++;
     }
     if (shotsRing.length > 90) shotsRing.shift();
     shotsRing.push({ x: m.pos.x, z: m.pos.z, t: simT, m: m });
@@ -3131,9 +3226,16 @@ CBZ.studio.need(NEED).then(function () {
         lights: { sun: 0.86, hemi: 0.52, shadowSpan: 420, groundColor: 0x6a6f76 },
       },
       dunes: {
-        fov: 72, far: 16000, exposure: 0.88,
+        /* The sun came down from 0.98: at that level the sand's own vertex
+           colours clipped to white and the whole erg rendered as a sheet of
+           paper — the exact wash the city map already fixed for its stone.
+           Sand is TAN, and the men and the dead have to read against it. */
+        fov: 72, far: 16000, exposure: 0.8,
         sky: { top: 0x2a6bb2, bottom: 0xe3c893, fogNear: 1100, fogFar: 8600, radius: 12000 },
-        lights: { sun: 0.98, hemi: 0.46, shadowSpan: 620, groundColor: 0x8f7850 },
+        /* skyColor: the hemisphere's sky side defaults to pale BLUE, and blue
+           fill on tan sand is gray — the erg was desaturating itself. Desert
+           ambience is the sand's own bounce: warm. */
+        lights: { sun: 0.84, hemi: 0.42, shadowSpan: 620, skyColor: 0xcfc2a4, groundColor: 0x8f7850 },
       },
     };
     SKY.island = SKY.field = SKY.city;
@@ -3381,7 +3483,7 @@ CBZ.studio.need(NEED).then(function () {
      tools/battle-check.mjs can hold it at zero instead of somebody squinting.
      Read-only: it never touches a man. */
   const QUAL = { overlapPeak: 0, embeddedEver: 0, blindFire: 0, throughMate: 0,
-    fratricide: 0, bodyW: 0, stuckSeen: 0, wallSeconds: 0 };
+    throughSand: 0, fratricide: 0, bodyW: 0, stuckSeen: 0, wallSeconds: 0 };
   function bodyWidth() {
     if (QUAL.bodyW) return QUAL.bodyW;
     for (let i = 0; i < men.length; i++) {
@@ -3462,7 +3564,8 @@ CBZ.studio.need(NEED).then(function () {
       sepResid: sepResid, fineCell: Math.round(FINE * 100) / 100,
       radMax: Math.round(bodyRadMax * 100) / 100,
       wallSeconds: Math.round(QUAL.wallSeconds * 10) / 10,
-      blindFire: QUAL.blindFire, throughMate: QUAL.throughMate, fratricide: QUAL.fratricide,
+      blindFire: QUAL.blindFire, throughMate: QUAL.throughMate,
+      throughSand: QUAL.throughSand, fratricide: QUAL.fratricide,
       shots: stats.red.shots + stats.blue.shots, engaged: engaged,
       colliders: (CBZ.colliders && CBZ.colliders.length) || 0,
     };
@@ -3488,6 +3591,10 @@ CBZ.studio.need(NEED).then(function () {
         raises: !!(MAPS[SET.map] && MAPS[SET.map].raise),
         gap: MAP ? Math.round(MAP.gap) : null,
         centre: MAP ? [Math.round(MAP.cx), Math.round(MAP.cz)] : null,
+        // the fight window's own vertical span, measured off groundAt at
+        // build — and whether the ground takes part in the sight lines
+        relief: MAP ? MAP.relief : null,
+        terrainLos: !!(MAP && MAP.terrainLos),
         men: men.length, red: aliveCount("red"), blue: aliveCount("blue"),
         queued: spawnQueue.length, corpses: corpses.length, rockets: rockets.length,
         planes: planes.length, air: AIR.on, sticks: AIR.sticks || 0, nukes: AIR.nukes || 0,
