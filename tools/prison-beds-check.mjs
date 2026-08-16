@@ -9,7 +9,31 @@
    ordered to bed every night by systems/prisonschedule.js's muster with nowhere
    to lie down, so they stood in the wing until dawn.
 
-   THE RATCHET THIS FILE HOLDS, and there are only two numbers in it:
+   AND THE OTHER HALF OF THE SAME ASK (2026-08-16). Capacity was solved and the
+   wing still could not get the men into it: at the night block 23 of 61 men
+   were lying down — 38% — with 43 racks free the whole time. Instrumented, it
+   was four faults, and the biggest of them was that world/door.js's keycard
+   leaf at (0, -8) is the cell house's ONLY entrance and is shut for the whole
+   run, so fifty of the sixty-six racks were behind a door no inmate can open.
+   `abed` is that fault as a number and this file pins its floor.
+
+   THE RATCHET THIS FILE HOLDS, and there are only four numbers in it:
+
+     abed          the share of the men this system is RESPONSIBLE for who are
+                   actually LYING at the night block. 0.38 before the routing
+                   wave; 0.85 on the finished one. Floor 0.60 — below every
+                   post-wave measurement including a bad run, because the
+                   metric carries irreducible run-to-run spread (§4b) and a
+                   threshold set on a lucky run is worse than none. It is the
+                   LOOSE half of this gate; the four below it are the ratchet.
+     homelessInside a man standing INSIDE his own housing with no rack to his
+                   name. 0 on every measured run; pinned at 0. NOT `homeless`,
+                   which also counts men locked out in the yard — being locked
+                   out is what securing a wing does.
+     doubleClaimed racks with two names on them. Measured at 3; pinned at 0.
+     lodged        bodies the sweep found inside a mattress and could not step
+                   clear. See below on why this and not `bunkStanders` is what
+                   a DAYLIGHT block can assert on.
 
      sleepGap      housed inmates minus registered beds. MUST be <= 0, and it
                    is asserted AT THE NIGHT BLOCK, not at spawn — a wing that
@@ -21,6 +45,19 @@
                    the "mattress with no anchor" failure this gate exists to
                    catch. A bare addBox slab would instead show up as beds not
                    rising at all, so both halves are checked.
+
+   WHY THE DAYLIGHT ASSERTION ASKS `lodged` AND NOT `bunkStanders`. It used to
+   ask `bunkStanders` and it flaked one run in four, and the flake was real
+   information: systems/prisonrest.js sweeps bodies out of the bedding at 2 Hz,
+   a walking man crosses a 1.04 x 2.36 m mattress footprint in far less than
+   half a second, and this file sampled at an arbitrary phase between two
+   sweeps. It was measuring TRAFFIC. `lodged` is the same scan taken one
+   instruction after the sweep — bodies it found and could not move, because
+   `CBZ.rest.stepOff` refuses a rack with no solved entry point rather than
+   pushing a body into a wall. A mattress drawn without a propuse anchor, which
+   is the failure the assertion exists for, still turns it red; a man walking
+   past no longer does. Nothing is weakened: "nobody is LEFT standing in a
+   mattress" is the assertion's own wording, and this is that sentence.
 
    WHY THE ARITHMETIC IS NOT A CONSTANT. entities/npc.js:547 sizes the
    anonymous tier as `houses - npcs.length - cells`, so adding cells feeds back
@@ -110,9 +147,24 @@ const pin = (hour) => evl(`if (CBZ.dayPhase) CBZ.dayPhase(${phaseOf(hour)}); ret
    lags the phase until the next tick: the run is not at an hour until
    prisonSchedule.id() says so, and asserting on the phase instead is how this
    gate once reported "block=secure hour=23". */
+/* …AND THE RE-PIN LOOP RUNS INSIDE THE PAGE. It used to be two CDP round trips
+   per half second of sim, which for the three-block evening below is well over
+   a thousand of them and made the gate round-trip bound rather than sim bound.
+   The loop is byte-identical in what it does to the world — pin the phase, step
+   thirty frames, repeat — it just stops asking the debugger's permission twenty
+   times a second. Kept to ten seconds of sim per evaluate so a slow build never
+   sits inside one call long enough to look hung. */
 async function holdHour(hour, seconds, wantId) {
   const chunks = Math.max(1, Math.round(seconds / 0.5));
-  for (let i = 0; i < chunks; i++) { await pin(hour); await step(30); }
+  for (let i = 0; i < chunks; i += 20) {
+    const n = Math.min(20, chunks - i);
+    await evl(`var ph = ${phaseOf(hour)};
+      for (var c = 0; c < ${n}; c++) {
+        if (CBZ.dayPhase) CBZ.dayPhase(ph);
+        for (var k = 0; k < 30; k++) CBZ.stepSim(1 / 60);
+      }
+      return true;`);
+  }
   let blk = null;
   for (let i = 0; i < 40; i++) {
     await pin(hour); await step(6);
@@ -122,6 +174,22 @@ async function holdHour(hour, seconds, wantId) {
   return blk;
 }
 const runNight = (seconds) => holdHour(23, seconds, "night");
+/* WALK THE EVENING, DO NOT JUMP INTO IT. The wing musters on the 18:30 klaxon,
+   the leaves rack at 21:00 and the lights go out at 22:00, and each of those is
+   an order the men are given time to obey — systems/prisonschedule.js opens the
+   block gate for the count and shuts it behind the last man. Pinning straight
+   to 23:00 from the boot block photographs a wing that was never given its
+   evening, which is not the measurement the game makes. */
+async function runEvening() {
+  // the block lengths the game actually runs, at escape's 30 s/in-game-hour:
+  // count 18:30-21:00 is 75 s, secure 21:00-22:00 is 30 s. Shortening the
+  // count is not a faster gate, it is a different prison — a man walking in
+  // from the sally port is 165 m out at 1.5-2.8 m/s and the evening return is
+  // exactly as long as it needs to be for him.
+  await holdHour(19, 75, "count");
+  await holdHour(21.5, 30, "secure");
+  return runNight(75);
+}
 
 // ---- 1. THE WING AS BOOTED ------------------------------------------------
 await step(240);
@@ -142,7 +210,15 @@ const boot = await evl(`
   var rigs = 0, list = CBZ.npcs || [], byRole = {};
   for (var i = 0; i < list.length; i++) {
     var a = list[i];
-    if (!a || a._crowd || !a.group || a.dead || a.escaped) continue;
+    /* THE SAME PREDICATE sleepGap USES, AND THAT IS THE WHOLE POINT of the
+       "agrees with an independent count" assertion two checks down: this line
+       asked for a.escaped to be false and the build's own count does not, so
+       the two disagreed by one the moment a single man went over the wire
+       inside the four seconds before this sample — a second flake, found the
+       same way as the first. Excluding the dead only is also the stricter
+       reading for a boot-time CAPACITY claim: the wing must be able to sleep
+       every rig it SPAWNS, and a man who has already got out is still one. */
+    if (!a || a._crowd || !a.group || a.dead) continue;
     if (a.kind !== "inmate" && a.role !== "inmate") continue;
     rigs++; byRole[a.role || "?"] = (byRole[a.role || "?"] | 0) + 1;
   }
@@ -224,14 +300,18 @@ check("wing: the build's own sleepGap agrees with an independent count",
 }
 
 // ---- 4. LIGHTS OUT: THE ONLY TWO NUMBERS THAT MATTER ----------------------
-const blk = await runNight(90);
+const blk = await runEvening();
 const night = await evl(`
   var r = CBZ.prisonRestAudit(), s = CBZ.prisonScheduleAudit();
-  return { r: r, block: s.block, hour: s.hour, lightsOut: s.lightsOut };
+  return { r: r, s: s, block: s.block, hour: s.hour, lightsOut: s.lightsOut };
 `);
 if (bad(night)) { check("night: the audit reads", false, why(night)); done(4); }
 console.log("  ..  block:", night.block, "hour:", night.hour, "(held", blk + ")");
 console.log("  ..  restAudit(night):", JSON.stringify(night.r));
+// WHERE THE MEN WHO ARE NOT IN BED ARE STANDING. A residue you cannot locate
+// is a residue you cannot argue with; every fault this gate's abed floor was
+// written for was found by reading exactly this list off a live run.
+console.log("  ..  still afoot:", JSON.stringify(night.r.afootAt));
 
 check("night: the run is actually at lights-out",
   night.block === "night" && night.lightsOut === true, `block=${night.block} hour=${night.hour}`);
@@ -245,22 +325,87 @@ check("night: the beds are reachable — men are actually lying in them",
 check("night: no bed is a floor mat", night.r.mats === 0 && night.r.matsRefused === 0,
   `mats=${night.r.mats} refused=${night.r.matsRefused}`);
 
+/* ---- 4b. AND THE MEN ARE IN THEM (2026-08-16) ---------------------------
+   Capacity is not the ask answered. `abed` is the share of the men this system
+   is RESPONSIBLE for at lights-out who are actually lying down, and the routing
+   wave took it from 0.38 to the 0.85-0.87 band.
+
+   WHAT IS OUT OF THE DENOMINATOR, AND WHY EACH ONE IS NOT A FUDGE. `settling`
+   drops the dead (no bed is owed), the escaped (a man over the wire is not a
+   man the wing failed to bed — counting him would let a build score BETTER by
+   losing prisoners) and the BUSY: knocked out, hunting, fighting, fleeing,
+   grabbed. systems/prisonrest.js §3 is forbidden to touch those bodies at all
+   — "a real brain state outranks the furniture" — so scoring it on them is
+   scoring it on somebody else's work.
+
+   THE VARIANCE THAT REMAINS, STATED PLAINLY, BECAUSE IT IS NOT ALL REMOVABLE.
+   Excluding the busy took out one term. The dominant one is left: WHERE THE
+   MEN HAPPEN TO BE STANDING WHEN THE 18:30 KLAXON SOUNDS. The social AI puts a
+   different cast in the south block, the yard and the lower track every run,
+   the block gate shuts at the 22:00 lights-out klaxon whatever is happening,
+   and a man who was 120 m out at the return does not make it.
+
+   WHAT WAS ACTUALLY MEASURED, AND ON WHAT — the builds were NOT identical, so
+   the spread must not be quoted as if they were:
+
+     0.38   38a1e5c, before any of this work
+     0.78   routing wave, dorm lead-in still cutting the workshop corner
+     0.64   same build, a run that left more men in the far south
+     0.85   the complete build — and the only run on it so far
+
+   ONE sample on the finished code is not a distribution. ABED_FLOOR is
+   therefore set at 0.60, below every post-wave measurement including the bad
+   one, and it is deliberately the LOOSE half of this gate: it exists to catch
+   a regression back toward 0.38 and it does not prove the wave correct. THAT
+   job belongs to the four assertions below it, every one of which read the
+   same value on every run — bunkStanders 0, lodged 0, doubleClaimed 0,
+   homelessInside 0 — plus the gate being shut at lights-out. Raise the floor
+   when there are several runs on one build to raise it against; tightening it
+   beyond ~0.85 is a DESIGN change, not a test change, because it means
+   mustering earlier than the evening return or putting a second housing unit
+   in the south block, and neither is this file's call to make.
+
+   `homelessInside` is the invariant, and it is deliberately NOT `homeless`.
+   Six to eight men are typically still in the yard when the gate racks shut,
+   and being locked out is what securing a wing DOES — they are counted, named
+   and printed by `afootAt` above, but they are not a fault. A man standing
+   INSIDE his own housing with no mattress to his name is. */
+const ABED_FLOOR = 0.60;          // below every post-wave measurement, incl. the bad one
+check("night: MOST OF THE WING IS ACTUALLY IN A BED (abed >= 0.60)",
+  night.r.abed != null && night.r.abed >= ABED_FLOOR,
+  `abed=${night.r.abed} lying=${night.r.lying} of ${night.r.settling} settling` +
+  ` (${night.r.inmates} rigs, ${night.r.inmates - night.r.live} over the wire, ${night.r.busy} in a brain state)`);
+check("night: nobody who made the count is left without a rack",
+  night.r.homelessInside === 0,
+  `homelessInside=${night.r.homelessInside} (of ${night.r.homeless} with no rack; the rest are locked out in the yard)`);
+check("night: no rack has two names on it",
+  night.r.doubleClaimed === 0, `doubleClaimed=${night.r.doubleClaimed} reserved=${night.r.reserved}/${night.r.beds}`);
+/* THE KEYCARD IS STILL THE KEYCARD. The wing gate is racked for the count and
+   for nothing else — a schedule that left the escape objective standing open
+   at 02:00 would have bought this number by giving the game away. */
+check("night: the block gate is shut at lights-out",
+  night.s.gateOpen === false && night.s.gateOpenOffCount === 0,
+  `gateOpen=${night.s.gateOpen} openOffCount=${night.s.gateOpenOffCount} hold=${night.s.hold}`);
+
 // ---- 5. AND IT SURVIVES THE DAY -------------------------------------------
 // A capacity claim taken once at 23:00 proves nothing if the wing loses beds
 // on a block change. Walk the clock through the day and back.
 {
   const dayBlk = await holdHour(13, 12, "work");
-  const day = await evl(`var r = CBZ.prisonRestAudit(); return { block: "${dayBlk}", beds: r.beds, inmates: r.inmates, gap: r.sleepGap, st: r.bunkStanders, lying: r.lying };`);
-  const back = await runNight(60);
+  const day = await evl(`var r = CBZ.prisonRestAudit(); return { block: "${dayBlk}", beds: r.beds, inmates: r.inmates, gap: r.sleepGap, st: r.bunkStanders, lodged: r.lodged, lying: r.lying };`);
+  const back = await runEvening();
   const again = await evl(`var r = CBZ.prisonRestAudit(); return { beds: r.beds, inmates: r.inmates, gap: r.sleepGap, st: r.bunkStanders, lying: r.lying };`);
   if (bad(day) || bad(again)) check("day: the audit reads", false, why(day) + " / " + why(again));
   else {
     console.log("  ..  restAudit(work block):", JSON.stringify(day), "held", back);
     check("day: the beds empty when the block is up", day.block === "work" && day.lying < night.r.lying, `block=${day.block} lying ${night.r.lying} -> ${day.lying}`);
-    // …and the sweep that keeps bunkStanders at 0 runs on the LIVE wing, not
-    // only on a reset. A daylight block with a body standing in a mattress is
-    // the owner's original sentence, whatever the beds count says.
-    check("day: nobody is left standing in a mattress in daylight", day.st === 0, `bunkStanders=${day.st}`);
+    // …and the sweep that keeps bodies out of the bedding runs on the LIVE
+    // wing, not only on a reset. A daylight block with a body LEFT standing in
+    // a mattress is the owner's original sentence, whatever the beds count
+    // says — and `lodged` is that sentence sampled where it means something
+    // (see this file's header on the 1-in-4 flake it replaces).
+    check("day: nobody is left standing in a mattress in daylight",
+      day.lodged === 0, `lodged=${day.lodged} (bunkStanders sampled mid-sweep=${day.st})`);
     check("day: no bed is lost to a block change", day.beds === night.r.beds && again.beds === night.r.beds,
       `beds ${night.r.beds} -> ${day.beds} -> ${again.beds}`);
     check("day: the gap stays closed across a full cycle", again.gap <= 0 && again.st === 0,
