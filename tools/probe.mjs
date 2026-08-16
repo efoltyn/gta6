@@ -282,4 +282,11 @@ if (own) {
     catch (_) { await sleep(400); try { await rm(own.profile, { recursive: true, force: true }); } catch (_) {} }
   }
 }
+// process.exit() TRUNCATES A PIPE. node's stdout is asynchronous whenever it
+// is not a TTY, so any answer larger than the 64 KB pipe buffer reached the
+// caller cut off mid-JSON — invisible when you run this by hand in a terminal
+// (a TTY writes synchronously) and dead reliable the moment another tool
+// spawns it. tools/solid-census.mjs dumps ~800 KB a tile and read back
+// exactly 65536 bytes, every time. Drain, then leave.
+await new Promise((r) => process.stdout.write("", r));
 process.exit(process.exitCode || 0);

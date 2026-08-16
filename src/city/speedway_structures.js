@@ -1421,10 +1421,29 @@
     // POINT, and the whole perimeter is one merged panel geometry instead of
     // three. Same silhouette, two draw calls, and it is the same code the two
     // venue frontages run.
+    // …AND IT HAD NO COLLIDER LEDGER. `fence` registers nothing unless it is
+    // handed one — flushRun() bails on `!o.solid` — so this call drew 286 m of
+    // 2.4 m chain-link that a body walked straight through, in four stretches
+    // up to 43.8 m wide. tools/solid-census.mjs scored it 17.3% solid (the
+    // only metres that stopped anyone were the ones that happened to fall
+    // inside a garage's own box) against 100% for the site perimeter next
+    // door, which does pass a ledger. Nothing about it was visible: the fence
+    // is drawn, complete, in the right place.
+    //
+    // ARGUMENT-ORDER ADAPTER, for the reason island_speedway.js's siteSolid
+    // spells out at length: this file's ledger is (minX, maxX, minZ, maxZ)
+    // and the shared kit — like every other collider helper in city/ — is
+    // (minX, minZ, maxX, maxZ). Handing S.solidBox straight in would put
+    // every panel's collider somewhere else entirely. S.solidYaw already
+    // matches the kit's oriented form, so it goes through untouched.
+    const pSolid = S.solidBox
+      ? function (minX, minZ, maxX, maxZ, y0, y1) { S.solidBox(minX, maxX, minZ, maxZ, y0, y1); }
+      : null;
     fence({
       root: grp, name: "speedway-paddock-fence",
       path: [{ x: x0, z: z1 }, { x: x0, z: z0 }, { x: x1, z: z0 }, { x: x1, z: z1 }],
       h: 2.4, pitch: 3.0, post: 0x8f969e,
+      solid: pSolid, solidYaw: S.solidYaw,
       gaps: [{ x: (x0 + x1) / 2, z: z0, half: (x1 - x0) * 0.06 }],
     });
     return grp;
