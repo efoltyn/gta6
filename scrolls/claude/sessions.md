@@ -3907,3 +3907,95 @@ new props, the before/after tool made one-command easy, everything committed.
   are measured off descriptors and height functions, not pixels: beachSpanM
   100→160, islandBeachM 8→26, drySandM, wadeM, wetLineLive, verts, drawCalls.
 - npm run visual:beach = the beach comparison in one command.
+
+## 2026-08-16 — OPEN DUNES was a flat white plate (battle.html's dunes venue)
+
+Owner: "Look at NPC war open dunes." Looked, with screenshots and the checker.
+The war itself held (0 overlap / embedded / blindFire / stuck, ended on
+budget) but the venue did not: the label promised dunes and bare sand, and
+the field was a featureless near-white sheet with the desert city's towers
+filling the horizon. Three measured faults, three fixes — games/battle.html,
+tools/battle-check.mjs.
+
+- **THE CENTRE WAS A CONSTANT AND THE DUNES WERE 600 m FURTHER OUT.**
+  rings.city+650 sits a third of the way up the dune amplitude ramp:
+  measured 7.6 m of relief across the whole ±160 m fight window — one gentle
+  swell, no dune anywhere. The venue now SCANS the erg (2D — the erg is a
+  ring, not a bearing) for the first centre passing two measurements: ≥16 m
+  of relief in the window AND ≥2 of the 3 central spawn lanes crest-cut at
+  eye height. Relief alone was not enough — the best on-axis window put all
+  its sand on the flanks and the firing lines still saw each other spawn to
+  spawn. Lands at (2100,−350): relief 23.7 m, 3/3 lanes cut. The terrain
+  derives from WORLD_SEED only, so the same URL is the same war. (An offline
+  replica of heightAt using the FALLBACK hash landed the scan 200 m from
+  where the page's real Squirrel3 hash01 does — measure in the page, not in
+  a copy of the page.)
+
+- **A DUNE IS NOT MADE OF COLLIDERS.** eyeLos was micro.segmentBlocked —
+  boxes only — so on real dunes men would sight and fire through twenty
+  metres of sand. terrainBlocked() samples groundAt along the eye line at
+  3 m steps (a 420 m dune wavelength cannot be stepped over) and eyeLos asks
+  it on maps that declare terrainLos. Dunes only, deliberately: a RAISED
+  venue's groundAt is a raycast heightfield that cannot tell a roof from a
+  hill, and its buildings already block sight honestly through their own
+  colliders. Fire discipline inherits the honesty for free — the trigger
+  re-asks the same eyeLos. Revert `?tlos=0`.
+
+- **THE SAND RENDERED AS PAPER.** sun 0.98 clipped the terrain's own tan
+  vertex colours to white, and the hemisphere light's default pale-BLUE sky
+  side desaturated the rest (blue fill on tan sand is gray). sun 0.84,
+  exposure 0.8, lights.skyColor 0xcfc2a4 — desert ambience is the sand's own
+  bounce. Screenshot-verified: sand reads tan, dune shading carries the
+  aerials, men and corpses read against the ground.
+
+Ratchets: audit() states `relief` (the fight window's measured vertical
+span) and `terrainLos`; QUAL gains `throughSand`, counted at the trigger
+with the terrain test ALWAYS on for the dunes map — 0 armed, 2 in the
+26v26 sweep with `?tlos=0`, which is what makes the zero mean something.
+battle-check fails any map on throughSand>0, fails `dunes` under 12 m of
+relief (the flat-plate regression is now loud — it fired during the build
+when the first scan criterion missed), and --revert adds `&tlos=0`.
+
+NOTE (same session): the full nine-map sweep flagged transient overlap pairs
+on `gov` (1-2 pairs) and `marina` (0-1) — measured on BOTH sides of this
+wave (base 0dce341 in a clean worktree: gov 1 pair, worst 0.97 m). It is a
+pre-existing, machine-load-sensitive transient on the dense venues, not a
+dunes regression (dunes itself: 0 across every counter, every run, both
+revert directions). Named here instead of fixed: separation under big
+substeps on dense venues is its own measurement pass, and this wave's
+subject was the erg.
+## 2026-08-16 — A THUMB COULD NOT USE THE C4, IN EITHER GAME
+
+Owner: "I can't use c4 on touch — prison game, prob can't in gang city
+either." He couldn't, anywhere: plant AND detonate lived on keyboard [B]
+alone (city/explosives.js's tap/hold state machine), and no touch file ever
+drew a control for either verb — the exact "keyboard verb with no thumb"
+failure touch.js's verb ledger exists to catch, except these two verbs were
+never even DECLARED into it, so no counter could say so. Inside the wire it
+was worse than the city: the phone's DEMOLITION card does not exist in the
+pen, so hold-[B] is the ONLY detonator the prison has — an iPad prisoner
+with a brick carried a stat fiction.
+
+ONE BUTTON, ONE PILL, ZERO REIMPLEMENTATION. #tbomb joins the on-foot icon
+cluster (bomb-with-spark glyph): tap plants, hold ~0.5 s detonates — by
+holding the module's own logical key down exactly as long as the finger is
+(CBZ.touchKeyHold, the edge-per-call sibling of touchKeyTap), so the arm
+delay, the det-cord clustering, the five-signal receiver cap, the yield to
+the B-2's bomb bay and every refusal line stay explosives.js's alone. Shown
+only when the verb can act (the keyboard's own claim test: bricks on foot,
+or charges out), and red once charges ARE out — the charge LED's own color.
+The vehicle layer gets the pill the plan ends on: body.tveh-on hides the
+on-foot cluster in a seat, so DETONATE (worded — that rail speaks verbs)
+joins the aux rail in drive/armor and now boat, wired through the same key
+hold, inheriting the 0.5 s arm that keeps a mis-brush of the glass from
+sending the street up.
+
+MEASURED (tools/c4-touch-check.mjs — headless touch session, both games):
+tap → exactly 1 planted and exactly 1 brick spent; 0.33 s of hold → nothing;
+0.7 s → every charge out fired, no brick spent; the drive context builds AND
+shows #tvBoom with a charge out (real car, real boarding arc) and the same
+hold detonates from the driver's seat; escape: plant + detonate inside the
+wire. touchAudit 42/42 covered — c4-plant / c4-detonate are ledger rows now,
+so the next thumbless verb cannot hide the way this one did. Also: the
+"[B]… Shift+B" stash hint is keyboard-only now (a touchscreen is never shown
+a keyboard key). Gate: npm run test:c4-touch.
