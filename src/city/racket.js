@@ -16,7 +16,8 @@
 
    WHAT THIS FILE OWNS — the one racket ledger and everything that reads it:
      · per-store PROTECTION state (who runs it, fear, trust, tribute owed)
-     · the gunpoint ROB / EXTORT verbs at every counter (CBZ.interactions)
+     · the two gunpoint verbs at every counter: ROB, and EXTORT — which is
+       OFFERING PROTECTION at the muzzle's end (owner's exact framing)
      · store-owner MEMORY: a keeper you robbed remembers it BY DAY and
        greets your return with a drawn pistol (brave) or raised hands (meek)
      · protector RETALIATION: rob a protected store and the crew that runs
@@ -441,23 +442,6 @@
       hotCash += Math.round(take * 0.2);
       note("Crew rule: kick up a cut at the HQ — $" + Math.round(take * 0.2) + " of that is theirs.", 2.6, { from: "Crew" });
     }
-    return true;
-  }
-
-  // force the drop safe at gunpoint — the second rung when the drawer's thin.
-  function robSafe(lot) {
-    if (!on() || !lot) return false;
-    const door = lotDoor(lot);
-    const r = CBZ.cityTill.take(lot, { point: "safe", by: "player", rob: true });
-    const take = (r && r.taken) | 0;
-    if (take > 0) { CBZ.city.addCash(take); big("DROP SAFE CRACKED +$" + take); if (CBZ.sfx) CBZ.sfx("coin"); }
-    else note("The drop safe is empty.", 1.8);
-    if (CBZ.cityCrime) CBZ.cityCrime(180, { instant: true, x: door.x, z: door.z, type: "store robbery" });
-    if (CBZ.cityAlarm) CBZ.cityAlarm(door.x, door.z, 20, 1.2, playerActor());
-    CBZ.city.addRespect(3);
-    const rec = recFor(lot);
-    const entry = recordRob(lot, "player", take);
-    respondToRob(lot, rec, entry, "player", null);
     return true;
   }
 
@@ -1095,32 +1079,24 @@
       const prot = rec && rec.gang ? (isPlayerSide(rec.gang) ? "yours" : "the " + sideName(rec.gang) + "'s") : "nobody's";
       return { label: storeName(lot), note: (lot.kind === "bank" ? "The float is caged" : "Register ~" + money(reg)) + " · this block is " + prot };
     });
-    // E — ROB. The register empties through the till ledger; the protector answers.
+    // TWO ROWS, THE OWNER'S EXACT GRAMMAR: rob, or extort. Bare verbs — the
+    // card title already names the store, the note already says the stakes.
     I.register("ped:vendor:gp", {
       id: "rk-gp-rob", slot: "e", needsGunDrawn: true, bad: true,
-      label: function (v) { return v.vendor && v.vendor.kind === "bank" ? "Make the teller pay out" : "Empty the register"; },
+      label: "Rob",
+      sub: function (v) { return v.vendor && v.vendor.kind === "bank" ? "the teller's cage" : "empty the register"; },
       onSelect: function (v) { if (v.vendor) robCounter(v.vendor, { armed: true }); },
     });
-    // I — EXTORT. The conquest verb: the store signs, or names its crew.
     I.register("ped:vendor:gp", {
       id: "rk-gp-extort", slot: "i", needsGunDrawn: true, bad: true,
-      label: function (v) {
+      label: "Extort",
+      sub: function (v) {
         const rec = v.vendor && state.get(v.vendor);
-        if (rec && rec.gang && !isPlayerSide(rec.gang)) return "Take over the protection";
-        if (rec && isPlayerSide(rec.gang)) return "Remind them who runs this";
-        return "Demand protection money";
+        if (rec && rec.gang && !isPlayerSide(rec.gang)) return "offer protection — take the block from the " + sideName(rec.gang);
+        if (rec && isPlayerSide(rec.gang)) return "they already pay your side";
+        return "offer protection — they pay daily";
       },
       onSelect: function (v) { if (v.vendor) extortCounter(v.vendor); },
-    });
-    // J — the DROP SAFE, when this trade keeps one and it holds anything.
-    I.register("ped:vendor:gp", {
-      id: "rk-gp-safe", slot: "j", needsGunDrawn: true, bad: true,
-      canShow: function (v) {
-        if (!v.vendor || !CBZ.cityTill || !CBZ.cityTill.holds) return false;
-        try { return (CBZ.cityTill.holds(v.vendor, { point: "safe" }).amount | 0) > 0; } catch (e) { return false; }
-      },
-      label: "Force the drop safe",
-      onSelect: function (v) { if (v.vendor) robSafe(v.vendor); },
     });
 
     // ---- calm-counter verbs (no gun): the ledger speaks through the owner --

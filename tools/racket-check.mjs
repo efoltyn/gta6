@@ -167,9 +167,9 @@ loadRacket(CBZ);
 check("api", !!CBZ.cityRacket && !!CBZ.cityRacketStores && !!CBZ.cityRacketZoneTally && !!CBZ.cityRacketOwnerFill);
 check("verbs registered",
   CBZ._reg.sources.some((s) => s.id === "src-vendor-gunpoint") &&
-  (CBZ._reg.options["ped:vendor:gp"] || []).length >= 3 &&
+  (CBZ._reg.options["ped:vendor:gp"] || []).length === 2 &&
   (CBZ._reg.options["ped:vendor"] || []).length >= 2,
-  "gunpoint source + " + ((CBZ._reg.options["ped:vendor:gp"] || []).length) + " demand rows");
+  "gunpoint source + exactly rob/extort");
 
 const lots = CBZ.city.arena.lots;
 const spoon = lots[0], circuit = lots[1], bar = lots[2], glint = lots[3];
