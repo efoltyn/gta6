@@ -331,11 +331,21 @@
 
      OWNER: "the armory needs to have all the guns."
 
-     CBZ.FPS_WEAPONS declares thirteen. The armory carried six of them — five on
-     the rack and the bolt sniper in the cage — so seven weapons the game fully
-     models, animates and gives a voice to existed nowhere a player could ever
-     pick one up in the prison. That is the gun-room grammar failing its own
-     rule (c): the room is supposed to be where a CATEGORY changes hands.
+     CBZ.FPS_WEAPONS declares fourteen and this room is the ISSUE store for
+     thirteen of them. The armory carried six — five on the rack and the bolt
+     sniper in the cage — so seven weapons the game fully models, animates and
+     gives a voice to existed nowhere a player could ever pick one up in the
+     prison. That is the gun-room grammar failing its own rule (c): the room is
+     supposed to be where a CATEGORY changes hands.
+
+     THE FOURTEENTH IS CONTRABAND AND IS DELIBERATELY ABSENT. `shank` is the one
+     weapon in the roster nobody issues (weapons/appearances/shank.js: "Nobody
+     issued it, nobody finished it"), and systems/economy.js:114 syncShankWeapon
+     un/locks it off the Shiv row of the bag on every addItem/takeItem — so its
+     rack IS the inventory, and a blade on a guard's wall would be the bug.
+     Recorded HERE because its NOT being recorded here is the whole fault:
+     tools/prison-polish-check.mjs counted the roster against this wall and
+     called the room short by one (missing=["shank"]) for months.
 
      They are placed by what they are, not dumped in a row:
        · THE RACK (nine, open the moment the keycard turns) — every gun a screw
@@ -343,11 +353,17 @@
          machine pistols and the taser. The four new ones go on the LOWER shelf
          run, which the rack has always had and never used, so the board, the
          brackets and the five original positions are untouched.
-       · THE CAGE (four, behind the Warden's key or a hacksaw) — the ones that
-         change what game you are playing: the bolt sniper on its plinth, plus
-         the M249, the RPG and the 40mm on a wall rack beside it. REACH and
+       · THE CAGE (four GUNS, behind the Warden's key or a hacksaw) — the ones
+         that change what game you are playing: the bolt sniper on its plinth,
+         plus the M249, the RPG and the 40mm on a wall rack beside it. REACH and
          EXPLOSIVES are the categorical tier; that is why they are the ones
          behind the second door rather than the first.
+         The demolition crate built further down shares the cage as a fourteenth
+         slot — 9 rack + 4 cage guns + it — but it is an ITEM slot (`slot.item`,
+         a count into the bag), not a weapon unlock. So the tier is asserted over
+         GUN slots: a bare `gatedSlots === 4` reads 5 the moment the cage stocks
+         anything that is not a rifle, and this file's own RATCHET below says
+         gatedSlots may only go UP. Count guns.
      Flag false → the exact five-and-one the room shipped with.
      ================================================================== */
   if (CBZ.CONFIG.PRISON_ARMORY_FULL_RACK == null) CBZ.CONFIG.PRISON_ARMORY_FULL_RACK = true;
