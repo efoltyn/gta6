@@ -2651,6 +2651,28 @@
         ch.body.rotation.x = ch.lean - 0.06 * drive;
         ch.body.rotation.y = sgn * (0.50 * wind + 1.00 * drive - 0.24 * recover);
         ch.body.position.y += -0.05 * drive;
+      } else if (ch.punchKind === "shove") {
+        /* TWO-HANDED SHOVE — a push, not a strike, and every beat differs
+           from the punches around it accordingly: BOTH palms chamber at the
+           sternum on the wind (elbows folded flat against the ribs — nothing
+           like the bladed chin-guard chamber), then the two elbows snap open
+           ON THE SAME BEAT while the torso lunges through the extension.
+           There is no yaw sweep at all — you rotate through a punch, but a
+           shove is symmetric, so all its power reads through body pitch: the
+           biggest rock-back → lunge of any kind in this chain. The guard
+           writes above are overwritten on every channel they touched — a
+           shove has no guard hand. */
+        const aL = ch.parts.la, aR = ch.parts.ra;
+        const upper = -0.42 - 0.20 * wind - 0.88 * drive + 0.30 * recover;  // chest height, both arms
+        const elbow = -(1.78 + 0.30 * wind) + 1.62 * Math.pow(drive, 1.3);  // folded → near straight
+        const reach = -0.05 * wind + 0.30 * drive - 0.06 * recover;         // shoulders shove through
+        if (aL) { aL.rotation.x = upper; aL.rotation.y = 0.12 * drive; aL.rotation.z = 0.18 - 0.08 * drive; aL.position.z = reach; }
+        if (aR) { aR.rotation.x = upper; aR.rotation.y = -0.12 * drive; aR.rotation.z = -(0.18 - 0.08 * drive); aR.position.z = reach; }
+        if (J.la) J.la.rotation.x = elbow;
+        if (J.ra) J.ra.rotation.x = elbow;
+        ch.body.rotation.x = ch.lean + 0.16 * wind - 0.30 * drive;   // rock back, then lunge
+        ch.body.rotation.y = 0;                                      // squared shoulders throughout
+        ch.body.position.y += -0.04 * wind - 0.08 * drive;
       } else {                                          // straight jab/cross
         // fist chambers at the chin (deep elbow), shoulder drives forward as
         // the elbow SNAPS open — full extension at peak drive, fist stopping

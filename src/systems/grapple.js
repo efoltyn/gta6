@@ -689,6 +689,27 @@
     return best;
   }
 
+  // ---- THIRD-PERSON SWING: the survival verbs drive the player rig through
+  //      the same flag layer every other mode's melee uses (entities/
+  //      character.js reads punchT/punchArm/punchKind at animChar time, and
+  //      physics.js runs animChar on CBZ.playerChar every frame; fpsmode
+  //      hides the rig in first person, so the flags are always safe to set).
+  //      Until this existed the NPC staggered and fell while the player's own
+  //      body just stood there — the hit had physics but the swing had no
+  //      animation. The snap toward the camera aim is systems/combat.js:245's
+  //      trick: physics.js only steers body yaw while you MOVE, so a
+  //      stationary punch must square up here or the body swings 90° off the
+  //      crosshair it just landed a hit through. ----
+  let swingSide = false, lastSwing = -1e9, swingCombo = 0;
+  function swingPlayer(kind, dur) {
+    const ch = CBZ.playerChar; if (!ch || !ch.group) return;
+    ch.punchArm = kind === "shove" ? "r" : ((swingSide = !swingSide) ? "l" : "r");
+    ch.punchKind = kind;
+    ch.punchDur = dur; ch.punchT = dur;
+    const L = lookDir(), yaw = Math.atan2(L.x, L.z);
+    ch.group.rotation.y = CBZ.lerpAngle ? CBZ.lerpAngle(ch.group.rotation.y, yaw, 0.85) : yaw;
+  }
+
   // ---- the verbs ----
   let held = null;
   function grab() {
@@ -705,6 +726,10 @@
     p.heldBy = null;
     if (thrown) {
       const L = lookDir();
+      // the heave: a throw is a two-handed drive off the chest — same body
+      // as the shove, held a beat longer for the weight leaving the arms
+      swingPlayer("shove", 0.46);
+      CBZ.fpsPunchAnim && CBZ.fpsPunchAnim(true);   // silent: "ko" is the voice here
       hit(held, { dir: L, force: THROW_FWD, fling: THROW_UP });
       CBZ.sfx && CBZ.sfx("ko");
       CBZ.shake && CBZ.shake(0.3);
@@ -714,6 +739,12 @@
   function punch() {
     if (held) { release(true); return; }   // LMB while holding = throw
     CBZ.fpsPunchAnim && CBZ.fpsPunchAnim();  // swing the first-person hand
+    // the third-person body throws the REAL swing — alternating fists, every
+    // third blow inside a combo winding up into a hook (city combat's rhythm)
+    swingCombo = (CBZ.now - lastSwing < 980) ? swingCombo + 1 : 1;
+    lastSwing = CBZ.now;
+    const hook = swingCombo % 3 === 0;
+    swingPlayer(hook ? "hook" : (swingCombo % 2 ? "jab" : "cross"), hook ? 0.42 : 0.34);
     const t = aimTarget();
     CBZ.sfx && CBZ.sfx("whoosh");
     if (!t) return;
@@ -733,6 +764,12 @@
     CBZ.doHitstop && CBZ.doHitstop(0.04);
   }
   function push() {
+    // the swing plays whether or not it connects (same contract as punch):
+    // both palms drive off the sternum in third person, the first-person
+    // hand thrusts silently (the shove's own contact sfx lands below)
+    swingPlayer("shove", 0.40);
+    CBZ.fpsPunchAnim && CBZ.fpsPunchAnim(true);
+    CBZ.sfx && CBZ.sfx("whoosh");
     const t = aimTarget();
     if (!t) return;
     const P = CBZ.player.pos;
