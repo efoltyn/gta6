@@ -3849,3 +3849,58 @@ restrained. Landed via temp-index commit atop origin/main (shared dirty
 checkout), PR #27 merged; local main THEN fast-forwarded to bfaccbd after
 re-pointing the three files' index entries (ff refuses dirty-but-identical
 files otherwise), so this tree's copies are clean and safe from add -A.
+
+## 2026-08-16 — the prison sat on air (SIT_PHYS_V1, branch claude/prison-game-sitting-physics-58xypq)
+
+Owner report: "guys can sit on air, like, close to a chair, but, like, not on
+the chair. They can just sit on nothing, fix the physics." Reproduced in one
+probe world, mode escape, seed 90210 — twelve bodies in the seated pose at the
+morning yard block, eleven of them nowhere near a seat. Four faults, one law
+(A SEATED BODY IS AT ITS SEAT), one flag:
+
+1. THE WING SAT HALF A METRE FROM ITS OWN BUNKS. Every bunk-posed cell
+   resident measured exactly 1.06 m from his bunk centre — latOut (0.56) +
+   body radius (0.5), the depenetration signature. cellblock.js's leash pins
+   the man to the mattress edge at order 22.6; actorcollide.js's wall clamp
+   (25) ran later and ejected him from the now-solid bunk frame every frame,
+   and the later writer wins. Ten men at once, seated on nothing at floor
+   level. Fix: furniture-held bodies (seat/bed/lie claim, seated/lying rig,
+   or a live prop arc) skip the separation+clamp roster — the rule peds.js's
+   own sit branch already states ("a seated body must not be shoved around by
+   the desk colliders"), closed for the prison's plain actors. Their
+   traversal sample stays stamped so standing up never reads as a sprint.
+2. A CLAIMED SITTER WAS DRAGGED 2.13 m OFF HIS STOOL, still posed seated —
+   the third actor shape had no pin. The player has propuse §3, a peds.js ped
+   re-pins itself from _deskAnchor at 34, a PLAIN actor had nobody, so the
+   muster's target-writes slid him across the yard. Fix: propuse's NPC hold
+   (42) pins seated occupants exactly as it always pinned lying ones — whole
+   transform, same order, wins the frame. For a ped it re-writes the values
+   its own branch just wrote (no-op); KO outranks the furniture.
+3. THE SIT ARC GLIDED. propSit's NPC commit latches char.sitting before the
+   arc (peds' state machine needs it) and the walk-in phase wrote no rig
+   state, so the seated pose owned animChar for the whole leg — a man sailing
+   to the bench folded into a chair shape, measured seated at 2.25 m out.
+   Fix: the walk phase writes absolute rig state like every other phase
+   (sitting/crouch false); the lower/perch beats re-raise the flag when the
+   hips actually land.
+4. THE PLAYER COULD NOT SIT IN HIS OWN PRISON. propuse §3's force-exit read
+   `g.mode !== "city"`, so the sit arc completed and stood him back up the
+   same frame — measured sat 0 of the 160 frames after the arc. Fix: the pin
+   honours the mode the sit began in (P._propMode, recorded by
+   propSit/propSleep; anything that never recorded one keeps the "city"
+   reading byte for byte).
+
+Ratchets, both measured before pinning: CBZ.cellblockAudit().seatDrift
+(bunk-posed men off their spot; was 10-11, pinned 0) and
+CBZ.propUseAudit().airSitters (claimed seats whose occupant sits >0.35 m off
+the anchor; was 1 within a minute of chow, pinned 0). Geometry only, no flag
+reads, so a revert run measures the defect instead of hiding it.
+
+New tool: tools/prison-sit-check.mjs (npm run test:prison-sit) — 12
+assertions on the fixed tree (wing seated with seatDrift 0, chow airSitters 0
+and worst offset 0 m, a live arc with glideFault 0 landing at 0 m, the player
+still seated three seconds on and released cleanly by propStand);
+`--revert` boots ?cfg_SIT_PHYS_V1=0 and asserts the OPPOSITE (seatDrift 11,
+player stood back up) — the two-sided shape mode-engine-check demands.
+Verified: default 12/12, revert 4/4, MATHGATE ok (400 ticks, det ok,
+errors baseline-only), city regression probe 37 seated peds offSeat=0.

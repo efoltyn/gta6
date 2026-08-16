@@ -21,6 +21,8 @@
     "test:ghost-colliders": "node tools/ghost-collider-check.mjs",
     "test:battle": "node tools/battle-check.mjs",
     "test:battle-revert": "node tools/battle-check.mjs --revert",
+    "test:prison-sit": "node tools/prison-sit-check.mjs",
+    "test:prison-sit-revert": "node tools/prison-sit-check.mjs --revert",
     "test:bailout-presentation": "node tools/test-bailout-presentation-browser.mjs",
     "visual:compare": "node tools/visual-compare.mjs",
     "visual:wildlife": "node tools/visual-compare.mjs --preset wildlife-attachments --before https://efoltyn.github.io/gta6/",
