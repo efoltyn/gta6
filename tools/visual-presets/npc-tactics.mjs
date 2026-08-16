@@ -75,14 +75,14 @@ const subjects = [
   { id: "cover-peek", label: "A hurt man and a wall",
     focus: "THE STUDIO BUILT A REAL BOX (mesh + collider + LOS blocker) twelve metres out and OFF the firing line, and hurt one of the two shooters below his nerve. Before: the hurt man drifts in the open, strafing on a band with the box beside him doing nothing — the dead cover scan this wave's predecessor fixed never sent anyone THERE. After: he gets the BOX between himself and the gun — tucked on its far side, stepping out past its EDGE to shoot (the corner-peek) while his healthy partner trades from open ground. tuckedM is his distance from the box's hide point: small = the wall is doing its job.",
     act: { n: 2, dist: 16, weapons: ["Pistol", "Pistol"], pre: 3.5, sample: 1.5,
-      hurtIdx: 0, hurtHp: 0.3, coverBox: { off: -3.5, dist: 12, w: 3.2, h: 2.2, d: 0.9 } },
+      hurtIdx: 0, hurtHp: 0.36, coverBox: { off: -3.5, dist: 12, w: 3.2, h: 2.2, d: 0.9 } },
     strip: { frames: 4, stepSec: 0.8 },
     cam: { dx: -8, dy: 3.4, dz: 2.5, adx: -1.5, ady: 1.1, adz: -12, fov: 52 } },
 
   /* ---- HIDE: breaking contact when it goes wrong ------------------------ */
   { id: "hide-break", label: "Too hurt to trade — breaking contact",
     focus: "Three guns, and the one cut to a third of his health — with a kiosk the studio built OFF his lane, a real hidden pocket in his away hemisphere. His two partners keep the fire tokens, so he owes the fight nothing. Before: a hurt man's only move was nine metres STRAIGHT BACK — still in the open, still in the same firing lane the rounds are coming up, re-derived every frame so he backpedals forever. After: he breaks for somewhere the player CANNOT DRAW A LINE TO and holds it while his partners trade. exposedPct is the payoff: the fraction of the photographed window the player could draw a chest-height lane to him at all.",
-    act: { n: 3, dist: 13, weapons: ["Pistol", "Pistol", "Pistol"], pre: 1.2, sample: 1.2, hurtIdx: 2, hurtHp: 0.32,
+    act: { n: 3, dist: 13, weapons: ["Pistol", "Pistol", "Pistol"], pre: 1.2, sample: 1.2, hurtIdx: 2, hurtHp: 0.38,
       wall: { off: 8, dist: 20, w: 2.6, h: 2.4, d: 2.6 } },
     strip: { frames: 4, stepSec: 1.0 },
     cam: { dx: 9, dy: 7.5, dz: 4, adx: 0, ady: 1.1, adz: -16, fov: 60 } },
