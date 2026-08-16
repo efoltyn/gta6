@@ -103,8 +103,8 @@ function why(r) { return (r && r.__err) ? ("threw: " + String(r.__err).split("\n
      800% of the only housing in the world. These assertions exist so the
      number can never go back to being typed: what the building sleeps is a
      FACT it publishes, and the anonymous tiers are the remainder of a
-     subtraction against it. (The wing has since grown to twenty-five cells
-     and sixty-six racks; the thirteen above is the state that produced the
+     subtraction against it. (The wing has since grown to twenty-four cells
+     and sixty-four racks; the thirteen above is the state that produced the
      fault, and the 26 is its arithmetic. That these assertions still pass
      unchanged across that growth is the point of writing them this way.)
 
@@ -179,11 +179,25 @@ function why(r) { return (r && r.__err) ? ("threw: " + String(r.__err).split("\n
     }
     /* WALKABILITY, SWEPT RATHER THAN ARGUED. Making the bunk solid reopened the
        exact question the old non-solid doctrine settled by giving up: can you
-       still get around? So walk the two routes the escape actually uses and
-       every cell centre against every LIVE collider at the real 0.38 radius.
-       Overhead colliders (y0 > 1.7 — the upper deck is at 1.94) are skipped:
-       they are what a body walks UNDER, and counting them would fail the test
-       for the feature working. */
+       still get around? Swept against every LIVE collider at the real 0.38
+       radius. Overhead colliders (y0 > 1.7 — the upper deck is at 1.94) are
+       skipped: they are what a body walks UNDER, and counting them would fail
+       the test for the feature working.
+
+       EVERY PROBE POINT IS DERIVED FROM THE WING, and that is not tidiness.
+       This block first shipped with the aisle typed in as "x -6..6 at z = -31",
+       which was an open cross-aisle when it was written and is cell D-1's
+       partition since the wing was rescaled to 25 cells. It failed 10 of 25
+       samples against a 3.8 x 0.34 wall and blamed the bunk — a test asserting
+       a coordinate nobody had promised to keep. The wing already answers all of
+       this about itself: cellblockAudit sweeps the spine and the door gap over
+       its OWN collider records (asserted above), the housing unit publishes its
+       bounds and its route, and a cell knows its own half-extents. So:
+         · every cell must hold at least one spot a body can stand in;
+         · every resident not sitting or lying must BE standing in a legal one
+           (a seated man legitimately overlaps his own bed, so he is exempt);
+         · the dorm's central lane, walked between the unit's published bounds
+           along the route it publishes. */
     const R = 0.38;
     function clear(x, z) {
       for (const c of (CBZ.colliders || [])) {
@@ -192,27 +206,47 @@ function why(r) { return (r && r.__err) ? ("threw: " + String(r.__err).split("\n
       }
       return true;
     }
-    out.lanes = { dorm: 0, dormN: 0, aisle: 0, aisleN: 0, cellCentres: 0, blocked: [] };
-    for (let z = 107; z <= 123; z += 0.5) { out.lanes.dormN++; if (!clear(-33, z)) out.lanes.dorm++; }
-    /* THE CENTRE HALL IS 8.2 m WIDE, NOT 12. This swept x -6..+6 because the
-       middle of the wing used to be 23 m of nothing; rows D and E now stand in
-       it and the hall between their barred fronts is |x| < 4.1. Sampling to
-       +-6 walks into the rows' own back walls and calls the wing impassable
-       while a man has 8.2 m of clear concrete. Read the hall's half-width off
-       the wing itself so a future row change cannot strand this number again. */
-    const hall = (CBZ.cellblock && CBZ.cellblock.hallHalf) || 3.6;
-    for (let x = -hall; x <= hall; x += 0.5) { out.lanes.aisleN++; if (!clear(x, -31)) out.lanes.aisle++; }
-    for (const c of cells) if (!clear(c.x, c.z)) { out.lanes.cellCentres++; out.lanes.blocked.push(c.tag); }
-    /* THE DUTY POST IS NOT FURNITURE. entities/keycard.js stands the guard's
-       desk — and the KEYCARD, the item the whole escape is built around — on
-       the wing floor at (13.9, -11.5). A cell appended over that floor puts
-       the card inside a cell; it happened, and the only symptom was one
-       unwalkable cell centre above. Assert the thing itself rather than its
-       symptom: no cell may contain the post. */
-    // hx/hz are the cell's HALF-EXTENTS. (dx/dz are the direction the cell
-    // faces, -1/0/+1 — using those tests the post against zero on one axis and
-    // the assertion can never fire, which is how the first draft of this line
-    // passed against a wing that had the desk inside C-6.)
+    /* LANE SWEEP — origin/main's shape, kept over the one this branch wrote.
+       Two reasons it is better: a cell passes if ANY of a 3x3 grid inside it
+       is standable rather than its exact CENTRE (a centre is one arbitrary
+       point, and a cell with a stool on the middle of the floor is not a
+       broken cell), and the dorm lane is read off CBZ.prisonHousing's own
+       published bounds instead of the literal z 107..123 this file used to
+       type. It also drops the fixed x -6..+6 sweep of the centre hall, which
+       was the number that went stale when rows D and E were built into it. */
+    out.lanes = { dorm: 0, dormN: 0, cellsNoStand: 0, stuck: 0, standing: 0 };
+    for (const c of cells) {
+      let ok = false;
+      for (let ax = -0.6; ax <= 0.61 && !ok; ax += 0.3)
+        for (let az = -0.6; az <= 0.61 && !ok; az += 0.3)
+          if (clear(c.x + ax * c.hx, c.z + az * c.hz)) ok = true;
+      if (!ok) out.lanes.cellsNoStand++;
+      const n = c.owner;
+      if (!n || n === "player" || !n.group) continue;
+      if (n.char && n.char.sitting) continue;              // on his bed, by design
+      if (n._propBed || n._propLie) continue;              // in it, likewise
+      out.lanes.standing++;
+      if (!clear(n.group.position.x, n.group.position.z)) out.lanes.stuck++;
+    }
+    const H = CBZ.prisonHousing;
+    if (H && H.bounds && H.route) {
+      for (let z = H.bounds.z0 + 1; z <= H.bounds.z1 - 1; z += 0.5) {
+        out.lanes.dormN++; if (!clear(H.route.x, z)) out.lanes.dorm++;
+      }
+    }
+    /* THE DUTY POST IS NOT FURNITURE, and it needs its own assertion because
+       the sweep above — in either version — would not have caught this.
+       entities/keycard.js stands the guard's desk, and the KEYCARD the whole
+       escape is built around, on the wing floor at (13.9, -11.5). Growing the
+       wing appended a cell over that floor and put the card inside a cell.
+       The lane sweep only ever saw it as one unwalkable centre, and the
+       grid-sample version above would not have flagged it at all: C-6 had
+       standing room in the corners. So assert the THING, not the symptom.
+
+       hx/hz are the cell's HALF-EXTENTS. (dx/dz are the direction the cell
+       faces, -1/0/+1 — testing against those compares the post to zero on one
+       axis, and the assertion can never fire. That was this line's first
+       draft, and it passed against a wing that had the desk inside C-6.) */
     out.duty = { x: 13.9, z: -11.5, inCell: null };
     for (const c of cells) {
       const hx = c.hx || 1.9, hz = c.hz || 1.9;
@@ -234,11 +268,10 @@ function why(r) { return (r && r.__err) ? ("threw: " + String(r.__err).split("\n
       JSON.stringify({ spawn: r.audit.spawnBlocked, gap: r.audit.doorGapBlocked,
                        spine: r.audit.spineBlocked, colliders: r.audit.colliders }));
     check("bunk: every lane is still walkable at 0.38",
-      !!r.lanes && r.lanes.dorm === 0 && r.lanes.aisle === 0 && r.lanes.cellCentres === 0,
-      `dorm aisle ${r.lanes.dormN - r.lanes.dorm}/${r.lanes.dormN} · block aisle ` +
-      `${r.lanes.aisleN - r.lanes.aisle}/${r.lanes.aisleN} · cell centres ` +
-      `${r.cells - r.lanes.cellCentres}/${r.cells}` +
-      (r.lanes.blocked && r.lanes.blocked.length ? ` · blocked ${r.lanes.blocked.join(",")}` : ""));
+      !!r.lanes && r.lanes.dorm === 0 && r.lanes.stuck === 0 && r.lanes.cellsNoStand === 0,
+      `cells with standing room ${r.cells - r.lanes.cellsNoStand}/${r.cells} · ` +
+      `residents on their feet, unstuck ${r.lanes.standing - r.lanes.stuck}/${r.lanes.standing} · ` +
+      `dorm lane ${r.lanes.dormN - r.lanes.dorm}/${r.lanes.dormN}`);
     check("keycard: no cell was built over the duty post",
       !!r.duty && r.duty.inCell === null,
       r.duty ? (r.duty.inCell ? `the desk at (13.9,-11.5) is inside cell ${r.duty.inCell}` : "post is wing floor, not a cell")

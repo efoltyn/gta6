@@ -908,6 +908,13 @@
     }
     return s;
   }
+  /* PUBLIC: the flat shootable-prop registry, read-only by convention. The
+     tsunami reads it to entrain the LIGHT street furniture (bin / newsbox /
+     cone — things that would genuinely float) as real debris: it marks the
+     record `over` through the same flag a bullet-knock or bumper-clip uses,
+     so a prop the water took can never be tipped twice. */
+  CBZ.cityStreetShootables = function () { return shootables; };
+
   // PUBLIC: a shot travelled from→to — react the nearest registered prop the
   // line passes through (within its radius). Returns the prop record or null.
   CBZ.cityShootProp = function (from, to) {

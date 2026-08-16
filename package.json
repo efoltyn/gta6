@@ -19,6 +19,7 @@
     "test:shark-mouth": "node tools/test-shark-mouth-browser.mjs",
     "test:invisible-walls": "node tools/invisible-wall-check.mjs",
     "test:ghost-colliders": "node tools/ghost-collider-check.mjs",
+    "test:sinkhole": "node tools/sinkhole-check.mjs",
     "test:battle": "node tools/battle-check.mjs",
     "test:battle-revert": "node tools/battle-check.mjs --revert",
     "test:bailout-presentation": "node tools/test-bailout-presentation-browser.mjs",

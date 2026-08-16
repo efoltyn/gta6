@@ -117,12 +117,26 @@ if (!ready) { console.error("site-probe: world never built"); done(1); }
 // traffic wrap) actually fire
 await evl("(function(){ if (CBZ.stepSim) for (var i=0;i<240;i++) CBZ.stepSim(1/60); return 1; })()");
 
+let failed = 0;
 for (const e of EXPR) {
   const v = await evl(`JSON.stringify(${e})`);
+  // SURFACE THE THROW. evl() returns {__error} when the page raised, and the
+  // old code fed that object straight into JSON.parse, which threw, which
+  // left `out` as the object and printed "[object Object]" — so a probe that
+  // died on a typo looked exactly like a probe that returned an object. Two
+  // separate investigations were spent on that.
+  if (v && typeof v === "object" && v.__error) {
+    console.error(`${e}
+  !! ${v.__error}`);
+    failed++;
+    continue;
+  }
+  if (v === undefined) { console.log(`${e} = undefined`); continue; }
   let out = v;
   try { out = JSON.stringify(JSON.parse(v)); } catch (_) {}
   console.log(`${e} = ${out}`);
 }
+if (failed) console.error(`site-probe: ${failed} expression(s) threw`);
 
 /* ---- OPTIONAL AERIAL. `--shot <file> --over <x,z> [--alt 220]` parks the
    camera straight above a point and captures one frame. A number tells you a

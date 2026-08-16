@@ -1595,6 +1595,8 @@
   function tsuCrash(ctx) {
     const st = ctx.st;
     st.landfall = true;
+    // the silence releases FAST, so the roar below lands into it
+    if (CBZ.audioHush) CBZ.audioHush(false, { fade: 0.12 });
     const fx0 = ctx.cx + st.dx * st.frontS, fz0 = ctx.cz + st.dz * st.frontS;
     const px = -st.dz, pz = st.dx;
     for (let i = -2; i <= 2; i++) {
@@ -2184,7 +2186,12 @@
              still boiling, and then the lip comes down. */
           let v = st.speedK * tsuVRel(ctx, st.frontS);
           if (!st.broke && -(st.frontS + ctx.R) <= 1.6) {
-            if (st.stallT < st.stallSecs) { st.stallT += dt; v = st.speedK * 0.02; }
+            if (st.stallT < st.stallSecs) {
+              // THE HELD BREATH: the world goes quiet while the wave stands,
+              // so the crash has silence to land in (CBZ.audioHush)
+              if (!st.stallT && CBZ.audioHush) CBZ.audioHush(true);
+              st.stallT += dt; v = st.speedK * 0.02;
+            }
             else { st.broke = true; st.crashT = 0; tsuCrash(ctx); }
           }
           if (st.crashT >= 0) st.crashT += dt;
@@ -2380,6 +2387,8 @@
       // ONE LINE PUTS THE SEA BACK. There is no mesh to reposition, no sheet
       // to delete and no swimmer to stand down.
       surgeSet(0);
+      // an event cancelled mid-stand must not leave the world muted
+      if (CBZ.audioHush) CBZ.audioHush(false);
       const W = CBZ.survSeaWave ? CBZ.survSeaWave() : null;
       // the sediment goes with it — one match's soup must never tint the next
       if (W) { W.amp = 0.86; W.chop = 0.72; W.foam = 0.34; W.opacity = 1; W.sediment = 0; }
@@ -4023,35 +4032,51 @@
       return null;
     }
     const r = 7 + scale(3.4, ctx);
+    /* CLEAR OF THE OTHER HOLES IS LAW TOO, AND IT USED NOT TO BE. Two shafts
+       cut into each other are not two sinkholes: the lips carve through one
+       another, and the floor query — which answers from the FIRST live shaft
+       that contains the point — starts handing out the neighbour's stair, so
+       the middle of a 58 m hole reports as 1.6 m deep. Caught by
+       tools/sinkhole-check.mjs asserting that floorAt at a mouth's centre drops
+       most of the shaft's depth. */
+    function nearAnotherHole(x, z) {
+      const S = CBZ.groundShafts || [];
+      for (let i = 0; i < S.length; i++) if (Math.hypot(x - S[i].x, z - S[i].z) < S[i].r + r + 12) return true;
+      const P = ctx.st.seqs || [];
+      for (let i = 0; i < P.length; i++) if (Math.hypot(x - P[i].x, z - P[i].z) < P[i].r + r + 12) return true;
+      return false;
+    }
+    /* THE BUILDINGS MUST BE STANDING AT THE LIP, NOT IN THE HOLE. That is
+       the whole read of the reference photograph — a tower whose footing
+       is inside the mouth is a floating tower, and this file's structural
+       ledger has no concept of "undermined". Close is the point; over is
+       the bug. */
+    function underABuilding(x, z) {
+      const B = ctx.arena.fragile || [];
+      for (let i = 0; i < B.length; i++) {
+        const b = B[i];
+        const bx = b.ox != null ? b.ox : b.x, bz = b.oz != null ? b.oz : b.z;
+        if (bx == null) continue;
+        if (Math.hypot(x - bx, z - bz) < r * 0.85 + (b.w || 8) * 0.5) return true;
+      }
+      return false;
+    }
     const spec = {
       cx: ctx.cx, cz: ctx.cz, R: ctx.R, r: r, rng: rnd, minDist: 14, tries: 90,
-      avoid(x, z) {
-        const S = CBZ.groundShafts || [];
-        for (let i = 0; i < S.length; i++) if (Math.hypot(x - S[i].x, z - S[i].z) < S[i].r + r + 12) return true;
-        const P = ctx.st.seqs || [];
-        for (let i = 0; i < P.length; i++) if (Math.hypot(x - P[i].x, z - P[i].z) < P[i].r + r + 12) return true;
-        /* THE BUILDINGS MUST BE STANDING AT THE LIP, NOT IN THE HOLE. That is
-           the whole read of the reference photograph — a tower whose footing
-           is inside the mouth is a floating tower, and this file's structural
-           ledger has no concept of "undermined". Close is the point; over is
-           the bug. */
-        const B = ctx.arena.fragile || [];
-        for (let i = 0; i < B.length; i++) {
-          const b = B[i];
-          const bx = b.ox != null ? b.ox : b.x, bz = b.oz != null ? b.oz : b.z;
-          if (bx == null) continue;
-          if (Math.hypot(x - bx, z - bz) < r * 0.85 + (b.w || 8) * 0.5) return true;
-        }
-        return false;
-      },
+      avoid(x, z) { return nearAnotherHole(x, z) || underABuilding(x, z); },
     };
     /* THE SLOPE LAW IS LAW; KEEPING CLEAR OF A BUILDING IS TASTE. If the
        island cannot offer flat ground away from every tower, take flat ground
        — a disaster that silently does nothing because its preferences went
        unmet is worse than a hole beside a wall. The slope refusal is never
-       relaxed, which is what keeps holesOnSlopes at zero. */
+       relaxed, which is what keeps holesOnSlopes at zero.
+
+       The relaxed pass used to drop `avoid` ENTIRELY, which threw away the
+       hole-spacing rule along with the building rule. It now drops only the
+       taste half: no site beside a tower is better than a site inside an
+       existing shaft, and if neither can be had there is simply no hole. */
     let site = CBZ.groundShaftSite(spec);
-    if (!site) { spec.avoid = null; site = CBZ.groundShaftSite(spec); }
+    if (!site) { spec.avoid = nearAnotherHole; site = CBZ.groundShaftSite(spec); }
     if (!site) return null;
     const seq = stageHole(ctx, site.x, site.z, r);
     if (seq && seq.warnSecs != null && warnSecs) seq.warnSecs = warnSecs;
