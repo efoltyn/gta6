@@ -2,7 +2,7 @@
   "name": "cell-block-z",
   "private": true,
   "version": "0.1.0",
-  "description": "Vite dev/build harness for the legacy IIFE game (O1 \u2014 MASTER-PLAN Part II OSS/Vite bridge). Legacy game files are untouched and keep working with a dumb static server; `npm run dev`/`npm run build` add a parallel module world via src/bootstrap.js.",
+  "description": "Vite dev/build harness for the legacy IIFE game (O1 — MASTER-PLAN Part II OSS/Vite bridge). Legacy game files are untouched and keep working with a dumb static server; `npm run dev`/`npm run build` add a parallel module world via src/bootstrap.js.",
   "engines": {
     "node": ">=22"
   },
@@ -44,7 +44,7 @@
     "visual:role-outfits": "node tools/visual-compare.mjs --preset role-outfit-gallery --keep-going --before https://efoltyn.github.io/gta6/",
     "visual:captain-fleet": "node tools/visual-compare.mjs --preset captain-fleet --keep-going --before https://efoltyn.github.io/gta6/",
     "test:tactics": "node tools/tactics-check.mjs",
-    "visual:npc-tactics": "node tools/visual-compare.mjs --preset npc-tactics --subjects firefight,stop-profile,cover-peek,hide-break --no-open"
+    "visual:npc-tactics": "node tools/visual-compare.mjs --preset npc-tactics --subjects cops-standoff,firefight,stop-profile,cover-peek,hide-break --no-open"
   },
   "devDependencies": {
     "three": "^0.164.1",

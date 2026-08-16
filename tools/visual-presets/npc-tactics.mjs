@@ -46,6 +46,17 @@
 const CAST_DIR = -1;               // cast is placed down -Z of the mark
 
 const subjects = [
+  /* ---- THE LAW: officers under the same doctrine -------------------------
+     FIRST on purpose: a giving-up officer is removed to the reserve, so two
+     simulated minutes of wanted-0 staging (the gang subjects) degrade the
+     cop pool — the instrumented probe fired 13 planted rounds as subject
+     one and zero as subject five. The department shoots on a fresh shift. */
+  { id: "cops-standoff", label: "Four officers, weapons free",
+    focus: "THE OTHER HALF OF 'SHOOTING AT YOU'. Four real officers at four stars, lethal force authorized (NPC_IQ_COP_POSITIONS). Before: the department's final approach was a flank-offset march to a four-to-nine-metre stop — officers jogging while firing, spines twisted between run-heading and aim, exactly the gang glitch with a badge on it. After: they close in silence, take POSITIONS — planted in band, wall-projected spots, posture()'s own tucks and corner peeks — and every round leaves a STANDING body (the set-feet trigger rule). The arrest, challenge and tackle choreography is untouched by construction.",
+    act: { cops: 4, dist: 24, pre: 6.0, sample: 1.5, wanted: 4 },
+    strip: { frames: 4, stepSec: 0.8 },
+    cam: { dx: 0, dy: 11, dz: 15, adx: 0, ady: 1.2, adz: -14, fov: 55 } },
+
   /* ---- THE HEADLINE: a four-gun ambush, over time ---------------------- */
   { id: "firefight", label: "Four guns open up — the whole fight",
     focus: "THE COMPLAINT, PHOTOGRAPHED. Four armed gangers engage the player. Before: everyone jogs and strafes while firing — read the strip row: every man is somewhere new each frame, spines twisted between run-heading and aim. After: they spread, PICK POSITIONS, and PLANT — the row barely changes because the men are standing their ground to shoot. avgTriggerSpeed is the owner's sentence as a number: before ≈ a jog, after ≈ zero.",
@@ -76,12 +87,6 @@ const subjects = [
     strip: { frames: 4, stepSec: 1.0 },
     cam: { dx: 9, dy: 7.5, dz: 4, adx: 0, ady: 1.1, adz: -16, fov: 60 } },
 
-  /* ---- THE LAW: officers under the same doctrine ------------------------- */
-  { id: "cops-standoff", label: "Four officers, weapons free",
-    focus: "THE OTHER HALF OF 'SHOOTING AT YOU'. Four real officers at four stars, lethal force authorized (NPC_IQ_COP_POSITIONS). Before: the department's final approach was a flank-offset march to a four-to-nine-metre stop — officers jogging while firing, spines twisted between run-heading and aim, exactly the gang glitch with a badge on it. After: they take POSITIONS like a trained unit — planted in band, wall-projected spots, tucks and corner peeks from posture()'s own doctrine — and every round leaves a standing body. The arrest, challenge and tackle choreography is untouched by construction.",
-    act: { cops: 4, dist: 24, pre: 6.0, sample: 1.5, wanted: 4 },
-    strip: { frames: 4, stepSec: 0.8 },
-    cam: { dx: 0, dy: 11, dz: 15, adx: 0, ady: 1.2, adz: -14, fov: 55 } },
 
   /* ---- THE WALL RULE: the goal that used to be inside the masonry -------
      NOT in the default sweep (npm run visual:npc-tactics runs the stable
@@ -527,22 +532,6 @@ async function stageNpcTactics(input) {
       // the honest hide point: the far side of the box from the player
       const hx = wallRef.cx, hz = wallRef.cz + (act.coverBox.d / 2 + 0.8) * CAST_DIR;
       return { tuckedM: Number(Math.hypot(hurt.pos.x - hx, hurt.pos.z - hz).toFixed(1)) };
-    };
-  }
-  if (subject.id === "cops-standoff") {
-    // temporary trigger-chain diagnostics for officer zero (metadata-only)
-    S.extra = () => {
-      const c0 = S.cast[0];
-      if (!c0 || c0.dead) return {};
-      return {
-        dShootCD: Number((c0.shootCD || 0).toFixed(2)),
-        dSees: c0.sees ? 1 : 0,
-        dSpeed: Number((c0.speed || 0).toFixed(2)),
-        dHold: Number((c0._holdFireT || 0).toFixed(2)),
-        dPlant: c0._iqPlant ? 1 : 0,
-        dDist: Number(Math.hypot(c0.pos.x - M.x, c0.pos.z - M.z).toFixed(1)),
-        dHasTarget: c0.curTarget ? 1 : 0,
-      };
     };
   }
   if (subject.id === "wall-goal" && wallRef) {
