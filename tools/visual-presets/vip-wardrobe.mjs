@@ -122,12 +122,17 @@ async function stageVipWardrobe(input) {
     if (A0 && (A0.weightedSidewalkPoint || A0.randomSidewalkPoint)) {
       let seed0 = 424243;
       const mrng = () => { seed0 = (seed0 * 1103515245 + 12345) & 0x7fffffff; return seed0 / 0x7fffffff; };
-      for (let t = 0; t < 24; t++) {
+      let anyPoint = null;
+      for (let t = 0; t < 40; t++) {
         const p0 = A0.weightedSidewalkPoint ? A0.weightedSidewalkPoint(mrng) : A0.randomSidewalkPoint();
         if (!p0) continue;
+        anyPoint = p0;
         const d0 = A0.districtAt ? A0.districtAt(p0.x, p0.z) : null;
-        if (!d0 || d0.kind === "core" || d0.kind === "commercial") { mx = p0.x; mz = p0.z; break; }
+        // REQUIRE a downtown district — a point with NO district is an outland
+        // road (the countryside plate this line replaced), never a fallback.
+        if (d0 && (d0.kind === "core" || d0.kind === "commercial")) { mx = p0.x; mz = p0.z; anyPoint = null; break; }
       }
+      if (anyPoint) { mx = anyPoint.x; mz = anyPoint.z; }   // exhausted: any sidewalk beats the motel
     }
     S = window.__vipWard = {
       gx: mx, gz: mz,
