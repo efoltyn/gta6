@@ -179,11 +179,25 @@ function why(r) { return (r && r.__err) ? ("threw: " + String(r.__err).split("\n
     }
     /* WALKABILITY, SWEPT RATHER THAN ARGUED. Making the bunk solid reopened the
        exact question the old non-solid doctrine settled by giving up: can you
-       still get around? So walk the two routes the escape actually uses and
-       every cell centre against every LIVE collider at the real 0.38 radius.
-       Overhead colliders (y0 > 1.7 — the upper deck is at 1.94) are skipped:
-       they are what a body walks UNDER, and counting them would fail the test
-       for the feature working. */
+       still get around? Swept against every LIVE collider at the real 0.38
+       radius. Overhead colliders (y0 > 1.7 — the upper deck is at 1.94) are
+       skipped: they are what a body walks UNDER, and counting them would fail
+       the test for the feature working.
+
+       EVERY PROBE POINT IS DERIVED FROM THE WING, and that is not tidiness.
+       This block first shipped with the aisle typed in as "x -6..6 at z = -31",
+       which was an open cross-aisle when it was written and is cell D-1's
+       partition since the wing was rescaled to 25 cells. It failed 10 of 25
+       samples against a 3.8 x 0.34 wall and blamed the bunk — a test asserting
+       a coordinate nobody had promised to keep. The wing already answers all of
+       this about itself: cellblockAudit sweeps the spine and the door gap over
+       its OWN collider records (asserted above), the housing unit publishes its
+       bounds and its route, and a cell knows its own half-extents. So:
+         · every cell must hold at least one spot a body can stand in;
+         · every resident not sitting or lying must BE standing in a legal one
+           (a seated man legitimately overlaps his own bed, so he is exempt);
+         · the dorm's central lane, walked between the unit's published bounds
+           along the route it publishes. */
     const R = 0.38;
     function clear(x, z) {
       for (const c of (CBZ.colliders || [])) {
@@ -192,10 +206,26 @@ function why(r) { return (r && r.__err) ? ("threw: " + String(r.__err).split("\n
       }
       return true;
     }
-    out.lanes = { dorm: 0, dormN: 0, aisle: 0, aisleN: 0, cellCentres: 0 };
-    for (let z = 107; z <= 123; z += 0.5) { out.lanes.dormN++; if (!clear(-33, z)) out.lanes.dorm++; }
-    for (let x = -6; x <= 6; x += 0.5) { out.lanes.aisleN++; if (!clear(x, -31)) out.lanes.aisle++; }
-    for (const c of cells) if (!clear(c.x, c.z)) out.lanes.cellCentres++;
+    out.lanes = { dorm: 0, dormN: 0, cellsNoStand: 0, stuck: 0, standing: 0 };
+    for (const c of cells) {
+      let ok = false;
+      for (let ax = -0.6; ax <= 0.61 && !ok; ax += 0.3)
+        for (let az = -0.6; az <= 0.61 && !ok; az += 0.3)
+          if (clear(c.x + ax * c.hx, c.z + az * c.hz)) ok = true;
+      if (!ok) out.lanes.cellsNoStand++;
+      const n = c.owner;
+      if (!n || n === "player" || !n.group) continue;
+      if (n.char && n.char.sitting) continue;              // on his bed, by design
+      if (n._propBed || n._propLie) continue;              // in it, likewise
+      out.lanes.standing++;
+      if (!clear(n.group.position.x, n.group.position.z)) out.lanes.stuck++;
+    }
+    const H = CBZ.prisonHousing;
+    if (H && H.bounds && H.route) {
+      for (let z = H.bounds.z0 + 1; z <= H.bounds.z1 - 1; z += 0.5) {
+        out.lanes.dormN++; if (!clear(H.route.x, z)) out.lanes.dorm++;
+      }
+    }
     return out;
   `);
   if (bad(r)) check("bunk: the wing reports its racks", false, why(r));
@@ -212,10 +242,10 @@ function why(r) { return (r && r.__err) ? ("threw: " + String(r.__err).split("\n
       JSON.stringify({ spawn: r.audit.spawnBlocked, gap: r.audit.doorGapBlocked,
                        spine: r.audit.spineBlocked, colliders: r.audit.colliders }));
     check("bunk: every lane is still walkable at 0.38",
-      !!r.lanes && r.lanes.dorm === 0 && r.lanes.aisle === 0 && r.lanes.cellCentres === 0,
-      `dorm aisle ${r.lanes.dormN - r.lanes.dorm}/${r.lanes.dormN} · block aisle ` +
-      `${r.lanes.aisleN - r.lanes.aisle}/${r.lanes.aisleN} · cell centres ` +
-      `${r.cells - r.lanes.cellCentres}/${r.cells}`);
+      !!r.lanes && r.lanes.dorm === 0 && r.lanes.stuck === 0 && r.lanes.cellsNoStand === 0,
+      `cells with standing room ${r.cells - r.lanes.cellsNoStand}/${r.cells} · ` +
+      `residents on their feet, unstuck ${r.lanes.standing - r.lanes.stuck}/${r.lanes.standing} · ` +
+      `dorm lane ${r.lanes.dormN - r.lanes.dorm}/${r.lanes.dormN}`);
   }
 }
 
