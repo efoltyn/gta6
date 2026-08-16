@@ -260,6 +260,22 @@ async function stageNpcTactics(input) {
             if (!p || p.dead || S.castSet.has(p)) continue;
             if (p.rage || p.state === "fight") { p.rage = null; if (p.state === "fight") p.state = "walk"; p.alarmed = 0; }
           }
+          // AND THE LAW STAYS OFF THE SET. Armed cast members are legitimate
+          // police targets at ANY star level, and a wanted-4 cop subject
+          // leaves waves of dispatched units converging for minutes — v4
+          // measured them shooting the gang cast mid-take (one hurt man died
+          // and his recycled rig read as 753 m of "ground gained"). Any
+          // officer not in this subject's cast who closes on the arena is
+          // walked back to the holding line, targets cleared.
+          for (const cop of CBZ.cityCops || []) {
+            if (!cop || cop.dead || S.castSet.has(cop) || !cop.pos) continue;
+            const cd = Math.hypot(cop.pos.x - S.mark.x, cop.pos.z - S.mark.z);
+            if (cd < 80) {
+              cop.pos.x = S.mark.x + 200; cop.pos.z = S.mark.z + 200;
+              if (cop.group) cop.group.position.set(cop.pos.x, 0, cop.pos.z);
+              cop.curTarget = null; cop.npcTarget = null; cop.searchT = 0; cop.chaseCar = null;
+            }
+          }
         }
         for (const m of S.cast) {
           if (!m || m.dead) continue;
@@ -475,6 +491,9 @@ async function stageNpcTactics(input) {
       c2.curTarget = PA; c2.sees = true; c2.retarget = 1.5; c2.lostT = 0;
       c2.searchT = 0; c2.giveUp = false; c2.gunstop = false; c2.arrestT = 0;
       c2.shootCD = 0.3 + i * 0.12; c2._coverT = 0; c2._challenged = false;
+      // a POSTED or DUTIED officer keeps his assignment brain — a roadblock
+      // stance or a move-along beat at the cast mark reads as a mute cop
+      c2._post = null; c2._duty = null; c2.chaseCar = null; c2.npcTarget = null;
       c2._iqPos = null; c2._iqPlant = false; c2._iqBear = null; c2._iqCov = null; c2._iqAimOn = null;
       if (c2.target) { c2.target.x = spot.x; c2.target.z = spot.z; }
       S.cast.push(c2);
