@@ -79,6 +79,9 @@
                        city sinkhole is an EVENT the city runs, not ambient
                        chaos; the primitive is ready either way)
      SHAFT_SLOPE_MAX   the placement law's slope ceiling (rise/run)
+     SHAFT_MASK_SLOTS  how many holes the ground can be cut for at once (the
+                       GLSL array length; nearest the eye win, the rest are not
+                       drawn — see THE SLOTS ARE A LENS below)
      SHAFT_ESCAPE      the spiral of ledges (false = a pure sheer pit)
      SHAFT_BURIAL      the shifting-soil DOT at the bottom
 
@@ -94,6 +97,7 @@
   if (CBZ.CONFIG.GROUND_SHAFT == null) CBZ.CONFIG.GROUND_SHAFT = true;
   if (CBZ.CONFIG.CITY_SINKHOLES == null) CBZ.CONFIG.CITY_SINKHOLES = false;
   if (CBZ.CONFIG.SHAFT_SLOPE_MAX == null) CBZ.CONFIG.SHAFT_SLOPE_MAX = 0.14;
+  if (CBZ.CONFIG.SHAFT_MASK_SLOTS == null) CBZ.CONFIG.SHAFT_MASK_SLOTS = 8;
   if (CBZ.CONFIG.SHAFT_ESCAPE == null) CBZ.CONFIG.SHAFT_ESCAPE = true;
   if (CBZ.CONFIG.SHAFT_BURIAL == null) CBZ.CONFIG.SHAFT_BURIAL = true;
 
@@ -171,25 +175,80 @@
 
      So every material standing between the sky and the shaft floor (found by
      ONE downward raycast, which is what "standing between" means) gets a
-     four-slot discard injected into its fragment shader. Consequences that
+     slotted discard injected into its fragment shader. Consequences that
      fall out for free and would each have been their own bug otherwise: the
      road paint over a city junction goes with the road, and on the island the
      OCEAN PLANE goes too — it sits at y=-0.8 across the whole island, so a
      46 m shaft looked up at blue water and down into it saw the sea, and both
-     are fixed by the same four numbers.
+     are fixed by the same one discard.
 
      Degrade-safe by construction: if a material's shader has no anchor we
      recognise (a custom ShaderMaterial that is not the disaster water), it is
      left alone and the only cost is that one surface still draws over the hole.
      ============================================================ */
-  const SHAFT_SLOTS = 4;
+  /* THE SLOTS ARE A LENS, NOT A LIMIT — AND THE NEAREST HOLE ALWAYS WINS ONE.
+
+     `uniform vec4 uShaftV[N]` is a GLSL array, so N is fixed at compile time
+     and the number of holes the ground can stop drawing for is CAPPED. That is
+     inherent to masking-instead-of-cutting and it is fine; what was NOT fine
+     was which N. The slots were filled with `live[0..3]` — creation order — so
+     once the island held four shafts the FIFTH one, the one that had just
+     opened under the player, was the one that got no slot. Its lip collar drew
+     on unbroken grass with the road running straight over it, while floorAt
+     (which has no cap and never had one) went on answering with the shaft
+     floor. You saw a ring, and then you fell through it. Sinkholes are
+     permanent by design and the arc repeats, so this was reached in any long
+     match, and it always struck the newest hole — the one being looked at.
+
+     Two changes make the cap a level of detail instead of a cliff:
+       1. the slots are filled NEAREST-EYE-FIRST, so the hole you can walk into
+          is by definition the hole that is drawn (and a shaft mid-collapse,
+          which growTo() re-cuts to the back of `live` six times, keeps its slot
+          instead of losing it on the first widening);
+       2. a shaft that misses out is NOT DRAWN AT ALL — group hidden, and the
+          props its mouth swallowed put back. Untouched ground is a quiet lie
+          at 90 m; a ring lying on solid grass is a loud one at 2 m.
+     `ringsOnSolidGround` in shaftAudit() is the invariant, pinned at 0. */
+  const SHAFT_SLOTS = Math.max(1, Math.min(16, CBZ.CONFIG.SHAFT_MASK_SLOTS || 8));
   const shaftV = [];
   for (let i = 0; i < SHAFT_SLOTS; i++) shaftV.push(new THREE.Vector4(0, 0, 0, 0));
   const uShaftV = { value: shaftV };
   const maskedSites = [];
+  const slotted = [];        // this frame's winners, nearest eye first
+  const rank = [];           // scratch for the ranking — syncMask runs per frame
+  function eyeX() { return CBZ.camera ? CBZ.camera.position.x : (CBZ.player && CBZ.player.pos ? CBZ.player.pos.x : 0); }
+  function eyeZ() { return CBZ.camera ? CBZ.camera.position.z : (CBZ.player && CBZ.player.pos ? CBZ.player.pos.z : 0); }
+  /* WHAT A SLOT IS RANKED ON. Distance to the EYE is the visual answer, and it
+     is the camera that renders, so the camera leads. But the camera and the
+     player come apart — a death cam, a cinematic, a chase cam left behind a
+     car — and it is the PLAYER who falls, through a floor query that has no
+     slot limit. So the score is the nearer of the two, and a shaft with the
+     player actually inside it is pinned to a slot outright: "you are standing
+     in a hole that is not being drawn" is the one state this cap must never be
+     allowed to produce, rather than merely be unlikely to. */
+  function slotScore(h, ex, ez, px, pz) {
+    const de = (h.x - ex) * (h.x - ex) + (h.z - ez) * (h.z - ez);
+    if (px == null) return de;
+    const dp = (h.x - px) * (h.x - px) + (h.z - pz) * (h.z - pz);
+    // inside the mouth: rank ahead of everything, closest-first among them
+    if (dp < h.mouth * h.mouth) return -1e9 + dp;
+    return de < dp ? de : dp;
+  }
   function syncMask() {
+    slotted.length = 0;
+    if (live.length <= SHAFT_SLOTS) {
+      for (let i = 0; i < live.length; i++) slotted.push(live[i]);
+    } else {
+      const ex = eyeX(), ez = eyeZ();
+      const pp = CBZ.player && CBZ.player.pos;
+      const px = pp ? pp.x : null, pz = pp ? pp.z : null;
+      rank.length = 0;
+      for (let i = 0; i < live.length; i++) rank.push(live[i]);
+      rank.sort(function (a, b) { return slotScore(a, ex, ez, px, pz) - slotScore(b, ex, ez, px, pz); });
+      for (let i = 0; i < SHAFT_SLOTS; i++) slotted.push(rank[i]);
+    }
     for (let i = 0; i < SHAFT_SLOTS; i++) {
-      const h = live[i];
+      const h = slotted[i];
       // the discard radius is the WALL's outer radius, not the removed-floor
       // radius: between the two lies the sliver of ground the wall stands
       // behind, and on the island that sliver is where the SEA was showing
@@ -197,9 +256,19 @@
       if (h) shaftV[i].set(h.x, h.z, h.r * 1.06, h.bottom);
       else shaftV[i].set(0, 0, 0, 0);
     }
+    for (let i = 0; i < live.length; i++) setDrawn(live[i], slotted.indexOf(live[i]) >= 0);
   }
-  const FRAG_HEAD = "uniform vec4 uShaftV[4];\n";
-  const FRAG_TEST = "\n  for (int si = 0; si < 4; si++) { vec4 sh = uShaftV[si]; if (sh.z > 0.0 && distance(SHAFTWORLD.xz, sh.xy) < sh.z) discard; }\n";
+  /* A shaft is drawn only while the ground above it is being discarded. The
+     props clearInside() swallowed come back with it, so an unslotted site
+     reads as ground nothing has happened to rather than as a hole with a lid. */
+  function setDrawn(h, drawn) {
+    if (h._drawn === drawn) return;
+    h._drawn = drawn;
+    if (h.grp) h.grp.visible = drawn;
+    if (h.hidden) for (let i = 0; i < h.hidden.length; i++) h.hidden[i].visible = !drawn;
+  }
+  const FRAG_HEAD = "uniform vec4 uShaftV[" + SHAFT_SLOTS + "];\n";
+  const FRAG_TEST = "\n  for (int si = 0; si < " + SHAFT_SLOTS + "; si++) { vec4 sh = uShaftV[si]; if (sh.z <= 0.0) break; if (distance(SHAFTWORLD.xz, sh.xy) < sh.z) discard; }\n";
   function maskMaterial(mat) {
     if (!mat || mat._shaftMasked) return;
     mat._shaftMasked = true;
@@ -228,15 +297,34 @@
       mat.needsUpdate = true;
     } catch (e) { /* a material we cannot patch simply keeps drawing */ }
   }
-  // ONE raycast per site: everything the sky can see through is what has to
-  // stop being drawn. Repeat sites (the growth phase re-cuts the shaft several
-  // times) are skipped — the materials are already masked and the uniform is
-  // what moves.
+  /* ONE SWEEP PER SITE PER RADIUS — and the second half of that is the point.
+
+     A repeat visit used to be skipped outright, on the reasoning that the
+     materials are already masked and only the uniform moves. That holds on the
+     island, where ONE disc material is the entire ground, and fails in the city,
+     where a junction is dozens of separate meshes: road, lane paint, kerb, lot
+     slab. The growth phase cuts the first plug at HALF the final radius, so a
+     site swept once was swept at r/2 — and every road mesh sitting in the
+     annulus between r/2 and r kept drawing, leaving a partial lid of tarmac
+     over the void. Measured on a city junction: 124 flat surfaces over the
+     mouth, 48 masked.
+
+     So a site remembers the radius it was swept at and is swept AGAIN when the
+     hole outgrows it. Still bounded — six or seven re-cuts, each only touching
+     materials that are not masked yet, and `_shaftMasked` makes every repeat a
+     cheap early-out. */
   function maskGroundAt(h) {
+    const R = h.mouth + 2;
+    let site = null;
     for (let i = 0; i < maskedSites.length; i++) {
-      if (Math.hypot(maskedSites[i].x - h.x, maskedSites[i].z - h.z) < 4) return;
+      if (Math.hypot(maskedSites[i].x - h.x, maskedSites[i].z - h.z) < 4) { site = maskedSites[i]; break; }
     }
-    maskedSites.push({ x: h.x, z: h.z });
+    if (site) {
+      if (R <= site.r) return;           // already swept this wide or wider
+      site.r = R;                        // it has grown: sweep the new annulus
+    } else {
+      maskedSites.push({ x: h.x, z: h.z, r: R });
+    }
     function take(o) {
       if (!o || !o.material) return;
       let p = o, skip = false;
@@ -245,11 +333,30 @@
       if (Array.isArray(o.material)) { for (let k = 0; k < o.material.length; k++) maskMaterial(o.material[k]); }
       else maskMaterial(o.material);
     }
+    /* TWO PHASES, TWO try/catches, AND THAT SEPARATION IS THE WHOLE CITY FIX.
+
+       These used to share one `try`, which quietly made the city sinkhole a
+       hole nothing was ever masked for. `root()` is the arena group in
+       survival but THE WHOLE SCENE in the city, and the scene contains
+       Sprites; r128's Sprite.raycast dereferences `raycaster.camera`, which a
+       bare `new THREE.Raycaster()` leaves null, so phase (a) threw on the
+       first sprite it reached — and took phase (b), the sweep that actually
+       finds the road, the kerb, the lot slab and the ground plate, down with
+       it. Every city shaft was therefore the exact fault this file exists to
+       have fixed: a lip ring on intact tarmac with a 40 m drop under it.
+
+       So: the raycaster is handed a camera (sprites answer instead of
+       throwing), and each phase now fails alone. Phase (b) is the
+       load-bearing one — it is a box test over the footprint and cannot
+       throw on somebody else's mesh — so the mask survives anything (a) hits. */
     try {
       // (a) what the sky sees through — catches the ground plate and the sea
       const rc = new THREE.Raycaster(new THREE.Vector3(h.x, h.gy + 60, h.z), new THREE.Vector3(0, -1, 0), 0, 60 + h.depth + 40);
+      if (CBZ.camera) rc.camera = CBZ.camera;
       const hits = rc.intersectObject(root(), true) || [];
       for (let i = 0; i < hits.length; i++) take(hits[i].object);
+    } catch (e) { /* a scene we cannot ray is still swept by (b) below */ }
+    try {
       /* (b) every FLAT surface overlapping the footprint. One ray down the
          middle is not enough: a road, its lane paint, a kerb and a lot slab
          are separate meshes at slightly different heights and a ray that
@@ -258,7 +365,6 @@
          (under 3 m tall) so this never recompiles a building's shader for a
          hole that, by the placement law, is not under a building anyway. */
       const box = new THREE.Box3();
-      const R = h.mouth + 2;
       root().traverse(function (o) {
         if (!o.isMesh || !o.geometry) return;
         let p = o; while (p) { if (p.userData && p.userData.groundShaft) return; p = p.parent; }
@@ -1179,6 +1285,10 @@
     // re-wrap in ANY mode if somebody re-installed a floor after us (a city
     // reset, a mode switch): the wrapper is what makes the stair walkable
     if (live.length && CBZ.floorAt !== cityFloorFn) installCityFloor();
+    // the slots follow the eye, so they have to be re-dealt as the eye moves.
+    // Only once there are more holes than slots — below that every shaft owns
+    // one permanently and the sort would be a per-frame no-op.
+    if (live.length > SHAFT_SLOTS) syncMask();
     for (let i = seqs.length - 1; i >= 0; i--) { const s = seqs[i]; if (!s.done) s.tick(dt); }
     tickChunks(dt);
     tickHazards(dt);
@@ -1196,11 +1306,29 @@
        cityShaftReady     can the main world cut one at all (flag + registries)
        privateHoles    0  — shaft geometry registered nowhere (the old failure
                             mode: a hole drawn but not subtracted from a floor)
+       ringsOnSolidGround
+                       0  — HARD INVARIANT, and the one this file got wrong for
+                            a whole release: a shaft DRAWN over ground that is
+                            still being drawn. That is a lip collar lying on
+                            unbroken grass with the road running across it —
+                            a hole you cannot see and fall into anyway, because
+                            the floor query never had the mask's slot limit.
+       playerInUnslotted
+                       0  — HARD INVARIANT: the player standing inside a shaft
+                            that is not being drawn. The slot ranking pins an
+                            occupied shaft, so this is 0 by construction and
+                            not merely by luck.
+       maskSlots          how many holes the ground can be cut for at once
+       unslottedShafts    holes past that cap (hidden, not ringed)
+       nearestUnslotted   metres from the eye to the closest hole that is NOT
+                          being drawn — the headroom on the LOD. Small means
+                          the cap is being felt where it can be seen.
      falls / crushed / buried / voidSaves are printed beside them so a build
      that "passes" by never opening a hole cannot look like a working one.
      ============================================================ */
   CBZ.shaftAudit = function () {
-    let worst = 0, onSlope = 0, dow = 0, deepest = 0, priv = 0;
+    let worst = 0, onSlope = 0, dow = 0, deepest = 0, priv = 0, rings = 0, nearUn = Infinity, inUn = 0;
+    const ex = eyeX(), ez = eyeZ();
     for (let i = 0; i < live.length; i++) {
       const h = live[i];
       const s = CBZ.groundShaftSlope(h.x, h.z, h.r);
@@ -1209,11 +1337,24 @@
       dow += h.depth / (h.r * 2);
       if (h.depth > deepest) deepest = h.depth;
       if (pub.indexOf(h) < 0) priv++;
+      const hasSlot = slotted.indexOf(h) >= 0;
+      if (!hasSlot) {
+        const d = Math.hypot(h.x - ex, h.z - ez);
+        if (d < nearUn) nearUn = d;
+        if (h.grp && h.grp.visible) rings++;      // drawn with the ground still over it
+        const pp = CBZ.player && CBZ.player.pos;
+        if (pp && Math.hypot(h.x - pp.x, h.z - pp.z) < h.mouth) inUn++;
+      }
     }
     return {
       shafts: live.length,
       published: pub.length,
       privateHoles: priv,
+      maskSlots: SHAFT_SLOTS,
+      unslottedShafts: Math.max(0, live.length - slotted.length),
+      ringsOnSolidGround: rings,
+      playerInUnslotted: inUn,
+      nearestUnslotted: nearUn === Infinity ? null : +nearUn.toFixed(1),
       holeSlopeMax: +worst.toFixed(3),
       holesOnSlopes: onSlope,
       slopeLaw: CBZ.CONFIG.SHAFT_SLOPE_MAX,

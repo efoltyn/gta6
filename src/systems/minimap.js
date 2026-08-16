@@ -36,7 +36,7 @@
      This drew EVERY entry in CBZ.colliders as a filled rectangle, and
      CBZ.colliders is not "walls" — it is every solid AABB in the world. A
      trash bag, a traffic cone, a bench, a bunk-room stool, a crate, the three
-     colliders each cell face is built from and all thirteen door leaves each
+     colliders each cell face is built from and all twenty-five door leaves each
      got a `Math.max(1, …)` px stamp, so a 0.4 m cone weighed exactly as much
      on a 112x168 canvas as a 76 m perimeter wall. At 112 px across the whole
      compound that is not a map of anything: it is a grey field.

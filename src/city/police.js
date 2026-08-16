@@ -3558,7 +3558,17 @@
           c._iqSlot = sl;
         }
         if (wantShoot && c.sees && dist < 30 && mayShoot) {
-          if (c.shootCD <= 0) {
+          // SET FEET, THEN FIRE (combat_iq 3c, cop half). With the position
+          // doctrine live an officer does not pull the trigger at a full
+          // stride — the measured before/after showed every round leaving at
+          // 3.9 m/s because the plant only ever happened AFTER the shot. He
+          // fires standing (or nearly), at point blank, or — the escape valve
+          // — after holding his trigger through 2.5 s of movement with a live
+          // line, so a dry position pocket can never mute the police.
+          const posLive = M && CBZ.CONFIG.NPC_IQ_POSITIONS !== false && CBZ.CONFIG.NPC_IQ_COP_POSITIONS !== false;
+          const setFeet = !posLive || (c.speed || 0) < 1.2 || dist < 6 || (c._holdFireT || 0) > 2.5;
+          if (c.shootCD <= 0 && setFeet) {
+            c._holdFireT = 0;
             c.shootCD = (c.swat ? 0.16 : 0.5) + rng() * 0.3;   // fireAt overwrites this when the tier layer is live
             fireAt(c, tgt, dist, dt);   // fireAt does the final muzzle→target clearLineOfFire gate
             // after a burst, an armed target may make a cop break to cover briefly
@@ -3566,6 +3576,31 @@
               if (AT) AT.coverArm(c, { dur: 1.0 + rng(), rng });
               else { c._coverT = 1.0 + rng(); c._coverDir = rng() < 0.5 ? -1 : 1; }
             }
+          } else if (c.shootCD <= 0) {
+            c._holdFireT = (c._holdFireT || 0) + dt;           // withholding on the move
+          }
+        }
+
+        // ---- STOP TO SHOOT (systems/combat_iq.js 3c). An officer does not
+        //      fire on the run: with the fire token, eyes on, and the range
+        //      his weapon wants he PLANTS — feet still, spine squared on the
+        //      mark — and moves again when the token passes or the mark
+        //      breaks the band. Mid-burst (he just pulled the trigger) the
+        //      halt applies to every officer, token or not. The old code let
+        //      a cop jog to 4–9 m while fireAt snapped his spine at you every
+        //      shot and the mover lerped it back — the exact run-and-gun
+        //      twitch the position wave removes from the gangs. Skips: close
+        //      quarters (arrest footwork), active cover-peek beats, wounded
+        //      officers (the cover-hold branch below owns them), flag-off.
+        if (M && M.moveGate && wantShoot && c.sees && dist > 2.6 && !(c._coverT > 0) &&
+            !(c.hp != null && c.maxHp && c.hp < c.maxHp * 0.34)) {
+          const mg = M.moveGate(c, tgt, dist, mayShoot ? "fire" : (c._iqSlot || ""));
+          if (mg && mg.halt) {
+            c.speed = 0;
+            c.group.rotation.y = lerpAngle(c.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(0.002, dt));
+            finalizeMove(c);
+            if (near) animChar(c.char, 0, dt);
+            continue;
           }
         }
 
@@ -3661,6 +3696,43 @@
               return { x: px * c._flankSide * 5 + dx * 0.35, z: pz * c._flankSide * 5 + dz * 0.35 };
             })();
           stepTo(c, step.x, step.z, c.baseSpeed * 1.05, dt, near);
+          continue;
+        }
+
+        // ---- POSITIONS FOR THE POLICE (combat_iq 3b, NPC_IQ_COP_POSITIONS).
+        //      The final shoot-posture walk used to be a flank-offset march to
+        //      a 4-9 m stop — run-and-gun with a badge. An officer with lethal
+        //      authority now takes a POSITION like every other gun in the
+        //      city: picked for a real chest-height firing lane, wall-
+        //      projected, committed, PLANTED — with the cover tuck, the
+        //      corner peek and the token discipline posture() already owns.
+        //      Everything above this block — arrest-first, challenges, the
+        //      tackle, gun-stops, cover-peek beats, glass breach, door
+        //      routing, blind flanks — runs exactly as before and `continue`s
+        //      past this when active; the legacy approach below remains the
+        //      fall-through for close quarters and for either flag off.
+        //      Bounded to the firing envelope (3..28 m): beyond it posture's
+        //      own LOS window (the weapon band + 8) is narrower than the
+        //      cop hunt's 48 m and would call a hunting officer "blind";
+        //      the legacy approach below closes the gap first, as ever.
+        if (M && M.posture && wantShoot && dist > 3 && dist < 28 &&
+            CBZ.CONFIG.NPC_IQ_POSITIONS !== false && CBZ.CONFIG.NPC_IQ_COP_POSITIONS !== false) {
+          // posture() steers a .target the cop rig never had — a plain vector
+          // with the one method posture calls (no THREE dependency).
+          if (!c.target) c.target = { x: c.pos.x, y: 0, z: c.pos.z, set(nx, ny, nz) { this.x = nx; this.y = ny; this.z = nz; } };
+          const pSlot = M.posture(c, tgt, dt) || "fire";
+          c._iqSlot = pSlot;
+          const gx2 = c.target.x - c.pos.x, gz2 = c.target.z - c.pos.z;
+          const gd2 = Math.hypot(gx2, gz2);
+          const mg2 = M.moveGate ? M.moveGate(c, tgt, dist, pSlot) : null;
+          if ((mg2 && mg2.halt) || gd2 < 0.9) {
+            c.speed = 0;
+            c.group.rotation.y = lerpAngle(c.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(0.002, dt));
+            finalizeMove(c);
+            if (near) animChar(c.char, 0, dt);
+          } else {
+            stepTo(c, gx2, gz2, c.baseSpeed * (c.sees ? 1 : 1.12), dt, near);
+          }
           continue;
         }
 

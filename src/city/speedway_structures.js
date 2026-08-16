@@ -543,6 +543,12 @@
     finishIM(grp, trussIM);
 
     // ---- 6. colliders: the stand is a building, not a hologram ----
+    // A stand follows the CIRCUIT, so every chord but the odd one lies at an
+    // angle, and a stand is DEEP (rows*0.95 + 4 ≈ 25 m on the main grandstand).
+    // Bounding-boxing a 25 m deep block on a diagonal throws ~9 m of solid air
+    // out over the apron in front of it and the same again out the back, which
+    // is why the paddock side of this circuit felt walled off well short of the
+    // seating. Registered with the tangent frame's own yaw instead.
     const CN = Math.max(6, Math.round(arc / 12));
     for (let i = 0; i < CN; i++) {
       const t = t0 + (t1 - t0) * (i + 0.5) / CN;
@@ -550,9 +556,15 @@
       const um = (uBase + uBack) / 2, ud = (uBack - uBase) + 4;
       const cxw = f.x + f.nx * um, czw = f.z + f.nz * um;
       const half = Math.abs(t1 - t0) * S.L / CN * 0.55;
-      const ex = Math.abs(f.tx) * half + Math.abs(f.nx) * ud / 2;
-      const ez = Math.abs(f.tz) * half + Math.abs(f.nz) * ud / 2;
-      S.solidBox(cxw - ex, cxw + ex, czw - ez, czw + ez, 0, topY + 1.2);
+      if (S.solidYaw && CBZ.orientedCollider) {
+        // local +x on the TANGENT (along the rows), local +z on the NORMAL
+        // (through the depth) — rotation.y maps local +x to world (cos,-sin).
+        S.solidYaw(cxw, czw, half, ud / 2, Math.atan2(-f.tz, f.tx), 0, topY + 1.2);
+      } else {
+        const ex = Math.abs(f.tx) * half + Math.abs(f.nx) * ud / 2;
+        const ez = Math.abs(f.tz) * half + Math.abs(f.nz) * ud / 2;
+        S.solidBox(cxw - ex, cxw + ex, czw - ez, czw + ez, 0, topY + 1.2);
+      }
     }
 
     if (P.sign && S.label) {
@@ -1496,9 +1508,14 @@
                     perimeter that WANTS to seal a road is a checkpoint, which
                     is a different object.
        o.solid      fn(minX,minZ,maxX,maxZ,y0,y1) — the CALLER's collider ledger
-       o.colliderPitch  AABB length along the run (default 12)
+       o.solidYaw   fn(cx,cz,hw,hd,yaw,y0,y1) — the SAME ledger, oriented form.
+                    Supply it and a curved perimeter collides as the fence it
+                    is; omit it and every piece degrades to its bounding box,
+                    which on a curve is metres of invisible wall (see
+                    flushRun). Straight runs are identical either way.
+       o.colliderPitch  collider length along the run (default 12)
        o.post/o.fabric  colours
-     Returns {group, posts, panels, colliders, length}. */
+     Returns {group, posts, panels, colliders, length, aabbSlackSaved}. */
   function fence(o) {
     if (!o || !o.root || !o.path || o.path.length < 2) return null;
     const grp = new THREE.Group(); grp.name = o.name || "venue-fence";
@@ -1509,7 +1526,7 @@
     if (o.closed) pts.push({ x: pts[0].x, z: pts[0].z });
     // panel geometry is merged: ONE draw call for the whole perimeter
     const pos = [], nor = [], uv = [], idx = [];
-    let quads = 0, posts = 0, cols = 0, total = 0;
+    let quads = 0, posts = 0, cols = 0, total = 0, slack = 0;
     // Size the post pool off the PATH, not off a round number: an InstancedMesh
     // allocates its whole matrix buffer up front (16 floats an instance), so a
     // blanket 4096 would hand the GPU a megabyte per fence to draw 200 posts.
@@ -1519,18 +1536,37 @@
     }
     const fIM = makeIM(cmat(o.post || SITE_POST), want, { noShadow: true });
     // one contiguous stretch of standing fence, flushed into AABBs on a break
+    // THE WORST INVISIBLE WALL IN THE GAME LIVED IN THESE SIX LINES.
+    // A run was chopped into `cp`-long pieces and each piece registered as the
+    // BOUNDING BOX of its endpoints — fine on the arena's staircase perimeter,
+    // where every run is axis-aligned, and a catastrophe on any curve. The
+    // speedway's perimeter is a superellipse sampled every 6 deg: measured on
+    // the shipped world its 559 m of 0.32 m chain-link became 45 boxes, the
+    // worst of them 12.7 m square, holding the player NINE METRES off a fence
+    // they could see through. Same run, same pieces — each is now registered
+    // with the yaw it actually lies at, so the collider is the fence.
     let runX = null, runZ = null;
     function flushRun(ex, ez) {
       if (runX == null || !o.solid) { runX = null; return; }
       const len = Math.hypot(ex - runX, ez - runZ);
       if (len < 0.5) { runX = null; return; }
       const n = Math.max(1, Math.round(len / cp));
+      const oc = o.solidYaw && CBZ.orientedCollider;
       for (let i = 0; i < n; i++) {
         const a = i / n, b = (i + 1) / n;
         const ax = runX + (ex - runX) * a, az = runZ + (ez - runZ) * a;
         const bx = runX + (ex - runX) * b, bz = runZ + (ez - runZ) * b;
-        o.solid(Math.min(ax, bx) - 0.16, Math.min(az, bz) - 0.16,
-                Math.max(ax, bx) + 0.16, Math.max(az, bz) + 0.16, y0, y0 + h);
+        if (oc) {
+          // local +x along the run, local +z across it. rotation.y sends local
+          // +x to world (cos,-sin), so cos = the run's dx and sin = -dz.
+          const yaw = Math.atan2(az - bz, bx - ax);
+          const seg = Math.hypot(bx - ax, bz - az);
+          if (CBZ.orientedSlack) slack += CBZ.orientedSlack(seg / 2, 0.16, yaw);
+          o.solidYaw((ax + bx) / 2, (az + bz) / 2, seg / 2, 0.16, yaw, y0, y0 + h);
+        } else {
+          o.solid(Math.min(ax, bx) - 0.16, Math.min(az, bz) - 0.16,
+                  Math.max(ax, bx) + 0.16, Math.max(az, bz) + 0.16, y0, y0 + h);
+        }
         cols++;
       }
       runX = null;
@@ -1580,7 +1616,12 @@
       m.userData.venueFence = true;              // non-empty userData: batch.js spares it
       grp.add(m);
     }
-    return { group: grp, posts: posts, panels: quads, colliders: cols, length: total };
+    return { group: grp, posts: posts, panels: quads, colliders: cols, length: total,
+             // metres of solid air this perimeter would have added if every
+             // piece were still registered as its own bounding box. A RATCHET:
+             // it may only go down, and on a curved perimeter it must never
+             // read 0 (that would mean the yaw path went dark again).
+             aabbSlackSaved: +slack.toFixed(1) };
   }
 
   /* THE ONE PLACE YOU CROSS THE PERIMETER. Authored in a LOCAL frame where

@@ -113,6 +113,19 @@
   // their own npcAttack still fires. Non-companion player-side fighters (e.g. a
   // founded-gang Soldier whose state genuinely is 'fight') take the full treatment.
   function companionDriven(p) { return !!(p && p.companion); }
+
+  // combat_iq's POSITION layer (systems/combat_iq.js 3b) owns a body's
+  // steering whenever posture() drove it this frame: it committed the body to
+  // a wall-projected firing position and possibly PLANTED it there. A
+  // per-frame strafe/standoff overlay on top of that is exactly the goal
+  // churn the position wave removes — the body jogged forever because its
+  // goal never held still. Everything this module steers checks here first;
+  // bodies posture doesn't run (stripped builds, flag-off, non-gunners)
+  // fall through to the original smarts unchanged.
+  function iqDrives(p) {
+    const M = (!CBZ.CONFIG || CBZ.CONFIG.NPC_COMBAT_IQ !== false) ? CBZ.combatIQ : null;
+    return !!(M && M.drives && M.drives(p));
+  }
   function setEngage(m, focus) {
     if (companionDriven(m)) return;          // positioning-only; companionThink shoots
     m.rage = focus; if (m.state !== "fight") m.state = "fight";
@@ -197,6 +210,7 @@
   CBZ.cityCombatSmarts = function (ped, foe, dt) {
     if (!on() || !steerable(ped) || !ped.target) return;
     if (!hasGun(ped)) return;                          // melee charges; press/brain own it
+    if (iqDrives(ped)) return;                         // a committed firing position owns this body
     const F = pos(foe); if (!F) return;
     const px = ped.pos.x, pz = ped.pos.z;
     let ax = px - F.x, az = pz - F.z;                  // foe→ped axis (we face the foe)
@@ -399,6 +413,11 @@
       const side = laneIdx * 3.1;                            // lanes: -6.2 -3.1 0 +3.1 +6.2
       lane++;
       m._sqWantCover = (i & 1) ? 1 : 0;                     // every other shooter favors cover
+      // the position layer already committed this shooter to a wall-projected
+      // spot (see iqDrives) — keep the focus-fire + role bookkeeping, leave
+      // the steering to the position. The lane math still ran so lanes stay
+      // stable for the crewmates that DO take them.
+      if (iqDrives(m)) continue;
       steerTo(m, _E.x - axx * back + tx * side, _E.z - axz * back + tz * side);
     }
     return focus;

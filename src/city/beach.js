@@ -69,6 +69,9 @@
      CBZ.cityBuildBeach(city)   — world.js calls this once at build
      CBZ.cityBeachLoot()        — live loot records (map follow-up)
      CBZ.cityBeachLootReset()   — restock everything for a fresh run
+     CBZ.cityBeachPalms()       — the takeable-palm kit: the tsunami buys a
+                                  REAL palm out of the instanced pool
+                                  (city/tsunami.js's no-fake-debris doctrine)
 ============================================================ */
 (function () {
   "use strict";
@@ -110,6 +113,9 @@
   const stallSpots = [];     // { x, z, face } behind each vendor stall counter
   const anglerSpots = [];    // { x, z, face } at each rod on the pier head
   let built = false;
+  // the takeable-palm kit (built with the palms; see the palm section) — the
+  // tsunami buys real palms out of the instanced pool through this
+  let palmField = null;
 
   // ---- the swash apron (built in section 1, animated at the bottom) --------
   // Drying sand vs. sand the water is on right now. Kept as THREE.Colors so
@@ -382,6 +388,63 @@
     trunkIM.castShadow = frondIM.castShadow = false;
     trunkIM.receiveShadow = frondIM.receiveShadow = true;
     root.add(trunkIM); root.add(frondIM);
+
+    /* ---- THE PALMS CAN BE TAKEN (2026-08-15, TSU_DEBRIS) -----------------
+       The tsunami's debris doctrine is REAL OBJECTS ONLY, and the palms are
+       the first thing a wave over this beach would rip out — but they live
+       in two InstancedMeshes, and an instance cannot leave its pool. So the
+       pool sells the palm: take(i) zero-scales the palm's instances (trunk,
+       crown hub, six fronds), drops its trunk collider, and hands back a
+       REAL group built from the SAME geometry and the SAME pooled material,
+       pivoted at the trunk's middle so it tumbles like a tree and not like
+       a flag. Nothing is invented: it is the identical palm, re-plumbed
+       from one draw call into its own. Runtime-only (Math.random jitter,
+       never rng) so the build stream stays deterministic. */
+    palmField = {
+      list: palms,
+      take(i) {
+        const p = palms[i];
+        if (!p || p._taken) return null;
+        p._taken = 1;
+        const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+        trunkIM.setMatrixAt(i, zero);
+        if (TREES2) trunkIM.setMatrixAt(palms.length + i, zero);
+        for (let k = 0; k < 6; k++) frondIM.setMatrixAt(i * 6 + k, zero);
+        trunkIM.instanceMatrix.needsUpdate = frondIM.instanceMatrix.needsUpdate = true;
+        // the trunk stops being a wall the moment it is wreckage
+        if (CBZ.colliders) for (let c = CBZ.colliders.length - 1; c >= 0; c--) {
+          const col = CBZ.colliders[c];
+          if (col.ref !== trunkIM) continue;
+          if (p.x < col.minX || p.x > col.maxX || p.z < col.minZ || p.z > col.maxZ) continue;
+          CBZ.colliders.splice(c, 1);
+          if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+          break;
+        }
+        // the real palm, rebuilt in local space around the trunk's middle
+        const grp = new THREE.Group();
+        const d2 = new THREE.Object3D();
+        d2.rotation.set(0, p.yaw, p.lean); d2.scale.set(1, p.h, 1); d2.updateMatrix();
+        const trunk = new THREE.Mesh(palmTrunkGeo, trunkIM.material);
+        trunk.rotation.set(0, p.yaw, p.lean); trunk.scale.set(1, p.h, 1);
+        grp.add(trunk);
+        const e = d2.matrix.elements;
+        const tx = e[4] * 0.5, ty = e[5] * 0.5, tz = e[6] * 0.5;   // trunk top, group-local
+        const hub = new THREE.Mesh(palmTrunkGeo, trunkIM.material);
+        hub.position.set(tx, ty - 0.05, tz);
+        hub.rotation.set(0, p.yaw, p.lean); hub.scale.set(2.0, 0.55, 2.0);
+        grp.add(hub);
+        for (let k = 0; k < 6; k++) {
+          const a = p.yaw + k * (Math.PI / 3) + Math.random() * 0.3;
+          const fr = new THREE.Mesh(palmFrondGeo, frondIM.material);
+          fr.position.set(tx + Math.cos(a) * 1.05, ty + 0.02, tz + Math.sin(a) * 1.05);
+          fr.rotation.set(0, -a, 0.34);
+          grp.add(fr);
+        }
+        grp.position.set(p.x, p.h / 2 - 0.18, p.z);
+        root.add(grp);
+        return { group: grp, x: p.x, z: p.z };
+      },
+    };
 
     // =====================================================================
     //  3) SUNBATHER CLUSTERS — umbrella + towels per spot, instanced with
@@ -773,20 +836,106 @@
       };
     })();
 
-    // =====================================================================
-    //  6) THE REST OF THE APRON — west quay PARKING LOT, paint only. The
-    //  south-east corner is intentionally open instead of filled with props.
-    // =====================================================================
+    /* =====================================================================
+       6) THE REST OF THE APRON — the west quay PARKING LOT.
+
+       WHAT WAS THERE, and it was wrong three ways at once (2026-08-15):
+
+       · 15 STALLS. A city beach with a car park for fifteen cars is a car
+         park drawn to fill a gap in the apron, not one sized to the place it
+         serves. The west quay is 26 m of made ground running the whole
+         seaboard and the lot used 81 m of it.
+       · THE STALLS WERE NOT STALLS. 5.4 m of z per bay across an 11 m depth
+         is one 5.4 x 11 box per car — twice the width and twice the depth of
+         a standard 2.74 x 5.49 stall — with no aisle inside it at all, and
+         one long "aisle line" painted down the middle of the boxes. Nothing
+         about it corresponded to how a car occupies ground.
+       · IT WAS PAINTED ACROSS A HIGHWAY. world.js opens a 26 m gap in the
+         WEST seawall at wgz +/- 13 for island_military.js's causeway (see
+         its WGATE note), and this lot ran z = cz-38 .. cz+43 — straight over
+         the causeway mouth. Painted bays across a live carriageway is the
+         same class of mistake as a berth registered on dry land: the paint
+         said park here and the road said do not.
+
+       It is now two real double-loaded modules (ULI: 2.74 x 5.49 stall,
+       7.32 m two-way aisle, 18.30 m module) laid NORTH and SOUTH of the
+       causeway mouth, solved off the gap rather than around it — so the
+       beach traffic has somewhere to leave a car, and the causeway keeps its
+       mouth. The south-east corner of the apron stays deliberately open.
+       ===================================================================== */
+    const beachBays = [];
     (function parking() {
-      const stripes = [];
-      const sx1 = minX - 4.5, sx0 = sx1 - 11;              // stalls back onto the quay
-      for (let i = 0; i < 15; i++) {
-        const z = cz - 38 + i * 5.4;
-        stripes.push(boxGeoAt((sx0 + sx1) / 2, 0.03, z, 11, 0.012, 0.22));
+      const STALL_W = 2.74, STALL_D = 5.49, AISLE = 7.32;
+      const MODULE = STALL_D * 2 + AISLE;                  // 18.30
+      // the quay strip: the seawall stands at minX-26 (world.js EW), so the
+      // lot's west edge keeps 3 m off it and its east edge keeps the old 4.5 m
+      // shoulder against the city's own kerb line.
+      const x1 = minX - 4.5, x0 = x1 - MODULE;
+      const rowCx = [x0 + STALL_D / 2, x1 - STALL_D / 2];   // the two stall rows
+      // THE CAUSEWAY MOUTH, read from the same dial world.js reads. A lot that
+      // hard-codes cz here would drift off the gap the day the military island
+      // moves, which is exactly what the seawall gate's own comment warns of.
+      const _MILW = (CBZ.worldOff && CBZ.worldOff("military")) || { dx: 0, dz: 0 };
+      const wgz = cz + _MILW.dz, GAP = 16;                 // 13 m of deck + a 3 m shoulder
+      const stripes = [], kerbs = [];
+      function block(z0, z1) {
+        const n = Math.floor((z1 - z0) / STALL_W);
+        if (n < 4) return;
+        const zBase = z0 + ((z1 - z0) - n * STALL_W) / 2;
+        for (let r = 0; r < 2; r++) {
+          for (let i = 0; i <= n; i++) {
+            stripes.push(boxGeoAt(rowCx[r], 0.03, zBase + i * STALL_W, STALL_D, 0.012, 0.2));
+          }
+          // the kerb the row backs onto — the thing that makes a bay a bay
+          // rather than a rectangle of paint you can drive straight over.
+          const kx = r === 0 ? x0 + 0.07 : x1 - 0.07;
+          kerbs.push(boxGeoAt(kx, 0.07, (zBase + zBase + n * STALL_W) / 2, 0.14, 0.14, n * STALL_W));
+          for (let i = 0; i < n; i++) {
+            beachBays.push({ x: rowCx[r], z: zBase + (i + 0.5) * STALL_W });
+          }
+        }
+        // the aisle's own centre line
+        stripes.push(boxGeoAt((x0 + x1) / 2, 0.03, (zBase + zBase + n * STALL_W) / 2, 0.18, 0.012, n * STALL_W));
       }
-      stripes.push(boxGeoAt(sx1, 0.03, cz - 38 + 7 * 5.4, 0.22, 0.012, 14 * 5.4));   // aisle line
+      block(cz - 88, wgz - GAP);                            // south of the causeway
+      block(wgz + GAP, cz + 88);                            // north of it
       mergeAdd(stripes, cmat(0xd8dce0), { receive: false });
+      mergeAdd(kerbs, cmat(0xb4b8bc), { receive: false });
     })();
+
+    /* ---- AND CARS IN IT. A 100-bay lot with nothing in it reads abandoned,
+       which is the failure city/island_speedway.js's own audit note describes:
+       "a painted bay with no metal in it". Deferred exactly like
+       govcomplex.js's §8 car park, for exactly the same reason — cityMakeCar
+       reaches into CBZ.city.arena, which mode.js only assigns after buildCity()
+       returns. Fill rate + hard ceiling, because metal is the expensive part
+       and a beach lot is meant to look USED, not full. */
+    if (CBZ.onUpdate && beachBays.length) {
+      let beachParked = false;
+      CBZ.onUpdate(55.3, function () {
+        if (beachParked) return;
+        if (!CBZ.cityMakeCar || !CBZ.cityEcon || !CBZ.cityEcon.CARS || !CBZ.city || !CBZ.city.arena) return;
+        beachParked = true;
+        const CARS = CBZ.cityEcon.CARS;
+        if (!CARS.length) return;
+        const n = Math.min(16, Math.max(1, Math.round(beachBays.length * 0.22)));
+        const stride = Math.max(1, Math.floor(beachBays.length / n));
+        // deterministic: the beach's own seeded stream, never Math.random
+        for (let k = 0, i = (rng() * stride) | 0; k < n && i < beachBays.length; k++, i += stride) {
+          const s = beachBays[i];
+          try {
+            // heading PI/2 = nose along +x, which is the axis these stalls
+            // run on (5.49 m of depth in X, 2.74 m of width in Z) — so
+            // `vertical` is FALSE here, unlike the gov lots whose bays run
+            // the other way. A car flagged vertical while pointing across the
+            // axis is the kind of quiet disagreement that only shows up when
+            // something else asks the record which way it is facing.
+            const c = CBZ.cityMakeCar(s.x, s.z, Math.PI / 2, false, CARS[(rng() * CARS.length) | 0], 0);
+            if (c) { c.ai = false; c.v = 0; c.baseV = 0; c.road = null; }
+          } catch (e) { /* no vehicle path in this build — the stalls stay empty */ }
+        }
+      });
+    }
 
     // =====================================================================
     //  7) THE PEOPLE WHO WORK THE BEACH.
@@ -1065,6 +1214,8 @@
 
   // ---- PUBLIC --------------------------------------------------------------
   CBZ.cityBeachLoot = function () { return loot; };
+  // the palms as world objects a disaster can claim: {list, take(i)} or null
+  CBZ.cityBeachPalms = function () { return palmField; };
   // usable beach furniture — {loungers, deckchairs, occupied}. A lounger with
   // no propuse anchor behind it would be a prop pretending to be furniture, so
   // this counts ANCHORS, never meshes.

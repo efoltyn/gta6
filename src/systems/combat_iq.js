@@ -53,6 +53,9 @@
      CBZ.combatIQ.cover(a, tx, tz)        -> { x, z } real cover, or null
      CBZ.combatIQ.slot(a, tgt, dt)        -> "fire" | "flank" | "cover" | "hold"
      CBZ.combatIQ.posture(a, tgt, dt)     -> steers actor.target; returns the slot
+     CBZ.combatIQ.moveGate(a,tgt,d,slot)  -> { halt } stop-to-shoot contract (city)
+     CBZ.combatIQ.planted(a) / drives(a)  -> is this body holding a picked position
+     CBZ.combatIQ.geom                    -> walk/fire segment tests vs the colliders
      CBZ.combatIQ.shootFirst(a, tgt)      -> may this person open unprovoked
      CBZ.combatIQ.melee(a, tgt, dt)       -> "close"|"circle"|"guard"|"windup"|
                                              "swing"|"recover"|"backstep"
@@ -104,6 +107,11 @@
      NPC_IQ_SQUAD      the shooter token + spacing + suppression
      NPC_IQ_SHOOTFIRST unprovoked openings
      NPC_IQ_MELEE      the punch exchange
+     NPC_IQ_POSITIONS  firing positions + stop-to-shoot + hide (CITY ONLY —
+                       see block 3b; battle.html's posture path is untouched)
+     NPC_IQ_COP_POSITIONS  police.js routes its shoot-posture walk through
+                       posture()/positions too (arrest/challenge/tackle
+                       choreography untouched; needs NPC_IQ_POSITIONS)
 ============================================================ */
 (function () {
   "use strict";
@@ -116,8 +124,14 @@
   if (C.NPC_IQ_SQUAD == null) C.NPC_IQ_SQUAD = true;
   if (C.NPC_IQ_SHOOTFIRST == null) C.NPC_IQ_SHOOTFIRST = true;
   if (C.NPC_IQ_MELEE == null) C.NPC_IQ_MELEE = true;
+  if (C.NPC_IQ_POSITIONS == null) C.NPC_IQ_POSITIONS = true;
+  if (C.NPC_IQ_COP_POSITIONS == null) C.NPC_IQ_COP_POSITIONS = true;   // police.js consumes (its shoot-posture walk)
 
   function on() { return C.NPC_COMBAT_IQ !== false; }
+  // the position layer is a CITY brain: battle.html consumes posture() for its
+  // beloved chase-and-retreat (BATTLE-GRAND-PLAN: "do not lose it") and runs
+  // its own wall projection, so every 3b/3c line below is inert off-city.
+  function cityMode() { return !!(CBZ.game && CBZ.game.mode === "city"); }
 
   // seeded LCG for moment-to-moment rolls (own stream — never a world stream)
   let _s = 1013904;
@@ -296,6 +310,14 @@
     // a sprinting target is a harder target — the ONE bit of the old cop math
     // worth keeping, generalised to every shooter instead of only the police.
     if (tgt && (tgt.isPlayer ? (CBZ.player && CBZ.player.sprint) : (tgt.speed || 0) > 3.4)) h *= 0.72;
+    // SHOOTING ON THE RUN IS A SPRAY. The moving penalty is what turns "you
+    // would stop to shoot" from advice into the best available play — a
+    // planted man simply out-hits a running one, so the position layer's
+    // plant is arithmetic self-interest, not choreography. City-only:
+    // battle.html balances its armies around trading on the move. Gated on
+    // NPC_IQ_POSITIONS with the rest of 3b/3c so ?cfg_NPC_IQ_POSITIONS=0 is
+    // a TRUE one-line revert (and the A/B rig's before side is honest).
+    if (cityMode() && C.NPC_IQ_POSITIONS !== false) { const ms = a.speed || 0; if (ms > 2.4) h *= 0.55; else if (ms > 1.1) h *= 0.8; }
     // suppressed shooters shoot worse. This is what makes covering fire mean
     // something instead of being a decorative word in a comment.
     if ((a._iqSupp || 0) > 0) h *= 0.62;
@@ -345,6 +367,12 @@
     if ((a._iqReact || 0) > 0) a._iqReact -= dt;
     if ((a._iqSupp || 0) > 0) a._iqSupp -= dt;
     if ((a._iqCovering || 0) > 0) a._iqCovering -= dt;
+    if ((a._iqFiredT || 0) > 0) a._iqFiredT -= dt;             // the plant window (3c)
+    // A RUNNER NEVER SETTLES. Sprinting between positions caps the aim settle
+    // at 40% of full — the other half of the stop-to-shoot arithmetic (see
+    // hitChance). City-only for the same battle.html reason as there, and
+    // flag-gated with it so the revert reverts everything.
+    if (cityMode() && C.NPC_IQ_POSITIONS !== false && (a.speed || 0) > 2.4 && (a._iqAimT || 0) > p.settle * 0.4) a._iqAimT = p.settle * 0.4;
   };
 
   // dmg: whatever the CALLER was already going to deal. We return it scaled so
@@ -391,6 +419,12 @@
     const ceil = (DPS_CAP * spr) / (p.hit10 || 1);
     if (out > ceil) { out = ceil; mul = out / (base || 1); }
     _fires++;
+    // THE TRIGGER PULL OPENS A PLANT WINDOW: a person stops for the burst.
+    // moveGate() (3c) hands this to every consumer's speed gate, which is the
+    // literal "in general, you would stop to shoot". Harmless off-city — the
+    // field decays in aimTick and nothing outside the city reads it.
+    if (C.NPC_IQ_POSITIONS !== false)
+      a._iqFiredT = Math.min(0.9, 0.28 + (a._iqBurst | 0) * p.rate * (1.15 - p.disc * 0.25));
     return { fire: true, hit: hit, dmg: out, cd: cd, mul: mul, p: p };
   };
 
@@ -488,7 +522,13 @@
       if (!segBox(hx, hz, tx, tz, c)) continue;
       // prefer close cover, and cover that does not walk us INTO the gun
       const closing = Math.max(0, dThreatNow - Math.hypot(hx - tx, hz - tz));
-      const score = walk + closing * 1.4;
+      let score = walk + closing * 1.4;
+      // STICKY: the wall you are already using outbids a marginally better
+      // one. Re-probes used to flip a hurt man's chosen box every second or
+      // two as he moved (each flip re-derives the hide AND peek points — a
+      // goal-churn source the staged deaths were hiding), and no person
+      // changes walls because a different one came up 80 cm closer.
+      if (a._iqCov && a._iqCov.ref === c) score -= 4;
       if (score < bestScore) { bestScore = score; best = { x: hx, z: hz, d: walk, ref: c }; }
     }
     a._iqCov = best;
@@ -500,6 +540,310 @@
     const c = a && a._iqCov;
     if (!c) return false;
     return Math.hypot(a.pos.x - c.x, a.pos.z - c.z) < 1.6;
+  };
+
+  // ============================================================
+  //  3b. FIRING POSITIONS — pick a spot, get there, PLANT, shoot.
+  //
+  //  THE CITY COMPLAINT THIS ANSWERS (owner, 2026-08-15): "NPCs with guns
+  //  kind of run around stupidly and glitchy … when they're shooting at you
+  //  they should be picking position. In general, you would stop to shoot."
+  //
+  //  WHAT WAS ACTUALLY WRONG, read off the code:
+  //    (1) posture() wrote a NEW goal every frame — bearing + deadband +
+  //        separation, with squadai.js strafing ±3 m on top — so the goal
+  //        never held still long enough to be REACHED. peds.js only plants a
+  //        body within 0.9 m of its goal; a goal that renews itself every
+  //        frame is a body that jogs forever, firing on the run while
+  //        actorAimAt snaps its spine at the mark and the mover lerps it
+  //        back — that tug-of-war IS the "glitchy" the owner is seeing.
+  //    (2) Every goal was pure geometry around the mark, blind to walls.
+  //        BATTLE-GRAND-PLAN names the identical root cause on the battle
+  //        page ("every tactical goal must be projected onto reachable
+  //        space") — battle.html got its wall rule; the city never did. A
+  //        bearing slot through a facade is a man pressing his face into
+  //        masonry until the 0.45 s stuck-timer kicks him sideways.
+  //    (3) A hurt man's only retreat was 9 m STRAIGHT BACK, in the open,
+  //        usually still straight down the shooter's lane.
+  //
+  //  THE SHAPE OF THE FIX — a position is a COMMITMENT, not a per-frame
+  //  suggestion:
+  //    • pickPos(): candidate spots fanned around the anchored bearing at
+  //      the weapon's preferred range, each PROJECTED onto reachable space —
+  //      a spot only counts if the walk there is unwalled, the spot itself
+  //      is outside every collider, and it has a real FIRING LANE to the
+  //      mark (chest-height segment vs the same boxes that stop bodies —
+  //      which makes a 0.9 m planter true half-cover: it stops legs, not
+  //      bullets). Cover-adjacent spots score better; a leashed defender
+  //      (a.guard — gangs.js war posts, turf defence) pays to leave his
+  //      post, so a crew DEFENDS its ground instead of chasing across town.
+  //    • The fighter COMMITS (_iqPos), walks there, and PLANTS: the goal
+  //      stops moving, move() zeroes speed, the body stands and delivers.
+  //      It repositions for a REASON — mark displaced, firing lane walled,
+  //      fresh suppression, the flank timer — never per frame.
+  //    • With the fire token and REAL cover, the position is the box's
+  //      corner (peekPoint) — step out, shoot, tuck back when the token
+  //      passes. A flanker's spots walk wide around the arc through
+  //      whatever defilade is on the way: the sneak is the path.
+  //    • A hurt man with no cover HIDES for real: hidePos() picks a
+  //      reachable spot in the away hemisphere, paying a big bonus for
+  //      spots the THREAT has no firing lane to — break contact, get a
+  //      wall between, watch the corner.
+  //
+  //  CITY-GATED and flag-gated (NPC_IQ_POSITIONS; master NPC_COMBAT_IQ):
+  //  outside game.mode === "city" — battle.html above all — posture() runs
+  //  its exact old math, byte for byte.
+  // ============================================================
+  let _posPicks = 0, _posDry = 0, _posHides = 0;
+
+  // ---- segment tests against the SAME boxes bodies collide with -----------
+  // Two different questions with two different height filters:
+  //   walkBlocked — could a body walk this line? (anything shin-high blocks)
+  //   fireBlocked — could a round travel this line at chest height? (only
+  //                 boxes spanning the chest line block; a low wall doesn't)
+  const CHEST_Y = 1.30;            // the lane height the hit rolls contest
+  const _segCols = [], _ptCols = [];
+  function solidWalk(c) { if (c.y0 == null || c.y1 == null) return true; return c.y0 <= 1.1 && (c.y1 - c.y0) >= 0.4; }
+  function solidFire(c) { if (c.y0 == null || c.y1 == null) return true; return c.y0 <= CHEST_Y && c.y1 >= CHEST_Y; }
+  function segBlocked(ax, az, bx, bz, fire) {
+    if (!CBZ.queryCollidersNear) return false;
+    const len = Math.hypot(bx - ax, bz - az);
+    if (len < 0.05) return false;
+    const cols = CBZ.queryCollidersNear((ax + bx) * 0.5, (az + bz) * 0.5, len * 0.5 + 1.6, _segCols);
+    for (let i = 0; i < cols.length; i++) {
+      const c = cols[i];
+      if (c.minX == null) continue;
+      if (fire ? !solidFire(c) : !solidWalk(c)) continue;
+      if (segBox(ax, az, bx, bz, c)) return true;
+    }
+    return false;
+  }
+  function walkBlocked(ax, az, bx, bz) { return segBlocked(ax, az, bx, bz, false); }
+  function fireBlocked(ax, az, bx, bz) { return segBlocked(ax, az, bx, bz, true); }
+  function pointBlocked(x, z) {
+    if (!CBZ.queryCollidersNear) return false;
+    const cols = CBZ.queryCollidersNear(x, z, 1.2, _ptCols);
+    for (let i = 0; i < cols.length; i++) {
+      const c = cols[i];
+      if (c.minX == null || !solidWalk(c)) continue;
+      if (x > c.minX - 0.5 && x < c.maxX + 0.5 && z > c.minZ - 0.5 && z < c.maxZ + 0.5) return true;
+    }
+    return false;
+  }
+  // public: other systems (and tools/tactics-check.mjs) may ask the same
+  // questions without re-deriving the height filters.
+  IQ.geom = { walkBlocked: walkBlocked, fireBlocked: fireBlocked, pointBlocked: pointBlocked };
+
+  // ---- the candidate fan ---------------------------------------------------
+  // Angles are ordered narrow→wide so a token holder prefers the spot that
+  // costs the least walking; a flanker's scoring PAYS him to take the wide
+  // ones. Radii bracket the weapon's preferred hold.
+  const POS_ANGS = [0, 0.32, -0.32, 0.65, -0.65, 1.0, -1.0, 1.45, -1.45];
+  const _radii = [0, 0, 0];
+  function pickPos(a, tgt, p, slot, baseAng, want) {
+    const tx = tgt.pos.x, tz = tgt.pos.z;
+    const pref = Math.max(3, Math.min(want || p.pref, p.hi));
+    _radii[0] = pref;
+    _radii[1] = Math.max(3, pref * 0.7);
+    _radii[2] = Math.min(p.hi, pref * 1.35);
+    const guard = a.guard;
+    const cv = a._iqCov;                 // cached cover probe — a bonus, not a law
+    let best = null, bs = 1e9, tried = 0;
+    for (let ai = 0; ai < POS_ANGS.length; ai++) {
+      const off = POS_ANGS[ai] * (slot === "flank" ? 1.5 : 1);
+      for (let ri = 0; ri < 3; ri++) {
+        const r = _radii[ri];
+        const x = tx + Math.sin(baseAng + off) * r, z = tz + Math.cos(baseAng + off) * r;
+        if (pointBlocked(x, z)) continue;                        // inside a wall is not a spot
+        if (fireBlocked(x, z, tx, tz)) continue;                 // no firing lane, no position
+        if (walkBlocked(a.pos.x, a.pos.z, x, z)) continue;       // can't get there straight
+        const walk = Math.hypot(x - a.pos.x, z - a.pos.z);
+        let score = walk + Math.abs(r - pref) * 0.55 + Math.abs(off) * 1.2;
+        if (slot === "flank") {
+          score -= Math.abs(off) * 3.2;                          // a flanker is PAID to go wide
+          // ...and paid MORE to arrive unseen. THE SNEAK IS THE PATH: a flank
+          // spot needs a firing lane by construction (the fireBlocked gate
+          // above), so what separates a stalk from a stroll is whether the
+          // WALK stays out of the mark's lanes — sampled at two points of the
+          // journey, against the same chest-height geometry as everything
+          // else. Two extra segment tests, flank candidates only.
+          const mx1 = a.pos.x + (x - a.pos.x) * 0.45, mz1 = a.pos.z + (z - a.pos.z) * 0.45;
+          const mx2 = a.pos.x + (x - a.pos.x) * 0.8, mz2 = a.pos.z + (z - a.pos.z) * 0.8;
+          if (fireBlocked(tx, tz, mx1, mz1)) score -= 3.5;
+          if (fireBlocked(tx, tz, mx2, mz2)) score -= 2.5;
+        }
+        if (guard) score += Math.max(0, Math.hypot(x - guard.x, z - guard.z) - 14) * 1.4;   // defenders hold the post
+        if (cv && Math.hypot(x - cv.x, z - cv.z) < 3.5) score -= 3.2;   // fight from beside the wall
+        if (score < bs) { bs = score; if (!best) best = { x: 0, z: 0 }; best.x = x; best.z = z; }
+        if (++tried >= 14 && best) return best;                  // bounded: never scan the whole fan
+      }
+    }
+    return best;
+  }
+
+  // ---- HIDE: break contact and get out of the threat's firing lanes --------
+  // Candidates fan the AWAY hemisphere; a spot the threat has no chest-height
+  // lane to earns the big bonus (that is what "hiding from" means), never a
+  // spot that closes toward the gun.
+  const HIDE_ANGS = [0, 0.4, -0.4, 0.85, -0.85, 1.25, -1.25];
+  function hidePos(a, tgt, dist) {
+    const tx = tgt.pos.x, tz = tgt.pos.z;
+    const away = Math.atan2(a.pos.x - tx, a.pos.z - tz);
+    let best = null, bs = 1e9;
+    for (let ai = 0; ai < HIDE_ANGS.length; ai++) {
+      for (let ri = 0; ri < 2; ri++) {
+        const r = ri === 0 ? 8.5 : 13.5;
+        const angH = away + HIDE_ANGS[ai];
+        const x = a.pos.x + Math.sin(angH) * r, z = a.pos.z + Math.cos(angH) * r;
+        if (pointBlocked(x, z)) continue;
+        if (walkBlocked(a.pos.x, a.pos.z, x, z)) continue;
+        const dT = Math.hypot(x - tx, z - tz);
+        if (dT < dist * 0.8) continue;                           // never hide TOWARD the gun
+        const hidden = fireBlocked(tx, tz, x, z);
+        let score = r * 0.35 + Math.abs(HIDE_ANGS[ai]) * 0.9 - (dT - dist) * 0.45 - (hidden ? 9 : 0);
+        if (score < bs) { bs = score; if (!best) best = { x: 0, z: 0, hidden: false }; best.x = x; best.z = z; best.hidden = hidden; }
+      }
+    }
+    return best;
+  }
+
+  // ---- PEEK: the corner of the box you are hiding behind -------------------
+  // cover() put the body on the far side of a real collider; with the fire
+  // token the firing spot is that box's EDGE — step out past it (whichever
+  // side this person favours, a stable trait), shoot, tuck back when the
+  // token passes. Only a spot with an actual lane counts.
+  function peekPoint(a, cv, tx, tz) {
+    const c = cv.ref;
+    if (!c || c.minX == null) return null;
+    let fx = tx - cv.x, fz = tz - cv.z;
+    const fl = Math.hypot(fx, fz) || 1; fx /= fl; fz /= fl;
+    const px = -fz, pz = fx;                                     // along the box face
+    const half = Math.abs(px) * (c.maxX - c.minX) * 0.5 + Math.abs(pz) * (c.maxZ - c.minZ) * 0.5 + 0.75;
+    const s0 = trait(a, 0x51DE) < 0.5 ? 1 : -1;
+    for (let k = 0; k < 2; k++) {
+      const s = k === 0 ? s0 : -s0;
+      const x = cv.x + px * s * half, z = cv.z + pz * s * half;
+      if (pointBlocked(x, z)) continue;
+      if (fireBlocked(x, z, tx, tz)) continue;
+      return { x: x, z: z };
+    }
+    return null;
+  }
+
+  // ---- commit a position and steer at it ----------------------------------
+  // Writes a.target with GOAL-STABILITY: separation applies while walking in
+  // (two men are never sent to the same metre) but a PLANTED body's goal is
+  // its position, exactly — a goal that keeps wandering is the churn this
+  // whole block exists to remove. Plant has hysteresis so it can't flicker.
+  function driveToPos(a, x, z, tgt, cls) {
+    let P = a._iqPos;
+    if (!P || P.cls !== cls || P.x !== x || P.z !== z) {
+      P = a._iqPos = { x: x, z: z, tx: tgt.pos.x, tz: tgt.pos.z, cls: cls };
+    }
+    // latch at 1.35: the mover parks on the SEPARATED goal, which can rest a
+    // stride short of the raw position — measured as men standing still at
+    // their spot, firing, while the stricter 1.05 latch never granted "planted".
+    const d = Math.hypot(a.pos.x - x, a.pos.z - z);
+    a._iqPlant = d < (a._iqPlant ? 1.7 : 1.35);
+    if (a._iqPlant) a.target.set(x, a.target.y || 0, z);
+    else { const s = separate(a, x, z, tgt); a.target.set(s.x, a.target.y || 0, s.z); }
+    a._iqPosF = nowMs();
+  }
+
+  // ---- the band-position driver (called from posture's main branch) --------
+  // Re-picks ONLY for a reason: no position yet / slot class changed / the
+  // mark displaced / the firing lane walled itself (throttled re-test) / the
+  // scheduled displacement timer (flankers cycle fast — that IS the flank).
+  function firePosTick(a, tgt, p, slot, ang, want, tol, dt) {
+    const tx = tgt.pos.x, tz = tgt.pos.z;
+    const cls = slot === "flank" ? "flank" : "fire";
+    let P = a._iqPos && (a._iqPos.cls === "fire" || a._iqPos.cls === "flank") ? a._iqPos : null;
+    // DRY BACKOFF, actually honored. A dry pick used to schedule a 1.1 s
+    // retry and then re-scan the whole fan NEXT FRAME anyway, because "no
+    // position" re-triggered the pick unconditionally — measured as a
+    // 2-per-frame pick storm on any fighter in a walled pocket. The dry flag
+    // makes the backoff real; a fresh engagement (no flag) still picks
+    // immediately.
+    if (!P && a._iqPosDry && (a._iqRepoT || 0) > 0) return false;
+    let pick = !P || P.cls !== cls;
+    if (P && !pick) {
+      if (Math.hypot(tx - P.tx, tz - P.tz) > Math.max(4.5, tol * 1.7)) pick = true;      // mark displaced
+      else if ((a._iqRepoT || 0) <= 0) pick = true;                                      // scheduled displacement
+      else {
+        a._iqLaneT = (a._iqLaneT || 0) - dt;
+        if (a._iqLaneT <= 0) {
+          a._iqLaneT = 0.5 + trait(a, 0x9A17) * 0.4;
+          if (fireBlocked(P.x, P.z, tx, tz)) pick = true;                                // the lane walled itself
+        }
+      }
+    }
+    if (pick) {
+      const cand = pickPos(a, tgt, p, slot, ang, want);
+      _posPicks++;
+      if (!cand) {
+        // fully walled pocket — no honest spot. Fall back to the raw goal
+        // this beat (the mover's steering + stuck kick handle it) and retry
+        // after the backoff above.
+        _posDry++;
+        a._iqPos = null; a._iqPlant = false; a._iqRepoT = 1.1; a._iqPosDry = true;
+        return false;
+      }
+      P = a._iqPos = { x: cand.x, z: cand.z, tx: tx, tz: tz, cls: cls };
+      a._iqPosDry = false;
+      a._iqRepoT = cls === "flank" ? 2.4 + trait(a, 0xF7A1) * 1.8 : 5.5 + trait(a, 0xF7A1) * 4.5;
+    }
+    driveToPos(a, P.x, P.z, tgt, P.cls);
+    return true;
+  }
+
+  // hide positions cycle on their own slower clock (a man who broke contact
+  // holds his hole; he does not re-roll it forty times a second).
+  function hideTick(a, tgt, dist, dt) {
+    const H = a._iqPos && a._iqPos.cls === "hide" ? a._iqPos : null;
+    a._iqHideT = (a._iqHideT || 0) - dt;
+    if (H && a._iqHideT > 0 && Math.hypot(tgt.pos.x - H.tx, tgt.pos.z - H.tz) < 8) return H;
+    const hp = hidePos(a, tgt, dist);
+    a._iqHideT = 4.5 + trait(a, 0x81DE7) * 2.5;
+    if (!hp) return null;
+    _posHides++;
+    return hp;
+  }
+
+  // ============================================================
+  //  3c. STOP-TO-SHOOT — the one movement contract every consumer reads.
+  //  halt=true → zero your speed this frame and keep the spine on the mark.
+  //  Three ways a body earns a halt:
+  //    firing  — it just pulled the trigger (_iqFiredT, set in shot());
+  //              every consumer that fires through shot() gets this free.
+  //    planted — it is standing on the position it picked (city, 3b).
+  //    band    — no position system runs for this consumer (police.js keeps
+  //              its own cover/flank machinery) but it holds the fire slot,
+  //              eyes on, inside its weapon's band: stand and deliver.
+  // ============================================================
+  const _mgOut = { halt: false, why: "" };
+  function _mg(h, w) { _mgOut.halt = h; _mgOut.why = w; return _mgOut; }
+  IQ.moveGate = function (a, tgt, dist, slotStr) {
+    if (!on() || C.NPC_IQ_POSITIONS === false || !a) return null;
+    if ((a._iqFiredT || 0) > 0) return _mg(true, "firing");
+    const p = profile(a);
+    if (!p || p.cls === "none") return null;
+    if (C.NPC_IQ_POSITIONS !== false && a._iqPos && a._iqPlant) return _mg(true, "planted");
+    // the BAND halt exists for consumers with no position system of their own
+    // (police.js keeps its cover/flank machinery). A posture-driven body with
+    // no committed position is position-less for a REASON — dry pocket, lost
+    // sight — and freezing it in band parked one on a blocked lane, holding
+    // fire forever. Its maneuvering is posture's job; let it move.
+    const postured = a._iqBrainF && (nowMs() - a._iqBrainF) < 300;
+    if (slotStr === "fire" && dist != null && !a._iqPos && !postured &&
+        dist >= Math.min(4, p.lo * 0.7) && dist <= p.hi * 1.02) return _mg(true, "band");
+    return _mg(false, "");
+  };
+  IQ.planted = function (a) { return !!(a && a._iqPlant); };
+  // does the position system own this body's steering right now? squadai's
+  // strafe/standoff overlay defers while it does — a per-frame jitter on top
+  // of a committed position is exactly the goal churn 3b removes.
+  IQ.drives = function (a) {
+    return !!(C.NPC_IQ_POSITIONS !== false && a && a._iqPosF && (nowMs() - a._iqPosF) < 300);
   };
 
   // ============================================================
@@ -632,6 +976,11 @@
     const dist = Math.hypot(dx, dz) || 0.001;
     _engaged++;
     IQ.aimTick(a, tgt, dt);
+    a._iqBrainF = nowMs();   // this body is posture-driven (moveGate reads it)
+
+    // POSITION MODE availability (block 3b) — needed before the LOS block so
+    // a committed position can survive a blink (see below).
+    const posOn = C.NPC_IQ_POSITIONS !== false && cityMode() && !!CBZ.queryCollidersNear;
 
     // LOS + memory (shared primitives — never re-implemented here)
     const AT = CBZ.aiTactics;
@@ -643,11 +992,30 @@
       if (sees && a.searchT > 0) { a.searchT = 0; a.searchGoal = null; a._sweepGoal = null; }
       if (a.searchT > 0) {
         const step = AT.searchTick(a, dt, { sweepRadMin: 5, sweepRadMax: 12, reachR: 3, rng: rng });
-        if (step) { a.target.set(a.pos.x + step.x, a.target.y || 0, a.pos.z + step.z); return "search"; }
+        if (step) { a._iqPos = null; a._iqPlant = false; a.target.set(a.pos.x + step.x, a.target.y || 0, a.pos.z + step.z); return "search"; }
         a.searchT = 0;
       }
       if (!sees && dist < 42) {
+        // A COMMITTED POSITION SURVIVES A BLINK. The instrumented probe
+        // caught the old behavior in the act: a man WALKING to his spot loses
+        // the mark behind a pole or a parked car for a quarter second, the
+        // blind branch dumps his position, sight returns, he picks a fresh
+        // one — goal jumps every second or two and he never arrives anywhere
+        // (posPicks 5 / plantedEnd 0 / an 11.6 m/s goal churn on a lone
+        // shooter). A person does not forget his plan because he blinked.
+        // COVER and HIDE positions hold indefinitely while blind — being
+        // unseen is what those spots are FOR — and a firing spot holds
+        // through 1.2 s of lost sight before the corner-work starts. The
+        // search escalation (giveUpT above) still clears everything when the
+        // mark is genuinely gone; npcAttack's own muzzle LOS gate keeps a
+        // blind man from firing either way.
+        if (posOn && a._iqPos && (a._iqPos.cls === "cover" || a._iqPos.cls === "hide" || (a.lostT || 0) < 1.2)) {
+          const cls = a._iqPos.cls;
+          driveToPos(a, a._iqPos.x, a._iqPos.z, tgt, cls);
+          return cls === "hide" ? "hide" : (cls === "cover" ? "cover" : "fire");
+        }
         const bf = AT.blindFlank(a, dx, dz, dist, dt, { period: 1.2, periodJitter: 0.8, sideAmt: 4.5, closeBias: 0.35, rng: rng });
+        a._iqPos = null; a._iqPlant = false;   // no eyes, no held position — work the corner
         a.target.set(a.pos.x + bf.x, a.target.y || 0, a.pos.z + bf.z);
         return "blind";
       }
@@ -655,6 +1023,17 @@
 
     const slot = IQ.slot(a, tgt, dt);
     if (slot === "fire") _tokens++;
+
+    // POSITION MODE timers (block 3b; posOn computed above the LOS block).
+    // posDt is frame-gated exactly like aimTick's dt: garrison/piracy call
+    // posture() on an actor move() also postures, and without the gate every
+    // position timer would tick twice per frame for those bodies.
+    let posDt = dt;
+    if (posOn) {
+      const fr2 = nowMs();
+      if (a._iqPosTickF === fr2) posDt = 0; else a._iqPosTickF = fr2;
+      a._iqRepoT = (a._iqRepoT || 0) - posDt;
+    }
 
     // SELF-PRESERVATION. Below the person's nerve they stop trading and get
     // the wall between them and the gun — and they STAY there longer than a
@@ -664,9 +1043,34 @@
     const wantCover = slot === "cover" || hurt || (a._iqSupp || 0) > 0;
 
     if (wantCover) {
+      // HIDE HYSTERESIS. A hurt man who committed to breaking contact holds
+      // that commitment for its window even if a scrap of cover drifts in and
+      // out of probe range on the way — the measured failure was the goal
+      // flapping cover↔hide at ~1 Hz (24 m/s of churn) as the 12 m cover
+      // radius crossed and re-crossed while he ran.
+      if (posOn && hurt && a._iqPos && a._iqPos.cls === "hide" && (a._iqHideT || 0) > 0) {
+        driveToPos(a, a._iqPos.x, a._iqPos.z, tgt, "hide");
+        a._iqHold = true;
+        return "hide";
+      }
       const cv = IQ.cover(a, tx, tz);
       if (cv) {
         _covered++;
+        if (posOn) {
+          // hold the FAR SIDE of the box; with the fire token step out past
+          // its EDGE (peekPoint — a spot with an actual lane), and tuck back
+          // the moment the token passes. Both are commitments, so the body
+          // PLANTS at them instead of orbiting the hide point.
+          let hx = cv.x, hz = cv.z, peeked = false;
+          if (slot === "fire") {
+            const pk = peekPoint(a, cv, tx, tz);
+            if (pk) { hx = pk.x; hz = pk.z; peeked = true; }
+          }
+          driveToPos(a, hx, hz, tgt, "cover");
+          a._iqHold = true;
+          // an edge with no lane keeps the man honest: tucked, not shooting.
+          return peeked ? "peek" : "cover";
+        }
         // hold the far side; peek out toward the mark only while the token is
         // ours (a covered man who never leans out is a man who never shoots).
         const lean = slot === "fire" ? 0.55 : 0;
@@ -678,6 +1082,13 @@
       // no cover anywhere: a hurt fighter breaks contact rather than stand
       // in the open trading — the old code's only answer was to keep walking in.
       if (hurt && p.tier !== "swat") {
+        if (posOn) {
+          // HIDE for real (block 3b): a reachable spot in the away hemisphere,
+          // ideally one the threat has no firing lane to — not 9 m of open
+          // street straight down the same lane the rounds are coming up.
+          const hp = hideTick(a, tgt, dist, posDt);
+          if (hp) { driveToPos(a, hp.x, hp.z, tgt, "hide"); a._iqHold = true; return "hide"; }
+        }
         a.target.set(a.pos.x - (dx / dist) * 9, a.target.y || 0, a.pos.z - (dz / dist) * 9);
         return "fallback";
       }
@@ -714,6 +1125,12 @@
     while (dAng < -Math.PI) dAng += Math.PI * 2;
     if (Math.abs(dAng) > 1.9) a._iqBear = cur - bear;
     const ang = a._iqBear + bear;
+    // POSITION MODE: commit the band/bearing solve to a PICKED, wall-projected
+    // spot and plant on it (block 3b). At knife range want==dist, so the
+    // zero-offset candidate is the ground he is standing on — he fights where
+    // he stands, exactly as the invariant above demands. A dry pick (fully
+    // walled pocket) falls through to the raw goal below for this beat.
+    if (posOn && firePosTick(a, tgt, p, slot, ang, want, tol, posDt)) return slot;
     let gx = tx + Math.sin(ang) * want, gz = tz + Math.cos(ang) * want;
     // a flanker actively works its angle wider; a token holder keeps its line
     if (slot === "flank") {
@@ -733,6 +1150,9 @@
   // fire an actual mechanic rather than a word in a design document.
   IQ.suppress = function (a, secs) {
     if (!a || !on()) return;
+    // FRESH incoming fire displaces a planted man soon — a beaten position is
+    // left once, not re-rolled per bullet (the fresh-vs-sustained gate).
+    if ((a._iqSupp || 0) <= 0 && (a._iqRepoT || 0) > 0.9) a._iqRepoT = 0.9;
     a._iqSupp = Math.max(a._iqSupp || 0, secs == null ? 1.4 : secs);
     a._iqCovT = 0;                                             // re-probe cover NOW
   };
@@ -931,6 +1351,7 @@
     // live census of who is currently fighting under this layer
     const tiers = { civ: 0, thug: 0, pro: 0, elite: 0, swat: 0 };
     let armed = 0, engaged = 0, covered = 0, inCover = 0, melee = 0, supp = 0;
+    let positioned = 0, planted = 0, hiding = 0;
     const lists = [CBZ.cityPeds, CBZ.cityCops];
     for (let li = 0; li < lists.length; li++) {
       const L = lists[li]; if (!L) continue;
@@ -946,6 +1367,7 @@
         if (a._iqCov) { covered++; if (IQ.inCover(a)) inCover++; }
         if (a._iqM) melee++;
         if ((a._iqSupp || 0) > 0) supp++;
+        if (a._iqPos) { positioned++; if (a._iqPlant) planted++; if (a._iqPos.cls === "hide") hiding++; }
       }
     }
     let tokens = 0;
@@ -960,11 +1382,15 @@
       shootFirst: _shootFirst, meleeBouts: _bouts, suppressed: supp,
       shots: _shots, fires: _fires,
       coverQueries: _coverQ, coverFound: _coverHit,
+      // block 3b — the position layer's own ratchet numbers
+      positioned: positioned, planted: planted, hiding: hiding,
+      posPicks: _posPicks, posDry: _posDry, posHides: _posHides,
       tiers: tiers, dpsCap: DPS_CAP,
       flags: {
         master: C.NPC_COMBAT_IQ !== false, tiers: C.NPC_IQ_TIERS !== false,
         cover: C.NPC_IQ_COVER !== false, squad: C.NPC_IQ_SQUAD !== false,
         shootFirst: C.NPC_IQ_SHOOTFIRST !== false, melee: C.NPC_IQ_MELEE !== false,
+        positions: C.NPC_IQ_POSITIONS !== false,
       },
     };
   };

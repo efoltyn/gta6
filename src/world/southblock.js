@@ -41,6 +41,41 @@
   const DRESS = !!CBZ.CONFIG.PRISON_DRESS_V2;
   const PD = CBZ.prisonDress || null;   // world/cafeteria.js; degrade-safe
 
+  /* ============================================================
+     PRISON_PROP_USE_V1 — THE FLAG'S HOME. (2026-08-15)
+     ============================================================
+     OWNER: "there's rooms that have, like, random blocks, just very stupid
+     stuff. I don't like stupid details. Just leave an empty room if you want,
+     or find a way to make it used." The rule that follows from it: EVERY PROP
+     IS EITHER USABLE OR IT GOES. Usable = it has a collider (it stops you, or
+     it is cover), it registers a propuse seat or bed anchor, it holds a placed
+     item, it is a door / lock / breach target, it is a pushable, or it is a
+     light fitting systems/prisonnight.js drives.
+
+     THE MEASUREMENT: tools/visual-presets/prison-rooms.mjs counts, per room,
+     `props / solid / used / dead` and `deadVol` m3. On the 2026-08-15 baseline
+     run this file's LOWER YARD was the only room in the compound with
+     `used: 0` — 58 props, 43 dead, 5.39 m3 — and 5.12 m3 of that was four
+     walk-through 8 m lamp posts.
+
+     WHAT THIS FLAG CHANGES IN THIS FILE
+       · the four floodlight poles are GONE. systems/prisonnight.js:236 already
+         stands eight real flood masts and four of them are over this yard.
+       · the bar stock, both laundry carts and all three bleacher tiers are
+         solid; the carts, the two barbells are pushables.
+       · the weight benches and the bleachers register propuse seat anchors —
+         the exercise yard's own program, which it did not have.
+     OFF → every box back exactly as it shipped, including the four poles and
+     the three concentric bleacher slabs.
+
+     DECLARED HERE, READ IN cafeteria / lounge / yardfurniture / escape_routes.
+     Same `== null` idiom as PRISON_DRESS_V2 above: idempotent, so whichever of
+     the five files index.html parses first wins and the rest are no-ops.
+     Ratchet: lower-yard `used` may never go back to 0.
+  ============================================================ */
+  if (CBZ.CONFIG.PRISON_PROP_USE_V1 == null) CBZ.CONFIG.PRISON_PROP_USE_V1 = true;
+  const USE = !!CBZ.CONFIG.PRISON_PROP_USE_V1;
+
   // ---- ground: a poured concrete apron + the walkway leading to the gate ----
   // PRISON_GROUND_V2 (owner: "the checkered ground is dumb" — world/ground.js
   // owns the flag). The apron is a slab, so it gets REAL EXPANSION JOINTS on a
@@ -98,13 +133,29 @@
     }
   })();
 
-  // ---- floodlight poles ringing the lower yard ----
-  function floodPole(x, z) {
-    addBox(x, 4.0, z, 0.4, 8, 0.4, 0x3c424d, {});
-    addBox(x, 8.1, z, 1.6, 0.4, 0.7, 0x2a2f38, { cast: false });
-    addBox(x, 7.95, z + 0.3, 1.5, 0.3, 0.18, 0xfff1a8, { emissive: 0xffe066, ei: 0.9, cast: false });
+  /* ---- floodlight poles: DELETED (PRISON_PROP_USE_V1) -------------------
+     THE YARD ALREADY HAS FLOOD MASTS AND THEY ARE NOT THESE.
+     systems/prisonnight.js:236 stands eight — floodMast(-21,66) (21,66)
+     (-21,110) (21,110) are the four over THIS yard — and each of those is a
+     0.36 x 7 pole drawn `{ solid: true }`, with a bracket, a `mover`-tagged
+     head, a 9 m light pool, a 6.9 m beam cone and a `flood` kind that strikes
+     at dusk and burns till dawn (prisonnight.js:118).
+     The four this file drew stood at (+/-20, 74) and (+/-20, 112) — 8.06 m and
+     2.24 m from the real ones. Two eight-metre masts 2.24 m apart, and the
+     pair this file owned was the fake one: 0.4 x 8 x 0.4 drawn `{}`, so you
+     walked through a lamp post, under a head that was permanently emissive and
+     never once obeyed lights-out.
+     12 boxes. 5.12 m3 of walk-through steel — four of the five largest dead
+     props in lower-yard and the single largest in sally-port. Deleting them
+     costs the yard no light at all, because the light was never theirs. */
+  if (!USE) {
+    const floodPole = function (x, z) {
+      addBox(x, 4.0, z, 0.4, 8, 0.4, 0x3c424d, {});
+      addBox(x, 8.1, z, 1.6, 0.4, 0.7, 0x2a2f38, { cast: false });
+      addBox(x, 7.95, z + 0.3, 1.5, 0.3, 0.18, 0xfff1a8, { emissive: 0xffe066, ei: 0.9, cast: false });
+    };
+    [[-20, 74], [20, 74], [-20, 112], [20, 112]].forEach((p) => floodPole(p[0], p[1]));
   }
-  [[-20, 74], [20, 74], [-20, 112], [20, 112]].forEach((p) => floodPole(p[0], p[1]));
 
   // ============================================================
   //  WORKSHOP (south-west) — welding bay
@@ -133,7 +184,14 @@
   addBox(-40, 0.9, 69, 1.6, 1.8, 2.0, 0x2a2f38, { solid: true });    // 1.8m masonry forge
   addBox(-40, 1.2, 70.2, 1.2, 0.7, 0.3, 0xff6a1a, { emissive: 0xc83000, ei: 0.9, cast: false });
   // stacked steel stock + a parts crate
-  for (let i = 0; i < 4; i++) addBox(-27 + (i % 2) * 0.4, 0.3 + Math.floor(i / 2) * 0.34, 75 + (i % 2) * 0.5, 2.6, 0.28, 0.28, 0x6b7480, { cast: false });
+  // PRISON_PROP_USE_V1: the four bars were drawn `{}`+cast:false — 0.816 m3 of
+  // 2.6 m steel a body walked straight through, the largest walk-through
+  // object in the workshop after the forge glow. Bar stock IS the workshop's
+  // raw material and a shin-high stack of it is a real obstacle, so it is
+  // solid, y-gated to the stack's own top (0.64 + 0.14) the way the mess
+  // tables and the round-table stools are — an obstacle, never a pillar.
+  const STOCK = USE ? { cast: false, solid: true, y0: 0, y1: 0.78 } : { cast: false };
+  for (let i = 0; i < 4; i++) addBox(-27 + (i % 2) * 0.4, 0.3 + Math.floor(i / 2) * 0.34, 75 + (i % 2) * 0.5, 2.6, 0.28, 0.28, 0x6b7480, STOCK);
   addBox(-28, 0.5, 62, 1.6, 1.0, 1.6, CBZ.COL.CRATE, { solid: true });
 
   // ============================================================
@@ -218,11 +276,23 @@
     addBox(-39.05, 1.2, z, 0.06, 0.7, 0.7, 0x6fb7ff, { emissive: 0x2a5e85, ei: 0.4, cast: false }); // glass glow
   }
   // rolling laundry carts (canvas bins on a frame)
-  function cart(x, z) {
-    addBox(x, 0.7, z, 1.2, 0.9, 1.4, 0xe2e2e2, {});
-    addBox(x, 0.18, z, 1.3, 0.12, 1.5, 0x3c424d, { cast: false });
+  // PRISON_PROP_USE_V1: both were drawn `{}` — a 1.5 m3 canvas bin you walked
+  // through, and the (-29.5, 99) one was the biggest dead prop in the room.
+  // A cart is SOLID (these two are the only cover on this floor) and the one
+  // that is not holding a tool is a PUSHABLE: a laundry cart on castors is the
+  // most obviously shovable object in the compound, and systems/pushables.js
+  // is already how this compound prices a bench, a barrel and a mop bucket.
+  // The (-31, 92) cart stays bolted because world/yardfurniture.js:231 lays
+  // the LOCKPICK in it at y 1.22 — a route item does not get to roll away.
+  function cart(x, z, push) {
+    const bin = addBox(x, 0.7, z, 1.2, 0.9, 1.4, 0xe2e2e2, USE ? { solid: true } : {});
+    const base = addBox(x, 0.18, z, 1.3, 0.12, 1.5, 0x3c424d, { cast: false });
+    if (USE && push && CBZ.pushProp) CBZ.pushProp({
+      parts: [bin, base], x: x, z: z, hx: 0.65, hz: 0.75, y1: 1.15,
+      mass: 30, kind: "cart", leash: 5.0, mode: "escape",
+    });
   }
-  cart(-31, 92); cart(-29.5, 99);
+  cart(-31, 92, false); cart(-29.5, 99, true);
 
   // ============================================================
   //  HOUSING D — controlled open-bay dormitory, 16 real beds
@@ -328,19 +398,57 @@
   addBox(-11, 3.6, 85.0, 1.6, 0.12, 0.9, 0xff7a1a, { cast: false });
   addBox(-11, 3.95, 84.6, 1.4, 0.7, 0.08, 0xffffff, { cast: false });
   // weight benches + plates
+  // PRISON_PROP_USE_V1: THE EXERCISE YARD HAD NO PROGRAM. The pad was already
+  // solid but nothing could ever be ON it — lower-yard measured `used: 0`, the
+  // only room in the compound that did. A weight bench is a bench: it gets a
+  // propuse seat anchor at the pad's REAL top (centre 0.45 + half of 0.16 =
+  // 0.53), declared, never the kind table's guess. And the loaded bar is 60 kg
+  // of free weight resting in the J-hooks, so it is a pushable rather than
+  // three boxes welded to the sky — the same call world/yardfurniture.js:130
+  // already makes for the north yard's bench, plate tree and chalk bucket.
   function weightBench(x, z) {
     addBox(x, 0.45, z, 0.7, 0.16, 2.2, 0x3a3f47, { solid: true });
-    addBox(x, 1.1, z - 1.3, 1.9, 0.12, 0.12, 0x2a2f38, { cast: false }); // bar
-    addBox(x - 0.85, 1.1, z - 1.3, 0.16, 0.5, 0.5, 0x1a1a1a, { cast: false });
-    addBox(x + 0.85, 1.1, z - 1.3, 0.16, 0.5, 0.5, 0x1a1a1a, { cast: false });
+    const bar = addBox(x, 1.1, z - 1.3, 1.9, 0.12, 0.12, 0x2a2f38, { cast: false });
+    const pl = [
+      addBox(x - 0.85, 1.1, z - 1.3, 0.16, 0.5, 0.5, 0x1a1a1a, { cast: false }),
+      addBox(x + 0.85, 1.1, z - 1.3, 0.16, 0.5, 0.5, 0x1a1a1a, { cast: false }),
+    ];
+    if (!USE) return;
+    // yaw 0 looks +z; the bar is at z-1.3, so PI faces the lifter up the bench.
+    if (CBZ.roomSeatAnchor)
+      CBZ.roomSeatAnchor(x, 0, z + 0.3, Math.PI, "bench", null, { cushion: 0.53, floorBelow: 0 });
+    if (CBZ.pushProp) CBZ.pushProp({
+      parts: [bar].concat(pl), x: x, z: z - 1.3, hx: 1.0, hz: 0.26, y1: 1.35,
+      mass: 60, kind: "barbell", leash: 3.0, mode: "escape",
+    });
   }
   weightBench(8, 100); weightBench(11, 106);
-  // pull-up / dip rig
+  // pull-up / dip rig. The 9 m crossbar stays non-solid ON PURPOSE: it is the
+  // member the two solid uprights carry, 2.7 m up, and nothing that walks can
+  // reach it — the same exemption this file's NO-DECOY SWEEP note already
+  // names for overhead slabs and for bedding lying on a solid frame.
   addBox(4, 1.4, 110, 0.16, 2.8, 0.16, 0x515a66, { solid: true });
   addBox(13, 1.4, 110, 0.16, 2.8, 0.16, 0x515a66, { solid: true });
   addBox(8.5, 2.7, 110, 9.0, 0.16, 0.16, 0x6b7480, { cast: false });
-  // tiered bleachers along the west edge of the infield
-  for (let i = 0; i < 3; i++) addBox(-17, 0.4 + i * 0.5, 96, 2.2, 0.4, 14 - i * 2, 0x6e7682, { solid: i === 0 });
+  // tiered bleachers along the west edge of the infield.
+  // PRISON_PROP_USE_V1: they were three CONCENTRIC slabs on one centreline
+  // (2.2 wide, 14/12/10 deep, all at x=-17) with only the bottom one solid —
+  // a wedding cake you walked into the top two tiers of and could not sit on
+  // any of. Three real STEPPED tiers now, rising away from the half-court,
+  // inside the SAME x[-18.1,-15.9] footprint this file's own institutional
+  // note measures the laundry wayfinding leg against — so that note still
+  // holds. Every tier is solid; every tier seats four, facing +x at the court.
+  if (USE) {
+    for (let i = 0; i < 3; i++) {
+      const bx = -16.27 - i * 0.73, top = 0.45 + i * 0.45;
+      addBox(bx, top / 2, 96, 0.73, top, 14, 0x6e7682, { solid: true });
+      for (const dz of [-5.0, -1.7, 1.7, 5.0])
+        if (CBZ.roomSeatAnchor)
+          CBZ.roomSeatAnchor(bx, 0, 96 + dz, Math.PI / 2, "bench", null, { cushion: top, floorBelow: 0 });
+    }
+  } else {
+    for (let i = 0; i < 3; i++) addBox(-17, 0.4 + i * 0.5, 96, 2.2, 0.4, 14 - i * 2, 0x6e7682, { solid: i === 0 });
+  }
 
   // ============================================================
   //  SALLY PORT — checkpoint flanking the gate, guard hut, transport

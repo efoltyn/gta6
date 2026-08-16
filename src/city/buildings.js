@@ -1031,12 +1031,27 @@
   CBZ.cityGlassReset = function () {
     shatteredPanes = 0;
     winOpenQ.length = 0;   // never carve a fresh arena from a stale pre-reset queue
+    /* CBZ.CONFIG.DEMO_FAST_PURGE (declared in city/demolition.js, which loads
+       after this file — so it is read here at CALL time, never at parse time,
+       and an absent demolition.js simply leaves it undefined => legacy path).
+       The re-seat test below was `CBZ.colliders.indexOf(gp.col) === -1`: a full
+       scan of the city's 123,332-entry collider array PER PANE, across 37,540
+       panes. Normally only a handful of panes are broken so the loop is cheap —
+       but after a city-wide nuke EVERY pane is shattered and the reset pays all
+       37,540 scans in one frame: measured 553 ms, on the reset that is supposed
+       to hand the player a clean city. One membership Set, built once, makes it
+       O(colliders + panes). Same cure as the removal direction (city/
+       demolition.js's destroy() and city/structural.js's purge()). */
+    const have = CBZ.CONFIG.DEMO_FAST_PURGE ? new Set(CBZ.colliders) : null;
     for (const gp of cityGlass) {
       if (gp.shattered) {
         gp.shattered = false;
         if (gp.mesh) gp.mesh.visible = true;
         else paneShow(gp, true);       // pooled pane: restore (honours night state)
-        if (gp.col && CBZ.colliders.indexOf(gp.col) === -1) CBZ.colliders.push(gp.col);
+        if (gp.col) {
+          if (have) { if (!have.has(gp.col)) { CBZ.colliders.push(gp.col); have.add(gp.col); } }
+          else if (CBZ.colliders.indexOf(gp.col) === -1) CBZ.colliders.push(gp.col);
+        }
       }
       gp.cracked = false; gp.crackHold = 0;
     }
@@ -8221,10 +8236,25 @@
   CBZ.cityMegaTower = function () {
     if (!_megaTower || !_megaTower.lot) return null;
     const lb = _megaTower.lot.building || {};
+    /* THE `|| _helipad` FALLBACK MUST NOT OUTLIVE A COLLAPSE.
+       city/demolition.js's suspendAir() nulls b.helipad and b.hangar while the
+       tower is rubble and restores them on the rebuild calendar — the entire
+       basis of its DEMO_LANDMARKS decision ("flying a plane into your own
+       hangar should cost you the hangar, and then give it back"). `hangar`
+       below honours that, because it reads the building and stops. `helipad`
+       did not: the module-global `_helipad` (stamped by the rooftop-pad
+       post-pass) survives the teardown untouched, so the fallback handed
+       playeraircraft.js / phone.js a pad on a tower that is a smoking pile,
+       and the missile chopper spawned in mid-air over rubble.
+       `lb._demoAir` is demolition's own suspension stamp — the record it
+       writes on the building the moment it takes the tags away — so it is the
+       exact tell for "suspended, do not fall back". The fallback still covers
+       the case it was written for: the boot window before the post-pass has
+       stamped lot.building.helipad, where no suspension record exists. */
     return {
       lot: _megaTower.lot,
       penthouseDoor: _megaTower.penthouseDoor,
-      helipad: lb.helipad || _helipad || null,
+      helipad: lb.helipad || (lb._demoAir ? null : (_helipad || null)),
       hangar: lb.hangar || null,
     };
   };

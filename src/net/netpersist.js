@@ -261,11 +261,26 @@
     if (!w || w.v !== 1) { console.warn("[netpersist] world blob v" + (w && w.v) + " — skipped"); return; }
     if (w.gangs) applyGangs(w.gangs);
     if (w.fracture && CBZ.cityFracture && CBZ.cityFracture.apply) try { CBZ.cityFracture.apply(w.fracture); } catch (e) { console.error("[netpersist]", e); }
+    /* THE CLOCK GOES BACK BEFORE THE DEMOLITION LEDGER — order is load-bearing.
+       These two lines used to sit BELOW w.demo, and blob.demo's rows are stamped
+       in CBZ.dayTime() units (blob.dayN is literally commented "rebuild timers
+       count in these"). Applied against a FRESH-BOOT clock, every timing test in
+       city/demolition.js reads the wrong number twice over:
+         • applyOne()'s healed check, `now - row.at >= T_REBUILT` — a row saved
+           on day 12 that has genuinely already healed is admitted anyway,
+         • phaseFor(), which then picks a phase off the same bogus elapsed time.
+       The demolition phase ticker runs a frame later with the RESTORED clock,
+       sees those rows are past T_REBUILT and tears every one of them straight
+       back down through rebuild() — so the load paid a full destroy() AND a
+       full rebuild() for rows that should never have been admitted, doubling
+       the load spike on exactly the save (a nuked city) where it hurts most.
+       Nothing between here and the old position reads the clock: w.npc
+       (schedule.js's ledger) and w.identities are pure id/roster restores.  */
+    if (w.day != null && CBZ.dayPhase) CBZ.dayPhase(w.day);
+    if (w.dayN != null && CBZ.dayCount) CBZ.dayCount(w.dayN);
     if (w.demo && CBZ.cityDemolition && CBZ.cityDemolition.apply) try { CBZ.cityDemolition.apply(w.demo); } catch (e) { console.error("[netpersist]", e); }
     if (w.npc && CBZ.cityNpcLedger && CBZ.cityNpcLedger.apply) try { CBZ.cityNpcLedger.apply(w.npc); } catch (e) { console.error("[netpersist]", e); }
     if (w.identities && CBZ.cityIdentities && CBZ.cityIdentities.apply) try { CBZ.cityIdentities.apply(w.identities); } catch (e) { console.error("[netpersist]", e); }
-    if (w.day != null && CBZ.dayPhase) CBZ.dayPhase(w.day);
-    if (w.dayN != null && CBZ.dayCount) CBZ.dayCount(w.dayN);
     if (w.fam && CBZ.cityFamilyTree && CBZ.cityFamilyTree.apply) try { CBZ.cityFamilyTree.apply(w.fam); } catch (e) { console.error("[netpersist]", e); }
     // B6: restore BaseRecords BEFORE the pieces (w.bld) below — a replayed
     // cupboard's onPiecePlace hook checks CBZ.baseAt() to decide whether to

@@ -17,6 +17,13 @@
   CBZ.vents = CBZ.vents || [];
   CBZ.altExitZones = CBZ.altExitZones || [];
 
+  // PRISON_PROP_USE_V1 — canonical declaration + doctrine: world/southblock.js.
+  // Two things in this file failed the "usable or gone" test and one passed it;
+  // the reasoning for all three is written at the site.
+  CBZ.CONFIG = CBZ.CONFIG || {};
+  if (CBZ.CONFIG.PRISON_PROP_USE_V1 == null) CBZ.CONFIG.PRISON_PROP_USE_V1 = true;
+  const USE = !!CBZ.CONFIG.PRISON_PROP_USE_V1;
+
   function sign(text, x, y, z, w, h, ry, fg, bg) {
     const c = document.createElement("canvas");
     c.width = 512; c.height = 128;
@@ -67,6 +74,15 @@
   }
 
   // ---- ceiling structure so the cell block reads like an enclosed facility ----
+  // KEPT, DELIBERATELY (PRISON_PROP_USE_V1). The room audit files the five
+  // longitudinal rails on the next line as dead props and the six cross
+  // members on this one as ROOF SHELL, and the only thing separating them is a
+  // 6 m2 footprint threshold the rails miss by 0.4 m2 (0.16 x 35 = 5.6). They
+  // are one object: a purlin grid under a 9 m lid, primaries at 8.90 in
+  // 0.16 x 0.22 and secondaries hung 12 cm below them at 8.78 in 0.16 x 0.14 —
+  // which is the right way round, and is why the ceiling reads as built rather
+  // than as a painted plane. Deleting structure to move a number is exactly
+  // the over-count this pass is supposed to avoid.
   for (let z = -41; z <= -12; z += 5.8) addBox(0, 8.9, z, 31.4, 0.16, 0.22, 0x515a66, { cast: false });
   for (let x = -12; x <= 12; x += 6) addBox(x, 8.78, -26, 0.16, 0.14, 35, 0x3f4852, { cast: false });
   pipe(-14.9, 7.55, -28, 0.16, 27, "z", 0x47515c);
@@ -115,8 +131,20 @@
   const checkpointDrop = floorHatch(12.4, -5.4, "Checkpoint Ceiling Drop", 0x8b95a1);
   ceilingCell.dest = checkpointDrop;
   checkpointDrop.dest = ceilingCell;
-  addBox(11.6, 6.7, -36.4, 2.2, 0.18, 2.2, 0x59636f, { cast: false });
-  addBox(12.4, 6.65, -5.4, 2.2, 0.18, 2.2, 0x59636f, { cast: false });
+  // THE TWO CEILING PATCHES ARE GONE (PRISON_PROP_USE_V1). Route 3's two ends
+  // are drawn by floorHatch() on the line above: a 1.75 m grated hatch ON THE
+  // FLOOR at y 0.055-0.22, with the CBZ.vents record — the thing the player
+  // actually crawls into — registered at y 0.12. These two boxes were 2.2 x
+  // 0.18 x 2.2 grey squares hung 6.5 m ABOVE those hatches, saying "ceiling"
+  // because the route is named "Ceiling Service Hatch", with nothing at that
+  // height to enter and no relationship to the grate you use. 0.871 m3 each:
+  // the single largest dead prop in the north yard and the second largest in
+  // the cell house. A grey square in the air is the definition of the thing
+  // this pass deletes.
+  if (!USE) {
+    addBox(11.6, 6.7, -36.4, 2.2, 0.18, 2.2, 0x59636f, { cast: false });
+    addBox(12.4, 6.65, -5.4, 2.2, 0.18, 2.2, 0x59636f, { cast: false });
+  }
   pipe(12.0, 7.2, -20.5, 0.14, 30, "z", 0x717c86);
 
   // ---- route 4: cafeteria grease duct into the same ditch network ----
@@ -127,10 +155,18 @@
   pipe(-27.8, 2.6, 20.2, 0.22, 5.4, "z", 0x6f604e);
   sign("MAINT", -28.7, 3.5, 19.2, 1.5, 0.55, Math.PI / 2, "#ffd451", "#3b3329");
 
-  // Extra yard detail that makes routes legible from the camera.
-  for (let z = 5; z <= 47; z += 7) {
-    addBox(-29.45, 5.2, z, 0.12, 0.12, 3.3, 0x66717c, { cast: false });
-    addBox(29.45, 5.2, z + 2.5, 0.12, 0.12, 3.0, 0x66717c, { cast: false });
+  // "Extra yard detail that makes routes legible from the camera" — DELETED
+  // (PRISON_PROP_USE_V1). Fourteen 3.3 m sticks, 12 cm square, bolted 5.2 m up
+  // the two yard perimeter walls with 3.7 m of nothing between each one. They
+  // make no route legible: every route in this file is a hatch in the floor or
+  // a painted ditch, both of them at ankle height, and a dashed line of stubs
+  // halfway up a 6 m wall is not a conduit run — a conduit run is continuous.
+  // Nothing reaches them, nothing reads them, nothing is lit by them.
+  if (!USE) {
+    for (let z = 5; z <= 47; z += 7) {
+      addBox(-29.45, 5.2, z, 0.12, 0.12, 3.3, 0x66717c, { cast: false });
+      addBox(29.45, 5.2, z + 2.5, 0.12, 0.12, 3.0, 0x66717c, { cast: false });
+    }
   }
   pipe(0, 9.8, 22, 0.10, 48, "z", 0x5b6470);
 })();
