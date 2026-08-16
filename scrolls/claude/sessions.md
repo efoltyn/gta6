@@ -3999,3 +3999,58 @@ wire. touchAudit 42/42 covered — c4-plant / c4-detonate are ledger rows now,
 so the next thumbless verb cannot hide the way this one did. Also: the
 "[B]… Shift+B" stash hint is keyboard-only now (a touchscreen is never shown
 a keyboard key). Gate: npm run test:c4-touch.
+
+## 2026-08-16 — the "nil outfit" body, fourth and fifth producers (fable, solo)
+
+Owner (iPad screenshot, live pages build): an adult NPC — aim tag "Lv.11
+Founder" — rendering skin-toned from shoulder to wrist, "nil outfit … too
+common". Same symptom family as 2026-07-29/2026-08-04, but every pinned
+number was green (`bare=0 instHoles=0`): those audits test RENDERABILITY,
+and this body renders fine — it is CLOTH PAINTED AS SKIN, which no
+instrument could see.
+
+**Producers found (probed live, seed 90210, before touching anything):**
+- `crowd.js setLook` copied the imposter's one-mesh skin arm onto the real
+  rig's arms + armsLower on EVERY promotion, and `outfits.js plainRedress`'s
+  arms-continuity then preserved the naked arm through every later redress,
+  forever. Near the player promoted bodies dominate, hence "too common";
+  with a tan crowd shirt the whole torso joins in (the screenshot).
+- `vips.js paintFit` tinted torso/collar/legs only — never arms — and
+  `cityPaintSlot`'s canvas guard made it a TOTAL no-op on painted bodies.
+  Probe: black-suit guard with cream blouse arms; the don in a painted
+  cocktail dress; the magnate principal in a painted KID'S HOODIE (no age
+  gate in draftableCiv — a child, drafted as the billionaire, embodying a
+  FOUNDER, with three SMG suits). `restoreFit` sampled painted materials'
+  white base at draft and "restored" it at release.
+- `billionaires.js` embodiment left `_sid` on the released civilian → the
+  walking "Lv.11 Founder" (economy.js roleOf tests roster by sid) AND the
+  next `cityPedStash` stomped the founder's persistent ledger page.
+- `schedule.js cityPedDeal` had no band gate (banked adult identities could
+  land on child bodies).
+
+**Fixes (two flags, both default ON, one-line reverts):**
+- `CITY_CROWD_SLEEVES` — setLook paints shirt upper arms + skin forearms
+  (the spawn path's own short-sleeve grammar); plainRedress + the corpse-
+  swap sampler clamp an exact-skin-hex upper arm to the shirt (exact
+  compares only — tan shirts never trip it).
+- `CITY_VIP_WARDROBE` — vips.js casts/releases through `CBZ.cityRedressPed`
+  (magnate → tux/varied suit, guards → jobFit "close protection" = painted
+  All Black Tactical, senator/judge → new jobFit rows → composed business
+  suit, don → set colors + bandana, star → gown); draftableCiv refuses
+  non-adult bands; stash/restore now carries name+gender (billionaires
+  renames after stash). Unflagged correctness: cleanupEmbodied scrubs the
+  founder sid off live releases (restoring any pre-embodiment `_sid` via
+  `_bilPrevSid`); cityPedDeal refuses non-adult bodies.
+
+**RATCHET:** `outfitIntegrityAudit()` gains `skinArms` (+`skinArmSample`) —
+upper-arm cloth flat-painted exactly the rig's own skinTone under a real
+(non-skin) torso; painted tank excluded by id, shirtless bodies excluded by
+the torso half. PINNED AT 0 in math-gate. RUN AND GREEN, seed 90210: boot
+125 rigs / det-side 32 rigs, `bare=0 deadTex=0 instHoles=0 skinArms=0`,
+determinism ok, wardrobe/yoke audits untouched.
+
+**NEW EYES:** `tools/visual-presets/vip-wardrobe.mjs` — flag-A/B preset
+(`--before local`, before boots both cfg_ flags OFF): promoted-crowd row,
+magnate detail, don/senator/star court, and the released party, with
+skinArmedInRow / armClash / minorsInRow / founderSidKept / skinArmsCity
+metrics on every plate.

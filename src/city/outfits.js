@@ -777,7 +777,15 @@
     const torso = readColor(s.torso);
     if (torso == null) return null;            // harness stub rigs — no sample
     const legs = readColor(s.legs), collar = readColor(s.collar);
-    const arms = readColor(s.arms), shoes = readColor(s.shoes);
+    let arms = readColor(s.arms);
+    const shoes = readColor(s.shoes);
+    // A SWAP NEVER HANDS YOU NAKED ARMS. A body left over from the old crowd
+    // promotion paint (or a pre-fix save) can still be wearing its own skin on
+    // the whole arm; sampling that into the record would dress the PLAYER in
+    // it. Same exact-hex clamp as plainRedress: skin-on-upper-arm reads as the
+    // shirt. (Deliberate skin-arm garments — the painted tank — are canvas
+    // meshes, which readColor already skips.)
+    if (arms != null && ch.skinTone != null && arms === ch.skinTone) arms = torso;
     return {
       legs: legs != null ? legs : torso,
       torso,
@@ -1584,6 +1592,12 @@
     if (/sheriff|deputy/i.test(job)) return CAT.sheriff;
     if (/soldier|military/i.test(job)) return CAT.soldier;
     if (/security|guard|bouncer|doorman/i.test(job)) return CAT.security;
+    // ELECTED/BENCH OFFICIALS read as suits, not street clothes. vips.js's
+    // senator/judge principals carry these exact job strings ("the senator",
+    // "holds the bench") and dress through this one wardrobe now — the office
+    // row turns into the composed business suit via adultFitFor's bizRecord.
+    if (/\bsenator\b|congress|assembly member|council member|\bmayor\b/i.test(job)) return CAT.office;
+    if (/\bjudge\b|holds the bench|magistrate|district attorney|prosecutor/i.test(job)) return CAT.office;
     if (/accountant|office|banker|bank manager|analyst|lawyer|air traffic controller|yacht broker|receptionist/i.test(job)) return CAT.office;
     return null;
   }
@@ -1794,14 +1808,26 @@
     const torso = liveTorsoHex(ped);
     let legs = force ? JEAN : readColor(s.legs);
     if (legs == null) legs = 0x363b46;
-    // ARMS CONTINUITY: the instanced crowd renders bare (skin-tinted) arms, and
-    // crowd.js's setLook just painted this rig's arms to that same skin tone — so
-    // a plain promoted body must KEEP its live arm color, not slam it to the shirt
-    // color (which would pop skin sleeves → cloth sleeves the instant you walk up).
-    // Sample what the rig is wearing on the arms right now; only fall back to the
-    // torso color when it can't be read (no skinSlots / harness stub).
+    // ARMS CONTINUITY: sample what the rig is wearing on the arms right now so a
+    // re-dress doesn't pop a promoted body's sleeves to a different color the
+    // instant you walk up; only fall back to the torso color when the sample
+    // can't be read (no skinSlots / harness stub).
     let arms = force ? torso : readColor(s.arms);
     if (arms == null) arms = torso;
+    // …BUT A SLEEVE IS NEVER SKIN. crowd.js's setLook used to copy the
+    // imposter's one-mesh skin arm onto the real rig's whole arm, and this
+    // continuity read then preserved that naked arm through every later
+    // re-dress, forever — the owner's "nil outfit" body (2026-08-16 screenshot:
+    // a dressed torso with bare shoulder-to-wrist arms). setLook now paints
+    // real sleeves (CITY_CROWD_SLEEVES), and this is the healing half: an
+    // UPPER-arm sample that exactly matches the rig's own built skin tone (or
+    // its live head color — the promotion repaints the head) is the old broken
+    // paint, not a shirt, so it takes the shirt color instead. Exact-hex
+    // compares only — a tan shirt that merely resembles skin never trips this.
+    if ((!CBZ.CONFIG || CBZ.CONFIG.CITY_CROWD_SLEEVES !== false) && arms != null) {
+      const headHex = readColor(s.head);
+      if (arms === ped.char.skinTone || (headHex != null && arms === headHex)) arms = torso;
+    }
     const colors = { legs, torso, collar: torso, arms, shoes: 0x2b2b2b };
     dressRig(ped.char, colors, { id: "basics", colors }, opts);
     ped._castFit = null;
@@ -2269,6 +2295,16 @@
       // teaches clothMeshRenders about the layer — so bare stays the one
       // question "is anybody rendering with a hole in them".)
       instHeld: 0, instHoles: 0,
+      // NAKED ARMS, COUNTED (the owner's 2026-08-16 "nil outfit" body: a
+      // dressed torso with skin from shoulder to wrist). A body counts when
+      // its UPPER-arm cloth is flat-painted exactly the rig's own built skin
+      // tone while the torso wears a real (non-skin) color — the signature the
+      // old crowd-promotion setLook left and plainRedress then preserved.
+      // Deliberate skin-arm garments don't trip it: the painted tank is canvas
+      // (readColor skips maps) and its flat fallback is excluded by fit id;
+      // shirtless bodies (boxers/swimmers) fail the dressed-torso half. PIN AT
+      // 0 — with CITY_CROWD_SLEEVES on, no producer is left.
+      skinArms: 0, skinArmSample: [],
       guarantee: guaranteeOn(), sample: [],
     };
     if (!BARE) return out;
@@ -2288,6 +2324,17 @@
         out.bare++;
         if (out.sample.length < 6) {
           out.sample.push((p.name || p.job || p.kind || "?") + ":" + holes + (ch._clothesKey ? "@" + ch._clothesKey : ""));
+        }
+      }
+      // naked-arm census (see the field doc above): exact-hex compares only.
+      const tank = p._castFit === "wifebeater" ||
+        (ch._clothesKey != null && String(ch._clothesKey).indexOf("wifebeater") === 0) ||
+        (ch === CBZ.playerChar && g.cityOutfitId === "wifebeater");
+      if (!tank && ch.skinTone != null) {
+        const armHex = readColor(s.arms), torsoHex = readColor(s.torso);
+        if (armHex != null && armHex === ch.skinTone && torsoHex != null && torsoHex !== ch.skinTone) {
+          out.skinArms++;
+          if (out.skinArmSample.length < 6) out.skinArmSample.push((p.name || p.job || p.kind || "?") + (p._crowd ? "/crowd" : ""));
         }
       }
       const DRAWS = CBZ.pedInstanceDraws;

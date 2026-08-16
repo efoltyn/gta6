@@ -1059,9 +1059,17 @@ const PASS = `(() => {
       out.outfits = oi.rigs + " rigs bare=" + oi.bare + " deadTex=" + oi.deadTex +
                     " repaired=" + oi.repaired + " pinned=" + oi.pinned +
                     " instHeld=" + oi.instHeld + " instHoles=" + oi.instHoles +
+                    " skinArms=" + (oi.skinArms | 0) +
                     (oi.sample && oi.sample.length ? " " + JSON.stringify(oi.sample) : "");
       if (oi.bare > 0) out.fails.push("BARE RIGS (invisible outfit regions): " + oi.bare + " " + JSON.stringify(oi.sample));
       if (oi.deadTex > 0) out.fails.push("DEAD CLOTH TEXTURES: " + oi.deadTex);
+      // THE FOURTH PRODUCER OF THE SAME SYMPTOM (owner screenshot 2026-08-16:
+      // "nil outfit" — a dressed torso over naked shoulder-to-wrist arms).
+      // Crowd promotion's setLook copied the imposter's one-mesh skin arm onto
+      // the real rig's whole arm and plainRedress preserved it forever; both
+      // ends are fixed (CITY_CROWD_SLEEVES) and this pins the count of bodies
+      // still rendering skin on a clothed upper arm. PINNED AT 0.
+      if ((oi.skinArms | 0) > 0) out.fails.push("SKIN-ARMED RIGS (nil-outfit look): " + oi.skinArms + " " + JSON.stringify(oi.skinArmSample || []));
       // THE THIRD PRODUCER OF THE SAME SYMPTOM, now visible to this gate.
       // entities/pedinstance.js draws most garment boxes from instance pools
       // and hides the originals on a private LAYER, which is a way to empty a
