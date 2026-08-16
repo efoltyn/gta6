@@ -100,9 +100,33 @@ ws.addEventListener("message", (ev) => {
     errors.push("console.error: " + m.params.args.map((a) => a.value || a.description || "").join(" ").slice(0, 200));
   }
 });
-const send = (method, params = {}) => new Promise((r) => { const i = id++; pend.set(i, r); ws.send(JSON.stringify({ id: i, method, params })); });
+/* A DEAD BROWSER MUST FAIL, NOT HANG. Three full engine boots in one session
+   is enough to lose the renderer (measured: chromium gone, node still waiting),
+   and a CDP round-trip that never resolves turns a 6-minute tool into a
+   40-minute wait for the outer `timeout` to shoot it. Every call is bounded,
+   and a lapsed call marks the browser dead so the run reports which leg it got
+   to instead of dying silent.
+
+   THE BOUND HAS TO CLEAR A WORLD BUILD, though, and that is the trap: building
+   Gang City blocks the page's main thread for the better part of a minute on
+   swiftshader, so Runtime.evaluate legitimately does not answer for that whole
+   time. A 45 s bound called that a dead browser and reported a launch failure
+   for a captain who was, in fact, at his own wheel. Three minutes is longer
+   than any honest block and far shorter than the outer timeout. */
+let browserDead = false;
+const CDP_MS = 180000;
+const send = (method, params = {}) => new Promise((resolve) => {
+  const i = id++;
+  const timer = setTimeout(() => {
+    if (pend.delete(i)) { browserDead = true; resolve({ __dead: true }); }
+  }, CDP_MS);
+  pend.set(i, (m) => { clearTimeout(timer); resolve(m); });
+  try { ws.send(JSON.stringify({ id: i, method, params })); }
+  catch (e) { clearTimeout(timer); pend.delete(i); browserDead = true; resolve({ __dead: true }); }
+});
 const evl = async (e) => {
   const r = await send("Runtime.evaluate", { expression: e, returnByValue: true, awaitPromise: true });
+  if (r.__dead) return { __dead: true };
   if (r.result && r.result.exceptionDetails) return { __throw: r.result.exceptionDetails.text };
   return r.result && r.result.result && r.result.result.value;
 };
@@ -115,6 +139,7 @@ await send("Page.enable");
    as a missing feature. */
 async function boot(url, fresh) {
   errors = [];
+  if (browserDead) return false;
   /* EACH SAIL LEG IS A NEW PLAYER. Without this the second leg inherits the
      first one's saved character — origins.js does not replay a story's opening
      verb for a captain who has already sailed, so the boat never launches and
@@ -126,7 +151,8 @@ async function boot(url, fresh) {
   }
   await send("Page.navigate", { url });
   for (let i = 0; i < 900; i++) {
-    if (await evl("!!(window.CBZ && CBZ.bootComplete && CBZ.setCityOrigin && CBZ.marineHulls)")) return true;
+    if (browserDead) return false;
+    if (await evl("!!(window.CBZ && CBZ.bootComplete && CBZ.setCityOrigin && CBZ.marineHulls)") === true) return true;
     await sleep(200);
   }
   return false;
@@ -182,7 +208,12 @@ if (has("--sail")) {
     // looks like a hang
     process.stdout.write(`  ${hull}: booting ... `);
     const bt = Date.now();
-    if (!await boot(`${origin}?seed=${SEED}`, true)) { console.log("never booted"); fails.push(`${hull}: never booted`); continue; }
+    if (!await boot(`${origin}?seed=${SEED}`, true)) {
+      const why = browserDead ? "the browser died" : "never booted";
+      console.log(why); fails.push(`${hull}: ${why}`);
+      if (browserDead) break;              // every later leg would say the same
+      continue;
+    }
     process.stdout.write(`${((Date.now() - bt) / 1000).toFixed(0)}s, sailing ... `);
     const set = await evl(`(function(){
       if (!CBZ.setCityOriginBoat) return "no setter";
@@ -192,11 +223,19 @@ if (has("--sail")) {
       p.click(); return "ok";
     })()`);
     if (set !== "ok") { fails.push(`${hull}: could not start (${set})`); continue; }
+    /* WAIT FOR THE RUN TO EXIST BEFORE ASKING IT ANYTHING. The world build is
+       one long synchronous block; polling captainAudit() through it just
+       queues calls behind it and reads nothing. */
+    for (let i = 0; i < 300 && !browserDead; i++) {
+      if (await evl("!!(CBZ.city && CBZ.city.arena && CBZ.game.state === 'playing')") === true) break;
+      await sleep(500);
+    }
     // captain.js arms a PENDING launch and fires the moment the fleet exists
     // (START_SEC 14 in sim time); give it real wall time on swiftshader
     let a = null;
-    for (let i = 0; i < 150; i++) {
+    for (let i = 0; i < 150 && !browserDead; i++) {
       a = await evl("CBZ.captainAudit && CBZ.captainAudit()");
+      if (a && a.__dead) { a = null; break; }
       if (a && a.boat) break;
       await sleep(400);
     }
