@@ -1595,6 +1595,8 @@
   function tsuCrash(ctx) {
     const st = ctx.st;
     st.landfall = true;
+    // the silence releases FAST, so the roar below lands into it
+    if (CBZ.audioHush) CBZ.audioHush(false, { fade: 0.12 });
     const fx0 = ctx.cx + st.dx * st.frontS, fz0 = ctx.cz + st.dz * st.frontS;
     const px = -st.dz, pz = st.dx;
     for (let i = -2; i <= 2; i++) {
@@ -2184,7 +2186,12 @@
              still boiling, and then the lip comes down. */
           let v = st.speedK * tsuVRel(ctx, st.frontS);
           if (!st.broke && -(st.frontS + ctx.R) <= 1.6) {
-            if (st.stallT < st.stallSecs) { st.stallT += dt; v = st.speedK * 0.02; }
+            if (st.stallT < st.stallSecs) {
+              // THE HELD BREATH: the world goes quiet while the wave stands,
+              // so the crash has silence to land in (CBZ.audioHush)
+              if (!st.stallT && CBZ.audioHush) CBZ.audioHush(true);
+              st.stallT += dt; v = st.speedK * 0.02;
+            }
             else { st.broke = true; st.crashT = 0; tsuCrash(ctx); }
           }
           if (st.crashT >= 0) st.crashT += dt;
@@ -2380,6 +2387,8 @@
       // ONE LINE PUTS THE SEA BACK. There is no mesh to reposition, no sheet
       // to delete and no swimmer to stand down.
       surgeSet(0);
+      // an event cancelled mid-stand must not leave the world muted
+      if (CBZ.audioHush) CBZ.audioHush(false);
       const W = CBZ.survSeaWave ? CBZ.survSeaWave() : null;
       // the sediment goes with it — one match's soup must never tint the next
       if (W) { W.amp = 0.86; W.chop = 0.72; W.foam = 0.34; W.opacity = 1; W.sediment = 0; }

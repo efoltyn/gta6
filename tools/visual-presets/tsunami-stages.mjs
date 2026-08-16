@@ -63,15 +63,27 @@ const beats = [
     id: "landfall",
     label: "LANDFALL — the Miyako shot",
     focus: "THE reference frame. Front-quarter on the churning gray-black debris soup as it takes the shore town: sediment darkening the water, foam boiling off the leading edge, whitewater streaking back to sea, cars and trees tumbling inside it.",
+    /* TRIPOD RESTAGED (2026-08-15). The old 140 m land-side stand read as a
+       whiteout — not fog (15% at that range) but CONTENT: at sediment 1.0
+       the flooded town, the wake and the crest spray fill the whole frame
+       with pale values and nothing dark is left to read them against — and
+       every land-side offset eventually loses the tower lottery to the
+       random bearing. So this is now the news-helicopter angle every real
+       tsunami aerial uses: over the SEA behind the front, looking inland at
+       the dark back of the broken wall and the town being taken beyond it.
+       There are no towers in the sea to photobomb, and the dark water is
+       the contrast anchor in every possible bearing. */
     wait: { untilFrontPast: 24, extraSecs: 0.35 },
-    shot: { mode: "front", back: -96, side: 104, alt: 42, aimAhead: -10, aimY: 9 },
+    shot: { mode: "front", back: 55, side: 20, alt: 26, aimAhead: 12, aimY: 6 },
   },
   {
     id: "crossing",
     label: "Mid-crossing — the wall spending itself",
     focus: "Halfway over the island. THE QUESTION THIS BEAT ASKS: is there still a wall here? A bore that has run 130 m inland has been climbing and tearing through a town the whole way, and what is left of it should be a fast, deep, dirty flood with an edge — not the same tower that broke on the beach. Watch faceH against the landfall frame.",
+    // same restage as landfall: the sea-side chopper angle, higher and
+    // further back so half the island's flooding shows behind the wall
     wait: { untilFrontPast: 130 },
-    shot: { mode: "front", back: -104, side: 118, alt: 44, aimAhead: -12, aimY: 8 },
+    shot: { mode: "front", back: 64, side: 26, alt: 32, aimAhead: 16, aimY: 4 },
   },
   {
     id: "inundation",

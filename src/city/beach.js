@@ -69,6 +69,9 @@
      CBZ.cityBuildBeach(city)   — world.js calls this once at build
      CBZ.cityBeachLoot()        — live loot records (map follow-up)
      CBZ.cityBeachLootReset()   — restock everything for a fresh run
+     CBZ.cityBeachPalms()       — the takeable-palm kit: the tsunami buys a
+                                  REAL palm out of the instanced pool
+                                  (city/tsunami.js's no-fake-debris doctrine)
 ============================================================ */
 (function () {
   "use strict";
@@ -110,6 +113,9 @@
   const stallSpots = [];     // { x, z, face } behind each vendor stall counter
   const anglerSpots = [];    // { x, z, face } at each rod on the pier head
   let built = false;
+  // the takeable-palm kit (built with the palms; see the palm section) — the
+  // tsunami buys real palms out of the instanced pool through this
+  let palmField = null;
 
   // ---- the swash apron (built in section 1, animated at the bottom) --------
   // Drying sand vs. sand the water is on right now. Kept as THREE.Colors so
@@ -382,6 +388,63 @@
     trunkIM.castShadow = frondIM.castShadow = false;
     trunkIM.receiveShadow = frondIM.receiveShadow = true;
     root.add(trunkIM); root.add(frondIM);
+
+    /* ---- THE PALMS CAN BE TAKEN (2026-08-15, TSU_DEBRIS) -----------------
+       The tsunami's debris doctrine is REAL OBJECTS ONLY, and the palms are
+       the first thing a wave over this beach would rip out — but they live
+       in two InstancedMeshes, and an instance cannot leave its pool. So the
+       pool sells the palm: take(i) zero-scales the palm's instances (trunk,
+       crown hub, six fronds), drops its trunk collider, and hands back a
+       REAL group built from the SAME geometry and the SAME pooled material,
+       pivoted at the trunk's middle so it tumbles like a tree and not like
+       a flag. Nothing is invented: it is the identical palm, re-plumbed
+       from one draw call into its own. Runtime-only (Math.random jitter,
+       never rng) so the build stream stays deterministic. */
+    palmField = {
+      list: palms,
+      take(i) {
+        const p = palms[i];
+        if (!p || p._taken) return null;
+        p._taken = 1;
+        const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+        trunkIM.setMatrixAt(i, zero);
+        if (TREES2) trunkIM.setMatrixAt(palms.length + i, zero);
+        for (let k = 0; k < 6; k++) frondIM.setMatrixAt(i * 6 + k, zero);
+        trunkIM.instanceMatrix.needsUpdate = frondIM.instanceMatrix.needsUpdate = true;
+        // the trunk stops being a wall the moment it is wreckage
+        if (CBZ.colliders) for (let c = CBZ.colliders.length - 1; c >= 0; c--) {
+          const col = CBZ.colliders[c];
+          if (col.ref !== trunkIM) continue;
+          if (p.x < col.minX || p.x > col.maxX || p.z < col.minZ || p.z > col.maxZ) continue;
+          CBZ.colliders.splice(c, 1);
+          if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+          break;
+        }
+        // the real palm, rebuilt in local space around the trunk's middle
+        const grp = new THREE.Group();
+        const d2 = new THREE.Object3D();
+        d2.rotation.set(0, p.yaw, p.lean); d2.scale.set(1, p.h, 1); d2.updateMatrix();
+        const trunk = new THREE.Mesh(palmTrunkGeo, trunkIM.material);
+        trunk.rotation.set(0, p.yaw, p.lean); trunk.scale.set(1, p.h, 1);
+        grp.add(trunk);
+        const e = d2.matrix.elements;
+        const tx = e[4] * 0.5, ty = e[5] * 0.5, tz = e[6] * 0.5;   // trunk top, group-local
+        const hub = new THREE.Mesh(palmTrunkGeo, trunkIM.material);
+        hub.position.set(tx, ty - 0.05, tz);
+        hub.rotation.set(0, p.yaw, p.lean); hub.scale.set(2.0, 0.55, 2.0);
+        grp.add(hub);
+        for (let k = 0; k < 6; k++) {
+          const a = p.yaw + k * (Math.PI / 3) + Math.random() * 0.3;
+          const fr = new THREE.Mesh(palmFrondGeo, frondIM.material);
+          fr.position.set(tx + Math.cos(a) * 1.05, ty + 0.02, tz + Math.sin(a) * 1.05);
+          fr.rotation.set(0, -a, 0.34);
+          grp.add(fr);
+        }
+        grp.position.set(p.x, p.h / 2 - 0.18, p.z);
+        root.add(grp);
+        return { group: grp, x: p.x, z: p.z };
+      },
+    };
 
     // =====================================================================
     //  3) SUNBATHER CLUSTERS — umbrella + towels per spot, instanced with
@@ -1151,6 +1214,8 @@
 
   // ---- PUBLIC --------------------------------------------------------------
   CBZ.cityBeachLoot = function () { return loot; };
+  // the palms as world objects a disaster can claim: {list, take(i)} or null
+  CBZ.cityBeachPalms = function () { return palmField; };
   // usable beach furniture — {loungers, deckchairs, occupied}. A lounger with
   // no propuse anchor behind it would be a prop pretending to be furniture, so
   // this counts ANCHORS, never meshes.
