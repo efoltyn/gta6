@@ -347,6 +347,14 @@
     if (!hostSim() || g.mode !== "city" || !ped || ped.dead) return;
     if (ped.vendor || ped.gang || ped.isPlayer || ped.companion || ped.recruited ||
         ped.controlled || ped.bounty || ped.isFamily || ped.kind !== "civilian") return;
+    // AGE FIRST (the wardrobe's own law, applied to identity): every page in
+    // this book is an adult's life — a job, a wallet, grudges, sometimes a
+    // listed-corp founder. Dealing one onto a child's body put an adult's
+    // name, cash and dossier role on a nine-year-old (the cloth survived only
+    // because outfits.js's band gate refuses adult fits). Children keep their
+    // own identities; the page waits for an adult body.
+    const band = ped.band || (ped.char && ped.char.band);
+    if (ped.child || (band && band !== "adult")) return;
     const t = wall();
     if (ped._sidFresh && t - ped._sidFresh < 4000) return;       // just dealt — idempotent
     if (ped._sid) {                                  // the old page lets the body go
