@@ -3681,3 +3681,42 @@ flash with a real radius.
   the report. And the before/after loop itself (pristine-worktree before,
   --reuse-before after, single navigation per side) dodges the known
   second-navigate disc artifact by construction.
+
+## 2026-08-16 — THE LAST FREEZE WAS A THOUSAND UNGATED FLEE DECISIONS (follow-up wave, same session)
+
+Owner: *"Keep working do everything you want to do."* The one cost deliberately
+left on the table ("the city dying — it is the honest cost", 2026-08-02) was
+re-measured after the demolition fix and stopped being honest: probe-nuke-perf
+attributed **8,007–10,432 ms per simulated second to peds.js u:34 at s=28-30**
+(worst single tick 4,070 ms) — ~95% of the whole sim — while every other
+updater sat near 300 ms/s.
+
+- **THE CAUSE IS A MISSING GATE, NOT MASS.** fleeFrom (think()'s threatened
+  branch) is the only major decision in the file with no rate gate — up to two
+  city-wide door scans + 15 LOS raycasts per decision at 15 Hz per alarmed
+  body — and PED_BRAIN_STAGGER exempts `alarmed > 0`, so the one existing
+  throttle switches itself off exactly when cityScare alarms the whole
+  population. The 4 s tick is a CONVOY: _refugeT=2.5 and _rallyT=6 are the
+  only unjittered gates in the file, so every body that decided in the blast
+  frame re-decides on the same frame forever after.
+- **`PED_SIM_BUDGET_MS` (default 8, live-read, 0 = byte-identical legacy)** —
+  impactbus's drain-budget shape applied to decisions: think() and the
+  corpse-reap decision behind a rotating cursor + per-frame deadline; deferred
+  peds keep their previous decision, gate timers held not drained; a stride
+  tick landing on a deferred frame is OWED via a think-bank (clamped 1 s),
+  never dropped; bodies inside 58 m bypass the deadline; SIM_MIN_THINKS=8
+  floors the sweep so a near-crowd overrun cannot starve the tail. Movement,
+  timers, gunpointSweep, rebuildPedGrid, render LOD: every ped, every frame.
+- **MEASURED (probe-nuke-perf, seed 90210, same detonation both sides):**
+  u:34 at s=28/29/30: 8,007→358 · 10,083→358 · 10,432→350 ms/s (23-29x);
+  worst tick through the panic window 4,070→71 ms (57x); whole-sim
+  13,034→~3,000 ms/s steady. Calm-street and early seconds within noise
+  (+~15% bookkeeping at s0-10 — the cursor's honest cost). Gates after:
+  MATHGATE ok (det ok), freeze contract ok, phase contract ok.
+- **KNOWN AND LEFT, for the next wave:** the unjittered _refugeT/_rallyT
+  convoys (budget flattens their cost, not their synchrony — a one-line
+  jitter each, but it edits a behaviour constant); and losgrid's DDA index
+  rebuild on CBZ.losBlockers identity change may bill demolition's work to
+  whoever raycasts first that frame (attribution smear, not a leak).
+- Also: nuke-sequence.mjs's landmark beat focus no longer promises an empty
+  before-side sky (stale since NUKE_FX_AFTERMATH shipped on both sides).

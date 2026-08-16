@@ -1341,6 +1341,34 @@
   CBZ.initAudio = initAudio;
   CBZ.sfx = sfx;
   CBZ.nuclearShock = nuclearShock;
+
+  /* ---- THE HELD BREATH (2026-08-15) ---------------------------------------
+     nuclearShock's duck is an impulse that schedules its own recovery; this
+     is the other envelope the same pressure stage can make — a duck that
+     STAYS until released. The tsunami's stall wears it: while the wave
+     stands at the seawall the whole world fades to almost nothing, and the
+     crash lands into that silence, which is the oldest trick horror has.
+     One stage, two shapes; anything else that needs a held hush (a standoff,
+     a held breath underwater) can reuse it. `on` fades slow by default and
+     releases FAST, because the release is the hit landing. */
+  let hushed = false;
+  CBZ.audioHush = function (on, opts) {
+    if (!ctx || !pressureGain || !pressureFilter) return false;
+    opts = opts || {};
+    if (!!on === hushed) return true;
+    hushed = !!on;
+    const t = ctx.currentTime;
+    const fade = opts.fade != null ? +opts.fade : (on ? 0.7 : 0.14);
+    try {
+      pressureGain.gain.cancelScheduledValues(t);
+      pressureGain.gain.setValueAtTime(Math.max(0.05, pressureGain.gain.value), t);
+      pressureGain.gain.exponentialRampToValueAtTime(on ? 0.13 : 1, t + fade);
+      pressureFilter.frequency.cancelScheduledValues(t);
+      pressureFilter.frequency.setValueAtTime(Math.max(80, pressureFilter.frequency.value), t);
+      pressureFilter.frequency.exponentialRampToValueAtTime(on ? 1500 : 22000, t + fade);
+    } catch (e) {}
+    return true;
+  };
   // A spatial sound request must name its emitter. This helper deliberately
   // computes distance at the caller boundary rather than turning "wanted" or
   // another abstract state into global audio.

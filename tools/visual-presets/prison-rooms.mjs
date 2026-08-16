@@ -88,7 +88,12 @@
                     and rails as dead scenery would be a lie about a bed a man
                     sleeps in. Shell boxes are already out of the prop set, so
                     a claim cannot leak through the floor into the walls.
-     deadProps      props - shell - solidProps - usedProps. THE NUMBER.
+                    INDEPENDENT of solidProps — a bench is one prop, one solid
+                    and one used. Counting them as a ranked choice (the first
+                    version did) hides every usable thing that is also solid,
+                    which is most furniture worth having.
+     deadProps      props that are NEITHER solid NOR used. THE NUMBER. Not a
+                    subtraction of the two counts above, which now overlap.
      deadFlat       of those, the ones under 5 cm in some axis: deck paint,
                     decals, signage skins. Reported separately so the headline
                     count is not drowned by a floor-line kit; they are still
@@ -444,6 +449,17 @@ async function stagePrisonRoom(input) {
     //    these objects is claimed by whatever registered it.
     const refUse = new Map();
     const claim = (obj, kind) => { if (obj && !refUse.has(obj)) refUse.set(obj, kind); };
+    /* `mesh`/`pool`/`beam` are the three refs the light rig DRIVES, and a caged
+       wall lamp is four boxes (back plate, glass, two cage bars) of which only
+       the glass is driven. That looks like three false dead props per lamp, and
+       it was reported as ~75 across the compound — so the fitting was given a
+       `parts` field to declare the rest of itself. MEASURED, IT CHANGED NOTHING:
+       mess, lounge and cell-single each returned identical props/solid/used/dead
+       with the declaration and without it. The contact rule below already claims
+       them, because a lamp's plate and bars touch the glass this loop claims.
+       The `parts` plumbing was reverted rather than shipped as a no-op with a
+       comment claiming a fix. Recorded here so nobody re-derives the same
+       plausible-and-wrong idea from the same four-boxes-one-bulb observation. */
     for (const f of ((CBZ.prisonLights && CBZ.prisonLights.fixtures) || [])) {
       claim(f && f.mesh, "light"); claim(f && f.pool, "light"); claim(f && f.beam, "light");
     }
@@ -804,8 +820,23 @@ async function stagePrisonRoom(input) {
       props++;
       if (it.merged) mergedProps++;
       propVolume += it.vol;
-      if (it.solid) { solidProps++; continue; }
-      if (it.use) { usedProps++; used.push(it); continue; }
+      /* SOLID AND USED ARE INDEPENDENT FACTS, and this loop used to treat
+         them as one ranked choice: `if (it.solid) { solidProps++; continue; }`
+         answered the question and stopped, so every bench you can sit on, every
+         bunk you can lie on and every rack holding a placed item — all of them
+         solid — was counted as solid and NEVER as used. `usedProps` was
+         therefore not "props something uses", it was "props something uses
+         that you can also walk through", which is close to the opposite. It
+         read 0 for rooms whose whole content is usable furniture, and it is
+         the number the prop cleanup was steered by.
+
+         `deadProps` is unchanged by this and stays comparable across every run
+         already taken: a prop is dead when it is neither, which is what the
+         two `continue`s also computed. Only the two positive counts move, and
+         they may now overlap — a solid bench is one prop, one solid, one used. */
+      if (it.solid) solidProps++;
+      if (it.use) { usedProps++; used.push(it); }
+      if (it.solid || it.use) continue;
       deadProps++;
       deadPropVolume += it.vol;
       if (Math.min(it.w, it.hh, it.d) <= 0.05) deadFlat++;
