@@ -32,6 +32,9 @@
   // driving into the shader so the CPU height query matches the displacement.
   const arenaWave = { amp: 0.86, chop: 0.72, foam: 0.34, opacity: 1 };
   let arena_meanY = function () { return -0.8; };
+  // SURV_BEACH_V2's live wet-line rig ({attr, base, h, th, wet, n}) + the
+  // static shore numbers the before/after tool reads (CBZ.survShoreAudit).
+  let shoreRig = null, shoreFacts = null;
 
   // SURV_SEABED — the island's coastal shelf (see groundHeightAt below). ON →
   // the ground falls away past the beach, so the open ocean is real water and
@@ -110,6 +113,46 @@
   CBZ.survSeaBedYAt = function (x, z) {
     return arena ? arena.groundHeightAt(x, z) : 0;
   };
+  // The shore's static facts (band width, dry sand, wade band, live wet line)
+  // — what tools/visual-presets/beach-shores.mjs prints as its measurements.
+  CBZ.survShoreAudit = function () { return shoreFacts; };
+
+  /* ---- THE WATERLINE MOVES (SURV_BEACH_V2) --------------------------------
+     Same law the city beach's swash apron enforces: the dark wet line and the
+     sea's edge must be ONE thing. Every vertex of the shore ring below the
+     LIVE mean sea (plus a small alongshore swash so the line breathes instead
+     of ruling a circle) wets INSTANTLY; dry-out is slow (0.10/s ≈ 10 s), so a
+     tsunami drawdown strands a great ring of wet sand and a flood's retreat
+     leaves its own high-water mark. ~2k vertices, one colour write per frame,
+     survival mode only. 47.95: right after the ocean mesh itself has taken
+     this frame's surge at 47.9 — sand and sea read the same number. */
+  const WET_DRY_RATE = 0.10;
+  let _wetT = 0;
+  if (CBZ.onUpdate) CBZ.onUpdate(47.95, function (dt) {
+    const S = shoreRig;
+    if (!S || !arena || !CBZ.game || CBZ.game.mode !== "survival") return;
+    _wetT += dt || 0;
+    const t = CBZ.waterClock ? CBZ.waterClock() : _wetT;
+    const sea = arena_meanY();
+    const dry = Math.min(1, Math.max(0, dt) * WET_DRY_RATE);
+    const cols = S.attr.array, base = S.base;
+    let dirty = false;
+    for (let i = 0; i < S.n; i++) {
+      // ±0.3 m of breathing swash, phased along the shore (θ·43 ≈ 21 m waves)
+      const swash = 0.19 * Math.sin(t * 0.9 + S.th[i] * 43.0) + 0.11 * Math.sin(t * 0.53 - S.th[i] * 23.0);
+      const lip = S.h[i] - (sea + swash);          // m above the breathing waterline
+      const target = lip <= 0 ? 1 : (lip >= 0.5 ? 0 : 1 - (lip / 0.5) * (lip / 0.5) * (3 - 2 * (lip / 0.5)));
+      let w = S.wet[i];
+      if (target > w) w = target;                  // soaks instantly
+      else w += (target - w) * dry;                // dries slowly behind the sea
+      if (Math.abs(w - S.wet[i]) < 0.004) continue;
+      S.wet[i] = w;
+      const q = i * 3, dk = 1 - 0.45 * w;          // wet sand: darker, same hue
+      cols[q] = base[q] * dk; cols[q + 1] = base[q + 1] * dk; cols[q + 2] = base[q + 2] * dk;
+      dirty = true;
+    }
+    if (dirty) S.attr.needsUpdate = true;
+  });
 
   // deterministic-ish RNG so the map is the same each match (learnable)
   let _s = 1337;
@@ -175,13 +218,43 @@
        underwater treatment has long since faded to black anyway.
 
        `?cfg_SURV_SEABED=0` restores the flat floor — and the walk-on-water. */
-    const SHELF_SLOPE = 0.34;          // m of depth per m past the waterline
-    const SHORE_R = R + 8;             // where the ground starts falling away
+    const SHELF_SLOPE = 0.34;          // m of depth per m past the shore band
+    /* SURV_BEACH_V2 — THE BEACH BECOMES A SHORE, NOT A STRIPE (2026-08-16).
+       The old coast was an 8 m flat sand annulus at y=-0.02 whose outer rim
+       simply stopped where the shelf began: a ring with sand painted on it.
+       V2 widens the band to 26 m and gives it the one thing a beach IS — a
+       PROFILE: the flat grass edge, a low wave-built berm at the top of the
+       swash, then a foreshore that walks you down THROUGH the waterline and
+       keeps falling until the shelf takes over. groundHeightAt and the drawn
+       ring read the SAME function, so the bottom you see is the bottom you
+       stand on (the doctrine two comments below already enforces for the
+       seabed). Sand below the waterline is real wadable foreshore — the
+       water climbs you for ~14 m before city/swim.js takes over — a
+       fringing beach, not a cliff edge with sand painted on it.
+       ?cfg_SURV_BEACH_V2=0 → the old 8 m stripe and shelf, byte for byte. */
+    if (CBZ.CONFIG.SURV_BEACH_V2 == null) CBZ.CONFIG.SURV_BEACH_V2 = true;
+    const BEACH2 = CBZ.CONFIG.SURV_BEACH_V2 !== false && CBZ.CONFIG.SURV_SEABED !== false;
+    const BEACH_W = BEACH2 ? 26 : 8;   // grass edge → shelf handoff
+    const SHORE_R = R + BEACH_W;       // where the shelf takes over from the beach
+    const FORE_DROP = BEACH2 ? 1.9 : 0; // depth the foreshore has reached by SHORE_R
     const DEEP = 34;                   // m — the shelf stops falling here (~100 m out)
-    function seabedAt(x, z) {
-      const d = Math.hypot(x - cx, z - cz) - SHORE_R;
-      return d > 0 ? -Math.min(d * SHELF_SLOPE, DEEP) : 0;
+    // the whole coast as one function of distance-from-centre: 0 on the grass,
+    // berm + foreshore across the beach band, then the linear shelf. Every
+    // consumer — physics, the drawn shore ring, the drawn seabed ring — reads
+    // THIS, which is what keeps drawn and walked from ever being two surfaces.
+    function coastHeightAt(dist) {
+      const d = dist - SHORE_R;
+      if (d > 0) return -Math.min(FORE_DROP + d * SHELF_SLOPE, DEEP);
+      if (!BEACH2) return 0;
+      const b = dist - R;              // metres past the grass edge
+      if (b <= 0) return 0;
+      const t = b / BEACH_W, s = t * t * (3 - 2 * t);
+      // the berm: the low ridge waves build at the top of their own swash —
+      // a read on every natural beach, not a wall (0.30 peak, gone mid-beach)
+      const k = (b - 4.6) / 2.4;
+      return 0.30 * Math.exp(-k * k) - FORE_DROP * s;
     }
+    function seabedAt(x, z) { return coastHeightAt(Math.hypot(x - cx, z - cz)); }
     function groundHeightAt(x, z) {
       let h = 0;
       for (let i = 0; i < hills.length; i++) {
@@ -287,13 +360,89 @@
       root.add(pm);
     }
 
-    // the island disc (grass) with a sandy beach ring. The ring ends AT the
-    // waterline (SHORE_R) and the draped shelf above takes over from there, so
-    // sand meets sea instead of overhanging it.
-    const beach = new THREE.Mesh(new THREE.CircleGeometry(SHORE_R, 64),
-      new THREE.MeshLambertMaterial({ color: 0xe6d49a }));
-    beach.rotation.x = -Math.PI / 2; beach.position.set(cx, -0.02, cz);
-    beach.receiveShadow = true; root.add(beach);
+    // the island disc (grass) with a sandy beach ring. Flag off: the old flat
+    // 8 m stripe. Flag on: the ring is DRAPED over coastHeightAt — the berm,
+    // the foreshore, the walk into the water — with vertex colours that carry
+    // the read (mottled dry sand, a damp band, dark wet sand) and a LIVE
+    // waterline: the tick at 47.95 below wets every vertex the sea currently
+    // reaches and dries it slowly after, so a tsunami drawdown strands a huge
+    // ring of visibly WET sand — the dread beat, on the beach itself.
+    if (!BEACH2) {
+      const beach = new THREE.Mesh(new THREE.CircleGeometry(SHORE_R, 64),
+        new THREE.MeshLambertMaterial({ color: 0xe6d49a }));
+      beach.rotation.x = -Math.PI / 2; beach.position.set(cx, -0.02, cz);
+      beach.receiveShadow = true; root.add(beach);
+    } else (function shoreRing() {
+      /* R-3 (tucked 3 m under the grass disc, 3 cm down so the grass wins the
+         overlap) out to SHORE_R-1, which is exactly the seabed ring's inner
+         rim — SAME 96 theta segments, so the two meshes share their boundary
+         vertices and the handoff has no seam and no overlap.
+         CircleGeometry/RingGeometry local→world after rotateX(-PI/2):
+         (x, y, z) → (x, z, -y), so local z IS world height (mesh sits at y 0)
+         and world radius is hypot(local x, local y). */
+      const shoreGeo = new THREE.RingGeometry(R - 3, SHORE_R - 1, 96, 20);
+      const sp = shoreGeo.attributes.position, sa = sp.array, vn = sp.count;
+      const cols = new Float32Array(vn * 3);   // live colour (base × wetness)
+      const base = new Float32Array(vn * 3);   // authored colour, never mutated
+      const vh = new Float32Array(vn);         // vertex height (the profile)
+      const vth = new Float32Array(vn);        // vertex theta (alongshore phase)
+      const DRY = new THREE.Color(0xe6d49a), BED = new THREE.Color(0xcdbb8f);
+      const c = new THREE.Color();
+      for (let i = 0; i < vn; i++) {
+        const lx = sa[i * 3], ly = sa[i * 3 + 1];
+        const dist = Math.hypot(lx, ly);
+        const h = dist <= R ? -0.03 : coastHeightAt(dist);
+        sa[i * 3 + 2] = h;
+        vh[i] = h; vth[i] = Math.atan2(ly, lx);
+        // dry sand, mottled: per-vertex grain (position hash — no rng draw,
+        // the island build stream stays byte-identical) over a broad warm/cool
+        // drift, blending into the seabed's own tone at the outer rim so the
+        // shared edge is invisible in colour as well as in position.
+        const wx = cx + lx, wz = cz - ly;
+        const grain = 1 + ((CBZ.hash01 ? CBZ.hash01(wx * 1.7, wz * 1.7, 0xb31c) : 0.5) - 0.5) * 0.11;
+        const drift = 1 + 0.05 * Math.sin(vth[i] * 7 + dist * 0.31);
+        c.copy(DRY).lerp(BED, ss(SHORE_R - 5, SHORE_R - 1, dist)).multiplyScalar(grain * drift);
+        base[i * 3] = c.r; base[i * 3 + 1] = c.g; base[i * 3 + 2] = c.b;
+      }
+      function ss(e0, e1, x2) { let t = (x2 - e0) / (e1 - e0); t = t < 0 ? 0 : t > 1 ? 1 : t; return t * t * (3 - 2 * t); }
+      sp.needsUpdate = true;
+      shoreGeo.setAttribute("color", new THREE.BufferAttribute(cols, 3));
+      shoreGeo.computeVertexNormals();
+      shoreGeo.computeBoundingSphere();
+      const shoreMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
+      shoreMat.name = "survival-beach-shore";     // no water/ocean/sea in the name (test contract)
+      const shore = new THREE.Mesh(shoreGeo, shoreMat);
+      shore.rotation.x = -Math.PI / 2; shore.position.set(cx, 0, cz);
+      shore.receiveShadow = true;
+      shore.userData.coat = true;                 // it is the ground; blizzards coat it
+      shore.userData.dynamic = true;              // never batch-merge a mesh we repaint
+      root.add(shore);
+      shoreRig = { attr: shoreGeo.getAttribute("color"), base, h: vh, th: vth, wet: new Float32Array(vn), n: vn };
+      // start honest: everything the sea covers right now is wet
+      for (let i = 0; i < vn; i++) {
+        const w = vh[i] < OCEAN_Y + 0.12 ? 1 : 0;
+        shoreRig.wet[i] = w;
+        const q = i * 3, dk = 1 - 0.45 * w;
+        cols[q] = base[q] * dk; cols[q + 1] = base[q + 1] * dk; cols[q + 2] = base[q + 2] * dk;
+      }
+      shoreRig.attr.needsUpdate = true;
+    })();
+    // the shore numbers the before/after tool reads — measured off the SAME
+    // functions the physics uses, at rest sea level, so they cannot lie
+    (function facts() {
+      let water = -1, swim = -1;
+      for (let b = 0; b <= 80; b += 0.25) {     // no hill reaches past R, so the coast IS the ground here
+        const gh = coastHeightAt(R + b);
+        if (water < 0 && gh <= OCEAN_Y) water = b;
+        if (swim < 0 && OCEAN_Y - gh >= 1.35) { swim = b; break; }
+      }
+      shoreFacts = {
+        beachBandM: +(BEACH_W).toFixed(2),
+        drySandM: +(water < 0 ? BEACH_W : water).toFixed(2),
+        wadeM: +((swim > 0 && water >= 0) ? swim - water : 0).toFixed(2),
+        wetLive: shoreRig ? 1 : 0,
+      };
+    })();
     // clean solid green — the old two-tone checker tiling read as a debug texture
     const island = new THREE.Mesh(new THREE.CircleGeometry(R, 64),
       new THREE.MeshLambertMaterial({ color: 0x53a84e }));

@@ -3849,3 +3849,61 @@ restrained. Landed via temp-index commit atop origin/main (shared dirty
 checkout), PR #27 merged; local main THEN fast-forwarded to bfaccbd after
 re-pointing the three files' index entries (ff refuses dirty-but-identical
 files otherwise), so this tree's copies are clean and safe from add -A.
+
+## THE 2026-08-16 BEACH SESSION — both coasts get bigger and real, zero props, one easy A/B button
+
+**Mandate:** *"Improve the beach without adding props in natural disaster and in
+gang city and commit bigger and more real easy use before after tool and GO
+FAST."* Read as three deliverables: both beaches bigger + more real with ZERO
+new props, the before/after tool made one-command easy, everything committed.
+
+**Gang City (`BEACH_V2`, default on, `?cfg_BEACH_V2=0` reverts):**
+- world.js: the south seawall's beach gap grew 100 → 160 m (cx-150..cx+10).
+  Every consumer reads the descriptor, so the sand, swash apron, minimap band
+  and stashes all widened without another file changing. Prop COUNTS untouched
+  — a wider beach with the same nine palms is mostly open sand, which is what
+  a coastline is.
+- beach.js: the sand band stopped being one flat quad in one hex. It is a
+  subdivided grid with micro-relief (three incommensurate sine fields, ZERO
+  rng draws — build stream byte-identical under the flag) and vertex colour
+  doing texture's job: grain mottle (position hash), warm/cool drift, crests
+  bleaching + hollows shading, a damp band into the swash, and the high-tide
+  WRACK LINE as colour. Relief clamps near-flat where authored things live
+  (towels 0.085, furniture 0.06, pier approach) and ≤0.20 everywhere (the
+  boardwalk deck's underside is 0.22). The swash apron gained alongshore
+  columns (7 → ~16, one per 11 m) so the run-up reads as surf tongues.
+  BUG CAUGHT IN REVIEW: first grid winding faced -Y (invisible sand);
+  cross-product check fixed it before the first screenshot.
+- Lobes ride the relief and take the same vertex colours.
+
+**Natural Disaster island (`SURV_BEACH_V2`, default on):**
+- disaster_arena.js: the 8 m flat sand annulus at y=-0.02 became a 26 m SHORE
+  with a profile — grass edge, low wave-built berm (0.30 peak at b≈4.6), then
+  a smoothstep foreshore that descends THROUGH the waterline to -1.9 where the
+  shelf takes over. groundHeightAt and the drawn ring read ONE function
+  (coastHeightAt), so drawn == walked (the seabed doctrine, extended to the
+  beach). Dry sand ~11.6 m, wadable foreshore ~15 m before swim.js takes you.
+- The drawn ring (RingGeometry R-3..SHORE_R-1, SAME 96 theta segments as the
+  seabed ring, so the boundary vertices coincide — no seam, no overlap) is
+  vertex-coloured and carries a LIVE WET LINE: every vertex below the live
+  mean sea + a breathing alongshore swash wets instantly, dries at 0.10/s —
+  so a tsunami drawdown strands a great ring of visibly wet sand (the dread
+  beat, on the beach itself) and a flood's retreat leaves a high-water mark.
+  Tick at 47.95, right behind the ocean mesh's own surge take at 47.9.
+- CBZ.survShoreAudit() publishes the shore's static facts (band, dry, wade,
+  wet-line liveness) measured off the same functions physics uses.
+
+**The easy before/after button:**
+- tools/before-after.mjs — ONE argument: `node tools/before-after.mjs
+  beach-shores` (or `npm run ba -- <preset>`; bare = list all presets with
+  titles). Applies the three decisions every run makes anyway: --before from
+  the preset's defaultBefore (flag-A/B) else deployed, --keep-going,
+  --no-open. Everything else passes through to visual-compare.mjs.
+- tools/visual-presets/beach-shores.mjs — five subjects across BOTH worlds in
+  one run (city boots by Play; island via CBZ.setMode("survival"), which
+  systems/state.js builds synchronously): city panorama / waterline /
+  backshore, island shore / walk-into-the-water. Flag A/B by default
+  (before = this checkout with cfg_BEACH_V2=0&cfg_SURV_BEACH_V2=0). Metrics
+  are measured off descriptors and height functions, not pixels: beachSpanM
+  100→160, islandBeachM 8→26, drySandM, wadeM, wetLineLive, verts, drawCalls.
+- npm run visual:beach = the beach comparison in one command.
