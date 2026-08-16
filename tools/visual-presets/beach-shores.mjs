@@ -99,6 +99,7 @@ async function stageBeach(input) {
     }, 180000, 300);
     if (!playing) return { ok: false, err: "never reached playing" };
     try { if (CBZ.setQualityLevel) CBZ.setQualityLevel(3); } catch (_) {}
+    if (CBZ.setFPS) CBZ.setFPS(false);   // iter-1 lesson: the first-person rifle photobombs every frame otherwise
     window.requestAnimationFrame = function () { return 0; };
     await wait(600);
     const overlay = document.createElement("div");
@@ -134,6 +135,7 @@ async function stageBeach(input) {
     CBZ.stepSim(1 / 60);
     if (CBZ.player) { CBZ.player.hp = 100; CBZ.player.dead = false; }
   }
+  if (CBZ.setFPS) CBZ.setFPS(false);     // a mode switch can re-arm the viewmodel
 
   // ---- tripod -------------------------------------------------------------
   const T = window.THREE;

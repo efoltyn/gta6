@@ -291,7 +291,16 @@
       // its OWN material (the shared cmat pool must never learn vertexColors)
       const sandMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
       sandMat.name = "beach-dry-sand";
-      mergeAdd(sandGeoms, sandMat);
+      const sandMesh = mergeAdd(sandGeoms, sandMat);
+      if (sandMesh) {
+        // non-empty userData = core/batch.js keeps its hands off (the swash
+        // apron's own rule). Batching this mesh swaps in the batch material,
+        // and the batch material does not read vertex colours — iter-1 of the
+        // before/after run photographed exactly that: dunes present, mottle
+        // gone, sandVerts 0.
+        sandMesh.userData.beachSand = true;
+        sandMesh.name = "beach-dry-sand";
+      }
     }
 
     // =====================================================================
