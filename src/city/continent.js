@@ -314,11 +314,11 @@
     //   pairs grows for free whenever the map does, so it is reported
     //   separately as evidence and is not the headline.
     // SAME-BIOME PAIRS ARE SKIPPED, for the reason the math gate's own
-    // overlap test skips them: "same biome = sibling, fine". A civic
-    // campus butted onto its own city, or three villages of one nation
-    // clustered together, is DESIGN — counting those would have pinned
-    // minPairDistance at 2u (Goldspire <-> its civic campus, measured)
-    // and the metric would never have moved again.
+    // overlap test skips them: "same biome = sibling, fine". An annex
+    // butted onto its own city, or three villages of one nation
+    // clustered together, is DESIGN — counting those pinned
+    // minPairDistance at 2u (measured, back when Goldspire still had its
+    // civic campus) and the metric would never have moved again.
     let minPair = Infinity, allSum = 0, allPairs = 0, closest = null;
     const nearest = new Array(regions.length).fill(Infinity);
     const tight = [];
@@ -604,8 +604,48 @@
       }
       return false;
     }
+    /* A RIVER IS A POLYLINE, and it had to become a third kind rather than a
+       chain of rects. city/river.js's channel is ~7 km of 116 m water: as
+       rects that is ~43 bodies, and inlandWaterField below is called for
+       every plate vertex (224k of them), every physics ground query and every
+       water test in the game — so 43 bodies is a 43x multiplier on the single
+       hottest field in the world build. As ONE `path` body it is a bounding
+       box reject for the whole country and, inside the box, a scan of the two
+       or three segments the sample's own slice can reach.
+
+       `b.half` may be a NUMBER (constant width) or an ARRAY parallel to
+       `b.pts` (a channel that tapers, which a real river does at both ends).
+       Returns the signed distance to the channel's edge, so a caller cannot
+       tell a river from a lake — which is the point. */
+    function pathBodyField(b, x, z) {
+      const bb = b.bbox;
+      if (bb) {
+        const ox = Math.max(bb.minX - x, 0, x - bb.maxX);
+        const oz = Math.max(bb.minZ - z, 0, z - bb.maxZ);
+        if (ox > 0 || oz > 0) return Math.hypot(ox, oz);   // outside: cheap and exact enough
+      }
+      const p = b.pts;
+      if (!p || p.length < 2) return Infinity;
+      let best = Infinity;
+      for (let i = 0; i + 1 < p.length; i++) {
+        const ax = p[i].x, az = p[i].z, bx = p[i + 1].x, bz = p[i + 1].z;
+        const vx = bx - ax, vz = bz - az;
+        const L2 = vx * vx + vz * vz;
+        let t = L2 > 0 ? ((x - ax) * vx + (z - az) * vz) / L2 : 0;
+        t = t < 0 ? 0 : (t > 1 ? 1 : t);
+        const dx = x - (ax + vx * t), dz = z - (az + vz * t);
+        const half = Array.isArray(b.half)
+          ? (b.half[i] + (b.half[i + 1] - b.half[i]) * t)
+          : (+b.half || 40);
+        const d = Math.hypot(dx, dz) - half;
+        if (d < best) best = d;
+        if (best < -half) break;                            // deep inside: no closer answer matters
+      }
+      return best;
+    }
     function waterBodyField(b, x, z) {
       if (!b) return Infinity;
+      if (b.kind === "path") return pathBodyField(b, x, z);
       if (b.kind === "circle") return Math.hypot(x - b.cx, z - b.cz) - b.r;
       const dx = Math.max(b.minX - x, 0, x - b.maxX);
       const dz = Math.max(b.minZ - z, 0, z - b.maxZ);
@@ -632,6 +672,48 @@
       const inland = inlandWaterField(x, z);
       if (inland < s) s = inland;
       return s;
+    }
+
+    /* ---- THE RIVER (city/river.js) ------------------------------------
+       THE HARBOUR PASS ABOVE BUILDS A MOAT. `bayDist` is a Chebyshev
+       distance, so the water it opens between BAY0 and BAY1 is a closed 67 m
+       ring around the city rect with no outlet on any side — and a flood
+       fill from a marina berth proves it: 314 m and stop, with the nearest
+       coast 7 km away. Every boat in this game was floating in a pond.
+
+       The river cannot be a landmass builder of its own. It has to know
+       where the SEA is to run to it, and NOTHING in this world knows that
+       until the field above exists: before this builder, waterfield.js
+       answers from a boot-time fallback that reads open country as ocean
+       (which is precisely how city/marina.js came to put 104 of 112 berths
+       on grass). So it is called HERE, with `coastOnly` — the same field
+       minus the inland term, i.e. the coastline with no river in it yet,
+       which is exactly the oracle "how far to the sea" needs — and the body
+       it hands back is pushed into the array `inlandWaterField` reads, so
+       one line later the shore field carves it like any other water.        */
+    function coastOnly(x, z) {
+      const e = plateInsideDistance(x, z);
+      let s = e - coastInset(x, z);
+      if (HARBOR) {
+        const bd = bayDist(x, z);
+        const sBay = bd <= BAY0 ? (BAY0 - bd)
+                   : (bd >= BAY1 ? (bd - BAY1) : -Math.min(bd - BAY0, BAY1 - bd));
+        if (sBay < s) s = sBay;
+      }
+      if (s < 12 && inSolidRegion(x, z, 8)) s = 12;
+      return s;
+    }
+    if (CBZ.cityRiverCarve) {
+      try {
+        const rb = CBZ.cityRiverCarve(city, {
+          shoreAt: coastOnly,
+          plate: { minX: minX, maxX: maxX, minZ: minZ, maxZ: maxZ },
+        });
+        // `waterBodies` is this builder's own slice and is what the field
+        // reads; river.js also files the body on city.waterBodies for the
+        // shader/highway consumers. Push here or the carve never happens.
+        if (rb) waterBodies.push(rb);
+      } catch (e) { console.error("[river]", e); }
     }
 
     // ================= CONTINUOUS COUNTRY RELIEF =========================

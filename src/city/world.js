@@ -793,6 +793,33 @@
       return Math.max(0, Math.min(1, distScore * 0.6 + waterBonus + jitter));
     }
 
+    // ---- WHERE A DECAL SITS (the drawn ground, not the walkable floor) ----
+    //  groundHeightAt below is the WALKABLE floor, and across the flat city
+    //  that is 0 everywhere. But the ground is DRAWN as a stack of thin slabs
+    //  ABOVE it — avenues 0.040, cross streets 0.065, the block sidewalk slab
+    //  0.08, lot pads and grass yards 0.10 (see the road/block passes above).
+    //  So anything seated on floorAt() + a few centimetres (blood pools, tyre
+    //  smears) lands INSIDE that stack: on the road it clears the asphalt and
+    //  shows, on a block it is 2-6 cm UNDER the sidewalk slab and the depth
+    //  test eats it whole. Fall off a tower onto the kerb and the blood is
+    //  simply not there — which is exactly the report.
+    //  This returns the top of whatever is actually drawn at (x,z). On real
+    //  terrain (Mount Mercy) none of these slabs exist, so the walkable floor
+    //  is the answer and the old behaviour stands.
+    const GY_ROAD = 0.065, GY_WALK = 0.08, GY_LOT = 0.10;
+    function groundDecalYAt(x, z) {
+      const real = Math.max(0, CBZ.cityGroundHeightAt ? (+CBZ.cityGroundHeightAt(x, z) || 0) : 0);
+      if (real > 0.2) return real;                                  // raised terrain: no slabs
+      if (x < minX || x > maxX || z < minZ || z > maxZ) return real; // off the grid entirely
+      // distance to the nearest block centre on each axis (blocks sit halfway
+      // between two road centre-lines, one `step` apart)
+      const dx = Math.abs((((x - xLines[0]) % step) + step) % step - step / 2);
+      const dz = Math.abs((((z - zLines[0]) % step) + step) % step - step / 2);
+      if (dx > BLK / 2 || dz > BLK / 2) return GY_ROAD;              // carriageway
+      const lotHalf = (BLK - 4) / 2;                                 // the lot/yard pad
+      return (dx <= lotHalf && dz <= lotHalf) ? GY_LOT : GY_WALK;    // pad, else sidewalk band
+    }
+
     city = {
       root, center: { x: cx, z: cz },
       N, step, BLK, ROAD, xLines, zLines, minX, maxX, minZ, maxZ,
@@ -811,6 +838,9 @@
         const real = CBZ.cityGroundHeightAt ? (+CBZ.cityGroundHeightAt(x, z) || 0) : 0;
         return Math.max(0, real);
       },
+      // top of the DRAWN ground stack — what a ground decal seats on. See the
+      // note on groundDecalYAt above; never feed this to physics or footing.
+      groundDecalY: groundDecalYAt,
       // land-value field (PROCGEN.md roadmap #3): distance-to-centre falloff +
       // waterfront proximity bonus + low-freq deterministic noise, ~[0,1].
       // Sampled by buildings.js (height gradient, abandoned-lot gate) — cheap
@@ -888,12 +918,39 @@
       // carriageway once the slab shrank: raised strips lining every street that
       // read as walls and visually narrowed the road.)
       const sidewalkHalf = BLK / 2;
+      /* THE DROPPED KERB. Every block used to be ringed by four UNBROKEN runs
+         of stone: not one property in the city had a way in that the world
+         drew. city/approach.js solves ONE crossing per parcel (the face the
+         door goes on, which is a function of the lot and the city centre and
+         therefore knowable HERE, hundreds of lines before any building
+         exists), and this run is split around it — so the gap in the kerb and
+         the driveway laid through it come from the same solve and can never
+         end up in different places. Feature-detected: no approach.js, or the
+         flag off, and every run is drawn whole exactly as before. */
+      function curbRun(x, z, span, vertical, gap) {
+        if (!gap) { curb(x, z, span, vertical); return; }
+        // `gap` is the crossing's centre along this run's axis, in world
+        // coordinates, and its half-width. A crossing that does not actually
+        // fall inside the run leaves the run whole.
+        const c0 = (vertical ? z : x) - span / 2, c1 = c0 + span;
+        const g0 = gap.at - gap.half, g1 = gap.at + gap.half;
+        if (g1 <= c0 || g0 >= c1) { curb(x, z, span, vertical); return; }
+        // A stub shorter than the kerb is thick is not a kerb, it is a pebble.
+        if (g0 - c0 > 0.5) curb(vertical ? x : (c0 + g0) / 2, vertical ? (c0 + g0) / 2 : z, g0 - c0, vertical);
+        if (c1 - g1 > 0.5) curb(vertical ? x : (g1 + c1) / 2, vertical ? (g1 + c1) / 2 : z, c1 - g1, vertical);
+      }
       for (const lot of lots) {
         const cx2 = lot.cx, cz2 = lot.cz, e = sidewalkHalf - 0.2, span = BLK - 0.8;
-        curb(cx2, cz2 - e, span, false);
-        curb(cx2, cz2 + e, span, false);
-        curb(cx2 - e, cz2, span, true);
-        curb(cx2 + e, cz2, span, true);
+        const ap = CBZ.cityLotApproach ? CBZ.cityLotApproach(lot, { x: cx, z: cz }) : null;
+        // the crossing sits on ONE face; the other three runs stay whole
+        const gz0 = (ap && ap.nz < 0) ? { at: ap.x, half: ap.half + 0.6 } : null;   // -z face
+        const gz1 = (ap && ap.nz > 0) ? { at: ap.x, half: ap.half + 0.6 } : null;   // +z face
+        const gx0 = (ap && ap.nx < 0) ? { at: ap.z, half: ap.half + 0.6 } : null;   // -x face
+        const gx1 = (ap && ap.nx > 0) ? { at: ap.z, half: ap.half + 0.6 } : null;   // +x face
+        curbRun(cx2, cz2 - e, span, false, gz0);
+        curbRun(cx2, cz2 + e, span, false, gz1);
+        curbRun(cx2 - e, cz2, span, true, gx0);
+        curbRun(cx2 + e, cz2, span, true, gx1);
         // sidewalk expansion-joint lines (subtle scored concrete grid)
         for (let s = -1; s <= 1; s += 2) {
           for (let j = -1; j <= 1; j += 1) {

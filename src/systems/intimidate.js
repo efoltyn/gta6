@@ -69,21 +69,54 @@
     return false;
   }
 
-  // does this inmate carry a concealed firearm? decided once, from profile —
-  // gang muscle / brawlers / bold types do; vendors and pacifists never.
+  /* ============================================================
+     NOBODY SPAWNS WITH A GUN. (PRISON_GUN_PROVENANCE)
+
+     OWNER, 2026-08-13: "nobody has a gun in prison unless it came from the
+     armoury!! this is dumb, they need to actually run over a dead person who
+     has a gun, they can steal a taser, or steal a keycard and access the
+     gunroom... or when i open the gun room if one sneaks in behind me while
+     door is open they could grab a gun."
+
+     This function used to ROLL for it: a typical gang inmate had a 27–40%
+     chance of a concealed firearm, capped at 0.6. A yard where every third man
+     is carrying, out of nowhere, decided at spawn.
+
+     It is the same law the rest of this block already runs on. city/take.js
+     does not MINT cigarettes, it TRANSFERS them; the comment forty lines below
+     is proud that a shakedown "was never minting". A gun appearing on a man
+     because a die came up short is minting, and worse than minting currency —
+     currency at least cannot shoot you.
+
+     So the roll is gone and the answer is always no. Every gun an inmate ever
+     holds now has exactly one origin, and the player can watch all of them
+     happen:
+
+       CORPSE      systems/prisondrops.js already lays a dead man's real "Gun"
+                   on the floor (ai.js kill() → prisonDrop). An inmate who
+                   walks over it picks it up — the same walk-over the player
+                   uses, no second loot path. LIVE (see npcTakeWeapon there).
+       ARMORY      a keycard opens world/gunroom.js. An inmate who gets one
+                   can go where the guns are. PLANNED.
+       TAILGATE    CBZ.armory.open is public. You raise the gate; whoever is
+                   behind you is inside it too. PLANNED.
+       TASER       taken off a guard, the non-lethal tier. PLANNED.
+
+     WHY THIS IS THE SAME WAVE AS THE POPUP DELETIONS, not a detour:
+     the block needed a caption track because too much of it happened without a
+     cause the player could observe. "X pulls a gun on you!" existed precisely
+     BECAUSE the gun came from a spawn roll — there was no earlier moment to
+     have watched, so the only way to tell you was to tell you. Give the gun a
+     history and the caption is not deleted, it is made redundant: you know he
+     is armed because you saw him take it off the body, or because you left the
+     armory gate up and saw him slip in behind you.
+
+     Kept as a function (rather than deleting the call in initN) so the
+     provenance rule has one obvious home, and so a build that wants the old
+     behaviour has one line to change rather than a system to reconstruct.
+     ============================================================ */
   function decideGun(n) {
-    if (n.role === "merchant" || n.role === "dealer") return false;
-    const beh = n.behavior || "";
-    if (beh === "pacifist") return false;
-    const r = n.ratings || {}, p = n.personality || {};
-    let c = 0.05;
-    if (n.gang != null) c += 0.12;
-    if (n.crewRole === "shotcaller" || n.crewRole === "enforcer" || n.crewRole === "collector") c += 0.20;
-    const f = r.fighting || 40;
-    if (f > 78) c += 0.20; else if (f > 58) c += 0.10;
-    if (beh === "predator" || beh === "bully" || beh === "hothead" || beh === "unpredictable") c += 0.12;
-    c += ((p.nerve != null ? p.nerve : 0.5) - 0.5) * 0.22;
-    return rng() < Math.min(0.6, Math.max(0, c));
+    return false;
   }
 
   function initN(n) {
@@ -95,6 +128,7 @@
     n.intimidFireT = 0;
     n.poseHandsUp = false;
     n.poseAimBack = false;
+    if (n.char) n.char.handsUp = false;   // a recycled rig must not start overhead
     n._reactHinted = false;
     // reflect the gun into their loot so a frisk / takedown can yield it
     if (n.hasGun && CBZ.econ && CBZ.econ.rollLoadout) {
@@ -111,15 +145,61 @@
     const beh = CBZ.BEHAVIORS && CBZ.BEHAVIORS[n.behavior];
     const guts = beh && beh.guts != null ? beh.guts : 0.4;
 
+    /* HOW OFTEN A MAN CHANCES IT.
+       OWNER, 2026-08-13: "i hold a gun at you far away you raise your hands or
+       charge at me or run away USUALLY RAISE HANDS."
+
+       The old curve did the opposite. Baseline at average stats (nerve .5,
+       fighting 40, guts .4) was 0.53 — already a coin flip — and then the
+       distance term ADDED ten points beyond 9 m, exactly where the owner wants
+       surrender. With a taser and a crewmate nearby it reached the 0.92 cap.
+       Pointing a gun across the yard drew a weapon on you roughly one time in
+       five, which is what "overridden by how aggressive other inmates are"
+       felt like.
+
+       Two changes, and only two:
+         · the baseline is halved, so a drawn gun is a thing a hard man does,
+           not the median response;
+         · the distance term FLIPS. Range is now what makes a man comply — he
+           has time to see the muzzle, and nothing to gain by racing it. Close
+           quarters is where chancing it starts to make sense, because at
+           arm's length a grab is a real option and the shot is not.
+       The modifiers that were already reading right (taser, backup) stand. */
+    /* A MAN WITH A BLADE ANSWERS FIRST, because he is holding something and
+       has to do something with it. systems/prisonshanks.js owns that decision
+       (stats-driven, no rng, distance as a hard gate) and performs the stow or
+       the drop itself; this file only learns which of the three he picked.
+
+       CHARGE is the branch the header above has promised since the owner said
+       "you raise your hands or charge at me or run away" — it has never once
+       run, because `decideGun` returns false and the only defiance this
+       module knew was pulling a gun nobody has. A shank is a weapon a man can
+       plausibly chance it with, so it is the one that brings the branch back.
+
+       The other two land in the SAME `scared` body as an empty-handed man: he
+       put the thing away (or on the floor) and got his hands up, which is
+       exactly what the surrender pose already draws. Nothing to special-case. */
+    if (CBZ.prisonShankGunpoint) {
+      let blade = null;
+      try { blade = CBZ.prisonShankGunpoint(n, { lethal: lethal, dist: playerDist(n) }); } catch (e) {}
+      if (blade === "charge") {
+        n.intimidMode = "charge";
+        n.poseHandsUp = false; n.poseAimBack = false;
+        if (n.char) n.char.handsUp = false;
+        // NO POPUP. A man walking at you with a blade out is the message.
+        return;
+      }
+    }
+
     let draw = 0;
     if (n.hasGun) {
-      draw = 0.08 + nerve * 0.5 + fight * 0.28 + guts * 0.22;
+      draw = 0.04 + nerve * 0.26 + fight * 0.15 + guts * 0.12;
       const d = playerDist(n);
-      if (d < 3) draw -= 0.28;                 // a gun in your face is sobering
-      else if (d > 9) draw += 0.10;            // room to chance it at distance
+      if (d < 2.5) draw += 0.14;               // close enough to grab the barrel
+      else if (d > 9) draw -= 0.16;            // he has time to think, and does
       if (!lethal) draw += 0.18;               // you're only holding a taser
       if (gangNearby(n)) draw += 0.10;         // backup emboldens
-      draw = Math.max(0, Math.min(0.92, draw));
+      draw = Math.max(0, Math.min(0.72, draw));
     }
 
     if (n.hasGun && rng() < draw) {
@@ -130,11 +210,24 @@
     } else {
       n.intimidMode = "scared";
       n.poseHandsUp = true; n.poseAimBack = false;
-      if (CBZ.npcEmote) CBZ.npcEmote(n, "");
-      if (!n._reactHinted) {
-        n._reactHinted = true;
-        CBZ.flashHint && CBZ.flashHint("" + shortName(n) + " freezes up — " + robCue(), 1.7);
-      }
+      // ONE ARM DRIVER. `poseHandsUp` is read only by systems/reactions.js,
+      // which poses arms by ADDING a damped offset and backing that offset out
+      // again at the top of the next frame — so the surrender restarted from
+      // the idle base every frame and could never converge, while
+      // entities/character.js kept damping the same arms toward the walk/idle
+      // target (~-0.34, at the sides). Two drivers, neither winning: hands
+      // hovering by the hips, twitching with the gait.
+      //
+      // character.js already solved this and the prison simply never opted in.
+      // `ch.handsUp` does three things at once there: the idle counter-swing
+      // branch (line ~2276) stops writing the arms, the late surrender layer
+      // (line ~2786) damps them to -2.60 with the elbow/splay detail, and
+      // reactions.js's own `animOwnsArms` guard sees the flag and skips its
+      // additive write. Setting it makes character.js the sole arm driver,
+      // which is what its comment there says the pose needs.
+      if (n.char) n.char.handsUp = true;
+      // NO POPUP. The pose above IS the message — hands overhead, frozen,
+      // facing you. "X freezes up" captioned a body the player is looking at.
     }
   }
 
@@ -156,14 +249,23 @@
 
   function endIntimid(n) {
     const wasArmed = n.intimidMode === "draw" || n.intimidMode === "standoff";
+    const wasCharging = n.intimidMode === "charge";
+    if (CBZ.prisonShankGunpointEnd) { try { CBZ.prisonShankGunpointEnd(n); } catch (e) {} }
     n.intimidMode = null;
     n.intimidT = 0;
     n.poseHandsUp = false;
     n.poseAimBack = false;
+    // hand the arms back to the idle animator, or he keeps them overhead for
+    // the rest of the run (character.js owns them for as long as this is set).
+    if (n.char) n.char.handsUp = false;
     n._reactHinted = false;
     // someone who drew on you stays wary and bolts with the gun still out;
     // hands-up folks just go back to their day.
-    if (wasArmed && alive(n) && n.aiState !== "fight" && n.aiState !== "snitch") {
+    // A man who CHARGED is not finished because you looked away — that is the
+    // moment he wanted. His hunt is left running (entities/ai.js owns it and
+    // times it out on its own), so lowering the gun on someone who decided to
+    // come at you does not cancel him.
+    if (wasArmed && !wasCharging && alive(n) && n.aiState !== "fight" && n.aiState !== "snitch") {
       n.aiState = "flee"; n.fleeT = 1.5 + rng() * 1.5;
     }
   }
@@ -177,8 +279,14 @@
       return;
     }
 
-    const aiming = !!(CBZ.isAimingWeapon && CBZ.isAimingWeapon());
     const gun = CBZ.currentGun && CBZ.currentGun();
+    /* THIS MODULE IS ABOUT A MUZZLE. Holding a blade out at a man is a threat,
+       but it is not the threat this file models — nobody puts his hands over
+       his head because someone across the yard is holding a sharpened strip of
+       bed frame. `currentGun()` answers with whatever is equipped, and since
+       the shank shipped that can be a weapon with no barrel, which would have
+       had the whole wing surrendering to a knife at nine metres. */
+    const aiming = !!(CBZ.isAimingWeapon && CBZ.isAimingWeapon()) && !(gun && gun.melee);
     const lethal = !!(gun && !gun.nonlethal);
 
     // who is directly in the player's gun sights? (inmates only — guards keep
@@ -203,14 +311,32 @@
         if (!alive(n)) { endIntimid(n); continue; }
         if (n.intimidMode == null) decideReaction(n, lethal);
 
-        if (n.intimidMode === "draw") {
+        if (n.intimidMode === "charge") {
+          // Nothing to run here. entities/ai.js's huntPlayer brain is already
+          // walking him at you and swinging when he arrives, and
+          // systems/prisonshanks.js keeps the blade drawn because it reads the
+          // same field. Re-arming the hunt each frame is the whole of it, so
+          // that holding the gun on him does not time out his approach.
+          n.huntPlayer = Math.max(n.huntPlayer || 0, 6);
+        } else if (n.intimidMode === "draw") {
           n.intimidDrawT -= dt;
           if (n.intimidDrawT <= 0) {
             n.intimidMode = "standoff";
             n.poseAimBack = true;
             n.intimidFireT = 0.8 + ((n.personality && n.personality.nerve) || 0.5) * 1.7;
             CBZ.sfx && CBZ.sfx("switch");
-            CBZ.flashHint && CBZ.flashHint("" + shortName(n) + " pulls a gun on you!", 1.5);
+            // NO LINE. `poseAimBack = true` two lines up is the whole message:
+            // systems/reactions.js levels his gun arm forward at you and sets
+            // the tense fear face, and the "switch" sound is the draw. This was
+            // the first popup the owner pointed at — "PUNCHING LEGIT IS A
+            // MOTION" applies double to a man raising a gun at your face.
+            //
+            // Deleted only after the pose was PHOTOGRAPHED (tools/visual-presets/
+            // gunpoint-studio.mjs, subject standoff-draw) rather than assumed:
+            // the hands-up pose next door looked equally fine in the source and
+            // was in fact fighting animChar to a half-raised stall. A caption is
+            // safe to remove when someone has looked at the screen, not when the
+            // code reads like it should work.
           }
         } else if (n.intimidMode === "standoff") {
           if (aimedHere) {
@@ -243,16 +369,15 @@
        moved — cigs in `units`, and `taken` DOLLARS pinned at zero, because
        there are no dollars in here and pretending otherwise would be the exact
        fiction the block exists to delete. */
-    // A shakedown is possible RIGHT NOW — arm the tappable pill for exactly as
-    // long as that stays true (the TTL sweep in interactions.js retires it the
-    // moment this stops being re-armed, e.g. you lower the gun or he bolts).
-    // The pill fires "@prisonRobTarget", never a synthesized "g": this verb is
-    // POLLED off CBZ.keys and a synthetic keydown/keyup pair is already over
-    // before the next frame reads it.
-    if (CBZ.prisonPrompt && canRob(target)) {
-      CBZ.prisonPrompt("rob", "@prisonRobTarget", "Rob " + shortName(target), null);
-    }
-
+    // NO PILL. A shakedown used to raise its own button the moment the man
+    // froze, which is the same fourth-wall break as the popup that sat beside
+    // it: a new control appearing to announce a state the player can see. The
+    // verb now lives where every other thing you can do to a person lives —
+    // systems/interact.js's option panel, which already reskins itself for
+    // seventeen kinds of approach and simply gained one more (a man at
+    // gunpoint). That panel is deliberately short-ranged, so the verbs arrive
+    // when you have WALKED UP to him, while the hands-up pose carries the read
+    // from across the yard. [G] stays as a hotkey for anyone who wants it.
     const robNow = !!(CBZ.keys && CBZ.keys["g"]);
     if (robNow && !robWas) doRob(target);
     robWas = robNow;
@@ -278,8 +403,21 @@
     target.intimidT = HOLD;                                       // keep them terrified
   }
 
-  // Pill target: acts on whoever is currently under the gun, re-validated.
-  CBZ.prisonRobTarget = function () { doRob(currentTarget); };
+  // The interact panel dispatches here. It passes the actor its own row is
+  // about; the argument is honoured so the panel and the shakedown can never
+  // act on two different men, and falls back to whoever is under the gun for
+  // the [G] hotkey, which has no actor of its own. doRob re-validates either
+  // way, so a stale panel row cannot rob somebody who already put his hands
+  // down.
+  CBZ.prisonRobTarget = function (who) { doRob(who || currentTarget); };
+
+  // "Let him go" — lower the gun on this one man. Ends the hold immediately
+  // rather than waiting out HOLD, so choosing to release reads as a decision
+  // instead of as the player drifting out of range.
+  CBZ.intimidateRelease = function (who) {
+    const t = who || currentTarget;
+    if (t && t.intimidMode) endIntimid(t);
+  };
 
   const intimidate = {
     // called by ai.js aiThink: returns a move speed (0 = frozen) while this
@@ -296,10 +434,10 @@
   };
   CBZ.intimidate = intimidate;
 
-  // ---- ratchet declaration (see CBZ.prisonPromptAudit in interactions.js) ----
-  (CBZ._prisonPromptSites || (CBZ._prisonPromptSites = [])).push(
-    { id: "rob", act: "@prisonRobTarget", was: "… freezes up — [G] to rob" }
-  );
+  // The "rob" prompt site is GONE, not muted — the verb moved into the
+  // interact panel's own option list (systems/interact.js verbsFor), so there
+  // is no prompt left for CBZ.prisonPromptAudit to count. CBZ.prisonRobTarget
+  // stays exported because the panel dispatches through it.
 
   // SENSE before the npc brain (npc.js @22) so think() sees fresh intent.
   CBZ.onUpdate(19, tick);

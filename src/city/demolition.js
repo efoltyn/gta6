@@ -64,9 +64,66 @@
   // with storeys, so a 12-storey block needs ~18 damage (an airliner crash
   // currently delivers ~3.2). Kinetic impact damage is the other half.
   if (CBZ.CONFIG.DEMO_MAX_STOREYS == null) CBZ.CONFIG.DEMO_MAX_STOREYS = 64;
-  const MAX_STOREYS = CBZ.CONFIG.DEMO_MAX_STOREYS;
+  /* READ LIVE, NOT LATCHED — this used to be `const MAX_STOREYS =
+     CBZ.CONFIG.DEMO_MAX_STOREYS`, a LOAD-TIME COPY, while city/structural.js's
+     mirror of this very gate (its `maxCollapseStoreys()`, structural.js:318-324)
+     reads the config on every call and its comment states the contract as a
+     fact: "Read the SAME config value, live, every call — not a load-time copy
+     ... so the two can never drift again". Half of that mirror was a lie.
+     Raise DEMO_MAX_STOREYS at runtime (a debug poke, a mission script, a
+     `?cfg_` applied after this file parsed) and structural.js would start
+     condemning towers this file still refuses: structural batch-hides the
+     building, hands the lot to destroy(), destroy() returns false at
+     eligible() — and the block is left as a permanently INVISIBLE, NON-SOLID
+     hole with no rubble pile and no rebuild calendar. That is the exact
+     failure the mirror exists to prevent, so this reader is now shaped
+     identically to structural.js's, down to the 64 fallback. No flag: this
+     aligns the code to its own already-documented invariant. */
+  function maxStoreys() {
+    const v = CBZ.CONFIG.DEMO_MAX_STOREYS;
+    return (typeof v === "number" && v > 0) ? v : 64;
+  }
+  /* DEMO_FAST_PURGE — unregister a building's members from the city-sized
+     shared arrays in ONE compaction pass instead of indexOf+splice per member.
+     Measured at seed 90210 (329 lots, CBZ.colliders.length = 123,332): ONE
+     destroy() of the 52-storey flagship (831 colliders + 2,152 window panes)
+     took 432.9 ms; destroying all 328 lots took 5,679 ms — and a nuke pays it
+     PER CONDEMNED BUILDING PER FRAME through structural.js's finishCollapse,
+     at the worst possible case, because structural.js's hideReal() has already
+     purged those colliders so every indexOf runs the full 123k length and
+     misses. The one-pass primitive already exists in the sibling file
+     (structural.js's `purge`, written for this exact case and measured at
+     6.2 ms vs 36.9 ms on 3,000 removals); it is published as
+     CBZ.structuralPurge and REUSED here, never copied (Block Law).
+     false = the byte-identical indexOf/splice loops that predate this, kept
+     verbatim below (one-line revert, owner rule). The fast path also degrades
+     to them automatically whenever CBZ.structuralPurge is absent — index.html
+     loads THIS file (862) before structural.js (1133), so the primitive is
+     resolved lazily INSIDE each function, never captured at module scope. */
+  if (CBZ.CONFIG.DEMO_FAST_PURGE == null) CBZ.CONFIG.DEMO_FAST_PURGE = true;
+  /* DEMO_LOAD_V1 — the load path. D.apply() ran a full destroy() per row
+     synchronously: measured 2,063 ms for a 328-row blob, no budget, no
+     yielding, inside net/netpersist.js's applyWorld. Three fixes ride this
+     flag: (a) ONE purge pass per shared array for the WHOLE blob instead of
+     one per row, (b) the healed-check now reads the RESTORED clock (see
+     netpersist.js's own comment at the w.demo line), and (c) single-player
+     saves carry the ledger at all — see the SP PERSISTENCE block at the foot
+     of this file. false = the old per-row path, verbatim, and no SP section.  */
+  if (CBZ.CONFIG.DEMO_LOAD_V1 == null) CBZ.CONFIG.DEMO_LOAD_V1 = true;
+  /* DEMO_RUBBLE_DET — rubble draw-stream equalisation + a less pathetic light
+     tier. See buildRubble() for the full reasoning and the mesh arithmetic.
+     false = the pre-existing two-branch builder, verbatim. */
+  if (CBZ.CONFIG.DEMO_RUBBLE_DET == null) CBZ.CONFIG.DEMO_RUBBLE_DET = true;
   // ~3 rockets for a small shop, ~5-6 for a fat 4-storey block (RPG power 1.9)
   function hpMax(b) { return 2 + b.storeys * 1.2 + (b.w * b.d) / 300; }
+
+  /* The shared one-pass compaction, resolved AT CALL TIME (see DEMO_FAST_PURGE
+     above for why it can never be captured at module scope). Returns null when
+     the flag is off or structural.js is not loaded — every caller treats null
+     as "take the legacy loop", which is the degrade-safe contract. */
+  function fastPurge() {
+    return CBZ.CONFIG.DEMO_FAST_PURGE ? (CBZ.structuralPurge || null) : null;
+  }
 
   const ledger = new Map();      // key "x,z" -> rec
   const hp = new Map();          // lot -> accumulated blast damage (session-local)
@@ -104,7 +161,7 @@
   function eligible(lot) {
     const b = lot && lot.building;
     if (!b || !b.group || !b.colliders || !b.colliders.length) return false;
-    if (b.storeys > MAX_STOREYS) return false;               // landmark tier
+    if (b.storeys > maxStoreys()) return false;              // landmark tier (live read — see maxStoreys)
     if (!CBZ.CONFIG.DEMO_LANDMARKS && (b.helipad || b.hangar)) return false;
     if (lot.kind === "park") return false;
     return true;
@@ -147,6 +204,19 @@
   // The first entries (structural.js drains nearest-first) keep the full pile;
   // the rest retain a grounded, collidable three-piece silhouette.
   const RUBBLE_DETAIL_CAP = 32;
+  /* LIGHT TIER = 5 slabs + 1 shard, not 2 + 1 (DEMO_RUBBLE_DET).
+     After a whole-city nuke the measured split was 32 detailed / 296 light, and
+     a 2-slab-plus-1-shard stub does not read as "a building was here" — it
+     reads as "the building was ERASED", which is precisely the owner's
+     "buildings blow up wrong". The arithmetic for the fix: +3 meshes x ~296
+     light lots = ~+900 extra boxes worst case, taking the light tier from
+     296*3 = 888 to 296*6 = 1,776 and the whole city-nuke pile budget from
+     ~1,480 to ~2,368 meshes. They are static, shadowless, unmerged
+     BoxGeometry boxes on the SHARED cmat cache (one material, no new
+     material per box), i.e. the cheapest thing this renderer draws — the same
+     class of object the scaffold phase already puts 40-60 of on a SINGLE lot.
+     The 32-lot full-mound cap is unchanged; only the floor is raised. */
+  const RUBBLE_LIGHT_SLABS = 5, RUBBLE_LIGHT_SHARDS = 1;
   function box(g, x, y, z, w, h, d, col, ry) {
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(col));
     m.position.set(x, y, z);
@@ -161,26 +231,87 @@
     const rng = lotRng(lot, 0xdead);
     const W = b.w - 1.2, Dp = b.d - 1.2;
     const peak = Math.min(3.6, 1.0 + b.storeys * 0.35);
+    // The tier LATCHES here, at build time, and is deliberately never
+    // retrofitted: a pile that healed out of the ledger frees a detailed slot
+    // for the NEXT lot to be built (ledger.size is read live, and destroy()
+    // registers the record before calling setPhase, so the new pile counts
+    // itself), but an existing stub is left exactly as it is. Rebuilding
+    // standing geometry underneath the player to chase a budget is a worse bug
+    // than an under-detailed pile. DEMO_RUBBLE_DET changes only what the latch
+    // MEANS (how many of the pile's slabs get meshes), never when it happens.
     const detailed = ledger.size <= RUBBLE_DETAIL_CAP;
     rec.rubbleDetailed = detailed;
     // concrete greys + a memory of the building's own wall colour
     const cols = [0x565a5e, 0x4a4e52, 0x63676b, 0x585349];
-    const n = detailed ? 14 + ((rng() * 8) | 0) : 2;
-    for (let i = 0; i < n; i++) {
-      // mound profile: big tilted slabs near the centre, crumbs at the rim
-      const ang = rng() * Math.PI * 2, rr = Math.sqrt(rng());
-      const x = Math.cos(ang) * rr * W * 0.42, z = Math.sin(ang) * rr * Dp * 0.42;
-      const k = 1 - rr;                                        // 1 centre → 0 rim
-      const w = 1.2 + rng() * 3.4 * (0.4 + k), d = 1.2 + rng() * 3.4 * (0.4 + k);
-      const h = 0.3 + k * peak * (0.5 + rng() * 0.6);
-      box(g, b.ox + x, h / 2 - 0.05, b.oz + z, w, h, d, cols[(rng() * cols.length) | 0], rng() * Math.PI);
-    }
-    // a couple of leaning wall shards — reads as "was a building", not a quarry
-    for (let i = 0; i < (detailed ? 2 : 1); i++) {
-      const sx = rng() < 0.5 ? -1 : 1;
-      const m = box(g, b.ox + sx * W * 0.3, peak * 0.55, b.oz + (rng() - 0.5) * Dp * 0.5,
-        0.35, peak * 1.5, 2.2 + rng() * 2.5, 0x585349, rng() * 0.4);
-      m.rotation.z = sx * (0.35 + rng() * 0.25);               // leaning, not standing
+    if (CBZ.CONFIG.DEMO_RUBBLE_DET) {
+      /* ---- EQUALISED DRAW STREAM ----------------------------------------
+         The file header (:19-21) promises: "Rubble is DETERMINISTIC — seeded
+         by the lot's coordinates (CBZ.hashN), so every client and every reload
+         grows the same pile from a record that is just {x, z, atDay}."
+         The two-branch builder below BROKE that promise, and not subtly. The
+         detailed branch drew `14 + ((rng()*8)|0)` (one draw) then 7 draws per
+         slab then 5 per shard; the light branch skipped the count draw
+         entirely and drew 2 slabs and 1 shard. So the SAME lot, from the SAME
+         seed, produced a DIFFERENT pile depending on how full the ledger
+         happened to be at the moment it collapsed — and the light pile was not
+         even a prefix of the detailed one, because the missing count draw
+         shifted the whole stream by one. Two clients that nuked the same
+         district in a different order disagreed about the geometry; so did one
+         client reloading its own save.
+         The fix: draw EVERY parameter for the FULL pile, unconditionally, in
+         the original order. The tier then decides only how many of those
+         already-decided slabs get a mesh. A lot's pile is a pure function of
+         its coordinates again — the header's promise, restored — and a light
+         pile is now a true visual PREFIX of its own detailed self, so a lot
+         that heals and falls again in a quieter frame grows the same mound it
+         would have grown the first time.
+         The detailed branch is byte-identical to what it always drew (same
+         count formula, same order, nothing skipped); only light piles change. */
+      const n = 14 + ((rng() * 8) | 0);
+      const slabCap = detailed ? n : RUBBLE_LIGHT_SLABS;
+      for (let i = 0; i < n; i++) {
+        // mound profile: big tilted slabs near the centre, crumbs at the rim
+        const ang = rng() * Math.PI * 2, rr = Math.sqrt(rng());
+        const x = Math.cos(ang) * rr * W * 0.42, z = Math.sin(ang) * rr * Dp * 0.42;
+        const k = 1 - rr;                                        // 1 centre → 0 rim
+        const w = 1.2 + rng() * 3.4 * (0.4 + k), d = 1.2 + rng() * 3.4 * (0.4 + k);
+        const h = 0.3 + k * peak * (0.5 + rng() * 0.6);
+        const ci = (rng() * cols.length) | 0;                    // drawn even when unmeshed —
+        const ry = rng() * Math.PI;                              // the stream must not shift
+        if (i >= slabCap) continue;                              // tier caps MESHES, not PARAMETERS
+        box(g, b.ox + x, h / 2 - 0.05, b.oz + z, w, h, d, cols[ci], ry);
+      }
+      // a couple of leaning wall shards — reads as "was a building", not a quarry
+      const shardCap = detailed ? 2 : RUBBLE_LIGHT_SHARDS;
+      for (let i = 0; i < 2; i++) {
+        const sx = rng() < 0.5 ? -1 : 1;
+        const sz = (rng() - 0.5) * Dp * 0.5;
+        const sd = 2.2 + rng() * 2.5;
+        const sry = rng() * 0.4;
+        const lean = sx * (0.35 + rng() * 0.25);                 // leaning, not standing
+        if (i >= shardCap) continue;
+        const m = box(g, b.ox + sx * W * 0.3, peak * 0.55, b.oz + sz, 0.35, peak * 1.5, sd, 0x585349, sry);
+        m.rotation.z = lean;
+      }
+    } else {
+      // ---- LEGACY (DEMO_RUBBLE_DET off): the two-branch builder, verbatim ---
+      const n = detailed ? 14 + ((rng() * 8) | 0) : 2;
+      for (let i = 0; i < n; i++) {
+        // mound profile: big tilted slabs near the centre, crumbs at the rim
+        const ang = rng() * Math.PI * 2, rr = Math.sqrt(rng());
+        const x = Math.cos(ang) * rr * W * 0.42, z = Math.sin(ang) * rr * Dp * 0.42;
+        const k = 1 - rr;                                        // 1 centre → 0 rim
+        const w = 1.2 + rng() * 3.4 * (0.4 + k), d = 1.2 + rng() * 3.4 * (0.4 + k);
+        const h = 0.3 + k * peak * (0.5 + rng() * 0.6);
+        box(g, b.ox + x, h / 2 - 0.05, b.oz + z, w, h, d, cols[(rng() * cols.length) | 0], rng() * Math.PI);
+      }
+      // a couple of leaning wall shards — reads as "was a building", not a quarry
+      for (let i = 0; i < (detailed ? 2 : 1); i++) {
+        const sx = rng() < 0.5 ? -1 : 1;
+        const m = box(g, b.ox + sx * W * 0.3, peak * 0.55, b.oz + (rng() - 0.5) * Dp * 0.5,
+          0.35, peak * 1.5, 2.2 + rng() * 2.5, 0x585349, rng() * 0.4);
+        m.rotation.z = sx * (0.35 + rng() * 0.25);               // leaning, not standing
+      }
     }
     // one central mound collider: you clamber AROUND a fresh collapse
     const c = { minX: b.ox - W * 0.3, maxX: b.ox + W * 0.3, minZ: b.oz - Dp * 0.3, maxZ: b.oz + Dp * 0.3, y0: 0, y1: Math.max(0.9, peak * 0.55) };
@@ -267,7 +398,15 @@
   // gone: a lot that's mid-clear no longer blocks you).
   function releasePropCols(rec) {
     if (rec.propCols && rec.propCols.length) {
-      for (const c of rec.propCols) { const i = CBZ.colliders.indexOf(c); if (i >= 0) CBZ.colliders.splice(i, 1); }
+      // Same disease, same cure as destroy() (DEMO_FAST_PURGE). A phase group
+      // only ever registers 0-2 colliders, so the win per call is small — but
+      // this runs on EVERY phase change of EVERY record, i.e. ~4 times per lot
+      // over a 328-lot nuke's rebuild arc, each one previously a full 123k
+      // indexOf + a 123k memmove. One compaction pass replaces both, and the
+      // shape is now identical to destroy()'s so there is one idiom to read.
+      const purge = fastPurge();
+      if (purge) purge(CBZ.colliders, new Set(rec.propCols));
+      else for (const c of rec.propCols) { const i = CBZ.colliders.indexOf(c); if (i >= 0) CBZ.colliders.splice(i, 1); }
       rec.propCols = [];
       if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     }
@@ -415,6 +554,55 @@
     }
   }
 
+  // ========================================================================
+  //  SHARED-ARRAY BOOKKEEPING (DEMO_FAST_PURGE / DEMO_LOAD_V1).
+  //
+  //  Both directions of a teardown touch the three city-sized arrays every
+  //  system on the map holds a reference to — CBZ.colliders (123,332 entries
+  //  at seed 90210), CBZ.platforms, CBZ.losBlockers — and both used to do it
+  //  one member at a time with indexOf. Two spans exist so the O(city) cost is
+  //  paid ONCE per event instead of once per member and once per lot:
+  //
+  //    _dbatch   REMOVAL span. destroy() collects into shared Sets and the
+  //              span owner runs one purge per array at the end. Opened by
+  //              D.apply() so loading a 328-row save blob costs
+  //              O(colliders + members), not O(rows x colliders).
+  //    _reSets   RE-SEAT span. rebuild()'s "is this already registered?" test
+  //              was `indexOf(...) === -1`; it is now a membership Set built
+  //              once. A BULK rebuild (D.reset(), or a whole healed district
+  //              draining in one tick) shares one set of Sets across every
+  //              record, so the Set construction is paid once too.
+  //
+  //  Both are plain module state, both are opened and closed synchronously by
+  //  the function that owns the span, and both degrade to nothing: with the
+  //  flag off — or with structural.js simply not loaded, so CBZ.structuralPurge
+  //  is undefined — every caller falls through to its original loop verbatim.
+  // ========================================================================
+  let _dbatch = null;                 // {cols,plats,los} Sets — open removal span
+  let _reSets = null;                 // {cols,plats,los} Sets — open re-seat span
+  function reSetsBegin() {
+    if (_reSets) return false;        // already inside somebody else's span
+    _reSets = {
+      cols: new Set(CBZ.colliders || []),
+      plats: new Set(CBZ.platforms || []),
+      los: new Set(CBZ.losBlockers || []),
+    };
+    return true;                      // caller owns this span and must end it
+  }
+  function reSetsEnd(owned) { if (owned) _reSets = null; }
+  // Push `v` onto `arr` unless it is already there. Inside a span the answer
+  // comes from the Set (O(1)); outside one it is the original indexOf scan.
+  // NOTE the deliberate staleness allowance: releasePropCols() removes phase-
+  // prop colliders from CBZ.colliders during a bulk rebuild, leaving those
+  // objects present-but-gone in `_reSets.cols`. Harmless by construction —
+  // nothing ever re-seats a phase-prop collider through this helper, and the
+  // ARRAY, never the Set, is the truth.
+  function seat(arr, set, v) {
+    if (!arr || v == null) return;
+    if (set) { if (!set.has(v)) { arr.push(v); set.add(v); } return; }
+    if (arr.indexOf(v) === -1) arr.push(v);
+  }
+
   // ---- collapse / rebuild --------------------------------------------------
   function destroy(lot, opts) {
     opts = opts || {};
@@ -425,21 +613,58 @@
     // 1) the batched shell: merged copies off, shared-buffer slices zeroed
     if (CBZ.batchHideGroup) CBZ.batchHideGroup(b.group);
     b.group.visible = false;
-    // 2) glass out of the instanced pools (+ solid panes' meshes/colliders)
-    for (const gp of b.windows || []) {
-      if (gp.shattered) continue;
-      gp.shattered = true;
-      if (gp.mesh) gp.mesh.visible = false;
-      else if (CBZ._paneShow) CBZ._paneShow(gp, false);
-      if (gp.col) { const i = CBZ.colliders.indexOf(gp.col); if (i >= 0) CBZ.colliders.splice(i, 1); }
-    }
-    // 3) physics + vision: this building no longer blocks anything
-    for (const c of b.colliders) { const i = CBZ.colliders.indexOf(c); if (i >= 0) CBZ.colliders.splice(i, 1); }
-    for (const p of b.platforms || []) { const i = CBZ.platforms.indexOf(p); if (i >= 0) CBZ.platforms.splice(i, 1); }
-    for (const m of b.losMeshes || []) { const i = CBZ.losBlockers.indexOf(m); if (i >= 0) CBZ.losBlockers.splice(i, 1); }
-    for (const dr of b.doors || []) {
-      dr.demolished = true;
-      if (dr.colIn) { const i = CBZ.colliders.indexOf(dr.col); if (i >= 0) CBZ.colliders.splice(i, 1); dr.colIn = false; }
+    const purge = fastPurge();
+    if (purge) {
+      /* ---- FAST PATH (DEMO_FAST_PURGE) --------------------------------------
+         Collect EVERY member this building is giving up into three Sets first,
+         then compact each shared array exactly once. This is the same code
+         structural.js's hideReal() already runs — deliberately, so the two
+         teardown paths a nuke alternates between behave identically.
+         Inside an open removal span (_dbatch, opened by D.apply for a whole
+         save blob) we contribute to the span's Sets and let the SPAN OWNER do
+         the compaction, which is what turns a 328-row load from
+         O(rows x colliders) into O(colliders + members). */
+      const bt = _dbatch;
+      const deadCols = bt ? bt.cols : new Set();
+      const deadPlats = bt ? bt.plats : new Set();
+      const deadLos = bt ? bt.los : new Set();
+      for (const gp of b.windows || []) {
+        if (gp.shattered) continue;
+        gp.shattered = true;
+        if (gp.mesh) gp.mesh.visible = false;
+        else if (CBZ._paneShow) CBZ._paneShow(gp, false);
+        if (gp.col) deadCols.add(gp.col);
+      }
+      for (const c of b.colliders) deadCols.add(c);
+      for (const p of b.platforms || []) deadPlats.add(p);
+      for (const m of b.losMeshes || []) deadLos.add(m);
+      for (const dr of b.doors || []) {
+        dr.demolished = true;
+        if (dr.colIn) { deadCols.add(dr.col); dr.colIn = false; }
+      }
+      if (!bt) {
+        purge(CBZ.colliders, deadCols);
+        purge(CBZ.platforms, deadPlats);
+        purge(CBZ.losBlockers, deadLos);
+      }
+    } else {
+      // ---- LEGACY PATH (flag off, or structural.js not loaded) — verbatim ----
+      // 2) glass out of the instanced pools (+ solid panes' meshes/colliders)
+      for (const gp of b.windows || []) {
+        if (gp.shattered) continue;
+        gp.shattered = true;
+        if (gp.mesh) gp.mesh.visible = false;
+        else if (CBZ._paneShow) CBZ._paneShow(gp, false);
+        if (gp.col) { const i = CBZ.colliders.indexOf(gp.col); if (i >= 0) CBZ.colliders.splice(i, 1); }
+      }
+      // 3) physics + vision: this building no longer blocks anything
+      for (const c of b.colliders) { const i = CBZ.colliders.indexOf(c); if (i >= 0) CBZ.colliders.splice(i, 1); }
+      for (const p of b.platforms || []) { const i = CBZ.platforms.indexOf(p); if (i >= 0) CBZ.platforms.splice(i, 1); }
+      for (const m of b.losMeshes || []) { const i = CBZ.losBlockers.indexOf(m); if (i >= 0) CBZ.losBlockers.splice(i, 1); }
+      for (const dr of b.doors || []) {
+        dr.demolished = true;
+        if (dr.colIn) { const i = CBZ.colliders.indexOf(dr.col); if (i >= 0) CBZ.colliders.splice(i, 1); dr.colIn = false; }
+      }
     }
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     // 4) the lot's obligations pause while it's a hole in the ground
@@ -489,21 +714,35 @@
     restoreAir(b);              // the rebuild calendar gives the pad/hangar back
     if (CBZ.batchShowGroup) CBZ.batchShowGroup(b.group);
     b.group.visible = true;
-    for (const gp of b.windows || []) {
-      if (!gp.shattered) continue;
-      gp.shattered = false; gp.cracked = false;
-      if (gp.mesh) gp.mesh.visible = true;
-      else if (CBZ._paneShow) CBZ._paneShow(gp, true);
-      if (gp.col && CBZ.colliders.indexOf(gp.col) === -1) CBZ.colliders.push(gp.col);
-    }
-    for (const c of b.colliders) if (CBZ.colliders.indexOf(c) === -1) CBZ.colliders.push(c);
-    for (const p of b.platforms || []) if (CBZ.platforms.indexOf(p) === -1) CBZ.platforms.push(p);
-    for (const m of b.losMeshes || []) if (CBZ.losBlockers.indexOf(m) === -1) CBZ.losBlockers.push(m);
-    for (const dr of b.doors || []) {
-      dr.demolished = false;
-      dr.open = false; dr.hold = 0; dr.t = 0; dr.pivot.rotation.y = 0;
-      if (!dr.colIn) { if (CBZ.colliders.indexOf(dr.col) === -1) CBZ.colliders.push(dr.col); dr.colIn = true; }
-    }
+    /* RE-SEAT (DEMO_FAST_PURGE). The mirror of destroy()'s disease: this used
+       to answer "already registered?" with `indexOf(...) === -1` per pane, per
+       collider, per platform, per LOS mesh — the 52-storey flagship alone is
+       2,152 panes x a 123k scan. One membership Set answers all of them in
+       O(1); reSetsBegin() builds it, or joins the bulk span an outer caller
+       (D.reset, the phase ticker's healed-rows drain) already opened so a
+       whole-city heal pays the O(city) construction ONCE rather than per lot.
+       Flag off / structural.js absent => `sets` is null and seat() falls back
+       to the original indexOf test, verbatim. */
+    const fast = !!fastPurge();
+    const owned = fast ? reSetsBegin() : false;
+    const sets = fast ? _reSets : null;
+    try {
+      for (const gp of b.windows || []) {
+        if (!gp.shattered) continue;
+        gp.shattered = false; gp.cracked = false;
+        if (gp.mesh) gp.mesh.visible = true;
+        else if (CBZ._paneShow) CBZ._paneShow(gp, true);
+        if (gp.col) seat(CBZ.colliders, sets && sets.cols, gp.col);
+      }
+      for (const c of b.colliders) seat(CBZ.colliders, sets && sets.cols, c);
+      for (const p of b.platforms || []) seat(CBZ.platforms, sets && sets.plats, p);
+      for (const m of b.losMeshes || []) seat(CBZ.losBlockers, sets && sets.los, m);
+      for (const dr of b.doors || []) {
+        dr.demolished = false;
+        dr.open = false; dr.hold = 0; dr.t = 0; dr.pivot.rotation.y = 0;
+        if (!dr.colIn) { seat(CBZ.colliders, sets && sets.cols, dr.col); dr.colIn = true; }
+      }
+    } finally { reSetsEnd(owned); }
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     if (b.home && b.home._demoListed != null) { b.home.listed = b.home._demoListed; b.home._demoListed = null; }
     if (retire) startTween({ rec: null, building: b, from: 3, to: -1, outGroup: retire, inGroup: null, outMode: "v" });
@@ -642,16 +881,51 @@
 
   // ---- ticking: phase advancement (cheap — ledger is tiny, early-out when 0) --
   CBZ.onUpdate(34.5, function () {
-    if (!CBZ.game || CBZ.game.mode !== "city") return;
+    if (!CBZ.game || CBZ.game.mode !== "city") {
+      /* MODE-EXIT SEAM — the tween leak. rebuild() at the `retire` line starts
+         an exit tween for the scaffold, and setPhase() starts one on every
+         phase change, but stepTweens() only ever ran BEHIND this early return.
+         Leave the city mid-tween (die into the menu, jump to another mode) and
+         the retiring group was STRANDED in the arena at whatever partial scale
+         it happened to hold — a half-sunk scaffold frozen in the world until
+         something called D.reset(). This is the smallest honest fix: the
+         mode-exit boundary already exists right here, and the file already
+         owns the primitive for settling everything at once. killAllTweens()
+         finalises each one exactly as a completed tween would — incoming
+         groups snap to identity (the file's own rule: "settled == the snap
+         build"), outgoing groups are disposed — so re-entering the city finds
+         precisely the state a load would have produced. No flag: this is a
+         leak, and leaving it is not a behaviour anyone can want. */
+      if (tweens.length) killAllTweens();
+      return;
+    }
     wrapBoom("cityExplosion");
     wrapBoom("cityAirstrikeExplosion");
+    // Single-player save wiring — the same lazy, idempotent, marker-guarded
+    // install the wrapBoom lines above use, for the same reason (worldstate.js
+    // may or may not have mounted yet). Both are a handful of comparisons per
+    // frame once installed; see the SP PERSISTENCE block below.
+    spWrapSaves();
+    spHydrate();
     stepTweens();                    // advance transition FX (a final rebuild's scaffold retracts even after the ledger empties)
     if (!ledger.size) return;
     const now = CBZ.dayTime ? CBZ.dayTime() : 0;
-    for (const rec of Array.from(ledger.values())) {
-      if (now - rec.at >= T_REBUILT) rebuild(rec);
-      else setPhase(rec, phaseFor(rec));
-    }
+    const recs = Array.from(ledger.values());
+    // A whole district heals in ONE tick after a load (or after a day-jump), and
+    // each rebuild() otherwise builds its own O(city) membership Set. Count the
+    // healed rows first — the ledger is at most a few hundred entries — and open
+    // the shared re-seat span only when more than one record will actually use
+    // it. A frame of pure phase ticking must not pay an O(colliders) Set build,
+    // and this ticker runs every frame for as long as any rubble exists.
+    let healed = 0;
+    for (const rec of recs) if (now - rec.at >= T_REBUILT) healed++;
+    const owned = (healed > 1 && fastPurge()) ? reSetsBegin() : false;
+    try {
+      for (const rec of recs) {
+        if (now - rec.at >= T_REBUILT) rebuild(rec);
+        else setPhase(rec, phaseFor(rec));
+      }
+    } finally { reSetsEnd(owned); }
   });
 
   // ---- public surface --------------------------------------------------------
@@ -688,9 +962,37 @@
     if (!best || bd > 3) return false;                                // address didn't resolve
     return destroy(best, { quiet: true, silent: true, at: row.at });
   };
+  /* THE LOAD PATH (DEMO_LOAD_V1). This ran a full destroy() per row,
+     synchronously, inside net/netpersist.js's applyWorld: measured 2,063 ms
+     for a 328-row blob, because every row paid its own indexOf storm against
+     the 123,332-entry collider array. Batching the REMOVALS turns the whole
+     blob into O(colliders + members): each destroy() contributes to the shared
+     Sets (see the _dbatch span above) and the compaction runs once, here, at
+     the end.
+     Per-row isolation is preserved EXACTLY — the try/catch is still per row, so
+     one unresolvable address still cannot kill the rest of the load — and the
+     outer try/finally guarantees the span closes and the arrays are compacted
+     even if the loop itself throws. With the flag off, or DEMO_FAST_PURGE off,
+     or structural.js not loaded, this is the original loop, verbatim. */
   D.apply = function (blob) {
     if (!blob || blob.v !== 1 || !Array.isArray(blob.list)) return;
-    for (const row of blob.list) try { D.applyOne(row); } catch (e) {}
+    const purge = CBZ.CONFIG.DEMO_LOAD_V1 ? fastPurge() : null;
+    if (!purge || _dbatch) {                       // legacy path, or already inside a span
+      for (const row of blob.list) try { D.applyOne(row); } catch (e) {}
+      return;
+    }
+    _dbatch = { cols: new Set(), plats: new Set(), los: new Set() };
+    try {
+      for (const row of blob.list) try { D.applyOne(row); } catch (e) {}
+    } finally {
+      const bt = _dbatch; _dbatch = null;
+      // Phase-prop colliders pushed by each row's setPhase() are NOT in these
+      // Sets, so the single compaction below keeps every one of them.
+      purge(CBZ.colliders, bt.cols);
+      purge(CBZ.platforms, bt.plats);
+      purge(CBZ.losBlockers, bt.los);
+      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    }
   };
   // net-relay surface (networld): a guest applies the host's rebuild event by
   // address; the host applies a guest's forwarded blast without re-running FX.
@@ -705,9 +1007,126 @@
   // full restore for a new run (called from cityGlassReset)
   D.reset = function () {
     killAllTweens();
-    for (const rec of Array.from(ledger.values())) rebuild(rec, { silent: true });
+    // One shared re-seat span for the whole ledger: a post-nuke reset re-seats
+    // 328 buildings at once, and without this each of them rebuilt its own
+    // membership Set over the 123k collider array.
+    const recs = Array.from(ledger.values());
+    const owned = (recs.length > 1 && fastPurge()) ? reSetsBegin() : false;
+    try { for (const rec of recs) rebuild(rec, { silent: true }); }
+    finally { reSetsEnd(owned); }
     hp.clear();
   };
+
+  /* ========================================================================
+     SP PERSISTENCE (DEMO_LOAD_V1) — "it must stay loadable".
+
+     D.serialize() had exactly ONE caller in the whole repo: net/netpersist.js's
+     worldBlob (its line 137, the MULTIPLAYER HOST path). Single-player saves
+     carried no demolition at all, so a player could level the skyline, watch
+     the autosave tick, reload — and find the city pristine. The consequence
+     with an end date, which is this file's entire thesis (see the
+     DEMO_LANDMARKS block up top), evaporated on reload.
+
+     WHAT THE SP LEDGER ACTUALLY OFFERS, having read city/worldstate.js:
+     • There is NO existing world-DAMAGE seam to ride. city/fracture.js is in
+       the same position this file was — `cityFracture.serialize` is likewise
+       called only from netpersist.js:136 — so "ride where fracture reapplies"
+       does not exist in single-player. Nothing to copy, nothing to share.
+     • There IS a clean, established SECTION pattern, and a structurally
+       identical consumer already using it: city/construction.js:1106-1134
+       stamps `led.wall` through lazy idempotent wraps of cityWorldCommit /
+       cityWorldCollect, then hydrates once per ledger identity off a tick.
+       worldstate.js's own comments call this the "stamp before commit"
+       pattern. That is what is used below, unchanged in shape.
+     • Version safety is BY CONSTRUCTION and needs no new guard: worldstate's
+       load() admits only `version === 2`, and a v2 save written before this
+       change simply has no `demo` key, which reads as undefined and skips.
+       That is exactly how `cashStore`, `identities` and `cityContacts` were
+       each added to this record after the fact.
+
+     THE ONE REAL BLOCKER, AND ITS FIX: the SP ledger does NOT persist the
+     calendar. CBZ.dayCount/dayPhase ride only the MP world blob
+     (netpersist.js:140-141). Our rows are stamped in ABSOLUTE CBZ.dayTime()
+     units, so a `at: 12.4` from a save made on day 12 is meaningless against a
+     fresh-boot clock sitting at ~0 — phaseFor() would read el = -12 and freeze
+     every pile at phase 1 for twelve in-game days before the arc even started.
+     So the section stores the clock reading it was TAKEN at (`now`) and
+     hydrate REBASES: age = savedNow - row.at is preserved exactly, and the
+     rebuild calendar resumes from where it actually stood. No change to
+     daynight.js, no change to the wire format netpersist already sends
+     (D.serialize() is untouched; `now` is added by the stamp, and D.apply
+     ignores keys it does not know).
+  ======================================================================== */
+  function spLedger() { const g = CBZ.game; return (g && g.cityWorld && typeof g.cityWorld === "object") ? g.cityWorld : null; }
+  let _spHydrated = null;                      // the ledger object we have already adopted
+  function spStamp() {
+    if (!CBZ.CONFIG.DEMO_LOAD_V1) return;
+    // MULTIPLAYER keeps its existing, host-authoritative path: worldBlob.demo.
+    // Stamping the same state into the CHARACTER ledger too would give a guest
+    // a second, stale copy of world truth it has no authority over.
+    if (CBZ.net && CBZ.net.active) return;
+    const led = spLedger();
+    if (!led) return;
+    // NEVER overwrite a blob we have not adopted yet. worldstate.js autosaves
+    // every 5 s; without this, a reload's first autosave would fire while the
+    // ledger is still empty (the run reset re-glazes the city) and erase the
+    // very rows we are about to hydrate from.
+    if (_spHydrated !== led) return;
+    if (!ledger.size) { if (led.demo) led.demo = null; return; }   // a fully healed city stops carrying rows
+    const blob = D.serialize();
+    blob.now = +(CBZ.dayTime ? CBZ.dayTime() : 0).toFixed(3);      // the clock these `at`s are relative to
+    led.demo = blob;
+  }
+  let _spWrapped = false;
+  function spWrapSaves() {
+    if (_spWrapped) return;
+    const c = CBZ.cityWorldCommit;
+    if (typeof c !== "function") return;       // worldstate.js not up yet — retry next tick
+    _spWrapped = true;
+    if (!c._demoSaveWrap) {
+      const w = function () { try { spStamp(); } catch (e) {} return c.apply(this, arguments); };
+      w._demoSaveWrap = true; CBZ.cityWorldCommit = w;
+    }
+    const cc = CBZ.cityWorldCollect;
+    if (typeof cc === "function" && !cc._demoSaveWrap) {
+      const w2 = function () { try { spStamp(); } catch (e) {} return cc.apply(this, arguments); };
+      w2._demoSaveWrap = true; CBZ.cityWorldCollect = w2;
+    }
+  }
+  function spHydrate() {
+    if (!CBZ.CONFIG.DEMO_LOAD_V1 || !CBZ.CONFIG.CITY_DEMOLITION) return;
+    const led = spLedger();
+    if (!led || led === _spHydrated) return;
+    // AFTER THE CITY IS BUILT, AND AFTER THE RUN RESET HAS FINISHED.
+    // systems/state.js runs `resetGame(); setState("playing")` in that order,
+    // and city/mode.js's reset() calls cityGlassReset() -> D.reset(), which
+    // rebuilds every record it can see. Waiting for state === "playing" puts
+    // us strictly after that teardown, so nothing we admit is undone.
+    const A = arena();
+    if (!A || !A.lots || !A.lots.length) return;
+    if (!CBZ.game || CBZ.game.state !== "playing") return;
+    _spHydrated = led;                          // claim it either way — one attempt per ledger
+    // MP takes the netpersist worldBlob path; never self-apply a char blob.
+    if (CBZ.net && CBZ.net.active) return;
+    const blob = led.demo;
+    if (!blob || blob.v !== 1 || !Array.isArray(blob.list) || !blob.list.length) return;
+    const now = CBZ.dayTime ? CBZ.dayTime() : 0;
+    const base = (typeof blob.now === "number" && isFinite(blob.now)) ? blob.now : null;
+    // REBASE (see the block comment): preserve each row's AGE, not its absolute
+    // timestamp, because the SP ledger carries no clock. Without `blob.now` —
+    // a section written by an older build of this file — fall through to the
+    // raw rows rather than inventing an age.
+    const rows = base == null ? blob.list : blob.list.map(function (r) {
+      return { x: r.x, z: r.z, at: now - Math.max(0, base - r.at) };
+    });
+    try { D.apply({ v: 1, list: rows }); } catch (e) {}
+  }
+  /* NOT re-hydrated on a fresh run inside the same page session: the identity
+     check above fires once per g.cityWorld object, and starting a new life
+     runs the whole mode.js reset block (gangs, families, real estate, glass —
+     line 580-610 there) whose declared job is to hand you a clean city. A page
+     RELOAD always mints a new ledger object out of load(), which is the case
+     the owner's "must stay loadable" actually names. */
 
   // ---- transition tooling (tools/demolition-check.mjs interpolation assert) ---
   // Prove a phase change actually INTERPOLATES rather than snaps, deterministically

@@ -57,12 +57,73 @@
 
    SHOW, DON'T TELL: this file prints nothing and adds no prompt. There is no
    snore, either — `systems/audio.js` has no such cue, and inventing one
-   without a measured SPL is exactly the fake-prop fault docs/claude/sound.md
+   without a measured SPL is exactly the fake-prop fault scrolls/claude/sound.md
    exists to stop. The night is quiet because the men are asleep.
 
-   Flags PRISON_REST_V1 · PRISON_REST_WARDEN.
+   ...AND A FIFTH, WHICH WAS THE MEASURING INSTRUMENT ITSELF (2026-08-15).
+      OWNER: "Scale the number of cells so every single NPC has a bed."
+      `sleepGap` answered 0 — every single NPC already had one — and it was
+      wrong by eight men, because it asked `role === "inmate"` and `role` in
+      this game is a TRADE. The prison's dealer, its two merchants and its
+      five crew runners are convicts out of the same factory in the same
+      orange (entities/npc.js:26 stamps `kind: "inmate"` on all fifty), and
+      not one of them was in the count. §2's predicate now asks the factory,
+      the gap read +8 the moment it did, and world/cellblock.js answered it
+      with eleven more cells: 42 -> 66 beds against 50 -> 62 men, sleepGap -4
+      at the night block. A ratchet that cannot see the fault is not a
+      ratchet, and the men it could not see were the ones sleeping standing up.
+
+   ...AND A SIXTH: THE WING HAD THE BEDS AND COULD NOT GET THE MEN INTO THEM
+      (2026-08-16). `sleepGap` read -4 and only 23 of 61 men were lying down.
+      Instrumented at the night block, every man in CBZ.npcs, the count came
+      out as four separate faults and not one:
+
+        6 men       never housed at all. §2 was widened to the FACTORY
+                    predicate on 2026-08-15 and the two files that MOVE a body
+                    were not: prisonschedule's `housed()` and npc.js's curfew
+                    gate both still asked `role === "inmate"`, so the dealer,
+                    both merchants and four thieves got no muster, no claim and
+                    no walk. The 2026-08-15 note above is that same bug, found
+                    a second time one layer down.
+        0 claims    `_claim` was set on ZERO of 66 racks while 31 men held a
+                    `_restBed`. §5's block-change `dropClaims` clears the
+                    reservation and does NOT clear the `_restBed` the men keep,
+                    and `assign()`'s fast path handed that record back without
+                    re-taking it — so `CBZ.rest.claim` saw every rack as free.
+                    Three racks in that run had two names on them.
+        13 men      standing in a heap at z -6.2..-7.3, every one of them
+                    aimed at the single point (0, -9.8).
+        50 racks    behind world/door.js's keycard leaf. That door is the cell
+                    house's ONLY entrance — a 5.72 x 0.34 m slab at (0, -8) —
+                    and it is shut for the whole run. A 0.5 m body cannot pass
+                    the band z[-8.5,-7.5] anywhere. So the wing's racks were
+                    never reachable by anybody not spawned inside, and the
+                    thirteen were standing against it.
+
+      What is fixed HERE is the assignment: the claim is a reservation again,
+      and a rack nobody can reach is not on offer (§4). Getting a body to a
+      reachable rack is systems/prisonschedule.js's, which now walks a ROUTE
+      and racks the block gate for the count.
+
+   Flags PRISON_REST_V1 · PRISON_REST_WARDEN · PRISON_LIGHTSOUT_V2.
    Ratchet CBZ.prisonRestAudit().bunkStanders — bodies standing inside a
    mattress, which is the owner's complaint stated as a number — pinned at 0.
+   Ratchet CBZ.prisonRestAudit().sleepGap — prisoner rigs minus registered
+   mattresses, which is the 2026-08-15 ask stated as a number — pinned <= 0,
+   held by tools/prison-beds-check.mjs at the night block and not at spawn.
+   Ratchet CBZ.prisonRestAudit().doubleClaimed — racks with two names on them
+   — pinned at 0.
+   Ratchet CBZ.prisonRestAudit().homelessInside — a man standing INSIDE his own
+   housing with no rack to his name — pinned at 0. Deliberately not `homeless`:
+   a man still in the yard when the wing secured is locked out, which is what
+   securing a wing DOES, and an assertion that calls that a fault is an
+   assertion that will be silenced instead of believed.
+   Ratchet CBZ.prisonRestAudit().abed — the share of the men this system is
+   RESPONSIBLE for at lights-out who are actually lying down. 0.38 before the
+   routing wave; 0.85 on the finished build. Floor 0.60 in
+   tools/prison-beds-check.mjs — see its header for why it is deliberately
+   loose and which numbers are the real ratchet. Also read by
+   tools/visual-presets/prison-lightsout.mjs.
 ============================================================ */
 (function () {
   "use strict";
@@ -75,8 +136,13 @@
   const CFG = (CBZ.CONFIG = CBZ.CONFIG || {});
   if (CFG.PRISON_REST_V1 == null) CFG.PRISON_REST_V1 = true;
   if (CFG.PRISON_REST_WARDEN == null) CFG.PRISON_REST_WARDEN = true;
+  // THE 2026-08-16 LIGHTS-OUT WAVE, one flag across three files (this one,
+  // systems/prisonschedule.js, entities/npc.js). Set it false and the wing
+  // goes back to 23-of-61 in bed, byte for byte.
+  if (CFG.PRISON_LIGHTSOUT_V2 == null) CFG.PRISON_LIGHTSOUT_V2 = true;
 
   function on() { return CFG.PRISON_REST_V1 !== false && CBZ.game && CBZ.game.mode === "escape"; }
+  function v2() { return CFG.PRISON_LIGHTSOUT_V2 !== false; }
   function sched() { return CBZ.prisonSchedule || null; }
 
   const beds = [];          // every authored rack: cell house, then south dorm
@@ -102,8 +168,28 @@
         drift off the mesh); seats come from propuse's rect query, once,
         by room — never a per-frame scan of the city's 3,375 chairs.
      ========================================================== */
-  // every body this file is responsible for finding a place for
-  function inmateOf(a) { return a && !a._crowd && a.role === "inmate" && a.group; }
+  /* EVERY BODY THIS FILE IS RESPONSIBLE FOR FINDING A PLACE FOR — and it used
+     to be `a.role === "inmate"`, which is how a capacity ratchet reported 0
+     while eight men had no bed.
+
+     MEASURED 2026-08-15, live escape run: 50 prisoner rigs in CBZ.npcs —
+     `inmate` x42, `thief` x5, `merchant` x2, `dealer` x1 — against 42
+     mattresses. `sleepGap` read 42 - 42 = 0 and the wing looked solved,
+     because `role` in this game is a TRADE (npc.js:315/329/345/380: the
+     infirmary's med seller, the yard's dealer, the crew's runners) and not a
+     statement about whether the man is doing time. Every one of those bodies
+     comes out of the same factory, wearing the same orange, and
+     entities/npc.js:26 stamps `kind: "inmate"` on all of them at birth.
+     A bed is owed to a man, not to his trade.
+
+     So the question is asked of the FACTORY, and the old `role` test is kept
+     as an OR purely so nothing that was counted before can fall out (npclife's
+     `jailInmate` sets both; entities/crowd.js sets both AND `_crowd`, which is
+     what still excludes the anonymous city tier). `kind` is the tight half:
+     modes/gungame.js:293 pushes its bots into this same CBZ.npcs and none of
+     them carries it. The number went 0 -> +8 the moment this line changed,
+     which is the whole reason world/cellblock.js then grew eleven cells. */
+  function inmateOf(a) { return a && !a._crowd && a.group && (a.kind === "inmate" || a.role === "inmate"); }
   function population() {
     const list = CBZ.npcs || [];
     let n = 0;
@@ -131,8 +217,14 @@
       // and `_cell` is how §4 reserves it for him. The TOP rack is a cellmate's
       // and belongs to nobody in particular, so it is left unmarked and the
       // nearest man without a place takes it.
-      if (c.bed) { c.bed._cell = c; beds.push(c.bed); }
-      if (c.bedTop) beds.push(c.bedTop);
+      //
+      // `_room` is a DIFFERENT question and both racks answer it: which cell
+      // this mattress physically stands in, hence which door has to be open
+      // before anybody can lie on it. §4's reachability test reads it, and it
+      // has to be on the top rack too — half the racks behind the wing's
+      // locked doors are upper bunks.
+      if (c.bed) { c.bed._cell = c; c.bed._room = c; beds.push(c.bed); }
+      if (c.bedTop) { c.bedTop._room = c; beds.push(c.bedTop); }
     }
     const housing = CBZ.prisonHousing;
     if (housing && housing.beds) for (let i = 0; i < housing.beds.length; i++) {
@@ -189,8 +281,26 @@
      than enumerate those cases, the sweep asks the identical question
      `bunkStanders` asks, and moves anyone it finds. When the invariant and the
      thing enforcing it are the same test, the ratchet cannot pass by luck. */
+  /* …AND THE NUMBER THE SWEEP LEAVES BEHIND, WHICH IS THE ONE A GATE CAN
+     ACTUALLY ASSERT ON. `bunkStanders` is sampled by the probe at an arbitrary
+     phase of this 2 Hz sweep, and a body crosses a mattress footprint (1.04 x
+     2.36 m) in well under the half second between two of them — so at any
+     daylight block the number is "how many men happened to be mid-stride
+     through a bunk when you looked", and tools/prison-beds-check.mjs's
+     daylight assertion flaked one run in four on exactly that. It was reading
+     traffic, not a fault.
+
+     `lodged` is the same question asked one instruction later: how many bodies
+     the sweep found and COULD NOT MOVE. `CBZ.rest.stepOff` refuses a rack with
+     no solved entry point rather than shoving a body into a wall, so a
+     mattress drawn without a propuse anchor — the exact failure that gate
+     exists to catch — shows up here and a man walking past does not. "Nobody
+     is LEFT standing in a mattress" is the assertion's own wording; this is
+     that sentence as a number, and it does not depend on when you look. */
+  let lodged = 0, swept = 0;
   function clearBunks() {
-    CBZ.rest.sweep(beds, CBZ.npcs || [], { skip: isFloorBed, eligible: inmateOf });
+    swept = CBZ.rest.sweep(beds, CBZ.npcs || [], { skip: isFloorBed, eligible: inmateOf });
+    lodged = swept ? CBZ.rest.standers(beds, CBZ.npcs || [], { skip: isFloorBed, eligible: inmateOf }) : 0;
   }
 
   /* ==========================================================
@@ -202,15 +312,80 @@
      ========================================================== */
   // a rack inside somebody else's cell is not on offer, however near it is
   function someoneElses(b, a) { return !!(b._cell && b._cell.owner && b._cell.owner !== a); }
+  /* A RACK ON THE FAR SIDE OF A DOOR HE CANNOT OPEN IS NOT CAPACITY.
+     MEASURED 2026-08-16 at the night block: thirteen men holding cell-house
+     racks, all thirteen standing in the yard against world/door.js's keycard
+     leaf, which is the cell house's only entrance and is shut. Handing a man a
+     bed he provably cannot walk to is worse than handing him none — it takes
+     the rack out of the pool for somebody who CAN reach it and parks a body at
+     a locked door all night. systems/prisonschedule.js owns the geometry (it
+     drives both the block gate and the cell leaves), so it is asked. */
+  function shut(b, a) {
+    if (!v2()) return false;
+    const S = sched();
+    if (!S || !S.canReach) return false;
+    return !S.canReach(a, b.x, b.z);
+  }
+  // a rack this man has already failed to walk to (prisonschedule's stall
+  // detector marks it) is not offered to him again
+  function failed(b, a) { return !!(a._restFailed && a._restFailed.indexOf(b) >= 0); }
+  function reserved(b, a) { return someoneElses(b, a) || shut(b, a) || failed(b, a); }
   function assign(a) {
     const held = a._restBed;
-    if (held && (!held.occupant || held.occupant === a)) return held;
+    /* THE CLAIM IS THE RESERVATION, AND THE FAST PATH USED TO DROP IT.
+       Measured 2026-08-16: 66 racks, 31 men holding a `_restBed`, `_claim` set
+       on none of them, because §5 drops every claim on a non-bed block change
+       and this line handed the record straight back without re-taking it. So
+       `CBZ.rest.claim` saw a full wing as empty and put a second name on three
+       racks. Re-take it here, and treat a record somebody ELSE now holds as
+       lost rather than fighting him for it.
+
+       A DOOR SHUTTING IN FRONT OF A MAN DOES NOT TAKE HIS BED AWAY. `shut()`
+       belongs in `reserved` below, where it stops a man being HANDED a rack he
+       cannot walk to; testing it here as well meant a straggler twenty metres
+       from the gate lost his rack the instant the wing secured — measured,
+       eight men homeless at 23:00 with sixteen racks standing free, because
+       releasing them helped nobody. He keeps it and waits; the wing unlocks at
+       05:00. */
+    if (held && (!held.occupant || held.occupant === a) && (!v2() || !held._claim || held._claim === a)) {
+      if (v2()) held._claim = a;
+      return held;
+    }
     const cb = CBZ.cellblock;
     if (a._cellIdx != null && cb && cb.cells[a._cellIdx] && cb.cells[a._cellIdx].bed) {
       const own = cb.cells[a._cellIdx].bed;
-      if (!own.occupant || own.occupant === a) { a._restBed = own; return own; }
+      if (!own.occupant || own.occupant === a) { a._restBed = own; if (v2()) own._claim = a; return own; }
     }
-    return CBZ.rest.claim(a, beds, { key: "_restBed", reserved: someoneElses });
+    if (v2() && held) CBZ.rest.unclaim(a, "_restBed");
+    return CBZ.rest.claim(a, beds, { key: "_restBed", reserved: v2() ? reserved : someoneElses });
+  }
+  /* GIVE A RACK BACK. systems/prisonschedule.js calls this when it gives up on
+     walking a man to one — a stall it cannot route around, or a door that has
+     finished waiting for him — so the mattress returns to the pool for
+     somebody nearer instead of being held all night by a man in the yard. */
+  const MAX_FAILED = 4;                  // …and no man may blacklist the whole
+  function release(a, permanently) {     // wing one rack at a time
+    const b = a && a._restBed;
+    if (!b) return null;
+    if (permanently) {
+      const f = a._restFailed || (a._restFailed = []);
+      if (f.indexOf(b) < 0) { f.push(b); if (f.length > MAX_FAILED) f.shift(); }
+    }
+    CBZ.rest.unclaim(a, "_restBed");
+    return b;
+  }
+  /* EVERY CLAIM WHOSE HOLDER IS GONE. This replaces §5's blanket `dropClaims`
+     under the flag: a claim is meant to be stable for the whole run
+     (systems/rest.js's claim() says so in as many words), and dropping all of
+     them at every block change while the men keep their `_restBed` is what put
+     two names on one rack. What must still be released is a rack held by a man
+     who is dead, out, or no longer pointing at it. */
+  function releaseGone() {
+    for (let i = 0; i < beds.length; i++) {
+      const b = beds[i], a = b._claim;
+      if (!a || b.occupant) continue;
+      if (a.dead || a.escaped || a._restBed !== b || !inmateOf(a)) b._claim = null;
+    }
   }
 
   /* ---- THE PLACE IS PUBLIC, because the MUSTER needs it -------------------
@@ -235,6 +410,57 @@
     beds: beds,
     capacity: function () { return beds.length; },
     population: population,
+    release: release,
+    /* WHICH CELLS ARE STILL WAITING FOR SOMEBODY. systems/prisonschedule.js's
+       door driver asks before it racks a leaf shut, because a wing that locks
+       on the clock alone locks its own men out — and behind those leaves is
+       most of the building. One pass over the cast, not one per cell; the
+       caller reuses the array. */
+    unsettled: function (out) {
+      out = out || [];
+      out.length = 0;
+      if (!on() || !built) return out;
+      const S = sched();
+      const list = CBZ.npcs || [];
+      let strandedInside = 0;
+      for (let i = 0; i < list.length; i++) {
+        const a = list[i];
+        if (!inmateOf(a) || a.dead || a.escaped || a._propLie) continue;
+        const p = a.group.position;
+        const b = a._restBed, c = b && b._room;
+        if (!c) {
+          /* A MAN WHO IS HOME AND HAS NOWHERE TO LIE DOWN. Measured 2026-08-16:
+             seven of them standing in the hall at 23:00 with every leaf shut
+             and racks free behind them — they made the count and the wing
+             locked around them anyway. A wing is not secured while somebody
+             inside it has no bed, so every cell with a free rack stays open
+             until they do. */
+          if (!b && S && S.inBlock && S.inBlock(p.x, p.z, -0.4)) strandedInside++;
+          continue;
+        }
+        if (p.x > c.x - c.hx && p.x < c.x + c.hx && p.z > c.z - c.hz && p.z < c.z + c.hz) continue;
+        if (out.indexOf(c) < 0) out.push(c);
+      }
+      if (strandedInside) for (let i = 0; i < beds.length; i++) {
+        const b = beds[i], c = b._room;
+        if (!c || b.occupant || b._claim) continue;
+        if (out.indexOf(c) < 0) out.push(c);
+      }
+      return out;
+    },
+    // how many live men are still not lying down — what the count gate and the
+    // door hold are both waiting on
+    afoot: function () {
+      if (!on() || !built) return 0;
+      const list = CBZ.npcs || [];
+      let n = 0;
+      for (let i = 0; i < list.length; i++) {
+        const a = list[i];
+        if (!inmateOf(a) || a.dead || a.escaped || a._propLie) continue;
+        n++;
+      }
+      return n;
+    },
   };
 
   /* ==========================================================
@@ -256,7 +482,7 @@
       // inside a bunk with nothing driving it. `getUp(a, true)` skips the arc,
       // which is also what makes its step-off fire (CBZ.rest.up).
       const list = CBZ.npcs || [];
-      for (let i = 0; i < list.length; i++) { getUp(list[i], true); list[i]._restBed = null; }
+      for (let i = 0; i < list.length; i++) { getUp(list[i], true); list[i]._restBed = null; list[i]._restFailed = null; }
       for (let i = 0; i < beds.length; i++) beds[i]._claim = null;
       if (built) clearBunks();
       lastBlock = "";
@@ -351,9 +577,34 @@
     }
 
     if (changed && !bedTime) {
-      // a block that empties the beds also drops every stale claim
-      CBZ.rest.dropClaims(beds);
+      // A BLOCK THAT EMPTIES THE BEDS USED TO DROP EVERY CLAIM, and that is
+      // how a full wing read as empty to the next man who asked for a rack:
+      // the reservation went, the `_restBed` stayed, and two men walked to one
+      // mattress. Under the flag only a rack whose holder is GONE goes back in
+      // the pool; a claim is stable for the whole run, which is the entire
+      // point of systems/rest.js's claim().
+      if (v2()) releaseGone(); else CBZ.rest.dropClaims(beds);
     }
+
+    /* THE RATCHET, ENFORCED EVERY SWEEP AND NOT ONLY ON A RESET (2026-08-15).
+       `clearBunks()` lived in the fresh-run branch alone, so between restarts
+       nothing held `bunkStanders` down except `up()`'s per-body step-off — and
+       that only catches a man who was PUT in the bed. A man who merely walks
+       through a mattress on his way somewhere is the other half of the fault
+       and it was never swept. Measured on bfaccbd it read 2 during lock-up and
+       0 in daylight, which looked pinned; growing the wing from 42 racks to 66
+       and widening §2's predicate to all 50 rigs turned the same drift into 6
+       and 1, because both terms of an area-times-traffic problem got bigger.
+       The scan is 66 rectangles against ~70 bodies at 2 Hz and it is the
+       IDENTICAL call the audit makes, so the number cannot pass by luck.
+
+       NOT during a bed block: at secure/night the wing is converging on its
+       own bunks and a man standing at his rack a beat before propuse's arc
+       takes him is not a fault, he is arriving — stepping him off there would
+       be this file fighting its own hand-off. NOT during `count` either: the
+       muster owns the bodies then, which is the rule stated at the top of
+       this file and worth more than a number. */
+    if (!bedTime && id !== "count") clearBunks();
 
     wardenTick(id);
   });
@@ -412,18 +663,84 @@
 
   CBZ.prisonRestAudit = function () {
     let standers = 0, housedIn = 0, inBed = 0, sat = 0, matBeds = 0, bunkBeds = 0, taken = 0;
+    let held = 0, shutOut = 0;
     for (let i = 0; i < beds.length; i++) {
       if (beds[i].kind === "mat") matBeds++; else bunkBeds++;
       if (beds[i].occupant) taken++;
+      if (beds[i]._claim) held++;
     }
     const list = CBZ.npcs || [];
+    /* THE 2026-08-16 NUMBERS, AND THE DENOMINATOR IS THE WHOLE ARGUMENT.
+
+       `abed` asks: of the men this system is RESPONSIBLE for putting to bed,
+       how many are lying down. Three classes are out of that denominator and
+       each one is a rule this file already obeys everywhere else:
+
+         dead        no bed is owed.
+         escaped     a man over the wire is not a man the wing failed to bed,
+                     and counting him would let a build score BETTER by losing
+                     prisoners — the ratchet must not reward an escape.
+         busy        `CBZ.rest.busy` — knocked out, hunting, fighting, fleeing,
+                     grabbed. §3 refuses to touch these bodies at all ("a real
+                     brain state outranks the furniture"), so scoring this
+                     system on men it is forbidden to move is scoring it on
+                     somebody else's work. This is also where most of the
+                     run-to-run variance lived: the AI picks a different
+                     number of fights every run and `abed` swung 0.78-0.87 on
+                     an unchanged build because of it.
+
+       `settling` is that denominator, `live` is kept beside it so the raw
+       share is still visible, and `homeless`/`homelessInside`/`doubleClaimed`
+       are the three ways assignment can fail, counted apart so a regression
+       names itself instead of hiding inside one ratio. */
+    let live = 0, settling = 0, homeless = 0, homelessInside = 0, busyN = 0;
+    const seen = [], twice = [], afootAt = [];
     for (let i = 0; i < list.length; i++) {
       const a = list[i];
       if (!inmateOf(a) || a.dead) continue;
       housedIn++;
       if (a._propLie) inBed++;
       if (a._propSeat) sat++;
+      if (a.escaped) continue;
+      live++;
+      const b = a._restBed, pos = a.group.position;
+      /* `busy` is asked of a body that is NOT already asleep: propuse's hold
+         is not a brain state and a sleeping man must stay in the numerator.
+         `escape` is added to it by name and it is the strongest case of the
+         rule, not an exception to it — entities/npc.js's curfew branch only
+         runs for `wander`/`socialize`/none, so a man walking to the sally port
+         is one NO part of this system is permitted to turn around. Measured,
+         three to six men a run are in that state at 23:00. */
+      if (!a._propLie && (busy(a) || a.aiState === "escape")) { busyN++; continue; }
+      settling++;
+      /* WHERE THE MEN WHO ARE NOT IN BED ARE STANDING, capped at a dozen. Not
+         decoration: every fault in this wave was found by reading this list
+         off a live run — thirteen bodies at z -6.2..-7.3 named the shut gate,
+         nine against the laundry wall named the dorm route — and a residue
+         nobody can locate is a residue nobody can argue with. */
+      if (!a._propLie && afootAt.length < 12) {
+        afootAt.push({ x: Math.round(pos.x * 10) / 10, z: Math.round(pos.z * 10) / 10,
+          role: a.role || null, bed: b ? 1 : 0, reach: b ? (shut(b, a) ? 0 : 1) : null,
+          ai: a.aiState || null, mus: a._muster ? 1 : 0, leg: a._wayI | 0 });
+      }
+      /* A MAN WHO MADE THE COUNT HAS A BED; A MAN WHO MISSED IT IS OUTSIDE.
+         `homeless` counts both and is therefore NOT an invariant — men still
+         in the yard when the gate racked shut are locked out, which is what a
+         prison securing itself does. `homelessInside` is the half that is a
+         fault: a body standing in its own housing with no mattress to its
+         name, the wing failing at the one job it has once he is through the
+         door. */
+      if (!b) {
+        homeless++;
+        const S = sched(), h = CBZ.prisonHousing;
+        if ((S && S.inBlock && S.inBlock(pos.x, pos.z, -0.4)) ||
+            (h && h.contains && h.contains(pos.x, pos.z, -0.4))) homelessInside++;
+        continue;
+      }
+      if (!a._propLie && shut(b, a)) shutOut++;      // holding a rack behind a shut door
+      if (seen.indexOf(b) < 0) seen.push(b); else if (twice.indexOf(b) < 0) twice.push(b);
     }
+    const abedNow = settling ? Math.round((inBed / settling) * 100) / 100 : 1;
     // the identical question the sweep above asks, asked by the shared layer
     standers = CBZ.rest.standers(beds, list, { skip: isFloorBed, eligible: inmateOf });
     const S = sched();
@@ -436,11 +753,20 @@
       // EVERY MAN HAS A PLACE. Not "the wing sleeps what it claims" — that is
       // world/cellblock.js's job now and it counts its own mattresses — but the
       // thing the muster depends on: a body ordered to bed has a bed to be
-      // ordered to. Positive = men with nowhere to lie down.
+      // ordered to. Positive = men with nowhere to lie down. `housedIn` is
+      // every prisoner rig (§2), not every rig whose trade is "inmate": the
+      // narrow reading is what let this sit at 0 with eight men on their feet.
       sleepGap: built ? housedIn - beds.length : null,
       racks: claim, capacity: beds.length,
       inmates: housedIn, lying: inBed, seated: sat,
       bunkStanders: standers,
+      // bodies the last sweep found in a mattress and could not step clear —
+      // the deterministic half of the same invariant (see clearBunks)
+      lodged: lodged, sweptLast: swept,
+      // the 2026-08-16 wave. `settling` is abed's denominator; see the audit.
+      v2: v2(), live: live, settling: settling, busy: busyN, abed: abedNow,
+      reserved: held, homeless: homeless, homelessInside: homelessInside,
+      doubleClaimed: twice.length, shutOut: shutOut, afootAt: afootAt,
       messSeats: messSeats.length, yardSeats: yardSeats.length,
       wardenBed: !!wardenBed, wardenAsleep: !!(w && w.asleep),
       fittings: CBZ._prisonProps || null,

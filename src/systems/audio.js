@@ -295,7 +295,7 @@
 
      So the bank is now DERIVED, not tuned. Each cue names the real-world sound
      pressure level of the thing it depicts (dB SPL at 1 m, sourced in
-     docs/claude/sound.md — 3M's Noise Navigator database of 1700+ measurements
+     scrolls/claude/sound.md — 3M's Noise Navigator database of 1700+ measurements
      where one exists, anchored between two measured neighbours where it does
      not), and the mix maps that onto:
 
@@ -422,6 +422,22 @@
     win: fx([R + "jingle3.mp3", R + "chime1.mp3", R + "chime2.mp3"], 0.095, 0.5), // 55 dB
 
     thunder: fx([O + "sfx100v2_thunder_01.m4a"], 0.46, 0.8),           // 120 dB
+    /* A STRIKE YOU ARE STANDING NEXT TO. `thunder` is the same energy heard
+       after a kilometre of atmosphere has smeared it into a roll; at twenty
+       metres none of that smearing has happened yet and what arrives is a
+       broadband CRACK off the channel — the rifle-shot report, then the tearing
+       hiss of the return strokes, and only then the low end. Re-voiced from
+       recordings already in the bank (no new asset): the cannon high-passed
+       hard and pitched up for the report, the taser resonance for the electric
+       tear, the thunder recording pitched down underneath for the body.
+       systems/lightningfx.js plays this AND schedules `thunder` behind it at
+       the speed of sound, so a far strike still rolls. 125 dB. */
+    thunder_crack: layers([
+      part([R + "cannon1.mp3"], 0.60, 1.34, 1.56, 0, { hp: 260, decay: 0.09 }),
+      part([R + "resonance2.mp3"], 0.15, 1.70, 1.95, 0.012, { hp: 700 }),
+      part([O + "sfx100v2_thunder_01.m4a"], 0.52, 1.05, 1.22, 0.03, { hp: 120 }),
+      part([O + "sfx100v2_thunder_01.m4a"], 0.34, 0.50, 0.60, 0.19, { lp: 800, bass: 5 }),
+    ], 0.1),
     rumble: fx([O + "sfx100v2_loop_machine_02.m4a", O + "sfx100v2_stones_01.m4a"], 0.24, 0.5), // 100 dB
     collapse: layers([
       part([R + "cannon1.mp3"], 0.25, 0.72, 0.86),                     // 110 dB
@@ -1325,6 +1341,34 @@
   CBZ.initAudio = initAudio;
   CBZ.sfx = sfx;
   CBZ.nuclearShock = nuclearShock;
+
+  /* ---- THE HELD BREATH (2026-08-15) ---------------------------------------
+     nuclearShock's duck is an impulse that schedules its own recovery; this
+     is the other envelope the same pressure stage can make — a duck that
+     STAYS until released. The tsunami's stall wears it: while the wave
+     stands at the seawall the whole world fades to almost nothing, and the
+     crash lands into that silence, which is the oldest trick horror has.
+     One stage, two shapes; anything else that needs a held hush (a standoff,
+     a held breath underwater) can reuse it. `on` fades slow by default and
+     releases FAST, because the release is the hit landing. */
+  let hushed = false;
+  CBZ.audioHush = function (on, opts) {
+    if (!ctx || !pressureGain || !pressureFilter) return false;
+    opts = opts || {};
+    if (!!on === hushed) return true;
+    hushed = !!on;
+    const t = ctx.currentTime;
+    const fade = opts.fade != null ? +opts.fade : (on ? 0.7 : 0.14);
+    try {
+      pressureGain.gain.cancelScheduledValues(t);
+      pressureGain.gain.setValueAtTime(Math.max(0.05, pressureGain.gain.value), t);
+      pressureGain.gain.exponentialRampToValueAtTime(on ? 0.13 : 1, t + fade);
+      pressureFilter.frequency.cancelScheduledValues(t);
+      pressureFilter.frequency.setValueAtTime(Math.max(80, pressureFilter.frequency.value), t);
+      pressureFilter.frequency.exponentialRampToValueAtTime(on ? 1500 : 22000, t + fade);
+    } catch (e) {}
+    return true;
+  };
   // A spatial sound request must name its emitter. This helper deliberately
   // computes distance at the caller boundary rather than turning "wanted" or
   // another abstract state into global audio.

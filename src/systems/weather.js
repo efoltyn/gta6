@@ -306,6 +306,18 @@
   let flashT = 0;          // remaining flash time
   let strikeCD = 5;        // cooldown before next possible strike
   let pendingThunder = 0;  // seconds until thunder follows the flash (delay)
+  let strobeS = 0, strobeT = 0;  // an externally-requested flash (see CBZ.weatherStrobe)
+
+  /* PUBLISHED so a real drawn bolt can light the real scene. See the block in
+     tryLightning that consumes it. Deliberately a REQUEST rather than a direct
+     write: this file owns the daynight-relative baseline and the decay curve,
+     and a caller that wrote hemi.intensity itself would be overwritten by
+     daynight.js on the very next frame. */
+  CBZ.weatherStrobe = function (strength, secs) {
+    if (!(strength > 0)) return;
+    strobeS = Math.max(strobeS, Math.min(3, strength));
+    strobeT = Math.max(strobeT, Math.min(1, secs > 0 ? secs : 0.1));
+  };
 
   function tryLightning(dt) {
     if (!hemi && !sunL) return;
@@ -336,6 +348,21 @@
         // double-flicker on big strikes
         if (rng() < 0.5) flashT += 0.06;
       }
+    }
+
+    /* A STRIKE SOMEONE ELSE DREW. systems/lightningfx.js draws real bolts with
+       real RETURN STROKES, and what a stroke does to a scene is LIGHT it — not
+       tint a rectangle over the lens. That is exactly the hemi+sun bump this
+       file already owns for its ambient sky flashes, so the bolt renderer pokes
+       THIS, once per stroke, rather than opening a second lighting path that
+       could disagree with daynight.js about what the baseline is. Applied here
+       — after the baseline capture at the top, before the animation below — so
+       a strobe lights the world on the frame it was asked for. Strength and
+       duration are max-combined, so overlapping strikes never cancel. */
+    if (strobeS > 0) {
+      flash = Math.max(flash, strobeS);
+      flashT = Math.max(flashT, strobeT);
+      strobeS = 0; strobeT = 0;
     }
 
     // animate the active flash (fast attack, quick decay)
@@ -648,7 +675,17 @@
       if (!g.attributes || !g.attributes.normal || !g.attributes.position) return;
       if (!g.boundingSphere) { try { g.computeBoundingSphere(); } catch (e) { return; } }
       const bs = g.boundingSphere;
-      if (!bs || !(bs.radius * Math.max(Math.abs(o.scale.x), Math.abs(o.scale.z)) >= COAT_MIN_R)) return;
+      // `userData.coat` is the author's OPT-IN, and it is the twin of the
+      // `noCoat` opt-out three lines up: this is ground, coat it whatever size
+      // it is. COAT_MIN_R exists to keep a scan of a whole city off ten
+      // thousand small props, and it is exactly right for that — but it has no
+      // way to know that the disaster island's outlying hills (bounding radius
+      // 16-23 m against a 34 m bar) are TERRAIN. Measured: a blizzard whitened
+      // the sea-level plate and the central refuge cone and left three green
+      // hills standing in the middle of a white island. A size heuristic
+      // cannot answer "is this the ground"; the file that built it can.
+      const forced = !!(ud && ud.coat);
+      if (!forced && (!bs || !(bs.radius * Math.max(Math.abs(o.scale.x), Math.abs(o.scale.z)) >= COAT_MIN_R))) return;
       const ms = Array.isArray(o.material) ? o.material : [o.material];
       for (let i = 0; i < ms.length; i++) {
         const m = ms[i];
@@ -901,8 +938,11 @@
     // DARK-PATH EARLY-OUT: with the ambient storm off and nothing driving,
     // the whole tick is skipped — the throttled indoor test used to scan
     // CBZ.platforms and raycast 5×/sec for a cloud that could never appear.
+    // (`strobeS` is in the test because a drawn bolt can strike under a clear
+    // sky — a scripted beat, a test harness — and the tick that consumes the
+    // request must not be the one thing that got skipped.)
     if (!AUTO && drvHold <= 0 && intensity === 0 && drv.fog <= 0 &&
-        drv.lightning <= 0 && flashT <= 0 && pendingThunder <= 0 && !groundLive) return;
+        drv.lightning <= 0 && flashT <= 0 && strobeS <= 0 && pendingThunder <= 0 && !groundLive) return;
 
     // camera forward (XZ) for seedDrop's lead bias — matrix z-basis, once per
     // tick. Looking straight down leaves the previous bearing standing.

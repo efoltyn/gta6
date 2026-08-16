@@ -40,7 +40,9 @@
     cyl(g, 0.020, 0.42, mat.black, 0, 0.045, -0.92, Math.PI / 2);
     box(g, 0.030, 0.085, 0.030, mat.black, 0, 0.10, -0.80, 0, 0, 0);
     box(g, 0.030, 0.075, 0.055, mat.black, 0, 0.065, -0.775, 0.5);
-    cyl(g, 0.027, 0.095, mat.steel, 0, 0.045, -1.10, Math.PI / 2);
+    cyl(g, 0.027, 0.095, mat.black, 0, 0.045, -1.10, Math.PI / 2);
+    const bore = cyl(g, 0.014, 0.008, mat.bore || mat.black, 0, 0.045, -1.153, Math.PI / 2);
+    bore.userData.weaponBore = true;
     // 30rd 5.56 mag: near-straight, just a hint of forward curve
     box(g, 0.062, 0.19, 0.10, mat.dark, 0, -0.155, -0.265, 0.14);
     box(g, 0.062, 0.10, 0.095, mat.dark, 0, -0.285, -0.30, 0.28);

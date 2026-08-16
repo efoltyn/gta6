@@ -41,16 +41,49 @@ const beats = [
   {
     id: "opensea",
     label: "The open-sea face",
-    focus: "The bore still in deep water: a towering curl with an overhanging lip and a spray-torn crest, blue-green and translucent. The curl geometry scales with the depth under it, so this is the tallest, steepest read of the whole event.",
+    focus: "The bore still in deep water: long, low and FAST — c = √(g·d), so out here it has all its speed and not yet all its height. Blue-green and translucent, spray tearing off the lip. Watch frontV: this must be the fastest the wave moves before the crash.",
     wait: { state: "active", phase: "sweep", untilShoal: 0.55 },
     shot: { mode: "front", back: -118, side: 126, alt: 46, aimAhead: -6, aimY: 14 },
+  },
+  {
+    id: "peak",
+    label: "THE PEAK — the wave stands",
+    focus: "The owner's reference frame. Shoaling has traded the wave's speed for height: metres off the beach it is at its tallest, steepest, most overhung — and SLOWEST. For a held beat the wall simply STANDS over the town, crawling, boiling. frontV must be the lowest of any beat; the before build has no stall and photographs the same wave mid-stride instead.",
+    wait: { untilShoal: 0.975, extraSecs: 0.25 },
+    shot: { mode: "front", back: -120, side: 92, alt: 24, aimAhead: -4, aimY: 20 },
+  },
+  {
+    id: "crash",
+    label: "THE CRASH — the lip comes down",
+    focus: "The stand ends all at once: the curl folds, the crest drops, a line of white water erupts along the whole front, and the released bore accelerates into the streets. After = a breaking EVENT you can point at (crashAge just past zero, frontV surging); before = the same wall walking at cruise speed.",
+    wait: { untilFrontPast: 5, extraSecs: 0.2 },
+    shot: { mode: "front", back: -98, side: 108, alt: 36, aimAhead: -8, aimY: 10 },
   },
   {
     id: "landfall",
     label: "LANDFALL — the Miyako shot",
     focus: "THE reference frame. Front-quarter on the churning gray-black debris soup as it takes the shore town: sediment darkening the water, foam boiling off the leading edge, whitewater streaking back to sea, cars and trees tumbling inside it.",
+    /* TRIPOD RESTAGED (2026-08-15). The old 140 m land-side stand read as a
+       whiteout — not fog (15% at that range) but CONTENT: at sediment 1.0
+       the flooded town, the wake and the crest spray fill the whole frame
+       with pale values and nothing dark is left to read them against — and
+       every land-side offset eventually loses the tower lottery to the
+       random bearing. So this is now the news-helicopter angle every real
+       tsunami aerial uses: over the SEA behind the front, looking inland at
+       the dark back of the broken wall and the town being taken beyond it.
+       There are no towers in the sea to photobomb, and the dark water is
+       the contrast anchor in every possible bearing. */
     wait: { untilFrontPast: 24, extraSecs: 0.35 },
-    shot: { mode: "front", back: -96, side: 104, alt: 42, aimAhead: -10, aimY: 9 },
+    shot: { mode: "front", back: 55, side: 20, alt: 26, aimAhead: 12, aimY: 6 },
+  },
+  {
+    id: "crossing",
+    label: "Mid-crossing — the wall spending itself",
+    focus: "Halfway over the island. THE QUESTION THIS BEAT ASKS: is there still a wall here? A bore that has run 130 m inland has been climbing and tearing through a town the whole way, and what is left of it should be a fast, deep, dirty flood with an edge — not the same tower that broke on the beach. Watch faceH against the landfall frame.",
+    // same restage as landfall: the sea-side chopper angle, higher and
+    // further back so half the island's flooding shows behind the wall
+    wait: { untilFrontPast: 130 },
+    shot: { mode: "front", back: 64, side: 26, alt: 32, aimAhead: 16, aimY: 4 },
   },
   {
     id: "inundation",
@@ -255,7 +288,10 @@ async function stageTsunami(input) {
   query("focus").textContent = subject.focus;
   query("focus").style.cssText = "position:absolute;top:96px;left:28px;color:#c0cfda;font-size:12.5px;font-weight:550;max-width:660px;line-height:1.45";
   query("perf").textContent =
-    `phase ${a2.phase || "—"} · front ${fs.toFixed(0)}m · turbid ${(a2.sediment != null ? a2.sediment : 0).toFixed(2)}`
+    `phase ${a2.phase || "—"} · front ${fs.toFixed(0)}m · v ${a2.frontV != null ? a2.frontV.toFixed(1) + "m/s" : "—"}`
+    + `${a2.stalled ? " · STANDING" : ""}${a2.crashAge != null ? " · crash+" + a2.crashAge.toFixed(1) + "s" : ""}`
+    + ` · turbid ${(a2.sediment != null ? a2.sediment : 0).toFixed(2)}`
+    + ` · faceH ${a2.faceH != null ? a2.faceH.toFixed(1) + "m" : "—"} (spent ${a2.spent != null ? a2.spent.toFixed(2) : "—"})`
     + ` · debris ${a2.debrisEntrained || 0} (${a2.debrisStrikes || 0} strikes)`
     + ` · undertow ${(a2.undertowPull || 0).toFixed(1)}`
     + ` · refuges ${a2.refugesStanding != null ? a2.refugesStanding + "/" + a2.refugesTotal : "—"}`;
@@ -268,6 +304,17 @@ async function stageTsunami(input) {
     debrisStrikes: Number(a2.debrisStrikes || 0),
     debrisKills: Number(a2.debrisKills || 0),
     sediment: Number((a2.sediment || 0).toFixed(3)),
+    /* THE WALL'S LIVE HEIGHT, so "did it come down as it crossed" is a number
+       and not an argument about a screenshot. Neither reading has a good
+       direction on its own — tall is right at landfall and wrong halfway over
+       the island — so they are reported plainly and read per beat. */
+    faceH: Number(a2.faceH || 0),
+    spent: Number(a2.spent != null ? a2.spent : 0),
+    /* THE SPEED OF THE FRONT AT THE SHOT — the whole shoaling argument as one
+       number per beat: fast at opensea, a crawl at the peak, surging again
+       after the crash. Like faceH it has no good direction on its own; it is
+       read per beat, and a build that predates it reports 0 = not measured. */
+    frontV: Number(a2.frontV || 0),
     undertowPull: Math.abs(Number(a2.undertowPull || 0)),
     refugesStanding: Number(a2.refugesStanding || 0),
     lightSwept: Number(a2.lightSwept || 0),
@@ -288,20 +335,23 @@ async function stageTsunami(input) {
 
 export default {
   id: "tsunami-stages",
-  title: "The Tsunami: Drawdown, Curl, Landfall, Undertow",
-  description: "One seeded survival tsunami per build, polled to the same PHYSICAL beats — the drawdown that is the only warning, the open-sea curl, the Miyako landfall on the debris churn, the inundation with roofs as islands, the undertow tearing back out, and the wreckage it leaves. Every tripod is placed relative to the live wave front, so the shots line up even though the bearing is random per run.",
+  title: "The Tsunami: Drawdown, Stand, Crash, Undertow",
+  description: "One seeded survival tsunami per build, polled to the same PHYSICAL beats — the drawdown that is the only warning, the fast open-sea curl, the PEAK where shoaling has traded all that speed for height and the wall STANDS over the beach at a crawl, the CRASH where the lip comes down and releases the bore, the Miyako landfall on the debris churn, the inundation with roofs as islands, the undertow tearing back out, and the wreckage it leaves. Every tripod is placed relative to the live wave front, so the shots line up even though the bearing is random per run.",
   beforeLabel: "BEFORE · DEPLOYED",
   afterLabel: "AFTER · LOCAL",
   viewport: { width: 1180, height: 700 },
   readyExpression: "window.THREE && window.CBZ && CBZ.CONFIG",
   urlParams: { seed: 90210 },
   stageTimeoutMs: 600000,
-  metricsNote: "Debris counts and the undertow are read from CBZ.disasters.tsunamiAudit() at the moment of the shot: what the water was carrying, how often it hit somebody, and how hard it pulled on the way out. refugesStanding is the invariant — the wave may wound a concrete tower but must never take one down.",
+  metricsNote: "Debris counts and the undertow are read from CBZ.disasters.tsunamiAudit() at the moment of the shot: what the water was carrying, how often it hit somebody, and how hard it pulled on the way out. refugesStanding is the invariant — the wave may wound a concrete tower but must never take one down. NOTE: faceH, spent and frontV are NEW audit fields — a build that predates them reports 0, which means 'not measured', not 'no wave'. frontV is the shoaling arc in one number per beat: fastest at OPEN SEA, a crawl at THE PEAK while the wave stands, surging again after THE CRASH. For these the pictures are the comparison; the numbers only speak within a side.",
   metrics: {
     debrisEntrained: { label: "Debris entrained", better: "higher" },
     debrisStrikes: { label: "Debris strikes", better: "higher" },
     debrisKills: { label: "Debris kills", better: "higher" },
     sediment: { label: "Turbidity", better: "higher" },
+    faceH: { label: "Face height", unit: "m" },
+    spent: { label: "Bore left", },
+    frontV: { label: "Front speed", unit: "m/s" },
     undertowPull: { label: "Undertow", unit: "m/s", better: "higher" },
     refugesStanding: { label: "Refuges standing", better: "higher" },
     lightSwept: { label: "Light frames swept", better: "higher" },

@@ -283,12 +283,16 @@
        cone is parented to the flashlight group itself, so it points wherever
        the hand does and inherits the prop's own visibility. ---- */
   const TORCH_LEN = 9;
+  const torchOrigin = new THREE.Vector3();
+  const torchDirection = new THREE.Vector3();
+  const torchQuaternion = new THREE.Quaternion();
   function torchCone(g) {
     if (g._torchCone || !g.flashlight || !g.flashlight.group) return;
     const cone = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 1.25, TORCH_LEN, 12, 1, true),
       new THREE.MeshBasicMaterial({ color: 0xdff2ff, transparent: true, opacity: 0.075, side: THREE.DoubleSide, depthWrite: false }));
     cone.rotation.x = Math.PI / 2;                 // down the prop's own +z
-    cone.position.z = TORCH_LEN / 2 + 0.32;
+    const beamZ = g.flashlight.group.userData.beamOrigin ? g.flashlight.group.userData.beamOrigin.z : 0.32;
+    cone.position.z = TORCH_LEN / 2 + beamZ;
     cone.userData.mover = true;
     g.flashlight.group.add(cone);
     g._torchCone = cone;
@@ -308,11 +312,25 @@
       const g = list[i];
       if (!g.flashlightOn) { if (g._torchPool) g._torchPool.material.opacity = 0; continue; }
       torchCone(g);
-      const yaw = g.group.rotation.y;
-      const ax = g.group.position.x + Math.sin(yaw) * 5.4;
-      const az = g.group.position.z + Math.cos(yaw) * 5.4;
+      // The pool and assigned spotlight follow the ACTUAL reflector axis, not a
+      // second yaw-only guess. This keeps hand, lens, volumetric cone and ground
+      // contact welded together through a search pose or hit reaction.
+      const fg = g.flashlight.group;
+      fg.updateWorldMatrix(true, false);
+      torchOrigin.copy(fg.userData.beamOrigin || { x: 0, y: 0, z: 0.32 });
+      fg.localToWorld(torchOrigin);
+      fg.getWorldQuaternion(torchQuaternion);
+      torchDirection.set(0, 0, 1).applyQuaternion(torchQuaternion).normalize();
+      let reach = 5.4;
+      if (torchDirection.y < -0.035) {
+        reach = Math.max(1.8, Math.min(TORCH_LEN, (0.05 - torchOrigin.y) / torchDirection.y));
+      }
+      const ax = torchOrigin.x + torchDirection.x * reach;
+      const az = torchOrigin.z + torchDirection.z * reach;
       g._torchAim = g._torchAim || { x: 0, z: 0 };
+      g._torchOrigin = g._torchOrigin || { x: 0, y: 0, z: 0 };
       g._torchAim.x = ax; g._torchAim.z = az;
+      g._torchOrigin.x = torchOrigin.x; g._torchOrigin.y = torchOrigin.y; g._torchOrigin.z = torchOrigin.z;
       if (g._torchPool) {
         g._torchPool.position.set(ax, 0.05, az);
         g._torchPool.material.opacity = 0.10 + dark * 0.20;
@@ -324,7 +342,8 @@
       const slot = dyn.torch[i], g = slot.guard;
       if (!g || !g.flashlightOn || g.dead) { slot.light.visible = false; slot.light.intensity = 0; continue; }
       slot.light.visible = true;
-      slot.light.position.set(g.group.position.x, 1.45, g.group.position.z);
+      const origin = g._torchOrigin;
+      slot.light.position.set(origin ? origin.x : g.group.position.x, origin ? origin.y : 1.45, origin ? origin.z : g.group.position.z);
       slot.target.position.set(g._torchAim.x, 0, g._torchAim.z);
       slot.light.intensity = 0.6 + dark * 1.5;
     }

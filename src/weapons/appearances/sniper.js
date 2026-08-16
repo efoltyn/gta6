@@ -42,7 +42,9 @@
     }
     // LONG thin free-floated barrel + muzzle brake at the very end
     cyl(g, 0.024, 0.92, mat.black, 0, 0.050, -0.77, Math.PI / 2);
-    cyl(g, 0.034, 0.10, mat.steel, 0, 0.050, -1.26, Math.PI / 2);
+    cyl(g, 0.034, 0.10, mat.black, 0, 0.050, -1.26, Math.PI / 2);
+    const bore = cyl(g, 0.017, 0.009, mat.bore || mat.black, 0, 0.050, -1.316, Math.PI / 2);
+    bore.userData.weaponBore = true;
     // flush hinged floorplate magazine ahead of the trigger
     box(g, 0.075, 0.045, 0.16, mat.steel, 0, -0.055, -0.235);
     // full WOOD hunting stock: slim forend under the barrel, wrist,

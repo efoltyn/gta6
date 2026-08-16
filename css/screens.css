@@ -16,7 +16,12 @@
   box-shadow:var(--shadow); border:3px solid #ffffff;
   position:relative;
 }
-#title .card-box{max-height:calc(100vh - 32px); overflow-y:auto;}
+/* THE TITLE CARD IS THE SCREEN, not a dialogue over one. Every other .card-box
+   floats above a running world and wants to stay narrow; this one holds the
+   entire first decision, and at 560px it left 61% of a laptop and a third of a
+   landscape phone empty while its own contents scrolled inside it. It grows
+   with the display now, up to a readable line length. */
+#title .card-box{max-height:calc(100vh - 32px); overflow-y:auto; width:min(1100px,94vw);}
 .logo{
   font-size:clamp(40px,8vw,64px); font-weight:700; line-height:.92; letter-spacing:1px;
   color:var(--orange);
@@ -84,13 +89,29 @@
 /* ============================================================
    game-mode selector (title) + per-mode title blocks
 ============================================================ */
-.mode-select{
-  display:grid; grid-template-columns:repeat(2,1fr); gap:10px;
-  width:min(460px,100%); margin:0 auto 18px;
+/* THE OTHER GAMES, AFTER THE GAME. This strip opened the title card until
+   2026-08-14, which made the first screen a menu of six products rather than
+   the one you came to play. It kept every button; it stopped going first, and
+   the dashed rule above it says plainly that the screen has ended and a
+   switcher has begun. */
+.mode-strip-label{
+  margin-top:22px; padding-top:16px;
+  border-top:2px dashed rgba(124,90,58,.28);
 }
-/* A launcher tile spans the grid: it leaves the page, so it must not read as
-   a fifth sibling of four modes that stay. */
-.mode-launch{ grid-column:1 / -1; background:linear-gradient(180deg,#fff,#ffeede); }
+/* SIX TILES, SIX EQUAL CELLS. Until 2026-08-15 this was `auto-fit` over six
+   things of two different shapes, and it came out lopsided at every desktop
+   width: the four mode tiles fitted four of the eight columns a 1100px card
+   offered and stopped two-thirds of the way across, while the two launchers
+   spanned the whole rule as 90px-tall bars holding one line of 12px type. Six
+   divides by 2 and 3; the grid uses those, and every tile is the same cell. */
+.mode-select{
+  display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px;
+  width:100%; margin:0 auto;
+}
+@media (min-width:760px){ .mode-select{ grid-template-columns:repeat(3,minmax(0,1fr)); } }
+/* A launcher still reads as a different KIND of tile — warm fill and a trailing
+   arrow say it leaves the page — it just no longer says so by being enormous. */
+.mode-launch{ background:linear-gradient(180deg,#fff,#ffeede); }
 .mode-launch span::after{ content:" \2192"; opacity:.5; }
 .mode-btn{
   pointer-events:auto; cursor:pointer; font-family:inherit; text-align:center;
@@ -130,10 +151,88 @@
 .quality-btn:active{transform:translateY(2px); border-bottom-width:2px;}
 #qualityPreset + #playBtn{margin-top:16px;}
 
+/* PLAY BELONGS ON ITS OWN LINE. #playBtn is an inline-block and .new-life-btn
+   an inline-flex, so the two shared a text line and PLAY sat visibly left of
+   centre with New Life parked beside it — the most-pressed button on the game
+   was the one thing on the screen that was not aligned to anything. A flex
+   column puts one under the other and centres both, at every width. */
+.title-actions{display:flex; flex-direction:column; align-items:center;}
+
 @media (max-width:520px){
   .quality-select{gap:5px;}
   .quality-btn{padding-inline:3px;}
   .quality-btn small{font-size:9px;}
+}
+
+/* ============================================================
+   TWO COLUMNS: THE ROSTER, THEN THE RAIL
+   ------------------------------------------------------------
+   The card was one column of THREE different widths (owner, 2026-08-15). The
+   roles ran the full 1100px; Graphics and PLAY shrank to a 460px strip down
+   the middle with 300px of empty paper either side of them; then MORE GAMES
+   went full width again. PLAY was not even centred in its own strip, because
+   New Life stood next to it. And the whole stack was tall enough that a 1100px
+   card scrolled INSIDE a 1512px display.
+
+   So: what you are choosing from goes left, what you press goes right, and the
+   other games run along the bottom under their rule. Two very different
+   screens want that same shape — a desktop (lots of width, no reason to use a
+   third of it) and a phone on its side (one long axis, and PLAY was 2.26
+   screenfuls below the fold before it got one) — so they share the rule.
+
+   Placement is explicit because auto-placement drops the rail BELOW the mode
+   card rather than beside it. The mode cards are matched as
+   `div…-only:not(.smallnote)`: the same mode classes gate the footer notes,
+   and a .smallnote.mode-city-only landing in the card's cell prints itself
+   straight across the wordmark.
+============================================================ */
+@media (min-width:900px), (orientation:landscape) and (max-height:600px){
+  #title .card-box{
+    display:grid; align-content:start;
+    grid-template-columns:minmax(0,1.85fr) minmax(0,1fr);
+    column-gap:26px; padding:22px 26px 18px; text-align:center;
+  }
+  #title .card-box > div.mode-city-only:not(.smallnote),
+  #title .card-box > div.mode-escape-only:not(.smallnote),
+  #title .card-box > div.mode-survival-only:not(.smallnote),
+  #title .card-box > div.mode-gungame-only:not(.smallnote){grid-column:1; grid-row:1;}
+  /* The rail is ONE grid item, so it stretches to the roster's height and can
+     lay itself out inside: presets at the top, PLAY pushed to the bottom by
+     `margin-top:auto` so it lands level with the last row of roles. */
+  #title .card-box > .title-actions{
+    grid-column:2; grid-row:1; align-items:stretch; gap:10px;
+  }
+  #title .card-box > .mode-strip-label,
+  #title .card-box > .mode-select,
+  #title .card-box > .smallnote{grid-column:1 / -1;}
+  #title .title-actions > #qualityPreset{width:100%; margin:0;}
+  /* Three across is a 460px control; the rail is ~350px and the labels stop
+     fitting. Stacked, each preset gets a full-width row and reads at a glance. */
+  #title .title-actions .quality-select{grid-template-columns:1fr; gap:7px;}
+  #title .title-actions .quality-btn small{white-space:normal;}
+  #title .title-actions > #playBtn{width:100%; margin:auto 0 0; padding-block:18px; font-size:24px;}
+  #title .title-actions > #newLifeBtn{width:100%; margin:0;}
+}
+
+/* The phone-on-its-side half of that rule, where vertical room is the scarce
+   thing: 8vw of an 852pt-wide phone is a 68px wordmark on a 393px-tall screen. */
+@media (orientation:landscape) and (max-height:600px){
+  #title .card-box{column-gap:22px; padding:16px 22px 14px;}
+  #title .logo{font-size:clamp(28px,5.6vh,42px);}
+  #title .origin-label{margin:9px 0 5px;}
+  #title .origin-btn{padding:8px 8px 7px;}
+  #title .mode-strip-label{margin-top:14px; padding-top:12px;}
+  #title .title-actions > #playBtn{padding-block:12px; font-size:19px;}
+}
+
+/* A 667pt phone is 185pt shorter than a 16 and carries the roster six rows
+   deep, which left PLAY a hair under the fold. Tighten the picker's own
+   rhythm rather than the 48px touch targets, which are not negotiable. */
+@media (orientation:portrait) and (max-height:740px){
+  #title .origin-select{gap:6px;}
+  #title .origin-label{margin:8px 0 4px;}
+  #title #qualityPreset{margin-top:10px;}
+  #title #qualityPreset + #playBtn{margin-top:10px;}
 }
 
 /* show only the active mode's title copy */

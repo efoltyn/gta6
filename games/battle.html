@@ -119,6 +119,27 @@
   #nflash{position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none;z-index:55}
   #hint{position:fixed;left:calc(14px + env(safe-area-inset-left,0px));bottom:calc(14px + env(safe-area-inset-bottom,0px));
     z-index:41;font-size:10px;letter-spacing:.14em;opacity:.45;pointer-events:none;display:none;max-width:26vw;line-height:1.6}
+
+  /* ---- THE MAN ON THE LENS: who the camera is on, and how his fight is
+     going. Ammo is the reason this exists — a magazine emptying and a man
+     reloading is the beat the war is made of, and it was invisible. ---- */
+  #who{position:fixed;left:calc(14px + env(safe-area-inset-left,0px));top:calc(64px + env(safe-area-inset-top,0px));
+    z-index:41;display:none;pointer-events:none;padding:9px 12px 10px;border-radius:12px;min-width:172px;
+    background:rgba(12,14,17,.55);border:1px solid rgba(255,255,255,.12);backdrop-filter:blur(6px);
+    font-variant-numeric:tabular-nums}
+  #who.down{opacity:.55}
+  #whoN{font-size:13px;letter-spacing:.16em;font-weight:800}
+  #whoN i{font-style:normal;opacity:.5;font-weight:600;letter-spacing:.1em}
+  #whoHp{height:3px;border-radius:2px;background:rgba(255,255,255,.14);margin:6px 0 8px;overflow:hidden}
+  #whoHp s{display:block;height:100%;background:#4fbf6a;transition:width .12s linear}
+  #whoG{font-size:11px;letter-spacing:.14em;opacity:.75;display:flex;justify-content:space-between;gap:10px}
+  #whoG b{font-weight:800;opacity:.95}
+  #whoMagT{height:5px;border-radius:3px;background:rgba(255,255,255,.14);margin:5px 0 7px;overflow:hidden}
+  #whoMagT s{display:block;height:100%;background:#e8dcc0;transition:width .1s linear}
+  #whoMagT.rl s{background:#ff9a3d}
+  #whoK{font-size:11px;letter-spacing:.14em;opacity:.7}
+  #whoK b{color:#ffd08a;font-weight:800}
+  body.coarse #who{min-width:150px;padding:7px 10px 8px}
 </style>
 </head>
 <body>
@@ -138,6 +159,7 @@
         <input id="redN" type="number" inputmode="numeric" min="1" value="30">
         <button data-t="red" data-d="10">+</button>
       </div>
+      <select id="redU"></select>
       <select id="redW"></select>
       <select id="redT"></select>
       <select id="redS"></select>
@@ -149,6 +171,7 @@
         <input id="blueN" type="number" inputmode="numeric" min="1" value="30">
         <button data-t="blue" data-d="10">+</button>
       </div>
+      <select id="blueU"></select>
       <select id="blueW"></select>
       <select id="blueT"></select>
       <select id="blueS"></select>
@@ -162,6 +185,9 @@
     <button data-n="200">200 v 200</button>
     <button data-n="500">500 v 500</button>
   </div>
+
+  <div class="lbl">THE MATCHUPS</div>
+  <div class="presets" id="matchups"></div>
 
   <button id="start">START THE WAR</button>
   <button id="bench">FIND MY MAX</button>
@@ -189,6 +215,13 @@
 <div id="banner"></div>
 <div id="nflash"></div>
 <div id="hint"></div>
+<div id="who">
+  <div id="whoN"></div>
+  <div id="whoHp"><s></s></div>
+  <div id="whoG"><span id="whoGun"></span><b id="whoAmmo"></b></div>
+  <div id="whoMagT"><s></s></div>
+  <div id="whoK"></div>
+</div>
 
 <div id="end"><div class="in">
   <h2 id="endT">RESULT</h2>
@@ -222,6 +255,8 @@ const SET = {
   map:   Q.get("map")  || saved.map  || "city",
   redN:  parseInt(Q.get("red")  || saved.redN  || 30, 10) || 30,
   blueN: parseInt(Q.get("blue") || saved.blueN || 30, 10) || 30,
+  redU:  Q.get("ru") || saved.redU || "men",     // WHO fights: "men" or a bestiary species id
+  blueU: Q.get("bu") || saved.blueU || "men",
   redW:  Q.get("rw") || saved.redW || "ak47",
   blueW: Q.get("bw") || saved.blueW || "ak47",
   redT:  Q.get("rt") || saved.redT || "elite",
@@ -238,6 +273,8 @@ const SET = {
 const PROBE = Q.get("probe") === "1" || (Q.get("probe") !== "0" && (SET.auto || SET.bench));
 const SEP_OLD = Q.get("sep") === "old";      // the revert switch — see separateOld()
 const FIRE_OLD = Q.get("fire") === "old";    // ditto, for fire discipline
+const STEER_OLD = Q.get("steer") === "old";  // ditto, for wall-aware goal projection
+const SHARE_OLD = Q.get("share") === "old";  // ditto, for squad target sharing
 const SUPPORTS = [
   { id: "none", label: "NO AIR" },
   { id: "bomber", label: "ONE BOMBER" },
@@ -269,12 +306,28 @@ if (SET.blueN < 1) SET.blueN = 1;
      arena   the kill box, kept, because it is the control: no world at all,
              so anything that goes wrong there is the men, not the map. */
 const TOWN_AT = { x: 0, z: -700 };       // the mainland coordinates bomb-survivor stands on
+/* THE VENUES.
+
+   Gang City is already built. Every entry with a `raise` list is a real place
+   from the map — the same geometry the mainland uses — and costs exactly this
+   one row, because studio.raise() runs the builders the file already
+   registered and studio.heightfield() measures the ground they left behind.
+   Nothing below authors a wall, a floor or a height function.
+
+   raise:  studio packs to RAISE as the ground (order is the build order)
+   packs:  what must LOAD for that to work (raise packs plus anything the
+           venue's own props need); studio resolves each pack's `needs`
+   sea:    lay the deep sea plate under it, for a venue that reads as coastal */
 const MAPS = {
-  city:   { label: "GANG CITY", note: "the real downtown. streets, glass, doors", packs: ["citycore"] },
-  island: { label: "MILITARY ISLAND", note: "the real base. fence, strip, jets", packs: ["militaryisland", "airbase"] },
-  field:  { label: "HALLORAN FIELD", note: "the real airport. aprons, terminal", packs: ["airport"] },
-  dunes:  { label: "OPEN DUNES", note: "bare sand. firing lines", packs: ["desert"] },
-  arena:  { label: "KILL BOX", note: "flat yard. crates. walls", packs: [] },
+  city:     { label: "GANG CITY", note: "the real downtown. streets, glass, doors", packs: ["citycore"] },
+  island:   { label: "MILITARY ISLAND", note: "the real base. fence, strip, jets", packs: ["militaryisland", "airbase"], raise: ["militaryisland"], sea: true },
+  field:    { label: "HALLORAN FIELD", note: "the real airport. aprons, terminal", packs: ["airport"], raise: ["airport"], sea: true },
+  gov:      { label: "THE SEAT OF STATE", note: "the real complex. wings, strongrooms", packs: ["govcomplex"], raise: ["govcomplex"] },
+  harbor:   { label: "CAPE HARBOR", note: "the coastal strip. apron, helipads", packs: ["capeharbor"], raise: ["capeharbor"], sea: true },
+  marina:   { label: "THE MARINA", note: "basin, pontoons, moored boats", packs: ["marina"], raise: ["marina"], sea: true },
+  speedway: { label: "THE SPEEDWAY", note: "banked oval. a ground that is NOT flat", packs: ["speedway"], raise: ["speedway"], sea: true },
+  dunes:    { label: "OPEN DUNES", note: "bare sand. firing lines", packs: ["desert"] },
+  arena:    { label: "KILL BOX", note: "flat yard. crates. walls", packs: [] },
 };
 if (!MAPS[SET.map]) SET.map = "city";
 
@@ -301,12 +354,22 @@ const GUN_NAME = {
 const GUN_ORDER = ["ak47", "carbine", "lmg", "smg", "uzi", "shotgun", "sniper",
   "sidearm", "revolver", "deagle", "glauncher", "bazooka", "taser"];
 const MIX_RIFLES = ["ak47", "carbine", "lmg", "smg", "shotgun", "sniper"];
+/* the men's empty hands are a weapon row too — combat_iq's own melee exchange
+   (IQ.melee: close, circle, guard, windup, swing) drives them, so "100 unarmed
+   men vs the gorilla" is a supported army and not a special case. Punch damage
+   by training: a SWAT officer hits harder than a clerk. */
+const PUNCH = { civ: 6, thug: 8, pro: 10, elite: 12, swat: 14 };
 
 /* ============================================================ LOAD
    Base packs first; the armoury after, in dependency order. Every file in
    the second list is engine source loaded verbatim — the page adds nothing
    to any of them. */
-const NEED = ["caps", "people", "fx", "damage", "sound", "batch"];
+/* bestiary + beasts ride in the base load on purpose: the menu lists every
+   species BY READING the bestiary (a hardcoded copy of 54 names is the exact
+   stat-fiction this repo bans), and the three beast files are pure drivers —
+   no engine, no spawner, nothing scheduled. Measured cost is a handful of
+   small data files on a load that already fetches thirty. */
+const NEED = ["caps", "people", "fx", "damage", "sound", "batch", "bestiary", "beasts"];
 const ARMOURY = [
   "weapons/weapon-data.js",
   "weapons/appearances/sidearm.js", "weapons/appearances/shotgun.js",
@@ -411,6 +474,10 @@ CBZ.studio.need(NEED).then(function () {
     CBZ.queryCollidersNear = function (x, z, r, out) { return CBZ.micro.queryColliders(x, z, r, out); };
   }
   if (CBZ.now == null) CBZ.now = performance.now();
+  // creature_combat's rest height asks CBZ.floorAt (the mainland's ground);
+  // out here the ground is whatever venue this battle raised. Same shim
+  // pattern as queryCollidersNear above — route the name, never fork the file.
+  if (!CBZ.floorAt) CBZ.floorAt = function (x, z) { return MAP ? MAP.groundAt(x, z) : 0; };
 
   const COARSE = CBZ.studio.touchDevice;
   if (COARSE) document.body.classList.add("coarse");
@@ -445,7 +512,36 @@ CBZ.studio.need(NEED).then(function () {
     });
     h += "<option value=\"mixed\"" + (cur === "mixed" ? " selected" : "") + ">MIXED RIFLES</option>";
     h += "<option value=\"everything\"" + (cur === "everything" ? " selected" : "") + ">EVERYTHING</option>";
+    h += "<option value=\"fists\"" + (cur === "fists" ? " selected" : "") + ">FISTS (UNARMED)</option>";
     sel.innerHTML = h;
+  }
+  /* WHO FIGHTS — men, or any land species straight out of the bestiary the
+     mainland hunts. The list is READ, not copied: a species added to Gang
+     City appears here on the next load. Aquatics and snakes wait for the
+     water battles; everything that walks is in, fighters first. */
+  function landSpecies() {
+    const SP = CBZ.WILDLIFE_SPECIES || {};
+    return Object.keys(SP)
+      .filter(function (id) { const s = SP[id]; return s && !s.aquatic && !s.snake && s.build; })
+      .sort(function (a, b) { return (SP[b].danger || 0) - (SP[a].danger || 0) || (a < b ? -1 : 1); });
+  }
+  function fillKind(sel, cur) {
+    const SP = CBZ.WILDLIFE_SPECIES || {};
+    let h = "<option value=\"men\"" + (cur === "men" ? " selected" : "") + ">MEN</option>";
+    landSpecies().forEach(function (id) {
+      h += "<option value=\"" + id + "\"" + (cur === id ? " selected" : "") + ">" +
+        String(SP[id].name || id).toUpperCase() + "</option>";
+    });
+    sel.innerHTML = h;
+  }
+  // a beast army has no rifle and no drill sergeant: its gun/training rows
+  // grey out rather than lie
+  function kindRows(team) {
+    const beast = el(team + "U").value !== "men";
+    el(team + "W").disabled = beast;
+    el(team + "T").disabled = beast;
+    el(team + "W").style.opacity = beast ? 0.35 : 1;
+    el(team + "T").style.opacity = beast ? 0.35 : 1;
   }
   function fillTraining(sel, cur) {
     sel.innerHTML = TRAININGS.map(function (t) {
@@ -460,7 +556,37 @@ CBZ.studio.need(NEED).then(function () {
   fillGuns(el("redW"), SET.redW); fillGuns(el("blueW"), SET.blueW);
   fillTraining(el("redT"), SET.redT); fillTraining(el("blueT"), SET.blueT);
   fillSupport(el("redS"), SET.redS); fillSupport(el("blueS"), SET.blueS);
+  fillKind(el("redU"), SET.redU); fillKind(el("blueU"), SET.blueU);
+  ["red", "blue"].forEach(function (t) {
+    el(t + "U").addEventListener("change", function () { kindRows(t); });
+    kindRows(t);
+  });
   el("redN").value = SET.redN; el("blueN").value = SET.blueN;
+  /* THE MATCHUPS — the fights people argue about, one tap each. A button only
+     fills the form (kind, count, weapon, training); START is still yours. */
+  const MATCHUPS = [
+    { label: "100 MEN v GORILLA", r: { u: "men", n: 100, w: "fists", t: "civ" }, b: { u: "gorilla", n: 1 } },
+    { label: "LIONS v 1000 DOGS", r: { u: "lion", n: 100 }, b: { u: "dog", n: 1000 } },
+    { label: "WOLVES v THE GUARD", r: { u: "gray_wolf", n: 60 }, b: { u: "men", n: 30, w: "ak47", t: "elite" } },
+    { label: "BEARS v BARE HANDS", r: { u: "brown_bear", n: 12 }, b: { u: "men", n: 120, w: "fists", t: "thug" } },
+    { label: "THE STAMPEDE", r: { u: "bison", n: 200 }, b: { u: "men", n: 60, w: "ak47", t: "pro" } },
+  ];
+  const muEl = el("matchups");
+  MATCHUPS.forEach(function (mu) {
+    const b = document.createElement("button");
+    b.textContent = mu.label;
+    b.addEventListener("click", function () {
+      [["red", mu.r], ["blue", mu.b]].forEach(function (row) {
+        const t = row[0], v = row[1];
+        el(t + "U").value = v.u;
+        el(t + "N").value = v.n;
+        if (v.w) el(t + "W").value = v.w;
+        if (v.t) el(t + "T").value = v.t;
+        kindRows(t);
+      });
+    });
+    muEl.appendChild(b);
+  });
   document.querySelectorAll(".cnt button").forEach(function (b) {
     b.addEventListener("click", function () {
       const inp = el(b.dataset.t + "N");
@@ -476,12 +602,14 @@ CBZ.studio.need(NEED).then(function () {
   function readMenu() {
     SET.redN = Math.max(1, parseInt(el("redN").value, 10) || 1);
     SET.blueN = Math.max(1, parseInt(el("blueN").value, 10) || 1);
+    SET.redU = el("redU").value; SET.blueU = el("blueU").value;
     SET.redW = el("redW").value; SET.blueW = el("blueW").value;
     SET.redT = el("redT").value; SET.blueT = el("blueT").value;
     SET.redS = el("redS").value; SET.blueS = el("blueS").value;
     try {
       localStorage.setItem("cbz-npcwar", JSON.stringify({
         map: SET.map, redN: SET.redN, blueN: SET.blueN,
+        redU: SET.redU, blueU: SET.blueU,
         redW: SET.redW, blueW: SET.blueW, redT: SET.redT, blueT: SET.blueT,
         redS: SET.redS, blueS: SET.blueS,
       }));
@@ -536,6 +664,18 @@ CBZ.studio.need(NEED).then(function () {
   let started = false, over = false, simT = 0, speed = 1, lastSpeed = 1;
   let bench = null;
   const stats = { red: { kills: 0, shots: 0, hits: 0 }, blue: { kills: 0, shots: 0, hits: 0 } };
+  /* THE LEDGER, PER MAN AND PER GUN. The team totals above answer "who won";
+     they cannot answer "how is THIS man doing", which is the only question a
+     camera parked on his shoulder makes you ask. Every man carries his own
+     kills/shots/hits/reloads (see makeMan), and each gun keeps the same four
+     across everyone carrying it — so MIXED and EVERYTHING finally settle the
+     argument they were always implicitly starting. */
+  const GUNS = {};
+  function gunLedger(wid) {
+    let g = GUNS[wid];
+    if (!g) g = GUNS[wid] = { shots: 0, hits: 0, kills: 0, reloads: 0, men: 0 };
+    return g;
+  }
   const shotsRing = [];          // recent fire positions, feeds the director
   const spawnQueue = [];
   let spawnTotal = 0;
@@ -584,10 +724,10 @@ CBZ.studio.need(NEED).then(function () {
     m.userData.terrain = true;
     CBZ.scene.add(m);
   }
-  function apron(minX, maxX, minZ, maxZ, color) {
+  function apron(minX, maxX, minZ, maxZ, color, y) {
     const g = new THREE.PlaneGeometry(maxX - minX, maxZ - minZ);
     g.rotateX(-Math.PI / 2);
-    g.translate((minX + maxX) / 2, 0.004, (minZ + maxZ) / 2);
+    g.translate((minX + maxX) / 2, (y == null ? 0 : y) + 0.004, (minZ + maxZ) / 2);
     const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: color || 0x8d9198 }));
     m.receiveShadow = true; m.matrixAutoUpdate = false; m.updateMatrix();
     m.userData.terrain = true;
@@ -612,14 +752,42 @@ CBZ.studio.need(NEED).then(function () {
     }
     return false;
   }
-  function freeSpot(x, z) {
-    if (!blockedAt(x, z)) return { x: x, z: z };
-    for (let r = 1; r < 40; r++) {
-      const a = r * 2.399963229728653, d = r * 1.35;      // golden angle
-      const px = x + Math.cos(a) * d, pz = z + Math.sin(a) * d;
-      if (!blockedAt(px, pz)) return { x: px, z: pz };
+  /* AND NOT ON TOP OF EACH OTHER EITHER. The spiral above only ever asked the
+     geometry. On an open field that is enough, because the ranked grid never
+     puts two men in the same square — but on a DENSE venue (the seat of state
+     is walls, planters and steps) many grid points are blocked, several men
+     spiral out of their own square and converge on the same first free metre,
+     and they start the battle interpenetrating. Measured on `gov`: one
+     overlapping pair at t=0, which the sweep counts as a fault and should.
+     Claimed points are remembered for the length of one build. */
+  /* AND THE CLAIM IS THE BODY'S OWN SIZE. A flat 1.15 m is the right answer
+     for a man and a fiction for a bull elephant: an army of them spawned
+     INSIDE one another and spent the opening seconds of the battle shoving
+     itself apart. Each claim carries the radius that took it, so a pair only
+     has to clear what the two of them actually occupy. */
+  const _claim = [];
+  const CLAIM_R = 0.575;         // a man's half of the old 1.15 m pair
+  function crowdedAt(x, z, r) {
+    for (let i = 0; i < _claim.length; i++) {
+      const c = _claim[i];
+      const dx = x - c.x, dz = z - c.z, need = r + c.r;
+      if (dx * dx + dz * dz < need * need) return true;
     }
-    return { x: x, z: z };
+    return false;
+  }
+  function freeSpot(x, z, r) {
+    r = r || CLAIM_R;
+    const take = function (px, pz) { _claim.push({ x: px, z: pz, r: r }); return { x: px, z: pz }; };
+    if (!blockedAt(x, z) && !crowdedAt(x, z, r)) return take(x, z);
+    // the search walks outward in the body's OWN units, so a big animal is
+    // not condemned to test forty man-sized rings it can never fit in
+    const step = 1.35 * Math.max(1, r / CLAIM_R * 0.72);
+    for (let k = 1; k < 40; k++) {
+      const a = k * 2.399963229728653, d = k * step;      // golden angle
+      const px = x + Math.cos(a) * d, pz = z + Math.sin(a) * d;
+      if (!blockedAt(px, pz) && !crowdedAt(px, pz, r)) return take(px, pz);
+    }
+    return take(x, z);
   }
 
   /* SPAWN ON THE STREET, NOT ON A GRID. Given the town's own road records,
@@ -659,16 +827,19 @@ CBZ.studio.need(NEED).then(function () {
     };
   }
 
+  let MEASURED = null;        // what the heightfield found, for the audit
   function buildMap(id) {
     /* THE START LINE, and every one of these is a distance a man has to WALK
        before anything happens. The open maps can be wide because a firing line
        across sand is a sightline: dunes at 150 m resolved in 32 s and the kill
        box at 120 m in 51 s, both measured. A city cannot, because a block is
-       not a sightline — so `city` came down from 300 (a minute of marching, see
-       streetSpawner) to a three-block approach that still has to be fought
-       through, and the two base maps came down with it for the same reason:
-       an apron with hangars on it is closer to a downtown than to a dune. */
-    const gap = { city: 170, island: 175, field: 180, dunes: 150, arena: 120 }[id] || 150;
+       not a sightline — `city` used to read 300 here and the two armies spent
+       the first forty seconds marching (see streetSpawner), so it is a
+       three-block approach now that still has to be fought through. */
+    const M = MAPS[id] || MAPS.arena;
+    _claim.length = 0;          // spawn claims belong to ONE build
+    let gap = { city: 170, island: 175, field: 180, dunes: 150, arena: 120 }[id] || 150;
+    let gapOverride = 0;      // measured venues size their own no-man's land
     let groundAt = function () { return 0; };
     let cx = 0, cz = 0, spawners = null;
 
@@ -716,18 +887,52 @@ CBZ.studio.need(NEED).then(function () {
           blue: streetSpawner(town.roads, cx, cz, 1, gap),
         };
       }
-    } else if (id === "island") {
-      seaPlate();
-      base = CBZ.studio.raise("militaryisland");
-      cx = -620; cz = -700;                       // the island's authored centre
-      apron(cx - 400, cx + 400, cz - 300, cz + 300, 0x7d7a6c);
-    } else if (id === "field") {
-      seaPlate();
-      base = CBZ.studio.raise("airport");
-      cx = -305; cz = -120;                       // mid-field, x -900..290 / z -280..40
-      apron(-960, 350, -340, 100, 0x8a8d8f);
+    } else if (M.raise) {
+      /* A REAL GANG CITY VENUE, MEASURED RATHER THAN DECLARED.
+
+         Every raised venue took the same three hand-written constants before
+         this: a centre, an apron rectangle and a flat groundAt. All three were
+         guesses that nothing checked, and all three are readable from the
+         geometry once it exists. Raise into our OWN group so the heightfield
+         casts against the venue and not the skybox, then ask it where it is
+         and how high it stands. A venue that is flat measures flat; the
+         speedway's banking measures as banking, for free. */
+      if (M.sea) seaPlate();
+      const venue = new THREE.Group();
+      CBZ.scene.add(venue);
+      for (let i = 0; i < M.raise.length; i++) {
+        const got = CBZ.studio.raise(M.raise[i], { parent: venue });
+        if (!base) base = got;
+        if (!got) console.error("[battle] nothing raised for pack:", M.raise[i]);
+      }
+      const H = CBZ.studio.heightfield(venue, { step: 6, pad: 30 });
+      if (H) {
+        groundAt = H.heightAt;
+        cx = H.cx; cz = H.cz;
+        // ground out to the fog under the venue's own floor, so its edge is a
+        // quay and not the inside of the sky dome
+        apron(H.box.min.x - 420, H.box.max.x + 420, H.box.min.z - 420, H.box.max.z + 420,
+              M.apronColor || 0x7d7a6c, H.minY);
+        // the armies start half the venue apart, clamped to a distance two
+        // sides can actually cross before the watcher loses interest
+        // ...and 320 m is not that distance. MEASURED on `city` at 304 m: the
+        // first round went off at t=10.9 s, forty-five of fifty-two men were
+        // still in slot `march` at t=13, and the two sides were not inside
+        // 100 m of each other until t=41. Closure through real geometry runs
+        // about 5 m/s combined, not the 12 m/s two marching columns suggest,
+        // so the old ceiling was a full minute of watching crowds walk. 190 is
+        // where the fixed maps measure (Halloran 6.5 s to first contact,
+        // island 7.1) and it still leaves a venue-length approach to fight.
+        gapOverride = Math.max(90, Math.min(190, Math.min(H.spanX, H.spanZ) * 0.5));
+        MEASURED = { cols: H.cols, rows: H.rows, step: +H.step.toFixed(1), miss: H.miss,
+                     minY: +H.minY.toFixed(2), maxY: +H.maxY.toFixed(2),
+                     spanX: Math.round(H.spanX), spanZ: Math.round(H.spanZ) };
+      } else {
+        console.error("[battle] heightfield measured nothing for", id, "— falling back to flat");
+      }
     }
 
+    if (gapOverride) gap = gapOverride;
     const grid = function (team, i) {
       const side = team === "red" ? -1 : 1;
       const col = (i / 10) | 0, row = i % 10;
@@ -739,10 +944,10 @@ CBZ.studio.need(NEED).then(function () {
       id: id, gap: gap, cx: cx, cz: cz, groundAt: groundAt,
       // team spawn: down the streets where there are streets, ranked columns
       // where there are not, and in both cases OUT of the geometry
-      spawnAt: function (team, i) {
+      spawnAt: function (team, i, r) {
         const s = spawners && spawners[team];
         const p = (s && s(i)) || grid(team, i);
-        return freeSpot(p.x, p.z);
+        return freeSpot(p.x, p.z, r);
       },
     };
   }
@@ -753,6 +958,7 @@ CBZ.studio.need(NEED).then(function () {
     return TRAININGS[3];
   };
   function pickGun(choice, i) {
+    if (choice === "fists") return "fists";
     if (choice === "mixed") return MIX_RIFLES[(i * 7 + ((i / MIX_RIFLES.length) | 0)) % MIX_RIFLES.length];
     if (choice === "everything") return GUN_ORDER[(i * 5 + ((i / GUN_ORDER.length) | 0)) % GUN_ORDER.length];
     return GUN_NAME[choice] ? choice : "ak47";
@@ -761,7 +967,8 @@ CBZ.studio.need(NEED).then(function () {
     const T = TEAMS[teamId];
     const tr = trainingOf(teamId === "red" ? SET.redT : SET.blueT);
     const wid = pickGun(teamId === "red" ? SET.redW : SET.blueW, i);
-    const w = CBZ.weaponById(wid) || CBZ.weaponById("ak47");
+    const fists = wid === "fists";
+    const w = fists ? null : (CBZ.weaponById(wid) || CBZ.weaponById("ak47"));
     const group = CBZ.studio.cast(tr.role, { color: T.color, variant: i * 2 + (teamId === "red" ? 0 : 1) });
     if (!group) return null;
     const at = MAP.spawnAt(teamId, i);
@@ -775,13 +982,15 @@ CBZ.studio.need(NEED).then(function () {
       target: V(),                            // combat_iq's posture() steers this
       yaw: group.rotation.y, speed: 0,
       hp: bench ? 1e9 : tr.hp, maxHp: bench ? 1e9 : tr.hp,
-      armed: true, weapon: GUN_NAME[wid], wid: wid,
-      launcher: !!w.explosive,
-      mag: w.magSize || w.mag || 30, magSize: w.magSize || w.mag || 30,
+      armed: !fists, weapon: fists ? null : GUN_NAME[wid], wid: wid,
+      fists: fists, punch: PUNCH[tr.id] || 8, rad: 0.45,
+      launcher: !!(w && w.explosive),
+      mag: w ? (w.magSize || w.mag || 30) : 0, magSize: w ? (w.magSize || w.mag || 30) : 0,
       cool: 0.4 + lcg() * 1.2, reloadT: 0,
       tgt: null, losBadT: 0, slot: "hold", thinkAt: simT + lcg() * 0.3, lastThink: simT,
       dead: false, dieT: 0, dieDir: 1, animF: (i % 4),
       lastShotT: -9, sq: Math.floor(i / 10), sqSlot: i % 10,
+      kills: 0, shotsF: 0, hitsF: 0, reloads: 0,
     };
     man.target.set(at.x, 0, at.z);
     (squads[teamId][man.sq] = squads[teamId][man.sq] || []).push(man);
@@ -801,8 +1010,168 @@ CBZ.studio.need(NEED).then(function () {
     else if (tr.id === "elite") man.kind = "soldier";
     else if (tr.id === "pro") man.kind = "guard";
     else if (tr.id === "thug") man.aggr = 0.92;
-    if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(man);
+    if (!fists && CBZ.syncActorWeapon) CBZ.syncActorWeapon(man);
     return man;
+  }
+
+  /* ============================================================ THE BEASTS
+     An army out of the bestiary. The body is the species' own build() — the
+     same low-poly animal the mainland hunts — walked by the shared gait rig
+     and fought by creature_combat's one strike driver. NOTHING here is a new
+     animal AI: stats come off the species row (hp, spd, danger, bite), the
+     lope comes from wildlife_rig's class table, and the bite comes from
+     CBZ.creatureFight with this page's ground and damage funnel plugged into
+     its seams. */
+  const BEAST_TUNE = {};
+  function beastTuning(sp) {
+    let b = BEAST_TUNE[sp.id];
+    if (b) return b;
+    const cls = CBZ.wildlifeRig.classify(sp);
+    // charge speed off the species' own wander speed and its class's attack
+    // multiplier, lifted into the men's speed register (walkers 4.6–8.0) so
+    // a wolf runs a man down and an elephant arrives like weather
+    const chase = Math.max(4.2, Math.min(8.6, (sp.spd || 2) * (cls.atkM || 2.2) * 1.15));
+    b = BEAST_TUNE[sp.id] = {
+      chase: chase,
+      march: Math.max(2.6, chase * 0.55),
+      dmg: Math.max(6, (sp.bite || 10) * 1.35),   // the men's own +45% band rule, scaled for teeth
+      // a dangerous animal strikes FASTER, not just harder — measured on the
+      // first arena run: at a flat 1.24 s a gorilla ring-fenced by circling
+      // brawlers landed ~7% of its potential strikes and thirty of them lost
+      // to thirty thugs, which is not what a silverback is
+      rate: 0.95 + (1 - Math.min(1, sp.danger || 0)) * 0.7,
+      brave: (sp.danger || 0) >= 0.7,             // bears, cats, the gorilla: no rout in them
+      prey: (sp.danger || 0) < 0.15,              // deer and rabbits fight nobody
+    };
+    return b;
+  }
+  function makeBeast(teamId, i) {
+    const spId = teamId === "red" ? SET.redU : SET.blueU;
+    const sp = (CBZ.WILDLIFE_SPECIES || {})[spId];
+    if (!sp || !sp.build) return null;
+    const T = TEAMS[teamId];
+    let group = null;
+    try { group = sp.build({ THREE: THREE, mat: CBZ.cmat, rng: lcg }); } catch (e) { console.warn("[war] species build failed:", spId, e); }
+    if (!group) return null;
+    const s = sp.scale || 1;
+    group.scale.setScalar(s);
+    // measure the body once: separation radius, aim heights, the collar seat
+    const bb = new THREE.Box3().setFromObject(group);
+    const H = Math.max(0.5, bb.max.y - bb.min.y);
+    /* THE FOOTPRINT AN ANIMAL ACTUALLY OCCUPIES.
+
+       The first pass took 0.3 of the SMALLER of (length, 1.6 x width) and
+       capped it at 1.1 m, which asked a 2.2 m dog to keep 0.84 m from the
+       next dog and a lion 1.26 m — so a pack closed up and drew straight
+       through itself, exactly as reported. A body's separation circle has to
+       account for the length as well as the beam, because an animal is long
+       and it turns: half the mean of the two spans is the honest radius for a
+       circle standing in for a body that can face any way. */
+    const spanX = Math.max(0.3, bb.max.x - bb.min.x);     // nose to tail (+X authored)
+    const spanZ = Math.max(0.3, bb.max.z - bb.min.z);     // across the shoulders
+    const rad = Math.min(3.4, Math.max(0.45, (spanX + spanZ) * 0.28));
+    noteBodyRadius(rad);
+    // the coat stays the animal's own — a thin team collar says whose side,
+    // seated on the neck line the box measured rather than a guessed height
+    const collar = new THREE.Mesh(CBZ.boxGeom(0.18 / s, 0.12 / s, Math.min(0.9, spanZ * 0.85) / s),
+      CBZ.cmat(T.color));
+    collar.position.set((bb.max.x * 0.55) / s, (H * 0.7) / s, 0);
+    group.add(collar);
+    const at = MAP.spawnAt(teamId, i, rad);
+    group.position.set(at.x, MAP.groundAt(at.x, at.z), at.z);
+    CBZ.scene.add(group);
+    const tn = beastTuning(sp);
+    const m = {
+      id: teamId + i, team: teamId, i: i, beast: true, species: sp, tn: tn,
+      group: group, pos: group.position, target: V(),
+      heading: teamId === "red" ? 0 : Math.PI, faceH: teamId === "red" ? 0 : Math.PI,
+      yaw: 0, speed: 0, state: "wander",           // gait's flee-bound reads .state
+      hp: bench ? 1e9 : sp.hp || 40, maxHp: bench ? 1e9 : sp.hp || 40,
+      armed: false, weapon: null, launcher: false, mag: 0, magSize: 0,
+      cool: 0, reloadT: 0,
+      rad: rad,
+      /* REACH IS A DISTANCE BETWEEN CENTRES, so it has to clear whatever the
+         separation pass will hold this body away from — the men's melee
+         circle (IQ.melee orbits at ~1.8 m; measured as the run where thirty
+         gorillas lost to thirty thugs by idling at the edge of their own
+         strike gate) AND, now that bodies keep their real footprints, a
+         second animal of its own kind. Two lions holding 2.6 m apart with a
+         2.47 m reach would have circled each other forever. */
+      reach: Math.max(1.2 + s * 1.1, rad * 2 + 0.55),
+      eyeH: Math.max(0.5, H * 0.8), losY: Math.max(0.35, H * 0.55),
+      aimY: Math.max(0.3, H * 0.5), headY: Math.max(0.45, H * 0.8),
+      tgt: null, losBadT: 0, slot: "hold", thinkAt: simT + lcg() * 0.3, lastThink: simT,
+      dead: false, dieT: 0, dieDir: 1, animF: (i % 4),
+      lastShotT: -9, sq: Math.floor(i / 10), sqSlot: i % 10,
+      kills: 0, shotsF: 0, hitsF: 0, reloads: 0,
+    };
+    CBZ.faceAnimalHeading(m, m.heading);
+    if (CBZ.wildlifeRig) CBZ.wildlifeRig.buildGait(m);
+    m.target.set(at.x, 0, at.z);
+    (squads[teamId][m.sq] = squads[teamId][m.sq] || []).push(m);
+    if (AIR.on && CBZ.ordnance && CBZ.ordnance.addTarget) {
+      m.ordTgt = CBZ.ordnance.addTarget({
+        pos: m.pos, team: teamId, unit: m,
+        onDamage: function (dmg, info) {
+          hurtMan(m, dmg, { byTeam: info && info.team, cause: "bomb" });
+        },
+      });
+    }
+    return m;
+  }
+  /* HOW CLOSE TWO BODIES CAN GET, so a fist can always land on what it is
+     standing next to. The separation pass holds a pair `radA + radB` apart;
+     an arm swung at a fixed 1.9 m connects with a man and whiffs forever at
+     a bear, which is not a difficulty setting, it is a bug. Man on man this
+     answers 1.85 — the number it always used — and it grows with whatever is
+     actually in front of him. */
+  function meleeReach(a, b) {
+    return 0.95 + (a.rad || 0.45) + (b.rad || 0.45);
+  }
+  // one mover for the strike bubble: creature_combat decides where, this page
+  // answers to its own walls and ground — the exact locomotion seam the file
+  // published for water, used here for a city
+  function beastMove(a, dx, dz, step) {
+    /* AND IT DOES NOT WALK INTO THE BODY IT IS BITING. creature_combat closes
+       to 70% of the reach it was handed — right for a driver that cannot know
+       how wide either party is, and a guaranteed overlap once both parties are
+       lions: 0.7 x 3.13 m is 2.19 m, and two lions owe each other 2.58 m. The
+       locomotion seam is the honest place to say so, because the seam exists
+       exactly so the caller can own what "moving" means in its own world. */
+    const t = a.tgt;
+    if (t && !t.dead) {
+      const cx = t.pos.x - a.pos.x, cz = t.pos.z - a.pos.z;
+      const d = Math.hypot(cx, cz);
+      const keep = (a.rad || 0.5) + (t.rad || 0.45);
+      if (d - step < keep) step = Math.max(0, d - keep);
+    }
+    if (step <= 0) return;
+    a.pos.x += dx * step;
+    a.pos.z += dz * step;
+    CBZ.micro.resolveCircle(a.pos, a.rad || 0.6, a.pos.y, 1.8);
+    a.pos.y = MAP.groundAt(a.pos.x, a.pos.z);
+  }
+  function beastFight(m, tgt, sdt) {
+    let o = m._bf;
+    if (!o) {
+      o = m._bf = {
+        speed: 0, reach: m.reach, rate: m.tn.rate, dmg: m.tn.dmg, move: beastMove,
+        onHit: null,
+      };
+      o.onHit = function (dmg) {
+        const t = m.tgt;
+        if (!t || t.dead) return;
+        hurtMan(t, dmg, { by: m });
+        // a struck beast shudders (creature_combat's own flinch); a struck man
+        // already staggers through the damage funnel's suppression
+        if (t.beast && !t.dead && CBZ.creatureFlinch) { try { CBZ.creatureFlinch(t); } catch (e) {} }
+      };
+    }
+    o.speed = m.tn.chase * 0.9;
+    m.speed = 2;                       // close-quarters footwork, for the sprint-target test
+    CBZ.creatureFight(m, tgt, sdt, o);
+    m.heading = typeof m.heading === "number" ? m.heading : 0;
+    m.faceH = m.heading;
   }
 
   /* ============================================================ REACHABLE
@@ -832,6 +1201,9 @@ CBZ.studio.need(NEED).then(function () {
   }
   function killMan(m, imp) {
     m.dead = true; m.hp = 0;
+    // a beast that dies mid-swing must let the pose go, or the strike offset
+    // stays latched on the corpse — the exact leak creatureEndAttack exists for
+    if (m.beast && CBZ.creatureEndAttack) { try { CBZ.creatureEndAttack(m); } catch (e) {} }
     if (m.ordTgt) {
       m.ordTgt.alive = false;
       if (CBZ.ordnance && CBZ.ordnance.removeTarget) CBZ.ordnance.removeTarget(m.ordTgt);
@@ -841,6 +1213,12 @@ CBZ.studio.need(NEED).then(function () {
     if (byT && byT !== m.team) stats[byT].kills++;
     else if (!byT) stats[m.team === "red" ? "blue" : "red"].kills++;   // blast with no author still scores the other side
     // fratricide (a bomb is a blunt tool) credits nobody
+    // and the man who did it keeps his own tally, with his gun
+    const by = imp && imp.by;
+    if (by && by.team && by.team !== m.team) {
+      by.kills = (by.kills || 0) + 1;
+      if (by.wid) gunLedger(by.wid).kills++;
+    }
     // sprawl: the rig's own death variety; the topple is ours (caller owns it)
     if (m.char && CBZ.deathPose) { try { CBZ.deathPose(m.char, m.i * 3.7 + 1.3, lcg()); } catch (e) {} }
     m.dieT = 0.0001;
@@ -871,7 +1249,8 @@ CBZ.studio.need(NEED).then(function () {
       if (old.group) CBZ.studio.drop(old.group);
     }
     if (camDist2(m.pos) < 120 * 120 || aliveCount("red") + aliveCount("blue") < 40) {
-      hud.feed(TEAMS[m.team].name + " " + (m.i + 1) + " DOWN");
+      hud.feed((m.beast ? TEAMS[m.team].name + " " + String(m.species.name).toUpperCase()
+        : TEAMS[m.team].name + " " + (m.i + 1)) + " DOWN");
     }
   }
   function aliveCount(team) {
@@ -986,8 +1365,27 @@ CBZ.studio.need(NEED).then(function () {
      stale body grid is exactly the thing that lets two men swap cells and
      stop seeing each other. */
   const SEP = 0.9;               // centre-to-centre clearance two men keep
-  const BODY = 0.62;             // shoulder width: closer than this is DRAWN through
-  const FINE = 2.4;              // cell: > SEP, so a 3x3 sweep is complete
+  /* AND THE CELL FOLLOWS THE BIGGEST BODY ON THE FIELD.
+
+     2.4 m is "wider than two men", which is what makes the four-neighbour fan
+     below a COMPLETE sweep: two bodies further apart than one cell can never
+     be touching, so they never need comparing. The moment an army is lions
+     that arithmetic breaks — a lion pair owes each other 2.6 m of clearance,
+     more than the cell, so the pairs that mattered most were exactly the ones
+     the sweep was allowed to skip. Measured on 120 lions v 400 dogs before
+     this: 32 overlapping pairs at peak, the worst pair 84% inside each other.
+
+     So the cell is sized off the widest body that has actually spawned, and
+     the completeness bound holds by construction: FINE > 2 * maxRadius >=
+     every pair clearance. An army of men never grows it (the max stays 0.45)
+     and pays nothing. */
+  let FINE = 2.4;
+  let bodyRadMax = 0.45;
+  function noteBodyRadius(r) {
+    if (!(r > bodyRadMax)) return;
+    bodyRadMax = r;
+    FINE = Math.max(2.4, r * 2 + 0.25);
+  }
   const fine = new Map();
   function rebuildFine() {
     fine.clear();
@@ -1003,8 +1401,10 @@ CBZ.studio.need(NEED).then(function () {
   // the four cells that make each pair appear once: same cell (j > i), then
   // E, NE, N, NW. Anything closer than one cell is inside this fan.
   const FAN = [[1, 0], [1, 1], [0, 1], [-1, 1]];
+  let sepFixed = 0;
   function separatePass(k) {
-    if (SEP_OLD) return separateOld(k);
+    if (SEP_OLD) { separateOld(k); return 0; }
+    sepFixed = 0;
     fine.forEach(function (a, key) {
       for (let i = 0; i < a.length; i++) {
         const m = a[i];
@@ -1018,12 +1418,42 @@ CBZ.studio.need(NEED).then(function () {
         }
       }
     });
+    return sepFixed;
+  }
+  /* ONE SWEEP IS NOT A SOLVER.
+
+     A single relaxation pass fixes any pair it looks at — and then the next
+     pair moves one of them back. In open order that is invisible (a man's
+     residual is under a shoulder width); in a crush of four hundred dogs
+     converging on a pride it is not, because every body is inside several
+     constraints at once and each correction partly cancels the last. The
+     probe proved it was this and not a hole in the grid: instrumented with
+     the grid's OWN sweep, the survivors after one pass matched the O(n^2)
+     count exactly, 33 for 33 — nothing was being missed, everything was
+     being undone.
+
+     So the pass runs until it converges, up to three sweeps, rebuilding the
+     body grid between them because the bodies have moved. It stops the
+     instant a sweep corrects nothing, so open order still costs exactly one
+     sweep, and a battle of men — whose radii never grow past 0.45 — never
+     enters the loop at all. */
+  function separateSolve(k) {
+    const fixed = separatePass(k);
+    if (!fixed || bodyRadMax <= 0.5) return;
+    for (let it = 0; it < 2; it++) {
+      rebuildFine();
+      if (!separatePass(k)) return;
+    }
   }
   function push2(m, o, k) {
     if (o.dead || o === m) return;
+    // clearance is the PAIR's, not the species': a man by a man keeps the old
+    // 0.9, a man by a bear keeps more, and the radii are clamped at build so
+    // the widest pair (2.2) still fits the FINE cell's completeness bound
+    const clr = (m.rad || 0.45) + (o.rad || 0.45);
     const dx = o.pos.x - m.pos.x, dz = o.pos.z - m.pos.z;
     const d2 = dx * dx + dz * dz;
-    if (d2 > SEP * SEP) return;
+    if (d2 > clr * clr) return;
     let d = Math.sqrt(d2), ux, uz;
     if (d < 1e-4) {
       // exactly co-located: a deterministic bearing off the pair's own ids,
@@ -1037,9 +1467,10 @@ CBZ.studio.need(NEED).then(function () {
     // wrong for two bodies genuinely inside each other — that has to be gone
     // THIS step or it is on screen. Inside shoulder width the correction is
     // full; outside it, the soft pass keeps the crowd from jittering.
-    const push = (SEP - d) * 0.5 * (d < BODY ? 1 : k);
+    const push = (clr - d) * 0.5 * (d < clr * 0.69 ? 1 : k);
     m.pos.x -= ux * push; m.pos.z -= uz * push;
     o.pos.x += ux * push; o.pos.z += uz * push;
+    sepFixed++;
     // a shove is a move, and a move has to answer to the walls. Marking them
     // makes the NEXT step resolve them instead of every one of them now: a
     // body squeezed into a crate is invisible to every line of sight, so it
@@ -1052,24 +1483,24 @@ CBZ.studio.need(NEED).then(function () {
   function shove(m, ux, uz, amt) {
     const x0 = m.pos.x, z0 = m.pos.z;
     m.pos.x += ux * amt; m.pos.z += uz * amt;
-    CBZ.micro.resolveCircle(m.pos, 0.5, m.pos.y, 1.8);
+    CBZ.micro.resolveCircle(m.pos, (m.rad || 0.45) + 0.05, m.pos.y, 1.8);
     return (m.pos.x - x0) * ux + (m.pos.z - z0) * uz;
   }
   /* ---- THE PINNED PAIR, and it is why walls were the last overlap left ----
 
-     One relaxation sweep does not converge in a crowd. A man belongs to
-     several pairs at once, so the shove that clears him of B walks him back
-     into C, and against a WALL it is worse than un-converged, it is a loop:
+     separateSolve above already answers the CROWD half of this: a body belongs
+     to several pairs at once, so the shove that clears it of B walks it back
+     into C, and it sweeps again until nothing moves. What no number of sweeps
+     can answer is a WALL, because a wall does not take its half of the shove:
      separation puts him into the facade, the next step's resolveCircle puts
      him straight back out — which is straight back into the man he was cleared
      from — and the two of them oscillate in a doorway for as long as they both
-     want to stand there. MEASURED on main, 26 v 26, 90 s: overlapPeak 0 on
-     island, field, dunes and the kill box, and 3 on `city`, the one map made
-     of walls.
+     want to stand there. MEASURED, 26 v 26, 90 s: overlapPeak 0 on island,
+     field, dunes and the kill box, and 3 on `city`, the one map made of walls.
 
-     So a SECOND pass runs over what the first one could not fix, and only over
-     that — pairs still inside shoulder width, which after one sweep is a
-     handful in a battle and usually none. It asks the world instead of
+     So a final pass runs over what the sweeps could not fix, and only over
+     that — pairs still inside their own overlap line, which after convergence
+     is a handful in a battle and usually none. It asks the world instead of
      assuming it:
 
        1. shove each man his half and see how much the world let him keep;
@@ -1098,14 +1529,19 @@ CBZ.studio.need(NEED).then(function () {
   }
   function unpin(m, o) {
     if (o.dead || o === m) return;
+    // the PAIR's clearance and the PAIR's overlap line, exactly as push2 and
+    // the probe read them — a lion pinned against a hangar is the same fault
+    // as a man pinned against a facade, and a man's numbers are still 0.9/0.62
+    const clr = (m.rad || 0.45) + (o.rad || 0.45);
+    const deep = clr * 0.69;
     let dx = o.pos.x - m.pos.x, dz = o.pos.z - m.pos.z;
-    if (dx * dx + dz * dz >= BODY * BODY) return;            // the common case: nothing to do
+    if (dx * dx + dz * dz >= deep * deep) return;            // the common case: nothing to do
     let d = Math.sqrt(dx * dx + dz * dz), ux, uz;
     if (d < 1e-4) {
       const ang = ((m.i * 37 + o.i * 91) % 360) * Math.PI / 180;
       ux = Math.cos(ang); uz = Math.sin(ang); d = 1e-4;
     } else { ux = dx / d; uz = dz / d; }
-    const push = (SEP - d) * 0.5;
+    const push = (clr - d) * 0.5;
     const gotM = shove(m, -ux, -uz, push);
     const gotO = shove(o, ux, uz, push);
     const owed = Math.max(0, push - gotM) + Math.max(0, push - gotO);
@@ -1114,14 +1550,14 @@ CBZ.studio.need(NEED).then(function () {
       else if (push - gotO > 0.01) shove(m, -ux, -uz, owed);
     }
     dx = o.pos.x - m.pos.x; dz = o.pos.z - m.pos.z;
-    if (dx * dx + dz * dz < BODY * BODY) {
-      const s = ((m.i * 37 + o.i * 91) & 1) ? 1 : -1;
-      shove(m, uz * s, -ux * s, BODY);                       // along the wall
-      shove(o, -uz * s, ux * s, BODY);
+    if (dx * dx + dz * dz < deep * deep) {
+      const sgn = ((m.i * 37 + o.i * 91) & 1) ? 1 : -1;
+      shove(m, uz * sgn, -ux * sgn, deep);                   // along the wall
+      shove(o, -uz * sgn, ux * sgn, deep);
       dx = o.pos.x - m.pos.x; dz = o.pos.z - m.pos.z;
-      if (dx * dx + dz * dz < BODY * BODY) {
+      if (dx * dx + dz * dz < deep * deep) {
         // nowhere left to put them: the frame wins, the world gets the next step
-        const e = (BODY - Math.sqrt(dx * dx + dz * dz)) * 0.5 + 0.01;
+        const e = (deep - Math.sqrt(dx * dx + dz * dz)) * 0.5 + 0.01;
         m.pos.x -= ux * e; m.pos.z -= uz * e;
         o.pos.x += ux * e; o.pos.z += uz * e;
       }
@@ -1150,6 +1586,39 @@ CBZ.studio.need(NEED).then(function () {
         }
       }
     });
+  }
+  /* DID THE PASS ACTUALLY DO ITS JOB? The probe's overlap count is O(n^2) and
+     deliberately shares none of the grid's assumptions, which makes it honest
+     about the RESULT and silent about the CAUSE: a pair can survive because
+     the pass never visited it (a grid that is not complete) or because it was
+     visited and something moved it back. This counts the survivors using the
+     grid's OWN sweep immediately after the pass — so a residual of zero here
+     beside a non-zero probe means the grid is missing pairs, and a residual
+     that matches the probe means the pass is being fought. */
+  let sepResid = 0;
+  function sepResidual() {
+    let n = 0;
+    fine.forEach(function (a) {
+      for (let i = 0; i < a.length; i++) {
+        const m = a[i];
+        if (m.dead) continue;
+        const cx = Math.floor(m.pos.x / FINE), cz = Math.floor(m.pos.z / FINE);
+        for (let j = i + 1; j < a.length; j++) n += tooClose(m, a[j]);
+        for (let f = 0; f < 4; f++) {
+          const b = fine.get(gridKey(cx + FAN[f][0], cz + FAN[f][1]));
+          if (!b) continue;
+          for (let j = 0; j < b.length; j++) n += tooClose(m, b[j]);
+        }
+      }
+    });
+    return n;
+  }
+  function tooClose(m, o) {
+    if (o.dead || o === m) return 0;
+    if (Math.abs(m.pos.y - o.pos.y) >= 1.8) return 0;
+    const need = 0.69 * ((m.rad || 0.45) + (o.rad || 0.45));
+    const dx = o.pos.x - m.pos.x, dz = o.pos.z - m.pos.z;
+    return (dx * dx + dz * dz) < need * need ? 1 : 0;
   }
   // NEIGHBOURS, for anything that needs to ask about bodies rather than push
   // them: the fire-discipline lane test, and the director.
@@ -1313,8 +1782,12 @@ CBZ.studio.need(NEED).then(function () {
      token discipline, derived damage. This page only draws the round,
      plays the report and applies the number it was handed. */
   const SIGHT = 175;
+  // eye and torso heights are PER BODY now: a man looks from 1.52 and is hit
+  // at 1.35; a wolf looks from half a metre and a giraffe from four — the
+  // measured box each beast carries says so, and the default is the man.
   function eyeLos(m, o) {
-    return !CBZ.micro.segmentBlocked(m.pos.x, m.pos.y + 1.52, m.pos.z, o.pos.x, o.pos.y + 1.35, o.pos.z);
+    return !CBZ.micro.segmentBlocked(m.pos.x, m.pos.y + (m.eyeH || 1.52), m.pos.z,
+      o.pos.x, o.pos.y + (o.losY || 1.35), o.pos.z);
   }
   /* IS ONE OF MINE STANDING IN THIS LANE? Only the near end is asked: past
      about twelve metres the round has cleared the firing line and anybody it
@@ -1373,10 +1846,11 @@ CBZ.studio.need(NEED).then(function () {
     const w = CBZ.weaponById(m.wid);
     m.mag--; m.lastShotT = simT;
     stats[m.team].shots++;
+    m.shotsF++; gunLedger(m.wid).shots++;
     /* WHEN DOES THE WAR ACTUALLY START? The one number that says whether a
-       person is watching a battle or watching a commute, and it is free. On
-       main this read 10.9 s on `city` with 26 a side, because the two armies
-       formed up 304 m apart — see streetSpawner. Held by battle-check. */
+       person is watching a battle or watching a commute, and it is free. It
+       read 10.9 s on `city` with 26 a side, because the two armies formed up
+       304 m apart — see streetSpawner. Held by battle-check. */
     if (QUAL.firstShotT < 0) QUAL.firstShotT = Math.round(simT * 10) / 10;
     if (PROBE) {
       // both counters are asked AT THE TRIGGER and with a fresh test, because
@@ -1392,8 +1866,9 @@ CBZ.studio.need(NEED).then(function () {
     const hit = lcg() < r.hit;
     const head = hit && lcg() < 0.12;
 
-    // the round, resolved: chest point on a hit, a spread-true near miss on a miss
-    _v.set(tgt.pos.x, tgt.pos.y + (head ? 1.62 : 1.28), tgt.pos.z);
+    // the round, resolved: chest point on a hit, a spread-true near miss on a
+    // miss — at the TARGET BODY's own heights (a dog's chest is not at 1.28)
+    _v.set(tgt.pos.x, tgt.pos.y + (head ? (tgt.headY || 1.62) : (tgt.aimY || 1.28)), tgt.pos.z);
     if (!hit) {
       const slot = (w && w.slot) || "_def";
       const spread = (CBZ.NPC_SPREAD && (CBZ.NPC_SPREAD[slot] || CBZ.NPC_SPREAD._def)) || 0.055;
@@ -1431,6 +1906,7 @@ CBZ.studio.need(NEED).then(function () {
 
     if (hit) {
       stats[m.team].hits++;
+      m.hitsF++; gunLedger(m.wid).hits++;
       if (CBZ.bodyWound && cd2 < 90 * 90) { try { CBZ.bodyWound(tgt, _v, {}); } catch (e) {} }
       // combat_iq's ladder is authored for fights against the PLAYER, whose
       // fairness cap this page has no player to need. Army-on-army trades at
@@ -1478,6 +1954,7 @@ CBZ.studio.need(NEED).then(function () {
     const w = CBZ.weaponById(m.wid);
     m.mag--; m.lastShotT = simT;
     stats[m.team].shots++;
+    m.shotsF++; gunLedger(m.wid).shots++;
     shotsRing.push({ x: m.pos.x, z: m.pos.z, t: simT, m: m });
     let from = null;
     if (camDist2(m.pos) < 150 * 150 && CBZ.actorMuzzle) from = CBZ.actorMuzzle(m, _muz);
@@ -1523,6 +2000,12 @@ CBZ.studio.need(NEED).then(function () {
         CBZ.studio.boom({ x: r.pos.x, y: Math.max(r.pos.y, MAP.groundAt(r.pos.x, r.pos.z) + 0.6), z: r.pos.z }, {
           radius: r.w.blastRadius || 13, power: (r.w.blastPower || 1.9) * 0.55,
           structural: MAP.id !== "arena" && spawnTotal < 700,
+          // THE MAN WHO FIRED IT. blastWorldActors has forwarded `opts.by` to
+          // every hurt call since it was written; this page simply never told
+          // it whose rocket that was, so a launcher crew's kills credited
+          // nobody — measured on an EVERYTHING roster where the bazooka ended
+          // the battle and finished the ledger with 0 kills against its name.
+          by: r.by,
         });
       }
     }
@@ -1735,6 +2218,154 @@ CBZ.studio.need(NEED).then(function () {
      Slow tick per man: pick a mark, hand steering to combat_iq's posture
      (cover, fire token, band, bearing slot), advance when walls have kept
      the mark unseen too long. The fast path below only moves and shoots. */
+  // nobody in sight: MARCH. Squads move as ranked columns behind their
+  // senior man — the approach reads as an army, and it costs one lookup
+  // per follower. Contact dissolves the parade: the moment anyone has a
+  // mark, combat_iq (or the beast brain) owns him.
+  //
+  // THE SENIOR MAN IS THE ONLY ONE WHO NAVIGATES. He descends the flow
+  // field, the column trails him on his own bearing, and a squad rounds a
+  // block as a squad. Before this, every follower solved the same wall
+  // independently and the formation came apart on the first corner.
+  // (Shared with the beasts verbatim: a wolf pack files through the same
+  // streets the men do, and spreads the same way when it finds the fight.)
+  function marchGoal(m) {
+    const com = teamCOM[m.team === "red" ? "blue" : "red"];
+    const sq = squads[m.team][m.sq];
+    let lead = null;
+    if (sq) for (let i = 0; i < sq.length; i++) if (!sq[i].dead) { lead = sq[i]; break; }
+    if (lead && lead !== m) {
+      const ahead = lead.target;
+      const my = Math.atan2(ahead.x - lead.pos.x, ahead.z - lead.pos.z);
+      const row = ((m.sqSlot / 2) | 0) + 1, col = (m.sqSlot & 1) ? 1.25 : -1.25;
+      m.target.set(
+        lead.pos.x - Math.sin(my) * row * 2.0 + Math.cos(my) * col, 0,
+        lead.pos.z - Math.cos(my) * row * 2.0 - Math.sin(my) * col);
+    } else if (!navStep(m, m.target)) {
+      const j = m.hunt ? 0 : 14;      // a hunt marches STRAIGHT at them
+      m.target.set(com.x + (lcg() - 0.5) * j, 0, com.z + (lcg() - 0.5) * j);
+    }
+    // a pack marching in also spreads: the column-follow above is a MAN's
+    // formation, and animals that ignore it would otherwise walk in a stack
+    if (m.beast) spreadGoal(m);
+    m.slot = "march";
+  }
+  /* THE WALL RULE — the fix this wave is actually for. A combat goal is only
+     a straight line if the world agrees: posture()'s bearing and band goals
+     are pure geometry around the mark, and in a real downtown they routinely
+     land through a building, which is the man pressing his face into the
+     facade until the detour timer spins him. One torso-height segment test
+     per think; when the line is walled, descend the flow field instead — the
+     same "around, not through" the marches already use. ?steer=old reverts. */
+  function goalBlocked(m) {
+    return CBZ.micro.segmentBlocked(
+      m.pos.x, m.pos.y + 1.1, m.pos.z,
+      m.target.x, MAP.groundAt(m.target.x, m.target.z) + 1.1, m.target.z);
+  }
+  function steerAroundWalls(m) {
+    if (STEER_OLD) return;
+    const gd = Math.hypot(m.target.x - m.pos.x, m.target.z - m.pos.z);
+    if (gd > 8 && goalBlocked(m) && navStep(m, m.target)) {
+      // the field hands every man in a cell the SAME cell centre, and two
+      // walled men approaching it from opposite sides would meet head-on at
+      // a point by construction. A man-stable lateral inside the 4 m cell
+      // keeps the descent direction and loses the pile-up.
+      m.target.x += ((m.i % 5) - 2) * 0.8;
+      m.target.z += (((m.i * 7) % 5) - 2) * 0.8;
+    }
+  }
+  /* A CHARGE IS NOT A QUEUE.
+
+     The men have had a goal-level anti-clump since the first build: after
+     combat_iq picks a spot, the goal is pushed off whichever mates are
+     already standing near it, so two riflemen are never sent to the same
+     metre of street. The beasts had NOTHING — every lion in the pride was
+     steered at the same enemy body, so a hundred goals stacked on one point
+     and the separation pass spent every frame shoving apart bodies that the
+     steering shoved straight back together. Measured on 120 lions v 400 dogs:
+     70 overlapping pairs at peak, and the probe named them for what they were
+     — same team, both charging, mostly not even fighting anybody yet.
+
+     Same rule as the men's, in the pair's own units: two lions need more room
+     than two dogs, and the fine grid already knows who is nearby. */
+  const _bn = [];
+  function spreadGoal(m) {
+    const reach = (m.rad + bodyRadMax) * 1.3;
+    const a = fineNear(m.target.x, m.target.z, reach, _bn);
+    let ox = 0, oz = 0, n = 0;
+    for (let i = 0; i < a.length && n < 5; i++) {
+      const o = a[i];
+      if (o === m || o.dead || o.team !== m.team) continue;
+      const want = (m.rad + (o.rad || 0.45)) * 1.1;
+      const dx = m.target.x - o.pos.x, dz = m.target.z - o.pos.z;
+      const d = Math.hypot(dx, dz);
+      if (d > want || d < 0.001) continue;
+      ox += (dx / d) * (want - d); oz += (dz / d) * (want - d); n++;
+    }
+    if (n) { m.target.x += ox; m.target.z += oz; }
+  }
+  // the beast's slow tick: pick the fight, close on it, surround it. The
+  // strike itself is creature_combat's, in the bubble stepMan owns.
+  function thinkBeast(m, tgt, thinkDt) {
+    const tn = m.tn;
+    // a mauled animal that is not one of the brave ones quits and runs — and
+    // is run down or lives by the same chase-and-retreat physics the men
+    // already play by. Prey species skip straight to flight.
+    const beaten = m.hp < m.maxHp * 0.3 && !tn.brave;
+    if (beaten || tn.prey) {
+      const com = teamCOM[m.team === "red" ? "blue" : "red"];
+      const fx = m.pos.x - (tgt ? tgt.pos.x : com.x), fz = m.pos.z - (tgt ? tgt.pos.z : com.z);
+      const fl = Math.hypot(fx, fz) || 1;
+      m.target.set(m.pos.x + (fx / fl) * 16, 0, m.pos.z + (fz / fl) * 16);
+      m.slot = "fallback"; m.state = "flee"; m.tgt = null;
+      return;
+    }
+    m.state = "charge";                        // the gait's flee-bound reads this
+    const sees = eyeLos(m, tgt);
+    m.sees = sees;
+    if (!sees) {
+      m.losBadT += thinkDt;
+      if (m.losBadT > 7) { m.tgt = null; m.losBadT = 0; return; }
+      if (m.losBadT > 2.0) {                   // an animal does not trade with a facade at all
+        if (!navStep(m, m.target)) m.target.set(tgt.pos.x, 0, tgt.pos.z);
+        m.slot = "push";
+        return;
+      }
+    } else m.losBadT = 0;
+    const d = Math.hypot(tgt.pos.x - m.pos.x, tgt.pos.z - m.pos.z);
+    if (d < 14) {
+      /* THE SURROUND: a pack does not queue single file behind the prey.
+         Each pack index takes a bearing around the mark — the same slot idea
+         the gunmen's fire arcs use, at claw range.
+
+         The ring is the two BODIES' own sizes, not a fraction of the reach.
+         Sizing it off reach put every attacker inside the clearance the
+         separation pass was simultaneously trying to keep them at, so the two
+         rules fought each other and the pack shimmered through itself — 25 of
+         the 32 overlapping pairs in the lions-and-dogs measurement were on a
+         surround ring. Twelve bearings around the WHOLE circle, too: seven
+         slots across 172 degrees left the far side of the prey empty. */
+      /* AND THE RING HAS A CAPACITY. One ring at touching distance holds
+         2*pi*r / (bodies wide) animals and no more — for dogs on a lion that
+         is eight — so when four hundred dogs pick the same lion, the ring
+         itself was ordering three hundred of them to stand inside each other.
+         Twelve bearings on THREE concentric rings, assigned off the animal's
+         own stable index: the front rank bites, the ranks behind wait their
+         turn at a body's distance back, and a pack reads as a pack closing in
+         rather than a single pile. */
+      const slot = (m.i % 12) * (Math.PI / 6);
+      const ringN = (((m.i / 12) | 0) % 3);
+      const base = Math.atan2(m.pos.x - tgt.pos.x, m.pos.z - tgt.pos.z) + slot;
+      const r = m.rad + (tgt.rad || 0.45) + 0.12 + ringN * m.rad * 1.9;
+      m.target.set(tgt.pos.x + Math.sin(base) * r, 0, tgt.pos.z + Math.cos(base) * r);
+    } else {
+      m.target.set(tgt.pos.x, 0, tgt.pos.z);
+      steerAroundWalls(m);
+    }
+    spreadGoal(m);
+    m.slot = "push";
+  }
+
   function think(m, now) {
     const thinkDt = Math.min(1.2, now - m.lastThink);
     m.lastThink = now;
@@ -1747,35 +2378,40 @@ CBZ.studio.need(NEED).then(function () {
     if (m.stepAsideT > 0 && m.tgt && !m.tgt.dead) { m.stepAsideT -= thinkDt; return; }
 
     if (!m.tgt || m.tgt.dead) { m.tgt = pickTarget(m, m.hunt ? SIGHT * 2 : SIGHT); m.losBadT = 0; }
-    const tgt = m.tgt;
-    if (!tgt) {
-      // nobody in sight: MARCH. Squads move as ranked columns behind their
-      // senior man — the approach reads as an army, and it costs one lookup
-      // per follower. Contact dissolves the parade: the moment anyone has a
-      // mark, combat_iq owns him.
-      //
-      // THE SENIOR MAN IS THE ONLY ONE WHO NAVIGATES. He descends the flow
-      // field, the column trails him on his own bearing, and a squad rounds a
-      // block as a squad. Before this, every follower solved the same wall
-      // independently and the formation came apart on the first corner.
-      const com = teamCOM[m.team === "red" ? "blue" : "red"];
-      const sq = squads[m.team][m.sq];
-      let lead = null;
-      if (sq) for (let i = 0; i < sq.length; i++) if (!sq[i].dead) { lead = sq[i]; break; }
-      if (lead && lead !== m) {
-        const ahead = lead.target;
-        const my = Math.atan2(ahead.x - lead.pos.x, ahead.z - lead.pos.z);
-        const row = ((m.sqSlot / 2) | 0) + 1, col = (m.sqSlot & 1) ? 1.25 : -1.25;
-        m.target.set(
-          lead.pos.x - Math.sin(my) * row * 2.0 + Math.cos(my) * col, 0,
-          lead.pos.z - Math.cos(my) * row * 2.0 - Math.sin(my) * col);
-      } else if (!navStep(m, m.target)) {
-        const j = m.hunt ? 0 : 14;      // a hunt marches STRAIGHT at them
-        m.target.set(com.x + (lcg() - 0.5) * j, 0, com.z + (lcg() - 0.5) * j);
+    // CONTACT IS INFORMATION A SQUAD SHARES. Before marching blind past a
+    // fight, a man asks his own column: a mate already engaged hands him the
+    // mark, and the squad turns to the guns together instead of one man
+    // duelling while nine file past. One squad scan per think, only while
+    // unengaged — this is what "acting under orders" costs when it is real.
+    if (!m.tgt && !SHARE_OLD) {
+      /* AT MOST TWO MEN TURN ON ONE SHOUT. Whole-column adoption was a
+         measured pile-up (ten mates beelining one mark crossed files into a
+         sub-0.62 m pair on the arena probe); two is a buddy answering a
+         contact, and the rest of the column keeps its shape and its march,
+         acquiring organically as the fight arrives. The pair still tells
+         the watcher the squad is a squad — without a scrum. */
+      const sqB = squads[m.team][m.sq];
+      if (sqB) for (let i = 0; i < sqB.length; i++) {
+        const b = sqB[i];
+        if (b === m || b.dead || !b.tgt || b.tgt.dead) continue;
+        let onIt = 0;
+        for (let j = 0; j < sqB.length; j++) {
+          if (sqB[j] !== m && !sqB[j].dead && sqB[j].tgt === b.tgt) onIt++;
+        }
+        if (onIt >= 2) continue;
+        const bd = Math.hypot(b.tgt.pos.x - m.pos.x, b.tgt.pos.z - m.pos.z);
+        if (bd < SIGHT * 1.3) {
+          m.tgt = b.tgt; m.losBadT = 0;
+          // and hold rank for the rest of this beat — the man engages on his
+          // own next think, with the fire arcs handing him a bearing.
+          marchGoal(m);
+          return;
+        }
       }
-      m.slot = "march";
-      return;
     }
+    const tgt = m.tgt;
+    if (!tgt) { marchGoal(m); return; }
+    if (m.beast) { thinkBeast(m, tgt, thinkDt); return; }
     const sees = eyeLos(m, tgt);
     m.sees = sees;
     if (!sees) {
@@ -1795,6 +2431,17 @@ CBZ.studio.need(NEED).then(function () {
       }
     } else m.losBadT = 0;
 
+    if (m.fists) {
+      // an unarmed man has one range: his arms. Close on the mark; inside it
+      // IQ.melee (stepMan) owns the footwork, the guard and the swing.
+      const d = Math.hypot(tgt.pos.x - m.pos.x, tgt.pos.z - m.pos.z);
+      if (d > meleeReach(m, tgt)) {
+        m.target.set(tgt.pos.x, 0, tgt.pos.z);
+        steerAroundWalls(m);
+      }
+      m.slot = "push";
+      return;
+    }
     if (m.launcher) {
       // launchers stand off; combat_iq has no rocket column, so the band is ours
       const d = Math.hypot(tgt.pos.x - m.pos.x, tgt.pos.z - m.pos.z);
@@ -1806,6 +2453,14 @@ CBZ.studio.need(NEED).then(function () {
     const slot = CBZ.combatIQ && CBZ.combatIQ.posture
       ? CBZ.combatIQ.posture(m, tgt, thinkDt) : "fire";
     m.slot = slot || "fire";
+
+    // THE WALL RULE RUNS BEFORE THE SPREAD, deliberately: a projected goal is
+    // a flow-field cell CENTRE, and two men walled off the same bearing would
+    // otherwise be handed the same metre of street — the anti-clump below has
+    // to get the last word on every goal, projected or not. (cover and peek
+    // hug walls by design — the hide point sits just past the box — so the
+    // rule only audits the long moves: bands, bearings, flanks.)
+    if (m.slot !== "cover" && m.slot !== "peek") steerAroundWalls(m);
 
     // anti-clump on the goal, from the grid: posture's own separation scans
     // city rosters, which are empty out here
@@ -1830,7 +2485,10 @@ CBZ.studio.need(NEED).then(function () {
       if (m.dieT > 0 && m.dieT < 1) {
         m.dieT = Math.min(1, m.dieT + sdt * 2.4);
         const k = 1 - (1 - m.dieT) * (1 - m.dieT);
-        m.group.rotation.x = m.dieDir * k * (Math.PI / 2 - 0.07);
+        // a man topples over his own facing; a four-legged body falls ONTO
+        // ITS SIDE — the roll axis is the honest one for a quadruped
+        if (m.beast) m.group.rotation.z = m.dieDir * k * 1.45;
+        else m.group.rotation.x = m.dieDir * k * (Math.PI / 2 - 0.07);
       }
       return;
     }
@@ -1840,6 +2498,33 @@ CBZ.studio.need(NEED).then(function () {
       if (m.reloadT <= 0) m.mag = m.magSize;
     }
     m.cool -= sdt;
+
+    // ---- THE STRIKE BUBBLE. Inside claw range creature_combat owns the
+    // whole beat — approach, facing, windup, the hit, the recover — through
+    // the exact seams it published: opts.move walks on THIS map's walls and
+    // ground, opts.onHit lands in THIS page's damage funnel. Outside the
+    // bubble the beast is just another marcher below.
+    if (m.beast) {
+      const bt = m.tgt;
+      if (bt && !bt.dead && !over) {
+        const bd = Math.hypot(bt.pos.x - m.pos.x, bt.pos.z - m.pos.z);
+        if (bd < m.reach + 2.6) {
+          beastFight(m, bt, sdt);
+          // a striking beast still answers to the walls: the separation pass
+          // shoves bodies without asking the world, and this early return
+          // used to skip the standing resolve for the whole swing — measured
+          // as one gorilla probed inside an arena crate mid-maul
+          m.resT = (m.resT || 0) - sdt;
+          if (m.resT <= 0) { m.resT = 0.25; CBZ.micro.resolveCircle(m.pos, m.rad || 0.5, m.pos.y, 1.8); }
+          return;
+        }
+      } else if (m._atkAnim != null && m._atkAnim >= 0 && CBZ.creatureEndAttack) {
+        // the victim died under the swing: cancel it CLEANLY or the strike
+        // pose stays latched on a living body forever — measured on the
+        // probe as _atkAnim frozen at 0.94 on a gorilla marching victorious
+        try { CBZ.creatureEndAttack(m); } catch (e) {}
+      }
+    }
 
     // ---- move toward the goal combat_iq (or the march) set. A man is not a
     // pathfinder: when a wall eats his progress he slides ALONG it for a
@@ -1858,15 +2543,24 @@ CBZ.studio.need(NEED).then(function () {
       // 7.0 fallback outran every pursuer and froze a whole battle behind
       // one unkillable runner. And an army that outnumbers the last few
       // holdouts eight to one smells blood and sprints.
-      spd = m.slot === "fallback" ? 5.2 :
-            (m.slot === "push" || m.slot === "march" || m.slot === "flank") ? (m.hunt ? 7.6 : 6.2) :
-            (m.slot === "cover" || hurtish) ? 7.0 : 4.6;
-      // holding the fire token forty metres out of range is not holding
-      // anything: closing to the band is a RUN, whatever the slot says
-      if (tdist < 1e9 && tdist > 42 && spd < 6.2) spd = m.hunt ? 7.6 : 6.4;
-      // and a mob eight-to-one over the last holdouts does not respect the
-      // band at all — it runs them down. This rule is what ENDS a battle.
-      if (m.hunt && tdist < 999) spd = Math.max(spd, 8.0);
+      if (m.beast) {
+        // the species' own legs: charge in, lope on the march, and a beaten
+        // runner flees just under charge pace — catchable, like the men
+        const tn = m.tn;
+        spd = m.slot === "fallback" ? tn.chase * 0.92 :
+              m.slot === "push" ? tn.chase : tn.march;
+        if (m.hunt && tdist < 999) spd = Math.max(spd, tn.chase * 1.08);
+      } else {
+        spd = m.slot === "fallback" ? 5.2 :
+              (m.slot === "push" || m.slot === "march" || m.slot === "flank") ? (m.hunt ? 7.6 : 6.2) :
+              (m.slot === "cover" || hurtish) ? 7.0 : 4.6;
+        // holding the fire token forty metres out of range is not holding
+        // anything: closing to the band is a RUN, whatever the slot says
+        if (tdist < 1e9 && tdist > 42 && spd < 6.2) spd = m.hunt ? 7.6 : 6.4;
+        // and a mob eight-to-one over the last holdouts does not respect the
+        // band at all — it runs them down. This rule is what ENDS a battle.
+        if (m.hunt && tdist < 999) spd = Math.max(spd, 8.0);
+      }
       let nx = dx / d, nz = dz / d;
       if (m.detourT > 0) {
         m.detourT -= sdt;
@@ -1877,11 +2571,12 @@ CBZ.studio.need(NEED).then(function () {
       const ox = m.pos.x, oz = m.pos.z;
       m.pos.x += nx * spd * sdt;
       m.pos.z += nz * spd * sdt;
-      CBZ.micro.resolveCircle(m.pos, 0.5, m.pos.y, 1.8);
+      CBZ.micro.resolveCircle(m.pos, m.rad || 0.5, m.pos.y, 1.8);
       const got = Math.hypot(m.pos.x - ox, m.pos.z - oz);
       const want = spd * sdt;
       if (want > 0.001 && got < want * 0.25) {
         m.stuckT = (m.stuckT || 0) + sdt;
+        if (PROBE) QUAL.wallSeconds += sdt;      // the wall-running metric, held near zero
         if (m.stuckT > 0.8) {
           m.stuckT = 0;
           m.detourT = 1.5 + ((m.i % 5) * 0.35);
@@ -1896,7 +2591,7 @@ CBZ.studio.need(NEED).then(function () {
       m.resT = (m.resT || 0) - sdt;
       if (m.resT <= 0) {
         m.resT = 0.25;
-        CBZ.micro.resolveCircle(m.pos, 0.5, m.pos.y, 1.8);
+        CBZ.micro.resolveCircle(m.pos, m.rad || 0.5, m.pos.y, 1.8);
       }
     }
     m.speed = spd;
@@ -1904,6 +2599,21 @@ CBZ.studio.need(NEED).then(function () {
 
     // face the fight when there is one, else the walk
     const tgt = m.tgt;
+    if (m.beast) {
+      // the animal convention: heading h faces (cos h, sin h), nose on +X.
+      // Outside the strike bubble the beast faces its own travel; inside it
+      // creature_combat turned the head already.
+      if (spd > 0.1 && d > 0.05) {
+        const want = Math.atan2(dz, dx);
+        let dh = want - m.heading;
+        while (dh > Math.PI) dh -= Math.PI * 2;
+        while (dh < -Math.PI) dh += Math.PI * 2;
+        m.heading += dh * Math.min(1, sdt * 6);
+        m.faceH = m.heading;
+        CBZ.faceAnimalHeading(m, m.heading);
+      }
+      return;                                    // no rifle on an animal
+    }
     const engaged = tgt && !tgt.dead && m.sees;
     if (!engaged && spd > 0.1) {
       const want = Math.atan2(dx, dz);
@@ -1917,11 +2627,30 @@ CBZ.studio.need(NEED).then(function () {
     // ---- the trigger ----
     if (!tgt || tgt.dead || m.reloadT > 0) return;
     const dist = Math.hypot(tgt.pos.x - m.pos.x, tgt.pos.z - m.pos.z);
+    if (m.fists) {
+      // THE PUNCH EXCHANGE is combat_iq's own melee brain — close, circle,
+      // guard, windup, swing — the same beat structure every brawler in the
+      // city fights with. It writes m.target for the footwork; "swing" is
+      // the one frame a blow lands, through the same funnel as a bullet.
+      const mr = meleeReach(m, tgt);
+      if (dist < mr * 1.9 && CBZ.combatIQ && CBZ.combatIQ.melee) {
+        // `incoming` is how a brawler reads the other man's windup and gets
+        // his guard up — without it two NPCs never block each other
+        const st = CBZ.combatIQ.melee(m, tgt, sdt,
+          { reach: mr, incoming: (tgt._windup || 0) > 0 || (tgt._iqM && tgt._iqM.st === "windup") });
+        if (st === "swing") {
+          hurtMan(tgt, m.punch * (0.85 + lcg() * 0.4), { by: m });
+          stats[m.team].shots++; stats[m.team].hits++;   // the ledger counts blows thrown and landed
+          m.shotsF++; m.hitsF++; gunLedger("fists").shots++; gunLedger("fists").hits++;
+        }
+      }
+      return;
+    }
     if (m.launcher) {
       if (m.cool <= 0 && m.sees && dist > 16 && dist < 95) {
         const w = CBZ.weaponById(m.wid);
         fireRocket(m, tgt);
-        if (m.mag <= 0) { m.reloadT = w.reloadTime || w.reload || 2; m.mag = 0; }
+        if (m.mag <= 0) { m.reloadT = w.reloadTime || w.reload || 2; m.mag = 0; m.reloads++; gunLedger(m.wid).reloads++; }
         m.cool = (w.fireDelay || w.interval || 1.2) + 0.6 + lcg() * 0.8;
       }
       return;
@@ -1954,6 +2683,7 @@ CBZ.studio.need(NEED).then(function () {
     fireShot(m, tgt, r);
     if (m.mag <= 0) {
       m.reloadT = (w && (w.reloadTime || w.reload)) || 1.6;
+      m.reloads++; gunLedger(m.wid).reloads++;
       const dCam = Math.sqrt(camDist2(m.pos));
       if (dCam < 60 && CBZ.audioManifest && CBZ.audioManifest.effects && CBZ.audioManifest.effects.reload) {
         try { CBZ.sfx("reload", { dist: dCam, ghost: true }); } catch (e) {}
@@ -1971,6 +2701,7 @@ CBZ.studio.need(NEED).then(function () {
     focus: V(), yaw: 0.9, pitch: 0.62, dist: 64,
     wFocus: V(), wYaw: 0.9, wPitch: 0.62, wDist: 64,
     followM: null, cutAt: 0, shot: "crane", craneSpin: 0.05,
+    followTeam: "red", holdT: 0, reptT: 0,
   };
   /* THE CAMERA DOES NOT GO THROUGH A WALL.
 
@@ -2038,38 +2769,198 @@ CBZ.studio.need(NEED).then(function () {
     }
     return best;
   }
-  function directorCut() {
-    cam.cutAt = simT + 5.5 + lcg() * 3.5;
-    const hs = hotspot();
-    cam.shot = lcg() < 0.45 && hottestMan() ? "shoulder" : "crane";
-    if (cam.shot === "shoulder") {
-      cam.followM = hottestMan();
-    } else if (hs) {
-      cam.wFocus.set(hs.x, MAP.groundAt(hs.x, hs.z), hs.z);
-      cam.wYaw = lcg() * Math.PI * 2;
-      cam.wPitch = 0.4 + lcg() * 0.5;
-      cam.wDist = 26 + lcg() * 46;
-      cam.craneSpin = (lcg() < 0.5 ? -1 : 1) * (0.03 + lcg() * 0.05);
+  /* ============================================================ THE POINT MAN
+     THE CAMERA WAS RIDING THE BACK OF THE ARMY.
+
+     "Whoever shot last" sounds like the action and is not: with five hundred
+     men firing, the most recent trigger pull is a coin toss across the whole
+     line, and because a column's REAR ranks have the clearest lanes past
+     their own mates, the coin landed behind the army more often than in front
+     of it. You watched shoulders and backpacks while the war happened three
+     hundred metres up the street.
+
+     The front of the group is a different man and a better one: he is the one
+     in contact, he is the one being shot at, and he is the one who is about to
+     die — which is exactly why the shot is worth taking. He is found as the
+     living man CLOSEST TO THE ENEMY'S MASS, with one guard that matters: he
+     must have his own group around him. Without it the pick is always the
+     lunatic who broke ranks and sprinted forty metres ahead of everybody —
+     the front of NOTHING, alone in a street, the least interesting man alive.
+     So the deepest dozen are ranked, and the first one with mates at his
+     shoulder takes the lens. */
+  const POINT = { red: null, blue: null, at: -9 };
+  const _pc = [];
+  const _pn = [];
+  function pointMan(team) {
+    const foe = teamCOM[team === "red" ? "blue" : "red"];
+    _pc.length = 0;
+    for (let i = 0; i < men.length; i++) {
+      const m = men[i];
+      if (m.dead || m.team !== team) continue;
+      // depth INTO the enemy, plus a nudge for a man who is actually in a
+      // fight — at equal depth the engaged man is the one to watch
+      const d = Math.hypot(m.pos.x - foe.x, m.pos.z - foe.z) - (m.tgt && !m.tgt.dead ? 5 : 0);
+      _pc.push(m, d);
     }
+    if (!_pc.length) return null;
+    let first = null;
+    for (let pass = 0; pass < 12; pass++) {
+      let bi = -1, bd = 1e18;
+      for (let i = 0; i < _pc.length; i += 2) {
+        if (_pc[i] && _pc[i + 1] < bd) { bd = _pc[i + 1]; bi = i; }
+      }
+      if (bi < 0) break;
+      const m = _pc[bi];
+      _pc[bi] = null;
+      if (!first) first = m;
+      // does he have his group with him? three mates inside fifteen metres is
+      // a spearhead; nobody inside fifteen metres is a man who has run away
+      const near = fineNear(m.pos.x, m.pos.z, 15, _pn);
+      let mates = 0;
+      for (let k = 0; k < near.length; k++) {
+        if (near[k] !== m && !near[k].dead && near[k].team === team && ++mates >= 3) break;
+      }
+      if (mates >= 3) return m;
+    }
+    return first;               // a squad of two left: the deepest IS the front
+  }
+  function updatePoint() {
+    POINT.red = pointMan("red");
+    POINT.blue = pointMan("blue");
+    POINT.at = simT;
+  }
+  // who the lens should be on for a team: its point man, and never a corpse
+  // (except for the death beat the director deliberately holds — see below)
+  function subjectFor(team) {
+    const p = POINT[team];
+    if (p && !p.dead) return p;
+    updatePoint();
+    return POINT[team] && !POINT[team].dead ? POINT[team] : null;
+  }
+  /* THE FIGHT AXIS: the bearing from one army's mass to the other. Every shot
+     below is framed off it, which is the whole difference between this
+     director and the one that rolled `lcg() * 2PI` for its yaw and pointed the
+     lens at a car park half the time. */
+  function fightAxis() {
+    const a = teamCOM.red, b = teamCOM.blue;
+    const dx = b.x - a.x, dz = b.z - a.z;
+    if (Math.abs(dx) + Math.abs(dz) < 0.001) return 0;
+    return Math.atan2(dx, dz);              // camera-yaw convention: (sin, cos)
+  }
+  // is there sky between this focus and a camera parked on this bearing? The
+  // arm-shortening in camApply saves a shot that is BLOCKED; it cannot save a
+  // shot that is blocked in every direction because nobody checked before
+  // committing. Four candidate bearings, one segment test each, per cut.
+  function clearYaw(fx, fz, want, dist, spread) {
+    const fy = MAP.groundAt(fx, fz) + 1.2;
+    const tries = [0, spread, -spread, spread * 2, -spread * 2, Math.PI];
+    for (let i = 0; i < tries.length; i++) {
+      const y = want + tries[i];
+      const px = fx + Math.sin(y) * dist * 0.86, pz = fz + Math.cos(y) * dist * 0.86;
+      const py = Math.max(MAP.groundAt(px, pz) + 1.6, fy + dist * 0.4);
+      if (!CBZ.micro.segmentBlocked || !CBZ.micro.segmentBlocked(fx, fy, fz, px, py, pz)) return y;
+    }
+    return want;
+  }
+  /* THE SHOT DECK. Four framings, all of them ABOUT something:
+       point — over the point man's shoulder, looking where he is looking,
+               which is at the men trying to kill him. The default, and the
+               one the death beat belongs to.
+       push  — planted in front of the advancing front rank, looking back
+               INTO it: the shot that makes five hundred men read as five
+               hundred men instead of a texture.
+       line  — broadside of the contact, across the fight axis, both armies
+               in frame trading fire.
+       crane — high and wide down the axis, for the shape of the whole thing.
+     Weights favour the point man because he is where the war is. */
+  function directorCut() {
+    const alive = aliveCount("red") + aliveCount("blue");
+    const r = lcg();
+    const subjTeam = lcg() < 0.5 ? "red" : "blue";
+    const subj = subjectFor(subjTeam) || subjectFor(subjTeam === "red" ? "blue" : "red");
+    cam.shot = !subj ? "crane" : r < 0.5 ? "point" : r < 0.7 ? "push" : r < 0.88 ? "line" : "crane";
+    cam.followM = subj;
+    cam.craneSpin = (lcg() < 0.5 ? -1 : 1) * (0.02 + lcg() * 0.035);
+    // a good shot is held; a wide is a punctuation mark
+    cam.cutAt = simT + (cam.shot === "point" ? 8 + lcg() * 5 : 5 + lcg() * 3);
+    const ax = fightAxis();
+    if (cam.shot === "line" || cam.shot === "crane") {
+      const hs = (subj ? { x: subj.pos.x, z: subj.pos.z } : hotspot()) || { x: MAP.cx, z: MAP.cz };
+      cam.wFocus.set(hs.x, MAP.groundAt(hs.x, hs.z), hs.z);
+      if (cam.shot === "line") {
+        // across the axis: both firing lines in profile
+        cam.wDist = 22 + Math.min(46, Math.sqrt(alive) * 3.4);
+        cam.wPitch = 0.3 + lcg() * 0.22;
+        cam.wYaw = clearYaw(hs.x, hs.z, ax + (lcg() < 0.5 ? 1 : -1) * Math.PI / 2, cam.wDist, 0.5);
+      } else {
+        cam.wDist = 46 + Math.min(150, Math.sqrt(alive) * 9);
+        cam.wPitch = 0.62 + lcg() * 0.4;
+        cam.wYaw = clearYaw(hs.x, hs.z, ax + Math.PI + (lcg() - 0.5) * 0.8, cam.wDist, 0.6);
+      }
+    }
+  }
+  // the death beat: when the man on the lens goes down, the camera STAYS on
+  // him for a moment. He is the point man — watching him fall IS the shot, and
+  // cutting away on the frame he dies is throwing away the only moment the
+  // whole follow was built to catch.
+  function subjectDied() {
+    cam.holdT = 1.5;
+    cam.wPitch = 0.22;
+    cam.wDist = 7.5;
+  }
+  function frameSubject(m, dt) {
+    cam.wFocus.set(m.pos.x, m.pos.y, m.pos.z);
+    if (cam.shot === "push") {
+      // ahead of him, walking backwards as the army comes on
+      cam.wYaw = m.yaw + (lcg() - 0.5) * 0.02;
+      cam.wPitch = 0.2; cam.wDist = 13;
+    } else {
+      cam.wYaw = m.yaw + Math.PI + 0.35;
+      cam.wPitch = 0.28; cam.wDist = 9.5;
+    }
+    if (cam.holdT > 0) cam.holdT -= dt;
   }
   function stepCamera(dt) {
     const IN = CBZ.micro.input;
+    if (simT - POINT.at > 0.5) updatePoint();
     if (cam.mode === "auto") {
-      if (simT >= cam.cutAt || (cam.shot === "shoulder" && (!cam.followM || cam.followM.dead))) directorCut();
-      if (cam.shot === "shoulder" && cam.followM && !cam.followM.dead) {
-        const m = cam.followM;
-        cam.wFocus.set(m.pos.x, m.pos.y, m.pos.z);
-        cam.wYaw = m.yaw + Math.PI + 0.35;
-        cam.wPitch = 0.3; cam.wDist = 10.5;
-      } else cam.wYaw += cam.craneSpin * dt * 8;
+      const subj = cam.followM;
+      const subjGone = (cam.shot === "point" || cam.shot === "push") &&
+        (!subj || (subj.dead && cam.holdT <= 0));
+      if (subj && subj.dead && cam.holdT === 0) subjectDied();
+      if (simT >= cam.cutAt || subjGone) directorCut();
+      if ((cam.shot === "point" || cam.shot === "push") && cam.followM) frameSubject(cam.followM, dt);
+      else cam.wYaw += cam.craneSpin * dt * 8;
     } else if (cam.mode === "follow") {
-      if (!cam.followM || cam.followM.dead) cam.followM = hottestMan();
+      /* FOLLOW IS THE FRONT OF THE GROUP, ALWAYS — and "always" is the word
+         the first build got wrong. Latching onto the point man once and
+         riding him until he died measured at frontness 0.55 over a 150-a-side
+         city fight: the man the camera picked at the start of the advance was
+         mid-pack by the time the armies met, because the FRONT MOVED and the
+         camera did not. Half the army was ahead of the lens, which is the
+         original complaint wearing a new hat.
+
+         So the lens also hands over while he lives — but only when the front
+         has genuinely left him behind (twelve metres, on a three-second
+         cadence), never on the metre-to-metre jostle of a firing line. He
+         dies, the camera holds the beat, then it takes the man who stepped
+         over him. */
       const m = cam.followM;
-      if (m) {
-        cam.wFocus.set(m.pos.x, m.pos.y, m.pos.z);
-        cam.wYaw = m.yaw + Math.PI + 0.3;
-        cam.wPitch = 0.26; cam.wDist = 8.5;
+      if (m && m.dead && cam.holdT === 0) subjectDied();
+      if (!m || (m.dead && cam.holdT <= 0)) {
+        const next = subjectFor(cam.followTeam);
+        if (next) { cam.followM = next; cam.holdT = 0; cam.reptT = simT + 3; }
+      } else if (!m.dead && simT >= cam.reptT) {
+        cam.reptT = simT + 3;
+        const p = POINT[cam.followTeam];
+        if (p && p !== m && !p.dead) {
+          const foe = teamCOM[cam.followTeam === "red" ? "blue" : "red"];
+          const dm = Math.hypot(m.pos.x - foe.x, m.pos.z - foe.z);
+          const dp = Math.hypot(p.pos.x - foe.x, p.pos.z - foe.z);
+          if (dm - dp > 12) cam.followM = p;
+        }
       }
+      if (cam.followM) frameSubject(cam.followM, dt);
     } else if (IN) {
       const fwd = 46 * dt * (cam.dist / 60 + 0.4);
       const mx = IN.axis("KeyA", "KeyD"), mz = IN.axis("KeyS", "KeyW");
@@ -2081,11 +2972,82 @@ CBZ.studio.need(NEED).then(function () {
     }
     camApply(dt);
   }
-  function setCamMode(mode) {
+  /* ============================================================ THE CARD
+     What the man on the lens is doing, in the only four numbers that matter
+     while you are watching him: how hurt he is, what he is holding, how many
+     rounds are left in it, and how many men he has killed. The magazine is
+     the point — a rifle emptying and a man reloading behind a wall is the
+     rhythm of the whole fight and it was happening invisibly.
+
+     Every write is guarded by a cached string: this runs at 10 Hz on a page
+     that is already drawing a thousand bodies, so it must not touch the DOM
+     when nothing has changed. */
+  const whoC = { n: "", g: "", a: "", k: "", hp: -1, mag: -1, rl: null, on: null, down: null };
+  function stepWho() {
+    const m = (cam.mode === "follow" || cam.shot === "point" || cam.shot === "push")
+      ? cam.followM : null;
+    const on = !!m;
+    if (on !== whoC.on) { whoC.on = on; el("who").style.display = on ? "block" : "none"; }
+    if (!m) return;
+    const down = !!m.dead;
+    if (down !== whoC.down) { whoC.down = down; el("who").classList.toggle("down", down); }
+    const name = m.beast ? String(m.species.name).toUpperCase()
+      : TEAMS[m.team].name + " " + (m.i + 1);
+    const n = name + (down ? " <i>DOWN</i>" : "");
+    if (n !== whoC.n) { whoC.n = n; el("whoN").innerHTML = n;
+      el("whoN").style.color = "#" + TEAMS[m.team].color.toString(16).padStart(6, "0"); }
+    const hp = m.maxHp > 1e8 ? 1 : Math.max(0, Math.min(1, m.hp / m.maxHp));
+    if (Math.abs(hp - whoC.hp) > 0.01) {
+      whoC.hp = hp;
+      const s = el("whoHp").firstElementChild;
+      s.style.width = (hp * 100) + "%";
+      s.style.background = hp > 0.6 ? "#4fbf6a" : hp > 0.3 ? "#e2c14a" : "#ff5a3d";
+    }
+    const gun = m.beast ? "CLAWS AND TEETH" : m.fists ? "FISTS"
+      : ((CBZ.weaponById(m.wid) || {}).label || m.weapon || "").toUpperCase();
+    if (gun !== whoC.g) { whoC.g = gun; el("whoGun").textContent = gun; }
+    // ammo: rounds left, or the reload counting itself down
+    const reloading = m.reloadT > 0;
+    const ammo = m.magSize > 0
+      ? (reloading ? "RELOADING" : m.mag + "/" + m.magSize) : "—";
+    if (ammo !== whoC.a) { whoC.a = ammo; el("whoAmmo").textContent = ammo; }
+    const w = m.magSize > 0 ? (CBZ.weaponById(m.wid) || {}) : null;
+    const full = w ? ((w.reloadTime || w.reload) || 1.6) : 1;
+    const frac = m.magSize > 0
+      ? (reloading ? Math.max(0, Math.min(1, 1 - m.reloadT / full)) : m.mag / m.magSize) : 0;
+    if (Math.abs(frac - whoC.mag) > 0.01 || reloading !== whoC.rl) {
+      whoC.mag = frac; whoC.rl = reloading;
+      const t = el("whoMagT");
+      t.style.display = m.magSize > 0 ? "block" : "none";
+      t.classList.toggle("rl", reloading);
+      t.firstElementChild.style.width = (frac * 100) + "%";
+    }
+    const k = "<b>" + (m.kills || 0) + "</b> KILLS" +
+      (m.magSize > 0 ? " &middot; " + (m.reloads || 0) + " RELOADS" : "") +
+      (m.shotsF ? " &middot; " + Math.round((m.hitsF / m.shotsF) * 100) + "% HIT" : "");
+    if (k !== whoC.k) { whoC.k = k; el("whoK").innerHTML = k; }
+  }
+
+  function setCamMode(mode, team) {
     cam.mode = mode;
-    el("cCam").textContent = mode === "auto" ? "AUTO CAM" : mode === "follow" ? "FOLLOW" : "FREE CAM";
+    if (team) cam.followTeam = team;
+    el("cCam").textContent = mode === "auto" ? "AUTO CAM"
+      : mode === "follow" ? "FOLLOW " + TEAMS[cam.followTeam].name : "FREE CAM";
     el("cCam").classList.toggle("on", mode === "auto");
-    if (mode === "follow") cam.followM = hottestMan();
+    if (mode === "follow") {
+      updatePoint();
+      cam.followM = subjectFor(cam.followTeam) || hottestMan();
+      cam.holdT = 0; cam.reptT = simT + 3;
+      cam.shot = "point";          // else a stale AUTO framing rides along
+    }
+  }
+  // AUTO -> FOLLOW RED -> FOLLOW BLUE -> FREE. Both armies have a front, and
+  // which one you want to ride is the whole question a spectator has.
+  function cycleCam() {
+    if (cam.mode === "auto") setCamMode("follow", "red");
+    else if (cam.mode === "follow" && cam.followTeam === "red") setCamMode("follow", "blue");
+    else if (cam.mode === "follow") setCamMode("free");
+    else setCamMode("auto");
   }
   // manual orbit: pointers on the page, ignored while the UI owns them
   let drag = null;
@@ -2169,7 +3131,7 @@ CBZ.studio.need(NEED).then(function () {
     b.addEventListener("click", function () { setSpeed(parseFloat(b.dataset.s)); });
   });
   el("cCam").addEventListener("click", function () {
-    setCamMode(cam.mode === "auto" ? "follow" : cam.mode === "follow" ? "free" : "auto");
+    cycleCam();
   });
 
   /* ============================================================ BENCH
@@ -2216,7 +3178,8 @@ CBZ.studio.need(NEED).then(function () {
     let n = 0;
     while (spawnQueue.length && n < 10) {
       const s = spawnQueue.shift();
-      const m = makeMan(s[0], s[1]);
+      const kind = s[0] === "red" ? SET.redU : SET.blueU;
+      const m = kind === "men" ? makeMan(s[0], s[1]) : makeBeast(s[0], s[1]);
       if (m) men.push(m);
       n++;
     }
@@ -2229,6 +3192,18 @@ CBZ.studio.need(NEED).then(function () {
     el("banner").classList.add("on");
     bannerT = 3.4;
   }
+  // the man with the most kills, alive or dead — the ledger's whole point
+  function topKiller() {
+    let best = null;
+    for (let i = 0; i < men.length; i++) {
+      if ((men[i].kills || 0) > (best ? best.kills : 0)) best = men[i];
+    }
+    return best;
+  }
+  function gunLabel(wid) {
+    if (wid === "fists") return "FISTS";
+    return ((CBZ.weaponById(wid) || {}).label || wid || "").toUpperCase();
+  }
   function endWar(winner) {
     over = true;
     const rows = [
@@ -2238,6 +3213,26 @@ CBZ.studio.need(NEED).then(function () {
       ["BLUE SHOTS", stats.blue.shots + "  (" + pct(stats.blue.hits, stats.blue.shots) + " HIT)"],
       ["LEFT STANDING", aliveCount("red") + aliveCount("blue")],
     ];
+    const tk = topKiller();
+    if (tk && tk.kills) {
+      rows.push(["TOP KILLER", (tk.beast ? String(tk.species.name).toUpperCase()
+        : TEAMS[tk.team].name + " " + (tk.i + 1)) + " &middot; " + tk.kills + " KILLS" +
+        (tk.beast || tk.fists ? "" : " &middot; " + gunLabel(tk.wid))]);
+    }
+    // and the guns, ranked by what they actually did — the row MIXED and
+    // EVERYTHING were always secretly asking for. A launcher lands NO hits by
+    // construction (its damage is blast, through studio.boom), so printing it
+    // a hit rate reads as a broken weapon rather than an honest column.
+    const wids = Object.keys(GUNS).sort(function (a, b) { return GUNS[b].kills - GUNS[a].kills; });
+    const gunRow = function (wid) {
+      const g = GUNS[wid];
+      let s = g.kills + " KILLS";
+      if (g.hits > 0) s += " &middot; " + pct(g.hits, g.shots) + " HIT";
+      if (g.reloads > 0) s += " &middot; " + g.reloads + " RELOADS";
+      return [gunLabel(wid), s];
+    };
+    if (wids.length > 1) wids.slice(0, 5).forEach(function (wid) { rows.push(gunRow(wid)); });
+    else if (wids.length === 1) rows.push(gunRow(wids[0]));
     el("endT").textContent = winner ? TEAMS[winner].name + " TAKE IT" : "NOBODY LEFT";
     el("endTable").innerHTML = rows.map(function (r) {
       return "<tr><td>" + r[0] + "</td><td>" + r[1] + "</td></tr>";
@@ -2329,14 +3324,19 @@ CBZ.studio.need(NEED).then(function () {
     el("ctl").style.display = "flex";
     if (!COARSE) {
       el("hint").style.display = "block";
-      el("hint").innerHTML = "DRAG ORBIT &middot; WHEEL ZOOM &middot; WASD PAN<br>SPACE PAUSE &middot; 1-5 SPEED &middot; F FOLLOW";
+      el("hint").innerHTML = "DRAG ORBIT &middot; WHEEL ZOOM &middot; WASD PAN<br>SPACE PAUSE &middot; 1-5 SPEED &middot; F FRONT CAM";
     }
     setSpeed(1);
     setCamMode(asBench ? "free" : "auto");
     if (asBench) { cam.wPitch = 0.9; cam.wDist = 170; }
     initRes(spawnTotal);
     started = true;
-    banner(MAPS[SET.map].label, TEAMS.red.name + " " + SET.redN + "   V   " + TEAMS.blue.name + " " + SET.blueN);
+    const armyName = function (team) {
+      const u = team === "red" ? SET.redU : SET.blueU;
+      const sp = u !== "men" && (CBZ.WILDLIFE_SPECIES || {})[u];
+      return sp ? String(sp.name).toUpperCase() + "S" : TEAMS[team].name;
+    };
+    banner(MAPS[SET.map].label, armyName("red") + " " + SET.redN + "   V   " + armyName("blue") + " " + SET.blueN);
     if (AIR.on) spawnPlanes();
     CBZ.micro.onFrame(frame);
   }
@@ -2347,7 +3347,7 @@ CBZ.studio.need(NEED).then(function () {
   }
 
   /* ============================================================ FRAME */
-  let uiT = 0, winCheckT = 0, lastWall = 0;
+  let uiT = 0, winCheckT = 0, lastWall = 0, whoT = 0;
   function frame(dt) {
     if (!started) return;
     // THE SIM CLOCK IS WALL TIME, NOT RENDER TIME. microboot clamps its dt
@@ -2372,7 +3372,10 @@ CBZ.studio.need(NEED).then(function () {
       if (IN.pressed("Digit3")) setSpeed(4);
       if (IN.pressed("Digit4")) setSpeed(8);
       if (IN.pressed("Digit5")) setSpeed(0.25);
-      if (IN.pressed("KeyF")) setCamMode("follow");
+      // F rides the front rank; pressing it again crosses to the other army
+      if (IN.pressed("KeyF")) {
+        setCamMode("follow", cam.mode === "follow" && cam.followTeam === "red" ? "blue" : "red");
+      }
       if (IN.pressed("KeyC")) setCamMode(cam.mode === "auto" ? "free" : "auto");
     }
 
@@ -2397,8 +3400,8 @@ CBZ.studio.need(NEED).then(function () {
         }
         for (let i = 0; i < men.length; i++) stepMan(men[i], sdt);
         rebuildFine();                       // bodies moved: the body grid is stale
-        separatePass(Math.min(0.9, sdt * 26));
-        if (!SEP_OLD) { rebuildFine(); pinnedPass(); }   // and what one sweep could not fix
+        separateSolve(Math.min(0.9, sdt * 26));
+        if (!SEP_OLD) { rebuildFine(); pinnedPass(); }   // and what no sweep can fix: a wall
         stepRockets(sdt);
         if (AIR.on) {
           if (simT - airAimT > 3) {
@@ -2412,6 +3415,14 @@ CBZ.studio.need(NEED).then(function () {
       }
     }
 
+    /* THE SOLVER'S OWN VERDICT, ONCE A FRAME. It has to sweep where the
+       bodies ARE — a residual read off the pre-push grid silently
+       under-reports and would have exonerated the pass. Once per FRAME
+       rather than per sub-step, and never during a benchmark: the benchmark
+       exists to report what this machine can really carry, and an audit that
+       only runs while you are measuring is an audit that changes the answer. */
+    if (PROBE && !bench && simDt > 0) { rebuildFine(); sepResid = sepResidual(); }
+
     // ---- render-side work at real time: gait, aim pose, camera ----
     const camP = CBZ.camera.position;
     for (let i = 0; i < men.length; i++) {
@@ -2420,6 +3431,15 @@ CBZ.studio.need(NEED).then(function () {
       const d2 = (m.pos.x - camP.x) * (m.pos.x - camP.x) + (m.pos.z - camP.z) * (m.pos.z - camP.z);
       m.animF = (m.animF + 1) & 1023;
       const every = d2 < 70 * 70 ? 1 : d2 < 150 * 150 ? 2 : 4;
+      if (m.beast) {
+        // the species walks on the shared rig — legs swing by distance
+        // actually moved, so the charge, the march and the rout all animate
+        // off the same law. LOD-skipped exactly like the men's gait.
+        if ((m.animF % every) === 0 && CBZ.wildlifeRig) {
+          try { CBZ.wildlifeRig.animateGait(m, dt * every); } catch (e) {}
+        }
+        continue;
+      }
       if ((m.animF % every) === 0 && CBZ.animChar && m.char) {
         // A MAN IN COVER GETS SMALL. `ch.crouch` is the rig's own flag —
         // animChar damps `_cb` and folds the thighs off it, and nothing here
@@ -2431,9 +3451,20 @@ CBZ.studio.need(NEED).then(function () {
         try { CBZ.animChar(m.char, m.speed * speed, dt * every); } catch (e) {}
       }
       const engaged = m.tgt && !m.tgt.dead && m.sees;
-      if (engaged && d2 < 190 * 190 && CBZ.actorAimAt) {
-        CBZ.actorAimAt(m, m.tgt, dt);
-        m.yaw = m.group.rotation.y;
+      if (engaged && d2 < 190 * 190) {
+        if (m.fists) {
+          // a brawler squares up by turning his whole body — there is no
+          // weapon arm for actorAimAt to lay on the line
+          const want = Math.atan2(m.tgt.pos.x - m.pos.x, m.tgt.pos.z - m.pos.z);
+          let dy = want - m.yaw;
+          while (dy > Math.PI) dy -= Math.PI * 2;
+          while (dy < -Math.PI) dy += Math.PI * 2;
+          m.yaw += dy * Math.min(1, dt * 9);
+          m.group.rotation.y = m.yaw;
+        } else if (CBZ.actorAimAt) {
+          CBZ.actorAimAt(m, m.tgt, dt);
+          m.yaw = m.group.rotation.y;
+        }
       }
       if (m._weaponProp) {
         const showGun = d2 < 130 * 130;
@@ -2448,6 +3479,10 @@ CBZ.studio.need(NEED).then(function () {
     if (bannerT > 0 && (bannerT -= dt) <= 0) el("banner").classList.remove("on");
 
     // ---- chrome on a slow tick ----
+    // the card runs faster than the rest of the chrome: a magazine draining
+    // and a reload filling are the two things on it that MOVE
+    whoT -= dt;
+    if (whoT <= 0) { whoT = 0.1; if (started) stepWho(); }
     uiT -= dt;
     if (uiT <= 0) {
       uiT = 0.25;
@@ -2483,7 +3518,7 @@ CBZ.studio.need(NEED).then(function () {
      Read-only: it never touches a man. */
   const QUAL = { overlapPeak: 0, overlapWorstEver: null, embeddedEver: 0,
     blindFire: 0, throughMate: 0, fratricide: 0, bodyW: 0, stuckSeen: 0,
-    firstShotT: -1 };
+    wallSeconds: 0, firstShotT: -1 };
   function bodyWidth() {
     if (QUAL.bodyW) return QUAL.bodyW;
     for (let i = 0; i < men.length; i++) {
@@ -2497,9 +3532,18 @@ CBZ.studio.need(NEED).then(function () {
     }
     return QUAL.bodyW;
   }
-  // the probe asks about the SAME shoulder width the separation pass corrects
-  // to — two numbers here is how a fix and its check drift apart
-  const BODY_CLEAR = BODY;
+  /* OVERLAP IS A PAIR'S QUESTION, NOT A CONSTANT.
+
+     0.62 m is the number for two MEN — 0.52 m across the shoulders plus a
+     little. Applied to a lion it is meaningless and applied to an elephant it
+     is a joke: this probe reported "0 overlap" for armies of animals visibly
+     standing inside each other, because it was measuring them with a man's
+     shoulders. The threshold is now a FRACTION of the pair's own radii, and
+     the fraction is chosen so two men still resolve to exactly 0.62 —
+     0.69 * (0.45 + 0.45) — which keeps every number this probe has ever
+     reported for a man's war comparable with the ones before it. */
+  const OVERLAP_K = 0.69;
+  const BODY_CLEAR = 0.62;      // two men, for the audit line that names it
   function quality() {
     const live = [];
     for (let i = 0; i < men.length; i++) if (!men[i].dead) live.push(men[i]);
@@ -2509,8 +3553,24 @@ CBZ.studio.need(NEED).then(function () {
     for (let i = 0; i < live.length; i++) {
       for (let j = i + 1; j < live.length; j++) {
         const dx = live[j].pos.x - live[i].pos.x, dz = live[j].pos.z - live[i].pos.z;
+        /* TWO MEN ON DIFFERENT LEVELS ARE NOT OVERLAPPING. This probe measured
+           XZ alone, which was exactly right while every venue was a flat
+           plate. Now that the ground is measured, `gov` has a terrace 3.4 m
+           above its lawn and the speedway is banked 11 m: a man on the steps
+           and a man below him share a square metre of map and nothing else.
+           A body is 1.8 m tall, so anything further apart in Y than that is
+           two men in the same footprint on different floors — which is what a
+           real venue is FOR. */
+        if (Math.abs(live[j].pos.y - live[i].pos.y) >= 1.8) continue;
         const d = Math.hypot(dx, dz);
-        if (d < BODY_CLEAR) { pairs++; if (d < worst) worst = Math.round(d * 100) / 100; }
+        const need = OVERLAP_K * ((live[i].rad || 0.45) + (live[j].rad || 0.45));
+        if (d < need) {
+          pairs++;
+          // how deep, as a FRACTION of what this pair owed each other, so a
+          // lion pair and a man pair are comparable numbers
+          const bite = Math.round((d / need) * 100) / 100;
+          if (bite < worst) worst = bite;
+        }
       }
     }
     if (pairs > QUAL.overlapPeak) QUAL.overlapPeak = pairs;
@@ -2539,6 +3599,10 @@ CBZ.studio.need(NEED).then(function () {
       overlapNow: pairs, overlapWorst: QUAL.overlapWorstEver, overlapPeak: QUAL.overlapPeak,
       embedded: embedded, embeddedEver: QUAL.embeddedEver,
       stuck: stuck, stuckPeak: QUAL.stuckSeen,
+      // the separation pass's own verdict, and the cell it was run on
+      sepResid: sepResid, fineCell: Math.round(FINE * 100) / 100,
+      radMax: Math.round(bodyRadMax * 100) / 100,
+      wallSeconds: Math.round(QUAL.wallSeconds * 10) / 10,
       blindFire: QUAL.blindFire, throughMate: QUAL.throughMate, fratricide: QUAL.fratricide,
       firstShotT: QUAL.firstShotT,
       shots: stats.red.shots + stats.blue.shots, engaged: engaged,
@@ -2552,6 +3616,20 @@ CBZ.studio.need(NEED).then(function () {
       return {
         clock: { frames: dbgN, wallSum: Math.round(dbgWall * 100) / 100 },
         map: SET.map, started: started, over: over,
+        kinds: { red: SET.redU, blue: SET.blueU },
+        beasts: (function () { let n = 0; for (let i = 0; i < men.length; i++) if (men[i].beast && !men[i].dead) n++; return n; })(),
+        steer: STEER_OLD ? "old" : "walls",
+        // the ground, as MEASURED off the raised venue (null for the maps that
+        // author their own: city, dunes, arena). A checker can finally assert
+        // that the surface men stand on is the surface that got built.
+        ground: MEASURED,
+        // whether this map CLAIMS to raise a venue. `ground: null` means one
+        // thing on arena (it authors its own flat yard) and something else
+        // entirely on marina (the venue failed to build) — without this flag a
+        // checker cannot tell an honest null from a silent failure.
+        raises: !!(MAPS[SET.map] && MAPS[SET.map].raise),
+        gap: MAP ? Math.round(MAP.gap) : null,
+        centre: MAP ? [Math.round(MAP.cx), Math.round(MAP.cz)] : null,
         men: men.length, red: aliveCount("red"), blue: aliveCount("blue"),
         queued: spawnQueue.length, corpses: corpses.length, rockets: rockets.length,
         planes: planes.length, air: AIR.on, sticks: AIR.sticks || 0, nukes: AIR.nukes || 0,
@@ -2566,6 +3644,31 @@ CBZ.studio.need(NEED).then(function () {
         calls: (CBZ.renderer && CBZ.renderer.info) ? CBZ.renderer.info.render.calls : null,
         speed: speed, simT: Math.round(simT * 10) / 10,
         stats: JSON.parse(JSON.stringify(stats)),
+        guns: JSON.parse(JSON.stringify(GUNS)),
+        // the camera, checkable: which shot is up, who it is on, and whether
+        // that man is genuinely at the front of his own army
+        cam: (function () {
+          const m = cam.followM;
+          const foe = m ? teamCOM[m.team === "red" ? "blue" : "red"] : null;
+          let ahead = null;
+          if (m && foe) {
+            const md = Math.hypot(m.pos.x - foe.x, m.pos.z - foe.z);
+            let n = 0, tot = 0;
+            for (let i = 0; i < men.length; i++) {
+              const o = men[i];
+              if (o.dead || o.team !== m.team) continue;
+              tot++;
+              if (Math.hypot(o.pos.x - foe.x, o.pos.z - foe.z) < md) n++;
+            }
+            // the fraction of his own army standing BEHIND him: 1 = the very
+            // front of the group, 0 = the back rank the old camera rode
+            ahead = tot ? Math.round((1 - n / tot) * 100) / 100 : null;
+          }
+          return { mode: cam.mode, shot: cam.shot, team: cam.followTeam,
+            on: m ? m.id : null, onDead: m ? !!m.dead : null, frontness: ahead,
+            kills: m ? (m.kills || 0) : null, mag: m ? m.mag : null,
+            reloads: m ? (m.reloads || 0) : null };
+        })(),
         caps: CBZ.modeHas ? { blast: CBZ.modeHas("blast"), blastActors: CBZ.modeHas("blastActors") } : null,
         unrouted: CBZ.modeCapsAudit ? CBZ.modeCapsAudit().unrouted : null,
         colliders: (CBZ.colliders && CBZ.colliders.length) || 0,
@@ -2592,16 +3695,61 @@ CBZ.studio.need(NEED).then(function () {
       return hs;
     },
     reinforce: function (n) { queueMen(n || 10); },
+    /* WHICH PAIRS, AND WHAT WERE THEY DOING. An overlap COUNT tells you the
+       bodies are wrong; it never tells you which rule put them there, and
+       three rules can produce the same number. This lists the live offenders
+       with the state of both parties, which is how the surround ring and the
+       strike approach were each caught. Read-only, probe-only. */
+    overlaps: function (n) {
+      const live = [];
+      for (let i = 0; i < men.length; i++) if (!men[i].dead) live.push(men[i]);
+      const out = [];
+      for (let i = 0; i < live.length && out.length < (n || 12); i++) {
+        for (let j = i + 1; j < live.length && out.length < (n || 12); j++) {
+          const a = live[i], b = live[j];
+          if (Math.abs(a.pos.y - b.pos.y) >= 1.8) continue;
+          const d = Math.hypot(b.pos.x - a.pos.x, b.pos.z - a.pos.z);
+          const need = OVERLAP_K * ((a.rad || 0.45) + (b.rad || 0.45));
+          if (d >= need) continue;
+          out.push({
+            a: a.id, b: b.id, d: Math.round(d * 100) / 100,
+            need: Math.round(need * 100) / 100,
+            same: a.team === b.team,
+            kind: (a.beast ? "beast" : "man") + "/" + (b.beast ? "beast" : "man"),
+            slotA: a.slot, slotB: b.slot,
+            striking: [(a._atkAnim >= 0), (b._atkAnim >= 0)],
+            tgtA: a.tgt && !a.tgt.dead ? a.tgt.id : null,
+            tgtB: b.tgt && !b.tgt.dead ? b.tgt.id : null,
+            sameTgt: !!(a.tgt && a.tgt === b.tgt),
+          });
+        }
+      }
+      return out;
+    },
     debugMen: function (n) {
       const out = [];
       for (let i = 0; i < men.length && out.length < (n || 4); i++) {
         const m = men[i];
         if (m.dead) continue;
-        out.push({ id: m.id, x: Math.round(m.pos.x), z: Math.round(m.pos.z),
+        const row = { id: m.id, x: Math.round(m.pos.x), z: Math.round(m.pos.z),
           slot: m.slot, sees: !!m.sees, mag: m.mag, rel: Math.round((m.reloadT || 0) * 10) / 10,
           cool: Math.round(m.cool * 100) / 100,
           tgt: m.tgt && !m.tgt.dead ? m.tgt.id : null,
-          tx: Math.round(m.target.x), tz: Math.round(m.target.z) });
+          tx: Math.round(m.target.x), tz: Math.round(m.target.z) };
+        if (m.tgt && !m.tgt.dead) row.d = Math.round(Math.hypot(m.tgt.pos.x - m.pos.x, m.tgt.pos.z - m.pos.z) * 10) / 10;
+        // the beast's fight-loop internals, so a probe can SEE why an animal
+        // is or is not striking instead of inferring it from the scoreboard
+        if (m.beast) {
+          row.beast = m.species.id; row.reach = Math.round(m.reach * 100) / 100;
+          row.atkT = m._atkT == null ? null : Math.round(m._atkT * 100) / 100;
+          row.anim = m._atkAnim == null ? null : Math.round(m._atkAnim * 100) / 100;
+          row.hp = Math.round(m.hp);
+          // the discovered rig, auditable: leg columns found, and the
+          // walks-where-it-faces invariant the rig maintains (1 = aligned)
+          row.legs = m.gait ? m.gait.cols.length : 0;
+          row.align = m._motionAlignment == null ? null : Math.round(m._motionAlignment * 100) / 100;
+        }
+        out.push(row);
       }
       return out;
     },

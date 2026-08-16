@@ -13,19 +13,15 @@
 
   let guardNo = 0;
   function addFlashlight(ch) {
-    const group = new THREE.Group();
-    group.position.set(0.02, -0.06, 0.08);
-
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 0.52), CBZ.mat(0x171b22));
-    body.position.z = 0.02;
-    body.castShadow = true;
-    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.34, 0.13), CBZ.mat(0x0b0d12));
-    grip.position.set(0, -0.08, -0.12);
-    grip.castShadow = true;
-    const lensMat = CBZ.mat(0xe8f6ff, { emissive: 0x000000, ei: 0 });
-    const lens = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.18, 0.05), lensMat);
-    lens.position.z = 0.30;
-    group.add(body, grip, lens);
+    // ONE MODEL at every scale: weapons/flashlight.js also feeds the physical
+    // death drop and the inventory thumbnail.  Its +Z is the light direction;
+    // rotate that axis onto the hand socket's -Y (down the forearm), so the
+    // reflector sits beyond the fingers and the parented beam leaves the lens.
+    const group = CBZ.buildFlashlight ? CBZ.buildFlashlight() : new THREE.Group();
+    group.position.set(0.01, -0.025, 0.025);
+    group.rotation.x = Math.PI / 2;
+    const lens = group.userData.lens || null;
+    const lensMat = group.userData.lensMat || (lens && lens.material) || CBZ.mat(0xe8f6ff, { emissive: 0x000000, ei: 0 });
     group.visible = false;
     ch.sockets.rightHand.add(group);
     return { group, lens, lensMat };
@@ -614,6 +610,78 @@
     return { ok: false, msg: "" };
   }
 
+  /* ---- TORCH DISCIPLINE ---------------------------------------------------
+     A DUTY TORCH IS A TOOL, AND WHAT MAKES IT A TOOL IS THAT IT COSTS A HAND.
+     Ungated, the search branch below lit the beam the instant a screw started
+     hunting you — at noon, in an open yard, all the way in to arm's length —
+     and updateFlashlight then pinned his right arm out in front of him for as
+     long as it burned. That is the pose a man uses to PRESENT A WEAPON. What
+     the owner saw was the warden walking up to a prisoner in broad daylight
+     and AIMING a flashlight at him, then tasing him with the taser drawn into
+     the same fist the torch hangs off: systems/taserfx.js parents it to
+     `thirdPersonWeapon`, a CHILD of the `rightHand` socket addFlashlight uses,
+     and re-poses that arm at onAlways(53) — 33 orders after us. Two props in
+     one hand, two writers on one arm, and a torch used as a threat.
+
+     Three rules, one flag (GUARD_TORCH_DISCIPLINE=0 restores the old body):
+
+       A TORCH IS FOR THE DARK. The search branch now asks the light rig what
+       the light actually IS where he is standing (systems/fixtures.js's
+       level(), the same curve that prices his eyesight) rather than testing
+       the sun, so a lamp answers for a room the way the sky answers for a
+       yard. Measured: at noon every point in this prison — open yard, wing
+       middle, wing corner — reads 1.00 and nobody draws anything; at
+       lights-out the yard reads 0.00 and even the wing, with its night
+       lighting, reads 0.28. The threshold below has margin on both sides.
+
+       A DRAWN WEAPON OWNS THE FIST. While the taser is out, or predator.js
+       has him mid-seize, there is no torch at all — one object per hand.
+
+       CLOSE QUARTERS ARE HANDS, NOT LIGHT. Inside grabbing distance of the
+       man he is chasing the light may stay on (after dark he still needs it)
+       but the PRESENTED pose is dropped and the arm goes back to the
+       animator, so the torch swings at his side while he closes instead of
+       being held out at your face. Sticky radii, so a distance jittering
+       across the boundary cannot twitch the arm. */
+  if (CBZ.CONFIG && CBZ.CONFIG.GUARD_TORCH_DISCIPLINE == null) CBZ.CONFIG.GUARD_TORCH_DISCIPLINE = true;
+  const TORCH_CQ_IN = 3.4;    // m — closing to grab you: the arm comes down
+  const TORCH_CQ_OUT = 5.6;   // m — and does not go back up until here
+  const TORCH_DARK = 0.62;    // light level under which a beam is worth carrying
+
+  function torchDiscipline() {
+    return !!(CBZ.CONFIG && CBZ.CONFIG.GUARD_TORCH_DISCIPLINE);
+  }
+  // the taser/gun and the torch hang off ONE hand; whoever drew wins it.
+  function torchHandBusy(g) {
+    return !!(g._seizing || (g.armed && !g._holstered));
+  }
+  // Is a beam worth anything where he is standing? Cached for a fifth of a
+  // second: level() walks the whole fixture list after dark, and this question
+  // is asked twice a frame per guard (updateGuard AND detection.js both call
+  // updateGuardFlashlight).
+  function torchDarkEnough(g) {
+    const lights = CBZ.prisonLights;
+    if (!lights || !lights.level) return true;          // no rig, no opinion
+    const now = CBZ.now || 0;
+    if (g._torchLitT == null || Math.abs(now - g._torchLitT) > 240) {
+      g._torchLitT = now;
+      let L = 1;
+      try { L = lights.level(g.group.position.x, g.group.position.z); } catch (e) { L = 1; }
+      g._torchLevel = typeof L === "number" && L === L ? L : 1;
+    }
+    return g._torchLevel < TORCH_DARK;
+  }
+  // sticky "he is on top of you". Only a live hunt can close it, and it opens
+  // the instant the hunt ends — never a latch that outlives the chase.
+  function torchCloseQuarters(g) {
+    if (!(g.hunt > 0)) { g._torchCQ = false; return false; }
+    const dx = player.pos.x - g.group.position.x;
+    const dz = player.pos.z - g.group.position.z;
+    const r = g._torchCQ ? TORCH_CQ_OUT : TORCH_CQ_IN;
+    g._torchCQ = dx * dx + dz * dz < r * r;
+    return g._torchCQ;
+  }
+
   function shouldUseFlashlight(g) {
     if (g.dead || g.ko > 0 || g.asleep || g.bribed > 0) return false;
     // GONE MEANS GONE. systems/economy.js's pickpocket takes the TORCH off the
@@ -622,12 +690,14 @@
     // run. Nothing is announced — you simply notice, later, that one beam is
     // missing from the wire. Cleared only by resetLoadouts on a new run.
     if (g.flashlightLost) return false;
+    const disc = torchDiscipline();
+    if (disc && torchHandBusy(g)) return false;
     const dayness = CBZ.dayness == null ? 1 : CBZ.dayness;
     const sunY = CBZ.sun && CBZ.sun.position ? CBZ.sun.position.y : 80;
     const nightAmount = CBZ.nightAmount == null ? (1 - dayness) : CBZ.nightAmount;
     const trueNight = (dayness < 0.045 && sunY < -8) || nightAmount > 0.965;
     const activeSearch = g.hunt > 0 || (g.investigate && g.investigate.t > 0);
-    if (activeSearch) return "search";
+    if (activeSearch && (!disc || torchDarkEnough(g))) return "search";
     // A NIGHT SHIFT CARRIES A TORCH. The 34% duty cycle below is an idle-hours
     // habit; during the schedule's own dark blocks (unlock, evening return,
     // secure, lights out — systems/prisonschedule.js) a screw walking a wing
@@ -652,6 +722,15 @@
     const on = !!reason;
     g.flashlightOn = on;
     g.flashlightReason = reason;
+    // WHETHER IT BURNS AND WHETHER IT IS HELD OUT ARE TWO QUESTIONS. Presenting
+    // is a searching man's carry — arm forward, beam thrown ahead of his feet.
+    // A man closing the last three metres on a runner is not searching, so the
+    // arm is handed straight back to animChar, which damps it into the run
+    // swing on the next frame. The beam is welded to the actual reflector axis
+    // (systems/prisonnight.js's driveTorches reads the world quaternion), so
+    // the cone and the floor pool follow the swinging hand for free.
+    const present = on && !(torchDiscipline() && torchCloseQuarters(g));
+    g.flashlightPresented = present;
     if (g.wedge) g.wedge.visible = on;
     if (g.flashlight) {
       g.flashlight.group.visible = on;
@@ -661,7 +740,7 @@
     if (!on && g.wedge && g.wedge.material) {
       g.wedge.material.opacity = 0;
     }
-    if (on && g.char && g.char.parts && g.char.parts.ra) {
+    if (present && g.char && g.char.parts && g.char.parts.ra) {
       const r = g.char.parts.ra.rotation;
       const k = dt == null ? 1 : (1 - Math.exp(-14 * dt));
       r.x += (-1.05 - r.x) * k;
@@ -1169,6 +1248,40 @@
       onStateExit(fn, states) { exitHooks.push({ fn: fn, states: states || null }); },
     };
   })();
+
+  /* THE THREE COUNTERS THAT NAME THE BUG. `torchAsWeapon` is the whole of the
+     owner's complaint reduced to a number: a torch lit and held out in front
+     of a man the guard is already close enough to grab. `litInDaylight` and
+     `litWithWeaponDrawn` are the two ways it got there. All three must read 0
+     with GUARD_TORCH_DISCIPLINE on, and the flag off is how you see them. */
+  CBZ.guardTorchAudit = function () {
+    const out = {
+      discipline: torchDiscipline(), guards: 0, lit: 0, presented: 0,
+      closeQuarters: 0, handBusy: 0,
+      torchAsWeapon: 0, litInDaylight: 0, litWithWeaponDrawn: 0,
+    };
+    for (const g of CBZ.guards || []) {
+      if (!g || !g.group) continue;
+      out.guards++;
+      const busy = torchHandBusy(g);
+      // The audit asks the flag-INDEPENDENT question — is he inside grabbing
+      // range of the man he is hunting — rather than reading the sticky
+      // `_torchCQ`, which only the disciplined path ever writes. Both sides of
+      // an A/B have to be measured by the same ruler.
+      const dx = player.pos.x - g.group.position.x;
+      const dz = player.pos.z - g.group.position.z;
+      const near = g.hunt > 0 && dx * dx + dz * dz < TORCH_CQ_OUT * TORCH_CQ_OUT;
+      if (busy) out.handBusy++;
+      if (near) out.closeQuarters++;
+      if (!g.flashlightOn) continue;
+      out.lit++;
+      if (g.flashlightPresented) out.presented++;
+      if (near && g.flashlightPresented) out.torchAsWeapon++;
+      if (busy) out.litWithWeaponDrawn++;
+      if (g.flashlightReason === "search" && !torchDarkEnough(g)) out.litInDaylight++;
+    }
+    return out;
+  };
 
   CBZ.updateGuard = updateGuard;
   CBZ.updateGuardFlashlight = updateFlashlight;

@@ -37,8 +37,11 @@
     // tall hooded FRONT SIGHT POST near the muzzle (the AK profile-maker)
     box(g, 0.05, 0.05, 0.045, mat.black, 0, 0.085, -1.08);
     box(g, 0.018, 0.085, 0.02, mat.black, 0, 0.15, -1.08);
-    // slant muzzle brake
-    cyl(g, 0.034, 0.11, mat.steel, 0, 0.035, -1.18, Math.PI / 2);
+    // slant muzzle brake + a recessed near-black bore. The old bright steel
+    // cap made the business end read as a grey plug instead of an open barrel.
+    cyl(g, 0.034, 0.11, mat.black, 0, 0.035, -1.18, Math.PI / 2);
+    const bore = cyl(g, 0.019, 0.009, mat.bore || mat.black, 0, 0.035, -1.239, Math.PI / 2);
+    bore.userData.weaponBore = true;
     // rear tangent sight on the dust cover
     box(g, 0.05, 0.035, 0.13, mat.steel, 0, 0.105, -0.34);
     // CURVED BANANA MAG — three segments sweeping down + forward
@@ -51,7 +54,7 @@
     // full wood stock drooping slightly to the butt, steel buttplate
     box(g, 0.10, 0.135, 0.40, mat.wood, 0, -0.045, 0.255, 0.10);
     box(g, 0.105, 0.17, 0.04, mat.steel, 0, -0.075, 0.455, 0.10);
-    g.userData.muzzle = new THREE.Vector3(0, 0.035, -1.24);
+    g.userData.muzzle = new THREE.Vector3(0, 0.035, -1.245);
     return g;
   };
 })();

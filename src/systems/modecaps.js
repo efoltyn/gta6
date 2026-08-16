@@ -37,7 +37,7 @@
    answered.
 
    ------------------------------------------------------------------
-   THE FIVE-POINT BLOCK LAW COMPLIANCE (docs/claude/doctrine.md):
+   THE FIVE-POINT BLOCK LAW COMPLIANCE (scrolls/claude/doctrine.md):
    1. ONE-LINE ADOPTION.  `CBZ.modeHas("traverse")` replaces the caller's
       existing `CBZ.game.mode === "city"`. Same shape, same length, no
       schema, no registration, no lifecycle.
@@ -156,7 +156,7 @@
      silently replaced config.js's. city/mode.js's descriptor stopped landing
      in CBZ.modes, and the city built with no arena and an empty biome set.
      The math gate caught it. The rule that would have prevented it is the one
-     at the top of docs/claude/engine-systems.md: REUSE, never re-invent.)
+     at the top of scrolls/claude/engine-systems.md: REUSE, never re-invent.)
 
      A CAPABILITY IS NOW A FIELD ON THE DESCRIPTOR THAT ALREADY EXISTS:
 
@@ -180,7 +180,7 @@
      block that invents a capability grants it to a game by documenting a
      name, never by editing this file again.
 
-     THE FIVE-POINT BLOCK LAW COMPLIANCE (docs/claude/doctrine.md):
+     THE FIVE-POINT BLOCK LAW COMPLIANCE (scrolls/claude/doctrine.md):
      1. ONE-LINE ADOPTION — one field on a call the mode already makes.
      2. DEGRADE-SAFE — `MODE_CAPS_DECL_V1 = false` makes every chain below
         ignore descriptors entirely and run the code it ran before this block

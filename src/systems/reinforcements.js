@@ -83,6 +83,13 @@
     if (!gd) return;
     // make absolutely sure it can't be doing anything this frame
     gd.hunt = 0; gd.alert = 0; gd.ko = 0; gd.dead = true;
+    // Prison outfits mount Gang City's pooled SWAT carrier + helmet on riot
+    // responders. Return those pieces through their real pool before this
+    // module recursively disposes the ordinary one-shot guard rig.
+    if (gd._prisonRiotArmorRig && CBZ.cityArmorDressPed) {
+      try { CBZ.cityArmorDressPed(gd, []); } catch (e) {}
+      gd._prisonRiotArmorRig = null;
+    }
     // release any boost-ledger entries other jail systems hold on this guard
     // (harmless field restore on a rig we're about to free; without it the
     // shared ledger would retain the disposed guard until the next restoreAll)
@@ -201,11 +208,12 @@
             (!CBZ.guards || CBZ.guards.length < MAX_GUARDS)) {
           if (spawnOne()) {
             spawnCd = SPAWN_CD;
-            if (!announced) {
-              announced = true;
-              if (CBZ.flashToast) { try { CBZ.flashToast("REINFORCEMENTS!"); } catch (e) {} }
-              if (CBZ.flashHint) { try { CBZ.flashHint("The towers called it in — riot squad incoming!", 2.4); } catch (e) {} }
-            }
+            // NO TOAST. The surge announces itself diegetically: guards vault
+            // out of the tower corners and converge. A "REINFORCEMENTS!"
+            // banner over that is the game narrating what the player can
+            // already see. `announced` still latches so the run-reset path
+            // below keeps its one-shot-per-surge shape.
+            announced = true;
           }
         }
       }
@@ -233,7 +241,7 @@
         standT += dt;
         if (standT >= STAND_HOLD) {
           recallAll();
-          if (CBZ.flashHint) { try { CBZ.flashHint("The riot squad stands down.", 2.0); } catch (e) {} }
+          // NO HINT either — the squad walking off IS the stand-down.
         }
       } else {
         standT = 0;                        // still warm — hold the line

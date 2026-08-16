@@ -10,6 +10,11 @@ rust/**/target/
 # `npm run build`. Never the source of truth; not committed.
 dist/
 
+# Subagent scratch worktrees. Each is a full second checkout of this repo that
+# the agent harness creates, locks and removes on its own; committing one would
+# commit the repository into itself.
+.claude/worktrees/
+
 # generated world-audit artifacts
 tools/audit/
 aircraft-current-orbit.png

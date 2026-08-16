@@ -1,9 +1,9 @@
 /* ============================================================
-   city/weapon_thumbnails.js — actual procedural gun renders for UI slots.
+   city/weapon_thumbnails.js — actual procedural held-item renders for UI slots.
 
-   One lazy offscreen renderer and one cached data URL per weapon.  Inventory
-   and hotbar cells therefore show the exact model already used in the hand,
-   without creating a WebGL canvas/render loop per slot.
+   One lazy offscreen renderer and one cached data URL per model. Inventory and
+   hotbar cells therefore show the exact gun/flashlight already used in the
+   hand, without creating a WebGL canvas/render loop per slot.
 ============================================================ */
 (function () {
   "use strict";
@@ -30,13 +30,14 @@
     } catch (e) { renderer = null; return false; }
   }
   function clearHolder() { while (holder && holder.children.length) holder.remove(holder.children[0]); }
-  CBZ.weaponThumbnail = function (id) {
-    id = String(id || "sidearm").toLowerCase();
-    if (cache[id]) return cache[id];
-    if (!CBZ.buildActorWeapon || !boot()) return "";
+  function modelThumbnail(key, build) {
+    if (cache[key]) return cache[key];
+    if (!build || !boot()) return "";
     try {
       clearHolder();
-      const model = CBZ.buildActorWeapon(id);
+      holder.position.set(0, 0, 0);
+      const model = build();
+      if (!model) return "";
       model.position.set(0, 0, 0); model.rotation.set(0, 0, 0); model.scale.setScalar(1);
       holder.add(model);
       holder.updateMatrixWorld(true);
@@ -51,13 +52,25 @@
       camera.position.set(Math.max(2.5, size.x * 4 + 2), size.y * 0.16, 0);
       camera.up.set(0, 1, 0); camera.lookAt(0, 0, 0); camera.updateProjectionMatrix();
       renderer.render(scene, camera);
-      cache[id] = renderer.domElement.toDataURL("image/png");
+      cache[key] = renderer.domElement.toDataURL("image/png");
       clearHolder(); holder.position.set(0, 0, 0);
-      return cache[id];
+      return cache[key];
     } catch (e) {
       clearHolder(); if (holder) holder.position.set(0, 0, 0);
       return "";
     }
+  }
+  CBZ.weaponThumbnail = function (id) {
+    id = String(id || "sidearm").toLowerCase();
+    if (!CBZ.buildActorWeapon) return "";
+    return modelThumbnail(id, function () { return CBZ.buildActorWeapon(id); });
   };
-  CBZ.weaponThumbnailInvalidate = function (id) { if (id) delete cache[String(id).toLowerCase()]; else for (const k in cache) delete cache[k]; };
+  CBZ.flashlightThumbnail = function () {
+    if (!CBZ.buildFlashlight) return "";
+    return modelThumbnail("$guard-torch", function () { return CBZ.buildFlashlight({ lit: false }); });
+  };
+  CBZ.weaponThumbnailInvalidate = function (id) {
+    if (id) delete cache[String(id).toLowerCase()];
+    else for (const k in cache) delete cache[k];
+  };
 })();

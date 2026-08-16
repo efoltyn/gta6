@@ -200,10 +200,23 @@ if (has("--serve")) {
   await new Promise(() => {});
 }
 
+/* Flags that CONSUME the next argv entry. Declared once, because the bare
+   expression is "everything left over" and a flag missing from this list has
+   its VALUE silently joined into the expression instead. `--eval-timeout` was
+   missing, so
+
+       probe.mjs --eval-timeout 180000 'CBZ.foo()'
+
+   evaluated the string "180000 CBZ.foo()" and failed with `SyntaxError:
+   Unexpected identifier` or `TypeError: 180000 is not a function` — an error
+   about the caller's code, pointing nowhere near the real cause. Adding a new
+   value-taking flag means adding it here. */
+const VALUED = new Set(["--seed", "--step", "--file", "--eval-timeout"]);
+
 // ---- one-shot query: attach to the live world if there is one --------------
 const expr = has("--file")
   ? await readFile(argS("--file", ""), "utf8")
-  : argv.filter((a) => !a.startsWith("--") && argv[argv.indexOf(a) - 1] !== "--seed" && argv[argv.indexOf(a) - 1] !== "--step" && argv[argv.indexOf(a) - 1] !== "--file").join(" ");
+  : argv.filter((a, i) => !a.startsWith("--") && !VALUED.has(argv[i - 1])).join(" ");
 if (!expr && !has("--reset") && !has("--step")) {
   console.error("usage: probe.mjs '<expression>' | --file f.js | --serve | --stop | --step N | --reset | --isolated");
   process.exit(2);

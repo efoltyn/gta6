@@ -431,7 +431,7 @@
      no loop.js, so every one-shot game in games/ was verifiable only by
      WAITING on software-rasterized frames at roughly 60x slow: a three-minute
      game costs three hours of probe, which means in practice nobody ever
-     tested one to its end. The whole point of docs/claude/verification.md is
+     tested one to its end. The whole point of scrolls/claude/verification.md is
      that a gate reads state and steps time by hand.
 
      Same shape and the same order as tick() above, minus the renderer, with

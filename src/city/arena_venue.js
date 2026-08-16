@@ -331,12 +331,35 @@ CBZ.arenaVenue = {
     root.add(V);
 
     var colliders = [], platforms = [], losMeshes = [], lights = [], proxies = [];
+    // census: how many ring colliders are oriented, and how much invisible
+    // wall the old AABB-per-chord form would have added around this bowl.
+    var ringOriented = 0, ringSlack = 0;
     function solid(x0, z0, x1, z1, y0, y1) {
       var c = {
         minX: Math.min(x0, x1), maxX: Math.max(x0, x1),
         minZ: Math.min(z0, z1), maxZ: Math.max(z0, z1), ref: V
       };
       if (y0 != null) { c.y0 = y0; c.y1 = y1; }
+      (CBZ.colliders = CBZ.colliders || []).push(c);
+      colliders.push(c); return c;
+    }
+    // A CHORD ON A CORNER ARC IS NOT AXIS-ALIGNED, AND IT NEVER WAS.
+    // ringSolid used to re-type each rotated chord as its own AABB, which for
+    // a 5 m chord at 45 deg is a 3.7 m square around a 0.24 m handrail — the
+    // player was stopped 2.9 m short of a rail they could see through, on all
+    // four corners of every ring in this bowl. The mesh below it was always
+    // drawn rotated (put(... ry: s.yaw)); only the collider lied. Same centre,
+    // same half-extents, same yaw as the mesh, resolved in its own frame by
+    // physics.js. Straight sides come back as plain AABBs and are byte-
+    // identical to what they always were.
+    function solidBox(cx2, cz2, hw, hd, yaw, y0, y1) {
+      var c = CBZ.orientedCollider
+        ? CBZ.orientedCollider(cx2, cz2, hw, hd, yaw, y0, y1)
+        : { minX: cx2 - hw, maxX: cx2 + hw, minZ: cz2 - hd, maxZ: cz2 + hd,
+            y0: y0, y1: y1 };
+      c.ref = V;
+      if (c.yaw && CBZ.orientedSlack) ringSlack += CBZ.orientedSlack(hw, hd, yaw);
+      if (c.yaw) ringOriented++;
       (CBZ.colliders = CBZ.colliders || []).push(c);
       colliders.push(c); return c;
     }
@@ -493,21 +516,17 @@ CBZ.arenaVenue = {
       return { x: k, z: CZ - B - d, nx: 0, nz: -1 };
     }
 
-    // A ring of solid AABBs following the plan (arcs approximated by the true
-    // AABB of each short oriented chord — kept short so the fatness stays sane).
+    // A ring of solid chords following the plan. Each chord is registered
+    // with the SAME centre / half-extents / yaw as the mesh drawn on it, so
+    // the wall you walk into is the wall you can see. (It used to register
+    // the chord's bounding box instead, which on the corner arcs was several
+    // metres of solid air — see solidBox above.)
     function ringSolid(d, thick, y0, y1, opts) {
       opts = opts || {};
       walkRing(d, opts.pitch || 5.0, function (s) {
         if (opts.skip && opts.skip(s)) return;
-        var hx = s.len / 2, hz = thick / 2, ax, az;
-        if (isStraight(s.side)) {
-          ax = Math.abs(s.nx) * hz + Math.abs(s.nz) * hx;
-          az = Math.abs(s.nz) * hz + Math.abs(s.nx) * hx;
-        } else {
-          var c = Math.abs(Math.cos(s.yaw)), sn = Math.abs(Math.sin(s.yaw));
-          ax = hx * c + hz * sn; az = hx * sn + hz * c;
-        }
-        solid(s.x - ax, s.z - az, s.x + ax, s.z + az, y0, y1);
+        var hx = s.len / 2, hz = thick / 2;
+        solidBox(s.x, s.z, hx, hz, s.yaw, y0, y1);
         if (opts.mesh !== false) {
           put(opts.pool || "concrete", {
             x: s.x, y: (y0 + y1) / 2, z: s.z,
@@ -863,8 +882,15 @@ CBZ.arenaVenue = {
       // already beyond that deck's rear edge, leaving seven floating rail
       // components around the bowl.
       railRing(D_TOP - 0.08, TOP_Y, 1.04, false);
-      // solid back wall behind the top row — you cannot step off the bowl
-      ringSolid(D_TOP + 0.62, 0.6, TOP_Y, TOP_Y + 1.4, { pitch: 5.0, mesh: false });
+      // Solid back wall behind the top row — you cannot step off the bowl.
+      // IT USED TO BE DRAWN AS NOTHING AT ALL. `mesh: false` on a ring that
+      // has no other geometry standing in it is the literal definition of an
+      // invisible wall: 32 colliders, 92 m2, a metre and a half tall, in open
+      // air at the back of the gods. The guard rail one line up is a BAR on
+      // posts at a different radius, so it never covered this. Drawing it
+      // costs nothing new — ringSolid flushes into the same instanced
+      // concrete pool every other band in this bowl already uses.
+      ringSolid(D_TOP + 0.62, 0.6, TOP_Y, TOP_Y + 1.4, { pitch: 5.0, pool: "concrete" });
     })();
 
     // ---------------- aisle step treads (two half-risers per row) ------------
@@ -1681,6 +1707,16 @@ CBZ.arenaVenue = {
         deckR: DECK_R, apron: APRON_BANDS, marqueeX: +(A + D_FACE + 9).toFixed(2),
         crowdTotal: crowdTotal, crowdCap: crowdCap,
         colliders: colliders.length, standColliders: standColliders,
+        // ---- THE INVISIBLE WALL, AS A NUMBER -------------------------------
+        // `orientedColliders` is how many ring chords sit on a corner arc and
+        // therefore carry a yaw. `aabbSlackSaved` is the metres of solid air
+        // those chords used to add up to when each was registered as its own
+        // bounding box — summed worst-case outward reach past the wall face.
+        // Both are RATCHETS: slack may only go DOWN, and if `orientedColliders`
+        // ever reads 0 on a bowl with corners, somebody has re-typed a rotated
+        // chord as an AABB again and the walls have moved back out.
+        orientedColliders: ringOriented,
+        aabbSlackSaved: +ringSlack.toFixed(1),
         platforms: platforms.length,
         losBlockers: losMeshes.length,
         seatCushion: SEAT_CUSH,

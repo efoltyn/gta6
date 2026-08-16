@@ -118,6 +118,19 @@
   const CLUTCH_DUR = 0.6;       // wound-clutch: hand reaches to the hit for ~0.6s after a non-fatal shot
   const CLUTCH_ARM = -1.35;     // the clutching arm folds in across the wound (pitch up + across)
 
+  // Prison bullets used only the old 0.55-radian torso hinge: a torch carrier
+  // folded like a door and drove his raised hand through his face.  Escape now
+  // gets one compact directional impact beat from the same CBZ.body impulse the
+  // city reads, tuned for the guard rig and deliberately preserving the torch
+  // arm.  The richer city fight stack remains city-only.
+  const JAIL_HIT_DUR = 0.30;
+  const JAIL_HIT_PITCH = 0.25;
+  const JAIL_HIT_ROLL = 0.18;
+  const JAIL_HIT_YAW = 0.20;
+  const JAIL_HIT_HEAD = 0.34;
+  const JAIL_HIT_KNEE = 0.30;
+  const JAIL_HIT_FREE_ARM = -0.46;
+
   // ---- HEAD SNAP (punch reactions, CBZ.reactPunch — jail AND city) ----
   // Every landed melee blow is read as a shot to the head (this rig has no
   // separate hit-location model, and in a fistfight that's where punches go).
@@ -135,6 +148,11 @@
   const AIM_RANGE2 = 60 * 60;   // shooters visibly track a mark inside 60u
   const AIM_HEAD_YAW = 0.75;    // believable neck turn cap
   const AIM_HEAD_PIT = 0.38;
+  // STARE (CBZ.npcStare): how far a neck turns onto you, and how far away
+  // somebody can still clock you. Wider than the aim cap because a look is
+  // not a shoulder-committed aim.
+  const STARE_YAW = 1.05;
+  const STARE_RANGE2 = 26 * 26;
   const AIM_ELEV = 0.55;        // max gun-arm elevation correction (rad)
 
   // per-actor reaction record, keyed by the actor object.
@@ -181,7 +199,9 @@
         stagT: 0, stagX: 0, stagZ: 1, stagAmp: 0,
         flinT: 0, flinX: 0, flinZ: 1, flinAmp: 0,
         clutchT: 0, clutchSide: 0, clutchAmp: 0,   // wound-clutch (non-fatal): timer / which hand (±1) / caliber weight
+        jailHitT: 0, jailHitX: 0, jailHitZ: 1, jailHitAmp: 0,
         headAmp: 0, headKind: "cross", headLf: 1, headLs: 0, hsX: 0, hsY: 0, hsZ: 0,  // HEAD SNAP (CBZ.reactPunch)
+        stK: 0, stOff: 0,                          // STARE (CBZ.npcStare) — eased neck yaw + last frame's offset
         aimK: 0, aimY: 0, aimP: 0, aimA: 0, hyOff: 0,
         swingT: 0, swingArm: 1, dazeK: 0, guardK: 0,
         // seed the detectors from the CURRENT values so an actor first seen
@@ -258,6 +278,19 @@
       if (CBZ.knockback && !a._npcAttached) CBZ.knockback(a, p.x, p.z, SHOVE);
     }
     r.dir = dir;
+    if (CBZ.game && CBZ.game.mode === "escape") {
+      const ph = a._phys;
+      let hx = ph && Number.isFinite(ph.fdx) ? ph.fdx : 0;
+      let hz = ph && Number.isFinite(ph.fdz) ? ph.fdz : 0;
+      if (Math.hypot(hx, hz) < 0.01 && p) {
+        hx = a.group.position.x - p.x;
+        hz = a.group.position.z - p.z;
+      }
+      const hd = Math.hypot(hx, hz) || 1;
+      r.jailHitX = hx / hd; r.jailHitZ = hz / hd;
+      r.jailHitAmp = Math.min(1.15, 0.62 + ((ph && ph.shock) || 0) * 0.34);
+      r.jailHitT = JAIL_HIT_DUR;
+    }
     // alertCrowd drives the JAIL ambient crowd; in city mode peds run their own
     // panic (cityPanic), so don't cross the wires here.
     if (CBZ.alertCrowd && a.group && CBZ.game && CBZ.game.mode !== "city") {
@@ -305,6 +338,7 @@
     for (let pass = 0; pass < passes; pass++) {
       const list = pass === 0 ? guards : pass === 1 ? npcs : cityPeds;
       const isCity = pass === 2;
+      const isJail = !isCity && game.mode === "escape";
       for (let i = 0; i < list.length; i++) {
         const a = list[i];
         if (!a || !a.group || !a.char) continue;
@@ -394,10 +428,62 @@
         }
         r.hsX = 0; r.hsY = 0; r.hsZ = 0;
 
-        // CITY fight-read channels share the same back-out dance: neck pitch +
-        // body yaw + legs are all DAMPED by animChar (feedback if left in), so
-        // reveal the clean base before this frame's offsets go back on.
-        if (isCity) {
+        /* HE LOOKS AT YOU. (CBZ.npcStare — what the floating "!" became.)
+
+           27 call sites used to hang an exclamation mark over the head of
+           anyone who clocked you, painted on a canvas with depthTest:false so
+           it showed through walls. A man noticing you is not a symbol, it is a
+           head turning.
+
+           This sits HERE, beside the head-snap back-out, rather than with the
+           aim head-track further down — because that whole block lives inside
+           `if (isCity && parts && body)` and the prison never reaches it. Same
+           shape as the hands-up bug: finished machinery, gated away from the
+           mode that needed it. Rather than widen a city branch (and risk
+           double-driving a channel the city already writes), the stare owns a
+           small offset of its own, backed out here the same way every other
+           damped channel in this file is.
+
+           `.pos` goes through the group fallback because a jail actor keeps
+           its position on `.group.position` — the trap that had citySay
+           silently failing for the whole prison and crashed every landed punch
+           in systems/combat.js until this wave. */
+        if (neck && r.stOff) neck.rotation.y -= r.stOff;
+        r.stOff = 0;
+        if ((a.stareT || 0) > 0) {
+          a.stareT -= dt;
+          // `live`/`down` are declared further down this function, so the test is
+          // spelled out here rather than reaching forward into them.
+          const looking = !a.dead && !a.escaped && !(a.ko > 0) && !(a.koT > 0) &&
+            !a.surrender && !(a.char.handsUp || a.char.surrender);
+          const me = a.pos || (a.group && a.group.position);
+          const tgt = a.stareAt || CBZ.player;
+          const tp = tgt && (tgt.pos || (tgt.group && tgt.group.position));
+          let want = 0;
+          if (looking && neck && me && tp && !tgt.dead) {
+            const sdx = tp.x - me.x, sdz = tp.z - me.z;
+            if (sdx * sdx + sdz * sdz < STARE_RANGE2) {
+              let rel = Math.atan2(sdx, sdz) - a.group.rotation.y;
+              rel = ((rel + Math.PI) % (Math.PI * 2)) - Math.PI;
+              if (rel < -Math.PI) rel += Math.PI * 2;
+              // a neck only turns so far; past that he would have to step round
+              want = rel > STARE_YAW ? STARE_YAW : (rel < -STARE_YAW ? -STARE_YAW : rel);
+            }
+          }
+          r.stK = damp(r.stK || 0, want, 11, dt);   // snap on, ease off
+          if (neck && Math.abs(r.stK) > 0.001) { r.stOff = r.stK; neck.rotation.y += r.stOff; }
+        } else if (r.stK) {
+          r.stK = damp(r.stK, 0, 11, dt);
+          if (Math.abs(r.stK) < 0.002) r.stK = 0;
+          if (neck && r.stK) { r.stOff = r.stK; neck.rotation.y += r.stOff; }
+        }
+
+        // Directional fight-read channels share the same back-out dance: neck
+        // pitch + body yaw + joints are DAMPED by animChar (feedback if left
+        // in), so reveal the clean base before this frame's offsets go back on.
+        // Escape uses only the small jail-hit layer below; all other city reads
+        // remain inside the explicit isCity block.
+        if (isCity || isJail) {
           if (neck && r.nkOff) neck.rotation.x -= r.nkOff;
           if (neck && r.hyOff) neck.rotation.y -= r.hyOff;   // aim head-track (own channel — facial backs out only its own)
           if (body && r.byOff) body.rotation.y -= r.byOff;
@@ -414,6 +500,7 @@
           r.nkOff = 0; r.hyOff = 0; r.byOff = 0; r.llOff = 0; r.rlOff = 0;
           r.lowLaOff = 0; r.lowRaOff = 0; r.lowLlOff = 0; r.lowRlOff = 0;
 
+          if (isCity) {
           // ---- EDGE DETECTORS (city) ----
           // STAGGER: grapple's hit() bumps _phys.fl on every real blow and
           // carries the TRUE world push direction + shock energy — far better
@@ -462,6 +549,7 @@
             }
           }
           r.atkCd = cd;
+          }
         }
 
         // A city vault/mantle is a full-rig pose. We intentionally reach this
@@ -488,7 +576,7 @@
           // the pose — stacking the player-relative recoil on top would double
           // the pitch and point the wrong way in NPC-vs-NPC fights. The timer
           // still bleeds so the flash/shove bookkeeping is unchanged.
-          if (!down && !(isCity && r.stagT > 0)) {
+          if (!down && !(isCity && r.stagT > 0) && !(isJail && r.jailHitT > 0)) {
             // ease-out: full at the moment of impact, smoothly to 0.
             const k = r.recoil / RECOIL_DUR;          // 1 → 0
             const ease = k * k;                        // quadratic ease-out
@@ -580,6 +668,42 @@
           if (!down) bodyOff += r.cowerLean;
         }
 
+        // ---- PRISON BULLET IMPACT ----------------------------------------
+        // One force-scaled whole-body answer instead of the old torso hinge:
+        // shoulders turn, head snaps, knees take the load and the FREE arm
+        // reacts. The raised right torch arm remains owned by guards.js, so the
+        // flashlight stays in the fist and cannot spear through the face.
+        if (isJail && r.jailHitT > 0) {
+          r.jailHitT = Math.max(0, r.jailHitT - dt);
+          if (!down && parts && body) {
+            const t = r.jailHitT / JAIL_HIT_DUR;
+            const amp = t * t * r.jailHitAmp;
+            const ry = a.group.rotation.y || 0;
+            const lf = Math.cos(ry) * r.jailHitZ + Math.sin(ry) * r.jailHitX;
+            const ls = Math.cos(ry) * r.jailHitX - Math.sin(ry) * r.jailHitZ;
+            bodyOff += -lf * JAIL_HIT_PITCH * amp;
+            bodyRoll += -ls * JAIL_HIT_ROLL * amp;
+            r.byOff += -ls * JAIL_HIT_YAW * amp;
+            if (neck) {
+              r.nkOff += -lf * JAIL_HIT_HEAD * amp;
+              r.hyOff += -ls * JAIL_HIT_HEAD * 0.55 * amp;
+            }
+            if (low) {
+              const dip = JAIL_HIT_KNEE * amp;
+              if (low.ll) { const b0 = low.ll.rotation.x, w = Math.max(0, b0 + dip); r.lowLlOff += w - b0; low.ll.rotation.x = w; }
+              if (low.rl) { const b0 = low.rl.rotation.x, w = Math.max(0, b0 + dip * 0.82); r.lowRlOff += w - b0; low.rl.rotation.x = w; }
+            }
+            // Guards carry the torch in the semantic right hand. The left arm
+            // absorbs the hit/clutches inward; inmates use the same readable
+            // free-arm beat without inventing a weapon-hand exception.
+            if (parts.la) {
+              const off = JAIL_HIT_FREE_ARM * amp;
+              parts.la.rotation.x += off;
+              r.laOff += off;
+            }
+          }
+        }
+
         // ============================================================
         //  CITY FIGHT READS — all additive, all fast-decay, all inside the
         //  isCity gate so jail/survival posing is byte-identical. Pose writes
@@ -604,7 +728,15 @@
           const live = !flat && animated;
           const ry = a.group.rotation.y || 0;
           const seed = a._deathSeed || 0;
-          const gunArm = a.armed && a._weaponProp && a._weaponProp.visible; // actorweapons owns it
+          /* actorweapons owns this arm — but only when what is in it has a
+             BARREL. `armed && a visible prop` was a complete test right up
+             until a weapon existed with no muzzle: (3b) below elevates the arm
+             so the barrel LINE meets the target, and pointed at a shank it
+             holds a man's fist at head height aiming a sharpened strip of bed
+             frame like a pistol. The prop was stamped with the answer at build
+             time (systems/actorweapons.js), so this costs one property read. */
+          const gunArm = a.armed && a._weaponProp && a._weaponProp.visible &&
+            !(a._weaponProp.userData && a._weaponProp.userData.weaponMelee);
 
           // ---- (1) DIRECTIONAL STAGGER: lurch along the REAL push direction
           //      so a watcher reads who hit whom — head whipping harder than
@@ -768,16 +900,17 @@
             const adx = a.rage.pos.x - a.pos.x, adz = a.rage.pos.z - a.pos.z;
             if (adx * adx + adz * adz < AIM_RANGE2) aimT = a.rage;
           }
-          r.aimK = damp(r.aimK, aimT ? 1 : 0, 14, dt);
-          if (aimT) {
-            const tdx = aimT.pos.x - a.pos.x, tdz = aimT.pos.z - a.pos.z;
+          // a jail actor has no `.pos` — read through the group
+          const apos = a.pos || (a.group && a.group.position);
+          if (aimT && apos) {
+            const tdx = aimT.pos.x - apos.x, tdz = aimT.pos.z - apos.z;
             const th = Math.hypot(tdx, tdz) || 0.001;
             const ty = (aimT.pos.y || 0) + (aimT.isPlayer ? 1.05 : 0.95);  // chest height × HUMAN_SCALE 0.70 (was 1.5 / 1.35)
             let relY = Math.atan2(tdx, tdz) - ry;
             relY = ((relY + Math.PI) % (Math.PI * 2)) - Math.PI;
             if (relY < -Math.PI) relY += Math.PI * 2;
             if (relY > AIM_HEAD_YAW) relY = AIM_HEAD_YAW; else if (relY < -AIM_HEAD_YAW) relY = -AIM_HEAD_YAW;
-            const elev = Math.atan2(ty - ((a.pos.y || 0) + 1.29), th);  // shoulder → target (1.84 local collar × HUMAN_SCALE 0.70)
+            const elev = Math.atan2(ty - ((apos.y || 0) + 1.29), th);  // shoulder → target (1.84 local collar × HUMAN_SCALE 0.70)
             let hp2 = -elev * 0.7;                                      // facial convention: -x looks up
             if (hp2 > AIM_HEAD_PIT) hp2 = AIM_HEAD_PIT; else if (hp2 < -AIM_HEAD_PIT) hp2 = -AIM_HEAD_PIT;
             let armC = -elev;                                           // more negative = barrel raised
@@ -885,9 +1018,10 @@
 
         // apply the combined body offset on top of animChar's fresh base
         if (body && bodyOff) body.rotation.x += bodyOff;
-        // city extras land the same way: roll rides animChar's rotation.z assign;
-        // yaw + neck are damped channels, already backed out at the top.
-        if (isCity) {
+        // Directional extras land the same way: roll rides animChar's
+        // rotation.z assign; yaw + neck are damped channels, already backed
+        // out at the top. Escape only populated these from the impact beat.
+        if (isCity || isJail) {
           if (body && bodyRoll) body.rotation.z += bodyRoll;
           if (body && r.byOff) body.rotation.y += r.byOff;
           if (neck && r.nkOff) neck.rotation.x += r.nkOff;
@@ -970,11 +1104,13 @@
         //   get-up branch's OWN backed-out writes (r.gbx) — clamping there would
         //   desync that back-out. On an upright walker both channels are freshly
         //   ASSIGNED by animChar, so the clamp is purely a ceiling with no feedback.
-        const upright = isCity && body && !down &&
+        const upright = (isCity || isJail) && body && !down &&
           !(pp && (pp.air || pp.down > 0)) && Math.abs(a.group.rotation.x) <= 0.05;
         if (upright) {
-          const MAX_FWD = 0.95;   // deepest forward bend (matches the severed-leg crawl read)
-          const MAX_BACK = -0.7;  // deepest backward reel
+          // Prison has one compact impact layer and a raised carried tool; keep
+          // its upper body tighter so the hand never collapses into the face.
+          const MAX_FWD = isJail ? 0.52 : 0.95;
+          const MAX_BACK = isJail ? -0.46 : -0.7;
           if (body.rotation.x > MAX_FWD) body.rotation.x = MAX_FWD;
           else if (body.rotation.x < MAX_BACK) body.rotation.x = MAX_BACK;
           // side-keel (roll) sums the same independent layers (stagger + flinch +
@@ -983,7 +1119,7 @@
           // every frame, so a clamp can't feed back. (body.rotation.y / yaw is a
           // DAMPED, backed-out channel — clamping it post-add would desync r.byOff,
           // so it is deliberately left to its own already-modest sum.)
-          const ROLL = 0.6;       // ~34°: a deep side-keel, still upright
+          const ROLL = isJail ? 0.42 : 0.6;
           if (body.rotation.z > ROLL) body.rotation.z = ROLL;
           else if (body.rotation.z < -ROLL) body.rotation.z = -ROLL;
           // Reactions run after animChar and legitimately replace the torso's
@@ -1048,6 +1184,17 @@
     }
   }
   CBZ.reactPunch = reactPunch;
+
+  /* CBZ.npcStare(actor, secs, at) — make somebody LOOK at you.
+     The replacement for the floating "!" that used to hang over the head of
+     anyone who noticed you. One line at a call site, degrade-safe (a build
+     without this file just does nothing), and it costs no new state beyond a
+     timer: the head-track above does the rest. `at` defaults to the player. */
+  CBZ.npcStare = function (actor, secs, at) {
+    if (!actor) return;
+    actor.stareT = Math.max(actor.stareT || 0, secs || 1.6);
+    if (at) actor.stareAt = at;
+  };
 
   // LATE (89): after animChar (20/22) and facial.js (88) have posed the
   // rig this frame, so our additive offsets sit on a fresh base.

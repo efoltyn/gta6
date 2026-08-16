@@ -66,6 +66,18 @@
   // usable in cafeteria (:445) even though its home file loads at :450.
   if (CBZ.CONFIG.PRISON_DRESS_V2 == null) CBZ.CONFIG.PRISON_DRESS_V2 = true;
   const DRESS = !!CBZ.CONFIG.PRISON_DRESS_V2;
+  /* PRISON_PROP_USE_V1 — canonical declaration + doctrine: world/southblock.js.
+     THIS FILE IS THE SHARED KIT AND IT IS DELIBERATELY BARELY TOUCHED.
+     CBZ.prisonDress is consumed by world/prisonwings.js, world/adminwing.js,
+     world/roofs.js and world/building_dress.js — four files this pass does not
+     own — so a change to lamp(), strip(), band(), dado(), scuff() or
+     floorLine() ripples into ~20 rooms audited by somebody else. It stays a
+     drawing vocabulary. The only kit change is K.crate handing back the meshes
+     it drew (additive: the return value was undefined, so no existing caller
+     can see it), and the only room changes are the two free-standing objects
+     in the service end that a body walks into and could not move. */
+  if (CBZ.CONFIG.PRISON_PROP_USE_V1 == null) CBZ.CONFIG.PRISON_PROP_USE_V1 = true;
+  const USE = !!CBZ.CONFIG.PRISON_PROP_USE_V1;
 
   roomShell({
     x0: -29, x1: -19, z0: 6, z1: 22, h: 6,
@@ -324,12 +336,19 @@
     };
 
     // ---- milk crate (2 meshes) --------------------------------------------
+    // RETURNS ITS MESHES (PRISON_PROP_USE_V1). It returned undefined, so a
+    // caller could draw a crate and then had no way to hand it to
+    // systems/pushables.js — the same "two services that are both about
+    // furniture could not be composed" gap city/furniture.js:266 fixed with
+    // its own `parts`. Additive: nothing can regress on a return value that
+    // used to be undefined.
     K.crate = function (x, y, z, o) {
       o = o || {};
       const c = o.color != null ? o.color : 0x3a6ea5;
       const s = o.s || 0.44;
-      addBox(x, y, z, s, s * 0.72, s, c, { cast: false });
-      addBox(x, y + s * 0.36, z, s + 0.03, 0.05, s + 0.03, 0x2d5580, { cast: false }); // rim
+      const body = addBox(x, y, z, s, s * 0.72, s, c, { cast: false });
+      const rim = addBox(x, y + s * 0.36, z, s + 0.03, 0.05, s + 0.03, 0x2d5580, { cast: false }); // rim
+      return { parts: [body, rim], s: s, top: y + s * 0.36 + 0.025 };
     };
     // a stack of cafeteria trays (1 mesh per tray)
     K.trayStack = function (x, y, z, n, color) {
@@ -538,16 +557,45 @@
       mass: 16, kind: "mopbucket", solid: true, leash: 5.0, mode: "escape",
     });
     PD.pipe(-22.6, 0.85, 20.1, 1.3, "y", 0.03, 0x9a7a4e);                          // mop handle
-    // wet-floor A-frame beside it
+    // wet-floor A-frame beside it. PRISON_PROP_USE_V1: three boxes standing
+    // free on the deck at 0.62 m, drawn cast:false — you walked through the
+    // one object in the room whose entire job is to be in your way. It is a
+    // 2 kg folding plastic sign parked next to a mop bucket that is ALREADY a
+    // pushable (four lines up), so it gets the same treatment and the lightest
+    // mass in the compound bar the chalk bucket. `solid:true` here is
+    // pushables' own flag — it mints the collider the sign never had.
+    const wfParts = [];
     for (const s of [-1, 1]) {
       const w = addBox(-23.4 + s * 0.14, 0.32, 19.2, 0.05, 0.62, 0.44, 0xffd451, { cast: false });
       w.rotation.z = s * 0.22;
+      wfParts.push(w);
     }
-    addBox(-23.4, 0.5, 19.2, 0.3, 0.16, 0.02, 0x2a2f38, { cast: false });
-    // milk-crate corner (the one place a chow hall is never tidy)
-    PD.crate(-20.3, 0.16, 20.9, { color: 0x3a6ea5 });
-    PD.crate(-20.3, 0.48, 20.9, { color: 0xc94d3a });
-    PD.crate(-20.4, 0.16, 20.2, { color: 0x2f6b3a });
+    wfParts.push(addBox(-23.4, 0.5, 19.2, 0.3, 0.16, 0.02, 0x2a2f38, { cast: false }));
+    if (USE && CBZ.pushProp) CBZ.pushProp({
+      parts: wfParts, x: -23.4, z: 19.2, hx: 0.2, hz: 0.24, y1: 0.63,
+      mass: 2, kind: "wetfloor", solid: true, leash: 6.0, mode: "escape",
+    });
+    // milk-crate corner (the one place a chow hall is never tidy).
+    // PRISON_PROP_USE_V1: six boxes of 0.44 m crate on the floor of the one
+    // room the DAY BEAT sends the whole block to, and a body went through all
+    // six. A milk crate is the archetypal shovable — 1.5 kg, skitters — so the
+    // corner stays exactly as drawn and becomes three things you can kick.
+    // The first two are STACKED on one footprint, so they are ONE body: shove
+    // the bottom crate of a stack as a separate prop and the top one is left
+    // hanging in the air, which is a worse lie than the one being fixed.
+    const cLo = PD.crate(-20.3, 0.16, 20.9, { color: 0x3a6ea5 });
+    const cHi = PD.crate(-20.3, 0.48, 20.9, { color: 0xc94d3a });
+    const cSide = PD.crate(-20.4, 0.16, 20.2, { color: 0x2f6b3a });
+    if (USE && CBZ.pushProp) {
+      CBZ.pushProp({
+        parts: cLo.parts.concat(cHi.parts), x: -20.3, z: 20.9, hx: 0.24, hz: 0.24,
+        y1: cHi.top, mass: 3, kind: "crate", solid: true, leash: 5.0, mode: "escape",
+      });
+      CBZ.pushProp({
+        parts: cSide.parts, x: -20.4, z: 20.2, hx: 0.24, hz: 0.24,
+        y1: cSide.top, mass: 2, kind: "crate", solid: true, leash: 5.0, mode: "escape",
+      });
+    }
     // a floor drain in the service end
     (function drain() {
       const d = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.05, 10), CBZ.cmat(0x3c424d));

@@ -1,10 +1,10 @@
 /* ============================================================
    systems/inventory.js — a Minecraft-style inventory.
 
-   • An always-visible HOTBAR (9 slots) at the bottom; number keys 1-9
-     select (when you're not mid-conversation), and tapping/clicking a
-     slot quick-USES a consumable.
-   • Press [E] to open the full STASH: a 27-slot grid above the hotbar.
+   • An always-visible HOTBAR at the bottom. In Prison Escape [1] is always
+     fists and [2]..[0] select the rearrangeable firearm rail; tapping/clicking
+     an item slot still quick-USES a consumable.
+   • Press [I] to open the full STASH: a 27-slot grid above the hotbar.
      Left-click picks up a stack onto the cursor, click again to place/
      swap/merge (classic Minecraft). Right-click USES a consumable.
    • Items mirror the economy inventory (CBZ.game.inventory is the count
@@ -125,6 +125,12 @@
     // produce a render (no GL context, model factory missing). A real gun in
     // this bag is always the mesh, never this.
     gun: "<path d='M2 6.8h18.4v5.2h-5.1l-1.5 3h-2.4l-1.4 6.2H5.2L6.8 12H2z' fill='currentColor' stroke='none'/>",
+    // Same last-resort rule for the duty flashlight: normal play renders the
+    // canonical 3D model; this only covers a failed/offscreen WebGL context.
+    torch: "<path d='M3 9h11v6H3z'/><path d='M14 7l7-2v14l-7-2z'/><path d='M5.5 9V6.5h5V9'/><path d='M5.5 15v2.5h5V15'/>",
+    // Last-resort demolition charge (same rule): body, three taped demo
+    // sticks, the LED. Normal play renders the real brick via CBZ.c4Thumbnail.
+    c4: "<rect x='3.4' y='11' width='17.2' height='7.6' rx='1.2'/><rect x='5.6' y='6.2' width='3.6' height='4.8' rx='.8'/><rect x='10.2' y='6.2' width='3.6' height='4.8' rx='.8'/><rect x='14.8' y='6.2' width='3.6' height='4.8' rx='.8'/><path d='M3.4 14.8h17.2' opacity='.5'/><circle cx='17.8' cy='16.4' r='1.1' fill='currentColor' stroke='none'/>",
     wood: "<rect x='2.6' y='8.6' width='18.8' height='6.8' rx='3.4'/><ellipse cx='5.4' cy='12' rx='1.7' ry='3.4'/><ellipse cx='5.4' cy='12' rx='.6' ry='1.3'/><path d='M12 8.6v6.8' opacity='.45'/>",
     stone: "<path d='M3.6 15.6l3.2-8.2 6.2-3 7.4 5.2-2.2 8.4H6z'/><path d='M6.8 7.4l4.2 5.2 9-2.8M11 12.6l-1 5.4'/>",
     scrap: "<path d='M3.6 6.2l6 2.2 4-4.2 6.4 3-2 6.2 3 5.4-8.2-1-5.2 3.2-2.2-6.2z'/>",
@@ -155,7 +161,7 @@
     "Stolen Wallet": "wallet", "Cash Roll": "cash", "Gold Tooth": "tooth",
     "Gold Chain": "chain", "Luxury Watch": "watch",
     // --- keys / weapon (Gun renders as the MESH; this is its fallback) ---
-    "Gun-Room Key": "key", "Gun": "gun",
+    "Gun-Room Key": "key", "Gun": "gun", "Guard Torch": "torch", "C4 Charge": "c4",
     // B7: resource/tool catalog parity (systems/economy.js) — see city/hud.js
     // + city/charpanel.js for the city-mode equivalents.
     "Wood": "wood", "Stone": "stone", "Scrap": "scrap", "Hatchet": "hatchet", "Pickaxe": "pickaxe",
@@ -178,13 +184,25 @@
      "@held" = the prison's legacy "Gun" item, which weapon-data.js keeps in
      sync with CBZ.weaponInventory (syncLegacyGunItem). It is not a pistol —
      it is whatever came off the armory rack, so it renders the weapon the
-     player actually has out. --------------------------------------------- */
+     player actually has out.
+
+     THE SHIV JOINS THE TABLE, and the reason it may is the reason it could
+     not before. This comment used to name the Shiv as the exact thing the
+     allowlist existed to keep a 9 mm off — because normalizeWeaponId() had no
+     row for it and answered "sidearm". It now HAS a row
+     (actorweapons.js NAME_TO_ID → "shank", weapons/appearances/shank.js), so
+     the thumbnail of a shiv is a photograph of a shiv. The allowlist is doing
+     its job either way: it is a list of names with a REAL MODEL BEHIND THEM,
+     and the fix was to give this one a model, not to widen the gate. "Hacksaw
+     Blade" and "Tattoo Gun" stay absent for precisely that reason — nothing
+     has drawn them yet. ------------------------------------------------- */
   const GUN_ID = {
     "Gun": "@held",
     "Pistol": "sidearm", "Sidearm": "sidearm", "Revolver": "revolver", "Desert Eagle": "deagle",
     "SMG": "smg", "Uzi": "uzi", "Shotgun": "shotgun", "Rifle": "carbine", "Carbine": "carbine",
     "AK-47": "ak47", "Sniper": "sniper", "LMG": "lmg", "Taser": "taser",
     "Bazooka": "bazooka", "Rocket Launcher": "bazooka", "Grenade Launcher": "glauncher",
+    "Shiv": "shank", "Shank": "shank",
   };
   function heldWeaponId() {
     const inv = CBZ.weaponInventory || [];
@@ -195,6 +213,14 @@
   function gunIdFor(name) {
     const gid = GUN_ID[name];
     if (!gid) return null;
+    /* The shiv's row leaves with its flag. PRISON_SHANK=0 sends
+       normalizeWeaponId back to answering "sidearm" for a blade name, so
+       letting this entry through on the off-side would hand the thumbnail
+       rig a pistol and paint a 9 mm on the Shiv — the precise failure the
+       allowlist above was written to prevent, reintroduced by the revert
+       rather than by the feature. Off-side, it falls to the drawn glyph,
+       which is what this bag actually shipped. */
+    if (gid === "shank" && CBZ.CONFIG && CBZ.CONFIG.PRISON_SHANK === false) return null;
     return gid === "@held" ? heldWeaponId() : gid;
   }
 
@@ -217,6 +243,28 @@
   // concatenation, and at most three cells in this whole bag carry a gun.
   const faceMemo = Object.create(null);
   function faceHtml(name) {
+    if (name === "Guard Torch") {
+      let src = "";
+      try { if (CBZ.flashlightThumbnail) src = CBZ.flashlightThumbnail(); } catch (e) { src = ""; }
+      // This is the same model factory used by the guard hand and death drop.
+      // If the thumbnail GL context is unavailable, fall through to ART.torch;
+      // a torch must still never masquerade as the generic unknown-item dot.
+      if (src) return "<img class='islot-img' src='" + src + "' alt=''>";
+    }
+    if (name === "C4 Charge") {
+      // THE SAME PHOTOGRAPH THE CITY BAG SHOWS: city/itemicons.js classifies
+      // the c4 row (registered by explosives.js) as kind "bomb" and shoots
+      // the real demolition-charge asset under the icon rig's lamps. A
+      // weapon_thumbnails side-shot of the planted mesh was tried first and
+      // washed out at slot size (MEASURED — pale slab, no silhouette); the
+      // icon rig exists for exactly this, and borrowing it keeps one C4 face
+      // across both bags. GL miss falls through to ART.c4, never the dot.
+      let src = "";
+      try {
+        if (CBZ.itemIcon) src = CBZ.itemIcon(name, (CBZ.cityEcon && CBZ.cityEcon.ITEMS && CBZ.cityEcon.ITEMS[name]) || { c4: true, tag: "throwable" });
+      } catch (e) { src = ""; }
+      if (src) return "<img class='islot-img' src='" + src + "' alt=''>";
+    }
     const gid = gunIdFor(name);
     if (gid) {
       let src = "";
@@ -262,14 +310,22 @@
   CBZ.escapeIconAudit = function (opts) {
     const noRender = !!(opts && opts.noRender);
     const IT = (CBZ.econ && CBZ.econ.ITEMS) || {};
-    const out = { on: iconsOn(), items: 0, withIcon: 0, generic: 0, genericNames: [], guns: 0, glyphs: 0, byTag: {} };
+    const out = { on: iconsOn(), items: 0, withIcon: 0, generic: 0, genericNames: [], models: 0, guns: 0, glyphs: 0, byTag: {} };
     for (const n in IT) {
       if (!Object.prototype.hasOwnProperty.call(IT, n)) continue;
       out.items++;
       let kind = "";
       if (iconsOn()) {
+        if (n === "Guard Torch") {
+          if (noRender) { if (CBZ.flashlightThumbnail) kind = "model"; }
+          else {
+            let src = "";
+            try { if (CBZ.flashlightThumbnail) src = CBZ.flashlightThumbnail(); } catch (e) { src = ""; }
+            if (src) kind = "model";
+          }
+        }
         const gid = gunIdFor(n);
-        if (gid) {
+        if (!kind && gid) {
           if (noRender) { if (CBZ.weaponThumbnail) kind = "gun"; }
           else {
             let src = "";
@@ -279,6 +335,7 @@
         }
         if (!kind && iconGlyph(n)) kind = "glyph";
       }
+      if (kind === "model") { out.withIcon++; out.models++; continue; }
       if (kind === "gun") { out.withIcon++; out.guns++; continue; }
       if (kind === "glyph") { out.withIcon++; out.glyphs++; continue; }
       out.generic++; out.genericNames.push(n);
@@ -320,13 +377,16 @@
   // full stash overlay
   const panel = document.createElement("div"); panel.className = "card-box invPanel";
   panel.innerHTML = '<div class="invTitle">STASH</div>';
+  const loadout = document.createElement("div"); loadout.className = "invLoadout";
+  loadout.innerHTML = '<div class="invLoadoutTitle">WEAPON KEYS <span>1 is always fists · tap two slots or drag to swap</span></div>' +
+    '<div class="invLoadoutSlots"></div><div class="invReserve"></div>';
   const grid = document.createElement("div"); grid.className = "invGrid";
   for (let i = 0; i < N_MAIN; i++) grid.appendChild(mkCell(mainCells, i));
   const hbRow = document.createElement("div"); hbRow.className = "invGrid invHot";
   for (let i = 0; i < N_HOT; i++) hbRow.appendChild(mkCell(hbCells, N_MAIN + i));
   const hint = document.createElement("div"); hint.className = "invHint";
-  hint.textContent = "Left-click move · Right-click use/fence · B or Esc to close";
-  panel.appendChild(grid); panel.appendChild(hbRow); panel.appendChild(hint);
+  hint.textContent = "Left-click move · Right-click use/fence · I or Esc to close";
+  panel.appendChild(loadout); panel.appendChild(grid); panel.appendChild(hbRow); panel.appendChild(hint);
   screen.appendChild(panel);
 
   document.body.appendChild(bar);
@@ -354,13 +414,20 @@
     if (wantDock) { if (stripEl.parentNode !== bar) bar.insertBefore(stripEl, bar.firstChild); }
     else if (stripEl.parentNode !== hudRoot) hudRoot.appendChild(stripEl);
   }
-  // a docked gun chip is a hotbar cell: click/tap = equip that gun. The row is
-  // drawn in CBZ.weaponInventory order; a leading fists/melee chip (never
-  // present while a gun is held) just offsets the map, so index from the tail.
+  // a docked gun chip is a hotbar cell: click/tap = equip its declared prison
+  // slot. Slot 1 never looks up a gun — it always asks the shared holster gate
+  // for fists. Non-prison modes keep the old acquisition-order fallback.
   if (stripEl) stripEl.addEventListener("mousedown", function (e) {
     if (!stripDocked()) return;
     const c = e.target.closest && e.target.closest(".cSlot"); if (!c) return;
     e.preventDefault(); e.stopPropagation();
+    const ps = c.dataset.prisonSlot;
+    if (ps != null) {
+      if (+ps < 0) { if (CBZ.playerHolster) CBZ.playerHolster(true); return; }
+      const id = c.dataset.weaponId;
+      if (id && CBZ.fpsSelectWeaponId) CBZ.fpsSelectWeaponId(id);
+      return;
+    }
     const cells = stripEl.querySelectorAll(".cSlot");
     const winv = CBZ.weaponInventory || [];
     const i = Array.prototype.indexOf.call(cells, c) - (cells.length - winv.length);
@@ -371,6 +438,96 @@
     if (!stripDocked() || stripEl.style.display === "none") return 0;
     return (CBZ.weaponInventory || []).length;
   }
+
+  // ---------- prison firearm loadout (fixed 1 + rearrangeable 2..0) -------
+  const loadoutSlotsEl = loadout.querySelector(".invLoadoutSlots");
+  const reserveEl = loadout.querySelector(".invReserve");
+  let loadoutPick = null; // {kind:"slot",slot,id} | {kind:"reserve",id}
+
+  function weaponThumb(id) {
+    let src = "";
+    try { if (CBZ.weaponThumbnail) src = CBZ.weaponThumbnail(id); } catch (_) { src = ""; }
+    return src
+      ? "<img class='gunModel' src='" + src + "' alt=''>"
+      : "<span class='s'>GUN</span>";
+  }
+
+  function renderLoadout() {
+    if (!loadoutSlotsEl || !reserveEl) return;
+    const prison = CBZ.game && CBZ.game.mode === "escape";
+    loadout.style.display = prison ? "block" : "none";
+    if (!prison) { loadoutPick = null; return; }
+    loadoutSlotsEl.innerHTML = typeof CBZ.weaponSlotsHTML === "function"
+      ? CBZ.weaponSlotsHTML({ icons: true, prisonLoadout: true }) : "";
+    const unslotted = CBZ.prisonUnslottedWeapons ? CBZ.prisonUnslottedWeapons() : [];
+    reserveEl.innerHTML = unslotted.length
+      ? "<span class='invReserveLabel'>UNASSIGNED</span>" + unslotted.map((id) => {
+        const w = CBZ.weaponById && CBZ.weaponById(id);
+        return "<div class='invReserveGun' draggable='true' data-weapon-id='" + esc(id) +
+          "' title='" + esc((w && w.label) || id) + "'>" + weaponThumb(id) + "</div>";
+      }).join("")
+      : "";
+    if (loadoutPick) {
+      const selector = loadoutPick.kind === "slot"
+        ? ".cSlot[data-prison-slot='" + loadoutPick.slot + "']"
+        : ".invReserveGun[data-weapon-id='" + loadoutPick.id + "']";
+      const picked = loadout.querySelector(selector);
+      if (picked) picked.classList.add("picked");
+      else loadoutPick = null;
+    }
+  }
+
+  function finishLoadoutDrop(slot, source) {
+    if (!(slot >= 0) || slot >= 9 || !source) return;
+    if (source.kind === "slot" && CBZ.swapPrisonWeaponSlots) CBZ.swapPrisonWeaponSlots(source.slot, slot);
+    else if (source.id && CBZ.assignPrisonWeaponSlot) CBZ.assignPrisonWeaponSlot(slot, source.id);
+    loadoutPick = null;
+    renderLoadout();
+  }
+
+  loadout.addEventListener("click", function (e) {
+    const fixed = e.target.closest && e.target.closest(".cSlot[data-prison-slot='-1']");
+    if (fixed) { loadoutPick = null; renderLoadout(); return; }
+    const cell = e.target.closest && e.target.closest(".cSlot[data-prison-slot]");
+    const reserve = e.target.closest && e.target.closest(".invReserveGun");
+    if (reserve) {
+      const id = reserve.dataset.weaponId;
+      loadoutPick = loadoutPick && loadoutPick.kind === "reserve" && loadoutPick.id === id
+        ? null : { kind: "reserve", id };
+      renderLoadout();
+      return;
+    }
+    if (!cell) return;
+    const slot = +cell.dataset.prisonSlot;
+    if (slot < 0) return;
+    if (loadoutPick) { finishLoadoutDrop(slot, loadoutPick); return; }
+    if (cell.dataset.weaponId) {
+      loadoutPick = { kind: "slot", slot, id: cell.dataset.weaponId };
+      renderLoadout();
+    }
+  });
+  loadout.addEventListener("dragstart", function (e) {
+    const cell = e.target.closest && e.target.closest(".cSlot[data-prison-slot]");
+    const reserve = e.target.closest && e.target.closest(".invReserveGun");
+    const src = reserve ? { kind: "reserve", id: reserve.dataset.weaponId }
+      : (cell && +cell.dataset.prisonSlot >= 0 && cell.dataset.weaponId
+        ? { kind: "slot", slot: +cell.dataset.prisonSlot, id: cell.dataset.weaponId } : null);
+    if (!src || !e.dataTransfer) { e.preventDefault(); return; }
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", JSON.stringify(src));
+  });
+  loadout.addEventListener("dragover", function (e) {
+    const cell = e.target.closest && e.target.closest(".cSlot[data-prison-slot]");
+    if (cell && +cell.dataset.prisonSlot >= 0) e.preventDefault();
+  });
+  loadout.addEventListener("drop", function (e) {
+    const cell = e.target.closest && e.target.closest(".cSlot[data-prison-slot]");
+    if (!cell || +cell.dataset.prisonSlot < 0 || !e.dataTransfer) return;
+    e.preventDefault();
+    let src = null;
+    try { src = JSON.parse(e.dataTransfer.getData("text/plain")); } catch (_) {}
+    finishLoadoutDrop(+cell.dataset.prisonSlot, src);
+  });
 
   // ---------- touch access (merge seam, rides PRISON_TOUCH_PROMPTS) ----------
   // CBZ.toggleInventory existed with ZERO touch surfaces calling it — on an
@@ -483,6 +640,7 @@
         (cursor.count > 1 ? '<span class="islot-n">' + cursor.count + "</span>" : "");
       cursorEl.style.left = ptr.x + "px"; cursorEl.style.top = ptr.y + "px";
     } else cursorEl.style.display = "none";
+    if (invOpen) renderLoadout();
   }
 
   // ---------- effects ----------
@@ -546,7 +704,7 @@
     // open, not at build — the string must never name a key glass doesn't have.
     hint.textContent = CBZ.touchMode
       ? "Tap to move · hold to use or fence · ✕ closes"
-      : "Left-click move · Right-click use/fence · B or Esc to close";
+      : "Left-click move · Right-click use/fence · I or Esc to close";
     screen.style.display = "flex";
     if (!CBZ.touchMode && document.exitPointerLock) document.exitPointerLock();
     resync();
@@ -571,14 +729,28 @@
     // CBZ.invOpen and blocks every other city panel.
     if (CBZ.game && CBZ.game.mode === "city") return;
     const k = e.key.toLowerCase();
-    // B = open the bag/stash. I/J/K/L are RESERVED for interaction slots, so
-    // the stash moved off I; E stays sabotage/vent, numbers drive the hotbar.
-    if (k === "b") { toggle(); return; }
+    // I is the invariant stash owner, including beside an NPC interaction;
+    // that panel uses J/K/L/;. B remains a compatibility alias.
+    if (k === "i" || k === "b") {
+      e.preventDefault();
+      toggle();
+      return;
+    }
     if (k === "escape" && invOpen) { close(); return; }
     if (!invOpen) {
-      // number keys ALWAYS drive the hotbar now (interaction options moved to IJKL).
-      // Unified bar: the digits span the DOCKED gun chips first — they carry
-      // the printed 1..N — then this bag's item slots. One bar, one keymap.
+      // Prison's keymap is physical and invariant: 1 = fists, 2..0 = the nine
+      // loadout cells rearranged in the I-screen. Consumables remain tappable;
+      // they never steal one of the weapon digits.
+      if (CBZ.game && CBZ.game.mode === "escape") {
+        if (e.key === "1") { if (CBZ.playerHolster) CBZ.playerHolster(true); return; }
+        const wi = "234567890".indexOf(e.key);
+        if (wi >= 0) {
+          const map = CBZ.prisonWeaponLoadout ? CBZ.prisonWeaponLoadout() : (CBZ.weaponInventory || []);
+          if (map[wi] && CBZ.fpsSelectWeaponId) CBZ.fpsSelectWeaponId(map[wi]);
+          return;
+        }
+      }
+      // Other modes keep the legacy acquisition-order digit map.
       const n = "123456789".indexOf(e.key);
       if (n >= 0) {
         const guns = dockedGunKeys();
@@ -600,7 +772,7 @@
   CBZ.refreshInventory = function () { if (_refresh) _refresh(); resync(); };
 
   // hide hotbar / close stash on menus; reset selection on a new run
-  let lastEl = 0, lastHeld = "";
+  let lastEl = 0, lastHeld = "", lastLoadout = "";
   CBZ.onAlways(97, function () {
     dockWeaponStrip();
     const playing = CBZ.game.state === "playing";
@@ -620,6 +792,9 @@
     // "sidearm" both before and after a sidearm pickup).
     const held = heldWeaponId() + ((CBZ.weaponInventory || []).length ? "|armed" : "");
     if (held !== lastHeld) { lastHeld = held; render(); }
+    const mapped = CBZ.prisonWeaponLoadout ? CBZ.prisonWeaponLoadout().join(",") : "";
+    const loadoutSig = mapped + "|" + (CBZ.prisonUnslottedWeapons ? CBZ.prisonUnslottedWeapons().join(",") : "");
+    if (loadoutSig !== lastLoadout) { lastLoadout = loadoutSig; if (invOpen) renderLoadout(); }
   });
 
   /* ---- RATCHET: CBZ.jailHudAudit() — the ONE-BAR claim as numbers. In a

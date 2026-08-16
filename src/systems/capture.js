@@ -234,20 +234,23 @@
   // straight through to the popup it used to write.
   CBZ.jailTell = { toast: tellToast, hint: tellHint, on: showing };
 
-  // instant version (tower shot) — quick red flash, straight to cell
-  function haulToCell(msg) {
-    if (CBZ.killstreakBreak) CBZ.killstreakBreak(msg || "Captured");
-    tellToast(msg || "BACK TO YOUR CELL");
-    // HAUL SITE 1 — land in the real cell when there is one, else the old spot
-    if (!landInCell()) { player.pos.copy(CBZ.SPAWN); player.vy = 0; }
-    player.stun = 0; player.subdue = 0;
-    setCaptureState("normal", 0);
-    CBZ.playerChar.group.rotation.z = 0;
-    g.detection = 0; g.invuln = 1.6; g.caughtCount++;
-    applyStrike();                               // sets confineT (or ends the run)
-    if (confineT > 0) sealPlayerCell();          // the door shuts behind you
-    CBZ.guards.forEach((gd) => { gd.hunt = 0; gd.alert = 0; gd.investigate = null; gd.capCD = 0; });
-    CBZ.el.flash.classList.remove("go"); void CBZ.el.flash.offsetWidth; CBZ.el.flash.classList.add("go");
+  // A MAN IS RESTRAINED BEFORE HE IS MOVED. This used to be the "instant
+  // version": string → teleport → strike on the same frame — and with the
+  // tier ladder on, applyStrike() turns a strike straight into the
+  // TRANSFERRED card, so a tower round or an empty stomach reclassified you
+  // to a higher security level without a hand ever landing on you (USER:
+  // "you can just get transferred without being physically restrained").
+  // The city never does that — wanted.js's bust() runs hands → cuff → walk →
+  // ride before book-in — so every haul now runs the pen's own restraint
+  // beat: you are already down (every caller fires at hp<=0 or
+  // dead-to-rights), the screws cuff you, fade to black, wake in the cell.
+  // The strike/transfer fires at the blackout, cuffed, like every capture.
+  // opts.strike:false = a medical drag (starvation), not a capture: no
+  // strike, no transfer — the screws just put you back in your bunk.
+  function haulToCell(msg, opts) {
+    // the red flash IS the hit that dropped you; the cuffs follow it
+    if (CBZ.el && CBZ.el.flash) { CBZ.el.flash.classList.remove("go"); void CBZ.el.flash.offsetWidth; CBZ.el.flash.classList.add("go"); }
+    startEscort(msg || "BACK TO YOUR CELL", opts);
   }
   CBZ.haulToCell = haulToCell;
 
@@ -294,11 +297,17 @@
        quarter into HIGH, nothing at all into segregation. Skipping the wing
        shakedown here is what keeps the tier table's own rule TRUE rather than
        silently a half of a half. */
-    const transferring = tiered && !T.top() && !campaign;
+    // BELT + BRACES on the city's law (wanted.js: hands → cuff → ride before
+    // book-in): a TRANSFER is the end of an ARREST, so it requires the cuffs
+    // to actually be on. Every live caller reaches here through the escort
+    // blackout and IS cuffed; a future unrestrained caller degrades to the
+    // in-tier strike below, never to the card.
+    const restrained = !!(CBZ.playerChar && CBZ.playerChar.cuffed) || player.captureState === "cuffed";
+    const transferring = tiered && !T.top() && !campaign && restrained;
     const taken = transferring ? 0 : Math.floor((g.cigs || 0) / 2);
     if (taken > 0 && CBZ.econ && CBZ.econ.addCigs) CBZ.econ.addCigs(-taken);
 
-    if (transferring || (!tiered && strike >= 3 && !campaign)) {
+    if (transferring || (!tiered && strike >= 3 && !campaign && restrained)) {
       // TRANSFERRED TO MAX SECURITY — the run is over. Clean up any capture
       // theatrics first so the lose screen isn't hidden under the fade.
       escortT = 0; escorted = false;
@@ -405,15 +414,18 @@
     return CBZ.hurtPlayer(dmg, fromX, fromZ, opts || {});
   };
 
-  // cuffed-escort version: hands behind back, fade to black, wake in cell
-  let escortT = 0, escorted = false;
-  function startEscort() {
+  // cuffed-escort: hands behind back, fade to black, wake in cell. EVERY
+  // capture path ends here now (haulToCell routes through it), so the cuffs
+  // are always ON before applyStrike can ever say TRANSFERRED.
+  let escortT = 0, escorted = false, escortStrike = true;
+  function startEscort(msg, opts) {
     if (escortT > 0) return;
-    if (CBZ.killstreakBreak) CBZ.killstreakBreak("Cuffed");
+    escortStrike = !(opts && opts.strike === false);
+    if (CBZ.killstreakBreak) CBZ.killstreakBreak(msg || "Cuffed");
     escortT = 1.9; escorted = false;
     CBZ.playerChar.cuffed = true; player.stun = 2.2;
     setCaptureState("cuffed", 1.9);
-    tellToast("CUFFED — BACK TO YOUR CELL");
+    tellToast(msg || "CUFFED — BACK TO YOUR CELL");
     CBZ.guards.forEach((gd) => { gd.hunt = 0; gd.alert = 0; gd.investigate = null; gd.capCD = 0; });
   }
 
@@ -450,6 +462,10 @@
     player.subdue = (player.subdue || 0) + 1;
     if (player.subdue === 1) {
       player.stun = 1.85; setCaptureState("tased", 1.35);
+      // The guard visibly draws the shared taser, launches its twin probes and
+      // energizes the same body-pose signal used when the player fires one.
+      // Capture still owns stun/state; taserfx owns only what that event looks like.
+      if (CBZ.taserFx && CBZ.taserFx.actorTasePlayer) CBZ.taserFx.actorTasePlayer(gd);
       tellHint("TASED — you hit the floor!", 1.6);
       CBZ.sfx("tase"); CBZ.shake && CBZ.shake(0.55);
       if (CBZ.el && CBZ.el.flash) { CBZ.el.flash.classList.remove("go"); void CBZ.el.flash.offsetWidth; CBZ.el.flash.classList.add("go"); }
@@ -592,7 +608,18 @@
     if (sentCallT <= 0) {
       sentCallT = 1;
       if (CBZ.setObjective) {
-        CBZ.setObjective("Serving " + s + "s" + (sentCall ? " · " + sentCall : "") +
+        /* STRIKES BELONG HERE, NOT IN A TOAST.
+           Being caught is the one piece of prison bookkeeping that is both
+           invisible and permanent: three and you are shipped to max security.
+           It was announced by a popup you could be looking away from, and then
+           never shown again — so the fact that decides your run lived for two
+           seconds and then only inside a variable.
+           This line already rewrites every second on the readout the mode
+           always has, so the count rides it. A standing fact on a standing
+           surface, instead of a warning you had to catch. */
+        const st = CBZ.game.caughtCount || 0;
+        const strikes = st > 0 ? " · caught " + st + "/3" : "";
+        CBZ.setObjective("Serving " + s + "s" + strikes + (sentCall ? " · " + sentCall : "") +
           " — or find a keycard, a vent or a tunnel and don't wait.");
       }
     }
@@ -811,11 +838,16 @@
       if (fadeEl) fadeEl.style.opacity = (phase < 0.95 ? phase / 0.95 : Math.max(0, (1.9 - phase) / 0.95)).toFixed(2);
       if (!escorted && phase >= 0.95) {           // blackout — drop into the cell
         escorted = true;
-        // HAUL SITE 2 — the cuffed escort ends at the same real door
+        // THE HAUL SITE — every capture (and every drag) ends at the same
+        // real door; this blackout is the ONE place a strike can land, and
+        // the player is cuffed by construction when it does.
         if (!landInCell()) { player.pos.copy(CBZ.SPAWN); player.vy = 0; }
-        g.detection = 0; g.invuln = 2.0; g.caughtCount++;
-        applyStrike();                             // strike 3 ends the run here
-        if (confineT > 0) sealPlayerCell();
+        g.detection = 0; g.invuln = 2.0;
+        if (escortStrike) {
+          g.caughtCount++;
+          applyStrike();                           // strike 3 / transfer ends the run here
+          if (confineT > 0) sealPlayerCell();
+        }
       }
       if (escortT <= 0) {
         CBZ.playerChar.cuffed = false; player.subdue = 0; player.stun = 0;

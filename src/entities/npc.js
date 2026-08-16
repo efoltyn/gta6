@@ -24,6 +24,9 @@
 
     const n = {
       char: ch, group: ch.group, kind: "inmate", role: opts.role,
+      // Outfit assignment is authored at the actor, while the actual garment
+      // remains city/outfits.js + city/clothes.js's shared responsibility.
+      prisonOutfit: opts.prisonOutfit || "inmate",
       gang: opts.gang == null ? null : opts.gang,
       crewRole: opts.crewRole || "",
       personality: opts.personality || null,
@@ -88,7 +91,15 @@
       s === "pressurePlayer" || s === "tailPlayer" || s === "interceptThreat" || s === "diversion");
   }
 
-  function recoverStuck(n, dt, speed, gp) {
+  function recoverStuck(n, dt, speed, gp, routed) {
+    /* NOT WHILE A ROUTE OWNS HIM. `pickTarget` samples his `region`, and at
+       lights-out systems/prisonschedule.js pins that region to a 2.2 m box
+       around the mattress — which is on the far side of a cell wall from a man
+       still in the corridor, so the "recovery" aims him through it and undoes
+       the leg he is walking. A man who is genuinely stuck on a route is caught
+       by that file's own stall detector, which gives his rack away rather than
+       jiggling him at a wall. */
+    if (routed) { n._lastX = gp.x; n._lastZ = gp.z; n._stuckT = 0; return; }
     if (n._lastX != null) {
       const dx = gp.x - n._lastX, dz = gp.z - n._lastZ;
       const tx = n.target.x - gp.x, tz = n.target.z - gp.z;
@@ -184,7 +195,10 @@
     if (n._detailOn !== wantDetail) {       // toggle only on tier change
       n._detailOn = wantDetail;
       const det = n.char.detail;
-      if (det) for (let k = 0; k < det.length; k++) det[k].visible = wantDetail;
+      if (det) for (let k = 0; k < det.length; k++) {
+        const part = det[k];
+        part.visible = wantDetail && !(part.userData && part.userData._cbzDetailSuppressed);
+      }
       if (n._tag) n._tag.visible = false;
     }
 
@@ -242,9 +256,18 @@
     // patch of wing floor to stand count on (`_muster`); the brightness test
     // stays as the fallback for a build where that file is absent.
     const SCH = CBZ.prisonSchedule;
+    const CFG2 = CBZ.CONFIG || {};
+    const V2 = CFG2.PRISON_LIGHTSOUT_V2 !== false;
     const schedIn = SCH && SCH.enabled() ? SCH.indoors() : (CBZ.nightAmount || 0) > 0.72;
     const hasHousing = !!(n._muster || n._cellIdx != null);
-    const curfew = !!(CBZ.CONFIG && CBZ.CONFIG.NPC_SCHEDULES && n.role === "inmate" && hasHousing && !imp &&
+    /* A BED IS OWED TO A MAN, NOT TO HIS TRADE — the third file to learn it.
+       systems/prisonrest.js's §2 was widened to the factory predicate on
+       2026-08-15 and this gate was not, so the wing's dealer, its merchants
+       and its thieves were exempt from curfew and stood in the yard all night
+       with racks reserved for them. `kind` is stamped at line 26 on every body
+       this factory makes; the old `role` test stays as an OR. */
+    const convict = V2 ? (n.kind === "inmate" || n.role === "inmate") : n.role === "inmate";
+    const curfew = !!(CFG2.NPC_SCHEDULES && convict && hasHousing && !imp &&
         schedIn &&
         (!n.aiState || n.aiState === "wander" || n.aiState === "socialize"));
     if (curfew) {
@@ -254,25 +277,49 @@
         n._bedX = m ? m.x : (r ? r[0] + 0.5 + Math.random() * Math.max(1, r[1] - r[0] - 1) : gp.x);
         n._bedZ = m ? m.z : (r ? r[2] + 0.6 + Math.random() * 1.6 : gp.z);   // low-z edge = the cell-block side
       }
-      // A MAN WALKS THROUGH HIS UNIT'S DOOR, NOT THROUGH ITS wall. Cell-house
-      // beds route through the x[-3,3] throat; a south-dorm record publishes
-      // its own north entrance. Both destinations came from the same bed claim.
-      const outside = n._muster && SCH && (SCH.inAssignedHousing
-        ? !SCH.inAssignedHousing(n, gp.x, gp.z, -0.5)
-        : !SCH.inBlock(gp.x, gp.z, -0.5));
-      if (outside) {
-        const route = n._muster.route;
-        n.target.set(route ? route.x : 0, 0, route ? route.z : -9.8);
+      /* A MAN WALKS THROUGH HIS UNIT'S DOOR, NOT THROUGH ITS WALL — and one
+         door is not enough, because this mover is a straight line to `target`
+         and systems/actorcollide.js is explicit that it will bump a wall the
+         target is behind. systems/prisonschedule.js hands over an ORDERED
+         ROUTE (`_muster.way`) authored off the wing's own records: the man's
+         own lane across the throat, the cross-passage, his gallery or the
+         centre hall, his own doorway, and only then the mattress. He walks the
+         first leg he has not reached; the index is sticky so a body shoved
+         backwards does not re-walk the compound. */
+      const way = V2 && n._muster ? n._muster.way : null;
+      if (way && way.length) {
+        let wi = n._wayI | 0;
+        if (wi >= way.length) wi = way.length - 1;
+        while (wi < way.length - 1) {
+          const w = way[wi];
+          const wdx = w.x - gp.x, wdz = w.z - gp.z;
+          if (wdx * wdx + wdz * wdz > 1.1 * 1.1) break;      // not on this leg yet
+          wi++;
+        }
+        n._wayI = wi;
+        const w = way[wi];
+        n.target.set(w.x, 0, w.z);
+        const ldx = w.x - gp.x, ldz = w.z - gp.z;
+        // only the LAST leg settles him; pausing on a corridor leg is a plug
+        if (wi === way.length - 1 && ldx * ldx + ldz * ldz < 1.2) n.pause = Math.max(n.pause || 0, 2.0);
+      } else {
+        const outside = n._muster && SCH && (SCH.inAssignedHousing
+          ? !SCH.inAssignedHousing(n, gp.x, gp.z, -0.5)
+          : !SCH.inBlock(gp.x, gp.z, -0.5));
+        if (outside) {
+          const route = n._muster.route;
+          n.target.set(route ? route.x : 0, 0, route ? route.z : -9.8);
+        }
+        else n.target.set(n._bedX, 0, n._bedZ);
+        const bdx = n.target.x - gp.x, bdz = n.target.z - gp.z;
+        if (!outside && bdx * bdx + bdz * bdz < 1.2) n.pause = Math.max(n.pause || 0, 2.0); // settled in for the night
       }
-      else n.target.set(n._bedX, 0, n._bedZ);
-      const bdx = n.target.x - gp.x, bdz = n.target.z - gp.z;
-      if (!outside && bdx * bdx + bdz * bdz < 1.2) n.pause = Math.max(n.pause || 0, 2.0); // settled in for the night
     } else if (n._bedX != null && !schedIn) {
       n._bedX = n._bedZ = null;       // dawn — back to the day routine
     }
 
     speed = purposefulRoutine(n, dt, speed, gp, imp, curfew);
-    recoverStuck(n, dt, speed, gp);
+    recoverStuck(n, dt, speed, gp, curfew && V2 && !!(n._muster && n._muster.way));
 
     if (n.pause > 0) { n.pause -= dt; if (near) animChar(n.char, 0, dt); }
     else {
@@ -321,6 +368,7 @@
   // The Dealer — sells product (hangs out north of the armory)
   makeNpc({
     pos: [14, 18], region: [10, 17, 12, 24], role: "dealer", speed: 2.0,
+    prisonOutfit: "cap",
     tagText: "Dealer · product", tagColor: "#b07aff",
     skin: { legs: 0xff7a1a, torso: 0xff7a1a, collar: 0xff9747, arms: 0xff7a1a, skin: 0x6b4a32, cap: 0x222222, stripes: 0xc85c00, shoes: 0x111111 },
     data: {
@@ -436,7 +484,7 @@
       talk: ["Nobody gets jumped on my floor.", "We look out for our crew down here."] },
 
     // ===== CHAPEL (south-east) — the quiet wing =====
-    { name: "Brother Amos", tag: "Chapel", color: "#e7d8ff", pos: [33, 68], box: [25, 41, 60, 78], role: "inmate", neutral: true, speed: 1.3,
+    { name: "Brother Amos", tag: "Chapel", outfit: "chapel", color: "#e7d8ff", pos: [33, 68], box: [25, 41, 60, 78], role: "inmate", neutral: true, speed: 1.3,
       behavior: "pacifist", ratings: { fighting: 22, toughness: 40, cunning: 86, stealth: 60 }, skin: jump(0xd8a177, 0xdedede, { torso: 0x4a4f57, legs: 0x4a4f57, arms: 0x4a4f57, stripes: 0 }),
       talk: ["Peace, brother. Always peace.", "Even in here, grace finds a way."] },
     { name: "Deacon", tag: "Chapel", color: "#e7d8ff", pos: [37, 73], box: [28, 42, 62, 80], role: "inmate", neutral: true, speed: 1.7,
@@ -447,14 +495,14 @@
       talk: ["Let it go, son.", "Not here. Not in here."] },
 
     // ===== INFIRMARY (east) — the doc + the sick =====
-    { name: "Doc Mercer", tag: "Infirmary · meds", color: "#9fe6c0", pos: [33, 96], box: [26, 41, 88, 104], role: "merchant", neutral: true, speed: 1.4,
+    { name: "Doc Mercer", tag: "Infirmary · meds", outfit: "orderly", color: "#9fe6c0", pos: [33, 96], box: [26, 41, 88, 104], role: "merchant", neutral: true, speed: 1.4,
       behavior: "pacifist", ratings: { fighting: 28, toughness: 46, cunning: 90, stealth: 55 }, skin: jump(0xe8c39a, 0xcfcfcf, { torso: 0xeef2f5, arms: 0xeef2f5, legs: 0xeef2f5, collar: 0xeef2f5, stripes: 0 }),
       data: { name: "Doc Mercer", pool: "goods", tip: "Bad cut? I've patched worse for less.",
         talk: ["I keep folks breathing in here.", "Painkillers for cigs. Don't tell the Warden."] } },
     { name: "Patient Zero", tag: "Infirmary", color: "#9fe6c0", pos: [29, 100], box: [25, 40, 90, 104], role: "inmate", neutral: true, speed: 1.5,
       behavior: "unpredictable", ratings: { fighting: 22, toughness: 26, speed: 30 }, skin: jump(0xd0b08a, 0x6a6a6a),
       talk: ["...is it cold in here?", "They said I'd be out by spring. Which spring?"] },
-    { name: "Orderly Pratt", tag: "Infirmary", color: "#9fe6c0", pos: [37, 100], box: [28, 42, 90, 104], role: "inmate", neutral: true, speed: 1.9,
+    { name: "Orderly Pratt", tag: "Infirmary", outfit: "orderly", color: "#9fe6c0", pos: [37, 100], box: [28, 42, 90, 104], role: "inmate", neutral: true, speed: 1.9,
       behavior: "defensive", ratings: { fighting: 56, toughness: 64 }, skin: jump(0xc08a5a, 0x2a2018, { torso: 0xeef2f5, arms: 0xeef2f5 }),
       talk: ["No rough stuff near the beds.", "I'll sedate the next one who swings."] },
 
@@ -504,7 +552,7 @@
   ROSTER.forEach((m) => makeNpc({
     pos: m.pos, region: m.box, role: m.role, speed: m.speed,
     gang: m.gang == null ? null : m.gang, forceNeutral: !!m.neutral,
-    behavior: m.behavior, ratings: m.ratings,
+    behavior: m.behavior, ratings: m.ratings, prisonOutfit: m.outfit || "inmate",
     tagText: m.tag, tagColor: m.color, skin: m.skin,
     data: m.data || {
       name: m.name,
@@ -524,7 +572,7 @@
 
      JAIL_CROWD is the same kind of body as MASS_CROWD — an anonymous inmate
      with no name, no history and no part in the story — so it answers to the
-     same fact, and for the same reason: the wing has thirteen cells, and the
+     same fact, and for the same reason: the wing has twenty-five cells, and the
      count that put ~207 men in front of them could not see that. Load order
      makes it exact (index.html: cellblock 456 -> this file 535): the wing is
      built, the named ROSTER above is already on the floor, and what is left is

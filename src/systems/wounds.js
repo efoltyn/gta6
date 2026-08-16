@@ -921,7 +921,20 @@
       s0 = 0.045 + 0.032 * cal;
       if (pick.region === "head") s0 *= 1.15;
       if (kind === "bruise") {
-        const b = s0 * 2.2;
+        /* A BRUISE WAS FOUR TIMES WIDER THAN A BULLET HOLE. (OWNER: "the
+           bruise is way too big too.")
+
+           Measured on the 0.60-unit adult head this file already sizes
+           everything against: `s0 * 2.2` with cal 1 gives a 0.169 patch, which
+           is 28% of the head — while the bullet path a few lines up was
+           deliberately tuned DOWN to 0.043 across, "1 face in 14", i.e. 7%.
+           A fist left a mark four times the width of a gunshot.
+
+           A contusion IS broader than a puncture, so this stays the widest
+           wound in the file — just not by a factor of four. 0.95 puts it near
+           0.073, about 1 face in 8: plainly bigger than a bullet hole, plainly
+           a mark rather than a splodge. The jitter is kept so no two match. */
+        const b = s0 * 0.95;
         sx = b * (0.85 + Math.random() * 0.3); sy = b * (0.7 + Math.random() * 0.3);
       } else if (kind === "blade") {
         sx = s0 * (0.45 + Math.random() * 0.2); sy = s0 * (1.7 + Math.random() * 0.4);

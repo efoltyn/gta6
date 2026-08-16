@@ -61,6 +61,41 @@
     rocketAmmoType: "standard",
   };
 
+  // One transition record is shared with holsterprops.js. Gameplay changes
+  // weapon state immediately; the record lets the first-person view dip the
+  // old gun briefly and lets the third-person body carry that same gun all the
+  // way to its physical back/hip mount instead of teleporting it there.
+  let weaponTransitionSeq = 0;
+  let fpSwapT = 0, fpSwapDur = 0.34, fpSwapFrom = null, fpSwapTo = null, fpSwapP = 1;
+  function markWeaponTransition(from, to, reason) {
+    if (from === to) return;
+    const now = (window.performance && performance.now) ? performance.now() : Date.now();
+    const rec = CBZ.weaponTransition = {
+      seq: ++weaponTransitionSeq,
+      from: from || null,
+      to: to || null,
+      reason: reason || "switch",
+      mode: CBZ.game && CBZ.game.mode,
+      at: now,
+    };
+    fpSwapT = fpSwapDur;
+    fpSwapFrom = rec.from;
+    fpSwapTo = rec.to;
+    fpSwapP = 0;
+    try {
+      document.dispatchEvent(new CustomEvent("cbz-weapon-transition", { detail: rec }));
+    } catch (_) {}
+  }
+  CBZ.weaponTransitionState = function () { return CBZ.weaponTransition || null; };
+  CBZ.fpsHolsterVisualState = function () {
+    return {
+      active: fpSwapT > 0 && !!fpSwapFrom && !fpSwapTo,
+      from: fpSwapFrom,
+      to: fpSwapTo,
+      progress: fpSwapP,
+    };
+  };
+
   // ---- reusable math temporaries ----
   const eye = new THREE.Vector3();
   const fwd = new THREE.Vector3();
@@ -144,19 +179,33 @@
   CBZ.fpsRocketAmmoType = function () { return fps.rocketAmmoType; };
   CBZ.fpsSetRocketAmmoType = setRocketAmmoType;
   CBZ.fpsCycleRocketAmmoType = cycleRocketAmmoType;
-  // HOLSTER (city-only de-escalation): when the player holsters, armed() reads
-  // FALSE so the EXISTING fists viewmodel shows and every cityHasGun()/witness/
-  // wanted/panic system automatically treats the player as unarmed — the
-  // de-escalation comes free from this single gate. Default false (undefined =
-  // not holstered). Jail/survival are untouched (the holster flag is city-only).
-  CBZ.cityHolster = function (on) {
-    if (CBZ.game.mode !== "city") return;
-    CBZ.game.cityHolstered = (on === undefined) ? !CBZ.game.cityHolstered : !!on;
+  // HOLSTER / FISTS. City keeps its de-escalation flag; Prison Escape gets the
+  // same gate because key 1 is a permanent empty-hands slot. Ownership and the
+  // selected gun remain intact while armed() returns false, so drawing it again
+  // is a reversible physical action rather than deleting/re-adding inventory.
+  function holstered() {
+    if (CBZ.game.mode === "city") return !!CBZ.game.cityHolstered;
+    if (CBZ.game.mode === "escape") return !!CBZ.game.prisonHolstered;
+    return false;
+  }
+  CBZ.playerHolster = function (on) {
+    const mode = CBZ.game.mode;
+    if (mode !== "city" && mode !== "escape") return false;
+    const old = armed() ? CBZ.currentWeaponId : null;
+    const key = mode === "city" ? "cityHolstered" : "prisonHolstered";
+    CBZ.game[key] = (on === undefined) ? !CBZ.game[key] : !!on;
+    const next = armed() ? CBZ.currentWeaponId : null;
+    if (old !== next) markWeaponTransition(old, next, next ? "draw" : "holster");
     setAmmoHud();
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    return true;
+  };
+  CBZ.cityHolster = function (on) {
+    if (CBZ.game.mode !== "city") return false;
+    return CBZ.playerHolster(on);
   };
   function armed() {
-    if (CBZ.game.mode === "city" && CBZ.game.cityHolstered) return false;   // holstered = read as unarmed (fists show, de-escalates)
+    if (holstered()) return false;   // holstered = read as unarmed (fists show; city also de-escalates)
     return availableIndices().length > 0 && !(CBZ.game.mode === "city" && CBZ.game.cityMeleeWeapon);
   }
   function shoulderActive() {
@@ -227,6 +276,7 @@
 
   function resetWeapons() {
     if (CBZ.game.mode === "city") CBZ.game.cityHolstered = false;   // a fresh run / respawn is never holstered (PROG also zeroes it)
+    if (CBZ.game.mode === "escape") CBZ.game.prisonHolstered = false;
     fps.weapon = CBZ.currentWeaponId ? Math.max(0, weaponIndex(CBZ.currentWeaponId)) : 0;
     normalizeWeapon();
     fps.rounds = WEAPONS.map((w, i) => magOf(i));
@@ -239,6 +289,7 @@
     recoil = 0; recoilSide = 0; bloom = 0; recoilHold = 0;
     recoilPitch = 0; recoilYaw = 0; shotsInBurst = 0; sinceShot = 99;
     fpsHipFov = 0;
+    fpSwapT = 0; fpSwapP = 1; fpSwapFrom = fpSwapTo = null;
     hitMarkerT = 0;
     if (hitMarker && hitMarker.wrap) hitMarker.wrap.style.display = "none";
     syncAmmo();
@@ -281,6 +332,7 @@
   const mat = {
     dark: new THREE.MeshLambertMaterial({ color: 0x161a20 }),
     black: new THREE.MeshLambertMaterial({ color: 0x080a0c }),
+    bore: new THREE.MeshLambertMaterial({ color: 0x010203 }),
     steel: new THREE.MeshLambertMaterial({ color: 0x48515c }),
     worn: new THREE.MeshLambertMaterial({ color: 0x747f8c }),
     tan: new THREE.MeshLambertMaterial({ color: 0x8b6a42 }),
@@ -388,6 +440,20 @@
     g.addColorStop(0.34, "rgba(255,210,90,.9)");
     g.addColorStop(0.68, "rgba(255,110,34,.45)");
     g.addColorStop(1, "rgba(255,60,20,0)");
+    x.fillStyle = g; x.fillRect(0, 0, 48, 48);
+    return new THREE.CanvasTexture(c);
+  })();
+  // A taser has a tight blue-white cartridge snap, not burning propellant.
+  // Keep a separate map so tinting the shared orange firearm texture cannot
+  // turn its yellow/red pixels into a muddy pseudo-electric flash.
+  const taserFlashTex = (function () {
+    const c = document.createElement("canvas"); c.width = c.height = 48;
+    const x = c.getContext("2d");
+    const g = x.createRadialGradient(24, 24, 1, 24, 24, 23);
+    g.addColorStop(0, "rgba(255,255,255,1)");
+    g.addColorStop(0.28, "rgba(165,235,255,.96)");
+    g.addColorStop(0.66, "rgba(50,155,255,.46)");
+    g.addColorStop(1, "rgba(20,70,255,0)");
     x.fillStyle = g; x.fillRect(0, 0, 48, 48);
     return new THREE.CanvasTexture(c);
   })();
@@ -1379,7 +1445,9 @@
     _stripT = 0.2;
     const inv = CBZ.weaponInventory || [];
     const sig = CBZ.game.mode + "|" + CBZ.game.state + "|" + inv.join(",") + "|" +
-      (CBZ.currentWeaponId || "") + "|" + (CBZ.game.cityMeleeWeapon || "");
+      (CBZ.currentWeaponId || "") + "|" + (CBZ.game.cityMeleeWeapon || "") + "|" +
+      (CBZ.game.prisonHolstered ? "fists" : "armed") + "|" +
+      (CBZ.prisonWeaponLoadout ? CBZ.prisonWeaponLoadout().join(",") : "");
     if (sig === _stripSig) return;
     _stripSig = sig;
     try { setWeaponStrip(); } catch (e) {}
@@ -1390,8 +1458,14 @@
     syncAmmo();
     // city/life mode shows ammo whenever you're holding a gun (third-person too),
     // not only while aiming — you always want to see your rounds.
-    if ((fps.active || shoulderActive() || CBZ.game.mode === "city") && armed()) {
-      const w = weapon();
+    // A MELEE WEAPON HAS NO MAGAZINE. Without this test the shank reads
+    // "0 / 0 · 0" over the crosshair — an ammo counter for a thing that has
+    // never had ammo, which is exactly the kind of gun-shaped assumption that
+    // let a blade be a pistol in the first place. The weapon strip below still
+    // runs, so the chip and its icon are unaffected.
+    const wAmmo = weapon();
+    if ((fps.active || shoulderActive() || CBZ.game.mode === "city") && armed() && !(wAmmo && wAmmo.melee)) {
+      const w = wAmmo;
       ammoEl.style.display = "block";
       // City play is always instrumentation-only.  This cannot depend on a
       // campaign mission being active: sandbox/side-job weapons were still
@@ -1504,7 +1578,10 @@
     }
     if (shared) {
       styleStrip();
-      const html = CBZ.weaponSlotsHTML({ icons: true });
+      const html = CBZ.weaponSlotsHTML({
+        icons: true,
+        prisonLoadout: CBZ.game.mode === "escape",
+      });
       stripEl.className = "panel slots";
       stripEl.innerHTML = html;
       stripEl.style.display = html ? "flex" : "none";
@@ -2215,6 +2292,22 @@
     if (lethalHeadshot) a.hp = 0;
     else a.hp -= dmg;
 
+    // A surviving prison target now enters the SAME directional body-impulse
+    // contract as a surviving city target. Previously jail rounds exposed only
+    // root knockback, then reactions.js guessed a 0.55-rad torso hinge from the
+    // player's position—the torch hand folded through the face and the real ray
+    // direction was lost. Keep the established root shove below; this record
+    // supplies the missing direction/energy to the pose without changing travel.
+    if (!w.nonlethal && !lethalHeadshot && a.hp > 0 && CBZ.body && CBZ.body.hit) {
+      const cal = caliber(w);
+      const force = (3.0 + ((w.knock || 1) * 2.7)) * (0.72 + cal * 0.28) * Math.sqrt(Math.max(0.25, fall));
+      const dir = shotDir ? { x: shotDir.x, y: shotDir.y, z: shotDir.z } : null;
+      CBZ.body.hit(a, {
+        fromX: CBZ.player.pos.x, fromZ: CBZ.player.pos.z,
+        dir: dir, force: force, cal: cal, wkey: w.key,
+        dist: hit.dist, point: hit.point, byPlayer: true,
+      });
+    }
     if (CBZ.knockback) CBZ.knockback(a, CBZ.player.pos.x, CBZ.player.pos.z, w.knock * (hit.head ? 1.25 : 1));
     if (guardish) a.hunt = 3;
     else if (CBZ.provokeGang) CBZ.provokeGang(a, 12);
@@ -2312,6 +2405,22 @@
     else if (CBZ.flashHint) CBZ.flashHint(fps.reserve > 0 ? dry : "No reserve ammo", 1.0);
   }
 
+  /* A THRUST WITH THE DRAWN BLADE. Its own cooldown (`shotCD`, the same field
+     the guns use — one weapon rhythm, not two) and its own reach, both read
+     from the weapon row so the shank's speed is tuning data and not a constant
+     buried in a shooter. The first-person hand swings silently: the stab's
+     audio is the hit, and `triggerFistPunch`'s whoosh is a bare-knuckle cue. */
+  function meleeStrike(w) {
+    if (shotCD > 0) return;
+    shotCD = w.interval || 0.42;
+    const hit = aimedActor(w.range || MELEE);
+    triggerFistPunch(true);
+    const strike = CBZ.prisonStab || CBZ.punch;
+    if (!strike) { CBZ.sfx && CBZ.sfx("step"); return; }
+    const r = strike(hit && hit.actor);
+    if (r && r.msg) { if (CBZ.jailTell) CBZ.jailTell.hint(r.msg, 2.4); else if (CBZ.flashHint) CBZ.flashHint(r.msg, 2.4); }
+  }
+
   function shoot() {
     if (!(fps.active || shoulderActive()) || CBZ.game.state !== "playing" || CBZ.player.dead || (CBZ.player.stun || 0) > 0 || CBZ.player.driving || CBZ.player._swim) return;
     if (!armed()) {
@@ -2329,6 +2438,19 @@
     }
 
     const w = weapon();
+    /* ---- MELEE WEAPONS DO NOT FIRE -------------------------------------
+       The divert happens HERE, above every line that assumes a magazine:
+       the mod lookups, the shot cooldown, the reload interrupt, the dry
+       click, the round decrement, the recoil ladder, the tracer. A shank
+       has none of those and faking them (a 1-round mag that "reloads")
+       is how a melee weapon ends up behaving like a very short gun.
+
+       Everything a thrust needs already exists three lines above, in the
+       unarmed branch: aimedActor() finds the man in front of you and
+       CBZ.punch lands on the animation's drive frame. The stab is the same
+       two calls with the blade profile — systems/combat.js owns what a
+       blade does; this file only owns the trigger. */
+    if (w && w.melee) { meleeStrike(w); return; }
     // ---- attached weapon mods (city/gunmods.js): a suppressor kills the flash
     // + muffles the report, a muzzle brake / grip settles the recoil, a grip /
     // laser tightens the cone. All no-ops (mul 1, supp false) when nothing's on
@@ -2394,17 +2516,20 @@
     pumpT = w.pump ? 1 : pumpT;
 
     // a suppressor chokes the muzzle flash down to a dim spit and clips the tail
-    const flashScale = w.flash * (0.9 + rng() * 0.28) * (modSupp ? 0.2 : 1);
-    const flashT = modSupp ? 0.02 : (w.key === "shotgun" ? 0.065 : 0.04);
+    const taserShot = w.key === "taser";
+    const flashScale = (taserShot ? 0.14 : w.flash) * (0.9 + rng() * 0.28) * (modSupp ? 0.2 : 1);
+    const flashT = taserShot ? 0.07 : (modSupp ? 0.02 : (w.key === "shotgun" ? 0.065 : 0.04));
     if (fps.active) {
       const activeModel = weaponModels[fps.weapon];
       if (!setMuzzleSpriteFromModel(muzzle, activeModel)) muzzle.position.copy(activeModel.userData.muzzle);
+      muzzle.material.map = taserShot ? taserFlashTex : flashTex;
       muzzle.scale.setScalar(flashScale);
       muzzle.rotation.z = rng() * Math.PI * 2;
       muzzle.visible = flashScale > 0.02;
       muzzleT = flashT;
     } else {
       worldMuzzle.position.copy(muzzleWorld(tmp2));
+      worldMuzzle.material.map = taserShot ? taserFlashTex : flashTex;
       worldMuzzle.scale.setScalar(flashScale * 1.2);
       worldMuzzle.material.opacity = 1;
       worldMuzzle.visible = flashScale > 0.02;
@@ -2423,7 +2548,8 @@
     CBZ.shake && CBZ.shake(w.shake);
     CBZ.doHitstop && CBZ.doHitstop(w.key === "shotgun" ? 0.028 : 0.014);
     if (CBZ.game.mode !== "city") CBZ.reportCrime && CBZ.reportCrime(w.heat, { type: w.nonlethal ? "taser" : "gunfire", actorRole: CBZ.game.role, weapon: w.key });
-    ejectCasing(w);
+    // A taser expends a front cartridge; there is no hot brass case to eject.
+    if (!taserShot) ejectCasing(w);
 
     const origin = muzzleWorld(tmp2);
     // Two-ray shoulder aim: camera ray establishes intent, then the actual ray
@@ -2853,7 +2979,10 @@
       // round's real flight time, so a 200m headshot doesn't feel instant
       // without touching the deterministic hit-resolution timing at all.
       if (i < 5 || pellets === 1) {
-        if (sniperShot.delay > 0) deferCall(sniperShot.delay, function () { fireTracer(origin, end, w.tracer, w.key === "shotgun" ? 0.045 : 0.055); });
+        if (w.key === "taser" && CBZ.taserFx && CBZ.taserFx.fire) {
+          // Twin physical probe wires + body arc replace the firearm tracer.
+          CBZ.taserFx.fire(origin, end, { target: hit.actor || null });
+        } else if (sniperShot.delay > 0) deferCall(sniperShot.delay, function () { fireTracer(origin, end, w.tracer, w.key === "shotgun" ? 0.045 : 0.055); });
         else fireTracer(origin, end, w.tracer, w.key === "shotgun" ? 0.045 : 0.055);
       }
       // city: a window in this pellet's path shatters (glass never blocks the
@@ -2907,7 +3036,9 @@
         const r = gunHit(hit, w, shotDir);
         head = head || r.head;
         down = down || r.down;
-        spawnImpact(hit.point, !w.nonlethal, w.key === "shotgun", cal);
+        // taserfx owns the contact glow/arcs; the generic round impact is a
+        // large white bullet spark that visually erases the two probe contacts.
+        if (w.key !== "taser") spawnImpact(hit.point, !w.nonlethal, w.key === "shotgun", cal);
         // One small flesh response per round/pellet. The death path already emits
         // its single full gore event; calling that here as well used to create a
         // pool-sized explosion for every pellet in a shotgun blast.
@@ -3091,8 +3222,10 @@
     if (av.length <= 1) return;          // nothing to switch to: stay silent, no sfx churn
     switchCD = 0.22;
     const pos = Math.max(0, av.indexOf(fps.weapon));
+    const oldId = CBZ.currentWeaponId || weaponIdOf(fps.weapon);
     fps.weapon = av[(pos + delta + av.length) % av.length];
     CBZ.currentWeaponId = weaponIdOf(fps.weapon);
+    markWeaponTransition(oldId, CBZ.currentWeaponId, "switch");
     fps.reloading = 0;
     // per-weapon draw time: a heavy rifle (AK equip 0.5s) takes a beat to
     // shoulder before it can fire — switching itself stays instant.
@@ -3116,13 +3249,23 @@
   // WHY: scrolling/Q through a growing arsenal is clumsy; an RPG, an AK and a
   // sidearm should each be one keypress (GTA/CS muscle memory). 0-based slot.
   function selectWeaponSlot(slot) {
+    const oldId = armed() ? (CBZ.currentWeaponId || weaponIdOf(fps.weapon)) : null;
     if (CBZ.game.mode === "city") CBZ.game.cityHolstered = false;   // drawing a gun un-holsters (re-arms)
+    if (CBZ.game.mode === "escape") CBZ.game.prisonHolstered = false;
     const av = availableIndices();
     if (slot < 0 || slot >= av.length) return false;
     const idx = av[slot];
-    if (idx === fps.weapon) return true;
+    if (idx === fps.weapon) {
+      const sameId = weaponIdOf(idx);
+      CBZ.currentWeaponId = sameId;
+      markWeaponTransition(oldId, sameId, oldId ? "select" : "draw");
+      setAmmoHud();
+      if (CBZ.game.mode === "city" && CBZ.cityHudDirty) CBZ.cityHudDirty();
+      return true;
+    }
     fps.weapon = idx;
     CBZ.currentWeaponId = weaponIdOf(fps.weapon);
+    markWeaponTransition(oldId, CBZ.currentWeaponId, oldId ? "switch" : "draw");
     fps.reloading = 0;
     shotCD = Math.max((WEAPONS[fps.weapon] && WEAPONS[fps.weapon].equip) || 0, Math.min(shotCD, 0.08));  // heavy guns take a beat to shoulder
     syncAmmo();
@@ -3339,6 +3482,13 @@
   CBZ.fpsWeaponIdOf = weaponIdOf;
   CBZ.fpsWeaponCount = function () { return WEAPONS.length; };
   CBZ.fpsWeaponIndex = function () { return fps.weapon; };
+  // DO YOU ACTUALLY OWN A GUN — not "is first person on". fps.weapon is only
+  // ever an INDEX into WEAPONS; it is 0 (the first slot) on a player who has
+  // never picked anything up, so reading it as a weapon says "armed" to an
+  // empty-handed inmate. availableIndices() is the same ownership test the
+  // swap/reload paths already normalise against, so this cannot drift from
+  // what those verbs would actually do.
+  CBZ.fpsHasWeapon = function () { return availableIndices().length > 0; };
   // re-seed the current mag/reserve display after a mod purchase changes capacity
   CBZ.fpsResyncAmmo = function () { syncAmmo(); setAmmoHud(); };
   // TRUE while the player is HOLDING RMB to aim down sights, with a gun out and
@@ -3571,6 +3721,11 @@
     if (shotCD > 0) shotCD = Math.max(0, shotCD - dt);
     if (dryCD > 0) dryCD = Math.max(0, dryCD - dt);
     if (switchCD > 0) switchCD = Math.max(0, switchCD - dt);
+    if (fpSwapT > 0) {
+      fpSwapT = Math.max(0, fpSwapT - dt);
+      fpSwapP = 1 - fpSwapT / fpSwapDur;
+      if (fpSwapT <= 0) fpSwapP = 1;
+    }
 
     // Q = swap gun, polled at frame rate. A switch only fires on a fresh
     // press (key was up last frame, down now) and only when off cooldown,
@@ -3824,7 +3979,13 @@
       // First-person: the player body is hidden, so the 3PS aim/carry poses
       // must not linger on the rig (animChar reads these flags). Clear here.
       if (CBZ.playerChar) { CBZ.playerChar.aimingPose = false; CBZ.playerChar.carryPose = false; }
-      if (armed()) {
+      // A holster flips the gameplay gate immediately, but its outgoing gun
+      // must begin from the armed carry pose. Starting it from the fist pose
+      // pulled a long gun inward/UP before the stow offsets ran, which read as
+      // a draw. Keep the old viewmodel on its actual carry baseline until it
+      // has dipped out, then reveal the fist.
+      const fpStowingGun = fpSwapT > 0 && !!fpSwapFrom && !fpSwapTo && fpSwapP < 0.80;
+      if (armed() || fpStowingGun) {
         // FPS_ADS_SIGHTS: while aiming (and NOT down a real optic), ease the
         // viewmodel from its corner carry (0.36,-0.34) to a centered, down-the-
         // sights pose (0.00,-0.05). Only X/Y shift — Z is held at the carry
@@ -3871,6 +4032,22 @@
         vm.position.set(0.12 + bobX * 0.4, -0.30 + bobY * 0.5 - vmPunch * 0.05, -0.66 - vmPunch * 0.05);
         vm.rotation.x = vmPunch * 0.10;
         vm.rotation.z = -bobX * 0.10;
+      }
+      // First person gets only the near-field portion of a holster: the old
+      // gun dips out below/right, then the fist rises. The full hand-to-mount
+      // travel belongs to the visible third-person body in holsterprops.js.
+      if (fpStowingGun) {
+        const k = fpSwapP / 0.80;
+        const e = k * k * (3 - 2 * k);
+        vm.position.x += 0.25 * e;
+        vm.position.y -= 0.65 * e;
+        vm.position.z -= 0.16 * e;
+        vm.rotation.x += 0.30 * e;
+        vm.rotation.z += 0.20 * e;
+      } else if (fpSwapT > 0 && fpSwapTo) {
+        const dip = Math.sin(Math.PI * fpSwapP) * 0.08;
+        vm.position.y -= dip;
+        vm.rotation.x += dip * 0.9;
       }
       carriedGun.visible = false;
     } else {
@@ -3972,12 +4149,13 @@
     if (sg && sg.userData.pump) sg.userData.pump.position.z = sg.userData.pumpBaseZ + Math.sin(pumpT * Math.PI) * 0.22;
     const carriedSg = carriedModels[1];
     if (carriedSg && carriedSg.userData.pump) carriedSg.userData.pump.position.z = carriedSg.userData.pumpBaseZ + Math.sin(pumpT * Math.PI) * 0.22;
-    gun.visible = armed();
-    fists.visible = !armed();
+    const fpStowingGun = fps.active && fpSwapT > 0 && !!fpSwapFrom && !fpSwapTo && fpSwapP < 0.80;
+    gun.visible = armed() || fpStowingGun;
+    fists.visible = !armed() && !fpStowingGun;
 
     if (muzzleT > 0) {
       muzzleT -= dt;
-      muzzle.material.opacity = Math.max(0, muzzleT / (w.key === "shotgun" ? 0.065 : 0.04));
+      muzzle.material.opacity = Math.max(0, muzzleT / (w.key === "taser" ? 0.07 : (w.key === "shotgun" ? 0.065 : 0.04)));
       if (muzzleT <= 0) muzzle.visible = false;
     }
 

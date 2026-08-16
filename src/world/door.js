@@ -94,8 +94,16 @@
 
   CBZ.door = door;
 
-  CBZ.closeDoor = function () {
-    door.open = false; door.t = 0; door.mesh.position.y = door.closedY;
+  /* closeDoor(soft) — `soft` is the ONE addition: with it, the collider, the
+     reader lamp and the open flag change on this frame exactly as before, but
+     the leaf is left where it is for systems/interactions.js's ramp to lower
+     at the authored 1.6 rate. Callers that pass nothing (systems/lockdown.js's
+     slam, systems/state.js's reset, the storyboards) get the historic
+     teleport, byte for byte — a lockdown SHOULD snap and a reset must not
+     animate behind the fade. */
+  CBZ.closeDoor = function (soft) {
+    door.open = false;
+    if (!soft) { door.t = 0; door.mesh.position.y = door.closedY; }
     door.readerLight.material.color.setHex(0xff3b3b);
     door.readerLight.material.emissive.setHex(0xff0000);
     if (CBZ.colliders.indexOf(door.collider) === -1) CBZ.colliders.push(door.collider);
@@ -160,4 +168,31 @@
     if (door.blown) return;
     return _close.apply(this, arguments);
   };
+
+  /* ---- AND A WAY TO SHUT IT (systems/interactions.js's CBZ.prisonDoors) ----
+     One declaration into the shared registry; the tap path and the polled [E]
+     both end in the set() below, so this file still owns the only code that
+     moves the leaf. The credential is `hasKey` — the exact condition
+     interactions.js's approach-open tests — because a door you could not have
+     opened is not a door you may close. `autoR` is 4 m: that open test is
+     `ddx*ddx + ddz*ddz < 16` on the same point. */
+  (CBZ._prisonDoorSpecs || (CBZ._prisonDoorSpecs = [])).push({
+    id: "prison-yard-door", label: "the yard checkpoint", autoR: 4.0,
+    at: function () { return { x: 0, y: 1.8, z: -8 }; },
+    pick: function () { return [mesh]; },
+    col: function () { return door.collider; },
+    isOpen: function () { return !!door.open; },
+    permanent: function () { return !!door.blown; },
+    canUse: function () { return !!(CBZ.game && CBZ.game.hasKey); },
+    set: function (v) {
+      if (v) { CBZ.openDoor(); return !!door.open; }
+      CBZ.closeDoor(true);
+      // the existing 85 dB door_close cue, from the leaf's own coordinates —
+      // CBZ.openDoor's counterpart cue is CBZ.sfx because it fires at arm's
+      // length; a door you shut is likewise yours, but the slab is 5.7 m of
+      // steel across the yard from anyone else, so it speaks from where it is.
+      if (CBZ.worldSfx) CBZ.worldSfx("door_close", 0, -8, { ref: 12 });
+      return !door.open;
+    },
+  });
 })();

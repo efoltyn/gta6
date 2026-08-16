@@ -264,8 +264,20 @@
       // HEAVY charges defeat what a single hit cannot. carveHole refuses a wall
       // thicker than 0.9 m by default because a single rocket genuinely should
       // not open a pier; enough accumulated mass should, and says so in pounds.
+      /* A WALKABLE ROW MUST PRODUCE A WALKABLE HOLE. The table's own word for
+         the 5 lb row is "one man" — but the carve used to be r≈0.5 around the
+         charge's own seat, and a charge is seated at chest height (~1.2 m):
+         a 1.0 m window whose 0.7 m sill STEP_UP (0.45, systems/physics.js)
+         refuses. FM 90-10-1's hole is one a man MOVES THROUGH, so the rows
+         the table itself marks walkable open to the floor and to head
+         height, and never narrower than a body (player capsule r 0.38); the
+         2 lb mousehole stays the mousehole the doctrine says it is. */
       const rec = CBZ.cityCarveWall(x, y, z, spec.holeR, {
-        search: 2.4, gapW: spec.holeR * 2, maxThick: total >= TABLE[3].lb ? 1.6 : (total >= TABLE[2].lb ? 1.2 : 0.9),
+        search: 2.4,
+        gapW: spec.walkable ? Math.max(spec.holeR * 2, 1.3) : spec.holeR * 2,
+        v0: spec.walkable ? y - 1.35 : undefined,
+        v1: spec.walkable ? Math.max(y + 0.9, 2.05) : undefined,
+        maxThick: total >= TABLE[3].lb ? 1.6 : (total >= TABLE[2].lb ? 1.2 : 0.9),
       });
       if (rec) {
         audit.holes++;
@@ -281,6 +293,11 @@
            mass keeps working through the stack until there is nothing left to
            open. That is exactly "with enough C4, actually blowing up". */
         const fr = CBZ.cityFracture;
+        // this carve OWNS the opening — drop the room-sized carve the same
+        // blast deferred a frame ago (crashfx's self-coupled blastAt), or it
+        // re-resolves next frame and eats a flank/neighbour (see fracture.js
+        // cancelPendingNear).
+        if (fr && fr.cancelPendingNear) { try { fr.cancelPendingNear(x, z, 2.5); } catch (e) {} }
         if (fr && fr._adopt) { try { fr._adopt(rec, spec.holeR); } catch (e) {} }
       }
     } catch (e) {}

@@ -810,6 +810,7 @@
   // SAME orders as the Situation Room; no office-only state is introduced.
   const OFFICE_PROP_KEYS = ["cabinet-bureau", "oval-address", "oval-pardon"];
   let officeZonesWired = false;
+  let officeZoneCount = 0;
   function officeProp(key) {
     if (!CBZ.presidentInteriorProps) return null;
     let list = [];
@@ -858,6 +859,7 @@
           },
         }],
       });
+      officeZoneCount++;
     });
     if (CBZ.interactions.describe) {
       try { CBZ.interactions.describe("presprop", function () { return { label: "Presidential desk", note: "a physical state order" }; }); } catch (e) {}
@@ -1665,6 +1667,8 @@
         orderProps: (IA.orderProps || []).concat(ROOM.pads.map(function (p) { return p.key; })),
         architecture: architecture,
       },
+      officeOrderProps: IA.orderProps ? IA.orderProps.length : 0,
+      officeOrderZones: officeZoneCount,
     };
   }
   CBZ.presidencyAudit = audit;

@@ -269,8 +269,11 @@
       {
         id: "R6", name: "Southgate Spur", width: 24, lanesPerDir: 3, fillet: 60,
         pts: [
-          // -280, not -240: clears the Goldspire Civic Campus, whose minX is
-          // -230 after the spread. The old x cut its western edge.
+          // -280, not -240: originally chosen to clear the Goldspire Civic
+          // Campus (minX -230 after the spread), which the old x cut through.
+          // The campus was deleted 2026-08-15; the spur stays at -280 because
+          // every deck T, fillet and dock length downstream is solved off it —
+          // moving it now would reroute the network for no gain.
           { x: -280, z: southZ - HALF },                 // T flush onto Route 1's south deck
           { x: -280, z: foundryRowZ + HALF },            // T flush onto Foundry Row's deck
         ],

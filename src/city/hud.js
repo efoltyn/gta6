@@ -1169,6 +1169,38 @@
     const melee = CBZ.game.cityMeleeWeapon || null;   // Bat/Knife — held melee, not a gun
     const heldGun = !melee && CBZ.currentWeaponId ? CBZ.currentWeaponId : null;
     let html = "";
+
+    // Prison Escape is the one fixed rail: [1] is always fists and [2]..[0]
+    // are the player's rearrangeable loadout. Empty cells stay visible so the
+    // number is a physical place in the stash, not an acquisition-order label
+    // that slides every time a gun is picked up.
+    if (opts.prisonLoadout) {
+      const keys = CBZ.PRISON_WEAPON_SLOT_KEYS || ["2", "3", "4", "5", "6", "7", "8", "9", "0"];
+      const slots = CBZ.prisonWeaponLoadout ? CBZ.prisonWeaponLoadout() : inv.slice(0, keys.length);
+      const fistsHeld = !!CBZ.game.prisonHolstered || !heldGun;
+      html += "<div class='cSlot fists" + (fistsHeld ? " held" : "") +
+        "' data-prison-slot='-1' data-key='1'><span class='key'>1</span><span class='s fist'>FIST</span></div>";
+      for (let i = 0; i < keys.length; i++) {
+        const id = slots[i] || null;
+        const m = id ? weaponMetaById(id) : null;
+        const held = !!(id && id === heldGun && !CBZ.game.prisonHolstered);
+        let ammoTxt = "";
+        if (m && !held && fps2 && fps2.rounds && fps2.reserves) {
+          const cur = (fps2.rounds[m.i] != null) ? fps2.rounds[m.i] : (m.w.mag || 0);
+          const res = (fps2.reserves[m.i] != null) ? fps2.reserves[m.i] : (m.w.reserve || 0);
+          if (cur + res <= 0) ammoTxt = "<span class='a dry'>" + (icons ? "∅" : "DRY") + "</span>";
+        }
+        const face = m
+          ? (icons ? hotbarGunFace(m, id) : "<span class='s'>" + esc(m.w.short || m.w.label || id) + "</span>")
+          : "<span class='s empty'>—</span>";
+        html += "<div class='cSlot" + (held ? " held" : "") + (id ? "" : " empty") +
+          "' data-prison-slot='" + i + "' data-key='" + keys[i] + "'" +
+          (id ? " data-weapon-id='" + esc(id) + "' draggable='true'" : "") + ">" +
+          "<span class='key'>" + keys[i] + "</span>" + face + ammoTxt + "</div>";
+      }
+      return html;
+    }
+
     let slot = 1;
     const key = function () { return "<span class='key'>" + (slot++) + "</span>"; };
     // FISTS is the baseline, and it is a real slot: unarmed is a thing you can
@@ -1198,7 +1230,7 @@
           const res = (fps2.reserves[m.i] != null) ? fps2.reserves[m.i] : (m.w.reserve || 0);
           if (cur + res <= 0) ammoTxt = "<span class='a dry'>" + (icons ? "∅" : "DRY") + "</span>";
         }
-        html += "<div class='cSlot" + (held ? " held" : "") + "'>" + key() +
+        html += "<div class='cSlot" + (held ? " held" : "") + "' data-weapon-id='" + esc(id) + "'>" + key() +
           (icons ? hotbarGunFace(m, id) : "<span class='s'>" + esc(lbl) + "</span>") + ammoTxt + "</div>";
       }
     }

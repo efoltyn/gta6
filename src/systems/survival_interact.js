@@ -26,7 +26,9 @@
   if (!el.interact) return;
 
   const OPT_KEYS = ["i", "j", "k", "l"];   // same 4 interaction slots as every mode
-  const REACH = 3.4, CONE = 0.2;
+  // must match grapple.js's REACH/CONE exactly — a looser menu advertises
+  // Grab/Punch/Shove in a shell where aimTarget() is null and the verb no-ops
+  const REACH = 3.1, CONE = 0.25;
 
   // verb sets — labels + the grapple call each one fires
   const HOLD_VERBS = [

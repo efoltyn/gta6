@@ -75,7 +75,7 @@
      its centre sits, so wrapping it around the camera costs nothing.
 
      THE HORIZON LINE DOES NOT MOVE, AND THAT IS DERIVED, NOT LAZY. Our
-     world is FLAT (docs/claude/doctrine.md — the true sphere was refused
+     world is FLAT (scrolls/claude/doctrine.md — the true sphere was refused
      on arithmetic). On a flat sea the horizon is the vanishing line of
      the water plane, which sits at EXACTLY eye level at every altitude
      (atan(h/d) → 0 as d → ∞); only a curved earth dips it. So the

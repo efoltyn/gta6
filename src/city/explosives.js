@@ -107,9 +107,27 @@
   }
   ensureItem();
 
-  function econ() { return CBZ.cityEcon || null; }
+  // ONE LEDGER PER MODE. This file hardcoded CBZ.cityEcon/g.cityInv, which is
+  // why prison C4 could never exist: escape mode's bag is g.inventory
+  // (systems/inventory.js is explicit that it is "the count truth"), and
+  // g.cityInv isn't even initialised outside a city life — so a stolen brick
+  // COUNTED zero and [B] fell through to the stash. systems/economy.js's
+  // itemStore() is the ONE mode-aware accessor (city → cityEcon, everything
+  // else → g.inventory), the same switchboard buildmode.js and baseclaim.js
+  // already buy through. Degrade-safe: no itemStore ⇒ the exact cityEcon
+  // path this file shipped with.
+  function econ() {
+    if (CBZ.econ && CBZ.econ.itemStore) return CBZ.econ.itemStore();
+    return CBZ.cityEcon || null;
+  }
   function count() { const e = econ(); return (e && e.count) ? e.count(C4.item) : ((g.cityInv && g.cityInv[C4.item]) || 0); }
   function syncHud() { g.cityC4 = count(); if (CBZ.cityHudDirty) CBZ.cityHudDirty(); }
+  // one voice per mode (same routing finishPlant always used, now shared)
+  function note(line, s) {
+    if (g.mode === "city" && CBZ.city) CBZ.city.note(line, s);
+    else if (CBZ.jailTell) CBZ.jailTell.hint(line, s);
+    else if (CBZ.flashHint) CBZ.flashHint(line, s);
+  }
 
   // ---- the charge mesh: olive-drab body, tan demo blocks, a blinking LED ----
   // ONE geo/material set shared by every charge (and the gun-store display).
@@ -201,8 +219,8 @@
   function tryPlant() {
     const P = CBZ.player, e = econ();
     if (!P || !e || P.driving) return;
-    if (count() <= 0) { if (CBZ.city) CBZ.city.note("No C4 — the gun store sells charges.", 1.6); return; }
-    if (planted.length >= C4.maxPlanted) { if (CBZ.city) CBZ.city.note("The receiver only tracks " + C4.maxPlanted + " charges — send what's out there first.", 2); return; }
+    if (count() <= 0) { note(g.mode === "escape" ? "No C4 — the armory cage keeps the charges." : "No C4 — the gun store sells charges.", 1.6); return; }
+    if (planted.length >= C4.maxPlanted) { note("The receiver only tracks " + C4.maxPlanted + " charges — send what's out there first.", 2); return; }
     const f = aimFwd();
     const px = P.pos.x, pz = P.pos.z, py = (P.pos.y || 0) + 1.2;
     const ch = { mesh: buildMesh(), car: null, body: null, wall: null, fly: null, x: 0, y: 0, z: 0, det: null, blink: rng() };
@@ -453,15 +471,21 @@
         normal: ch.wall || null, cause: "explosion",
       });
       if (res && res.kind === "undercharged") {
-        const need = res.needLb || 0;
-        const line = "The door held — that needs " + need + " lb on it.";
-        if (g.mode === "city" && CBZ.city) CBZ.city.note(line, 2);
-        else if (CBZ.jailTell) CBZ.jailTell.hint(line, 2);
-        else if (CBZ.flashHint) CBZ.flashHint(line, 2);
+        note("The door held — that needs " + (res.needLb || 0) + " lb on it.", 2);
       }
       // contactBreach already detonated; the city couplings below still run.
       if (g.mode !== "city") {
         if (ch.body && CBZ.hurtWorldActor) { try { CBZ.hurtWorldActor(ch.body, 1e6, { fromX: p.x, fromZ: p.z, byPlayer: true, cause: "explosion" }); } catch (e2) {} }
+        // A BOMB INSIDE THE WIRE IS THE LOUDEST THING A PRISONER CAN DO. The
+        // city couples its blast to cityCrime/cityAlarm below; the pen's
+        // equivalents are heat and the guards' heads turning — the same
+        // coupling world/door.js's defeat() already applies, now applied to
+        // EVERY prison detonation, not only the ones that pay a priced door.
+        if (g.mode === "escape") {
+          if (CBZ.addHeat) CBZ.addHeat(70);
+          const gds = CBZ.guards || [];
+          for (let i = 0; i < gds.length; i++) if (gds[i] && !gds[i].dead) gds[i].alert = Math.max(gds[i].alert || 0, 1);
+        }
         return;
       }
       if (ch.wall && CBZ.cityBlastWall) CBZ.cityBlastWall({ x: p.x, y: p.y, z: p.z }, ch.wall, { power: 1.8 });
@@ -505,13 +529,13 @@
   // ---- [B]: tap = plant, hold ~0.5s = detonate all. CAPTURE phase so the
   // bomb key wins over any bubble listeners while you're actually carrying;
   // when you have neither charges nor plants, [B] falls through untouched. ----
-  let holding = false, armT = 0;
+  let holding = false, armT = 0, stashHinted = false;
   addEventListener("keydown", function (e) {
     if (e.repeat || holding) return;
     if ((e.key || "").toLowerCase() !== "b") return;
-    if (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;   // Shift+B belongs to wealth.js
+    if (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;   // Shift+B: wealth.js in city, the stash's fallback in escape
     if (!c4Live() || g.state !== "playing") return;
-    if (CBZ.cityMenuOpen || !CBZ.player || CBZ.player.dead) return;
+    if (CBZ.cityMenuOpen || CBZ.invOpen || !CBZ.player || CBZ.player.dead) return;
     // FLYING THE BOMBER OWNS [B]. city/strategic.js's B-2 uses tap=release /
     // hold=carpet run on this same key; a charge in your pocket must not eat
     // the bomb-bay key while you are 200 m up (this capture handler would
@@ -523,6 +547,15 @@
     if (!canPlant && !planted.length) return;
     e.preventDefault();
     if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+    // IN THE PEN, [B] IS ALSO THE STASH KEY (systems/inventory.js). While you
+    // carry charges this capture handler wins, which is correct — a man with
+    // a bomb in his hand is not browsing his bag — but say ONCE where the bag
+    // went: Shift+B reaches inventory.js untouched (wealth.js's chord is
+    // city-gated), so nothing is lost, only moved while the charges last.
+    if (g.mode === "escape" && !stashHinted) {
+      stashHinted = true;
+      note("[B] is the bomb while you carry charges — the stash answers Shift+B.", 2.6);
+    }
     holding = true; armT = 0;
   }, true);
   addEventListener("keyup", function (e) {

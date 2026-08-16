@@ -2,8 +2,12 @@
 
    Boots the REAL survival mode (title → Disaster Survival → Play), freezes
    the rAF loop, forces the director to the volcano, and photographs the same
-   simulated seconds of the same seeded eruption on both sides. Then it forces
-   the NUKE and photographs the finale, wide and from inside.
+   simulated seconds of the same seeded eruption on both sides.
+
+   VOLCANO ONLY (owner, 2026-08-15: "I just wanted the volcano to be more
+   real... I never mentioned nuke"). The four nuke-finale beats this preset
+   used to end on are gone with the finale itself — the island's arc is
+   nature all the way now, and a volcano report photographs the volcano.
 
    Skeleton lifted from disaster-sequence.mjs (same boot, same rAF freeze,
    same stepSim clock, same HUD-hide sweep). What is different is the AIMING:
@@ -28,21 +32,32 @@
                   the load.
      lava-night   close-up. Opaque crust, incandescent channels, and the flow
                   lighting the hillside at night.
-     nuke-wide    the finale from off-island: the REAL gang-city mushroom
-                  (city/nukefx.js) standing over the arena.
-     nuke-pov     the death view. You see light, not geometry.
 
    Metrics ride the two ratchets: CBZ.volcanoAudit() (lavaTransparent MUST be
    0 — that is the owner's "see thru" complaint as a number) and
-   CBZ.disasterAudit() (pyroRuns / laharRuns / ashRoofCollapses /
-   nukeUsedNukefx / cameraFar). */
+   CBZ.disasterAudit() (pyroRuns / laharRuns / ashRoofCollapses).
 
-/* EACH HAZARD BEAT RE-FORCES THE ERUPTION. The volcano's active window is
-   20 s and there are five things to photograph in it; a single run cannot
-   hold all five at the age each one wants, and a beat that arrives after the
+   AND THE BODY COUNT, which is the owner's OTHER complaint — "the volcano
+   kills way too many people and randomly" — as a number. `aliveNow` and
+   `killedThisBeat` are read off CBZ.surv.aliveCount(), which the DEPLOYED
+   build already exports, so this is a like-for-like measurement of the same
+   seeded lobby rather than a new counter that only the after side can answer.
+   The preset heals the PLAYER every tick, so every death in these numbers is
+   a bot the eruption actually killed. */
+
+/* EVERY HAZARD BEAT RE-FORCES THE ERUPTION. The volcano's active window is
+   20 s and there are seven things to photograph in it; a single run cannot
+   hold all seven at the age each one wants, and a beat that arrives after the
    event ended photographs an empty hillside (it did, twice, before this).
    Forcing per beat costs ~6 s of warn each time and buys every beat its own
-   correctly-aged eruption on both sides of the comparison. */
+   correctly-aged eruption on both sides of the comparison.
+
+   EVERY, not most. Two of the lava beats used to inherit the eruption their
+   PREDECESSOR had forced, and that quietly made the storyboard order
+   load-bearing: `--subjects lava-day` on its own photographed an idle island
+   with a fallback tripod and cheerfully reported ok:true, which is the one
+   thing this preset's header promises it will not do. A beat that cannot
+   stage its own subject is not a beat. */
 const subjects = [
   { id: "warn-lane", label: "Warning — the lane announces itself", hud: false,
     focus: "Warn phase, no words. The crater glows, ash starts, and ROCK is already coming down the corridor the pyroclastic flow will take. Before-side: a glowing disc and nothing about direction.",
@@ -50,19 +65,38 @@ const subjects = [
     cam: { lane: true, ahead: 60, side: 26, alt: 26, fallback: { x: 108, y: 46, z: 672, ax: 0, ay: 20, az: 600 } } },
 
   { id: "column", label: "The eruption column", hud: false,
-    focus: "First seconds of the active phase: lava fountain out of the vent, dark ash column standing up over it, flows starting down the cone.",
-    act: { untilState: "active", extraSecs: 3.2 },
+    focus: "First seconds of the active phase: lava fountain out of the vent, dark ash column standing on a rose-lit base (the vent lights its own smoke from below — the wide bible photo), the white-hot spatter apron draped over the summit, and glowing rockfall streaking the flanks. Before-side: dark column on an additive disc.",
+    /* force: this beat used to inherit whatever disaster the director
+       happened to be on — run alone (`--subjects column`) it photographed a
+       LIGHTNING STORM and reported ok:true, the exact order-dependence the
+       header note above forbids. The nuke-wide/landmark beats are the ONLY
+       deliberate inheritors (they continue nuke-fireball's cloud, and
+       re-forcing would reset its age). */
+    act: { force: "volcano", untilState: "active", extraSecs: 3.2 },
     cam: { x: 118, y: 40, z: 686, ax: 0, ay: 30, az: 600 } },
 
   { id: "lava-day", label: "Lava close-up — opaque crust", hud: false,
-    focus: "OPAQUE crusted flow: dark basalt levees standing proud of the ground with a white-yellow incandescent channel cracking through, cooling to dull red downstream. Before-side: an additive box you can see the grass through. vol_lavaTransparent must read 0.",
-    act: { extraSecs: 2.2 },
-    cam: { lava: true, side: 15, alt: 8, back: 19, fallback: { x: 26, y: 12, z: 626, ax: 4, ay: 4, az: 606 } } },
+    focus: "THE BIBLE SHOT (owner's Etna close-up, 2026-08-15): a DARK crusted surface with a bright connected LACE of melt cracked through it — thin filaments wrapping irregular black islands, meandering between the levees. Before-side: one smooth bright band of even orange, the 'glowing road'. Organic, never geometric. vol_lavaTransparent must read 0.",
+    act: { force: "volcano", untilState: "active", extraSecs: 12 },
+    cam: { lava: true, frame: 0.55, out: 22, alt: 11, behind: 3, fallback: { x: 26, y: 12, z: 626, ax: 4, ay: 4, az: 606 } } },
+
+  { id: "lava-front", label: "The advancing nose — does it FLOW?", hud: false,
+    focus: "The leading edge at close range. It must nose forward continuously, the lace must travel downstream, and — new with the 2026-08-15 bible — the run should FORK: vol_lavaBranches counts the children a stem has grown, and a fan of lobed noses is what 'organic' means here. Before-side: one uniform ribbon, no forks, smooth even glow.",
+    /* behind 6 (was -5): stand UP-flow of the nose, above it, looking down
+       the descent. Down-flow of a nose on a cone means below its own ridge
+       line, and the peek run photographed the ridge instead of the rock. */
+    act: { force: "volcano", untilState: "active", extraSecs: 9 },
+    cam: { lava: true, frame: 1, out: 13, alt: 9, behind: 6, fallback: { x: 22, y: 9, z: 620, ax: 4, ay: 3, az: 604 } } },
 
   { id: "pyroclastic", label: "Pyroclastic flow — mid-descent", hud: false,
     focus: "THE KILLER. A ground-hugging avalanche of 600 C rock and gas boiling down the fall line at 6x sprinting speed, engulfing its lane. Opaque overlapping billows with an incandescent basal fringe — not translucent orange rocks. Before-side has no such hazard at all.",
     act: { force: "volcano", untilState: "active", extraSecs: 5.4, needLine: true },
     cam: { lane: true, ahead: 44, side: 15, alt: 34, fallback: { x: 96, y: 34, z: 664, ax: 0, ay: 16, az: 604 } } },
+
+  { id: "pyro-close", label: "The cloud at reading distance", hud: false,
+    focus: "OWNER: 'there's big rocks looking of smoke — smoke doesn't look like big bouncing boulders'. Close enough that INDIVIDUAL elements are legible, which is exactly where the before-side falls apart: lit low-poly icosahedra up to ~21 m across, visibly tumbling on their own axes. It has to read as a churning ash cloud with soft irregular edges, not as a rockslide.",
+    act: { force: "volcano", untilState: "active", extraSecs: 4.3, needLine: true },
+    cam: { lane: true, ahead: 20, side: 30, alt: 13, fallback: { x: 74, y: 22, z: 646, ax: 10, ay: 12, az: 610 } } },
 
   { id: "lahar", label: "Lahar in the channel", hud: false,
     focus: "Wet concrete: a matte grey-brown mud river down the VALLEY rather than the fall line, carrying boulders and logs. Slower than the flow, and it sets where it stops.",
@@ -75,29 +109,10 @@ const subjects = [
     cam: { x: 46, y: 15, z: 662, ax: -6, ay: 3, az: 618 } },
 
   { id: "lava-night", label: "Lava at night — it lights the hill", hud: false,
-    focus: "The same flow after dark. The channel is an UNLIT material, so it stays exactly as bright as it was at noon (that IS incandescence), and its pooled point lights paint the hillside around it. The eruption's own sky tint now follows the day cycle instead of overriding night into noon.",
-    act: { night: true, force: "volcano", untilState: "active", extraSecs: 4.5 },
-    cam: { lava: true, side: 15, alt: 8, back: 19, fallback: { x: 26, y: 12, z: 626, ax: 4, ay: 4, az: 606 } } },
+    focus: "The wide bible photo's regime: a BLACK cone wearing a branching incandescent fan, the lace unchanged from noon (unlit IS incandescent), the vent apron the brightest thing in frame, pooled lights painting the hillside. Before-side: broad smooth orange tubes of even brightness.",
+    act: { night: true, force: "volcano", untilState: "active", extraSecs: 12 },
+    cam: { lava: true, frame: 0.55, out: 22, alt: 11, behind: 3, fallback: { x: 26, y: 12, z: 626, ax: 4, ay: 4, az: 606 } } },
 
-  { id: "nuke-fireball", label: "The finale — t+7s, the fireball", hud: false,
-    focus: "Seven seconds in: still the incandescent phase, hot billows and the cap glow. Orange here is CORRECT — it is a fireball. The complaint was about the end stage, which is the next two beats.",
-    act: { day: true, force: "nuke", untilState: "active", extraSecs: 7.0 },
-    cam: { x: 0, y: 460, z: 1850, ax: 0, ay: 700, az: 600 } },
-
-  { id: "nuke-wide", label: "The nuclear finale — the mature cloud", hud: false,
-    focus: "t+26s, THE END STAGE the owner was describing. This must be city/nukefx.js's RESEARCHED mushroom standing over the island — cap kilometres up, one coherent grey-brown body. Before-side clipped it off at the 1 km far plane and left the low ground-surge lobes hanging unfogged: the 'orange floating rocks'.",
-    act: { extraSecs: 19 },
-    cam: { x: 0, y: 620, z: 2950, ax: 0, ay: 1750, az: 600 } },
-
-  { id: "nuke-landmark", label: "The finale — the cloud as a landmark", hud: false,
-    focus: "t+70s. NUKE_FX_AFTERMATH keeps the cloud maturing over the island instead of deleting it. With the arena frustum open it is finally VISIBLE from the island; before, the far plane cut it off entirely.",
-    act: { extraSecs: 44 },
-    cam: { x: 0, y: 620, z: 3900, ax: 0, ay: 2300, az: 600 } },
-
-  { id: "nuke-pov", label: "The nuclear finale — from inside it", hud: true,
-    focus: "The death view. Standing in it you see LIGHT, not geometry: the #nukeFlash whiteout, the same sheet the gang city uses. HUD left on so the sheet is photographed where the player sees it.",
-    act: { atGroundZero: true, extraSecs: 0.35 },
-    cam: { player: true, back: 7, up: 3 } },
 ];
 
 async function stageVolcano(input) {
@@ -200,6 +215,13 @@ async function stageVolcano(input) {
   if (act.night && CBZ.dayPhase) { try { CBZ.dayPhase(0.93); } catch (_) {} }
   if (act.day && CBZ.dayPhase) { try { CBZ.dayPhase(0.42); } catch (_) {} }
 
+  /* THE BODY COUNT. Read the lobby BEFORE this beat simulates anything, so
+     `killedThisBeat` is the deaths those exact simulated seconds caused and
+     not a running total. aliveCount() is on the deployed build too, which is
+     the only reason the two sides can be compared at all here. */
+  const aliveOf = () => { try { return CBZ.surv.aliveCount(); } catch (_) { return -1; } };
+  const aliveBefore = aliveOf();
+
   if (act.force) { CBZ.disasters.force(act.force); step(0.1); }
   if (act.untilState) stepUntilState(act.untilState, 30);
   if (act.extraSecs) step(act.extraSecs);
@@ -245,26 +267,106 @@ async function stageVolcano(input) {
     }
   } else if (cam.lava) {
     // THE FLOW TELLS THE CAMERA WHERE IT IS. volcanoAudit publishes the live
-    // fronts; frame the one furthest down the hill, from downslope, so the
-    // shot looks UP the channel at the incandescent core.
+    // fronts and their axes; frame the one that has run furthest.
     try {
       const A = CBZ.volcanoAudit ? CBZ.volcanoAudit() : null;
       const tips = (A && A.lavaTips) || [];
+      const mids = (A && A.lavaMids) || [];
       const hill = (CBZ.surv && CBZ.surv.arena) ? CBZ.surv.arena.hills[0] : { x: 0, z: 600 };
-      let best = null, bd = -1;
-      for (const t of tips) {
-        const d = Math.hypot(t.x - hill.x, t.z - hill.z);
-        if (d > bd) { bd = d; best = t; }
+      /* PREFER A FLOW STILL ON THE CONE. "Furthest tip from the hill" used
+         to be the whole rule, and once the flows learned to branch and run
+         long it reliably elected a nose deep in the town — where the tripod
+         maths landed the camera inside somebody's stairwell (again). The
+         braid the shot exists to judge lives on the mountainside, so among
+         tips still within ~1.7 r of the peak take the furthest-run one, and
+         only fall back to the global winner when nothing is on the cone. */
+      /* 1.25 r, not more: the arena's town starts ~1.4 r out, and a radius
+         that reaches the town elects some flow's cold toe next to a road —
+         the night peek framed an ash-dusted street with the lava reduced to
+         orange crumbs at the margin. The braid lives on the flank. */
+      const onR = (hill.r || 30) * 1.25;
+      let best = null, bd = -1, bi = -1, bdOn = -1, biOn = -1;
+      for (let i = 0; i < tips.length; i++) {
+        const d = Math.hypot(tips[i].x - hill.x, tips[i].z - hill.z);
+        if (d > bd) { bd = d; best = tips[i]; bi = i; }
+        if (d <= onR && d > bdOn) { bdOn = d; biOn = i; }
       }
-      if (best && bd > 4) {
-        const dx = (best.x - hill.x) / bd, dz = (best.z - hill.z) / bd;
-        aimed = {
-          x: best.x + dx * (cam.back || 10) - dz * (cam.side || 11),
-          y: best.y + (cam.alt || 6),
-          z: best.z + dz * (cam.back || 10) + dx * (cam.side || 11),
-          ax: best.x - dx * 6, ay: best.y + 1.2, az: best.z - dz * 6,
+      if (biOn >= 0) { best = tips[biOn]; bi = biOn; }
+      const mid = bi >= 0 ? mids[bi] : null;
+      if (best && mid) {
+        /* TWO POINTS ON THE FLOW BEAT ONE POINT AND A GUESS.
+
+           Three tripods failed here before this one. The last of them framed
+           the ribbon as the straight line from the vent to its toe — which is
+           right only for a flow that never turned, and a fall line's whole
+           job is to turn. On a cone that shoulders away under it, the point
+           "55% of the way from the vent to the tip" sits out on open
+           hillside with the actual lava thirty metres to one side, which is
+           precisely what the last set of shots photographed.
+
+           world/volcanofx.js now publishes `lavaMids` beside `lavaTips`, so
+           the axis is measured off two points that are both ON the flow.
+           `frame` slides the look-at from the middle of the river (0) to its
+           advancing nose (1), and the camera stands square to that axis. */
+        let fx = best.x - mid.x, fz = best.z - mid.z;
+        const fl = Math.hypot(fx, fz) || 1; fx /= fl; fz /= fl;
+        const f = cam.frame != null ? cam.frame : 0.2;
+        const mx = mid.x + (best.x - mid.x) * f, mz = mid.z + (best.z - mid.z) * f;
+        const gAtP = (x, z) => (CBZ.surv && CBZ.surv.arena ? CBZ.surv.arena.groundHeightAt(x, z) : 0);
+        const my = gAtP(mx, mz);
+        const out = cam.out != null ? cam.out : 24;
+        /* THE TRIPOD PROVES ITS OWN SIGHTLINE. Every blind placement rule
+           tried here has been defeated by some seed's town: the fixed sign
+           parked the camera against the cone, the away-from-the-mountain
+           flip parked it inside a tower, and a photograph of an obstruction
+           is a failed beat that reports ok:true. So the flank is chosen the
+           way a photographer chooses it: candidate stands (near/far, both
+           sides, rising altitude) are tested with a real raycast at the
+           look-at point, and the first stand that can actually SEE the flow
+           wins. Sprites, particle motes and water do not count as walls; a
+           hit within 6 m of the subject IS the subject. Identical logic on
+           both sides of the comparison — it is pure scene geometry. */
+        /* Solids collected ONCE with the sprite/particle/water strata already
+           filtered out. Handing intersectObjects the raw scene children found
+           two failure modes at once: any exotic object that made the walk
+           throw turned the try/catch into "sure, that stand can see", and a
+           blocked tripod passed the audition — the full-run day beat shipped
+           a portrait of an office block that way. */
+        const solids = [];
+        CBZ.scene.traverse((ob) => {
+          if (ob.isMesh && ob.visible && !(ob.userData && ob.userData.waterSurface)) solids.push(ob);
+        });
+        const ray = new T.Raycaster();
+        const canSee = (px, py, pz) => {
+          const dir = new T.Vector3(mx - px, my + 1.2 - py, mz - pz);
+          const len = dir.length() || 1;
+          dir.multiplyScalar(1 / len);
+          ray.set(new T.Vector3(px, py, pz), dir);
+          ray.near = 0.1; ray.far = Math.max(0.2, len - 6);   // the last 6 m IS the subject
+          try { return ray.intersectObjects(solids, false).length === 0; }
+          catch (_) { return false; }                          // a stand that cannot be proved is not chosen
         };
-        aimNote = "lava front";
+        const c1x = mx - fz * out, c1z = mz + fx * out;
+        const c2x = mx + fz * out, c2z = mz - fx * out;
+        const away = Math.hypot(c2x - hill.x, c2z - hill.z) > Math.hypot(c1x - hill.x, c1z - hill.z) ? 1 : -1;
+        const alt0 = cam.alt || 12;
+        /* the ladder climbs: same-side near, other side, then higher and
+           further on both sides. If every rung is blocked the HIGHEST stand
+           wins — over the rooftops beats behind a wall every time. */
+        const rungs = [
+          [away, 1, 1], [-away, 1, 1], [away, 1.45, 1.9], [-away, 1.45, 1.9],
+          [away, 2, 3.1], [-away, 2, 3.1],
+        ];
+        let cxp = null, czp = null, cyp = 0;
+        for (const [flip, oMul, aMul] of rungs) {
+          const tx = mx + flip * fz * out * oMul - fx * (cam.behind || 0);
+          const tz = mz - flip * fx * out * oMul - fz * (cam.behind || 0);
+          const ty = Math.max(gAtP(tx, tz), my) + alt0 * aMul;
+          cxp = tx; czp = tz; cyp = ty;                        // fallback: the last (highest) rung
+          if (canSee(tx, ty, tz)) break;
+        }
+        aimed = { x: cxp, y: cyp, z: czp, ax: mx, ay: my + 1.2, az: mz };
+        aimNote = "lava flank";
       }
     } catch (_) {}
   }
@@ -322,18 +424,21 @@ async function stageVolcano(input) {
   query("perf").textContent = ticks
     ? `sim ${ticks} ticks · avg ${(totalMs / ticks).toFixed(1)}ms · worst ${maxMs.toFixed(0)}ms\n` +
       `lava ${vol ? vol.lavaFlows : "-"} flows / ${vol ? vol.lavaTransparent : "-"} see-thru · pyro ${dis ? dis.pyroRuns : "-"} · lahar ${dis ? dis.laharRuns : "-"}\n` +
-      `ash ${vol ? vol.ashPeakDepth : "-"} m · roofs ${dis ? dis.ashRoofs : "-"} @ ${dis ? dis.ashRoofMax : "-"} m · lost ${dis ? dis.ashRoofCollapses : "-"} · nukefx ${dis && dis.nukeUsedNukefx ? "YES" : "no"}`
+      `ash ${vol ? vol.ashPeakDepth : "-"} m · roofs ${dis ? dis.ashRoofs : "-"} @ ${dis ? dis.ashRoofMax : "-"} m · lost ${dis ? dis.ashRoofCollapses : "-"}`
     : "—";
   query("perf").style.cssText = `position:absolute;right:24px;top:24px;text-align:right;white-space:pre-line;line-height:1.5;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:${maxMs > 100 ? "#ff9c9c" : "#9fe8c3"}`;
   query("source").textContent = new URL(input.sourceUrl).host + new URL(input.sourceUrl).pathname;
   query("source").style.cssText = "position:absolute;bottom:10px;left:27px;color:#9cb0bf;font:10px ui-monospace,SFMono-Regular,Menlo,monospace";
 
+  const aliveNow = aliveOf();
   const metrics = {
     tickAvgMs: ticks ? Number((totalMs / ticks).toFixed(2)) : 0,
     tickMaxMs: Number(maxMs.toFixed(1)),
     ticksOver33: over33,
     drawCalls: Number(render.calls || 0),
     cameraFar: Math.round(camera.far),
+    aliveNow: aliveNow,
+    killedThisBeat: Math.max(0, aliveBefore - aliveNow),
   };
   const carry = (obj, prefix) => {
     if (!obj) return;
@@ -356,25 +461,37 @@ async function stageVolcano(input) {
 
 export default {
   id: "volcano-stages",
-  title: "The Stratovolcano (and an honest nuke)",
-  description: "One seeded survival match per build, the director forced through the volcano and then the nuclear finale, stepped to identical simulated seconds. The travelling beats aim themselves off CBZ.disasters.hazards() so the camera stands on the flank of the ACTUAL flow rather than a guessed hillside. vol_lavaTransparent is the owner's 'see thru' complaint as a number and must read 0; audit_nukeUsedNukefx says whether the finale drew city/nukefx.js's real mushroom or something standing in for it.",
+  title: "The Stratovolcano",
+  description: "One seeded survival match per build, the director forced through the volcano's beats and stepped to identical simulated seconds. The travelling beats aim themselves off CBZ.disasters.hazards() so the camera stands on the flank of the ACTUAL flow rather than a guessed hillside, and the lava tripod raycasts its own sightline. vol_lavaTransparent is the owner's 'see thru' complaint as a number and must read 0.",
   beforeLabel: "BEFORE · DEPLOYED",
   afterLabel: "AFTER · LOCAL",
   viewport: { width: 1100, height: 680 },
   readyExpression: "window.THREE && window.CBZ && CBZ.CONFIG",
   urlParams: { seed: 90210 },
   stageTimeoutMs: 480000,
-  metricsNote: "vol_* comes from CBZ.volcanoAudit() (world/volcanofx.js) and audit_* from CBZ.disasterAudit(). lavaTransparent counts LIVE lava materials that are transparent or additively blended — the thing the owner could see through. cameraFar is the finale's frustum: below ~2600 the mushroom's cap is clipped off.",
+  metricsNote: "vol_* comes from CBZ.volcanoAudit() (world/volcanofx.js) and audit_* from CBZ.disasterAudit(). lavaTransparent counts LIVE lava materials that are transparent or additively blended — the thing the owner could see through. Only the rows named below are printed; the full audit dump stays in metadata.json for debugging.",
+  metricsWhitelist: true,
   metrics: {
+    /* THE OWNER'S SECOND COMPLAINT AS A NUMBER. A stratovolcano is supposed to
+       be survivable by getting off its side; "kills way too many people" means
+       the lobby is being deleted by hazards nobody could read or dodge. Lower
+       is better here for the same reason higher is better for pyroRuns — the
+       hazard should still HAPPEN, it just should not be a lottery. */
+    killedThisBeat: { label: "Bots killed in this beat", better: "lower" },
+    aliveNow: { label: "Lobby still alive", better: "higher" },
     vol_lavaTransparent: { label: "See-through lava materials", better: "lower" },
     vol_lavaFlows: { label: "Live lava flows", better: "higher" },
+    /* The 2026-08-15 bible as numbers: a stem that forks is organic, a vent
+       that floods white is the photograph's brightest pixel. Both are 0 on
+       any build older than the bible. */
+    vol_lavaBranches: { label: "Lava forks grown", better: "higher" },
+    vol_ventGlows: { label: "Incandescent vent aprons", better: "higher" },
+    vol_ashColumns: { label: "Sprite ash columns", better: "higher" },
     vol_pyroLive: { label: "Pyroclastic flows live", better: "higher" },
     vol_ashPeakDepth: { label: "Peak ash depth", unit: "m", better: "higher" },
     audit_pyroRuns: { label: "Pyroclastic runs", better: "higher" },
     audit_laharRuns: { label: "Lahar runs", better: "higher" },
     audit_ashRoofCollapses: { label: "Roofs lost to ash load", better: "higher" },
-    audit_nukeUsedNukefx: { label: "Finale used nukefx", better: "higher" },
-    cameraFar: { label: "Camera far plane", unit: "m", better: "higher" },
     tickAvgMs: { label: "Sim tick avg", unit: "ms", better: "lower" },
     tickMaxMs: { label: "Sim tick worst", unit: "ms", better: "lower" },
     drawCalls: { label: "Draw calls", better: "lower" },

@@ -93,7 +93,7 @@ for (let i = 0; i < 240 && !playing; i++) {
   if (!playing) await sleep(200);
 }
 if (!playing) { console.error("SORTIE: FAIL never reached play"); done(1); }
-// free play, not the motel opening (see docs/claude/verification.md)
+// free play, not the motel opening (see scrolls/claude/verification.md)
 await evl(`(() => { try { if (CBZ.game.cityCampaign) CBZ.game.cityCampaign.phase = "endless_contracts"; } catch (e) {} return true; })()`);
 
 if (!(await evl("typeof CBZ.strategicNuclearSortie === 'function' && typeof CBZ.strategicSortieState === 'function'"))) {

@@ -208,6 +208,208 @@
     };
   };
 
+  /* ============================================================
+     THE OTHER HALF OF THE VERB — CBZ.prisonDoors (close by tap, close by key)
+
+     OWNER (verbatim): "all doors should open or close when pressed. I like
+     auto open, don't remove, but I want ability to close. Of course still
+     needing key. This is really mostly adding CLOSE BY TAP ON MOBILE, no
+     button needed."
+
+     THE MEASURED FAULT: every door in the compound was a one-way valve. Five
+     files own a door primitive — world/door.js's vertical yard leaf,
+     world/prisonwings.js's nine pivot leaves, world/adminwing.js's two,
+     world/gunroom.js's armoury gate plus its inner cage, world/cellblock.js's
+     thirteen sliding cell fronts — and between them they exposed exactly ONE
+     public close, CBZ.closeDoor, which only systems/lockdown.js and the run
+     reset ever called. Twenty-seven doors, zero of them shuttable by hand.
+
+     ONE SEAM, NOT FIVE COPIES. Each file DECLARES its doors into the plain
+     array CBZ._prisonDoorSpecs at load — order-independent, the same trick
+     CBZ._prisonPromptSites uses, and necessary because every world file above
+     parses 130+ script tags before this one. This block is the only place
+     that knows what the verb IS; the primitives themselves are untouched.
+
+     A spec is:
+       id / label   what the audit prints and what the desktop hint says
+       at()         {x,y,z} of the leaf — the point reach is measured to
+       pick()       meshes a tap ray may hit (the pivot / leaf / collider pane)
+       col()        the leaf's own collider object, so the audit can state
+                    whether a "closed" door is actually SOLID again — a shut
+                    door with no collider in CBZ.colliders is a picture
+       isOpen()     live state, read from the file's own flag
+       permanent()  blown, or released by the control-room console. LAW 4: a
+                    hole is a hole, and never becomes a door again.
+       canUse()     THE CREDENTIAL, and it is the SAME test the file's open
+                    path runs. You may only shut a door you would have been
+                    allowed to open — a man with no keycard cannot shut a
+                    sally gate in a guard's face, and a cell front, which asks
+                    nothing to open, asks nothing to close either.
+       set(v)       the file's own setOpen/closeDoor. The SOUND belongs there,
+                    so each door keeps voicing itself from its own coordinates
+                    with the door_close cue systems/audio.js already ships.
+       openByTap    false when the door's open route is a hold-to-defeat beat
+                    (the three cages, the Warden's office): a tap must never
+                    shortcut a 3.2 s pick.
+       autoR        metres of that file's own approach-open radius, so the
+                    latch below knows how far away "away" is.
+
+     THE LATCH (LAW 3). Auto-open stays exactly as it was — which means the
+     instant you shut a door you are still standing in the radius that opened
+     it. A deliberate close is a LATCH, not a suggestion: each owning tick
+     asks CBZ.prisonDoorLatched(id) before its PROXIMITY open and skips it.
+     The latch clears when you walk out of autoR + 2 m, when you deliberately
+     open the door again, when anything else opens it (a guard tailgating, the
+     racks thrown, a breaching charge), or when the run stops. Staff
+     tailgating is deliberately NOT latched out: a guard with a card opens his
+     own door, and that window is what the whole wing is built on.
+     world/prisonwings.js's 3 s auto-shut composes with this instead of
+     duplicating it — that timer only runs while a door is OPEN, and a latched
+     door is shut, so the two never argue.
+  ============================================================ */
+  const doorSpecs = (CBZ._prisonDoorSpecs || (CBZ._prisonDoorSpecs = []));
+  const LATCH_PAD = 2.0;              // metres past autoR that release the latch
+  const DOOR_TAP_REACH = 3.2;         // a tap may reach across a doorway
+  const DOOR_KEY_REACH = 2.6;         // a keypress means the door you stand in
+  function dsafe(fn, dflt) { try { return fn(); } catch (e) { return dflt; } }
+  function doorPoint(s) { return dsafe(function () { return s.at(); }, null); }
+  function doorIsOpen(s) { return dsafe(function () { return !!s.isOpen(); }, false); }
+  function doorGone(s) { return dsafe(function () { return !!(s.permanent && s.permanent()); }, true); }
+  function doorCred(s) { return dsafe(function () { return !!s.canUse(); }, false); }
+  function doorD2(s) {
+    const p = doorPoint(s);
+    if (!p || !player || !player.pos) return Infinity;
+    const dx = player.pos.x - p.x, dz = player.pos.z - p.z;
+    return dx * dx + dz * dz;
+  }
+  function doorById(id) {
+    if (id && typeof id === "object") return id;
+    for (let i = 0; i < doorSpecs.length; i++) if (doorSpecs[i].id === id) return doorSpecs[i];
+    return null;
+  }
+  /* THE ONE PLACE A DOOR MOVES ON THE PLAYER'S OWN SAY-SO. A tap
+     (systems/touch.js tapWorld) and the polled [E] below both end here, so
+     the two can never drift — the same reason the pill verbs above are named
+     functions rather than inlined key branches. */
+  function doorAct(s, want) {
+    if (!s) return null;
+    if (doorGone(s)) return "gone";                     // blown / released: LAW 4
+    if (doorIsOpen(s) === want) return "already";
+    if (!doorCred(s)) return "denied";                  // the open path's own keys
+    if (want && s.openByTap === false) return "held";   // a pick beat owns its opening
+    dsafe(function () { return s.set(want); }, false);
+    if (doorIsOpen(s) !== want) return "refused";
+    s._latch = !want;                                   // shutting it LATCHES it shut
+    return want ? "opened" : "closed";
+  }
+  function nearestDoor(open, reach, facing) {
+    let best = null, bd = reach * reach;
+    for (let i = 0; i < doorSpecs.length; i++) {
+      const s = doorSpecs[i];
+      if (doorIsOpen(s) !== open || doorGone(s) || !doorCred(s)) continue;
+      const d2 = doorD2(s);
+      if (d2 >= bd) continue;
+      if (facing) {
+        // THE KEY PATH NEEDS AN AIM THE TAP ALREADY HAS. A tap carries a ray;
+        // a keypress carries only a position, and a cell front is ~2 m from
+        // the bunk you might be pressing [E] at. Requiring the door to be in
+        // front of the camera is the cheapest honest disambiguation.
+        const p = doorPoint(s);
+        const yaw = CBZ.cam ? CBZ.cam.yaw : 0;
+        const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
+        const dx = p.x - player.pos.x, dz = p.z - player.pos.z;
+        const len = Math.hypot(dx, dz) || 1;
+        if ((dx / len) * fx + (dz / len) * fz < 0.35) continue;
+      }
+      bd = d2; best = s;
+    }
+    return best;
+  }
+  CBZ.prisonDoorList = function () { return doorSpecs; };
+  CBZ.prisonDoorLatched = function (id) { const s = doorById(id); return !!(s && s._latch); };
+  CBZ.prisonDoorToggle = function (id) {
+    const s = doorById(id);
+    return s ? doorAct(s, !doorIsOpen(s)) : null;
+  };
+  CBZ.prisonDoorSet = function (id, v) { const s = doorById(id); return s ? doorAct(s, !!v) : null; };
+  CBZ.prisonDoorNearest = function (reach) { return nearestDoor(true, reach || DOOR_TAP_REACH, false); };
+  // The @fn a pill would fire, and the function the [E] branch calls. Named on
+  // CBZ so a tap, a key and a headless probe are provably the same code.
+  CBZ.prisonDoorCloseNearest = function () {
+    const s = nearestDoor(true, DOOR_KEY_REACH, true);
+    return s ? doorAct(s, false) : null;
+  };
+  /* THE RATCHET. `doors` is every declared leaf; `closeable` is the number
+     that expose the verb RIGHT NOW (open, not blown, credential in hand) and
+     is the number the owner asked to stop being zero. `latched` may only be
+     non-zero while the player is stood at a door he shut himself. */
+  CBZ.prisonDoorAudit = function () {
+    const rows = [];
+    let open = 0, gone = 0, cred = 0, latched = 0, closeable = 0;
+    for (let i = 0; i < doorSpecs.length; i++) {
+      const s = doorSpecs[i];
+      const o = doorIsOpen(s), g2 = doorGone(s), c = doorCred(s), l = !!s._latch;
+      if (o) open++;
+      if (g2) gone++;
+      if (c) cred++;
+      if (l) latched++;
+      if (o && !g2 && c) closeable++;
+      // -1 = the spec declares no collider; otherwise 1 when the leaf is
+      // solid right now. A closed door must read 1, an open one 0.
+      let col = -1;
+      if (s.col) {
+        const cc = dsafe(function () { return s.col(); }, null);
+        if (cc) col = CBZ.colliders.indexOf(cc) >= 0 ? 1 : 0;
+      }
+      rows.push({ id: s.id, open: o, gone: g2, cred: c, latch: l, col: col,
+        openByTap: s.openByTap !== false, d: Math.round(Math.sqrt(doorD2(s)) * 10) / 10 });
+    }
+    return { doors: doorSpecs.length, open: open, blown: gone, credentialed: cred,
+      latched: latched, closeable: closeable, rows: rows };
+  };
+
+  // The polled half. Runs from updateInteractions so it shares the one hint
+  // slot and the one hintTimer every other prison verb already writes.
+  let doorKeyWas = false;
+  function doorCloseKey() {
+    // updateInteractions runs in the CITY too (its mode gate is the win check
+    // at the bottom), and the compound shares the city's coordinate space
+    // near the origin — so without this a city walk past z=-8 would be
+    // offered the yard checkpoint. The tap path carries the same guard.
+    if (!CBZ.game || CBZ.game.mode !== "escape") { doorKeyWas = false; return; }
+    const down = !!(CBZ.keys && CBZ.keys["e"]);
+    const s = nearestDoor(true, DOOR_KEY_REACH, true);
+    if (s) {
+      /* TOUCH GETS NO PILL, ON PURPOSE. The owner asked for this verb as a
+         TAP ON THE DOOR ("no button needed"), and systems/touch.js's tapWorld
+         fires the very doorAct() this key does. A pill here would be exactly
+         the chrome LAW 5 ("fewer button popups") forbids, and it would fight
+         the vent/breaker pills for the one arbitrated slot. */
+      if (!onTouch()) { CBZ.showHint("Press [E] to close " + (s.label || "the door")); hintTimer = 0.2; }
+      // EDGE-TRIGGERED, unlike every other polled prison verb: this one acts
+      // on a door whose auto-open is still live, so a held key would flap the
+      // leaf open/shut at 60 Hz.
+      if (down && !doorKeyWas) doorAct(s, false);
+    }
+    doorKeyWas = down;
+  }
+
+  /* LATCH UPKEEP. Order 41.46 sits AFTER every door tick (gunroom 41,
+     adminwing 41.4, prisonwings 41.44) so a latch set at order 40 is read by
+     all of them before it can be cleared in the same frame. */
+  CBZ.onUpdate(41.46, function () {
+    if (!doorSpecs.length) return;
+    const gm = CBZ.game;
+    const live = !!(gm && gm.mode === "escape" && gm.state === "playing");
+    for (let i = 0; i < doorSpecs.length; i++) {
+      const s = doorSpecs[i];
+      if (!s._latch) continue;
+      if (!live || doorIsOpen(s)) { s._latch = false; continue; }   // somebody opened it
+      const r = (s.autoR || 2.5) + LATCH_PAD;
+      if (doorD2(s) > r * r) s._latch = false;                      // you walked away
+    }
+  });
+
   /* ---- THE VERBS, EXTRACTED ------------------------------------------------
      Each of these was written inline inside the `if (CBZ.keys["e"])` branch it
      still serves. They are lifted out UNCHANGED so the key path and the pill
@@ -306,7 +508,10 @@
         // above keeps the flag-off revert byte-identical. hasKey stays the
         // door/AI truth; the item is display, never a second key check.
         if (CBZ.CONFIG && CBZ.CONFIG.JAIL_HUD_UNIFIED !== false && CBZ.econ && CBZ.econ.addItem) CBZ.econ.addItem("Keycard", 1);
-        CBZ.sfx("key"); CBZ.flashToast("KEYCARD!");
+        // The chip above lit up, the bag took the item, and the key sound
+        // plays. "KEYCARD!" was a fourth telling of the same pickup. Deleted,
+        // not muted — there is no string left to turn back on.
+        CBZ.sfx("key");
         CBZ.setObjective("Keycard opens staff checkpoints. Cross the yard or scout tunnels for another way out.");
       }
     }
@@ -320,7 +525,10 @@
     const ddx = player.pos.x, ddz = player.pos.z + 8;
     const nearDoor = ddx * ddx + ddz * ddz < 16;
     if (!door.open) {
-      if (nearDoor && g.hasKey) {
+      // LAW 3: a door you shut yourself stays shut while you stand in the
+      // radius that would otherwise re-open it. CBZ.prisonDoorLatched is the
+      // shared registry above; the credential test below is untouched.
+      if (nearDoor && g.hasKey && !CBZ.prisonDoorLatched("prison-yard-door")) {
         CBZ.openDoor();
         readerK = ""; readerRung = false;
         CBZ.setObjective("Cross the yard, dodge the searchlights, reach the glowing exit.");
@@ -339,9 +547,19 @@
         readerRung = false;
         readerLamp("lock", 0);
       }
-    } else if (door.t < 1) {
-      door.t = Math.min(1, door.t + dt * 1.6);
-      door.mesh.position.y = door.closedY + door.t * (door.travel || 8); // slide into its authored wall pocket
+    }
+    // THE LEAF TRAVELS BOTH WAYS NOW. It used to only ever rise (the `t < 1`
+    // ramp), because CBZ.closeDoor teleported it back to closedY — which is
+    // right for a lockdown SLAM and for the run reset, and wrong for a hand
+    // on the door. closeDoor(true) leaves t alone and this ramp lowers it at
+    // the same 1.6 rate it raises. Same authored pocket, one direction added.
+    {
+      const want = door.open ? 1 : 0;
+      if (door.t !== want) {
+        const step = dt * 1.6;
+        door.t = want > door.t ? Math.min(want, door.t + step) : Math.max(want, door.t - step);
+        door.mesh.position.y = door.closedY + door.t * (door.travel || 8);
+      }
     }
 
     // ---- breaker box power sabotage ----
@@ -470,6 +688,9 @@
       }
     }
     if (armedVentT > 0 && (armedVentT -= dt) <= 0) armedVent = null;
+
+    // ---- shut it behind you (every registered door, one implementation) ----
+    doorCloseKey();
 
     // hint fade-out
     if (hintTimer > 0) { hintTimer -= dt; if (hintTimer <= 0) CBZ.hideHint(); }

@@ -24,6 +24,11 @@
      node tools/battle-check.mjs --seconds 90        longer watch (WALL clock)
      node tools/battle-check.mjs --resolve 150       longer war (SIM clock)
      node tools/battle-check.mjs --keep              leave chrome up
+     node tools/battle-check.mjs --url https://efoltyn.github.io/gta6/
+                                                    check the DEPLOYED site
+                                                    rather than this checkout,
+                                                    which is the only way to
+                                                    know a wave actually shipped
    Exit 0 = ok.                                                              */
 import { spawn } from "node:child_process";
 import { rm } from "node:fs/promises";
@@ -36,14 +41,19 @@ const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
 const arg = (f, d) => { const i = argv.indexOf(f); return i >= 0 && argv[i + 1] != null ? argv[i + 1] : d; };
 
-/* THE SWEEP NAMED A MAP THAT DOES NOT EXIST. The default was
-   "city,streets,dunes,arena" and there has never been a `streets` — battle.html
-   ends its map table with `if (!MAPS[SET.map]) SET.map = "city"`, so the gate
-   quietly ran the city TWICE and never once loaded `island` or `field`, the two
-   grounds that raise a real piece of the map. A pin is only worth the surface
-   it covers, so: all five, and an unknown name is now a FAILURE rather than a
-   silent second helping of downtown. */
-const KNOWN = ["city", "island", "field", "dunes", "arena"];
+/* EVERY MAP THE PAGE OFFERS, OR THE SWEEP IS DECORATION.
+
+   This list used to read "city,streets,dunes,arena". `streets` is not a map
+   and never was — battle.html ends its map table with `if (!MAPS[SET.map])
+   SET.map = "city"`, so the sweep spent a quarter of its run booting a
+   fallback and calling it a pass, while island and field, the two venues that
+   were actually broken, were never checked at all. A checker whose map list
+   can drift from the page's is a checker that certifies the maps nobody plays.
+
+   And the guard is the other half of that: a name this list does not know is
+   now a FAILURE rather than a silent extra helping of downtown, so the next
+   typo announces itself instead of quietly shrinking the sweep. */
+const KNOWN = ["city", "island", "field", "gov", "harbor", "marina", "speedway", "dunes", "arena"];
 const MAPS = arg("--map", KNOWN.join(",")).split(",");
 {
   const bad = MAPS.filter((m) => !KNOWN.includes(m));
@@ -55,14 +65,15 @@ const SPEED = arg("--speed", "4");
 /* THE TWO BUDGETS, both in SIM seconds and both measured rather than chosen.
 
    OPENING — how long a person may be asked to watch men WALK before the first
-   round goes off. `city` read 10.9 s on main, because the two armies formed up
-   304 m apart at opposite edges of the downtown (see streetSpawner) and spent
-   the first third of the war marching. After the start lines came in, the five
-   maps measure: kill box 1.0 · city 2.2 · dunes 3.2 · Halloran 6.5 · island
-   7.1. The pin is 9 rather than 8 because island is the one that varies: at its
-   previous start line it read 7.3 on one run and 8.4 on the next of the same
-   build, the sim advancing in frame-sized steps. A gate that flakes is a gate
-   people learn to re-run.
+   round goes off. `city` read 10.9 s before the start lines came in, because
+   the two armies formed up 304 m apart at opposite edges of the downtown (see
+   streetSpawner) and spent the first forty seconds marching. All nine maps now
+   measure: harbor 0.6 · field 0.6 · marina 0.6 · kill box 0.9 · gov 1.2 · city
+   2.2 · dunes 3.2 · island 7.2 · speedway 7.3. The pin is 9 rather than 8
+   because the two at the top of that list are the ones that vary — island has
+   been seen at 7.1 and at 8.4 on the same build, the sim advancing in
+   frame-sized steps — and a gate that flakes is a gate people learn to
+   re-run.
 
    RESOLVE — how long a war may run without a result. Deliberately in SIM time,
    not wall time: headless swiftshader manages about 0.6x real on the city map,
@@ -76,18 +87,32 @@ const RESOLVE = parseFloat(arg("--resolve", "120"));
    discipline restored, and asserts the faults COME BACK. A fix nobody can
    turn off has not been measured. */
 const REVERT = has("--revert");
-const EXTRA = REVERT ? "&sep=old&fire=old" : "";
+/* --extra appends raw query params to every battle URL, so the sweep can put
+   BEAST armies (or any roster the page's menu can) under the same counters:
+     node tools/battle-check.mjs --map city --extra "ru=lion&bu=dog"
+   URLSearchParams takes the FIRST occurrence, so --n keeps owning the counts. */
+const EXTRAQ = arg("--extra", "");
+const EXTRA = (REVERT ? "&sep=old&fire=old" : "") + (EXTRAQ ? "&" + EXTRAQ : "");
 
-/* ---- one browser, one dev server, every map through it ------------------ */
+/* ---- one browser, one origin, every map through it ----------------------
+   The origin is normally a devserver on this checkout. --url points the same
+   sweep at a real host: "the bytes are on the server" and "the game runs on
+   the server" are different claims, and only the second one is a deploy. */
 async function claimPort(lo, n, probe) {
   for (let p = lo; p < lo + n; p++) { try { await probe(p); } catch (_) { return p; } }
   throw new Error("no free port");
 }
-const port = await claimPort(9780, 150, (p) => fetch(`http://127.0.0.1:${p}/`));
-const server = spawn("python3", [path.join(ROOT, "tools/devserver.py")],
-  { env: { ...process.env, PORT: String(port) }, stdio: "ignore" });
-const origin = `http://127.0.0.1:${port}/`;
-{
+const REMOTE = arg("--url", "");
+let server = { kill() {} };
+let origin;
+if (REMOTE) {
+  origin = REMOTE.endsWith("/") ? REMOTE : REMOTE + "/";
+  try { await fetch(origin); } catch (e) { console.error("BATTLE: FAIL cannot reach " + origin); process.exit(1); }
+} else {
+  const port = await claimPort(9780, 150, (p) => fetch(`http://127.0.0.1:${p}/`));
+  server = spawn("python3", [path.join(ROOT, "tools/devserver.py")],
+    { env: { ...process.env, PORT: String(port) }, stdio: "ignore" });
+  origin = `http://127.0.0.1:${port}/`;
   let up = false;
   for (let i = 0; i < 40 && !up; i++) { try { await fetch(origin); up = true; } catch (_) { await sleep(100); } }
   if (!up) { console.error("BATTLE: FAIL devserver never came up"); process.exit(1); }
@@ -190,9 +215,36 @@ for (const map of MAPS) {
     stuck: q.stuck, blindFire: q.blindFire, throughMate: q.throughMate,
     shots: q.shots, fratricide: q.fratricide, engaged: q.engaged,
     firstShotT: q.firstShotT,
+    ground: audit && audit.ground, centre: audit && audit.centre, gap: audit && audit.gap,
     errors: errors.filter((e) => !/ProgressEvent|favicon|preload/i.test(e)).slice(0, 6),
   };
   report.push(row);
+
+  /* IS THERE ANY GROUND UNDER THIS BATTLE?
+
+     The fault this exists for makes NO noise: a venue whose builder returns
+     early (an under-declared dependency, a site walk that finds no water) is
+     raised into an empty group, the men stand on the fallback plane, and every
+     other measurement here passes — nobody overlaps, nobody is embedded, and
+     the war ends on schedule, on a featureless grey plate. It was found by
+     looking at a screenshot, which is not a test.
+
+     The heightfield reports what it measured, so a raised venue can be held to
+     it: geometry has to exist, it has to be big enough to fight on, and the
+     grid has to mostly HIT something. `miss` is grid points where a ray found
+     nothing at all — a venue that misses everywhere did not get built. */
+  const G = row.ground;
+  if (audit && audit.raises) {
+    if (!G) {
+      fails.push(`${map}: declares a venue but NOTHING was raised — the men are standing on the fallback plane`);
+    } else if (Math.min(G.spanX, G.spanZ) < 40) {
+      fails.push(`${map}: venue measured only ${G.spanX}x${G.spanZ} m — it raised almost nothing`);
+    }
+    /* NOT a miss-fraction assertion. The marina's grid misses 92% of its own
+       box and is completely correct to: a basin is mostly water, and a venue
+       is not required to be dense. What is NOT allowed is measuring nothing
+       at all, which is the failure that has no other symptom. */
+  }
 
   if (row.overlapPeak > 0) fails.push(`${map}: ${row.overlapPeak} overlapping pairs (worst ${row.overlapWorst} m apart)`);
   /* HOW LONG BEFORE ANYTHING HAPPENS, AND DOES IT EVER FINISH. Neither of

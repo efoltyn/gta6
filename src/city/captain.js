@@ -1437,9 +1437,13 @@
   }
   if (CBZ.addLandmass) CBZ.addLandmass(function (city) {
     yardBuilt = false; boardPos = null; yardGate = null;
-    // marina builds at 66 and stamps its site synchronously; 67 reads it.
+    // marina stamps its site synchronously; this reads it, so it must run
+    // immediately AFTER it. The pair moved together from 66/67 to 97.5/97.6:
+    // the marina cannot choose its water until city/continent.js publishes
+    // the real shoreline at 97, and a yard placed against a marina that has
+    // not been sited yet is a yard on the wrong coast.
     return buildYard(city);
-  }, 67);
+  }, 97.6);
 
   let yardZoneWired = false;
   function wireYardZone() {

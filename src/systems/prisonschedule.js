@@ -51,10 +51,44 @@
    rest of the night (`_keyed`), because staff re-securing the wing at
    lights-out do not re-check a door that reads as locked.
 
+   ------------------------------------------------------------------
+   THE BLOCK GATE IS PART OF THE TIMETABLE, AND WAS NEVER WIRED TO IT
+   (2026-08-16). The table above says men cross between the block and the
+   compound twice a day — `wake` is "Unlock and morning count", `count` is
+   "Evening return — everyone back to the block". world/door.js's 5.72 x 0.34 m
+   leaf at (0, -8) is the only way across, and nothing but the player's keycard
+   had ever moved it. MEASURED at the night block: thirteen mustered men
+   standing in a heap at z -6.2..-7.3, all thirteen aimed at (0, -9.8) on the
+   far side of that slab, and all fifty cell-house racks behind it. A 0.5 m
+   body cannot pass the band z[-8.5,-7.5] at any x. The evening return has
+   therefore never once been physically possible.
+
+   So §3 racks it, and the rule is the narrowest one that works: THE GATE IS
+   OPEN ONLY WHILE A COUNT IS BEING TAKEN, MEN ARE STILL OUT, AND THE LIGHTS
+   ARE STILL ON. It never opens for yard, chow, work or supper — at those hours
+   the keycard is the only way through, byte for byte as before — and it shuts
+   the moment the last man is in, at the 22:00 lights-out klaxon, or when the
+   hold below runs out, whichever comes first. Every hour the escape is
+   actually played, it is shut and the card is the only answer.
+
+   The cell leaves get the same rule for the same reason: a leaf does not rack
+   shut while a man who sleeps behind it is still outside it, which is what
+   "secure and count" means and is already the shape of the refusal that will
+   not close a door on the player. Both holds are bounded — GATE_HOLD from the
+   evening return, CELL_HOLD from secure — because the wing will wait for a
+   straggler and it will not wait all night; a man it stops waiting for loses
+   his rack to somebody who can reach one. The PLAYER's cell is never held: it
+   has no NPC on its racks, so it locks on the 21:00 klaxon exactly as before
+   and the Cell Key is worth exactly what it was worth.
+
    Flags: PRISON_SCHEDULE_V1 (all of it), PRISON_SCHEDULE_DOORS (the night
-   lock alone), PRISON_SCHEDULE_PA (the klaxon alone).
+   lock alone), PRISON_SCHEDULE_PA (the klaxon alone),
+   PRISON_LIGHTSOUT_V2 (the 2026-08-16 routing wave: the count gate, the door
+   hold, the route home, and the housing predicate).
    Ratchet: CBZ.prisonScheduleAudit().gaps pinned at 0 — every hour of the
    day belongs to exactly one block — and .hudText pinned at 0.
+   Ratchet: CBZ.prisonScheduleAudit().gateOpenOffCount pinned at 0 — the block
+   gate is never open outside a count, which is the keycard's whole value.
 ============================================================ */
 (function () {
   "use strict";
@@ -66,6 +100,10 @@
   if (CFG.PRISON_SCHEDULE_V1 == null) CFG.PRISON_SCHEDULE_V1 = true;
   if (CFG.PRISON_SCHEDULE_DOORS == null) CFG.PRISON_SCHEDULE_DOORS = true;
   if (CFG.PRISON_SCHEDULE_PA == null) CFG.PRISON_SCHEDULE_PA = true;
+  // one flag for the whole 2026-08-16 lights-out wave, shared with
+  // systems/prisonrest.js and entities/npc.js — see the header
+  if (CFG.PRISON_LIGHTSOUT_V2 == null) CFG.PRISON_LIGHTSOUT_V2 = true;
+  function v2() { return CFG.PRISON_LIGHTSOUT_V2 !== false; }
 
   const root = CBZ.prisonRoot || CBZ.scene;
   const WORLD = CBZ.WORLD || { cellBlock: { x0: -16, x1: 16, z0: -44, z1: -8 } };
@@ -233,6 +271,69 @@
     return p.x > col.minX - R && p.x < col.maxX + R && p.z > col.minZ - R && p.z < col.maxZ + R;
   }
   let wantLocked = false, doorRetry = 0;
+
+  /* ---- THE HOLD. A wing that secures on the clock alone secures its own men
+       OUT, and behind those leaves is most of the building — fifty of the
+       sixty-six racks. So a leaf waits for the man who sleeps behind it, the
+       same refusal shape `playerInDoorway` already has one line down, and the
+       block gate waits for the same reason on the same timer.
+
+       BOUNDED, because a wing that waits forever is a wing that never locks
+       and the escape game is built on it locking. Ninety seconds is 3 in-game
+       hours at escape's 30 s/hour — long enough for the walk in from the sally
+       port (165 m at 1.5-2.8 m/s), short enough that the wing is sealed well
+       before the useful part of the night. When a hold expires the stragglers
+       lose their racks (prisonRest.release) so a mattress is not held all
+       night by a man in the yard, and everything shuts.
+
+       TWO TIMERS, BECAUSE THERE ARE TWO RULES AND THEY START AT DIFFERENT
+       KLAXONS. The block gate's patience runs from the EVENING RETURN, which
+       is when the men are ordered in; the cell leaves' runs from SECURE, which
+       is when the wing is ordered shut. A single timer armed at the return has
+       about fifteen seconds left by the time the leaves are asked for any,
+       which is no patience at all. ---- */
+  /* 110 s is the evening return through to lights-out — 18:30 to 22:00 is
+     3.5 in-game hours at 30 s each — and it is a CEILING, not a duration: the
+     gate shuts the moment the count is in, and `lightsOut` shuts it regardless.
+     Measured at 90: eight men still in the south block when the budget ran out,
+     locked out of a wing with fifteen free racks in it, `abed` 0.78. The walk
+     in from the sally port is 165 m and the timetable already allows for it. */
+  const GATE_HOLD = 110, CELL_HOLD = 90;
+  let gateT = 0, holdT = 0, waiting = [], gateOpen = false, gateOffCount = 0;
+  function rest() { return CBZ.prisonRest || null; }
+  function counting() { const b = live(); return !!(b && b.home !== null); }
+  // is the block gate one this file may move at all — a blown slab is a hole
+  // (LAW 4) and a leaf the player deliberately latched shut is his
+  function gateUsable() { const d = CBZ.door; return !!(d && !d.blown); }
+  /* THE GATE THIS FILE MOVES IS THE ONE THIS FILE OPENED. Two refusals, and
+     both are the player's:
+       · a leaf he DELIBERATELY latched shut (systems/interactions.js's LAW 3)
+         is not re-opened by staff on the next count;
+       · a leaf HE opened with the keycard is never slammed on him — the whole
+         escape is built on that card, and a schedule that undid it would be
+         this file taking the game's own objective away. So the close only
+         fires on a gate `gateMine` says we racked. */
+  let gateMine = false;
+  function setGate(want) {
+    if (!v2() || !gateUsable()) return;
+    const d = CBZ.door;
+    gateOpen = !!d.open;
+    if (gateOpen === want) { if (!want) gateMine = false; return; }
+    if (want) {
+      if (CBZ.prisonDoorLatched && CBZ.prisonDoorLatched("prison-yard-door")) return;
+      if (CBZ.openDoor) CBZ.openDoor();
+      gateMine = !!d.open;
+    } else {
+      if (!gateMine) return;                      // his card, his door
+      if (CBZ.closeDoor) {
+        CBZ.closeDoor(true);                      // soft: interactions.js ramps the leaf
+        if (CBZ.worldSfx) CBZ.worldSfx("door_close", 0, -8, { ref: 12 });
+      }
+      gateMine = false;
+    }
+    gateOpen = !!d.open;
+  }
+
   function driveDoors(dt) {
     if (!CFG.PRISON_SCHEDULE_DOORS) return;
     const list = cells();
@@ -241,12 +342,26 @@
     if (doorRetry > 0) return;
     doorRetry = 0.35;
     const cb = CBZ.cellblock;
+    const R = rest();
+    // WHO THE WING IS STILL WAITING FOR, asked once for the whole sweep.
+    const hold = v2() && wantLocked && holdT > 0 && R && R.unsettled;
+    if (hold) R.unsettled(waiting); else waiting.length = 0;
     for (let i = 0; i < list.length; i++) {
       const c = list[i];
-      const want = wantLocked && !c._keyed;
+      const want = wantLocked && !c._keyed && !(hold && waiting.indexOf(c) >= 0);
       if (!!c.locked === want) continue;
       if (playerInDoorway(c)) continue;         // never close a door on a body
       cb.setDoor(c, want);
+    }
+    /* ---- and the block gate. It is open only while a count is running and
+         the wing is not yet full; every other hour it is exactly the keycard
+         door it has always been. `gateOffCount` is the ratchet: this file must
+         never leave it open outside a count. ---- */
+    if (v2()) {
+      setGate(gateWanted());
+      // …and only ever OUR gate: a leaf the player opened with his own card at
+      // 02:00 is the game working, not this file leaving the wing unlocked.
+      if (gateMine && gateOpen && !counting()) gateOffCount++;
     }
   }
 
@@ -290,6 +405,57 @@
       return !!h.contains(x, z, pad);
     return inBlock(x, z, pad);
   }
+  /* CAN THIS MAN GET TO THAT RACK — the question systems/prisonrest.js must
+     ask before it writes his name on a mattress, and the reason it has to ask
+     THIS file is that this file is the one holding the keys. Two doors can
+     stand between a body and a bed:
+
+       the block gate   world/door.js's leaf. Passable if it is open, blown, or
+                        going to be racked for the count that is running.
+       his own cell     passable if the leaf is not locked, and a leaf being
+                        HELD open for him counts as not locked because
+                        driveDoors above is holding it for exactly this man.
+
+     Optimistic on purpose while the hold is live: the wing IS about to open
+     for him, and re-shuffling every claim on the frame the klaxon sounds is a
+     game of musical chairs. Pessimistic the moment the hold expires, which is
+     what re-homes a straggler onto a rack he can still reach. */
+  /* Is the block gate open, or about to be racked for the count that is
+     running? One sentence: OPEN ONLY WHILE A COUNT IS RUNNING, MEN ARE STILL
+     OUT, AND THE LIGHTS ARE STILL ON.
+
+     `lightsOut` is the hard floor and it is the timetable's own field, not a
+     timer — at 22:00 the leaf is shut whatever the count says, which is every
+     hour the escape is actually played. Before that the gate follows the COUNT
+     rather than the clock, because a wing that racks its gate at 21:00 with
+     men still in the yard has not secured them, it has locked them out: that
+     read `!wantLocked` in the first draft and left four men outside with
+     nowhere to lie down. `gateT` bounds it either way (90 s from the return,
+     i.e. shut by 21:30 in-game at 30 s/hour) so the gate closes on its own
+     even if a straggler never arrives. */
+  function gateWanted() {
+    const b = live(), R = rest();
+    return counting() && !(b && b.lightsOut) && gateT > 0 && !!R && R.afoot() > 0;
+  }
+  function gatePassable() {
+    const d = CBZ.door;
+    if (!d) return true;                       // no such door in this build
+    if (d.open || d.blown) return true;
+    return gateWanted();
+  }
+  function canReach(n, x, z) {
+    if (!v2()) return true;
+    const p = n && n.group && n.group.position;
+    if (!p) return true;
+    const dest = inBlock(x, z, -0.4);
+    if (dest && !inBlock(p.x, p.z, -0.4) && !gatePassable()) return false;
+    const cb = CBZ.cellblock;
+    if (!cb || !cb.cellAt) return true;
+    const c = cb.cellAt(x, z, -0.1);
+    if (!c || !c.locked) return true;
+    return cb.cellAt(p.x, p.z, -0.1) === c;    // already behind it: he is home
+  }
+
   function inOwnCell(x, z) {
     const cb = CBZ.cellblock;
     if (!cb || !cb.v2 || !cb.playerCell) return inBlock(x, z);
@@ -428,17 +594,43 @@
      residents (`_cellIdx`): world/cellblock.js's order-22.6 leash already owns
      those bodies, and a second system writing their `target` is two movers on
      one Vector3, which is a man vibrating in his own doorway. */
+  /* ...AND A SECOND CLASS WAS EXCLUDED BY ACCIDENT, FOR THE THIRD TIME.
+     `role === "inmate"` is a TRADE, not a sentence — systems/prisonrest.js's
+     §2 header spells this out and was widened on 2026-08-15 — and this
+     predicate, which is the thing that actually MOVES a body, was not widened
+     with it. MEASURED 2026-08-16 at the night block: six men with no muster,
+     no bed claim and no walk — one dealer, one merchant and four thieves,
+     every one of them a convict out of the same factory in the same orange.
+     Asked of the factory now (entities/npc.js:26 stamps `kind`), with the old
+     role test kept as an OR so nothing that counted before drops out. */
   function housed(n) {
-    return n && !n._crowd && !n.dead && !n.escaped && n.role === "inmate" &&
-      n._cellIdx == null && n.group;
+    return n && !n._crowd && !n.dead && !n.escaped && n.group && n._cellIdx == null &&
+      (v2() ? (n.kind === "inmate" || n.role === "inmate") : n.role === "inmate");
   }
-  // a deterministic patch of open wing floor, clear of the x = 0 patrol spine.
-  // THE FALLBACK ONLY: a man is sent to the place he actually sleeps whenever
-  // systems/prisonrest.js can name one (see muster()).
+  /* A deterministic patch of open wing floor, clear of the x = 0 patrol spine.
+     THE FALLBACK ONLY: a man is sent to the place he actually sleeps whenever
+     systems/prisonrest.js can name one (see muster()).
+
+     THE GRID WAS WRITTEN FOR A THREE-ROW WING. `x = ±(3.0 + (row % 4) * 2.6)`
+     reaches ±10.8 and `z` starts at -11.5, and on 2026-08-15 the cell house
+     grew two inner rows into what had been 23.4 m of empty aisle: rows D and E
+     now occupy x[-7.9,-4.1] and x[4.1,7.9] from z = -14.1 north, so four of
+     the eight lanes park a man inside a cell wall. Never observed firing — it
+     only runs when prisonRest.place() returns null, i.e. before the fittings
+     have drained — but a fallback that is wrong is worse than no fallback.
+     The wing's own open floor is the south cross-passage (z -13.5..-9.0, clear
+     x -11..+11, measured) and the centre hall (x -1..1 at its narrowest, where
+     the door pockets pinch it), so the grid lays men across the cross-passage
+     and never north of it. */
   function musterSpot(i) {
+    if (!v2()) {
+      const side0 = (i & 1) ? 1 : -1;
+      const row0 = (i / 2) | 0;
+      return { x: side0 * (3.0 + (row0 % 4) * 2.6), z: -11.5 - ((row0 / 4) | 0) * 3.1 };
+    }
     const side = (i & 1) ? 1 : -1;
-    const row = (i / 2) | 0;
-    return { x: side * (3.0 + (row % 4) * 2.6), z: -11.5 - ((row / 4) | 0) * 3.1 };
+    const row = (i / 2) | 0;                          // 48 lanes, all of them floor
+    return { x: side * (1.0 + (row % 6) * 1.8), z: -9.6 - ((row / 6) | 0) * 1.1 };
   }
   /* WHERE HE IS SENT IS WHERE HE SLEEPS. The first draft parked every mustered
      man on a hash of a floor grid, and systems/prisonrest.js then walked him
@@ -460,29 +652,223 @@
       spot.unit = unit.id || null;
       spot.route = unit.route ? { x: unit.route.x, z: unit.route.z } : null;
     }
+    spot.bed = bed;
+    if (v2()) spot.way = routeHome(n, bed, spot);
     return spot;
   }
-  let mustered = false;
+
+  /* ==========================================================
+     6b. THE ROUTE HOME IS A ROUTE, NOT A POINT.
+
+     entities/npc.js's mover is a straight line to `target` and
+     systems/actorcollide.js says so out loud: "It's not full pathfinding, so
+     an NPC may bump a wall its target is behind." A single destination is
+     therefore only ever correct in an empty field. MEASURED at the night
+     block: thirteen men in a heap at the wing gate all aimed at one point, and
+     nine more pressed against the laundry's south wall aimed diagonally
+     through it at the dorm door.
+
+     systems/navigation.js's A* was tried first and cannot do this: its escape
+     grid is 2.15 m cells with 0.72 m of collider pad, which closes every
+     doorway in the compound. Seven of the eight routes a man actually needs
+     came back `kind: "fallback"` — no path at all. So the legs are AUTHORED
+     off the wing's own published records, which is what the rest of this file
+     already does with doorX/doorZ and the housing unit's `route`.
+
+     Every coordinate below was read off a free-space sweep of the live
+     colliders at a 0.5 m grid with the actor's own 0.5 m radius:
+
+       the throat        z[-8.5,-7.5] is solid at every x until the gate racks;
+                         inside it the south cross-passage z[-13.5,-9.0] is
+                         clear from x -11 to +11.
+       the galleries     x -11..-9 and x +9..+11, clear the whole length.
+       the centre hall   x -3..+3, pinching to x -1..+1 at each door pocket, so
+                         the hall is walked on x = 0 and stepped out of only
+                         when the man is abeam his own door.
+       the cross-aisle   z -37..-35, clear across, which is how the north row
+                         (row A, doors facing +z) is reached.
+       the dorm          a 1.5 m slot at z ~105.5 between the laundry's south
+                         wall (z 104.3) and the dorm's north wall (z 105.8),
+                         open only from the EAST — its west end is the
+                         compound wall.
+
+     THE LAST LEG IS THE DOORWAY, not the mattress, for rows B/C/D/E: standing
+     in his own door a man is 2.2-2.5 m from the rack's solved entry point, and
+     systems/rest.js hands over at 2.6 m, so propuse's own arc walks the last
+     stretch. Row A is 3.8 m deep and he walks in.
+     ========================================================== */
+  const THROAT_OUT = -6.2, THROAT_IN = -10.2, CROSS_Z = -11.8, AISLE_Z = -36.2;
+  function routeHome(n, bed, spot) {
+    const p = n.group.position;
+    const unit = bed._housingUnit || null;
+    const way = [];
+    if (unit && unit.route) {
+      /* A PUBLISHED HOUSING UNIT STATES ITS OWN ENTRANCE and this file walks
+         to it down the lane outside: 1.6 m short of the route point is the
+         slot between the unit's north wall and whatever is built in front of
+         it, and the lead-in comes from the open side (measured: east). */
+      const apron = unit.route.z - 1.6;
+      /* THE LEAD-IN IS THE COMPOUND'S CENTRE LANE, NOT THE UNIT'S OWN CORNER.
+         Measured: with the lead-in at the dorm's east edge (bounds.x1 + 3),
+         men coming from the yard walked a diagonal straight into the
+         workshop's north-east corner and stopped there — two of them pinned at
+         (-25.5, 79.3) and (-24.7, 79.3) at 23:00, both still on leg 0 with a
+         reachable rack waiting. x = 0 is open from z 60 to the sally port and
+         the apron lane is open from x -43 eastward, so the dog-leg out to the
+         middle and back is the only pair of legs with no building on them. */
+      way.push({ x: 0, z: apron });
+      way.push({ x: unit.route.x, z: apron });
+      way.push({ x: unit.route.x, z: unit.route.z });
+    } else {
+      // HIS OWN LANE ACROSS THE THROAT. One aim point for thirteen men is a
+      // plug; the lane is a hash of the RACK, so it is the same every night.
+      const h = CBZ.hash01 ? CBZ.hash01(bed.x, bed.z, 4517) : 0.5;
+      const lane = -2.1 + h * 4.2;
+      way.push({ x: lane, z: THROAT_OUT });
+      way.push({ x: lane, z: THROAT_IN });
+      const cb = CBZ.cellblock;
+      const c = (cb && cb.cellAt) ? cb.cellAt(bed.x, bed.z, -0.1) : null;
+      if (c) {
+        const mid = (c.oa + c.ob) / 2;
+        if (c.dx !== 0) {
+          // a side row: up its own gallery, or up the middle of the hall when
+          // the door opens onto the hall (|mouth| < 8 m from the spine)
+          const mouthX = c.faceX + c.dx * 1.35;
+          const aisleX = Math.abs(mouthX) > 8 ? mouthX : 0;
+          way.push({ x: aisleX, z: CROSS_Z });
+          way.push({ x: aisleX, z: c.faceZ + mid });
+          if (aisleX !== mouthX) way.push({ x: mouthX, z: c.faceZ + mid });
+        } else {
+          // the north row: up the hall to the cross-aisle, then across it
+          way.push({ x: 0, z: CROSS_Z });
+          way.push({ x: 0, z: AISLE_Z });
+          way.push({ x: c.faceX + mid, z: AISLE_Z });
+        }
+        way.push({ x: c.doorX, z: c.doorZ });
+      } else {
+        way.push({ x: 0, z: CROSS_Z });
+      }
+    }
+    way.push({ x: spot.x, z: spot.z });
+    /* START HIM ON THE LEG HE HAS NOT ALREADY WALKED. A man rounded up INSIDE
+       his own housing must not be marched back out to the gate to come in
+       again — which is what a route always starting at leg 0 would do to every
+       body the muster catches indoors. */
+    const home = unit && unit.contains ? unit.contains : function (x, z, pad) { return inBlock(x, z, pad); };
+    let wi = 0;
+    if (home(p.x, p.z, -0.4)) while (wi < way.length - 1 && !home(way[wi].x, way[wi].z, -0.4)) wi++;
+    n._wayI = wi;
+    return way;
+  }
+
+  /* ---- TAKING THE COUNT. It used to be a one-shot edge (`if (on ===
+       mustered) return`), so a man who was fighting, KO'd, out of the wing or
+       simply not yet born when the klaxon sounded never got a destination for
+       the rest of the night, and a man whose rack was released got no second
+       one. MEASURED: six men with no muster at all at 23:00 and three racks
+       with two names. The count is now RE-TAKEN on a cadence for as long as a
+       count block is running, and it only touches men who need it. ---- */
+  let mustered = false, nextSpot = 0;
+  function musterOne(n, i) {
+    if (!n._dayRegion) n._dayRegion = n.region;
+    // his lane is HIS: a man the recount keeps re-asking about must not shuffle
+    // sideways across the cross-passage every half second while he waits
+    if (n._spotI == null) n._spotI = i;
+    const s = bedSpotFor(n) || musterSpot(n._spotI);
+    if (s.z < CB.z0 + 2) return false;                   // ran out of wing floor
+    n.region = [s.x - 1.1, s.x + 1.1, s.z - 1.1, s.z + 1.1];
+    n.target.set(s.x, 0, s.z);
+    n._muster = s;
+    n._bedX = n._bedZ = null;                            // npc.js re-reads the new spot
+    n._homeD = Infinity; n._homeT = 0; n._homeLeg = null; // the stall detector starts over
+    return true;
+  }
+  /* THE FALLBACK GRID IS A RING, NOT A RAY. `nextSpot` is bumped by every
+     re-count, and unbounded it walks the lanes north out of the cross-passage
+     and into the cell rows — measured, men parked at z -26 inside row D. There
+     are 48 authored lanes; index 49 is lane 1 again, which is a man standing
+     beside another man and not a man standing inside a wall. */
+  const SPOTS = 48;
+  function bumpSpot() { nextSpot = (nextSpot + 1) % SPOTS; }
   function muster(on) {
     if (on === mustered) return;
     mustered = on;
+    nextSpot = 0;
     const list = CBZ.npcs || [];
-    let i = 0;
     for (let k = 0; k < list.length; k++) {
       const n = list[k];
       if (!housed(n)) continue;
-      if (on) {
-        if (!n._dayRegion) n._dayRegion = n.region;
-        const s = bedSpotFor(n) || musterSpot(i++);
-        if (s.z < CB.z0 + 2) continue;                     // ran out of wing floor
-        n.region = [s.x - 1.1, s.x + 1.1, s.z - 1.1, s.z + 1.1];
-        n.target.set(s.x, 0, s.z);
-        n._muster = s;
-      } else if (n._dayRegion) {
+      if (on) { if (musterOne(n, nextSpot)) bumpSpot(); }
+      else if (n._dayRegion) {
         n.region = n._dayRegion;
-        n._dayRegion = null; n._muster = null;
-        n._bedX = n._bedZ = null;                          // npc.js re-rolls at the next curfew
+        n._dayRegion = null; n._muster = null; n._wayI = 0; n._spotI = null;
+        n._bedX = n._bedZ = null;                        // npc.js re-rolls at the next curfew
       }
+    }
+  }
+  /* Everybody the first pass could not place, and everybody whose rack has
+     since gone. Bounded: at most RECOUNT bodies per tick, so a wing that loses
+     twenty claims at once does not land twenty route builds on one frame. */
+  const RECOUNT = 3;
+  let recountAt = 0;
+  function recount(dt) {
+    if (!v2() || !mustered) return;
+    recountAt -= dt;
+    if (recountAt > 0) return;
+    recountAt = 0.5;
+    const list = CBZ.npcs || [];
+    let did = 0;
+    for (let k = 0; k < list.length && did < RECOUNT; k++) {
+      const n = list[k];
+      if (!housed(n) || n._propLie) continue;
+      const m = n._muster;
+      // a spot with a rack that is still his is fine; a man standing on the
+      // FALLBACK grid has no rack at all and is asked again every pass, because
+      // the thing he is waiting for is a mattress coming free
+      if (m && m.bed && m.bed._claim === n && n._restBed === m.bed) continue;
+      if (musterOne(n, nextSpot)) { bumpSpot(); did++; }
+    }
+  }
+
+  /* ---- THE STALL. The legs above are authored, so they are right about the
+       geometry this wing has today and will be wrong the first time somebody
+       builds a wall across one. Rather than trust them, MEASURE: a man who has
+       not closed a metre on his own bed in STALL seconds is not walking there,
+       whatever the route says. He gives the rack back — permanently, so
+       CBZ.rest.claim does not hand him the same unreachable one next tick —
+       and the recount above finds him another. That is also the only thing
+       standing between a bad waypoint and a body pressed against a wall until
+       dawn, which is the fault this whole wave is about. ---- */
+  const STALL = 14, STALL_STEP = 1.0;
+  let stallAt = 0;
+  function stalls(dt) {
+    if (!v2() || !mustered) return;
+    stallAt -= dt;
+    if (stallAt > 0) return;
+    stallAt = 1.0;
+    const R = rest();
+    const list = CBZ.npcs || [];
+    for (let k = 0; k < list.length; k++) {
+      const n = list[k];
+      if (!housed(n) || n._propLie || !n._muster) continue;
+      if (n.ko > 0 || n.aiState === "fight" || n.aiState === "flee") { n._homeT = 0; continue; }
+      /* MEASURED AGAINST THE LEG HE IS WALKING, NOT THE BED. A route is a
+         dog-leg by construction — up the hall, across the cross-aisle, into
+         the door — so a man obeying it perfectly spends whole legs getting
+         FURTHER from the mattress. The first draft measured to the bed and
+         took five men's racks away for walking their own route correctly. */
+      const p = n.group.position, m = n._muster;
+      const way = m.way;
+      const leg = (way && way.length) ? way[Math.min(n._wayI | 0, way.length - 1)] : m;
+      const d = Math.hypot(leg.x - p.x, leg.z - p.z);
+      // reaching a leg resets the clock: progress is progress
+      if (n._homeLeg !== leg) { n._homeLeg = leg; n._homeD = d; n._homeT = 0; continue; }
+      if (d < (n._homeD == null ? Infinity : n._homeD) - STALL_STEP) { n._homeD = d; n._homeT = 0; continue; }
+      n._homeT = (n._homeT || 0) + 1.0;
+      if (n._homeT < STALL) continue;
+      n._homeT = 0; n._homeD = Infinity; n._homeLeg = null;
+      if (R && R.release) R.release(n, true);
+      n._muster = null; n._wayI = 0;              // recount() gives him another
     }
   }
   /* …and the guards physically move them. WHERE an inmate walks is npc.js's
@@ -567,7 +953,7 @@
      ========================================================== */
   function live() { return PLAN.block(); }
 
-  function apply(b, announce) {
+  function apply(b, announce, prev) {
     if (b.cells === "lock") wantLocked = true;
     else if (b.cells === "open") {
       wantLocked = false;
@@ -582,6 +968,21 @@
     // gate is many real seconds, and a wing that racks shut long after the
     // horn reads as two unrelated events instead of one order being obeyed.
     doorRetry = 0;
+    /* A LOCK-UP ARMS THE HOLD ONCE, ON ITS FIRST BLOCK. count -> secure ->
+       night is ONE lock-up with three klaxons in it, not three; re-arming on
+       each of them (which the first draft did) hands the wing a fresh ninety
+       seconds of patience at 22:00 and the gate is still standing open at
+       23:00, which is the escape objective left ajar all night. Measured:
+       `hold` read 89.4 and `gateOpen` true at the night block. */
+    if (b.home === null) { gateT = 0; holdT = 0; }
+    else {
+      // the two blocks that ORDER men across the gate: `wake` (cells open) and
+      // `count` (cells null). `secure` and `night` lock the wing and arm the
+      // leaves' own patience instead — the gate's own budget carries over from
+      // the return, so the count can finish across the 21:00 klaxon.
+      if (b.cells !== "lock") gateT = GATE_HOLD;
+      else if (!prev || prev.cells !== "lock") holdT = CELL_HOLD;
+    }
     drivePosts(b.home !== null);
     muster(b.home !== null);
     if (announce) soundPA(b.pa);
@@ -595,7 +996,7 @@
   /* A RUN CAN START AT ANY HOUR — the sky clock runs on the title screen — so
      the plan lands in the block that is ACTUALLY running and tells us it was
      not a change (`first`). Every later transition announces itself. */
-  PLAN.on(function (b, prev, first) { apply(b, !first); });
+  PLAN.on(function (b, prev, first) { apply(b, !first, prev); });
 
   function reset() {
     PLAN.rearm(); blasts = 0;
@@ -604,11 +1005,14 @@
     muster(false);
     drivePosts(false);
     wantLocked = false;
+    gateT = 0; holdT = 0; waiting.length = 0; gateOpen = false; gateOffCount = 0; gateMine = false;
+    // the block gate goes back the way the build left it — shut, keycard only
+    if (v2() && gateUsable() && CBZ.door.open && CBZ.closeDoor) CBZ.closeDoor();
     if (list && CBZ.cellblock.resetDoors) CBZ.cellblock.resetDoors();
   }
   // Tear down when the RUN ends, never on a PAUSE: `paused` is a state exit
   // like any other to the shared dispatcher, and unlocking the wing there
-  // would slide thirteen leaves open behind the pause card and slam them shut
+  // would slide twenty-five leaves open behind the pause card and slam them shut
   // again the instant you resumed. (states: title/playing/paused/won/lost —
   // systems/state.js setState.)
   if (CBZ.jailBoost && CBZ.jailBoost.onStateExit) CBZ.jailBoost.onStateExit(reset, ["title", "won", "lost"]);
@@ -621,10 +1025,36 @@
 
     PLAN.poll(dt);            // fires apply() through the listener above
 
+    /* THE HOLD RUNS DOWN WHILE THE COUNT IS BEING TAKEN, and the instant it
+       reaches zero the wing stops waiting: every man still holding a rack he
+       has not reached gives it up (so the mattress is not held all night by a
+       body in the yard) and driveDoors racks everything shut on the next
+       0.35 s pass. This is the one thing that guarantees the compound is
+       sealed at night whatever happened during the count. */
+    if (v2() && counting()) {
+      if (gateT > 0) gateT = Math.max(0, gateT - dt);
+      if (holdT > 0) {
+        holdT -= dt;
+        if (holdT <= 0) {
+          holdT = 0;
+          const R = rest(), list = CBZ.npcs || [];
+          for (let k = 0; k < list.length; k++) {
+            const n = list[k];
+            if (!housed(n) || n._propLie || !n._restBed) continue;
+            if (canReach(n, n._restBed.x, n._restBed.z)) continue;
+            if (R && R.release) R.release(n, true);
+            n._muster = null; n._wayI = 0;
+          }
+        }
+      }
+    }
+
     driveDoors(dt);
     tryCellKey();
     enforceCurfew(dt);
     herd(dt);
+    recount(dt);
+    stalls(dt);
     pumpPA(dt);
   });
   // the horn's own lamp fades on menus too, so a paused game does not freeze
@@ -662,6 +1092,10 @@
     inBlock: inBlock,
     inHousing: inHousing,
     inAssignedHousing: inAssignedHousing,
+    // "can this man get to that rack right now" — systems/prisonrest.js's
+    // reachability test, answered by the file holding the keys
+    canReach: canReach,
+    counting: counting,
     // the PA, for anything that legitimately announces itself (a later
     // security tier, a recapture): n blasts from the nearest real horn
     announce: soundPA,
@@ -691,6 +1125,12 @@
       wantLocked: wantLocked, lockedDoors: locked, keyedDoors: keyed,
       mustered: mustered,
       nightPosts: (CBZ.guards || []).filter(function (g) { return !!g._dayRoute; }).length,
+      // the 2026-08-16 count gate. `gateOpenOffCount` is the ratchet: the
+      // keycard leaf may only ever stand open while a count is being taken.
+      v2: v2(), counting: counting(),
+      hold: Math.round(holdT * 10) / 10, gateHold: Math.round(gateT * 10) / 10,
+      gateOpen: !!(CBZ.door && CBZ.door.open), gateOpenOffCount: gateOffCount,
+      heldOpenCells: waiting.length,
     };
   };
 })();

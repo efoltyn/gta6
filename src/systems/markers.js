@@ -51,29 +51,6 @@
   ax.fillText("!", 32, 32);
   const alertTex = new THREE.CanvasTexture(ac);
 
-  const offerTex = {};
-  function makeOfferTexture(ch, bg, fg) {
-    const key = ch + bg + fg;
-    if (offerTex[key]) return offerTex[key];
-    const oc = document.createElement("canvas");
-    oc.width = oc.height = 64;
-    const ox = oc.getContext("2d");
-    ox.fillStyle = bg;
-    ox.strokeStyle = "rgba(0,0,0,.68)";
-    ox.lineWidth = 5;
-    ox.beginPath();
-    ox.roundRect ? ox.roundRect(9, 12, 46, 38, 10) : ox.rect(9, 12, 46, 38);
-    ox.fill();
-    ox.stroke();
-    ox.fillStyle = fg;
-    ox.font = "bold 32px Fredoka, Arial, sans-serif";
-    ox.textAlign = "center";
-    ox.textBaseline = "middle";
-    ox.fillText(ch, 32, 32);
-    offerTex[key] = new THREE.CanvasTexture(oc);
-    return offerTex[key];
-  }
-
   /* ---- THE ICONS ARE DEPTH-TESTED NOW -------------------------------------
      Every one of these was `depthTest: false`, which is not a style choice —
      it is a wallhack. A snitch two cells away, a guard on the far side of the
@@ -112,14 +89,6 @@
     return spr;
   }
 
-  function makeApproachMarker() {
-    const spr = new THREE.Sprite(markerMat(makeOfferTexture("?", "#f7f1df", "#111827")));
-    spr.scale.set(0.66, 0.52, 1);
-    spr.position.y = 3.55;
-    spr.visible = false;
-    return spr;
-  }
-
   function hunting(a) {
     return (a.hunt > 0 || a.huntPlayer > 0) && !a.dead && !(a.ko > 0) && !a.escaped;
   }
@@ -146,19 +115,6 @@
     return !!(a && (a.wedge || a.kind === "guard" || a.kind === "warden"));
   }
 
-  function approachStyle(kind) {
-    if (kind === "tax" || kind === "snitchThreat" || kind === "debtCollect" || kind === "jobThreat" || kind === "infoSell" || kind === "stashCover" || kind === "racketCover" || kind === "coverDebt" || kind === "witnessFix" || kind === "recantOffer" || kind === "crewDues" || kind === "stickUp" || kind === "alibiDeal" || kind === "witnessBlackmail" || kind === "payoffOffer" || kind === "racketOffer" || kind === "snitchIntel") {
-      return { ch: "$", bg: "#172033", fg: "#ffd451" };
-    }
-    if (kind === "coverStory" || kind === "favor" || kind === "lookout" || kind === "crewBackup" || kind === "gangJob" || kind === "gangParley" || kind === "gangInvite" || kind === "reputation" || kind === "heatWarning") {
-      return { ch: "+", bg: "#16351f", fg: "#8dff9f" };
-    }
-    if (kind === "turfWarning" || kind === "copTaunt" || kind === "copTip" || kind === "copPlea") {
-      return { ch: "!", bg: "#3d2113", fg: "#ffb020" };
-    }
-    return { ch: "?", bg: "#f7f1df", fg: "#111827" };
-  }
-
   // overhead-marker height: just above the (unscaled-root) character's head.
   // Post HUMAN_SCALE=0.70 the old 3.55–3.85 literals (tuned to the 2.60u rig)
   // floated a metre high; CBZ.charHeadY(a) resolves to ~1.97 (head 1.82 + margin).
@@ -168,8 +124,8 @@
   /* ============================================================
      WHEN AN ICON IS ALLOWED TO EXIST — the conversation gate.
 
-     The information these four sprites carry (this man will talk to you, this
-     man has already talked ABOUT you, this screw is getting suspicious) is
+     The information these three sprites carry (this man has already talked
+     ABOUT you, this screw is getting suspicious, this man is worth a stop) is
      good information. It was being delivered at the wrong moment, to a player
      stood 40 m away who could do nothing about it, THROUGH the walls of the
      room it was happening in. So the icon becomes a property of BEING THERE:
@@ -247,9 +203,15 @@
       if (!a._tipMarker) { a._tipMarker = makeTipMarker(); a.group.add(a._tipMarker); }
       if (!a._snitchMarker) { a._snitchMarker = makeSnitchMarker(); a.group.add(a._snitchMarker); }
       if (!a._alertMarker) { a._alertMarker = makeAlertMarker(); a.group.add(a._alertMarker); }
-      if (!a._approachMarker) { a._approachMarker = makeApproachMarker(); a.group.add(a._approachMarker); }
 
-      const hostile = hunting(a) && (!guardish(a) || !!a.flashlightOn);
+      // A HUNT IS THE THREAT, NOT THE TORCH. This used to require a guard's
+      // flashlight to be ON before his hunt counted as hostile — which only
+      // ever worked because entities/guards.js lit the beam for every hunt,
+      // including a midday sprint across the yard. Now that a torch is a
+      // dark-hours tool again, a guard chasing you under the sun would have
+      // fallen through to `softAlert` and grown a friendly "walk up and talk"
+      // marker over his head mid-charge. Ask the brain state directly.
+      const hostile = hunting(a);
       const softAlert = !hostile && guardish(a) && (a.alert || 0) > 0.15 && !a.flashlightOn && !a.dead && !(a.ko > 0);
       const tip = !hostile && CBZ.game && CBZ.game.role === "cop" && a.copMarked > 0 && !a.dead && !(a.ko > 0) && !a.escaped;
       const knownReport = (a.reportedPlayerT || 0) > 0;
@@ -273,11 +235,33 @@
       paint(a._tipMarker, tip, op, headY(a) + bob);
       paint(a._snitchMarker, snitch, op, headY(a) + bob);
       if (snitch) a._snitchMarker.scale.setScalar(knownReport ? 0.56 : 0.66);
-      if (offer) {
-        const s = approachStyle(a.approach.kind);
-        a._approachMarker.material.map = makeOfferTexture(s.ch, s.bg, s.fg);
-      }
-      paint(a._approachMarker, offer, op, headY(a) + bob);
+      /* THE OFFER MARKER IS GONE — HE LOOKS AT YOU INSTEAD.
+
+         OWNER: "question and money means the dialogue they say when you walk
+         up is relevant to that, plus [+] means they run towards you to help."
+
+         Both halves are already true and the glyph was previewing them:
+           · "?" and "$" said "this man wants something from you" — and the
+             thing he wants is spelled out the moment you arrive, in his own
+             approach line (systems/interact.js reads a.approach.msg). This
+             marker only ever appeared at 3.8m, and the panel that names the
+             offer opens at 3.6m, so the sprite was a two-tenths-of-a-metre
+             preview of a card about to open by itself.
+           · "+" said "backup". Five of the six sites that drew it set
+             aiState="shadowPlayer" on the line ABOVE, and shadowPlayer targets
+             a spot at your shoulder and returns baseSpeed * 1.25 — he is
+             already running to you at a jog while the symbol explains that he
+             is running to you.
+
+         What a man walking over to talk to you actually does is LOOK at you,
+         so that is what he does now (CBZ.npcStare, systems/reactions.js). The
+         stare is re-armed while the approach is live, so his head stays on you
+         for the whole walk-up instead of snapping once.
+
+         The other three markers stay: softAlert, tip and snitch are hidden
+         KNOWLEDGE (this screw suspects you, this man has already talked about
+         you) with no behaviour of their own to read. */
+      if (offer && want && CBZ.npcStare) CBZ.npcStare(a, 0.6);
     }
   }
 

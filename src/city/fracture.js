@@ -537,6 +537,20 @@
   api.onHole = null;          // net layer assigns: fn(hole) on every NEW local carve
   api.recent = recent;
   api.recentAt = recentAt;    // generalized dedup window (additive)
+  // A caller that OPENED the wall itself (systems/breach.js's contact carve)
+  // owns the hole: it calls this to drop the carve the same blast deferred a
+  // frame earlier. Without it the deferred carve re-resolves against LIVE
+  // colliders — the struck box is spliced out by then — and lands its
+  // room-sized hole on a remnant flank or a neighbouring wall. Measured in
+  // the pen: one 5 lb brick made its doorway AND blew a second full-height
+  // hole in the doorway's own flank.
+  api.cancelPendingNear = function (x, z, r) {
+    const rr = r == null ? DEFER_CELL : r;
+    for (let i = deferQ.length - 1; i >= 0; i--) {
+      const d = deferQ[i];
+      if (Math.abs(d.x - x) <= rr && Math.abs(d.z - z) <= rr) deferQ.splice(i, 1);
+    }
+  };
   api.burst = fractureBurst;  // explicit alias if a caller prefers a named method
   api._adopt = function (rec, r) { return adopt(rec, r || (rec.gap ? (rec.gap.u1 - rec.gap.u0) / 2 : 1.6), false); };
   api._cleared = cleared;

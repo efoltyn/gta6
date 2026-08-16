@@ -394,7 +394,14 @@
     // g.busted: the BUSTED cutscene (city/wanted.js bust()) releases the lock
     // itself while mode is still "city"/"playing" — without this exemption the
     // release spuriously paused the world mid-cutscene.
-    if (!cam.locked && CBZ.game.state === "playing" && !(CBZ.surv && CBZ.surv.spectating) && !(CBZ.fullMap && CBZ.fullMap.active) && !CBZ.cityMenuOpen && !CBZ.settingsOpen && !(CBZ.cityCam && CBZ.cityCam.death) && !CBZ.game.busted && !(CBZ.game.mode === "city" && CBZ.player && CBZ.player.dead)) CBZ.setState("paused");
+    // CBZ.invOpen (src/systems/inventory.js): the escape/survival stash [I]
+    // also calls document.exitPointerLock() itself on open. It is the
+    // non-city twin of cityMenuOpen and belongs on this list for the same
+    // reason — without it, [I] unlocked the cursor, this handler read that as
+    // a bare unlock and paused, and inventory.js's own `!playing && invOpen ->
+    // close()` sweep then shut the bag on the next frame. Pressing I flashed
+    // the stash and dropped you on the pause card.
+    if (!cam.locked && CBZ.game.state === "playing" && !(CBZ.surv && CBZ.surv.spectating) && !(CBZ.fullMap && CBZ.fullMap.active) && !CBZ.cityMenuOpen && !CBZ.invOpen && !CBZ.settingsOpen && !(CBZ.cityCam && CBZ.cityCam.death) && !CBZ.game.busted && !(CBZ.game.mode === "city" && CBZ.player && CBZ.player.dead)) CBZ.setState("paused");
     else if (cam.locked && CBZ.game.state === "paused") CBZ.setState("playing");
   });
   document.addEventListener("mousemove", (e) => {

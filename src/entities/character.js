@@ -1133,6 +1133,45 @@
       roll: Math.max(-0.48, Math.min(0.48, inward)),
     };
   }
+  const _reachMountGrip = new THREE.Vector3();
+  // The holster target already exists as a live rig mount. Solve the same
+  // shoulder/elbow chain used by mantle grips against that point instead of
+  // guessing one pose for every torso and arm length. Because the mount and
+  // shoulder are siblings under `body`, body lean/bob cancels out naturally.
+  function reachMountArmSolve(ch, target, arm) {
+    const P = ch && ch.profile;
+    const part = ch && ch.parts && (arm === "l" ? ch.parts.la : ch.parts.ra);
+    if (!P || !part || !target || !target.parent || !ch.body || !ch.group ||
+        typeof target.getWorldPosition !== "function" || typeof ch.body.worldToLocal !== "function") return null;
+    ch.group.updateMatrixWorld(true);
+    target.getWorldPosition(_reachMountGrip);
+    ch.body.worldToLocal(_reachMountGrip);
+    const dx = _reachMountGrip.x - part.position.x;
+    let dy = _reachMountGrip.y - part.position.y;
+    let dz = _reachMountGrip.z - part.position.z;
+    const l1 = Math.max(0.12, P.armUp - 0.02);
+    const l2 = Math.max(0.12, P.armLo + 0.01);
+    let reach = Math.hypot(dy, dz);
+    const maxReach = (l1 + l2) * 0.965;
+    const minReach = Math.abs(l1 - l2) + 0.035;
+    if (reach > maxReach) {
+      const k = maxReach / reach;
+      dy *= k; dz *= k; reach = maxReach;
+    } else if (reach < minReach) {
+      const k = minReach / Math.max(0.001, reach);
+      dy *= k; dz *= k; reach = minReach;
+    }
+    const elbow = Math.acos(Math.max(-1, Math.min(1,
+      (reach * reach - l1 * l1 - l2 * l2) / (2 * l1 * l2))));
+    const fromDown = Math.atan2(dz, -dy);
+    const shoulder = fromDown - Math.atan2(l2 * Math.sin(elbow), l1 + l2 * Math.cos(elbow));
+    const lateral = Math.atan2(dx, Math.max(0.16, reach));
+    return {
+      shoulder: -shoulder,
+      elbow: -elbow,
+      roll: Math.max(-0.72, Math.min(0.72, lateral)),
+    };
+  }
 
   // The torso and legs are siblings authored from the feet, but anatomically
   // meet at this socket. Every pose writer may rotate the torso; these two
@@ -2255,14 +2294,18 @@
       ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, 0.18 - recoilSide * 0.22, ar, dt);
       ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, 0.34, ar, dt);
       ch.parts.ra.position.z = damp(ch.parts.ra.position.z, 0.14, ar, dt);
-      ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, (longGun ? -1.55 : -1.45) - 0.14 * hv - pitch * 0.8, ar - 1, dt);
-      ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, (longGun ? -0.34 : -0.22) - 0.10 * hv, ar - 1, dt);
-      ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, longGun ? -0.42 : -0.30, ar - 1, dt);
-      ch.parts.la.position.z = damp(ch.parts.la.position.z, (longGun ? 0.24 : 0.14) + hsup * 0.5, ar - 1, dt);
+      // A pistol is still a TWO-HAND shot. The old sidearm targets left the
+      // support fist beside the left shoulder while the gun floated in the
+      // right hand (visible from the prison chase camera). Cross and extend the
+      // support arm onto the firing wrist; long guns keep their handguard pose.
+      ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, (longGun ? -1.55 : -1.56) - 0.14 * hv - pitch * 0.8, ar - 1, dt);
+      ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, (longGun ? -0.34 : -0.32) - 0.10 * hv, ar - 1, dt);
+      ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, longGun ? -0.42 : -0.68, ar - 1, dt);
+      ch.parts.la.position.z = damp(ch.parts.la.position.z, (longGun ? 0.24 : 0.20) + hsup * 0.5, ar - 1, dt);
       // gun arm nearly locked; the support elbow closes onto the handguard.
       // recoil folds the elbow a touch — the arm absorbs the kick.
       setElbow(J.ra, -0.10 - recoil * 0.25, ar);
-      setElbow(J.la, (longGun ? -0.72 : -0.48) - 0.26 * hv, ar - 1);
+      setElbow(J.la, (longGun ? -0.72 : -0.22) - 0.26 * hv, ar - 1);
     } else if (ch.cuffed) {
       ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, 0.5, 10, dt);
       ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, 0.5, 10, dt);
@@ -2481,7 +2524,60 @@
       guard.rotation.z = -sgn * 0.42;
       guard.position.z = 0.10;
       if (guardJ) guardJ.rotation.x = -1.85;
-      if (ch.punchKind === "upper") {                   // rising uppercut
+      if (ch.punchKind === "stab") {
+        /* SHANK THRUST — deliberately NOT a punch with a prop in the fist.
+           Everything that makes this read is a difference from the jab above:
+
+             · a shank CHAMBERS AT THE RIBS, not at the chin. You carry it
+               pinned against the forearm and low against the body, because
+               that is how it stays unseen until it is in someone. So the
+               wind pulls the elbow BACK past the hip (arm.rotation.x goes
+               positive) instead of stacking the fist by the jaw;
+             · the drive is a PISTON, not an arc — a short straight line
+               along the body's forward axis. The upper arm barely rotates
+               (-0.62 at peak, less than half the jab's travel); it is the
+               ELBOW snapping from folded to nearly straight that carries the
+               point, and the shoulder shoves through on position.z;
+             · the off hand does not sit at the jaw guarding. A shanking is a
+               GRAB and a stick: the free arm reaches out to hook the man and
+               hold him on the blade, which is also what keeps the two arms
+               from reading as a boxing stance;
+             · there is no follow-through. The body's yaw sweep is a third of
+               a hook's — you do not rotate through a stab, you plant and
+               drive and pull it straight back out, which is why `recover`
+               retracts hard on the same axis it drove on.
+
+           The blade prop hangs off the RIGHT hand socket, so combat.js pins
+           punchArm to "r" for a stab; `left` is still honoured here so the
+           block stays correct if anything ever puts a shank in the other fist. */
+        const grabArm = left ? ch.parts.ra : ch.parts.la;
+        const grabJ = left ? J.ra : J.la;
+        /* The travel is deliberately most of the shoulder's range. Authored at
+           -0.62 the "piston" barely left the hip: on the impact frame the hand
+           was still low and the point aimed at the concrete, so the plate read
+           as a man standing next to someone holding a shiv rather than putting
+           it in him. -1.05 lands the fist around the belly of a same-size
+           opponent (character.js's jab calls -1.42 chin height), which is
+           where a stab goes, and the elbow finishing near-straight is what
+           carries the point the last 30 cm. */
+        arm.rotation.x = 0.30 * wind - 1.05 * drive + 0.35 * recover;
+        arm.rotation.y = sgn * (-0.10 - 0.20 * drive);
+        arm.rotation.z = sgn * (0.30 - 0.18 * drive);
+        arm.position.z = -0.06 * wind + 0.32 * drive - 0.10 * recover;
+        // folded hard on the wind (the point is behind the hip), snapped
+        // almost straight at the peak — this is the joint doing the stabbing.
+        if (armJ) armJ.rotation.x = -(1.95 + 0.35 * wind) + 1.86 * Math.pow(drive, 1.25);
+        // the hooking hand: out and across, closing as the blade goes in
+        grabArm.rotation.x = -0.55 - 0.62 * drive;
+        grabArm.rotation.y = -sgn * (0.22 + 0.30 * drive);
+        grabArm.rotation.z = -sgn * 0.30;
+        grabArm.position.z = 0.06 + 0.14 * drive;
+        if (grabJ) grabJ.rotation.x = -(0.85 - 0.30 * drive);
+        // a low, committed body: drops into it, minimal rotation, no lean-back
+        ch.body.rotation.x = ch.lean + 0.10 * wind - 0.20 * drive;
+        ch.body.rotation.y = sgn * (0.18 * wind + 0.26 * drive - 0.10 * recover);
+        ch.body.position.y += -0.05 * wind - 0.07 * drive;
+      } else if (ch.punchKind === "upper") {            // rising uppercut
         // fist drops to the waist on the wind, then the hips+shoulder launch
         // it UP THE CENTERLINE to the chin — upper arm stops forward-low
         // (~-0.9) with the elbow folded so the forearm is vertical at impact.
@@ -2548,29 +2644,60 @@
 
     // ---- FIGHT STANCE idle: bladed, hands-up, ready. Only when not mid-move,
     // so any actual strike/reaction below (or the punch above) wins outright.
+    /* `bladeCarry` joins the exclusion list for the same reason aimingPose and
+       carryPose are on it: this is a BOXING guard — both fists up by the jaw,
+       weight bladed, hands ready to catch a punch — and it is the wrong body
+       for a man holding an edge. You do not put your dukes up with a shank;
+       you keep the hand low and lead with the point, which is what
+       systems/prisonshanks.js poses. Written as a rig flag rather than fought
+       over by update order, exactly like the two flags beside it. */
     if (ch.fightStance && !(ch.punchT > 0) && !(ch.kickT > 0) && !(ch.blockT > 0) &&
         !(ch.dodgeT > 0) && !(ch.staggerT > 0) && !(ch.koT > 0) && !ch.koPose &&
-        !ch.aimingPose && !ch.carryPose && !ch.cuffed && !ch.surrender && !ch.handsUp) {
-      ch.fightPh = (ch.fightPh || 0) + dt;              // own phase: weave, don't walk
+        !ch.aimingPose && !ch.carryPose && !ch.bladeCarry && !ch.cuffed &&
+        !ch.surrender && !ch.handsUp) {
+      /* GASSED — the guard comes down. (`ch.winded`, 0..1, written by
+         systems/combat.js from the punch stamina it used to keep private.)
+
+         Punch stamina gated every attack you threw and had NO body: the bar in
+         #survBars is display:none outside survival/gungame (hud.css), and the
+         value itself was a module-local `let` nobody could read. So the only
+         way the prison could tell you why your fists stopped working was a
+         popup that said "Catch your breath." — narration standing in for an
+         animation that was never built.
+
+         A tired fighter is one of the most legible things a body can do, and
+         it needs no new rig: the arms sink out of the chin-guard, the weave
+         goes slow and heavy, the chest starts heaving on the breath channel,
+         and the knees give up the sprung crouch. Every one of those is a
+         channel this block already drives. At winded = 0 the arithmetic below
+         reduces EXACTLY to the values above it, so a fresh fighter is
+         untouched, byte for byte. */
+      const gas = Math.min(1, Math.max(0, ch.winded || 0));
+      // the weave itself slows as he tires — a gassed man does not bounce
+      ch.fightPh = (ch.fightPh || 0) + dt * (1 - gas * 0.45);
       const w = Math.sin(ch.fightPh * 2.6);             // slow weave
       const w2 = Math.sin(ch.fightPh * 5.2 + 1.3);      // faster forearm pump
-      // forearms up near the chin, tucked slightly inward, a touch forward
-      ch.parts.la.rotation.x = -0.9 + w2 * 0.05;
-      ch.parts.la.rotation.z = -0.26;
+      const pump = 1 - gas * 0.6;                       // the pump dies off too
+      // forearms up near the chin, tucked slightly inward, a touch forward —
+      // and sagging toward the ribs as he gasses out
+      ch.parts.la.rotation.x = (-0.9 + gas * 0.62) + w2 * 0.05 * pump;
+      ch.parts.la.rotation.z = -0.26 + gas * 0.10;
       ch.parts.la.rotation.y = 0.1;
-      ch.parts.la.position.z = 0.1;
-      ch.parts.ra.rotation.x = -0.98 - w2 * 0.05;
-      ch.parts.ra.rotation.z = 0.26;
+      ch.parts.la.position.z = 0.1 - gas * 0.06;
+      ch.parts.ra.rotation.x = (-0.98 + gas * 0.66) - w2 * 0.05 * pump;
+      ch.parts.ra.rotation.z = 0.26 - gas * 0.10;
       ch.parts.ra.rotation.y = -0.1;
-      ch.parts.ra.position.z = 0.1;
-      // bladed torso + subtle rhythmic weave; soft knees when standing still
+      ch.parts.ra.position.z = 0.1 - gas * 0.06;
+      // bladed torso + subtle rhythmic weave; soft knees when standing still.
+      // The heave rides ch.breath (the same channel idle/carry already use), so
+      // a winded man visibly sucks air where a fresh one is still.
       ch.body.rotation.y = -0.18 + w * 0.1;
-      ch.body.rotation.x = ch.lean + 0.08;
+      ch.body.rotation.x = ch.lean + 0.08 + gas * (0.10 + Math.sin(ch.breath * 4.6) * 0.055);
       ch.body.rotation.z = ch.sway + w * 0.04;
       if (!moving) {
-        ch.body.position.y -= 0.05 + w * 0.02;          // sit into the stance, bob
-        ch.parts.ll.scale.y = 0.96;
-        ch.parts.rl.scale.y = 0.96;
+        ch.body.position.y -= (0.05 + w * 0.02) * (1 - gas * 0.8);  // stands up out of the crouch
+        ch.parts.ll.scale.y = 0.96 + gas * 0.04;
+        ch.parts.rl.scale.y = 0.96 + gas * 0.04;
       }
     }
 
@@ -2680,7 +2807,43 @@
       const rsgn = rleft ? 1 : -1;
       const high = ch.reachHigh || 0;               // 0 = hip pocket, 1 = collar
       const across = ch.reachSide == null ? -1 : ch.reachSide;
-      if (rarm) {
+      const mountReach = (ch.reachKind === "holster-back" || ch.reachKind === "holster-hip")
+        ? reachMountArmSolve(ch, ch.reachTarget, ch.reachArm) : null;
+      if (rarm && mountReach) {
+        // Exact target solve for this body's real arm lengths and live mount.
+        // The gun remains welded to this hand during the extend/dwell phase.
+        rarm.rotation.x = mountReach.shoulder * renv;
+        rarm.rotation.y = 0;
+        rarm.rotation.z = mountReach.roll * renv;
+        rarm.position.z = 0;
+        if (rarmJ) rarmJ.rotation.x = mountReach.elbow * renv;
+        if (rother && ch.reachKind === "holster-back") {
+          rother.rotation.x = -0.24 * renv;
+          rother.rotation.z = -rsgn * 0.12 * renv;
+        }
+      } else if (rarm && ch.reachKind === "holster-back") {
+        // Reach BEHIND and over the shoulder while the weapon prop travels to
+        // the live back mount. Positive X swings this rig's arm backward;
+        // positive Z lifts the right elbow away from the ribs so the hand does
+        // not pass through the torso on its way to the sling.
+        rarm.rotation.x = 1.18 * renv;
+        rarm.rotation.y = -0.46 * renv;
+        rarm.rotation.z = -0.78 * renv;
+        rarm.position.z = -0.10 * renv;
+        if (rarmJ) rarmJ.rotation.x = -1.68 * renv;
+        if (rother) {
+          rother.rotation.x = -0.24 * renv;
+          rother.rotation.z = -rsgn * 0.12 * renv;
+        }
+      } else if (rarm && ch.reachKind === "holster-hip") {
+        // The hand falls back and out to the actual right-hip mount. This is a
+        // shorter, lower action than a back sling and keeps the elbow close.
+        rarm.rotation.x = 0.46 * renv;
+        rarm.rotation.y = -0.12 * renv;
+        rarm.rotation.z = -0.34 * renv;
+        rarm.position.z = -0.05 * renv;
+        if (rarmJ) rarmJ.rotation.x = -0.62 * renv;
+      } else if (rarm) {
         // upper arm swings forward and slightly down; the elbow stays soft so
         // the hand hangs at pocket height instead of pointing like a salute
         rarm.rotation.x = (-0.62 - 0.55 * high) * renv;
@@ -2688,9 +2851,11 @@
         rarm.rotation.z = rsgn * (0.20 - 0.26 * high) * renv;
         rarm.position.z = 0.16 * renv;
       }
-      if (rarmJ) rarmJ.rotation.x = -(0.85 - 0.30 * high) * renv;
+      if (rarmJ && ch.reachKind !== "holster-back" && ch.reachKind !== "holster-hip") {
+        rarmJ.rotation.x = -(0.85 - 0.30 * high) * renv;
+      }
       // the OTHER hand drifts up and out — the distraction, the friendly touch
-      if (rother) {
+      if (rother && ch.reachKind !== "holster-back") {
         rother.rotation.x = -0.34 * renv;
         rother.rotation.z = -rsgn * 0.22 * renv;
       }
@@ -2835,6 +3000,35 @@
       ch.koLift = 0;
       ch.koK = 0;
     }
+    // ---- TASER CONTACT: a short involuntary whole-body lock over whichever
+    // locomotion/KO pose already owns the actor. systems/taserfx.js raises only
+    // this timer; the character rig remains the sole limb writer. The high-rate
+    // alternating offsets read as muscle contraction while the larger opposing
+    // arm/leg angles keep the silhouette tense instead of a generic loose fall.
+    if (ch.taserT > 0) {
+      const td = Math.max(0.18, ch.taserDur || 0.72);
+      ch.taserT = Math.max(0, ch.taserT - dt);
+      const strength = Math.min(1, ch.taserT / Math.min(0.16, td));
+      const buzz = Math.sin((td - ch.taserT) * 92) * strength;
+      ch.body.rotation.x -= 0.14 * strength;
+      ch.body.rotation.z += buzz * 0.055;
+      if (ch.parts.la) {
+        ch.parts.la.rotation.x -= 0.38 * strength;
+        ch.parts.la.rotation.z += 0.42 * strength + buzz * 0.05;
+      }
+      if (ch.parts.ra) {
+        ch.parts.ra.rotation.x -= 0.42 * strength;
+        ch.parts.ra.rotation.z -= 0.44 * strength + buzz * 0.05;
+      }
+      if (J.la) J.la.rotation.x -= 0.50 * strength;
+      if (J.ra) J.ra.rotation.x -= 0.54 * strength;
+      if (ch.parts.ll) ch.parts.ll.rotation.x -= 0.18 * strength + buzz * 0.025;
+      if (ch.parts.rl) ch.parts.rl.rotation.x += 0.16 * strength - buzz * 0.025;
+      if (ch.neck) {
+        ch.neck.rotation.x -= 0.16 * strength;
+        ch.neck.rotation.z -= buzz * 0.065;
+      }
+    }
     // LAST inside the base animator: KO, stagger, punch and surrender all get
     // their final Euler before the shared socket is solved.
     lockCharacterHips(ch);
@@ -2936,9 +3130,9 @@
                LEFT shoulder), staggered 0.06 lower and 0.06 further out so
                two stowed rifles read as a clean X with no z-fighting where
                they cross.
-       hip   — pistol holster ON the right hip: muzzle down with a ~12°
+       hip   — pistol holster ON the semantic right hip: muzzle down with a ~12°
                forward cant, grip to the rear, outboard of the thigh
-               (x .46 > leg span .40) so it never buries in the leg.
+               (|x| .46 > leg span .40) so it never buries in the leg.
      Consumers must OVERWRITE the hand-mount transform CBZ.buildActorWeapon
      ships on its props: prop.position.set(0,0,0); prop.rotation.set(0,0,0);
      then their own scale. Prop convention: barrel -Z, rail +Y, grip -Y;
@@ -2966,7 +3160,10 @@
     rig._mounts = {
       back:  mk(-0.14 * s, 1.44 * s, -0.36 * s, 1.571, -0.698, -1.271),
       back2: mk( 0.14 * s, 1.38 * s, -0.42 * s, 1.571,  0.698, -1.271),
-      hip:   mk( 0.46 * s, 1.05 * s, -0.20 * s, -1.781, -0.26, Math.PI),
+      // The shoulder roots were corrected to semantic right = local -X in
+      // makeCharacter. Keep the holster on that SAME side so a right-hand
+      // stow does not cross the pelvis toward the obsolete +X hip.
+      hip:   mk(-0.46 * s, 1.05 * s, -0.20 * s, -1.781, 0.26, Math.PI),
     };
     return rig._mounts;
   }
@@ -3352,7 +3549,9 @@
      Returns the duration so a caller can time a consequence to the DWELL —
      the grab lands at ~55% of it, not on the first frame.
        opts.arm "l"|"r"  · opts.dur seconds · opts.side -1 across / +1 out
-       opts.high 0 hip .. 1 collar · opts.amt 0..1 commitment
+       opts.high 0 hip .. 1 collar · opts.amt 0..1 commitment · opts.kind for
+       a registered physical reach such as holster-back / holster-hip
+       opts.target live Object3D mount for a physical hand-to-target solve
      No-ops on a rig that is mid-strike or down, so a lift can never cancel a
      punch and a KO'd body never reaches for anything. */
   CBZ.charReach = function (ch, opts) {
@@ -3366,6 +3565,8 @@
     ch.reachSide = opts.side == null ? -1 : +opts.side;
     ch.reachHigh = Math.max(0, Math.min(1, +opts.high || 0));
     ch.reachAmt = opts.amt == null ? 1 : Math.max(0, Math.min(1, +opts.amt));
+    ch.reachKind = opts.kind || "";
+    ch.reachTarget = opts.target && opts.target.isObject3D ? opts.target : null;
     return dur;
   };
   CBZ.animChar = animChar;

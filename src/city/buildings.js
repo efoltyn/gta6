@@ -970,12 +970,27 @@
   CBZ.cityGlassReset = function () {
     shatteredPanes = 0;
     winOpenQ.length = 0;   // never carve a fresh arena from a stale pre-reset queue
+    /* CBZ.CONFIG.DEMO_FAST_PURGE (declared in city/demolition.js, which loads
+       after this file — so it is read here at CALL time, never at parse time,
+       and an absent demolition.js simply leaves it undefined => legacy path).
+       The re-seat test below was `CBZ.colliders.indexOf(gp.col) === -1`: a full
+       scan of the city's 123,332-entry collider array PER PANE, across 37,540
+       panes. Normally only a handful of panes are broken so the loop is cheap —
+       but after a city-wide nuke EVERY pane is shattered and the reset pays all
+       37,540 scans in one frame: measured 553 ms, on the reset that is supposed
+       to hand the player a clean city. One membership Set, built once, makes it
+       O(colliders + panes). Same cure as the removal direction (city/
+       demolition.js's destroy() and city/structural.js's purge()). */
+    const have = CBZ.CONFIG.DEMO_FAST_PURGE ? new Set(CBZ.colliders) : null;
     for (const gp of cityGlass) {
       if (gp.shattered) {
         gp.shattered = false;
         if (gp.mesh) gp.mesh.visible = true;
         else paneShow(gp, true);       // pooled pane: restore (honours night state)
-        if (gp.col && CBZ.colliders.indexOf(gp.col) === -1) CBZ.colliders.push(gp.col);
+        if (gp.col) {
+          if (have) { if (!have.has(gp.col)) { CBZ.colliders.push(gp.col); have.add(gp.col); } }
+          else if (CBZ.colliders.indexOf(gp.col) === -1) CBZ.colliders.push(gp.col);
+        }
       }
       gp.cracked = false;
     }
@@ -1547,6 +1562,17 @@
     const c = best;
     const parent = wall.parent;                             // the building group (its position offsets locals)
     const px = parent ? parent.position.x : 0, pz = parent ? parent.position.z : 0;
+    // FREE-STANDING vs FACADE. A city building group is TRANSLATED to its lot
+    // (bgroup.position.set(ox,0,oz), ~line 2279) — that offset is what "there
+    // is a building volume behind this wall" looks like in the scenegraph. A
+    // wall hanging off an identity-positioned parent (the scene itself, the
+    // prison-world root, Gun Game's worldRoot, scene-level props) is a lone
+    // slab in the open: nothing behind it. Three decisions below change on
+    // that fact — the gap width, the outward side, and whether the hole gets
+    // an interior dress at all.
+    const freeStanding = !parent || parent === CBZ.scene ||
+      (Math.abs(parent.position.x) < 1e-6 && Math.abs(parent.position.z) < 1e-6);
+    carveDbg.freeStanding = freeStanding;
     const horiz = (c.maxX - c.minX) >= (c.maxZ - c.minZ);   // wall runs along X if wider in X
     const minU = horiz ? c.minX : c.minZ, maxU = horiz ? c.maxX : c.maxZ;   // wall extent (world) along its axis
     const len = maxU - minU;
@@ -1575,7 +1601,16 @@
        old value is kept as a floor — and a window opening, which passes an
        explicit gapW, is untouched. */
     const ordnanceW = Math.min(opts.gapW != null ? opts.gapW : r * 2, 9);
-    const gapW = Math.max(0.5, Math.min(len * 0.8, opts.gapW != null ? opts.gapW : r * 2), ordnanceW);
+    /* The ordnance floor below exists because a city facade is a RUN of short
+       segments (the measured 0.50 m slit above) — the gap must span the struck
+       box's neighbours, which the opening sweep then clears. A free-standing
+       wall IS the whole wall: letting ordnanceW bypass the len clamp there
+       swallows the entire box — both flanks come out negative-width and are
+       skipped — so the wall vanishes and only the dress would remain standing.
+       The bypass is facade-only; a lone slab keeps its flanks. */
+    const gapW = freeStanding
+      ? Math.max(0.5, Math.min(len * 0.8, ordnanceW))
+      : Math.max(0.5, Math.min(len * 0.8, opts.gapW != null ? opts.gapW : r * 2), ordnanceW);
     let u0 = hit - gapW / 2, u1 = hit + gapW / 2;
     if (u1 - u0 < 0.4) { u0 = (minU + maxU) / 2 - gapW / 2; u1 = (minU + maxU) / 2 + gapW / 2; }
     // the STRUCK box's own surviving extent (its remnants can never be wider
@@ -1628,9 +1663,14 @@
     }
     // OUTWARD side: from the building centre when we have one (stable across
     // replays), else from the side the hit came from (scene-level props).
+    // The centre-offset trick only means "outward" when the parent is a
+    // building group positioned at its lot. A scene parent sits at (0,0,0),
+    // so cOff is just the wall's world coordinate — its sign says which side
+    // of the MAP ORIGIN the wall is on, not which way is out — and the dress
+    // and rim extruded on the wrong side for most of the prison.
     const cOff = horiz ? fixed - pz : fixed - px;
     let outS;
-    if (parent && Math.abs(cOff) > 0.6) outS = cOff >= 0 ? 1 : -1;
+    if (!freeStanding && Math.abs(cOff) > 0.6) outS = cOff >= 0 ? 1 : -1;
     else { const off = horiz ? (z - fixed) : (x - fixed); outS = off >= 0 ? 1 : -1; }
 
     const wmat = wall.material;
@@ -1821,6 +1861,19 @@
       cityBreaches.push(rec);
       return rec;
     }
+    /* THE HOUSE THE ROCKET BUILT (user-filmed, prison yard). Everything in
+       the dress below — pocket liner, back wall, concrete floor slab, glowing
+       ceiling lamp, furniture — is a CITY INTERIOR, authored to be swallowed
+       by the building volume behind a facade. A free-standing wall has no
+       behind: built there, the prefab stands proud in the open as a lit
+       little house on the spot the rocket cleared. A lone slab keeps only
+       what blasted concrete leaves — the remnant flanks, the fractured rim,
+       the scorch and the debris the fracture chain already throws. */
+    if (freeStanding) {
+      buildRim();
+      cityBreaches.push(rec);
+      return rec;
+    }
     // revealRoom (a shot-open upper window) reads as an EMPTY LIT ROOM — same
     // shell as a blast (inset pocket + back wall + floor slab) but NO damage
     // (no furniture, rebar, rubble) plus closing side walls + a ceiling, so a
@@ -1920,49 +1973,55 @@
     if (parent) parent.add(sq); else CBZ.scene.add(sq);
     rec.extras.push(sq);
 
-    // --- FRACTURED RIM: 8-13 jittered concrete prisms ringing the opening in
-    //     a radial crack pattern, a few HANGING into the gap as cracked
-    //     overhang. Built in face space, merged to ONE mesh, fake-AO shaded. ---
-    const rim = [];
-    const nCh = 8 + ((Math.random() * 6) | 0);
-    const per = 2 * (gapU + gapV);
-    for (let i = 0; i < nCh; i++) {
-      const cw = 0.2 + Math.random() * (0.25 + Math.min(0.5, r * 0.18));
-      const chh = cw * (0.7 + Math.random() * 0.9);
-      const g = new THREE.BoxGeometry(cw, chh, 0.16 + Math.random() * 0.22);
-      g.rotateZ((Math.random() - 0.5) * 1.1);   // radial jitter around the face normal
-      g.rotateX((Math.random() - 0.5) * 0.4);
-      // walk the perimeter (bottom → right → top → left), jittered
-      const t = ((i + Math.random() * 0.6) / nCh) * per;
-      let fu, fv;
-      if (t < gapU) { fu = u0 + t; fv = v0 + (Math.random() * 0.12 - 0.04); }
-      else if (t < gapU + gapV) { fu = u1 + (Math.random() * 0.1 - 0.04); fv = v0 + (t - gapU); }
-      else if (t < gapU * 2 + gapV) {
-        fu = u1 - (t - gapU - gapV);
-        fv = Math.random() < 0.45 ? v1 - chh * 0.45 : v1 + (Math.random() * 0.1 - 0.03);   // overhang chunks HANG into the gap
-      } else { fu = u0 - (Math.random() * 0.1 - 0.04); fv = v1 - (t - gapU * 2 - gapV); }
-      fu = Math.max(u0 - 0.15, Math.min(u1 + 0.15, fu + (Math.random() - 0.5) * 0.2));
-      fv = Math.max(v0 - 0.1, Math.min(v1 + 0.12, fv));
-      const fn = fixed + outS * (thick / 2 - 0.05 + Math.random() * 0.16);   // proud of the face
-      if (horiz) g.translate(fu - px, fv, fn - pz);
-      else { g.rotateY(Math.PI / 2); g.translate(fn - px, fv, fu - pz); }
-      rim.push(g);
-    }
-    const BGU = THREE.BufferGeometryUtils;
-    let rgs = null;
-    if (BGU && BGU.mergeBufferGeometries && rim.length > 1) { const m = BGU.mergeBufferGeometries(rim); for (const g of rim) g.dispose(); rgs = m ? [m] : null; }
-    else if (rim.length) rgs = rim;            // no merger: every chunk still lands, one mesh each
-    if (rgs) for (let ri = 0; ri < rgs.length; ri++) {
-      const rg = rgs[ri];
-      shadeGeo(rg, false);
-      const rm = new THREE.Mesh(rg, rimMat());
-      rm.castShadow = false; rm.receiveShadow = true;
-      if (parent) parent.add(rm); else CBZ.scene.add(rm);
-      rec.extras.push(rm);
-    }
+    buildRim();
 
     cityBreaches.push(rec);
     return rec;
+
+    // --- FRACTURED RIM: 8-13 jittered concrete prisms ringing the opening in
+    //     a radial crack pattern, a few HANGING into the gap as cracked
+    //     overhang. Built in face space, merged to ONE mesh, fake-AO shaded.
+    //     (a function — hoisted — so the free-standing early-out above keeps
+    //     its rim while skipping the interior dress) ---
+    function buildRim() {
+      const rim = [];
+      const nCh = 8 + ((Math.random() * 6) | 0);
+      const per = 2 * (gapU + gapV);
+      for (let i = 0; i < nCh; i++) {
+        const cw = 0.2 + Math.random() * (0.25 + Math.min(0.5, r * 0.18));
+        const chh = cw * (0.7 + Math.random() * 0.9);
+        const g = new THREE.BoxGeometry(cw, chh, 0.16 + Math.random() * 0.22);
+        g.rotateZ((Math.random() - 0.5) * 1.1);   // radial jitter around the face normal
+        g.rotateX((Math.random() - 0.5) * 0.4);
+        // walk the perimeter (bottom → right → top → left), jittered
+        const t = ((i + Math.random() * 0.6) / nCh) * per;
+        let fu, fv;
+        if (t < gapU) { fu = u0 + t; fv = v0 + (Math.random() * 0.12 - 0.04); }
+        else if (t < gapU + gapV) { fu = u1 + (Math.random() * 0.1 - 0.04); fv = v0 + (t - gapU); }
+        else if (t < gapU * 2 + gapV) {
+          fu = u1 - (t - gapU - gapV);
+          fv = Math.random() < 0.45 ? v1 - chh * 0.45 : v1 + (Math.random() * 0.1 - 0.03);   // overhang chunks HANG into the gap
+        } else { fu = u0 - (Math.random() * 0.1 - 0.04); fv = v1 - (t - gapU * 2 - gapV); }
+        fu = Math.max(u0 - 0.15, Math.min(u1 + 0.15, fu + (Math.random() - 0.5) * 0.2));
+        fv = Math.max(v0 - 0.1, Math.min(v1 + 0.12, fv));
+        const fn = fixed + outS * (thick / 2 - 0.05 + Math.random() * 0.16);   // proud of the face
+        if (horiz) g.translate(fu - px, fv, fn - pz);
+        else { g.rotateY(Math.PI / 2); g.translate(fn - px, fv, fu - pz); }
+        rim.push(g);
+      }
+      const BGU = THREE.BufferGeometryUtils;
+      let rgs = null;
+      if (BGU && BGU.mergeBufferGeometries && rim.length > 1) { const m = BGU.mergeBufferGeometries(rim); for (const g of rim) g.dispose(); rgs = m ? [m] : null; }
+      else if (rim.length) rgs = rim;            // no merger: every chunk still lands, one mesh each
+      if (rgs) for (let ri = 0; ri < rgs.length; ri++) {
+        const rg = rgs[ri];
+        shadeGeo(rg, false);
+        const rm = new THREE.Mesh(rg, rimMat());
+        rm.castShadow = false; rm.receiveShadow = true;
+        if (parent) parent.add(rm); else CBZ.scene.add(rm);
+        rec.extras.push(rm);
+      }
+    }
   }
   // PUBLIC primitive for city/fracture.js (ledger/caps/persistence live there)
   CBZ.cityCarveWall = carveHole;
@@ -2743,6 +2802,14 @@
     // together for core/batch.js. Position-hashed pick (never rng), so lot #23's
     // brick colour is decidable without building lots 0..22.
     const civicSpec = opts.civic || null;
+    // FACADE KIT: does the requested facade crown the roof? This has to be
+    // answered HERE, before the roofline code below, because the shell decides
+    // its own setback crown and corner finials long before dressFacade() runs.
+    // A dome, a minaret, a mansard or a setback tower must not have the host's
+    // own spire growing up through it.
+    const facadeTakesRoof = !!(CBZ.facadeCrownsRoof && CBZ.facadeCrownsRoof(
+      opts.dress || null,
+      function (salt) { return CBZ.hash01 ? CBZ.hash01(ox, oz, salt) : 0.42; }, storeys));
     let MPAL = null;
     if (MASONRY && CBZ.masonryPalette) {
       // ashlar STONE for the monumental trades; the humbler civic kinds that
@@ -3898,7 +3965,9 @@
         belt(rTop + 0.12, 0.22, 0.14, shadeHex(color, 0.80));
       }
       // ---- CORNER PINNACLES: chunky parapet-corner caps (finials; storeys >= 3)
-      if (storeys >= 3) {
+      // Skipped when a facade owns the roofline: gothic pinnacles, a mosque's
+      // merlons or a mansard's cresting all land on these same four corners.
+      if (storeys >= 3 && !facadeTakesRoof) {
         const finH = 0.5 + h01(0x11e) * 0.5;
         for (const sxp of [-1, 1]) for (const szp of [-1, 1]) {
           dbox(sxp * (w / 2 - 0.06), rTop + pp + finH / 2, szp * (d / 2 - 0.06), 0.36, finH, 0.36, TRIM);
@@ -3910,7 +3979,9 @@
       // ONLY (cast shadow, no collider), seated ON the roof slab and inset from
       // it, so a walkable terrace remains around it (roofloot / helipad / snipers
       // keep working) and no interior floor is touched.
-      if (storeys >= 6) {
+      // Skipped outright when a facade crowns the roof — this volume plus its
+      // spire is exactly what was growing through the domes and mansards.
+      if (storeys >= 6 && !facadeTakesRoof) {
         // CENTRE THE CROWN ON THE ROOF SLAB (slabCx/slabCz/slabW/slabD — the solid
         // walkable roof, which already excludes the -x stairwell strip) and rise
         // from rTop, so the crown base sits ON the roof (never floating above the
@@ -3978,6 +4049,10 @@
         garageGround: !!opts.garageGround,
         showroom: !!opts.showroom,
         civic: civicSpec,
+        // THE FACADE KIT's spec, written at the CALL SITE exactly the way
+        // govcomplex.js writes {crown, order, motto} for the Capitol. Absent on
+        // every existing caller, so the kit is inert until someone asks for it.
+        dress: opts.dress || null,
         pal: MPAL || { wall: color, stone: TRIM, dirt: 0x2a2420, kind: "brick", id: null },
         color, TRIM, BASE, PIL, MULL,
         hash: bhash,
@@ -4059,11 +4134,21 @@
         if (CBZ.bldCivicOrder) CBZ.bldCivicOrder(ctxC);
         if (CBZ.bldCivicCrown) CBZ.bldCivicCrown(ctxC);
       }
+      // ---- THE FACADE KIT (city/facade_kit.js + city/facades/*.js) --------
+      // The generalisation of what govcomplex.js does to this same building:
+      // an object literal at the call site turns the base office shell into a
+      // brick loft / an ashlar bank / a mosque / a pagoda, deriving every
+      // dimension from w, d, storeys, FH and rTop. Emitted here so it lands in
+      // the merged deco buckets below — a dressed building is draw-call equal
+      // to a bare one. Returns the def so we can tell whether it took the roof.
+      const dressed = CBZ.dressFacade ? CBZ.dressFacade(ctxC) : null;
       // ROOF CLUTTER on every real building (not just masonry) — flat empty
       // roofs are the second-biggest "this is a box" tell after flat facades.
       // Skipped on civic anchors: their DOME / CLOCK TOWER already owns the
       // roof centre, and a water tank next to a courthouse dome is comedy.
-      if (CBZ.bldRoofClutter && !opts.boarded && !(civicF && civicSpec)) CBZ.bldRoofClutter(ctxC);
+      // Skipped for the same reason when a facade crowned its own roof.
+      if (CBZ.bldRoofClutter && !opts.boarded && !(civicF && civicSpec)
+          && !(dressed && dressed.crownsRoof)) CBZ.bldRoofClutter(ctxC);
     }
     flushDeco();
 
@@ -8083,10 +8168,25 @@
   CBZ.cityMegaTower = function () {
     if (!_megaTower || !_megaTower.lot) return null;
     const lb = _megaTower.lot.building || {};
+    /* THE `|| _helipad` FALLBACK MUST NOT OUTLIVE A COLLAPSE.
+       city/demolition.js's suspendAir() nulls b.helipad and b.hangar while the
+       tower is rubble and restores them on the rebuild calendar — the entire
+       basis of its DEMO_LANDMARKS decision ("flying a plane into your own
+       hangar should cost you the hangar, and then give it back"). `hangar`
+       below honours that, because it reads the building and stops. `helipad`
+       did not: the module-global `_helipad` (stamped by the rooftop-pad
+       post-pass) survives the teardown untouched, so the fallback handed
+       playeraircraft.js / phone.js a pad on a tower that is a smoking pile,
+       and the missile chopper spawned in mid-air over rubble.
+       `lb._demoAir` is demolition's own suspension stamp — the record it
+       writes on the building the moment it takes the tags away — so it is the
+       exact tell for "suspended, do not fall back". The fallback still covers
+       the case it was written for: the boot window before the post-pass has
+       stamped lot.building.helipad, where no suspension record exists. */
     return {
       lot: _megaTower.lot,
       penthouseDoor: _megaTower.penthouseDoor,
-      helipad: lb.helipad || _helipad || null,
+      helipad: lb.helipad || (lb._demoAir ? null : (_helipad || null)),
       hangar: lb.hangar || null,
     };
   };

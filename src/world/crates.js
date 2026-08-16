@@ -88,7 +88,7 @@
      A previous pass MUTED these — greyer lumber, a steel chip instead of a gold
      one — and left the mechanic standing, which is why they are still here. The
      mute was treating a doctrine violation as a colour problem. The doctrine is
-     the ITEM EXISTENCE TEST (docs/claude/doctrine.md): "everything in inventory
+     the ITEM EXISTENCE TEST (scrolls/claude/doctrine.md): "everything in inventory
      is a physical asset", "the WORLD is the inventory", and the owner's own
      corollary that glowing floor pickups make it Subway Surfers. A box you walk
      up to, hold E on for 0.9 s, and receive a randomised payout from IS A LOOT

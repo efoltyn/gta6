@@ -51,11 +51,18 @@
     "AK-47": "ak47", ak47: "ak47",   // the status rifle gets its OWN model (wood + banana mag) — it must be recognizable in NPC hands
     Sniper: "sniper", sniper: "sniper",
     LMG: "lmg", lmg: "lmg",
+    // MELEE. Without these rows the fall-through below hands a 9 mm pistol to
+    // anyone carrying a blade — "Shiv" is the name nine years of prison loot
+    // tables use, "Shank" is what the weapon row calls itself, and both have
+    // to land on the same model or an inmate frisked for a shiv draws a Glock.
+    Shank: "shank", shank: "shank",
+    Shiv: "shank", shiv: "shank",
   };
 
   const mat = {
     dark: new THREE.MeshLambertMaterial({ color: 0x161a20 }),
     black: new THREE.MeshLambertMaterial({ color: 0x080a0c }),
+    bore: new THREE.MeshLambertMaterial({ color: 0x010203 }),
     steel: new THREE.MeshLambertMaterial({ color: 0x48515c }),
     worn: new THREE.MeshLambertMaterial({ color: 0x747f8c }),
     tan: new THREE.MeshLambertMaterial({ color: 0x8b6a42 }),
@@ -104,8 +111,16 @@
   function normalizeWeaponId(name) {
     if (!name) return "sidearm";
     const direct = CBZ.weaponById && CBZ.weaponById(name);
-    if (direct) return direct.id || direct.key;
-    return NAME_TO_ID[name] || NAME_TO_ID[String(name).toLowerCase()] || "sidearm";
+    const id = direct ? (direct.id || direct.key)
+      : (NAME_TO_ID[name] || NAME_TO_ID[String(name).toLowerCase()]);
+    /* PRISON_SHANK=0 means "give me the body this game had before the shank",
+       and that body INCLUDED the bug the missing row was hiding: with no entry
+       for a blade name, the fall-through below answered "sidearm", so asking
+       this function what a shiv looks like handed back a 9 mm pistol. The
+       revert has to reproduce that too, or the flag's off-side is a world that
+       never existed and the A/B is measuring the wrong difference. */
+    if (id === "shank" && CBZ.CONFIG && CBZ.CONFIG.PRISON_SHANK === false) return "sidearm";
+    return id || "sidearm";
   }
 
   function weaponMeta(id) {
@@ -131,6 +146,13 @@
     const model = builder ? builder({ THREE, box, cyl, mat }) : fallbackWeapon();
     model.userData.weaponId = id;
     model.userData.weaponSlot = meta.slot || "pistol";
+    // Does this prop have a BARREL? Every consumer that reasons about aim —
+    // muzzle direction, arm elevation, gunpoint reactions — has been able to
+    // assume "a weapon is out" means "a gun is out", because until the shank
+    // there was no other kind. Stamped once at build so a per-frame reader
+    // never has to look the row up again.
+    model.userData.weaponMelee = !!meta.melee;
+    model.userData.weaponHold = Object.assign({ heavy: 0, support: 0, stance: "" }, meta.hold || {});
     model.scale.setScalar((meta.slot === "pistol" || meta.slot === "utility") ? 0.92 : 0.82);
     model.position.set(0.02, 0.02, 0.03);
     // barrel runs ALONG the forearm (grip in the hand, muzzle past the fingers)
@@ -164,7 +186,10 @@
   const WP_CAP = 64;
   const WP_GRAVITY = 20.5;
   const WP_CLEAR = 0.012;
+  const WP_CORPSE_CLEAR = 0.018;
+  const WP_CORPSE_PASSES = 12;
   const wpBox = new THREE.Box3();
+  const wpCorpseBox = new THREE.Box3();
   const wpLocalBox = new THREE.Box3();
   const wpInvRoot = new THREE.Matrix4();
   const wpRel = new THREE.Matrix4();
@@ -183,7 +208,9 @@
   const wpDeltaQ = new THREE.Quaternion();
   const wpEuler = new THREE.Euler(0, 0, 0, "YXZ");
   const wpSpinEuler = new THREE.Euler();
-  const WP_STATS = { attached: 0, settled: 0, wallHits: 0, groundHits: 0 };
+  const wpSeenActors = new Set();
+  const wpSeenParts = new Set();
+  const WP_STATS = { attached: 0, settled: 0, wallHits: 0, groundHits: 0, corpseHits: 0 };
 
   function wpFinite(v, d) { return typeof v === "number" && isFinite(v) ? v : d; }
   function wpGround(x, z, fromY, override) {
@@ -314,6 +341,130 @@
     r.y0 = b.settled ? b.supportY : b.pos.y;
   }
 
+  // A dead actor is not scenery. Prison death drops are born beside the body
+  // which owned them, so floor/wall-only physics lets a perfectly solid gun or
+  // torch finish inside the torso while the corpse topples. Consume the real
+  // articulated rig here: each anatomical mesh contributes its current world
+  // AABB, including the group's fall rotation and the limb pose. No guessed
+  // corpse capsule and no prison-local second weapon solver.
+  const WP_CORPSE_SLOT_KEYS = [
+    "torso", "collar", "pelvis", "legs", "legsLower", "shoes",
+    "arms", "armsLower", "hands", "head",
+  ];
+
+  function wpEachCorpsePart(b, visit) {
+    wpSeenActors.clear();
+    const lists = [CBZ.guards, CBZ.npcs, CBZ.cityPeds, CBZ.cityCops];
+    const scanActor = function (actor, group, ch) {
+      if (!actor || !actor.dead || !group || !group.parent || group.visible === false || !ch || !ch.skinSlots) return true;
+      if (wpSeenActors.has(actor)) return true;
+      wpSeenActors.add(actor);
+      const dx = b.pos.x - group.position.x, dz = b.pos.z - group.position.z;
+      const metric = ch.metric || (group.userData && group.userData.characterMetric) || {};
+      const reach = Math.max(2.4, wpFinite(metric.height, 1.82) + Math.max(b.half.x, b.half.z) + 0.55);
+      if (dx * dx + dz * dz > reach * reach) return true;
+      wpSeenParts.clear();
+      for (let k = 0; k < WP_CORPSE_SLOT_KEYS.length; k++) {
+        const slot = ch.skinSlots[WP_CORPSE_SLOT_KEYS[k]] || [];
+        for (let i = 0; i < slot.length; i++) {
+          const part = slot[i];
+          if (!part || !part.isMesh || !part.parent || part.visible === false || wpSeenParts.has(part)) continue;
+          wpSeenParts.add(part);
+          const geo = part.geometry;
+          if (!geo) continue;
+          if (!geo.boundingBox && geo.computeBoundingBox) geo.computeBoundingBox();
+          if (!geo.boundingBox || geo.boundingBox.isEmpty()) continue;
+          part.updateWorldMatrix(true, false);
+          wpCorpseBox.copy(geo.boundingBox).applyMatrix4(part.matrixWorld);
+          // A toppled voxel rig can extend a hidden sliver below the floor. That
+          // buried volume must not shove a floor-resting weapon away from air.
+          const cx = (wpCorpseBox.min.x + wpCorpseBox.max.x) * 0.5;
+          const cz = (wpCorpseBox.min.z + wpCorpseBox.max.z) * 0.5;
+          const floor = wpGround(cx, cz, wpCorpseBox.max.y + 0.3);
+          wpCorpseBox.min.y = Math.max(wpCorpseBox.min.y, floor - 0.01);
+          if (wpCorpseBox.max.y <= wpCorpseBox.min.y + 0.006) continue;
+          if (visit(wpCorpseBox, actor, part) === false) return false;
+        }
+      }
+      return true;
+    };
+    for (let l = 0; l < lists.length; l++) {
+      const list = lists[l] || [];
+      for (let i = 0; i < list.length; i++) if (scanActor(list[i], list[i] && list[i].group, list[i] && list[i].char) === false) return;
+    }
+    // Player-death weapon drops use the same law even though the player record
+    // stores its render group on CBZ.playerChar rather than `player.group`.
+    if (CBZ.player && CBZ.player.dead && CBZ.playerChar) {
+      scanActor(CBZ.player, CBZ.playerChar.group, CBZ.playerChar);
+    }
+  }
+
+  function wpCorpseOverlapCount(b) {
+    if (!b || !b.mesh || !b.mesh.parent || !b.corpseCollision) return 0;
+    wpWrite(b);
+    wpBox.setFromObject(b.mesh);
+    let overlaps = 0;
+    wpEachCorpsePart(b, function (c) {
+      const ox = Math.min(wpBox.max.x, c.max.x) - Math.max(wpBox.min.x, c.min.x);
+      const oy = Math.min(wpBox.max.y, c.max.y) - Math.max(wpBox.min.y, c.min.y);
+      const oz = Math.min(wpBox.max.z, c.max.z) - Math.max(wpBox.min.z, c.min.z);
+      if (ox > 0.004 && oy > 0.004 && oz > 0.004) overlaps++;
+    });
+    return overlaps;
+  }
+
+  function wpResolveCorpses(b) {
+    const contact = { hit: false, landed: false, impact: 0 };
+    if (!b.corpseCollision || !b.mesh || !b.mesh.parent) return contact;
+    for (let pass = 0; pass < WP_CORPSE_PASSES; pass++) {
+      wpWrite(b);
+      wpBox.setFromObject(b.mesh);
+      let moved = false;
+      wpEachCorpsePart(b, function (c) {
+        const ox = Math.min(wpBox.max.x, c.max.x) - Math.max(wpBox.min.x, c.min.x);
+        const oy = Math.min(wpBox.max.y, c.max.y) - Math.max(wpBox.min.y, c.min.y);
+        const oz = Math.min(wpBox.max.z, c.max.z) - Math.max(wpBox.min.z, c.min.z);
+        if (ox <= 0.001 || oy <= 0.001 || oz <= 0.001) return true;
+
+        const sx0 = c.min.x - wpBox.max.x - WP_CORPSE_CLEAR;
+        const sx1 = c.max.x - wpBox.min.x + WP_CORPSE_CLEAR;
+        const sx = Math.abs(sx0) <= Math.abs(sx1) ? sx0 : sx1;
+        const sz0 = c.min.z - wpBox.max.z - WP_CORPSE_CLEAR;
+        const sz1 = c.max.z - wpBox.min.z + WP_CORPSE_CLEAR;
+        const sz = Math.abs(sz0) <= Math.abs(sz1) ? sz0 : sz1;
+        // Corpse volume below the weapon is support. Never resolve downward
+        // through the floor; an overhead hit either sets the object on top or
+        // lets the smaller horizontal separation roll it clear.
+        const sy = c.max.y - wpBox.min.y + WP_CORPSE_CLEAR;
+        const ax = Math.abs(sx), ay = Math.abs(sy), az = Math.abs(sz);
+        if (ay <= ax && ay <= az) {
+          const impact = Math.max(0, -b.vy);
+          b.pos.y += sy;
+          if (b.vy < 0) b.vy = 0;
+          b.vx *= 0.70; b.vz *= 0.70;
+          contact.landed = true;
+          contact.impact = Math.max(contact.impact, impact);
+        } else if (ax <= az) {
+          b.pos.x += sx;
+          if ((sx > 0 && b.vx < 0) || (sx < 0 && b.vx > 0)) b.vx *= -0.24;
+          else b.vx *= 0.55;
+        } else {
+          b.pos.z += sz;
+          if ((sz > 0 && b.vz < 0) || (sz < 0 && b.vz > 0)) b.vz *= -0.24;
+          else b.vz *= 0.55;
+        }
+        b.wx *= 0.72; b.wy *= 0.72; b.wz *= 0.72;
+        wpMeasureSpan(b);
+        WP_STATS.corpseHits++;
+        contact.hit = moved = true;
+        return false; // recompute the weapon box before resolving another part
+      });
+      if (!moved) break;
+    }
+    wpWrite(b);
+    return contact;
+  }
+
   function wpClatter(b, impact) {
     if (b.sounded || impact < 1.4 || !CBZ.sfx) return;
     if (CBZ.camera) {
@@ -324,19 +475,11 @@
     try { CBZ.sfx(b.sound || "shell"); } catch (e) {}
   }
 
-  function wpSettle(b) {
-    // A firearm rests on a SIDE, never balanced upright on its grip. Keep the
-    // tumble's yaw so two drops do not form a copied row.
-    wpEuler.setFromQuaternion(b.q, "YXZ");
-    wpEuler.set(0, wpEuler.y, b.side * (Math.PI / 2 - 0.06), "YXZ");
-    b.q.setFromEuler(wpEuler);
-    b.vx = b.vy = b.vz = b.wx = b.wy = b.wz = 0;
-    b.settled = true;
-    wpWrite(b);
-
+  function wpRestOnGround(b) {
     // Set the model's REAL lowest vertex on the highest support under its
     // footprint. The corner/centre sweep prevents a long rifle bridging a
     // kerb or slope from leaving one end below the surface.
+    wpWrite(b);
     wpBox.setFromObject(b.mesh);
     let support = -Infinity;
     const xs = [wpBox.min.x, (wpBox.min.x + wpBox.max.x) * 0.5, wpBox.max.x];
@@ -350,8 +493,32 @@
     b.supportY = support;
     wpMeasureSpan(b);
     wpWrite(b);
+    return support;
+  }
+
+  function wpSettle(b) {
+    // A firearm rests on a SIDE, never balanced upright on its grip. Keep the
+    // tumble's yaw so two drops do not form a copied row.
+    wpEuler.setFromQuaternion(b.q, "YXZ");
+    wpEuler.set(0, wpEuler.y, b.side * (Math.PI / 2 - 0.06), "YXZ");
+    b.q.setFromEuler(wpEuler);
+    b.vx = b.vy = b.vz = b.wx = b.wy = b.wz = 0;
+    b.settled = true;
+    wpRestOnGround(b);
+    // Resting against a corpse is still resting: separate from the actual
+    // posed body after the ground snap, then keep tracking this body while the
+    // corpse finishes its fall so a later frame cannot rotate through it.
+    wpResolveCorpses(b);
     wpSyncRecord(b);
     WP_STATS.settled++;
+  }
+
+  function wpStepResting(b) {
+    wpRestOnGround(b);
+    wpResolveCorpses(b);
+    wpMeasureSpan(b);
+    wpWrite(b);
+    wpSyncRecord(b);
   }
 
   function wpRelease(bodyOrMesh) {
@@ -389,6 +556,7 @@
       side: opts.side === -1 ? -1 : opts.side === 1 ? 1 : (Math.random() < 0.5 ? -1 : 1),
       sound: opts.sound || "shell", sounded: false, bounces: 0, t: 0,
       bottom: 0, top: 0, supportY: 0, settled: false, dead: false,
+      corpseCollision: !!opts.corpseCollision,
     };
     mesh.userData = mesh.userData || {};
     mesh.userData.weaponBody = body;
@@ -418,6 +586,21 @@
         if (Math.abs(b.pos.x - ox) > 1e-5) { b.vx *= -0.24; WP_STATS.wallHits++; }
         if (Math.abs(b.pos.z - oz) > 1e-5) { b.vz *= -0.24; WP_STATS.wallHits++; }
         if (b.pos.x !== ox || b.pos.z !== oz) { b.wx *= 0.72; b.wy *= 0.72; b.wz *= 0.72; wpMeasureSpan(b); }
+      }
+
+      const corpseContact = wpResolveCorpses(b);
+      if (corpseContact.landed) {
+        const impact = corpseContact.impact;
+        wpClatter(b, impact);
+        if (impact > 1.45 && b.bounces < 2) {
+          b.bounces++;
+          b.vy = impact * (b.bounces === 1 ? 0.18 : 0.10);
+          b.vx *= 0.48; b.vz *= 0.48;
+          b.wx *= 0.45; b.wy *= 0.40; b.wz *= 0.45;
+        } else {
+          wpSettle(b);
+          break;
+        }
       }
 
       const support = wpGround(b.pos.x, b.pos.z, b.top + 0.2);
@@ -450,8 +633,10 @@
           !b.mesh.userData || b.mesh.userData.weaponBody !== b) {
         wpBodies.splice(i, 1); continue;
       }
-      wpStepBody(b, dt);
-      if (b.settled) wpBodies.splice(i, 1);
+      if (b.settled) {
+        if (b.corpseCollision) wpStepResting(b);
+        else wpBodies.splice(i, 1);
+      } else wpStepBody(b, dt);
     }
   });
 
@@ -473,19 +658,25 @@
       const y = o.y + d.y * 1.55 * t;
       if (y < testGround(x, z) + 0.05 - 1e-4) solverPenetration++;
     }
-    let underground = 0;
+    let underground = 0, active = 0, corpseOverlaps = 0, corpseTracked = 0;
     for (let i = 0; i < wpBodies.length; i++) {
       const b = wpBodies[i];
+      if (!b.settled) active++;
       wpMeasureSpan(b);
       if (b.bottom < wpGround(b.pos.x, b.pos.z, b.top + 0.2) - 0.02) underground++;
+      if (b.corpseCollision) {
+        corpseTracked++;
+        corpseOverlaps += wpCorpseOverlapCount(b);
+      }
     }
     const missing = WP_REQUIRED.filter(function (id) { return !wpAdopters.has(id); });
     return {
       required: WP_REQUIRED.length, adopted: wpAdopters.size, missing: missing,
-      solverPenetration: solverPenetration, active: wpBodies.length,
+      solverPenetration: solverPenetration, active: active, tracked: wpBodies.length,
       underground: underground, cap: WP_CAP,
       attached: WP_STATS.attached, settled: WP_STATS.settled,
       wallHits: WP_STATS.wallHits, groundHits: WP_STATS.groundHits,
+      corpseTracked: corpseTracked, corpseOverlaps: corpseOverlaps, corpseHits: WP_STATS.corpseHits,
     };
   };
 
@@ -579,27 +770,50 @@
     }
     const ch = actor.char;
     if (!ch || !ch.parts) return;
-    const slot = actor._weaponProp && actor._weaponProp.userData && actor._weaponProp.userData.weaponSlot;
-    setReadyPose(ch, slot === "long" || slot === "rifle" || slot === "auto");
+    setReadyPose(ch, actor._weaponProp || syncActorWeapon(actor));
   }
 
   // hold the gun FORWARD at chest height (not dangling at the hip). The right arm
   // swings up to roughly horizontal so the muzzle reads as "weapon ready".
   // mirror the PLAYER's known-good forward-aim arm pose (fpsmode third-person)
   // so NPC guns point forward at chest height — not at the hip, not up at the sky.
-  function setReadyPose(ch, longGun) {
+  function setReadyPose(ch, prop) {
     if (!ch || !ch.parts) return;
+    const ud = prop && prop.userData ? prop.userData : {};
+    const slot = ud.weaponSlot || "pistol";
+    const longGun = slot === "long" || slot === "rifle" || slot === "auto";
+    const hold = ud.weaponHold || {};
+    const heavy = Math.max(0, Math.min(1, hold.heavy || 0));
+    const support = Math.max(0, Math.min(0.5, hold.support || 0));
+    const shoulder = hold.stance === "shoulder";
+    const elbow = function (part, angle) {
+      const low = part && part.userData && part.userData.low;
+      if (low) low.rotation.x = angle;
+    };
     // gun arm raised to ~horizontal-forward, NO y/z twist (twist was throwing the
     // muzzle off). With the prop's +π/2 mount this points the barrel forward.
     if (ch.parts.ra) {
-      ch.parts.ra.rotation.set(longGun ? -1.50 : -1.45, 0, 0);
+      ch.parts.ra.rotation.set((longGun ? -1.54 : -1.50) + heavy * 0.10, longGun ? 0.12 : 0.18, longGun ? 0.30 : 0.34);
       ch.parts.ra.position.z = 0.14;
+      elbow(ch.parts.ra, shoulder ? -0.28 : (longGun ? -0.10 - heavy * 0.12 : -0.16));
     }
-    // support hand comes up under a long gun; a pistol stays one-handed (let the
-    // left arm swing naturally with the walk).
-    if (longGun && ch.parts.la) {
-      ch.parts.la.rotation.set(-1.20, 0.20, 0.22);
-      ch.parts.la.position.z = 0.20;
+    // Every firearm is a two-hand object while presented. Pistols meet at the
+    // firing wrist; long guns move the left hand forward by the weapon's own
+    // support measurement. A shoulder launcher stays close to the receiver.
+    if (ch.parts.la) {
+      if (longGun) {
+        ch.parts.la.rotation.set(
+          (shoulder ? -1.38 : -1.55) - heavy * 0.10,
+          shoulder ? -0.18 : -0.34 - heavy * 0.08,
+          shoulder ? -0.34 : -0.42 - support * 0.18
+        );
+        ch.parts.la.position.z = (shoulder ? 0.16 : 0.24) + support * 0.5;
+        elbow(ch.parts.la, shoulder ? -0.48 : -0.72 - heavy * 0.26);
+      } else {
+        ch.parts.la.rotation.set(-1.56, -0.32, -0.68);
+        ch.parts.la.position.z = 0.20;
+        elbow(ch.parts.la, -0.22 - heavy * 0.12);
+      }
     }
   }
 
@@ -642,7 +856,7 @@
       // already attached with the right id, only rebuilding when the weapon changed.
       const prop = syncActorWeapon(a);
       if (!prop) continue;
-      setReadyPose(a.char, prop.userData && prop.userData.weaponSlot === "long");
+      setReadyPose(a.char, prop);
     }
   }
   if (CBZ.onUpdate) CBZ.onUpdate(36, function () {
@@ -675,4 +889,9 @@
   CBZ.actorHolster = actorHolster;
   CBZ.actorMuzzle = actorMuzzle;
   CBZ.actorAimAt = actorAimAt;
+  CBZ.actorReadyPose = function (actor) {
+    const prop = syncActorWeapon(actor);
+    if (prop && actor && actor.char) setReadyPose(actor.char, prop);
+    return prop;
+  };
 })();
