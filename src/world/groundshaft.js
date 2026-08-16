@@ -281,15 +281,34 @@
       mat.needsUpdate = true;
     } catch (e) { /* a material we cannot patch simply keeps drawing */ }
   }
-  // ONE raycast per site: everything the sky can see through is what has to
-  // stop being drawn. Repeat sites (the growth phase re-cuts the shaft several
-  // times) are skipped — the materials are already masked and the uniform is
-  // what moves.
+  /* ONE SWEEP PER SITE PER RADIUS — and the second half of that is the point.
+
+     A repeat visit used to be skipped outright, on the reasoning that the
+     materials are already masked and only the uniform moves. That holds on the
+     island, where ONE disc material is the entire ground, and fails in the city,
+     where a junction is dozens of separate meshes: road, lane paint, kerb, lot
+     slab. The growth phase cuts the first plug at HALF the final radius, so a
+     site swept once was swept at r/2 — and every road mesh sitting in the
+     annulus between r/2 and r kept drawing, leaving a partial lid of tarmac
+     over the void. Measured on a city junction: 124 flat surfaces over the
+     mouth, 48 masked.
+
+     So a site remembers the radius it was swept at and is swept AGAIN when the
+     hole outgrows it. Still bounded — six or seven re-cuts, each only touching
+     materials that are not masked yet, and `_shaftMasked` makes every repeat a
+     cheap early-out. */
   function maskGroundAt(h) {
+    const R = h.mouth + 2;
+    let site = null;
     for (let i = 0; i < maskedSites.length; i++) {
-      if (Math.hypot(maskedSites[i].x - h.x, maskedSites[i].z - h.z) < 4) return;
+      if (Math.hypot(maskedSites[i].x - h.x, maskedSites[i].z - h.z) < 4) { site = maskedSites[i]; break; }
     }
-    maskedSites.push({ x: h.x, z: h.z });
+    if (site) {
+      if (R <= site.r) return;           // already swept this wide or wider
+      site.r = R;                        // it has grown: sweep the new annulus
+    } else {
+      maskedSites.push({ x: h.x, z: h.z, r: R });
+    }
     function take(o) {
       if (!o || !o.material) return;
       let p = o, skip = false;
@@ -298,11 +317,30 @@
       if (Array.isArray(o.material)) { for (let k = 0; k < o.material.length; k++) maskMaterial(o.material[k]); }
       else maskMaterial(o.material);
     }
+    /* TWO PHASES, TWO try/catches, AND THAT SEPARATION IS THE WHOLE CITY FIX.
+
+       These used to share one `try`, which quietly made the city sinkhole a
+       hole nothing was ever masked for. `root()` is the arena group in
+       survival but THE WHOLE SCENE in the city, and the scene contains
+       Sprites; r128's Sprite.raycast dereferences `raycaster.camera`, which a
+       bare `new THREE.Raycaster()` leaves null, so phase (a) threw on the
+       first sprite it reached — and took phase (b), the sweep that actually
+       finds the road, the kerb, the lot slab and the ground plate, down with
+       it. Every city shaft was therefore the exact fault this file exists to
+       have fixed: a lip ring on intact tarmac with a 40 m drop under it.
+
+       So: the raycaster is handed a camera (sprites answer instead of
+       throwing), and each phase now fails alone. Phase (b) is the
+       load-bearing one — it is a box test over the footprint and cannot
+       throw on somebody else's mesh — so the mask survives anything (a) hits. */
     try {
       // (a) what the sky sees through — catches the ground plate and the sea
       const rc = new THREE.Raycaster(new THREE.Vector3(h.x, h.gy + 60, h.z), new THREE.Vector3(0, -1, 0), 0, 60 + h.depth + 40);
+      if (CBZ.camera) rc.camera = CBZ.camera;
       const hits = rc.intersectObject(root(), true) || [];
       for (let i = 0; i < hits.length; i++) take(hits[i].object);
+    } catch (e) { /* a scene we cannot ray is still swept by (b) below */ }
+    try {
       /* (b) every FLAT surface overlapping the footprint. One ray down the
          middle is not enough: a road, its lane paint, a kerb and a lot slab
          are separate meshes at slightly different heights and a ray that
@@ -311,7 +349,6 @@
          (under 3 m tall) so this never recompiles a building's shader for a
          hole that, by the placement law, is not under a building anyway. */
       const box = new THREE.Box3();
-      const R = h.mouth + 2;
       root().traverse(function (o) {
         if (!o.isMesh || !o.geometry) return;
         let p = o; while (p) { if (p.userData && p.userData.groundShaft) return; p = p.parent; }
