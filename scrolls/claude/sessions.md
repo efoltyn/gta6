@@ -3897,3 +3897,12 @@ with the terrain test ALWAYS on for the dunes map — 0 armed, 2 in the
 battle-check fails any map on throughSand>0, fails `dunes` under 12 m of
 relief (the flat-plate regression is now loud — it fired during the build
 when the first scan criterion missed), and --revert adds `&tlos=0`.
+
+NOTE (same session): the full nine-map sweep flagged transient overlap pairs
+on `gov` (1-2 pairs) and `marina` (0-1) — measured on BOTH sides of this
+wave (base 0dce341 in a clean worktree: gov 1 pair, worst 0.97 m). It is a
+pre-existing, machine-load-sensitive transient on the dense venues, not a
+dunes regression (dunes itself: 0 across every counter, every run, both
+revert directions). Named here instead of fixed: separation under big
+substeps on dense venues is its own measurement pass, and this wave's
+subject was the erg.
