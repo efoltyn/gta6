@@ -200,7 +200,12 @@
   // header for why this is derived and not a taste knob.
   if (CBZ.CONFIG.ROAD_CLEARANCE_DOCK == null) CBZ.CONFIG.ROAD_CLEARANCE_DOCK = 24;
 
-  const MPH_PER_UNIT = 2.4;          // vehicles.js:68 — the repo's own figure
+  // ADOPTED: vehicles.js publishes the one conversion (CBZ.speedMph). This
+  // literal was one of three different answers in the repo and 7.3% high — and
+  // it is the one that decides whether you are SPEEDING, so it has to be the
+  // same number the speedometer draws. Kept as the no-vehicles.js fallback.
+  const MPH_PER_UNIT = 2.4;          // vehicles.js — the repo's historical figure
+  const mphOf = (v) => (CBZ.speedMph ? CBZ.speedMph(v) : Math.abs(v || 0) * MPH_PER_UNIT);
   function on() { return CBZ.CONFIG.ROAD_RULES !== false; }
 
   /* ---- POSTED LIMITS ----------------------------------------------------
@@ -1752,7 +1757,7 @@
     if (!p) { over = 0; return; }
     const limit = CBZ.roadSpeedLimit(p.x, p.z);
     if (limit <= 0) { over = 0; return; }                 // unposted: open country
-    const mph = Math.abs(car.v || 0) * MPH_PER_UNIT;
+    const mph = mphOf(car.v);
     if (mph <= limit + CBZ.CONFIG.ROAD_SPEED_TOL) { over = 0; return; }
 
     over += dt;

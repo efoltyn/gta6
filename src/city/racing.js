@@ -914,7 +914,17 @@
       speed: function () { const c = CBZ.player && CBZ.player._vehicle; return Math.abs((c && c.v) || 0); },
     });
     SR.kit = CBZ.raceKit.create({ course: plan.course, laps: 1, trackLen: CBZ.raceKit.courseLength(plan.course) || 900, entrants: entrants });
-    if (CBZ.raceHud) { CBZ.raceHud.show(); CBZ.raceHud.lights(0); }
+    if (CBZ.raceHud) {
+      CBZ.raceHud.show(); CBZ.raceHud.lights(0);
+      // THE ROUTE, ON THE HUD. A street race is driven on real roads that look
+      // like every other road in the city, and the only guide was one floating
+      // gate marker at a time; the course object already carries the whole
+      // driven path, so the map draws it. `open: true` — a sprint is not a loop.
+      if (CBZ.raceHud.setTrack && plan.course && plan.course.path && plan.course.path.length > 2) {
+        CBZ.raceHud.setTrack(plan.course.path.map(function (p) { return { x: p.x, z: p.z }; }),
+          { open: SR.kind !== "circuit" });
+      }
+    }
     srMarker(true, SR.cps[0].x, SR.cps[0].z);
     note((SR.kind === "circuit" ? "STREET CIRCUIT" : "STREET SPRINT") + " — " + SR.cpTotal +
       " gates, " + drivers.length + " runners, pot $" + SR.pot + ". Lights…", 3.2);
@@ -943,12 +953,32 @@
         note("P" + place + " — the pot goes up the road.", 3.0);
       }
       if (CBZ.raceHud) {
+        /* A RESULTS BOARD WITH NO RESULTS ON IT. This passed `time: ""` and
+           `pts: null` for every row, so a street race finished on a grid of
+           names with three empty columns — you could not tell how close it had
+           been, or by how much. The kit has known each rival's elapsed time and
+           progress the whole way; the only thing missing was a caller reading
+           it. Same shape the speedway board uses: the leader's TIME, everyone
+           else's gap to him. (Street races run one lap of N gates, so there is
+           no per-lap best to show; the column is simply left empty rather than
+           filled with a fiction.) */
+        const lead = kitOrder[0];
         CBZ.raceHud.results(kitOrder.map(function (e, i) {
+          let time = "";
+          if (e.finished) {
+            time = (i === 0 || !lead.finished)
+              ? CBZ.raceHud.fmtT(e.finishT)
+              : "+" + Math.max(0, e.finishT - lead.finishT).toFixed(1) + "s";
+          } else if (SR.kit && lead) {
+            time = "+" + SR.kit.gapSeconds(lead, e).toFixed(1) + "s";
+          }
           return { pos: i + 1, name: e.name, number: e.number, color: e.color,
-            time: "", pts: null, purse: (i === 0 && e.isPlayer) ? SR.pot : 0, you: !!e.isPlayer };
+            time: time, pts: null, purse: (i === 0 && e.isPlayer) ? SR.pot : 0,
+            you: !!e.isPlayer, best: 0 };
         }), {
           title: win ? "STREET RACE — YOURS" : "STREET RACE",
-          sub: (SR.kind === "circuit" ? "loop circuit" : "point to point") + " · " + SR.cpTotal + " gates",
+          sub: (SR.kind === "circuit" ? "loop circuit" : "point to point") + " · " + SR.cpTotal + " gates" +
+               " · ante $" + SR.ante + " · pot $" + SR.pot,
           foot: "Drive off to continue",
         });
       }
@@ -974,7 +1004,9 @@
     if (SR.phase === "grid") {
       SR.countT -= dt;
       const c = SR.countT;
-      if (c > 0) { if (CBZ.raceHud) CBZ.raceHud.lights(c > 2.3 ? 1 : c > 1.1 ? 2 : 3); return; }
+      // `of` scales a three-step producer onto the five-lamp gantry, so the
+      // street countdown fills the same board the speedway's does.
+      if (c > 0) { if (CBZ.raceHud) CBZ.raceHud.lights(c > 2.3 ? 1 : c > 1.1 ? 2 : 3, 3); return; }
       SR.phase = "run"; SR.lightsT = 1.3;
       if (CBZ.raceHud) CBZ.raceHud.lights("go");
       if (CBZ.raceDrivers) CBZ.raceDrivers.setState("race", "street");
@@ -1010,12 +1042,35 @@
       SR.kit.update(dt);
       const cx = SR.kit.playerContext();
       if (cx && CBZ.raceHud) {
+        // The tower and the map are the same two reads the speedway weekend
+        // gained, fed from the same scorer — a street race is a course with an
+        // order on it, and nothing here needs to know it is a street.
+        const lead = SR.kit.order[0];
+        const tower = SR.kit.order.map(function (e, i) {
+          const ahead = i > 0 ? SR.kit.order[i - 1] : null;
+          const d = e.driver;
+          return {
+            pos: e.pos, name: e.name, number: e.number, color: e.color,
+            you: !!e.isPlayer, dnf: !!(d && (d.dnf || (d.car && d.car.dead))),
+            gap: ahead ? SR.kit.gapSeconds(ahead, e) : null,
+            gapText: e.finished ? "FIN" : null,
+          };
+        });
+        const cars = [];
+        const RL = CBZ.raceDrivers ? CBZ.raceDrivers.list("street") : [];
+        for (const m of RL) if (m.car && m.car.pos) cars.push({ x: m.car.pos.x, z: m.car.pos.z, color: (m._racer && m._racer.teamColor) != null ? m._racer.teamColor : 0xd0342c, dnf: !!m.dnf });
+        if (P._vehicle && P._vehicle.pos) cars.push({ x: P._vehicle.pos.x, z: P._vehicle.pos.z, color: 0xeaf6ff, you: true });
+        const eng = P._vehicle && P._vehicle.engineHp != null ? Math.max(0, Math.min(100, P._vehicle.engineHp)) / 100 : null;
         CBZ.raceHud.update({
           pos: cx.row.pos, count: SR.kit.entrants.length,
           lap: Math.min(SR.cpTotal, SR.cpPassed + 1), laps: SR.cpTotal,
           lapT: SR.kit.time, best: 0,
           gapA: cx.ahead ? { name: cx.ahead.name, s: cx.gapA } : null,
           gapB: cx.behind ? { name: cx.behind.name, s: cx.gapB } : null,
+          tower: tower, cars: cars, damage: eng,
+          // the LAP cell counts GATES on a street race — say so, rather than
+          // letting "3/8" read as three laps of eight.
+          note: "GATE " + Math.min(SR.cpTotal, SR.cpPassed + 1) + "/" + SR.cpTotal,
         });
       }
     }

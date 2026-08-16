@@ -76,6 +76,14 @@
     ids: function () { return Object.keys(defs); },
     show: function (id) { if (defs[id]) { openId = id; render(); } },
     hide: function () { if (openId) { seen[openId] = true; openId = ""; render(); } },
+    /* CLOSE IT WITHOUT COUNTING IT AS READ. `hide()` means "I have read this,
+       never show me again" — right for a dismissing keypress, wrong for the
+       game taking the card away because something started. Boarding a car on a
+       race day opened the Driving card across the countdown; closing it with
+       hide() would have marked it read and the player would never get the one
+       card he had not seen. defer() takes it down and leaves it unread, so the
+       first-time pop brings it back the moment the race is over. */
+    defer: function () { if (openId) { openId = ""; cur = ""; render(); } },
     toggle: function (id) { if (openId) C.hide(); else C.show(id || context()); },
     // "has the player already been shown and dismissed this one"
     dismissed: function (id) { return !!seen[id]; },
@@ -206,6 +214,16 @@
     if (!on()) return;
     const now = context();
     if (now === cur) return;
+    /* NOT OVER A COUNTDOWN. Entering the car on the grid is a context change,
+       so the Driving card opened across the middle of the screen at the exact
+       moment the start lights were counting down and stayed there — a
+       reference sheet you cannot read because you are trying to launch, over
+       the one event you must watch. This is the same rule as "never over a
+       menu", applied to the other kind of moment where the player is not free
+       to stop and read. It DEFERS rather than suppresses: `cur` is left alone,
+       so the card opens the moment the race is over and you are still driving,
+       which is when it was any use. */
+    if (CBZ.raceLive && CBZ.raceLive()) return;
     cur = now;
     if (!now || !CBZ.CONFIG.CONTROLS_AUTO) return;
     // Only ever ONCE per context per session, and never over a menu.

@@ -128,14 +128,28 @@
     // ---- three long, sparse ceiling light lines (the only overhead fixtures)
     for (const fz of [-1, 0, 1]) glow(CX, ceilY, CZ + fz * (D * 0.22), (xHi - xLo) * 0.55, 0.07, 0.42, 0xf2ead8, 0.32);
 
-    // ---- partition helpers (roomKit's wall idiom: batch-safe, non-collider) --
+    // ---- partition helpers ---------------------------------------------------
+    // A WALL YOU WALK THROUGH IS A PAINTING OF A WALL. These partitions were
+    // drawn with roomKit's decorative idiom (batch-safe, NO collider), which is
+    // fine for a shell you only ever see through a doorway — and wrong for the
+    // one floor in the game the player is SPAWNED onto and expected to live in.
+    // Measured before the fix: the entire exec storey carried exactly ONE
+    // collider (the lift core). Every partition, both glass runs and the desks
+    // were phantoms, so the corner office, the meeting room and reception were
+    // one undivided plate you jogged straight across. Every mass a body should
+    // bump now carries `solid` (colliders are height-gated — physics.js skips a
+    // box the body's head is under — so a storey-50 partition can never affect
+    // the street below). Door gaps stay gaps: only the segments are solid, and
+    // the header over a doorway stays a phantom because it sits at 2.76m where
+    // no standing body reaches it anyway.
     const WALLH = FH - 0.12;
+    const SOLID = { solid: true, cast: false };
     function wallX(z, x0, x1, gapX, gapW) {
       gapW = gapW || 1.7;
       const lo = Math.min(x0, x1), hi = Math.max(x0, x1);
       const gg = gapX != null && gapX > lo && gapX < hi;
       const segs = gg ? [[lo, gapX - gapW / 2], [gapX + gapW / 2, hi]] : [[lo, hi]];
-      for (const s of segs) { if (s[1] - s[0] < 0.2) continue; lb((s[0] + s[1]) / 2, WALLH / 2, z, s[1] - s[0], WALLH, PWT, WALLC); }
+      for (const s of segs) { if (s[1] - s[0] < 0.2) continue; lb((s[0] + s[1]) / 2, WALLH / 2, z, s[1] - s[0], WALLH, PWT, WALLC, SOLID); }
       if (gg) lb(gapX, WALLH - 0.16, z, gapW, 0.32, PWT, WALLC);
     }
     // a floor-to-ceiling GLASS partition run along Z at fixed x, with slim
@@ -146,11 +160,17 @@
     // cityRegisterGlass builds an individual transparent mesh, which core/batch.js
     // SPARES (transparent → never merged), so burstPane's visible-flip still hides
     // it. ox/oz convert b-local → world so the shatter ray hits the pane where it
-    // renders; no collider (o.solid) — the partition stays walk-through as before,
-    // it just breaks now. Fallback keeps the plain pane if the API is absent.
+    // renders. `solid` is what makes it a WALL and not a tinted hologram: the pane
+    // gets a height-gated collider that burstPane REMOVES when the glass goes, so
+    // the partition stops you until you break it and then lets you walk through
+    // the hole — the exterior curtain wall's exact behaviour, which is what the
+    // owner meant by "not real like the window glass". It also earns the pane
+    // `col`, and cityShatterRay blows a collider-backed pane out on the FIRST
+    // strike, so one punch takes this glass down instead of the two-stage crack.
+    // Fallback keeps the plain pane if the API is absent.
     const gmat = CBZ.cityGlassMat ? CBZ.cityGlassMat() : new THREE.MeshLambertMaterial({ color: 0xbfe9f7, transparent: true, opacity: 0.6 });
     function glassPane(x, py, pz, pd) {
-      if (CBZ.cityRegisterGlass) { CBZ.cityRegisterGlass(b.group, x, py, pz, 0.06, WALLH - 0.1, pd, ox, oz); return; }
+      if (CBZ.cityRegisterGlass) { CBZ.cityRegisterGlass(b.group, x, py, pz, 0.06, WALLH - 0.1, pd, ox, oz, { solid: true }); return; }
       const pane = new THREE.Mesh(new THREE.BoxGeometry(0.06, WALLH - 0.1, pd), gmat);
       pane.position.set(x, py, pz);
       pane.castShadow = false; pane.receiveShadow = false;
@@ -167,7 +187,7 @@
       }
       // mullion posts at the ends + doorway jambs; header over the doorway
       const posts = gg ? [lo, gapZ - gapW / 2, gapZ + gapW / 2, hi] : [lo, hi];
-      for (const pz of posts) lb(x, WALLH / 2, pz, 0.14, WALLH, 0.14, WALLC);
+      for (const pz of posts) lb(x, WALLH / 2, pz, 0.14, WALLH, 0.14, WALLC, SOLID);
       if (gg) lb(x, WALLH - 0.16, gapZ, PWT, 0.32, gapW, WALLC);
     }
 
@@ -191,7 +211,7 @@
     //  RECEPTION — one desk facing the lift, one bench, two planters. Space.
     // ========================================================================
     const rec = { x: core.x, z: core.z - 5.6 };
-    lb(rec.x, 0.5, rec.z, 2.6, 0.92, 0.85, WALNUT);                   // desk body
+    lb(rec.x, 0.5, rec.z, 2.6, 0.92, 0.85, WALNUT, SOLID);            // desk body
     lb(rec.x, 0.99, rec.z, 2.8, 0.07, 1.0, STONE);                    // stone top
     // THE RECEPTIONIST SITS BEHIND HER OWN DESK. The chair used to stand on the
     // +z (lift) side with face 0, i.e. on the VISITORS' side of the counter with
@@ -216,7 +236,7 @@
     for (const s of [-1, 1]) {
       const px = core.x + s * 2.6, pz = core.z - 2.6;
       if (!cfp(px, pz, 0.7)) continue;
-      lb(px, 0.42, pz, 0.8, 0.84, 0.8, PLANTER);
+      lb(px, 0.42, pz, 0.8, 0.84, 0.8, PLANTER, SOLID);
       lb(px, 1.18, pz, 0.62, 0.7, 0.62, LEAF);
     }
 
@@ -230,7 +250,7 @@
     lb(xHi - 4.1, 0.03, offCz, 5.6, 0.05, 3.8, RUGC);                 // one rug under the desk zone
     // THE DESK — one long executive slab, long axis along z, his back to +x glass
     const dsk = { x: xHi - 3.5, z: offCz };
-    lb(dsk.x, 0.37, dsk.z, 1.05, 0.7, 2.7, WALNUT);                   // pedestal body
+    lb(dsk.x, 0.37, dsk.z, 1.05, 0.7, 2.7, WALNUT, SOLID);            // pedestal body
     lb(dsk.x, 0.75, dsk.z, 1.22, 0.08, 3.0, STONE);                   // stone top
     // THE TERMINAL CLUSTER (the read the owner likes): three monitors along the
     // desk's -x working edge facing the chair, a keyboard slab, a desk lamp.
@@ -272,7 +292,7 @@
     }
     // one low credenza against the partition + a decanter accent
     if (cfp(offX0 + 0.75, offCz - 3.6, 0.7)) {
-      lb(offX0 + 0.75, 0.32, offCz - 3.6, 0.55, 0.62, 2.4, WALNUT);
+      lb(offX0 + 0.75, 0.32, offCz - 3.6, 0.55, 0.62, 2.4, WALNUT, SOLID);
       lb(offX0 + 0.75, 0.68, offCz - 3.6, 0.6, 0.06, 2.5, STONE);
       lb(offX0 + 0.75, 0.82, offCz - 4.3, 0.16, 0.24, 0.16, GOLD);
     }
@@ -295,7 +315,7 @@
       glassZ(mr.x1, mr.z0, mr.z1 - 0.1, null);                        // glass side facing the gallery
       // ONE long table
       const TL = Math.min(4.6, (mr.x1 - mr.x0) - 2.8);
-      lb(mcx, 0.48, mcz, TL, 0.1, 1.3, WALNUT);                       // top
+      lb(mcx, 0.48, mcz, TL, 0.1, 1.3, WALNUT, SOLID);                // top
       lb(mcx, 0.24, mcz, TL - 1.4, 0.42, 0.5, WALNUT);                // spine base
       // eight chairs: three a side + one at each end, all facing the table
       for (let i = -1; i <= 1; i++) for (const s of [-1, 1]) {

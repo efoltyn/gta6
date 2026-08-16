@@ -2192,9 +2192,35 @@
     // real-driver race state
     rd: false, phase: "idle", kit: null, drivers: [], countT: 0,
     playerTotal: 0, lightsOffT: 0,
+    // ---- THE RACE-WEEKEND READS (RACE_WEEKEND_V2) -------------------------
+    // Sectors are the resolution a driver can act on: three per lap, timed off
+    // the SAME centreline parameter the lap counter already watches, so this
+    // invents no second notion of where you are. secBest is your reference from
+    // the PREVIOUS lap (so the delta answers "am I quicker than last time
+    // through here"); secPurple is your best of the whole session, and purple
+    // means you have just beaten it. Only the player is sector-timed — the
+    // rivals are scored on laps, so a purple here is honestly YOUR session best
+    // and never claims to be the field's. `flap` IS the field's, across every
+    // entrant, and is the one number that compares you to them.
+    secIdx: 0, secStart: 0, secBest: null, secPurple: null, secShow: null,
+    flap: 0, flapName: "", flapId: null,
+    // The chequered flag is a PLACE, not the end of the world: the player
+    // crossing it ends HIS race and the field keeps racing until they are all
+    // home (or the cooldown cap expires, so a wrecked rival cannot hang the
+    // weekend). `playerDone` is the latch — see the note on `phase` in tickRD.
+    playerDone: false, playerFinishT: 0, cooldownT: 0, parkT: 0, entryPaid: 0,
   };
+  // Rivals get this long after the player finishes to complete the lap they are
+  // on before the results board is drawn. Three laps of an 800 m oval at racing
+  // pace is ~25 s a lap, so a car half a lap down still gets home.
+  const COOLDOWN_CAP = 30;
+  const SECTORS = 3;
   CBZ.speedwayRaceState = function () { return RACE; };   // probe/debug peek (headless gates)
   const LAP_PURSE = 7500;       // per finishing-position-scaled payout base
+  // RACE_PURSE_V2 — see the long note at the payout site in endRaceRD().
+  const PURSE_V2_BASE = 2400;   // win over 3 laps = $7,200 (was $22,500)
+  const PURSE_V2_START = 200;   // start money for taking the flag (was a $500 floor)
+  const FLAP_BONUS = 600;       // fastest lap of the field
   const FIELD_N = 5;            // legacy AI opponents on the grid
   const FIELD_RD = 6;           // real driving opponents on the grid
   // Centreline length. NOT re-derived by chord sampling any more (that
@@ -2318,9 +2344,31 @@
     const back = -(row * ROWGAP + (lane > 0 ? 0 : ROWGAP * 0.5) + 3.0);
     const x = f.x + f.tx * back + f.nx * (lane * COLW);
     const z = f.z + f.tz * back + f.nz * (lane * COLW);
-    // heading follows the track tangent at the slot's own param
+    /* heading follows the track tangent at the slot's own param — and THE PARAM
+       COMES BACK OUT NOW, because the scorer needs it and could not find it.
+
+       THE POLE CAR WAS SCORED A LAP DOWN. racedrivers.js seeds a new driver's
+       `t` with `coarseParam`, a 96-sample nearest-point search — 8.3 m apart on
+       an 800 m lap. Pole sits 3.0 m BEHIND the start line, and the nearest of
+       those 96 samples to a point 3 m behind the line is the line itself: pole
+       came out at t = 0.000 while every car behind it came out at t ≈ 0.99. All
+       of them carry `laps = -1` (the grid is behind the line, so the roll-over
+       crossing arms lap 1 without scoring), so pole's total was −1.000 against
+       the field's −0.01 — a full lap adrift before the lights went out, and it
+       stayed adrift because the gap is real arithmetic on real numbers.
+
+       Nothing showed it: the old HUD drew two rows, the car ahead and the car
+       behind, so an entire grid could be mis-ordered in front of you and the
+       only symptom was a strange number in one cell. The timing tower put all
+       seven rows on screen and it read `+129.8` on the front row.
+
+       This is the general lesson, not a speedway one: DO NOT SEARCH FOR A
+       NUMBER YOU AUTHORED. `back` is metres behind the line by construction, so
+       the param is `back / L` exactly, at any resolution, and it is now handed
+       to the scorer instead of being re-derived by a coarse search that cannot
+       represent it. */
     const t = ((back / lineLen()) % 1 + 1) % 1;
-    return { x, z, heading: trackFrame(t).heading };
+    return { x, z, heading: trackFrame(t).heading, t: t, back: back };
   }
 
   // THE SPEEDWAY AS A TOOL. A second event asks for this object instead of
@@ -2373,7 +2421,15 @@
     RACE.laps = 3; RACE.countT = 3.9; RACE.lightsOffT = 0;
     RACE.playerLaps = -1;                    // grid sits BEHIND the line: the
     RACE.playerTotal = -0.02;                // roll-over crossing arms lap 1
+                                             // (re-seeded exactly below, once
+                                             //  the player's own slot is known)
     RACE.drivers = [];
+    RACE.secIdx = 0; RACE.secStart = 0;
+    RACE.secBest = new Array(SECTORS).fill(0);
+    RACE.secPurple = new Array(SECTORS).fill(0);
+    RACE.secShow = [];
+    RACE.flap = 0; RACE.flapName = ""; RACE.flapId = null;
+    RACE.playerDone = false; RACE.playerFinishT = 0; RACE.cooldownT = 0; RACE.parkT = 0;
 
     // === the field: top-6 championship drivers, pole by standing ===
     let field = (RC && RC.standings) ? RC.standings().slice(0, FIELD_RD) : [];
@@ -2381,17 +2437,41 @@
       // roster module absent: anonymous fast rivals so the race still runs
       for (let i = 0; i < FIELD_RD; i++) field.push({ name: "Rival " + (i + 1), number: 90 + i, teamColor: [0xc0392b, 0x1b6ec8, 0x2ba24a, 0xd66a2e, 0x6a2bd6, 0xe0a92e][i], accent: 0xeef2f6, skill: 0.72 + i * 0.04, homeStyle: "muscle" });
     }
+    /* SIX DRIVERS, SIX DRIVERS — NOT ONE SCALAR SIX TIMES.
+       `aggr` and `consistency` used to be straight-line functions of `skill`,
+       so the whole field was the same personality at six volumes: the fastest
+       man was always also the bravest and the most reliable, and there was
+       never a wild quick one or a slow tidy one to race differently. The three
+       traits are now spread AROUND the skill line by a per-driver signature —
+       hashed off the name so a given rival is the same character every weekend
+       and no Math.random enters worldgen. Skill still sets the ceiling; the
+       signature decides what kind of driver reaches it. racedrivers.js already
+       reads all three independently (mistakes are (1-consistency)*(0.3+aggr*
+       0.25); DEFEND is gated on aggr > 0.45), so this needed no AI change to
+       become visible — the AI was always ready for a field that differed. */
+    function trait(racer, salt, spread) {
+      const n = String(racer.name || "r") + "|" + (racer.number || 0);
+      let h = 2166136261 >>> 0;
+      for (let k = 0; k < n.length; k++) { h ^= n.charCodeAt(k); h = Math.imul(h, 16777619) >>> 0; }
+      h = Math.imul(h ^ salt, 2654435761) >>> 0;
+      return ((h >>> 8) / 16777216 - 0.5) * 2 * spread;      // −spread..+spread
+    }
     for (let i = 0; i < field.length; i++) {
       const racer = field[i], slot = gridSlot(i);
+      const sk = racer.skill || 0.8;
+      // a brave/timid axis and a tidy/ragged axis, independent of each other
+      const aggr = Math.max(0.12, Math.min(0.97, 0.35 + sk * 0.45 + trait(racer, 0x9e1, 0.26)));
+      const cons = Math.max(0.30, Math.min(0.98, 0.55 + sk * 0.40 + trait(racer, 0x5cd, 0.18)));
       const m = RD.spawn({
         x: slot.x, z: slot.z, heading: slot.heading,
         style: racer.homeStyle || "muscle", color: racer.teamColor,
         livery: RC && RC.liveryFor ? RC.liveryFor(racer) : { number: racer.number, base: racer.teamColor, accent: racer.accent },
         name: racer.name, number: racer.number,
-        skill: racer.skill || 0.8,
-        aggr: 0.35 + (racer.skill || 0.8) * 0.45,
-        consistency: 0.55 + (racer.skill || 0.8) * 0.4,
+        skill: sk,
+        aggr: aggr,
+        consistency: cons,
         lane0: (i % 2 === 0 ? 1 : -1) * 2.6,     // hold your grid column off the launch
+        t0: slot.t,                              // exact, not searched — see gridSlot()
         tag: "speedway", course: "speedway",
         playerProgress: function () { return RACE.playerTotal; },
       });
@@ -2421,7 +2501,11 @@
     car.group.position.set(ps.x, py, ps.z);
     car.group.rotation.y = ps.heading;
     P.pos.set(ps.x, py, ps.z);
-    RACE.playerLastT = paramAt(ps.x, ps.z);
+    // The player's slot knows its own param too, so his progress starts from
+    // the same exact arithmetic the field's does rather than from a typed
+    // -0.02 that happened to be close enough on one grid size.
+    RACE.playerLastT = ps.t != null ? ps.t : paramAt(ps.x, ps.z);
+    RACE.playerTotal = RACE.playerLaps + RACE.playerLastT;
 
     // === the scorer ===
     const entrants = RACE.drivers.map(function (m) {
@@ -2441,7 +2525,19 @@
     });
     RACE.kit = CBZ.raceKit.create({ course: "speedway", laps: RACE.laps, entrants: entrants });
 
-    if (CBZ.raceHud) { CBZ.raceHud.show(); CBZ.raceHud.lights(0); }
+    if (CBZ.raceHud) {
+      CBZ.raceHud.show();
+      CBZ.raceHud.lights(0);
+      // THE MAP IS THE COURSE, SAMPLED — not a drawing of a speedway. 72 points
+      // off the one authoritative frame function, so if the curvature diagram
+      // at the top of this file changes shape, so does the map, for free.
+      if (CBZ.raceHud.setTrack) {
+        const pts = [];
+        for (let i = 0; i < 72; i++) { const f = trackFrame(i / 72); pts.push({ x: f.x, z: f.z }); }
+        const sf = trackFrame(SF_T);
+        CBZ.raceHud.setTrack(pts, { start: { x: sf.x, z: sf.z, nx: sf.nx, nz: sf.nz } });
+      }
+    }
     const rnd = RC ? (RC.round + 1) : 1;
     note("ROUND " + rnd + " — " + RACE.drivers.length + " championship cars on the grid. Lights out and away we go…", 3.0);
   }
@@ -2557,11 +2653,114 @@
     return car;
   };
 
+  /* ---- SECTOR TIMING ------------------------------------------------------
+     Three sectors a lap off the same centreline parameter the lap counter
+     watches. A sector closes when the player's `t` passes its boundary going
+     FORWARD; a backwards crossing simply does not close one (the lap counter
+     already refuses to score a reversed line crossing, and this refuses for the
+     same reason). `secShow` is what the HUD renders: the sectors completed on
+     the CURRENT lap, each against your own best and the session's. */
+  function sectorTick(t, now) {
+    if (RACE.playerLaps < 0) { RACE.secIdx = 0; RACE.secStart = now; return; }
+    const want = Math.floor(t * SECTORS);              // 0..SECTORS-1
+    if (want === RACE.secIdx) return;
+    // forward only, and only one boundary at a time (a teleport is not a lap)
+    const fwd = (want - RACE.secIdx + SECTORS) % SECTORS;
+    if (fwd !== 1) { RACE.secIdx = want; RACE.secStart = now; return; }
+    const idx = RACE.secIdx;
+    const st = now - RACE.secStart;
+    RACE.secIdx = want; RACE.secStart = now;
+    if (!(st > 1.5)) return;                            // jitter, not a sector
+    const prevBest = RACE.secBest[idx];
+    const purple = !RACE.secPurple[idx] || st < RACE.secPurple[idx];
+    if (purple) RACE.secPurple[idx] = st;
+    if (!prevBest || st < prevBest) RACE.secBest[idx] = st;
+    // A NEW LAP IS A NEW SET, and the set is dense: assigning secShow[1] into a
+    // fresh [] leaves a HOLE at 0, and a hole is an `undefined` the HUD would
+    // dereference. Rebuild it at full length every time sector 1 closes.
+    if (idx === 0 || RACE.secShow.length !== SECTORS) RACE.secShow = new Array(SECTORS).fill(null);
+    RACE.secShow[idx] = { s: st, delta: prevBest ? st - prevBest : null, purple: purple };
+  }
+
+  /* ---- THE FIELD'S FASTEST LAP -------------------------------------------
+     raceKit has been recording `e.lapTimes[]` and `e.best` for every entrant
+     since it was written and NOTHING in the repo ever read them. One sweep
+     turns that into the purple every racing game uses to say the session just
+     changed — and into a bonus at the finish, so chasing it is a decision. */
+  function fastestLapSweep() {
+    const kit = RACE.kit; if (!kit) return false;
+    let changed = false;
+    for (const e of kit.entrants) {
+      if (e.best > 0 && (!RACE.flap || e.best < RACE.flap - 1e-6)) {
+        RACE.flap = e.best;
+        RACE.flapName = e.isPlayer ? "YOU" : e.name;
+        RACE.flapId = e.id;
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  // one HUD frame, built from the scorer + the live cars. Called from BOTH the
+  // countdown and the race, which is why the grid no longer shows em-dashes.
+  function pushHud(extra) {
+    const kit = RACE.kit;
+    if (!kit || !CBZ.raceHud) return;
+    const ctx = kit.playerContext();
+    if (!ctx) return;
+    const lead = kit.order[0];
+    // THE TIMING TOWER: intervals, not gaps to the leader — the number you can
+    // act on is the distance to the car you can see.
+    const tower = kit.order.map(function (e, i) {
+      const drv = e.driver;
+      const out = !!(drv && (drv.dnf || (drv.car && drv.car.dead)));
+      const ahead = i > 0 ? kit.order[i - 1] : null;
+      const lapsDown = lead && !e.finished ? Math.floor(Math.max(0, lead.total - e.total)) : 0;
+      return {
+        pos: e.pos, name: e.name, number: e.number, color: e.color,
+        you: !!e.isPlayer, dnf: out, fl: RACE.flapId != null && e.id === RACE.flapId,
+        lapped: lapsDown > 0 ? lapsDown : 0,
+        gap: ahead && !lapsDown ? kit.gapSeconds(ahead, e) : null,
+        gapText: e.finished ? "FIN" : null,
+      };
+    });
+    // the dots: every entrant's live world position, player included
+    const cars = [];
+    for (const m of RACE.drivers) {
+      if (!m.car || !m.car.pos) continue;
+      cars.push({ x: m.car.pos.x, z: m.car.pos.z, color: m._racer ? m._racer.teamColor : 0x9fb0c6, dnf: !!m.dnf });
+    }
+    const pc = CBZ.player && CBZ.player._vehicle;
+    if (pc && pc.pos) cars.push({ x: pc.pos.x, z: pc.pos.z, color: 0xeaf6ff, you: true });
+
+    const lapNow = Math.max(1, Math.min(RACE.laps, RACE.playerLaps + 1));
+    let flag = null;
+    if (RACE.playerDone) flag = "finished";
+    else if (RACE.phase === "grid") flag = null;
+    else if (RACE.playerLaps === RACE.laps - 1) flag = "white";      // final lap
+    else if (RACE.lightsOffT > 0) flag = "green";
+    const eng = pc && pc.engineHp != null ? Math.max(0, Math.min(100, pc.engineHp)) / 100 : null;
+
+    CBZ.raceHud.update(Object.assign({
+      pos: ctx.row.pos, count: kit.entrants.length,
+      lap: lapNow, laps: RACE.laps,
+      lapT: RACE.phase === "grid" ? 0 : kit.time - ctx.row.lapStart,
+      last: ctx.row.lastLap, best: ctx.row.best,
+      gapA: ctx.ahead ? { name: ctx.ahead.name, s: ctx.gapA } : null,
+      gapB: ctx.behind ? { name: ctx.behind.name, s: ctx.gapB } : null,
+      tower: tower, cars: cars,
+      sectors: RACE.secShow && RACE.secShow.length ? RACE.secShow.slice(0, SECTORS) : null,
+      flap: RACE.flap > 0 ? { s: RACE.flap, name: RACE.flapName } : null,
+      damage: eng, flag: flag,
+    }, extra || null));
+  }
+
   function tickRD(dt) {
     const P = CBZ.player;
     // bailed out of the car mid-weekend
     if (!P || !P.driving || !P._vehicle || P._vehicle.dead) {
       if (RACE.phase === "grid") cancelRD("Race scratched — you left the grid.");
+      else if (RACE.playerDone) endRaceRD({});          // already home; a walk-off is not a DNF
       else endRaceRD({ dnf: true });
       return;
     }
@@ -2572,10 +2771,21 @@
       RACE.countT -= dt;
       const c = RACE.countT;
       if (c > 0) {
-        if (CBZ.raceHud) CBZ.raceHud.lights(c > 2.4 ? 1 : c > 1.2 ? 2 : 3);
+        // FIVE lamps, filling in real time — the same count the physical gantry
+        // over the start line runs, instead of a three-step approximation of it.
+        if (CBZ.raceHud) {
+          const lit = Math.min(5, Math.max(1, Math.ceil((3.9 - c) / 3.9 * 5)));
+          CBZ.raceHud.lights(lit);
+        }
+        // The grid is the one moment you most want the order, and the HUD used
+        // to return before drawing anything: POS and LAP read "—" until the
+        // lights went out. The scorer is already live, so simply feed it.
+        RACE.kit.update(0);
+        pushHud({ note: "GRID · LIGHTS " + Math.min(5, Math.max(1, Math.ceil((3.9 - c) / 3.9 * 5))) + "/5" });
         return;
       }
       RACE.phase = "green"; RACE.lightsOffT = 1.4;
+      RACE.secStart = RACE.kit ? RACE.kit.time : 0;
       if (CBZ.raceHud) CBZ.raceHud.lights("go");
       CBZ.raceDrivers.setState("race", "speedway");
       note("GREEN GREEN GREEN!", 1.8);
@@ -2591,25 +2801,52 @@
     if (RACE.playerLastT > 0.85 && pt < 0.15) RACE.playerLaps++;
     else if (RACE.playerLastT < 0.15 && pt > 0.85) RACE.playerLaps--;   // backed over the line
     RACE.playerLastT = pt;
-    RACE.playerTotal = RACE.playerLaps + pt;
+    // A DRIVER WHO HAS TAKEN THE FLAG IS NOT STILL SCORING. Freeze his progress
+    // at the finish so a cool-down lap cannot re-order the classification he
+    // has already earned (and cannot roll his own lap counter past `laps`).
+    if (!RACE.playerDone) RACE.playerTotal = RACE.playerLaps + pt;
 
     RACE.kit.update(dt);
-
-    // ---- the racing HUD strip ----
-    const ctx = RACE.kit.playerContext();
-    if (ctx && CBZ.raceHud) {
-      CBZ.raceHud.update({
-        pos: ctx.row.pos, count: RACE.kit.entrants.length,
-        lap: Math.max(1, Math.min(RACE.laps, RACE.playerLaps + 1)),
-        laps: RACE.laps,
-        lapT: RACE.kit.time - ctx.row.lapStart, best: ctx.row.best,
-        gapA: ctx.ahead ? { name: ctx.ahead.name, s: ctx.gapA } : null,
-        gapB: ctx.behind ? { name: ctx.behind.name, s: ctx.gapB } : null,
-      });
+    if (!RACE.playerDone) sectorTick(pt, RACE.kit.time);
+    if (fastestLapSweep() && RACE.flapId === "you") {
+      note("FASTEST LAP — " + (CBZ.raceHud ? CBZ.raceHud.fmtT(RACE.flap) : RACE.flap.toFixed(2)), 2.0);
     }
 
-    // ---- checkered flag ----
-    if (RACE.playerLaps >= RACE.laps) endRaceRD({});
+    // ---- the chequered flag is a PLACE, not the end of the world ------------
+    // This used to be `if (playerLaps >= laps) endRaceRD({})` — the instant the
+    // player crossed the line the entire field was deleted mid-corner and the
+    // results board appeared over a track with nobody on it. Rivals still on
+    // their last lap were classified on frozen progress, which is also why the
+    // ordering could disagree with what you had just watched happen. Now the
+    // player takes the flag, his own race stops scoring, and the RACE keeps
+    // running until everyone is home or the cap expires.
+    if (!RACE.playerDone && RACE.playerLaps >= RACE.laps) {
+      RACE.playerDone = true;
+      RACE.playerFinishT = RACE.kit.time;
+      RACE.cooldownT = COOLDOWN_CAP;
+      const prow = RACE.kit.playerRow();
+      if (prow) { prow.finished = true; prow.finishT = RACE.kit.time; }
+      RACE.phase = "cooldown";
+      if (CBZ.sfx) CBZ.sfx("coin");
+      note("CHEQUERED FLAG — cool-down lap. The field is still running.", 3.0);
+    }
+    if (RACE.playerDone) {
+      RACE.cooldownT -= dt;
+      const running = RACE.kit.entrants.filter(function (e) {
+        if (e.finished) return false;
+        const d = e.driver;
+        return !(d && (d.dnf || (d.car && d.car.dead)));
+      }).length;
+      // THREE WAYS OUT, and the third is the one a player actually uses: park
+      // it. Waiting out a cool-down you did not ask for is the same mistake as
+      // ending the race the instant you crossed, pointed the other way — so
+      // coming to a stop after the flag calls it in, which is what parking in
+      // the pit lane means anywhere else.
+      RACE.parkT = Math.abs(car.v) < 2 ? (RACE.parkT || 0) + dt : 0;
+      if (running === 0 || RACE.cooldownT <= 0 || RACE.parkT > 1.5) { pushHud(); endRaceRD({}); return; }
+    }
+
+    pushHud();
   }
 
   // race scratched before the green — no result, no round burned.
@@ -2625,10 +2862,32 @@
     opts = opts || {};
     const kit = RACE.kit, RC = CBZ.cityRacing;
     kit.update(0);
-    let order = kit.order.slice();
+    fastestLapSweep();
     const pRow = kit.playerRow();
-    if (opts.dnf) { order = order.filter((e) => e !== pRow); order.push(pRow); }
+    const isOut = function (e) {
+      if (e.isPlayer) return !!opts.dnf;
+      const d = e.driver;
+      return !!(d && (d.dnf || (d.car && d.car.dead)));
+    };
+    /* A CAR THAT DID NOT FINISH IS NOT CLASSIFIED AHEAD OF ONE THAT DID.
+       raceKit's live order sorts on progress, which is right while the race is
+       running — but at the flag a rival who put it in the wall on the last lap
+       still carried the highest `total` in the field and was therefore
+       classified P1, over cars that were still circulating. Only the PLAYER was
+       ever demoted on a DNF (`order.filter(...); order.push(pRow)`), so the
+       fault was invisible unless a rival crashed. games/racing.js:372 already
+       sorted retirements last and the two flows disagreed; they agree now.
+       Retirements keep their relative order by how far they got, which is the
+       convention: out on lap 3 classifies ahead of out on lap 1. */
+    let order = kit.order.slice().sort(function (a, b) {
+      const ao = isOut(a), bo = isOut(b);
+      if (ao !== bo) return ao ? 1 : -1;
+      if (a.finished && b.finished) return a.finishT - b.finishT;
+      if (a.finished !== b.finished) return a.finished ? -1 : 1;
+      return b.total - a.total;
+    });
     const place = order.indexOf(pRow) + 1;
+    const flRow = RACE.flapId != null ? order.filter(function (e) { return e.id === RACE.flapId; })[0] : null;
 
     // === CHAMPIONSHIP: the finishing order IS the awards order ===
     if (RC && RC.awardRace) {
@@ -2636,9 +2895,32 @@
       RC.bumpRound();
     }
 
-    // === purse: position × laps × season-build multiplier (a DNF pays $0) ===
+    /* === purse: position × laps × season-build multiplier (a DNF pays $0) ===
+       AND A FREE RACE MAY NOT BE THE BEST-PAID RACE IN THE GAME. Measured
+       before this change, at LAP_PURSE 7500 over 3 laps:
+
+         Speedway weekend   entry $0     win $22,500   LAST PLACE $500 floor
+         APEX Night         entry $250   win    $700   lose the entry + the bet
+         Street race        ante $50     pot = ante × runners, plus 1 star
+         Pink slip          your car     his car
+
+       So the one event that costs nothing, risks nothing and cannot pay less
+       than $500 paid thirty-two times the prestige event you have to qualify
+       for — and a guaranteed floor on a free entry is a money printer with a
+       lap counter attached, not a race. The floor is now START MONEY (you
+       showed up and took the flag), a retirement still pays nothing, and the
+       win is scaled to sit at the TOP of the ladder rather than off it.
+       `RACE_PURSE_V2=false` restores the old numbers exactly. */
+    const V2 = CBZ.CONFIG.RACE_PURSE_V2 !== false;
     const roundMul = RC ? (1 + RC.round * 0.10) : 1;
-    const purse = opts.dnf ? 0 : Math.max(500, Math.round(LAP_PURSE * (7 - Math.min(7, place)) / 6 * RACE.laps * roundMul));
+    const base = V2 ? PURSE_V2_BASE : LAP_PURSE;
+    const floor = V2 ? PURSE_V2_START : 500;
+    let purse = opts.dnf ? 0 : Math.max(floor, Math.round(base * (7 - Math.min(7, place)) / 6 * RACE.laps * roundMul));
+    // THE SECOND THING TO RACE FOR. `e.lapTimes[]`/`e.best` were collected for
+    // every entrant and read by nothing; a lap bonus turns the last lap of a
+    // race you cannot win into a lap worth pushing on.
+    const wonFL = !opts.dnf && flRow && flRow.isPlayer;
+    if (wonFL) purse += Math.round(FLAP_BONUS * roundMul);
     if (purse && CBZ.city && CBZ.city.addCash) CBZ.city.addCash(purse);
     // cityEvent below owns respect/reputation when present; only old/partial
     // harnesses use the direct fallback (never award the same finish twice).
@@ -2651,8 +2933,7 @@
     // === the results board ===
     const leader = order[0];
     const rows = order.map(function (e, i) {
-      const drv = e.driver;
-      const dnf = (drv && (drv.dnf || (drv.car && drv.car.dead))) || (e.isPlayer && !!opts.dnf);
+      const dnf = isOut(e);
       let time = "";
       if (dnf) time = "";
       else if (e.finished) time = (i === 0 || !leader.finished) ? (CBZ.raceHud ? CBZ.raceHud.fmtT(e.finishT) : e.finishT.toFixed(1)) : "+" + Math.max(0, e.finishT - leader.finishT).toFixed(1) + "s";
@@ -2661,14 +2942,20 @@
         pos: i + 1, name: e.name, number: e.number, color: e.color,
         time: time, pts: pointsForPlace(i + 1), purse: e.isPlayer ? purse : 0,
         you: e.isPlayer, dnf: dnf,
+        // the two columns the board never had: what each driver's best lap
+        // actually was, and who owns the fastest of them.
+        best: e.best || 0, fl: !!(flRow && e.id === flRow.id),
       };
     });
     if (CBZ.raceHud) {
       CBZ.raceHud.hide();
+      const flTxt = RACE.flap > 0
+        ? " · Fastest lap " + (CBZ.raceHud.fmtT(RACE.flap)) + " " + RACE.flapName + (wonFL ? " (+$" + fmt(Math.round(FLAP_BONUS * roundMul)) + ")" : "")
+        : "";
       CBZ.raceHud.results(rows, {
-        title: opts.dnf ? "DNF — OUT OF THE RACE" : (place === 1 ? "CHECKERED FLAG — YOU WIN!" : "RACE RESULTS"),
+        title: opts.dnf ? "DNF — OUT OF THE RACE" : (place === 1 ? "CHEQUERED FLAG — YOU WIN!" : "RACE RESULTS"),
         sub: RC ? "Diamond Speedway · Season " + RC.season : "Diamond Speedway",
-        foot: purse ? ("Purse $" + fmt(purse) + " · +" + pointsForPlace(place) + " championship points · Esc closes") : "No purse for a DNF · Esc closes",
+        foot: (purse ? ("Purse $" + fmt(purse) + " · +" + pointsForPlace(place) + " championship points") : "No purse for a DNF") + flTxt + " · Esc closes",
       });
     }
     const ord = place === 1 ? "1st — CHECKERED FLAG!" : place === 2 ? "2nd" : place === 3 ? "3rd" : place + "th";

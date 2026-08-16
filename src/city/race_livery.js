@@ -151,7 +151,25 @@
   // ---- recolour the body to the livery BASE — reuse playercars' exact pattern
   // (clone the _bodyPaint material once per source mat, tag _playerCarOwned so the
   // existing detach/dispose cleans it up). This keeps the body in its paint bucket. ----
+  /* ADOPTED: playercars.js owns the recolour traversal now
+     (`CBZ.cityRecolorCarBody`). This was a byte-copy of it, and being a copy is
+     exactly why it died: playercars' version cleared `_bodyPaint` on the
+     material it minted, this one tested for `_bodyPaint`, and the two run in
+     that order on every car — so `livery.base` matched nothing and was
+     discarded on every AI racer, loaner and pink-slip car in the game. The `:`
+     arm is the original body verbatim, for a harness that loads this file
+     without playercars.js. */
   function recolorBase(root, base) {
+    if (CBZ.cityRecolorCarBody) {
+      CBZ.cityRecolorCarBody(root, base);
+      // evidence the league colour actually reached a body, for carPaintAudit:
+      // this counter read 0 for the whole life of the livery layer.
+      root.traverse(function (o) {
+        const m = o.material;
+        if (m && !Array.isArray(m) && m._bodyPaint) o.userData.raceLiveryBase = base;
+      });
+      return;
+    }
     const c = new THREE.Color(base);
     const swapped = new Map();
     root.traverse(function (o) {
@@ -162,7 +180,7 @@
         nm = m.clone();
         nm.color = c.clone();
         if (nm.emissive) nm.emissive = c.clone().multiplyScalar(0.16);
-        nm._shared = false; nm._bodyPaint = false; nm._playerCarOwned = true;
+        nm._shared = false; nm._playerCarOwned = true;
         swapped.set(m.id, nm);
       }
       o.material = nm;

@@ -325,7 +325,7 @@
       "  <div id='cSlots' class='cSlots oC'></div>" +
       "  <div id='cAmmo' class='cAmmo oM'></div>" +
       "</div>" +
-      "<div id='cSpeed' class='oM' style='position:absolute;right:var(--hud-pad-r);bottom:74px;text-align:right;color:var(--hud-ink);display:none'><span aria-hidden='true' style='font-size:16px;color:var(--hud-dim)'>↠</span> <span id='cSpeedN' style='font-size:30px;font-weight:700;text-shadow:0 2px 4px rgba(0,0,0,.6)'>0</span></div>" +
+      "<div id='cSpeed' class='oM' style='position:absolute;right:var(--hud-pad-r);bottom:74px;text-align:right;color:var(--hud-ink);display:none'><span aria-hidden='true' style='font-size:16px;color:var(--hud-dim)'>↠</span> <span id='cSpeedN' style='font-size:30px;font-weight:700;text-shadow:0 2px 4px rgba(0,0,0,.6)'>0</span> <span id='cSpeedFU' style='font-size:12px;font-weight:700;letter-spacing:1px;color:var(--hud-dim)'>MPH</span></div>" +
       "<div id='cJob' class='cPanel oM' style='position:absolute;top:var(--hud-pad-t);left:50%;transform:translateX(-50%);text-align:center;color:var(--hud-ink);font-size:14px;max-width:60%;padding:5px 14px;display:none'></div>" +
       // Retired prospect objective shell. Kept hidden so older references stay
       // harmless, but default story/prospect checklist text no longer reaches HUD.
@@ -1743,11 +1743,23 @@
       const owned = !!((CBZ.carClusterSpeedOwned && CBZ.carClusterSpeedOwned()) ||
                        (CBZ.touchVehicleActive && CBZ.touchVehicleActive()));
       if (car && car.pos && !owned) {
-        const mph = Math.round(Math.abs(car.v || 0) * 3);   // world units/s → rough mph (top coupe ~50u/s ≈ 150)
+        // ADOPTED: vehicles.js's CBZ.speedRead is the one conversion (see its
+        // note). The `* 3` this replaces called itself "rough mph" in its own
+        // comment and disagreed with the instrument cluster by 25% — two
+        // different speeds for one car, which is the fault the owner reported
+        // as "shows km/h not mph". The `:` arm keeps the old guess for a
+        // harness loaded without vehicles.js.
+        const read = CBZ.speedRead ? CBZ.speedRead(car.v) : null;
+        const shown = read ? read.n : Math.round(Math.abs(car.v || 0) * 3);
         speedEl.style.display = "block";
         _speedShown = true;
         const sn = speedEl.querySelector("#cSpeedN");
-        if (sn) { sn.textContent = mph; sn.style.color = mph > 100 ? "#ff9e6b" : "#e8ecf2"; }
+        if (sn) { sn.textContent = shown; sn.style.color = shown > 100 ? "#ff9e6b" : "#e8ecf2"; }
+        // …and it says WHICH unit now. This readout drew a bare number with an
+        // arrow glyph and nothing else, so on the one path where it is the only
+        // speedometer on screen there was no way to tell what you were reading.
+        const su = speedEl.querySelector("#cSpeedFU");
+        if (su && read && su.textContent !== read.unit) su.textContent = read.unit;
       } else { speedEl.style.display = "none"; _speedShown = false; }
     }
     // population headcount + kill feed (throttled — they change steadily, not

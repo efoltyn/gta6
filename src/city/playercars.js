@@ -2394,6 +2394,24 @@
   // template's paint material is tagged `_bodyPaint`; clone(true) shares material
   // refs, so we swap those meshes onto a per-car cloned material (one per unique
   // source paint) and tag it `_playerCarOwned` so detach()/dispose can clean up.
+  /* THE PAINT IS REPAINTABLE TWICE, AND THAT USED TO BE THE WHOLE BUG.
+     This function used to clear `_bodyPaint` on the clone it minted, on the
+     reasoning that a per-car material is no longer "the template's paint".
+     But `_bodyPaint` is the only handle anything downstream has for finding a
+     car's body, and TWO downstream passes need it after this one runs:
+
+       • race_livery.js `recolorBase()` — the livery's BASE colour. It tests
+         `m._bodyPaint`, matched zero materials on every car ever built, and
+         silently discarded `livery.base`. Every AI racer on the grid wore its
+         catalog paint and the league's team colours never reached the track.
+       • CBZ.cityRecolorCar (vehicles.js) — the parked/scenery repaint hook,
+         which `cityAddParkedCar(x,z,h,{color})` has always called and which
+         had no definition at all.
+
+     So the flag STAYS SET, and a material this instance already owns is
+     repainted IN PLACE instead of cloned again — a second pass costs nothing
+     and cannot leak. `crashdeform.js:317` already reads the pair as an OR, and
+     modshop's respray keys off `_playerCarOwned`, so neither changes meaning. */
   function recolorBody(root, color) {
     if (root && root.userData && root.userData.marineLivery) return;
     const c = new THREE.Color(color);
@@ -2401,17 +2419,28 @@
     root.traverse(function (o) {
       const m = o.material;
       if (!m || Array.isArray(m) || !m._bodyPaint) return;
+      if (m._playerCarOwned) {                 // ours already — repaint, don't mint
+        if (m.color && m.color.copy) m.color.copy(c);
+        if (m.emissive && m.emissive.copy) m.emissive.copy(c).multiplyScalar(0.16);
+        return;
+      }
       let nm = swapped.get(m.id);
       if (!nm) {
         nm = m.clone();
         nm.color = c.clone();
         if (nm.emissive) nm.emissive = c.clone().multiplyScalar(0.16);
-        nm._shared = false; nm._bodyPaint = false; nm._playerCarOwned = true;
+        nm._shared = false; nm._playerCarOwned = true;
+        // _bodyPaint deliberately LEFT TRUE — see the block comment above.
+        if (CFG.CAR_PAINT_HANDLE_V2 === false) nm._bodyPaint = false;
         swapped.set(m.id, nm);
       }
       o.material = nm;
     });
   }
+  // THE ONE REPAINT VERB. Published so no other file re-implements the
+  // `_bodyPaint` traversal (race_livery.js had a byte-copy of it, and that copy
+  // is what went dead when this one changed a flag).
+  CBZ.cityRecolorCarBody = recolorBody;
 
   /* THE SEE-INSIDE DISCIPLINE, BORROWED FROM THE BUILDINGS.
      city/buildings.js has one rule that makes a lit office read through a

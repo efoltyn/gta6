@@ -177,16 +177,26 @@
     build();
     el.style.display = "block";
 
+    /* ADOPTED: vehicles.js owns the one conversion now (CBZ.speedRead) — see
+       its long note. This file's private `MPH_PER_UNIT = 2.4` was one of three
+       different answers in the repo and overstated every speed by 7.3%; the `:`
+       arm is the original body verbatim for a harness without vehicles.js.
+       CAR_CLUSTER_UNIT still wins where it is set explicitly, so nobody's saved
+       preference changes meaning. */
+    if (CBZ.CONFIG.CAR_CLUSTER_UNIT != null) CBZ.CONFIG.CAR_SPEED_UNIT = CBZ.CONFIG.CAR_CLUSTER_UNIT;
     const kmh = CBZ.CONFIG.CAR_CLUSTER_UNIT === "kmh";
-    const mph = Math.abs(car.v || 0) * MPH_PER_UNIT;
-    const shown = Math.max(0, Math.round(kmh ? mph * 1.609 : mph));
+    const read = CBZ.speedRead ? CBZ.speedRead(car.v) : null;
+    const mph = read ? read.mph : Math.abs(car.v || 0) * MPH_PER_UNIT;
+    const shown = read ? read.n : Math.max(0, Math.round(kmh ? mph * 1.609 : mph));
 
     let limit = 0;
     if (CBZ.CONFIG.CAR_CLUSTER_LIMIT !== false && CBZ.roadSpeedLimit) {
       const p = car.group ? car.group.position : car.pos;
       if (p) { try { limit = CBZ.roadSpeedLimit(p.x, p.z) | 0; } catch (e) { limit = 0; } }
     }
-    const limShown = limit > 0 ? (kmh ? Math.round(limit * 1.609 / 5) * 5 : limit) : 0;
+    const limShown = limit > 0
+      ? (CBZ.speedLimitRead ? CBZ.speedLimitRead(limit) : (kmh ? Math.round(limit * 1.609 / 5) * 5 : limit))
+      : 0;
     const over = limit > 0 && mph > limit + 4;      // 4 mph of grace, as posted enforcement has
 
     const f = CBZ.vehicleFuel ? CBZ.vehicleFuel(car) : null;
@@ -198,13 +208,17 @@
 
     // Repaint only when something visible changed — the killfeed's fingerprint
     // trick. A per-frame innerHTML write on a driving HUD is pure jank.
+    // the UNIT joins the fingerprint: switching mph↔kmh at runtime changes the
+    // label and can leave the number identical, and a repaint gate that cannot
+    // see the label would keep drawing the old one.
     const fp = shown + "|" + limShown + "|" + (over ? 1 : 0) + "|" +
-               (f ? Math.round(f.frac * 60) : -1) + "|" + gearTxt + "|" + (handoff ? 1 : 0);
+               (f ? Math.round(f.frac * 60) : -1) + "|" + gearTxt + "|" + (handoff ? 1 : 0) +
+               "|" + (read ? read.unit : (kmh ? "KM/H" : "MPH"));
     if (fp === lastFP) return;
     lastFP = fp;
 
     elSpeed.textContent = String(shown);
-    elUnit.textContent = kmh ? "KM/H" : "MPH";
+    elUnit.textContent = read ? read.unit : (kmh ? "KM/H" : "MPH");
     elGear.textContent = gearTxt;
     if (limShown > 0) { elLimit.style.display = "flex"; elLimitNum.textContent = String(limShown); }
     else elLimit.style.display = "none";
