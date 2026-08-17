@@ -249,6 +249,10 @@ async function stage(input) {
   // it as the subject.
   const armOnce = () => {
     if (CBZ.game) { CBZ.game.cityHolstered = false; CBZ.game.cityMeleeWeapon = null; }
+    // Own exactly the weapon under test: the inventory accumulates across
+    // subjects and holsterprops stows the surplus on the back, which put a
+    // rocket tube across the silhouette of a carbine grip shot.
+    if (Array.isArray(CBZ.weaponInventory)) CBZ.weaponInventory.length = 0;
     CBZ.unlockWeapon(sub.weapon, { select: true });
     if (CBZ.fpsSelectWeaponId) { try { CBZ.fpsSelectWeaponId(sub.weapon); } catch (_) {} }
     if (CBZ.fpsAddAmmo) { try { CBZ.fpsAddAmmo(400); } catch (_) {} }
@@ -432,15 +436,15 @@ async function stage(input) {
   q("side").textContent = before ? input.beforeLabel : input.afterLabel;
   q("side").style.cssText = `position:absolute;top:22px;left:26px;padding:7px 11px;border-radius:7px;background:${before ? "#c94c4c" : "#218b60"};font-size:12px;font-weight:900;letter-spacing:.12em`;
   q("name").textContent = sub.label;
-  q("name").style.cssText = "position:absolute;top:64px;left:26px;font-size:25px;font-weight:800;letter-spacing:-.02em";
+  q("name").style.cssText = "position:absolute;top:60px;left:22px;padding:4px 10px;border-radius:6px;background:rgba(8,12,16,.72);font-size:25px;font-weight:800;letter-spacing:-.02em";
   q("focus").textContent = sub.focus;
-  q("focus").style.cssText = "position:absolute;top:99px;left:28px;color:#c0cfda;font-size:13px;font-weight:550;max-width:700px";
+  q("focus").style.cssText = "position:absolute;top:103px;left:22px;padding:5px 10px;border-radius:6px;background:rgba(8,12,16,.72);color:#d6e2ec;font-size:13px;font-weight:550;max-width:690px";
   q("num").textContent =
     "off hand → bore " + cm(probe && probe.gap) +
     " · above axis " + cm(probe && probe.above) +
     " · travel " + cm(travel) +
     (sub.kind === "reload" ? " · phase " + (reachedP == null ? "MISSED" : reachedP.toFixed(2)) : "");
-  q("num").style.cssText = "position:absolute;right:24px;top:24px;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:#9fe8c3";
+  q("num").style.cssText = "position:absolute;right:22px;top:22px;padding:6px 10px;border-radius:6px;background:rgba(8,12,16,.78);font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:#9fe8c3";
   q("diag").textContent =
     "held " + (prop ? (prop.userData && prop.userData.weaponId) || "?" : "NONE") +
     " · grips " + (prop && prop.userData && prop.userData.grips ? "authored" : "none") +
@@ -452,7 +456,7 @@ async function stage(input) {
     (audit ? " · audit gap " + cm(audit.gap) : " · audit n/a (build has no gunHandAudit)");
   q("diag").style.cssText = "position:absolute;left:26px;bottom:40px;max-width:1040px;padding:5px 8px;border-radius:5px;background:rgba(8,12,16,.72);font:11px ui-monospace,SFMono-Regular,Menlo,monospace;color:#e8c98f";
   q("source").textContent = new URL(input.sourceUrl).host + new URL(input.sourceUrl).pathname;
-  q("source").style.cssText = "position:absolute;bottom:18px;left:26px;color:#9cb0bf;font:11px ui-monospace,SFMono-Regular,Menlo,monospace";
+  q("source").style.cssText = "position:absolute;bottom:16px;left:22px;padding:3px 8px;border-radius:5px;background:rgba(8,12,16,.6);color:#b9c8d4;font:11px ui-monospace,SFMono-Regular,Menlo,monospace";
 
   const metrics = {};
   if (probe) {
