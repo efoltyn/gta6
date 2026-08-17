@@ -64,11 +64,11 @@ const subjects = [
   HOLD("carry-carbine", "carbine", "LOW READY · M4 carbine · side",
     "Not presenting — the walking-around carry, which is what the player sees most of the time. The rifle is still a two-hand object.",
     "side", { aim: false }),
-  RELOAD("reload-carbine-drop", "carbine", 0.22, "RELOAD · M4 · empty mag leaving the gun",
+  RELOAD("reload-ak-drop", "ak47", 0.22, "RELOAD · AK-47 · empty mag leaving the gun",
     "Frame one of the story: hand on the magwell, gun rolled to show it, the spent magazine on its way to the pavement.", "quarter"),
   RELOAD("reload-carbine-belt", "carbine", 0.50, "RELOAD · M4 · reaching the belt",
     "Mid-reload. The off hand should be down at the pouch on the left hip with a fresh magazine, nowhere near the handguard.", "side"),
-  RELOAD("reload-carbine-seat", "carbine", 0.83, "RELOAD · M4 · seating the fresh mag",
+  RELOAD("reload-ak-seat", "ak47", 0.83, "RELOAD · AK-47 · seating the fresh mag",
     "The slap. Hand back at the magwell, gun still canted, about to run forward to the charging handle.", "quarter"),
   RELOAD("reload-lmg", "lmg", 0.50, "RELOAD · M249 · belt change",
     "A belt gun is not fed from a magwell: cover up, ammo box off, box on, belt laid in. Different choreography, same solver.", "side"),
@@ -207,7 +207,9 @@ async function stage(input) {
   if (CBZ.game) { CBZ.game.cityHolstered = false; CBZ.game.cityMeleeWeapon = null; }
   if (!CBZ.unlockWeapon) return { ok: false, err: "no CBZ.unlockWeapon" };
   CBZ.unlockWeapon(sub.weapon, { select: true });
+  if (CBZ.fpsSelectWeaponId) { try { CBZ.fpsSelectWeaponId(sub.weapon); } catch (_) {} }
   if (CBZ.fpsAddAmmo) { try { CBZ.fpsAddAmmo(400); } catch (_) {} }
+  if (CBZ.fpsSetActive && CBZ.fps && CBZ.fps.active) CBZ.fpsSetActive(false);
   if (CBZ.fpsSetAim) CBZ.fpsSetAim(sub.aim === false ? false : true);
   // settle: the body-yaw ease is ~0.3 s and the arm damps another ~0.3 s
   for (let i = 0; i < 10; i++) {
