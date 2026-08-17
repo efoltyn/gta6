@@ -147,6 +147,7 @@ const PROBE = `(() => {
     const rec = { id: gid };
     try {
       CBZ.unlockWeapon(gid, { select: true });
+      if (CBZ.fpsSelectWeaponId) CBZ.fpsSelectWeaponId(gid);
       if (CBZ.fpsAddAmmo) CBZ.fpsAddAmmo(400);
       // A gun-to-gun switch runs holsterprops' stow TRANSFER first (~0.9 s),
       // during which the incoming prop is deliberately hidden. Wait it out
@@ -173,6 +174,12 @@ const PROBE = `(() => {
       rec.passes = au ? au.passes : null;
       rec.driven = au ? au.driven : null;
       rec.why = au ? au.why : null;
+      rec.solve = au && au.reach != null
+        ? "reach=" + (au.reach*100).toFixed(0) + " dist=" + (au.dist*100).toFixed(0) +
+          " over=" + (au.over*100).toFixed(0) + " pull=" + (au.pull*100).toFixed(0) +
+          " over2=" + (au.over2*100).toFixed(0) + " slid=" + au.slid +
+          " resid=" + (au.residual == null ? "null" : (au.residual*100).toFixed(0))
+        : null;
       // ISOLATION PROBE: call the solver by hand on the same anchor. If this
       // lands and the frame pass did not, the fault is in the plumbing (hook
       // order, a later writer) and not in the maths — the two failures look
@@ -250,7 +257,7 @@ for (const g of res.guns) {
     lpad(g.aimGap, 8) + lpad(g.aimAbove, 8) + lpad(g.carryGap, 9) + lpad(g.carryAbove, 8) +
     lpad(g.travel, 9) + "  " + pad(g.style, 10) + lpad(g.ammoAfter, 7) + lpad(g.blend, 7) +
     "  " + (g.why || "") +
-    (g.direct != null ? "  direct=" + g.direct + " bore=" + g.directBore + " +1f=" + g.afterOneStep : "") +
+    (g.solve ? "  [" + g.solve + "]" : "") +
     (g.err ? "   ERR " + g.err : ""));
   if (g.err) fails.push(g.id + ": " + g.err);
   if (g.oneHanded) continue;

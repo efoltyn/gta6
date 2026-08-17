@@ -1276,6 +1276,24 @@
     const part = ch && ch.parts && (arm === "l" ? ch.parts.la : ch.parts.ra);
     if (part) part.userData._armRestZ = z || 0;
   };
+  /* HOW FAR THIS ARM CAN ACTUALLY REACH, IN WORLD METRES — and it lives here
+     because the two ends of that question are in different units and a caller
+     that guesses the conversion gets a plausible, wrong number. The solve
+     above runs in BODY-LOCAL units (the rig is authored at ~1.3 and scaled to
+     human size on the group), so its own clamp is 0.898-ish local; a consumer
+     comparing that against a world-metre distance to a weapon is out by the
+     whole rig scale. Read the scale off the live matrix instead of assuming
+     it: a child, a scaled prop rig or a future HUMAN_SCALE change all just
+     work. Protraction is included because it is real reach, not slack. */
+  charArmTo.span = function (ch, arm) {
+    const P = ch && ch.profile;
+    if (!P || !ch.body) return 0;
+    const l1 = Math.max(0.12, P.armUp - 0.02);
+    const l2 = Math.hypot(P.armLo + 0.01, 0.035);
+    ch.body.updateWorldMatrix(true, false);
+    const s = ch.body.matrixWorld.getMaxScaleOnAxis() || 1;
+    return ((l1 + l2) * 0.985 + 0.24) * s;   // 0.24 = the protraction cap above
+  };
   CBZ.charArmTo = charArmTo;
 
   // The torso and legs are siblings authored from the feet, but anatomically

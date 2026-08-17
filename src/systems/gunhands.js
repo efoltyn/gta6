@@ -460,6 +460,8 @@
       const reach = armSpan(ch);
       shoulderWorld(ch, "l", _sh);
       let over = _sh.distanceTo(target) - reach;
+      seen.reach = reach; seen.dist = _sh.distanceTo(target); seen.over = over;
+      seen.pull = 0; seen.slid = 0;
       if (over > 0.01) {
         // A little PAST just-reachable. Sitting exactly on the reach limit
         // leaves the off arm locked straight, which reads as a second set of
@@ -468,6 +470,7 @@
         // toward its own pose each frame, this pulls it in by whatever is
         // still missing, and `over` shrinks to zero at the balance point.
         const pull = Math.min(over + 0.06, 0.42);
+        seen.pull = pull;
         prop.getWorldQuaternion(_bodyQ);
         _fwd.set(0, 0, -1).applyQuaternion(_bodyQ);        // the barrel's own axis
         ch.sockets.rightHand.updateWorldMatrix(true, false);
@@ -482,11 +485,12 @@
         target = computeTarget();
         over = _sh.distanceTo(target) - reach;
       }
-      if (over > 0.01) slideToReach(ch, prop, target, reach, _sh);
+      seen.over2 = over;
+      if (over > 0.01) { slideToReach(ch, prop, target, reach, _sh); seen.slid = 1; }
     }
 
     CBZ.charArmTo.rest(ch, "l", 0);
-    CBZ.charArmTo(ch, target, "l", blend);
+    seen.residual = CBZ.charArmTo(ch, target, "l", blend);
   }
 
   /* Still short — a bipod-legged M249, an NPC whose gun this pass may not
@@ -509,17 +513,15 @@
     }
     return target.lerp(_grip, hi);
   }
-  /* The off arm's real span in WORLD metres. l1/l2 mirror charArmTo's own
-     link lengths; the rig's metre conversion is on the group. */
+  /* The off arm's real span in WORLD metres. Asked of the solver rather than
+     recomputed here: the rig is authored in local units and scaled to human
+     size on the group, so anything that re-derives the conversion instead of
+     reading it is one refactor away from comparing local units against world
+     metres and silently deciding a gun 30 cm out of reach is fine. */
   const _sh = new THREE.Vector3(), _fwd = new THREE.Vector3();
   const _rt = new THREE.Vector3(), _grip = new THREE.Vector3();
   function armSpan(ch) {
-    const P = ch.profile;
-    if (!P) return 0.62;
-    const l1 = Math.max(0.12, P.armUp - 0.02);
-    const l2 = Math.hypot(P.armLo + 0.01, 0.035);
-    const s = (ch.group && ch.group.userData && ch.group.userData.humanScale) || 0.70;
-    return (l1 + l2) * 0.985 * s;
+    return (CBZ.charArmTo.span && CBZ.charArmTo.span(ch, "l")) || 0.62;
   }
   function shoulderWorld(ch, arm, out) {
     const part = arm === "l" ? ch.parts.la : ch.parts.ra;
@@ -633,6 +635,10 @@
       passes: seen.pass,
       driven: seen.drive,
       why: seen.why,
+      // the shoulder solve's own working: what it thought the arm could
+      // reach, how far short it was, and what it did about it
+      reach: seen.reach, dist: seen.dist, over: seen.over, over2: seen.over2,
+      pull: seen.pull, slid: seen.slid, residual: seen.residual,
       reloading: R.active,
       reloadP: R.p,
     };
