@@ -321,10 +321,10 @@ async function stage(input) {
   // and the crop comes from the lens instead.
   camera.fov = 27;
   aim.copy(base).addScaledVector(fwd, 0.26);
-  aim.y = floorY + 1.22;
+  aim.y = floorY + 1.14;
   if (sub.view === "quarter") {
-    eye.copy(base).addScaledVector(right, 2.2).addScaledVector(fwd, 3.1);
-    eye.y = floorY + 1.50;
+    eye.copy(base).addScaledVector(right, 2.6).addScaledVector(fwd, 3.7);
+    eye.y = floorY + 1.34;
   } else {
     eye.copy(base).addScaledVector(right, 3.8).addScaledVector(fwd, 0.30);
     eye.y = floorY + 1.34;
