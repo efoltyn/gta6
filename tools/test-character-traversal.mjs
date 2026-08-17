@@ -384,6 +384,16 @@ function probeGap(sillTop, headerBottom, opts, probeOpts) {
     "the pass height must sit just above the sill, not arc over it");
   assert.ok(s.passY + 0.58 <= 2.30 + 0.02,
     "a diving body's profile must fit under the header");
+  /* THE POSE MUST BE TOLD THE ENVELOPE IT WAS MEASURED AGAINST. The fit check
+     above only holds if the drawn body really is that short — and this rig is
+     1.82 m standing, so entities/character.js has to lay the whole model down
+     rather than just pitch the torso over vertical legs. It sizes that lay-out
+     from `passH`, so this field travelling with the state is what keeps the
+     drawn body and the arithmetic talking about the same body. */
+  assert.ok(s.passH > 0 && s.passH <= 0.62,
+    "the threading envelope must travel with the move for the animator to use");
+  assert.ok(s.passY + s.passH <= 2.30 + 0.02,
+    "and it must be the envelope the header clearance was actually proved with");
   finish(win.a, win.r);
   assert.ok(win.a.pos.z > 1.6, "the body must end up on the far side of the wall");
   assert.equal(win.a.pos.y, 0, "and back down on the floor");

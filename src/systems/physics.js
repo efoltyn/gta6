@@ -793,7 +793,10 @@
       const gx = ap.x + dirX * gapEndT, gz = ap.z + dirZ * gapEndT;
       return {
         kind: "through", gapStyle, car: null, collider: c, ceilRef: ceilingOver.ref,
-        rise, top, span, landOnTop: false, passY, headroom,
+        // passH travels WITH the move: entities/character.js lays the body out
+        // inside this exact envelope, so the pose and the fit check can never
+        // disagree about how tall a threading body is.
+        rise, top, span, landOnTop: false, passY, passH, headroom,
         enter: expanded.enter, exit: expanded.exit, faceT: raw.enter,
         contactT: Math.max(0, raw.enter - Math.min(0.42, height * 0.22)),
         endT: gapEndT, endY: groundAt(gx, gz, feet),
@@ -1055,7 +1058,7 @@
       kind: hit.kind, style, car: hit.car, collider: hit.collider,
       styleIndex, tangent, pathLen,
       gapStyle: hit.gapStyle || null, ceilRef: hit.ceilRef || null,
-      passY: hit.passY, headroom: hit.headroom,
+      passY: hit.passY, passH: hit.passH, headroom: hit.headroom,
       landOnTop: hit.landOnTop, top: hit.top, rise: hit.rise, span: hit.span,
       minX: hit.minX, maxX: hit.maxX, minZ: hit.minZ, maxZ: hit.maxZ,
       startX: p.x, startY: p.y || 0, startZ: p.z,

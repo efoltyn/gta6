@@ -2042,12 +2042,44 @@
         const emerge = smoother01((u - 0.68) / 0.32);
         // held through the middle: full commitment, then unwound on the way out
         const shape = Math.max(0, gather - emerge);
+        /* ---- THE POSE HAS TO AGREE WITH THE ARITHMETIC ---------------------
+           physics.js checked this hole against a HORIZONTAL body: 0.58 m tall,
+           its bottom at the sill line. If the animator only pitches `ch.body`
+           (the torso, hinged at the hips) then the legs stay standing, the rig
+           is still 1.82 m tall, and the drawn body goes straight through the
+           header the fit check just proved it cleared. A jackknifed torso over
+           vertical legs is not a dive.
+
+           So the DIVE lays the whole rig down, and it needs the same pivot
+           trick the landing roll needs and for the same reason: `model`'s
+           origin is at the FEET, so pitching it alone swings the head through
+           the floor. Rotating about a point P is R plus the translation
+           P - R*P; carrying one extra -P puts the body's own centre line ON
+           the root instead of above it, which is what makes "the root is at
+           passY" and "the body's envelope starts at passY" the same statement.
+           `lay` is offset so the envelope sits just inside the 0.58 m the
+           aperture was measured against, not straddling it. */
         if (dive) {
-          // Pitch toward horizontal. Positive rotation.x is nose-down toward
-          // the direction of travel, which is where the hands already are.
-          ch.body.position.y = damp(ch.body.position.y, -0.30 * shape, sr, dt);
-          ch.body.rotation.x = damp(ch.body.rotation.x, 1.02 * shape - 0.30 * emerge, sr, dt);
-          ch.body.rotation.z = damp(ch.body.rotation.z, 0.10 * shape, sr, dt);
+          const theta = 1.45 * shape;                 // ~83 deg: committed, not quite flat
+          const h = Math.max(0.55, ((ch.metric && ch.metric.height) || 1.82) * 0.50);
+          // The envelope physics.js actually measured this hole against, not a
+          // second copy of the number (tp.passH; see its note in physics.js).
+          const lay = (tp.passH || 0.58) * 0.5;       // centre the envelope over the sill
+          if (ch.model) {
+            ch.model.rotation.x = theta;
+            ch.model.rotation.y = 0;
+            ch.model.rotation.z = 0.10 * shape;
+            if (!ch._seatSunk) {
+              ch.model.position.y = -h * Math.cos(theta) + lay * shape;
+              ch.model.position.z = -h * Math.sin(theta);
+            }
+          }
+          // The torso adds only the last few degrees on top of the lay-out —
+          // a chest lifted slightly against the dive line, which is what a
+          // person actually does to see the landing.
+          ch.body.position.y = damp(ch.body.position.y, -0.06 * shape, sr, dt);
+          ch.body.rotation.x = damp(ch.body.rotation.x, -0.22 * shape + 0.18 * emerge, sr, dt);
+          ch.body.rotation.z = damp(ch.body.rotation.z, 0.06 * shape, sr, dt);
           // Both arms spear ahead of the head, elbows nearly locked — the arms
           // are the leading edge of the body's cross-section, not a balance aid.
           limb(ch.parts.la, -0.30 - 2.30 * shape, 0.06, -0.14 - 0.10 * shape, 0.18 * shape);
@@ -2068,8 +2100,18 @@
             ch.neck.rotation.z = damp(ch.neck.rotation.z, 0, sr, dt);
           }
         } else {
-          ch.body.position.y = damp(ch.body.position.y, -0.20 * shape, sr, dt);
-          ch.body.rotation.x = damp(ch.body.rotation.x, 0.44 * shape, sr, dt);
+          /* AND A STEP HAS TO ACTUALLY DUCK. physics.js measured this opening
+             against height * 0.78 (1.42 m on an adult), so the rig has to lose
+             ~0.40 m of stature or the drawn head is inside the lintel — the
+             same disagreement the dive above has to avoid, in the upright
+             case. Folding the knees does NOT do it in this rig: the legs hang
+             off `model` and the hip socket never moves, so bending them
+             changes the silhouette without lowering the head by a millimetre.
+             ch.body.position.y is the only channel that shortens the body,
+             which is why the number here is large and the leg drive below is
+             expression rather than height. */
+          ch.body.position.y = damp(ch.body.position.y, -0.42 * shape, sr, dt);
+          ch.body.rotation.x = damp(ch.body.rotation.x, 0.50 * shape, sr, dt);
           ch.body.rotation.z = damp(ch.body.rotation.z, -0.12 * shape, sr, dt);
           // Lead hand on the frame, trailing arm tucked in past the jamb.
           limb(ch.parts.la, -0.34 - 1.30 * shape, 0.20, -0.44 * shape, 0.14 * shape);
@@ -2087,10 +2129,16 @@
             ch.neck.rotation.z = damp(ch.neck.rotation.z, 0, sr, dt);
           }
         }
-        if (ch.model) {
+        // The dive owns ch.model above (it is the only thing that can make the
+        // rig actually horizontal); a step stays upright, so settle it.
+        if (!dive && ch.model) {
           ch.model.rotation.x = damp(ch.model.rotation.x, 0, sr, dt);
           ch.model.rotation.y = damp(ch.model.rotation.y, 0, sr, dt);
           ch.model.rotation.z = damp(ch.model.rotation.z, 0, sr, dt);
+          if (!ch._seatSunk) {
+            ch.model.position.y = damp(ch.model.position.y, 0, sr, dt);
+            ch.model.position.z = damp(ch.model.position.z, 0, sr, dt);
+          }
         }
       } else if (tp.kind === "mantle") {
         // Reach → hang → pull → press-out. The old fixed -2.4rad shoulder target
