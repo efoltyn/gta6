@@ -7,6 +7,9 @@
     "node": ">=22"
   },
   "scripts": {
+    "test:traversal": "node tools/test-character-traversal.mjs",
+    "test:traversal-browser": "node tools/test-character-traversal-browser.mjs",
+    "visual:parkour": "node tools/before-after.mjs parkour-moves --keep-going",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
