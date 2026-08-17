@@ -363,7 +363,12 @@ async function stage(input) {
   const camera = CBZ.camera;
   camera.aspect = input.width / input.height;
   camera.near = 0.03; camera.far = 4000;
-  const floorY = groundAt(base.x, base.z);
+  /* HEIGHTS COME OFF THE RIG, NOT OFF THE GROUND. groundAt returns the
+     TERRAIN under a point, and the player spawns on an upper interior floor
+     of the terminal — so a tripod built on it sat metres below the subject and
+     photographed an empty floor with the player out of frame entirely. The rig
+     knows where it is; ask it. */
+  const floorY = base.y;
   const aim = new T.Vector3(), eye = new T.Vector3();
   // Frame the HANDS: a support grip that cannot be read at conversational
   // distance has not been fixed. The tripod STANDS BACK (weapon-holds.mjs's
