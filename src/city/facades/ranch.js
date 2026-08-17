@@ -263,15 +263,16 @@
 
       // Does this bay get a window on storey k? A bay is DROPPED, never nudged:
       // a shifted window reads as a mistake, a missing one reads as a blank
-      // panel behind the porch / the chimney / the garage, which is correct.
+      // panel behind the chimney breast or over the garage, which is correct.
+      // The PORCH is deliberately NOT a reason to drop a window — a front room
+      // window opening onto the porch is normal, and killing those bays left an
+      // 11 m cottage with a bricked-up ground floor and a door in it, which is
+      // the exact failure the window rule exists to prevent.
       function bayLive(L, k, b) {
         const f = L.f, hi = L.occ + 0.12;
         if (f.s === chF.s && Math.abs(b.t - chT) < chW / 2 + hi) return false;
         if (wantGar && f.s === gaF.s && k === 0 && Math.abs(b.t - garT) < garW / 2 + hi) return false;
-        if (f.s === ctx.doorSide && k === 0) {
-          if (hasPorch) return (b.t - hi > porchOff + porchW / 2) || (b.t + hi < porchOff - porchW / 2);
-          return F.clearsDoor(ctx, f, b.t, L.occ * 2 + 0.4);
-        }
+        if (f.s === ctx.doorSide && k === 0) return F.clearsDoor(ctx, f, b.t, L.occ * 2 + 0.4);
         return true;
       }
 
@@ -325,11 +326,21 @@
         const lo = cy - k * FH;
         const solidBand = (cy >= rTop) || (lo <= 0.50) || (lo >= FH - 0.43);
         if (!solidBand) {
+          let live = 0;
           for (let i = 0; i < L.bays.length; i++) {
             const b = L.bays[i];
             if (!bayLive(L, k, b)) continue;
             holes.push([b.t - L.occ, b.t + L.occ]);
+            live++;
           }
+          // THE BACKSTOP. If a face+storey ends up with no window at all — a
+          // frontage too narrow to fit a bay clear of the door, a chimney that
+          // ate the only bay — siding the whole band would brick the wall up.
+          // So side ONLY the host's own end jambs (which are solid wall anyway)
+          // and leave the glass alone. A blank glazed strip is a bad elevation;
+          // a bricked-up one is a broken building.
+          if (!live) return [[-f.span / 2 - 0.05, -f.span / 2 + 0.50],
+            [f.span / 2 - 0.50, f.span / 2 + 0.05]];
         }
         return subtract(-f.span / 2 - 0.05, f.span / 2 + 0.05, holes);
       }
@@ -352,7 +363,7 @@
       // CORNER BOARDS. The siding has to die into something at each arris or it
       // simply stops in mid-air. Vertical, so crossing the host's window band is
       // not just allowed but the point: it is what breaks the ribbon.
-      F.corners(ctx, (skirtH + plateTop) / 2, plateTop - skirtH, 0.22, 0.115, trim);
+      F.corners(ctx, (skirtH + plateTop) / 2, plateTop - skirtH, 0.22, 0.145, trim);
 
       // ============================================================
       //  7. THE WINDOWS — casing, drip cap, sill, muntins, shutters
@@ -380,7 +391,10 @@
         F.box(ctx, f, t, gy, 0.07, gh - 0.03, 0.05, trim);
         F.box(ctx, f, t, y0 + gh * 0.50, wW - 0.02, 0.09, 0.055, trim);
         if (k <= 1) {
-          F.box(ctx, f, t, y0 - 0.25, wW + cw * 0.6, 0.14, CP * 0.55, trimD);    // apron
+          // the apron under the sill — but not on the ground storey, where it
+          // would land inside the foundation's water-table cap.
+          if (y0 - 0.32 > skirtH + 0.16)
+            F.box(ctx, f, t, y0 - 0.25, wW + cw * 0.6, 0.14, CP * 0.55, trimD);
           F.box(ctx, f, t, y0 + gh * 0.25, wW - 0.02, 0.05, 0.045, trim);
           F.box(ctx, f, t, y0 + gh * 0.75, wW - 0.02, 0.05, 0.045, trim);
         }
@@ -542,7 +556,8 @@
         // belongs and where nothing can foul the doorway.
         const nps = 4, psD = porchD / nps;
         for (let j = 0; j < nps; j++) {
-          const th = 0.11 + j * 0.035;
+          // 0.10 at the wall: porchTop (FH+0.50) minus that is exactly e.head.
+          const th = 0.10 + j * 0.04;
           const ty = porchTop - (shedDrop * j) / nps;
           F.box(ctx, df, porchOff, ty - th / 2, porchW + 0.34 - j * 0.02, th, psD + 0.10,
             (j % 2) ? roofB : roofA, j * psD);
@@ -563,10 +578,10 @@
           // SIDE RAILINGS only — the front stays open so the walk-in is clear.
           const rl = porchD - postW - 0.32;
           if (rl > 0.5) {
-            for (const ry of [deckY + 0.34, deckY + 0.86])
+            for (const ry of [deckY + 0.30, deckY + 0.92])
               F.box(ctx, df, ptt, ry, postW * 0.72, 0.09, rl, trim, 0.13);
             for (let i = 0; i < 4; i++)
-              F.box(ctx, df, ptt, deckY + 0.56, postW * 0.45, 0.46, 0.07, trim,
+              F.box(ctx, df, ptt, deckY + 0.61, postW * 0.45, 0.62, 0.07, trim,
                 0.13 + (i + 0.5) * (rl / 4));
           }
         }

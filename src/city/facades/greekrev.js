@@ -134,6 +134,7 @@
       const TRIM = F.mix(PALE, 0xfffdf5, 0.40);        // cornices, columns, casings
       const DIM = F.shade(PALE, 0.86);                 // porch wall, tympanum field
       const DARK = F.shade(PALE, 0.58);                // reveals — the darkest pale tone
+      const FLUT = F.shade(PALE, 0.70);                // the shadow inside a flute
       const ROOF = F.shade(F.mix(base, 0x2c3331, 0.90), 0.60);
       const ROOFL = F.shade(ROOF, 1.26);
       const SHUT = F.shade(F.mix(SHUTTERS[Math.min(SHUTTERS.length - 1,
@@ -160,9 +161,18 @@
       const ridge = yCorn + rise;
       // THE STYLOBATE. One rise, 0.40 < physics STEP_UP (0.45), so the porch is
       // walk-on-able straight off the pavement and the doorway is never sealed.
-      const TOP = 0.40;
+      // A drive-in bay gets no crepidoma at all — a car cannot climb a temple.
+      const porch = !e.driveIn;
+      const TOP = porch ? 0.40 : 0.0;
       const plinthTop = 0.46;                      // water table, inside the 0.55 sill zone
       const WP = 0.13;                             // the pale wall skin's projection
+      // THE DOORCASE, sized here because the elevation above it has to know
+      // where its cap lands: the window over the front door must sit ON that
+      // cap, not be cut in half by it.
+      const doorTop = Math.min(e.head + 0.15, yEnt - 0.45);
+      const antT = e.gap / 2 + 0.44;               // the flanking antae
+      const capTop = doorTop + 0.42;               // top of the doorcase entablature
+      const capHalf = antT + 0.47;
 
       // ============================================================
       //  3. THE COLONNADE'S TANGENTS — solved before anything is drawn
@@ -172,12 +182,12 @@
       // front reads as two unrelated drawings on one elevation.
       const colY = TOP;
       const colH = Math.max(0.9, yEnt - colY - 0.02);
-      const capH = colH > 0 ? Math.max(0.20, (ionic ? 0.75 : 0.95) * Math.max(0.20, colH / 13)) : 0.2;
       let nCol = (spec && spec.columns) ? clamp(spec.columns | 0, 2, 8) : (ef.span >= 16.5 ? 6 : 4);
       if (nCol % 2) nCol += 1;                     // EVEN: nothing lands on the door axis
       // Slenderness is a real number: Greek Doric runs 5.5-7 diameters, Ionic
-      // 9. The second cap keeps a wide front from growing tree trunks.
+      // about 9. The second cap keeps a wide front from growing tree trunks.
       const cr = Math.max(0.20, Math.min(colH / (ionic ? 15.5 : 13.5), ef.span / (nCol * 3.0)));
+      const capH = cr * (ionic ? 1.00 : 1.15);     // a Doric capital is ~half a diameter
       const cMarg = Math.max(0.80, ef.span * 0.055);
       const outer = Math.max(cr + 0.4, halfT - cMarg);
       // A = half the CENTRAL intercolumniation. It is widened until the door
@@ -221,11 +231,21 @@
       // one over the door, and a pilaster respond goes behind each column. That
       // yields the canonical 3-bay (tetrastyle) or 5-bay (hexastyle) temple
       // front without a single hardcoded count.
+      // The CENTRE intercolumniation is kept in the list even though the door is
+      // in it: upstairs it wants a window like every other bay, and refusing it
+      // is what leaves a blank panel over the front door (the bug stone.js's
+      // header calls out). Whether it gets one is decided per storey, below.
+      // All front slots are then cut to the NARROWEST of them, so the upper
+      // floor reads as one uniform row of sash rather than a widening fan.
       const frontSlots = [], frontLines = colT.slice();
+      let minFrontW = Infinity;
       for (let i = 0; i + 1 < colT.length; i++) {
-        const t = (colT[i] + colT[i + 1]) / 2;
         const wid = colT[i + 1] - colT[i] - cr * 2.2;
-        if (wid > 1.0 && F.clearsDoor(ctx, ef, t, 1.4)) frontSlots.push({ t: t, w: wid });
+        if (wid > 1.0) minFrontW = Math.min(minFrontW, wid);
+      }
+      for (let i = 0; i + 1 < colT.length; i++) {
+        const wid = colT[i + 1] - colT[i] - cr * 2.2;
+        if (wid > 1.0) frontSlots.push({ t: (colT[i] + colT[i + 1]) / 2, w: minFrontW });
       }
       function layout(f) {
         if (f.s === ctx.doorSide) return { lines: frontLines, slots: frontSlots };
@@ -254,49 +274,73 @@
         plans.push({ lines: lay.lines, wins: ws });
       }
 
+      // The doorway's keep-out interval on the entrance face. Any band whose
+      // bottom lands inside the doorcase is emitted in SEGMENTS around this,
+      // never over it — the runBand rule, and the reason nothing here can grow
+      // a kerb across the front door.
       const doorHole = [-(e.gap / 2 + 0.55), e.gap / 2 + 0.55];
-      // a ring that steps around the doorway when asked (plinth, ground courses)
-      function ring(cy, h, proj, col, over, inset, hole) {
+      function holesFor(f, yBot) {
+        return (f.s === ctx.doorSide && yBot < capTop - 0.25) ? [doorHole] : [];
+      }
+      function ring(cy, h, proj, col, over, inset) {
         for (let i = 0; i < faces.length; i++) {
-          const f = faces[i];
-          const holes = (hole && f.s === ctx.doorSide) ? [doorHole] : [];
-          runBand(ctx, F, f, cy, h, proj, col, holes, over, inset);
+          runBand(ctx, F, faces[i], cy, h, proj, col, holesFor(faces[i], cy - h / 2), over, inset);
         }
+      }
+      // WHERE ONE WINDOW ACTUALLY LANDS, or null if it cannot. Shared by the
+      // wall skin (which needs the holes) and the window pass (which needs the
+      // frames), so the two can never disagree about a single opening.
+      function placeWin(f, wn, k) {
+        let y0 = k * FH + 0.55, wh = wn.h;
+        if (f.s === ctx.doorSide) {
+          // the ground centre bay belongs to the doorway
+          if (y0 < e.head && !F.clearsDoor(ctx, f, wn.t, wn.ow + 1.0)) return null;
+          // the sash over the front door stands ON the doorcase cap
+          if (Math.abs(wn.t) < capHalf + wn.ow / 2 && y0 < capTop) {
+            const lift = capTop - y0;
+            y0 = capTop; wh = Math.min(wh, glassH - lift - 0.10);
+          }
+        }
+        if (wh < 0.85) return null;
+        return { y0: y0, h: wh, lift: y0 - (k * FH + 0.55) };
       }
 
       // ============================================================
       //  5. THE PAINTED WALL — a pale skin with the windows punched out
       // ============================================================
       // The host glazes ONE continuous band per storey on every face. Rather
-      // than brick that up, the skin is emitted with runBand around the window
+      // than brick that up, the skin is emitted with runBand AROUND the window
       // openings, so every square metre of wall is painted board and the only
-      // glass left showing is glass we have framed as a window.
+      // glass left showing is glass we have framed as a window. That is the
+      // whole difference between a punched-window elevation and a bricked-up one.
       for (let i = 0; i < faces.length; i++) {
         const f = faces[i], wins = plans[i].wins;
         const shaded = (f.s === ctx.doorSide) ? DIM : PALE;   // the porch is in shadow
         for (let k = 0; k < ST; k++) {
           const gy0 = k * FH + 0.52, gy1 = (k + 1) * FH - 0.42;
-          const holes = [];
+          const holes = holesFor(f, gy0);
           for (let j = 0; j < wins.length; j++) {
-            const wn = wins[j];
-            holes.push([wn.t - wn.ow / 2, wn.t + wn.ow / 2]);
+            const p = placeWin(f, wins[j], k);
+            if (p) holes.push([wins[j].t - wins[j].ow / 2, wins[j].t + wins[j].ow / 2]);
           }
-          if (k === 0 && f.s === ctx.doorSide) holes.push(doorHole);
           runBand(ctx, F, f, (gy0 + gy1) / 2, gy1 - gy0, WP, shaded, holes, 0.14);
-          // the two SOLID zones the host leaves us — sill and header — are
-          // painted edge to edge, which is legal because there is no glass
-          // there and it is what makes the elevation read as one material.
-          runBand(ctx, F, f, k * FH + 0.275, 0.50, WP, shaded,
-            (k === 0 && f.s === ctx.doorSide) ? [doorHole] : [], 0.14);
-          if (k < ST - 1) F.band(ctx, f, (k + 1) * FH - 0.215, 0.42, WP, shaded, 0.28);
-          // a floor-line band, in the sill zone where it is allowed to be
-          if (k > 0) F.band(ctx, f, k * FH + 0.10, 0.16, WP + 0.10, TRIM, 0.30);
+          // the two SOLID zones the host leaves us — the sill run and the
+          // header run — are painted edge to edge, which is legal because there
+          // is no glass there and it is what makes the elevation one material.
+          runBand(ctx, F, f, k * FH + 0.275, 0.50, WP, shaded, holesFor(f, k * FH + 0.02), 0.14);
+          if (k < ST - 1) {
+            runBand(ctx, F, f, (k + 1) * FH - 0.215, 0.42, WP, shaded,
+              holesFor(f, (k + 1) * FH - 0.43), 0.28);
+          }
         }
       }
+      // a floor-line course at every storey, in the sill zone where a horizontal
+      // is allowed to be, and stepped around the doorcase where it must be.
+      for (let k = 1; k < ST; k++) ring(k * FH + 0.10, 0.16, WP + 0.10, TRIM, 0.30);
       // WATER TABLE: the plinth the temple stands on. Stepped around the
       // doorway — a 0.46 m lip across a front door is a wall, not a moulding.
-      ring(plinthTop * 0.5, plinthTop, WP + 0.14, PALE, 0.34, 0, true);
-      ring(plinthTop + 0.09, 0.18, WP + 0.24, TRIM, 0.40, 0, true);
+      ring(plinthTop * 0.5, plinthTop, WP + 0.14, PALE, 0.34);
+      ring(plinthTop + 0.09, 0.18, WP + 0.24, TRIM, 0.40);
 
       // ============================================================
       //  6. WINDOWS: flat trim, sill, head, muntins, flanking shutters
@@ -304,19 +348,25 @@
       for (let i = 0; i < faces.length; i++) {
         const f = faces[i], wins = plans[i].wins;
         for (let k = 0; k < ST; k++) {
-          const y0 = k * FH + 0.55;                // the host's own sill line
           for (let j = 0; j < wins.length; j++) {
-            const wn = wins[j], ow = wn.ow, wh = wn.h;
-            // an opening whose sill is below the door head cannot sit over it
-            if (k === 0 && y0 < e.head && !F.clearsDoor(ctx, f, wn.t, ow + 1.0)) continue;
-            const cy = y0 + wh / 2;
+            const wn = wins[j], ow = wn.ow;
+            const p = placeWin(f, wn, k);
+            if (!p) continue;
+            const y0 = p.y0, wh = p.h, cy = y0 + wh / 2;
             // the reveal, so the opening reads as a hole in a thick wall
             F.box(ctx, f, wn.t, cy, ow, wh, WP - 0.05, DARK);
-            // if the sash is shorter than the host band, cap the leftover with
-            // a painted panel — a box the WINDOW's width, never the face's.
-            if (glassH - wh > 0.10) {
-              F.box(ctx, f, wn.t, y0 + wh + (glassH - wh) / 2 + 0.03,
-                ow + wn.cw * 2, glassH - wh + 0.06, WP + 0.01, PALE);
+            // The runBand skin left this whole tangent interval open. Anything
+            // the sash does not fill — the head panel above it, and the apron
+            // below a sash that was lifted clear of the doorcase — is plugged
+            // with a painted board the WINDOW's width, never the face's.
+            const top0 = k * FH + 0.55 + glassH;
+            if (top0 - (y0 + wh) > 0.10) {
+              F.box(ctx, f, wn.t, (y0 + wh + top0) / 2 + 0.03,
+                ow + wn.cw * 2, top0 - y0 - wh + 0.06, WP + 0.01, PALE);
+            }
+            if (p.lift > 0.10) {
+              F.box(ctx, f, wn.t, (k * FH + 0.52 + y0) / 2, ow + wn.cw * 2,
+                y0 - k * FH - 0.52 + 0.04, WP + 0.01, PALE);
             }
             // flat casing each side, and a flat head — Greek Revival trim is
             // BOARDS, square-edged, with no mouldings to speak of
@@ -474,22 +524,22 @@
       const terrW = Math.min(ef.span - 0.20, 2 * (outer + cr) + 1.20);
       const sw = Math.max(1.2, terrW - 0.90);
       const stepD = clamp(PD * 0.55, 0.90, 2.00);
-      pbox(0, TOP / 2, terrW, TOP, 0, PD, F.shade(TRIM, 0.96));
-      pbox(0, TOP + 0.05, terrW + 0.10, 0.10, -0.05, PD + 0.06, TRIM);   // the stylobate's edge
-      if (ef.horiz) {
-        ctx.plat(-terrW / 2, terrW / 2, ef.out > 0 ? halfQ : -(halfQ + PD),
-          ef.out > 0 ? halfQ + PD : -halfQ, TOP, null);
-      } else {
-        ctx.plat(ef.out > 0 ? halfQ : -(halfQ + PD), ef.out > 0 ? halfQ + PD : -halfQ,
-          -terrW / 2, terrW / 2, TOP, null);
-      }
-      const nS = 3;
-      for (let i = 0; i < nS; i++) {
-        const th = TOP * (nS - i) / nS;
-        const o0 = PD + i * (stepD / nS);
-        pbox(0, th / 2, sw, th, o0, o0 + stepD / nS + 0.02, F.shade(TRIM, 0.92 + i * 0.03));
-      }
-      {
+      if (porch) {
+        pbox(0, TOP / 2, terrW, TOP, 0, PD, F.shade(TRIM, 0.96));
+        pbox(0, TOP + 0.05, terrW + 0.10, 0.10, -0.05, PD + 0.06, TRIM);   // stylobate edge
+        if (ef.horiz) {
+          ctx.plat(-terrW / 2, terrW / 2, ef.out > 0 ? halfQ : -(halfQ + PD),
+            ef.out > 0 ? halfQ + PD : -halfQ, TOP, null);
+        } else {
+          ctx.plat(ef.out > 0 ? halfQ : -(halfQ + PD), ef.out > 0 ? halfQ + PD : -halfQ,
+            -terrW / 2, terrW / 2, TOP, null);
+        }
+        const nS = 3;
+        for (let i = 0; i < nS; i++) {
+          const th = TOP * (nS - i) / nS;
+          const o0 = PD + i * (stepD / nS);
+          pbox(0, th / 2, sw, th, o0, o0 + stepD / nS + 0.02, F.shade(TRIM, 0.92 + i * 0.03));
+        }
         const o0 = halfQ + PD, o1 = halfQ + PD + stepD;
         if (ef.horiz) {
           const z0 = ef.out * o0, z1 = ef.out * o1;
@@ -521,7 +571,7 @@
           const a = (-1 + 2 * (k + 0.5) / nf) * 1.15;      // +/- 66 degrees of arc
           const tq = cq + Math.cos(a) * cr * 0.94;
           gbox(t + Math.sin(a) * cr * 0.94, sy + sh * 0.5, ef.out * (halfQ + tq),
-            cr * 0.20, sh * 0.94, cr * 0.20, DIM);
+            cr * 0.20, sh * 0.94, cr * 0.20, FLUT);
         }
         // NECKING + CAPITAL. Doric: annulets, a flaring echinus, a square
         // abacus. Ionic: the same abacus over two volute blocks.
@@ -629,15 +679,15 @@
       // narrow sidelights, a rectangular transom (never a fanlight — that is
       // Federal), flanking pilasters, and a flat entablature cap.
       {
-        const doorTop = Math.min(e.head + 0.15, yEnt - 0.45);
-        // On a one-storey shell the wall top is BELOW the kit's nominal 3.6 m
-        // door head, so a full-width cap over the opening would be forced under
-        // it. In that case the cap is emitted in segments around the doorway
-        // instead — nothing at all hangs into the opening either way.
+        // On a ONE-STOREY shell the wall top is below the kit's nominal 3.6 m
+        // door head, so doorTop is clamped under yEnt and a full-width cap over
+        // the opening would be forced below e.head. In that case the cap is
+        // emitted in SEGMENTS around the doorway instead, so nothing at all
+        // hangs into the opening either way — the flight of steps and the porch
+        // beam above still leave well over two metres of clear headroom.
         const capOK = doorTop >= e.head - 0.02;
         const dW = Math.min(e.gap - 0.85, 2.05);
         const slW = clamp(e.gap * 0.15, 0.22, 0.50);
-        const antT = e.gap / 2 + 0.44;
         const leafTop = doorTop - 0.62;
         // the shadowed reveal the whole thing is cut into
         F.box(ctx, ef, 0, (TOP + doorTop) / 2, e.gap + 0.42, doorTop - TOP, 0.05, DARK);

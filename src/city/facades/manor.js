@@ -85,10 +85,10 @@
     for (let i = 0; i < hs.length; i++) {
       const a = Math.max(L, hs[i][0]), b = Math.min(R, hs[i][1]);
       if (b <= x) continue;
-      if (a - x > 0.05) F.box(ctx, F.face(ctx, f.s), (x + a) / 2, cy, a - x, h, proj, col, inset);
+      if (a - x > 0.05) F.box(ctx, f, (x + a) / 2, cy, a - x, h, proj, col, inset);
       x = b;
     }
-    if (R - x > 0.05) F.box(ctx, F.face(ctx, f.s), (x + R) / 2, cy, R - x, h, proj, col, inset);
+    if (R - x > 0.05) F.box(ctx, f, (x + R) / 2, cy, R - x, h, proj, col, inset);
   }
 
   CBZ.registerFacade("manor", {
@@ -193,7 +193,9 @@
       const slopes = faces.filter(function (f) { return !isEnd(f); });
       const frontIsEnd = isEnd(ef);
       const primary = frontIsEnd ? slopes[ctx.hash(0x27ab) < 0.5 ? 0 : 1] : ef;
-      const secondary = (slopes[0] === primary) ? slopes[1] : slopes[0];
+      // compared by side index, not by reference: F.entrance mints its own face
+      // object, so `slopes[0] === ef` is false even when they are the same wall.
+      const secondary = (slopes[0].s === primary.s) ? slopes[1] : slopes[0];
       const HFR = [0.95, 0.70, 0.86, 0.62];                // the unequal heights
       const hph = (ctx.hash(0x33c7) * 4) | 0;
       const gables = [];
@@ -225,16 +227,20 @@
                           : eave + clamp(unit * 0.035, 0.22, 0.60);
           if (g.over && bay) bay.gabled = true;
           gables.push(g);
-          if (g.f.s !== ctx.doorSide || !g.over) addHole(g.f.s, g.t - g.w / 2, g.t + g.w / 2);
+          // deliberately NO member keep-out under a gable: the wall below it is
+          // ordinary wall and still wants its studs and its mullions.
         }
       }
 
       // THE LATERAL CHIMNEY BREAST: one gable-end wall, hash-picked side and
       // hash-picked tangent, off the gable's centre line so it does not fight
       // the king post in the tympanum.
+      // Never the entrance front: a stack there would grow through the bay.
       const ends = faces.filter(isEnd);
+      const endOpts = ends.filter(function (f) { return f.s !== ctx.doorSide; });
+      const bList = endOpts.length ? endOpts : ends;
       const breast = {
-        f: ends[ctx.hash(0x0c4e) < 0.5 ? 0 : 1],
+        f: bList[bList.length > 1 && ctx.hash(0x0c4e) >= 0.5 ? 1 : 0],
         w: 0, t: 0, proj: clamp(unit * 0.050, 0.35, 0.95),
       };
       breast.w = clamp(breast.f.span * 0.19, 1.15, 3.0);
@@ -313,10 +319,13 @@
         for (const b of bays) {
           if (blocked(hl, b.t, b.w * 0.6)) continue;
           F.box(ctx, f, b.t, 0.47, b.w * 0.92, 0.16, PJ * 1.70, STONEL);
+          // the LABEL MOULD lives in the header zone and its returns come down
+          // as short VERTICAL stubs — a drip drawn at the window head itself
+          // would be a stone bar laid across the host's glass.
           const lw = b.w * 0.96;
-          F.box(ctx, f, b.t, gTop - 0.60, lw, 0.18, PJ * 1.55, STONEL);        // drip
+          F.box(ctx, f, b.t, gTop - 0.36, lw, 0.18, PJ * 1.55, STONEL);        // drip
           for (const sg of [-1, 1])                                            // returns
-            F.box(ctx, f, b.t + sg * lw / 2, gTop - 0.76, 0.20, 0.34, PJ * 1.45, STONEL);
+            F.box(ctx, f, b.t + sg * lw / 2, gTop - 0.55, 0.20, 0.36, PJ * 1.45, STONEL);
         }
         lights(f, 0, clamp(unit * 0.16, 1.00, 1.75), clamp(unit * 0.016, 0.13, 0.22), STONEL, PJ * 1.10);
       }
@@ -583,14 +592,19 @@
       // ============================================================
       for (const g of gables) {
         const f = g.f;
-        const dep = clamp(A * 0.22, 0.60, 2.20);           // buried into the roof
+        const dep = clamp(A * 0.24, 0.65, 2.40);           // buried into the roof
         const steps = 8;
         for (let i = 0; i < steps; i++) {
           const u0 = i / steps, u1 = (i + 1) / steps;
           const wid = g.w * (1 - u1 * 0.92);
           const cy = H + g.h * (u0 + u1) / 2;
           const hh = g.h / steps + 0.03;
-          F.box(ctx, f, g.t, cy, wid, hh, g.proj + dep, ROOF, -dep);
+          // The wing's own roof: the mass loses DEPTH as it rises as well as
+          // width, so from an oblique angle it reads as a pitched cross wing
+          // and not as a box shoved through the slope. Near the apex what is
+          // left is the wing's ridge running back into the main roof.
+          const back = dep * (1 - u1 * 0.62);
+          F.box(ctx, f, g.t, cy, wid, hh, g.proj + back, ROOF, -back);
           if (wid > bb * 2.4)
             F.box(ctx, f, g.t, cy, wid - bb * 2.0, hh - 0.01, 0.13, PLASTER, g.proj + 0.01);
           for (const sg of [-1, 1])
@@ -612,18 +626,21 @@
       // ============================================================
       //  12. DORMERS — on the slope the cross gables did not take
       // ============================================================
-      // A dormer's front plane is computed from the roof's own across-width at
-      // the dormer HEAD, so it is always proud of the slope it sits in; it is
-      // emitted in roof coordinates because that plane is usually INBOARD of
-      // the wall face and F.box only measures outward from the wall.
+      // Two numbers make a dormer sit in a roof instead of floating over it or
+      // sinking into it, and on a pitch this steep both matter. The front plane
+      // comes from the roof's across-width at the dormer's FOOT (from its head,
+      // as a shallower roof can get away with, the whole lower half would be
+      // swallowed); the depth is the dormer's own rise divided by the slope, so
+      // the back of it always reaches the tiles at its head. It is emitted in
+      // roof coordinates because that front plane is usually INBOARD of the
+      // wall face, and F.box can only measure outward from the wall.
       {
         const f = secondary;
         const nd = clamp(Math.round(f.span / clamp(unit * 0.42, 4.0, 6.5)), 1, 4);
         const dh = clamp(pitchH * 0.34, 1.0, 2.4);
-        const dy = H + pitchH * 0.10;
-        const uTop = (dy + dh - H) / pitchH;
-        const out = (A / 2 + eave) * (1 - uTop) + clamp(unit * 0.055, 0.40, 0.90);
-        const dep = clamp(A * 0.17, 0.55, 1.70);
+        const dy = H + pitchH * 0.06;
+        const out = (A / 2 + eave) * (1 - 0.06) + clamp(unit * 0.030, 0.22, 0.45);
+        const dep = dh * (A / 2 + eave) / pitchH + 0.55;
         const use = f.span * 0.84;
         const dw = clamp(use / (nd * 2.1), 0.85, 2.2);
         const ck = clamp(dw * 0.16, 0.14, 0.32);
@@ -640,11 +657,13 @@
           rbox(t, dy + dh * 0.52, sg * (out + 0.05), 0.10, dh * 0.64, 0.14, OAK);
           put(dy + dh * 0.52, dw * 0.84, 0.09, 0.14, 0.06, OAK);                 // transom
           put(dy + dh * 0.14, dw + ck * 3.2, 0.16, 0.30, 0.10, STONEL);          // sill
+          const hh = clamp(dh * 0.42, 0.4, 1.1);
           for (let j = 0; j < 4; j++) {                                          // gable head
             const u = (j + 0.5) / 4;
-            const hh = clamp(dh * 0.42, 0.4, 1.1);
+            // each course of the little gable is that much higher up the main
+            // slope, so it has to reach that much further back to land on it
             put(dy + dh + 0.06 + u * hh, (dw + ck * 2) * (1 - u * 0.88), hh / 4 + 0.03,
-              dep * (1 - u * 0.2), 0.02, j === 1 ? ROOFL : ROOF);
+              dep + u * hh * (A / 2 + eave) / pitchH, 0.02, j === 1 ? ROOFL : ROOF);
           }
         }
       }
@@ -690,7 +709,9 @@
       // cluster clearing the roof edge at its own tangent.
       {
         const f = breast.f, bp = breast.proj, t = breast.t, bw = breast.w;
-        const mid = H * 0.55;
+        // the stage change lands on a FLOOR LINE, where a real breast steps
+        // back, and where the host's wall is solid anyway.
+        const mid = ST >= 2 ? Math.max(1, Math.round(ST * 0.55)) * FH - 0.18 : H * 0.55;
         F.rib(ctx, f, t, 0.0, mid, bw, bp, STONE);
         F.rib(ctx, f, t, mid, H + 0.10, bw * 0.86, bp * 0.74, STONE);
         for (let j = 0; j < 3; j++)                          // the weathering offset
@@ -706,7 +727,7 @@
           for (let j = 0; j < 3; j++)
             F.box(ctx, f, st, ty + 0.10 + j * 0.16, sw + 0.14 + j * 0.16, 0.16,
               bp * 0.74 + 0.55 + j * 0.16, j === 1 ? STONEL : F.shade(STONEL, 0.90), -0.45);
-          const n = f.halfN + bp * 0.74 * 0.5;
+          const n = f.halfN + (bp * 0.74 - 0.40) / 2;      // the shaft's own centre
           const px = f.horiz ? st : f.out * n, pz = f.horiz ? f.out * n : st;
           pot(px, ty + 0.56, pz, Math.max(0.13, sw * 0.26), F.shade(BRICK, 1.06));
         }

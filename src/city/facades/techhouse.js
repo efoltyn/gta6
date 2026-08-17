@@ -4,92 +4,81 @@
 
    WHAT IS BEING MODELLED. The contemporary architect house: two or three
    STACKED, SHIFTED SLABS of one material each, a glass ground floor pushed
-   back into the shadow of the volume above it, and a single continuous roof
-   plane laid so thin at the edge that it looks like it is floating. There is
-   no cornice, no parapet, no moulding, no trim, no pattern and nothing
-   applied. ALL of the identity is in the MASSING and in the two claddings
-   fighting each other — warm timber against cold concrete — with black steel
-   doing every job neither of them will do. That is the whole style, and it
-   is the exact opposite of hightech.js's Exostructure, which is a tower that
-   turns itself inside out; this is a HOUSE, and its argument is subtraction.
+   back into the shadow of the volume above it, and one roof plane laid so
+   thin at the edge that it looks like it is floating. No cornice, no
+   parapet, no moulding, no trim, no pattern, nothing applied. ALL of the
+   identity is in the MASSING and in two claddings fighting each other —
+   warm timber against cold concrete — with black steel doing every job
+   neither of them will do. That is the whole style, and it is the opposite
+   of hightech.js's Exostructure, which is a tower turned inside out; this
+   is a HOUSE, and its argument is subtraction.
 
    THE COMPOSITION, and why each piece has to be there.
-
      THE SHIFT     The upper volume is pushed OUT past the wall on two
                    ADJACENT faces; the volume above it (when the house is
                    tall enough to have one) is pushed out on the OTHER two.
-                   In plan the two slabs are therefore offset diagonally,
-                   which is what makes the house read as stacked boxes at
-                   200 m instead of as one box wearing paint. Everything
-                   else in the file is measured off that one decision.
+                   In plan the slabs are offset diagonally, and that is what
+                   makes the house read as stacked boxes at 200 m instead of
+                   as one box wearing paint. All else is measured off it.
      THE CANTILEVER  Because the upper volume stands proud and the ground
                    storey does not, the ground storey IS the recess: dark,
-                   glassy, held up on a few slim black steel posts, and lost
-                   under a deep shaded SOFFIT. A cantilever is not a shape,
-                   it is a shadow — so the soffit gets a dark reveal at the
-                   wall, a timber board, and a linear LED washing it.
+                   glassy, held on slim black steel posts and lost under a
+                   deep shaded SOFFIT. A cantilever is a shadow, not a shape,
+                   so the soffit gets a dark reveal at the wall, a timber
+                   board, and a linear LED washing it.
      BATTENS       The timber volume is a run of slim vertical cedar fins
-                   standing PROUD of its own cladding, at a pitch derived
-                   from the floor height. They cross the host building's
-                   window band and they are SUPPOSED to: a run of fins over
-                   glass is a brise-soleil, which is the single most
-                   recognisable element on a house of this kind, and it is
-                   also how a continuous ribbon of glazing stops reading as
-                   a ribbon (the kit's own advice about verticals).
-     CONCRETE      The other volume is board-formed concrete: pale, cool,
-                   flat, with nothing on it but the faint horizontal plank
-                   reveals of the formwork and the vertical panel joints.
-                   Two shades and a joint line — that is the entire texture
-                   budget, because "minimal and expensive" is a discipline.
-     APERTURES     Each volume gets ONE large opening per storey per face,
-                   pushed hard off centre, and the opening is where the host
-                   building's own glazing shows through. The cladding is
-                   drawn in SEGMENTS around it (never over it) so those
-                   windows survive; the two shifted volumes push their
-                   openings to opposite ends, which is where the asymmetry
-                   comes from.
-     GLASS CORNER  At the corner where the two concrete faces meet, both
-                   apertures run right to the corner and no cladding turns
-                   it. The host shell keeps a 0.55 m solid jamb at the end
-                   of every face, so that jamb is painted in the glass tone:
-                   the glazing then reads as wrapping the corner with no
-                   post in it, and the roof fascia flies past it unsupported.
+                   standing PROUD of its own cladding, pitched off the floor
+                   height. They cross the host's window band and are SUPPOSED
+                   to: fins over glass are a brise-soleil, and they are also
+                   how a glazing ribbon stops reading as a ribbon.
+     CONCRETE      The other volume is board-formed concrete: pale, cool and
+                   flat, carrying nothing but the faint plank reveals of the
+                   formwork and the vertical panel joints. Two shades and a
+                   joint line is the whole texture budget, because "minimal
+                   and expensive" is a discipline.
+     APERTURES     One large opening per storey per face, pushed hard off
+                   centre, and it is where the host's own glazing shows
+                   through — the cladding is drawn in SEGMENTS around it,
+                   never over it. The two volumes push their openings to
+                   opposite ends; that is where the asymmetry comes from.
+     GLASS CORNER  Where the two concrete faces meet, both apertures run to
+                   the corner and no cladding turns it, so the slab bands fly
+                   past a notch with the building set back behind them. The
+                   host keeps 0.55 m of solid jamb at every face end, so that
+                   jamb is painted in the glass tone and the glazing reads as
+                   wrapping the corner with no post in it.
      BLADE + SLOT  The entrance is a full-height SLOT — a vertical void from
-                   the ground to the roof where no cladding, no batten and
-                   no band is drawn at all, so the host's own two storeys of
-                   glass glow at the back of it — cut against a stone-clad
-                   BLADE WALL that stands proud of everything else and
-                   overshoots the roof line. Blade, slot and window make the
-                   entrance face a three-part asymmetric composition.
-     THE BRIDGE    A thin floating deck to the door with a shadow void under
-                   it and one floating tread in front. Registered with
-                   ctx.plat, top at 0.36 m — under physics STEP_UP — so the
-                   player walks straight in.
+                   ground to roof where no cladding, batten or band is drawn
+                   at all, so the host's own two storeys of glass glow at the
+                   back of it — cut against a stone-clad BLADE WALL standing
+                   proud of everything and overshooting the roof line. Blade,
+                   slot and window make the entrance face three-part.
+     THE BRIDGE    A thin floating deck to the door, shadow void beneath, one
+                   floating tread in front, registered with ctx.plat at 0.36
+                   — under physics STEP_UP — so the player walks straight in.
      THE ROOF      A perimeter eave frame, razor thin, oversailing furthest
                    over the entrance so the entry gets a flying canopy. The
                    host's own parapet is clad out in near-black and left in
-                   the eave's shadow, which is how a parapet-less slim edge
-                   is achieved on a shell that insists on having a parapet.
-                   The middle of the roof is left OPEN — for the solar array,
-                   and so rooftop gameplay keeps its deck.
+                   that eave's shadow — that is how a parapet-less edge is won
+                   on a shell that insists on a parapet. The middle stays OPEN,
+                   for the array and for rooftop gameplay.
      SOLAR         One big array laid flat in a grid on framed rails, inset
                    from the edges and holding a clear central spine, because
                    roof loot and the elevator headhouse live near the slab
                    centre. This is the element that dates the house.
 
-   THE WINDOW RULE. No horizontal band in this file ever crosses the host's
-   glazing: every band lives in the sill zone (k*FH … +0.55) or the header
-   zone ((k+1)*FH-0.45 … ), and every band on the entrance face is emitted in
-   segments around the slot so nothing can hang across the doorway. What
-   crosses the glass is exclusively VERTICAL — battens, mullions, steel posts,
-   the blade — which is what turns a ribbon into punched openings.
+   THE WINDOW RULE. No horizontal band here crosses the host glazing: every
+   band lives in a sill zone (k*FH … +0.55) or a header zone ((k+1)*FH-0.45
+   … ), and every band on the entrance face is emitted in segments around the
+   slot so nothing can hang across the doorway. What crosses the glass is
+   exclusively VERTICAL — battens, mullions, steel posts, the blade — which is
+   what turns a ribbon into punched openings.
 
-   SPEC (optional, all defaulted): { timberHex } forces the cedar tone;
-   { solar:false } omits the rooftop array. `{style:"techhouse"}` alone is
-   complete.
+   SPEC (optional, all defaulted): { timberHex } forces the cedar tone,
+   { solar:false } omits the rooftop array. `{style:"techhouse"}` is complete.
 
    COST. Everything is ctx.dbox and merges into the host's deco buckets. The
-   only real meshes are up to FOUR ctx.lamp glows in the soffits — the LED
+   only real meshes are up to THREE ctx.lamp glows in the soffits — the LED
    lines themselves are bright merged boxes, not lights.
 ============================================================ */
 (function () {
@@ -103,12 +92,11 @@
   // Used to extend a clad plane exactly as far as the neighbouring plane's own
   // projection, so a proud volume closes its corners instead of leaving a notch.
   const NBR = [[2, 3], [2, 3], [0, 1], [0, 1]];
-  const OPP = [1, 0, 3, 2];
 
   // A horizontal run on one face between explicit tangent limits, interrupted
-  // by "holes" (the entrance slot, an aperture). You cannot cut a hole in a
-  // merged axis-aligned box; you decline to draw over it. Same trick as
-  // stone.js's runBand, generalised to take its own L and R.
+  // by "holes" (the slot, an aperture). You cannot cut a hole in a merged
+  // axis-aligned box; you decline to draw over it. stone.js's runBand,
+  // generalised to take its own L and R.
   function seg(ctx, F, f, cy, h, proj, col, inset, L, R, holes) {
     if (!(h > 0) || !(proj > 0) || R - L < 0.06) return;
     let x = L;
@@ -141,16 +129,16 @@
       const df = e.f;                                  // the entrance face
       const faces = F.faces(ctx);
 
-      // The two host-solid zones per storey, kept comfortably INSIDE the real
-      // ones (0.55 sill / 0.45 header) so no rounding can ever put a band on
-      // the glass. Everything horizontal in this file is sized off these.
+      // The two host-solid zones per storey, kept INSIDE the real ones (0.55
+      // sill / 0.45 header) so no rounding can put a band on the glass.
+      // Everything horizontal in this file is sized off these.
       const SLO = 0.42, SHI = 0.32;
 
       // ---------------- palette: wood, concrete, stone, black ----------------
-      // Three real values plus black, all pulled a little toward ctx.color so
-      // the house sits in its district without the district flattening it. The
-      // timber has to stay WARM and the concrete has to stay COOL: the moment
-      // those two converge the whole facade is one grey box again.
+      // Three real values plus black, pulled a little toward ctx.color so the
+      // house sits in its district without the district flattening it. The
+      // timber must stay WARM and the concrete COOL: the moment those two
+      // converge the whole facade is one grey box again.
       const WOOD = F.shade(F.mix((spec && spec.timberHex) || 0xa5652f, ctx.color, 0.14), 0.96);
       const WOODL = F.shade(WOOD, 1.15);               // fin faces catching light
       const WOODP = F.shade(WOOD, 0.84);               // the panel BEHIND the fins
@@ -165,9 +153,9 @@
       const LED = 0xffeccb;
 
       // ---------------- the massing ----------------
-      // How far a volume cantilevers. Scaled off the SMALL plan dimension and
-      // capped hard: a metre and a half is a real cantilever and it still does
-      // not eat the pavement on a 22 m house.
+      // How far a volume cantilevers: off the SMALL plan dimension, capped
+      // hard, because a metre and a half is already a real cantilever and it
+      // still does not eat the pavement on a 22 m house.
       const CO = clamp(small * 0.105, 0.70, 1.45);
       const CO2 = CO * 0.92;                  // the upper slab shifts slightly less
       const SKIN = 0.07;                      // a flush face still needs a clad plane
@@ -193,7 +181,7 @@
       // THE VOLUME TABLE. `wood:true` means "timber on the timber faces and
       // proud there"; `wood:false` is the concrete slab above, proud on the
       // other pair. A one-storey house has no floor to cantilever off, so its
-      // single volume stands proud from the GROUND and the flying roof does the
+      // one volume stands proud from the GROUND and the flying roof does the
       // cantilevering instead.
       const vols = [];
       if (ST >= 3) {
@@ -229,10 +217,10 @@
       //  1. THE APERTURE — one big opening per face per storey
       // ============================================================
       // Positioned, never centred. On the entrance face the composition is
-      // already fixed (window | slot | blade) so the opening takes the side the
-      // blade did not. On a concrete face it runs to the glass corner. Anywhere
-      // else it is pushed to one end, and the two stacked volumes push to
-      // OPPOSITE ends so the slabs read as shifted.
+      // already fixed (window | slot | blade) so the opening takes the side
+      // the blade did not; on a concrete face it runs to the glass corner;
+      // anywhere else it is pushed to one end, opposite ends for the two
+      // stacked volumes, so the slabs read as shifted.
       function aperture(v, f, run) {
         const runW = run.R - run.L;
         const pw = clamp(runW * 0.13, 0.85, 2.0);     // narrowest solid panel allowed
@@ -270,14 +258,17 @@
           const wood = volWood(v, f.s);
           const panel = wood ? WOODP : CONC;
           const run = ext(f, function (s) { return volProj(v, s); });
+          // ONE aperture line per volume, repeated at every storey in it: the
+          // openings stack, which is what stops a two-storey volume reading as
+          // two unrelated elevations glued together.
+          const ap = aperture(v, f, run);
           for (let k = k0; k <= k1; k++) {
             const y0 = k * FH, y1 = (k + 1) * FH;
-            const ap = aperture(v, f, run);
             const holes = doorHoles(f);
             if (ap) holes.push(ap);
-            // the SILL zone and the HEADER zone run the full plane: both are
-            // solid host wall, so a continuous band there is safe and it is
-            // what makes the cladding read as one surface rather than as piers.
+            // sill and header zones run the FULL plane: both are solid host
+            // wall, so a band there is safe, and it is what makes the cladding
+            // read as one surface rather than as a row of piers.
             seg(ctx, F, f, y0 + SLO / 2, SLO, P, panel, 0, run.L, run.R, doorHoles(f));
             seg(ctx, F, f, y1 - SHI / 2, SHI, P, panel, 0, run.L, run.R, doorHoles(f));
             // the glass zone: cladding ONLY beside the opening
@@ -285,8 +276,8 @@
             seg(ctx, F, f, my, mh, P, panel, 0, run.L, run.R, holes);
             if (!ap) continue;
             const apW = ap[1] - ap[0], apC = (ap[0] + ap[1]) / 2;
-            // the reveal that makes the opening a hole in a thick wall: a dark
-            // head and sill inside the solid zones, and a dark jamb at each end
+            // the reveal that makes the opening a hole in a thick wall: dark
+            // head and sill inside the solid zones, dark jambs at each end
             // that is not already the end of the plane.
             F.box(ctx, f, apC, y0 + SLO - 0.06, apW, 0.12, P * 0.9, VOID, 0);
             F.box(ctx, f, apC, y1 - SHI + 0.06, apW, 0.12, P * 0.9, VOID, 0);
@@ -296,17 +287,16 @@
               F.rib(ctx, f, t - sg * 0.08, y0 + SLO - 0.02, y1 - SHI + 0.02, 0.16, P * 0.95, VOID, 0);
             }
           }
-          // BOARD-FORMED CONCRETE. Faint horizontal plank reveals and the
-          // vertical joints where the formwork panels met. Emitted with the
-          // same holes as the cladding, so a "horizontal" line here can only
-          // ever exist where there is solid panel behind it.
+          // BOARD-FORMED CONCRETE: faint plank reveals and the vertical joints
+          // where the formwork panels met. Emitted with the SAME holes as the
+          // cladding, so a horizontal line here can only ever exist where
+          // there is solid panel behind it.
           if (!wood && v.y1 - v.y0 > 0.6) {
             const pitch = FH / 3.4;
             const n = Math.max(1, Math.round((v.y1 - v.y0) / pitch));
             for (let i = 0; i < n; i++) {
               const y = v.y0 + (i + 0.5) * ((v.y1 - v.y0) / n);
               const kk = Math.floor((y + 0.001) / FH);
-              const ap = aperture(v, f, run);
               const holes = doorHoles(f);
               if (ap && y > kk * FH + SLO && y < (kk + 1) * FH - SHI) holes.push(ap);
               seg(ctx, F, f, y, 0.06, P + 0.03, JOINT, 0, run.L, run.R, holes);
@@ -325,11 +315,11 @@
       // ============================================================
       //  3. THE BATTEN SCREEN — slim cedar fins over the timber volume
       // ============================================================
-      // A run of vertical fins standing proud of the timber cladding, at a
-      // pitch off the floor height, crossing the openings and the host's own
-      // glazing exactly as a brise-soleil does. Adjacent fins alternate by one
-      // shade: on a flat wall every fin faces the same way and takes the same
-      // light, so without that the screen flattens into a single tone at 40 m.
+      // Fins standing proud of the timber cladding at a pitch off the floor
+      // height, crossing the openings and the host's own glazing exactly as a
+      // brise-soleil does. Adjacent fins alternate by one shade: on a flat
+      // wall every fin faces the same way and takes the same light, so without
+      // that the screen flattens to a single tone at 40 m.
       const bPitch = clamp(FH * 0.115, 0.30, 0.42);
       const bWid = clamp(bPitch * 0.30, 0.07, 0.14);
       const bProj = clamp(small * 0.020, 0.13, 0.24);
@@ -361,16 +351,16 @@
       // ============================================================
       //  4. THE FRAMELESS GLASS CORNER
       // ============================================================
-      // The host shell keeps 0.55 m of solid wall at the end of every face, so
-      // a true frameless corner is not available — but painting that jamb in the
-      // glass tone, on both faces, with no cladding turning the corner and no
-      // steel post standing in it, makes the glazing read as wrapping the
-      // corner. The roof fascia flying past overhead finishes the illusion.
+      // The host keeps 0.55 m of solid wall at the end of every face, so a
+      // true frameless corner is not on offer — but painting that jamb in the
+      // glass tone on both faces, with no cladding turning the corner and no
+      // post standing in it, makes the glazing read as wrapping the corner.
+      // The fascia flying past overhead finishes the illusion.
       for (let i = 0; i < cFaces.length; i++) {
         const f = F.face(ctx, cFaces[i]);
         const ge = glassEnd[cFaces[i]];
         const t = ge * (f.span / 2 - 0.30);
-        F.box(ctx, f, t, H / 2, 0.62, H, 0.06, GLASSD, 0);
+        F.box(ctx, f, t, H / 2, 0.62, H, 0.12, GLASSD, 0);
         // a hairline black shadow where the glass meets the cladding
         F.rib(ctx, f, t - ge * 0.36, 0, H, 0.07, 0.10, VOID, 0);
       }
@@ -378,12 +368,11 @@
       // ============================================================
       //  5. THE RECESSED GROUND FLOOR + the slab edge above it
       // ============================================================
-      // Nothing is drawn over the ground storey's glass: it is left dark and
-      // open, with the solid sill and header zones clad in near-black so the
-      // whole storey recedes, and a few slim black steel posts crossing it.
-      // Those posts are the visible structure the cantilever lands on, and
-      // being vertical they are also what breaks the host's window ribbon into
-      // separate panes.
+      // Nothing is drawn over this storey's glass: it is left dark and open,
+      // its solid sill and header zones clad in near-black so the whole storey
+      // recedes, and a few slim steel posts crossing it. Those posts are the
+      // structure the cantilever lands on, and being vertical they are also
+      // what breaks the host's window ribbon into separate panes.
       if (ST >= 2) {
         for (let fi = 0; fi < faces.length; fi++) {
           const f = faces[fi];
@@ -405,19 +394,25 @@
         }
       }
 
-      // THE SLAB EDGES. One band at the bottom of every clad volume, projecting
-      // a little past that volume's own face: the exposed floor slab. This is
-      // the line that says "stacked slabs" at a distance, and it lands squarely
-      // in the solid zone at the floor line.
+      // THE SLAB EDGES. A band at the bottom of every clad volume, and a second
+      // capping the top of a volume the one above has stepped back from —
+      // the exposed floor slab, projecting a little past the cladding it
+      // belongs to. This is the line that says "stacked slabs" at 200 m, and
+      // it always lands squarely in the solid zone at a floor line.
       for (let vi = 0; vi < vols.length; vi++) {
         const v = vols[vi];
-        if (v.y0 < 0.2) continue;                       // a ground-bearing volume has none
         for (let fi = 0; fi < faces.length; fi++) {
           const f = faces[fi];
           const P = volProj(v, f.s) + 0.10;
           const run = ext(f, function (s) { return volProj(v, s) + 0.10; });
-          seg(ctx, F, f, v.y0 + 0.03, 0.30, P, CONCL, 0, run.L, run.R, doorHoles(f));
-          seg(ctx, F, f, v.y0 + 0.20, 0.06, P + 0.03, JOINT, 0, run.L, run.R, doorHoles(f));
+          const above = vols[vi + 1];
+          if (v.y0 > 0.2) {                             // a ground-bearing volume has none
+            seg(ctx, F, f, v.y0 + 0.03, 0.30, P, CONCL, 0, run.L, run.R, doorHoles(f));
+            seg(ctx, F, f, v.y0 + 0.20, 0.06, P + 0.03, JOINT, 0, run.L, run.R, doorHoles(f));
+          }
+          if (above && volProj(above, f.s) < P - 0.3) {
+            seg(ctx, F, f, v.y1 - 0.03, 0.26, P, CONCL, 0, run.L, run.R, doorHoles(f));
+          }
         }
       }
 
@@ -425,11 +420,10 @@
       //  6. THE SOFFIT UNDER THE CANTILEVER — dark reveal, board, LED
       // ============================================================
       // A cantilever is a shadow, not a shape. Three boxes per proud face: a
-      // dark reveal where the underside meets the wall, a warm timber board
-      // filling the rest of the projection, and a thin bright line between
-      // them — the integrated linear LED, which is what a house like this
-      // spends its evening budget on.
-      let lampsLeft = 4;
+      // dark reveal where the underside meets the wall, a timber board filling
+      // the rest of the projection, and a thin bright line between them — the
+      // integrated linear LED this house spends its evening budget on.
+      let lampsLeft = 2;                    // real emissive meshes: two, then done
       for (let vi = 0; vi < vols.length; vi++) {
         const v = vols[vi];
         if (v.y0 < 0.2) continue;
@@ -442,8 +436,8 @@
           seg(ctx, F, f, v.y0 - 0.11, 0.22, 0.22, VOID, 0, run.L, run.R, hs);
           seg(ctx, F, f, v.y0 - 0.19, 0.16, P - 0.28, WOOD, 0.26, run.L, run.R, hs);
           seg(ctx, F, f, v.y0 - 0.09, 0.06, 0.09, LED, 0.20, run.L, run.R, hs);
-          // one real glow per proud face, kept off the doorway
-          if (lampsLeft > 0) {
+          // one real glow per proud TIMBER face, kept off the doorway
+          if (lampsLeft > 0 && v.wood) {
             const lt = (f.s === ctx.doorSide) ? -bladeSide * (slotH + 1.3) : f.span * 0.22;
             if (F.clearsDoor(ctx, f, lt, 0.6)) {
               const nrm = f.halfN + 0.34;
@@ -470,12 +464,12 @@
       // ============================================================
       //  7. THE BLADE WALL AND THE FULL-HEIGHT ENTRANCE SLOT
       // ============================================================
-      // The blade is the only piece of stone on the house and the only element
-      // that runs unbroken from the ground past the roof line. It is a vertical
-      // member, so it may cross the host's glazing; the slot beside it is a
-      // pure void — no cladding, no batten, no band — which is why the host's
-      // own two storeys of glass are visible at the back of it and why nothing
-      // can hang across the doorway.
+      // The blade is the only stone on the house and the only element running
+      // unbroken from the ground past the roof line. It is a VERTICAL member,
+      // so it may cross the host glazing; the slot beside it is a pure void —
+      // no cladding, no batten, no band — which is why the host's own two
+      // storeys of glass show at the back of it, and why nothing at all can
+      // hang across the doorway.
       const bladeTop = H + PP + T + clamp(FH * 0.30, 0.55, 1.30);
       F.box(ctx, df, bladeT, bladeTop / 2, bladeW, bladeTop, bladeP, STONE, 0);
       {
@@ -508,29 +502,29 @@
         for (const sg of [-1, 1]) {
           F.rib(ctx, df, sg * (e.gap / 2 + 0.28), 0, H, 0.10, 0.13, STEEL, 0);
         }
-        // the transom over the door, held at the head so nothing hangs into it
+        // The transom over the door. It sits at the door head and must still
+        // land inside the SILL zone of whichever storey the head falls in, or
+        // a 14 cm bar would be lying on the host's glass — hence the guard.
         const trY = e.head + 0.07, trH = 0.14;
-        if (trY + trH < Math.floor(e.head / FH + 1) * FH - 0.45 + 0.30) {
+        if (trY + trH <= Math.floor(e.head / FH) * FH + 0.55) {
           F.box(ctx, df, 0, trY + trH / 2, slotH * 2 - 0.3, trH, 0.16, STEEL, 0);
         }
-        // the LED at the head of the slot, washing down the stone
-        F.box(ctx, df, 0, H - 0.42, slotH * 2 - 0.5, 0.07, 0.12, LED, 0.10);
+        // the head of the slot: a dark reveal with the LED line under it,
+        // washing down the stone. Both sit in the top storey's header zone.
         F.box(ctx, df, 0, H - 0.24, slotH * 2 - 0.3, 0.24, 0.18, VOID, 0);
-        if (lampsLeft > 0) {
-          lampsLeft--;
-          const nrm = df.halfN + 0.30;
-          ctx.lamp(df.horiz ? 0 : df.out * nrm, e.head + 0.75, df.horiz ? df.out * nrm : 0,
-            clamp(small * 0.012, 0.10, 0.16), LED);
-        }
+        F.box(ctx, df, 0, H - 0.38, slotH * 2 - 0.5, 0.07, 0.12, LED, 0.10);
+        // the third and last real mesh on the building
+        const nrm = df.halfN + 0.30;
+        ctx.lamp(df.horiz ? 0 : df.out * nrm, e.head + 0.75, df.horiz ? df.out * nrm : 0,
+          clamp(small * 0.012, 0.10, 0.16), LED);
       }
 
       // ============================================================
       //  8. THE FLOATING BRIDGE TO THE DOOR
       // ============================================================
       // A thin deck with a shadow void under it and one floating tread in
-      // front. TOP = 0.36 is under physics STEP_UP (0.45), and the approach is
-      // registered as a continuous ramp so a sprinting player cannot sample a
-      // seam between the two slabs.
+      // front. TOP = 0.36 is under physics STEP_UP (0.45) and the approach is
+      // one continuous ramp, so a sprinting player cannot sample a seam.
       if (!e.driveIn) {
         const TOP = 0.36;
         const halfN = df.halfN;
@@ -567,11 +561,10 @@
       //  9. THE FLOATING ROOF — dark upstand, razor fascia, deep eave
       // ============================================================
       // The host shell always builds itself a parapet, so it is clad out in
-      // near-black barely proud of the wall and left in the eave's shadow: that
-      // is how a parapet-less edge is achieved here. Above it the roof is a
-      // PERIMETER FRAME, not a lid — thin, oversailing furthest over the
-      // entrance, and open in the middle so the solar array has somewhere to be
-      // and rooftop gameplay keeps its deck.
+      // near-black barely proud of the wall and left in the eave's shadow.
+      // Above it the roof is a PERIMETER FRAME, not a lid — thin, oversailing
+      // furthest over the entrance, open in the middle so the array has
+      // somewhere to be and rooftop gameplay keeps its deck.
       const OVb = clamp(small * 0.085, 0.55, 1.20) + (ST === 1 ? clamp(small * 0.05, 0.30, 0.70) : 0);
       function ovOf(s) {
         const base = Math.max(OVb, volProj(topVol, s) + 0.30);
@@ -585,26 +578,30 @@
         seg(ctx, F, f, H + (upY - H) / 2, upY - H, up, VOID, 0, rU.L, rU.R, null);
         const OV = ovOf(f.s);
         const rE = ext(f, function (s) { return ovOf(s); });
+        // the eave runs to each neighbour's OWN overhang, so the four planes
+        // mitre; the run is asymmetric, so it is centred on its own midpoint
+        // and not on the face.
+        const eC = (rE.L + rE.R) / 2, eW = rE.R - rE.L;
         // the plane: reaching 0.5 m back over the deck so the frame is a frame
-        F.box(ctx, f, 0, upY + T / 2, rE.R - rE.L, T, OV + 0.5, CONCL, -0.5);
+        F.box(ctx, f, eC, upY + T / 2, eW, T, OV + 0.5, CONCL, -0.5);
         // the razor: a hairline lit lip on top and a dark drip under the outer
-        // edge, which is the whole reason a 0.18 m slab reads as thin.
-        F.box(ctx, f, 0, upY + T - 0.02, rE.R - rE.L, 0.05, OV + 0.06, F.shade(CONCL, 1.10), -0.04);
-        F.box(ctx, f, 0, upY - 0.05, rE.R - rE.L, 0.10, OV, VOID, 0);
+        // edge, which is the whole reason a 0.2 m slab reads as thin.
+        F.box(ctx, f, eC, upY + T - 0.02, eW, 0.05, OV + 0.06, F.shade(CONCL, 1.10), -0.04);
+        F.box(ctx, f, eC, upY - 0.05, eW, 0.10, OV, VOID, 0);
         // the eave soffit: timber and lit over the entrance, dark elsewhere
         if (f.s === ctx.doorSide) {
-          F.box(ctx, f, 0, upY - 0.16, rE.R - rE.L, 0.14, OV - 0.30, WOOD, 0.30);
-          F.box(ctx, f, 0, upY - 0.13, rE.R - rE.L - 0.9, 0.06, 0.09, LED, 0.22);
+          F.box(ctx, f, eC, upY - 0.16, eW, 0.14, OV - 0.30, WOOD, 0.30);
+          F.box(ctx, f, eC, upY - 0.13, eW - 0.9, 0.06, 0.09, LED, 0.22);
         }
       }
 
       // ============================================================
       //  10. THE ROOFTOP SOLAR ARRAY
       // ============================================================
-      // Laid flat in a grid on framed rails, low enough to sit under the eave
-      // and inset from the slab edges, with a clear central spine: roof loot,
-      // the elevator headhouse and the helipad all live near the slab centre
-      // and a solar farm parked on top of them is not a favour to anybody.
+      // Laid flat in a grid on framed rails, low enough to sit under the eave,
+      // inset from the slab edges and holding a clear central spine: roof loot,
+      // the headhouse and the helipad all live near the slab centre and a solar
+      // farm parked on top of them is a favour to nobody.
       if (!spec || spec.solar !== false) {
         const R = F.roof(ctx);
         const y = ctx.rTop + 0.05;

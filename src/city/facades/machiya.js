@@ -1,79 +1,75 @@
 /* ============================================================
    city/facades/machiya.js — "Japanese Residence": the minka / machiya.
 
-   WHAT IS BEING MODELLED. A HOUSE, not a temple. The Japanese townhouse and
+   WHAT IS BEING MODELLED. A HOUSE, not a temple. The townhouse and the
    farmhouse are the same building at two densities: a low timber frame with
-   pale plaster panels between its posts, a veranda deck along the street
-   face, and — sitting on top of all of it and dominating everything — one
-   enormous tiled roof whose eaves reach so far past the wall that the ground
-   floor lives permanently in its shade. That last fact is the whole style.
-   A minka is a roof with a house parked under it, and this file spends most
-   of its geometry accordingly: the roof owns 40-55 percent of the elevation
-   at every subject size, and it is ONE roof.
+   pale plaster between its posts, a veranda deck along the street face, and —
+   sitting on top of all of it — one enormous tiled roof whose eaves reach so
+   far past the wall that the ground floor lives permanently in its shade. A
+   minka is a roof with a house parked under it, and this file spends its
+   geometry accordingly: the roof owns 40-55 percent of the elevation at every
+   subject size, and it is ONE roof.
 
    HOW THIS DIFFERS FROM pagoda.js ("Tiered Eaves"), DELIBERATELY. That file
-   is a temple: many stacked eaves, dougong bracket sets, upturned corners,
-   round vermilion columns, a gilt sorin mast. This one is domestic and it
-   refuses all five of those moves.
+   is a temple — stacked eaves, dougong bracket sets, upturned corners, round
+   vermilion columns, a gilt sorin mast. This one is domestic and refuses all
+   five of those moves.
      · ONE roof, not a tier per storey. There is exactly one ridge.
-     · IRIMOYA (hipped-and-gabled): the lower part of the roof hips round all
-       four sides, and above the hip break it becomes a straight gable with a
+     · IRIMOYA (hipped-and-gabled): the roof hips round all four sides low
+       down, and above the hip break it becomes a straight gable with a
        plastered triangular end (tsuma) inside dark barge boards. That double
-       profile is the single most recognisable Japanese roof shape and no
-       other facade in the kit makes it.
+       profile is the most recognisable Japanese roof there is.
      · The eave is carried on EXPOSED RAFTER TAILS — a rank of small cedar
        ends walking out from under the tile — not on bracket sets. A house
        cannot afford dougong and does not pretend to.
-     · The corners come DOWN, not up. A domestic kawara eave is a straight
-       low line; an upturned horn on a farmhouse would read as a mistake.
+     · The corners come DOWN, not up. A domestic kawara eave is a straight low
+       line; an upturned horn on a farmhouse reads as a mistake.
      · Every post is SQUARE, so every post is a free dbox. pagoda spends
-       twenty real cylinders on its colonnade; this facade mints two meshes
-       in total, both of them entry lanterns.
+       twenty real cylinders on its colonnade; this facade mints two meshes in
+       total, both of them entry lanterns.
 
    THE ELEMENTS AND WHY EACH ONE IS HERE.
 
-     GREAT ROOF   stepped horizontal courses of dark kawara tile from the
-                  eave lip up to the ridge, sized at each course's TOP so
-                  every course laps the one below it, with a thin darker lap
-                  line at each joint. It starts BELOW the wall head and
-                  reaches EO past the wall on every side, so the eave line
-                  sits low and the wall is in shadow — the reason these
-                  houses read as horizontal from any distance.
-     RIDGE        three stacked courses, deliberately thick, with a heavier
-                  capping roll and an onigawara end block at each end. A thin
-                  ridge is the fastest way to make a tiled roof look printed.
-     END TILES    a small block at the eave lip over EVERY rafter, because
-                  kawara terminates in a row of round tile ends and that
-                  dotted line is what the eye actually reads as "tile".
+     GREAT ROOF   stepped courses of dark kawara from the eave lip to the
+                  ridge, each sized at its OWN TOP so it is inset behind the
+                  course below and every joint shows a lap. It starts BELOW
+                  the wall head and reaches EO past the wall on all four
+                  sides: the eave line sits low, the wall lives in its shade,
+                  and the house reads horizontal from any distance.
+     RIDGE        three stacked courses, deliberately thick, a heavier capping
+                  roll and an onigawara block at each end. A thin ridge is the
+                  fastest way to make a tiled roof look printed on.
+     END TILES    a small block at the eave lip over EVERY rafter — kawara
+                  terminates in a row of round tile ends, and that dotted line
+                  is what the eye actually reads as "tile".
      GABLE        plastered tsuma panel, stepped dark barge boards up both
-                  slopes, a gegyo pendant under the ridge point and a barred
-                  mushiko vent for the attic.
+                  slopes, a gegyo pendant under the ridge point, and a barred
+                  mushiko vent for the attic behind it.
      SHINKABE     the wall: pale plaster in the solid sill and header zones,
                   gridded by exposed dark posts on every bay line (verticals
-                  may cross the host glazing and that is exactly how a
-                  continuous ribbon turns back into separate punched
-                  windows), horizontal nageshi and kamoi rails inside the
-                  solid zones only, and a dark timber base board at the foot.
+                  may cross the host glazing, and that is exactly how a
+                  continuous ribbon turns back into separate punched windows),
+                  nageshi and kamoi rails inside the solid zones only, and a
+                  dark timber base board at the foot.
      KOUSHI /     the host's own window band is FRAMED, never covered: the
-     SHOJI        street storey gets a close-set dark lattice screen over it,
-                  the upper storeys a coarser pale shoji grid. The glass
-                  behind is the dark ground those muntins are read against.
-     ENGAWA       a continuous veranda deck along the entrance face, 0.40 m
-                  up (under physics STEP_UP 0.45) with a 0.20 m stone step in
-                  the door gap, both registered with ctx.plat so the player
+     SHOJI        street storey gets a close-set dark lattice, the storeys
+                  above a coarser pale shoji grid. The glass behind is the
+                  dark ground those muntins are read against.
+     ENGAWA       a continuous veranda deck along the entrance face, 0.40 m up
+                  with a 0.20 m stone step in the door gap — two rises under
+                  physics STEP_UP, both registered with ctx.plat, so the player
                   walks up and straight in. Low koran railing, board seams
-                  running parallel to the wall the way engawa boards do, and
-                  slender square posts up to the veranda roof.
+                  parallel to the wall the way engawa boards run, and slender
+                  square posts up to the veranda roof.
      HISASHI      that veranda roof: a low tiled pent in the ground storey's
-                  SOLID header zone, stepping down and out over the deck,
-                  held clear of the wall on its way out and cut in segments
-                  around the doorway. Two storeys and up only — a one-storey
-                  minka needs no second roof, the great eave already covers
-                  the deck.
-     ENTRY        over the door, above the hisashi and clear of e.head, a
-     CANOPY       small raised tiled hood on cheek boards, with a pair of
-                  andon lanterns. The one place the elevation is allowed to
-                  step forward.
+                  SOLID header zone, stepping down and out over the deck, held
+                  clear of the wall on the way and cut in segments round the
+                  doorway. Two storeys and up only — on a one-storey minka the
+                  great eave already covers the deck, and a second roof there
+                  would start the tiering this facade exists to refuse.
+     ENTRY        over the door, above the hisashi and clear of e.head, a small
+     CANOPY       raised hood on cheek boards with a pair of andon lanterns.
+                  The one place this elevation steps forward.
 
    COLOUR is three values with real distance between them: near-black
    blue-grey kawara, warm pale plaster, and dark timber lining every edge of
@@ -96,8 +92,14 @@
   // tangent holes — stone.js's runBand, plus an `inset` so an eave course can
   // be held clear of the wall instead of lying against it. You do not cut a
   // hole in merged axis-aligned boxes; you decline to draw over it.
+  // NOTE ON `over`: it is the extension PER END (stone.js's convention), not
+  // F.band's total. Left null it defaults to exactly what this band needs to
+  // reach the building's corner at its own inset and projection, so the four
+  // faces meet in solid material instead of leaving a notch — or, when the
+  // number is guessed too generously, a shelf floating out past the corner.
   function runBand(ctx, F, f, cy, h, proj, col, holes, over, inset) {
-    const L = -f.span / 2 - (over == null ? 0.12 : over);
+    const ins = inset || 0;
+    const L = -f.span / 2 - (over == null ? proj + ins + 0.10 : over);
     const R = -L;
     let x = L;
     const hs = (holes || []).slice().sort(function (a, b) { return a[0] - b[0]; });
@@ -154,7 +156,10 @@
       // against the PLAN, because a hip's pitch is height over half-depth and
       // a roof taller than half its own footprint is a spire, not a house.
       const EO = clamp(small * 0.22, 1.2, 3.2);        // eave overhang per side
-      const eaveDrop = clamp(EO * 0.30, 0.26, 0.95);   // how far the lip sits below the wall head
+      // how far the lip sits below the wall head. Capped against rTop as well
+      // as against EO, or a wide one-storey lot grows a 3 m overhang whose tip
+      // hangs down into head height.
+      const eaveDrop = Math.min(clamp(EO * 0.30, 0.26, 0.95), rTop * 0.22);
       const roofH = clamp(rTop * 0.55, small * 0.30, small * 0.52);
       const yEave = rTop - eaveDrop;                   // the eave lip line
       const runV = roofH + eaveDrop;                   // total vertical run of tile
@@ -208,17 +213,17 @@
             // SHITAMI-ITA: the dark weatherboard base the wall stands on, with
             // a chamfered cap. On the entrance face the engawa deck stands in
             // front of it; on the flanks it is the whole plinth.
-            runBand(ctx, F, f, 0.21, 0.42, PB * 1.3, timber, holes(f, 0), 0.16);
-            runBand(ctx, F, f, 0.47, 0.13, PB * 1.9, timberD, holes(f, 0), 0.22);
+            runBand(ctx, F, f, 0.21, 0.42, PB * 1.3, timber, holes(f, 0), null);
+            runBand(ctx, F, f, 0.47, 0.13, PB * 1.9, timberD, holes(f, 0), null);
           } else {
             // NAGESHI: the rail that covers the floor line, then the plaster
             // apron above it up to the window sill.
-            runBand(ctx, F, f, y0 + 0.13, 0.26, PB * 1.5, timber, holes(f, y0), 0.20);
-            runBand(ctx, F, f, y0 + 0.41, 0.28, PB * 0.8, plaster, holes(f, y0 + 0.27), 0.10);
+            runBand(ctx, F, f, y0 + 0.13, 0.26, PB * 1.5, timber, holes(f, y0), null);
+            runBand(ctx, F, f, y0 + 0.41, 0.28, PB * 0.8, plaster, holes(f, y0 + 0.27), null);
           }
           // KAMOI: the head rail over the screens, then plaster to the ceiling.
-          runBand(ctx, F, f, y1 - 0.33, 0.22, PB * 1.5, timber, holes(f, y1 - 0.44), 0.20);
-          runBand(ctx, F, f, y1 - 0.11, 0.22, PB * 0.8, plaster, holes(f, y1 - 0.22), 0.10);
+          runBand(ctx, F, f, y1 - 0.33, 0.22, PB * 1.5, timber, holes(f, y1 - 0.44), null);
+          runBand(ctx, F, f, y1 - 0.11, 0.22, PB * 0.8, plaster, holes(f, y1 - 0.22), null);
         }
         // THE POSTS. One plaster pier per bay line with an exposed dark post
         // down the middle of it. These are the only members allowed to cross
@@ -373,7 +378,9 @@
       const wantHis = (ST >= 2 && hisY > 1.6);
       // the entry canopy sits ABOVE e.head, so it breaks the hisashi line
       // rather than hanging into the doorway.
-      const canY = Math.max(e.head + 0.16, hisY + 0.62);
+      // +0.34 is not slack: the canopy's own fascia hangs 0.30 below its
+      // innermost course, and THAT is the lowest thing over the doorway.
+      const canY = Math.max(e.head + 0.34, hisY + 0.62);
       const canW = Math.min(ef.span * 0.52, e.gap + 1.9);
       const canProj = clamp(engD * 0.85, 0.9, 2.0);
       const wantCan = (rTop - canY) > 1.15;
@@ -384,14 +391,13 @@
           for (let j = 0; j < nH; j++) {
             const inset = j * dr;
             const cy = hisY - (hDrop * (j + 0.5)) / nH;
-            runBand(ctx, F, f, cy, 0.22, dr + 0.14, j === nH - 1 ? tileL : tile, hole,
-              2 * (inset + dr) + 0.24, inset);
+            runBand(ctx, F, f, cy, 0.22, dr + 0.14, j === nH - 1 ? tileL : tile, hole, null, inset);
           }
           // the lip: a heavier verge course, a dark fascia under it, and a run
           // of end tiles so the little roof terminates like the big one.
           const lipR = hisProj - dr * 0.5;
-          runBand(ctx, F, f, hisY - hDrop - 0.03, 0.26, 0.26, tileL, hole, 2 * (lipR + 0.26) + 0.3, lipR);
-          runBand(ctx, F, f, hisY - hDrop - 0.24, 0.20, 0.20, timberD, hole, 2 * (lipR + 0.2) + 0.3, lipR);
+          runBand(ctx, F, f, hisY - hDrop - 0.03, 0.26, 0.26, tileL, hole, null, lipR);
+          runBand(ctx, F, f, hisY - hDrop - 0.24, 0.20, 0.20, timberD, hole, null, lipR);
           const pitch = clamp(small * 0.09, 0.6, 1.2);
           const nT = Math.max(3, Math.min(34, Math.round(f.span / pitch)));
           for (let i = 0; i <= nT; i++) {
@@ -419,8 +425,11 @@
           // a small head brace, so the post meets the beam like a joint
           F.box(ctx, ef, t, hisY - 0.42, pw * 3.4, 0.16, pw * 1.2, timberD, engD - 0.28 - pw * 0.85);
         }
-        // the beam the posts carry, running the deck edge
-        F.box(ctx, ef, 0, hisY - 0.34, deckW, 0.20, pw * 1.5, timber, engD - 0.28 - pw * 0.75);
+        // The beam those posts carry, along the deck edge — in segments around
+        // the entry gap, because at 2.7 m it would otherwise be the one thing
+        // on this house hanging below e.head across the doorway.
+        runBand(ctx, F, ef, hisY - 0.34, 0.20, pw * 1.5, timber,
+          [[-gapHalf, gapHalf]], 0.12, engD - 0.28 - pw * 0.75);
       }
       if (wantCan) {
         // A small raised hood over the door: four courses out and down, a
@@ -504,7 +513,7 @@
           // two barge boards that step up the slope. Two blocks per end per
           // course is what makes the diagonal without rotating anything.
           for (const sa of [-1, 1]) {
-            rbox(sa * (pa + 0.10), cy, 0, 0.18, h + 0.02, Math.max(0.25, b2 - bgL * 1.2), plaster);
+            rbox(sa * (pa + 0.08), cy, 0, 0.20, h + 0.02, Math.max(0.25, b2 - bgL * 1.2), plaster);
             for (const sb of [-1, 1])
               rbox(sa * (pa + 0.28), cy, sb * (b2 / 2 + 0.05 - bgL / 2), bgT, h * 1.3, bgL, timberD);
           }
@@ -523,12 +532,15 @@
         const nT = Math.max(3, Math.min(40, Math.round(runT / rafPitch)));
         const step = runT / nT;
         const rw = clamp(step * 0.30, 0.11, 0.26);
+        const dr = (r - 0.06) / 2;
         for (let i = 0; i <= nT; i++) {
           const t = -runT / 2 + step * i;
-          // two stepped segments per tail, so the tail descends with the roof
+          // Two segments per tail. The INNER one is level and rides inside the
+          // top storey's solid header zone — a rafter that started descending
+          // at the wall would cut across the host's window head. Only the
+          // outer segment, already held clear of the wall, drops with the roof.
           for (let j = 0; j < 2; j++) {
-            const dr = (r - 0.06) / 2;
-            F.box(ctx, f, t, rTop - 0.38 - (eaveDrop - 0.12) * ((j + 0.5) / 2), rw, rw * 1.4,
+            F.box(ctx, f, t, rTop - 0.26 - (eaveDrop - 0.10) * (j * 0.78), rw, Math.min(rw * 1.4, 0.36),
               dr + 0.05, cedar, 0.06 + dr * j);
           }
           // one round tile end at the lip over every rafter

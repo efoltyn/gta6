@@ -9,78 +9,68 @@
 
         IN THE DESERT, ARCHITECTURE IS THE MANAGEMENT OF SUN AND SHADE.
 
-   Nothing here is decoration. Every part exists because of the sun, and that
-   is what makes the drawing hold together:
+   Nothing here is decoration. Every part exists because of the sun:
 
-     1. THE ROOF PLANE. One enormous thin blade floating past all four walls —
-        2 to 6 metres of overhang, 25 cm thick — so the whole elevation stands
-        in its shadow. It is the silhouette (hence crownsRoof): at 200 m this
-        house is a horizontal line with a dark slot under it and nothing else
-        in the city makes that shape. Optionally a BUTTERFLY: the plane is
-        pitched UP toward both eaves off a valley over the middle of the house,
-        which is the shape that made this style famous. Built the way
+     1. THE ROOF PLANE. One thin blade — 2 to 6 m of overhang, 25 cm thick —
+        floating past all four walls, so the whole elevation stands in its
+        shadow. It is the silhouette (hence crownsRoof): at 200 m this house is
+        a horizontal line with a dark slot under it, and nothing else in the
+        city makes that shape. Optionally a BUTTERFLY, pitched UP toward both
+        eaves off a valley over the middle of the house. Built the way
         victorian.js builds its mansard — stepped axis-aligned ribbons, no
-        rotation — with the step in y held under half the plate thickness so
-        the boxes overlap and the blade reads as one continuous sheet.
-     2. THE CLERESTORY WEDGE. The host's own parapet zone is clad as dark
-        glass, and it is then run UP to meet the underside of the plane. On a
-        flat roof that is a level slot; on a butterfly it is a triangular
-        wedge of glass that grows toward each eave, which is exactly what a
-        butterfly roof is FOR. One mechanism, both roofs, and it also closes
-        the gap the tilt opens over the wall head so the roof never floats
-        away from the building.
-     3. THE POST RING. The plane cannot land on the walls — it is three metres
-        past them — so it stands on a ring of slim dark steel posts solved off
-        the plate's own plan rectangle, each one topped out by asking the roof
-        how high it is at that exact point. Two ANGLED feature posts rake
-        outward at the entry, because in 1962 somebody always did.
-     4. BREEZE BLOCK. Decorative pierced concrete screens standing half a
-        metre OFF the glass on a stone kerb: a lattice of webs with a small
-        block in the middle of every cell. It is a screen, not a wall — you
-        see the host's own glazing through the holes, and it throws the one
-        piece of fine-grained shadow on a building otherwise made of very
-        large plain pieces.
-     5. THE CARPORT. A deep shaded slot on one flank where the roof overhang
-        is grown to a car's length, floored with a low slab (registered with
-        ctx.plat, 0.14 m, well under physics STEP_UP so you can walk or drive
-        onto it) and screened at one end by a slump-block wall.
+        rotation — with the y step held under half the plate thickness so
+        consecutive boxes overlap and the blade reads as one sheet.
+     2. THE CLERESTORY WEDGE. The host's own parapet zone is clad as dark glass
+        and then run UP to meet the plane's underside. Flat roof → a level
+        slot. Butterfly → a triangle of glass growing toward each eave, which
+        is what a butterfly roof is FOR; and it closes the gap the tilt opens
+        over the wall head, so the roof never floats away from the building.
+        One mechanism, both roofs.
+     3. THE POST RING. The plane cannot land on the walls, so it stands on slim
+        steel posts solved off the plate's own plan rectangle — each one asking
+        the roof how high it is above that exact point, which is why on a
+        butterfly the posts are visibly different lengths. Two ANGLED feature
+        posts rake outward at the entry, because in 1962 somebody always did.
+     4. BREEZE BLOCK. Pierced concrete screens standing half a metre OFF the
+        glass on a stone kerb: a lattice of webs with a small block in the
+        middle of every cell. A screen, not a wall — you see the host's own
+        glazing through the holes — and the only fine-grained shadow on a
+        building otherwise made of very large plain pieces.
+     5. THE CARPORT. A deep shaded slot on the flank where the overhang is
+        grown to a car's length, floored with a low slab (ctx.plat at 0.14 m,
+        well under physics STEP_UP) and screened at one end by slump block.
      6. HORIZONTALITY. Low stone garden walls run OUT past the house into the
-        yard and one of them forms a walled entry court, so the building's
-        lines do not stop where its walls do. On the elevation the same idea
-        is a continuous 1 m fascia band at every floor line — and here is the
-        part that matters: that band lives ENTIRELY in the host shell's own
-        solid zones (the 0.45 m header under a floor line plus the 0.55 m
-        sill above it), so the strongest horizontal in the design never covers
-        a single pane of the building's own glass.
-     7. THE FIREPLACE. One warm-stone mass, coursed, running from the ground
-        straight through the roof plane. It is the only vertical event in a
-        composition of horizontals, and it is what stops the house reading as
-        a stack of trays.
+        yard, one pair forming a walled entry court, so the building's lines do
+        not stop where its walls do. On the elevation the same idea is a 1 m
+        fascia band at every floor line — and that band lives ENTIRELY in the
+        host shell's own solid zones (the 0.45 header below a floor line plus
+        the 0.55 sill above it), so the strongest horizontal in the design
+        never covers a single pane of the building's own glass.
+     7. THE FIREPLACE. One coursed warm-stone mass from the ground straight
+        through the roof plane: the only vertical event in a composition of
+        horizontals, and what stops the house reading as a stack of trays.
 
-   WHERE THE GLASS IS. Everything solid this file draws is either a VERTICAL
-   (steel mullions, stone piers, the fireplace, posts, door jambs — these are
-   allowed to cross the window band and are precisely what turns a ribbon into
-   separate panes), or a horizontal that sits in a solid zone, or something
-   held clear of the wall entirely as an overhang or a free-standing screen.
-   No band is ever laid across the middle of a storey.
+   WHERE THE GLASS IS. Everything solid here is either a VERTICAL (mullions,
+   stone piers, the fireplace, posts, door jambs — allowed to cross the window
+   band, and precisely what turns a ribbon into separate panes), or a
+   horizontal inside a solid zone, or something held clear of the wall as an
+   overhang or a free-standing screen. No band crosses mid-storey.
 
-   COLOUR. Bone-white plane, warm desert stone, dark steel, and ONE hot accent
-   on the front door — tangerine, magenta, turquoise or marigold, picked by
-   position hash so a street of these is not one drawing. The values are
-   anchored mid-dark on purpose: intl.js measured that this renderer's key
-   multiplies a source hex by roughly three and a half, so a "bone white" of
-   0xd0 is a blown-out white page by the time you see it, and a facade whose
-   whole subject is the shadow under a white plane cannot afford that.
+   COLOUR. Bone plane, warm desert stone, dark steel, and ONE hot accent on the
+   front door — tangerine, magenta, turquoise or marigold by position hash.
+   Values are anchored mid-dark deliberately: intl.js measured that this
+   renderer's key multiplies a source hex by roughly three and a half, so a
+   "bone white" of 0xd0 arrives as blown-out paper, and a facade whose whole
+   subject is the shadow under a white plane cannot afford that.
 
-   BUDGET. Zero real meshes — every element in this file is ctx.dbox, so a
-   Palm Springs house costs the same draw calls as a bare box. The steel posts
-   are square tube, which is both correct and free; ctx.column would have made
-   them round AND expensive.
+   BUDGET. Zero real meshes — everything is ctx.dbox, so this house costs the
+   same draw calls as a bare box. The posts are square steel tube, which is
+   both correct and free; ctx.column would have made them round AND expensive.
 
-   maxStoreys 3: this grammar is low and horizontal by definition. A four-
-   storey block of it would be a lie, so the city-wide picker is told not to.
-   An explicit {dress:{style:"desertmod"}} at a call site is still honoured and
-   still re-proportions — every number below comes from w, d, storeys or FH.
+   maxStoreys 3, because this grammar is low and horizontal by definition and a
+   four-storey block of it would be a lie. An explicit dress spec is still
+   obeyed, and still re-proportions: every number comes from w, d, storeys, FH,
+   rTop or a face span.
 
    SPEC (optional, all defaulted): roof:"flat"|"butterfly", accent:<hex>.
 ============================================================ */
@@ -106,10 +96,23 @@
       const df = e.f;                       // the entrance face
       // a point on face f, `t` along it, Dd out from the wall plane → [x,z]
       const pt = function (f, t, Dd) { return f.horiz ? [t, f.out * (f.halfN + Dd)] : [f.out * (f.halfN + Dd), t]; };
+      // A ground slab lying OUTSIDE face f — n0 to n1 out of its wall plane,
+      // `tw` wide about tangent `tc` — emitted AND registered as a walk
+      // platform. The carport deck, the entry terrace and its apron are all
+      // this shape, so the horiz/vertical split is written once.
+      const outSlab = function (f, tc, tw, n0, n1, top, col, ramp) {
+        if (n1 - n0 <= 0.05 || tw <= 0.05) return;
+        F.box(ctx, f, tc, top / 2, tw, top, n1 - n0, col, n0);
+        const a = f.out * (f.halfN + n0), b = f.out * (f.halfN + n1);
+        const lo = Math.min(a, b), hi = Math.max(a, b);
+        if (f.horiz) ctx.plat(tc - tw / 2, tc + tw / 2, lo, hi, top,
+          ramp ? { z0: ctx.oz + b, z1: ctx.oz + a, y0: 0, y1: top } : null);
+        else ctx.plat(lo, hi, tc - tw / 2, tc + tw / 2, top,
+          ramp ? { axis: "x", x0: ctx.ox + b, x1: ctx.ox + a, y0: 0, y1: top } : null);
+      };
 
       // The host shell's own solid zones, per storey k: k*FH … k*FH+SILL and
-      // (k+1)*FH-HDR … (k+1)*FH. Everything horizontal in this file is checked
-      // against these two numbers and nothing else.
+      // (k+1)*FH-HDR … (k+1)*FH. Every horizontal here is checked against them.
       const SILL = 0.55, HDR = 0.45;
 
       // ============================================================
@@ -142,14 +145,13 @@
       // ============================================================
       //  1. SOLVING THE ROOF PLANE (numbers only — it is emitted last)
       // ============================================================
-      // Solved FIRST because everything tall in this facade measures itself
-      // against the underside of the plane: the post ring, the angled rakers,
-      // the clerestory wedge and the fireplace all ask soffitAt() how high the
-      // roof is above their own plan position.
-      const OV_F = clamp(small * 0.42, 2.0, 5.5);     // entry side: enormous
-      const OV_C = clamp(small * 0.55, 2.6, 6.5);     // carport side: a car deep
-      const OV_S = clamp(small * 0.22, 1.2, 3.2);     // the quiet flank
-      const OV_B = clamp(small * 0.16, 0.9, 2.4);     // the back
+      // Solved FIRST because everything tall here measures itself against the
+      // plane's underside: the post ring, the rakers, the clerestory wedge and
+      // the fireplace all ask soffitAt() how high the roof is above them.
+      const OV_F = clamp(small * 0.36, 1.8, 5.0);     // entry side: enormous
+      const OV_C = clamp(small * 0.48, 2.6, 6.0);     // carport side: a car deep
+      const OV_S = clamp(small * 0.20, 1.1, 2.8);     // the quiet flank
+      const OV_B = clamp(small * 0.15, 0.85, 2.2);    // the back
       const PT = clamp(small * 0.022, 0.20, 0.34);    // plate thickness: a blade
 
       // which flank gets the carport, which gets the fireplace
@@ -165,6 +167,11 @@
       const px0 = -(W / 2 + ov[2]), px1 = W / 2 + ov[3];
       const pz0 = -(D / 2 + ov[0]), pz1 = D / 2 + ov[1];
 
+      // Terrace depth belongs with the rest of the plan: the entry-court wall
+      // in §10 must stand OUTSIDE it, and §10 runs before §11 builds it.
+      const TERR_D = clamp(Math.min(ov[df.s] * 0.50, small * 0.17), 1.10, 2.60);
+      const TERR_A = clamp(TERR_D * 0.55, 0.60, 1.40);       // the half-rise apron
+
       // BUTTERFLY OR FLAT. The valley runs parallel to the entrance face, so
       // the wings rise toward the entry and toward the back — the deep entry
       // eave is the one that lifts, which is the whole point of the shape.
@@ -173,7 +180,7 @@
       const tMin = tiltZ ? pz0 : px0, tMax = tiltZ ? pz1 : px1;
       const crossC = tiltZ ? (px0 + px1) / 2 : (pz0 + pz1) / 2;
       const crossLen = tiltZ ? (px1 - px0) : (pz1 - pz0);
-      const RISE = butterfly ? clamp(small * 0.11, 0.60, 1.90) : 0;
+      const RISE = butterfly ? clamp(small * 0.16, 0.90, 2.60) : 0;
       const SLOPE = butterfly ? RISE / Math.max(tMax, -tMin) : 0;
       // the underside sits directly on the host's parapet head, so the dark
       // clerestory slot below reads as glass carrying the roof.
@@ -189,7 +196,7 @@
       // wholly inside a solid zone of the host shell (see §0's SILL/HDR).
       const PLINTH = Math.min(0.50, FH * 0.16);        // inside storey 0's sill zone
       F.ring(ctx, PLINTH / 2, PLINTH, SP, STONE, SP * 2.1, 0);
-      F.ring(ctx, PLINTH + 0.05, 0.11, SP + 0.10, STONE_L, SP * 2.2, 0);
+      F.ring(ctx, PLINTH - 0.02, 0.10, SP + 0.10, STONE_L, SP * 2.2, 0);
       F.ring(ctx, 0.06, 0.12, SP + 0.16, STONE_D, SP * 2.3, 0);   // the ground shadow line
 
       // FLOOR LINES: one band per intermediate floor, spanning the header zone
@@ -234,11 +241,14 @@
       F.corners(ctx, (H - HDR) / 2, H - HDR, pierL, SP, STONE);
       F.corners(ctx, PLINTH * 0.5, PLINTH + 0.12, pierL + 0.18, SP + 0.14, STONE_D);
       F.corners(ctx, H - HDR - 0.10, 0.16, pierL + 0.16, SP + 0.10, STONE_L);
-      // slump-block coursing on the piers: horizontal, but only ever as wide as
-      // the pier itself, so it cannot reach the glass between them.
+      // Slump-block coursing on the piers: horizontal, but never wider than the
+      // pier, so it cannot reach the glass between them. Held to the lower
+      // storey — F.corners costs eight boxes a course, and stone texture only
+      // reads at the height a person stands at anyway.
       {
         const cs = clamp(FH * 0.15, 0.40, 0.62);
-        const nc = Math.max(2, Math.min(20, Math.floor((H - HDR - PLINTH) / cs)));
+        const cTop = Math.min(H - HDR - 0.20, PLINTH + FH * 1.05);
+        const nc = Math.max(2, Math.min(8, Math.floor((cTop - PLINTH) / cs)));
         for (let i = 1; i <= nc; i++) {
           F.corners(ctx, PLINTH + i * cs, 0.07, pierL - 0.06, SP + 0.05,
             F.shade(STONE, 0.60 + h(0xd110 + i) * 0.16));
@@ -275,10 +285,10 @@
       // ============================================================
       //  5. THE CLERESTORY WEDGE — dark glass running up to the plane
       // ============================================================
-      // The host's parapet zone, clad as glass, and then continued UP to meet
-      // the roof's underside at whatever height the roof happens to be over
-      // that point. Flat roof → a level slot. Butterfly → a wedge that grows
-      // toward each eave. Emitted in segments so its top can follow the tilt.
+      // The host's parapet zone clad as glass, then continued UP to meet the
+      // roof's underside at whatever height the roof is over that point. Flat →
+      // a level slot; butterfly → a wedge growing toward each eave. Emitted in
+      // segments so its top can follow the tilt.
       const CLP = clamp(FP * 0.55, 0.12, 0.22);
       for (const f of faces) {
         const nSeg = clamp(Math.round(f.span / 1.5), 4, 16);
@@ -368,18 +378,9 @@
         const cw = clamp(cf.span * 0.62, 3.4, cf.span - 1.10);
         const ct = -df.out * cf.span * 0.10;            // shifted off the entry end
         const cd = ov[cpS] - 0.15;
-        const n0 = cf.halfN, n1 = cf.halfN + cd;
-        if (cf.horiz) {
-          ctx.dbox(ct, CARY / 2, cf.out * (n0 + cd / 2), cw, CARY, cd, CONC);
-          ctx.dbox(ct, CARY + 0.02, cf.out * (n0 + cd / 2), cw * 0.32, 0.05, cd, F.shade(CONC, 1.18));
-          ctx.plat(ct - cw / 2, ct + cw / 2, Math.min(cf.out * n0, cf.out * n1),
-            Math.max(cf.out * n0, cf.out * n1), CARY, null);
-        } else {
-          ctx.dbox(cf.out * (n0 + cd / 2), CARY / 2, ct, cd, CARY, cw, CONC);
-          ctx.dbox(cf.out * (n0 + cd / 2), CARY + 0.02, ct, cd, 0.05, cw * 0.32, F.shade(CONC, 1.18));
-          ctx.plat(Math.min(cf.out * n0, cf.out * n1), Math.max(cf.out * n0, cf.out * n1),
-            ct - cw / 2, ct + cw / 2, CARY, null);
-        }
+        outSlab(cf, ct, cw, 0, cd, CARY, CONC, null);
+        // the poured strip down the middle of the deck: a carport is not a room
+        F.box(ctx, cf, ct, CARY + 0.02, cw * 0.32, 0.05, cd, F.shade(CONC, 1.18), 0);
         // the SCREEN WALL at the far end (a slump-block privacy wall, chest to
         // head high) and a low kerb at the near end. Asymmetric on purpose: one
         // end of a carport is the storage wall, the other is where you walk in.
@@ -441,13 +442,10 @@
           ctx.dbox(xm, y + BEAMH * 0.40, z, xb - x + PSEC, BEAMH * 0.22, PSEC * 1.30, STEEL_L);
         }
       }
-      for (let j = 1; j < nqz; j++) {                   // the two z-running edges
-        const z = qz0 + (qz1 - qz0) * j / nqz;
-        post(qx0, z); post(qx1, z);
-      }
-      for (let j = 0; j < nqz; j++) {
+      for (let j = 0; j < nqz; j++) {                   // the two z-running edges
         const za = qz0 + (qz1 - qz0) * j / nqz, zb = qz0 + (qz1 - qz0) * (j + 1) / nqz;
         const zm = (za + zb) / 2;
+        if (j > 0) { post(qx0, za); post(qx1, za); }    // corners belong to the x edges
         for (const x of [qx0, qx1]) {
           const y = soffitAt(x, zm) - 0.03 - BEAMH / 2;
           ctx.dbox(x, y, zm, PSEC * 1.15, BEAMH, zb - za + PSEC, STEEL);
@@ -517,8 +515,12 @@
           // stays bone all the way round
           lay(tc, yb + 0.05, 0.10, tlen, 0.18, SOFF);
           lay(tc, yb + 0.10 + (PT - 0.10) / 2, PT - 0.10, tlen, 0, BONE);
-          // gravel deck: what the aerial camera sees, inside a bone gravel stop
-          lay(tc, yb + PT + 0.02, 0.05, tlen - 0.5, 1.5, F.shade(CONC, 0.92));
+          // Gravel deck: what the aerial camera sees, inside a bone gravel stop.
+          // A butterfly's ribbons are already narrow, so only the single flat
+          // ribbon may be shortened along the tilt axis — shrinking a 0.5 m
+          // ribbon by 0.5 m would emit an inverted box.
+          const gvT = (ribs.length === 1) ? Math.max(0.30, tlen - 0.9) : tlen;
+          lay(tc, yb + PT + 0.02, 0.05, gvT, 1.6, F.shade(CONC, 0.92));
           // the lit rim along the two sloping edges
           for (const sgn of [-1, 1]) {
             edge(tc, yb + PT + 0.03, tlen, sgn, 0.09, 0.20, BONE_L);
@@ -564,7 +566,7 @@
       {
         // two long walls running out from the back corners of the flanks
         const run = clamp(big * 0.42, 3.0, 11.0);
-        const bs = df.horiz ? (df.out > 0 ? -1 : 1) : (df.out > 0 ? -1 : 1);
+        const bs = df.out > 0 ? -1 : 1;          // "away from the entrance face"
         for (const sg of [-1, 1]) {
           if (df.horiz) {
             const x = sg * (W / 2 - GWT * 0.5);
@@ -582,7 +584,7 @@
         // with the path between them, each piece running out past the plate
         // corner. Emitted in segments around the doorway — the same rule that
         // governs a string course also governs a garden wall.
-        const cdst = clamp(ov[df.s] * 0.58, 1.5, 3.6);
+        const cdst = TERR_D + TERR_A + 0.55;           // clear of the terrace apron
         const gapH = e.gap / 2 + 1.10;
         const outr = df.span / 2 + clamp(small * 0.16, 0.8, 2.6);
         for (const sg of [-1, 1]) {
@@ -602,35 +604,14 @@
       //  11. THE ENTRY — the terrace, and the one hot colour in the house
       // ============================================================
       {
-        const TOP = 0.26;                                // one low float, no flight
-        const TD = clamp(Math.min(ov[df.s] * 0.50, small * 0.17), 1.10, 2.60);
+        // ONE low float at 0.26 and an apron at half that, both under physics
+        // STEP_UP (0.45), so there is no flight of steps to bounce off and the
+        // apron carries a ramp — a sprinting player never samples the seam.
+        const TOP = 0.26, TD = TERR_D, AD = TERR_A;
         const TW = Math.min(df.span - 0.5, e.gap + clamp(df.span * 0.42, 2.6, 7.0));
-        const hN = df.halfN;
-        if (df.horiz) {
-          ctx.dbox(0, TOP / 2, df.out * (hN + TD / 2), TW, TOP, TD, CONC);
-          ctx.dbox(0, TOP - 0.02, df.out * (hN + TD / 2), TW - 0.5, 0.06, TD - 0.4, F.shade(CONC, 1.14));
-          ctx.plat(-TW / 2, TW / 2, df.out > 0 ? hN : -(hN + TD), df.out > 0 ? hN + TD : -hN, TOP, null);
-        } else {
-          ctx.dbox(df.out * (hN + TD / 2), TOP / 2, 0, TD, TOP, TW, CONC);
-          ctx.dbox(df.out * (hN + TD / 2), TOP - 0.02, 0, TD - 0.4, 0.06, TW - 0.5, F.shade(CONC, 1.14));
-          ctx.plat(df.out > 0 ? hN : -(hN + TD), df.out > 0 ? hN + TD : -hN, -TW / 2, TW / 2, TOP, null);
-        }
-        // the apron: half the rise, with a ramp, so a sprinting player never
-        // samples the seam between two slabs
-        const AD = clamp(TD * 0.55, 0.6, 1.4);
-        const o0 = hN + TD, o1 = hN + TD + AD;
-        const AW = TW - 0.8;
-        if (df.horiz) {
-          ctx.dbox(0, TOP / 4, df.out * (o0 + AD / 2), AW, TOP / 2, AD, F.shade(CONC, 0.92));
-          const za = df.out * o0, zb = df.out * o1;
-          ctx.plat(-AW / 2, AW / 2, Math.min(za, zb), Math.max(za, zb), TOP / 2,
-            { z0: ctx.oz + zb, z1: ctx.oz + za, y0: 0, y1: TOP / 2 });
-        } else {
-          ctx.dbox(df.out * (o0 + AD / 2), TOP / 4, 0, AD, TOP / 2, AW, F.shade(CONC, 0.92));
-          const xa = df.out * o0, xb = df.out * o1;
-          ctx.plat(Math.min(xa, xb), Math.max(xa, xb), -AW / 2, AW / 2, TOP / 2,
-            { axis: "x", x0: ctx.ox + xb, x1: ctx.ox + xa, y0: 0, y1: TOP / 2 });
-        }
+        outSlab(df, 0, TW, 0, TD, TOP, CONC, null);
+        F.box(ctx, df, 0, TOP - 0.02, TW - 0.5, 0.06, TD - 0.4, F.shade(CONC, 1.14), 0.2);
+        outSlab(df, 0, TW - 0.8, TD, TD + AD, TOP / 2, F.shade(CONC, 0.92), true);
         // THE DOOR. The accent lives on VERTICALS only: two jambs and one tall
         // panel beside the opening. There is deliberately no lintel over the
         // door — between the ground storey's header zone and F.entrance's head
@@ -658,15 +639,12 @@
               0.15, 0.15, SP + 0.14, F.shade(ACCENT, 1.35), 0);
           }
         }
-        // a planter box on the terrace, low, stone, one more horizontal line
-        const plW = clamp(TW * 0.24, 0.7, 2.2);
+        // a planter box each side on the terrace: low, stone, one more line
+        const plW = clamp(TW * 0.24, 0.7, 2.2), plH = clamp(FH * 0.09, 0.22, 0.36);
         const plT = (e.gap / 2 + TW / 2) / 2;
-        for (const sg of [-1, 1]) {
-          if (TW / 2 - e.gap / 2 < plW + 0.4) continue;
-          F.box(ctx, df, sg * plT, TOP + clamp(FH * 0.09, 0.22, 0.36) / 2 + 0.02, plW,
-            clamp(FH * 0.09, 0.22, 0.36), TD * 0.55, STONE, 0.10);
-          F.box(ctx, df, sg * plT, TOP + clamp(FH * 0.09, 0.22, 0.36) + 0.04, plW + 0.14,
-            0.09, TD * 0.55 + 0.12, STONE_L, 0.05);
+        if (TW / 2 - e.gap / 2 >= plW + 0.4) for (const sg of [-1, 1]) {
+          F.box(ctx, df, sg * plT, TOP + plH / 2 + 0.02, plW, plH, TD * 0.55, STONE, 0.10);
+          F.box(ctx, df, sg * plT, TOP + plH + 0.04, plW + 0.14, 0.09, TD * 0.55 + 0.12, STONE_L, 0.05);
         }
       }
     },
