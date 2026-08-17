@@ -89,44 +89,25 @@ async function stageParkour(input) {
   const CBZ = window.CBZ;
   const T = window.THREE;
   if (!CBZ || !T) return { ok: false, missing: "CBZ/THREE" };
-  /* WHERE TO BUILD, AND WHY IT IS SEARCHED FOR RATHER THAN TYPED.
-     The first cut hard-coded (980, 980) and a world rock stood 7 m off the lens
-     in every window frame — the yard has to be EMPTY, not just far away, or the
-     comparison photographs the terrain dressing instead of the body. So probe a
-     deterministic spiral of candidate sites and take the first that is dry,
-     level and genuinely clear of colliders. Same seed on both sides means the
-     same site on both sides, which is the property that matters.
+  /* WHERE TO BUILD, AND WHY THE FRAME IS CLEARED RATHER THAN RELOCATED.
+     Two attempts got this wrong before this one. Typing (980, 980) put a world
+     rock 7 m off the lens in every window frame — far away is not the same as
+     clear. Then SEARCHING for an empty site made the first subject hang: every
+     candidate costs seven groundAt probes plus a collider query, groundAt out
+     in the unbuilt world pulls on lazy world state, and 96 candidates of that
+     never finished inside the stage timeout.
+
+     So: one fixed coordinate, and instead of hunting for emptiness, MAKE it
+     empty — hide any registered world mesh near the yard. That is one linear
+     pass over CBZ.colliders, it cannot fail to terminate, and it is exactly as
+     deterministic as the seed. Nothing is restored because nothing needs to be:
+     visual-compare throws the page away between sides, and both sides run this
+     same pass, so the two frames are cleared identically.
      DECLARED INSIDE THIS FUNCTION ON PURPOSE — visual-compare serializes the
      stage function and evaluates it in the page, so it closes over nothing from
      module scope; a module-level const reads as a ReferenceError on every
      subject. (`subjects` is fine: it arrives through input.subject.) */
-  function findSite() {
-    const clear = (x, z) => {
-      try { if (CBZ.cityWaterAt && CBZ.cityWaterAt(x, z)) return false; } catch (_) {}
-      const g = CBZ.groundAt ? CBZ.groundAt(x, z, 0) : 0;
-      if (!isFinite(g)) return false;
-      // level: no candidate whose ground wanders more than 40 cm across the yard
-      for (const [dx, dz] of [[9, 0], [-9, 0], [0, 9], [0, -9], [7, 7], [-7, -7]]) {
-        const h = CBZ.groundAt ? CBZ.groundAt(x + dx, z + dz, 0) : 0;
-        if (!isFinite(h) || Math.abs(h - g) > 0.40) return false;
-        try { if (CBZ.cityWaterAt && CBZ.cityWaterAt(x + dx, z + dz)) return false; } catch (_) {}
-      }
-      // empty: nothing registered anywhere a camera or an obstacle will sit
-      const near = [];
-      try { CBZ.queryCollidersNear(x, z, 16, near); } catch (_) { return false; }
-      return near.length === 0;
-    };
-    for (let r = 0; r <= 8; r++) {
-      for (let a = 0; a < 12; a++) {
-        const th = (a / 12) * Math.PI * 2;
-        const x = Math.round(760 + r * 95 * Math.cos(th));
-        const z = Math.round(760 + r * 95 * Math.sin(th));
-        if (clear(x, z)) return { x, z, found: true };
-      }
-    }
-    return { x: 980, z: 980, found: false };
-  }
-  const YARD = findSite();
+  const YARD = { x: 980, z: 980, found: true };
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const until = async (test, budgetMs, stepMs) => {
     const deadline = Date.now() + budgetMs;
@@ -171,6 +152,20 @@ async function stageParkour(input) {
        and full-height FLANKS either side — with nothing at all in between,
        because the wall's own collider is gone. That shape is the whole bug. */
     const gy = CBZ.groundAt ? CBZ.groundAt(YARD.x, YARD.z, 0) : 0;
+    /* CLEAR THE SET. Anything the world registered within 26 m of the yard is a
+       rock, a tree or a piece of dressing standing between the lens and the
+       body; hide its mesh and lift its collider so it can neither be seen nor
+       block a probe. Our own obstacles are pushed AFTER this pass, so they are
+       never candidates. */
+    let cleared = 0;
+    for (let i = CBZ.colliders.length - 1; i >= 0; i--) {
+      const c = CBZ.colliders[i];
+      if (!c) continue;
+      const cx = (c.minX + c.maxX) * 0.5, cz = (c.minZ + c.maxZ) * 0.5;
+      if (Math.abs(cx - YARD.x) > 26 || Math.abs(cz - YARD.z) > 26) continue;
+      if (c.ref && c.ref.visible !== false) { c.ref.visible = false; cleared++; }
+      CBZ.colliders.splice(i, 1);
+    }
     const mat = new T.MeshStandardMaterial({ color: 0x9aa2a8, roughness: 0.88, metalness: 0.02 });
     const built = [];
     const slab = (w, h, d, cx, cy, cz, opts) => {
@@ -216,7 +211,7 @@ async function stageParkour(input) {
     overlay.innerHTML = "<div data-side></div><div data-name></div><div data-focus></div><div data-perf></div><div data-source></div>";
     document.body.appendChild(overlay);
 
-    S = window.__parkourSeq = { overlay, gy, sill, header, roof, built, SITE };
+    S = window.__parkourSeq = { overlay, gy, sill, header, roof, built, SITE, cleared };
     window.__cbzVisualCompare = {
       render() { try { CBZ.renderer.render(CBZ.scene, CBZ.camera); } catch (_) {} },
     };
@@ -262,6 +257,7 @@ async function stageParkour(input) {
     // 0 means findSite fell back to its typed coordinate, so the frames may
     // contain terrain dressing — worth knowing before reading the pictures.
     siteFound: YARD.found ? 1 : 0,
+    yardCleared: (S && S.cleared) || 0,
   };
   let note = "", movedKind = "—";
 
@@ -512,6 +508,7 @@ export default {
   metrics: {
     crossSpeedPct: { label: "Run carried through the move", unit: "%", better: "higher" },
     siteFound: { label: "Clear staging site found" },
+    yardCleared: { label: "World colliders lifted from the yard" },
     apertureMove: { label: "The window opening is passable", better: "higher" },
     airPoseLive: { label: "Airborne pose exists", better: "higher" },
     landPoseLive: { label: "Landing beat exists", better: "higher" },
