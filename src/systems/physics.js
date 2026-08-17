@@ -933,7 +933,13 @@
       const ease = hermite01(u, s.tangent != null ? s.tangent : 1);
       out.x = s.startX + (s.endX - s.startX) * ease;
       out.z = s.startZ + (s.endZ - s.startZ) * ease;
-      const inU = s.faceInU, outU = s.faceOutU;
+      /* Defaulted rather than trusted. buildTraversal always sets both of these
+         for a `through` state, but the failure mode if it ever did not is
+         `u - undefined` = NaN written straight into the actor's position — a
+         body that vanishes to nowhere and takes the camera with it. A wrong
+         pin height is a cosmetic bug; a NaN root is not recoverable. */
+      const inU = s.faceInU != null ? s.faceInU : 0.30;
+      const outU = s.faceOutU != null ? s.faceOutU : 0.70;
       if (u <= inU) {
         // approach: lift the feet from the floor to the sill line
         const q = smooth01(inU > 1e-4 ? u / inU : 1);
