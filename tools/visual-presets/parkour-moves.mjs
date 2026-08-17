@@ -6,8 +6,8 @@
    what I look like in air, etc etc, and improving the current vault that looks
    glitchy." — the owner, 2026-08-17.
 
-   Six frames, one per claim, and every one of them is a pose the shipped build
-   cannot draw:
+   Seven frames, one per claim, and every one of them is a pose the shipped
+   build cannot draw:
 
      the aperture      a wall with a hole in it. BEFORE the probe refuses every
                        opening in the game (measured: sill 0.90 m / aperture
@@ -32,11 +32,15 @@
    STAGING. The obstacles are BUILT BY THIS PRESET, at a fixed coordinate well
    outside the city, on seeded terrain — a sill-plus-header window, a waist
    wall, and a roof block. Nothing here photographs city dressing, so the two
-   sides are pixel-comparable even though the deployed build's lots differ:
-   both sides get the same three boxes, the same camera and the same simulated
-   frame. rAF is stubbed so CBZ.stepSim is the only clock (jail-scene.mjs's
-   rule), and every capability is feature-detected so the older deployed build
-   degrades to "the body just stands there" instead of throwing.
+   sides are pixel-comparable: both get the same boxes, the same camera and the
+   same simulated frame. The before side is this same checkout with
+   `?cfg_PARKOUR_V2=0` (systems/physics.js's one-line revert), so the ONLY
+   difference between the two frames is the change under test — no seed drift,
+   no lot-layout drift. rAF is stubbed so CBZ.stepSim is the only clock
+   (jail-scene.mjs's rule), and every capability is feature-detected, which is
+   both how the flag-off side degrades to "the body just stands there" instead
+   of throwing and what lets `--before https://efoltyn.github.io/gta6/` work
+   against a genuinely older deployed build.
 
    The claim is also a number. `crossSpeedPct` is the slowest horizontal root
    speed reached during the vault as a percentage of the speed the body arrived
@@ -74,15 +78,19 @@ const subjects = [
     cam: { x: -5.6, y: 2.60, z: -8.6, aimX: -0.4, aimY: 2.35, aimZ: -6.4 } },
 ];
 
-/* The test yard's origin: far enough out that no lot, road or biome prop can
-   wander into frame, and identical on both sides because the terrain is
-   seeded. Every obstacle and camera below is expressed as an offset from it. */
-const YARD = { x: 980, z: 980 };
-
 async function stageParkour(input) {
   const CBZ = window.CBZ;
   const T = window.THREE;
   if (!CBZ || !T) return { ok: false, missing: "CBZ/THREE" };
+  /* THE TEST YARD'S ORIGIN: far enough out that no lot, road or biome prop can
+     wander into frame, and identical on both sides because the terrain is
+     seeded. Every obstacle and camera below is an offset from it.
+     DECLARED INSIDE THIS FUNCTION ON PURPOSE — visual-compare serializes the
+     stage function and evaluates it in the page, so it closes over nothing
+     from module scope. A module-level const here reads as
+     "ReferenceError: YARD is not defined" on the first subject and every
+     subject after it. `subjects` is fine because it arrives as input.subject. */
+  const YARD = { x: 980, z: 980 };
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const until = async (test, budgetMs, stepMs) => {
     const deadline = Date.now() + budgetMs;
