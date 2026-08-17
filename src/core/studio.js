@@ -468,15 +468,25 @@
       publishes: ["WILDLIFE_SPECIES", "defineSpecies"],
     },
     beasts: {
-      gives: "animals that WALK and FIGHT without the full city: the shared " +
-             "discovered gait rig (wildlife_rig), the one animal-attack driver " +
-             "creatureFight (lunge, pounce, maul, gore, stomp — windup, strike, " +
-             "recover, flinch), and the land body layer that poses jaws and " +
-             "legs through a strike. The same three files the mainland's " +
-             "wildlife runs on",
+      gives: "animals that WALK, FIGHT and DIE without the full city: the " +
+             "shared discovered gait rig (wildlife_rig), the one animal-attack " +
+             "driver creatureFight (lunge, pounce, maul, gore, stomp — windup, " +
+             "strike, recover, flinch), the land body layer that poses jaws and " +
+             "legs through a strike, and the verlet corpse solver that lays a " +
+             "dead quadruped on its flank with its legs splayed. The same four " +
+             "files the mainland's wildlife runs on",
+      /* THE SOLVER RIDES WITH THE FIGHT, and that is a correction, not a
+         convenience. A pack that can make an animal attack but not die
+         properly is a pack that hands every page it serves the exact death
+         quadruped_ragdoll.js was written to delete — a corpse sat upright with
+         its nose at the sky, because the only fallback left is a canned
+         rotation. games/battle.html was the proof: it loaded `beasts`, ran real
+         animal combat, and had no solver at all. Discovery-driven and
+         self-budgeting, so it costs a page that never kills anything nothing. */
       needs: ["look"],
-      files: ["city/wildlife_rig.js", "city/creature_combat.js", "systems/predator_anim.js"],
-      publishes: ["wildlifeRig", "creatureFight", "faceAnimalHeading"],
+      files: ["city/wildlife_rig.js", "city/creature_combat.js", "systems/predator_anim.js",
+        "systems/quadruped_ragdoll.js"],
+      publishes: ["wildlifeRig", "creatureFight", "faceAnimalHeading", "quadRagdoll"],
     },
 
     // ---- flight and weapons -------------------------------------------------
@@ -514,6 +524,22 @@
       needs: ["look"],
       files: ["systems/fx.js"],
       publishes: ["fx"],
+    },
+    blood: {
+      gives: "what a body does when something opens it: the directional spray, " +
+             "the atomised mist, the ground pool, the wall splat and the drip " +
+             "trail — CBZ.goreImpact and CBZ.gore. Restraint is built in (mist " +
+             "only on a real crunch, a pool only once the skin is genuinely " +
+             "open), so it does not turn every hit into a bloodbath",
+      /* ITS OWN PACK, and it is a fair-weather one on purpose. A page that
+         fights with guns already draws its impacts through gunfx; the file
+         below is what an ANIMAL's jaws need (creature_combat's biteBlood),
+         and 2.5k lines of it should not ride along on a battle of riflemen
+         that will never call it. Callers pull it in when the roster earns it —
+         games/battle.html asks for it exactly when a side is a beast army. */
+      needs: ["fx"],
+      files: ["systems/gore.js"],
+      publishes: ["gore", "goreImpact", "goreAudit"],
     },
     damage: {
       gives: "what ordnance LOOKS like when it lands on anything: fireball, " +
