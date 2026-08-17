@@ -120,6 +120,19 @@ async function stage(input) {
         CBZ.stepSim && document.getElementById("playBtn"), 300000);
     if (!booted) return { ok: false, err: "never booted" };
     if (CBZ.CONFIG) CBZ.CONFIG.CITY_HITMAN_CAMPAIGN = false;
+    /* THE A/B. Both sides are THIS checkout, staged by THIS code, and the only
+       difference is the four one-line revert flags the change ships with. That
+       is a stricter comparison than photographing the deployed build, which
+       cannot be staged the same way — under this preset's staging it never
+       arms the player, so every BEFORE frame came back "held NONE" and the
+       report measured the staging rather than the work. Flags off = the pose
+       and reload behaviour that shipped. */
+    if (CBZ.CONFIG && input.side === "before") {
+      CBZ.CONFIG.CHAR_SUPPORT_HAND_IK = false;
+      CBZ.CONFIG.CHAR_RELOAD_ANIM = false;
+      CBZ.CONFIG.CHAR_SHOULDER_LONGGUN = false;
+      CBZ.CONFIG.NPC_SUPPORT_HAND_IK = false;
+    }
     const playing = await until(() => {
       if (CBZ.game.state === "playing") return true;
       const b = document.getElementById("playBtn");
@@ -398,8 +411,9 @@ export default {
   title: "The Off Hand Holds the Gun — and Reloads It",
   description:
     "The real city boots once per side, the rAF loop is frozen, weapons are acquired through CBZ.unlockWeapon and reloads are pressed through CBZ.fpsReload — then the sim is stepped to the exact frame being photographed. axisGap is centimetres from the player's off hand to the drawn weapon's bore axis (prop origin → its own authored muzzle, geometry both builds have shipped for months): a hand wrapped round a handguard reads ~7-12 cm, a hand posed by a fixed table that never saw this weapon reads whatever it reads. handAbove is the owner's sentence as a signed number — how far the off hand rides ABOVE that axis. travel is centimetres the off hand moves in BODY space over one complete reload, so walking cannot inflate it; a build with no reload animation scores its own breathing.",
-  beforeLabel: "BEFORE · DEPLOYED",
-  afterLabel: "AFTER · LOCAL",
+  defaultBefore: "local",
+  beforeLabel: "BEFORE · FLAGS OFF",
+  afterLabel: "AFTER · FLAGS ON",
   viewport: { width: 1100, height: 680 },
   readyExpression: "window.THREE && window.CBZ && CBZ.CONFIG",
   urlParams: { seed: 90210 },
