@@ -504,12 +504,26 @@
        actually missed, so pistols — whose support anchor is beside their own
        grip — never move. */
     const stock = buttLen(prop);
-    if (resid != null && resid > LANDED && !reloadOwnsTheHand && stock > 0.18 &&
+    if (resid != null && resid > LANDED && !reloadOwnsTheHand &&
         CBZ.CONFIG.CHAR_SHOULDER_LONGGUN !== false && blend > 0.9) {
       shoulderWorld(ch, "l", _sh);
       prop.getWorldQuaternion(_bodyQ);
       _fwd.set(0, 0, -1).applyQuaternion(_bodyQ);          // the barrel's own axis
       shoulderWorld(ch, "r", _rt);                          // the firing shoulder
+      if (stock <= 0.18) {
+        /* NO STOCK TO SHOULDER — a pistol. It was being held at full arm's
+           length out to the firing side, which put its grip 81 cm from the
+           off shoulder: unreachable, for the same shoulder-width reason a
+           rifle's handguard is. The cure is the same and it is also the real
+           stance: both arms come to the CENTRELINE and meet there. Nothing is
+           pulled back, because there is nothing behind the grip to tuck —
+           keep the extension exactly as the aim pose set it and only move it
+           inboard. */
+        ch.sockets.rightHand.updateWorldMatrix(true, false);
+        ch.sockets.rightHand.getWorldPosition(_ext).sub(_rt);   // arm's own reach
+        _rt.lerp(_sh, 0.42).add(_ext);
+        seen.butt = 0;
+      } else {
       /* TOWARD THE CENTRELINE, not into the firing shoulder pocket — because
          on this rig a gun parked in that pocket is unreachable by the other
          hand BY CONSTRUCTION. The logged shoulders sit 1.24 body units apart
@@ -520,10 +534,11 @@
          miss WORSE. So the weapon comes to the chest, which is where a
          third-person rifle reads from anyway, and the fallback below walks
          the hand back along it to whatever it can actually hold. */
-      _rt.lerp(_sh, 0.38);
-      _rt.y -= 0.05;
-      seen.butt = stock;
-      _rt.addScaledVector(_fwd, stock);
+        _rt.lerp(_sh, 0.38);
+        _rt.y -= 0.05;
+        seen.butt = stock;
+        _rt.addScaledVector(_fwd, stock);
+      }
       CBZ.charArmTo.rest(ch, "r", 0);
       CBZ.charArmTo(ch, _rt, "r", blend);
       seen.placed = 1;
@@ -562,6 +577,7 @@
      forearm), and shared with the player's fallback above. */
   const _sh = new THREE.Vector3(), _fwd = new THREE.Vector3();
   const _rt = new THREE.Vector3(), _grip = new THREE.Vector3();
+  const _ext = new THREE.Vector3();
   function landOnWeapon(ch, prop, target, resid, steps, tol) {
     if (resid == null || resid <= tol) return resid;
     prop.updateWorldMatrix(true, false);
