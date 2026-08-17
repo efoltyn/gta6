@@ -503,16 +503,27 @@
        simply ate it (42 cm requested bought 10 cm). Only fires when the hand
        actually missed, so pistols — whose support anchor is beside their own
        grip — never move. */
-    if (resid != null && resid > LANDED && !reloadOwnsTheHand &&
+    const stock = buttLen(prop);
+    if (resid != null && resid > LANDED && !reloadOwnsTheHand && stock > 0.18 &&
         CBZ.CONFIG.CHAR_SHOULDER_LONGGUN !== false && blend > 0.9) {
       shoulderWorld(ch, "l", _sh);
       prop.getWorldQuaternion(_bodyQ);
       _fwd.set(0, 0, -1).applyQuaternion(_bodyQ);          // the barrel's own axis
       shoulderWorld(ch, "r", _rt);                          // the firing shoulder
-      _rt.lerp(_sh, 0.14);                                  // into the pocket
+      /* TOWARD THE CENTRELINE, not into the firing shoulder pocket — because
+         on this rig a gun parked in that pocket is unreachable by the other
+         hand BY CONSTRUCTION. The logged shoulders sit 1.24 body units apart
+         (~0.87 m of world shoulder width) and the arm is 0.63 m: a hand at
+         one shoulder cannot cross to the other, let alone to a handguard
+         0.46 m further down the barrel. Measured proof — parking the stock in
+         the pocket put the grip 87-89 cm from the off shoulder and made the
+         miss WORSE. So the weapon comes to the chest, which is where a
+         third-person rifle reads from anyway, and the fallback below walks
+         the hand back along it to whatever it can actually hold. */
+      _rt.lerp(_sh, 0.38);
       _rt.y -= 0.05;
-      seen.butt = buttLen(prop);
-      _rt.addScaledVector(_fwd, seen.butt);
+      seen.butt = stock;
+      _rt.addScaledVector(_fwd, stock);
       CBZ.charArmTo.rest(ch, "r", 0);
       CBZ.charArmTo(ch, _rt, "r", blend);
       seen.placed = 1;
@@ -530,7 +541,17 @@
        the end of it: walk the anchor along the gun toward the grip until the
        solver says it landed. Bisection on the MEASURED residual, so it needs
        no notion of reach at all, and the hand ends up on the weapon. */
-    if (blend > 0.9) { resid = landOnWeapon(ch, prop, target, resid, 4, LANDED); seen.slid = 1; }
+    // …but NEVER during a reload. The reload owns the hand, and its waypoints
+    // are deliberately OFF the weapon — the belt pouch most of all. Walking
+    // those back onto the gun is not a fallback, it is deleting the animation:
+    // it is what collapsed the sniper's reload to 5 cm of travel while its
+    // siblings moved metres. A hand reaching for the belt and not quite
+    // arriving still reads as a reload; a hand snapped back onto the gun does
+    // not read as anything.
+    if (blend > 0.9 && !reloadOwnsTheHand) {
+      resid = landOnWeapon(ch, prop, target, resid, 4, LANDED);
+      seen.slid = 1;
+    }
     seen.residual = resid;
   }
 
