@@ -27,6 +27,7 @@
     "ba": "node tools/before-after.mjs",
     "visual:beach": "node tools/before-after.mjs beach-shores",
     "visual:compare": "node tools/visual-compare.mjs",
+    "visual:facade-houses": "node tools/visual-compare.mjs --preset facade-houses --no-open --keep-going",
     "visual:wildlife": "node tools/visual-compare.mjs --preset wildlife-attachments --before https://efoltyn.github.io/gta6/",
     "visual:mounted-riders": "node tools/visual-compare.mjs --preset mounted-riders --before https://efoltyn.github.io/gta6/",
     "visual:sea-mounts": "node tools/visual-compare.mjs --preset sea-mounts --before https://efoltyn.github.io/gta6/",
