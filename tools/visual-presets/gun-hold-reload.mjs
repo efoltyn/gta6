@@ -133,52 +133,28 @@ async function stage(input) {
     await wait(700);
     tick(60);
 
-    // A studio mark that is FLAT across the whole body, found the same
-    // deterministic way on both sides (lifted from weapon-holds.mjs, which
-    // learned the hard way that a lot centroid can straddle a slab edge).
-    const lots = (CBZ.city && CBZ.city.arena && CBZ.city.arena.lots) || [];
-    let cx0 = 0, cz0 = 0, n = 0;
-    for (const lot of lots) {
-      const x = Number(lot.x != null ? lot.x : lot.cx);
-      const z = Number(lot.z != null ? lot.z : lot.cz);
-      if (Number.isFinite(x) && Number.isFinite(z)) { cx0 += x; cz0 += z; n++; }
-    }
-    cx0 = n ? cx0 / n : 0; cz0 = n ? cz0 / n : 0;
-    const wet = (x, z) => !!(CBZ.cityWaterAt && CBZ.cityWaterAt(x, z));
-    const RING = [[2, 0], [-2, 0], [0, 2], [0, -2], [1.4, 1.4], [-1.4, 1.4], [1.4, -1.4], [-1.4, -1.4]];
-    let fx = cx0, fz = cz0, best = Infinity;
-    for (let ix = -22; ix <= 22; ix++) {
-      for (let iz = -22; iz <= 22; iz++) {
-        const x = cx0 + ix * 36, z = cz0 + iz * 36;
-        if (wet(x, z)) continue;
-        const h = groundAt(x, z);
-        if (!isFinite(h)) continue;
-        let rough = 0, bad = false;
-        for (const [dx, dz] of RING) {
-          const g = groundAt(x + dx, z + dz);
-          if (!isFinite(g)) { bad = true; break; }
-          rough = Math.max(rough, Math.abs(g - h));
-        }
-        if (bad) continue;
-        const near = (Math.abs(ix) + Math.abs(iz)) * 1e-4;
-        if (rough + near < best) { best = rough + near; fx = x; fz = z; }
-      }
-    }
-
+    // NO STUDIO TELEPORT. weapon-holds.mjs needs one because a prone body plus
+    // its gun occupies three metres of ground and the slope under it IS the
+    // subject. Here the subject is two hands, the player is standing, and
+    // moving them was the one staging difference between this preset and
+    // tools/gunhands-check.mjs — which arms the player reliably. Round two of
+    // this preset captioned every single frame "held NONE" because of it.
+    // Shoot the player where the game put them.
     const overlay = document.createElement("div");
     overlay.id = "__ghOverlay";
     overlay.style.cssText = "position:fixed;inset:0;pointer-events:none;color:#f4f8fb;text-shadow:0 2px 9px #000;z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif";
     overlay.innerHTML = "<div data-side></div><div data-name></div><div data-focus></div><div data-num></div><div data-diag></div><div data-source></div>";
     document.body.appendChild(overlay);
 
-    S = window.__ghSeq = { gx: fx, gz: fz, overlay };
+    S = window.__ghSeq = { overlay };
     window.__cbzVisualCompare = {
       render() { try { CBZ.renderer.render(CBZ.scene, CBZ.camera); } catch (_) {} },
     };
   }
 
   const sub = input.subject;
-  const px = S.gx, pz = S.gz;
+  const px = CBZ.player ? CBZ.player.pos.x : 0;
+  const pz = CBZ.player ? CBZ.player.pos.z : 0;
   const py = groundAt(px, pz);
   const yaw = 0;                               // +Z is the rig's facing
 
@@ -186,7 +162,6 @@ async function stage(input) {
   if (CBZ.cam) { CBZ.cam.yaw = yaw - Math.PI; CBZ.cam.pitch = 0; }
   if (CBZ.player) {
     CBZ.player.driving = false; CBZ.player._swim = false; CBZ.player.dead = false;
-    CBZ.player.pos.set(px, py + 0.08, pz);
     CBZ.player.vy = 0; CBZ.player.grounded = true; CBZ.player.hp = 100;
   }
   if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.rotation.y = yaw;
@@ -211,12 +186,15 @@ async function stage(input) {
   if (CBZ.fpsAddAmmo) { try { CBZ.fpsAddAmmo(400); } catch (_) {} }
   if (CBZ.fpsSetActive && CBZ.fps && CBZ.fps.active) CBZ.fpsSetActive(false);
   if (CBZ.fpsSetAim) CBZ.fpsSetAim(sub.aim === false ? false : true);
-  // settle: the body-yaw ease is ~0.3 s and the arm damps another ~0.3 s
-  for (let i = 0; i < 10; i++) {
+  // Settle, and WAIT FOR THE GUN rather than stepping a fixed count: a
+  // gun-to-gun switch runs holsterprops' stow transfer first (~0.9 s) with the
+  // incoming prop deliberately hidden, and first person hides it outright.
+  for (let i = 0; i < 30; i++) {
     if (CBZ.player) { CBZ.player.pos.x = px; CBZ.player.pos.z = pz; }
     if (CBZ.cam) { CBZ.cam.yaw = yaw - Math.PI; CBZ.cam.pitch = 0; }
     if (CBZ.fpsSetActive && CBZ.fps && CBZ.fps.active) CBZ.fpsSetActive(false);
     tick(8);
+    if (i >= 8 && drawnProp()) break;
   }
 
   const ch = CBZ.playerChar;
@@ -225,12 +203,18 @@ async function stage(input) {
   ch.group.updateMatrixWorld(true);
 
   // ---- find the drawn hand weapon, the same way on either build ----------
+  // Reads CBZ.playerChar directly rather than closing over the `ch` const
+  // below — the settle loop above calls this while that binding is still in
+  // its temporal dead zone.
   function drawnProp() {
+    const c = CBZ.playerChar;
+    if (!c || !c.sockets) return null;
     if (CBZ.tpHandWeapon) { const p = CBZ.tpHandWeapon(); if (p) return p; }
-    const socket = ch.sockets.thirdPersonWeapon || ch.sockets.weapon;
+    const socket = c.sockets.thirdPersonWeapon || c.sockets.weapon;
     if (!socket) return null;
-    for (const c of socket.children) {
-      if (c.visible && c.userData && c.userData.weaponId && c.children && c.children.length) return c;
+    for (const kid of socket.children) {
+      if (kid.visible && kid.userData && kid.userData.weaponId &&
+          kid.children && kid.children.length) return kid;
     }
     return null;
   }
@@ -335,15 +319,15 @@ async function stage(input) {
   // distance has not been fixed. The tripod STANDS BACK (weapon-holds.mjs's
   // proven 5 m / 3.6 m marks — close-in tripods end up inside street props)
   // and the crop comes from the lens instead.
-  camera.fov = 19;
+  camera.fov = 27;
   aim.copy(base).addScaledVector(fwd, 0.26);
   aim.y = floorY + 1.22;
   if (sub.view === "quarter") {
-    eye.copy(base).addScaledVector(right, 2.9).addScaledVector(fwd, 4.1);
-    eye.y = floorY + 1.52;
+    eye.copy(base).addScaledVector(right, 2.2).addScaledVector(fwd, 3.1);
+    eye.y = floorY + 1.50;
   } else {
-    eye.copy(base).addScaledVector(right, 5.0).addScaledVector(fwd, 0.35);
-    eye.y = floorY + 1.36;
+    eye.copy(base).addScaledVector(right, 3.8).addScaledVector(fwd, 0.30);
+    eye.y = floorY + 1.34;
   }
   camera.position.copy(eye);
   camera.lookAt(aim);
