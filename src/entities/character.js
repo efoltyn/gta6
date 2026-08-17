@@ -2016,7 +2016,83 @@
       ch.body.position.z = damp(ch.body.position.z, 0, sr, dt);
       ch.body.rotation.y = damp(ch.body.rotation.y, 0, sr, dt);
 
-      if (tp.kind === "mantle") {
+      if (tp.kind === "through") {
+        /* ---- THREADING AN APERTURE (physics.js kind "through") -------------
+           The trajectory has already pinned the root inside the hole. What the
+           pose has to explain is that the body CHOSE a shape small enough to
+           fit — because that is the whole difference between this and a vault,
+           and the reason the owner could see that the old move was wrong: a
+           man does not go through a window in the shape he walks in.
+
+           Two silhouettes, and they are not the same move at two sizes:
+
+           "dive"  arms spear FORWARD, chest pitches down toward horizontal,
+                   legs trail and snap through last. Superman through the
+                   frame. The pitch is the pose — everything else follows it.
+           "step"  upright but compressed: one thigh drives high to clear the
+                   sill, the head ducks under the header, a hand rides the
+                   frame for balance. A tall doorway with a knee-high lip.
+
+           Beats: 0..0.24 gather (the commitment), 0.24..0.72 pass (the shape
+           is held — this is the stretch physics has pinned to the aperture, so
+           it must not be animating through it), 0.72..1 emerge and reach for
+           the floor. */
+        const dive = tp.gapStyle !== "step";
+        const gather = smoother01(u / 0.24);
+        const emerge = smoother01((u - 0.68) / 0.32);
+        // held through the middle: full commitment, then unwound on the way out
+        const shape = Math.max(0, gather - emerge);
+        if (dive) {
+          // Pitch toward horizontal. Positive rotation.x is nose-down toward
+          // the direction of travel, which is where the hands already are.
+          ch.body.position.y = damp(ch.body.position.y, -0.30 * shape, sr, dt);
+          ch.body.rotation.x = damp(ch.body.rotation.x, 1.02 * shape - 0.30 * emerge, sr, dt);
+          ch.body.rotation.z = damp(ch.body.rotation.z, 0.10 * shape, sr, dt);
+          // Both arms spear ahead of the head, elbows nearly locked — the arms
+          // are the leading edge of the body's cross-section, not a balance aid.
+          limb(ch.parts.la, -0.30 - 2.30 * shape, 0.06, -0.14 - 0.10 * shape, 0.18 * shape);
+          limb(ch.parts.ra, -0.30 - 2.30 * shape, -0.06, 0.14 + 0.10 * shape, 0.18 * shape);
+          setElbow(J.la, -0.10 - 0.10 * shape, sr);
+          setElbow(J.ra, -0.10 - 0.10 * shape, sr);
+          // Legs trail straight behind, then whip through as the hips clear.
+          const trail = Math.max(0, shape - emerge * 0.4);
+          const snap = smoother01((u - 0.74) / 0.26);
+          limb(ch.parts.ll, 0.60 * trail - 1.30 * snap, 0, 0.07, 0);
+          limb(ch.parts.rl, 0.52 * trail - 1.10 * snap, 0, -0.07, 0);
+          setKnee(J.ll, 0.16 + 0.34 * trail + 1.05 * snap, sr);
+          setKnee(J.rl, 0.20 + 0.42 * trail + 0.88 * snap, sr);
+          if (ch.neck) {
+            // Chin tucks going in (protect the head, see the landing), lifts on
+            // the way out to find the floor.
+            ch.neck.rotation.x = damp(ch.neck.rotation.x, 0.30 * shape - 0.46 * emerge, sr, dt);
+            ch.neck.rotation.z = damp(ch.neck.rotation.z, 0, sr, dt);
+          }
+        } else {
+          ch.body.position.y = damp(ch.body.position.y, -0.20 * shape, sr, dt);
+          ch.body.rotation.x = damp(ch.body.rotation.x, 0.44 * shape, sr, dt);
+          ch.body.rotation.z = damp(ch.body.rotation.z, -0.12 * shape, sr, dt);
+          // Lead hand on the frame, trailing arm tucked in past the jamb.
+          limb(ch.parts.la, -0.34 - 1.30 * shape, 0.20, -0.44 * shape, 0.14 * shape);
+          limb(ch.parts.ra, -0.22 - 0.44 * shape, -0.14, 0.30 * shape, 0.04);
+          setElbow(J.la, -0.30 - 0.44 * shape, sr);
+          setElbow(J.ra, -0.44 - 0.30 * shape, sr);
+          // Lead thigh drives high over the sill; the trail leg follows late.
+          const follow = smoother01((u - 0.52) / 0.34);
+          limb(ch.parts.ll, -0.16 - 1.46 * shape + 1.10 * follow, 0, 0.10, 0);
+          limb(ch.parts.rl, -0.12 - 0.42 * shape - 0.86 * follow, 0, -0.10, 0);
+          setKnee(J.ll, 0.10 + 1.52 * shape - 1.00 * follow, sr);
+          setKnee(J.rl, 0.10 + 0.34 * shape + 1.18 * follow, sr);
+          if (ch.neck) {
+            ch.neck.rotation.x = damp(ch.neck.rotation.x, 0.34 * shape, sr, dt);   // duck under the header
+            ch.neck.rotation.z = damp(ch.neck.rotation.z, 0, sr, dt);
+          }
+        }
+        if (ch.model) {
+          ch.model.rotation.x = damp(ch.model.rotation.x, 0, sr, dt);
+          ch.model.rotation.y = damp(ch.model.rotation.y, 0, sr, dt);
+          ch.model.rotation.z = damp(ch.model.rotation.z, 0, sr, dt);
+        }
+      } else if (tp.kind === "mantle") {
         // Reach → hang → pull → press-out. The old fixed -2.4rad shoulder target
         // pointed both arms almost vertically above the head. Here `hold`
         // blends into a real two-link solve against physics.js's near ledge.
@@ -2140,18 +2216,236 @@
       lockCharacterHips(ch);
       return;
     }
-    // The model node is normally scale-only. A spy vault temporarily rolls it;
-    // settle all three axes after any natural finish/interruption before gait
-    // takes over. Most frames pay one falsy branch.
+    // The model node is normally scale-only. A spy vault temporarily rolls it
+    // and a landing roll pitches AND offsets it (see the pivot note below);
+    // settle every channel either of them can touch after any natural finish or
+    // interruption, before gait takes over. Most frames pay one falsy branch.
     if (ch._traverseRecover && ch.model) {
-      ch.model.rotation.x = damp(ch.model.rotation.x, 0, 16, dt);
-      ch.model.rotation.y = damp(ch.model.rotation.y, 0, 16, dt);
-      ch.model.rotation.z = damp(ch.model.rotation.z, 0, 16, dt);
-      if (Math.abs(ch.model.rotation.x) + Math.abs(ch.model.rotation.y) +
-          Math.abs(ch.model.rotation.z) < 0.01) {
-        ch.model.rotation.set(0, 0, 0);
+      const m = ch.model;
+      m.rotation.x = damp(m.rotation.x, 0, 16, dt);
+      m.rotation.y = damp(m.rotation.y, 0, 16, dt);
+      m.rotation.z = damp(m.rotation.z, 0, 16, dt);
+      if (!ch._seatSunk) {
+        m.position.y = damp(m.position.y, 0, 16, dt);
+        m.position.z = damp(m.position.z, 0, 16, dt);
+      }
+      if (Math.abs(m.rotation.x) + Math.abs(m.rotation.y) + Math.abs(m.rotation.z) +
+          Math.abs(m.position.y) + Math.abs(m.position.z) < 0.01) {
+        m.rotation.set(0, 0, 0);
+        if (!ch._seatSunk) { m.position.y = 0; m.position.z = 0; }
         ch._traverseRecover = 0;
       }
+    }
+
+    /* ---- THE LANDING (systems/physics.js armLanding) -----------------------
+       OWNER: "real parkour jumping, catching self, LANDING, catching edge".
+
+       Physics hands over a budget — `hard` 0..1 for how much vertical energy
+       arrived, and `roll` for whether the body had the forward line to convert
+       it. This runs the clock itself, the same way `_traverseRecover` does, so
+       no updater has to exist for an NPC that never lands.
+
+       Owns the whole rig like every other full-body pose here, and outranks the
+       air pose below (you have touched down) while yielding to traversePose
+       above (a vault landing that flows straight into another vault should keep
+       vaulting). */
+    if (ch.landPose) {
+      const lp = ch.landPose;
+      lp.t += dt;
+      const q = clamp01(lp.t / (lp.dur || 0.34));
+      if (q >= 1) {
+        ch.landPose = null;
+        /* A COMPLETED REVOLUTION IS VISUALLY ZERO, AND MUST BE STORED AS ZERO.
+           The roll finishes at rotation.x = 2π; handing that to the recovery
+           damp would spend the next quarter-second numerically unwinding a
+           full turn the body has already made — the rig would rotate BACKWARDS
+           through 360° after landing. clearTraversalPose learned this from the
+           spy vault; the same rule applies here, plus the pivot offset, which
+           returns to zero on its own at 2π and is only assigned explicitly for
+           the same reason. */
+        if (ch.model) {
+          ch.model.rotation.set(0, 0, 0);
+          if (!ch._seatSunk) { ch.model.position.y = 0; ch.model.position.z = 0; }
+        }
+        ch._stanceNk = 1;                        // let the neck recover into gait
+      } else {
+        const sr = 20;
+        const limb = (part, x, y, z, pz) => {
+          if (!part) return;
+          part.rotation.x = damp(part.rotation.x, x, sr, dt);
+          part.rotation.y = damp(part.rotation.y, y || 0, sr, dt);
+          part.rotation.z = damp(part.rotation.z, z || 0, sr, dt);
+          part.position.z = damp(part.position.z, pz || 0, sr, dt);
+          part.scale.y = damp(part.scale.y, 1, sr, dt);
+        };
+        ch.body.position.z = damp(ch.body.position.z, 0, sr, dt);
+        ch.body.rotation.y = damp(ch.body.rotation.y, 0, sr, dt);
+        if (lp.roll) {
+          /* A FORWARD ROLL AROUND A PIVOT THE RIG DOES NOT HAVE.
+             `model`'s origin sits at the FEET (makeCharacter stacks the legs up
+             from y=0), so pitching it through 2π would swing the head a full
+             body-length UNDER the floor. A roll pivots at the body's centre, so
+             synthesize that pivot: rotating about a point P is the rotation plus
+             the translation P - R·P, which for P = (0,h,0) about local X is
+             exactly (0, h - h·cosθ, -h·sinθ). h is the radius of a tucked
+             adult ball, so the body rolls over the ground instead of through it,
+             and both compensation terms return to zero at θ = 2π on their own.
+             (The shipped spy-spin gets away with a feet pivot because its root
+             is already lifted over an obstacle; a landing's is not.) */
+          const spin = 1 - Math.pow(1 - q, 2.2);   // arrives with angular momentum, loses it
+          const theta = Math.PI * 2 * spin;
+          const h = 0.52;
+          if (ch.model) {
+            ch.model.rotation.x = theta;
+            ch.model.rotation.y = 0;
+            ch.model.rotation.z = 0;
+            if (!ch._seatSunk) {
+              ch.model.position.y = h - h * Math.cos(theta);
+              ch.model.position.z = -h * Math.sin(theta);
+            }
+          }
+          // Inside the roll the body is a BALL: knees to chest, arms wrapped
+          // in, chin tucked to the sternum. Anything extended would be the
+          // limb that catches the ground and stops the rotation dead.
+          const ball = Math.sin(Math.PI * clamp01((q - 0.04) / 0.86));
+          ch.body.position.y = damp(ch.body.position.y, -0.34 * ball, sr, dt);
+          ch.body.rotation.x = damp(ch.body.rotation.x, 0.52 * ball, sr, dt);
+          ch.body.rotation.z = damp(ch.body.rotation.z, 0.10 * ball, sr, dt);
+          limb(ch.parts.la, -0.52 - 0.90 * ball, 0.22, -0.50 * ball, 0.12 * ball);
+          limb(ch.parts.ra, -0.52 - 0.90 * ball, -0.22, 0.50 * ball, 0.12 * ball);
+          setElbow(J.la, -1.32 * ball - 0.20, sr);
+          setElbow(J.ra, -1.32 * ball - 0.20, sr);
+          limb(ch.parts.ll, -0.20 - 1.62 * ball, 0, 0.12, 0);
+          limb(ch.parts.rl, -0.16 - 1.50 * ball, 0, -0.12, 0);
+          setKnee(J.ll, 0.10 + 1.86 * ball, sr);
+          setKnee(J.rl, 0.10 + 1.74 * ball, sr);
+          if (ch.neck) {
+            ch.neck.rotation.x = damp(ch.neck.rotation.x, 0.52 * ball, sr, dt);
+            ch.neck.rotation.z = damp(ch.neck.rotation.z, 0, sr, dt);
+          }
+        } else {
+          /* ABSORB. One compression and one recovery — the knees and hips do
+             the work, the arms come out and forward for balance, and the depth
+             is the ENERGY, so a hop barely registers and a two-storey drop
+             puts a hand near the floor. */
+          const dip = Math.sin(Math.PI * clamp01(q / 0.92));
+          const load = dip * (0.34 + 0.66 * lp.hard);
+          ch.body.position.y = damp(ch.body.position.y, -0.46 * load, sr, dt);
+          ch.body.rotation.x = damp(ch.body.rotation.x, 0.40 * load, sr, dt);
+          ch.body.rotation.z = damp(ch.body.rotation.z, 0.05 * load, sr, dt);
+          // Arms swing forward-out as a counterweight to the falling hips.
+          limb(ch.parts.la, -0.20 - 0.96 * load, 0.10, -0.34 - 0.30 * load, 0.10 * load);
+          limb(ch.parts.ra, -0.20 - 0.96 * load, -0.10, 0.34 + 0.30 * load, 0.10 * load);
+          setElbow(J.la, -0.30 - 0.44 * load, sr);
+          setElbow(J.ra, -0.30 - 0.44 * load, sr);
+          // Thighs fold and the shins stay under the mass — a deep landing is a
+          // squat, not a kneel, so the knee leads the hip.
+          limb(ch.parts.ll, -0.14 - 0.92 * load, 0, 0.10, 0);
+          limb(ch.parts.rl, -0.12 - 0.86 * load, 0, -0.10, 0);
+          setKnee(J.ll, 0.08 + 1.62 * load, sr);
+          setKnee(J.rl, 0.08 + 1.54 * load, sr);
+          if (ch.neck) {
+            ch.neck.rotation.x = damp(ch.neck.rotation.x, -0.10 * load, sr, dt);
+            ch.neck.rotation.z = damp(ch.neck.rotation.z, 0, sr, dt);
+          }
+        }
+        ch.bob = ch.body.position.y;
+        ch.lean = ch.body.rotation.x;
+        ch.sway = ch.body.rotation.z;
+        ch._stanceNk = 1;
+        lockCharacterHips(ch);
+        return;
+      }
+    }
+
+    /* ---- WHAT A BODY LOOKS LIKE IN THE AIR --------------------------------
+       OWNER: "…what I look like in air, etc etc."
+
+       There was no answer to that. animChar's only altitude-aware line in the
+       whole file was the parachute canopy: an ordinary jump kept the walk cycle
+       running, so a body crossing a rooftop gap strode through the air on
+       nothing and landed mid-stride. Every full-body state here is a flag on
+       the rig, and systems/physics.js publishes this one the same way.
+
+       Three beats read off the actual velocity, not off a timer, so the pose is
+       always telling the truth about what the body is doing:
+
+         RISE   drive: hips extended from the push-off, arms thrown up and
+                forward, trailing knee folding up under the body.
+         APEX   the shape people recognise from a photograph — legs split, one
+                knee high, arms wide, chest tall.
+         FALL   prepare: both legs reach down and slightly forward to find the
+                ground, knees soft and ready to fold, arms out and a little
+                back, eyes down.
+
+       Deliberately below traversePose and landPose (both of those own their
+       own airborne stretch and must win) and above the stance poses, which
+       cannot be true while the feet are off the ground. */
+    /* …and it yields to every pose that OWNS the body for a different reason.
+       updatePlayer returns early on a knockdown, a swim and a flown aircraft
+       without ever reaching the branch that clears this flag, so a body that
+       left the ground and then got dropped could otherwise carry a stale air
+       pose over the top of its own KO. Cheapest correct guard: the states that
+       cannot be true in mid-air are the states that outrank being in mid-air. */
+    if (ch.airPose && !ch.pronePose && !ch.slidePose && !ch.sitting && !ch.cuffed) {
+      const air = ch.airPose;
+      const rise = clamp01(air.rise || 0);
+      const fall = clamp01(air.fall || 0);
+      const apex = clamp01(1 - rise - fall);
+      // Ease IN over the first fraction of a second so leaving the ground is a
+      // push-off and not a snap into a new pose. Nothing eases out: the pose is
+      // replaced wholesale by landPose the frame the feet touch.
+      const enter = smooth01((air.t || 0) / 0.16);
+      const sr = 12;
+      const limb = (part, x, y, z, pz) => {
+        if (!part) return;
+        part.rotation.x = damp(part.rotation.x, x, sr, dt);
+        part.rotation.y = damp(part.rotation.y, y || 0, sr, dt);
+        part.rotation.z = damp(part.rotation.z, z || 0, sr, dt);
+        part.position.z = damp(part.position.z, pz || 0, sr, dt);
+        part.scale.y = damp(part.scale.y, 1, sr, dt);
+      };
+      const g = enter;                                   // gate every amplitude
+      ch.body.position.z = damp(ch.body.position.z, 0, sr, dt);
+      ch.body.rotation.y = damp(ch.body.rotation.y, 0, sr, dt);
+      ch.body.position.y = damp(ch.body.position.y, g * (0.05 * rise - 0.04 * fall), sr, dt);
+      // Lean into a rise, stand tall at apex, tip a touch back reaching for the
+      // floor on the way down.
+      ch.body.rotation.x = damp(ch.body.rotation.x, g * (0.22 * rise + 0.06 * apex - 0.14 * fall), sr, dt);
+      ch.body.rotation.z = damp(ch.body.rotation.z, g * 0.06 * apex, sr, dt);
+      // ARMS. Up-and-forward through the drive, wide at apex, out-and-back on
+      // the descent. The asymmetry is small but it is what stops a jump reading
+      // as a rigid T-pose translated upward.
+      const armX = -0.24 - g * (1.32 * rise + 0.62 * apex + 0.16 * fall);
+      limb(ch.parts.la, armX, 0.08, -0.20 - g * (0.34 * apex + 0.46 * fall), g * 0.10 * rise);
+      limb(ch.parts.ra, armX + g * 0.16 * apex, -0.08, 0.20 + g * (0.40 * apex + 0.46 * fall), g * 0.10 * rise);
+      setElbow(J.la, -0.24 - g * (0.34 * rise + 0.20 * apex), sr);
+      setElbow(J.ra, -0.30 - g * (0.26 * rise + 0.24 * apex), sr);
+      // LEGS. A tuck that unfolds into a reach: the lead leg extends down first
+      // and the trail knee stays folded longest, which is what makes a landing
+      // look prepared rather than dropped.
+      const tuck = g * (0.86 * rise + 0.54 * apex);
+      const reach = g * fall;
+      limb(ch.parts.ll, -0.10 - tuck * 1.05 + reach * 0.34, 0, 0.10, 0);
+      limb(ch.parts.rl, -0.08 - tuck * 0.58 + reach * 0.10, 0, -0.10, 0);
+      setKnee(J.ll, 0.10 + tuck * 1.20 - reach * 0.06 + 0.14 * reach, sr);
+      setKnee(J.rl, 0.10 + tuck * 0.72 + reach * 0.40, sr);
+      if (ch.model) {
+        ch.model.rotation.x = damp(ch.model.rotation.x, 0, sr, dt);
+        ch.model.rotation.y = damp(ch.model.rotation.y, 0, sr, dt);
+        ch.model.rotation.z = damp(ch.model.rotation.z, 0, sr, dt);
+      }
+      if (ch.neck) {
+        // Chin up on the way up, down to find the ground on the way down.
+        ch.neck.rotation.x = damp(ch.neck.rotation.x, g * (-0.14 * rise + 0.26 * fall), sr, dt);
+        ch.neck.rotation.z = damp(ch.neck.rotation.z, 0, sr, dt);
+      }
+      ch.bob = ch.body.position.y;
+      ch.lean = ch.body.rotation.x;
+      ch.sway = ch.body.rotation.z;
+      ch._stanceNk = 1;
+      lockCharacterHips(ch);
+      return;
     }
 
     // ---- STANCE POSES (physics.js stance machine sets slidePose/pronePose
