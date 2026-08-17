@@ -149,11 +149,23 @@ const PROBE = `(() => {
       CBZ.unlockWeapon(gid, { select: true });
       if (CBZ.fpsSelectWeaponId) CBZ.fpsSelectWeaponId(gid);
       if (CBZ.fpsAddAmmo) CBZ.fpsAddAmmo(400);
+      // THIRD PERSON IS THE SUBJECT, and selecting a weapon can drop the game
+      // into first person — where holsterprops deliberately hides the hand gun.
+      // Forcing it once before the loop is why every weapon after the first
+      // photographed an empty socket. Force it per weapon, and park the chase
+      // camera so the follow logic does not flip straight back.
+      if (CBZ.fpsSetActive && CBZ.fps && CBZ.fps.active) CBZ.fpsSetActive(false);
+      if (CBZ.camera && CBZ.player && CBZ.player.pos) {
+        CBZ.camera.position.set(CBZ.player.pos.x, CBZ.player.pos.y + 2.2, CBZ.player.pos.z - 6);
+      }
       // A gun-to-gun switch runs holsterprops' stow TRANSFER first (~0.9 s),
       // during which the incoming prop is deliberately hidden. Wait it out
       // instead of sampling an empty hand.
       let prop = null;
-      for (let w = 0; w < 24 && !prop; w++) { step(10); prop = drawn(); }
+      for (let w = 0; w < 24 && !prop; w++) {
+        if (CBZ.fpsSetActive && CBZ.fps && CBZ.fps.active) CBZ.fpsSetActive(false);
+        step(10); prop = drawn();
+      }
       if (!prop) {
         const sk = ch().sockets.thirdPersonWeapon || ch().sockets.weapon;
         rec.miss = "cur=" + CBZ.currentWeaponId + " fpsW=" + (CBZ.fps && CBZ.fps.weapon) +
@@ -182,6 +194,21 @@ const PROBE = `(() => {
       rec.passes = au ? au.passes : null;
       rec.driven = au ? au.driven : null;
       rec.why = au ? au.why : null;
+      if (prop) {
+        const P = (v) => [+v.x.toFixed(2), +v.y.toFixed(2), +v.z.toFixed(2)].join("/");
+        const bodyL = (w) => { ch().body.updateWorldMatrix(true,false); return ch().body.worldToLocal(w.clone()); };
+        ch().body.updateWorldMatrix(true, false);
+        const lsh = ch().body.localToWorld(ch().parts.la.position.clone());
+        const rsh = ch().body.localToWorld(ch().parts.ra.position.clone());
+        ch().sockets.rightHand.updateWorldMatrix(true, false);
+        const wrist = ch().sockets.rightHand.getWorldPosition(new T.Vector3());
+        prop.updateWorldMatrix(true, false);
+        const grip = prop.localToWorld(new T.Vector3(0,0,0));
+        rec.geom = "Lsh" + P(bodyL(lsh)) + " Rsh" + P(bodyL(rsh)) +
+          " wrist" + P(bodyL(wrist)) + " grip" + P(bodyL(grip)) +
+          " |Rsh-wrist|=" + (rsh.distanceTo(wrist)*100).toFixed(0) +
+          " |Lsh-grip|=" + (lsh.distanceTo(grip)*100).toFixed(0);
+      }
       rec.solve = au && au.reach != null
         ? "reach=" + (au.reach*100).toFixed(0) + " dist=" + (au.dist*100).toFixed(0) +
           " over=" + (au.over*100).toFixed(0) + " butt=" + ((au.butt||0)*100).toFixed(0) +
@@ -269,7 +296,8 @@ for (const g of res.guns) {
     lpad(g.travel, 9) + "  " + pad(g.style, 10) + lpad(g.ammoAfter, 7) + lpad(g.blend, 7) +
     "  " + (g.why || "") +
     (g.solve ? "  [" + g.solve + "]" : "") +
-    (g.err ? "   ERR " + g.err : "") + (g.miss ? "  " + g.miss : ""));
+    (g.err ? "   ERR " + g.err : "") + (g.miss ? "  " + g.miss : "") +
+    (g.geom ? "\n              " + g.geom : ""));
   if (g.err) fails.push(g.id + ": " + g.err);
   if (g.oneHanded) continue;
   // A hand wrapped round a gun is within a fist of its bore. 22 cm is generous
