@@ -64,7 +64,6 @@
   const smooth = (u) => u * u * (3 - 2 * u);
   const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _t = new THREE.Vector3();
   const _tmp = new THREE.Vector3(), _bodyQ = new THREE.Quaternion();
-  const _dbg = new THREE.Vector3();
 
   /* ---- WHERE A WEAPON'S HANDS GO ----------------------------------------
      Authored per weapon in weapons/appearances/*.js. The one prop that can
@@ -471,74 +470,91 @@
        which is exactly the set of guns you shoulder. A pistol's support
        anchor is beside its own grip, so `over` is negative, and nothing
        about sidearms moves. */
+    /* ---- LAND IT ON THE GUN, measured rather than modelled -------------
+       DON'T MODEL THE REACH. Two rounds of this pass tested "is the anchor
+       within span?" against a scalar, and both were wrong by the same
+       0.17 m — the protraction. The solve can push the shoulder FORWARD and
+       only forward, so the reachable set is an ELLIPSOID, and a support hand
+       crossing to the far side of the body is asking almost entirely for its
+       MINOR axis. On this rig that matters more than it sounds: the logged
+       body-space shoulders are 0.62 and -0.62, i.e. 1.24 units apart — about
+       0.87 m of world shoulder width against an 0.63 m arm — so the off hand
+       spends nearly its whole span just crossing the chest.
+
+       So ask instead of predicting. charArmTo returns the metres it actually
+       missed by, so: solve, read, and if the hand did not land, act on that.
+       No reach model can be wrong because there isn't one. */
     const reloadOwnsTheHand = !!reloadSeg;
-    if (CBZ.CONFIG.CHAR_SHOULDER_LONGGUN !== false && !reloadOwnsTheHand) {
-      const reach = armSpan(ch);
+    const LANDED = 0.03;                     // 3 cm — a fist's worth of slop
+    CBZ.charArmTo.rest(ch, "l", 0);
+    let resid = CBZ.charArmTo(ch, target, "l", blend);
+    seen.resid0 = resid;
+    seen.slid = 0; seen.placed = 0;
+
+    /* PUT THE STOCK IN THE SHOULDER. The present-weapon pose holds the firing
+       arm nearly straight, which puts the grip ~0.55 m in front of the chest
+       and the handguard another 0.46 m past that — beyond anything the off
+       arm can touch. A shouldered rifle's geometry is not a matter of
+       opinion: the butt sits in the shoulder pocket and the grip is one
+       buttstock-length forward of it down the barrel, so
+           wrist = pocket + barrelForward x (grip-to-butt length)
+       measured off the weapon's own model. PLACED, not nudged — an earlier
+       pass moved the hand by the shortfall each frame and animChar's damp
+       simply ate it (42 cm requested bought 10 cm). Only fires when the hand
+       actually missed, so pistols — whose support anchor is beside their own
+       grip — never move. */
+    if (resid != null && resid > LANDED && !reloadOwnsTheHand &&
+        CBZ.CONFIG.CHAR_SHOULDER_LONGGUN !== false && blend > 0.9) {
       shoulderWorld(ch, "l", _sh);
-      let over = _sh.distanceTo(target) - reach;
-      seen.reach = reach; seen.dist = _sh.distanceTo(target); seen.over = over;
-      seen.slid = 0;
-      if (over > 0.01) {
-        prop.getWorldQuaternion(_bodyQ);
-        _fwd.set(0, 0, -1).applyQuaternion(_bodyQ);        // the barrel's own axis
-        shoulderWorld(ch, "r", _rt);                        // the firing shoulder
-        // into the pocket: a touch inboard of the joint and just below it
-        _rt.lerp(_sh, 0.14);
-        _rt.y -= 0.05;
-        seen.butt = buttLen(prop);
-        _rt.addScaledVector(_fwd, seen.butt);
-        CBZ.charArmTo.rest(ch, "r", 0);
-        ch.sockets.rightHand.updateWorldMatrix(true, false);
-        seen.rBefore = ch.sockets.rightHand.getWorldPosition(_dbg).distanceTo(_rt);
-        seen.rArm = CBZ.charArmTo(ch, _rt, "r", blend);
-        ch.sockets.rightHand.updateWorldMatrix(true, false);
-        seen.rAfter = ch.sockets.rightHand.getWorldPosition(_dbg).distanceTo(_rt);
-        // The gun rode the wrist back, so its world aim is now stale in both
-        // inputs the lock uses (socket orientation, and the parallax origin).
-        if (CBZ.tpHandWeaponRelock) CBZ.tpHandWeaponRelock();
-        prop.updateWorldMatrix(true, false);
-        target = computeTarget();
-        over = _sh.distanceTo(target) - reach;
-      }
-      seen.over2 = over;
-      if (over > 0.01) { slideToReach(ch, prop, target, reach, _sh); seen.slid = 1; }
+      prop.getWorldQuaternion(_bodyQ);
+      _fwd.set(0, 0, -1).applyQuaternion(_bodyQ);          // the barrel's own axis
+      shoulderWorld(ch, "r", _rt);                          // the firing shoulder
+      _rt.lerp(_sh, 0.14);                                  // into the pocket
+      _rt.y -= 0.05;
+      seen.butt = buttLen(prop);
+      _rt.addScaledVector(_fwd, seen.butt);
+      CBZ.charArmTo.rest(ch, "r", 0);
+      CBZ.charArmTo(ch, _rt, "r", blend);
+      seen.placed = 1;
+      // The gun rode the wrist back, so its world aim is stale in both inputs
+      // the lock uses (socket orientation, and the parallax origin).
+      if (CBZ.tpHandWeaponRelock) CBZ.tpHandWeaponRelock();
+      prop.updateWorldMatrix(true, false);
+      target = computeTarget();
+      resid = CBZ.charArmTo(ch, target, "l", blend);
     }
 
-    CBZ.charArmTo.rest(ch, "l", 0);
-    seen.residual = CBZ.charArmTo(ch, target, "l", blend);
+    /* Still short — a bipod-legged M249, or a rig whose shoulders are simply
+       too far apart for the handguard to be crossable. Then the honest answer
+       is that the hand holds the weapon FURTHER BACK rather than floating off
+       the end of it: walk the anchor along the gun toward the grip until the
+       solver says it landed. Bisection on the MEASURED residual, so it needs
+       no notion of reach at all, and the hand ends up on the weapon. */
+    if (blend > 0.9) { resid = landOnWeapon(ch, prop, target, resid, 4, LANDED); seen.slid = 1; }
+    seen.residual = resid;
   }
 
-  /* Still short — a bipod-legged M249, an NPC whose gun this pass may not
-     move, or a rocket reload that reaches for a muzzle a metre out. Then the
-     honest answer is that the hand holds the weapon FURTHER BACK rather than
-     floating in the air off the end of it: slide the anchor along the gun
-     toward the grip (which is in the other hand, so it is always reachable)
-     until it lands. Bisection, four steps, because the reachable set is an
-     interval — and the hand ends up ON the weapon either way. */
-  function slideToReach(ch, prop, target, reach, shoulder) {
+  /* Walk the off hand back along the weapon until the solver says it landed.
+     Bisection on the MEASURED residual — no reach model, so it cannot be
+     wrong about a lateral target the way a scalar span is. Used for NPCs,
+     whose weapon this pass may not move (their barrel is aimed by their own
+     forearm), and shared with the player's fallback above. */
+  const _sh = new THREE.Vector3(), _fwd = new THREE.Vector3();
+  const _rt = new THREE.Vector3(), _grip = new THREE.Vector3();
+  function landOnWeapon(ch, prop, target, resid, steps, tol) {
+    if (resid == null || resid <= tol) return resid;
     prop.updateWorldMatrix(true, false);
     _grip.set(0, 0, 0);
     prop.localToWorld(_grip);
-    seen.gripDist = shoulder.distanceTo(_grip);
-    if (seen.gripDist > reach) { seen.slideBailed = 1; return target; }   // even the grip is gone
-    seen.slideBailed = 0;
     let lo = 0, hi = 1;
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < steps; i++) {
       const mid = (lo + hi) / 2;
       _tmp.lerpVectors(target, _grip, mid);
-      if (shoulder.distanceTo(_tmp) > reach) lo = mid; else hi = mid;
+      const r = CBZ.charArmTo(ch, _tmp, "l", 1);
+      if (r != null && r > tol) lo = mid; else hi = mid;
     }
-    return target.lerp(_grip, hi);
-  }
-  /* The off arm's real span in WORLD metres. Asked of the solver rather than
-     recomputed here: the rig is authored in local units and scaled to human
-     size on the group, so anything that re-derives the conversion instead of
-     reading it is one refactor away from comparing local units against world
-     metres and silently deciding a gun 30 cm out of reach is fine. */
-  const _sh = new THREE.Vector3(), _fwd = new THREE.Vector3();
-  const _rt = new THREE.Vector3(), _grip = new THREE.Vector3();
-  function armSpan(ch) {
-    return (CBZ.charArmTo.span && CBZ.charArmTo.span(ch, "l")) || 0.62;
+    target.lerp(_grip, hi);
+    return CBZ.charArmTo(ch, target, "l", 1);
   }
   /* GRIP-TO-BUTT, in world metres, measured off the weapon's own geometry —
      the shared model convention runs the barrel down -Z from a grip at the
@@ -639,14 +655,14 @@
         const fl = CBZ.floorAt(_npcT.x, _npcT.z) + 0.05;
         if (_npcT.y < fl) _npcT.y = fl;
       }
-      // NPCs get the anchor slide but NOT the shoulder pull: their weapon's
-      // orientation comes from the forearm itself (actorweapons.js mounts the
-      // prop at a fixed local rotation), so moving that arm would swing the
-      // barrel off whatever combat.js is aiming it at. Sliding the off hand
-      // back along the gun puts it on the weapon and touches nothing else.
-      slideToReach(ch, prop, _npcT, armSpan(ch), shoulderWorld(ch, "l", _sh));
+      // NPCs never get the stock placement: their weapon's orientation comes
+      // from the forearm itself (actorweapons.js mounts the prop at a fixed
+      // local rotation), so moving that arm would swing the barrel off
+      // whatever combat.js is aiming it at. Sliding the off hand back along
+      // the gun puts it on the weapon and touches nothing else. Two probes,
+      // not four — a street of these runs every frame.
       CBZ.charArmTo.rest(ch, "l", 0);
-      CBZ.charArmTo(ch, _npcT, "l", 1);
+      landOnWeapon(ch, prop, _npcT, CBZ.charArmTo(ch, _npcT, "l", 1), 2, 0.05);
     }
   }
 
@@ -682,12 +698,10 @@
       passes: seen.pass,
       driven: seen.drive,
       why: seen.why,
-      // the shoulder solve's own working: what it thought the arm could
-      // reach, how far short it was, and what it did about it
-      reach: seen.reach, dist: seen.dist, over: seen.over, over2: seen.over2,
-      butt: seen.butt, slid: seen.slid, residual: seen.residual,
-      rArm: seen.rArm, rBefore: seen.rBefore, rAfter: seen.rAfter,
-      gripDist: seen.gripDist, slideBailed: seen.slideBailed,
+      // the hold solve's own working: how far the first solve missed by,
+      // whether the stock was re-placed, and what it missed by in the end
+      resid0: seen.resid0, placed: seen.placed, butt: seen.butt,
+      slid: seen.slid, residual: seen.residual,
       reloading: R.active,
       reloadP: R.p,
     };

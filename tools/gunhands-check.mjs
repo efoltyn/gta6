@@ -209,14 +209,10 @@ const PROBE = `(() => {
           " |Rsh-wrist|=" + (rsh.distanceTo(wrist)*100).toFixed(0) +
           " |Lsh-grip|=" + (lsh.distanceTo(grip)*100).toFixed(0);
       }
-      rec.solve = au && au.reach != null
-        ? "reach=" + (au.reach*100).toFixed(0) + " dist=" + (au.dist*100).toFixed(0) +
-          " over=" + (au.over*100).toFixed(0) + " butt=" + ((au.butt||0)*100).toFixed(0) +
-          " over2=" + (au.over2*100).toFixed(0) + " slid=" + au.slid +
-          " resid=" + (au.residual == null ? "null" : (au.residual*100).toFixed(0)) +
-          " | rArm=" + (au.rArm == null ? "NULL" : (au.rArm*100).toFixed(0)) +
-          " rBef=" + ((au.rBefore||0)*100).toFixed(0) + " rAft=" + ((au.rAfter||0)*100).toFixed(0) +
-          " gripD=" + ((au.gripDist||0)*100).toFixed(0) + " bail=" + au.slideBailed
+      rec.solve = au && au.resid0 != null
+        ? "miss0=" + (au.resid0*100).toFixed(0) + " placed=" + au.placed +
+          " butt=" + ((au.butt||0)*100).toFixed(0) +
+          " resid=" + (au.residual == null ? "null" : (au.residual*100).toFixed(0))
         : null;
       // ISOLATION PROBE: call the solver by hand on the same anchor. If this
       // lands and the frame pass did not, the fault is in the plumbing (hook

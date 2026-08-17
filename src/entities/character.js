@@ -1284,7 +1284,16 @@
      comparing that against a world-metre distance to a weapon is out by the
      whole rig scale. Read the scale off the live matrix instead of assuming
      it: a child, a scaled prop rig or a future HUMAN_SCALE change all just
-     work. Protraction is included because it is real reach, not slack. */
+     work.
+
+     BONE ONLY, and deliberately: protraction is NOT included even though the
+     solve spends it, because protraction pushes the shoulder FORWARD and
+     nothing else. A caller testing a target that is mostly SIDEWAYS — which
+     is the whole job of a support hand crossing to the other side of the
+     body — would be told it can reach 0.17 m further than it can. The
+     reachable set is an ellipsoid; this returns its minor axis, so a
+     reachability test built on it is conservative rather than wrong. If you
+     need the truth for a specific point, solve to it and read the residual. */
   charArmTo.span = function (ch, arm) {
     const P = ch && ch.profile;
     if (!P || !ch.body) return 0;
@@ -1292,7 +1301,7 @@
     const l2 = Math.hypot(P.armLo + 0.01, 0.035);
     ch.body.updateWorldMatrix(true, false);
     const s = ch.body.matrixWorld.getMaxScaleOnAxis() || 1;
-    return ((l1 + l2) * 0.985 + 0.24) * s;   // 0.24 = the protraction cap above
+    return (l1 + l2) * 0.985 * s;
   };
   CBZ.charArmTo = charArmTo;
 
