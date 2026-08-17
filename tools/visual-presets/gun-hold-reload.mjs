@@ -144,7 +144,26 @@ async function stage(input) {
     try { if (CBZ.setQualityLevel) CBZ.setQualityLevel(3); } catch (_) {}
     window.requestAnimationFrame = function () { return 0; };
     await wait(700);
-    tick(60);
+    /* SETTLE UNTIL THE PLAYER IS ACTUALLY THE PLAYER'S. On a COLD first load
+       the arrival sequence still owns the body for several seconds after
+       game.state flips to "playing": it moves them, and it will not let them
+       arm. The second side of a run is warm and gets there sooner, which is
+       why the FIRST side captured — whichever it was — came back "held NONE"
+       every time while the second rendered a drawn weapon correctly. That is
+       a race, not a difference between the two builds, and a fixed tick count
+       cannot see it. Step until the body stops being moved for a whole
+       second, with a real budget. */
+    {
+      let still = 0, lastX = NaN, lastZ = NaN;
+      for (let i = 0; i < 900 && still < 60; i++) {
+        tick(1);
+        const p = CBZ.player;
+        if (!p) continue;
+        if (Math.abs(p.pos.x - lastX) < 0.002 && Math.abs(p.pos.z - lastZ) < 0.002) still++;
+        else still = 0;
+        lastX = p.pos.x; lastZ = p.pos.z;
+      }
+    }
 
     // NO STUDIO TELEPORT. weapon-holds.mjs needs one because a prone body plus
     // its gun occupies three metres of ground and the slope under it IS the
@@ -192,23 +211,37 @@ async function stage(input) {
     if (CBZ.playerCrouchPress) CBZ.playerCrouchPress();
     tick(30);
   }
-  if (CBZ.game) { CBZ.game.cityHolstered = false; CBZ.game.cityMeleeWeapon = null; }
   if (!CBZ.unlockWeapon) return { ok: false, err: "no CBZ.unlockWeapon" };
-  CBZ.unlockWeapon(sub.weapon, { select: true });
-  if (CBZ.fpsSelectWeaponId) { try { CBZ.fpsSelectWeaponId(sub.weapon); } catch (_) {} }
-  if (CBZ.fpsAddAmmo) { try { CBZ.fpsAddAmmo(400); } catch (_) {} }
-  if (CBZ.fpsSetActive && CBZ.fps && CBZ.fps.active) CBZ.fpsSetActive(false);
   if (CBZ.fpsSetAim) CBZ.fpsSetAim(sub.aim === false ? false : true);
+  // ARM UNTIL IT TAKES, don't arm once and hope. Anything that owns the body
+  // (an arrival sequence, a vehicle, a holster) can swallow a single attempt,
+  // and a preset that assumes it worked photographs an empty hand and captions
+  // it as the subject.
+  const armOnce = () => {
+    if (CBZ.game) { CBZ.game.cityHolstered = false; CBZ.game.cityMeleeWeapon = null; }
+    CBZ.unlockWeapon(sub.weapon, { select: true });
+    if (CBZ.fpsSelectWeaponId) { try { CBZ.fpsSelectWeaponId(sub.weapon); } catch (_) {} }
+    if (CBZ.fpsAddAmmo) { try { CBZ.fpsAddAmmo(400); } catch (_) {} }
+  };
+  armOnce();
   // Settle, and WAIT FOR THE GUN rather than stepping a fixed count: a
   // gun-to-gun switch runs holsterprops' stow transfer first (~0.9 s) with the
   // incoming prop deliberately hidden, and first person hides it outright.
-  for (let i = 0; i < 30; i++) {
-    if (CBZ.player) { CBZ.player.pos.x = px; CBZ.player.pos.z = pz; }
+  // Re-assert every eight passes so a sequence that steals the body loses.
+  let armed = null;
+  for (let i = 0; i < 60 && !armed; i++) {
+    if (i > 0 && i % 8 === 0) armOnce();
+    if (CBZ.player) {
+      CBZ.player.driving = false; CBZ.player.dead = false;
+      CBZ.player.pos.x = px; CBZ.player.pos.z = pz;
+    }
     if (CBZ.cam) { CBZ.cam.yaw = yaw - Math.PI; CBZ.cam.pitch = 0; }
     if (CBZ.fpsSetActive && CBZ.fps && CBZ.fps.active) CBZ.fpsSetActive(false);
     tick(8);
-    if (i >= 8 && drawnProp()) break;
+    if (i >= 6) armed = drawnProp();
   }
+  if (!armed) return { ok: false, err: "never drew " + sub.weapon + " (game state " +
+    (CBZ.game && CBZ.game.state) + ", armed " + (CBZ.playerArmed && CBZ.playerArmed()) + ")" };
 
   const ch = CBZ.playerChar;
   if (!ch || !ch.group || !ch.sockets) return { ok: false, err: "no player rig" };
@@ -309,7 +342,11 @@ async function stage(input) {
     // a hold subject still gets a travel reading so the two columns are
     // directly comparable: this is what "the arm does nothing" looks like
     let prev = handLocal(), path = 0;
-    for (let k = 0; k < 60; k++) { tick(1); const now = handLocal(); path += now.distanceTo(prev); prev = now; }
+    for (let k = 0; k < 60; k++) {
+      if (CBZ.player) { CBZ.player.pos.x = px; CBZ.player.pos.z = pz; }
+      tick(1);
+      const now = handLocal(); path += now.distanceTo(prev); prev = now;
+    }
     travel = path;
     prop = drawnProp();
   }
