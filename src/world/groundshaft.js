@@ -126,7 +126,7 @@
   const live = [];
   const chunks = [];          // falling rim/entrained debris (our own integrator)
   const seqs = [];            // running collapse sequences
-  const stats = { falls: 0, crushed: 0, buried: 0, voidSaves: 0, siteRejects: 0, cut: 0 };
+  const stats = { falls: 0, crushed: 0, buried: 0, voidSaves: 0, siteRejects: 0, cut: 0, reMasked: 0, reSweeps: 0 };
 
   // ---- host seams: the only three things a shaft needs from its world ----
   function survMode() { return CBZ.game && CBZ.game.mode === "survival" && CBZ.surv && CBZ.surv.arena; }
@@ -307,6 +307,65 @@
       mat.needsUpdate = true;
     } catch (e) { /* a material we cannot patch simply keeps drawing */ }
   }
+  /* ============================================================
+     THE MASK FOLLOWS THE MESH, NOT THE MATERIAL OBJECT
+
+     THE FAULT: "on my phone it is a ring with the ground drawn over the hole,
+     but not in your screenshots." Both were true, and neither was the shader's
+     fault. `maskMaterial` stamps a discard onto the material OBJECT that a
+     ground mesh is wearing at the moment a shaft is cut. It is not the mesh's
+     property and nothing re-checks it — so anything that hands that mesh a
+     DIFFERENT material afterwards silently removes the hole's lid-remover and
+     the ground draws straight back over the mouth. The floor query has no such
+     dependency, so you still fall in: a ring you fall through, the exact
+     artefact this file has now produced three separate ways.
+
+     Two systems in this game replace ground materials at runtime, both in
+     core/gfx.js, and both are driven by the QUALITY TIER:
+
+       swapTree()      walks the whole scene and flips every cmat material to
+                       its `_cbzTwin` (Lambert ⇄ Standard) when tier().pbr
+                       changes — `o.material = m._cbzTwin`
+       promoteMerged() swaps the batcher's merged output between its source
+                       Lambert and a promoted Standard
+
+     Which is why this was invisible here and obvious on the owner's phone: a
+     desktop holds one tier for a whole session, while core/quality.js's auto
+     sampler drops tiers when the frame rate dips — and the frame rate dips
+     precisely during a disaster, which is the only time a sinkhole exists to
+     be covered up. Nothing about iOS, Safari, WebGL1 or GLSL precision: the
+     phone simply gets to the code path a fixed-tier desktop never reaches.
+
+     So the sweep now REMEMBERS THE MESHES it masked, and `healMask()` re-stamps
+     any whose material has been swapped since. It is an array scan with a
+     boolean early-out, cheap enough to run every frame a shaft is open, and it
+     is indifferent to WHY the material changed — a tier flip, a batch pass, a
+     mod, or the next system nobody has written yet. `shaftAudit().reMasked`
+     counts the saves. */
+  const maskedMeshes = [];
+  const REHEAL_SECS = 1.5;      // one shaft re-swept per this many seconds, round-robin
+  let healT = 0, healIdx = 0;
+  function takeMesh(o) {
+    if (!o || !o.material) return;
+    for (let p = o; p; p = p.parent) if (p.userData && p.userData.groundShaft) return;
+    if (Array.isArray(o.material)) { for (let k = 0; k < o.material.length; k++) maskMaterial(o.material[k]); }
+    else maskMaterial(o.material);
+    // recorded ONCE per mesh; the healer re-reads o.material every pass, so a
+    // mesh recorded while wearing its Lambert covers its Standard twin too
+    if (!o.userData._shaftSwept) { o.userData._shaftSwept = true; maskedMeshes.push(o); }
+  }
+  function healMask() {
+    for (let i = 0; i < maskedMeshes.length; i++) {
+      const o = maskedMeshes[i], m = o.material;
+      if (!m) continue;
+      if (Array.isArray(m)) {
+        for (let k = 0; k < m.length; k++) if (m[k] && !m[k]._shaftMasked) { maskMaterial(m[k]); stats.reMasked++; }
+      } else if (!m._shaftMasked) {
+        maskMaterial(m); stats.reMasked++;
+      }
+    }
+  }
+
   /* ONE SWEEP PER SITE PER RADIUS — and the second half of that is the point.
 
      A repeat visit used to be skipped outright, on the reasoning that the
@@ -323,26 +382,20 @@
      hole outgrows it. Still bounded — six or seven re-cuts, each only touching
      materials that are not masked yet, and `_shaftMasked` makes every repeat a
      cheap early-out. */
-  function maskGroundAt(h) {
+  function maskGroundAt(h, force) {
     const R = h.mouth + 2;
     let site = null;
     for (let i = 0; i < maskedSites.length; i++) {
       if (Math.hypot(maskedSites[i].x - h.x, maskedSites[i].z - h.z) < 4) { site = maskedSites[i]; break; }
     }
     if (site) {
-      if (R <= site.r) return;           // already swept this wide or wider
-      site.r = R;                        // it has grown: sweep the new annulus
+      if (R <= site.r && !force) return; // already swept this wide or wider
+      if (R > site.r) site.r = R;        // it has grown: sweep the new annulus
     } else {
       maskedSites.push({ x: h.x, z: h.z, r: R });
     }
-    function take(o) {
-      if (!o || !o.material) return;
-      let p = o, skip = false;
-      while (p) { if (p.userData && p.userData.groundShaft) { skip = true; break; } p = p.parent; }
-      if (skip) return;
-      if (Array.isArray(o.material)) { for (let k = 0; k < o.material.length; k++) maskMaterial(o.material[k]); }
-      else maskMaterial(o.material);
-    }
+    if (force) stats.reSweeps++;
+    const take = takeMesh;
     /* TWO PHASES, TWO try/catches, AND THAT SEPARATION IS THE WHOLE CITY FIX.
 
        These used to share one `try`, which quietly made the city sinkhole a
@@ -981,6 +1034,8 @@
     for (let i = seqs.length - 1; i >= 0; i--) seqs[i].dispose();
     clearChunks();
     maskedSites.length = 0;
+    for (let i = 0; i < maskedMeshes.length; i++) if (maskedMeshes[i].userData) maskedMeshes[i].userData._shaftSwept = false;
+    maskedMeshes.length = 0;
   };
 
   /* ============================================================
@@ -1424,6 +1479,9 @@
      ============================================================ */
   CBZ.onUpdate(28.6, function (dt) {
     if (!on()) return;
+    // before the early-out: a readout that only appears once a hole exists
+    // cannot tell you whether the flag is even on
+    debugHud(dt);
     if (!live.length && !seqs.length && !chunks.length) return;
     /* EXTERNAL CLEAR = RESET. The survival director empties CBZ.survHoles on
        match start and on mode exit; that array IS our registry, so an empty
@@ -1438,6 +1496,27 @@
     // re-wrap in ANY mode if somebody re-installed a floor after us (a city
     // reset, a mode switch): the wrapper is what makes the stair walkable
     if (live.length && CBZ.floorAt !== cityFloorFn) installCityFloor();
+    /* THE MASK IS MAINTAINED, NOT INSTALLED ONCE. Two passes, both bounded:
+       healMask() re-stamps meshes whose material was swapped out from under us
+       (an array scan with a boolean early-out — every frame is fine), and a
+       round-robin RE-SWEEP catches ground that did not exist at cut time at
+       all: a mesh built later, a batch merge, an LOD swap, a mod. One shaft
+       per REHEAL_SECS, so the traverse cost is the same whatever the hole
+       count, and `_shaftMasked` makes every already-correct mesh a boolean
+       test. This is deliberately blind to the CAUSE — the reported failure
+       reproduces on a phone and not on a desktop, and a fix that only knows
+       about the mechanisms I could name here would fix exactly the ones I
+       already checked. */
+    if (live.length) {
+      healMask();
+      healT += dt;
+      if (healT >= REHEAL_SECS) {
+        healT = 0;
+        healIdx = (healIdx + 1) % live.length;
+        const h = live[healIdx];
+        if (h && !h._closed) maskGroundAt(h, true);
+      }
+    }
     // the slots follow the eye, so they have to be re-dealt as the eye moves.
     // Only once there are more holes than slots — below that every shaft owns
     // one permanently and the sort would be a per-frame no-op.
@@ -1446,6 +1525,48 @@
     tickChunks(dt);
     tickHazards(dt);
   });
+
+  /* ============================================================
+     ?cfg_SHAFT_DEBUG=1 — THE AUDIT, ON THE DEVICE THAT HAS THE BUG
+
+     The ring fault reproduces on the owner's phone and not on any machine I
+     can run a browser on, and the three mechanisms I could name from reading
+     the code all measured clean here (a WebGL1 context, an iPhone viewport,
+     and core/gfx.js's quality-tier material swap each left lidsOverMouth at
+     0). At that point more guessing is worth less than one screenshot of the
+     real numbers from the real device, so the audit gets a readout: open the
+     game with ?cfg_SHAFT_DEBUG=1, stand near a sinkhole, photograph the
+     corner. `lids` is the whole question — non-zero means ground is still
+     drawing over the mouth and names how many surfaces, `rings` means a shaft
+     is drawn with no mask slot, and `reMask`/`reSweep` say whether the
+     self-heal is firing (and therefore what it is fighting). */
+  if (CBZ.CONFIG.SHAFT_DEBUG == null) CBZ.CONFIG.SHAFT_DEBUG = false;
+  let dbgEl = null, dbgT = 0;
+  function debugHud(dt) {
+    if (!CBZ.CONFIG.SHAFT_DEBUG) return;
+    dbgT += dt;
+    if (dbgT < 0.5) return;
+    dbgT = 0;
+    try {
+      if (!dbgEl) {
+        dbgEl = document.createElement("div");
+        dbgEl.style.cssText = "position:fixed;left:6px;bottom:6px;z-index:2147483647;pointer-events:none;" +
+          "font:11px ui-monospace,Menlo,monospace;color:#9fe8c3;background:rgba(0,0,0,.62);" +
+          "padding:6px 8px;border-radius:6px;white-space:pre;max-width:62vw";
+        document.body.appendChild(dbgEl);
+      }
+      const a = CBZ.shaftAudit();
+      const cap = CBZ.renderer && CBZ.renderer.capabilities;
+      dbgEl.style.color = (a.lidsOverMouth || a.ringsOnSolidGround) ? "#ff9c9c" : "#9fe8c3";
+      dbgEl.textContent =
+        "shafts " + a.shafts + "  LIDS " + a.lidsOverMouth + "  rings " + a.ringsOnSolidGround +
+        "\nslots " + a.maskSlots + "/" + a.unslottedShafts + " unslotted  swept " + a.sweptMeshes +
+        "\nreMask " + a.reMasked + "  reSweep " + a.reSweeps + "  collar " + a.collarSampled +
+        "\nthroat " + a.throatShade + "  q" + (CBZ.qualityAutoStats ? CBZ.qualityAutoStats.level : "?") +
+        "  pbr" + ((CBZ.gfxTier && CBZ.gfxTier.pbr) ? 1 : 0) +
+        "\ngl" + (cap && cap.isWebGL2 ? 2 : 1) + " " + (cap ? cap.precision : "?");
+    } catch (e) { /* a readout that throws is worse than no readout */ }
+  }
 
   /* ============================================================
      CBZ.shaftAudit() — the ratchet.
@@ -1608,6 +1729,10 @@
       sequences: seqs.length,
       chunks: chunks.length,
       cut: stats.cut, siteRejects: stats.siteRejects,
+      // the self-heal's own record: how often a ground material had to be
+      // re-stamped because something swapped it, and how many re-sweeps ran
+      reMasked: stats.reMasked, reSweeps: stats.reSweeps,
+      sweptMeshes: maskedMeshes.length,
       falls: stats.falls, crushed: stats.crushed, buried: stats.buried, voidSaves: stats.voidSaves,
     };
   };
