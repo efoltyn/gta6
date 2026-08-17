@@ -1443,6 +1443,14 @@
      geometric (no species table), so all 45 species animate from one change.
      MUST follow predator.js; without this tag the whole animation lane is dead. -->
 <script src="src/systems/predator_anim.js?v=allmain1"></script>
+<!-- THE APE MOVE SET. A silverback shared the wolf's `maul` row, so its entire
+     animated repertoire was a jaw opening on the strike envelope. This adds the
+     six things a knuckle-walker actually does — charge, overhead smash,
+     backhand, canine bite, chest-beat display — and the one no other file could
+     own: it PICKS A MAN UP, spins, and uses him as a club on everyone else.
+     MUST follow predator_anim.js (it drives its new hand layers) and
+     creature_combat.js (which calls into it through three guarded seams). -->
+<script src="src/systems/ape_combat.js?v=apes1"></script>
 <!-- VERLET CORPSE PHYSICS FOR ANIMALS — the sibling of city/ragdoll.js, which
      is hard-wired to the humanoid skeleton, so every one of the 45 species used
      to die by easing group.rotation.z to a constant ("head pointed to sky").

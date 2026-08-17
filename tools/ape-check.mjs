@@ -1,0 +1,319 @@
+#!/usr/bin/env node
+/* tools/ape-check.mjs — DOES THE GORILLA ACTUALLY FIGHT LIKE A GORILLA?
+
+   The claim this gate exists to hold: a silverback in games/battle.html used to
+   have exactly one animated attack and it was a wolf's. `creatureStyleFor` put
+   `gorilla` on the `maul` row, and the ATTACK arm of `maul` reaches
+   predator_anim's `default:` branch, which opens a jaw and does nothing else.
+   Against a hundred men that is a mouth on a treadmill.
+
+   systems/ape_combat.js is the answer, and every part of it is countable
+   through CBZ.apeAudit(). None of these numbers can be produced by narration:
+
+     charges/smashes/sweeps/bites/drums   the move set FIRED, not merely
+                                          defined. A repertoire that never
+                                          gets picked is a table, not a fight.
+     grabs                                the ape took a man off his feet.
+     spins                                the hold reached the flail.
+     clubHits                             ...and the man in its hand HIT other
+                                          men. This is the whole feature: a
+                                          body used as a weapon. Zero here
+                                          means the club swung through empty
+                                          air every time, which is the fault
+                                          this file cannot be allowed to ship.
+     throws + slams                       every grab RESOLVED. A hold that
+                                          never releases is a man welded to a
+                                          fist for the rest of the run.
+     stranded                             men left flagged _apeHeld/_apeFlying
+                                          with no live hold behind them. MUST
+                                          be 0: that flag stands the host's own
+                                          mover down, so a stale one is an
+                                          immortal statue in the middle of the
+                                          war.
+     sunk                                 held/flown bodies that ended up below
+                                          the ground they landed on.
+
+   And the reverts have to work, because a feature that cannot be turned off
+   has not been measured:
+     --revert   CBZ.CONFIG.APE_FLAIL = false  -> grabs MUST fall to 0 while the
+                rest of the move set keeps firing (the flail is separable).
+     --off      CBZ.CONFIG.APE_COMBAT = false -> the whole set goes quiet and
+                the gorilla is exactly the maul it always was.
+
+   Usage:
+     node tools/ape-check.mjs                    100 men v 1 gorilla, arena
+     node tools/ape-check.mjs --n 60 --seconds 50
+     node tools/ape-check.mjs --map city
+     node tools/ape-check.mjs --revert           the flail switch
+     node tools/ape-check.mjs --off              the whole-file switch
+     node tools/ape-check.mjs --keep             leave chrome up
+   Exit 0 = ok.                                                              */
+import { spawn } from "node:child_process";
+import { rm } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const argv = process.argv.slice(2);
+const has = (f) => argv.includes(f);
+const arg = (f, d) => { const i = argv.indexOf(f); return i >= 0 && argv[i + 1] != null ? argv[i + 1] : d; };
+
+const MAP = arg("--map", "arena");
+const N = parseInt(arg("--n", "100"), 10);
+const SECONDS = parseInt(arg("--seconds", "70"), 10);
+const SPEED = arg("--speed", "4");
+const REVERT = has("--revert");     // flail off, move set on
+const OFF = has("--off");           // everything off
+
+async function claimPort(lo, n, probe) {
+  for (let p = lo; p < lo + n; p++) { try { await probe(p); } catch (_) { return p; } }
+  throw new Error("no free port");
+}
+
+const REMOTE = arg("--url", "");
+let server = { kill() {} };
+let origin;
+if (REMOTE) {
+  origin = REMOTE.endsWith("/") ? REMOTE : REMOTE + "/";
+  try { await fetch(origin); } catch (e) { console.error("APE: FAIL cannot reach " + origin); process.exit(1); }
+} else {
+  const port = await claimPort(9840, 150, (p) => fetch(`http://127.0.0.1:${p}/`));
+  server = spawn("python3", [path.join(ROOT, "tools/devserver.py")],
+    { env: { ...process.env, PORT: String(port) }, stdio: "ignore" });
+  origin = `http://127.0.0.1:${port}/`;
+  let up = false;
+  for (let i = 0; i < 40 && !up; i++) { try { await fetch(origin); up = true; } catch (_) { await sleep(100); } }
+  if (!up) { console.error("APE: FAIL devserver never came up"); process.exit(1); }
+}
+
+const dbg = await claimPort(11080, 200, (p) => fetch(`http://127.0.0.1:${p}/json/version`));
+const profile = `/tmp/cbz-apecheck-${dbg}`;
+await rm(profile, { recursive: true, force: true });
+const CHROME_BIN = process.env.CBZ_CHROME || (process.platform === "darwin"
+  ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "/opt/pw-browsers/chromium");
+const chrome = spawn(CHROME_BIN, [
+  "--headless=new", "--no-sandbox", "--disable-dev-shm-usage",
+  "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
+  "--enable-webgl", "--mute-audio", "--window-size=900,560",
+  `--remote-debugging-port=${dbg}`, `--user-data-dir=${profile}`,
+  "about:blank",
+], { stdio: "ignore" });
+
+let target = null;
+for (let i = 0; i < 240 && !target; i++) {
+  try {
+    const ps = await (await fetch(`http://127.0.0.1:${dbg}/json/list`)).json();
+    target = ps.find((p) => p.type === "page");
+  } catch (_) {}
+  if (!target) await sleep(100);
+}
+const bye = (code, msg) => {
+  if (msg) console.log(msg);
+  if (!has("--keep")) chrome.kill("SIGTERM");
+  server.kill("SIGTERM");
+  process.exit(code);
+};
+if (!target) bye(1, "APE: FAIL no page");
+
+const ws = new WebSocket(target.webSocketDebuggerUrl);
+await new Promise((res, rej) => { ws.addEventListener("open", res, { once: true }); ws.addEventListener("error", rej, { once: true }); });
+let id = 1; const pend = new Map(); let errors = [];
+ws.addEventListener("message", (ev) => {
+  const m = JSON.parse(ev.data);
+  if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); return; }
+  if (m.method === "Runtime.exceptionThrown") {
+    const d = m.params.exceptionDetails;
+    errors.push(`${(d.url || "?").split("/").pop()}:${d.lineNumber} ${(d.exception && d.exception.description || d.text || "").split("\n")[0]}`);
+  } else if (m.method === "Runtime.consoleAPICalled" && m.params.type === "error") {
+    errors.push("console.error: " + m.params.args.map((a) => a.value || a.description || "").join(" ").slice(0, 200));
+  }
+});
+const send = (method, params = {}) => new Promise((r) => { const i = id++; pend.set(i, r); ws.send(JSON.stringify({ id: i, method, params })); });
+const evl = async (e) => {
+  const r = await send("Runtime.evaluate", { expression: e, returnByValue: true, awaitPromise: true });
+  if (r.result && r.result.exceptionDetails) return { __throw: r.result.exceptionDetails.text };
+  return r.result && r.result.result && r.result.result.value;
+};
+await send("Runtime.enable");
+await send("Page.enable");
+
+/* WHY THIS SWEEPS BATTLES INSTEAD OF WATCHING ONE.
+
+   Measured, and it is the single most important fact about this matchup: a
+   gorilla gets THREE TO FIVE SWINGS IN ITS ENTIRE LIFE. The arena's armies
+   start 120 m apart and a silverback closes at 5.5 m/s, so ~15 of the war's
+   23 seconds are a march; then sixty unarmed men reach it at once and 260 hp
+   is gone in about four. That is not something this file introduced — run the
+   same sweep with `--off` and the war ends at the same second with the same
+   survivors — it is what the shipped gorilla has always been, and it is why
+   "the gorilla has no real attacks" was a fair complaint.
+
+   One battle therefore samples three or four picks, and no honest assertion
+   about a six-move repertoire can be made from three picks. So the gate runs
+   the matchup REPEATEDLY and accumulates, exactly the way battle-check sweeps
+   maps rather than trusting one. The per-battle counters are reset between
+   runs by the page reload; the totals below are the sum. */
+const RUNS = parseInt(arg("--runs", "10"), 10);
+const T = { picks: 0, grabs: 0, spins: 0, clubHits: 0, throws: 0, slams: 0, drops: 0,
+  sweeps: 0, smashes: 0, charges: 0, drums: 0, bites: 0 };
+let strandedEver = 0, sunkEver = 0, ended = 0, bootMs = 0, samples = 0;
+let audit = null, tail = null, A = null;
+const fails = [];
+let present = null, isApe = null;
+const perRun = [];
+
+for (let run = 0; run < RUNS; run++) {
+  /* THE MATCHUP THE PAGE'S OWN MENU CALLS "100 MEN v GORILLA": unarmed
+     civilians against one silverback. Nothing here is a special test rig — it
+     is the preset row in games/battle.html's MATCHUPS table, expressed as the
+     query string that row fills in. */
+  const url = `${origin}games/battle.html?auto=1&map=${MAP}&red=${N}&blue=1` +
+    `&ru=men&bu=gorilla&rw=fists&rt=civ`;
+  errors = errors.concat([]);
+  await send("Page.navigate", { url });
+  await sleep(500);
+
+  let up = false;
+  const t0 = Date.now();
+  for (let i = 0; i < 400 && !up; i++) {
+    up = await evl("!!(window.__battle && __battle.audit().started)");
+    if (up !== true) { up = false; await sleep(250); }
+  }
+  if (run === 0) bootMs = Date.now() - t0;
+  if (!up) { fails.push(`run ${run + 1}: the battle never started`); continue; }
+
+  if (run === 0) {
+    // the file has to BE there before anything it does can be measured
+    present = await evl("!!(window.CBZ && CBZ.apeAudit && CBZ.apeStep && CBZ.apeMove && CBZ.apeStrike)");
+    if (present !== true) bye(1, "APE: FAIL systems/ape_combat.js is not loaded on games/battle.html (studio pack `beasts`)");
+    isApe = await evl("!!(CBZ.apeIs && CBZ.apeIs({ species: (CBZ.WILDLIFE_SPECIES||{}).gorilla }))");
+    if (isApe !== true) bye(1, "APE: FAIL the gorilla species row does not classify as an ape");
+  }
+
+  if (OFF) await evl("CBZ.CONFIG.APE_COMBAT = false");
+  else if (REVERT) await evl("CBZ.CONFIG.APE_FLAIL = false");
+
+  await evl(`__battle.speed(${SPEED})`);
+
+  /* WATCH IT. apeAudit ACCUMULATES within a battle, so one read at the end is
+     enough for the counters — but `stranded` is an INSTANTANEOUS property and
+     has to be sampled throughout: a body correctly held for two seconds is not
+     a fault and a body still flagged after every hold ended is. */
+  const t1 = Date.now();
+  let over = false;
+  while ((Date.now() - t1) / 1000 < SECONDS) {
+    await sleep(900);
+    samples++;
+    const s = await evl(`(function () {
+      var A = CBZ.apeAudit();
+      var men = (window.__battle && __battle.roster) ? __battle.roster() : null;
+      var stranded = 0, sunk = 0;
+      if (men) for (var i = 0; i < men.length; i++) {
+        var m = men[i];
+        if (!m) continue;
+        if ((m._apeHeld || m._apeFlying) && A.holds + A.flying === 0) stranded++;
+        if ((m._apeHeld || m._apeFlying) && m.pos && CBZ.floorAt &&
+            m.pos.y < CBZ.floorAt(m.pos.x, m.pos.z) - 0.6) sunk++;
+      }
+      return { stranded: stranded, sunk: sunk };
+    })()`);
+    if (s && !s.__throw) { strandedEver = Math.max(strandedEver, s.stranded | 0); sunkEver = Math.max(sunkEver, s.sunk | 0); }
+    const a = await evl("__battle.audit()");
+    if (a && a.over) { over = true; break; }
+  }
+  if (over) ended++;
+
+  // one settling beat so a hold that was mid-release when the war ended can finish
+  await sleep(900);
+  A = await evl("CBZ.apeAudit()");
+  audit = await evl("__battle.audit()");
+  tail = await evl(`(function () {
+    var men = (window.__battle && __battle.roster) ? __battle.roster() : null;
+    var flagged = 0;
+    if (men) for (var i = 0; i < men.length; i++) if (men[i] && (men[i]._apeHeld || men[i]._apeFlying)) flagged++;
+    var a = CBZ.apeAudit();
+    return { flagged: flagged, holds: a.holds, flying: a.flying };
+  })()`);
+  if (A && !A.__throw) for (const k in T) T[k] += (A[k] | 0);
+  perRun.push({ run: run + 1, simT: audit && audit.simT, red: audit && audit.red,
+    apes: audit && audit.beasts, picks: A && A.picks, grabs: A && A.grabs, club: A && A.clubHits });
+  if (tail && tail.flagged > 0 && tail.holds + tail.flying === 0) {
+    fails.push(`run ${run + 1}: ${tail.flagged} men left flagged after every hold ended — they can never move again`);
+  }
+}
+
+const clean = errors.filter((e) => !/ProgressEvent|favicon|preload/i.test(e));
+
+/* THE TOTALS, not the last battle's. `T` is the sum across every run in the
+   sweep — the only number that can honestly answer "does this repertoire
+   fire", given a gorilla only lives long enough for three or four swings. */
+if (!A || A.__throw) fails.push("apeAudit() threw");
+else if (OFF) {
+  /* THE WHOLE-FILE REVERT. Nothing may fire, and — the part that actually
+     matters — the battle must still run: a gorilla with ape_combat off is the
+     `maul` it has always been, not a broken one. */
+  const fired = T.picks + T.grabs + T.spins + T.sweeps + T.smashes + T.charges + T.drums + T.bites;
+  if (fired > 0) fails.push(`--off: APE_COMBAT=false and ${fired} ape moves still fired`);
+  if (!(audit && audit.simT > 8)) fails.push("--off: the battle did not run with the move set disabled");
+  if (ended === 0) fails.push("--off: no battle ever reached a result with the move set disabled");
+} else if (REVERT) {
+  /* THE FLAIL REVERT. The club is separable from the rest of the repertoire —
+     if turning it off also silences the charges and the backhands, the two are
+     tangled and the switch is a lie. */
+  if (T.grabs > 0) fails.push(`--revert: APE_FLAIL=false and the ape still grabbed ${T.grabs} men`);
+  if (T.clubHits > 0) fails.push(`--revert: APE_FLAIL=false and ${T.clubHits} club hits still landed`);
+  const rest = T.sweeps + T.smashes + T.charges + T.bites;
+  if (rest === 0) fails.push("--revert: turning the flail off silenced the WHOLE move set — they are tangled");
+} else {
+  /* THE REAL SWEEP. Every one of these is the difference between a feature and
+     a paragraph about a feature. */
+  if (T.picks === 0) fails.push("the driver never once asked the ape to choose a blow");
+  if (T.grabs === 0) fails.push(`the gorilla never picked anybody up across ${RUNS} battles`);
+  if (T.spins === 0) fails.push("a grab never reached the flail — nothing was ever swung");
+  if (T.clubHits === 0) fails.push("the swung body never hit anyone: the club is decoration");
+  /* EVERY GRAB MUST END. Not every grab ends in a FINISHER — an ape that dies
+     with a man in its hand is a legitimate and common outcome, counted as a
+     `drop` — but `grabs` and `drops + throws + slams` have to agree, because a
+     hold that ends neither way is a man welded to a corpse's fist forever.
+     (`- 1` allows exactly one hold still live in the final sample.) */
+  const resolved = T.throws + T.slams + T.drops;
+  if (resolved < T.grabs - 1) {
+    fails.push(`${T.grabs} grabs but only ${resolved} ended — holds are leaking`);
+  }
+  if (T.throws + T.slams === 0) {
+    fails.push("no hold ever reached a throw or a slam — the release code has never run");
+  }
+  // the repertoire has to be a repertoire. Two of the five non-grab moves
+  // firing is a coin; four is a move set.
+  const kinds = [T.sweeps, T.smashes, T.charges, T.bites, T.drums].filter((n) => n > 0).length;
+  if (kinds < 4) fails.push(`only ${kinds} of the 5 non-grab moves ever fired across ${RUNS} battles — the picker is stuck`);
+}
+
+if (strandedEver > 0) fails.push(`${strandedEver} bodies flagged _apeHeld with no live hold behind them`);
+if (sunkEver > 0) fails.push(`${sunkEver} held/flown bodies went under the ground`);
+if (tail && tail.flagged > 0 && tail.holds + tail.flying === 0) {
+  fails.push(`${tail.flagged} men left flagged after every hold ended — they can never move again`);
+}
+if (clean.length) fails.push(`${clean.length} console errors — ${clean[0]}`);
+
+const row = {
+  map: MAP, men: N, bootMs, ended, simT: audit && audit.simT, fps: audit && audit.fps,
+  redAlive: audit && audit.red, apesAlive: audit && audit.beasts,
+  mode: OFF ? "APE_COMBAT=false" : REVERT ? "APE_FLAIL=false" : "live",
+  runs: RUNS, endedRuns: ended, samples, strandedEver, sunkEver,
+  totals: T, perRun,
+};
+console.log(JSON.stringify(row, null, 2));
+
+if (fails.length) {
+  console.log("\nAPE: FAIL");
+  for (const f of fails) console.log("  - " + f);
+  bye(1, "");
+}
+bye(0, "APE: ok  " +
+  (OFF ? `(whole move set disabled, ${ended}/${RUNS} battles still reached a result)`
+    : REVERT ? `(flail off; ${T.sweeps + T.smashes + T.charges + T.bites} other ape moves still fired)`
+      : `${RUNS} battles · ${T.picks} blows chosen · grabs ${T.grabs} · spins ${T.spins} · club hits ${T.clubHits} · ` +
+        `throws ${T.throws} · slams ${T.slams} · dropped ${T.drops} · sweeps ${T.sweeps} · smashes ${T.smashes} · ` +
+        `charges ${T.charges} · bites ${T.bites} · drums ${T.drums}`));

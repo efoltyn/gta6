@@ -473,10 +473,13 @@
              "creatureFight (lunge, pounce, maul, gore, stomp — windup, strike, " +
              "recover, flinch), and the land body layer that poses jaws and " +
              "legs through a strike. The same three files the mainland's " +
-             "wildlife runs on",
-      needs: ["look"],
-      files: ["city/wildlife_rig.js", "city/creature_combat.js", "systems/predator_anim.js"],
-      publishes: ["wildlifeRig", "creatureFight", "faceAnimalHeading"],
+             "wildlife runs on, plus the ape move set — a knuckle-walker " +
+             "charges, hammers, backhands, beats its chest and PICKS A MAN UP " +
+             "and swings him, which the one generic maul could never be",
+      needs: ["look", "caps"],
+      files: ["city/wildlife_rig.js", "city/creature_combat.js", "systems/predator_anim.js",
+              "systems/ape_combat.js"],
+      publishes: ["wildlifeRig", "creatureFight", "faceAnimalHeading", "apeStep", "apeAudit"],
     },
 
     // ---- flight and weapons -------------------------------------------------

@@ -2651,6 +2651,57 @@
         ch.body.rotation.x = ch.lean - 0.06 * drive;
         ch.body.rotation.y = sgn * (0.50 * wind + 1.00 * drive - 0.24 * recover);
         ch.body.position.y += -0.05 * drive;
+      } else if (ch.punchKind === "elbow") {
+        /* ELBOW — the short one. A jab needs a foot of air to work in; an
+           elbow needs none, which is exactly why it is the blow men throw
+           once a fight has closed up and there is no room left to punch.
+           Everything about it is the opposite of the straight below:
+
+             · the fist NEVER leaves the shoulder line. The hand travels the
+               shortest arc there is — it stays folded hard against the bicep
+               for the whole strike (the elbow joint holds ~-2.5 rad and does
+               not open at all), so the POINT of the elbow is the leading
+               edge and the hand is just along for the ride;
+             · the power is a horizontal body turn, not a shoulder drive.
+               `arm.rotation.y` is the whole travel and the torso yaw behind
+               it is nearly a hook's — a short lever swung by a big mass;
+             · it comes back as fast as it went. A hook's follow-through
+               carries you off balance and an elbow deliberately does not,
+               so `recover` cancels the yaw on the same beat it drove. */
+        arm.rotation.x = -1.15 - 0.18 * drive;
+        arm.rotation.y = sgn * (0.85 - 1.75 * drive);
+        arm.rotation.z = sgn * (0.30 + 0.22 * drive);
+        arm.position.z = 0.06 + 0.10 * drive;
+        if (armJ) armJ.rotation.x = -(2.45 + 0.12 * wind);   // stays SHUT — that is the weapon
+        ch.body.rotation.x = ch.lean - 0.04 * drive;
+        ch.body.rotation.y = sgn * (0.42 * wind + 0.88 * drive - 0.55 * recover);
+        ch.body.position.y += -0.04 * drive;
+      } else if (ch.punchKind === "headbutt") {
+        /* HEADBUTT — and the head is the SECOND half of it. The move is a
+           grab: both hands come forward and IN to take a fistful of collar,
+           the arms then PULL while the neck and the whole spine snap the
+           skull down and through. Posing only the head would read as a nod;
+           the pull is what makes it read as a headbutt, and it is why this
+           gets its own kind instead of riding the jab with a neck offset.
+
+           `guard` is overwritten on every channel the block above touched —
+           there is no guard hand in a clinch, both of them are full. */
+        const gL = ch.parts.la, gR = ch.parts.ra;
+        const grip = -0.72 - 0.30 * wind + 0.34 * drive;     // out to the collar
+        const pull = -(1.35 + 0.25 * wind) - 0.55 * drive;   // then haul him in
+        if (gL) { gL.rotation.x = grip; gL.rotation.y = 0.30 - 0.16 * drive; gL.rotation.z = 0.34 - 0.20 * drive; gL.position.z = 0.10 + 0.06 * wind - 0.12 * drive; }
+        if (gR) { gR.rotation.x = grip; gR.rotation.y = -0.30 + 0.16 * drive; gR.rotation.z = -(0.34 - 0.20 * drive); gR.position.z = 0.10 + 0.06 * wind - 0.12 * drive; }
+        if (J.la) J.la.rotation.x = pull;
+        if (J.ra) J.ra.rotation.x = pull;
+        // the spine cocks BACK a long way and then whips through — the biggest
+        // pitch reversal in the chain, because the head has no other engine
+        ch.body.rotation.x = ch.lean - 0.42 * wind + 0.60 * drive - 0.16 * recover;
+        ch.body.rotation.y = 0;
+        ch.body.position.y += -0.03 * wind - 0.06 * drive;
+        if (ch.neck) {
+          ch.neck.rotation.x = -0.55 * wind + 0.85 * drive;  // chin up, then down through him
+          ch.neck.rotation.z = 0;
+        }
       } else if (ch.punchKind === "shove") {
         /* TWO-HANDED SHOVE — a push, not a strike, and every beat differs
            from the punches around it accordingly: BOTH palms chamber at the
@@ -2783,7 +2834,39 @@
       const kleg = kleft ? ch.parts.ll : ch.parts.rl;
       const kplant = kleft ? ch.parts.rl : ch.parts.ll;
       const ksgn = kleft ? 1 : -1;
-      if (ch.kickKind === "round") {                    // roundhouse off the hip
+      if (ch.kickKind === "knee") {
+        /* KNEE — the clinch strike, and the only one in this chain thrown from
+           INSIDE arm's length. A front kick needs a metre of gap and a
+           roundhouse needs two; a knee needs contact, which is why it is the
+           strike a real brawl converges on once both men are holding each
+           other. Three things separate it from the two kicks below:
+
+             · the leg NEVER straightens. `scale.y` chambers hard and stays
+               chambered through impact — the point of the knee is the weapon,
+               so an extending shin would be a different move entirely;
+             · it goes UP, not out. The thigh drives past horizontal
+               (-1.95 rad) and the travel is vertical;
+             · the arms PULL DOWN. A knee without the collar tie is a hop; the
+               damage comes from hauling the head down onto a rising knee, and
+               the two halves have to happen on the same beat or neither
+               reads. Both arms are committed, so there is no guard hand. */
+        kleg.rotation.x = 0.20 * kwind - 1.95 * kdrive + 0.30 * krec;
+        kleg.rotation.y = ksgn * 0.10 * kdrive;
+        kleg.rotation.z = ksgn * (0.20 + 0.18 * kdrive);   // hips open a little to clear
+        kleg.scale.y = 1 - 0.34 * kdrive - 0.10 * kwind;   // folded, and it STAYS folded
+        ch.body.rotation.x = ch.lean - 0.30 * kdrive + 0.14 * kwind;   // curls over the strike
+        ch.body.rotation.y = ksgn * 0.10 * kdrive;
+        ch.body.position.y += 0.10 * kdrive;               // rises onto the plant foot
+        // the collar tie: hands out on the wind, hauled down through the drive
+        const nL = ch.parts.la, nR = ch.parts.ra;
+        const reach = -1.05 - 0.20 * kwind + 0.95 * kdrive;
+        if (nL) { nL.rotation.x = reach; nL.rotation.y = 0.18; nL.rotation.z = 0.40 - 0.14 * kdrive; }
+        if (nR) { nR.rotation.x = reach; nR.rotation.y = -0.18; nR.rotation.z = -(0.40 - 0.14 * kdrive); }
+        if (ch.low) {
+          if (ch.low.la) ch.low.la.rotation.x = -(1.30 + 0.45 * kdrive);
+          if (ch.low.ra) ch.low.ra.rotation.x = -(1.30 + 0.45 * kdrive);
+        }
+      } else if (ch.kickKind === "round") {               // roundhouse off the hip
         const kswp = Math.min(1, kprog / 0.7);
         kleg.rotation.x = 0.28 * kwind - 1.3 * kdrive;
         kleg.rotation.y = ksgn * (0.3 - 1.35 * kswp) * kdrive;   // sweeps around the side
@@ -2804,12 +2887,19 @@
       kplant.rotation.x = 0.14 * kdrive;
       kplant.rotation.y = 0;
       kplant.scale.y = 1 - 0.05 * kdrive;
-      // arms counter-balance out and back
-      ch.parts.la.rotation.x = -0.4 * kdrive - 0.1 * kwind;
-      ch.parts.ra.rotation.x = -0.4 * kdrive - 0.1 * kwind;
-      ch.parts.la.rotation.z = 0.55 * kdrive + 0.08;
-      ch.parts.ra.rotation.z = -0.55 * kdrive - 0.08;
-      ch.body.position.y -= 0.05 * kdrive;              // sink into the plant leg
+      if (ch.kickKind === "knee") {
+        // the knee rises onto the plant foot rather than sinking into it, and
+        // its arms are HOLDING someone — the counter-balance below is a kick's
+        // free-arm bookkeeping and would throw the collar tie straight open
+        kplant.scale.y = 1 - 0.02 * kdrive;
+      } else {
+        // arms counter-balance out and back
+        ch.parts.la.rotation.x = -0.4 * kdrive - 0.1 * kwind;
+        ch.parts.ra.rotation.x = -0.4 * kdrive - 0.1 * kwind;
+        ch.parts.la.rotation.z = 0.55 * kdrive + 0.08;
+        ch.parts.ra.rotation.z = -0.55 * kdrive - 0.08;
+        ch.body.position.y -= 0.05 * kdrive;            // sink into the plant leg
+      }
     }
 
     // ---- BLOCK / GUARD: both forearms up in front of the face, torso hunched.
@@ -3011,7 +3101,13 @@
     }
 
     // ---- head: subtle counter-bob + breathing tilt, keeps eyes level ----
-    if (ch.neck) {
+    // A HEADBUTT IS THE ONE MOVE WHERE THE HEAD IS THE FIST. This damp runs
+    // after the punch block and would quietly pull 14% of the skull's travel
+    // back toward "eyes level" on every frame of it — the counter-bob is right
+    // for a body that is walking and wrong for a body throwing its forehead
+    // through someone. Nothing else in the chain needs the exemption; every
+    // other strike drives an arm and leaves the neck to this line.
+    if (ch.neck && !(ch.punchT > 0 && ch.punchKind === "headbutt")) {
       ch.neck.rotation.x = damp(ch.neck.rotation.x, -ch.lean * 0.7 + (moving ? Math.sin(ch.phase * 2) * 0.02 : 0), 9, dt);
       ch.neck.rotation.z = damp(ch.neck.rotation.z, -ch.sway * 0.6, 9, dt);
     }

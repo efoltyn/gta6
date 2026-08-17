@@ -1484,6 +1484,10 @@ CBZ.studio.need(NEED).then(function () {
   }
   function push2(m, o, k) {
     if (o.dead || o === m) return;
+    // a held or airborne body is somewhere the crowd solver has no say over:
+    // shoving it out of the gorilla's fist (or out of its own flight arc) is
+    // the pass correcting an "overlap" that is the entire point of the move
+    if (o._apeHeld || m._apeHeld || o._apeFlying || m._apeFlying) return;
     // clearance is the PAIR's, not the species': a man by a man keeps the old
     // 0.9, a man by a bear keeps more, and the radii are clamped at build so
     // the widest pair (2.2) still fits the FINE cell's completeness bound
@@ -2442,6 +2446,15 @@ CBZ.studio.need(NEED).then(function () {
 
   /* ============================================================ SIM STEP */
   function stepMan(m, sdt) {
+    /* A BODY IN A GORILLA'S HAND IS NOT A MARCHER. systems/ape_combat.js owns
+       this man's world transform outright while the flag is up — his position,
+       his facing and his rig — exactly the way grapple.js's `heldBy` stands the
+       player's own mover down. Everything below (think, locomotion, the fire
+       solution) would be fighting it for the same three numbers. The flag is
+       cleared by the hold itself, and by apeReset on a restart, so nothing can
+       strand a man mid-air. Tested first, above the death branch, because a man
+       who dies IN the hand is still in the hand until it lets go. */
+    if (m._apeHeld || m._apeFlying) return;
     if (m.dead) {
       if (m.dieT > 0 && m.dieT < 1) {
         m.dieT = Math.min(1, m.dieT + sdt * 2.4);
@@ -2466,6 +2479,18 @@ CBZ.studio.need(NEED).then(function () {
     // ground, opts.onHit lands in THIS page's damage funnel. Outside the
     // bubble the beast is just another marcher below.
     if (m.beast) {
+      /* A GORILLA MID-SWING IS NOT MARCHING ANYWHERE. Its own hold owns its
+         position, its facing and its pitch (systems/ape_combat.js, ticked by
+         apeStep above). Without this the branch below falls through the moment
+         the man in its hand DIES — `bt.dead` — and the locomotion at the bottom
+         of this function walks a spinning silverback across the map while the
+         body on its arm stays welded to a hand that is no longer where the
+         swing thinks it is. */
+      if (CBZ.apeOwns && CBZ.apeOwns(m)) {
+        m.resT = (m.resT || 0) - sdt;
+        if (m.resT <= 0) { m.resT = 0.25; CBZ.micro.resolveCircle(m.pos, m.rad || 0.5, m.pos.y, 1.8); }
+        return;
+      }
       const bt = m.tgt;
       if (bt && !bt.dead && !over) {
         const bd = Math.hypot(bt.pos.x - m.pos.x, bt.pos.z - m.pos.z);
@@ -3210,6 +3235,9 @@ CBZ.studio.need(NEED).then(function () {
   /* ============================================================ BEGIN */
   function begin(asBench) {
     el("menu").style.display = "none";
+    // a restart must not inherit a body from the last war: apeReset drops every
+    // live hold and puts anything still in the air back on its feet, unowned
+    if (CBZ.apeReset) { try { CBZ.apeReset(); } catch (e) {} }
     /* THE AIR BELONGS TO THE PLACE. One desert haze over all five grounds put
        an orange dust horizon behind a glass downtown and washed the streets
        out to paper. Three skies: a hard flat light for the kill box, a clean
@@ -3367,6 +3395,14 @@ CBZ.studio.need(NEED).then(function () {
           else if (simT - NAV.at.blue > 1.4) navSolve("blue");
         }
         for (let i = 0; i < men.length; i++) stepMan(men[i], sdt);
+        /* THE HOLD AND EVERYTHING IN THE AIR. This has to be its own call and
+           not a seam inside beastFight: the strike bubble above only runs while
+           the gorilla has a LIVING target inside reach, and a man being swung
+           around by the ankle is usually dead before the second revolution —
+           the moment his corpse stopped qualifying, the swing would freeze
+           mid-air with him welded to a fist. Driven here, on the sim clock, it
+           also runs at the dialled battle speed like everything else. */
+        if (CBZ.apeStep) { try { CBZ.apeStep(sdt); } catch (e) {} }
         rebuildFine();                       // bodies moved: the body grid is stale
         separateSolve(Math.min(0.9, sdt * 26));
         stepRockets(sdt);
@@ -3394,6 +3430,16 @@ CBZ.studio.need(NEED).then(function () {
     const camP = CBZ.camera.position;
     for (let i = 0; i < men.length; i++) {
       const m = men[i];
+      /* A MAN IN A FIST STILL HAS TO LOOK LIKE A MAN IN A FIST. animChar runs
+         AFTER the sim (that ordering is the whole reason grapple.js has a
+         late-write pass at order 90), so a hold pose written in the step would
+         be stomped here every frame and the body would ride round the swing in
+         a walk cycle. Held and airborne bodies get their own rig write instead
+         — arms and legs fighting the grip, not strolling. */
+      if (m._apeHeld || m._apeFlying) {
+        if (CBZ.apePoseVictim) { try { CBZ.apePoseVictim(m, dt); } catch (e) {} }
+        continue;
+      }
       if (m.dead) continue;
       const d2 = (m.pos.x - camP.x) * (m.pos.x - camP.x) + (m.pos.z - camP.z) * (m.pos.z - camP.z);
       m.animF = (m.animF + 1) & 1023;
@@ -3651,8 +3697,12 @@ CBZ.studio.need(NEED).then(function () {
     speed: setSpeed,
     // park the camera on the hottest fight at a chosen range — the seam a
     // screenshot tool needs, and the one the director already computes
-    look: function (dist, pitch, yaw) {
-      const hs = hotspot();
+    // `at` (optional {x,z}) overrides the director's own hotspot. The hotspot
+    // is the right answer for "show me the battle" and the wrong one for
+    // "show me THAT animal": tools/ape-shot.mjs has to frame one gorilla's
+    // arms, and the densest fight is rarely where it is standing.
+    look: function (dist, pitch, yaw, at) {
+      const hs = at || hotspot();
       cam.mode = "free";
       if (hs) { cam.wFocus.set(hs.x, MAP.groundAt(hs.x, hs.z), hs.z); cam.focus.copy(cam.wFocus); }
       cam.wDist = cam.dist = dist || 40;
@@ -3661,6 +3711,13 @@ CBZ.studio.need(NEED).then(function () {
       return hs;
     },
     reinforce: function (n) { queueMen(n || 10); },
+    /* THE LIVE CAST, BY REFERENCE. Every probe above answers a question about
+       the ARMY (how many, how far apart, how many rounds); tools/ape-check.mjs
+       needs to ask a question about a BODY — is this man still flagged as held
+       by something that no longer exists — and no counter can carry that. It
+       is the same array the sim walks, deliberately: a copy would let a stale
+       flag hide behind the copy. */
+    roster: function () { return men; },
     /* WHICH PAIRS, AND WHAT WERE THEY DOING. An overlap COUNT tells you the
        bodies are wrong; it never tells you which rule put them there, and
        three rules can produce the same number. This lists the live offenders
