@@ -244,9 +244,9 @@
           if (Math.abs(t) < bay / 2) continue;
           obox(f, t, 0.13, 0.11, 0.15, 0.30, outer + 0.01, DARK);
         }
-        run(0.29, 0.10, P, outer, TRIM);                            // the deck boards
-        run(0.28, 0.13, 0.12, outer + 0.05, TRIMD, 0.06);           // edge fascia
-        run(0.20, 0.08, P * 0.94, outer - 0.06, DARK, -0.10);       // joist shadow
+        lay(0.29, 0.10, P, outer, TRIM);                            // the deck boards
+        lay(0.28, 0.13, 0.12, outer + 0.05, TRIMD, 0.06);           // edge fascia
+        lay(0.20, 0.08, P * 0.94, outer - 0.06, DARK, -0.10);       // joist shadow
       }
       // the walkable ring: four platforms, no collider, so a monumental porch
       // can never seal the building's own front door

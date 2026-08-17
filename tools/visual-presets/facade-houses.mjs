@@ -52,46 +52,86 @@ const COTTAGE = { w: 11, d: 9, storeys: 1 };
 const MANSION = { w: 22, d: 16, storeys: 4 };
 const FH = 3.2;
 
-/* Every camera is SOLVED from the subject, not eyeballed, and it budgets for a
-   ROOF above the shell — the whole point of this set. A house roof plus a
-   chimney can reach ~1.9x the wall height on the one-storey cottage (a 3.2 m
-   shell under a 2.6 m gable and a 1.4 m stack), so ROOF_ALLOW is generous and
-   the frame maths uses it. Crop a chimney off and you have photographed the
-   wrong half of the building. */
-const ROOF_ALLOW = 1.95;
+/* Every camera is SOLVED from the subject, never eyeballed, and it budgets for
+   a ROOF above the shell — the whole point of this set. Crop a chimney off and
+   you have photographed the wrong half of the building.
+
+   THE REACH TABLE. Per style, per subject size: [tallest point, largest
+   half-extent from the centre], in metres, MEASURED by running each builder
+   against a stub ctx that records the extremes of every box it emits (that
+   probe lives in the scratchpad; re-run it and paste if a grammar changes
+   shape). This is why the cottage plates are framed differently from the
+   mansion plates: a manor's roof reaches 3.8x its wall on a one-storey shell
+   and 1.95x on a four-storey one, and a desert house's garden walls run 17 m
+   out from the centre while a brick Colonial stops at 11.7. A single guessed
+   multiplier cannot serve both, and the first run of this sheet proved it by
+   cropping the ridge off half the plates. */
+const REACH = {
+  greekrev:   { 1: [7.8, 7.4],  2: [12.3, 9.2],  4: [20.9, 13.8] },
+  romanvilla: { 1: [6.4, 7.3],  2: [10.2, 9.2],  4: [17.2, 13.3] },
+  spanish:    { 1: [10.2, 7.5], 2: [13.9, 10.1], 4: [21.4, 14.0] },
+  manor:      { 1: [12.1, 6.6], 2: [17.1, 7.9],  4: [25.0, 12.1] },
+  queenanne:  { 1: [10.0, 7.5], 2: [15.6, 9.4],  4: [23.1, 14.3] },
+  plantation: { 1: [7.4, 7.8],  2: [11.4, 9.8],  4: [19.7, 15.1] },
+  machiya:    { 1: [7.0, 7.5],  2: [11.0, 9.5],  4: [21.0, 14.3] },
+  desertmod:  { 1: [6.6, 9.8],  2: [9.9, 12.3],  4: [16.4, 17.3] },
+  techhouse:  { 1: [5.1, 6.8],  2: [8.3, 8.5],   4: [14.7, 12.7] },
+  ranch:      { 1: [8.2, 6.5],  2: [12.2, 9.4],  4: [20.1, 14.4] },
+  brickhouse: { 1: [9.0, 6.1],  2: [13.0, 7.6],  4: [20.6, 11.7] },
+};
+const MARGIN = 1.12;                      // air around the measured extreme
 const frame = (span, fill, fov) => (span / fill) / (2 * Math.tan(fov * Math.PI / 360));
-const fullTop = (s) => s.storeys * FH * ROOF_ALLOW;
+/* A style with no measured entry (a new grammar, or a subject size not in the
+   table) falls back to the envelope the table's worst case implies: a roof
+   allowance that shrinks as the shell grows, and a plan reach a little wider
+   than the footprint. Generous on purpose — sky in the plate is a blemish,
+   a cropped ridge is a lie. */
+const reach = (style, s) => {
+  const r = REACH[style] && REACH[style][s.storeys];
+  const top = r ? r[0] : s.storeys * FH * (1.75 + 2.65 / Math.max(1, s.storeys));
+  const half = r ? r[1] : Math.max(s.w, s.d) * 0.9;
+  return { top: top * MARGIN, half: half * MARGIN };
+};
 
 /* THE HERO. Three-quarter, from a little above eye level — high enough that the
    roof PLANE reads (on a house the roof is a surface you see, not just an
    outline) and low enough that it is still a house seen from the street rather
    than a plan. */
-const hero = (s) => {
-  const top = fullTop(s), fov = 40;
-  const dist = frame(Math.max(top, s.w * 0.8), 0.74, fov);
-  return { x: dist * 0.74, y: top * 0.62, z: dist * 0.74,
-    ax: 0, ay: top * 0.38, az: 0, fov: fov };
+const hero = (style, s) => {
+  const { top, half } = reach(style, s);
+  const fov = 40;
+  // Hold whichever is larger: the full height, or the three-quarter width —
+  // a low wide desert house overflows sideways long before it overflows up.
+  const dist = frame(Math.max(top, half * 1.55), 0.88, fov);
+  return { x: dist * 0.74, y: top * 0.52, z: dist * 0.74,
+    ax: 0, ay: top * 0.44, az: 0, fov: fov };
 };
 /* THE PAVEMENT. Standing at the gate looking at the front door — the frame that
    judges the porch, the steps, the door surround, and whether the ground-floor
    glass survived the dressing. Pushed back far enough to hold the full width
    plus the roof at this lens, and never inside the porch. */
-const street = (s) => {
+const street = (style, s) => {
   const fov = 58;
-  const needW = (s.w * 1.5) / 1.10;
-  const needH = fullTop(s) * 1.15;
-  return { x: s.w * 0.20, y: 1.65, z: s.d / 2 + Math.max(needW, needH, 13),
-    ax: 0, ay: s.storeys * FH * 0.5, az: 0, fov: fov };
+  const { top, half } = reach(style, s);
+  // Wide enough for the whole front, far enough for the ridge, and aimed at
+  // the middle of the WHOLE building — aiming at mid-wall throws away the top
+  // of the frame on a house whose roof is most of its height.
+  const needW = frame(half * 2.05, 0.94, fov);
+  const needH = frame(top, 0.94, fov) * 0.66;
+  return { x: s.w * 0.16, y: 1.65, z: s.d / 2 + Math.max(needW, needH, 11),
+    ax: 0, ay: top * 0.40, az: 0, fov: fov };
 };
 /* THE ROOFLINE. A house is recognised from down the block as a shape against
    the sky, so this frames the top half only: eaves, ridge, dormers, chimneys,
    turret, tile courses. If a style has no roof it fails visibly here. */
-const roofline = (s) => {
-  const h = s.storeys * FH, top = fullTop(s), fov = 30;
-  const band = (top - h * 0.55) * 1.55;
-  const dist = frame(band, 0.82, fov);
-  return { x: dist * 0.66, y: h * 0.92, z: dist * 0.66,
-    ax: 0, ay: (h * 0.72 + top) / 2, az: 0, fov: fov };
+const roofline = (style, s) => {
+  const h = s.storeys * FH, fov = 30;
+  const { top, half } = reach(style, s);
+  const y0 = h * 0.60;                       // start just below the wall head
+  const band = Math.max((top - y0) * 1.25, half * 1.5);
+  const dist = frame(band, 0.86, fov);
+  return { x: dist * 0.66, y: h * 0.88, z: dist * 0.66,
+    ax: 0, ay: (y0 + top) / 2, az: 0, fov: fov };
 };
 
 const STYLES = [
@@ -122,27 +162,34 @@ const STYLES = [
 const subjects = [];
 for (const [id, label, focus] of STYLES) {
   subjects.push({ id: "hero-" + id, label: label + " — the house", style: id,
-    focus: focus, subject: HOUSE, cam: hero(HOUSE) });
+    focus: focus, subject: HOUSE, cam: hero(id, HOUSE) });
 }
 for (const [id, label] of STYLES) {
   subjects.push({ id: "street-" + id, label: label + " — from the pavement", style: id,
     focus: "Standing at the gate. This is where a player meets the house: the door must be clear and reachable, nothing may hang below head height across it, and — the owner's first requirement — the base building's OWN window glass must still be visible between whatever the facade added. Shutters, posts, surrounds and mullions framing the glass are right; a solid band laid across it is the bug this frame exists to catch.",
-    subject: HOUSE, cam: street(HOUSE) });
+    subject: HOUSE, cam: street(id, HOUSE) });
 }
 for (const [id, label] of STYLES) {
   subjects.push({ id: "roof-" + id, label: label + " — the roofline", style: id,
     focus: "The top half alone, which is how a house is recognised from down the block: eaves and their overhang, ridge, gables, dormers, tile or shingle coursing, chimneys, turret, finials. A house grammar that terminated in a flat parapet has failed here and nowhere else.",
-    subject: HOUSE, cam: roofline(HOUSE) });
+    subject: HOUSE, cam: roofline(id, HOUSE) });
 }
 for (const [id, label] of STYLES) {
   subjects.push({ id: "cottage-" + id, label: label + " — one storey, 11 m", style: id,
     focus: "The same grammar on a cottage. Bay counts, porch bays, roof height, chimney size and column count must all have come down with the building. Ornament sized for a two-storey house and pasted onto one storey is the tell that a metre constant was hardcoded instead of derived from the host.",
-    subject: COTTAGE, cam: hero(COTTAGE) });
+    subject: COTTAGE, cam: hero(id, COTTAGE) });
 }
+/* Four of the eleven declare maxStoreys 3, so the mansion plate is deliberately
+   OUTSIDE their range: the auto-picker would never hand them this shell, and an
+   explicit dress spec at a call site is always obeyed, so this is what the
+   author would get if they asked anyway. Said plainly on the plate rather than
+   quietly skipped — a grammar's limit is worth seeing. */
+const CAPPED_AT_3 = { romanvilla: true, machiya: true, desertmod: true, techhouse: true };
 for (const [id, label] of STYLES) {
   subjects.push({ id: "mansion-" + id, label: label + " — four storeys, 22 m", style: id,
-    focus: "The same grammar on the 22x16m four-storey shell facade-gallery.mjs uses, so a house can be judged against the commercial ten on the identical box. Detail must multiply where it should (bays, columns, dormers, courses) and stay singular where it should (one turret, one tower, one ridge, one porch).",
-    subject: MANSION, cam: hero(MANSION) });
+    focus: "The same grammar on the 22x16m four-storey shell facade-gallery.mjs uses, so a house can be judged against the commercial ten on the identical box. Detail must multiply where it should (bays, columns, dormers, courses) and stay singular where it should (one turret, one tower, one ridge, one porch)."
+      + (CAPPED_AT_3[id] ? " NOTE: this grammar declares maxStoreys 3 — it is horizontal by definition and the registry will never hand it a shell this tall. The plate is here to show what its author was avoiding." : ""),
+    subject: MANSION, cam: hero(id, MANSION) });
 }
 
 async function stageFacadeHouses(input) {
