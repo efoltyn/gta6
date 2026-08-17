@@ -64,6 +64,7 @@
   const smooth = (u) => u * u * (3 - 2 * u);
   const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _t = new THREE.Vector3();
   const _tmp = new THREE.Vector3(), _bodyQ = new THREE.Quaternion();
+  const _dbg = new THREE.Vector3();
 
   /* ---- WHERE A WEAPON'S HANDS GO ----------------------------------------
      Authored per weapon in weapons/appearances/*.js. The one prop that can
@@ -487,7 +488,11 @@
         seen.butt = buttLen(prop);
         _rt.addScaledVector(_fwd, seen.butt);
         CBZ.charArmTo.rest(ch, "r", 0);
-        CBZ.charArmTo(ch, _rt, "r", blend);
+        ch.sockets.rightHand.updateWorldMatrix(true, false);
+        seen.rBefore = ch.sockets.rightHand.getWorldPosition(_dbg).distanceTo(_rt);
+        seen.rArm = CBZ.charArmTo(ch, _rt, "r", blend);
+        ch.sockets.rightHand.updateWorldMatrix(true, false);
+        seen.rAfter = ch.sockets.rightHand.getWorldPosition(_dbg).distanceTo(_rt);
         // The gun rode the wrist back, so its world aim is now stale in both
         // inputs the lock uses (socket orientation, and the parallax origin).
         if (CBZ.tpHandWeaponRelock) CBZ.tpHandWeaponRelock();
@@ -514,7 +519,9 @@
     prop.updateWorldMatrix(true, false);
     _grip.set(0, 0, 0);
     prop.localToWorld(_grip);
-    if (shoulder.distanceTo(_grip) > reach) return target;   // even the grip is gone
+    seen.gripDist = shoulder.distanceTo(_grip);
+    if (seen.gripDist > reach) { seen.slideBailed = 1; return target; }   // even the grip is gone
+    seen.slideBailed = 0;
     let lo = 0, hi = 1;
     for (let i = 0; i < 4; i++) {
       const mid = (lo + hi) / 2;
@@ -679,6 +686,8 @@
       // reach, how far short it was, and what it did about it
       reach: seen.reach, dist: seen.dist, over: seen.over, over2: seen.over2,
       butt: seen.butt, slid: seen.slid, residual: seen.residual,
+      rArm: seen.rArm, rBefore: seen.rBefore, rAfter: seen.rAfter,
+      gripDist: seen.gripDist, slideBailed: seen.slideBailed,
       reloading: R.active,
       reloadP: R.p,
     };

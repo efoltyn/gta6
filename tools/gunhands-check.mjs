@@ -154,6 +154,14 @@ const PROBE = `(() => {
       // instead of sampling an empty hand.
       let prop = null;
       for (let w = 0; w < 24 && !prop; w++) { step(10); prop = drawn(); }
+      if (!prop) {
+        const sk = ch().sockets.thirdPersonWeapon || ch().sockets.weapon;
+        rec.miss = "cur=" + CBZ.currentWeaponId + " fpsW=" + (CBZ.fps && CBZ.fps.weapon) +
+          " armed=" + (CBZ.playerArmed ? CBZ.playerArmed() : "?") +
+          " xfer=" + JSON.stringify(CBZ.weaponTransferState ? CBZ.weaponTransferState().active : "?") +
+          " kids=" + (sk ? sk.children.map((c) => ((c.userData && c.userData.weaponId) || c.type) +
+            (c.visible ? ":vis" : ":hid")).join(",") : "no socket");
+      }
       rec.drawn = prop ? prop.userData.weaponId : null;
       rec.grips = !!(prop && prop.userData.grips);
       if (!prop) { rec.err = "no drawn prop"; out.guns.push(rec); continue; }
@@ -178,7 +186,10 @@ const PROBE = `(() => {
         ? "reach=" + (au.reach*100).toFixed(0) + " dist=" + (au.dist*100).toFixed(0) +
           " over=" + (au.over*100).toFixed(0) + " butt=" + ((au.butt||0)*100).toFixed(0) +
           " over2=" + (au.over2*100).toFixed(0) + " slid=" + au.slid +
-          " resid=" + (au.residual == null ? "null" : (au.residual*100).toFixed(0))
+          " resid=" + (au.residual == null ? "null" : (au.residual*100).toFixed(0)) +
+          " | rArm=" + (au.rArm == null ? "NULL" : (au.rArm*100).toFixed(0)) +
+          " rBef=" + ((au.rBefore||0)*100).toFixed(0) + " rAft=" + ((au.rAfter||0)*100).toFixed(0) +
+          " gripD=" + ((au.gripDist||0)*100).toFixed(0) + " bail=" + au.slideBailed
         : null;
       // ISOLATION PROBE: call the solver by hand on the same anchor. If this
       // lands and the frame pass did not, the fault is in the plumbing (hook
@@ -258,7 +269,7 @@ for (const g of res.guns) {
     lpad(g.travel, 9) + "  " + pad(g.style, 10) + lpad(g.ammoAfter, 7) + lpad(g.blend, 7) +
     "  " + (g.why || "") +
     (g.solve ? "  [" + g.solve + "]" : "") +
-    (g.err ? "   ERR " + g.err : ""));
+    (g.err ? "   ERR " + g.err : "") + (g.miss ? "  " + g.miss : ""));
   if (g.err) fails.push(g.id + ": " + g.err);
   if (g.oneHanded) continue;
   // A hand wrapped round a gun is within a fist of its bore. 22 cm is generous
