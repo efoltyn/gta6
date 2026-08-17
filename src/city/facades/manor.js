@@ -474,7 +474,10 @@
           const gh = clamp(pitchH * 0.34, 0.9, 2.3);
           const top = Math.min(pTop + rise + gh, H + pitchH * 0.30);
           const gy0 = pTop + rise * 0.9;
-          const gw = e.gap + cheek * 2.2;
+          // The hood has to clear e.head, so it necessarily lands in the first
+          // upper storey's glass. It is kept TIGHT to the doorway (and capped
+          // against the face) so it takes the middle light and nothing more.
+          const gw = Math.min(e.gap + cheek * 1.3, f.span * 0.26);
           const steps = 6;
           for (let i = 0; i < steps; i++) {
             const u0 = i / steps, u1 = (i + 1) / steps;

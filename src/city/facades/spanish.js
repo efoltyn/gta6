@@ -178,13 +178,15 @@
       // ============================================================
       //  3. THE TOWER, SOLVED
       // ============================================================
-      // Wide enough that its base can be pierced by a portal that still
-      // leaves the kit's doorway keep-out clear, and deep enough that it
-      // stands PAST the main eave overhang — a tower the eaves fly over is a
-      // bump, not a tower.
-      const tS = clamp(Math.max(small * 0.26, e.gap + 1.15), 3.00,
-        Math.min(4.60, df.span * 0.42));
-      const tW = clamp(tS * 0.19, 0.42, 0.80);       // its wall thickness
+      // Wide enough that its base can be pierced by a portal whose own jambs
+      // stand OUTSIDE the kit's doorway keep-out — the walls are 15 percent of
+      // the side each, so the clear span is 0.70 tS and that is what has to
+      // beat e.gap, not the tower's overall width — and deep enough that it
+      // stands PAST the main eave overhang, because a tower the eaves fly over
+      // is a bump, not a tower.
+      const tS = clamp(Math.max(small * 0.32, (e.gap + 0.40) / 0.70), 3.40,
+        Math.min(5.60, df.span * 0.44));
+      const tW = clamp(tS * 0.15, 0.38, 0.70);       // its wall thickness
       const tP = EO + clamp(tS * 0.16, 0.25, 0.55);  // proud of the eave
       const tIn = clamp(tS * 0.22, 0.40, 0.90);      // rooted into the host wall
       const nOut = df.halfN + tP, nIn = df.halfN - tIn;
@@ -192,7 +194,7 @@
       // PIERCED, or standing beside the door? A drive-in front (a showroom or
       // a garage ground floor) has a 6.4 m opening no sane tower can span, so
       // there the tower steps aside instead and the door keeps the open wall.
-      const pierce = !e.driveIn && tS >= e.gap + 1.10 && df.span >= tS + 2.2;
+      const pierce = !e.driveIn && (tS - tW * 2) >= e.gap + 0.30 && df.span >= tS + 2.2;
       const tSide = (spec.towerSide === -1 || spec.towerSide === 1) ? spec.towerSide
         : (h(0x5b01) < 0.5 ? -1 : 1);
       const tCen = pierce ? 0
@@ -205,6 +207,15 @@
       const pSpring = clamp(e.head + 0.25, 2.40,
         Math.max(2.45, towTop - pRise - clamp(FH * 1.10, 2.20, 3.40)));
       const pHead = pSpring + pRise;
+
+      // …and the porch, which the frontispiece and the steps both measure off.
+      // PD is forced past the main eave overhang so the porch roof and the
+      // house roof read as two roofs instead of one thick one.
+      const PD = clamp(Math.max(small * 0.17, EO + 0.55), 1.40, 3.00);
+      const arcW = clamp(small * 0.30, 2.30, 3.50);      // one arcade bay
+      const pS = clamp(arcW * 0.22, 0.48, 0.85);         // pier side
+      const TOP = 0.30;                                  // terrace, under STEP_UP
+      const pOut = df.halfN + PD;
 
       function towFouls(f, t, wid) {
         return f.s === df.s && Math.abs(t - tCen) < (tS + wid) / 2 + 0.30;
@@ -436,7 +447,10 @@
         }
         // ITS OWN HIPPED TILE ROOF, on a deep eave, courses shrinking on both
         // axes. One lip box per course does the whole four-sided bulge.
-        const tRH = clamp(tS * 0.46, 1.00, 2.40);
+        // A LOW pyramid, and capped against how far the tower actually stands
+        // over the house: a steep cap reads Italianate, and an unclamped one
+        // turns the cottage subject into a campanile with a shed attached.
+        const tRH = clamp(Math.min(tS * 0.36, (towTop - yE) * 0.45), 0.85, 2.20);
         const tEO = clamp(tS * 0.19, 0.35, 0.75);
         const tnC = clamp(Math.round(tRH / CH), 3, 7);
         let tTop = towTop;
@@ -458,56 +472,64 @@
       }
 
       // ============================================================
-      //  7. THE CARVED DOOR SURROUND
+      //  7. THE CARVED FRONTISPIECE
       // ============================================================
       // The one piece of cast-stone ornament the house spends anything on, and
-      // it sits a full tower-depth back inside the portal where it is read
-      // through the arch. Spiral pilasters (alternating block lengths are how a
-      // twisted shaft reads in merged axis-aligned boxes), a moulded
-      // architrave, a scalloped shell hood and a cartouche. Everything that
-      // crosses the doorway is above e.head; the pilasters stand outside it.
-      {
-        const sw = Math.min(e.gap / 2 + 0.50, tS / 2 - tW - 0.28);
-        const top = Math.min(e.head + 0.45, yE - 0.35);
-        if (sw > e.gap / 2 * 0.7 && top > 2.2) {
-          F.box(ctx, df, 0, top / 2, sw * 2 + 0.60, top, 0.06, F.shade(stuc, 0.60));
-          const nSp = 7, spH = (top - 0.55) / nSp;
+      // it goes where the real ones put it: on the FACE of the entry tower,
+      // wrapped round the portal, which is the outermost plane of the whole
+      // composition and a metre and a half clear of any glazing. Spiral
+      // pilasters — alternating block lengths are how a twisted shaft reads in
+      // merged axis-aligned boxes — stand outside the doorway on both sides,
+      // and a scalloped shell with a cartouche rides over the arch crown.
+      if (pierce) {
+        const pw = clamp(tS * 0.13, 0.34, 0.60);
+        const pt = pClear / 2 + pw * 0.6 + 0.14;         // clear of the doorway
+        const y0 = TOP + 0.36, nSp = 7, spH = (pSpring - 0.34 - y0) / nSp;
+        if (spH > 0.16 && pt + pw < tS / 2) {
           for (const sg of [-1, 1]) {
-            const t = sg * (sw + 0.24);
             for (let i = 0; i < nSp; i++) {
-              const twist = (i % 2) ? 0.62 : 1.0;
-              F.box(ctx, df, t, 0.42 + (i + 0.5) * spH, 0.34 * twist + 0.16, spH + 0.03,
-                0.20 + (i % 2 ? 0 : 0.09), i % 2 ? stucD : stucL);
+              const tw2 = (i % 2) ? 0.60 : 1.0;
+              ebox(tCen + sg * pt, y0 + (i + 0.5) * spH, nOut + 0.10, pw * tw2 + pw * 0.18,
+                spH + 0.03, 0.20 + (i % 2 ? 0 : 0.09), i % 2 ? stucD : stucL);
             }
-            F.box(ctx, df, t, 0.24, 0.66, 0.34, 0.28, stucL);            // base
-            F.box(ctx, df, t, top - 0.16, 0.70, 0.24, 0.32, stucL);      // capital
+            ebox(tCen + sg * pt, y0 - 0.16, nOut + 0.10, pw * 1.5, 0.32, 0.28, stucL);
+            ebox(tCen + sg * pt, pSpring - 0.18, nOut + 0.10, pw * 1.6, 0.30, 0.30, stucL);
           }
-          // architrave and the shell over it
-          F.box(ctx, df, 0, top + 0.10, sw * 2 + 1.30, 0.22, 0.34, stucL);
-          F.box(ctx, df, 0, top + 0.28, sw * 2 + 1.00, 0.16, 0.26, stucD);
-          const shN = 4, shH = clamp(top * 0.22, 0.4, 0.9);
-          for (let i = 0; i < shN; i++) {
-            const u = (i + 0.5) / shN;
-            F.box(ctx, df, 0, top + 0.38 + u * shH, (sw * 2 + 0.70) * Math.sqrt(Math.max(0, 1 - u * u)),
-              shH / shN + 0.04, 0.30 - i * 0.04, i % 2 ? stucD : stucL);
-          }
-          // the cartouche: a small carved panel over the shell
-          F.box(ctx, df, 0, top + 0.44 + shH, 0.60, 0.44, 0.34, stucL);
-          F.box(ctx, df, 0, top + 0.44 + shH, 0.32, 0.26, 0.40, TALAV);
         }
+        const shH = clamp(tS * 0.20, 0.42, 0.90), shY = pHead + 0.26;
+        if (shY + shH < towTop - 0.60) {
+          ebox(tCen, shY, nOut + 0.10, pClear + 0.70, 0.20, 0.30, stucL);   // the cap shelf
+          for (let i = 0; i < 4; i++) {                                     // the shell
+            const u = (i + 0.5) / 4;
+            ebox(tCen, shY + 0.16 + u * shH, nOut + 0.09,
+              (pClear + 0.34) * Math.sqrt(Math.max(0, 1 - u * u)), shH / 4 + 0.05,
+              0.26 - i * 0.03, i % 2 ? stucD : stucL);
+          }
+          ebox(tCen, shY + 0.34 + shH, nOut + 0.12, 0.64, 0.48, 0.30, stucL);  // cartouche
+          ebox(tCen, shY + 0.34 + shH, nOut + 0.17, 0.34, 0.28, 0.24, TALAV);
+        }
+      }
+      // Behind the portal, on the house wall itself: the shadowed alcove the
+      // door actually stands in, so the entrance is a hole in a thick wall
+      // rather than a leaf stuck on a flat plane (stone.js's move), with a
+      // moulded architrave. It is stopped at the TOP of the first floor's sill
+      // zone, so however tall the alcove wants to be it cannot touch glass
+      // above the ground storey.
+      {
+        const aw = (pierce ? pClear : e.gap + 0.70) + 0.30;
+        const aTop = Math.min(e.head + 0.15, FH + GS - 0.05);
+        F.box(ctx, df, 0, aTop / 2, aw, aTop, 0.06, F.shade(stuc, 0.58));
+        F.box(ctx, df, 0, aTop - 0.13, aw - 0.24, 0.20, 0.22, stucL);
+        F.box(ctx, df, 0, aTop - 0.30, aw - 0.70, 0.14, 0.15, stucD);
       }
 
       // ============================================================
       //  8. THE ARCADE / COVERED PORCH, ITS TERRACE AND STEPS
       // ============================================================
-      // Round arches on square piers, standing on their own paved terrace,
-      // under a shed of tile. The depth is forced past the main eave overhang
-      // so the porch roof and the house roof read as two roofs.
-      const PD = clamp(Math.max(small * 0.17, EO + 0.55), 1.40, 3.00);
-      const arcW = clamp(small * 0.30, 2.30, 3.50);
-      const pS = clamp(arcW * 0.22, 0.48, 0.85);
-      const TOP = 0.30;                              // under physics STEP_UP
-      const pOut = df.halfN + PD;
+      // Round arches on square piers, standing on their own paved terrace
+      // under a shed of tile, filling whatever the tower leaves of the
+      // entrance face — one wing each side, and asymmetric without apology
+      // when the tower cannot be centred.
       {
         const lim = df.span / 2 - 0.35;
         const runs = [];
@@ -520,7 +542,9 @@
         const plan = [];
         for (const r of runs) {
           const len = r[1] - r[0];
-          const nA = Math.max(1, Math.round(len / arcW + 0.15));
+          // rounded UP a little on purpose: two tight arches read as an arcade,
+          // one four-metre arch reads as a hole in a wall.
+          const nA = Math.max(1, Math.round(len / arcW + 0.35));
           const step = len / nA;
           const rise = Math.min((step - pS) / 2, clamp(arcW * 0.55, 0.60, 1.70));
           if (rise > maxRise) maxRise = rise;
@@ -572,15 +596,16 @@
           }
           // THE SHED ROOF: three tile courses stepping out and down, the last
           // with the same rounded lip and tile snouts the main eave gets. Its
-          // inner edge stops 0.30 m short of the wall — a solid slab abutting
-          // the wall there would lay a band across the first floor's glass —
-          // and the gap is bridged by the porch beam ends, which is what
-          // actually carries a porch roof anyway.
+          // inner edge stops STAND clear of the wall — a slab abutting the
+          // wall there would lay a solid band right across the first floor's
+          // glazing, which is the one thing this kit must never do — and the
+          // slot is bridged by the porch RAFTER ENDS, which is what carries a
+          // porch roof anyway and which leaves the glass visible between them.
           const aLen = P.step * P.nA + pS * 0.8, aCen = (r[0] + r[1]) / 2;
           ebox(aCen, beamY + 0.04, pOut - pS / 2, aLen, 0.26, pS + 0.16, timber);   // the beam
-          const nS = 3, seg = (PD - 0.30) / nS + 0.18;
+          const nS = 3, STAND = 0.60, seg = (PD - STAND) / nS + 0.18;
           for (let j = 0; j < nS; j++) {
-            const n0 = df.halfN + 0.30 + (PD - 0.30) * j / nS;
+            const n0 = df.halfN + STAND + (PD - STAND) * j / nS;
             const y = beamY + 0.40 - j * CH * 0.62;
             ebox(aCen, y, n0 + seg / 2, aLen + 0.24, CH * 0.90, seg, j % 2 ? tile : F.shade(tile, 0.93));
             ebox(aCen, y - CH * 0.30, n0 + seg - 0.10, aLen + 0.30, CH * 0.46, CH * 0.60, tileL);
@@ -591,7 +616,7 @@
             const t = aCen - aLen / 2 + (aLen / nSn) * (i + 0.5);
             ebox(t, beamY + 0.40 - (nS - 1) * CH * 0.62 - CH * 0.18, pOut - 0.06,
               (aLen / nSn) * 0.42, CH * 0.60, 0.30, tileL);
-            ebox(t, beamY + 0.28, df.halfN + 0.26, 0.14, 0.18, 0.60, timberD);
+            ebox(t, beamY + 0.30, df.halfN + 0.46, 0.15, 0.19, 0.95, timberD);
           }
         }
         // THE TERRACE: one paved slab, one platform record, top 0.30 so it is
@@ -609,32 +634,35 @@
         // THE FLIGHT in front of the portal: two cosmetic treads with Talavera
         // risers, over one continuous ramp platform so a sprinting player can
         // never sample a seam between tread boxes.
+        // The flight is centred on the DOORWAY, which is the middle of the
+        // face whether or not the tower could be pierced round it.
         if (!e.driveIn) {
-          const stW = pClear + 1.40, stD = clamp(PD * 0.55, 0.70, 1.30);
+          const stW = (pierce ? pClear : e.gap) + 1.40, stD = clamp(PD * 0.55, 0.70, 1.30);
           for (let i = 0; i < 2; i++) {
             const th = TOP * (2 - i) / 2, off = pOut + (i + 0.5) * (stD / 2);
-            ebox(tCen, th / 2, off, stW - i * 0.30, th, stD / 2 + 0.03, floorT);
-            ebox(tCen, th - 0.05, off + stD / 4, stW - i * 0.30 - 0.10, 0.10, 0.10, TALAV);
+            ebox(0, th / 2, off, stW - i * 0.30, th, stD / 2 + 0.03, floorT);
+            ebox(0, th - 0.05, off + stD / 4, stW - i * 0.30 - 0.10, 0.10, 0.10, TALAV);
           }
           const o0 = pOut, o1 = pOut + stD;
           if (df.horiz) {
             const z0 = df.out * o0, z1 = df.out * o1;
-            ctx.plat(tCen - stW / 2, tCen + stW / 2, Math.min(z0, z1), Math.max(z0, z1), TOP,
+            ctx.plat(-stW / 2, stW / 2, Math.min(z0, z1), Math.max(z0, z1), TOP,
               { z0: ctx.oz + z1, z1: ctx.oz + z0, y0: 0, y1: TOP });
           } else {
             const x0 = df.out * o0, x1 = df.out * o1;
-            ctx.plat(Math.min(x0, x1), Math.max(x0, x1), tCen - stW / 2, tCen + stW / 2, TOP,
+            ctx.plat(Math.min(x0, x1), Math.max(x0, x1), -stW / 2, stW / 2, TOP,
               { axis: "x", x0: ctx.ox + x1, x1: ctx.ox + x0, y0: 0, y1: TOP });
           }
         }
-        // a pair of iron lanterns flanking the portal — the only lit thing on
+        // a pair of iron lanterns flanking the door — the only lit thing on
         // the house, and the two real meshes the entrance spends
+        const lN = pierce ? nOut : df.halfN, lT = (pierce ? pClear / 2 : e.gap / 2) + 0.36;
         for (const sg of [-1, 1]) {
-          const t = tCen + sg * (pClear / 2 + 0.34);
+          const t = sg * lT;
           const ly = Math.min(pSpring - 0.30, TOP + 2.30);
-          ebox(t, ly + 0.30, nOut + 0.14, 0.10, 0.10, 0.30, iron);
-          ebox(t, ly + 0.14, nOut + 0.26, 0.20, 0.24, 0.20, iron);
-          const lx = df.horiz ? t : df.out * (nOut + 0.26), lz = df.horiz ? df.out * (nOut + 0.26) : t;
+          ebox(t, ly + 0.30, lN + 0.14, 0.10, 0.10, 0.30, iron);
+          ebox(t, ly + 0.14, lN + 0.26, 0.20, 0.24, 0.20, iron);
+          const lx = df.horiz ? t : df.out * (lN + 0.26), lz = df.horiz ? df.out * (lN + 0.26) : t;
           ctx.lamp(lx, ly, lz, clamp(small * 0.016, 0.12, 0.22), 0xffd8a2);
         }
       }

@@ -19,86 +19,73 @@
 
    WHY EACH ELEMENT IS HERE.
 
-     THE PLINTH     A low brick apron with air vents, 0.34 m high — under
-     AND DECK       physics STEP_UP so the player walks straight up onto the
-                    porch, and registered as four ctx.plat rectangles so the
-                    veranda is a real walkable ring, not scenery. Broad
-                    cosmetic steps and one continuous ramp platform at the
-                    door, exactly as stone.js does it.
+     PLINTH AND     A low brick apron with crawl vents, 0.34 m high — under
+     DECK           physics STEP_UP, and registered as four ctx.plat rects so
+                    the veranda is a walkable ring, not scenery. Broad steps
+                    on one continuous ramp platform at the door, as stone.js.
 
-     THE COLOSSAL   Boxed white pillars standing at the DECK EDGE on all four
-     COLONNADE      faces, sharing one corner pillar per corner so the
-                    colonnade genuinely turns. They run in one storey-crossing
-                    order from the deck to the architrave, so the gallery
-                    threads BETWEEN them instead of stacking two short orders.
-                    Count comes from the perimeter at a target spacing, and
-                    the CENTRE gap of the entrance face is widened until it
-                    clears F.entrance's door gap — a widened centre
-                    intercolumniation is period licence; a shifted column
-                    reads as a mistake. Six to eight pillars per face: they
+     THE COLOSSAL   Boxed pillars at the DECK EDGE on all four faces, one
+     COLONNADE      shared pillar per corner so the colonnade genuinely turns,
+                    running in ONE storey-crossing order from deck to
+                    architrave so the gallery threads between them rather than
+                    stacking two short orders. The count comes from the
+                    perimeter at a target spacing, and the CENTRE gap of the
+                    entrance face is widened until it clears F.entrance — a
+                    widened centre intercolumniation is period licence, a
+                    shifted column is a mistake. Six to eight per face: they
                     must be countable from the street, because the count IS
-                    the style.
-                    They are boxed (dbox) rather than turned cylinders, which
-                    is both the honest vernacular — square plastered pillars
-                    are what most of these houses actually have — and what
-                    lets twenty of them cost nothing. A lighter sliver down
-                    the middle of each of a pillar's four faces gives it the
-                    lit-centre/dark-arris shading of a round shaft.
+                    the style. Boxed (dbox) rather than turned: square
+                    plastered pillars are the honest vernacular and it is what
+                    lets twenty of them cost nothing, and a lighter sliver
+                    down the middle of each of a pillar's four faces gives it
+                    the lit-centre/dark-arris shading of a round shaft.
 
-     THE GALLERIES  One projecting deck plus a full balustrade at EVERY floor
-                    line above the ground, so a 2-storey house gets the
-                    canonical double-height veranda and a 4-storey one gets
-                    the three-tier New Orleans version instead of a stretched
-                    single order. Each deck lives ENTIRELY inside the host's
-                    solid sill zone (floor line to floor line + 0.55), which
-                    is why it can project 2 m without touching a window.
+     THE GALLERIES  A projecting deck and a full balustrade at EVERY floor
+                    line above the ground: the 2-storey house gets the
+                    canonical double-height veranda, the 4-storey one the
+                    three-tier New Orleans version instead of a stretched
+                    order. Each deck lives ENTIRELY inside the host's solid
+                    sill zone (floor line … +0.55) — the only reason a 2 m
+                    projection may touch the wall at all.
 
-     PLAIN          Architrave, plain frieze, cornice — carried on the pillars
-     ENTABLATURE    out at the deck edge, clear of the wall, so the deepest
-                    horizontal on the building is not on the wall at all.
+     ENTABLATURE    Architrave, plain frieze, cornice, carried on the pillars
+                    out at the deck edge, so the deepest horizontal on the
+                    building never touches the wall.
 
-     HIPPED ROOF    Stepped axis-aligned courses stepping in on BOTH axes
-                    (victorian.js's mansard with the second axis unfrozen),
-                    springing from the veranda's outer rectangle so the eaves
-                    fly out over the whole gallery. Hip ribs down the four
-                    corners, a ridge cap, and a low 0.46 rise/run — the roof
-                    must read BROAD and LOW or it turns into a barn.
+     HIPPED ROOF    Stepped courses walking in on BOTH axes (victorian.js's
+                    mansard with the second axis unfrozen), springing from the
+                    veranda's outer rectangle so the eaves fly out over the
+                    whole gallery. Hip ribs on the four corners, a ridge cap,
+                    and a low 0.46 rise/run: broad and low, or it is a barn.
+                    DORMERS sit on the slope, their front plane read off the
+                    slope at their own height so they can never sink into it
+                    and their count solved from how much roof plane is left up
+                    there — on a hip, far less than a mansard leaves. A pair
+                    of CHIMNEYS rises out of the slope near the end walls.
 
-     DORMERS        Set on the slope, their front plane solved from the slope
-                    inset at their own height so they can never sink into it,
-                    and their count solved from how much roof plane is left at
-                    their top — a hip has far less room up there than a
-                    mansard does.
-
-     CENTRAL        A low pedimented bay breaking the eave over the entrance,
-     GABLED BAY     with a raked cornice, a recessed tympanum and a lunette.
-                    It is what a hipped-roof plantation house has instead of a
-                    temple pediment, and it tells you where the door is from
-                    200 m. Dormers stand aside for it.
-
-     CHIMNEYS       A pair, on the long axis near the end walls, rising out of
-                    the slope and past the ridge with corbelled caps and pots.
+     CENTRAL        A low pedimented bay breaking the eave over the door, with
+     GABLED BAY     a raked cornice, a recessed tympanum and a lunette — what
+                    a hipped-roof plantation house has instead of a temple
+                    front. Dormers stand aside for it.
 
      SHUTTERS       Tall louvred pairs FLANKING the host's glass on every
-                    window, with a sill, a flat head and a 6/6 muntin grid.
-                    The shutters and the piers between the bays are VERTICAL,
-                    which is what turns the host's continuous glass ribbon
-                    into separate punched openings. A shutter over the glass
-                    would be a bug; a shutter beside it is the whole point.
+                    window, with sill, flat head and a sash grid. They and the
+                    piers between bays are VERTICAL, which is what turns the
+                    host's glass ribbon into punched openings. A shutter
+                    beside the glass is the point; over it is a bug.
 
-     THE DOORWAY    A wide central doorcase: pilasters outside F.entrance's
-                    gap, sidelights either side of the leaf, a stepped
-                    fanlight over it and a cornice on top, with two lit
-                    carriage lamps. Everything that crosses the door axis is
-                    held above the host's 2.25 m door head.
+     THE DOORWAY    Pilasters outside F.entrance's gap, sidelights either side
+                    of the leaf, a stepped fanlight, a cornice, two lit
+                    carriage lamps. Everything crossing the door axis is held
+                    above the host's 2.25 m door head.
 
    COLOUR. Limewashed cream body, brighter cream trim, one hash-picked dark
-   shutter colour and a clearly darker roof. Because merged deco cannot cast
-   shadows in this renderer, the veranda's shade is PAINTED: every square
-   metre of wall the facade clads is laid in a shaded tone, with darker lines
-   under each gallery deck and under the eave, so the white colonnade reads
-   against a wall that is genuinely in shadow. Mixing hard to white flattened
-   stone.js's first render; nothing here goes near 0xffffff.
+   shutter colour, a clearly darker roof. Merged deco cannot cast shadows in
+   this renderer, so the veranda's shade is PAINTED: every square metre of
+   wall this facade clads is laid in a shaded tone, with dark lines under each
+   gallery deck and under the eave, so the white colonnade reads against a
+   wall that is genuinely in shadow. Nothing goes near 0xffffff — mixing hard
+   to white is what flattened stone.js's first render.
 
    SPEC OPTIONS (all optional; the facade is complete with {style:"plantation"}):
      spec.shutter   hex, overrides the hash-picked shutter colour.
@@ -223,32 +210,43 @@
       function deckEdge(f) { return f.halfN + P; }
 
       // ---- the entrance, solved before anything else needs to dodge it ----
-      // The doorcase has to fit UNDER the porch ceiling: the first gallery
-      // deck on a multi-storey house, the eave soffit on a cottage.
-      const ceil = (ST > 1) ? (FH + 0.06) : (H - 0.26);
-      const dTop = Math.min(2.50, ceil - 0.62);           // head of the door opening
-      const fanR = clamp(ceil - dTop - 0.24, 0.14, 0.58); // fanlight rise
-      const dcHalf = e.gap / 2 + 0.60;                    // doorcase outer half width
-      const dHead = dTop + fanR + 0.10;                   // underside of its cornice
+      // Solved DOWNWARD from the porch ceiling — the first gallery deck's
+      // soffit on a house, the eave soffit on a cottage — because that ceiling
+      // is fixed by the host's storey height and the doorcase is not. The door
+      // head is then clamped to stay above the host's own 2.25 m door leaf.
+      const ceilTop = (ST > 1) ? (FH + 0.05) : (H - 0.30);
+      const dHead = ceilTop - 0.22;                       // underside of the doorcase cornice
+      const dTop = clamp(dHead - 0.55, 2.30, 2.60);       // head of the door opening
+      const fanR = clamp(dHead - dTop - 0.10, 0.12, 0.60); // fanlight rise
+      const dcHalf = e.gap / 2 + 0.53;                    // doorcase pilasters' outer edge
 
       // ============================================================
       //  3. THE PLINTH, THE VERANDA DECK AND THE STEPS
       // ============================================================
       for (const f of faces) {
         const len = ringLen(f), outer = deckEdge(f);
-        // the brick apron: the low plinth the whole veranda stands on
-        obox(f, 0, 0.12, len, 0.24, 0.26, outer, BRICK);
-        obox(f, 0, 0.25, len + 0.04, 0.07, 0.30, outer + 0.02, F.shade(BRICK, 1.12));
-        // crawl-space vents punched through it — cheap, and it stops the apron
-        // reading as a painted stripe along the ground
+        // A DRIVE-IN host (showroom / garage deck) has a bay where the front
+        // door would be, so the raised deck runs in two lengths either side of
+        // it rather than laying a 0.34 m lip across a vehicle opening.
+        const bay = (f.s === ctx.doorSide && e.driveIn) ? e.gap + 1.0 : 0;
+        const lay = function (cy, h, dep, out2, col, grow) {
+          const L = len + (grow || 0);
+          if (bay <= 0) { obox(f, 0, cy, L, h, dep, out2, col); return; }
+          const seg = (L - bay) / 2;
+          if (seg > 0.25) for (const sg of [-1, 1]) obox(f, sg * (bay + seg) / 2, cy, seg, h, dep, out2, col);
+        };
+        lay(0.12, 0.24, 0.26, outer, BRICK);                        // the brick apron
+        lay(0.25, 0.07, 0.30, outer + 0.02, F.shade(BRICK, 1.12), 0.04);
+        // crawl-space vents, which are what stop the apron reading as a stripe
         const nv = Math.max(2, Math.round(len / 1.25));
         for (let i = 0; i < nv; i++) {
-          obox(f, -len / 2 + (i + 0.5) * (len / nv), 0.13, 0.11, 0.15, 0.30, outer + 0.01, DARK);
+          const t = -len / 2 + (i + 0.5) * (len / nv);
+          if (Math.abs(t) < bay / 2) continue;
+          obox(f, t, 0.13, 0.11, 0.15, 0.30, outer + 0.01, DARK);
         }
-        // the deck boards, its edge fascia, and the joist shadow under it
-        obox(f, 0, 0.29, len, 0.10, P, outer, TRIM);
-        obox(f, 0, 0.28, len + 0.06, 0.13, 0.12, outer + 0.05, TRIMD);
-        obox(f, 0, 0.20, len - 0.10, 0.08, P * 0.94, outer - 0.06, DARK);
+        run(0.29, 0.10, P, outer, TRIM);                            // the deck boards
+        run(0.28, 0.13, 0.12, outer + 0.05, TRIMD, 0.06);           // edge fascia
+        run(0.20, 0.08, P * 0.94, outer - 0.06, DARK, -0.10);       // joist shadow
       }
       // the walkable ring: four platforms, no collider, so a monumental porch
       // can never seal the building's own front door
@@ -298,17 +296,17 @@
         const y0 = deckTop, capB = colTop - 0.36;
         ctx.dbox(x, y0 + 0.13, z, hw * 2.9, 0.26, hw * 2.9, TRIM);          // plinth block
         ctx.dbox(x, y0 + 0.32, z, hw * 2.5, 0.14, hw * 2.5, TRIMD);         // base mould
-        // the shaft in two courses with a little entasis, in the slightly
-        // darker trim so the highlight slivers can do their work
+        // the shaft in two courses with a little entasis, laid in the slightly
+        // darker trim so the highlight slivers have something to read against
         const sy = y0 + 0.39, sh = (capB - sy) / 2;
-        for (let i = 0; i < 2; i++) {
-          const r = hw * (1 - i * 0.05);
-          ctx.dbox(x, sy + (i + 0.5) * sh, z, r * 2, sh + 0.02, r * 2, TRIMD);
+        for (let i = 0; i < 2 && sh > 0.12; i++) {
+          const r = hw * (1 - i * 0.05), cy = sy + (i + 0.5) * sh;
+          ctx.dbox(x, cy, z, r * 2, sh + 0.02, r * 2, TRIMD);
           // a lighter sliver down the middle of all four faces: the lit centre
           // and dark arrises of a turned shaft, for four boxes and no meshes
           for (const sg of [-1, 1]) {
-            ctx.dbox(x + sg * r, sy + (i + 0.5) * sh, z, 0.05, sh - 0.06, r * 0.9, TRIM);
-            ctx.dbox(x, sy + (i + 0.5) * sh, z + sg * r, r * 0.9, sh - 0.06, 0.05, TRIM);
+            ctx.dbox(x + sg * r, cy, z, 0.05, sh - 0.06, r * 0.9, TRIM);
+            ctx.dbox(x, cy, z + sg * r, r * 0.9, sh - 0.06, 0.05, TRIM);
           }
         }
         ctx.dbox(x, capB + 0.06, z, hw * 1.86, 0.12, hw * 1.86, TRIMD);     // necking
@@ -346,12 +344,11 @@
         obox(f, tc, yDeck + railH, inner, 0.14, 0.22, outer + 0.02, TRIM);  // top rail
         obox(f, tc, yDeck + railH + 0.11, inner, 0.08, 0.28, outer + 0.05, TRIMD);
       }
-      // THE DECKS. Each one lives entirely inside the host's solid sill zone
-      // (k*FH … k*FH+0.55), which is the only reason a 2 m projection is
-      // allowed to touch the wall at all. Over the doorway its soffit sits at
-      // k*FH+0.09 — a metre clear of the host's 2.25 m door head, deco-only
-      // with no collider, and unavoidable: a two-level veranda IS a ceiling
-      // over its own front door.
+      // THE DECKS live entirely inside the host's solid sill zone (k*FH …
+      // k*FH+0.55) — the only reason a 2 m projection may touch the wall at
+      // all. Over the doorway the soffit lands at k*FH+0.09, a metre clear of
+      // the host's 2.25 m door head, deco-only with no collider, and
+      // unavoidable: a two-level veranda IS a ceiling over its own front door.
       for (let k = 1; k < ST; k++) {
         const y = k * FH;
         for (const f of faces) {
@@ -383,12 +380,15 @@
       // ============================================================
       // Per storey the host leaves solid: the sill zone (k*FH … +0.55), the
       // header zone ((k+1)*FH-0.45 … ), and a 0.55 m jamb at each end of the
-      // face. Clad exactly those and cross the glass with VERTICALS only, and
-      // the whole elevation reads as painted board with punched windows in it
-      // while every one of the host's own windows stays open.
-      const doorHole = [[-dcHalf - 0.25, dcHalf + 0.25]];
-      function wallBand(f, k, cy, h, proj, col) {
-        if (f.s === ctx.doorSide && k === 0) runBand(ctx, F, f, cy, h, proj, col, doorHole, 0.15);
+      // face. Clad exactly those, cross the glass with VERTICALS only, and the
+      // elevation reads as painted board with punched windows in it while
+      // every one of the host's own windows stays open.
+      // Only a band that would cross the OPENING steps aside: the ground sill
+      // course would otherwise lay a kerb across the bottom of the door. The
+      // header course is above the door head and runs straight through.
+      const doorHole = [[-dcHalf, dcHalf]];
+      function wallBand(f, cy, h, proj, col, hole) {
+        if (hole) runBand(ctx, F, f, cy, h, proj, col, doorHole, 0.15);
         else F.band(ctx, f, cy, h, proj, col, 0.30);
       }
       function shutter(f, t, y0, y1, sw) {
@@ -416,19 +416,16 @@
         const winW = Math.min(step * 0.44, FH * 0.42, 1.5);
         const shW = clamp(winW * 0.44, 0.26, 0.68);
         const pierW = Math.max(0.26, step - winW - shW * 2 - 0.12);
-        // CORNER BOARDS: the painted board that closes a timber wall at the
-        // arris. Vertical, so it may cross the glass, and it does the job the
-        // host's own end jambs are asking for.
-        for (const sg of [-1, 1]) {
-          F.rib(ctx, f, sg * (f.span / 2 - 0.30), deckTop, H - 0.12, 0.60, 0.11, TRIMD);
-        }
+        // CORNER BOARDS close a timber wall at the arris, and they land on the
+        // host's own solid end jambs. Vertical, so they may cross the glass.
+        for (const sg of [-1, 1]) F.rib(ctx, f, sg * (f.span / 2 - 0.30), deckTop, H - 0.12, 0.60, 0.11, TRIMD);
         for (let k = 0; k < ST; k++) {
           const y0 = k * FH, gy0 = y0 + 0.55, gy1 = y0 + FH - 0.45;
           // sill zone (from the porch floor up on the ground storey) …
           const s0 = (k === 0) ? deckTop + 0.02 : y0 + 0.02;
-          if (gy0 - s0 > 0.08) wallBand(f, k, (s0 + gy0) / 2, gy0 - s0, 0.07, WALLS);
+          if (gy0 - s0 > 0.08) wallBand(f, (s0 + gy0) / 2, gy0 - s0, 0.07, WALLS, isDoor && k === 0);
           // … and header zone. Both are inside the host's solid bands.
-          wallBand(f, k, gy1 + 0.215, 0.42, 0.07, WALLS);
+          wallBand(f, gy1 + 0.215, 0.42, 0.07, WALLS, false);
           // the piers between the bays: verticals, and the reason the glass
           // ribbon reads as separate openings
           for (let i = 0; i < lines.length; i++) {
@@ -441,12 +438,9 @@
             // middle: any bay it would collide with is DROPPED, not nudged
             if (k === 0 && isDoor && !F.clearsDoor(ctx, f, t, winW + shW * 2 + 0.4)) continue;
             for (const sg of [-1, 1]) shutter(f, t + sg * (winW / 2 + shW / 2), gy0 - 0.02, gy1 + 0.02, shW);
-            // a 6/6 muntin grid on the host's own glass — thin framing members,
-            // never a panel
+            // a sash grid on the host's own glass: thin framing, never a panel
             F.rib(ctx, f, t, gy0 + 0.05, gy1 - 0.05, 0.055, 0.06, TRIM);
-            for (const u of [0.34, 0.52, 0.70]) {
-              F.box(ctx, f, t, gy0 + (gy1 - gy0) * u, winW, 0.05, 0.06, TRIM);
-            }
+            for (const u of [0.34, 0.52, 0.70]) F.box(ctx, f, t, gy0 + (gy1 - gy0) * u, winW, 0.05, 0.06, TRIM);
             F.box(ctx, f, t, y0 + 0.46, winW + shW * 2 + 0.34, 0.15, 0.22, TRIM);        // sill
             F.box(ctx, f, t, y0 + 0.42, winW + shW * 2 + 0.18, 0.08, 0.14, TRIMD);
             F.box(ctx, f, t, y0 + FH - 0.34, winW + shW * 2 + 0.42, 0.18, 0.24, TRIM);   // flat head
@@ -629,8 +623,11 @@
       for (const f of faces) {
         const nrm = (f.horiz ? RD : RW) / 2;              // roof half, this face's normal
         const tanH = (f.horiz ? RW : RD) / 2;             // roof half, along the face
-        const nf = f.halfN + P * 0.30;
-        const uf = clamp((nrm - nf) / Math.max(0.1, inSet), 0.10, 0.55);
+        // want the front plane just outside the wall line — then take the
+        // height off the SLOPE there, and put the plane back on the slope, so
+        // a clamp can never leave a dormer floating in front of the roof.
+        const uf = clamp((nrm - (f.halfN + P * 0.30)) / Math.max(0.1, inSet), 0.10, 0.55);
+        const nf = nrm - inSet * uf;
         const y0 = H + roofH * uf;
         const uTop = uf + dorH / roofH;
         const availHalf = tanH - inSet * uTop - 0.55;     // what is LEFT of the roof up there

@@ -287,6 +287,20 @@
           runBand(ctx, F, faces[i], cy, h, proj, col, holesFor(faces[i], cy - h / 2), over, inset);
         }
       }
+      // A run of wall between two heights, stepping around the window openings
+      // and — where it is low enough to matter — around the doorcase too. A band
+      // that STRADDLES the top of the doorcase is split in two first, so the
+      // doorway's keep-out never punches a hole in wall that is well above it.
+      function skin(f, y0, y1, proj, col, wh, over) {
+        if (y1 - y0 < 0.03) return;
+        if (f.s === ctx.doorSide && y0 < capTop - 0.03 && y1 > capTop + 0.03) {
+          skin(f, y0, capTop, proj, col, wh, over);
+          skin(f, capTop, y1, proj, col, wh, over);
+          return;
+        }
+        const holes = holesFor(f, y0).concat(wh);
+        runBand(ctx, F, f, (y0 + y1) / 2, y1 - y0, proj, col, holes, over);
+      }
       // WHERE ONE WINDOW ACTUALLY LANDS, or null if it cannot. Shared by the
       // wall skin (which needs the holes) and the window pass (which needs the
       // frames), so the two can never disagree about a single opening.
@@ -317,21 +331,17 @@
         const f = faces[i], wins = plans[i].wins;
         const shaded = (f.s === ctx.doorSide) ? DIM : PALE;   // the porch is in shadow
         for (let k = 0; k < ST; k++) {
-          const gy0 = k * FH + 0.52, gy1 = (k + 1) * FH - 0.42;
-          const holes = holesFor(f, gy0);
+          const openings = [];
           for (let j = 0; j < wins.length; j++) {
             const p = placeWin(f, wins[j], k);
-            if (p) holes.push([wins[j].t - wins[j].ow / 2, wins[j].t + wins[j].ow / 2]);
+            if (p) openings.push([wins[j].t - wins[j].ow / 2, wins[j].t + wins[j].ow / 2]);
           }
-          runBand(ctx, F, f, (gy0 + gy1) / 2, gy1 - gy0, WP, shaded, holes, 0.14);
+          skin(f, k * FH + 0.52, (k + 1) * FH - 0.42, WP, shaded, openings, 0.14);
           // the two SOLID zones the host leaves us — the sill run and the
           // header run — are painted edge to edge, which is legal because there
           // is no glass there and it is what makes the elevation one material.
-          runBand(ctx, F, f, k * FH + 0.275, 0.50, WP, shaded, holesFor(f, k * FH + 0.02), 0.14);
-          if (k < ST - 1) {
-            runBand(ctx, F, f, (k + 1) * FH - 0.215, 0.42, WP, shaded,
-              holesFor(f, (k + 1) * FH - 0.43), 0.28);
-          }
+          skin(f, k * FH + 0.02, k * FH + 0.52, WP, shaded, [], 0.14);
+          if (k < ST - 1) skin(f, (k + 1) * FH - 0.43, (k + 1) * FH - 0.01, WP, shaded, [], 0.28);
         }
       }
       // a floor-line course at every storey, in the sill zone where a horizontal
@@ -417,7 +427,8 @@
         const pw = clamp(f.span / Math.max(2, lines.length) * 0.17, 0.28, 0.80);
         for (let j = 0; j < lines.length; j++) {
           const t = lines[j];
-          if (Math.abs(t) > halfT - cLen * 0.55 && f.s === ctx.doorSide) continue;
+          // a respond that lands inside the corner board is already drawn
+          if (Math.abs(t) > f.span / 2 - cLen * 0.55) continue;
           if (!F.clearsDoor(ctx, f, t, pw + 0.3)) continue;
           F.rib(ctx, f, t, plinthTop, yEnt - 0.30, pw, WP + 0.05, PALE);
           F.box(ctx, f, t, yEnt - 0.28, pw * 1.30, 0.26, WP + 0.11, TRIM);
@@ -688,7 +699,9 @@
         const capOK = doorTop >= e.head - 0.02;
         const dW = Math.min(e.gap - 0.85, 2.05);
         const slW = clamp(e.gap * 0.15, 0.22, 0.50);
-        const leafTop = doorTop - 0.62;
+        // the transom eats a fixed slice of the head; on an unusually short
+        // storey it gives that back rather than inverting the leaf below it
+        const leafTop = Math.max(TOP + 1.0, doorTop - Math.min(0.62, (doorTop - TOP) * 0.22));
         // the shadowed reveal the whole thing is cut into
         F.box(ctx, ef, 0, (TOP + doorTop) / 2, e.gap + 0.42, doorTop - TOP, 0.05, DARK);
         // the leaf pair, with a meeting stile and two raised panels each
@@ -702,7 +715,9 @@
         for (const sg of [-1, 1]) {
           const st = sg * (dW / 2 + slW / 2 + 0.16);
           F.box(ctx, ef, st, (TOP + leafTop) / 2, slW, leafTop - TOP, 0.09, TRIM);
-          F.box(ctx, ef, st, (TOP + 0.55 + leafTop) / 2, slW * 0.72, leafTop - TOP - 0.55, 0.13, GLAZ);
+          if (leafTop - TOP > 0.9) {
+            F.box(ctx, ef, st, (TOP + 0.55 + leafTop) / 2, slW * 0.72, leafTop - TOP - 0.55, 0.13, GLAZ);
+          }
           F.rib(ctx, ef, sg * (dW / 2 + 0.08), TOP, doorTop, 0.14, 0.17, TRIM);
         }
         // the transom over door and sidelights, divided by three muntins

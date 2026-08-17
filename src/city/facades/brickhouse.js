@@ -235,13 +235,21 @@
       // know how wide a hole to leave. So this comes first.
       const ef = e.f;
       const dPlan = plans[ctx.doorSide];
+      // DLEAF / DHEAD are the host's PERSON-scaled door leaf (buildings.js:103,
+      // DOORW 1.6 x DOORH 2.25). They are the one place a metre constant is
+      // right here: a door is sized by the body walking through it, not by the
+      // building. Every dimension measured off them is still clamped against a
+      // host span.
+      const DLEAF = 0.80, DHEAD = 2.25;
       const surHalf = e.driveIn ? (e.gap / 2 + 0.5)
-        : Math.min(dPlan.step / 2 - 0.06, e.gap / 2 + clamp(unit * 0.05, 0.35, 0.65));
+        : Math.max(DLEAF + 0.30,
+          Math.min(dPlan.step / 2 - 0.06, e.gap / 2 + clamp(unit * 0.05, 0.35, 0.65)));
       const pilW = clamp(surHalf * 0.26, 0.22, 0.46);
       const pilT = surHalf - pilW / 2;
       // the water table runs closer in than the wall does: it is only knee-high
-      // and cannot foul a doorway, so it stops just clear of the door leaf.
-      const baseHalf = e.driveIn ? (e.gap / 2 + 0.3) : e.gap * 0.34;
+      // and cannot foul a doorway, so it stops just clear of the door leaf
+      // rather than clear of the whole ornament-free gap.
+      const baseHalf = e.driveIn ? (e.gap / 2 + 0.3) : e.gap * 0.30;
       const wallHole = [[-surHalf, surHalf]];
       const baseHole = [[-baseHalf, baseHalf]];
       function holesAt(f, k) {
@@ -319,7 +327,7 @@
         // elevation does not mint two hundred slivers.
         for (let fi = 0; fi < faces.length; fi++) {
           const f = faces[fi];
-          const nt = Math.min(46, Math.max(6, Math.round(f.span / 0.34)));
+          const nt = Math.min(40, Math.max(6, Math.round(f.span / 0.34)));
           const stp = (f.span + 0.2) / nt;
           for (let i = 0; i <= nt; i++) {
             F.box(ctx, f, -(f.span + 0.2) / 2 + i * stp, y + 0.23, 0.05, 0.26, BP + 0.10, JOINT);
@@ -342,7 +350,9 @@
           const long = (i % 2) === 0;
           F.corners(ctx, cy, qh * 0.90, long ? qh * 1.60 : qh * 0.95, BP + 0.08,
             long ? BRICKL : BRICKD);
-          F.corners(ctx, cy + qh * 0.45, 0.05, long ? qh * 1.60 : qh * 0.95, BP + 0.12, JOINT);
+          // the bed joint under every LONG course only — eight boxes a course is
+          // enough on a 4-storey corner without minting it twice over.
+          if (long) F.corners(ctx, cy - qh * 0.47, 0.05, qh * 1.60, BP + 0.12, JOINT);
         }
       }
 
@@ -399,10 +409,10 @@
         for (const sg of [-1, 1]) {
           const st = t + sg * (wid / 2 + jw + p.shW / 2);
           F.rib(ctx, f, st, y0 - 0.04, y1 + 0.04, p.shW, SP, SHUT);
-          F.box(ctx, f, st, y0 + (y1 - y0) * 0.52, p.shW + 0.03, 0.09, SP + 0.02, SHUTL);
+          F.box(ctx, f, st, y0 + (y1 - y0) * 0.52, p.shW + 0.03, 0.09, SP + 0.05, SHUTL);
           for (const u of [0.27, 0.78]) {
             F.box(ctx, f, st, y0 + (y1 - y0) * u, p.shW * 0.60, (y1 - y0) * 0.34,
-              SP + 0.015, SHUTL);
+              SP + 0.03, SHUTL);
           }
         }
       }
@@ -445,14 +455,17 @@
         // corner — the raking verge takes over from there. That return is the
         // single most reliable tell of a domestic classical gable.
         const retL = clamp(unit * 0.13, 0.8, 1.8);
+        // the return may not fly further than the rake it dies into, or the
+        // gable end grows a shelf the roof does not cover.
+        const fly = (isEave ? EAVE : RAKE) + 0.14;
         const runs = isEave ? [{ t: 0, len: f.span + RAKE * 2 }]
           : [{ t: -(f.span / 2 - retL / 2), len: retL }, { t: (f.span / 2 - retL / 2), len: retL }];
         for (let r = 0; r < runs.length; r++) {
           const rr = runs[r];
           F.box(ctx, f, rr.t, H + corH * 0.22, rr.len, corH * 0.44, 0.19, TRIMW);   // frieze board
-          F.box(ctx, f, rr.t, H + corH * 0.60, rr.len, corH * 0.10, EAVE * 0.55, TRIMW); // bed mould
-          F.box(ctx, f, rr.t, H + corH * 0.78, rr.len, corH * 0.24, EAVE + 0.14, TRIMW); // corona
-          F.box(ctx, f, rr.t, H + corH * 0.94, rr.len - 0.10, corH * 0.10, EAVE + 0.04, TRIMD);
+          F.box(ctx, f, rr.t, H + corH * 0.60, rr.len, corH * 0.10, fly * 0.42, TRIMW); // bed mould
+          F.box(ctx, f, rr.t, H + corH * 0.78, rr.len, corH * 0.24, fly, TRIMW);        // corona
+          F.box(ctx, f, rr.t, H + corH * 0.94, rr.len - 0.10, corH * 0.10, fly * 0.72, TRIMD);
           // DENTILS: a tight run of little blocks under the bed mould. Count
           // from the run's own length so the teeth stay the same size on an
           // 11 m cottage and a 22 m mansion.
@@ -460,7 +473,7 @@
           const dstep = rr.len / dn;
           for (let i = 0; i < dn; i++) {
             F.box(ctx, f, rr.t - rr.len / 2 + (i + 0.5) * dstep, H + corH * 0.48,
-              dstep * 0.46, corH * 0.16, EAVE * 0.42, TRIMW);
+              dstep * 0.46, corH * 0.16, fly * 0.34, TRIMW);
           }
         }
       }
@@ -472,17 +485,23 @@
       // runs wall-to-wall along the ridge so the two gable ends can be faced in
       // brick, and it is solid, so the host's roof furniture is buried instead
       // of poking through the shingles.
+      // Each course is sized at its own MID height, so the staircase straddles
+      // the true slope line instead of hanging entirely inside it — that is
+      // what keeps the bottom course out at the eave and still leaves a ridge
+      // narrow enough for the cap to cover.
+      const ledge = halfC0 / nR;                           // the step each course takes in
       for (let i = 0; i < nR; i++) {
         const u0 = i / nR, u1 = (i + 1) / nR;
         const th = roofH / nR;
+        const hm = halfC((u0 + u1) / 2);
         const cy = yEave + roofH * (u0 + u1) / 2;
         const col = (i % 3 === 0) ? ROOFC : ((i % 3 === 1) ? ROOFL : ROOFD);
-        rbox(0, 0, cy, LR, halfC(u1) * 2, th + 0.02, col);
-        // the butt line of each course, standing proud on the one below. This
-        // is the whole reason a stack of boxes reads as shingle courses and not
+        rbox(0, 0, cy, LR, hm * 2, th + 0.02, col);
+        // a thin dark lip laid along the ledge each course leaves. This is the
+        // whole reason a stack of boxes reads as lapped shingle courses and not
         // as a smooth ramp.
         for (const sg of [-1, 1]) {
-          rbox(0, sg * (halfC(u0) - 0.05), yEave + roofH * u0 + 0.05, LR + 0.02, 0.16, 0.10, ROOFD);
+          rbox(0, sg * (hm - ledge / 2), yEave + roofH * u1 + 0.035, LR + 0.02, ledge, 0.07, ROOFD);
         }
       }
       // the ridge cap
@@ -494,24 +513,24 @@
       // THE BRICK GABLE TRIANGLE, veneered on the prism's two ends, and the
       // white RAKING VERGE board outboard of it — which is the rake overhang.
       {
-        const gv = 0.11;
-        const rw = clamp(RAKE * 0.62, 0.15, 0.34);
-        const ra = LR / 2 + gv + rw / 2;
+        const gv = 0.11;                                   // veneer thickness
+        const rw = Math.max(0.14, RAKE - gv);              // so the board's outer
+        const ra = LR / 2 + gv + rw / 2;                   // face lands exactly on RAKE
         for (let i = 0; i < nR; i++) {
           const u0 = i / nR, u1 = (i + 1) / nR;
           const th = roofH / nR;
-          const c0 = halfC(u0), c1 = halfC(u1);
+          const hm = halfC((u0 + u1) / 2);
           const cy = yEave + roofH * (u0 + u1) / 2;
-          if (c1 > 0.10) {
+          if (hm > 0.10) {
             const col = (i % 2) ? BRICK : F.shade(BRICK, 0.94);
-            for (const sa of [-1, 1]) rbox(sa * (LR / 2 + gv / 2), 0, cy, gv, c1 * 2, th + 0.02, col);
+            for (const sa of [-1, 1]) rbox(sa * (LR / 2 + gv / 2), 0, cy, gv, hm * 2, th + 0.02, col);
             for (const sa of [-1, 1]) {
               rbox(sa * (LR / 2 + gv * 0.86), 0, yEave + roofH * u0 + 0.04, gv * 0.6,
-                c1 * 2 - 0.06, 0.05, JOINT);
+                hm * 2 - 0.06, 0.05, JOINT);
             }
           }
           for (const sa of [-1, 1]) for (const sg of [-1, 1]) {
-            rbox(sa * ra, sg * (c0 + c1) / 2, cy, rw, (c0 - c1) + th * 0.70, th + 0.02, TRIMW);
+            rbox(sa * ra, sg * (hm - ledge / 2), cy, rw, ledge + th * 0.70, th + 0.02, TRIMW);
           }
         }
       }
@@ -522,12 +541,14 @@
       // The front plane is computed from the slope's cross-width at the dormer's
       // FOOT (its widest point over the dormer's height) and then pushed out, so
       // a dormer can never sink back into the roof it stands on.
-      const dormOK = (sp.dormers !== false) && roofH >= 2.25 && LR >= 10.0;
+      const dormOK = (sp.dormers !== false) && roofH >= 2.25 && LR >= 9.0;
       if (dormOK) {
         const dh = clamp(roofH * 0.50, 1.05, 1.80);
         const u0 = 0.16, u1 = Math.min(0.90, u0 + dh / roofH);
-        const push = clamp(unit * 0.048, 0.28, 0.58);
-        const cOut = halfC(u0) + push;
+        const push = clamp(unit * 0.048, 0.30, 0.58);
+        // measured off the slope's widest point over the dormer's own height,
+        // plus half a course for the staircase's overshoot, plus the push
+        const cOut = halfC(u0) + ledge / 2 + push;
         const dep = Math.max(0.40, cOut - halfC(u1) + 0.35);
         const efp = plans[ctx.doorSide];
         let nD = Math.min(5, efp.n);
@@ -617,33 +638,36 @@
             F.rib(ctx, ef, t + u * pilW, 0.60, pilTop - 0.34, pilW * 0.16, TP + 0.02, TRIMD);
           }
         }
-        // 2. the door casing, and the sidelights when the bay is wide enough
-        const casT = 0.86;
+        // 2. the door casing, and the sidelights when the bay is wide enough.
+        //    The casing is clamped against the surround, so a narrow middle bay
+        //    squeezes it rather than bursting through the pilasters.
+        const casT = Math.min(DLEAF + 0.06, pilT - pilW / 2 - 0.08);
         for (const sg of [-1, 1]) {
-          F.rib(ctx, ef, sg * casT, 0.06, 2.46, 0.16, 0.13, TRIMW);
+          F.rib(ctx, ef, sg * casT, 0.06, DHEAD + 0.21, 0.16, 0.13, TRIMW);
         }
         const slW = pilT - pilW / 2 - (casT + 0.08);
         if (slW > 0.22) {
           const sc = casT + 0.08 + slW / 2;
           for (const sg of [-1, 1]) {
-            F.rib(ctx, ef, sg * sc, 1.15, 1.19, slW * 0.94, 0.12, TRIMW);   // sidelight rail
-            F.rib(ctx, ef, sg * sc, 0.06, 0.62, slW * 0.94, 0.13, TRIMW);   // its panelled base
-            F.rib(ctx, ef, sg * sc, 0.62, 2.42, 0.06, 0.12, TRIMW);         // its muntin
+            F.box(ctx, ef, sg * sc, 1.16, slW * 0.94, 0.09, 0.12, TRIMW);        // sidelight rail
+            F.rib(ctx, ef, sg * sc, 0.06, 0.62, slW * 0.94, 0.13, TRIMW);        // panelled base
+            F.rib(ctx, ef, sg * sc, 0.62, DHEAD + 0.17, 0.06, 0.12, TRIMW);      // its muntin
           }
         }
-        // 3. the transom bar and the FANLIGHT above the 2.25 m opening
-        F.box(ctx, ef, 0, 2.50, surHalf * 2 - 0.06, 0.15, 0.14, TRIMW);
+        // 3. the transom bar and the FANLIGHT, both clear above the door head
+        F.box(ctx, ef, 0, DHEAD + 0.25, surHalf * 2 - 0.06, 0.15, 0.14, TRIMW);
+        const fanY = DHEAD + 0.35;
         const fanW = Math.min(surHalf * 1.75, surHalf * 2 - 0.20);
         const fanRise = Math.min(surHalf * 0.62, 0.56);
         if (fanW > 1.0 && fanRise > 0.22) {
-          F.arch(ctx, ef, 0, 2.60, fanW, fanRise, 0.10, 0.13, TRIMW, "round");
+          F.arch(ctx, ef, 0, fanY, fanW, fanRise, 0.10, 0.13, TRIMW, "round");
           // radiating bars, drawn as verticals of arch-height — a fan at any
           // distance a player will ever stand.
           for (let i = 0; i < 5; i++) {
             const u = ((i + 0.5) / 5) * 2 - 1;
             const hh = Math.sqrt(Math.max(0, 1 - u * u)) * fanRise;
             if (hh < 0.12) continue;
-            F.box(ctx, ef, u * fanW * 0.42, 2.60 + hh / 2, 0.06, hh, 0.12, TRIMW);
+            F.box(ctx, ef, u * fanW * 0.42, fanY + hh / 2, 0.06, hh, 0.12, TRIMW);
           }
         }
         // 4. THE CROWNED CORNICE on consoles. Architrave and dentils stay under
@@ -651,21 +675,31 @@
         //    pass over glass, and both are held clear of the wall.
         if (entCrown) {
           const cw = surHalf * 2 + 0.60;
+          // The sill line of the storey above. Everything the crown lays ON the
+          // wall stops under it; everything above it is held clear as a real
+          // overhang, so the centre window's glass survives behind the cornice
+          // instead of being bricked over by it.
+          const yUp = FH + GSILL;
           for (const sg of [-1, 1]) {                                       // consoles
             F.box(ctx, ef, sg * (pilT - pilW * 0.1), yEnt - 0.26, pilW * 0.7, 0.50, TP + 0.20, TRIMW);
           }
-          F.box(ctx, ef, 0, yEnt + 0.06, cw, 0.14, TP + 0.16, TRIMW);        // architrave
+          F.box(ctx, ef, 0, (yEnt + yUp) / 2, cw, Math.max(0.10, yUp - yEnt),
+            TP + 0.16, TRIMW);                                              // architrave
           const dn = Math.max(5, Math.min(24, Math.round(cw / 0.36)));
           for (let i = 0; i < dn; i++) {
-            F.box(ctx, ef, -cw / 2 + (i + 0.5) * (cw / dn), yEnt + 0.18,
-              (cw / dn) * 0.44, 0.11, TP + 0.22, TRIMW);                     // dentils
+            F.box(ctx, ef, -cw / 2 + (i + 0.5) * (cw / dn), yUp + 0.09,
+              (cw / dn) * 0.44, 0.14, 0.16, TRIMW, 0.18);                   // dentils, held clear
           }
-          F.box(ctx, ef, 0, yEnt + 0.31, cw + 0.22, 0.18, 0.34, TRIMW, 0.22);   // corona, held clear
-          F.box(ctx, ef, 0, yEnt + 0.45, cw + 0.06, 0.10, 0.26, TRIMD, 0.26);   // crown mould
+          F.box(ctx, ef, 0, yUp + 0.26, cw + 0.22, 0.18, 0.34, TRIMW, 0.22);   // corona, held clear
+          F.box(ctx, ef, 0, yUp + 0.40, cw + 0.06, 0.10, 0.26, TRIMD, 0.26);   // crown mould
         }
-        // 5. two carriage lamps — the only real meshes this facade mints
-        if (ef.span > 6) {
-          const lt = surHalf + clamp(unit * 0.05, 0.34, 0.62);
+        // 5. two carriage lamps — the only real meshes this facade mints.
+        //    Parked between the surround and the shutter of the window next
+        //    door, so a narrow middle bay simply goes without rather than
+        //    hanging a lantern through a shutter.
+        const winIn = dPlan.step - (dPlan.wid / 2 + dPlan.jw + dPlan.shW);
+        const lt = Math.min(surHalf + 0.42, winIn - 0.22);
+        if (ef.span > 6 && lt > surHalf + 0.10) {
           const nrm = ef.halfN + TP + 0.12;
           for (const sg of [-1, 1]) {
             F.box(ctx, ef, sg * lt, 2.34, 0.14, 0.42, TP + 0.16, TRIMD);
@@ -683,7 +717,7 @@
         // continuous platform plus one ramp — never a row of tread boxes, or a
         // sprinting rider samples the seam between them.
         const TOP = clamp(FH * 0.11, 0.24, 0.38);
-        const landD = clamp(ctx.d * 0.09, 0.95, 1.70);
+        const landD = clamp((ef.horiz ? ctx.d : ctx.w) * 0.09, 0.95, 1.70);
         const stepD = landD * 0.62;
         const landW = Math.min(ef.span - 1.2, surHalf * 2 + clamp(unit * 0.16, 0.8, 1.9));
         const sw = Math.max(1.2, landW - 0.7);
@@ -724,12 +758,14 @@
           }
         }
       } else {
-        // A drive-in ground floor is not a Colonial doorway. Frame the opening
-        // in white and leave it completely alone.
+        // A drive-in ground floor is not a Colonial doorway. Two white jambs and
+        // nothing else: a head band over an opening this wide would have to
+        // either hang under e.head or lie straight across the storey above's
+        // glass, and neither is allowed. Verticals always are.
         for (const sg of [-1, 1]) {
           F.rib(ctx, ef, sg * (e.gap / 2 + 0.22), 0.06, e.head, 0.34, TP + 0.06, TRIMW);
+          F.box(ctx, ef, sg * (e.gap / 2 + 0.22), e.head - 0.12, 0.52, 0.20, TP + 0.13, TRIMW);
         }
-        F.box(ctx, ef, 0, e.head + 0.14, e.gap + 1.2, 0.22, TP + 0.14, TRIMW);
       }
     },
   });

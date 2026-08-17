@@ -220,7 +220,11 @@
       // clears F.entrance's 3.6 m head; on a 1-storey cottage that head is
       // taller than the wall, so the roofline wins — exactly adobe.js's rule.
       const porchTop = Math.min(FH + 0.50, rTop - 0.35);
-      const shedDrop = porchD * 0.34;            // ~4:12 on the shed
+      // ~4:12 on the shed, but never so much drop that the beam ends up under a
+      // walking head. On a 1-storey cottage porchTop is only 2.85, so the shed
+      // flattens to almost nothing — which is exactly what a real low cottage
+      // porch does rather than putting a 1.6 m beam across the front steps.
+      const shedDrop = Math.min(porchD * 0.34, Math.max(0.12, porchTop - deckY - 2.55));
 
       const gableSides = ridgeX ? [2, 3] : [0, 1];
       const ci = ctx.hash(0x7501) < 0.5 ? 0 : 1;
@@ -270,29 +274,45 @@
       // the exact failure the window rule exists to prevent.
       function bayLive(L, k, b) {
         const f = L.f, hi = L.occ + 0.12;
-        if (f.s === chF.s && Math.abs(b.t - chT) < chW / 2 + hi) return false;
+        // The chimney only vetoes a bay whose SASH it actually stands in front
+        // of, not one whose outer shutter it grazes — measuring against the full
+        // occupancy killed two of the four bays on a 16 m gable end and left the
+        // whole flank blind. A shutter tucked against a chimney breast is what
+        // real houses do anyway.
+        if (f.s === chF.s && Math.abs(b.t - chT) < chW / 2 + L.wW / 2 + L.cw + 0.10) return false;
         if (wantGar && f.s === gaF.s && k === 0 && Math.abs(b.t - garT) < garW / 2 + hi) return false;
-        if (f.s === ctx.doorSide && k === 0) return F.clearsDoor(ctx, f, b.t, L.occ * 2 + 0.4);
+        // the +0.75 buys room for the door surround boards and the light beside
+        // them, so a shutter can never land on top of the entrance trim.
+        if (f.s === ctx.doorSide && k === 0) return F.clearsDoor(ctx, f, b.t, L.occ * 2 + 0.75);
         return true;
       }
 
       // ============================================================
       //  5. THE FOUNDATION SKIRT
       // ============================================================
-      // Concrete to just under the host's 0.55 m sill line, capped by a water
-      // table board with a drip nose. The DOORWAY is a gap in it, not a kerb
-      // across it — a 0.5 m lip in a doorway is precisely the trip the repo's
-      // own door-collider notes were written about.
-      const skirtH = clamp(unit * 0.042, 0.42, 0.52);
+      // Concrete showing above grade, capped by a water table board with a drip
+      // nose. Two constraints set the height, and both are hard:
+      //   · the cap's TOP must stay under 0.50 m, because it is the one band on
+      //     this house that genuinely runs the full width of a face, and the
+      //     host's ground glass starts at 0.55 — a taller skirt lays a solid
+      //     stripe straight across the ground floor of all four elevations;
+      //   · the DOORWAY is a gap in it, not a kerb across it. A 0.4 m lip in a
+      //     doorway is precisely the trip this repo's own door-collider notes
+      //     were written about, and dbox carries no collider to soften it.
+      const skirtH = clamp(unit * 0.038, 0.30, 0.38);
       for (let fi = 0; fi < faces.length; fi++) {
         const f = faces[fi];
-        const runs = subtract(-f.span / 2 - 0.08, f.span / 2 + 0.08,
-          f.s === ctx.doorSide ? [[-1.15, 1.15]] : []);
+        const cut = [];
+        if (f.s === ctx.doorSide) cut.push([-1.15, 1.15]);
+        // the garage opening is a hole in it too — a 0.38 m curb across a
+        // garage door is not a threshold, it is a wall.
+        if (wantGar && f.s === gaF.s) cut.push([garT - garW / 2 - 0.2, garT + garW / 2 + 0.2]);
+        const runs = subtract(-f.span / 2 - 0.08, f.span / 2 + 0.08, cut);
         for (let i = 0; i < runs.length; i++) {
           const a = runs[i][0], b = runs[i][1];
           if (b - a < 0.12) continue;
           F.box(ctx, f, (a + b) / 2, skirtH * 0.5, b - a, skirtH, 0.155, conc);
-          F.box(ctx, f, (a + b) / 2, skirtH + 0.06, b - a + 0.03, 0.12, 0.205, concD);
+          F.box(ctx, f, (a + b) / 2, skirtH + 0.055, b - a + 0.03, 0.115, 0.205, concD);
         }
       }
 
@@ -305,27 +325,39 @@
       // the same reason stone.js alternates its rustication rather than painting
       // stripes on a flat plane. Course pitch rides FH (FH/16 ≈ 0.20 m) and the
       // level count is capped so a 4-storey house does not mint 1600 boxes.
-      const sidY0 = skirtH + 0.14;
+      const sidY0 = skirtH;
       const nLap = Math.min(40, Math.max(6, Math.round((plateTop - sidY0) / (FH / 16))));
       const lh = (plateTop - sidY0) / nLap;
 
-      // Where is face `f` SOLID at height cy? The host's contract: per storey
-      // the wall is solid from the floor line to +0.55 and from the ceiling down
-      // 0.45, and there is a 0.55 jamb at each end of every face. Read
-      // conservatively (0.50 / 0.43) so a band can never clip the glass edge.
-      function solidRuns(L, cy) {
+      // The host's contract, read CONSERVATIVELY: per storey the glass band is
+      // (k*FH+0.50 … (k+1)*FH-0.43), a little wider than the real 0.55/0.45 so a
+      // course can never clip the glass edge. Which storey's band a course
+      // overlaps — and whether it overlaps one AT ALL — is answered against the
+      // course's whole EXTENT, not its centre line. Testing the centre was wrong
+      // and it showed: on a 4-storey house the lap pitch grows to 0.33 m and a
+      // "solid zone" course centred at +0.50 was reaching 0.16 m up into the
+      // glass, laying a full-width band right across it on every face.
+      function glassK(y0, y1) {
+        for (let k = Math.max(0, Math.floor(y0 / FH)); k < ST; k++) {
+          if (k * FH >= y1) break;
+          if (y0 < (k + 1) * FH - 0.43 && y1 > k * FH + 0.50) return k;
+        }
+        return -1;
+      }
+
+      function solidRuns(L, y0, y1) {
         const f = L.f;
         const holes = [];
         // the doorway is never sided over
-        if (f.s === ctx.doorSide && cy < 2.52) holes.push([-1.05, 1.05]);
-        // nor is the chimney breast, at any height
-        if (f.s === chF.s) holes.push([chT - chW / 2 - 0.05, chT + chW / 2 + 0.05]);
-        if (wantGar && f.s === gaF.s && cy < garH + 0.34)
-          holes.push([garT - garW / 2 - 0.24, garT + garW / 2 + 0.24]);
-        const k = Math.min(ST - 1, Math.max(0, Math.floor(cy / FH)));
-        const lo = cy - k * FH;
-        const solidBand = (cy >= rTop) || (lo <= 0.50) || (lo >= FH - 0.43);
-        if (!solidBand) {
+        // Each hole is drawn a hair NARROWER than the thing that fills it, so the
+        // siding tucks under the door casing / the chimney / the garage jamb
+        // instead of stopping short and leaving a sliver of bare glass beside it.
+        if (f.s === ctx.doorSide && y0 < 2.52) holes.push([-0.92, 0.92]);
+        if (f.s === chF.s) holes.push([chT - chW / 2 + 0.03, chT + chW / 2 - 0.03]);
+        if (wantGar && f.s === gaF.s && y0 < garH + 0.34)
+          holes.push([garT - garW / 2 - 0.20, garT + garW / 2 + 0.20]);
+        const k = (y0 >= rTop) ? -1 : glassK(y0, y1);
+        if (k >= 0) {
           let live = 0;
           for (let i = 0; i < L.bays.length; i++) {
             const b = L.bays[i];
@@ -348,9 +380,9 @@
       for (let fi = 0; fi < faces.length; fi++) {
         const L = layout[fi], f = L.f;
         for (let i = 0; i < nLap; i++) {
-          const cy = sidY0 + (i + 0.5) * lh;
+          const y0 = sidY0 + i * lh, cy = y0 + lh / 2;
           const proud = (i % 2) === 0;
-          const runs = solidRuns(L, cy);
+          const runs = solidRuns(L, y0 - 0.006, y0 + lh + 0.006);
           for (let r = 0; r < runs.length; r++) {
             const a = runs[r][0], b = runs[r][1];
             if (b - a < 0.14) continue;
@@ -383,7 +415,9 @@
         for (const sg of [-1, 1])
           F.box(ctx, f, t + sg * (wW / 2 + cw / 2), gy, cw, gh + cw * 2, CP, trim);
         F.box(ctx, f, t, y1 + cw * 0.55, wW + cw * 2, cw * 1.1, CP, trim);        // head casing
-        F.box(ctx, f, t, y1 + cw * 1.25, wW + cw * 2 + 0.26, 0.10, CP + 0.10, trimD);  // DRIP CAP
+        // DRIP CAP: sits exactly on the head casing (a gap between them reads as
+        // a mistake) and throws the deepest shadow on the elevation.
+        F.box(ctx, f, t, y1 + cw * 1.1 + 0.05, wW + cw * 2 + 0.26, 0.10, CP + 0.10, trimD);
         F.box(ctx, f, t, y0 - 0.10, wW + cw * 2 + 0.20, 0.13, CP + 0.09, trim);  // sill, with a nose
         // muntins: a centre stile and a meeting rail, thin enough that the glass
         // still reads as glass. A shutter over the opening would be a bug; a
@@ -401,8 +435,10 @@
         if (sw > 0.17) {
           for (const sg of [-1, 1]) {
             const st = t + sg * (wW / 2 + cw + sw / 2);
-            F.box(ctx, f, st, gy, sw, gh + cw * 1.1, 0.10, shut);
-            F.box(ctx, f, st, gy, sw, 0.11, 0.135, shutL);                       // mid rail
+            // proud of the siding (0.105) — a shutter is screwed ON to the wall,
+            // and one flush with the clapboard disappears into it.
+            F.box(ctx, f, st, gy, sw, gh + cw * 1.1, 0.13, shut);
+            F.box(ctx, f, st, gy, sw, 0.11, 0.16, shutL);                        // mid rail
           }
         }
       }
@@ -563,7 +599,7 @@
             (j % 2) ? roofB : roofA, j * psD);
         }
         const outTop = porchTop - (shedDrop * (nps - 1)) / nps;
-        F.box(ctx, df, porchOff, outTop - 0.30, porchW + 0.38, 0.22, 0.13, trim, porchD + 0.02);
+        F.box(ctx, df, porchOff, outTop - 0.18, porchW + 0.38, 0.24, 0.13, trim, porchD + 0.02);
         const beamB = outTop - 0.54;
         F.box(ctx, df, porchOff, beamB + 0.13, porchW + 0.06, 0.26, 0.20, trim, porchD - 0.24);
         // TWO POSTS. Square 4x4s in dbox, not turned columns: this house cannot
@@ -588,9 +624,11 @@
         // A DOORMAT. One box, and it does more for "someone lives here" than
         // any amount of moulding.
         F.box(ctx, df, 0, deckY + 0.02, 1.10, 0.04, 0.62, F.shade(dark, 1.35), 0.12);
-      } else {
+      } else if (!e.driveIn) {
         // NO ROOM FOR A PORCH on a narrow frontage: a plain stoop and a
         // bracketed door hood, which is what the cheap version really has.
+        // A drive-in host gets NEITHER: its opening is 6.4 m wide and a hood or
+        // a stoop across that is something a car has to drive through.
         const hy = Math.min(FH + 0.48, rTop - 0.30);
         const hd = clamp(unit * 0.09, 0.65, 1.05);
         F.box(ctx, df, 0, hy, e.gap + 1.5, 0.14, hd, roofA);
@@ -611,21 +649,25 @@
         }
       }
 
-      // THE DOOR SURROUND, in the door colour. Vertical boards outside e.gap, so
-      // nothing crosses the opening: the host owns the leaf and its casing, and
-      // the accent colour is applied to what frames it. This is also the only
-      // place the door colour appears at full strength — the shutters carry a
-      // muted version of it, which is how a tract house ties itself together.
-      for (const sg of [-1, 1])
-        F.rib(ctx, df, sg * 1.58, deckY - 0.05, 2.66, 0.26, 0.14, door);
-      F.box(ctx, df, 0, deckY + 0.02, 2.9, 0.05, 0.05, F.shade(door, 0.8), 0.02);   // threshold
-
       // ============================================================
-      //  11. THE FITTINGS — the things that say it is occupied
+      //  11. THE ENTRANCE TRIM AND THE FITTINGS
       // ============================================================
-      // PORCH LIGHT: the facade's only real mesh. One lamp, beside the door.
-      {
-        const lt = (ctx.hash(0x7801) < 0.5 ? -1 : 1) * 1.95;
+      // All of it lives inside |t| < 2 m, so a drive-in host — whose opening is
+      // 6.4 m wide — gets none of it rather than a mailbox in the middle of the
+      // vehicle bay.
+      if (!e.driveIn) {
+        // THE DOOR SURROUND, in the door colour. Vertical boards outside e.gap,
+        // so nothing crosses the opening: the host owns the leaf and its casing,
+        // and the accent colour is applied to what frames it. This is the only
+        // place the door colour appears at full strength — the shutters carry a
+        // muted version of it, which is how a tract house ties itself together.
+        for (const sg of [-1, 1])
+          F.rib(ctx, df, sg * 1.58, deckY - 0.05, 2.66, 0.26, 0.14, door);
+        F.box(ctx, df, 0, deckY + 0.02, 2.9, 0.05, 0.05, F.shade(door, 0.8), 0.02);
+        // PORCH LIGHT: the facade's only real mesh. Mounted ON the door surround
+        // board, which is where a real one is screwed and which keeps it off the
+        // host glass without needing a tangent of its own.
+        const lt = (ctx.hash(0x7801) < 0.5 ? -1 : 1) * 1.58;
         const ly = 2.18;
         F.box(ctx, df, lt, ly - 0.22, 0.11, 0.36, 0.12, trimD);          // back plate
         F.box(ctx, df, lt, ly + 0.21, 0.22, 0.10, 0.22, trimD);          // little hood
@@ -655,13 +697,17 @@
       }
       // METERS AND A HOSE BIB on the chimney flank, at the far end from the
       // chimney. Nobody notices them; a house without them looks like a model.
+      // They STACK on one tangent hard by the corner rather than spreading
+      // sideways: that is the one strip of this elevation the window bays can
+      // never reach, so a meter can never end up bolted over a window.
       {
-        const ut = (chT < 0 ? 1 : -1) * Math.min(chF.span * 0.30, chF.span / 2 - 1.1);
-        F.box(ctx, chF, ut, 1.45, 0.40, 0.52, 0.22, F.shade(conc, 1.08));
-        F.box(ctx, chF, ut, 1.62, 0.26, 0.26, 0.30, F.shade(dark, 1.9));       // the dial
-        F.box(ctx, chF, ut + 0.66, 1.15, 0.30, 0.36, 0.20, F.shade(conc, 0.90));
-        F.box(ctx, chF, ut + 0.66, 0.82, 0.10, 0.34, 0.14, concD);             // riser
-        F.box(ctx, chF, ut - 0.60, 0.72, 0.10, 0.10, 0.20, F.shade(trimD, 0.78));
+        const usg = (chT < 0 ? 1 : -1);
+        const ut = usg * Math.max(0.8, chF.span / 2 - 0.88);
+        F.box(ctx, chF, ut, 1.52, 0.40, 0.52, 0.22, F.shade(conc, 1.08));      // electric meter
+        F.box(ctx, chF, ut, 1.68, 0.26, 0.26, 0.30, F.shade(dark, 1.9));       // its dial
+        F.box(ctx, chF, ut, 0.92, 0.32, 0.38, 0.20, F.shade(conc, 0.90));      // gas meter
+        F.box(ctx, chF, ut, 0.55, 0.11, 0.36, 0.14, concD);                    // riser
+        F.box(ctx, chF, ut - usg * 0.52, 0.62, 0.10, 0.10, 0.20, F.shade(trimD, 0.78));  // hose bib
       }
 
       // DOWNSPOUT: off one front corner, an elbow at the bottom and a splash

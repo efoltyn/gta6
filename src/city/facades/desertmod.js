@@ -142,6 +142,20 @@
       const FP = clamp(small * 0.026, 0.22, 0.40);    // floor-line fascia
       const MP = FP * 0.55;                           // steel mullions
 
+      // A free-standing SLUMP-BLOCK WALL on an axis-aligned plan rect: three
+      // lifts of slightly different tone under one coping. The garden walls,
+      // the entry court and the carport screen are all this one wall.
+      const gwall = function (x0, x1, z0, z1, hgt, salt) {
+        const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, sx = x1 - x0, sz = z1 - z0;
+        if (sx <= 0.05 || sz <= 0.05 || hgt <= 0.1) return;
+        for (let i = 0; i < 3; i++) {
+          const a = hgt * i / 3, b = hgt * (i + 1) / 3;
+          ctx.dbox(cx, (a + b) / 2, cz, sx, b - a - 0.03, sz, F.shade(STONE, 0.88 + h(salt + i) * 0.22));
+        }
+        ctx.dbox(cx, hgt + 0.07, cz, sx + 0.17, 0.13, sz + 0.17, STONE_L);
+        ctx.dbox(cx, 0.07, cz, sx + 0.10, 0.14, sz + 0.10, STONE_D);
+      };
+
       // ============================================================
       //  1. SOLVING THE ROOF PLANE (numbers only — it is emitted last)
       // ============================================================
@@ -381,23 +395,16 @@
         outSlab(cf, ct, cw, 0, cd, CARY, CONC, null);
         // the poured strip down the middle of the deck: a carport is not a room
         F.box(ctx, cf, ct, CARY + 0.02, cw * 0.32, 0.05, cd, F.shade(CONC, 1.18), 0);
-        // the SCREEN WALL at the far end (a slump-block privacy wall, chest to
-        // head high) and a low kerb at the near end. Asymmetric on purpose: one
-        // end of a carport is the storage wall, the other is where you walk in.
-        const swH = clamp(FH * 0.62, 1.7, 2.5);
-        const kbH = clamp(FH * 0.26, 0.70, 1.05);
+        // A tall SCREEN WALL at the end away from the entry and a low kerb at
+        // the near end. Asymmetric on purpose: one end of a carport is the
+        // storage wall, the other is where you walk in from the front door.
         const wallT = clamp(small * 0.036, 0.30, 0.50);
-        const ends = [{ t: ct - cw / 2 - wallT * 0.5, hgt: df.out > 0 ? swH : kbH },
-          { t: ct + cw / 2 + wallT * 0.5, hgt: df.out > 0 ? kbH : swH }];
-        for (let i = 0; i < ends.length; i++) {
-          const y = ends[i].hgt;
-          const lifts = 3;
-          for (let k = 0; k < lifts; k++) {
-            const a = y * k / lifts, b = y * (k + 1) / lifts;
-            F.box(ctx, cf, ends[i].t, (a + b) / 2, wallT, b - a - 0.03, cd - 0.20,
-              F.shade(STONE, 0.90 + h(0xd260 + i * 5 + k) * 0.20), 0.10);
-          }
-          F.box(ctx, cf, ends[i].t, y + 0.07, wallT + 0.16, 0.13, cd - 0.10, STONE_L, 0.06);
+        const n0 = cf.out * (cf.halfN + 0.10), n1 = cf.out * (cf.halfN + cd - 0.10);
+        for (const sg of [-1, 1]) {
+          const tt = ct + sg * (cw / 2 + wallT * 0.5);
+          const hgt = (sg * df.out < 0) ? clamp(FH * 0.62, 1.7, 2.5) : clamp(FH * 0.26, 0.70, 1.05);
+          if (cf.horiz) gwall(tt - wallT / 2, tt + wallT / 2, Math.min(n0, n1), Math.max(n0, n1), hgt, 0xd260 + sg * 9);
+          else gwall(Math.min(n0, n1), Math.max(n0, n1), tt - wallT / 2, tt + wallT / 2, hgt, 0xd270 + sg * 9);
         }
       }
 
@@ -458,7 +465,8 @@
       // built the same way a mansard is: stacked boxes, each stepped sideways,
       // each a little taller than its step so the joints close.
       {
-        const tR = clamp(df.span * 0.30, 1.5, df.span * 0.42);
+        // outboard of the doorway even on a drive-in host, where e.gap is 6.4
+        const tR = Math.max(clamp(df.span * 0.30, 1.5, df.span * 0.42), e.gap / 2 + 0.9);
         const Dp = ov[df.s] - pin + 0.42;
         for (const sg of [-1, 1]) {
           const pA = pt(df, sg * tR, Dp);
@@ -546,23 +554,11 @@
       // ============================================================
       //  10. GARDEN WALLS — the horizontal, continued out into the yard
       // ============================================================
-      // Low slump-block walls running OUT past the building. They are the
-      // reason the house reads as long and low from any angle: the eye follows
-      // a line that starts inside the plan and ends 8 m away in the sand.
+      // Low walls running OUT past the building. They are the reason the house
+      // reads as long and low from any angle: the eye follows a line that
+      // starts inside the plan and ends 8 m away in the sand.
       const GWH = clamp(FH * 0.28, 0.72, 1.15);
       const GWT = clamp(small * 0.036, 0.30, 0.50);
-      const gwall = function (x0, x1, z0, z1, hgt, salt) {
-        const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, sx = x1 - x0, sz = z1 - z0;
-        if (sx <= 0.05 || sz <= 0.05) return;
-        const lifts = 3;
-        for (let i = 0; i < lifts; i++) {
-          const a = hgt * i / lifts, b = hgt * (i + 1) / lifts;
-          ctx.dbox(cx, (a + b) / 2, cz, sx, b - a - 0.03, sz,
-            F.shade(STONE, 0.88 + h(salt + i) * 0.22));
-        }
-        ctx.dbox(cx, hgt + 0.07, cz, sx + 0.17, 0.13, sz + 0.17, STONE_L);
-        ctx.dbox(cx, 0.07, cz, sx + 0.10, 0.14, sz + 0.10, STONE_D);
-      };
       {
         // two long walls running out from the back corners of the flanks
         const run = clamp(big * 0.42, 3.0, 11.0);
@@ -606,22 +602,27 @@
       {
         // ONE low float at 0.26 and an apron at half that, both under physics
         // STEP_UP (0.45), so there is no flight of steps to bounce off and the
-        // apron carries a ramp — a sprinting player never samples the seam.
+        // apron carries a ramp — a sprinting player never samples the seam. A
+        // drive-in host gets neither: you cannot drive a car up a terrace, so
+        // there the forecourt is left as flat ground.
         const TOP = 0.26, TD = TERR_D, AD = TERR_A;
         const TW = Math.min(df.span - 0.5, e.gap + clamp(df.span * 0.42, 2.6, 7.0));
-        outSlab(df, 0, TW, 0, TD, TOP, CONC, null);
-        F.box(ctx, df, 0, TOP - 0.02, TW - 0.5, 0.06, TD - 0.4, F.shade(CONC, 1.14), 0.2);
-        outSlab(df, 0, TW - 0.8, TD, TD + AD, TOP / 2, F.shade(CONC, 0.92), true);
+        if (!e.driveIn) {
+          outSlab(df, 0, TW, 0, TD, TOP, CONC, null);
+          F.box(ctx, df, 0, TOP - 0.02, TW - 0.5, 0.06, TD - 0.4, F.shade(CONC, 1.14), 0.2);
+          outSlab(df, 0, TW - 0.8, TD, TD + AD, TOP / 2, F.shade(CONC, 0.92), true);
+        }
         // THE DOOR. The accent lives on VERTICALS only: two jambs and one tall
         // panel beside the opening. There is deliberately no lintel over the
         // door — between the ground storey's header zone and F.entrance's head
         // clearance there is no legal height for one, and a coloured board
         // hanging in the doorway is the exact bug the kit warns about.
+        const jY = e.driveIn ? 0.10 : TOP;          // foot of the jamb
         const jT = Math.min(H - HDR - 0.15, e.head - 0.05);
         const jw = clamp(small * 0.020, 0.16, 0.30);
         for (const sg of [-1, 1]) {
-          F.rib(ctx, df, sg * (e.gap / 2 + jw * 0.7), TOP, jT, jw, SP + 0.08, ACCENT, 0);
-          F.rib(ctx, df, sg * (e.gap / 2 + jw * 0.7), TOP, jT, jw * 0.34, SP + 0.13,
+          F.rib(ctx, df, sg * (e.gap / 2 + jw * 0.7), jY, jT, jw, SP + 0.08, ACCENT, 0);
+          F.rib(ctx, df, sg * (e.gap / 2 + jw * 0.7), jY, jT, jw * 0.34, SP + 0.13,
             F.shade(ACCENT, 1.30), 0);
         }
         // the coloured panel: the second half of every mid-century front door
@@ -630,7 +631,7 @@
           const sgP = h(0xd108) < 0.5 ? 1 : -1;         // opposite side to the breeze screen
           const pw = clamp(room * 0.30, 0.5, 1.15);
           const pT = Math.min(H - HDR - 0.15, e.head + 0.30);
-          F.rib(ctx, df, sgP * (e.gap / 2 + jw * 1.4 + pw / 2), TOP, pT, pw, SP + 0.05, ACCENT, 0);
+          F.rib(ctx, df, sgP * (e.gap / 2 + jw * 1.4 + pw / 2), jY, pT, pw, SP + 0.05, ACCENT, 0);
           F.rib(ctx, df, sgP * (e.gap / 2 + jw * 1.4 + pw / 2), pT - 0.10, pT, pw + 0.10, 0.12,
             F.shade(ACCENT, 0.62), SP + 0.02);
           // house numbers: four small accent pips up the panel edge
@@ -642,7 +643,7 @@
         // a planter box each side on the terrace: low, stone, one more line
         const plW = clamp(TW * 0.24, 0.7, 2.2), plH = clamp(FH * 0.09, 0.22, 0.36);
         const plT = (e.gap / 2 + TW / 2) / 2;
-        if (TW / 2 - e.gap / 2 >= plW + 0.4) for (const sg of [-1, 1]) {
+        if (!e.driveIn && TW / 2 - e.gap / 2 >= plW + 0.4) for (const sg of [-1, 1]) {
           F.box(ctx, df, sg * plT, TOP + plH / 2 + 0.02, plW, plH, TD * 0.55, STONE, 0.10);
           F.box(ctx, df, sg * plT, TOP + plH + 0.04, plW + 0.14, 0.09, TD * 0.55 + 0.12, STONE_L, 0.05);
         }

@@ -253,11 +253,17 @@
         const sy = k * FH;
         const gTop = (k + 1) * FH - 0.45;            // the host's glass head
         const isTop = (k === ST - 1);
-        // The head is drawn ONLY in the wall's own solid band: from the glass
-        // head up to 0.45 into the storey above. On the top storey that band
-        // is the 0.45 m header and nothing more, so the attic heads are small.
-        const rise = clamp(isTop ? (H - gTop - 0.12) : 0.80, 0.20, 0.80);
-        const winW = rise * 2;                       // semicircular by definition
+        // THE HEAD IS DRAWN ONLY IN THE WALL'S OWN SOLID BAND — from the glass
+        // head up to 0.45 into the storey above, one metre in all, of which the
+        // impost and the string course above take 0.28. Hence a 0.72 ceiling on
+        // the rise. The TOP storey has only its 0.45 m header to work in.
+        const rise = clamp(isTop ? (H - gTop - 0.20) : 0.72, 0.18, 0.72);
+        // A semicircle wherever the head room allows one. It does not on the
+        // attic, where a window as narrow as 2*rise would be a slit — the host
+        // glazes a full 2.2 m of storey and nothing may cover that — so the
+        // attic keeps a sane opening and takes a segmental head instead.
+        const winW = Math.max(rise * 2, clamp(FH * 0.34, 0.95, 1.45));
+        const segH = winW > rise * 2 + 0.02;
         const step = winW + clamp(winW * 0.62, 0.55, 1.20);
         const nb = clamp(Math.round((f.span - 1.3) / step), 2, 7);
         const bays = F.bays(f, nb, clamp(f.span * 0.06 + 0.55, 0.62, 1.40));
@@ -265,9 +271,9 @@
 
         // the render, in the two solid zones only
         if (k > 0) runBand(ctx, F, f, sy + 0.27, 0.50, PJ, STUC, holes, 0.18);
-        runBand(ctx, F, f, gTop + (rise + 0.14) / 2, rise + 0.14, PJ, STUC, holes, 0.18);
+        runBand(ctx, F, f, gTop + (rise + 0.20) / 2, rise + 0.20, PJ, STUC, holes, 0.18);
         // the floor line: a travertine string course capping the head band
-        runBand(ctx, F, f, gTop + rise + 0.06, 0.18, PJ + 0.12, TRAV, holes, 0.34);
+        runBand(ctx, F, f, gTop + rise + 0.16, 0.16, PJ + 0.12, TRAV, holes, 0.34);
 
         for (const b of bays) {
           const t = b.t;
@@ -282,14 +288,14 @@
           // sill (inside the sill zone). The ground storey already has the
           // plinth cap doing that job.
           if (k > 0) F.box(ctx, f, t, sy + 0.40, winW + 0.46, 0.18, PJ + 0.16, TRAV);
-          // THE ROUND HEAD: impost, dark void, travertine archivolt — all of
+          // THE ARCHED HEAD: impost, dark void, travertine archivolt — all of
           // it above gTop, so not one course of it lies over the glass.
-          F.box(ctx, f, t, gTop + 0.08, winW + 0.52, 0.16, PJ + 0.12, TRAV);
+          F.box(ctx, f, t, gTop + 0.07, winW + 0.52, 0.14, PJ + 0.12, TRAV);
           const st = rise > 0.5 ? 4 : 3;
           for (let j = 0; j < st; j++) {
             const u = (j + 0.5) / st;
-            const vh = (winW / 2) * Math.sqrt(Math.max(0, 1 - u * u));
-            const cy = gTop + 0.16 + u * rise, ch = rise / st + 0.04;
+            const vh = (winW / 2) * Math.sqrt(Math.max(0, 1 - u * u * (segH ? 0.58 : 1)));
+            const cy = gTop + 0.14 + u * rise, ch = rise / st + 0.04;
             F.box(ctx, f, t, cy, vh * 2, ch, PJ + 0.02, GLOOM);
             for (const sg of [-1, 1])
               F.box(ctx, f, t + sg * (vh + 0.11), cy, 0.22, ch, PJ + 0.12, TRAV);
@@ -406,8 +412,11 @@
             const cy = springY + u * rise, ch = rise / st + 0.04;
             for (const sg of [-1, 1]) {
               lob(f, tc + sg * (vh + vt / 2), cy, vt, ch, AT + 0.08, LD + 0.04, TRAV);
+              // the spandrel behind the ring is render, but a shade down: it
+              // sits under the eave and an arcade whose spandrels are as
+              // bright as the wall stops reading as a deep screen.
               const sw = (clear / 2 + pierW * 0.55) - (vh + vt);
-              if (sw > 0.06) lob(f, tc + sg * (vh + vt + sw / 2), cy, sw + 0.02, ch, AT, LD, STUC);
+              if (sw > 0.06) lob(f, tc + sg * (vh + vt + sw / 2), cy, sw + 0.02, ch, AT, LD, STUCD);
               // the intrados, on the arcade's INNER face and in shade. This is
               // the dark that makes an arch head read as a hole in a thick
               // screen instead of as a ring painted on a flat one.
@@ -418,7 +427,7 @@
             AT + 0.15, LD + 0.10, TRAV);                       // keystone
           const above = ey - (springY + rise + 0.14);
           if (above > 0.08)
-            lob(f, tc, (springY + rise + 0.14 + ey) / 2, clear + pierW * 0.9, above, AT, LD, STUC);
+            lob(f, tc, (springY + rise + 0.14 + ey) / 2, clear + pierW * 0.9, above, AT, LD, STUCD);
           // the centre arch is allowed to break up through the architrave, so
           // the architrave runs in segments around it.
           if (isC && springY + rise + 0.06 > ey) holes.push([t0 - 0.10, t1 + 0.10]);
@@ -457,6 +466,124 @@
       for (let k = 0; k < nLog; k++) {
         const T = tierOf(k), sy = springOf(T);
         for (const f of faces) if (lay[f.s]) arcade(f, T, lay[f.s], sy);
+      }
+
+      // ============================================================
+      //  8. THE BRACKETED CORNICE
+      // ============================================================
+      // Modillions hang in the header band and carry a soffit that flies out
+      // as far as EO — far enough to roof the loggia. A shy eave here would
+      // turn the whole villa back into a box with a hat on.
+      for (const f of faces) {
+        const pitch = clamp(FH * 0.36, 0.85, 1.35);
+        const n = clamp(Math.round((f.span + 0.4) / pitch), 4, 34);
+        const stp = (f.span + 0.4) / n;
+        const bw = clamp(stp * 0.30, 0.16, 0.34);
+        for (let i = 0; i < n; i++) {
+          const t = -(f.span + 0.4) / 2 + (i + 0.5) * stp;
+          F.box(ctx, f, t, H - 0.22, bw, 0.40, EO * 0.52, TRAV);
+          F.box(ctx, f, t, H - 0.09, bw + 0.10, 0.18, EO * 0.68, TRAV);
+        }
+        F.band(ctx, f, H - 0.05, 0.16, EO * 0.34, TRAVD, 0.30);     // bed mould
+        F.band(ctx, f, H + 0.07, 0.16, EO * 0.96, TRAVD, 0.36);     // soffit
+        F.band(ctx, f, H + 0.22, 0.26, EO * 1.00, TRAV, 0.42);      // fascia
+      }
+
+      // ============================================================
+      //  9. THE PANTILE ROOF — low, hipped, strongly overhanging
+      // ============================================================
+      const roofY0 = H + 0.34;
+      const nT = clamp(Math.round(rH / 0.26), 4, 9);
+      const radial = (EO + inRun) / nT;               // plan run per course
+      for (let i = 0; i < nT; i++) {
+        const outAt = EO - radial * i;                // walks inward as it rises
+        const cy = roofY0 + rH * (i + 0.5) / nT, ch = rH / nT + 0.05;
+        const col = (i % 3 === 1) ? TILEL : (i % 3 === 2 ? TILED : TILE);
+        for (const f of faces) {
+          const len = f.span + 2 * outAt + 0.05;
+          if (len < 0.6) continue;
+          F.box(ctx, f, 0, cy, len, ch, radial + 0.07, col, outAt - radial - 0.07);
+        }
+        // the hip ribs: four diagonals of heavier tile, which is the only
+        // thing that tells you a stepped roof is HIPPED and not a wedding cake.
+        const rb = clamp(small * 0.030, 0.22, 0.42);
+        for (const sx of [-1, 1]) for (const sz of [-1, 1])
+          ctx.dbox(sx * (W / 2 + outAt), cy, sz * (D / 2 + outAt), rb * 1.7, ch, rb * 1.7, TILEL);
+      }
+      for (const f of faces) {
+        // the heavy eave course, lowest and furthest out
+        F.box(ctx, f, 0, roofY0 + 0.11, f.span + 2 * (EO + 0.14) + 0.05, 0.24, 0.42, TILED,
+          EO + 0.14 - 0.42);
+        // PANTILE ROLLS running up the slope. This is the whole terracotta
+        // read at 40 m: a rhythm, not a smooth plane.
+        const rp = clamp(small * 0.038, 0.30, 0.46);
+        const n = clamp(Math.round((f.span + 2 * EO) / rp), 6, 42);
+        const stp = (f.span + 2 * EO) / n;
+        for (let i = 0; i < n; i++) {
+          F.box(ctx, f, -(f.span + 2 * EO) / 2 + (i + 0.5) * stp, roofY0 + 0.30,
+            stp * 0.42, 0.16, radial * 1.5, TILEL, EO + 0.10 - radial * 1.5);
+        }
+        // The host builds its own parapet on the roof slab, up to ~1 m of it.
+        // The roof springs above that, so a bed course straddling the wall
+        // plane wraps it in tile instead of leaving a grey stub at the eaves.
+        const bed = clamp(roofY0 + rH * (EO / (EO + inRun)) - H, 1.15, 2.00);
+        F.box(ctx, f, 0, H + bed / 2, f.span + 0.3, bed, 0.72, TILED, -0.44);
+      }
+
+      // ============================================================
+      //  10. THE COMPLUVIUM — the roof does not close
+      // ============================================================
+      // The courses stop inRun short of the middle and leave a rectangular
+      // opening: from the street, a low parapet and urns finishing the top
+      // line; from above, a terrace on the host's own walkable roof deck.
+      const ridgeY = roofY0 + rH;
+      const parH = clamp(rH * 0.40, 0.34, 0.62);
+      const tW = W - 2 * inRun, tD = D - 2 * inRun;
+      for (const f of faces) {
+        const len = f.span - 2 * inRun;
+        if (len < 1.2) continue;
+        F.box(ctx, f, 0, ridgeY + parH / 2, len + 0.52, parH, 0.44, STUC, -inRun - 0.22);
+        F.box(ctx, f, 0, ridgeY + parH + 0.09, len + 0.74, 0.18, 0.62, TRAV, -inRun - 0.31);
+      }
+      // the paving, laid on the solid part of the host's roof slab only, so it
+      // never floats over the stairwell void
+      {
+        const R = F.roof(ctx);
+        if (tW > 1.6 && tD > 1.6)
+          ctx.dbox(R.cx, H - 0.05, R.cz, Math.min(tW - 0.2, R.w), 0.10,
+            Math.min(tD - 0.2, R.d), TRAVD);
+      }
+      // URNS on the four corners of the coping — the only real meshes on the
+      // whole villa, four of them, well inside the ~40 budget.
+      {
+        const ur = clamp(small * 0.030, 0.20, 0.34), uy = ridgeY + parH + 0.18;
+        for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+          const ux = sx * (W / 2 - inRun), uz = sz * (D / 2 - inRun);
+          ctx.dbox(ux, uy + 0.14, uz, ur * 2.3, 0.28, ur * 2.3, TRAV);
+          ctx.ball(ux, uy + 0.30 + ur, uz, ur, TRAV);
+          ctx.dbox(ux, uy + 0.36 + ur * 2, uz, ur * 0.9, ur * 0.8, ur * 0.9, TRAV);
+        }
+      }
+      // THE PERGOLA on the terrace: two rows of posts, a beam over each and a
+      // run of rafters across. It stands on the +x side, away from the host's
+      // roof stairwell (which lives at -x), and its rafters ride just above
+      // the coping so the trellis is part of the silhouette from the street.
+      if (tW > 3.2 && tD > 2.6) {
+        const postH = clamp(ridgeY + parH - H + 0.12, 1.90, 2.90);
+        const px0 = W / 2 - inRun - 0.50, px1 = px0 - clamp(tW * 0.30, 1.00, 1.80);
+        const zs = tD - 0.9, ps = clamp(small * 0.022, 0.14, 0.22);
+        const n = clamp(Math.round(zs / 1.9), 2, 5);
+        for (let i = 0; i <= n; i++) {
+          const z = -zs / 2 + (zs / n) * i;
+          for (const px of [px0, px1]) ctx.dbox(px, H + postH / 2, z, ps * 2, postH, ps * 2, TRAV);
+        }
+        for (const px of [px0, px1])
+          ctx.dbox(px, H + postH + 0.10, 0, ps * 2.2, 0.20, zs + 0.5, TRAV);
+        const nr = clamp(Math.round(zs / 0.6), 3, 14);
+        for (let i = 0; i <= nr; i++) {
+          ctx.dbox((px0 + px1) / 2, H + postH + 0.28, -zs / 2 + (zs / nr) * i,
+            Math.abs(px0 - px1) + 0.5, 0.12, 0.14, TRAVD);
+        }
       }
     },
   });
