@@ -176,7 +176,7 @@ const PROBE = `(() => {
       rec.why = au ? au.why : null;
       rec.solve = au && au.reach != null
         ? "reach=" + (au.reach*100).toFixed(0) + " dist=" + (au.dist*100).toFixed(0) +
-          " over=" + (au.over*100).toFixed(0) + " pull=" + (au.pull*100).toFixed(0) +
+          " over=" + (au.over*100).toFixed(0) + " butt=" + ((au.butt||0)*100).toFixed(0) +
           " over2=" + (au.over2*100).toFixed(0) + " slid=" + au.slid +
           " resid=" + (au.residual == null ? "null" : (au.residual*100).toFixed(0))
         : null;

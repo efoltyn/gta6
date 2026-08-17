@@ -437,45 +437,55 @@
       showCarried(ch, R.style, false);
     }
 
-    /* ---- SHOULDER THE RIFLE ------------------------------------------
+    /* ---- PUT THE STOCK IN THE SHOULDER -------------------------------
        MEASURED, and it is the real reason the off hand could never be on a
        long gun: the present-weapon pose holds the firing arm nearly STRAIGHT
        (character.js: shoulder -1.571, elbow -0.10, plus 0.14 of shoulder
-       protraction), which puts the grip ~0.55 m in front of the chest. An
-       M4 drawn at its researched world length carries its handguard another
-       0.46 m past that. The off arm's total span is 0.63 m. The handguard
-       was 0.4 m OUT OF REACH — no support pose, tuned or solved, could ever
-       have touched it, which is exactly why three rounds of re-tuning the
-       angles never fixed the owner's complaint.
+       protraction), which puts the grip ~0.55 m in front of the chest. An M4
+       drawn at its researched world length carries its handguard another
+       0.46 m past that. The off arm's whole span is 0.80 m. The handguard sat
+       1.02 m from the off shoulder — a fifth of a metre beyond anything that
+       arm could touch. No support pose, hand-tuned or solved, could ever have
+       reached it, which is why three earlier rounds of re-tuning the angles
+       never fixed the owner's complaint. The gun has to come back.
 
-       You cannot pose your way out of that; the GUN has to come back. So
-       when the support anchor is beyond the off arm, the firing hand is
-       pulled straight back along the barrel by the shortfall — the rifle
-       goes into the shoulder instead of being held out at arm's length,
-       which is both how a rifle is actually held and what puts the
-       handguard inside the other arm's reach. Weapon-agnostic: a pistol's
-       support anchor is beside its own grip, so the pull is zero and
-       nothing about sidearms moves. */
-    if (CBZ.CONFIG.CHAR_SHOULDER_LONGGUN !== false) {
+       PLACED, NOT NUDGED. The first attempt pulled the firing hand back by
+       the shortfall each frame and expected the loop to settle. It cannot:
+       animChar re-writes that arm every frame with a damp, so a relative
+       nudge is a spring fighting a spring, and the measured result was 42 cm
+       of requested pull buying 10 cm of movement. So compute the answer
+       instead of approaching it — a shouldered rifle's geometry is not a
+       matter of opinion:
+
+           the BUTT sits in the shoulder pocket
+           the grip is one buttstock-length forward of it, down the barrel
+           => wrist = pocket + barrelForward x (grip-to-butt length)
+
+       The stock length is measured off the weapon's own model (its +Z
+       extent, cached per prop), so this is one line of geometry that works
+       for a carbine, an AK, a belt-fed M249 and a gun added tomorrow, and it
+       lands in ONE pass with nothing to converge to.
+
+       Only for weapons whose support hand is out of reach at arm's length —
+       which is exactly the set of guns you shoulder. A pistol's support
+       anchor is beside its own grip, so `over` is negative, and nothing
+       about sidearms moves. */
+    const reloadOwnsTheHand = !!reloadSeg;
+    if (CBZ.CONFIG.CHAR_SHOULDER_LONGGUN !== false && !reloadOwnsTheHand) {
       const reach = armSpan(ch);
       shoulderWorld(ch, "l", _sh);
       let over = _sh.distanceTo(target) - reach;
       seen.reach = reach; seen.dist = _sh.distanceTo(target); seen.over = over;
-      seen.pull = 0; seen.slid = 0;
+      seen.slid = 0;
       if (over > 0.01) {
-        // A little PAST just-reachable. Sitting exactly on the reach limit
-        // leaves the off arm locked straight, which reads as a second set of
-        // zombie arms; the margin buys a visible, load-bearing elbow. The
-        // loop is self-stabilising — animChar damps the firing arm back
-        // toward its own pose each frame, this pulls it in by whatever is
-        // still missing, and `over` shrinks to zero at the balance point.
-        const pull = Math.min(over + 0.06, 0.42);
-        seen.pull = pull;
         prop.getWorldQuaternion(_bodyQ);
         _fwd.set(0, 0, -1).applyQuaternion(_bodyQ);        // the barrel's own axis
-        ch.sockets.rightHand.updateWorldMatrix(true, false);
-        ch.sockets.rightHand.getWorldPosition(_rt);
-        _rt.addScaledVector(_fwd, -pull);
+        shoulderWorld(ch, "r", _rt);                        // the firing shoulder
+        // into the pocket: a touch inboard of the joint and just below it
+        _rt.lerp(_sh, 0.14);
+        _rt.y -= 0.05;
+        seen.butt = buttLen(prop);
+        _rt.addScaledVector(_fwd, seen.butt);
         CBZ.charArmTo.rest(ch, "r", 0);
         CBZ.charArmTo(ch, _rt, "r", blend);
         // The gun rode the wrist back, so its world aim is now stale in both
@@ -522,6 +532,36 @@
   const _rt = new THREE.Vector3(), _grip = new THREE.Vector3();
   function armSpan(ch) {
     return (CBZ.charArmTo.span && CBZ.charArmTo.span(ch, "l")) || 0.62;
+  }
+  /* GRIP-TO-BUTT, in world metres, measured off the weapon's own geometry —
+     the shared model convention runs the barrel down -Z from a grip at the
+     origin, so the +Z extent IS the buttpad. Measured once per prop from its
+     LOCAL bounds and cached: a Box3 over a socketed prop would be its world
+     box, which rotates with the aim and would make the stock change length
+     every time the player looked up. A weapon with no stock behind the grip
+     (a pistol) measures near zero and is placed at the grip, which is where a
+     pistol is held anyway. */
+  const _bb = new THREE.Box3(), _bbInv = new THREE.Matrix4(), _bbM = new THREE.Matrix4();
+  function buttLen(prop) {
+    if (prop.userData._buttLen != null) return prop.userData._buttLen;
+    prop.updateWorldMatrix(true, true);
+    _bbInv.copy(prop.matrixWorld).invert();
+    let maxZ = 0;
+    prop.traverse((o) => {
+      if (!o.isMesh || !o.geometry) return;
+      if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+      _bb.copy(o.geometry.boundingBox);
+      _bbM.multiplyMatrices(_bbInv, o.matrixWorld);   // this mesh, in PROP space
+      _bb.applyMatrix4(_bbM);
+      if (_bb.max.z > maxZ) maxZ = _bb.max.z;
+    });
+    // Prop space is pre-scale, so convert: the prop's own scale, then the
+    // rig's metre conversion which the socket chain applies above it.
+    const rig = (CBZ.playerChar && CBZ.playerChar.group && CBZ.playerChar.group.userData
+      && CBZ.playerChar.group.userData.humanScale) || 0.70;
+    const len = maxZ * (prop.scale.x || 1) * rig;
+    prop.userData._buttLen = len;
+    return len;
   }
   function shoulderWorld(ch, arm, out) {
     const part = arm === "l" ? ch.parts.la : ch.parts.ra;
@@ -638,7 +678,7 @@
       // the shoulder solve's own working: what it thought the arm could
       // reach, how far short it was, and what it did about it
       reach: seen.reach, dist: seen.dist, over: seen.over, over2: seen.over2,
-      pull: seen.pull, slid: seen.slid, residual: seen.residual,
+      butt: seen.butt, slid: seen.slid, residual: seen.residual,
       reloading: R.active,
       reloadP: R.p,
     };
