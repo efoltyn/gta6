@@ -165,6 +165,10 @@
 
     CBZ.guards.forEach((gd) => {
       gd.wi = 0; gd.alert = 0; gd.bribed = 0; gd.ko = 0; gd.dead = false; gd.hp = null; gd.rep = 0; gd.quest = null; gd.approach = null; gd.investigate = null; gd.state = "patrol"; gd.approachCD = 3 + Math.random() * 5;
+      // radio-window + gunpoint state (detection.js / intimidate.js): a new
+      // run unties every screw and forgets every call, landed or pending.
+      gd.tied = false; gd.radioT = null; gd._radioed = false; gd.intimidMode = null; gd.intimidT = 0; gd.poseHandsUp = false; gd._gunpointCD = 0;
+      if (gd.char) gd.char.handsUp = false;
       gd.group.position.copy(gd.start); gd.group.rotation.z = 0; gd.flashlightOn = false; gd.flashlightReason = ""; gd.wedge.visible = false;
     });
     CBZ.npcs.forEach((n) => {
