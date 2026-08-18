@@ -411,7 +411,7 @@
               // back (untake + re-solidify the parked hull)
               rec.taken = false;
               restoreParkedCollider(rec);
-              note("It won't start — try again.", 1.6);
+              note("It won't start, try again.", 1.6);
             });
         } else if (doors && doors.active) {
           return false;                       // one boarding at a time
@@ -421,7 +421,7 @@
     } else {
       took = driveArmor(rec);
     }
-    if (!took) { note("It won't start — try again.", 1.6); return false; }
+    if (!took) { note("It won't start, try again.", 1.6); return false; }
 
     rec.taken = true;
     // the parked solid leaves with the machine (idempotent — the air path may
@@ -432,7 +432,7 @@
     // hardware is instant, loud, and pins a hard manhunt. Ground = 3★, air = 4★.
     if (CBZ.cityCrime) { try { CBZ.cityCrime(120, { type: rec.civilian ? "aircraft-hijacking" : "grand-theft-military", x: rec.pos.x, z: rec.pos.z, instant: true }); } catch (e) {} }
     if (CBZ.cityForceStars) { try { CBZ.cityForceStars(rec.kind === "ground" || rec.kind === "tank" ? 3 : 4); } catch (e) {} }
-    big(rec.civilian ? "Tower reports a " + name + " departing with no clearance — owner not aboard." : "Base alert: a " + name + " just rolled off the reservation. Units scrambling.");
+    big(rec.civilian ? "Tower reports a " + name + " departing with no clearance, owner not aboard." : "Base alert: a " + name + " just rolled off the reservation. Units scrambling.");
     // No abstract bell for the theft flag. The visible base response, wanted
     // escalation and dispatch message carry the event without a sound following
     // the stolen aircraft into the sky.

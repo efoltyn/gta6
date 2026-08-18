@@ -132,11 +132,11 @@
     if (g.tired >= 100 && g.invuln <= 0) {
       P.hp -= (C.tireExhaustDmg || 1.4) * dt;
       tireWarnT -= dt;
-      if (tireWarnT <= 0) { tireWarnT = 5; CBZ.city && CBZ.city.note("Exhausted — find somewhere to sleep.", 2.4); }
+      if (tireWarnT <= 0) { tireWarnT = 5; CBZ.city && CBZ.city.note("Exhausted, find somewhere to sleep.", 2.4); }
       if (P.hp <= 0 && CBZ.cityKillPlayer) CBZ.cityKillPlayer("collapsed from exhaustion");
     } else if (g.tired > 60 && night > 0.5) {
       tireWarnT -= dt;
-      if (tireWarnT <= 0) { tireWarnT = 9; CBZ.city && CBZ.city.note("Getting tired — rest somewhere safe.", 2); }
+      if (tireWarnT <= 0) { tireWarnT = 9; CBZ.city && CBZ.city.note("Getting tired, rest somewhere safe.", 2); }
     }
 
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();

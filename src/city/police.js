@@ -454,7 +454,7 @@
   const BEAT_LINES = [
     "Quiet block tonight. Stay on it.",
     "Dispatch wants us visible on this strip.",
-    "Watch that corner — it's been hot all week.",
+    "Watch that corner, it's been hot all week.",
     "We loop the block, then check the storefronts.",
     "Payday weekend. Keep your eyes open.",
   ];
@@ -482,10 +482,10 @@
     if (challengeNoteCD > 0) return;
     challengeNoteCD = 4.5;
     if (CBZ.city && CBZ.city.note) {
-      CBZ.city.note(c.swat ? "\"POLICE! DOWN — HANDS BEHIND YOUR HEAD!\"" : "\"FREEZE! Hands where I can see them!\"", 2.0);
+      CBZ.city.note(c.swat ? "\"POLICE! DOWN · HANDS BEHIND YOUR HEAD!\"" : "\"FREEZE! Hands where I can see them!\"", 2.0);
       if (CBZ.now - surrenderHintT > 30000) {
         surrenderHintT = CBZ.now;
-        CBZ.city.note("Stand still to be cuffed — or walk up and surrender. Fighting back gets you shot.", 3.2);
+        CBZ.city.note("Stand still to be cuffed, or walk up and surrender. Fighting back gets you shot.", 3.2);
       }
     }
   }
@@ -652,7 +652,7 @@
     const s = STOP.susp;
     if (s >= 2.2) return "FINAL WARNING · walk off now and he calls it in";
     if (s >= 1.2) return "Officer is losing patience";
-    return "Open carry — he wants it away";
+    return "Open carry, he wants it away";
   }
   // The ordinary city card now HIDES #interactNote (it has no question line to
   // print any more), and it shares this element with us. Writing textContent
@@ -712,7 +712,7 @@
     cop.searchT = 0; cop.giveUp = false; cop.arrestT = 0;
     cop._duty = null;            // the open carry outranks a move-along
     drawGun(cop);                // challenge stance: gun OUT but lowered (_gunLowered)
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("\"Hey! Hold up — is that a firearm?\"", 1.8);
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("\"Hey! Hold up, is that a firearm?\"", 1.8);
     if (CBZ.sfx) CBZ.sfx("whoosh");
     stopRefreshPanel();
     stopShow();
@@ -742,7 +742,7 @@
       STOP.susp += 1;
       if (STOP.susp >= 3) {
         // brandishing call goes out → a 1-star stop becomes real; he squares up
-        if (CBZ.city) CBZ.city.note("“That's it — hands! HANDS!”", 1.8);
+        if (CBZ.city) CBZ.city.note("“That's it, hands! HANDS!”", 1.8);
         if (CBZ.cityCrime) CBZ.cityCrime(45, { instant: true, x: c.pos.x, z: c.pos.z, type: "shots-fired" });
         c.curTarget = CBZ.city.playerActor; c.sees = true; c.retarget = 1.5;
         endStop(false);
@@ -752,7 +752,7 @@
       }
     }
   }
-  function stopExcuseLicense() { stopAttempt(stopTalkChance(0.6), "“It's licensed — I carry legal.”"); }
+  function stopExcuseLicense() { stopAttempt(stopTalkChance(0.6), "“It's licensed. I carry legal.”"); }
   function stopExcuseRange()   { stopAttempt(stopTalkChance(0.5), "“On my way to the range, that's all.”"); }
 
   // REFUSING IS WALKING AWAY. The REFUSE row is gone, but the refusal it stood
@@ -771,7 +771,7 @@
     c._stopRefused = (c._stopRefused || 0) + 1;      // he will open harder next time
     STOP.susp += STOP.susp >= 1.2 ? 1.25 : 1.05;
     if (STOP.susp >= 3) {
-      if (CBZ.city) CBZ.city.note("“Refusing a lawful order — HANDS!”", 1.8);
+      if (CBZ.city) CBZ.city.note("“Refusing a lawful order. HANDS!”", 1.8);
       if (CBZ.cityCrime) CBZ.cityCrime(45, { instant: true, x: c.pos.x, z: c.pos.z, type: "armed-refusal" });
       c.curTarget = CBZ.city.playerActor; c.sees = true; c.retarget = 1.5;
       endStop(false);
@@ -1146,8 +1146,8 @@
     c._watchLost = true;
     const key = c.copRank;
     vacancy[key] = (key === "chief") ? 150 : 60;       // seconds without a holder
-    if (key === "chief" && CBZ.city && CBZ.city.big) CBZ.city.big("THE CHIEF IS DOWN — NO STAND-DOWN ORDER");
-    else if (CBZ.cityFeed) CBZ.cityFeed("MPD command post vacant — " + (c.name || "an officer") + " is down.", "#ff9e6b");
+    if (key === "chief" && CBZ.city && CBZ.city.big) CBZ.city.big("THE CHIEF IS DOWN · NO STAND-DOWN ORDER");
+    else if (CBZ.cityFeed) CBZ.cityFeed("MPD command post vacant · " + (c.name || "an officer") + " is down.", "#ff9e6b");
   }
 
   // spawn a cop at a specific spot (used by the car-biz police RAID in empire.js)
@@ -1880,7 +1880,7 @@
     // for ("if you shoot the pilot the helicopter should be in trouble").
     if (crewLost("Pilot") &&
         chopper.phase !== "idle" && chopper.phase !== "dispatch" && chopper.phase !== "spool") {
-      if (CBZ.cityFlavor) CBZ.cityFlavor("Air-1's pilot is hit — she's going down!", "#ff8b6b");
+      if (CBZ.cityFlavor) CBZ.cityFlavor("Air-1's pilot is hit, she's going down!", "#ff8b6b");
       downChopper();
       fallChopper(dt);
       return;
@@ -2552,7 +2552,7 @@
     van.npcDriver = null;
     if (n && !forced && CBZ.city && CBZ.city.note && CBZ.player &&
         Math.hypot(van.pos.x - CBZ.player.pos.x, van.pos.z - CBZ.player.pos.z) < 90) {
-      CBZ.city.note("A SWAT van arrives — the entry team deploys.", 2.2);
+      CBZ.city.note("A SWAT van arrives, the entry team deploys.", 2.2);
     }
     return n;
   }
@@ -2670,7 +2670,7 @@
     // (convictHailed reset in cityPoliceForceReset). chooseTarget() does the rest.
     if (g.escapedConvict && !convictHailed && g.state === "playing") {
       convictHailed = true;
-      if (CBZ.city && CBZ.city.big) CBZ.city.big("ALL UNITS — ESCAPED CONVICT AT LARGE");
+      if (CBZ.city && CBZ.city.big) CBZ.city.big("ALL UNITS · ESCAPED CONVICT AT LARGE");
     }
     const ambientWant = CBZ.CITY.ambientCops || 0;
     const playerWant = g.cityCopTarget || 0;
@@ -3518,7 +3518,7 @@
               }
             }
             if (c.sees && !P.driving && !P.dead && P.speed < 3 && dist < 6) {
-              if (c.arrestT === 0 && challengeNoteCD <= 0 && CBZ.city && CBZ.city.note) { challengeNoteCD = 2.5; CBZ.city.note("\"Easy now — hold still.\"", 1.2); }
+              if (c.arrestT === 0 && challengeNoteCD <= 0 && CBZ.city && CBZ.city.note) { challengeNoteCD = 2.5; CBZ.city.note("\"Easy now, hold still.\"", 1.2); }
               c.arrestT += dt;
               if (c.arrestT > 2.5 && dist < 3.2) { CBZ.cityBust && CBZ.cityBust({ cop: c }); return; }
               // close the last stretch slowly, cuffs out; square up on top
@@ -3809,8 +3809,8 @@
           if (dd > 2.4 && D.hold == null) { stepTo(c, ddx, ddz, c.baseSpeed * 0.85, dt, near); continue; }
           if (D.hold == null) {
             D.hold = 2.6;
-            copBark(c, D.kind === "corpse" ? ["Step back — this is a scene now.", "Nothing to see here. Keep it moving."]
-              : D.kind === "brawl" ? ["HEY! Break it up — NOW.", "Hands off each other. Walk away."]
+            copBark(c, D.kind === "corpse" ? ["Step back, this is a scene now.", "Nothing to see here. Keep it moving."]
+              : D.kind === "brawl" ? ["HEY! Break it up. NOW.", "Hands off each other. Walk away."]
                 : ["You can't camp here. Move along.", "Off the block. There's a shelter east side."]);
             disperse(c, p.pos.x, p.pos.z, D.kind);
           }

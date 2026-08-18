@@ -328,7 +328,7 @@
     if (s.tag) s.tag.visible = false;
     if (on) {
       if (!s.soldTag) {
-        s.soldTag = tagSprite("SOLD — restock soon", "#ff7a7a", 2.0, 0.5);
+        s.soldTag = tagSprite("SOLD, restock soon", "#ff7a7a", 2.0, 0.5);
         if (s.soldTag) { s.soldTag.position.set(s.tag ? s.tag.position.x : s.x, s.tag ? s.tag.position.y : s.y, s.tag ? s.tag.position.z : s.z); S.group.add(s.soldTag); }
       } else s.soldTag.visible = true;
       s.restockT = RESTOCK * (0.8 + Math.random() * 0.5);
@@ -354,10 +354,10 @@
     if (s.armor) {
       if (!CBZ.cityEquipArmor) { CBZ.city.note("Body armor's not stocked right now.", 1.8); return; }
       const price = armorPrice({ kit: s.kit, label: s.name, price: s.price });
-      if (!CBZ.city.spend(price)) { CBZ.city.note("The " + s.name + " runs " + fmt$(price) + " — come back with the money.", 2); return; }
+      if (!CBZ.city.spend(price)) { CBZ.city.note("The " + s.name + " runs " + fmt$(price) + " · come back with the money.", 2); return; }
       CBZ.cityEquipArmor(s.kit);
       if (CBZ.sfx) CBZ.sfx("coin");
-      CBZ.city.note("Strapped on the " + s.name + " for " + fmt$(price) + " — you're plated up.", 2.2);
+      CBZ.city.note("Strapped on the " + s.name + " for " + fmt$(price) + " · you're plated up.", 2.2);
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
       return;
     }
@@ -365,24 +365,24 @@
     // off-screen). Counts mirror to g.cityGrenades / g.cityC4 for HUD readers.
     if (s.boom) {
       const price = e.buyPrice(s.name);
-      if (!CBZ.city.spend(price)) { CBZ.city.note("The " + s.name + " runs " + fmt$(price) + " — come back with the money.", 2); return; }
+      if (!CBZ.city.spend(price)) { CBZ.city.note("The " + s.name + " runs " + fmt$(price) + " · come back with the money.", 2); return; }
       e.add(s.name, 1);
       const n = e.count ? e.count(s.name) : 0;
       if (s.name === "Grenade") g.cityGrenades = n;
       if (s.name === "C4 Charge") g.cityC4 = n;
       if (CBZ.sfx) CBZ.sfx("coin");
       CBZ.city.note(s.name === "C4 Charge"
-        ? "C4 in the bag (" + n + " carried) — [B] plants it, hold [B] to send the signal."
-        : "Frag in the bag (" + n + " carried) — [G] throws it.", 2.4);
+        ? "C4 in the bag (" + n + " carried). [B] plants it, hold [B] to send the signal."
+        : "Frag in the bag (" + n + " carried). [G] throws it.", 2.4);
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
       return;
     }
-    if (s.sold) { CBZ.city.note("That slot's sold out — restock truck's rolling.", 1.8); return; }
+    if (s.sold) { CBZ.city.note("That slot's sold out, restock truck's rolling.", 1.8); return; }
     const meta = e.ITEMS[s.name];
     if (!meta) return;
     const price = e.buyPrice(s.name);   // the SAME price the counter menu reads
     if (!CBZ.city.spend(price)) {
-      CBZ.city.note("The " + s.name + " runs " + fmt$(price) + " — come back with the money.", 2);
+      CBZ.city.note("The " + s.name + " runs " + fmt$(price) + " · come back with the money.", 2);
       return;
     }
     e.add(s.name, 1);
@@ -395,7 +395,7 @@
     setSold(s, true);
     if (CBZ.sfx) CBZ.sfx("coin");
     if (CBZ.city.addRespect) CBZ.city.addRespect(price >= 3000 ? 3 : 1);   // walking out heavy IS the flex
-    if (price >= 3000 && CBZ.city.big) CBZ.city.big("" + s.name + " — straight off the wall!");
+    if (price >= 3000 && CBZ.city.big) CBZ.city.big("" + s.name + " · straight off the wall!");
     CBZ.city.note("Bought the " + s.name + " for " + fmt$(price) + " (+" + rounds + " starter rounds).", 2.2);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
@@ -421,26 +421,26 @@
 
   function promptText(s) {
     const e = econ();
-    if (s.mod) return "<b style='color:#ffd166'>[E]</b> Gunsmith Bench — <span style='color:#7ed957'>fit scopes · bigger mags · silencer · grips</span>";
+    if (s.mod) return "<b style='color:#ffd166'>[E]</b> Gunsmith Bench, <span style='color:#7ed957'>fit scopes · bigger mags · silencer · grips</span>";
     if (s.ammo) {
       const meta = e.ITEMS["Ammo Box"] || {};
-      return "<b style='color:#ffd166'>[E]</b> Ammo Box — <span style='color:#7ed957'>" + fmt$(e.buyPrice("Ammo Box")) + "</span> <span style='color:#7f8794'>· +" + (meta.rounds || 60) + " rounds</span>";
+      return "<b style='color:#ffd166'>[E]</b> Ammo Box, <span style='color:#7ed957'>" + fmt$(e.buyPrice("Ammo Box")) + "</span> <span style='color:#7f8794'>· +" + (meta.rounds || 60) + " rounds</span>";
     }
     if (s.boom) {
       const use = s.name === "C4 Charge" ? "remote det · [B] plant, hold [B] boom" : "frag · [G] throws it";
-      return "<b style='color:#ffd166'>[E]</b> Buy " + s.name + " — <span style='color:#7ed957'>" + fmt$(e.buyPrice(s.name)) + "</span> <span style='color:#7f8794'>· " + use + "</span>";
+      return "<b style='color:#ffd166'>[E]</b> Buy " + s.name + " · <span style='color:#7ed957'>" + fmt$(e.buyPrice(s.name)) + "</span> <span style='color:#7f8794'>· " + use + "</span>";
     }
     if (s.armor) {
       const kit = armorKit(s.kit) || {};
       const price = armorPrice({ kit: s.kit, label: s.name, price: s.price });
       const stats = ((kit.pts | 0) > 0 ? "+" + kit.pts + " armor" : "body armor") + (kit.slot === "helmet" ? " · head" : "");
-      return "<b style='color:#ffd166'>[E]</b> Equip " + s.name + " — <span style='color:#7ed957'>" + fmt$(price) + "</span> <span style='color:#7f8794'>· " + stats + "</span>";
+      return "<b style='color:#ffd166'>[E]</b> Equip " + s.name + " · <span style='color:#7ed957'>" + fmt$(price) + "</span> <span style='color:#7f8794'>· " + stats + "</span>";
     }
-    if (s.sold) return "<span style='color:#ff9e9e'>" + s.name + " — SOLD</span> <span style='color:#7f8794'>· restock truck's rolling</span>";
+    if (s.sold) return "<span style='color:#ff9e9e'>" + s.name + " · SOLD</span> <span style='color:#7f8794'>· restock truck's rolling</span>";
     const meta = e.ITEMS[s.name] || {};
     const price = e.buyPrice(s.name);
     const stats = ((meta.dmg | 0) > 1 ? meta.dmg + " dmg" : "explosive") + (meta.ammo ? " · " + meta.ammo + "-rd mag" : "");
-    return "<b style='color:#ffd166'>[E]</b> Buy " + s.name + " — <span style='color:#7ed957'>" + fmt$(price) + "</span> <span style='color:#7f8794'>· " + stats + "</span>";
+    return "<b style='color:#ffd166'>[E]</b> Buy " + s.name + " · <span style='color:#7ed957'>" + fmt$(price) + "</span> <span style='color:#7f8794'>· " + stats + "</span>";
   }
 
   function promptEl() {
@@ -509,7 +509,7 @@
         setSold(s, false);
         const P = CBZ.player;
         if (P && CBZ.city && Math.hypot(P.pos.x - s.x, P.pos.z - s.z) < 30)
-          CBZ.city.note("Fresh steel on the rack — the " + s.name + " is back in stock.", 2.2);
+          CBZ.city.note("Fresh steel on the rack, the " + s.name + " is back in stock.", 2.2);
       }
     }
     // distance VIS-GATE: the dozen display models draw only when you're near

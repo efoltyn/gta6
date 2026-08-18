@@ -238,13 +238,13 @@
     const s = stars();
     if (s <= 0) return "Settle the docket" + dim("nothing outstanding");
     if (s >= 4) return "Settle the docket" + dim("that's a warrant, not a fine");
-    return "Pay your fine " + fmt$(fineCost()) + dim(s + "★ — clears the record");
+    return "Pay your fine " + fmt$(fineCost()) + dim(s + "★, clears the record");
   }
   function payFine() {
     const s = stars();
     if (s <= 0) { note("“Nothing outstanding against you. Have a good day.”", 2); return; }
     if (s >= 4) {
-      note("“That's a warrant, not a fine. I can't take your money for that — turn yourself in or run.”", 3);
+      note("“That's a warrant, not a fine. I can't take your money for that, turn yourself in or run.”", 3);
       return;
     }
     if (copsClose() && s >= 1) {
@@ -255,7 +255,7 @@
     if (!CBZ.city.spend(cost)) { note("The docket comes to " + fmt$(cost) + ". You're short.", 2.4); return; }
     coin();
     if (CBZ.city.clearWanted) CBZ.city.clearWanted();
-    note("Fine paid — " + fmt$(cost) + ". The clerk stamps it and the record closes.", 2.6, { from: "Clerk of the Court", app: "messages" });
+    note("Fine paid · " + fmt$(cost) + ". The clerk stamps it and the record closes.", 2.6, { from: "Clerk of the Court", app: "messages" });
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     repaint();
   }
@@ -344,7 +344,7 @@
   function qLabel() {
     const t = q();
     if (!t || t.done) return "Take a number" + dim("the window won't look at you without one");
-    if (t.called) return "You're up — window " + (1 + (t.num % 3)) + dim("NOW SERVING " + t.serving);
+    if (t.called) return "You're up, window " + (1 + (t.num % 3)) + dim("NOW SERVING " + t.serving);
     return "Waiting · your ticket " + t.num + dim("NOW SERVING " + t.serving + " — " + Math.max(1, Math.ceil((t.num - t.base) * Q_STEP - t.t)) + "s");
   }
   function qGate() {
@@ -375,7 +375,7 @@
     if (!car) return "Register a vehicle" + dim("drive one up, or park within 8m");
     const nm = (car.model && car.model.name) || "the vehicle";
     if (car.owned) return "Register a vehicle" + dim(nm + " is already titled to you");
-    return "Register " + nm + " " + fmt$(titleFee(car)) + dim(car.stolen ? "it's hot — the title launders it" : "clean title");
+    return "Register " + nm + " " + fmt$(titleFee(car)) + dim(car.stolen ? "it's hot, the title launders it" : "clean title");
   }
   function registerCar() {
     if (!qGate()) return;
@@ -397,7 +397,7 @@
     car.owned = true;                      // the field every ownership reader uses
     st().q = null;                          // served — the ticket is spent
     note(wasHot
-      ? "Titled. The " + nm + " is legally yours now — the plate comes back clean."
+      ? "Titled. The " + nm + " is legally yours now, the plate comes back clean."
       : "Titled and plated. The " + nm + " is on the register in your name.",
       3, { from: "Records & Licensing", app: "messages" });
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
@@ -461,7 +461,7 @@
   }
   function archiveLabel() {
     const r = st().read;
-    if (r) return "Reading the file…" + dim(Math.max(1, Math.ceil(r.need - r.t)) + "s — stay at the table");
+    if (r) return "Reading the file…" + dim(Math.max(1, Math.ceil(r.need - r.t)) + "s, stay at the table");
     const rec = readTarget();
     if (!rec) return "Search the archives" + dim("no officeholder on file for this ground");
     const id = holderId(rec);
@@ -473,7 +473,7 @@
     if (!rec) { note("“Nothing filed for this jurisdiction, I'm afraid.”", 2.2); return; }
     const lot = civicLots().library;
     st().read = { id: rec.id, sid: rec.office.holder, t: 0, need: READ_SECS, lot: lot };
-    note("Boxes on the table. This takes a while — and you have to stay with it.", 2.6,
+    note("Boxes on the table. This takes a while, and you have to stay with it.", 2.6,
       { from: "Public Library", app: "messages" });
     repaint();
   }
@@ -491,7 +491,7 @@
     // blackmail() needs an active council night and its OWN dirt table seeded
     // by its OWN searchShelf — there is no outside entry point, and that file
     // is not ours to edit this wave. See the CUTS note in the header.)
-    if (!stampHook(sid, "record", line)) note("Nowhere to file it yet — but you know it now.", 2);
+    if (!stampHook(sid, "record", line)) note("Nowhere to file it yet, but you know it now.", 2);
     repaint();
   }
 
@@ -621,7 +621,7 @@
     if (!it.length) { note("“Box is empty.”", 1.8); return; }
     for (let i = 0; i < it.length; i++) {
       if (it[i] === "summons") {
-        note("SUMMONS — an open case in your name. The Clerk of the Court will take " + fmt$(fineCost()) + " to close it.",
+        note("SUMMONS, an open case in your name. The Clerk of the Court will take " + fmt$(fineCost()) + " to close it.",
           4, { from: "Freeland County Court", app: "messages" });
       } else if (it[i] === "salary") {
         const s = salarySeat(), amt = salaryDue();
@@ -656,7 +656,7 @@
   function tripDetector(lot) {
     lot._civicBarred = (CBZ.now || 0) + BARRED_MS;
     const at = lotAt(lot);
-    note("METAL DETECTOR — the marshal waves you back. “Stow it outside or don't come in.”", 3,
+    note("METAL DETECTOR, the marshal waves you back. “Stow it outside or don't come in.”", 3,
       { from: (lot.building && lot.building.name) || "Federal Building", app: "messages" });
     // a weapon through a screening lane is a real offence; `trespass` is
     // wanted.js's live key that fits, and it is witness-gated (not `instant`)
@@ -668,7 +668,7 @@
     const lot = civicLots()[kind];
     if (!lot) return true;
     if (barred(lot)) {
-      note("“You were carrying. Desk is closed to you — come back later.”", 2.6);
+      note("“You were carrying. Desk is closed to you, come back later.”", 2.6);
       return false;
     }
     if (armed()) { tripDetector(lot); return false; }
@@ -798,7 +798,7 @@
     // callElection() fires the ON THE BALLOT headline at the moment that is
     // actually true. Claiming it here is a lie the player can act on, and it
     // steals the one headline that means something.
-    if (CBZ.city.big) CBZ.city.big("PAPERS FILED — " + (x.title || "office") + (x.name ? " of " + x.name : ""));
+    if (CBZ.city.big) CBZ.city.big("PAPERS FILED · " + (x.title || "office") + (x.name ? " of " + x.name : ""));
     if (r.sigsNeeded) {
       note("Now get " + r.sigsNeeded + " signatures. Without them your name is not printed.", 3.4,
         { from: "City Hall Annex", app: "messages" });
@@ -865,7 +865,7 @@
     const s = st();
     s.tax = TAX_STEPS[(stepIdx(TAX_STEPS, s.tax) + 1) % TAX_STEPS.length].v;
     const r = pledgeNow();
-    if (!r) note("Noted — but there's no race to pledge it to yet.", 2.2);
+    if (!r) note("Noted, but there's no race to pledge it to yet.", 2.2);
     else if (r.ok === false) { note(r.why || "That cannot be pledged yet.", 2.6); }
     else note("Platform filed: " + TAX_STEPS[stepIdx(TAX_STEPS, s.tax)].s + ".", 2);
     repaint();
@@ -874,7 +874,7 @@
     const s = st();
     s.police = POL_STEPS[(stepIdx(POL_STEPS, s.police) + 1) % POL_STEPS.length].v;
     const r = pledgeNow();
-    if (!r) note("Noted — but there's no race to pledge it to yet.", 2.2);
+    if (!r) note("Noted, but there's no race to pledge it to yet.", 2.2);
     else if (r.ok === false) { note(r.why || "That cannot be pledged yet.", 2.6); }
     else note("Platform filed: " + POL_STEPS[stepIdx(POL_STEPS, s.police)].s + ".", 2);
     repaint();
@@ -910,7 +910,7 @@
   function callLabel() {
     const f = liveFire();
     if (!CBZ.mission || !CBZ.mission.start) return "Sign on for a call" + dim("no board at this house");
-    if (!f) return "Sign on for a call" + dim("no calls — the house is quiet");
+    if (!f) return "Sign on for a call" + dim("no calls, the house is quiet");
     return "Sign on for a call " + fmt$(650) + dim(f.kind === "building" ? "structure fire, " + f.floors + " floor(s) alight" : "vehicle fire");
   }
   function signOn() {
@@ -1067,7 +1067,7 @@
           if (t.serving !== was) repaint();
           if (!t.called && t.serving >= t.num) {
             t.called = true;
-            note("NOW SERVING " + t.num + " — that's you. Step up to the window.", 3,
+            note("NOW SERVING " + t.num + " · that's you. Step up to the window.", 3,
               { from: "Records & Licensing", app: "messages" });
             repaint();
           }

@@ -151,7 +151,7 @@
     // hangar (→ F-22) is a separate add-on offered here once you own the tower.
     const isPent = !!g.cityOwnsPenthouse || isPenthouse(home);
     if (isPent && g.cityOwnsHangar) {
-      actions.push({ label: "Hangar", fn: () => { CBZ.city.note("Your F-22 sits in the deck hangar — walk up and take it out, or call an airstrike from your phone. The chopper waits on the helipad. · F fly · LMB missiles", 3.2); } });
+      actions.push({ label: "Hangar", fn: () => { CBZ.city.note("Your F-22 sits in the deck hangar, walk up and take it out, or call an airstrike from your phone. The chopper waits on the helipad. · F fly · LMB missiles", 3.2); } });
     } else if (isPent) {
       actions.push({ label: "Buy hangar " + money(hangarPrice()), fn: buyHangar });
     }
@@ -177,7 +177,7 @@
     if (!CBZ.city.spend(room.rent)) { CBZ.city.note("Can't afford the first " + money(room.rent) + ".", 1.8); return; }
     g.cityRentTier = 0;
     g.citySpawnPoint = { x: CBZ.city.arena.spawn.x, z: CBZ.city.arena.spawn.z };
-    CBZ.city.note("Rented " + room.name + ". A roof over your head — and a respawn point.", 2.6);
+    CBZ.city.note("Rented " + room.name + ". A roof over your head, and a respawn point.", 2.6);
     CBZ.cityHomeMenuRefresh();
   }
   // BUY a home at the realtor. We route through Zillow's buy path so there's ONE
@@ -203,7 +203,7 @@
     if (g.cityOwnsPenthouse && g.cityOwnsHeli) return;   // already armed (Zillow path) — don't re-banner
     g.cityOwnsPenthouse = true;
     g.cityOwnsHeli = true;          // the chopper comes with the penthouse
-    CBZ.city.big("The missile helicopter is yours — parked on the pad.");
+    CBZ.city.big("The missile helicopter is yours, parked on the pad.");
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
   function buyHome(lot) {
@@ -268,14 +268,14 @@
     return (home && home.hangarPrice) || (((C().homes || []).find((x) => x.id === "penthouse") || {}).hangarPrice) || 1200000;
   }
   function buyHangar() {
-    if (!g.cityOwnsPenthouse) { CBZ.city.note("Buy the penthouse first — the hangar is its deck.", 2.2); return; }
+    if (!g.cityOwnsPenthouse) { CBZ.city.note("Buy the penthouse first, the hangar is its deck.", 2.2); return; }
     if (g.cityOwnsHangar) { CBZ.city.note("You already own the hangar.", 1.8); return; }
     const cost = hangarPrice();
     const total = (g.cash || 0) + (g.cityBank || 0);
     if (total < cost) { CBZ.city.note("Need " + money(cost) + " (cash+bank) for the hangar.", 2.4); return; }
     let owe = cost; const fromCash = Math.min(g.cash || 0, owe); g.cash -= fromCash; owe -= fromCash; if (owe > 0) g.cityBank = (g.cityBank || 0) - owe;
     g.cityOwnsHangar = true;
-    CBZ.city.big("HANGAR ACQUIRED — now STEAL an F-22 and land it here to keep it.");
+    CBZ.city.big("HANGAR ACQUIRED, now STEAL an F-22 and land it here to keep it.");
     CBZ.city.addRespect(40);
     if (CBZ.sfx) CBZ.sfx("coin");
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
@@ -306,11 +306,11 @@
       const cut = stars <= 2 ? before : Math.max(before - (CBZ.CITY.starHeat[Math.max(0, stars - 2)] || 0), before * 0.45);
       CBZ.city.addHeat(-cut);
       const after = g.heat || 0;
-      laid = (g.wanted | 0) < stars ? " Heat cooled — you slipped the manhunt." : (after < before ? " Heat dropped while you laid low." : "");
+      laid = (g.wanted | 0) < stars ? " Heat cooled, you slipped the manhunt." : (after < before ? " Heat dropped while you laid low." : "");
     }
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     if (CBZ.sfx) CBZ.sfx("coin");
-    CBZ.city.note("Slept it off — full health, fed, rested, patched up." + laid + " Respawn set to home.", 3.2);
+    CBZ.city.note("Slept it off, full health, fed, rested, patched up." + laid + " Respawn set to home.", 3.2);
     close();
   }
   function storeCar() {
@@ -354,7 +354,7 @@
     let tx, ty, tz;
     if (home.loftY != null) { tx = lot.cx; ty = home.loftY + 0.1; tz = lot.cz; }
     else { tx = lot.cx + 1.4; ty = (home.floorY || 0) + (lot.building.FH || 4) + 0.2; tz = lot.cz; }
-    const note = home.loftY != null ? "The Spire loft — top of the world." : "Penthouse — top of the world.";
+    const note = home.loftY != null ? "The Spire loft, top of the world." : "Penthouse, top of the world.";
     // THE SHARED LIFT RIDE (city/occupy.js) — the census found this exact
     // reposition+sfx+note hand-rolled three times. One copy now; the inline
     // branch below is the degrade-safe fallback.
@@ -491,7 +491,7 @@
       const room = (C().homes || [])[g.cityRentTier];
       if (room && room.rent) {
         if (CBZ.city.spend(room.rent)) CBZ.city.note("Rent due: -" + money(room.rent), 2);
-        else { g.cityRentTier = null; g.citySpawnPoint = null; CBZ.city.note("Evicted — couldn't make rent.", 2.4); }
+        else { g.cityRentTier = null; g.citySpawnPoint = null; CBZ.city.note("Evicted, couldn't make rent.", 2.4); }
       }
     }
   });

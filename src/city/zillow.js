@@ -570,7 +570,7 @@
       if (isPenthouseHome(home)) {
         g.cityOwnsPenthouse = true;
         g.cityOwnsHeli = true;
-        if (CBZ.city && CBZ.city.big) CBZ.city.big("The missile helicopter is yours — on the pad.");
+        if (CBZ.city && CBZ.city.big) CBZ.city.big("The missile helicopter is yours, on the pad.");
       }
     }
   }
@@ -594,8 +594,8 @@
     teleportPlayer(door.x, door.z);
     if (CBZ.fullMap && CBZ.fullMap.setWaypoint) CBZ.fullMap.setWaypoint(door.x, door.z, rec.name);
     if (CBZ.city) {
-      CBZ.city.note((owned ? "Home — " : "Touring ") + rec.name
-        + (owned ? " (press H at the door for the safehouse menu)." : " — step through the door to look around."), 3.2);
+      CBZ.city.note((owned ? "Home · " : "Touring ") + rec.name
+        + (owned ? " (press H at the door for the safehouse menu)." : " · step through the door to look around."), 3.2);
       if (rec.flagship && CBZ.city.big) CBZ.city.big("" + rec.name);
     }
   }
@@ -608,13 +608,13 @@
     const rec = r.byId[id]; if (!rec) return;
     if (!rec.legal) {
       if (canSeize(rec)) return seize(id);
-      flash(rec.name + " can only be taken by force — control its district or earn the crew's trust.", "bad");
-      CBZ.city.note("That's a gang operation — take it over by holding the turf, not at a desk.", 2.4); if (CBZ.sfx) CBZ.sfx("empty"); refresh(); return;
+      flash(rec.name + " can only be taken by force, control its district or earn the crew's trust.", "bad");
+      CBZ.city.note("That's a gang operation, take it over by holding the turf, not at a desk.", 2.4); if (CBZ.sfx) CBZ.sfx("empty"); refresh(); return;
     }
     if (isOwned(rec)) { flash("You already own " + rec.name + ".", "bad"); refresh(); return; }
     if (rec.marketable === false && !direct) {
       const oc = rec.occupant ? rec.occupant.split(" — ")[0] : "its owner";
-      flash(rec.name + " isn't for sale — " + oc + " occupies it.", "bad");
+      flash(rec.name + " isn't for sale · " + oc + " occupies it.", "bad");
       CBZ.city.note("That property is occupied and off the market.", 2); if (CBZ.sfx) CBZ.sfx("empty"); refresh(); return;
     }
     if (isRenting(rec)) endRent(id, true);
@@ -673,7 +673,7 @@
       const offer = bl.offer("mortgage", principal, { propertyId: rec.id, value: mval(rec), down: down, category: rec.category, kind: rec.kind });
       if (!offer || !offer.approved) {
         const why = (offer && offer.reason) ? offer.reason : "the bank declined the mortgage";
-        flash("Mortgage declined — " + why + ".", "bad"); CBZ.city.note("Mortgage declined: " + why + ".", 2.4); if (CBZ.sfx) CBZ.sfx("empty"); refresh(); return;
+        flash("Mortgage declined · " + why + ".", "bad"); CBZ.city.note("Mortgage declined: " + why + ".", 2.4); if (CBZ.sfx) CBZ.sfx("empty"); refresh(); return;
       }
       charge(down);   // the down comes out of pocket; the engine disburses the rest to escrow
       const loanId = bl.take(offer);
@@ -756,19 +756,19 @@
     delete rentals()[rec.id];
     if (g.cityRentedHome === rec.id) {
       g.cityRentedHome = null;
-      if (!g.cityHome) { g.citySpawnPoint = null; if (!quiet) CBZ.city.note("Your lease is up — you\u2019ve got no place to crash until you rent or buy again.", 2.4, { from: "Zillow" }); }
+      if (!g.cityHome) { g.citySpawnPoint = null; if (!quiet) CBZ.city.note("Your lease is up, you\u2019ve got no place to crash until you rent or buy again.", 2.4, { from: "Zillow" }); }
     }
     if (!quiet) { flash("Ended your lease on " + rec.name + ".", "ok"); persist(); refresh(); }
   }
   function rentSetHome(id) {
     const rec = reg() && reg().byId[id]; if (!rec) return;
     const lease = rentals()[rec.id]; if (!lease || !lease.isHome) { flash("Only a rented residence can be your home base.", "bad"); refresh(); return; }
-    if (g.cityHome) { flash("You already own a home — that's your respawn.", "bad"); refresh(); return; }
+    if (g.cityHome) { flash("You already own a home, that's your respawn.", "bad"); refresh(); return; }
     const door = rec.lot.building && rec.lot.building.door || { x: rec.lot.cx, z: rec.lot.cz };
     g.citySpawnPoint = { x: door.x, z: door.z };
     g.cityRentedHome = rec.id;
     flash(rec.name + " is now your home base.", "ok");
-    CBZ.city.note("You\u2019re all moved in at " + rec.name + " — keys are under the mat.", 2.2, { from: "Zillow" });
+    CBZ.city.note("You\u2019re all moved in at " + rec.name + " · keys are under the mat.", 2.2, { from: "Zillow" });
     persist(); refresh();
   }
 
@@ -801,10 +801,10 @@
       if (isPenthouseHome(rec.lot.building.home)) { g.cityOwnsPenthouse = false; g.cityOwnsHeli = false; g.cityOwnsHangar = false; }
       rec.lot.building.home.owned = false;
     }
-    if (isHome(rec)) { g.cityHome = null; g.citySpawnPoint = null; CBZ.city.note("Sale closed on your place — you\u2019re off the books until you buy again.", 2.6, { from: "Zillow" }); }
+    if (isHome(rec)) { g.cityHome = null; g.citySpawnPoint = null; CBZ.city.note("Sale closed on your place, you\u2019re off the books until you buy again.", 2.6, { from: "Zillow" }); }
     const plTxt = pl ? " (" + (pl >= 0 ? "+" : "") + money(pl) + " flip)" : "";
     const note = payoff > 0 ? "Sold " + rec.name + " for " + money(gross) + " (-" + money(payoff) + " mortgage = +" + money(got) + ")" + plTxt + "." : "Sold " + rec.name + " for " + money(got) + plTxt + ".";
-    flash(note, "ok"); CBZ.city.big("SOLD " + rec.name + " — +" + money(got));
+    flash(note, "ok"); CBZ.city.big("SOLD " + rec.name + " · +" + money(got));
     if (CBZ.sfx) CBZ.sfx("coin");
     persist(); if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     refresh();
@@ -823,7 +823,7 @@
     g.citySpawnPoint = { x: door.x, z: door.z };
     if (!quiet) {
       flash(home.name + " is now your home" + (movedFrom ? "; " + movedFrom + " becomes a rental" : "") + ".", "ok");
-      CBZ.city.note(home.name + " is yours now — welcome home.", 2.4, { from: "Zillow" });
+      CBZ.city.note(home.name + " is yours now, welcome home.", 2.4, { from: "Zillow" });
       refresh();
     }
   }
@@ -1256,7 +1256,7 @@
       } else if (!rec.legal) {
         // illegal op: explain the takeover gate (control the zone OR good standing)
         if (canSeize(rec)) {
-          extra = "<div class='zsub'>You run this turf — take it over for " + money(seizePrice(rec)) + ".</div>";
+          extra = "<div class='zsub'>You run this turf, take it over for " + money(seizePrice(rec)) + ".</div>";
         } else {
           const gid = holdingGangId(rec);
           const oi = gid ? ownerInfo(gid) : UNDERWORLD;
@@ -1267,7 +1267,7 @@
       } else if (rec.marketable === false) {
         // legal but owner-occupied: surface WHO holds it (it's not on the market)
         const oc = occLabel(rec);
-        extra = "<div class='zsub'>Owner-occupied" + (oc ? " by " + esc(oc) : "") + " — not listed for sale.</div>";
+        extra = "<div class='zsub'>Owner-occupied" + (oc ? " by " + esc(oc) : "") + " · not listed for sale.</div>";
       }
       if (acts) extra += "<div class='zacts zacts-inline'>" + acts + "</div>";
     }
@@ -1314,12 +1314,12 @@
 
   // a one-line description so each tab's view reads clearly
   const TAB_HINT = {
-    residence: "Homes for sale — buy or finance, set one as your respawn.",
-    commercial: "Businesses for sale — each pays rent/profit every cycle.",
-    land: "Parkland & lots — cheap to hold, no rental income.",
-    illegal: "Gang operations — ranked for the empire, but seized by force, not bought.",
-    owned: "Your portfolio — sell, pay off mortgages, or set a home.",
-    rented: "Active leases — end a lease or set a rental as your home.",
+    residence: "Homes for sale, buy or finance, set one as your respawn.",
+    commercial: "Businesses for sale, each pays rent/profit every cycle.",
+    land: "Parkland & lots, cheap to hold, no rental income.",
+    illegal: "Gang operations, ranked for the empire, but seized by force, not bought.",
+    owned: "Your portfolio, sell, pay off mortgages, or set a home.",
+    rented: "Active leases, end a lease or set a rental as your home.",
   };
 
   function render() {

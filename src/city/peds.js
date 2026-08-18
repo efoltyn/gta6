@@ -2666,7 +2666,7 @@
       }
     }
     if (CBZ.city && CBZ.city.big) {
-      CBZ.city.big(lethal ? "You killed the boss's family — the crew is coming"
+      CBZ.city.big(lethal ? "You killed the boss's family, the crew is coming"
                           : "You crossed the boss's family");
     }
     return true;
@@ -4282,7 +4282,7 @@
         if (CBZ.cityRelShift) CBZ.cityRelShift(ped, "greeted", 1);
       }
     } else {
-      citySayBark(ped, pick(["Nah, nothing on me worth your while.", "Not today — maybe next time.", "I'm tapped out, sorry."], rng()), 1.8);
+      citySayBark(ped, pick(["Nah, nothing on me worth your while.", "Not today, maybe next time.", "I'm tapped out, sorry."], rng()), 1.8);
     }
     ped.reactCD = 16 + rng() * 10;
   }
@@ -4409,7 +4409,7 @@
       const side = rng() < 0.5 ? 1 : -1;                   // pick a kerb to cross to
       ped.target.set(ped.pos.x + ax * 6 - az * side * 9, 0, ped.pos.z + az * 6 + ax * side * 9);
       ped.state = "walk";
-      if (CBZ.citySay) CBZ.citySay(ped, pick(["“Not again—”", "“Keep walking. Keep walking.”", "“Not today. Not me.”"], rng()), "#cfd6e6", 2);
+      if (CBZ.citySay) CBZ.citySay(ped, pick(["“Not again, ”", "“Keep walking. Keep walking.”", "“Not today. Not me.”"], rng()), "#cfd6e6", 2);
       if (CBZ.cityStreetParts) CBZ.cityStreetParts(ped);   // warn the people around them
       return true;
     }
@@ -4427,7 +4427,7 @@
       // street name still rides on it — that part was already right.
       const gl = CBZ.cityLine && CBZ.cityLine(ped, "greet");
       const line = gl ? "“" + gl.replace(/\.$/, "") + ", " + title + ".”"
-                      : pick(["“Yo, " + title + "!”", "“Ayy — " + title + "! Good to see you.”", "“" + title + "! You good out here?”"], rng());
+                      : pick(["“Yo, " + title + "!”", "“Ayy · " + title + "! Good to see you.”", "“" + title + "! You good out here?”"], rng());
       if (CBZ.citySay) CBZ.citySay(ped, line, "#7ed957", 2.2); else citySayBark(ped, line, 1.8);
       if (CBZ.cityRelShift) CBZ.cityRelShift(ped, "greeted", 1);
       return true;
@@ -4460,7 +4460,7 @@
         ped.group.rotation.y = lerpAngle(ped.group.rotation.y, Math.atan2(P.pos.x - ped.pos.x, P.pos.z - ped.pos.z), 0.5);
         ped.pause = Math.max(ped.pause, 0.7 + rng() * 0.8); ped.speed = 0;
         citySayBark(ped, fam ? pick(["We move when you say, boss.", "Respect. You run this.", "Need anything, I'm on it."], rng())
-                              : pick(["That's the one from the news right there.", "Big respect — heard about you.", "We good, we good. No problems here."], rng()), 1.8);
+                              : pick(["That's the one from the news right there.", "Big respect, heard about you.", "We good, we good. No problems here."], rng()), 1.8);
         return true;
       }
     }

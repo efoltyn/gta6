@@ -754,13 +754,13 @@
       if (!jealous.dead && Math.hypot(jealous.pos.x - ped.pos.x, jealous.pos.z - ped.pos.z) < 8) {
         say(jealous, "“HEY! Back off!”", "#ff7b6b", 2.2);
         jealous.mood = -1; jealous.alarmed = Math.max(jealous.alarmed || 0, 4);
-        CBZ.city.note(ped.name + " is taken — " + jealous.name + " is not happy.", 2);
+        CBZ.city.note(ped.name + " is taken · " + jealous.name + " is not happy.", 2);
         return;
       }
     }
     if (!CBZ.cityIsRomance(ped)) { CBZ.city.note(ped.name + " isn't interested.", 1.6); say(ped, "“No thanks.”", "#cfd6e6", 1.6); return; }
     const cost = S().dateCost || 50;
-    if (!CBZ.city.canAfford(cost)) { CBZ.city.note("A date costs $" + cost + " — you're broke.", 1.8); say(ped, "“You're broke? ”", "#cfd6e6", 1.8); return; }
+    if (!CBZ.city.canAfford(cost)) { CBZ.city.note("A date costs $" + cost + " · you're broke.", 1.8); say(ped, "“You're broke? ”", "#cfd6e6", 1.8); return; }
     CBZ.city.spend(cost);
     // charm = base + temperament fit + your street rep + how loaded you look
     const repBonus = Math.min(0.6, (g.respect || 0) / 300);
@@ -1085,7 +1085,7 @@
         // grief turns to either rage (bold) or flight (meek); a big grudge will
         // also keep them hunting you long after they've calmed from this moment.
         if ((m.aggr || 0.3) > 0.55 && !m.gang) { m.rage = CBZ.city.playerActor; m.state = "confront"; r.ambushT = 0; say(m, "“YOU KILLED THEM!”", "#ff6b6b", 2.6); }
-        else { m.fear = 10; m.alarmed = Math.max(m.alarmed || 0, 6); r.ambushT = 25 + rng() * 30; say(m, "“Oh god — oh god…”", "#9bb0ff", 2.6); }
+        else { m.fear = 10; m.alarmed = Math.max(m.alarmed || 0, 6); r.ambushT = 25 + rng() * 30; say(m, "“Oh god, oh god…”", "#9bb0ff", 2.6); }
       } else {
         m.fear = Math.max(m.fear || 0, 6); say(m, "“…what did you do?”", "#9bb0ff", 2.2);
       }
@@ -1123,7 +1123,7 @@
         shown = true;
         q.path = null; q.pause = 3; q._notedT = 6; q.state = "walk";
         q.target.set(ped.target.x + (rng() - 0.5) * 2.5, 0, ped.target.z + (rng() - 0.5) * 2.5);
-        say(q, ["“Don't look. Walk.”", "“Come on. Other side.”", "“Eyes down — keep moving.”"][(rng() * 3) | 0], "#cfd6e6", 2.2);
+        say(q, ["“Don't look. Walk.”", "“Come on. Other side.”", "“Eyes down, keep moving.”"][(rng() * 3) | 0], "#cfd6e6", 2.2);
         const arm = (q.partner && !q.partner.dead && q.partner !== ped) ? q.partner
           : (q.friends || []).find((f) => f && !f.dead && f !== ped && !f.controlled && !f.companion
               && Math.hypot(f.pos.x - q.pos.x, f.pos.z - q.pos.z) < 5);
@@ -1394,7 +1394,7 @@
     if (typeof orec === "function" && !orec._relWrapped) {
       const w = function (ped) {
         if (ped && !ped.dead && CBZ.cityRelWillRecruit(ped) <= 0.05) {
-          CBZ.city && CBZ.city.note((ped.name || "They") + " won't run with you — too much bad blood.", 2);
+          CBZ.city && CBZ.city.note((ped.name || "They") + " won't run with you, too much bad blood.", 2);
           say(ped, "“After what you did? Never.”", "#ff9b8b", 2.2);
           return;
         }

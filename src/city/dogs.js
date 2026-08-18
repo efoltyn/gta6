@@ -285,7 +285,7 @@
   }
 
   function feedOwn(d) {
-    if (!consumeFeed()) { if (CBZ.city && CBZ.city.note) CBZ.city.note("No food to give — hunt some meat or buy a Bone.", 2); return; }
+    if (!consumeFeed()) { if (CBZ.city && CBZ.city.note) CBZ.city.note("No food to give, hunt some meat or buy a Bone.", 2); return; }
     d.hp = Math.min(d.maxHp, d.hp + 18);
     if (CBZ.city && CBZ.city.note) CBZ.city.note("" + d.name + " wolfs it down (+health).", 1.8);
   }
@@ -325,7 +325,7 @@
       find: function (px, pz, ctx, push) { const h = nearestDog(px, pz); if (h) push(h.d, h.dist); },
     });
     I.describe && I.describe("dog", function (d) {
-      return { label: (d.tamed ? "" + d.name : "" + d.name), note: d.tamed ? (d.sit ? "sitting · yours" : "your loyal dog") : (haveFeed() ? "hold food out to tame" : "a wary stray — bring food") };
+      return { label: (d.tamed ? "" + d.name : "" + d.name), note: d.tamed ? (d.sit ? "sitting · yours" : "your loyal dog") : (haveFeed() ? "hold food out to tame" : "a wary stray, bring food") };
     });
     // TAME (stray, needs food)
     I.register("dog", {
@@ -471,7 +471,7 @@
         if (ox * ox + oz * oz < PACK_R * PACK_R) dogAggro(o);
       }
       if (first && CBZ.city && CBZ.city.note) {
-        CBZ.city.note("The " + d.breed.name + "'s eyes flash RED — it's coming for you!", 2.4, { urgent: true });
+        CBZ.city.note("The " + d.breed.name + "'s eyes flash RED, it's coming for you!", 2.4, { urgent: true });
       }
     }
     return { head: !!(hit && hit.head), down: false, dmg: dmg };

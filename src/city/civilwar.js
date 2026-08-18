@@ -533,7 +533,7 @@
     S.fractures[parentId] = rec;
 
     if (CBZ.city && CBZ.city.big) CBZ.city.big("CIVIL WAR: " + rebelRec.name.toUpperCase() + " BREAKS AWAY");
-    if (CBZ.cityFeed) CBZ.cityFeed("" + rebelRec.name + " declares independence from " + nameOf(parentId) + " — the country fractures.", "#ff4d4d");
+    if (CBZ.cityFeed) CBZ.cityFeed("" + rebelRec.name + " declares independence from " + nameOf(parentId) + " · the country fractures.", "#ff4d4d");
     return rec;
   }
 
@@ -554,7 +554,7 @@
     S.unrestDays.republic = (S.unrestDays.republic || 0) + 1;
     const d = S.unrestDays.republic;
     if (d === 1 && CBZ.cityFeed) CBZ.cityFeed("Protests spread across " + triggers.length + " districts.", "#ffb27a");
-    else if (d === 2 && CBZ.cityFeed) CBZ.cityFeed("Unrest hardens — militants are arming in the streets.", "#ff6a5e");
+    else if (d === 2 && CBZ.cityFeed) CBZ.cityFeed("Unrest hardens, militants are arming in the streets.", "#ff6a5e");
     if (d >= UNREST_DAYS) { S.unrestDays.republic = 0; fracture("republic", { cause: "uprising" }); }
   }
   function statisticalCheck(day) {
@@ -615,7 +615,7 @@
     if (kind === "success") {
       rec.office.holder = plotterSid; rec.office.deputy = null;
       if (CBZ.city && CBZ.city.big) CBZ.city.big("COUP: " + rec.name.toUpperCase() + " FALLS TO THE JUNTA");
-      if (CBZ.cityFeed) CBZ.cityFeed("A military coup succeeds in " + rec.name + " — the junta rules now.", "#ff9e6b");
+      if (CBZ.cityFeed) CBZ.cityFeed("A military coup succeeds in " + rec.name + " · the junta rules now.", "#ff9e6b");
       if (CBZ.approvalShock) CBZ.approvalShock(rec.id, -6);
       return { outcome: "success", plotterSid: plotterSid };
     }
@@ -623,7 +623,7 @@
       const e = CBZ.cityLedgerEntry && CBZ.cityLedgerEntry(plotterSid);
       if (e) e.dead = true;   // no live body this wave for a shadow plotter — see header
       if (CBZ.city && CBZ.city.big) CBZ.city.big("COUP CRUSHED IN " + rec.name.toUpperCase());
-      if (CBZ.cityFeed) CBZ.cityFeed("The plot against " + rec.name + " is crushed — the plotters are purged.", "#ff6a5e");
+      if (CBZ.cityFeed) CBZ.cityFeed("The plot against " + rec.name + " is crushed, the plotters are purged.", "#ff6a5e");
       if (CBZ.approvalShock) CBZ.approvalShock(rec.id, -4);
       rippleCoupFailure(rec.id);
       return { outcome: "failure", plotterSid: plotterSid };
@@ -787,7 +787,7 @@
     S.cooldownUntil[rec.parentId] = day + REPRESSION_COOLDOWN_DAYS;
     delete S.fractures[rec.parentId];
     if (CBZ.city && CBZ.city.big) CBZ.city.big("RECONQUEST: " + (parentRec ? parentRec.name : rec.parentId).toUpperCase() + " REUNITES THE COUNTRY");
-    if (CBZ.cityFeed) CBZ.cityFeed("The uprising is crushed — " + (parentRec ? parentRec.name : rec.parentId) + " reconquers the rebel territory.", "#8fe08a");
+    if (CBZ.cityFeed) CBZ.cityFeed("The uprising is crushed · " + (parentRec ? parentRec.name : rec.parentId) + " reconquers the rebel territory.", "#8fe08a");
   }
   function endPartition(rec, day, reason) {
     const rebelRec = CBZ.polity.get(rec.rebelId);
@@ -860,7 +860,7 @@
     const S = state();
     delete S.fractures[rec.parentId];
     if (CBZ.city && CBZ.city.big) CBZ.city.big("WARLORDISM: " + (parentRec ? parentRec.name : rec.parentId).toUpperCase() + " COLLAPSES");
-    if (CBZ.cityFeed) CBZ.cityFeed("Both sides burn out — " + (parentRec ? parentRec.name : rec.parentId) + " dissolves into warlord territory.", "#ff3b3b");
+    if (CBZ.cityFeed) CBZ.cityFeed("Both sides burn out · " + (parentRec ? parentRec.name : rec.parentId) + " dissolves into warlord territory.", "#ff3b3b");
   }
   function resolveEndingIfDue(rec, day) {
     const w = findWar(rec);
@@ -916,7 +916,7 @@
           if (w && !w.ended) w.fatigue[fr.rebelId] = (w.fatigue[fr.rebelId] || 0) + LEADER_DEATH_FATIGUE_SPIKE;
           const rMil = CBZ.polwar.militaryOf(fr.rebelId);
           rMil.readiness = clampNum(0.05, 1, rMil.readiness - LEADER_DEATH_READINESS_HIT);
-          if (CBZ.cityFeed) CBZ.cityFeed("Rebel leader " + ((ped && ped.name) || "?") + " is dead — the uprising reels.", "#ff6a5e");
+          if (CBZ.cityFeed) CBZ.cityFeed("Rebel leader " + ((ped && ped.name) || "?") + " is dead, the uprising reels.", "#ff6a5e");
         }
       } catch (e) {}
     });

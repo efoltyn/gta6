@@ -151,7 +151,7 @@
     // actually plays toward, so it is the only thing that gets to be big — and
     // the arrow does the work "NEXT:" was doing.
     put(nextEl, "next", isFinal
-      ? (terse ? "FINAL" : "FINAL RUNG — one kill wins")
+      ? (terse ? "FINAL" : "FINAL RUNG, one kill wins")
       : (terse ? "▲ " : "NEXT: ") + (rungLabelAt(r + 1) || "?"));
 
     // the race: whoever holds the highest rung. Ties go to you (you can see
@@ -162,7 +162,7 @@
     put(leadEl, "lead", terse
       // nobody ahead → no cell. `.gg-lead:empty` is display:none.
       ? (ahead ? lead.name + " " + (lead.rung + 1) : "")
-      : (ahead ? "LEADER: " + lead.name + " — rung " + (lead.rung + 1) + "/" + total : "LEADER: You"));
+      : (ahead ? "LEADER: " + lead.name + " · rung " + (lead.rung + 1) + "/" + total : "LEADER: You"));
 
     put(spawnEl, "spawn", CBZ.player.dead && gg.respawnT > 0
       ? (terse ? String(Math.ceil(gg.respawnT)) : "RESPAWN IN " + Math.ceil(gg.respawnT))

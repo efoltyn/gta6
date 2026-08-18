@@ -791,7 +791,7 @@
       CBZ.addHeat((player.crouch ? 16 : 30) * dt);
       // the beam is ON you and your shadow is thirty feet long. Saying so is
       // the definition of telling.
-      if (!litNow) tellHint("SEARCHLIGHT — you're lit up!", 1.5);
+      if (!litNow) tellHint("SEARCHLIGHT, you're lit up!", 1.5);
       litNow = true;
       if (litPingT <= 0) {
         litPingT = 3.0;

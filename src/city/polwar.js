@@ -382,7 +382,7 @@
     }
     const label = nameOf(aId) + " declares war on " + nameOf(bId);
     if (CBZ.city && CBZ.city.big) CBZ.city.big("WAR: " + nameOf(aId).toUpperCase() + " VS " + nameOf(bId).toUpperCase());
-    if (CBZ.cityFeed) CBZ.cityFeed("" + label + (front.real ? " — front opens at the causeway." : " — front opens at the border."), "#ff6a5e");
+    if (CBZ.cityFeed) CBZ.cityFeed("" + label + (front.real ? " · front opens at the causeway." : " · front opens at the border."), "#ff6a5e");
     war.log.push({ day: day, kind: "declared", text: label });
     return war;
   }
@@ -469,7 +469,7 @@
     const rec = CBZ.polity.get(id);
     const hit = conscriptApprovalHit(rec && rec.govType);
     if (CBZ.approvalShock) CBZ.approvalShock(id, hit);
-    if (CBZ.cityFeed) CBZ.cityFeed("" + nameOf(id) + " conscripts " + batch + " more into the ranks — the streets thin.", "#ffb27a");
+    if (CBZ.cityFeed) CBZ.cityFeed("" + nameOf(id) + " conscripts " + batch + " more into the ranks, the streets thin.", "#ffb27a");
   }
   function startConscriptRelease(id) {
     const S = state(), mil = S.mil[id];
@@ -494,7 +494,7 @@
         if (amt > 0) {
           CBZ.corps.debitCash(target.id, amt);
           rec.treasury = (rec.treasury || 0) + amt;
-          if (CBZ.cityFeed) CBZ.cityFeed("" + rec.name + " nationalizes " + target.name + "'s cash reserves — a desperate treasury grab.", "#ff6a5e");
+          if (CBZ.cityFeed) CBZ.cityFeed("" + rec.name + " nationalizes " + target.name + "'s cash reserves, a desperate treasury grab.", "#ff6a5e");
         }
       }
     } else {
@@ -511,7 +511,7 @@
       }
       if (CBZ.approvalShock) CBZ.approvalShock(id, CHILD_SOLDIER_APPROVAL);
       if (CBZ.city && CBZ.city.big) CBZ.city.big("WAR CRIME: " + rec.name.toUpperCase() + " CONSCRIPTS CHILDREN");
-      if (CBZ.cityFeed) CBZ.cityFeed("" + rec.name + " turns to child conscription — a war crime the world will not forget.", "#ff3b3b");
+      if (CBZ.cityFeed) CBZ.cityFeed("" + rec.name + " turns to child conscription, a war crime the world will not forget.", "#ff3b3b");
     }
   }
   function checkDesperate(id, war, day) {

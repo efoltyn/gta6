@@ -173,7 +173,7 @@
     const role = CBZ.cityTitle ? CBZ.cityTitle(ped) : (ped.job || "principal");
     const doss = "Dossier: " + role + (org ? ", " + org : "") +
       ". Moves with " + (guards || "a") + " gun" + (guards === 1 ? "" : "s") + " on him at all times. " +
-      "The ring reads strangers — a worker's cloth or a taken uniform walks closer than your own face does.";
+      "The ring reads strangers, a worker's cloth or a taken uniform walks closer than your own face does.";
     return { tier: 1, ped: ped, name: ped.name || "the principal", dossier: doss, pay: TIERS[1].pay };
   }
 
@@ -247,7 +247,7 @@
       } catch (e) {}
     }
     note(quiet
-      ? "Clean work. Fee plus the quiet margin" + (st && st._dressed ? " — the uniform walked you out." : ".")
+      ? "Clean work. Fee plus the quiet margin" + (st && st._dressed ? " · the uniform walked you out." : ".")
       : "It made the scanner. The fee stands; the quiet margin does not.", 3.2);
     paintBoard(true);
   }
@@ -295,7 +295,7 @@
       id: "hit-" + TIERS[con.tier].id + "-" + n,
       title: "CONTRACT: " + con.name,
       targetName: con.name,
-      brief: con.dossier + " Quiet is worth more than fast — a witnessed kill burns the margin (and any borrowed cloth).",
+      brief: con.dossier + " Quiet is worth more than fast, a witnessed kill burns the margin (and any borrowed cloth).",
       reward: { cash: con.pay, notoriety: con.tier === 2 ? 160 : con.tier === 1 ? 60 : 20 },
       color: con.tier === 2 ? 0xff4d4d : 0xffc766,
       limit: con.tier === 2 ? 1200 : 900,
@@ -650,10 +650,10 @@
       options: [{
         id: "hitman-board-read", slot: "e",
         label: function () {
-          if (campaignOwns()) return "The wall — the Director's list";
+          if (campaignOwns()) return "The wall, the Director's list";
           const m = liveHit();
-          if (m) return "The wall — working: " + (m.def.targetName || "a name");
-          return "The wall — take the next name";
+          if (m) return "The wall, working: " + (m.def.targetName || "a name");
+          return "The wall, take the next name";
         },
         onSelect: function () {
           paintBoard(true);
@@ -677,10 +677,10 @@
         id: "hitman-case-open", slot: "e",
         label: function () {
           const ct = caseTier(), T = CBZ.hitmanTier();
-          if (ct >= 2) return "Gear case — emptied";
+          if (ct >= 2) return "Gear case, emptied";
           const want = ct + 1;
-          if (T.rep >= TIERS[want].need) return "Open the case — " + (want === 1 ? "the long lens" : "the quiet room-clearer");
-          return "Gear case — locked (REP " + TIERS[want].need + ")";
+          if (T.rep >= TIERS[want].need) return "Open the case · " + (want === 1 ? "the long lens" : "the quiet room-clearer");
+          return "Gear case, locked (REP " + TIERS[want].need + ")";
         },
         onSelect: function () {
           const R0 = recs(); if (!R0) return;

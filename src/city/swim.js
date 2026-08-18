@@ -779,7 +779,7 @@
     // The island says nothing. In survival the water arriving IS the message
     // (SHOW DON'T TELL) — the splash, the shake and the breath bar are the
     // whole readout, and a line of prose over a tsunami is noise.
-    if (!survOn() && CBZ.city && CBZ.city.note) CBZ.city.note("In the drink — swim to the seawall before you tire out", 2.6);
+    if (!survOn() && CBZ.city && CBZ.city.note) CBZ.city.note("In the drink, swim to the seawall before you tire out", 2.6);
   }
 
   function exitWater(P, spot) {

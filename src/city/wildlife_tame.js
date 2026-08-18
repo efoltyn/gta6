@@ -250,7 +250,7 @@
   }
   function tameFeed(a) {
     const sp = a.species, item = feedItemFor(sp);
-    if (!item) { note(isPredator(sp) ? "It only wants MEAT — hunt some first." : "You need food to offer.", 2); return; }
+    if (!item) { note(isPredator(sp) ? "It only wants MEAT, hunt some first." : "You need food to offer.", 2); return; }
     const econ = CBZ.cityEcon;
     if (econ && econ.take) econ.take(item, 1);
     a.feeds = (a.feeds || 0) + 1;
@@ -260,7 +260,7 @@
       a.tamed = true; a.petName = NAMES[(Math.random() * NAMES.length) | 0];
       a.stay = false;
       note("The " + sp.name + " is yours! Meet " + a.petName +
-        (rideDef(sp) ? (a.grow != null ? " — rideable once it grows up." : " — you can RIDE it.") : "."),
+        (rideDef(sp) ? (a.grow != null ? " · rideable once it grows up." : " · you can RIDE it.") : "."),
         3.6, sp.rarity === "legendary" ? { urgent: true } : undefined);
       if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(sp.rarity === "legendary" ? 10 : 2);
     } else {
@@ -1371,9 +1371,9 @@
     };
     ride.attackT = ride.attackCd = 0; ride.attackHitP = -1; ride.target = null; ride.targetKind = null;
     const help = aquatic
-      ? (ride.visual.breach ? " — hold sprint + rise near the surface to BREACH; E dismounts." :
-        (ride.visual.attack ? " — Fire bites; E dismounts." : " — rise/dive with Jump/C; E dismounts."))
-      : " — E to dismount.";
+      ? (ride.visual.breach ? " · hold sprint + rise near the surface to BREACH; E dismounts." :
+        (ride.visual.attack ? " · Fire bites; E dismounts." : " · rise/dive with Jump/C; E dismounts."))
+      : " · E to dismount.";
     note("Riding " + (a.petName || a.species.name) + help, 2.8);
   }
   // One public route for direct-touch/controller helpers. Tamed animals mount
@@ -1398,7 +1398,7 @@
       a.tamed = true;
       a.petName = a.petName || NAMES[(Math.random() * NAMES.length) | 0];
       a.stay = false;
-      note("You hold on. " + a.petName + " accepts you — for now.", 2.5, { urgent: true });
+      note("You hold on. " + a.petName + " accepts you, for now.", 2.5, { urgent: true });
       mount(a);
       return ride.mount === a;
     }
@@ -1627,7 +1627,7 @@
       };
       return {
         label: (a.legendary ? "★ " : "") + "A " + baby + sp.name,
-        note: feedItemFor(sp) ? ("hold food out to tame (" + (a.feeds || 0) + "/" + feedsNeeded(sp) + ")") : (isPredator(sp) ? "tameable — bring MEAT" : "tameable — bring food"),
+        note: feedItemFor(sp) ? ("hold food out to tame (" + (a.feeds || 0) + "/" + feedsNeeded(sp) + ")") : (isPredator(sp) ? "tameable, bring MEAT" : "tameable, bring food"),
       };
     });
     // DISMOUNT (only while riding)
