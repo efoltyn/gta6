@@ -98,7 +98,7 @@
     ape_smash:  { dur: 0.66, arc: 0.62, rng: 0.95, pow: 1.55, push: 2.4 },
     ape_sweep:  { dur: 0.46, arc: 1.22, rng: 1.40, pow: 0.85, push: 4.2 },
     ape_charge: { dur: 0.58, arc: 0.85, rng: 1.15, pow: 0.95, push: 5.0 },
-    ape_grab:   { dur: 0.50, arc: 0,    rng: 1.10, pow: 0.35, push: 0 },
+    ape_grab:   { dur: 0.50, arc: 0,    rng: 1.10, pow: 1.00, push: 0 },
     ape_drum:   { dur: 0.88, arc: 0,    rng: 0,    pow: 0,    push: 0 },
   };
   function moveOf(style) { return MOVES[style] || null; }
@@ -385,6 +385,7 @@
     STATS.picks++;
     var mv = MOVES[style];
     attacker._atkDur = mv.dur;
+    attacker._atkPow = mv.pow;
     /* AND IT DOES NOT WAIT A FULL SECOND BETWEEN BLOWS. The caller's `rate` is
        a stalking quadruped's cadence — creature_combat's own DEFAULT_RATE is
        1.1 s and battle.html derives 1.055 s for a gorilla — which is right for
@@ -400,11 +401,32 @@
     return style;
   }
 
-  // ============================================================
-  //  THE STRIKE MOMENT. creature_combat has advanced the clock across
-  //  STRIKE_AT and is asking who pays. Returns the damage dealt (0 is a real
-  //  answer — a chest-beat lands nothing on purpose) or null for "not mine".
-  // ============================================================
+  /* ============================================================
+      THE STRIKE MOMENT. creature_combat has advanced the clock across
+      STRIKE_AT and is asking who pays.
+
+      TWO ANSWERS, AND THE DIFFERENCE IS THE WHOLE SAFETY OF THIS FILE.
+
+      A NUMBER means "I consumed this strike" — only the grab (which hands the
+      beat to a hold) and the chest beat (which costs nothing on purpose) ever
+      say that.
+
+      `null` means "the primary mark is still yours". Every hitting move
+      answers this way, having applied only the SPLASH — the bystanders the arm
+      passed through on its way to the man the driver was actually swinging at.
+
+      The first build had the hitting moves consume the strike and pay
+      everyone, including the primary mark, through CBZ.hurtWorldActor. That is
+      wrong in a way no counter in tools/ape-check.mjs could see, because
+      battle.html routes hurtWorldActor straight back to its own hurtMan and
+      the numbers came out identical. In the CITY the caller's `opts.onHit` is
+      `animalStrikePlayer` (wildlife.js:2740) and the target handed in is a
+      DECOY whose .pos is the player's — it is not in CBZ.worldActors and never
+      could be. Swallowing the strike there meant the primary hit simply never
+      happened: a gorilla would have become completely unable to hurt the
+      player, and the only symptom would have been a player who never lost
+      health. Splash-only cannot express that bug: `opts.onHit` always runs.
+     ============================================================ */
   function apeStrike(attacker, target, style, opts, dmg) {
     if (!ON()) return null;
     var mv = moveOf(style);
@@ -424,14 +446,38 @@
         beginHold(attacker, target, dmg, opts);
         return 0;                                    // the hold bills the damage
       }
-      // refused (he died in the windup, or something bigger stepped in): the
-      // arm is already out, so it lands as an ordinary blow rather than a whiff
-      style = 'ape_smash'; mv = MOVES.ape_smash;
+      // refused (he died in the windup, the target is the player, something
+      // bigger stepped in): hand it straight back and let it land as the
+      // ordinary blow the driver was always going to throw
+      return null;
     }
     if (style === 'ape_bite') STATS.bites++;
     else if (style === 'ape_sweep') STATS.sweeps++;
     else if (style === 'ape_smash') STATS.smashes++;
     else if (style === 'ape_charge') STATS.charges++;
+
+    /* THE MARK STILL GETS MOVED. Its damage stays the driver's — that is the
+       whole point of answering `null` — but `opts.onHit(dmg)` is a number and
+       cannot express "and he leaves his feet", so the physical reaction is
+       ours and is applied with ZERO damage. Skipped for a target with no body
+       of its own to move: city callers hand in a reused DECOY whose .pos is
+       the player's, and the player's own knockback belongs to wildlife.js's
+       KNOCK table, not to this file. */
+    if (target && !target.dead && target.group && target.group.parent &&
+        !target._apeHeld && !target.isPlayer &&
+        !(CBZ.player && target.pos === CBZ.player.pos)) {
+      var tq = posOf(target);
+      if (tq) {
+        var mx = tq.x - p.x, mz = tq.z - p.z;
+        var ml = Math.hypot(mx, mz) || 1;
+        launch(attacker, target, mx / ml, mz / ml, mv.push,
+          (style === 'ape_smash') ? 1.1 : (mv.push > 3 ? 3.2 : 0.8), 0, '');
+      }
+    }
+
+    // a single-mark move has no splash by definition: the driver's own hit IS
+    // the move, already carrying this move's weight through `_atkPow`
+    if (mv.arc <= 0) return null;
 
     var dealt = 0;
     var rng = reach * mv.rng;
@@ -439,30 +485,21 @@
     // the backhand travels ACROSS the front; its fan is centred off the heading
     var centre = (style === 'ape_sweep') ? h + side * 0.42 : h;
 
-    if (mv.arc <= 0) {
-      // a single mark: the thing it was actually swinging at
-      dealt = dmg * mv.pow;
-      if (target && !target.dead) {
-        var tp = posOf(target);
-        var tx = tp ? (tp.x - p.x) : Math.cos(h), tz = tp ? (tp.z - p.z) : Math.sin(h);
-        var tl = Math.hypot(tx, tz) || 1;
-        if (style === 'ape_bite' && CBZ.creatureBiteWound) {
-          try { CBZ.creatureBiteWound(attacker, target, 'maul'); } catch (e) {}
-        }
-        launch(attacker, target, tx / tl, tz / tl, mv.push, mv.push > 3 ? 3.2 : 0.8,
-          dealt, 'a gorilla');
-      }
-      return dealt;
-    }
-
-    // THE FAN. Everything inside the arc takes it — that is the whole reason a
-    // 1.2 m arm matters against a crowd, and it is why a ring of men cannot
-    // simply stand shoulder to shoulder around a silverback.
+    /* THE FAN — the BYSTANDERS only. Everything inside the arc except the man
+       the driver is billing takes it, which is the whole reason a 1.2 m arm
+       matters against a crowd and why a ring of men cannot simply stand
+       shoulder to shoulder around a silverback. `pay` is already scaled by
+       `_atkPow` upstream, so the splash and the primary blow share one weight. */
     var list = roster();
     var rng2 = rng * rng;
+    var tpos = posOf(target);
     for (var i = 0; i < list.length; i++) {
       var o = list[i];
       if (!isEnemy(attacker, o) || o._apeHeld) continue;
+      // NOT the caller's mark, under either identity: the object it handed us,
+      // or the position it handed us (city callers pass a reused decoy whose
+      // .pos IS the real victim's — identity alone would double-bill him).
+      if (o === target || (tpos && posOf(o) === tpos)) continue;
       var q = posOf(o); if (!q) continue;
       var dx = q.x - p.x, dz = q.z - p.z;
       var d2 = dx * dx + dz * dz;
@@ -471,7 +508,7 @@
       if (Math.abs(shortest(Math.atan2(dz, dx) - centre)) > mv.arc) continue;
       // a blow falls off across the arc: the knuckles carry more than the wrist
       var near = 1 - 0.35 * (d / rng);
-      var pay = dmg * mv.pow * near;
+      var pay = dmg * near;
       dealt += pay;
       // a SMASH drives you into the ground, a SWEEP and a CHARGE throw you clear
       var upK = (style === 'ape_smash') ? 1.1 : 3.4;
@@ -479,7 +516,7 @@
         style === 'ape_smash' ? 'flattened by a gorilla' : 'swatted by a gorilla');
     }
     if (CBZ.shake && dealt > 0) { try { CBZ.shake(style === 'ape_smash' ? 0.35 : 0.2); } catch (e) {} }
-    return dealt;
+    return null;      // the primary mark is still the driver's to bill
   }
 
   // THE CHEST BEAT. No damage — the point is that it does none and still

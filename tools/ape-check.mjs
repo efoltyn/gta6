@@ -243,6 +243,72 @@ for (let run = 0; run < RUNS; run++) {
   }
 }
 
+/* ---- THE ANSWER CONTRACT ------------------------------------------------
+   The one bug in this whole feature that no counter above can see. apeStrike
+   returns either a NUMBER ("I consumed this strike") or `null` ("the primary
+   mark is still yours, I only did the splash"). Every hitting move must answer
+   `null`, because in the city the driver's `opts.onHit` IS the player's damage
+   and the target handed in is a decoy that can never appear in CBZ.worldActors
+   — a hitting move that swallowed the strike would make a gorilla unable to
+   hurt the player at all, and battle.html would score identically either way
+   because it routes hurtWorldActor straight back into its own hurtMan.
+   Only the grab and the chest beat may consume. Probed on a FRESH page so the
+   splash it deals cannot contaminate the sweep's totals above. ---------- */
+let contract = null;
+if (!OFF) {
+  await send("Page.navigate", { url: `${origin}games/battle.html?auto=1&map=${MAP}&red=20&blue=1&ru=men&bu=gorilla&rw=fists&rt=civ` });
+  let cUp = false;
+  for (let i = 0; i < 400 && !cUp; i++) {
+    cUp = await evl("!!(window.__battle && __battle.audit().started)");
+    if (cUp !== true) { cUp = false; await sleep(250); }
+  }
+  if (!cUp) fails.push("contract probe: the battle never started");
+  else {
+    contract = await evl(`(function () {
+      var men = __battle.roster(), ape = null, man = null;
+      for (var i = 0; i < men.length; i++) {
+        if (men[i].beast && !men[i].dead) ape = men[i];
+        else if (!men[i].dead && !man) man = men[i];
+      }
+      if (!ape || !man) return { __e: "no ape/man" };
+      // put the mark inside the arms so the move actually resolves
+      man.pos.x = ape.pos.x + 1.4; man.pos.z = ape.pos.z;
+      var o = { reach: ape.reach, dmg: 10 }, out = {};
+      ["ape_charge", "ape_smash", "ape_sweep", "ape_bite"].forEach(function (st) {
+        var r;
+        try { r = CBZ.apeStrike(ape, man, st, o, 10); } catch (e) { r = "threw: " + e; }
+        out[st] = (r === null || r === undefined) ? "null" : String(r);
+      });
+      /* ...and the two that MAY consume. The four probes above deliberately
+         apply the real knockback to the mark, which flags him airborne — and
+         grabbable() correctly refuses a body that is already in the air. Put
+         him back on his feet in front of the ape before asking for the grab,
+         or the probe measures its own side effect. */
+      man._apeFlying = 0; man._apeHeld = null; man.dead = false;
+      if (man.hp <= 0) man.hp = man.maxHp || 90;
+      man.pos.x = ape.pos.x + 1.4; man.pos.z = ape.pos.z;
+      man.pos.y = ape.pos.y;
+      ape._apeSwings = 9; ape._apeGrabT = -999;
+      var g; try { g = CBZ.apeStrike(ape, man, "ape_grab", o, 10); } catch (e) { g = "threw: " + e; }
+      out.ape_grab = (g === null || g === undefined) ? "null" : String(g);
+      var d; try { d = CBZ.apeStrike(ape, man, "ape_drum", o, 10); } catch (e) { d = "threw: " + e; }
+      out.ape_drum = (d === null || d === undefined) ? "null" : String(d);
+      return out;
+    })()`);
+    if (!contract || contract.__e || contract.__throw) {
+      fails.push("contract probe: " + JSON.stringify(contract));
+    } else {
+      ["ape_charge", "ape_smash", "ape_sweep", "ape_bite"].forEach((st) => {
+        if (contract[st] !== "null") {
+          fails.push(`${st} CONSUMED the strike (returned ${contract[st]}) — opts.onHit never runs, so a gorilla cannot hurt the player`);
+        }
+      });
+      if (contract.ape_grab === "null") fails.push("ape_grab did not consume the strike — the hold is not taking the beat");
+      if (contract.ape_drum !== "0") fails.push(`ape_drum returned ${contract.ape_drum} — the display must consume and cost nothing`);
+    }
+  }
+}
+
 const clean = errors.filter((e) => !/ProgressEvent|favicon|preload/i.test(e));
 
 /* THE TOTALS, not the last battle's. `T` is the sum across every run in the
@@ -301,7 +367,7 @@ const row = {
   map: MAP, men: N, bootMs, ended, simT: audit && audit.simT, fps: audit && audit.fps,
   redAlive: audit && audit.red, apesAlive: audit && audit.beasts,
   mode: OFF ? "APE_COMBAT=false" : REVERT ? "APE_FLAIL=false" : "live",
-  runs: RUNS, endedRuns: ended, samples, strandedEver, sunkEver,
+  runs: RUNS, endedRuns: ended, samples, strandedEver, sunkEver, contract,
   totals: T, perRun,
 };
 console.log(JSON.stringify(row, null, 2));

@@ -648,7 +648,11 @@
     if (g && actor._yawOff) { g.rotation.y -= actor._yawOff; actor._yawOff = 0; }
     actor._lungeAmt = 0;
     actor._atkAnim = -1;
-    actor._atkDur = 0;                 // back to the shared clock for the next swing
+    // back to the shared clock, the shared weight and the caller's own style:
+    // a per-move override lives for exactly one swing
+    actor._atkDur = 0;
+    actor._atkPow = 0;
+    actor._apeStyle = null;
     // hand the body layer back to the gait in one pass: k<=0 restores every
     // discovered leg/jaw offset to its authored base. Without this a strike that
     // ends on a non-zero pose (a pounce's extension, a stomp's forefoot) would
@@ -692,7 +696,17 @@
       var speed = (typeof opts.speed === 'number') ? opts.speed : speedFor(sp);
       var reach = (typeof opts.reach === 'number') ? opts.reach : (1.6 + aScale + tScale);
       var rate = (typeof opts.rate === 'number') ? opts.rate : DEFAULT_RATE;
-      var style = opts.style || attacker._atkStyle || creatureStyleFor(sp);
+      /* THE APE'S CHOICE OUTRANKS THE CALLER'S STANDING STYLE, and it has to.
+         city/wildlife.js and systems/predator.js both pin `opts.style` once
+         (wildlife.js:2740, off creatureStyleFor) and hand the same bundle back
+         every frame — which is exactly right for an animal with ONE attack, and
+         wrong for the one animal with six: the picker's answer would survive a
+         single frame and then be overwritten mid-swing, so the pose snapped from
+         a charge to a maul on frame two and the strike moment resolved as the
+         style nobody chose. `_apeStyle` is set at the top of a swing and lives
+         for that swing only (endAttack clears it), so a host that pins a style
+         still pins it for every other species in the bestiary. */
+      var style = attacker._apeStyle || opts.style || attacker._atkStyle || creatureStyleFor(sp);
       attacker._atkStyle = style;
 
       var tp = target.pos || (target.group && target.group.position);
@@ -738,16 +752,30 @@
         // strike moment: crossed STRIKE_AT this frame -> deal damage
         if (attacker._atkAnim < STRIKE_AT && _p >= STRIKE_AT && _dist <= reach * 1.6) {
           var dmg = (typeof opts.dmg === 'number') ? opts.dmg : ((sp && sp.bite) || 12);
+          // per-move weight, the damage sibling of `_atkDur`: an overhead
+          // two-handed smash is not worth the same as a jab and only the thing
+          // that CHOSE the move knows by how much. Unset = 1, i.e. every
+          // existing style bills exactly what it always billed.
+          if (attacker._atkPow > 0) dmg *= attacker._atkPow;
           // THE SEIZE takes precedence over the hit: if the block accepts, it
           // owns the damage, the camera and the death from here. Anything else
           // — flag off, no block loaded, refused (already holding someone) —
           // falls through to the ordinary strike exactly as before.
-          /* THE APE PAYS FOR ITS OWN BLOW. A backhand hits a fan of men, a
-             smash hits the ground under them, a grab hits nobody and takes a
-             body instead — none of that fits `opts.onHit(dmg)`, which is a
-             contract for one mark and one number. ape_combat resolves the
-             whole thing through the shared damage switchboard and hands back
-             the TOTAL it dealt; `null` means "not one of mine, carry on". */
+          /* THE APE'S EXTRA REACH. A backhand does not hit one man, it hits
+             everyone the arm passes through, and a grab hits nobody and takes a
+             body instead — neither fits `opts.onHit(dmg)`, which is a contract
+             for ONE mark and one number.
+
+             So ape_combat is asked first, and it answers one of two ways.
+             A number means it consumed the strike outright (the grab, which
+             hands the whole beat to a hold; the chest beat, which costs
+             nothing on purpose). `null` — the common answer — means it has
+             resolved the SPLASH on the bystanders and the primary mark is
+             still the caller's to bill, which is the only shape that keeps
+             `opts.onHit` intact. That matters more than it looks: in the city
+             the caller's onHit IS the player's damage (wildlife.js's
+             animalStrikePlayer), so an ape style that swallowed the strike
+             would have made a gorilla completely harmless to the player. */
           var apeDealt = null;
           if (CBZ.apeStrike) {
             try { apeDealt = CBZ.apeStrike(attacker, target, style, opts, dmg); } catch (e) { apeDealt = null; }
@@ -756,8 +784,8 @@
             RES.dealt = apeDealt;
           } else if (!trySeize(attacker, target, opts, style)) {
             if (style === 'bite' || style === 'maul' || style === 'strike' || style === 'lunge' ||
-                style === 'gore' || style === 'ram') {
-              biteWound(attacker, target, style);
+                style === 'gore' || style === 'ram' || style === 'ape_bite') {
+              biteWound(attacker, target, style === 'ape_bite' ? 'maul' : style);
             }
             if (typeof opts.onHit === 'function') {
               opts.onHit(dmg);
@@ -849,7 +877,7 @@
         if (CBZ.apeMove) {
           var picked = null;
           try { picked = CBZ.apeMove(attacker, target, opts, _dist, reach); } catch (e) { picked = null; }
-          if (picked) { style = picked; attacker._atkStyle = picked; }
+          if (picked) { style = picked; attacker._atkStyle = picked; attacker._apeStyle = picked; }
         }
         animateAttack(attacker, style, 0, _h, Math.min(reach, _dist), dt);
       } else {
