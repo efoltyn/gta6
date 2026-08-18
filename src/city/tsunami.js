@@ -70,8 +70,8 @@
 
    Flags: TSUNAMI (whole file) · TSUNAMI_AUTO (does it ever fire on its own) ·
    TSUNAMI_PEAK (metres at the crest) · TSUNAMI_PERIOD (mean seconds between) ·
-   TSU_FACE_V2 · TSU_DEBRIS · TSU_UNDERTOW · TSU_SHOAL_V2 (each a one-line
-   revert, and each read by BOTH tsunamis).
+   TSU_FACE_V2 · TSU_DEBRIS · TSU_UNDERTOW · TSU_SHOAL_V2 · TSU_PACE_V2 (each
+   a one-line revert, and each read by BOTH tsunamis).
 ============================================================ */
 (function () {
   "use strict";
@@ -85,8 +85,9 @@
   // CLAUDE.md bans — a complete event behind a door that never opens. It is
   // made safe to leave on by being RARE (TSUNAMI_PERIOD), by never firing
   // unless the player is actually on the coast to see it, and above all by
-  // announcing itself with 19 seconds of drawdown before the water turns
-  // round. You are not ambushed; you are warned, in the only language the
+  // announcing itself with nine seconds of drawdown before the water turns
+  // round (nineteen before TSU_PACE_V2, which was a warning long enough to
+  // get bored inside). You are not ambushed; you are warned, in the only language the
   // sea has. ?cfg_TSUNAMI_AUTO=0 leaves CBZ.cityTsunami() as the only trigger.
   if (CBZ.CONFIG.TSUNAMI_AUTO == null) CBZ.CONFIG.TSUNAMI_AUTO = true;
   if (CBZ.CONFIG.TSUNAMI_PEAK == null) CBZ.CONFIG.TSUNAMI_PEAK = 5.4;      // metres above mean
@@ -119,6 +120,20 @@
   if (CBZ.CONFIG.TSU_DEBRIS == null) CBZ.CONFIG.TSU_DEBRIS = true;
   if (CBZ.CONFIG.TSU_UNDERTOW == null) CBZ.CONFIG.TSU_UNDERTOW = true;
   if (CBZ.CONFIG.TSU_SHOAL_V2 == null) CBZ.CONFIG.TSU_SHOAL_V2 = true;
+  /* TSU_PACE_V2 — THE EVENT AT NORMAL SPEED. Owner, 2026-08-18: "the tsunami
+     is too slow right now... just make it normal." It was, and the shoaling
+     work is not what did it: the ARC was right and the CLOCK was wrong. The
+     city event ran a 77-second script — nineteen seconds of drawdown and lull
+     before the water even turned round, then thirty-four seconds of drain —
+     and the island event ran thirty-six, most of it waiting. Both are now cut
+     to roughly half, and the two places the front itself crawled (the stand,
+     and the deceleration floor going into it) are shortened to a beat rather
+     than a wait. Every shape is unchanged: the drawdown still reads, the wall
+     still stands before it breaks, the bore still spends itself crossing the
+     town. It just no longer takes a minute and a quarter to do it.
+     ?cfg_TSU_PACE_V2=0 restores the old clock exactly — read by BOTH
+     tsunamis, and it is the honest A/B for tools/before-after.mjs. */
+  if (CBZ.CONFIG.TSU_PACE_V2 == null) CBZ.CONFIG.TSU_PACE_V2 = true;
 
   function on() { return CBZ.CONFIG.TSUNAMI !== false && !!CBZ.waterSurgeSet; }
 
@@ -326,14 +341,33 @@
   // Named beats with durations, read by a single stepper — the propuse.js arc
   // shape. Nothing accumulates, so the event can be cancelled on any frame by
   // dropping the state and zeroing the surge.
-  const PHASES = [
-    ["draw", 16],     // the sea goes out — the warning
-    ["lull", 3.5],    // and holds there, low and wrong
-    ["surge", 11],    // it comes back
-    ["hold", 13],     // and stands
-    ["drain", 34],    // and leaves
+  /* THE CLOCK (TSU_PACE_V2). The old script is the second column and it is a
+     minute and a quarter long: nineteen seconds of receding sea before the
+     water turns round, and a drain that outlasts everything else in the event
+     put together. Nothing about the arc was wrong — every beat below still
+     exists, in the same order, with the same shape — it was simply being read
+     at half speed, which is why a wave that is doing 30 m/s felt slow. Cut to
+     36 s: long enough for the drawdown to be a warning you can act on and for
+     the drain to strand what it carried, short enough that the whole thing is
+     one held breath instead of an errand. */
+  const FAST = function () { return CBZ.CONFIG.TSU_PACE_V2 !== false; };
+  const PHASES_FAST = [
+    ["draw", 7.5],    // the sea goes out — the warning
+    ["lull", 1.6],    // and holds there, low and wrong
+    ["surge", 6],     // it comes back
+    ["hold", 6.5],    // and stands
+    ["drain", 15],    // and leaves
   ];
-  const TOTAL = PHASES.reduce(function (a, p) { return a + p[1]; }, 0);
+  const PHASES_SLOW = [
+    ["draw", 16], ["lull", 3.5], ["surge", 11], ["hold", 13], ["drain", 34],
+  ];
+  function phases() { return FAST() ? PHASES_FAST : PHASES_SLOW; }
+  function total() {
+    const P = phases();
+    let a = 0;
+    for (let i = 0; i < P.length; i++) a += P[i][1];
+    return a;
+  }
 
   let ev = null;          // { t, phase, peak, draw }
   // Seeded to a FULL period, not 0. Starting at zero means the very first tick
@@ -348,9 +382,10 @@
 
   // surge in metres for a given time into the event
   function surgeAt(t, peak, draw) {
+    const P = phases();
     let acc = 0;
-    for (let i = 0; i < PHASES.length; i++) {
-      const name = PHASES[i][0], dur = PHASES[i][1];
+    for (let i = 0; i < P.length; i++) {
+      const name = P[i][0], dur = P[i][1];
       if (t < acc + dur) {
         const u = (t - acc) / dur;
         switch (name) {
@@ -370,10 +405,11 @@
     return 0;
   }
   function phaseAt(t) {
+    const P = phases();
     let acc = 0;
-    for (let i = 0; i < PHASES.length; i++) {
-      if (t < acc + PHASES[i][1]) return PHASES[i][0];
-      acc += PHASES[i][1];
+    for (let i = 0; i < P.length; i++) {
+      if (t < acc + P[i][1]) return P[i][0];
+      acc += P[i][1];
     }
     return "";
   }
@@ -417,7 +453,13 @@
     if (CBZ.CONFIG.TSU_SHOAL_V2 === false) return u;
     if (u <= LANDFALL_U) {
       const w = u / LANDFALL_U;
-      return LANDFALL_U * (1 - Math.pow(1 - w, 2.0));   // ease OUT: dead slow at the wall
+      /* ease OUT: the front loses speed as the water under it shallows. The
+         exponent is how hard. At 2.0 the last twenty metres were a crawl the
+         surge had to wait out — the shoaling read as a stall in the middle of
+         the approach rather than as a wave standing up. TSU_PACE_V2 softens
+         it to 1.55: still visibly decelerating into the wall, no longer
+         parked there. */
+      return LANDFALL_U * (1 - Math.pow(1 - w, FAST() ? 1.55 : 2.0));
     }
     const w = (u - LANDFALL_U) / (1 - LANDFALL_U);
     return LANDFALL_U + (1 - LANDFALL_U) * Math.pow(w, 0.72);  // steep at 0: the release
@@ -488,7 +530,7 @@
   };
   CBZ.cityTsunamiState = function () {
     return ev ? {
-      phase: ev.phase, t: ev.t, total: TOTAL,
+      phase: ev.phase, t: ev.t, total: total(),
       surge: CBZ.waterSurge ? CBZ.waterSurge() : 0,
       frontS: ev.frontS, turbid: turbidAt(ev.frontS),
       debris: ev.debris ? ev.debris.stats() : null,
@@ -798,7 +840,7 @@
 
     const prev = CBZ.waterSurge ? CBZ.waterSurge() : 0;
     ev.t += dt;
-    if (ev.t >= TOTAL) { CBZ.cityTsunamiStop(); return; }
+    if (ev.t >= total()) { CBZ.cityTsunamiStop(); return; }
     const s = surgeAt(ev.t, ev.peak, ev.draw);
     CBZ.waterSurgeSet(s);
     ev.phase = phaseAt(ev.t);
