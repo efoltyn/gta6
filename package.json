@@ -25,6 +25,7 @@
     "test:ground": "node tools/ground-check.mjs",
     "test:crater": "node tools/crater-check.mjs",
     "test:bunker": "node tools/bunker-check.mjs",
+    "test:tunnel": "node tools/tunnel-check.mjs",
     "test:sinkhole": "node tools/sinkhole-check.mjs",
     "test:battle": "node tools/battle-check.mjs",
     "test:ape": "node tools/ape-check.mjs",
