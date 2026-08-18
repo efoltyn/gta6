@@ -3966,7 +3966,14 @@
            hurts and is thrown for the ground it buys. `push` is how far it
            moves you, and it is the reason a shove exists at all. */
         const M = MELEE_BLOW[kick ? "knee" : (stabbing ? "stab" : kind)] || MELEE_BLOW[""];
-        const swing = M.dmg + rng() * M.roll;
+        /* AND THE MAN THROWING IT IS A BODY TOO. The table above says what the
+           BLOW is worth; what it costs YOU also depends on who is throwing it,
+           and every inmate in this yard used to hit with identical weight
+           whatever they were built like. Two adult men come out at 1.0, so the
+           prison plays exactly as it did unless the man jumping you is
+           genuinely bigger or smaller than you. */
+        const swing = (M.dmg + rng() * M.roll) *
+          (CBZ.meleeScale ? CBZ.meleeScale(n, CBZ.player) : 1);
         if (CBZ.hurtPlayer) {
           CBZ.hurtPlayer(swing, n.group.position.x, n.group.position.z,
             { melee: true, stun: M.stun, heat: 4, shake: M.shake,

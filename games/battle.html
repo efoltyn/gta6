@@ -329,6 +329,17 @@ if (DEATH_OLD) {
   CBZ.CONFIG.CREATURE_JAW_CONTACT = false;
 }
 
+/* ?mass=old — THE SAME SHAPE OF SWITCH FOR THE OTHER WAVE THIS PAGE CARRIES.
+   Before it, every melee number in the game was read off the ATTACKER and
+   handed to the target untouched, so a civilian's fist took the same bite out
+   of a 190 kg silverback as out of another man — which is the whole reason a
+   hundred unarmed men could arithmetic a gorilla to death without it mattering
+   what a gorilla is. systems/bodymass.js makes the pair a ratio; man on man is
+   1.0 by construction, so a battle of riflemen is byte-identical either way and
+   this switch photographs exactly the mismatch and nothing else. */
+const MASS_OLD = Q.get("mass") === "old";
+if (MASS_OLD) CBZ.CONFIG.BODY_MASS = false;
+
 /* ============================================================ THE GROUND
    FOUR OF THESE ARE PLACES IN GANG CITY, AT THEIR OWN COORDINATES.
 
@@ -1302,7 +1313,15 @@ CBZ.studio.need(NEED).then(function () {
       o.onHit = function (dmg) {
         const t = m.tgt;
         if (!t || t.dead) return;
-        hurtMan(t, dmg, { by: m });
+        /* THE SAME LAW FROM THE OTHER SIDE — but through meleeAbsorb, NOT
+           meleeScale, and the difference is the whole balance of this page.
+           `tn.dmg` comes off the species' `bite`, which is already authored as
+           what that animal does TO A MAN; running it through the two-body ratio
+           would multiply the silverback by its own weight a second time and
+           hand it a 70% buff nobody wrote. meleeAbsorb asks only what the
+           TARGET soaks, so a beast hitting a man is worth exactly its row (no
+           change at all) and a beast hitting another beast finally is not. */
+        hurtMan(t, dmg * (CBZ.meleeAbsorb ? CBZ.meleeAbsorb(t) : 1), { by: m });
         // a struck beast shudders (creature_combat's own flinch); a struck man
         // already staggers through the damage funnel's suppression
         if (t.beast && !t.dead && CBZ.creatureFlinch) { try { CBZ.creatureFlinch(t); } catch (e) {} }
@@ -2982,7 +3001,15 @@ CBZ.studio.need(NEED).then(function () {
         const st = CBZ.combatIQ.melee(m, tgt, sdt,
           { reach: mr, incoming: (tgt._windup || 0) > 0 || (tgt._iqM && tgt._iqM.st === "windup") });
         if (st === "swing") {
-          hurtMan(tgt, m.punch * (0.85 + lcg() * 0.4), { by: m });
+          /* AND IT MATTERS WHO HE IS HITTING. `m.punch` is a number off the
+             THROWER and nothing else, so a civilian's fist used to take the
+             same bite out of a 190 kg silverback as out of another man — the
+             single reason a hundred unarmed men could hand-wrestle a gorilla
+             down on arithmetic alone. systems/bodymass.js turns the pair into
+             a ratio; man on man is 1.0, so every men-only battle this page has
+             ever run is numerically untouched. */
+          const mk = CBZ.meleeScale ? CBZ.meleeScale(m, tgt) : 1;
+          hurtMan(tgt, m.punch * (0.85 + lcg() * 0.4) * mk, { by: m });
           stats[m.team].shots++; stats[m.team].hits++;   // the ledger counts blows thrown and landed
           m.shotsF++; m.hitsF++; gunLedger("fists").shots++; gunLedger("fists").hits++;
         }

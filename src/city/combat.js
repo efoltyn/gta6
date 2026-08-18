@@ -282,6 +282,15 @@
   // tier: "light" | "heavy" | "finisher".  Returns true if it connected.
   function land(t, dmg, tier, opts) {
     opts = opts || {};
+    /* THE SAME BLOW IS NOT THE SAME BLOW. `dmg` arrives describing the swing —
+       the tier, the weapon, the combo — and nothing about the target, so a fist
+       hit a pedestrian, a cop and a black bear for identical numbers. The
+       scale is a ratio of the two bodies (systems/bodymass.js): adult man on
+       adult man is 1.0 by construction, so every street fight in the shipped
+       game is untouched, and only the mismatches — the bear, the child, the
+       woman — start reading as mismatches. Applied here, at the ONE place the
+       street's melee resolves, rather than at each of the callers. */
+    if (CBZ.meleeScale) dmg *= CBZ.meleeScale(P, t);
     // multiplayer target (remote player / synced puppet): authority is over the
     // wire — net code routes the damage and plays the local juice.
     if (t.netKind && CBZ.net && CBZ.net.localMeleeHit) return CBZ.net.localMeleeHit(t, dmg, tier);

@@ -289,7 +289,14 @@
       return { ok: false, msg: "" };
     }
 
-    const dmg = attack.dmg;
+    /* WHO YOU HIT DECIDES WHAT IT COSTS THEM. `attack.dmg` is a number off the
+       PLAYER's fist and the tier he threw — it says nothing at all about the
+       body it is landing on, so a jab took the same bite out of every inmate
+       in the yard regardless of what they were built like. systems/bodymass.js
+       turns the pair into a ratio off the anthropometric profile the rig
+       already carries; two adult men come out at exactly 1.0, so the prison's
+       existing fights do not move a point. */
+    const dmg = attack.dmg * (CBZ.meleeScale ? CBZ.meleeScale(CBZ.player, actor) : 1);
     actor.hp -= dmg;
     /* punches BRUISE (wounds.js) — the face you beat carries it.
 

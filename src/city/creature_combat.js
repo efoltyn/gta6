@@ -242,17 +242,33 @@
   }
 
   // ---- pose reset ---------------------------------------------------------
+  /* THE SCALE THE BODY WAS BUILT AT. Both the impact pulse below and the rest
+     settle used to write ABSOLUTE scale values — `g.scale.x = pulse`, then
+     `g.scale.x += (1 - g.scale.x) * e` — which quietly assumes every animal in
+     the game is authored at 1. games/battle.html scales each beast group to
+     its species' own `scale` (a silverback is 1.15), so the first swing any
+     beast threw shrank it by fifteen percent and the settle held it there for
+     the rest of the war. Nothing SAID it had happened: the animal was simply a
+     bit smaller than the row it came from, forever, and the first thing to
+     notice was a mass derivation reading 125 kg off a gorilla that should have
+     measured 190. Captured once, before either writer runs. */
+  function baseScale(actor, g) {
+    if (!(actor._baseScale > 0)) actor._baseScale = (g && g.scale && g.scale.x > 0) ? g.scale.x : 1;
+    return actor._baseScale;
+  }
+
   function restPose(actor, dt) {
     var g = actor.group;
     if (!g) return;
+    var bs = baseScale(actor, g);
     // damp any leftover strike transforms back to rest
     _e = Math.min(1, dt * 10);
     g.rotation.x += (0 - g.rotation.x) * _e;
     g.rotation.z += (0 - g.rotation.z) * _e;
-    if (g.scale.x !== 1) {
-      g.scale.x += (1 - g.scale.x) * _e;
-      g.scale.y += (1 - g.scale.y) * _e;
-      g.scale.z += (1 - g.scale.z) * _e;
+    if (g.scale.x !== bs) {
+      g.scale.x += (bs - g.scale.x) * _e;
+      g.scale.y += (bs - g.scale.y) * _e;
+      g.scale.z += (bs - g.scale.z) * _e;
     }
     var head = findHead(g);
     if (head && head.userData._cbzRX !== undefined) {
@@ -530,8 +546,11 @@
     g.rotation.x = (pitchZ !== 0) ? roll : pitch;      // aquatic: rotation.x is the ROLL
     if (pitchZ !== 0) g.rotation.z = pitchZ;           // ..and rotation.z is the true pitch
     else if (style === 'maul' || roll !== 0) g.rotation.z = roll;
-    if (pulse !== 1) { g.scale.x = pulse; g.scale.y = pulse; g.scale.z = pulse; }
-    else if (g.scale.x !== 1) { g.scale.x = g.scale.y = g.scale.z = 1; }
+    // the impact pop is a MULTIPLIER on the body's authored size, not a
+    // replacement for it — see baseScale()
+    var bsA = baseScale(actor, g);
+    if (pulse !== 1) { g.scale.x = g.scale.y = g.scale.z = bsA * pulse; }
+    else if (g.scale.x !== bsA) { g.scale.x = g.scale.y = g.scale.z = bsA; }
 
     // ---- THE BODY LAYER, the land sibling of the swimJaw call in 'lunge' -----
     // Everything above moves the GROUP. This moves the ANIMAL: predator_anim

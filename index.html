@@ -542,6 +542,15 @@
 
 <!-- 3. entities -->
   <script src="src/entities/character.js?v=holster1"></script>
+  <!-- WHAT A BODY WEIGHS, and therefore what a punch to it is worth. Every
+       melee site in the game handed the ATTACKER's own number straight to the
+       target, so a fist did the same to a 190 kg silverback as to a 62 kg
+       woman, and the silverback's blow landed on a man with no more authority
+       than a man's landed on it. Derived entirely from the anthropometric
+       profile character.js already builds and the species row's own scale —
+       nothing new is authored. MUST follow entities/character.js: it reads
+       CBZ.charProfile. -->
+  <script src="src/systems/bodymass.js?v=mass1"></script>
 <script src="src/entities/poses.js?v=pose1"></script>
 <script src="src/entities/player.js?v=radio1"></script>
 <script src="src/entities/coins.js"></script>
