@@ -111,8 +111,32 @@ async function stageVipWardrobe(input) {
     overlay.innerHTML = "<div data-scrim></div><div data-side></div><div data-name></div>" +
       "<div data-focus></div><div data-read></div><div data-source></div>";
     document.body.appendChild(overlay);
+    // STUDIO MARK: a CORE-district sidewalk point drawn with a SEEDED rng
+    // (vips.js corePoint's own recipe) — deterministic per seed, so both
+    // sides shoot the same downtown kerb. Two rejected marks taught this:
+    // the player's own spawn can be INSIDE the campaign motel, and "the
+    // first shopLot with a door" turned out to live at the airport — both
+    // photographed a landscape instead of the row.
+    let mx = CBZ.player.pos.x, mz = CBZ.player.pos.z;
+    const A0 = CBZ.city && CBZ.city.arena;
+    if (A0 && (A0.weightedSidewalkPoint || A0.randomSidewalkPoint)) {
+      let seed0 = 424243;
+      const mrng = () => { seed0 = (seed0 * 1103515245 + 12345) & 0x7fffffff; return seed0 / 0x7fffffff; };
+      let anyPoint = null;
+      for (let t = 0; t < 40; t++) {
+        const p0 = A0.weightedSidewalkPoint ? A0.weightedSidewalkPoint(mrng) : A0.randomSidewalkPoint();
+        if (!p0) continue;
+        anyPoint = p0;
+        const d0 = A0.districtAt ? A0.districtAt(p0.x, p0.z) : null;
+        // REQUIRE a downtown district — a point with NO district is an outland
+        // road (the countryside plate this line replaced), never a fallback.
+        if (d0 && (d0.kind === "core" || d0.kind === "commercial")) { mx = p0.x; mz = p0.z; anyPoint = null; break; }
+      }
+      if (anyPoint) { mx = anyPoint.x; mz = anyPoint.z; }   // exhausted: any sidewalk beats the motel
+    }
     S = window.__vipWard = {
-      gx: CBZ.player.pos.x, gz: CBZ.player.pos.z, gy: CBZ.player.pos.y,
+      gx: mx, gz: mz,
+      gy: (CBZ.floorAt && CBZ.floorAt(mx, mz)) || CBZ.player.pos.y,
       overlay, pinned: [],
     };
     window.__cbzVisualCompare = {
@@ -228,6 +252,12 @@ async function stageVipWardrobe(input) {
   };
   S.pinned = row;
   hold(); step(0.6); hold(); step(0.3); hold();
+  // ONE settling tick AFTER the final pin, and no position writes after it:
+  // entities/pedinstance.js draws most garment boxes from instance pools and
+  // syncs pool matrices on its own tick — render straight off a manual
+  // teleport and the pooled parts photograph at their PREVIOUS spot (the
+  // first contact sheet's scattered heads/torsos).
+  step(0.05);
 
   // ---- count what the plate is about --------------------------------------
   let skinArmedInRow = 0, armClash = 0, paintedBodies = 0, whiteTorsos = 0, kids = 0;
@@ -236,27 +266,55 @@ async function stageVipWardrobe(input) {
     if (!ss) continue;
     const band = p.band || (ch && ch.band);
     if (p.child || (band && band !== "adult")) kids++;
-    const torso = flat(ss.torso), arms = flat(ss.arms);
+    const torso = flat(ss.torso), arms = flat(ss.arms), head = flat(ss.head);
     if (torso === "painted") { paintedBodies++; continue; }
     if (torso === 0xffffff) whiteTorsos++;
-    if (arms != null && arms !== "painted" && ch.skinTone != null && arms === ch.skinTone && torso != null && torso !== ch.skinTone) skinArmedInRow++;
+    // naked arm = upper-arm flat hex EXACTLY the rig's built tone OR its live
+    // head color (crowd promotion paints head+arms with the imposter's own
+    // palette hex, not the built tone), under a real torso of another color.
+    const armIsSkin = arms != null && arms !== "painted" &&
+      ((ch.skinTone != null && arms === ch.skinTone) || (head != null && head !== "painted" && arms === head));
+    if (armIsSkin && torso != null && torso !== arms) skinArmedInRow++;
     const d = rgbd(arms, torso);
     if (d != null && d > 64) armClash++;
   }
   const audit = CBZ.outfitIntegrityAudit ? CBZ.outfitIntegrityAudit() : null;
 
-  // ---- fixed world-axis tripod, whole row, waist-up ------------------------
+  // ---- AIM AT WHERE THE BODIES ACTUALLY ARE (ped-lineup.mjs:218's law) -----
+  // The marks are REQUESTS; gravity, ground snapping and the brain answer
+  // them. Two contact sheets photographed an empty hillside because the lens
+  // was built from the requested coordinates while the bodies stood on real
+  // ground somewhere else. Read each body's live world position, frame the
+  // median cluster, and photograph their FRONTS (lens between row and mark).
   const camera = CBZ.camera;
   camera.aspect = input.width / input.height;
   camera.near = 0.05; camera.far = 4000;
   camera.fov = 34;
-  let lo = Infinity, hi = -Infinity, ry = S.gy, rz = S.gz + 7.5;
-  for (const m of row) { if (m.x < lo) lo = m.x; if (m.x > hi) hi = m.x; ry = m.y; rz = m.z; }
-  const cx = (lo + hi) / 2;
-  const dist = Math.max(2.6, (hi - lo) * 0.72 + 2.9);
-  camera.position.set(cx, ry + 1.62, rz - dist);
-  camera.lookAt(cx, ry + 1.02, rz);
+  const wv = new T.Vector3();
+  const placed = [];
+  for (const m of row) {
+    if (!m.p.group) continue;
+    m.p.group.updateWorldMatrix(true, false);
+    wv.setFromMatrixPosition(m.p.group.matrixWorld);
+    m.wx = wv.x; m.wy = wv.y; m.wz = wv.z;
+    placed.push(m);
+  }
+  placed.sort((a, b) => a.wy - b.wy);
+  const mid = placed[(placed.length / 2) | 0] || row[0];
+  const near = placed.filter((m) => Math.abs(m.wy - mid.wy) < 4 && Math.hypot(m.wx - mid.wx, m.wz - mid.wz) < 20);
+  let lo = Infinity, hi = -Infinity, czs = 0;
+  for (const m of near) { if (m.wx < lo) lo = m.wx; if (m.wx > hi) hi = m.wx; czs += m.wz; }
+  const cx = (lo + hi) / 2, cz = czs / Math.max(1, near.length), ry = mid.wy;
+  const dist = Math.max(3.2, (hi - lo) * 0.72 + 2.9);
+  // lens on the side the row FACES: they were turned toward the mark
+  let fdx = S.gx - cx, fdz = S.gz - cz;
+  const flen = Math.hypot(fdx, fdz) || 1;
+  fdx /= flen; fdz /= flen;
+  camera.position.set(cx + fdx * dist, ry + 1.62, cz + fdz * dist);
+  camera.lookAt(cx, ry + 1.02, cz);
   camera.updateProjectionMatrix();
+  const rz = cz;   // corridor clear below reads these
+  S.gyCam = ry;
   if (typeof CBZ.skySync === "function") CBZ.skySync();
   else {
     const skyRig = CBZ.skyDome && CBZ.skyDome.parent;

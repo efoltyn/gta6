@@ -406,6 +406,77 @@ try {
     }
   }
 
+  /* ---- THE MASK MUST REPAIR ITSELF ---------------------------------------
+     Everything above measures the mask as INSTALLED — cut a hole, look at the
+     ground, count what is still drawing. That is the state the desktop is
+     always in, and it is why the ring the owner photographed on a phone
+     survived every check in this file: maskMaterial() stamps the discard onto
+     the material OBJECT a mesh is wearing at cut time, and nothing re-checks
+     it, so a hole that was correctly masked at second 3 can be wearing a lid
+     again at second 20 without a single assertion moving.
+
+     So the fault is INJECTED, in both shapes it can take, and the mask is
+     required to come back on its own:
+       (a) ground that arrives over an open mouth — a batch merge, an LOD swap
+       (b) a mesh whose material is replaced by a different object, which is
+           exactly what core/gfx.js's Lambert/Standard twin swap does when the
+           quality tier moves (and a phone moves tiers; a desktop does not)
+     Neither is hypothetical: (b) is a live code path in core/gfx.js today. */
+  const heal = await json(`
+    var S = CBZ.groundShafts || []; var h = S[0];
+    if (!h) return { skipped: 1 };
+    var root = window.__sink.root();
+    var g = new THREE.Mesh(new THREE.PlaneGeometry(h.mouth * 2.2, h.mouth * 2.2),
+                           new THREE.MeshLambertMaterial({ color: 0x53a84e }));
+    g.rotation.x = -Math.PI / 2; g.position.set(h.x, h.gy + 0.02, h.z);
+    root.add(g);
+    // a mesh added this frame still carries an identity matrixWorld, and every
+    // footprint test here is in world space
+    g.updateMatrixWorld(true);
+    var lidNew = window.__sink.lidOver(h).unmasked;
+    window.__sink.step(3.0);
+    var lidHealed = window.__sink.lidOver(h).unmasked;
+    g.parent && g.parent.remove(g);
+
+    /* The victim has to be a mesh that actually COVERS THIS MOUTH. Materials
+       are shared — one roadMat dresses every road in the city — so the first
+       masked material in the scene usually belongs to a mesh a kilometre away
+       that no sweep ever touched and no hole depends on. Healing that would
+       prove nothing; healing the ground over the hole is the whole claim. */
+    var victim = null, vbox = new THREE.Box3();
+    root.traverse(function (o) {
+      if (victim || !o.isMesh || !o.geometry || !o.material || Array.isArray(o.material)) return;
+      if (o === g || !o.material._shaftMasked) return;
+      for (var p = o; p; p = p.parent) if (p.userData && p.userData.groundShaft) return;
+      if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+      vbox.copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld);
+      if (vbox.max.y - vbox.min.y > 3) return;
+      if (vbox.max.y < h.gy - 3 || vbox.min.y > h.gy + 0.35) return;
+      if (vbox.max.x < h.x - h.mouth || vbox.min.x > h.x + h.mouth) return;
+      if (vbox.max.z < h.z - h.mouth || vbox.min.z > h.z + h.mouth) return;
+      victim = o;
+    });
+    var swapped = null, swappedHealed = null;
+    if (victim) {
+      victim.material = victim.material.clone();   // a clone carries no _shaftMasked
+      swapped = !!victim.material._shaftMasked;
+      window.__sink.step(0.2);
+      swappedHealed = !!victim.material._shaftMasked;
+    }
+    return { lidNew: lidNew, lidHealed: lidHealed, swapped: swapped, swappedHealed: swappedHealed,
+             victim: victim ? (victim.name || victim.type) : null,
+             reMasked: CBZ.shaftAudit().reMasked, reSweeps: CBZ.shaftAudit().reSweeps };`);
+
+  if (heal.skipped) {
+    failures.push("the self-heal phase found no shaft to injure — it proved nothing");
+  } else {
+    if (heal.lidNew === 0) failures.push("the self-heal phase could not inject a lid at all — it is not testing what it claims to");
+    if (heal.lidHealed !== 0) failures.push(`ground added over an open mouth was never re-swept (unmasked ${heal.lidNew} -> ${heal.lidHealed})`);
+    if (heal.victim == null) failures.push("the self-heal phase found no masked ground mesh over the mouth to injure — it is not testing what it claims to");
+    if (heal.victim != null && heal.swapped !== false) failures.push("the self-heal phase could not swap a masked material — it is not testing what it claims to");
+    if (heal.victim != null && heal.swappedHealed !== true) failures.push(`a ground material swapped out from under the mask was never re-stamped (${heal.victim})`);
+  }
+
   if (browserErrors.length) failures.push(`browser errors: ${browserErrors.slice(0, 4).join(" | ")}`);
 
   const report = {
@@ -419,6 +490,7 @@ try {
       shafts: city.shafts, audit: city.audit,
       lid: city.holes.map((h) => ({ hole: h.i, total: h.lidTotal, unmasked: h.lidUnmasked, floorDrop: h.floorDrop })),
     } : { opened: false },
+    selfHeal: heal,
     shots: [survivalShot, cityShot].filter(Boolean),
     browserErrors,
     failures,

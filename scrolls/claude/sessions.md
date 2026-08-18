@@ -4000,6 +4000,75 @@ so the next thumbless verb cannot hide the way this one did. Also: the
 "[B]… Shift+B" stash hint is keyboard-only now (a touchscreen is never shown
 a keyboard key). Gate: npm run test:c4-touch.
 
+## THE 2026-08-16 BEACH SESSION — both coasts bigger and real, zero props, one easy A/B button
+
+**Mandate:** *"Improve the beach without adding props in natural disaster and
+in gang city and commit bigger and more real easy use before after tool and GO
+FAST."* Three deliverables: both beaches bigger + more real with ZERO new
+props, the before/after tool made one-command easy, everything committed.
+
+**Gang City (`BEACH_V2`, default on, `?cfg_BEACH_V2=0` reverts):**
+- world.js: the south seawall's beach gap grew 100 → 160 m (cx-150..cx+10).
+  Every consumer reads the descriptor (sand, swash, minimap band, stashes), so
+  the wider opening propagated with no other file changing. Prop COUNTS
+  untouched — a wider beach with the same nine palms is mostly open sand,
+  which is what a coastline is.
+- beach.js: the sand band stopped being one flat quad in one hex. Subdivided
+  grid, micro-relief (three incommensurate sine fields, ZERO rng draws — the
+  build stream is byte-identical under the flag), vertex colour doing
+  texture's job: grain mottle (position hash), warm/cool drift, crests
+  bleaching + hollows shading, a damp band into the swash, the high-tide
+  WRACK LINE as colour. Relief clamps near-flat where authored things live
+  (towels 0.085, furniture 0.06, pier approach) and ≤0.20 everywhere (the
+  boardwalk deck's underside is 0.22). Swash apron columns 7 → ~16 (one per
+  11 m) so the run-up reads as surf tongues, not one tilting line.
+
+**Natural Disaster island (`SURV_BEACH_V2`, default on):**
+- disaster_arena.js: the 8 m flat sand annulus at y=-0.02 became a 26 m SHORE
+  with a profile — grass edge, low wave-built berm (0.30 peak at b≈4.6), then
+  a smoothstep foreshore descending THROUGH the waterline to -1.9 where the
+  shelf takes over. groundHeightAt and the drawn ring read ONE function
+  (coastHeightAt): drawn == walked, the seabed doctrine extended to the
+  beach. Dry sand ~11.75 m, wadable foreshore ~15 m before swim.js takes you
+  (audited: CBZ.survShoreAudit()).
+- The drawn ring (RingGeometry R-3..SHORE_R-1, SAME 96 theta segments as the
+  seabed ring — boundary vertices coincide, no seam, no overlap) is
+  vertex-coloured and carries a LIVE WET LINE at tick 47.95 (behind the
+  ocean's own surge take at 47.9): every vertex under the live mean sea + a
+  breathing alongshore swash wets instantly, dries at 0.10/s — a tsunami
+  drawdown strands a great ring of visibly wet sand, and a flood's retreat
+  leaves a high-water mark.
+
+**The easy before/after button:**
+- tools/before-after.mjs — ONE argument (`node tools/before-after.mjs
+  beach-shores`, `npm run ba -- <preset>`, bare = list every preset with its
+  title). Applies the three decisions every run repeats: --before from the
+  preset's defaultBefore (flag-A/B) else deployed, --keep-going, --no-open;
+  everything else passes through to visual-compare.mjs.
+- tools/visual-presets/beach-shores.mjs — five subjects across BOTH worlds in
+  one run, flag A/B by default (before = this checkout with
+  cfg_BEACH_V2=0&cfg_SURV_BEACH_V2=0). Metrics come off descriptors and
+  height functions, not pixels: beachSpanM 100→160, swashVerts 91→272,
+  islandBeachM 8→26, wadeM 4→15, wetLineLive 0→1. npm run visual:beach.
+
+**Four defects the loop caught before the owner could (iter-1 → final):**
+1. The sand grid's triangle winding faced -Y (invisible sand) — caught by a
+   cross-product check before the first screenshot, fixed pre-run.
+2. core/batch.js MERGED the vertex-coloured sand mesh away (empty userData →
+   batch material → no vertexColors): dunes survived, mottle vanished,
+   sandVerts metric read 0. Fix = the swash apron's own rule, non-empty
+   userData. THE METRIC CAUGHT IT — that is why metrics ride the preset.
+3. The first-person rifle photobombed every after frame. CBZ.setFPS(false) in
+   the stage, twice (a mode switch can re-arm it).
+4. BOOT ORDER IS LOAD-BEARING for cross-world presets: booting city first
+   builds the continent underlay + world sea at y≈0 across the whole map —
+   global meshes state.js never hides — and the island's shore (0 → -1.9) and
+   own ocean (-0.8) sit UNDER them; iter-1's island frames photographed the
+   empty city sea. Measured with a raycast probe (hits: world-sea,
+   continent-underlay at ~92 m). The preset now boots STRAIGHT into survival
+   (the tsunami-stages boot), shoots the island first, then switches city-ward
+   — safe in that direction. Anyone building a two-world preset: island
+   subjects go first.
 ## 2026-08-16 — the "nil outfit" body, fourth and fifth producers (fable, solo)
 
 Owner (iPad screenshot, live pages build): an adult NPC — aim tag "Lv.11
