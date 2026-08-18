@@ -214,9 +214,6 @@ const PROBE = `(() => {
           " butt=" + ((au.butt||0)*100).toFixed(0) +
           " resid=" + (au.residual == null ? "null" : (au.residual*100).toFixed(0))
         : null;
-      rec.rl = "w=" + (rec.peakWeight == null ? "?" : rec.peakWeight) +
-        " f=" + rec.frames + " t=" + (rec.reloadTime || 0) +
-        " started=" + rec.reloadStarted;
       // ISOLATION PROBE: call the solver by hand on the same anchor. If this
       // lands and the frame pass did not, the fault is in the plumbing (hook
       // order, a later writer) and not in the maths — the two failures look
@@ -254,6 +251,7 @@ const PROBE = `(() => {
         CBZ.fpsReload();
         rec.reloadStarted = CBZ.fps.reloading > 0;
         let prev = handLocal(), path = 0, frames = 0, peakW = 0, sawStyle = null;
+        let minP = 9, maxP = -9, segFrames = 0;
         while (CBZ.fps.reloading > 0 && frames++ < Math.ceil(row.reload*8*60)+120) {
           step(1);
           const now = handLocal();
@@ -261,7 +259,11 @@ const PROBE = `(() => {
           prev = now;
           if (CBZ.gunReloadPose) {
             const r = CBZ.gunReloadPose();
-            if (r.active) { peakW = Math.max(peakW, r.weight); sawStyle = r.style; }
+            if (r.active) {
+              peakW = Math.max(peakW, r.weight); sawStyle = r.style;
+              minP = Math.min(minP, r.p); maxP = Math.max(maxP, r.p);
+              if (r.weight > 0) segFrames++;
+            }
           }
         }
         rec.travel = +(path*100).toFixed(1);
@@ -269,6 +271,8 @@ const PROBE = `(() => {
         rec.style = sawStyle;
         rec.peakWeight = +peakW.toFixed(2);
         rec.ammoAfter = CBZ.fps.rounds[i];
+        rec.rl = "w=" + peakW.toFixed(2) + " p=" + minP.toFixed(2) + ".." + maxP.toFixed(2) +
+          " f=" + frames + " t=" + row.reload + " segs=" + segFrames;
       }
     } catch (e) { rec.err = String(e && e.message || e); }
     out.guns.push(rec);
