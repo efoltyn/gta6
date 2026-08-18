@@ -575,11 +575,15 @@
   //  behaviour, which breaks the day the copy is reworded (and collided with
   //  the FACILITY lockdown, which is a different event entirely). The row says
   //  what it does; the copy is free to change.
+  //  The CALL is its own field (not split back out of the prose with " —" —
+  //  the same display-string-as-data disease the `lock` note above already
+  //  cured once): the call is what the screw shouts and what the objective
+  //  line carries; the prose only ever rode the suppressed hint path.
   const DAY_BEAT = [
-    { t: 55, s: "YARD CALL — the block empties into the yard." },
-    { t: 40, s: "CHOW — the line's forming in the cafeteria." },
-    { t: 35, s: "REC — the lounge is open." },
-    { t: 30, s: "LOCKUP — back to your cell, count time.", lock: true },
+    { t: 55, call: "YARD CALL", s: "the block empties into the yard." },
+    { t: 40, call: "CHOW", s: "the line's forming in the cafeteria." },
+    { t: 35, call: "REC", s: "the lounge is open." },
+    { t: 30, call: "LOCKUP", s: "back to your cell, count time.", lock: true },
   ];
   let beatI = 0, beatT = 0, beatLock = false;
   // the block musters to its cells (lockdown.js owns the routine; this is its
@@ -620,7 +624,7 @@
         const st = CBZ.game.caughtCount || 0;
         const strikes = st > 0 ? " · caught " + st + "/3" : "";
         CBZ.setObjective("Serving " + s + "s" + strikes + (sentCall ? " · " + sentCall : "") +
-          " — or find a keycard, a vent or a tunnel and don't wait.");
+          ". Or find a keycard, a vent or a tunnel and don't wait.");
       }
     }
     // the day beat rotates the block
@@ -629,7 +633,7 @@
       const b = DAY_BEAT[beatI % DAY_BEAT.length];
       beatI++;
       beatT = b.t;
-      sentCall = b.s.split(" —")[0];
+      sentCall = b.call;
       // THE CALL IS A CALL. A yard call is a thing an officer SHOUTS across a
       // block and a thing the block then physically does (muster() below walks
       // them); it is not a caption. So it goes over the nearest screw's head
@@ -637,7 +641,7 @@
       // popup. With nobody in earshot it is silent, which is correct: you
       // missed the call, and that is information you get by being somewhere
       // else, not information the HUD owes you.
-      tellHint(b.s, 2.4);
+      tellHint(b.call + ". " + b.s, 2.4);
       if (showing() && CBZ.citySay && CBZ.guards) {
         let crier = null, cd = 34 * 34;
         for (const gd of CBZ.guards) {

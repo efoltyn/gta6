@@ -652,6 +652,13 @@
   }
 
   // ---------- effects ----------
+  // NO CAPTION ON A SNACK (owner, 2026-08-18: the dumb hints go). Every line
+  // here used to print a flavor sentence over the world ("Slurp — calm and
+  // clear-headed.") narrating an effect the HUD already shows: the count
+  // ticks down in the bar cell, the coin sfx is the swallow, health/stamina
+  // bars move, and the heat drop is the wanted panel standing down. The one
+  // string that survives is the FENCE receipt, because a price is a fact
+  // that lives nowhere else on screen.
   function effect(name) {
     // X2: escape mode's hunger loop (survival/escape had none before) — the
     // snack items top up CBZ.player.hunger; a no-op for anything else/any
@@ -663,18 +670,21 @@
       CBZ.flashHint && CBZ.flashHint("Fenced " + name + " for " + v + "", 1.8);
       CBZ.sfx && CBZ.sfx("coin"); return;
     }
-    if (name === "Painkillers") { CBZ.player.stun = 0; CBZ.player.hp = Math.min(100, (CBZ.player.hp || 100) + 35); CBZ.addHeat && CBZ.addHeat(-10); CBZ.flashHint && CBZ.flashHint("Patched up — no pain.", 1.6); CBZ.sfx && CBZ.sfx("coin"); return; }
-    if (name === "Energy Drink") { CBZ.player.stun = 0; CBZ.player.stamina = 100; CBZ.addHeat && CBZ.addHeat(-8); CBZ.flashHint && CBZ.flashHint("Wired — wide awake.", 1.6); CBZ.sfx && CBZ.sfx("coin"); return; }
-    if (name === "Ramen") { CBZ.player.stun = 0; CBZ.addHeat && CBZ.addHeat(-40); CBZ.flashHint && CBZ.flashHint("Slurp — calm and clear-headed.", 1.6); }
-    else if (name === "Energy Bar") { CBZ.player.stun = 0; CBZ.addHeat && CBZ.addHeat(-25); CBZ.flashHint && CBZ.flashHint("Sugar rush — shake it off.", 1.6); }
-    else if (name === "Pruno Hooch") { CBZ.addHeat && CBZ.addHeat(-20); CBZ.flashHint && CBZ.flashHint("Liquid courage.", 1.6); }
-    else if (name === "Pills") { CBZ.addHeat && CBZ.addHeat(-15); CBZ.flashHint && CBZ.flashHint("Numb to it all.", 1.6); }
-    else if (name === "Powder") { CBZ.addHeat && CBZ.addHeat(-15); CBZ.flashHint && CBZ.flashHint("Wired and jittery.", 1.6); }
+    if (name === "Painkillers") { CBZ.player.stun = 0; CBZ.player.hp = Math.min(100, (CBZ.player.hp || 100) + 35); CBZ.addHeat && CBZ.addHeat(-10); CBZ.sfx && CBZ.sfx("coin"); return; }
+    if (name === "Energy Drink") { CBZ.player.stun = 0; CBZ.player.stamina = 100; CBZ.addHeat && CBZ.addHeat(-8); CBZ.sfx && CBZ.sfx("coin"); return; }
+    if (name === "Ramen") { CBZ.player.stun = 0; CBZ.addHeat && CBZ.addHeat(-40); }
+    else if (name === "Energy Bar") { CBZ.player.stun = 0; CBZ.addHeat && CBZ.addHeat(-25); }
+    else if (name === "Pruno Hooch") { CBZ.addHeat && CBZ.addHeat(-20); }
+    else if (name === "Pills") { CBZ.addHeat && CBZ.addHeat(-15); }
+    else if (name === "Powder") { CBZ.addHeat && CBZ.addHeat(-15); }
     CBZ.sfx && CBZ.sfx("coin");
   }
   function useItem(name) {
     if (!name || !(CBZ.game.inventory[name] > 0)) return;
-    if (!CONSUMABLE.has(name)) { CBZ.flashHint && CBZ.flashHint(name + " — equipped.", 1.0); return; }
+    // a tap on a non-consumable does nothing worth narrating — the gun rail
+    // owns equipping, and "Keycard — equipped." was a sentence about a card
+    // that equips nothing.
+    if (!CONSUMABLE.has(name)) return;
     if (CBZ.econ && CBZ.econ.takeItem && CBZ.econ.takeItem(name)) { effect(name); resync(); }
   }
 

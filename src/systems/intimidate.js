@@ -38,6 +38,32 @@
   const HOLD = 0.85;        // how long a reaction lingers after you look away
   const ROB_RANGE = 6.5;    // max distance to shake someone down
 
+  /* ---- JAIL_GUARD_HOLDUP --------------------------------------------------
+     OWNER, 2026-08-18: silencing the man who saw you must be a real verb set
+     — "kills them before they report it, or get someone to put their hands
+     up, or ties or wrists or something". So the muzzle works on a UNIFORM
+     now, with a guard's own arithmetic:
+
+       FOLD   most screws, close up, put their hands up (char.handsUp — the
+              same one-arm-driver pose the inmates use). While they're up:
+              detection.js HOLDS his radio window, guardSeesPoint answers
+              false for him, and the interact panel offers ROB / TIE HIM UP /
+              LET HIM GO (restrain consumes a Bedsheet Rope and puts him out
+              for the run).
+       DEFY   the warden nearly always, a mid-chase screw often, anyone at
+              long range sometimes: he comes for you AND his radio window
+              opens right there — pulling a gun on a guard is itself the
+              thing he calls in.
+       RELEASE is a decision with a cost: lower the gun on a held-up screw
+              and he goes straight for you and the call (short fuse), and he
+              will not fold for the same trick again for a few seconds.
+
+     Guards never take the inmate scared/draw/charge machine — their answer
+     to a muzzle is this block plus the hunt they already own. Flag false =
+     a gun pointed at a uniform does nothing, exactly as shipped. */
+  if (CBZ.CONFIG && CBZ.CONFIG.JAIL_GUARD_HOLDUP == null) CBZ.CONFIG.JAIL_GUARD_HOLDUP = true;
+  const guardHoldupOn = () => !!(CBZ.CONFIG && CBZ.CONFIG.JAIL_GUARD_HOLDUP);
+
   // PRISON_TOUCH_PROMPTS (declared in systems/interactions.js): "[G] to rob"
   // names a key a touch player does not have. The CUE loses the glyph on touch
   // and a real ROB pill is armed for as long as the shakedown is actually
@@ -270,6 +296,75 @@
     }
   }
 
+  // ---- the guard half (JAIL_GUARD_HOLDUP; header block up top) -------------
+  function decideGuardReaction(gd) {
+    /* A screw reads the distance, not his horoscope. Close enough that the
+       shot cannot miss, most fold; across a room, duty and the radio win.
+       The warden nearly never folds — it is HIS block — and a man already
+       mid-chase is committed. No rng ceremony beyond one roll. */
+    const d = playerDist(gd);
+    let fold = gd.kind === "warden" ? 0.2 : 0.75;
+    if (d > 8) fold -= 0.3;
+    if (gd.hunt > 0) fold -= 0.25;
+    if (rng() < fold) {
+      gd.intimidMode = "scared";
+      gd.intimidT = HOLD;
+      gd.poseHandsUp = true;
+      if (gd.char) gd.char.handsUp = true;   // character.js owns the arms (one driver)
+      gd.hunt = 0; gd.alert = 0; gd.investigate = null;
+      // his radio window, if open, is now HELD — detection.js reads this mode.
+      // The pose is the message; guards.js barks "heldup" on the transition.
+    } else {
+      // DEFY: he comes for you, and the drawn gun is itself what he calls in.
+      gd.hunt = Math.max(gd.hunt || 0, 3.2);
+      gd.alert = 1.0;
+      if (!gd._radioed && gd.radioT == null) gd.radioT = 3.2;
+      gd._gunpointCD = 6;   // he made his read; re-aiming does not re-roll it
+    }
+  }
+  // pose off, nothing else — for a hold that ended because he is down or tied
+  function clearGuardHoldup(gd) {
+    gd.intimidMode = null; gd.intimidT = 0; gd.poseHandsUp = false;
+    if (gd.char) gd.char.handsUp = false;
+  }
+  // the gun came down and he is still standing: he answers for it
+  function guardReleased(gd) {
+    clearGuardHoldup(gd);
+    if (gd.dead || gd.ko > 0 || gd.tied || gd.asleep) return;
+    gd.hunt = Math.max(gd.hunt || 0, 3.2);
+    gd.alert = 1.0;
+    if (!gd._radioed) gd.radioT = gd.radioT == null ? 2.2 : Math.min(gd.radioT, 2.2);
+    gd._gunpointCD = 4;   // fool me once
+  }
+
+  /* ---- RESTRAIN ("ties or wrists or something") ---------------------------
+     One Bedsheet Rope, spent on a man whose hands are already up (or who is
+     out cold at your feet), takes him out of the run without a body: tied =
+     blind (guardSeesPoint), silent (his radio window dies), inert (the ko
+     branch owns his pose). The interact panel's TIE HIM UP row dispatches
+     here; the sub-chip says "needs rope" when your bag cannot pay. Works on
+     a held-up inmate the same way. */
+  CBZ.prisonRestrainTarget = function (who) {
+    const t = who || currentTarget;
+    if (!t || t.tied || t.dead || t.escaped) return "";
+    const held = t.intimidMode === "scared";
+    const down = (t.ko || 0) > 0;
+    if (!held && !down) return "";
+    if (playerDist(t) > ROB_RANGE) return "";
+    if (!(CBZ.econ && CBZ.econ.hasItem && CBZ.econ.hasItem("Bedsheet Rope"))) return "norope";
+    if (!CBZ.econ.takeItem || !CBZ.econ.takeItem("Bedsheet Rope")) return "norope";
+    t.tied = true;
+    t.ko = Math.max(t.ko || 0, 9999);          // down for the run
+    t.radioT = null;                            // the call dies with his hands
+    t.hunt = 0; t.alert = 0; t.investigate = null;
+    if (t.intimidMode) {
+      if (t.kind === "guard" || t.kind === "warden") clearGuardHoldup(t);
+      else endIntimid(t);
+    }
+    CBZ.sfx && CBZ.sfx("switch", { volume: 0.4, pitch: 0.85 });
+    return "tied";
+  };
+
   let currentTarget = null;
   let robWas = false;
 
@@ -289,14 +384,19 @@
     const aiming = !!(CBZ.isAimingWeapon && CBZ.isAimingWeapon()) && !(gun && gun.melee);
     const lethal = !!(gun && !gun.nonlethal);
 
-    // who is directly in the player's gun sights? (inmates only — guards keep
-    // their own hunt behavior.)
-    let target = null;
+    // who is directly in the player's gun sights? Inmates run the full
+    // scared/draw/charge machine below; a GUARD in the sights runs the
+    // hold-up half further down (JAIL_GUARD_HOLDUP).
+    let target = null, guardTarget = null;
     if (aiming && CBZ.aimedActor) {
       const hit = CBZ.aimedActor(gun ? gun.range : 40);
-      if (hit && hit.actor && hit.actor.kind === "inmate" && alive(hit.actor)) target = hit.actor;
+      if (hit && hit.actor && alive(hit.actor)) {
+        const k = hit.actor.kind;
+        if (k === "inmate") target = hit.actor;
+        else if ((k === "guard" || k === "warden") && lethal) guardTarget = hit.actor;
+      }
     }
-    currentTarget = target;
+    currentTarget = target || guardTarget;
 
     const npcs = CBZ.npcs || [];
     for (let i = 0; i < npcs.length; i++) {
@@ -357,6 +457,26 @@
       }
     }
 
+    // ---- guards at gunpoint (JAIL_GUARD_HOLDUP; see the header block) ------
+    if (guardHoldupOn()) {
+      const guards = CBZ.guards || [];
+      for (let i = 0; i < guards.length; i++) {
+        const gd = guards[i];
+        if (!gd || !gd.group) continue;
+        if ((gd._gunpointCD || 0) > 0) gd._gunpointCD -= dt;
+        const aimedHere = gd === guardTarget;
+        if (aimedHere && alive(gd) && !gd.tied && !gd.asleep) {
+          if (gd.intimidMode == null && (gd._gunpointCD || 0) <= 0) decideGuardReaction(gd);
+          if (gd.intimidMode === "scared") gd.intimidT = HOLD;
+        }
+        if (gd.intimidMode === "scared") {
+          if (!alive(gd) || gd.tied) { clearGuardHoldup(gd); continue; }
+          gd.intimidT -= dt;
+          if (gd.intimidT <= 0) guardReleased(gd);
+        }
+      }
+    }
+
     /* ---- rob at gunpoint: [G] (or the ROB pill) while aiming at a held-up
        inmate ----
        A SHAKEDOWN IS A TRANSFER, and this one always was — systems/economy.js's
@@ -379,7 +499,7 @@
     // when you have WALKED UP to him, while the hands-up pose carries the read
     // from across the yard. [G] stays as a hotkey for anyone who wants it.
     const robNow = !!(CBZ.keys && CBZ.keys["g"]);
-    if (robNow && !robWas) doRob(target);
+    if (robNow && !robWas) doRob(currentTarget);   // whoever is under the gun — inmate or screw
     robWas = robNow;
   }
 
@@ -394,7 +514,7 @@
       let r = null;
       try { r = CBZ.cityTake(target, { by: "player", site: "intimidate:gunpoint" }); } catch (e) { r = null; }
       if (!r || (!r.units && (!r.items || !r.items.length))) {
-        CBZ.flashHint && CBZ.flashHint(shortName(target) + " has nothing left — you already took it.", 1.6);
+        CBZ.flashHint && CBZ.flashHint(shortName(target) + " has nothing left.", 1.6);
       }
     } else if (!target.looted) {
       if (CBZ.cityTakeLegacy) { try { CBZ.cityTakeLegacy("intimidate:gunpoint"); } catch (e) {} }
@@ -416,7 +536,11 @@
   // instead of as the player drifting out of range.
   CBZ.intimidateRelease = function (who) {
     const t = who || currentTarget;
-    if (t && t.intimidMode) endIntimid(t);
+    if (!t || !t.intimidMode) return;
+    // letting a SCREW go is the same decision as looking away from him —
+    // he answers for the gun (guardReleased), he does not shrug it off.
+    if (t.kind === "guard" || t.kind === "warden") guardReleased(t);
+    else endIntimid(t);
   };
 
   const intimidate = {

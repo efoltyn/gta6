@@ -319,6 +319,13 @@
     var lunge = 0;   // desired forward displacement right now
     var yOff = 0;    // desired height above the rest line
     var pitch = 0, roll = 0, pulse = 1;
+    // YAW is normally nobody's business here — creatureFight sets it from the
+    // heading every frame. One family of blows IS a yaw, though (an ape's
+    // backhand is the body turning through the arm), so it is written as a
+    // tracked OFFSET on top of whatever facing wrote: remembered and backed out
+    // like `lunge`, so a frame where the face block does not run (target
+    // exactly co-located) cannot accumulate it into a spin.
+    var yawOff = 0;
     // TRUE pitch for +X-forward bodies is rotation.Z (rotation.X rolls them).
     // The land styles have always written their "pitch" to rotation.x and the
     // read works, so they are left alone byte-for-byte; the aquatic styles,
@@ -428,6 +435,80 @@
           pitch = 0.3 * (kp < 0.35 ? kp / 0.35 : 1 - kp);
         }
         break;
+      /* ---- THE APE FAMILY (systems/ape_combat.js owns which one is thrown and
+         who pays for it; this owns where the BODY goes). Every one of these is
+         a knuckle-walker's real mechanic rather than a quadruped's bite:
+
+           ape_charge  the quadrupedal rush. It does not stop at contact — a
+                       silverback's charge carries through, which is why the
+                       damage fan is a line and not a point.
+           ape_smash   rear onto the hind legs, both forearms hammer DOWN. The
+                       rear-up is the tell you get a beat to read.
+           ape_sweep   the backhand. The arm is 1.2 m long and the power is the
+                       BODY turning behind it, so this is the one blow that
+                       writes a yaw; `_apeSide` alternates it left/right.
+           ape_grab    a short, low, committed reach — the arm goes UNDER the
+                       man, not at him. On contact the hold takes over and the
+                       group transform stops being ours entirely.
+           ape_bite    the canines. Head-dip, like every biter, but harder and
+                       shorter — this animal's mouth is a finisher, not an
+                       opener.
+           ape_drum    the chest beat. Reared, planted, no travel at all: the
+                       whole point is that it goes nowhere and still works. */
+      case 'ape_charge':
+        if (p < STRIKE_AT) { pitch = 0.20 * wind; yOff = -0.10 * sc * wind; lunge = -0.18 * sc * wind; }
+        else {
+          var cp = (p - STRIKE_AT) / (1 - STRIKE_AT);
+          lunge = reachHint * 1.25 * ease(Math.min(1, cp * 3.0)) * (1 - ease(Math.max(0, cp - 0.68) / 0.32));
+          pitch = 0.30 * Math.sin(Math.min(1, cp * 2) * Math.PI * 0.7);
+          yOff = Math.sin(Math.min(1, cp * 2.2) * Math.PI) * 0.10 * sc;
+          roll = Math.sin(cp * 11) * 0.09 * (1 - cp);
+        }
+        break;
+      case 'ape_smash':
+        if (p < STRIKE_AT) { pitch = -0.72 * wind; yOff = 0.42 * sc * wind; lunge = -0.12 * sc * wind; }
+        else {
+          var mp = (p - STRIKE_AT) / (1 - STRIKE_AT);
+          var fall = ease(Math.min(1, mp * 2.3));
+          pitch = -0.72 * (1 - fall) + 0.34 * fall;          // the hammer comes over
+          yOff = 0.42 * sc * (1 - fall) - 0.10 * sc * Math.sin(Math.min(1, mp * 2.6) * Math.PI);
+          lunge = reachHint * 0.45 * fall * (1 - ease(Math.max(0, mp - 0.6) / 0.4));
+          pulse = 1 + 0.07 * Math.sin(Math.min(1, mp * 2.6) * Math.PI);
+        }
+        break;
+      case 'ape_sweep':
+        var sw = actor._apeSide || 1;
+        if (p < STRIKE_AT) { yawOff = sw * 0.62 * wind; pitch = -0.16 * wind; lunge = -0.10 * sc * wind; }
+        else {
+          var wp = (p - STRIKE_AT) / (1 - STRIKE_AT);
+          var whip = ease(Math.min(1, wp * 2.2));
+          yawOff = sw * (0.62 - 1.30 * whip) * (1 - ease(Math.max(0, wp - 0.7) / 0.3));
+          lunge = reachHint * 0.35 * whip * (1 - ease(Math.max(0, wp - 0.55) / 0.45));
+          roll = -sw * 0.16 * whip;
+        }
+        break;
+      case 'ape_grab':
+        if (p < STRIKE_AT) { pitch = 0.18 * wind; yOff = -0.16 * sc * wind; lunge = -0.08 * sc * wind; }
+        else {
+          var gr = (p - STRIKE_AT) / (1 - STRIKE_AT);
+          lunge = reachHint * 0.80 * ease(Math.min(1, gr * 2.6)) * (1 - ease(Math.max(0, gr - 0.5) / 0.5));
+          pitch = 0.18 - 0.40 * ease(Math.min(1, gr * 1.8));   // straightens up with the load
+          yOff = -0.16 * sc * (1 - gr) + 0.16 * sc * gr;
+        }
+        break;
+      case 'ape_bite':
+        lunge = reachHint * 0.55 * env;
+        pitch = 0.42 * env;
+        if (head) head.rotation.x = head.userData._cbzRX + 0.55 * env;
+        break;
+      case 'ape_drum':
+        // planted and reared; the only travel is the chest heaving under the
+        // fists, which reads as a fast double bounce on the body pitch
+        pitch = -0.50 * Math.min(1, p * 2.6) * (1 - ease(Math.max(0, p - 0.72) / 0.28));
+        yOff = 0.34 * sc * Math.min(1, p * 2.6) * (1 - ease(Math.max(0, p - 0.72) / 0.28));
+        pulse = 1 + 0.035 * Math.max(0, Math.sin(p * Math.PI * 7));
+        break;
+
       default: // 'bite' — simple forward head-dip lunge
         lunge = reachHint * 0.5 * env;
         pitch = 0.35 * env;                        // head-dip
@@ -440,6 +521,10 @@
     g.position.x += cs * dL;
     g.position.z += sn * dL;
     actor._lungeAmt = lunge;
+
+    // the same delta discipline for the yaw an ape's backhand writes
+    var prevY = actor._yawOff || 0;
+    if (yawOff !== 0 || prevY !== 0) { g.rotation.y += yawOff - prevY; actor._yawOff = yawOff; }
 
     g.position.y = gy + yOff;
     g.rotation.x = (pitchZ !== 0) ? roll : pitch;      // aquatic: rotation.x is the ROLL
@@ -567,6 +652,19 @@
   function jawReaches(attacker, target, style, tp, reach) {
     if (!CONTACT_ON()) return true;
     if (style === 'stomp' || style === 'ram') return true;
+    /* AN ARM IS NOT A JAW, and every ape style except the bite connects with
+       one. The test below measures from the MOUTH — for a gorilla that is the
+       nose, at model-local x = 1.48 — and asks whether the mark is within a
+       body radius of it. A backhand's whole point is that it reaches a metre
+       further than that and sweeps sideways; a charge connects with the
+       shoulder and a grab goes under the man rather than at him. Held to the
+       muzzle they would read as misses on contact they visibly made, and the
+       re-arm below would loop the animal on a blow it kept "missing". The
+       canines are the one ape move that IS a mouth, so `ape_bite` is
+       deliberately absent from this list and answers to the test like every
+       other biter. */
+    if (style === 'ape_sweep' || style === 'ape_smash' ||
+        style === 'ape_charge' || style === 'ape_grab' || style === 'ape_drum') return true;
     var J = jawWorld(attacker);
     if (!J) return true;
     var tol = bodyRadius(target) + Math.max(0.4, (reach || 2) * 0.42);
@@ -724,8 +822,16 @@
       g.position.x -= Math.cos(h) * prevL;
       g.position.z -= Math.sin(h) * prevL;
     }
+    // the backhand's yaw offset is given back on the same terms as the lunge:
+    // a swing abandoned mid-arc must not leave the body permanently turned
+    if (g && actor._yawOff) { g.rotation.y -= actor._yawOff; actor._yawOff = 0; }
     actor._lungeAmt = 0;
     actor._atkAnim = -1;
+    // back to the shared clock, the shared weight and the caller's own style:
+    // a per-move override lives for exactly one swing
+    actor._atkDur = 0;
+    actor._atkPow = 0;
+    actor._apeStyle = null;
     // hand the body layer back to the gait in one pass: k<=0 restores every
     // discovered leg/jaw offset to its authored base. Without this a strike that
     // ends on a non-zero pose (a pounce's extension, a stomp's forefoot) would
@@ -753,6 +859,15 @@
         return RES;
       }
 
+      /* AN APE WITH A MAN IN ITS HAND IS NOT TAKING ORDERS FROM THIS DRIVER.
+         While a hold runs, systems/ape_combat.js owns the attacker's position,
+         facing, pitch and pose outright, and it is ticked by the HOST (its own
+         apeStep) precisely so the swing keeps going after the man in the hand
+         is dead and this driver has stopped being called for him. Standing down
+         here is the whole hand-off; with ape_combat absent the guard is false
+         and nothing about this file changes. */
+      if (CBZ.apeOwns && CBZ.apeOwns(attacker)) { RES.inRange = true; return RES; }
+
       // advance own flinch so a mid-fight hit still reads
       if (attacker._flinchT > 0) creatureAnimateFlinch(attacker, dt);
 
@@ -761,7 +876,17 @@
       var speed = (typeof opts.speed === 'number') ? opts.speed : speedFor(sp);
       var reach = (typeof opts.reach === 'number') ? opts.reach : (1.6 + aScale + tScale);
       var rate = (typeof opts.rate === 'number') ? opts.rate : DEFAULT_RATE;
-      var style = opts.style || attacker._atkStyle || creatureStyleFor(sp);
+      /* THE APE'S CHOICE OUTRANKS THE CALLER'S STANDING STYLE, and it has to.
+         city/wildlife.js and systems/predator.js both pin `opts.style` once
+         (wildlife.js:2740, off creatureStyleFor) and hand the same bundle back
+         every frame — which is exactly right for an animal with ONE attack, and
+         wrong for the one animal with six: the picker's answer would survive a
+         single frame and then be overwritten mid-swing, so the pose snapped from
+         a charge to a maul on frame two and the strike moment resolved as the
+         style nobody chose. `_apeStyle` is set at the top of a swing and lives
+         for that swing only (endAttack clears it), so a host that pins a style
+         still pins it for every other species in the bestiary. */
+      var style = attacker._apeStyle || opts.style || attacker._atkStyle || creatureStyleFor(sp);
       attacker._atkStyle = style;
 
       var tp = target.pos || (target.group && target.group.position);
@@ -796,18 +921,55 @@
       if (animating) {
         // advance strike animation
         RES.inRange = _dist <= reach * 1.5;
-        _p = attacker._atkAnim + dt / STRIKE_DUR;
+        /* PER-MOVE STRIKE CLOCK. 0.4 s is a bite's arc and it always was; a
+           two-handed overhead needs air under it and a chest-beat display is
+           four seconds of theatre compressed to one. `_atkDur` is set by
+           whatever chose the move (ape_combat's picker today) and read only
+           here — unset, this is the flat STRIKE_DUR every existing style has
+           always run on. */
+        var sdur = (attacker._atkDur > 0) ? attacker._atkDur : STRIKE_DUR;
+        _p = attacker._atkAnim + dt / sdur;
         // strike moment: crossed STRIKE_AT this frame -> deal damage
         if (attacker._atkAnim < STRIKE_AT && _p >= STRIKE_AT && _dist <= reach * 1.6) {
           var dmg = (typeof opts.dmg === 'number') ? opts.dmg : ((sp && sp.bite) || 12);
+          // per-move weight, the damage sibling of `_atkDur`: an overhead
+          // two-handed smash is not worth the same as a jab and only the thing
+          // that CHOSE the move knows by how much. Unset = 1, i.e. every
+          // existing style bills exactly what it always billed.
+          if (attacker._atkPow > 0) dmg *= attacker._atkPow;
+          /* THE APE'S EXTRA REACH. A backhand does not hit one man, it hits
+             everyone the arm passes through, and a grab hits nobody and takes a
+             body instead — neither fits `opts.onHit(dmg)`, which is a contract
+             for ONE mark and one number.
+
+             So ape_combat is asked first, and it answers one of two ways.
+             A number means it consumed the strike outright (the grab, which
+             hands the whole beat to a hold; the chest beat, which costs
+             nothing on purpose). `null` — the common answer — means it has
+             resolved the SPLASH on the bystanders and the primary mark is
+             still the caller's to bill, which is the only shape that keeps
+             `opts.onHit` intact. That matters more than it looks: in the city
+             the caller's onHit IS the player's damage (wildlife.js's
+             animalStrikePlayer), so an ape style that swallowed the strike
+             would have made a gorilla completely harmless to the player. */
+          var apeDealt = null;
+          if (CBZ.apeStrike) {
+            try { apeDealt = CBZ.apeStrike(attacker, target, style, opts, dmg); } catch (e) { apeDealt = null; }
+          }
+          if (apeDealt != null) {
+            RES.dealt = apeDealt;
           /* THE JAWS HAVE TO ARRIVE. Everything above this line decided the
              animal committed to a bite; jawReaches() decides whether the bite
              CONNECTED, by asking where the teeth actually are at the frame they
              close. A miss is a real outcome — the snap on empty air you can see
              — and it must not cost the animal its whole cooldown, or a lion
              that lunged an inch short would stand there for a second doing
-             nothing. It re-arms fast, closes the last step and tries again. */
-          if (!jawReaches(attacker, target, style, tp, reach)) {
+             nothing. It re-arms fast, closes the last step and tries again.
+             Asked AFTER the ape seam on purpose: a move ape_combat consumed
+             has already resolved (a grab is a hold, not a bite) and a splash
+             it dealt to the bystanders stands whether or not the mark the
+             driver was aiming at was reached. */
+          } else if (!jawReaches(attacker, target, style, tp, reach)) {
             RES.missed = true;
             attacker._atkT = rate * 0.3;
           } else if (!trySeize(attacker, target, opts, style)) {
@@ -816,8 +978,8 @@
             // — flag off, no block loaded, refused (already holding someone) —
             // falls through to the ordinary strike exactly as before.
             if (style === 'bite' || style === 'maul' || style === 'strike' || style === 'lunge' ||
-                style === 'gore' || style === 'ram') {
-              biteWound(attacker, target, style);
+                style === 'gore' || style === 'ram' || style === 'ape_bite') {
+              biteWound(attacker, target, style === 'ape_bite' ? 'maul' : style);
             }
             // ...and it BLEEDS. The decal above marks the skin; this is the
             // spray, and it leaves the teeth rather than the victim's centre.
@@ -902,6 +1064,18 @@
         attacker._atkT = rate * (0.9 + Math.random() * 0.25);
         attacker._atkAnim = 0;
         attacker._lungeAmt = 0;
+        /* WHICH BLOW? For every animal in the bestiary the answer is its one
+           style and always has been. An ape has a repertoire — charge, smash,
+           backhand, bite, the chest beat, and the grab — and which one it
+           throws depends on how many men are inside its arms, so the choice is
+           made HERE, once, at the top of the swing, and latched into
+           `_atkStyle` for the arc. Absent ape_combat this returns nothing and
+           the style is whatever it always was. */
+        if (CBZ.apeMove) {
+          var picked = null;
+          try { picked = CBZ.apeMove(attacker, target, opts, _dist, reach); } catch (e) { picked = null; }
+          if (picked) { style = picked; attacker._atkStyle = picked; attacker._apeStyle = picked; }
+        }
         animateAttack(attacker, style, 0, _h, Math.min(reach, _dist), dt);
       } else {
         // waiting between attacks: ease back to rest pose

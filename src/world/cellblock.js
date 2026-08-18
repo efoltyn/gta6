@@ -44,9 +44,10 @@
        spine are left completely clear. That USED to read "nothing this file
        builds sits at |x| < 11.7 south of z = -38" — which was a statement
        about the 23.4 m of empty aisle rows D and E now stand in. The live
-       statement is the CENTRE HALL x[-4.1,4.1], and the only things in it are
-       the two bolted day tables at |x| = 2.6 (their stools reach |x| = 1.29)
-       and, north of the rows, the officer desk at z = -42.6.
+       statement is the CENTRE HALL x[-4.1,4.1], and NOTHING this file builds
+       stands in it — the two bolted day tables that used to sit at |x| = 2.6
+       are gone (see section 7). The nearest fitting is the officer desk at
+       z = -42.6, north of the rows.
        CBZ.cellblockAudit().spineBlocked measures the x[-0.55,0.55] patrol
        lane over this file's own colliders and is pinned at 0.
 
@@ -102,13 +103,14 @@
    ceiling hatch (11.6,-36.4) still in the cross-aisle, doorGapBlocked and
    spineBlocked still 0.
 
-   THE TWO THINGS THAT DID MOVE ARE BOTH THIS FILE'S OWN. |x| = 6.6 is inside
-   row E now, so the day tables go to |x| = 2.6; and the two |x| = 7.5 cage
-   lamps, also inside row E, become four gallery lamps at |x| = 9.9.
+   THE ONE THING THAT DID MOVE IS THIS FILE'S OWN. The two |x| = 7.5 cage
+   lamps are inside row E now, so they become four gallery lamps at |x| = 9.9.
+   (The two day tables were the other one — they were shuffled 6.6 -> 2.6 by
+   the same collision and are now deleted outright; section 7 says why.)
 
    REVERT: CBZ.CONFIG.PRISON_CELL_ROWS_V3 = false (or ?cfg_PRISON_CELL_ROWS_V3=0)
    restores the 13-cell wing exactly — D and E are not built, B-5 is not
-   appended, and the tables and lamps go back to 6.6 and 7.5.
+   appended, and the lamps go back to 7.5.
 
    DRAW-CALL BUDGET. Partitions carry colliders + LOS refs, so core/batch.js
    spares them (~20 draw calls, unavoidable — they are walls). Everything
@@ -334,8 +336,8 @@
      can lie down or sit", and its two registrars take a coordinate and a top
      height — which this file has always computed and thrown away. So the
      existing geometry is registered rather than re-drawn: `bunkRig` already
-     returns its own mattress top, and `dayTable` already knows where its four
-     stools are.
+     returns its own mattress top, and the shower bench and the cell stool
+     already know where a body would sit on them.
 
      Degrade: no propuse.js → nothing registers and every mesh is exactly what
      it was. Counted on CBZ._prisonProps so one audit can answer for the whole
@@ -420,6 +422,35 @@
 
   function h01(x, z, salt) { return CBZ.hash01 ? CBZ.hash01(x, z, salt) : 0.5; }
   function pick(list, x, z, salt) { return list[(h01(x, z, salt) * list.length) | 0] || list[0]; }
+
+  /* A SOLID BOX MUST DECLARE HOW TALL IT IS. (OWNER: "as if there's an
+     invisible wall.")
+
+     world/materials.js:205 pushes a collider with no y0/y1 unless the caller
+     hands it one, and systems/physics.js's contract is that a band-less
+     collider blocks at EVERY height. So a `{ solid: true }` box drawn 10 cm
+     thick at knee height registers as a column of solid air from the floor to
+     the ceiling — invisible to the eye, invisible to tools/ghost-collider-
+     check.mjs (which measures FOOTPRINT, and the footprint is honestly drawn),
+     and visible only when something else reads the ledger and believes it.
+     systems/gore.js's wall-splat scan is that something else: it found a
+     wall-sized opaque face and painted a floor-to-head blood plane down the
+     side of a day table, which is how the owner found this at all.
+
+     `solidTo(y, hgt)` is that declaration, and it takes the SAME two numbers
+     the addBox/sbox call beside it already takes, so the band cannot drift
+     from the mesh the way a typed 0.79 would. It bands floor-up rather than to
+     the box's literal extent, because that is what this wing's furniture IS —
+     a shower bench is a plinth, not a plank floating at 0.42 with walkable air
+     underneath, and a rack shelf has a rack under it.
+
+     Pass it to every solid this file places that is SHORTER THAN A WALL.
+     Structure (partitions, the shell, the grille) keeps its full-height
+     collider: those boxes ARE their own height, and writing the band by hand
+     there would just be a second, driftable copy of CH. `on` carries the
+     caller's own solid gate through (the duty chair is solid only under
+     HONEST) so a flag-gated prop does not need a second spelling. */
+  function solidTo(y, hgt, on) { return { solid: on == null ? true : on, y0: 0, y1: y + hgt / 2 }; }
 
   // Every collider this file pushes, kept so CBZ.cellblockAudit() can judge
   // OUR work and never blame world/door.js or the yard for a blocked lane.
@@ -1268,13 +1299,13 @@
     addBox(cx, 0.05, cz + 0.6, 0.34, 0.05, 0.34, 0x5b6470, { cast: false });           // drain grating
     for (let i = 0; i < 2; i++) {
       const zz = cz - 1.5 + i * 2.6, rx = cx - w / 2 + 0.45;
-      addBox(rx, 1.14, zz, 0.12, 2.28, 0.12, C_STEEL_D, { solid: true });              // riser, floor to rose
+      addBox(rx, 1.14, zz, 0.12, 2.28, 0.12, C_STEEL_D, solidTo(1.14, 2.28));           // riser, floor to rose
       addBox(rx, 1.35, zz, 0.17, 0.17, 0.17, C_STEEL_D, { cast: false });              // mixer, on the riser
       addBox(rx, 2.36, zz, 0.40, 0.10, 0.30, C_STEEL, { cast: false });                // rose, over the riser
     }
     // the bench: a solid plinth with a seat anchor, not a plank in mid-air.
     const bz = cz - d / 2 + 0.45;
-    sbox(cx, 0.21, bz, w - 0.6, 0.42, 0.42, 0xb9a184, { solid: true });
+    sbox(cx, 0.21, bz, w - 0.6, 0.42, 0.42, 0xb9a184, solidTo(0.21, 0.42));
     useSeat(cx, bz, 0, 0.42);
   }
   /* THE LINEN STORE WAS 5 PROPS, 0 SOLID, 0 USED, 3.61 m3 — three cream planes
@@ -1288,14 +1319,14 @@
     if (!HONEST) {                                     // the shipped alcove, byte for byte
       for (let i = 0; i < 3; i++)
         addBox(cx, 0.7 + i * 0.72, cz - 0.7, w - 0.3, 0.07, d - 2.6, 0xb9a184, { cast: false });
-      sbox(cx, 1.35, cz - d / 2 + 0.25, w - 0.3, 2.7, 0.10, C_PART_D, { solid: true });
+      sbox(cx, 1.35, cz - d / 2 + 0.25, w - 0.3, 2.7, 0.10, C_PART_D, solidTo(1.35, 2.7));
       addBox(cx, 0.55, cz + d / 2 - 1.1, 1.3, 1.1, 1.5, 0xe2e2e2, { cast: false });
       addBox(cx, 1.12, cz + d / 2 - 1.1, 1.4, 0.12, 1.6, 0xd0d0d0, { cast: false });
       return;
     }
-    sbox(cx, 1.35, cz - d / 2 + 0.25, w - 0.3, 2.7, 0.10, C_PART_D, { solid: true }); // back rack frame
+    sbox(cx, 1.35, cz - d / 2 + 0.25, w - 0.3, 2.7, 0.10, C_PART_D, solidTo(1.35, 2.7));  // back rack frame
     for (let i = 0; i < 3; i++)
-      sbox(cx, 0.42 + i * 0.62, cz - d / 2 + 0.62, w - 0.3, 0.05, 0.62, 0xb9a184, { solid: true });
+      sbox(cx, 0.42 + i * 0.62, cz - d / 2 + 0.62, w - 0.3, 0.05, 0.62, 0xb9a184, solidTo(0.42 + i * 0.62, 0.05));
     const cartZ = cz + d / 2 - 1.1;
     const tub = addBox(cx, 0.55, cartZ, 1.3, 1.1, 1.5, 0xe2e2e2, { cast: false });
     const lip = addBox(cx, 1.12, cartZ, 1.4, 0.12, 1.6, 0xd0d0d0, { cast: false });
@@ -1324,7 +1355,7 @@
     } else {
       addBox(cx, 1.5, pz, w - 0.6, 3.0, 0.12, C_PART_D, { cast: false });               // back panel
     }
-    sbox(cx, 0.55, cz - d / 2 + 1.1, 3.4, 1.1, 0.9, 0x33200f, { solid: true });         // desk
+    sbox(cx, 0.55, cz - d / 2 + 1.1, 3.4, 1.1, 0.9, 0x33200f, solidTo(0.55, 1.1));      // desk
     addBox(cx, 1.16, cz - d / 2 + 1.1, 3.6, 0.12, 1.0, 0x4a3a22, { cast: false });
     addBox(cx - 0.9, 1.34, cz - d / 2 + 1.0, 0.7, 0.42, 0.06, 0x9fd6ff, { emissive: 0x2a6ea5, ei: 0.7, cast: false }); // monitor
     addBox(cx + 1.5, 1.75, cz - d / 2 + 0.42, 0.9, 1.1, 0.10, 0x2a2f38, { cast: false });   // key board
@@ -1334,7 +1365,7 @@
     // propuse seat now, so the post is somewhere a body sits and not a prop
     // shaped like one. `face` looks north at the desk.
     const chZ = cz - d / 2 + 2.0;
-    sbox(cx, 0.45, chZ, 0.6, 0.9, 0.6, C_DARK, { solid: HONEST });                     // chair
+    sbox(cx, 0.45, chZ, 0.6, 0.9, 0.6, C_DARK, solidTo(0.45, 0.9, HONEST));            // chair
     addBox(cx, 1.05, cz - d / 2 + 2.25, 0.6, 0.7, 0.1, C_DARK, { cast: false });       // back
     if (HONEST) useSeat(cx, chZ, Math.PI, 0.45);
     // WING SIGN — the block announces itself over the post.
@@ -1359,40 +1390,33 @@
         matter: the spine at x = 0 (guards.js patrol) and the south
         throat x[-3,3] at z = -8 (world/door.js).
      ========================================================== */
-  // The table is BOLTED (sbox → a real collider that never moves). The four
-  // stools are not: a day-room stool is a loose 9 kg pedestal and the block
-  // rearranges them all day, so each one is a pushable with its own collider
-  // and carries its propuse sit anchor with it when it slides.
-  function dayTable(x, z) {
-    sbox(x, 0.74, z, 2.2, 0.10, 1.0, 0x8a939d, { solid: true });
-    addBox(x, 0.37, z, 0.28, 0.74, 0.28, C_STEEL_D, { cast: false });
-    for (let i = -1; i <= 1; i += 2) for (const j of [1, -1]) {
-      const sx = x + i * 0.85, sz = z + j * 0.85;
-      const pad = addBox(sx, 0.44, sz, 0.42, 0.08, 0.42, 0x6b7480, { cast: false });
-      const post = addBox(sx, 0.22, sz, 0.14, 0.44, 0.14, C_STEEL_D, { cast: false });
-      if (CBZ.pushProp) CBZ.pushProp({
-        parts: [pad, post], x: sx, z: sz, hx: 0.21, hz: 0.21, y1: 0.48,
-        mass: 9, kind: "stool", solid: true, leash: 3.0, stand: true, mode: "escape", seat: { x: sx, z: sz },
-      });
-    }
-  }
-  /* THE TABLES MOVED, AND THAT IS THE ROWS' FAULT, NOT A RESTYLE. |x| = 6.6
-     is inside row E now, so the day room goes where a day room in a double
-     cell house goes: the CENTRE HALL, |x| = 2.6, cell fronts on both sides of
-     it. The inboard stool corner reaches |x| = 1.29 and the bolted top spans
-     |x| 1.50..3.70, so the x[-0.55,0.55] patrol lane guards.js walks is still
-     empty concrete and spineBlocked is still 0. Reverting the rows puts them
-     back on 6.6 exactly. */
-  const DTX = ROWS3 ? 2.6 : 6.6;
-  dayTable(-DTX, -26.0);
-  dayTable(DTX, -26.0);
-  // ...and its four stools are seats. The day room is where a block SITS; two
-  // tables with eight bolted stools nobody could use is the fake-prop fault in
-  // its purest form. Stool cushion is 0.48 (the 0.44-thick pad on a 0.22 post,
-  // matching dayTable's own numbers) and each looks at the table centre.
-  for (const tx of [-DTX, DTX]) for (const i of [-1, 1]) for (const j of [-1, 1]) {
-    useSeat(tx + i * 0.85, -26.0 + j * 0.85, Math.atan2(-i * 0.85, -j * 0.85), 0.48);
-  }
+  /* NO DINING FURNITURE IN THE CELL HOUSE. (OWNER, with the shot: "there prob
+     shouldn't be table and chairs in the cell room.")
+
+     Two bolted day tables and eight stools used to stand here. They were never
+     placed on purpose: they were authored at |x| = 6.6 back when that was open
+     floor, and when ROWS3 pushed row E out over 6.6 they were SHUFFLED inward
+     to |x| = 2.6 to keep them off the new cells — i.e. into the CENTRE HALL,
+     the one strip of this building that is a corridor between two facing tiers
+     of cell fronts. A mess table in the middle of a tier walkway is not a day
+     room, it is furniture parked in a fire lane, and it read exactly that way
+     down the barrel: a picnic table two metres from a locked door.
+
+     Deleted rather than re-sited, because the compound already owns the rooms
+     this furniture belongs in and both are dressed: world/cafeteria.js (the
+     chow hall's mess tables, 0.95 m banded colliders and real seats) and
+     world/lounge.js (the DAYROOM proper — round bolted table, four stools,
+     phone bank). Moving these two here as well would have made the wing's
+     walkway the third-best day room in a prison that has two good ones.
+
+     WHAT THE HALL IS FOR INSTEAD: nothing. The spine at x = 0 is guards.js's
+     patrol lane and the south throat x[-3,3] at z = -8 is world/door.js's; the
+     tables sat between them and now the whole centre hall is clear concrete,
+     which is what a tier walkway is. `spineBlocked` was 0 with them and is
+     still 0 without them. Eight seat anchors and two pushable-stool records go
+     with them — CBZ._prisonProps just counts fewer props in this file, and the
+     seats an inmate actually uses on this floor are the per-cell stool
+     (fitOutCell) and his own bunk. */
   // NO centre line down the spine. The dashed yellow one that lived here was
   // road grammar — from the air it joined the walkway and the track oval into
   // the owner's "yellow dotted road going through the middle of the jail".
@@ -1943,6 +1967,15 @@
       if (c.minX < R && c.maxX > -R && c.minZ < -12 && c.maxZ > -40) spine++;
     }
     let occupied = 0, empty = 0, locked = 0;
+    /* seatDrift (SIT_PHYS_V1) — bunk-posed residents NOT at their bunk spot.
+       The leash pins a "bunk" man to bunkSpot every frame at order 22.6;
+       systems/actorcollide.js's clamp at order 25 used to depenetrate him
+       back out of the (now solid) frame — measured at latOut + body radius =
+       1.06 m into the room, ten men at once, each seated on air half a metre
+       clear of his own mattress. The number is the fault: geometry only, no
+       flag reads, so a revert run measures the defect and a fixed run pins 0.
+       Fight/flee/KO men are excluded — unseat() owns them, not the pin. */
+    let seatDrift = 0;
     // cells per row, off the cells' OWN tags — so "how big is this wing"
     // cannot be answered by a number typed anywhere but the row tables.
     const rows = {};
@@ -1952,6 +1985,15 @@
       rows[r] = (rows[r] | 0) + 1;
       if (c.locked) locked++;
       if (c.owner && c.owner !== "player") occupied++; else empty++;
+      const n = c.owner;
+      if (n && n !== "player" && n.group && n.char && n.char.sitting
+          && n._cellPose === "bunk" && c.bunk
+          && !(n.ko > 0) && !n.intimidMode && !(n.huntPlayer > 0)
+          && n.aiState !== "fight" && n.aiState !== "flee"
+          && !(CBZ.propArcActive && CBZ.propArcActive(n))) {
+        const sp = bunkSpot(c), p = n.group.position;
+        if (Math.hypot(p.x - sp.x, p.z - sp.z) > 0.3) seatDrift++;
+      }
     }
     const pc = playerCell;
     const margin = pc ? Math.min(pc.hx - Math.abs(s.x - pc.x), pc.hz - Math.abs(s.z - pc.z)) : 0;
@@ -1964,6 +2006,7 @@
       spawnBlocked: spawnBlocked,                            // MUST be 0
       doorGapBlocked: gap,                                   // MUST be 0
       spineBlocked: spine,                                   // MUST be 0
+      seatDrift: seatDrift,                                  // MUST be 0 (SIT_PHYS_V1)
       colliders: mine.length,
       lamps: lamps.length + 1,
     };

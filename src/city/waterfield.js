@@ -52,7 +52,12 @@
   }
 
   function isLink(r) {
-    return !!(r && r.name && /bridge|causeway|link/i.test(r.name));
+    // Region names never change after build, and this used to run the regex
+    // for EVERY region on EVERY water query — profiled at >1% of the sim
+    // tick on its own. Compute once per region object.
+    if (!r || !r.name) return false;
+    if (r._isLink === undefined) r._isLink = /bridge|causeway|link/i.test(r.name);
+    return r._isLink;
   }
 
   function overDeck(A, x, z, margin) {
@@ -86,14 +91,65 @@
      (below) adds standing rainwater on top, because everything that asks
      "is there water on me" must see a flooded street — but nothing that asks
      "can a shark swim here" may, or the megalodon takes the freeway. */
+  /* terrain.shoreAt is an analytic field over the BUILT continent — pure per
+     city build, but each raw call walks several noise/path fields, and every
+     water question in the game (cars' overWater, peds, swim, gore, the
+     groundwater flood) funnels through here per entity per frame: profiled at
+     ~9% of the whole sim tick. Memoize it on a 4m corner grid with bilinear
+     blending: corners hold EXACT field values, the blend between them moves
+     the effective coastline by well under a metre on this smooth field, and
+     the per-call cost collapses to four Map reads once a cell is warm. The
+     value is a pure function of (x,z) and the terrain object, so runs (and MP
+     clients) stay deterministic; a rebuilt city gets a fresh cache via the
+     terrain-identity check. Far-out-of-band queries (|cell| ≥ 8000, i.e.
+     ±32km) skip the cache rather than aliasing keys. */
+  const COAST_GRID = 4;
+  const COAST_CACHE_MAX = 130000;            // ~few MB worst case, then reset
+  let coastCache = new Map(), coastCacheTerrain = null;
+  function coastRaw(terrain, x, z) {
+    try {
+      const s = +terrain.shoreAt(x, z);
+      if (Number.isFinite(s)) return s;
+    } catch (e) {}
+    return null;
+  }
+  function coastCorner(terrain, ix, iz) {
+    const key = (ix + 8192) * 16384 + (iz + 8192);
+    let v = coastCache.get(key);
+    if (v === undefined) {
+      if (coastCache.size >= COAST_CACHE_MAX) coastCache.clear();
+      v = coastRaw(terrain, ix * COAST_GRID, iz * COAST_GRID);
+      coastCache.set(key, v);
+    }
+    return v;
+  }
+  let _lcIx = null, _lcIz = 0, _lc00 = 0, _lc10 = 0, _lc01 = 0, _lc11 = 0;
   function coastAt(x, z) {
     const A = arena();
     const terrain = A && A.mapTerrain;
     if (terrain && typeof terrain.shoreAt === "function") {
-      try {
-        const s = +terrain.shoreAt(x, z);
-        if (Number.isFinite(s)) return s;
-      } catch (e) {}
+      if (coastCacheTerrain !== terrain) { coastCacheTerrain = terrain; coastCache.clear(); _lcIx = null; }
+      const gx = x / COAST_GRID, gz = z / COAST_GRID;
+      const ix = Math.floor(gx), iz = Math.floor(gz);
+      if (ix > -8000 && ix < 7999 && iz > -8000 && iz < 7999) {
+        // Consecutive queries overwhelmingly land in the SAME cell (an
+        // entity's feelers probe centimetres apart), so keep the last cell's
+        // corners in locals and skip even the Map hits on a repeat.
+        if (ix !== _lcIx || iz !== _lcIz) {
+          const c00 = coastCorner(terrain, ix, iz), c10 = coastCorner(terrain, ix + 1, iz),
+                c01 = coastCorner(terrain, ix, iz + 1), c11 = coastCorner(terrain, ix + 1, iz + 1);
+          if (c00 === null || c10 === null || c01 === null || c11 === null) {
+            const s0 = coastRaw(terrain, x, z);
+            if (s0 !== null) return s0;
+            return fallbackWater(A, x, z, true) ? -24 : 24;
+          }
+          _lcIx = ix; _lcIz = iz; _lc00 = c00; _lc10 = c10; _lc01 = c01; _lc11 = c11;
+        }
+        const fx = gx - ix, fz = gz - iz;
+        return (_lc00 * (1 - fx) + _lc10 * fx) * (1 - fz) + (_lc01 * (1 - fx) + _lc11 * fx) * fz;
+      }
+      const s = coastRaw(terrain, x, z);
+      if (s !== null) return s;
     }
     return fallbackWater(A, x, z, true) ? -24 : 24;
   }

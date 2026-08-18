@@ -43,6 +43,13 @@
     // hand wrapping the grip
     box(g, 0.165, 0.11, 0.14, mat.skin, 0, -0.155, 0.035, -0.18);
     g.userData.muzzle = new THREE.Vector3(0, 0.052, -0.66);
+    // WHERE THE HANDS GO — see systems/gunhands.js.
+    g.userData.grips = {
+      support: new THREE.Vector3(-0.105, -0.180, -0.010),
+      mag: new THREE.Vector3(0, -0.290, 0.010),
+      charge: new THREE.Vector3(0, 0.050, -0.105),
+      style: "mag",
+    };
     return g;
   };
 })();

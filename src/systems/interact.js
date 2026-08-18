@@ -140,6 +140,14 @@
       if (CBZ.prisonRobTarget) CBZ.prisonRobTarget(a);
       return { ok: true, msg: "" };
     } },
+    // Tie a held-up man's wrists (intimidate.js validates range/state and
+    // spends the Bedsheet Rope). Silent either way: the sub-chip already
+    // says "needs rope" when the bag cannot pay, and a tied man slumping is
+    // the receipt when it can.
+    restrain: { label: "Tie him up",      fn: (a) => {
+      if (CBZ.prisonRestrainTarget) CBZ.prisonRestrainTarget(a);
+      return { ok: true, msg: "" };
+    } },
     release:  { label: "Let him go",      fn: (a) => {
       // Lowering the gun is the other half of holding it up. Ending the hold
       // here (rather than making the player walk away) means the panel can
@@ -174,6 +182,7 @@
     detain:   "Drop them without an arrest meter",
     search:   "Confiscate pocket loot",
     rob:      "Empty his pockets at gunpoint",
+    restrain: "Spend a bedsheet rope to tie him. He stays down",
     release:  "Lower the gun and let him go",
   };
   // TIPS ARE OFF UNTIL ASKED FOR (JAIL_SHOW_DONT_TELL, declared entities/ai.js).
@@ -352,7 +361,7 @@
        the same panel, the same four keys, different verbs — which is exactly
        what happens when a man walks up with an offer. Outranks every approach
        kind because a drawn gun outranks a conversation. */
-    if (a.intimidMode === "scared") return ["rob", "release"];
+    if (a.intimidMode === "scared") return ["rob", "restrain", "release"];
     if (a.approach && a.approach.t > 0) {
       if (a.approach.kind === "gangInvite") return ["listen", "accept", "refuse"];
       if (a.approach.kind === "gangJob") return ["listen", "accept", "refuse"];
@@ -448,6 +457,7 @@
     if (v === "paySilence") return CBZ.knownSnitchCost ? CBZ.knownSnitchCost(a) + "" : "";
     if (v === "haggle") return a.approach && a.approach.haggled ? "done" : ((a.playerTrust || 0) >= 6 ? "trust helps" : "");
     if (v === "threaten" || v === "threatenSnitch") return CBZ.playerArmed && CBZ.playerArmed() ? "armed" : "";
+    if (v === "restrain") return CBZ.econ && CBZ.econ.hasItem && CBZ.econ.hasItem("Bedsheet Rope") ? "" : "needs rope";
     if (v === "confrontReport") return a.reportedPlayerCred == null ? "" : (a.reportedPlayerCred > 0.78 ? "believed" : (a.reportedPlayerCred < 0.45 ? "doubted" : "heard"));
     if (v === "question") {
       if ((a.playerTrust || 0) >= 5) return "talks";
@@ -1015,7 +1025,7 @@
     pay: 74, detain: 72, listen: 70, search: 70, warn: 66, threaten: 64, respect: 60,
     question: 60, haggle: 50, insult: 40,
     // gunpoint pair — only ever offered together, so the cap never sees them
-    rob: 96, release: 94,
+    rob: 96, restrain: 95, release: 94,
   };
   function cap4(v) {
     if (v.length <= 4) return v;
