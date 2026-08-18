@@ -4250,3 +4250,57 @@ live objects; the next real render-CPU win is object-count reduction
 count, not a leak). (d) 6.7M tris are mostly redhollow/backcountry/mercy
 nature megameshes — vertex-cost waste on paper, but NOT the bottleneck on
 Apple GPUs; don't chase it before draw/CPU.
+
+## 2026-08-18 — THE HITMAN HAD A BOX THAT OPENED FOR A NUMBER
+
+Owner, standing in the motel room with the card up on his screen: *"there's a
+box that opens because of rep. Don't do that. There's one currency for a
+hitman, that's money, and a box doesn't open up for money, it opens up with a
+key. Whole point of keys and rooms — we have vaults built, doors built, keys
+built, a prison game with multiple types of doors that open with keycards. Yet
+the Hitman game uses none of these great things. Hitman should use the keys,
+but this gearbox should just open."* And, on the card itself: *"remove the
+m-dash… it should just be read wall… I hate this over-verbosity, especially
+around buttons."*
+
+**REPUTATION IS GONE FROM `city/hitman.js`.** `w.reputation.hitman` had exactly
+one writer (this file) and zero readers anywhere in the repo — it was a number
+that existed only to lock two things in the one room that used it. Deleted:
+`rep()`, `TIERS[].need`, `tierUnlocked()`, the `hitman: repGain` field on the
+completion event, `REP n` on the board header, `LOCKED · REP 20` on the cards
+and `locked · REP 20` on the case line. `hitmanAudit().repGates` is pinned at 0
+in `tools/math-gate.mjs` so it cannot come back.
+
+- **THE GEAR CASE JUST OPENS.** One press, the whole kit (the long lens, the
+  threaded SMG, ammo), then it reads empty. Its gold "lock" fitting is a grey
+  latch now, because the mesh was advertising a lock that no longer exists.
+- **THE ONE LOCK LEFT IS A KEY, AND IT ALREADY EXISTED.** `govcomplex.js`'s
+  strongroom is the city's own keycard story: a steel leaf with a barred panel,
+  a brass key upstairs, the city seal on a lit plinth you can SEE before you can
+  reach it. The seal is now a real `key`-tagged economy row (`"City Seal"`,
+  `city/economy.js`) added to the bag by `srTakeSeal`, not only the
+  `g.cityGovWrit` boolean — so it can be carried, dropped and stashed like
+  anything else. The wall's THE OFFICE card reads `NEEDS THE CITY SEAL / City
+  Hall, behind steel` until you hold one. No shop stocks a `key`: keys are
+  found or taken, never bought.
+- **The other two rungs are not gated at all.** A harder name pays more and is
+  harder to reach, and that is the whole ladder. The board header prints
+  `$n PAID · n SETTLED` off a new `records.hitman.paid`.
+- **BUTTONS.** `The wall — take the next name` → **`Read wall`**;
+  `Gear case — locked (REP 20)` → **`Open the case`**. Both are under
+  interactions.js's 24-char ACTION_MAX, so each IS the button with no copy bar
+  restating it. The zones also `describe()` themselves now (`The wall`, `Gear
+  case`) — the bare `—` in the card title was the registry's own placeholder
+  for a kind nobody had named.
+- Same em-dash-and-verbosity pass over the rest of the hitman path:
+  `contracts.js` (`Field office — apply` → `Apply to the bureau`, `The drop —
+  <rank>` → `Read the drop`), `campaign.js` (`Take the deal — work as the
+  warden's spy` → `Spy for the warden`), `activities.js`, `origins.js`,
+  and the strongroom's own labels (`Strongroom — locked` → `Locked
+  strongroom`).
+
+GATE: MATHGATE ok (90210:329/182/207, 200 ticks, det ok, errors baseline-only).
+
+Trap for the next wave: `records.hitman.caseTier` is a dead legacy field kept
+only so a save from before this wave reads its case as already emptied
+(`caseOpened()` accepts `caseTier >= 2`). Do not build anything new on it.

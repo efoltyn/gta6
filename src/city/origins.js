@@ -1764,7 +1764,7 @@
     // to exactly the old hitman preset opening — nothing orphaned.
     const HITCOMP = PRESETS.hitman;
     ORIGINS.contract = {
-      meta: { icon: "", name: "The Hitman", blurb: "a motel, a silencer, one name — then the Director" },
+      meta: { icon: "", name: "The Hitman", blurb: "a motel, a silencer, one name" },
       get tuning() { return { missedLotFeed: (AXES.where[HITCOMP.where] || {}).feed || "" }; },
       findSpawn: function () { const f = (AXES.where[HITCOMP.where] || {}).find; return f ? f() : null; },
       grants: function (game) { applyGrants(HITCOMP, game); armHeat(game); },

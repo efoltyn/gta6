@@ -945,7 +945,7 @@
             push(faction === CELL ? "UNKNOWN" : "BUREAU",
               h == null ? "He is in the building." :
               (h >= 9 && h < 17) ? "He is inside now. Hours are good."
-                : (h >= 17 && h < 19) ? "He is on the plaza right now — flanked."
+                : (h >= 17 && h < 19) ? "He is on the plaza right now, flanked."
                 : "Building is dark. He will be in at nine.", 1);
           },
         },
@@ -964,7 +964,7 @@
         escapeStage("Leave the district"),
       ],
       doneText: "It is done.",
-      failText: "Contract closed — he is still breathing.",
+      failText: "Contract closed. He is still breathing.",
       onComplete: function () {
         // NO new systems: approval.js, elections.js and officials.js's
         // succession already handle everything downstream of a dead mayor.
@@ -1329,8 +1329,8 @@
           id: "bureau-join", slot: "i",
           label: function () {
             const f = F(); if (!f) return "Field office";
-            if (f.isMember(AGENCY)) return "Field office — " + f.rankName(AGENCY, f.rank(AGENCY));
-            return "Field office — apply";
+            if (f.isMember(AGENCY)) return "Read the board";
+            return "Apply to the bureau";
           },
           canShow: function () { return !!F(); },
           onSelect: function () {
@@ -1418,7 +1418,7 @@
       options: [
         {
           id: "cause-drop-read", slot: "e",
-          label: function () { const f = F(); return "The drop — " + (f ? f.rankName(CELL, f.rank(CELL)) : "read it"); },
+          label: function () { return "Read the drop"; },
           onSelect: function () { openBoard(CELL); },
         },
         // (Burning the thread lives on the board — see the note at the Bureau
@@ -1459,7 +1459,7 @@
       options: [
         {
           id: "set-board-read", slot: "i",
-          label: function () { const f = F(); return "The set's work — " + (f ? f.rankName(GANG, f.rank(GANG)) : "ask"); },
+          label: function () { return "Read the set's work"; },
           onSelect: function () { openBoard(GANG); },
         },
       ],
@@ -1503,7 +1503,7 @@
     const m = M();
     const started = (m && m.take) ? m.take("cell:tryout") : null;
     if (started && !started.inert) {
-      push("UNKNOWN", "We've watched your work. One favour, no money, no names — then we talk.", 2);
+      push("UNKNOWN", "We've watched your work. One favour, no money, no names, then we talk.", 2);
     } else {
       courtT = 0;                            // nothing to give yet; try again tomorrow
     }

@@ -51,8 +51,8 @@
     { id: "disaster", cat: "Emergency", label: "City Disaster Event", cost: 0, time: 4, reward: 260, desc: "Fire, flood, panic, evacuation, destruction, repairs, and emergency politics." },
     { id: "survival-island", cat: "Emergency", label: "Deploy To Disaster Island", cost: 0, time: 0, reward: 0, desc: "Launch the disaster survival activity while writing deployment consequences to City." },
 
-    { id: "hitman", cat: "Crime", label: "Hitman Contract", cost: 0, time: 0, reward: 900, desc: "Take a name off the network. The mark is a person the city already runs — a job, a shift, a habit. Quiet pays more than loud." },
-    { id: "official-contract", cat: "Crime", label: "Protected Contract", cost: 0, time: 0, reward: 15000, desc: "The upper wall: protected principals and sitting officeholders. The network only hands these to a proven reputation." },
+    { id: "hitman", cat: "Crime", label: "Hitman Contract", cost: 0, time: 0, reward: 900, desc: "Take a name off the network. The mark is a person the city already runs: a job, a shift, a habit. Quiet pays more than loud." },
+    { id: "official-contract", cat: "Crime", label: "Protected Contract", cost: 0, time: 0, reward: 15000, desc: "The upper wall: protected principals, and the sitting officeholder for anyone carrying the city seal." },
     { id: "jail", cat: "Crime", label: "Turn Yourself In", cost: 0, time: 0, reward: 0, desc: "Route into the jail/prison activity. Your city ledger keeps the arrest history." },
   ];
 
