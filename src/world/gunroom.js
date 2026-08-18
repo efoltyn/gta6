@@ -299,11 +299,16 @@
     return g;
   }
 
-  // a HANDGUN-sized silhouette needs more scale to read at rack distance than a
-  // rifle does. One list instead of the old `id === "sidearm" || id === "taser"`
-  // test, because the rack now carries five small guns rather than two.
+  // REAL-DIMENSION SIZING (weapons/weapon-scale.js): the rack hangs in world
+  // space, so the world-scale scalar applies directly — the racked gun is now
+  // the SAME length as the drawn one (it used to be ~30% longer and shrink on
+  // pickup). The compact-class READ boost inside the module is the same rule
+  // the old SMALL list encoded, so handguns still read at rack distance; the
+  // legacy pair stays as the module-absent fallback.
   const SMALL = { sidearm: 1, taser: 1, revolver: 1, deagle: 1, uzi: 1 };
-  function rackScale(id) { return SMALL[id] ? 1.25 : 1.05; }
+  function rackScale(id) {
+    return (CBZ.weaponWorldScale && CBZ.weaponWorldScale(id)) || (SMALL[id] ? 1.25 : 1.05);
+  }
   function buildRackModel(id) {
     const builder = CBZ.weaponAppearance && CBZ.weaponAppearance[id];
     // Appearance builders serve held weapons too, and many deliberately add a

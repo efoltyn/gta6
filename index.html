@@ -13,7 +13,7 @@
 <link rel="stylesheet" href="css/base.css">
 <link rel="stylesheet" href="css/hud.css?v=survrail1">
 <link rel="stylesheet" href="css/screens.css?v=bagless1">
-<link rel="stylesheet" href="css/mobile.css?v=bagless1">
+<link rel="stylesheet" href="css/mobile.css?v=c4touch1">
 <link rel="stylesheet" href="css/dashboard.css?v=standing1">
 <link rel="stylesheet" href="css/inventory.css?v=bagless1">
 <link rel="stylesheet" href="css/city.css?v=contractcard1">
@@ -222,6 +222,16 @@
       <div id="originPlaneWrap" class="origin-plane-wrap" style="display:none">
         <div class="origin-label origin-sublabel">CHOOSE YOUR AIRCRAFT</div>
         <div id="originPlaneSelect" class="origin-plane-select" aria-label="Choose your aircraft"></div>
+      </div>
+      <!-- CAPTAIN sub-select. The same strip, drawn by the same renderSub() in
+           systems/state.js, filled from CBZ.cityOriginBoats() — world/
+           water_hulls.js's live hull registry. That one is populated at PARSE
+           time, so unlike the aircraft list above this is the REAL fleet with
+           real lengths before a world exists, and a hull registered tomorrow
+           appears here with no edit. -->
+      <div id="originBoatWrap" class="origin-plane-wrap" style="display:none">
+        <div class="origin-label origin-sublabel">CHOOSE YOUR BOAT</div>
+        <div id="originBoatSelect" class="origin-plane-select" aria-label="Choose your boat"></div>
       </div>
       <details class="controls">
         <summary>Controls</summary>
@@ -461,6 +471,14 @@
 <!-- 1. core engine -->
 <script src="src/core/scene.js?v=neutralhaze1"></script>
 <script src="src/core/renderer.js?v=scale3"></script>
+<!-- THE GROUND STOPS BEING DRAWN OVER A HOLE. Must load AFTER core/renderer.js:
+     its installFog REPLACES THREE.ShaderChunk.fog_fragment wholesale, so a patch
+     installed before it is erased in silence. groundmask.js asserts CBZ.renderer
+     exists and appends rather than rewriting. -->
+<script src="src/core/groundmask.js?v=mask1"></script>
+<!-- THE GROUND IS A SOLID: base field minus carvings. Owns CBZ.floorAt, so it
+     must load before any mode registers its base (city/mode.js, modes/*). -->
+<script src="src/systems/solidground.js?v=solid1"></script>
 <script src="src/core/lights.js"></script>
 <script src="src/core/sky.js?v=neutralhaze2"></script>
 <script src="src/core/daynight.js?v=neutralhaze1"></script>
@@ -525,7 +543,7 @@
 <!-- 3. entities -->
   <script src="src/entities/character.js?v=holster1"></script>
 <script src="src/entities/poses.js?v=pose1"></script>
-<script src="src/entities/player.js?v=scale1y"></script>
+<script src="src/entities/player.js?v=radio1"></script>
 <script src="src/entities/coins.js"></script>
 <!-- Legacy down-state decals were REMOVED, not merely untagged (the file itself
      is gone as of 2026-07-26; this comment used to describe it in the present
@@ -538,32 +556,39 @@
 <!-- 4. systems — economy/quests load before actors that reference them -->
 <script src="src/systems/audio.js?v=nukefield1"></script>
 <script src="src/systems/hud.js?v=allmain3"></script>
-<script src="src/systems/economy.js?v=itemstore1"></script>
+<script src="src/systems/economy.js?v=radio1"></script>
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
 <script src="src/weapons/weapon-data.js?v=loadout1"></script>
+<script src="src/weapons/weapon-scale.js?v=realsize1"></script>
 <script src="src/weapons/optics.js?v=optic1"></script>
-<script src="src/weapons/appearances/sidearm.js?v=fix3"></script>
-<script src="src/weapons/appearances/shotgun.js"></script>
-<script src="src/weapons/appearances/carbine.js?v=bore1"></script>
-<script src="src/weapons/appearances/smg.js?v=bore1"></script>
-<script src="src/weapons/appearances/taser.js"></script>
-<script src="src/weapons/appearances/bazooka.js?v=muzzle2"></script>
-<script src="src/weapons/appearances/glauncher.js"></script>
+<script src="src/weapons/appearances/sidearm.js?v=grips1"></script>
+<script src="src/weapons/appearances/shotgun.js?v=grips1"></script>
+<script src="src/weapons/appearances/carbine.js?v=grips1"></script>
+<script src="src/weapons/appearances/smg.js?v=grips1"></script>
+<script src="src/weapons/appearances/taser.js?v=grips1"></script>
+<script src="src/weapons/appearances/bazooka.js?v=grips1"></script>
+<script src="src/weapons/appearances/glauncher.js?v=grips1"></script>
 <script src="src/weapons/appearances/grenade.js"></script>
-<script src="src/weapons/appearances/ak47.js?v=bore1"></script>
-<script src="src/weapons/appearances/revolver.js"></script>
-<script src="src/weapons/appearances/deagle.js"></script>
-<script src="src/weapons/appearances/uzi.js"></script>
-<script src="src/weapons/appearances/sniper.js?v=bore1"></script>
-<script src="src/weapons/appearances/lmg.js?v=bore1"></script>
+<script src="src/weapons/appearances/ak47.js?v=grips1"></script>
+<script src="src/weapons/appearances/revolver.js?v=grips1"></script>
+<script src="src/weapons/appearances/deagle.js?v=grips1"></script>
+<script src="src/weapons/appearances/uzi.js?v=grips1"></script>
+<script src="src/weapons/appearances/sniper.js?v=grips1"></script>
+<script src="src/weapons/appearances/lmg.js?v=grips1"></script>
 <script src="src/weapons/appearances/shank.js"></script>
 <!-- ONE prison flashlight model: held guard tool, physical death drop and
      inventory thumbnail all consume this factory. -->
 <script src="src/weapons/flashlight.js?v=duty1"></script>
 <script src="src/systems/actorweapons.js?v=weaphold1"></script>
 <script src="src/city/weapon_thumbnails.js?v=duty1"></script>
-<script src="src/systems/holsterprops.js?v=stow1"></script>
+<script src="src/systems/holsterprops.js?v=gunhands1"></script>
+<!-- THE OFF HAND ACTUALLY HOLDS THE GUN, AND RELOADS IT. Solves the
+     support arm onto the drawn weapon's own authored handguard every
+     frame (instead of the old hand-tuned Euler guess, which could not
+     know which gun was out) and choreographs the reload the same way.
+     After holsterprops — it reads the gun that module just placed. -->
+<script src="src/systems/gunhands.js?v=gunhands1"></script>
 <script src="src/systems/prisondrops.js?v=duty1"></script>
 
 <!-- 2c. rooms (use addBox + addPack) -->
@@ -585,7 +610,7 @@
 
 <!-- 3b. actors that depend on economy -->
 <script src="src/entities/vision.js"></script>
-<script src="src/entities/guards.js?v=duty1"></script>
+<script src="src/entities/guards.js?v=radio1"></script>
 <script src="src/entities/searchlight.js"></script>
 <script src="src/entities/ambientlife.js"></script>
 <script src="src/entities/keycard.js"></script>
@@ -681,15 +706,15 @@
      (it turns their tables), after entities/guards.js, entities/security.js
      and systems/economy.js (it turns their records), and BEFORE capture.js
      and state.js, which call CBZ.prisonTier at runtime. -->
-<script src="src/systems/prisontiers.js?v=tier1"></script>
+<script src="src/systems/prisontiers.js?v=radio1"></script>
 
 <!-- 4b. remaining systems -->
-<script src="src/systems/quests.js"></script>
+<script src="src/systems/quests.js?v=radio1"></script>
 <script src="src/systems/input.js"></script>
 <script src="src/systems/spatialgrid.js?v=scale3"></script>
 <script src="src/systems/reality.js?v=support1"></script>
 <script src="src/systems/npcgrid.js?v=scale2"></script>
-<script src="src/systems/camera.js?v=norecen1"></script>
+<script src="src/systems/camera.js?v=survdeathcam1"></script>
 <script src="src/systems/physics.js?v=trauma2"></script>
 <!-- THE MOVING-PLATFORM PRIMITIVE. Nothing in this engine could carry a
      standing actor on a surface that moves — 30+ CBZ.platforms sites, none
@@ -707,7 +732,7 @@
 <script src="src/entities/ambientstate.js?v=contact1"></script>
 <script src="src/entities/crowd.js?v=life4"></script>
 <script src="src/systems/simulation.js?v=scale8"></script>
-<script src="src/systems/detection.js?v=npcgoal51"></script>
+<script src="src/systems/detection.js?v=radio1"></script>
 <script src="src/systems/aitactics.js?v=tac1"></script>
 <!-- HOW WELL A PERSON FIGHTS (NPC_COMBAT_IQ). The ONE competence model —
      role x weapon -> reaction, settle, burst, accuracy, cover quality — plus
@@ -727,11 +752,11 @@
      same reason: both re-assert a carried weapon every frame because
      actorweapons' self-heal pass is city-only. -->
 <script src="src/systems/prisonshanks.js"></script>
-<script src="src/systems/capture.js?v=npc-react1"></script>
+<script src="src/systems/capture.js?v=radio1"></script>
 <script src="src/systems/markers.js?v=allmain2"></script>
 <script src="src/systems/music.js?v=samples1"></script>
 <script src="src/systems/reinforcements.js?v=allmain2"></script>
-<script src="src/systems/lockdown.js"></script>
+<script src="src/systems/lockdown.js?v=radio1"></script>
 <script src="src/systems/difficulty.js"></script>
 <script src="src/systems/reactions.js?v=prisonhit1"></script>
 <script src="src/systems/facial.js?v=glance1"></script>
@@ -742,7 +767,7 @@
 <script src="src/systems/dashboard.js?v=ranks1"></script>
 <script src="src/systems/combat.js?v=phys1"></script>
 <script src="src/systems/killstreaks.js"></script>
-<script src="src/systems/interact.js?v=stashkey1"></script>
+<script src="src/systems/interact.js?v=radio1"></script>
 <script src="src/systems/interactions.js?v=onebar1"></script>
 <!-- WHAT A THING IN YOUR BAG LOOKS LIKE: one real 3D object per item KIND,
      which city/itemicons.js photographs for the slot and city/inventory.js
@@ -756,19 +781,19 @@
      before every consumer: systems/inventory.js, city/hud.js, charpanel.js,
      city/inventory.js. Only needs CBZ + CBZ.CONFIG. -->
 <script src="src/city/itemicons.js?v=allmain1"></script>
-<script src="src/systems/inventory.js?v=bagless1"></script>
-<script src="src/systems/state.js?v=arrest4w10"></script>
+<script src="src/systems/inventory.js?v=radio1"></script>
+<script src="src/systems/state.js?v=radio1"></script>
 <script src="src/systems/save.js"></script>
 <script src="src/systems/runstats.js"></script>
-<script src="src/systems/touch.js?v=aimlatch1"></script>
-<script src="src/systems/touch_vehicle.js?v=norecen1"></script>
+<script src="src/systems/touch.js?v=c4touch1"></script>
+<script src="src/systems/touch_vehicle.js?v=c4touch1"></script>
 <!-- Xbox / gamepad support (GTA-style scheme). Loads before loop.js so its
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
 <script src="src/systems/gamepad.js?v=seamount1"></script>
 <script src="src/systems/fpsmode.js?v=stow1"></script>
 <script src="src/systems/gunfx.js?v=shotwarm1w9"></script>
-<script src="src/systems/intimidate.js?v=npc-react1"></script>
+<script src="src/systems/intimidate.js?v=radio1"></script>
 
 <!-- 4c. SURVIVAL — natural-disaster battle royale (a second game mode).
      Additive: registers its own updaters (gated by game.mode) and builds
@@ -787,10 +812,10 @@
 <script src="src/world/disaster_arena.js?v=snowbury1"></script>
 <script src="src/systems/grapple.js?v=trauma2"></script>
 <script src="src/entities/survivorbot.js?v=trauma2"></script>
-<script src="src/modes/survival.js?v=trauma2"></script>
+<script src="src/modes/survival.js?v=survdeathcam1"></script>
 <!-- GUN GAME borrows worlds it never builds: the prison (escape), the disaster
      island (survival). Loads AFTER both so their builders exist. -->
-<script src="src/modes/gungame.js?v=gg1"></script>
+<script src="src/modes/gungame.js?v=radio1"></script>
 <!-- THE SHAFT IS SHARED: world/groundshaft.js owns every hole in the ground
      (survival sinkholes today, CITY_SINKHOLES tomorrow). Must precede
      systems/disasters.js so the roster finds CBZ.groundShaft at load. -->
@@ -859,6 +884,24 @@
 <script src="src/city/facades/postmodern.js?v=fk2"></script>
 <script src="src/city/facades/neogothic.js?v=fk2"></script>
 <script src="src/city/facades/megabrace.js?v=fk2"></script>
+<!-- HOUSE GRAMMARS. The same contract written for the DOMESTIC end of the range:
+     every one of these owns a real roof (gable, hip, tile, turret, floating
+     plane) where the shell had a parapet, and every one dresses AROUND the base
+     building's own window band instead of over it — shutters, surrounds, posts
+     and courses that FRAME the host glass, which is the thing the owner asked
+     for. They declare maxStoreys so FACADE_KIT_CITY never hands a mansion
+     grammar to a tower. -->
+<script src="src/city/facades/greekrev.js?v=fk3"></script>
+<script src="src/city/facades/romanvilla.js?v=fk3"></script>
+<script src="src/city/facades/spanish.js?v=fk3"></script>
+<script src="src/city/facades/manor.js?v=fk3"></script>
+<script src="src/city/facades/queenanne.js?v=fk3"></script>
+<script src="src/city/facades/plantation.js?v=fk3"></script>
+<script src="src/city/facades/machiya.js?v=fk3"></script>
+<script src="src/city/facades/desertmod.js?v=fk3"></script>
+<script src="src/city/facades/techhouse.js?v=fk3"></script>
+<script src="src/city/facades/ranch.js?v=fk3"></script>
+<script src="src/city/facades/brickhouse.js?v=fk3"></script>
 <script src="src/city/facade_demo.js?v=fk2"></script>
 <script src="src/city/interiormap.js?v=intmap1"></script>
 <script src="src/city/interiorlight.js?v=room1"></script>
@@ -1247,7 +1290,7 @@
      its one live organ, the mode-aware item store, moved to
      CBZ.econ.itemStore in systems/economy.js.) -->
 <script src="src/systems/resources.js?v=allmain1"></script>
-<script src="src/city/explosives.js?v=c4-2"></script>
+<script src="src/city/explosives.js?v=c4-3"></script>
 <script src="src/city/armored.js?v=brinks1"></script>
 <script src="src/city/death.js?v=arrest4"></script>
 <script src="src/city/camera.js?v=shouldergun2"></script>
@@ -1442,6 +1485,14 @@
      geometric (no species table), so all 45 species animate from one change.
      MUST follow predator.js; without this tag the whole animation lane is dead. -->
 <script src="src/systems/predator_anim.js?v=allmain1"></script>
+<!-- THE APE MOVE SET. A silverback shared the wolf's `maul` row, so its entire
+     animated repertoire was a jaw opening on the strike envelope. This adds the
+     six things a knuckle-walker actually does — charge, overhead smash,
+     backhand, canine bite, chest-beat display — and the one no other file could
+     own: it PICKS A MAN UP, spins, and uses him as a club on everyone else.
+     MUST follow predator_anim.js (it drives its new hand layers) and
+     creature_combat.js (which calls into it through three guarded seams). -->
+<script src="src/systems/ape_combat.js?v=apes1"></script>
 <!-- VERLET CORPSE PHYSICS FOR ANIMALS — the sibling of city/ragdoll.js, which
      is hard-wired to the humanoid skeleton, so every one of the 45 species used
      to die by easing group.rotation.z to a constant ("head pointed to sky").

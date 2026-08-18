@@ -214,6 +214,33 @@
     return r;
   }
 
+  /* TRUE only when the pose body below would provably do nothing for this
+     city ped this frame: no pending detector edge, no external pose input
+     armed, and every stored additive channel/timer at rest. Any single
+     nonzero field falls through to the full path, so a mid-decay channel
+     always finishes its ease-out before the ped can go quiet. */
+  let _qQuiet = 0, _qFull = 0, _qWhy = "";
+  function quietCity(a, r) {
+    if (a.hp !== r.hp) { _qWhy = _qWhy || "hp"; return false; }   // un-consumed hit/heal edge
+    const pp = a._phys;
+    if (pp && pp.fl !== r.lastFl) { _qWhy = _qWhy || "fl"; return false; }  // un-consumed impact edge
+    if ((a.attackCD || 0) !== r.atkCd) { _qWhy = _qWhy || "cd"; return false; }  // un-consumed swing edge / live cadence
+    if (a.rage || (a.stareT || 0) > 0) { _qWhy = _qWhy || "rage/stare"; return false; }
+    if (a.poseAimBack || a.poseHandsUp || (a.poseCower || 0) > 0 || a.surrender) { _qWhy = _qWhy || "pose"; return false; }
+    if (a.state === "flee" || a.aiState === "flee") { _qWhy = _qWhy || "flee"; return false; }
+    if ((a._blockT || 0) > 0 || (a._broken || 0) > 0) { _qWhy = _qWhy || "block"; return false; }
+    if (r.recoil || r.flash || r.stagT || r.flinT || r.clutchT || r.swingT ||
+        r.jailHitT || r.headAmp || r.hsX || r.hsY || r.hsZ || r.stK || r.stOff ||
+        r.aimK || r.dazeK || r.guardK || r.cowerLean || r.gbx || r.gbz ||
+        r.laOff || r.raOff || r.nkOff || r.byOff || r.hyOff || r.llOff || r.rlOff ||
+        r.lowLaOff || r.lowRaOff || r.lowLlOff || r.lowRlOff || r.savedEm !== -1) {
+      _qWhy = _qWhy || ("chan:" + (r.stK ? "stK" : r.savedEm !== -1 ? "savedEm" : r.aimK ? "aimK" : r.dazeK ? "dazeK" : r.headAmp ? "headAmp" : r.hyOff ? "hyOff" : "other"));
+      return false;
+    }
+    return true;
+  }
+  CBZ.reactionsAudit = function () { const o = { quiet: _qQuiet, full: _qFull, firstBlock: _qWhy }; _qWhy = ""; return o; };
+
   // grab the head material (each rig builds its own MeshLambertMaterial,
   // so mutating it never bleeds onto another actor — see character.js).
   function headMat(a) {
@@ -387,6 +414,23 @@
         //   knockback to grapple (single, weighty integrator) and only do the
         //   cosmetic recoil/flash/pose below. Jail (guards/npcs) aren't touched by
         //   grapple, so they keep integrating it here exactly as before — UNCHANGED.
+        /* ---- QUIESCENT FAST PATH (city only) ----
+           On a calm street almost every ped has NOTHING for this file to do:
+           every additive channel is 0, every timer drained, no un-consumed
+           hit/swing edge pending — so the 300-line body below would back out
+           zeros, compute zeros and add zeros. Skipping it is byte-identical
+           and was measured at ~3.5% of the whole sim tick. quietCity() is the
+           complete enumeration: the three edge detectors (hp / _phys.fl /
+           attackCD — comparisons, so a hit landed while quiet still fires the
+           frame it is seen), every external pose input, and every field the
+           far-LOD clear above zeroes. Jail passes (guards/npcs) integrate
+           real knockback physics here and are deliberately not fast-pathed. */
+        if (isCity) {
+          const r0 = R.get(a);
+          if (r0 && quietCity(a, r0)) { _qQuiet++; continue; }
+          _qFull++;
+        }
+
         const pp = a._phys;
         if (!isCity && pp && (Math.abs(pp.kx) > 0.02 || Math.abs(pp.kz) > 0.02)) {
           a.group.position.x += pp.kx * dt; a.group.position.z += pp.kz * dt;

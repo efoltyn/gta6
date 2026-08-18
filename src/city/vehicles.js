@@ -5353,7 +5353,23 @@
          the road when it moved. `_heldBy` is the hold's own back-pointer, so
          there is nothing to keep in sync. */
       if (c._heldBy) continue;
-      if (c.player || c.dead || !c.ai || !c.road) { if (!c.player && !c.dead) parkSeat(c); continue; }
+      if (c.player || c.dead || !c.ai || !c.road) {
+        if (!c.player && !c.dead) {
+          // settled = parkSeat's own cache says nothing moved since last frame.
+          // A settled parked car 60m+ from the camera is completely inert, so
+          // its ~20-node subtree keeps last frame's world matrices — stamp it
+          // and core/matrixskip.js skips the recompose (this was most of the
+          // car half of the render matrix walk: parked cars vastly outnumber
+          // traffic). Near cars stay live for door/entry/impact animation.
+          const settled = c._parkX === c.pos.x && c._parkZ === c.pos.z && c._parkH === c.heading;
+          parkSeat(c);
+          if (settled && CBZ.CONFIG.CAR_MATRIX_HOLD !== false && c.group) {
+            const pdx = c.pos.x - camx, pdz = c.pos.z - camz;
+            if (pdx * pdx + pdz * pdz > 3600) c.group._cbzMatrixOwnedFrame = CBZ._matrixOwnStamp;
+          }
+        }
+        continue;
+      }
       // off-screen, non-critical cars: skip 2 of every 3 frames, banking dt so
       // they still cover the same ground when they do tick.
       const _cdx = c.pos.x - camx, _cdz = c.pos.z - camz;
@@ -5368,7 +5384,16 @@
         // above, invisible traffic doesn't need per-frame simulation.
         const _q = CBZ.qualityLevel == null ? 4 : CBZ.qualityLevel;
         const farStride = _q === 0 ? 6 : _q === 1 ? 4 : 3;
-        if ((_vframe + c._vsl) % farStride !== 0) continue;     // skipped this frame
+        if ((_vframe + c._vsl) % farStride !== 0) {
+          // NOTHING about this car changes on a skipped frame — the stride
+          // above is the guarantee — so its ~20-node subtree's world matrices
+          // are still exactly right. Stamp it so core/matrixskip.js skips the
+          // recompose too (the stamp expires next frame by construction; the
+          // frame the car actually ticks it moves and is left unstamped).
+          // ?cfg_CAR_MATRIX_HOLD=0 reverts.
+          if (CBZ.CONFIG.CAR_MATRIX_HOLD !== false && c.group) c.group._cbzMatrixOwnedFrame = CBZ._matrixOwnStamp;
+          continue;     // skipped this frame
+        }
         dt = c._acc; c._acc = 0;                         // catch-up step
       }
       // DRIVER SHOT DEAD AT THE WHEEL (cops / gunfire): drop the body out and let
