@@ -316,6 +316,14 @@ What still has to be taught, and should be scoped honestly: guard pathing inside
 camera behaviour under a lid, spawn clamps, and save/load plus networking of void records.
 Those are bounded and countable; they are not the 280-call-site rewrite.
 
+> **Superseded in part — see `solid-ground-architecture.md`.** That doc is the decision
+> and the build order. Two things below were corrected there: the `CBZ.voids`-as-mirror-of
+> -`CBZ.platforms` proposal is a parallel registry beside `CBZ.groundShafts` and was
+> replaced by one carving registry ("spans from subtraction"); and the staging order here
+> is wrong — the lid delivers three of the four fantasies and comes before the dig grid.
+> A third gap was found and is fixed there: **nothing in the engine clamps ascent**, so a
+> lid needs a real ceiling clamp, not just y-banded colliders.
+
 ## Recommended staging
 
 1. **Move the mask to A2** (global `ShaderChunk` patch). Small, contained, deletes the
