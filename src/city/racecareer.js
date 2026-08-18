@@ -1027,7 +1027,7 @@
         return { label: "Trophy shelf", note: TROPHY.cups + " cups · every one was a race" };
       });
       I.describe("racedoor", function () {
-        return { label: "League door", note: "Rank opens it — the door quotes its price" };
+        return { label: "League door", note: "Rank opens it" };
       });
     }
   }

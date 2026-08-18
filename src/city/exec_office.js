@@ -461,7 +461,7 @@
       },
       options: [{
         id: "exec-lift-ride-down", slot: "e",
-        label: "Lift — ground",
+        label: "Lift to the ground",
         onSelect: function () {
           const r = eo(); if (!r) return;
           rideBusyUntil = nowMs() + 1800;
@@ -484,7 +484,7 @@
       },
       options: [{
         id: "exec-lift-ride-up", slot: "e",
-        label: "Lift — floor 50",
+        label: "Lift to floor 50",
         onSelect: function () {
           const r = eo(); if (!r) return;
           rideBusyUntil = nowMs() + 1800;

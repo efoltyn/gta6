@@ -819,7 +819,7 @@
         "<span style='color:#d9a8ee'>" + (owned ? "wear it" : fmt$(e_buy(S.tux.name))) + "</span></div>";
     }
     html += "<div style='border-top:1px solid #3a3140;margin:12px 0 4px'></div>";
-    html += "<div style='color:#8a93a3;font-size:12px'>[Esc] / [E] close</div>";
+    if (!CBZ.touchMode) html += "<div style='color:#8a93a3;font-size:12px'>[Esc] / [E] close</div>";
     d.innerHTML = html;
   }
   function openPanel() {

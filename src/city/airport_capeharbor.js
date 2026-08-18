@@ -94,7 +94,7 @@
       // scheduled flights have somewhere to park when they arrive.
       parked: 1,
       // the check-in counter, under the landside canopy, facing the kerb.
-      desk: { lx: 0, lz: 120, heading: 0, label: "Cape Harbor Regional — Check-in" },
+      desk: { lx: 0, lz: 120, heading: 0, label: "Cape Harbor Regional" },
       // the causeway plug: the town's far edge, the one the kerb faces.
       road: { x: CH_X, z: CH_Z + CH_HZ },
     });

@@ -251,7 +251,7 @@
     spawnBaseGuards(ctx);
 
     // ---- ZONES: the interface surface (interactions #14) ----
-    ctx.zone({ id: "fixer", label: "[E] The fixer — RESTRICTED AREA contract", pos: [V.fixerAt[0], V.fixerAt[1]], r: 3.4, onUse: openBriefing });
+    ctx.zone({ id: "fixer", label: "[E] The fixer's contract", pos: [V.fixerAt[0], V.fixerAt[1]], r: 3.4, onUse: openBriefing });
     ctx.zone({
       id: "sabotage", label: "[E] Sabotage the generator", pos: [V.gen.lx, V.gen.lz], r: 3.2,
       canShow: () => simT >= RT.genUntil, onUse: () => sabotageGenerator(),

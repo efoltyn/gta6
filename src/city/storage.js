@@ -464,7 +464,7 @@
         html += "<div style='font-size:12px;color:#ffd166;margin-bottom:6px'>Paid down " + money(prop.cost - owe) + " in bags · " + money(owe) + " to go</div>";
       }
       if (CS) html += "<div style='font-size:11px;color:#8a93a3;margin-bottom:8px'>Carry duffels to the sale board by the gate to pay in cash.</div>";
-      actions.push({ label: "Buy — " + money(owe), fn: () => buy(prop) });
+      actions.push({ label: "Buy " + money(owe), fn: () => buy(prop) });
     } else {
       html += "<div style='font-size:12px;color:#7ed957;margin-bottom:6px'>OWNED ✓</div>";
       if (canStoreVehicleHere(prop)) {
@@ -496,7 +496,7 @@
         for (const c of AMMO_CRATES) {
           actions.push({ label: "Buy " + c.label + " (+" + c.qty + ") — " + money(c.cost) + "  [have " + stashCount(c.id) + "]", fn: () => buyAmmo(c) });
         }
-        actions.push({ label: "LOAD OUT — move the whole locker to your guns", fn: loadOut });
+        actions.push({ label: "Load out", fn: loadOut });
       }
     }
     // TOUCH: no number/Esc key hints — rows are fat tap targets (data-si) and a

@@ -116,6 +116,12 @@
     panel = document.createElement("div");
     panel.id = "cityShop";
     panel.style.cssText = "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:48;display:none;min-width:340px;max-width:460px;background:rgba(16,18,24,.94);border:2px solid #2c3140;border-radius:16px;padding:16px 18px;color:#e8eef7;font-family:Fredoka,system-ui,sans-serif;box-shadow:0 18px 50px rgba(0,0,0,.5);pointer-events:auto;max-height:88vh;overflow-y:auto";
+    panel.addEventListener("click", function (e) {
+      const row = e.target && e.target.closest ? e.target.closest("[data-k]") : null;
+      if (!row) return;
+      e.preventDefault(); e.stopPropagation();
+      pressKey(row.getAttribute("data-k"));
+    });
     document.body.appendChild(panel);
     return panel;
   }
@@ -189,7 +195,7 @@
   function renderCloset() {
     const it = CBZ.cityEcon.ITEMS;
     const SLOTS = (CBZ.cityOutfitSlots && CBZ.cityOutfitSlots()) || ["hat", "top", "outer", "bottom", "shoes", "glasses", "chain", "watch", "ring"];
-    let html = "<div style='font-size:12px;color:#9fb0c6;margin:6px 0 2px'>YOUR CLOSET <span style='color:#7f8794'>· number = wear it · <b style='color:#ff9e6b'>[0]</b> strip everything</span></div>";
+    let html = "<div style='font-size:12px;color:#9fb0c6;margin:6px 0 2px'>YOUR CLOSET <span class='shopRow' data-k='0' style='color:#7f8794'><b style='color:#ff9e6b'>strip everything</b></span></div>";
     // CURRENTLY WORN, head-to-toe (so you can see the full fit at a glance)
     const o = (CBZ.cityEcon.outfit ? CBZ.cityEcon.outfit() : (g.cityOutfit || {}));
     const wornAny = SLOTS.some((s) => o[s]);
@@ -211,7 +217,7 @@
     closetItems.forEach((nm, i) => {
       const m = it[nm], worn = isWorn(nm), slot = slotOf(nm);
       const after = dripAfter(nm), cur = playerDrip();
-      html += "<div style='display:flex;justify-content:space-between;padding:2px 0'><span><b style='color:#ffd166'>" + (i + 1) + "</b> " + nm +
+      html += "<div class='shopRow' data-k='" + (i + 1) + "' style='display:flex;justify-content:space-between;padding:2px 0'><span><b style='color:#ffd166'>" + (i + 1) + "</b> " + nm +
         " <span style='color:#7f8794;font-size:11px'>(" + (slot ? slot + " · " : "") + "+" + (m.drip || 0) + " drip)</span>" +
         (worn ? " <span style='color:#7ed957;font-size:11px'>✓worn</span>"
           : " <span style='color:#ffd166;font-size:11px'>DRIP " + cur + "→" + after + "</span>") +
@@ -274,7 +280,8 @@
     }
     html += "<div style='font-size:12px;color:#8a93a3;margin-bottom:6px'>Cash " + fmt$(g.cash) + " · " +
       (g.cityBank ? "Bank " + fmt$(g.cityBank) + " · " : "") +
-      dripBadge + " · [Esc]/[E] leave</div>";
+      dripBadge + "</div>";
+    html += "<div class='shopRow shopLeave' data-k='escape'>LEAVE</div>";
 
     // the walk-in routing line: the WALL sells the guns, the counter the rest.
     if (wallLive) {
@@ -288,8 +295,8 @@
     // light-touch outfit manager (the buy-equips-it path stays the core).
     const ck = closetKey(kind);
     if (isBoutique(kind) && ck) {
-      html += "<div style='font-size:11px;color:#7f8794;margin-bottom:4px'><b style='color:#7fd0ff'>[" + ck.toUpperCase() + "]</b> " +
-        (closetOpen ? "back to the store" : "open your closet (change clothes)") + "</div>";
+      html += "<div class='shopRow' data-k='" + ck + "' style='font-size:11px;color:#7f8794;margin-bottom:4px'><b style='color:#7fd0ff'>[" + ck.toUpperCase() + "]</b> " +
+        (closetOpen ? "back to the store" : "your closet") + "</div>";
     }
     if (closetOpen && isBoutique(kind)) {
       html += renderCloset();
@@ -300,9 +307,9 @@
     // BUY CONTROLS: bulk multiplier + haggle (only show where there's stock)
     if (listItems.length) {
       html += "<div style='font-size:11px;color:#7f8794;margin-bottom:6px;display:flex;gap:10px;flex-wrap:wrap'>" +
-        "<span><b style='color:#7fd0ff'>[X]</b> qty ×" + qty + "</span>" +
+        "<span class='shopRow' data-k='x'><b style='color:#7fd0ff'>[X]</b> qty ×" + qty + "</span>" +
         (haggleTried ? "<span style='color:#9fb0c6'>[V] haggled" + (haggle > 0 ? " −" + Math.round(haggle * 100) + "%" : " (no luck)") + "</span>"
-          : "<span><b style='color:#7fd0ff'>[V]</b> haggle</span>") +
+          : "<span class='shopRow' data-k='v'><b style='color:#7fd0ff'>[V]</b> haggle</span>") +
         (disc > 0 ? "<span style='color:#7ed957'>deal −" + Math.round(disc * 100) + "%</span>" : "") +
         "</div>";
       html += "<div style='font-size:12px;color:#9fb0c6;margin:4px 0'>BUY</div>";
@@ -338,7 +345,7 @@
           dripHint = " <span style='color:#ffd166;font-size:11px'>DRIP " + cur + "→" + after + "</span>" +
             (cur2 ? " <span style='color:#7f8794;font-size:11px'>(replaces " + cur2 + ")</span>" : "");
         }
-        html += "<div style='display:flex;justify-content:space-between;padding:3px 0'><span><b style='color:#ffd166'>" + (i + 1) + "</b> " + it +
+        html += "<div class='shopRow' data-k='" + (i + 1) + "' style='display:flex;justify-content:space-between;padding:3px 0'><span><b style='color:#ffd166'>" + (i + 1) + "</b> " + it +
           " <span style='color:#7f8794;font-size:11px'>(" + tagN + ")</span>" +
           (worn ? " <span style='color:#7ed957;font-size:11px'>✓worn</span>" : dripHint) +
           "</span><span style='color:#7ed957'>" + line + trendGlyph + "</span></div>";
@@ -365,7 +372,7 @@
         const owned = isFit && !!ownedFits[s.id];
         const tag = isFit ? "+" + s.swag + " drip" : "+" + s.swag + " swagger";
         const price = wornNow ? "" : (owned ? "<span style='color:#7fd0ff'>owned · wear</span>" : "<span style='color:#7ed957'>" + fmt$(s.cost) + "</span>");
-        html += "<div style='display:flex;justify-content:space-between;padding:2px 0'><span><b style='color:#7fd0ff'>" + letter.toUpperCase() + "</b> " +
+        html += "<div class='shopRow' data-k='" + letter + "' style='display:flex;justify-content:space-between;padding:2px 0'><span><b style='color:#7fd0ff'>" + letter.toUpperCase() + "</b> " +
           s.name + " <span style='color:#7f8794;font-size:11px'>(" + tag + ")</span>" +
           (wornNow ? " <span style='color:#7ed957;font-size:11px'>✓worn</span>" : "") +
           "</span><span>" + price + "</span></div>";
@@ -375,12 +382,12 @@
     const svc = services(kind);
     if (svc.length) {
       html += "<div style='font-size:12px;color:#9fb0c6;margin:8px 0 2px'>SERVICES</div>";
-      svc.forEach((s) => { html += "<div style='padding:2px 0'><b style='color:#7fd0ff'>" + s.key.toUpperCase() + "</b> " + s.label + "</div>"; });
+      svc.forEach((s) => { html += "<div class='shopRow' data-k='" + s.key + "' style='padding:2px 0'><b style='color:#7fd0ff'>" + s.key.toUpperCase() + "</b> " + s.label + "</div>"; });
     }
     // sellables you hold
     const sell = sellable(kind);
     if (sell.length) {
-      html += "<div style='font-size:12px;color:#9fb0c6;margin:8px 0 2px'>SELL — press <b style='color:#ff9e6b'>0</b> to sell all (" + fmt$(sellTotal(kind)) + ")</div>";
+      html += "<div class='shopRow' data-k='0' style='font-size:12px;color:#9fb0c6;margin:8px 0 2px'>SELL EVERYTHING <b style='color:#ff9e6b'>" + fmt$(sellTotal(kind)) + "</b></div>";
       // show what each lot fences for so a luxe piece's JACKPOT value is obvious.
       html += "<div style='font-size:12px;color:#aeb8c6'>" + sell.map((s) => {
         const ea = econ.sellPrice(s.name, kind);
@@ -399,11 +406,10 @@
       // it. That difference is the whole reason to move through the world.
       const held = tillEstimate(openLot);
       const hits = CBZ.cityTill.hits(openLot);
-      html += "<div style='font-size:12px;color:#ff7a7a;margin:10px 0 0;border-top:1px solid #2c3140;padding-top:6px'>" +
-        "<b style='color:#ff9e6b'>[R]</b> Rob the till <span style='color:#7f8794'>(" +
-        (held > 0 ? fmt$(held) + " in the drawer" : "drawer's empty right now") +
-        ", and the heat that comes with it)</span>" +
-        (hits >= 1 ? "<div style='color:#7f8794'>They've been hit before — the drawer's being dropped every " +
+      html += "<div class='shopRow' data-k='r' style='font-size:12px;color:#ff7a7a;margin:10px 0 0;border-top:1px solid #2c3140;padding-top:6px'>" +
+        "<b style='color:#ff9e6b'>[R]</b> Rob the till <span style='color:#7f8794'>" +
+        (held > 0 ? fmt$(held) + " in the drawer" : "drawer's empty") + "</span>" +
+        (hits >= 1 ? "<div style='color:#7f8794'>Hit before. The drawer is dropped every " +
           Math.round(60 * (2 / (1 + hits))) + " min now.</div>" : "") + "</div>";
     }
     el().innerHTML = html;
@@ -1815,40 +1821,53 @@
   CBZ.cityShopRender = function () { if (openLot) render(); };
   CBZ.cityShopLot = function () { return openLot; };
 
-  addEventListener("keydown", function (e) {
-    if (!openLot) return;
-    const k = e.key.toLowerCase();
-    if (k === "escape" || k === "e") { e.preventDefault(); close(); return; }
+  /* THE COUNTER HAD NO BUTTONS (owner, 2026-08-18: "figure out what sucks
+     around buttons"). Every shop and every civic desk in the game printed
+     [X] / [V] / [0-9] / [R] key hints and listened ONLY for a keydown — on a
+     tablet, where this game is actually played, that is a wall of text you
+     cannot press. Nothing about the rows changes: each one already named its
+     own key, so it now carries that key as `data-k` and a single delegated
+     click runs the SAME dispatch the keyboard runs. One code path, two inputs;
+     a shop verb can never work on one and not the other. */
+  function pressKey(k) {
+    if (!openLot || !k) return false;
+    k = String(k).toLowerCase();
+    if (k === "escape" || k === "e") { close(); return true; }
     // the closet toggle (boutique change-clothes view) — its key is chosen to
     // dodge restyle letters & service keys, so it never steals an existing verb.
     const ck = closetKey(openLot.kind);
-    if (ck && k === ck) { e.preventDefault(); closetOpen = !closetOpen; render(); return; }
+    if (ck && k === ck) { closetOpen = !closetOpen; render(); return true; }
     // while the closet is up, number keys EQUIP owned pieces and [0] strips all
     if (closetOpen && isBoutique(openLot.kind)) {
-      if (k >= "1" && k <= "9") { e.preventDefault(); closetEquip(parseInt(k, 10) - 1); return; }
-      if (k === "0") { e.preventDefault(); closetStripAll(); return; }
-      // fall through for nothing else: closet view owns the keys while it's open
-      return;
+      if (k >= "1" && k <= "9") { closetEquip(parseInt(k, 10) - 1); return true; }
+      if (k === "0") { closetStripAll(); return true; }
+      // nothing else: the closet view owns the keys while it is open
+      return false;
     }
-    if (k >= "1" && k <= "9") { e.preventDefault(); buy(parseInt(k, 10) - 1); return; }
-    if (k === "0") { e.preventDefault(); sellAll(openLot.kind); return; }
+    if (k >= "1" && k <= "9") { buy(parseInt(k, 10) - 1); return true; }
+    if (k === "0") { sellAll(openLot.kind); return true; }
     // bulk-quantity toggle (1 → 5 → 10 → 1)
-    if (k === "x") { e.preventDefault(); qty = qty === 1 ? 5 : qty === 5 ? 10 : 1; render(); return; }
+    if (k === "x") { qty = qty === 1 ? 5 : qty === 5 ? 10 : 1; render(); return true; }
     // haggle (one attempt this visit)
-    if (k === "v") { e.preventDefault(); tryHaggle(); return; }
+    if (k === "v") { tryHaggle(); return true; }
     // rob the till
     if (k === "r" && canRobTill(openLot.kind) && !services(openLot.kind).some((s) => s.key === "r")) {
-      e.preventDefault(); robTill(); return;
+      robTill(); return true;
     }
     // barber / clothing restyle — letters come from styleLetters(), which
     // already skips service keys + the closet key, so they can't collide.
     const styles = styleMenu(openLot.kind);
     if (styles.length && k >= "a" && k <= "z") {
       const idx = styleLetters(openLot.kind).indexOf(k);
-      if (idx >= 0 && idx < styles.length) { e.preventDefault(); restyle(openLot.kind, idx); return; }
+      if (idx >= 0 && idx < styles.length) { restyle(openLot.kind, idx); return true; }
     }
     const svc = services(openLot.kind).find((s) => s.key === k);
-    if (svc) { e.preventDefault(); svc.fn(); }
+    if (svc) { svc.fn(); return true; }
+    return false;
+  }
+  addEventListener("keydown", function (e) {
+    if (!openLot) return;
+    if (pressKey(e.key)) e.preventDefault();
   });
 
   // ---- BREAKING & ENTERING through a shot-out window. buildings.js only
@@ -2201,7 +2220,7 @@
     I.register("ped:civ", {
       id: "ped-cart-bite", slot: "k", prio: 41,
       canShow: (p) => !p.dead && !p.rage && p.state !== "flee" && _jobOf(p) === "street vendor",
-      label: "Buy a bite — $8",
+      label: "Buy a bite $8",
       onSelect: (p) => {
         if (!CBZ.city.spend(8)) { CBZ.city.note("Even the cart wants $8.", 1.4); return; }
         g.hunger = Math.min(100, (g.hunger || 0) + 30);

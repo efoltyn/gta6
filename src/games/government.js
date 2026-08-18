@@ -1038,7 +1038,7 @@
     V.reporterPost = { x: hx * 0.35, z: hz * 0.62, face: Math.PI };
     ctx.box(g, hx * 0.35, 0.5, hz * 0.72, 1.6, 1.0, 0.5, ctx.mat(COL.woodD));   // press table
     ctx.solid(hx * 0.35 - 0.85, hz * 0.72 - 0.3, hx * 0.35 + 0.85, hz * 0.72 + 0.3);
-    ctx.zone({ id: "reporter", pos: [hx * 0.35, hz * 0.5], r: 1.4, onUse: openReporter, label: "[E] The lobby reporter — leak a secret" });
+    ctx.zone({ id: "reporter", pos: [hx * 0.35, hz * 0.5], r: 1.4, onUse: openReporter, label: "[E] Leak to the reporter" });
 
     // ---- security desk + guard (the jam responder) ----
     V.guardPost = { x: hx * 0.82, z: -hz * 0.08, face: -Math.PI / 2 };

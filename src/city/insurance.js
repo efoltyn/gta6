@@ -755,7 +755,7 @@
     const approved = myClaim("approved");
     if (approved && CBZ.rankCan && CBZ.rankCan(p, ORG, "settle")) {
       return {
-        label: "Sign for your settlement — " + money(approved.amount),
+        label: "Sign for " + money(approved.amount),
         run: function () { say(p, "“Sign here. Sorry for the trouble.”"); payClaim(approved); },
       };
     }
@@ -778,7 +778,7 @@
         const q = CBZ.cityInsure(lot, { dryRun: true });
         if (q.ok) {
           return {
-            label: "Insure " + addrOf(lot) + " — " + money(q.price),
+            label: "Insure " + addrOf(lot) + " " + money(q.price),
             run: function () {
               const r = CBZ.cityInsure(lot);
               if (!r.ok) { note(r.why, 3); say(p, "“" + r.why + "”"); return; }

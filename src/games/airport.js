@@ -742,7 +742,7 @@
 
     // ---- ZONES (interactions) ----
     ctx.zone({ id: "desk", label: () => (R.job && R.delivered ? "Collect at the charter desk" : "REDEYE charter desk"), pos: [0, 1.6], r: 2.4, onUse: openBoard });
-    ctx.zone({ id: "fuel", label: "Fueler — wind & heat brief", pos: [-14, -3.4], r: 2.6, onUse: openFuelBrief });
+    ctx.zone({ id: "fuel", label: "Fueler", pos: [-14, -3.4], r: 2.6, onUse: openFuelBrief });
     ctx.zone({ id: "customs", label: "Customs booth", pos: [14, 1.4], r: 2.4, onUse: () => note("Inspector Vann only cares when you come home heavy.", 2.4) });
 
     // walkaround stations around the parked charter jet — only when a run is

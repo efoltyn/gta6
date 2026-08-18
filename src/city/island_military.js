@@ -1775,7 +1775,7 @@
         });
         if (CBZ.interactions.describe) {
           CBZ.interactions.describe("armory", function () {
-            return { label: "Armory", note: "Weapons, ammo and gear — Command HQ" };
+            return { label: "Armory", note: "Weapons, ammo and gear" };
           });
         }
         armoryWired = (typeof CBZ.cityOpenShop === "function" || typeof CBZ.cityOpenGunStore === "function") ? "shop" : "note";

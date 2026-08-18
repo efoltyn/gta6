@@ -4363,3 +4363,71 @@ Trap for the next wave: `describe()`'s `note` field is still authored all over
 the repo and is still not rendered anywhere. Do not "fix" that by printing it —
 it is a wall of standing text one line above a control, which is the thing this
 wave deleted. Either give a note a real home or delete the field.
+
+## 2026-08-18 (3) — THE BUTTON LAW, AND THE MENUS A THUMB COULD NOT PRESS
+
+Owner, after the vault card: *"Look for more things like it throughout the code
+base. Make this a huge thing. And figure out what sucks. surrounding buttons."*
+
+Two faults, and the second one is worse than the first.
+
+### FAULT 1 — WORDS AROUND CONTROLS
+
+A repo-wide scan of every authored `label:` / `sub:` / `desc:` string turned up
+**90 violations**: 30 controls carrying an em dash (which the renderers CUT on,
+which is how half a sentence lands on a button), and the rest simply too long
+to be a control. All fixed at the source. The worst was the **Gang Life Board**:
+twenty cards, each a button with a paragraph of dev-speak on it —
+*"Launch the disaster survival activity while writing deployment consequences
+to City"*, *"seed commute crowds and delay events"*, *"Route into the
+jail/prison activity"*. Every one is now a player-voice line under seven words
+(*"Fly out to the island and survive it"*, *"A fare across town"*, *"Walk in.
+The ledger keeps the record"*). Same for the **score board**, whose card descs
+restated the meta row underneath them (`"Low take, low heat (1-2★). No crew
+needed."` beside a row already printing ★ and crew) and whose bank tier carried
+a 245-character paragraph.
+
+### FAULT 2 — SIX MENUS WITH NO BUTTONS AT ALL
+
+`city/shops.js` printed `[X] qty`, `[V] haggle`, `[1-9]` buy, `[0]` sell,
+`[R]` rob, `[Esc] leave` — and registered exactly one listener: `keydown`.
+**Every shop and every civic desk in the game** (food, guns, pawn, barber,
+jewelry, gas, hardware, electronics, courthouse, DMV, library, post office,
+federal, city annex) was, on the tablet this game is played on, a wall of text
+with nothing to press. The owner could not buy a burger. Five more menus were
+in the same state: the **job board** (`careers.js`), the **mod garage**
+(`modshop.js`), the **car lot** (`empire.js`), the **realty desk**
+(`realestate.js`) and the **empire screen** (`wealth.js`) — whose action pills
+were *styled to look like buttons* and were plain `<span>`s.
+
+The fix is the same five lines in each: the keydown body becomes
+`pressKey(k)`, every row carries the key it already printed as `data-k`, and
+one delegated click calls the same dispatch. **One code path, two inputs** — a
+verb can never work on one and not the other. Rows get a 44px touch height and
+a real CLOSE control; the key legends (`"[1–6] accept · [Esc] close"`) stop
+printing on touch, where they teach controls the device does not have. Same
+reason the snowboard HUD stops printing `A/D carve · W tuck · Space ollie`.
+
+### THE RATCHET — `tools/button-gate.mjs` (`npm run test:buttons`)
+
+A one-second static scan, no browser, six rules, all pinned at the measured
+floor: label ≤ 34 chars, sub ≤ 44, tile desc ≤ 60, **no em dash in any of the
+three**, the copy bar stays deleted (`itouch-copy` = 0 files), and
+keyboard-only panels = 3 (the snowboard/swim/killstreak HUD overlays, which
+have no rows to press). Eight files carry a NAMED exemption for keys that are
+not player text (`occupy.js`'s design commentary, `wanted.js`'s crime names,
+`take.js`'s ledger sources). Every number may go DOWN and never up; the gate
+fails if you fix something and forget to lower it.
+
+GATE: MATHGATE ok (90210:329/182/207, 200 ticks, det ok, errors baseline-only)
+· BUTTONGATE ok (label 0/0 · sub 0/0 · desc 0/0 · copyBars 0 · keyboardOnly 3).
+
+Traps for the next wave: (a) the shop/job/lot/realty/empire panels now have TWO
+entry points into one dispatch — if you add a verb, add it to `pressKey`, never
+to the keydown listener, or it will work on a desktop and be invisible on the
+tablet. (b) `tools/button-gate.mjs` reads string LITERALS only, so a label
+built by concatenation (`"Charter: " + name + " — " + money(f)`) is invisible
+to it; the renderer's `verbButton()` is what catches those at display time.
+(c) Three files still hold unrendered `note:` annotations on data rows
+(`civic.js` service rows are the big one) — dead text shipped to the player's
+browser, worth deleting when someone is next in there.

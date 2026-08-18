@@ -29,6 +29,14 @@
     panel = document.createElement("div");
     panel.id = "cityRealty";
     panel.style.cssText = "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:48;display:none;min-width:360px;max-width:480px;background:rgba(16,20,26,.96);border:2px solid #2f3a44;border-radius:16px;padding:14px 18px;color:#e8eef7;font-family:Fredoka,system-ui,sans-serif;box-shadow:0 18px 50px rgba(0,0,0,.5);pointer-events:auto";
+    // ONE DISPATCH, TWO INPUTS: this menu listened only for a keydown, so on
+    // a tablet you could look at a house and never buy it (owner, 2026-08-18).
+    panel.addEventListener("click", function (e) {
+      const row = e.target && e.target.closest ? e.target.closest("[data-k]") : null;
+      if (!row) return;
+      e.preventDefault(); e.stopPropagation();
+      pressKey(row.getAttribute("data-k"));
+    });
     document.body.appendChild(panel);
     return panel;
   }
@@ -123,7 +131,7 @@
       html += "<div style='margin-top:8px;font-size:12px;color:#9fb0c6'>"
         + "[<b style='color:#ffd166'>&larr;</b>] Prev &nbsp; [<b style='color:#ffd166'>&rarr;</b>] Next &nbsp; · Page <b style='color:#ffd166'>" + (rpage + 1) + "</b>/" + pages + " (" + entries.length + " listings)</div>";
     }
-    html += "<div style='font-size:11px;color:#6b7480;margin-top:8px'>[1–" + actions.length + "] select · [Esc] close · more at Zillow [Z]</div>";
+    if (!CBZ.touchMode) html += "<div style='font-size:11px;color:#6b7480;margin-top:8px'>[1–" + actions.length + "] select · [Esc] close · more at Zillow [Z]</div>";
     open(html);
     realtyPages = pages;
   };
@@ -156,9 +164,10 @@
       actions.push({ label: "Buy hangar " + money(hangarPrice()), fn: buyHangar });
     }
     let html = "<div style='font-size:20px;font-weight:700;margin-bottom:6px'>" + home.name + "</div>";
-    html += "<div style='font-size:12px;color:#8a93a3;margin-bottom:10px'>Your home · safe " + money(g.cityBank || 0) + " · [Esc] leave</div>";
+    html += "<div style='font-size:12px;color:#8a93a3;margin-bottom:10px'>Your home · safe " + money(g.cityBank || 0) + "</div>";
     if (g.cityOwnsHeli) html += "<div style='font-size:12px;color:#7ed957;margin-bottom:8px'>Helicopter ready on the pad" + (g.cityOwnsHangar ? " · F-22 in the hangar" : "") + "</div>";
-    actions.forEach((a, i) => { html += "<div style='padding:4px 0'><b style='color:#ffd166'>" + (i + 1) + "</b> " + a.label + "</div>"; });
+    actions.forEach((a, i) => { html += "<div class='reRow' data-k='" + (i + 1) + "' style='padding:4px 0'><b style='color:#ffd166'>" + (i + 1) + "</b> " + a.label + "</div>"; });
+    html += "<div class='reRow reBtn' data-k='escape'>CLOSE</div>";
     open(html);
   };
   CBZ.cityHomeMenuRefresh = function () { if (panel && panel.style.display === "block") { if (mode === "home") CBZ.cityOpenHome(); else CBZ.cityHomeMenu(); } };
@@ -443,19 +452,23 @@
     }
   };
 
+  function pressKey(k) {
+    if (!panel || panel.style.display !== "block" || !k) return false;
+    k = String(k).toLowerCase();
+    if (k === "escape") { close(); return true; }
+    // page the realtor list (only when it's the buy menu and has >1 page)
+    if (mode === "buy" && realtyPages > 1 && (k === "arrowleft" || k === "[" || k === "arrowright" || k === "]")) {
+      rpage = (k === "arrowleft" || k === "[") ? (rpage - 1 + realtyPages) % realtyPages : (rpage + 1) % realtyPages;
+      CBZ.cityHomeMenu();
+      return true;
+    }
+    if (k >= "1" && k <= "9") { const a = actions[parseInt(k, 10) - 1]; if (a) a.fn(); return true; }
+    return false;
+  }
   addEventListener("keydown", function (e) {
     if (g.mode !== "city" || g.state !== "playing") return;
     if (panel && panel.style.display === "block") {
-      const k = e.key.toLowerCase();
-      if (k === "escape") { e.preventDefault(); close(); return; }
-      // page the realtor list (only when it's the buy menu and has >1 page)
-      if (mode === "buy" && realtyPages > 1 && (k === "arrowleft" || k === "[" || k === "arrowright" || k === "]")) {
-        e.preventDefault();
-        rpage = (k === "arrowleft" || k === "[") ? (rpage - 1 + realtyPages) % realtyPages : (rpage + 1) % realtyPages;
-        CBZ.cityHomeMenu();
-        return;
-      }
-      if (k >= "1" && k <= "9") { e.preventDefault(); const a = actions[parseInt(k, 10) - 1]; if (a) a.fn(); }
+      if (pressKey(e.key)) e.preventDefault();
       return;
     }
     // [H] at your own front door opens the safehouse menu

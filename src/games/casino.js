@@ -634,7 +634,7 @@
         const dealer = ctx.rig({ shirt: 0xe8dcc0, pants: 0x14100c, skin: which ? 0x8a5c34 : 0xc2905c, vest: 0x1c6e46 }).at(cx, cz + 1.05, Math.PI).deal();
         g.add(dealer.g); ctx.idle(dealer, which * 1.7); return dealer;
       });
-      ctx.zone({ id: "bj" + which, label: "Blackjack — $25 min [The Golden Ace]", pos: [cx, cz - 1.65], r: 1.7, onUse: () => { BJ.tableIx = which; BJ.phase = "bet"; renderBJ(); } });
+      ctx.zone({ id: "bj" + which, label: "Blackjack, $25 min", pos: [cx, cz - 1.65], r: 1.7, onUse: () => { BJ.tableIx = which; BJ.phase = "bet"; renderBJ(); } });
       ctx.light(cx, 3.2, cz, 0xffca72, 0.8, 8);
     });
     // --- roulette table + wheel ---
@@ -687,7 +687,7 @@
         const boss = ctx.rig({ shirt: 0x14100c, pants: 0x14100c, skin: 0xd9a066, vest: 0x211a12, hair: 0x777c82 }).at(cx + 2.6, cz - 0.6, 2.6).fold();
         g.add(boss.g); ctx.idle(boss, 4.1); return boss;
       }, "pitboss");
-      ctx.zone({ id: "roulette", label: "European Roulette [The Golden Ace]", pos: [cx, cz - 1.9], r: 1.9, onUse: renderRL });
+      ctx.zone({ id: "roulette", label: "European Roulette", pos: [cx, cz - 1.9], r: 1.9, onUse: renderRL });
       ctx.light(cx, 3.3, cz, 0xffca72, 0.85, 9);
     }
     // --- slot bank (first machine drives the 3D reels) ---
@@ -715,7 +715,7 @@
       }
       ctx.solid(sx - 0.5, sz - 0.45, sx + 0.5, sz + 0.45);
       V.slots.push({ reels });
-      ctx.zone({ id: "slot" + i, label: "Lucky 7s slots [The Golden Ace]", pos: [sx - 0.9, sz], r: 1.3, onUse: renderSL });
+      ctx.zone({ id: "slot" + i, label: "Lucky 7s slots", pos: [sx - 0.9, sz], r: 1.3, onUse: renderSL });
     }
     // --- cage + shark booth ---
     {
@@ -745,7 +745,7 @@
         const guard = ctx.rig({ shirt: 0x2c3038, pants: 0x14100c, skin: 0x704c28, cap: 0x2c3038 }).at(cx + 1.6, cz + 2.2, 2.4).fold();
         g.add(guard.g); ctx.idle(guard, 3.3); return guard;
       });
-      ctx.zone({ id: "cage", label: "The Cage — buy in / cash out [The Golden Ace]", pos: [cx + 1.5, cz], r: 1.6, onUse: renderCage });
+      ctx.zone({ id: "cage", label: "The Cage: buy in, cash out", pos: [cx + 1.5, cz], r: 1.6, onUse: renderCage });
       ctx.light(cx + 1, 3.0, cz, 0xffd48a, 0.8, 8);
     }
     {
@@ -767,7 +767,7 @@
         const shark = ctx.rig({ shirt: 0x39424e, pants: 0x14100c, skin: 0xb87c4c, hair: 0x555a60, shades: true }).at(cx, cz + 0.35, Math.PI).sit();
         shark.g.position.y -= 0.28; g.add(shark.g); ctx.idle(shark, 5.2); return shark;
       }, "shark");
-      ctx.zone({ id: "shark", label: "The Shark [The Golden Ace]", pos: [cx, cz - 1.3], r: 1.5, onUse: renderShark });
+      ctx.zone({ id: "shark", label: "The Shark", pos: [cx, cz - 1.3], r: 1.5, onUse: renderShark });
       ctx.light(cx, 1.7, cz - 0.1, 0xff9a4e, 0.6, 5.5);
     }
     // --- ambient patrons: real peds milling the slots/roulette so the floor
