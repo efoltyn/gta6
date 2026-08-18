@@ -4304,3 +4304,62 @@ GATE: MATHGATE ok (90210:329/182/207, 200 ticks, det ok, errors baseline-only).
 Trap for the next wave: `records.hitman.caseTier` is a dead legacy field kept
 only so a save from before this wave reads its case as already emptied
 (`caseOpened()` accepts `caseTier >= 2`). Do not build anything new on it.
+
+## 2026-08-18 (2) — THE WORDS BESIDE THE BUTTON ARE DELETED
+
+Owner, on a bank vault card reading **"The vault needs more than any one…"**
+next to a button reading **THE VAULT NEEDS**, under a title plate already
+reading **The vault**: *"Look at how many words there are next to that button…
+fix this instance, but also find other instances where there's so many fucking
+words next to a button. There should be almost no words next to a button.
+Almost none, if any."*
+
+**IT WAS ONE SENTENCE SAWN IN HALF AND PRINTED TWICE.** The docked card row was
+a grid of `[copy bar | button]`: the authored line went in the bar (cut at 40
+chars) and `verbHead()` of the same line went on the button. The COPY BAR IS
+DELETED, in both renderers that had one:
+
+- `city/interactions.js` — `rowsHTML`'s docked branch emits a `<button>` and
+  nothing else. New `verbButton()` decides what that button says: the whole
+  line under 28 caps chars; a line ending in a FIGURE keeps the figure and
+  drops the connective dash ("Order a drink — $12" → `ORDER A DRINK $12`, up to
+  34); a short disambiguating tail survives ("Lift — ground" → `LIFT GROUND`,
+  which is the only thing separating it from `LIFT FLOOR 50`); anything longer
+  falls back to its verb head. `copyText()` and the whole `.itouch-copy` CSS
+  block are gone.
+- `systems/interact.js` — the prison rail's `optChoice` and its
+  `PRISON_INTERACT_TOUCH=false` fallback did the same thing with `.pi-copy`.
+  Same law: `railButton()` puts the authored line ON the button (these labels
+  are short by construction: a 14-char name plus a verb), and the STATUS chip
+  (a meter word, "armed", "counting") rides inside the button as `.pi-act-sub`
+  instead of trailing a prose cell.
+
+**THE VAULT ITSELF.** `cityVaultLabel` returned the LOCK'S SENTENCE as a button
+label — that is where the nine words came from. It returns a verb now (`Open
+the vault` / `Make them open it` / `Try the vault`), and what the door wants is
+said ONCE, WHEN YOU PRESS IT, as a toast that comes and goes: `cityVaultWants`
+folds the lock line together with what is behind the steel. `describe()`'s note
+was NOT promoted onto the card to compensate — the answer to too many words is
+fewer words, not the same words moved up a line.
+
+**THE LOCK LINES THEMSELVES GOT SHORTER** (`city/loyalty.js`, the second time
+this exact complaint has landed on `cityLock` — see 2026-08-05's armory line).
+A refusing door now names ONE route, its cheapest, never `A, or B`: a card
+subtitle is one 11px line and a second clause is guaranteed to be cut mid-word.
+A door that holds keys names its key and stops.
+
+Authored labels that would still have printed a truncated sentence, fixed at
+the source: `Unload every bag here onto the racks` → `Unload the bags`, `Have
+them run it to the warehouse` → `Send it to the warehouse`, `Go through the
+drinks cabinet` → `Open the drinks cabinet`, `Heave a crate into the hold (n/m)`
+→ `Load a crate (n/m)`, `Take lift + snowboard from summit` → `Ride the lift
+up`, `Train — $60 (max HP 120)` → `Train — $60`, `Wire the racks to your
+account` → `Wire the racks out`, `Federal request: post the Guard` → `Post the
+Guard`, plus the captain's board rows.
+
+GATE: MATHGATE ok (90210:329/182/207, 200 ticks, det ok, errors baseline-only).
+
+Trap for the next wave: `describe()`'s `note` field is still authored all over
+the repo and is still not rendered anywhere. Do not "fix" that by printing it —
+it is a wall of standing text one line above a control, which is the thing this
+wave deleted. Either give a note a real home or delete the field.

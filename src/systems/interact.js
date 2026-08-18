@@ -801,24 +801,32 @@
       esc(labelFor(a, v)) + '"><span class="pi-lab">' + esc(shortLabel(a, v)) + "</span>" +
       (sub ? '<span class="pi-sub">' + esc(shortText(sub, subMax || 12)) + "</span>" : "") + "</button>";
   }
-  // Tablet row: the left side says what the option actually does; the right
-  // side is the thumb target. The index is still the canonical doAction index.
-  // SAY IT ONCE (interactions.js's zip-tie law): a copy cell that would only
-  // repeat the button's own word — label === verb, no meter, no teaching line —
-  // is dropped entirely, and the button is the row.
+  /* Tablet row: A BUTTON, AND NOTHING BESIDE IT (owner, 2026-08-18: "there
+     should be almost no words next to a button. Almost none, if any.")
+
+     This rail used to print the authored line in a copy cell and a three-letter
+     verb on the button — "Slip 25 to look away" beside SLIP — which is the
+     same sentence-sawn-in-half the city card was doing. The whole line moves
+     ONTO the button now (it is a short line by construction: these labels are
+     built from a 14-char name and a verb), so the price is still on the thumb
+     target. Only a line too long for a button falls back to its verb head.
+     A pure STATUS chip (a meter word, "armed", "counting") rides along inside
+     the button, where it was always headed. */
+  const RAIL_BUTTON_MAX = 28;
+  function railButton(label, word) {
+    const s = String(label || "").trim().replace(/[?.!]+$/, "");
+    if (s && s.length <= RAIL_BUTTON_MAX) return s;
+    return word;
+  }
   function optChoice(idx, a, v) {
     const label = labelFor(a, v);
     const sub = subFor(a, v);
-    const desc = (CBZ.cityCampaignPrisonDesc && CBZ.cityCampaignPrisonDesc(a, v)) || DESC[v] || "";
-    const detail = [sub, (helpOn && !learned[v]) ? desc : ""].filter(Boolean).join(" · ");
-    const word = shortLabel(a, v).toUpperCase();
-    const dup = !detail && String(label).trim().toUpperCase() === word;
+    const word = railButton(label, shortLabel(a, v)).toUpperCase();
     return '<div class="pi-choice">' +
-      (dup ? "" :
-        '<span class="pi-copy"><span class="pi-choice-label">' + esc(label) + "</span>" +
-        (detail ? '<span class="pi-choice-detail">' + esc(detail) + "</span>" : "") + "</span>") +
       '<button type="button" class="pi-action" data-pi="' + idx + '" aria-label="' +
-      esc(label) + '">' + esc(word) + "</button></div>";
+      esc(label) + '">' + esc(word) +
+      (sub ? '<span class="pi-act-sub">' + esc(shortText(sub, 12)) + "</span>" : "") +
+      "</button></div>";
   }
 
   function renderTouch(a, core, rest, rawNote) {
@@ -845,8 +853,7 @@
       // PRISON_TIPS off (the default): no toggle row at all. The rail is verbs.
       if (tipsAllowed()) {
         pills = '<div class="pi-choice pi-tips-choice">' +
-          '<span class="pi-copy"><span class="pi-choice-label">Teaching tips</span>' +
-          '<span class="pi-choice-detail">Explain unfamiliar actions beside their buttons</span></span>' +
+          '<span class="pi-copy"><span class="pi-choice-label">Teaching tips</span></span>' +
           '<button type="button" class="pi-action pi-tips-action' + (helpOn ? " on" : "") +
           '" data-pi="tips" aria-label="Teaching tips ' + (helpOn ? "on" : "off") + '">' +
           (helpOn ? "TIPS ON" : "TIPS OFF") + "</button></div>";
@@ -977,18 +984,18 @@
       const sub = subFor(a, v);
       const desc = (CBZ.cityCampaignPrisonDesc && CBZ.cityCampaignPrisonDesc(a, v)) || DESC[v] || "";
       if (dockedTouch) {
-        const action = v === "campaign-spy" ? "ACCEPT"
+        // A BUTTON, AND NOTHING BESIDE IT — the same law as the live rail
+        // above (this is the PRISON_INTERACT_TOUCH=false fallback). The
+        // authored line rides ON the button when it fits; the status chip
+        // rides inside it; the teaching sentence is not a control and does
+        // not sit next to one.
+        const word = v === "campaign-spy" ? "ACCEPT"
           : v === "campaign-escape" ? "REFUSE"
           : String((VERB[v] && VERB[v].label) || v).toUpperCase();
-        const detail = (showTips && !learned[v] && desc) ? `<span class="idesc">${desc}</span>` : "";
-        // SAY IT ONCE, here too: this is the PRISON_INTERACT_TOUCH=false
-        // fallback, and it must obey the same law as the live rail above.
-        const dup = !sub && !detail && String(label).trim().toUpperCase() === action;
+        const action = railButton(label, word).toUpperCase();
         return `<div class="iopt tverb tyes" data-i="${i}">` +
-          (dup ? "" :
-            `<span class="itouch-copy"><span class="ilab">${label}</span>` +
-            `<span class="isub">${sub}</span>${detail}</span>`) +
-          `<button type="button" class="itouch-act">${action}</button></div>`;
+          `<button type="button" class="itouch-act">${action}` +
+          (sub ? `<span class="pi-act-sub">${sub}</span>` : "") + `</button></div>`;
       }
       const row = `<div class="iopt" data-i="${i}"><span class="ikey">${(OPT_KEYS[i] || "").toUpperCase()}</span>` +
         `<span class="ilab">${label}</span>` +

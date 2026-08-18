@@ -298,7 +298,7 @@
         find: function (x, z) { return Math.hypot(x - target.x, z - target.z) <= 4.2 ? target : null; },
         options: [{
           id: "snowboard-lift-run", slot: "e",
-          label: function () { return state.mounted ? "Return snowboard" : "Take lift + snowboard from summit"; },
+          label: function () { return state.mounted ? "Return snowboard" : "Ride the lift up"; },
           onSelect: function () { if (state.mounted) dismount(false); else CBZ.startSnowboardRun(); },
         }],
       });

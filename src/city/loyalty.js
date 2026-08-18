@@ -579,19 +579,24 @@
       if (r.k === "people") return r.n + " more " + plural(r.n, "body", "bodies") + " loyal to you";
       if (r.k === "guns") return r.n + " more " + plural(r.n, "gun") + " under your command";
       if (r.k === "money") return "$" + r.n.toLocaleString() + " more";
-      return r.n > 1 ? (r.n + " more claims — rank, a second org, or a uniform they believe")
-                     : "one more claim — a rank, an org, or a uniform they believe";
+      return r.n > 1 ? (r.n + " more claims: rank, an org, a uniform")
+                     : "one more claim: a rank, an org, a uniform";
     }
     opts.sort(function (a, b) { return a.w - b.w; });
     partial.sort(function (a, b) { return a.w - b.w; });
     for (const r of opts) r.line = say(r);
     for (const r of partial) r.line = say(r);
     let line;
-    if (opts.length) line = opts[0].line + (opts[1] ? ", or " + opts[1].line : "");
+    // ONE ROUTE, NOT A LIST (owner, twice now: the armory's four-clause line in
+    // 2026-08-05, and the vault's "more than any one thing can buy — money and
+    // people, together" in 2026-08-18). This sentence is a card SUBTITLE at
+    // 11px on one line; a second "or" clause is guaranteed to be cut mid-word,
+    // so the door names its CHEAPEST route and stops talking.
+    if (opts.length) line = opts[0].line;
     else {
-      // nothing alone is enough — name the shape of the answer, not a fantasy
+      // nothing alone is enough: name the shape of the answer, not a fantasy
       const near = partial.slice(0, 2).map(function (r) { return r.k === "money" ? "money" : (r.k === "people" ? "people" : r.k); });
-      line = "more than any one thing can buy — " + (near.length ? near.join(" and ") + ", together" : "people, guns, money and access, together");
+      line = near.length ? near.join(" and ") + ", together" : "people, guns and money, together";
     }
     return { ok: false, gap: gap, tier: R.key, short: opts, partial: partial, line: line };
   };
@@ -674,9 +679,12 @@
     if (spec.verb && CBZ.cityPowerKnows(spec.verb)) {
       if (CBZ.cityPowerCan(spec.verb)) return { open: true, line: "", route: "power" };
       const need = CBZ.cityPowerNeed(spec.verb);
-      return { open: false, route: null,
-               line: label + " needs " + (keys.length ? ("a " + keys[0] + ", ") : "") +
-                     (orgs.length ? ("the " + orgs[0] + ", ") : "") + need.line + "." };
+      // the door names ITS OWN key first when it has one, and otherwise the
+      // one earned route. Never both plus a ledger clause: that is the line
+      // the HUD truncated mid-word.
+      if (keys.length) return { open: false, route: null, line: label + " needs a " + keys[0] + "." };
+      if (orgs.length) return { open: false, route: null, line: label + " only opens for the " + orgs[0] + "." };
+      return { open: false, route: null, line: label + " needs " + need.line + "." };
     }
     // the ledger cannot answer (flag off / loyalty.js half-loaded) — hand back
     // whatever this door did BEFORE it was ever locked. See `degrade` above.

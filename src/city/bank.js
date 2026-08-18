@@ -1709,17 +1709,33 @@
     }
     return best;
   };
+  /* THE BUTTON IS A VERB, NEVER THE LOCK'S SENTENCE (owner, 2026-08-18, on a
+     card reading "The vault needs more than any one..." beside a THE VAULT
+     NEEDS button: "there should be almost no words next to a button"). The
+     card carries two words; what the door WANTS, and what is behind it, is
+     said once, out loud, WHEN YOU PRESS IT — a toast that comes and goes,
+     never a standing wall of text on the HUD. */
   CBZ.cityVaultLabel = function (v) {
     if (!v) return "";
     const L = vaultLock(v);
-    if (L.open) return L.insider ? "Make them open the vault" : "Open the vault";
-    return L.line || "The vault is locked";
+    if (L.open) return L.insider ? "Make them open it" : "Open the vault";
+    return "Try the vault";
+  };
+  // what the door is waiting for, plus the reason to want it. Spoken on the
+  // press (see cityVaultTry), which is the only place it is ever printed.
+  CBZ.cityVaultWants = function (v) {
+    if (!v) return "";
+    const L = vaultLock(v);
+    const holds = vaultHolds(v);
+    const behind = holds && holds.amount > 0 ? " $" + Math.round(holds.amount).toLocaleString() + " is behind it." : "";
+    if (L.open) return "";
+    return (L.line || "The vault is locked.") + behind;
   };
   CBZ.cityVaultCanOpen = function (v) { return !!(v && !v.open && vaultLock(v).open); };
   CBZ.cityVaultTry = function (v) {
     if (!v || v.open) return false;
     const L = vaultLock(v);
-    if (!L.open) { note(L.line || "The vault is locked. Blow it, or find somebody who can open it.", 2.6); return false; }
+    if (!L.open) { note(CBZ.cityVaultWants(v) || "The vault is locked.", 3); return false; }
     if (L.insider) {
       note("He works the timelock. It swings.", 2.0);
       // the man who opened it under a gun is a witness, and the room knows.

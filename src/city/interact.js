@@ -884,10 +884,13 @@
      the VERBS, exactly as zone-interior-loot owns the search verb and
      interior_programs.js owns everything behind it.
 
-     THE VAULT CARD IS DELIBERATELY HONEST WHEN IT REFUSES. `cityVaultLabel`
-     returns the LOCK's own sentence ("The vault needs …") rather than hiding
-     the card, because a door that silently offers nothing is a wall and a door
-     that tells you what it wants is a gradient — doctrine LAW 1's whole point.
+     THE VAULT CARD IS DELIBERATELY HONEST WHEN IT REFUSES, because a door
+     that silently offers nothing is a wall and a door that tells you what it
+     wants is a gradient (doctrine LAW 1). But honesty is not a paragraph on a
+     button: the row is the verb ("Open the vault" / "Try the vault") and what
+     the door WANTS is a fact about the door, printed on the card's subtitle by
+     the describe() below. Press a door that refuses and the full line still
+     lands in the note channel.
      The bomb route needs no verb at all: you plant C4 on it like any wall. */
   I.registerZone({
     id: "zone-vault-door", kind: "vaultdoor", prio: 9, driving: false,
@@ -1055,7 +1058,7 @@
     options: [
       { id: "freeport-unload", slot: "e",
         canShow: function (t) { return !!t.dock; },
-        label: "Unload every bag here onto the racks",
+        label: "Unload the bags",
         onSelect: function () { CBZ.cashStore.unloadHere(); },
       },
       { id: "freeport-close", slot: "e",
@@ -1573,7 +1576,7 @@
   I.register("vehicle:inside", {
     id: "car-crew-drive", slot: "l", prio: 60,
     canShow: (car, ctx) => ordersOn() && ctx.driving && !car.airClass && aboardCrew(car).length > 0,
-    label: "Have them run it to the warehouse",
+    label: "Send it to the warehouse",
     onSelect: (car) => {
       const crew = aboardCrew(car);
       for (let i = 0; i < crew.length; i++) {

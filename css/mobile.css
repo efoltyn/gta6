@@ -676,38 +676,16 @@ body.touch .mode-escape-only .controls .keys-touch { display: grid; }
   }
   body.touch #interact .iopt.tverb.tno .ilab { color: #fff; font-size: 15px; font-weight: 700; }
   body.touch #interact .iopt.tverb:active { transform: none; box-shadow: none; }
-  body.touch #interact .itouch-copy {
-    min-width: 0;
-    justify-self: end;      /* the bar hugs its words — empty track stays clear glass,
-                               never a painted slab of left-over gradient */
-    max-width: 100%;
-    padding: 7px 10px;
-    border-radius: 10px;
-    background: linear-gradient(90deg, rgba(7,13,20,.45), rgba(7,13,20,.82));
-    text-align: right;
-    text-shadow: 0 2px 4px #000;
-  }
-  body.touch #interact .iopt.tverb .itouch-copy .ilab {
-    display: block;
-    font-size: 15px;
+  /* (the docked copy bar is DELETED — city/interactions.js emits a button and
+     nothing else now: "there should be almost no words next to a button".
+     What a thing IS, or wants, prints on the card's own subtitle above.) */
+  body.touch #interact .itouch-act .pi-act-sub{
+    margin-left: 8px;
+    color: #bfe6f5;
+    font-size: 11px;
     font-weight: 700;
-    line-height: 1.16;
-    letter-spacing: .25px;
-  }
-  body.touch #interact .itouch-copy .isub,
-  body.touch #interact .itouch-copy .idesc {
-    display: block;
-    max-width: none;
-    margin: 3px 0 0;
-    overflow: hidden;
-    color: #cbd6e2;
-    font-size: 10.5px;
-    font-weight: 500;
-    line-height: 1.2;
+    letter-spacing: .4px;
     opacity: .78;
-    text-align: right;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   body.touch #interact .itouch-act {
     grid-column: 2;         /* a deduped row has no copy cell; the button still

@@ -489,7 +489,7 @@
         html += "<div style='font-size:12px;color:#ffd166;margin-top:8px'>RACKS · " + st.bags + "/" + st.cap + " bags · " + money(st.value) + "</div>";
         if (st.stained) html += "<div style='font-size:11px;color:#d98a84'>" + money(st.stained) + " of it is dye-stained (30% fence cut to wire out)</div>";
         if (owedCrew) html += "<div style='font-size:11px;color:#d98a84'>Crew owed " + money(owedCrew) + " — they take it off the rack as you stock it.</div>";
-        if (st.value > 0) actions.push({ label: "Wire the racks to your account", fn: function () { CBZ.cashStore.bankIt(); render(); } });
+        if (st.value > 0) actions.push({ label: "Wire the racks out", fn: function () { CBZ.cashStore.bankIt(); render(); } });
       }
       if (prop.kind === "warehouse" || prop.kind === "compound") {
         html += "<div style='font-size:12px;color:#cdb8ff;margin-top:8px;margin-bottom:3px'>AMMO LOCKER · cap " + ammoCapTotal() + "/weapon</div>";

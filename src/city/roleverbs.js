@@ -216,7 +216,7 @@
   const ROW_TRAIN = {
     id: "rv-train",
     can: function () { return maxHp() < TRAIN_CEIL; },
-    label: function () { return "Train — " + money(TRAIN_COST) + " (max HP " + Math.round(maxHp()) + ")"; },
+    label: function () { return "Train — " + money(TRAIN_COST); },
     run: function (p) {
       if (maxHp() >= TRAIN_CEIL) { note("You're as conditioned as this body gets.", 1.6); return; }
       if (!CBZ.city.spend(TRAIN_COST)) { note("A session runs " + money(TRAIN_COST) + ".", 1.4); return; }
@@ -226,7 +226,7 @@
       paid(p, TRAIN_COST);
       if (CBZ.city.addRespect) CBZ.city.addRespect(1);
       coin(); say(p, "“Again. Last two are the only ones that count.”");
-      note("Trained — max HP " + Math.round(pl.maxHp) + ".", 1.8);
+      note("Trained. Max HP " + Math.round(pl.maxHp) + ".", 1.8);
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     },
   };

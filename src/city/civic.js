@@ -1020,7 +1020,7 @@
         ];
         if (gangList().length > 1) s.push({ key: "n", label: "Name a different crew" + dim("pull the next file"), fn: informNext });
         const seat = canRequest() ? holdsSeat() : null;
-        if (seat) s.push({ key: "u", label: "Federal request: post the Guard" + dim("as " + titleOf(seat.rec)), fn: federalRequest });
+        if (seat) s.push({ key: "u", label: "Post the Guard" + dim("as " + titleOf(seat.rec)), fn: federalRequest });
         return s;
       }
       case "cityannex": {
