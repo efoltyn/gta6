@@ -25,6 +25,14 @@
                      hold-[B] remote stays as the fast path — and it is the
                      ONLY one inside the wire, because a man in a prison yard
                      does not have a phone.
+     • TOUCH — the same grammar, one thumb: systems/touch.js's #tbomb button
+                     (tap = plant, hold = detonate) and the vehicle layer's
+                     DETONATE pill both drive THIS file's own [B] handler by
+                     synthesizing its key edges (touchKeyHold), so the tap/hold
+                     timing, the gates and the refusals here are the single
+                     source of truth on every input. Before 2026-08-16 no touch
+                     control existed at all — a brick on an iPad was a stat
+                     fiction in the prison AND the city.
 
    THE CHARGE HAS A MASS (systems/breach.js). One brick is 5 lb, which is the
    US Army row for a hole ONE MAN can move through; a charge STUCK to something
@@ -552,7 +560,10 @@
     // a bomb in his hand is not browsing his bag — but say ONCE where the bag
     // went: Shift+B reaches inventory.js untouched (wealth.js's chord is
     // city-gated), so nothing is lost, only moved while the charges last.
-    if (g.mode === "escape" && !stashHinted) {
+    // …but never on touch: a touchscreen is NEVER shown a keyboard key, and
+    // there is no conflict to explain there — the bomb has its own button and
+    // the stash keeps its own tap.
+    if (g.mode === "escape" && !stashHinted && !CBZ.touchMode) {
       stashHinted = true;
       note("[B] is the bomb while you carry charges — the stash answers Shift+B.", 2.6);
     }

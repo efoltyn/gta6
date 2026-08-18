@@ -57,6 +57,14 @@
     // hand on the grip
     box(g, 0.150, 0.105, 0.135, mat.skin, 0, -0.145, 0.015, -0.12);
     g.userData.muzzle = new THREE.Vector3(0, 0.045, -1.16);
+    // WHERE THE HANDS GO (systems/gunhands.js reads these; model space,
+    // barrel along -Z, +X = the gun's right flank).
+    g.userData.grips = {
+      support: new THREE.Vector3(0, -0.040, -0.560),   // under the polymer handguard
+      mag: new THREE.Vector3(0, -0.235, -0.285),       // magwell / mag body
+      charge: new THREE.Vector3(0, 0.118, 0.005),      // charging-handle T at the rear of the rail
+      style: "mag",
+    };
     return g;
   };
 })();

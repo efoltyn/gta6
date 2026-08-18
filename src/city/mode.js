@@ -296,9 +296,10 @@
     // very function and every non-city floorAt call recursed to a stack overflow
     // (the prison leg after a city visit crashed the update loop every frame:
     // mouse-look still ran but WASD no longer moved the player).
-    const cityFloor = function (x, z) { return g.mode === "city" ? city.arena.groundHeightAt(x, z) : (baseFloor && baseFloor !== cityFloor ? baseFloor(x, z) : 0); };
-    cityFloor._city = true;
-    CBZ.floorAt = cityFloor;
+    /* systems/solidground.js OWNS CBZ.floorAt. The city declares the field it
+       was built on and stops there — no wrapper, no capture, no _city marker,
+       and therefore none of the recursion the marker existed to prevent. */
+    CBZ.registerGroundBase("city", function (x, z) { return city.arena.groundHeightAt(x, z); });
     city.built = true;
   }
   city.build = build;
@@ -530,11 +531,10 @@
       if (CBZ.fx) CBZ.fx.clear();
       if (CBZ.clearGore) CBZ.clearGore();
       // re-install the floor wrapper in case survival rebuilt CBZ.floorAt after us
-      if (!CBZ.floorAt || !CBZ.floorAt._city) {
-        baseFloor = (CBZ.floorAt && CBZ.floorAt._city) ? baseFloor : CBZ.floorAt;
-        const f = function (x, z) { return g.mode === "city" ? A.groundHeightAt(x, z) : (baseFloor && baseFloor !== f ? baseFloor(x, z) : 0); };
-        f._city = true; CBZ.floorAt = f;
-      }
+      // re-declare the base after a reset; registering is idempotent and there
+      // is nothing to re-capture, so the old "did somebody else wrap us" dance
+      // has no equivalent here
+      CBZ.registerGroundBase("city", function (x, z) { return A.groundHeightAt(x, z); });
 
       // fresh stats for this life
       game.cash = (CBZ.CITY.econ && CBZ.CITY.econ.startCash) || 0;

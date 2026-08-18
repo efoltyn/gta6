@@ -1207,9 +1207,54 @@
       }
     }
 
-    // SPECTATE death-cam: slowly orbit the fallen body, drift to a higher,
+    // SPECTATE death-cam. Two beats, same grammar as the city's WASTED replay
+    // (owner: the city "goes to third person and shows me my death" — the
+    // disaster island now does too). BEAT ONE (surv.deathCam, armed by
+    // modes/survival.js on death): the camera leaves the shoulder rig and does
+    // the city replay's close slow orbit of your fallen body — swooping in from
+    // the exact framing you died with, riding the kill's slow-mo, and terrain-
+    // guarded because the island has hills and sinkholes where the city had
+    // flat streets. BEAT TWO (the original spectate): the orbit hands its final
+    // bearing to the rig and the drift below pulls out to the higher,
     // pulled-back framing so you watch the chaos play out.
     if (CBZ.surv && CBZ.surv.spectating) {
+      const sd = CBZ.surv.deathCam;
+      if (sd) {
+        const p = player.pos;
+        if (sd.ang0 == null) {
+          // seed the orbit AT the current camera bearing/framing → a swoop, not a cut
+          sd.ang0 = Math.atan2(camera.position.z - p.z, camera.position.x - p.x);
+          sd.r0 = Math.max(4.0, Math.min(13, Math.hypot(camera.position.x - p.x, camera.position.z - p.z)));
+          sd.h0 = Math.max(1.4, Math.min(8, camera.position.y - p.y));
+        }
+        sd.t += dt;              // world dt: the death slow-mo stretches the first beat, like the city
+        if (sd.t < (sd.dur || 5.2)) {
+          introT = 0; shakeAmt = 0;   // the replay is steady — same as the city orbit
+          prev.copy(p);               // no velocity spike on the hand-off
+          const ang = sd.ang0 + sd.t * 0.8;                    // the WASTED orbit rate
+          const s = Math.min(1, sd.t / 1.1), e = s * s * (3 - 2 * s);
+          const r = sd.r0 + (5.5 - sd.r0) * e, h = sd.h0 + (3.0 - sd.h0) * e;   // ease into the city's close framing
+          const cx = p.x + Math.cos(ang) * r, cz = p.z + Math.sin(ang) * r;
+          let cy = p.y + h;
+          // a body at a sinkhole's rim or on a slope must not put the lens
+          // under the island (inside the mouth the floor IS the shaft bottom,
+          // so the orbit rides down into the hole with you — correct).
+          if (CBZ.surv.floorAt) cy = Math.max(cy, CBZ.surv.floorAt(cx, cz) + 0.55);
+          camera.position.set(cx, cy, cz);
+          look.set(p.x, p.y + 0.7, p.z); camera.lookAt(look);
+          fov = smoothDamp(fov, 48, fovV, 0.2, fdt);
+          if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
+          camV.x.v = camV.y.v = camV.z.v = 0; lookV.x.v = lookV.y.v = lookV.z.v = 0;   // damp state stays synced for the hand-off
+          return;
+        }
+        // replay over → seed the rig from the orbit's last frame (the offset
+        // below is x=sin(yaw)·…, z=cos(yaw)·…, so yaw = π/2 − ang) and let the
+        // drift pull out from it as one continuous move.
+        CBZ.surv.deathCam = null;
+        cam.yaw = Math.PI / 2 - (sd.ang0 + sd.t * 0.8);
+        cam.pitch = 0.4;
+        camDist = 6.0; zoomTarget = clampZoom(6.0);
+      }
       cam.yaw += fdt * 0.22;
       cam.pitch += (0.52 - cam.pitch) * Math.min(1, fdt * 1.5);
       zoomTarget = clampZoom(zoomTarget + (12.5 - zoomTarget) * Math.min(1, fdt * 1.2));

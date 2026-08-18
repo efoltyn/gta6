@@ -179,7 +179,22 @@
       snitch: p.snitch, gang: p.gang || null, faction: p.faction || null,
       rank: p.rank || null, guard: p.guard || null, homeGuard: p.homeGuard || null,
       gstat: p.gstat || null,
+      // NAME AND SEX RIDE THE STASH. sim/billionaires.js's founder embodiment
+      // (its 35.72 tick) renames a live magnate principal to the founder's own
+      // name/sex AFTER this stash ran — without these two fields the release
+      // path marched a civilian off wearing a billionaire's NAME forever (and
+      // the dossier's founder read with it, via the sid that tick also set).
+      name: p.name, gender: p.gender,
     };
+  }
+  // the canonical-wardrobe switch (CBZ.CONFIG.CITY_VIP_WARDROBE, default on):
+  // cast/release dress through outfits.js's ONE redress path — the same painted
+  // uniforms, suits and gowns every other role wears — instead of the local
+  // flat tint. Feature-detected: no redress hook loaded → the old paint runs.
+  function vipWardrobe() {
+    const C = CBZ.CONFIG;
+    return (!C || C.CITY_VIP_WARDROBE == null || !!C.CITY_VIP_WARDROBE) &&
+      typeof CBZ.cityRedressPed === "function";
   }
   function restorePed(p) {
     const st = p._vipStash; if (!st) return;
@@ -189,13 +204,22 @@
     p.baseSpeed = st.baseSpeed; p.valuables = st.valuables; p.snitch = st.snitch;
     p.gang = st.gang; p.faction = st.faction; p.rank = st.rank;
     p.guard = st.guard; p.homeGuard = st.homeGuard; p.gstat = st.gstat;
+    if (st.name != null) p.name = st.name;
+    if (st.gender != null) p.gender = st.gender;
     p._vipStash = null;
     p.controlled = false; p.vip = null; p.vipLvl = 0; p.vipTitle = null;
     p._drip = null; p._dripKey = null;
     p.rage = null; p.state = "walk"; p.path = null; p.pause = 0.5 + rng();
     p._lvlShown = -1; p._lvlMat = null;          // level.js re-tags the honest read next sweep
     p._vipTagText = null; p._vipTagMat = null;
-    restoreFit(p);
+    // THE BODY WALKS OFF AS WHO IT REALLY IS. restoreFit repainted colors it
+    // sampled at draft time — off a PAINTED (canvas) material that sample is
+    // the white base, and cityPaintSlot then refuses painted meshes anyway, so
+    // a suited/uniformed civilian released wrong and a plain one could release
+    // white. The canonical redress re-derives the look from the restored
+    // identity fields through the exact path every spawn/recast/deal uses.
+    if (vipWardrobe()) { p._vipFit0 = null; CBZ.cityRedressPed(p); }
+    else restoreFit(p);
     if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(p);
   }
 
@@ -236,6 +260,13 @@
   // ---------- drafting (zero new rigs) ------------------------------------
   function draftableCiv(p) {
     if (!p || p.dead || p.isPlayer || p.vendor || p.gang || p.kind !== "civilian") return false;
+    // ADULTS ONLY. Children are kind "civilian" too, and this list never asked
+    // — which is how a child in a hoodie got drafted as the Magnate (billionaire
+    // archetype, founder embodiment, three armed guards) and how a minor could
+    // be handed an SMG as a "close protection" suit. Same age-first law the
+    // wardrobe's own casting gate enforces (outfits.js cityOutfitFor).
+    const band = p.band || (p.char && p.char.band);
+    if (p.child || (band && band !== "adult")) return false;
     if (p.controlled || p.companion || p.recruited || p.vagrant || p._crowd || p._parked || p.inCar || p.enterT > 0) return false;
     if ((p.npcWanted | 0) || p.bounty || p.rage || p.surrender || p.reportState || p.approach || p.ko > 0) return false;
     if (p.isFamily || p.protectGang || p._clubLine || p._clubGoingIn || p.hostage || p.kidnapped) return false;
@@ -344,8 +375,19 @@
       // a boss who isn't theirs; the street still reads "Don" via the tag.
       p.gang = gang.id; p.faction = gang.id; p.rank = "lt";
       p.gstat = { bodies: 8 + ((rng() * 6) | 0), loyalty: 1 };
-      paintFit(p, gang.color);
-    } else if (def.suit != null) paintFit(p, def.suit);
+    }
+    // THE PRINCIPAL DRESSES THROUGH THE ONE WARDROBE (CITY_VIP_WARDROBE).
+    // paintFit tinted torso/collar/legs and nothing else, and could not tint a
+    // painted (canvas) garment at all — which is how a magnate walked his lap
+    // in a kid's hoodie, a don in a cocktail dress, and a senator in a navy
+    // suit with her old shirt's arms. The canonical redress reads the identity
+    // set just above (archetype/job/gang, age/sex ride along) and paints the
+    // real thing: magnate → tux/varied suit, don → the set's colors + bandana,
+    // senator/judge → the composed business suit (their jobFit rows),
+    // star → gown or colored suit. Fallback: the old flat tint, unchanged.
+    if (vipWardrobe()) CBZ.cityRedressPed(p);
+    else if (gang) paintFit(p, gang.color);
+    else if (def.suit != null) paintFit(p, def.suit);
     if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(p);
     const idRec = identityFor(def, p);
     p._identityId = idRec ? idRec.id : null;       // peds.js death hook (separate task) reads this
@@ -361,7 +403,11 @@
     q.hp = q.maxHp = 170; q.baseSpeed = 2.3;
     q.snitch = 0; q.fear = 0; q.alarmed = 0; q.rage = null; q.guard = null;
     q.state = "walk"; q.path = null; q.pause = 0;
-    paintFit(q, def.suit != null ? def.suit : 0x171a21);
+    // canonical wardrobe: "close protection" is a jobFit row (the painted
+    // All Black Tactical) — a guard drafted out of a sundress actually
+    // changes into the detail's blacks now instead of keeping the dress.
+    if (vipWardrobe()) CBZ.cityRedressPed(q);
+    else paintFit(q, def.suit != null ? def.suit : 0x171a21);
     if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(q);
   }
   function castMade(q) {

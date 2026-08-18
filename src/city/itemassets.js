@@ -319,9 +319,15 @@
       }
       model.position.set(0, 0, 0);
       model.rotation.set(0, 0, 0);
-      // a pistol is small enough on a pavement to be missed; the same nudge the
-      // ground-drop path always applied, kept in the one place that owns it.
-      model.scale.setScalar(model.userData && model.userData.weaponSlot === "pistol" ? 1.2 : 1.0);
+      // REAL-DIMENSION SIZING (weapons/weapon-scale.js): pavement drops are
+      // world space, so the world scalar applies directly. The compact-class
+      // READ boost inside the module is the same "a pistol on a pavement is
+      // missed" rule the old 1.2 nudge encoded; that nudge stays as the
+      // module-absent fallback.
+      model.scale.setScalar(
+        (CBZ.weaponWorldScale && CBZ.weaponWorldScale(model.userData.weaponId || id)) ||
+        (model.userData && model.userData.weaponSlot === "pistol" ? 1.2 : 1.0)
+      );
       g.add(model);
       // seat it on its own lowest point so a dropped gun lies ON the ground
       const b = new THREE.Box3().setFromObject(model);
