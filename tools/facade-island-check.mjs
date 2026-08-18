@@ -98,8 +98,20 @@ const COUNT_FN = `
         if (Number.isInteger(n) && n >= 1) boxes += n; else meshes += 1;
       });
       out.push({ style: b.facadeStyle || null, storeys: b.storeys || 0,
+        x: b.x, z: b.z,
         w: Math.round(b.w * 10) / 10, d: Math.round(b.d * 10) / 10,
-        h: Math.round(b.h * 10) / 10, boxes: Math.round(boxes), meshes: meshes });
+        h: Math.round(b.h * 10) / 10, boxes: Math.round(boxes), meshes: meshes,
+        // how far this footprint intrudes into the nearest road corridor
+        // (<= 0 is clear); the grid is 40 m at 7 m wide, drawn from the
+        // island centre, same numbers world/disaster_arena.js lays it with
+        roadBite: (function () {
+          const cx = A.center.x, cz = A.center.z, GRID = 40, HALF = 3.5;
+          const lx = cx + Math.max(-2, Math.min(2, Math.round((b.x - cx) / GRID))) * GRID;
+          const lz = cz + Math.max(-2, Math.min(2, Math.round((b.z - cz) / GRID))) * GRID;
+          const bx = (b.w / 2 + HALF) - Math.abs(b.x - lx);
+          const bz = (b.d / 2 + HALF) - Math.abs(b.z - lz);
+          return Math.round(Math.max(bx, bz) * 10) / 10;
+        })() });
     }
     return out;
   };
@@ -199,6 +211,17 @@ try {
     && b.storeys < defs[b.style].min);
   if (short.length) fail(`tower(s) too short for their grammar: ${short.map((b) => `${b.style} ${b.storeys}<${defs[b.style].min}`).join(", ")}`);
   else pass("every skyline grammar got a tower tall enough for it");
+
+  /* NOTHING STANDS IN THE ROAD. The town used to be scattered on flat ground
+     and the street grid painted over it afterwards, so buildings sat in the
+     middle of the asphalt. Placement now seats every footprint on a kerb, and
+     this is the assertion that keeps it there: a positive roadBite is metres
+     of building inside a road corridor. */
+  const inRoad = dressed.filter((b) => b.roadBite > 0);
+  if (inRoad.length) {
+    fail(`${inRoad.length} building(s) standing in a road: `
+      + inRoad.slice(0, 6).map((b) => `${b.style || "?"} +${b.roadBite}m`).join(", "));
+  } else pass("no building stands in a road corridor");
 
   const hardErrors = consoleErrors.filter((e) => !/favicon|WebGL|SwiftShader/i.test(e));
   if (hardErrors.length) fail(`console errors: ${hardErrors.slice(0, 3).join(" | ")}`);
