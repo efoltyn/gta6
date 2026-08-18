@@ -88,6 +88,12 @@
       ? Math.min(realDt, FEEL_MAX) * scale
       : dt;
 
+    // MATRIX-HOLD FRAME COUNTER: systems that provably left a subtree's world
+    // matrices correct this frame (pedinstance's rig walk, vehicles' strided
+    // far cars) stamp the subtree root with this value and core/matrixskip.js
+    // skips recomposing it. Bumped here so a stamp is only ever good for ONE
+    // frame — any system that stops stamping hands its subtrees straight back.
+    CBZ._matrixOwnStamp = (CBZ._matrixOwnStamp || 0) + 1;
     // updaters are wrapped so a single throw can NEVER freeze the loop
     if (g.state === "playing") {
       g.elapsed += dt;
@@ -121,6 +127,7 @@
   // phases) actually progress across a burst.
   CBZ.stepSim = function (dt) {
     dt = dt || 1 / 60;
+    CBZ._matrixOwnStamp = (CBZ._matrixOwnStamp || 0) + 1;   // same contract as loop()
     CBZ.now = (CBZ.now || performance.now()) + dt * 1000;
     CBZ.wallDt = dt;
     let scale = 1;

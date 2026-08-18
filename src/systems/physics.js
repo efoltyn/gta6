@@ -68,12 +68,16 @@
   // Broadphase query for systems that need to inspect nearby world geometry
   // without resolving a collision. Callers own/reuse `out`; results are the
   // same collider objects from CBZ.colliders, deduplicated across grid cells.
-  const colQuerySeen = new Set();
+  // Dedup across grid cells by stamping the collider with the query id — a
+  // property compare instead of a Set hash per candidate. Same results; this
+  // query runs for every steering ped and crowd agent every frame and the Set
+  // overhead alone profiled at several % of the sim tick.
+  let colQueryId = 0;
   CBZ.queryCollidersNear = function (x, z, radius, out) {
     if (colDirty || colCount !== CBZ.colliders.length) rebuildColliderGrid();
     out = out || [];
     out.length = 0;
-    colQuerySeen.clear();
+    const qid = ++colQueryId;
     // same mode gate as collide(): stamped city colliders are phantom walls
     // in the prison/survival coordinate space, so queries skip them there.
     const cityOn = !CBZ.game || CBZ.game.mode === "city";
@@ -85,8 +89,8 @@
       for (let i = 0; i < bucket.length; i++) {
         const c = bucket[i];
         if (c._city && !cityOn) continue;
-        if (colQuerySeen.has(c)) continue;
-        colQuerySeen.add(c);
+        if (c._qSeen === qid) continue;
+        c._qSeen = qid;
         out.push(c);
       }
     }
@@ -1572,7 +1576,11 @@
   };
 
   function groundAt(x, z, fromY) {
-    let best = CBZ.floorAt ? CBZ.floorAt(x, z) : 0;
+    /* fromY is passed through so the ground can answer with the surface you are
+       actually near, not just the topmost one: over an intact lid the street,
+       inside the room below it the room floor. With no carvings in the world
+       this is byte-identical — solidground.js's fast path ignores it. */
+    let best = CBZ.floorAt ? CBZ.floorAt(x, z, fromY) : 0;
     const plats = CBZ.platforms;
     if (plats.length) {
       const reach = (fromY != null ? fromY : best) + STEP_UP;

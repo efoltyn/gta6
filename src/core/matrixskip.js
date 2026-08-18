@@ -41,6 +41,18 @@
   const proto = THREE.Object3D.prototype;
   const orig = proto.updateMatrixWorld;
   proto.updateMatrixWorld = function (force) {
+    /* MATRIX-AUTHORITY HANDOFF (entities/pedinstance.js): the instancing
+       pass already composes fresh world matrices for every node of every
+       city ped/cop rig each frame (that IS its job — the instance matrices
+       are built from them), and then r128's render walk was recomposing the
+       same ~33k nodes again: measured at most of an 8ms updateMatrixWorld.
+       A rig whose root carries THIS frame's ownership stamp is skipped
+       whole. Self-healing by construction: the stamp only matches while
+       pedinstance is live and stamping every tick — teardown resets the
+       shared counter, a detached/cloned subtree loses the stamped root, a
+       mode switch stops the stamping — and in every one of those cases the
+       equality fails and stock behaviour resumes on the next frame. */
+    if (this._cbzMatrixOwnedFrame !== undefined && this._cbzMatrixOwnedFrame === CBZ._matrixOwnStamp) return;
     if (this.visible === false && this._cbzMatrixAlways !== true) {
       // Parent's world matrix changed while we're hidden: remember, so the
       // first visible update recomposes even though our local flags are clean.

@@ -55,6 +55,13 @@
     box(g, 0.10, 0.135, 0.40, mat.wood, 0, -0.045, 0.255, 0.10);
     box(g, 0.105, 0.17, 0.04, mat.steel, 0, -0.075, 0.455, 0.10);
     g.userData.muzzle = new THREE.Vector3(0, 0.035, -1.245);
+    // WHERE THE HANDS GO — see systems/gunhands.js for the contract.
+    g.userData.grips = {
+      support: new THREE.Vector3(0, -0.070, -0.530),   // under the wood handguard
+      mag: new THREE.Vector3(0, -0.250, -0.300),       // the banana, mid-curve
+      charge: new THREE.Vector3(0.090, 0.075, -0.180), // AK charging handle: RIGHT side of the carrier
+      style: "mag",
+    };
     return g;
   };
 })();

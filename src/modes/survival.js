@@ -418,7 +418,12 @@
   function build() {
     if (surv.built) return;
     surv.arena = CBZ.buildDisasterArena();
-    CBZ.floorAt = function (x, z) { return surv.floorAt(x, z); };
+    /* The BASE is the island with nothing subtracted. The holes are carvings
+       now (world/groundshaft.js registers them), so this must NOT be
+       surv.floorAt — that one subtracts CBZ.survHoles itself and is kept for
+       the bots, which call it directly and are the one actor that cannot
+       climb out. Handing it in here would subtract every hole twice. */
+    CBZ.registerGroundBase("survival", function (x, z) { return surv.arena.groundHeightAt(x, z); });
     surv.built = true;
   }
 

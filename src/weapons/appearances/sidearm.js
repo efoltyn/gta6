@@ -44,6 +44,14 @@
     // hand wrapping the grip
     box(g, 0.125, 0.095, 0.105, mat.skin, 0, -0.135, 0.025, -0.18);
     g.userData.muzzle = new THREE.Vector3(0, 0.042, -0.52);
+    // WHERE THE HANDS GO — see systems/gunhands.js. A pistol is a two-hand
+    // shot: the support hand wraps the firing hand from the gun's LEFT.
+    g.userData.grips = {
+      support: new THREE.Vector3(-0.085, -0.150, -0.040),
+      mag: new THREE.Vector3(0, -0.245, -0.030),
+      charge: new THREE.Vector3(0, 0.036, -0.105),     // rear slide serrations
+      style: "mag",
+    };
     return g;
   };
 })();

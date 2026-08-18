@@ -384,6 +384,8 @@
   const originButtons = Array.from(document.querySelectorAll(".origin-btn"));
   const planeWrap = document.getElementById("originPlaneWrap");
   const planeSelect = document.getElementById("originPlaneSelect");
+  const boatWrap = document.getElementById("originBoatWrap");
+  const boatSelect = document.getElementById("originBoatSelect");
   const rollLine = document.getElementById("originRollLine");
 
   // THE ROSTER IS THE REGISTRY, NOT A LITERAL. This used to read
@@ -411,24 +413,50 @@
   // run-start and matches case-insensitively, so a casing drift here costs a
   // fallback to another airframe rather than a crash.
   const FALLBACK_PLANES = ["B-2 SPIRIT", "Heavy Bomber", "Fighter Jet", "Airliner", "Private Jet", "Helicopter"];
-  function renderPlanes() {
-    if (!planeSelect) return;
-    const live = CBZ.cityOriginPlanes ? CBZ.cityOriginPlanes() : [];
-    const names = live.length ? live.map((p) => p.name) : FALLBACK_PLANES;
-    const chosen = (CBZ.cityOriginPlane && CBZ.cityOriginPlane()) || names[0];
-    planeSelect.innerHTML = "";
-    names.forEach((n) => {
+
+  // ONE SUB-SELECT, TWO STORIES. The pilot picks an airframe and the captain
+  // picks a hull (owner, 2026-08-12: "captain like pilot should let me select
+  // any boat in start menu"), and the strip of buttons, the active class, the
+  // click binding and the "nothing chosen yet -> adopt what is highlighted"
+  // rule are the same in both. Written once, so the second one cannot drift
+  // from the first — the exact fault THE ROSTER IS THE REGISTRY note above
+  // describes, one level up.
+  //   rows: [{ id, label }]  ·  get(): current id  ·  set(id)
+  function renderSub(host, rows, get, set) {
+    if (!host) return;
+    const chosen = get() || (rows[0] && rows[0].id) || null;
+    host.innerHTML = "";
+    rows.forEach((r) => {
       const b = document.createElement("button");
       b.type = "button";
-      b.className = "origin-plane-btn" + (n === chosen ? " active" : "");
-      b.textContent = n;
+      b.className = "origin-plane-btn" + (r.id === chosen ? " active" : "");
+      b.textContent = r.label || r.id;
       b.addEventListener("click", () => {
-        if (CBZ.setCityOriginPlane) CBZ.setCityOriginPlane(n);
-        Array.from(planeSelect.children).forEach((c) => c.classList.toggle("active", c === b));
+        set(r.id);
+        Array.from(host.children).forEach((c) => c.classList.toggle("active", c === b));
       });
-      planeSelect.appendChild(b);
+      host.appendChild(b);
     });
-    if (CBZ.setCityOriginPlane && !(CBZ.cityOriginPlane && CBZ.cityOriginPlane())) CBZ.setCityOriginPlane(chosen);
+    if (chosen && !get()) set(chosen);
+  }
+  function renderPlanes() {
+    const live = CBZ.cityOriginPlanes ? CBZ.cityOriginPlanes() : [];
+    const names = live.length ? live.map((p) => p.name) : FALLBACK_PLANES;
+    renderSub(planeSelect, names.map((n) => ({ id: n, label: n })),
+      () => (CBZ.cityOriginPlane && CBZ.cityOriginPlane()) || null,
+      (n) => { if (CBZ.setCityOriginPlane) CBZ.setCityOriginPlane(n); });
+  }
+  // THE BOAT LIST IS ALREADY TRUE AT THE TITLE SCREEN, which is why there is
+  // no FALLBACK_BOATS beside FALLBACK_PLANES: water_hulls.js registers its
+  // fleet at parse time, so CBZ.cityOriginBoats() answers with real hulls and
+  // real lengths before a world exists. cityOriginBoatKey() resolves the
+  // default (the working trawler the Captain card describes), so the button
+  // lit here is the boat city/captain.js will actually put you on.
+  function renderBoats() {
+    const rows = CBZ.cityOriginBoats ? CBZ.cityOriginBoats() : [];
+    renderSub(boatSelect, rows,
+      () => (CBZ.cityOriginBoatKey && CBZ.cityOriginBoatKey()) || null,
+      (k) => { if (CBZ.setCityOriginBoat) CBZ.setCityOriginBoat(k); });
   }
 
   // `picked` = the player physically clicked a story card. origins.js has
@@ -448,6 +476,11 @@
       const wantPlane = g.cityOrigin === "pilot";
       planeWrap.style.display = wantPlane ? "" : "none";
       if (wantPlane) renderPlanes();
+    }
+    if (boatWrap) {
+      const wantBoat = g.cityOrigin === "captain";
+      boatWrap.style.display = wantBoat ? "" : "none";
+      if (wantBoat) renderBoats();
     }
   }
   CBZ.setCityOrigin = setOrigin;
