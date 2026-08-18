@@ -56,10 +56,23 @@
     // the dug ground IS the ground here; the mask must never eat it
     if (CBZ.groundMaskExempt) CBZ.groundMaskExempt(soilMat);
   }
-  // strata by depth, so a cut face reads as earth rather than as a coloured step
-  const BANDS = [[0.0, 0x6d7a4a], [0.06, 0x8a7150], [0.3, 0x7d6a4c], [0.62, 0x6a6053], [0.85, 0x554f47]];
-  function bandOf(t, out) {
-    let c = BANDS[0][1];
+  /* Strata by depth, so a cut face reads as earth rather than as a coloured
+     step. THE FIRST BAND IS NOT AUTHORED. It is the ground this site replaced,
+     sampled once at build time through world/groundshaft.js's published
+     groundColorAt — the same function the shaft lip uses, so a dig and a
+     sinkhole in the same field agree about what that field looks like. The
+     authored 0x6d7a4a it used to be is a decent guess at grass and wrong
+     everywhere else: on the island it drew a 34 m cream disc in green grass,
+     which reads as damage to the world rather than as a site in it. It stays
+     as the fallback for when the sample comes back with no answer. */
+  const GRASS_FALLBACK = 0x6d7a4a;
+  /* The first earth band starts as soon as a cell has MOVED AT ALL. It used to
+     start at 0.06, which on an 11 m site meant anything cut less than 0.66 m
+     kept the surface colour — so the top terrace of a pit was turf hanging in
+     mid-air over its own cut face. Ground that has been taken away is earth. */
+  const BANDS = [[0.004, 0x8a7150], [0.3, 0x7d6a4c], [0.62, 0x6a6053], [0.85, 0x554f47]];
+  function bandOf(s, t, out) {
+    let c = (s && s.topColor != null) ? s.topColor : GRASS_FALLBACK;
     for (let i = 0; i < BANDS.length; i++) if (t >= BANDS[i][0]) c = BANDS[i][1];
     const k = Math.max(0.35, 1 - t * 0.5);
     out[0] = (((c >> 16) & 255) / 255) * k;
@@ -117,6 +130,10 @@
     /* ONE CARVING FOR THE WHOLE SITE. Everything below the original grade is
        removed material whose floor is the grid — so floorAt, ceilAt, the mask
        and every consumer already understand this place. */
+    /* Sample BEFORE anything of ours is in the scene, so the raycast can only
+       find the ground being replaced. (groundColorAt also skips digSite groups,
+       so a later re-sample would still be right — belt and braces.) */
+    s.topColor = CBZ.groundColorAt ? CBZ.groundColorAt(x, z, surf) : null;
     s.carve = CBZ.addCarving({
       kind: "cyl", x: x, z: z, r: s.span / 2,
       y0: surf - s.maxDepth - 1, y1: surf + 40, open: true, dry: true,
@@ -214,7 +231,7 @@
     const col = [0, 0, 0];
     const H = (i, j) => s.top[idx(s, Math.max(0, Math.min(s.n, i)), Math.max(0, Math.min(s.n, j)))];
     const cellY = (i, j) => Math.min(H(i, j), H(i + 1, j), H(i, j + 1), H(i + 1, j + 1));
-    const push = (x, y, z, t) => { bandOf(t, col); P.push(x, y, z); C.push(col[0], col[1], col[2]); return P.length / 3 - 1; };
+    const push = (x, y, z, t) => { bandOf(s, t, col); P.push(x, y, z); C.push(col[0], col[1], col[2]); return P.length / 3 - 1; };
     for (let dj = 0; dj < s.chunk; dj++) for (let di = 0; di < s.chunk; di++) {
       const i = c0i + di, j = c0j + dj;
       if (i >= s.n || j >= s.n) continue;
@@ -311,7 +328,15 @@
       req.length = 0;
       for (let i = 0; i < sites.length; i++) {
         const s = sites[i];
-        req.push({ x: s.x, z: s.z, r: s.span / 2, y: s.surf, src: s });
+        /* A CELL IS DROPPED WHEN ITS CENTRE LEAVES THE CIRCLE, so the drawn
+           disc's edge is a staircase strictly inside span/2 in places, while
+           the discard was a clean circle AT span/2. The slivers between them
+           were ground thrown away with nothing drawn over it — photographed on
+           the island as a ring of blue triangles round the site, the ocean
+           showing through its own rim. A point at radius p belongs to a cell
+           whose centre is at most p + cell*0.707 out, so pulling the discard in
+           by one cell's diagonal guarantees we draw over everything we remove. */
+        req.push({ x: s.x, z: s.z, r: Math.max(1, s.span / 2 - s.cell * 0.8), y: s.surf, src: s });
       }
       return req;
     });

@@ -497,7 +497,13 @@
         const o = hits[i].object;
         if (!o || !o.isMesh || !o.visible || !o.material) continue;
         let p = o, mine = false;
-        while (p) { if (p.userData && p.userData.groundShaft) { mine = true; break; } p = p.parent; }
+        // anything this project DREW to replace ground is not the ground it
+        // replaced — a shaft's liner, and a dig site's soil, which is the one
+        // that made this worth publishing
+        while (p) {
+          if (p.userData && (p.userData.groundShaft || p.userData.digSite)) { mine = true; break; }
+          p = p.parent;
+        }
         if (mine) continue;
         // a canopy, a roof or a sign is not the ground; the ground is the
         // surface at the height the shaft's own rim was solved from
@@ -525,6 +531,14 @@
     } catch (e) { /* no answer is not a crash: the caller falls back to soil */ }
     return null;
   }
+  /* PUBLISHED, because a second thing needed it. systems/digsite.js was
+     painting its undisturbed surface a hardcoded olive, which is a fine guess
+     for grass and wrong everywhere else — photographed on the island it was a
+     34 m cream disc lying in green grass. It needs the answer this function
+     already works out (including the two things it learned the hard way: a
+     textured plate's material.color is a white TINT, not a colour, and a
+     vertexColors ground needs its face tint applied). One implementation. */
+  CBZ.groundColorAt = groundColorAt;
 
   // The strata ladder: topsoil → clay → silt → weathered rock → bedrock, with
   // the band edges jittered per shaft so no two read as the same wallpaper.

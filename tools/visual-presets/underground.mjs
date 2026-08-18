@@ -342,9 +342,16 @@ async function stageUnderground(input) {
     const a = pickBearing(h.x, h.gy, h.z, (ang) => new T.Vector3(h.x + Math.cos(ang) * d, hy, h.z + Math.sin(ang) * d), { x: h.x, z: h.z, r: h.r, y: h.gy });
     put(h.x + Math.cos(a) * d, hy, h.z + Math.sin(a) * d, h.x, h.gy - Math.min(h.depth * 0.4, 8), h.z);
   } else if (cam.frame === "oblique" && site) {
-    const sy = site.surf + 13;
-    const a2 = pickBearing(site.x, site.surf, site.z, (ang) => new T.Vector3(site.x + Math.cos(ang) * 20, sy, site.z + Math.sin(ang) * 20), { x: site.x, z: site.z, r: site.span * 0.5, y: site.surf });
-    put(site.x + Math.cos(a2) * 20, sy, site.z + Math.sin(a2) * 20, site.x, site.surf - 6, site.z);
+    /* STEEP, AND CLOSE. A pit is invisible from anywhere near its own grade —
+       its rim hides it, which is correct and useless in a photograph. At 20 m
+       out and 13 m up an 11 m pit read as a scuff; the heightfield and the
+       drawn geometry both said -11 and the picture said nothing. This looks
+       down into it. */
+    const ds2 = Math.max(14, site.span * 0.45), sy = site.surf + 19;
+    const a2 = pickBearing(site.x, site.surf, site.z,
+      (ang) => new T.Vector3(site.x + Math.cos(ang) * ds2, sy, site.z + Math.sin(ang) * ds2),
+      { x: site.x, z: site.z, r: site.span * 0.5, y: site.surf });
+    put(site.x + Math.cos(a2) * ds2, sy, site.z + Math.sin(a2) * ds2, site.x, site.surf - 7, site.z);
   } else if (cam.frame === "street" && room) {
     /* Nothing here is discarded — that is the whole claim of this beat — so
        there is no lid to exempt and every hit is a genuine occluder. */
