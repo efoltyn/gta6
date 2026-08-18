@@ -2264,7 +2264,7 @@
     // a live pink-slip duel (city/racecareer.js) holds the oval — one race
     // surface, one race at a time.
     if (CBZ.raceLadder && CBZ.raceLadder.pinkSlip && CBZ.raceLadder.pinkSlip().active) {
-      note("The oval is settling a pink slip — wait for the flag.", 2.2); return;
+      note("The oval is settling a pink slip, wait for the flag.", 2.2); return;
     }
     const P = CBZ.player;
     if (!P || !P.driving) { note("Get in a car to race.", 1.8); return; }
@@ -2347,7 +2347,7 @@
     RACE.label = null;
     if (CBZ.raceHud) { CBZ.raceHud.show(); CBZ.raceHud.lights(-1); }
     const rnd = RC ? (RC.round + 1) : 1, seas = RC ? RC.season : 1;
-    note("GREEN FLAG! Round " + rnd + " · 3 laps — beat the field!", 2.8);
+    note("GREEN FLAG! Round " + rnd + " · 3 laps, beat the field!", 2.8);
   }
   // export the join flow so racing.js's "challenge to a race" can drop the flag.
   CBZ.cityStartSpeedwayRace = startRace;
@@ -2794,7 +2794,7 @@
     const P = CBZ.player;
     // bailed out of the car mid-weekend
     if (!P || !P.driving || !P._vehicle || P._vehicle.dead) {
-      if (RACE.phase === "grid") cancelRD("Race scratched — you left the grid.");
+      if (RACE.phase === "grid") cancelRD("Race scratched, you left the grid.");
       else if (RACE.playerDone) endRaceRD({});          // already home; a walk-off is not a DNF
       else endRaceRD({ dnf: true });
       return;
@@ -2844,7 +2844,7 @@
     RACE.kit.update(dt);
     if (!RACE.playerDone) sectorTick(pt, RACE.kit.time);
     if (fastestLapSweep() && RACE.flapId === "you") {
-      note("FASTEST LAP — " + (CBZ.raceHud ? CBZ.raceHud.fmtT(RACE.flap) : RACE.flap.toFixed(2)), 2.0);
+      note("FASTEST LAP · " + (CBZ.raceHud ? CBZ.raceHud.fmtT(RACE.flap) : RACE.flap.toFixed(2)), 2.0);
     }
 
     // ---- the chequered flag is a PLACE, not the end of the world ------------
@@ -2863,7 +2863,7 @@
       if (prow) { prow.finished = true; prow.finishT = RACE.kit.time; }
       RACE.phase = "cooldown";
       if (CBZ.sfx) CBZ.sfx("coin");
-      note("CHEQUERED FLAG — cool-down lap. The field is still running.", 3.0);
+      note("CHEQUERED FLAG, cool-down lap. The field is still running.", 3.0);
     }
     if (RACE.playerDone) {
       RACE.cooldownT -= dt;
@@ -2988,13 +2988,13 @@
         ? " · Fastest lap " + (CBZ.raceHud.fmtT(RACE.flap)) + " " + RACE.flapName + (wonFL ? " (+$" + fmt(Math.round(FLAP_BONUS * roundMul)) + ")" : "")
         : "";
       CBZ.raceHud.results(rows, {
-        title: opts.dnf ? "DNF — OUT OF THE RACE" : (place === 1 ? "CHEQUERED FLAG — YOU WIN!" : "RACE RESULTS"),
+        title: opts.dnf ? "DNF · OUT OF THE RACE" : (place === 1 ? "CHEQUERED FLAG · YOU WIN!" : "RACE RESULTS"),
         sub: RC ? "Diamond Speedway · Season " + RC.season : "Diamond Speedway",
         foot: (purse ? ("Purse $" + fmt(purse) + " · +" + pointsForPlace(place) + " championship points") : "No purse for a DNF") + flTxt + " · Esc closes",
       });
     }
-    const ord = place === 1 ? "1st — CHECKERED FLAG!" : place === 2 ? "2nd" : place === 3 ? "3rd" : place + "th";
-    note(opts.dnf ? "DNF — the field takes the money." : ("FINISH: " + ord + "  +$" + fmt(purse)), 4.0);
+    const ord = place === 1 ? "1st. CHECKERED FLAG!" : place === 2 ? "2nd" : place === 3 ? "3rd" : place + "th";
+    note(opts.dnf ? "DNF, the field takes the money." : ("FINISH: " + ord + "  +$" + fmt(purse)), 4.0);
     // The career ledger hears the same result the player just saw. Previously
     // Diamond Speedway awarded a private NPC championship and paid cash but
     // left no durable evidence that the PLAYER had raced here.
@@ -3084,7 +3084,7 @@
     else if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(purse);
     if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(playerPlace <= 1 ? 12 : playerPlace <= 3 ? 5 : 1);
     const ptsGained = pointsForPlace(playerPlace);
-    const ord = playerPlace === 1 ? "1st — CHECKERED FLAG!" : playerPlace === 2 ? "2nd" : playerPlace === 3 ? "3rd" : playerPlace + "th";
+    const ord = playerPlace === 1 ? "1st. CHECKERED FLAG!" : playerPlace === 2 ? "2nd" : playerPlace === 3 ? "3rd" : playerPlace + "th";
     note("FINISH: " + ord + "  +$" + fmt(purse) + (RC ? "  ·  +" + ptsGained + " champ pts" : ""), 4.2);
 
     // SEASON FINALE: if the round just wrapped back to 0, crown the champion.
@@ -3279,7 +3279,7 @@
     if (won) {
       const pay = Math.round(bet.stake * bet.odds);
       if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(pay);
-      note("RACE BOOK: " + bet.label + " WINS — ticket pays $" + fmt(pay) + "!", 3.6);
+      note("RACE BOOK: " + bet.label + " WINS, ticket pays $" + fmt(pay) + "!", 3.6);
     } else {
       note("RACE BOOK: " + bet.label + " didn't win. Ticket's a coaster (−$" + fmt(bet.stake) + ").", 3.0);
     }
@@ -3300,7 +3300,7 @@
         BOOK.stake = STAKES[(i + 1) % STAKES.length];
         renderBook();
       } else if (act === "bet") {
-        if (BOOK.bet) { note("One ticket at a time — yours rides on " + BOOK.bet.label + ".", 2.2); return; }
+        if (BOOK.bet) { note("One ticket at a time, yours rides on " + BOOK.bet.label + ".", 2.2); return; }
         if ((g.cash || 0) < BOOK.stake) { note("Not enough cash for that stake.", 1.8); return; }
         const num = t.dataset.num === "you" ? "you" : (t.dataset.num | 0);
         const odds = parseFloat(t.dataset.odds);
@@ -3341,7 +3341,7 @@
       "<span style='color:#7de7ff;font-weight:700'>—</span><span style='color:#7de7ff'>YOURSELF (drive the race and win it)</span><span></span>" +
       "<span style='text-align:right'>" + btn("you", "YOU", PLAYER_ODDS) + "</span></div>";
     h += "<div style='display:flex;justify-content:space-between;align-items:center;font-size:11px;color:#6b7480;margin-top:8px;border-top:1px solid #2c3140;padding-top:6px'>" +
-      "<span>Races run at Diamond Speedway — take the causeway north.</span>" +
+      "<span>Races run at Diamond Speedway, take the causeway north.</span>" +
       "<button data-act='close' style='cursor:pointer;background:#1d2430;border:1px solid #2c3140;border-radius:8px;color:#e8eef7;font-size:12px;padding:3px 12px;font-family:inherit'>Close</button></div>";
     el.innerHTML = h;
   }
@@ -3378,7 +3378,7 @@
       },
       options: [{
         id: "speedway-join", slot: "i",
-        label: function () { return RACE.active ? "Racing — finish your laps" : "JOIN THE RACE"; },
+        label: function () { return RACE.active ? "Racing, finish your laps" : "JOIN THE RACE"; },
         onSelect: function () { if (!RACE.active) startRace(); },
       }, {
         id: "speedway-standings", slot: "e",

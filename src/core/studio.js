@@ -94,7 +94,31 @@
   const CBZ = (window.CBZ = window.CBZ || {});
   if (CBZ.studio) return;                         // idempotent (family guard idiom)
   CBZ.CONFIG = CBZ.CONFIG || {};
+
+  /* ?cfg_ANYTHING=0 WORKS ON A SLICE PAGE TOO.
+
+     src/config.js reads cfg_* out of the query string and writes CBZ.CONFIG
+     before anything else runs, which is how every A/B harness in this repo
+     flips one behaviour and photographs the difference. A games/ page does not
+     load config.js — it loads THIS file and then need()s packs — so no slice
+     page could be A/B'd at all, and a one-line revert flag written into one of
+     them was unreachable from a URL. studio.js is the first tag on every one
+     of those pages, so the same seven lines belong here. Idempotent with
+     config.js: both do `?cfg_X=0` -> CONFIG.X = false, and whichever runs
+     first wins the same answer. */
+  try {
+    if (typeof location !== "undefined" && location.search) {
+      new URLSearchParams(location.search).forEach(function (v, k) {
+        if (k.slice(0, 4) !== "cfg_") return;
+        CBZ.CONFIG[k.slice(4)] = v === "0" || v === "false" ? false
+          : v === "1" || v === "true" ? true : v;
+      });
+    }
+  } catch (e) {}
+
   if (CBZ.CONFIG.STUDIO_V1 == null) CBZ.CONFIG.STUDIO_V1 = true;
+  // one-line reverts for the takeoff repair, so before/after can photograph it
+  if (CBZ.CONFIG.PLANE_SEATING_V1 == null) CBZ.CONFIG.PLANE_SEATING_V1 = true;
 
   /* ---- WHERE src/ IS ------------------------------------------------------
      Derived from this file's own URL, never from the page's location. A page
@@ -211,6 +235,24 @@
       publishes: ["makeCharacter", "animChar", "charPoses"],
     },
 
+    ragdoll: {
+      gives: "REAL DEAD PEOPLE: 13 mass points, Jakobsen sticks, joint limits, " +
+             "ground friction and buoyancy, writing back onto the SAME rig " +
+             "meshes, so a body folds over a kerb, slumps down a stairwell " +
+             "and skids off a shotgun blast instead of rotating rigidly about " +
+             "one axis. The animals' solver (systems/quadruped_ragdoll.js) is " +
+             "a copy of this file's method; this is the original",
+      /* A PAGE THAT LOADS IT MUST ALSO SAY `CBZ.CONFIG.RAGDOLL_ANY_MODE = true`.
+         The file has always gated itself on `game.mode === "city"` — never
+         because the solver cared, only because the city was the one thing with
+         peds when it shipped. The gate is now a capability rather than a name,
+         and it stays OFF by default so no mode starts solving bodies because a
+         string changed. See the RAGDOLL_ANY_MODE block in the file. */
+      needs: ["people"],
+      files: ["city/ragdoll.js"],
+      publishes: ["cityRagdoll", "ragdollStep", "ragdollPin", "ragdollAudit"],
+    },
+
     // ---- being reachable by the engine's shared verbs ----------------------
     caps: {
       gives: "the capability bus. A page calls CBZ.registerMode(id, {caps, " +
@@ -230,7 +272,7 @@
     day: {
       gives: "a DAY made of named blocks. CBZ.dayPlan.define(id, [{id,from}...]) " +
              "answers what block it is, how long until the next and fires a " +
-             "callback when it turns over — wrapping midnight, silent on the " +
+             "callback when it turns over, wrapping midnight, silent on the " +
              "arm, and reading the world's own sun when one is loaded",
       needs: [],
       files: ["systems/dayplan.js"],
@@ -240,7 +282,7 @@
       gives: "light as a FACT. CBZ.fixtures.rig(id, spec) registers fixtures " +
              "with a per-kind schedule and drives their materials for free, " +
              "answers level(x,z) region-aware (a lamp does not shine through " +
-             "a wall) and scale(sensor,x,z) — what a sensor's range is worth " +
+             "a wall) and scale(sensor,x,z), what a sensor's range is worth " +
              "in this much dark. Pair it with `day` for lights-out",
       needs: [],
       files: ["systems/fixtures.js"],
@@ -259,7 +301,7 @@
     rest: {
       gives: "bodies USING furniture: claim a place, walk there, take the " +
              "pose, get up, step clear. CBZ.rest also carries the three " +
-             "load-order repairs that make furniture anchors exist at all — " +
+             "load-order repairs that make furniture anchors exist at all · " +
              "deferred registration, a late re-flush, and a loud count of " +
              "anchors refused for sharing a coordinate key",
       needs: ["people"],
@@ -268,8 +310,8 @@
     },
     rooms: {
       gives: "FURNITURE, and the grammar of a room. CBZ.furnish is the one " +
-             "vocabulary — chair, stool, bench, sofa, bed, desk, table, " +
-             "counter, shelf, locker, lamp — where one call DRAWS the piece " +
+             "vocabulary, chair, stool, bench, sofa, bed, desk, table, " +
+             "counter, shelf, locker, lamp, where one call DRAWS the piece " +
              "at real metric proportions, REGISTERS its sit/sleep anchor and " +
              "hands back the meshes; CBZ.roomShell stamps a floor and four " +
              "open-top walls with a doorway, and CBZ.roomFurnish lays out a " +
@@ -284,7 +326,7 @@
       gives: "furniture that MOVES when you walk into it. CBZ.pushables.add" +
              "({parts, mass, leash, stand}) makes a drawn prop a mass on a " +
              "floor: contact slides it, its collider and its standable top go " +
-             "with it, and the broadphase is dirtied — so the stool you shoved " +
+             "with it, and the broadphase is dirtied, so the stool you shoved " +
              "under the vent is really there to climb",
       needs: ["boot"],
       files: ["systems/pushables.js"],
@@ -345,8 +387,8 @@
     },
     citycore: {
       gives: "THE REAL CITY FABRIC: cityMakeBuilding, the one mint every shell " +
-             "in Gang City comes from — enterable glass towers with pooled " +
-             "instanced panes, stairs, doors, furnished floors — plus buildTown, " +
+             "in Gang City comes from, enterable glass towers with pooled " +
+             "instanced panes, stairs, doors, furnished floors, plus buildTown, " +
              "the street generator that lays a grid of marked roads, sidewalks, " +
              "crosswalks, non-overlapping lots, shops with signs and a skyline " +
              "cluster. Ask for a downtown with CBZ.studio.town(); nothing in it " +
@@ -415,7 +457,7 @@
       publishes: ["cityWaterAt"],
     },
     capeharbor: {
-      gives: "Cape Harbor airfield — the small coastal strip with its apron " +
+      gives: "Cape Harbor airfield, the small coastal strip with its apron " +
              "and helipads, authored well away from Halloran Field so a page " +
              "can raise both and have two airfields to fight over",
       // TWO under-declared dependencies, both silent. capeharbor's builder is
@@ -452,9 +494,9 @@
 
     // ---- the living assets: every animal Gang City owns ---------------------
     bestiary: {
-      gives: "THE WHOLE BESTIARY: 54 species as CBZ.WILDLIFE_SPECIES — lions, " +
+      gives: "THE WHOLE BESTIARY: 54 species as CBZ.WILDLIFE_SPECIES, lions, " +
              "wolves, bears, the gorilla, elephants, dogs, the sea's sharks and " +
-             "orcas — each with its authored stats (hp, speed, danger, bite, " +
+             "orcas, each with its authored stats (hp, speed, danger, bite, " +
              "herd) and a low-poly build() that returns the posed body. Data " +
              "and geometry only: no engine, no spawning, no hunt",
       needs: ["look"],
@@ -470,11 +512,11 @@
     beasts: {
       gives: "animals that WALK, FIGHT and DIE without the full city: the " +
              "shared discovered gait rig (wildlife_rig), the one animal-attack " +
-             "driver creatureFight (lunge, pounce, maul, gore, stomp — windup, " +
+             "driver creatureFight (lunge, pounce, maul, gore, stomp, windup, " +
              "strike, recover, flinch), the land body layer that poses jaws and " +
              "legs through a strike, the verlet corpse solver that lays a dead " +
              "quadruped on its flank with its legs splayed, and the ape move " +
-             "set — a knuckle-walker charges, hammers, backhands, beats its " +
+             "set, a knuckle-walker charges, hammers, backhands, beats its " +
              "chest and PICKS A MAN UP and swings him, which the one generic " +
              "maul could never be",
       /* THE SOLVER RIDES WITH THE FIGHT, and that is a correction, not a
@@ -538,7 +580,7 @@
     blood: {
       gives: "what a body does when something opens it: the directional spray, " +
              "the atomised mist, the ground pool, the wall splat and the drip " +
-             "trail — CBZ.goreImpact and CBZ.gore. Restraint is built in (mist " +
+             "trail. CBZ.goreImpact and CBZ.gore. Restraint is built in (mist " +
              "only on a real crunch, a pool only once the skin is genuinely " +
              "open), so it does not turn every hit into a bloodbath",
       /* ITS OWN PACK, and it is a fair-weather one on purpose. A page that
@@ -1329,9 +1371,44 @@
         af.launch(opts.at.x || 0, opts.at.y || 300, opts.at.z || 0, opts.heading || 0, opts.speed || 160);
       }
     }
+
+    /* THE AIRFRAME'S ORIGIN IS NOT THE MODEL'S ORIGIN, AND NOTHING SAID SO.
+
+       systems/airframe.js treats af.pos as a point gearHeight ABOVE the
+       wheels: step() clamps pos.y to `groundAt + P.gearHeight` and will not
+       let it go lower. The models world/airbase.js hands out are seated the
+       other way round — their wheels sit at local y = 0, because that file
+       exists to put PARKED aeroplanes flat on the concrete. applyTo() copies
+       pos straight through, so the two conventions differed by exactly
+       gearHeight and every flown model rode that high.
+
+       In the air it is invisible: 3.4 m of error at 320 m of altitude is
+       nothing, which is why it survived. On the ground it is the whole first
+       impression — Bomb Survivor's B-2 sat a MEASURED 3.40 m over its own
+       runway, wheels in mid-air, which is what "the plane is floating" was.
+
+       One wrapper reconciles them. The returned group's origin IS the
+       airframe's reference point, and the model hangs below it by exactly the
+       distance down to its own lowest geometry, measured rather than assumed —
+       a model the pack already seated and one it did not both come out right,
+       and a page that never heard of gearHeight cannot get it wrong. */
+    let mount = g;
+    if (CBZ.CONFIG.PLANE_SEATING_V1 !== false &&
+        af && af.spec && af.spec.gearHeight > 0 && THREE.Box3) {
+      const box = new THREE.Box3().setFromObject(g);
+      if (isFinite(box.min.y)) {
+        const drop = -af.spec.gearHeight - box.min.y;
+        if (Math.abs(drop) > 0.01) {
+          mount = new THREE.Group();
+          g.position.y += drop;
+          mount.add(g);
+        }
+      }
+    }
+
     const parent = opts.parent || CBZ.scene;
-    if (parent && parent.add) parent.add(g);
-    return { group: g, af: af };
+    if (parent && parent.add) parent.add(mount);
+    return { group: mount, af: af };
   };
 
   /* drop(obj) — REMOVE IT AND GIVE THE MEMORY BACK.
@@ -1518,6 +1595,48 @@
 
     let throttleSlider = null;
     const furniture = [];
+
+    /* THE RIGHT-HAND FURNITURE IS ONE BLOCK, SAT DOWN ON THE RADAR.
+
+       The verbs used to march LEFTWARD along the bottom edge — right: 24, 120,
+       216 — which walks a second button into the middle of the screen and, on
+       a flying page, strands it under a throttle slider it has nothing to do
+       with. They are one column now: the slider outboard where it is dragged,
+       the verbs inboard where they are tapped, every top edge on one line.
+
+       AND THE BLOCK SITS AS LOW AS THE SCREEN ALLOWS. It used to float in the
+       middle of the right edge with ~60 px of dead air under it and the radar
+       marooned below that, because each piece was placed by a number somebody
+       picked rather than against the thing it had to clear. BASE is that thing
+       stated once: the scope is RADAR px tall standing RADAR_GAP off the
+       bottom, so nothing may come below its top edge plus a little air — and
+       the whole cluster is built UP from that line.
+
+       env(safe-area-inset-bottom) is in there because the furniture layer is
+       `inset:0` on the RAW viewport while the radar is placed with the inset,
+       so a plain pixel number here and a calc() there drift apart by the
+       height of the home indicator and the two overlap on exactly the phones
+       this layout is for.
+
+       PWR's cap is the alignment reference: microboot draws it CAP_INSET
+       inside the slider's own top edge, and the slider is sized so that line
+       lands on the TOP button's top edge. The column fills BOTTOM-UP in
+       declaration order, so the verb a page lists first — the one pressed
+       every few seconds — is nearest the resting thumb, and a rare armed verb
+       (a nuke) is the one you reach up for. */
+    const RADAR = 132, RADAR_GAP = 14, AIR = 14;
+    const BASEPX = RADAR_GAP + RADAR + AIR;                  // 160 px of scope + air
+    const BASE = "calc(" + BASEPX + "px + env(safe-area-inset-bottom,0px))";
+    const CAP_INSET = 6;                      // .mt-slider>b { top: 6px }
+    const BTN = 76, BTN_GAP = 14;
+    const nBtn = Object.keys(btnDefs).length;
+    const STACK_H = nBtn * BTN + Math.max(0, nBtn - 1) * BTN_GAP;
+    // the throttle is as tall as the stack it aligns to, floored so a page
+    // with a single verb still gets a slider long enough to drag accurately
+    const PWR = { right: 24, width: 46, height: Math.max(150, STACK_H + CAP_INSET) };
+    // where the cap's top edge lands, measured up from the same base
+    const STACK_TOP = BASEPX + PWR.height - CAP_INSET;
+
     if (coarse) {
       T.init({});
       // A FLYING GAME ON A PHONE NEEDS A THROTTLE, and holding a key is not an
@@ -1525,7 +1644,8 @@
       // to the one control that actually needs to be held at a value.
       if (kind === "fly" && T.addSlider) {
         throttleSlider = T.addSlider({
-          label: "PWR", value: 0.72, right: 24, bottom: 210, height: 168,
+          label: "PWR", value: 0.72, right: PWR.right, bottom: BASE,
+          width: PWR.width, height: PWR.height,
           onChange: function (v) { C.throttle = v; },
         });
         furniture.push(throttleSlider);
@@ -1534,17 +1654,36 @@
          touchscreen has no keys, so a page that never thinks about it ships a
          ten minute half nobody can stop. Added here, once, above the page. */
       if (opts.pause !== false) {
+        // TOP LEFT, UNDER THE HEALTH METER — the only free corner. The right
+        // one is a column the HUD already owns: .scr sits at top 13 and .fd
+        // runs from top 86 down, so a 44 px button at top 16 on that side
+        // landed ON the score, which is exactly how it shipped. Health is
+        // ~48 px tall from top 14, so 64 clears it.
         furniture.push(T.addButton({
-          label: "II", size: 44, right: 22, top: 16,
+          label: "II", size: 44,
+          left: "calc(14px + env(safe-area-inset-left,0px))",
+          top: "calc(64px + env(safe-area-inset-top,0px))",
           onDown: function () { if (CBZ.micro) CBZ.micro.paused = !CBZ.micro.paused; },
         }));
       }
+      // inboard of the slider when there is one, on the outside edge when
+      // there is not — a walking surface has no throttle to clear
+      const colRight = throttleSlider ? PWR.right + PWR.width + 16 : 24;
       let i = 0;
       for (const name in btnDefs) {
         (function (n, idx) {
+          // idx 0 is the bottom of the stack; the last one declared lands with
+          // its top edge on STACK_TOP, level with the PWR cap
+          // idx 0 is the bottom of the stack. With a slider the stack hangs
+          // from its cap; without one it stands straight on BASE. Either way
+          // the lowest button never comes below BASE, which is the radar.
+          const up = idx * (BTN + BTN_GAP);
+          const bottom = throttleSlider
+            ? "calc(" + (STACK_TOP - STACK_H + up) + "px + env(safe-area-inset-bottom,0px))"
+            : "calc(" + (BASEPX + up) + "px + env(safe-area-inset-bottom,0px))";
           handles[n] = T.addButton({
-            label: btnDefs[n], word: String(btnDefs[n]).length > 2, size: 76,
-            right: 24 + idx * 96, bottom: kind === "fly" ? 108 : 132,
+            label: btnDefs[n], word: String(btnDefs[n]).length > 2, size: BTN,
+            right: colRight, bottom: bottom,
             onDown: function () { state.held[n] = true; state.tapped[n] = true; },
             onUp: function () { state.held[n] = false; },
           });

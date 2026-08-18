@@ -161,7 +161,7 @@
         "<div class='stg-hint' id='stgCloseHint'>Close <b>[Esc]</b></div>" +
       "</div>" +
       "<div class='stg-section'>" +
-        "<h4>PERFORMANCE — QUALITY</h4>" +
+        "<h4>PERFORMANCE. QUALITY</h4>" +
         "<div class='stg-row'>" +
           "<label for='stgAuto'>Auto (adaptive)</label>" +
           "<input type='checkbox' id='stgAuto'>" +
@@ -172,9 +172,9 @@
       "<div class='stg-section'>" +
         "<h4>NPC POPULATION</h4>" +
         rangeRow("stgCrowdDensity", "Crowd density (visible nearby)", 0, 1600, 20, 720, false) +
-        "<div class='stg-note'>Live — applies immediately.</div>" +
+        "<div class='stg-note'>Live, applies immediately.</div>" +
         rangeRow("stgTotalPop", "Total population", 60, 900, 20, 140, false) +
-        "<div class='stg-note warn'>Applies next time you load in — not instant (total population is fixed at boot).</div>" +
+        "<div class='stg-note warn'>Applies next time you load in, not instant (total population is fixed at boot).</div>" +
       "</div>" +
       "<button class='stg-close' id='stgCloseBtn'>Done</button>";
 

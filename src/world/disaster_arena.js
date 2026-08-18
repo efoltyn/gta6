@@ -42,6 +42,12 @@
   // the flat y=0 floor out to infinity, and you walk on the sea.
   if (CBZ.CONFIG.SURV_SEABED == null) CBZ.CONFIG.SURV_SEABED = true;
 
+  // SURV_FACADES — dress the island's town with the facade kit's registered
+  // grammars, one per building, so every style can be walked around in the
+  // mode that loads in seconds. ON by default: this island is the kit's
+  // showroom. ?cfg_SURV_FACADES=0 gives the plain island back.
+  if (CBZ.CONFIG.SURV_FACADES == null) CBZ.CONFIG.SURV_FACADES = true;
+
   /* ---- THE SURVIVAL WATER QUERIES ---------------------------------------
      One surface, three questions, all answered off world/water_spec.js's
      canonical swell table — the same one the shader displaces by. These are
@@ -162,6 +168,130 @@
   const WT = 0.3;     // wall thickness
   const SW = 3.6;     // broad stairwell strip (two easy lanes along the -x interior wall)
   const DOORW = 1.8;  // front doorway width
+
+
+  /* ============================================================
+     THE FACADE KIT ON THE ISLAND (city/facade_kit.js + city/facades/*.js)
+     ============================================================
+     The kit's contract is a ctx of the host's REAL numbers plus a handful of
+     emitters — it never touches THREE, the scene graph or the collider arrays
+     itself. buildings.js hands it that ctx for a city lot; this hands it the
+     same ctx for an island building, so all 31 registered grammars can be
+     walked around in the mode that loads in seconds instead of booting the
+     whole city.
+
+     Two things this has to get right or it would be a performance trap:
+
+       1. MERGE. A facade emits hundreds to a few thousand boxes. One mesh
+          each would be 30 000 draw calls on a 27-building island. So dbox
+          collects a BoxGeometry per call, keyed by colour, and the whole
+          bucket is merged into ONE mesh per colour at the end — exactly what
+          buildings.js's flushDeco does, for exactly the same reason.
+       2. THE GROUP. Everything lands in the building's own group, so the
+          earthquake still topples a dressed building as a single piece and
+          the arena's teardown still frees it.
+
+     Deco is collision-free by construction: colliders and platforms come from
+     the arena's own lbox/tbox walls, and a facade may only add a walk surface
+     through ctx.plat (a porch deck or a flight of steps), never a wall.
+  ============================================================ */
+  function shadeHex(hex, f) {
+    const r = Math.max(0, Math.min(255, (((hex >> 16) & 255) * f) | 0));
+    const g2 = Math.max(0, Math.min(255, (((hex >> 8) & 255) * f) | 0));
+    const b = Math.max(0, Math.min(255, ((hex & 255) * f) | 0));
+    return (r << 16) | (g2 << 8) | b;
+  }
+
+  // o: { group, ox, oz, gy, w, d, storeys, fh, wt, rTop, pp, doorSide, color,
+  //      style, plats }
+  function dressIslandFacade(o) {
+    if (!CBZ.dressFacade || !o.style) return null;
+    if (CBZ.CONFIG && CBZ.CONFIG.SURV_FACADES === false) return null;
+    const THREE = window.THREE;
+    const mat = CBZ.mat;
+    const deco = new Map();          // colour -> [BufferGeometry]
+    const group = o.group, ox = o.ox, oz = o.oz, gy = o.gy;
+
+    function dbox(lx, ly, lz, bw, bh, bd, col) {
+      if (!(bw > 0) || !(bh > 0) || !(bd > 0)) return;
+      if (!Number.isFinite(lx + ly + lz + bw + bh + bd)) return;
+      const g2 = new THREE.BoxGeometry(bw, bh, bd);
+      g2.translate(lx, ly, lz);
+      const key = col >>> 0;
+      let list = deco.get(key);
+      if (!list) { list = []; deco.set(key, list); }
+      list.push(g2);
+    }
+    function addMesh(geo, col, lx, ly, lz, emissive) {
+      const m = new THREE.Mesh(geo, emissive ? mat(col, { emissive: col, ei: 0.8 }) : mat(col));
+      m.position.set(lx, ly, lz);
+      m.castShadow = !emissive; m.receiveShadow = true;
+      group.add(m);
+      return m;
+    }
+
+    const ctx = {
+      ox: ox, oz: oz, w: o.w, d: o.d, storeys: o.storeys,
+      FH: o.fh, WT: o.wt, rTop: o.rTop, pp: o.pp, doorSide: o.doorSide,
+      slabCx: 0, slabCz: 0, slabW: o.w - 2 * o.wt, slabD: o.d - 2 * o.wt,
+      garageGround: false, showroom: false, civic: null,
+      dress: { style: o.style },
+      pal: { wall: o.color, stone: shadeHex(o.color, 1.14), dirt: 0x2a2420, kind: "brick", id: null },
+      color: o.color,
+      TRIM: shadeHex(o.color, 1.16),
+      BASE: shadeHex(o.color, 0.60),
+      PIL: shadeHex(o.color, 1.06),
+      MULL: 0x39404a,
+      hash: function (salt) { return CBZ.hash01 ? CBZ.hash01(ox, oz, salt) : 0.42; },
+      dbox: dbox,
+      // A facade never needs a collider on this island — the arena's own walls
+      // already carry them — so lbox is deliberately the deco path too.
+      lbox: function (lx, ly, lz, bw, bh, bd, col) { dbox(lx, ly, lz, bw, bh, bd, col); },
+      plat: function (lx0, lx1, lz0, lz1, top, ramp) {
+        const p = { minX: ox + lx0, maxX: ox + lx1, minZ: oz + lz0, maxZ: oz + lz1, top: gy + top };
+        if (ramp) {
+          p.ramp = { z0: oz + ramp.z0, z1: oz + ramp.z1, y0: gy + ramp.y0, y1: gy + ramp.y1 };
+        }
+        CBZ.platforms.push(p); if (o.plats) o.plats.push(p);
+      },
+      ball: function (lx, ly, lz, r, col) { addMesh(new THREE.SphereGeometry(r, 10, 7), col, lx, ly, lz); },
+      column: function (lx, ly, lz, r, h, col, seg) {
+        addMesh(new THREE.CylinderGeometry(r, r, h, seg || 12), col, lx, ly + h / 2, lz);
+      },
+      cone: function (lx, ly, lz, r, h, col) { addMesh(new THREE.ConeGeometry(r, h, 14), col, lx, ly + h / 2, lz); },
+      dome: function (lx, ly, lz, r, col) {
+        addMesh(new THREE.SphereGeometry(r, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), col, lx, ly, lz);
+      },
+      lamp: function (lx, ly, lz, r, col) { addMesh(new THREE.SphereGeometry(r, 8, 6), col, lx, ly, lz, true); },
+      disc: function () {},                 // clock faces: civic only, not here
+      plaque: function () {}, seal: function () {},
+    };
+
+    const def = CBZ.dressFacade(ctx);
+
+    // ---- flush the merged deco buckets (one mesh per colour) --------------
+    const BGU = THREE.BufferGeometryUtils;
+    deco.forEach(function (geos, col) {
+      const m2 = mat(col);
+      if (BGU && BGU.mergeBufferGeometries && geos.length > 1) {
+        const merged = BGU.mergeBufferGeometries(geos);
+        for (const g2 of geos) g2.dispose();
+        if (merged) {
+          const m = new THREE.Mesh(merged, m2);
+          m.castShadow = false; m.receiveShadow = true;
+          group.add(m);
+        }
+      } else {
+        for (const g2 of geos) {
+          const m = new THREE.Mesh(g2, m2);
+          m.castShadow = false; m.receiveShadow = true;
+          group.add(m);
+        }
+      }
+    });
+    deco.clear();
+    return def;
+  }
 
   CBZ.buildDisasterArena = function () {
     if (arena) return arena;
@@ -553,7 +683,7 @@
       return { max: mx, min: mn };
     }
 
-    function makeBuilding(ox, oz, w, d, storeys, color, gy) {
+    function makeBuilding(ox, oz, w, d, storeys, color, gy, style) {
       const bgroup = new THREE.Group();
       bgroup.position.set(ox, gy, oz);
       root.add(bgroup);
@@ -600,11 +730,18 @@
         }
       }
 
-      // ground-floor foundation: a solid walkable slab at the floor reference
-      // (gy = the footprint's high point), extending down to bury any gap on
-      // the low side. This gives a flat indoor ground floor to walk and the
-      // base the stairs climb from, instead of bumpy terrain poking through.
-      lbox(0, -0.35, 0, w - WT, 0.7, d - WT, 0x6c7178, { plat: true });
+      /* GROUND-FLOOR FOUNDATION: a solid walkable slab at the floor reference
+         (gy = the footprint's high point), extending down to bury any gap on
+         the low side. This gives a flat indoor ground floor to walk and the
+         base the stairs climb from, instead of bumpy terrain poking through.
+
+         Its top used to sit at EXACTLY gy, which is the height the lot was
+         levelled to — so on a flat lot the slab and the island's grass were
+         coplanar across the whole room and z-fought, and you stood in a room
+         with a grass floor. It is lifted 8 cm clear (a step far under physics
+         STEP_UP, so you still walk straight in) and squared out to the full
+         footprint, so no sliver of terrain shows along the wall line either. */
+      lbox(0, -0.27, 0, w, 0.7, d, 0x6c7178, { plat: true });
 
       const wallOpt = { solid: true, los: true };
       for (let k = 0; k < storeys; k++) {
@@ -685,8 +822,19 @@
         lbox(ixMin + SW / 2, (k + 1) * FH - 0.1, lzc, SW, 0.2, LD + 0.2, 0xb4b9c1, { plat: true, los: true, cast: false });
       }
 
+      // THE FACADE. Emitted last so it dresses the finished shell, and into
+      // this building's own group so the quake still topples it as one piece.
+      dressIslandFacade({
+        group: bgroup, ox: ox, oz: oz, gy: gy, w: w, d: d, storeys: storeys,
+        fh: FH, wt: WT, rTop: rTop, pp: 0.7, doorSide: 0,   // the door is on -z
+        color: color, style: style, plats: plats,
+      });
+
       const b = {
-        group: bgroup, ox, oz, gy, x: ox, z: oz, w, d, h: storeys * FH,
+        group: bgroup, ox, oz, gy, x: ox, z: oz, w, d, h: storeys * FH, storeys,
+        facadeStyle: style || null,        // so a tool can photograph "the pagoda one"
+        floorTop: gy + 0.08,               // the walkable ground-floor surface, published
+                                           // so a probe can assert nothing grows through it
         colliders: cols, platforms: plats, glass: glassList, fallen: false,
       };
       fragile.push(b);
@@ -699,7 +847,7 @@
     // (high ground for the tsunami). Still one group so the quake topples the
     // whole thing; its walls/floors register as height-gated colliders +
     // walkable platforms (collapse yanks them all). ----
-    function makeTower(ox, oz, w, d, h, color) {
+    function makeTower(ox, oz, w, d, h, color, style) {
       const gy = groundHeightAt(ox, oz);
       const g = new THREE.Group();
       g.position.set(ox, gy, oz);
@@ -767,7 +915,17 @@
       const capm = new THREE.Mesh(new THREE.BoxGeometry(iw * 0.7, 1.2, id * 0.5), mat(0x8b9097));
       capm.position.set(0, realH + 0.6, id * 0.55); capm.castShadow = true; g.add(capm);
 
-      const b = { group: g, ox, oz, gy, x: ox, z: oz, w, d, h: realH, colliders: cols, platforms: plats, glass: glassT, fallen: false };
+      // THE FACADE — the tower grammars (bundled tube, braced tube, setback
+      // ziggurat, radiator crown …) declare minStoreys in the range these
+      // island towers actually reach, so they get the skyline half of the kit.
+      dressIslandFacade({
+        group: g, ox: ox, oz: oz, gy: gy, w: w, d: d, storeys: storeys,
+        fh: FH, wt: TW, rTop: realH, pp: 0.6, doorSide: 0,
+        color: color, style: style, plats: plats,
+      });
+
+      const b = { group: g, ox, oz, gy, x: ox, z: oz, w, d, h: realH, storeys,
+        facadeStyle: style || null, colliders: cols, platforms: plats, glass: glassT, fallen: false };
       fragile.push(b);
 
       // ---- the elevator car: a slab that rides the central shaft, gy → roof ----
@@ -833,6 +991,43 @@
       : new THREE.MeshBasicMaterial({ color: 0xf2d14a, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
     const roadSegs = [];
     const ROADW = 7;
+    /* THE STREET GRID, declared HERE rather than beside the code that draws
+       it, because the buildings have to be placed with it in mind and they go
+       down first. It used to be declared after the town loop, which is exactly
+       why nothing consulted it: the houses were scattered on flat ground and
+       the asphalt was then painted straight through them. */
+    const GRID = 40;                 // avenue / cross-street pitch
+    const KERB = ROADW / 2 + 1.4;    // corridor half-width plus a verge
+
+    // The nearest grid line to a coordinate, and how far off it we are.
+    function nearestLine(v, origin) {
+      const k = Math.max(-2, Math.min(2, Math.round((v - origin) / GRID)));
+      return { line: origin + k * GRID, off: v - (origin + k * GRID) };
+    }
+    // Does this footprint sit in a road corridor? Avenues run along z at a
+    // fixed x, cross-streets along x at a fixed z, so each axis is tested
+    // against its own family of lines.
+    function onRoad(x, z, w, d) {
+      const a = nearestLine(x, cx), c = nearestLine(z, cz);
+      return Math.abs(a.off) < w / 2 + KERB || Math.abs(c.off) < d / 2 + KERB;
+    }
+    /* Push a footprint OFF the nearer road and stand it on the kerb, facing
+       the street. A town whose buildings line its streets reads as a town;
+       the same buildings scattered between them read as a sample book, and
+       the ones that landed ON the asphalt read as a bug — which is what they
+       were. Returns null when the candidate cannot be seated without landing
+       in the other family of roads. */
+    function faceStreet(x, z, w, d) {
+      const a = nearestLine(x, cx), c = nearestLine(z, cz);
+      // snap on whichever axis the candidate is already closest to a line
+      const snapX = Math.abs(a.off) <= Math.abs(c.off);
+      const half = snapX ? w / 2 : d / 2;
+      const near = snapX ? a : c;
+      const side = near.off >= 0 ? 1 : -1;
+      const seat = near.line + side * (KERB + half + 0.6);
+      const nx = snapX ? seat : x, nz = snapX ? z : seat;
+      return onRoad(nx, nz, w, d) ? null : { x: nx, z: nz };
+    }
     function layRoadLine(fixed, vertical) {
       const step = 4, segs = [];
       let runStart = null;
@@ -968,16 +1163,45 @@
       box(ox, gy + SH + 1.1, fz + 0.36, 8.6, 1.05, 0.1, 0xeafff2);
     }
 
+    /* ---- WHICH FACADE GOES ON WHICH BUILDING -------------------------------
+       The registry is the source of truth, not a list copied into this file:
+       a grammar that declares minStoreys is a SKYLINE grammar and belongs on
+       the downtown towers, everything else is low-rise and belongs in the
+       town. Sorted by id so the island is the same on every boot, and the
+       town/tower counts grow to cover the registry, so adding a facade file
+       adds a building here rather than quietly going unseen.
+
+       Read from the registry REGARDLESS of SURV_FACADES: the flag turns the
+       ornament off, never the town plan. The island is meant to be learnable,
+       so flipping a cosmetic flag must not move a building or change a
+       tower's height — dressIslandFacade is the only thing the flag gates,
+       and it checks the flag itself.                                       */
+    const facadeIds = CBZ.facadeList
+      ? CBZ.facadeList().map(function (f) { return f.id; }).sort() : [];
+    const lowIds = facadeIds.filter(function (id) {
+      const def = CBZ.facadeDef && CBZ.facadeDef(id); return def && !def.minStoreys;
+    });
+    const towerIds = facadeIds.filter(function (id) {
+      const def = CBZ.facadeDef && CBZ.facadeDef(id); return def && def.minStoreys > 0;
+    });
+
     // place the town in a loose ring, ONLY on flat ground (off the mountain
     // and hill skirts so terrain never pokes through a floor), no overlaps
     const placed = [];
-    let attempts = 0, want = 18;
-    while (placed.length < want && attempts < 600) {
+    let attempts = 0, want = Math.max(18, lowIds.length);
+    while (placed.length < want && attempts < 1400) {
       attempts++;
       const a = rng() * Math.PI * 2;
       const dist = 44 + rng() * (R - 60);
-      const x = cx + Math.cos(a) * dist, z = cz + Math.sin(a) * dist;
       const w = 6.5 + rng() * 4.5, d = 7 + rng() * 4.5;
+      // Seat it on the kerb of the nearest street FIRST, then judge the ground
+      // under where it will actually stand — testing the terrain at the
+      // candidate and moving it afterwards is how a building ends up half in
+      // a hillside.
+      const seat = faceStreet(cx + Math.cos(a) * dist, cz + Math.sin(a) * dist, w, d);
+      if (!seat) continue;
+      const x = seat.x, z = seat.z;
+      if (Math.hypot(x - cx, z - cz) > R - 34) continue;         // stay off the shore
       const ter = footprintTerrain(x, z, w, d);
       if (ter.max - ter.min > 0.45 || ter.max > 1.8) continue;   // must be flat-ish
       let clash = false;
@@ -985,12 +1209,14 @@
       if (clash) continue;
       const storeys = 1 + ((rng() * 3) | 0);    // 1..3 (roof is the top level)
       const color = PALETTE[(rng() * PALETTE.length) | 0];
-      makeBuilding(x, z, w, d, storeys, color, ter.max);   // sit on the high point
+      const style = lowIds.length ? lowIds[placed.length % lowIds.length] : null;
+      makeBuilding(x, z, w, d, storeys, color, ter.max, style);   // sit on the high point
       placed.push({ x, z, w, d });
     }
 
     // ---- city grid: streets, then a skyline of really tall towers ----
-    const GRID = 40;
+    // (GRID / KERB / onRoad / faceStreet are declared up by ROADW — the town
+    // is placed against this grid long before the asphalt is drawn.)
     for (let k = -2; k <= 2; k++) {
       layRoadLine(cx + k * GRID, true);    // avenues (run along z)
       layRoadLine(cz + k * GRID, false);   // cross-streets (run along x)
@@ -998,21 +1224,35 @@
 
     // a downtown cluster of tall towers, plus a few outliers, on flat ground
     const TOWER_PALETTE = [0x5b6b82, 0x6f7e96, 0x8a98ac, 0x49566b, 0x7a6f8c, 0x5e7d86];
-    let tAttempts = 0, tWant = 9;
+    let tAttempts = 0, tWant = Math.max(9, towerIds.length);
     let towers = 0;
-    while (towers < tWant && tAttempts < 500) {
+    while (towers < tWant && tAttempts < 900) {
       tAttempts++;
       const a = rng() * Math.PI * 2;
       const dist = 40 + rng() * (R - 56);
-      const x = cx + Math.cos(a) * dist, z = cz + Math.sin(a) * dist;
       const w = 7 + rng() * 5, d = 7 + rng() * 5;
+      const seat = faceStreet(cx + Math.cos(a) * dist, cz + Math.sin(a) * dist, w, d);
+      if (!seat) continue;
+      const x = seat.x, z = seat.z;
+      if (Math.hypot(x - cx, z - cz) > R - 34) continue;
       const ter = footprintTerrain(x, z, w, d);
       if (ter.max - ter.min > 0.45 || ter.max > 1.6) continue;   // flat ground only
       let clash = false;
       for (const p of placed) { if (Math.abs(p.x - x) < (p.w + w) / 2 + 5 && Math.abs(p.z - z) < (p.d + d) / 2 + 5) { clash = true; break; } }
       if (clash) continue;
-      const h = 18 + rng() * 20;          // ~18–38m (5–11 floors you can climb via the lift)
-      makeTower(x, z, w, d, h, TOWER_PALETTE[(rng() * TOWER_PALETTE.length) | 0]);
+      /* HEIGHT FOLLOWS THE GRAMMAR. The island's own towers are ~18-38 m
+         (5-11 floors), but a bundled tube or a braced tube is a grammar for
+         forty storeys and declares minStoreys to say so — put one on a
+         six-storey block and you get a smear, not a tower. So a tower wearing
+         a skyline facade is built tall enough to carry it (its minStoreys
+         plus a few floors), capped at 22 so the island stays quick to load
+         and the lift ride stays short. Undressed, the original range. */
+      const tStyle = towerIds.length ? towerIds[towers % towerIds.length] : null;
+      const tDef = tStyle && CBZ.facadeDef ? CBZ.facadeDef(tStyle) : null;
+      const h = tDef
+        ? Math.min(22, tDef.minStoreys + 3) * FH
+        : 18 + rng() * 20;                // ~18–38m (5–11 floors via the lift)
+      makeTower(x, z, w, d, h, TOWER_PALETTE[(rng() * TOWER_PALETTE.length) | 0], tStyle);
       placed.push({ x, z, w, d });
       towers++;
     }
@@ -1023,7 +1263,10 @@
     function placeFlat(halfW, halfD) {
       for (let a = 0; a < 90; a++) {
         const ang = rng() * Math.PI * 2, dist = 38 + rng() * (R - 56);
-        const x = cx + Math.cos(ang) * dist, z = cz + Math.sin(ang) * dist;
+        const seat = faceStreet(cx + Math.cos(ang) * dist, cz + Math.sin(ang) * dist,
+          halfW * 2, halfD * 2);
+        if (!seat) continue;                       // a filling station in the road
+        const x = seat.x, z = seat.z;
         const ter = footprintTerrain(x, z, halfW * 2, halfD * 2);
         if (ter.max - ter.min > 0.4 || ter.max > 1.3) continue;
         let clash = false;

@@ -3317,7 +3317,7 @@
     // scared here bolts sooner — the same contagion a gunshot produces. No
     // second "run from fire" brain, and no cost when nobody is nearby.
     if (COOKOFF() && CBZ.cityPanicRaise) { try { CBZ.cityPanicRaise(car.pos.x, car.pos.z, 0.8); } catch (e) {} }
-    if (!opts.quiet && CBZ.city && (car.player || nearCam(car, 60))) CBZ.city.note("The car's on fire — bail out!", 1.1);
+    if (!opts.quiet && CBZ.city && (car.player || nearCam(car, 60))) CBZ.city.note("The car's on fire, bail out!", 1.1);
   }
   /* THE FUEL LOAD IS THE PAYLOAD. A cook-off is a chemical event whose size is
      set by how much fuel the vehicle carries, and fuel capacity tracks vehicle
@@ -3786,7 +3786,7 @@
     if (CBZ.cityPromotePlayerCar) CBZ.cityPromotePlayerCar(car);
     if (CBZ.carAudio) CBZ.carAudio.start();   // the motor turns over the moment you're in
     const worth = car.model ? "  ·  " + car.model.name : "";   // value stays hidden until you chop it
-    CBZ.city && CBZ.city.note("Driving" + worth + " — [E] out  [C] car style", 1.8);
+    CBZ.city && CBZ.city.note("Driving" + worth + " · [E] out  [C] car style", 1.8);
     return true;
   };
   CBZ.cityExitVehicle = function () {
@@ -4738,7 +4738,7 @@
       }
       if (!car._agroundNoted) {
         car._agroundNoted = true;
-        CBZ.city && CBZ.city.note("Aground — back her off the beach.", 1.8);
+        CBZ.city && CBZ.city.note("Aground, back her off the beach.", 1.8);
       }
     } else if (car._agroundNoted) car._agroundNoted = false;
     // ---- CARS_NO_WATER: a road car is not a boat. Past a grace window (a
@@ -4764,7 +4764,7 @@
           car.dead = true;
           car.group.position.set(car.pos.x, sinkY, car.pos.z);
           CBZ.cityExitVehicle();
-          CBZ.city && CBZ.city.note("The car went under — swim!", 2.0);
+          CBZ.city && CBZ.city.note("The car went under, swim!", 2.0);
           return;
         }
       }

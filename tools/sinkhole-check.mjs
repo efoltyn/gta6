@@ -72,7 +72,16 @@ function findChrome() {
   return "chromium";
 }
 const chromePath = findChrome();
-const base = `http://127.0.0.1:${serverPort}/?seed=90210`;
+/* A DELIBERATELY SMALL CAP, ON PURPOSE. The original bug hid behind the slot
+   count, so the cap's behaviour — nearest-eye ranking, and what a shaft that
+   loses a slot does about its own geometry — has to be reachable. It is not
+   reachable at the shipping count: hole spacing is LAW (two shafts cut into
+   each other hand out the neighbour's stair), so the island saturates at about
+   a dozen holes no matter how many events are forced. Rather than chase a cap
+   we cannot exceed, run the check with a cap we can, and let the shipping
+   default stay chosen for the game instead of for the test. */
+const MASK_SLOTS_UNDER_TEST = 4;
+const base = `http://127.0.0.1:${serverPort}/?seed=90210&cfg_GROUND_MASK_SLOTS=${MASK_SLOTS_UNDER_TEST}`;
 
 await mkdir(OUT, { recursive: true });
 await rm(profile, { recursive: true, force: true });
@@ -159,6 +168,18 @@ window.__sink = {
     if (CBZ.playerChar && CBZ.playerChar.group) rigs.push(CBZ.playerChar.group);
     return rigs;
   },
+  /* IS THIS MATERIAL CARRYING THE MASK? Under core/groundmask.js the discard
+     lives in the fog ShaderChunks, so a material carries it unless it has no
+     fog chunks at all (fog:false) or it deliberately opted out (CBZ_NOMASK —
+     the shaft's own wall, lip and stair, which live inside the band on
+     purpose). There is no per-material stamp any more, and that is the point:
+     nothing has to be found, so nothing can be missed. */
+  masked: function (m) {
+    if (!m) return false;
+    if (m.fog === false) return false;
+    if (m.defines && m.defines.CBZ_NOMASK) return false;
+    return true;
+  },
   lidOver: function (h) {
     var T = window.THREE, box = new T.Box3(), out = { total: 0, unmasked: 0, names: [] };
     var rigs = window.__sink.actorRigs();
@@ -186,7 +207,7 @@ window.__sink = {
       if (Math.max(box.max.x - box.min.x, box.max.z - box.min.z) < MIN_GROUND) return;
       var m = Array.isArray(o.material) ? o.material[0] : o.material;
       out.total++;
-      if (m && m._shaftMasked) return;
+      if (window.__sink.masked(m)) return;
       out.unmasked++;
       /* NAME THE THING. "Mesh, Mesh" tells the next reader nothing, and the
          useful question about a surviving lid pixel is always the same one:
@@ -320,6 +341,8 @@ try {
      software rasteriser, comfortably past any single-evaluate patience. Driving
      them one at a time keeps each call short and makes a stall report which
      event it stalled on instead of just "timed out". */
+  /* Roughly two shafts per forced event; the cap under test is small, so six
+     events clears it with room to spare. */
   const EVENTS = 6;
   let survival = null;
   for (let e = 0; e < EVENTS; e++) {
@@ -338,7 +361,12 @@ try {
   // one vantage point proves nothing about the hole on the far side.
   const stands = [];
   for (let i = 0; i < survival.shafts; i++) stands.push(await json(`return __sink.standAt(${i});`));
-  await evaluate(`(function(){__sink.frame(0);})()`);
+  /* PHOTOGRAPH A HOLE THAT IS ACTUALLY SLOTTED. Under a deliberately small cap
+     most shafts are unslotted and therefore not drawn — correct behaviour, and
+     a completely useless record shot, which the next reader would file as a
+     regression. Stand at the hole first: that pins it a slot by the same
+     ranking the game uses. */
+  await evaluate(`(function(){__sink.standAt(0); __sink.frame(0);})()`);
   const survivalShot = await shot("survival-shaft");
 
   if (boot.mode !== "survival" || !boot.arena) failures.push("survival did not boot");
@@ -353,7 +381,9 @@ try {
     failures.push(`shaftAudit is missing ${missing.join(", ")} — this build predates the ground-mask invariants, so the ring-on-solid-ground family cannot be measured at all`);
   }
   if (graded) {
-    if (!(boot.slots >= 4)) failures.push(`maskSlots too small (${boot.slots})`);
+    if (boot.slots !== MASK_SLOTS_UNDER_TEST) {
+      failures.push(`the cfg_GROUND_MASK_SLOTS override did not take (asked ${MASK_SLOTS_UNDER_TEST}, got ${boot.slots}) — the cap is untested`);
+    }
     if (!(survival.shafts > boot.slots)) {
       failures.push(`only ${survival.shafts} shafts opened against ${boot.slots} slots — the check never exceeded the cap it exists to test`);
     }
@@ -363,7 +393,8 @@ try {
   if (A.holesOnSlopes !== 0) failures.push(`shaftAudit.holesOnSlopes = ${A.holesOnSlopes} (a sinkhole on a mountainside)`);
   if (A.privateHoles !== 0) failures.push(`shaftAudit.privateHoles = ${A.privateHoles}`);
   if (!(A.deepOverWide >= 2)) failures.push(`shaftAudit.deepOverWide = ${A.deepOverWide} (a crater, not a shaft)`);
-  if (A.cityFloorWrapped !== true) failures.push("the floor was never wrapped — the stair is drawn and not walkable");
+  if (A.floorOwned !== true) failures.push("systems/solidground.js does not own CBZ.floorAt — the stair is drawn and not walkable");
+  if (!(A.carvings > 0)) failures.push(`${A.shafts} shafts are open but only ${A.carvings} carvings are registered — the holes are not in the ground model`);
   for (const h of survival.holes) {
     if (h.lidUnmasked !== 0) failures.push(`survival hole ${h.i}: ${h.lidUnmasked}/${h.lidTotal} ground surfaces over the mouth still drawing (${h.lidNames.join(", ")})`);
     if (!(h.floorDrop > h.depth * 0.4)) failures.push(`survival hole ${h.i}: floorAt only drops ${h.floorDrop} m into a ${h.depth} m shaft`);
@@ -422,31 +453,35 @@ try {
            exactly what core/gfx.js's Lambert/Standard twin swap does when the
            quality tier moves (and a phone moves tiers; a desktop does not)
      Neither is hypothetical: (b) is a live code path in core/gfx.js today. */
+  /* GROUND THAT ARRIVES LATE, AND GROUND THAT CHANGES ITS CLOTHES.
+     These two used to need maintenance — a round-robin re-sweep for meshes
+     built after a hole was cut, and a per-frame healer for materials swapped by
+     a quality-tier change (core/gfx.js's swapTree, which un-masked holes on the
+     owner's phone and never on a fixed-tier desktop). Under the chunk mask both
+     are true THE INSTANT THEY EXIST, because the discard is in every fogged
+     shader by construction. So this phase asserts the stronger claim: NO TIME
+     PASSES. If either of these ever needs a tick to become true again, the mask
+     has quietly gone back to being a search. */
   const heal = await json(`
     var S = CBZ.groundShafts || []; var h = S[0];
     if (!h) return { skipped: 1 };
     var root = window.__sink.root();
+    var before = window.__sink.lidOver(h).total;
     var g = new THREE.Mesh(new THREE.PlaneGeometry(h.mouth * 2.2, h.mouth * 2.2),
                            new THREE.MeshLambertMaterial({ color: 0x53a84e }));
     g.rotation.x = -Math.PI / 2; g.position.set(h.x, h.gy + 0.02, h.z);
     root.add(g);
-    // a mesh added this frame still carries an identity matrixWorld, and every
-    // footprint test here is in world space
     g.updateMatrixWorld(true);
-    var lidNew = window.__sink.lidOver(h).unmasked;
-    window.__sink.step(3.0);
-    var lidHealed = window.__sink.lidOver(h).unmasked;
+    var after = window.__sink.lidOver(h);
+    var sawIt = after.total > before;          // the probe is actually looking at it
+    var lidNew = after.unmasked;               // must be 0 with NO step
     g.parent && g.parent.remove(g);
 
-    /* The victim has to be a mesh that actually COVERS THIS MOUTH. Materials
-       are shared — one roadMat dresses every road in the city — so the first
-       masked material in the scene usually belongs to a mesh a kilometre away
-       that no sweep ever touched and no hole depends on. Healing that would
-       prove nothing; healing the ground over the hole is the whole claim. */
+    // a material swapped out from under the hole — the phone bug
     var victim = null, vbox = new THREE.Box3();
     root.traverse(function (o) {
       if (victim || !o.isMesh || !o.geometry || !o.material || Array.isArray(o.material)) return;
-      if (o === g || !o.material._shaftMasked) return;
+      if (o === g || !window.__sink.masked(o.material)) return;
       for (var p = o; p; p = p.parent) if (p.userData && p.userData.groundShaft) return;
       if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
       vbox.copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld);
@@ -456,25 +491,35 @@ try {
       if (vbox.max.z < h.z - h.mouth || vbox.min.z > h.z + h.mouth) return;
       victim = o;
     });
-    var swapped = null, swappedHealed = null;
+    var swappedStillMasked = null;
     if (victim) {
-      victim.material = victim.material.clone();   // a clone carries no _shaftMasked
-      swapped = !!victim.material._shaftMasked;
-      window.__sink.step(0.2);
-      swappedHealed = !!victim.material._shaftMasked;
+      victim.material = victim.material.clone();      // exactly what swapTree does
+      swappedStillMasked = window.__sink.masked(victim.material);
     }
-    return { lidNew: lidNew, lidHealed: lidHealed, swapped: swapped, swappedHealed: swappedHealed,
-             victim: victim ? (victim.name || victim.type) : null,
-             reMasked: CBZ.shaftAudit().reMasked, reSweeps: CBZ.shaftAudit().reSweeps };`);
+
+    // and the hole's OWN liner must be exempt, or the walls of every shaft vanish
+    var liners = 0, linersExempt = 0;
+    (h.grp ? h.grp : { traverse: function () {} }).traverse(function (o) {
+      if (!o.isMesh || !o.material || Array.isArray(o.material)) return;
+      liners++;
+      if (o.material.defines && o.material.defines.CBZ_NOMASK) linersExempt++;
+    });
+
+    return { sawIt: sawIt, lidNew: lidNew, victim: victim ? (victim.name || victim.type) : null,
+             swappedStillMasked: swappedStillMasked, liners: liners, linersExempt: linersExempt,
+             maskAudit: CBZ.groundMaskAudit ? CBZ.groundMaskAudit() : null };`);
 
   if (heal.skipped) {
-    failures.push("the self-heal phase found no shaft to injure — it proved nothing");
+    failures.push("the late-ground phase found no shaft to injure — it proved nothing");
   } else {
-    if (heal.lidNew === 0) failures.push("the self-heal phase could not inject a lid at all — it is not testing what it claims to");
-    if (heal.lidHealed !== 0) failures.push(`ground added over an open mouth was never re-swept (unmasked ${heal.lidNew} -> ${heal.lidHealed})`);
-    if (heal.victim == null) failures.push("the self-heal phase found no masked ground mesh over the mouth to injure — it is not testing what it claims to");
-    if (heal.victim != null && heal.swapped !== false) failures.push("the self-heal phase could not swap a masked material — it is not testing what it claims to");
-    if (heal.victim != null && heal.swappedHealed !== true) failures.push(`a ground material swapped out from under the mask was never re-stamped (${heal.victim})`);
+    if (!heal.sawIt) failures.push("the late-ground phase injected a mesh the lid probe cannot even see — it is not testing what it claims to");
+    if (heal.lidNew !== 0) failures.push(`ground added over an open mouth was NOT masked on arrival (${heal.lidNew} unmasked, with no tick) — the mask is a search again`);
+    if (heal.victim == null) failures.push("the late-ground phase found no masked ground mesh over the mouth to injure — it is not testing what it claims to");
+    if (heal.victim != null && heal.swappedStillMasked !== true) failures.push(`a ground material swapped out from under the hole lost the mask (${heal.victim})`);
+    if (!(heal.liners > 0)) failures.push("the shaft has no liner meshes to check — the exemption test proved nothing");
+    if (heal.liners > 0 && heal.linersExempt === 0) failures.push("the shaft's own liner is NOT exempt from the mask — its walls and lip will be discarded with the ground");
+    if (heal.maskAudit && heal.maskAudit.installed !== true) failures.push(`core/groundmask.js did not install: ${heal.maskAudit.why}`);
+    if (heal.maskAudit && heal.maskAudit.sweptMeshes !== 0) failures.push("the mask is sweeping meshes again");
   }
 
   if (browserErrors.length) failures.push(`browser errors: ${browserErrors.slice(0, 4).join(" | ")}`);

@@ -296,9 +296,10 @@
     // very function and every non-city floorAt call recursed to a stack overflow
     // (the prison leg after a city visit crashed the update loop every frame:
     // mouse-look still ran but WASD no longer moved the player).
-    const cityFloor = function (x, z) { return g.mode === "city" ? city.arena.groundHeightAt(x, z) : (baseFloor && baseFloor !== cityFloor ? baseFloor(x, z) : 0); };
-    cityFloor._city = true;
-    CBZ.floorAt = cityFloor;
+    /* systems/solidground.js OWNS CBZ.floorAt. The city declares the field it
+       was built on and stops there — no wrapper, no capture, no _city marker,
+       and therefore none of the recursion the marker existed to prevent. */
+    CBZ.registerGroundBase("city", function (x, z) { return city.arena.groundHeightAt(x, z); });
     city.built = true;
   }
   city.build = build;
@@ -504,7 +505,7 @@
   CBZ.registerMode("city", {
     id: "city",
     label: "City",
-    objective: "Make money any way you can — hustle, steal, deal, or go legit. Obey the lights or run them. Cops escalate to 5 stars; get cuffed and you're off to jail.",
+    objective: "Make money any way you can, hustle, steal, deal, or go legit. Obey the lights or run them. Cops escalate to 5 stars; get cuffed and you're off to jail.",
     build,
     reset(game) {
       build();
@@ -515,6 +516,7 @@
       // the root but BEFORE spawnCityPeds/Traffic add dynamic rigs to it. The
       // load-time batch pass (core/batch.js) can't reach the city: it's built
       // lazily, long after the page-load event that triggers that pass.
+      if (CBZ.bootStep) CBZ.bootStep("city:batch");   // loading meter, see systems/bootprogress.js
       if (CBZ.batchStaticUnder) CBZ.batchStaticUnder(A.root);
       // LOCAL_INSTANCING (city/localinst.js): collapse the repeated static props
       // batch LEFT (emissive/transparent/textured trim) into per-tile
@@ -530,11 +532,10 @@
       if (CBZ.fx) CBZ.fx.clear();
       if (CBZ.clearGore) CBZ.clearGore();
       // re-install the floor wrapper in case survival rebuilt CBZ.floorAt after us
-      if (!CBZ.floorAt || !CBZ.floorAt._city) {
-        baseFloor = (CBZ.floorAt && CBZ.floorAt._city) ? baseFloor : CBZ.floorAt;
-        const f = function (x, z) { return g.mode === "city" ? A.groundHeightAt(x, z) : (baseFloor && baseFloor !== f ? baseFloor(x, z) : 0); };
-        f._city = true; CBZ.floorAt = f;
-      }
+      // re-declare the base after a reset; registering is idempotent and there
+      // is nothing to re-capture, so the old "did somebody else wrap us" dance
+      // has no equivalent here
+      CBZ.registerGroundBase("city", function (x, z) { return A.groundHeightAt(x, z); });
 
       // fresh stats for this life
       game.cash = (CBZ.CITY.econ && CBZ.CITY.econ.startCash) || 0;
@@ -612,6 +613,7 @@
       // spawn population (spawnCityPeds also spawns gangs + seeds families).
       // Multiplayer GUEST: the sim host owns peds/cops/traffic — we render its
       // snapshots as puppets (src/net/networld.js), so nothing spawns locally.
+      if (CBZ.bootStep) CBZ.bootStep("city:pop");
       const netGuest = CBZ.net && CBZ.net.noSim();
       const observePeds = campaignLayerObserved("peds");
       const observeCrowd = campaignLayerObserved("crowd");
@@ -628,12 +630,14 @@
       // (crowd.js skips promotion-to-real-peds when net.noSim())
       if (CBZ.spawnCityCrowd) CBZ.spawnCityCrowd(observeCrowd ? (CBZ.CITY.crowd != null ? CBZ.CITY.crowd : 280) : 0);
       if (CBZ.clearCityCops) CBZ.clearCityCops();
+      if (CBZ.bootStep) CBZ.bootStep("city:traffic");
       if (!netGuest && CBZ.spawnCityTraffic) {
         campaignTrafficDeferred = !observeTraffic;
         CBZ.spawnCityTraffic(observeTraffic ? CBZ.CITY.traffic : 0);
       } else {
         campaignTrafficDeferred = false;
       }
+      if (CBZ.bootStep) CBZ.bootStep("city:run");
       if (CBZ.cityWantedReset) CBZ.cityWantedReset();
       // ESCAPED CONVICT: you didn't get released — you BROKE OUT. The city should
       // not greet you clean. After cityWantedReset() zeroed the slate, stamp a

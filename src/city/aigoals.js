@@ -468,7 +468,7 @@
     return null;
   }
   // people talk like people — no meta, no commands, just street small-talk
-  const CHAT_OPEN = ["“Been a minute! How you living?”", "“You look tired — you good?”", "“Rent went up AGAIN, I swear.”", "“You hear what happened on 3rd?”", "“We still on for Friday?”", "“This city, man…”"];
+  const CHAT_OPEN = ["“Been a minute! How you living?”", "“You look tired, you good?”", "“Rent went up AGAIN, I swear.”", "“You hear what happened on 3rd?”", "“We still on for Friday?”", "“This city, man…”"];
   const CHAT_BACK = ["“Same as always.”", "“Hanging in there.”", "“Tell me about it.”", "“Crazy out here lately.”", "“For real.”", "“Don't even start.”"];
   const PHONE_LINES = ["“…yeah. Yeah, I'm on my way.”", "“Tell him I said no. NO.”", "“…uh huh. Uh huh.”", "“I can't talk long.”"];
   function pickLine(arr) { return arr[(rng() * arr.length) | 0]; }
@@ -1939,7 +1939,7 @@
     _rampTipT = t;
     const E = CBZ.cityEcon;
     const where = (E && E.districtAt && E.districtName) ? E.districtName(E.districtAt(ped.pos.x, ped.pos.z)) : "the city";
-    if (CBZ.cityFlavor) CBZ.cityFlavor("" + who + ": somebody's spraying up " + where + " — stay clear.", "#9fb0c6");
+    if (CBZ.cityFlavor) CBZ.cityFlavor("" + who + ": somebody's spraying up " + where + " · stay clear.", "#9fb0c6");
   }
 
   // expose a manual trigger (debug / scripted events can force a spree on a ped)
@@ -2086,7 +2086,7 @@
     }
     _evicted++;
     if (CBZ.cityFeed && CBZ.player && Math.hypot(ped.pos.x - CBZ.player.pos.x, ped.pos.z - CBZ.player.pos.z) < 60) {
-      CBZ.cityFlavor && CBZ.cityFlavor("Evicted — another soul put out on the street.", "#9a8d7a");
+      CBZ.cityFlavor && CBZ.cityFlavor("Evicted, another soul put out on the street.", "#9a8d7a");
     }
   }
 
@@ -2323,7 +2323,7 @@
             // RAGE at the truck: peds.js drives the shooting; the truck's wrap
             // sees damage → its guard crew bails and engages → a real firefight.
             r.rage = truck; r.state = "fight"; r.target.set(tx, 0, tz);
-            if (rng() < 0.4) bark(r, "“Stop the truck! Out of the cab — NOW!”", "#ff8a5a", 2.4);
+            if (rng() < 0.4) bark(r, "“Stop the truck! Out of the cab. NOW!”", "#ff8a5a", 2.4);
           } else {
             r.target.set(tx, 0, tz); r.path = null; r._goalCD = Math.max(r._goalCD || 0, 1.0);
           }
@@ -2346,7 +2346,7 @@
         _jobCracked = true;
         try { AR.crack(); } catch (e) {}
         if (CBZ.cityFeed && CBZ.player && Math.hypot(tx - CBZ.player.pos.x, tz - CBZ.player.pos.z) < 120) {
-          CBZ.cityFeed("The truck's cracked — cash everywhere!", "#ffd451");
+          CBZ.cityFeed("The truck's cracked, cash everywhere!", "#ffd451");
         }
       }
       if (!_npcJobCrew.length) endNpcJob();

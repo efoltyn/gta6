@@ -955,6 +955,6 @@
     // Declared and deliberately NOT drawn — the reason travels with the row so
     // the skipped list can never quietly absorb a real gap:
     V("hangar-buy", { ctx: "foot", key: "B", skip: "playeraircraft's [B] at a hangar only ever prints the steal-it notice; the F-22 is not buyable and a pill for a refusal is a lie" });
-    V("armor-turret", { ctx: "armor", key: "mouse", skip: "the turret already tracks cam.yaw, and on touch cam.yaw IS the look drag — aiming the gun is aiming the camera, so a control would be a duplicate axis" });
+    V("armor-turret", { ctx: "armor", key: "mouse", skip: "the turret already tracks cam.yaw, and on touch cam.yaw IS the look drag, aiming the gun is aiming the camera, so a control would be a duplicate axis" });
   }
 })();

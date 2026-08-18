@@ -598,7 +598,7 @@
       out.kind = out.kind || "jail"; out.unit = "cigs";
       out.name = out.name || ((src.data && src.data.name) || "them");
       if (jp) out.pools.push(jp);
-      else out.why = out.why || "They have nothing left — you already took it.";
+      else out.why = out.why || "They have nothing left, you already took it.";
       return;
     }
 
@@ -649,7 +649,7 @@
         out.kind = out.kind || "place";
         out.name = out.name || (src.building && src.building.name) || src.name || "the place";
         _provHit[P.id || ("p" + i)] = (_provHit[P.id || ("p" + i)] | 0) + 1;
-        if (!ps || !ps.length) { out.why = out.why || "There is nothing in it — it has already been cleared."; return; }
+        if (!ps || !ps.length) { out.why = out.why || "There is nothing in it, it has already been cleared."; return; }
         for (let k = 0; k < ps.length; k++) {
           const q = ps[k];
           if (!q || typeof q.take !== "function") continue;
@@ -692,7 +692,7 @@
       out.kind = out.kind || "till";
       out.name = out.name || src.name || "the place";
       if (ow) collect(ow, out, seen, opts);
-      else out.why = out.why || "Nobody owns this — there is nothing here to take.";
+      else out.why = out.why || "Nobody owns this, there is nothing here to take.";
       return;
     }
 
@@ -803,7 +803,7 @@
     if (!out.name) out.name = "nobody";
     if (!out.why) {
       if (!out.pools.length) out.why = "There is nothing to take here.";
-      else if (out.amount <= 0 && out.units > 0) out.why = "No money — but they are carrying something.";
+      else if (out.amount <= 0 && out.units > 0) out.why = "No money, but they are carrying something.";
       else if (out.amount <= 0) out.why = "They are cleaned out.";
       else out.why = null;
     }

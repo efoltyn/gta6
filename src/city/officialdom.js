@@ -166,7 +166,7 @@
     const title = titleOf(rec, seat.deputy);
     const appr = Math.round(rec.approval || 0);
     const bits = [];
-    bits.push(title + " of " + rec.name + " — approval " + appr + "%.");
+    bits.push(title + " of " + rec.name + " · approval " + appr + "%.");
     if (rec.taxRate != null) bits.push("Tax rate " + Math.round(rec.taxRate * 100) + "%.");
     if (rec.treasury != null) bits.push("Treasury " + fmt$(rec.treasury) + ".");
     if (rec.office && rec.office.termDay != null && CBZ.worldDay) {
@@ -206,7 +206,7 @@
     const rec = seat.rec;
     if (stars() >= 1 && CBZ.cityReduceWanted) {
       CBZ.cityReduceWanted(1);
-      return "a call to the precinct — one charge goes away";
+      return "a call to the precinct, one charge goes away";
     }
     const want = Math.round(price * GRANT_MUL);
     const have = Math.max(0, rec.treasury || 0);
@@ -320,7 +320,7 @@
     I.register("ped:civ", {
       id: "official-grease", slot: "k", prio: 48,
       canShow: canGrease,
-      label: function (p) { const s = seatOf(p); return "Grease the wheels — " + fmt$(priceFor(s)); },
+      label: function (p) { const s = seatOf(p); return "Grease the wheels · " + fmt$(priceFor(s)); },
       onSelect: function (p) { grease(p); },
     });
 

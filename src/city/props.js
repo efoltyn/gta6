@@ -542,10 +542,10 @@
     ["continent:backcountry-rock", "fixed", "1.3-2.4 m boulders on the same ground"],
     ["forest:conifer-trunk", "fixed", "was 24 of ~2600, capped 'for perf' against a spatial broadphase"],
     ["forest:birch-trunk", "fixed", "the round-canopy loop was never iterated by the collider pass at all"],
-    ["snow:pine-trunk", "fixed", "130 pines, 0 colliders — you rode through the whole stand"],
+    ["snow:pine-trunk", "fixed", "130 pines, 0 colliders, you rode through the whole stand"],
     ["snow:rocky-outcrop", "fixed", "40 dodecahedra up to 5.5 m on open snow"],
     ["farmland:field-fence", "fixed", "one AABB per RUN (~110) beats one per post (~2400) and is what blocks"],
-    ["terrain:mountain-boulder", "fixed", "3-9 m, via rockscliffs.js's new opts.solidMin — the ONE rock factory"],
+    ["terrain:mountain-boulder", "fixed", "3-9 m, via rockscliffs.js's new opts.solidMin, the ONE rock factory"],
     ["desert:rock-cluster", "fixed", "same seam; disabled by default flag, wired for when it is on"],
     ["desert:motel-pylon", "fixed", "9 m roadside mast, the one thing at that stop with no col()"],
     ["highway:suspension-tower-leg", "fixed", "26 m leg that ALSO stood in the outer travel lane; moved out AND collided"],
@@ -553,15 +553,15 @@
     ["prison:water-tower-leg", "fixed", "4 x 8 m columns under the compound's tallest landmark"],
     ["prison:forge/altar/washer/cabinet/workbench/pew/bed", "fixed", "same rooms as the crate+bus that WERE solid"],
     ["town:square-bench", "fixed", "4/town; 0.65 m top is over physics.js's 0.45 STEP_UP"],
-    ["town:hitching-rail", "fixed", "and its two POSTS were never drawn at all — a stick floating at waist height"],
+    ["town:hitching-rail", "fixed", "and its two POSTS were never drawn at all, a stick floating at waist height"],
     ["street:sign-post", "fixed", "~90; the 1 m bollard beside it was solid, the 3 m post was not"],
     ["street:name-blade-mast", "fixed", "~60, same rule"],
     ["roof:water-tank", "fixed", "5.5 m on a WALKABLE roof; y-gated so it is not a column to the pavement"],
     ["roof:hvac-chiller", "fixed", "2.3 m, same y-gate"],
-    ["marina:travel-lift-leg", "fixed", "4 x 8.4 m — the biggest machine on the waterfront"],
+    ["marina:travel-lift-leg", "fixed", "4 x 8.4 m, the biggest machine on the waterfront"],
     ["marina:mooring-pile", "fixed", "8 x 5.2 m driven timbers at the channel mouth"],
     ["gov:lamp-standard", "fixed", "42 x 6 m; every other standing object in that kit took a col()"],
-    ["gov:security-bollard", "fixed", "32, and the PITCH was solved too — 3.4 m let a car through the Capitol line"],
+    ["gov:security-bollard", "fixed", "32, and the PITCH was solved too. 3.4 m let a car through the Capitol line"],
     ["annex:cooler/snack-rack/parts-shelf", "fixed", "free-standing, in rooms with no walls to cover them"],
     ["town:welcome-sign", "fixed", "the INVERSE fault: an 11 m solid wall filling the gap between two posts"],
     // ---- already solid before this pass (spot-checked, not re-listed in full)
@@ -576,23 +576,23 @@
     ["checkpoint:barrier-board", "solid", "y0/y1 gated, markCollidersDirty'd"],
     // ---- deliberately bare, and WHY (the decoy budget) -----------------
     ["street:traffic-cone", "decoy", "checkpoints.js: 'a cone that stops a car is a bollard'"],
-    ["alley:bin/newsbox/cone knockables", "decoy", "tonight's alley law — they tip, they do not wall"],
-    ["park:bench/hedge", "decoy", "buildings.js: 'brushable so chases never snag' (authored, and it contradicts clutter.js — flagged, not overruled)"],
+    ["alley:bin/newsbox/cone knockables", "decoy", "tonight's alley law, they tip, they do not wall"],
+    ["park:bench/hedge", "decoy", "buildings.js: 'brushable so chases never snag' (authored, and it contradicts clutter.js, flagged, not overruled)"],
     ["terrain:offshore-backdrop-range", "decoy", "'decorative mountains are not geography'; backdropAudit().onPlate pinned 0"],
     ["wildnature:backdrop-scatter", "decoy", "7500 trees + 2100 rocks, off-plate by construction"],
     ["street:litter/weeds/drains/bags/pallets/bikes", "decoy", "detail_kit.js's own fine-grain policy line"],
     ["roof:vent/dish/aerial/duct", "decoy", "sub-1 m, or dormant under PROPS_PURGE_V1"],
-    ["facade:awning/shutter/downpipe/wall-lamp", "decoy", "lowest edge 3.1 m — you walk under it"],
+    ["facade:awning/shutter/downpipe/wall-lamp", "decoy", "lowest edge 3.1 m, you walk under it"],
     // ---- FOUND AND LEFT: the honest backlog ----------------------------
-    ["facade:fire-escape-drop-ladder", "bare", "hangs into 0.7-3.4 m body height, ~100 of them; a 1.25 m collider off a wall risks blocking the pavement it overhangs — needs a measured footprint, not a guess"],
+    ["facade:fire-escape-drop-ladder", "bare", "hangs into 0.7-3.4 m body height, ~100 of them; a 1.25 m collider off a wall risks blocking the pavement it overhangs, needs a measured footprint, not a guess"],
     ["gov:perimeter-GATE-opening", "bare", "7 complexes have a 16-24 m gap with no gate leaf at all; that is a missing OBJECT, not a missing collider"],
     ["gov:hedge", "bare", "99 x 4.4-5.4 m parterres; hedges are the one class this pass deliberately did not decide"],
-    ["gov:watchtower-deck-rail", "bare", "deck is unreachable (no ladder) AND unfenced — fix the ladder first"],
+    ["gov:watchtower-deck-rail", "bare", "deck is unreachable (no ladder) AND unfenced, fix the ladder first"],
     ["bunker:ammo-crate-stack", "bare", "the single missing col() in an otherwise complete file"],
-    ["civic:engaged-column/cheek-wall", "bare", "8 m colonnade proud of the wall on the front walk-up — but buildings_civic.js draws NOTHING unless BLD_EXTRAS is on, and it defaults false, so this is dormant"],
+    ["civic:engaged-column/cheek-wall", "bare", "8 m colonnade proud of the wall on the front walk-up, but buildings_civic.js draws NOTHING unless BLD_EXTRAS is on, and it defaults false, so this is dormant"],
     ["forest:fallen-log/tent", "bare", "8 logs at 5-10 m, 3 tents at 4.8 m"],
     ["annex:island-tree", "bare", "50 of 64 trunks, capped at 14 by an explicit comment"],
-    ["highway:elevated-pylon/deck-lamp", "bare", "DORMANT — every caller passes elevated:false and HWY_LAMPS defaults off; pre-broken if either flips"],
+    ["highway:elevated-pylon/deck-lamp", "bare", "DORMANT, every caller passes elevated:false and HWY_LAMPS defaults off; pre-broken if either flips"],
   ];
   CBZ.solidityAudit = function () {
     const out = { classesChecked: SOLIDITY.length, classesSolid: 0, classesFixed: 0, decoyPolicy: 0, classesBare: 0, bare: [] };
@@ -1078,7 +1078,7 @@
           const coins = 8 + ((CBZ.hash01(s.x, s.z, 4711) * 18) | 0);   // $8–25, fixed per meter
           if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(coins);
           if (CBZ.sfx) CBZ.sfx("coin");
-          if (CBZ.city && CBZ.city.note) CBZ.city.note("Cracked the meter — $" + coins + " in coins.", 1.8);
+          if (CBZ.city && CBZ.city.note) CBZ.city.note("Cracked the meter. $" + coins + " in coins.", 1.8);
           if (CBZ.cityCrime) CBZ.cityCrime(25, { x: s.x, z: s.z, type: "theft" });
         }
         break;                                       // one car claims the hit this tick
@@ -1117,7 +1117,7 @@
     ["PISSWASSER", "the beer you've earned", 0x5a3a12, 0xf0c060],
     ["eCOLA", "now 30% more cola", 0x7a0d14, 0xffe9e9],
     ["VOLT ELECTRONICS", "phones smarter than you", 0x062a2a, 0x39d0c0],
-    ["KEYSTONE REALTY", "own the block — press Z", 0x0d3a2c, 0x4fd0a0, { tag: "Z" }],
+    ["KEYSTONE REALTY", "own the block, press Z", 0x0d3a2c, 0x4fd0a0, { tag: "Z" }],
     ["GRAND CASINO", "the house misses you", 0x2a1a05, 0xc9a227],
     ["BIGNESS BURGER", "supersize your debt", 0x3a0f0f, 0xffcf3a],
     ["BENNY'S CHOP SHOP", "no plate? no problem", 0x2a2308, 0xd0a23c],

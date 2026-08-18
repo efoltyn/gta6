@@ -914,9 +914,31 @@
       // plate, inset from the walls, away from the stairwell strip.
       if (CBZ.furnish && CBZ.furnish.table && b.w > 5 && b.d > 5) {
         const n = 1 + (h01(b.x, b.z, 0x9a11) > 0.55 ? 1 : 0);
+        /* TWO TABLES MUST NOT BE THE SAME TABLE. Both positions were drawn
+           independently from the hash inside a room whose usable span is only
+           about 5 m, and nothing compared them — so a fair share of the
+           two-table buildings got both slabs in the same place: one L-shaped
+           top with a seam through it, eight chairs round it and a couple of
+           them clipping through the tabletop. A table is 2.1 x 1.25 with its
+           chair ring 0.42 out, so centres closer than ~3.2 m interpenetrate.
+           The second one is mirrored to the far quadrant when that happens,
+           which is deterministic and puts it where a second table would
+           actually be; if the room is too small to hold two apart, it simply
+           does not get a second. */
+        const spots = [];
+        const MINSEP = 3.2;
         for (let k = 0; k < n; k++) {
-          const lx = (h01(b.x + k * 3.1, b.z, 0x9a12) - 0.5) * (b.w - 4.4);
-          const lz = (h01(b.x, b.z + k * 3.1, 0x9a13) - 0.5) * (b.d - 4.4);
+          let lx = (h01(b.x + k * 3.1, b.z, 0x9a12) - 0.5) * (b.w - 4.4);
+          let lz = (h01(b.x, b.z + k * 3.1, 0x9a13) - 0.5) * (b.d - 4.4);
+          let clash = function () {
+            for (let j = 0; j < spots.length; j++) {
+              if (Math.hypot(spots[j].lx - lx, spots[j].lz - lz) < MINSEP) return true;
+            }
+            return false;
+          };
+          if (clash()) { lx = -lx; lz = -lz; }
+          if (clash()) continue;              // this room only has room for one
+          spots.push({ lx: lx, lz: lz });
           const wx = b.x + lx, wz = b.z + lz;
           const yaw = h01(wx, wz, 0x9a14) > 0.5 ? 0 : Math.PI / 2;
           // host draw: the table belongs to the BUILDING's group, so it goes

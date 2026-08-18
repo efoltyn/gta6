@@ -48,6 +48,9 @@
 
   CBZ.buildCity = function () {
     if (city) return city;
+    // loading-meter checkpoints (systems/bootprogress.js) — AFTER the memo
+    // guard: a cached call is free and must not report a build step.
+    if (CBZ.bootStep) CBZ.bootStep("city:core");
     armRng();
     const C = CBZ.CITY;
     const cx = C.center.x, cz = C.center.z;
@@ -1108,7 +1111,9 @@
     })();
 
     // ---- let sibling modules furnish the city (buildings, props, lights) ----
+    if (CBZ.bootStep) CBZ.bootStep("city:buildings");
     if (CBZ.cityBuildings) try { CBZ.cityBuildings(city); } catch (e) { console.error("[city buildings]", e); }
+    if (CBZ.bootStep) CBZ.bootStep("city:expansion");
     if (CBZ.cityExpansion) try { CBZ.cityExpansion(city); } catch (e) { console.error("[city expansion]", e); }
     // worldmap.js: 3 new islands (speedway/airport/military) + 4 biome
     // landmasses (desert/forest/farmland/snow). Runs AFTER the original island
@@ -1116,6 +1121,7 @@
     if (CBZ.cityWorldGeo) try { CBZ.cityWorldGeo(city); } catch (e) { console.error("[city worldgeo]", e); }
     // No procedural horizon/backdrop terrain is built. Elevation must be owned
     // by a reachable registered landmass and its shared ground-height oracle.
+    if (CBZ.bootStep) CBZ.bootStep("city:props");
     if (CBZ.cityProps) try { CBZ.cityProps(city); } catch (e) { console.error("[city props]", e); }
 
     // ---- RED CURBS at hydrants (props.js just placed them): paint the curb
@@ -1201,7 +1207,9 @@
     // ---- THE WATERFRONT WITH A PURPOSE (city/beach.js): sand beach +
     //      boardwalk + pier in the south seawall gap and a painted parking
     //      apron. Runs last, after the seawall and landmass builders. ----
+    if (CBZ.bootStep) CBZ.bootStep("city:beach");
     if (CBZ.cityBuildBeach) try { CBZ.cityBuildBeach(city); } catch (e) { console.error("[city beach]", e); }
+    if (CBZ.bootStep) CBZ.bootStep("city:finish");
 
     // =====================================================================
     //  THE SEA, REBUILT AGAIN (CBZ.CONFIG.SEA_OVERHAUL + WATER_V2, both on
@@ -1258,7 +1266,7 @@
       // ocean plane rather than throwing — a world with dull water is
       // recoverable, a world that fails to build is not.
       if (!CBZ.waterCommonUniforms || !CBZ.waterBuildSeaGeometry) {
-        console.error("[sea] world/water_spec.js did not load before city/world.js — falling back to the flat ocean plane");
+        console.error("[sea] world/water_spec.js did not load before city/world.js, falling back to the flat ocean plane");
         // drop the expansion island's own ocean plane first — it shares seaMat
         // and would z-fight this one (same sweep the real path does below)
         const stale = [];

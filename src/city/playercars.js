@@ -2793,7 +2793,7 @@
     // setUnifiedVisual refuses a freight body outright (see its note); say so
     // rather than silently doing nothing when somebody presses the key.
     if (active.group && active.group.userData && active.group.userData.holdSpec) {
-      if (CBZ.city && CBZ.city.note) CBZ.city.note("The load space is part of this body — no restyle.", 1.4);
+      if (CBZ.city && CBZ.city.note) CBZ.city.note("The load space is part of this body, no restyle.", 1.4);
       return;
     }
     const at = Math.max(0, STYLE_ORDER.indexOf(active.detailStyle));

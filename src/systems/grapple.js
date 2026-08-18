@@ -798,7 +798,7 @@
     held = t; phys(t).heldBy = CBZ.player;
     phys(t).down = 0; phys(t).air = false;
     CBZ.sfx && CBZ.sfx("whoosh");
-    CBZ.flashHint && CBZ.flashHint("Holding " + (t.name || "survivor") + " — release or throw", 1.2);
+    CBZ.flashHint && CBZ.flashHint("Holding " + (t.name || "survivor") + " · release or throw", 1.2);
   }
   function release(thrown) {
     if (!held) return;

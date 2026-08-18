@@ -961,10 +961,10 @@
     }
     if (!opts.silent && CBZ.city) {
       const CLUB = (CBZ.CITY && CBZ.CITY.CLUB_DRIP) || 30, VIP = (CBZ.CITY && CBZ.CITY.VIP_DRIP) || 70;
-      if (rec.cop) CBZ.city.note("The uniform's on — at a distance, the city reads a cop.", 2.6);
-      else if (rec.gang) CBZ.city.note("" + rec.name + " on your back — their corners read kin, their rivals read TARGET.", 3);
-      else if (before < CLUB && after >= CLUB && CBZ.city.big) CBZ.city.big("" + rec.name + " — cloth like this opens velvet ropes.");
-      else if (before < VIP && after >= VIP && CBZ.city.big) CBZ.city.big("✦ " + rec.name + " — dressed like money; the elite lounge waves you up.");
+      if (rec.cop) CBZ.city.note("The uniform's on, at a distance, the city reads a cop.", 2.6);
+      else if (rec.gang) CBZ.city.note("" + rec.name + " on your back, their corners read kin, their rivals read TARGET.", 3);
+      else if (before < CLUB && after >= CLUB && CBZ.city.big) CBZ.city.big("" + rec.name + " · cloth like this opens velvet ropes.");
+      else if (before < VIP && after >= VIP && CBZ.city.big) CBZ.city.big("✦ " + rec.name + " · dressed like money; the elite lounge waves you up.");
       else CBZ.city.note("Now wearing " + rec.name + ".", 1.8);
     }
     if (CBZ.cityLook) { CBZ.cityLook().outfit = rec.name; }          // legacy style read stays true
@@ -1093,7 +1093,7 @@
     g.cityOutfitBlownT = CBZ.now + 60000;
     if (fresh && CBZ.city) {
       const who = (by && by.name) || "Someone";
-      CBZ.city.note("“" + (why || ("Wait — you're no " + String(c.role).toLowerCase() + "!")) + "” " + who + " clocks you.", 2.6);
+      CBZ.city.note("“" + (why || ("Wait, you're no " + String(c.role).toLowerCase() + "!")) + "” " + who + " clocks you.", 2.6);
     }
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     return true;
@@ -1142,7 +1142,7 @@
   // ticked from the per-frame updater below.
   function disguiseTick(dt) {
     if (!disguiseOn() || !disguise()) return;
-    if (weaponBetraysCover()) { disguiseBlow(null, "That's not staff — he's armed!"); return; }
+    if (weaponBetraysCover()) { disguiseBlow(null, "That's not staff, he's armed!"); return; }
     const sen = seniorSees(dt);
     if (sen) disguiseBlow(sen, "I don't know you.");
   }
@@ -1947,7 +1947,7 @@
     _pendingSwap = { body, theirs, mine: worn(), witness: strippingWitness(body) };
     g.cityOutfitChanging = 2.4;
     if (!CBZ.cityMenuOpen) { CBZ.cityMenuOpen = true; _heldMenu = true; }   // hands full — can't shoot
-    CBZ.city && CBZ.city.note("Stripping the " + theirs.name + " off the body — you're exposed…", 2.2);
+    CBZ.city && CBZ.city.note("Stripping the " + theirs.name + " off the body, you're exposed…", 2.2);
     return true;
   };
   function finishSwap() {

@@ -1272,7 +1272,7 @@
     if (!P) return "";
     let out = "";
     const cap = Math.round((P.maxHp || 100) * REST_FRAC);
-    if ((P.hp | 0) < cap) { P.hp = cap; out = " Rough sleep — patched up, not fixed."; }
+    if ((P.hp | 0) < cap) { P.hp = cap; out = " Rough sleep, patched up, not fixed."; }
     const sCap = Math.round((P.maxStamina || 100) * REST_STAM);
     if ((P.stamina || 0) < sCap) P.stamina = sCap;
     if (CBZ.cityHudDirty) { try { CBZ.cityHudDirty(); } catch (e) {} }

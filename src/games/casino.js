@@ -104,14 +104,14 @@
   function chipsHUD() { return "chips <b>" + bag().chips.toLocaleString() + "</b> · cash <b>" + fmt(C.wallet.cash()) + "</b>" + (bag().debt ? " · <span style='color:#ff9aa2'>marker " + fmt(bag().debt) + "</span>" : ""); }
   function winStreak(profit) {
     const s = bag();
-    if (profit > 0) { s.streak++; if (profit > s.stats.biggestWin) s.stats.biggestWin = profit; if (s.streak === LIMITS.COMP_STREAK) { C.hud.feed("Barman sends one over — on the house. Heater confirmed.", "#ffd166"); pitBossBark("hot"); } }
+    if (profit > 0) { s.streak++; if (profit > s.stats.biggestWin) s.stats.biggestWin = profit; if (s.streak === LIMITS.COMP_STREAK) { C.hud.feed("Barman sends one over, on the house. Heater confirmed.", "#ffd166"); pitBossBark("hot"); } }
     else if (profit < 0) s.streak = 0;
     save();
   }
   function bustWatch() {
     const s = bag();
     if (s.chips >= 5 || C.wallet.cash() >= 15) return;
-    C.hud.feed(s.debt > 0 ? "Broke AND carrying the Shark's marker. Bad night." : "Felt's closed to you — unless you visit the booth in the back.", "#ff9aa2");
+    C.hud.feed(s.debt > 0 ? "Broke AND carrying the Shark's marker. Bad night." : "Felt's closed to you, unless you visit the booth in the back.", "#ff9aa2");
     pitBossBark("cold");
   }
 
@@ -140,7 +140,7 @@
   function bjDeal() {
     const s = bag();
     if (BJ.stake < LIMITS.BJ_MIN) { C.hud.feed("Table minimum is $" + LIMITS.BJ_MIN, "#ff9aa2"); return; }
-    if (s.chips < BJ.stake) { C.hud.feed("Not enough chips — the cage sells them.", "#ff9aa2"); return; }
+    if (s.chips < BJ.stake) { C.hud.feed("Not enough chips, the cage sells them.", "#ff9aa2"); return; }
     s.chips -= BJ.stake; save();
     BJ.phase = "player"; BJ.act = 0; BJ.splitDone = false;
     BJ.hands = [{ cards: [], bet: BJ.stake, done: false, meshes: [] }];
@@ -214,7 +214,7 @@
       const pv = handValue(h.cards).v, dv = handValue(BJ.dealer).v;
       let tag;
       if (pv > 21) tag = "bust";
-      else if (naturalOK && isNatural(h.cards) && !isNatural(BJ.dealer)) tag = "BLACKJACK — 3:2";
+      else if (naturalOK && isNatural(h.cards) && !isNatural(BJ.dealer)) tag = "BLACKJACK. 3:2";
       else if (isNatural(BJ.dealer) && !isNatural(h.cards)) tag = "dealer blackjack";
       else if (dv > 21) tag = "dealer busts on " + dv;
       else tag = pv > dv ? pv + " beats " + dv : (pv === dv ? "push " + pv : dv + " beats " + pv);
@@ -235,7 +235,7 @@
         btn("deal", "DEAL", "#c98f22", BJ.stake < LIMITS.BJ_MIN) + btn("clear", "Clear", "#26343c") + btn("hub", "Floor", "#26343c");
     } else if (BJ.phase === "player") {
       const h = bjHand(), hv = handValue(h.cards);
-      body = "<div style='margin:4px 0 8px'>" + (BJ.hands.length > 1 ? "<b>Hand " + (BJ.act + 1) + "</b> — " : "") +
+      body = "<div style='margin:4px 0 8px'>" + (BJ.hands.length > 1 ? "<b>Hand " + (BJ.act + 1) + "</b> · " : "") +
         "You: <b>" + hv.v + (hv.soft ? " soft" : "") + "</b> (" + h.cards.map(cardName).join(" ") + ") vs dealer " + cardName(BJ.dealer[0]) + "</div>" +
         btn("hit", "HIT", "#1c6b40") + btn("standp", "STAND", "#c98f22") +
         btn("dbl", "DOUBLE", "#7c1626", h.cards.length !== 2 || bag().chips < h.bet) +
@@ -246,7 +246,7 @@
       body = "<div style='margin:4px 0 8px'>Dealer had <b>" + handValue(BJ.dealer).v + "</b> (" + BJ.dealer.map(cardName).join(" ") + ") · " + chipsHUD() + "</div>" +
         btn("deal", "REBET " + fmt(BJ.stake), "#c98f22", bag().chips < BJ.stake) + btn("changebet", "CHANGE BET", "#26343c") + btn("hub", "Floor", "#26343c");
     }
-    C.hud.panel(head("BLACKJACK — 3:2 · DEALER STANDS 17", "$" + LIMITS.BJ_MIN + "–$" + LIMITS.BJ_MAX) + (msg && BJ.phase !== "dealer" ? "<div style='margin:2px 0 6px;opacity:.8'>" + msg + "</div>" : "") + body, {
+    C.hud.panel(head("BLACKJACK · 3:2 · DEALER STANDS 17", "$" + LIMITS.BJ_MIN + "–$" + LIMITS.BJ_MAX) + (msg && BJ.phase !== "dealer" ? "<div style='margin:2px 0 6px;opacity:.8'>" + msg + "</div>" : "") + body, {
       chip5: () => { bjChip(5); }, chip25: () => { bjChip(25); }, chip100: () => { bjChip(100); }, chip500: () => { bjChip(500); },
       deal: bjDeal, clear: () => { BJ.stake = 0; renderBJ(); }, changebet: () => { BJ.phase = "bet"; BJ.stake = 0; renderBJ(); },
       hit: bjHit, standp: bjStand, dbl: bjDouble, split: bjSplit, hub: openHub,
@@ -261,7 +261,7 @@
   function rlPlace(key) {
     if (RL.spinning) return;
     const s = bag(), amt = Math.min(RL.unit, s.chips);
-    if (amt <= 0) { C.hud.feed("No chips — the cage sells them.", "#ff9aa2"); return; }
+    if (amt <= 0) { C.hud.feed("No chips, the cage sells them.", "#ff9aa2"); return; }
     if (rlStake() + amt > LIMITS.RL_MAX) { C.hud.feed("Table cap is $" + LIMITS.RL_MAX, "#ff9aa2"); return; }
     s.chips -= amt; RL.bets[key] = (RL.bets[key] || 0) + amt; save(); renderRL();
   }
@@ -305,14 +305,14 @@
       rcell("1-18", "low", "#2c4438", 1) + rcell("EVEN", "even", "#2c4438", 1) + rcell("RED", "red", "#a41f2f", 1) +
       rcell("BLK", "black", "#1a1f24", 1) + rcell("ODD", "odd", "#2c4438", 1) + rcell("19-36", "high", "#2c4438", 1) + "</div>";
     const hist = RL.hist.length ? "<div style='margin:4px 0;opacity:.85'>Last: " + RL.hist.map((h) => "<b style='color:" + (h === 0 ? "#3ad17a" : RED_SET[h] ? "#ff6b7a" : "#cfd6dd") + "'>" + h + "</b>").join(" ") + "</div>" : "";
-    const body = "<div style='margin:2px 0 6px'>" + (RL.spinning ? "No more bets — ball's away…" : "On the felt <b>" + fmt(rlStake()) + "</b> · unit $" + RL.unit + " · " + chipsHUD()) + "</div>" +
+    const body = "<div style='margin:2px 0 6px'>" + (RL.spinning ? "No more bets, ball's away…" : "On the felt <b>" + fmt(rlStake()) + "</b> · unit $" + RL.unit + " · " + chipsHUD()) + "</div>" +
       rows + hist +
       [5, 25, 100].map((d) => btn("unit" + d, "$" + d + (RL.unit === d ? " ✓" : ""), "#5a3a1a")).join("") +
       btn("spin", "SPIN", "#c98f22", RL.spinning || !rlStake()) + btn("clearrl", "CLEAR", "#26343c", RL.spinning || !rlStake()) + btn("hub", "Floor", "#26343c");
     const handlers = { spin: rlSpin, clearrl: rlClear, hub: openHub, unit5: () => { RL.unit = 5; renderRL(); }, unit25: () => { RL.unit = 25; renderRL(); }, unit100: () => { RL.unit = 100; renderRL(); } };
     ["red", "black", "even", "odd", "low", "high", "dz1", "dz2", "dz3", "col1", "col2", "col3"].forEach((k) => { handlers["b_" + k] = () => rlPlace(k); });
     for (let n = 0; n <= 36; n++) handlers["b_n" + n] = () => rlPlace("n" + n);
-    C.hud.panel(head("EUROPEAN ROULETTE — SINGLE ZERO", "straight 35:1 · table cap $" + LIMITS.RL_MAX), handlers ? body : body, handlers);
+    C.hud.panel(head("EUROPEAN ROULETTE · SINGLE ZERO", "straight 35:1 · table cap $" + LIMITS.RL_MAX), handlers ? body : body, handlers);
   }
 
   /* ======================= SLOTS ========================================== */
@@ -320,7 +320,7 @@
   function slPull() {
     if (SL.spinning) return;
     const s = bag();
-    if (s.chips < SL.bet) { C.hud.feed("No chips — the cage sells them.", "#ff9aa2"); return; }
+    if (s.chips < SL.bet) { C.hud.feed("No chips, the cage sells them.", "#ff9aa2"); return; }
     s.chips -= SL.bet; s.stats.pulls++; save();
     SL.spinning = true; renderSL();
     const stops = [Math.floor(Math.random() * 22), Math.floor(Math.random() * 22), Math.floor(Math.random() * 22)];
@@ -334,19 +334,19 @@
     if (win > 0) {
       s.chips += win;
       if (mult >= 200) C.hud.toast("JACKPOT! " + syms.join(" "));
-      C.hud.feed("Reels: " + syms.join(" · ") + " — pays " + mult + "x (+" + (win - SL.bet) + " chips)", "#ffd166");
+      C.hud.feed("Reels: " + syms.join(" · ") + " · pays " + mult + "x (+" + (win - SL.bet) + " chips)", "#ffd166");
     }
     winStreak(win - SL.bet); save();
     SL.spinning = false; renderSL(); bustWatch();
   }
   function renderSL() {
     const body = "<div style='margin:2px 0 8px'>" +
-      (SL.last ? "Last: <b>" + SL.last.syms.join(" ") + "</b>" + (SL.last.win ? " — paid " + SL.last.win : " — nothing") + " · " : "") +
+      (SL.last ? "Last: <b>" + SL.last.syms.join(" ") + "</b>" + (SL.last.win ? " · paid " + SL.last.win : " · nothing") + " · " : "") +
       "bet <b>$" + SL.bet + "</b> · " + chipsHUD() +
       "<br><span style='opacity:.6;font-size:12px'>DIA 500x · 7s 250x · BAR 40x · BELL 20x · fruit 12/8/6x · cherries small · 90.8% return</span></div>" +
       LIMITS.SLOT_BETS.map((b) => btn("sb" + b, "$" + b + (SL.bet === b ? " ✓" : ""), "#5a3a1a")).join("") +
       btn("pull", SL.spinning ? "SPINNING…" : "PULL", "#7c1626", SL.spinning) + btn("hub", "Floor", "#26343c");
-    C.hud.panel(head("LUCKY 7s — 3 REEL", "the dome knows"), body, {
+    C.hud.panel(head("LUCKY 7s. 3 REEL", "the dome knows"), body, {
       pull: slPull, hub: openHub,
       sb5: () => { SL.bet = 5; renderSL(); }, sb10: () => { SL.bet = 10; renderSL(); }, sb25: () => { SL.bet = 25; renderSL(); },
     });
@@ -375,7 +375,7 @@
     sharkBark();                     // the ped mutters flavor; the loan PANEL below stays the primary [E]
     const s = bag();
     const body = s.debt > 0
-      ? "<div style='margin:6px 0'>“You already carry my marker — <b>" + fmt(s.debt) + "</b>. Pay the cage. Then we talk.”</div>" + btn("hub", "Walk away", "#26343c")
+      ? "<div style='margin:6px 0'>“You already carry my marker, <b>" + fmt(s.debt) + "</b>. Pay the cage. Then we talk.”</div>" + btn("hub", "Walk away", "#26343c")
       : "<div style='margin:6px 0'>“I'll front you <b>" + fmt(LIMITS.LOAN_GIVE) + "</b> in chips. You'll owe <b>" + fmt(LIMITS.LOAN_OWE) + "</b>. The house always pays me first.”</div>" +
         btn("takeloan", "Take the marker (+" + LIMITS.LOAN_GIVE + " chips)", "#7c1626") + btn("hub", "Walk away", "#26343c");
     C.hud.panel(head("THE SHARK", "vig is vig"), body, {
@@ -435,18 +435,18 @@
   const DEALER_LINES = [[
     "Dealer stands on all seventeens. The shoe doesn't care what you feel.",
     "Blackjack pays three to two. Insurance pays for the chandeliers.",
-    "Fresh six-deck shoe, cut card's buried. Count it if you like — the pit counts you right back.",
+    "Fresh six-deck shoe, cut card's buried. Count it if you like, the pit counts you right back.",
     "Double when you're sure. This felt has heard a lot of sure.",
   ], [
     "Hit sixteen, stand on seventeen, lose with a smile. That's the whole game.",
     "Cards don't run hot or cold, friend. They run house.",
-    "Nice hand. Now win it eight more times — that's when the felt starts to notice.",
+    "Nice hand. Now win it eight more times, that's when the felt starts to notice.",
     "You want a system? Mine's simple: I deal, you pay, we both stay polite.",
   ]];
   const CROUPIER_LINES = [
     "Single zero, true wheel, honest ball. That one green pocket is the whole business model.",
     "Place your bets... and no more bets. The wheel doesn't take requests.",
-    "Red, black, odd, even — the zero quietly collects from all of them.",
+    "Red, black, odd, even, the zero quietly collects from all of them.",
     "Every system ever devised dies in that little green slot. Yours will keep it company.",
     "Thirty-six numbers, thirty-five to one. That missing number is the house's whole living.",
   ];
@@ -466,7 +466,7 @@
     "Table three's running warm. We notice warm.",
     "Win or lose, you're on camera the whole time. Do smile.",
     "Nobody beats this floor for long. The floor is extremely patient.",
-    "You're up? Wonderful. Stay a while — let it find its way home.",
+    "You're up? Wonderful. Stay a while, let it find its way home.",
     "Comps are for friends of the house. Keep playing; we'll see how friendly you get.",
   ];
   // The pit boss also BARKS live lines keyed to the player's night (read straight
@@ -475,7 +475,7 @@
   // the flagship or before the facade lands.
   const PITBOSS_HOT = [
     "Table's running warm. We notice warm.",
-    "Three on the trot — enjoy it. The wheel has a long memory.",
+    "Three on the trot, enjoy it. The wheel has a long memory.",
     "A heater like that draws eyes. Mostly ours.",
   ];
   const PITBOSS_COLD = [
@@ -484,7 +484,7 @@
     "Down to felt lint? There's a booth in the back for exactly that.",
   ];
   const SHARK_LINES = [
-    "Vig is vig. Nothing personal — all arithmetic.",
+    "Vig is vig. Nothing personal, all arithmetic.",
     "Everybody pays. The house first, me second, you whenever you can.",
     "Short again? The marker's right here. So am I.",
   ];
@@ -634,7 +634,7 @@
         const dealer = ctx.rig({ shirt: 0xe8dcc0, pants: 0x14100c, skin: which ? 0x8a5c34 : 0xc2905c, vest: 0x1c6e46 }).at(cx, cz + 1.05, Math.PI).deal();
         g.add(dealer.g); ctx.idle(dealer, which * 1.7); return dealer;
       });
-      ctx.zone({ id: "bj" + which, label: "Blackjack — $25 min [The Golden Ace]", pos: [cx, cz - 1.65], r: 1.7, onUse: () => { BJ.tableIx = which; BJ.phase = "bet"; renderBJ(); } });
+      ctx.zone({ id: "bj" + which, label: "Blackjack. $25 min [The Golden Ace]", pos: [cx, cz - 1.65], r: 1.7, onUse: () => { BJ.tableIx = which; BJ.phase = "bet"; renderBJ(); } });
       ctx.light(cx, 3.2, cz, 0xffca72, 0.8, 8);
     });
     // --- roulette table + wheel ---
@@ -728,7 +728,7 @@
       queueCast({
         // "banker" job-hint → formal business fit (bizRecord) AND a sensible cage
         // occupation: the cage IS the house bank. Formal, distinct from floor staff.
-        role: "cashier", name: "Cage — Okafor", outfit: "banker",
+        role: "cashier", name: "Cage. Okafor", outfit: "banker",
         at: [cx - 0.2, cz], face: Math.PI / 2, post: "pinned", pose: "stand",
         dialogue: CASHIER_LINES,
       }, function () {
@@ -745,7 +745,7 @@
         const guard = ctx.rig({ shirt: 0x2c3038, pants: 0x14100c, skin: 0x704c28, cap: 0x2c3038 }).at(cx + 1.6, cz + 2.2, 2.4).fold();
         g.add(guard.g); ctx.idle(guard, 3.3); return guard;
       });
-      ctx.zone({ id: "cage", label: "The Cage — buy in / cash out [The Golden Ace]", pos: [cx + 1.5, cz], r: 1.6, onUse: renderCage });
+      ctx.zone({ id: "cage", label: "The Cage, buy in / cash out [The Golden Ace]", pos: [cx + 1.5, cz], r: 1.6, onUse: renderCage });
       ctx.light(cx + 1, 3.0, cz, 0xffd48a, 0.8, 8);
     }
     {

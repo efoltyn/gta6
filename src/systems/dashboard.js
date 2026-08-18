@@ -134,7 +134,7 @@
       `<span class="dfac ${gi === 0 ? "f-red" : "f-blue"}">${st > 0 ? "+" : ""}${st}</span>` +
       `<span class="dstatus ${cls}">${word}</span>` +
       `<span class="dpow">${debt > 0 ? debt + " owed" : "clear"}</span>` +
-      `<span class="drec">${cover > 0 ? cover + "s cover" : "—"}</span>` +
+      `<span class="drec">${cover > 0 ? cover + "s cover" : ". "}</span>` +
       `<span class="dbeh">${acting.length ? acting.map(dispName).join(", ") : "nobody on you"}</span>` +
       `</div>`;
   }
@@ -150,7 +150,7 @@
         `<span class="dfac f-bent">${rs > 0 ? "+" : ""}${rs}</span>` +
         `<span class="dstatus ${rs >= 0 ? "s-ok" : "s-fight"}">${rs >= 8 ? "useful" : rs <= -8 ? "leaning on you" : "transactional"}</span>` +
         `<span class="dpow">${rd > 0 ? rd + " owed" : "clear"}</span>` +
-        `<span class="drec">${rc > 0 ? rc + "s cover" : "—"}</span>` +
+        `<span class="drec">${rc > 0 ? rc + "s cover" : ". "}</span>` +
         `<span class="dbeh">cigs buy silence, names and time</span>` +
         `</div>`;
     }
@@ -201,7 +201,7 @@
   function hintHtml() {
     const off = CBZ.CONFIG && CBZ.CONFIG.MAP_TOUCH_LABELS === false;
     if (CBZ.touchMode && !off) return '<button type="button" class="dclose" aria-label="Close rankings">✕ Close</button>';
-    return '<span class="dhint">Tab / L — cycle · Esc — close</span>';
+    return '<span class="dhint">Tab / L, cycle · Esc, close</span>';
   }
   // Delegated: render() rewrites this header at ~5 Hz, so the button itself is
   // a different node every tick and can never own the listener.
@@ -267,8 +267,8 @@
         `<span class="dbeh">Temperament</span><span class="dcap dcap-fight">Fight</span><span class="dcap dcap-t">Tuf</span>` +
         `<span class="dcap dcap-s">Spd</span><span class="dpow">Notor.</span><span class="drec">Record</span><span class="dstatus">Status</span>`;
     const sub = ledger
-      ? "every number the block keeps on you — the yard tells you the same things out loud, this is the ledger behind them"
-      : `${TABS[CBZ.ui.dashTab].sub} — <b>capability</b> bars (fight/tough/speed) are independent of <b>temperament</b> (who starts trouble)`;
+      ? "every number the block keeps on you, the yard tells you the same things out loud, this is the ledger behind them"
+      : `${TABS[CBZ.ui.dashTab].sub}, <b>capability</b> bars (fight/tough/speed) are independent of <b>temperament</b> (who starts trouble)`;
 
     root.innerHTML =
       `<div class="dpanel${ledger ? " dledger" : ""}">` +

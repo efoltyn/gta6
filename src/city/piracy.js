@@ -254,7 +254,7 @@
         test: function () {
           if (C.PIRACY_JOIN === false) return "They don't take strangers.";
           const cr = nearestCrew(200);
-          if (!cr) return "You'd have to find them first — they're not in the phone book.";
+          if (!cr) return "You'd have to find them first, they're not in the phone book.";
           if (!(CBZ.cityOwnsGun && CBZ.cityOwnsGun())) return "Turn up with a gun or don't turn up.";
           if (CBZ.factions && CBZ.factions.tier && CBZ.factions.tier("police") >= 0) return "They know what you are.";
           return true;
@@ -782,7 +782,7 @@
       // state will not deal, or somebody would pay and cannot, or nobody is
       // looking. A silent clamp to a floor said none of them.
       phone(p && p.kind === "state"
-        ? who + " is on the state's books. Nobody is coming with a bag — but somebody is coming."
+        ? who + " is on the state's books. Nobody is coming with a bag, but somebody is coming."
         : (p && p.kind === "broke"
           ? (p.why || (p.name + " has nothing.")) + " There is no number to ask for."
           : "Nobody's asking after " + who + ". There's no number here."),
@@ -802,7 +802,7 @@
     // whole reason a big number takes long enough to get you caught: cash in a
     // safe is a phone call, a block of stock is a fire sale.
     const slowNote = (p.purse && p.purse.slow > p.purse.liquid)
-      ? " Most of it isn't cash — they're selling to raise it, and that takes time."
+      ? " Most of it isn't cash, they're selling to raise it, and that takes time."
       : "";
     h.mission = M.start({
       id: "ransom:" + (h.ped._sid || Math.round(h.x) + ":" + Math.round(h.z)),
@@ -900,7 +900,7 @@
     } else if (got < h.amount * 0.995) {
       // 0.5% — a bag can land a few dollars short because the last thing sold
       // was an indivisible whole share, and that is not a story beat.
-      phone("The bag is light — " + money(got) + ". That is everything " + p.name + " had.", "THE WIRE", 5);
+      phone("The bag is light · " + money(got) + ". That is everything " + p.name + " had.", "THE WIRE", 5);
     }
     h.amount = got;
     return got;

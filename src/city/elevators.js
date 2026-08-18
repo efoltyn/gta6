@@ -727,6 +727,19 @@
   }
 
   // ---- the tiny prompt / floor-ticker chip (one DOM node, hidden when idle) --
+  //
+  // TOUCH: this chip is the ONLY surface the lift ever offered, and on a
+  // tablet it offered nothing at all — it printed "[E] Elevator — call" (a key
+  // glyph on a device with no keys) inside a pointer-events:none div, and
+  // css/city.css's live-world declutter hid the whole node during city play
+  // anyway. Net effect on iPad: walk to a lift, get no prompt, no button, no
+  // ride. Fixed in three places that all have to agree:
+  //   1. the CALL prompt is now a real .tpill via CBZ.touchActionPrompt, so a
+  //      tap synthesizes the same [E] keydown this file's own onKey reads
+  //      (systems/touch.js's pill contract — no parallel elevator handler),
+  //   2. the chip writes innerHTML, because a pill is markup,
+  //   3. css/mobile.css un-hides #elevChip on touch and drops it into the
+  //      walk-up prompt band, flattening its slab only while it holds a pill.
   let chip = null;
   function dom() {
     if (chip || typeof document === "undefined" || !document.body) return;
@@ -739,16 +752,31 @@
       document.body.appendChild(chip);
     } catch (e) { chip = null; }
   }
+  // The CALL prompt. Desktop keeps its exact string; touch gets the tappable
+  // pill (worded, never a key glyph) that fires this module's [E] path.
+  function callPrompt(end) {
+    const desktop = end === "g"
+      ? "[E] Elevator, call (ride to the roof)"
+      : "[E] Elevator, call (ride down)";
+    return CBZ.touchActionPrompt
+      ? CBZ.touchActionPrompt("e", end === "g" ? "ELEVATOR UP" : "ELEVATOR DOWN", desktop)
+      : desktop;
+  }
   // PERF: callers run at frame rate (the ride ticker, the idle prompt) — skip
   // the DOM writes unless the text actually changed; setting the same
-  // textContent/display every frame still dirties the DOM.
+  // innerHTML/display every frame still dirties the DOM (and would blow away a
+  // pill mid-tap, since the CALL prompt re-renders at 12 Hz while you stand
+  // on the pad).
   let _chipLast;
   function chipText(t) {
     if (t === _chipLast) return;
     dom(); if (!chip) return;
     _chipLast = t;
     if (!t) { chip.style.display = "none"; return; }
-    chip.style.display = "block"; chip.textContent = t;
+    // the shared writer (systems/touch.js) sets the markup and decides whether
+    // this content is a bare BUTTON (slab dropped) or PROSE (slab kept).
+    if (CBZ.touchPromptChip) { CBZ.touchPromptChip(chip, t); return; }
+    chip.style.display = "block"; chip.innerHTML = t;
   }
 
   function padNear() {
@@ -829,11 +857,11 @@
       // boarded? (only once the doors are wide enough that they really walked in)
       if (r.open > 0.7 && insideCab(el, m.end, P)) { beginClose(el); return "Doors closing…"; }
       if (m.t >= WAIT_OPEN) {
-        if (inDoorway(el, m.end, P)) { m.t = WAIT_OPEN - 0.6; return "Elevator — step in"; }  // doors WAIT, no crush
+        if (inDoorway(el, m.end, P)) { m.t = WAIT_OPEN - 0.6; return "Elevator, step in"; }  // doors WAIT, no crush
         setDoorTarget(r, false, true); m.st = "close"; m.will = false; // nobody came: close back to idle
         setLit(el, false);
       }
-      return insideCab(el, m.end, P) ? "Doors closing…" : "Elevator — step in ([E] closes the doors)";
+      return insideCab(el, m.end, P) ? "Doors closing…" : "Elevator, step in";
     }
 
     if (m.st === "close") {
@@ -841,7 +869,7 @@
         setDoorTarget(r, true, true); m.st = "open"; m.t = WAIT_OPEN - 1.4;
         if (m.will) m.will = false;
         setLit(el, true);
-        return "Elevator — step in";
+        return "Elevator, step in";
       }
       if (m.will && !insideCab(el, m.end, P)) {               // stepped back out: cancel the ride
         m.will = false; setLit(el, false);
@@ -895,7 +923,7 @@
         if (CBZ.sfx) CBZ.sfx("blip");
         if (CBZ.shake) CBZ.shake(0.25);
         if (CBZ.city && CBZ.city.note) {
-          CBZ.city.note(m.end === "r" ? ("" + ST + " floors up — the roof is yours.") : "Ground floor.", 2);
+          CBZ.city.note(m.end === "r" ? ("" + ST + " floors up, the roof is yours.") : "Ground floor.", 2);
         }
         return null;
       }
@@ -919,7 +947,7 @@
         resetMachine(el, CALL_COOL);
         return null;
       }
-      return m.end === "r" ? "Roof — step out" : "Ground floor — step out";
+      return m.end === "r" ? "Roof, step out" : "Ground floor, step out";
     }
     return undefined;
   }
@@ -979,7 +1007,7 @@
       if (_promptT >= 1 / 12) {
         _promptT = 0;
         const near = padNear();
-        chipText(near ? (near.end === "g" ? "[E] Elevator — call (ride to the roof)" : "[E] Elevator — call (ride down)") : null);
+        chipText(near ? callPrompt(near.end) : null);
       }
     } else chipText(null);
   });

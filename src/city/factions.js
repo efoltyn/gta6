@@ -709,7 +709,7 @@
     lastMemb[id] = !!memb(id);
     applyFork(id);
     if (f.onJoin) { try { f.onJoin(api, f); } catch (e) {} }
-    big("JOINED — " + String(f.name).toUpperCase());
+    big("JOINED · " + String(f.name).toUpperCase());
     fnote(f, "You're a " + rankName(id, playerRank(id)) + " in the " + f.name + ".", 3.2);
     if (CBZ.cityRankEvent) CBZ.cityRankEvent("faction-joined", { faction: id, how: how });
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
@@ -733,7 +733,7 @@
     const f = DEFS[id]; if (!f || !memb(id)) return false;
     leave(id, "expelled");
     const r = own(id, true); r.standing = -1;
-    big("EXPELLED — " + String(f.name).toUpperCase());
+    big("EXPELLED · " + String(f.name).toUpperCase());
     fnote(f, why || "They cut you loose.", 3);
     return true;
   }

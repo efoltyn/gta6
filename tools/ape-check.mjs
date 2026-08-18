@@ -155,7 +155,7 @@ await send("Page.enable");
    maps rather than trusting one. The per-battle counters are reset between
    runs by the page reload; the totals below are the sum. */
 const RUNS = parseInt(arg("--runs", "10"), 10);
-const T = { picks: 0, grabs: 0, spins: 0, clubHits: 0, throws: 0, slams: 0, drops: 0,
+const T = { picks: 0, fanHits: 0, grabs: 0, spins: 0, clubHits: 0, throws: 0, slams: 0, drops: 0,
   sweeps: 0, smashes: 0, charges: 0, drums: 0, bites: 0 };
 let strandedEver = 0, sunkEver = 0, ended = 0, bootMs = 0, samples = 0;
 let audit = null, tail = null, A = null;
@@ -265,7 +265,7 @@ if (!OFF) {
   if (!cUp) fails.push("contract probe: the battle never started");
   else {
     contract = await evl(`(function () {
-      var men = __battle.roster(), ape = null, man = null;
+      var men = __battle.roster(), menAll = men, ape = null, man = null;
       for (var i = 0; i < men.length; i++) {
         if (men[i].beast && !men[i].dead) ape = men[i];
         else if (!men[i].dead && !man) man = men[i];
@@ -293,6 +293,48 @@ if (!OFF) {
       out.ape_grab = (g === null || g === undefined) ? "null" : String(g);
       var d; try { d = CBZ.apeStrike(ape, man, "ape_drum", o, 10); } catch (e) { d = "threw: " + e; }
       out.ape_drum = (d === null || d === undefined) ? "null" : String(d);
+
+      /* CAN THE PICKER EVEN REACH ALL SIX? Asked here, deterministically, and
+         NOT inferred from what happened to come up in the sweep. A gorilla only
+         lives for two or three blows, so "did every move fire in ten battles"
+         is a question about dice as much as about code — and it has already
+         produced a green run with the chest beat at zero. Four hundred draws
+         with a thick crowd in front of it answers the LOGIC question the sweep
+         cannot: is any branch unreachable by construction (which is exactly the
+         bug the one-random-against-a-descending-chain build had, and which no
+         amount of battle sampling would have named). */
+      // the grab probe above left a live hold, and apeMove correctly refuses to
+      // choose anything while one runs — clear it or this loop measures that
+      try { CBZ.apeReset(); } catch (e) {}
+      man._apeHeld = null; man._apeFlying = 0; man.dead = false;
+      if (!(man.hp > 0)) man.hp = man.maxHp || 90;
+      man.pos.x = ape.pos.x + 1.4; man.pos.z = ape.pos.z;
+      /* AND IT NEEDS A CROWD IN FRONT OF IT. The grab and the chest beat are
+         both gated on bodies being inside the arms, and the strike probes above
+         have just launched everyone who was — so without this the loop measures
+         an empty field and reports two branches "unreachable" that are simply
+         not applicable. Stand six of them back up in a ring at arm's length. */
+      var ring = 0;
+      for (var w = 0; w < menAll.length && ring < 6; w++) {
+        var rm = menAll[w];
+        if (rm === ape || rm === man || rm.beast) continue;
+        rm.dead = false; rm._apeFlying = 0; rm._apeHeld = null;
+        if (!(rm.hp > 0)) rm.hp = rm.maxHp || 90;
+        var a2 = (ring / 6) * 6.283;
+        rm.pos.x = ape.pos.x + Math.cos(a2) * 2.0;
+        rm.pos.z = ape.pos.z + Math.sin(a2) * 2.0;
+        ring++;
+      }
+      var seen = {};
+      for (var n = 0; n < 400; n++) {
+        ape._apeSwings = (n % 5);          // walk both sides of the swing gates
+        ape._atkT = 1; ape._apeGrabT = -999; ape._apeDrumT = -999;
+        ape.hp = (n % 7 === 0) ? ape.maxHp * 0.3 : ape.maxHp;   // and the hurt branch
+        var st = null;
+        try { st = CBZ.apeMove(ape, man, o, 1.4, ape.reach); } catch (e) { st = "threw: " + e; }
+        if (st) seen[st] = (seen[st] || 0) + 1;
+      }
+      out.__reach = seen;
       return out;
     })()`);
     if (!contract || contract.__e || contract.__throw) {
@@ -305,6 +347,10 @@ if (!OFF) {
       });
       if (contract.ape_grab === "null") fails.push("ape_grab did not consume the strike — the hold is not taking the beat");
       if (contract.ape_drum !== "0") fails.push(`ape_drum returned ${contract.ape_drum} — the display must consume and cost nothing`);
+      const reach = contract.__reach || {};
+      for (const st of ["ape_charge", "ape_smash", "ape_sweep", "ape_bite", "ape_grab", "ape_drum"]) {
+        if (!(reach[st] > 0)) fails.push(`the picker never once chose ${st} in 400 draws — that branch is unreachable`);
+      }
     }
   }
 }
@@ -336,6 +382,38 @@ else if (OFF) {
      a paragraph about a feature. */
   if (T.picks === 0) fails.push("the driver never once asked the ape to choose a blow");
   if (T.grabs === 0) fails.push(`the gorilla never picked anybody up across ${RUNS} battles`);
+  /* AND YOU HAVE TO ACTUALLY SEE IT. This is the assertion the whole feature
+     lives or dies on, and it is here because the owner reported the failure in
+     exactly these words: "I didn't see the gorilla spinning around". Every
+     counter above was green at the time — the flail worked perfectly and
+     happened in four of ten battles for about a second and a half of a
+     twenty-second war, so a person watching one battle most likely never saw
+     it. A feature you cannot encounter has not shipped, so the rate is gated
+     like any other number: a battle that finishes without a single grab is the
+     failure being measured, and no more than a quarter of them may. */
+  /* THE FLAIL IS BOUNDED ON BOTH SIDES, and both bounds are owner reports that
+     pull directly against each other:
+
+       "I didn't see the gorilla spinning around"  — it was happening in four
+           battles of ten for a second and a half of a twenty-second war. Too
+           rare is indistinguishable from absent.
+       "that isn't gorillas only move but it should be a move"  — chasing the
+           first note took it to half of every blow the animal threw, which is
+           not a repertoire, it is a default with five decorations.
+
+     They trade directly: a gorilla lives for about three blows, so every point
+     of probability is BOTH the grab's share of the move set and its chance of
+     showing up at all. Asserting only one of them is how this went wrong twice
+     — once in each direction — so both are gated here and the tuning has to
+     land in the corridor between them. */
+  const dry = perRun.filter((r) => !(r.grabs > 0)).length;
+  if (dry > Math.ceil(RUNS * 0.3)) {
+    fails.push(`${dry} of ${RUNS} battles finished without a single grab — at that rate a person watching one war never sees the flail`);
+  }
+  const share = T.picks ? T.grabs / T.picks : 0;
+  if (share > 0.4) {
+    fails.push(`the grab is ${Math.round(share * 100)}% of every blow the gorilla throws — that is its default, not one of six moves`);
+  }
   if (T.spins === 0) fails.push("a grab never reached the flail — nothing was ever swung");
   if (T.clubHits === 0) fails.push("the swung body never hit anyone: the club is decoration");
   /* EVERY GRAB MUST END. Not every grab ends in a FINISHER — an ape that dies
@@ -361,8 +439,15 @@ else if (OFF) {
   }
   // the repertoire has to be a repertoire. Two of the five non-grab moves
   // firing is a coin; four is a move set.
+  /* AND THEY HAVE TO HAPPEN IN A REAL FIGHT, not merely be reachable. Held at
+     3 of 5 rather than 4 on purpose: a gorilla gets two or three blows in its
+     life and half of them are now the grab, so demanding every move appear in
+     one ten-battle sweep is a coin flip, and a gate that flips is not a gate.
+     The `unreachable branch` failure — the real one, the one the single-random
+     chain caused — is caught deterministically by the 400-draw probe above.
+     This one only has to prove the picker is not jammed on one answer in play. */
   const kinds = [T.sweeps, T.smashes, T.charges, T.bites, T.drums].filter((n) => n > 0).length;
-  if (kinds < 4) fails.push(`only ${kinds} of the 5 non-grab moves ever fired across ${RUNS} battles — the picker is stuck`);
+  if (kinds < 3) fails.push(`only ${kinds} of the 5 non-grab moves fired in ${RUNS} real battles — the picker is jammed`);
 }
 
 if (strandedEver > 0) fails.push(`${strandedEver} bodies flagged _apeHeld with no live hold behind them`);
