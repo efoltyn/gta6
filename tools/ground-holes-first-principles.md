@@ -137,37 +137,97 @@ per-mesh CSG over ~150 authored surfaces per mouth. Because the ground casts no 
 it buys almost nothing A2 does not already deliver. **This is the "bigger job" people
 mean, and it is the wrong one to do.**
 
+## The thickness move — what Minecraft actually solved
+
+The framing above ("holes are hard") quietly assumes the ground is a **surface**.
+Minecraft's answer was to make it a **solid**: the thing you stand on is the top of a
+deep block of material, the real bottom is far below, and a hole is not something you
+*construct* — it is material you *remove*, revealing sides and a floor that were always
+there. That reframing moves most of the wanted features out of the expensive bucket.
+
+**What thickness buys, concretely:**
+
+- **Walls come free.** Lower a region and re-mesh; the vertical faces fall out of the
+  surface extraction. `groundshaft.js`'s `buildWall`, `buildLip`, the strata ladder and
+  the whole shader mask exist only because an infinitely thin plane has no inside to
+  reveal. A solid has one.
+- **No slot cap and no discovery**, because nothing is being masked at all.
+- **Digging works** — the same operation at a smaller radius, driven by a tool.
+- **Strata for free**, as vertex colour by depth, instead of a hand-authored ladder.
+- **`floorAt` gets cheaper and more honest** — an array lookup instead of an analytic
+  max-of-cones, and by construction the surface you can actually see.
+
+**The machinery is already in the tree, aimed one ring too far out.** `world/terrain.js`
+builds a real tiled heightfield — `PlaneGeometry(TSPAN, TSPAN, TSEG, TSEG)` at
+`TERRAIN_TILE_SEG = 88`, 4×4 tiles, ~248k tris — but deliberately only for "the FAR
+BACKDROP RING … you look out AT but never walk on", and `CBZ.terrainHeight` returns
+**EXACTLY 0** across every walkable footprint, by contract, so that "physics is
+unchanged, nothing can fall off a hill". The renderer for a dig-able world already
+exists and is pointed at scenery.
+
+`systems/chunks.js` is likewise already a 16 m spatial grid, chosen as exactly 2× the
+physics collider cell so chunk edges land on collider edges — a ready-made dirty-tile
+unit for re-meshing.
+
+**The migration is unusually safe**, which is the strongest argument for it: a
+heightfield initialised to 0 everywhere is *byte-identical* to the flat plane for every
+consumer. Swap the representation without changing a single value, keep terrain.js's
+flat contract intact, and only then start lowering cells.
+
+### Two things the thickness move does not solve
+
+**1. A heightfield gives slopes, not sheer walls.** Minecraft's faces are vertical
+because it is voxels. A plain heightfield grid interpolates between neighbours, so a
+lowered region reads as a *dent*, not a *cut* — and the reference photograph is a sheer
+shaft. The fix is standard and cheap but must be designed in from the start: emit
+explicit side quads at height discontinuities (duplicate the edge vertices) instead of
+letting the grid interpolate. That one decision is the difference between a dented world
+and a cut one.
+
+**2. Digging DOWN is single-valued; a cave is not.** A pit, quarry, trench or crater
+keeps one height per (x,z), so `floorAt` keeps its shape and the 280 call sites are safe.
+A basement, tunnel or overhang puts a lid *above* a void and needs the multi-valued step
+no matter how thick the ground is. Thickness converts the pit family — most of what is
+actually wanted — into the cheap bucket. It does not abolish Job B; it stops Job B
+blocking the common case.
+
+When multi-valued is wanted, the cheap version is a **layered heightfield**: per cell, a
+short list of solid spans, and `floorAt` picks the span containing your feet. Two facts
+make that unusually tractable here — `groundAt(x, z, fromY)` **already** takes `fromY`
+and already uses it to choose among stacked surfaces (that is how building storeys
+work), and `CBZ.floorAt` is universally 2-arg (197 call sites, zero passing a third), so
+an optional `fromY` defaulting to "the topmost span" is byte-identical for every
+existing caller.
+
+### Where it stays hard: the authored surface layer
+
+Minecraft has no authored surface layer — its roads *are* blocks, so lowering the ground
+lowers the road. Gang City's streets are separate meshes at fixed heights: lane paint at
+`gy+0.057`, kerbs, lot slabs, pads. Lower the heightfield under a road and the road hangs
+in the air. That is the same ~150-surfaces-per-mouth problem, and thickness does not
+touch it.
+
+So the honest split: **the thickness move is excellent exactly where the ground is bare**
+— the survival island, the biomes, wilderness, a dedicated quarry — and still hard under
+the authored city, unless the street layer is eventually baked into the terrain surface
+(vertex colour / texture) instead of being separate meshes.
+
+The two approaches are complementary, not competing: a dig-able heightfield where the
+ground is bare, and the global shader mask (A2) under the authored city.
+
 ## Recommended staging
 
-1. **Move the mask to A2.** Contained to `groundshaft.js` + an install point after
-   `renderer.js`. Deletes the entire discovery class of bugs and the slot cap.
-   `npm run test:sinkhole` already measures the invariant that would catch a regression.
-2. **Void volumes — the multi-valued floor.** A record of
-   `{footprint, yTop, yFloor}`; `groundAt` uses the void's floor when the querier's feet
-   are below `yTop + STEP_UP`, and platforms raise from there as they do now. Walls and
-   ceilings come free from the existing y-banded colliders. This is what unlocks
-   basements and tunnels. The risk is not the arithmetic — it is the 280 `CBZ.floorAt`
-   call sites and the systems that assume the ground is the ground: nav, spawn clamps,
-   swim (a basement below sea level), camera collision, blob shadows, per-wheel vehicle
-   suspension. Flag it, audit it, and expect that to be the real work.
-3. **A dig-able region, if wanted.** Authored from the start as a chunked heightfield
-   with holes — one biome or quarry, never the whole map.
-
-## Why Minecraft is not the model
-
-Minecraft's world is a volume from the first line of code; every block is addressable
-and re-meshing a dirty chunk is routine. This world is authored polygon soup — roads,
-lane paint, kerbs, lot slabs, pads, each its own mesh at its own height, overlapping by
-centimetres. There is no volume to subtract from, and voxelising underneath authored
-content means re-authoring the content.
-
-Note also that a heightfield can express a pit but **not** a tunnel: one height per
-(x,z) is the same limitation in the mesh that `floorAt` has in the physics. The two
-constraints are the same constraint wearing different clothes, which is why Job A and
-Job B keep getting confused.
-
-The tractable ambition is a fixed vocabulary of subtractive volumes — pits, shafts,
-basements, tunnels — placed by events or by hand. Not per-block digging.
+1. **Move the mask to A2** (global `ShaderChunk` patch). Small, contained, deletes the
+   discovery bug class and the slot cap, and stays the right answer under authored
+   streets whatever happens to the terrain. `npm run test:sinkhole` guards it.
+2. **A thick, dig-able heightfield for bare ground**, initialised to 0 so the swap
+   changes no values. Side quads at discontinuities from day one. Re-mesh per
+   `systems/chunks.js` tile. This is what makes holes *ordinary* instead of special, and
+   it retires most of `groundshaft.js`'s geometry in those regions.
+3. **Layered spans**, only when caves or basements are actually wanted — behind the
+   optional `fromY`, which is non-breaking today.
+4. **Baking the street layer into the surface** — the real precondition for digging in
+   Gang City, and the largest single piece here. Scope separately.
 
 ## Recorded rejections
 
@@ -181,3 +241,7 @@ basements, tunnels — placed by events or by hand. Not per-block digging.
   costs an afternoon. Install after `CBZ.renderer` exists.
 - **A shared `Vector4` uniform (not an array)** — does not work; `UniformsUtils.clone()`
   copies it per material. Use an array so `slice()` keeps the elements shared.
+- **"Minecraft is not the model"** — an earlier draft of this doc said exactly that, and
+  it was half wrong. Minecraft is not the model for the *authored surface layer*, which
+  it does not have. It is precisely the model for the *ground representation*: make the
+  walkable surface the top of a solid and a hole stops being a thing you build.
