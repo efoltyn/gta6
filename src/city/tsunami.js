@@ -461,8 +461,16 @@
          parked there. */
       return LANDFALL_U * (1 - Math.pow(1 - w, FAST() ? 1.55 : 2.0));
     }
+    /* THE RELEASE. w^0.72 has infinite slope at w=0, which on the old clock
+       was a hard shove and on the new one is a teleport: the storyboard
+       caught the front covering 36 m in a third of a second between the
+       crash frame and the next beat, which is not a bore charging a street,
+       it is a cut. 0.82 keeps the release — the front still leaves the
+       seawall far faster than it arrived at it — and spends the same total
+       time crossing the town, because the shape is normalized by the level
+       fraction either way. */
     const w = (u - LANDFALL_U) / (1 - LANDFALL_U);
-    return LANDFALL_U + (1 - LANDFALL_U) * Math.pow(w, 0.72);  // steep at 0: the release
+    return LANDFALL_U + (1 - LANDFALL_U) * Math.pow(w, FAST() ? 0.82 : 0.72);
   }
   function frontAt(u) { return FRONT_FROM + (FRONT_TO - FRONT_FROM) * frontShape(u); }
   // 0 in deep water, 1 once the bore is scouring the town: the sediment load,
@@ -528,11 +536,23 @@
     noted = "";
     return true;
   };
+  /* THE EVENT, READABLE FROM OUTSIDE. Everything a storyboard or a probe
+     needs to poll a PHYSICAL beat rather than a wall clock — where the front
+     is, how far through its travel, whether the lip has come down and how
+     long ago, how tall the wall is right now — plus the origin and bearing,
+     which are chosen from the player's position at trigger time and are the
+     only way a camera can be placed relative to a wave whose direction is
+     different on every run. */
   CBZ.cityTsunamiState = function () {
     return ev ? {
       phase: ev.phase, t: ev.t, total: total(),
       surge: CBZ.waterSurge ? CBZ.waterSurge() : 0,
       frontS: ev.frontS, turbid: turbidAt(ev.frontS),
+      u: ev.u, peak: ev.peak, draw: ev.draw,
+      cx: ev.cx, cz: ev.cz, dx: ev.dx, dz: ev.dz,
+      crashed: !!ev.crashed, crashT: ev.crashed ? ev.crashT : -1,
+      faceH: faceHeight(ev.peak, ev.frontS), curl: curlAt(ev.frontS),
+      fast: CBZ.CONFIG.TSU_PACE_V2 !== false,
       debris: ev.debris ? ev.debris.stats() : null,
     } : null;
   };
