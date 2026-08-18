@@ -336,6 +336,19 @@ else if (OFF) {
      a paragraph about a feature. */
   if (T.picks === 0) fails.push("the driver never once asked the ape to choose a blow");
   if (T.grabs === 0) fails.push(`the gorilla never picked anybody up across ${RUNS} battles`);
+  /* AND YOU HAVE TO ACTUALLY SEE IT. This is the assertion the whole feature
+     lives or dies on, and it is here because the owner reported the failure in
+     exactly these words: "I didn't see the gorilla spinning around". Every
+     counter above was green at the time — the flail worked perfectly and
+     happened in four of ten battles for about a second and a half of a
+     twenty-second war, so a person watching one battle most likely never saw
+     it. A feature you cannot encounter has not shipped, so the rate is gated
+     like any other number: a battle that finishes without a single grab is the
+     failure being measured, and no more than a quarter of them may. */
+  const dry = perRun.filter((r) => !(r.grabs > 0)).length;
+  if (dry > Math.ceil(RUNS * 0.25)) {
+    fails.push(`${dry} of ${RUNS} battles finished without a single grab — at that rate a person watching one war never sees the flail`);
+  }
   if (T.spins === 0) fails.push("a grab never reached the flail — nothing was ever swung");
   if (T.clubHits === 0) fails.push("the swung body never hit anyone: the club is decoration");
   /* EVERY GRAB MUST END. Not every grab ends in a FINISHER — an ape that dies
