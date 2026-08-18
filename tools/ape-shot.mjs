@@ -12,8 +12,9 @@
      tools/shots/ape-sweep.png     the backhand at full extension
      tools/shots/ape-drum.png      reared and planted, hands at the chest
      tools/shots/ape-bite.png      the canines, at contact
-     tools/shots/ape-flail.png     a man in the hand, mid-spin
-     tools/shots/ape-flail2.png    ...three quarters of a turn later
+     tools/shots/ape-spin-1..6.png one real revolution of the flail, six frames
+                                   from a FIXED camera with the ring left in —
+                                   a still cannot show a spin, a strip can
 
    The poses are driven through the SHIPPING entry points — CBZ.predatorPose for
    the body and the real hold state for the flail — so a picture here is a
@@ -184,34 +185,33 @@ const grabbed = await evl(`(function () {
 })()`);
 if (grabbed !== true) console.log("  ! flail: " + grabbed);
 else {
-  const spin = async (secs, file, dist) => {
+  /* THE SPIN, AS A SEQUENCE. One still cannot show a rotation — the owner's
+     report was literally "I didn't see the gorilla spinning around" — so this
+     walks ONE real revolution in six frames from a fixed camera, with the ring
+     of men LEFT VISIBLE so the club landing on them is part of the picture.
+     The sim stays frozen; only apeStep advances, so the frames are the swing. */
+  const spin = async (secs, file) => {
     await evl(`(function () {
       var n = Math.round(${secs} / 0.016);
       for (var i = 0; i < n; i++) CBZ.apeStep(0.016);
-      var men = __battle.roster();
-      var ape = null;
+      var men = __battle.roster(), ape = null;
       for (var j = 0; j < men.length; j++) {
-        if (men[j]._apeHeld) CBZ.apePoseVictim(men[j], 0.016);
+        if (men[j]._apeHeld || men[j]._apeFlying) CBZ.apePoseVictim(men[j], 0.016);
         if (men[j].beast && !men[j].dead) ape = men[j];
+        if (men[j].group) men[j].group.visible = true;   // give the ring back
       }
       if (!ape) return false;
-      // the portrait pass hid every man BEFORE this one was grabbed, so the
-      // club is invisible unless it is explicitly given back
-      for (var v = 0; v < men.length; v++) {
-        var mm = men[v];
-        if (!mm.group) continue;
-        if (mm === ape || mm._apeHeld || mm._apeFlying) mm.group.visible = true;
-        else mm.group.visible = false;
-      }
-      var h = ape ? ((typeof ape.heading === "number") ? ape.heading : -ape.group.rotation.y) : 0;
-      __battle.look(${dist}, 0.24, h + Math.PI / 2, ape ? { x: ape.pos.x, z: ape.pos.z } : null);
+      // a FIXED camera for the whole strip: if it tracked the ape's heading the
+      // spin would be the one thing the shot could not show
+      if (!window.__spinCam) window.__spinCam = { x: ape.pos.x, z: ape.pos.z };
+      __battle.look(13, 0.95, 2.2, window.__spinCam);   // steep: a rotation reads from above
       return true;
     })()`);
-    await sleep(450);
+    await sleep(420);
     await shot(file);
   };
-  await spin(0.75, "ape-flail.png", 7);
-  await spin(0.30, "ape-flail2.png", 7);
+  await spin(0.55, "ape-spin-1.png");
+  for (let i = 2; i <= 6; i++) await spin(0.13, "ape-spin-" + i + ".png");
 }
 
 bye(0, "APE-SHOT: ok");
