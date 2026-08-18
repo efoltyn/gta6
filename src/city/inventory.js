@@ -1226,6 +1226,16 @@
   }
   if (typeof document !== "undefined" && document.addEventListener) document.addEventListener("keydown", onChestKey);
 
+  // Your OWN chest, and on touch it could not be opened: the chip carrying the
+  // verb is in css/city.css's declutter list. Desktop string unchanged; touch
+  // gets the pill that fires the same [E] handler above.
+  function chestPrompt(c) {
+    const desktop = chestEmpty(c) ? "[E] Open chest (empty)" : "[E] Open chest";
+    return CBZ.touchActionPrompt
+      ? CBZ.touchActionPrompt("e", chestEmpty(c) ? "OPEN CHEST (EMPTY)" : "OPEN CHEST", desktop)
+      : desktop;
+  }
+
   // proximity chip
   let chip = null, _chipLast;
   function chipText(t) {
@@ -1238,7 +1248,8 @@
       document.body.appendChild(chip);
     }
     if (!t) { chip.style.display = "none"; return; }
-    chip.style.display = "block"; chip.textContent = t;
+    if (CBZ.touchPromptChip) { CBZ.touchPromptChip(chip, t); return; }
+    chip.style.display = "block"; chip.innerHTML = t;
   }
 
   // ============================================================
@@ -1348,7 +1359,7 @@
       const P = CBZ.player;
       if (playing() && P && !P.dead && !P.driving && !CBZ.cityMenuOpen && !CBZ.invOpen) {
         const c = chestNear(REACH);
-        chipText(c ? (chestEmpty(c) ? "[E] Open chest (empty)" : "[E] Open chest") : null);
+        chipText(c ? chestPrompt(c) : null);
       } else chipText(null);
     }
   });

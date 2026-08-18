@@ -239,7 +239,8 @@
     dom(); if (!chip) return;
     _chipLast = t;
     if (!t) { chip.style.display = "none"; return; }
-    chip.style.display = "block"; chip.textContent = t;
+    if (CBZ.touchPromptChip) { CBZ.touchPromptChip(chip, t); return; }
+    chip.style.display = "block"; chip.innerHTML = t;
   }
 
   // is the player standing at an elevator pad? The lift's [E] outranks ours.
@@ -275,11 +276,26 @@
     const b = boardNear();
     if (!b) { chipText(null); return; }
     if (b.lease) {
-      chipText("[E] Pull your ad — " + (b.lease.bizName ? b.lease.bizName + " · " : "") + money(b.lease.per) + "/wk runs until you do");
+      chipText(lease("PULL YOUR AD", "[E] Pull your ad",
+        " — " + (b.lease.bizName ? b.lease.bizName + " · " : "") + money(b.lease.per) + "/wk runs until you do"));
     } else {
-      chipText("[E] Rent this board — " + money(priceOf(b)) + "/wk · " + ownerOf(b) + " (" + districtLabel(b) + ")");
+      chipText(lease("RENT THIS BOARD", "[E] Rent this board",
+        " — " + money(priceOf(b)) + "/wk · " + ownerOf(b) + " (" + districtLabel(b) + ")"));
     }
   });
+
+  // The board prompt: a verb and a PRICE. On touch the verb becomes a pill and
+  // the price stays prose beside it (the chip keeps its slab for exactly that
+  // reason) — desktop gets the byte-identical single string it always had.
+  // The tail is game data (a business name, a district) and the chip now
+  // writes innerHTML, so it is escaped on BOTH paths — a board named "R&D <b>"
+  // must render as its name, not as markup.
+  function lease(pill, key, tail) {
+    return (CBZ.touchActionPrompt ? CBZ.touchActionPrompt("e", pill, key) : key) + escText(tail);
+  }
+  function escText(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
 
   // [E] signs / ends the lease. DOCUMENT-level so stopPropagation beats
   // interact.js's window-level "[E] = eat" fallback (the elevator pattern).
