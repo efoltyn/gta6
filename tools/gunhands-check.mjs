@@ -253,6 +253,14 @@ const PROBE = `(() => {
         let prev = handLocal(), path = 0, frames = 0, peakW = 0, sawStyle = null;
         let minP = 9, maxP = -9, segFrames = 0;
         while (CBZ.fps.reloading > 0 && frames++ < Math.ceil(row.reload*8*60)+120) {
+          // STAY IN THIRD PERSON. The sniper is the only scoped weapon, and
+          // aiming it enters the scope view -> first person -> holsterprops
+          // hides the hand gun -> gunhands correctly declines to pose an arm
+          // holding nothing. That is right in play (you are looking down the
+          // scope) but it silently zeroed this measurement, which is why the
+          // sniper read 3.6 cm of travel with the envelope at full weight for
+          // 120 frames.
+          if (CBZ.fpsSetActive && CBZ.fps.active) CBZ.fpsSetActive(false);
           step(1);
           const now = handLocal();
           path += now.distanceTo(prev);
@@ -272,7 +280,8 @@ const PROBE = `(() => {
         rec.peakWeight = +peakW.toFixed(2);
         rec.ammoAfter = CBZ.fps.rounds[i];
         rec.rl = "w=" + peakW.toFixed(2) + " p=" + minP.toFixed(2) + ".." + maxP.toFixed(2) +
-          " f=" + frames + " t=" + row.reload + " segs=" + segFrames;
+          " f=" + frames + " t=" + row.reload + " segs=" + segFrames +
+          " tp=" + (CBZ.fps.active ? "NO" : "yes");
       }
     } catch (e) { rec.err = String(e && e.message || e); }
     out.guns.push(rec);
