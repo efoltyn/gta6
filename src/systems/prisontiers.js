@@ -630,7 +630,7 @@
     const t = tier();
     return {
       logo: "TRANSFERRED",
-      sub: "Reclassified — " + t.arrive,
+      sub: "Reclassified: " + t.arrive,
       place: String(level() + 1),
       total: "of 4 · " + t.label,
       button: "REPORT TO " + t.label,
@@ -664,7 +664,7 @@
   }
   function winLine(sub) {
     if (!on()) return sub;
-    return beaten === 0 ? sub : sub + " — out of " + TIERS[beaten].short;
+    return beaten === 0 ? sub : sub + " · out of " + TIERS[beaten].short;
   }
 
   /* ==========================================================

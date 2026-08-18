@@ -13,12 +13,16 @@
      stuck        a man who has been told to march and has not moved in 4 s.
      blindFire    a round fired at a mark the shooter cannot see.
      throughMate  a round fired down a lane a team mate is standing in.
-     ended        the war reached a result inside the budget.
+     firstShotT   how long the war spends WALKING before it starts. Two crowds
+                  crossing a downtown is not a battle, and it is the only fault
+                  here that shows up as boredom rather than as a wrong pixel.
+     ended        the war reached a result inside the SIM-time budget.
 
    Usage:
-     node tools/battle-check.mjs                     the default sweep
+     node tools/battle-check.mjs                     the default sweep (5 maps)
      node tools/battle-check.mjs --map city --n 40   one map, one size
-     node tools/battle-check.mjs --seconds 90        longer watch
+     node tools/battle-check.mjs --seconds 90        longer watch (WALL clock)
+     node tools/battle-check.mjs --resolve 150       longer war (SIM clock)
      node tools/battle-check.mjs --keep              leave chrome up
      node tools/battle-check.mjs --url https://efoltyn.github.io/gta6/
                                                     check the DEPLOYED site
@@ -40,14 +44,44 @@ const arg = (f, d) => { const i = argv.indexOf(f); return i >= 0 && argv[i + 1] 
 /* EVERY MAP THE PAGE OFFERS, OR THE SWEEP IS DECORATION.
 
    This list used to read "city,streets,dunes,arena". `streets` is not a map
-   and never was — the sweep spent a quarter of its run booting a fallback and
-   calling it a pass — while island and field, the two venues that were
-   actually broken, were never checked at all. A checker whose map list can
-   drift from the page's is a checker that certifies the maps nobody plays. */
-const MAPS = arg("--map", "city,island,field,gov,harbor,marina,speedway,dunes,arena").split(",");
+   and never was — battle.html ends its map table with `if (!MAPS[SET.map])
+   SET.map = "city"`, so the sweep spent a quarter of its run booting a
+   fallback and calling it a pass, while island and field, the two venues that
+   were actually broken, were never checked at all. A checker whose map list
+   can drift from the page's is a checker that certifies the maps nobody plays.
+
+   And the guard is the other half of that: a name this list does not know is
+   now a FAILURE rather than a silent extra helping of downtown, so the next
+   typo announces itself instead of quietly shrinking the sweep. */
+const KNOWN = ["city", "island", "field", "gov", "harbor", "marina", "speedway", "dunes", "arena"];
+const MAPS = arg("--map", KNOWN.join(",")).split(",");
+{
+  const bad = MAPS.filter((m) => !KNOWN.includes(m));
+  if (bad.length) { console.error(`BATTLE: FAIL unknown map(s) ${bad.join(", ")} — known: ${KNOWN.join(", ")}`); process.exit(1); }
+}
 const N = parseInt(arg("--n", "26"), 10);
 const SECONDS = parseInt(arg("--seconds", "70"), 10);
 const SPEED = arg("--speed", "4");
+/* THE TWO BUDGETS, both in SIM seconds and both measured rather than chosen.
+
+   OPENING — how long a person may be asked to watch men WALK before the first
+   round goes off. `city` read 10.9 s before the start lines came in, because
+   the two armies formed up 304 m apart at opposite edges of the downtown (see
+   streetSpawner) and spent the first forty seconds marching. All nine maps
+   measured: harbor 0.6 · field 0.6 · marina 0.6 · kill box 0.9 · gov 1.2 ·
+   city 2.2 · dunes 3.2 · island 7.2 · speedway 7.3. The pin is 9 rather than 8
+   because the two at the top of that list are the ones that vary — island has
+   been seen at 7.1 and at 8.4 on the same build, the sim advancing in
+   frame-sized steps — and a gate that flakes is a gate people learn to re-run.
+
+   RESOLVE — how long a war may run without a result. Deliberately in SIM time,
+   not wall time: headless swiftshader manages about 0.6x real on the city map,
+   so a wall-clock deadline would fail the biggest map for being the biggest
+   map rather than for dragging. A sweep that runs out of WALL time before
+   reaching RESOLVE reports `inconclusive` and does not fail — an unfinished
+   measurement is not a fault, and saying so beats pretending either way. */
+const OPENING = parseFloat(arg("--opening", "9"));
+const RESOLVE = parseFloat(arg("--resolve", "120"));
 /* --revert runs the SAME sweep with the old separation pass, the old fire
    discipline and transparent sand (?tlos=0) restored, and asserts the faults
    COME BACK. A fix nobody can turn off has not been measured. */
@@ -158,14 +192,16 @@ for (const map of MAPS) {
 
   // watch it. The quality probe lives in the page (it needs the roster), and
   // it ACCUMULATES — one sample cannot see a shot that was fired between polls.
-  let last = null, ended = false, samples = 0;
+  let last = null, ended = false, samples = 0, simT = 0;
   const t1 = Date.now();
   while ((Date.now() - t1) / 1000 < SECONDS) {
     await sleep(1500);
     const q = await evl("__battle.quality()");
     if (q && !q.__throw) { last = q; samples++; }
     const a = await evl("__battle.audit()");
+    if (a) simT = a.simT || simT;
     if (a && a.over) { ended = true; break; }
+    if (simT >= RESOLVE) break;          // long enough to judge; stop burning wall time
   }
   const audit = await evl("__battle.audit()");
   const q = last || {};
@@ -178,6 +214,7 @@ for (const map of MAPS) {
     stuck: q.stuck, blindFire: q.blindFire, throughMate: q.throughMate,
     throughSand: q.throughSand,
     shots: q.shots, fratricide: q.fratricide, engaged: q.engaged,
+    firstShotT: q.firstShotT,
     ground: audit && audit.ground, centre: audit && audit.centre, gap: audit && audit.gap,
     relief: audit && audit.relief, terrainLos: audit && audit.terrainLos,
     errors: errors.filter((e) => !/ProgressEvent|favicon|preload/i.test(e)).slice(0, 6),
@@ -211,6 +248,19 @@ for (const map of MAPS) {
   }
 
   if (row.overlapPeak > 0) fails.push(`${map}: ${row.overlapPeak} overlapping pairs (worst ${row.overlapWorst} m apart)`);
+  /* HOW LONG BEFORE ANYTHING HAPPENS, AND DOES IT EVER FINISH. Neither of
+     these is a crash, a leak or a wrong pixel — they are the two ways a battle
+     you WATCH can be bad without a single counter going non-zero, which is
+     exactly why they belong in the gate. Both were failing on main: `city`
+     took 10.9 s to fire its first round (two armies 304 m apart) and had not
+     resolved after 83 s of sim, while every other map was done inside 55. */
+  if (!(row.firstShotT >= 0) || row.firstShotT > OPENING) {
+    fails.push(`${map}: first round at ${row.firstShotT < 0 ? "never" : row.firstShotT + "s"} — over the ${OPENING}s opening budget (men walking, not fighting)`);
+  }
+  if (!row.ended) {
+    if (row.simT >= RESOLVE) fails.push(`${map}: no result in ${row.simT}s of sim — ${row.red} v ${row.blue} still standing`);
+    else { row.inconclusive = true; console.log(`  ${map}: ran out of wall clock at ${row.simT}s of sim (budget ${RESOLVE}s) — resolution not judged`); }
+  }
   if (row.embeddedEver > 0) fails.push(`${map}: ${row.embeddedEver} bodies inside geometry`);
   if (row.blindFire > 0) fails.push(`${map}: ${row.blindFire} rounds fired at a mark nobody could see`);
   if (row.throughSand > 0) fails.push(`${map}: ${row.throughSand} rounds fired through the terrain itself`);

@@ -123,7 +123,7 @@
   var CLUB_SELF = 0.30;     // ...and it costs the club something every time
   var THROW_SPD_CAP = 17;   // m/s — ω·r uncapped reaches silly numbers
   var GRAV = 21;            // m/s² — matches CBZ.TUNE.gravity's default register
-  var GRAB_CD = 4.2;        // s — an ape does not grab twice in a row
+  var GRAB_CD = 2.6;        // s — an ape does not grab twice in a row
   var MAX_HOLDS = 3;        // concurrent flails; a troop of apes must not thrash
   var APE_TEMPO = 0.5;      // multiplier on the caller's between-blow cooldown
 
@@ -131,6 +131,7 @@
   var HOLDS = [];           // live { ape, victim, phase, ... }
   var FLYING = [];          // live { victim, vx, vy, vz, t, spin, by, team, dmg }
   var _roster = [];         // reused CBZ.worldActors sink
+  var holdId = 0;           // identifies a hold, so a club pass can be tokened
   var _hostDriven = false;  // set by the first explicit apeStep(); kills the fallback tick
   // `picks` counts every time the driver asked for a move. It exists because
   // "the repertoire never fired" and "the driver only ever asked once" look
@@ -358,12 +359,24 @@
        the gorilla being weak, it is the gorilla never getting to fight: the
        hold is the most committed thing in the move set and committing to it
        cold, before anything has been cleared off you, is simply a bad move.
-       So it now takes THREE swings of the ordinary repertoire to earn — which
-       is also how it actually goes: you scatter the ring first, THEN you pick
-       one up. */
-    else if (FLAIL_ON() && HOLDS.length < MAX_HOLDS && crowd >= 2 && swings >= 2 &&
+       THAT REASONING EXPIRED, and the note stays so the reversal is legible.
+       The hold was suicide because the club was barely connecting: sweepClub
+       only tested for contact twice per revolution, so the arm scythed through
+       a ring of men and cleared about a fifth of it. Tested continuously it
+       lands five times the hits, the ring goes down with it, and five holds in
+       seven now reach their release instead of one in four — so committing
+       early is no longer committing to death, it is the thing that saves the
+       animal. A thick crowd (four or more inside the arms) therefore gets
+       grabbed on FIRST contact, which is also the honest read: a silverback
+       that wades into a mob does not trade jabs first.
+
+       And the frequency is a feature requirement, not a taste: measured at the
+       old gate, FIVE OF TEN battles finished without a single grab, which is
+       the owner reporting he never saw the thing the work was for. */
+    else if (FLAIL_ON() && HOLDS.length < MAX_HOLDS && crowd >= 2 &&
+             (swings >= 2 || crowd >= 4) &&
              (attacker._apeGrabT || -99) < now - GRAB_CD &&
-             grabbable(attacker, target) && roll() < (crowd >= 4 ? 0.45 : 0.26)) {
+             grabbable(attacker, target) && roll() < (crowd >= 4 ? 0.68 : 0.32)) {
       style = 'ape_grab';
     }
     /* THE CHARGE IS THE ARRIVAL. Authored as "throw it when the target is out
@@ -558,7 +571,7 @@
       ape: ape, victim: victim, phase: 'lift', t: 0,
       ph: headingOf(ape),                  // the swing angle, absolute world radians
       dmg: dmg, revs: revs, turned: 0,
-      arm: arm, lastTag: -1, tag: 0,
+      arm: arm, id: ++holdId, tok: 0,
       opts: opts || null,
     };
     ape._apeHold = h;
@@ -646,7 +659,9 @@
       var d = dt * hz * 6.283185307179586;
       h.ph += d;
       h.turned += d / 6.283185307179586;
-      h.tag = Math.floor(h.turned * 2);          // two contact windows a turn
+      // one pass per body per TURN of the club, identified by this hold and
+      // which revolution it is on — see sweepClub
+      h.tok = h.id * 64 + (Math.floor(h.turned) | 0);
       sweepClub(h, hz);
       if (h.turned >= h.revs) {
         // FINISH. Into the ground if a body is standing where he would land,
@@ -697,8 +712,20 @@
 
   // THE CLUB CONNECTS. Everyone the swung body passes through takes it, once
   // per contact window, and so does the body — being the weapon is fatal.
+  /* THE CLUB CONNECTS — and it is a rotating BAR, so it has to be tested like
+     one. The first build gated this whole function on a two-per-revolution
+     counter (`h.tag`), which meant the arm was only asked what it was passing
+     through at two instants per turn: between them it swept 180 degrees of
+     standing men and touched none of them. That is why a spinning silverback
+     was still a punching bag — it was clearing perhaps a fifth of the ring it
+     was physically scything through, so sixty men kept hitting it and three
+     holds in four ended with the ape dying mid-swing.
+
+     Tested EVERY frame now, with the once-per-turn rule moved where it belongs:
+     onto the VICTIM. Each man can be hit once per revolution of the club (the
+     token is this hold's id and the turn number), so the arm cannot machine-gun
+     the same body across consecutive frames and cannot skip anyone either. */
   function sweepClub(h, hz) {
-    if (h.tag === h.lastTag) return;
     var v = h.victim, ape = h.ape;
     var vp = posOf(v); if (!vp) return;
     var ap = posOf(ape); if (!ap) return;
@@ -717,6 +744,7 @@
     for (var i = 0; i < list.length; i++) {
       var o = list[i];
       if (o === v || !isEnemy(ape, o) || o._apeHeld) continue;
+      if (o._apeClubTok === h.tok) continue;      // already took this turn's pass
       var q = posOf(o); if (!q) continue;
       // nearest point on the arm-plus-body segment, clamped to its ends
       var t = seg2 > 1e-6 ? ((q.x - ap.x) * sx + (q.z - ap.z) * sz) / seg2 : 0;
@@ -733,13 +761,13 @@
       // that is what being hit by something moving in a circle does to you
       var tx = -Math.sin(h.ph), tz = Math.cos(h.ph);
       var spd = clamp(hz * 6.283 * h.arm.hold * 0.42, 4, 13);
+      o._apeClubTok = h.tok;
       launch(ape, o, (tx * 0.75 + dx / d * 0.25), (tz * 0.75 + dz / d * 0.25),
         spd, 3.6, h.dmg * CLUB_DMG, 'clubbed with a body');
       struck++;
       STATS.clubHits++;
     }
     if (struck) {
-      h.lastTag = h.tag;
       // the club pays for every landing — a man used as a weapon does not
       // survive being used as a weapon
       hurt(v, h.dmg * CLUB_SELF * struck, impOf(ape, 'used as a club', 0));
