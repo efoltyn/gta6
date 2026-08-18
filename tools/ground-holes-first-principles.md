@@ -215,6 +215,107 @@ the authored city, unless the street layer is eventually baked into the terrain 
 The two approaches are complementary, not competing: a dig-able heightfield where the
 ground is bare, and the global shader mask (A2) under the authored city.
 
+## The bunker case: it is not the hole, it is the LID
+
+The driving fantasy is concrete: a B-2 sortie drops on Gang City and leaves a **crater**;
+a bunker buster does **real damage underground**; the player can **build** underground
+bunkers; and a mission target in a bunker can be reached **either** on foot through
+layers of security **or** by putting a penetrator through the roof from 40,000 ft.
+
+Almost all of that logic already exists.
+
+| piece | where | state |
+|---|---|---|
+| B-2, bombing runs, ballistics | `city/aircraft.js`, `city/playeraircraft.js` | ships |
+| penetration model (`penCE` vs roof CE) | `city/strategic.js`, `CBZ.strategicBunkerRoof` | ships |
+| bunkers, interiors, blast doors, shelter guarantee | `city/bunkers.js` | ships |
+| breach state machine (held / crack / breach) | `CBZ.strategicBunkerBreach` | ships |
+| security layers, keycards, gov complexes | `city/security.js`, `city/govcomplex.js` | ships |
+| missions, contract kills | `core/mission.js`, `city/hitman.js` | ships |
+| placement / build mode / 16 m chunks | `systems/buildmode.js`, `pieces.js`, `chunks.js` | ships |
+| **persistent carved hole in a flat surface that reveals the interior** | `buildings.js::carveHole` | **ships — for WALLS** |
+| persistent shaft with floor, fall damage, burial | `world/groundshaft.js` | ships |
+
+So the instinct — "so much of this logic exists but the hole is the issue" — is right. But
+the missing primitive is worth naming exactly, because naming it shrinks the job:
+
+> **A pit is a hole with nothing over it. A bunker is a hole with a LID on it. A bunker
+> buster is the thing that turns a lid into a hole.**
+
+A pit is single-valued and already works — `groundshaft.js` puts you 46 m down and proves
+it. A lid is street *above* and room *below*, both solid, at the same (x,z). That is the
+multi-valued case, and it is the **only** thing missing from the list above.
+
+This is also why `bunkers.js` builds mounds. Its header records the workaround honestly:
+the interior "sits AT GRADE and the earth sits OVER it — a massive tiered berm". That is
+exactly what you do when you have no lid. It works for an isolated hillside shelter and
+it cannot work for the mission fantasy, because a bad guy under a Gang City block needs
+the *street* over his head, not a visible hill in the middle of downtown.
+
+### The rendering problem mostly evaporates
+
+An intact lid means **there is nothing to draw**. The street looks like a street; the room
+below is enclosed and unseen. No mask, no discard, no slots, no retopology — the hardest
+rendering problem in this document simply does not arise while the lid is intact.
+
+It only arises *after* a breach — and a breach is a crater, which is single-valued, which
+is the case that already works. `carveHole` is the precedent for the punch itself: it
+already opens a persistent hole in a flat surface that "reads as a real LIT ROOM, never a
+dark gray crater", by finding the surface whose y-band contains the hit and rebuilding it
+around the gap. That is the same operation the lid needs.
+
+### The cost, measured — and it is much smaller than Job B implies
+
+Earlier this doc warned about 280 `CBZ.floorAt` call sites. For *this* feature that fear
+is mostly wrong, because of how support queries split:
+
+| consumer | query | needs voids? |
+|---|---|---|
+| **the player** (`systems/physics.js`) | `groundAt(x, z, fromY)` ×13 | yes — and it **already takes `fromY`** and already selects among stacked surfaces (that is how building storeys work) |
+| peds / guards (`city/peds.js`) | `floorAt` ×1 | yes — one call site |
+| survival bots (`entities/survivorbot.js`) | `floorAt` ×3 | not for city bunkers |
+| vehicles (`city/vehicles.js`) | `floorAt` ×4 | **no — surface-only is CORRECT.** A car drives on the street *over* the bunker |
+| aircraft (`city/aircraft.js`) | `floorAt` ×7 | **no — same** |
+
+Almost everything that reads `floorAt` *wants* the surface and is right to get it. The
+things that can be underground are the player and a handful of guards.
+
+**The seam is one line.** `physics.js:1575`:
+
+```js
+function groundAt(x, z, fromY) {
+  let best = CBZ.floorAt ? CBZ.floorAt(x, z) : 0;      // ← pass fromY
+```
+
+`CBZ.floorAt` is already wrappable and already wrapped in anger — `groundshaft.js`
+installs a wrapper over it today. Give `floorAt` the optional third argument (proven
+non-breaking: 197 call sites, none passing a third) and a void wrapper can answer "the
+lid" or "the room" from the same registry. One caveat found while checking: physics.js
+calls its **local** `groundAt` binding, not `CBZ.groundAt`, so this cannot be monkey-
+patched from outside — the edit belongs in `physics.js`.
+
+### The shape to build: `CBZ.voids`, the mirror of `CBZ.platforms`
+
+`CBZ.platforms` is already a sparse, spatially-indexed list of walkable surfaces selected
+by the querier's `fromY`, which **raise** the floor. A lid needs the mirror: a sparse list
+of volumes that **lower** it inside their vertical band. Same data shape, same indexing,
+same selection rule, opposite sign — and sparse, so this is not a world representation
+change at all. No voxels, no global heightfield required for the bunker fantasy.
+
+Then the whole feature set falls out of one concept:
+
+- **crater** — lower the surface. Single-valued; works today.
+- **bunker** — a void with a lid.
+- **bunker buster** — delete the lid span. The crater and the room become one hole, and
+  `strategicBunkerBreach` already owns the verdict that decides it.
+- **infiltration on foot** — a door at the far end of the void; blast doors and the
+  security layers already exist.
+- **building a bunker** — placing a void record.
+
+What still has to be taught, and should be scoped honestly: guard pathing inside a void,
+camera behaviour under a lid, spawn clamps, and save/load plus networking of void records.
+Those are bounded and countable; they are not the 280-call-site rewrite.
+
 ## Recommended staging
 
 1. **Move the mask to A2** (global `ShaderChunk` patch). Small, contained, deletes the
@@ -224,8 +325,10 @@ ground is bare, and the global shader mask (A2) under the authored city.
    changes no values. Side quads at discontinuities from day one. Re-mesh per
    `systems/chunks.js` tile. This is what makes holes *ordinary* instead of special, and
    it retires most of `groundshaft.js`'s geometry in those regions.
-3. **Layered spans**, only when caves or basements are actually wanted — behind the
-   optional `fromY`, which is non-breaking today.
+3. **`CBZ.voids` + the `fromY` seam** — the lid. This is the one that unlocks the bunker
+   fantasy (crater, buster, build, infiltrate), and it is far cheaper than the general
+   multi-valued terrain problem because voids are sparse and almost nothing else wants
+   to know about them.
 4. **Baking the street layer into the surface** — the real precondition for digging in
    Gang City, and the largest single piece here. Scope separately.
 
