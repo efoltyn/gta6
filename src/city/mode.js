@@ -515,6 +515,7 @@
       // the root but BEFORE spawnCityPeds/Traffic add dynamic rigs to it. The
       // load-time batch pass (core/batch.js) can't reach the city: it's built
       // lazily, long after the page-load event that triggers that pass.
+      if (CBZ.bootStep) CBZ.bootStep("city:batch");   // loading meter, see systems/bootprogress.js
       if (CBZ.batchStaticUnder) CBZ.batchStaticUnder(A.root);
       // LOCAL_INSTANCING (city/localinst.js): collapse the repeated static props
       // batch LEFT (emissive/transparent/textured trim) into per-tile
@@ -612,6 +613,7 @@
       // spawn population (spawnCityPeds also spawns gangs + seeds families).
       // Multiplayer GUEST: the sim host owns peds/cops/traffic — we render its
       // snapshots as puppets (src/net/networld.js), so nothing spawns locally.
+      if (CBZ.bootStep) CBZ.bootStep("city:pop");
       const netGuest = CBZ.net && CBZ.net.noSim();
       const observePeds = campaignLayerObserved("peds");
       const observeCrowd = campaignLayerObserved("crowd");
@@ -628,12 +630,14 @@
       // (crowd.js skips promotion-to-real-peds when net.noSim())
       if (CBZ.spawnCityCrowd) CBZ.spawnCityCrowd(observeCrowd ? (CBZ.CITY.crowd != null ? CBZ.CITY.crowd : 280) : 0);
       if (CBZ.clearCityCops) CBZ.clearCityCops();
+      if (CBZ.bootStep) CBZ.bootStep("city:traffic");
       if (!netGuest && CBZ.spawnCityTraffic) {
         campaignTrafficDeferred = !observeTraffic;
         CBZ.spawnCityTraffic(observeTraffic ? CBZ.CITY.traffic : 0);
       } else {
         campaignTrafficDeferred = false;
       }
+      if (CBZ.bootStep) CBZ.bootStep("city:run");
       if (CBZ.cityWantedReset) CBZ.cityWantedReset();
       // ESCAPED CONVICT: you didn't get released — you BROKE OUT. The city should
       // not greet you clean. After cityWantedReset() zeroed the slate, stamp a

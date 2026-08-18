@@ -764,6 +764,11 @@
      city/inventory.js. Only needs CBZ + CBZ.CONFIG. -->
 <script src="src/city/itemicons.js?v=allmain1"></script>
 <script src="src/systems/inventory.js?v=bagless1"></script>
+<!-- LOADING METER: the boot card's percentage, drawn on a worker thread so it
+     keeps counting through the 20-30 s synchronous world build (the main
+     thread cannot repaint during that). Must load BEFORE state.js, which
+     shows it, and before the city modules that call CBZ.bootStep(). -->
+<script src="src/systems/bootprogress.js?v=meter1"></script>
 <script src="src/systems/state.js?v=arrest4w10"></script>
 <script src="src/systems/save.js"></script>
 <script src="src/systems/runstats.js"></script>
