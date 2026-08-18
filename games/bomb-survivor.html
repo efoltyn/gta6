@@ -367,8 +367,17 @@ function spawnUnit(rec, role, i) {
     const flown = CBZ.studio.fly("bomber", { groundAt: groundAt });
     if (flown) { u.group = flown.group; u.af = flown.af; }
     if (u.human && u.af) {
-      u.af.place(RW_X0, groundAt(RW_X0, RW_Z) + (u.af.spec.gearHeight || 3.4), RW_Z, RW_HDG, 64);
-      u.af.throttle = 1;
+      // launch(), NOT place(). place()'s fifth argument is PITCH IN RADIANS
+      // and this line used to pass 64 there, meaning "64 m/s". The result was
+      // the whole first impression of this game: a B-2 standing on its tail at
+      // 64 rad ≡ 67° nose-up, velocity zeroed by place() so the 64 never
+      // happened, thrust pointing 92% at the sky — 6.9 m/s² of it against
+      // 9.81 of gravity, so it could never leave the ground — creeping down
+      // the runway at walking pace forever. It read as a plane FLOATING.
+      // launch() is the verb that takes a heading AND an airspeed, and it
+      // seats the attitude level (-0.03 rad) instead of guessing.
+      u.af.launch(RW_X0, groundAt(RW_X0, RW_Z) + (u.af.spec.gearHeight || 3.4), RW_Z, RW_HDG, 64);
+      u.af.throttle = 1;            // after launch(), which sets its own 0.85
       u.rolling = true;
       u.hdg = RW_HDG;
     } else if (u.af) {

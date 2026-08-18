@@ -1329,9 +1329,43 @@
         af.launch(opts.at.x || 0, opts.at.y || 300, opts.at.z || 0, opts.heading || 0, opts.speed || 160);
       }
     }
+
+    /* THE AIRFRAME'S ORIGIN IS NOT THE MODEL'S ORIGIN, AND NOTHING SAID SO.
+
+       systems/airframe.js treats af.pos as a point gearHeight ABOVE the
+       wheels: step() clamps pos.y to `groundAt + P.gearHeight` and will not
+       let it go lower. The models world/airbase.js hands out are seated the
+       other way round — their wheels sit at local y = 0, because that file
+       exists to put PARKED aeroplanes flat on the concrete. applyTo() copies
+       pos straight through, so the two conventions differed by exactly
+       gearHeight and every flown model rode that high.
+
+       In the air it is invisible: 3.4 m of error at 320 m of altitude is
+       nothing, which is why it survived. On the ground it is the whole first
+       impression — Bomb Survivor's B-2 sat a MEASURED 3.40 m over its own
+       runway, wheels in mid-air, which is what "the plane is floating" was.
+
+       One wrapper reconciles them. The returned group's origin IS the
+       airframe's reference point, and the model hangs below it by exactly the
+       distance down to its own lowest geometry, measured rather than assumed —
+       a model the pack already seated and one it did not both come out right,
+       and a page that never heard of gearHeight cannot get it wrong. */
+    let mount = g;
+    if (af && af.spec && af.spec.gearHeight > 0 && THREE.Box3) {
+      const box = new THREE.Box3().setFromObject(g);
+      if (isFinite(box.min.y)) {
+        const drop = -af.spec.gearHeight - box.min.y;
+        if (Math.abs(drop) > 0.01) {
+          mount = new THREE.Group();
+          g.position.y += drop;
+          mount.add(g);
+        }
+      }
+    }
+
     const parent = opts.parent || CBZ.scene;
-    if (parent && parent.add) parent.add(g);
-    return { group: g, af: af };
+    if (parent && parent.add) parent.add(mount);
+    return { group: mount, af: af };
   };
 
   /* drop(obj) — REMOVE IT AND GIVE THE MEMORY BACK.
