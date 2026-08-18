@@ -419,8 +419,23 @@ function parseParamString(value) {
   return out;
 }
 
+/* WHICH PAGE OF THE BUILD. Every preset until now photographed index.html,
+   because --before/--after name a BUILD ROOT and the runner navigated straight
+   to it. games/ is a dozen standalone games served out of that same root, and
+   not one of them could be compared at all — a preset for the NPC War had no
+   way to say "the same two builds, but the battle page". `preset.page` is that
+   one word, resolved against whichever root each side was given, so a deployed
+   baseline and a local checkout stay directly comparable. Absolute values are
+   honoured for the rare preset that needs a different origin. */
+function withPresetPage(url) {
+  const page = preset && preset.page;
+  if (!page) return url;
+  const base = url.endsWith("/") ? url : `${url}/`;
+  return new URL(String(page), base).href;
+}
+
 function cacheBusted(url, side) {
-  const parsed = new URL(url);
+  const parsed = new URL(withPresetPage(url));
   // Presets may pin URL params (seed, cfg_* flags) so both sides boot the
   // exact same deterministic world.
   for (const [key, value] of Object.entries(preset.urlParams || {})) {

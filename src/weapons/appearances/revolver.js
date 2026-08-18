@@ -53,6 +53,14 @@
     // hand wrapping the grip
     box(g, 0.15, 0.11, 0.13, mat.skin, 0, -0.15, 0.07, -0.24);
     g.userData.muzzle = new THREE.Vector3(0, 0.045, -0.64);
+    // WHERE THE HANDS GO — see systems/gunhands.js. A wheelgun is fed
+    // through the cylinder, which swings out to the gun's LEFT.
+    g.userData.grips = {
+      support: new THREE.Vector3(-0.090, -0.170, 0.020),
+      mag: new THREE.Vector3(-0.115, 0.020, -0.180),
+      charge: new THREE.Vector3(0, 0.085, 0.055),      // the hammer spur
+      style: "cylinder",
+    };
     return g;
   };
 })();

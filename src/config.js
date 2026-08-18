@@ -778,6 +778,29 @@
   // the feed is runtime-visual. Flip false for a one-line revert (no cameras,
   // no feed). URL A/B: ?cfg_CCTV_V1=0.
   if (CBZ.CONFIG.CCTV_V1 == null) CBZ.CONFIG.CCTV_V1 = true;
+  // SIT PHYS V1 (owner: prison — "guys can sit on air, close to a chair, but
+  // not on the chair"). ONE LAW, closed in three files: A SEATED BODY IS AT
+  // ITS SEAT. Measured faults it deletes, all in mode "escape":
+  //   · systems/actorcollide.js's wall clamp (order 25) depenetrated every
+  //     bunk sitter the cell leash (22.6) had just pinned to the mattress edge
+  //     — ejected latOut + body radius = 1.06 m into the room, seated on air
+  //     at floor level, ten men at once. Furniture-held bodies now skip the
+  //     separation/clamp roster, the rule peds.js's own sit branch states.
+  //   · nothing re-pinned a seated PLAIN actor (peds pin their own via state
+  //     "sit"; prison actors have no such owner), so the muster dragged a
+  //     yard sitter 2.13 m off his claimed stool in the full seated pose.
+  //     city/propuse.js's NPC hold (order 42) now pins seated occupants
+  //     exactly as it always pinned lying ones.
+  //   · propuse's sit ARC latched char.sitting through its walk-in leg, so a
+  //     body GLIDED to the bench in the seated pose; the walk phase writes
+  //     absolute rig state now, like every other phase.
+  //   · the player pin force-stood the player anywhere outside mode "city",
+  //     so a prison bench sat you down and instantly stood you back up; the
+  //     pin now honours the mode the sit began in.
+  // Ratchets: CBZ.propUseAudit().airSitters 0, CBZ.cellblockAudit().seatDrift
+  // 0 — both measured by tools/prison-sit-check.mjs (--revert proves the
+  // fault returns). Flip false (?cfg_SIT_PHYS_V1=0) for a one-line revert.
+  if (CBZ.CONFIG.SIT_PHYS_V1 == null) CBZ.CONFIG.SIT_PHYS_V1 = true;
   // STREET TALK V2: every civilian is YES / NO / PUNCH. Offer math uses level
   // gap + max cash they can spare. Flip false to restore the crowded verb menu.
   if (CBZ.CONFIG.STREET_TALK_V2 == null) CBZ.CONFIG.STREET_TALK_V2 = true;
@@ -1589,4 +1612,10 @@
   //              single knob if the dressing pass ever feels heavy),
   //              _UTILITY_LINES, _STREET_FURNITURE, _GROUND_GRIME,
   //              _BUILDING_DRESS
+  //   PARKOUR_V2 src/systems/physics.js — the traversal pass that added going
+  //              THROUGH an opening (a shot-out window, a C4 mousehole) instead
+  //              of only over the top, velocity-matched vault root motion, the
+  //              edge catch, the airborne pose and the landing/roll beat.
+  //              ?cfg_PARKOUR_V2=0 restores the shipped vault exactly and is
+  //              the "before" side of tools/visual-presets/parkour-moves.mjs
 })();

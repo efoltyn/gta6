@@ -4123,3 +4123,130 @@ determinism ok, wardrobe/yoke audits untouched.
 magnate detail, don/senator/star court, and the released party, with
 skinArmedInRow / armClash / minorsInRow / founderSidKept / skinArmsCity
 metrics on every plate.
+
+## 2026-08-16 — the prison sat on air (SIT_PHYS_V1, branch claude/prison-game-sitting-physics-58xypq)
+
+Owner report: "guys can sit on air, like, close to a chair, but, like, not on
+the chair. They can just sit on nothing, fix the physics." Reproduced in one
+probe world, mode escape, seed 90210 — twelve bodies in the seated pose at the
+morning yard block, eleven of them nowhere near a seat. Four faults, one law
+(A SEATED BODY IS AT ITS SEAT), one flag:
+
+1. THE WING SAT HALF A METRE FROM ITS OWN BUNKS. Every bunk-posed cell
+   resident measured exactly 1.06 m from his bunk centre — latOut (0.56) +
+   body radius (0.5), the depenetration signature. cellblock.js's leash pins
+   the man to the mattress edge at order 22.6; actorcollide.js's wall clamp
+   (25) ran later and ejected him from the now-solid bunk frame every frame,
+   and the later writer wins. Ten men at once, seated on nothing at floor
+   level. Fix: furniture-held bodies (seat/bed/lie claim, seated/lying rig,
+   or a live prop arc) skip the separation+clamp roster — the rule peds.js's
+   own sit branch already states ("a seated body must not be shoved around by
+   the desk colliders"), closed for the prison's plain actors. Their
+   traversal sample stays stamped so standing up never reads as a sprint.
+2. A CLAIMED SITTER WAS DRAGGED 2.13 m OFF HIS STOOL, still posed seated —
+   the third actor shape had no pin. The player has propuse §3, a peds.js ped
+   re-pins itself from _deskAnchor at 34, a PLAIN actor had nobody, so the
+   muster's target-writes slid him across the yard. Fix: propuse's NPC hold
+   (42) pins seated occupants exactly as it always pinned lying ones — whole
+   transform, same order, wins the frame. For a ped it re-writes the values
+   its own branch just wrote (no-op); KO outranks the furniture.
+3. THE SIT ARC GLIDED. propSit's NPC commit latches char.sitting before the
+   arc (peds' state machine needs it) and the walk-in phase wrote no rig
+   state, so the seated pose owned animChar for the whole leg — a man sailing
+   to the bench folded into a chair shape, measured seated at 2.25 m out.
+   Fix: the walk phase writes absolute rig state like every other phase
+   (sitting/crouch false); the lower/perch beats re-raise the flag when the
+   hips actually land.
+4. THE PLAYER COULD NOT SIT IN HIS OWN PRISON. propuse §3's force-exit read
+   `g.mode !== "city"`, so the sit arc completed and stood him back up the
+   same frame — measured sat 0 of the 160 frames after the arc. Fix: the pin
+   honours the mode the sit began in (P._propMode, recorded by
+   propSit/propSleep; anything that never recorded one keeps the "city"
+   reading byte for byte).
+
+Ratchets, both measured before pinning: CBZ.cellblockAudit().seatDrift
+(bunk-posed men off their spot; was 10-11, pinned 0) and
+CBZ.propUseAudit().airSitters (claimed seats whose occupant sits >0.35 m off
+the anchor; was 1 within a minute of chow, pinned 0). Geometry only, no flag
+reads, so a revert run measures the defect instead of hiding it.
+
+New tool: tools/prison-sit-check.mjs (npm run test:prison-sit) — 12
+assertions on the fixed tree (wing seated with seatDrift 0, chow airSitters 0
+and worst offset 0 m, a live arc with glideFault 0 landing at 0 m, the player
+still seated three seconds on and released cleanly by propStand);
+`--revert` boots ?cfg_SIT_PHYS_V1=0 and asserts the OPPOSITE (seatDrift 11,
+player stood back up) — the two-sided shape mode-engine-check demands.
+Verified: default 12/12, revert 4/4, MATHGATE ok (400 ticks, det ok,
+errors baseline-only), city regression probe 37 seated peds offSeat=0.
+
+## 2026-08-17 — THE FRAME, NOT THE LOAD (react-doctor wave)
+
+Owner: run react-doctor on the game, then make it run much much faster —
+in-game feel, not load time. React Doctor (millionco, oxlint-based) scanned
+813 files: 372 warnings, zero of them React (this is IIFE + r128) and, on
+inspection, none on a hot path — its `indexOf`-in-loop hits are 3-element
+arrays in bounded scans. The real wave came from a CDP sampling profiler
+attached to the live probe world (scratchpad cdprofile.mjs pattern —
+Profiler.start → stepSim ×400 → aggregate self-hits by function). Calm
+street, seed 90210, all before/after on the same machine.
+
+**Sim tick 29.7 → 24.9 ms. Render-side updateMatrixWorld 10.8 → 6.9 ms/frame.**
+
+The finds, in guilt order:
+
+1. **The coastline was recomputed from noise for every water question**
+   (~9% of the tick): every cityWaterAt/isSurfaceWater — cars' overWater,
+   swim, gore, floods — funnels through waterfield's coastAt →
+   continent.js shoreField, an analytic field over noise2/pathBodyField/
+   inSolidRegion. Memoized on a 4m corner grid with bilinear blending
+   (exact at corners, <1m coastline shift, pure function of (x,z) so MP/
+   determinism-safe; worldgen calls shoreField DIRECTLY and is untouched).
+   Plus: overDeck ran a REGEX per region per call (isLink) — now cached on
+   the region object; plus a last-cell fast path. Continent fields left the
+   profile entirely.
+2. **pedinstance walked all ~700 rigs every frame** (a:96, 3.4→1.5ms;
+   clean A/B 2.37→0.86ms): far (>40m) rigs now walk on 1 of 3 frames
+   (`PED_SYNC_STAGGER`), phases spread by group.id; every same-frame
+   contract kept — park gates run every frame, sweepRig knows a held frame
+   from a missing part via r.skipStamp.
+3. **The renderer recomposed every matrix the instancer had ALREADY
+   composed** — 33k ped-rig + 9k car nodes of the 48k matrixAutoUpdate
+   set. New shared contract: loop.js bumps CBZ._matrixOwnStamp once per
+   frame; a system that provably left a subtree's world matrices correct
+   stamps the root; core/matrixskip.js skips the whole subtree on stamp
+   equality. Stamps expire next frame BY CONSTRUCTION (no teardown
+   bookkeeping, nothing can stay stale). Stampers: pedinstance walked+held
+   rigs (`PED_MATRIX_OWN`), vehicles far-stride skipped cars and settled
+   parked cars >60m (`CAR_MATRIX_HOLD`; parkSeat's own cache is the
+   "settled" oracle; near cars stay live for doors/entry). Coverage
+   measured: 116/622 rigs (the non-culled ones), 386/420 cars.
+4. **reactions.js ran its 300-line pose body for every calm ped**: added
+   the quiescent fast path — a complete enumeration of the three edge
+   detectors, every external pose input and every stored channel; any
+   nonzero falls through. Measured 98-99% skip on calm streets, and
+   CBZ.reactionsAudit() now reports quiet/full/firstBlock forever.
+5. **The hot reticle asked isProtectedActor for all ~630 peds every
+   frame** (2.6%): bare radii are strictly inside assisted radii, so
+   findActorHit now tests assisted spheres first and asks the predicate
+   only on a would-be hit (still never cached — childsafe's obligation
+   kept; also no longer asked for merely-culled invisible peds). Gone from
+   the profile.
+6. **queryCollidersNear deduped via Set hashing** for every steering ped +
+   crowd probe: now a query-id stamp on the collider (9.1→7.0%).
+
+GATE: MATHGATE ok (90210:329/182/207, 400 ticks, det ok, errors
+baseline-only) with everything default-ON. Reverts: ?cfg_PED_SYNC_STAGGER
+/ PED_MATRIX_OWN / CAR_MATRIX_HOLD = 0.
+
+Traps for the next wave: (a) probe-world measurements are only comparable
+within one boot — event spikes (an ambient craft crashing mid-burst made
+airtraffic read 3.1ms when its steady state is 0.26) and boot-state drift
+lie across boots; A/B a cfg flag live in ONE world. (b) probe.mjs --serve
+edits need a serve RESTART to load; two restarts racing leaves the
+lockfile pointing at the stale one — pgrep before trusting it. (c) The
+render walk's remaining 6.9ms is the 170k-node visit floor + ~15k unnamed
+live objects; the next real render-CPU win is object-count reduction
+(mid-play accretion measured at only ~13 obj/s net, so it's the standing
+count, not a leak). (d) 6.7M tris are mostly redhollow/backcountry/mercy
+nature megameshes — vertex-cost waste on paper, but NOT the bottleneck on
+Apple GPUs; don't chase it before draw/CPU.

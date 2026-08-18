@@ -1173,6 +1173,138 @@
     };
   }
 
+  /* ---- CBZ.charArmTo — PUT THIS HAND EXACTLY THERE ------------------------
+
+     The two solvers above are the older, deliberately approximate pair: both
+     flatten the problem into the sagittal plane (reach = hypot(dy, dz)) and
+     hand the sideways component to a clamped `roll`, which is fine for a grab
+     that only has to look plausible and wrong the moment the target has to be
+     HIT — a support hand on a handguard is off by however much dx there was.
+
+     This one is exact, and it is exact for THIS rig rather than for an
+     idealised two-link chain, because the wrist is not at the end of the
+     forearm: makeCharacter parks the hand socket at (0, -(armLo+0.01), 0.035)
+     inside the elbow group, i.e. a hair FORWARD of the bone. Fold that offset
+     into the second link as a length l2 with a built-in tilt t and the closed
+     form survives:
+
+       hand, in the upper arm's own frame, with the elbow at angle e
+         u = (0, -l1, 0) + Rx(e)·f,      f = (0, -l2·cos t, l2·sin t)
+         |u|² = l1² + l2² + 2·l1·l2·cos(e - t)
+       so the elbow that puts the wrist at distance d is
+         e = t - acos( (d² - l1² - l2²) / (2·l1·l2) )
+       and with Euler order XYZ (three.js default) the shoulder that swings û
+       onto the unit target v is, exactly,
+         sin z = v.x / |û.y|
+         x     = atan2(v.z, v.y) - atan2(û.z, û.y·cos z)
+
+     Out of reach, the shoulder PROTRACTS (position.z) instead of the arm
+     silently giving up — that is the real joint that lets a person reach the
+     front of a rifle, and it is why a long gun's support hand can land at all.
+
+       CBZ.charArmTo(ch, worldPoint, arm, k)
+         arm  "l" | "r"        k  0..1 blend against the pose already there
+       Returns the residual metres between wrist and target (0 = landed), or
+       null if the rig can't be solved. Writes rotations only. */
+  const _armT = new THREE.Vector3(), _armV = new THREE.Vector3();
+  const _armWrist = new THREE.Vector3();
+  function charArmTo(ch, worldPoint, arm, k) {
+    const P = ch && ch.profile;
+    const part = ch && ch.parts && (arm === "l" ? ch.parts.la : ch.parts.ra);
+    const low = part && part.userData && part.userData.low;
+    if (!P || !part || !low || !ch.body || !worldPoint) return null;
+    const blend = k == null ? 1 : Math.max(0, Math.min(1, k));
+    if (blend <= 0) return null;
+
+    // body space — the frame both the shoulder root and the pose live in
+    ch.body.updateWorldMatrix(true, false);
+    _armT.copy(worldPoint);
+    ch.body.worldToLocal(_armT);
+
+    const l1 = Math.max(0.12, P.armUp - 0.02);          // shoulder → elbow pivot
+    const fy = -(P.armLo + 0.01), fz = 0.035;           // elbow → wrist socket
+    const l2 = Math.hypot(fy, fz);
+    const t = Math.atan2(fz, -fy);                      // the wrist's forward tilt
+
+    // SCAPULAR PROTRACTION: reach past the arm's length by leading with the
+    // shoulder, capped, before the bone solve — the same degree of freedom a
+    // person spends getting a hand to the front of a rifle.
+    const rest = part.userData._armRestZ != null ? part.userData._armRestZ : 0;
+    let push = Math.hypot(_armT.x - part.position.x, _armT.y - part.position.y,
+                          _armT.z - rest) - (l1 + l2) * 0.985;
+    push = Math.max(0, Math.min(0.24, push));
+    part.position.z += (rest + push - part.position.z) * blend;
+
+    _armV.set(_armT.x - part.position.x, _armT.y - part.position.y, _armT.z - part.position.z);
+    const d0 = _armV.length();
+    const maxR = (l1 + l2) * 0.985;
+    const minR = Math.abs(l1 - l2) + 0.06;
+    const d = Math.max(minR, Math.min(maxR, d0));
+    if (d < 1e-4) return null;
+    _armV.multiplyScalar(1 / d0);                       // unit direction to the target
+
+    const cosE = Math.max(-1, Math.min(1, (d * d - l1 * l1 - l2 * l2) / (2 * l1 * l2)));
+    const e = Math.min(0.02, t - Math.acos(cosE));      // elbows bend one way only
+    const uy = -l1 + fy * Math.cos(e) - fz * Math.sin(e);
+    const uz = fy * Math.sin(e) + fz * Math.cos(e);
+    const un = Math.hypot(uy, uz) || 1e-6;
+    const uyN = uy / un, uzN = uz / un;
+
+    const sinZ = Math.max(-0.999, Math.min(0.999, _armV.x / -uyN));
+    const rz = Math.asin(sinZ);
+    const rx = Math.atan2(_armV.z, _armV.y) - Math.atan2(uzN, uyN * Math.cos(rz));
+
+    const wrap = (a) => (a > Math.PI ? a - 2 * Math.PI : a < -Math.PI ? a + 2 * Math.PI : a);
+    part.rotation.x += (wrap(rx) - part.rotation.x) * blend;
+    part.rotation.y += (0 - part.rotation.y) * blend;
+    part.rotation.z += (rz - part.rotation.z) * blend;
+    low.rotation.x += (e - low.rotation.x) * blend;
+    low.rotation.y += (0 - low.rotation.y) * blend;
+    low.rotation.z += (0 - low.rotation.z) * blend;
+
+    // residual, measured off the real socket rather than trusted from the math
+    const socket = ch.sockets && (arm === "l" ? ch.sockets.leftHand : ch.sockets.rightHand);
+    if (!socket) return Math.max(0, d0 - maxR);
+    part.updateMatrixWorld(true);
+    socket.getWorldPosition(_armWrist);
+    return _armWrist.distanceTo(worldPoint);
+  }
+  /* Remember the pose's own shoulder-forward value so protraction is measured
+     against it instead of accumulating. Callers that drive an arm every frame
+     (systems/gunhands.js) latch this once per pose change. */
+  charArmTo.rest = function (ch, arm, z) {
+    const part = ch && ch.parts && (arm === "l" ? ch.parts.la : ch.parts.ra);
+    if (part) part.userData._armRestZ = z || 0;
+  };
+  /* HOW FAR THIS ARM CAN ACTUALLY REACH, IN WORLD METRES — and it lives here
+     because the two ends of that question are in different units and a caller
+     that guesses the conversion gets a plausible, wrong number. The solve
+     above runs in BODY-LOCAL units (the rig is authored at ~1.3 and scaled to
+     human size on the group), so its own clamp is 0.898-ish local; a consumer
+     comparing that against a world-metre distance to a weapon is out by the
+     whole rig scale. Read the scale off the live matrix instead of assuming
+     it: a child, a scaled prop rig or a future HUMAN_SCALE change all just
+     work.
+
+     BONE ONLY, and deliberately: protraction is NOT included even though the
+     solve spends it, because protraction pushes the shoulder FORWARD and
+     nothing else. A caller testing a target that is mostly SIDEWAYS — which
+     is the whole job of a support hand crossing to the other side of the
+     body — would be told it can reach 0.17 m further than it can. The
+     reachable set is an ellipsoid; this returns its minor axis, so a
+     reachability test built on it is conservative rather than wrong. If you
+     need the truth for a specific point, solve to it and read the residual. */
+  charArmTo.span = function (ch, arm) {
+    const P = ch && ch.profile;
+    if (!P || !ch.body) return 0;
+    const l1 = Math.max(0.12, P.armUp - 0.02);
+    const l2 = Math.hypot(P.armLo + 0.01, 0.035);
+    ch.body.updateWorldMatrix(true, false);
+    const s = ch.body.matrixWorld.getMaxScaleOnAxis() || 1;
+    return (l1 + l2) * 0.985 * s;
+  };
+  CBZ.charArmTo = charArmTo;
+
   // The torso and legs are siblings authored from the feet, but anatomically
   // meet at this socket. Every pose writer may rotate the torso; these two
   // helpers make that rotation happen around the hip in full 3D. Compensation
@@ -2016,7 +2148,131 @@
       ch.body.position.z = damp(ch.body.position.z, 0, sr, dt);
       ch.body.rotation.y = damp(ch.body.rotation.y, 0, sr, dt);
 
-      if (tp.kind === "mantle") {
+      if (tp.kind === "through") {
+        /* ---- THREADING AN APERTURE (physics.js kind "through") -------------
+           The trajectory has already pinned the root inside the hole. What the
+           pose has to explain is that the body CHOSE a shape small enough to
+           fit — because that is the whole difference between this and a vault,
+           and the reason the owner could see that the old move was wrong: a
+           man does not go through a window in the shape he walks in.
+
+           Two silhouettes, and they are not the same move at two sizes:
+
+           "dive"  arms spear FORWARD, chest pitches down toward horizontal,
+                   legs trail and snap through last. Superman through the
+                   frame. The pitch is the pose — everything else follows it.
+           "step"  upright but compressed: one thigh drives high to clear the
+                   sill, the head ducks under the header, a hand rides the
+                   frame for balance. A tall doorway with a knee-high lip.
+
+           Beats: 0..0.24 gather (the commitment), 0.24..0.72 pass (the shape
+           is held — this is the stretch physics has pinned to the aperture, so
+           it must not be animating through it), 0.72..1 emerge and reach for
+           the floor. */
+        const dive = tp.gapStyle !== "step";
+        const gather = smoother01(u / 0.24);
+        const emerge = smoother01((u - 0.68) / 0.32);
+        // held through the middle: full commitment, then unwound on the way out
+        const shape = Math.max(0, gather - emerge);
+        /* ---- THE POSE HAS TO AGREE WITH THE ARITHMETIC ---------------------
+           physics.js checked this hole against a HORIZONTAL body: 0.58 m tall,
+           its bottom at the sill line. If the animator only pitches `ch.body`
+           (the torso, hinged at the hips) then the legs stay standing, the rig
+           is still 1.82 m tall, and the drawn body goes straight through the
+           header the fit check just proved it cleared. A jackknifed torso over
+           vertical legs is not a dive.
+
+           So the DIVE lays the whole rig down, and it needs the same pivot
+           trick the landing roll needs and for the same reason: `model`'s
+           origin is at the FEET, so pitching it alone swings the head through
+           the floor. Rotating about a point P is R plus the translation
+           P - R*P; carrying one extra -P puts the body's own centre line ON
+           the root instead of above it, which is what makes "the root is at
+           passY" and "the body's envelope starts at passY" the same statement.
+           `lay` is offset so the envelope sits just inside the 0.58 m the
+           aperture was measured against, not straddling it. */
+        if (dive) {
+          const theta = 1.45 * shape;                 // ~83 deg: committed, not quite flat
+          const h = Math.max(0.55, ((ch.metric && ch.metric.height) || 1.82) * 0.50);
+          // The envelope physics.js actually measured this hole against, not a
+          // second copy of the number (tp.passH; see its note in physics.js).
+          const lay = (tp.passH || 0.58) * 0.5;       // centre the envelope over the sill
+          if (ch.model) {
+            ch.model.rotation.x = theta;
+            ch.model.rotation.y = 0;
+            ch.model.rotation.z = 0.10 * shape;
+            if (!ch._seatSunk) {
+              ch.model.position.y = -h * Math.cos(theta) + lay * shape;
+              ch.model.position.z = -h * Math.sin(theta);
+            }
+          }
+          // The torso adds only the last few degrees on top of the lay-out —
+          // a chest lifted slightly against the dive line, which is what a
+          // person actually does to see the landing.
+          ch.body.position.y = damp(ch.body.position.y, -0.06 * shape, sr, dt);
+          ch.body.rotation.x = damp(ch.body.rotation.x, -0.22 * shape + 0.18 * emerge, sr, dt);
+          ch.body.rotation.z = damp(ch.body.rotation.z, 0.06 * shape, sr, dt);
+          // Both arms spear ahead of the head, elbows nearly locked — the arms
+          // are the leading edge of the body's cross-section, not a balance aid.
+          limb(ch.parts.la, -0.30 - 2.30 * shape, 0.06, -0.14 - 0.10 * shape, 0.18 * shape);
+          limb(ch.parts.ra, -0.30 - 2.30 * shape, -0.06, 0.14 + 0.10 * shape, 0.18 * shape);
+          setElbow(J.la, -0.10 - 0.10 * shape, sr);
+          setElbow(J.ra, -0.10 - 0.10 * shape, sr);
+          // Legs trail straight behind, then whip through as the hips clear.
+          const trail = Math.max(0, shape - emerge * 0.4);
+          const snap = smoother01((u - 0.74) / 0.26);
+          limb(ch.parts.ll, 0.60 * trail - 1.30 * snap, 0, 0.07, 0);
+          limb(ch.parts.rl, 0.52 * trail - 1.10 * snap, 0, -0.07, 0);
+          setKnee(J.ll, 0.16 + 0.34 * trail + 1.05 * snap, sr);
+          setKnee(J.rl, 0.20 + 0.42 * trail + 0.88 * snap, sr);
+          if (ch.neck) {
+            // Chin tucks going in (protect the head, see the landing), lifts on
+            // the way out to find the floor.
+            ch.neck.rotation.x = damp(ch.neck.rotation.x, 0.30 * shape - 0.46 * emerge, sr, dt);
+            ch.neck.rotation.z = damp(ch.neck.rotation.z, 0, sr, dt);
+          }
+        } else {
+          /* AND A STEP HAS TO ACTUALLY DUCK. physics.js measured this opening
+             against height * 0.78 (1.42 m on an adult), so the rig has to lose
+             ~0.40 m of stature or the drawn head is inside the lintel — the
+             same disagreement the dive above has to avoid, in the upright
+             case. Folding the knees does NOT do it in this rig: the legs hang
+             off `model` and the hip socket never moves, so bending them
+             changes the silhouette without lowering the head by a millimetre.
+             ch.body.position.y is the only channel that shortens the body,
+             which is why the number here is large and the leg drive below is
+             expression rather than height. */
+          ch.body.position.y = damp(ch.body.position.y, -0.42 * shape, sr, dt);
+          ch.body.rotation.x = damp(ch.body.rotation.x, 0.50 * shape, sr, dt);
+          ch.body.rotation.z = damp(ch.body.rotation.z, -0.12 * shape, sr, dt);
+          // Lead hand on the frame, trailing arm tucked in past the jamb.
+          limb(ch.parts.la, -0.34 - 1.30 * shape, 0.20, -0.44 * shape, 0.14 * shape);
+          limb(ch.parts.ra, -0.22 - 0.44 * shape, -0.14, 0.30 * shape, 0.04);
+          setElbow(J.la, -0.30 - 0.44 * shape, sr);
+          setElbow(J.ra, -0.44 - 0.30 * shape, sr);
+          // Lead thigh drives high over the sill; the trail leg follows late.
+          const follow = smoother01((u - 0.52) / 0.34);
+          limb(ch.parts.ll, -0.16 - 1.46 * shape + 1.10 * follow, 0, 0.10, 0);
+          limb(ch.parts.rl, -0.12 - 0.42 * shape - 0.86 * follow, 0, -0.10, 0);
+          setKnee(J.ll, 0.10 + 1.52 * shape - 1.00 * follow, sr);
+          setKnee(J.rl, 0.10 + 0.34 * shape + 1.18 * follow, sr);
+          if (ch.neck) {
+            ch.neck.rotation.x = damp(ch.neck.rotation.x, 0.34 * shape, sr, dt);   // duck under the header
+            ch.neck.rotation.z = damp(ch.neck.rotation.z, 0, sr, dt);
+          }
+        }
+        // The dive owns ch.model above (it is the only thing that can make the
+        // rig actually horizontal); a step stays upright, so settle it.
+        if (!dive && ch.model) {
+          ch.model.rotation.x = damp(ch.model.rotation.x, 0, sr, dt);
+          ch.model.rotation.y = damp(ch.model.rotation.y, 0, sr, dt);
+          ch.model.rotation.z = damp(ch.model.rotation.z, 0, sr, dt);
+          if (!ch._seatSunk) {
+            ch.model.position.y = damp(ch.model.position.y, 0, sr, dt);
+            ch.model.position.z = damp(ch.model.position.z, 0, sr, dt);
+          }
+        }
+      } else if (tp.kind === "mantle") {
         // Reach → hang → pull → press-out. The old fixed -2.4rad shoulder target
         // pointed both arms almost vertically above the head. Here `hold`
         // blends into a real two-link solve against physics.js's near ledge.
@@ -2140,18 +2396,236 @@
       lockCharacterHips(ch);
       return;
     }
-    // The model node is normally scale-only. A spy vault temporarily rolls it;
-    // settle all three axes after any natural finish/interruption before gait
-    // takes over. Most frames pay one falsy branch.
+    // The model node is normally scale-only. A spy vault temporarily rolls it
+    // and a landing roll pitches AND offsets it (see the pivot note below);
+    // settle every channel either of them can touch after any natural finish or
+    // interruption, before gait takes over. Most frames pay one falsy branch.
     if (ch._traverseRecover && ch.model) {
-      ch.model.rotation.x = damp(ch.model.rotation.x, 0, 16, dt);
-      ch.model.rotation.y = damp(ch.model.rotation.y, 0, 16, dt);
-      ch.model.rotation.z = damp(ch.model.rotation.z, 0, 16, dt);
-      if (Math.abs(ch.model.rotation.x) + Math.abs(ch.model.rotation.y) +
-          Math.abs(ch.model.rotation.z) < 0.01) {
-        ch.model.rotation.set(0, 0, 0);
+      const m = ch.model;
+      m.rotation.x = damp(m.rotation.x, 0, 16, dt);
+      m.rotation.y = damp(m.rotation.y, 0, 16, dt);
+      m.rotation.z = damp(m.rotation.z, 0, 16, dt);
+      if (!ch._seatSunk) {
+        m.position.y = damp(m.position.y, 0, 16, dt);
+        m.position.z = damp(m.position.z, 0, 16, dt);
+      }
+      if (Math.abs(m.rotation.x) + Math.abs(m.rotation.y) + Math.abs(m.rotation.z) +
+          Math.abs(m.position.y) + Math.abs(m.position.z) < 0.01) {
+        m.rotation.set(0, 0, 0);
+        if (!ch._seatSunk) { m.position.y = 0; m.position.z = 0; }
         ch._traverseRecover = 0;
       }
+    }
+
+    /* ---- THE LANDING (systems/physics.js armLanding) -----------------------
+       OWNER: "real parkour jumping, catching self, LANDING, catching edge".
+
+       Physics hands over a budget — `hard` 0..1 for how much vertical energy
+       arrived, and `roll` for whether the body had the forward line to convert
+       it. This runs the clock itself, the same way `_traverseRecover` does, so
+       no updater has to exist for an NPC that never lands.
+
+       Owns the whole rig like every other full-body pose here, and outranks the
+       air pose below (you have touched down) while yielding to traversePose
+       above (a vault landing that flows straight into another vault should keep
+       vaulting). */
+    if (ch.landPose) {
+      const lp = ch.landPose;
+      lp.t += dt;
+      const q = clamp01(lp.t / (lp.dur || 0.34));
+      if (q >= 1) {
+        ch.landPose = null;
+        /* A COMPLETED REVOLUTION IS VISUALLY ZERO, AND MUST BE STORED AS ZERO.
+           The roll finishes at rotation.x = 2π; handing that to the recovery
+           damp would spend the next quarter-second numerically unwinding a
+           full turn the body has already made — the rig would rotate BACKWARDS
+           through 360° after landing. clearTraversalPose learned this from the
+           spy vault; the same rule applies here, plus the pivot offset, which
+           returns to zero on its own at 2π and is only assigned explicitly for
+           the same reason. */
+        if (ch.model) {
+          ch.model.rotation.set(0, 0, 0);
+          if (!ch._seatSunk) { ch.model.position.y = 0; ch.model.position.z = 0; }
+        }
+        ch._stanceNk = 1;                        // let the neck recover into gait
+      } else {
+        const sr = 20;
+        const limb = (part, x, y, z, pz) => {
+          if (!part) return;
+          part.rotation.x = damp(part.rotation.x, x, sr, dt);
+          part.rotation.y = damp(part.rotation.y, y || 0, sr, dt);
+          part.rotation.z = damp(part.rotation.z, z || 0, sr, dt);
+          part.position.z = damp(part.position.z, pz || 0, sr, dt);
+          part.scale.y = damp(part.scale.y, 1, sr, dt);
+        };
+        ch.body.position.z = damp(ch.body.position.z, 0, sr, dt);
+        ch.body.rotation.y = damp(ch.body.rotation.y, 0, sr, dt);
+        if (lp.roll) {
+          /* A FORWARD ROLL AROUND A PIVOT THE RIG DOES NOT HAVE.
+             `model`'s origin sits at the FEET (makeCharacter stacks the legs up
+             from y=0), so pitching it through 2π would swing the head a full
+             body-length UNDER the floor. A roll pivots at the body's centre, so
+             synthesize that pivot: rotating about a point P is the rotation plus
+             the translation P - R·P, which for P = (0,h,0) about local X is
+             exactly (0, h - h·cosθ, -h·sinθ). h is the radius of a tucked
+             adult ball, so the body rolls over the ground instead of through it,
+             and both compensation terms return to zero at θ = 2π on their own.
+             (The shipped spy-spin gets away with a feet pivot because its root
+             is already lifted over an obstacle; a landing's is not.) */
+          const spin = 1 - Math.pow(1 - q, 2.2);   // arrives with angular momentum, loses it
+          const theta = Math.PI * 2 * spin;
+          const h = 0.52;
+          if (ch.model) {
+            ch.model.rotation.x = theta;
+            ch.model.rotation.y = 0;
+            ch.model.rotation.z = 0;
+            if (!ch._seatSunk) {
+              ch.model.position.y = h - h * Math.cos(theta);
+              ch.model.position.z = -h * Math.sin(theta);
+            }
+          }
+          // Inside the roll the body is a BALL: knees to chest, arms wrapped
+          // in, chin tucked to the sternum. Anything extended would be the
+          // limb that catches the ground and stops the rotation dead.
+          const ball = Math.sin(Math.PI * clamp01((q - 0.04) / 0.86));
+          ch.body.position.y = damp(ch.body.position.y, -0.34 * ball, sr, dt);
+          ch.body.rotation.x = damp(ch.body.rotation.x, 0.52 * ball, sr, dt);
+          ch.body.rotation.z = damp(ch.body.rotation.z, 0.10 * ball, sr, dt);
+          limb(ch.parts.la, -0.52 - 0.90 * ball, 0.22, -0.50 * ball, 0.12 * ball);
+          limb(ch.parts.ra, -0.52 - 0.90 * ball, -0.22, 0.50 * ball, 0.12 * ball);
+          setElbow(J.la, -1.32 * ball - 0.20, sr);
+          setElbow(J.ra, -1.32 * ball - 0.20, sr);
+          limb(ch.parts.ll, -0.20 - 1.62 * ball, 0, 0.12, 0);
+          limb(ch.parts.rl, -0.16 - 1.50 * ball, 0, -0.12, 0);
+          setKnee(J.ll, 0.10 + 1.86 * ball, sr);
+          setKnee(J.rl, 0.10 + 1.74 * ball, sr);
+          if (ch.neck) {
+            ch.neck.rotation.x = damp(ch.neck.rotation.x, 0.52 * ball, sr, dt);
+            ch.neck.rotation.z = damp(ch.neck.rotation.z, 0, sr, dt);
+          }
+        } else {
+          /* ABSORB. One compression and one recovery — the knees and hips do
+             the work, the arms come out and forward for balance, and the depth
+             is the ENERGY, so a hop barely registers and a two-storey drop
+             puts a hand near the floor. */
+          const dip = Math.sin(Math.PI * clamp01(q / 0.92));
+          const load = dip * (0.34 + 0.66 * lp.hard);
+          ch.body.position.y = damp(ch.body.position.y, -0.46 * load, sr, dt);
+          ch.body.rotation.x = damp(ch.body.rotation.x, 0.40 * load, sr, dt);
+          ch.body.rotation.z = damp(ch.body.rotation.z, 0.05 * load, sr, dt);
+          // Arms swing forward-out as a counterweight to the falling hips.
+          limb(ch.parts.la, -0.20 - 0.96 * load, 0.10, -0.34 - 0.30 * load, 0.10 * load);
+          limb(ch.parts.ra, -0.20 - 0.96 * load, -0.10, 0.34 + 0.30 * load, 0.10 * load);
+          setElbow(J.la, -0.30 - 0.44 * load, sr);
+          setElbow(J.ra, -0.30 - 0.44 * load, sr);
+          // Thighs fold and the shins stay under the mass — a deep landing is a
+          // squat, not a kneel, so the knee leads the hip.
+          limb(ch.parts.ll, -0.14 - 0.92 * load, 0, 0.10, 0);
+          limb(ch.parts.rl, -0.12 - 0.86 * load, 0, -0.10, 0);
+          setKnee(J.ll, 0.08 + 1.62 * load, sr);
+          setKnee(J.rl, 0.08 + 1.54 * load, sr);
+          if (ch.neck) {
+            ch.neck.rotation.x = damp(ch.neck.rotation.x, -0.10 * load, sr, dt);
+            ch.neck.rotation.z = damp(ch.neck.rotation.z, 0, sr, dt);
+          }
+        }
+        ch.bob = ch.body.position.y;
+        ch.lean = ch.body.rotation.x;
+        ch.sway = ch.body.rotation.z;
+        ch._stanceNk = 1;
+        lockCharacterHips(ch);
+        return;
+      }
+    }
+
+    /* ---- WHAT A BODY LOOKS LIKE IN THE AIR --------------------------------
+       OWNER: "…what I look like in air, etc etc."
+
+       There was no answer to that. animChar's only altitude-aware line in the
+       whole file was the parachute canopy: an ordinary jump kept the walk cycle
+       running, so a body crossing a rooftop gap strode through the air on
+       nothing and landed mid-stride. Every full-body state here is a flag on
+       the rig, and systems/physics.js publishes this one the same way.
+
+       Three beats read off the actual velocity, not off a timer, so the pose is
+       always telling the truth about what the body is doing:
+
+         RISE   drive: hips extended from the push-off, arms thrown up and
+                forward, trailing knee folding up under the body.
+         APEX   the shape people recognise from a photograph — legs split, one
+                knee high, arms wide, chest tall.
+         FALL   prepare: both legs reach down and slightly forward to find the
+                ground, knees soft and ready to fold, arms out and a little
+                back, eyes down.
+
+       Deliberately below traversePose and landPose (both of those own their
+       own airborne stretch and must win) and above the stance poses, which
+       cannot be true while the feet are off the ground. */
+    /* …and it yields to every pose that OWNS the body for a different reason.
+       updatePlayer returns early on a knockdown, a swim and a flown aircraft
+       without ever reaching the branch that clears this flag, so a body that
+       left the ground and then got dropped could otherwise carry a stale air
+       pose over the top of its own KO. Cheapest correct guard: the states that
+       cannot be true in mid-air are the states that outrank being in mid-air. */
+    if (ch.airPose && !ch.pronePose && !ch.slidePose && !ch.sitting && !ch.cuffed) {
+      const air = ch.airPose;
+      const rise = clamp01(air.rise || 0);
+      const fall = clamp01(air.fall || 0);
+      const apex = clamp01(1 - rise - fall);
+      // Ease IN over the first fraction of a second so leaving the ground is a
+      // push-off and not a snap into a new pose. Nothing eases out: the pose is
+      // replaced wholesale by landPose the frame the feet touch.
+      const enter = smooth01((air.t || 0) / 0.16);
+      const sr = 12;
+      const limb = (part, x, y, z, pz) => {
+        if (!part) return;
+        part.rotation.x = damp(part.rotation.x, x, sr, dt);
+        part.rotation.y = damp(part.rotation.y, y || 0, sr, dt);
+        part.rotation.z = damp(part.rotation.z, z || 0, sr, dt);
+        part.position.z = damp(part.position.z, pz || 0, sr, dt);
+        part.scale.y = damp(part.scale.y, 1, sr, dt);
+      };
+      const g = enter;                                   // gate every amplitude
+      ch.body.position.z = damp(ch.body.position.z, 0, sr, dt);
+      ch.body.rotation.y = damp(ch.body.rotation.y, 0, sr, dt);
+      ch.body.position.y = damp(ch.body.position.y, g * (0.05 * rise - 0.04 * fall), sr, dt);
+      // Lean into a rise, stand tall at apex, tip a touch back reaching for the
+      // floor on the way down.
+      ch.body.rotation.x = damp(ch.body.rotation.x, g * (0.22 * rise + 0.06 * apex - 0.14 * fall), sr, dt);
+      ch.body.rotation.z = damp(ch.body.rotation.z, g * 0.06 * apex, sr, dt);
+      // ARMS. Up-and-forward through the drive, wide at apex, out-and-back on
+      // the descent. The asymmetry is small but it is what stops a jump reading
+      // as a rigid T-pose translated upward.
+      const armX = -0.24 - g * (1.32 * rise + 0.62 * apex + 0.16 * fall);
+      limb(ch.parts.la, armX, 0.08, -0.20 - g * (0.34 * apex + 0.46 * fall), g * 0.10 * rise);
+      limb(ch.parts.ra, armX + g * 0.16 * apex, -0.08, 0.20 + g * (0.40 * apex + 0.46 * fall), g * 0.10 * rise);
+      setElbow(J.la, -0.24 - g * (0.34 * rise + 0.20 * apex), sr);
+      setElbow(J.ra, -0.30 - g * (0.26 * rise + 0.24 * apex), sr);
+      // LEGS. A tuck that unfolds into a reach: the lead leg extends down first
+      // and the trail knee stays folded longest, which is what makes a landing
+      // look prepared rather than dropped.
+      const tuck = g * (0.86 * rise + 0.54 * apex);
+      const reach = g * fall;
+      limb(ch.parts.ll, -0.10 - tuck * 1.05 + reach * 0.34, 0, 0.10, 0);
+      limb(ch.parts.rl, -0.08 - tuck * 0.58 + reach * 0.10, 0, -0.10, 0);
+      setKnee(J.ll, 0.10 + tuck * 1.20 - reach * 0.06 + 0.14 * reach, sr);
+      setKnee(J.rl, 0.10 + tuck * 0.72 + reach * 0.40, sr);
+      if (ch.model) {
+        ch.model.rotation.x = damp(ch.model.rotation.x, 0, sr, dt);
+        ch.model.rotation.y = damp(ch.model.rotation.y, 0, sr, dt);
+        ch.model.rotation.z = damp(ch.model.rotation.z, 0, sr, dt);
+      }
+      if (ch.neck) {
+        // Chin up on the way up, down to find the ground on the way down.
+        ch.neck.rotation.x = damp(ch.neck.rotation.x, g * (-0.14 * rise + 0.26 * fall), sr, dt);
+        ch.neck.rotation.z = damp(ch.neck.rotation.z, 0, sr, dt);
+      }
+      ch.bob = ch.body.position.y;
+      ch.lean = ch.body.rotation.x;
+      ch.sway = ch.body.rotation.z;
+      ch._stanceNk = 1;
+      lockCharacterHips(ch);
+      return;
     }
 
     // ---- STANCE POSES (physics.js stance machine sets slidePose/pronePose
@@ -2651,6 +3125,57 @@
         ch.body.rotation.x = ch.lean - 0.06 * drive;
         ch.body.rotation.y = sgn * (0.50 * wind + 1.00 * drive - 0.24 * recover);
         ch.body.position.y += -0.05 * drive;
+      } else if (ch.punchKind === "elbow") {
+        /* ELBOW — the short one. A jab needs a foot of air to work in; an
+           elbow needs none, which is exactly why it is the blow men throw
+           once a fight has closed up and there is no room left to punch.
+           Everything about it is the opposite of the straight below:
+
+             · the fist NEVER leaves the shoulder line. The hand travels the
+               shortest arc there is — it stays folded hard against the bicep
+               for the whole strike (the elbow joint holds ~-2.5 rad and does
+               not open at all), so the POINT of the elbow is the leading
+               edge and the hand is just along for the ride;
+             · the power is a horizontal body turn, not a shoulder drive.
+               `arm.rotation.y` is the whole travel and the torso yaw behind
+               it is nearly a hook's — a short lever swung by a big mass;
+             · it comes back as fast as it went. A hook's follow-through
+               carries you off balance and an elbow deliberately does not,
+               so `recover` cancels the yaw on the same beat it drove. */
+        arm.rotation.x = -1.15 - 0.18 * drive;
+        arm.rotation.y = sgn * (0.85 - 1.75 * drive);
+        arm.rotation.z = sgn * (0.30 + 0.22 * drive);
+        arm.position.z = 0.06 + 0.10 * drive;
+        if (armJ) armJ.rotation.x = -(2.45 + 0.12 * wind);   // stays SHUT — that is the weapon
+        ch.body.rotation.x = ch.lean - 0.04 * drive;
+        ch.body.rotation.y = sgn * (0.42 * wind + 0.88 * drive - 0.55 * recover);
+        ch.body.position.y += -0.04 * drive;
+      } else if (ch.punchKind === "headbutt") {
+        /* HEADBUTT — and the head is the SECOND half of it. The move is a
+           grab: both hands come forward and IN to take a fistful of collar,
+           the arms then PULL while the neck and the whole spine snap the
+           skull down and through. Posing only the head would read as a nod;
+           the pull is what makes it read as a headbutt, and it is why this
+           gets its own kind instead of riding the jab with a neck offset.
+
+           `guard` is overwritten on every channel the block above touched —
+           there is no guard hand in a clinch, both of them are full. */
+        const gL = ch.parts.la, gR = ch.parts.ra;
+        const grip = -0.72 - 0.30 * wind + 0.34 * drive;     // out to the collar
+        const pull = -(1.35 + 0.25 * wind) - 0.55 * drive;   // then haul him in
+        if (gL) { gL.rotation.x = grip; gL.rotation.y = 0.30 - 0.16 * drive; gL.rotation.z = 0.34 - 0.20 * drive; gL.position.z = 0.10 + 0.06 * wind - 0.12 * drive; }
+        if (gR) { gR.rotation.x = grip; gR.rotation.y = -0.30 + 0.16 * drive; gR.rotation.z = -(0.34 - 0.20 * drive); gR.position.z = 0.10 + 0.06 * wind - 0.12 * drive; }
+        if (J.la) J.la.rotation.x = pull;
+        if (J.ra) J.ra.rotation.x = pull;
+        // the spine cocks BACK a long way and then whips through — the biggest
+        // pitch reversal in the chain, because the head has no other engine
+        ch.body.rotation.x = ch.lean - 0.42 * wind + 0.60 * drive - 0.16 * recover;
+        ch.body.rotation.y = 0;
+        ch.body.position.y += -0.03 * wind - 0.06 * drive;
+        if (ch.neck) {
+          ch.neck.rotation.x = -0.55 * wind + 0.85 * drive;  // chin up, then down through him
+          ch.neck.rotation.z = 0;
+        }
       } else if (ch.punchKind === "shove") {
         /* TWO-HANDED SHOVE — a push, not a strike, and every beat differs
            from the punches around it accordingly: BOTH palms chamber at the
@@ -2783,7 +3308,39 @@
       const kleg = kleft ? ch.parts.ll : ch.parts.rl;
       const kplant = kleft ? ch.parts.rl : ch.parts.ll;
       const ksgn = kleft ? 1 : -1;
-      if (ch.kickKind === "round") {                    // roundhouse off the hip
+      if (ch.kickKind === "knee") {
+        /* KNEE — the clinch strike, and the only one in this chain thrown from
+           INSIDE arm's length. A front kick needs a metre of gap and a
+           roundhouse needs two; a knee needs contact, which is why it is the
+           strike a real brawl converges on once both men are holding each
+           other. Three things separate it from the two kicks below:
+
+             · the leg NEVER straightens. `scale.y` chambers hard and stays
+               chambered through impact — the point of the knee is the weapon,
+               so an extending shin would be a different move entirely;
+             · it goes UP, not out. The thigh drives past horizontal
+               (-1.95 rad) and the travel is vertical;
+             · the arms PULL DOWN. A knee without the collar tie is a hop; the
+               damage comes from hauling the head down onto a rising knee, and
+               the two halves have to happen on the same beat or neither
+               reads. Both arms are committed, so there is no guard hand. */
+        kleg.rotation.x = 0.20 * kwind - 1.95 * kdrive + 0.30 * krec;
+        kleg.rotation.y = ksgn * 0.10 * kdrive;
+        kleg.rotation.z = ksgn * (0.20 + 0.18 * kdrive);   // hips open a little to clear
+        kleg.scale.y = 1 - 0.34 * kdrive - 0.10 * kwind;   // folded, and it STAYS folded
+        ch.body.rotation.x = ch.lean - 0.30 * kdrive + 0.14 * kwind;   // curls over the strike
+        ch.body.rotation.y = ksgn * 0.10 * kdrive;
+        ch.body.position.y += 0.10 * kdrive;               // rises onto the plant foot
+        // the collar tie: hands out on the wind, hauled down through the drive
+        const nL = ch.parts.la, nR = ch.parts.ra;
+        const reach = -1.05 - 0.20 * kwind + 0.95 * kdrive;
+        if (nL) { nL.rotation.x = reach; nL.rotation.y = 0.18; nL.rotation.z = 0.40 - 0.14 * kdrive; }
+        if (nR) { nR.rotation.x = reach; nR.rotation.y = -0.18; nR.rotation.z = -(0.40 - 0.14 * kdrive); }
+        if (ch.low) {
+          if (ch.low.la) ch.low.la.rotation.x = -(1.30 + 0.45 * kdrive);
+          if (ch.low.ra) ch.low.ra.rotation.x = -(1.30 + 0.45 * kdrive);
+        }
+      } else if (ch.kickKind === "round") {               // roundhouse off the hip
         const kswp = Math.min(1, kprog / 0.7);
         kleg.rotation.x = 0.28 * kwind - 1.3 * kdrive;
         kleg.rotation.y = ksgn * (0.3 - 1.35 * kswp) * kdrive;   // sweeps around the side
@@ -2804,12 +3361,19 @@
       kplant.rotation.x = 0.14 * kdrive;
       kplant.rotation.y = 0;
       kplant.scale.y = 1 - 0.05 * kdrive;
-      // arms counter-balance out and back
-      ch.parts.la.rotation.x = -0.4 * kdrive - 0.1 * kwind;
-      ch.parts.ra.rotation.x = -0.4 * kdrive - 0.1 * kwind;
-      ch.parts.la.rotation.z = 0.55 * kdrive + 0.08;
-      ch.parts.ra.rotation.z = -0.55 * kdrive - 0.08;
-      ch.body.position.y -= 0.05 * kdrive;              // sink into the plant leg
+      if (ch.kickKind === "knee") {
+        // the knee rises onto the plant foot rather than sinking into it, and
+        // its arms are HOLDING someone — the counter-balance below is a kick's
+        // free-arm bookkeeping and would throw the collar tie straight open
+        kplant.scale.y = 1 - 0.02 * kdrive;
+      } else {
+        // arms counter-balance out and back
+        ch.parts.la.rotation.x = -0.4 * kdrive - 0.1 * kwind;
+        ch.parts.ra.rotation.x = -0.4 * kdrive - 0.1 * kwind;
+        ch.parts.la.rotation.z = 0.55 * kdrive + 0.08;
+        ch.parts.ra.rotation.z = -0.55 * kdrive - 0.08;
+        ch.body.position.y -= 0.05 * kdrive;            // sink into the plant leg
+      }
     }
 
     // ---- BLOCK / GUARD: both forearms up in front of the face, torso hunched.
@@ -3011,7 +3575,13 @@
     }
 
     // ---- head: subtle counter-bob + breathing tilt, keeps eyes level ----
-    if (ch.neck) {
+    // A HEADBUTT IS THE ONE MOVE WHERE THE HEAD IS THE FIST. This damp runs
+    // after the punch block and would quietly pull 14% of the skull's travel
+    // back toward "eyes level" on every frame of it — the counter-bob is right
+    // for a body that is walking and wrong for a body throwing its forehead
+    // through someone. Nothing else in the chain needs the exemption; every
+    // other strike drives an arm and leaves the neck to this line.
+    if (ch.neck && !(ch.punchT > 0 && ch.punchKind === "headbutt")) {
       ch.neck.rotation.x = damp(ch.neck.rotation.x, -ch.lean * 0.7 + (moving ? Math.sin(ch.phase * 2) * 0.02 : 0), 9, dt);
       ch.neck.rotation.z = damp(ch.neck.rotation.z, -ch.sway * 0.6, 9, dt);
     }

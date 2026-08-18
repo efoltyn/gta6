@@ -722,6 +722,19 @@
   function dropRig(r) { emptyRig(r); rigs.delete(r.group); }
 
   let _lastParent = null;
+  /* FAR-RIG SYNC STAGGER — the full rig walk (updateMatrix + matrixWorld
+     compose + setMatrixAt per part) is this file's whole per-frame cost, and
+     it was being paid for every body in the 95m band every frame. A ped 40m+
+     away re-posing at 20Hz instead of 60Hz is not a visible difference, so
+     far rigs only walk on their phase frame (group.id spreads the phases so
+     the load is flat, not spiky). Everything that must stay same-frame DOES:
+     the culled/parent/visibility park gates above run every frame, a rig
+     leaving the list still drops the same frame via the sweep, and a skipped
+     rig's instances simply keep last frame's pose — sweepRig leaves them
+     alone instead of mis-reading the skip as "part went missing" and parking
+     the body. ?cfg_PED_SYNC_STAGGER=0 reverts to every-frame walks. */
+  const FAR_SYNC_D2 = 40 * 40, SYNC_K = 3;
+  let _px = 0, _pz = 0, _stagger = false, _own = 0;
   function scan(list) {
     if (!list) return;
     for (let i = 0; i < list.length; i++) {
@@ -732,6 +745,15 @@
       const r = rigOf(g);
       r.stamp = stamp;
       if (a.culled || !g.parent || !chainVisible(g)) { parkRig(r); continue; }
+      if (_stagger && !r.parked && (stamp + g.id) % SYNC_K !== 0) {
+        const dx = g.position.x - _px, dz = g.position.z - _pz;
+        if (dx * dx + dz * dz > FAR_SYNC_D2) {
+          r.skipStamp = stamp;
+          // held pose is still OURS — keep the render walk off this subtree
+          if (_own) g._cbzMatrixOwnedFrame = _own;
+          continue;
+        }
+      }
       // Ancestors first. Rigs overwhelmingly share ONE parent (the arena
       // root), so cache it and pay the walk-to-scene once per frame.
       const pg = g.parent;
@@ -741,6 +763,13 @@
       g.matrixWorldNeedsUpdate = false;
       r.parked = false;
       walk(r, g);
+      /* MATRIX AUTHORITY: walk() just composed a fresh, correct world matrix
+         for every visible node of this rig — the render pass recomputing the
+         same ~50 nodes again is pure duplicate work. Stamp the rig root so
+         core/matrixskip.js skips the whole subtree this frame (the stamp is
+         re-earned every tick; see the handoff note there). Off with
+         ?cfg_PED_MATRIX_OWN=0 independently of instancing itself. */
+      if (_own) g._cbzMatrixOwnedFrame = _own;
     }
   }
 
@@ -775,6 +804,7 @@
   const STALE = 240;
   function sweepRig(r) {
     if (r.stamp !== stamp) { _gone.push(r); return; }
+    if (r.skipStamp === stamp) return;   // far rig on an off-phase frame: instances hold last pose
     const recs = r.recs;
     for (let i = recs.length - 1; i >= 0; i--) {
       const rec = recs[i];
@@ -796,6 +826,12 @@
     stamp++;
     _lastParent = null;
     fallbackMeshes = 0;
+    const P = CBZ.player;
+    _stagger = !!(P && P.pos) && CBZ.CONFIG.PED_SYNC_STAGGER !== false;
+    if (_stagger) { _px = P.pos.x; _pz = P.pos.z; }
+    // the loop bumps CBZ._matrixOwnStamp once per frame; a stamp equal to it
+    // is only ever good for THIS frame, so nothing here needs a teardown path
+    _own = CBZ.CONFIG.PED_MATRIX_OWN !== false ? (CBZ._matrixOwnStamp || 0) : 0;
     pools.forEach(resetLive);
     scan(CBZ.cityPeds);
     scan(CBZ.cityCops);
