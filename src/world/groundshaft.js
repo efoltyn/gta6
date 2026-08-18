@@ -814,8 +814,12 @@
        diameter. A CRATER is the opposite shape and the same primitive: ordnance
        digs a wide shallow bowl, so `bowl` lifts the clamp rather than adding a
        second hole system to sit beside this one. */
-    const depth = opts.bowl ? Math.max(1.2, opts.depth || r * 0.55)
-                            : Math.max(r * 2.4, opts.depth || r * 4.2);
+    /* The deeper-than-wide clamp is the SINKHOLE's law. A crater is a wide
+       shallow bowl and a BREACH is a hole of exactly the thickness it has to get
+       through — forcing either to 2.4x its radius made a 3 m roof punch reach
+       16 m and drop the room's floor out from under itself. Both say so. */
+    const depth = (opts.bowl || opts.through) ? Math.max(1.2, opts.depth || r * 0.55)
+                                              : Math.max(r * 2.4, opts.depth || r * 4.2);
     const h = {
       x: x, z: z, r: r,
       mouth: r * 0.93,          // the floor is gone a hair inside the visible rim
@@ -826,13 +830,18 @@
       grp: new THREE.Group(),
       voids: [],
       bowl: !!opts.bowl,
+      /* A HOLE THROUGH. A shaft and a crater both END in a floor; a BREACH does
+         not — it opens into a room, and the room's floor is the floor. Building
+         one anyway put a dome of earth in the ceiling of the bunker it had just
+         opened, which is a plug, not a hole. */
+      through: !!opts.through,
       /* A CRATER IS A DISH AND A SHAFT IS A PIT, and they are opposite shapes.
          The talus cone is a rubble MOUND — highest in the middle, sloping down
          to the wall — which is right for a collapse and exactly backwards for
          ordnance: it put the deepest point of a bomb hole at its rim. So a bowl
          gets its own floor curve (`dish`, deepest at the centre, rising to meet
          the lip) and keeps only a small cone of loose spoil at the bottom. */
-      dish: opts.bowl ? { r: Math.max(0.5, r * 0.98), h: depth * 0.95 } : null,
+      dish: (opts.bowl && !opts.through) ? { r: Math.max(0.5, r * 0.98), h: depth * 0.95 } : null,
       coneR: opts.bowl ? r * 0.3 : r * 0.66,
       coneH: opts.bowl ? Math.min(0.5, depth * 0.12) : Math.min(4.2, depth * 0.11),
       stepN: 0, stepA0: 0, stepIn: r * 0.78,
@@ -857,14 +866,14 @@
     }
     const wall = buildWall(h);
     const lip = buildLip(h);
-    const rubble = buildFloorFurniture(h);
+    const rubble = h.through ? null : buildFloorFurniture(h);
     const dish = buildDish(h);
     const stair = buildStair(h);
     /* THE BLACK — a disc at the very bottom under the rubble, so a shaft you
        cannot see the bottom of reads as bottomless rather than as a gap. A
        CRATER is the opposite: you can see its floor, and painting a void under
        it made a 5 m dish read as a hole to nowhere. Bowls get earth instead. */
-    const dark = h.bowl ? null : new THREE.Mesh(new THREE.CircleGeometry(r * 0.95, 24),
+    const dark = (h.bowl || h.through) ? null : new THREE.Mesh(new THREE.CircleGeometry(r * 0.95, 24),
       new THREE.MeshBasicMaterial({ color: 0x05040a }));
     if (dark) { dark.rotation.x = -Math.PI / 2; dark.position.set(x, h.bottom - 0.2, z); }
     wall.position.set(x, 0, z);
@@ -1025,9 +1034,10 @@
     if (!CBZ.addCarving) return;
     h.carve = CBZ.addCarving({
       kind: "cyl", x: h.x, z: h.z, r: h.mouth,
-      y0: h.bottom, y1: h.gy + 60,        // open to the sky: no lid over a sinkhole
+      y0: h.through ? h.bottom - 0.05 : h.bottom, y1: h.gy + 60,   // open to the sky
+      floorFnSkip: !!h.through,
       open: true, dry: true, mode: h.mode, owner: "groundshaft",
-      floorFn: function (x, z) { const y = shaftFloor(h, x, z); return y == null ? h.bottom : y; },
+      floorFn: h.through ? null : function (x, z) { const y = shaftFloor(h, x, z); return y == null ? h.bottom : y; },
     });
   }
   function detachCarving(h) {
