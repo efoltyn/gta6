@@ -2280,6 +2280,16 @@
     // car — built via cityBuildPlayerCarVisual(homeStyle, teamColor, liveryFor)
     // so the number on track matches the name on the standings board. Falls back
     // to the old fast-CARS field if racing.js isn't loaded (headless / partial).
+    /* CLEARING THE ARRAY IS NOT REMOVING THE CARS. `RACE.racers.length = 0`
+       drops the only references to the previous field's car groups, but those
+       groups were added to the arena ROOT — so they stay in the scene, parked
+       on the grid, forever, and nothing can ever reach them to clean them up.
+       endRace() is the only place that disposes them, so ANY path that reaches
+       this line with a field still standing (a race abandoned without a flag,
+       a world rebuild, a second start after an early return) silently welds
+       another five motionless cars onto the start/finish straight. Race twice
+       that way and the grid is a scrapyard. Dispose first, THEN clear. */
+    for (const r of RACE.racers) disposeFieldCar(r.group);
     RACE.racers.length = 0;
     const RC = CBZ.cityRacing;
     const buildVis = CBZ.cityBuildPlayerCarVisual, infer = CBZ.cityInferCarStyle;
@@ -2442,6 +2452,12 @@
     RACE.playerTotal = -0.02;                // roll-over crossing arms lap 1
                                              // (re-seeded exactly below, once
                                              //  the player's own slot is known)
+    // Same law as the legacy field below: dropping the array does not remove
+    // the cars. These ARE cityCars records tagged "speedway", so a stale field
+    // is still reachable — despawn it before building a new one, or a restart
+    // leaves the last six drivers loose on the circuit with nothing steering
+    // them and a fresh six lined up behind.
+    if (RD && RD.despawnAll) { try { RD.despawnAll("speedway"); } catch (e) {} }
     RACE.drivers = [];
     RACE.secIdx = 0; RACE.secStart = 0;
     RACE.secBest = new Array(SECTORS).fill(0);
