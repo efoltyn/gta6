@@ -468,18 +468,35 @@
       publishes: ["WILDLIFE_SPECIES", "defineSpecies"],
     },
     beasts: {
-      gives: "animals that WALK and FIGHT without the full city: the shared " +
-             "discovered gait rig (wildlife_rig), the one animal-attack driver " +
-             "creatureFight (lunge, pounce, maul, gore, stomp — windup, strike, " +
-             "recover, flinch), and the land body layer that poses jaws and " +
-             "legs through a strike. The same three files the mainland's " +
-             "wildlife runs on, plus the ape move set — a knuckle-walker " +
-             "charges, hammers, backhands, beats its chest and PICKS A MAN UP " +
-             "and swings him, which the one generic maul could never be",
+      gives: "animals that WALK, FIGHT and DIE without the full city: the " +
+             "shared discovered gait rig (wildlife_rig), the one animal-attack " +
+             "driver creatureFight (lunge, pounce, maul, gore, stomp — windup, " +
+             "strike, recover, flinch), the land body layer that poses jaws and " +
+             "legs through a strike, the verlet corpse solver that lays a dead " +
+             "quadruped on its flank with its legs splayed, and the ape move " +
+             "set — a knuckle-walker charges, hammers, backhands, beats its " +
+             "chest and PICKS A MAN UP and swings him, which the one generic " +
+             "maul could never be",
+      /* THE SOLVER RIDES WITH THE FIGHT, and that is a correction, not a
+         convenience. A pack that can make an animal attack but not die
+         properly is a pack that hands every page it serves the exact death
+         quadruped_ragdoll.js was written to delete — a corpse sat upright with
+         its nose at the sky, because the only fallback left is a canned
+         rotation. games/battle.html was the proof: it loaded `beasts`, ran real
+         animal combat, and had no solver at all. Discovery-driven and
+         self-budgeting, so it costs a page that never kills anything nothing. */
+      /* AND SO DOES THE APE, for the same reason in the other direction: the
+         one thing `beasts` exists to serve is games/battle.html, and the
+         matchup that page is asked for by name is a hundred men against a
+         gorilla. `caps` joins the needs because ape_combat reaches its
+         bystanders through the capability bus (CBZ.worldActors /
+         CBZ.hurtWorldActor) rather than one branch per host — without that
+         pack a backhand has nobody to reach. */
       needs: ["look", "caps"],
       files: ["city/wildlife_rig.js", "city/creature_combat.js", "systems/predator_anim.js",
-              "systems/ape_combat.js"],
-      publishes: ["wildlifeRig", "creatureFight", "faceAnimalHeading", "apeStep", "apeAudit"],
+        "systems/quadruped_ragdoll.js", "systems/ape_combat.js"],
+      publishes: ["wildlifeRig", "creatureFight", "faceAnimalHeading", "quadRagdoll",
+        "apeStep", "apeAudit"],
     },
 
     // ---- flight and weapons -------------------------------------------------
@@ -517,6 +534,22 @@
       needs: ["look"],
       files: ["systems/fx.js"],
       publishes: ["fx"],
+    },
+    blood: {
+      gives: "what a body does when something opens it: the directional spray, " +
+             "the atomised mist, the ground pool, the wall splat and the drip " +
+             "trail — CBZ.goreImpact and CBZ.gore. Restraint is built in (mist " +
+             "only on a real crunch, a pool only once the skin is genuinely " +
+             "open), so it does not turn every hit into a bloodbath",
+      /* ITS OWN PACK, and it is a fair-weather one on purpose. A page that
+         fights with guns already draws its impacts through gunfx; the file
+         below is what an ANIMAL's jaws need (creature_combat's biteBlood),
+         and 2.5k lines of it should not ride along on a battle of riflemen
+         that will never call it. Callers pull it in when the roster earns it —
+         games/battle.html asks for it exactly when a side is a beast army. */
+      needs: ["fx"],
+      files: ["systems/gore.js"],
+      publishes: ["gore", "goreImpact", "goreAudit"],
     },
     damage: {
       gives: "what ordnance LOOKS like when it lands on anything: fireball, " +

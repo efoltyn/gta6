@@ -58,6 +58,24 @@
 // back to opts.onHit. `maul` (bears/wolves) opts in automatically on the
 // player — that is the second consumer of the block, not a shark special case.
 //
+// THE BITE CONNECTS, AND THE BITE BLEEDS (jawReaches / biteBlood). Two faults
+// lived in the strike frame below and both of them made a maul read as a shove:
+//   1. damage landed on a CENTRE-TO-CENTRE range test (`_dist <= reach*1.6`),
+//      and `reach` on a lion is metres — so the jaws closed on air and a man
+//      two and a half metres away took the hit. jawReaches() asks instead where
+//      the animal's OWN teeth are at the frame they close (creatureJawWorld)
+//      and whether that point is inside the victim's body. A short bite MISSES
+//      (RES.missed), re-arms fast and closes the last step. This is the animal
+//      sibling of the survival brawl's "punch lands on real fist contact, not
+//      at click range". Flag: CREATURE_JAW_CONTACT.
+//   2. a bite drew no blood anywhere in this game — only a decal, and only on
+//      humanoid rigs. biteBlood() fires systems/gore.js's CBZ.goreImpact from
+//      the jaw point along the bite line, with the same restraint the disaster
+//      island's beatings earn through systems/trauma.js (mist only on a real
+//      crunch, a ground pool only once the skin is open) and the same
+//      escalation (a body worried repeatedly opens further). Flag:
+//      CREATURE_BITE_BLOOD.
+//
 // ALLOCATION-FREE PER FRAME: no vectors or objects are created in the hot
 // path. Per-actor scratch lives on the actor itself (_atkT, _atkAnim,
 // _atkStyle, _flinchT, _lungeX/_lungeZ...), math uses module-scope temp
@@ -69,10 +87,19 @@
   var CBZ = window.CBZ;
   if (!CBZ || !window.THREE) return;
 
-  // ---- feature flag: the one-line revert for the seize hand-off ---------
+  // ---- feature flags: the one-line reverts ------------------------------
   // (declared here, not in config.js — every agent declares its own default)
-  if (CBZ.CONFIG && CBZ.CONFIG.CREATURE_SEIZE == null) CBZ.CONFIG.CREATURE_SEIZE = true;
-  function SEIZE_ON() { return !(CBZ.CONFIG && CBZ.CONFIG.CREATURE_SEIZE === false); }
+  var CFG = (CBZ.CONFIG = CBZ.CONFIG || {});
+  if (CFG.CREATURE_SEIZE == null) CFG.CREATURE_SEIZE = true;
+  // THE JAW HAS TO ARRIVE. See jawReaches() — damage lands on real tooth
+  // contact rather than on a centre-to-centre range test.
+  if (CFG.CREATURE_JAW_CONTACT == null) CFG.CREATURE_JAW_CONTACT = true;
+  // A BITE BLEEDS. See biteBlood() — the spray, the mist and the pool the
+  // disaster island's punches already earn, fired from the teeth.
+  if (CFG.CREATURE_BITE_BLOOD == null) CFG.CREATURE_BITE_BLOOD = true;
+  function SEIZE_ON() { return CFG.CREATURE_SEIZE !== false; }
+  function CONTACT_ON() { return CFG.CREATURE_JAW_CONTACT !== false; }
+  function BLOOD_ON() { return CFG.CREATURE_BITE_BLOOD !== false; }
 
   // ---- tuning ----------------------------------------------------------
   var STRIKE_DUR = 0.4;      // seconds for one attack animation
@@ -86,7 +113,9 @@
   var _dx = 0, _dz = 0, _dist = 0, _h = 0, _p = 0, _e = 0, _amt = 0;
 
   // reused result object for creatureFight (never allocated per frame)
-  var RES = { inRange: false, dealt: 0 };
+  // `missed` is the jaw-contact gate's verdict: the animal committed to a
+  // strike and the teeth did not arrive. Read it immediately like the rest.
+  var RES = { inRange: false, dealt: 0, missed: false };
 
   // ---- helpers ----------------------------------------------------------
   function groundAt(x, z) {
@@ -560,6 +589,156 @@
     return out;
   }
 
+  // ==========================================================================
+  //  WHERE THE TEETH ACTUALLY ARE — and whether they got there.
+  // ==========================================================================
+  // jawPoint() answers in GROUP-LOCAL units. Everything below needs the same
+  // point in the world, because "did it bite you" is a question about metres of
+  // ground, not about a model's coordinate frame. One reused vector, no
+  // allocation: applyEuler goes through THREE's own module-scope quaternion and
+  // honours the group's rotation ORDER, which matters — a corpse or a rolling
+  // predator may be on 'YXZ'.
+  var _jw = new THREE.Vector3();
+  function jawWorld(actor) {
+    var g = actor && actor.group;
+    if (!g) return null;
+    var jl = jawPoint(actor);
+    _jw.set(jl.x, jl.y, jl.z);
+    if (g.scale) _jw.multiply(g.scale);        // the species' own build scale
+    _jw.applyEuler(g.rotation).add(g.position);
+    return _jw;
+  }
+
+  // How wide is the thing being bitten, as a circle on the ground? Callers who
+  // measured their own body (games/battle.html measures every animal's box)
+  // publish `rad`; anything else is derived from its scale the same way the
+  // default reach is. Never a species table.
+  function bodyRadius(t) {
+    if (t && typeof t.rad === 'number' && t.rad > 0) return t.rad;
+    return 0.42 + actorScale(t) * 0.45;
+  }
+
+  /* DID THE BITE REACH? — the tooth-contact gate.
+
+     The strike used to land whenever the two CENTRES were inside reach*1.6 at
+     the strike frame, and `reach` on a big animal is several metres: a lion
+     opened its mouth two and a half metres from a man's chest, the damage
+     applied, and the blood appeared on a body nothing had touched. That is the
+     same fault the survival brawl had before "punch/shove land on real fist
+     contact, not at click range" — a click-range hit dressed as an animation.
+
+     So the test is now the one the picture makes: take the attacker's OWN jaw
+     point, in the world, at the frame the jaws close, and ask whether it is
+     inside the victim's body. TOL is deliberately generous — a low-poly snout
+     is a box, a body is a circle, and neither is the creature — but it is a
+     fixed hand's breadth plus a fraction of the biter, not a free three metres.
+
+     Two styles are exempt because their weapon is not the mouth: `stomp` lands
+     with a forefoot and `ram` with a shoulder, so their contact is the body's,
+     and gating them on the snout would make a horse that kicks you miss.
+
+     THE TOLERANCE IS THE CALLER'S OWN REACH, and it has to be — the first
+     version derived it from the attacker's scale alone and that quietly broke
+     two whole shelves of the bestiary. Not every style carries its lunge INTO
+     the strike frame: `bite` peaks its forward offset exactly at STRIKE_AT
+     (env = 1), but `pounce` and `strike` are measured from the START of their
+     leap/snap phase, so at the damage frame their offset is still ~0 and the
+     jaw is a whole body-length short of where the animation ends up. A snake
+     would have missed every bite it ever threw. `reach` is the one number the
+     caller has already stated for this pairing ("this animal can hit from
+     here"), so the gate is anchored at the TEETH and sized by it, which still
+     roughly halves the old window (jaw + 0.42·reach against centre + 1.6·reach)
+     without ever telling a species its own attack does not connect. */
+  function jawReaches(attacker, target, style, tp, reach) {
+    if (!CONTACT_ON()) return true;
+    if (style === 'stomp' || style === 'ram') return true;
+    /* AN ARM IS NOT A JAW, and every ape style except the bite connects with
+       one. The test below measures from the MOUTH — for a gorilla that is the
+       nose, at model-local x = 1.48 — and asks whether the mark is within a
+       body radius of it. A backhand's whole point is that it reaches a metre
+       further than that and sweeps sideways; a charge connects with the
+       shoulder and a grab goes under the man rather than at him. Held to the
+       muzzle they would read as misses on contact they visibly made, and the
+       re-arm below would loop the animal on a blow it kept "missing". The
+       canines are the one ape move that IS a mouth, so `ape_bite` is
+       deliberately absent from this list and answers to the test like every
+       other biter. */
+    if (style === 'ape_sweep' || style === 'ape_smash' ||
+        style === 'ape_charge' || style === 'ape_grab' || style === 'ape_drum') return true;
+    var J = jawWorld(attacker);
+    if (!J) return true;
+    var tol = bodyRadius(target) + Math.max(0.4, (reach || 2) * 0.42);
+    var jx = tp.x - J.x, jz = tp.z - J.z;
+    return (jx * jx + jz * jz) <= tol * tol;
+  }
+
+  /* ==========================================================================
+     BLOOD FROM TEETH.
+
+     THE REFERENCE, and it is a real one in this repo: systems/trauma.js already
+     answers "what does a beating look like" for the disaster island — a blunt
+     blow accrues on a ledger, and when it crosses the bar systems/gore.js's
+     CBZ.goreImpact throws a directional spray, atomises a mist only on a real
+     crunch, stains the ground only once the skin is genuinely open, and
+     systems/wounds.js marks the body so the survivor carries it. Nothing in
+     this game bled from a BITE. A bear closed its jaws on a man and the only
+     evidence was a decal — which is why a maul read as a shove.
+
+     This is that model with teeth in place of a fist:
+       • the spray leaves the JAW, along the bite line, not from the victim's
+         navel — the point jawReaches() just proved was in contact;
+       • severity is the style (a shark's rush is not a magpie's peck) times the
+         size of the animal doing it, so the 46th species is priced for free;
+       • the ledger idea survives: a body worried by a pack opens further with
+         each closing of the jaws, which is exactly the owner's "punch someone a
+         bunch of times" applied to a wolf pack. It lives on the VICTIM as two
+         numbers, decays, and costs nothing when nothing is biting.
+     CBZ.CONFIG.CREATURE_BITE_BLOOD = false restores the decal-only behaviour. */
+  var BITE_SEV = { lunge: 1.0, maul: 0.85, gore: 0.8, ram: 0.75, pounce: 0.7, bite: 0.62, strike: 0.4, peck: 0.28, stomp: 0.5 };
+  var LEDGER_DECAY = 0.09;      // units/s — a worrying counts, last minute's bite does not
+  var LEDGER_MAX = 1.8;
+  function biteBlood(attacker, target, style) {
+    if (!BLOOD_ON() || typeof CBZ.goreImpact !== 'function') return;
+    var J = jawWorld(attacker);
+    if (!J) return;
+    var tp = target.pos || (target.group && target.group.position);
+    if (!tp) return;
+    var sc = actorScale(attacker);
+    // the bite LINE: from the animal's centre through its own teeth. That is
+    // the direction the flesh tears along, and the axis gore.js fans the spray
+    // and stamps a wall splat on.
+    var g = attacker.group;
+    var dx = J.x - g.position.x, dz = J.z - g.position.z;
+    var dl = Math.sqrt(dx * dx + dz * dz);
+    if (dl > 0.001) { dx /= dl; dz /= dl; } else { dx = 1; dz = 0; }
+
+    var base = (BITE_SEV[style] != null ? BITE_SEV[style] : 0.6) * Math.min(1.7, 0.55 + sc * 0.55);
+    // the ledger — a body being worried opens further every time.
+    var now = (CBZ.now != null ? CBZ.now * 0.001 : (Date.now() * 0.001));
+    var led = target._biteLedger || 0;
+    var last = target._biteLedgerT;
+    if (last != null) led = Math.max(0, led - LEDGER_DECAY * Math.max(0, now - last));
+    led = Math.min(LEDGER_MAX, led + base * 0.55);
+    target._biteLedger = led; target._biteLedgerT = now;
+
+    var sev = Math.min(2, base + led * 0.5);
+    // ONE EMISSION PER BITE, never per frame: creature_combat crosses
+    // STRIKE_AT exactly once a swing, so this is called exactly once per
+    // closing of the jaws by construction.
+    _bd.x = dx; _bd.y = 0.18; _bd.z = dz;   // a bite tears slightly upward
+    _bo2.dir = _bd;
+    _bo2.amount = Math.max(0.35, Math.min(1.9, sev));
+    _bo2.mist = sev > 0.85;                 // only a real crunch atomises anything
+    _bo2.pool = sev > 0.6;                  // only an open wound stains the ground
+    _bo2.player = !!(target.isPlayer || (CBZ.player && target === CBZ.player));
+    _bo2.sfx = sev > 0.7 ? 'hit' : false;
+    try { CBZ.goreImpact(J.x, J.y, J.z, _bo2); } catch (e) {}
+  }
+  // reused, so the hot path allocates nothing and gore.js keeps taking plain
+  // data (opts.dir has never been a THREE type).
+  var _bd = { x: 0, y: 0, z: 0 };
+  var _bo2 = { dir: null, amount: 0.7, mist: false, pool: false, player: false, sfx: false };
+
   // Build (once per actor) the seize a MAUL offers on the player. This is the
   // block's second consumer: bears and wolves get "it has you" for one line.
   function maulSeizeOpts(attacker) {
@@ -667,6 +846,7 @@
   function creatureFight(attacker, target, dt, opts) {
     RES.inRange = false;
     RES.dealt = 0;
+    RES.missed = false;
     try {
       if (!attacker || !target || !attacker.group || !dt) return RES;
       opts = opts || attacker._atkOpts0 || (attacker._atkOpts0 = {});
@@ -757,10 +937,6 @@
           // that CHOSE the move knows by how much. Unset = 1, i.e. every
           // existing style bills exactly what it always billed.
           if (attacker._atkPow > 0) dmg *= attacker._atkPow;
-          // THE SEIZE takes precedence over the hit: if the block accepts, it
-          // owns the damage, the camera and the death from here. Anything else
-          // — flag off, no block loaded, refused (already holding someone) —
-          // falls through to the ordinary strike exactly as before.
           /* THE APE'S EXTRA REACH. A backhand does not hit one man, it hits
              everyone the arm passes through, and a grab hits nobody and takes a
              body instead — neither fits `opts.onHit(dmg)`, which is a contract
@@ -782,11 +958,32 @@
           }
           if (apeDealt != null) {
             RES.dealt = apeDealt;
+          /* THE JAWS HAVE TO ARRIVE. Everything above this line decided the
+             animal committed to a bite; jawReaches() decides whether the bite
+             CONNECTED, by asking where the teeth actually are at the frame they
+             close. A miss is a real outcome — the snap on empty air you can see
+             — and it must not cost the animal its whole cooldown, or a lion
+             that lunged an inch short would stand there for a second doing
+             nothing. It re-arms fast, closes the last step and tries again.
+             Asked AFTER the ape seam on purpose: a move ape_combat consumed
+             has already resolved (a grab is a hold, not a bite) and a splash
+             it dealt to the bystanders stands whether or not the mark the
+             driver was aiming at was reached. */
+          } else if (!jawReaches(attacker, target, style, tp, reach)) {
+            RES.missed = true;
+            attacker._atkT = rate * 0.3;
           } else if (!trySeize(attacker, target, opts, style)) {
+            // THE SEIZE takes precedence over the hit: if the block accepts, it
+            // owns the damage, the camera and the death from here. Anything else
+            // — flag off, no block loaded, refused (already holding someone) —
+            // falls through to the ordinary strike exactly as before.
             if (style === 'bite' || style === 'maul' || style === 'strike' || style === 'lunge' ||
                 style === 'gore' || style === 'ram' || style === 'ape_bite') {
               biteWound(attacker, target, style === 'ape_bite' ? 'maul' : style);
             }
+            // ...and it BLEEDS. The decal above marks the skin; this is the
+            // spray, and it leaves the teeth rather than the victim's centre.
+            biteBlood(attacker, target, style);
             if (typeof opts.onHit === 'function') {
               opts.onHit(dmg);
             } else {
@@ -888,6 +1085,7 @@
     } catch (e) {
       RES.inRange = false;
       RES.dealt = 0;
+      RES.missed = false;
       return RES;
     }
   }
@@ -899,6 +1097,13 @@
   CBZ.creatureStyleFor = creatureStyleFor;
   CBZ.creatureSeizeStyleFor = creatureSeizeStyleFor;
   CBZ.creatureJawPoint = jawPoint;      // group-LOCAL hold point, cached per actor
+  // The same point IN THE WORLD, and the contact test built on it. Exported
+  // because a probe has to be able to photograph and measure "the teeth were
+  // here when they closed" — that claim is the whole of the bite repair, and a
+  // claim only this file can answer honestly. Returns a REUSED vector.
+  CBZ.creatureJawWorld = jawWorld;
+  CBZ.creatureJawReaches = jawReaches;
+  CBZ.creatureBiteBlood = biteBlood;
   CBZ.creatureBiteWound = biteWound;    // mounted predators reuse the same paired wound owner
   CBZ.creatureRestY = restY;            // medium-aware rest height (land or water)
   // CANCEL A SWING IN FLIGHT, cleanly. Exported because this file is the only

@@ -1589,4 +1589,10 @@
   //              single knob if the dressing pass ever feels heavy),
   //              _UTILITY_LINES, _STREET_FURNITURE, _GROUND_GRIME,
   //              _BUILDING_DRESS
+  //   PARKOUR_V2 src/systems/physics.js — the traversal pass that added going
+  //              THROUGH an opening (a shot-out window, a C4 mousehole) instead
+  //              of only over the top, velocity-matched vault root motion, the
+  //              edge catch, the airborne pose and the landing/roll beat.
+  //              ?cfg_PARKOUR_V2=0 restores the shipped vault exactly and is
+  //              the "before" side of tools/visual-presets/parkour-moves.mjs
 })();

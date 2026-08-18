@@ -342,7 +342,7 @@
     // there is and it is a real tactic, not decoration: it buys distance.
     var hurtish = attacker.maxHp > 0 && attacker.hp < attacker.maxHp * 0.55;
     if ((attacker._apeDrumT || 0) < now - 9 && crowd >= 2 && swings > 1 &&
-        roll() < (hurtish ? 0.22 : 0.10)) {
+        roll() < (hurtish ? 0.30 : 0.17)) {
       attacker._apeDrumT = now;
       style = 'ape_drum';
     }
