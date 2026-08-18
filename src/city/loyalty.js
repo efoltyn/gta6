@@ -579,8 +579,8 @@
       if (r.k === "people") return r.n + " more " + plural(r.n, "body", "bodies") + " loyal to you";
       if (r.k === "guns") return r.n + " more " + plural(r.n, "gun") + " under your command";
       if (r.k === "money") return "$" + r.n.toLocaleString() + " more";
-      return r.n > 1 ? (r.n + " more claims — rank, a second org, or a uniform they believe")
-                     : "one more claim — a rank, an org, or a uniform they believe";
+      return r.n > 1 ? (r.n + " more claims, rank, a second org, or a uniform they believe")
+                     : "one more claim, a rank, an org, or a uniform they believe";
     }
     opts.sort(function (a, b) { return a.w - b.w; });
     partial.sort(function (a, b) { return a.w - b.w; });
@@ -591,7 +591,7 @@
     else {
       // nothing alone is enough — name the shape of the answer, not a fantasy
       const near = partial.slice(0, 2).map(function (r) { return r.k === "money" ? "money" : (r.k === "people" ? "people" : r.k); });
-      line = "more than any one thing can buy — " + (near.length ? near.join(" and ") + ", together" : "people, guns, money and access, together");
+      line = "more than any one thing can buy · " + (near.length ? near.join(" and ") + ", together" : "people, guns, money and access, together");
     }
     return { ok: false, gap: gap, tier: R.key, short: opts, partial: partial, line: line };
   };
@@ -769,7 +769,7 @@
     const out = [];
     for (let i = 0; i < B.length; i++) if (CBZ.citySurrender(B[i], { disarm: true, prisoner: true })) out.push(B[i]);
     if (out.length && CBZ.city && CBZ.city.note) {
-      CBZ.city.note(out.length + " " + plural(out.length, "man", "men") + " down arms — they are yours to take or turn loose.", 2.8);
+      CBZ.city.note(out.length + " " + plural(out.length, "man", "men") + " down arms, they are yours to take or turn loose.", 2.8);
     }
     return out;
   };
@@ -803,7 +803,7 @@
     ped.surrender = false; ped.surrenderT = 0; ped.poseHandsUp = false;
     if (ped.char) { ped.char.surrender = false; ped.char.handsUp = false; }
     ped.state = "flee"; ped.fear = 8; ped.rage = null;
-    note("Ransom paid — $" + pay.toLocaleString() + " for " + nm(ped) + ".", 2.4);
+    note("Ransom paid. $" + pay.toLocaleString() + " for " + nm(ped) + ".", 2.4);
     if (CBZ.sfx) { try { CBZ.sfx("coin"); } catch (e) {} }
     return true;
   };

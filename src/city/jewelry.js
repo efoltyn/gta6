@@ -518,7 +518,7 @@
   // ---- the ALARM + the charge (normal wanted flow, no special cop code) ------
   function startAlarm(cs) {
     if (S.alarmT <= 0) {
-      note("ALARM — " + S.jw.name + "! Every head on the block just turned.", 2.2);
+      note("ALARM · " + S.jw.name + "! Every head on the block just turned.", 2.2);
       S.beepT = 1.4;
     }
     S.alarmT = ALARM_TIME;
@@ -642,7 +642,7 @@
   function startPry(cs) {
     const P = CBZ.player;
     S.pry = { cs, t: 0, px: P.pos.x, pz: P.pos.z };
-    note("Working the lock — stay still, stay quiet…", 1.4);
+    note("Working the lock, stay still, stay quiet…", 1.4);
   }
   function cancelPry(why) {
     if (!S.pry) return;
@@ -659,14 +659,14 @@
     setTaken(best, true);
     e.add(best.name, 1);
     if (CBZ.sfx) CBZ.sfx("coin");
-    note("Slipped the " + best.name + " (" + fmt$(best.value) + ") out clean — no alarm.", 2.4);
+    note("Slipped the " + best.name + " (" + fmt$(best.value) + ") out clean, no alarm.", 2.4);
     if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(best.value >= 90000 ? 6 : 2);
     if (piecesLeft(cs) === 0) caseEmptied(cs);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     // every pull risks the clerk turning around mid-lift
     const v = S.lot.building && S.lot.building.vendor;
     if (v && !v.dead && Math.random() < PRY_RISK) {
-      note("The " + (v.name || "Jeweler") + " spun around — you're MADE!", 2.2);
+      note("The " + (v.name || "Jeweler") + " spun around, you're MADE!", 2.2);
       startAlarm(cs);
     }
   }
@@ -695,7 +695,7 @@
     if (broken && left > 0)
       return "<b style='color:#ffd166'>[E]</b> Grab the ice <span style='color:#7f8794'>· " + left + " piece" + (left > 1 ? "s" : "") + " loose in the glass</span>";
     if (left === 0)
-      return "<span style='color:#7f8794'>Cleaned out — the insurance re-stock is coming.</span>";
+      return "<span style='color:#7f8794'>Cleaned out, the insurance re-stock is coming.</span>";
     if (S.pry && S.pry.cs === cs)
       return "<span style='color:#9fe0ff'>Prying… " + Math.round(100 * S.pry.t / PRY_TIME) + "%</span> <span style='color:#7f8794'>· don't move</span>";
     // OPEN-STORE BUY: clerk posted + intact case + a buyable piece in your aim →
@@ -706,13 +706,13 @@
       const can = affordPrice() >= (buy.value | 0);
       const why = "<span style='color:#7f8794'>· " + dripWord(buy.drip) + " · pawn it later</span>";
       if (can)
-        return "<b style='color:#9be37a'>[E]</b> Buy the " + buy.label + " — <b style='color:#ffd166'>" + fmt$(buy.value) + "</b> " + why;
-      return "<span style='color:#ff9e9e'>" + buy.label + " — " + fmt$(buy.value) + "</span> <span style='color:#7f8794'>· short on cash + bank · the glass, though…</span>";
+        return "<b style='color:#9be37a'>[E]</b> Buy the " + buy.label + " · <b style='color:#ffd166'>" + fmt$(buy.value) + "</b> " + why;
+      return "<span style='color:#ff9e9e'>" + buy.label + " · " + fmt$(buy.value) + "</span> <span style='color:#7f8794'>· short on cash + bank · the glass, though…</span>";
     }
     if (pryEligible(cs))
       return "<b style='color:#9fe0ff'>[E]</b> Pry the case <span style='color:#7f8794'>· slow + silent · one piece · the clerk might turn</span>";
     if (!isNight())
-      return "<span style='color:#7f8794'>Locked case — too many eyes in daylight. The glass, though…</span>";
+      return "<span style='color:#7f8794'>Locked case, too many eyes in daylight. The glass, though…</span>";
     return "<span style='color:#ff9e9e'>The " + clerkName() + " is watching this case.</span> <span style='color:#7f8794'>· the glass, though…</span>";
   }
 
@@ -802,7 +802,7 @@
       const pr = S.pry, cs = pr.cs;
       const moved = Math.hypot(P.pos.x - pr.px, P.pos.z - pr.pz) > 0.5;
       const away = Math.hypot(P.pos.x - cs.x, P.pos.z - cs.z) > REACH + 0.8;
-      if (moved || away) cancelPry("The pry slipped — you moved.");
+      if (moved || away) cancelPry("The pry slipped, you moved.");
       else if ((cs.pane && cs.pane.shattered) || piecesLeft(cs) === 0) cancelPry();
       else {
         pr.t += dt;

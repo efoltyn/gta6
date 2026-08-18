@@ -808,7 +808,7 @@
     warnMirrorSkipOnce: function (e) {
       if (warnedMirrorSkip) return;
       warnedMirrorSkip = true;
-      console.log("[sqlitedb] localStorage safety-mirror skipped (" + (e && e.message) + ") — sqlite is primary now, this save is not lost");
+      console.log("[sqlitedb] localStorage safety-mirror skipped (" + (e && e.message) + "), sqlite is primary now, this save is not lost");
     },
     // ---- smart-query seam (Build step 4): parity with server/server.js's
     // pquery/bquery over the SAME chunk grid. No gameplay consumer this

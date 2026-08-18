@@ -507,7 +507,7 @@
       // from nothing and the wind gets up, all through the ONE weather system —
       // so wet asphalt, wet grip and the lightning flash come along for free.
       warn(ctx) {
-        narrate("hint", "Storm rolling in — keep moving!", 2.4); sound("thunder");
+        narrate("hint", "Storm rolling in, keep moving!", 2.4); sound("thunder");
         const a = rnd() * 6.28; ctx.st.wx = Math.cos(a); ctx.st.wz = Math.sin(a);
       },
       warnTick(dt, ctx) {
@@ -681,7 +681,7 @@
       // the sky opens, the light goes, and the gutters start to stand before
       // anything else happens. A player who reads it is already walking uphill.
       warn(ctx) {
-        narrate("hint", "FLASH FLOOD — water rising, get HIGH!", 3); sound("water");
+        narrate("hint", "FLASH FLOOD, water rising, get HIGH!", 3); sound("water");
         // THE CHANNEL, not a random bearing: water runs the way the ground
         // falls. Sample a ring and take the LOWEST — that is where the front
         // will run and where the water will stand deepest when it stops.
@@ -804,7 +804,7 @@
       // of information the old banner was trying to convey. The wind vector is
       // now THE weather's wind (systems/weather.js), not a third private one.
       warn(ctx) {
-        narrate("hint", "HURRICANE inbound — brace and hold on!", 3); sound("wind");
+        narrate("hint", "HURRICANE inbound, brace and hold on!", 3); sound("wind");
         const a = rnd() * 6.28; ctx.st.wx = Math.cos(a); ctx.st.wz = Math.sin(a);
         ctx.st.gustCd = 2; ctx.st.turn = (rnd() - 0.5) * 0.2;
         ctx.st.debris = CBZ.fx.particleCloud({ mode: "swirl", color: 0x7a6f5a, count: 200, radius: ctx.R * 0.7, top: 10, size: 0.3, opacity: 0.6, vMin: 8, vMax: 16 });
@@ -877,7 +877,7 @@
       // a wildfire is coming, and it also gives the fire a real ORIGIN you can
       // put your back to instead of a hazard that materialises everywhere.
       warn(ctx) {
-        narrate("hint", "Wildfire spreading — don't get cornered!", 2.6); sound("fire");
+        narrate("hint", "Wildfire spreading, don't get cornered!", 2.6); sound("fire");
         const tr = ctx.arena.flammable;
         const seedTree = tr[(rnd() * tr.length) | 0];
         if (seedTree && !seedTree.burnt) { ignite(seedTree); ctx.st.seed = seedTree; }
@@ -1018,14 +1018,16 @@
       safeDir(x, z, ctx) { return CBZ.tornado ? CBZ.tornado.safeDir(x, z) : null; },
     },
 
-    // ---- VOLCANO: ash-out, lava flows from the mountain, lava bombs ----
+    // ---- VOLCANO: lava flood off the mountain, lava bombs, pyro + lahar ----
     volcano: {
       name: "VOLCANIC ERUPTION", emoji: "", warnSecs: 6, activeSecs: 20, gap: 7, cause: "incinerated by lava", tint: 0x2e211c,
       /* THE MOUNTAIN WAKES UP IN FRONT OF YOU. A rising rumble under your
-         feet, the crater rim starting to glow, and the first ash beginning
-         to fall — three physical facts that between them say everything the
-         banner said, and unlike the banner they tell you WHICH mountain and
-         WHICH way the ash is drifting.
+         feet, the crater rim starting to glow, and rock coming down the lane
+         — physical facts that between them say everything the banner said,
+         and unlike the banner they tell you WHICH mountain and WHICH flank.
+
+         (The grey ash rain that used to fall here is gone with the rest of
+         the ash — OWNER, 2026-08-16: "the ash everywhere is just so dumb".)
 
          AND, NEW: WHICH WAY THE MOUNTAIN IS GOING TO FALL. A pyroclastic
          flow is unsurvivable inside its lane, so a hazard the player cannot
@@ -1036,13 +1038,12 @@
          flow will take — plus the crowd, whose warnThreat now clears that
          corridor first. Nothing is drawn that is not a physical object. */
       warn(ctx) {
-        narrate("hint", "THE VOLCANO IS WAKING — off the mountain, out of the ash!", 3);
+        narrate("hint", "THE VOLCANO IS WAKING, get off the mountain!", 3);
         sound("rumble"); if (CBZ.shake) CBZ.shake(0.5);
         const h = ctx.arena.hills[0];
         ctx.st.preGlow = disc(h.x, h.z, 0xff5210, 0.0, h.peak + 0.3);
         ctx.st.preGlow.material.blending = THREE.AdditiveBlending;
         ctx.st.preGlow.scale.set(4, 4, 1);
-        ctx.st.preAsh = CBZ.fx.particleCloud({ mode: "fall", color: 0x4a4038, count: 200, radius: 26, top: 30, size: 0.24, opacity: 0.4, vMin: 5, vMax: 10 });
         const wa = rnd() * 6.28; ctx.st.wx = Math.cos(wa); ctx.st.wz = Math.sin(wa);
         // the failing flank, chosen ONCE so the telegraph and the flow can
         // never point at two different sides of the same mountain
@@ -1060,9 +1061,7 @@
         if (CBZ.shake) CBZ.shake(0.04 + 0.22 * k * k);
         rattleProps(ctx, 0.015 + 0.05 * k);
         if (ctx.st.preGlow) ctx.st.preGlow.material.opacity = k * (0.55 + 0.3 * Math.sin(CBZ.now * 0.012));
-        ctx.st.preAsh.setActive(k * 0.6);
-        ctx.st.preAsh.update(dt, h.x + ctx.st.wx * 30 * k, 0, h.z + ctx.st.wz * 30 * k);
-        weather({ rain: 0, wind: 3 + k * 5, windDir: { x: ctx.st.wx, z: ctx.st.wz }, fog: k * 0.35, fogColor: 0x2e211c });
+        weather({ rain: 0, wind: 3 + k * 5, windDir: { x: ctx.st.wx, z: ctx.st.wz }, fog: k * 0.2, fogColor: 0x2e211c });
         ctx.st.rumbleCd = (ctx.st.rumbleCd || 0) - dt;
         if (ctx.st.rumbleCd <= 0) { ctx.st.rumbleCd = 1.8 - k; soundAt("rumble", h.x, h.z); }
         // ROCKFALL DOWN THE LANE — the telegraph, and it accelerates
@@ -1143,7 +1142,7 @@
       // "whiteout" — you can measure it by how much island you can still see,
       // and by how much of the grass has gone white under your feet.
       warn(ctx) {
-        narrate("hint", "Blizzard incoming — get INDOORS or keep moving!", 2.8); sound("wind");
+        narrate("hint", "Blizzard incoming, get INDOORS or keep moving!", 2.8); sound("wind");
         const a = rnd() * 6.28; ctx.st.wx = Math.cos(a); ctx.st.wz = Math.sin(a);
       },
       warnTick(dt, ctx) {
@@ -1194,7 +1193,7 @@
       // real sequence, and it makes the player look UP, which is where the
       // warning for the rest of the event will be.
       warn(ctx) {
-        narrate("hint", "METEORS — watch the shadows!", 2.6); sound("rumble");
+        narrate("hint", "METEORS, watch the shadows!", 2.6); sound("rumble");
         ctx.st.streaks = []; ctx.st.streakCd = 0.15;
       },
       warnTick(dt, ctx) {
@@ -1455,7 +1454,7 @@
   // ============================================================
   const TSUNAMI_LEGACY = {
     name: "TSUNAMI", emoji: "", warnSecs: 7, activeSecs: 20, gap: 7, cause: "swept away by the tsunami", tint: 0x35607e,
-    warn(ctx) { narrate("hint", "TSUNAMI — get to HIGH GROUND!", 3); sound("water"); },
+    warn(ctx) { narrate("hint", "TSUNAMI, get to HIGH GROUND!", 3); sound("water"); },
     start(ctx) {
       // the rising flood pool that ultimately drowns the low ground
       const m = new THREE.Mesh(new THREE.PlaneGeometry(ctx.R * 3, ctx.R * 3),
@@ -2081,7 +2080,7 @@
     if (st.spray) st.spray.setActive(0);
     surgeSet(st.floodSurge);
     tsuPublish(ctx, 1.6);
-    narrate("hint", "THE ISLAND IS UNDER — swim, climb, survive", 3);
+    narrate("hint", "THE ISLAND IS UNDER, swim, climb, survive", 3);
   }
 
   const TSUNAMI_V2 = {
@@ -2095,7 +2094,7 @@
       st.waveAmp = 0.86; st.chopAmp = 0.72; st.foamGain = 0.34;
       st.frontS = -1e9; st.frontV = 0; st.stallT = 0; st.broke = false; st.crashT = -1;
       tsuPublish(ctx, 0);
-      narrate("hint", "TSUNAMI — the sea is PULLING BACK. GET HIGH!", 3.6);
+      narrate("hint", "TSUNAMI, the sea is PULLING BACK. GET HIGH!", 3.6);
       soundAt("siren", ctx.cx, ctx.cz);
       if (CBZ.shake) CBZ.shake(0.3);
     },
@@ -2119,7 +2118,7 @@
       st.sirenCd = (st.sirenCd || 0) - dt;
       if (st.sirenCd <= 0) { st.sirenCd = 2.6; soundAt("siren", ctx.cx, ctx.cz); }
       if (rnd() < dt * 0.7) sound("water");
-      if (!st.saidBed && k > 0.62) { st.saidBed = 1; narrate("hint", "The seabed is EXPOSED — IT'S COMING", 2.6); }
+      if (!st.saidBed && k > 0.62) { st.saidBed = 1; narrate("hint", "The seabed is EXPOSED. IT'S COMING", 2.6); }
     },
     // during the drawdown the whole low island is the danger — that is what
     // puts 99 survivors on the mountain path, and a crowd running uphill IS
@@ -2349,7 +2348,7 @@
         tsuCarHandoff(ctx);
         tsuFlotsam(dt, ctx, 1.6);
         if (rnd() < dt * 2.5) sound("water");
-        if (st.floodT > ctx.activeSecs * 0.34) { st.phase = "drain"; st.drainFrom = st.floodSurge; narrate("hint", "The water is DRAINING — move!", 2.4); }
+        if (st.floodT > ctx.activeSecs * 0.34) { st.phase = "drain"; st.drainFrom = st.floodSurge; narrate("hint", "The water is DRAINING, move!", 2.4); }
       } else {  // drain — slow, and what it drags out with it is the memory
         const cur = CBZ.waterSurge ? CBZ.waterSurge() : 0;
         const next = Math.max(0, cur - dt * (st.floodSurge + 1.5) / Math.max(1.5, ctx.activeSecs * 0.2));
@@ -2632,7 +2631,7 @@
     const V = vfx();
     try { volAliveAtStart = surv().aliveCount(); } catch (e) { volAliveAtStart = -1; }
     narrate("banner", "VOLCANIC ERUPTION");
-    narrate("hint", "THE MOUNTAIN ERUPTS — stay off the lava!", 3);
+    narrate("hint", "THE MOUNTAIN ERUPTS, stay off the lava!", 3);
     if (CBZ.shake) CBZ.shake(0.9); sound("explosion"); sound("rumble");
     // a fountain of glowing lava bursting UP out of the summit vent
     ctx.st.erFountain = CBZ.fx.particleCloud({ mode: "rise", color: 0xff6a1a, count: 260, radius: 7, top: 22, size: 0.3, opacity: 0.85, vMin: 12, vMax: 22, drift: 3 }); ctx.st.erFountain.setActive(0.95);
@@ -2656,8 +2655,10 @@
        under the dark one is that underside; without it the column reads as
        a grey smudge that merely starts near the mountain. */
     ctx.st.erSmokeLit = CBZ.fx.particleCloud({ mode: "rise", color: 0xd06a35, count: 110, radius: 8, top: 15, size: 0.5, opacity: 0.32, vMin: 4, vMax: 8, drift: 3 }); ctx.st.erSmokeLit.setActive(0.75);
-    // fine ash raining back down over the island
-    ctx.st.erAsh = CBZ.fx.particleCloud({ mode: "fall", color: 0x4a4038, count: 300, radius: 26, top: 30, size: 0.24, opacity: 0.45, vMin: 6, vMax: 12 }); ctx.st.erAsh.setActive(0.85);
+    /* NO ash raining over the island any more — OWNER, 2026-08-16: "the ash
+       everywhere is just so dumb, idc if it's realistic". The 300 grey motes
+       that fell here went the same way as the ground blanket. */
+    ctx.st.erAsh = null;
     /* The crater itself: the V2 path gets the OPAQUE draped spatter apron
        (world/volcanofx.js ventGlow — the reference photo's white-hot summit).
        The additive disc survives only as the flag revert's crater, because a
@@ -2725,15 +2726,19 @@
         ctx.st.erLava.push(V.lavaFlow({
           x: p.x, z: p.z, groundAt: gAt(ctx), parent: root(), bearing: a,
           len: h.r * 1.5 + 18 * ctx.intensity,
-          // broad enough for the nine-column braid grid (narrow cutoff is
-          // 4.2); the children fork off at 0.62x and take the five-column one
-          width: 4.5 + 1.1 * ctx.intensity,
+          /* A SLOW FLOOD, NOT RIVERS — OWNER, 2026-08-16: "magma coming down
+             not in rivers but like a slow flood". At 4.5-5.6 m wide the five
+             stems read as separate ribbons with grass between them; at
+             ~10-13 m they overlap into one apron at the rim and come down
+             the cone as broad lobes that happen to divide. Same station
+             count (spacing is set by the lid field, not the width), same
+             nine-column grid, so the flood costs what the rivers cost. */
+          width: 10 + 3 * ctx.intensity,
           /* YOU WALK AWAY FROM LAVA — that is this file's own doctrine two
              hundred lines up, and at 4.2-6.8 m/s the flows were outrunning a
-             SPRINT. A basaltic channel on a slope this size does about walking
-             pace, so at 1.7-3.0 a flow is what it is supposed to be: a thing
-             you lose ground to slowly and lose your house to entirely. */
-          speed: 1.7 + 1.3 * ctx.intensity,
+             SPRINT. Slower still now (1.2-1.9): a flood CREEPS — the wide
+             front nosing down the cone is the read, not the sprint. */
+          speed: 1.2 + 0.7 * ctx.intensity,
           salt: 4700 + i * 137,
           branches: 2,
           // BUDGET: three real lights for five stems (the vent apron carries
@@ -2790,7 +2795,10 @@
     /* AN ERUPTION DARKENS THE AIR; IT DOES NOT DELETE THE ISLAND. The old
        22/160 m fog put the far side of a 240 m island inside the wall, so the
        mountain you are supposed to be reading was the murkiest thing on
-       screen. 40/300 keeps the whole arena legible and still filthy.
+       screen. Widened again (55/380) with the ash's removal — OWNER,
+       2026-08-16: the grey-out was half of "the ash covers everything in a
+       dumb way", and with no blanket to excuse it the air only needs enough
+       murk to sell the event.
 
        AND IT MUST NOT TURN NIGHT INTO NOON. survEnv is a flat override, so
        writing sunInt 0.5 unconditionally made a midnight eruption brighter
@@ -2798,7 +2806,7 @@
        under which the lava's own light is supposed to be the thing you see.
        dayK() is the sun's own elevation off core/daynight.js. */
     const dk = dayK();
-    ctx.env.fog = lerpHex(0x120b08, 0x2e211c, dk); ctx.env.fogNear = 40; ctx.env.fogFar = 300;
+    ctx.env.fog = lerpHex(0x120b08, 0x2e211c, dk); ctx.env.fogNear = 55; ctx.env.fogFar = 380;
     /* AND IT MUST NOT PAINT THE ISLAND PEACH. 0xff6a3a is a fully saturated
        orange; run through every diffuse surface on the map it turned grey ash,
        grey concrete and green grass into one warm pastel, which is the
@@ -2807,9 +2815,6 @@
        so the sun keeps its warmth and loses most of its saturation. */
     ctx.env.sunInt = 0.5 * dk; ctx.env.sunColor = 0xd9714a;
     ctx.env.hemiInt = 0.14 + 0.42 * dk; ctx.env.hemiColor = 0x9c7461;
-    // the ash rains where the wind carries it — the fallout wedge is VISIBLE
-    if (ctx.st.erWindX != null) ctx.st.erAsh.update(dt, h.x + ctx.st.erWindX * 40, 0, h.z + ctx.st.erWindZ * 40);
-    else ctx.st.erAsh.update(dt, camPos().x, 0, camPos().z);
     ctx.st.erFountain.update(dt, h.x, h.peak, h.z);
     if (ctx.st.erSmoke) ctx.st.erSmoke.update(dt, h.x + (ctx.st.erWindX || 0) * 14, h.peak + 6, h.z + (ctx.st.erWindZ || 0) * 14);
     // the sprite pillar leans with the same wind the ash falls on
@@ -2818,9 +2823,9 @@
     if (ctx.st.erSmokeLit) ctx.st.erSmokeLit.update(dt, h.x + (ctx.st.erWindX || 0) * 5, h.peak + 1.5, h.z + (ctx.st.erWindZ || 0) * 5);
     if (ctx.st.erVent) ctx.st.erVent.update(dt);
     if (ctx.st.erCrater) ctx.st.erCrater.material.opacity = 0.7 + 0.25 * (0.5 + 0.5 * Math.sin(CBZ.now * 0.012));
-    // ash is weather: it dims the sun, it blows downwind, and it is the same
-    // wind everything else in the game reads
-    weather({ rain: 0, wind: 7, windDir: { x: ctx.st.erWindX || 1, z: ctx.st.erWindZ || 0 }, fog: 0.55, fogColor: 0x2e211c });
+    // the eruption is still weather — a dimmed sun and a downwind haze — but
+    // a light one now the ash is gone: 0.55 fog was the island-wide grey-out
+    weather({ rain: 0, wind: 7, windDir: { x: ctx.st.erWindX || 1, z: ctx.st.erWindZ || 0 }, fog: 0.3, fogColor: 0x2e211c });
     if (rnd() < dt * 1.6) sound("rumble");
 
     // ---------------- LAVA ----------------
@@ -2986,7 +2991,6 @@
        (survivable if you get out of the channel), then the ash (survivable
        indefinitely if you are indoors). */
     const P = ctx.st.pyro, LH = ctx.st.lahar, LV = ctx.st.erLava;
-    const wX = ctx.st.erWindX, wZ = ctx.st.erWindZ;
     surv().forEachActor(function (a) {
       const ax = a.pos.x, az = a.pos.z;
       // 1) PYROCLASTIC FLOW — zero survival in the path, no exceptions.
@@ -3048,15 +3052,13 @@
         }
       }
       /* 5) ASHFALL — glass in the lungs, and a roof is a real answer to it.
-         THE ASH FIELD IS THE ONLY AUTHORITY ON WHERE THERE IS ASH. The
-         geometric downwind wedge below it used to fire whenever the ash
-         LEDGER had not yet built up — a cone-and-radius test that choked
-         everyone standing 8 to 80 m downwind of the vent whether or not a
-         single grey quad had appeared there. That is death by arithmetic
-         with nothing on screen to explain it, which is the "randomly" half
-         of the owner's note. It now only runs when there is no ash field at
-         all (the VOLCANO_ASH_LOAD revert), where it is the whole feature
-         rather than a phantom second opinion. */
+         THE ASH FIELD IS THE ONLY AUTHORITY ON WHERE THERE IS ASH — and
+         with VOLCANO_ASH_LOAD now defaulting OFF (owner, 2026-08-16) there
+         is usually no ash at all, so there is usually no choke. The old
+         geometric downwind wedge that stood in when the field was absent is
+         deleted rather than resurrected: it choked people with nothing on
+         screen to explain it, which is exactly the death-by-arithmetic the
+         owner reported. No picture, no damage. */
       if (!sheltered(a)) {
         let choke = 0;
         /* AND IT IS A GRADIENT, NOT A SWITCH. The measurement that found this:
@@ -3084,9 +3086,6 @@
              the colour of the ground you are standing on. */
           const d = AL.depthAt(ax, az);
           choke = Math.max(0, Math.min(1, (d - ASH_DOT_DEPTH) / 0.35));
-        } else if (wX != null) {
-          const dx = ax - h.x, dz = az - h.z, d = Math.hypot(dx, dz);
-          if (d > 8 && d < 80 && (dx * wX + dz * wZ) / d > 0.72) choke = 0.7;
         }
         if (choke > 0) surv().hurt(a, scale(3.4, ctx) * choke * dt, { cause: "choked by volcanic ash" });
       }
@@ -3163,7 +3162,6 @@
     if (ctx.st.erSmoke) ctx.st.erSmoke.dispose();
     if (ctx.st.erColumn) { ctx.st.erColumn.dispose(); ctx.st.erColumn = null; }
     if (ctx.st.erSmokeLit) { ctx.st.erSmokeLit.dispose(); ctx.st.erSmokeLit = null; }
-    if (ctx.st.erAsh) ctx.st.erAsh.dispose();
     if (ctx.st.erVent) { ctx.st.erVent.dispose(); ctx.st.erVent = null; }
     if (ctx.st.erCrater) rmMesh(ctx.st.erCrater);
     (ctx.st.erStreams || []).forEach((s) => rmMesh(s.mesh));
@@ -3267,10 +3265,9 @@
       if (P.r > 0.7) { const d = Math.hypot(x - P.m.position.x, z - P.m.position.z); if (d < P.r + 3) t = Math.max(t, Math.min(0.95, 1 - (d - P.r * 0.85) / 3)); }
     });
     if (ctx.st.lahar && ctx.st.lahar.hitTest(x, z)) t = Math.max(t, 0.8);
-    if (ctx.st.erWindX != null) {
-      const dx = x - h.x, dz = z - h.z, d = Math.hypot(dx, dz) || 1;
-      if (d > 8 && d < 80 && (dx * ctx.st.erWindX + dz * ctx.st.erWindZ) / d > 0.72) t = Math.max(t, 0.45);
-    }
+    // no downwind-wedge term any more: with the ash gone (2026-08-16) there
+    // is nothing there to flee, and bots emptying a visibly clean half of the
+    // island read as broken pathing
     return t;
   }
 
@@ -4285,7 +4282,7 @@
     dir.cur = DEFS[id]; dir.curId = id; dir.st = {}; dir.state = "warn"; dir.t = dir.cur.warnSecs;
     dir.overT = 0; dir.overName = null;   // a new warning supersedes the all-clear
     curCtx = makeCtx(0);
-    narrate("banner", dir.cur.name + " — INCOMING");
+    narrate("banner", dir.cur.name + " · INCOMING");
     // THE UNIVERSAL TELEGRAPH IS PHYSICAL: every warning lands with a jolt you
     // feel, warnAmbience() below tints the whole sky toward the hazard's mood,
     // and the def's own warnTick starts the world doing the thing. Nothing on

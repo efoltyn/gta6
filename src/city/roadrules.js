@@ -1682,7 +1682,7 @@
         try {
           console.warn("[roadrules] clamped " + (seg.district || "road") + " segment " +
             (seg.route ? seg.route + " " : "") + "at (" + Math.round(seg.x) + "," + Math.round(seg.z) +
-            ") — it crossed '" + seg._clearance.blockedBy + "' by " + seg._clearance.depth +
+            "), it crossed '" + seg._clearance.blockedBy + "' by " + seg._clearance.depth +
             " m; " + Math.round(cut) + " m removed. Fix the builder so the DECK stops there too.");
         } catch (e) {}
       }
@@ -1719,7 +1719,7 @@
         try {
           console.warn("[roadrules] " + (seg.district || "road") + " segment at (" +
             Math.round(seg.x) + "," + Math.round(seg.z) + ") crosses keep-out '" + p.name +
-            "' end to end (" + Math.round(ov) + " m) — NOT clamped, because clamping a road " +
+            "' end to end (" + Math.round(ov) + " m). NOT clamped, because clamping a road " +
             "out of a keep-out can strand the facility it serves. Shrink that zone (or move " +
             "the road) in the builder that owns it.");
         } catch (e2) {}

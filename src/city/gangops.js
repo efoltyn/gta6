@@ -138,7 +138,7 @@
   // ============================================================
   //  DEAL — a corner dealer + ambient buyers + a robbable cash stack
   // ============================================================
-  const DEAL_BARK = ["What you need?", "I got that, fam.", "Twenties, fifties — say it.", "Step up, don't loiter."];
+  const DEAL_BARK = ["What you need?", "I got that, fam.", "Twenties, fifties, say it.", "Step up, don't loiter."];
   const BUYER_BARK = ["You holding?", "Let me get a twenty.", "Hook me up, man.", "Same as last time."];
 
   // the grabbable cash stack that appears on the desk/ground during an exchange.
@@ -316,7 +316,7 @@
   // ============================================================
   //  EXTORT — a member leans on a civilian/shopkeeper on the turf
   // ============================================================
-  const EXTORT_BARK = ["This block's ours — pay up.", "Protection ain't free.", "You owe rent on this corner.", "Hand it over, we'll keep you safe."];
+  const EXTORT_BARK = ["This block's ours, pay up.", "Protection ain't free.", "You owe rent on this corner.", "Hand it over, we'll keep you safe."];
 
   // is a ped a BUSINESS FRONT — a shopkeeper/vendor or a well-off operator
   // (tycoon/billionaire/socialite/business identity)? La Cosa Nostra's whole WHY
@@ -778,7 +778,7 @@
         try {
           CBZ.cityFeed(reprisal
             ? "You wiped out " + wipes + " whole crews. The rest are closing ranks."
-            : "Your name rings out too loud — the whole city wants you gone.", "#ffb37b");
+            : "Your name rings out too loud, the whole city wants you gone.", "#ffb37b");
         } catch (e) {}
       }
       CBZ.cityUnifyGangsAgainstPlayer(reprisal ? 1 : 0.85);

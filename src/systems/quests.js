@@ -53,7 +53,7 @@
   const CHAIN_TALK = [
     "Smokes buy you a nap. A keycard buys you the gun room.",
     "There's a rack of guns behind that red door. All that's between you and it is a card.",
-    "Forget the crates. Find the card that opens the armory — that's the only door that changes anything.",
+    "Forget the crates. Find the card that opens the armory. That's the only door that changes anything.",
     "Screw walks around with the only key to the cage inside. Think about that.",
   ];
   function chainLine(actor) {
@@ -142,7 +142,7 @@
     actor.rep = (actor.rep || 0) + 34;
     actor.quest = null;
     CBZ.sfx("key");
-    if (actor.rep >= FRIEND) return "You're alright. Come find me — I'll get you out of here.";
+    if (actor.rep >= FRIEND) return "You're alright. Come find me. I'll get you out of here.";
     if (q.type === "armory") return "You actually did it. There's people in here who'll want to know that.";
     if (q.type === "gift") return "That'll do. You're good for it, I'll say that much.";
     return "Nice work. I don't forget who does what I ask.";

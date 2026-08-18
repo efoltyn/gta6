@@ -226,7 +226,7 @@
     }
     if (cash > 0) CBZ.city.addCash(cash);
     else {
-      CBZ.city.note("Cracked it open — the set's tapped out. Nothing in the bag.", 2.4);
+      CBZ.city.note("Cracked it open, the set's tapped out. Nothing in the bag.", 2.4);
       if (CBZ.cityGangProvoke && gid) CBZ.cityGangProvoke(gid, 0.8);
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
       return;
@@ -249,9 +249,9 @@
     // cops: a roof job has no street witnesses. That's the whole appeal.
     if (st.rich && gid && CBZ.cityGangProvoke) {
       CBZ.cityGangProvoke(gid, 0.8);
-      CBZ.city.note("Cracked the set's roof stash — $" + cash + extra + ". They'll know it was light.", 2.8);
+      CBZ.city.note("Cracked the set's roof stash. $" + cash + extra + ". They'll know it was light.", 2.8);
     } else {
-      CBZ.city.note("Cracked the stash — $" + cash + extra + ".", 2.2);
+      CBZ.city.note("Cracked the stash. $" + cash + extra + ".", 2.2);
     }
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }

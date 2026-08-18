@@ -86,11 +86,11 @@
           label: function () {
             const t = CBZ.airlineTicket;
             if (t) {
-              if (!t.shuttle) return "Ticket to " + t.to.code + " — waiting for the next aircraft";
+              if (!t.shuttle) return "Ticket to " + t.to.code + " · waiting for the next aircraft";
               const d = (CBZ.airlineDepartures(target.ap) || []).find(function (x) { return x.shuttle === t.shuttle; });
-              if (d && d.boarding) return "Boarding now — stand " + (d.gate || "?") + " for " + t.to.code;
-              if (d) return "Ticket to " + t.to.code + " — boards in " + mmss(d.eta);
-              return "Ticket to " + t.to.code + " — aircraft inbound";
+              if (d && d.boarding) return "Boarding now, stand " + (d.gate || "?") + " for " + t.to.code;
+              if (d) return "Ticket to " + t.to.code + " · boards in " + mmss(d.eta);
+              return "Ticket to " + t.to.code + " · aircraft inbound";
             }
             const dep = chosen();
             if (!dep) return "No departures";
@@ -113,7 +113,7 @@
             if (!t) { if (W.addCash) W.addCash(dep.price); note("That flight is no longer available.", 2.6); return; }
             note("Ticket to " + dep.to.name + ", " + money(dep.price) + ". " +
               (dep.boarding
-                ? ("Boarding now at stand " + (dep.gate || "?") + " — walk out to the aircraft.")
+                ? ("Boarding now at stand " + (dep.gate || "?") + " · walk out to the aircraft.")
                 : ("Boards in " + mmss(dep.eta) + (dep.gate ? (" at stand " + dep.gate) : "") + ".")), 5);
           },
         },
@@ -147,7 +147,7 @@
             const back = Math.round(t.price * 0.5);
             if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(back);
             CBZ.airlineCancelTicket();
-            note("Ticket refunded — " + money(back) + " of " + money(t.price) + ".", 3);
+            note("Ticket refunded · " + money(back) + " of " + money(t.price) + ".", 3);
           },
         },
       ],

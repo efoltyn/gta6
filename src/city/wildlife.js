@@ -1327,7 +1327,7 @@
     const by = (w && w.by) || null;
     if (killerIsPlayer(by)) {
       if (CBZ.city) {
-        if (a.legendary) { if (CBZ.city.note) CBZ.city.note("★ LEGENDARY " + a.species.name + " DOWN — skin it before it's gone!", 4, { urgent: true }); }
+        if (a.legendary) { if (CBZ.city.note) CBZ.city.note("★ LEGENDARY " + a.species.name + " DOWN, skin it before it's gone!", 4, { urgent: true }); }
         else if (CBZ.city.note) CBZ.city.note(a.species.name + " down · walk up & hold to skin", 2.4);
       }
       if (CBZ.cityKillFeed) { try { CBZ.cityKillFeed("You", a.species.name, "hunted"); } catch (e) {} }
@@ -1478,7 +1478,7 @@
     v.t = Math.max(v.t, sp.venom === true ? 6 : 4);   // refresh/extend
     v.dps = Math.max(v.dps, sp.venomDps || 5);
     v.name = sp.name;
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("VENOM — " + sp.name + " bit you! Find an antidote or ride it out.", 3.2, { urgent: true });
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("VENOM · " + sp.name + " bit you! Find an antidote or ride it out.", 3.2, { urgent: true });
   }
   function venomTick(dt) {
     const v = g._venom; if (!v || v.t <= 0) return;

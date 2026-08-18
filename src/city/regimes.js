@@ -383,7 +383,7 @@
       if (c.dead) continue;
       if (convertCop(c)) n++;
     }
-    if (n && CBZ.cityFeed) CBZ.cityFeed("The force collapses — " + n + " officers walk away, guns in hand.", "#ff9e6b");
+    if (n && CBZ.cityFeed) CBZ.cityFeed("The force collapses · " + n + " officers walk away, guns in hand.", "#ff9e6b");
     return n;
   }
 
@@ -504,7 +504,7 @@
     const day = CBZ.worldDay ? CBZ.worldDay() : 0;
     if (s.curfewWarnedNight !== day) {
       s.curfewWarnedNight = day;
-      if (CBZ.city && CBZ.city.note) CBZ.city.note("Curfew in effect — get off the streets.", 2.4);
+      if (CBZ.city && CBZ.city.note) CBZ.city.note("Curfew in effect, get off the streets.", 2.4);
     }
   });
 
@@ -565,15 +565,15 @@
       if (!newHolder) { const m = mintFigure("dictator"); newHolder = m && m._sid; }
       rec.office.holder = newHolder || null; rec.office.deputy = null; rec.vacuum = null;
       if (newHolder && CBZ.cityLedgerEntry) { const e = CBZ.cityLedgerEntry(newHolder); if (e) e.job = "dictator"; }
-      if (CBZ.city && CBZ.city.big) CBZ.city.big("LOYALIST SUCCESSION — THE REGIME HOLDS");
-      if (CBZ.cityFeed) CBZ.cityFeed("A loyalist deputy seizes power in " + rec.name + " after " + victimName + "'s death — the dictatorship continues.", "#ff9e6b");
+      if (CBZ.city && CBZ.city.big) CBZ.city.big("LOYALIST SUCCESSION · THE REGIME HOLDS");
+      if (CBZ.cityFeed) CBZ.cityFeed("A loyalist deputy seizes power in " + rec.name + " after " + victimName + "'s death, the dictatorship continues.", "#ff9e6b");
       if (CBZ.approvalShock) CBZ.approvalShock(rec.id, -4);
     } else if (roll < 0.75) {
       // JUNTA — stays dictatorship, military flavor.
       const m = mintFigure("junta general");
       rec.office.holder = m ? m._sid : null; rec.office.deputy = null; rec.vacuum = null;
       if (CBZ.city && CBZ.city.big) CBZ.city.big("MILITARY JUNTA SEIZES POWER");
-      if (CBZ.cityFeed) CBZ.cityFeed("The generals move in — a junta rules " + rec.name + " now.", "#ff9e6b");
+      if (CBZ.cityFeed) CBZ.cityFeed("The generals move in, a junta rules " + rec.name + " now.", "#ff9e6b");
       if (CBZ.approvalShock) CBZ.approvalShock(rec.id, -8);
     } else {
       // DEMOCRATIC RESTORATION — govType flips, a snap election is queued
@@ -582,7 +582,7 @@
       rec.office.holder = null; rec.office.deputy = null;
       rec.govType = "democracy";
       rec.vacuum = day;
-      if (CBZ.city && CBZ.city.big) CBZ.city.big("THE REGIME FALLS — DEMOCRACY RESTORED");
+      if (CBZ.city && CBZ.city.big) CBZ.city.big("THE REGIME FALLS · DEMOCRACY RESTORED");
       if (CBZ.cityFeed) CBZ.cityFeed("" + rec.name + " restores democracy after " + victimName + "'s fall.", "#8fe08a");
       if (CBZ.approvalShock) CBZ.approvalShock(rec.id, 15);
     }

@@ -276,7 +276,7 @@
     }
     // armed crew engaging IS a reported armed robbery in progress — light it up
     spikeHeat(reason);
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("Armored crew bailing out — they're shooting back!", 2.2);
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("Armored crew bailing out, they're shooting back!", 2.2);
   }
 
   // ---- the heat spike: armed robbery of an armored truck ----------------------
@@ -309,8 +309,8 @@
     truck.armoredHaul = spill;
     spillCash(x, z, spill);
     if (CBZ.sfx) CBZ.sfx("explosion");
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("Armored truck cracked open downtown — $" + fmt(truck.armoredHaul) + " loose on the street.", 3, { from: "Scanner", app: "news" });
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("Doors are open. Grab it and go — sirens already rolling.", 3, { from: "UNKNOWN NUMBER" });
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("Armored truck cracked open downtown. $" + fmt(truck.armoredHaul) + " loose on the street.", 3, { from: "Scanner", app: "news" });
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("Doors are open. Grab it and go, sirens already rolling.", 3, { from: "UNKNOWN NUMBER" });
   }
 
   function fmt(n) { return (n | 0).toLocaleString ? (n | 0).toLocaleString("en-US") : ("" + (n | 0)); }
@@ -469,7 +469,7 @@
       // a non-lethal blast still rocks it + alerts the crew — tell the player it held
       if (CBZ.city && CBZ.city.note && byPlayer) {
         const pct = Math.max(0, Math.round(car.armoredHull / (car.fullRoute ? TUNE.hullHp * 1.25 : TUNE.hullHp) * 100));
-        CBZ.city.note("Hull holding (" + pct + "%) — hit it with more explosives.", 1.6);
+        CBZ.city.note("Hull holding (" + pct + "%), hit it with more explosives.", 1.6);
       }
     }
   }

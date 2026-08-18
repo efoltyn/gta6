@@ -468,8 +468,8 @@
     cc.fillText("DUTY ROSTER", 24, 46);
     cc.font = "bold 19px Arial"; cc.fillStyle = "#9fb2c4"; cc.textAlign = "right";
     cc.fillText("SHIFT CHANGE " + fmtT(SHIFT_LEN - t), w - 24, 46);
-    const rows = [["CAGE", r.cage || "— AT COFFEE"], ["FRONT DESK", r.frontDesk], ["BAIL", r.bail || "— WINDOW SHUT"],
-      ["BULLPEN", r.bullpenDesk || "— OUT"], ["INTERROGATION", r.interrogation || "— EMPTY"], ["LOBBY", r.lobby], ["K-9", r.k9]];
+    const rows = [["CAGE", r.cage || " · AT COFFEE"], ["FRONT DESK", r.frontDesk], ["BAIL", r.bail || " · WINDOW SHUT"],
+      ["BULLPEN", r.bullpenDesk || " · OUT"], ["INTERROGATION", r.interrogation || " · EMPTY"], ["LOBBY", r.lobby], ["K-9", r.k9]];
     const top = 92, rh = 31;
     rows.forEach((row, i) => {
       const y = top + i * rh;
@@ -495,7 +495,7 @@
       cc.fillStyle = "#9fb2c4"; cc.font = "24px Arial"; cc.fillText("EVIDENCE · 22 YRS", w / 2, h / 2 + 38); }
     else if (clerk === "PYE") { cc.fillStyle = "#cdd8e2"; cc.font = "bold 58px Arial"; cc.fillText("OFC. PYE", w / 2, h / 2 - 16, w - 44);
       cc.fillStyle = "#9fb2c4"; cc.font = "24px Arial"; cc.fillText("EVIDENCE · PROBATIONARY", w / 2, h / 2 + 38); }
-    else { cc.fillStyle = "#6d7f91"; cc.font = "bold 44px Arial"; cc.fillText("— POST EMPTY —", w / 2, h / 2); }
+    else { cc.fillStyle = "#6d7f91"; cc.font = "bold 44px Arial"; cc.fillText(" · POST EMPTY · ", w / 2, h / 2); }
     if (V.plate) V.plate.paint(); else if (V.plateTex) V.plateTex.needsUpdate = true;
   }
 
@@ -544,9 +544,9 @@
     // THE BOY — Lt. Decker, crew teal, a civilian in custody (driven manually).
     qNPC("DECKER", { role: "detainee", name: "Lt. Decker", outfit: 0x1f6f6a, skin: 0xc89878,
       at: [12, -6], face: -Math.PI / 2, post: "pinned", pose: "sit",
-      dialogue: ["Kid. The sheet's on Reyes' desk — my number's 4471-B.",
+      dialogue: ["Kid. The sheet's on Reyes' desk, my number's 4471-B.",
         "Lou next door knows what the sarge drinks. Ask about the word.",
-        "They put the bag in the cage. Rookie runs it till the vet clocks in — read the plate.",
+        "They put the bag in the cage. Rookie runs it till the vet clocks in, read the plate.",
         "Don't bring metal past that gate."], sayColor: "#ffe9b8" });
   }
   function qNPC(tag, spec) { if (V && V.pending) V.pending.push({ tag, spec }); }
@@ -586,14 +586,14 @@
     ctx.zone({ id: "boy", pos: [12, -6], r: 3.2, label: labelBoy, onUse: talkBoy });
   }
   // dynamic labels (also arm the run on first approach)
-  function labelSarge() { armStart(); const r = S; if (!r) return "[E] Precinct 13 — GET YOUR BOY OUT";
+  function labelSarge() { armStart(); const r = S; if (!r) return "[E] Precinct 13. GET YOUR BOY OUT";
     if (r.bribed) return "[E] The desk sergeant (charges lost)";
-    if (r.password && !r.released && r.releaseAt == null) return "[E] Whisper the word to the sergeant — $" + BOND.BRIBE;
+    if (r.password && !r.released && r.releaseAt == null) return "[E] Whisper the word to the sergeant. $" + BOND.BRIBE;
     return "[E] Talk to the desk sergeant"; }
   function labelBail() { const r = S; if (!r) return "[E] Bail window"; if (r.chargesKicked || r.released || r.releaseAt != null) return "[E] Bail window (settled)";
-    const q = bailQuote(r.charges); return q == null ? "[E] Bail window (CLOSED — RICO referral)" : "[E] Post bail — $" + q; }
+    const q = bailQuote(r.charges); return q == null ? "[E] Bail window (CLOSED. RICO referral)" : "[E] Post bail. $" + q; }
   function labelCage() { const r = S; if (!r) return "[E] Evidence cage"; if (r.inv.duffel) return "[E] Evidence cage (stash out)";
-    return rosterAt(r.t, r.lawyered).cage ? "[E] Evidence cage — sign-out / work the lock" : "[E] Evidence cage (clerk away)"; }
+    return rosterAt(r.t, r.lawyered).cage ? "[E] Evidence cage, sign-out / work the lock" : "[E] Evidence cage (clerk away)"; }
   function labelLawyer() { const r = S; if (!r || !r.inv.card || r.lawyered) return ""; return r.deckerLoc === "interrogation" ? "[E] Slide the lawyer card through the tray" : ""; }
   function labelSteak() { const r = S; if (!r || !r.inv.steak) return ""; return "[E] Toss the steak to REX"; }
   function labelExtract() { const r = S; if (!r) return "[E] The crew's beater"; return "[E] Slip away in the beater"; }
@@ -617,7 +617,7 @@
       return;
     }
     sergeantSay(pick(["Visiting hours. Bench is there.", "You lost? Bail window's the glass."]));
-    if (!S.password) feed("The sergeant's on the take — but you'd need the WORD. Ask Lou next door.", "#e8b23a");
+    if (!S.password) feed("The sergeant's on the take, but you'd need the WORD. Ask Lou next door.", "#e8b23a");
   }
   function sergeantSay(l) { const h = V && V.staff.KOWALCZYK; if (h && h.say) h.say(l); else feed("Kowalczyk: " + l, "#dfe7ff"); }
 
@@ -626,9 +626,9 @@
     const owe = S.loanOwed ? "  ·  you owe Lou $" + S.loanOwed : "";
     C.hud.panel(
       hHead("LOU'S BONDS", "both money paths start here" + owe) +
-      "<div style='font-size:13px;margin:6px 0;line-height:1.5'>Cash <b>" + fmtCash(C.wallet.cash()) + "</b>. The sergeant's on the take — I sell the WORD that opens him. Or take a loan; the vig keeps me sentimental.</div>" +
-      hBtn("word", S.password ? "WORD BOUGHT" : "Buy the word on the sarge — $" + BOND.PASSWORD, S.password ? "#26343c" : "#8a1f1f", S.password) +
-      hBtn("loan", S.loanGot ? "LOAN TAKEN" : "Loan — $" + BOND.LOAN_NOW + " now, $" + BOND.LOAN_OWED + " owed", S.loanGot ? "#26343c" : "#1f4e8a", !!S.loanGot) +
+      "<div style='font-size:13px;margin:6px 0;line-height:1.5'>Cash <b>" + fmtCash(C.wallet.cash()) + "</b>. The sergeant's on the take. I sell the WORD that opens him. Or take a loan; the vig keeps me sentimental.</div>" +
+      hBtn("word", S.password ? "WORD BOUGHT" : "Buy the word on the sarge. $" + BOND.PASSWORD, S.password ? "#26343c" : "#8a1f1f", S.password) +
+      hBtn("loan", S.loanGot ? "LOAN TAKEN" : "Loan. $" + BOND.LOAN_NOW + " now, $" + BOND.LOAN_OWED + " owed", S.loanGot ? "#26343c" : "#1f4e8a", !!S.loanGot) +
       "<div style='margin-top:8px'>" + hBtn("close", "Leave", "#26343c") + "</div>",
       {
         word: () => { if (S.password) return; if (!C.wallet.spend(BOND.PASSWORD, "The word on Kowalczyk")) { feed("Short. Loans are the other thing I do."); return; }
@@ -641,18 +641,18 @@
   function openBail() {
     armStart();
     if (S.chargesKicked || S.released || S.releaseAt != null) { feed("Bail's settled. Decker's release is in motion."); return; }
-    if (!rosterAt(S.t, S.lawyered).bail) { feed("da Silva: Window shade is down — BACK IN 5.", "#e88a7a"); return; }
+    if (!rosterAt(S.t, S.lawyered).bail) { feed("da Silva: Window shade is down. BACK IN 5.", "#e88a7a"); return; }
     const q = bailQuote(S.charges);
     if (q == null) { feed("da Silva: It's above my pay grade now. The DA has the file.", "#e88a7a"); return; }
     C.hud.panel(
       hHead("BAIL WINDOW", "charges: " + chargeTier(S.charges)) +
       "<div style='font-size:13px;margin:6px 0;line-height:1.5'>Bail is <b>400 + 8 × charges</b> = <b>$" + q + "</b>, and it CLIMBS while he talks in the box (freeze it with the lawyer card). Cash <b>" + fmtCash(C.wallet.cash()) + "</b>.<br><span style='opacity:.8'>Cheaper but dirty: the sergeant kicks the whole sheet for the word + $" + BOND.BRIBE + ".</span></div>" +
-      hBtn("pay", "Post bail — $" + q, "#1c6b40") + hBtn("close", "Leave", "#26343c"),
+      hBtn("pay", "Post bail. $" + q, "#1c6b40") + hBtn("close", "Leave", "#26343c"),
       {
-        pay: () => { const qq = bailQuote(S.charges); if (qq == null) { feed("Too late — RICO referral. The window's shut."); return; }
+        pay: () => { const qq = bailQuote(S.charges); if (qq == null) { feed("Too late. RICO referral. The window's shut."); return; }
           if (!C.wallet.spend(qq, "Bail posted")) { feed("da Silva: Bail is $" + qq + ". You're short."); return; }
           S.paid += qq; S.bailPaid = true; startRelease(); toast("BAIL POSTED");
-          feed("da Silva: Receipt. Processing takes a minute — wait by the desk.", "#9fd0ff"); C.hud.closePanel(); },
+          feed("da Silva: Receipt. Processing takes a minute, wait by the desk.", "#9fd0ff"); C.hud.closePanel(); },
         close: () => C.hud.closePanel(),
       });
   }
@@ -666,7 +666,7 @@
     armStart(); if (S.inv.caseNo) return;
     if (rosterAt(S.t, S.lawyered).bullpenDesk === "REYES") { feed("Reyes: That desk bites. Walk on.", "#e88a7a"); S.heat += 8; return; }
     if (observed()) { S.heat += 25; toast("HEY!"); feed("\"Step away from the detective's desk.\"", "#e88a7a"); return; }
-    S.inv.caseNo = CASE_NO; toast("CASE " + CASE_NO); feed("Case number " + CASE_NO + " — the duffel's sign-out key.", "#e8b23a");
+    S.inv.caseNo = CASE_NO; toast("CASE " + CASE_NO); feed("Case number " + CASE_NO + " · the duffel's sign-out key.", "#e8b23a");
   }
 
   function openEvidence() {
@@ -675,8 +675,8 @@
     const clerk = rosterAt(S.t, S.lawyered).cage;
     const blind = !clerk || flickerPhaseAt(S.t) === "dark";
     C.hud.panel(
-      hHead("EVIDENCE CAGE", clerk ? ("clerk: " + clerk + (flickerPhaseAt(S.t) === "dark" ? " · tube DARK" : "")) : "post empty — tube: " + flickerPhaseAt(S.t)) +
-      "<div style='font-size:13px;margin:6px 0;line-height:1.5'>Two ways past the gate:<br>• <b>SIGN IT OUT</b> — needs case# <b>" + (S.inv.caseNo || "—") + "</b> + a badge that satisfies the clerk (rookie takes the escort badge; the veteran does not — READ THE PLATE).<br>• <b>PICK THE LOCK</b> — only while the clerk can't see you (post empty OR the tube is dark). No signature, no chain.</div>" +
+      hHead("EVIDENCE CAGE", clerk ? ("clerk: " + clerk + (flickerPhaseAt(S.t) === "dark" ? " · tube DARK" : "")) : "post empty, tube: " + flickerPhaseAt(S.t)) +
+      "<div style='font-size:13px;margin:6px 0;line-height:1.5'>Two ways past the gate:<br>• <b>SIGN IT OUT</b>, needs case# <b>" + (S.inv.caseNo || "—") + "</b> + a badge that satisfies the clerk (rookie takes the escort badge; the veteran does not. READ THE PLATE).<br>• <b>PICK THE LOCK</b>, only while the clerk can't see you (post empty OR the tube is dark). No signature, no chain.</div>" +
       hBtn("sign", "Sign the duffel out", "#1f4e8a", !clerk || S.stashLoc !== "cage") +
       hBtn("pick", S.cageOpen ? "GATE OPEN" : "Work the cage lock (" + Math.floor(S.pickProgress / 3 * 100) + "%)", "#8a1f1f", S.cageOpen || !S.inv.picks) +
       "<div style='margin-top:8px'>" + hBtn("close", "Back off", "#26343c") + "</div>" +
@@ -727,7 +727,7 @@
     armStart(); if (!S.inv.card || S.lawyered || S.deckerLoc !== "interrogation") return;
     S.inv.card = false; S.lawyered = true; S.talking = false;
     toast("HE SHUT UP"); if (V.decker && V.decker.say) V.decker.say("...I want my lawyer. Miss Ferro. Now.");
-    feed("Charge meter FROZEN — he's done talking.", "#7fe8a8");
+    feed("Charge meter FROZEN, he's done talking.", "#7fe8a8");
   }
 
   function takeSteak() {
@@ -742,8 +742,8 @@
 
   function talkBoy() {
     armStart();
-    if (S.released && !S.following) { S.following = true; if (V.decker && V.decker.say) V.decker.say("Right behind you. Walk normal."); feed("Decker's on your shoulder — get to the beater.", "#7fe8a8"); return; }
-    if (V.decker && V.decker.say) V.decker.say(pick(["The sheet's on Reyes' desk — 4471-B.", "Read the plate at the cage before you sign.", "Don't bring metal past that gate."]));
+    if (S.released && !S.following) { S.following = true; if (V.decker && V.decker.say) V.decker.say("Right behind you. Walk normal."); feed("Decker's on your shoulder, get to the beater.", "#7fe8a8"); return; }
+    if (V.decker && V.decker.say) V.decker.say(pick(["The sheet's on Reyes' desk. 4471-B.", "Read the plate at the cage before you sign.", "Don't bring metal past that gate."]));
   }
 
   /* ---- release + endings ---- */
@@ -783,7 +783,7 @@
     S.detained = true; S.heat = 100;
     toast("BOOKED");
     setTimeout(() => { if (S && S.detained && !S.ended) {
-      S.ended = true; S.ending = "LOSE"; S.endWhy = "Cuffs, prints, cell B — you know how this ends. You've read the wall.";
+      S.ended = true; S.ending = "LOSE"; S.endWhy = "Cuffs, prints, cell B, you know how this ends. You've read the wall.";
       const s = bag(); s.busted++; saveStats(); openResult();
     } }, 1200);
   }
@@ -904,7 +904,7 @@
     const crossedIn = S.prevZ > 8 && pz <= 8 && px > -1.6 && px < 1.6;
     if (crossedIn && armedEntry(w) && (S.t - S.detectorTrippedT) > 3) {
       S.detectorTrippedT = S.t; S.heat = Math.min(100, S.heat + 45);
-      toast("DETECTOR — BEEP");
+      toast("DETECTOR · BEEP");
       feed("Metal at the gate. Every eye in the lobby just found you. Stow it or lose the picks.", "#e88a7a");
       if (V.detLamp) V.detLamp.material.color.setHex(0xc8402f);
       if (S.heat >= 100) detain();
@@ -927,7 +927,7 @@
     if (pz < -20.5 && dogD < 6.0) {
       const eating = S.t < S.dogEatUntil;
       if (k9Alarm({ duffel: S.inv.duffel, steakDeployed: S.steakDeployed, dogEating: eating })) {
-        toast("K-9 ALARM"); feed("REX lunges at the duffel — the whole precinct heard that.", "#e88a7a"); S.heat = 100; detain();
+        toast("K-9 ALARM"); feed("REX lunges at the duffel, the whole precinct heard that.", "#e88a7a"); S.heat = 100; detain();
       } else if (!S.inv.duffel && S.dogBarkCd <= 0) { S.dogBarkCd = 12; S.heat = Math.min(100, S.heat + 4); feed("REX barks you back from the kennel.", "#e88a7a"); }
     }
   }
@@ -960,7 +960,7 @@
     const title = kind === "WIN" ? "CLEAN GETAWAY" : kind === "LOSE" ? (S.detained ? "BOOKED" : "SHIFT CHANGE") : kind === "PARTIAL" ? "HALF A JOB" : "YOU WALKED";
     C.hud.panel(
       "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:6px'>" +
-        "<b style='letter-spacing:2px;color:" + col + ";font-size:18px'>PRECINCT 13 — " + title + "</b>" +
+        "<b style='letter-spacing:2px;color:" + col + ";font-size:18px'>PRECINCT 13 · " + title + "</b>" +
         "<span style='opacity:.7;font-size:12px'>Esc closes</span></div>" +
       "<div style='font-size:13px;margin:6px 0;line-height:1.5'>" + S.endWhy + "</div>" +
       "<div style='font-size:13px;margin:8px 0'>Time left <b>" + fmtT(SHIFT_LEN - S.t) + "</b> · charges <b>" + Math.round(S.charges) + " (" + chargeTier(S.charges) + ")</b> · cash spent <b>" + fmtCash(statSpent()) + "</b> · heat peak <b>" + Math.round(S.heatPeak) + "</b><br>" +
@@ -974,8 +974,8 @@
     C.hud.panel(
       hHead("PRECINCT 13", "GET YOUR BOY OUT · shift change " + fmtT(SHIFT_LEN - r.t)) +
       "<div style='font-size:13px;margin:6px 0;line-height:1.6'>" +
-        "① <b>FREE DECKER</b> — post steep cash bail at the window, OR buy the WORD from Lou and let the sergeant kick the sheet ($" + BOND.BRIBE + ").<br>" +
-        "② <b>RECOVER THE STASH</b> — sign the duffel out of the cage (case # from Reyes' file + a badge that satisfies the clerk — READ THE PLATE), or pick the gate while the clerk's blind.<br>" +
+        "① <b>FREE DECKER</b>, post steep cash bail at the window, OR buy the WORD from Lou and let the sergeant kick the sheet ($" + BOND.BRIBE + ").<br>" +
+        "② <b>RECOVER THE STASH</b>, sign the duffel out of the cage (case # from Reyes' file + a badge that satisfies the clerk. READ THE PLATE), or pick the gate while the clerk's blind.<br>" +
         "• Freeze his rising charges with the lawyer card (viewing-window tray).<br>" +
         "• Steak the K-9 before you carry the bag out the back.<br>" +
         "• Nothing metal drawn through the front detector." +

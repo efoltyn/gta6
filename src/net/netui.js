@@ -83,7 +83,7 @@
         const btn = document.querySelector('.mode-btn[data-mode="city"]');
         if (btn) btn.click();
         if (CBZ.startRun) CBZ.startRun();
-        addLine("k-sys", "Connected to " + esc(m.server.name) + " — T to talk · /help for commands");
+        addLine("k-sys", "Connected to " + esc(m.server.name) + " · T to talk · /help for commands");
         if (m.server.motd) addLine("k-sys", esc(m.server.motd));
         online.style.display = "block";
         refreshOnline();

@@ -625,7 +625,7 @@
   // together, who know who you are, stop looking at each other and look at YOU.
   // The line is `opinion`'s sign. That is a stat fiction retired with a beat
   // that already existed, not a new system.
-  const NOTICE_UP = ["“That's them. That's really them.”", "“Told you they were real.”", "“Don't stare — but look.”"];
+  const NOTICE_UP = ["“That's them. That's really them.”", "“Told you they were real.”", "“Don't stare, but look.”"];
   const NOTICE_DOWN = ["“Don't. Look. Up.”", "“That's the one from the news.”", "“Keep walking. Keep walking.”"];
   function pick(a) { return a[(Math.random() * a.length) | 0]; }
   function say(p, line, color, secs) { if (CBZ.citySay && line) CBZ.citySay(p, line, color, secs); }
@@ -877,7 +877,7 @@
     if (CBZ.cityPanicRaise) CBZ.cityPanicRaise(m.pos.x, m.pos.z, 0.8);
   }
 
-  const GRIEF_CRY = ["“No — NO!”", "“Somebody help!”", "“Please, please…”", "“Oh god…”", "“Wake up. Wake UP.”"];
+  const GRIEF_CRY = ["“No. NO!”", "“Somebody help!”", "“Please, please…”", "“Oh god…”", "“Wake up. Wake UP.”"];
   const GRIEF_KID = ["“Mom? MOM!”", "“Get up, please…”", "“Daddy?”"];
   function tickGrief(m, dt) {
     const gr = m._kinGrief;

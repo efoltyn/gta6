@@ -98,8 +98,42 @@ const COUNT_FN = `
         if (Number.isInteger(n) && n >= 1) boxes += n; else meshes += 1;
       });
       out.push({ style: b.facadeStyle || null, storeys: b.storeys || 0,
+        x: b.x, z: b.z,
         w: Math.round(b.w * 10) / 10, d: Math.round(b.d * 10) / 10,
-        h: Math.round(b.h * 10) / 10, boxes: Math.round(boxes), meshes: meshes });
+        h: Math.round(b.h * 10) / 10, boxes: Math.round(boxes), meshes: meshes,
+        // how far this footprint intrudes into the nearest road corridor
+        // (<= 0 is clear); the grid is 40 m at 7 m wide, drawn from the
+        // island centre, same numbers world/disaster_arena.js lays it with
+        roadBite: (function () {
+          const cx = A.center.x, cz = A.center.z, GRID = 40, HALF = 3.5;
+          const lx = cx + Math.max(-2, Math.min(2, Math.round((b.x - cx) / GRID))) * GRID;
+          const lz = cz + Math.max(-2, Math.min(2, Math.round((b.z - cz) / GRID))) * GRID;
+          const bx = (b.w / 2 + HALF) - Math.abs(b.x - lx);
+          const bz = (b.d / 2 + HALF) - Math.abs(b.z - lz);
+          return Math.round(Math.max(bx, bz) * 10) / 10;
+        })(),
+        /* FLOOR vs GROUND. The arena levels each building on the HIGH point of
+           a 3x3 terrain sample and lays a foundation slab whose top is exactly
+           that height, inset by the wall thickness. Anywhere the real ground
+           between those nine samples rises above the slab, grass comes up
+           through the floor of a building you can walk into. This samples the
+           interior far more finely than the placement did and reports the
+           worst intrusion in metres. */
+        floorBite: (function () {
+          // Towers have no foundation slab (their ground floor is terrain), so
+          // only a building that publishes floorTop is asserted on.
+          if (!A.groundHeightAt || b.floorTop == null) return 0;
+          const top = b.floorTop;
+          let worst = -9;
+          const N = 7;
+          for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+            const fx = b.x + (i / (N - 1) - 0.5) * (b.w - 0.6);
+            const fz = b.z + (j / (N - 1) - 0.5) * (b.d - 0.6);
+            const g = A.groundHeightAt(fx, fz);
+            if (g - top > worst) worst = g - top;
+          }
+          return Math.round(worst * 100) / 100;
+        })() });
     }
     return out;
   };
@@ -199,6 +233,27 @@ try {
     && b.storeys < defs[b.style].min);
   if (short.length) fail(`tower(s) too short for their grammar: ${short.map((b) => `${b.style} ${b.storeys}<${defs[b.style].min}`).join(", ")}`);
   else pass("every skyline grammar got a tower tall enough for it");
+
+  /* NOTHING STANDS IN THE ROAD. The town used to be scattered on flat ground
+     and the street grid painted over it afterwards, so buildings sat in the
+     middle of the asphalt. Placement now seats every footprint on a kerb, and
+     this is the assertion that keeps it there: a positive roadBite is metres
+     of building inside a road corridor. */
+  const inRoad = dressed.filter((b) => b.roadBite > 0);
+  if (inRoad.length) {
+    fail(`${inRoad.length} building(s) standing in a road: `
+      + inRoad.slice(0, 6).map((b) => `${b.style || "?"} +${b.roadBite}m`).join(", "));
+  } else pass("no building stands in a road corridor");
+
+  /* NOTHING GROWS THROUGH THE FLOOR. These buildings are enterable, so their
+     ground floor is a room a player stands in — grass poking up through it is
+     as wrong as a wall with a hole. floorBite is metres of terrain standing
+     above the foundation slab. */
+    const throughFloor = dressed.filter((b) => b.floorBite > 0.02);
+  if (throughFloor.length) {
+    fail(`${throughFloor.length} building(s) with ground through the floor: `
+      + throughFloor.slice(0, 6).map((b) => `${b.style || "?"} +${b.floorBite}m`).join(", "));
+  } else pass("no terrain stands above a building's floor slab");
 
   const hardErrors = consoleErrors.filter((e) => !/favicon|WebGL|SwiftShader/i.test(e));
   if (hardErrors.length) fail(`console errors: ${hardErrors.slice(0, 3).join(" | ")}`);

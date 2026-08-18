@@ -879,7 +879,7 @@
     let html = "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:6px'>" +
       "<div style='font-weight:800;font-size:16px'>" + (V.venue === "desk" ? "Exchange Desk" : "Airport FX Counter") + "</div>" +
       "<div style='font-size:11px;color:#7f8794'>" + Math.round(spread * 100) + "% spread</div></div>";
-    html += "<div style='font-size:12px;color:#9fb0c8;margin-bottom:10px'>Wallet — " + fmt$(CBZ.currency ? CBZ.currency.walletGet("LBD") : 0) + " LBD</div>";
+    html += "<div style='font-size:12px;color:#9fb0c8;margin-bottom:10px'>Wallet · " + fmt$(CBZ.currency ? CBZ.currency.walletGet("LBD") : 0) + " LBD</div>";
     const rows = list();
     rows.forEach(function (r) {
       const bal = CBZ.currency ? CBZ.currency.walletGet(r.id) : 0;

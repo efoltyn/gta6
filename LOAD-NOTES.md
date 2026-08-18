@@ -132,7 +132,9 @@ Both are `CBZ.CONFIG` flags with a one-line URL revert, per doctrine. Gated:
   `tools/visual-world-qa.mjs`).~~
 
 - **`CITY_BOOT_SCREEN` (default ON)** — `systems/state.js`. **This makes nothing
-  faster.** It paints an honest card, waits two frames so the card has actually
+  faster.** (Superseded 2026-08-18: the card is now a real percentage meter —
+  see "The loading meter" at the bottom of this file. The flag still turns the
+  whole thing off.) It paints an honest card, waits two frames so the card has actually
   been painted, and only THEN hands the thread to the build — so the 21–31 s
   freeze happens behind a screen that says what is happening instead of behind a
   blank page. The spinner animates `transform`/`opacity` only, so Chrome keeps
@@ -199,3 +201,78 @@ name and build one arena; the city pays for 470 files and then builds the
 entire planet before the first step. The owed list above is unchanged and
 **#1 (slice the build) is still the headline** — the freeze is 5× the cost of
 everything else combined.
+
+---
+
+## The loading meter (2026-08-18) — the freeze finally has a number on it
+
+Owner, from a phone, looking at the boot card: *"Make this into a progress
+meter that shows percentage and remove all the fucking gray text. I don't know
+what the fuck that's for. And make it a very accurate progress meter."*
+
+Both done. The card is now a **LINE**: one big percentage and one rule that
+fills left to right under BUILDING THE WORLD. The spinner is gone and so is
+the apology paragraph. The interesting half is the percentage, because the
+build is still ONE synchronous 20-30 s task — the thread doing the building
+cannot draw the meter that reports it. **Nothing here made the build faster.**
+
+`src/systems/bootprogress.js` (new). Two mechanisms:
+
+- **Who draws it.** The meter is an `OffscreenCanvas` transferred to a
+  **Worker**. The worker is its own thread: it redraws at 30fps while the main
+  thread is inside `biome_snow.js`, and `postMessage()` from a blocked main
+  thread still reaches it immediately (the worker's event loop is not the one
+  that is stuck) — so checkpoints reported mid-freeze move the number on
+  screen in real time. No SharedArrayBuffer, so no COOP/COEP headers: this
+  works on Pages exactly as the repo is served. A CSS-animated highlight
+  slides along the rule as liveness insurance (compositor-only, so it survives
+  the freeze even if a browser ever refuses to push worker canvas frames), and
+  browsers without OffscreenCanvas fall back to the same meter in DOM.
+- **Where the number comes from.** NOT "steps done / steps total" — the steps
+  differ by 20x and that bar would be a liar. Every step is weighted by **how
+  long it actually took last time on this machine** (localStorage, EMA), seeded
+  on the first ever run by the table above. Checkpoints snap the bar to the
+  truth; between them the worker eases across the segment on that step's
+  expected duration, hitting 85% of it exactly when the step was predicted to
+  end and then crawling asymptotically. It never overshoots and never goes
+  backwards.
+
+Checkpoints are `CBZ.bootStep(key)` calls, ~50 of them: `city/world.js`
+(core/buildings/expansion/props/beach/finish), `city/worldmap.js` — **one per
+landmass builder**, keyed by the file that registered it (`document.currentScript`
+at registration time) — and `city/mode.js` (batch/pop/traffic/run), plus the
+post-build shader-compile frames, which the card now HOLDS for instead of
+handing over a frozen game after two frames.
+
+**The gate: `node tools/boot-meter-check.mjs`.** It fires PLAY without awaiting
+it, reads back the drawing thread's own tape (timestamp + percentage every
+200 ms) to prove the number moved inside the window where the page could not
+run a single rAF, then rebuilds the world a second time in the same browser and
+prints predicted-vs-actual for every step, cold and calibrated. On this rig
+(SwiftShader, so the post-build shader phase is wildly inflated — compare runs,
+don't quote one):
+
+| | cold (seed table) | calibrated (2nd build) |
+|---|---|---|
+| median per-step error | **35-43%** | **13-20%** |
+| bar monotonic | yes | yes |
+| worker samples advancing inside the frozen window | — | 137 of 199 across a 46 s build |
+
+(Two runs, and the spread is the box, not the meter: this machine's own build
+time moved 107 s → 149 s between them. One calibrated run on the player's
+actual device is what the number is for.)
+
+Two things the instrument found on the way:
+
+- **`city:batch` is 8-10 s.** `batchStaticUnder` + `instanceStaticUnder` +
+  `freezeStaticUnder` in `city/mode.js`'s reset is the second-biggest single
+  item in the whole load, and it never appeared in the builder table above
+  because it runs after `buildCity` returns. Worth its own line when #1 gets
+  sliced.
+- **Selecting the CITY tile built the whole world with NO card at all.**
+  `setMode()` calls `mode.build()`, so the title screen could freeze for half a
+  minute on a mode click; the old boot card only ever covered PLAY. Every
+  human-facing path into an unbuilt world is metered now (`CBZ.presentModeSwitch`).
+
+Reverts: `?cfg_BOOT_METER=0` (no meter), `?cfg_CITY_BOOT_SCREEN=0` (no card at
+all — the buttons call `startRun()` raw, exactly like a tool does).

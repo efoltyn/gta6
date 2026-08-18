@@ -282,7 +282,7 @@
       giver: "Diamond Speedway",
       brief: "Earn the right to the paddock, then take the whole night.",
       reward: { respect: 20 },
-      doneText: "APEX CHAMPION — you arrived as a rookie and own the night.",
+      doneText: "APEX CHAMPION, you arrived as a rookie and own the night.",
       stages: [
         {
           id: "report", goal: "reach", text: "Report to the Diamond Speedway paddock",
@@ -380,7 +380,7 @@
       racer.retired = true;
       const rookie = promoteRookie();
       if (CBZ.cityIdentities.setSuccessor) CBZ.cityIdentities.setSuccessor(rec.id, rookie._identityId);
-      const msg = "Racer #" + racer.number + " (" + racer.name + ") has died — rookie #" + rookie.number + " (" + rookie.name + ") enters the field.";
+      const msg = "Racer #" + racer.number + " (" + racer.name + ") has died, rookie #" + rookie.number + " (" + rookie.name + ") enters the field.";
       if (CBZ.city && CBZ.city.big) { try { CBZ.city.big(msg); } catch (e) { /* */ } }
       else note(msg, 4.0);
     });
@@ -620,7 +620,7 @@
         const slip = r.slips && (r.slips.won || r.slips.lost)
           ? (r.slips.won > r.slips.lost ? " Holds YOUR pink slip." : " You hold HIS pink slip.")
           : "";
-        note("" + r.name + " — P" + pos + " in the championship, " + r.wins + " wins (#" + r.number + ")." + slip, 3.2);
+        note("" + r.name + " · P" + pos + " in the championship, " + r.wins + " wins (#" + r.number + ")." + slip, 3.2);
       },
     });
     // challenge to a street race → route to the speedway join flow if it exists,
@@ -634,7 +634,7 @@
         const PA = CBZ.player;
         if (PA && PA.driving && CBZ.cityStartSpeedwayRace) {
           // they're at the wheel and the track flow is live → drop the green flag.
-          note("" + r.name + " takes the challenge — to the line!", 2.4);
+          note("" + r.name + " takes the challenge, to the line!", 2.4);
           try { CBZ.cityStartSpeedwayRace(); } catch (e) { /* */ }
         } else {
           note("\"" + r.name + ": Meet me at the speedway and we'll settle it.\"", 3.0);
@@ -759,7 +759,7 @@
     const P = CBZ.player;
     if (!P || !CBZ.roadPick || !CBZ.cityNav || !CBZ.cityNav.routeTo) return null;
     const seg = CBZ.roadSegmentAt ? CBZ.roadSegmentAt(P.pos.x, P.pos.z, 10) : null;
-    if (!seg) { note("Get on a road — street races start from the tarmac.", 2.2); return null; }
+    if (!seg) { note("Get on a road, street races start from the tarmac.", 2.2); return null; }
     const from = { x: P.pos.x, z: P.pos.z };
     const pts = [from];
     if (kind === "circuit") {
@@ -850,12 +850,12 @@
     opts = opts || {};
     if (!srOn() || SR.active) return false;
     const P = CBZ.player;
-    if (!P || !P.driving || !P._vehicle || P._vehicle.dead) { note("You race what you drive — get in a car.", 2.2); return false; }
+    if (!P || !P.driving || !P._vehicle || P._vehicle.dead) { note("You race what you drive, get in a car.", 2.2); return false; }
     if (!CBZ.raceDrivers || !CBZ.raceKit) return false;
     if (CBZ.speedwayRaceState && CBZ.speedwayRaceState().active) { note("You're already on a grid.", 1.8); return false; }
     if (CBZ.raceLadder && CBZ.raceLadder.pinkSlip && CBZ.raceLadder.pinkSlip().active) { note("Settle the pink slip first.", 1.8); return false; }
     const plan = srPlan(opts.kind || "sprint");
-    if (!plan) { note("No clean route from here — roll a few blocks and call it again.", 2.4); return false; }
+    if (!plan) { note("No clean route from here, roll a few blocks and call it again.", 2.4); return false; }
     const ante = Math.max(50, opts.ante || SR.ante);
     if (!(CBZ.city && CBZ.city.spend && CBZ.city.spend(ante))) { note("The grid wants " + ante + " a head. You're short.", 2.2); return false; }
 
@@ -943,14 +943,14 @@
       place = row ? row.pos : kitOrder.length || 1;
     }
     if (result === "bail") {
-      note("You stepped out — the pot rides away with the field.", 2.8);
+      note("You stepped out, the pot rides away with the field.", 2.8);
     } else {
       if (win) {
         SR.wins++; SR.potPaid += SR.pot;
         if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(SR.pot);
-        srBig("STREET WIN — POT $" + SR.pot);
+        srBig("STREET WIN · POT $" + SR.pot);
       } else {
-        note("P" + place + " — the pot goes up the road.", 3.0);
+        note("P" + place + " · the pot goes up the road.", 3.0);
       }
       if (CBZ.raceHud) {
         /* A RESULTS BOARD WITH NO RESULTS ON IT. This passed `time: ""` and
@@ -976,7 +976,7 @@
             time: time, pts: null, purse: (i === 0 && e.isPlayer) ? SR.pot : 0,
             you: !!e.isPlayer, best: 0 };
         }), {
-          title: win ? "STREET RACE — YOURS" : "STREET RACE",
+          title: win ? "STREET RACE · YOURS" : "STREET RACE",
           sub: (SR.kind === "circuit" ? "loop circuit" : "point to point") + " · " + SR.cpTotal + " gates" +
                " · ante $" + SR.ante + " · pot $" + SR.pot,
           foot: "Drive off to continue",
@@ -1093,7 +1093,7 @@
     I.register("ped:civ", {
       id: "racer-street", slot: "k", prio: 5,
       canShow: (p) => srOn() && isRacer(p) && !SR.active,
-      label: () => "Street race — $" + SR.ante + " a head, winner takes the pot",
+      label: () => "Street race. $" + SR.ante + " a head, winner takes the pot",
       onSelect: (p) => {
         const r = p._racer; if (!r) return;
         if (!CBZ.player || !CBZ.player.driving) {

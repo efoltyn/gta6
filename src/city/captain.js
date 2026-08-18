@@ -744,7 +744,7 @@
       course: { x: boat.pos.x + Math.sin(h) * 600, z: boat.pos.z + Math.cos(h) * 600 },
       speed: num(S.cruiseMs, 4.5) * 0.8,
     };
-    note((p.name || "The mate") + " has the helm — she'll hold this heading. Walk your deck.", 2.6);
+    note((p.name || "The mate") + " has the helm, she'll hold this heading. Walk your deck.", 2.6);
   }
   function handBack(p) {
     helm = null;
@@ -773,7 +773,7 @@
       if (CBZ.syncActorWeapon) { try { CBZ.syncActorWeapon(c); } catch (e) {} }
       n++;
     }
-    note(up ? ("All hands armed — " + n + " gun" + (n === 1 ? "" : "s") + " on deck.")
+    note(up ? ("All hands armed · " + n + " gun" + (n === 1 ? "" : "s") + " on deck.")
             : "Guns back in the locker.", 2.2);
   }
 
@@ -823,7 +823,7 @@
       try { CBZ.cityEcon.add(sp.fur, 1); } catch (e) { continue; }
       nCrewCatches++;
       if (voyage && voyage.kind === "fish") voyage.caught = (voyage.caught || 0) + 1;
-      if (nCrewCatches % 3 === 1) note("Thump on the deck — " + sp.name + " in the box.", 1.8);
+      if (nCrewCatches % 3 === 1) note("Thump on the deck · " + sp.name + " in the box.", 1.8);
     }
   }
 
@@ -1061,13 +1061,13 @@
       giver: "The chart table", reward: 0,
       stages: [
         { id: "out", text: "Make " + off.at.name, goal: "reach", at: { x: off.at.x, z: off.at.z }, radius: 40 },
-        { id: "box", text: "Fill the box (" + off.want + " fish — order the hands to cast lines)", goal: "custom" },
+        { id: "box", text: "Fill the box (" + off.want + " fish, order the hands to cast lines)", goal: "custom" },
       ],
       onComplete: function () {
         nFishTrips++;
         const bonus = (kind.caught || 0) * 12;
         if (bonus && CBZ.city && CBZ.city.addCash) CBZ.city.addCash(bonus);
-        note("Box full — the fish are yours to sell, and the buyer tips " + money(bonus) + ".", 3);
+        note("Box full, the fish are yours to sell, and the buyer tips " + money(bonus) + ".", 3);
         endVoyage();
       },
       onFail: endVoyage,
@@ -1088,7 +1088,7 @@
       onComplete: function () {
         nSalvage++;
         if (off.car) off.car._captSalvaged = true;
-        note("Stripped to the waterline — " + money(off.pay) + " in fittings.", 2.6);
+        note("Stripped to the waterline · " + money(off.pay) + " in fittings.", 2.6);
         endVoyage();
       },
       onFail: endVoyage,
@@ -1107,11 +1107,11 @@
       giver: "Nobody. This one is yours.", reward: 0,
       stages: [
         { id: "close", text: "Run her down", goal: "reach", vehicle: off.car, radius: 30 },
-        { id: "take", text: "Take her — board, break her crew, or drive her", goal: "custom" },
+        { id: "take", text: "Take her, board, break her crew, or drive her", goal: "custom" },
       ],
       onComplete: function () {
         nRaids++;
-        note("She's yours. Her people are your problem now — or your payday.", 3.2);
+        note("She's yours. Her people are your problem now, or your payday.", 3.2);
         endVoyage();
       },
       onFail: endVoyage,
@@ -1155,7 +1155,7 @@
           onSelect: function () { if (offers && offers.fish) startFish(offers.fish); } },
         { id: "cv-salvage", slot: "k",
           canShow: function () { return !voyage && offers && !!offers.salvage; },
-          label: function () { return "Salvage a derelict — " + money(offers.salvage.pay); },
+          label: function () { return "Salvage a derelict · " + money(offers.salvage.pay); },
           onSelect: function () { if (offers && offers.salvage) startSalvage(offers.salvage); } },
         { id: "cv-raid", slot: "l", bad: true,
           canShow: function () { return !voyage && offers && !!offers.raid; },
@@ -1163,11 +1163,11 @@
           onSelect: function () { if (offers && offers.raid) startRaid(offers.raid); } },
         { id: "cv-none", slot: "e",
           canShow: function () { return !voyage && offers && !offers.charter && !offers.cargo && !offers.fish && !offers.salvage; },
-          label: function () { return "Nothing on the board — quiet water today"; },
+          label: function () { return "Nothing on the board, quiet water today"; },
           onSelect: function () { note("The sea will have work tomorrow.", 1.8); } },
         { id: "cv-live", slot: "e",
           canShow: function () { return !!voyage; },
-          label: function () { return "Voyage under way — see it through"; },
+          label: function () { return "Voyage under way, see it through"; },
           onSelect: function () {} },
       ],
     });
@@ -1195,7 +1195,7 @@
             // THE REWARD IS LEGIBLE THROUGH THE LOCKED DOOR (gun-room law):
             // anybody may read what the manifest pays; only a master takes it.
             const o = offersHM && offersHM.cargo;
-            return "Ticketed masters only — top manifest pays " + money(o ? o.pay : 2400);
+            return "Ticketed masters only, top manifest pays " + money(o ? o.pay : 2400);
           },
           onSelect: function () { note("The harbourmaster doesn't look up: \"Master's ticket, or off my quay.\"", 2.6); } },
         { id: "hm-cargo", slot: "e",
@@ -1211,7 +1211,7 @@
       ],
     });
     if (I.describe) I.describe("hmBoard", function () {
-      return { label: "Harbourmaster's board", note: playerIsCaptain() ? "The good contracts, master" : "The good contracts — behind the counter" };
+      return { label: "Harbourmaster's board", note: playerIsCaptain() ? "The good contracts, master" : "The good contracts, behind the counter" };
     });
 
     // load / unload verbs on the crate stack (a zone at the live dock)
@@ -1468,7 +1468,7 @@
           canShow: function () { return !!yardGate && !yardOwned(); },
           label: function () {
             const e = prizeEntry();
-            return "Locked — the " + (e ? e.label : "Ravenna 41") + ". " + money(e ? e.price : 1450000) + " at the broker's desk";
+            return "Locked, the " + (e ? e.label : "Ravenna 41") + ". " + money(e ? e.price : 1450000) + " at the broker's desk";
           },
           onSelect: function () { note("Chain and padlock. The hull sits there where you can read her name. The broker sells the key.", 3); } },
         { id: "yg-open", slot: "e",
@@ -1484,7 +1484,7 @@
       ],
     });
     if (I.describe) I.describe("yardGate", function () {
-      return { label: "Cassaline hard stand", note: yardOwned() ? "Your hull on the cradle" : "The next boat up — locked" };
+      return { label: "Cassaline hard stand", note: yardOwned() ? "Your hull on the cradle" : "The next boat up, locked" };
     });
   }
   function yardOwned() {
@@ -1505,7 +1505,7 @@
       if (!cr || cr.target !== boat || pirateHitSeen[cr.id]) continue;
       pirateHitSeen[cr.id] = 1;
       nPirateHits++;
-      note("Skiffs on the quarter — that's not a fishing pattern. Arm the crew.", 3.4, { urgent: true });
+      note("Skiffs on the quarter, that's not a fishing pattern. Arm the crew.", 3.4, { urgent: true });
     }
   }
 

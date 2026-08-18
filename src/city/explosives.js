@@ -227,8 +227,8 @@
   function tryPlant() {
     const P = CBZ.player, e = econ();
     if (!P || !e || P.driving) return;
-    if (count() <= 0) { note(g.mode === "escape" ? "No C4 — the armory cage keeps the charges." : "No C4 — the gun store sells charges.", 1.6); return; }
-    if (planted.length >= C4.maxPlanted) { note("The receiver only tracks " + C4.maxPlanted + " charges — send what's out there first.", 2); return; }
+    if (count() <= 0) { note(g.mode === "escape" ? "No C4, the armory cage keeps the charges." : "No C4, the gun store sells charges.", 1.6); return; }
+    if (planted.length >= C4.maxPlanted) { note("The receiver only tracks " + C4.maxPlanted + " charges, send what's out there first.", 2); return; }
     const f = aimFwd();
     const px = P.pos.x, pz = P.pos.z, py = (P.pos.y || 0) + 1.2;
     const ch = { mesh: buildMesh(), car: null, body: null, wall: null, fly: null, x: 0, y: 0, z: 0, det: null, blink: rng() };
@@ -265,7 +265,7 @@
         ch.mesh.quaternion.setFromUnitVectors(_up, _n.clone());
         ch.body = vic;
         vic.group.add(ch.mesh);
-        return finishPlant(ch, "Charge on the mark — walk away.");
+        return finishPlant(ch, "Charge on the mark, walk away.");
       }
     }
 
@@ -479,7 +479,7 @@
         normal: ch.wall || null, cause: "explosion",
       });
       if (res && res.kind === "undercharged") {
-        note("The door held — that needs " + (res.needLb || 0) + " lb on it.", 2);
+        note("The door held, that needs " + (res.needLb || 0) + " lb on it.", 2);
       }
       // contactBreach already detonated; the city couplings below still run.
       if (g.mode !== "city") {
@@ -565,7 +565,7 @@
     // the stash keeps its own tap.
     if (g.mode === "escape" && !stashHinted && !CBZ.touchMode) {
       stashHinted = true;
-      note("[B] is the bomb while you carry charges — the stash answers Shift+B.", 2.6);
+      note("[B] is the bomb while you carry charges, the stash answers Shift+B.", 2.6);
     }
     holding = true; armT = 0;
   }, true);
