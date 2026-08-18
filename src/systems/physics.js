@@ -1576,7 +1576,11 @@
   };
 
   function groundAt(x, z, fromY) {
-    let best = CBZ.floorAt ? CBZ.floorAt(x, z) : 0;
+    /* fromY is passed through so the ground can answer with the surface you are
+       actually near, not just the topmost one: over an intact lid the street,
+       inside the room below it the room floor. With no carvings in the world
+       this is byte-identical — solidground.js's fast path ignores it. */
+    let best = CBZ.floorAt ? CBZ.floorAt(x, z, fromY) : 0;
     const plats = CBZ.platforms;
     if (plats.length) {
       const reach = (fromY != null ? fromY : best) + STEP_UP;

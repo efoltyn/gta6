@@ -8,16 +8,23 @@
  * maskMaterial run" (it did) but "did the program the GPU is actually running
  * come out with the discard in it".
  *
+ * RE-POINTED for core/groundmask.js. The discard is no longer stamped onto
+ * materials one at a time — it lives in THREE.ShaderChunk's fog chunks, so it
+ * is in every fogged program by construction. That deletes the class of fault
+ * this probe was built to chase (a material JS believed it had patched), but
+ * NOT the question, which is the good one and is now global: does the program
+ * the GPU actually linked contain the discard and the uniform?
+ *
  * So this probe asks the GL context directly, per ground material:
- *   _shaftMasked        did maskMaterial claim it
+ *   masked              does JS believe this material carries the mask
  *   program LINK_STATUS core/renderer.js sets debug.checkShaderErrors = false
  *                       by default, so a failed link is SILENT and the mesh
  *                       just "renders wrong" — exactly the reported symptom
- *   uShaftV[0] location  is the uniform actually in the linked program
- *   uShaftV in source    is the discard in the shader the GPU compiled
+ *   uCbzHoles[0] location  is the uniform actually in the linked program
+ *   uCbzHoles in source    is the discard in the shader the GPU compiled
  *
  * and reports the device limits the injection spends: one extra varying
- * (vec3 vShaftW) and SHAFT_MASK_SLOTS vec4s of fragment uniform.
+ * (vec3 vCbzGW) and GROUND_MASK_SLOTS vec4s of fragment uniform.
  *
  * Run: node tools/shaft-mask-probe.mjs [--webgl1] [--mobile]
  *   --webgl1  force a WebGL1 context (older iOS Safari) instead of WebGL2
@@ -125,6 +132,15 @@ window.__probe = {
   /* THE MEASUREMENT: for every ground-ish material over a mouth, ask the GL
      context what actually got linked — not what maskMaterial believes. */
   programs: function () {
+    /* RENDER FIRST. A material's program is created on its first draw, so
+       reading renderer.properties before a frame leaves program null for
+       everything — which used to make this probe report a green that had
+       inspected nothing at all. */
+    /* compile() initialises every material in the scene whether or not it is
+       on screen this frame; a plain render only reaches what survived culling,
+       which is why aiming the camera elsewhere left this probe with nothing. */
+    try { CBZ.renderer.compile(CBZ.scene, CBZ.camera); } catch (e) {}
+    try { CBZ.renderer.render(CBZ.scene, CBZ.camera); } catch (e) {}
     var gl = CBZ.renderer.getContext();
     var props = CBZ.renderer.properties;
     var S = CBZ.groundShafts || [];
@@ -148,22 +164,31 @@ window.__probe = {
         seen.push(m.uuid);
         var rec = {
           mat: m.name || m.type, mesh: o.name || o.type,
-          masked: !!m._shaftMasked, hasOnBeforeCompile: typeof m.onBeforeCompile === "function",
-          program: null, linked: null, uShaftVLoc: null, srcHasUShaftV: null,
+          // no per-material stamp exists any more: a material carries the mask
+          // unless it has no fog chunks (fog:false) or opted out (CBZ_NOMASK)
+          masked: m.fog !== false && !(m.defines && m.defines.CBZ_NOMASK),
+          exempt: !!(m.defines && m.defines.CBZ_NOMASK), noFog: m.fog === false,
+          program: null, linked: null, uHolesLoc: null, srcHasUHoles: null,
           srcHasDiscard: null, glError: null,
         };
-        var pr = props.get(m).program;
+        /* r128 STORES IT AS currentProgram. This probe read .program,
+           which does not exist on a material's property entry in this revision
+           — so every record came back program:null and the probe reported a
+           confident green having inspected nothing, including while it was
+           being used to chase the phone regression. Found by dumping
+           Object.keys(renderer.properties.get(mat)). */
+        var pr = props.get(m).currentProgram;
         if (pr) {
           rec.program = true;
           var gp = pr.program;
           rec.linked = !!gl.getProgramParameter(gp, gl.LINK_STATUS);
-          rec.uShaftVLoc = gl.getUniformLocation(gp, "uShaftV[0]") !== null;
+          rec.uHolesLoc = gl.getUniformLocation(gp, "uCbzHoles[0]") !== null;
           try {
             var shaders = gl.getAttachedShaders(gp) || [];
             for (var k = 0; k < shaders.length; k++) {
               var src = gl.getShaderSource(shaders[k]) || "";
               if (src.indexOf("gl_FragColor") >= 0 || src.indexOf("pc_fragColor") >= 0) {
-                rec.srcHasUShaftV = src.indexOf("uShaftV") >= 0;
+                rec.srcHasUHoles = src.indexOf("uCbzHoles") >= 0;
                 rec.srcHasDiscard = src.indexOf("discard") >= 0;
                 rec.compiled = !!gl.getShaderParameter(shaders[k], gl.COMPILE_STATUS);
                 rec.log = (gl.getShaderInfoLog(shaders[k]) || "").slice(0, 400);
@@ -327,6 +352,22 @@ try {
   })()`);
   const png = await send("Page.captureScreenshot", { format: "png" });
   await writeFile(path.join(OUT, `${tag}.png`), Buffer.from(png.result.data, "base64"));
+
+  /* A PROBE THAT INSPECTED NOTHING MUST NOT REPORT GREEN. This is the same
+     discipline the sinkhole check applies to its own phases: the failure mode
+     of a device probe is not a wrong answer, it is a confident answer about an
+     empty set. */
+  {
+    const linked = programs.filter((r) => r.program && r.linked);
+    if (!programs.length) failures.push("no ground material over any mouth was found — the probe inspected nothing");
+    else if (!linked.length) failures.push(`inspected ${programs.length} ground materials and NONE had a linked GL program — the probe proved nothing`);
+    else {
+      const noUniform = linked.filter((r) => r.uHolesLoc !== true);
+      const noDiscard = linked.filter((r) => r.srcHasUHoles !== true);
+      if (noUniform.length) failures.push(`${noUniform.length}/${linked.length} linked ground programs lack the uCbzHoles uniform`);
+      if (noDiscard.length) failures.push(`${noDiscard.length}/${linked.length} linked ground programs lack the discard in their compiled source`);
+    }
+  }
 
   if (!selfHeal.skipped) {
     if (selfHeal.lidsAfterReSweep > 0) failures.push(`ground added over an open mouth was never re-swept (lids ${selfHeal.lidsWhenNewGroundArrives} -> ${selfHeal.lidsAfterReSweep})`);

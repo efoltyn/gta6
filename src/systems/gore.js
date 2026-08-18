@@ -1043,6 +1043,74 @@
   // a missing splat beats a floating one).
   const MIN_FACE = 1.2;   // min in-plane horizontal face span for a "wall" (rejects hydrant/pole/meter/sign)
   const MIN_WALL_H = 1.0; // min height of a height-gated band to count as wall (rejects low curbs/ledges)
+
+  /* A BAND-LESS COLLIDER IS NOT A FULL-HEIGHT WALL — IT IS A PROP NOBODY GAVE
+     A HEIGHT TO. (OWNER, filming the cell house: "look how blood shows on
+     table as if there's an invisible wall.")
+
+     He was reading the collider ledger correctly. physics.js's contract is
+     that a collider with no y0/y1 blocks at EVERY height, and world/*.js is
+     full of waist-high furniture drawn `{ solid: true }` with no band — a
+     2.2 m mess table registers as a 2.2 m-wide box that reaches the ceiling.
+     The gates above are written against `c.y1`, so on those records BOTH of
+     them were skipped: the "is the splat seat inside the solid band" test and
+     the MIN_WALL_H test. The scan then found a wall-sized opaque face 2.2 m
+     across, and stamped a floor-to-head blood plane down the side of a table.
+     That plane is the invisible wall made visible — the splat is drawn exactly
+     where the collider says a wall is, and the collider is lying.
+
+     So ask the thing that is actually drawn. `c.ref` is the Mesh addBox
+     registered with the collider (world/materials.js:210), and its world
+     bounds are the honest height of the prop. This is the same read
+     systems/physics.js's `colliderVerticalBand` and city/buildings.js's
+     `wallBandOf` already make for the same reason, and the same degrade: a
+     collider with NO ref is anonymous, stays full-height, and behaves exactly
+     as it did before.
+
+     `visible` IS NOT CONSULTED, AND THAT IS THE ONE PLACE THIS DIVERGES FROM
+     THE TWO PRIOR READS. Both of those bail on `ref.visible === false`,
+     correctly for what they do — physics.js will not vault a prop that is not
+     drawn. Here it would delete the fix outright: core/batch.js:495 merges the
+     compound's static boxes into one buffer and sets EVERY original
+     `visible = false`, keeping it in the graph purely as a raycast target. So
+     in a batched prison almost every table's ref is invisible, and bailing
+     would hand back "no band" — which is exactly the full-height lie this is
+     here to stop. We are not asking whether the prop is drawn this frame, we
+     are asking how tall it IS, and its geometry answers that either way.
+
+     COST, AND WHY THERE IS NO CACHE. The derive runs only for a collider the
+     ray actually HIT inside 3.4 m — the call site is placed AFTER the slab
+     test, not before it — so a kill event pays for a handful of Box3 reads,
+     during a frame that is already spawning thirty meshes. Memoising the
+     answer onto the collider was the obvious optimisation and is the wrong
+     one: CBZ.colliders is walked every frame by systems/physics.js, and
+     stamping a new field onto a few records mid-run splits their hidden class
+     and makes that loop pay for this one. Both prior readers (physics.js,
+     buildings.js) recompute for the same reason; so does this. The shared Box3
+     and the reused return record keep it allocation-free either way. */
+  let splatBounds = null;
+  const splatBand = { y0: 0, y1: 0 };
+  function drawnBand(c) {
+    const r = c.ref;
+    if (!r || !(window.THREE && THREE.Box3)) return null;
+    if (!splatBounds) splatBounds = new THREE.Box3();
+    try {
+      splatBounds.setFromObject(r);
+      if ((splatBounds.isEmpty && splatBounds.isEmpty()) ||
+          !isFinite(splatBounds.min.y) || !isFinite(splatBounds.max.y)) return null;
+      splatBand.y0 = splatBounds.min.y; splatBand.y1 = splatBounds.max.y;
+      return splatBand;
+    } catch (e) { return null; }
+  }
+  // the three height gates, run against whichever band we have. Split out so
+  // the declared-band path (free) and the derived path (a bounds read) cannot
+  // drift apart — a table must fail the same test a window sill fails.
+  function bandRejects(y0, y1, y) {
+    if (y < y0 - 0.1 || y > y1 + 0.1) return true;   // splat seat outside the solid band
+    if (y1 - y0 < MIN_WALL_H) return true;           // too short a band to be a wall (curb/ledge/table)
+    if (y1 - y < 0.45) return true;                  // face too short above the splat seat
+    return false;
+  }
   function spawnWallSplat(x, y, z, dx, dz, amt, instant) {
     const cols = CBZ.colliders;
     if (!cols || !cols.length || walls.length > 48) return;
@@ -1051,11 +1119,9 @@
     for (let i = 0; i < cols.length; i++) {
       const c = cols[i]; if (!c || c.minX == null) continue;
       // height-gated band: require the splat seat to land INSIDE the solid band
-      // (tight slack), not in open air above/below a window band.
-      if (c.y1 != null) {
-        if (y < c.y0 - 0.1 || y > c.y1 + 0.1) continue;     // splat would sit outside the solid band
-        if (c.y1 - c.y0 < MIN_WALL_H) continue;             // too short a band to be a wall (curb/ledge/sill)
-      }
+      // (tight slack), not in open air above/below a window band. DECLARED
+      // bands are free to read, so they are tested here, before the ray.
+      if (c.y1 != null && bandRejects(c.y0 || 0, c.y1, y)) continue;
       if (isSeeThroughCol(c)) continue;                      // intact glass pane / door vision — never a splat
       // ray (x,z)+t*(dx,dz) vs AABB slab — find nearest forward face hit
       let t0 = 0, t1 = bestT, face = null;
@@ -1076,7 +1142,14 @@
       const faceX = face === "xmin" || face === "xmax";
       const span = faceX ? (c.maxZ - c.minZ) : (c.maxX - c.minX);
       if (span < MIN_FACE) continue;                         // thin prop, not a wall
-      if (c.y1 != null && c.y1 - y < 0.45) continue;         // face too short above the splat seat
+      // NO DECLARED BAND: measure the thing that is drawn before believing it
+      // is a wall. This is where the table gets thrown out — 2.2 m wide, and
+      // 0.10 m tall. Placed after the slab test on purpose: the derive only
+      // ever runs on a collider the ray already hit inside 3.4 m.
+      if (c.y1 == null) {
+        const band = drawnBand(c);
+        if (band && bandRejects(band.y0, band.y1, y)) continue;
+      }
       // OPEN / SHATTERED WINDOW: the bullet flew through a hole — there is no
       // surface to splat. Skip and keep scanning for a real wall behind it.
       const hx = x + dx * t0, hz = z + dz * t0;
