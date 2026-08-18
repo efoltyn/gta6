@@ -347,8 +347,17 @@ else if (OFF) {
   if (resolved < T.grabs - 1) {
     fails.push(`${T.grabs} grabs but only ${resolved} ended — holds are leaking`);
   }
-  if (T.throws + T.slams === 0) {
-    fails.push("no hold ever reached a throw or a slam — the release code has never run");
+  /* AND AT LEAST ONE MUST REACH A FINISHER. Guarded by the sample size on
+     purpose: a hold ends in a throw, a slam, or a drop (the ape dying with a
+     man still in its hand, which is the commonest outcome in a losing fight),
+     so a sweep that only produced two grabs can legitimately show zero
+     finishers and prove nothing either way. Saying INCONCLUSIVE is the honest
+     answer there — silently passing a sample too small to fail is how a gate
+     stops being one. */
+  if (T.grabs < 3) {
+    fails.push(`only ${T.grabs} grabs across ${RUNS} battles — too small a sample to test the release path at all; raise --runs`);
+  } else if (T.throws + T.slams === 0) {
+    fails.push(`${T.grabs} grabs and not one reached a throw or a slam — the release code has never run`);
   }
   // the repertoire has to be a repertoire. Two of the five non-grab moves
   // firing is a coin; four is a move set.
