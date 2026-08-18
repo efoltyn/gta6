@@ -826,6 +826,29 @@
   // seams (collar/placket/waistband) on every nobody. clothes.js, outfits.js and
   // crowd.js all read this; undefined is treated as ON.
   if (CBZ.CONFIG.CITY_PLAIN_CIVVIES == null) CBZ.CONFIG.CITY_PLAIN_CIVVIES = true;
+  // PROMOTED BODIES GET REAL SLEEVES (the "nil outfit" fix, wave 1). The
+  // instanced crowd imposter renders its whole arm in SKIN (one mesh, cheap),
+  // and crowd.js's promotion setLook used to copy that literally onto the real
+  // rig — so every body that stepped out of the crowd walked up with naked
+  // shoulder-to-wrist arms, which at close range reads as a person with no
+  // outfit (owner screenshot, 2026-08-16; same look the 2026-07 spawn fix
+  // already retired for makePed bodies). On: a promoted body wears the shirt
+  // on its upper arms and keeps skin forearms — the exact short-sleeve grammar
+  // spawned peds use — and outfits.js's plain re-dress refuses to preserve a
+  // skin-colored upper arm it samples off a stale body. Flip false to restore
+  // the old bare-arm copy.
+  if (CBZ.CONFIG.CITY_CROWD_SLEEVES == null) CBZ.CONFIG.CITY_CROWD_SLEEVES = true;
+  // VIPS DRESS THROUGH THE ONE WARDROBE (the "nil outfit" fix, wave 2).
+  // vips.js used to paint drafted principals/guards with its own flat tint
+  // (torso/collar/legs only): arms kept the civilian's old shirt or bare skin
+  // (a black-suit bodyguard with cream arms), a body wearing a PAINTED garment
+  // couldn't be tinted at all (a don in a cocktail dress, a magnate in a kid's
+  // hoodie), children could be drafted as magnates and armed guards, and the
+  // release path restored colors sampled off painted materials (white). On:
+  // drafting refuses non-adult bodies and every cast/release re-dresses through
+  // outfits.js's canonical redressPed — the same painted uniforms, suits and
+  // gowns every other role wears. Flip false for the old flat paintFit.
+  if (CBZ.CONFIG.CITY_VIP_WARDROBE == null) CBZ.CONFIG.CITY_VIP_WARDROBE = true;
   // FLAVOR FEED (owner's rule: the HUD is not a tutorial/lore space). Pure
   // world-narration lines — "the big houses are lived in now", "line out the
   // door at X's store", corporate market chatter, eulogy prose for strangers —

@@ -185,24 +185,123 @@
     //  lobes along the inner edge so the street→beach line reads windblown,
     //  not ruled. Lobes sit a hair LOWER than the band (no z-fight where
     //  they tuck under it; the part bulging onto the gray shows).
+    //
+    //  BEACH_V2 (2026-08-16): the band stops being one flat quad in one flat
+    //  colour. It is a subdivided grid with MICRO-RELIEF (three incommensurate
+    //  sine fields — smooth low dunes, deterministic, ZERO rng draws so the
+    //  build stream is byte-identical either way) and VERTEX COLOUR doing the
+    //  work a texture would: per-vertex grain mottle (position hash), a broad
+    //  warm/cool drift, crests bleaching and hollows shading with the relief,
+    //  a damp gradient into the swash, and the high-tide WRACK LINE as a
+    //  colour band — the one mark every real beach carries, drawn with zero
+    //  props. The relief is clamped flat where authored things live: the
+    //  activity band (towels 0.085, furniture 0.06, loot), the pier approach,
+    //  and ≤0.20 everywhere (under the boardwalk deck's underside at 0.22).
+    //  ?cfg_BEACH_V2=0 → the old flat quad, byte for byte.
     // =====================================================================
+    const V2 = !!(CBZ.CONFIG && CBZ.CONFIG.BEACH_V2 !== false);
     const sandGeoms = [];
     const dryFar = ES - 1.5;                              // dry sand's water-side edge
-    const band = new THREE.PlaneGeometry(BW + 4, innerZ - dryFar);
-    band.rotateX(-Math.PI / 2);
-    band.translate((BX0 + BX1) / 2, 0.06, (innerZ + dryFar) / 2);
-    sandGeoms.push(band);
+    const gx0 = BX0 - 2, gx1 = BX1 + 2;
+    const pjx = BX1 - 26;                                 // pier x (section 5 derives the same)
+    function sandY(x, z) {
+      let b = 0.055 * Math.sin(x * 0.111 + z * 0.234)
+            + 0.042 * Math.sin(x * 0.293 - z * 0.147 + 1.7)
+            + 0.028 * Math.sin(x * 0.512 + z * 0.409 + 4.2);
+      b *= 0.18 + 0.82 * ss01(ES + 11, ES + 15.5, z);     // activity band stays near-flat
+      b *= 0.25 + 0.75 * ss01(4.5, 9, Math.abs(x - pjx)); // dead flat on the pier approach
+      b *= Math.min(1, ss01(0, 7, x - gx0), ss01(0, 7, gx1 - x));  // no cliff at the span's ends
+      const y = 0.06 + b + 0.07 * ss01(innerZ - 9, innerZ - 1.5, z);  // backshore rise
+      return Math.min(0.20, Math.max(0.052, y));
+    }
+    const SAND_C = new THREE.Color(SAND), DAMP_C = new THREE.Color(0xcbb283);
+    function sandCol(x, z, y, out, q) {
+      const grain = 1 + ((CBZ.hash01 ? CBZ.hash01(x * 1.7, z * 1.7, 0x5a7d) : 0.5) - 0.5) * 0.10;
+      const drift = 1 + 0.05 * Math.sin(x * 0.071 + z * 0.113 + 0.9);
+      const lift = 1 + (y - 0.06) * 0.9;                  // crests bleach, hollows shade
+      const wk = (z - (ES + 1.1)) / 0.95;                 // the wrack line — colour, not props
+      const tone = grain * drift * lift * (1 - 0.15 * Math.exp(-wk * wk));
+      const damp = 1 - ss01(ES - 0.4, ES + 3.6, z);       // last metres shade toward damp
+      out[q] = (SAND_C.r + (DAMP_C.r - SAND_C.r) * damp) * tone;
+      out[q + 1] = (SAND_C.g + (DAMP_C.g - SAND_C.g) * damp) * tone;
+      out[q + 2] = (SAND_C.b + (DAMP_C.b - SAND_C.b) * damp) * tone;
+    }
+    if (!V2) {
+      const band = new THREE.PlaneGeometry(BW + 4, innerZ - dryFar);
+      band.rotateX(-Math.PI / 2);
+      band.translate((BX0 + BX1) / 2, 0.06, (innerZ + dryFar) / 2);
+      sandGeoms.push(band);
+    } else (function sandField() {
+      const NXs = Math.max(28, Math.round((gx1 - gx0) / 2.8)), NZs = 12;
+      const n = (NXs + 1) * (NZs + 1);
+      const pos = new Float32Array(n * 3), col = new Float32Array(n * 3);
+      for (let iz = 0, k = 0; iz <= NZs; iz++) {
+        const z = dryFar + (innerZ - dryFar) * iz / NZs;
+        for (let ix = 0; ix <= NXs; ix++, k++) {
+          const x = gx0 + (gx1 - gx0) * ix / NXs;
+          const y = sandY(x, z);
+          pos[k * 3] = x; pos[k * 3 + 1] = y; pos[k * 3 + 2] = z;
+          sandCol(x, z, y, col, k * 3);
+        }
+      }
+      const idx = new Uint32Array(NXs * NZs * 6);
+      let w = 0;
+      for (let iz = 0; iz < NZs; iz++) for (let ix = 0; ix < NXs; ix++) {
+        const a = iz * (NXs + 1) + ix, b2 = a + 1, c2 = a + NXs + 1, d2 = c2 + 1;
+        // rows run landward (z INCREASES with iz), so (a,d,b)/(a,c,d) is the
+        // winding whose face normal is +Y — cross((d-a),(b-a)) = (0,1,0)
+        idx[w++] = a; idx[w++] = d2; idx[w++] = b2;
+        idx[w++] = a; idx[w++] = c2; idx[w++] = d2;
+      }
+      const gm = new THREE.BufferGeometry();
+      gm.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+      gm.setAttribute("color", new THREE.BufferAttribute(col, 3));
+      gm.setIndex(new THREE.BufferAttribute(idx, 1));
+      gm.computeVertexNormals();
+      sandGeoms.push(gm);
+    })();
     for (let i = 0; i < 9; i++) {                         // the irregular inner edge
       const lx = BX0 + 4 + (i + rng() * 0.6) * (BW - 8) / 9;
       const r = 3.2 + rng() * 3.4;
-      const c = new THREE.CircleGeometry(r, 10);
-      c.rotateX(-Math.PI / 2);
+      const lobe = new THREE.CircleGeometry(r, 10);
+      lobe.rotateX(-Math.PI / 2);
       // mostly tucked under the band; the top arc bulges ≤1m onto the gray,
       // never onto the road (the last cross-street's asphalt starts at minZ)
-      c.translate(lx, 0.052, innerZ - r + 1.0);
-      sandGeoms.push(c);
+      lobe.translate(lx, 0.052, innerZ - r + 1.0);
+      if (V2) {
+        // the lobes ride the relief a hair below the band, and past innerZ
+        // (on the gray) they lie at the old flat 0.052 — the bulge that shows
+        lobe.deleteAttribute("uv");
+        const lp = lobe.attributes.position, la = lp.array, ln = lp.count;
+        const lc = new Float32Array(ln * 3);
+        for (let k = 0; k < ln; k++) {
+          const x = la[k * 3], z = la[k * 3 + 2];
+          const y = z >= innerZ - 0.01 ? 0.052 : Math.max(0.052, sandY(x, z) - 0.006);
+          la[k * 3 + 1] = y;
+          sandCol(x, z, y, lc, k * 3);
+        }
+        lp.needsUpdate = true;
+        lobe.setAttribute("color", new THREE.BufferAttribute(lc, 3));
+        lobe.computeVertexNormals();
+      }
+      sandGeoms.push(lobe);
     }
-    mergeAdd(sandGeoms, cmat(SAND));
+    if (!V2) mergeAdd(sandGeoms, cmat(SAND));
+    else {
+      // its OWN material (the shared cmat pool must never learn vertexColors)
+      const sandMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
+      sandMat.name = "beach-dry-sand";
+      const sandMesh = mergeAdd(sandGeoms, sandMat);
+      if (sandMesh) {
+        // non-empty userData = core/batch.js keeps its hands off (the swash
+        // apron's own rule). Batching this mesh swaps in the batch material,
+        // and the batch material does not read vertex colours — iter-1 of the
+        // before/after run photographed exactly that: dunes present, mottle
+        // gone, sandVerts 0.
+        sandMesh.userData.beachSand = true;
+        sandMesh.name = "beach-dry-sand";
+      }
+    }
 
     // =====================================================================
     //  THE SWASH APRON — the wet-sand strip and the drowned slope, replaced
@@ -232,7 +331,12 @@
       const AX0 = BX0 - 2, AX1 = BX1 + 2;
       const AZ_LAND = ES + 0.5, AZ_SEA = ES - 16;
       const RAMP_Z = ES - 5.5, FLAT_Y = 0.048, SEA_FLOOR_Y = -0.80;
-      const NX = 7, NZ = 13;
+      // BEACH_V2: one swash column per ~11 m of shore instead of 7 across the
+      // whole span — the run-up's alongshore phase gets room to read as SURF
+      // (arcs and tongues) instead of one line tilting. Same heights, same
+      // footprint, same single draw call; everything below is sized off NX/NZ.
+      const NX = V2 ? Math.max(9, 1 + Math.round((AX1 - AX0) / 11)) : 7;
+      const NZ = V2 ? 17 : 13;
       function apronY(z) {
         if (z >= RAMP_Z) return FLAT_Y;
         const t = Math.min(1, (RAMP_Z - z) / (RAMP_Z - AZ_SEA));

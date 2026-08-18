@@ -208,6 +208,11 @@ html, body { touch-action: none; -webkit-user-select: none; user-select: none; }
 .tbtn.tfire { background: rgba(226,74,58,.5); border-color: rgba(255,120,100,.65);
   position: relative; overflow: visible; }
 .tbtn.on { transform: translateY(3px); background: rgba(255,122,26,.62); box-shadow: 0 1px 0 rgba(0,0,0,.3); }
+/* C4 (#tbomb, touch.js): tap plants, hold ~0.5 s detonates — explosives.js's
+   own [B] grammar. Red = CHARGES OUT: the button is a live detonator now, in
+   the same red the charge's own LED blinks, and it stays on the glass with an
+   empty bag until the charges it placed are spent. */
+#tbomb.tarmed { color: #ff6a5e; border-color: rgba(255,106,94,.62); background: rgba(150,40,28,.45); }
 
 /* ---- THE LANDSCAPE PHONE: THE COLUMN IS TALLER THAN THE SCREEN ------------
    (owner, on an iPhone: "the reload button is invisible… this is only in
@@ -281,7 +286,8 @@ html, body { touch-action: none; -webkit-user-select: none; user-select: none; }
   #tbtns #taim    { order: 6; }
   #tbtns #tscope  { order: 7; }
   #tbtns #thoming { order: 8; }
-  #tbtns #trecen  { order: 9; }
+  #tbtns #tbomb   { order: 9; }
+  #tbtns #trecen  { order: 10; }
   /* AIM PRINTED ON TOP OF SWAP (owner screenshot, iPhone landscape,
      2026-08-16). The .tslide seat parks AIM/SCOPE absolutely at
      right:calc(100% + 12px) — just left of the #tbtns box. In THIS wrap

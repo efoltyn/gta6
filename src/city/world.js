@@ -570,7 +570,14 @@
     // THE BEACH GAP: the south seawall opens over one stretch — city/beach.js
     // lays sand there and the shore must run straight into the water (no
     // knee-wall, no cap). The wall resumes either side of the span.
-    const BX0 = cx - 110, BX1 = cx - 10;
+    // BEACH_V2 (2026-08-16): the span grows 100 → 160 m. A city beach one
+    // block long read as an amenity strip, not a coastline. Every consumer —
+    // the sand, the swash apron, the minimap band, the stash spots — reads
+    // this pair off the descriptor, so the wider opening propagates without
+    // another file changing. ?cfg_BEACH_V2=0 → the old 100 m gap.
+    if (CBZ.CONFIG.BEACH_V2 == null) CBZ.CONFIG.BEACH_V2 = true;
+    const BEACH2 = CBZ.CONFIG.BEACH_V2 !== false;
+    const BX0 = cx - (BEACH2 ? 150 : 110), BX1 = cx + (BEACH2 ? 10 : -10);
     gapWall((EW + BX0) / 2, ES, BX0 - EW, T); gapWall((BX1 + EE) / 2, ES, EE - BX1, T);
     // THE NORTH CAUSEWAY GATE: city/island_airport.js runs a 24m-wide highway
     // causeway straight across the harbor from the mainland's NORTH edge (centred

@@ -63,9 +63,9 @@
   }
 
   // ---- STOWED props on the body mounts ------------------------------------
-  // scale: 0.92 on the back reads a touch oversized (stylized-rig trick —
-  // Fortnite scales stowed guns up) vs the 0.82 NPC hand scale; hip pistols
-  // keep their 0.92 build scale.
+  // A stowed gun is the same physical object as a drawn one, so it wears the
+  // same real-dimension scale (weapons/weapon-scale.js); the caller's legacy
+  // 0.92 remains only as the module-absent fallback.
   function mountTo(m, id, mountGroup, scale) {
     if (m.id !== id) {
       disposeProp(m);
@@ -76,7 +76,7 @@
         // charMounts contract): the mount group carries the whole pose.
         m.prop.position.set(0, 0, 0);
         m.prop.rotation.set(0, 0, 0);
-        m.prop.scale.setScalar(scale);
+        m.prop.scale.setScalar((CBZ.weaponHeldScale && CBZ.weaponHeldScale(id)) || scale);
         // stowed guns never cast the aim shadow of a drawn one; keep the
         // silhouette cheap (decorative — colliders/LOS never see them)
         m.prop.traverse((obj) => { obj.castShadow = false; });
@@ -227,7 +227,9 @@
     parent.updateWorldMatrix(true, false);
     source.matrixWorld.decompose(TRANSFER_POS_A, TRANSFER_Q_A, TRANSFER_SCALE_A);
     target.matrixWorld.decompose(TRANSFER_POS_B, TRANSFER_Q_B, TRANSFER_SCALE_B);
-    TRANSFER_SCALE_B.multiplyScalar(0.92);
+    // land the travelling gun at the exact scale the destination mount will
+    // show it at (real-dimension scale, or the legacy 0.92 stow fallback)
+    TRANSFER_SCALE_B.multiplyScalar((CBZ.weaponHeldScale && CBZ.weaponHeldScale(transfer.id)) || 0.92);
     TRANSFER_POS.lerpVectors(TRANSFER_POS_A, TRANSFER_POS_B, e);
     TRANSFER_Q.slerpQuaternions(TRANSFER_Q_A, TRANSFER_Q_B, e);
     TRANSFER_SCALE.lerpVectors(TRANSFER_SCALE_A, TRANSFER_SCALE_B, e);
@@ -392,10 +394,15 @@
         hand.prop = CBZ.buildActorWeapon(heldId);
         hand.id = heldId;
         hand.long = isLongSlot(hand.prop.userData && hand.prop.userData.weaponSlot);
-        // TP guns read BIGGER than build scale (standard third-person trick:
-        // the over-shoulder camera sits metres away — at NPC scale the held
-        // gun vanished into the blocky hand; screenshot-tuned).
-        hand.prop.scale.setScalar(hand.long ? 1.25 : 1.15);
+        // REAL-DIMENSION SIZING (weapons/weapon-scale.js): derived from the
+        // researched real gun length. The class READ factors were calibrated
+        // against THIS display's screenshot-tuned 1.25/1.15 pair, so the
+        // player's rifles keep their approved size within a few percent —
+        // what changes is that every OTHER display of the same gun (NPC
+        // hands, mounts, racks, drops) now lands on the same world length.
+        hand.prop.scale.setScalar(
+          (CBZ.weaponHeldScale && CBZ.weaponHeldScale(heldId)) || (hand.long ? 1.25 : 1.15)
+        );
         // THE GUN'S OWN REACH, measured once per drawn weapon — the muzzle
         // clearance below needs a length, and a per-weapon table of lengths
         // would be wrong the day somebody adds a gun. Box3 on an unparented
