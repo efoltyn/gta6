@@ -50,57 +50,57 @@
   const MODS = {
     // ---- OPTICS (slot "scope") — fov is the aimed-lens the scope forces ----
     reddot:  { id: "reddot",  name: "Red Dot Sight",        slot: "scope", price: 900,
-               blurb: "1× illuminated dot — fast target pickup, tiny zoom.",
+               blurb: "1× illuminated dot, fast target pickup, tiny zoom.",
                scope: { fov: 42, overlay: "dot",    tint: "#ff5b5b" },
                fits: (id) => isFirearm(id) },
     reflex:  { id: "reflex",  name: "Reflex Sight",         slot: "scope", price: 1100,
-               blurb: "1× open reflex — wide window, unlimited eye relief.",
+               blurb: "1× open reflex, wide window, unlimited eye relief.",
                scope: { fov: 43, overlay: "reflex", tint: "#5bff8a" },
                fits: (id) => isFirearm(id) },
     holo:    { id: "holo",    name: "Holographic Sight",    slot: "scope", price: 1600,
-               blurb: "1× holo ring + chevron — both eyes open, fastest CQB.",
+               blurb: "1× holo ring + chevron, both eyes open, fastest CQB.",
                scope: { fov: 40, overlay: "holo",   tint: "#5bff8a" },
                fits: (id) => isFirearm(id) },
     acog:    { id: "acog",    name: "Tactical Scope · 4×",  slot: "scope", price: 2800,
-               blurb: "4× prism (ACOG) — mid-range precision, chevron reticle.",
+               blurb: "4× prism (ACOG), mid-range precision, chevron reticle.",
                scope: { fov: 26, overlay: "acog",   tint: "#ffcf5b" },
                fits: (id) => SMGS[id] || RIFLES[id] || MG[id] || SNIPERS[id] },
     sniper:  { id: "sniper",  name: "Sniper Scope · 8×",    slot: "scope", price: 4500,
-               blurb: "8× magnified — full scoped view + mil-dot crosshair.",
+               blurb: "8× magnified, full scoped view + mil-dot crosshair.",
                scope: { fov: 11, overlay: "scope", highMag: true, tint: "#e8f4ff" },
                fits: (id) => RIFLES[id] || SNIPERS[id] || MG[id] },
     thermal: { id: "thermal", name: "Thermal Scope · 6×",   slot: "scope", price: 8000,
-               blurb: "6× white-hot thermal — targets glow through the dark.",
+               blurb: "6× white-hot thermal, targets glow through the dark.",
                scope: { fov: 17, overlay: "scope", highMag: true, thermal: true, tint: "#ff9a3c" },
                fits: (id) => RIFLES[id] || SNIPERS[id] || MG[id] },
 
     // ---- MAGS (slot "mag") -------------------------------------------------
     extmag:  { id: "extmag",  name: "Extended Mag",         slot: "mag", price: 1200,
-               blurb: "+50% capacity — fewer reloads mid-fight.",
+               blurb: "+50% capacity, fewer reloads mid-fight.",
                magMul: 1.5,
                fits: (id) => isFirearm(id) },
     drummag: { id: "drummag", name: "Drum Mag",             slot: "mag", price: 3000,
-               blurb: "2.5× capacity — spray without breathing.",
+               blurb: "2.5× capacity, spray without breathing.",
                magMul: 2.5,
                fits: (id) => SMGS[id] || RIFLES[id] || MG[id] },
 
     // ---- MUZZLE (slot "muzzle") -------------------------------------------
     suppressor: { id: "suppressor", name: "Suppressor",     slot: "muzzle", price: 2200,
-               blurb: "Kills the flash, muffles the shot, halves the noise — go quiet.",
+               blurb: "Kills the flash, muffles the shot, halves the noise, go quiet.",
                suppress: true, spreadMul: 0.96,
                fits: (id) => isFirearm(id) },
     brake:   { id: "brake",   name: "Muzzle Brake",         slot: "muzzle", price: 1400,
-               blurb: "Vents gas up — cuts muzzle climb ~30%.",
+               blurb: "Vents gas up, cuts muzzle climb ~30%.",
                recoilMul: 0.7,
                fits: (id) => isFirearm(id) },
 
     // ---- UNDER-BARREL / RAIL (slot "under") -------------------------------
     grip:    { id: "grip",    name: "Tactical Grip",        slot: "under", price: 1000,
-               blurb: "Foregrip — steadier hold, tighter cone.",
+               blurb: "Foregrip, steadier hold, tighter cone.",
                recoilMul: 0.85, spreadMul: 0.9,
                fits: (id) => SMGS[id] || RIFLES[id] || MG[id] || SHOTGUNS[id] || SNIPERS[id] },
     laser:   { id: "laser",   name: "Laser Sight",          slot: "under", price: 1300,
-               blurb: "Boresight laser — much tighter hip-fire.",
+               blurb: "Boresight laser, much tighter hip-fire.",
                spreadMul: 0.78,
                fits: (id) => isFirearm(id) },
   };
@@ -309,11 +309,11 @@
     const m = MODS[modId];
     if (!m || !CBZ.city) return false;
     const id = equippedGunId();
-    if (!id) { CBZ.city.note("Draw a firearm first — mods bolt onto the gun in your hands.", 2.2); return false; }
+    if (!id) { CBZ.city.note("Draw a firearm first, mods bolt onto the gun in your hands.", 2.2); return false; }
     if (!m.fits(id)) { CBZ.city.note("A " + m.name + " won't fit the " + gunLabel(id) + ".", 2.2); return false; }
     const r = recOf(id);
     if (r[m.slot] === modId) { CBZ.city.note("The " + gunLabel(id) + " already wears a " + m.name + ".", 1.8); return false; }
-    if (!CBZ.city.spend(m.price)) { CBZ.city.note("The " + m.name + " runs " + fmt$(m.price) + " — come back with the money.", 2.2); return false; }
+    if (!CBZ.city.spend(m.price)) { CBZ.city.note("The " + m.name + " runs " + fmt$(m.price) + " · come back with the money.", 2.2); return false; }
     const replaced = r[m.slot] ? (MODS[r[m.slot]] || {}).name : null;
     r[m.slot] = modId;
     dressWeaponId(id);
@@ -348,7 +348,7 @@
     return d;
   }
   function slotChip(equippedId) {
-    if (!equippedId) return "<span style='color:#7f8794'>— empty —</span>";
+    if (!equippedId) return "<span style='color:#7f8794'>, empty, </span>";
     const m = MODS[equippedId];
     return "<span style='color:#7ed957'>" + (m ? m.name : equippedId) + "</span>";
   }
@@ -360,7 +360,7 @@
       "<div style='font-size:22px;font-weight:700'>Gunsmith Bench</div>" +
       "<div style='color:#9fb0c3;cursor:pointer' id='gsmithClose'>Close [Esc]</div></div>";
     if (!id) {
-      html += "<p style='color:#ffb35b;margin:12px 0 4px'>You're not holding a firearm. Buy a gun off the wall (or draw one with the number keys), then step back to the bench — mods fit the weapon in your hands.</p>";
+      html += "<p style='color:#ffb35b;margin:12px 0 4px'>You're not holding a firearm. Buy a gun off the wall (or draw one with the number keys), then step back to the bench, mods fit the weapon in your hands.</p>";
       panel.innerHTML = html;
       wireClose();
       return;
@@ -389,7 +389,7 @@
           "<div style='color:" + (affordable || owned ? "#7ed957" : "#ff7a7a") + ";font-weight:700;white-space:nowrap'>" + (owned ? "—" : fmt$(m.price)) + "</div></div>";
       });
     });
-    html += "<div style='color:#7f8794;font-size:12px;margin-top:12px'>Click a mod or press its number to fit it. One per slot — a new optic/mag/muzzle swaps the old.</div>";
+    html += "<div style='color:#7f8794;font-size:12px;margin-top:12px'>Click a mod or press its number to fit it. One per slot, a new optic/mag/muzzle swaps the old.</div>";
     panel.innerHTML = html;
     wireClose();
     panel.querySelectorAll(".gsmithRow").forEach((row) => {

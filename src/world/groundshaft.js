@@ -274,6 +274,9 @@
   CBZ.groundShaftCanOpen = function (x, z, r) {
     const slope = CBZ.groundShaftSlope(x, z, r);
     if (slope > CBZ.CONFIG.SHAFT_SLOPE_MAX) return { ok: false, why: "slope", slope: slope };
+    // a non-finite probe point is a caller bug, not a lake: cityWaterAt(undefined,
+    // undefined) answers TRUE, which is how the building rule above hid for so long
+    if (!Number.isFinite(x) || !Number.isFinite(z)) return { ok: false, why: "badPoint", slope: slope };
     if (CBZ.cityWaterAt && !survMode() && CBZ.cityWaterAt(x, z)) return { ok: false, why: "water", slope: slope };
     if (!survMode() && CBZ.city && CBZ.city.arena) {
       const A = CBZ.city.arena;
@@ -286,14 +289,29 @@
         const hx = (g.hw != null ? g.hw : (g.w || 0) / 2) + r, hz = (g.hh != null ? g.hh : (g.d || g.h || 0) / 2) + r;
         if (hx > 0 && hz > 0 && Math.abs(x - (g.x || 0)) < hx && Math.abs(z - (g.z || 0)) < hz) return { ok: false, why: "gov", slope: slope };
       }
-      // never straight through a building footprint — the reference photograph
-      // is a hole in an INTERSECTION with the buildings still standing
+      /* NEVER STRAIGHT THROUGH A BUILDING FOOTPRINT — the reference photograph
+         is a hole in an INTERSECTION with the buildings still standing, and this
+         engine's structural ledger has no concept of "undermined".
+
+         THIS RULE HAD NEVER ONCE FIRED. It read L.x / L.z; a city lot record
+         carries cx / cz (its building carries ox / oz), so both reads were
+         undefined, `Math.abs(x - undefined)` is NaN, and `NaN < hw` is false —
+         so every candidate passed the building test no matter where it was.
+         Measured: of 300 lots WITH buildings, zero were refused for "building".
+         A bomb crater or a city sinkhole could open straight under a tower and
+         leave it standing on air. Found by tools/crater-check.mjs failing to
+         locate a single lot the law would refuse. */
       const lots = A.lots || [];
       for (let i = 0; i < lots.length; i++) {
         const L = lots[i];
         if (!L || !L.building) continue;
-        const hw = (L.w || 0) / 2 + r * 0.55, hd = (L.d || L.h || 0) / 2 + r * 0.55;
-        if (Math.abs(x - L.x) < hw && Math.abs(z - L.z) < hd) return { ok: false, why: "building", slope: slope };
+        const B = L.building;
+        const lx = L.cx != null ? L.cx : (L.x != null ? L.x : (B.ox != null ? B.ox : null));
+        const lz = L.cz != null ? L.cz : (L.z != null ? L.z : (B.oz != null ? B.oz : null));
+        if (lx == null || lz == null) continue;
+        const bw = (B.w != null ? B.w : L.w) || 0, bd = (B.d != null ? B.d : (L.d || L.h)) || 0;
+        const hw = bw / 2 + r * 0.55, hd = bd / 2 + r * 0.55;
+        if (Math.abs(x - lx) < hw && Math.abs(z - lz) < hd) return { ok: false, why: "building", slope: slope };
       }
     }
     return { ok: true, slope: slope };
@@ -458,6 +476,16 @@
         if (py > gy + 2.5 || py < gy - 2.5) continue;
         const mat = Array.isArray(o.material) ? o.material[0] : o.material;
         if (!mat || !mat.color) continue;
+        /* A TEXTURED SURFACE DOES NOT KEEP ITS COLOUR IN material.color — that
+           field is a TINT of the map, and for the city's road and sidewalk
+           plates it is plain white. Reading it produced a WHITE lip collar
+           around every city hole: photographed on a bomb crater at a junction,
+           the ring of "torn asphalt" was brighter than the concrete beside it.
+           A tint is not an answer, so treat a mapped material as no answer and
+           let the caller fall back to the section colour, which is what the
+           collar always used to be. (The island, whose ground is flat untextured
+           colour, still samples exactly as before.) */
+        if (mat.map) continue;
         let r = mat.color.r, g = mat.color.g, b = mat.color.b;
         // a vertexColors ground (the island's beach ring is white × per-vertex
         // sand) would answer "white" from the material alone
@@ -535,6 +563,55 @@
       for (let i = 0; i < seg; i++) {
         const a = j * (seg + 1) + i, b = a + 1, d = a + (seg + 1), e = d + 1;
         idx.push(a, d, b, b, d, e);
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    return new THREE.Mesh(geo, wallMat);
+  }
+
+  /* THE DISH FLOOR — a crater's bottom is a SURFACE, not an absence.
+
+     A shaft can get away with a black disc down there: nothing reaches the
+     floor of a 46 m hole and "bottomless" is the honest read. A 5 m bomb crater
+     is the opposite — you can see every inch of its floor from the street — and
+     with the black disc suppressed and nothing in its place, the mask cut the
+     ground away and left the sky showing through the middle of the hole.
+
+     So a bowl builds the surface its own floor query already describes: the
+     same `dish` curve shaftFloor() answers with, meshed as a radial fan, so the
+     thing you see and the thing you stand on are one solve. Strata colour comes
+     from the shared ladder at the true depth of each ring, which is why the
+     floor meets the wall without a seam in value. */
+  function buildDish(h) {
+    if (!h.dish) return null;
+    const seg = 40, rings = 8;
+    const R = h.dish.r;
+    const pos = new Float32Array((seg + 1) * (rings + 1) * 3);
+    const col = new Float32Array((seg + 1) * (rings + 1) * 3);
+    const idx = [];
+    const c = [0, 0, 0];
+    let p = 0;
+    for (let j = 0; j <= rings; j++) {
+      const rr = (j / rings) * R;
+      const y = h.bottom + h.dish.h * (rr / R);
+      const t = Math.max(0, Math.min(1, (h.gy - y) / h.depth));
+      for (let i = 0; i <= seg; i++) {
+        const a = (i / seg) * TAU;
+        const wob = 1 + (hs(h, Math.cos(a) * 2.7 + j, Math.sin(a) * 2.7) - 0.5) * 0.06;
+        pos[p] = h.x + Math.cos(a) * rr * wob; pos[p + 1] = y; pos[p + 2] = h.z + Math.sin(a) * rr * wob;
+        strataColor(h, t, a, c);
+        col[p] = c[0]; col[p + 1] = c[1]; col[p + 2] = c[2];
+        p += 3;
+      }
+    }
+    for (let j = 0; j < rings; j++) {
+      for (let i = 0; i < seg; i++) {
+        const a = j * (seg + 1) + i, b = a + 1, d = a + (seg + 1), e = d + 1;
+        idx.push(a, b, d, b, e, d);
       }
     }
     const geo = new THREE.BufferGeometry();
@@ -663,6 +740,11 @@
   function buildFloorFurniture(h) {
     const B = BoxBuf();
     h.voids = [];
+    /* The wedged slabs exist to publish VOID POCKETS — the only thing that
+       stops the burial DOT at the bottom of a deep shaft. A bomb crater has
+       no burial and no wall to shelter against, so slabs the size of a car
+       leaning in a 5 m dish were just furniture in the wrong room. */
+    const wedges = h.bowl ? 0 : 3;
     // talus cone, as stacked broken plates (a cone primitive reads too clean)
     const cone = h.coneR;
     for (let i = 0; i < 26; i++) {
@@ -673,7 +755,7 @@
         hs(h, i, 7) * TAU, i % 3 === 0 ? h.surfaceColor : 0x4a4036, 0.16 + hs(h, i, 8) * 0.1);
     }
     // wedged slabs → the void spaces
-    const nV = 3;
+    const nV = wedges;
     for (let i = 0; i < nV; i++) {
       const a = (i / nV) * TAU + hs(h, i, 11) * 0.9;
       const rr = h.r * 0.72;
@@ -727,9 +809,13 @@
     mats();
     const gy = opts.gy != null ? opts.gy : rawFloor(x, z);
     const r = Math.max(2.5, opts.r || 8);
-    // DEEPER THAN WIDE, ALWAYS. The reference reads as a shaft, not a crater,
-    // and the ratio is the whole reason: default 2.1x the diameter.
-    const depth = Math.max(r * 2.4, opts.depth || r * 4.2);
+    /* DEEPER THAN WIDE, ALWAYS — for a SINKHOLE. The reference reads as a
+       shaft, not a crater, and the ratio is the whole reason: 2.1x the
+       diameter. A CRATER is the opposite shape and the same primitive: ordnance
+       digs a wide shallow bowl, so `bowl` lifts the clamp rather than adding a
+       second hole system to sit beside this one. */
+    const depth = opts.bowl ? Math.max(1.2, opts.depth || r * 0.55)
+                            : Math.max(r * 2.4, opts.depth || r * 4.2);
     const h = {
       x: x, z: z, r: r,
       mouth: r * 0.93,          // the floor is gone a hair inside the visible rim
@@ -739,7 +825,16 @@
       mode: CBZ.game ? CBZ.game.mode : null,
       grp: new THREE.Group(),
       voids: [],
-      coneR: r * 0.66, coneH: Math.min(4.2, depth * 0.11),
+      bowl: !!opts.bowl,
+      /* A CRATER IS A DISH AND A SHAFT IS A PIT, and they are opposite shapes.
+         The talus cone is a rubble MOUND — highest in the middle, sloping down
+         to the wall — which is right for a collapse and exactly backwards for
+         ordnance: it put the deepest point of a bomb hole at its rim. So a bowl
+         gets its own floor curve (`dish`, deepest at the centre, rising to meet
+         the lip) and keeps only a small cone of loose spoil at the bottom. */
+      dish: opts.bowl ? { r: Math.max(0.5, r * 0.98), h: depth * 0.95 } : null,
+      coneR: opts.bowl ? r * 0.3 : r * 0.66,
+      coneH: opts.bowl ? Math.min(0.5, depth * 0.12) : Math.min(4.2, depth * 0.11),
       stepN: 0, stepA0: 0, stepIn: r * 0.78,
       born: CBZ.now || 0,
     };
@@ -755,7 +850,7 @@
        game the moment it finished opening — the colour was the sampled one,
        the flag had simply forgotten where it came from. */
     h.topSampled = opts.topSampled != null ? !!opts.topSampled : (top != null && opts.top == null);
-    if (CBZ.CONFIG.SHAFT_ESCAPE !== false) {
+    if (CBZ.CONFIG.SHAFT_ESCAPE !== false && !h.bowl) {
       h.stepN = Math.max(6, Math.min(34, Math.round(depth / 1.3)));
       h.stepA0 = (h.seed % 1) * TAU;
       h.stepIn = h.mouth * 0.78;
@@ -763,19 +858,23 @@
     const wall = buildWall(h);
     const lip = buildLip(h);
     const rubble = buildFloorFurniture(h);
+    const dish = buildDish(h);
     const stair = buildStair(h);
-    // the black — a disc at the very bottom under the rubble, so a shaft you
-    // cannot see the bottom of still reads as bottomless rather than as a gap
-    const dark = new THREE.Mesh(new THREE.CircleGeometry(r * 0.95, 24),
+    /* THE BLACK — a disc at the very bottom under the rubble, so a shaft you
+       cannot see the bottom of reads as bottomless rather than as a gap. A
+       CRATER is the opposite: you can see its floor, and painting a void under
+       it made a 5 m dish read as a hole to nowhere. Bowls get earth instead. */
+    const dark = h.bowl ? null : new THREE.Mesh(new THREE.CircleGeometry(r * 0.95, 24),
       new THREE.MeshBasicMaterial({ color: 0x05040a }));
-    dark.rotation.x = -Math.PI / 2;
-    dark.position.set(x, h.bottom - 0.2, z);
+    if (dark) { dark.rotation.x = -Math.PI / 2; dark.position.set(x, h.bottom - 0.2, z); }
     wall.position.set(x, 0, z);
     lip.position.set(x, 0, z);
     // the collar is ground, so it takes ground's shadows too: an unshadowed
     // annulus inside a shadowed field is the ring again, drawn in light
     lip.receiveShadow = true;
-    h.grp.add(wall, lip, dark);
+    h.grp.add(wall, lip);
+    if (dark) h.grp.add(dark);
+    if (dish) h.grp.add(dish);
     if (rubble) h.grp.add(rubble);
     if (stair) h.grp.add(stair);
     h.grp.userData.groundShaft = true;
@@ -861,6 +960,11 @@
       return h.bottom + (i + 1) * (h.depth / h.stepN);
     }
     const cone = d < h.coneR ? h.coneH * (1 - d / h.coneR) : 0;
+    if (h.dish) {
+      // rises from the centre out to the rim; the spoil cone sits on top of it
+      const t = Math.min(1, d / h.dish.r);
+      return h.bottom + Math.max(h.dish.h * t, cone);
+    }
     return h.bottom + cone;
   }
   // "am I over a hole" — the ONE containment answer (nothing re-derives it)

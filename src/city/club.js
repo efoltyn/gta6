@@ -249,7 +249,7 @@
     } else {
       // TURNED AWAY — the whole point. Dejected walk-off.
       release(p, true);
-      note('Bouncer: "Not tonight." — turned away at the rope.', 1.3);
+      note('Bouncer: "Not tonight.", turned away at the rope.', 1.3);
     }
     S.line.shift();
   }
@@ -316,9 +316,9 @@
   function admitPlayer(drip) {
     setAdmitted(true);
     const vip = drip >= vipDrip();
-    big(vip ? "WELCOME TO THE VELVET — VIP" : "WELCOME TO THE VELVET");
+    big(vip ? "WELCOME TO THE VELVET · VIP" : "WELCOME TO THE VELVET");
     if (vip) note("The bouncer unhooks the rope and nods you toward the elite lounge.", 2.2);
-    else note('Bouncer: "Welcome to the Velvet, VIP." — the rope opens.', 2.0);
+    else note('Bouncer: "Welcome to the Velvet, VIP.", the rope opens.', 2.0);
     // one-time entry bonus: drip is a STATUS signal → respect. VIP pays more.
     if (!S.everIn) {
       S.everIn = true;
@@ -349,7 +349,7 @@
       if (CBZ.city.addHeat) CBZ.city.addHeat(-18 * dt);       // bleed heat fast inside
       if ((g.wanted | 0) <= 1 && (g.heat || 0) <= 0 && CBZ.city.clearWanted) {
         CBZ.city.clearWanted();
-        note("You melt into the crowd — the heat loses you inside the Velvet.", 2.0);
+        note("You melt into the crowd, the heat loses you inside the Velvet.", 2.0);
       }
     }
     // BOTTLE SERVICE: your drip flexes into cash + respect on a slow cadence —
@@ -361,7 +361,7 @@
       const flex = Math.round(40 + drip * 12);               // bigger fit → bigger flex
       if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(flex);
       if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(1);
-      note("Bottle service — your drip pulls $" + flex + " in tips & a respect nod.", 2.0);
+      note("Bottle service, your drip pulls $" + flex + " in tips & a respect nod.", 2.0);
       if (S.admitted_vip) offerConnect();
     }
   }
@@ -384,9 +384,9 @@
     if (best) {
       best._clubConnect = true;     // interact.js / your crew code can read this as "rich lead"
       best.tightWithYou = true;     // warmer to recruiting (guarded read elsewhere)
-      note("A high-roller in the VIP lounge — " + (best.name || "a big earner") + " — is worth knowing.", 2.4);
+      note("A high-roller in the VIP lounge · " + (best.name || "a big earner") + " · is worth knowing.", 2.4);
     } else {
-      note("The VIP lounge is full of money — work the room.", 2.0);
+      note("The VIP lounge is full of money, work the room.", 2.0);
     }
   }
 

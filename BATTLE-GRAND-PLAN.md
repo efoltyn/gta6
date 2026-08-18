@@ -393,3 +393,16 @@ biggest spectacle-per-line; 3 and 4 are additive and independent.
   fourth topple. Beast BLOOD is `gore.js` through `creature_combat`, pulled by
   the `blood` pack only when a side is an animal army, so a battle of riflemen
   loads and costs exactly what it always did.
+- MAN death is `city/ragdoll.js`'s, through the new `ragdoll` pack. That file
+  gated itself on `game.mode === "city"` — never because 13 points and a ground
+  clamp care what mode is running, only because the city was the one thing with
+  peds the day it shipped — and the gate is now the opt-in capability
+  `CBZ.CONFIG.RAGDOLL_ANY_MODE` (default OFF, so every other mode is
+  byte-identical). Both solvers publish the same four verbs now — `*Step(dt)`
+  so a page with its own clock drives them, `*Drop(actor)` to hand a slot back
+  when a corpse is retired, `*Audit()`, and a lazily grown pool with
+  RANGE/ACTIVE/POOL dials — so a page wires human and animal corpses the same
+  way and neither is special.
+- Men's death BLOOD is priced off the killing weapon (shotgun mists and pools,
+  pistol does not, a fist barely marks him) rather than one flat burst per
+  death, and `?blood=1` pulls the pack for a rifle war that wants it.

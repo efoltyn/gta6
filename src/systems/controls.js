@@ -267,7 +267,7 @@
       ["W / A / S / D", "Move"],
       ["Shift", "Sprint"],
       ["Space", "Jump"],
-      ["E", "Interact — doors, seats, vehicles, loot"],
+      ["E", "Interact, doors, seats, vehicles, loot"],
       ["?", "Show the controls for whatever you are doing"],
       ["Space / Esc", "Close this card"],
     ],
@@ -279,31 +279,31 @@
   C.declare("plane", {
     title: "Aeroplane",
     rows: [
-      ["Space", "Throttle up — hold to build speed"],
+      ["Space", "Throttle up, hold to build speed"],
       ["Ctrl", "Throttle down / wheel brakes"],
       ["W / S", "Nose down / nose up"],
-      ["A / D", "Roll left / right — bank to turn"],
+      ["A / D", "Roll left / right, bank to turn"],
       ["Q / E", "Rudder"],
       ["V", "Cockpit view"],
-      ["F", "Get out — in the air, that means jump"],
+      ["F", "Get out, in the air, that means jump"],
     ],
     touchRows: [
-      ["STICK", "Pitch and roll — bank to turn"],
+      ["STICK", "Pitch and roll, bank to turn"],
       ["THR + / THR −", "Throttle up / down"],
       ["VIEW", "Cockpit view"],
       ["FIRE / EXIT", "Fire weapons / get out"],
     ],
-    note: "Throttle is Space, not W. W and S fly the nose. You need speed before the wings will lift you — hold Space down the runway first.",
+    note: "Throttle is Space, not W. W and S fly the nose. You need speed before the wings will lift you, hold Space down the runway first.",
     touchNote: "Build speed with THR + before pulling the joystick back to lift off.",
   });
 
   C.declare("heli", {
     title: "Helicopter",
     rows: [
-      ["Space", "Collective up — climb"],
-      ["Ctrl", "Collective down — descend"],
+      ["Space", "Collective up, climb"],
+      ["Ctrl", "Collective down, descend"],
       ["W / S", "Cyclic forward / back"],
-      ["A / D", "Pedals — yaw"],
+      ["A / D", "Pedals, yaw"],
       ["Q / E", "Slide left / right"],
       ["V", "Cockpit view"],
       ["F", "Get out"],
@@ -322,7 +322,7 @@
     rows: [
       ["Space", "Pull the canopy"],
       ["A / D", "Steer"],
-      ["S", "Flare — bleed speed before you land"],
+      ["S", "Flare, bleed speed before you land"],
     ],
     touchRows: [
       ["PULL", "Open the canopy"],
@@ -345,7 +345,7 @@
       ["TILT", "Optional gentle tilt steering"],
       ["EXIT", "Get out"],
     ],
-    note: "Watch the fuel bar on the dash — run dry and the engine quits. Gas stations refuel on E.",
+    note: "Watch the fuel bar on the dash, run dry and the engine quits. Gas stations refuel on E.",
     touchNote: "Tilt is optional and calibrates from how you are holding the iPad when you switch it on.",
   });
 

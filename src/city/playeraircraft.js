@@ -1549,8 +1549,8 @@
     else disposeGroup(craft.group);
     // a commandeered base machine is impounded; only the Raptor talks hangars.
     aircraftNote(craft.fromProp
-      ? "The commandeered aircraft was impounded — military hardware doesn't stay yours."
-      : "The stolen F-22 was impounded — you never got it to a hangar.", 2.6, "Flight Ops");
+      ? "The commandeered aircraft was impounded, military hardware doesn't stay yours."
+      : "The stolen F-22 was impounded, you never got it to a hangar.", 2.6, "Flight Ops");
     return true;
   }
 
@@ -1693,8 +1693,8 @@
   // jet just another purchase; risking your life to lift it off a 4★ base and
   // sweating it back to your hangar is the felt earn.
   function jetNotBuyable() {
-    if (g.cityOwnsJet) { aircraftNote("The F-22 is already yours — it's in your hangar.", 2.4, "Flight Ops"); return false; }
-    aircraftNote("The F-22 can't be bought — steal it from the military base and land it in a hangar you own.", 3.4, "Flight Ops");
+    if (g.cityOwnsJet) { aircraftNote("The F-22 is already yours, it's in your hangar.", 2.4, "Flight Ops"); return false; }
+    aircraftNote("The F-22 can't be bought, steal it from the military base and land it in a hangar you own.", 3.4, "Flight Ops");
     return false;
   }
   CBZ.cityBuyJet = jetNotBuyable;
@@ -1737,7 +1737,7 @@
     if (!craft || craft.fireCD > 0) return;
     if (craft.armed === false) return;          // commercial aircraft do not grow F-22 weapons when hijacked
     if (craft.ammo <= 0) {
-      aircraftNote("Out of missiles — land on the pad/hangar to resupply.", 1.6, "Flight Ops");
+      aircraftNote("Out of missiles, land on the pad/hangar to resupply.", 1.6, "Flight Ops");
       return;
     }
     // world-space muzzle position + forward direction

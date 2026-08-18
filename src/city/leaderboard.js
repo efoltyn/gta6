@@ -136,7 +136,7 @@
       // "who's rich and killable NOW" first, history second — but still high
       // enough that a famous kill (high finalLoot/level) ranks above small fry.
       score: ((rec.finalLoot || 0) + (rec.finalLevel || 0) * 1100) * 0.35,
-      why: "DECEASED — " + title + (rec.killedAt ? ", killed" : ""), where: "city",
+      why: "DECEASED · " + title + (rec.killedAt ? ", killed" : ""), where: "city",
       protection: "none (dead)", you: false, dead: true,
     };
   }
@@ -158,7 +158,7 @@
           actor: null, name: racer.name, title: "Racer #" + racer.number, level: 0,
           loot: worth,
           score: worth * 0.35 + (racer.wins || 0) * 900 * 0.35,
-          why: "DECEASED — Racer #" + racer.number + " · " + (racer.wins || 0) + " career wins", where: "city",
+          why: "DECEASED. Racer #" + racer.number + " · " + (racer.wins || 0) + " career wins", where: "city",
           protection: "none (dead)", you: false, dead: true,
         });
       }

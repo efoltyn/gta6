@@ -175,7 +175,7 @@
         } else if (e.why === "death") {
           var dead = deadSet.has(e.a) ? e.a : (deadSet.has(e.b) ? e.b : null);
           var live = dead === e.a ? e.b : e.a;
-          out.push({ t: e.end, text: "" + (dead ? nameOf(dead) : an) + " passed — " + (dead ? nameOf(live) : bn) + " mourns" });
+          out.push({ t: e.end, text: "" + (dead ? nameOf(dead) : an) + " passed · " + (dead ? nameOf(live) : bn) + " mourns" });
         } else {
           out.push({ t: e.end, text: "" + an + " and " + bn + " divorced" });
         }
@@ -254,7 +254,7 @@
     } else {
       c1.appendChild(row("No partner yet.", "color:#8a93a8;"));
     }
-    c1.appendChild(row("Kids: player-in-tree pending — you have no sid on the family tree yet, so kidsOf() can't resolve. Showing your household record instead:", "color:#8a93a8;font:12px system-ui;margin-top:4px;"));
+    c1.appendChild(row("Kids: player-in-tree pending, you have no sid on the family tree yet, so kidsOf() can't resolve. Showing your household record instead:", "color:#8a93a8;font:12px system-ui;margin-top:4px;"));
     out.push(c1);
 
     var fam = (CBZ.cityFamilies || []).find(function (f) { return f && f.mine; });
@@ -282,7 +282,7 @@
   // urgent thing they are doing wins.
   function liveStatus(m) {
     if (!m || m.dead) return null;
-    if (m.kidnapped) return "taken — being held";
+    if (m.kidnapped) return "taken, being held";
     if (m._kinGrief) return "kneeling beside somebody they lost";
     if (m._propSeat) return "at the table";
     if (m._kinBeat) return "talking with " + ((m._kinBeat.other && m._kinBeat.other.name) || "someone");

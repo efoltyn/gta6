@@ -658,7 +658,7 @@
     if (!CBZ.cityFireMissile) return;
     const m = car.mods && car.mods.launcher;
     if (!m || (m.ammo | 0) <= 0) {
-      if (CBZ.city && CBZ.city.note) CBZ.city.note("Rocket pods empty — resupply at the mod garage.", 1.6);
+      if (CBZ.city && CBZ.city.note) CBZ.city.note("Rocket pods empty, resupply at the mod garage.", 1.6);
       if (CBZ.sfx) CBZ.sfx("empty");
       return;
     }
@@ -678,7 +678,7 @@
       if (CBZ.sfx) CBZ.sfx("whoosh");
       if (CBZ.shake) CBZ.shake(0.5);
       if (CBZ.cityCrime) CBZ.cityCrime(TUNE.crimeShots + 40, { type: "shots-fired", x: car.pos.x, z: car.pos.z });
-      if (m.ammo <= 0 && CBZ.city && CBZ.city.note) CBZ.city.note("Last rocket away — pods empty.", 1.4);
+      if (m.ammo <= 0 && CBZ.city && CBZ.city.note) CBZ.city.note("Last rocket away, pods empty.", 1.4);
     }
   }
 
@@ -1102,9 +1102,9 @@
           action: function () { doRespray(car); } }];
       case "armor":
         return [
-          { label: "Black-shield plating — LIGHT", price: PRICE.armor.light, sub: "shrugs ~50% small-arms",
+          { label: "Black-shield plating. LIGHT", price: PRICE.armor.light, sub: "shrugs ~50% small-arms",
             owned: m.armor === "light", action: function () { doMod(car, "armor", "light", PRICE.armor.light); } },
-          { label: "Black-shield plating — HEAVY", price: PRICE.armor.heavy, sub: "shrugs ~80% small-arms · RPG still kills",
+          { label: "Black-shield plating. HEAVY", price: PRICE.armor.heavy, sub: "shrugs ~80% small-arms · RPG still kills",
             owned: m.armor === "heavy", action: function () { doMod(car, "armor", "heavy", PRICE.armor.heavy); } },
         ];
       case "booster":
@@ -1129,13 +1129,13 @@
         const cur = m.perf | 0;
         const sub = { 1: "faster · chrome exhaust", 2: "grippier · intercooler + vents", 3: "top stage · scoop + big wing" };
         return [1, 2, 3].map(function (t) {
-          return { label: "Performance — Stage " + t, price: PRICE.perf[t], sub: sub[t],
+          return { label: "Performance. Stage " + t, price: PRICE.perf[t], sub: sub[t],
             owned: cur >= t, action: function () { doMod(car, "perf", t, PRICE.perf[t]); } };
         });
       }
       case "glow":
         return Object.keys(GLOW_COLORS).map(function (name) {
-          return { label: "Underglow — " + name.toUpperCase(), price: PRICE.glow, sub: "neon kit · pulses",
+          return { label: "Underglow · " + name.toUpperCase(), price: PRICE.glow, sub: "neon kit · pulses",
             owned: m.glow === name, action: function () { doMod(car, "glow", name, PRICE.glow); } };
         });
       default: return [];
@@ -1147,7 +1147,7 @@
     const car = liveCar();
     if (!car) { closePanel(); return; }
     let html = "<div style='font-weight:700;font-size:18px;margin-bottom:2px;color:#bfe39a'>Mod Garage</div>";
-    html += "<div style='color:#8a93a3;font-size:12px;margin-bottom:10px'>Keep the ride — build a war machine. " +
+    html += "<div style='color:#8a93a3;font-size:12px;margin-bottom:10px'>Keep the ride, build a war machine. " +
       "<span style='color:#7ed957'>" + fmt$(cash()) + "</span> on hand</div>";
     // tab bar (keys [1]-[7])
     html += "<div style='display:flex;flex-wrap:wrap;gap:5px;margin-bottom:12px'>";
@@ -1209,11 +1209,11 @@
   // ---- shop actions ----------------------------------------------------------
   function doMod(car, modId, tier, price) {
     if (price > 0 && !(CBZ.city && CBZ.city.spend && CBZ.city.spend(price))) {
-      if (CBZ.city && CBZ.city.note) CBZ.city.note("That runs " + fmt$(price) + " — come back with the money.", 1.8);
+      if (CBZ.city && CBZ.city.note) CBZ.city.note("That runs " + fmt$(price) + " · come back with the money.", 1.8);
       return;
     }
     cityApplyCarMod(car, modId, tier);
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("Installed — your ride's meaner now.", 1.6);
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("Installed, your ride's meaner now.", 1.6);
   }
   function doResupply(car) {
     const m = car.mods && car.mods.launcher; if (!m) return;
@@ -1224,7 +1224,7 @@
     }
     m.ammo = TUNE.launcherAmmoMax;
     if (CBZ.sfx) CBZ.sfx("reload");
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("Rockets loaded — " + m.ammo + " ready.", 1.6);
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("Rockets loaded · " + m.ammo + " ready.", 1.6);
   }
   function doRespray(car) {
     if (!(CBZ.city && CBZ.city.spend && CBZ.city.spend(PRICE.respray))) {
@@ -1242,7 +1242,7 @@
     // a visual swap orphaned our attachments — re-dress.
     if (car.mods) applyMods(car);
     if (CBZ.sfx) CBZ.sfx("switch");
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("Fresh paint" + (restyled ? " + new lines" : "") + " — looks clean.", 1.8);
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("Fresh paint" + (restyled ? " + new lines" : "") + " · looks clean.", 1.8);
     renderPanelSafe();
   }
   function recolor(car, col) {

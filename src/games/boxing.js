@@ -422,11 +422,11 @@
         case "slip": { const ch = chOf(foe(d.s)); if (ch) { ch.dodgeT = 0.4; ch.dodgeDir = nextRand() < 0.5 ? -1 : 1; } break; }
         case "slipmove": { const ch = chOf(byDir(d.s)); if (ch) { ch.dodgeT = 0.4; ch.dodgeDir = d.dir; } break; }
         case "knockdown": { const ch = chOf(byDir(d.s)); if (ch) { ch.koPose = true; ch.koT = 0.7; ch.koDur = 0.7; ch.fightStance = false; }
-          if (near) feed("DOWN — " + nm(byDir(d.s) === A ? bout.a : bout.b) + " hits the canvas!", "#ff9a9a"); break; }
+          if (near) feed("DOWN · " + nm(byDir(d.s) === A ? bout.a : bout.b) + " hits the canvas!", "#ff9a9a"); break; }
         case "getup": { const ch = chOf(byDir(d.s)); if (ch) { ch.koPose = false; ch.koT = 0; } if (near) feed(nm(byDir(d.s) === A ? bout.a : bout.b) + " beats the count!", "#ffd166"); break; }
         case "count": if (near && d.n >= 4) feed("...the ref counts " + d.n + "..."); break;
-        case "bell": if (near) feed("*DING* — Round " + d.n, "#e8b64c"); break;
-        case "bellEnd": if (near) feed("*DING* — end of round " + d.n); break;
+        case "bell": if (near) feed("*DING*. Round " + d.n, "#e8b64c"); break;
+        case "bellEnd": if (near) feed("*DING*, end of round " + d.n); break;
         case "cards": if (near) feed("Judges turn in Round " + d.round + " cards."); break;
         case "ropes": if (near) feed(nm(byDir(d.s) === A ? bout.a : bout.b) + " is driven into the ropes."); break;
         case "over": endOfBout(bout); break;
@@ -449,7 +449,7 @@
       oddsA: oddsFromProb(p), oddsB: oddsFromProb(1 - p), bet: null };
     resetFighterRigs();
     if (near) feed("Undercard: " + DEFS[card[0]].name + " (" + LIVE.oddsA.toFixed(2) + ") vs " +
-      DEFS[card[1]].name + " (" + LIVE.oddsB.toFixed(2) + ") — [E] to bet.", "#9ad0ff");
+      DEFS[card[1]].name + " (" + LIVE.oddsB.toFixed(2) + "). [E] to bet.", "#9ad0ff");
   }
   function startPlayerBout(idx) {
     if (!V || !V.fA) { feed("The card is closed tonight."); return; }
@@ -458,7 +458,7 @@
       boutIdx: idx, purse: B.purse, done: false, oddsA: oddsFromProb(B.youWinProb), oddsB: oddsFromProb(1 - B.youWinProb), bet: null };
     resetFighterRigs();
     pendingAction = null;
-    feed((idx === 2 ? "TITLE FIGHT" : B.label) + " — you vs " + DEFS[B.opp].name + ". Purse " + fmt(B.purse) + ".", "#e8b64c");
+    feed((idx === 2 ? "TITLE FIGHT" : B.label) + " · you vs " + DEFS[B.opp].name + ". Purse " + fmt(B.purse) + ".", "#e8b64c");
     openFighterHUD();
   }
   function resetFighterRigs() {
@@ -477,16 +477,16 @@
         C.wallet.give(LIVE.purse, "Fight purse");
         if (CBZ.city && CBZ.city.addRespect) { try { CBZ.city.addRespect(LIVE.boutIdx === 2 ? 12 : 6); } catch (e) {} }
         if (LIVE.boutIdx === 2 && !s.belt) { s.belt = true; openBelt(); feed("NEW SOUTHPAW PALACE CHAMPION!", "#ffd166"); }
-        else feed("Winner by " + method + " — purse " + fmt(LIVE.purse) + "!", "#ffd166");
+        else feed("Winner by " + method + " · purse " + fmt(LIVE.purse) + "!", "#ffd166");
       } else {
         s.losses++;
-        feed(bout.winner === "B" ? ("Beaten by " + method + ". Journeyman's night — no purse.") : "Draw. No purse tonight.", "#ff9a9a");
+        feed(bout.winner === "B" ? ("Beaten by " + method + ". Journeyman's night, no purse.") : "Draw. No purse tonight.", "#ff9a9a");
       }
       save();
     } else if (LIVE.role === "ai" && LIVE.bet) {   // settle the bettor's stake
       const won = LIVE.bet.side === bout.winner;
       if (won) { const pay = payout(LIVE.bet.stake, LIVE.bet.odds); C.wallet.give(pay, "Bet cashed"); feed("Bet cashed: +" + fmt(pay), "#ffd166"); }
-      else feed("Bet lost — " + fmt(LIVE.bet.stake) + " to the house.", "#ff9a9a");
+      else feed("Bet lost · " + fmt(LIVE.bet.stake) + " to the house.", "#ff9a9a");
       LIVE.bet = null;
     }
     if (LIVE.role === "player") { panelMode = "result"; openResult(bout); }
@@ -620,13 +620,13 @@
       label: () => {
         const s = bag();
         if (LIVE && LIVE.role === "player" && !LIVE.bout.over) return "[E] Back to the corner (bout live)";
-        return "[E] SOUTHPAW PALACE — Fight Night" + (s.belt ? " (CHAMPION)" : "");
+        return "[E] SOUTHPAW PALACE. Fight Night" + (s.belt ? " (CHAMPION)" : "");
       },
       onUse: () => { if (LIVE && LIVE.role === "player" && !LIVE.bout.over) openFighterHUD(); else openMain(); },
     });
     ctx.zone({
       id: "belt", pos: [half + 2.4, half + 1.6], r: 1.8,
-      label: () => bag().belt ? "[E] The Southpaw Palace belt — yours" : "[E] The belt case (win the title)",
+      label: () => bag().belt ? "[E] The Southpaw Palace belt, yours" : "[E] The belt case (win the title)",
       onUse: () => { const s = bag(); C.hud.toast(s.belt ? "SOUTHPAW PALACE CHAMPION" : "Win the title fight to claim the strap."); },
     });
   }
@@ -759,7 +759,7 @@
       rank().toUpperCase() + " · cash <b>" + fmt(C.wallet.cash()) + "</b>" + (s.belt ? " · <span style='color:#e8b64c'>CHAMPION</span>" : "") + "</div>";
     const fightRow = s.belt
       ? "<div style='opacity:.8;font-size:13px;margin:6px 0'>You hold the strap. Defend it (title purse):</div>" + btn("fight", "DEFEND vs " + DEFS.vega.name + " — " + fmt(BOUTS[2].purse), "#8a1f1f")
-      : "<div style='font-size:13px;margin:6px 0'>" + B.label + ": <b>you</b> vs " + DEFS[B.opp].name + " (" + DEFS[B.opp].blurb + ")<br>your odds <b>" + oddsFromProb(B.youWinProb).toFixed(2) + "</b> · purse <b>" + fmt(B.purse) + "</b></div>" + btn("fight", "SIGN — " + B.label, "#8a1f1f");
+      : "<div style='font-size:13px;margin:6px 0'>" + B.label + ": <b>you</b> vs " + DEFS[B.opp].name + " (" + DEFS[B.opp].blurb + ")<br>your odds <b>" + oddsFromProb(B.youWinProb).toFixed(2) + "</b> · purse <b>" + fmt(B.purse) + "</b></div>" + btn("fight", "SIGN · " + B.label, "#8a1f1f");
     C.hud.panel(
       head("SOUTHPAW PALACE", "Fight Night") + fh +
       "<div style='display:flex;gap:16px;flex-wrap:wrap'>" +
@@ -782,7 +782,7 @@
       "<span style='display:inline-block;width:10px'></span>" + btn("giveup", "Throw in the towel", "#6b2222");
     C.hud.panel(
       "<div style='display:flex;justify-content:space-between;align-items:center'>" +
-        "<b style='color:#ff9a9a'>YOU — THE SOUTHPAW</b>" +
+        "<b style='color:#ff9a9a'>YOU. THE SOUTHPAW</b>" +
         "<span id='bx_round' style='color:#e8b64c;font-weight:800'>ROUND 1/3</span>" +
         "<b id='bx_opnm' style='color:#9ad0ff'>OPPONENT</b></div>" +
       "<div style='display:flex;gap:14px;margin:6px 0'>" +
@@ -813,9 +813,9 @@
     // TELEGRAPH the opening: opponent winding up -> slip/block now; you slipped -> counter window
     let tell = "";
     if (a.act === "down") tell = "DOWN! Mash a punch button to rise (" + a.riseHits + "/" + a.riseNeed + ")";
-    else if (a.counterT > 0) tell = "COUNTER WINDOW — punch NOW for DOUBLE!";
-    else if (b.act === "punch" && b.pT < PUNCH[b.punch].wu * windupMult(b.st / 100)) tell = "" + DEFS[LIVE.bKey].short + " loads a " + b.punch.toUpperCase() + " — SLIP or BLOCK!";
-    else if (a.swell >= 2) tell = "Your eye is closing — see the cutman between rounds.";
+    else if (a.counterT > 0) tell = "COUNTER WINDOW, punch NOW for DOUBLE!";
+    else if (b.act === "punch" && b.pT < PUNCH[b.punch].wu * windupMult(b.st / 100)) tell = "" + DEFS[LIVE.bKey].short + " loads a " + b.punch.toUpperCase() + " · SLIP or BLOCK!";
+    else if (a.swell >= 2) tell = "Your eye is closing, see the cutman between rounds.";
     set("bx_tell", tell, "h");
   }
 
@@ -823,7 +823,7 @@
     panelMode = "corner";
     const a = bout.a, s = a;
     const cutOpts = s.cutmanLeft > 0
-      ? btn("ice", "Ice the swelling — $150", "#1f4e8a") + btn("air", "Oxygen (stamina) — $120", "#1f4e8a") + btn("pep", "Adrenaline (HP) — $200", "#1f4e8a")
+      ? btn("ice", "Ice the swelling. $150", "#1f4e8a") + btn("air", "Oxygen (stamina). $120", "#1f4e8a") + btn("pep", "Adrenaline (HP). $200", "#1f4e8a")
       : "<div style='opacity:.7;font-size:12px'>The cutman's done what he can this fight.</div>";
     C.hud.panel(
       head("YOUR CORNER", "Round " + bout.round + " done · cutman work: " + s.cutmanLeft + " left") +
@@ -854,7 +854,7 @@
       for (let r = 0; r < bout.cards[j].length; r++) h += "<td style='text-align:center'>" + bout.cards[j][r][0] + "-" + bout.cards[j][r][1] + "</td>";
       h += "<td style='text-align:center;font-weight:800'>" + tot[j][0] + "-" + tot[j][1] + "</td></tr>";
     }
-    h += "</table><div style='font-size:11px;opacity:.7;margin-top:2px'>(you — opponent, 10-point-must)</div>";
+    h += "</table><div style='font-size:11px;opacity:.7;margin-top:2px'>(you, opponent, 10-point-must)</div>";
     return h;
   }
 
@@ -880,7 +880,7 @@
   let betStake = 50;
   function pokeStake() { const e = document.getElementById("bx_stake"); if (e) e.textContent = fmt(betStake); }
   function placeBet(side) {
-    if (!LIVE || LIVE.role !== "ai" || LIVE.bout.over) { feed("Too late — bout's decided."); return; }
+    if (!LIVE || LIVE.role !== "ai" || LIVE.bout.over) { feed("Too late, bout's decided."); return; }
     if (LIVE.bet) { feed("Your money's already down on this one."); return; }
     if (!C.wallet.spend(betStake, "Bet placed")) return;
     LIVE.bet = { side: side, stake: betStake, odds: side === "A" ? LIVE.oddsA : LIVE.oddsB };
@@ -902,7 +902,7 @@
         close: () => { LIVE = null; panelMode = null; C.hud.closePanel(); } });
   }
 
-  function openBelt() { C.hud.toast("SOUTHPAW PALACE CHAMPION — the case is yours."); }
+  function openBelt() { C.hud.toast("SOUTHPAW PALACE CHAMPION, the case is yours."); }
 
   // redraw the judges' held scorecards onto the ringside board (per round)
   function drawCards(bout) {
@@ -925,7 +925,7 @@
         cc.textAlign = "right"; cc.fillStyle = "#fff6e2"; cc.font = "bold 40px Arial";
         cc.fillText(bout.cards[j][r][0] + " - " + bout.cards[j][r][1], w - 34, y + 4);
       }
-    } else { cc.textAlign = "center"; cc.fillStyle = "#8a929c"; cc.font = "bold 40px Arial"; cc.fillText("— fight night —", w / 2, 168); }
+    } else { cc.textAlign = "center"; cc.fillStyle = "#8a929c"; cc.font = "bold 40px Arial"; cc.fillText(" · fight night · ", w / 2, 168); }
     if (V.card) V.card.paint(); else if (V.boardTex) V.boardTex.needsUpdate = true;
   }
 

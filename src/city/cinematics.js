@@ -387,7 +387,7 @@
       { // pull back out to third person; the offer lands
         dur: 3.6, cut: true, hideRig: false,
         cam: { pos: W(-4.2, 2.6, 4.6), look: W(0, 1.4, 0) },
-        enter() { say("SAL VETTI", "There's a car outside. My driver takes you to the meet. Front seat — my guys like the company."); },
+        enter() { say("SAL VETTI", "There's a car outside. My driver takes you to the meet. Front seat, my guys like the company."); },
       },
       {
         dur: 1.6,
@@ -540,7 +540,7 @@
       { // pull out; you live
         dur: 2.4, cut: true, hideRig: false,
         cam: () => carCamera(car, 6.0, 2.6, -4.2, 0, 1.0, 0),
-        enter() { say("THE DRIVER", "Vetti pays for instincts. Get out — the money's already moving."); },
+        enter() { say("THE DRIVER", "Vetti pays for instincts. Get out, the money's already moving."); },
       },
     ];
   }

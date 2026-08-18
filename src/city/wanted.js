@@ -451,7 +451,7 @@
     if ((e.key || "").toLowerCase() !== "t") return;
     e.preventDefault();
     g.cityMasked = !g.cityMasked;
-    if (CBZ.city && CBZ.city.note) CBZ.city.note(g.cityMasked ? "Mask up — witnesses can't ID you." : "Mask off — your face is showing.", 1.8);
+    if (CBZ.city && CBZ.city.note) CBZ.city.note(g.cityMasked ? "Mask up, witnesses can't ID you." : "Mask off, your face is showing.", 1.8);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   });
   // talk your stars DOWN by `levels` (a bought alibi) without fully clearing them
@@ -605,7 +605,7 @@
     };
     for (let i = bountyBoard.length - 1; i >= 0; i--) if (bountyBoard[i].id === o.id) bountyBoard.splice(i, 1);
     contractWaypoint(t);
-    bNotify("Contract accepted: " + contract.targetName + " (" + bMoney(contract.reward) + ") — last seen in " + dk + ". The map ping refreshes as they move.");
+    bNotify("Contract accepted: " + contract.targetName + " (" + bMoney(contract.reward) + "), last seen in " + dk + ". The map ping refreshes as they move.");
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     return contract;
   }
@@ -627,8 +627,8 @@
     const c = contract; if (!c) return;
     clearOurBounty(c);
     dropContractWaypoint();
-    bNotify("Contract failed — " + why + ".");
-    if (CBZ.cityFeed) { try { CBZ.cityFeed("Contract failed — " + why, "#ff8a8a"); } catch (e) {} }
+    bNotify("Contract failed · " + why + ".");
+    if (CBZ.cityFeed) { try { CBZ.cityFeed("Contract failed · " + why, "#ff8a8a"); } catch (e) {} }
     contract = null; bountyCooldown = 60;
   }
   function pingContract(manual) {
@@ -665,13 +665,13 @@
   CBZ.bountyFromPoster = function (poster) {
     if (!bountiesOn() || g.mode !== "city") return null;
     if (contract) {
-      bNotify("You've already got a live contract — " + contract.targetName + " (" + bMoney(contract.reward) + "). Finish it or let it expire.");
+      bNotify("You've already got a live contract · " + contract.targetName + " (" + bMoney(contract.reward) + "). Finish it or let it expire.");
       pingContract(true);
       return contract;
     }
     if (bountyCooldown > 0) { bNotify("The board's quiet right now. Check back soon."); return null; }
     try { topUpBoard(); } catch (e) {}
-    if (!bountyBoard.length) { bNotify("Just old paper — nothing active on this one."); return null; }
+    if (!bountyBoard.length) { bNotify("Just old paper, nothing active on this one."); return null; }
     const px = (poster && typeof poster.x === "number") ? poster.x : (poster && poster.pos && typeof poster.pos.x === "number") ? poster.pos.x : (CBZ.player ? CBZ.player.pos.x : 0);
     const pz = (poster && typeof poster.z === "number") ? poster.z : (poster && poster.pos && typeof poster.pos.z === "number") ? poster.pos.z : (CBZ.player ? CBZ.player.pos.z : 0);
     // MASSIVE contracts headline the poster; otherwise the biggest purse near it
@@ -723,7 +723,7 @@
     const inside = x > B.minX + inset && x < B.maxX - inset && z > B.minZ + inset && z < B.maxZ - inset;
     if (!inside) { if (milLock) releaseMilZone(); else milWarnT = 0; return; }
     if (!milLock) {
-      if (milWarnT === 0 && CBZ.city && CBZ.city.big) CBZ.city.big("RESTRICTED AREA — TURN BACK");
+      if (milWarnT === 0 && CBZ.city && CBZ.city.big) CBZ.city.big("RESTRICTED AREA · TURN BACK");
       milWarnT += dt;
       // a fresh crime reported INSIDE the wire (report() stamps _milHostileT)
       // = hostile incursion, no grace. 10s window: generous enough that a

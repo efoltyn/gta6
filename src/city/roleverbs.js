@@ -143,17 +143,17 @@
     can: function (p) { return !!medicQuote(p); },
     label: function (p) {
       const q = medicQuote(p); if (!q) return "Get patched up";
-      return (q.crit ? "Emergency treatment — " : "Get patched up — ") + money(q.price);
+      return (q.crit ? "Emergency treatment · " : "Get patched up · ") + money(q.price);
     },
     run: function (p) {
       const q = medicQuote(p); if (!q) return;
-      if (!CBZ.city.spend(q.price)) { note("A patch-up runs " + money(q.price) + " — you're short.", 1.8); return; }
+      if (!CBZ.city.spend(q.price)) { note("A patch-up runs " + money(q.price) + " · you're short.", 1.8); return; }
       const pl = P();
       pl.hp = Math.min(q.mx, hpNow() + q.heal);
       if (pl._bleeding) pl._bleeding = 0;                // a dressed wound stops bleeding
       paid(p, q.price);
       coin(); say(p, q.line);
-      note("Patched up — " + Math.round(pl.hp) + "/" + Math.round(q.mx) + " for " + money(q.price) + ".", 2);
+      note("Patched up · " + Math.round(pl.hp) + "/" + Math.round(q.mx) + " for " + money(q.price) + ".", 2);
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     },
   };
@@ -166,7 +166,7 @@
   const ROW_DRINK = {
     id: "rv-drink",
     can: function () { return true; },
-    label: function () { return "Order a drink — $12"; },
+    label: function () { return "Order a drink. $12"; },
     run: function (p) {
       if (!CBZ.city.spend(12)) { note("Need $12 for a round.", 1.4); return; }
       coin();
@@ -176,7 +176,7 @@
       if (CBZ.cityDrink) CBZ.cityDrink(1);
       paid(p, 12);
       say(p, "“One more and you're walking home.”");
-      note("A round — loosened up.", 1.8);
+      note("A round, loosened up.", 1.8);
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     },
   };
@@ -192,7 +192,7 @@
   const ROW_PLATE = {
     id: "rv-plate",
     can: function () { return platePrice() > 0 && (g.hunger || 0) < 96 && !!CBZ.cityEat; },
-    label: function () { return "Grab a plate — " + money(platePrice()); },
+    label: function () { return "Grab a plate · " + money(platePrice()); },
     run: function (p) {
       const price = platePrice(); if (!price) return;
       if (!CBZ.city.spend(price)) { note("A plate runs " + money(price) + ".", 1.4); return; }
@@ -216,7 +216,7 @@
   const ROW_TRAIN = {
     id: "rv-train",
     can: function () { return maxHp() < TRAIN_CEIL; },
-    label: function () { return "Train — " + money(TRAIN_COST) + " (max HP " + Math.round(maxHp()) + ")"; },
+    label: function () { return "Train · " + money(TRAIN_COST) + " (max HP " + Math.round(maxHp()) + ")"; },
     run: function (p) {
       if (maxHp() >= TRAIN_CEIL) { note("You're as conditioned as this body gets.", 1.6); return; }
       if (!CBZ.city.spend(TRAIN_COST)) { note("A session runs " + money(TRAIN_COST) + ".", 1.4); return; }
@@ -226,7 +226,7 @@
       paid(p, TRAIN_COST);
       if (CBZ.city.addRespect) CBZ.city.addRespect(1);
       coin(); say(p, "“Again. Last two are the only ones that count.”");
-      note("Trained — max HP " + Math.round(pl.maxHp) + ".", 1.8);
+      note("Trained, max HP " + Math.round(pl.maxHp) + ".", 1.8);
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     },
   };
@@ -242,7 +242,7 @@
   const ROW_CUT = {
     id: "rv-cut",
     can: function () { return !!CBZ.cityLook; },
-    label: function () { return "Get a lineup — $30"; },
+    label: function () { return "Get a lineup. $30"; },
     run: function (p) {
       if (!CBZ.city.spend(30)) { note("A lineup runs $30.", 1.4); return; }
       const L = CBZ.cityLook();
@@ -251,7 +251,7 @@
       paid(p, 30);
       if (CBZ.city.addRespect) CBZ.city.addRespect(2);
       coin(); say(p, "“Chair's the kerb today. Hold still.”");
-      note("Fresh lineup — you look like somebody.", 1.8);
+      note("Fresh lineup, you look like somebody.", 1.8);
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     },
   };
@@ -277,7 +277,7 @@
   const ROW_HAND = {
     id: "rv-hand",
     can: function (p) { return !handSpent(p) && onShift(jobOf(p)); },
-    label: function (p) { return "Lend a hand — " + money(handPay(p)); },
+    label: function (p) { return "Lend a hand · " + money(handPay(p)); },
     run: function (p) {
       if (handSpent(p)) { note("They've nothing left for you today.", 1.6); return; }
       const amt = handPay(p);
@@ -286,7 +286,7 @@
       if (CBZ.city.addRespect) CBZ.city.addRespect(1);
       coin();
       say(p, "“Grab the other end. Cash at the end of it.”");
-      note("Worked the shift — " + money(amt) + " in hand.", 2);
+      note("Worked the shift · " + money(amt) + " in hand.", 2);
     },
   };
 
@@ -322,13 +322,13 @@
   const ROW_PRODUCE = {
     id: "rv-produce",
     can: function () { return ensureGood("Fresh Produce"); },
-    label: function () { return "Buy fresh produce — " + money(goodPrice("Fresh Produce")); },
+    label: function () { return "Buy fresh produce · " + money(goodPrice("Fresh Produce")); },
     run: function (p) { buyGood(p, "Fresh Produce", "“Picked this morning. Straight off the field.”"); },
   };
   const ROW_MEAT = {
     id: "rv-meat",
     can: function () { return ensureGood("Fresh Cut"); },
-    label: function () { return "Buy a fresh cut — " + money(goodPrice("Fresh Cut")); },
+    label: function () { return "Buy a fresh cut · " + money(goodPrice("Fresh Cut")); },
     run: function (p) { buyGood(p, "Fresh Cut", "“Off the herd this week. You won't do better.”"); },
   };
   // THE CATCH is not a new item at all: wildlife.js already registers
@@ -340,7 +340,7 @@
     can: function () { const e = econ(); return !!(e && e.ITEMS && e.ITEMS["Fresh Fish"]); },
     label: function () {
       const e = econ(), v = (e && e.ITEMS["Fresh Fish"] && e.ITEMS["Fresh Fish"].value) || 8;
-      return "Buy the catch — " + money(Math.round(v * 1.3));
+      return "Buy the catch · " + money(Math.round(v * 1.3));
     },
     run: function (p) {
       const e = econ(); if (!e || !e.ITEMS || !e.ITEMS["Fresh Fish"]) return;
@@ -349,7 +349,7 @@
       e.add("Fresh Fish", 1);
       paid(p, price);
       coin(); say(p, "“Still wet. Take it before the gulls do.”");
-      note("Bought Fresh Fish — " + money(price) + ".", 1.8);
+      note("Bought Fresh Fish · " + money(price) + ".", 1.8);
     },
   };
 
@@ -391,7 +391,7 @@
       if (g.cityJob) return false;
       return !!runDest(p);
     },
-    label: function (p) { const d = runDest(p); return "Take a delivery run — " + money(d ? d.reward : 0); },
+    label: function (p) { const d = runDest(p); return "Take a delivery run · " + money(d ? d.reward : 0); },
     run: function (p) {
       const d = runDest(p); if (!d) return;
       const where = d.name || "the address";
@@ -445,7 +445,7 @@
       const nm = (lot.building && lot.building.name) || "the casino";
       CBZ.fullMap.setWaypoint(lot.cx, lot.cz, nm);
       if (CBZ.cityMeet) CBZ.cityMeet(p);
-      say(p, "“Floor's open. Cage is by the door — don't embarrass me.”");
+      say(p, "“Floor's open. Cage is by the door, don't embarrass me.”");
       note("Marked " + nm + " on your map.", 2.2);
     },
   };
@@ -461,7 +461,7 @@
     can: function (p, ctx) {
       return !!(CBZ.cityCabRide && CBZ.cityCabFare && CBZ.cityCabFare() > 0 && (ctx.wanted | 0) < 2);
     },
-    label: function () { return "Ask for a lift — " + money(CBZ.cityCabFare()); },
+    label: function () { return "Ask for a lift · " + money(CBZ.cityCabFare()); },
     run: function (p) { CBZ.cityCabRide(p); },
   };
 
@@ -725,7 +725,7 @@
         sp._rvGushT = now() + 20000;                     // matches props.js's geyser life
         if (CBZ.cityPanicRaise) CBZ.cityPanicRaise(sp.x, sp.z, 0.5);
         if (CBZ.cityAlarm && CBZ.city) CBZ.cityAlarm(sp.x, sp.z, 20, 0.7, CBZ.city.playerActor);
-        note("The cap goes — the main comes straight up off the street.", 2);
+        note("The cap goes, the main comes straight up off the street.", 2);
       },
     },
 
@@ -748,7 +748,7 @@
         CBZ.city.addCash(coins);
         coin();
         if (CBZ.cityCrime) CBZ.cityCrime(25, { x: sp.x, z: sp.z, type: "theft" });
-        note("Popped the coin box — $" + coins + " in shrapnel.", 1.8);
+        note("Popped the coin box. $" + coins + " in shrapnel.", 1.8);
       },
     },
 
@@ -767,7 +767,7 @@
         if (!legs.length) { note("The board's sun-bleached blank.", 1.8); return; }
         const line = legs.map(function (o) { return o.n + " " + (Math.round(o.d / 100) / 10) + "km"; }).join("  ·  ");
         if (CBZ.fullMap && CBZ.fullMap.setWaypoint) CBZ.fullMap.setWaypoint(legs[0].x, legs[0].z, legs[0].n);
-        note("Route board — " + line, 3.4);
+        note("Route board · " + line, 3.4);
       },
     },
 
@@ -787,7 +787,7 @@
       run: function (sp) {
         const acted = CBZ.citySearchStreetProp(sp, {
           empty: "Rags, cans, a radio with no back. Nothing.",
-          hit: "A roll of notes knotted in a sock — $",
+          hit: "A roll of notes knotted in a sock. $",
         });
         if (!acted) return;
         if (CBZ.cityAlarm && CBZ.city) CBZ.cityAlarm(sp.x, sp.z, 12, 0.6, CBZ.city.playerActor);

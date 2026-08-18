@@ -3427,7 +3427,7 @@
     if (!it) return false;
     if (it.tag === "food" && CBZ.cityEat) return CBZ.cityEat(name);
     if (it.tag === "throwable" && CBZ.cityThrowFromInventory) { CBZ.cityThrowFromInventory(); return true; }
-    if (it.tag === "drug") { CBZ.city && CBZ.city.note("Sell " + name + " to a dealer — not for using.", 1.4); return false; }
+    if (it.tag === "drug") { CBZ.city && CBZ.city.note("Sell " + name + " to a dealer, not for using.", 1.4); return false; }
     return false;
   }
 

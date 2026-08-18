@@ -420,7 +420,7 @@
         S.curfewNight = null; S.curfewFlagged = 0; S.curfewWarned = null;
         shock(h.id, -7);
         addTyranny(8, "declared a curfew");
-        if (CBZ.city && CBZ.city.big) CBZ.city.big("CURFEW — " + String(h.rec.name).toUpperCase());
+        if (CBZ.city && CBZ.city.big) CBZ.city.big("CURFEW · " + String(h.rec.name).toUpperCase());
         news(h.title + " signs a curfew over " + h.rec.name
           + ": nobody on the street between 23:00 and 05:00 for " + CURFEW_DAYS + " days.");
         orders("Your office", "The curfew you signed does not exempt you. Be indoors by 23:00.", 1);
@@ -436,7 +436,7 @@
       gate: function (h) {
         const S = st();
         const since = day() - (S.lastAmnestyDay || -999);
-        if (since < AMNESTY_COOLDOWN) return { ok: false, why: "Another amnesty this soon is worth nothing — " + (AMNESTY_COOLDOWN - since) + " day(s)." };
+        if (since < AMNESTY_COOLDOWN) return { ok: false, why: "Another amnesty this soon is worth nothing · " + (AMNESTY_COOLDOWN - since) + " day(s)." };
         return { ok: true };
       },
       run: function (h) {
@@ -496,7 +496,7 @@
       gate: function (h) {
         const S = st();
         const since = day() - (S.lastSkimDay || -999);
-        if (since < SKIM_COOLDOWN) return { ok: false, why: "The books were touched too recently — " + (SKIM_COOLDOWN - since) + " day(s)." };
+        if (since < SKIM_COOLDOWN) return { ok: false, why: "The books were touched too recently · " + (SKIM_COOLDOWN - since) + " day(s)." };
         const take = Math.min(SKIM_CAP, Math.round((h.rec.treasury || 0) * SKIM_FRAC));
         if (take < 100) return { ok: false, why: "There is nothing in the " + h.rec.name + " treasury worth taking." };
         return { ok: true };
@@ -707,7 +707,7 @@
       try { CBZ.protection.spawnMembers(det, A, px, pz, rng); } catch (e) {}
     }
     shock(h.id, -1);
-    orders("Your office", "One more body on your detail — " + det.memberCount + " now, " + money(GUARD_COST) + " out of the treasury.", 0);
+    orders("Your office", "One more body on your detail · " + det.memberCount + " now, " + money(GUARD_COST) + " out of the treasury.", 0);
     return { ok: true, why: "", detail: det.id, memberCount: det.memberCount };
   }
 
@@ -786,7 +786,7 @@
 
     shock(h.id, -11);
     addTyranny(18, "put soldiers on the street");
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("TROOPS DEPLOYED — " + String(h.rec.name).toUpperCase());
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("TROOPS DEPLOYED · " + String(h.rec.name).toUpperCase());
     news(h.title + " orders the Fort Brandt garrison into " + h.rec.name + " over " + reason + ". "
       + bodies.length + " soldiers on the street for " + MARTIAL_DAYS + " days.");
     orders(generalName(), "Column moving. " + bodies.length + " under arms, " + MARTIAL_DAYS + " days, and then they come home whatever you say.", 2);
@@ -878,7 +878,7 @@
     if (S.curfewUntil) { had = true; S.curfewUntil = 0; S.curfewNight = null; S.curfewFlagged = 0; }
     if (S.policeBumped || S.forceAdded) { had = true; restorePolice(S); }
     refundMil();
-    if (had && !quiet) news("The orders stand down — the office changes hands.");
+    if (had && !quiet) news("The orders stand down, the office changes hands.");
     return had;
   }
 
@@ -926,7 +926,7 @@
       } else if (have > 1) {
         h.rec.treasury = 0;
         if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(Math.round(have));
-        orders("Treasury", "Payroll ran dry — " + money(have) + " is all there was.", 1);
+        orders("Treasury", "Payroll ran dry · " + money(have) + " is all there was.", 1);
       } else {
         orders("Treasury", "There is no money in " + h.rec.name + ". You were not paid.", 1);
       }
@@ -1074,7 +1074,7 @@
       });
       if (CBZ.interactions.describe) {
         CBZ.interactions.describe("govcommand", function () {
-          return { label: "Command HQ", note: "Fort Brandt — the garrison takes orders here" };
+          return { label: "Command HQ", note: "Fort Brandt, the garrison takes orders here" };
         });
       }
     } catch (e) {}

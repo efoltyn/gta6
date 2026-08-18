@@ -159,12 +159,12 @@
 
   // one-line teaching text per verb; shown until the player has used it
   const DESC = {
-    insult:   "Talk trash — drops rep, may start a brawl",
-    fight:    "Throw hands — chain hits for a K.O. combo",
-    befriend: "Do favors, build rep — friends walk you free",
+    insult:   "Talk trash · drops rep, may start a brawl",
+    fight:    "Throw hands · chain hits for a K.O. combo",
+    befriend: "Do favors, build rep · friends walk you free",
     trade:    "Buy contraband with cigarettes",
     bribe:    "Spend cigs to make authority look away",
-    steal:    "Lift a key, a chain, or cigs — risky if seen",
+    steal:    "Lift a key, a chain, or cigs · risky if seen",
     payoff:   "Corrupt cop cleans up heat for a price",
     join:     "Join their gang for backup & protection",
     listen:   "Hear what they want",
@@ -251,7 +251,7 @@
     if (a.reportedPlayerT > 0) parts.push("still fresh");
     if (a.reportedPlayerSpread > 1) parts.push("word got round");
     if (a.reportedPlayerLastKnown && a.reportedPlayerLastKnown.type) parts.push(a.reportedPlayerLastKnown.type === "visual" ? "saw you himself" : "only heard it");
-    return `talks to the screws — ${base}${parts.length ? " · " + parts.join(" · ") : ""}`;
+    return `talks to the screws. ${base}${parts.length ? " · " + parts.join(" · ") : ""}`;
   }
   function cleanName(a) {
     return a && a.data && a.data.name ? a.data.name.replace(/^the |^a |^an /, "") : "someone";
@@ -506,7 +506,7 @@
     const ap = a.approach || {};
     switch (ap.kind) {
       case "favor":      return `Do the favor (+${ap.gift || 3})`;
-      case "buyItem":    return `Buy it — ${ap.price || 0}`;
+      case "buyItem":    return `Buy it. ${ap.price || 0}`;
       case "copBribe":   return `Pocket the ${ap.price || 0}`;
       case "copTip":     return "Take the tip";
       case "copPlea":    return "Hear the plea out";
@@ -530,7 +530,7 @@
       case "insult":   return `Talk trash to ${nm}`;
       case "befriend": return (a.playerGrudge || 0) >= 6 ? `Square things with ${nm}` : ((a.rep || 0) >= 45 ? `Catch up with ${nm}` : `Chat up ${nm}`);
       case "fight":    return `Throw hands with ${nm}`;
-      case "trade":    { const o = a.data && a.data.offer; return o ? `Buy ${shortText(o.item, 16)} — ${o.price}` : "Browse their goods"; }
+      case "trade":    { const o = a.data && a.data.offer; return o ? `Buy ${shortText(o.item, 16)}. ${o.price}` : "Browse their goods"; }
       case "bribe":    { const c = CBZ.econ.bribeCost ? CBZ.econ.bribeCost(a) : (a.kind === "warden" ? 25 : (a.corrupt ? 5 : 10)); return `Slip ${c} to look away`; }
       case "payoff":   { const c = CBZ.econ.payoffCost ? CBZ.econ.payoffCost(a) : 6; return `Pay ${c} to clear your heat`; }
       case "steal":    return (a.kind === "guard" || a.kind === "warden") ? `Lift ${nm}'s keys` : `Pick ${nm}'s pocket`;

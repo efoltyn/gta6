@@ -335,7 +335,7 @@
       if (g.playerGang) g.playerGang.treasury = (g.playerGang.treasury || 0) + paid;
       else if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(paid);
     }
-    if (!quiet) note("The crew took their cut off the rack — " + money(paid) +
+    if (!quiet) note("The crew took their cut off the rack · " + money(paid) +
       (s.crewDebt > 0 ? " (" + money(s.crewDebt) + " still owed)" : "") + ".", 2.8);
     persist();
     return paid;
@@ -509,8 +509,8 @@
     if (t.kind === "escrow") return "Put " + amt + " down as money on the yard (" + money(remaining()) + " to go)";
     if (t.kind === "shelf") return "Stow " + amt + " on the rack";
     if (t.kind === "dock") return "Set " + amt + " down on the dock";
-    if (t.kind === "home") return "Into the floor safe — " + amt;
-    if (t.kind === "full") return "The racks are full — wire some out first";
+    if (t.kind === "home") return "Into the floor safe · " + amt;
+    if (t.kind === "full") return "The racks are full, wire some out first";
     if (t.kind === "homefull") return "The floor safe is full (" + HOME_CAP + " bags)";
     return null;
   }
@@ -522,7 +522,7 @@
     const bag = CBg && CBg.carried();
     if (!bag) { note("Nothing on your shoulder.", 1.5); return false; }
     const t = stowTarget();
-    if (!t) { note("Not your place — you can only store cash somewhere you own.", 2.2); return false; }
+    if (!t) { note("Not your place, you can only store cash somewhere you own.", 2.2); return false; }
     if (t.kind === "full") { note("Every rack slot is full. Wire some of it out and come back.", 2.6); return false; }
     if (t.kind === "homefull") { note("The floor safe only takes " + HOME_CAP + " bags. The yard takes the rest.", 2.6); return false; }
     if (t.kind === "dock") { CBg.drop(); note("On the dock. Carry it inside to bank it.", 2.0); return true; }
@@ -554,7 +554,7 @@
     L.push({ a: amt, dyed: !!dyed });
     S().deposits++;
     sfx("coin");
-    big("IN THE SAFE — " + money(amt));
+    big("IN THE SAFE · " + money(amt));
     note(h.name + ": " + L.length + "/" + HOME_CAP + " bags · " + money(valueOf(L)), 2.6);
     persist();
     buildHomeVisual(h);
@@ -572,7 +572,7 @@
   function unloadHere() {
     if (!on()) return 0;
     const P = CBZ.player; if (!P || !P.pos) return 0;
-    if (!owned()) { note("Buy the yard first — this is somebody else's dock.", 2.2); return 0; }
+    if (!owned()) { note("Buy the yard first, this is somebody else's dock.", 2.2); return 0; }
     const CBg = CBZ.cashBags;
     if (!CBg || !CBg.list) return 0;
     const W = wh(); if (!W) return 0;
@@ -593,12 +593,12 @@
       S().bags.push({ a: amt, dyed: dyed });
       moved++; value += amt; if (inHold) held++;
     }
-    if (!moved) { note("Nothing to unload here — bags have to be ON the dock.", 2.2); return 0; }
+    if (!moved) { note("Nothing to unload here, bags have to be ON the dock.", 2.2); return 0; }
     S().deposits += moved;
     _dirty = true;
     sfx("coin");
     const st = stored();
-    big("UNLOADED " + moved + " BAGS — " + money(value));
+    big("UNLOADED " + moved + " BAGS · " + money(value));
     note("Freeport racks: " + st.bags + "/" + st.cap + " · " + money(st.value) +
       (held ? " (" + held + " out of the hold)" : ""), 3.0);
     persist();
@@ -625,7 +625,7 @@
     } else if (CBZ.city && CBZ.city.addCash) {
       CBZ.city.addCash(rec.a);            // degrade: no bag system, no bag
     }
-    note("Off the rack: " + money(rec.a) + (rec.dyed ? " — stained notes." : "."), 2.2);
+    note("Off the rack: " + money(rec.a) + (rec.dyed ? " · stained notes." : "."), 2.2);
     persist();
     return true;
   }
@@ -649,7 +649,7 @@
     sfx("coin");
     big("WIRED " + money(net) + " TO YOUR ACCOUNT");
     note(fee > 0 ? ("A fence took " + money(fee) + " to wash the stained notes.")
-                 : "Clean money, clean transfer — the racks are empty.", 2.8);
+                 : "Clean money, clean transfer, the racks are empty.", 2.8);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     persist();
     return net;
@@ -701,7 +701,7 @@
     s.escrow = Math.min(PRICE, (s.escrow | 0) + credit);
     sfx("coin");
     if (s.escrow >= PRICE) { closeSale(true); return true; }
-    note(money(credit) + " down" + (dyed ? " (stained — the vendor discounted it)" : "") +
+    note(money(credit) + " down" + (dyed ? " (stained, the vendor discounted it)" : "") +
       ". " + money(remaining()) + " still owed on the Freeport.", 3.0);
     // OVERPAYMENT IS NOT SWALLOWED: escrow is capped at the price and the
     // change is never taken off the player in the first place.
@@ -714,7 +714,7 @@
     if (!fromEscrow) {
       const owe = remaining();
       if (((g.cash || 0) + (g.cityBank || 0)) < owe) {
-        note("Need " + money(owe) + " (cash + bank) to close — or carry the difference in bags.", 3.0);
+        note("Need " + money(owe) + " (cash + bank) to close, or carry the difference in bags.", 3.0);
         sfx("hit"); return false;
       }
       let left = owe;
@@ -725,7 +725,7 @@
     }
     grantOwnership();
     big("THE FREEPORT IS YOURS");
-    note("Bonded yard, dock, racks and the strip. Drive the money here — bags on the rack are money in hand.", 4.2);
+    note("Bonded yard, dock, racks and the strip. Drive the money here, bags on the rack are money in hand.", 4.2);
     sfx("coin");
     if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(120);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();

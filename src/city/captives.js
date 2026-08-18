@@ -376,7 +376,7 @@
           h.icon + " " + h.name));
         var hsub = [h.status, fmtDist(h.dist) + " away"];
         if (h.wanted && h.bounty > 0) hsub.push("bounty " + fmtMoney(h.bounty));
-        else if (!h.wanted) hsub.push("clean — no paper");
+        else if (!h.wanted) hsub.push("clean, no paper");
         hi.appendChild(el("div", "font:12px system-ui;color:#9aa6bd;", hsub.join(" · ")));
         hc.appendChild(hi);
         hc.appendChild(locateBtn(h.x, h.z, h.name));
@@ -424,7 +424,7 @@
     var inVehNow = 0;
     for (var i = 0; i < held.length; i++) if (held[i].state === "in_vehicle") inVehNow++;
     if (inVehNow > lastInVehicle) {
-      toast("Captive in the back — press [" + KEY_LABEL + "] to track them.", 4.5);
+      toast("Captive in the back, press [" + KEY_LABEL + "] to track them.", 4.5);
     }
     lastInVehicle = inVehNow;
     lastHeldCount = held.length;
@@ -432,7 +432,7 @@
     if (taken.length > lastTakenCount) {
       // family.js already fires its own line on snatch; we add the "press U"
       // affordance so the player learns the panel exists at the exact moment.
-      toast("Family taken — press [" + KEY_LABEL + "] to see who & where.", 5);
+      toast("Family taken, press [" + KEY_LABEL + "] to see who & where.", 5);
     }
     lastTakenCount = taken.length;
 

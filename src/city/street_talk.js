@@ -117,7 +117,7 @@
   };
   const YES_YES = [
     "Bet. Let's run it.", "Say less.", "I'm down. Don't make me regret it.",
-    "Alright, you {{F_WORD}} — deal.", "Yes. But if this is a setup I will {{F_WORD}} you up.",
+    "Alright, you {{F_WORD}}, deal.", "Yes. But if this is a setup I will {{F_WORD}} you up.",
   ];
   const NO_NO = [
     "Hard pass.", "Nah. Walk.", "Not today, chief.",
@@ -237,7 +237,7 @@
       if (p.cash != null) p.cash = Math.max(0, (p.cash | 0) - got);
       p.wealth = Math.max(0, (p.wealth || 0.2) - 0.05);
       relShift(p, "intimidated", o.kind === "tribute" ? 1 : 0.4);
-      say(p, o.kind === "tribute" ? "“Take it — just go.”" : "“Here. Get back on your feet.”", "#cdeccd", 2.2);
+      say(p, o.kind === "tribute" ? "“Take it, just go.”" : "“Here. Get back on your feet.”", "#cdeccd", 2.2);
       if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(o.kind === "tribute" ? 2 : 1);
       sfx("coin");
     } else if (o.kind === "tax") {
@@ -358,7 +358,7 @@
     // ("You Lv.23 · gap +7 · max offer $180"). The action itself is the YES verb.
     if (!o) return { label: (p.name || "Someone"), note: "" };
     const CUE = {
-      tribute: "They're sizing you up — and folding.", tax: "They expect their cut.",
+      tribute: "They're sizing you up, and folding.", tax: "They expect their cut.",
       charity: "They could use a hand.", handout: "They're pressing cash on you.",
       deal: "There's product to move here.", flex: "Old money, measuring you.",
       chat: "Just street talk.",

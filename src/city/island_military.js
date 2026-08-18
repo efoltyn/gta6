@@ -1767,7 +1767,7 @@
                 // prefer a REAL shop if the engine exposes one
                 if (typeof CBZ.cityOpenShop === "function") { CBZ.cityOpenShop("guns", tok); return; }
                 if (typeof CBZ.cityOpenGunStore === "function") { CBZ.cityOpenGunStore(); return; }
-                const msg = "Base armory — racked M4s, sidearms and crates. Quartermaster's out; help yourself at the city gun store.";
+                const msg = "Base armory, racked M4s, sidearms and crates. Quartermaster's out; help yourself at the city gun store.";
                 if (CBZ.city && CBZ.city.note) CBZ.city.note(msg, 3.2);
               },
             },
@@ -1775,7 +1775,7 @@
         });
         if (CBZ.interactions.describe) {
           CBZ.interactions.describe("armory", function () {
-            return { label: "Armory", note: "Weapons, ammo and gear — Command HQ" };
+            return { label: "Armory", note: "Weapons, ammo and gear. Command HQ" };
           });
         }
         armoryWired = (typeof CBZ.cityOpenShop === "function" || typeof CBZ.cityOpenGunStore === "function") ? "shop" : "note";

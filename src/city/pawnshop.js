@@ -274,14 +274,14 @@
   function sellOne(name) {
     const e = econ(); if (!e || !CBZ.city) return;
     let n = e.count ? e.count(name) : 0; if (n <= 0) return;
-    if (isWorn(name) && n <= 1) { note("That's the only one — and you're wearing it. Take it off first.", 2); return; }
+    if (isWorn(name) && n <= 1) { note("That's the only one, and you're wearing it. Take it off first.", 2); return; }
     const p = fencePrice(name);
     if (!e.take(name, 1)) return;
     CBZ.city.addCash(p);
     if (e.bumpFenceRep) e.bumpFenceRep(1);
     if (CBZ.sfx) CBZ.sfx("coin");
     if (p >= 50000 && CBZ.city.big) CBZ.city.big("PAWNED " + name + " for " + fmt$(p) + "!");
-    else note("Fenced the " + name + " for " + fmt$(p) + ". (Pawn pays the lowball — that's the price of fast cash.)", 2.2);
+    else note("Fenced the " + name + " for " + fmt$(p) + ". (Pawn pays the lowball, that's the price of fast cash.)", 2.2);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
 
@@ -374,7 +374,7 @@
     const t = { id, name, principal: o.principal, fee: o.fee, redeem: o.redeem, born: now(), expires: now() + o.term, forfeit: false };
     tickets().push(t);
     if (CBZ.sfx) CBZ.sfx("coin");
-    note("Pawned the " + name + " for " + fmt$(o.principal) + ". Redeem for " + fmt$(o.redeem) + " within " + Math.round(o.term) + "s — or it's forfeit.", 3);
+    note("Pawned the " + name + " for " + fmt$(o.principal) + ". Redeem for " + fmt$(o.redeem) + " within " + Math.round(o.term) + "s, or it's forfeit.", 3);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     if (CBZ.cityWorldCommit) CBZ.cityWorldCommit();
     return id;
@@ -390,13 +390,13 @@
   function redeemTicket(t) {
     const e = econ(); if (!e || !CBZ.city || !t || t.forfeit) return false;
     if (now() >= t.expires) { forfeit(t); return false; }      // too late — the broker already pulled it
-    if (!CBZ.city.canAfford(t.redeem)) { note("Redeeming the " + t.name + " costs " + fmt$(t.redeem) + " — come back with it.", 2.2); return false; }
+    if (!CBZ.city.canAfford(t.redeem)) { note("Redeeming the " + t.name + " costs " + fmt$(t.redeem) + " · come back with it.", 2.2); return false; }
     if (!CBZ.city.spend(t.redeem)) return false;
     e.add(t.name, 1);                                          // your item, back in your pocket
     t.forfeit = true; t.redeemed = true;                       // close the ticket
     pruneTickets();
     if (CBZ.sfx) CBZ.sfx("coin");
-    note("Redeemed the " + t.name + " for " + fmt$(t.redeem) + " — it's yours again.", 2.4);
+    note("Redeemed the " + t.name + " for " + fmt$(t.redeem) + " · it's yours again.", 2.4);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     if (CBZ.cityWorldCommit) CBZ.cityWorldCommit();
     return true;
@@ -406,7 +406,7 @@
     t.forfeit = true;                                          // the broker keeps the collateral
     const P = CBZ.player;
     if (P && CBZ.city && Math.hypot(P.pos.x - S.cx, P.pos.z - S.cz) < 60)
-      note("The " + t.name + " ticket lapsed — forfeited to the broker.", 2.4);
+      note("The " + t.name + " ticket lapsed, forfeited to the broker.", 2.4);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
   // drop redeemed/forfeited tickets older than a grace window so the array
@@ -449,10 +449,10 @@
 
   function sellPromptText() {
     const list = sellable();
-    if (!list.length) return "<span style='color:#7f8794'>Nothing to fence — bring me gold, watches, stones.</span>";
+    if (!list.length) return "<span style='color:#7f8794'>Nothing to fence, bring me gold, watches, stones.</span>";
     const top = list[0], p = fencePrice(top.name);
     let extra = "";
-    if (list.length > 1) { let t = 0; for (const s of list) t += fencePrice(s.name) * s.n; extra = " <span style='color:#7f8794'>· [G] sell everything — " + fmt$(t) + "</span>"; }
+    if (list.length > 1) { let t = 0; for (const s of list) t += fencePrice(s.name) * s.n; extra = " <span style='color:#7f8794'>· [G] sell everything · " + fmt$(t) + "</span>"; }
     const nn = top.n > 1 ? " ×" + top.n : "";
     return "<b style='color:#9fe0ff'>[E]</b> Pawn-sell " + top.name + nn + " <span style='color:#7ed957'>" + fmt$(p) + "</span> <span style='color:#7f8794'>· broker's lowball, gone for good</span>" + extra;
   }
@@ -468,7 +468,7 @@
     // PAWN-NEW mode (the default). Offer the priciest pawnable in your pockets.
     const list = sellable();
     const toggle = live.length ? " <span style='color:#7f8794'>· [F] redeem tickets (" + live.length + ")</span>" : "";
-    if (!list.length) return "<span style='color:#7f8794'>Bring me something to lend against — gold, a watch, a stone.</span>" + toggle;
+    if (!list.length) return "<span style='color:#7f8794'>Bring me something to lend against, gold, a watch, a stone.</span>" + toggle;
     const top = list[0], o = loanOffer(top.name);
     return "<b style='color:#ffb23c'>[E]</b> Pawn " + top.name + " for <span style='color:#7ed957'>" + fmt$(o.principal) + "</span> <span style='color:#7f8794'>· redeem " + fmt$(o.redeem) + " in " + Math.round(o.term) + "s, else forfeit</span>" + toggle;
   }

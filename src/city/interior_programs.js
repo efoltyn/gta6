@@ -1612,7 +1612,7 @@
     footlocker: { rate: 0.60, tier: 1, dud: 0.32, item: 0.36, cash: [12, 84],   label: "Open the footlocker",       empty: "Spare boots, a bar of soap, a letter he never sent." },
     weapons:    { rate: 1.00, tier: 2, dud: 0.24, item: 0.44, cash: [20, 120],  gun: 0.10, label: "Force the weapons locker", empty: "Empty racks. Whatever was in here walked out already." },
     cabinet:    { rate: 1.00, tier: 3, dud: 0.16, item: 0.46, cash: [140, 620], label: "Go through the drinks cabinet", empty: "Good bottles, all of them empty. He drinks alone." },
-    safe:       { rate: 1.00, tier: 4, dud: 0.00, item: 0.34, cash: [0, 0],     label: "Crack the floor safe",      empty: "Deeds, a passport in another name — and no cash. He moved it." },
+    safe:       { rate: 1.00, tier: 4, dud: 0.00, item: 0.34, cash: [0, 0],     label: "Crack the floor safe",      empty: "Deeds, a passport in another name, and no cash. He moved it." },
   };
   // WHAT COMES OUT, by container. Every name is checked against the live econ
   // catalog before it is offered, so a catalog edit can only ever shrink these.
@@ -1855,14 +1855,14 @@
           CBZ.cityEcon.add(n, 1);
           const half = Math.round(safeCash(rec) * 0.4);
           lootCash(half);
-          if (CBZ.city && CBZ.city.big) CBZ.city.big("THE SAFE — " + n + " + $" + half);
+          if (CBZ.city && CBZ.city.big) CBZ.city.big("THE SAFE · " + n + " + $" + half);
           if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(5);
           return true;
         }
       }
       const cash = safeCash(rec);
       lootCash(cash);
-      if (CBZ.city && CBZ.city.big) CBZ.city.big("THE SAFE — $" + cash);
+      if (CBZ.city && CBZ.city.big) CBZ.city.big("THE SAFE. $" + cash);
       if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(4);
       return true;
     }

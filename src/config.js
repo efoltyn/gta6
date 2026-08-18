@@ -163,14 +163,14 @@
   //   picksWeak preference for only fighting weaker targets (0..1)
   //   guts      general boldness, used for flavour/sorting
   CBZ.BEHAVIORS = {
-    pacifist:     { label: "Pacifist",    emoji: "", init: 0.00, retaliate: 0.05, fleeHurt: 0.92, picksWeak: 0.0, guts: 0.08, desc: "Won't throw a punch — runs from any trouble." },
-    defensive:    { label: "Defensive",   emoji: "", init: 0.02, retaliate: 0.97, fleeHurt: 0.20, picksWeak: 0.0, guts: 0.70, desc: "Never starts it — but finishes whoever does." },
+    pacifist:     { label: "Pacifist",    emoji: "", init: 0.00, retaliate: 0.05, fleeHurt: 0.92, picksWeak: 0.0, guts: 0.08, desc: "Won't throw a punch, runs from any trouble." },
+    defensive:    { label: "Defensive",   emoji: "", init: 0.02, retaliate: 0.97, fleeHurt: 0.20, picksWeak: 0.0, guts: 0.70, desc: "Never starts it, but finishes whoever does." },
     protector:    { label: "Protector",   emoji: "", init: 0.07, retaliate: 0.95, fleeHurt: 0.12, picksWeak: 0.0, guts: 0.85, desc: "Wades in to defend friends and underdogs." },
     opportunist:  { label: "Opportunist", emoji: "", init: 0.12, retaliate: 0.62, fleeHurt: 0.55, picksWeak: 0.95, guts: 0.40, desc: "Only swings when the fight's already won." },
     hothead:      { label: "Hothead",     emoji: "", init: 0.30, retaliate: 0.92, fleeHurt: 0.18, picksWeak: 0.15, guts: 0.78, desc: "Quick to rage, slow to think it through." },
     bully:        { label: "Bully",       emoji: "", init: 0.24, retaliate: 0.55, fleeHurt: 0.60, picksWeak: 1.0, guts: 0.45, desc: "Hunts the weak, folds against the strong." },
     predator:     { label: "Predator",    emoji: "", init: 0.42, retaliate: 0.97, fleeHurt: 0.05, picksWeak: 0.55, guts: 0.96, desc: "Looks for a fight and rarely backs down." },
-    unpredictable:{ label: "Wildcard",    emoji: "", init: 0.18, retaliate: 0.60, fleeHurt: 0.40, picksWeak: 0.30, guts: 0.50, desc: "Nobody — including them — knows what's next." },
+    unpredictable:{ label: "Wildcard",    emoji: "", init: 0.18, retaliate: 0.60, fleeHurt: 0.40, picksWeak: 0.30, guts: 0.50, desc: "Nobody, including them, knows what's next." },
   };
   CBZ.BEHAVIOR_KEYS = Object.keys(CBZ.BEHAVIORS);
 
@@ -450,7 +450,7 @@
       { id: "studio",    name: "The Studio",         rent: 0,  price: 2500,   sqft: 450,   garage: 0, tier: 1, blurb: "One room, one window, everything in reach. A real start." },
       { id: "flat",      name: "Open-Plan Flat",     rent: 0,  price: 12000,  sqft: 950,   garage: 1, tier: 2, blurb: "Room to breathe and a single bay for the car." },
       { id: "loft",      name: "Warehouse Loft",     rent: 0,  price: 32000,  sqft: 2200,  garage: 2, tier: 3, blurb: "High ceilings, raw concrete, your whole life in one big open space." },
-      { id: "sky",       name: "Skyline Aerie",      rent: 0,  price: 80000,  sqft: 4200,  garage: 3, tier: 4, blurb: "A glass perch over downtown — the city laid out below you." },
+      { id: "sky",       name: "Skyline Aerie",      rent: 0,  price: 80000,  sqft: 4200,  garage: 3, tier: 4, blurb: "A glass perch over downtown, the city laid out below you." },
       { id: "spire",     name: "The Spire",          rent: 0,  price: 180000, sqft: 11000, garage: 6, tier: 5, elevator: true, blurb: "A tower yours top to bottom: a wraparound parking deck on the ground, glass on every wall, and one colossal loft filling the sky." },
       // ---- TASK 1: the apex home. The mega-tower PENTHOUSE — the most expensive,
       // flagship address in the city. It isn't just a place to sleep: a missile
@@ -460,7 +460,7 @@
       // flagship) onto lot.building.home; realestate.js + zillow.js sell it and
       // set g.cityOwnsPenthouse / g.cityOwnsHeli on the buy. The hangar is a
       // separate big-ticket add-on (priced below; charged in realestate.js).
-      { id: "penthouse", name: "The Apex Penthouse", rent: 0,  price: 750000, sqft: 24000, garage: 8, tier: 6, elevator: true, flagship: true, helipad: true, hangarPrice: 1200000, blurb: "The crown of the skyline: the city's tallest mega-tower, yours alone. A wraparound sky-deck garage, a glass loft that floats above downtown, and your own rooftop HELIPAD — a missile helicopter parked and ready. Buy the deck HANGAR to base a fighter jet." },
+      { id: "penthouse", name: "The Apex Penthouse", rent: 0,  price: 750000, sqft: 24000, garage: 8, tier: 6, elevator: true, flagship: true, helipad: true, hangarPrice: 1200000, blurb: "The crown of the skyline: the city's tallest mega-tower, yours alone. A wraparound sky-deck garage, a glass loft that floats above downtown, and your own rooftop HELIPAD, a missile helicopter parked and ready. Buy the deck HANGAR to base a fighter jet." },
     ],
     rentTick: 90,          // seconds between rent / property-tax charges
     taxRate: 0.0008,       // owned-home tax per tick as a fraction of its price

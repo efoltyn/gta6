@@ -132,7 +132,7 @@
     ph.spin = (state.steer || 0.6) * 4.2; ph.spinZ = -ph.spin * 0.55;
     ph.down = Math.max(ph.down || 0, 1.4); ph.kx = ph.kz = 0;
     if (CBZ.shake) CBZ.shake(0.7);
-    note("" + (reason || "Wipeout") + " — you lost the edge.", 2.4);
+    note("" + (reason || "Wipeout") + " · you lost the edge.", 2.4);
   }
 
   function pose() {

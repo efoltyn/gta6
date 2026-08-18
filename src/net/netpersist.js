@@ -180,7 +180,7 @@
 
   // ---- apply: character (queued until the city run is up; pos lands AFTER spawn)
   function applyChar(c) {
-    if (!c || c.v !== 1) { if (c) console.warn("[netpersist] char blob v" + c.v + " — skipped"); return; }
+    if (!c || c.v !== 1) { if (c) console.warn("[netpersist] char blob v" + c.v + " · skipped"); return; }
     if (c.ledger && CBZ.cityWorldAdopt) {
       // the server's character wins over whatever the local reset/ledger dealt
       if (CBZ.resetWeaponInventory) CBZ.resetWeaponInventory();
@@ -258,7 +258,7 @@
 
   // ---- apply: world (first host after server boot; queued until gangs exist) -
   function applyWorld(w) {
-    if (!w || w.v !== 1) { console.warn("[netpersist] world blob v" + (w && w.v) + " — skipped"); return; }
+    if (!w || w.v !== 1) { console.warn("[netpersist] world blob v" + (w && w.v) + " · skipped"); return; }
     if (w.gangs) applyGangs(w.gangs);
     if (w.fracture && CBZ.cityFracture && CBZ.cityFracture.apply) try { CBZ.cityFracture.apply(w.fracture); } catch (e) { console.error("[netpersist]", e); }
     /* THE CLOCK GOES BACK BEFORE THE DEMOLITION LEDGER — order is load-bearing.

@@ -268,7 +268,7 @@
     CBZ.sfx && CBZ.sfx("shoot_pistol");
     if (CBZ.shootPlayer) CBZ.shootPlayer(52, g.x, g.z, {
       heat: 16, shake: 0.62, stun: 0.22,
-      haulMsg: "SHOT DOWN — DRAGGED TO YOUR CELL",
+      haulMsg: "SHOT DOWN · DRAGGED TO YOUR CELL",
       hint: shortName(n) + " shoots back!",
     });
   }
