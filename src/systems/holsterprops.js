@@ -349,6 +349,33 @@
   const PITCH_FREE = 0.8;      // rad of torso pitch past which the body stops aiming the gun
   const MUZZLE_CLEAR = 0.05;   // m of air under the muzzle at the grazing angle
   const _hgUpAxis = new THREE.Vector3(0, 1, 0);
+  /* ---- A GUN BEING RELOADED IS NOT A GUN BEING AIMED ---------------------
+     systems/gunhands.js owns the reload clock (it reads fpsmode's own
+     fps.reloading, so there is one timer, not two) and publishes the envelope
+     here. Two things happen to the weapon while that envelope is up:
+       · it comes off the crosshair to a WORK position — muzzle forward and a
+         little down, in body space — because a magazine change happens in
+         front of your chest, not down the sights. This is also what makes a
+         reload read when the player never raised the sights at all;
+       · it ROLLS about its own barrel toward the body, presenting the magwell
+         to the hand that is coming for it. From the chase camera that roll is
+         most of the animation; the arm is the other half.
+     Absent the module, gunReloadPose is undefined and every line below is
+     skipped — the gun poses exactly as it always has. */
+  const RELOAD_WORK = new THREE.Vector3(0.12, -0.30, 0.95).normalize();
+  const _rlDir = new THREE.Vector3();
+  function reloadPose() {
+    if (!CBZ.gunReloadPose || CBZ.CONFIG.CHAR_RELOAD_ANIM === false) return null;
+    const r = CBZ.gunReloadPose();
+    return r && r.active && r.weight > 0.001 ? r : null;
+  }
+  // blend the aim/low-ready direction toward the work position
+  function reloadAimBlend(rl, ch, dir) {
+    if (!rl || !ch || !ch.body) return;
+    ch.body.getWorldQuaternion(_hgBodyQ);
+    _rlDir.copy(RELOAD_WORK).applyQuaternion(_hgBodyQ);
+    dir.lerp(_rlDir, rl.weight).normalize();
+  }
 
   if (CBZ.onAlways) CBZ.onAlways(54, function () {
     const hand = mounts.hand;
@@ -428,7 +455,24 @@
     const drawingBlocked = !!(transfer && transfer.to && transfer.t < transfer.dur * 0.62);
     hand.prop.visible = !drawingBlocked;
     hand.prop.position.set(0.02, 0.02, 0.03);
-    const presenting = CBZ.tpPresenting && CBZ.tpPresenting();
+    aimHandProp();
+  });
+
+  /* ---- ORIENT THE DRAWN GUN, callable more than once a frame -------------
+     Extracted so systems/gunhands.js can re-run it AFTER it has moved the
+     arms. It has to: the weapon's world orientation is written as a LOCAL
+     quaternion relative to the wrist socket, and the aim ray is
+     parallax-corrected from the gun's own POSITION — so a pass that shoulders
+     the rifle (pulling the firing hand back until the off hand can reach the
+     handguard) invalidates both inputs. Re-running is cheap and is the only
+     thing that keeps the barrel on the crosshair afterwards. */
+  function aimHandProp() {
+    const hand = mounts.hand;
+    const ch = CBZ.playerChar;
+    if (!hand.prop || !hand.prop.parent || !ch || !ch.body) return;
+    const socket = hand.prop.parent;
+    const rl = reloadPose();
+    const presenting = (CBZ.tpPresenting && CBZ.tpPresenting()) || !!rl;
     if (presenting && CBZ.camera) {
       // WORLD BARREL LOCK while presenting: the pose chain (body-yaw damp →
       // shoulder → elbow → hand) only APPROXIMATES the aim, so a socket-posed
@@ -440,6 +484,7 @@
       _hgDir.set(0, 0, -1).applyQuaternion(CBZ.camera.quaternion);
       _hgTarget.copy(CBZ.camera.position).addScaledVector(_hgDir, 120);
       _hgDir.copy(_hgTarget).sub(_hgPos).normalize();
+      reloadAimBlend(rl, ch, _hgDir);   // …unless it is being reloaded
       // Physics wins over a point-blank aim ray: when crouched/prone beside a
       // slope, the crosshair may be below the muzzle's physically possible
       // line. Keep the bullet ray authoritative, but do not render half the gun
@@ -453,6 +498,11 @@
       _hgWorldQ.setFromRotationMatrix(_hgMat);
       socket.getWorldQuaternion(_hgParentQ);
       hand.prop.quaternion.copy(_hgParentQ.invert()).multiply(_hgWorldQ);
+      if (rl) {
+        // roll the magwell toward the hand coming for it, and drop the muzzle
+        hand.prop.rotateZ(rl.cant);
+        hand.prop.rotateX(rl.dip);
+      }
     } else {
       // LOW-READY (screenshot-diagnosed): the old socket-local pose pointed
       // the barrel straight down the lowered forearm — dead away from the
@@ -495,5 +545,17 @@
       socket.getWorldQuaternion(_hgParentQ);
       hand.prop.quaternion.copy(_hgParentQ.invert()).multiply(_hgWorldQ);
     }
-  });
+  }
+  CBZ.tpHandWeaponRelock = aimHandProp;
+
+  /* THE DRAWN GUN, for anything that has to reason about where it physically
+     ended up this frame rather than where the pose meant to put it. This
+     module is the one owner of that prop and of its final world orientation,
+     so it is the one place that can answer honestly. Null unless a weapon is
+     actually visible in the third-person hand.
+     Consumer: systems/gunhands.js (support-hand IK + the reload animation). */
+  CBZ.tpHandWeapon = function () {
+    return mounts.hand.prop && mounts.hand.prop.visible && mounts.hand.prop.parent
+      ? mounts.hand.prop : null;
+  };
 })();

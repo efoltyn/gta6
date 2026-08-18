@@ -45,6 +45,14 @@
     // hand wrapping the center grip
     box(g, 0.160, 0.105, 0.135, mat.skin, 0, -0.155, -0.13, -0.06);
     g.userData.muzzle = new THREE.Vector3(0, 0.045, -0.52);
+    // WHERE THE HANDS GO — see systems/gunhands.js. Mag-in-grip, so the off
+    // hand has no handguard: it cups the barrel nut ahead of the receiver.
+    g.userData.grips = {
+      support: new THREE.Vector3(0, -0.020, -0.335),
+      mag: new THREE.Vector3(0, -0.330, -0.172),       // the magazine IS the grip
+      charge: new THREE.Vector3(0, 0.150, -0.130),     // top-cover cocking knob
+      style: "mag",
+    };
     return g;
   };
 })();
