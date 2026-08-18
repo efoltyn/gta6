@@ -744,6 +744,20 @@
     return touch;
   };
 
+  /* EDGE OFFSETS TAKE A CSS LENGTH, NOT JUST A NUMBER.
+
+     The furniture layer is `inset:0` on the raw viewport, so a plain
+     `bottom: 24` puts a control UNDER the home indicator on every phone made
+     since 2017 — while the HUD next to it, which uses env(safe-area-inset-*),
+     sits correctly above it. The two layers disagreed by the height of the
+     inset and nothing could express the difference. Now anything that can be
+     a CSS length can be one: pass a number for plain pixels, or a string like
+     "calc(160px + env(safe-area-inset-bottom,0px))" to respect the notch. */
+  function len(v, dflt) {
+    const x = v != null ? v : dflt;
+    return typeof x === "number" ? x + "px" : String(x);
+  }
+
   // addButton({glyph, word, key, latch, right, bottom, size, id})
   // `key` is the desktop code this button stands in for — the page keeps ONE
   // handler. `word:true` renders a verb pill (interaction), otherwise an icon.
@@ -755,13 +769,13 @@
     const S = o.size || 64;
     b.style.width = S + "px";
     b.style.height = S + "px";
-    b.style.right = (o.right != null ? o.right : 24) + "px";
-    b.style.bottom = (o.bottom != null ? o.bottom : 24) + "px";
-    if (o.left != null) { b.style.left = o.left + "px"; b.style.right = "auto"; }
+    b.style.right = len(o.right, 24);
+    b.style.bottom = len(o.bottom, 24);
+    if (o.left != null) { b.style.left = len(o.left); b.style.right = "auto"; }
     // TOP ANCHORING, because a layer that can only hang off the bottom edge
     // forces every page to put system controls (pause, mute, camera) in the
     // thumb zone with the game verbs, where they get hit by accident.
-    if (o.top != null) { b.style.top = o.top + "px"; b.style.bottom = "auto"; }
+    if (o.top != null) { b.style.top = len(o.top); b.style.bottom = "auto"; }
     b.textContent = o.glyph || o.label || "";
     touch.root.appendChild(b);
 
@@ -804,8 +818,8 @@
     const el = document.createElement("div");
     el.className = "mt-slider";
     const W = o.width || 46, H = o.height || 190;
-    el.style.cssText += "width:" + W + "px;height:" + H + "px;right:" +
-      (o.right != null ? o.right : 24) + "px;bottom:" + (o.bottom != null ? o.bottom : 108) + "px;";
+    el.style.cssText += "width:" + len(W) + ";height:" + len(H) +
+      ";right:" + len(o.right, 24) + ";bottom:" + len(o.bottom, 108) + ";";
     const fill = document.createElement("i");
     const cap = document.createElement("b");
     cap.textContent = o.label || "";

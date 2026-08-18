@@ -79,6 +79,10 @@
   // rate command it replaced, kept live because it is also the only honest
   // way to A/B the thing in a running match.
   if (CBZ.CONFIG.AIRFRAME_BANK_HOLD_V1 == null) CBZ.CONFIG.AIRFRAME_BANK_HOLD_V1 = true;
+  // Rotation on the mains (see the ground contact in step()). False restores
+  // the attitude leveller that ran at every speed, which is the one-line
+  // revert the before/after preset photographs.
+  if (CBZ.CONFIG.AIRFRAME_ROTATE_V1 == null) CBZ.CONFIG.AIRFRAME_ROTATE_V1 = true;
 
   const airframe = (CBZ.airframe = CBZ.airframe || {});
   let liveCount = 0;
@@ -357,9 +361,21 @@
           const f = Math.max(0, 1 - decel / horiz);
           v.x *= f; v.z *= f;
         }
+        /* LEVELLING THE ATTITUDE ON THE WHEELS IS FOR TAXIING, NOT FOR
+           ROTATING. This dragged pitch to zero at 3/s whenever the gear was
+           down — at ANY speed — so an aeroplane commanding the nose up on the
+           takeoff roll was pulling against a spring that always won, and it
+           left the ground only when the runway ran out from under it and the
+           terrain dropped away. A real aeroplane rotates on its mains.
+           Below flying speed it IS just a vehicle on wheels, so level it;
+           above, the elevator gets the nose. Nose-DOWN is always levelled,
+           because that direction is the gear compressing, not a rotation. */
+        const rotatingOff = CBZ.CONFIG.AIRFRAME_ROTATE_V1 !== false &&
+          speed > P.stallSpeed * 1.5;
+        const lvl = Math.min(1, dt * 3.0);
         _e.setFromQuaternion(af.quat, "YXZ");
-        _e.x += (0 - _e.x) * Math.min(1, dt * 3.0);
-        _e.z += (0 - _e.z) * Math.min(1, dt * 3.0);
+        if (!rotatingOff || _e.x < 0) _e.x += (0 - _e.x) * lvl;
+        _e.z += (0 - _e.z) * lvl;          // the gear holds the WINGS level, always
         af.quat.setFromEuler(_e);
         // a hard arrival is the caller's business, not ours — report it
         if (!wasGrounded) af.touchdownSpeed = -vy;
