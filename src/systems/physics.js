@@ -68,12 +68,16 @@
   // Broadphase query for systems that need to inspect nearby world geometry
   // without resolving a collision. Callers own/reuse `out`; results are the
   // same collider objects from CBZ.colliders, deduplicated across grid cells.
-  const colQuerySeen = new Set();
+  // Dedup across grid cells by stamping the collider with the query id — a
+  // property compare instead of a Set hash per candidate. Same results; this
+  // query runs for every steering ped and crowd agent every frame and the Set
+  // overhead alone profiled at several % of the sim tick.
+  let colQueryId = 0;
   CBZ.queryCollidersNear = function (x, z, radius, out) {
     if (colDirty || colCount !== CBZ.colliders.length) rebuildColliderGrid();
     out = out || [];
     out.length = 0;
-    colQuerySeen.clear();
+    const qid = ++colQueryId;
     // same mode gate as collide(): stamped city colliders are phantom walls
     // in the prison/survival coordinate space, so queries skip them there.
     const cityOn = !CBZ.game || CBZ.game.mode === "city";
@@ -85,8 +89,8 @@
       for (let i = 0; i < bucket.length; i++) {
         const c = bucket[i];
         if (c._city && !cityOn) continue;
-        if (colQuerySeen.has(c)) continue;
-        colQuerySeen.add(c);
+        if (c._qSeen === qid) continue;
+        c._qSeen = qid;
         out.push(c);
       }
     }
