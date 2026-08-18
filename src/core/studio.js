@@ -1518,6 +1518,48 @@
 
     let throttleSlider = null;
     const furniture = [];
+
+    /* THE RIGHT-HAND FURNITURE IS ONE BLOCK, SAT DOWN ON THE RADAR.
+
+       The verbs used to march LEFTWARD along the bottom edge — right: 24, 120,
+       216 — which walks a second button into the middle of the screen and, on
+       a flying page, strands it under a throttle slider it has nothing to do
+       with. They are one column now: the slider outboard where it is dragged,
+       the verbs inboard where they are tapped, every top edge on one line.
+
+       AND THE BLOCK SITS AS LOW AS THE SCREEN ALLOWS. It used to float in the
+       middle of the right edge with ~60 px of dead air under it and the radar
+       marooned below that, because each piece was placed by a number somebody
+       picked rather than against the thing it had to clear. BASE is that thing
+       stated once: the scope is RADAR px tall standing RADAR_GAP off the
+       bottom, so nothing may come below its top edge plus a little air — and
+       the whole cluster is built UP from that line.
+
+       env(safe-area-inset-bottom) is in there because the furniture layer is
+       `inset:0` on the RAW viewport while the radar is placed with the inset,
+       so a plain pixel number here and a calc() there drift apart by the
+       height of the home indicator and the two overlap on exactly the phones
+       this layout is for.
+
+       PWR's cap is the alignment reference: microboot draws it CAP_INSET
+       inside the slider's own top edge, and the slider is sized so that line
+       lands on the TOP button's top edge. The column fills BOTTOM-UP in
+       declaration order, so the verb a page lists first — the one pressed
+       every few seconds — is nearest the resting thumb, and a rare armed verb
+       (a nuke) is the one you reach up for. */
+    const RADAR = 132, RADAR_GAP = 14, AIR = 14;
+    const BASEPX = RADAR_GAP + RADAR + AIR;                  // 160 px of scope + air
+    const BASE = "calc(" + BASEPX + "px + env(safe-area-inset-bottom,0px))";
+    const CAP_INSET = 6;                      // .mt-slider>b { top: 6px }
+    const BTN = 76, BTN_GAP = 14;
+    const nBtn = Object.keys(btnDefs).length;
+    const STACK_H = nBtn * BTN + Math.max(0, nBtn - 1) * BTN_GAP;
+    // the throttle is as tall as the stack it aligns to, floored so a page
+    // with a single verb still gets a slider long enough to drag accurately
+    const PWR = { right: 24, width: 46, height: Math.max(150, STACK_H + CAP_INSET) };
+    // where the cap's top edge lands, measured up from the same base
+    const STACK_TOP = BASEPX + PWR.height - CAP_INSET;
+
     if (coarse) {
       T.init({});
       // A FLYING GAME ON A PHONE NEEDS A THROTTLE, and holding a key is not an
@@ -1525,7 +1567,8 @@
       // to the one control that actually needs to be held at a value.
       if (kind === "fly" && T.addSlider) {
         throttleSlider = T.addSlider({
-          label: "PWR", value: 0.72, right: 24, bottom: 210, height: 168,
+          label: "PWR", value: 0.72, right: PWR.right, bottom: BASE,
+          width: PWR.width, height: PWR.height,
           onChange: function (v) { C.throttle = v; },
         });
         furniture.push(throttleSlider);
@@ -1535,16 +1578,29 @@
          ten minute half nobody can stop. Added here, once, above the page. */
       if (opts.pause !== false) {
         furniture.push(T.addButton({
-          label: "II", size: 44, right: 22, top: 16,
+          label: "II", size: 44, right: 22,
+          top: "calc(16px + env(safe-area-inset-top,0px))",
           onDown: function () { if (CBZ.micro) CBZ.micro.paused = !CBZ.micro.paused; },
         }));
       }
+      // inboard of the slider when there is one, on the outside edge when
+      // there is not — a walking surface has no throttle to clear
+      const colRight = throttleSlider ? PWR.right + PWR.width + 16 : 24;
       let i = 0;
       for (const name in btnDefs) {
         (function (n, idx) {
+          // idx 0 is the bottom of the stack; the last one declared lands with
+          // its top edge on STACK_TOP, level with the PWR cap
+          // idx 0 is the bottom of the stack. With a slider the stack hangs
+          // from its cap; without one it stands straight on BASE. Either way
+          // the lowest button never comes below BASE, which is the radar.
+          const up = idx * (BTN + BTN_GAP);
+          const bottom = throttleSlider
+            ? "calc(" + (STACK_TOP - STACK_H + up) + "px + env(safe-area-inset-bottom,0px))"
+            : "calc(" + (BASEPX + up) + "px + env(safe-area-inset-bottom,0px))";
           handles[n] = T.addButton({
-            label: btnDefs[n], word: String(btnDefs[n]).length > 2, size: 76,
-            right: 24 + idx * 96, bottom: kind === "fly" ? 108 : 132,
+            label: btnDefs[n], word: String(btnDefs[n]).length > 2, size: BTN,
+            right: colRight, bottom: bottom,
             onDown: function () { state.held[n] = true; state.tapped[n] = true; },
             onUp: function () { state.held[n] = false; },
           });
