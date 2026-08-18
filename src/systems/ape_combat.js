@@ -376,7 +376,7 @@
     else if (FLAIL_ON() && HOLDS.length < MAX_HOLDS && crowd >= 2 &&
              (swings >= 2 || crowd >= 4) &&
              (attacker._apeGrabT || -99) < now - GRAB_CD &&
-             grabbable(attacker, target) && roll() < (crowd >= 4 ? 0.52 : 0.30)) {
+             grabbable(attacker, target) && roll() < (crowd >= 4 ? 0.68 : 0.32)) {
       style = 'ape_grab';
     }
     /* THE CHARGE IS THE ARRIVAL. Authored as "throw it when the target is out
