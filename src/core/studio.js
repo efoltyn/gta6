@@ -238,7 +238,7 @@
     ragdoll: {
       gives: "REAL DEAD PEOPLE: 13 mass points, Jakobsen sticks, joint limits, " +
              "ground friction and buoyancy, writing back onto the SAME rig " +
-             "meshes — so a body folds over a kerb, slumps down a stairwell " +
+             "meshes, so a body folds over a kerb, slumps down a stairwell " +
              "and skids off a shotgun blast instead of rotating rigidly about " +
              "one axis. The animals' solver (systems/quadruped_ragdoll.js) is " +
              "a copy of this file's method; this is the original",
