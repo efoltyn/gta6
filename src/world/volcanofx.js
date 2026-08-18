@@ -669,6 +669,19 @@
 
     let adv = Math.min(seg * 1.05, len);   // metres of flow laid down
     let age = 0, dead = false, lidT = 0, lastSt = -1;
+    /* THE QUENCH — what happens when the eruption stops feeding this flow.
+       quenchT < 0 is a live river. quench() starts the clock: over ~8 s the
+       front stalls, the advection phase winds down (a chilling surface stops
+       travelling), the melt dies to near-black rock with the last ember
+       seams in the deepest cracks, the haze and the pooled light fade out.
+       Fully settled, update() becomes a no-op and the flow just STANDS
+       there as dark crusted rock — which is the vulcanology (supply stops,
+       THEN it chills black) and the fix for the old endEruption pop, where
+       a glowing river vanished from the hillside in a single frame. phT
+       replaces `age` in the phase term so the wind-down actually slows the
+       lace instead of just dimming it. */
+    let quenchT = -1, phT = 0, settled = false;
+    const QUENCH_SECS = 8;
     const _v = new THREE.Vector3();
     /* THE SURFACE RUNS FASTER THAN THE FRONT. The nose is braked by the crust
        it is pushing; the melt behind it is not. ~2.4x is the ratio that reads
@@ -769,15 +782,24 @@
     function stationThick(i) {
       const bornAt = i * seg / Math.max(0.001, speed);
       const localAge = clamp(age - bornAt, 0, 120);
-      return { t: 0.18 + 0.5 * (localAge / (localAge + 6)) + 0.1 * wProf[i], cool: clamp(localAge / 90, 0, 1) };
+      // the quench overrides the slow clock: with the supply cut, the whole
+      // run chills together over QUENCH_SECS instead of station by station
+      const qk = quenchT >= 0 ? Math.min(1, quenchT / QUENCH_SECS) : 0;
+      return {
+        t: 0.18 + 0.5 * (localAge / (localAge + 6)) + 0.1 * wProf[i],
+        cool: clamp(localAge / 90 + qk, 0, 1),
+        qk: qk,
+      };
     }
 
     function writeStations(from, to) {
-      const ph = age * skinV * LID_K;
+      const ph = phT * skinV * LID_K;
       for (let i = from; i <= to && i < N; i++) {
         const p = path.pts[i], st = stationThick(i);
+        // the second quench factor lands the settled flow at ~4% hot: black
+        // rock, with the last dull-red seams surviving in the deepest lace
         ring(i, p.x, p.y, p.z, nX[i], nZ[i], halfW * wProf[i], st.t,
-          hot0[i] * (1 - 0.58 * st.cool), i * seg, ph, cGY, mGY);
+          hot0[i] * (1 - 0.58 * st.cool) * (1 - 0.9 * st.qk), i * seg, ph, cGY, mGY);
       }
     }
 
@@ -816,7 +838,7 @@
       }
       const st = stationThick(i);
       ring(i, _v.x, _v.y, _v.z, nx, nz, hw, st.t * (0.55 + 0.45 * frac),
-        hot0[i] * (1 - 0.58 * st.cool), adv, age * skinV * LID_K, cGY, mGY);
+        hot0[i] * (1 - 0.58 * st.cool) * (1 - 0.9 * st.qk), adv, phT * skinV * LID_K, cGY, mGY);
       // put the station's own bed back — the nose borrowed those slots
       for (let c = 0; c < COLS; c++) {
         const k = i * COLS + c;
@@ -846,10 +868,16 @@
         return { x: _v.x, y: _v.y, z: _v.z };
       },
       update(dt) {
-        if (dead) return handle;
+        if (dead || settled) return handle;
         age += dt;
-        adv = Math.min(len, adv + speed * dt);
+        const qk = quenchT >= 0 ? Math.min(1, (quenchT += dt) / QUENCH_SECS) : 0;
+        // a chilling surface stops travelling: the phase winds down with the
+        // heat instead of the lace sliding under a dead crust forever
+        phT += dt * (1 - qk);
+        if (quenchT < 0) adv = Math.min(len, adv + speed * dt);
         // the front forks where a fork was armed — see BRANCHING above
+        // (a quenched flow is no longer fed, so it arms nothing new)
+        if (quenchT >= 0) branchPts.length = 0;
         for (let b = 0; b < branchPts.length; b++) {
           const bp = branchPts[b];
           if (bp.done || adv < bp.at) continue;
@@ -883,7 +911,9 @@
            that was the tapered nose gets its full width on the same frame it
            stops being the front. */
         lidT += dt;
-        if (st !== lastSt || lidT >= 0.033) {
+        // qk >= 1 forces one FINAL full write past the 30 Hz throttle, so the
+        // settled colours actually land before update() stops doing anything
+        if (st !== lastSt || lidT >= 0.033 || qk >= 1) {
           lidT = 0; lastSt = st;
           writeStations(0, Math.max(0, st - 1));
         }
@@ -905,12 +935,13 @@
         // per-vertex rewrite
         // capped at 1.04: over-driving vertex colours through the output
         // encoding is what bleached the melt toward white in the peek shots
-        const fl = 0.92 + 0.1 * Math.sin(age * 5.3) + Math.random() * 0.04;
+        // a dying surface stops breathing too — the flicker rides (1 - qk)
+        const fl = 0.96 + (0.06 * Math.sin(age * 5.3) + Math.random() * 0.04 - 0.04) * (1 - qk);
         chMat.color.setScalar(clamp(fl, 0.75, 1.04));
 
         for (let i = 0; i < haze.length; i++) {
           const H = haze[i], s = adv * H.u;
-          if (s < 0.5) { H.sp.visible = false; continue; }
+          if (s < 0.5 || qk >= 1) { H.sp.visible = false; continue; }
           pathAt(path, s, _v);
           H.sp.visible = true;
           H.sp.position.set(
@@ -918,21 +949,39 @@
             _v.y + 1.4 + 0.7 * Math.sin(age * 1.6 + H.ph),
             _v.z + Math.cos(age * 0.8 + H.ph) * width * 0.3
           );
-          const sc = width * (0.42 + 0.13 * Math.sin(age * 1.1 + H.ph));
-          H.sp.scale.set(sc, sc, 1);
+          // the convection dies with the heat under it
+          const sc = width * (0.42 + 0.13 * Math.sin(age * 1.1 + H.ph)) * (1 - qk);
+          H.sp.scale.set(Math.max(0.01, sc), Math.max(0.01, sc), 1);
         }
         if (light) {
           pathAt(path, adv * 0.82, _v);
           light.position.set(_v.x, _v.y + 2.2, _v.z);
-          light.intensity = 1.5 + 0.35 * Math.sin(age * 4.1);
+          light.intensity = (1.5 + 0.35 * Math.sin(age * 4.1)) * (1 - qk);
+        }
+        // fully chilled: one last frame just wrote the black-rock colours,
+        // so the scar can stop paying for updates it no longer shows
+        if (qk >= 1) { settled = true; chMat.color.setScalar(1); }
+        return handle;
+      },
+      /* the eruption stopped feeding this flow. It stalls, chills black over
+         QUENCH_SECS, and STAYS — the caller keeps it as a scar (the lahar's
+         harden() precedent) instead of deleting a glowing river mid-frame.
+         Children are branches of the same supply, so they die with it. */
+      quench() {
+        if (quenchT < 0) {
+          quenchT = 0;
+          for (let b = 0; b < children.length; b++) children[b].quench();
         }
         return handle;
       },
+      get quenched() { return quenchT >= 0; },
       // is (x,z) ON the flow? The lethal corridor IS the drawn ribbon —
       // the same wProf the geometry used, so what kills you is what glows.
       // A branch is part of the flow, so its ribbon kills through this same
       // call and no caller has to know the tree exists.
       hitTest(x, z) {
+        // cold rock is terrain, not a hazard — what kills you is what glows
+        if (quenchT >= 0) return false;
         const c = pathCoord(path, x, z, adv);
         if (c.s >= 0 && c.s <= adv) {
           const i = clamp(Math.round(c.s / seg), 0, N - 1);
@@ -2019,11 +2068,15 @@
      can see it.
      ============================================================ */
   CBZ.volcanoAudit = function () {
-    let lavaTransparent = 0, lavaMeshes = 0, lavaTris = 0;
-    const lavaTips = [], lavaMids = [];
+    let lavaTransparent = 0, lavaMeshes = 0, lavaTris = 0, lavaScars = 0;
+    const lavaTips = [], lavaMids = [], lavaScarTips = [], lavaScarMids = [];
     for (let i = 0; i < LIVE.lava.length; i++) {
       const f = LIVE.lava[i];
-      try { lavaTips.push(f.tip); lavaMids.push(f.mid); } catch (e) {}
+      // a quenched scar is not a front: cameras and threat maps aiming off
+      // lavaTips must frame the rivers that still run, not last event's rock
+      // — the scars publish their own pair for anything that wants the rock
+      if (f.quenched) { lavaScars++; try { lavaScarTips.push(f.tip); lavaScarMids.push(f.mid); } catch (e) {} }
+      else { try { lavaTips.push(f.tip); lavaMids.push(f.mid); } catch (e) {} }
       const ms = [f.mesh, f.channel];
       for (let k = 0; k < ms.length; k++) {
         const m = ms[k]; if (!m || !m.material) continue;
@@ -2045,7 +2098,10 @@
     }
     return {
       v2: CBZ.CONFIG.VOLCANO_V2 !== false,
-      lavaFlows: LIVE.lava.length,
+      // live rivers only; the kept black flows are lavaScars, so the two
+      // numbers stay comparable with builds that deleted flows at the end
+      lavaFlows: LIVE.lava.length - lavaScars,
+      lavaScars: lavaScars,
       lavaMeshes: lavaMeshes,
       lavaTransparent: lavaTransparent,        // MUST be 0
       lavaOpaque: lavaTransparent === 0,
@@ -2056,6 +2112,8 @@
       // line from the vent (it did not; that is what a fall line is for)
       lavaTips: lavaTips,
       lavaMids: lavaMids,
+      lavaScarTips: lavaScarTips,
+      lavaScarMids: lavaScarMids,
       // the fan: how many live flows are branch children, and the incandescent
       // vent apron count — the two 2026-08-15 reference-photo features as
       // numbers, so the ratchet can see them

@@ -3168,9 +3168,26 @@
     ctx.st.erStreams = null;
     (ctx.st.erPools || []).forEach((P) => rmMesh(P.m));
     ctx.st.erPools = null;
-    // the lava cools and goes; the flows themselves are transient hazards
-    (ctx.st.erLava || []).forEach((f) => f.dispose());
-    ctx.st.erLava = null;
+    /* THE LAVA DOES NOT VANISH — IT DIES WHERE IT STANDS. The old line here
+       disposed every flow the frame the eruption ended: a glowing river
+       popped off the hillside mid-frame. quench() is the physics (the
+       supply stops, THEN it chills black over ~8 s, ember seams last) and
+       the five stems ride ONE composite scar so the eviction cap below
+       counts eruptions, not stems. Cold rock kills nothing: hitTest goes
+       false on quench, and this list is nulled out of the actor pass. */
+    if (ctx.st.erLava) {
+      const flows = ctx.st.erLava;
+      if (flows.length && flows.every((f) => typeof f.quench === "function")) {
+        flows.forEach((f) => f.quench());
+        volScars.push({
+          update(dt) { for (let i = 0; i < flows.length; i++) flows[i].update(dt); },
+          dispose() { for (let i = 0; i < flows.length; i++) { try { flows[i].dispose(); } catch (e) {} } },
+        });
+      } else {
+        flows.forEach((f) => f.dispose());
+      }
+      ctx.st.erLava = null;
+    }
     if (ctx.st.pyro) { ctx.st.pyro.dispose(); ctx.st.pyro = null; }
     /* THE SCARS OUTLIVE THE EVENT, and that is the point: a lahar SETS, and
        ash does not wash off between disasters. Both stay in the world for the
