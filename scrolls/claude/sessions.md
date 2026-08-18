@@ -4178,3 +4178,75 @@ still seated three seconds on and released cleanly by propStand);
 player stood back up) — the two-sided shape mode-engine-check demands.
 Verified: default 12/12, revert 4/4, MATHGATE ok (400 ticks, det ok,
 errors baseline-only), city regression probe 37 seated peds offSeat=0.
+
+## 2026-08-17 — THE FRAME, NOT THE LOAD (react-doctor wave)
+
+Owner: run react-doctor on the game, then make it run much much faster —
+in-game feel, not load time. React Doctor (millionco, oxlint-based) scanned
+813 files: 372 warnings, zero of them React (this is IIFE + r128) and, on
+inspection, none on a hot path — its `indexOf`-in-loop hits are 3-element
+arrays in bounded scans. The real wave came from a CDP sampling profiler
+attached to the live probe world (scratchpad cdprofile.mjs pattern —
+Profiler.start → stepSim ×400 → aggregate self-hits by function). Calm
+street, seed 90210, all before/after on the same machine.
+
+**Sim tick 29.7 → 24.9 ms. Render-side updateMatrixWorld 10.8 → 6.9 ms/frame.**
+
+The finds, in guilt order:
+
+1. **The coastline was recomputed from noise for every water question**
+   (~9% of the tick): every cityWaterAt/isSurfaceWater — cars' overWater,
+   swim, gore, floods — funnels through waterfield's coastAt →
+   continent.js shoreField, an analytic field over noise2/pathBodyField/
+   inSolidRegion. Memoized on a 4m corner grid with bilinear blending
+   (exact at corners, <1m coastline shift, pure function of (x,z) so MP/
+   determinism-safe; worldgen calls shoreField DIRECTLY and is untouched).
+   Plus: overDeck ran a REGEX per region per call (isLink) — now cached on
+   the region object; plus a last-cell fast path. Continent fields left the
+   profile entirely.
+2. **pedinstance walked all ~700 rigs every frame** (a:96, 3.4→1.5ms;
+   clean A/B 2.37→0.86ms): far (>40m) rigs now walk on 1 of 3 frames
+   (`PED_SYNC_STAGGER`), phases spread by group.id; every same-frame
+   contract kept — park gates run every frame, sweepRig knows a held frame
+   from a missing part via r.skipStamp.
+3. **The renderer recomposed every matrix the instancer had ALREADY
+   composed** — 33k ped-rig + 9k car nodes of the 48k matrixAutoUpdate
+   set. New shared contract: loop.js bumps CBZ._matrixOwnStamp once per
+   frame; a system that provably left a subtree's world matrices correct
+   stamps the root; core/matrixskip.js skips the whole subtree on stamp
+   equality. Stamps expire next frame BY CONSTRUCTION (no teardown
+   bookkeeping, nothing can stay stale). Stampers: pedinstance walked+held
+   rigs (`PED_MATRIX_OWN`), vehicles far-stride skipped cars and settled
+   parked cars >60m (`CAR_MATRIX_HOLD`; parkSeat's own cache is the
+   "settled" oracle; near cars stay live for doors/entry). Coverage
+   measured: 116/622 rigs (the non-culled ones), 386/420 cars.
+4. **reactions.js ran its 300-line pose body for every calm ped**: added
+   the quiescent fast path — a complete enumeration of the three edge
+   detectors, every external pose input and every stored channel; any
+   nonzero falls through. Measured 98-99% skip on calm streets, and
+   CBZ.reactionsAudit() now reports quiet/full/firstBlock forever.
+5. **The hot reticle asked isProtectedActor for all ~630 peds every
+   frame** (2.6%): bare radii are strictly inside assisted radii, so
+   findActorHit now tests assisted spheres first and asks the predicate
+   only on a would-be hit (still never cached — childsafe's obligation
+   kept; also no longer asked for merely-culled invisible peds). Gone from
+   the profile.
+6. **queryCollidersNear deduped via Set hashing** for every steering ped +
+   crowd probe: now a query-id stamp on the collider (9.1→7.0%).
+
+GATE: MATHGATE ok (90210:329/182/207, 400 ticks, det ok, errors
+baseline-only) with everything default-ON. Reverts: ?cfg_PED_SYNC_STAGGER
+/ PED_MATRIX_OWN / CAR_MATRIX_HOLD = 0.
+
+Traps for the next wave: (a) probe-world measurements are only comparable
+within one boot — event spikes (an ambient craft crashing mid-burst made
+airtraffic read 3.1ms when its steady state is 0.26) and boot-state drift
+lie across boots; A/B a cfg flag live in ONE world. (b) probe.mjs --serve
+edits need a serve RESTART to load; two restarts racing leaves the
+lockfile pointing at the stale one — pgrep before trusting it. (c) The
+render walk's remaining 6.9ms is the 170k-node visit floor + ~15k unnamed
+live objects; the next real render-CPU win is object-count reduction
+(mid-play accretion measured at only ~13 obj/s net, so it's the standing
+count, not a leak). (d) 6.7M tris are mostly redhollow/backcountry/mercy
+nature megameshes — vertex-cost waste on paper, but NOT the bottleneck on
+Apple GPUs; don't chase it before draw/CPU.
