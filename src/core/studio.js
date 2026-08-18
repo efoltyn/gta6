@@ -1611,9 +1611,15 @@
          touchscreen has no keys, so a page that never thinks about it ships a
          ten minute half nobody can stop. Added here, once, above the page. */
       if (opts.pause !== false) {
+        // TOP LEFT, UNDER THE HEALTH METER — the only free corner. The right
+        // one is a column the HUD already owns: .scr sits at top 13 and .fd
+        // runs from top 86 down, so a 44 px button at top 16 on that side
+        // landed ON the score, which is exactly how it shipped. Health is
+        // ~48 px tall from top 14, so 64 clears it.
         furniture.push(T.addButton({
-          label: "II", size: 44, right: 22,
-          top: "calc(16px + env(safe-area-inset-top,0px))",
+          label: "II", size: 44,
+          left: "calc(14px + env(safe-area-inset-left,0px))",
+          top: "calc(64px + env(safe-area-inset-top,0px))",
           onDown: function () { if (CBZ.micro) CBZ.micro.paused = !CBZ.micro.paused; },
         }));
       }
