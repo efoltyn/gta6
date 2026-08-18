@@ -235,16 +235,23 @@
      outer edge (r * 1.06), not the removed floor: between the two lies the
      sliver of ground the wall stands behind, and on the island that sliver is
      where the sea was showing through as a blue crescent at the rim. */
+  // core/groundmask.js deals the slots for EVERY owner of holes now, so this
+  // file publishes its shafts and reads back which of them won one.
+  if (CBZ.groundMaskProvide) {
+    CBZ.groundMaskProvide(function () {
+      maskReq.length = 0;
+      for (let i = 0; i < live.length; i++) {
+        const h = live[i];
+        maskReq.push({ x: h.x, z: h.z, r: h.r * 1.06, y: h.gy, src: h });
+      }
+      return maskReq;
+    });
+  }
   function syncMask() {
     slotted.length = 0;
-    if (!CBZ.groundMaskApply) { for (let i = 0; i < live.length; i++) setDrawn(live[i], true); return; }
-    maskReq.length = 0;
-    for (let i = 0; i < live.length; i++) {
-      const h = live[i];
-      maskReq.push({ x: h.x, z: h.z, r: h.r * 1.06, y: h.gy, src: h });
-    }
-    const won = CBZ.groundMaskApply(maskReq);
-    for (let i = 0; i < won.length; i++) slotted.push(won[i]);
+    if (!CBZ.groundMaskSync) { for (let i = 0; i < live.length; i++) setDrawn(live[i], true); return; }
+    const w = CBZ.groundMaskSync();
+    for (let i = 0; i < w.length; i++) slotted.push(w[i]);
     for (let i = 0; i < live.length; i++) setDrawn(live[i], slotted.indexOf(live[i]) >= 0);
   }
 
