@@ -79,6 +79,10 @@
   // rate command it replaced, kept live because it is also the only honest
   // way to A/B the thing in a running match.
   if (CBZ.CONFIG.AIRFRAME_BANK_HOLD_V1 == null) CBZ.CONFIG.AIRFRAME_BANK_HOLD_V1 = true;
+  // Rotation on the mains (see the ground contact in step()). False restores
+  // the attitude leveller that ran at every speed, which is the one-line
+  // revert the before/after preset photographs.
+  if (CBZ.CONFIG.AIRFRAME_ROTATE_V1 == null) CBZ.CONFIG.AIRFRAME_ROTATE_V1 = true;
 
   const airframe = (CBZ.airframe = CBZ.airframe || {});
   let liveCount = 0;
@@ -366,7 +370,8 @@
            Below flying speed it IS just a vehicle on wheels, so level it;
            above, the elevator gets the nose. Nose-DOWN is always levelled,
            because that direction is the gear compressing, not a rotation. */
-        const rotatingOff = speed > P.stallSpeed * 1.5;
+        const rotatingOff = CBZ.CONFIG.AIRFRAME_ROTATE_V1 !== false &&
+          speed > P.stallSpeed * 1.5;
         const lvl = Math.min(1, dt * 3.0);
         _e.setFromQuaternion(af.quat, "YXZ");
         if (!rotatingOff || _e.x < 0) _e.x += (0 - _e.x) * lvl;

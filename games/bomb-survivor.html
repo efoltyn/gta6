@@ -147,6 +147,15 @@ const NUKE_ARM     = 5;        // kills that earn the one round
 const RESPAWN_AIR  = 8;
 const CIVILIANS    = 20;
 
+// ONE-LINE REVERT for the takeoff repair, so tools/before-after.mjs can
+// photograph this checkout against its own broken self rather than against a
+// deployed build that differs by forty other commits. ?cfg_BOMB_TAKEOFF_V1=0
+// restores BOTH halves of the old behaviour: the spawn that passed 64 into
+// place()'s PITCH argument, and the roll that only ever ended if the player
+// pulled the stick. Pair it with ?cfg_PLANE_SEATING_V1=0&cfg_AIRFRAME_ROTATE_V1=0
+// for the complete before.
+const TAKEOFF_V1 = CBZ.CONFIG.BOMB_TAKEOFF_V1 !== false;
+
 function headingToward(fromX, fromZ, toX, toZ) { return Math.atan2(fromX - toX, fromZ - toZ); }
 
 const TEAMS = [
@@ -376,7 +385,9 @@ function spawnUnit(rec, role, i) {
       // the runway at walking pace forever. It read as a plane FLOATING.
       // launch() is the verb that takes a heading AND an airspeed, and it
       // seats the attitude level (-0.03 rad) instead of guessing.
-      u.af.launch(RW_X0, groundAt(RW_X0, RW_Z) + (u.af.spec.gearHeight || 3.4), RW_Z, RW_HDG, 64);
+      const ry = groundAt(RW_X0, RW_Z) + (u.af.spec.gearHeight || 3.4);
+      if (TAKEOFF_V1) u.af.launch(RW_X0, ry, RW_Z, RW_HDG, 64);
+      else u.af.place(RW_X0, ry, RW_Z, RW_HDG, 64);   // the bug: 64 rad of PITCH
       u.af.throttle = 1;            // after launch(), which sets its own 0.85
       u.rolling = true;
       u.hdg = RW_HDG;
@@ -701,7 +712,9 @@ function stepBomber(u, dt, mine) {
     const VR = 86;                     // rotate speed, m/s — bomber stalls at 55
     u.af.throttle = 1;
     if (mine) u.hdg += ctl.move.x * 0.22 * dt;
-    const rotate = u.af.speed > VR || (mine && ctl.move.y > 0.4 && u.af.speed > 78);
+    const rotate = TAKEOFF_V1
+      ? (u.af.speed > VR || (mine && ctl.move.y > 0.4 && u.af.speed > 78))
+      : (mine && ctl.move.y > 0.4 && u.af.speed > 85);   // the bug: pull, or never
     const gy = groundAt(u.af.pos.x, u.af.pos.z);
     // hold the deck, or climb out at ~10° — a near aim point so steerTo
     // commands a firm pitch rather than a suggestion

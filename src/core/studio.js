@@ -94,7 +94,31 @@
   const CBZ = (window.CBZ = window.CBZ || {});
   if (CBZ.studio) return;                         // idempotent (family guard idiom)
   CBZ.CONFIG = CBZ.CONFIG || {};
+
+  /* ?cfg_ANYTHING=0 WORKS ON A SLICE PAGE TOO.
+
+     src/config.js reads cfg_* out of the query string and writes CBZ.CONFIG
+     before anything else runs, which is how every A/B harness in this repo
+     flips one behaviour and photographs the difference. A games/ page does not
+     load config.js — it loads THIS file and then need()s packs — so no slice
+     page could be A/B'd at all, and a one-line revert flag written into one of
+     them was unreachable from a URL. studio.js is the first tag on every one
+     of those pages, so the same seven lines belong here. Idempotent with
+     config.js: both do `?cfg_X=0` -> CONFIG.X = false, and whichever runs
+     first wins the same answer. */
+  try {
+    if (typeof location !== "undefined" && location.search) {
+      new URLSearchParams(location.search).forEach(function (v, k) {
+        if (k.slice(0, 4) !== "cfg_") return;
+        CBZ.CONFIG[k.slice(4)] = v === "0" || v === "false" ? false
+          : v === "1" || v === "true" ? true : v;
+      });
+    }
+  } catch (e) {}
+
   if (CBZ.CONFIG.STUDIO_V1 == null) CBZ.CONFIG.STUDIO_V1 = true;
+  // one-line reverts for the takeoff repair, so before/after can photograph it
+  if (CBZ.CONFIG.PLANE_SEATING_V1 == null) CBZ.CONFIG.PLANE_SEATING_V1 = true;
 
   /* ---- WHERE src/ IS ------------------------------------------------------
      Derived from this file's own URL, never from the page's location. A page
@@ -1351,7 +1375,8 @@
        a model the pack already seated and one it did not both come out right,
        and a page that never heard of gearHeight cannot get it wrong. */
     let mount = g;
-    if (af && af.spec && af.spec.gearHeight > 0 && THREE.Box3) {
+    if (CBZ.CONFIG.PLANE_SEATING_V1 !== false &&
+        af && af.spec && af.spec.gearHeight > 0 && THREE.Box3) {
       const box = new THREE.Box3().setFromObject(g);
       if (isFinite(box.min.y)) {
         const drop = -af.spec.gearHeight - box.min.y;
