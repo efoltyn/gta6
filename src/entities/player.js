@@ -140,7 +140,7 @@
     if (build === readSavedBuild()) return false;   // already the active build
     try { localStorage.setItem("cbz_playerBuild", build); } catch (e) {}
     if (typeof CBZ.flashHint === "function") {
-      CBZ.flashHint((build === "f" ? "Female" : "Male") + " build set — reloading…", 1.6);
+      CBZ.flashHint((build === "f" ? "Female" : "Male") + " build set. Reloading…", 1.6);
     }
     const doReload = function () { try { location.reload(); } catch (e) {} };
     // small delay so the hint has a chance to paint before a blocking confirm()

@@ -60,6 +60,13 @@
     // hand on the wrist of the stock
     box(g, 0.150, 0.105, 0.14, mat.skin, 0, -0.10, 0.10, -0.12);
     g.userData.muzzle = new THREE.Vector3(0, 0.050, -1.32);
+    // WHERE THE HANDS GO — see systems/gunhands.js.
+    g.userData.grips = {
+      support: new THREE.Vector3(0, -0.075, -0.520),   // under the wood forend
+      mag: new THREE.Vector3(0, -0.095, -0.235),       // hinged floorplate
+      charge: new THREE.Vector3(0.145, 0.015, 0.005),  // the BOLT knob — this gun is worked by hand
+      style: "mag",
+    };
     return g;
   };
 })();

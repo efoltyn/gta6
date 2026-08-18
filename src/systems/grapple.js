@@ -689,6 +689,107 @@
     return best;
   }
 
+  // ---- THIRD-PERSON SWING: the survival verbs drive the player rig through
+  //      the same flag layer every other mode's melee uses (entities/
+  //      character.js reads punchT/punchArm/punchKind at animChar time, and
+  //      physics.js runs animChar on CBZ.playerChar every frame; fpsmode
+  //      hides the rig in first person, so the flags are always safe to set).
+  //      Until this existed the NPC staggered and fell while the player's own
+  //      body just stood there — the hit had physics but the swing had no
+  //      animation. The snap toward the camera aim is systems/combat.js:245's
+  //      trick: physics.js only steers body yaw while you MOVE, so a
+  //      stationary punch must square up here or the body swings 90° off the
+  //      crosshair it just landed a hit through. ----
+  let swingSide = false, lastSwing = -1e9, swingCombo = 0;
+  function swingPlayer(kind, dur) {
+    const ch = CBZ.playerChar; if (!ch || !ch.group) return;
+    ch.punchArm = kind === "shove" ? "r" : ((swingSide = !swingSide) ? "l" : "r");
+    ch.punchKind = kind;
+    ch.punchDur = dur; ch.punchT = dur;
+    const L = lookDir(), yaw = Math.atan2(L.x, L.z);
+    ch.group.rotation.y = CBZ.lerpAngle ? CBZ.lerpAngle(ch.group.rotation.y, yaw, 0.85) : yaw;
+  }
+
+  // ---- CONTACT-RESOLVED STRIKES: the click starts a SWING, nothing else.
+  //      The blow lands in the order-50 pass below, on the frame the animed
+  //      fist's ACTUAL world position (the rig's hand socket at the end of
+  //      the forearm — character.js sockets.leftHand/rightHand) overlaps the
+  //      target's body. No more hitting from 3.1 m at click time, before the
+  //      arm had even chambered: range now EMERGES from arm length + lunge
+  //      (~2 m centre-to-centre, the same figure boxing.js and city combat
+  //      tuned by hand), timing emerges from the animation's own drive, and
+  //      a body that steps into the arc gets clipped while one that steps
+  //      back out of it is a whiff. Order 50 runs after animChar (30-46) so
+  //      the socket is posed for THIS frame; getWorldPosition refreshes the
+  //      parent matrix chain itself in r128. One victim per swing, downed/
+  //      airborne bodies excluded — both exactly the old aimTarget contract.
+  let strike = null;                     // { kind, t, dur, arm }
+  const _fist = new THREE.Vector3();
+  const FIST_SLACK2 = 0.68 * 0.68;       // fist sphere vs body capsule (BOT_R + fist)
+  const SHOVE_SIDES = ["l", "r"];        // a shove drives both palms
+  function fistPos(ch, side, out) {
+    const s = ch.sockets && (side === "l" ? ch.sockets.leftHand : ch.sockets.rightHand);
+    if (s) return s.getWorldPosition(out);
+    const L = lookDir(), P = CBZ.player.pos;   // socketless rig: arm's length forward
+    return out.set(P.x + L.x * 1.35, P.y + 1.35, P.z + L.z * 1.35);
+  }
+  function strikeVictim(kind, arm) {
+    const ch = CBZ.playerChar; if (!ch) return null;
+    const P = CBZ.player.pos, L = lookDir();
+    const sides = kind === "shove" ? SHOVE_SIDES : [arm];
+    for (const s of sides) {
+      fistPos(ch, s, _fist);
+      for (const b of CBZ.bots) {
+        if (b.dead || busy(b)) continue;
+        const dx = b.pos.x - P.x, dz = b.pos.z - P.z;
+        if (dx * dx + dz * dz > 7.3) continue;         // coarse cull
+        if (dx * L.x + dz * L.z < 0.1) continue;       // behind you: a chambering
+        //                                                fist can't "hit" someone
+        //                                                hugging your back
+        const fx = _fist.x - b.pos.x, fz = _fist.z - b.pos.z;
+        if (fx * fx + fz * fz > FIST_SLACK2) continue; // the hand isn't ON them
+        if (_fist.y < b.pos.y + 0.1 || _fist.y > b.pos.y + 2.1) continue; // over the head / under the feet
+        return b;
+      }
+    }
+    return null;
+  }
+  function landStrike(kind, t) {
+    const P = CBZ.player.pos, L = lookDir();
+    if (kind === "punch") {
+      const knockdown = Math.random() < 0.4 ? 1.2 : 0;
+      hit(t, { fromX: P.x, fromZ: P.z, force: PUNCH_FORCE, knockdown });
+      // A BEATING ADDS UP. The first two land as bruises (systems/wounds.js);
+      // the third or fourth splits skin and the face starts wearing it. That
+      // ramp is the ledger's job — this line just reports the blow.
+      if (CBZ.trauma) CBZ.trauma.strike(t, PUNCH_FORCE, { dir: { x: L.x, y: 0.35, z: L.z }, fromX: P.x, fromZ: P.z, y: 1.5 });
+      if (CBZ.surv) CBZ.surv.hurt(t, 18, { cause: "beaten to death", fromX: P.x, fromZ: P.z });
+      CBZ.sfx && CBZ.sfx("punch");
+      CBZ.shake && CBZ.shake(0.18);
+      CBZ.doHitstop && CBZ.doHitstop(0.04);   // the freeze sits ON the impact frame now
+    } else {
+      hit(t, { fromX: P.x, fromZ: P.z, force: PUSH_FORCE, knockdown: Math.random() < 0.5 ? 1.0 : 0 });
+      // A SHOVE IS A BIG FORCE THAT BARELY BREAKS SKIN — it's flat palms across
+      // a wide area. What makes a push bloody is WHAT IT PUTS YOU INTO, and that
+      // arrives later through the wall-slam / landing hooks in step(). So the
+      // knockback number stays at 12 and the flesh weight is cut to a fifth.
+      if (CBZ.trauma) CBZ.trauma.strike(t, PUSH_FORCE, { flesh: 0.2, dir: { x: L.x, y: 0.2, z: L.z }, fromX: P.x, fromZ: P.z, y: 1.2 });
+      CBZ.sfx && CBZ.sfx("punch");
+      CBZ.shake && CBZ.shake(0.12);
+    }
+  }
+  //      after animChar has posed this frame's arms (orders 30-46):
+  CBZ.onUpdate(50, function (dt) {
+    if (!strike) return;
+    if (CBZ.game.mode !== "survival" || (CBZ.player && CBZ.player.dead)) { strike = null; return; }
+    strike.t += dt;
+    const prog = strike.t / strike.dur;
+    if (prog > 0.74) { strike = null; return; }   // recover phase: the swing is spent — a whiff
+    if (prog < 0.16) return;                      // wind-up: the fist is still at the chest
+    const v = strikeVictim(strike.kind, strike.arm);
+    if (v) { landStrike(strike.kind, v); strike = null; }
+  });
+
   // ---- the verbs ----
   let held = null;
   function grab() {
@@ -705,6 +806,10 @@
     p.heldBy = null;
     if (thrown) {
       const L = lookDir();
+      // the heave: a throw is a two-handed drive off the chest — same body
+      // as the shove, held a beat longer for the weight leaving the arms
+      swingPlayer("shove", 0.46);
+      CBZ.fpsPunchAnim && CBZ.fpsPunchAnim(true);   // silent: "ko" is the voice here
       hit(held, { dir: L, force: THROW_FWD, fling: THROW_UP });
       CBZ.sfx && CBZ.sfx("ko");
       CBZ.shake && CBZ.shake(0.3);
@@ -714,39 +819,26 @@
   function punch() {
     if (held) { release(true); return; }   // LMB while holding = throw
     CBZ.fpsPunchAnim && CBZ.fpsPunchAnim();  // swing the first-person hand
-    const t = aimTarget();
+    // the third-person body throws the REAL swing — alternating fists, every
+    // third blow inside a combo winding up into a hook (city combat's rhythm)
+    swingCombo = (CBZ.now - lastSwing < 980) ? swingCombo + 1 : 1;
+    lastSwing = CBZ.now;
+    const hook = swingCombo % 3 === 0;
+    const dur = hook ? 0.42 : 0.34;
+    swingPlayer(hook ? "hook" : (swingCombo % 2 ? "jab" : "cross"), dur);
     CBZ.sfx && CBZ.sfx("whoosh");
-    if (!t) return;
-    const knockdown = Math.random() < 0.4 ? 1.2 : 0;
-    const P = CBZ.player.pos;
-    hit(t, { fromX: P.x, fromZ: P.z, force: PUNCH_FORCE, knockdown });
-    // A BEATING ADDS UP. The first two land as bruises (systems/wounds.js); the
-    // third or fourth splits skin and the face starts wearing it. That ramp is
-    // the ledger's job — this line just reports the blow.
-    if (CBZ.trauma) {
-      const L = lookDir();
-      CBZ.trauma.strike(t, PUNCH_FORCE, { dir: { x: L.x, y: 0.35, z: L.z }, fromX: P.x, fromZ: P.z, y: 1.5 });
-    }
-    if (CBZ.surv) CBZ.surv.hurt(t, 18, { cause: "beaten to death", fromX: P.x, fromZ: P.z });
-    CBZ.sfx && CBZ.sfx("punch");
-    CBZ.shake && CBZ.shake(0.18);
-    CBZ.doHitstop && CBZ.doHitstop(0.04);
+    // no target check, no damage here: the strike resolver lands the blow on
+    // the frame the fist physically arrives — or it doesn't, and that's a miss
+    strike = { kind: "punch", t: 0, dur, arm: (CBZ.playerChar && CBZ.playerChar.punchArm) || "r" };
   }
   function push() {
-    const t = aimTarget();
-    if (!t) return;
-    const P = CBZ.player.pos;
-    hit(t, { fromX: P.x, fromZ: P.z, force: PUSH_FORCE, knockdown: Math.random() < 0.5 ? 1.0 : 0 });
-    // A SHOVE IS A BIG FORCE THAT BARELY BREAKS SKIN — it's flat palms across a
-    // wide area. What makes a push bloody is WHAT IT PUTS YOU INTO, and that
-    // arrives later through the wall-slam / landing hooks in step(). So the
-    // knockback number stays at 12 and the flesh weight is cut to a fifth.
-    if (CBZ.trauma) {
-      const L = lookDir();
-      CBZ.trauma.strike(t, PUSH_FORCE, { flesh: 0.2, dir: { x: L.x, y: 0.2, z: L.z }, fromX: P.x, fromZ: P.z, y: 1.2 });
-    }
-    CBZ.sfx && CBZ.sfx("punch");
-    CBZ.shake && CBZ.shake(0.12);
+    // the swing plays whether or not it connects (same contract as punch):
+    // both palms drive off the sternum in third person, the first-person
+    // hand thrusts silently (the shove's contact sfx lands with the strike)
+    swingPlayer("shove", 0.40);
+    CBZ.fpsPunchAnim && CBZ.fpsPunchAnim(true);
+    CBZ.sfx && CBZ.sfx("whoosh");
+    strike = { kind: "shove", t: 0, dur: 0.40, arm: "r" };
   }
 
   // ---- public body API used by disasters / movement modules ----

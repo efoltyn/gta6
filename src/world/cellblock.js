@@ -1967,6 +1967,15 @@
       if (c.minX < R && c.maxX > -R && c.minZ < -12 && c.maxZ > -40) spine++;
     }
     let occupied = 0, empty = 0, locked = 0;
+    /* seatDrift (SIT_PHYS_V1) — bunk-posed residents NOT at their bunk spot.
+       The leash pins a "bunk" man to bunkSpot every frame at order 22.6;
+       systems/actorcollide.js's clamp at order 25 used to depenetrate him
+       back out of the (now solid) frame — measured at latOut + body radius =
+       1.06 m into the room, ten men at once, each seated on air half a metre
+       clear of his own mattress. The number is the fault: geometry only, no
+       flag reads, so a revert run measures the defect and a fixed run pins 0.
+       Fight/flee/KO men are excluded — unseat() owns them, not the pin. */
+    let seatDrift = 0;
     // cells per row, off the cells' OWN tags — so "how big is this wing"
     // cannot be answered by a number typed anywhere but the row tables.
     const rows = {};
@@ -1976,6 +1985,15 @@
       rows[r] = (rows[r] | 0) + 1;
       if (c.locked) locked++;
       if (c.owner && c.owner !== "player") occupied++; else empty++;
+      const n = c.owner;
+      if (n && n !== "player" && n.group && n.char && n.char.sitting
+          && n._cellPose === "bunk" && c.bunk
+          && !(n.ko > 0) && !n.intimidMode && !(n.huntPlayer > 0)
+          && n.aiState !== "fight" && n.aiState !== "flee"
+          && !(CBZ.propArcActive && CBZ.propArcActive(n))) {
+        const sp = bunkSpot(c), p = n.group.position;
+        if (Math.hypot(p.x - sp.x, p.z - sp.z) > 0.3) seatDrift++;
+      }
     }
     const pc = playerCell;
     const margin = pc ? Math.min(pc.hx - Math.abs(s.x - pc.x), pc.hz - Math.abs(s.z - pc.z)) : 0;
@@ -1988,6 +2006,7 @@
       spawnBlocked: spawnBlocked,                            // MUST be 0
       doorGapBlocked: gap,                                   // MUST be 0
       spineBlocked: spine,                                   // MUST be 0
+      seatDrift: seatDrift,                                  // MUST be 0 (SIT_PHYS_V1)
       colliders: mine.length,
       lamps: lamps.length + 1,
     };

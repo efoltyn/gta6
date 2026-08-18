@@ -442,7 +442,11 @@
     if (!auxWrap || !airV2()) return;
     const air = next === "heli" || next === "wing";
     const drv = next === "drive" || next === "armor";
-    if (!air && !drv && next !== "mount") return;
+    // A boat builds an aux rail for exactly ONE pill (DETONATE, below) — the
+    // rest of its layout is deliberately untouched, so it still gets no
+    // RECENTER and keeps the joystick helm exactly as it was.
+    const boat = next === "boat";
+    if (!air && !drv && !boat && next !== "mount") return;
     let h = "";
     // A MOUNT IS NOT A VEHICLE and must not be dressed as one — see the mount
     // branch in the watcher. It gets ONE pill, in the aux rail, well clear of
@@ -468,9 +472,16 @@
           pill("tvTrimR", tw + " ▶", "tv-sm") + "</div>";
       }
     }
+    // THE GETAWAY BOOM. explosives.js is explicit that hold-[B] detonates
+    // "from a car, so the drive-away bomb actually plays" — and body.tveh-on
+    // hides the on-foot cluster that carries the touch bomb button, so in the
+    // driver's seat a thumb had no path to the one verb the plan ends on.
+    // Worded, not a glyph: this rail is the verb-pill vocabulary, and DETONATE
+    // is the word. Hidden until charges are actually out (refreshAux).
+    if (drv || boat) h += pill("tvBoom", "DETONATE", "tv-sm tv-warn");
     // Same rule as the on-foot #trecen: when the flag is off the pill is not
     // built, not merely hidden by the show() sweep below.
-    if (!CBZ.CONFIG || CBZ.CONFIG.CAM_TOUCH_RECENTER !== false) h += pill("tvRecen", "RECENTER", "tv-sm");
+    if (!boat && (!CBZ.CONFIG || CBZ.CONFIG.CAM_TOUCH_RECENTER !== false)) h += pill("tvRecen", "RECENTER", "tv-sm");
     auxWrap.innerHTML = h;
     const q = (id) => auxWrap.querySelector("#" + id);
     // BOMB — hold, not tap: strategicBombHold IS the [B] state machine (tap
@@ -494,6 +505,15 @@
     if (q("tvTrimR")) holdBtn(q("tvTrimR"), "e");
     if (q("tvDismount")) tapBtn(q("tvDismount"), () => { if (CBZ.cityDismount) CBZ.cityDismount(); });
     if (q("tvRecen")) tapBtn(q("tvRecen"), () => { if (CBZ.camRecenter) CBZ.camRecenter(); });
+    // DETONATE — a HOLD on the module's own logical key (touch.js's
+    // touchKeyHold), because [B] in a seat is already exactly this verb:
+    // explosives.js refuses the plant half while driving and detonates past
+    // 0.5 s, so the pill inherits the arm delay — the thing that makes a
+    // mis-brush of the glass NOT send the whole street up — instead of
+    // reimplementing a faster, more dangerous copy of it. holdFn registers
+    // the release, so blur/app-switch lands the keyup a lost touchend never
+    // sends and the hold can never wedge armed.
+    if (q("tvBoom")) holdFn(q("tvBoom"), (down) => { if (CBZ.touchKeyHold) CBZ.touchKeyHold("b", down); });
   }
 
   // Is the touch vehicle layer currently OWNING the bottom-right instrument
@@ -699,6 +719,12 @@
     if (tr) show(tr, air && (!CBZ.CONFIG || CBZ.CONFIG.FLIGHT_CONTROLS_V2 !== false));
     const rc = auxWrap.querySelector("#tvRecen");
     if (rc) show(rc, !!CBZ.camRecenter && (!CBZ.CONFIG || CBZ.CONFIG.CAM_TOUCH_RECENTER !== false));
+    // DETONATE: only while charges are actually out there. cityC4Planted is
+    // the module's own count — when a mode without the blast capability clears
+    // the field, or the last charge fires, the count hits zero and the pill
+    // stands down on the next tick with no second source of truth.
+    const bm = auxWrap.querySelector("#tvBoom");
+    if (bm) show(bm, !!(CBZ.cityC4Planted && CBZ.cityC4Planted() > 0 && CBZ.cityC4Detonate));
   }
 
   // ---- key pump: held buttons win over a released stick ---------------------

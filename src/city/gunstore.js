@@ -133,7 +133,12 @@
       const z = R.z + R.nz * 0.22 + R.tz * lat;
       // barrel lies ALONG the wall; origin is the grip, so re-centre the silhouette
       s.model.rotation.y = Math.atan2(-R.tx, -R.tz);
-      s.model.scale.setScalar(0.95);
+      // REAL-DIMENSION SIZING (weapons/weapon-scale.js): wall display hangs in
+      // world space — the gun on the wall is the length the researched real
+      // gun would be (× class READ), identical to the one sold into the hand.
+      s.model.scale.setScalar(
+        (CBZ.weaponWorldScale && CBZ.weaponWorldScale(s.model.userData.weaponId || s.name)) || 0.95
+      );
       s.model.position.set(x - R.tx * 0.38, y, z - R.tz * 0.38);
       group.add(s.model);
       s.x = x; s.y = y; s.z = z; s.reach = RACK_REACH; s.dot = RACK_DOT;
@@ -166,6 +171,12 @@
       const x = ccx + C.tx * lat, z = ccz + C.tz * lat;
       const y = C.top + 0.15;
       s.model.rotation.y = Math.atan2(-C.tx, -C.tz);
+      // case pistols lie in world space too: same real-dimension law as the
+      // wall rack (they used to keep the hand-socket scale — a different size
+      // than the same pistol two metres away on the wall).
+      s.model.scale.setScalar(
+        (CBZ.weaponWorldScale && CBZ.weaponWorldScale(s.model.userData.weaponId || s.name)) || 0.92
+      );
       s.model.position.set(x - C.tx * 0.1, y, z - C.tz * 0.1);
       group.add(s.model);
       s.x = x; s.y = y; s.z = z; s.reach = CASE_REACH; s.dot = CASE_DOT;

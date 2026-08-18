@@ -40,6 +40,23 @@
     { label: "Punch", sub: "hit", fn: () => CBZ.grapple && CBZ.grapple.punch() },
     { label: "Shove", sub: "push", fn: () => CBZ.grapple && CBZ.grapple.push() },
   ];
+  // THE WATER'S ONE VERB (owner: "I want climb out placed like" these).
+  // city/swim.js used to render the haul-out as a .tpill in the centre-screen
+  // prompt band, which is where a walk-up verb belongs and not where a verb you
+  // need mid-swim does — both thumbs are already on the stick and DIVE. It is a
+  // contextual physical verb on a thing in reach, which is exactly what this
+  // dock is for, so it comes here in the same .svbtn grammar as Throw and Grab.
+  // The label is swim.js's own (a moored hull says "Climb aboard", because that
+  // press ends with you at its helm), so this file never re-decides it.
+  const SWIM_VERBS = [
+    { label: "Climb out", sub: "haul up", fn: () => CBZ.citySwimClimbOut && CBZ.citySwimClimbOut() },
+  ];
+  function swimOffer() {
+    const sw = CBZ.citySwimState ? CBZ.citySwimState() : null;
+    if (!sw || !sw.swimming || !sw.climb) return null;
+    SWIM_VERBS[0].label = sw.climbVerb || "Climb out";
+    return SWIM_VERBS;
+  }
 
   let verbs = [], shown = false, cd = 0;
 
@@ -63,6 +80,15 @@
       "bottom:calc(34px + env(safe-area-inset-bottom,0px));z-index:23;display:none;" +
       "flex-direction:column-reverse;gap:10px;pointer-events:none;}" +
       "#survVerbs.show{display:flex;}" +
+      // ON FOOT the dock is seated left of #tbtns, the on-foot icon cluster.
+      // IN THE WATER that corner belongs to somebody else: touch_vehicle.js
+      // hides #tbtns (body.tveh-on) and puts DIVE/RISE there instead, and those
+      // are .tv-big pills — 128px wide off a right:14 edge, so they reach to
+      // 142 and the dock's own 112 would have landed on top of RISE. Same
+      // grammar, one seat inboard, and lifted clear of the HEALTH/STAMINA bars
+      // that run along the bottom centre in this mode.
+      "#survVerbs.swim{right:calc(156px + env(safe-area-inset-right,0px));" +
+      "bottom:calc(96px + env(safe-area-inset-bottom,0px));}" +
       ".svbtn{pointer-events:auto;min-width:104px;height:48px;border-radius:24px;padding:0 18px;" +
       "border:1.5px solid rgba(127,231,255,.5);background:rgba(10,20,32,.68);color:#eaf4ff;" +
       "font-family:Fredoka,system-ui,sans-serif;font-weight:600;font-size:16px;letter-spacing:.6px;" +
@@ -73,13 +99,17 @@
     dock.id = "survVerbs";
     document.body.appendChild(dock);
   }
-  function renderDock(held) {
+  // `set` is the live verb list; `key` is what decides a rebuild. The key
+  // carries the LABELS, not just the set name, because the water's verb renames
+  // itself between "Climb out" and "Climb aboard" without the set changing —
+  // keying on the name alone would leave the old word on the button.
+  function renderDock(set, key) {
     ensureDock();
-    const mode = held ? "held" : "free";
-    if (dockMode !== mode) {
-      dockMode = mode;
-      dock.innerHTML = (held ? HOLD_VERBS : FREE_VERBS).map((v, i) =>
+    if (dockMode !== key) {
+      dockMode = key;
+      dock.innerHTML = set.map((v, i) =>
         '<button class="svbtn" type="button" data-i="' + i + '">' + v.label + "</button>").join("");
+      dock.classList.toggle("swim", key.indexOf("swim:") === 0);
     }
     dock.classList.add("show");
   }
@@ -154,12 +184,27 @@
   CBZ.onUpdate(46, function (dt) {
     if (cd > 0) cd -= dt;
     if (CBZ.game.mode !== "survival") return;
-    const t = (CBZ.game.state === "playing" && !CBZ.player.dead) ? target() : null;
+    const live = CBZ.game.state === "playing" && !CBZ.player.dead;
+    // THE WATER TAKES PRECEDENCE, and it costs nothing to give it: you cannot
+    // grab, punch or shove while you are swimming (grapple.js aims along the
+    // ground cone from a body the water owns), so the dock is free, and the one
+    // verb the swimmer does have is the one that gets them out. Touch only —
+    // swim.js keeps printing "[Space] climb out" for the keyboard, which is
+    // where that verb has always lived.
+    const swim = (live && CBZ.touchMode) ? swimOffer() : null;
+    if (swim) {
+      verbs = swim;
+      renderDock(swim, "swim:" + swim[0].label);
+      el.interact.classList.remove("show");
+      shown = true;
+      return;
+    }
+    const t = live ? target() : null;
     if (!t) { if (shown) { shown = false; el.interact.classList.remove("show"); hideDock(); } return; }
     verbs = t.held ? HOLD_VERBS : FREE_VERBS;
     if (CBZ.touchMode) {
       // touch: tappable verb buttons by the thumb cluster, no reach-across card
-      renderDock(t.held);
+      renderDock(verbs, t.held ? "held" : "free");
       el.interact.classList.remove("show");
     } else {
       render(t.held);

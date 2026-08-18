@@ -1161,7 +1161,7 @@
       wick:    { name: "The Marked",    outfit: "suit",       title: "Open Contract", blurb: "every single person wants the money" },
       racer:   { name: "The Racer",     outfit: "coveralls",  title: "Rookie",        blurb: "a loaner, a back-row start, one way up" },
       president: { name: "The President", outfit: "suit",     title: "President",     blurb: "sworn in this morning; the country is yours" },
-      captain: { name: "The Captain",   outfit: "coveralls",  title: "Skipper",       blurb: "a diesel trawler, a crew of three, open water" },
+      captain: { name: "The Captain",   outfit: "coveralls",  title: "Skipper",       blurb: "your own hull, a crew, and open water" },
     },
 
     // ---- WHERE: a lot the CITY BUILT. Never a room this file authors. ----
@@ -1375,6 +1375,56 @@
   // the world is built, and the pick is made before that.
   CBZ.setCityOriginPlane = function (name) { g.cityOriginPlane = name || null; };
   CBZ.cityOriginPlane = function () { return g.cityOriginPlane || null; };
+
+  /* ---- THE BOAT PICKER ---------------------------------------------------
+     OWNER (2026-08-12): "captain like pilot should let me select any boat in
+     start menu." Same law as the aircraft list above, and it does not keep a
+     list either — a hand-typed fleet goes stale the day somebody registers a
+     twelfth hull.
+
+     ONE DIFFERENCE, AND IT IS AN IMPROVEMENT. The aircraft list has to ship
+     FALLBACK_PLANES because militaryvehicles.js only registers once a world
+     exists, and the pick happens before that. world/water_hulls.js's registry
+     is filled at PARSE time — the four authored hulls plus every row
+     city/yachts.js queues ahead of it — so at the title screen this answers
+     with the REAL fleet, names, lengths and all. No fallback, nothing to drift.
+
+     Sorted by length, because a picker of boats is a picker of sizes. */
+  CBZ.cityOriginBoats = function () {
+    const R = CBZ.marineHulls;
+    if (!R || !R.list) return [];
+    const out = [];
+    try {
+      for (const rec of R.list()) {
+        const h = rec && (rec.hull || rec.spec);
+        if (!h || !isFinite(h.loa)) continue;
+        const name = rec.label || rec.model || rec.key;
+        out.push({ id: rec.key, name: name, loa: +h.loa,
+          label: name + " · " + Math.round(h.loa) + " m" });
+      }
+    } catch (e) { return out; }
+    out.sort(function (a, b) { return a.loa - b.loa; });
+    return out;
+  };
+  // A KEY, not a name — unlike the aircraft case the registry is live when the
+  // pick is made, so there is nothing to resolve later and nothing to mis-case.
+  CBZ.setCityOriginBoat = function (key) { g.cityOriginBoat = key || null; };
+  CBZ.cityOriginBoat = function () { return g.cityOriginBoat || null; };
+  /* THE PICK, RESOLVED — never null and never a key that is not registered.
+     The pick if it still resolves, else the working trawler this story has
+     always described, else anything that floats, because a build with
+     YACHT_FLEET off has no trawler and must still put the man to sea. This is
+     what the title screen LIGHTS UP; city/captain.js layers one more rule on
+     top of it (a captain who owns a boat and never touched the picker keeps
+     her — see flag() there), which is why that file reads the raw field too. */
+  CBZ.cityOriginBoatKey = function () {
+    const rows = CBZ.cityOriginBoats();
+    if (!rows.length) return g.cityOriginBoat || "trawler";
+    const want = g.cityOriginBoat;
+    for (let i = 0; i < rows.length; i++) if (rows[i].id === want) return want;
+    for (let i = 0; i < rows.length; i++) if (rows[i].id === "trawler") return "trawler";
+    return rows[0].id;
+  };
 
   /* ---- APPLYING A COMPOSITION -------------------------------------------
      One function replaces the six grant* functions a six-story registry would
