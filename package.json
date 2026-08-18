@@ -31,6 +31,8 @@
     "test:beast-deaths-revert": "node tools/beast-death-check.mjs --revert",
     "test:c4-touch": "node tools/c4-touch-check.mjs",
     "test:battle-revert": "node tools/battle-check.mjs --revert",
+    "test:prison-sit": "node tools/prison-sit-check.mjs",
+    "test:prison-sit-revert": "node tools/prison-sit-check.mjs --revert",
     "test:bailout-presentation": "node tools/test-bailout-presentation-browser.mjs",
     "ba": "node tools/before-after.mjs",
     "visual:beach": "node tools/before-after.mjs beach-shores",
