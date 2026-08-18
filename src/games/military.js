@@ -251,7 +251,7 @@
     spawnBaseGuards(ctx);
 
     // ---- ZONES: the interface surface (interactions #14) ----
-    ctx.zone({ id: "fixer", label: "[E] The fixer — RESTRICTED AREA contract", pos: [V.fixerAt[0], V.fixerAt[1]], r: 3.4, onUse: openBriefing });
+    ctx.zone({ id: "fixer", label: "[E] The fixer. RESTRICTED AREA contract", pos: [V.fixerAt[0], V.fixerAt[1]], r: 3.4, onUse: openBriefing });
     ctx.zone({
       id: "sabotage", label: "[E] Sabotage the generator", pos: [V.gen.lx, V.gen.lz], r: 3.2,
       canShow: () => simT >= RT.genUntil, onUse: () => sabotageGenerator(),
@@ -301,10 +301,10 @@
       sayColor: "#d8e6b0", talkLabel: "Talk to the Fixer",
       dialogue: [
         "Three jobs, one night. Photograph the prototype, tap the comms mast, and drive something loud out the gate.",
-        "Green means they're bored. Red means they've made you — and the gate seals.",
+        "Green means they're bored. Red means they've made you, and the gate seals.",
         "Kill the generator if the lights get hot. It buys you a dark minute, but they'll notice.",
         "Watch the mess. When the light's on, half the wire empties out to eat.",
-        "Get pinched once, it's the brig — pick your way out. Twice and it's a court martial. Don't get pinched twice.",
+        "Get pinched once, it's the brig, pick your way out. Twice and it's a court martial. Don't get pinched twice.",
       ],
     });
   }
@@ -333,7 +333,7 @@
     C.solid(lx - 4.4, lz - 4.9, lx + 4.4, lz + 4.9, 0, 1.4);
     ctx.light(lx, gy + 3.4, lz + 3, M.protoGlass, 0.5, 12);
     // a warning placard
-    signPlate(ctx, lx, gy + 2.2, lz + 6.05, "PROTOTYPE — NO PHOTOGRAPHY", 0);
+    signPlate(ctx, lx, gy + 2.2, lz + 6.05, "PROTOTYPE · NO PHOTOGRAPHY", 0);
     V.proto = { lx, lz, wx: V.origin.x + lx, wz: V.origin.z + lz, y: gy + 1.2 };
     // a known LOS wall for the vision probe (the revetment back wall centre)
     V.probeWall = { wx: V.origin.x + lx, wz: V.origin.z + lz - 6 };
@@ -371,7 +371,7 @@
     ctx.box(g, lx + 2.2, gy + 1.4, lz + 2.05, 1.4, 1.6, 0.2, ctx.emat(M.warn, 0.5)); // breaker panel
     ctx.cyl(g, lx - 2.6, gy + 1.2, lz - 1.4, 0.5, 0.5, 2.4, ctx.mat(M.dark), 10);     // exhaust stack
     C.solid(lx - 3, lz - 2, lx + 3, lz + 2, 0, 3.2);
-    signPlate(ctx, lx + 2.2, gy + 2.6, lz + 2.2, "MAIN POWER — DANGER", 0);
+    signPlate(ctx, lx + 2.2, gy + 2.6, lz + 2.2, "MAIN POWER · DANGER", 0);
     V.gen = { lx, lz };
   }
   function sabotageGenerator() {
@@ -383,7 +383,7 @@
     for (const s of V.beams) s.disabled = 999;
     // it's LOUD: auto-escalate to at least YELLOW
     setAlarm(Math.max(RT.alarm, TIER_AT[1] + 2));
-    if (C) { C.hud.toast("GENERATOR DOWN — 60s of dark"); C.hud.feed("Perimeter lights cut. They'll be scrambling.", "#ffd166"); }
+    if (C) { C.hud.toast("GENERATOR DOWN. 60s of dark"); C.hud.feed("Perimeter lights cut. They'll be scrambling.", "#ffd166"); }
     if (CBZ.shake) CBZ.shake(0.35);
     return { until: RT.genUntil, tier: TIERS[RT.tierIdx] };
   }
@@ -624,13 +624,13 @@
     else if (wantExtras < haveExtras) { despawnExtras(); if (wantExtras) spawnExtras(wantExtras); }
     if (!C) return;
     if (nt > oldIdx) {
-      const msg = nt === 1 ? "ALERT: YELLOW — they're suspicious"
-        : nt === 2 ? "ALERT: ORANGE — patrols doubling, lights sweeping"
-          : "ALERT: RED — gate sealed, they're hunting";
+      const msg = nt === 1 ? "ALERT: YELLOW, they're suspicious"
+        : nt === 2 ? "ALERT: ORANGE, patrols doubling, lights sweeping"
+          : "ALERT: RED, gate sealed, they're hunting";
       C.hud.toast(msg);
       if (nt >= 2 && CBZ.shake) CBZ.shake(nt === 3 ? 0.5 : 0.3);
     } else if (nt < oldIdx && nt === 0) {
-      C.hud.feed("Alert cooling — you're a ghost again.", "#8fe39a");
+      C.hud.feed("Alert cooling, you're a ghost again.", "#8fe39a");
     }
   }
 
@@ -653,7 +653,7 @@
         gd.mode = "patrol"; gd.seg = 0;
       }
     }
-    if (C && RT.messOn) C.hud.feed("Mess call — some sentries break for chow.", "#cfe3ff");
+    if (C && RT.messOn) C.hud.feed("Mess call, some sentries break for chow.", "#cfe3ff");
   }
 
   /* --------------------------------------------------- ELECTRIC FENCE ---- */
@@ -668,7 +668,7 @@
         setAlarm(RT.alarm + 18);
         if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(8, null, null, "electrified fence", false, null, true);
         if (CBZ.shake) CBZ.shake(0.4);
-        hint("ELECTRIFIED FENCE — bad idea", "#ff5a4a");
+        hint("ELECTRIFIED FENCE, bad idea", "#ff5a4a");
         return;
       }
     }
@@ -682,7 +682,7 @@
     if (C) {
       C.wallet.give(PAY[name] || 0, name === "photo" ? "Prototype photographed"
         : name === "tap" ? "Comms mast tapped" : "Military vehicle stolen");
-      C.hud.toast((name === "photo" ? "PHOTO SECURED" : name === "tap" ? "COMMS TAPPED" : "HARDWARE STOLEN") + " — job done");
+      C.hud.toast((name === "photo" ? "PHOTO SECURED" : name === "tap" ? "COMMS TAPPED" : "HARDWARE STOLEN") + " · job done");
     }
     if (nb.photo && nb.tap && nb.steal && C) C.hud.feed("All three jobs done. CRASH THE GATE in a stolen vehicle.", "#ffd166");
     return true;
@@ -704,13 +704,13 @@
         RT.photoT += dt;
         hint("Framing the prototype… " + Math.min(100, Math.round(RT.photoT / PHOTO_HOLD * 100)) + "%");
         if (RT.photoT >= PHOTO_HOLD) { RT.photoT = 0; completeJob("photo"); }
-      } else { if (near && !clear) hint("No clean shot — get past the revetment wall"); RT.photoT = Math.max(0, RT.photoT - dt * 1.5); }
+      } else { if (near && !clear) hint("No clean shot, get past the revetment wall"); RT.photoT = Math.max(0, RT.photoT - dt * 1.5); }
     }
     // COMMS TAP: at the junction box, hold-to-install, but only while UNSEEN
     if (!nb.tap && V.comms) {
       const near = d2(P.pos.x, P.pos.z, V.comms.wx, V.comms.wz) < TAP_R;
       if (near) {
-        if (RT.seen) { hint("Spotted — can't work the mast now"); RT.tapT = Math.max(0, RT.tapT - dt * 0.8); }
+        if (RT.seen) { hint("Spotted, can't work the mast now"); RT.tapT = Math.max(0, RT.tapT - dt * 0.8); }
         else {
           RT.tapT += dt;
           hint("Installing tap… " + Math.min(100, Math.round(RT.tapT / TAP_HOLD * 100)) + "%");
@@ -733,12 +733,12 @@
     if (V.barrier && V.barrier.mesh) V.barrier.mesh.visible = false;
     const cashBefore = C ? C.wallet.cash() : 0;
     const payout = PAY.extract;
-    if (C) C.wallet.give(payout, "Fort Halstead — extraction bonus");
+    if (C) C.wallet.give(payout, "Fort Halstead, extraction bonus");
     const cashAfter = C ? C.wallet.cash() : payout;
     nb.active = false; RT.outcome = "win";
     if (state) { state.wins = (state.wins || 0) + 1; state.best = Math.max(state.best || 0, payout); }
     save();
-    if (C) { C.hud.toast("EXTRACTED — CONTRACT PAID"); openWinPanel(payout); if (CBZ.shake) CBZ.shake(0.8); }
+    if (C) { C.hud.toast("EXTRACTED · CONTRACT PAID"); openWinPanel(payout); if (CBZ.shake) CBZ.shake(0.8); }
     return { won: true, payout, cashBefore, cashAfter, jobs: { photo: nb.photo, tap: nb.tap, steal: nb.steal } };
   }
 
@@ -761,7 +761,7 @@
     // slam the cell door (a real collider) until the lock is picked
     if (!V.brigDoor) V.brigDoor = C.solid(cell.lx - 2.4, cell.lz + 2.2, cell.lx + 2.4, cell.lz + 2.8, 0, 3.6);
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
-    if (C) { C.hud.toast("CAUGHT — THE BRIG"); C.hud.feed(reason || "Hands where I can see them.", "#ff5a4a"); }
+    if (C) { C.hud.toast("CAUGHT · THE BRIG"); C.hud.feed(reason || "Hands where I can see them.", "#ff5a4a"); }
     if (CBZ.shake) CBZ.shake(0.7);
     startLockpick();
   }
@@ -773,7 +773,7 @@
     if (P && cell) { P.pos.set(cell.wx, floorY(cell.wx, cell.wz) + 0.1, cell.wz + 4); P.vy = 0; }
     setAlarm(TIER_AT[1] + 2);                          // back out at YELLOW, they're looking
     if (RT.brig.keyH) { window.removeEventListener("keydown", RT.brig.keyH); RT.brig.keyH = null; }
-    if (C) { C.hud.closePanel(); C.hud.toast("LOCK PICKED — you slip out"); }
+    if (C) { C.hud.closePanel(); C.hud.toast("LOCK PICKED, you slip out"); }
   }
   function courtMartial() {
     RT.brig.active = false; RT.outcome = "lose";
@@ -835,7 +835,7 @@
     const pins = bk.pins.map((x, i) => "<span style='display:inline-block;width:22px;height:22px;border-radius:5px;margin-right:5px;background:" + (x.set ? "#35d07a" : i === bk.pin ? "#e8b64c" : "#26343c") + "'></span>").join("");
     const html =
       "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>" +
-      "<b style='letter-spacing:2px;color:#e8b64c;font-size:17px'>THE BRIG — PICK THE LOCK</b>" +
+      "<b style='letter-spacing:2px;color:#e8b64c;font-size:17px'>THE BRIG · PICK THE LOCK</b>" +
       "<span style='font-size:12px'>pin " + (bk.pin + 1) + " / " + bk.pins.length + "</span></div>" +
       "<div style='font-size:12px;opacity:.85;margin-bottom:8px'>Seat each pin: hit <b>SET</b> (or Space) when the pick is in the green.</div>" +
       "<div>" + pins + "</div>" +
@@ -854,13 +854,13 @@
     const jrow = (done, label) => "<div style='margin:2px 0'>" + (done ? "" : "▫") + " " + label + "</div>";
     const html =
       "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>" +
-      "<b style='letter-spacing:2px;color:#d8e6b0;font-size:17px'>FORT HALSTEAD — RESTRICTED AREA</b>" +
+      "<b style='letter-spacing:2px;color:#d8e6b0;font-size:17px'>FORT HALSTEAD · RESTRICTED AREA</b>" +
       "<span style='font-size:13px'>cash <b style='color:#ffd451'>$" + C.wallet.cash().toLocaleString() + "</b></span></div>" +
       "<div style='font-size:12px;opacity:.9;margin-bottom:6px'>One night. Three jobs, any order, then crash the gate in something with tracks.</div>" +
-      jrow(nb.photo, "Photograph the prototype (far hangar) — $" + PAY.photo.toLocaleString()) +
-      jrow(nb.tap, "Tap the comms mast (hold, stay unseen) — $" + PAY.tap.toLocaleString()) +
-      jrow(nb.steal, "Steal a military vehicle — $" + PAY.steal.toLocaleString()) +
-      "<div style='margin:4px 0;font-size:12px;opacity:.85'>Extraction: crash the gate in a stolen vehicle — $" + PAY.extract.toLocaleString() + "</div>" +
+      jrow(nb.photo, "Photograph the prototype (far hangar). $" + PAY.photo.toLocaleString()) +
+      jrow(nb.tap, "Tap the comms mast (hold, stay unseen). $" + PAY.tap.toLocaleString()) +
+      jrow(nb.steal, "Steal a military vehicle. $" + PAY.steal.toLocaleString()) +
+      "<div style='margin:4px 0;font-size:12px;opacity:.85'>Extraction: crash the gate in a stolen vehicle. $" + PAY.extract.toLocaleString() + "</div>" +
       "<div style='margin-top:8px'>" +
       (nb.active
         ? "<span style='" + BTN + "background:#26343c;color:#8fe39a'>CONTRACT ACTIVE · alert " + TIERS[RT.tierIdx] + "</span>"
@@ -877,7 +877,7 @@
     nb.active = true; nb.photo = nb.tap = nb.steal = false; nb.caught = 0;
     RT.alarm = 0; RT.tierIdx = 0; RT.outcome = "none"; RT.photoT = RT.tapT = 0;
     save();
-    C.hud.toast("CONTRACT ACTIVE — go dark");
+    C.hud.toast("CONTRACT ACTIVE, go dark");
   }
   function openWinPanel(payout) {
     C.hud.panel(

@@ -127,7 +127,7 @@
        running before it means being erased in silence. CBZ.renderer is that
        file's own output, so its presence is proof we are downstream of it. */
     if (!CBZ.renderer) {
-      state.why = "loaded before core/renderer.js — its installFog would erase this patch silently";
+      state.why = "loaded before core/renderer.js, its installFog would erase this patch silently";
       if (window.console) console.error("[groundmask] " + state.why);
       return false;
     }
@@ -135,7 +135,7 @@
     const parsF = THREE.ShaderChunk.fog_pars_fragment, frg = THREE.ShaderChunk.fog_fragment;
     if (typeof parsV !== "string" || typeof vtx !== "string" ||
         typeof parsF !== "string" || typeof frg !== "string") {
-      state.why = "fog chunks missing — unknown THREE build, left alone";
+      state.why = "fog chunks missing, unknown THREE build, left alone";
       return false;
     }
     if (frg.indexOf("uCbzHoles") >= 0) { state.installed = true; return true; }   // idempotent

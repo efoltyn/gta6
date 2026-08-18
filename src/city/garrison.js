@@ -938,7 +938,7 @@
       });
     }
     const w = CBZ.cityGarrison(gar.id + "-watch", {
-      name: gar.name + " — Command Watch",
+      name: gar.name + " · Command Watch",
       org: ARMY, organization: "military", rankField: "milRank",
       x: x, z: z, home: gar.home,
       job: "soldier", weapon: "Pistol", hp: 160,

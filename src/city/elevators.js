@@ -756,8 +756,8 @@
   // pill (worded, never a key glyph) that fires this module's [E] path.
   function callPrompt(end) {
     const desktop = end === "g"
-      ? "[E] Elevator — call (ride to the roof)"
-      : "[E] Elevator — call (ride down)";
+      ? "[E] Elevator, call (ride to the roof)"
+      : "[E] Elevator, call (ride down)";
     return CBZ.touchActionPrompt
       ? CBZ.touchActionPrompt("e", end === "g" ? "ELEVATOR UP" : "ELEVATOR DOWN", desktop)
       : desktop;
@@ -857,11 +857,11 @@
       // boarded? (only once the doors are wide enough that they really walked in)
       if (r.open > 0.7 && insideCab(el, m.end, P)) { beginClose(el); return "Doors closing…"; }
       if (m.t >= WAIT_OPEN) {
-        if (inDoorway(el, m.end, P)) { m.t = WAIT_OPEN - 0.6; return "Elevator — step in"; }  // doors WAIT, no crush
+        if (inDoorway(el, m.end, P)) { m.t = WAIT_OPEN - 0.6; return "Elevator, step in"; }  // doors WAIT, no crush
         setDoorTarget(r, false, true); m.st = "close"; m.will = false; // nobody came: close back to idle
         setLit(el, false);
       }
-      return insideCab(el, m.end, P) ? "Doors closing…" : "Elevator — step in";
+      return insideCab(el, m.end, P) ? "Doors closing…" : "Elevator, step in";
     }
 
     if (m.st === "close") {
@@ -869,7 +869,7 @@
         setDoorTarget(r, true, true); m.st = "open"; m.t = WAIT_OPEN - 1.4;
         if (m.will) m.will = false;
         setLit(el, true);
-        return "Elevator — step in";
+        return "Elevator, step in";
       }
       if (m.will && !insideCab(el, m.end, P)) {               // stepped back out: cancel the ride
         m.will = false; setLit(el, false);
@@ -923,7 +923,7 @@
         if (CBZ.sfx) CBZ.sfx("blip");
         if (CBZ.shake) CBZ.shake(0.25);
         if (CBZ.city && CBZ.city.note) {
-          CBZ.city.note(m.end === "r" ? ("" + ST + " floors up — the roof is yours.") : "Ground floor.", 2);
+          CBZ.city.note(m.end === "r" ? ("" + ST + " floors up, the roof is yours.") : "Ground floor.", 2);
         }
         return null;
       }
@@ -947,7 +947,7 @@
         resetMachine(el, CALL_COOL);
         return null;
       }
-      return m.end === "r" ? "Roof — step out" : "Ground floor — step out";
+      return m.end === "r" ? "Roof, step out" : "Ground floor, step out";
     }
     return undefined;
   }

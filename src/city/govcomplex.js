@@ -2964,7 +2964,7 @@
           if (t.what === "key") return "Take " + (v.spec.key || "the key");
           if (t.what === "rack") return "Take a weapon off the rack";
           if (t.what === "seal") return "Take the city seal";
-          return v.key ? "Unlock the strongroom" : "Strongroom — locked";
+          return v.key ? "Unlock the strongroom" : "Strongroom, locked";
         },
         // deliberately NOT `bad`: that field is a static truthy in this registry
         // (interactions.js:363 subtracts 240 from the target score for it), so
@@ -3021,7 +3021,7 @@
     if (name && CBZ.cityGiveWeapon) { try { CBZ.cityGiveWeapon(name); } catch (e) {} }
     if (CBZ.cityAddAmmo) { try { CBZ.cityAddAmmo(60); } catch (e) {} }
     if (econ && econ.add) { try { econ.add("Body Armor", 1); } catch (e) {} }
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("CONFISCATED ARMS — " + (name || "the rack") + " + plates");
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("CONFISCATED ARMS · " + (name || "the rack") + " + plates");
     else srNote("You take " + (name || "what is on the rack") + " off the rack.", 2.4);
   }
 
@@ -3042,7 +3042,7 @@
       if (CBZ.city && CBZ.city.big) CBZ.city.big("THE CITY SEAL");
       return;
     }
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("THE CITY SEAL — you sign for yourself now");
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("THE CITY SEAL, you sign for yourself now");
     srNote("The seal of the city, in your pocket. No government door in this state is closed to you.", 3.4);
   }
   // idempotent, one line per complex — occupy.js stores the pass on the actor,

@@ -2049,7 +2049,7 @@
               nextWarmT = (CBZ.now || 0) + 120000;      // ~2 min cooldown — a rest, not a battery
               const P = CBZ.player;
               if (P && P.hp != null && P.maxHp) P.hp = Math.min(P.maxHp, P.hp + Math.round(P.maxHp * 0.08));
-              CBZ.city.note("You warm up by the hearth — the cold eases off.", 2.2);
+              CBZ.city.note("You warm up by the hearth, the cold eases off.", 2.2);
             },
           }],
         });

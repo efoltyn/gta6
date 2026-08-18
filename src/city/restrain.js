@@ -463,7 +463,7 @@
       // dragging in a clean citizen: the desk doesn't pay — it CHARGES you.
       ped.controlled = false;
       ped.fear = 10; ped.alarmed = 8; ped.state = "flee";
-      CBZ.city && CBZ.city.note("“This one's clean. Cuffing citizens off the street — that's a snatch job.”", 2.6);
+      CBZ.city && CBZ.city.note("“This one's clean. Cuffing citizens off the street, that's a snatch job.”", 2.6);
       CBZ.cityCrime && CBZ.cityCrime(120, { instant: true, x: CBZ.player.pos.x, z: CBZ.player.pos.z, type: "kidnapping" });
     }
     I.refresh();
@@ -599,7 +599,7 @@
           if (c.dead) continue;
           if (Math.hypot(c.pos.x - ped.pos.x, c.pos.z - ped.pos.z) < 16) {
             r._copSeen = true;
-            if (CBZ.citySay) CBZ.citySay(c, "“Hey! Step away from him — NOW.”", "#ffd27b", 2.2);
+            if (CBZ.citySay) CBZ.citySay(c, "“Hey! Step away from him. NOW.”", "#ffd27b", 2.2);
             CBZ.cityCrime && CBZ.cityCrime(70, { instant: true, x: ped.pos.x, z: ped.pos.z, type: "kidnapping" });
             break;
           }
@@ -759,7 +759,7 @@
   I.describe("station", function () {
     const p = deskCaptive(CBZ.player.pos.x, CBZ.player.pos.z);
     const note = p
-      ? (isWanted(p) ? "They've got paper on this one — the desk pays cash" : "This one's clean — the desk doesn't pay for citizens")
+      ? (isWanted(p) ? "They've got paper on this one, the desk pays cash" : "This one's clean, the desk doesn't pay for citizens")
       : "The desk takes collars";
     return { label: "Precinct Desk", note };
   });

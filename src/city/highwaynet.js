@@ -367,7 +367,7 @@
           if (!res.ok) {
             blocked++;
             warn(tag + " crosses '" + res.blockedBy + "' by " + Math.round(res.depth) +
-              " m — the drivable record is CLAMPED to the boundary; retune the table so the DECK stops there too");
+              " m, the drivable record is CLAMPED to the boundary; retune the table so the DECK stops there too");
             leg.blockedBy = res.blockedBy;
           }
         } else for (const rg of regs) {
@@ -376,7 +376,7 @@
           const hit = rg.kind === "circle"
             ? rectCircleOverlap(leg, rg.cx, rg.cz, rg.r + pad)
             : rectsOverlap(leg, rg.minX - pad, rg.maxX + pad, rg.minZ - pad, rg.maxZ + pad);
-          if (hit) warn(tag + " overlaps region '" + rg.name + "' — retune the table");
+          if (hit) warn(tag + " overlaps region '" + rg.name + "', retune the table");
         }
         for (const wb of waters) {
           const hit = wb.kind === "circle"
@@ -403,7 +403,7 @@
           if (!isLinkName(rg.name) || rg.kind === "circle") continue;
           if (d.x >= rg.minX - 6 && d.x <= rg.maxX + 6 && d.z >= rg.minZ - 6 && d.z <= rg.maxZ + 6) { ok = true; break; }
         }
-        if (!ok) warn(route.id + " dock (" + d.x + "," + d.z + ") [" + d.note + "] found no causeway/link region — a landmass moved without this table");
+        if (!ok) warn(route.id + " dock (" + d.x + "," + d.z + ") [" + d.note + "] found no causeway/link region, a landmass moved without this table");
       }
     }
     return blocked;

@@ -329,7 +329,7 @@
         // No water anywhere we can reach. Spawn it anyway (never swallow the
         // player's vehicle) but COUNT it — this is the ratchet.
         _beached++;
-        if (window.console) console.warn("[berth] no berth for marine hull '" + modelName + "' — spawned on land at " + (x | 0) + "," + (z | 0));
+        if (window.console) console.warn("[berth] no berth for marine hull '" + modelName + "', spawned on land at " + (x | 0) + "," + (z | 0));
       }
       return orig(x, z, modelName);
     };

@@ -879,7 +879,7 @@
       // why the old version of this line ("[B] tap: release · … · LMB missiles")
       // was never delivered to anybody. The keys are taught on the flight strip
       // instead (payloadHudText); this is the loadout, for the phone's record.
-      note("B-2 SPIRIT airborne — bay loaded with sixteen Mk-84, four JDAM, and three nuclear weapons. Penetrators only bite fast and high.",
+      note("B-2 SPIRIT airborne, bay loaded with sixteen Mk-84, four JDAM, and three nuclear weapons. Penetrators only bite fast and high.",
         5.4, { from: "Flight Ops", app: "messages" });
     }
     // bay doors ease open around a drop window, then seal
@@ -948,7 +948,7 @@
   const PAY_SHORT = { bomb: "MK-84", jdam: "JDAM", buster: "GBU-57", nuke: "NUKE" };
   function payloadLabel(k, c) {
     if (k === "bomb") return "Payload: Mk-84 bombs (" + payloadCount("bomb", c) + ")";
-    if (k === "jdam") return "Payload: GBU-31 JDAM — guided (" + payloadCount("jdam", c) + ")";
+    if (k === "jdam") return "Payload: GBU-31 JDAM, guided (" + payloadCount("jdam", c) + ")";
     if (k === "buster") return "Payload: GBU-57 BUNKER BUSTER (" + payloadCount("buster", c) + ")";
     return "Payload: NUCLEAR WEAPON (" + payloadCount("nuke", c) + ")";
   }
@@ -972,7 +972,7 @@
       // the B-2's nuclear rack is flight-only. The single vault device remains
       // a portable planting item; it is not secretly a fourth aircraft round.
       payloadFlash("NO OTHER STORES", 2.4);
-      note("No other stores aboard — JDAM rack " + (CBZ.CONFIG.STRAT_JDAM === false ? "is disabled" : "spent")
+      note("No other stores aboard. JDAM rack " + (CBZ.CONFIG.STRAT_JDAM === false ? "is disabled" : "spent")
         + ". GBU-57 penetrators are in the Fort Brandt Deep Shelter's ordnance crate; the nuclear rack is spent.",
         3.2, { from: "Flight Ops", app: "messages" });
       return payload;
@@ -982,7 +982,7 @@
     // The two SPECIALS are genuine headlines and belong in the record; the two
     // ordinary racks are not, and a news push per keypress would be spam.
     if ((payload === "buster" || payload === "nuke") && CBZ.city && CBZ.city.big) {
-      try { CBZ.city.big(payload === "nuke" ? "BAY ARMED — NUCLEAR WEAPON" : "BAY ARMED — GBU-57 PENETRATOR"); } catch (e) {}
+      try { CBZ.city.big(payload === "nuke" ? "BAY ARMED · NUCLEAR WEAPON" : "BAY ARMED · GBU-57 PENETRATOR"); } catch (e) {}
     }
     sfx("switch", { pitch: 1.2, volume: 0.3 });
     return payload;
@@ -1813,7 +1813,7 @@
     // A REFUSED RELEASE IS THE SAME BUG AS THE INVISIBLE PAYLOAD SWITCH: both
     // notes below are deleted upstream (mode.js phoneWorthy), so [B] simply did
     // nothing and read as a broken key. The strip is the surface that works.
-    if (agl < 14) { if (!force) { payloadFlash("TOO LOW — CLIMB", 1.8); note("Too low — climb before releasing.", 1.4); } return false; }
+    if (agl < 14) { if (!force) { payloadFlash("TOO LOW · CLIMB", 1.8); note("Too low, climb before releasing.", 1.4); } return false; }
     if (!payloadAvailable(payload, c)) { cyclePayload(); if (!payloadAvailable(payload, c)) { if (!force) { payloadFlash("BAY EMPTY", 1.8); note("Bay's empty.", 1.2); } return false; } }
     // The nuke resolver intentionally admits one propagating apocalypse at a
     // time. Refuse a second release BEFORE charging the rack so all three
@@ -1822,7 +1822,7 @@
     if (payload === "nuke" && nuclearChannelBusy()) {
       if (!force) {
         payloadFlash("NUCLEAR CHANNEL BUSY", 2.0);
-        note("Nuclear channel busy — wait for the current weapon to resolve.", 2.0, { from: "Flight Ops", app: "messages" });
+        note("Nuclear channel busy, wait for the current weapon to resolve.", 2.0, { from: "Flight Ops", app: "messages" });
       }
       return false;
     }
@@ -2054,7 +2054,7 @@
         CBZ.cityBombWalk(w.pts, { kind: kind, interval: run.interval, delay: w.tf });
       } catch (e) {}
     }
-    note("BOMB RUN — " + run.want + " away.", 1.8);
+    note("BOMB RUN · " + run.want + " away.", 1.8);
     return true;
   }
 
@@ -2104,7 +2104,7 @@
         dirx: hx, dirz: hz,
       });
     } catch (e) { run.active = false; return false; }
-    note("STRIKE INBOUND — " + count + " x 2000 lb, " + Math.round(tot) + "s out. Clear the grid.", 3.4);
+    note("STRIKE INBOUND · " + count + " x 2000 lb, " + Math.round(tot) + "s out. Clear the grid.", 3.4);
     if (CBZ.sfxAt) CBZ.sfxAt("siren", tx, tz, { volume: 0.35 });
     return true;
   }
@@ -2358,7 +2358,7 @@
         detonate(I.cx, iy, I.cz, "buster", { byPlayer: true, mass: kin.mass, speed: kin.speed });
         // guarantee the interior kill through the KILL BUS with an honest cause
         sweepKill(I.minX - 1, I.maxX + 1, I.minZ - 1, I.maxZ + 1, "airstrike");
-        note("Direct hit — " + (bunker.name || "the bunker") + " is breached.", 2.6);
+        note("Direct hit · " + (bunker.name || "the bunker") + " is breached.", 2.6);
       } else if (verdict === "crack") {
         // through most of the roof, not all of it: the room is survivable
         // hell, the shelter guarantee HOLDS, and the player is told why.
@@ -2366,13 +2366,13 @@
           byPlayer: true, noDamage: false, scale: 0.45, mass: kin.mass, speed: kin.speed,
         });
         sweepKill(x - 4, x + 4, I.minZ - 1, I.maxZ + 1, "airstrike");
-        note("The roof cracked but held — come in faster and higher.", 3.2);
+        note("The roof cracked but held, come in faster and higher.", 3.2);
       } else {
         // spent on the berm. Still a 2-tonne warhead going off on a hillside.
         detonate(x, Math.max(1.2, surf) + 0.8, z, "buster", {
           byPlayer: true, dirx: dx, dirz: dz, scale: 0.6, mass: kin.mass, speed: kin.speed,
         });
-        note("Spent on the berm — that roof needs a faster, higher release.", 3.2);
+        note("Spent on the berm, that roof needs a faster, higher release.", 3.2);
       }
       return;
     }
@@ -2638,7 +2638,7 @@
     // ---- consequence: the whole state turns on you. The star API grants the
     // owner-reserved 5th star only for a military-scale reason — this is one.
     if (CBZ.cityCrime) { try { CBZ.cityCrime(400, { x: x, z: z, type: "terrorism", instant: true }); } catch (e) {} }
-    if (CBZ.cityAddStars) { try { CBZ.cityAddStars(5, "Nuclear detonation — military response"); } catch (e) {} }
+    if (CBZ.cityAddStars) { try { CBZ.cityAddStars(5, "Nuclear detonation, military response"); } catch (e) {} }
     // panic buses (the loudest possible scare, C4's exact pattern)
     if (CBZ.cityPostEvent) { try { CBZ.cityPostEvent({ type: "explosion", pos: { x: x, y: 1, z: z }, radius: 400, intensity: 4 }); } catch (e) {} }
     if (CBZ.cityEvent) { try { CBZ.cityEvent("explosion", { x: x, z: z, panic: 40, damage: 30 }, { silent: true, noWanted: true }); } catch (e) {} }
@@ -2829,7 +2829,7 @@
     if (sortie) return { ok: false, why: "A sortie is already airborne." };
     // The nuclear channel admits one apocalypse at a time and always has —
     // refuse BEFORE anything is claimed or debited, the way dropPayload does.
-    if (nuclearChannelBusy()) return { ok: false, why: "Nuclear channel busy — one weapon at a time." };
+    if (nuclearChannelBusy()) return { ok: false, why: "Nuclear channel busy, one weapon at a time." };
     if (!b2rec || !b2rec.group || !b2rec.group.parent) return { ok: false, why: "There is no bomber." };
     if (b2rec.taken || b2rec._aiActive) return { ok: false, why: "The bomber is not on its pad." };
     const pilot = sortieCrew();
@@ -2870,7 +2870,7 @@
       phase: "inbound", t: 0, sndT: 0,
     };
     // The city gets told, once, the way every other inbound is told.
-    note("NUCLEAR SORTIE AIRBORNE — one weapon inbound on " +
+    note("NUCLEAR SORTIE AIRBORNE, one weapon inbound on " +
       (opts.label || "your mark") + ". Get underground.", 4.2,
       { from: "Strategic Command", app: "messages" });
     if (CBZ.sfxAt) { try { CBZ.sfxAt("siren", tx, tz, { volume: 0.4 }); } catch (e) {} }
@@ -3165,10 +3165,10 @@
             beep: Math.ceil(nkTimer() / 10) * 10,
           });
           if (nkArm() > 0) {
-            note("ARMING — hold the sequence. " + nkTimer() + " seconds once it goes hot.", 3.4,
+            note("ARMING, hold the sequence. " + nkTimer() + " seconds once it goes hot.", 3.4,
               { from: "Device", app: "messages" });
           } else {
-            note("DEVICE ARMED — " + nkTimer() + " seconds. Run.", 3.2);
+            note("DEVICE ARMED · " + nkTimer() + " seconds. Run.", 3.2);
           }
           if (CBZ.cityCrime) { try { CBZ.cityCrime(200, { x: t.x, z: t.z, type: "planting-explosives" }); } catch (e) {} }
         },
@@ -3242,7 +3242,7 @@
         }
         if (a.arm <= 0) {
           a.arm = 0;
-          note("DEVICE HOT — " + Math.ceil(a.t) + " seconds. Get a vehicle.", 3.6);
+          note("DEVICE HOT · " + Math.ceil(a.t) + " seconds. Get a vehicle.", 3.6);
           if (CBZ.city && CBZ.city.big) { try { CBZ.city.big("NUCLEAR DEVICE ARMED"); } catch (e) {} }
           if (CBZ.shake) { try { CBZ.shake(1.2); } catch (e) {} }
         }
@@ -3296,7 +3296,7 @@
       // airliner and the Raptor. Pressing [B] in one of them was silent, which
       // reads as a broken control rather than the wrong airframe. We do NOT
       // preventDefault here: the key still belongs to whoever else wants it.
-      if (k !== "c" && !e.repeat && CBZ.player && CBZ.player._aircraft) payloadFlash("NO BOMB BAY — TAKE THE B-2", 2.6);
+      if (k !== "c" && !e.repeat && CBZ.player && CBZ.player._aircraft) payloadFlash("NO BOMB BAY · TAKE THE B-2", 2.6);
       return;                                         // only the B-2 owns these keys
     }
     e.preventDefault();

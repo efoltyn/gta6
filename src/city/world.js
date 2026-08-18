@@ -1266,7 +1266,7 @@
       // ocean plane rather than throwing — a world with dull water is
       // recoverable, a world that fails to build is not.
       if (!CBZ.waterCommonUniforms || !CBZ.waterBuildSeaGeometry) {
-        console.error("[sea] world/water_spec.js did not load before city/world.js — falling back to the flat ocean plane");
+        console.error("[sea] world/water_spec.js did not load before city/world.js, falling back to the flat ocean plane");
         // drop the expansion island's own ocean plane first — it shares seaMat
         // and would z-fight this one (same sweep the real path does below)
         const stale = [];

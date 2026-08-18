@@ -184,7 +184,7 @@
             // wake and the drag would loop every ~400 s for the rest of the run.
             g._oocHunger = Math.max(g._oocHunger || 0, 25);
             CBZ.player.hunger = g._oocHunger;
-            if (CBZ.haulToCell) CBZ.haulToCell("STARVED — DRAGGED TO YOUR CELL", { strike: false });
+            if (CBZ.haulToCell) CBZ.haulToCell("STARVED · DRAGGED TO YOUR CELL", { strike: false });
           }
         }
       }

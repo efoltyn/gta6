@@ -382,7 +382,7 @@
       if (entry.fails >= 3) {
         entry.dead = true;
         micro.retired.push({ band: band, order: entry.order, source: entry.source || "", error: String(e && e.message || e) });
-        console.warn("[micro] retired a " + band + " hook (order " + entry.order + ") — it needs the full engine:", e);
+        console.warn("[micro] retired a " + band + " hook (order " + entry.order + "), it needs the full engine:", e);
       }
     }
   }

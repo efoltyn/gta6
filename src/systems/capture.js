@@ -333,8 +333,8 @@
       g.detection = Math.max(g.detection, g.strikeHeatFloor);
       g.cellWatch = true;               // extra sweeps past your cell (below)
       confineT = 7;
-      tellToast(campaign && strike >= 3 ? "STRIKE — THE WARDEN KEEPS YOU"
-        : (tiered && T.top() ? "STRIKE — SEGREGATION" : "STRIKE 2 — FINAL WARNING"));
+      tellToast(campaign && strike >= 3 ? "STRIKE · THE WARDEN KEEPS YOU"
+        : (tiered && T.top() ? "STRIKE · SEGREGATION" : "STRIKE 2 · FINAL WARNING"));
       tellHint(campaign && strike >= 3
         ? `The warden blocks your transfer${taken ? ` — but the screws take ${taken} cigs` : ""} and the block stays hot.`
         : (tiered && T.top()
@@ -342,7 +342,7 @@
           : `${taken ? taken + " cigs confiscated. " : ""}One more capture = TRANSFER TO MAX SECURITY. Guards now sweep your block.`), 3.4);
     } else {
       confineT = 4;
-      tellToast("STRIKE 1 — SHAKEDOWN");
+      tellToast("STRIKE 1 · SHAKEDOWN");
       tellHint(`${taken ? taken + " cigs confiscated. " : ""}Two more strikes and you're shipped to max security.`, 3.2);
     }
     // THE SHAKEDOWN IS A THING THAT HAPPENS TO YOU, not a sentence about a
@@ -400,12 +400,12 @@
     }
     if (player.hp <= 0) {
       player.hp = 100;
-      haulToCell(opts.haulMsg || (opts.melee ? "BEATEN DOWN" : "SHOT — DRAGGED TO YOUR CELL"));
+      haulToCell(opts.haulMsg || (opts.melee ? "BEATEN DOWN" : "SHOT · DRAGGED TO YOUR CELL"));
       return true;
     }
     // NO "You're hit — get to cover!". The red flash IS the hit, and the health
     // bar you can see falling is the report.
-    tellHint(opts.hint || "You're hit — get to cover!", 1.1);
+    tellHint(opts.hint || "You're hit, get to cover!", 1.1);
     return false;
   };
   // An NPC (or a tower) lands a SHOT on the player. Unchanged contract; it is
@@ -425,7 +425,7 @@
     escortT = 1.9; escorted = false;
     CBZ.playerChar.cuffed = true; player.stun = 2.2;
     setCaptureState("cuffed", 1.9);
-    tellToast(msg || "CUFFED — BACK TO YOUR CELL");
+    tellToast(msg || "CUFFED · BACK TO YOUR CELL");
     CBZ.guards.forEach((gd) => { gd.hunt = 0; gd.alert = 0; gd.investigate = null; gd.capCD = 0; });
   }
 
@@ -466,12 +466,12 @@
       // energizes the same body-pose signal used when the player fires one.
       // Capture still owns stun/state; taserfx owns only what that event looks like.
       if (CBZ.taserFx && CBZ.taserFx.actorTasePlayer) CBZ.taserFx.actorTasePlayer(gd);
-      tellHint("TASED — you hit the floor!", 1.6);
+      tellHint("TASED, you hit the floor!", 1.6);
       CBZ.sfx("tase"); CBZ.shake && CBZ.shake(0.55);
       if (CBZ.el && CBZ.el.flash) { CBZ.el.flash.classList.remove("go"); void CBZ.el.flash.offsetWidth; CBZ.el.flash.classList.add("go"); }
     } else if (player.subdue === 2) {
       player.stun = 2.05; setCaptureState("tackled", 1.55);
-      tellHint("TACKLED — cuffs coming out!", 1.6);
+      tellHint("TACKLED, cuffs coming out!", 1.6);
       CBZ.sfx("punch"); CBZ.shake && CBZ.shake(0.7);
       spray(1.1);                                   // the OC goes in your eyes — an overlay, not a line
     } else if (showing() && CBZ.predatorSeize && !seizedBy) {
@@ -668,7 +668,7 @@
     if (g.jailSentence <= 0) {
       g.jailSentence = 0;
       // the gate opening is the announcement.
-      tellToast("TIME SERVED — GATE'S OPEN");
+      tellToast("TIME SERVED · GATE'S OPEN");
       beatLock = false;
       releasePlayerCell(); muster(false);   // nothing of ours stays shut past the gate
       if (CBZ.cityJailRelease) { try { CBZ.cityJailRelease("served"); return; } catch (e) {} }
@@ -715,8 +715,8 @@
     // lines that used to say so are gone; what is left is the room, the bars
     // racking across in front of you (sealPlayerCell, above) and the sentence
     // standing in the objective readout the pipe already writes.
-    tellToast("BOOKED — YOUR CELL");
-    tellHint("Intake. The door stays shut for the count — " +
+    tellToast("BOOKED · YOUR CELL");
+    tellHint("Intake. The door stays shut for the count · " +
       Math.ceil(+g.jailSentence) + "s to serve.", 3.0);
     // NO SOUND REQUEST HERE. The bars racking shut on you is the one sound the
     // intake is about, and it was silent — this asked for a generic `door` cue
@@ -758,7 +758,7 @@
           confineShown = s;
           // the SHUT DOOR is the confinement. A per-second countdown line was a
           // caption on a locked cell you are standing inside.
-          if (!showing()) CBZ.showHint(heldDoor != null ? `Cell door locked — ${s}s` : `Confined to your cell — ${s}s`);
+          if (!showing()) CBZ.showHint(heldDoor != null ? `Cell door locked. ${s}s` : `Confined to your cell. ${s}s`);
           else toldHints++;
         }
       } else {
@@ -880,14 +880,14 @@
       if (towerSeq === 1 && towerShotCD <= 0) {
         towerBurst(towerSrc, 6.0, 3);                                   // warning shots, WIDE
         CBZ.shake && CBZ.shake(0.3);
-        tellHint("TOWER — WARNING SHOTS! TURN BACK!", 1.6);
+        tellHint("TOWER · WARNING SHOTS! TURN BACK!", 1.6);
         towerShotCD = 1.1;
         if (towerT > 1.4) towerSeq = 2;
       } else if (towerSeq === 2 && towerShotCD <= 0) {
         towerBurst(towerSrc, 2.4, 4);                                   // final volley, CLOSE
         CBZ.shake && CBZ.shake(0.5);
         if (CBZ.el && CBZ.el.flash) { CBZ.el.flash.classList.remove("go"); void CBZ.el.flash.offsetWidth; CBZ.el.flash.classList.add("go"); }
-        tellHint("LAST WARNING — GET OUT OF THE OPEN!", 1.6);
+        tellHint("LAST WARNING · GET OUT OF THE OPEN!", 1.6);
         towerShotCD = 1.3;
         if (towerT > 3.2) towerSeq = 3;
       } else if (towerSeq === 3 && towerShotCD <= 0) {

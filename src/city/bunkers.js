@@ -395,7 +395,7 @@
       const L = doorLock(t);
       return {
         label: t.name || "Blast Door",
-        note: L.open ? "Hardened shelter — the door is the only way in" : "SEALED — " + (t.lockNote || "it answers to somebody who has more than you"),
+        note: L.open ? "Hardened shelter, the door is the only way in" : "SEALED · " + (t.lockNote || "it answers to somebody who has more than you"),
       };
     });
     I.registerZone({
@@ -406,7 +406,7 @@
         label: function (t) {
           if (t.kind === "armory") {
             const day = CBZ.dayCount ? CBZ.dayCount() : 0;
-            return day < t.nextRestock ? "Ordnance crate — restocks tomorrow" : "Take bunker-buster bombs (2)";
+            return day < t.nextRestock ? "Ordnance crate, restocks tomorrow" : "Take bunker-buster bombs (2)";
           }
           return t.taken ? "The cache is cleaned out" : "Crack open the supply cache";
         },
@@ -425,7 +425,7 @@
             if (day < t.nextRestock) { if (CBZ.city && CBZ.city.note) CBZ.city.note("The quartermaster restocks the penetrators daily.", 2); return; }
             t.nextRestock = day + 1;
             if (e && e.add) e.add("Bunker Buster", 2);
-            if (CBZ.city && CBZ.city.note) CBZ.city.note("2× GBU-57 bunker busters loaded — the B-2's bay carries them.", 2.6);
+            if (CBZ.city && CBZ.city.note) CBZ.city.note("2× GBU-57 bunker busters loaded, the B-2's bay carries them.", 2.6);
           } else {
             if (t.taken) return;
             t.taken = true;
@@ -439,7 +439,7 @@
       }],
     });
     if (I.describe) I.describe("bunkercrate", function (t) {
-      return { label: t.kind === "armory" ? "Ordnance Crate" : "Supply Cache", note: t.kind === "armory" ? "GBU-57 penetrators — B-2 payload" : "Left behind when the site went dark" };
+      return { label: t.kind === "armory" ? "Ordnance Crate" : "Supply Cache", note: t.kind === "armory" ? "GBU-57 penetrators. B-2 payload" : "Left behind when the site went dark" };
     });
     I.registerZone({
       id: "bunker-vault", kind: "nukevault", radius: 2.8,

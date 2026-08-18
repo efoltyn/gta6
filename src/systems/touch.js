@@ -1811,7 +1811,7 @@
     CBZ.touchVerb("cam-recenter", { ctx: "foot", key: "—", skip: "owner asked the recenter button off the iPad glass (TOUCH_RECENTER=0); the look drag still levels the view, it just takes a drag instead of a tap" });
   CBZ.touchVerb("cam-zoom", { ctx: "any", key: "wheel", hook: "camZoom" });
   // Declared and NOT drawn, each with the reason, so the count cannot launder them:
-  CBZ.touchVerb("front-view", { ctx: "foot", key: "B", skip: "outfit check — the FRONT VIEW hold is a look-at-yourself pose, and CAM_TP_V2 gates it on pointer lock; a thumb has the phone's wardrobe for this" });
+  CBZ.touchVerb("front-view", { ctx: "foot", key: "B", skip: "outfit check, the FRONT VIEW hold is a look-at-yourself pose, and CAM_TP_V2 gates it on pointer lock; a thumb has the phone's wardrobe for this" });
   CBZ.touchVerb("shoulder-swap", { ctx: "foot", key: "MMB", skip: "CBZ.camSetShoulder is one call away, but a 6th icon for a mirrored 0.68 m offset is not worth the corner" });
 
   CBZ.touchVerbWired("move", "#tstick");

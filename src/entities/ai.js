@@ -3715,7 +3715,7 @@
         if (m.gang === victim.gang && alive(m)) { m.aiState = "flee"; m.fleeT = 3.5; m.foe = null; }
       }
       if (CBZ.player && Math.hypot(CBZ.player.pos.x - victim.group.position.x, CBZ.player.pos.z - victim.group.position.z) < 24)
-        nar(`${gangName(victim.gang)} scatter — their leader's down!`, 2);
+        nar(`${gangName(victim.gang)} scatter, their leader's down!`, 2);
     }
     // A DEATH HAS A SURFACE ALREADY, AND IT IS NOT A HINT LINE. city/killfeed.js
     // owns the ONE sanctioned popup in this game (engine-systems.md), and every
@@ -5308,7 +5308,7 @@
         addGangDebt(gang, Math.max(3, a.cost || 3));
         addGangStanding(gang, -10);
         if (gangStanding(gang) < -10 || gangDebt(gang) > 10) provokeGang(n, 5);
-        return { ok: false, msg: `${gangName(gang)} put interest on the dues — your tab's at ${gangDebt(gang)} now.` };
+        return { ok: false, msg: `${gangName(gang)} put interest on the dues, your tab's at ${gangDebt(gang)} now.` };
       }
       if (a.kind === "stickUp") {
         const gang = n.gang;
@@ -5540,7 +5540,7 @@
         addGangDebt(gang, Math.max(2, Math.ceil((a.cost || 3) * 0.8)));
         addGangStanding(gang, -6);
         if (gangStanding(gang) < -12 || gangDebt(gang) > 12) provokeGang(n, 5);
-        return { ok: false, msg: `${gangName(gang)} chalk the unpaid dues onto your tab — ${gangDebt(gang)} now.` };
+        return { ok: false, msg: `${gangName(gang)} chalk the unpaid dues onto your tab. ${gangDebt(gang)} now.` };
       }
       if (a.kind === "stickUp") {
         const gang = n.gang;

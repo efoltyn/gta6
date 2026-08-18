@@ -1300,7 +1300,7 @@
   function throwGrenade() {
     if (g.mode !== "city" || g.state !== "playing" || !P || P.dead || P.driving) return;
     if ((P.stun || 0) > 0) return;
-    if (grenCount() <= 0) { if (CBZ.city) CBZ.city.note("No grenades — buy them at the gun shop", 1.4); return; }
+    if (grenCount() <= 0) { if (CBZ.city) CBZ.city.note("No grenades, buy them at the gun shop", 1.4); return; }
     if (live.length >= GREN.maxLive) return;
     if (!(CBZ.cityEcon && CBZ.cityEcon.take && CBZ.cityEcon.take("Grenade"))) return;
     const dir = aimVec();

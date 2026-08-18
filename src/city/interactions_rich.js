@@ -105,12 +105,12 @@
   //      wins when it has something to say; this fills the slot for a plain
   //      stranger). Words buy a sliver of warmth — and they remember you said it.
   const COMPLIMENTS = [
-    "“Love the fit — you wear it well.”",
+    "“Love the fit, you wear it well.”",
     "“You've got a good energy about you.”",
     "“Respect. You carry yourself right.”",
     "“That's a clean look, no lie.”",
   ];
-  const COMP_BACK = ["“Ha — appreciate that.”", "“Aw, thanks. ”", "“You're alright, you know that?”", "“Means a lot, stranger.”"];
+  const COMP_BACK = ["“Ha, appreciate that.”", "“Aw, thanks. ”", "“You're alright, you know that?”", "“Means a lot, stranger.”"];
   function compliment(p) {
     meet(p);
     note(COMPLIMENTS[(Math.random() * COMPLIMENTS.length) | 0], 1.8);
@@ -271,7 +271,7 @@
     // 2) a VIP/celebrity nearby = a name to find (photo, or a fat mark).
     const vip = nearestVipOther(p);
     if (vip && vip.pos) {
-      note("“See that one? That's " + (vip.name || vipTitle(vip)) + " — a real somebody. They're around.”", 3.2);
+      note("“See that one? That's " + (vip.name || vipTitle(vip)) + " · a real somebody. They're around.”", 3.2);
       if (CBZ.fullMap && CBZ.fullMap.setWaypoint) CBZ.fullMap.setWaypoint(vip.pos.x, vip.pos.z, vipTitle(vip));
       if (CBZ.cityMarkTarget) try { CBZ.cityMarkTarget(vip); } catch (e) {}
       sfx("blip");
@@ -312,7 +312,7 @@
   const HANDOUT = 25;
   function looksBroke(p) { return (p.wealth || 0) < 0.25 && !p.robbed; }
   function giveMoney(p) {
-    if (!spend(HANDOUT)) { note("You're tapped out — nothing to give.", 1.8); return; }
+    if (!spend(HANDOUT)) { note("You're tapped out, nothing to give.", 1.8); return; }
     meet(p);
     p.cash = (p.cash | 0) + HANDOUT;       // it's real — into their pocket
     note("You slip " + nm(p) + " " + money(HANDOUT) + ". They light up.", 2.4);
@@ -328,7 +328,7 @@
   function fanMoment(p) {
     meet(p);
     const photo = Math.random() < 0.5;
-    if (photo) note("You grab a photo with " + (p.name || vipTitle(p)) + " — that's one for the story.", 2.6);
+    if (photo) note("You grab a photo with " + (p.name || vipTitle(p)) + " · that's one for the story.", 2.6);
     else note("" + (p.name || vipTitle(p)) + " signs an autograph for you.", 2.6);
     relShift(p, "greeted", 0.6);
     if (p.mood != null) p.mood = Math.min(1, (p.mood || 0) + 0.3);

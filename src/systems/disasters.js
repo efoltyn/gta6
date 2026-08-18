@@ -507,7 +507,7 @@
       // from nothing and the wind gets up, all through the ONE weather system —
       // so wet asphalt, wet grip and the lightning flash come along for free.
       warn(ctx) {
-        narrate("hint", "Storm rolling in — keep moving!", 2.4); sound("thunder");
+        narrate("hint", "Storm rolling in, keep moving!", 2.4); sound("thunder");
         const a = rnd() * 6.28; ctx.st.wx = Math.cos(a); ctx.st.wz = Math.sin(a);
       },
       warnTick(dt, ctx) {
@@ -681,7 +681,7 @@
       // the sky opens, the light goes, and the gutters start to stand before
       // anything else happens. A player who reads it is already walking uphill.
       warn(ctx) {
-        narrate("hint", "FLASH FLOOD — water rising, get HIGH!", 3); sound("water");
+        narrate("hint", "FLASH FLOOD, water rising, get HIGH!", 3); sound("water");
         // THE CHANNEL, not a random bearing: water runs the way the ground
         // falls. Sample a ring and take the LOWEST — that is where the front
         // will run and where the water will stand deepest when it stops.
@@ -804,7 +804,7 @@
       // of information the old banner was trying to convey. The wind vector is
       // now THE weather's wind (systems/weather.js), not a third private one.
       warn(ctx) {
-        narrate("hint", "HURRICANE inbound — brace and hold on!", 3); sound("wind");
+        narrate("hint", "HURRICANE inbound, brace and hold on!", 3); sound("wind");
         const a = rnd() * 6.28; ctx.st.wx = Math.cos(a); ctx.st.wz = Math.sin(a);
         ctx.st.gustCd = 2; ctx.st.turn = (rnd() - 0.5) * 0.2;
         ctx.st.debris = CBZ.fx.particleCloud({ mode: "swirl", color: 0x7a6f5a, count: 200, radius: ctx.R * 0.7, top: 10, size: 0.3, opacity: 0.6, vMin: 8, vMax: 16 });
@@ -877,7 +877,7 @@
       // a wildfire is coming, and it also gives the fire a real ORIGIN you can
       // put your back to instead of a hazard that materialises everywhere.
       warn(ctx) {
-        narrate("hint", "Wildfire spreading — don't get cornered!", 2.6); sound("fire");
+        narrate("hint", "Wildfire spreading, don't get cornered!", 2.6); sound("fire");
         const tr = ctx.arena.flammable;
         const seedTree = tr[(rnd() * tr.length) | 0];
         if (seedTree && !seedTree.burnt) { ignite(seedTree); ctx.st.seed = seedTree; }
@@ -1038,7 +1038,7 @@
          flow will take — plus the crowd, whose warnThreat now clears that
          corridor first. Nothing is drawn that is not a physical object. */
       warn(ctx) {
-        narrate("hint", "THE VOLCANO IS WAKING — get off the mountain!", 3);
+        narrate("hint", "THE VOLCANO IS WAKING, get off the mountain!", 3);
         sound("rumble"); if (CBZ.shake) CBZ.shake(0.5);
         const h = ctx.arena.hills[0];
         ctx.st.preGlow = disc(h.x, h.z, 0xff5210, 0.0, h.peak + 0.3);
@@ -1142,7 +1142,7 @@
       // "whiteout" — you can measure it by how much island you can still see,
       // and by how much of the grass has gone white under your feet.
       warn(ctx) {
-        narrate("hint", "Blizzard incoming — get INDOORS or keep moving!", 2.8); sound("wind");
+        narrate("hint", "Blizzard incoming, get INDOORS or keep moving!", 2.8); sound("wind");
         const a = rnd() * 6.28; ctx.st.wx = Math.cos(a); ctx.st.wz = Math.sin(a);
       },
       warnTick(dt, ctx) {
@@ -1193,7 +1193,7 @@
       // real sequence, and it makes the player look UP, which is where the
       // warning for the rest of the event will be.
       warn(ctx) {
-        narrate("hint", "METEORS — watch the shadows!", 2.6); sound("rumble");
+        narrate("hint", "METEORS, watch the shadows!", 2.6); sound("rumble");
         ctx.st.streaks = []; ctx.st.streakCd = 0.15;
       },
       warnTick(dt, ctx) {
@@ -1454,7 +1454,7 @@
   // ============================================================
   const TSUNAMI_LEGACY = {
     name: "TSUNAMI", emoji: "", warnSecs: 7, activeSecs: 20, gap: 7, cause: "swept away by the tsunami", tint: 0x35607e,
-    warn(ctx) { narrate("hint", "TSUNAMI — get to HIGH GROUND!", 3); sound("water"); },
+    warn(ctx) { narrate("hint", "TSUNAMI, get to HIGH GROUND!", 3); sound("water"); },
     start(ctx) {
       // the rising flood pool that ultimately drowns the low ground
       const m = new THREE.Mesh(new THREE.PlaneGeometry(ctx.R * 3, ctx.R * 3),
@@ -2080,7 +2080,7 @@
     if (st.spray) st.spray.setActive(0);
     surgeSet(st.floodSurge);
     tsuPublish(ctx, 1.6);
-    narrate("hint", "THE ISLAND IS UNDER — swim, climb, survive", 3);
+    narrate("hint", "THE ISLAND IS UNDER, swim, climb, survive", 3);
   }
 
   const TSUNAMI_V2 = {
@@ -2094,7 +2094,7 @@
       st.waveAmp = 0.86; st.chopAmp = 0.72; st.foamGain = 0.34;
       st.frontS = -1e9; st.frontV = 0; st.stallT = 0; st.broke = false; st.crashT = -1;
       tsuPublish(ctx, 0);
-      narrate("hint", "TSUNAMI — the sea is PULLING BACK. GET HIGH!", 3.6);
+      narrate("hint", "TSUNAMI, the sea is PULLING BACK. GET HIGH!", 3.6);
       soundAt("siren", ctx.cx, ctx.cz);
       if (CBZ.shake) CBZ.shake(0.3);
     },
@@ -2118,7 +2118,7 @@
       st.sirenCd = (st.sirenCd || 0) - dt;
       if (st.sirenCd <= 0) { st.sirenCd = 2.6; soundAt("siren", ctx.cx, ctx.cz); }
       if (rnd() < dt * 0.7) sound("water");
-      if (!st.saidBed && k > 0.62) { st.saidBed = 1; narrate("hint", "The seabed is EXPOSED — IT'S COMING", 2.6); }
+      if (!st.saidBed && k > 0.62) { st.saidBed = 1; narrate("hint", "The seabed is EXPOSED. IT'S COMING", 2.6); }
     },
     // during the drawdown the whole low island is the danger — that is what
     // puts 99 survivors on the mountain path, and a crowd running uphill IS
@@ -2348,7 +2348,7 @@
         tsuCarHandoff(ctx);
         tsuFlotsam(dt, ctx, 1.6);
         if (rnd() < dt * 2.5) sound("water");
-        if (st.floodT > ctx.activeSecs * 0.34) { st.phase = "drain"; st.drainFrom = st.floodSurge; narrate("hint", "The water is DRAINING — move!", 2.4); }
+        if (st.floodT > ctx.activeSecs * 0.34) { st.phase = "drain"; st.drainFrom = st.floodSurge; narrate("hint", "The water is DRAINING, move!", 2.4); }
       } else {  // drain — slow, and what it drags out with it is the memory
         const cur = CBZ.waterSurge ? CBZ.waterSurge() : 0;
         const next = Math.max(0, cur - dt * (st.floodSurge + 1.5) / Math.max(1.5, ctx.activeSecs * 0.2));
@@ -2631,7 +2631,7 @@
     const V = vfx();
     try { volAliveAtStart = surv().aliveCount(); } catch (e) { volAliveAtStart = -1; }
     narrate("banner", "VOLCANIC ERUPTION");
-    narrate("hint", "THE MOUNTAIN ERUPTS — stay off the lava!", 3);
+    narrate("hint", "THE MOUNTAIN ERUPTS, stay off the lava!", 3);
     if (CBZ.shake) CBZ.shake(0.9); sound("explosion"); sound("rumble");
     // a fountain of glowing lava bursting UP out of the summit vent
     ctx.st.erFountain = CBZ.fx.particleCloud({ mode: "rise", color: 0xff6a1a, count: 260, radius: 7, top: 22, size: 0.3, opacity: 0.85, vMin: 12, vMax: 22, drift: 3 }); ctx.st.erFountain.setActive(0.95);
@@ -4282,7 +4282,7 @@
     dir.cur = DEFS[id]; dir.curId = id; dir.st = {}; dir.state = "warn"; dir.t = dir.cur.warnSecs;
     dir.overT = 0; dir.overName = null;   // a new warning supersedes the all-clear
     curCtx = makeCtx(0);
-    narrate("banner", dir.cur.name + " — INCOMING");
+    narrate("banner", dir.cur.name + " · INCOMING");
     // THE UNIVERSAL TELEGRAPH IS PHYSICAL: every warning lands with a jolt you
     // feel, warnAmbience() below tints the whole sky toward the hazard's mood,
     // and the def's own warnTick starts the world doing the thing. Nothing on

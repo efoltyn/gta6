@@ -715,7 +715,7 @@
   };
 
   B.apply = function (blob) {
-    if (!blob || blob.v !== 1 || !Array.isArray(blob.pieces)) { if (blob) console.warn("[building] apply: blob v" + (blob && blob.v) + " — skipped"); return; }
+    if (!blob || blob.v !== 1 || !Array.isArray(blob.pieces)) { if (blob) console.warn("[building] apply: blob v" + (blob && blob.v) + " · skipped"); return; }
     for (let i = 0; i < blob.pieces.length; i++) {
       const rec = blob.pieces[i];
       const piece = B.place(rec.kind, rec.gx, rec.gy, rec.gz, rec.rot, { skipValidity: true, ownerId: rec.ownerId, hp: rec.hp });

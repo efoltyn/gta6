@@ -287,7 +287,7 @@
         }
       }
     }
-    if (families.length && CBZ.cityFlavor) CBZ.cityFlavor("The big houses are lived in now. Families, pools — leverage.", "#9fd0ff");
+    if (families.length && CBZ.cityFlavor) CBZ.cityFlavor("The big houses are lived in now. Families, pools, leverage.", "#9fd0ff");
   }
 
   // ---- DAILY ROUTINE -------------------------------------------------------
@@ -519,7 +519,7 @@
             if (reactCD <= 0 && (playerHurt || playerHot)) {
               reactCD = 12;
               if (CBZ.cityFlavor) CBZ.cityFlavor(playerHurt
-                ? "" + (m.name || "Family") + ": “You're bleeding — get inside.”"
+                ? "" + (m.name || "Family") + ": “You're bleeding, get inside.”"
                 : "" + (m.name || "Family") + ": “The whole block's watching you. Be careful.”", "#9fd0ff");
             }
             continue;
@@ -561,7 +561,7 @@
             if (CBZ.cityFeed) CBZ.cityFeed("They got " + (m.name || "your people") + " at the house. This can't stand.", "#ff7a7a");
             if (CBZ.city && CBZ.city.note) CBZ.city.note("They hit your HOME. " + (m.name || "Family") + " is gone.", 4);
           } else if (CBZ.cityFlavor) {
-            CBZ.cityFlavor("" + (m.name || "Someone") + " — somebody's whole world — is gone. The set won't forget.", "#ffce7a");
+            CBZ.cityFlavor("" + (m.name || "Someone") + " · somebody's whole world, is gone. The set won't forget.", "#ffce7a");
           }
         }
       }
@@ -624,7 +624,7 @@
     ped.ransom = ransom; ped.captiveT = 180;
     kidnap = { ped, gangId: gang.id, captors, ransom, t: 180, x: hx, z: hz, authored: !!opts.authored };
     if (CBZ.cityFeed) CBZ.cityFeed("The " + gang.name + " took " + (ped.name || "your girl") + ". They want $" + ransom.toLocaleString() + ".", "#ff7a7a");
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("They have " + (ped.name || "your family") + ". $" + ransom.toLocaleString() + " — or come take them back.", 5);
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("They have " + (ped.name || "your family") + ". $" + ransom.toLocaleString() + " · or come take them back.", 5);
     if (CBZ.fullMap && CBZ.fullMap.setWaypoint) CBZ.fullMap.setWaypoint(hx, hz, "THEY HAVE " + (ped.name || "FAMILY").toUpperCase());
   }
 
@@ -668,7 +668,7 @@
       const d = Math.hypot(P.pos.x - k.x, P.pos.z - k.z);
       if (d < 5) {
         if ((g.cash || 0) >= k.ransom) {
-          if (CBZ.city && CBZ.city.note) CBZ.city.note("[E] Pay $" + k.ransom.toLocaleString() + " — or kill the three holding " + (k.ped.name || "them"), 1.4);
+          if (CBZ.city && CBZ.city.note) CBZ.city.note("[E] Pay $" + k.ransom.toLocaleString() + " · or kill the three holding " + (k.ped.name || "them"), 1.4);
           if (CBZ.keys && (CBZ.keys["e"] || CBZ.keys["E"])) {
             /* THE MONEY GOES SOMEWHERE. `g.cash -= k.ransom` DESTROYED it: the
                crew that took your family got not one dollar richer for it, so

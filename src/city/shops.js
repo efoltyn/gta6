@@ -199,15 +199,15 @@
         "<span style='display:inline-block;margin:1px 6px 1px 0'>" +
         "<span style='color:#7f8794'>" + s + ":</span> <span style='color:#7ed957'>" + o[s] + "</span> <span style='color:#7f8794'>+" + (it[o[s]].drip || 0) + "</span></span>"
       ).join("");
-    } else html += "<span style='color:#7f8794'>plain clothes — nothing equipped.</span>";
+    } else html += "<span style='color:#7f8794'>plain clothes, nothing equipped.</span>";
     html += "</div>";
     // OWNED pieces you can put on (number keys). Worn ones marked ✓.
     closetItems = ownedWearables().slice(0, 9);
     if (!closetItems.length) {
-      html += "<div style='font-size:12px;color:#7f8794;margin-top:4px'>You don't own any wearables yet — buy a fit to build drip.</div>";
+      html += "<div style='font-size:12px;color:#7f8794;margin-top:4px'>You don't own any wearables yet, buy a fit to build drip.</div>";
       return html;
     }
-    html += "<div style='font-size:12px;color:#9fb0c6;margin:6px 0 2px'>OWN — press the number to wear</div>";
+    html += "<div style='font-size:12px;color:#9fb0c6;margin:6px 0 2px'>OWN, press the number to wear</div>";
     closetItems.forEach((nm, i) => {
       const m = it[nm], worn = isWorn(nm), slot = slotOf(nm);
       const after = dripAfter(nm), cur = playerDrip();
@@ -227,7 +227,7 @@
     const before = playerDrip();
     if (equipItem(nm)) {
       const after = playerDrip();
-      CBZ.city.note("Put on " + nm + " — sharper already.", 1.6);
+      CBZ.city.note("Put on " + nm + " · sharper already.", 1.6);
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     }
     render();
@@ -241,7 +241,7 @@
     const before = playerDrip();
     SLOTS.forEach((s) => { if (o[s]) unequipItem(s); });
     const after = playerDrip();
-    CBZ.city.note("Stripped down — back to basics.", 1.6);
+    CBZ.city.note("Stripped down, back to basics.", 1.6);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     render();
   }
@@ -278,7 +278,7 @@
 
     // the walk-in routing line: the WALL sells the guns, the counter the rest.
     if (wallLive) {
-      html += "<div style='font-size:12px;color:#9fb0c6;margin:2px 0 6px'>The pieces are <b style='color:#ffd166'>on the wall</b> — " +
+      html += "<div style='font-size:12px;color:#9fb0c6;margin:2px 0 6px'>The pieces are <b style='color:#ffd166'>on the wall</b> · " +
         "walk up to one and press <b style='color:#ffd166'>E</b> to take it off the rack. The counter's got the ammo.</div>";
     }
 
@@ -380,7 +380,7 @@
     // sellables you hold
     const sell = sellable(kind);
     if (sell.length) {
-      html += "<div style='font-size:12px;color:#9fb0c6;margin:8px 0 2px'>SELL — press <b style='color:#ff9e6b'>0</b> to sell all (" + fmt$(sellTotal(kind)) + ")</div>";
+      html += "<div style='font-size:12px;color:#9fb0c6;margin:8px 0 2px'>SELL, press <b style='color:#ff9e6b'>0</b> to sell all (" + fmt$(sellTotal(kind)) + ")</div>";
       // show what each lot fences for so a luxe piece's JACKPOT value is obvious.
       html += "<div style='font-size:12px;color:#aeb8c6'>" + sell.map((s) => {
         const ea = econ.sellPrice(s.name, kind);
@@ -403,7 +403,7 @@
         "<b style='color:#ff9e6b'>[R]</b> Rob the till <span style='color:#7f8794'>(" +
         (held > 0 ? fmt$(held) + " in the drawer" : "drawer's empty right now") +
         ", and the heat that comes with it)</span>" +
-        (hits >= 1 ? "<div style='color:#7f8794'>They've been hit before — the drawer's being dropped every " +
+        (hits >= 1 ? "<div style='color:#7f8794'>They've been hit before, the drawer's being dropped every " +
           Math.round(60 * (2 / (1 + hits))) + " min now.</div>" : "") + "</div>";
     }
     el().innerHTML = html;
@@ -539,8 +539,8 @@
       // JACKPOT FENCE: a single piece pawning for a real fortune gets a headline
       // — pawning a Patek/ring/bonds should FEEL like the score it is.
       if (jackpotItem && jackpotEach >= 50000 && CBZ.city.big) {
-        CBZ.city.note(fmt$(jackpotEach) + " received — pawn sale: " + jackpotItem + ".", 2.4, { from: "Liberty Bank", app: "bank" });
-        if (n > 1) CBZ.city.note("…plus the rest of the haul — " + fmt$(got) + " total.", 2);
+        CBZ.city.note(fmt$(jackpotEach) + " received, pawn sale: " + jackpotItem + ".", 2.4, { from: "Liberty Bank", app: "bank" });
+        if (n > 1) CBZ.city.note("…plus the rest of the haul · " + fmt$(got) + " total.", 2);
       } else {
         CBZ.city.note("Sold " + n + " for " + fmt$(got), 1.8);
       }
@@ -620,9 +620,9 @@
     const CLUB = (CBZ.CITY && CBZ.CITY.CLUB_DRIP) || 30, VIP = (CBZ.CITY && CBZ.CITY.VIP_DRIP) || 70;
     // crossing a threshold by buying this piece is a moment — headline it.
     if (before < CLUB && after >= CLUB && after < VIP && CBZ.city.big) {
-      CBZ.city.big("That fit turns heads — the Velvet's rope would open for you.");
+      CBZ.city.big("That fit turns heads, the Velvet's rope would open for you.");
     } else if (before < VIP && after >= VIP && CBZ.city.big) {
-      CBZ.city.big("✦ Dressed like money — the Velvet's elite lounge would wave you up.");
+      CBZ.city.big("✦ Dressed like money, the Velvet's elite lounge would wave you up.");
     } else {
       CBZ.city.note("Now wearing " + name + (replaced ? " (over " + replaced + ")" : "") + ".", 1.8);
     }
@@ -644,7 +644,7 @@
       CBZ.city.note("Talked them down −" + Math.round(haggle * 100) + "% on the whole counter.", 2);
     } else if (roll > 0.93 && rep < 40) {
       haggle = 0;
-      CBZ.city.note("The clerk's insulted — no deal today.", 1.8);
+      CBZ.city.note("The clerk's insulted, no deal today.", 1.8);
     } else {
       haggle = 0;
       CBZ.city.note("They won't budge on price.", 1.6);
@@ -1219,7 +1219,7 @@
     out.of = Math.round(amt);
     out.amount = Math.max(0, Math.round(amt - s[key]));
     if (!(out.amount > 0)) {
-      out.why = (src.kind && shopShutSoft(src)) ? "shut — the drawer's dropped for the night" : "already emptied";
+      out.why = (src.kind && shopShutSoft(src)) ? "shut, the drawer's dropped for the night" : "already emptied";
     }
     return out;
   }
@@ -1659,7 +1659,7 @@
     const r = CBZ.cityTill.take(openLot, { point: "register", frac: resisted ? (0.3 + Math.random() * 0.3) : 1, by: "player", rob: true });
     const take = r.taken;
     if (!(take > 0)) {
-      CBZ.city.note(r.why === "empty" ? "Drawer's empty — they've already dropped it." : ("Nothing in " + (r.name || "the register") + " — " + (r.why || "empty") + "."), 2.2);
+      CBZ.city.note(r.why === "empty" ? "Drawer's empty, they've already dropped it." : ("Nothing in " + (r.name || "the register") + " — " + (r.why || "empty") + "."), 2.2);
       // it is still an armed robbery even when the score is nothing, and the
       // clerk still screams: fall through to the crime/alarm/panic beats.
     } else CBZ.city.addCash(take);
@@ -1677,8 +1677,8 @@
       CBZ.citySpawnCop(sx, sz, false);
       if (CBZ.sfxAt) CBZ.sfxAt("siren", sx, sz);
     }
-    if (resisted) CBZ.city.big("Clerk resisted! Grabbed " + fmt$(take) + " — cops rolling!");
-    else CBZ.city.big("Robbed the till: " + fmt$(take) + " — WANTED!");
+    if (resisted) CBZ.city.big("Clerk resisted! Grabbed " + fmt$(take) + " · cops rolling!");
+    else CBZ.city.big("Robbed the till: " + fmt$(take) + " · WANTED!");
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     // the store kicks you out after a stick-up
     close();
@@ -1729,7 +1729,7 @@
     if (CBZ.sfx) CBZ.sfx("coin");
     for (const m of toBuy) econ.add(m, 1);
     for (const m of set) if (!isWorn(m)) equip(m);          // wear the whole set
-    CBZ.city.big("ICED OUT — full set" + (price > 0 ? " for " + fmt$(price) : "") + "!");
+    CBZ.city.big("ICED OUT, full set" + (price > 0 ? " for " + fmt$(price) : "") + "!");
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     render();
   }
@@ -1740,15 +1740,15 @@
   function withdraw() { const amt = Math.min(500, g.cityBank || 0); if (amt <= 0) { CBZ.city.note("Bank empty.", 1.2); return; } g.cityBank -= amt; CBZ.city.addCash(amt); CBZ.city.note("Withdrew " + fmt$(amt), 1.6); render(); }
   function bribe() {
     const stars = g.wanted | 0;
-    if (stars <= 0) { CBZ.city.note("You're clean — nothing to pay off.", 1.4); return; }
+    if (stars <= 0) { CBZ.city.note("You're clean, nothing to pay off.", 1.4); return; }
     const cost = ((CBZ.CITY.econ && CBZ.CITY.econ.bribeBase) || 150) * stars;
     if (!CBZ.city.spend(cost)) { CBZ.city.note("A bribe costs " + fmt$(cost) + " right now.", 1.8); return; }
     const T = CBZ.CITY.starHeat; g.heat = Math.max(0, T[Math.max(0, stars - 1)] - 1);
     if (CBZ.city.addHeat) CBZ.city.addHeat(0);
-    CBZ.city.note("Paid off the cops — down to " + (stars - 1) + "★ (" + fmt$(cost) + ")", 2.2);
+    CBZ.city.note("Paid off the cops, down to " + (stars - 1) + "★ (" + fmt$(cost) + ")", 2.2);
     if (CBZ.sfx) CBZ.sfx("coin"); render();
   }
-  function train() { if ((CBZ.player.maxHp || 100) >= 240) { CBZ.city.note("You're maxed out — the gym can't take you further.", 1.8); return; } if (CBZ.city.spend(100)) { CBZ.player.maxHp = Math.min(240, (CBZ.player.maxHp || 100) + 10); CBZ.player.hp = CBZ.player.maxHp; CBZ.city.addRespect(1); CBZ.city.note("Trained — max HP " + CBZ.player.maxHp, 1.8); render(); } }
+  function train() { if ((CBZ.player.maxHp || 100) >= 240) { CBZ.city.note("You're maxed out, the gym can't take you further.", 1.8); return; } if (CBZ.city.spend(100)) { CBZ.player.maxHp = Math.min(240, (CBZ.player.maxHp || 100) + 10); CBZ.player.hp = CBZ.player.maxHp; CBZ.city.addRespect(1); CBZ.city.note("Trained, max HP " + CBZ.player.maxHp, 1.8); render(); } }
   // BAR — buy a round. The bar's verb promises "drinks" but it has no stock and
   // the food heal path is kind-gated; this is the drink. Loosens you up: tops a
   // little hunger, a short stamina boost, and a small patch-up (mirrors the
@@ -1764,7 +1764,7 @@
     CBZ.player._boost = 12;
     if (CBZ.player.hp != null && CBZ.player.maxHp) CBZ.player.hp = Math.min(CBZ.player.maxHp, CBZ.player.hp + 8);
     if (CBZ.cityDrink) CBZ.cityDrink(1);
-    CBZ.city.note("Drink — loosened up. That's gonna add up...", 1.8);
+    CBZ.city.note("Drink, loosened up. That's gonna add up...", 1.8);
     render();
   }
   const MAKER_CORP_ID = { KAI: "kaido", VLT: "volante" };   // economy.js CARS .maker -> sim/corporations.js id
@@ -1931,13 +1931,13 @@
     const r = CBZ.cityTill.take(lot, { point: "register", frac: 0.45 + Math.random() * 0.35, by: "player", rob: true });
     const d = lot.building && lot.building.door;
     if (!(r.taken > 0)) {
-      CBZ.city.note("Drawer's empty — nothing in it to take.", 1.8);
+      CBZ.city.note("Drawer's empty, nothing in it to take.", 1.8);
       return;
     }
     CBZ.city.addCash(r.taken);
     if (CBZ.sfx) CBZ.sfx("coin");
     if (CBZ.cityCrime) CBZ.cityCrime(40, { x: d ? d.x : CBZ.player.pos.x, z: d ? d.z : CBZ.player.pos.z, type: "till grab" });
-    CBZ.city.note("Cleaned the drawer — " + fmt$(r.taken) + ". Nobody watching.", 2);
+    CBZ.city.note("Cleaned the drawer · " + fmt$(r.taken) + ". Nobody watching.", 2);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
   // …and the SAFE behind the counter, which is the whole gradient: a drawer is
@@ -2001,7 +2001,7 @@
     p.cash = (p.cash | 0) + fare;
     P.pos.x = it.x + 2; P.pos.z = it.z + 2;
     if (P.vel) { P.vel.x = 0; P.vel.z = 0; }
-    CBZ.city.note("Dropped across town — " + fmt$(fare) + " on the meter.", 2.2);
+    CBZ.city.note("Dropped across town · " + fmt$(fare) + " on the meter.", 2.2);
   }
   // A CAB IS A FARE, AND A FARE IS NOT A CAB DRIVER. The crosstown drop above
   // is the only "somebody drives you" effect in the game; a chauffeur standing
@@ -2071,7 +2071,7 @@
       const v = t.lot.building && t.lot.building.vendor;
       return {
         label: (t.lot.building && t.lot.building.name) || "Counter",
-        note: v && v.dead ? "Register's open — nobody left to watch it" : "Register's open — nobody's watching",
+        note: v && v.dead ? "Register's open, nobody left to watch it" : "Register's open, nobody's watching",
       };
     });
 
@@ -2081,7 +2081,7 @@
     I.register("ped:vendor", {
       id: "vendor-shut", slot: "e", prio: 20,
       canShow: (v) => !!v.vendor && shopShut(v.vendor),
-      label: (v) => "Locked up for the night — knock anyway",
+      label: (v) => "Locked up for the night, knock anyway",
       onSelect: (v) => {
         if (CBZ.citySay) CBZ.citySay(v, "“We're closed. Sunup.”", "#cfe6ff", 2.2);
         else CBZ.city.note("“We're closed. Sunup.”", 1.6);
@@ -2093,7 +2093,7 @@
     I.register("ped:vendor", {
       id: "vendor-hotmeal", slot: "k", prio: 10,
       canShow: (v) => !!v.vendor && v.vendor.kind === "food",
-      label: () => "Hot plate — $15 (a real meal)",
+      label: () => "Hot plate. $15 (a real meal)",
       onSelect: () => {
         if (!CBZ.city.spend(15)) { CBZ.city.note("A plate runs $15.", 1.4); return; }
         g.hunger = Math.min(100, (g.hunger || 0) + 50);
@@ -2107,20 +2107,20 @@
     I.register("ped:vendor", {
       id: "vendor-lineup", slot: "k", prio: 10,
       canShow: (v) => !!v.vendor && v.vendor.kind === "barber" && !shopShut(v.vendor),
-      label: () => "Quick lineup — $25",
+      label: () => "Quick lineup. $25",
       onSelect: () => {
         if (!CBZ.city.spend(25)) { CBZ.city.note("The chair runs $25.", 1.4); return; }
         const lk = look(); lk.swagger = (lk.swagger || 0) + 1;
         CBZ.city.addRespect(1);
         if (CBZ.sfx) CBZ.sfx("coin");
-        CBZ.city.note("Edges cleaned up — sharper already.", 1.6);
+        CBZ.city.note("Edges cleaned up, sharper already.", 1.6);
       },
     });
     // the hardware counter: the working TOOL BAG, bundled under list price
     I.register("ped:vendor", {
       id: "vendor-toolbag", slot: "k", prio: 10,
       canShow: (v) => !!v.vendor && v.vendor.kind === "hardware",
-      label: () => "Tool bag — " + fmt$(toolbagPrice()) + " (crowbar · picks · medkit)",
+      label: () => "Tool bag · " + fmt$(toolbagPrice()) + " (crowbar · picks · medkit)",
       onSelect: () => {
         const price = toolbagPrice();
         if (!CBZ.city.spend(price)) { CBZ.city.note("The bag runs " + fmt$(price) + ".", 1.6); return; }
@@ -2131,7 +2131,7 @@
           if (m && (m.melee || m.gun) && CBZ.cityGiveWeapon) CBZ.cityGiveWeapon(n);
         }
         if (CBZ.sfx) CBZ.sfx("coin");
-        CBZ.city.note("Tool bag over the counter — ready to work.", 1.8);
+        CBZ.city.note("Tool bag over the counter, ready to work.", 1.8);
       },
     });
     // the pawnbroker: one press fences the whole haul (the haggle's built into
@@ -2139,7 +2139,7 @@
     I.register("ped:vendor", {
       id: "vendor-fence", slot: "k", prio: 10,
       canShow: (v) => !!v.vendor && v.vendor.kind === "pawn" && sellTotal("pawn") > 0,
-      label: () => "Fence the lot — " + fmt$(sellTotal("pawn")),
+      label: () => "Fence the lot · " + fmt$(sellTotal("pawn")),
       onSelect: () => sellAll("pawn"),
     });
     // YOUR trade pays at the counter too: a player working security collects a
@@ -2157,7 +2157,7 @@
       id: "vendor-retainer", slot: "l", prio: 12, role: "security",
       canShow: (v) => !!v.vendor && !v.dead && _sNow() > (v._retainerT || 0) &&
                       CBZ.cityTill.holds(v.vendor, { point: "register" }).amount >= RETAINER,
-      label: () => "Collect the watch retainer — " + fmt$(RETAINER),
+      label: () => "Collect the watch retainer · " + fmt$(RETAINER),
       onSelect: (v) => {
         const paid = CBZ.cityTill.take(v.vendor, { point: "register", max: RETAINER, by: "player" });
         if (!(paid.taken > 0)) {
@@ -2177,16 +2177,16 @@
     I.register("ped:civ", {
       id: "ped-mechanic-fix", slot: "k", prio: 44,
       canShow: (p, ctx) => !ctx.driving && !p.dead && /mechanic/i.test(_jobOf(p)) && !!fixableCar(p),
-      label: (p) => { const c = fixableCar(p); return "Fix ride — " + fmt$(c ? fixPrice(c) : 0); },
+      label: (p) => { const c = fixableCar(p); return "Fix ride · " + fmt$(c ? fixPrice(c) : 0); },
       onSelect: (p) => {
         const c = fixableCar(p); if (!c) return;
         const price = fixPrice(c);
-        if (!CBZ.city.spend(price)) { CBZ.city.note("Repairs run " + fmt$(price) + " — you're short.", 1.6); return; }
+        if (!CBZ.city.spend(price)) { CBZ.city.note("Repairs run " + fmt$(price) + " · you're short.", 1.6); return; }
         c.engineHp = 100; c._smoking = false;
         p.cash = (p.cash | 0) + price;
         if (CBZ.sfx) CBZ.sfx("coin");
         if (CBZ.citySay) CBZ.citySay(p, "“Runs better than it looks. We're square.”", "#cfe6ff", 2.2);
-        CBZ.city.note("Engine patched — she'll run.", 1.8);
+        CBZ.city.note("Engine patched, she'll run.", 1.8);
       },
     });
     // a cab driver takes a fare across town (they won't carry a hot one)
@@ -2194,14 +2194,14 @@
       id: "ped-cab-ride", slot: "k", prio: 43,
       canShow: (p, ctx) => !ctx.driving && !p.dead && !p.rage && p.state !== "flee" &&
         _jobOf(p) === "cab driver" && (ctx.wanted | 0) < 2,
-      label: () => "Flag a cab — " + fmt$(cabFare()),
+      label: () => "Flag a cab · " + fmt$(cabFare()),
       onSelect: (p) => cabRide(p),
     });
     // a cart vendor sells off the cart — cheap calories without a counter
     I.register("ped:civ", {
       id: "ped-cart-bite", slot: "k", prio: 41,
       canShow: (p) => !p.dead && !p.rage && p.state !== "flee" && _jobOf(p) === "street vendor",
-      label: "Buy a bite — $8",
+      label: "Buy a bite. $8",
       onSelect: (p) => {
         if (!CBZ.city.spend(8)) { CBZ.city.note("Even the cart wants $8.", 1.4); return; }
         g.hunger = Math.min(100, (g.hunger || 0) + 30);

@@ -416,10 +416,10 @@
       const n = co.lots.length - 1;
       for (let i = co.lots.length - 1; i > 0; i--) { co.lots[i]._company = null; restoreOwner(co.lots[i]); }
       co.lots.length = 1; co.cash = 60000 + rint(120000); co.growth = 0;
-      note("" + co.name + " COLLAPSED — " + n + " properties dumped on the market", "#ff9a6b");
+      note("" + co.name + " COLLAPSED · " + n + " properties dumped on the market", "#ff9a6b");
     }
     if (co.growth > 0 && co.growth % 4 === 0) {
-      note("" + co.name + " is booming — " + co.lots.length + " properties under management");
+      note("" + co.name + " is booming · " + co.lots.length + " properties under management");
       co.growth++;
     }
   }

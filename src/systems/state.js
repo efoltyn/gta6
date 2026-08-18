@@ -247,7 +247,7 @@
       const T = CBZ.prisonTier && CBZ.prisonTier.card ? CBZ.prisonTier.card() : null;
       if (logo) logo.textContent = T ? T.logo : "TRANSFERRED";
       if (sub) sub.textContent = T ? T.sub : (reason === "transferred"
-        ? "Strike three — shipped to max security"
+        ? "Strike three, shipped to max security"
         : "The escape is over");
       setText("slPlace", T ? T.place : String(Math.min(3, g.caughtCount || 3)));
       setText("slTotal", T ? T.total : "strikes");

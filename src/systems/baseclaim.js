@@ -404,7 +404,7 @@
     if (soonest === Infinity) return;
     if (playClock - lastWarnAt < UPKEEP_WARN_COOLDOWN) return;
     lastWarnAt = playClock;
-    if (CBZ.flashHint) CBZ.flashHint("base upkeep low — deposit Wood at the cupboard", 3.0);
+    if (CBZ.flashHint) CBZ.flashHint("base upkeep low, deposit Wood at the cupboard", 3.0);
   }
   // The tick itself: CITY-mode only (see file header's scope note), right
   // beside city/economy.js's own 30/30.2/.../30.8 ladder (CBZ.PRIO.ECON)
@@ -470,7 +470,7 @@
             const rec = recFor(t); if (!rec) return;
             const res = depositUpkeep(rec);
             if (!res.ok) CBZ.flashHint && CBZ.flashHint("Need " + res.cost + " Wood for upkeep", 1.8);
-            else CBZ.flashHint && CBZ.flashHint("Upkeep paid (" + res.cost + " Wood) — +24h", 1.8);
+            else CBZ.flashHint && CBZ.flashHint("Upkeep paid (" + res.cost + " Wood). +24h", 1.8);
           },
         },
         {
@@ -720,7 +720,7 @@
     return { v: 1, bases: out, ruins: ru, playClock: playClock };
   }
   function apply(blob) {
-    if (!blob || blob.v !== 1 || !Array.isArray(blob.bases)) { if (blob) console.warn("[baseclaim] apply: blob v" + blob.v + " — skipped"); return; }
+    if (!blob || blob.v !== 1 || !Array.isArray(blob.bases)) { if (blob) console.warn("[baseclaim] apply: blob v" + blob.v + " · skipped"); return; }
     // B8: restore the play-clock FIRST — the per-record upkeepUntil default
     // below (for a pre-B8 save that never had the field) is stamped off it.
     playClock = blob.playClock > 0 ? blob.playClock : 0;

@@ -447,7 +447,7 @@
       const p = S.legislation[id];
       if (p && p.kind === kind && p.value === value) return true;
       S.legislation[id] = { kind: kind, value: value, daysLeft: LEGISLATE_DAYS, unpopular: isUnpopular(id, kind, value) };
-      if (CBZ.cityFeed) CBZ.cityFeed("" + nameOf(id) + "'s legislature takes up a " + kind + " policy bill (" + value + ") — " + LEGISLATE_DAYS + " days to a vote.", "#ffd76a");
+      if (CBZ.cityFeed) CBZ.cityFeed("" + nameOf(id) + "'s legislature takes up a " + kind + " policy bill (" + value + ") · " + LEGISLATE_DAYS + " days to a vote.", "#ffd76a");
       return true;
     }
     // decree — every other govType, instant, no approval cost.
@@ -677,7 +677,7 @@
     S.brainDrainNet[from] = (S.brainDrainNet[from] || 0) + skilledFlow;
     if (!S.brainDrainHeadlined[from] && S.brainDrainNet[from] >= BRAIN_DRAIN_HEADLINE_T) {
       S.brainDrainHeadlined[from] = true;
-      if (CBZ.cityFeed) CBZ.cityFeed("Doctors and engineers are leaving " + nameOf(from) + " — a brain drain the economy will feel.", "#ff9e6b");
+      if (CBZ.cityFeed) CBZ.cityFeed("Doctors and engineers are leaving " + nameOf(from) + " · a brain drain the economy will feel.", "#ff9e6b");
     }
   }
 
@@ -797,7 +797,7 @@
     const n = GIG_N_MIN + Math.floor(rng() * (GIG_N_MAX - GIG_N_MIN + 1));
     const payout = Math.round(BASE_GIG_PAYOUT * n * harsh * (0.9 + rng() * 0.3));
     S.gig = { phase: "offered", origin: origin, n: n, payout: payout, harsh: harsh, startDay: day };
-    if (CBZ.cityFeed) CBZ.cityFeed("Word on the docks: " + n + " people are desperate to leave " + nameOf(origin) + " — a border-escape run pays $" + payout + ".", "#8fe0ff");
+    if (CBZ.cityFeed) CBZ.cityFeed("Word on the docks: " + n + " people are desperate to leave " + nameOf(origin) + " · a border-escape run pays $" + payout + ".", "#8fe0ff");
   }
   function gigOffer() { const gg = state().gig; return (gg && gg.phase === "offered") ? Object.assign({}, gg) : null; }
   function gigAccept() {
@@ -816,7 +816,7 @@
     g.heat = (g.heat || 0) + GIG_HEAT;
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(gg.payout); else g.cash = (g.cash || 0) + gg.payout;
-    if (CBZ.cityFeed) CBZ.cityFeed("Border-escape run complete — " + gg.n + " souls out of " + nameOf(gg.origin) + ", $" + gg.payout + " paid.", "#8fe08a");
+    if (CBZ.cityFeed) CBZ.cityFeed("Border-escape run complete · " + gg.n + " souls out of " + nameOf(gg.origin) + ", $" + gg.payout + " paid.", "#8fe08a");
     S.gig = null;
     return { origin: gg.origin, n: gg.n, payout: gg.payout };
   }

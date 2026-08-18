@@ -688,7 +688,7 @@
         const hits = CBZ.worldLayout.mapAudit();
         for (const h of hits) {
           console.warn("[map-reserve] " + h.tier + " overlap: " + h.a + " (" + h.aKind + ") x " +
-            h.b + " (" + h.bKind + ") — " + h.area + " m2, " + h.contain + "% of smaller @ (" +
+            h.b + " (" + h.bKind + ") · " + h.area + " m2, " + h.contain + "% of smaller @ (" +
             h.at.x + "," + h.at.z + ")");
         }
       } catch (e) { console.error("[map-reserve]", e); }

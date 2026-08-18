@@ -383,7 +383,7 @@
     det.memberCount = Math.min(HIRE_CAP, det.memberCount + 1);
     const A = arena(), P = CBZ.player;
     if (A && P) spawnMembers(det, A, P.pos.x + (rng() - 0.5) * 3, P.pos.z + (rng() - 0.5) * 3, rng);
-    if (CBZ.city) CBZ.city.note("Hired security (" + gear.weapon + ") — " + det.memberCount + "/" + HIRE_CAP + " on your detail.", 2.6);
+    if (CBZ.city) CBZ.city.note("Hired security (" + gear.weapon + ") · " + det.memberCount + "/" + HIRE_CAP + " on your detail.", 2.6);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     return det;
   }
@@ -467,7 +467,7 @@
           if (rel && rel.grudge > 50) {
             const nm = gd.name || "a guard";
             dropMember(det, gd);
-            if (CBZ.cityFeed) CBZ.cityFeed("" + nm + " walks off the detail — the grudge finally won.", "#ff9e6b");
+            if (CBZ.cityFeed) CBZ.cityFeed("" + nm + " walks off the detail, the grudge finally won.", "#ff9e6b");
           }
         }
         // WAGES — only wallet-funded (hired security) details drain g.cash.
@@ -482,7 +482,7 @@
           const q = det.memberPedRefs[0];
           const nm = (q && q.name) || "one of your guards";
           dropMember(det, q);
-          if (CBZ.cityFeed) CBZ.cityFeed("Couldn't make payroll — " + nm + " walked off the job.", "#ff6a5e");
+          if (CBZ.cityFeed) CBZ.cityFeed("Couldn't make payroll · " + nm + " walked off the job.", "#ff6a5e");
         } else {
           det.memberCount = 0;
         }
@@ -507,7 +507,7 @@
     if (!det) return { ok: false, reason: "not on a protection detail" };
     const rel = CBZ.cityRel ? CBZ.cityRel(ped) : null;
     if (!rel) return { ok: false, reason: "no relationship to read" };
-    if ((rel.fear || 0) + (rel.respect || 0) <= 120) return { ok: false, reason: "not swayed — needs fear+respect > 120" };
+    if ((rel.fear || 0) + (rel.respect || 0) <= 120) return { ok: false, reason: "not swayed, needs fear+respect > 120" };
     const cost = Math.round(SUBORN_BASE_COST * (1 + Math.max(0, rel.loyalty || 0) / 100));
     if (!CBZ.city || !CBZ.city.canAfford(cost)) return { ok: false, reason: "can't afford", cost };
     CBZ.city.spend(cost);

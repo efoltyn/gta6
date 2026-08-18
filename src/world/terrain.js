@@ -383,7 +383,7 @@
   CBZ.buildTerrain = function (parent) {
     if (CBZ.PROC_TERRAIN === false) return null;     // gate (default ON)
     if (_built) return _built;
-    if (!window.noise) { console.warn("[terrain] window.noise missing — skipped"); return null; }
+    if (!window.noise) { console.warn("[terrain] window.noise missing, skipped"); return null; }
     window.noise.seed(SEED);
 
     const root = parent || CBZ.scene;

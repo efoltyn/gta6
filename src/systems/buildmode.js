@@ -412,7 +412,7 @@
     if (gx == null) {
       bm.gx = null; bm.gy = bm.level; bm.gz = null; bm.lastValid = null;
       hideAllGhosts();
-      setHint("[" + bm.kind.toUpperCase() + "] · rot T · level R/F (" + bm.level + ") · click/E place · X demolish · Z undo · N exit  —  no target");
+      setHint("[" + bm.kind.toUpperCase() + "] · rot T · level R/F (" + bm.level + ") · click/E place · X demolish · Z undo · N exit, no target");
       return;
     }
 

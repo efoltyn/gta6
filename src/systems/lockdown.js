@@ -114,7 +114,7 @@
       // SHOW DON'T TELL: the grace IS the screws walking past your door
       // without stopping. Printing "they walk past" over the top of them
       // walking past is the caption track the owner asked us to delete.
-      if (grace) tellHint("Count time — stay in your cell and they walk past.", 2.2);
+      if (grace) tellHint("Count time, stay in your cell and they walk past.", 2.2);
     }
     for (const gd of CBZ.guards) {
       if (!able(gd)) continue;

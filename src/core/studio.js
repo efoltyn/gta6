@@ -230,7 +230,7 @@
     day: {
       gives: "a DAY made of named blocks. CBZ.dayPlan.define(id, [{id,from}...]) " +
              "answers what block it is, how long until the next and fires a " +
-             "callback when it turns over — wrapping midnight, silent on the " +
+             "callback when it turns over, wrapping midnight, silent on the " +
              "arm, and reading the world's own sun when one is loaded",
       needs: [],
       files: ["systems/dayplan.js"],
@@ -240,7 +240,7 @@
       gives: "light as a FACT. CBZ.fixtures.rig(id, spec) registers fixtures " +
              "with a per-kind schedule and drives their materials for free, " +
              "answers level(x,z) region-aware (a lamp does not shine through " +
-             "a wall) and scale(sensor,x,z) — what a sensor's range is worth " +
+             "a wall) and scale(sensor,x,z), what a sensor's range is worth " +
              "in this much dark. Pair it with `day` for lights-out",
       needs: [],
       files: ["systems/fixtures.js"],
@@ -259,7 +259,7 @@
     rest: {
       gives: "bodies USING furniture: claim a place, walk there, take the " +
              "pose, get up, step clear. CBZ.rest also carries the three " +
-             "load-order repairs that make furniture anchors exist at all — " +
+             "load-order repairs that make furniture anchors exist at all · " +
              "deferred registration, a late re-flush, and a loud count of " +
              "anchors refused for sharing a coordinate key",
       needs: ["people"],
@@ -268,8 +268,8 @@
     },
     rooms: {
       gives: "FURNITURE, and the grammar of a room. CBZ.furnish is the one " +
-             "vocabulary — chair, stool, bench, sofa, bed, desk, table, " +
-             "counter, shelf, locker, lamp — where one call DRAWS the piece " +
+             "vocabulary, chair, stool, bench, sofa, bed, desk, table, " +
+             "counter, shelf, locker, lamp, where one call DRAWS the piece " +
              "at real metric proportions, REGISTERS its sit/sleep anchor and " +
              "hands back the meshes; CBZ.roomShell stamps a floor and four " +
              "open-top walls with a doorway, and CBZ.roomFurnish lays out a " +
@@ -284,7 +284,7 @@
       gives: "furniture that MOVES when you walk into it. CBZ.pushables.add" +
              "({parts, mass, leash, stand}) makes a drawn prop a mass on a " +
              "floor: contact slides it, its collider and its standable top go " +
-             "with it, and the broadphase is dirtied — so the stool you shoved " +
+             "with it, and the broadphase is dirtied, so the stool you shoved " +
              "under the vent is really there to climb",
       needs: ["boot"],
       files: ["systems/pushables.js"],
@@ -345,8 +345,8 @@
     },
     citycore: {
       gives: "THE REAL CITY FABRIC: cityMakeBuilding, the one mint every shell " +
-             "in Gang City comes from — enterable glass towers with pooled " +
-             "instanced panes, stairs, doors, furnished floors — plus buildTown, " +
+             "in Gang City comes from, enterable glass towers with pooled " +
+             "instanced panes, stairs, doors, furnished floors, plus buildTown, " +
              "the street generator that lays a grid of marked roads, sidewalks, " +
              "crosswalks, non-overlapping lots, shops with signs and a skyline " +
              "cluster. Ask for a downtown with CBZ.studio.town(); nothing in it " +
@@ -415,7 +415,7 @@
       publishes: ["cityWaterAt"],
     },
     capeharbor: {
-      gives: "Cape Harbor airfield — the small coastal strip with its apron " +
+      gives: "Cape Harbor airfield, the small coastal strip with its apron " +
              "and helipads, authored well away from Halloran Field so a page " +
              "can raise both and have two airfields to fight over",
       // TWO under-declared dependencies, both silent. capeharbor's builder is
@@ -452,9 +452,9 @@
 
     // ---- the living assets: every animal Gang City owns ---------------------
     bestiary: {
-      gives: "THE WHOLE BESTIARY: 54 species as CBZ.WILDLIFE_SPECIES — lions, " +
+      gives: "THE WHOLE BESTIARY: 54 species as CBZ.WILDLIFE_SPECIES, lions, " +
              "wolves, bears, the gorilla, elephants, dogs, the sea's sharks and " +
-             "orcas — each with its authored stats (hp, speed, danger, bite, " +
+             "orcas, each with its authored stats (hp, speed, danger, bite, " +
              "herd) and a low-poly build() that returns the posed body. Data " +
              "and geometry only: no engine, no spawning, no hunt",
       needs: ["look"],
@@ -470,11 +470,11 @@
     beasts: {
       gives: "animals that WALK, FIGHT and DIE without the full city: the " +
              "shared discovered gait rig (wildlife_rig), the one animal-attack " +
-             "driver creatureFight (lunge, pounce, maul, gore, stomp — windup, " +
+             "driver creatureFight (lunge, pounce, maul, gore, stomp, windup, " +
              "strike, recover, flinch), the land body layer that poses jaws and " +
              "legs through a strike, the verlet corpse solver that lays a dead " +
              "quadruped on its flank with its legs splayed, and the ape move " +
-             "set — a knuckle-walker charges, hammers, backhands, beats its " +
+             "set, a knuckle-walker charges, hammers, backhands, beats its " +
              "chest and PICKS A MAN UP and swings him, which the one generic " +
              "maul could never be",
       /* THE SOLVER RIDES WITH THE FIGHT, and that is a correction, not a
@@ -538,7 +538,7 @@
     blood: {
       gives: "what a body does when something opens it: the directional spray, " +
              "the atomised mist, the ground pool, the wall splat and the drip " +
-             "trail — CBZ.goreImpact and CBZ.gore. Restraint is built in (mist " +
+             "trail. CBZ.goreImpact and CBZ.gore. Restraint is built in (mist " +
              "only on a real crunch, a pool only once the skin is genuinely " +
              "open), so it does not turn every hit into a bloodbath",
       /* ITS OWN PACK, and it is a fair-weather one on purpose. A page that
