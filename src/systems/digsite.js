@@ -253,9 +253,35 @@
         if (!(ny < y - 1e-4)) continue;
         const t2 = Math.max(0, Math.min(1, (s.base0[idx(s, i, j)] - ny) / s.maxDepth));
         const p1 = nb[k][2], p2 = nb[k][3];
-        const q1 = push(P[p1 * 3], ny, P[p1 * 3 + 2], t2);
-        const q2 = push(P[p2 * 3], ny, P[p2 * 3 + 2], t2);
-        I.push(p1, q1, p2, p2, q1, q2);
+        const ax = P[p1 * 3], az = P[p1 * 3 + 2], bx = P[p2 * 3], bz = P[p2 * 3 + 2];
+        /* THE WALL GETS ITS OWN TOP EDGE. Indexing back into the cell's top
+           face here is two vertices cheaper and destroys the entire look:
+           computeVertexNormals averages every face sharing a vertex, so a
+           shared corner blends a horizontal top with a vertical wall and the
+           whole staircase smooth-shades into a soft ramp. Measured on an 11 m
+           pit: from directly overhead it read correctly (only tops visible),
+           and from any oblique angle — which is every angle a player has — it
+           was a white blob with the right heightfield underneath it. Lambert on
+           this build does not take flatShading (it warns and ignores), so the
+           split has to be in the geometry. Four vertices per wall, no shared
+           normals, and a cut face reads as a cut face. */
+        /* The wall's TOP edge is earth, not turf. Taking the top cell's own t
+           gave an undug neighbour's grass colour to the top of the cut face, so
+           every wall wore a green curtain down its first metre. A vertical face
+           is soil from the first millimetre — nudge onto the first earth band. */
+        const tw = Math.max(t, 0.005);
+        const u1 = push(ax, y, az, tw), u2 = push(bx, y, bz, tw);
+        const q1 = push(ax, ny, az, t2), q2 = push(bx, ny, bz, t2);
+        /* WOUND TOWARD THE VOID. This was `u1, q1, u2` — which puts the face
+           normal on the SOLID side of every wall, so each one is only visible
+           from inside the ground it is holding back. A pit therefore had walls
+           that were backface-culled from the pit: you looked into an 11 m
+           excavation and saw the sky through it. It survived because from
+           directly overhead only the top faces are in view and the site reads
+           perfectly, and every automated check asked the heightfield, which was
+           right all along. Verified with the cross product for all four
+           neighbours: this ordering points at the lower cell in each case. */
+        I.push(u1, u2, q1, u2, q2, q1);
       }
     }
     if (!P.length) return null;
