@@ -365,7 +365,12 @@ async function stageUnderground(input) {
     const ab = pickBearing(h.x, h.gy, h.z, (ang) => new T.Vector3(h.x + Math.cos(ang) * db, by, h.z + Math.sin(ang) * db), { x: h.x, z: h.z, r: h.r, y: h.gy });
     put(h.x + Math.cos(ab) * db, by, h.z + Math.sin(ab) * db, h.x, room ? room.y0 + 1.2 : h.gy - 6, h.z);
   } else if (cam.frame === "mouth" && focusHole) {
-    const h = focusHole, dm = h.r * 3.0, my = h.gy + h.r * 2.4;
+    /* A tunnel mouth is small (r under 3 m), so a purely proportional offset
+       puts the lens 8 m out and 6 m up — inside a prison yard, that is against
+       a wall, and the wall is beside the lens rather than in front of it so no
+       bearing search can see the problem. Floors on both, so the shot carries
+       enough yard to show the mouth is IN something. */
+    const h = focusHole, dm = Math.max(h.r * 4.5, 13), my = h.gy + Math.max(h.r * 3.2, 9);
     const am = pickBearing(h.x, h.gy, h.z, (ang) => new T.Vector3(h.x + Math.cos(ang) * dm, my, h.z + Math.sin(ang) * dm), { x: h.x, z: h.z, r: h.r, y: h.gy });
     put(h.x + Math.cos(am) * dm, my, h.z + Math.sin(am) * dm, h.x, h.gy - h.depth * 0.55, h.z);
   } else {
