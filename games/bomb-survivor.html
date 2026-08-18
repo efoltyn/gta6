@@ -682,19 +682,37 @@ function stepBomber(u, dt, mine) {
   u.cool = Math.max(0, u.cool - dt);
 
   if (u.rolling) {
-    // the roll is SHORT and it is YOURS: full power is set, the centreline
-    // hold flies the line, but the stick steers the nose wheel and pulling
-    // back past 85 rotates early. Watching an unpiloted crawl was the old
-    // game's first minute; this one is airborne inside seven seconds.
+    /* THE ROLL IS SHORT AND IT ENDS WHETHER OR NOT ANYBODY PULLS.
+
+       EVERY VERB IN THIS GAME LIVES BELOW THE `return` AT THE BOTTOM OF THIS
+       BRANCH — the DROP read, the NUKE read, the run altitude, the bombsight.
+       So `rolling` is not a cosmetic state: while it is true the player has no
+       game at all. It used to clear on ONE condition, a stick pulled past 0.4
+       above 85 m/s, and nothing on screen says to do that beyond the word
+       ROTATE. A player who did not pull rolled to the end of the island and
+       then skimmed the sea at gear height forever, still rolling, still unable
+       to drop anything. That is what "there's no bombs" was.
+
+       So Vr flies the aeroplane off. The centreline hold pins the nose to the
+       deck until rotation speed and then aims at a climb-out instead, which is
+       the airframe's own autopilot doing it with the shipped coefficients —
+       no hand-poked vertical velocity. Pulling early still rotates early,
+       because that part was a good idea. */
+    const VR = 86;                     // rotate speed, m/s — bomber stalls at 55
     u.af.throttle = 1;
     if (mine) u.hdg += ctl.move.x * 0.22 * dt;
+    const rotate = u.af.speed > VR || (mine && ctl.move.y > 0.4 && u.af.speed > 78);
+    const gy = groundAt(u.af.pos.x, u.af.pos.z);
+    // hold the deck, or climb out at ~10° — a near aim point so steerTo
+    // commands a firm pitch rather than a suggestion
+    const lever = rotate ? 1000 : 3000;
+    const aimY = rotate ? gy + 180 : gy + 4;
     const aim = u.af.steerTo(_v.set(
-      u.af.pos.x - Math.sin(u.hdg) * 3000, groundAt(u.af.pos.x, u.af.pos.z) + 4, u.af.pos.z - Math.cos(u.hdg) * 3000), { gain: 3.2 });
-    if (mine && ctl.move.y > 0.4 && u.af.speed > 85) u.af.vel.y += 3.2 * dt * u.af.speed / 90;
+      u.af.pos.x - Math.sin(u.hdg) * lever, aimY, u.af.pos.z - Math.cos(u.hdg) * lever), { gain: 3.2 });
     u.af.step(dt, aim);
     u.pos.copy(u.af.pos);
     if (u.group) u.af.applyTo(u.group);
-    if (u.af.pos.y - groundAt(u.af.pos.x, u.af.pos.z) > 40) { u.rolling = false; if (mine) setRole(); }
+    if (u.af.pos.y - gy > 40) { u.rolling = false; if (mine) setRole(); }
     return;
   }
 
