@@ -144,7 +144,9 @@
   //      REAL end screen (#survlose via CBZ.loseGame, systems/state.js) takes
   //      over with its already-bound Try Again / Main Menu buttons.
   if (CBZ.CONFIG.SURV_SPECTATE == null) CBZ.CONFIG.SURV_SPECTATE = true;   // false → death cuts straight to the lose card
+  if (CBZ.CONFIG.SURV_DEATHCAM == null) CBZ.CONFIG.SURV_DEATHCAM = true;   // false → skip the death replay: banner + chaos drift immediately (the pre-replay flow)
   let overlay = null, titleEl = null, subEl = null, btnRow = null;
+  let overlayHoldT = 0;    // ELIMINATED held back while the death replay's first beat plays
   function buildOverlay() {
     if (overlay) return;
     overlay = document.createElement("div");
@@ -193,7 +195,17 @@
     if (CBZ.CONFIG.SURV_SPECTATE === false || liveBots() <= 1) { finishRound(); return; }
     surv.spectating = true; surv.spectateT = 0;
     if (document.exitPointerLock) { try { document.exitPointerLock(); } catch (e) {} }
-    showSpectateOverlay();
+    // THE DEATH REPLAY (parity with Gang City — owner: the city "goes to third
+    // person and shows me my death", the disaster game should too). Arm the
+    // close WASTED-style orbit for systems/camera.js and hold the ELIMINATED
+    // banner back the same ~1.8s beat the city holds WASTED, so the ragdoll
+    // fling plays out clean before any UI lands on it. The watcher below drops
+    // the banner in while the orbit is still circling; the camera pulls out to
+    // the chaos view on its own when the replay's beat is spent.
+    if (CBZ.CONFIG.SURV_DEATHCAM !== false) {
+      surv.deathCam = { t: 0, dur: 5.2 };
+      overlayHoldT = 1.8;
+    } else showSpectateOverlay();
   }
   // resolve the round for a dead player: leave spectate, record the run in
   // the persistent survival stats, fill the lose card's flavor line (cause,
@@ -217,6 +229,7 @@
   }
   function clearSpectate() {
     surv.spectating = false;
+    surv.deathCam = null; overlayHoldT = 0;   // reset() routes here too — no replay leaks into the next match
     if (overlay) {
       overlay.style.display = "none";
       titleEl.style.opacity = "0"; titleEl.style.transform = "translateY(14px)";
@@ -229,6 +242,7 @@
     arena: null,
     built: false,
     spectating: false,     // true after the player dies until they pick a button
+    deathCam: null,        // {t, dur} while the city-style death replay orbits (read by systems/camera.js)
     playerActor,
     stats: { total: 0, placement: 0, disastersSurvived: 0 },
 
@@ -393,6 +407,8 @@
     if (surv.spectating && g.state === "playing") {
       surv.spectateT += dt;
       if (liveBots() <= 1) { finishRound(); return; }
+      // the held-back ELIMINATED banner lands once the fling has played out
+      if (overlayHoldT > 0) { overlayHoldT -= dt; if (overlayHoldT <= 0) showSpectateOverlay(); }
       specHudT -= dt;
       if (specHudT <= 0 && subEl) { specHudT = 0.5; subEl.textContent = spectateLine(); }
     }
@@ -402,7 +418,12 @@
   function build() {
     if (surv.built) return;
     surv.arena = CBZ.buildDisasterArena();
-    CBZ.floorAt = function (x, z) { return surv.floorAt(x, z); };
+    /* The BASE is the island with nothing subtracted. The holes are carvings
+       now (world/groundshaft.js registers them), so this must NOT be
+       surv.floorAt — that one subtracts CBZ.survHoles itself and is kept for
+       the bots, which call it directly and are the one actor that cannot
+       climb out. Handing it in here would subtract every hole twice. */
+    CBZ.registerGroundBase("survival", function (x, z) { return surv.arena.groundHeightAt(x, z); });
     surv.built = true;
   }
 

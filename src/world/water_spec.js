@@ -1868,6 +1868,14 @@
     });
     mat.userData.waterMode = "shared-disaster-fresnel";
     mat.userData.waterUniforms = U;
+    /* THE SEA GOES WITH THE GROUND OVER A HOLE. This shader #includes the fog
+       chunks, so core/groundmask.js's discard is already compiled into it — but
+       a ShaderMaterial owns its own uniforms and three will not hand it the
+       shared slot array, so the CODE arrives without the DATA and the test
+       reads zeros. One line gives it the data. It matters: the ocean plane sits
+       at y=-0.8 across the whole island, so a 46 m shaft looked up at blue
+       water and down into it saw the sea. */
+    if (CBZ.groundMaskAttach) CBZ.groundMaskAttach(mat);
     return mat;
   };
 

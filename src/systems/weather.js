@@ -307,6 +307,29 @@
   let strikeCD = 5;        // cooldown before next possible strike
   let pendingThunder = 0;  // seconds until thunder follows the flash (delay)
   let strobeS = 0, strobeT = 0;  // an externally-requested flash (see CBZ.weatherStrobe)
+  let flashBump = 0;       // the additive intensity a flash is contributing RIGHT NOW
+
+  /* ---- OVERCAST: THE CLOUD DECK THE STORM IS FALLING OUT OF -----------
+     OWNER, with a photograph of a real strike: "your lightning in the game
+     is amazing, the issue is the sky is a nice blue sky with hardly any
+     clouds during the lightning storm."
+
+     It was. Rain, wind, wet asphalt, flashes and bolts were all wired — and
+     the one thing every one of them implies, a sky with cloud in it, was
+     nobody's job. core/sky.js had no weather input at all (its only read of
+     this file sat behind a flag that has been false for months), so the dome
+     stayed the clear-day gradient plus a cloudless daylight photo, and
+     survival's mood tint just multiplied that blue by slate.
+
+     So this is the number the sky was missing: how much cloud deck is
+     overhead, 0..1, eased over seconds because weather does not cut. It is
+     derived here rather than in the painter because THIS file is the one
+     that knows the difference between drizzle, a driven disaster and a dry
+     scripted strobe — and because a second system re-deriving "is it
+     storming" from rain counts is exactly the fork this file exists to
+     prevent. */
+  let overcast = 0;
+  const OC_EASE = 0.55;    // ~1.8 s time constant: the deck rolls in, never cuts
 
   /* PUBLISHED so a real drawn bolt can light the real scene. See the block in
      tryLightning that consumes it. Deliberately a REQUEST rather than a direct
@@ -370,7 +393,17 @@
       flashT -= dt;
       // flicker so it reads like a real bolt rather than a fade
       const flick = 0.6 + 0.4 * Math.abs(Math.sin(CBZ.now * 0.05));
+      // A STROKE LIGHTS THE CLOUD IT CAME OUT OF, and core/sky.js reads this to
+      // flare the whole deck white on the frame the bolt fires — the single
+      // most recognisable thing about the reference photograph is that the sky
+      // is not dark during a strike, it is the brightest thing in frame.
+      // Published as the bump ITSELF rather than a boolean, so the painter
+      // rides the exact decay curve the lights are already using instead of
+      // inventing a second one that could disagree with it. `Math.max(0,
+      // flashT)` zeroes it on the frame the flash expires, so it cannot be
+      // left stale if the dark-path early-out closes the tick right after.
       const bump = flash * flick * Math.max(0, flashT) * 6;
+      flashBump = bump;
       if (hemi) hemi.intensity = baseHemi + bump;
       if (sunL) sunL.intensity = baseSun + bump * 0.7; // sun bump a touch softer — it's already the brighter light
     }
@@ -941,8 +974,12 @@
     // (`strobeS` is in the test because a drawn bolt can strike under a clear
     // sky — a scripted beat, a test harness — and the tick that consumes the
     // request must not be the one thing that got skipped.)
+    // (`overcast` joins the test for the same reason the ground did: the deck
+    // outlives the last drop by design, and a tick skipped while it is still
+    // easing out would freeze a storm sky over a finished storm.)
     if (!AUTO && drvHold <= 0 && intensity === 0 && drv.fog <= 0 &&
-        drv.lightning <= 0 && flashT <= 0 && strobeS <= 0 && pendingThunder <= 0 && !groundLive) return;
+        drv.lightning <= 0 && flashT <= 0 && strobeS <= 0 && pendingThunder <= 0 &&
+        overcast <= 0.0005 && !groundLive) return;
 
     // camera forward (XZ) for seedDrop's lead bias — matrix z-basis, once per
     // tick. Looking straight down leaves the previous bearing standing.
@@ -1044,6 +1081,19 @@
       geo.setDrawRange(0, 0);
     }
 
+    // ---- the cloud deck overhead (read by core/sky.js) ----
+    // Three sources, max-combined, because a sky can be overcast for any of
+    // them independently: rain implies the cloud it fell out of; a driver
+    // asserting `lightning` IS declaring a storm whatever the rain says; and
+    // a driver's own `fog` is its mood dial, which a whiteout uses to bring
+    // the ceiling down without raining harder.
+    const ocTarget = Math.min(1, Math.max(
+      intensity * 1.25 - 0.05,
+      drv.lightning * 0.95,
+      drv.fog * 0.9));
+    overcast += (ocTarget - overcast) * Math.min(1, dt * OC_EASE);
+    if (overcast < 0.0004) overcast = 0;
+
     // ---- fog darkening while raining ----
     // A driver may nominate its OWN mood colour (a blizzard's whiteout is not
     // storm-grey) and its own strength, so the same one lerp serves both.
@@ -1089,7 +1139,7 @@
       // run restarted: clear any in-flight flash so hemi isn't left bright.
       // daynight (order 2) re-asserts hemi.intensity every frame, so simply
       // dropping our additive flash is enough — no need to restore by hand.
-      flashT = 0; flash = 0; pendingThunder = 0; strikeCD = 4 + rng() * 4;
+      flashT = 0; flash = 0; flashBump = 0; pendingThunder = 0; strikeCD = 4 + rng() * 4;
     }
     lastElapsed = g.elapsed;
   });
@@ -1103,6 +1153,11 @@
     get windZ() { return windZ; },
     get snow() { return snowMix; },
     get driven() { return drvHold > 0; },
+    // WHAT IS OVERHEAD. `overcast` is how much cloud deck the sky is carrying,
+    // 0..1 (core/sky.js paints it); `flash` is the live additive intensity of
+    // a lightning stroke, 0 between them.
+    get overcast() { return overcast; },
+    get flash() { return flashBump; },
     // WHAT THE WEATHER LEFT BEHIND — the two scalars anything downstream
     // needs to know the world is wet or white without asking three files.
     get groundWater() { return pool; },

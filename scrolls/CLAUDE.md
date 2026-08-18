@@ -259,7 +259,9 @@ of them places in Gang City at their own coordinates: **city** (`studio.town()`
 at the mainland's (0,-700) — eight blocks, marked streets, crosswalks, shops
 with signs, enterable instanced-glass towers), **island**
 (`raise("militaryisland")`, -620,-700), **field** (`raise("airport")`, Halloran),
-**dunes** (the basin, kept — an open firing line is a different game), **arena**
+**dunes** (the erg, out where the ground MEASURES as dunes — the venue scans
+for ≥16 m of relief with the central lanes crest-cut, and terrain joins the
+sight lines there: `terrainBlocked`, revert `?tlos=0`), **arena**
 (the kill box, kept as the CONTROL: no world, so a fault there is the men).
 
 **THE REAL FABRIC COST 17 041 DRAW CALLS AND THAT IS NOT THE TOWN'S FAULT.**
@@ -320,6 +322,160 @@ Ratchet **`tools/battle-check.mjs`** — `overlapPeak` · `embedded` · `blindFi
 **two-sided**: `--revert` (`?sep=old&fire=old`) asserts the faults COME BACK
 (3 overlapping pairs, 214 ghost rounds), because a fix nobody can turn off has
 not been measured. Page probe `window.__battle.quality()`.
+
+### AND THEN SOMEBODY WATCHED IT — 2026-08-12, "NPC war sucks"
+
+Every counter above read zero and the game was still bad, which is the whole
+lesson: **the faults that make a battle you WATCH unwatchable do not show up as
+wrong pixels, they show up as boredom**, and none of them were being counted.
+Measurement found three, and a fourth in the gate itself, which had been
+reporting a coverage it did not have.
+
+**THE FIRST FORTY SECONDS WERE TWO CROWDS WALKING.** `streetSpawner` sorted the
+town's avenues by distance from centre DESCENDING and took the outermost three,
+so on an eight-block downtown 472 m across the two armies started at opposite
+EDGES and the `gap` the map table declares was a number the city wrote down and
+then ignored. Measured, 26 v 26: **nearest enemy 304 m at t=0**, first round at
+**t=10.9 s**, at t=13 s **forty-five of the fifty-two still in slot `march`**
+with four rounds fired between them, and the armies not inside 100 m of each
+other until **t=41 s**. Closure through a grid of blocks runs about 5 m/s
+combined, not the 12 m/s two marching columns suggest.
+The lanes are now chosen by nearness to the declared start line and the city's
+gap came down 300 → **170**. The raised venues get it from the other end: the
+same wave that added `gov`/`harbor`/`marina`/`speedway` also made a venue size
+its own no-man's land off its measured span (`gapOverride`), which is the
+better mechanism and had the same fault baked into its clamp — a **320 m**
+ceiling is the walking battle again, generically. The ceiling is **190** now,
+where the fixed maps actually measure.
+
+    city, first round fired    10.9 s -> 2.2 s
+    city, rounds by t~65 s     550    -> 967
+    city, result               never  -> 58.3 s
+    overlapPeak, city          3      -> 0
+    nine maps, all resolve, every counter 0
+
+**THE MOP-UP NEEDED EIGHT TO ONE, SO IT NEVER CAME.** `hunt` — wider look,
+straight march, run at 8 m/s, `fireMax` x1.6 — is the rule that ENDS a battle,
+and it was gated on a ratio so extreme that by the time it could fire there was
+nothing left to hunt. Measured: at t=83 s it stood **17 v 4**, a rout at 4.25:1,
+flag still false, twenty-one men holding a mark none of them could see, and the
+shot counter unchanged at 715 for three straight samples. **3:1 now** — where an
+army stops manoeuvring and starts sweeping.
+
+**A WALL DOES NOT TAKE ITS HALF OF THE SHOVE.** The overlap pin was NOT
+holding: `overlapPeak` read 0 on island, field, dunes and the kill box and
+**3 on `city`**, the one map made of walls. Two answers landed on this in the
+same week and they are complementary, not duplicates. `separateSolve` (the
+beast-armies wave) sweeps again until nothing moves, which fixes the CROWD half
+— a body belongs to several pairs at once, so the shove that clears it of B
+walks it back into C. No number of sweeps fixes a WALL, because the wall does
+not move: separation puts a man into the facade, the next step's
+`resolveCircle` puts him straight back out into the man he was just cleared
+from, and the two of them oscillate in a doorway forever. `pinnedPass` runs
+last, over what convergence could not fix and only that: it SHOVES AND ASKS THE
+WORLD WHAT IT KEPT, hands what a wall refused to the man who has somewhere to
+go, parts them along the wall if neither does, and separates them regardless if
+the geometry genuinely cannot seat two bodies — because a frame drawn with two
+bodies inside each other is the fault being counted, and `resT = 0` gives the
+world the last word on the next step. It reads the PAIR's clearance, so it
+holds a lion against a hangar exactly as it holds a man against a facade.
+**overlapPeak 3 → 0 on every map.**
+
+**AND THE GATE WAS TESTING THE CITY TWICE.** `battle-check.mjs`'s default sweep
+was `city,streets,dunes,arena`. There has never been a `streets`; battle.html
+ends its map table with `if (!MAPS[SET.map]) SET.map = "city"`, so the pin
+covered four runs of three maps and **never once loaded `island` or `field`** —
+the two grounds that raise a real piece of Gang City. Two waves found this
+independently in the same week; the list is now every map the page offers
+(nine), and an unknown name is a FAILURE rather than a silent second helping of
+downtown, so the next typo announces itself instead of shrinking the sweep.
+
+Two new pins, both things a person feels rather than sees: **`firstShotT`** (how
+long the war spends walking before it starts — measured across all nine maps:
+harbor 0.6 · field 0.6 · marina 0.6 · kill box 0.9 · gov 1.2 · city 2.2 ·
+dunes 3.2 · island 7.2 · speedway 7.3, pinned at **9** rather than 8 because the
+last two are the ones that vary — island has been seen at 7.1 and at 8.4 on the
+same build, the sim advancing in frame-sized steps — and a gate that flakes is a
+gate people learn to re-run) and **`ended`**
+against a SIM-time budget, not a wall-clock one, because headless swiftshader
+manages ~0.6x real on the city map and a wall deadline would fail the biggest
+map for being the biggest map. A sweep that runs out of wall clock before the
+sim budget reports `inconclusive` and does not fail.
+
+## THE CAPTAIN PICKS HIS BOAT — `CBZ.cityOriginBoats()`
+
+**"Captain like pilot should let me select any boat in start menu"** (owner,
+2026-08-12). The Pilot has had a CHOOSE YOUR AIRCRAFT strip since the day that
+story shipped, read off the live registry so a new airframe appears with no
+edit. The Captain got a constant: `const FLAG_KEY = "trawler"`.
+
+**THE LIST WAS ALREADY THERE AND IT IS BETTER THAN THE PILOT'S.** The aircraft
+picker has to ship `FALLBACK_PLANES` because militaryvehicles.js only registers
+once a world exists and the pick happens before that. `world/water_hulls.js`
+registers at PARSE time — its four authored hulls plus every row `city/yachts.js`
+queues ahead of it — so at the title screen `CBZ.cityOriginBoats()` answers with
+the **real fleet, names and lengths and all**, and there is no fallback list to
+drift. Eleven hulls today, from the 4.5 m Calanque tender to the 156 m Vosswerft
+Aurora, sorted by length, and a twelfth is pickable the moment it registers.
+
+**ONE STRIP, TWO STORIES.** `systems/state.js` grew a `renderSub()` — the
+buttons, the active class, the binding and the "nothing chosen yet" rule — and
+both the aircraft and the boat lists are now calls to it. A shared renderer is
+exactly the kind of change that fixes one story by breaking the other, so
+`tools/boat-origin-check.mjs` reads the **Pilot's** strip in the same pass.
+
+**WHAT IT COST WAS EVERY FITTING IN `city/captain.js`, AND THAT IS THE POINT.**
+The file typed the trawler's own measurements as literals — the fish hold's
+floor at deck 2.43 between bulwarks at x ±2.64, the chart table at
+(0.95, 2.59, 2.35), three crew stations, the rail a deckhand casts from, the
+bench a fare sits on, the square a crate lands on, the patch of deck you are set
+down on when you hand over the wheel. Put a man on the 4.5 m tender with those
+numbers and his crew stand in the air two metres above the sea and his chart
+table floats astern of the boat. So `solveFit(key)` derives all of them from the
+four dimensions every registered hull already carries (`deriveSpec`: loa, beam,
+deckY, sternOffset). **The trawler's authored numbers are the reference** — each
+ratio reproduces her to the centimetre, which is the check that the proportions
+are real and not invented.
+
+Two things are capped rather than scaled, because proportion is the wrong model
+past a certain size: a hold the length of a 156 m yacht is not a hold, it is a
+deck, and a chart table 20 m forward is in a different room from the wheel. Both
+cap into the aft working space, which on that hull is what the tender garage
+actually is. **The crew scales too** — three hands on a RIB is a clown car, so
+the ROSTER is sliced by length and the mate is first, because he is the man who
+can take the wheel and let you walk your deck.
+
+**AND THE HOLD IS ALSO THE DECK.** `vehicle_hold`'s floor rect is a real
+collider, so fitting one to the open boats is what makes a skiff — which
+declares no walkable deck of its own — a boat a man can cross. Below a floor two
+men could stand on there is no room, and an open boat with no cargo room is an
+honest open boat.
+
+**A BOAT CARRIED BY ANOTHER BOAT IS NOT A BOAT YOU CAN SAIL**, and offering
+eleven hulls is what made that reachable. `findFlagship` adopts a hull the world
+already floats rather than spawning one — right, and how a 156 m superyacht gets
+sailed at all, since no marina berth could ever take her. But measured, **both**
+afloat Calanque tenders are children of a superyacht's davits (yachts.js's
+"Launch the tender"): adopting one would write `car.pos` in WORLD coordinates
+onto a group whose transform is its PARENT's, and the captain's first command
+would be issued from inside somebody else's tender garage. Anything not parented
+straight to the scene is somebody's cargo, and is skipped.
+
+**PICK BEATS OWNED BEATS DEFAULT**, and the order is the whole rule: a boat you
+actually clicked wins; else the flagship you already own (a returning skipper
+who never touched the picker keeps the hull he has — that record round-trips
+through `g.cityGarage` where the session-side pick does not); else the working
+trawler the card has always described. The other way round means either "I chose
+the tender and got the trawler" or "I owned a sloop and the game took it".
+
+Ratchet `CBZ.captainFitAudit().offHull` — a station placed outside its own hull
+— pinned at **0**, and it is checked for **every hull in the registry, not the
+one being sailed**, at the title screen with no world built. That fault is
+silent: nothing throws when a crew station lands four metres off the transom,
+you just find a deckhand treading water. Tool
+**`tools/boat-origin-check.mjs`** (`--sail` starts real runs on the smallest
+hull, the default and the 156 m flagship — the last of which can never be
+delivered to a marina berth and has to be adopted at her outer roadstead).
 
 ## THE STUDIO — `src/core/studio.js`, one script tag
 

@@ -42,6 +42,17 @@
     ring.rotation.x = Math.PI / 2;
     g.add(ring);
 
+    // REAL-DIMENSION SIZING (weapons/weapon-scale.js, gun-scale pass): the
+    // model portrays an M67 frag — 64mm wide, 90mm tall — but the authored
+    // group spans ~0.35m, so every lobbed grenade flew as a beach ball.
+    // weaponRealScale measures this factory and derives the scalar from the
+    // real M67 height × the thrown READ boost; guard-called so a build
+    // without the scale module keeps the legacy size.
+    if (CBZ.grenadeRealScale) {
+      const s = CBZ.grenadeRealScale();
+      if (s > 0) g.scale.setScalar(s);
+    }
+
     return g;
   };
 })();

@@ -62,6 +62,15 @@
     g.userData.muzzle = new THREE.Vector3(0, 0.095, -1.10);
     g.userData.pump = pump;
     g.userData.pumpBaseZ = pump.position.z;
+    // WHERE THE HANDS GO — see systems/gunhands.js. The support hand rides
+    // the PUMP (it is what racks the gun), and shells go in one at a time
+    // through the loading port under the receiver.
+    g.userData.grips = {
+      support: new THREE.Vector3(0, -0.060, -0.520),
+      mag: new THREE.Vector3(0, -0.090, -0.190),
+      charge: new THREE.Vector3(0, -0.060, -0.520),    // racking IS the pump
+      style: "shell",
+    };
     return g;
   };
 })();

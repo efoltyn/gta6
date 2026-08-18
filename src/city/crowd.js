@@ -1253,7 +1253,18 @@
     const paint = CBZ.cityPaintSlot || ((arr, hex) => (arr || []).forEach((m) => { if (m && m.material && m.material.color) { if (m.material._shared) m.material = m.material.clone(); m.material.color.setHex(hex); } }));
     if (ch.head) paint([ch.head], skinHex);
     const ss = ch.skinSlots || {};
-    paint(ss.hands, skinHex); paint(ss.arms, skinHex); paint(ss.armsLower, skinHex); paint(ss.hair, hairHex);
+    // THE PROMOTED BODY GETS REAL SLEEVES (CBZ.CONFIG.CITY_CROWD_SLEEVES, default
+    // on). The imposter's arm is ONE skin-tinted mesh, so copying it literally
+    // painted the real rig's WHOLE arm skin — shoulder to wrist — and at close
+    // range that is a person with no outfit (the owner's "nil outfit" screenshot;
+    // peds.js:929 already calls the same look wrong for spawns: "a bare-skin
+    // WHOLE arm read as sleeveless", user-filmed). Paint the shirt on the upper
+    // arm and keep the skin forearm — the exact short-sleeve grammar every
+    // spawned body uses. The swap happens ≥14 m out under the promotion screen
+    // guard, so the sleeve gaining a color out there is invisible; the naked arm
+    // two meters away was not.
+    const sleeves = !C || C.CITY_CROWD_SLEEVES == null || !!C.CITY_CROWD_SLEEVES;
+    paint(ss.hands, skinHex); paint(ss.arms, sleeves ? shirtHex : skinHex); paint(ss.armsLower, skinHex); paint(ss.hair, hairHex);
     paint(ss.torso, shirtHex); paint(ss.collar, shirtHex);
   }
   function makePooled() {

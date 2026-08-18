@@ -47,6 +47,27 @@
   function posOf(a) { return a._p ? a.pos : a.group.position; }
   function radOf(a) { return a._p ? a.r : R; }
 
+  /* A BODY THE FURNITURE OWNS IS NOT A COLLISION CANDIDATE (SIT_PHYS_V1).
+     It is parked at an authored anchor — a stool, a bench, a bunk edge —
+     and those anchors legitimately overlap the piece's own collider, so the
+     wall clamp below reads a seated man as a depenetration case. Measured,
+     cell 3: the leash (order 22.6) pinned its bunk sitter to the mattress
+     edge at x 10.35 and this file (order 25) ejected him to 10.86 every
+     frame — bunk latOut + body radius, the depenetration signature — which
+     put the whole wing seated on air half a metre from its bunks. Same rule
+     city/peds.js's own sit branch states ("a seated body must not be shoved
+     around by the desk colliders") and propuse's settle beats already obey;
+     this closes it for the prison's plain actors. Mid-arc bodies are the
+     arc's: its walk leg runs its own collideSlide and its settle beats
+     deliberately do not collide. KO'd bodies were always skipped so you can
+     step over them; a seated man earns the same treatment. */
+  function furnitureHeld(a) {
+    if (CBZ.CONFIG && CBZ.CONFIG.SIT_PHYS_V1 === false) return false;
+    return !!(a._propSeat || a._propBed || a._propLie
+      || (a.char && (a.char.sitting || a.char.lying))
+      || (CBZ.propArcActive && CBZ.propArcActive(a)));
+  }
+
   /* ---- THE BAND. CBZ.collide's FOUR-argument contract, honoured -----------
      Both clamps in this file called `CBZ.collide(pos, radius)` and stopped
      there. Inside collide, the height-gate line reads
@@ -144,12 +165,16 @@
     for (let i = 0; i < CBZ.guards.length; i++) {
       const g = CBZ.guards[i];
       if (!standing(g)) continue;
+      // furniture-held: neither shoved nor clamped; keep the traversal sample
+      // fresh so standing up is never read back as a sprint by the vault probe
+      if (furnitureHeld(g)) { stampRest(g); continue; }
       if (vaultOn && traverse(g, dt)) continue;   // the vault owns this body
       list.push(g);
     }
     for (let i = 0; i < CBZ.npcs.length; i++) {
       const n = CBZ.npcs[i];
       if (!standing(n) || n._crowd) continue;
+      if (furnitureHeld(n)) { stampRest(n); continue; }
       if (vaultOn && traverse(n, dt)) continue;
       list.push(n);
     }
