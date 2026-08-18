@@ -140,6 +140,23 @@
       ringNear: new THREE.Color(0x0a0e16), // near-black; windows carry it
       ringFar: new THREE.Color(0x121a2b),
     },
+    /* THE STORM DECK. Authored, not derived — for the same reason every
+       other row here is authored: a deck derived from the disaster's fog
+       colour (0x3a4150) is just that slate everywhere, and a real overcast
+       sky is NOT one flat value. It is dark directly overhead, where you are
+       looking through the whole thickness of the cloud base, and it gets
+       PALER toward the horizon, where daylight is leaking in under the deck
+       from tens of kilometres away. That vertical inversion — dark above,
+       bright below — is what reads as "a ceiling over the world" instead of
+       "grey paint on a dome", and it is the first thing the owner's
+       reference photograph shows. These are then nudged 18% toward the live
+       fog so a blizzard's whiteout and a volcanic red still carry into the
+       cloud, without the mood being allowed to flatten it. */
+    storm: {
+      top: new THREE.Color(0x3c4652),   // the base of the cloud, straight up
+      mid: new THREE.Color(0x5b6874),
+      low: new THREE.Color(0x8e9ca8),   // daylight under the deck, near the horizon
+    },
     glow: { // the sunset burn, golden hour (sun up) → civil dusk (sun dipped)
       golden: new THREE.Color(0xffd98c),
       goldenMid: new THREE.Color(0xffb15e),
@@ -206,6 +223,198 @@
     img.src = "assets/sky/day.jpg";
   })();
 
+  /* ---------------- 1b. THE STORM DECK ------------------------------
+     OWNER, holding up a photograph of a real strike: "your lighting in the
+     game is fucking amazing, the issue is the sky is a nice blue sky with
+     hardly any clouds during the lightning storm."
+
+     Correct, and it was structural rather than a tuning miss. This file had
+     NO weather input at all: its one read of systems/weather.js sat behind
+     PROCEDURAL_CLOUDS, which is false, so the LIGHTNING STORM disaster —
+     which drives rain 0.92, wind 9, fog and lightning 1 through the shared
+     weather system, and gets wet asphalt, wet grip, flashes and real bolts
+     for it — was throwing those bolts out of the clear-day gradient and the
+     cloudless assets/sky/day.jpg. survival's mood tint then multiplied that
+     blue by slate, which is a DARKER BLUE CLOUDLESS SKY, exactly as filmed.
+     A multiply can only ever darken what is already painted; it cannot put
+     cloud where there is none.
+
+     So the deck is painted, into the one canvas that already carries the
+     sky, and it is painted IN PERSPECTIVE. A cloud layer is flat and it is
+     over your head, so the piece of it directly above you is small and
+     spread across a lot of sky, while everything from there to the horizon
+     is tens of kilometres of deck crushed into the last few degrees. Drawing
+     the noise straight down the canvas gets that exactly backwards and reads
+     as wallpaper on a dome — the giveaway being cloud "features" that stay
+     the same size all the way to the waterline. Instead the band loop below
+     samples the tile at the ground radius r = h/tan(elevation) that each
+     canvas row is actually looking at, so the structure compresses toward
+     the horizon on its own and the deck reads as a ceiling with distance in
+     it. Cost is ~40 pattern fillRects inside a repaint that is already
+     throttled to ≤10 Hz, and zero when it is not raining.
+
+     BUDGET NOTE: this is why the dormant PROCEDURAL_CLOUDS box/billboard
+     layers stay dormant. They are two more draw calls and they cannot do
+     the one thing an overcast sky must do — close the WHOLE sky. */
+  const DECK_N = 256;                 // tile is square and wraps in both axes
+  const DECK_BANDS = 22;              // perspective steps from zenith to horizon
+  /* The ground radius (in deck heights) at which HALF the tile has been
+     crossed. This was written as a multiplier on r and it was the single
+     worst thing in the first pass: r·6.3 saturates by r≈0.16, i.e. the ENTIRE
+     tile was spent within a few degrees of the zenith and the rest of the sky
+     was one smeared band. As a radius, 1.15 puts the halfway point at 41°
+     elevation — features stay roughly square through the mid sky and the
+     compression lands where a real deck's does, in the last few degrees. */
+  const DECK_R0 = 1.15;
+  let deckDark = null, deckLite = null, deckBuilt = false;
+  let deckPatD = null, deckPatL = null;
+  const DECK_XFORM = (typeof DOMMatrix !== "undefined");
+
+  function buildDeck() {
+    if (deckBuilt) return;
+    deckBuilt = true;                 // one attempt, ever — a failure stays failed
+    try {
+      // Periodic value noise. Every octave's period DIVIDES DECK_N, which is
+      // what makes the tile seamless in both axes — required, because the
+      // painter wraps it around all 360° of azimuth and scrolls it as the
+      // deck drifts downwind. Lattices are built first and sampled bilinearly,
+      // rather than hashing per pixel per octave: same field, ~8× cheaper,
+      // and this runs on the frame the first storm cloud appears.
+      const OCT = [[4, 0.50], [8, 0.26], [16, 0.14], [32, 0.08], [64, 0.05], [128, 0.022]];
+      const field = new Float32Array(DECK_N * DECK_N);
+      let norm = 0;
+      for (let o = 0; o < OCT.length; o++) {
+        const P = OCT[o][0], amp = OCT[o][1]; norm += amp;
+        const lat = new Float32Array(P * P);
+        for (let i = 0; i < P * P; i++) {
+          let n = Math.imul(i + 1, 374761393) ^ Math.imul(o + 7, 668265263);
+          n = Math.imul(n ^ (n >>> 13), 1274126177);
+          lat[i] = ((n ^ (n >>> 16)) >>> 0) / 4294967296;
+        }
+        const cell = DECK_N / P;
+        for (let y = 0; y < DECK_N; y++) {
+          const fy = y / cell, iy = Math.floor(fy), ty = fy - iy;
+          const sy = ty * ty * (3 - 2 * ty);
+          const y0 = (iy % P) * P, y1 = ((iy + 1) % P) * P;
+          for (let x = 0; x < DECK_N; x++) {
+            const fx = x / cell, ix = Math.floor(fx), tx = fx - ix;
+            const sx = tx * tx * (3 - 2 * tx);
+            const x0 = ix % P, x1 = (ix + 1) % P;
+            const a = lat[y0 + x0], b = lat[y0 + x1];
+            const c = lat[y1 + x0], d = lat[y1 + x1];
+            field[y * DECK_N + x] += amp * ((a + (b - a) * sx) + ((c + (d - c) * sx) - (a + (b - a) * sx)) * sy);
+          }
+        }
+      }
+      // TWO COMPLEMENTARY MAPS OFF ONE FIELD, never two fields: where the
+      // cloud is thick its underside is dark, and where it thins the daylight
+      // above it comes through. Splitting one density about its midpoint keeps
+      // the light and the dark INTERLOCKED — the bright patches are exactly
+      // the gaps in the dark ones, which is what makes a deck read as a single
+      // body of cloud rather than two unrelated grey washes.
+      const mk = function (r, g, b, lo, hi, gain) {
+        const cv = document.createElement("canvas");
+        cv.width = DECK_N; cv.height = DECK_N;
+        const cx = cv.getContext("2d");
+        const im = cx.createImageData(DECK_N, DECK_N);
+        const px = im.data;
+        for (let i = 0; i < DECK_N * DECK_N; i++) {
+          const d = field[i] / norm;
+          let a = (d - lo) / (hi - lo);
+          a = a < 0 ? 0 : a > 1 ? 1 : a;
+          a = a * a * (3 - 2 * a) * gain;
+          const o = i * 4;
+          px[o] = r; px[o + 1] = g; px[o + 2] = b; px[o + 3] = Math.round(a * 255);
+        }
+        cx.putImageData(im, 0, 0);
+        return cv;
+      };
+      // Thresholds are deliberately MEAN-OFFSET rather than symmetric about
+      // the field's centre. An overcast deck is mostly deck: light has to be
+      // earned by a real thinning, or the "gaps" cover half the sky and the
+      // whole thing renders as white fog instead of storm cloud. (It did.)
+      deckDark = mk(20, 25, 32, 0.40, 0.74, 1);      // thick cloud, lit from above only
+      deckLite = mk(226, 234, 240, 0.34, 0.12, 1);   // hi<lo inverts: only the thin gaps
+      deckPatD = skyCtx.createPattern(deckDark, "repeat");
+      deckPatL = skyCtx.createPattern(deckLite, "repeat");
+    } catch (_) { deckDark = deckLite = deckPatD = deckPatL = null; }
+  }
+
+  // canvas row → how far out across a flat deck that row is looking, 0 at the
+  // zenith and saturating at the horizon. This one line is the perspective.
+  function deckV(y) {
+    const el = Math.max(0.02, (0.5 - y / SKY_H) * Math.PI);
+    const r = 1 / Math.tan(el);        // ground radius, in deck heights
+    return r / (r + DECK_R0);
+  }
+
+  function deckLayer(pat, reps, driftU, driftV, alpha, bot) {
+    if (!pat || alpha < 0.004) return;
+    const sx = SKY_W / (DECK_N * 3);   // three tile widths around the horizon
+    skyCtx.fillStyle = pat;
+    const span = DECK_N * reps;
+    for (let i = 0; i < DECK_BANDS; i++) {
+      /* BANDS BUTT-JOINT ON INTEGER ROWS. They used to overlap by a pixel to
+         hide a rounding gap — but these fills are TRANSLUCENT, so an
+         overlapping row is composited twice and comes out darker than either
+         neighbour. That drew 22 concentric arcs across the sky: not clouds,
+         the seams between the bands drawing them. Snapping to integers makes
+         the rects tile exactly, so there is nothing to gap and nothing to
+         double. */
+      const y0 = Math.round((i / DECK_BANDS) * bot), y1 = Math.round(((i + 1) / DECK_BANDS) * bot);
+      if (y1 <= y0) continue;
+      const v0 = deckV(y0) * span, v1 = deckV(y1) * span;
+      const dv = v1 - v0;
+      if (!(dv > 1e-4)) continue;
+      /* AND THE STRUCTURE FADES OUT AT THE ZENITH. An equirectangular canvas
+         wraps every row around a latitude circle, so near the pole one row of
+         tile is smeared through 360° and cloud detail turns into radial
+         streaks — a mapping artefact, not weather. Fading the structure into
+         the flat base over the top of the sky removes it, and removes it in
+         the direction the truth points anyway: straight up through a storm
+         deck you are looking through its full thickness, which is the darkest
+         and most featureless part of the sky. Same `v` as the perspective, so
+         it costs nothing. */
+      const zen = Math.min(1, (deckV((y0 + y1) * 0.5)) * 4.2);
+      if (zen < 0.01) continue;
+      const sy = (y1 - y0) / dv;
+      skyCtx.globalAlpha = alpha * zen;
+      pat.setTransform(new DOMMatrix([sx, 0, 0, sy, driftU, y0 - (v0 + driftV) * sy]));
+      skyCtx.fillRect(0, y0, SKY_W, y1 - y0);
+    }
+    skyCtx.globalAlpha = 1;
+  }
+
+  function paintDeck(fadeTop) {
+    const k = frame.stormK;
+    if (k < 0.01) return;
+    buildDeck();
+    /* THE DECK RUNS TO THE HORIZON ROW, NOT TO `fadeTop`. The fog ramp only
+       reaches full opacity AT the horizon, so a deck that stopped where the
+       ramp starts left ~50 px of untouched clear blue between the cloud and
+       the fog — a bright band right around the waterline, which is the one
+       place the owner was already looking. Painting down to HORIZON_Y hands
+       the last 50 px to the ramp, which melts the cloud into exactly the fog
+       colour, and the seam law at step 4 is untouched. */
+    const bot = HORIZON_Y;
+    // 1) the base ceiling: opaque at full overcast, so the blue underneath is
+    //    GONE rather than tinted. This is the half that fixes the complaint;
+    //    the structure below is the half that makes it worth looking at.
+    const g = skyCtx.createLinearGradient(0, 0, 0, bot);
+    g.addColorStop(0, cssA(_stTop, k));
+    g.addColorStop(0.55, cssA(_stMid, k));
+    g.addColorStop(1, cssA(_stLow, k));
+    skyCtx.fillStyle = g;
+    skyCtx.fillRect(0, 0, SKY_W, Math.ceil(bot));
+    if (!DECK_XFORM || !deckPatD || !deckPatD.setTransform) return; // flat deck, still a deck
+    // 2) structure. The two layers run at different tile counts and different
+    //    drift rates because a storm sky is not one sheet — it is a ragged
+    //    lower layer sliding under a slower mass above it, and that parallax
+    //    is most of what sells depth in a still frame.
+    deckLayer(deckPatD, 1.15, frame.stormU, frame.stormV, k * 0.92, bot);
+    deckLayer(deckPatL, 0.8, frame.stormU * 0.5 + 90, frame.stormV * 0.5, k * frame.stormLit * 0.3, bot);
+  }
+
   // horizon colour = fog ÷ tint (clamped) so (texel × tint) == fog exactly
   function horizonCss(fog, tint) {
     const r = Math.min(255, Math.round((fog.r / Math.max(tint.r, 0.004)) * 255));
@@ -215,9 +424,15 @@
   }
 
   // frame state the painter reads (computed each frame, painted throttled)
-  const frame = { glowU: 0, glowK: 0, photoK: 1, duskW: 0, spaceK: 0, hazeK: 1 };
+  const frame = {
+    glowU: 0, glowK: 0, photoK: 1, duskW: 0, spaceK: 0, hazeK: 1,
+    // the storm deck: coverage 0..1, its drift in canvas px, and how much
+    // daylight is left to light the thin gaps (a night deck has none).
+    stormK: 0, stormU: 0, stormV: 0, stormLit: 1,
+  };
   const _zen = new THREE.Color(), _mid = new THREE.Color(), _top = new THREE.Color();
   const _hot = new THREE.Color(), _gmid = new THREE.Color();
+  const _stTop = new THREE.Color(), _stMid = new THREE.Color(), _stLow = new THREE.Color();
 
   function paintSky(fog, tint) {
     const hz = horizonCss(fog, tint);
@@ -263,6 +478,12 @@
       gsp.addColorStop(1, cssA(SPACE, 0));
       skyCtx.fillStyle = gsp; skyCtx.fillRect(0, 0, SKY_W, Math.ceil(fadeTop));
     }
+    // 2c) THE STORM DECK, over the clear sky and over the photo — a cloud
+    //     layer is the nearest thing in the sky and it occludes everything
+    //     behind it, including the sun's own burn below. Drawn only down to
+    //     `fadeTop`, so the fog band at step 4 melts it into the horizon for
+    //     free and the seam law is untouched.
+    paintDeck(fadeTop);
     // 3) THE BURN: a wide warm glow pinned to the sun's azimuth (canvas u),
     //    so the horizon goes hot orange/pink on the sun's side while the
     //    far side and zenith stay cool. Drawn 3× for the u=0/1 seam wrap;
@@ -581,7 +802,19 @@
   let forcePaint = true, lastPaintAt = -1e9;
   const lastFog = new THREE.Color(-1, -1, -1), lastTint = new THREE.Color(-1, -1, -1);
   let lastKDay = -1, lastGlowK = -1, lastGlowU = -1, lastPhotoK = -1;
-  let lastSpaceK = -1, lastHazeK = -1;
+  let lastSpaceK = -1, lastHazeK = -1, lastStormK = -1, lastStormU = -1e9;
+  const _white = new THREE.Color(1, 1, 1);
+  /* WRITING THE TINT HAS TO BE IDEMPOTENT. Normally daynight (@2) resets the
+     dome tint to white and survival (@93) re-asserts the disaster mood before
+     this file touches it, so a fresh base arrives every frame and nothing can
+     accumulate. But CBZ.skySync() runs skyFrame() by hand — frozen-loop tools
+     call it between renders with no engine tick in between — and a second
+     pass would then lerp and brighten a tint this file had ALREADY lerped and
+     brightened. Remembering both sides of our own write closes it exactly: if
+     the tint still is what we left, nobody else has had a turn, so restore
+     the base we started from and redo the write. Cheap, and it means
+     skyFrame() can be called any number of times for one world state. */
+  const _tintBase = new THREE.Color(1, 1, 1), _tintWrote = new THREE.Color(-1, -1, -1);
   const _fogFallback = new THREE.Color(0xb6c4c8);
   function moved(a, b) {
     return Math.abs(a.r - b.r) > 0.006 || Math.abs(a.g - b.g) > 0.006 || Math.abs(a.b - b.b) > 0.006;
@@ -605,6 +838,9 @@
     const fog = scene.fog ? scene.fog.color : _fogFallback;
     const tint = dome.material.color;
 
+    if (tint.equals(_tintWrote)) tint.copy(_tintBase);
+    _tintBase.copy(tint);
+
     const night = CBZ.nightAmount == null ? 0 : CBZ.nightAmount;
     const dayness = CBZ.dayness == null ? 1 : CBZ.dayness;
     const duskness = CBZ.duskness == null ? 0 : CBZ.duskness;
@@ -617,11 +853,83 @@
     _top.copy(PAL.night.top).lerp(PAL.day.top, kDay).lerp(PAL.dusk.top, duskness * 0.6);
     _zen.copy(PAL.night.zen).lerp(PAL.day.zen, kDay).lerp(PAL.dusk.zen, duskness * 0.6);
     _mid.copy(PAL.night.mid).lerp(PAL.day.mid, kDay).lerp(PAL.dusk.mid, duskness * 0.85);
+    // the deck: authored, dimmed into the night with the rest of the sky, then
+    // nudged toward the live fog so the disaster's own mood carries into it
+    const stLum = 0.12 + 0.88 * kDay;
+    _stTop.copy(PAL.storm.top).multiplyScalar(stLum).lerp(fog, 0.18);
+    _stMid.copy(PAL.storm.mid).multiplyScalar(stLum).lerp(fog, 0.18);
+    _stLow.copy(PAL.storm.low).multiplyScalar(stLum).lerp(fog, 0.22);
     _hot.copy(PAL.glow.golden).lerp(PAL.glow.civil, civil);
     _gmid.copy(PAL.glow.goldenMid).lerp(PAL.glow.civilMid, civil);
     frame.duskW = duskness;
     frame.glowK = duskness;
     frame.photoK = clamp01((up - 0.3) * 4); // photo fades out entering golden hour
+
+    /* ---- THE STORM (see section 1b) --------------------------------
+       systems/weather.js owns "how much cloud is overhead" because it is the
+       file that knows the difference between drizzle, a driven disaster and
+       a dry scripted strobe. This file owns what that LOOKS like. */
+    const W = CBZ.weather;
+    frame.stormK = clamp01(W && typeof W.overcast === "number" ? W.overcast : 0);
+    if (frame.stormK > 0.002) {
+      // drift: the deck moves downwind, and the wind is the ONE wind vector
+      // systems/weather.js publishes — never a private bearing. Azimuthal
+      // component only (a deck crossing overhead sweeps the sky sideways);
+      // the approach term is slower, because a ceiling coming at you moves
+      // far less in apparent angle than it does in kilometres.
+      const spd = W && typeof W.wind === "number" ? W.wind : 0;
+      const dtc = Math.min(0.1, dt > 0 ? dt : 0);
+      frame.stormU -= dtc * (5 + spd * 1.6) * (W && W.windX != null ? (W.windX * 0.8 + 0.5) : 1);
+      frame.stormV += dtc * (1.4 + spd * 0.35);
+      // WRAP ON THE SHARED PERIOD, not on "some big number". The tile is drawn
+      // twice around the canvas (period SKY_W/2 = 512 px) and the second layer
+      // drifts at exactly HALF the first — so 1024 px is a whole number of
+      // tiles for BOTH layers and the wrap is invisible. An arbitrary wrap, or
+      // none at all, either jumps the sky or lets the offset grow until float
+      // precision starts quantising the drift into visible steps.
+      if (frame.stormU <= -1024) frame.stormU += 1024;
+      if (frame.stormV >= 512) frame.stormV -= 512;
+      // the thin gaps only glow if there is daylight above the deck to glow
+      frame.stormLit = 0.10 + 0.90 * kDay;
+      // A DECK OCCLUDES WHAT IS BEHIND IT. The clear-sky photograph, the
+      // sunset burn, the sun disc, its halo and the veiling glare are all
+      // things you cannot see through cloud, and leaving any of them running
+      // under an overcast sky is the tell that the grey is a filter rather
+      // than a ceiling.
+      frame.photoK *= 1 - frame.stormK;
+      frame.glowK *= 1 - frame.stormK * 0.88;
+      /* AND THE DOME TINT HAS TO LET GO. modes/survival.js multiplies the
+         whole dome by the disaster's fog colour (0x3a4150 for the storm) so
+         the sky reads the mood — which was the only storm-sky mechanism
+         there was, and which caps every texel at that slate. Now that the
+         mood is PAINTED, that multiply can only crush it, so ease the tint
+         back to white as the deck takes over. Legal, and deliberately here:
+         this file runs at order 99, after daynight (@2, which rewrites the
+         tint to white every frame) and after survival (@93) — it is the last
+         writer of sky colour by design, and nothing accumulates because both
+         of those re-assert the tint from scratch on the next frame. */
+      tint.lerp(_white, clamp01(frame.stormK * 1.2));
+    } else {
+      frame.stormLit = 1;
+    }
+    /* THE STROKE LIGHTS THE CLOUD IT CAME OUT OF. The reference photograph is
+       not a bright bolt on a dark sky — the whole sky is blazing, because a
+       return stroke is a hundred million volts INSIDE the deck. Pushing the
+       tint overbright (>1 is legal on a MeshBasicMaterial and clamps at the
+       output) flares the entire painted sky on the frame the bolt fires, for
+       free: no repaint, no second material, no extra draw. It rides the exact
+       decay curve systems/weather.js is already using for the hemi/sun bump,
+       so the sky, the lit faces and the shadowed faces all pulse together. */
+    const fl = W && typeof W.flash === "number" ? W.flash : 0;
+    if (fl > 0.004) {
+      const fk = Math.min(1.6, fl * 0.75) * (0.35 + 0.65 * frame.stormK);
+      // ceiling on the add: daynight.js (@2) rewrites this tint to white every
+      // frame so nothing can accumulate here, but a bounded write costs one
+      // Math.min and cannot blow the sky out if a future context ever skips it.
+      tint.r = Math.min(2.4, tint.r + fk * 0.92);
+      tint.g = Math.min(2.4, tint.g + fk * 0.97);
+      tint.b = Math.min(2.4, tint.b + fk * 1.18);
+    }
     // ---- altitude terms (section 0a) --------------------------------
     // spaceK: the share of the atmosphere already below you, scaled by how
     // lit the sky is at all — a night sky is black without any help, and
@@ -637,6 +945,8 @@
     let gu = Math.atan2(-10, -Math.cos(a) * 80) / (Math.PI * 2);
     frame.glowU = gu - Math.floor(gu);
 
+    _tintWrote.copy(tint);
+
     // dome repaint — throttled (canvas refill + ~2MB upload is cheap at
     // <10Hz, wasteful at 60); fog/palette drift over seconds, not frames
     const du = Math.abs(frame.glowU - lastGlowU);
@@ -645,12 +955,19 @@
       (frame.glowK > 0.02 && Math.min(du, 1 - du) > 0.01) ||
       Math.abs(frame.photoK - lastPhotoK) > 0.03 ||
       Math.abs(frame.spaceK - lastSpaceK) > 0.015 ||
-      Math.abs(frame.hazeK - lastHazeK) > 0.02;
+      Math.abs(frame.hazeK - lastHazeK) > 0.02 ||
+      Math.abs(frame.stormK - lastStormK) > 0.012 ||
+      // the deck DRIFTS, so it needs its own repaint reason: without this the
+      // cloud would only move when something else happened to change. 1.2 px
+      // of a 1024 px / 360° canvas is 0.4°, i.e. a repaint about every half
+      // second at storm wind speeds — motion, well under the 10 Hz ceiling.
+      (frame.stormK > 0.02 && Math.abs(frame.stormU - lastStormU) > 1.2);
     if (forcePaint || (CBZ.now - lastPaintAt > 100 && (moved(fog, lastFog) || moved(tint, lastTint) || palMoved))) {
       paintSky(fog, tint);
       lastFog.copy(fog); lastTint.copy(tint);
       lastKDay = kDay; lastGlowK = frame.glowK; lastGlowU = frame.glowU; lastPhotoK = frame.photoK;
       lastSpaceK = frame.spaceK; lastHazeK = frame.hazeK;
+      lastStormK = frame.stormK; lastStormU = frame.stormU;
       lastPaintAt = CBZ.now; forcePaint = false;
     }
 
@@ -662,7 +979,10 @@
     _p.set(Math.cos(a) * 80, Math.sin(a) * 95, -10).normalize();
     const sunY = _p.y;
     sunSpr.position.copy(_p).multiplyScalar(795);
-    let sop = Math.min(1, dayness * 1.6 + duskness * 0.5);
+    // NOTHING IN THE SKY SURVIVES THE DECK. A visible sun disc under full
+    // overcast is the single most obvious "the grey is a filter" tell.
+    const clear = 1 - frame.stormK;
+    let sop = Math.min(1, dayness * 1.6 + duskness * 0.5) * (clear * clear);
     if (sunY < -0.02) sop = 0;
     sunSpr.visible = sop > 0.01;
     if (sunSpr.visible) {
@@ -672,7 +992,7 @@
       sunSpr.scale.set(coreS, coreS, 1);
     }
     // dusk halo: blooms with duskness, lingers a moment after the disc dips
-    const hop = duskness * clamp01((sunY + 0.15) * 7);
+    const hop = duskness * clamp01((sunY + 0.15) * 7) * clear;
     haloSpr.visible = hop > 0.015;
     if (haloSpr.visible) {
       haloSpr.position.copy(sunSpr.position);
@@ -698,7 +1018,7 @@
         // the glare a lens or an eye makes on its own, which altitude cannot
         // take away. Without this the sunrise shot from the cockpit was one
         // flat cream wash with no horizon left in it.
-        gop *= 0.30 + 0.70 * frame.hazeK;
+        gop *= (0.30 + 0.70 * frame.hazeK) * clear * clear;
       }
       glareSpr.visible = gop > 0.008;
       if (glareSpr.visible) {
@@ -760,6 +1080,14 @@
       camOutsideDome: rig.position.distanceTo(CBZ.camera.position) >= 850 ? 1 : 0,
       spaceK: +frame.spaceK.toFixed(3),
       hazeK: +frame.hazeK.toFixed(3),
+      // the storm deck, for the gate: coverage, whether the tile actually
+      // built, and how far the sun/photo/burn have been shut down by it.
+      stormK: +frame.stormK.toFixed(3),
+      deck: deckDark ? 1 : 0,
+      deckPerspective: (DECK_XFORM && deckPatD && deckPatD.setTransform) ? 1 : 0,
+      photoK: +frame.photoK.toFixed(3),
+      sunOpacity: +(sunSpr.visible ? sunSpr.material.opacity : 0).toFixed(3),
+      tintR: +dome.material.color.r.toFixed(3),
       // apparent elevation of the sun disc AS DRAWN, measured from the
       // camera, vs. the elevation of the light that is actually shading the
       // world. These two must AGREE at every altitude — they differed by
