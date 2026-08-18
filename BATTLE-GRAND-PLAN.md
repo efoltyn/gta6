@@ -208,10 +208,13 @@ This is a battle you WATCH, so command must be visible:
 - **New studio pack `bestiary`** — files: `city/wildlife_species.js` +
   `city/wildlife/*.js` (10 files). needs: `look`. publishes:
   `WILDLIFE_SPECIES`, `defineSpecies`. Zero new art; 53 species arrive.
-- **New pack `beasts`** — files: `city/creature_combat.js`,
-  `systems/predator_anim.js`. needs: `boot, look`. publishes:
-  `creatureFight`. (Shim `CBZ.floorAt` → `MAP.groundAt` on the page, exactly
-  like the `queryCollidersNear` shim battle.html already does.)
+- **New pack `beasts`** — SHIPPED, and it grew: `city/wildlife_rig.js`,
+  `city/creature_combat.js`, `systems/predator_anim.js`,
+  `systems/quadruped_ragdoll.js`. needs: `look`. publishes: `wildlifeRig`,
+  `creatureFight`, `faceAnimalHeading`, `quadRagdoll`. (Shims on the page:
+  `CBZ.floorAt` → `MAP.groundAt` and `CBZ.collide` →
+  `micro.resolveCircle`, exactly like the `queryCollidersNear` shim
+  battle.html already does — route the name, never fork the file.)
 - **BLOCK-LAW extraction**: `buildGaitRig` / `gaitAnimate` (+ swim rig +
   `faceAnimalHeading`) move from wildlife.js into a shared
   `city/wildlife_rig.js`; wildlife.js keeps calling them verbatim. Consumers:
@@ -220,6 +223,37 @@ This is a battle you WATCH, so command must be visible:
 - **Add the gorilla** (one ~30-line build(): silverback, knuckle stance) —
   smallest possible art job, unlocks the viral matchup by name: **100 MEN VS
   1 GORILLA**, with our actual assets, animated, not math.
+
+### 3.1b How a beast DIES and BITES (shipped — do not re-litigate)
+
+The `beasts` pack carries `systems/quadruped_ragdoll.js` as well, because a
+pack that can make an animal attack but not die properly hands every page it
+serves the pose that file was written to delete. Three facts a later wave must
+inherit rather than rediscover:
+
+- **The corpse roll axis is `rotation.x` under `rotation.order = 'YXZ'`, never
+  `rotation.z`.** Every species is authored nose-toward-+X and THREE.Euler's
+  default `XYZ` applies Rz FIRST, in model space — so `rotation.z` is the
+  model-local PITCH. Measured in the vendored r128 build, easing it to 1.45 rad
+  puts the nose vector at y = 0.993, i.e. 83 degrees at the sky. That is the
+  "sitting up on its back" the owner filmed, and both the page's canned topple
+  and wildlife.js's shared tumble had it. `predator_anim.js`'s r128 note states
+  the same rule independently.
+- **Deaths go through the solver first, the tumble second, a canned rotation
+  never.** `CBZ.quadRagdoll(actor, {point, dir, imp})` → `wildlifeDeathTumble` →
+  (last resort) a YXZ long-axis roll. The solver's own budget dials
+  (`QUAD_RAGDOLL_RANGE/ACTIVE/POOL`) exist because a page that FLIES a camera
+  over an army is not the first-person city those numbers were sized for.
+- **A bite lands on real jaw contact and it bleeds.** `creature_combat`'s
+  `jawReaches()` asks where the animal's own teeth are at the frame they close
+  (tolerance sized by the caller's declared `reach`, so no species is ever told
+  its own attack cannot connect), and `biteBlood()` fires `CBZ.goreImpact` from
+  that point along the bite line — the same call, and the same restraint, the
+  disaster island's beatings earn through `systems/trauma.js`. Flags:
+  `CREATURE_JAW_CONTACT`, `CREATURE_BITE_BLOOD`.
+
+Gate: `tools/beast-death-check.mjs` (and `--revert`, which asserts `?death=old`
+brings all three faults back). Report: `npm run visual:beast-deaths`.
 
 ### 3.2 Animals as units
 
@@ -354,3 +388,8 @@ biggest spectacle-per-line; 3 and 4 are additive and independent.
   is sacred.
 - Chase-and-retreat per-man rules are untouched; command layer only feeds
   them better inputs.
+- Beast DEATH is `quadruped_ragdoll.js`'s and the corpse roll axis is settled
+  (see 3.1b) — a future wave adds orders and morale on top, it does not write a
+  fourth topple. Beast BLOOD is `gore.js` through `creature_combat`, pulled by
+  the `blood` pack only when a side is an animal army, so a battle of riflemen
+  loads and costs exactly what it always did.
