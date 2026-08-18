@@ -79,6 +79,10 @@ subjects.push({ id: "town-aerial", kind: "aerial",
 subjects.push({ id: "downtown", kind: "skyline",
   label: "The downtown skyline",
   focus: "The tower cluster as a skyline: ten distinct tops against the sky. If two crowns read the same from here, the grammars are not doing their job." });
+subjects.push({ id: "interior", kind: "interior",
+  label: "Inside a dressed building",
+  focus: "The island's buildings are ENTERABLE — a front door, a switchback stair to every floor, and the heavy day-room table systems/quake.js puts on each ground floor as earthquake cover (drop, cover, hold on: a bot under that table takes a fraction of the damage). This plate exists because a facade is emitted into the building's own group, so it is the frame that catches ornament intruding through the wall into the room, or a porch beam hanging where a player walks in. The interior should look exactly as it did before the kit touched it.",
+});
 subjects.push({ id: "street-row", kind: "street",
   label: "Down the street",
   focus: "Eye level in the town, the way a player meets these buildings while running from a disaster. Doors, porches, ground-floor glass and whether the ornament reads at all at 1.7 m." });
@@ -178,6 +182,18 @@ async function stageIsland(input) {
     for (const b of A.fragile) if (b.h > top) { top = b.h; tx = b.x; tz = b.z; }
     cam = { x: A.center.x - 150, y: top * 0.55, z: A.center.z + 165,
       ax: tx, ay: top * 0.52, az: tz, fov: 34 };
+  } else if (input.subject.kind === "interior") {
+    /* Stand INSIDE a dressed low-rise building, in the corner away from the
+       stairwell (which the arena puts on the -x interior strip), looking back
+       across the room at the doorway wall on -z. */
+    let b = null;
+    for (const o of A.fragile) {
+      if (o.facadeStyle && o.h < 12 && o.w > 8 && o.d > 8) { b = o; break; }
+    }
+    if (!b) for (const o of A.fragile) if (o.facadeStyle && o.h < 12) { b = o; break; }
+    if (!b) return { ok: false, err: "no low-rise dressed building" };
+    cam = { x: b.x + b.w * 0.30, y: (b.gy || 0) + 1.62, z: b.z + b.d * 0.30,
+      ax: b.x - b.w * 0.10, ay: (b.gy || 0) + 1.15, az: b.z - b.d * 0.42, fov: 72 };
   } else if (input.subject.kind === "street") {
     /* Stand in the town at eye height — OUTSIDE. The first pass put the lens
        26 m from a house on a guessed bearing and landed inside a neighbour's
