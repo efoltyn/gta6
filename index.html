@@ -461,6 +461,11 @@
 <!-- 1. core engine -->
 <script src="src/core/scene.js?v=neutralhaze1"></script>
 <script src="src/core/renderer.js?v=scale3"></script>
+<!-- THE GROUND STOPS BEING DRAWN OVER A HOLE. Must load AFTER core/renderer.js:
+     its installFog REPLACES THREE.ShaderChunk.fog_fragment wholesale, so a patch
+     installed before it is erased in silence. groundmask.js asserts CBZ.renderer
+     exists and appends rather than rewriting. -->
+<script src="src/core/groundmask.js?v=mask1"></script>
 <script src="src/core/lights.js"></script>
 <script src="src/core/sky.js?v=neutralhaze2"></script>
 <script src="src/core/daynight.js?v=neutralhaze1"></script>
