@@ -393,7 +393,7 @@
     }
     const countryName = rec ? rec.name : bank.countryId;
     if (CBZ.city && CBZ.city.big) CBZ.city.big("CENTRAL BANK GOVERNOR " + name + " ASSASSINATED");
-    if (CBZ.cityFeed) CBZ.cityFeed("" + countryName + "'s central bank governor " + name + " assassinated — markets rattled.", "#ff6a5e");
+    if (CBZ.cityFeed) CBZ.cityFeed("" + countryName + "'s central bank governor " + name + " assassinated, markets rattled.", "#ff6a5e");
   }
   if (typeof CBZ.cityKillPed === "function" && !CBZ.cityKillPed._cbKillWrap) {
     const origKill = CBZ.cityKillPed;
@@ -564,8 +564,8 @@
       try { CBZ.forex.shock(ccy, shockFrac); } catch (e) {}
     }
     const countryName = rec ? rec.name : countryId;
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("" + countryName.toUpperCase() + " RATE DECREED — " + (clamped * 100).toFixed(1) + "%");
-    if (CBZ.cityFeed) CBZ.cityFeed("" + countryName + "'s central bank rate is DECREED at " + (clamped * 100).toFixed(1) + "% — independence gutted.", "#ff9e6b");
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("" + countryName.toUpperCase() + " RATE DECREED · " + (clamped * 100).toFixed(1) + "%");
+    if (CBZ.cityFeed) CBZ.cityFeed("" + countryName + "'s central bank rate is DECREED at " + (clamped * 100).toFixed(1) + "%, independence gutted.", "#ff9e6b");
     return { ok: true, rate: clamped };
   }
 

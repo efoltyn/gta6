@@ -868,7 +868,7 @@
       const it = items && items[name];
       rows.push({ name, n, it, face: itemFace(name, it), val: (it && it.value) || 0 });
     }
-    if (!rows.length) { invGrid.innerHTML = "<div class='cpEmpty'>Empty — nothing carried.</div>"; return; }
+    if (!rows.length) { invGrid.innerHTML = "<div class='cpEmpty'>Empty, nothing carried.</div>"; return; }
     rows.sort((a, b) => (b.val - a.val) || (b.n - a.n));
     let html = "";
     for (let i = 0; i < rows.length; i++) {

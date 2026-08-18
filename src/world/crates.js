@@ -244,7 +244,7 @@
   // number it added. "+4 cigs" teaches the player that crates are the point;
   // "that'll bite through a padlock" teaches him where to walk next.
   const TOOL_LINE = {
-    "Hacksaw Blade": "Hacksaw blade — that'll bite through a padlock.",
+    "Hacksaw Blade": "Hacksaw blade, that'll bite through a padlock.",
     "Lockpick": "A lockpick. Somebody was planning something.",
   };
   function crackOpen(ct) {
@@ -259,8 +259,8 @@
     if (ct.tool && CBZ.econ && CBZ.econ.addItem) CBZ.econ.addItem(ct.tool, 1);
     if (CBZ.sfx) CBZ.sfx(ct.tool ? "key" : "coin");
     flashChip(ct.tool
-      ? (TOOL_LINE[ct.tool] || (ct.tool + " — pocketed.")) + "  (+" + cigs + " cigs)"
-      : "Cracked the crate — +" + cigs + " cigs", ct.tool ? 2.8 : 2.0);
+      ? (TOOL_LINE[ct.tool] || (ct.tool + " · pocketed.")) + "  (+" + cigs + " cigs)"
+      : "Cracked the crate. +" + cigs + " cigs", ct.tool ? 2.8 : 2.0);
   }
 
   // ---- the tiny prompt chip (one DOM node, hidden when idle; headless-safe) —

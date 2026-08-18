@@ -127,7 +127,7 @@
        running before it means being erased in silence. CBZ.renderer is that
        file's own output, so its presence is proof we are downstream of it. */
     if (!CBZ.renderer) {
-      state.why = "loaded before core/renderer.js — its installFog would erase this patch silently";
+      state.why = "loaded before core/renderer.js, its installFog would erase this patch silently";
       if (window.console) console.error("[groundmask] " + state.why);
       return false;
     }
@@ -135,7 +135,7 @@
     const parsF = THREE.ShaderChunk.fog_pars_fragment, frg = THREE.ShaderChunk.fog_fragment;
     if (typeof parsV !== "string" || typeof vtx !== "string" ||
         typeof parsF !== "string" || typeof frg !== "string") {
-      state.why = "fog chunks missing — unknown THREE build, left alone";
+      state.why = "fog chunks missing, unknown THREE build, left alone";
       return false;
     }
     if (frg.indexOf("uCbzHoles") >= 0) { state.installed = true; return true; }   // idempotent
@@ -219,6 +219,30 @@
     state.filled = out.length;
     return out;
   };
+
+  /* MORE THAN ONE OWNER OF HOLES. The mask began as the shaft file's private
+     arrangement, which was fine while shafts were the only thing that removed
+     ground. Craters, breaches, tunnel mouths and dig sites all remove it too,
+     and a second caller fighting over the same slot array is how a rendering
+     system quietly starts lying. So anyone with holes REGISTERS A PROVIDER, and
+     this file is the single place that ranks them and deals the slots. */
+  const providers = [];
+  let won = [];
+  CBZ.groundMaskProvide = function (fn) { if (typeof fn === "function" && providers.indexOf(fn) < 0) providers.push(fn); };
+  CBZ.groundMaskSlotted = function () { return won; };
+  const gather = [];
+  CBZ.groundMaskSync = function () {
+    gather.length = 0;
+    for (let i = 0; i < providers.length; i++) {
+      let e = null;
+      try { e = providers[i](); } catch (err) { e = null; }
+      if (!e) continue;
+      for (let k = 0; k < e.length; k++) if (e[k]) gather.push(e[k]);
+    }
+    won = CBZ.groundMaskApply(gather);
+    return won;
+  };
+  if (CBZ.onUpdate) CBZ.onUpdate(28.55, function () { if (providers.length) CBZ.groundMaskSync(); });
 
   CBZ.groundMaskSlots = SLOTS;
   // the eye the slots are ranked from — published so the audit measures the

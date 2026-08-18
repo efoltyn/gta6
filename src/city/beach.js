@@ -1103,7 +1103,7 @@
     const cash = 40 + ((Math.random() * 120) | 0) + (L.bag ? 30 : 0);
     CBZ.city.addCash(cash);
     if (CBZ.sfx) CBZ.sfx("coin");
-    CBZ.city.note("Rifled the " + (L.bag ? "beach bag" : "cooler") + " — $" + cash + ". Nobody locks up at the beach.", 2.2);
+    CBZ.city.note("Rifled the " + (L.bag ? "beach bag" : "cooler") + " · $" + cash + ". Nobody locks up at the beach.", 2.2);
     // petty theft: charged only if someone actually sees it (witness chokepoint)
     if (CBZ.cityCrime) CBZ.cityCrime(20, { type: "theft", x: L.x, z: L.z });
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();

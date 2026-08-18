@@ -504,8 +504,8 @@
   }
   function carryDesc(gig) {
     if (gig.kind === "delivery") return "Drive it clean to " + (gig.to || "the address");
-    if (gig.kind === "smuggle") return "Run the load to " + (gig.sellName || "a hot market") + " — stay cool";
-    return "Get the rider to the drop — mind the tip";
+    if (gig.kind === "smuggle") return "Run the load to " + (gig.sellName || "a hot market") + " · stay cool";
+    return "Get the rider to the drop, mind the tip";
   }
 
   // ---------------------------------------------------------
@@ -525,13 +525,13 @@
       if (econ && econ.add) econ.add(gig.drug, gig.qty);
       if (econ && econ.recordBuy) econ.recordBuy(gig.drug, gig.qty);
       if (!g.career) g.career = "dealer";
-      note("Copped " + gig.qty + "× " + gig.drug + " @ $" + gig.unit + ". It's HOT now — move.", 2.6);
+      note("Copped " + gig.qty + "× " + gig.drug + " @ $" + gig.unit + ". It's HOT now, move.", 2.6);
     } else if (gig.kind === "delivery") {
-      note("Order's in the car. Keep it intact — drive smooth.", 2.2);
+      note("Order's in the car. Keep it intact, drive smooth.", 2.2);
     } else {
       // a passenger boards; seat-snap them into the player's car if driving.
       gig.passenger = boardPassenger(gig);
-      note(gig.passenger ? ((gig.passenger.name || "Your fare") + " is in. Tip's on the clock.") : "Fare's aboard — go.", 2.4);
+      note(gig.passenger ? ((gig.passenger.name || "Your fare") + " is in. Tip's on the clock.") : "Fare's aboard, go.", 2.4);
     }
     enterCarry(gig);
   }
@@ -608,7 +608,7 @@
       if (jolt > 0) {
         gig.tip = clamp(gig.tip - clamp(jolt * 0.02, 0.04, 0.4), 0, 1);
         gig.combo = 0;
-        note("The rider grabs the door — tip drops.", 1.2);
+        note("The rider grabs the door, tip drops.", 1.2);
       } else {
         const nm = nearMiss(P);
         if (nm) { gig.combo = Math.min(99, gig.combo + 1); gig.lastNearT = now(); }
@@ -682,7 +682,7 @@
     spend(Math.min(fine, g.cash || 0));
     const P = playerPos();
     if (CBZ.cityCrime) CBZ.cityCrime(80, { x: P.x, z: P.z, type: "dealing", instant: true });
-    note("SEARCHED — they found the load. Lost it + a $" + fine + " fine.", 3);
+    note("SEARCHED, they found the load. Lost it + a $" + fine + " fine.", 3);
     big("BUSTED · load gone");
     failInternal(gig, "you got searched");
   }
@@ -756,7 +756,7 @@
     if (!gig || gig.kind !== "smuggle" || gig.phase !== "carry") { note("Nothing to stash.", 1.4); return false; }
     const P = playerPos();
     gig.stashed = !gig.stashed;
-    if (gig.stashed) { gig.stashX = P.x; gig.stashZ = P.z; note("Load stashed — heat's bleeding. Come back when it's quiet.", 2.6); }
+    if (gig.stashed) { gig.stashX = P.x; gig.stashZ = P.z; note("Load stashed, heat's bleeding. Come back when it's quiet.", 2.6); }
     else note("Picked the load back up.", 1.8);
     hudDirty();
     return gig.stashed;
@@ -771,9 +771,9 @@
       if (g.cityGigStreak === 10 && !g.cityGigInsulated) {
         g.cityGigInsulated = true;
         big("UNLOCKED · Insulated Bag");
-        note("10 clean drops — you earned an INSULATED BAG. Cargo survives rougher rides now.", 3.4);
+        note("10 clean drops, you earned an INSULATED BAG. Cargo survives rougher rides now.", 3.4);
       } else if (g.cityGigStreak % 3 === 0) {
-        note("Clean streak ×" + g.cityGigStreak + " — pay multiplier ×" + streak().toFixed(2), 2.0);
+        note("Clean streak ×" + g.cityGigStreak + " · pay multiplier ×" + streak().toFixed(2), 2.0);
       }
     } else {
       if ((g.cityGigStreak || 0) >= 3) note("Streak broken.", 1.4);
@@ -815,7 +815,7 @@
   }
   // public complete()/fail(): act on the active gig.
   function complete() { const gig = g.cityGig; if (!gig) return; if (gig.phase === "carry") { tryDropoff(gig, gig.dest); } else completeInternal(gig); }
-  function fail(why) { const gig = g.cityGig; if (!gig) return; note("Gig dropped — " + (why || "you bailed") + ".", 2.2); failInternal(gig, why || "abandoned"); }
+  function fail(why) { const gig = g.cityGig; if (!gig) return; note("Gig dropped · " + (why || "you bailed") + ".", 2.2); failInternal(gig, why || "abandoned"); }
 
   // ---------------------------------------------------------
   //  THE TICK — one onUpdate; the accept-UI agent can also call tick(dt)
@@ -837,7 +837,7 @@
     // smuggle: a screaming-hot load with no cops around still costs you if you
     // hit max heat and a manhunt is already on (the world bust takes over).
     if (gig && gig.kind === "smuggle" && gig.phase === "carry" && (g.wanted | 0) >= 5 && gig.heat > 0.9) {
-      note("Too hot — the load's a liability. Stash it or sell NOW.", 2.0);
+      note("Too hot, the load's a liability. Stash it or sell NOW.", 2.0);
     }
   }
 

@@ -256,8 +256,8 @@
     S.began = true;
     S.wasPresident = true;
     bindDetail({ id: rec.id, rec: rec });
-    big("SWORN IN — PRESIDENT OF " + String(rec.name || "THE REPUBLIC").toUpperCase());
-    orders("Chief of Staff", "The Mansion is yours. The Situation Room is behind the steel door off the entrance hall — your seal opens it. Nobody else's does.", 2);
+    big("SWORN IN · PRESIDENT OF " + String(rec.name || "THE REPUBLIC").toUpperCase());
+    orders("Chief of Staff", "The Mansion is yours. The Situation Room is behind the steel door off the entrance hall, your seal opens it. Nobody else's does.", 2);
     // the first WHY is a locked door: walk to it. mission.js owns the HUD
     // line, waypoint and beacon — build none of those.
     const site = mansionSite();
@@ -696,14 +696,14 @@
       gate: function () {
         if (!CBZ.stateWall || !CBZ.stateWall.order) return { ok: false, why: "No construction machinery loaded." };
         const s = CBZ.stateWall.status();
-        if (s.done) return { ok: false, why: "The wall stands — " + s.built + " sections along the Saltlands line." };
+        if (s.done) return { ok: false, why: "The wall stands · " + s.built + " sections along the Saltlands line." };
         if (s.ordered) return { ok: false, why: "Under construction: " + s.built + "/" + s.total + " sections. Crews draw pay daily." };
         return { ok: true };
       },
       run: function (h) {
         const r = CBZ.stateWall.order(h.rec);
         if (!r.ok) return r;
-        big("THE WALL — CONSTRUCTION BEGINS");
+        big("THE WALL · CONSTRUCTION BEGINS");
         news(h.title + " orders a border wall along the Saltlands frontier. " + r.total + " sections, paid daily out of the treasury.");
         return { ok: true, why: "" };
       },
@@ -881,7 +881,7 @@
       },
       options: [{
         id: "pres-door-try", slot: "e",
-        label: function () { return doorOpensFor() ? "Situation Room" : "Situation Room — sealed"; },
+        label: function () { return doorOpensFor() ? "Situation Room" : "Situation Room, sealed"; },
         onSelect: function () {
           if (doorOpensFor()) return; // the door is already sliding; walk in
           orders("Mansion Detail", "The steel door does not move. Two men in suits look through you. This room opens for one person in the country.", 0);
@@ -1211,7 +1211,7 @@
     if (recId) shock(recId, ATTACK_APPROVAL);
     big("ATTACK IN THE SALTLANDS");
     news(realStaged
-      ? "Gunfire at the Dry Gulch market — the Sons of the Dune claim the attack."
+      ? "Gunfire at the Dry Gulch market, the Sons of the Dune claim the attack."
       : "A bomb tears through the Dry Gulch market. The Sons of the Dune claim it; the count is still coming in.");
     paintBoard();
   }
@@ -1300,11 +1300,11 @@
       if (recId) shock(recId, RAID_WIN_APPROVAL);
       big("SAFEHOUSE TAKEN");
       news("Bureau raid in the Saltlands: " + killed + " cell member(s) dead, " + held + " in custody" + (raidCasualties() ? ", " + raidCasualties() + " agent(s) lost." : "."));
-      if (!livingCell().length) { big("THE CELL IS BROKEN"); news("The Sons of the Dune are finished — the board is clear."); }
+      if (!livingCell().length) { big("THE CELL IS BROKEN"); news("The Sons of the Dune are finished, the board is clear."); }
     } else {
       S.raidsLost++;
       if (recId) shock(recId, RAID_LOSS_APPROVAL);
-      news("Bureau raid repelled at the Saltlands safehouse — " + raidCasualties() + " agent(s) down. The cell is emboldened.");
+      news("Bureau raid repelled at the Saltlands safehouse · " + raidCasualties() + " agent(s) down. The cell is emboldened.");
       if (CBZ.cityEvent) { try { CBZ.cityEvent("terror-threat", { panic: 3 }); } catch (e) {} }
     }
     // walk survivors home (their post is done); the dead stay where they fell
@@ -1437,7 +1437,7 @@
         orders("Chief of Staff", "The Capitol has the votes and the auditors have the ledgers. Two days. Bury the scandal or start packing.", 2);
       } else if (S.impeachDay != null && !bad) {
         S.impeachDay = null;
-        news("The impeachment collapses — the scandal went quiet before the vote.");
+        news("The impeachment collapses, the scandal went quiet before the vote.");
       } else if (S.impeachDay != null && d >= S.impeachDay) {
         // CONVICTED. The seat moves through the record's own fields (the
         // same holder/vacuum bookkeeping regimes' restoration writes), the
@@ -1448,7 +1448,7 @@
         rec.office.holder = rec.office.deputy || null;
         rec.office.deputy = null;
         rec.vacuum = d;
-        big("CONVICTED — REMOVED FROM OFFICE");
+        big("CONVICTED · REMOVED FROM OFFICE");
         news("The Senate convicts. The presidency is stripped; the marshals have a warrant.");
         S.arrestArmed = true; S.arrestT = 0; S.arrestWhy = "Corruption in office";
         orders("Marshals Service", "You have " + ARREST_GRACE_SEC + " seconds to surrender at the Mansion. Cross the border and you are a fugitive instead.", 2);

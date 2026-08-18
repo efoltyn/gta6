@@ -1490,7 +1490,7 @@
       if (rec.tres) continue;
       rec.tres = true;
       if (CBZ.cityFlavor) {
-        try { CBZ.cityFlavor((rec.label || "Restricted floor") + " — you are not supposed to be here.", "#ff9c6b"); } catch (e) {}
+        try { CBZ.cityFlavor((rec.label || "Restricted floor") + " · you are not supposed to be here.", "#ff9c6b"); } catch (e) {}
       }
       // cityCrime's signature is crime(amount, opts) (wanted.js:357) — passing
       // the type as the FIRST argument charged nothing and fed a NaN into the
@@ -1550,7 +1550,7 @@
   const SITES = [
     { id: "buildings.js:6554 interiorStaff", migrated: false, note: "office-tower staffing; buildings.js is read-only to this domain. It already routes through CBZ.interiorStaff (the shared seat layer), so the duplication is the CALLER's floor policy (floors 1-3, <=6 bodies), not the mechanism. Folds in when buildings.js's owner calls cityOccupyBuilding(lot,{preset:'corporate'}) instead." },
     { id: "officejobs.js:44 desk claim", migrated: false, note: "claims LIVE peds rather than spawning; not a spawner, counted honestly anyway. Folds in once occupancy owns desks." },
-    { id: "citystaff.js:24 instanced figures", migrated: false, note: "kept DELIBERATELY as a cheap decorative LOD tier (InstancedMesh, 2 draw calls for 180 figures); its headcount now resolves through cityOccupancyAt so there is ONE answer, but the figures themselves are still a parallel implementation — counted honestly as legacy." },
+    { id: "citystaff.js:24 instanced figures", migrated: false, note: "kept DELIBERATELY as a cheap decorative LOD tier (InstancedMesh, 2 draw calls for 180 figures); its headcount now resolves through cityOccupancyAt so there is ONE answer, but the figures themselves are still a parallel implementation, counted honestly as legacy." },
     // ONE row per site in the 2026-07-26 census, so the table totals the
     // baseline exactly (9). gangs.js's crew spawner and its boss block were a
     // single census row and stay a single row here.

@@ -287,7 +287,7 @@
   // ---- AGENT: a quick pre-approval read (consumes the bank loan engine via
   //      Zillow's financing quote on the priciest home you could finance). ----
   function talkToAgent() {
-    if (!CBZ.cityRealtyListings) { note("The agent's between clients — try the wall.", 1.8); return; }
+    if (!CBZ.cityRealtyListings) { note("The agent's between clients, try the wall.", 1.8); return; }
     const cash = (g.cash || 0) + (g.cityBank || 0);
     let inv = [];
     try { inv = CBZ.cityRealtyListings({}) || []; } catch (e) { inv = []; }
@@ -305,13 +305,13 @@
     if (q) {
       const bankTail = (q.viaBank && q.payment > 0) ? ", about " + fmt$(Math.round(q.payment)) + "/cycle" : "";
       const ratePct = (Math.round((q.rate || 0.06) * 1000) / 10) + "%";
-      msg = "Agent: pre-approved. " + ratePct + " on a mortgage — "
+      msg = "Agent: pre-approved. " + ratePct + " on a mortgage · "
         + "as little as " + fmt$(q.down) + " down" + bankTail + " on " + shortName(qName) + ". "
         + (topCash ? "You could pay cash for the " + shortName(topCash.name) + " today." : "Read the wall and pick a place.");
     } else if (topCash) {
-      msg = "Agent: \"" + fmt$(cash) + " on hand — you could buy the " + shortName(topCash.name) + " outright. Have a look at the wall.\"";
+      msg = "Agent: \"" + fmt$(cash) + " on hand, you could buy the " + shortName(topCash.name) + " outright. Have a look at the wall.\"";
     } else {
-      msg = "Agent: \"Save a deposit and we'll talk financing — 20% down opens most doors. The listings are on the wall.\"";
+      msg = "Agent: \"Save a deposit and we'll talk financing. 20% down opens most doors. The listings are on the wall.\"";
     }
     note(msg, 3.4);
   }
@@ -376,7 +376,7 @@
     const slice = S.rows.slice(S.page * PAGE, S.page * PAGE + PAGE);
 
     let html = "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:4px'>"
-      + "<div style='font-size:19px;font-weight:700'>Keystone Realty — Listings</div>"
+      + "<div style='font-size:19px;font-weight:700'>Keystone Realty · Listings</div>"
       + "<button data-ract='close' style='background:none;border:0;color:#9fb0c6;font-size:18px;cursor:pointer'>✕</button></div>";
     html += "<div style='font-size:12px;color:#8a93a3;margin-bottom:9px'>Cash " + fmt$(cash) + " · Bank " + fmt$(bank)
       + (g.cityHome ? " · Home: " + shortName(g.cityHome.name) : "") + "</div>";
@@ -391,7 +391,7 @@
         + "<div style='display:flex;justify-content:space-between;gap:10px'>"
         + "<span style='font-size:14px;font-weight:600'>" + (rec.flagship ? "" : "") + esc(rec.name) + "</span>"
         + "<span style='font-size:14px;color:#7df0c4'>" + fmt$(rec.value) + "</span></div>"
-        + "<div style='font-size:11px;color:#8a93a3;margin:1px 0 4px'>" + esc(tags) + (rec.blurb ? " — " + esc(trim(rec.blurb)) : "") + "</div>"
+        + "<div style='font-size:11px;color:#8a93a3;margin:1px 0 4px'>" + esc(tags) + (rec.blurb ? " · " + esc(trim(rec.blurb)) : "") + "</div>"
         + "<div style='display:flex;flex-wrap:wrap;gap:6px;align-items:center'>";
       if (rec.owned) {
         html += "<span style='font-size:12px;color:#9be8b4'>" + (rec.isHome ? "Your home" : "Owned") + "</span>";
@@ -439,8 +439,8 @@
     P.pos.set(door.x, 0, door.z); P.vy = 0; P.grounded = true;
     if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.position.copy(P.pos);
     if (CBZ.fullMap && CBZ.fullMap.setWaypoint) CBZ.fullMap.setWaypoint(door.x, door.z, rec.name);
-    note((rec.owned ? "Home — " : "Touring ") + shortName(rec.name)
-      + (rec.owned ? " (press H at the door for the safehouse menu)." : " — step through the door to look around."), 3.0);
+    note((rec.owned ? "Home · " : "Touring ") + shortName(rec.name)
+      + (rec.owned ? " (press H at the door for the safehouse menu)." : ". Step through the door to look around."), 3.0);
     if (rec.flagship && CBZ.city && CBZ.city.big) CBZ.city.big("" + rec.name);
   }
   function actBtn(act, idx, label, bg) {
@@ -463,7 +463,7 @@
       return;
     }
     if (act === "buy") {
-      if (!(CBZ.cityZillow && CBZ.cityZillow.buyByLot)) { note("Sales desk is offline — try the phone [Z].", 2); return; }
+      if (!(CBZ.cityZillow && CBZ.cityZillow.buyByLot)) { note("Sales desk is offline, try the phone [Z].", 2); return; }
       const before = !!rec.owned;
       const ok = CBZ.cityZillow.buyByLot(rec.lot);   // charges, persists, registers, sets home
       if (ok && CBZ.cityZillow.setHomeByLot && rec.listedHome) CBZ.cityZillow.setHomeByLot(rec.lot);

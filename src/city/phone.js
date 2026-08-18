@@ -158,14 +158,14 @@
       const frac = hi > lo ? (heat - lo) / (hi - lo) : 1;
       inner += bar(frac, RED, "Heat to " + (w + 1) + "★: " + Math.round(heat).toLocaleString() + " / " + hi.toLocaleString());
     } else {
-      inner += "<div style='font-size:11px;color:" + RED + ";margin-top:4px'>MAXED OUT — the whole city is hunting you.</div>";
+      inner += "<div style='font-size:11px;color:" + RED + ";margin-top:4px'>MAXED OUT, the whole city is hunting you.</div>";
     }
     // flavor answering "why is 5★ hard?" (BUG FIX: the old "helicopter circling"
     // line was assigned first and then ALWAYS overwritten by this if/else —
     // a dead branch. Folded into the 4★ arm so the chopper actually shows.)
     let flavor = "";
-    if (w >= 5) flavor = "AIRSTRIKE inbound — 5★ takes relentless carnage to hold.";
-    else if (w === 4) flavor = "Helicopter circling overhead — one more spree and they call in an airstrike (5★).";
+    if (w >= 5) flavor = "AIRSTRIKE inbound. 5★ takes relentless carnage to hold.";
+    else if (w === 4) flavor = "Helicopter circling overhead, one more spree and they call in an airstrike (5★).";
     if (flavor) inner += "<div style='font-size:11px;color:" + DIM + ";margin-top:4px'>" + esc(flavor) + "</div>";
     return card("WANTED", inner);
   }
@@ -395,7 +395,7 @@
     if (!rowsData || !rowsData.length) {
       return card("CURRENCY EXCHANGE", "<div style='font-size:13px;color:" + DIM + "'>No exchange data available.</div>");
     }
-    let inner = "<div style='font-size:11px;color:" + DIM + ";margin-bottom:4px'>Quoted vs the Liberty Dollar — trade at an airport FX counter or the exchange desk.</div>";
+    let inner = "<div style='font-size:11px;color:" + DIM + ";margin-bottom:4px'>Quoted vs the Liberty Dollar, trade at an airport FX counter or the exchange desk.</div>";
     rowsData.forEach(function (r) {
       const col = r.trend === "up" ? GOLD : (r.trend === "down" ? GREEN : DIM);
       const arrow = r.trend === "up" ? "▲" : (r.trend === "down" ? "▼" : "–");
@@ -539,7 +539,7 @@
   }
   function bondsHtml(rowsData, holdings) {
     if (!rowsData || !rowsData.length) {
-      let inner = "<div style='font-size:13px;color:" + DIM + "'>No sovereign bonds on offer right now — auctions open when a country's treasury runs a deficit.</div>";
+      let inner = "<div style='font-size:13px;color:" + DIM + "'>No sovereign bonds on offer right now, auctions open when a country's treasury runs a deficit.</div>";
       return card("SOVEREIGN BONDS", inner);
     }
     let inner = "";
@@ -646,7 +646,7 @@
       inner += row(label, need + " lb", GOLD);
       inner += short
         ? "<div style='font-size:11px;color:" + RED + ";margin:2px 0 4px'>Short " + (need - outLb) +
-          " lb — set " + short + " more brick" + (short === 1 ? "" : "s") + " on it.</div>"
+          " lb, set " + short + " more brick" + (short === 1 ? "" : "s") + " on it.</div>"
         : "<div style='font-size:11px;color:" + GREEN + ";margin:2px 0 4px'>Enough on it. Send it.</div>";
     }
 
@@ -663,11 +663,11 @@
     const s = (typeof CBZ.cityAirServices === "function") ? CBZ.cityAirServices() : null;
     let inner = "";
     if (s && s.riding) {
-      inner += "<div style='font-size:12px;color:" + GREEN + ";margin-bottom:4px'>In the air — enjoy the ride.</div>";
+      inner += "<div style='font-size:12px;color:" + GREEN + ";margin-bottom:4px'>In the air, enjoy the ride.</div>";
     }
     // CHOPPER — comes free with the penthouse
     if (!s || !s.helipad) {
-      inner += svcBtn("", "Call Chopper", false, "Locked — own the APEX PENTHOUSE; a chopper comes parked on its rooftop pad.");
+      inner += svcBtn("", "Call Chopper", false, "Locked, own the APEX PENTHOUSE; a chopper comes parked on its rooftop pad.");
     } else if (s.chopperActive) {
       inner += svcBtn("", "Chopper inbound…", false, "Walk under it to board. It flies you to your waypoint (or home).");
     } else if (s.chopperCD > 0) {
@@ -683,15 +683,15 @@
     const hangarProp = (CBZ.cityStorage && CBZ.cityStorage.PROPERTIES) ? CBZ.cityStorage.PROPERTIES.find(function (p) { return p.id === "hangar"; }) : null;
     if (!s || !s.hangar) {
       if (ownsAirportHangar) {
-        inner += svcBtn("", "Private Hangar — owned", false, "Empty hangar at the airport apron. STEAL the F-22 from the military base, then land it inside to keep it.");
+        inner += svcBtn("", "Private Hangar, owned", false, "Empty hangar at the airport apron. STEAL the F-22 from the military base, then land it inside to keep it.");
       } else if (CBZ.cityStorage && CBZ.cityStorage.buy) {
-        inner += svcBtn("buyhangar", "Buy Private Hangar — " + money(hangarProp ? hangarProp.cost : 1200000), true, "An airport apron hangar — the home a stolen F-22 needs. The penthouse also offers a deck hangar.");
+        inner += svcBtn("buyhangar", "Buy Private Hangar · " + money(hangarProp ? hangarProp.cost : 1200000), true, "An airport apron hangar, the home a stolen F-22 needs. The penthouse also offers a deck hangar.");
       }
     }
     // AIRSTRIKE — needs a based F-22 (own a hangar, then steal & land the jet)
     if (!s || !s.hangar) {
       inner += svcBtn("", "Call Airstrike", false,
-        "Locked — buy a private or penthouse hangar, steal the F-22, and land it inside to base it.");
+        "Locked, buy a private or penthouse hangar, steal the F-22, and land it inside to base it.");
     } else if (s.strikeCD > 0) {
       inner += svcBtn("", "Jet rearming", false, "Ready in " + s.strikeCD + "s.");
     } else {
@@ -738,9 +738,9 @@
   }
   function gigStageHint(a) {
     const s = gigStage(a).toLowerCase();
-    if (s.indexOf("pickup") >= 0 || s.indexOf("hail") >= 0 || s.indexOf("offered") >= 0) return "Head to the pickup — the spot's on your map.";
-    if (s.indexOf("carry") >= 0 || s.indexOf("ride") >= 0 || s.indexOf("transit") >= 0 || s.indexOf("enroute") >= 0) return "Cargo aboard — get to the drop-off.";
-    if (s.indexOf("drop") >= 0 || s.indexOf("deliver") >= 0) return "At the drop — hand it over.";
+    if (s.indexOf("pickup") >= 0 || s.indexOf("hail") >= 0 || s.indexOf("offered") >= 0) return "Head to the pickup, the spot's on your map.";
+    if (s.indexOf("carry") >= 0 || s.indexOf("ride") >= 0 || s.indexOf("transit") >= 0 || s.indexOf("enroute") >= 0) return "Cargo aboard, get to the drop-off.";
+    if (s.indexOf("drop") >= 0 || s.indexOf("deliver") >= 0) return "At the drop, hand it over.";
     return "Job in progress.";
   }
   // cache the last batch of offers we showed, keyed by index, so a click can
@@ -762,7 +762,7 @@
       const title = (line ? line.label : "" + k) + (active.pay ? " · " + money(active.pay) : "");
       inner += "<div style='font-size:13px;color:" + GREEN + ";font-weight:700;margin-bottom:2px'>" + esc(title) + "</div>";
       inner += "<div style='font-size:11px;color:" + DIM + ";margin-bottom:6px'>" + esc(gigStageHint(active)) + "</div>";
-      if (typeof G.cancel === "function") inner += gigBtn("cancel", k, "Drop this gig", true, "Forfeit the run — no pay.");
+      if (typeof G.cancel === "function") inner += gigBtn("cancel", k, "Drop this gig", true, "Forfeit the run, no pay.");
       return card("GIG WORK", inner);
     }
     // 2) FRESH OFFERS — if the player has fetched offers for a line, list them.
@@ -777,7 +777,7 @@
       return card("GIG WORK", inner);
     }
     // 3) DEFAULT — the menu of gig lines to fetch work for.
-    inner += "<div style='font-size:11px;color:" + DIM + ";margin-bottom:4px'>Clock in — pick a line of work:</div>";
+    inner += "<div style='font-size:11px;color:" + DIM + ";margin-bottom:4px'>Clock in, pick a line of work:</div>";
     let lines = GIG_LINES;
     if (typeof G.lines === "function") {
       try {

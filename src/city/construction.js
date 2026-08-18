@@ -551,7 +551,7 @@
     var pool = poolFor(name);
     var poolIndex = pool.count;
     var ok = pool.add(tgt.x, tgt.z, tgt.rot, 1);
-    if (!ok) { if (CBZ.city && CBZ.city.note) CBZ.city.note('Piece limit reached — free some pieces first.', 1.8); return; }
+    if (!ok) { if (CBZ.city && CBZ.city.note) CBZ.city.note('Piece limit reached, free some pieces first.', 1.8); return; }
 
     CBZ.placement.reserve(tgt.rect);           // dodge future world/scatter placement
     var cRect = cReserve(tgt.rect);            // dodge/enable future OWN-piece removal
@@ -636,10 +636,10 @@
     var P = CBZ.player; if (!P || !P.pos) return;
     var lot = lotNear(P.pos.x, P.pos.z, 3.0);
     if (!lot) { if (CBZ.city && CBZ.city.note) CBZ.city.note("No buildable parcel at your location.", 1.6, { from: "Maps", app: "system" }); return; }
-    if (!CBZ.cityOwnsLot || !CBZ.cityOwnsLot(lot)) { if (CBZ.city && CBZ.city.note) CBZ.city.note("That parcel isn't on your deeds — put an offer in first.", 2.2, { from: "Zillow" }); return; }
+    if (!CBZ.cityOwnsLot || !CBZ.cityOwnsLot(lot)) { if (CBZ.city && CBZ.city.note) CBZ.city.note("That parcel isn't on your deeds, put an offer in first.", 2.2, { from: "Zillow" }); return; }
     T.active = true; T.lot = lot; T.basis = lotBasis(lot);
     ensureGhost();
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("Build mode — [1-5] piece, LMB place, Shift+LMB remove, [N] exit.", 2.6);
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("Build mode. [1-5] piece, LMB place, Shift+LMB remove, [N] exit.", 2.6);
   }
   function exitBuild() {
     T.active = false; T.lot = null; T.basis = null; T.target = null;
@@ -973,7 +973,7 @@
     const S = st();
     if (S.ordered) return { ok: false, why: "Already ordered." };
     const P = plan();
-    if (!P || !P.segs.length) return { ok: false, why: "No frontier to build on — the Saltlands never registered." };
+    if (!P || !P.segs.length) return { ok: false, why: "No frontier to build on, the Saltlands never registered." };
     if (!rec || !rec.id) return { ok: false, why: "No treasury to pay the crews from." };
     if ((rec.treasury || 0) < SEG_COST * SEGS_PER_DAY) return { ok: false, why: "The treasury cannot cover even the first day of crews." };
     S.ordered = true; S.seatId = rec.id; S.built = 0; S.breached = {}; S.spentTotal = 0;
@@ -1003,7 +1003,7 @@
       if ((rec.treasury || 0) < SEG_COST) {
         if (S.paidStallDay !== day()) {
           S.paidStallDay = day();
-          news("Wall construction stalls — the treasury cannot cover the crews.");
+          news("Wall construction stalls, the treasury cannot cover the crews.");
         }
         break;
       }
@@ -1014,7 +1014,7 @@
     if (S.built >= P.segs.length && !S.doneAnnounced) {
       S.doneAnnounced = true;
       if (CBZ.city && CBZ.city.big) CBZ.city.big("THE WALL STANDS");
-      news("The Saltlands border wall is complete — " + P.segs.length + " sections, " + P.gaps.length + " manned crossing(s).");
+      news("The Saltlands border wall is complete · " + P.segs.length + " sections, " + P.gaps.length + " manned crossing(s).");
     }
   }
   // re-man a post whose officers died — next day, small treasury cost

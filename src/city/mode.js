@@ -505,7 +505,7 @@
   CBZ.registerMode("city", {
     id: "city",
     label: "City",
-    objective: "Make money any way you can — hustle, steal, deal, or go legit. Obey the lights or run them. Cops escalate to 5 stars; get cuffed and you're off to jail.",
+    objective: "Make money any way you can, hustle, steal, deal, or go legit. Obey the lights or run them. Cops escalate to 5 stars; get cuffed and you're off to jail.",
     build,
     reset(game) {
       build();

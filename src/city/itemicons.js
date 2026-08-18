@@ -1343,7 +1343,7 @@
     // read is never lost.
     if (row.pelt && CBZ.peltWearable && CBZ.peltWearable(name)) {
       return (CBZ.peltWorn && CBZ.peltWorn() === name)
-        ? { id: "wear", label: "Take off", hint: "unhood — sells " + fmt$(pawnPrice(name)) + " at a fence" }
+        ? { id: "wear", label: "Take off", hint: "unhood · sells " + fmt$(pawnPrice(name)) + " at a fence" }
         : { id: "wear", label: "Wear", hint: "hood + mantle · sells " + fmt$(pawnPrice(name)) + " at a fence" };
     }
     if (row.value > 0) {
@@ -1433,13 +1433,13 @@
         if (CBZ.cityInventory && CBZ.cityInventory.placeChest) return !!CBZ.cityInventory.placeChest({});
         return false;
       case "feed":
-        note("Offer it to an animal — walk up and use it there.");
+        note("Offer it to an animal, walk up and use it there.");
         return false;
       case "deal":
-        note("Sell " + name + " to a dealer — not for using.", 1.4);
+        note("Sell " + name + " to a dealer, not for using.", 1.4);
         return false;
       case "sell":
-        note(name + " fences for " + fmt$(pawnPrice(name)) + " — take it to a pawn shop.", 2);
+        note(name + " fences for " + fmt$(pawnPrice(name)) + " · take it to a pawn shop.", 2);
         return false;
       default: return false;
     }

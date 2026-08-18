@@ -2411,7 +2411,25 @@
      So the flag STAYS SET, and a material this instance already owns is
      repainted IN PLACE instead of cloned again — a second pass costs nothing
      and cannot leak. `crashdeform.js:317` already reads the pair as an OR, and
-     modshop's respray keys off `_playerCarOwned`, so neither changes meaning. */
+     modshop's respray keys off `_playerCarOwned`, so neither changes meaning.
+
+     AND `STAYS SET` HAS TO BE WRITTEN DOWN, NOT ASSUMED. The block above was
+     already correct about WHY the flag must survive — and it still did not,
+     because `THREE.Material.clone()` is `new this.constructor().copy(this)`
+     and `Material.copy()` only copies the properties three.js itself knows
+     about. Every custom tag we hang on a material — `_bodyPaint`, `_shared`,
+     `_playerCarOwned` — is dropped on the floor by the clone. The two lines
+     below that set `_shared`/`_playerCarOwned` explicitly are why THOSE two
+     survived; `_bodyPaint` was left to a comment, so it did not, and the exact
+     failure this file predicted happened anyway:
+
+       CBZ.cityRecolorCarBody(car.group, 0x00ff00) on a live race car turned
+       ZERO meshes green, and CBZ.carPaintAudit() counted 0 body-paint
+       materials on all 391 cars in the world.
+
+     So the tag is re-applied on the clone, in code. A car built through this
+     path is paintable for the rest of its life, which is what makes the race
+     livery, the parked-car repaint and the respray land at all. */
   function recolorBody(root, color) {
     if (root && root.userData && root.userData.marineLivery) return;
     const c = new THREE.Color(color);
@@ -2430,8 +2448,10 @@
         nm.color = c.clone();
         if (nm.emissive) nm.emissive = c.clone().multiplyScalar(0.16);
         nm._shared = false; nm._playerCarOwned = true;
-        // _bodyPaint deliberately LEFT TRUE — see the block comment above.
-        if (CFG.CAR_PAINT_HANDLE_V2 === false) nm._bodyPaint = false;
+        // RE-APPLIED, NOT INHERITED: Material.clone() does not carry custom
+        // props (see the block comment). Without this line the car becomes
+        // unpaintable the instant it is first painted.
+        nm._bodyPaint = CFG.CAR_PAINT_HANDLE_V2 !== false;
         swapped.set(m.id, nm);
       }
       o.material = nm;
@@ -2773,7 +2793,7 @@
     // setUnifiedVisual refuses a freight body outright (see its note); say so
     // rather than silently doing nothing when somebody presses the key.
     if (active.group && active.group.userData && active.group.userData.holdSpec) {
-      if (CBZ.city && CBZ.city.note) CBZ.city.note("The load space is part of this body — no restyle.", 1.4);
+      if (CBZ.city && CBZ.city.note) CBZ.city.note("The load space is part of this body, no restyle.", 1.4);
       return;
     }
     const at = Math.max(0, STYLE_ORDER.indexOf(active.detailStyle));

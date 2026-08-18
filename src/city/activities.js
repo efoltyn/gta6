@@ -51,7 +51,7 @@
     { id: "disaster", cat: "Emergency", label: "City Disaster Event", cost: 0, time: 4, reward: 260, desc: "Fire, flood, panic, evacuation, destruction, repairs, and emergency politics." },
     { id: "survival-island", cat: "Emergency", label: "Deploy To Disaster Island", cost: 0, time: 0, reward: 0, desc: "Launch the disaster survival activity while writing deployment consequences to City." },
 
-    { id: "hitman", cat: "Crime", label: "Hitman Contract", cost: 0, time: 0, reward: 900, desc: "Take a name off the network. The mark is a person the city already runs — a job, a shift, a habit. Quiet pays more than loud." },
+    { id: "hitman", cat: "Crime", label: "Hitman Contract", cost: 0, time: 0, reward: 900, desc: "Take a name off the network. The mark is a person the city already runs, a job, a shift, a habit. Quiet pays more than loud." },
     { id: "official-contract", cat: "Crime", label: "Protected Contract", cost: 0, time: 0, reward: 15000, desc: "The upper wall: protected principals and sitting officeholders. The network only hands these to a proven reputation." },
     { id: "jail", cat: "Crime", label: "Turn Yourself In", cost: 0, time: 0, reward: 0, desc: "Route into the jail/prison activity. Your city ledger keeps the arrest history." },
   ];
@@ -414,7 +414,7 @@
     const m = modalEl();
     modalBtns = {};
     if (casino.game === "menu") {
-      m.innerHTML = head("Diamond-Style Casino", "Pick a game. The house always has an edge — bet smart.") +
+      m.innerHTML = head("Diamond-Style Casino", "Pick a game. The house always has an edge, bet smart.") +
         "<div style='display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px;margin:6px 0 12px'>" +
         casinoTile("Blackjack", "blackjack", "Dealer stands on 17. BJ pays 3:2. ~99% RTP with good play.") +
         casinoTile("Roulette", "roulette", "Single-zero wheel. Straight 35:1, even-money ~48.6%.") +
@@ -450,7 +450,7 @@
     // in the house's stock — tiny per-dollar effect, but a real one.
     if (profit > 25000 && CBZ.stocks && typeof CBZ.stocks.shock === "function") {
       CBZ.stocks.shock("RYL", -profit / 2000000);
-      if (CBZ.cityFeed) CBZ.cityFeed("Casino floor jackpot rattles Royale Casino Corp — RYL dips", "#ffd166");
+      if (CBZ.cityFeed) CBZ.cityFeed("Casino floor jackpot rattles Royale Casino Corp. RYL dips", "#ffd166");
     }
     CBZ.cityEvent && CBZ.cityEvent("casino", { profit, faction: "casino", factionDelta: profit > 0 ? -1 : 1 }, { silent: true });
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
@@ -505,7 +505,7 @@
       "<div style='font-size:12px;color:#8a93a3'>DEALER " + (s.done ? "(" + handTotal(s.d) + ")" : "") + "</div>" +
       "<div style='font-size:24px;font-weight:700;letter-spacing:2px'>" + dealerCards + "</div>" +
       "<div style='height:8px'></div>" +
-      "<div style='font-size:12px;color:#8a93a3'>YOU (" + pt + ")" + (blackjackP ? " — BLACKJACK!" : "") + "</div>" +
+      "<div style='font-size:12px;color:#8a93a3'>YOU (" + pt + ")" + (blackjackP ? " · BLACKJACK!" : "") + "</div>" +
       "<div style='font-size:24px;font-weight:700;letter-spacing:2px'>" + s.p.map(cardName).join(" ") + "</div></div>";
     if (!s.done) {
       // auto-resolve naturals
@@ -547,7 +547,7 @@
     if (pt > 21) { net = -s.bet; s.result = "Bust."; }
     else if (bjP && !bjD) { net = Math.round(s.bet * 1.5); s.result = "Blackjack! Pays 3:2."; }
     else if (bjD && !bjP) { net = -s.bet; s.result = "Dealer blackjack."; }
-    else { if (dt > 21 || pt > dt) { net = s.bet; s.result = dt > 21 ? "Dealer busts — you win." : "You win."; } else if (pt < dt) { net = -s.bet; s.result = "Dealer wins."; } else { net = 0; s.result = "Push."; } }
+    else { if (dt > 21 || pt > dt) { net = s.bet; s.result = dt > 21 ? "Dealer busts, you win." : "You win."; } else if (pt < dt) { net = -s.bet; s.result = "Dealer wins."; } else { net = 0; s.result = "Push."; } }
     s.net = net;
     // stake already removed; return stake+win on a win, return stake on push
     if (net > 0) payout(s.bet + net);
@@ -670,7 +670,7 @@
     modalBtns.betmin = function () { casino.bet = 25; reRenderCasinoGame(); };
     modalBtns.betmax = function () { casino.bet = Math.max(25, Math.min(stakeCap(), Math.floor(bankroll() / 25) * 25)) || 25; reRenderCasinoGame(); };
     modalBtns.hiroll = function () {
-      if (!casino.hr && !highRoller()) { note("Members only — VIP tables need Baller wealth or max DRIP.", 2.4); return; }
+      if (!casino.hr && !highRoller()) { note("Members only. VIP tables need Baller wealth or max DRIP.", 2.4); return; }
       casino.hr = !casino.hr;
       casino.bet = Math.min(stakeCap(), casino.bet);
       reRenderCasinoGame();
@@ -785,7 +785,7 @@
         "<div style='height:9px;background:#222a33;border-radius:6px;overflow:hidden'><div style='height:100%;width:" + Math.round(val) + "%;background:" + col + "'></div></div></div>";
     }
     const moArrow = f.momentum > 0.4 ? "▲ you" : (f.momentum < -0.4 ? "▼ " + f.oppName : "even");
-    m.innerHTML = head((f.mma ? "MMA — Round " + f.round + "/" + f.rounds : "Boxing — Round " + f.round + "/" + f.rounds), "Momentum: " + moArrow) +
+    m.innerHTML = head((f.mma ? "MMA. Round " + f.round + "/" + f.rounds : "Boxing. Round " + f.round + "/" + f.rounds), "Momentum: " + moArrow) +
       "<div style='display:flex;gap:14px'>" +
       "<div style='flex:1'>" + bar("YOU", f.me.hp, "#4f8bff") + bar("stamina", f.me.stam, "#7ed957") + "</div>" +
       "<div style='flex:1'>" + bar(f.oppName, f.opp.hp, "#ff6b6b") + bar("stamina", f.opp.stam, "#ffb347") + "</div></div>" +
@@ -981,13 +981,13 @@
     const totalCost = s.entry + s.bet;
     const can = bankroll() >= totalCost;
     const winChance = Math.round(clamp(0.34 + s.driverRep * 0.004 + (s.driving ? 0.12 : 0), 0.15, 0.78) * 100);
-    m.innerHTML = head("Illegal Street Race", s.driving ? "You're behind the wheel — this is a LIVE checkpoint race." : "On foot — this resolves as a simulated race.") +
+    m.innerHTML = head("Illegal Street Race", s.driving ? "You're behind the wheel, this is a LIVE checkpoint race." : "On foot, this resolves as a simulated race.") +
       "<div style='font-size:12px;color:#9fb0c6;margin-bottom:8px'>Entry $" + s.entry + " · " + s.rivalCount + " rivals · est. win chance " + winChance + "%" + (s.driving ? "" : " (get in a car for the drivable version)") + "</div>" +
       "<div style='display:flex;gap:6px;align-items:center;margin:6px 0 10px'>" +
       "<span style='font-size:12px;color:#8a93a3'>Side bet on yourself</span>" + btn("-50", "down") +
       "<div style='min-width:64px;text-align:center;font-weight:700;font-size:16px;color:#ffd166'>$" + s.bet + "</div>" + btn("+50", "up") + "</div>" +
       "<div style='font-size:12px;color:#cdd6e3;margin-bottom:10px'>Win the race: prize $" + s.def.reward + (s.bet ? " + bet pays $" + Math.round(s.bet * 2.2) : "") + ". Lose: forfeit entry" + (s.bet ? " + side bet" : "") + ".</div>" +
-      "<div style='display:flex;gap:8px'>" + btn(s.driving ? "GREEN LIGHT — drive!" : "Run the race", "go", true, !can) + btn("Back out", "leave") + "</div>" +
+      "<div style='display:flex;gap:8px'>" + btn(s.driving ? "GREEN LIGHT, drive!" : "Run the race", "go", true, !can) + btn("Back out", "leave") + "</div>" +
       (can ? "" : "<div style='color:#ff6b6b;font-size:12px;margin-top:8px'>Need $" + totalCost + " for entry + bet.</div>");
     modalBtns.up = function () { s.bet = Math.min(5000, s.bet + 50); renderRaceMenu(); };
     modalBtns.down = function () { s.bet = Math.max(0, s.bet - 50); renderRaceMenu(); };
@@ -1071,7 +1071,7 @@
 
   function startLiveRace(s) {
     const course = buildRaceCourse();
-    if (!course) { note("No room for a course — running it simulated.", 2); simulateRace(s); return; }
+    if (!course) { note("No room for a course, running it simulated.", 2); simulateRace(s); return; }
     closeModal();
     clearRaceBeacons();
     // REAL rivals when the driver brain is loaded; virtual progress ghosts as
@@ -1115,7 +1115,7 @@
     }
     // place first two beacons
     refreshBeacons();
-    note("RACE ON — hit the gold checkpoints! " + course.length + " to go." + (rivalDrivers ? " " + rivalDrivers.length + " rivals on the road." : ""), 2.6);
+    note("RACE ON, hit the gold checkpoints! " + course.length + " to go." + (rivalDrivers ? " " + rivalDrivers.length + " rivals on the road." : ""), 2.6);
     big("3.. 2.. 1.. GO!");
   }
   function refreshBeacons() {
@@ -1148,7 +1148,7 @@
         });
         CBZ.raceHud.hide();
         CBZ.raceHud.results(rows, {
-          title: won ? "STREET RACE — YOU WIN" : "STREET RACE — BEATEN",
+          title: won ? "STREET RACE · YOU WIN" : "STREET RACE · BEATEN",
           sub: r.course.length + " checkpoints · illegal",
           foot: won ? "Prize $" + s.def.reward + (s.bet ? " + side bet $" + Math.round(s.bet * 2.2) : "") + " · Esc closes" : "Entry forfeited · Esc closes",
         });
@@ -1229,7 +1229,7 @@
       r.t += dt;
       // abort if player leaves the car
       if (!CBZ.player.driving) {
-        note("You left the car — race forfeited.", 2.2);
+        note("You left the car, race forfeited.", 2.2);
         endLiveRace(false, false);
       } else {
         // checkpoint hit test
@@ -1286,7 +1286,7 @@
           }
         }
         // time limit
-        if (raceRun && r.t > r.limit) { note("Too slow — race over.", 2.2); endLiveRace(false, false); }
+        if (raceRun && r.t > r.limit) { note("Too slow, race over.", 2.2); endLiveRace(false, false); }
       }
     }
 

@@ -430,7 +430,7 @@
   CBZ.registerMode("survival", {
     id: "survival",
     label: "Disaster Survival",
-    objective: "Outlast every disaster. Read the sky and run for the RIGHT kind of shelter — high ground when the sea comes, indoors when the air kills, open ground when the buildings fall. The disasters never stop. Be the last one standing.",
+    objective: "Outlast every disaster. Read the sky and run for the RIGHT kind of shelter, high ground when the sea comes, indoors when the air kills, open ground when the buildings fall. The disasters never stop. Be the last one standing.",
     build,
     reset(game) {
       build();

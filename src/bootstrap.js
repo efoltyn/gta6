@@ -140,7 +140,7 @@ export function adoptScene() {
   const CBZ = _cbz || window.CBZ;
   const THREE = _three || window.THREE;
   if (!CBZ) {
-    throw new Error("[bootstrap] adoptScene() called before CBZ is ready — wrap the call in onCBZReady()/registerModule()");
+    throw new Error("[bootstrap] adoptScene() called before CBZ is ready, wrap the call in onCBZReady()/registerModule()");
   }
   return {
     scene: CBZ.scene,

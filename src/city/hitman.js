@@ -305,7 +305,7 @@
       } catch (e) {}
     }
     note(quiet
-      ? "Clean work. Fee plus the quiet margin" + (st && st._dressed ? " — the uniform walked you out." : ".")
+      ? "Clean work. Fee plus the quiet margin" + (st && st._dressed ? " · the uniform walked you out." : ".")
       : "It made the scanner. The fee stands; the quiet margin does not.", 3.2);
     paintBoard(true);
   }
@@ -354,9 +354,9 @@
       title: "CONTRACT: " + con.name,
       targetName: con.name,
       // THE LEGS WERE BUILT AND THEN THROWN AWAY. This array is filled in
-      // above — the kill leg (goal "kill" bound to the real ped, or the
-      // officeholder's death broadcast) and escapeStage() — and the def
-      // never carried it, so core/mission.js fell through to its single-leg
+      // above (the kill leg, goal "kill" bound to the real ped or the
+      // officeholder's death broadcast, and escapeStage) and the def never
+      // carried it, so core/mission.js fell through to its single-leg
       // shorthand: ONE stage, goal "manual", its text the briefing. That is
       // why a contract showed the briefing as its own objective, why the
       // kill never advanced anything, and why settle()'s quiet margin could
@@ -765,10 +765,10 @@
       options: [{
         id: "hitman-board-read", slot: "e",
         label: function () {
-          if (campaignOwns()) return "The wall — the Director's list";
+          if (campaignOwns()) return "The wall, the Director's list";
           const m = liveHit();
-          if (m) return "The wall — working: " + (m.def.targetName || "a name");
-          return "The wall — take the next name";
+          if (m) return "The wall, working: " + (m.def.targetName || "a name");
+          return "The wall, take the next name";
         },
         onSelect: function () {
           paintBoard(true);
@@ -792,10 +792,10 @@
         id: "hitman-case-open", slot: "e",
         label: function () {
           const ct = caseTier(), T = CBZ.hitmanTier();
-          if (ct >= 2) return "Gear case — emptied";
+          if (ct >= 2) return "Gear case, emptied";
           const want = ct + 1;
-          if (T.rep >= TIERS[want].need) return "Open the case — " + (want === 1 ? "the long lens" : "the quiet room-clearer");
-          return "Gear case — locked (REP " + TIERS[want].need + ")";
+          if (T.rep >= TIERS[want].need) return "Open the case · " + (want === 1 ? "the long lens" : "the quiet room-clearer");
+          return "Gear case, locked (REP " + TIERS[want].need + ")";
         },
         onSelect: function () {
           const R0 = recs(); if (!R0) return;

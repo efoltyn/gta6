@@ -312,7 +312,7 @@ function initGrass(scene) {
         // exercised whenever qualityLevel is >= MIN_QUALITY_LEVEL at build
         // time but drops afterward).
         built = true;
-        console.log(`[grass] quality gate: qualityLevel=${q} < ${MIN_QUALITY_LEVEL} when the city finished building — skipping grass this session`);
+        console.log(`[grass] quality gate: qualityLevel=${q} < ${MIN_QUALITY_LEVEL} when the city finished building, skipping grass this session`);
         return;
       }
 

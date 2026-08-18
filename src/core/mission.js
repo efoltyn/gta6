@@ -492,7 +492,7 @@
       if (def.onComplete) { try { def.onComplete(m, paid); } catch (e) { console.error("[mission:" + m.id + "] onComplete", e); } }
     } else {
       m._why = why;
-      announce(m, def.failText || ((def.title || "Job") + " failed — " + why));
+      announce(m, def.failText || ((def.title || "Job") + " failed · " + why));
       factionEvent("onMissionFail", def.faction, { mission: m, id: m.id, why: why });
       if (def.onFail) { try { def.onFail(m, why); } catch (e) { console.error("[mission:" + m.id + "] onFail", e); } }
     }

@@ -525,7 +525,7 @@
     if (!officeCan("quote")) return { ok: false, why: "There is nobody at the counter to write it." };
     const value = marketValue(lot);
     if (value >= SMALL_POLICY && !officeCan("bind")) {
-      return { ok: false, why: "Nobody here can bind a policy that size — the underwriter's desk is empty." };
+      return { ok: false, why: "Nobody here can bind a policy that size, the underwriter's desk is empty." };
     }
     const price = premiumFor(lot);
     // THE PREMIUM HAS TO LAND SOMEWHERE. With no firm behind the branch there is
@@ -536,14 +536,14 @@
     if (!opts.dryRun) {
       if (!CBZ.cityTake || !CBZ.cityHolds) return { ok: false, why: "The till is closed." };
       const have = CBZ.cityHolds("player", { bank: true });
-      if (!have || have.amount < price) return { ok: false, why: "The premium is " + money(price) + " — you are short." };
+      if (!have || have.amount < price) return { ok: false, why: "The premium is " + money(price) + " · you are short." };
       const res = CBZ.cityTake("player", {
         max: price, bank: true, to: till,
         site: "insurance:premium", reason: "premium",
       });
       // A PARTIAL PAYMENT IS NOT A POLICY. take.js hands back an exact inverse
       // for exactly this: if the pocket could not cover it, put it back.
-      if (res.taken < price) { try { res.refund && res.refund(); } catch (e) {} return { ok: false, why: "The premium is " + money(price) + " — you are short." }; }
+      if (res.taken < price) { try { res.refund && res.refund(); } catch (e) {} return { ok: false, why: "The premium is " + money(price) + " · you are short." }; }
     }
     if (opts.dryRun) return { ok: true, price: price, value: value };
     policies.set(lot, { lot: lot, holder: "player", value: value, at: now() });
@@ -591,7 +591,7 @@
     // A LOSS IS NOT A CLAIM UNTIL SOMEBODY INSPECTS IT. That is the Adjuster's
     // whole rung, and with his desk empty the file simply never opens.
     if (!officeCan("assess")) {
-      if (pol.holder === "player") note("No adjuster available — your claim on " + addrOf(lot) + " cannot be opened.", 3);
+      if (pol.holder === "player") note("No adjuster available, your claim on " + addrOf(lot) + " cannot be opened.", 3);
       return;
     }
     const cl = {
@@ -687,7 +687,7 @@
     if (cl.mission && cl.mission.alive && cl.mission.alive()) { try { cl.mission.retire("settled"); } catch (e) {} }
     if (cl.holder === "player") {
       if (cl.paid <= 0) note(branch.name + " has nothing left in the reserve. The claim is worthless.", 3.4);
-      else note("Settled — " + money(cl.paid) + " on " + cl.addr + ".", 3);
+      else note("Settled · " + money(cl.paid) + " on " + cl.addr + ".", 3);
     } else if (cl.paid > 0) {
       // the ONE line that makes a player DISCOVER this system exists.
       flavor(branch.name + " settles " + money(cl.paid) + " on " + cl.addr, "#8fd0c2");
@@ -755,7 +755,7 @@
     const approved = myClaim("approved");
     if (approved && CBZ.rankCan && CBZ.rankCan(p, ORG, "settle")) {
       return {
-        label: "Sign for your settlement — " + money(approved.amount),
+        label: "Sign for your settlement · " + money(approved.amount),
         run: function () { say(p, "“Sign here. Sorry for the trouble.”"); payClaim(approved); },
       };
     }
@@ -766,7 +766,7 @@
         run: function () {
           say(p, officeCan("deny")
             ? "“The regional director signed that refusal himself. Top floor. Nothing I can do.”"
-            : "“That desk is empty. Come back — it may go through.”");
+            : "“That desk is empty. Come back, it may go through.”");
           note(denied.addr + " — " + money(denied.amount) + " disputed by " + branch.name + ".", 3.2);
         },
       };

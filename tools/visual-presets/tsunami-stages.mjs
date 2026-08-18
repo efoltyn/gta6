@@ -17,7 +17,14 @@
    The beats are polled on STATE, not on wall-clock: CBZ.disasters.state()
    reports idle|warn|active and CBZ.disasters.tsunamiAudit().phase reports
    warn|sweep|flooded|drain, so a build whose pacing differs still gets
-   photographed at the same physical moment of the event.
+   photographed at the same physical moment of the event. Where a beat lives
+   INSIDE a phase it is a fraction of that phase (untilWarnFrac /
+   untilFloodFrac / untilDrainK), never a count of seconds — that distinction
+   is the whole reason this preset can be used to argue about PACING, which is
+   what it is pointed at by default: `defaultBefore: "local"` makes both sides
+   this same checkout and turns TSU_PACE_V2 off on the before side, so the
+   report is one wave photographed at one set of physical beats with nothing
+   different between the columns but the clock.
 
    Staging facts this depends on (verified 2026-08-02/03):
    - rAF stub after boot kills core/loop.js; CBZ.hitstop/slowmo zeroed per tick.
@@ -35,8 +42,21 @@ const beats = [
     id: "drawdown",
     label: "The drawdown — the only warning",
     focus: "Warn phase. The sea empties off the shelf and hundreds of metres of wet seabed appear; the crowd should already be running uphill. No siren text, no banner: this IS the warning.",
-    wait: { state: "warn", phase: "warn", extraSecs: 6 },
+    wait: { state: "warn", phase: "warn", untilWarnFrac: 0.92 },
     shot: { mode: "front", back: 250, side: 130, alt: 34, aimAhead: -60, aimY: 0 },
+  },
+  {
+    /* THE FRAME THE PACING CHANGE IS ABOUT. Between "the seabed is bare" and
+       "the wall is at the beach" the old storyboard had nothing, which is
+       exactly the stretch that felt like waiting: the sea turns round and the
+       bore starts its run 172 m out. One wide frame at the instant the front
+       is released says how far away it starts, which is the only honest way
+       to read the speed of everything that follows. */
+    id: "seaturns",
+    label: "The sea turns — the bore is released",
+    focus: "The first frame of the sweep. The drawdown is over, the water is coming back, and the front starts its run from 52 m of open water outside the beach. Nothing here should differ between the builds but the clock: same wave, same distance to cover, one of them about to take half as long over it.",
+    wait: { state: "active", phase: "sweep", untilShoal: 0.06 },
+    shot: { mode: "front", back: -40, side: 200, alt: 60, aimAhead: 30, aimY: 6 },
   },
   {
     id: "opensea",
@@ -63,40 +83,44 @@ const beats = [
     id: "landfall",
     label: "LANDFALL — the Miyako shot",
     focus: "THE reference frame. Front-quarter on the churning gray-black debris soup as it takes the shore town: sediment darkening the water, foam boiling off the leading edge, whitewater streaking back to sea, cars and trees tumbling inside it.",
-    /* TRIPOD RESTAGED (2026-08-15). The old 140 m land-side stand read as a
-       whiteout — not fog (15% at that range) but CONTENT: at sediment 1.0
-       the flooded town, the wake and the crest spray fill the whole frame
-       with pale values and nothing dark is left to read them against — and
-       every land-side offset eventually loses the tower lottery to the
-       random bearing. So this is now the news-helicopter angle every real
-       tsunami aerial uses: over the SEA behind the front, looking inland at
-       the dark back of the broken wall and the town being taken beyond it.
-       There are no towers in the sea to photobomb, and the dark water is
-       the contrast anchor in every possible bearing. */
+    /* TRIPOD RESTAGED TWICE. 2026-08-15 moved it off the land-side stand,
+       which was a whiteout, and out over the SEA behind the front — the
+       news-helicopter angle every real tsunami aerial uses, with the dark
+       water as the contrast anchor in every possible bearing. Correct
+       angle, wrong LENS: at 55 m back and 26 m up the near water surface
+       filled the frame and the picture went from a white wash to a blue
+       one, with no shoreline, no town and no front in it. A helicopter is
+       not fifty metres off the wave, it is a couple of hundred metres out
+       and seventy up — so this is that stand-off, and the frame now holds
+       the whole thing the beat is about: dark sea, the bore's line, the
+       shore it is taking and the town behind it. */
     wait: { untilFrontPast: 24, extraSecs: 0.35 },
-    shot: { mode: "front", back: 55, side: 20, alt: 26, aimAhead: 12, aimY: 6 },
+    shot: { mode: "front", back: 150, side: 62, alt: 72, aimAhead: 46, aimY: 0 },
   },
   {
     id: "crossing",
     label: "Mid-crossing — the wall spending itself",
     focus: "Halfway over the island. THE QUESTION THIS BEAT ASKS: is there still a wall here? A bore that has run 130 m inland has been climbing and tearing through a town the whole way, and what is left of it should be a fast, deep, dirty flood with an edge — not the same tower that broke on the beach. Watch faceH against the landfall frame.",
-    // same restage as landfall: the sea-side chopper angle, higher and
-    // further back so half the island's flooding shows behind the wall
+    // the same stand-off as landfall, higher and further back again: from
+    // 178 m out and 88 m up the whole flooded town is in one frame — the
+    // towers still standing, the wreckage between them, and the bore's
+    // remaining edge out at the far shore, which is what "is there still a
+    // wall here" actually needs to be looked at
     wait: { untilFrontPast: 130 },
-    shot: { mode: "front", back: 64, side: 26, alt: 32, aimAhead: 16, aimY: 4 },
+    shot: { mode: "front", back: 178, side: 74, alt: 88, aimAhead: 66, aimY: 0 },
   },
   {
     id: "inundation",
     label: "Inundation — roofs as islands",
-    focus: "The town is under. Concrete towers and their roofs stand clear and dry (vertical evacuation works); light wood-frame footprints are gone. Debris drifts between the buildings that are left.",
-    wait: { phase: "flooded", extraSecs: 5 },
+    focus: "Halfway through the standing flood. The town is under: concrete towers and their roofs stand clear and dry (vertical evacuation works); light wood-frame footprints are gone. Debris drifts between the buildings that are left.",
+    wait: { phase: "flooded", untilFloodFrac: 0.55 },
     shot: { mode: "center", dist: 86, alt: 30, aimY: 5 },
   },
   {
     id: "undertow",
     label: "The drain — the undertow",
-    focus: "The water tearing back out to sea. This is the half that drowns people: the current reverses, and the wreckage the wave carried in is stranded across the streets as it goes.",
-    wait: { phase: "drain", extraSecs: 2.2 },
+    focus: "40% of the inundation already gone (drainK 0.6) — the water tearing back out to sea. This is the half that drowns people: the current reverses, and the wreckage the wave carried in is stranded across the streets as it goes.",
+    wait: { phase: "drain", untilDrainK: 0.6 },
     shot: { mode: "center", dist: 150, alt: 40, aimY: 3 },
   },
   {
@@ -236,6 +260,41 @@ async function stageTsunami(input) {
       step(0.05);
     }
   }
+  /* WALL-CLOCK WAITS ARE A LIE IN A PACING COMPARISON. Three beats used to
+     say "six seconds into the drawdown" / "five seconds into the flood" /
+     "2.2 seconds into the drain", which is a fixed number of seconds into a
+     phase whose LENGTH is the thing being compared: retimed, the same six
+     seconds walked straight out of the drawdown into the sweep and the
+     inundation shot landed in the drain. Every one of them is now a fraction
+     of its own phase, read off the audit, so both sides are photographed at
+     the same point of the same beat however long that beat lasts. */
+  if (w.untilWarnFrac != null) {
+    guard = 0;
+    while (guard++ < 4000) {
+      const a = audit();
+      if (CBZ.disasters.state() !== "warn") break;                     // missed it
+      if (a.warnBudget && a.eventT != null && a.eventT / a.warnBudget >= w.untilWarnFrac) break;
+      step(1 / 30);
+    }
+  }
+  if (w.untilFloodFrac != null) {
+    guard = 0;
+    while (guard++ < 4000) {
+      const a = audit();
+      if (a.phase && a.phase !== "flooded" && a.phase !== "sweep") break;
+      if (a.phase === "flooded" && a.floodBudget && a.floodT / a.floodBudget >= w.untilFloodFrac) break;
+      step(1 / 30);
+    }
+  }
+  if (w.untilDrainK != null) {
+    guard = 0;
+    while (guard++ < 4000) {
+      const a = audit();
+      if (CBZ.disasters.state() !== "active") break;
+      if (a.phase === "drain" && a.drainK != null && a.drainK <= w.untilDrainK) break;
+      step(1 / 30);
+    }
+  }
   if (w.untilIdle) { guard = 0; while (guard++ < 6000 && CBZ.disasters.state() === "active") step(0.1); }
   if (w.extraSecs) step(w.extraSecs);
 
@@ -284,20 +343,24 @@ async function stageTsunami(input) {
   query("side").textContent = before ? input.beforeLabel : input.afterLabel;
   query("side").style.cssText = `position:absolute;top:22px;left:26px;padding:7px 11px;border-radius:7px;background:${before ? "#c94c4c" : "#218b60"};font-size:12px;font-weight:900;letter-spacing:.12em`;
   query("name").textContent = subject.label;
-  query("name").style.cssText = "position:absolute;top:60px;left:26px;font-size:25px;font-weight:800;letter-spacing:-.02em;max-width:640px";
+  /* A CAPTION HAS TO SURVIVE ITS OWN PICTURE, and half of these are a pale
+     overcast sky or a whitewater frame — white-on-white is not a caption. A
+     text shadow is not enough against a bright field; every block gets its
+     own dark plate. */
+  query("name").style.cssText = "position:absolute;top:56px;left:22px;padding:6px 12px;border-radius:8px;background:rgba(6,12,17,.62);font-size:25px;font-weight:800;letter-spacing:-.02em;max-width:640px";
   query("focus").textContent = subject.focus;
-  query("focus").style.cssText = "position:absolute;top:96px;left:28px;color:#c0cfda;font-size:12.5px;font-weight:550;max-width:660px;line-height:1.45";
+  query("focus").style.cssText = "position:absolute;top:100px;left:22px;padding:8px 12px;border-radius:8px;background:rgba(6,12,17,.62);color:#cfdce6;font-size:12.5px;font-weight:550;max-width:640px;line-height:1.45";
   query("perf").textContent =
-    `phase ${a2.phase || "—"} · front ${fs.toFixed(0)}m · v ${a2.frontV != null ? a2.frontV.toFixed(1) + "m/s" : "—"}`
+    `t ${a2.eventT != null ? a2.eventT.toFixed(1) + "s" : "—"} · phase ${a2.phase || "—"} · front ${fs.toFixed(0)}m · v ${a2.frontV != null ? a2.frontV.toFixed(1) + "m/s" : "—"}`
     + `${a2.stalled ? " · STANDING" : ""}${a2.crashAge != null ? " · crash+" + a2.crashAge.toFixed(1) + "s" : ""}`
     + ` · turbid ${(a2.sediment != null ? a2.sediment : 0).toFixed(2)}`
     + ` · faceH ${a2.faceH != null ? a2.faceH.toFixed(1) + "m" : "—"} (spent ${a2.spent != null ? a2.spent.toFixed(2) : "—"})`
     + ` · debris ${a2.debrisEntrained || 0} (${a2.debrisStrikes || 0} strikes)`
     + ` · undertow ${(a2.undertowPull || 0).toFixed(1)}`
     + ` · refuges ${a2.refugesStanding != null ? a2.refugesStanding + "/" + a2.refugesTotal : "—"}`;
-  query("perf").style.cssText = "position:absolute;right:24px;top:24px;font:11.5px ui-monospace,SFMono-Regular,Menlo,monospace;color:#9fe8c3;text-align:right";
+  query("perf").style.cssText = "position:absolute;right:20px;top:20px;padding:7px 11px;border-radius:8px;background:rgba(6,12,17,.62);font:11.5px ui-monospace,SFMono-Regular,Menlo,monospace;color:#9fe8c3;text-align:right;max-width:560px";
   query("source").textContent = new URL(input.sourceUrl).host + new URL(input.sourceUrl).pathname;
-  query("source").style.cssText = "position:absolute;bottom:14px;left:27px;color:#9cb0bf;font:10px ui-monospace,SFMono-Regular,Menlo,monospace";
+  query("source").style.cssText = "position:absolute;bottom:12px;left:22px;padding:4px 9px;border-radius:6px;background:rgba(6,12,17,.55);color:#a8bccb;font:10px ui-monospace,SFMono-Regular,Menlo,monospace";
 
   const metrics = {
     debrisEntrained: Number(a2.debrisEntrained || 0),
@@ -315,6 +378,13 @@ async function stageTsunami(input) {
        after the crash. Like faceH it has no good direction on its own; it is
        read per beat, and a build that predates it reports 0 = not measured. */
     frontV: Number(a2.frontV || 0),
+    /* THE CLOCK ON THE BEAT — the whole pacing argument as one number per
+       shot. The beats are polled on PHYSICAL state, so the picture is the
+       same wave on both sides and the only thing that can differ is HOW LONG
+       IT TOOK TO GET THERE. Lower is faster, on every beat. A build that
+       predates the audit's clock reports 0 = not measured. */
+    eventT: Number(a2.eventT || 0),
+    sweepT: Number(a2.sweepT || 0),
     undertowPull: Math.abs(Number(a2.undertowPull || 0)),
     refugesStanding: Number(a2.refugesStanding || 0),
     lightSwept: Number(a2.lightSwept || 0),
@@ -337,13 +407,15 @@ export default {
   id: "tsunami-stages",
   title: "The Tsunami: Drawdown, Stand, Crash, Undertow",
   description: "One seeded survival tsunami per build, polled to the same PHYSICAL beats — the drawdown that is the only warning, the fast open-sea curl, the PEAK where shoaling has traded all that speed for height and the wall STANDS over the beach at a crawl, the CRASH where the lip comes down and releases the bore, the Miyako landfall on the debris churn, the inundation with roofs as islands, the undertow tearing back out, and the wreckage it leaves. Every tripod is placed relative to the live wave front, so the shots line up even though the bearing is random per run.",
-  beforeLabel: "BEFORE · DEPLOYED",
-  afterLabel: "AFTER · LOCAL",
+  defaultBefore: "local",
+  beforeParams: { cfg_TSU_PACE_V2: 0 },
+  beforeLabel: "BEFORE · SLOW CLOCK (TSU_PACE_V2=0)",
+  afterLabel: "AFTER · NORMAL SPEED",
   viewport: { width: 1180, height: 700 },
   readyExpression: "window.THREE && window.CBZ && CBZ.CONFIG",
   urlParams: { seed: 90210 },
   stageTimeoutMs: 600000,
-  metricsNote: "Debris counts and the undertow are read from CBZ.disasters.tsunamiAudit() at the moment of the shot: what the water was carrying, how often it hit somebody, and how hard it pulled on the way out. refugesStanding is the invariant — the wave may wound a concrete tower but must never take one down. NOTE: faceH, spent and frontV are NEW audit fields — a build that predates them reports 0, which means 'not measured', not 'no wave'. frontV is the shoaling arc in one number per beat: fastest at OPEN SEA, a crawl at THE PEAK while the wave stands, surging again after THE CRASH. For these the pictures are the comparison; the numbers only speak within a side.",
+  metricsNote: "THE CLOCK IS THE HEADLINE: every beat is polled to the same PHYSICAL moment on both sides, so `Clock at beat` is how many seconds the event took to reach that identical picture — lower is faster, on all nine. Debris counts and the undertow are read from CBZ.disasters.tsunamiAudit() at the moment of the shot: what the water was carrying, how often it hit somebody, and how hard it pulled on the way out. refugesStanding is the invariant — the wave may wound a concrete tower but must never take one down. NOTE: faceH, spent and frontV are NEW audit fields — a build that predates them reports 0, which means 'not measured', not 'no wave'. frontV is the shoaling arc in one number per beat: fastest at OPEN SEA, a crawl at THE PEAK while the wave stands, surging again after THE CRASH. For these the pictures are the comparison; the numbers only speak within a side.",
   metrics: {
     debrisEntrained: { label: "Debris entrained", better: "higher" },
     debrisStrikes: { label: "Debris strikes", better: "higher" },
@@ -352,6 +424,8 @@ export default {
     faceH: { label: "Face height", unit: "m" },
     spent: { label: "Bore left", },
     frontV: { label: "Front speed", unit: "m/s" },
+    eventT: { label: "Clock at beat", unit: "s", better: "lower" },
+    sweepT: { label: "Front travelling", unit: "s", better: "lower" },
     undertowPull: { label: "Undertow", unit: "m/s", better: "higher" },
     refugesStanding: { label: "Refuges standing", better: "higher" },
     lightSwept: { label: "Light frames swept", better: "higher" },

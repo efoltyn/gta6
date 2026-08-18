@@ -495,7 +495,7 @@
           addRacketStanding(1);
           CBZ.sfx && CBZ.sfx("coin");
           clearGuardApproach(g);
-          return { ok: true, msg: `It was ${nameOf(snitch)}. Do what you like with that — I never said it.` };
+          return { ok: true, msg: `It was ${nameOf(snitch)}. Do what you like with that. I never said it.` };
         }
         if (CBZ.addHeat) CBZ.addHeat(-3);
         addRacketStanding(1);

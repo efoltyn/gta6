@@ -64,10 +64,10 @@
   //        · "hangar" the F-22 keep-home. vehCap = stored-vehicle cap; ammoCap =
   //        per-weapon stash cap (warehouse only). anchor = how we place it.
   const PROPERTIES = [
-    { id: "garage1",   name: "Two-Bay Garage",   emoji: "", kind: "garage",    cost: 35000,   vehCap: 2,  anchor: "carlot",  off: { dx: -7, dz: 0 }, blurb: "A lock-up off the car lot. Two stalls — stash a hot ride and it's yours." },
+    { id: "garage1",   name: "Two-Bay Garage",   emoji: "", kind: "garage",    cost: 35000,   vehCap: 2,  anchor: "carlot",  off: { dx: -7, dz: 0 }, blurb: "A lock-up off the car lot. Two stalls, stash a hot ride and it's yours." },
     { id: "garage2",   name: "Ten-Car Block",    emoji: "", kind: "garage",    cost: 140000,  vehCap: 10, anchor: "carlot",  off: { dx: 7, dz: 0 },  blurb: "A whole storage block. Ten bays for the collection." },
-    { id: "warehouse", name: "Dockside Warehouse", emoji: "", kind: "warehouse", cost: 450000,  vehCap: 6, ammoCap: 600, anchor: "beach", blurb: "A waterfront unit — six vehicle bays AND a steel AMMO LOCKER. Your armory." },
-    { id: "hangar",    name: "Private Hangar",   emoji: "", kind: "hangar",    cost: 1200000, vehCap: 0,  anchor: "airport", blurb: "An apron hangar. The home a stolen F-22 needs — land it inside to keep it." },
+    { id: "warehouse", name: "Dockside Warehouse", emoji: "", kind: "warehouse", cost: 450000,  vehCap: 6, ammoCap: 600, anchor: "beach", blurb: "A waterfront unit, six vehicle bays AND a steel AMMO LOCKER. Your armory." },
+    { id: "hangar",    name: "Private Hangar",   emoji: "", kind: "hangar",    cost: 1200000, vehCap: 0,  anchor: "airport", blurb: "An apron hangar. The home a stolen F-22 needs, land it inside to keep it." },
     /* THE FREEPORT — the top of this ladder, and the first property in the
        game that is a PLACE ON ITS OWN LAND rather than a spot on somebody
        else's. It is city/govcomplex.js's `freeport` COMPLEXES row: a bonded
@@ -87,7 +87,7 @@
        owning a skyline. And it is the only property in the game you can pay
        for in DUFFELS at the gate (cashstore.js's escrow), which is what
        stops the first unbankable vault haul from being worthless. */
-    { id: "freeport",  name: "Freeport Compound", emoji: "", kind: "compound", cost: 1750000, vehCap: 8, ammoCap: 900, anchor: "freeport", blurb: "A bonded freight yard on its own land — dock, racks, container yard and a cargo strip. The only place in the world you can bank a duffel." },
+    { id: "freeport",  name: "Freeport Compound", emoji: "", kind: "compound", cost: 1750000, vehCap: 8, ammoCap: 900, anchor: "freeport", blurb: "A bonded freight yard on its own land, dock, racks, container yard and a cargo strip. The only place in the world you can bank a duffel." },
   ];
   const PROP_BY_ID = {}; for (const p of PROPERTIES) PROP_BY_ID[p.id] = p;
 
@@ -303,8 +303,8 @@
     state().owned[prop.id] = true;
     big(prop.emoji + " ACQUIRED " + prop.name);
     note(prop.kind === "hangar" ? "Now STEAL an F-22 and land it inside to keep it." :
-         prop.kind === "warehouse" ? "Vehicle bays + ammo locker online — your armory." :
-         "A safe place to stash a hot ride — drive one in and store it.", 3);
+         prop.kind === "warehouse" ? "Vehicle bays + ammo locker online, your armory." :
+         "A safe place to stash a hot ride, drive one in and store it.", 3);
     if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(Math.max(3, Math.round(prop.cost / 12000)));
     sfx("coin");
     persist();
@@ -340,7 +340,7 @@
   function storeCurrentVehicle() {
     const P = CBZ.player; if (!P) return;
     if (!P.driving || !P._vehicle) { note("Drive a vehicle in to store it.", 1.8); return; }
-    if (storedVehicleCount() >= vehCapTotal()) { note("Storage full (" + storedVehicleCount() + "/" + vehCapTotal() + ") — pull one out first.", 2); sfx("hit"); return; }
+    if (storedVehicleCount() >= vehCapTotal()) { note("Storage full (" + storedVehicleCount() + "/" + vehCapTotal() + "), pull one out first.", 2); sfx("hit"); return; }
     const car = P._vehicle;
     const model = (car.model && car.model.name) || "Sedan";
     state().vehicles.push({ kind: "car", model: model, owner: true });
@@ -349,7 +349,7 @@
     if (car.group && car.group.parent) car.group.parent.remove(car.group);
     if (CBZ.cityCars) { const idx = CBZ.cityCars.indexOf(car); if (idx >= 0) CBZ.cityCars.splice(idx, 1); }
     big("Stored your " + model);
-    note(car.stolen ? "A hot ride, laundered — it's yours now." : "Safely stored.", 2.4);
+    note(car.stolen ? "A hot ride, laundered, it's yours now." : "Safely stored.", 2.4);
     persist();
     if (open_) render();
   }
@@ -358,7 +358,7 @@
     const s = state();
     const v = s.vehicles[i]; if (!v) return;
     const left = RETRIEVE_CD - (now() - (s.lastRetrieve || 0));
-    if (left > 0) { note("Retrieval cooling down — " + Math.ceil(left / 1000) + "s.", 1.8); return; }
+    if (left > 0) { note("Retrieval cooling down · " + Math.ceil(left / 1000) + "s.", 1.8); return; }
     const P = CBZ.player; if (!P) return;
     // spawn it just beside the player so it appears at the property
     const ox = Math.sin((P.heading || 0)) * 3 + 3, oz = Math.cos((P.heading || 0)) * 3;
@@ -406,20 +406,20 @@
     const spend = CBZ.city && CBZ.city.spend ? CBZ.city.spend(crate.cost) : (canAfford(crate.cost) && charge(crate.cost));
     if (!spend) { note("" + crate.label + " costs " + money(crate.cost) + ".", 2); sfx("hit"); return; }
     state().ammo[crate.id] = Math.min(cap, have + crate.qty);
-    note("Stocked " + crate.label + " — locker " + stashCount(crate.id) + "/" + cap + ".", 2);
+    note("Stocked " + crate.label + " · locker " + stashCount(crate.id) + "/" + cap + ".", 2);
     sfx("coin");
     persist();
     if (open_) render();
   }
   function loadOut() {
-    if (!ownedWarehouse()) { note("No ammo locker — buy the warehouse or the Freeport.", 1.8); return; }
+    if (!ownedWarehouse()) { note("No ammo locker, buy the warehouse or the Freeport.", 1.8); return; }
     const s = state(); let moved = 0;
     for (const id in s.ammo) {
       const n = s.ammo[id] | 0;
       if (n > 0 && CBZ.fpsAddAmmo) { try { CBZ.fpsAddAmmo(n, id); moved += n; s.ammo[id] = 0; } catch (e) {} }
     }
-    if (moved <= 0) { note("Locker's empty — buy crates first.", 1.8); return; }
-    big("Loaded out — " + moved + " rounds from the locker");
+    if (moved <= 0) { note("Locker's empty, buy crates first.", 1.8); return; }
+    big("Loaded out · " + moved + " rounds from the locker");
     sfx("coin");
     persist();
     if (open_) render();
@@ -464,7 +464,7 @@
         html += "<div style='font-size:12px;color:#ffd166;margin-bottom:6px'>Paid down " + money(prop.cost - owe) + " in bags · " + money(owe) + " to go</div>";
       }
       if (CS) html += "<div style='font-size:11px;color:#8a93a3;margin-bottom:8px'>Carry duffels to the sale board by the gate to pay in cash.</div>";
-      actions.push({ label: "Buy — " + money(owe), fn: () => buy(prop) });
+      actions.push({ label: "Buy · " + money(owe), fn: () => buy(prop) });
     } else {
       html += "<div style='font-size:12px;color:#7ed957;margin-bottom:6px'>OWNED ✓</div>";
       if (canStoreVehicleHere(prop)) {
@@ -488,15 +488,15 @@
         const owedCrew = CBZ.cashStore.crewDebt ? CBZ.cashStore.crewDebt() : 0;
         html += "<div style='font-size:12px;color:#ffd166;margin-top:8px'>RACKS · " + st.bags + "/" + st.cap + " bags · " + money(st.value) + "</div>";
         if (st.stained) html += "<div style='font-size:11px;color:#d98a84'>" + money(st.stained) + " of it is dye-stained (30% fence cut to wire out)</div>";
-        if (owedCrew) html += "<div style='font-size:11px;color:#d98a84'>Crew owed " + money(owedCrew) + " — they take it off the rack as you stock it.</div>";
+        if (owedCrew) html += "<div style='font-size:11px;color:#d98a84'>Crew owed " + money(owedCrew) + " · they take it off the rack as you stock it.</div>";
         if (st.value > 0) actions.push({ label: "Wire the racks to your account", fn: function () { CBZ.cashStore.bankIt(); render(); } });
       }
       if (prop.kind === "warehouse" || prop.kind === "compound") {
         html += "<div style='font-size:12px;color:#cdb8ff;margin-top:8px;margin-bottom:3px'>AMMO LOCKER · cap " + ammoCapTotal() + "/weapon</div>";
         for (const c of AMMO_CRATES) {
-          actions.push({ label: "Buy " + c.label + " (+" + c.qty + ") — " + money(c.cost) + "  [have " + stashCount(c.id) + "]", fn: () => buyAmmo(c) });
+          actions.push({ label: "Buy " + c.label + " (+" + c.qty + ") · " + money(c.cost) + "  [have " + stashCount(c.id) + "]", fn: () => buyAmmo(c) });
         }
-        actions.push({ label: "LOAD OUT — move the whole locker to your guns", fn: loadOut });
+        actions.push({ label: "LOAD OUT, move the whole locker to your guns", fn: loadOut });
       }
     }
     // TOUCH: no number/Esc key hints — rows are fat tap targets (data-si) and a
@@ -588,7 +588,7 @@
         const owe = (prop.id === "freeport" && CBZ.cashStore && CBZ.cashStore.remaining) ? CBZ.cashStore.remaining() : prop.cost;
         showPrompt(CBZ.touchActionPrompt("g", "Buy " + money(owe)));
       }
-      else if (prop.kind === "hangar") showPrompt(CBZ.touchActionPrompt("g", g.cityOwnsJet ? "Hangar" : "Hangar — needs a jet"));
+      else if (prop.kind === "hangar") showPrompt(CBZ.touchActionPrompt("g", g.cityOwnsJet ? "Hangar" : "Hangar, needs a jet"));
       else showPrompt(CBZ.touchActionPrompt("g", "Storage"));
       return;
     }
