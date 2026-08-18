@@ -67,13 +67,12 @@ const SPEED = arg("--speed", "4");
    OPENING — how long a person may be asked to watch men WALK before the first
    round goes off. `city` read 10.9 s before the start lines came in, because
    the two armies formed up 304 m apart at opposite edges of the downtown (see
-   streetSpawner) and spent the first forty seconds marching. All nine maps now
-   measure: harbor 0.6 · field 0.6 · marina 0.6 · kill box 0.9 · gov 1.2 · city
-   2.2 · dunes 3.2 · island 7.2 · speedway 7.3. The pin is 9 rather than 8
+   streetSpawner) and spent the first forty seconds marching. All nine maps
+   measured: harbor 0.6 · field 0.6 · marina 0.6 · kill box 0.9 · gov 1.2 ·
+   city 2.2 · dunes 3.2 · island 7.2 · speedway 7.3. The pin is 9 rather than 8
    because the two at the top of that list are the ones that vary — island has
    been seen at 7.1 and at 8.4 on the same build, the sim advancing in
-   frame-sized steps — and a gate that flakes is a gate people learn to
-   re-run.
+   frame-sized steps — and a gate that flakes is a gate people learn to re-run.
 
    RESOLVE — how long a war may run without a result. Deliberately in SIM time,
    not wall time: headless swiftshader manages about 0.6x real on the city map,
@@ -83,16 +82,16 @@ const SPEED = arg("--speed", "4");
    measurement is not a fault, and saying so beats pretending either way. */
 const OPENING = parseFloat(arg("--opening", "9"));
 const RESOLVE = parseFloat(arg("--resolve", "120"));
-/* --revert runs the SAME sweep with the old separation pass and the old fire
-   discipline restored, and asserts the faults COME BACK. A fix nobody can
-   turn off has not been measured. */
+/* --revert runs the SAME sweep with the old separation pass, the old fire
+   discipline and transparent sand (?tlos=0) restored, and asserts the faults
+   COME BACK. A fix nobody can turn off has not been measured. */
 const REVERT = has("--revert");
 /* --extra appends raw query params to every battle URL, so the sweep can put
    BEAST armies (or any roster the page's menu can) under the same counters:
      node tools/battle-check.mjs --map city --extra "ru=lion&bu=dog"
    URLSearchParams takes the FIRST occurrence, so --n keeps owning the counts. */
 const EXTRAQ = arg("--extra", "");
-const EXTRA = (REVERT ? "&sep=old&fire=old" : "") + (EXTRAQ ? "&" + EXTRAQ : "");
+const EXTRA = (REVERT ? "&sep=old&fire=old&tlos=0" : "") + (EXTRAQ ? "&" + EXTRAQ : "");
 
 /* ---- one browser, one origin, every map through it ----------------------
    The origin is normally a devserver on this checkout. --url points the same
@@ -213,9 +212,11 @@ for (const map of MAPS) {
     overlapNow: q.overlapNow, overlapWorst: q.overlapWorst, overlapPeak: q.overlapPeak,
     embedded: q.embedded, embeddedEver: q.embeddedEver,
     stuck: q.stuck, blindFire: q.blindFire, throughMate: q.throughMate,
+    throughSand: q.throughSand,
     shots: q.shots, fratricide: q.fratricide, engaged: q.engaged,
     firstShotT: q.firstShotT,
     ground: audit && audit.ground, centre: audit && audit.centre, gap: audit && audit.gap,
+    relief: audit && audit.relief, terrainLos: audit && audit.terrainLos,
     errors: errors.filter((e) => !/ProgressEvent|favicon|preload/i.test(e)).slice(0, 6),
   };
   report.push(row);
@@ -262,8 +263,19 @@ for (const map of MAPS) {
   }
   if (row.embeddedEver > 0) fails.push(`${map}: ${row.embeddedEver} bodies inside geometry`);
   if (row.blindFire > 0) fails.push(`${map}: ${row.blindFire} rounds fired at a mark nobody could see`);
+  if (row.throughSand > 0) fails.push(`${map}: ${row.throughSand} rounds fired through the terrain itself`);
   if (row.stuck > 0) fails.push(`${map}: ${row.stuck} men stuck`);
   if (row.errors.length) fails.push(`${map}: ${row.errors.length} console errors — ${row.errors[0]}`);
+
+  /* THE MAP THAT PROMISES DUNES HAS TO MEASURE SOME. The old venue centred
+     the war where the dune amplitude ramp had barely started: 7.6 m of
+     relief across the whole field — a flat plate with "OPEN DUNES" on the
+     menu row, and nothing but a screenshot could catch it. The audit now
+     states the fight window's vertical span, so the checker can hold the
+     ground to the label. */
+  if (map === "dunes" && audit && !(audit.relief >= 12)) {
+    fails.push(`dunes: the map promises dunes and measured ${audit.relief} m of relief — that is a flat plate`);
+  }
 }
 
 console.log(JSON.stringify(report, null, 2));
@@ -274,13 +286,15 @@ if (REVERT) {
   // a whole is measurably worse, because otherwise the fix bought nothing.
   const overlap = report.reduce((s, r) => s + (r.overlapPeak || 0), 0);
   const lanes = report.reduce((s, r) => s + (r.throughMate || 0), 0);
-  console.log(`\nrevert totals: overlapPeak ${overlap}, throughMate ${lanes}`);
-  if (overlap === 0 && lanes === 0) {
+  const sand = report.reduce((s, r) => s + (r.throughSand || 0), 0);
+  console.log(`\nrevert totals: overlapPeak ${overlap}, throughMate ${lanes}, throughSand ${sand}`);
+  if (overlap === 0 && lanes === 0 && sand === 0) {
     bye(1, "BATTLE --revert: FAIL — the old passes produced no faults either, " +
       "so the fix is unproven (or the switches are not wired)");
   }
   bye(0, `\nBATTLE --revert: ok — the old code brings the faults back ` +
-    `(${overlap} overlapping pairs, ${lanes} rounds through a mate), which is what makes the zero above mean something.`);
+    `(${overlap} overlapping pairs, ${lanes} rounds through a mate, ${sand} through the sand), ` +
+    `which is what makes the zero above mean something.`);
 }
 
 if (fails.length) bye(1, "\nBATTLE: FAIL — " + fails.join("\n              "));

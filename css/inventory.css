@@ -127,17 +127,10 @@
 #inventory{ display:none !important; }
 body.mode-survival #hotbar{ display:none !important; }
 
-/* ---- touch access (merge seam): the BAG cell rides the hotbar; the ✕ rides
-   the panel. Both exist only on glass — body.touch is stamped by touch.js. */
-#invBagBtn{
-  display:none; width:50px; height:50px; border-radius:11px;
-  align-items:center; justify-content:center;
-  background:rgba(58,74,98,.78); border:2px solid rgba(255,255,255,.22);
-  font-size:12px; font-weight:700; letter-spacing:1px; color:#dfe7f2;
-  pointer-events:auto; -webkit-tap-highlight-color:transparent; touch-action:manipulation;
-}
-body.touch #invBagBtn{ display:flex; }
-#invBagBtn:active{ transform:translateY(2px); background:rgba(255,122,26,.55); }
+/* ---- touch access (merge seam): the ✕ rides the panel, on glass only —
+   body.touch is stamped by touch.js. (The BAG button that used to ride the
+   hotbar here is GONE — owner 2026-08-16: the bar itself is the inventory;
+   escape item cells surface on pickup instead of hiding behind a screen.) */
 .invClose{
   display:none; position:absolute; top:10px; right:12px; width:40px; height:40px;
   align-items:center; justify-content:center; border-radius:10px;
@@ -174,11 +167,17 @@ body.jail-hud-unified #keycard{ display:none !important; }
 }
 #hotbar #weaponStrip.slots .cSlot .gunModel{ width:42px; height:30px; }
 
-/* Escape's ten digit keys belong exclusively to the fixed weapon rail. The
-   item bag remains in the I-screen/touch BAG instead of doubling this into a
-   nineteen-cell strip that cannot fit on a phone. Other modes keep their old
-   item cells. (Escape has no body.mode-escape class; it is the default mode.) */
-body.jail-hud-unified:not(.mode-city):not(.mode-survival):not(.mode-gungame) #hotbar > .islot{
+/* Escape's ten digit keys belong exclusively to the fixed weapon rail, and
+   the BAG button is gone (owner: the bar IS the inventory — "so I can see
+   when I pickup a keycard etc it's just where the guns are"). So an escape
+   item cell earns its bar seat by HOLDING something: empty cells stay off
+   the glass (nineteen permanent cells cannot fit on a phone), a pickup —
+   keycard, ramen, wallet — surfaces its cell beside the gun chips the frame
+   it lands, and spending the stack takes the cell away again. .filled is
+   stamped by systems/inventory.js fill(). Other modes keep their old
+   always-on item cells. (Escape has no body.mode-escape class; it is the
+   default mode.) */
+body.jail-hud-unified:not(.mode-city):not(.mode-survival):not(.mode-gungame) #hotbar > .islot:not(.filled){
   display:none !important;
 }
 
@@ -192,4 +191,9 @@ body.jail-hud-unified:not(.mode-city):not(.mode-survival):not(.mode-gungame) #ho
   #hotbar #weaponStrip.slots{ gap:3px; max-width:calc(100vw - 72px); overflow-x:auto; }
   #hotbar #weaponStrip.slots .cSlot{ width:39px; height:43px; flex:0 0 39px; }
   #hotbar #weaponStrip.slots .cSlot .gunModel{ width:34px; height:24px; }
+  /* the item cells that surface on pickup ride the same shrunken row as the
+     gun chips — a 50px keycard beside a 43px pistol reads as two bars. */
+  #hotbar > .islot{ width:43px; height:43px; }
+  #hotbar > .islot .islot-svg{ width:27px; height:27px; }
+  #hotbar > .islot .islot-img{ width:36px; height:26px; }
 }

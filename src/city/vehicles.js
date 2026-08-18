@@ -64,6 +64,69 @@
                             : cmat(color == null ? 0x888888 : color, opts);
   }
 
+  /* ============================================================
+     THE SPEEDOMETER IS ONE CONVERSION — CBZ.speedRead(v)
+
+     OWNER (2026-08-15): "the normal cars in gang city show km/h on the
+     speedometer not mph."
+
+     He is reading a number that is too big for the label, and there were THREE
+     different answers to "how fast is this car" in the repo, none of them the
+     world's own:
+
+       city/carcluster.js   v x 2.4    labelled MPH   (the instrument cluster)
+       city/hud.js          v x 3      labelled MPH   (the fallback readout)
+       city/roadrules.js    v x 2.4    posted limits compared in mph
+
+     hud.js's own comment admits its 3 is a guess ("rough mph"), and 3 against
+     2.4 is a 25% disagreement between two numbers that have appeared in the
+     same corner of the same screen — which is the "TWO SPEEDS SHOWN IN BOTTOM
+     RIGHT" the owner already complained about once, still there in the
+     arithmetic after being fixed in the layout.
+
+     AND 2.4 IS NOT RIGHT EITHER. A world unit in this game is a METRE — a man
+     is 1.82 units tall, the prison is 248 x 244 units and is described as
+     hectares — and `car.v` is units per second, because `pos.x += vx * dt` is
+     the only integration there is. So the conversions are not a taste knob and
+     never were:
+
+         1 unit/s  =  2.23694 mph  =  3.6 km/h
+
+     2.4 overstates every speed by 7.3%, which is exactly the flavour of wrong
+     that makes a speedometer read like the other unit. It is derived here now,
+     once, from the two definitions, and the three consumers ask instead of
+     each typing their own. `CAR_SPEED_UNIT` picks the label ("mph" | "kmh")
+     and BOTH branches come off the same metres-per-second, so the two can
+     never disagree about how fast the car is — only about what to call it.
+
+     SPEED_UNIT_V2=false restores the historical 2.4/3.0 pair at every site. */
+  const MPS_PER_UNIT = 1;                 // a world unit is a metre
+  const MPH_PER_MPS = 2.2369362920544;    // exact: 3600 / 1609.344
+  const KMH_PER_MPS = 3.6;                // exact
+  if (CBZ.CONFIG.SPEED_UNIT_V2 == null) CBZ.CONFIG.SPEED_UNIT_V2 = true;
+  if (CBZ.CONFIG.CAR_SPEED_UNIT == null) CBZ.CONFIG.CAR_SPEED_UNIT = "mph";
+  CBZ.speedMph = function (v) {
+    const s = Math.abs(v || 0) * MPS_PER_UNIT;
+    return CBZ.CONFIG.SPEED_UNIT_V2 === false ? s * 2.4 : s * MPH_PER_MPS;
+  };
+  // {n, unit, mph} — n/unit are what to DRAW, mph is the comparable number a
+  // posted limit is expressed in, so a caller never converts a limit twice.
+  CBZ.speedRead = function (v) {
+    const mph = CBZ.speedMph(v);
+    if (CBZ.CONFIG.CAR_SPEED_UNIT === "kmh") {
+      const s = Math.abs(v || 0) * MPS_PER_UNIT;
+      const kmh = CBZ.CONFIG.SPEED_UNIT_V2 === false ? mph * 1.609344 : s * KMH_PER_MPS;
+      return { n: Math.max(0, Math.round(kmh)), unit: "KM/H", mph: mph };
+    }
+    return { n: Math.max(0, Math.round(mph)), unit: "MPH", mph: mph };
+  };
+  // a posted limit is authored in mph; this is how it is DRAWN
+  CBZ.speedLimitRead = function (mphLimit) {
+    if (!(mphLimit > 0)) return 0;
+    return CBZ.CONFIG.CAR_SPEED_UNIT === "kmh"
+      ? Math.round(mphLimit * 1.609344 / 5) * 5 : Math.round(mphLimit);
+  };
+
   // CRASH SEVERITY THRESHOLDS — re-grounded in real-world crash data (NHTSA/IIHS).
   // The sim's speed unit ≈ 2.4 mph (sedan top ≈ 35u ≈ 80 mph; cruise 7-12u ≈ 20-30
   // mph), so the bands below map onto the real damage ladder:
@@ -2419,8 +2482,24 @@
       // repaint deterministically via the shared recolor hook when present
       if (CBZ.cityRecolorCar) { try { CBZ.cityRecolorCar(c, opts.color); } catch (e) {} }
     }
+    if (opts.color != null) c.color = opts.color;
     syncOccupants(c);                       // parked = empty; no ghost driver
     return c;
+  };
+
+  /* THE REPAINT HOOK THAT WAS ONLY EVER CALLED. `cityAddParkedCar` has asked
+     for `CBZ.cityRecolorCar` since the day it was written and nothing in the
+     repo ever defined it, so every caller that passed a colour — a venue
+     dressing its staff cars, a gang parking its fleet — silently got the
+     position-hashed catalog paint instead. It is one line over the shared
+     traversal; it never was worth a second implementation, only a definition. */
+  CBZ.cityRecolorCar = function (car, color) {
+    if (!car || color == null) return false;
+    const root = (car.group && car.group.userData && car.group.userData.carVisual) || car.group;
+    if (!root || !CBZ.cityRecolorCarBody) return false;
+    CBZ.cityRecolorCarBody(root, color);
+    car.color = color;
+    return true;
   };
 
   // a car the player bought / pulled from a garage — owned, full value
@@ -4002,6 +4081,16 @@
     // once a frame for the driven car) so callers don't each re-derive it.
     const surf = surfaceGripMul(car);
     grip *= surf.mul;
+    /* SLIPSTREAM. `_draft` (0..1) is written by racedrivers.js's one sweep over
+       every car on track — the AI field AND this one — so the tow down a
+       straight is symmetric and there is no second aero model living in the
+       player's loop. Outside a race nothing writes it and this is a no-op. */
+    if (car._draft > 0) {
+      const gain = CBZ.DRAFT_TOP_GAIN == null ? 0.10 : CBZ.DRAFT_TOP_GAIN;
+      top *= 1 + car._draft * gain;
+      accel *= 1 + car._draft * 0.18;
+      drag *= 1 - car._draft * 0.35;      // it is a DRAG reduction; say so
+    }
     return { accel, top, turn, grip, brake, dmg: d, roll, drift, wheelbase, steerLock, drag, rolling, flatPull, cornerGripMul, cornerPull, surfMul: surf.mul, surfKind: surf.kind };
   }
   function vehicleDims(car) {
@@ -5264,7 +5353,23 @@
          the road when it moved. `_heldBy` is the hold's own back-pointer, so
          there is nothing to keep in sync. */
       if (c._heldBy) continue;
-      if (c.player || c.dead || !c.ai || !c.road) { if (!c.player && !c.dead) parkSeat(c); continue; }
+      if (c.player || c.dead || !c.ai || !c.road) {
+        if (!c.player && !c.dead) {
+          // settled = parkSeat's own cache says nothing moved since last frame.
+          // A settled parked car 60m+ from the camera is completely inert, so
+          // its ~20-node subtree keeps last frame's world matrices — stamp it
+          // and core/matrixskip.js skips the recompose (this was most of the
+          // car half of the render matrix walk: parked cars vastly outnumber
+          // traffic). Near cars stay live for door/entry/impact animation.
+          const settled = c._parkX === c.pos.x && c._parkZ === c.pos.z && c._parkH === c.heading;
+          parkSeat(c);
+          if (settled && CBZ.CONFIG.CAR_MATRIX_HOLD !== false && c.group) {
+            const pdx = c.pos.x - camx, pdz = c.pos.z - camz;
+            if (pdx * pdx + pdz * pdz > 3600) c.group._cbzMatrixOwnedFrame = CBZ._matrixOwnStamp;
+          }
+        }
+        continue;
+      }
       // off-screen, non-critical cars: skip 2 of every 3 frames, banking dt so
       // they still cover the same ground when they do tick.
       const _cdx = c.pos.x - camx, _cdz = c.pos.z - camz;
@@ -5279,7 +5384,16 @@
         // above, invisible traffic doesn't need per-frame simulation.
         const _q = CBZ.qualityLevel == null ? 4 : CBZ.qualityLevel;
         const farStride = _q === 0 ? 6 : _q === 1 ? 4 : 3;
-        if ((_vframe + c._vsl) % farStride !== 0) continue;     // skipped this frame
+        if ((_vframe + c._vsl) % farStride !== 0) {
+          // NOTHING about this car changes on a skipped frame — the stride
+          // above is the guarantee — so its ~20-node subtree's world matrices
+          // are still exactly right. Stamp it so core/matrixskip.js skips the
+          // recompose too (the stamp expires next frame by construction; the
+          // frame the car actually ticks it moves and is left unstamped).
+          // ?cfg_CAR_MATRIX_HOLD=0 reverts.
+          if (CBZ.CONFIG.CAR_MATRIX_HOLD !== false && c.group) c.group._cbzMatrixOwnedFrame = CBZ._matrixOwnStamp;
+          continue;     // skipped this frame
+        }
         dt = c._acc; c._acc = 0;                         // catch-up step
       }
       // DRIVER SHOT DEAD AT THE WHEEL (cops / gunfire): drop the body out and let

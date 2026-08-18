@@ -404,10 +404,11 @@
     const carried = buildWeaponModel(w);
     if (!carried.userData.muzzle) carried.userData.muzzle = new THREE.Vector3(0, 0.05, -0.58);
     carried.visible = i === 0;
-    // TP guns read BIGGER than FP-scale (standard third-person trick — the
-    // over-shoulder camera sits metres away; at 1.05 the held gun vanished
-    // into the blocky hand and the owner couldn't see it at all).
-    carried.scale.setScalar(1.45);
+    // REAL-DIMENSION SIZING (weapons/weapon-scale.js): same law as every
+    // other world display of a gun — real researched length × class READ.
+    // The legacy 1.45 (screenshot-tuned so the gun didn't vanish into the
+    // blocky hand) stays as the module-absent fallback.
+    carried.scale.setScalar((CBZ.weaponHeldScale && CBZ.weaponHeldScale(w.id)) || 1.45);
     carriedModels.push(carried);
     carriedGun.add(carried);
   });
@@ -1336,7 +1337,24 @@
   }
 
   function aimForward(out) {
-    if (shoulderActive()) return CBZ.camera.getWorldDirection(out).normalize();
+    if (shoulderActive()) {
+      // PINNED THIRD-PERSON FRAME (systems/camera.js, CAM_TP_FIXED_ANGLE): the
+      // lens is held at the rig's resting angle on purpose, so it is no longer
+      // the aim — reading it here would nail every round, the acquire cone and
+      // the reticle to that one angle and the gun could not be raised at all.
+      // Take the aim off the input the player is actually moving. Sign: in
+      // third person a POSITIVE cam.pitch is the camera above looking DOWN
+      // (the orbit is `oy = sin(pitch)·dist`), which is the opposite of the
+      // first-person fps.fp convention `forward()` uses two lines down — hence
+      // the -sin here and the +sin there. Degrades to the lens when the flag is
+      // off, when the frame is free (aiming down sights), or in any build where
+      // camera.js predates the hook.
+      if (CBZ.camAimDecoupled && CBZ.camAimDecoupled() && CBZ.cam) {
+        const y = CBZ.cam.yaw || 0, p = CBZ.cam.pitch || 0, cp = Math.cos(p);
+        return out.set(-Math.sin(y) * cp, -Math.sin(p), -Math.cos(y) * cp).normalize();
+      }
+      return CBZ.camera.getWorldDirection(out).normalize();
+    }
     return forward(out);
   }
 
@@ -1839,15 +1857,25 @@
         if (!a || a.dead || a.ko > 0 || a.escaped || !a.group) continue;
         // per-actor radii: a protected actor gets the bare silhouette, so only
         // a literal ray through the real body registers. (See the block above.)
-        const bare = childUnaided(a);
-        if (bare) aimChildSkips++;
-        const hr = bare ? hrRaw : hrA, br = bare ? brRaw : brA;
+        // PERF (exact, and the predicate is still never cached): the bare radii
+        // are strictly CONTAINED in the assisted ones, so an actor the ray
+        // misses at ASSISTED size is missed at bare size too — the protection
+        // question only needs asking for an actor the ray could actually
+        // touch. The standing branch below tests assisted spheres first and
+        // asks childUnaided() only on a potential hit; the two seated branches
+        // (rare) ask it up front as before. This took the predicate from ~630
+        // calls/frame (every ped, every frame, from the hot reticle) to ~hits.
+        let bare = false, hr = hrA, br = brA;
         if (a.group.visible === false) {
           // SEATED OCCUPANT (hidden body, live vehicle): only LIVE riders whose
           // record links the actual car object. (AIM_VEHICLE_OCCUPANTS)
           if (CBZ.CONFIG.AIM_VEHICLE_OCCUPANTS === false) continue;
           const car = a.inCar;
           if (!car || typeof car !== "object" || !car.pos || car.dead) continue;
+          // an invisible ped is USUALLY just culled, so the protection question
+          // is asked only after the occupant checks prove there is a target here
+          bare = childUnaided(a);
+          if (bare) { aimChildSkips++; hr = hrRaw; br = brRaw; }
           const cy = car.pos.y || 0;
           // refresh the rider's dead-while-driving pos so anything reading it
           // (overhead tags, map dots) points at the car, not the sidewalk spot
@@ -1871,6 +1899,8 @@
           if (CBZ.CONFIG.CHAR_SEATED_HITTABLE === false) continue;
           const ap = a.pos;
           if (!ap) continue;
+          bare = childUnaided(a);
+          if (bare) { aimChildSkips++; hr = hrRaw; br = brRaw; }
           let hx = ap.x, hy = ap.y + 0.95, hz = ap.z;   // fallback: seated head guess
           const hm = a.char && a.char.head;
           if (hm && hm.getWorldPosition) { hm.getWorldPosition(occPoint); hx = occPoint.x; hy = occPoint.y; hz = occPoint.z; }
@@ -1884,12 +1914,21 @@
           continue;
         }
         const gp = a.group.position, gy = gp.y || 0;
+        // ASSISTED-radius pre-pass (superset of the bare spheres — see above)
+        let hd = sphereEntry(origin, dir, gp.x, gy + HEAD_Y, gp.z, hrA, maxT);
+        let td = sphereEntry(origin, dir, gp.x, gy + TORSO_Y, gp.z, brA, maxT);
+        let ld = sphereEntry(origin, dir, gp.x, gy + LEG_Y, gp.z, brA * 0.82, maxT);
+        if (!((hd >= 0 && hd < bestDist) || (td >= 0 && td < bestDist) || (ld >= 0 && ld < bestDist))) continue;
+        if (childUnaided(a)) {
+          aimChildSkips++;
+          // protected: re-test at the bare silhouette — only a literal hit counts
+          hd = sphereEntry(origin, dir, gp.x, gy + HEAD_Y, gp.z, hrRaw, maxT);
+          td = sphereEntry(origin, dir, gp.x, gy + TORSO_Y, gp.z, brRaw, maxT);
+          ld = sphereEntry(origin, dir, gp.x, gy + LEG_Y, gp.z, brRaw * 0.82, maxT);
+        }
         // HEAD first — small high sphere, takes priority
-        const hd = sphereEntry(origin, dir, gp.x, gy + HEAD_Y, gp.z, hr, maxT);
         if (hd >= 0 && hd < bestDist) { bestActor = a; bestDist = hd; bestHead = true; bestOcc = false; continue; }
         // BODY — torso + legs spheres
-        const td = sphereEntry(origin, dir, gp.x, gy + TORSO_Y, gp.z, br, maxT);
-        const ld = sphereEntry(origin, dir, gp.x, gy + LEG_Y, gp.z, br * 0.82, maxT);
         let bd = Math.min(td < 0 ? Infinity : td, ld < 0 ? Infinity : ld);
         if (bd < bestDist) { bestActor = a; bestDist = bd; bestHead = false; bestOcc = false; }
       }
@@ -3499,6 +3538,11 @@
   CBZ.weaponThirdPersonActive = shoulderActive;
   CBZ.playerArmed = armed;
   CBZ.playerMuzzleWorld = function (out) { return muzzleWorld(out || new THREE.Vector3()); };
+  // THE intent ray, for the other systems that used to re-derive it from the
+  // lens. Once the third-person frame can be pinned (CAM_TP_FIXED_ANGLE) the
+  // lens and the aim are two different directions, and every consumer that
+  // guesses gets a different answer than the round does.
+  CBZ.playerAimDir = function (out) { return aimForward(out || new THREE.Vector3()); };
   // ---- aim introspection for other systems (e.g. systems/intimidate.js) ----
   CBZ.currentGun = function () { return armed() ? weapon() : null; };   // equipped weapon or null
   CBZ.aimedActor = aimedActor;                                         // {actor,dist,head,point} | null
@@ -3700,7 +3744,14 @@
     if (fps.active) fps.fp = Math.max(-1.3, Math.min(1.3, fps.fp + dPitch * k));
     // CBZ.camPitchRange is the single owner of the third-person envelope, so the
     // lock can settle onto a target as high as the view is allowed to look.
-    else if (CBZ.cam) { const r = CBZ.camPitchRange ? CBZ.camPitchRange() : [-1.0, 0.9]; CBZ.cam.pitch = Math.max(r[0], Math.min(r[1], CBZ.cam.pitch + dPitch * k)); }
+    // SIGN (fixed 2026-08-15): dPitch is UP-positive — it is a difference of
+    // asin(y) terms — and so is fps.fp, but third-person cam.pitch is DOWN-
+    // positive (the orbit is `oy = sin(pitch)·dist`, so a positive pitch puts
+    // the lens ABOVE the pivot looking down). Adding it here drove the reticle
+    // the wrong way in every third-person soft-lock: a target above your sights
+    // pushed the aim further below them, then the lock re-measured a bigger
+    // error and pushed harder. Only the branch's sign was ever wrong.
+    else if (CBZ.cam) { const r = CBZ.camPitchRange ? CBZ.camPitchRange() : [-1.0, 0.9]; CBZ.cam.pitch = Math.max(r[0], Math.min(r[1], CBZ.cam.pitch - dPitch * k)); }
   }
   CBZ.aimLockTarget = function () { return lockTarget; };
 
@@ -4097,7 +4148,12 @@
       if (aim && carriedGun.parent && CBZ.camera) {
         carriedGun.parent.updateWorldMatrix(true, false);
         carriedGun.getWorldPosition(_blGunPos);
-        _blDir.set(0, 0, -1).applyQuaternion(CBZ.camera.quaternion);
+        // aimForward() rather than the lens quaternion: identical while the
+        // camera IS the aim (it is literally getWorldDirection), and the only
+        // correct answer once the frame is pinned (CAM_TP_FIXED_ANGLE) — a
+        // barrel locked to a lens that no longer follows the reticle would
+        // photograph a man firing level at something above his head.
+        aimForward(_blDir);
         _blTarget.copy(CBZ.camera.position).addScaledVector(_blDir, 120);
         _blDir.copy(_blTarget).sub(_blGunPos).normalize();
         // matrix with -Z along the aim dir (+Y kept upright) = barrel on target

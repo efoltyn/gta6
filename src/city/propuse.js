@@ -414,6 +414,16 @@
   // so it costs nothing until something sits.
   const ENTRY_R = 0.78;      // how far out from the cushion the stander's feet go
   const BED_SIDE = 0.95;     // half a mattress + a body
+  // One description of "sitting on this bed", shared by the perch beat going
+  // to sleep and the edge beat getting up, so the two can never disagree.
+  function bedSeatRef(rec) {
+    return {
+      cushion: Math.max(0.30, rec.top - rec.y),
+      floorBelow: 0,
+      kind: rec.kind || null,
+      ceiling: rec.ceiling != null ? rec.ceiling - (rec.y || 0) : null,
+    };
+  }
   const BODY_R = 0.30;
   const probe = [];
   function clearAt(x, z, y) {
@@ -969,6 +979,16 @@
         A.abandon = true;
         return true;
       }
+      // ABSOLUTE RIG STATE, like every other phase (SIT_PHYS_V1). The NPC
+      // commit latches char.sitting before the arc begins (peds.js's sit
+      // branch needs the flag), and this phase used to write no rig flags at
+      // all — so the seated pose owned animChar and the body GLIDED to the
+      // bench sitting on air for the whole walk-in leg. A walking phase is a
+      // WALK: the lower/perch beats re-raise the flag at the moment the hips
+      // actually land, and this runs at order 42, after peds re-latch at 34.
+      if (CBZ.CONFIG.SIT_PHYS_V1 !== false && (ch.sitting || ch.crouch)) {
+        ch.sitting = false; ch.crouch = false;
+      }
       if (A.skipWalk || guide(actor, A.walkTo.x, A.walkTo.z, rec.y, dt) || A.t > WALK_CAP) {
         A.i++; A.t = 0;
         const g2 = groupOf(actor);
@@ -1036,6 +1056,11 @@
       case "perch":
       case "edge": {
         // sit on the mattress EDGE, feet on the floor, facing out of the bed.
+        // The seat is DESCRIBED, not just measured: a bed anchor carries its
+        // own `kind` (a bunk is not a four-poster) and, when something is
+        // racked above it, the underside of that rack. entities/character.js
+        // turns the pair into a posture and, on a bottom bunk, into the duck
+        // that keeps this beat's head out of the steel.
         const sx = rec.hz, sz = -rec.hx;
         const side = ((ex - rec.x) * sx + (ez - rec.z) * sz) >= 0 ? 1 : -1;
         const px = rec.x + sx * side * (0.34), pz = rec.z + sz * side * (0.34);
@@ -1044,11 +1069,11 @@
         if (name === "perch") {
           place(actor, A.sx + (px - A.sx) * e, rec.y, A.sz + (pz - A.sz) * e, lerpA(A.syaw, outFace, e));
           ch.crouch = u > 0.06 && u < 0.35;
-          if (u >= 0.24 && !ch.sitting) { ch.sitting = true; ch.seatRef = { cushion: Math.max(0.30, rec.top - rec.y), floorBelow: 0 }; }
+          if (u >= 0.24 && !ch.sitting) { ch.sitting = true; ch.seatRef = bedSeatRef(rec); }
           grp.rotation.z = 0;
         } else {
           place(actor, px, rec.y, pz, outFace);
-          ch.sitting = true; ch.seatRef = { cushion: Math.max(0.30, rec.top - rec.y), floorBelow: 0 };
+          ch.sitting = true; ch.seatRef = bedSeatRef(rec);
           grp.rotation.z = 0;
           // the arc that follows is a plain stand-up FROM the edge: hand the
           // stand phases the perch position and the outward facing so they
@@ -1150,6 +1175,9 @@
     const seatRef = CBZ.propSeatRef(seat);
     if (actor === CBZ.player) {
       const P = CBZ.player, ch = CBZ.playerChar;
+      // the mode this sit belongs to (SIT_PHYS_V1): the pin below force-exits
+      // on a mode CHANGE, not on "not the city" — a prison bench is sittable
+      P._propMode = (CBZ.game && CBZ.game.mode) || "city";
       if (!(opts && opts.instant) && beginArc(actor, "sit", seat)) return true;
       P.pos.set(seat.x, seat.y, seat.z);
       P.vy = 0; P.grounded = true;
@@ -1280,6 +1308,7 @@
     actor._propBed = bed;
     if (actor === CBZ.player) {
       const P = CBZ.player, ch = CBZ.playerChar;
+      P._propMode = (CBZ.game && CBZ.game.mode) || "city";   // see propSit
       if (!(opts && opts.instant) && beginArc(actor, "lie", bed)) { arcOf(actor).onDone = bedDown; return true; }
       const L = CBZ.propLiePlace(P, bed, {});   // own object: outlives the shared scratch
       P.pos.set(L.x, L.y, L.z);
@@ -1417,13 +1446,28 @@
     }
     const pch = CBZ.playerChar;
     if (pch && pch.lying) sleepers++;
+    /* THE RATCHET (SIT_PHYS_V1): airSitters — claimed seats whose occupant is
+       in the seated pose but NOT at the seat. This is the owner's sentence as
+       a number ("sit on air, close to a chair, but not on the chair"): before
+       the seat re-pin it read 1 within a minute of the first chow block
+       (2.13 m off a yard stool); with the pin it is 0 by construction, and a
+       new mover that drags seated bodies shows up here before it ships.
+       Mid-arc bodies are excluded — a transition legitimately holds the flag
+       away from the anchor for a beat. Pinned at 0 by
+       tools/prison-sit-check.mjs. */
+    let airSitters = 0;
     for (let i = 0; i < claimed.length; i++) {
-      const o = claimed[i].occupant;
+      const rec = claimed[i], o = rec.occupant;
       if (o && o !== CBZ.player && o.char && o.char.lying) sleepers++;
+      if (rec.lieY == null && o && o !== CBZ.player && o.char && o.char.sitting
+          && !arcOf(o) && !o._npcAttached && !((o.ko | 0) > 0) && o.group) {
+        const gp = o.group.position;
+        if (Math.hypot(gp.x - rec.x, gp.z - rec.z) > 0.35) airSitters++;
+      }
     }
     return {
       seats: seats.length, beds: beds.length, noGeom: noGeom, blocked: blocked,
-      sleepers: sleepers, postured: postured,
+      sleepers: sleepers, postured: postured, airSitters: airSitters,
     };
   };
 
@@ -1564,10 +1608,26 @@
           // is back asleep on the next frame instead of lying to attention.
           if (!o.char || !o.char.lying) setLying(o);
         }
-      } else if (geomOn() && o.char && o.char.sitting && !o.char.seatRef) {
+      } else if (o.char && o.char.sitting && !o._npcAttached) {
+        /* A SEATED BODY IS AT ITS SEAT (SIT_PHYS_V1) — the third actor shape
+           closed. The player has the pin below; a peds.js ped re-pins itself
+           from _deskAnchor (its own sit branch, order 34); a PLAIN actor — the
+           whole prison cast — had NOBODY, so any mover writing `target` (the
+           wing's muster, a schedule herd) dragged a seated man metres off his
+           claimed stool in the full seated pose: the owner's "sitting on air,
+           close to a chair, but not on the chair", measured at 2.13 m. The
+           WHOLE transform, exactly like the lie re-pin above and at the same
+           order (42), so the pin wins the frame over every mover. For a ped
+           this re-writes the values its own branch just wrote — a no-op. A KO
+           outranks the furniture: the crumple owns the body until the game's
+           own sweep (rest.busy -> up) releases the claim. */
+        if (CBZ.CONFIG.SIT_PHYS_V1 !== false && !((o.ko | 0) > 0) && !o.driving) {
+          if (o.pos && o.pos.set) o.pos.set(rec.x, rec.y, rec.z);
+          if (o.group) { o.group.position.set(rec.x, rec.y, rec.z); o.group.rotation.y = rec.face; }
+        }
         // a seated NPC whose seat DECLARED its geometry gets the real chair
         // solve; an undeclared one gets null back and keeps the legacy pose.
-        o.char.seatRef = CBZ.propSeatRef(rec);
+        if (geomOn() && !o.char.seatRef) o.char.seatRef = CBZ.propSeatRef(rec);
       }
     }
     if (pArc || (!seat && !bed)) return;
@@ -1575,7 +1635,14 @@
     // ---- 3. the player pin ----------------------------------------------
     // force-exit: anything else claiming the body wins (shot, KO'd, died,
     // thrown, entered a car, a cutscene grabbed the camera, mode change).
-    if (!g || g.mode !== "city" || g.state !== "playing"
+    // "Mode change" means CHANGED — measured against the mode the sit began
+    // in (SIT_PHYS_V1), not against "city": the guard's old literal stood the
+    // player back up the instant a PRISON sit arc finished, so a bench in the
+    // yard sat you down and popped you upright in the same second. Anything
+    // that never recorded a mode (a restore, the flag off) keeps the old
+    // "city" reading byte for byte.
+    const sitMode = (CBZ.CONFIG.SIT_PHYS_V1 !== false && P._propMode) || "city";
+    if (!g || g.mode !== sitMode || g.state !== "playing"
         || P.dead || (P.ko | 0) > 0 || P.driving || P._death
         || (P._phys && (P._phys.air || (P._phys.down | 0) > 0))
         || (CBZ.cineActive && CBZ.cineActive())) {

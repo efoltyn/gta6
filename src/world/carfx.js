@@ -259,6 +259,163 @@
   //   'plastic'    SHARED dark matte (slight env)
   //   'interior'   SHARED very dark matte (no envMap)
   // opts may override { roughness, metalness, emissiveIntensity }.
+  /* ==========================================================================
+     WHY A RANK OF CARS WAS A RANK OF WHITE CARS  —  CAR_PAINT_V2
+
+     OWNER, looking at the speedway car park: "this gray whiteish car glitch".
+     Every vehicle on the campus — twenty parked cars off a colourful catalog
+     (0xe24b4b red, 0xf2c43d taxi yellow, 0x7d2bd6 purple, 0x1470e3 blue) —
+     rendered as the same pale grey-white. The colours were never lost: the
+     material's `.color` is the catalog hex on every one of them. The paint was
+     simply not most of the pixel.
+
+     THE ARITHMETIC. A MeshStandardMaterial splits its response by metalness:
+     the DIFFUSE lobe — the only lobe that carries the car's own colour under a
+     Lambert-lit world — is scaled by (1 - metalness), and the rest is a
+     specular reflection of `envMap` scaled by `envMapIntensity`. This file's
+     paint ran metalness 0.55 and playercars.js's per-style table pushed it to
+     0.70 on a lowrider, with envMapIntensity up to 1.5. So:
+
+         diffuse share   1 - 0.55            =  45%   (0.30 on the lowrider)
+         env share       0.55 x 1.0          =  55%   (1.05 on the lowrider)
+
+     and the env being reflected is `gradientCanvas()` above, whose top stop is
+     #9fc4ff — a bright blue-white sky. On the surfaces you actually look at
+     from a standing or overhead camera (roof, hood, boot lid) the normal points
+     UP, samples that top stop, and more than half the pixel becomes pale sky.
+     Then core/renderer.js's tone map pre-multiplies by exposure/0.6 = 1.67x and
+     the survivors clip toward white. A red car is 45% red and 55% bright sky
+     times 1.67 — which is a white car, exactly as filmed.
+
+     THE LAW, and why it is a scale and not a new table. playercars.js's
+     PAINT_OPTS is authored intent worth keeping — a Veyron IS meant to read
+     wetter than a hatchback — so the ordering survives untouched and only the
+     absolute response moves: metalness is scaled so the diffuse lobe carries
+     the paint, and the env load is scaled to a sheen rather than a coat.
+
+         metalness         x 0.40   0.48 -> 0.19   0.70 -> 0.28
+         envMapIntensity   x 0.45   1.00 -> 0.45   1.50 -> 0.68
+         roughness         x 0.92   a slightly tighter highlight, so what env
+                                    survives reads as a HIGHLIGHT and not a wash
+
+     diffuse share goes 45% -> 81%, and env load 0.55 -> 0.085. Real automotive
+     paint is a pigmented dielectric under a clearcoat, not a metal; the flake
+     is what the residual metalness is for. `metalEnvLoad` (metalness x
+     envMapIntensity) is the number that was wrong and it is the ratchet.
+
+     ONE FLAG: CAR_PAINT_V2=false restores the authored numbers verbatim at
+     every call site at once. ========================================== */
+  const PAINT_V2 = { metalness: 0.40, envMapIntensity: 0.45, roughness: 0.92 };
+  // A paint whose env reflection out-weighs this much of its own colour is the
+  // defect above. 0.35 sits above every value the scaled table produces (the
+  // lowrider, the hottest entry, lands at 0.19) and below every value the
+  // unscaled one did (the softest, a hatch, was 0.48).
+  const METAL_ENV_CEIL = 0.35;
+  function paintResponse(metalness, roughness, envMapIntensity) {
+    const on = CBZ.CONFIG ? CBZ.CONFIG.CAR_PAINT_V2 !== false : true;
+    const m = on ? metalness * PAINT_V2.metalness : metalness;
+    const e = on ? envMapIntensity * PAINT_V2.envMapIntensity : envMapIntensity;
+    const r = on ? Math.min(0.95, roughness * PAINT_V2.roughness) : roughness;
+    return {
+      metalness: m, roughness: r, envMapIntensity: e,
+      diffuseShare: 1 - m,          // how much of the pixel is the car's colour
+      metalEnvLoad: m * e,          // how much of it is the sky
+      v2: on,
+    };
+  }
+  /* CBZ.carPaintAudit() — THE RATCHET. `washed` is the number that matters:
+     live body-paint materials whose reflection load exceeds the ceiling, i.e.
+     cars whose own colour is not most of them. It read every paint material in
+     the world before this change and must read 0. `minDiffuseShare` may only
+     go UP. `mutedHex` counts materials whose colour is NOT what the catalog
+     asked for — a different fault (a dead recolour hook) that would otherwise
+     hide behind the same symptom, so it is counted separately and pinned too. */
+  CBZ.carPaintAudit = function () {
+    const out = {
+      v2: CBZ.CONFIG ? CBZ.CONFIG.CAR_PAINT_V2 !== false : true,
+      cars: 0, paints: 0, washed: 0, mutedHex: 0, marine: 0,
+      minDiffuseShare: 1, maxMetalEnvLoad: 0, ceiling: METAL_ENV_CEIL,
+      liveried: 0, distinctHex: 0, muted: [],
+    };
+    const list = CBZ.cityCars || [];
+    const hexes = Object.create(null);
+    for (let i = 0; i < list.length; i++) {
+      const c = list[i];
+      if (!c || !c.group || c.dead) continue;
+      /* A HULL IS NOT A CAR AND IS NOT MEANT TO MATCH THE CATALOG.
+         playercars.js's recolorBody returns early on `userData.marineLivery`:
+         world/water_hulls.js authors a boat's paint scheme itself and the
+         catalog `color` on a marine record is only the showroom swatch. Counted
+         as cars, the marina's tenders and fishers were the whole `mutedHex`
+         reading — a fault that was in the audit, not in the fleet. */
+      const vis = c.group.userData && c.group.userData.carVisual;
+      if ((vis && vis.userData && vis.userData.marineLivery) ||
+          (c.group.userData && c.group.userData.marineLivery)) { out.marine++; continue; }
+      out.cars++;
+      let seen = false;
+      c.group.traverse(function (o) {
+        const m = o.material;
+        if (!m || Array.isArray(m) || !m._bodyPaint) return;
+        out.paints++;
+        const mt = m.metalness == null ? 0 : m.metalness;
+        const ei = m.envMapIntensity == null ? 1 : m.envMapIntensity;
+        const load = m.envMap ? mt * ei : 0;
+        if (load > METAL_ENV_CEIL) out.washed++;
+        if (1 - mt < out.minDiffuseShare) out.minDiffuseShare = 1 - mt;
+        if (load > out.maxMetalEnvLoad) out.maxMetalEnvLoad = load;
+        if (!seen && m.color && m.color.getHex) {
+          seen = true;
+          const hx = m.color.getHex();
+          hexes[hx] = (hexes[hx] || 0) + 1;
+          // the paint the CATALOG asked for, before buildCar's per-car clearcoat
+          // tint (0.86..1.14) — compare on hue, not on exact bytes.
+          const want = c.color != null ? c.color : (c.model ? c.model.color : null);
+          if (want != null && hueGap(hx, want) > 0.06) {
+            out.mutedHex++;
+            // NAME THE OFFENDER. A bare count is a number you can only argue
+            // with; a row you can look up is one you can fix or exonerate.
+            if (out.muted.length < 6) {
+              out.muted.push({
+                model: (c.model && c.model.name) || "?",
+                want: "#" + ("000000" + (want >>> 0).toString(16)).slice(-6),
+                got: "#" + ("000000" + (hx >>> 0).toString(16)).slice(-6),
+                why: c._raceCar ? "raceCar" : c.player ? "player" : c._propParked ? "parked" : c.ai ? "traffic" : "other",
+              });
+            }
+          }
+        }
+        if (o.userData && o.userData.raceLiveryBase) out.liveried++;
+      });
+    }
+    out.distinctHex = Object.keys(hexes).length;
+    out.minDiffuseShare = +out.minDiffuseShare.toFixed(3);
+    out.maxMetalEnvLoad = +out.maxMetalEnvLoad.toFixed(3);
+    return out;
+  };
+  // hue distance in [0,1] between two packed hexes (0 = same hue family)
+  function hueGap(a, b) {
+    function hue(h) {
+      const r = ((h >> 16) & 255) / 255, g2 = ((h >> 8) & 255) / 255, bl = (h & 255) / 255;
+      const mx = Math.max(r, g2, bl), mn = Math.min(r, g2, bl), d = mx - mn;
+      // A NEAR-GREY HAS NO MEANINGFUL HUE. At d < 0.09 the hue angle is decided
+      // by a couple of bytes of rounding, so an off-white repainted to a
+      // slightly different off-white reported a full hue mismatch and showed up
+      // as a fault. Below the threshold both colours are simply "grey" and
+      // compare equal — the test is "did the paint go missing", not "did the
+      // eighth decimal move".
+      if (d < 0.09) return -1;
+      let hh;
+      if (mx === r) hh = ((g2 - bl) / d + 6) % 6;
+      else if (mx === g2) hh = (bl - r) / d + 2;
+      else hh = (r - g2) / d + 4;
+      return hh / 6;
+    }
+    const ha = hue(a), hb = hue(b);
+    if (ha < 0 || hb < 0) return ha === hb ? 0 : 0.5;
+    const d = Math.abs(ha - hb);
+    return Math.min(d, 1 - d);
+  }
+
   function vehicleMat(role, color, opts) {
     opts = opts || {};
 
@@ -281,14 +438,18 @@
       // ALWAYS fresh — per-car recolor clones the FIRST instance, but each
       // vehicle template gets its own paint material to recolour independently.
       const col = color != null ? color : 0xb0b4ba;
+      const P = paintResponse(num(opts.metalness, 0.55),
+                             num(opts.roughness, 0.38),
+                             num(opts.envMapIntensity, 1.0));
       const m = new THREE.MeshStandardMaterial({
         color: col,
-        metalness: num(opts.metalness, 0.55),
-        roughness: num(opts.roughness, 0.38),
+        metalness: P.metalness,
+        roughness: P.roughness,
         flatShading: true,
         envMap: CBZ.ENV || null,
-        envMapIntensity: num(opts.envMapIntensity, 1.0),
+        envMapIntensity: P.envMapIntensity,
       });
+      m._paintResponse = P;                    // read by CBZ.carPaintAudit()
       // subtle self-glow so paint doesn't go black in shadow (recolorBody also
       // expects an .emissive to exist — it sets it to color*0.16 on the clone).
       m.emissive = new THREE.Color(col).multiplyScalar(0.04);

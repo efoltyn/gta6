@@ -78,6 +78,14 @@
     // hand on the grip
     box(g, 0.160, 0.105, 0.14, mat.skin, 0, -0.155, 0.025, -0.12);
     g.userData.muzzle = new THREE.Vector3(0, 0.045, -1.204);
+    // WHERE THE HANDS GO — see systems/gunhands.js. A belt gun is reloaded
+    // through the feed cover and the ammo box, not a magwell.
+    g.userData.grips = {
+      support: new THREE.Vector3(0, -0.035, -0.555),   // under the barrel, behind the bipod yoke
+      mag: new THREE.Vector3(0, -0.130, -0.210),       // ammo-box lid
+      charge: new THREE.Vector3(0, 0.150, -0.220),     // feed-tray cover latch
+      style: "belt",
+    };
     return g;
   };
 })();

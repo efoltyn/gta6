@@ -1,7 +1,8 @@
 /* ============================================================
    systems/survivalhud.js — the SURVIVAL disaster HUD.
 
-   Alive-count pill ("87 ALIVE"), HP + stamina bars, a BREATH bar while
+   Alive-count pill ("87" + a people glyph, riding the top-right rail beside
+   the match clock — index.html/#topright), HP + stamina bars, a BREATH bar while
    you are in the water, the screen white-out (lightning/nuke), and a
    minimap drawn to the
    existing #minimap canvas (the prison minimap is gated off in this

@@ -286,7 +286,34 @@
       "@media(max-width:720px){#cityKillFeed{top:124px;font-size:10px}}" +
       // touch zone map (css/mobile.css): top-right is the money+wanted column —
       // the feed stacks BELOW it, clear of the tap targets.
-      "body.touch #cityKillFeed{top:170px}";
+      "body.touch #cityKillFeed{top:170px}" +
+      // SURVIVAL HANGS IT UNDER THE PILLS. Every offset above is measured off
+      // the CITY's top-right stack (cash, then the wanted bar, then room for a
+      // situational pill) — but the disaster mode hides all of that and leaves
+      // exactly one row up there: the alive count and the clock, top:18 and
+      // ~46px tall. Against that, 170px is most of the way down a landscape
+      // phone, which put the death lines across the middle of the water and
+      // straight through the RISE button. These two rules re-hang the feed
+      // ~10px under the pill row, in the gap the pills leave behind, and they
+      // are last in the sheet so they beat body.touch at equal specificity.
+      // The clamp is the other half of it: four lines is ~80px, and on the
+      // shortest landscape phone the DIVE/RISE column (bottom:18 + two 72px
+      // .tv-big pills + a 10px gap = 182px of the bottom edge) leaves barely
+      // that. overflow:hidden against a height measured off THAT column means a
+      // burst of deaths drops the OLDEST line — newest is first in the DOM, so
+      // what gets clipped is the bottom of the stack — instead of the feed
+      // growing down over a button the thumb needs. svh is the toolbars-SHOWN
+      // height, which is the one really on the glass; vh is the fallback for
+      // engines without it.
+      // The max(46px, …) floor is insurance, not a layout: a viewport short
+      // enough to drive the subtraction to zero would otherwise hide the feed
+      // ENTIRELY, and a silent feed is a worse failure than two lines grazing a
+      // button. No shipping phone is that short in landscape (an SE is 320),
+      // so on real glass the calc always wins.
+      "body.mode-survival #cityKillFeed{top:74px;overflow:hidden;" +
+      "max-height:max(46px,calc(100vh - 268px));max-height:max(46px,calc(100svh - 268px))}" +
+      "@media(max-width:820px){body.mode-survival #cityKillFeed{top:64px;" +
+      "max-height:max(46px,calc(100vh - 258px));max-height:max(46px,calc(100svh - 258px))}}";
     document.head.appendChild(style);
     feedEl = document.createElement("div");
     feedEl.id = "cityKillFeed";

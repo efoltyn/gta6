@@ -153,7 +153,15 @@
     // never has to look the row up again.
     model.userData.weaponMelee = !!meta.melee;
     model.userData.weaponHold = Object.assign({ heavy: 0, support: 0, stance: "" }, meta.hold || {});
-    model.scale.setScalar((meta.slot === "pistol" || meta.slot === "utility") ? 0.92 : 0.82);
+    // REAL-DIMENSION SIZING (weapons/weapon-scale.js): the scalar is derived
+    // from the researched real gun length so an NPC's rifle is the SAME size
+    // as the player's — the old 0.82/0.92 pair drew NPC guns ~35% smaller
+    // than the player's identical third-person gun ("guns feel small"). The
+    // legacy pair stays as the fallback when the scale module is absent or
+    // CBZ.CONFIG.WEAPON_REAL_SCALE=false.
+    const heldScale = (CBZ.weaponHeldScale && CBZ.weaponHeldScale(id)) ||
+      ((meta.slot === "pistol" || meta.slot === "utility") ? 0.92 : 0.82);
+    model.scale.setScalar(heldScale);
     model.position.set(0.02, 0.02, 0.03);
     // barrel runs ALONG the forearm (grip in the hand, muzzle past the fingers)
     // so an extended arm points the gun FORWARD, upright. (+π/2, π) verified

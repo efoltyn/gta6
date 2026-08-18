@@ -197,6 +197,8 @@
        x, z, heading,                       // grid slot
        model | style, color,                // car identity
        livery: {number, base, accent},      // optional (race_livery.js)
+       t0,                                  // exact course param, if the caller
+                                            // knows it (a grid slot does)
        name, number, skill (0..1), aggr (0..1), consistency (0..1),
        tag,                                 // group key for despawnAll
        mode: "line" | "path",
@@ -256,8 +258,14 @@
       _lapFloor: 0,
     };
     if (m.line) {
-      // seat the param at the spawn point so progress starts clean
-      m.t = coarseParam(m.line, opts.x, opts.z);
+      /* Seat the param at the spawn point so progress starts clean. A caller
+         that KNOWS the param — a grid slot is authored as "N metres behind the
+         line", so its param is exact arithmetic — passes `t0` and we take it.
+         `coarseParam` is a 96-sample search and cannot resolve a car parked a
+         few metres behind the start line from one parked ON it: the pole slot
+         came out at t = 0 against the field's 0.99 and was scored a whole lap
+         down all race. See the long note on island_speedway.js's gridSlot(). */
+      m.t = opts.t0 != null ? ((opts.t0 % 1) + 1) % 1 : coarseParam(m.line, opts.x, opts.z);
     }
     D.list.push(m);
     return m;
@@ -377,6 +385,85 @@
     return want;
   }
 
+  /* ============================================================
+     SLIPSTREAM — the thing an oval race is actually ABOUT.
+
+     A tri-oval with two long straights and no draft is a procession: the
+     fastest car leads, everybody else holds station behind at their own
+     terminal velocity, and a pass can only ever come from someone else's
+     mistake. Measured before this block, the word "draft"/"slipstream" did not
+     appear anywhere in the race code — the AI had racecraft (ATTACK swings to
+     the free side of a slower car) with no mechanism that could ever make it
+     work, because a car with the same top speed cannot pass one in front of it
+     on a straight.
+
+     THE MODEL. A car in another's wake sees reduced pressure drag, so its
+     terminal speed rises. The tow is strongest right behind the leading car and
+     is gone by about eight car lengths; it needs the two to be genuinely in
+     line, because a car half a width offset is in dirty air, not a wake. It
+     therefore reads as one number per car in [0,1] and is applied as a top-speed
+     and acceleration multiplier — the same two places a booster would go.
+
+     IT APPLIES TO THE PLAYER TOO, and it must: a tow the AI gets and you don't
+     is not a mechanic, it is a handicap. `car._draft` is set on EVERY car in
+     the race including the player's, and vehicles.js's carDynamics reads it —
+     one line there, no second physics path. And because the tow works both
+     ways, "hold the inside line so nobody gets a run on you" becomes a real
+     defensive decision instead of a comment in the AI.
+
+     Flag RACE_SLIPSTREAM=false → every _draft is 0 and both consumers no-op. */
+  const DRAFT_RANGE = 32;        // metres: ~8 car lengths, then it is gone
+  const DRAFT_LAT = 3.1;         // metres of lateral offset before it is dirty air
+  const DRAFT_MIN = 2.2;         // closer than this you are not in the wake, you are IN the car
+  if (CBZ.CONFIG.RACE_SLIPSTREAM == null) CBZ.CONFIG.RACE_SLIPSTREAM = true;
+  let _draftPairs = 0, _draftPeak = 0;
+  function draftSweep() {
+    const on = CBZ.CONFIG.RACE_SLIPSTREAM !== false;
+    // gather every car ON TRACK: the AI field plus the player, one flat list, so
+    // the tow is symmetric by construction rather than by two matching branches.
+    const cars = [];
+    for (const m of D.list) if (m.car && !m.car.dead && m.state !== "grid") cars.push(m.car);
+    const P = CBZ.player;
+    if (P && P.driving && P._vehicle && !P._vehicle.dead) cars.push(P._vehicle);
+    for (const c of cars) c._draft = 0;
+    if (!on || cars.length < 2) return;
+    for (let i = 0; i < cars.length; i++) {
+      const c = cars[i];
+      const v = Math.abs(c.v || 0);
+      if (v < 8) continue;                       // no wake to sit in at walking pace
+      const fx = Math.sin(c.heading), fz = Math.cos(c.heading);
+      const rx = Math.cos(c.heading), rz = -Math.sin(c.heading);
+      let best = 0;
+      for (let j = 0; j < cars.length; j++) {
+        if (j === i) continue;
+        const o = cars[j];
+        const dx = o.pos.x - c.pos.x, dz = o.pos.z - c.pos.z;
+        const dot = dx * fx + dz * fz;           // + = ahead of us
+        if (dot < DRAFT_MIN || dot > DRAFT_RANGE) continue;
+        const lat = Math.abs(dx * rx + dz * rz);
+        if (lat > DRAFT_LAT) continue;
+        // he has to be going the same way, or he is a backmarker facing the wall
+        if ((Math.sin(o.heading) * fx + Math.cos(o.heading) * fz) < 0.6) continue;
+        // strongest just behind, tapering to nothing at range; a car half a
+        // width offset gets a fraction of the tow, not all of it.
+        const near = 1 - (dot - DRAFT_MIN) / (DRAFT_RANGE - DRAFT_MIN);
+        const line = 1 - lat / DRAFT_LAT;
+        const f = near * near * (0.45 + line * 0.55);
+        if (f > best) best = f;
+      }
+      c._draft = best;
+      if (best > 0.02) { _draftPairs++; if (best > _draftPeak) _draftPeak = best; }
+    }
+  }
+  CBZ.raceDraftAudit = function () {
+    return {
+      on: CBZ.CONFIG.RACE_SLIPSTREAM !== false,
+      towsSeen: _draftPairs, peak: +_draftPeak.toFixed(3),
+      range: DRAFT_RANGE, lat: DRAFT_LAT,
+      topGain: CBZ.DRAFT_TOP_GAIN == null ? 0.10 : CBZ.DRAFT_TOP_GAIN,
+    };
+  };
+
   // ============================================================
   //  THE TICK — order 37.3: after the lane AI (37) has moved traffic,
   //  before the car-car collision pass (37.6) resolves the frame's
@@ -386,10 +473,16 @@
   CBZ.onUpdate(37.3, function (dt) {
     if (g.mode !== "city" || !D.list.length) return;
     if (dt > 0.12) dt = 0.12;
+    draftSweep();                       // one pass for the whole field + the player
     for (let i = 0; i < D.list.length; i++) {
       const m = D.list[i], car = m.car;
       if (!car || car.dead || car._exploded) { m.dnf = true; continue; }
       const P = perf(car);
+      // the tow, applied where a booster would go (see draftSweep's note)
+      if (car._draft > 0) {
+        P.top *= 1 + car._draft * (CBZ.DRAFT_TOP_GAIN == null ? 0.10 : CBZ.DRAFT_TOP_GAIN);
+        P.accel *= 1 + car._draft * 0.18;
+      }
 
       // ---- GRID HOLD: parked on the slot, brakes on, engine idling ----
       if (m.state === "grid") {
@@ -654,6 +747,22 @@
     CBZ.raceKit._last = kit;      // debug/probe handle (headless gates read time)
     return kit;
   }
+
+  /* IS A RACE HAPPENING RIGHT NOW. One predicate, so anything that must hold
+     its peace during a race asks a question instead of learning the name of
+     every event in the game. True for the speedway weekend, APEX night, a
+     pink-slip duel and a street race — all four spawn through `spawn()` — and
+     for the legacy spline field, which does not. */
+  CBZ.raceLive = function () {
+    if (D.list.length) return true;
+    try {
+      const S = CBZ.speedwayRaceState && CBZ.speedwayRaceState();
+      if (S && S.active) return true;
+      const st = CBZ.cityStreetRacing && CBZ.cityStreetRacing.state && CBZ.cityStreetRacing.state();
+      if (st && st.active) return true;
+    } catch (e) {}
+    return false;
+  };
 
   CBZ.raceDrivers = {
     spawn: spawn,

@@ -717,17 +717,51 @@
     cityGlass.push(rec); if (list) list.push(rec);
     return rec.mesh;
   }
+  // ---- CRACKED PANES -------------------------------------------------------
+  // A PUNCH THAT NEVER LANDS TWICE NEVER BREAKS ANYTHING. Melee is deliberately
+  // two-stage (first swing spider-cracks, second blows it out), but `cracked`
+  // used to be cleared by the DECAL's expiry — and the decal lives 0.45-0.70s.
+  // So the second punch had to arrive inside a ~half-second window or the pane
+  // silently re-healed and you were back at swing one, forever. Measured: a
+  // pooled (non-collider) pane — which is every interior/partition pane in the
+  // game — was effectively unbreakable by fist at any human click rate, while
+  // collider-backed curtain-wall panes burst on hit one. That is exactly the
+  // "the office glass isn't real like the window glass" report.
+  //
+  // The fade and the STATE are now separate clocks: the decal still fades on its
+  // own cosmetic schedule, while the pane stays genuinely cracked for CRACK_HOLD
+  // seconds — long enough that a second swing at a normal rhythm always finishes
+  // the job, short enough that the world still re-glazes itself if you wander off.
+  const crackedPanes = [];   // panes holding "one more hit finishes it"
+  const CRACK_HOLD = 6.0;    // seconds a cracked pane stays cracked
+  function markCracked(gp) {
+    gp.cracked = true;
+    gp.crackHold = CRACK_HOLD;
+    if (crackedPanes.indexOf(gp) === -1) crackedPanes.push(gp);
+  }
   // lay a fading spider-crack decal flat over a pane (just before it bursts).
   // Cheap: a single quad on a shared material, pooled and capped.
-  function crackPane(gp, hx, hy, hz) {
-    if (gp.shattered || gp.cracked || crackQuads.length > 24) return;
-    gp.cracked = true;
+  // (bx,bz) points from the pane back toward whoever struck it, so the decal
+  // lands on the face being HIT. It used to be placed by the pane's own world
+  // sign (`gp.z >= 0`), which put the crack on the far side of the glass for
+  // half the map and on the outside of every interior pane — you punched, the
+  // only feedback rendered behind the wall, and the swing read as a whiff.
+  function crackPane(gp, hx, hy, hz, bx, bz) {
+    if (gp.shattered || gp.cracked) return;
+    markCracked(gp);                     // state FIRST: a capped decal pool must
+                                         // never cost the player a landed hit
+    if (crackQuads.length > 24) return;
     const horiz = gp.hd < gp.hw;   // pane wider in X than Z → faces ±Z
     const sz = Math.min(1.5, Math.max(0.7, gp.span));
     const q = new THREE.Mesh(new THREE.PlaneGeometry(sz, sz), crackMat());
     const px = hx != null ? hx : gp.x, py = hy != null ? hy : gp.y, pz = hz != null ? hz : gp.z;
-    if (horiz) { q.position.set(px, py, gp.z + (gp.z >= 0 ? 0.05 : -0.05)); }
-    else { q.position.set(gp.x + (gp.x >= 0 ? 0.05 : -0.05), py, pz); q.rotation.y = Math.PI / 2; }
+    if (horiz) {
+      const off = bz != null ? (bz >= 0 ? 0.05 : -0.05) : (gp.z >= 0 ? 0.05 : -0.05);
+      q.position.set(px, py, gp.z + off);
+    } else {
+      const off = bx != null ? (bx >= 0 ? 0.05 : -0.05) : (gp.x >= 0 ? 0.05 : -0.05);
+      q.position.set(gp.x + off, py, pz); q.rotation.y = Math.PI / 2;
+    }
     q.renderOrder = 3;
     CBZ.scene.add(q);
     crackQuads.push({ mesh: q, gp, life: 0.45 + Math.random() * 0.25, fade: 0 });
@@ -772,14 +806,17 @@
   // A small local rolloff makes a far pane disappear beneath the player's gun
   // report; beyond 55m it is intentionally inaudible.
   const PLAYER_GLASS_HEAR_DIST = 55;
-  function playPlayerGlass(gp) {
+  // gain scales the whole cue: 1 = a pane coming down, ~0.4 = a pane taking a
+  // hit and holding (the melee crack stage).
+  function playPlayerGlass(gp, gain) {
     if (!gp || !CBZ.sfx) return;
+    gain = gain == null ? 1 : gain;
     const p = CBZ.player && CBZ.player.pos;
     let dist = null;
     if (p) dist = Math.hypot(gp.x - p.x, gp.y - (p.y || 0), gp.z - p.z);
     if (dist != null && dist >= PLAYER_GLASS_HEAR_DIST) return;
-    const volume = dist == null ? 1 : Math.max(0, 1 - Math.max(0, dist - 8) / (PLAYER_GLASS_HEAR_DIST - 8));
-    CBZ.sfx("glass", dist == null ? undefined : { dist: dist, volume: volume });
+    const volume = (dist == null ? 1 : Math.max(0, 1 - Math.max(0, dist - 8) / (PLAYER_GLASS_HEAR_DIST - 8))) * gain;
+    CBZ.sfx("glass", dist == null ? { volume: volume } : { dist: dist, volume: volume });
   }
   // burst every intact pane within r of (x,z) — called on car crashes etc.
   // SWISS CHEESE: a blast doesn't just clear glass — up to PER_BLAST_OPEN of the
@@ -868,10 +905,24 @@
   // ahead of the muzzle within range), select by true forward entry distance, and
   // take the impact point at the MIDPOINT of the segment inside the pane so the
   // decal/chip always lands in the glass — stable from touching distance to range.
+  // opts.back — THE FIST INSIDE THE PANE. A shot starts at a muzzle held out in
+  // front of you; a PUNCH starts at your own centre, and a body standing flush
+  // against glass has its centre within a body-radius (0.38m) of the pane plane
+  // — or straight past it, whenever the glass carries no collider and you simply
+  // walked into it. A pane that is not strictly FORWARD of the origin was never
+  // tested, so the swing sailed through and nothing broke: measured, a punch
+  // landed at every standoff from 3.0m down to 0.0m and then failed at every
+  // negative one. That is the owner's "you have to be a perfect distance away to
+  // punch glass — too close and your punch registers thru it". `back` lets a
+  // strike reach that far BEHIND its own origin, which is where the glass you
+  // are pressed against actually is. Bounded to roughly a body radius so it can
+  // never reach a different pane standing behind you, and it defaults to 0, so
+  // every gun/blast caller keeps byte-identical behaviour.
   CBZ.cityShatterRay = function (ox, oy, oz, dx, dy, dz, maxDist, force, opts) {
     opts = opts || {};
     const nl = Math.hypot(dx, dy, dz) || 1; dx /= nl; dy /= nl; dz /= nl;
     const lim = maxDist != null ? maxDist : 1e9;
+    const back = opts.back > 0 ? Math.min(opts.back, 0.75) : 0;
     CBZ.cityLastShatterDist = -1;
     let best = null, bestT = lim, bestMid = lim, bestExit = lim;
     for (let i = 0; i < cityGlass.length; i++) {
@@ -885,9 +936,9 @@
       else { let a = ((gp.z - gp.hd) - oz) / dz, b = ((gp.z + gp.hd) - oz) / dz; if (a > b) { const s = a; a = b; b = s; } if (a > tmin) tmin = a; if (b < tmax) tmax = b; }
       if (tmax < tmin) continue;                        // ray misses the box entirely
       // forward segment the ray spends INSIDE this pane: [tEnter, tExit].
-      const tEnter = tmin > 0 ? tmin : 0;               // clamp the muzzle-inside case forward
+      const tEnter = tmin > -back ? tmin : -back;       // clamp the origin-inside case to the reach-behind
       const tExit = tmax < lim ? tmax : lim;            // bounded by the round's reach
-      if (tExit <= 1e-5 || tExit <= tEnter) continue;   // pane is at/behind the muzzle, or no forward extent → not crossed
+      if (tExit <= -back + 1e-5 || tExit <= tEnter) continue;   // pane is behind the strike's reach, or no extent → not crossed
       // SELECT the pane whose forward entry is nearest; when several flush panes
       // share entry 0 (muzzle inside, point-blank), break the tie on the SHORTER
       // forward exit — that's the thin pane the round is actually punching out,
@@ -909,7 +960,17 @@
         burstPane(best); queueWindowOpening(best);
         if (opts.directPlayer) playPlayerGlass(best);
       }
-      else { crackPane(best, bestHX, bestHY, bestHZ); spawnGlassChip(bestHX, bestHY, bestHZ); }
+      else {
+        // strike direction reversed → the decal lands on the face being hit
+        crackPane(best, bestHX, bestHY, bestHZ, -dx, -dz);
+        spawnGlassChip(bestHX, bestHY, bestHZ);
+        // A LANDED HIT MUST BE AUDIBLE. The first swing of the two-stage break
+        // used to make no sound at all, so a punch that genuinely connected was
+        // indistinguishable from one that missed the pane entirely — the other
+        // half of "I can't punch and break it". Quieter than the burst: this is
+        // glass surviving a hit, not glass coming down.
+        if (opts.directPlayer) playPlayerGlass(best, 0.4);
+      }
     }
     return best;
   };
@@ -992,8 +1053,9 @@
           else if (CBZ.colliders.indexOf(gp.col) === -1) CBZ.colliders.push(gp.col);
         }
       }
-      gp.cracked = false;
+      gp.cracked = false; gp.crackHold = 0;
     }
+    crackedPanes.length = 0;   // a re-glazed city holds no half-broken panes
     // interior band dressing hidden by wall carves comes back with the glass
     for (let i = 0; i < roomDeco.length; i++) if (roomDeco[i].hidden) decoShow(roomDeco[i], true);
     for (const s of cityShards) CBZ.scene.remove(s.mesh);
@@ -1033,10 +1095,16 @@
           CBZ.scene.remove(cq.mesh);
           if (cq.mesh.material) cq.mesh.material.dispose();
           cq.mesh.geometry.dispose();
-          if (cq.gp) cq.gp.cracked = false;   // pane re-heals (decal gone)
-          crackQuads.splice(i, 1);
+          crackQuads.splice(i, 1);        // the DECAL is gone; the pane stays
+                                          // cracked on its own clock (below)
         }
       }
+    }
+    // cracked panes re-heal on CRACK_HOLD, not on the decal's fade
+    for (let i = crackedPanes.length - 1; i >= 0; i--) {
+      const gp = crackedPanes[i];
+      gp.crackHold -= dt;
+      if (gp.shattered || gp.crackHold <= 0) { gp.cracked = false; crackedPanes.splice(i, 1); }
     }
     if (!cityShards.length) return;
     const G = (CBZ.TUNE && CBZ.TUNE.gravity) || 22;
@@ -1493,6 +1561,17 @@
      already there. A collider with no mesh stays non-carvable, as before. */
   const carveBounds = window.THREE && THREE.Box3 ? new THREE.Box3() : null;
   const carveBand = { y0: 0, y1: 0, derived: false };
+  /* The LONG horizontal axis a band-less collider must span to count as a WALL
+     rather than a post (see the eligibility loop in carveHole). Deliberately
+     the plain "how wide is it" test and NOT an aspect ratio: a ratio veto
+     rejected the 1.4 m-thick × 2.5 m heavy wall that tools/breach-check.mjs
+     opens with the heavy explosive rows (2.5/1.4 = 1.79), which is a real wall
+     and must still open. Every band-less thing in the city that is ALSO thin
+     enough to reach this test is street furniture spanning ≤ 0.84 m (the
+     widest is a barrel), so 1.2 m clears the largest offender by 43% while
+     sitting well under the 2.5 m the probe itself uses to recognise a wall.
+     City facades never reach this test at all — they declare y0/y1. */
+  const POST_SPAN = 1.2;
   function wallBandOf(c) {
     if (c.y0 != null && c.y1 != null && isFinite(c.y0) && isFinite(c.y1)) return c;   // zero-alloc hot path
     if (!c.ref || c.ref.visible === false || !carveBounds) return null;
@@ -1513,7 +1592,11 @@
   // by a probe walking a body at the hole. Publishing them turns the next
   // "the hole doesn't work" into one call instead of another probe round.
   const carveDbg = {};
-  CBZ.cityBreachAudit = function () { return Object.assign({}, carveDbg); };
+  // `live` = how many carves are on the books right now. tools/prop-blast-check
+  // reads it across a detonation to prove a blast against a lamp post opens
+  // NOTHING — the count is the only way to tell "refused" from "carved
+  // something else nearby" without walking the scene graph.
+  CBZ.cityBreachAudit = function () { return Object.assign({ live: cityBreaches.length }, carveDbg); };
 
   function carveHole(x, y, z, r, opts) {
     opts = opts || {};
@@ -1546,6 +1629,28 @@
       // breach.js raises this ceiling as its ledger crosses the heavier rows,
       // so a thick wall opens when the POUNDS say it does. Default unchanged.
       if (Math.min(c.maxX - c.minX, c.maxZ - c.minZ) > maxThick) continue;   // thick = counters/plinths, skip
+      /* A POST IS NOT A WALL (owner-filmed: an RPG into a STREET LAMP).
+         Every street prop in the city — lamp masts, sign poles, hydrants,
+         bollards, parking meters, tree trunks — registers through props.js
+         solidCollider(x, z, r, ref), which pushes a SQUARE footprint box and
+         no y-band. The band therefore comes from `derived` above, off the
+         mesh, and a 5.6 m lamp mast on a 0.34 m box clears BOTH gates: taller
+         than 1.6, thinner than 0.9. So the rocket picked the lamp as its
+         "wall", hid the mast, and — because a lamp's parent group is
+         translated to the kerb, which is exactly what `freeStanding` reads as
+         "there is a building behind this" — dressed the full interior room
+         over the sidewalk: an ~8 m unlit-white pocket liner, a glowing
+         ceiling slab, furniture silhouettes, and a ~57-piece rubble heap on
+         the grass. None of it existed; it was a lamp.
+         A wall is a RUN: it spans. A footprint under POST_SPAN in BOTH
+         horizontal axes is a post, and the file already refuses to open piers.
+         Gated to DERIVED bands only, so every first-class wall collider (which
+         declares y0/y1) keeps its exact old eligibility — including the
+         measured 0.6 m facade segments — while the prison's 5.5 m band-less
+         wall boxes and the heavy-explosive test wall still pass. The blast
+         still scars, shakes, shatters glass and throws its debris at a post;
+         it just no longer remodels one into an apartment. */
+      if (band.derived && Math.max(c.maxX - c.minX, c.maxZ - c.minZ) < POST_SPAN) continue;
       const mt = c.ref.material; if (mt && mt.transparent) continue;    // glass/doors keep their own systems
       const sx = Math.max(c.minX, Math.min(c.maxX, x)), sz = Math.max(c.minZ, Math.min(c.maxZ, z));
       const dx = x - sx, dz = z - sz, dd = dx * dx + dz * dz;
@@ -1762,6 +1867,19 @@
       // but a carve on a wall NEAR it swept the perimeter collider out of the
       // opening — "PERIMETER BREACHED" through the side door.
       if (o.noBreach) continue;
+      /* AND NEITHER DOES A LAMP POST. This sweep exists to clear the WALL
+         SEGMENTS that sit inside the new opening — the sill course under it,
+         the neighbouring facade boxes it now spans. It clears them by splicing
+         the collider and hiding the mesh. A post standing on the pavement in
+         front of the facade is within `planeTol` of the wall plane and is
+         narrow enough to fall "wholly inside the hole", so a rocket into the
+         shopfront behind it deleted the lamp as collateral — measured by
+         tools/prop-blast-check.mjs, which caught a 7 m mast vanishing from a
+         blast that never carved it. Same rule as the eligibility loop: a
+         band-less collider that does not SPAN is street furniture, and street
+         furniture is not part of the wall it happens to stand near. */
+      if (o.y0 == null && o.y1 == null &&
+          Math.max(o.maxX - o.minX, o.maxZ - o.minZ) < POST_SPAN) continue;
       const oFixed = horiz ? (o.minZ + o.maxZ) / 2 : (o.minX + o.maxX) / 2;
       if (Math.abs(oFixed - fixed) > planeTol) continue;
       // a heightless collider is full-height, so it always overlaps
@@ -1868,8 +1986,20 @@
        behind: built there, the prefab stands proud in the open as a lit
        little house on the spot the rocket cleared. A lone slab keeps only
        what blasted concrete leaves — the remnant flanks, the fractured rim,
-       the scorch and the debris the fracture chain already throws. */
-    if (freeStanding) {
+       the scorch and the debris the fracture chain already throws.
+
+       AND `freeStanding` DOES NOT CATCH EVERY LONE SLAB. It infers "there is a
+       volume behind this wall" from the parent group being TRANSLATED — but
+       every street prop in the city is a group translated to its own kerb, so
+       a lamp mast, a sign post or a fence panel reads as facade and gets the
+       whole prefab built in the open air (owner-filmed: an RPG into a street
+       lamp). The collider gates above stop props being picked as walls at all
+       now; this is the second wall of that fence, and it asks the question
+       directly instead of inferring it — a building is metres across in BOTH
+       horizontal axes, a prop group is its own pole. Only walls too short to
+       be architecture on their own pay for the bounds traversal, so the
+       common city-facade path is untouched. */
+    if (freeStanding || propSized()) {
       buildRim();
       cityBreaches.push(rec);
       return rec;
@@ -1977,6 +2107,38 @@
 
     cityBreaches.push(rec);
     return rec;
+
+    // Is the thing we just carved PROP-SIZED rather than a building? A hoisted
+    // function so the free-standing early-out above can call it. Returns false
+    // fast for any wall long enough to be architecture on its own (the whole
+    // city-facade path), so the Box3 traversal only ever runs on the short,
+    // suspicious boxes — a lamp mast, a fence post, a sign.
+    function propSized() {
+      if (len >= 3.0) return false;              // a 3 m run is a wall, whatever it hangs off
+      if (!parent || !carveBounds) return false;
+      /* CHEAP ANSWER FIRST. A city facade is a RUN of short segments, so
+         `len < 3` is the COMMON case here, not the exotic one — and the bounds
+         traversal below walks a whole building's mesh tree. A building group
+         carries a collider per wall box per storey per face; a prop group
+         carries its own post and nothing else. Counting siblings is one pass
+         over a flat array with an early-out, so the ordinary facade carve
+         answers "yes, a building" almost immediately and never pays for the
+         traversal. Only the genuinely ambiguous few reach the Box3. */
+      let sib = 0;
+      for (let i = 0; i < CBZ.colliders.length; i++) {
+        const o = CBZ.colliders[i];
+        if (o !== c && o.ref && o.ref.parent === parent && ++sib >= 4) return false;
+      }
+      try {
+        carveBounds.setFromObject(parent);
+        if (carveBounds.isEmpty && carveBounds.isEmpty()) return false;
+        const bw = carveBounds.max.x - carveBounds.min.x;
+        const bd = carveBounds.max.z - carveBounds.min.z;
+        if (!isFinite(bw) || !isFinite(bd)) return false;
+        carveDbg.parentFootprint = [+bw.toFixed(2), +bd.toFixed(2)];
+        return Math.min(bw, bd) < 3.0;           // narrower than a corridor = furniture
+      } catch (e) { return false; }
+    }
 
     // --- FRACTURED RIM: 8-13 jittered concrete prisms ringing the opening in
     //     a radial crack pattern, a few HANGING into the gap as cracked
@@ -8339,7 +8501,11 @@
       const trunkH = TREES2 ? th + 0.15 : th;
       const trunk = add(new THREE.BoxGeometry(0.45, trunkH, 0.45), 0x6b4a2a, x, TREES2 ? th / 2 + 0.025 : th / 2 + 0.1, z);
       trunk.castShadow = true;
-      CBZ.colliders.push({ minX: x - 0.3, maxX: x + 0.3, minZ: z - 0.3, maxZ: z + 0.3, ref: trunk, noCam: true });
+      // noBreach: a plaza tree is a 0.6 m square box with a tall trunk mesh on
+      // it and no y-band — the exact profile carveHole's derived-band path
+      // mistakes for a wall panel (see the eligibility loop's POST_ASPECT note,
+      // and city/props.js:solidCollider for the filmed lamp-post case).
+      CBZ.colliders.push({ minX: x - 0.3, maxX: x + 0.3, minZ: z - 0.3, maxZ: z + 0.3, ref: trunk, noCam: true, noBreach: true });
       const parts = TREES2 ? [x - 0.225, -0.05, z - 0.225, x + 0.225, th + 0.1, z + 0.225] : null;
       if (vi++ % 2 === 0) {
         if (TREES2) {

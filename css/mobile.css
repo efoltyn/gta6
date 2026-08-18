@@ -208,6 +208,11 @@ html, body { touch-action: none; -webkit-user-select: none; user-select: none; }
 .tbtn.tfire { background: rgba(226,74,58,.5); border-color: rgba(255,120,100,.65);
   position: relative; overflow: visible; }
 .tbtn.on { transform: translateY(3px); background: rgba(255,122,26,.62); box-shadow: 0 1px 0 rgba(0,0,0,.3); }
+/* C4 (#tbomb, touch.js): tap plants, hold ~0.5 s detonates — explosives.js's
+   own [B] grammar. Red = CHARGES OUT: the button is a live detonator now, in
+   the same red the charge's own LED blinks, and it stays on the glass with an
+   empty bag until the charges it placed are spent. */
+#tbomb.tarmed { color: #ff6a5e; border-color: rgba(255,106,94,.62); background: rgba(150,40,28,.45); }
 
 /* ---- THE LANDSCAPE PHONE: THE COLUMN IS TALLER THAN THE SCREEN ------------
    (owner, on an iPhone: "the reload button is invisible… this is only in
@@ -281,7 +286,26 @@ html, body { touch-action: none; -webkit-user-select: none; user-select: none; }
   #tbtns #taim    { order: 6; }
   #tbtns #tscope  { order: 7; }
   #tbtns #thoming { order: 8; }
-  #tbtns #trecen  { order: 9; }
+  #tbtns #tbomb   { order: 9; }
+  #tbtns #trecen  { order: 10; }
+  /* AIM PRINTED ON TOP OF SWAP (owner screenshot, iPhone landscape,
+     2026-08-16). The .tslide seat parks AIM/SCOPE absolutely at
+     right:calc(100% + 12px) — just left of the #tbtns box. In THIS wrap
+     regime that strip of glass is where the spill column lands on the
+     browser the screenshot came from: WebKit does not widen a column flex
+     container's box for wrapped lines, so line 2 draws OUTSIDE the box
+     (cross-start being the right edge) and the absolutely-seated AIM
+     prints on the spill column's bottom cell — SWAP, per the order ladder
+     above. Two buttons, one spot. (Chromium grew the box when it fixed
+     intrinsic sizing of wrapped columns, so there the same CSS instead
+     strands AIM out past the spill column — wrong on both engines, just
+     differently.) On short viewports the pair simply rejoins the flow and
+     spills with everyone else per orders 6/7, which is what the ladder
+     always planned ("what spills is the situational half — AIM, SCOPE"),
+     and which no engine can misplace. Tall viewports never wrap
+     (flex-wrap exists only inside this media block), so the
+     beside-the-trigger seat survives everywhere it worked. */
+  #tbtns.tslide #taim, #tbtns.tslide #tscope { position: static; }
   /* #tfire.tpad::after (the drag ring) is deliberately NOT rescaled: it is
      drawn from PAD_MAXR, so it states how far the held thumb may actually
      roam. Shrinking it to match the smaller roundel would make it a decoration
@@ -353,7 +377,14 @@ body.touch .ikey { display: none !important; }
    under the #interact card. Container stops capturing: only pills tap. */
 body.touch #cityStoragePrompt, body.touch #cityAircraftPrompt, body.touch #bankPrompt,
 body.touch #pawnPrompt, body.touch #jewelryPrompt, body.touch #clothingPrompt,
-body.touch #gunstorePrompt, body.touch #shopliftPrompt {
+body.touch #gunstorePrompt, body.touch #shopliftPrompt,
+/* #citySwimPrompt was simply never added to this list. Its module div carries
+   the same desktop chrome every prompt div carries — a translucent slab, a 1px
+   blue border, 7x16 padding — which is correct behind a "[Space] climb out"
+   STRING and wrong behind a pill: on touch it drew a second box hugging the
+   CLIMB OUT button, so the button appeared to be sitting in a shadow. It is the
+   band's ninth tenant now, flattened like the other eight. */
+body.touch #citySwimPrompt {
   /* 158 -> 168: the spoken-word band (below) now occupies 120..~160 on a
      landscape tablet, which is where the pill's own top edge used to sit. Ten
      pixels is the whole correction — a 52px pill still runs 168..220 and the

@@ -244,6 +244,10 @@
     scope: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7.5"/><path d="M12 1.5v6M12 16.5v6M1.5 12h6M16.5 12h6"/></svg>',
     aim: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8V4.5A1.5 1.5 0 0 1 4.5 3H8"/><path d="M16 3h3.5A1.5 1.5 0 0 1 21 4.5V8"/><path d="M21 16v3.5a1.5 1.5 0 0 1-1.5 1.5H16"/><path d="M8 21H4.5A1.5 1.5 0 0 1 3 19.5V16"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/></svg>',
     homing: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.6" fill="currentColor" stroke="none"/><path d="M12 4v-2.5M12 22.5V20M4 12H1.5M22.5 12H20"/></svg>',
+    // C4 — bomb body + sparking fuse. The one glyph in the cluster with a
+    // spark, because the button is also the DETONATOR (hold): it has to read
+    // as "this goes bang", not as another camera or weapon utility.
+    bomb: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="14" r="6.8"/><path d="M15.2 9.1 17.6 6.7"/><path d="M18.6 3.4v1.7M21.9 6.7h-1.7M20.9 4.4l-1.2 1.2"/></svg>',
     // RECENTER — two chevrons collapsing onto a horizon line: "bring the view
     // back to level". Deliberately unlike every other glyph in this cluster
     // (reticle / arc / eye / brackets / rings) so it reads at a glance.
@@ -288,6 +292,10 @@
       btn("taim", "tbtn tsm", SVG.aim, "Aim") +
       btn("tscope", "tbtn tsm", SVG.scope, "Scope") +
       btn("thoming", "tbtn tsm", SVG.homing, "Homing on/off") +
+      // C4 (city/explosives.js): the same [B] grammar the keyboard owns —
+      // tap plants a charge, hold ~0.5 s detonates everything out. Shown only
+      // while the verb can DO something (bricks carried, or charges planted).
+      btn("tbomb", "tbtn tsm", SVG.bomb, "C4: tap to plant, hold to detonate") +
       // Not built at all when TOUCH_RECENTER is off (default), rather than
       // built and permanently hidden: a node nobody can see is still a tap
       // target the moment some other rule un-hides it.
@@ -319,6 +327,13 @@
       if (CBZ.sfx) CBZ.sfx("rack", { volume: 0.3, pitch: CBZ.lockonHomingOn && CBZ.lockonHomingOn() ? 1.25 : 0.8 });
     });
     tapBtn(document.getElementById("treload"), () => { if (CBZ.fpsReload) CBZ.fpsReload(); });
+    // C4 — a HOLD button that speaks the module's own key. explosives.js's [B]
+    // is a tap/hold state machine (tap = plant, held 0.5 s = detonate all) with
+    // its own mode/menu/death/aircraft gates, so the thumb inherits the WHOLE
+    // grammar — including the det-cord clustering and the "receiver only
+    // tracks five" refusal — by holding the logical key down for exactly as
+    // long as the finger is down, never by re-implementing any of it.
+    holdBtn("tbomb", (down) => { if (CBZ.touchKeyHold) CBZ.touchKeyHold("b", down); });
     // RECENTER (TOUCH_RECENTER) — a mouse levels the view in one flick; a thumb
     // has to drag back across the whole screen, which is why every console
     // third-person game binds this to a stick click. Camera-owned verb, so it
@@ -365,6 +380,8 @@
     // rule in the onAlways below) and a one-frame flash of a button that then
     // vanishes is worse than never showing it.
     const rc0 = document.getElementById("trecen"); if (rc0) rc0.style.display = "none";
+    // C4 starts hidden for the same reason — most sessions never carry a brick.
+    const bm0 = document.getElementById("tbomb"); if (bm0) bm0.style.display = "none";
   }
 
   // press-and-hold button (jump/fire). It now tracks WHICH fingers are on it
@@ -669,6 +686,19 @@
       document.dispatchEvent(new KeyboardEvent("keyup", init));
     } catch (e) {}
   };
+  // The HOLD sibling: one edge per call, for modules whose key is a tap/hold
+  // state machine (C4's [B]: tap plants, held 0.5 s detonates). The touch
+  // button passes its own down/up edges through, and the module's per-frame
+  // hold timer does the rest — same events, same capture order, same gates as
+  // a physical key, so the two grammars can never drift. Blur-safety is the
+  // caller's holdBtn/holdFn record: a swallowed touchend releases through the
+  // stale sweep, which lands here as the keyup a lost key never sends.
+  CBZ.touchKeyHold = function (key, down) {
+    key = String(key || "").toLowerCase();
+    const init = { key: key, bubbles: true, cancelable: true };
+    if (/^[a-z]$/.test(key)) init.code = "Key" + key.toUpperCase();
+    try { document.dispatchEvent(new KeyboardEvent(down ? "keydown" : "keyup", init)); } catch (e) {}
+  };
   // CAPTURE-phase so a pill tap fires exactly ONE action: several legacy
   // prompt divs are themselves click-wired (bank/pawn/jewelry/…), and letting
   // the tap bubble into them would fire the verb twice.
@@ -904,7 +934,10 @@
     if (CBZ.fps && CBZ.fps.active) CBZ.fps.fp = Math.max(-1.3, Math.min(1.3, CBZ.fps.fp + sp));
     // CBZ.camPitchRange (systems/camera.js) is the single owner of the third-person
     // envelope, so the assist can settle onto a target as high as the view can look.
-    else { const r = CBZ.camPitchRange ? CBZ.camPitchRange() : [-1.0, 0.9]; CBZ.cam.pitch = Math.max(r[0], Math.min(r[1], CBZ.cam.pitch + sp)); }
+    // SIGN: `sp` is UP-positive like fps.fp; third-person cam.pitch is DOWN-
+    // positive (see the same fix in fpsmode's applyAimLock). This branch pulled
+    // the iPad's reticle away from every target it was supposed to settle onto.
+    else { const r = CBZ.camPitchRange ? CBZ.camPitchRange() : [-1.0, 0.9]; CBZ.cam.pitch = Math.max(r[0], Math.min(r[1], CBZ.cam.pitch - sp)); }
   });
 
   function note(s) { if (CBZ.city && CBZ.city.note) CBZ.city.note(s, 1.5); }
@@ -1611,6 +1644,24 @@
       hm.style.display = (CBZ.lockonState && CBZ.lockonState().active) ? "" : "none";
       hm.style.opacity = (CBZ.lockonHomingOn && CBZ.lockonHomingOn()) ? "" : "0.38";
     }
+    // C4: the same claim test the keyboard's own [B] keydown runs
+    // (explosives.js) — a brick to plant on foot, or ANY charges out (the
+    // detonator half, which outlives the last brick in the bag). Hidden in an
+    // aircraft because [B] up there is the B-2's bomb bay, exactly as the
+    // keyboard handler yields it; hidden while driving because body.tveh-on
+    // hides this whole cluster and the vehicle layer's DETONATE pill owns the
+    // getaway boom. Red (.tarmed) = charges out: the button is a detonator now.
+    const bm = document.getElementById("tbomb");
+    if (bm) {
+      const P = CBZ.player;
+      const live = CBZ.modeHas ? CBZ.modeHas("blast") : CBZ.game.mode === "city";
+      const bricks = CBZ.cityC4Count ? CBZ.cityC4Count() : 0;
+      const out = CBZ.cityC4Planted ? CBZ.cityC4Planted() : 0;
+      const want = (live && P && !P.dead && !P._aircraft && !P.driving &&
+        (bricks > 0 || out > 0)) ? "" : "none";
+      if (bm.style.display !== want) bm.style.display = want;
+      bm.classList.toggle("tarmed", out > 0);
+    }
     syncInteractionDock();
     // RECENTER: THIRD PERSON ONLY, and only while it would actually do
     // something. In first person cam.pitch IS your aim, so levelling it is a
@@ -1704,6 +1755,13 @@
   CBZ.touchVerb("view-toggle", { ctx: "foot", key: "V", hook: "toggleFPS" });
   CBZ.touchVerb("homing", { ctx: "foot", key: "H", hook: "lockonHomingSet" });
   CBZ.touchVerb("interact", { ctx: "foot", key: "E", hook: null });
+  // C4 — the exact "keyboard verb with no thumb" this ledger was built to
+  // catch: plant AND detonate lived on [B] alone, so on an iPad the charge in
+  // your bag was a stat fiction in both the prison and the city. The button
+  // synthesizes the module's own key edges (touchKeyHold), so the hooks named
+  // here are explosives.js's published handles — present iff the verb is real.
+  CBZ.touchVerb("c4-plant", { ctx: "foot", key: "B tap", hook: "cityC4Plant" });
+  CBZ.touchVerb("c4-detonate", { ctx: "foot/vehicle", key: "B hold", hook: "cityC4Detonate" });
   // cam-recenter is DRAWN ONLY WHEN ITS FLAG IS ON (default off since
   // 2026-08-04). A skipped row carries its reason and cannot hide inside the
   // covered count; a wired row would be a lie once the button is not built.
@@ -1729,6 +1787,8 @@
   CBZ.touchVerbWired("view-toggle", "#tview");
   CBZ.touchVerbWired("homing", "#thoming");
   CBZ.touchVerbWired("interact", "world tap / .tpill");
+  CBZ.touchVerbWired("c4-plant", "#tbomb tap");
+  CBZ.touchVerbWired("c4-detonate", "#tbomb hold / #tvBoom");
   if (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_RECENTER !== false) CBZ.touchVerbWired("cam-recenter", "#trecen");
   CBZ.touchVerbWired("cam-zoom", "pinch");
 })();

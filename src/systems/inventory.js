@@ -5,6 +5,8 @@
      fists and [2]..[0] select the rearrangeable firearm rail; tapping/clicking
      an item slot still quick-USES a consumable.
    • Press [I] to open the full STASH: a 27-slot grid above the hotbar.
+     Not in every mode — see stashMode(): city has its own bag, and survival
+     has no inventory at all, so I belongs to its interaction card there.
      Left-click picks up a stack onto the cursor, click again to place/
      swap/merge (classic Minecraft). Right-click USES a consumable.
    • Items mirror the economy inventory (CBZ.game.inventory is the count
@@ -530,17 +532,20 @@
   });
 
   // ---------- touch access (merge seam, rides PRISON_TOUCH_PROMPTS) ----------
-  // CBZ.toggleInventory existed with ZERO touch surfaces calling it — on an
-  // iPad the 27-slot stash was unreachable. The BAG cell is a CHILD of the
-  // hotbar so it inherits every show/hide the bar already has (mode gates,
-  // mode-survival hide) with no JS sync; body.touch is the only extra gate
-  // (css). The panel gets a real ✕ because Esc does not exist on glass.
+  // THE BAG BUTTON IS GONE (owner, 2026-08-16: "the bag button that opens up a
+  // whole stash screen, that should be gone — the way it looks when I have
+  // guns should be permanent, so I can see when I pickup a keycard etc it's
+  // just where the guns are"). On glass the BAR is the whole inventory now:
+  // an escape item cell shows itself the moment it holds something (the
+  // .filled class fill() stamps below; css/inventory.css keys the escape
+  // hide rule off it), so a keycard pickup surfaces beside the gun chips
+  // with no second screen behind a button. The stash overlay itself still
+  // exists for a keyboard's [I] — it is where WEAPON KEYS are rearranged —
+  // so the ✕ and the long-press stay wired for any touch session that can
+  // still reach it (a paired keyboard's I, or another mode's surface).
   const touchUI = !(CBZ.CONFIG && CBZ.CONFIG.PRISON_TOUCH_PROMPTS === false);
-  let bagBtn = null, invX = null;
+  let invX = null;
   if (touchUI) {
-    bagBtn = document.createElement("div"); bagBtn.id = "invBagBtn"; bagBtn.textContent = "BAG";
-    bar.appendChild(bagBtn);
-    bagBtn.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); toggle(); });
     invX = document.createElement("div"); invX.className = "invClose"; invX.textContent = "✕";
     panel.appendChild(invX);
     invX.addEventListener("mousedown", (e) => { e.preventDefault(); close(); });
@@ -603,6 +608,9 @@
   const LEGACY_FACE = '<span class="islot-ic">▪</span>';
   function fill(cell, s) {
     cell.classList.remove("r-uncommon", "r-rare", "r-epic");
+    // .filled is how the escape hotbar knows a cell EARNED its place on the
+    // bar (empty cells stay off the glass there — css/inventory.css).
+    cell.classList.toggle("filled", !!(s && s.item));
     if (s && s.item) {
       const n = s.item;
       const tally = s.count > 1 ? '<span class="islot-n">' + s.count + "</span>" : "";
@@ -697,9 +705,31 @@
   screen.addEventListener("contextmenu", (e) => e.preventDefault());
   document.addEventListener("mousemove", (e) => { if (invOpen) { ptr.x = e.clientX; ptr.y = e.clientY; if (cursor) render(); } });
 
+  /* ---- WHO OWNS [I] --------------------------------------------------------
+     OWNER, on the natural-disaster run: "i is inventory (which doesnt need to
+     exist) and also an interaction option."  Both were true: this stash's only
+     mode gate was `mode === "city"`, so in SURVIVAL one press of I toggled a
+     27-slot bag *and* fired survival_interact.js's first slot (Grab / Throw) —
+     two listeners, no stopImmediatePropagation, this one first because
+     index.html loads it first. It also exitPointerLock()s, so the grab landed
+     with the mouse already released.
+
+     The bag is the one that doesn't belong. Survival has no inventory at all:
+     nothing in modes/survival.js grants an item, css hides #hotbar and
+     #inventory in this mode, and the doctrine line is "the WORLD is the
+     inventory" — the disaster island's items are bodies and debris you carry
+     with your hands. So the stash simply does not exist here, and I is left
+     to the interaction card, matching how city spends it (interactions.js
+     KEYS = e,i,j,k,l). Prison keeps the bag and keeps I; its own card still
+     uses J/K/L/; (systems/interact.js), so that invariant is untouched. */
+  function stashMode() {
+    const m = CBZ.game && CBZ.game.mode;
+    return m !== "city" && m !== "survival";
+  }
+
   // ---------- open / close ----------
   function open() {
-    if (invOpen) return; invOpen = true; CBZ.invOpen = true;
+    if (invOpen || !stashMode()) return; invOpen = true; CBZ.invOpen = true;
     // touchMode latches after this module loads, so the hint is chosen per
     // open, not at build — the string must never name a key glass doesn't have.
     hint.textContent = CBZ.touchMode
@@ -730,8 +760,12 @@
     if (CBZ.game && CBZ.game.mode === "city") return;
     const k = e.key.toLowerCase();
     // I is the invariant stash owner, including beside an NPC interaction;
-    // that panel uses J/K/L/;. B remains a compatibility alias.
+    // that panel uses J/K/L/;. B remains a compatibility alias. In survival
+    // (see stashMode above) the key is NOT ours — fall through without
+    // preventDefault so survival_interact.js's Grab/Throw is the only thing
+    // that answers it.
     if (k === "i" || k === "b") {
+      if (!stashMode()) return;
       e.preventDefault();
       toggle();
       return;
@@ -777,7 +811,10 @@
     dockWeaponStrip();
     const playing = CBZ.game.state === "playing";
     bar.style.display = playing ? "flex" : "none";
-    if (!playing && invOpen) close();
+    // a mode change can happen with the bag up (city/survival are entered from
+    // a menu, not always through a state flip) — a stash left open in a mode
+    // that has none wedges CBZ.invOpen and eats the pointer lock.
+    if ((!playing || !stashMode()) && invOpen) close();
     const el = CBZ.game.elapsed || 0;
     if (el + 0.001 < lastEl) { selIdx = 0; cursor = null; resync(); } // new run
     lastEl = el;
@@ -810,6 +847,20 @@
       keycardChipHidden: !!(document.body && document.body.classList.contains("jail-hud-unified")),
       keycardItem: !!(CBZ.game && CBZ.game.inventory && CBZ.game.inventory["Keycard"] > 0),
       hasKey: !!(CBZ.game && CBZ.game.hasKey),
+    };
+  };
+
+  /* ---- RATCHET: CBZ.stashAudit() — one line that answers "who owns I here?".
+     In survival it must read owns=false / open=false forever: that is the whole
+     fix, and a future mode gate that regresses it shows up as owns=true beside
+     a card whose first slot is already I. */
+  CBZ.stashAudit = function () {
+    return {
+      mode: CBZ.game && CBZ.game.mode,
+      owns: stashMode(),                     // does [I] toggle this bag?
+      open: invOpen,
+      screen: screen.style.display !== "none",
+      hotbar: bar.style.display !== "none",
     };
   };
 

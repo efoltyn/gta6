@@ -259,7 +259,9 @@ of them places in Gang City at their own coordinates: **city** (`studio.town()`
 at the mainland's (0,-700) — eight blocks, marked streets, crosswalks, shops
 with signs, enterable instanced-glass towers), **island**
 (`raise("militaryisland")`, -620,-700), **field** (`raise("airport")`, Halloran),
-**dunes** (the basin, kept — an open firing line is a different game), **arena**
+**dunes** (the erg, out where the ground MEASURES as dunes — the venue scans
+for ≥16 m of relief with the central lanes crest-cut, and terrain joins the
+sight lines there: `terrainBlocked`, revert `?tlos=0`), **arena**
 (the kill box, kept as the CONTROL: no world, so a fault there is the men).
 
 **THE REAL FABRIC COST 17 041 DRAW CALLS AND THAT IS NOT THE TOWN'S FAULT.**

@@ -48,6 +48,14 @@
     box(g, 0.14, 0.10, 0.12, mat.skin, 0, -0.09, 0.09, -0.1);
     // projectile + flash originate at the bore tip
     g.userData.muzzle = new THREE.Vector3(0, 0.05, -0.78);
+    // WHERE THE HANDS GO — see systems/gunhands.js. Six chambers in a drum:
+    // reloaded like a revolver, swung out to the weapon's LEFT.
+    g.userData.grips = {
+      support: new THREE.Vector3(0, -0.130, -0.420),   // the authored forward vertical grip
+      mag: new THREE.Vector3(-0.140, 0.020, -0.180),
+      charge: null,
+      style: "cylinder",
+    };
     return g;
   };
 })();

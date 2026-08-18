@@ -58,6 +58,14 @@
     // bell.  Keeping this socket on the authored nose also keeps recoil from
     // making the first rocket frame look like it came through the weapon.
     g.userData.muzzle = new THREE.Vector3(0, 0.05, -1.995);
+    // WHERE THE HANDS GO — see systems/gunhands.js. A rocket goes in the
+    // FRONT of the tube, so the reload runs the off hand all the way out.
+    g.userData.grips = {
+      support: new THREE.Vector3(0, -0.150, -0.420),   // the authored forward support grip
+      mag: new THREE.Vector3(0, 0.050, -1.330),        // the bell, where the warhead seats
+      charge: null,
+      style: "rocket",
+    };
     return g;
   };
 })();

@@ -32,12 +32,21 @@
   // driving into the shader so the CPU height query matches the displacement.
   const arenaWave = { amp: 0.86, chop: 0.72, foam: 0.34, opacity: 1 };
   let arena_meanY = function () { return -0.8; };
+  // SURV_BEACH_V2's live wet-line rig ({attr, base, h, th, wet, n}) + the
+  // static shore numbers the before/after tool reads (CBZ.survShoreAudit).
+  let shoreRig = null, shoreFacts = null;
 
   // SURV_SEABED — the island's coastal shelf (see groundHeightAt below). ON →
   // the ground falls away past the beach, so the open ocean is real water and
   // city/swim.js's swimmer runs on this island. OFF (or ?cfg_SURV_SEABED=0) →
   // the flat y=0 floor out to infinity, and you walk on the sea.
   if (CBZ.CONFIG.SURV_SEABED == null) CBZ.CONFIG.SURV_SEABED = true;
+
+  // SURV_FACADES — dress the island's town with the facade kit's registered
+  // grammars, one per building, so every style can be walked around in the
+  // mode that loads in seconds. ON by default: this island is the kit's
+  // showroom. ?cfg_SURV_FACADES=0 gives the plain island back.
+  if (CBZ.CONFIG.SURV_FACADES == null) CBZ.CONFIG.SURV_FACADES = true;
 
   /* ---- THE SURVIVAL WATER QUERIES ---------------------------------------
      One surface, three questions, all answered off world/water_spec.js's
@@ -110,6 +119,46 @@
   CBZ.survSeaBedYAt = function (x, z) {
     return arena ? arena.groundHeightAt(x, z) : 0;
   };
+  // The shore's static facts (band width, dry sand, wade band, live wet line)
+  // — what tools/visual-presets/beach-shores.mjs prints as its measurements.
+  CBZ.survShoreAudit = function () { return shoreFacts; };
+
+  /* ---- THE WATERLINE MOVES (SURV_BEACH_V2) --------------------------------
+     Same law the city beach's swash apron enforces: the dark wet line and the
+     sea's edge must be ONE thing. Every vertex of the shore ring below the
+     LIVE mean sea (plus a small alongshore swash so the line breathes instead
+     of ruling a circle) wets INSTANTLY; dry-out is slow (0.10/s ≈ 10 s), so a
+     tsunami drawdown strands a great ring of wet sand and a flood's retreat
+     leaves its own high-water mark. ~2k vertices, one colour write per frame,
+     survival mode only. 47.95: right after the ocean mesh itself has taken
+     this frame's surge at 47.9 — sand and sea read the same number. */
+  const WET_DRY_RATE = 0.10;
+  let _wetT = 0;
+  if (CBZ.onUpdate) CBZ.onUpdate(47.95, function (dt) {
+    const S = shoreRig;
+    if (!S || !arena || !CBZ.game || CBZ.game.mode !== "survival") return;
+    _wetT += dt || 0;
+    const t = CBZ.waterClock ? CBZ.waterClock() : _wetT;
+    const sea = arena_meanY();
+    const dry = Math.min(1, Math.max(0, dt) * WET_DRY_RATE);
+    const cols = S.attr.array, base = S.base;
+    let dirty = false;
+    for (let i = 0; i < S.n; i++) {
+      // ±0.3 m of breathing swash, phased along the shore (θ·43 ≈ 21 m waves)
+      const swash = 0.19 * Math.sin(t * 0.9 + S.th[i] * 43.0) + 0.11 * Math.sin(t * 0.53 - S.th[i] * 23.0);
+      const lip = S.h[i] - (sea + swash);          // m above the breathing waterline
+      const target = lip <= 0 ? 1 : (lip >= 0.5 ? 0 : 1 - (lip / 0.5) * (lip / 0.5) * (3 - 2 * (lip / 0.5)));
+      let w = S.wet[i];
+      if (target > w) w = target;                  // soaks instantly
+      else w += (target - w) * dry;                // dries slowly behind the sea
+      if (Math.abs(w - S.wet[i]) < 0.004) continue;
+      S.wet[i] = w;
+      const q = i * 3, dk = 1 - 0.45 * w;          // wet sand: darker, same hue
+      cols[q] = base[q] * dk; cols[q + 1] = base[q + 1] * dk; cols[q + 2] = base[q + 2] * dk;
+      dirty = true;
+    }
+    if (dirty) S.attr.needsUpdate = true;
+  });
 
   // deterministic-ish RNG so the map is the same each match (learnable)
   let _s = 1337;
@@ -119,6 +168,130 @@
   const WT = 0.3;     // wall thickness
   const SW = 3.6;     // broad stairwell strip (two easy lanes along the -x interior wall)
   const DOORW = 1.8;  // front doorway width
+
+
+  /* ============================================================
+     THE FACADE KIT ON THE ISLAND (city/facade_kit.js + city/facades/*.js)
+     ============================================================
+     The kit's contract is a ctx of the host's REAL numbers plus a handful of
+     emitters — it never touches THREE, the scene graph or the collider arrays
+     itself. buildings.js hands it that ctx for a city lot; this hands it the
+     same ctx for an island building, so all 31 registered grammars can be
+     walked around in the mode that loads in seconds instead of booting the
+     whole city.
+
+     Two things this has to get right or it would be a performance trap:
+
+       1. MERGE. A facade emits hundreds to a few thousand boxes. One mesh
+          each would be 30 000 draw calls on a 27-building island. So dbox
+          collects a BoxGeometry per call, keyed by colour, and the whole
+          bucket is merged into ONE mesh per colour at the end — exactly what
+          buildings.js's flushDeco does, for exactly the same reason.
+       2. THE GROUP. Everything lands in the building's own group, so the
+          earthquake still topples a dressed building as a single piece and
+          the arena's teardown still frees it.
+
+     Deco is collision-free by construction: colliders and platforms come from
+     the arena's own lbox/tbox walls, and a facade may only add a walk surface
+     through ctx.plat (a porch deck or a flight of steps), never a wall.
+  ============================================================ */
+  function shadeHex(hex, f) {
+    const r = Math.max(0, Math.min(255, (((hex >> 16) & 255) * f) | 0));
+    const g2 = Math.max(0, Math.min(255, (((hex >> 8) & 255) * f) | 0));
+    const b = Math.max(0, Math.min(255, ((hex & 255) * f) | 0));
+    return (r << 16) | (g2 << 8) | b;
+  }
+
+  // o: { group, ox, oz, gy, w, d, storeys, fh, wt, rTop, pp, doorSide, color,
+  //      style, plats }
+  function dressIslandFacade(o) {
+    if (!CBZ.dressFacade || !o.style) return null;
+    if (CBZ.CONFIG && CBZ.CONFIG.SURV_FACADES === false) return null;
+    const THREE = window.THREE;
+    const mat = CBZ.mat;
+    const deco = new Map();          // colour -> [BufferGeometry]
+    const group = o.group, ox = o.ox, oz = o.oz, gy = o.gy;
+
+    function dbox(lx, ly, lz, bw, bh, bd, col) {
+      if (!(bw > 0) || !(bh > 0) || !(bd > 0)) return;
+      if (!Number.isFinite(lx + ly + lz + bw + bh + bd)) return;
+      const g2 = new THREE.BoxGeometry(bw, bh, bd);
+      g2.translate(lx, ly, lz);
+      const key = col >>> 0;
+      let list = deco.get(key);
+      if (!list) { list = []; deco.set(key, list); }
+      list.push(g2);
+    }
+    function addMesh(geo, col, lx, ly, lz, emissive) {
+      const m = new THREE.Mesh(geo, emissive ? mat(col, { emissive: col, ei: 0.8 }) : mat(col));
+      m.position.set(lx, ly, lz);
+      m.castShadow = !emissive; m.receiveShadow = true;
+      group.add(m);
+      return m;
+    }
+
+    const ctx = {
+      ox: ox, oz: oz, w: o.w, d: o.d, storeys: o.storeys,
+      FH: o.fh, WT: o.wt, rTop: o.rTop, pp: o.pp, doorSide: o.doorSide,
+      slabCx: 0, slabCz: 0, slabW: o.w - 2 * o.wt, slabD: o.d - 2 * o.wt,
+      garageGround: false, showroom: false, civic: null,
+      dress: { style: o.style },
+      pal: { wall: o.color, stone: shadeHex(o.color, 1.14), dirt: 0x2a2420, kind: "brick", id: null },
+      color: o.color,
+      TRIM: shadeHex(o.color, 1.16),
+      BASE: shadeHex(o.color, 0.60),
+      PIL: shadeHex(o.color, 1.06),
+      MULL: 0x39404a,
+      hash: function (salt) { return CBZ.hash01 ? CBZ.hash01(ox, oz, salt) : 0.42; },
+      dbox: dbox,
+      // A facade never needs a collider on this island — the arena's own walls
+      // already carry them — so lbox is deliberately the deco path too.
+      lbox: function (lx, ly, lz, bw, bh, bd, col) { dbox(lx, ly, lz, bw, bh, bd, col); },
+      plat: function (lx0, lx1, lz0, lz1, top, ramp) {
+        const p = { minX: ox + lx0, maxX: ox + lx1, minZ: oz + lz0, maxZ: oz + lz1, top: gy + top };
+        if (ramp) {
+          p.ramp = { z0: oz + ramp.z0, z1: oz + ramp.z1, y0: gy + ramp.y0, y1: gy + ramp.y1 };
+        }
+        CBZ.platforms.push(p); if (o.plats) o.plats.push(p);
+      },
+      ball: function (lx, ly, lz, r, col) { addMesh(new THREE.SphereGeometry(r, 10, 7), col, lx, ly, lz); },
+      column: function (lx, ly, lz, r, h, col, seg) {
+        addMesh(new THREE.CylinderGeometry(r, r, h, seg || 12), col, lx, ly + h / 2, lz);
+      },
+      cone: function (lx, ly, lz, r, h, col) { addMesh(new THREE.ConeGeometry(r, h, 14), col, lx, ly + h / 2, lz); },
+      dome: function (lx, ly, lz, r, col) {
+        addMesh(new THREE.SphereGeometry(r, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), col, lx, ly, lz);
+      },
+      lamp: function (lx, ly, lz, r, col) { addMesh(new THREE.SphereGeometry(r, 8, 6), col, lx, ly, lz, true); },
+      disc: function () {},                 // clock faces: civic only, not here
+      plaque: function () {}, seal: function () {},
+    };
+
+    const def = CBZ.dressFacade(ctx);
+
+    // ---- flush the merged deco buckets (one mesh per colour) --------------
+    const BGU = THREE.BufferGeometryUtils;
+    deco.forEach(function (geos, col) {
+      const m2 = mat(col);
+      if (BGU && BGU.mergeBufferGeometries && geos.length > 1) {
+        const merged = BGU.mergeBufferGeometries(geos);
+        for (const g2 of geos) g2.dispose();
+        if (merged) {
+          const m = new THREE.Mesh(merged, m2);
+          m.castShadow = false; m.receiveShadow = true;
+          group.add(m);
+        }
+      } else {
+        for (const g2 of geos) {
+          const m = new THREE.Mesh(g2, m2);
+          m.castShadow = false; m.receiveShadow = true;
+          group.add(m);
+        }
+      }
+    });
+    deco.clear();
+    return def;
+  }
 
   CBZ.buildDisasterArena = function () {
     if (arena) return arena;
@@ -175,13 +348,43 @@
        underwater treatment has long since faded to black anyway.
 
        `?cfg_SURV_SEABED=0` restores the flat floor — and the walk-on-water. */
-    const SHELF_SLOPE = 0.34;          // m of depth per m past the waterline
-    const SHORE_R = R + 8;             // where the ground starts falling away
+    const SHELF_SLOPE = 0.34;          // m of depth per m past the shore band
+    /* SURV_BEACH_V2 — THE BEACH BECOMES A SHORE, NOT A STRIPE (2026-08-16).
+       The old coast was an 8 m flat sand annulus at y=-0.02 whose outer rim
+       simply stopped where the shelf began: a ring with sand painted on it.
+       V2 widens the band to 26 m and gives it the one thing a beach IS — a
+       PROFILE: the flat grass edge, a low wave-built berm at the top of the
+       swash, then a foreshore that walks you down THROUGH the waterline and
+       keeps falling until the shelf takes over. groundHeightAt and the drawn
+       ring read the SAME function, so the bottom you see is the bottom you
+       stand on (the doctrine two comments below already enforces for the
+       seabed). Sand below the waterline is real wadable foreshore — the
+       water climbs you for ~14 m before city/swim.js takes over — a
+       fringing beach, not a cliff edge with sand painted on it.
+       ?cfg_SURV_BEACH_V2=0 → the old 8 m stripe and shelf, byte for byte. */
+    if (CBZ.CONFIG.SURV_BEACH_V2 == null) CBZ.CONFIG.SURV_BEACH_V2 = true;
+    const BEACH2 = CBZ.CONFIG.SURV_BEACH_V2 !== false && CBZ.CONFIG.SURV_SEABED !== false;
+    const BEACH_W = BEACH2 ? 26 : 8;   // grass edge → shelf handoff
+    const SHORE_R = R + BEACH_W;       // where the shelf takes over from the beach
+    const FORE_DROP = BEACH2 ? 1.9 : 0; // depth the foreshore has reached by SHORE_R
     const DEEP = 34;                   // m — the shelf stops falling here (~100 m out)
-    function seabedAt(x, z) {
-      const d = Math.hypot(x - cx, z - cz) - SHORE_R;
-      return d > 0 ? -Math.min(d * SHELF_SLOPE, DEEP) : 0;
+    // the whole coast as one function of distance-from-centre: 0 on the grass,
+    // berm + foreshore across the beach band, then the linear shelf. Every
+    // consumer — physics, the drawn shore ring, the drawn seabed ring — reads
+    // THIS, which is what keeps drawn and walked from ever being two surfaces.
+    function coastHeightAt(dist) {
+      const d = dist - SHORE_R;
+      if (d > 0) return -Math.min(FORE_DROP + d * SHELF_SLOPE, DEEP);
+      if (!BEACH2) return 0;
+      const b = dist - R;              // metres past the grass edge
+      if (b <= 0) return 0;
+      const t = b / BEACH_W, s = t * t * (3 - 2 * t);
+      // the berm: the low ridge waves build at the top of their own swash —
+      // a read on every natural beach, not a wall (0.30 peak, gone mid-beach)
+      const k = (b - 4.6) / 2.4;
+      return 0.30 * Math.exp(-k * k) - FORE_DROP * s;
     }
+    function seabedAt(x, z) { return coastHeightAt(Math.hypot(x - cx, z - cz)); }
     function groundHeightAt(x, z) {
       let h = 0;
       for (let i = 0; i < hills.length; i++) {
@@ -287,13 +490,89 @@
       root.add(pm);
     }
 
-    // the island disc (grass) with a sandy beach ring. The ring ends AT the
-    // waterline (SHORE_R) and the draped shelf above takes over from there, so
-    // sand meets sea instead of overhanging it.
-    const beach = new THREE.Mesh(new THREE.CircleGeometry(SHORE_R, 64),
-      new THREE.MeshLambertMaterial({ color: 0xe6d49a }));
-    beach.rotation.x = -Math.PI / 2; beach.position.set(cx, -0.02, cz);
-    beach.receiveShadow = true; root.add(beach);
+    // the island disc (grass) with a sandy beach ring. Flag off: the old flat
+    // 8 m stripe. Flag on: the ring is DRAPED over coastHeightAt — the berm,
+    // the foreshore, the walk into the water — with vertex colours that carry
+    // the read (mottled dry sand, a damp band, dark wet sand) and a LIVE
+    // waterline: the tick at 47.95 below wets every vertex the sea currently
+    // reaches and dries it slowly after, so a tsunami drawdown strands a huge
+    // ring of visibly WET sand — the dread beat, on the beach itself.
+    if (!BEACH2) {
+      const beach = new THREE.Mesh(new THREE.CircleGeometry(SHORE_R, 64),
+        new THREE.MeshLambertMaterial({ color: 0xe6d49a }));
+      beach.rotation.x = -Math.PI / 2; beach.position.set(cx, -0.02, cz);
+      beach.receiveShadow = true; root.add(beach);
+    } else (function shoreRing() {
+      /* R-3 (tucked 3 m under the grass disc, 3 cm down so the grass wins the
+         overlap) out to SHORE_R-1, which is exactly the seabed ring's inner
+         rim — SAME 96 theta segments, so the two meshes share their boundary
+         vertices and the handoff has no seam and no overlap.
+         CircleGeometry/RingGeometry local→world after rotateX(-PI/2):
+         (x, y, z) → (x, z, -y), so local z IS world height (mesh sits at y 0)
+         and world radius is hypot(local x, local y). */
+      const shoreGeo = new THREE.RingGeometry(R - 3, SHORE_R - 1, 96, 20);
+      const sp = shoreGeo.attributes.position, sa = sp.array, vn = sp.count;
+      const cols = new Float32Array(vn * 3);   // live colour (base × wetness)
+      const base = new Float32Array(vn * 3);   // authored colour, never mutated
+      const vh = new Float32Array(vn);         // vertex height (the profile)
+      const vth = new Float32Array(vn);        // vertex theta (alongshore phase)
+      const DRY = new THREE.Color(0xe6d49a), BED = new THREE.Color(0xcdbb8f);
+      const c = new THREE.Color();
+      for (let i = 0; i < vn; i++) {
+        const lx = sa[i * 3], ly = sa[i * 3 + 1];
+        const dist = Math.hypot(lx, ly);
+        const h = dist <= R ? -0.03 : coastHeightAt(dist);
+        sa[i * 3 + 2] = h;
+        vh[i] = h; vth[i] = Math.atan2(ly, lx);
+        // dry sand, mottled: per-vertex grain (position hash — no rng draw,
+        // the island build stream stays byte-identical) over a broad warm/cool
+        // drift, blending into the seabed's own tone at the outer rim so the
+        // shared edge is invisible in colour as well as in position.
+        const wx = cx + lx, wz = cz - ly;
+        const grain = 1 + ((CBZ.hash01 ? CBZ.hash01(wx * 1.7, wz * 1.7, 0xb31c) : 0.5) - 0.5) * 0.11;
+        const drift = 1 + 0.05 * Math.sin(vth[i] * 7 + dist * 0.31);
+        c.copy(DRY).lerp(BED, ss(SHORE_R - 5, SHORE_R - 1, dist)).multiplyScalar(grain * drift);
+        base[i * 3] = c.r; base[i * 3 + 1] = c.g; base[i * 3 + 2] = c.b;
+      }
+      function ss(e0, e1, x2) { let t = (x2 - e0) / (e1 - e0); t = t < 0 ? 0 : t > 1 ? 1 : t; return t * t * (3 - 2 * t); }
+      sp.needsUpdate = true;
+      shoreGeo.setAttribute("color", new THREE.BufferAttribute(cols, 3));
+      shoreGeo.computeVertexNormals();
+      shoreGeo.computeBoundingSphere();
+      const shoreMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
+      shoreMat.name = "survival-beach-shore";     // no water/ocean/sea in the name (test contract)
+      const shore = new THREE.Mesh(shoreGeo, shoreMat);
+      shore.rotation.x = -Math.PI / 2; shore.position.set(cx, 0, cz);
+      shore.receiveShadow = true;
+      shore.userData.coat = true;                 // it is the ground; blizzards coat it
+      shore.userData.dynamic = true;              // never batch-merge a mesh we repaint
+      root.add(shore);
+      shoreRig = { attr: shoreGeo.getAttribute("color"), base, h: vh, th: vth, wet: new Float32Array(vn), n: vn };
+      // start honest: everything the sea covers right now is wet
+      for (let i = 0; i < vn; i++) {
+        const w = vh[i] < OCEAN_Y + 0.12 ? 1 : 0;
+        shoreRig.wet[i] = w;
+        const q = i * 3, dk = 1 - 0.45 * w;
+        cols[q] = base[q] * dk; cols[q + 1] = base[q + 1] * dk; cols[q + 2] = base[q + 2] * dk;
+      }
+      shoreRig.attr.needsUpdate = true;
+    })();
+    // the shore numbers the before/after tool reads — measured off the SAME
+    // functions the physics uses, at rest sea level, so they cannot lie
+    (function facts() {
+      let water = -1, swim = -1;
+      for (let b = 0; b <= 80; b += 0.25) {     // no hill reaches past R, so the coast IS the ground here
+        const gh = coastHeightAt(R + b);
+        if (water < 0 && gh <= OCEAN_Y) water = b;
+        if (swim < 0 && OCEAN_Y - gh >= 1.35) { swim = b; break; }
+      }
+      shoreFacts = {
+        beachBandM: +(BEACH_W).toFixed(2),
+        drySandM: +(water < 0 ? BEACH_W : water).toFixed(2),
+        wadeM: +((swim > 0 && water >= 0) ? swim - water : 0).toFixed(2),
+        wetLive: shoreRig ? 1 : 0,
+      };
+    })();
     // clean solid green — the old two-tone checker tiling read as a debug texture
     const island = new THREE.Mesh(new THREE.CircleGeometry(R, 64),
       new THREE.MeshLambertMaterial({ color: 0x53a84e }));
@@ -404,7 +683,7 @@
       return { max: mx, min: mn };
     }
 
-    function makeBuilding(ox, oz, w, d, storeys, color, gy) {
+    function makeBuilding(ox, oz, w, d, storeys, color, gy, style) {
       const bgroup = new THREE.Group();
       bgroup.position.set(ox, gy, oz);
       root.add(bgroup);
@@ -536,8 +815,17 @@
         lbox(ixMin + SW / 2, (k + 1) * FH - 0.1, lzc, SW, 0.2, LD + 0.2, 0xb4b9c1, { plat: true, los: true, cast: false });
       }
 
+      // THE FACADE. Emitted last so it dresses the finished shell, and into
+      // this building's own group so the quake still topples it as one piece.
+      dressIslandFacade({
+        group: bgroup, ox: ox, oz: oz, gy: gy, w: w, d: d, storeys: storeys,
+        fh: FH, wt: WT, rTop: rTop, pp: 0.7, doorSide: 0,   // the door is on -z
+        color: color, style: style, plats: plats,
+      });
+
       const b = {
-        group: bgroup, ox, oz, gy, x: ox, z: oz, w, d, h: storeys * FH,
+        group: bgroup, ox, oz, gy, x: ox, z: oz, w, d, h: storeys * FH, storeys,
+        facadeStyle: style || null,        // so a tool can photograph "the pagoda one"
         colliders: cols, platforms: plats, glass: glassList, fallen: false,
       };
       fragile.push(b);
@@ -550,7 +838,7 @@
     // (high ground for the tsunami). Still one group so the quake topples the
     // whole thing; its walls/floors register as height-gated colliders +
     // walkable platforms (collapse yanks them all). ----
-    function makeTower(ox, oz, w, d, h, color) {
+    function makeTower(ox, oz, w, d, h, color, style) {
       const gy = groundHeightAt(ox, oz);
       const g = new THREE.Group();
       g.position.set(ox, gy, oz);
@@ -618,7 +906,17 @@
       const capm = new THREE.Mesh(new THREE.BoxGeometry(iw * 0.7, 1.2, id * 0.5), mat(0x8b9097));
       capm.position.set(0, realH + 0.6, id * 0.55); capm.castShadow = true; g.add(capm);
 
-      const b = { group: g, ox, oz, gy, x: ox, z: oz, w, d, h: realH, colliders: cols, platforms: plats, glass: glassT, fallen: false };
+      // THE FACADE — the tower grammars (bundled tube, braced tube, setback
+      // ziggurat, radiator crown …) declare minStoreys in the range these
+      // island towers actually reach, so they get the skyline half of the kit.
+      dressIslandFacade({
+        group: g, ox: ox, oz: oz, gy: gy, w: w, d: d, storeys: storeys,
+        fh: FH, wt: TW, rTop: realH, pp: 0.6, doorSide: 0,
+        color: color, style: style, plats: plats,
+      });
+
+      const b = { group: g, ox, oz, gy, x: ox, z: oz, w, d, h: realH, storeys,
+        facadeStyle: style || null, colliders: cols, platforms: plats, glass: glassT, fallen: false };
       fragile.push(b);
 
       // ---- the elevator car: a slab that rides the central shaft, gy → roof ----
@@ -819,11 +1117,33 @@
       box(ox, gy + SH + 1.1, fz + 0.36, 8.6, 1.05, 0.1, 0xeafff2);
     }
 
+    /* ---- WHICH FACADE GOES ON WHICH BUILDING -------------------------------
+       The registry is the source of truth, not a list copied into this file:
+       a grammar that declares minStoreys is a SKYLINE grammar and belongs on
+       the downtown towers, everything else is low-rise and belongs in the
+       town. Sorted by id so the island is the same on every boot, and the
+       town/tower counts grow to cover the registry, so adding a facade file
+       adds a building here rather than quietly going unseen.
+
+       Read from the registry REGARDLESS of SURV_FACADES: the flag turns the
+       ornament off, never the town plan. The island is meant to be learnable,
+       so flipping a cosmetic flag must not move a building or change a
+       tower's height — dressIslandFacade is the only thing the flag gates,
+       and it checks the flag itself.                                       */
+    const facadeIds = CBZ.facadeList
+      ? CBZ.facadeList().map(function (f) { return f.id; }).sort() : [];
+    const lowIds = facadeIds.filter(function (id) {
+      const def = CBZ.facadeDef && CBZ.facadeDef(id); return def && !def.minStoreys;
+    });
+    const towerIds = facadeIds.filter(function (id) {
+      const def = CBZ.facadeDef && CBZ.facadeDef(id); return def && def.minStoreys > 0;
+    });
+
     // place the town in a loose ring, ONLY on flat ground (off the mountain
     // and hill skirts so terrain never pokes through a floor), no overlaps
     const placed = [];
-    let attempts = 0, want = 18;
-    while (placed.length < want && attempts < 600) {
+    let attempts = 0, want = Math.max(18, lowIds.length);
+    while (placed.length < want && attempts < 1400) {
       attempts++;
       const a = rng() * Math.PI * 2;
       const dist = 44 + rng() * (R - 60);
@@ -836,7 +1156,8 @@
       if (clash) continue;
       const storeys = 1 + ((rng() * 3) | 0);    // 1..3 (roof is the top level)
       const color = PALETTE[(rng() * PALETTE.length) | 0];
-      makeBuilding(x, z, w, d, storeys, color, ter.max);   // sit on the high point
+      const style = lowIds.length ? lowIds[placed.length % lowIds.length] : null;
+      makeBuilding(x, z, w, d, storeys, color, ter.max, style);   // sit on the high point
       placed.push({ x, z, w, d });
     }
 
@@ -849,9 +1170,9 @@
 
     // a downtown cluster of tall towers, plus a few outliers, on flat ground
     const TOWER_PALETTE = [0x5b6b82, 0x6f7e96, 0x8a98ac, 0x49566b, 0x7a6f8c, 0x5e7d86];
-    let tAttempts = 0, tWant = 9;
+    let tAttempts = 0, tWant = Math.max(9, towerIds.length);
     let towers = 0;
-    while (towers < tWant && tAttempts < 500) {
+    while (towers < tWant && tAttempts < 900) {
       tAttempts++;
       const a = rng() * Math.PI * 2;
       const dist = 40 + rng() * (R - 56);
@@ -862,8 +1183,19 @@
       let clash = false;
       for (const p of placed) { if (Math.abs(p.x - x) < (p.w + w) / 2 + 5 && Math.abs(p.z - z) < (p.d + d) / 2 + 5) { clash = true; break; } }
       if (clash) continue;
-      const h = 18 + rng() * 20;          // ~18–38m (5–11 floors you can climb via the lift)
-      makeTower(x, z, w, d, h, TOWER_PALETTE[(rng() * TOWER_PALETTE.length) | 0]);
+      /* HEIGHT FOLLOWS THE GRAMMAR. The island's own towers are ~18-38 m
+         (5-11 floors), but a bundled tube or a braced tube is a grammar for
+         forty storeys and declares minStoreys to say so — put one on a
+         six-storey block and you get a smear, not a tower. So a tower wearing
+         a skyline facade is built tall enough to carry it (its minStoreys
+         plus a few floors), capped at 22 so the island stays quick to load
+         and the lift ride stays short. Undressed, the original range. */
+      const tStyle = towerIds.length ? towerIds[towers % towerIds.length] : null;
+      const tDef = tStyle && CBZ.facadeDef ? CBZ.facadeDef(tStyle) : null;
+      const h = tDef
+        ? Math.min(22, tDef.minStoreys + 3) * FH
+        : 18 + rng() * 20;                // ~18–38m (5–11 floors via the lift)
+      makeTower(x, z, w, d, h, TOWER_PALETTE[(rng() * TOWER_PALETTE.length) | 0], tStyle);
       placed.push({ x, z, w, d });
       towers++;
     }

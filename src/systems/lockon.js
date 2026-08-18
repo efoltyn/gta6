@@ -303,7 +303,12 @@
     if (P.driving) return "";
     const w = CBZ.currentGun && CBZ.currentGun();
     if (w && w.explosive && !w.dumbfire && (CBZ.fpsActive && CBZ.fpsActive() || (CBZ.weaponThirdPersonActive && CBZ.weaponThirdPersonActive()))) {
-      CBZ.camera.getWorldDirection(_aimD).normalize();
+      // Ask fpsmode for the ray it will actually fire rather than re-deriving it
+      // from the lens: with the third-person frame pinned (CAM_TP_FIXED_ANGLE)
+      // those are two different directions, and a lock square drawn on the
+      // lens's would sit on a target the rocket is not pointed at.
+      if (CBZ.playerAimDir) CBZ.playerAimDir(_aimD).normalize();
+      else CBZ.camera.getWorldDirection(_aimD).normalize();
       _aimO.copy(CBZ.camera.position);
       return "rpg";
     }

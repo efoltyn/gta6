@@ -3596,127 +3596,657 @@ thing under test and the check must not share its blind spots. `overlapPeak` ·
 `--revert` (`?sep=old&fire=old`) asserts they come back: 3 overlapping pairs and
 214 ghost rounds. A fix nobody can turn off has not been measured.
 
-## 2026-08-15 — THE NUKE: TWO-TONE ORGANIC CLOUD + THE DEMOLITION FREEZE DIES (orchestrator + two opus builders)
+## 2026-08-15 — A RANK OF WHITE CARS, AND A RACE YOU COULD NOT READ
 
-Owner, verbatim: *"use before after tool and opus subagents to make nuke look
-realer in all stages and more cool and less geometric and en it also crashes
-game with city damage because it does it wrong to buildings blow up wrong idk
-figure it all out and make nuke look better and load able and this will
-improve the tool dogfioding"* — then, mid-wave, a reference plate of a real
-detonation: *"In gang city — Here a good screenshot of finish. Plus flash at
-the start realistically radius."* The plate's reads: dark self-shadowed cap
-over a MUCH lighter cream stem, ground still burning under a cold cloud, a
-flash with a real radius.
+Owner, on the Diamond Speedway grid: *"look at the garbage racer game in gang
+city game, make it way better, first with this gray whiteish car glitch and then
+just making that game legit rn its really really really thin logic and ui."*
 
-- **THE CRASH WAS NEVER AN EXCEPTION — IT WAS indexOf AT CITY SCALE.**
-  Measured live (seed 90210, 329 lots, CBZ.colliders = 123,332):
-  `cityDemolition.destroy()` removed every member with indexOf+splice —
-  432.9 ms for ONE 52-storey tower, 5,679 ms city-wide, quadratic in city
-  size, and paid as guaranteed full-miss scans on the nuke path because
-  hideReal() had already purged the same colliders. The O(n) cure existed
-  IN THE SIBLING FILE the whole time (structural.js purge(), whose header
-  names the exact tower); demolition.js had never adopted it.
-  `DEMO_FAST_PURGE` (ef2cf9f): destroy/rebuild/releasePropCols/
-  cityGlassReset/condemned all batch through `CBZ.structuralPurge`. VM
-  harness: destroy-all 15,460→304 ms (51x), glass re-seat 104x.
-- **LOADABLE, THREE WAYS** (`DEMO_LOAD_V1`): D.apply() compacts once per
-  array for a whole blob (18,085→76 ms, 239x); netpersist restores the
-  saved CLOCK before the demolition ledger (healed rows were admitted
-  against the fresh-boot clock, then torn down by the next tick — the load
-  paid destroy+rebuild per healed row); and SP saves finally carry rubble —
-  cityDemolition.serialize() had exactly one caller (the MP host blob), so
-  a nuked SP city reloaded intact. Rode construction.js's stamp()/hydrate()
-  section pattern with AGE-REBASING against the save's own clock (the SP
-  ledger persists no calendar). Deliberate: a fresh run in the same page
-  session does not re-hydrate; a reload always does (demolition.js:1124).
-- **"BUILDINGS BLOW UP WRONG" WAS ALSO THE RUBBLE**: RUBBLE_DETAIL_CAP
-  latched by ledger.size at build time, so building #33+ got a permanent
-  2-slab stub (32 mounds / 296 stubs after a city nuke — erased, not
-  rubbled), and the light branch consumed FEWER rng draws, so the same lot
-  grew different rubble depending on insertion order — against the file's
-  own determinism header. `DEMO_RUBBLE_DET`: every pile draws the full
-  parameter stream (tier caps meshes only), light tier 2+1→5+1. Plus:
-  DEMO_MAX_STOREYS mirror read live (structural.js:318 claimed both files
-  already did), cityMegaTower() no longer reports a helipad on rubble, NaN
-  collapse-wedge guard, tween settle on mode exit.
-- **NUKE_FX_ORGANIC (c7a6eb2, one flag, 17 sites, off = 2026-08-05 build).**
-  cbzSmokeLobes2: pool's real tiling noise in world space (2200 m + 420 m,
-  drifting) instead of the sine plaid; per-lobe identity off a 900 m noise
-  field (0.84–1.16 brightness, ±6% tint — a hash STROBES on climbing lobes,
-  noise doesn't); cap shades its own belly (−35%) and lights its crown rim
-  (+12%) in the cap's own frame; per-material role uniform (shared program,
-  per-material VALUES) makes the stem pale where the cap stays dark — the
-  plate's two-tone. Ash endpoints: stem 0x292725→0xb8ab98 (cream), surge
-  →0x8f7f6e, cap near-dark. Ember clocks split from colour clocks (stem
-  80 s, surge 75 s, masked to the deck; hot billows walk down to the ground
-  fire, out at 58 s) — the ground burns under a cold cap. Wind seeded per
-  GZ (hash01), cap drift ≤6% capW, stem lean 3.5% + cross-wind S, surge
-  fingers ±7% and ovals downwind — OFFSETS ONLY, reported dims untouched.
-  Stem 48→64 / surge 76→88 lobes with alphas solved EXACTLY invariant
-  (a' = 1−(1−a)^(N/N'): 0.74→0.64, 0.44→0.39) — the smoke audit reads the
-  same density (live: stem 0.961 ≥ 0.93 floor at t=26). Fireball boils
-  (subdiv 3, 3-octave displacement 0.105R, mottled core; dome/veil stay
-  clean Sedov). Drawn flash radii to research: fireball 62→222 m (16 kt
-  band 200–240), white dome to 416 m @0.85 s (Sedov 576·t^0.4) — also
-  reconciled a veil and an opaque front that disagreed 3.5x. Sky gets its
-  air back by ~3.5 s (fog authority τ=2.6 after the untouched double-flash
-  window; light drive keeps τ=5.2). In-shader haze grounds the cloud at
-  range (28% @20 km — FOGPROOF stays dodged). Night stops lying: the ||1
-  floor read a driven-to-zero hemisphere as 1.0; icon beat now sits INTO
-  the dark. seedVolumes(seed) per GZ — a second nuke is no longer the first
-  nuke's sculpture replayed (debug: bodySeed/windDeg/windK).
-- **GATES, all green on the merged branch**: math-gate (det ok, twice),
-  test-nukefx-phases, test-nuke-freeze-node, nuke-smoke-check (one shared
-  program, coverage 0.96–1.0, no shader errors), api-lint, and
-  **demolition-check COMPLETED FOR THE FIRST TIME IN ITS EXISTENCE** — it
-  had died on line 18 (`OUT` for `OUTDIR`, ReferenceError) since the line
-  landed, which is why finding 1 shipped: the gate that owned the arc never
-  ran. Fixed as mkdir(OUTDIR) (the literal one-word fix would ENOENT on the
-  first screenshot — the exact failure its own comment warns about).
-  Full arc green: blast→rubble (0 floating)→cleared→scaffold→rebuilt,
-  round-trip re-derives phase.
-- **TOOL DOGFOODING NOTES**: the metrics-rider noise lesson reconfirmed —
-  the first after-capture ran beside a math gate and its early beats read
-  3x worse than truth; judge perf from isolated probes, re-capture solo for
-  the report. And the before/after loop itself (pristine-worktree before,
-  --reuse-before after, single navigation per side) dodges the known
-  second-navigate disc artifact by construction.
+Two complaints, and they turned out to be four faults and one arithmetic error.
 
-## 2026-08-16 — THE LAST FREEZE WAS A THOUSAND UNGATED FLEE DECISIONS (follow-up wave, same session)
+### THE CARS WERE NEVER WHITE. THE PAINT WAS NOT MOST OF THE PIXEL.
 
-Owner: *"Keep working do everything you want to do."* The one cost deliberately
-left on the table ("the city dying — it is the honest cost", 2026-08-02) was
-re-measured after the demolition fix and stopped being honest: probe-nuke-perf
-attributed **8,007–10,432 ms per simulated second to peds.js u:34 at s=28-30**
-(worst single tick 4,070 ms) — ~95% of the whole sim — while every other
-updater sat near 300 ms/s.
+Every vehicle on the campus rendered the same pale grey-white off a catalog that
+is `0xe24b4b` red, `0xf2c43d` taxi yellow, `0x7d2bd6` purple and `0x1470e3`
+blue — and `material.color` was the right hex on every single one. A
+`MeshStandardMaterial` scales its DIFFUSE lobe (the only lobe carrying the car's
+own colour under a Lambert-lit world) by `1 - metalness` and reflects `envMap`
+with the rest. `world/carfx.js` ran the paint at metalness **0.55** and
+playercars.js's per-style table pushed it to **0.70**, with `envMapIntensity` up
+to **1.5**:
 
-- **THE CAUSE IS A MISSING GATE, NOT MASS.** fleeFrom (think()'s threatened
-  branch) is the only major decision in the file with no rate gate — up to two
-  city-wide door scans + 15 LOS raycasts per decision at 15 Hz per alarmed
-  body — and PED_BRAIN_STAGGER exempts `alarmed > 0`, so the one existing
-  throttle switches itself off exactly when cityScare alarms the whole
-  population. The 4 s tick is a CONVOY: _refugeT=2.5 and _rallyT=6 are the
-  only unjittered gates in the file, so every body that decided in the blast
-  frame re-decides on the same frame forever after.
-- **`PED_SIM_BUDGET_MS` (default 8, live-read, 0 = byte-identical legacy)** —
-  impactbus's drain-budget shape applied to decisions: think() and the
-  corpse-reap decision behind a rotating cursor + per-frame deadline; deferred
-  peds keep their previous decision, gate timers held not drained; a stride
-  tick landing on a deferred frame is OWED via a think-bank (clamped 1 s),
-  never dropped; bodies inside 58 m bypass the deadline; SIM_MIN_THINKS=8
-  floors the sweep so a near-crowd overrun cannot starve the tail. Movement,
-  timers, gunpointSweep, rebuildPedGrid, render LOD: every ped, every frame.
-- **MEASURED (probe-nuke-perf, seed 90210, same detonation both sides):**
-  u:34 at s=28/29/30: 8,007→358 · 10,083→358 · 10,432→350 ms/s (23-29x);
-  worst tick through the panic window 4,070→71 ms (57x); whole-sim
-  13,034→~3,000 ms/s steady. Calm-street and early seconds within noise
-  (+~15% bookkeeping at s0-10 — the cursor's honest cost). Gates after:
-  MATHGATE ok (det ok), freeze contract ok, phase contract ok.
-- **KNOWN AND LEFT, for the next wave:** the unjittered _refugeT/_rallyT
-  convoys (budget flattens their cost, not their synchrony — a one-line
-  jitter each, but it edits a behaviour constant); and losgrid's DDA index
-  rebuild on CBZ.losBlockers identity change may bill demolition's work to
-  whoever raycasts first that frame (attribution smear, not a leak).
-- Also: nuke-sequence.mjs's landmark beat focus no longer promises an empty
-  before-side sky (stale since NUKE_FX_AFTERMATH shipped on both sides).
+    diffuse share    1 − 0.55 = 45%        (30% on a lowrider)
+    env share        0.55 × 1.0 = 55%      (105% on a lowrider)
+
+…and the env being reflected is `gradientCanvas()`'s **#9fc4ff sky-bright top**,
+which is exactly what an upward-facing roof, hood and boot lid sample. Then
+core/renderer.js pre-multiplies by `exposure/0.6 = 1.67×`. A red car was 45% red
+and 55% bright sky times 1.67, which is a white car.
+
+`CAR_PAINT_V2` scales the authored table rather than replacing it — a Veyron is
+still meant to read wetter than a hatchback, so only the absolute response
+moves: metalness ×0.40, envMapIntensity ×0.45, roughness ×0.92. **Measured,
+two-sided, over the live world:**
+
+                          CAR_PAINT_V2=0        V2 (shipped)
+    washed paints         14 of 16              0 of 16
+    min diffuse share     0.45                  0.78
+    max metal·env load    0.55                  0.099
+
+Ratchet `CBZ.carPaintAudit().washed` pinned at 0, `minDiffuseShare` may only go
+UP. Marine hulls are excluded and counted separately: `world/water_hulls.js`
+authors a boat's scheme itself and playercars' `recolorBody` returns early on
+`marineLivery`, so counting tenders as cars was a fault in the audit, not in the
+fleet.
+
+### TWO REPAINT PATHS WERE DEAD, AND ONE OF THEM HAD NO DEFINITION AT ALL.
+
+`playercars.js` `recolorBody()` cleared `_bodyPaint` on the per-car material it
+minted. But `_bodyPaint` is the only handle anything downstream has for finding
+a body, and two passes need it after that one runs:
+
+- **`race_livery.js recolorBase()`** — a byte-copy of the same traversal,
+  testing the flag the original had just cleared. It matched **zero materials on
+  every car ever built**, so `livery.base` was silently discarded and no AI
+  racer, loaner or pink-slip car ever wore its league colour. The copy is gone;
+  playercars publishes **`CBZ.cityRecolorCarBody`** and race_livery adopts it.
+- **`CBZ.cityRecolorCar`** — `cityAddParkedCar(x,z,h,{color})` has called this
+  since the day it was written and **nothing in the repo ever defined it**. Now
+  defined, in one line over the shared traversal.
+
+A material this instance already owns is repainted IN PLACE, so a second pass
+costs nothing and cannot leak.
+
+### THE POLE CAR WAS SCORED A LAP DOWN, AND NOTHING COULD SHOW IT.
+
+`racedrivers.js` seeds a driver's course param with `coarseParam`, a 96-sample
+nearest-point search — **8.3 m apart on an 800 m lap**. Pole sits **3.0 m**
+behind the start line, and the nearest of those samples to a point 3 m behind
+the line is the line itself. Pole came out at `t = 0.000` while the rest of the
+grid came out at `t ≈ 0.99`; all of them carry `laps = -1`, so pole's total was
+**−1.000 against the field's −0.01 — a full lap adrift before the lights went
+out.**
+
+`gridSlot()` had already computed the exact param (`back / L`) and thrown it
+away. It returns it now and `spawn()` takes `t0`. **DO NOT SEARCH FOR A NUMBER
+YOU AUTHORED.** Measured on the grid: totals `-0.0038 … -0.0264`, monotonic by
+slot, spread **0.0226 lap**, worst interval **0.5 s** (it read **+129.8 s**).
+
+It survived because the old HUD drew **two rows** — the car ahead and the car
+behind. An entire grid could be mis-ordered in front of you and the only symptom
+was a strange number in one cell.
+
+### THE HUD THREW AWAY EVERYTHING THE RACE ALREADY KNEW.
+
+`CBZ.raceKit` computes a complete running order with live intervals, and
+collects `e.lapTimes[]` / `e.lastLap` / `e.best` for **every** entrant on every
+crossing. Grep confirmed **nothing in the repo read `lapTimes` or `lastLap`,
+anywhere.** The full order went to the world jumbotron at 1.5 Hz — a sign you
+cannot read while driving.
+
+`racehud.js` is a broadcast overlay now: a **timing tower** (whole field, team
+colour chips, intervals not gaps-to-leader, lap-down and FIN markers), a **track
+map** sampled from the one authoritative frame function with a live dot per car,
+**three sector times** timed off the same centreline parameter the lap counter
+watches, **LAST vs BEST** with the delta coloured, and the **fastest lap of the
+field** in purple. Five more, all filmed:
+
+- the gap arrows were **coloured backwards** (ahead got red-vs-green inverted,
+  and the empty states inverted them again)
+- the strip **did not update during the countdown** — the grid, the one moment
+  you want the order, showed em-dashes
+- the lamp gantry had **three lamps against the world gantry's five**
+- `.rMap`/`.rDmg` carry `display:none` in the sheet, so `style.display = ""`
+  handed them back to it — the map was "mounted" and not on the screen, and
+  every `!== "none"` test agreed with the bug
+- the ENGINE bar was anchored at `top:50%` with a `-50%` transform, which is
+  where the timing tower is
+
+### THE CHEQUERED FLAG IS A PLACE, NOT THE END OF THE WORLD.
+
+`if (RACE.playerLaps >= RACE.laps) endRaceRD({})` — the instant the player
+crossed, six cars were deleted mid-corner and a results board appeared over an
+empty track. Rivals still on their last lap were classified on frozen progress,
+which is also why the order could disagree with what you had just watched. The
+player now takes the flag, his own race stops scoring, and the field keeps
+running until everyone is home, the cap expires, **or he parks it** — because
+waiting out a cool-down you did not ask for is the same mistake pointed the
+other way.
+
+Also at the flag: **a retirement is no longer classified ahead of a running
+car.** Only the PLAYER was ever demoted on a DNF, so the fault was invisible
+unless a rival crashed; `games/racing.js:372` already sorted retirements last
+and the two flows disagreed.
+
+### AND A FREE RACE MAY NOT BE THE BEST-PAID RACE IN THE GAME.
+
+    Speedway weekend   entry $0     win $22,500   LAST PLACE $500 floor
+    APEX Night         entry $250   win    $700
+    Street race        ante $50     pot = ante × runners, plus 1 star
+
+The one event that costs nothing and cannot pay less than $500 paid **thirty-two
+times** the prestige event you have to qualify for. `RACE_PURSE_V2`: the floor
+becomes START MONEY ($200 for taking the flag), a retirement still pays nothing,
+the win scales to $7,200 over three laps, and a **fastest-lap bonus** ($600)
+turns the last lap of a race you cannot win into a lap worth pushing on.
+
+### SLIPSTREAM — THE THING AN OVAL RACE IS ACTUALLY ABOUT.
+
+The word "draft" did not appear anywhere in the race code. The AI had racecraft
+(ATTACK swings to the free side of a slower car) with no mechanism that could
+ever make it work: a car with the same top speed cannot pass one in front of it
+on a straight. `RACE_SLIPSTREAM` is one sweep over every car on track — **the AI
+field AND the player**, because a tow the AI gets and you do not is a handicap,
+not a mechanic — feeding one `_draft` scalar that vehicles.js's `carDynamics`
+reads in one line. Measured over a race: **11,791 tows, peak 0.818.**
+
+Six drivers are six drivers now, too: `aggr` and `consistency` were straight-line
+functions of `skill`, so the fastest man was always also the bravest and the
+tidiest. They are spread around the skill line by a per-driver signature hashed
+off the name (deterministic, no `Math.random`). racedrivers.js already read all
+three independently — the AI was always ready for a field that differed. It
+shows up on the results board as **0:18.1 / 0:18.3 / 0:19.7 / 0:21.8**.
+
+### AND THE CARD CAME DOWN OFF THE GRID.
+
+`systems/controls.js` pops its reference card the first time you enter a car —
+which on a race day is the moment you sit on the grid, so "Driving: W/S
+accelerate" sat across the middle of the screen through the entire countdown.
+The auto-pop now DEFERS while `CBZ.raceLive()` (one new predicate, true for all
+four race flows), and `raceHud.show()` dismisses one that is already up.
+
+Flags `CAR_PAINT_V2` · `RACE_PURSE_V2` · `RACE_SLIPSTREAM` · `CAR_PAINT_HANDLE_V2`.
+Ratchets `CBZ.carPaintAudit()` · `CBZ.raceHud.audit().blindPanels` ·
+`CBZ.raceDraftAudit()`. Gate **`tools/race-weekend-check.mjs`**, two-sided on
+the paint. `tools/race-check.mjs` still green.
+
+### AND THE SPEEDOMETER WAS READING THE OTHER UNIT.
+
+Owner, same day: *"the normal cars in gang city show km/h on the speedometer
+not mph."* Three consumers, three different answers to "how fast is this car",
+none of them the world's own:
+
+    city/carcluster.js   v × 2.4   labelled MPH   (the instrument cluster)
+    city/hud.js          v × 3     labelled MPH   (the fallback readout)
+    city/roadrules.js    v × 2.4   the number that decides you are SPEEDING
+
+hud.js's own comment called its 3 a guess ("rough mph"), and 3 against 2.4 is a
+**25% disagreement between two numbers that have shared one corner of one
+screen** — the "TWO SPEEDS SHOWN IN BOTTOM RIGHT" the owner reported once
+before, fixed in the layout and still there in the arithmetic.
+
+And 2.4 is wrong too. A world unit in this game is a **metre** — a man is 1.82
+units, the prison is 248 × 244 units and is measured in hectares — and `car.v`
+is units per second, because `pos.x += vx * dt` is the only integration there
+is. So the conversions are not a taste knob: **1 u/s = 2.23694 mph = 3.6 km/h,
+exactly.**
+
+    v (u/s)   ×2.4 (cluster)   ×3 (fallback)   TRUE mph   TRUE km/h
+    35            84               105             78         126
+    50.7         122               152            113         183
+
+A sedan at its top speed drew **105 under an MPH label when the mph is 78 and
+the km/h is 126** — which is precisely how a speedometer comes to read like the
+other unit. `CBZ.speedRead(v)` / `speedMph(v)` / `speedLimitRead(mph)` in
+vehicles.js are the one conversion now; all three consumers adopt it with their
+own literal kept as the no-vehicles.js fallback arm, the fallback readout gained
+the unit label it never had, and `CAR_SPEED_UNIT` switches both the number and
+the word off the same metres-per-second so they can never disagree.
+`SPEED_UNIT_V2=false` restores the historical 2.4/3.0 pair.
+
+## 2026-08-15 — THE CITY HID THE ONE CARD THAT ASKS YOU A QUESTION (pushed 776b2b3)
+
+Owner report: on iPad the Gang City interaction options open; on Mac nothing
+shows. Root cause was CSS, not JS: every city interaction (walk-up verb, the
+dialogue's two answers, police gun-stop) renders into `#interact`, and
+`css/city.css`'s declutter block `display:none !important`-ed it in city play.
+The only restore rule was `body.touch...#interact.show` (mobile.css:410), so
+keyboards pressed E into an invisible panel. Fix: one rule in city.css —
+`body.mode-city.state-playing #interact.show { display:block !important }` —
+the same visible-only-while-live contract touch had. Verified by probe both
+ways before landing (desktop idle=none/shown=block).
+
+Also aligned survival_interact's menu REACH/CONE (was 3.4/0.2) with
+grapple.js's action constants (3.1/0.25) — the looser menu advertised
+Grab/Punch/Shove in a shell where aimTarget() was null and every verb no-oped.
+
+New tools: `tools/visual-presets/interaction-{city,prison,disaster}.mjs` —
+device-matrix presets (iphone-16 + ipad-mini portrait/landscape + laptop)
+staging the interaction beats of all three games (city walk-up/dialogue/
+hire-after; prison inmate/guard walk-up; survival free/carrying) with
+panelVisible/verbCount/minTapPx/optionChars metrics. Not yet captured — the
+machine was under load 31 with two other sessions' Chromes; run when quiet:
+`npm run visual:compare -- --preset interaction-city --before https://efoltyn.github.io/gta6/ --no-open`
+
+NOTE: commit 776b2b3 was built on a temp index atop origin/main and pushed
+directly (this checkout had another session's dirty tree + was behind 2);
+local main ref was deliberately left alone — pull when convenient.
+
+## 2026-08-15 — a man in zip ties could still shoot (and punch) — PR #27, merged
+
+Owner filmed a cuffed ped in gang city firing with his wrists pinned behind
+his back. Root cause: restrain.js's zip-tie state was pose-only — nothing on
+the trigger path ever read `ped.restraint`. Worst case was a tied COMPANION:
+think()'s crew branch ran BEFORE the `controlled` early-return, so
+companionThink re-armed him (Pistol, 999) and wiped surrender/rage every
+tick while the 38.5 restraint tick held the cuffed pose. The fist path was
+open too: npcAttack's melee branch + hurtActor's fight-back roll never
+checked restraint (grappled protected itself via attackCD; cuffed didn't).
+
+Fix (peds.js/gangs.js/combat.js): npcAttack refuses `att.restraint` (one
+gate, gun + fist, every caller); restrained companion falls through to
+restrain.js; fight-back roll, loot pickup, raid arming, Lt defense, loyalty
+battle, reprisal squads all skip restrained bodies; poseEligible treats zip
+ties like surrender so the aim pass never lifts a tied arm. Witnesses still
+count a tied man on purpose.
+
+Verified in an isolated probe world (stepSim in-page, one throwaway Chrome
+per probe-budget): cuffed companion disarmed across 240 ticks with a
+released control re-arming; cuffed ped force-raged every tick for 120 ticks
+= 0 dmg, released control = 57.3. math-gate deferred — another session's
+gate was mid-run at load ~135 and the change is inert unless something is
+restrained. Landed via temp-index commit atop origin/main (shared dirty
+checkout), PR #27 merged; local main THEN fast-forwarded to bfaccbd after
+re-pointing the three files' index entries (ff refuses dirty-but-identical
+files otherwise), so this tree's copies are clean and safe from add -A.
+
+## THE 2026-08-16 BEACH SESSION — both coasts get bigger and real, zero props, one easy A/B button
+
+**Mandate:** *"Improve the beach without adding props in natural disaster and in
+gang city and commit bigger and more real easy use before after tool and GO
+FAST."* Read as three deliverables: both beaches bigger + more real with ZERO
+new props, the before/after tool made one-command easy, everything committed.
+
+**Gang City (`BEACH_V2`, default on, `?cfg_BEACH_V2=0` reverts):**
+- world.js: the south seawall's beach gap grew 100 → 160 m (cx-150..cx+10).
+  Every consumer reads the descriptor, so the sand, swash apron, minimap band
+  and stashes all widened without another file changing. Prop COUNTS untouched
+  — a wider beach with the same nine palms is mostly open sand, which is what
+  a coastline is.
+- beach.js: the sand band stopped being one flat quad in one hex. It is a
+  subdivided grid with micro-relief (three incommensurate sine fields, ZERO
+  rng draws — build stream byte-identical under the flag) and vertex colour
+  doing texture's job: grain mottle (position hash), warm/cool drift, crests
+  bleaching + hollows shading, a damp band into the swash, and the high-tide
+  WRACK LINE as colour. Relief clamps near-flat where authored things live
+  (towels 0.085, furniture 0.06, pier approach) and ≤0.20 everywhere (the
+  boardwalk deck's underside is 0.22). The swash apron gained alongshore
+  columns (7 → ~16, one per 11 m) so the run-up reads as surf tongues.
+  BUG CAUGHT IN REVIEW: first grid winding faced -Y (invisible sand);
+  cross-product check fixed it before the first screenshot.
+- Lobes ride the relief and take the same vertex colours.
+
+**Natural Disaster island (`SURV_BEACH_V2`, default on):**
+- disaster_arena.js: the 8 m flat sand annulus at y=-0.02 became a 26 m SHORE
+  with a profile — grass edge, low wave-built berm (0.30 peak at b≈4.6), then
+  a smoothstep foreshore that descends THROUGH the waterline to -1.9 where the
+  shelf takes over. groundHeightAt and the drawn ring read ONE function
+  (coastHeightAt), so drawn == walked (the seabed doctrine, extended to the
+  beach). Dry sand ~11.6 m, wadable foreshore ~15 m before swim.js takes you.
+- The drawn ring (RingGeometry R-3..SHORE_R-1, SAME 96 theta segments as the
+  seabed ring, so the boundary vertices coincide — no seam, no overlap) is
+  vertex-coloured and carries a LIVE WET LINE: every vertex below the live
+  mean sea + a breathing alongshore swash wets instantly, dries at 0.10/s —
+  so a tsunami drawdown strands a great ring of visibly wet sand (the dread
+  beat, on the beach itself) and a flood's retreat leaves a high-water mark.
+  Tick at 47.95, right behind the ocean mesh's own surge take at 47.9.
+- CBZ.survShoreAudit() publishes the shore's static facts (band, dry, wade,
+  wet-line liveness) measured off the same functions physics uses.
+
+**The easy before/after button:**
+- tools/before-after.mjs — ONE argument: `node tools/before-after.mjs
+  beach-shores` (or `npm run ba -- <preset>`; bare = list all presets with
+  titles). Applies the three decisions every run makes anyway: --before from
+  the preset's defaultBefore (flag-A/B) else deployed, --keep-going,
+  --no-open. Everything else passes through to visual-compare.mjs.
+- tools/visual-presets/beach-shores.mjs — five subjects across BOTH worlds in
+  one run (city boots by Play; island via CBZ.setMode("survival"), which
+  systems/state.js builds synchronously): city panorama / waterline /
+  backshore, island shore / walk-into-the-water. Flag A/B by default
+  (before = this checkout with cfg_BEACH_V2=0&cfg_SURV_BEACH_V2=0). Metrics
+  are measured off descriptors and height functions, not pixels: beachSpanM
+  100→160, islandBeachM 8→26, drySandM, wadeM, wetLineLive, verts, drawCalls.
+- npm run visual:beach = the beach comparison in one command.
+
+## 2026-08-16 — OPEN DUNES was a flat white plate (battle.html's dunes venue)
+
+Owner: "Look at NPC war open dunes." Looked, with screenshots and the checker.
+The war itself held (0 overlap / embedded / blindFire / stuck, ended on
+budget) but the venue did not: the label promised dunes and bare sand, and
+the field was a featureless near-white sheet with the desert city's towers
+filling the horizon. Three measured faults, three fixes — games/battle.html,
+tools/battle-check.mjs.
+
+- **THE CENTRE WAS A CONSTANT AND THE DUNES WERE 600 m FURTHER OUT.**
+  rings.city+650 sits a third of the way up the dune amplitude ramp:
+  measured 7.6 m of relief across the whole ±160 m fight window — one gentle
+  swell, no dune anywhere. The venue now SCANS the erg (2D — the erg is a
+  ring, not a bearing) for the first centre passing two measurements: ≥16 m
+  of relief in the window AND ≥2 of the 3 central spawn lanes crest-cut at
+  eye height. Relief alone was not enough — the best on-axis window put all
+  its sand on the flanks and the firing lines still saw each other spawn to
+  spawn. Lands at (2100,−350): relief 23.7 m, 3/3 lanes cut. The terrain
+  derives from WORLD_SEED only, so the same URL is the same war. (An offline
+  replica of heightAt using the FALLBACK hash landed the scan 200 m from
+  where the page's real Squirrel3 hash01 does — measure in the page, not in
+  a copy of the page.)
+
+- **A DUNE IS NOT MADE OF COLLIDERS.** eyeLos was micro.segmentBlocked —
+  boxes only — so on real dunes men would sight and fire through twenty
+  metres of sand. terrainBlocked() samples groundAt along the eye line at
+  3 m steps (a 420 m dune wavelength cannot be stepped over) and eyeLos asks
+  it on maps that declare terrainLos. Dunes only, deliberately: a RAISED
+  venue's groundAt is a raycast heightfield that cannot tell a roof from a
+  hill, and its buildings already block sight honestly through their own
+  colliders. Fire discipline inherits the honesty for free — the trigger
+  re-asks the same eyeLos. Revert `?tlos=0`.
+
+- **THE SAND RENDERED AS PAPER.** sun 0.98 clipped the terrain's own tan
+  vertex colours to white, and the hemisphere light's default pale-BLUE sky
+  side desaturated the rest (blue fill on tan sand is gray). sun 0.84,
+  exposure 0.8, lights.skyColor 0xcfc2a4 — desert ambience is the sand's own
+  bounce. Screenshot-verified: sand reads tan, dune shading carries the
+  aerials, men and corpses read against the ground.
+
+Ratchets: audit() states `relief` (the fight window's measured vertical
+span) and `terrainLos`; QUAL gains `throughSand`, counted at the trigger
+with the terrain test ALWAYS on for the dunes map — 0 armed, 2 in the
+26v26 sweep with `?tlos=0`, which is what makes the zero mean something.
+battle-check fails any map on throughSand>0, fails `dunes` under 12 m of
+relief (the flat-plate regression is now loud — it fired during the build
+when the first scan criterion missed), and --revert adds `&tlos=0`.
+
+NOTE (same session): the full nine-map sweep flagged transient overlap pairs
+on `gov` (1-2 pairs) and `marina` (0-1) — measured on BOTH sides of this
+wave (base 0dce341 in a clean worktree: gov 1 pair, worst 0.97 m). It is a
+pre-existing, machine-load-sensitive transient on the dense venues, not a
+dunes regression (dunes itself: 0 across every counter, every run, both
+revert directions). Named here instead of fixed: separation under big
+substeps on dense venues is its own measurement pass, and this wave's
+subject was the erg.
+## 2026-08-16 — A THUMB COULD NOT USE THE C4, IN EITHER GAME
+
+Owner: "I can't use c4 on touch — prison game, prob can't in gang city
+either." He couldn't, anywhere: plant AND detonate lived on keyboard [B]
+alone (city/explosives.js's tap/hold state machine), and no touch file ever
+drew a control for either verb — the exact "keyboard verb with no thumb"
+failure touch.js's verb ledger exists to catch, except these two verbs were
+never even DECLARED into it, so no counter could say so. Inside the wire it
+was worse than the city: the phone's DEMOLITION card does not exist in the
+pen, so hold-[B] is the ONLY detonator the prison has — an iPad prisoner
+with a brick carried a stat fiction.
+
+ONE BUTTON, ONE PILL, ZERO REIMPLEMENTATION. #tbomb joins the on-foot icon
+cluster (bomb-with-spark glyph): tap plants, hold ~0.5 s detonates — by
+holding the module's own logical key down exactly as long as the finger is
+(CBZ.touchKeyHold, the edge-per-call sibling of touchKeyTap), so the arm
+delay, the det-cord clustering, the five-signal receiver cap, the yield to
+the B-2's bomb bay and every refusal line stay explosives.js's alone. Shown
+only when the verb can act (the keyboard's own claim test: bricks on foot,
+or charges out), and red once charges ARE out — the charge LED's own color.
+The vehicle layer gets the pill the plan ends on: body.tveh-on hides the
+on-foot cluster in a seat, so DETONATE (worded — that rail speaks verbs)
+joins the aux rail in drive/armor and now boat, wired through the same key
+hold, inheriting the 0.5 s arm that keeps a mis-brush of the glass from
+sending the street up.
+
+MEASURED (tools/c4-touch-check.mjs — headless touch session, both games):
+tap → exactly 1 planted and exactly 1 brick spent; 0.33 s of hold → nothing;
+0.7 s → every charge out fired, no brick spent; the drive context builds AND
+shows #tvBoom with a charge out (real car, real boarding arc) and the same
+hold detonates from the driver's seat; escape: plant + detonate inside the
+wire. touchAudit 42/42 covered — c4-plant / c4-detonate are ledger rows now,
+so the next thumbless verb cannot hide the way this one did. Also: the
+"[B]… Shift+B" stash hint is keyboard-only now (a touchscreen is never shown
+a keyboard key). Gate: npm run test:c4-touch.
+
+## THE 2026-08-16 BEACH SESSION — both coasts bigger and real, zero props, one easy A/B button
+
+**Mandate:** *"Improve the beach without adding props in natural disaster and
+in gang city and commit bigger and more real easy use before after tool and GO
+FAST."* Three deliverables: both beaches bigger + more real with ZERO new
+props, the before/after tool made one-command easy, everything committed.
+
+**Gang City (`BEACH_V2`, default on, `?cfg_BEACH_V2=0` reverts):**
+- world.js: the south seawall's beach gap grew 100 → 160 m (cx-150..cx+10).
+  Every consumer reads the descriptor (sand, swash, minimap band, stashes), so
+  the wider opening propagated with no other file changing. Prop COUNTS
+  untouched — a wider beach with the same nine palms is mostly open sand,
+  which is what a coastline is.
+- beach.js: the sand band stopped being one flat quad in one hex. Subdivided
+  grid, micro-relief (three incommensurate sine fields, ZERO rng draws — the
+  build stream is byte-identical under the flag), vertex colour doing
+  texture's job: grain mottle (position hash), warm/cool drift, crests
+  bleaching + hollows shading, a damp band into the swash, the high-tide
+  WRACK LINE as colour. Relief clamps near-flat where authored things live
+  (towels 0.085, furniture 0.06, pier approach) and ≤0.20 everywhere (the
+  boardwalk deck's underside is 0.22). Swash apron columns 7 → ~16 (one per
+  11 m) so the run-up reads as surf tongues, not one tilting line.
+
+**Natural Disaster island (`SURV_BEACH_V2`, default on):**
+- disaster_arena.js: the 8 m flat sand annulus at y=-0.02 became a 26 m SHORE
+  with a profile — grass edge, low wave-built berm (0.30 peak at b≈4.6), then
+  a smoothstep foreshore descending THROUGH the waterline to -1.9 where the
+  shelf takes over. groundHeightAt and the drawn ring read ONE function
+  (coastHeightAt): drawn == walked, the seabed doctrine extended to the
+  beach. Dry sand ~11.75 m, wadable foreshore ~15 m before swim.js takes you
+  (audited: CBZ.survShoreAudit()).
+- The drawn ring (RingGeometry R-3..SHORE_R-1, SAME 96 theta segments as the
+  seabed ring — boundary vertices coincide, no seam, no overlap) is
+  vertex-coloured and carries a LIVE WET LINE at tick 47.95 (behind the
+  ocean's own surge take at 47.9): every vertex under the live mean sea + a
+  breathing alongshore swash wets instantly, dries at 0.10/s — a tsunami
+  drawdown strands a great ring of visibly wet sand, and a flood's retreat
+  leaves a high-water mark.
+
+**The easy before/after button:**
+- tools/before-after.mjs — ONE argument (`node tools/before-after.mjs
+  beach-shores`, `npm run ba -- <preset>`, bare = list every preset with its
+  title). Applies the three decisions every run repeats: --before from the
+  preset's defaultBefore (flag-A/B) else deployed, --keep-going, --no-open;
+  everything else passes through to visual-compare.mjs.
+- tools/visual-presets/beach-shores.mjs — five subjects across BOTH worlds in
+  one run, flag A/B by default (before = this checkout with
+  cfg_BEACH_V2=0&cfg_SURV_BEACH_V2=0). Metrics come off descriptors and
+  height functions, not pixels: beachSpanM 100→160, swashVerts 91→272,
+  islandBeachM 8→26, wadeM 4→15, wetLineLive 0→1. npm run visual:beach.
+
+**Four defects the loop caught before the owner could (iter-1 → final):**
+1. The sand grid's triangle winding faced -Y (invisible sand) — caught by a
+   cross-product check before the first screenshot, fixed pre-run.
+2. core/batch.js MERGED the vertex-coloured sand mesh away (empty userData →
+   batch material → no vertexColors): dunes survived, mottle vanished,
+   sandVerts metric read 0. Fix = the swash apron's own rule, non-empty
+   userData. THE METRIC CAUGHT IT — that is why metrics ride the preset.
+3. The first-person rifle photobombed every after frame. CBZ.setFPS(false) in
+   the stage, twice (a mode switch can re-arm it).
+4. BOOT ORDER IS LOAD-BEARING for cross-world presets: booting city first
+   builds the continent underlay + world sea at y≈0 across the whole map —
+   global meshes state.js never hides — and the island's shore (0 → -1.9) and
+   own ocean (-0.8) sit UNDER them; iter-1's island frames photographed the
+   empty city sea. Measured with a raycast probe (hits: world-sea,
+   continent-underlay at ~92 m). The preset now boots STRAIGHT into survival
+   (the tsunami-stages boot), shoots the island first, then switches city-ward
+   — safe in that direction. Anyone building a two-world preset: island
+   subjects go first.
+## 2026-08-16 — the "nil outfit" body, fourth and fifth producers (fable, solo)
+
+Owner (iPad screenshot, live pages build): an adult NPC — aim tag "Lv.11
+Founder" — rendering skin-toned from shoulder to wrist, "nil outfit … too
+common". Same symptom family as 2026-07-29/2026-08-04, but every pinned
+number was green (`bare=0 instHoles=0`): those audits test RENDERABILITY,
+and this body renders fine — it is CLOTH PAINTED AS SKIN, which no
+instrument could see.
+
+**Producers found (probed live, seed 90210, before touching anything):**
+- `crowd.js setLook` copied the imposter's one-mesh skin arm onto the real
+  rig's arms + armsLower on EVERY promotion, and `outfits.js plainRedress`'s
+  arms-continuity then preserved the naked arm through every later redress,
+  forever. Near the player promoted bodies dominate, hence "too common";
+  with a tan crowd shirt the whole torso joins in (the screenshot).
+- `vips.js paintFit` tinted torso/collar/legs only — never arms — and
+  `cityPaintSlot`'s canvas guard made it a TOTAL no-op on painted bodies.
+  Probe: black-suit guard with cream blouse arms; the don in a painted
+  cocktail dress; the magnate principal in a painted KID'S HOODIE (no age
+  gate in draftableCiv — a child, drafted as the billionaire, embodying a
+  FOUNDER, with three SMG suits). `restoreFit` sampled painted materials'
+  white base at draft and "restored" it at release.
+- `billionaires.js` embodiment left `_sid` on the released civilian → the
+  walking "Lv.11 Founder" (economy.js roleOf tests roster by sid) AND the
+  next `cityPedStash` stomped the founder's persistent ledger page.
+- `schedule.js cityPedDeal` had no band gate (banked adult identities could
+  land on child bodies).
+
+**Fixes (two flags, both default ON, one-line reverts):**
+- `CITY_CROWD_SLEEVES` — setLook paints shirt upper arms + skin forearms
+  (the spawn path's own short-sleeve grammar); plainRedress + the corpse-
+  swap sampler clamp an exact-skin-hex upper arm to the shirt (exact
+  compares only — tan shirts never trip it).
+- `CITY_VIP_WARDROBE` — vips.js casts/releases through `CBZ.cityRedressPed`
+  (magnate → tux/varied suit, guards → jobFit "close protection" = painted
+  All Black Tactical, senator/judge → new jobFit rows → composed business
+  suit, don → set colors + bandana, star → gown); draftableCiv refuses
+  non-adult bands; stash/restore now carries name+gender (billionaires
+  renames after stash). Unflagged correctness: cleanupEmbodied scrubs the
+  founder sid off live releases (restoring any pre-embodiment `_sid` via
+  `_bilPrevSid`); cityPedDeal refuses non-adult bodies.
+
+**RATCHET:** `outfitIntegrityAudit()` gains `skinArms` (+`skinArmSample`) —
+upper-arm cloth flat-painted exactly the rig's own skinTone under a real
+(non-skin) torso; painted tank excluded by id, shirtless bodies excluded by
+the torso half. PINNED AT 0 in math-gate. RUN AND GREEN, seed 90210: boot
+125 rigs / det-side 32 rigs, `bare=0 deadTex=0 instHoles=0 skinArms=0`,
+determinism ok, wardrobe/yoke audits untouched.
+
+**NEW EYES:** `tools/visual-presets/vip-wardrobe.mjs` — flag-A/B preset
+(`--before local`, before boots both cfg_ flags OFF): promoted-crowd row,
+magnate detail, don/senator/star court, and the released party, with
+skinArmedInRow / armClash / minorsInRow / founderSidKept / skinArmsCity
+metrics on every plate.
+
+## 2026-08-16 — the prison sat on air (SIT_PHYS_V1, branch claude/prison-game-sitting-physics-58xypq)
+
+Owner report: "guys can sit on air, like, close to a chair, but, like, not on
+the chair. They can just sit on nothing, fix the physics." Reproduced in one
+probe world, mode escape, seed 90210 — twelve bodies in the seated pose at the
+morning yard block, eleven of them nowhere near a seat. Four faults, one law
+(A SEATED BODY IS AT ITS SEAT), one flag:
+
+1. THE WING SAT HALF A METRE FROM ITS OWN BUNKS. Every bunk-posed cell
+   resident measured exactly 1.06 m from his bunk centre — latOut (0.56) +
+   body radius (0.5), the depenetration signature. cellblock.js's leash pins
+   the man to the mattress edge at order 22.6; actorcollide.js's wall clamp
+   (25) ran later and ejected him from the now-solid bunk frame every frame,
+   and the later writer wins. Ten men at once, seated on nothing at floor
+   level. Fix: furniture-held bodies (seat/bed/lie claim, seated/lying rig,
+   or a live prop arc) skip the separation+clamp roster — the rule peds.js's
+   own sit branch already states ("a seated body must not be shoved around by
+   the desk colliders"), closed for the prison's plain actors. Their
+   traversal sample stays stamped so standing up never reads as a sprint.
+2. A CLAIMED SITTER WAS DRAGGED 2.13 m OFF HIS STOOL, still posed seated —
+   the third actor shape had no pin. The player has propuse §3, a peds.js ped
+   re-pins itself from _deskAnchor at 34, a PLAIN actor had nobody, so the
+   muster's target-writes slid him across the yard. Fix: propuse's NPC hold
+   (42) pins seated occupants exactly as it always pinned lying ones — whole
+   transform, same order, wins the frame. For a ped it re-writes the values
+   its own branch just wrote (no-op); KO outranks the furniture.
+3. THE SIT ARC GLIDED. propSit's NPC commit latches char.sitting before the
+   arc (peds' state machine needs it) and the walk-in phase wrote no rig
+   state, so the seated pose owned animChar for the whole leg — a man sailing
+   to the bench folded into a chair shape, measured seated at 2.25 m out.
+   Fix: the walk phase writes absolute rig state like every other phase
+   (sitting/crouch false); the lower/perch beats re-raise the flag when the
+   hips actually land.
+4. THE PLAYER COULD NOT SIT IN HIS OWN PRISON. propuse §3's force-exit read
+   `g.mode !== "city"`, so the sit arc completed and stood him back up the
+   same frame — measured sat 0 of the 160 frames after the arc. Fix: the pin
+   honours the mode the sit began in (P._propMode, recorded by
+   propSit/propSleep; anything that never recorded one keeps the "city"
+   reading byte for byte).
+
+Ratchets, both measured before pinning: CBZ.cellblockAudit().seatDrift
+(bunk-posed men off their spot; was 10-11, pinned 0) and
+CBZ.propUseAudit().airSitters (claimed seats whose occupant sits >0.35 m off
+the anchor; was 1 within a minute of chow, pinned 0). Geometry only, no flag
+reads, so a revert run measures the defect instead of hiding it.
+
+New tool: tools/prison-sit-check.mjs (npm run test:prison-sit) — 12
+assertions on the fixed tree (wing seated with seatDrift 0, chow airSitters 0
+and worst offset 0 m, a live arc with glideFault 0 landing at 0 m, the player
+still seated three seconds on and released cleanly by propStand);
+`--revert` boots ?cfg_SIT_PHYS_V1=0 and asserts the OPPOSITE (seatDrift 11,
+player stood back up) — the two-sided shape mode-engine-check demands.
+Verified: default 12/12, revert 4/4, MATHGATE ok (400 ticks, det ok,
+errors baseline-only), city regression probe 37 seated peds offSeat=0.
+
+## 2026-08-17 — THE FRAME, NOT THE LOAD (react-doctor wave)
+
+Owner: run react-doctor on the game, then make it run much much faster —
+in-game feel, not load time. React Doctor (millionco, oxlint-based) scanned
+813 files: 372 warnings, zero of them React (this is IIFE + r128) and, on
+inspection, none on a hot path — its `indexOf`-in-loop hits are 3-element
+arrays in bounded scans. The real wave came from a CDP sampling profiler
+attached to the live probe world (scratchpad cdprofile.mjs pattern —
+Profiler.start → stepSim ×400 → aggregate self-hits by function). Calm
+street, seed 90210, all before/after on the same machine.
+
+**Sim tick 29.7 → 24.9 ms. Render-side updateMatrixWorld 10.8 → 6.9 ms/frame.**
+
+The finds, in guilt order:
+
+1. **The coastline was recomputed from noise for every water question**
+   (~9% of the tick): every cityWaterAt/isSurfaceWater — cars' overWater,
+   swim, gore, floods — funnels through waterfield's coastAt →
+   continent.js shoreField, an analytic field over noise2/pathBodyField/
+   inSolidRegion. Memoized on a 4m corner grid with bilinear blending
+   (exact at corners, <1m coastline shift, pure function of (x,z) so MP/
+   determinism-safe; worldgen calls shoreField DIRECTLY and is untouched).
+   Plus: overDeck ran a REGEX per region per call (isLink) — now cached on
+   the region object; plus a last-cell fast path. Continent fields left the
+   profile entirely.
+2. **pedinstance walked all ~700 rigs every frame** (a:96, 3.4→1.5ms;
+   clean A/B 2.37→0.86ms): far (>40m) rigs now walk on 1 of 3 frames
+   (`PED_SYNC_STAGGER`), phases spread by group.id; every same-frame
+   contract kept — park gates run every frame, sweepRig knows a held frame
+   from a missing part via r.skipStamp.
+3. **The renderer recomposed every matrix the instancer had ALREADY
+   composed** — 33k ped-rig + 9k car nodes of the 48k matrixAutoUpdate
+   set. New shared contract: loop.js bumps CBZ._matrixOwnStamp once per
+   frame; a system that provably left a subtree's world matrices correct
+   stamps the root; core/matrixskip.js skips the whole subtree on stamp
+   equality. Stamps expire next frame BY CONSTRUCTION (no teardown
+   bookkeeping, nothing can stay stale). Stampers: pedinstance walked+held
+   rigs (`PED_MATRIX_OWN`), vehicles far-stride skipped cars and settled
+   parked cars >60m (`CAR_MATRIX_HOLD`; parkSeat's own cache is the
+   "settled" oracle; near cars stay live for doors/entry). Coverage
+   measured: 116/622 rigs (the non-culled ones), 386/420 cars.
+4. **reactions.js ran its 300-line pose body for every calm ped**: added
+   the quiescent fast path — a complete enumeration of the three edge
+   detectors, every external pose input and every stored channel; any
+   nonzero falls through. Measured 98-99% skip on calm streets, and
+   CBZ.reactionsAudit() now reports quiet/full/firstBlock forever.
+5. **The hot reticle asked isProtectedActor for all ~630 peds every
+   frame** (2.6%): bare radii are strictly inside assisted radii, so
+   findActorHit now tests assisted spheres first and asks the predicate
+   only on a would-be hit (still never cached — childsafe's obligation
+   kept; also no longer asked for merely-culled invisible peds). Gone from
+   the profile.
+6. **queryCollidersNear deduped via Set hashing** for every steering ped +
+   crowd probe: now a query-id stamp on the collider (9.1→7.0%).
+
+GATE: MATHGATE ok (90210:329/182/207, 400 ticks, det ok, errors
+baseline-only) with everything default-ON. Reverts: ?cfg_PED_SYNC_STAGGER
+/ PED_MATRIX_OWN / CAR_MATRIX_HOLD = 0.
+
+Traps for the next wave: (a) probe-world measurements are only comparable
+within one boot — event spikes (an ambient craft crashing mid-burst made
+airtraffic read 3.1ms when its steady state is 0.26) and boot-state drift
+lie across boots; A/B a cfg flag live in ONE world. (b) probe.mjs --serve
+edits need a serve RESTART to load; two restarts racing leaves the
+lockfile pointing at the stale one — pgrep before trusting it. (c) The
+render walk's remaining 6.9ms is the 170k-node visit floor + ~15k unnamed
+live objects; the next real render-CPU win is object-count reduction
+(mid-play accretion measured at only ~13 obj/s net, so it's the standing
+count, not a leak). (d) 6.7M tris are mostly redhollow/backcountry/mercy
+nature megameshes — vertex-cost waste on paper, but NOT the bottleneck on
+Apple GPUs; don't chase it before draw/CPU.

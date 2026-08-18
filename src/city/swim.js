@@ -305,6 +305,11 @@
   let drownDeaths = 0;          // SWIM_SINK ratchet: real drownings this session
   let breath = BREATH_MAX;
   let climbPress = false;              // consumed keydown/tap edge (see below)
+  // The live haul-out offer, refreshed by climbStep and read by publish(). ""
+  // means "no way out in reach"; otherwise it is the worded verb ("Climb out" /
+  // "Climb aboard"), because WHERE the haul-up puts you is the thing the label
+  // has to say when a quay and a moored hull are both within arm's length.
+  let climbVerb = "";
   let touchVert = 0, touchVertT = -9;  // touch-driven dive/rise, with a stale sweep
   const swimCurrent = { x: 0, z: 0 };
 
@@ -688,7 +693,12 @@
     return d;
   }
   function showPrompt(html) { const e = promptEl(); if (!e) return; if (e.style.display !== "block") e.style.display = "block"; if (e._h !== html) { e._h = html; e.innerHTML = html; } }
-  function hidePrompt() { if (_promptEl && _promptEl.style.display !== "none") _promptEl.style.display = "none"; }
+  // Hiding the prompt and withdrawing the offer are the same event — every
+  // caller (left the water, went under, walked out of reach, hauled out) means
+  // both — so the offer is retired HERE rather than at five call sites, one of
+  // which would eventually be missed and leave a CLIMB OUT button standing over
+  // open water. climbStep re-arms it after this runs.
+  function hidePrompt() { climbVerb = ""; if (_promptEl && _promptEl.style.display !== "none") _promptEl.style.display = "none"; }
 
   // ---- input ---------------------------------------------------------------
   // Climb-out is an EDGE, latched from a real keydown rather than polled off
@@ -1240,7 +1250,7 @@
   // ---- the way out ---------------------------------------------------------
   function climbStep(A, P, dt, sub) {
     const spot = climbSpot(A, P.pos.x, P.pos.z, 4.6);
-    if (!spot) { climbPress = false; hidePrompt(); return; }
+    if (!spot) { climbPress = false; climbVerb = ""; hidePrompt(); return; }
     // Only offer (and consume) the haul-out at the surface: deep under a quay
     // the Space press belongs to the ascent. The margin clears the buoyancy
     // oscillator's own overshoot on a passing crest (a bob must not blink the
@@ -1249,20 +1259,29 @@
     // the head clears the water while sub < (BODY_H - EYE_H)/BODY_H = 0.912, so
     // 0.90 is "you can see the quay you are reaching for" and nothing else.
     const atSurface = sub <= (CFG.SWIM_SINK !== false ? 0.90 : FLOAT_SUB + 0.17);
-    if (!atSurface) { climbPress = false; hidePrompt(); return; }
-    // Desktop keeps the exact "[Space] climb out" string; touch renders a
-    // tappable verb pill wired straight to CBZ.citySwimClimbOut (the "@fn"
-    // form, because a synthesized Space is not a verb any module owns).
-    // .tpill sets pointer-events:auto, so the pill is tappable even though
-    // this container is pointer-events:none — the house prompt pattern.
+    if (!atSurface) { climbPress = false; climbVerb = ""; hidePrompt(); return; }
     // A hull says "climb aboard", land says "climb out" — the verb tells you
     // WHERE the haul-up is about to put you, which matters when a moored boat
     // and a quay are both in reach.
     const aboard = !!spot.boat;
     const verb = aboard ? "Climb aboard" : "Climb out";
-    showPrompt(CBZ.touchActionPrompt
+    // THE DISASTER MODE'S TOUCH VERB MOVED TO THE VERB DOCK (owner: "I want
+    // climb out placed like" the throw/grab buttons). A centre-screen prompt
+    // band is the right home for a walk-up verb you meet standing still, and
+    // the wrong one for a verb you need while both thumbs are already busy
+    // steering and diving — so in survival, systems/survival_interact.js puts
+    // this in #survVerbs beside the right thumb, in the same .svbtn grammar as
+    // Grab / Throw / Set down, off the `climb` flag published below.
+    //
+    // The CITY keeps the prompt-band pill: #survVerbs is a survival-only dock,
+    // and a city swimmer with no pill would have no touch surface at all.
+    // Desktop is untouched everywhere — same string, same place.
+    const docked = !!CBZ.touchMode && survOn();
+    if (docked) hidePrompt();
+    else showPrompt(CBZ.touchActionPrompt
       ? CBZ.touchActionPrompt("@citySwimClimbOut", verb, "[Space] " + verb.toLowerCase())
       : "[Space] " + verb.toLowerCase());
+    climbVerb = verb;             // after hidePrompt(), which retires the offer
     if (climbPress) { climbPress = false; exitWater(P, spot); }
   }
 
@@ -1331,6 +1350,12 @@
     swimming: false, submergence: 0, depth: 0, breath: 1,
     diving: false, treading: false, sinking: false, x: 0, y: 0, z: 0,
     surfaceY: 0, headUnder: false, speed: 0,
+    // THE HAUL-OUT, PUBLISHED. climbStep already knew every frame whether a
+    // way out was in reach and what it was called; it just kept the answer to
+    // itself and spent it on a centre-screen prompt. Exported, the touch layer
+    // can put the verb where every other touch verb lives — in the thumb
+    // column beside DIVE/RISE — instead of the middle of the water.
+    climb: false, climbVerb: "",
   };
   function publish(P) {
     _state.swimming = swimming;
@@ -1344,6 +1369,8 @@
     _state.headUnder = swimming && S.headUnder;
     _state.surfaceY = S.surf;
     _state.speed = swimming ? Math.hypot(S.vx, S.vz) : 0;
+    _state.climbVerb = swimming ? climbVerb : "";
+    _state.climb = !!_state.climbVerb;
     if (P && CFG.WATER_BREATH !== false) { P.breath = breath; P.breathMax = BREATH_MAX; }
     if (P && P.pos) {
       _state.x = P.pos.x; _state.y = P.pos.y; _state.z = P.pos.z;
