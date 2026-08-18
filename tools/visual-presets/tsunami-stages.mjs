@@ -343,9 +343,13 @@ async function stageTsunami(input) {
   query("side").textContent = before ? input.beforeLabel : input.afterLabel;
   query("side").style.cssText = `position:absolute;top:22px;left:26px;padding:7px 11px;border-radius:7px;background:${before ? "#c94c4c" : "#218b60"};font-size:12px;font-weight:900;letter-spacing:.12em`;
   query("name").textContent = subject.label;
-  query("name").style.cssText = "position:absolute;top:60px;left:26px;font-size:25px;font-weight:800;letter-spacing:-.02em;max-width:640px";
+  /* A CAPTION HAS TO SURVIVE ITS OWN PICTURE, and half of these are a pale
+     overcast sky or a whitewater frame — white-on-white is not a caption. A
+     text shadow is not enough against a bright field; every block gets its
+     own dark plate. */
+  query("name").style.cssText = "position:absolute;top:56px;left:22px;padding:6px 12px;border-radius:8px;background:rgba(6,12,17,.62);font-size:25px;font-weight:800;letter-spacing:-.02em;max-width:640px";
   query("focus").textContent = subject.focus;
-  query("focus").style.cssText = "position:absolute;top:96px;left:28px;color:#c0cfda;font-size:12.5px;font-weight:550;max-width:660px;line-height:1.45";
+  query("focus").style.cssText = "position:absolute;top:100px;left:22px;padding:8px 12px;border-radius:8px;background:rgba(6,12,17,.62);color:#cfdce6;font-size:12.5px;font-weight:550;max-width:640px;line-height:1.45";
   query("perf").textContent =
     `t ${a2.eventT != null ? a2.eventT.toFixed(1) + "s" : "—"} · phase ${a2.phase || "—"} · front ${fs.toFixed(0)}m · v ${a2.frontV != null ? a2.frontV.toFixed(1) + "m/s" : "—"}`
     + `${a2.stalled ? " · STANDING" : ""}${a2.crashAge != null ? " · crash+" + a2.crashAge.toFixed(1) + "s" : ""}`
@@ -354,9 +358,9 @@ async function stageTsunami(input) {
     + ` · debris ${a2.debrisEntrained || 0} (${a2.debrisStrikes || 0} strikes)`
     + ` · undertow ${(a2.undertowPull || 0).toFixed(1)}`
     + ` · refuges ${a2.refugesStanding != null ? a2.refugesStanding + "/" + a2.refugesTotal : "—"}`;
-  query("perf").style.cssText = "position:absolute;right:24px;top:24px;font:11.5px ui-monospace,SFMono-Regular,Menlo,monospace;color:#9fe8c3;text-align:right";
+  query("perf").style.cssText = "position:absolute;right:20px;top:20px;padding:7px 11px;border-radius:8px;background:rgba(6,12,17,.62);font:11.5px ui-monospace,SFMono-Regular,Menlo,monospace;color:#9fe8c3;text-align:right;max-width:560px";
   query("source").textContent = new URL(input.sourceUrl).host + new URL(input.sourceUrl).pathname;
-  query("source").style.cssText = "position:absolute;bottom:14px;left:27px;color:#9cb0bf;font:10px ui-monospace,SFMono-Regular,Menlo,monospace";
+  query("source").style.cssText = "position:absolute;bottom:12px;left:22px;padding:4px 9px;border-radius:6px;background:rgba(6,12,17,.55);color:#a8bccb;font:10px ui-monospace,SFMono-Regular,Menlo,monospace";
 
   const metrics = {
     debrisEntrained: Number(a2.debrisEntrained || 0),
