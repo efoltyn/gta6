@@ -1173,6 +1173,138 @@
     };
   }
 
+  /* ---- CBZ.charArmTo — PUT THIS HAND EXACTLY THERE ------------------------
+
+     The two solvers above are the older, deliberately approximate pair: both
+     flatten the problem into the sagittal plane (reach = hypot(dy, dz)) and
+     hand the sideways component to a clamped `roll`, which is fine for a grab
+     that only has to look plausible and wrong the moment the target has to be
+     HIT — a support hand on a handguard is off by however much dx there was.
+
+     This one is exact, and it is exact for THIS rig rather than for an
+     idealised two-link chain, because the wrist is not at the end of the
+     forearm: makeCharacter parks the hand socket at (0, -(armLo+0.01), 0.035)
+     inside the elbow group, i.e. a hair FORWARD of the bone. Fold that offset
+     into the second link as a length l2 with a built-in tilt t and the closed
+     form survives:
+
+       hand, in the upper arm's own frame, with the elbow at angle e
+         u = (0, -l1, 0) + Rx(e)·f,      f = (0, -l2·cos t, l2·sin t)
+         |u|² = l1² + l2² + 2·l1·l2·cos(e - t)
+       so the elbow that puts the wrist at distance d is
+         e = t - acos( (d² - l1² - l2²) / (2·l1·l2) )
+       and with Euler order XYZ (three.js default) the shoulder that swings û
+       onto the unit target v is, exactly,
+         sin z = v.x / |û.y|
+         x     = atan2(v.z, v.y) - atan2(û.z, û.y·cos z)
+
+     Out of reach, the shoulder PROTRACTS (position.z) instead of the arm
+     silently giving up — that is the real joint that lets a person reach the
+     front of a rifle, and it is why a long gun's support hand can land at all.
+
+       CBZ.charArmTo(ch, worldPoint, arm, k)
+         arm  "l" | "r"        k  0..1 blend against the pose already there
+       Returns the residual metres between wrist and target (0 = landed), or
+       null if the rig can't be solved. Writes rotations only. */
+  const _armT = new THREE.Vector3(), _armV = new THREE.Vector3();
+  const _armWrist = new THREE.Vector3();
+  function charArmTo(ch, worldPoint, arm, k) {
+    const P = ch && ch.profile;
+    const part = ch && ch.parts && (arm === "l" ? ch.parts.la : ch.parts.ra);
+    const low = part && part.userData && part.userData.low;
+    if (!P || !part || !low || !ch.body || !worldPoint) return null;
+    const blend = k == null ? 1 : Math.max(0, Math.min(1, k));
+    if (blend <= 0) return null;
+
+    // body space — the frame both the shoulder root and the pose live in
+    ch.body.updateWorldMatrix(true, false);
+    _armT.copy(worldPoint);
+    ch.body.worldToLocal(_armT);
+
+    const l1 = Math.max(0.12, P.armUp - 0.02);          // shoulder → elbow pivot
+    const fy = -(P.armLo + 0.01), fz = 0.035;           // elbow → wrist socket
+    const l2 = Math.hypot(fy, fz);
+    const t = Math.atan2(fz, -fy);                      // the wrist's forward tilt
+
+    // SCAPULAR PROTRACTION: reach past the arm's length by leading with the
+    // shoulder, capped, before the bone solve — the same degree of freedom a
+    // person spends getting a hand to the front of a rifle.
+    const rest = part.userData._armRestZ != null ? part.userData._armRestZ : 0;
+    let push = Math.hypot(_armT.x - part.position.x, _armT.y - part.position.y,
+                          _armT.z - rest) - (l1 + l2) * 0.985;
+    push = Math.max(0, Math.min(0.24, push));
+    part.position.z += (rest + push - part.position.z) * blend;
+
+    _armV.set(_armT.x - part.position.x, _armT.y - part.position.y, _armT.z - part.position.z);
+    const d0 = _armV.length();
+    const maxR = (l1 + l2) * 0.985;
+    const minR = Math.abs(l1 - l2) + 0.06;
+    const d = Math.max(minR, Math.min(maxR, d0));
+    if (d < 1e-4) return null;
+    _armV.multiplyScalar(1 / d0);                       // unit direction to the target
+
+    const cosE = Math.max(-1, Math.min(1, (d * d - l1 * l1 - l2 * l2) / (2 * l1 * l2)));
+    const e = Math.min(0.02, t - Math.acos(cosE));      // elbows bend one way only
+    const uy = -l1 + fy * Math.cos(e) - fz * Math.sin(e);
+    const uz = fy * Math.sin(e) + fz * Math.cos(e);
+    const un = Math.hypot(uy, uz) || 1e-6;
+    const uyN = uy / un, uzN = uz / un;
+
+    const sinZ = Math.max(-0.999, Math.min(0.999, _armV.x / -uyN));
+    const rz = Math.asin(sinZ);
+    const rx = Math.atan2(_armV.z, _armV.y) - Math.atan2(uzN, uyN * Math.cos(rz));
+
+    const wrap = (a) => (a > Math.PI ? a - 2 * Math.PI : a < -Math.PI ? a + 2 * Math.PI : a);
+    part.rotation.x += (wrap(rx) - part.rotation.x) * blend;
+    part.rotation.y += (0 - part.rotation.y) * blend;
+    part.rotation.z += (rz - part.rotation.z) * blend;
+    low.rotation.x += (e - low.rotation.x) * blend;
+    low.rotation.y += (0 - low.rotation.y) * blend;
+    low.rotation.z += (0 - low.rotation.z) * blend;
+
+    // residual, measured off the real socket rather than trusted from the math
+    const socket = ch.sockets && (arm === "l" ? ch.sockets.leftHand : ch.sockets.rightHand);
+    if (!socket) return Math.max(0, d0 - maxR);
+    part.updateMatrixWorld(true);
+    socket.getWorldPosition(_armWrist);
+    return _armWrist.distanceTo(worldPoint);
+  }
+  /* Remember the pose's own shoulder-forward value so protraction is measured
+     against it instead of accumulating. Callers that drive an arm every frame
+     (systems/gunhands.js) latch this once per pose change. */
+  charArmTo.rest = function (ch, arm, z) {
+    const part = ch && ch.parts && (arm === "l" ? ch.parts.la : ch.parts.ra);
+    if (part) part.userData._armRestZ = z || 0;
+  };
+  /* HOW FAR THIS ARM CAN ACTUALLY REACH, IN WORLD METRES — and it lives here
+     because the two ends of that question are in different units and a caller
+     that guesses the conversion gets a plausible, wrong number. The solve
+     above runs in BODY-LOCAL units (the rig is authored at ~1.3 and scaled to
+     human size on the group), so its own clamp is 0.898-ish local; a consumer
+     comparing that against a world-metre distance to a weapon is out by the
+     whole rig scale. Read the scale off the live matrix instead of assuming
+     it: a child, a scaled prop rig or a future HUMAN_SCALE change all just
+     work.
+
+     BONE ONLY, and deliberately: protraction is NOT included even though the
+     solve spends it, because protraction pushes the shoulder FORWARD and
+     nothing else. A caller testing a target that is mostly SIDEWAYS — which
+     is the whole job of a support hand crossing to the other side of the
+     body — would be told it can reach 0.17 m further than it can. The
+     reachable set is an ellipsoid; this returns its minor axis, so a
+     reachability test built on it is conservative rather than wrong. If you
+     need the truth for a specific point, solve to it and read the residual. */
+  charArmTo.span = function (ch, arm) {
+    const P = ch && ch.profile;
+    if (!P || !ch.body) return 0;
+    const l1 = Math.max(0.12, P.armUp - 0.02);
+    const l2 = Math.hypot(P.armLo + 0.01, 0.035);
+    ch.body.updateWorldMatrix(true, false);
+    const s = ch.body.matrixWorld.getMaxScaleOnAxis() || 1;
+    return (l1 + l2) * 0.985 * s;
+  };
+  CBZ.charArmTo = charArmTo;
+
   // The torso and legs are siblings authored from the feet, but anatomically
   // meet at this socket. Every pose writer may rotate the torso; these two
   // helpers make that rotation happen around the hip in full 3D. Compensation
