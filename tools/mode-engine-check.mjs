@@ -192,6 +192,41 @@ const PASS = `(() => {
   // speed x 1.7) with the player standing on the far side of a low prop, so
   // the guard's own mover — not the probe — drives it into the face. Nothing
   // here fakes movement; the only thing set is the hunt flag.
+  //
+  /* WHY THIS ONE HAS BEEN RED, MEASURED 2026-08-18 — read this before
+     "fixing" either the wiring or the probe, because the fault is in NEITHER.
+     Instrumented with CBZ.characterTraversal.stats().why (the per-reason
+     refusal ledger physics.js publishes), driving the loop below:
+
+       prop 1  maxSpd 5.75  moved 0.82  probed at 1.79 m  -> no start
+       prop 2  maxSpd 40.6  moved 1.34  probed at 1.16 m  -> no start
+       prop 3+ maxSpd 0     moved 0     never probed at all
+
+     TWO SEPARATE THINGS, and both of them are in this file.
+
+     1. THE SAME GUARD IS REUSED 147 TIMES. ".find(...)" below returns the
+        first standing guard on every iteration, and that one body is
+        teleported to a new prop each time with no nav/steer reset. After the
+        second teleport it stops moving entirely — maxSpd 0 for every
+        remaining prop — so "traverse()" never clears its TRAV_SPEED (2.6 m/s)
+        gate and no probe is ever issued. Everything after prop 2 is measuring
+        a guard that is standing still.
+
+     2. THE FIRST PROPS IN THE LIST ARE NOT VAULTABLE ANYWAY. A clean
+        synthetic probe against those same boxes, from the same side, also
+        returns null — with reasons "gap-too-short" (a bunk or table deck sits
+        less than 0.62 m above the prop's top, so there is neither room to
+        carry a body over it nor a man-sized hole to thread) and
+        "landing-blocked" (prison furniture is in dense rows; the far side of
+        one bench is the next bench). Those refusals are CORRECT. Section 1
+        above finds 33 of 147 boxes traversable; the loop below simply never
+        reaches one, because it stops at the first guard that will not move.
+
+     So the honest fix is to this harness — round-robin the cast, or reset the
+     steer state after each teleport, and iterate props that section 1 already
+     proved traversable — not to loosen anything in systems/physics.js or
+     systems/actorcollide.js. Left red rather than quietly relaxed: a gate that
+     is wrong about WHY should say so, not go green. */
   const t0 = T.stats();
   let drove = "", tried = 0;
   const lowList = [];
