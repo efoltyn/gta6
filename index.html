@@ -223,6 +223,16 @@
         <div class="origin-label origin-sublabel">CHOOSE YOUR AIRCRAFT</div>
         <div id="originPlaneSelect" class="origin-plane-select" aria-label="Choose your aircraft"></div>
       </div>
+      <!-- CAPTAIN sub-select. The same strip, drawn by the same renderSub() in
+           systems/state.js, filled from CBZ.cityOriginBoats() — world/
+           water_hulls.js's live hull registry. That one is populated at PARSE
+           time, so unlike the aircraft list above this is the REAL fleet with
+           real lengths before a world exists, and a hull registered tomorrow
+           appears here with no edit. -->
+      <div id="originBoatWrap" class="origin-plane-wrap" style="display:none">
+        <div class="origin-label origin-sublabel">CHOOSE YOUR BOAT</div>
+        <div id="originBoatSelect" class="origin-plane-select" aria-label="Choose your boat"></div>
+      </div>
       <details class="controls">
         <summary>Controls</summary>
         <div class="keys">
