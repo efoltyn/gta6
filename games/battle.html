@@ -307,6 +307,16 @@ if (CBZ.CONFIG.QUAD_RAGDOLL_POOL == null) CBZ.CONFIG.QUAD_RAGDOLL_POOL = 96;
 // folding at wall speed is the page arguing with itself; SPACE must freeze
 // the dead as dead as it freezes the living. See the step call in frame().
 CBZ.quadRagdollDriven = true;
+/* ...and the same three decisions for the MEN, whose solver (city/ragdoll.js)
+   has the identical shape. RAGDOLL_ANY_MODE is the one that matters: that file
+   refused every mode but "city" — never because 13 points and a ground clamp
+   care what mode is running, only because the city was the one thing with peds
+   the day it shipped. This page has armies of them. */
+if (CBZ.CONFIG.RAGDOLL_ANY_MODE == null) CBZ.CONFIG.RAGDOLL_ANY_MODE = true;
+if (CBZ.CONFIG.RAGDOLL_RANGE == null) CBZ.CONFIG.RAGDOLL_RANGE = 190;
+if (CBZ.CONFIG.RAGDOLL_ACTIVE == null) CBZ.CONFIG.RAGDOLL_ACTIVE = 30;
+if (CBZ.CONFIG.RAGDOLL_POOL == null) CBZ.CONFIG.RAGDOLL_POOL = 120;
+CBZ.ragdollDriven = true;
 /* HOW LONG A BODY STAYS. `corpses` used to be a hard FIFO of 260 that dropped
    the oldest outright — a carcass in plain sight popped out of existence the
    moment the 261st man fell, which on a 300-a-side battle is constantly and
@@ -323,10 +333,12 @@ const CORPSE_MAX = Math.max(4, parseInt(Q.get("corpses") || "420", 10) || 420);
    One switch, because the three shipped as one wave and a before/after has to
    be able to photograph the whole of it against itself. */
 const DEATH_OLD = Q.get("death") === "old";
+const BLOOD_Q = Q.get("blood");        // "1" force it on, "0" force it off
 if (DEATH_OLD) {
   CBZ.CONFIG.WILDLIFE_RAGDOLL = false;
   CBZ.CONFIG.CREATURE_BITE_BLOOD = false;
   CBZ.CONFIG.CREATURE_JAW_CONTACT = false;
+  CBZ.CONFIG.RAGDOLL_ANY_MODE = false;      // ...and the men fall like planks again
 }
 
 /* ============================================================ THE GROUND
@@ -415,7 +427,12 @@ const PUNCH = { civ: 6, thug: 8, pro: 10, elite: 12, swat: 14 };
    stat-fiction this repo bans), and the three beast files are pure drivers —
    no engine, no spawner, nothing scheduled. Measured cost is a handful of
    small data files on a load that already fetches thirty. */
-const NEED = ["caps", "people", "fx", "damage", "sound", "batch", "bestiary", "beasts"];
+/* `ragdoll` rides in the base load with `people`, and it is not a tax: MEN are
+   this page's primary unit and every one of them used to fall like a plank.
+   city/ragdoll.js is the original of the method the animals' solver copied —
+   13 points, sticks, joint limits, a ground clamp — writing back onto the same
+   rig meshes, so the wounds and the dropped rifle ride along for free. */
+const NEED = ["caps", "people", "ragdoll", "fx", "damage", "sound", "batch", "bestiary", "beasts"];
 const ARMOURY = [
   "weapons/weapon-data.js",
   "weapons/weapon-scale.js",   // real-dimension display sizing (math, not magic scalars)
@@ -696,7 +713,11 @@ CBZ.studio.need(NEED).then(function () {
        riflemen loads and costs precisely what it always did — which is what
        tools/battle-check.mjs measures. */
     HAS_BEASTS = SET.redU !== "men" || SET.blueU !== "men";
-    if (HAS_BEASTS) p.push("blood");
+    // ?blood=1 pulls it for a battle of MEN too — a rifle war that stains the
+    // street is a legitimate thing to want, it is just not worth 2.5k lines by
+    // default when gunfx already draws every impact. ?blood=0 refuses it even
+    // for an animal army, which is the revert.
+    if (BLOOD_Q !== "0" && (HAS_BEASTS || BLOOD_Q === "1")) p.push("blood");
     return p;
   }
   // buying air is a decision that costs four packs; warm them on the change,
@@ -731,6 +752,16 @@ CBZ.studio.need(NEED).then(function () {
   const _upV = V();          // probe scratch: a corpse's own up axis
   const _fwV = V();          // probe scratch: a corpse's own nose axis
   const BITES = { landed: 0, missed: 0 };   // probe: jaw contact, counted
+  /* HOW MANY BODIES HAVE BEEN HANDED TO A SOLVER (and not yet retired). The
+     two corpse solvers are stepped from the innermost sub-step loop, and this
+     page has already been bitten once by adding work there: a battle of
+     riflemen is held to zero overlapping bodies, which is a knife edge a
+     shoulder either crosses or does not. Until the first body falls there is
+     nothing to solve and nothing to enter — one integer read, and the opening
+     of every battle costs exactly what it always did. (It counts bodies, not
+     ACTIVE solves: a settled corpse still holds its slot and its frozen pose,
+     and the solvers skip it themselves in one test.) */
+  let deadSolving = 0;
   const _v = V(), _v2 = V(), _muz = V();
   let world = null, base = null, town = null, MAP = null, hud = null;
   let men = [], corpses = [], rockets = [], dropGuns = [], planes = [];
@@ -1343,6 +1374,7 @@ CBZ.studio.need(NEED).then(function () {
     m.dieT = 0.0001;
     m.dieDir = lcg() < 0.5 ? -1 : 1;
     if (m.beast) beastDeathPhysics(m, imp);
+    else manDeathPhysics(m, imp);
     // the rifle leaves his hands and lands like hardware, not like a prop
     const prop = m._weaponProp;
     if (prop && CBZ.weaponPhysics && CBZ.weaponPhysics.drop) {
@@ -1433,6 +1465,7 @@ CBZ.studio.need(NEED).then(function () {
       try {
         if (CBZ.quadRagdoll(m, { point: _kpt, dir: _kdir, imp: energy })) {
           m.ragdoll = true; m.dieT = 0;      // the solver owns the transform now
+          deadSolving++;
           return "ragdoll";
         }
       } catch (e) {}
@@ -1451,6 +1484,80 @@ CBZ.studio.need(NEED).then(function () {
     m.dieT = 0.0001;
     return "topple";
   }
+
+  /* ============================================================ A MAN DIES
+     The animals got a real corpse solver and the men standing next to them
+     kept a plank: `group.rotation.x` eased to 90 degrees over 0.4s, one axis,
+     the whole body rigid, the legs frozen mid-stride. city/ragdoll.js has
+     solved this properly since it shipped — 13 mass points, Jakobsen sticks,
+     joint limits, ground friction, a whisper of bounce, writing back onto the
+     SAME rig meshes so the wounds and the blood soak ride along — and it
+     refused to run here for one reason: it tested `game.mode === "city"`.
+     That gate was never about the solver, and it is now a capability the page
+     opts into (RAGDOLL_ANY_MODE, declared at the top of this file).
+
+     Same shape as beastDeathPhysics: the killing round decides which way the
+     body goes over, the solver is asked first, and the canned topple is what
+     is left when it declines (budget full, too far, no rig). */
+  function manDeathPhysics(m, imp) {
+    if (DEATH_OLD || !m.group || !m.char) { m.dieT = 0.0001; return "topple"; }
+    let dx = 0, dz = 0;
+    const by = imp && imp.by;
+    if (by && by.pos) { dx = m.pos.x - by.pos.x; dz = m.pos.z - by.pos.z; }
+    else if (imp && imp.fromX != null) { dx = m.pos.x - imp.fromX; dz = m.pos.z - imp.fromZ; }
+    const dl = Math.hypot(dx, dz);
+    if (dl > 0.01) { dx /= dl; dz /= dl; }
+    else { const a = lcg() * Math.PI * 2; dx = Math.cos(a); dz = Math.sin(a); }
+    _kdir.x = dx; _kdir.y = 0; _kdir.z = dz;
+    // the entry point: chest height on the shooter's side, so the solver's
+    // topple bias throws the high mass over AWAY from the gun.
+    _kpt.x = m.pos.x - dx * 0.28;
+    _kpt.y = m.pos.y + 1.28;
+    _kpt.z = m.pos.z - dz * 0.28;
+    /* HOW HARD. The solver's band is the human one it was tuned on: ~6 a
+       pistol, ~14 a shotgun, 20+ a blast. A punch is not a bullet and must not
+       throw a body across the street, which is exactly the read the survival
+       brawl's own "land on real fist contact" wave was about. */
+    const cause = imp && imp.cause;
+    const w = (by && by.wid) ? CBZ.weaponById(by.wid) : null;
+    let energy = 7;
+    if (cause === "bomb") energy = 22;
+    else if (by && by.beast) energy = 9;                    // teeth: a maul, not a round
+    else if (by && by.fists) energy = 4;                    // a fist drops you where you stand
+    else if (w) energy = w.pellets ? 15 : Math.max(5, Math.min(13, (w.damage || 20) * 0.35));
+    if (CBZ.cityRagdoll) {
+      try {
+        if (CBZ.cityRagdoll(m, _kpt, _kdir, energy)) {
+          m.ragdoll = true; m.dieT = 0;      // the solver owns the transform now
+          deadSolving++;
+          manDeathGore(m, _kdir, energy);
+          return "ragdoll";
+        }
+      } catch (e) {}
+    }
+    m.dieT = 0.0001;
+    manDeathGore(m, _kdir, energy);
+    return "topple";
+  }
+
+  /* AND HE BLEEDS — when this battle loaded the blood at all. `gore` rides in
+     only when the roster earns it (a beast army, or ?blood=1), because 2.5k
+     lines of it is a real cost and gunfx has drawn the men's impacts since it
+     shipped. When it IS here, a kill is a kill: the same directional spray,
+     mist and ground pool an animal's bite throws, priced off what killed him.
+     Guarded end to end, so a battle without the pack is byte-identical. */
+  function manDeathGore(m, dir, energy) {
+    if (typeof CBZ.goreImpact !== "function") return;
+    const sev = Math.max(0.4, Math.min(1.8, energy * 0.09));
+    _gore.dir = dir;
+    _gore.amount = sev;
+    _gore.mist = energy >= 13;            // only a real crunch atomises anything
+    _gore.pool = energy >= 6;             // only an open wound stains the ground
+    _gore.player = false;
+    _gore.sfx = false;                    // gunfx already cracked; do not double it
+    try { CBZ.goreImpact(m.pos.x, m.pos.y + 1.15, m.pos.z, _gore); } catch (e) {}
+  }
+  const _gore = { dir: null, amount: 0.8, mist: false, pool: true, player: false, sfx: false };
 
   /* THE OLDEST BODY LEAVES THE FIELD — it is not deleted where it lies.
 
@@ -1489,7 +1596,8 @@ CBZ.studio.need(NEED).then(function () {
     // frozen pose keeps a slot a live death could have used — and the solver
     // would go on writing this group's transform against the sink.
     if (CBZ.quadRagdollDrop) { try { CBZ.quadRagdollDrop(old); } catch (e) {} }
-    old.ragdoll = false;
+    if (CBZ.ragdollDrop) { try { CBZ.ragdollDrop(old); } catch (e) {} }
+    if (old.ragdoll) { old.ragdoll = false; deadSolving = Math.max(0, deadSolving - 1); }
     sinking.push({ g: old.group, t: 0, h: Math.max(0.6, (old.eyeH || 1) * 1.4) });
   }
   // the sink itself: real time, because it is presentation and not simulation
@@ -3621,7 +3729,10 @@ CBZ.studio.need(NEED).then(function () {
            between men has no quadruped to solve, so it should not enter the
            solver at all — and now the men-only sub-step is the one it always
            was, which is the only way that check keeps meaning what it says. */
-        if (HAS_BEASTS && CBZ.quadRagdollStep) CBZ.quadRagdollStep(sdt);
+        if (deadSolving > 0) {
+          if (HAS_BEASTS && CBZ.quadRagdollStep) CBZ.quadRagdollStep(sdt);
+          if (CBZ.ragdollStep) CBZ.ragdollStep(sdt);
+        }
         rebuildFine();                       // bodies moved: the body grid is stale
         separateSolve(Math.min(0.9, sdt * 26));
         stepRockets(sdt);
@@ -3839,6 +3950,24 @@ CBZ.studio.need(NEED).then(function () {
      holds a men-only war to `overlapPeak === 0` — a knife edge — so a probe
      that quietly costs more on the exact battle it is measuring is a probe
      that changes its own answer. Whole thing behind HAS_BEASTS. */
+  /* THE MEN'S DEATHS, and this one is NOT gated: men are almost always the
+     roster, so "is anyone falling like a plank" is the question this page is
+     most often asked. Three counters and one loop over the corpse list, which
+     is the same loop the beast audit runs and is only ever read on a probe
+     poll. `plank` is the number that matters — a body that resolved to the
+     canned single-axis topple instead of the solver. */
+  function manAudit() {
+    const o = { men: 0, ragdoll: 0, plank: 0, solver: null, mode: DEATH_OLD ? "old" : "ragdoll" };
+    for (let i = 0; i < corpses.length; i++) {
+      const c = corpses[i];
+      if (c.beast || !c.char) continue;
+      o.men++;
+      if (c.ragdoll) o.ragdoll++; else o.plank++;
+    }
+    if (CBZ.ragdollAudit) o.solver = CBZ.ragdollAudit();
+    return o;
+  }
+
   const _EMPTY_AUDIT = {};
   function beastAudit() {
     if (!HAS_BEASTS) return _EMPTY_AUDIT;
@@ -3857,7 +3986,6 @@ CBZ.studio.need(NEED).then(function () {
       else if (_upV.y > 0.62) o.standing++;
       else if (Math.abs(_upV.y) < 0.62) o.flank++;
     }
-    const g = CBZ.goreAudit ? CBZ.goreAudit() : null;
     return {
       deaths: o,
       deathMode: DEATH_OLD ? "old" : "ragdoll",
@@ -3865,10 +3993,21 @@ CBZ.studio.need(NEED).then(function () {
       sinking: sinking.length,
       corpseMax: DEATH_OLD ? 260 : CORPSE_MAX,
       // the bite, measured: strikes that connected vs strikes whose jaws
-      // closed short, and the blood actually on the ground behind them.
+      // closed short. (The blood behind them is bloodAudit(), below — it is
+      // not the animals' and a rifle war can stain a street too.)
       bites: { landed: BITES.landed, missed: BITES.missed },
-      blood: g ? { pools: g.pools, streaks: g.streaks } : null,
     };
+  }
+
+  /* BLOOD IS NOT THE ANIMALS'. This started life inside beastAudit() because
+     the bite was the first thing on this page that drew any, and it therefore
+     reported `null` for a rifle war that had loaded the pack with ?blood=1 and
+     was staining the street. It belongs wherever gore.js is: one test, and the
+     sweep itself only ever runs on a probe poll. */
+  function bloodAudit() {
+    if (!CBZ.goreAudit) return null;
+    const g = CBZ.goreAudit();
+    return { pools: g.pools, streaks: g.streaks, visible: g.bloodVisible };
   }
 
   window.__battle = {
@@ -3916,6 +4055,9 @@ CBZ.studio.need(NEED).then(function () {
              deaths   how each beast corpse on the field actually resolved
              sinking  bodies mid-retirement (never a pop — retireOldestCorpse) */
         ...beastAudit(),
+        dead: manAudit(),
+        blood: bloodAudit(),
+        solving: deadSolving,
         planes: planes.length, air: AIR.on, sticks: AIR.sticks || 0, nukes: AIR.nukes || 0,
         planesDbg: planes.map(function (p) {
           return { t: p.team, nuke: p.nuke, mode: p.egress ? "egress" : p.mode,

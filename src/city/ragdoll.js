@@ -47,9 +47,28 @@
   // quality tier (pause-menu slider): ~7 at tier 0 up to ~28 at tier 4
   // (mid-tier ≈ the old 14, sized for a sprint/burst through the
   // 1000-strong street). Read at use time — never snapshot the tier.
-  function MAX_ACTIVE() { return CBZ.qScale ? CBZ.qScale(7, 28) : 14; }
-  const POOL = 36;            // total slots incl. frozen corpses still holding pose
-  const RANGE2 = 60 * 60;     // only kills this close to the camera get the flop
+  function MAX_ACTIVE() {
+    // A SPECTATOR PAGE IS NOT THE CITY. games/battle.html watches two armies
+    // from a flying camera: whole ranks go down in the same second and every
+    // body this refuses falls back to a canned plank topple. Callers raise the
+    // CEILING; the number stays derived from the live quality tier otherwise.
+    const c = CBZ.CONFIG.RAGDOLL_ACTIVE;
+    if (c > 0) return c | 0;
+    return CBZ.qScale ? CBZ.qScale(7, 28) : 14;
+  }
+  // total slots incl. frozen corpses still holding pose. Grown lazily (see
+  // pool()) so raising the ceiling costs nothing until the bodies arrive.
+  function POOL_N() {
+    const p = CBZ.CONFIG.RAGDOLL_POOL;
+    return (p > 0) ? Math.min(320, p | 0) : 36;
+  }
+  // only kills this close to the camera get the flop. A page that flies its
+  // camera OVER the fight rather than standing in it legitimately wants this
+  // wider — CBZ.CONFIG.RAGDOLL_RANGE is that dial, in metres.
+  function RANGE2() {
+    const r = CBZ.CONFIG.RAGDOLL_RANGE;
+    return ((r > 0) ? +r : 60) ** 2;
+  }
   const SLEEP_V = 0.22;       // u/s — under this the body counts as still
   const SLEEP_T = 0.6;        // s of stillness before the pose freezes
   const MAX_LIFE = 7;         // hard cap on solve time (safety)
@@ -60,6 +79,28 @@
   // ---- WATER (flag declared here; we do not edit src/config.js) -------------
   const CFG = (CBZ.CONFIG = CBZ.CONFIG || {});
   if (CFG.RAGDOLL_BUOYANCY == null) CFG.RAGDOLL_BUOYANCY = true;
+
+  /* ---- WHO IS ALLOWED A REAL BODY (CBZ.CONFIG.RAGDOLL_ANY_MODE) -----------
+     This file tested `CBZ.game.mode === "city"` in two places and refused
+     everything else. That gate was never about the SOLVER — 13 points, sticks,
+     joint limits and a ground clamp have no opinion about which mode is
+     running — it was about scope on the day it shipped, when the city was the
+     only thing with peds to kill. The cost of leaving it in is that every
+     other page with human bodies keeps a canned topple forever:
+     games/battle.html watches up to a thousand men die and every one of them
+     fell like a plank, rotating rigidly about one axis, while the animals
+     standing next to them (systems/quadruped_ragdoll.js, which copied THIS
+     file's method) folded properly.
+
+     So the gate becomes a capability the page opts into rather than a name it
+     has to be called. Default OFF: every existing mode reads exactly as it
+     did, and nothing starts solving bodies because a mode string happened to
+     change. A page that wants real corpses says so in one line. */
+  if (CFG.RAGDOLL_ANY_MODE == null) CFG.RAGDOLL_ANY_MODE = false;
+  function allowed() {
+    if (CBZ.CONFIG.RAGDOLL_ANY_MODE === true) return true;
+    return !!(CBZ.game && CBZ.game.mode === "city");
+  }
   function buoyOn() { return CBZ.CONFIG.RAGDOLL_BUOYANCY !== false; }
   const BUOY_G = -0.35;      // gravity multiplier at full submersion → net UP
   const BUOY_DRAG = 0.86;    // per-substep velocity retention in water (viscous)
@@ -223,7 +264,18 @@
     };
   }
   const slots = [];
-  for (let i = 0; i < POOL; i++) slots.push(makeSlot(i));
+  /* THE POOL IS GROWN, NEVER PRE-PAID. Every slot carries several Float32
+     arrays, so a page that raises the ceiling for the deaths it MIGHT see
+     would otherwise pay for all of them the moment this file parses. The list
+     starts at the seed and only reaches for the ceiling when a body actually
+     arrives and no free slot is left (see start()). */
+  const POOL_SEED = 10;
+  function grow(n) {
+    const want = Math.min(POOL_N(), n);
+    while (slots.length < want) slots.push(makeSlot(slots.length));
+    return slots;
+  }
+  grow(POOL_SEED);
   let seq = 0;
 
   // scratch — zero per-frame allocation
@@ -332,7 +384,7 @@
   }
 
   function start(target, point, dir, imp, fromNet) {
-    if (!CBZ.game || CBZ.game.mode !== "city") return false;
+    if (!allowed()) return false;
     if (!target) return false;
     if (fromNet) target.dead = true;          // the host's word is law — the rag ev beats the snapshot row
     else if (!target.dead) return false;
@@ -341,7 +393,7 @@
     const cam = CBZ.camera && CBZ.camera.position;
     if (cam && !target.isPlayer && !fromNet) { // host gated by ITS camera already; guests trust the ev
       const gdx = target.pos.x - cam.x, gdz = target.pos.z - cam.z;
-      if (gdx * gdx + gdz * gdz > RANGE2) return false;   // far kills keep the cheap path
+      if (gdx * gdx + gdz * gdz > RANGE2()) return false;   // far kills keep the cheap path
     }
     // already ours → re-kick and wake (shooting a settled corpse stirs it)
     let s = target._ragSlot != null ? slots[target._ragSlot] : null;
@@ -355,7 +407,8 @@
     // just-seeded one: an RPG into a crowd kills 9+ in a single call stack
     // before any solve runs, and freezing those locks corpses bolt upright.
     let active = 0, oldest = null;
-    for (let i = 0; i < POOL; i++) {
+    const N = slots.length;
+    for (let i = 0; i < N; i++) {
       const t = slots[i];
       if (t.used && !t.asleep) { active++; if (t.life > 0.5 && (!oldest || t.age < oldest.age)) oldest = t; }
     }
@@ -365,11 +418,15 @@
     }
     // a free slot, else retire the stalest frozen corpse back to the stock sprawl
     s = null; let stale = null;
-    for (let i = 0; i < POOL; i++) {
+    for (let i = 0; i < N; i++) {
       const t = slots[i];
       if (!t.used) { s = t; break; }
       if (t.asleep && (!stale || t.age < stale.age)) stale = t;
     }
+    // every slot is spoken for: reach for the ceiling ONE step at a time, and
+    // only now, with a real body waiting. Recycling a frozen corpse stays the
+    // fallback once the ceiling is genuinely reached.
+    if (!s && slots.length < POOL_N()) { grow(slots.length + 6); s = slots[N] || null; }
     if (!s && stale) { releaseSlot(stale); s = stale; }
     if (!s) return false;
 
@@ -681,12 +738,19 @@
     low.rotation.set(Math.atan2(-_b.z, -_b.y), 0, Math.asin(cl1(_b.x)));
   }
 
-  CBZ.onUpdate(25, function (dt) {
-    const city = CBZ.game && CBZ.game.mode === "city";
-    for (let i = 0; i < POOL; i++) {
+  /* ---- THE STEP, public because the frame this advances by is not always
+     the frame the browser drew. games/battle.html runs a sim clock the viewer
+     controls (pause, quarter speed, up to eight times) and the corpses on that
+     field belong to that clock — a paused battle with bodies still folding is
+     a page arguing with itself. A page that owns a clock sets
+     CBZ.ragdollDriven = true and calls this with its own dt; the city keeps
+     the updater below and never knows this exists. */
+  CBZ.ragdollStep = function (dt) {
+    const live = allowed();
+    for (let i = 0; i < slots.length; i++) {
       const s = slots[i];
       if (!s.used) continue;
-      if (!city) { releaseSlot(s); continue; }
+      if (!live) { releaseSlot(s); continue; }
       const t = s.ped;
       if (!t) { releaseSlot(s); continue; }
       if (s.isPlayer) {
@@ -708,7 +772,38 @@
       // the death cam orbits player.pos — follow the pelvis down the stairs
       if (s.isPlayer && CBZ.player && CBZ.player.pos) CBZ.player.pos.set(s.cx, s.cy, s.cz);
     }
+  };
+
+  CBZ.onUpdate(25, function (dt) {
+    if (CBZ.ragdollDriven) return;      // the page owns the clock (see above)
+    CBZ.ragdollStep(dt);
   });
+
+  /* HAND A SLOT BACK EARLY. The step releases a slot when the body leaves the
+     world, which is the right default and one frame too late for a caller that
+     RETIRES a corpse deliberately (battle.html sinks its oldest bodies out of
+     shot, and for those seconds a frozen pose held a slot a fresh death could
+     have used — and the solver would go on writing that rig's transform
+     against the sink). Idempotent, and safe on a body this file never saw. */
+  CBZ.ragdollDrop = function (target) {
+    if (!target || target._ragSlot == null) return false;
+    const s = slots[target._ragSlot];
+    if (!s || !s.used || s.ped !== target) return false;
+    releaseSlot(s);
+    return true;
+  };
+
+  /* WHAT THE SOLVER IS ACTUALLY DOING — the same shape quadRagdollAudit
+     returns, so a probe can read both skeletons the same way. */
+  CBZ.ragdollAudit = function () {
+    let act = 0, sleep = 0, pinned = 0;
+    for (let i = 0; i < slots.length; i++) {
+      const s = slots[i]; if (!s.used) continue;
+      if (s.asleep) sleep++; else act++;
+      if (s.pin) pinned++;
+    }
+    return { solving: act, frozen: sleep, pinned, pool: slots.length, cap: MAX_ACTIVE(), anyMode: CBZ.CONFIG.RAGDOLL_ANY_MODE === true };
+  };
 
   CBZ.cityRagdoll = function (target, point, dir, imp) { return start(target, point, dir, imp, false); };
 

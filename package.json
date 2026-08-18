@@ -29,6 +29,7 @@
     "ba": "node tools/before-after.mjs",
     "visual:beach": "node tools/before-after.mjs beach-shores",
     "visual:beast-deaths": "node tools/before-after.mjs beast-deaths",
+    "visual:soldier-deaths": "node tools/before-after.mjs soldier-deaths",
     "visual:compare": "node tools/visual-compare.mjs",
     "visual:facade-houses": "node tools/visual-compare.mjs --preset facade-houses --no-open --keep-going",
     "visual:wildlife": "node tools/visual-compare.mjs --preset wildlife-attachments --before https://efoltyn.github.io/gta6/",

@@ -211,6 +211,24 @@
       publishes: ["makeCharacter", "animChar", "charPoses"],
     },
 
+    ragdoll: {
+      gives: "REAL DEAD PEOPLE: 13 mass points, Jakobsen sticks, joint limits, " +
+             "ground friction and buoyancy, writing back onto the SAME rig " +
+             "meshes — so a body folds over a kerb, slumps down a stairwell " +
+             "and skids off a shotgun blast instead of rotating rigidly about " +
+             "one axis. The animals' solver (systems/quadruped_ragdoll.js) is " +
+             "a copy of this file's method; this is the original",
+      /* A PAGE THAT LOADS IT MUST ALSO SAY `CBZ.CONFIG.RAGDOLL_ANY_MODE = true`.
+         The file has always gated itself on `game.mode === "city"` — never
+         because the solver cared, only because the city was the one thing with
+         peds when it shipped. The gate is now a capability rather than a name,
+         and it stays OFF by default so no mode starts solving bodies because a
+         string changed. See the RAGDOLL_ANY_MODE block in the file. */
+      needs: ["people"],
+      files: ["city/ragdoll.js"],
+      publishes: ["cityRagdoll", "ragdollStep", "ragdollPin", "ragdollAudit"],
+    },
+
     // ---- being reachable by the engine's shared verbs ----------------------
     caps: {
       gives: "the capability bus. A page calls CBZ.registerMode(id, {caps, " +

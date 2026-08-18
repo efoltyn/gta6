@@ -186,6 +186,7 @@ const row = {
   noseUpPeak: peak.noseUp, noseWorstPeak: peak.noseWorst,
   bitesLanded: bites.landed, bitesMissed: bites.missed,
   bloodPools: blood && blood.pools,
+  men: (audit && audit.dead) || null,
   solver: audit && audit.solver,
   errors: errors.filter((e) => !/ProgressEvent|favicon|preload/i.test(e)).slice(0, 6),
 };
@@ -223,6 +224,13 @@ if (!(d.ragdoll > 0)) {
 // A settled field must read as dead: most bodies on their flank.
 if (d.beast >= 4 && (d.flank || 0) < Math.ceil(d.beast * 0.6)) {
   fails.push(`only ${d.flank}/${d.beast} carcasses are lying on their flank`);
+}
+// THE MEN, when there are any: not one of them may fall as a rigid plank.
+// (A beast-vs-beast run has none, and this is silent then.)
+const men = (audit && audit.dead) || {};
+if ((men.men || 0) > 0 && (men.plank || 0) > 0) {
+  fails.push(`${men.plank}/${men.men} men fell as rigid planks — city/ragdoll.js is not ` +
+    "loaded, RAGDOLL_ANY_MODE is off, or the solver refused every body");
 }
 // THE BITE. It has to land, and it has to draw blood.
 if (!(bites.landed > 0)) fails.push("no bite ever connected — the jaw-contact gate is refusing every strike");
