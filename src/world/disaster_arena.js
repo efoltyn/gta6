@@ -730,11 +730,18 @@
         }
       }
 
-      // ground-floor foundation: a solid walkable slab at the floor reference
-      // (gy = the footprint's high point), extending down to bury any gap on
-      // the low side. This gives a flat indoor ground floor to walk and the
-      // base the stairs climb from, instead of bumpy terrain poking through.
-      lbox(0, -0.35, 0, w - WT, 0.7, d - WT, 0x6c7178, { plat: true });
+      /* GROUND-FLOOR FOUNDATION: a solid walkable slab at the floor reference
+         (gy = the footprint's high point), extending down to bury any gap on
+         the low side. This gives a flat indoor ground floor to walk and the
+         base the stairs climb from, instead of bumpy terrain poking through.
+
+         Its top used to sit at EXACTLY gy, which is the height the lot was
+         levelled to — so on a flat lot the slab and the island's grass were
+         coplanar across the whole room and z-fought, and you stood in a room
+         with a grass floor. It is lifted 8 cm clear (a step far under physics
+         STEP_UP, so you still walk straight in) and squared out to the full
+         footprint, so no sliver of terrain shows along the wall line either. */
+      lbox(0, -0.27, 0, w, 0.7, d, 0x6c7178, { plat: true });
 
       const wallOpt = { solid: true, los: true };
       for (let k = 0; k < storeys; k++) {
@@ -826,6 +833,8 @@
       const b = {
         group: bgroup, ox, oz, gy, x: ox, z: oz, w, d, h: storeys * FH, storeys,
         facadeStyle: style || null,        // so a tool can photograph "the pagoda one"
+        floorTop: gy + 0.08,               // the walkable ground-floor surface, published
+                                           // so a probe can assert nothing grows through it
         colliders: cols, platforms: plats, glass: glassList, fallen: false,
       };
       fragile.push(b);
