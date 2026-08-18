@@ -285,6 +285,28 @@
     // undefined) answers TRUE, which is how the building rule above hid for so long
     if (!Number.isFinite(x) || !Number.isFinite(z)) return { ok: false, why: "badPoint", slope: slope };
     if (CBZ.cityWaterAt && !survMode() && CBZ.cityWaterAt(x, z)) return { ok: false, why: "water", slope: slope };
+    /* THE SURVIVAL ISLAND HAS BUILDINGS TOO, and this law never looked at them.
+       Everything below was gated to the city, so on the island only the SLOPE
+       rule applied and a hole could open straight through a house. It was
+       invisible for the sinkhole because systems/disasters.js does its own
+       avoid() pass over arena.fragile before calling here — a private second
+       copy of a rule that belongs in one place — and it surfaced the moment
+       something ELSE asked for ground: a dig site photographed sitting across a
+       row of houses. Same rule, same reason, now in the law itself so every
+       caller gets it. */
+    if (survMode() && CBZ.surv && CBZ.surv.arena) {
+      const B = CBZ.surv.arena.fragile || [];
+      for (let i = 0; i < B.length; i++) {
+        const b = B[i];
+        if (!b || b.fallen) continue;                  // rubble is ground, not a building
+        const bx = b.ox != null ? b.ox : b.x, bz = b.oz != null ? b.oz : b.z;
+        if (bx == null || bz == null) continue;
+        // the record carries w AND d; a circle on the larger one is the
+        // conservative read, and conservative is the right side to be wrong on
+        const half = Math.max(b.w || 8, b.d || b.w || 8) * 0.5;
+        if (Math.hypot(x - bx, z - bz) < r * 0.85 + half) return { ok: false, why: "building", slope: slope };
+      }
+    }
     if (!survMode() && CBZ.city && CBZ.city.arena) {
       const A = CBZ.city.arena;
       // never under a government complex: those regions are authored places

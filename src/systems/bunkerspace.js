@@ -52,9 +52,16 @@
 
   function mats() {
     if (wallMat) return;
-    wallMat = new THREE.MeshLambertMaterial({ color: 0x6a6c70 });
-    floorMat = new THREE.MeshLambertMaterial({ color: 0x4c4e52 });
-    ceilMat = new THREE.MeshLambertMaterial({ color: 0x3a3c40 });
+    /* "A REAL LIT ROOM, NEVER A DARK GREY CRATER" is the doctrine city/
+       buildings.js states for a blast hole, and a bunker photographed through
+       its own breached roof came out a navy box: no sun reaches here, and a
+       handful of point lights against a whole room is not enough on this
+       renderer. Emissive is the reliable half — it does not depend on a light
+       budget, a quality tier or how many lights the frame already has — and
+       the lamps then read as sources rather than as the only illumination. */
+    wallMat = new THREE.MeshLambertMaterial({ color: 0x6a6c70, emissive: 0x2b2e33 });
+    floorMat = new THREE.MeshLambertMaterial({ color: 0x4c4e52, emissive: 0x24262a });
+    ceilMat = new THREE.MeshLambertMaterial({ color: 0x3a3c40, emissive: 0x1c1e21 });
     lampMat = new THREE.MeshBasicMaterial({ color: 0xffe9b8 });
     /* THE LINER LIVES INSIDE THE MASK'S BAND AT THE ENTRANCE and, once breached,
        directly under an open mouth. Opting out is a #define — exact, in the

@@ -76,6 +76,17 @@
     const n = Math.max(4, Math.round(span / cell));
     const surf = CBZ.groundBaseAt ? CBZ.groundBaseAt(x, z) : 0;
     if (!Number.isFinite(surf)) return null;
+    /* THE SAME PLACEMENT LAW AS EVERY OTHER HOLE. A dig site replaces the ground
+       across its whole footprint, so it has no more business under a building,
+       in water or inside a government complex than a shaft or a crater does —
+       and photographed without this it sat straight through a row of houses,
+       which is the "undermined tower" fault wearing a different hat. Reusing
+       world/groundshaft.js's law rather than writing a second one is also the
+       only way the two can never drift apart. */
+    if (CBZ.groundShaftCanOpen && !o.force) {
+      const can = CBZ.groundShaftCanOpen(x, z, Math.max(8, (Math.max(8, o.span || 48)) / 2));
+      if (!can.ok) { stats.refusedLaw = (stats.refusedLaw || 0) + 1; return null; }
+    }
     const s = {
       x: x, z: z, cell: cell, n: n, span: n * cell, surf: surf,
       x0: x - (n * cell) / 2, z0: z - (n * cell) / 2,
@@ -283,6 +294,7 @@
       avgRemeshMs: stats.remesh ? +(stats.remeshMs / stats.remesh).toFixed(3) : 0,
       cell: CBZ.CONFIG.DIG_CELL, maxDepth: CBZ.CONFIG.DIG_MAX_DEPTH,
       refusedSlope: stats.refusedSlope || 0,
+      refusedLaw: stats.refusedLaw || 0,
       worstSeedStep: sites.length ? +sites[0].worstStep.toFixed(3) : 0,
       enabled: CBZ.CONFIG.DIG_SITES !== false,
     };
