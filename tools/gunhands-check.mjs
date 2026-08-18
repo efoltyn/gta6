@@ -214,6 +214,9 @@ const PROBE = `(() => {
           " butt=" + ((au.butt||0)*100).toFixed(0) +
           " resid=" + (au.residual == null ? "null" : (au.residual*100).toFixed(0))
         : null;
+      rec.rl = "w=" + (rec.peakWeight == null ? "?" : rec.peakWeight) +
+        " f=" + rec.frames + " t=" + (rec.reloadTime || 0) +
+        " started=" + rec.reloadStarted;
       // ISOLATION PROBE: call the solver by hand on the same anchor. If this
       // lands and the frame pass did not, the fault is in the plumbing (hook
       // order, a later writer) and not in the maths — the two failures look
@@ -291,7 +294,7 @@ for (const g of res.guns) {
     lpad(g.aimGap, 8) + lpad(g.aimAbove, 8) + lpad(g.carryGap, 9) + lpad(g.carryAbove, 8) +
     lpad(g.travel, 9) + "  " + pad(g.style, 10) + lpad(g.ammoAfter, 7) + lpad(g.blend, 7) +
     "  " + (g.why || "") +
-    (g.solve ? "  [" + g.solve + "]" : "") +
+    (g.rl ? "  " + g.rl : "") +
     (g.err ? "   ERR " + g.err : "") + (g.miss ? "  " + g.miss : "") +
     (g.geom ? "\n              " + g.geom : ""));
   if (g.err) fails.push(g.id + ": " + g.err);
