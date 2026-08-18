@@ -123,7 +123,11 @@
   if (CBZ.CONFIG.VOLCANO_V2 == null) CBZ.CONFIG.VOLCANO_V2 = true;
   if (CBZ.CONFIG.VOLCANO_PYRO == null) CBZ.CONFIG.VOLCANO_PYRO = true;
   if (CBZ.CONFIG.VOLCANO_LAHAR == null) CBZ.CONFIG.VOLCANO_LAHAR = true;
-  if (CBZ.CONFIG.VOLCANO_ASH_LOAD == null) CBZ.CONFIG.VOLCANO_ASH_LOAD = true;
+  /* OFF as of 2026-08-16. OWNER: "the ash covering the map is not needed...
+     idc if it's realistic". The blanket, the roof quads and the choke it fed
+     all hang off this one flag; ?cfg_VOLCANO_ASH_LOAD=1 brings the whole
+     ledger back intact. */
+  if (CBZ.CONFIG.VOLCANO_ASH_LOAD == null) CBZ.CONFIG.VOLCANO_ASH_LOAD = false;
 
   const V = {};
   // live census for CBZ.volcanoAudit() — measured, never counted in source
@@ -525,8 +529,10 @@
       // and along the way it necks and bellies on the two slow waves
       const lobe = 1 + 0.24 * Math.sin(i * 0.52 + wPh1) + 0.13 * Math.sin(i * 1.27 + wPh2);
       wProf[i] = (0.5 + 0.72 * Math.pow(u, 0.7)) * lobe * (0.9 + 0.2 * h01(p.x, p.z, salt + 11));
-      // temperature falls downstream — this is the whole colour story
-      hot0[i] = clamp(1.06 - 0.72 * u + (h01(p.x, p.z, salt + 37) - 0.5) * 0.16, 0.1, 1);
+      // temperature falls downstream — this is the whole colour story.
+      // Gentled from 0.72: the toe of an ACTIVE flow is still ~1000 C rock
+      // arriving from the vent, dull orange rather than near-black.
+      hot0[i] = clamp(1.06 - 0.6 * u + (h01(p.x, p.z, salt + 37) - 0.5) * 0.16, 0.1, 1);
       meander[i] = 0.13 * Math.sin(i * 0.44 + mPh) + 0.05 * Math.sin(i * 1.03 + mPh * 2);
     }
 
@@ -732,18 +738,38 @@
         melt = Math.max(melt, flood * across);
         melt = melt * melt * (3 - 2 * melt);   // smoothstep: filaments get EDGES
         ramp3(clamp(melt * (0.32 + 0.8 * hot), 0, 1), MELT_A, MELT_B, MELT_C, _c3);
-        // the lid itself is not black — it is dark rock still holding heat,
-        // warmest right beside a filament (a crack heats its own rim)
-        _c4.copy(_LID_D).lerp(_LID_W, clamp(hot * (0.3 + 0.7 * lace), 0, 1));
+        /* the lid itself is not black — it is dark rock still holding heat,
+           warmest right beside a filament (a crack heats its own rim).
+           QUADRATIC in hot, and biased harder into the lace: the 2026-08-16
+           slow-cooling repair keeps `hot` high for the whole eruption, and a
+           lid warmth LINEAR in hot then painted every plate warm gold — the
+           dark-crust-vs-bright-lace contrast that IS the bible photo fell
+           over. hot*hot keeps the plates dark rock while the filaments and
+           their rims stay incandescent for just as long. */
+        _c4.copy(_LID_D).lerp(_LID_W, clamp(hot * hot * (0.22 + 0.78 * lace), 0, 1));
         _c4.lerp(_c3, melt);
         kCol[off] = _c4.r * grM; kCol[off + 1] = _c4.g * grM; kCol[off + 2] = _c4.b * grM;
       }
     }
 
+    /* HOW FAST DOES LAVA GO BLACK? Slower than this file thought. OWNER,
+       2026-08-16: "the magma turns black way too soon... research the magma
+       coming out of a volcano and when it becomes black to do it right."
+       The vulcanology: basalt erupts at ~1100-1200 C (yellow-orange) and
+       stays visibly incandescent all the way down to ~500 C. A STAGNANT skin
+       greys over in minutes — but a channel that is still BEING FED keeps
+       tearing its own skin open and reads orange for hours; flows only chill
+       black after the supply stops. Every flow here is fed for the whole
+       eruption, so at /26 the vent stations were "hours old" by second
+       twenty of a twenty-second event — that is the premature black. /90
+       means an eruption-length lifetime dims a station ~20%, and the floor
+       (0.42, was 0.28) keeps even the oldest surface at a dull-red crack
+       glow instead of flat black — which is what the seams of a real flow
+       margin do for days. */
     function stationThick(i) {
       const bornAt = i * seg / Math.max(0.001, speed);
-      const localAge = clamp(age - bornAt, 0, 40);
-      return { t: 0.18 + 0.5 * (localAge / (localAge + 6)) + 0.1 * wProf[i], cool: clamp(localAge / 26, 0, 1) };
+      const localAge = clamp(age - bornAt, 0, 120);
+      return { t: 0.18 + 0.5 * (localAge / (localAge + 6)) + 0.1 * wProf[i], cool: clamp(localAge / 90, 0, 1) };
     }
 
     function writeStations(from, to) {
@@ -751,7 +777,7 @@
       for (let i = from; i <= to && i < N; i++) {
         const p = path.pts[i], st = stationThick(i);
         ring(i, p.x, p.y, p.z, nX[i], nZ[i], halfW * wProf[i], st.t,
-          hot0[i] * (1 - 0.72 * st.cool), i * seg, ph, cGY, mGY);
+          hot0[i] * (1 - 0.58 * st.cool), i * seg, ph, cGY, mGY);
       }
     }
 
@@ -790,7 +816,7 @@
       }
       const st = stationThick(i);
       ring(i, _v.x, _v.y, _v.z, nx, nz, hw, st.t * (0.55 + 0.45 * frac),
-        hot0[i] * (1 - 0.72 * st.cool), adv, age * skinV * LID_K, cGY, mGY);
+        hot0[i] * (1 - 0.58 * st.cool), adv, age * skinV * LID_K, cGY, mGY);
       // put the station's own bed back — the nose borrowed those slots
       for (let c = 0; c < COLS; c++) {
         const k = i * COLS + c;
@@ -947,11 +973,25 @@
      Same construction as the pyroclastic current, because it is the same
      physics upside down: overlapping camera-facing sprites wearing the
      shared cauliflower alpha, sizes growing with height (a plume expands
-     as it entrains air), the whole column BUILDING over its first seconds
-     rather than appearing, churning in place, and bending downwind with
-     height squared (drag integrates). Dark tiers only — the photograph's
-     pillar is soot against sky; the rose light at its base is the separate
-     lit-underside cloud the director already owns.
+     as it entrains air), bending downwind with height squared (drag
+     integrates). Dark tiers only — the photograph's pillar is soot against
+     sky; the rose light at its base is the separate lit-underside cloud
+     the director already owns.
+
+     OWNER, 2026-08-16: "when smoke comes out of the volcano it looks like
+     flat bouncing circle ish things — look at the rpg explosion and how it
+     has shape." Both halves diagnosed the same build: every puff was a
+     PERMANENT FIXTURE parked at its own height and wobbled around that seat
+     by three sinusoids — position oscillation, which the eye reads exactly
+     as billboards bouncing. The RPG's smoke reads as a volume because every
+     puff has a LIFECYCLE: born small, growing as it rises, dying into the
+     plume. So the column is now an EMITTER. A puff is born just over the
+     vent, climbs the axis while it expands, decelerates into the head,
+     spreads sideways there (that crowd IS the cauliflower bulge), and is
+     recycled back to the vent inside the one part of the mass dense enough
+     to mask it. Nothing oscillates; all motion is travel. The churn comes
+     from the shared materials' slow rotation (the pyro current's trick) and
+     the whole mass slowly turning about its own axis.
 
      Materials are OWNED, not the pyro pool's: the pyro drives its shared
      materials' rotation every tick it is alive, and two systems steering
@@ -977,22 +1017,34 @@
         blending: THREE.NormalBlending, rotation: i * 1.7,
       }));
     }
-    const N = qi(14, 26);
+    // a few more than the fixture build had: an emitter always has part of
+    // its roster in transit, and the deleted 500-mote ash rain pays for it
+    const N = qi(18, 30);
     const grp = new THREE.Group();
     grp.frustumCulled = false;
     parent.add(grp);
+    /* the lifecycle, in seconds of climb. u = life/RISE: 0 birth at the
+       vent, 1 arrival at the head, then a HOLD to 1.35 spreading in the
+       cauliflower before the puff recycles. Births are staggered across one
+       full cycle so the column is a column, not a pulse — and so it STANDS
+       UP over its first seconds for free, led by its own leading puff.
+       6 s, not longer: the cycle time IS the birth rate (N puffs per
+       1.35 RISE), and the first cut at 7.5 s put nine puffs in the air by
+       the time the storyboard photographs the young column — a head on a
+       thread of beads, not a pillar. */
+    const RISE = 6;
     const puffs = [];
     for (let i = 0; i < N; i++) {
-      /* even column density with a crowd at the top: the head is where the
-         plume stops rising and spreads, so the highest band gets the extra
-         puffs and the extra size — that is the cauliflower bulge */
-      const h = i < N * 0.62 ? (i / Math.max(1, N * 0.62)) : (0.78 + Math.random() * 0.22);
-      const m = new THREE.Sprite(mats[Math.min(COL_TIERS.length - 1, (h * 3.2) | 0)]);
+      const m = new THREE.Sprite(mats[0]);
       m.renderOrder = 7;
+      m.visible = false;
       grp.add(m);
       puffs.push({
-        m: m, h: h, ph: Math.random() * 6.28,
-        lat: (Math.random() * 2 - 1), la2: (Math.random() * 2 - 1),
+        m: m, tier: 0,
+        life: -(i / N) * RISE * 1.35,
+        ang: Math.random() * 6.28,          // seat around the axis
+        rr: 0.2 + Math.random() * 0.8,      // seat across the column
+        ph: Math.random() * 6.28,
         sz: 0.8 + Math.random() * 0.5,
       });
     }
@@ -1002,24 +1054,51 @@
       update(dt, wx, wz) {
         if (dead) return handle;
         t += dt;
-        const build = Math.min(1, t / 9);          // the column STANDS UP
         const bx = wx || 0, bz = wz || 0;
+        // the slow boil, at zero position cost: the shared materials turn at
+        // their own rates, shuffled across the roster (the pyro's trick)
+        for (let i = 0; i < mats.length; i++) mats[i].rotation = i * 1.7 + t * (0.05 + i * 0.02);
         for (let i = 0; i < puffs.length; i++) {
           const P = puffs[i];
-          const hh = P.h * build;
-          // the plume widens as it climbs, and the head bulges hardest
-          const rad = r0 * (0.5 + 1.9 * hh) * (P.h > 0.78 ? 1.35 : 1);
-          const churn = Math.sin(t * 0.7 + P.ph);
+          P.life += dt;
+          if (P.life < 0) { P.m.visible = false; continue; }
+          let u = P.life / RISE;
+          if (u >= 1.35) {
+            // recycled inside the crowded head, the one place dense enough
+            // to mask a departure; reseeded so the column never loops
+            P.life = 0; u = 0;
+            P.ang = Math.random() * 6.28;
+            P.rr = 0.2 + Math.random() * 0.8;
+            P.ph = Math.random() * 6.28;
+          }
+          const climb = Math.min(1, u);
+          // fast off the vent, decelerating into the head — a plume climbing
+          // toward neutral buoyancy — then the head HOLDS and spreads.
+          // 0.8: enough curve to crowd the head, not so much that the stem
+          // empties (puff density goes as 1/climb-rate)
+          const hh = Math.pow(climb, 0.8);
+          const hold = Math.max(0, u - 1);
+          const rad = r0 * (0.5 + 1.9 * hh) * (1 + hold * 1.3);
           // downwind lean integrates with height — drag works on the WHOLE climb
           const lean = height * 0.3 * hh * hh;
+          const drift = P.ang + t * 0.16;     // the whole mass slowly turns
           P.m.position.set(
-            x + P.lat * rad * 0.55 + Math.sin(t * 0.5 + P.ph) * 1.6 + bx * lean,
-            baseY + hh * height + churn * 1.2,
-            z + P.la2 * rad * 0.55 + Math.cos(t * 0.45 + P.ph) * 1.6 + bz * lean
+            x + Math.cos(drift) * rad * P.rr * 0.62 + bx * lean,
+            baseY + (hh + hold * 0.12) * height,
+            z + Math.sin(drift) * rad * P.rr * 0.62 + bz * lean
           );
-          const sc = rad * P.sz * (1.55 + 0.14 * Math.sin(t * 0.8 + P.ph));
+          /* BORN SMALL, GROWS AS IT ENTRAINS AIR — the lifecycle is the
+             shape. Scale doubles as the fade: a puff pops in tiny inside the
+             dense base (behind the fountain and the lit underside cloud) and
+             has been swallowed by the head crowd before it recycles. */
+          const grow = Math.min(1, u * 5) * (0.68 + 0.32 * climb) * (1 + hold * 0.45);
+          const sc = rad * P.sz * 1.5 * grow * (1 + 0.05 * Math.sin(t * 0.8 + P.ph));
           P.m.scale.set(sc, sc * 0.94, 1);
-          P.m.visible = hh > 0.01;
+          P.m.visible = sc > 0.05;
+          // the tier IS the lighting (see the pyro note): re-seated as the
+          // puff climbs out of the column's own shadow into the lit crown
+          const tier = Math.min(COL_TIERS.length - 1, (hh * 3.2) | 0);
+          if (tier !== P.tier) { P.tier = tier; P.m.material = mats[tier]; }
         }
         return handle;
       },

@@ -896,7 +896,7 @@
     grantPlayerRung();
     if (CBZ.killstreakReset) CBZ.killstreakReset();
     if (CBZ.setObjective) {
-      CBZ.setObjective("GUN GAME on " + map.label + " — every kill advances the ladder; the final rung is bare fists. First through wins.");
+      CBZ.setObjective("GUN GAME on " + map.label + ". Every kill advances the ladder; the final rung is bare fists. First through wins.");
     }
   }
 

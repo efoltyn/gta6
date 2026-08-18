@@ -75,6 +75,7 @@
   CBZ.setMode = setMode;
 
   function resetGame() {
+    if (CBZ.bootStep) CBZ.bootStep("boot:reset");
     CBZ.hitstop = 0;
     CBZ.slowmo = 0;
     const mode = g.mode === "survival" ? "survival" : (g.mode === "city" ? "city" : (g.mode === "gungame" ? "gungame" : "escape"));
@@ -165,6 +166,10 @@
 
     CBZ.guards.forEach((gd) => {
       gd.wi = 0; gd.alert = 0; gd.bribed = 0; gd.ko = 0; gd.dead = false; gd.hp = null; gd.rep = 0; gd.quest = null; gd.approach = null; gd.investigate = null; gd.state = "patrol"; gd.approachCD = 3 + Math.random() * 5;
+      // radio-window + gunpoint state (detection.js / intimidate.js): a new
+      // run unties every screw and forgets every call, landed or pending.
+      gd.tied = false; gd.radioT = null; gd._radioed = false; gd.intimidMode = null; gd.intimidT = 0; gd.poseHandsUp = false; gd._gunpointCD = 0;
+      if (gd.char) gd.char.handsUp = false;
       gd.group.position.copy(gd.start); gd.group.rotation.z = 0; gd.flashlightOn = false; gd.flashlightReason = ""; gd.wedge.visible = false;
     });
     CBZ.npcs.forEach((n) => {
@@ -345,11 +350,15 @@
         // locker (city/wanted.js): only serving it or making bail opens that.
         g.jailSentence = 0; g._jailSentenceIn = 0; g._jailBailIn = 0;
         if (CBZ.arrestCount) CBZ.arrestCount("escapes");
-        if (CBZ.setMode) CBZ.setMode("city");
-        // Human-facing button: same full rebuild, so it gets the boot card too
-        // (falls back to the raw call if the presented form isn't up yet).
-        if (CBZ.startRunPresented) CBZ.startRunPresented();
-        else if (CBZ.startRun) CBZ.startRun();
+        // Human-facing button: the switch to CITY builds the world and the
+        // start populates it — one presented operation, one meter, so this
+        // path can never freeze the result screen with nothing on it.
+        if (CBZ.bootComplete && bootMeterOn() && !bootBusy) {
+          present("city", false, function () { setMode("city"); startRun(); });
+        } else {
+          setMode("city");
+          if (CBZ.startRun) CBZ.startRun();
+        }
       });
     }
     streetsBtn.classList.toggle("hidden", !show);
@@ -371,7 +380,8 @@
       // game on the release, on its own page. There is nothing here to switch
       // to, so it navigates. Everything without data-href is untouched.
       if (btn.dataset.href) { location.href = btn.dataset.href; return; }
-      setMode(btn.dataset.mode);
+      // presented: switching to an unbuilt CITY is a 20-30 s world build
+      presentModeSwitch(btn.dataset.mode);
     });
   });
   setMode(g.mode || "escape");
@@ -575,12 +585,15 @@
   // teardown and the plan) the tab is genuinely frozen, and with NOTHING
   // painted it reads as a hung page — which is exactly what a phone kills.
   //
-  // This does not make the build one millisecond faster. It paints an honest
-  // card FIRST and hands the thread over only after that card is on screen,
-  // so the freeze happens behind a screen that says what is happening. The
-  // spinner animates `transform` and `opacity` ONLY, which Chrome keeps
-  // running on the compositor thread while the main thread is blocked — so it
-  // is still visibly moving during the 26 s, and the page never looks dead.
+  // This does not make the build one millisecond faster. It paints a REAL
+  // progress meter first and hands the thread over only after that meter is
+  // on screen, so the freeze happens behind a percentage that keeps counting.
+  // The drawing and the arithmetic live in systems/bootprogress.js: an
+  // OffscreenCanvas on a worker thread (which paints straight through a
+  // blocked main thread) driven by per-step checkpoints weighted by what each
+  // step actually cost on THIS machine last run. The checkpoints are the
+  // `CBZ.bootStep(...)` calls in city/world.js, city/worldmap.js (one per
+  // landmass builder) and city/mode.js.
   //
   // CBZ.startRun itself is UNTOUCHED and still fully synchronous: every tool,
   // probe and gate in tools/ calls it and asserts on the world immediately
@@ -588,58 +601,69 @@
   // `?cfg_CITY_BOOT_SCREEN=0` → the buttons call startRun() directly, as before.
   if (CBZ.CONFIG.CITY_BOOT_SCREEN == null) CBZ.CONFIG.CITY_BOOT_SCREEN = true;
 
-  let bootCard = null, bootBusy = false;
-  function bootScreenEl() {
-    if (bootCard) return bootCard;
-    const style = document.createElement("style");
-    // Compositor-only keyframes on purpose — see the note above.
-    style.textContent =
-      "@keyframes cbzBootSpin{to{transform:rotate(360deg)}}" +
-      "@keyframes cbzBootPulse{0%,100%{opacity:.45}50%{opacity:1}}";
-    document.head.appendChild(style);
-    bootCard = document.createElement("div");
-    bootCard.id = "bootload";
-    bootCard.style.cssText =
-      // 200 is above every existing layer (the highest in css/ is 140) — the
-      // card must cover the title screen and the HUD while the thread is gone.
-      "position:fixed;inset:0;z-index:200;display:none;flex-direction:column;" +
-      "align-items:center;justify-content:center;gap:18px;background:#0f1622;" +
-      "color:#fff7ec;font-family:Fredoka,system-ui,sans-serif;text-align:center;padding:24px";
-    bootCard.innerHTML =
-      '<div style="width:54px;height:54px;border:5px solid rgba(255,122,26,.25);' +
-      'border-top-color:#ff7a1a;border-radius:50%;animation:cbzBootSpin 1s linear infinite"></div>' +
-      '<div style="font-size:22px;font-weight:700;letter-spacing:.5px">BUILDING THE WORLD</div>' +
-      '<div style="font-size:14px;max-width:34ch;line-height:1.5;opacity:.75;' +
-      'animation:cbzBootPulse 2.2s ease-in-out infinite">Generating terrain, cities and traffic. ' +
-      'The first load is the slow one — keep this tab open.</div>';
-    document.body.appendChild(bootCard);
-    return bootCard;
+  let bootBusy = false;
+
+  function bootMeterOn() {
+    return CBZ.CONFIG.CITY_BOOT_SCREEN !== false && CBZ.bootMeter && CBZ.CONFIG.BOOT_METER !== false;
   }
-  function showBootScreen(on) { bootScreenEl().style.display = on ? "flex" : "none"; }
+
+  // The tail of the load nobody could see: startRun() returns with the world
+  // built but NOT drawn — the first frames compile ~107 shader programs and
+  // block for seconds more (LOAD-NOTES.md: ~13 s). Hiding the card after two
+  // frames handed the player a frozen game and called it loaded. Hold the
+  // meter until frames are actually cheap (3 in a row under 90 ms), with a
+  // hard 25 s cap so a genuinely slow GPU still gets its game back.
+  function waitForCheapFrames(done) {
+    if (CBZ.bootStep) CBZ.bootStep("boot:frames");
+    let cheap = 0, n = 0, prev = performance.now();
+    const deadline = prev + 25000;
+    (function tick() {
+      const t = performance.now(), d = t - prev; prev = t; n++;
+      cheap = d < 90 ? cheap + 1 : 0;
+      if ((cheap >= 3 && n >= 4) || t > deadline) { done(); return; }
+      requestAnimationFrame(tick);
+    })();
+  }
+
+  // One presented heavy operation: paint the meter, hand the thread over only
+  // once it is actually on screen, hold it until frames are cheap again.
+  // Two frames, not one: the first flushes style/layout, the second only runs
+  // after the compositor has PAINTED the card. Handing the thread over on the
+  // first frame draws nothing and we are back to a frozen blank page. ~32 ms,
+  // so pointer-lock user activation survives it.
+  function present(mode, worldOnly, work) {
+    bootBusy = true;
+    CBZ.bootMeter.show(mode, worldOnly);
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        try { work(); }
+        finally {
+          waitForCheapFrames(function () {
+            CBZ.bootMeter.finish(function () { bootBusy = false; });
+          });
+        }
+      });
+    });
+  }
+
+  // SELECTING the CITY tile builds the whole world too (setMode -> mode.build),
+  // and that used to freeze the title screen for half a minute with nothing on
+  // it at all — the boot card only ever covered PLAY. Any human-facing switch
+  // into an unbuilt heavy world now gets the same meter.
+  function presentModeSwitch(id) {
+    if (bootBusy) return;
+    const heavy = id === "city" && CBZ.modes && CBZ.modes.city && !(CBZ.city && CBZ.city.built);
+    if (!heavy || !bootMeterOn()) { setMode(id); return; }
+    present(id, true, function () { setMode(id); });
+  }
+  CBZ.presentModeSwitch = presentModeSwitch;
 
   // The presented start: paint, then build. Same guards as startRun so a tap
   // during boot still can't build a half-registered world.
   function startRunPresented() {
     if (!CBZ.bootComplete || bootBusy) return;
-    if (CBZ.CONFIG.CITY_BOOT_SCREEN === false) { startRun(); return; }
-    bootBusy = true;
-    showBootScreen(true);
-    // Two frames, not one: the first flushes style/layout, the second only
-    // runs after the compositor has actually PAINTED the card. Handing the
-    // thread over on the first frame draws nothing and we are back to a white
-    // freeze. ~32 ms, so pointer-lock user activation is unaffected.
-    requestAnimationFrame(function () {
-      requestAnimationFrame(function () {
-        try { startRun(); }
-        finally {
-          // Hold the card across the first post-build frames too — that is
-          // where the shader compile lives and the thread is still blocked.
-          requestAnimationFrame(function () {
-            requestAnimationFrame(function () { showBootScreen(false); bootBusy = false; });
-          });
-        }
-      });
-    });
+    if (!bootMeterOn()) { startRun(); return; }
+    present(g.mode, false, startRun);
   }
   CBZ.startRunPresented = startRunPresented;
 

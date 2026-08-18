@@ -730,11 +730,18 @@
         }
       }
 
-      // ground-floor foundation: a solid walkable slab at the floor reference
-      // (gy = the footprint's high point), extending down to bury any gap on
-      // the low side. This gives a flat indoor ground floor to walk and the
-      // base the stairs climb from, instead of bumpy terrain poking through.
-      lbox(0, -0.35, 0, w - WT, 0.7, d - WT, 0x6c7178, { plat: true });
+      /* GROUND-FLOOR FOUNDATION: a solid walkable slab at the floor reference
+         (gy = the footprint's high point), extending down to bury any gap on
+         the low side. This gives a flat indoor ground floor to walk and the
+         base the stairs climb from, instead of bumpy terrain poking through.
+
+         Its top used to sit at EXACTLY gy, which is the height the lot was
+         levelled to — so on a flat lot the slab and the island's grass were
+         coplanar across the whole room and z-fought, and you stood in a room
+         with a grass floor. It is lifted 8 cm clear (a step far under physics
+         STEP_UP, so you still walk straight in) and squared out to the full
+         footprint, so no sliver of terrain shows along the wall line either. */
+      lbox(0, -0.27, 0, w, 0.7, d, 0x6c7178, { plat: true });
 
       const wallOpt = { solid: true, los: true };
       for (let k = 0; k < storeys; k++) {
@@ -826,6 +833,8 @@
       const b = {
         group: bgroup, ox, oz, gy, x: ox, z: oz, w, d, h: storeys * FH, storeys,
         facadeStyle: style || null,        // so a tool can photograph "the pagoda one"
+        floorTop: gy + 0.08,               // the walkable ground-floor surface, published
+                                           // so a probe can assert nothing grows through it
         colliders: cols, platforms: plats, glass: glassList, fallen: false,
       };
       fragile.push(b);
@@ -982,6 +991,43 @@
       : new THREE.MeshBasicMaterial({ color: 0xf2d14a, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
     const roadSegs = [];
     const ROADW = 7;
+    /* THE STREET GRID, declared HERE rather than beside the code that draws
+       it, because the buildings have to be placed with it in mind and they go
+       down first. It used to be declared after the town loop, which is exactly
+       why nothing consulted it: the houses were scattered on flat ground and
+       the asphalt was then painted straight through them. */
+    const GRID = 40;                 // avenue / cross-street pitch
+    const KERB = ROADW / 2 + 1.4;    // corridor half-width plus a verge
+
+    // The nearest grid line to a coordinate, and how far off it we are.
+    function nearestLine(v, origin) {
+      const k = Math.max(-2, Math.min(2, Math.round((v - origin) / GRID)));
+      return { line: origin + k * GRID, off: v - (origin + k * GRID) };
+    }
+    // Does this footprint sit in a road corridor? Avenues run along z at a
+    // fixed x, cross-streets along x at a fixed z, so each axis is tested
+    // against its own family of lines.
+    function onRoad(x, z, w, d) {
+      const a = nearestLine(x, cx), c = nearestLine(z, cz);
+      return Math.abs(a.off) < w / 2 + KERB || Math.abs(c.off) < d / 2 + KERB;
+    }
+    /* Push a footprint OFF the nearer road and stand it on the kerb, facing
+       the street. A town whose buildings line its streets reads as a town;
+       the same buildings scattered between them read as a sample book, and
+       the ones that landed ON the asphalt read as a bug — which is what they
+       were. Returns null when the candidate cannot be seated without landing
+       in the other family of roads. */
+    function faceStreet(x, z, w, d) {
+      const a = nearestLine(x, cx), c = nearestLine(z, cz);
+      // snap on whichever axis the candidate is already closest to a line
+      const snapX = Math.abs(a.off) <= Math.abs(c.off);
+      const half = snapX ? w / 2 : d / 2;
+      const near = snapX ? a : c;
+      const side = near.off >= 0 ? 1 : -1;
+      const seat = near.line + side * (KERB + half + 0.6);
+      const nx = snapX ? seat : x, nz = snapX ? z : seat;
+      return onRoad(nx, nz, w, d) ? null : { x: nx, z: nz };
+    }
     function layRoadLine(fixed, vertical) {
       const step = 4, segs = [];
       let runStart = null;
@@ -1147,8 +1193,15 @@
       attempts++;
       const a = rng() * Math.PI * 2;
       const dist = 44 + rng() * (R - 60);
-      const x = cx + Math.cos(a) * dist, z = cz + Math.sin(a) * dist;
       const w = 6.5 + rng() * 4.5, d = 7 + rng() * 4.5;
+      // Seat it on the kerb of the nearest street FIRST, then judge the ground
+      // under where it will actually stand — testing the terrain at the
+      // candidate and moving it afterwards is how a building ends up half in
+      // a hillside.
+      const seat = faceStreet(cx + Math.cos(a) * dist, cz + Math.sin(a) * dist, w, d);
+      if (!seat) continue;
+      const x = seat.x, z = seat.z;
+      if (Math.hypot(x - cx, z - cz) > R - 34) continue;         // stay off the shore
       const ter = footprintTerrain(x, z, w, d);
       if (ter.max - ter.min > 0.45 || ter.max > 1.8) continue;   // must be flat-ish
       let clash = false;
@@ -1162,7 +1215,8 @@
     }
 
     // ---- city grid: streets, then a skyline of really tall towers ----
-    const GRID = 40;
+    // (GRID / KERB / onRoad / faceStreet are declared up by ROADW — the town
+    // is placed against this grid long before the asphalt is drawn.)
     for (let k = -2; k <= 2; k++) {
       layRoadLine(cx + k * GRID, true);    // avenues (run along z)
       layRoadLine(cz + k * GRID, false);   // cross-streets (run along x)
@@ -1176,8 +1230,11 @@
       tAttempts++;
       const a = rng() * Math.PI * 2;
       const dist = 40 + rng() * (R - 56);
-      const x = cx + Math.cos(a) * dist, z = cz + Math.sin(a) * dist;
       const w = 7 + rng() * 5, d = 7 + rng() * 5;
+      const seat = faceStreet(cx + Math.cos(a) * dist, cz + Math.sin(a) * dist, w, d);
+      if (!seat) continue;
+      const x = seat.x, z = seat.z;
+      if (Math.hypot(x - cx, z - cz) > R - 34) continue;
       const ter = footprintTerrain(x, z, w, d);
       if (ter.max - ter.min > 0.45 || ter.max > 1.6) continue;   // flat ground only
       let clash = false;
@@ -1206,7 +1263,10 @@
     function placeFlat(halfW, halfD) {
       for (let a = 0; a < 90; a++) {
         const ang = rng() * Math.PI * 2, dist = 38 + rng() * (R - 56);
-        const x = cx + Math.cos(ang) * dist, z = cz + Math.sin(ang) * dist;
+        const seat = faceStreet(cx + Math.cos(ang) * dist, cz + Math.sin(ang) * dist,
+          halfW * 2, halfD * 2);
+        if (!seat) continue;                       // a filling station in the road
+        const x = seat.x, z = seat.z;
         const ter = footprintTerrain(x, z, halfW * 2, halfD * 2);
         if (ter.max - ter.min > 0.4 || ter.max > 1.3) continue;
         let clash = false;
