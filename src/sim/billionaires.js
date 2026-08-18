@@ -353,7 +353,25 @@
   function cleanupEmbodied() {
     for (const sid in _embodied) {
       const p = _embodied[sid];
-      if (!p || p.dead || !p.controlled) delete _embodied[sid];
+      if (!p || p.dead || !p.controlled) {
+        // A RELEASED BODY IS NOT THE FOUNDER ANY MORE. vips.js's releaseParty
+        // restores the civilian's own identity but knows nothing about the sid
+        // this module hand-assigned — leaving it meant (a) the walking civilian
+        // read "Founder · <corp>" in the dossier forever (economy.js roleOf
+        // tests roster membership by sid), the owner's screenshotted
+        // "Lv.11 Founder" nobody, and (b) the next cityPedStash wrote that
+        // civilian's resident stats OVER the founder's persistent ledger page.
+        // Scrub the link on live releases only — a DEAD body keeps its sid so
+        // the assassination/succession wrap below can route the death.
+        if (p && !p.dead && p._bilFounder === sid) {
+          // hand back whatever dealt identity the body carried BEFORE the
+          // embodiment borrowed it (null when it carried none) — the assign
+          // below stashes it for exactly this moment.
+          if (p._sid === sid) p._sid = p._bilPrevSid != null ? p._bilPrevSid : null;
+          p._bilPrevSid = null; p._bilFounder = null; p._bilChecked = false;
+        }
+        delete _embodied[sid];
+      }
     }
   }
   function pickFreeFounder() {
@@ -383,6 +401,7 @@
       if (!rec) continue;
       const e = CBZ.cityLedgerEntry && CBZ.cityLedgerEntry(rec.sid);
       if (!e) continue;                            // hydration edge case — no page to read identity off
+      p._bilPrevSid = p._sid || null;   // the civilian's own dealt page, returned at release (cleanupEmbodied)
       p._sid = rec.sid; p._bilFounder = rec.sid;
       if (e.name) p.name = e.name;
       if (e.sex != null) p.gender = e.sex ? "f" : "m";

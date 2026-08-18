@@ -55,6 +55,29 @@
 
   CBZ.CONFIG = CBZ.CONFIG || {};
   const C = CBZ.CONFIG;
+
+  /* ---- ?cfg_X=0 ON A SLICE PAGE ------------------------------------------
+     `src/config.js` has always turned every `cfg_*` query param into a
+     CBZ.CONFIG flag, and that is the seam the whole A/B toolchain is built on:
+     tools/visual-compare.mjs's flag-A/B mode boots the SAME checkout twice and
+     flips exactly one flag, which is the only honest "before" for a behaviour
+     change. A slice page (games/*.html) never loads config.js, so on those
+     pages `?cfg_WILDLIFE_RAGDOLL=0` did nothing at all and every engine flag
+     they inherited was untestable from the outside.
+
+     Same three lines as config.js, and applied HERE — at microboot's module
+     load, i.e. before any pack file runs — so it still wins over every
+     `== null` default in every module the page goes on to load. If config.js
+     is present it ran first and this is a byte-identical no-op. */
+  try {
+    if (typeof location !== "undefined" && location.search) {
+      new URLSearchParams(location.search).forEach(function (v, k) {
+        if (k.slice(0, 4) !== "cfg_") return;
+        C[k.slice(4)] = v === "0" || v === "false" ? false : v === "1" || v === "true" ? true : v;
+      });
+    }
+  } catch (e) {}
+
   if (C.MICRO_V1 == null) C.MICRO_V1 = true;
   if (C.MICRO_SHADOWS == null) C.MICRO_SHADOWS = true;
   if (C.MICRO_DPR_MAX == null) C.MICRO_DPR_MAX = 1.75;

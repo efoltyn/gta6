@@ -64,6 +64,12 @@
    first-class outcome here, not an error.
 
    Flag: CBZ.CONFIG.WILDLIFE_RAGDOLL (default ON) — one line back to tumbles.
+   Dials (all optional, all defaulted to the numbers this file shipped with):
+     QUAD_RAGDOLL_RANGE   m from the camera a kill still solves in (78)
+     QUAD_RAGDOLL_ACTIVE  bodies solving at once (quality tier, 4..14)
+     QUAD_RAGDOLL_POOL    slots incl. frozen corpses holding a pose (18)
+   They exist for the SPECTATOR case: a page that flies a camera over an army
+   of animals is not the first-person city these three numbers were sized for.
 ============================================================================ */
 (function () {
   "use strict";
@@ -80,9 +86,31 @@
 
   // ---- budget (same shape as ragdoll.js; smaller because a carcass lingers
   //      for CARCASS_LINGER seconds and we must not hold slots that long) -----
-  function MAX_ACTIVE() { return CBZ.qScale ? CBZ.qScale(4, 14) : 8; }
-  var POOL = 18;              // slots incl. frozen corpses still holding a pose
-  var RANGE2 = 78 * 78;       // only kills this close to the camera solve
+  function MAX_ACTIVE() {
+    // A SPECTATOR PAGE IS NOT THE CITY. games/battle.html watches an army of
+    // animals kill each other from a flying camera: a budget of eight was
+    // written for a first-person player who can only ever be near a handful of
+    // deaths, and on a battlefield it means most of the corpses on screen fell
+    // back to the tumble. The number stays derived from the quality tier —
+    // callers raise the CEILING, they do not hand-pick a count.
+    var c = CBZ.CONFIG.QUAD_RAGDOLL_ACTIVE;
+    if (c > 0) return c | 0;
+    return CBZ.qScale ? CBZ.qScale(4, 14) : 8;
+  }
+  // slots incl. frozen corpses still holding a pose. Grown lazily (see pool())
+  // so raising the ceiling costs nothing until the bodies actually arrive.
+  function POOL_N() {
+    var p = CBZ.CONFIG.QUAD_RAGDOLL_POOL;
+    return (p > 0) ? Math.min(256, p | 0) : 18;
+  }
+  // only kills this close to the camera solve. A page that flies its camera
+  // over the fight (rather than standing in it) legitimately wants this wider —
+  // CBZ.CONFIG.QUAD_RAGDOLL_RANGE is that dial, in metres.
+  function RANGE2() {
+    var r = CBZ.CONFIG.QUAD_RAGDOLL_RANGE;
+    r = (r > 0) ? +r : 78;
+    return r * r;
+  }
   var SLEEP_V = 0.20;         // u/s — under this the body counts as still
   var SLEEP_T = 0.55;         // s of stillness before the pose freezes
   var MAX_LIFE = 6.5;         // hard cap on solve time (safety)
@@ -417,7 +445,20 @@
     };
   }
   var slots = [];
-  for (var si = 0; si < POOL; si++) slots.push(makeSlot(si));
+  /* THE POOL IS GROWN, NEVER PRE-PAID, and that has to be true at LOAD as much
+     as at the ceiling. Every slot carries four Float32Arrays, so a page that
+     raises QUAD_RAGDOLL_POOL for the deaths it MIGHT see would otherwise pay
+     for all of them the moment this file parses — hundreds of retained typed
+     arrays on a battle of riflemen that never kills an animal at all. So the
+     list starts at the seed below and only reaches for the ceiling when a body
+     actually arrives and no free slot is left (see start()). */
+  var POOL_SEED = 6;
+  function grow(n) {
+    var want = Math.min(POOL_N(), n);
+    while (slots.length < want) slots.push(makeSlot(slots.length));
+    return slots;
+  }
+  grow(POOL_SEED);
   var seq = 0, refused = 0, started = 0;
 
   // scratch — zero per-frame allocation (the file's whole hot path)
@@ -582,7 +623,7 @@
     var cam = CBZ.camera && CBZ.camera.position;
     if (cam) {
       var gdx = grp.position.x - cam.x, gdz = grp.position.z - cam.z;
-      if (gdx * gdx + gdz * gdz > RANGE2) { refused++; return false; }
+      if (gdx * gdx + gdz * gdz > RANGE2()) { refused++; return false; }
     }
     opts = opts || {};
     var s = (a._quadSlot != null) ? slots[a._quadSlot] : null;
@@ -595,7 +636,8 @@
     // (a grenade in a herd starts several corpses in one call stack, and
     // freezing those locks them bolt upright — the exact bug we are here for).
     var active = 0, oldest = null, i;
-    for (i = 0; i < POOL; i++) {
+    var N = slots.length;
+    for (i = 0; i < N; i++) {
       var t = slots[i];
       if (t.used && !t.asleep) { active++; if (t.life > 0.5 && (!oldest || t.age < oldest.age)) oldest = t; }
     }
@@ -604,11 +646,15 @@
       else { refused++; return false; }
     }
     s = null; var stale = null;
-    for (i = 0; i < POOL; i++) {
+    for (i = 0; i < N; i++) {
       var t2 = slots[i];
       if (!t2.used) { s = t2; break; }
       if (t2.asleep && (!stale || t2.age < stale.age)) stale = t2;
     }
+    // every slot is spoken for: reach for the ceiling ONE step at a time, and
+    // only now, when a real body is waiting for it. Recycling a frozen corpse
+    // stays the fallback once the ceiling is genuinely reached.
+    if (!s && slots.length < POOL_N()) { grow(slots.length + 4); s = slots[N] || null; }
     if (!s && stale) { releaseSlot(stale); s = stale; }
     if (!s) { refused++; return false; }
 
@@ -1022,6 +1068,20 @@
     s.asleep = false; s.still = 0; s.age = ++seq;
     return true;
   };
+  /* HAND A SLOT BACK EARLY. The updater releases a slot when the body leaves
+     the scene, which is the right default and is one frame too late for a
+     caller that RETIRES a corpse deliberately — games/battle.html sinks its
+     oldest carcasses out of the world over a couple of seconds, and for those
+     seconds a frozen pose was holding a slot a fresh death could have used.
+     Idempotent, and safe on an actor this file has never seen. */
+  CBZ.quadRagdollDrop = function (actor) {
+    if (!actor || actor._quadSlot == null) return false;
+    var s = slots[actor._quadSlot];
+    if (!s || !s.used || s.act !== actor) return false;
+    releaseSlot(s);
+    return true;
+  };
+
   CBZ.quadRagdollUnpin = function (actor) {
     if (!actor || actor._quadSlot == null) return;
     var s = slots[actor._quadSlot];
@@ -1030,24 +1090,28 @@
 
   CBZ.quadRagdollAudit = function () {
     var act = 0, sleep = 0, pinned = 0;
-    for (var i = 0; i < POOL; i++) {
+    for (var i = 0; i < slots.length; i++) {
       var s = slots[i]; if (!s.used) continue;
       if (s.asleep) sleep++; else act++;
       if (s.pin) pinned++;
     }
-    return { solving: act, frozen: sleep, pinned: pinned, pool: POOL, cap: MAX_ACTIVE(), started: started, refused: refused };
+    return { solving: act, frozen: sleep, pinned: pinned, pool: slots.length, cap: MAX_ACTIVE(), started: started, refused: refused };
   };
 
   // ==========================================================================
-  //  THE UPDATER — 47.5: after wildlife.js's tick (47.1) and after the seize
-  //  (47.35), so the pose we write is the last word on a corpse for the frame.
-  //  A SLEEPING body is not written at all, which is deliberate: its meshes
-  //  already hold the frozen pose, and NOT writing is what lets wildlife.js's
-  //  skinned-husk sink still lower the group.
+  //  THE STEP — one frame of corpse physics for every live slot.
+  //
+  //  PUBLIC, because the frame this should advance by is not always the frame
+  //  the browser drew. games/battle.html runs a SIM CLOCK the viewer controls
+  //  (pause, quarter speed, up to eight times) and the corpses on that field
+  //  belong to that clock, not to requestAnimationFrame — a paused battle with
+  //  bodies still folding is a page arguing with itself. So a page that owns a
+  //  clock sets CBZ.quadRagdollDriven = true and calls this with its own dt;
+  //  everything else keeps the updater below and never knows this exists.
   // ==========================================================================
-  if (CBZ.onUpdate) CBZ.onUpdate(47.5, function (dt) {
+  CBZ.quadRagdollStep = function (dt) {
     if (!(dt > 0)) return;
-    for (var i = 0; i < POOL; i++) {
+    for (var i = 0; i < slots.length; i++) {
       var s = slots[i];
       if (!s.used) continue;
       var a = s.act;
@@ -1061,5 +1125,17 @@
       if (!s.asleep) { solve(s, dt); writePose(s); }
       else if (s.wet) { bobAsleep(s); writePose(s); }
     }
+  };
+
+  // ==========================================================================
+  //  THE UPDATER — 47.5: after wildlife.js's tick (47.1) and after the seize
+  //  (47.35), so the pose we write is the last word on a corpse for the frame.
+  //  A SLEEPING body is not written at all, which is deliberate: its meshes
+  //  already hold the frozen pose, and NOT writing is what lets wildlife.js's
+  //  skinned-husk sink still lower the group.
+  // ==========================================================================
+  if (CBZ.onUpdate) CBZ.onUpdate(47.5, function (dt) {
+    if (CBZ.quadRagdollDriven) return;    // the page owns the clock (see above)
+    CBZ.quadRagdollStep(dt);
   });
 })();

@@ -3849,3 +3849,404 @@ restrained. Landed via temp-index commit atop origin/main (shared dirty
 checkout), PR #27 merged; local main THEN fast-forwarded to bfaccbd after
 re-pointing the three files' index entries (ff refuses dirty-but-identical
 files otherwise), so this tree's copies are clean and safe from add -A.
+
+## THE 2026-08-16 BEACH SESSION — both coasts get bigger and real, zero props, one easy A/B button
+
+**Mandate:** *"Improve the beach without adding props in natural disaster and in
+gang city and commit bigger and more real easy use before after tool and GO
+FAST."* Read as three deliverables: both beaches bigger + more real with ZERO
+new props, the before/after tool made one-command easy, everything committed.
+
+**Gang City (`BEACH_V2`, default on, `?cfg_BEACH_V2=0` reverts):**
+- world.js: the south seawall's beach gap grew 100 → 160 m (cx-150..cx+10).
+  Every consumer reads the descriptor, so the sand, swash apron, minimap band
+  and stashes all widened without another file changing. Prop COUNTS untouched
+  — a wider beach with the same nine palms is mostly open sand, which is what
+  a coastline is.
+- beach.js: the sand band stopped being one flat quad in one hex. It is a
+  subdivided grid with micro-relief (three incommensurate sine fields, ZERO
+  rng draws — build stream byte-identical under the flag) and vertex colour
+  doing texture's job: grain mottle (position hash), warm/cool drift, crests
+  bleaching + hollows shading, a damp band into the swash, and the high-tide
+  WRACK LINE as colour. Relief clamps near-flat where authored things live
+  (towels 0.085, furniture 0.06, pier approach) and ≤0.20 everywhere (the
+  boardwalk deck's underside is 0.22). The swash apron gained alongshore
+  columns (7 → ~16, one per 11 m) so the run-up reads as surf tongues.
+  BUG CAUGHT IN REVIEW: first grid winding faced -Y (invisible sand);
+  cross-product check fixed it before the first screenshot.
+- Lobes ride the relief and take the same vertex colours.
+
+**Natural Disaster island (`SURV_BEACH_V2`, default on):**
+- disaster_arena.js: the 8 m flat sand annulus at y=-0.02 became a 26 m SHORE
+  with a profile — grass edge, low wave-built berm (0.30 peak at b≈4.6), then
+  a smoothstep foreshore that descends THROUGH the waterline to -1.9 where the
+  shelf takes over. groundHeightAt and the drawn ring read ONE function
+  (coastHeightAt), so drawn == walked (the seabed doctrine, extended to the
+  beach). Dry sand ~11.6 m, wadable foreshore ~15 m before swim.js takes you.
+- The drawn ring (RingGeometry R-3..SHORE_R-1, SAME 96 theta segments as the
+  seabed ring, so the boundary vertices coincide — no seam, no overlap) is
+  vertex-coloured and carries a LIVE WET LINE: every vertex below the live
+  mean sea + a breathing alongshore swash wets instantly, dries at 0.10/s —
+  so a tsunami drawdown strands a great ring of visibly wet sand (the dread
+  beat, on the beach itself) and a flood's retreat leaves a high-water mark.
+  Tick at 47.95, right behind the ocean mesh's own surge take at 47.9.
+- CBZ.survShoreAudit() publishes the shore's static facts (band, dry, wade,
+  wet-line liveness) measured off the same functions physics uses.
+
+**The easy before/after button:**
+- tools/before-after.mjs — ONE argument: `node tools/before-after.mjs
+  beach-shores` (or `npm run ba -- <preset>`; bare = list all presets with
+  titles). Applies the three decisions every run makes anyway: --before from
+  the preset's defaultBefore (flag-A/B) else deployed, --keep-going,
+  --no-open. Everything else passes through to visual-compare.mjs.
+- tools/visual-presets/beach-shores.mjs — five subjects across BOTH worlds in
+  one run (city boots by Play; island via CBZ.setMode("survival"), which
+  systems/state.js builds synchronously): city panorama / waterline /
+  backshore, island shore / walk-into-the-water. Flag A/B by default
+  (before = this checkout with cfg_BEACH_V2=0&cfg_SURV_BEACH_V2=0). Metrics
+  are measured off descriptors and height functions, not pixels: beachSpanM
+  100→160, islandBeachM 8→26, drySandM, wadeM, wetLineLive, verts, drawCalls.
+- npm run visual:beach = the beach comparison in one command.
+
+## 2026-08-16 — OPEN DUNES was a flat white plate (battle.html's dunes venue)
+
+Owner: "Look at NPC war open dunes." Looked, with screenshots and the checker.
+The war itself held (0 overlap / embedded / blindFire / stuck, ended on
+budget) but the venue did not: the label promised dunes and bare sand, and
+the field was a featureless near-white sheet with the desert city's towers
+filling the horizon. Three measured faults, three fixes — games/battle.html,
+tools/battle-check.mjs.
+
+- **THE CENTRE WAS A CONSTANT AND THE DUNES WERE 600 m FURTHER OUT.**
+  rings.city+650 sits a third of the way up the dune amplitude ramp:
+  measured 7.6 m of relief across the whole ±160 m fight window — one gentle
+  swell, no dune anywhere. The venue now SCANS the erg (2D — the erg is a
+  ring, not a bearing) for the first centre passing two measurements: ≥16 m
+  of relief in the window AND ≥2 of the 3 central spawn lanes crest-cut at
+  eye height. Relief alone was not enough — the best on-axis window put all
+  its sand on the flanks and the firing lines still saw each other spawn to
+  spawn. Lands at (2100,−350): relief 23.7 m, 3/3 lanes cut. The terrain
+  derives from WORLD_SEED only, so the same URL is the same war. (An offline
+  replica of heightAt using the FALLBACK hash landed the scan 200 m from
+  where the page's real Squirrel3 hash01 does — measure in the page, not in
+  a copy of the page.)
+
+- **A DUNE IS NOT MADE OF COLLIDERS.** eyeLos was micro.segmentBlocked —
+  boxes only — so on real dunes men would sight and fire through twenty
+  metres of sand. terrainBlocked() samples groundAt along the eye line at
+  3 m steps (a 420 m dune wavelength cannot be stepped over) and eyeLos asks
+  it on maps that declare terrainLos. Dunes only, deliberately: a RAISED
+  venue's groundAt is a raycast heightfield that cannot tell a roof from a
+  hill, and its buildings already block sight honestly through their own
+  colliders. Fire discipline inherits the honesty for free — the trigger
+  re-asks the same eyeLos. Revert `?tlos=0`.
+
+- **THE SAND RENDERED AS PAPER.** sun 0.98 clipped the terrain's own tan
+  vertex colours to white, and the hemisphere light's default pale-BLUE sky
+  side desaturated the rest (blue fill on tan sand is gray). sun 0.84,
+  exposure 0.8, lights.skyColor 0xcfc2a4 — desert ambience is the sand's own
+  bounce. Screenshot-verified: sand reads tan, dune shading carries the
+  aerials, men and corpses read against the ground.
+
+Ratchets: audit() states `relief` (the fight window's measured vertical
+span) and `terrainLos`; QUAL gains `throughSand`, counted at the trigger
+with the terrain test ALWAYS on for the dunes map — 0 armed, 2 in the
+26v26 sweep with `?tlos=0`, which is what makes the zero mean something.
+battle-check fails any map on throughSand>0, fails `dunes` under 12 m of
+relief (the flat-plate regression is now loud — it fired during the build
+when the first scan criterion missed), and --revert adds `&tlos=0`.
+
+NOTE (same session): the full nine-map sweep flagged transient overlap pairs
+on `gov` (1-2 pairs) and `marina` (0-1) — measured on BOTH sides of this
+wave (base 0dce341 in a clean worktree: gov 1 pair, worst 0.97 m). It is a
+pre-existing, machine-load-sensitive transient on the dense venues, not a
+dunes regression (dunes itself: 0 across every counter, every run, both
+revert directions). Named here instead of fixed: separation under big
+substeps on dense venues is its own measurement pass, and this wave's
+subject was the erg.
+## 2026-08-16 — A THUMB COULD NOT USE THE C4, IN EITHER GAME
+
+Owner: "I can't use c4 on touch — prison game, prob can't in gang city
+either." He couldn't, anywhere: plant AND detonate lived on keyboard [B]
+alone (city/explosives.js's tap/hold state machine), and no touch file ever
+drew a control for either verb — the exact "keyboard verb with no thumb"
+failure touch.js's verb ledger exists to catch, except these two verbs were
+never even DECLARED into it, so no counter could say so. Inside the wire it
+was worse than the city: the phone's DEMOLITION card does not exist in the
+pen, so hold-[B] is the ONLY detonator the prison has — an iPad prisoner
+with a brick carried a stat fiction.
+
+ONE BUTTON, ONE PILL, ZERO REIMPLEMENTATION. #tbomb joins the on-foot icon
+cluster (bomb-with-spark glyph): tap plants, hold ~0.5 s detonates — by
+holding the module's own logical key down exactly as long as the finger is
+(CBZ.touchKeyHold, the edge-per-call sibling of touchKeyTap), so the arm
+delay, the det-cord clustering, the five-signal receiver cap, the yield to
+the B-2's bomb bay and every refusal line stay explosives.js's alone. Shown
+only when the verb can act (the keyboard's own claim test: bricks on foot,
+or charges out), and red once charges ARE out — the charge LED's own color.
+The vehicle layer gets the pill the plan ends on: body.tveh-on hides the
+on-foot cluster in a seat, so DETONATE (worded — that rail speaks verbs)
+joins the aux rail in drive/armor and now boat, wired through the same key
+hold, inheriting the 0.5 s arm that keeps a mis-brush of the glass from
+sending the street up.
+
+MEASURED (tools/c4-touch-check.mjs — headless touch session, both games):
+tap → exactly 1 planted and exactly 1 brick spent; 0.33 s of hold → nothing;
+0.7 s → every charge out fired, no brick spent; the drive context builds AND
+shows #tvBoom with a charge out (real car, real boarding arc) and the same
+hold detonates from the driver's seat; escape: plant + detonate inside the
+wire. touchAudit 42/42 covered — c4-plant / c4-detonate are ledger rows now,
+so the next thumbless verb cannot hide the way this one did. Also: the
+"[B]… Shift+B" stash hint is keyboard-only now (a touchscreen is never shown
+a keyboard key). Gate: npm run test:c4-touch.
+
+## THE 2026-08-16 BEACH SESSION — both coasts bigger and real, zero props, one easy A/B button
+
+**Mandate:** *"Improve the beach without adding props in natural disaster and
+in gang city and commit bigger and more real easy use before after tool and GO
+FAST."* Three deliverables: both beaches bigger + more real with ZERO new
+props, the before/after tool made one-command easy, everything committed.
+
+**Gang City (`BEACH_V2`, default on, `?cfg_BEACH_V2=0` reverts):**
+- world.js: the south seawall's beach gap grew 100 → 160 m (cx-150..cx+10).
+  Every consumer reads the descriptor (sand, swash, minimap band, stashes), so
+  the wider opening propagated with no other file changing. Prop COUNTS
+  untouched — a wider beach with the same nine palms is mostly open sand,
+  which is what a coastline is.
+- beach.js: the sand band stopped being one flat quad in one hex. Subdivided
+  grid, micro-relief (three incommensurate sine fields, ZERO rng draws — the
+  build stream is byte-identical under the flag), vertex colour doing
+  texture's job: grain mottle (position hash), warm/cool drift, crests
+  bleaching + hollows shading, a damp band into the swash, the high-tide
+  WRACK LINE as colour. Relief clamps near-flat where authored things live
+  (towels 0.085, furniture 0.06, pier approach) and ≤0.20 everywhere (the
+  boardwalk deck's underside is 0.22). Swash apron columns 7 → ~16 (one per
+  11 m) so the run-up reads as surf tongues, not one tilting line.
+
+**Natural Disaster island (`SURV_BEACH_V2`, default on):**
+- disaster_arena.js: the 8 m flat sand annulus at y=-0.02 became a 26 m SHORE
+  with a profile — grass edge, low wave-built berm (0.30 peak at b≈4.6), then
+  a smoothstep foreshore descending THROUGH the waterline to -1.9 where the
+  shelf takes over. groundHeightAt and the drawn ring read ONE function
+  (coastHeightAt): drawn == walked, the seabed doctrine extended to the
+  beach. Dry sand ~11.75 m, wadable foreshore ~15 m before swim.js takes you
+  (audited: CBZ.survShoreAudit()).
+- The drawn ring (RingGeometry R-3..SHORE_R-1, SAME 96 theta segments as the
+  seabed ring — boundary vertices coincide, no seam, no overlap) is
+  vertex-coloured and carries a LIVE WET LINE at tick 47.95 (behind the
+  ocean's own surge take at 47.9): every vertex under the live mean sea + a
+  breathing alongshore swash wets instantly, dries at 0.10/s — a tsunami
+  drawdown strands a great ring of visibly wet sand, and a flood's retreat
+  leaves a high-water mark.
+
+**The easy before/after button:**
+- tools/before-after.mjs — ONE argument (`node tools/before-after.mjs
+  beach-shores`, `npm run ba -- <preset>`, bare = list every preset with its
+  title). Applies the three decisions every run repeats: --before from the
+  preset's defaultBefore (flag-A/B) else deployed, --keep-going, --no-open;
+  everything else passes through to visual-compare.mjs.
+- tools/visual-presets/beach-shores.mjs — five subjects across BOTH worlds in
+  one run, flag A/B by default (before = this checkout with
+  cfg_BEACH_V2=0&cfg_SURV_BEACH_V2=0). Metrics come off descriptors and
+  height functions, not pixels: beachSpanM 100→160, swashVerts 91→272,
+  islandBeachM 8→26, wadeM 4→15, wetLineLive 0→1. npm run visual:beach.
+
+**Four defects the loop caught before the owner could (iter-1 → final):**
+1. The sand grid's triangle winding faced -Y (invisible sand) — caught by a
+   cross-product check before the first screenshot, fixed pre-run.
+2. core/batch.js MERGED the vertex-coloured sand mesh away (empty userData →
+   batch material → no vertexColors): dunes survived, mottle vanished,
+   sandVerts metric read 0. Fix = the swash apron's own rule, non-empty
+   userData. THE METRIC CAUGHT IT — that is why metrics ride the preset.
+3. The first-person rifle photobombed every after frame. CBZ.setFPS(false) in
+   the stage, twice (a mode switch can re-arm it).
+4. BOOT ORDER IS LOAD-BEARING for cross-world presets: booting city first
+   builds the continent underlay + world sea at y≈0 across the whole map —
+   global meshes state.js never hides — and the island's shore (0 → -1.9) and
+   own ocean (-0.8) sit UNDER them; iter-1's island frames photographed the
+   empty city sea. Measured with a raycast probe (hits: world-sea,
+   continent-underlay at ~92 m). The preset now boots STRAIGHT into survival
+   (the tsunami-stages boot), shoots the island first, then switches city-ward
+   — safe in that direction. Anyone building a two-world preset: island
+   subjects go first.
+## 2026-08-16 — the "nil outfit" body, fourth and fifth producers (fable, solo)
+
+Owner (iPad screenshot, live pages build): an adult NPC — aim tag "Lv.11
+Founder" — rendering skin-toned from shoulder to wrist, "nil outfit … too
+common". Same symptom family as 2026-07-29/2026-08-04, but every pinned
+number was green (`bare=0 instHoles=0`): those audits test RENDERABILITY,
+and this body renders fine — it is CLOTH PAINTED AS SKIN, which no
+instrument could see.
+
+**Producers found (probed live, seed 90210, before touching anything):**
+- `crowd.js setLook` copied the imposter's one-mesh skin arm onto the real
+  rig's arms + armsLower on EVERY promotion, and `outfits.js plainRedress`'s
+  arms-continuity then preserved the naked arm through every later redress,
+  forever. Near the player promoted bodies dominate, hence "too common";
+  with a tan crowd shirt the whole torso joins in (the screenshot).
+- `vips.js paintFit` tinted torso/collar/legs only — never arms — and
+  `cityPaintSlot`'s canvas guard made it a TOTAL no-op on painted bodies.
+  Probe: black-suit guard with cream blouse arms; the don in a painted
+  cocktail dress; the magnate principal in a painted KID'S HOODIE (no age
+  gate in draftableCiv — a child, drafted as the billionaire, embodying a
+  FOUNDER, with three SMG suits). `restoreFit` sampled painted materials'
+  white base at draft and "restored" it at release.
+- `billionaires.js` embodiment left `_sid` on the released civilian → the
+  walking "Lv.11 Founder" (economy.js roleOf tests roster by sid) AND the
+  next `cityPedStash` stomped the founder's persistent ledger page.
+- `schedule.js cityPedDeal` had no band gate (banked adult identities could
+  land on child bodies).
+
+**Fixes (two flags, both default ON, one-line reverts):**
+- `CITY_CROWD_SLEEVES` — setLook paints shirt upper arms + skin forearms
+  (the spawn path's own short-sleeve grammar); plainRedress + the corpse-
+  swap sampler clamp an exact-skin-hex upper arm to the shirt (exact
+  compares only — tan shirts never trip it).
+- `CITY_VIP_WARDROBE` — vips.js casts/releases through `CBZ.cityRedressPed`
+  (magnate → tux/varied suit, guards → jobFit "close protection" = painted
+  All Black Tactical, senator/judge → new jobFit rows → composed business
+  suit, don → set colors + bandana, star → gown); draftableCiv refuses
+  non-adult bands; stash/restore now carries name+gender (billionaires
+  renames after stash). Unflagged correctness: cleanupEmbodied scrubs the
+  founder sid off live releases (restoring any pre-embodiment `_sid` via
+  `_bilPrevSid`); cityPedDeal refuses non-adult bodies.
+
+**RATCHET:** `outfitIntegrityAudit()` gains `skinArms` (+`skinArmSample`) —
+upper-arm cloth flat-painted exactly the rig's own skinTone under a real
+(non-skin) torso; painted tank excluded by id, shirtless bodies excluded by
+the torso half. PINNED AT 0 in math-gate. RUN AND GREEN, seed 90210: boot
+125 rigs / det-side 32 rigs, `bare=0 deadTex=0 instHoles=0 skinArms=0`,
+determinism ok, wardrobe/yoke audits untouched.
+
+**NEW EYES:** `tools/visual-presets/vip-wardrobe.mjs` — flag-A/B preset
+(`--before local`, before boots both cfg_ flags OFF): promoted-crowd row,
+magnate detail, don/senator/star court, and the released party, with
+skinArmedInRow / armClash / minorsInRow / founderSidKept / skinArmsCity
+metrics on every plate.
+
+## 2026-08-16 — the prison sat on air (SIT_PHYS_V1, branch claude/prison-game-sitting-physics-58xypq)
+
+Owner report: "guys can sit on air, like, close to a chair, but, like, not on
+the chair. They can just sit on nothing, fix the physics." Reproduced in one
+probe world, mode escape, seed 90210 — twelve bodies in the seated pose at the
+morning yard block, eleven of them nowhere near a seat. Four faults, one law
+(A SEATED BODY IS AT ITS SEAT), one flag:
+
+1. THE WING SAT HALF A METRE FROM ITS OWN BUNKS. Every bunk-posed cell
+   resident measured exactly 1.06 m from his bunk centre — latOut (0.56) +
+   body radius (0.5), the depenetration signature. cellblock.js's leash pins
+   the man to the mattress edge at order 22.6; actorcollide.js's wall clamp
+   (25) ran later and ejected him from the now-solid bunk frame every frame,
+   and the later writer wins. Ten men at once, seated on nothing at floor
+   level. Fix: furniture-held bodies (seat/bed/lie claim, seated/lying rig,
+   or a live prop arc) skip the separation+clamp roster — the rule peds.js's
+   own sit branch already states ("a seated body must not be shoved around by
+   the desk colliders"), closed for the prison's plain actors. Their
+   traversal sample stays stamped so standing up never reads as a sprint.
+2. A CLAIMED SITTER WAS DRAGGED 2.13 m OFF HIS STOOL, still posed seated —
+   the third actor shape had no pin. The player has propuse §3, a peds.js ped
+   re-pins itself from _deskAnchor at 34, a PLAIN actor had nobody, so the
+   muster's target-writes slid him across the yard. Fix: propuse's NPC hold
+   (42) pins seated occupants exactly as it always pinned lying ones — whole
+   transform, same order, wins the frame. For a ped it re-writes the values
+   its own branch just wrote (no-op); KO outranks the furniture.
+3. THE SIT ARC GLIDED. propSit's NPC commit latches char.sitting before the
+   arc (peds' state machine needs it) and the walk-in phase wrote no rig
+   state, so the seated pose owned animChar for the whole leg — a man sailing
+   to the bench folded into a chair shape, measured seated at 2.25 m out.
+   Fix: the walk phase writes absolute rig state like every other phase
+   (sitting/crouch false); the lower/perch beats re-raise the flag when the
+   hips actually land.
+4. THE PLAYER COULD NOT SIT IN HIS OWN PRISON. propuse §3's force-exit read
+   `g.mode !== "city"`, so the sit arc completed and stood him back up the
+   same frame — measured sat 0 of the 160 frames after the arc. Fix: the pin
+   honours the mode the sit began in (P._propMode, recorded by
+   propSit/propSleep; anything that never recorded one keeps the "city"
+   reading byte for byte).
+
+Ratchets, both measured before pinning: CBZ.cellblockAudit().seatDrift
+(bunk-posed men off their spot; was 10-11, pinned 0) and
+CBZ.propUseAudit().airSitters (claimed seats whose occupant sits >0.35 m off
+the anchor; was 1 within a minute of chow, pinned 0). Geometry only, no flag
+reads, so a revert run measures the defect instead of hiding it.
+
+New tool: tools/prison-sit-check.mjs (npm run test:prison-sit) — 12
+assertions on the fixed tree (wing seated with seatDrift 0, chow airSitters 0
+and worst offset 0 m, a live arc with glideFault 0 landing at 0 m, the player
+still seated three seconds on and released cleanly by propStand);
+`--revert` boots ?cfg_SIT_PHYS_V1=0 and asserts the OPPOSITE (seatDrift 11,
+player stood back up) — the two-sided shape mode-engine-check demands.
+Verified: default 12/12, revert 4/4, MATHGATE ok (400 ticks, det ok,
+errors baseline-only), city regression probe 37 seated peds offSeat=0.
+
+## 2026-08-17 — THE FRAME, NOT THE LOAD (react-doctor wave)
+
+Owner: run react-doctor on the game, then make it run much much faster —
+in-game feel, not load time. React Doctor (millionco, oxlint-based) scanned
+813 files: 372 warnings, zero of them React (this is IIFE + r128) and, on
+inspection, none on a hot path — its `indexOf`-in-loop hits are 3-element
+arrays in bounded scans. The real wave came from a CDP sampling profiler
+attached to the live probe world (scratchpad cdprofile.mjs pattern —
+Profiler.start → stepSim ×400 → aggregate self-hits by function). Calm
+street, seed 90210, all before/after on the same machine.
+
+**Sim tick 29.7 → 24.9 ms. Render-side updateMatrixWorld 10.8 → 6.9 ms/frame.**
+
+The finds, in guilt order:
+
+1. **The coastline was recomputed from noise for every water question**
+   (~9% of the tick): every cityWaterAt/isSurfaceWater — cars' overWater,
+   swim, gore, floods — funnels through waterfield's coastAt →
+   continent.js shoreField, an analytic field over noise2/pathBodyField/
+   inSolidRegion. Memoized on a 4m corner grid with bilinear blending
+   (exact at corners, <1m coastline shift, pure function of (x,z) so MP/
+   determinism-safe; worldgen calls shoreField DIRECTLY and is untouched).
+   Plus: overDeck ran a REGEX per region per call (isLink) — now cached on
+   the region object; plus a last-cell fast path. Continent fields left the
+   profile entirely.
+2. **pedinstance walked all ~700 rigs every frame** (a:96, 3.4→1.5ms;
+   clean A/B 2.37→0.86ms): far (>40m) rigs now walk on 1 of 3 frames
+   (`PED_SYNC_STAGGER`), phases spread by group.id; every same-frame
+   contract kept — park gates run every frame, sweepRig knows a held frame
+   from a missing part via r.skipStamp.
+3. **The renderer recomposed every matrix the instancer had ALREADY
+   composed** — 33k ped-rig + 9k car nodes of the 48k matrixAutoUpdate
+   set. New shared contract: loop.js bumps CBZ._matrixOwnStamp once per
+   frame; a system that provably left a subtree's world matrices correct
+   stamps the root; core/matrixskip.js skips the whole subtree on stamp
+   equality. Stamps expire next frame BY CONSTRUCTION (no teardown
+   bookkeeping, nothing can stay stale). Stampers: pedinstance walked+held
+   rigs (`PED_MATRIX_OWN`), vehicles far-stride skipped cars and settled
+   parked cars >60m (`CAR_MATRIX_HOLD`; parkSeat's own cache is the
+   "settled" oracle; near cars stay live for doors/entry). Coverage
+   measured: 116/622 rigs (the non-culled ones), 386/420 cars.
+4. **reactions.js ran its 300-line pose body for every calm ped**: added
+   the quiescent fast path — a complete enumeration of the three edge
+   detectors, every external pose input and every stored channel; any
+   nonzero falls through. Measured 98-99% skip on calm streets, and
+   CBZ.reactionsAudit() now reports quiet/full/firstBlock forever.
+5. **The hot reticle asked isProtectedActor for all ~630 peds every
+   frame** (2.6%): bare radii are strictly inside assisted radii, so
+   findActorHit now tests assisted spheres first and asks the predicate
+   only on a would-be hit (still never cached — childsafe's obligation
+   kept; also no longer asked for merely-culled invisible peds). Gone from
+   the profile.
+6. **queryCollidersNear deduped via Set hashing** for every steering ped +
+   crowd probe: now a query-id stamp on the collider (9.1→7.0%).
+
+GATE: MATHGATE ok (90210:329/182/207, 400 ticks, det ok, errors
+baseline-only) with everything default-ON. Reverts: ?cfg_PED_SYNC_STAGGER
+/ PED_MATRIX_OWN / CAR_MATRIX_HOLD = 0.
+
+Traps for the next wave: (a) probe-world measurements are only comparable
+within one boot — event spikes (an ambient craft crashing mid-burst made
+airtraffic read 3.1ms when its steady state is 0.26) and boot-state drift
+lie across boots; A/B a cfg flag live in ONE world. (b) probe.mjs --serve
+edits need a serve RESTART to load; two restarts racing leaves the
+lockfile pointing at the stale one — pgrep before trusting it. (c) The
+render walk's remaining 6.9ms is the 170k-node visit floor + ~15k unnamed
+live objects; the next real render-CPU win is object-count reduction
+(mid-play accretion measured at only ~13 obj/s net, so it's the standing
+count, not a leak). (d) 6.7M tris are mostly redhollow/backcountry/mercy
+nature megameshes — vertex-cost waste on paper, but NOT the bottleneck on
+Apple GPUs; don't chase it before draw/CPU.

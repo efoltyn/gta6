@@ -778,6 +778,29 @@
   // the feed is runtime-visual. Flip false for a one-line revert (no cameras,
   // no feed). URL A/B: ?cfg_CCTV_V1=0.
   if (CBZ.CONFIG.CCTV_V1 == null) CBZ.CONFIG.CCTV_V1 = true;
+  // SIT PHYS V1 (owner: prison — "guys can sit on air, close to a chair, but
+  // not on the chair"). ONE LAW, closed in three files: A SEATED BODY IS AT
+  // ITS SEAT. Measured faults it deletes, all in mode "escape":
+  //   · systems/actorcollide.js's wall clamp (order 25) depenetrated every
+  //     bunk sitter the cell leash (22.6) had just pinned to the mattress edge
+  //     — ejected latOut + body radius = 1.06 m into the room, seated on air
+  //     at floor level, ten men at once. Furniture-held bodies now skip the
+  //     separation/clamp roster, the rule peds.js's own sit branch states.
+  //   · nothing re-pinned a seated PLAIN actor (peds pin their own via state
+  //     "sit"; prison actors have no such owner), so the muster dragged a
+  //     yard sitter 2.13 m off his claimed stool in the full seated pose.
+  //     city/propuse.js's NPC hold (order 42) now pins seated occupants
+  //     exactly as it always pinned lying ones.
+  //   · propuse's sit ARC latched char.sitting through its walk-in leg, so a
+  //     body GLIDED to the bench in the seated pose; the walk phase writes
+  //     absolute rig state now, like every other phase.
+  //   · the player pin force-stood the player anywhere outside mode "city",
+  //     so a prison bench sat you down and instantly stood you back up; the
+  //     pin now honours the mode the sit began in.
+  // Ratchets: CBZ.propUseAudit().airSitters 0, CBZ.cellblockAudit().seatDrift
+  // 0 — both measured by tools/prison-sit-check.mjs (--revert proves the
+  // fault returns). Flip false (?cfg_SIT_PHYS_V1=0) for a one-line revert.
+  if (CBZ.CONFIG.SIT_PHYS_V1 == null) CBZ.CONFIG.SIT_PHYS_V1 = true;
   // STREET TALK V2: every civilian is YES / NO / PUNCH. Offer math uses level
   // gap + max cash they can spare. Flip false to restore the crowded verb menu.
   if (CBZ.CONFIG.STREET_TALK_V2 == null) CBZ.CONFIG.STREET_TALK_V2 = true;
@@ -803,6 +826,29 @@
   // seams (collar/placket/waistband) on every nobody. clothes.js, outfits.js and
   // crowd.js all read this; undefined is treated as ON.
   if (CBZ.CONFIG.CITY_PLAIN_CIVVIES == null) CBZ.CONFIG.CITY_PLAIN_CIVVIES = true;
+  // PROMOTED BODIES GET REAL SLEEVES (the "nil outfit" fix, wave 1). The
+  // instanced crowd imposter renders its whole arm in SKIN (one mesh, cheap),
+  // and crowd.js's promotion setLook used to copy that literally onto the real
+  // rig — so every body that stepped out of the crowd walked up with naked
+  // shoulder-to-wrist arms, which at close range reads as a person with no
+  // outfit (owner screenshot, 2026-08-16; same look the 2026-07 spawn fix
+  // already retired for makePed bodies). On: a promoted body wears the shirt
+  // on its upper arms and keeps skin forearms — the exact short-sleeve grammar
+  // spawned peds use — and outfits.js's plain re-dress refuses to preserve a
+  // skin-colored upper arm it samples off a stale body. Flip false to restore
+  // the old bare-arm copy.
+  if (CBZ.CONFIG.CITY_CROWD_SLEEVES == null) CBZ.CONFIG.CITY_CROWD_SLEEVES = true;
+  // VIPS DRESS THROUGH THE ONE WARDROBE (the "nil outfit" fix, wave 2).
+  // vips.js used to paint drafted principals/guards with its own flat tint
+  // (torso/collar/legs only): arms kept the civilian's old shirt or bare skin
+  // (a black-suit bodyguard with cream arms), a body wearing a PAINTED garment
+  // couldn't be tinted at all (a don in a cocktail dress, a magnate in a kid's
+  // hoodie), children could be drafted as magnates and armed guards, and the
+  // release path restored colors sampled off painted materials (white). On:
+  // drafting refuses non-adult bodies and every cast/release re-dresses through
+  // outfits.js's canonical redressPed — the same painted uniforms, suits and
+  // gowns every other role wears. Flip false for the old flat paintFit.
+  if (CBZ.CONFIG.CITY_VIP_WARDROBE == null) CBZ.CONFIG.CITY_VIP_WARDROBE = true;
   // FLAVOR FEED (owner's rule: the HUD is not a tutorial/lore space). Pure
   // world-narration lines — "the big houses are lived in now", "line out the
   // door at X's store", corporate market chatter, eulogy prose for strangers —
@@ -1566,4 +1612,10 @@
   //              single knob if the dressing pass ever feels heavy),
   //              _UTILITY_LINES, _STREET_FURNITURE, _GROUND_GRIME,
   //              _BUILDING_DRESS
+  //   PARKOUR_V2 src/systems/physics.js — the traversal pass that added going
+  //              THROUGH an opening (a shot-out window, a C4 mousehole) instead
+  //              of only over the top, velocity-matched vault root motion, the
+  //              edge catch, the airborne pose and the landing/roll beat.
+  //              ?cfg_PARKOUR_V2=0 restores the shipped vault exactly and is
+  //              the "before" side of tools/visual-presets/parkour-moves.mjs
 })();

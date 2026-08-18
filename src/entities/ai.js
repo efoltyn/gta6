@@ -18,6 +18,39 @@
   const GANG_COLORS = [0xff3b3b, 0x3b7bff]; // red vs blue armbands
 
   /* ============================================================
+     THE YARD BEATING — the strike table for a man who has decided to jump you.
+
+     `JUMP_GRAB_P` is the chance a blow escalates into the shared seize grammar
+     (CBZ.predatorSeize) instead of landing as a punch. It used to be, in
+     effect, 1.0 from the third blow onward, which made the ANIMAL takedown —
+     camera possessed and orbiting the attacker, predator.js:1350 — the normal
+     way a prison fight went, on a man with hands. At 0.12, gated behind five
+     landed blows and capped at one per attacker, it is what it should be: the
+     thing that happens when somebody is really determined, a couple of fights
+     in a run rather than every one. `CBZ.CONFIG.JAIL_GRAB_P` overrides it live
+     for anyone measuring the rate.
+
+     MELEE_BLOW is what the count now buys instead. One row per strike the rig
+     can throw, and the numbers say what the strike IS:
+       dmg/roll  damage floor and spread
+       stun      how long you cannot act — bone weapons stun more than they cut
+       shake     camera kick
+       push      metres you are moved; a shove is almost all push and no damage,
+                 which is precisely why a man throws one
+     ============================================================ */
+  const JUMP_GRAB_P_DEFAULT = 0.12;
+  const MELEE_BLOW = {
+    "":         { dmg: 7,  roll: 5, stun: 0.42, shake: 0.42, push: 0.42 },  // straight
+    hook:       { dmg: 9,  roll: 5, stun: 0.50, shake: 0.52, push: 0.55 },
+    upper:      { dmg: 10, roll: 5, stun: 0.55, shake: 0.55, push: 0.34 },
+    elbow:      { dmg: 8,  roll: 4, stun: 0.62, shake: 0.50, push: 0.30 },
+    knee:       { dmg: 9,  roll: 5, stun: 0.72, shake: 0.48, push: 0.24 },
+    headbutt:   { dmg: 12, roll: 6, stun: 0.66, shake: 0.66, push: 0.36 },
+    shove:      { dmg: 2,  roll: 2, stun: 0.26, shake: 0.28, push: 1.30 },
+    stab:       { dmg: 13, roll: 8, stun: 0.34, shake: 0.32, push: 0.30 },
+  };
+
+  /* ============================================================
      SHOW DON'T TELL — THE ONE NARRATION SINK (JAIL_SHOW_DONT_TELL).
 
      OWNER, verbatim: "the HUD is cluttered with 4th-wall breakers — summaries
@@ -3831,15 +3864,36 @@
       if (d < 1.9 && n.hitCD <= 0) {
         n.hitCD = 1.0;
         n.jumpBlows = (n.jumpBlows || 0) + 1;
-        // THE THIRD BLOW IS A GRAB. A man who has hit you twice and is still
-        // on you takes you off your feet — one shared arc, one timed press out.
-        const grabs = n.jumpBlows >= 3 && CBZ.predatorSeize &&
-          !(CBZ.game && (CBZ.game.invuln || 0) > 0) && !n._seizing;
+        /* THE GRAB IS RARE NOW, AND THAT IS THE POINT (owner, verbatim: "in
+           prison game look how when attacked you get spun around. This is very
+           unrealistic for a human attacking you").
+
+           He is right, and the reason is structural rather than a tuning
+           mistake. `CBZ.predatorSeize` is the ANIMAL grab: systems/predator.js
+           possesses the lens and orbits it around the attacker's jaw for the
+           whole hold (predator.js:1350 driveCamera, `h.camPh += dt * …`), which
+           is a magnificent read on a bear that has you in its mouth and an
+           absurd one on a man who has grabbed your shirt in a yard. It was
+           firing on EVERY third blow — i.e. on essentially every fight that
+           lasted three seconds — so the animal camera was the prison's default
+           melee experience.
+
+           It is not deleted, because a man grabbing you and taking you off your
+           feet is real and it is the best thing in the fight when it lands. It
+           is now what it should always have been: uncommon, late, and once per
+           man. Everything the count used to spend on grabs is spent below on
+           an actual beating instead — elbows, knees, headbutts, body shots,
+           shoves — which is the exchange the owner asked for. */
+        const grabP = (CBZ.CONFIG && CBZ.CONFIG.JAIL_GRAB_P != null)
+          ? +CBZ.CONFIG.JAIL_GRAB_P : JUMP_GRAB_P_DEFAULT;
+        const grabs = n.jumpBlows >= 5 && !n._jumpGrabbed && rng() < grabP &&
+          CBZ.predatorSeize && !(CBZ.game && (CBZ.game.invuln || 0) > 0) && !n._seizing;
         if (grabs && CBZ.predatorSeize(n, CBZ.player, {
           style: "drag", nonLethal: true, hold: 2.6, dps: 6, thrash: 0.7,
           cause: "jumped in the yard",
           onEnd: function () { n.jumpBlows = 0; if (n.char) n.char.fightStance = false; },
         })) {
+          n._jumpGrabbed = 1;              // his one takedown this fight is spent
           CBZ.addHeat(4);
           return n.baseSpeed * 1.5;
         }
@@ -3850,10 +3904,52 @@
            it, every other blow would be an empty left fist thrown while the
            shiv hung at his side. */
         const stabbing = !!n._shankOut;
+        /* THE BEATING ITSELF — "more normal shit", which in a prison yard means
+           a man throwing every close-quarters strike he has, not one jab on
+           loop with an uppercut every third beat (which is literally what this
+           was: `punchKind = jumpBlows % 3 === 0 ? "upper" : ""`).
+
+           The vocabulary is chosen by RANGE and by how long he has been on you,
+           because that is what decides it in a real fight:
+             · first exchange, at arm's length — straights and hooks;
+             · once it closes up (under 1.35 m) the long punches stop working
+               and the short weapons come out: elbows, knees, the headbutt;
+             · a man who has been swinging a while starts throwing to the BODY,
+               and a man who wants room throws a shove instead of a punch.
+           Every one of these is a real pose on the shared rig — three of them
+           (elbow, headbutt, knee) were added to entities/character.js for this,
+           because the rig had five strikes and a brawl needs more than that. */
+        const closed = d < 1.35;
+        const blows = n.jumpBlows;
+        const r = rng();
+        let kind = "", kick = null;
+        if (stabbing) kind = "stab";
+        else if (closed && r < 0.22) kind = "headbutt";
+        else if (closed && r < 0.46) kind = "elbow";
+        else if (closed && r < 0.60) kick = "knee";
+        else if (r < 0.14 && blows >= 2) kind = "shove";      // make room, then reset
+        else if (r < 0.34) kind = "hook";
+        else if (r < 0.48) kind = "upper";
+        else kind = "";                                        // the straight: still the staple
         if (n.char) {
-          n.char.punchArm = stabbing ? "r" : ((n.jumpBlows & 1) ? "r" : "l");
-          n.char.punchKind = stabbing ? "stab" : ((n.jumpBlows % 3 === 0) ? "upper" : "");
-          n.char.punchT = n.char.punchDur || 0.28;
+          n.char.punchArm = stabbing ? "r" : ((blows & 1) ? "r" : "l");
+          if (kick) {
+            // a knee is a KICK on this rig, not a punch — different limb,
+            // different layer, and the punch channel has to be left alone or
+            // both fire in the same frame and fight for the torso
+            n.char.kickLeg = (blows & 1) ? "r" : "l";
+            n.char.kickKind = "knee";
+            n.char.kickDur = 0.42;
+            n.char.kickT = n.char.kickDur;
+            n.char.punchT = 0;
+          } else {
+            n.char.punchKind = kind;
+            // the short weapons are FAST — that is most of why they land in
+            // close; a headbutt is slower because the wind-up is the whole tell
+            n.char.punchDur = kind === "elbow" ? 0.22 : kind === "headbutt" ? 0.34
+              : kind === "shove" ? 0.30 : (n.char.punchDur || 0.28);
+            n.char.punchT = n.char.punchDur;
+          }
         }
         // face him at you so the fist travels the right way
         n.group.rotation.y = Math.atan2(px - n.group.position.x, pz - n.group.position.z);
@@ -3861,10 +3957,19 @@
         // so a beating can put you on the floor exactly like a bullet does.
         // Being shanked is roughly twice being punched, and it is meant to be:
         // the answer to a man with a blade is not to trade blows with him.
-        const swing = stabbing ? (13 + rng() * 8) : (7 + rng() * 5);
+        /* AND EACH ONE COSTS SOMETHING DIFFERENT, or the vocabulary above is
+           choreography over one number. These are the honest relationships:
+           an elbow is short and sharp (less damage than a hook, more stun
+           because it lands on bone); a knee to the body takes the wind out of
+           you (the most stun in the set); a headbutt is the heaviest single
+           strike a bare-handed man has and it costs him too; a shove barely
+           hurts and is thrown for the ground it buys. `push` is how far it
+           moves you, and it is the reason a shove exists at all. */
+        const M = MELEE_BLOW[kick ? "knee" : (stabbing ? "stab" : kind)] || MELEE_BLOW[""];
+        const swing = M.dmg + rng() * M.roll;
         if (CBZ.hurtPlayer) {
           CBZ.hurtPlayer(swing, n.group.position.x, n.group.position.z,
-            { melee: true, stun: stabbing ? 0.34 : 0.5, heat: 4, shake: stabbing ? 0.32 : 0.45,
+            { melee: true, stun: M.stun, heat: 4, shake: M.shake,
               sfx: stabbing ? "hit" : "punch", by: n });
         } else {
           CBZ.player.hp = (CBZ.player.hp == null ? 100 : CBZ.player.hp) - swing;
@@ -3878,12 +3983,14 @@
         // is the same two lines against the surface the player actually has.
         const kx = CBZ.player.pos.x - n.group.position.x, kz = CBZ.player.pos.z - n.group.position.z;
         const kd = Math.hypot(kx, kz) || 1;
-        CBZ.player.pos.x += (kx / kd) * 0.42;
-        CBZ.player.pos.z += (kz / kd) * 0.42;
+        CBZ.player.pos.x += (kx / kd) * M.push;
+        CBZ.player.pos.z += (kz / kd) * M.push;
       }
       return n.baseSpeed * 1.5;
     }
-    if (n.jumpBlows) { n.jumpBlows = 0; if (n.char) n.char.fightStance = false; }
+    // he broke off (or the hunt timed out): the blow count and his one
+    // takedown both reset, so "once" means once per fight and not once ever
+    if (n.jumpBlows) { n.jumpBlows = 0; n._jumpGrabbed = 0; if (n.char) n.char.fightStance = false; }
 
     // DEFEND: once you've joined a gang, your crew jumps whoever's hunting you
     if (CBZ.player.gang != null && n.gang === CBZ.player.gang && n.aiState !== "fight") {
