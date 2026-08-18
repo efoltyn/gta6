@@ -393,7 +393,8 @@ try {
   if (A.holesOnSlopes !== 0) failures.push(`shaftAudit.holesOnSlopes = ${A.holesOnSlopes} (a sinkhole on a mountainside)`);
   if (A.privateHoles !== 0) failures.push(`shaftAudit.privateHoles = ${A.privateHoles}`);
   if (!(A.deepOverWide >= 2)) failures.push(`shaftAudit.deepOverWide = ${A.deepOverWide} (a crater, not a shaft)`);
-  if (A.cityFloorWrapped !== true) failures.push("the floor was never wrapped — the stair is drawn and not walkable");
+  if (A.floorOwned !== true) failures.push("systems/solidground.js does not own CBZ.floorAt — the stair is drawn and not walkable");
+  if (!(A.carvings > 0)) failures.push(`${A.shafts} shafts are open but only ${A.carvings} carvings are registered — the holes are not in the ground model`);
   for (const h of survival.holes) {
     if (h.lidUnmasked !== 0) failures.push(`survival hole ${h.i}: ${h.lidUnmasked}/${h.lidTotal} ground surfaces over the mouth still drawing (${h.lidNames.join(", ")})`);
     if (!(h.floorDrop > h.depth * 0.4)) failures.push(`survival hole ${h.i}: floorAt only drops ${h.floorDrop} m into a ${h.depth} m shaft`);

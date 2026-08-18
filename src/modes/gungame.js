@@ -216,14 +216,8 @@
   // CBZ.floorAt unconditionally (same reason city re-installs on reset).
   function mapFloor(x, z) { return curMap().floorAt(x, z); }
   function installFloor() {
-    if (CBZ.floorAt && CBZ.floorAt._gungame) return;
-    const base = CBZ.floorAt || null;
-    const f = function (x, z) {
-      if (g.mode === "gungame") return mapFloor(x, z);
-      return base && base !== f ? base(x, z) : 0;
-    };
-    f._gungame = true;
-    CBZ.floorAt = f;
+    // systems/solidground.js owns CBZ.floorAt; declare the map field and stop
+    CBZ.registerGroundBase("gungame", function (x, z) { return mapFloor(x, z); });
   }
 
   // ---- prison cast parking --------------------------------------------------

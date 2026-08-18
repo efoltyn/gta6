@@ -466,6 +466,9 @@
      installed before it is erased in silence. groundmask.js asserts CBZ.renderer
      exists and appends rather than rewriting. -->
 <script src="src/core/groundmask.js?v=mask1"></script>
+<!-- THE GROUND IS A SOLID: base field minus carvings. Owns CBZ.floorAt, so it
+     must load before any mode registers its base (city/mode.js, modes/*). -->
+<script src="src/systems/solidground.js?v=solid1"></script>
 <script src="src/core/lights.js"></script>
 <script src="src/core/sky.js?v=neutralhaze2"></script>
 <script src="src/core/daynight.js?v=neutralhaze1"></script>

@@ -131,12 +131,13 @@
     if (survMode()) return CBZ.surv.arena.root;
     return CBZ.scene;
   }
-  // The ground WITHOUT any shaft subtracted — the terrain a new hole is cut in.
-  // Reading CBZ.floorAt here would let one shaft's floor be another's terrain.
-  let baseFloor = null;       // the city floorAt we wrapped (see installCityFloor)
+  /* The ground WITHOUT any hole subtracted — the terrain a new one is cut in.
+     Reading CBZ.floorAt here would let one shaft's floor become another's
+     terrain. solidground.js publishes the unsubtracted field directly, so this
+     no longer has to reach for a wrapper it captured earlier and hope. */
   function rawFloor(x, z) {
     if (survMode()) return CBZ.surv.arena.groundHeightAt(x, z);
-    if (baseFloor) { const y = +baseFloor(x, z); return Number.isFinite(y) ? y : 0; }
+    if (CBZ.groundBaseAt) { const y = +CBZ.groundBaseAt(x, z); return Number.isFinite(y) ? y : 0; }
     if (CBZ.floorAt) { const y = +CBZ.floorAt(x, z); return Number.isFinite(y) ? y : 0; }
     return 0;
   }
@@ -785,7 +786,7 @@
     stats.cut++;
     clearInside(h);
     syncMask();
-    installCityFloor();
+    attachCarving(h);
     return h;
   };
 
@@ -835,6 +836,7 @@
       h.grp.traverse(function (o) { if (o.geometry) o.geometry.dispose(); if (o.material && o.material.dispose && !o.material.vertexColors) o.material.dispose(); });
       if (h.grp.parent) h.grp.parent.remove(h.grp);
     }
+    detachCarving(h);
     let i = live.indexOf(h); if (i >= 0) live.splice(i, 1);
     i = pub.indexOf(h); if (i >= 0) pub.splice(i, 1);
     syncMask();                 // the ground comes back the moment the record does not
@@ -909,26 +911,24 @@
      heals itself across a mode switch. survivorbot.js calls CBZ.surv.floorAt
      DIRECTLY, so bots keep landing on the flat bottom — which is correct for
      them anyway: they are the one actor in this game that cannot climb. */
-  let cityFloorFn = null;
-  function installCityFloor() {
-    if (!CBZ.floorAt || CBZ.floorAt === cityFloorFn) return;
-    const prev = CBZ.floorAt;
-    // never wrap a wrapper of ours (an older install that survived a mode
-    // reset) — that is the recursion the _city marker exists to prevent
-    if (prev._shaft) { cityFloorFn = prev; return; }
-    baseFloor = prev;
-    cityFloorFn = function (x, z) {
-      if (live.length) {
-        for (let i = 0; i < live.length; i++) {
-          const y = shaftFloor(live[i], x, z);
-          if (y != null) return y;
-        }
-      }
-      return prev(x, z);
-    };
-    cityFloorFn._shaft = true;
-    if (prev._city) cityFloorFn._city = true;
-    CBZ.floorAt = cityFloorFn;
+  /* A SHAFT IS A CARVING. It used to be a WRAPPER around CBZ.floorAt — one more
+     link in a five-deep chain of mode wrappers, each marking itself so the next
+     reset would not capture itself and recurse. systems/solidground.js owns the
+     floor now, so a hole is a record handed to it: a cylinder of removed
+     material whose floor is shaped by this file's own stair-and-cone math,
+     which therefore still lives in exactly one place. */
+  function attachCarving(h) {
+    if (!CBZ.addCarving) return;
+    h.carve = CBZ.addCarving({
+      kind: "cyl", x: h.x, z: h.z, r: h.mouth,
+      y0: h.bottom, y1: h.gy + 60,        // open to the sky: no lid over a sinkhole
+      open: true, dry: true, mode: h.mode, owner: "groundshaft",
+      floorFn: function (x, z) { const y = shaftFloor(h, x, z); return y == null ? h.bottom : y; },
+    });
+  }
+  function detachCarving(h) {
+    if (h.carve && CBZ.removeCarving) CBZ.removeCarving(h.carve);
+    h.carve = null;
   }
 
   /* ============================================================
@@ -1302,7 +1302,6 @@
     for (let i = 0; i < live.length; i++) if (pub.indexOf(live[i]) < 0) pub.push(live[i]);
     // re-wrap in ANY mode if somebody re-installed a floor after us (a city
     // reset, a mode switch): the wrapper is what makes the stair walkable
-    if (live.length && CBZ.floorAt !== cityFloorFn) installCityFloor();
     /* THE SLOTS FOLLOW THE EYE, so they are re-dealt every frame a hole is
        open. core/groundmask.js only sorts when there are more holes than
        slots; below that this is a handful of Vector4 writes. There is no
@@ -1518,7 +1517,8 @@
       stepsPerShaft: live.length ? live[0].stepN : 0,
       escapeReady: CBZ.CONFIG.SHAFT_ESCAPE !== false,
       cityShaftReady: !!(CBZ.CONFIG.CITY_SINKHOLES && CBZ.roadJunctions && CBZ.city && CBZ.city.arena),
-      cityFloorWrapped: !!(CBZ.floorAt && CBZ.floorAt._shaft),
+      floorOwned: !!(CBZ.floorAt && CBZ.floorAt._solid),
+      carvings: (CBZ.carvings || []).length,
       sequences: seqs.length,
       chunks: chunks.length,
       cut: stats.cut, siteRejects: stats.siteRejects,
