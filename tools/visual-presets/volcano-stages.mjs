@@ -109,9 +109,20 @@ const subjects = [
     cam: { x: 46, y: 15, z: 662, ax: -6, ay: 3, az: 618 } },
 
   { id: "lava-night", label: "Lava at night — it lights the hill", hud: false,
-    focus: "The wide bible photo's regime: a BLACK cone wearing a branching incandescent fan, the lace unchanged from noon (unlit IS incandescent), the vent apron the brightest thing in frame, pooled lights painting the hillside. Before-side: broad smooth orange tubes of even brightness.",
+    focus: "The wide bible photo's regime: a BLACK cone wearing a branching incandescent fan, the lace unchanged from noon (unlit IS incandescent), the vent apron the brightest thing in frame, pooled lights painting the hillside. Both sides now stage REAL night — the old staging set the clock before stepping 40 simulated seconds and photographed dawn.",
     act: { night: true, force: "volcano", untilState: "active", extraSecs: 12 },
+    /* KNOWN LIMIT, measured: the island's terrain is UNLIT material (a
+       capture with sunIntensity=0 still renders bright green lawn), so
+       survival night reads on the sky, the fog, the lit buildings and the
+       lava's own light — never on the grass. The flank election frames the
+       flow itself, which is where the night regime actually shows. */
     cam: { lava: true, frame: 0.55, out: 22, alt: 11, behind: 3, fallback: { x: 26, y: 12, z: 626, ax: 4, ay: 4, az: 606 } } },
+
+  { id: "cooled", label: "When the eruption ends — the flow dies where it stands", hud: false,
+    focus: "The supply stops, so the river stalls and chills BLACK in place: crusted dark rock, the last ember seams fading in the deepest cracks, kept on the cone as a scar (the lahar's precedent). Before-side: the glowing flows are DELETED the frame the eruption ends — the strip photographs a bare hillside three times. The strip is the proof: the after row dims across the same simulated seconds.",
+    act: { force: "volcano", untilState: "active", extraSecs: 21 },
+    strip: { frames: 3, stepSec: 2.6 },
+    cam: { lava: true, scar: true, frame: 0.5, out: 24, alt: 12, behind: 2, fallback: { x: 26, y: 12, z: 626, ax: 4, ay: 4, az: 606 } } },
 
 ];
 
@@ -170,9 +181,36 @@ async function stageVolcano(input) {
     overlay.innerHTML = "<div data-side></div><div data-name></div><div data-focus></div><div data-perf></div><div data-source></div>";
     document.body.appendChild(overlay);
 
-    S = window.__volcanoSeq = { overlay, dayPhase: null };
+    S = window.__volcanoSeq = { overlay, dayPhase: null, tripod: null };
     window.__cbzVisualCompare = {
-      render() { try { CBZ.renderer.render(CBZ.scene, CBZ.camera); } catch (_) {} },
+      /* re-aim before every harness render: a film strip's advance() steps
+         the LIVE sim, whose camera controller re-follows the player — so
+         without this, frame t+1 of every strip photographs the player's
+         back instead of the staged tripod. */
+      render() {
+        try {
+          const T2 = window.__volcanoSeq && window.__volcanoSeq.tripod;
+          if (T2) {
+            CBZ.camera.position.set(T2.x, T2.y, T2.z);
+            CBZ.camera.lookAt(T2.ax, T2.ay, T2.az);
+            if (typeof CBZ.skySync === "function") CBZ.skySync();
+          }
+          CBZ.renderer.render(CBZ.scene, CBZ.camera);
+        } catch (_) {}
+      },
+      /* the film-strip hook: step THIS page's frozen sim by stepSec so both
+         sides photograph identical simulated seconds. Self-contained (this
+         object outlives the stage call), so it re-implements the healed
+         step loop instead of closing over it. */
+      async advance(stepSec) {
+        const n = Math.max(1, Math.round(stepSec * 60));
+        for (let i = 0; i < n; i++) {
+          CBZ.hitstop = 0; CBZ.slowmo = 0;
+          CBZ.stepSim(1 / 60);
+          if (CBZ.player) { CBZ.player.hp = 100; CBZ.player.dead = false; }
+          if (CBZ.game && CBZ.game.state !== "playing") CBZ.game.state = "playing";
+        }
+      },
     };
   }
 
@@ -225,6 +263,15 @@ async function stageVolcano(input) {
   if (act.force) { CBZ.disasters.force(act.force); step(0.1); }
   if (act.untilState) stepUntilState(act.untilState, 30);
   if (act.extraSecs) step(act.extraSecs);
+  /* NIGHT, RE-ASSERTED. Setting dayPhase(0.93) up top and then stepping
+     30-40 simulated seconds rolled the 150 s day clock straight past
+     midnight and into the morning — every "night" beat this preset ever
+     shipped was actually photographed at dawn, which is why the
+     lava-lights-the-hill claim never looked like the Fuego reference. Pin
+     the clock again AFTER the sim has run, and give it a couple of
+     simulated seconds (not a couple of ticks: the light rig LERPS toward
+     the clock, and 0.1 s photographs the lerp's starting point — midday). */
+  if (act.night && CBZ.dayPhase) { try { CBZ.dayPhase(0.93); step(2.5); } catch (_) {} }
 
   // GROUND ZERO: put the player where the front is about to arrive, so the
   // whiteout is photographed from inside the blast and not next to it.
@@ -270,8 +317,17 @@ async function stageVolcano(input) {
     // fronts and their axes; frame the one that has run furthest.
     try {
       const A = CBZ.volcanoAudit ? CBZ.volcanoAudit() : null;
-      const tips = (A && A.lavaTips) || [];
-      const mids = (A && A.lavaMids) || [];
+      let tips = (A && A.lavaTips) || [];
+      let mids = (A && A.lavaMids) || [];
+      /* cam.scar: the post-eruption beat's subject is the QUENCHED flow, and
+         the audit deliberately excludes quenched noses from lavaTips (live
+         cameras must not frame dead rock). On a build with no quench at all
+         the scar arrays are absent, tips stay empty, and the beat drops to
+         its fallback tripod — which photographs the bare cone the old
+         behaviour actually leaves. */
+      if (cam.scar && A && A.lavaScarTips && A.lavaScarTips.length) {
+        tips = A.lavaScarTips; mids = A.lavaScarMids || mids;
+      }
       const hill = (CBZ.surv && CBZ.surv.arena) ? CBZ.surv.arena.hills[0] : { x: 0, z: 600 };
       /* PREFER A FLOW STILL ON THE CONE. "Furthest tip from the hill" used
          to be the whole rule, and once the flows learned to branch and run
@@ -398,12 +454,27 @@ async function stageVolcano(input) {
     camera.lookAt(cam.ax, cam.ay, cam.az);
   }
   camera.updateProjectionMatrix();
+  // remember the tripod for the strip re-aim in render() above; the
+  // player-follow framing deliberately stays live (it is ABOUT the player)
+  S.tripod = null;
+  if (!(cam.player && CBZ.player && CBZ.player.pos)) {
+    S.tripod = aimed
+      ? { x: aimed.x, y: aimed.y, z: aimed.z, ax: aimed.ax, ay: aimed.ay, az: aimed.az }
+      : { x: cam.x, y: cam.y, z: cam.z, ax: cam.ax, ay: cam.ay, az: cam.az };
+  }
   if (typeof CBZ.skySync === "function") CBZ.skySync();
   else {
     const skyRig = CBZ.skyDome && CBZ.skyDome.parent;
     if (skyRig && skyRig.position) skyRig.position.set(camera.position.x, 0, camera.position.z);
   }
   if (!subject.hud) setHud(false);
+  /* NIGHT, PINNED AS THE LAST ACT. The mid-stage re-assert above proved
+     insufficient in real harness runs — the capture still photographed
+     daylight while dayPhase read 0.947 — so the pin is repeated here as the
+     final thing before the render the harness will flush. The metrics
+     record sunInt/fog below, so a capture whose picture disagrees with its
+     own staged lighting can be caught by number instead of by squint. */
+  if (act.night && CBZ.dayPhase) { try { CBZ.dayPhase(0.93); step(0.5); } catch (_) {} }
   if (CBZ.renderer.info && CBZ.renderer.info.reset) CBZ.renderer.info.reset();
   CBZ.renderer.render(CBZ.scene, camera);
   const render = (CBZ.renderer.info && CBZ.renderer.info.render) || {};
@@ -431,7 +502,14 @@ async function stageVolcano(input) {
   query("source").style.cssText = "position:absolute;bottom:10px;left:27px;color:#9cb0bf;font:10px ui-monospace,SFMono-Regular,Menlo,monospace";
 
   const aliveNow = aliveOf();
+  // the sky clock and the LIGHTS at capture — the numbers that catch "night
+  // was actually dawn" without anyone having to squint at a thumbnail
+  let dph = -1, sunNow = -1;
+  try { dph = Number(CBZ.dayPhase().toFixed(3)); } catch (_) {}
+  try { sunNow = Number(CBZ.sun.intensity.toFixed(3)); } catch (_) {}
   const metrics = {
+    dayPhase: dph,
+    sunIntensity: sunNow,
     tickAvgMs: ticks ? Number((totalMs / ticks).toFixed(2)) : 0,
     tickMaxMs: Number(maxMs.toFixed(1)),
     ticksOver33: over33,
@@ -485,6 +563,7 @@ export default {
        that floods white is the photograph's brightest pixel. Both are 0 on
        any build older than the bible. */
     vol_lavaBranches: { label: "Lava forks grown", better: "higher" },
+    vol_lavaScars: { label: "Cooled flows kept as scars", better: "higher" },
     vol_ventGlows: { label: "Incandescent vent aprons", better: "higher" },
     vol_ashColumns: { label: "Sprite ash columns", better: "higher" },
     vol_pyroLive: { label: "Pyroclastic flows live", better: "higher" },

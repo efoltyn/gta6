@@ -97,7 +97,8 @@
    follows it out to sea) and TSU_SHOAL_V2 (2026-08-15: the front decelerates
    as it shoals — c = √(g·d) — stands at full towering height for a held beat
    at the beach, the slowest moment of the event, then CRASHES and the
-   released bore charges the island).
+   released bore charges the island) and TSU_PACE_V2 (2026-08-18: the same arc
+   at normal speed — the event's clock, not its shape, was what made it drag).
 ============================================================ */
 (function () {
   "use strict";
@@ -1581,7 +1582,15 @@
   function tsuVRel(ctx, fs) {
     const R = ctx.R;
     const toShore = -(fs + R);
-    if (toShore > 0) return Math.max(0.085, Math.sqrt(Math.min(1, toShore / 52)));
+    /* THE FLOOR ON THE APPROACH (TSU_PACE_V2). √(d) goes to zero at the
+       shoreline, and 0.085 let it: the last few metres of open water took
+       longer than the entire crossing of the island behind them, which is
+       where most of "the tsunami is too slow" actually lived. 0.30 keeps the
+       deceleration — the front still arrives at a fraction of its open-sea
+       speed, still stands, still breaks — without the approach out-lasting
+       the event it is the approach to. */
+    const floor = CBZ.CONFIG.TSU_PACE_V2 !== false ? 0.30 : 0.085;
+    if (toShore > 0) return Math.max(floor, Math.sqrt(Math.min(1, toShore / 52)));
     const land = Math.max(0, Math.min(1, (fs + R) / (2 * R)));
     const spent = Math.max(0.08, Math.pow(1 - land, 1.45));
     return 1.18 * (0.5 + 0.5 * spent);
@@ -2083,13 +2092,33 @@
     narrate("hint", "THE ISLAND IS UNDER, swim, climb, survive", 3);
   }
 
+  /* THE CLOCK (TSU_PACE_V2, declared in city/tsunami.js — which loads after
+     this file, so every read of it is lazy). Owner: "the tsunami is too slow
+     right now... just make it normal." The wave itself was already doing
+     30-50 m/s; what was slow was the SCRIPT around it — ten seconds of
+     drawdown, an eleven-second sweep with a second and a quarter of dead stop
+     in the middle of it, nine seconds of standing flood and six of drain: a
+     36-second event of which the wave was moving for eleven. The budget is
+     now 22 s and the front spends more of it moving. ?cfg_TSU_PACE_V2=0
+     restores the old numbers exactly. */
+  const TSU_FAST = () => CBZ.CONFIG.TSU_PACE_V2 !== false;
   const TSUNAMI_V2 = {
-    name: "TSUNAMI", emoji: "", warnSecs: 10, activeSecs: 26, gap: 8,
+    name: "TSUNAMI", emoji: "",
+    get warnSecs() { return TSU_FAST() ? 6 : 10; },
+    get activeSecs() { return TSU_FAST() ? 16 : 26; },
+    gap: 8,
     cause: "swept away by the tsunami", tint: 0x2c5a78,
     warn(ctx) {
       const st = ctx.st, a = rnd() * Math.PI * 2;
       st.dx = Math.cos(a); st.dz = Math.sin(a);
       st.warnT = 0; st.phase = "warn";
+      /* THE CLOCK. "Too slow" is a complaint about SECONDS, and until now the
+         event published none: the storyboard could photograph every beat and
+         still not say when any of them happened. eventT runs from the first
+         frame of the drawdown to the last frame of the drain, phaseT resets on
+         each beat, and both are in the audit — so pacing is a number two
+         builds can be compared on instead of a feeling. */
+      st.eventT = 0; st.phaseT = 0; st.activeT = 0; st.sweepT = 0; st.crashAtT = -1;
       st.level = CBZ.survSeaMeanY ? CBZ.survSeaMeanY() : -0.8;
       st.waveAmp = 0.86; st.chopAmp = 0.72; st.foamGain = 0.34;
       st.frontS = -1e9; st.frontV = 0; st.stallT = 0; st.broke = false; st.crashT = -1;
@@ -2101,6 +2130,7 @@
     warnTick(dt, ctx) {
       const st = ctx.st;
       st.warnT += dt;
+      st.eventT = (st.eventT || 0) + dt; st.phaseT = (st.phaseT || 0) + dt;
       const k = Math.min(1, st.warnT / TSUNAMI_V2.warnSecs);
       /* THE DREAD BEAT, AND IT IS THE WHOLE WARNING. The sea empties off the
          shelf — hundreds of metres of wet seabed, boats on the mud, the reef
@@ -2134,17 +2164,26 @@
       // stay dry — the refuges have to survive or the event has no answer
       st.floodSurge = Math.min(14.3, 8.3 + scale(2.4, ctx));
       st.frontS = -(R + 52);
-      st.speed = (2 * R + 104) / (ctx.activeSecs * 0.44);   // legacy constant walk
+      /* THE SWEEP'S SHARE OF THE BUDGET. 0.44 of 26 s was 11.4 s to cross
+         344 m; 0.46 of 16 s is 7.4 s for the same ground — the front is
+         half again as fast, and the beats it has to hit (approach, stand,
+         crash, crossing) all still fit inside it. */
+      const sweepShare = TSU_FAST() ? 0.46 : 0.44;
+      st.speed = (2 * R + 104) / (ctx.activeSecs * sweepShare);   // legacy constant walk
       /* SHOALING (TSU_SHOAL_V2): integrate the relative-speed profile over
          the whole travel and scale it so approach + stand + crash + crossing
          land in the SAME sweep budget the constant speed used — the director's
          clock, the flood phase and the drain cannot tell the difference. */
       st.broke = false; st.stallT = 0; st.crashT = -1; st.frontV = st.speed;
       if (CBZ.CONFIG.TSU_SHOAL_V2 !== false) {
-        st.stallSecs = 1.25;
+        /* THE STAND IS A BEAT, NOT A PAUSE. At 1.25 s the wall came to a
+           genuine halt at the seawall and you could watch it not move; the
+           held breath and the crash still land at 0.45 s, and the wave reads
+           as standing up rather than as stopped. */
+        st.stallSecs = TSU_FAST() ? 0.45 : 1.25;
         let unit = 0;
         for (let s0 = -(R + 52); s0 < R + 52; s0 += 0.5) unit += 0.5 / tsuVRel(ctx, s0);
-        st.speedK = unit / Math.max(2, ctx.activeSecs * 0.44 - st.stallSecs);
+        st.speedK = unit / Math.max(2, ctx.activeSecs * sweepShare - st.stallSecs);
       } else st.speedK = 0;
       st.waveAmp = 1.55; st.chopAmp = 2.15; st.foamGain = 0.82;
       st.waveId = "tsu" + CBZ.now + rnd();
@@ -2164,6 +2203,11 @@
     },
     active(dt, ctx) {
       const st = ctx.st;
+      st.eventT = (st.eventT || 0) + dt;
+      st.activeT = (st.activeT || 0) + dt;
+      if (st.phase !== st.timedPhase) { st.timedPhase = st.phase; st.phaseT = 0; }
+      st.phaseT = (st.phaseT || 0) + dt;
+      if (st.phase === "sweep") st.sweepT = (st.sweepT || 0) + dt;
       /* A LEADEN SKY, and it took a screenshot to learn why the old one was
          not. modes/survival.js paints BOTH the fog and the sky dome from
          env.fog, and the renderer is sRGB — so 0x35607e, which reads as a dark
@@ -2191,7 +2235,7 @@
               if (!st.stallT && CBZ.audioHush) CBZ.audioHush(true);
               st.stallT += dt; v = st.speedK * 0.02;
             }
-            else { st.broke = true; st.crashT = 0; tsuCrash(ctx); }
+            else { st.broke = true; st.crashT = 0; st.crashAtT = st.eventT || 0; tsuCrash(ctx); }
           }
           if (st.crashT >= 0) st.crashT += dt;
           st.frontV = v;
@@ -2348,13 +2392,15 @@
         tsuCarHandoff(ctx);
         tsuFlotsam(dt, ctx, 1.6);
         if (rnd() < dt * 2.5) sound("water");
-        if (st.floodT > ctx.activeSecs * 0.34) { st.phase = "drain"; st.drainFrom = st.floodSurge; narrate("hint", "The water is DRAINING, move!", 2.4); }
+        st.floodBudget = ctx.activeSecs * (TSU_FAST() ? 0.30 : 0.34);
+        if (st.floodT > st.floodBudget) { st.phase = "drain"; st.drainFrom = st.floodSurge; narrate("hint", "The water is DRAINING, move!", 2.4); }
       } else {  // drain — slow, and what it drags out with it is the memory
         const cur = CBZ.waterSurge ? CBZ.waterSurge() : 0;
-        const next = Math.max(0, cur - dt * (st.floodSurge + 1.5) / Math.max(1.5, ctx.activeSecs * 0.2));
+        const next = Math.max(0, cur - dt * (st.floodSurge + 1.5) / Math.max(1.5, ctx.activeSecs * (TSU_FAST() ? 0.17 : 0.2)));
         surgeSet(next);
         st.level = CBZ.survSeaMeanY ? CBZ.survSeaMeanY() : 0;
         const drainK = Math.max(0, Math.min(1, next / Math.max(0.1, st.floodSurge)));
+        st.drainK = drainK;      // 1 = still fully inundated, 0 = the sea is back
         st.waveAmp = 0.86 + 0.52 * drainK; st.chopAmp = 0.72 + 1.0 * drainK; st.foamGain = 0.34 + 0.28 * drainK;
         // the water that leaves is the dirtiest water there has been — it is
         // carrying the town out with it
@@ -3168,9 +3214,26 @@
     ctx.st.erStreams = null;
     (ctx.st.erPools || []).forEach((P) => rmMesh(P.m));
     ctx.st.erPools = null;
-    // the lava cools and goes; the flows themselves are transient hazards
-    (ctx.st.erLava || []).forEach((f) => f.dispose());
-    ctx.st.erLava = null;
+    /* THE LAVA DOES NOT VANISH — IT DIES WHERE IT STANDS. The old line here
+       disposed every flow the frame the eruption ended: a glowing river
+       popped off the hillside mid-frame. quench() is the physics (the
+       supply stops, THEN it chills black over ~8 s, ember seams last) and
+       the five stems ride ONE composite scar so the eviction cap below
+       counts eruptions, not stems. Cold rock kills nothing: hitTest goes
+       false on quench, and this list is nulled out of the actor pass. */
+    if (ctx.st.erLava) {
+      const flows = ctx.st.erLava;
+      if (flows.length && flows.every((f) => typeof f.quench === "function")) {
+        flows.forEach((f) => f.quench());
+        volScars.push({
+          update(dt) { for (let i = 0; i < flows.length; i++) flows[i].update(dt); },
+          dispose() { for (let i = 0; i < flows.length; i++) { try { flows[i].dispose(); } catch (e) {} } },
+        });
+      } else {
+        flows.forEach((f) => f.dispose());
+      }
+      ctx.st.erLava = null;
+    }
     if (ctx.st.pyro) { ctx.st.pyro.dispose(); ctx.st.pyro = null; }
     /* THE SCARS OUTLIVE THE EVENT, and that is the point: a lahar SETS, and
        ash does not wash off between disasters. Both stay in the world for the
@@ -4428,6 +4491,24 @@
            build that predates these reports nothing, which reads as 0 /
            false / null — "not measured", never "no wave". */
         frontV: st.frontV != null ? +(+st.frontV).toFixed(2) : null,
+        /* ---- THE CLOCK, so pacing is a measurement ----------------------
+           eventT is seconds since the sea started going out; sweepT is how
+           long the front has been travelling; crashAtT is the eventT the lip
+           came down at. The budgets it is spending are published beside them,
+           because "the wave is slow" and "the wave has 26 seconds to fill"
+           are different bugs with different fixes. A build that predates
+           these reports null = not measured. */
+        eventT: st.eventT != null ? +(+st.eventT).toFixed(2) : null,
+        activeT: st.activeT != null ? +(+st.activeT).toFixed(2) : null,
+        sweepT: st.sweepT != null ? +(+st.sweepT).toFixed(2) : null,
+        phaseT: st.phaseT != null ? +(+st.phaseT).toFixed(2) : null,
+        crashAtT: st.crashAtT != null && st.crashAtT >= 0 ? +(+st.crashAtT).toFixed(2) : null,
+        warnBudget: TSUNAMI_V2.warnSecs, activeBudget: TSUNAMI_V2.activeSecs,
+        floodT: st.floodT != null ? +(+st.floodT).toFixed(2) : null,
+        floodBudget: st.floodBudget != null ? +(+st.floodBudget).toFixed(2) : null,
+        // how much of the inundation is still standing, 1 -> 0 across the
+        // drain: the physical read of "how far through the undertow are we"
+        drainK: st.drainK != null ? +(+st.drainK).toFixed(3) : null,
         stalled: !!(st.phase === "sweep" && st.stallT > 0 && !st.broke),
         crashAge: st.crashT != null && st.crashT >= 0 ? +(+st.crashT).toFixed(2) : null,
         debrisEntrained: dbg ? dbg.entrained : 0,

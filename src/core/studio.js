@@ -227,12 +227,18 @@
     // ---- people ------------------------------------------------------------
     people: {
       gives: "the 1.82 m voxel body the whole game runs on, its gait, its " +
-             "poses and its death. This is the rig the city, the prison and " +
-             "gun game all wear. Use CBZ.studio.cast(role) rather than " +
-             "building a person out of boxes",
+             "poses, its death — and what it WEIGHS, which is what decides " +
+             "whether a punch landing on it means anything. This is the rig " +
+             "the city, the prison and gun game all wear. Use " +
+             "CBZ.studio.cast(role) rather than building a person out of boxes",
+      /* MASS SHIPS WITH THE BODY, not with the fight. bodymass.js reads the
+         anthropometric profile character.js already builds, so it belongs to
+         the same pack for the same reason the gait does: a page that can put a
+         person on screen can answer how heavy they are, and a page that cannot
+         has nothing to ask about. */
       needs: ["look"],
-      files: ["entities/character.js", "entities/poses.js"],
-      publishes: ["makeCharacter", "animChar", "charPoses"],
+      files: ["entities/character.js", "entities/poses.js", "systems/bodymass.js"],
+      publishes: ["makeCharacter", "animChar", "charPoses", "bodyMass", "meleeScale"],
     },
 
     ragdoll: {

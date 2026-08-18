@@ -181,6 +181,10 @@
         nm.color = c.clone();
         if (nm.emissive) nm.emissive = c.clone().multiplyScalar(0.16);
         nm._shared = false; nm._playerCarOwned = true;
+        // Material.clone() drops custom props, so the body tag is re-applied
+        // here too — this arm only runs without playercars.js, and a harness
+        // that repaints twice would hit the identical dead-traversal bug.
+        nm._bodyPaint = true;
         swapped.set(m.id, nm);
       }
       o.material = nm;
