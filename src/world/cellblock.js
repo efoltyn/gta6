@@ -1597,6 +1597,57 @@
     return r < 0.34 ? "bars" : (r < 0.72 ? "bunk" : "pace");
   }
   function barsSpot(c) { return facePoint(c, (c.oa + c.ob) / 2, -0.85); }
+
+  /* ---- THE PACING BOX, AND THE LAW THAT A POST MUST BE INSIDE IT ----------
+     THE FLICKER (owner, 2026-08-19, video from his own cell): "ai is flickering
+     like moving super fast front back while trying to run while in cell."
+
+     Two numbers in this file disagreed and nothing made them agree. The leash
+     confines a resident to a box — the cell inset by a body radius, minus the
+     bunk footprint — and separately sends him to a POST derived from the door
+     frame (`barsSpot`, the door's centreline). Half this wing's doors are
+     offset over the bunk, so on the shipped tree TWELVE of twenty residents
+     were being sent to a post their own leash forbids. The result is a frame
+     loop with no fixed point: entities/npc.js walks the man at the post at
+     order 22, the clamp here shoves him back off it at order 22.6, and neither
+     ever wins. Measured on the pre-fix tree: 1.4 m of travel per second, net
+     displacement zero, a body vibrating at 60 Hz — which is exactly what a
+     screenshot cannot show and a video can.
+
+     The box is the authority now: `postIn` clamps the pose spot into it, so a
+     post is by construction somewhere the man is allowed to stand. He walks
+     there once, gets inside the settle radius, and stops.
+
+     The BUNK pose is deliberately exempt from the bunk exclusion: that strip
+     is off-limits to a PACING body, not to the man sitting on the mattress —
+     his spot is the seat the SIT_PHYS_V1 ratchet measures (cellblockAudit's
+     seatDrift), and it must stay exactly on the rig. */
+  function paceBox(c, forBunk) {
+    let x0 = c.x - c.hx + 0.62, x1 = c.x + c.hx - 0.62;
+    const z0 = c.z - c.hz + 0.62, z1 = c.z + c.hz - 0.62;
+    // THE PACING LANE STOPS AT THE BED. Taken off the rig's own footprint, so
+    // it tracks the bunk if it moves.
+    if (c.bunk && !forBunk) {
+      const wide = (c.bunk.along === "z" ? c.bunk.latOut : c.bunk.lonOut) + BODY_R;
+      if (c.bunk.x < c.x) x0 = Math.max(x0, c.bunk.x + wide);
+      else x1 = Math.min(x1, c.bunk.x - wide);
+      if (x1 < x0) x1 = x0 = (x0 + x1) / 2;      // a cell too narrow to pace
+    }
+    return { x0: x0, x1: x1, z0: z0, z1: z1 };
+  }
+  function clampInto(b, v) {
+    if (v.x < b.x0) v.x = b.x0; else if (v.x > b.x1) v.x = b.x1;
+    if (v.z < b.z0) v.z = b.z0; else if (v.z > b.z1) v.z = b.z1;
+  }
+  // the post a resident of `c` is sent to, as a point he is ALLOWED to occupy
+  function postV2() { return !CBZ.CONFIG || CBZ.CONFIG.CELL_POST_V2 !== false; }
+  function postIn(c, pose) {
+    const b = paceBox(c, pose === "bunk");
+    const s = pose === "bars" ? barsSpot(c)
+      : (pose === "bunk" && c.bunk ? bunkSpot(c) : { x: c.x, z: c.z });
+    if (postV2()) clampInto(b, s);
+    return s;
+  }
   function bunkSpot(c) {
     // THE NEAR LONG EDGE OF THE BUNK — and it is always an X offset, because
     // every bunk in this wing is laid out ALONG Z (fitOutCell passes "z" for
@@ -1641,7 +1692,10 @@
       const c = cells[i];
       if (c.vacant || c.owner) continue;
       const pose = cellPose(c);
-      const seat = pose === "bars" ? barsSpot(c) : (pose === "bunk" ? bunkSpot(c) : { x: c.x, z: c.z });
+      // spawned ON his post, and the post is the leash's own answer — a man
+      // dealt onto a spot his leash forbids spends his first seconds being
+      // shoved off it (see postIn).
+      const seat = postIn(c, pose);
       const hh = h01(c.x, c.z, 6001);
       let n = null;
       try {
@@ -1668,9 +1722,11 @@
   }
 
   /* ==========================================================
-     10. THE LEASH + the door slide + the lamp mirror. One updater, and it
-         runs after entities/npc.js's order-22 movement so the clamp is the
-         last word on where a cell resident ended the frame.
+     10. THE LEASH + the door slide + the lamp mirror. The leash runs on BOTH
+         sides of entities/npc.js's order-22 mover: order 21.9 decides where a
+         resident is allowed to go, order 22.6 has the last word on where he
+         ended the frame. A clamp with no say before the mover can only ever
+         undo the step — which is a body vibrating, not a body in a cell.
      ========================================================== */
   const SLIDE_RATE = 4.2;
   let lampHex = -1, lampT = 0, lastElapsed = 0;
@@ -1685,6 +1741,74 @@
     if (was && CBZ.setCharPose) CBZ.setCharPose(n.char, "stand");
     if (was && c) stepClearOfBunk(c, n);
   }
+
+  /* One pass of the cell leash over every occupied cell. `pre` runs before the
+     mover and owns the DECISIONS (the post, the pause, the facing); the post-
+     mover pass only re-clamps a body that was pushed since. */
+  function leashPass(dt, pre) {
+    for (let i = 0; i < cells.length; i++) {
+      const c = cells[i], n = c.owner;
+      if (!n || n === "player") continue;
+      if (n.dead || n.escaped) { if (pre) unseat(n, c); continue; }
+      // A BODY IN ITS BUNK IS NOT A BODY TO BE CLAMPED. Once systems/
+      // prisonrest.js has put a man to bed (or a propuse arc is walking him
+      // to it) the transform belongs to that hold: propuse re-pins the lie
+      // spot at order 42, and an AABB clamp or a target write here would be
+      // two systems arguing over one Vector3 — the exact way a body vibrates
+      // in place that prisonschedule.js's herd() already warns about.
+      if (n._propLie || n._propBed || (CBZ.propArcActive && CBZ.propArcActive(n))) continue;
+      // A REAL BRAIN STATE OUTRANKS THE POST — the same precedence poses.js
+      // documents: hands-up, a KO or a hunt owns the rig, and the held pose
+      // must LET GO rather than freeze a seated body mid-fight. The box still
+      // holds: a fight inside a cell is a fight inside THAT cell.
+      const owned = n.ko > 0 || n.intimidMode || n.huntPlayer > 0
+        || n.aiState === "fight" || n.aiState === "flee";
+      const pose = owned ? "pace" : n._cellPose;
+      // A bunk too low for this rig is not this man's bunk — `seatFits`
+      // measures HIS body against the clearance the bunk PUBLISHES, so the
+      // overlap is unreachable rather than "fixed by being taller". The
+      // fallback is a pose this wing already has, not a special case.
+      if (pose === "bunk" && (!c.bunk || (n.char && !seatFits(n.char, c.bunk.headroom)))) {
+        n._cellPose = "bars"; unseat(n, c); continue;
+      }
+      const b = paceBox(c, pose === "bunk");
+      const p = n.group.position;
+      clampInto(b, p);
+      if (n.target) clampInto(b, n.target);
+      if (owned) { if (pre) unseat(n, c); continue; }
+      const s = postIn(c, pose);
+      if (pose === "bunk") {
+        p.x = s.x; p.z = s.z;
+        if (!pre) continue;
+        n.target.set(s.x, 0, s.z);
+        n.pause = Math.max(n.pause || 0, 0.6);
+        n.group.rotation.y = CBZ.lerpAngle(n.group.rotation.y, Math.atan2(c.dx, c.dz), 1 - Math.pow(0.02, dt));
+        if (n.char && CBZ.setCharPose) {
+          n.char.seatRef = n.char.seatRef || { cushion: c.bunk.top, floorBelow: 0 };
+          CBZ.setCharPose(n.char, "sit");
+        }
+      } else if (pose === "bars" && pre) {
+        n.target.set(s.x, 0, s.z);
+        // THE SETTLE RADIUS IS THE MOVER'S. entities/npc.js stops walking at
+        // 0.4 m of the target; a post that only counts as reached at a
+        // TIGHTER radius than that is a post nobody ever reaches, so the man
+        // paces the last handspan forever. Half a metre of Euclidean slack
+        // clears the mover's own stop distance with room to spare.
+        if (Math.hypot(p.x - s.x, p.z - s.z) < 0.5) {
+          n.pause = Math.max(n.pause || 0, 0.5);
+          n.group.rotation.y = CBZ.lerpAngle(n.group.rotation.y, Math.atan2(c.dx, c.dz), 1 - Math.pow(0.02, dt));
+        }
+      }
+    }
+  }
+
+  // pass one: BEFORE entities/npc.js's order-22 mover, so the step it takes is
+  // a step toward somewhere this file will let him stand.
+  CBZ.onUpdate(21.9, function (dt) {
+    const g = CBZ.game;
+    if (!g || g.mode !== "escape" || !cast || !postV2()) return;
+    leashPass(dt, true);
+  });
 
   CBZ.onUpdate(22.6, function (dt) {
     const g = CBZ.game;
@@ -1717,68 +1841,14 @@
     // ---- the leash. Whatever the 4995-line brain wanted, a cell resident
     //      ends the frame inside his own cell: this is what "in cell" means,
     //      and it costs one AABB clamp per occupant.
-    for (let i = 0; i < cells.length; i++) {
-      const c = cells[i], n = c.owner;
-      if (!n || n === "player") continue;
-      if (n.dead || n.escaped) { unseat(n, c); continue; }
-      // A BODY IN ITS BUNK IS NOT A BODY TO BE CLAMPED. Once systems/
-      // prisonrest.js has put a man to bed (or a propuse arc is walking him
-      // to it) the transform belongs to that hold: propuse re-pins the lie
-      // spot at order 42, and an AABB clamp or a target write here would be
-      // two systems arguing over one Vector3 — the exact way a body vibrates
-      // in place that prisonschedule.js's herd() already warns about.
-      if (n._propLie || n._propBed || (CBZ.propArcActive && CBZ.propArcActive(n))) continue;
-      const p = n.group.position;
-      let x0 = c.x - c.hx + 0.62, x1 = c.x + c.hx - 0.62;
-      const z0 = c.z - c.hz + 0.62, z1 = c.z + c.hz - 0.62;
-      // THE PACING LANE STOPS AT THE BED. The clamp box was the cell inset by
-      // one body radius and took no notice of the 1.25 m of furniture in it —
-      // fine while the bunk was walk-through, a body wedged in a collider now.
-      // Taken off the rig's own footprint, so it tracks the bunk if it moves.
-      if (c.bunk) {
-        const wide = (c.bunk.along === "z" ? c.bunk.latOut : c.bunk.lonOut) + BODY_R;
-        if (c.bunk.x < c.x) x0 = Math.max(x0, c.bunk.x + wide);
-        else x1 = Math.min(x1, c.bunk.x - wide);
-        if (x1 < x0) x1 = x0 = (x0 + x1) / 2;      // a cell too narrow to pace
-      }
-      if (p.x < x0) p.x = x0; else if (p.x > x1) p.x = x1;
-      if (p.z < z0) p.z = z0; else if (p.z > z1) p.z = z1;
-      if (n.target) {
-        if (n.target.x < x0) n.target.x = x0; else if (n.target.x > x1) n.target.x = x1;
-        if (n.target.z < z0) n.target.z = z0; else if (n.target.z > z1) n.target.z = z1;
-      }
-      // A REAL BRAIN STATE OUTRANKS THE POST — the same precedence poses.js
-      // documents: hands-up, a KO or a hunt owns the rig, and the held pose
-      // must LET GO rather than freeze a seated body mid-fight.
-      if (n.ko > 0 || n.intimidMode || n.huntPlayer > 0 || n.aiState === "fight" || n.aiState === "flee") { unseat(n, c); continue; }
-      if (n._cellPose === "bars") {
-        const s = barsSpot(c);
-        n.target.set(s.x, 0, s.z);
-        if (Math.abs(p.x - s.x) + Math.abs(p.z - s.z) < 0.55) {
-          n.pause = Math.max(n.pause || 0, 0.5);
-          n.group.rotation.y = CBZ.lerpAngle(n.group.rotation.y, Math.atan2(c.dx, c.dz), 1 - Math.pow(0.02, dt));
-        }
-      } else if (n._cellPose === "bunk") {
-        // THE POSE IS ASKED FOR, NOT ASSUMED. This branch used to sit the man
-        // down unconditionally, and the rack over his head was 0.37 m too low
-        // for the body doing it — the owner's screenshot, exactly. `seatFits`
-        // measures HIS rig against the clearance the bunk PUBLISHES, so the
-        // overlap is not "fixed by being taller", it is unreachable: a body
-        // that would not clear the deck never takes the pose, at any height.
-        // The fallback is a pose this wing already has, not a special case.
-        if (n.char && !seatFits(n.char, c.bunk.headroom)) { n._cellPose = "bars"; unseat(n, c); continue; }
-        const s = bunkSpot(c);
-        p.x = s.x; p.z = s.z;
-        n.target.set(s.x, 0, s.z);
-        n.pause = Math.max(n.pause || 0, 0.6);
-        n.group.rotation.y = CBZ.lerpAngle(n.group.rotation.y, Math.atan2(c.dx, c.dz), 1 - Math.pow(0.02, dt));
-        if (n.char && CBZ.setCharPose) {
-          n.char.seatRef = n.char.seatRef || { cushion: c.bunk.top, floorBelow: 0 };
-          CBZ.setCharPose(n.char, "sit");
-        }
-      }
-    }
-
+    //
+    //      IT RUNS TWICE, AND THE FIRST PASS IS THE ONE THAT MATTERS. A clamp
+    //      that only runs AFTER entities/npc.js (order 22) can never do better
+    //      than undo the step the mover just took — undoing a step every frame
+    //      forever is precisely the flicker. Pass one (order 21.9, `pre`)
+    //      settles where the man is ALLOWED to go before he is moved; pass two
+    //      (order 22.6) is the cheap safety net that catches the step itself.
+    leashPass(dt, !postV2());
     // ---- lamp mirror: interactions.js's breaker only knows about
     //      CBZ.ceilingLamp, so the rest of the wing follows it. Polled at
     //      4 Hz and written only on a change.
@@ -1976,6 +2046,12 @@
        flag reads, so a revert run measures the defect and a fixed run pins 0.
        Fight/flee/KO men are excluded — unseat() owns them, not the pin. */
     let seatDrift = 0;
+    /* postDrift (CELL_POST_V2) — residents being walked at a post their own
+       leash forbids. Pure geometry: the man's live target measured against the
+       box this file clamps him to. A non-zero reading IS the flicker — the
+       mover spends every frame closing on a point the clamp spends every frame
+       taking back. Was 12 of 20 on the shipped wing; pinned at 0. */
+    let postDrift = 0;
     // cells per row, off the cells' OWN tags — so "how big is this wing"
     // cannot be answered by a number typed anywhere but the row tables.
     const rows = {};
@@ -1994,6 +2070,12 @@
         const sp = bunkSpot(c), p = n.group.position;
         if (Math.hypot(p.x - sp.x, p.z - sp.z) > 0.3) seatDrift++;
       }
+      if (n && n !== "player" && n.target && !n.dead && !n.escaped && !(n.ko > 0)
+          && !n._propLie && !n._propBed && !(CBZ.propArcActive && CBZ.propArcActive(n))
+          && n.aiState !== "fight" && n.aiState !== "flee" && !n.intimidMode && !(n.huntPlayer > 0)) {
+        const bx = paceBox(c, n._cellPose === "bunk"), t = n.target;
+        if (t.x < bx.x0 - 1e-3 || t.x > bx.x1 + 1e-3 || t.z < bx.z0 - 1e-3 || t.z > bx.z1 + 1e-3) postDrift++;
+      }
     }
     const pc = playerCell;
     const margin = pc ? Math.min(pc.hx - Math.abs(s.x - pc.x), pc.hz - Math.abs(s.z - pc.z)) : 0;
@@ -2007,6 +2089,7 @@
       doorGapBlocked: gap,                                   // MUST be 0
       spineBlocked: spine,                                   // MUST be 0
       seatDrift: seatDrift,                                  // MUST be 0 (SIT_PHYS_V1)
+      postDrift: postDrift,                                  // MUST be 0 (CELL_POST_V2)
       colliders: mine.length,
       lamps: lamps.length + 1,
     };

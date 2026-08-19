@@ -801,6 +801,20 @@
   // 0 — both measured by tools/prison-sit-check.mjs (--revert proves the
   // fault returns). Flip false (?cfg_SIT_PHYS_V1=0) for a one-line revert.
   if (CBZ.CONFIG.SIT_PHYS_V1 == null) CBZ.CONFIG.SIT_PHYS_V1 = true;
+  // CELL_POST_V2 — A POST A MAN CAN ACTUALLY STAND ON. world/cellblock.js
+  // confines a cell resident to a box (the cell inset by a body radius, minus
+  // the bunk footprint) and separately sends him to a pose spot off the door
+  // centreline. Nothing made the two agree: measured on the shipped wing,
+  // TWELVE of twenty residents were posted to a spot their own leash forbids,
+  // so entities/npc.js walked them at it (order 22) and the clamp shoved them
+  // back off it (order 22.6) every frame — the owner's "flickering like moving
+  // super fast front back while trying to run while in cell", 1.4 m/s of
+  // travel going nowhere. The post is clamped into the box now, and the leash
+  // runs once BEFORE the mover so the step it takes is a step it keeps.
+  // Ratchet: CBZ.cellblockAudit().postDrift 0 and no actor above 0.35 m/s of
+  // back-and-forth, both measured by tools/prison-jitter-check.mjs (--revert
+  // proves the fault returns). Flip false (?cfg_CELL_POST_V2=0) to revert.
+  if (CBZ.CONFIG.CELL_POST_V2 == null) CBZ.CONFIG.CELL_POST_V2 = true;
   // STREET TALK V2: every civilian is YES / NO / PUNCH. Offer math uses level
   // gap + max cash they can spare. Flip false to restore the crowded verb menu.
   if (CBZ.CONFIG.STREET_TALK_V2 == null) CBZ.CONFIG.STREET_TALK_V2 = true;

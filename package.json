@@ -40,6 +40,8 @@
     "test:gunhands": "node tools/gunhands-check.mjs",
     "test:battle-revert": "node tools/battle-check.mjs --revert",
     "test:prison-sit": "node tools/prison-sit-check.mjs",
+    "test:prison-jitter": "node tools/prison-jitter-check.mjs",
+    "test:prison-jitter-revert": "node tools/prison-jitter-check.mjs --revert",
     "test:prison-sit-revert": "node tools/prison-sit-check.mjs --revert",
     "test:bailout-presentation": "node tools/test-bailout-presentation-browser.mjs",
     "ba": "node tools/before-after.mjs",
