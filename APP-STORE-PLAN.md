@@ -1,23 +1,22 @@
 # APP-STORE-PLAN — the staged roadmap to the App Store
 
-Owner's call (2026-08-19): **Prison Escape and Natural Disaster ship now as two
-apps. Gang City (full open world) is the eventual flagship. NPC War is optional —
-useful as a demo.** Gun Game does NOT ship as its own app; it stays a mode inside
-Gang City later. Researched August 2026 against Apple's current rules (sources at
-the bottom).
+Owner's call (2026-08-19): **four games ship — NPC War, Prison Escape, Natural
+Disaster now, and Gang City (full open world) as the eventual flagship.** Gun
+Game does NOT ship as its own app; it stays a mode inside Gang City. Researched
+August 2026 against Apple's current rules (sources at the bottom).
 
 ## The waves
 
 | Wave | App | What it is in this repo | Why this order |
 |---|---|---|---|
-| 0 (optional, first) | **NPC War** | `games/battle.html`, standalone | Lowest-stakes pipeline guinea pig + free demo/marketing |
+| 0 (first) | **NPC War** | `games/battle.html`, standalone | Real release AND the lowest-stakes pipeline guinea pig |
 | 1 | **Prison Escape** | `index.html` forced into `escape` mode | Complete game with an arc; the original |
 | 1 | **Natural Disaster** | `index.html` forced into `survival` mode | Distinct genre (BR survival), tamest rating |
 | 2 (later) | **Gang City** | `index.html` city mode — the whole world, gun game + co-op inside | Ships when the open world is ready; biggest app, worst perf case, needs the most polish |
 
-### Why NPC War first is genuinely worth doing
-"Maybe it's worth doing" — yes, and specifically FIRST, because it derisks
-everything after it for almost no effort:
+### Why NPC War goes first
+It's a full release in its own right, and putting it first derisks everything
+after it for almost no effort:
 - It exercises the **entire pipeline** — Capacitor wrapper, Xcode 26 build,
   App Store Connect record, privacy label, new age questionnaire, review — on the
   app you care least about. A rejection or a WKWebView surprise costs nothing here.
@@ -27,7 +26,7 @@ everything after it for almost no effort:
 - It already boots straight into its own menu and has touch orbit/pinch; the only
   work is on-screen buttons for its keyboard verbs (pause, 1–5 speed, front cam)
   and bundling.
-- As a free demo it can point at the others ("from the maker of…" in the
+- As a free app it doubles as a demo pointing at the others ("from the maker of…" in the
   description is fine; do NOT build it as a launcher that downloads the other
   games — that's guideline 4.7 territory).
 
