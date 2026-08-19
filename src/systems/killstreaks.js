@@ -3,6 +3,31 @@
 
    Tracks consecutive player knockdowns from fists, guns, and legacy
    beat-up actions. Capture breaks the streak. 25 arms the nuke.
+
+   ---- ESCAPE ONLY (2026-08-19) --------------------------------------------
+   OWNER, on Gun Game: "I'm seeing fucking dialogue pop ups. Why should there
+   be dialogue?" This file was the loudest source of them, and it took a
+   deathmatch to make that obvious.
+
+   The gate here was an EXCLUSION LIST — `mode === "survival" || mode ===
+   "city"` — so every mode written afterwards opted itself IN by existing.
+   modes/gungame.js is a mode made entirely of kills, so every single kill
+   popped the centre card ("You Killed FINN W. / +50"), every death popped
+   "STREAK ENDED / Respawning", and the reward cards landed at 3, 5 and 7 of
+   the EIGHT kills a gun-game ladder takes — narrating a prison at a player
+   who is not in one:
+       RADAR SWEEP    "Guards marked. Keep moving."   (no guards in an arena)
+       COUNTER-SCAN   "Heat reduced. Yard confused."  (no heat, no yard)
+       EMP BLAST      "Searchlights stumble."         (no searchlights)
+   The 25-streak nuke is worse than flavour: it drops CBZ.npcs — which is
+   where gun game registers its bots — and calls CBZ.winGame, so a streak
+   reward could end a ladder match by pressing N.
+
+   And gun game already HAS this system, done properly: consecutive kills are
+   the weapon ladder. A second reward ladder stacked on the first is two
+   scoreboards fighting over one screen. Streaks, the nuke and this whole HUD
+   belong to the ESCAPE scenario, which is the one with a block to end.
+   `escapeOnly()` is now the single gate every entry point below asks.
 ============================================================ */
 (function () {
   "use strict";
@@ -13,6 +38,10 @@
 
   const CBZ = window.CBZ;
   if (!CBZ) return;
+
+  // THE ONE GATE (see the header). Every reward, card, meter write and the
+  // nuke asks this and nothing else.
+  function escapeOnly() { return !!(CBZ.game && CBZ.game.mode === "escape"); }
 
   const REWARDS = [
     { n: 3,  name: "RADAR SWEEP",      sub: "Guards marked. Keep moving." },
@@ -81,14 +110,13 @@
   }
 
   function setMeter() {
-    const city = CBZ.game && CBZ.game.mode === "city";
-    meter.style.display = (!city && CBZ.game && CBZ.game.state === "playing" && streak > 0) ? "block" : "none";
+    meter.style.display = (escapeOnly() && CBZ.game.state === "playing" && streak > 0) ? "block" : "none";
     meter.textContent = "STREAK " + streak + (best > streak ? "  BEST " + best : "");
     meter.classList.toggle("armed", nukeReady && !nukeUsed);
   }
 
   function showKill(actor) {
-    if (CBZ.game && CBZ.game.mode === "city") return;
+    if (!escapeOnly()) return;
     title.textContent = streak >= 2 ? streak + " KILL STREAK!" : "";
     sub.textContent = "";
     points.textContent = "+50";
@@ -97,7 +125,7 @@
   }
 
   function showReward(r) {
-    if (CBZ.game && CBZ.game.mode === "city") return;
+    if (!escapeOnly()) return;
     title.textContent = r.n + " KILL STREAK!";
     sub.textContent = r.name + (r.n === 25 ? nukeCue() : "");
     points.textContent = "+50";
@@ -113,7 +141,7 @@
   }
 
   function onDown(actor, source) {
-    if (!CBZ.game || CBZ.game.mode === "city" || CBZ.game.state !== "playing" || nukeUsed) return;
+    if (!escapeOnly() || CBZ.game.state !== "playing" || nukeUsed) return;
     streak++;
     best = Math.max(best, streak);
     CBZ.game.killstreak = streak;
@@ -143,7 +171,7 @@
 
   function breakStreak(reason) {
     if (streak <= 0) return;
-    if (CBZ.game && CBZ.game.mode === "city") { reset(); return; }
+    if (!escapeOnly()) { reset(); return; }
     title.textContent = "STREAK ENDED";
     sub.textContent = reason || "Captured";
     points.textContent = "";
@@ -157,7 +185,7 @@
   }
 
   function detonateNuke() {
-    if (!nukeReady || nukeUsed || !CBZ.game || CBZ.game.mode === "city" || CBZ.game.state !== "playing") return;
+    if (!nukeReady || nukeUsed || !escapeOnly() || CBZ.game.state !== "playing") return;
     nukeUsed = true;
     nukeReady = false;
     title.textContent = "TACTICAL NUKE INBOUND";
@@ -228,10 +256,12 @@
   CBZ.killstreakBreak = breakStreak;
 
   CBZ.onAlways(94, function () {
-    if (CBZ.game.mode === "survival" || CBZ.game.mode === "city") {
+    // ESCAPE ONLY, asked as a scenario question rather than as a list of the
+    // modes somebody remembered to exclude (see the header).
+    if (!escapeOnly()) {
       meter.style.display = "none";
       box.classList.remove("pop", "nuke", "ended");
-      return;   // killstreaks / tactical-nuke are a prison thing
+      return;
     }
     const el = (CBZ.game && CBZ.game.elapsed) || 0;
     if (el + 0.001 < lastElapsed) reset();

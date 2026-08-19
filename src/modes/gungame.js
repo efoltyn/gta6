@@ -5,9 +5,11 @@
    and play gun game"): the ladder itself is the gradient. Everyone — you and
    every bot — starts on the same first gun; every kill advances the killer
    ONE rung down a fixed weapon ladder; whoever lands the FINAL rung's kill
-   wins the match. The next weapon is always VISIBLE (gungamehud.js shows the
-   gun you are one kill from), and the final rung is CATEGORICAL: bare fists,
-   the humiliation rung — losing your lead to a punch is the drama.
+   wins the match. The gradient is READ OFF THE GUN IN YOUR HANDS, not off a
+   panel — gungamehud.js's row is OFF by default (owner: "you know what gun
+   you're on because you're holding it in your hand") — and the final rung is
+   CATEGORICAL: bare fists, the humiliation rung; losing your lead to a punch
+   is the drama.
 
    THIS MODE BUILDS NO WORLD. It borrows maps whole:
      • JAIL   — the prison world (CBZ.prisonRoot) that boots with the game.
@@ -19,6 +21,25 @@
      • ISLAND — the disaster island. Built through survival's OWN
                 CBZ.modes.survival.build() so surv.built/surv.arena stay the
                 one truth and both modes share one build (never two islands).
+   IT BORROWS THE GEOMETRY, NEVER THE GAME (2026-08-19, owner: "in gun game
+   I'm seeing dialogue pop ups — why should there be dialogue?"). Borrowing
+   CBZ.prisonRoot borrowed the whole ESCAPE SIMULATION with it, because the
+   prison's own systems were gated by exception lists ("not survival") or by
+   nothing at all. Measured mid-match, before the fix: seventeen crimes
+   reported to a block that is not playing, heat at 31/100 in 45 s, 1608 guard
+   sight ticks, and the popups the owner actually saw — the breakout's own
+   prompts, offered in the middle of a deathmatch:
+       "Crouch [C] to enter vent / hatch"      (a vent teleports you off-map)
+       "Press [E] to Sabotage Power"
+       objective rewritten to "Cross the yard or scout tunnels for another way out."
+   Fixed at the two owners, not here: systems/detection.js (the wanted machine
+   and CBZ.reportCrime — the one choke point every shot, punch and lift goes
+   through) and systems/interactions.js (the breakout props). Both now ask for
+   the SCENARIO, `mode === "escape"`, which is the right question for a world's
+   own game — capabilities are for shared engine verbs (systems/modecaps.js).
+   The ratchet is CBZ.gungameAudit().prisonLeak: heat that arrived during a
+   match, resolved from the live ledger. Pin at 0.
+
    MORE MAPS — the seam: add an entry to MAPS below with {label, small,
    ensure(), root(), floorAt(x,z), point()}. A city-slice map (e.g. the
    speedway infield) is deliberately NOT shipped: CBZ.city builds the whole
@@ -145,6 +166,7 @@
     hiddenCast: [],      // prison actors we group-hid for a jail match (restored on exit)
     matchesPlayed: 0,
     winner: null,        // "You" | bot name, once decided
+    heatAtStart: 0,      // the prison-leak ratchet's baseline (see the header)
   };
   CBZ.gungame = gg;
 
@@ -381,7 +403,6 @@
     if (CBZ.shake) CBZ.shake(1.0);
     if (CBZ.sfx) CBZ.sfx("ko");
     if (CBZ.doSlowmo) CBZ.doSlowmo(0.4);
-    if (CBZ.killstreakBreak) CBZ.killstreakBreak("Respawning");
     if (CBZ.cityKillFeed) CBZ.cityKillFeed(byBot ? byBot.name : "", "You", cause || "gunfire", { you: true });
     if (byBot && byBot._ggBot) advanceBot(byBot);
   }
@@ -411,10 +432,15 @@
     if (!r.melee && CBZ.unlockWeapon) CBZ.unlockWeapon(r.id, { select: true });
     if (CBZ.fpsResetWeapons) CBZ.fpsResetWeapons();             // full mags for the new gun
   }
-  function hint(msg, secs) {
-    if (CBZ.jailTell) CBZ.jailTell.hint(msg, secs || 2);
-    else if (CBZ.flashHint) { try { CBZ.flashHint(msg, secs || 2); } catch (e) {} }
-  }
+  // A PROMOTION IS A GUN, NOT A SENTENCE. This used to flash
+  // "RUNG 2/9 — COMPACT SMG · NEXT: 12G PUMP" through CBZ.jailTell on every
+  // kill — the same sentence the owner has now deleted twice (the terse pass,
+  // then GUNGAME_HUD_PANEL=false: "you know what gun you're on because you're
+  // holding it in your hand"). Worse, it could not even have printed: jailTell
+  // SUPPRESSES under JAIL_SHOW_DONT_TELL, which is on by default, so the line
+  // was dead code claiming to be feedback. What a rung change actually is: the
+  // weapon in your hands becomes a different category on the same frame, with
+  // a full heal and a full magazine behind it. That is louder than a caption.
   function advancePlayer() {
     if (!gg.match || gg.match.over) return;
     gg.playerKills++;
@@ -425,9 +451,6 @@
     gg.playerRungKills = 0;
     CBZ.player.hp = 100;
     grantPlayerRung();
-    const nxt = gg.playerRung < ladder().length - 1 ? rungLabel(rungAt(gg.playerRung + 1)) : null;
-    hint("RUNG " + (gg.playerRung + 1) + "/" + ladder().length + " — " + rungLabel(rungAt(gg.playerRung)) +
-      (nxt ? "  ·  NEXT: " + nxt : "  ·  FINAL RUNG"), 2.4);
     if (CBZ.sfx) CBZ.sfx("key");
   }
   function advanceBot(b) {
@@ -867,6 +890,13 @@
     // shared prison combat paths index these; an arena match must not crash them
     g.koLog = g.koLog || {};
     g.kos = g.kos || 0;
+    // NO SENTENCE FOLLOWS YOU INTO THE ARENA. Heat, a pending radio call and a
+    // sealed cell door are escape-run state; a match started straight off an
+    // escape run used to inherit them. detection.js's ledger now refuses to
+    // grow outside that scenario, so this is the other half: start at zero.
+    g.detection = 0; g.strikeHeatFloor = 0; g.witnessReportT = 0; g.lastKnown = null;
+    if (CBZ.releasePlayerCell) { try { CBZ.releasePlayerCell(); } catch (e) {} }
+    gg.heatAtStart = g.detection;
 
     despawnBots();
     gg.playerRung = 0; gg.playerRungKills = 0; gg.playerKills = 0; gg.playerDeaths = 0;
@@ -894,7 +924,6 @@
     if (CBZ.cam) { CBZ.cam.yaw = CBZ.playerChar.group.rotation.y + Math.PI; CBZ.cam.pitch = 0.34; }
     if (CBZ.resetZoom) CBZ.resetZoom();
     grantPlayerRung();
-    if (CBZ.killstreakReset) CBZ.killstreakReset();
     if (CBZ.setObjective) {
       CBZ.setObjective("GUN GAME on " + map.label + ". Every kill advances the ladder; the final rung is bare fists. First through wins.");
     }
@@ -911,7 +940,6 @@
     CBZ.player._death = null;
     if (CBZ.resetWeaponInventory) CBZ.resetWeaponInventory();
     if (CBZ.fpsResetWeapons) CBZ.fpsResetWeapons();
-    if (CBZ.killstreakReset) CBZ.killstreakReset();
   };
 
   CBZ.registerMode("gungame", {
@@ -958,6 +986,15 @@
       matchOver: !!(gg.match && gg.match.over),
       spawnPool: gg.spawnPool.length,
       hiddenCast: gg.hiddenCast.length,
+      /* THE RATCHET (pin at 0). Not "is detection.js gated?" — a table that
+         describes itself measures nothing. This resolves the live ledger: any
+         heat that arrived after the match started means the prison's wanted
+         machine reached a deathmatch again, whatever the source. A file
+         dropping out of index.html, a new caller bypassing reportCrime, or the
+         gate being reverted all push it up. */
+      prisonLeak: (gg.match && g.mode === "gungame")
+        ? Math.max(0, Math.round(((g.detection || 0) - gg.heatAtStart) * 100) / 100)
+        : 0,   // nothing to measure when no match is running (the audit is read from any mode)
       borrowedWorlds: { jail: !!CBZ.prisonRoot, island: !!(CBZ.surv && CBZ.surv.built) },
     };
   };

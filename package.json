@@ -39,6 +39,7 @@
     "test:elevator-touch": "node tools/elevator-touch-check.mjs",
     "test:gunhands": "node tools/gunhands-check.mjs",
     "test:battle-revert": "node tools/battle-check.mjs --revert",
+    "test:gungame-quiet": "node tools/gungame-quiet-check.mjs",
     "test:prison-sit": "node tools/prison-sit-check.mjs",
     "test:prison-sit-revert": "node tools/prison-sit-check.mjs --revert",
     "test:bailout-presentation": "node tools/test-bailout-presentation-browser.mjs",
