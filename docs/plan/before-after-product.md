@@ -31,11 +31,38 @@ tool:
   stops being the diff and becomes the delta. The receipt is the human's
   eyes too — the interface between "I name a problem" and "I accept the
   solution," with no code-reading in between.
+- **Team-facing** (owner, 2026-08-19, from his day job): the receipt is a
+  shared language for people who didn't write the code — which, at AI
+  speed, is soon everyone. The working case: one technical person on
+  staff, the code written by Codex and Claude Code, and the recurring
+  failure — *"he'll ask me a question where he doesn't really understand
+  the question he's asking, and I don't understand it either, because it's
+  about code neither of us wrote."* Two tourists discussing a country
+  neither has visited. But both of them know the output — and what they
+  need from it — *better than the coders do*, so the receipt relocates the
+  conversation to the one layer where the humans in the room are the
+  experts: *"it turns our discussions into what has changed, not what in
+  the code has changed."* It fixes the question side, not just the answer
+  side: instead of formulating a question about code in a vocabulary
+  neither person has, you point at output — this number, this screen,
+  this beat — and say *make it that*. And the owner's closing word is the
+  product requirement: it lets them detach from the code **"safely."**
+  The safety is not a feeling; it is the revert discipline. Detaching
+  without receipts and reverts is abdication. With them it is delegation.
 
 This gets **more** true as models improve, not less: code review is the
 first oversight channel to die at agentic scale; output judgment is the
 last. That is why "the final stage" is the right description and why the
 simplest tool is the durable one.
+
+The team-facing half also names the wedge customer for the public tool,
+and it is not game developers: **teams where AI writes most of the code
+and nobody on staff is — or wants to be — its author.** Outside the
+software industry the one-technical-person company is the norm, not the
+exception, and every one of them is becoming an AI-coded shop with no
+verification layer at all. One artifact serves all three consumers above —
+the agent loops on it, the owner judges by it, the team talks in it —
+which is the shape of a product, not a utility.
 
 **And it replaces a testing paradigm, not just a review step** (owner,
 2026-08-19): *"it's a much better way to test an app than trying to press
