@@ -281,17 +281,6 @@
     chip.style.display = "block"; chip.innerHTML = t;
   }
 
-  // The CRACK prompt. Desktop keeps its exact string; touch gets the pill that
-  // fires this module's own [E] handler (no keyboard glyph on a screen with no
-  // keyboard). Riding the lift up only to find an unusable stash was the other
-  // half of the same touch outage.
-  function crackPrompt(st) {
-    const desktop = st.rich ? "[E] Crack the set's stash" : "[E] Crack the stash open";
-    return CBZ.touchActionPrompt
-      ? CBZ.touchActionPrompt("e", st.rich ? "CRACK THE SET'S STASH" : "CRACK THE STASH", desktop)
-      : desktop;
-  }
-
   // the un-cracked stash you're standing over (you must actually be ON the roof)
   function stashNear() {
     const P = CBZ.player; if (!P) return null;
@@ -304,7 +293,6 @@
   }
 
   let cracking = null;   // { st, t }
-  let _promptT = 0;      // ~12 Hz proximity-prompt clock (the pry-beat stays per-frame)
   CBZ.onUpdate(36.7, function (dt) {            // after elevators (36.6) so the lift/escape tags exist
     if (g.mode !== "city") { cracking = null; chipText(null); return; }
     const A = CBZ.city && CBZ.city.arena;
@@ -334,41 +322,15 @@
       if (cracking.t >= CRACK_T) { crackOpen(st); cracking = null; chipText(null); }
       return;
     }
-    // prompt scan at ~12 Hz, not frame rate — stashNear hypots every stash, and
-    // a walk-up prompt doesn't need 60 Hz reactions (the [E] handler re-checks).
-    _promptT += dt;
-    if (g.state === "playing" && P && !P.dead && !P.driving && !CBZ.cityMenuOpen) {
-      if (_promptT >= 1 / 12) {
-        _promptT = 0;
-        const st = stashNear();
-        chipText(st ? crackPrompt(st) : null);
-      }
-    } else chipText(null);
+    // not cracking: the chip has nothing to say. The walk-up PRY prompt is the
+    // interaction card's job (zone-roofstash below) — this file once ran a raw
+    // [E] keydown + a chip pill AND the zone, three surfaces for one verb (two
+    // sessions each fixed the same tablet outage a day apart); the registry is
+    // the keystone, so it is the only one left. The chip keeps the pry-beat
+    // prose above, which the card has no channel for.
+    chipText(null);
   });
 
-  // [E] starts the pry. On DOCUMENT with stopPropagation (the elevators.js
-  // pattern) so interact.js's window-level "[E] = eat" fallback never fires on
-  // the same press. Stash spots are seeded clear of the lift pads, so the two
-  // document listeners can't both be in reach.
-  function onKey(e) {
-    if (!built || g.mode !== "city" || g.state !== "playing" || cracking) return;
-    if (CBZ.cityMenuOpen) return;
-    const P = CBZ.player;
-    if (!P || P.dead || P.driving) return;
-    if ((e.key || "").toLowerCase() !== "e") return;
-    const st = stashNear();
-    if (!st) return;
-    e.preventDefault();
-    e.stopPropagation();
-    cracking = { st, t: 0 };
-  }
-  if (typeof document !== "undefined" && document.addEventListener) document.addEventListener("keydown", onKey);
-
-  /* THE VERB EXISTED ONLY ON A KEYBOARD (2026-08-18). This file hung its [E]
-     on a raw document keydown, which means the verb has no card, no button and
-     no existence at all on the tablet this game is played on. The registry is
-     what turns a proximity verb into a thumb target, and it costs one record:
-     the SAME finder, the SAME body. The keydown stays for the desktop. */
   let zoned = false;
   CBZ.onUpdate(99.63, function () {
     if (zoned || !CBZ.interactions || !CBZ.interactions.registerZone) return;
@@ -379,7 +341,9 @@
       find: function () { return (built && !cracking && g.mode === "city") ? stashNear() : null; },
       options: [{
         id: "roofstash-pry", slot: "e", bad: true,
-        label: function () { return "Pry it open"; },
+        // a SET'S stash provokes the set that holds the block — the button
+        // says whose box you are about to open (the deleted pill's wording)
+        label: function (st) { return st && st.rich ? "Crack the set's stash" : "Pry it open"; },
         onSelect: function (st) { if (st) cracking = { st: st, t: 0 }; },
       }],
     });

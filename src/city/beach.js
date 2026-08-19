@@ -1129,16 +1129,6 @@
     chip.style.display = "block"; chip.innerHTML = t;
   }
 
-  // Desktop keeps its exact string; touch gets the pill that fires this
-  // module's own [E] (city.css's declutter hides this chip during play, so on
-  // a tablet the cooler had no control at all until mobile.css restored it).
-  function riflePrompt(L) {
-    const desktop = L.bag ? "[E] Go through the beach bag" : "[E] Go through the cooler";
-    return CBZ.touchActionPrompt
-      ? CBZ.touchActionPrompt("e", L.bag ? "GO THROUGH THE BAG" : "GO THROUGH THE COOLER", desktop)
-      : desktop;
-  }
-
   function lootNear() {
     const P = CBZ.player; if (!P || P.pos.y > 1.6) return null;
     for (const L of loot) {
@@ -1190,7 +1180,6 @@
   }
 
   let rifling = null;          // { L, t }
-  let _promptT = 0;
   CBZ.onUpdate(36.9, function (dt) {
     if (g.mode !== "city" || !built) { rifling = null; chipText(null); return; }
     populate();
@@ -1208,35 +1197,14 @@
       if (rifling.t >= RIFLE_T) { rifle(L); rifling = null; chipText(null); }
       return;
     }
-    _promptT += dt;
-    if (g.state === "playing" && P && !P.dead && !P.driving && !CBZ.cityMenuOpen) {
-      if (_promptT >= 1 / 12) {
-        _promptT = 0;
-        const L = lootNear();
-        chipText(L ? riflePrompt(L) : null);
-      }
-    } else chipText(null);
+    // not rifling: the chip has nothing to say. The walk-up prompt is the
+    // interaction card's job (zone-beachbag below) — the raw [E] keydown and
+    // the chip pill that used to double it are deleted; the registry is the
+    // one surface. The chip keeps the rifling-progress prose above, which the
+    // card has no channel for.
+    chipText(null);
   });
 
-  function onKey(e) {
-    if (!built || g.mode !== "city" || g.state !== "playing" || rifling) return;
-    if (CBZ.cityMenuOpen) return;
-    const P = CBZ.player;
-    if (!P || P.dead || P.driving) return;
-    if ((e.key || "").toLowerCase() !== "e") return;
-    const L = lootNear();
-    if (!L) return;
-    e.preventDefault();
-    e.stopPropagation();
-    rifling = { L, t: 0 };
-  }
-  if (typeof document !== "undefined" && document.addEventListener) document.addEventListener("keydown", onKey);
-
-  /* THE VERB EXISTED ONLY ON A KEYBOARD (2026-08-18). This file hung its [E]
-     on a raw document keydown, which means the verb has no card, no button and
-     no existence at all on the tablet this game is played on. The registry is
-     what turns a proximity verb into a thumb target, and it costs one record:
-     the SAME finder, the SAME body. The keydown stays for the desktop. */
   let zoned = false;
   CBZ.onUpdate(99.64, function () {
     if (zoned || !CBZ.interactions || !CBZ.interactions.registerZone) return;
@@ -1247,7 +1215,9 @@
       find: function () { return (built && !rifling && g.mode === "city") ? lootNear() : null; },
       options: [{
         id: "beachbag-rifle", slot: "e", bad: true,
-        label: function () { return "Go through the bag"; },
+        // the button names what you are actually rifling (the deleted pill
+        // distinguished bag from cooler; the one surviving surface keeps that)
+        label: function (L) { return L && L.bag ? "Go through the bag" : "Go through the cooler"; },
         onSelect: function (L) { if (L) rifling = { L: L, t: 0 }; },
       }],
     });

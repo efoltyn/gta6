@@ -726,20 +726,22 @@
     gateDoor(r);
   }
 
-  // ---- the tiny prompt / floor-ticker chip (one DOM node, hidden when idle) --
+  // ---- the tiny floor-ticker chip (one DOM node, hidden when idle) ----------
   //
-  // TOUCH: this chip is the ONLY surface the lift ever offered, and on a
-  // tablet it offered nothing at all — it printed "[E] Elevator — call" (a key
-  // glyph on a device with no keys) inside a pointer-events:none div, and
-  // css/city.css's live-world declutter hid the whole node during city play
-  // anyway. Net effect on iPad: walk to a lift, get no prompt, no button, no
-  // ride. Fixed in three places that all have to agree:
-  //   1. the CALL prompt is now a real .tpill via CBZ.touchActionPrompt, so a
-  //      tap synthesizes the same [E] keydown this file's own onKey reads
-  //      (systems/touch.js's pill contract — no parallel elevator handler),
-  //   2. the chip writes innerHTML, because a pill is markup,
-  //   3. css/mobile.css un-hides #elevChip on touch and drops it into the
-  //      walk-up prompt band, flattening its slab only while it holds a pill.
+  // STATUS ONLY. The chip shows what the MACHINE is doing while it runs — the
+  // boarding coach ("Elevator, step in"), the ride ticker, the step-out line —
+  // prose the interaction card has no channel for. The CALL/CLOSE verb itself
+  // is NOT here: it lives solely on the interaction registry (zone-lift
+  // below), which renders the one card with the one button on every input.
+  //
+  // It used to also print a call prompt, and for one day (2026-08-18/19) the
+  // lift had TWO touch buttons because two sessions each fixed "no button on
+  // a tablet" on their own — one gave this chip a tappable ELEVATOR UP pill,
+  // the other registered the interaction zone. Both shipped; players stood at
+  // a lift looking at an ELEVATOR UP pill beside a CALL THE LIFT card doing
+  // the same thing. The registry is the keystone ("ONE context-sensitive
+  // interaction system"), so the pill, the idle prompt and this file's raw
+  // [E] keydown are gone; the zone is the only way to speak to the lift.
   let chip = null;
   function dom() {
     if (chip || typeof document === "undefined" || !document.body) return;
@@ -752,29 +754,17 @@
       document.body.appendChild(chip);
     } catch (e) { chip = null; }
   }
-  // The CALL prompt. Desktop keeps its exact string; touch gets the tappable
-  // pill (worded, never a key glyph) that fires this module's [E] path.
-  function callPrompt(end) {
-    const desktop = end === "g"
-      ? "[E] Elevator, call (ride to the roof)"
-      : "[E] Elevator, call (ride down)";
-    return CBZ.touchActionPrompt
-      ? CBZ.touchActionPrompt("e", end === "g" ? "ELEVATOR UP" : "ELEVATOR DOWN", desktop)
-      : desktop;
-  }
-  // PERF: callers run at frame rate (the ride ticker, the idle prompt) — skip
-  // the DOM writes unless the text actually changed; setting the same
-  // innerHTML/display every frame still dirties the DOM (and would blow away a
-  // pill mid-tap, since the CALL prompt re-renders at 12 Hz while you stand
-  // on the pad).
+  // PERF: callers run at frame rate (the ride ticker) — skip the DOM writes
+  // unless the text actually changed; setting the same innerHTML/display every
+  // frame still dirties the DOM.
   let _chipLast;
   function chipText(t) {
     if (t === _chipLast) return;
     dom(); if (!chip) return;
     _chipLast = t;
     if (!t) { chip.style.display = "none"; return; }
-    // the shared writer (systems/touch.js) sets the markup and decides whether
-    // this content is a bare BUTTON (slab dropped) or PROSE (slab kept).
+    // the shared writer (systems/touch.js) keeps the readable slab under prose
+    // (this chip only ever holds prose now — the ticker and the coaching lines).
     if (CBZ.touchPromptChip) { CBZ.touchPromptChip(chip, t); return; }
     chip.style.display = "block"; chip.innerHTML = t;
   }
@@ -952,7 +942,6 @@
     return undefined;
   }
 
-  let _promptT = 0;
   CBZ.onUpdate(36.6, function (dt) {
     if (g.mode !== "city") {
       // mode exit mid-cycle: if the player was sealed in a ride, put them
@@ -1000,62 +989,20 @@
       }
     }
 
-    // all idle: proximity prompt at ~12 Hz, not frame rate — padNear hypots
-    // every lift pad, and the [E] handler re-checks reach on the press anyway.
-    _promptT += dt;
-    if (g.state === "playing" && P && !P.dead && !P.driving && !CBZ.cityMenuOpen) {
-      if (_promptT >= 1 / 12) {
-        _promptT = 0;
-        const near = padNear();
-        chipText(near ? callPrompt(near.end) : null);
-      }
-    } else chipText(null);
+    // all idle: the chip has nothing to say. The walk-up CALL prompt is the
+    // interaction card's job (zone-lift below) — one surface on every input.
+    chipText(null);
   });
 
-  // [E] calls the lift / closes the doors early. Registered on DOCUMENT in the
-  // CAPTURE phase so stopPropagation keeps every later handler — interact.js's
-  // window-level "[E] = eat" fallback, shop/zillow panels — from firing on the
-  // same press: the lift wins arbitration when you're at it.
-  function onKey(e) {
-    if (!built || g.mode !== "city" || g.state !== "playing") return;
-    if (CBZ.cityMenuOpen) return;
-    const P = CBZ.player;
-    if (!P || P.dead || P.driving) return;
-    if ((e.key || "").toLowerCase() !== "e") return;
-    // inside an OPEN cab: [E] = close the doors now (early depart)
-    for (const el of elevators) {
-      if (el.m.st === "open" && insideCab(el, el.m.end, P) && !inDoorway(el, el.m.end, P)) {
-        e.preventDefault(); e.stopPropagation();
-        beginClose(el);
-        return;
-      }
-    }
-    const near = padNear();
-    if (near) {
-      e.preventDefault(); e.stopPropagation();
-      callLift(near.el, near.end);
-      return;
-    }
-    // sealed inside an idle cab (doors timed out on you): [E] reopens this end
-    for (const el of elevators) {
-      if (el.m.st !== "idle") continue;
-      for (const end of ["g", "r"]) {
-        if (insideCab(el, end, P)) {
-          e.preventDefault(); e.stopPropagation();
-          callLift(el, end);
-          return;
-        }
-      }
-    }
-  }
-  if (typeof document !== "undefined" && document.addEventListener) document.addEventListener("keydown", onKey, true);
-
-  /* THE LIFT EXISTED ONLY ON A KEYBOARD (2026-08-18). Its [E] hung on a raw
-     document keydown, so on a tablet no lift in the city could be called, and
-     a player sealed in an idle cab had no way to open the doors. The registry
-     is what turns a proximity verb into a thumb target; this is the SAME three
-     cases the keydown runs, in the order it runs them, off the SAME finders.
-     The keydown stays for the desktop. */
+  /* THE ZONE IS THE ONLY WAY TO SPEAK TO THE LIFT. This file used to carry a
+     raw capture-phase [E] keydown AND this zone — two whole input systems for
+     one verb, each shipped by a different session fixing the same tablet bug
+     a day apart (34ad5d9 gave the chip a pill that synthesized the keydown;
+     c844a7a added the zone). The keydown's stopPropagation even starved the
+     zone of its own [E] on desktop, so the registry card sat there rendering
+     a button whose key press it never received. The keydown and the pill are
+     deleted; the registry dispatches [E], the tap and the card for all three
+     cases below (close an open cab, call from a pad, reopen a sealed cab). */
   let zoned = false;
   function liftTarget() {
     if (!built || g.mode !== "city" || CBZ.cityMenuOpen) return null;
