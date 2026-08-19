@@ -239,7 +239,7 @@
   skips files a page already carries, so the day a "guns" pack ships,
   these lines simply stop being needed.
 ============================================================ -->
-<script src="../src/core/studio.js"></script>
+<script src="../src/core/studio.js?v=nodash1"></script>
 <script>
 "use strict";
 (function () {
@@ -283,6 +283,74 @@ const SUPPORTS = [
 ];
 if (SET.redN < 1) SET.redN = 1;
 if (SET.blueN < 1) SET.blueN = 1;
+
+/* ============================================================ THE DEAD
+   THE CORPSE SOLVER IS SIZED FOR A SPECTATOR, NOT FOR A PLAYER.
+
+   systems/quadruped_ragdoll.js's three budget numbers were chosen for the
+   city, where the camera is a person standing in the fight: it can only ever
+   be near a handful of deaths at once, so eight solving bodies and a 78 m
+   range gate are generous. This page is the opposite shape — you FLY over an
+   army, whole ranks of animals go down in the same second, and every body the
+   solver refuses falls back to the canned tumble. Declared before need() so
+   the flags are already in place when the pack file runs, and every one of
+   them is a `?cfg_*` away from the shipped default (microboot applies those).
+
+   NOTE these are ceilings, not allocations: the pool grows only as bodies
+   actually arrive, and MAX_ACTIVE still freezes the OLDEST settling corpse
+   rather than refusing a fresh one. */
+CBZ.CONFIG = CBZ.CONFIG || {};
+if (CBZ.CONFIG.QUAD_RAGDOLL_RANGE == null) CBZ.CONFIG.QUAD_RAGDOLL_RANGE = 190;
+if (CBZ.CONFIG.QUAD_RAGDOLL_ACTIVE == null) CBZ.CONFIG.QUAD_RAGDOLL_ACTIVE = 26;
+if (CBZ.CONFIG.QUAD_RAGDOLL_POOL == null) CBZ.CONFIG.QUAD_RAGDOLL_POOL = 96;
+// ...and the sim clock owns them. A battle at quarter speed with corpses
+// folding at wall speed is the page arguing with itself; SPACE must freeze
+// the dead as dead as it freezes the living. See the step call in frame().
+CBZ.quadRagdollDriven = true;
+/* ...and the same three decisions for the MEN, whose solver (city/ragdoll.js)
+   has the identical shape. RAGDOLL_ANY_MODE is the one that matters: that file
+   refused every mode but "city" — never because 13 points and a ground clamp
+   care what mode is running, only because the city was the one thing with peds
+   the day it shipped. This page has armies of them. */
+if (CBZ.CONFIG.RAGDOLL_ANY_MODE == null) CBZ.CONFIG.RAGDOLL_ANY_MODE = true;
+if (CBZ.CONFIG.RAGDOLL_RANGE == null) CBZ.CONFIG.RAGDOLL_RANGE = 190;
+if (CBZ.CONFIG.RAGDOLL_ACTIVE == null) CBZ.CONFIG.RAGDOLL_ACTIVE = 30;
+if (CBZ.CONFIG.RAGDOLL_POOL == null) CBZ.CONFIG.RAGDOLL_POOL = 120;
+CBZ.ragdollDriven = true;
+/* HOW LONG A BODY STAYS. `corpses` used to be a hard FIFO of 260 that dropped
+   the oldest outright — a carcass in plain sight popped out of existence the
+   moment the 261st man fell, which on a 300-a-side battle is constantly and
+   is exactly the "and then they disappear" in the report. ?corpses=N sets the
+   budget; the eviction itself is now a sink-and-fade nobody can catch. */
+const CORPSE_MAX = Math.max(4, parseInt(Q.get("corpses") || "420", 10) || 420);
+
+/* ?death=old — THE REVERT SWITCH FOR THE WHOLE BEAST-DEATH WAVE, in the same
+   shape as sep/fire/steer/share above, and for the same reason: a fix nobody
+   can turn off has not been measured. It restores, verbatim and all at once:
+     • the canned `rotation.z` topple — the nose-to-sky pose in the report;
+     • the hard corpse FIFO that deleted a body where it lay;
+     • bites that land at centre-to-centre range and draw no blood.
+   One switch, because the three shipped as one wave and a before/after has to
+   be able to photograph the whole of it against itself. */
+const DEATH_OLD = Q.get("death") === "old";
+const BLOOD_Q = Q.get("blood");        // "1" force it on, "0" force it off
+if (DEATH_OLD) {
+  CBZ.CONFIG.WILDLIFE_RAGDOLL = false;
+  CBZ.CONFIG.CREATURE_BITE_BLOOD = false;
+  CBZ.CONFIG.CREATURE_JAW_CONTACT = false;
+  CBZ.CONFIG.RAGDOLL_ANY_MODE = false;      // ...and the men fall like planks again
+}
+
+/* ?mass=old — THE SAME SHAPE OF SWITCH FOR THE OTHER WAVE THIS PAGE CARRIES.
+   Before it, every melee number in the game was read off the ATTACKER and
+   handed to the target untouched, so a civilian's fist took the same bite out
+   of a 190 kg silverback as out of another man — which is the whole reason a
+   hundred unarmed men could arithmetic a gorilla to death without it mattering
+   what a gorilla is. systems/bodymass.js makes the pair a ratio; man on man is
+   1.0 by construction, so a battle of riflemen is byte-identical either way and
+   this switch photographs exactly the mismatch and nothing else. */
+const MASS_OLD = Q.get("mass") === "old";
+if (MASS_OLD) CBZ.CONFIG.BODY_MASS = false;
 
 /* ============================================================ THE GROUND
    FOUR OF THESE ARE PLACES IN GANG CITY, AT THEIR OWN COORDINATES.
@@ -370,7 +438,12 @@ const PUNCH = { civ: 6, thug: 8, pro: 10, elite: 12, swat: 14 };
    stat-fiction this repo bans), and the three beast files are pure drivers —
    no engine, no spawner, nothing scheduled. Measured cost is a handful of
    small data files on a load that already fetches thirty. */
-const NEED = ["caps", "people", "fx", "damage", "sound", "batch", "bestiary", "beasts"];
+/* `ragdoll` rides in the base load with `people`, and it is not a tax: MEN are
+   this page's primary unit and every one of them used to fall like a plank.
+   city/ragdoll.js is the original of the method the animals' solver copied —
+   13 points, sticks, joint limits, a ground clamp — writing back onto the same
+   rig meshes, so the wounds and the dropped rifle ride along for free. */
+const NEED = ["caps", "people", "ragdoll", "fx", "damage", "sound", "batch", "bestiary", "beasts"];
 const ARMOURY = [
   "weapons/weapon-data.js",
   "weapons/weapon-scale.js",   // real-dimension display sizing (math, not magic scalars)
@@ -480,6 +553,17 @@ CBZ.studio.need(NEED).then(function () {
   // out here the ground is whatever venue this battle raised. Same shim
   // pattern as queryCollidersNear above — route the name, never fork the file.
   if (!CBZ.floorAt) CBZ.floorAt = function (x, z) { return MAP ? MAP.groundAt(x, z) : 0; };
+  /* quadruped_ragdoll.js pushes a corpse's EXTREMITIES (head, tail, feet) out
+     of walls with CBZ.collide(point, radius, yLo, yHi) — physics.js's name, and
+     physics.js is not on a slice page. microboot's grid resolver answers the
+     same question in the same world; route the name rather than let a dead
+     lion's head lie inside a shop front. Same shim pattern as the two above. */
+  if (!CBZ.collide) {
+    CBZ.collide = function (p, r, yLo, yHi) {
+      return CBZ.micro.resolveCircle(p, r || 0.2, yLo == null ? p.y : yLo,
+        Math.max(0.1, (yHi == null ? p.y + 0.2 : yHi) - (yLo == null ? p.y : yLo)));
+    };
+  }
 
   const COARSE = CBZ.studio.touchDevice;
   if (COARSE) document.body.classList.add("coarse");
@@ -619,6 +703,9 @@ CBZ.studio.need(NEED).then(function () {
   }
   // what the chosen battle actually needs: the ground's packs, plus the air
   // stack only when somebody bought air, plus the mushroom only for a nuke
+  // Is either army an animal army? Read once per battle at begin() — it gates
+  // the corpse solver's step and the blood pack (see both call sites).
+  let HAS_BEASTS = false;
   function packsFor() {
     const p = MAPS[SET.map].packs.slice();
     // airbase rides along for its aircraft FACTORIES, not for a base: raw
@@ -627,6 +714,21 @@ CBZ.studio.need(NEED).then(function () {
     // studio.model asks it first.
     if (SET.redS !== "none" || SET.blueS !== "none") p.push("military", "airbase", "air", "ordnance");
     if (SET.redS === "nuke" || SET.blueS === "nuke") p.push("nukefx");
+    /* BLOOD RIDES WITH THE ANIMALS. creature_combat's bite now draws real
+       blood (systems/gore.js), and this page had bodies that remembered hits
+       and a world that never showed one landing — a gorilla closed its jaws on
+       a man and the only evidence in the frame was a decal you had to fly down
+       to find. But 2.5k lines of gore is the ANIMALS' bill: men on this page
+       shoot each other and gunfx has drawn their impacts since it shipped. So
+       the pack is pulled exactly when a side is a beast army, and a battle of
+       riflemen loads and costs precisely what it always did — which is what
+       tools/battle-check.mjs measures. */
+    HAS_BEASTS = SET.redU !== "men" || SET.blueU !== "men";
+    // ?blood=1 pulls it for a battle of MEN too — a rifle war that stains the
+    // street is a legitimate thing to want, it is just not worth 2.5k lines by
+    // default when gunfx already draws every impact. ?blood=0 refuses it even
+    // for an animal army, which is the revert.
+    if (BLOOD_Q !== "0" && (HAS_BEASTS || BLOOD_Q === "1")) p.push("blood");
     return p;
   }
   // buying air is a decision that costs four packs; warm them on the change,
@@ -658,6 +760,19 @@ CBZ.studio.need(NEED).then(function () {
 
   /* ============================================================ STATE */
   const V = function () { return new THREE.Vector3(); };
+  const _upV = V();          // probe scratch: a corpse's own up axis
+  const _fwV = V();          // probe scratch: a corpse's own nose axis
+  const BITES = { landed: 0, missed: 0 };   // probe: jaw contact, counted
+  /* HOW MANY BODIES HAVE BEEN HANDED TO A SOLVER (and not yet retired). The
+     two corpse solvers are stepped from the innermost sub-step loop, and this
+     page has already been bitten once by adding work there: a battle of
+     riflemen is held to zero overlapping bodies, which is a knife edge a
+     shoulder either crosses or does not. Until the first body falls there is
+     nothing to solve and nothing to enter — one integer read, and the opening
+     of every battle costs exactly what it always did. (It counts bodies, not
+     ACTIVE solves: a settled corpse still holds its slot and its frozen pose,
+     and the solvers skip it themselves in one test.) */
+  let deadSolving = 0;
   const _v = V(), _v2 = V(), _muz = V();
   let world = null, base = null, town = null, MAP = null, hud = null;
   let men = [], corpses = [], rockets = [], dropGuns = [], planes = [];
@@ -793,14 +908,30 @@ CBZ.studio.need(NEED).then(function () {
   }
 
   /* SPAWN ON THE STREET, NOT ON A GRID. Given the town's own road records,
-     each side forms up in the outermost north-south streets on its half and
-     walks in. That is one lookup per man and it is the reason an urban fight
-     reads as an assault down avenues instead of two blocks of men shuffling
-     through masonry. */
-  function streetSpawner(roads, cx, cz, side) {
+     each side forms up in north-south streets on its half and walks in. That
+     is one lookup per man and it is the reason an urban fight reads as an
+     assault down avenues instead of two blocks of men shuffling through
+     masonry.
+
+     AND IT FORMS UP AT THE DECLARED GAP, WHICH IS THE FAULT THIS WAVE FOUND.
+     It used to sort the lanes by distance from the centre DESCENDING and take
+     the outermost three — so on an eight-block downtown 472 m across, the two
+     armies started at opposite edges and `gap` was a number the city map wrote
+     down and then ignored. MEASURED, 26 v 26 on `city`: nearest enemy 304 m at
+     t=0, first round fired at t=10.9 s, and at t=17 s all 52 men were still in
+     slot `march` having managed eleven shots between them. Closure through a
+     grid of blocks runs about 5 m/s combined, not the 12 m/s two marching
+     columns suggest, so three hundred metres is a full minute of watching
+     crowds walk before the war starts. Nobody watches that twice.
+
+     So the lanes are chosen by how near they are to the declared start line
+     (cx ± gap/2) instead of by how far out they can possibly be, and the
+     number in the table above is finally the number on the ground. */
+  function streetSpawner(roads, cx, cz, side, gap) {
+    const want = cx + side * gap * 0.5;
     const lanes = (roads || []).filter(function (r) {
       return r.vertical && (r.x - cx) * side > 24;
-    }).sort(function (a, b) { return Math.abs(b.x - cx) - Math.abs(a.x - cx); }).slice(0, 3);
+    }).sort(function (a, b) { return Math.abs(a.x - want) - Math.abs(b.x - want); }).slice(0, 3);
     if (!lanes.length) return null;
     return function (i) {
       const L = lanes[i % lanes.length];
@@ -815,9 +946,16 @@ CBZ.studio.need(NEED).then(function () {
 
   let MEASURED = null;        // what the heightfield found, for the audit
   function buildMap(id) {
+    /* THE START LINE, and every one of these is a distance a man has to WALK
+       before anything happens. The open maps can be wide because a firing line
+       across sand is a sightline: dunes at 150 m resolved in 32 s and the kill
+       box at 120 m in 51 s, both measured. A city cannot, because a block is
+       not a sightline — `city` used to read 300 here and the two armies spent
+       the first forty seconds marching (see streetSpawner), so it is a
+       three-block approach now that still has to be fought through. */
     const M = MAPS[id] || MAPS.arena;
     _claim.length = 0;          // spawn claims belong to ONE build
-    let gap = { city: 300, island: 230, field: 260, dunes: 150, arena: 120 }[id] || 150;
+    let gap = { city: 170, island: 175, field: 180, dunes: 150, arena: 120 }[id] || 150;
     let gapOverride = 0;      // measured venues size their own no-man's land
     let groundAt = function () { return 0; };
     let cx = 0, cz = 0, spawners = null;
@@ -903,8 +1041,8 @@ CBZ.studio.need(NEED).then(function () {
         // buffer. Ground that runs out to the fog is the honest answer here.
         apron(town.rect.minX - 900, town.rect.maxX + 900, town.rect.minZ - 900, town.rect.maxZ + 900, 0x555a61);
         spawners = {
-          red: streetSpawner(town.roads, cx, cz, -1),
-          blue: streetSpawner(town.roads, cx, cz, 1),
+          red: streetSpawner(town.roads, cx, cz, -1, gap),
+          blue: streetSpawner(town.roads, cx, cz, 1, gap),
         };
       }
     } else if (M.raise) {
@@ -935,7 +1073,15 @@ CBZ.studio.need(NEED).then(function () {
               M.apronColor || 0x7d7a6c, H.minY);
         // the armies start half the venue apart, clamped to a distance two
         // sides can actually cross before the watcher loses interest
-        gapOverride = Math.max(90, Math.min(320, Math.min(H.spanX, H.spanZ) * 0.5));
+        // ...and 320 m is not that distance. MEASURED on `city` at 304 m: the
+        // first round went off at t=10.9 s, forty-five of fifty-two men were
+        // still in slot `march` at t=13, and the two sides were not inside
+        // 100 m of each other until t=41. Closure through real geometry runs
+        // about 5 m/s combined, not the 12 m/s two marching columns suggest,
+        // so the old ceiling was a full minute of watching crowds walk. 190 is
+        // where the fixed maps measure (Halloran 6.5 s to first contact,
+        // island 7.1) and it still leaves a venue-length approach to fight.
+        gapOverride = Math.max(90, Math.min(190, Math.min(H.spanX, H.spanZ) * 0.5));
         MEASURED = { cols: H.cols, rows: H.rows, step: +H.step.toFixed(1), miss: H.miss,
                      minY: +H.minY.toFixed(2), maxY: +H.maxY.toFixed(2),
                      spanX: Math.round(H.spanX), spanZ: Math.round(H.spanZ) };
@@ -1198,7 +1344,15 @@ CBZ.studio.need(NEED).then(function () {
       o.onHit = function (dmg) {
         const t = m.tgt;
         if (!t || t.dead) return;
-        hurtMan(t, dmg, { by: m });
+        /* THE SAME LAW FROM THE OTHER SIDE — but through meleeAbsorb, NOT
+           meleeScale, and the difference is the whole balance of this page.
+           `tn.dmg` comes off the species' `bite`, which is already authored as
+           what that animal does TO A MAN; running it through the two-body ratio
+           would multiply the silverback by its own weight a second time and
+           hand it a 70% buff nobody wrote. meleeAbsorb asks only what the
+           TARGET soaks, so a beast hitting a man is worth exactly its row (no
+           change at all) and a beast hitting another beast finally is not. */
+        hurtMan(t, dmg * (CBZ.meleeAbsorb ? CBZ.meleeAbsorb(t) : 1), { by: m });
         // a struck beast shudders (creature_combat's own flinch); a struck man
         // already staggers through the damage funnel's suppression
         if (t.beast && !t.dead && CBZ.creatureFlinch) { try { CBZ.creatureFlinch(t); } catch (e) {} }
@@ -1206,7 +1360,16 @@ CBZ.studio.need(NEED).then(function () {
     }
     o.speed = m.tn.chase * 0.9;
     m.speed = 2;                       // close-quarters footwork, for the sprint-target test
-    CBZ.creatureFight(m, tgt, sdt, o);
+    const res = CBZ.creatureFight(m, tgt, sdt, o);
+    /* THE TEETH, COUNTED. creature_combat now lands a strike on real jaw
+       contact rather than on a centre-to-centre range test, and `missed` is
+       its verdict when the animal committed and the jaws closed short. A
+       spectator can SEE that snap; a checker needs the number, and a bite
+       ledger that never records a miss is the tell that the gate is off. */
+    if (res && PROBE) {
+      if (res.dealt > 0) BITES.landed++;
+      else if (res.missed) BITES.missed++;
+    }
     m.heading = typeof m.heading === "number" ? m.heading : 0;
     m.faceH = m.heading;
   }
@@ -1260,6 +1423,8 @@ CBZ.studio.need(NEED).then(function () {
     if (m.char && CBZ.deathPose) { try { CBZ.deathPose(m.char, m.i * 3.7 + 1.3, lcg()); } catch (e) {} }
     m.dieT = 0.0001;
     m.dieDir = lcg() < 0.5 ? -1 : 1;
+    if (m.beast) beastDeathPhysics(m, imp);
+    else manDeathPhysics(m, imp);
     // the rifle leaves his hands and lands like hardware, not like a prop
     const prop = m._weaponProp;
     if (prop && CBZ.weaponPhysics && CBZ.weaponPhysics.drop) {
@@ -1279,12 +1444,7 @@ CBZ.studio.need(NEED).then(function () {
     }
     m.armed = false;
     corpses.push(m);
-    if (corpses.length > 260) {
-      const old = corpses.shift();
-      const k = men.indexOf(old);
-      if (k >= 0) men.splice(k, 1);
-      if (old.group) CBZ.studio.drop(old.group);
-    }
+    if (corpses.length > (DEATH_OLD ? 260 : CORPSE_MAX)) retireOldestCorpse();
     if (camDist2(m.pos) < 120 * 120 || aliveCount("red") + aliveCount("blue") < 40) {
       hud.feed((m.beast ? TEAMS[m.team].name + " " + String(m.species.name).toUpperCase()
         : TEAMS[m.team].name + " " + (m.i + 1)) + " DOWN");
@@ -1294,6 +1454,211 @@ CBZ.studio.need(NEED).then(function () {
     let n = 0;
     for (let i = 0; i < men.length; i++) if (men[i].team === team && !men[i].dead) n++;
     return n;
+  }
+
+  /* ============================================================ A BEAST DIES
+     OWNER, on this page: "it shows dead beasts sitting up on back and then
+     they disappear — they should be real ragdoll and not disappear."
+
+     BOTH HALVES WERE ONE LINE EACH, AND BOTH WERE WRONG THE SAME WAY: they
+     invented a death instead of asking the engine for one.
+
+     SITTING UP. stepMan's dead branch eased `group.rotation.z` to ±1.45 rad
+     with the comment "a four-legged body falls ONTO ITS SIDE — the roll axis
+     is the honest one for a quadruped". The intent is right and the axis is
+     not. Every animal asset is authored nose toward +X, THREE.Euler's default
+     order 'XYZ' composes R = Rx·Ry·Rz, and Rz therefore applies FIRST, in
+     model space — so rotation.z on one of these bodies is the model-local
+     PITCH and +1.45 rad is a NOSE 83° INTO THE AIR. The page was not laying
+     the animal down; it was sitting it up and pointing its head at the sky,
+     which is the picture in the report, verbatim. (systems/predator_anim.js
+     states the same rule in its r128 note; systems/quadruped_ragdoll.js's
+     header quotes the owner's original complaint about it in the city.)
+
+     So this page stops authoring deaths. quadruped_ragdoll.js is a real
+     14-point verlet solver — legs that splay, a head that lolls, a body that
+     drapes over the terrain it fell on and cannot come to rest on its feet —
+     and it now rides in the `beasts` pack this page already loads. It is asked
+     first, with the killing round's own direction and energy so the body goes
+     over AWAY from what shot it. When it declines (a snake, a body past the
+     range gate, the budget full) we fall through to CBZ.wildlifeDeathTumble
+     when the mainland is loaded, and otherwise to the same tumble's shape
+     inline — on rotation.order 'YXZ', where rotation.x IS the long-axis roll,
+     which is the corrected version of the line this replaces. */
+  const _kdir = { x: 0, y: 0, z: 0 };
+  const _kpt = { x: 0, y: 0, z: 0 };
+  function beastDeathPhysics(m, imp) {
+    const grp = m.group;
+    if (!grp) return "none";
+    if (DEATH_OLD) { m.dieT = 0.0001; return "topple"; }
+    // WHICH WAY IT GOES OVER. A body does not fall over its own facing, it
+    // falls away from whatever hit it: the shooter's line if we have one, the
+    // blast centre if we have that, else the direction it was already going.
+    let dx = 0, dz = 0;
+    const by = imp && imp.by;
+    if (by && by.pos) { dx = m.pos.x - by.pos.x; dz = m.pos.z - by.pos.z; }
+    else if (imp && imp.fromX != null) { dx = m.pos.x - imp.fromX; dz = m.pos.z - imp.fromZ; }
+    const dl = Math.hypot(dx, dz);
+    if (dl > 0.01) { dx /= dl; dz /= dl; }
+    else { const a = lcg() * Math.PI * 2; dx = Math.cos(a); dz = Math.sin(a); }
+    _kdir.x = dx; _kdir.y = 0; _kdir.z = dz;
+    // the impact point: the shooter's side of the body, so the solver's roll
+    // couple picks the flank the round actually crossed.
+    _kpt.x = m.pos.x - dx * (m.rad || 0.5);
+    _kpt.y = m.pos.y + (m.eyeH || 1) * 0.6;
+    _kpt.z = m.pos.z - dz * (m.rad || 0.5);
+    // ENERGY. A rocket throws a wolf; a pistol round folds it where it stands.
+    // The solver's band is 1..30 (~6 a pistol, ~14 a shotgun, 20+ a blast).
+    const cause = imp && imp.cause;
+    const energy = cause === "bomb" ? 24 : (by && by.beast) ? 9 : 11;
+    if (CBZ.quadRagdoll) {
+      try {
+        if (CBZ.quadRagdoll(m, { point: _kpt, dir: _kdir, imp: energy })) {
+          m.ragdoll = true; m.dieT = 0;      // the solver owns the transform now
+          deadSolving++;
+          return "ragdoll";
+        }
+      } catch (e) {}
+    }
+    if (CBZ.wildlifeDeathTumble) {
+      try {
+        if (CBZ.wildlifeDeathTumble(m, _kdir, 3.2 + energy * 0.28, _kpt)) {
+          m.tumble = true; m.dieT = 0;
+          return "tumble";
+        }
+      } catch (e) {}
+    }
+    // THE LAST RESORT, and the honest version of the line it replaces: roll
+    // about the body's own long axis, which under 'YXZ' is rotation.x.
+    grp.rotation.order = "YXZ";
+    m.dieT = 0.0001;
+    return "topple";
+  }
+
+  /* ============================================================ A MAN DIES
+     The animals got a real corpse solver and the men standing next to them
+     kept a plank: `group.rotation.x` eased to 90 degrees over 0.4s, one axis,
+     the whole body rigid, the legs frozen mid-stride. city/ragdoll.js has
+     solved this properly since it shipped — 13 mass points, Jakobsen sticks,
+     joint limits, ground friction, a whisper of bounce, writing back onto the
+     SAME rig meshes so the wounds and the blood soak ride along — and it
+     refused to run here for one reason: it tested `game.mode === "city"`.
+     That gate was never about the solver, and it is now a capability the page
+     opts into (RAGDOLL_ANY_MODE, declared at the top of this file).
+
+     Same shape as beastDeathPhysics: the killing round decides which way the
+     body goes over, the solver is asked first, and the canned topple is what
+     is left when it declines (budget full, too far, no rig). */
+  function manDeathPhysics(m, imp) {
+    if (DEATH_OLD || !m.group || !m.char) { m.dieT = 0.0001; return "topple"; }
+    let dx = 0, dz = 0;
+    const by = imp && imp.by;
+    if (by && by.pos) { dx = m.pos.x - by.pos.x; dz = m.pos.z - by.pos.z; }
+    else if (imp && imp.fromX != null) { dx = m.pos.x - imp.fromX; dz = m.pos.z - imp.fromZ; }
+    const dl = Math.hypot(dx, dz);
+    if (dl > 0.01) { dx /= dl; dz /= dl; }
+    else { const a = lcg() * Math.PI * 2; dx = Math.cos(a); dz = Math.sin(a); }
+    _kdir.x = dx; _kdir.y = 0; _kdir.z = dz;
+    // the entry point: chest height on the shooter's side, so the solver's
+    // topple bias throws the high mass over AWAY from the gun.
+    _kpt.x = m.pos.x - dx * 0.28;
+    _kpt.y = m.pos.y + 1.28;
+    _kpt.z = m.pos.z - dz * 0.28;
+    /* HOW HARD. The solver's band is the human one it was tuned on: ~6 a
+       pistol, ~14 a shotgun, 20+ a blast. A punch is not a bullet and must not
+       throw a body across the street, which is exactly the read the survival
+       brawl's own "land on real fist contact" wave was about. */
+    const cause = imp && imp.cause;
+    const w = (by && by.wid) ? CBZ.weaponById(by.wid) : null;
+    let energy = 7;
+    if (cause === "bomb") energy = 22;
+    else if (by && by.beast) energy = 9;                    // teeth: a maul, not a round
+    else if (by && by.fists) energy = 4;                    // a fist drops you where you stand
+    else if (w) energy = w.pellets ? 15 : Math.max(5, Math.min(13, (w.damage || 20) * 0.35));
+    if (CBZ.cityRagdoll) {
+      try {
+        if (CBZ.cityRagdoll(m, _kpt, _kdir, energy)) {
+          m.ragdoll = true; m.dieT = 0;      // the solver owns the transform now
+          deadSolving++;
+          manDeathGore(m, _kdir, energy);
+          return "ragdoll";
+        }
+      } catch (e) {}
+    }
+    m.dieT = 0.0001;
+    manDeathGore(m, _kdir, energy);
+    return "topple";
+  }
+
+  /* AND HE BLEEDS — when this battle loaded the blood at all. `gore` rides in
+     only when the roster earns it (a beast army, or ?blood=1), because 2.5k
+     lines of it is a real cost and gunfx has drawn the men's impacts since it
+     shipped. When it IS here, a kill is a kill: the same directional spray,
+     mist and ground pool an animal's bite throws, priced off what killed him.
+     Guarded end to end, so a battle without the pack is byte-identical. */
+  function manDeathGore(m, dir, energy) {
+    if (typeof CBZ.goreImpact !== "function") return;
+    const sev = Math.max(0.4, Math.min(1.8, energy * 0.09));
+    _gore.dir = dir;
+    _gore.amount = sev;
+    _gore.mist = energy >= 13;            // only a real crunch atomises anything
+    _gore.pool = energy >= 6;             // only an open wound stains the ground
+    _gore.player = false;
+    _gore.sfx = false;                    // gunfx already cracked; do not double it
+    try { CBZ.goreImpact(m.pos.x, m.pos.y + 1.15, m.pos.z, _gore); } catch (e) {}
+  }
+  const _gore = { dir: null, amount: 0.8, mist: false, pool: true, player: false, sfx: false };
+
+  /* THE OLDEST BODY LEAVES THE FIELD — it is not deleted where it lies.
+
+     `corpses` was a hard FIFO: past the cap the oldest was dropped from the
+     scene in the same frame, so a carcass you were looking at vanished
+     mid-shot. That is the second half of the report and it is not a budget
+     problem, it is a PRESENTATION problem — the budget has to exist, but a
+     body may not blink out in front of the camera. So the oldest corpse that
+     is NOT the one you are looking at starts sinking through the ground and
+     is dropped once it is genuinely out of sight. The list is walked from the
+     oldest end for the first body far enough from the camera; if every corpse
+     on the field is close (a small battle that has not filled the budget can
+     never get here), the oldest goes anyway rather than let the list grow. */
+  const sinking = [];
+  const SINK_NEAR2 = 55 * 55;          // don't start a fade this close to the eye
+  function retireOldestCorpse() {
+    if (DEATH_OLD) {                       // the FIFO that popped a body out of the world
+      const gone = corpses.shift();
+      if (!gone) return;
+      const j = men.indexOf(gone);
+      if (j >= 0) men.splice(j, 1);
+      if (gone.group) CBZ.studio.drop(gone.group);
+      return;
+    }
+    let pick = -1;
+    for (let i = 0; i < corpses.length; i++) {
+      if (camDist2(corpses[i].pos) > SINK_NEAR2) { pick = i; break; }
+    }
+    if (pick < 0) pick = 0;
+    const old = corpses.splice(pick, 1)[0];
+    if (!old) return;
+    const k = men.indexOf(old);
+    if (k >= 0) men.splice(k, 1);
+    if (!old.group) return;
+    // hand the solver its slot back before the body starts sinking, or a
+    // frozen pose keeps a slot a live death could have used — and the solver
+    // would go on writing this group's transform against the sink.
+    if (CBZ.quadRagdollDrop) { try { CBZ.quadRagdollDrop(old); } catch (e) {} }
+    if (CBZ.ragdollDrop) { try { CBZ.ragdollDrop(old); } catch (e) {} }
+    if (old.ragdoll) { old.ragdoll = false; deadSolving = Math.max(0, deadSolving - 1); }
+    sinking.push({ g: old.group, t: 0, h: Math.max(0.6, (old.eyeH || 1) * 1.4) });
+  }
+  // the sink itself: real time, because it is presentation and not simulation
+  // — a paused battle should still finish tidying up behind itself.
+  function stepSinking(dt) {
+    for (let i = sinking.length - 1; i >= 0; i--) {
+      const s = sinking[i];
+      s.t += dt;
+      s.g.position.y -= dt * s.h * 0.55;
+      if (s.t > 2.2) { CBZ.studio.drop(s.g); sinking.splice(i, 1); }
+    }
   }
 
   /* ============================================================ THE GRID
@@ -1484,6 +1849,10 @@ CBZ.studio.need(NEED).then(function () {
   }
   function push2(m, o, k) {
     if (o.dead || o === m) return;
+    // a held or airborne body is somewhere the crowd solver has no say over:
+    // shoving it out of the gorilla's fist (or out of its own flight arc) is
+    // the pass correcting an "overlap" that is the entire point of the move
+    if (o._apeHeld || m._apeHeld || o._apeFlying || m._apeFlying) return;
     // clearance is the PAIR's, not the species': a man by a man keeps the old
     // 0.9, a man by a bear keeps more, and the radii are clamped at build so
     // the widest pair (2.2) still fits the FINE cell's completeness bound
@@ -1512,6 +1881,93 @@ CBZ.studio.need(NEED).then(function () {
     // makes the NEXT step resolve them instead of every one of them now: a
     // body squeezed into a crate is invisible to every line of sight, so it
     // is immortal, and a battle with an immortal in it cannot end.
+    m.resT = 0; o.resT = 0;
+  }
+  // One shove, resolved against the world, reporting how much of it SURVIVED
+  // along the axis it was aimed down. That number is the whole mechanism of
+  // the pinned pass below: it is how a body finds out that a wall said no.
+  function shove(m, ux, uz, amt) {
+    const x0 = m.pos.x, z0 = m.pos.z;
+    m.pos.x += ux * amt; m.pos.z += uz * amt;
+    CBZ.micro.resolveCircle(m.pos, (m.rad || 0.45) + 0.05, m.pos.y, 1.8);
+    return (m.pos.x - x0) * ux + (m.pos.z - z0) * uz;
+  }
+  /* ---- THE PINNED PAIR, and it is why walls were the last overlap left ----
+
+     separateSolve above already answers the CROWD half of this: a body belongs
+     to several pairs at once, so the shove that clears it of B walks it back
+     into C, and it sweeps again until nothing moves. What no number of sweeps
+     can answer is a WALL, because a wall does not take its half of the shove:
+     separation puts him into the facade, the next step's resolveCircle puts
+     him straight back out — which is straight back into the man he was cleared
+     from — and the two of them oscillate in a doorway for as long as they both
+     want to stand there. MEASURED, 26 v 26, 90 s: overlapPeak 0 on island,
+     field, dunes and the kill box, and 3 on `city`, the one map made of walls.
+
+     So a final pass runs over what the sweeps could not fix, and only over
+     that — pairs still inside their own overlap line, which after convergence
+     is a handful in a battle and usually none. It asks the world instead of
+     assuming it:
+
+       1. shove each man his half and see how much the world let him keep;
+       2. hand what a wall refused to the OTHER man, who is the one with
+          somewhere to go;
+       3. if neither has, part them ALONG the wall rather than into it, on a
+          bearing off their own ids so it is the same every run;
+       4. and if the geometry genuinely cannot seat two men, separate them
+          anyway without asking, because a frame drawn with two bodies inside
+          each other is the fault being counted. resT = 0 hands them back to
+          the world on the next step, where a wall gets the last word.        */
+  function pinnedPass() {
+    fine.forEach(function (a) {
+      for (let i = 0; i < a.length; i++) {
+        const m = a[i];
+        if (m.dead) continue;
+        for (let j = i + 1; j < a.length; j++) unpin(m, a[j]);
+        const cx = Math.floor(m.pos.x / FINE), cz = Math.floor(m.pos.z / FINE);
+        for (let f = 0; f < 4; f++) {
+          const b = fine.get(gridKey(cx + FAN[f][0], cz + FAN[f][1]));
+          if (!b) continue;
+          for (let j = 0; j < b.length; j++) unpin(m, b[j]);
+        }
+      }
+    });
+  }
+  function unpin(m, o) {
+    if (o.dead || o === m) return;
+    // the PAIR's clearance and the PAIR's overlap line, exactly as push2 and
+    // the probe read them — a lion pinned against a hangar is the same fault
+    // as a man pinned against a facade, and a man's numbers are still 0.9/0.62
+    const clr = (m.rad || 0.45) + (o.rad || 0.45);
+    const deep = clr * 0.69;
+    let dx = o.pos.x - m.pos.x, dz = o.pos.z - m.pos.z;
+    if (dx * dx + dz * dz >= deep * deep) return;            // the common case: nothing to do
+    let d = Math.sqrt(dx * dx + dz * dz), ux, uz;
+    if (d < 1e-4) {
+      const ang = ((m.i * 37 + o.i * 91) % 360) * Math.PI / 180;
+      ux = Math.cos(ang); uz = Math.sin(ang); d = 1e-4;
+    } else { ux = dx / d; uz = dz / d; }
+    const push = (clr - d) * 0.5;
+    const gotM = shove(m, -ux, -uz, push);
+    const gotO = shove(o, ux, uz, push);
+    const owed = Math.max(0, push - gotM) + Math.max(0, push - gotO);
+    if (owed > 0.01) {
+      if (push - gotM > 0.01) shove(o, ux, uz, owed);
+      else if (push - gotO > 0.01) shove(m, -ux, -uz, owed);
+    }
+    dx = o.pos.x - m.pos.x; dz = o.pos.z - m.pos.z;
+    if (dx * dx + dz * dz < deep * deep) {
+      const sgn = ((m.i * 37 + o.i * 91) & 1) ? 1 : -1;
+      shove(m, uz * sgn, -ux * sgn, deep);                   // along the wall
+      shove(o, -uz * sgn, ux * sgn, deep);
+      dx = o.pos.x - m.pos.x; dz = o.pos.z - m.pos.z;
+      if (dx * dx + dz * dz < deep * deep) {
+        // nowhere left to put them: the frame wins, the world gets the next step
+        const e = (deep - Math.sqrt(dx * dx + dz * dz)) * 0.5 + 0.01;
+        m.pos.x -= ux * e; m.pos.z -= uz * e;
+        o.pos.x += ux * e; o.pos.z += uz * e;
+      }
+    }
     m.resT = 0; o.resT = 0;
   }
   /* THE PASS THIS ONE REPLACED, kept so the claim is two-sided: ?sep=old and
@@ -1710,8 +2166,20 @@ CBZ.studio.need(NEED).then(function () {
       count[t] = n;
       if (n) { teamCOM[t].x = x / n; teamCOM[t].z = z / n; }
     });
-    HUNT.red = count.blue > 0 && count.red >= count.blue * 8;
-    HUNT.blue = count.red > 0 && count.blue >= count.red * 8;
+    /* THE MOP-UP IS A PHASE, AND EIGHT TO ONE IS NOT WHERE IT STARTS.
+       `hunt` is what ends a battle — a wider look, a straight march and a run
+       (stepMan: speed 8.0, fireMax x1.6) — and it was gated on a ratio so
+       extreme that by the time it could fire there was nothing left to hunt.
+       MEASURED, 26 v 26 on `city`: at t=83 s it stood 17 v 4, a comfortable
+       rout at 4.25:1, and the flag was still false; twenty-one men held a mark
+       none of them could SEE, all of them in slot `push`, and the shot counter
+       sat unchanged at 715 for the last three samples. That is dead air with
+       the result already decided.
+
+       Three to one is where an army stops manoeuvring and starts sweeping,
+       which is both the real answer and the measured one. */
+    HUNT.red = count.blue > 0 && count.red >= count.blue * 3;
+    HUNT.blue = count.red > 0 && count.blue >= count.red * 3;
     comAt = simT;
   }
 
@@ -1809,6 +2277,11 @@ CBZ.studio.need(NEED).then(function () {
     m.mag--; m.lastShotT = simT;
     stats[m.team].shots++;
     m.shotsF++; gunLedger(m.wid).shots++;
+    /* WHEN DOES THE WAR ACTUALLY START? The one number that says whether a
+       person is watching a battle or watching a commute, and it is free. It
+       read 10.9 s on `city` with 26 a side, because the two armies formed up
+       304 m apart — see streetSpawner. Held by battle-check. */
+    if (QUAL.firstShotT < 0) QUAL.firstShotT = Math.round(simT * 10) / 10;
     if (PROBE) {
       // both counters are asked AT THE TRIGGER and with a fresh test, because
       // a cached answer from the last think is exactly the thing being checked
@@ -2442,14 +2915,38 @@ CBZ.studio.need(NEED).then(function () {
 
   /* ============================================================ SIM STEP */
   function stepMan(m, sdt) {
+    /* A BODY IN A GORILLA'S HAND IS NOT A MARCHER. systems/ape_combat.js owns
+       this man's world transform outright while the flag is up — his position,
+       his facing and his rig — exactly the way grapple.js's `heldBy` stands the
+       player's own mover down. Everything below (think, locomotion, the fire
+       solution) would be fighting it for the same three numbers. The flag is
+       cleared by the hold itself, and by apeReset on a restart, so nothing can
+       strand a man mid-air. Tested first, above the death branch, because a man
+       who dies IN the hand is still in the hand until it lets go. */
+    if (m._apeHeld || m._apeFlying) return;
     if (m.dead) {
+      // A SOLVED CORPSE HAS EXACTLY ONE WRITER. quadruped_ragdoll.js owns the
+      // group's position and quaternion from the frame the animal died (this
+      // page steps it on the sim clock — see the quadRagdollStep call in
+      // frame()), and a second author here is precisely the double-write that
+      // leaves a body latched half way through its own fall.
+      if (m.ragdoll) return;
+      // the shared tumble, when the mainland's wildlife.js is loaded and the
+      // solver declined this body. Returns false once it has settled.
+      if (m.tumble) {
+        if (!CBZ.wildlifeDeathStep || !CBZ.wildlifeDeathStep(m, sdt)) m.tumble = false;
+        return;
+      }
       if (m.dieT > 0 && m.dieT < 1) {
         m.dieT = Math.min(1, m.dieT + sdt * 2.4);
         const k = 1 - (1 - m.dieT) * (1 - m.dieT);
-        // a man topples over his own facing; a four-legged body falls ONTO
-        // ITS SIDE — the roll axis is the honest one for a quadruped
-        if (m.beast) m.group.rotation.z = m.dieDir * k * 1.45;
-        else m.group.rotation.x = m.dieDir * k * (Math.PI / 2 - 0.07);
+        // A MAN topples over his own facing. A FOUR-LEGGED BODY falls onto its
+        // flank, which is a roll about its own long axis — and on a body
+        // authored nose-toward-+X that axis is rotation.x under the 'YXZ' order
+        // beastDeathPhysics puts the corpse on, NOT rotation.z (which is the
+        // model-local PITCH and was sitting every dead animal upright).
+        if (m.beast && DEATH_OLD) m.group.rotation.z = m.dieDir * k * 1.45;   // the reverted pose
+        else m.group.rotation.x = m.dieDir * k * (m.beast ? 1.45 : (Math.PI / 2 - 0.07));
       }
       return;
     }
@@ -2466,6 +2963,18 @@ CBZ.studio.need(NEED).then(function () {
     // ground, opts.onHit lands in THIS page's damage funnel. Outside the
     // bubble the beast is just another marcher below.
     if (m.beast) {
+      /* A GORILLA MID-SWING IS NOT MARCHING ANYWHERE. Its own hold owns its
+         position, its facing and its pitch (systems/ape_combat.js, ticked by
+         apeStep above). Without this the branch below falls through the moment
+         the man in its hand DIES — `bt.dead` — and the locomotion at the bottom
+         of this function walks a spinning silverback across the map while the
+         body on its arm stays welded to a hand that is no longer where the
+         swing thinks it is. */
+      if (CBZ.apeOwns && CBZ.apeOwns(m)) {
+        m.resT = (m.resT || 0) - sdt;
+        if (m.resT <= 0) { m.resT = 0.25; CBZ.micro.resolveCircle(m.pos, m.rad || 0.5, m.pos.y, 1.8); }
+        return;
+      }
       const bt = m.tgt;
       if (bt && !bt.dead && !over) {
         const bd = Math.hypot(bt.pos.x - m.pos.x, bt.pos.z - m.pos.z);
@@ -2600,7 +3109,15 @@ CBZ.studio.need(NEED).then(function () {
         const st = CBZ.combatIQ.melee(m, tgt, sdt,
           { reach: mr, incoming: (tgt._windup || 0) > 0 || (tgt._iqM && tgt._iqM.st === "windup") });
         if (st === "swing") {
-          hurtMan(tgt, m.punch * (0.85 + lcg() * 0.4), { by: m });
+          /* AND IT MATTERS WHO HE IS HITTING. `m.punch` is a number off the
+             THROWER and nothing else, so a civilian's fist used to take the
+             same bite out of a 190 kg silverback as out of another man — the
+             single reason a hundred unarmed men could hand-wrestle a gorilla
+             down on arithmetic alone. systems/bodymass.js turns the pair into
+             a ratio; man on man is 1.0, so every men-only battle this page has
+             ever run is numerically untouched. */
+          const mk = CBZ.meleeScale ? CBZ.meleeScale(m, tgt) : 1;
+          hurtMan(tgt, m.punch * (0.85 + lcg() * 0.4) * mk, { by: m });
           stats[m.team].shots++; stats[m.team].hits++;   // the ledger counts blows thrown and landed
           m.shotsF++; m.hitsF++; gunLedger("fists").shots++; gunLedger("fists").hits++;
         }
@@ -3210,6 +3727,12 @@ CBZ.studio.need(NEED).then(function () {
   /* ============================================================ BEGIN */
   function begin(asBench) {
     el("menu").style.display = "none";
+    // a restart must not inherit a body from the last war: apeReset drops every
+    // live hold and puts anything still in the air back on its feet, unowned
+    if (CBZ.apeReset) { try { CBZ.apeReset(); } catch (e) {} }
+    // packsFor() sets this on every route that loads ground packs; the bench
+    // button reaches begin() without one, so state it here too.
+    HAS_BEASTS = SET.redU !== "men" || SET.blueU !== "men";
     /* THE AIR BELONGS TO THE PLACE. One desert haze over all five grounds put
        an orange dust horizon behind a glass downtown and washed the streets
        out to paper. Three skies: a hard flat light for the kill box, a clean
@@ -3316,6 +3839,16 @@ CBZ.studio.need(NEED).then(function () {
 
   /* ============================================================ FRAME */
   let uiT = 0, winCheckT = 0, lastWall = 0, whoT = 0;
+  /* THE PROBE'S CLOCK. The sim below reads performance.now() on purpose — the
+     speed dial is a promise about REAL seconds and a render-time clock cannot
+     keep it. That also means a headless tool cannot advance this battle by a
+     stated amount: it can only wait, at whatever rate a software rasteriser
+     manages, which is how a two-minute war becomes a two-hour probe and why in
+     practice nobody photographed one. `injectDt` is the seam — set it and the
+     next frame consumes exactly that many seconds instead of asking the wall.
+     Read once and cleared, so a missed frame can never silently double a step.
+     Driven only by __battle.advance(); play never touches it. */
+  let injectDt = 0;
   function frame(dt) {
     if (!started) return;
     // THE SIM CLOCK IS WALL TIME, NOT RENDER TIME. microboot clamps its dt
@@ -3324,8 +3857,10 @@ CBZ.studio.need(NEED).then(function () {
     // is one real second per second, and the sub-steps below keep the
     // integration solid however long the frame took.
     const wall = performance.now();
-    const realDt = lastWall ? Math.min(0.25, (wall - lastWall) / 1000) : dt;
+    let realDt = lastWall ? Math.min(0.25, (wall - lastWall) / 1000) : dt;
     lastWall = wall;
+    if (injectDt > 0) { realDt = injectDt; injectDt = 0; }   // the probe's clock
+
     dt = realDt;                      // gait, camera and timers follow the same clock
     dbgWall += realDt; dbgN++;
     fxBudget = 0;
@@ -3367,8 +3902,46 @@ CBZ.studio.need(NEED).then(function () {
           else if (simT - NAV.at.blue > 1.4) navSolve("blue");
         }
         for (let i = 0; i < men.length; i++) stepMan(men[i], sdt);
+        /* THE HOLD AND EVERYTHING IN THE AIR. This has to be its own call and
+           not a seam inside beastFight: the strike bubble above only runs while
+           the gorilla has a LIVING target inside reach, and a man being swung
+           around by the ankle is usually dead before the second revolution —
+           the moment his corpse stopped qualifying, the swing would freeze
+           mid-air with him welded to a fist. Driven here, on the sim clock, it
+           also runs at the dialled battle speed like everything else.
+
+           GATED ON THE ROSTER for the same measured reason the corpse solver
+           below is, and it is worth stating rather than copying: a war of
+           riflemen is held to `overlapPeak === 0` by tools/battle-check.mjs,
+           and that is a knife-edge which ANY added work in this innermost
+           sub-step can push over (the solver's own note records 0 pairs on
+           three runs ungated versus 1-2 with). There is no ape in a men-only
+           battle, so there is nothing here for it to step. */
+        if (HAS_BEASTS && CBZ.apeStep) { try { CBZ.apeStep(sdt); } catch (e) {} }
+        /* THE DEAD RUN ON THE SAME CLOCK AS THE LIVING. quadruped_ragdoll.js
+           normally ticks itself off the frame hook, which would leave the
+           corpses folding at wall speed while the battle ran at quarter speed
+           — and still folding while SPACE says the war is paused. The page
+           claimed the solver (CBZ.quadRagdollDriven, set at the top) precisely
+           so it could be stepped HERE, inside the sub-step, with the sim's own
+           dt. Nothing else on this page has to know.
+
+           GATED ON THE ROSTER, and the gate is not an optimisation — it is the
+           proof. tools/battle-check.mjs holds a battle of RIFLEMEN to
+           `overlapPeak === 0`, a knife-edge that a man's shoulder either
+           crosses or does not, and adding any work to the innermost loop of
+           that battle moved it (measured: 0 overlapping pairs on three runs of
+           the old code, 1-2 on three runs with this call ungated). A war
+           between men has no quadruped to solve, so it should not enter the
+           solver at all — and now the men-only sub-step is the one it always
+           was, which is the only way that check keeps meaning what it says. */
+        if (deadSolving > 0) {
+          if (HAS_BEASTS && CBZ.quadRagdollStep) CBZ.quadRagdollStep(sdt);
+          if (CBZ.ragdollStep) CBZ.ragdollStep(sdt);
+        }
         rebuildFine();                       // bodies moved: the body grid is stale
         separateSolve(Math.min(0.9, sdt * 26));
+        if (!SEP_OLD) { rebuildFine(); pinnedPass(); }   // and what no sweep can fix: a wall
         stepRockets(sdt);
         if (AIR.on) {
           if (simT - airAimT > 3) {
@@ -3391,9 +3964,22 @@ CBZ.studio.need(NEED).then(function () {
     if (PROBE && !bench && simDt > 0) { rebuildFine(); sepResid = sepResidual(); }
 
     // ---- render-side work at real time: gait, aim pose, camera ----
+    // the retired bodies sink out on WALL time on purpose: they are no longer
+    // part of the battle, and a paused page should still finish tidying up.
+    if (sinking.length) stepSinking(realDt);
     const camP = CBZ.camera.position;
     for (let i = 0; i < men.length; i++) {
       const m = men[i];
+      /* A MAN IN A FIST STILL HAS TO LOOK LIKE A MAN IN A FIST. animChar runs
+         AFTER the sim (that ordering is the whole reason grapple.js has a
+         late-write pass at order 90), so a hold pose written in the step would
+         be stomped here every frame and the body would ride round the swing in
+         a walk cycle. Held and airborne bodies get their own rig write instead
+         — arms and legs fighting the grip, not strolling. */
+      if (m._apeHeld || m._apeFlying) {
+        if (CBZ.apePoseVictim) { try { CBZ.apePoseVictim(m, dt); } catch (e) {} }
+        continue;
+      }
       if (m.dead) continue;
       const d2 = (m.pos.x - camP.x) * (m.pos.x - camP.x) + (m.pos.z - camP.z) * (m.pos.z - camP.z);
       m.animF = (m.animF + 1) & 1023;
@@ -3483,8 +4069,9 @@ CBZ.studio.need(NEED).then(function () {
      person would point at on the screen, turned into an integer, so
      tools/battle-check.mjs can hold it at zero instead of somebody squinting.
      Read-only: it never touches a man. */
-  const QUAL = { overlapPeak: 0, embeddedEver: 0, blindFire: 0, throughMate: 0,
-    throughSand: 0, fratricide: 0, bodyW: 0, stuckSeen: 0, wallSeconds: 0 };
+  const QUAL = { overlapPeak: 0, overlapWorstEver: null, embeddedEver: 0,
+    blindFire: 0, throughMate: 0, throughSand: 0, fratricide: 0, bodyW: 0,
+    stuckSeen: 0, wallSeconds: 0, firstShotT: -1 };
   function bodyWidth() {
     if (QUAL.bodyW) return QUAL.bodyW;
     for (let i = 0; i < men.length; i++) {
@@ -3540,6 +4127,10 @@ CBZ.studio.need(NEED).then(function () {
       }
     }
     if (pairs > QUAL.overlapPeak) QUAL.overlapPeak = pairs;
+    // the WORST gap ever seen, not the worst in the sample that happens to be
+    // last — the failure line used to read "3 overlapping pairs (worst null m
+    // apart)" because the peak accumulates and the distance did not
+    if (pairs && (QUAL.overlapWorstEver == null || worst < QUAL.overlapWorstEver)) QUAL.overlapWorstEver = worst;
     let embedded = 0, stuck = 0, engaged = 0;
     const buf = [];
     for (let i = 0; i < live.length; i++) {
@@ -3558,7 +4149,7 @@ CBZ.studio.need(NEED).then(function () {
     if (stuck > QUAL.stuckSeen) QUAL.stuckSeen = stuck;
     return {
       alive: live.length, bodyW: bodyWidth(),
-      overlapNow: pairs, overlapWorst: pairs ? worst : null, overlapPeak: QUAL.overlapPeak,
+      overlapNow: pairs, overlapWorst: QUAL.overlapWorstEver, overlapPeak: QUAL.overlapPeak,
       embedded: embedded, embeddedEver: QUAL.embeddedEver,
       stuck: stuck, stuckPeak: QUAL.stuckSeen,
       // the separation pass's own verdict, and the cell it was run on
@@ -3567,9 +4158,79 @@ CBZ.studio.need(NEED).then(function () {
       wallSeconds: Math.round(QUAL.wallSeconds * 10) / 10,
       blindFire: QUAL.blindFire, throughMate: QUAL.throughMate,
       throughSand: QUAL.throughSand, fratricide: QUAL.fratricide,
+      firstShotT: QUAL.firstShotT,
       shots: stats.red.shots + stats.blue.shots, engaged: engaged,
       colliders: (CBZ.colliders && CBZ.colliders.length) || 0,
     };
+  }
+
+  /* THE BEAST AUDIT — and it is OFF unless the roster earns it.
+
+     A battle of riflemen has no beast corpse to describe, and this used to be
+     spelled inline in audit(): a sweep of every corpse on the field doing
+     quaternion maths, plus the solver's own slot sweep, on every poll of a
+     check that samples once a second for a minute. tools/battle-check.mjs
+     holds a men-only war to `overlapPeak === 0` — a knife edge — so a probe
+     that quietly costs more on the exact battle it is measuring is a probe
+     that changes its own answer. Whole thing behind HAS_BEASTS. */
+  /* THE MEN'S DEATHS, and this one is NOT gated: men are almost always the
+     roster, so "is anyone falling like a plank" is the question this page is
+     most often asked. Three counters and one loop over the corpse list, which
+     is the same loop the beast audit runs and is only ever read on a probe
+     poll. `plank` is the number that matters — a body that resolved to the
+     canned single-axis topple instead of the solver. */
+  function manAudit() {
+    const o = { men: 0, ragdoll: 0, plank: 0, solver: null, mode: DEATH_OLD ? "old" : "ragdoll" };
+    for (let i = 0; i < corpses.length; i++) {
+      const c = corpses[i];
+      if (c.beast || !c.char) continue;
+      o.men++;
+      if (c.ragdoll) o.ragdoll++; else o.plank++;
+    }
+    if (CBZ.ragdollAudit) o.solver = CBZ.ragdollAudit();
+    return o;
+  }
+
+  const _EMPTY_AUDIT = {};
+  function beastAudit() {
+    if (!HAS_BEASTS) return _EMPTY_AUDIT;
+    const o = { beast: 0, ragdoll: 0, tumble: 0, topple: 0,
+      standing: 0, noseUp: 0, flank: 0, noseWorst: 0 };
+    for (let i = 0; i < corpses.length; i++) {
+      const c = corpses[i];
+      if (!c.beast || !c.group) continue;
+      o.beast++;
+      if (c.ragdoll) o.ragdoll++; else if (c.tumble) o.tumble++; else o.topple++;
+      const q = c.group.quaternion;
+      _upV.set(0, 1, 0).applyQuaternion(q);            // the body's own UP
+      _fwV.set(1, 0, 0).applyQuaternion(q);            // ...and its NOSE (+X authored)
+      if (_fwV.y > o.noseWorst) o.noseWorst = Math.round(_fwV.y * 100) / 100;
+      if (_fwV.y > 0.5) o.noseUp++;
+      else if (_upV.y > 0.62) o.standing++;
+      else if (Math.abs(_upV.y) < 0.62) o.flank++;
+    }
+    return {
+      deaths: o,
+      deathMode: DEATH_OLD ? "old" : "ragdoll",
+      solver: CBZ.quadRagdollAudit ? CBZ.quadRagdollAudit() : null,
+      sinking: sinking.length,
+      corpseMax: DEATH_OLD ? 260 : CORPSE_MAX,
+      // the bite, measured: strikes that connected vs strikes whose jaws
+      // closed short. (The blood behind them is bloodAudit(), below — it is
+      // not the animals' and a rifle war can stain a street too.)
+      bites: { landed: BITES.landed, missed: BITES.missed },
+    };
+  }
+
+  /* BLOOD IS NOT THE ANIMALS'. This started life inside beastAudit() because
+     the bite was the first thing on this page that drew any, and it therefore
+     reported `null` for a rifle war that had loaded the pack with ?blood=1 and
+     was staining the street. It belongs wherever gore.js is: one test, and the
+     sweep itself only ever runs on a probe poll. */
+  function bloodAudit() {
+    if (!CBZ.goreAudit) return null;
+    const g = CBZ.goreAudit();
+    return { pools: g.pools, streaks: g.streaks, visible: g.bloodVisible };
   }
 
   window.__battle = {
@@ -3598,6 +4259,28 @@ CBZ.studio.need(NEED).then(function () {
         terrainLos: !!(MAP && MAP.terrainLos),
         men: men.length, red: aliveCount("red"), blue: aliveCount("blue"),
         queued: spawnQueue.length, corpses: corpses.length, rockets: rockets.length,
+        /* THE DEAD, MEASURED — and measured on TWO axes, because the pose in
+           the report is not the one a single axis catches.
+
+           A carcass has three ways to be wrong and they need telling apart:
+             standing  it came to rest on its own feet        (body up ≈ +Y)
+             noseUp    it is SITTING UP, head at the sky      (body FORWARD ≈ +Y)
+             flank     it is lying on its side — the correct one
+           The first build of this probe read only the up vector, and under the
+           reverted `rotation.z = 1.45` topple a nose-to-sky body reports
+           up.y ≈ 0.12 — i.e. it scored as a perfect flank while looking exactly
+           like the screenshot the owner sent. The forward axis is the one that
+           separates them, so both are taken, off the group's real quaternion
+           rather than off a rotation channel (the solver writes a quaternion;
+           reading .z back off it answers a question nobody asked).
+
+             solver   quadruped_ragdoll's own audit (solving / frozen / refused)
+             deaths   how each beast corpse on the field actually resolved
+             sinking  bodies mid-retirement (never a pop — retireOldestCorpse) */
+        ...beastAudit(),
+        dead: manAudit(),
+        blood: bloodAudit(),
+        solving: deadSolving,
         planes: planes.length, air: AIR.on, sticks: AIR.sticks || 0, nukes: AIR.nukes || 0,
         planesDbg: planes.map(function (p) {
           return { t: p.team, nuke: p.nuke, mode: p.egress ? "egress" : p.mode,
@@ -3649,10 +4332,76 @@ CBZ.studio.need(NEED).then(function () {
       };
     },
     speed: setSpeed,
+
+    /* ---- THE STUDIO SEAM: run this war by hand ---------------------------
+       freeze()   stop requestAnimationFrame. Nothing moves again until
+                  advance() says so, which is what makes a screenshot a
+                  statement about a moment rather than about a frame rate.
+       advance(s) run exactly `s` seconds of THIS page's own frame, in fixed
+                  steps, through microboot's headless stepSim — the same
+                  always/updater/frame order the browser loop runs, minus the
+                  renderer. Every clock in the battle (the sim, combat_iq's
+                  CBZ.now, the corpse solver, the camera director) is driven
+                  from that one frame, so they cannot drift apart.
+       render()   draw the current state once, on demand.
+       corpsesOf()where the dead actually are, so a tool can point a camera at
+                  a body instead of guessing at the middle of the map.
+       All read/drive-only, and none of it is reachable from play. */
+    freeze: function () {
+      if (CBZ.micro.stop) CBZ.micro.stop();
+      lastWall = 0;                       // the next real frame must not see a gap
+      return true;
+    },
+    advance: function (sec, step) {
+      const h = Math.max(1 / 240, Math.min(0.05, step || 1 / 60));
+      let left = Math.max(0, +sec || 0), n = 0;
+      while (left > 1e-4 && n < 6000) {
+        const d = Math.min(h, left);
+        injectDt = d;
+        CBZ.micro.stepSim(d);
+        left -= d; n++;
+      }
+      return { frames: n, simT: Math.round(simT * 100) / 100 };
+    },
+    render: function () {
+      const R = CBZ.renderer || (CBZ.micro && CBZ.micro.renderer);
+      if (R && CBZ.camera) { try { R.render(CBZ.scene, CBZ.camera); } catch (e) {} }
+      return true;
+    },
+    corpsesOf: function (beastOnly) {
+      const out = [];
+      for (let i = 0; i < corpses.length; i++) {
+        const c = corpses[i];
+        if (beastOnly && !c.beast) continue;
+        out.push({ id: c.id, beast: !!c.beast, team: c.team,
+          x: Math.round(c.pos.x * 100) / 100, y: Math.round(c.pos.y * 100) / 100,
+          z: Math.round(c.pos.z * 100) / 100,
+          ragdoll: !!c.ragdoll, h: c.eyeH || 1 });
+      }
+      return out;
+    },
+    /* PARK THE CAMERA ON ONE BODY, at a stated offset. `look()` frames the
+       hottest FIGHT, which is the right shot for a spectator and the wrong one
+       for a photograph of a corpse — the thing under discussion is by
+       definition no longer where the fighting is. */
+    lookAt: function (p, off, pitch) {
+      cam.mode = "free";
+      cam.wFocus.set(p.x, (p.y || 0) + (p.h || 0.5), p.z);
+      cam.focus.copy(cam.wFocus);
+      cam.wDist = cam.dist = off == null ? 9 : off;
+      cam.wPitch = cam.pitch = pitch == null ? 0.30 : pitch;
+      if (p.yaw != null) cam.wYaw = cam.yaw = p.yaw;
+      return true;
+    },
+
     // park the camera on the hottest fight at a chosen range — the seam a
     // screenshot tool needs, and the one the director already computes
-    look: function (dist, pitch, yaw) {
-      const hs = hotspot();
+    // `at` (optional {x,z}) overrides the director's own hotspot. The hotspot
+    // is the right answer for "show me the battle" and the wrong one for
+    // "show me THAT animal": tools/ape-shot.mjs has to frame one gorilla's
+    // arms, and the densest fight is rarely where it is standing.
+    look: function (dist, pitch, yaw, at) {
+      const hs = at || hotspot();
       cam.mode = "free";
       if (hs) { cam.wFocus.set(hs.x, MAP.groundAt(hs.x, hs.z), hs.z); cam.focus.copy(cam.wFocus); }
       cam.wDist = cam.dist = dist || 40;
@@ -3661,6 +4410,13 @@ CBZ.studio.need(NEED).then(function () {
       return hs;
     },
     reinforce: function (n) { queueMen(n || 10); },
+    /* THE LIVE CAST, BY REFERENCE. Every probe above answers a question about
+       the ARMY (how many, how far apart, how many rounds); tools/ape-check.mjs
+       needs to ask a question about a BODY — is this man still flagged as held
+       by something that no longer exists — and no counter can carry that. It
+       is the same array the sim walks, deliberately: a copy would let a stale
+       flag hide behind the copy. */
+    roster: function () { return men; },
     /* WHICH PAIRS, AND WHAT WERE THEY DOING. An overlap COUNT tells you the
        bodies are wrong; it never tells you which rule put them there, and
        three rules can produce the same number. This lists the live offenders

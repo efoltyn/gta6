@@ -360,7 +360,7 @@
        sweep with no explanation, which is correct: you were not there. */
   const RADIO = [
     "Post four, got a sighting for you. Sending it now.",
-    "Yeah — he's yours. Same spot I called in.",
+    "Yeah, he's yours. Same spot I called in.",
     "Control, I've got eyes. Passing it up the line.",
   ];
   function racketBark(g) {
@@ -495,7 +495,7 @@
           addRacketStanding(1);
           CBZ.sfx && CBZ.sfx("coin");
           clearGuardApproach(g);
-          return { ok: true, msg: `It was ${nameOf(snitch)}. Do what you like with that — I never said it.` };
+          return { ok: true, msg: `It was ${nameOf(snitch)}. Do what you like with that. I never said it.` };
         }
         if (CBZ.addHeat) CBZ.addHeat(-3);
         addRacketStanding(1);
@@ -601,7 +601,7 @@
       }
       if (CBZ.addHeat) CBZ.addHeat(g.corrupt ? 12 : 28);
       nudgeCleanGuard(g);
-      return { ok: false, msg: "Wrong answer. Control, this is post one —" };
+      return { ok: false, msg: "Wrong answer. Control, this is post one." };
     }
     if (action === "refuse") {
       expireGuardApproach(g, "refuse");
@@ -855,7 +855,7 @@
       };
       n.approachCD = Math.min(n.approachCD || 2, 0.9 + rng() * 2.0);
       if (CBZ.npcEmote) CBZ.npcEmote(n, "?");
-      if (nearPlayer && CBZ.prisonSay) CBZ.prisonSay(n, "Boss — I saw him going the other way. Towards the south gate.", { rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
+      if (nearPlayer && CBZ.prisonSay) CBZ.prisonSay(n, "Boss, I saw him going the other way. Towards the south gate.", { rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
       return;
     }
 
@@ -926,7 +926,9 @@
   const BARKS = {
     hunt: ["STOP RIGHT THERE!", "We got a runner!", "Don't make me chase you!", "You're mine, inmate!"],
     huntWarden: ["You dare run from ME?", "MY block. MY rules. Take him down!"],
-    investigate: ["I heard something over there…", "Eyes open — something moved.", "Hold up. Checking that out."],
+    investigate: ["I heard something over there…", "Eyes open. Something moved.", "Hold up. Checking that out."],
+    // hands over his head, your gun on him — he talks like a man buying time
+    heldup: ["Easy. Easy now.", "Alright. Take it easy.", "Don't do anything stupid, son."],
   };
   let barkCD = 0;   // global spacing so barks never spam the hint line
 
@@ -1013,6 +1015,19 @@
     } else if (g.group.rotation.z !== 0) {
       g.group.rotation.z = CBZ.damp(g.group.rotation.z, 0, 9, dt); // stand back up
       if (Math.abs(g.group.rotation.z) < 0.02) g.group.rotation.z = 0;
+    }
+
+    // HELD AT GUNPOINT (systems/intimidate.js JAIL_GUARD_HOLDUP owns the
+    // state): he stands where the muzzle found him, facing it. The hunt he
+    // was on and the call he was making wait behind his hands — detection.js
+    // holds his radio window while this is set, and guardSeesPoint answers
+    // false for him, so nothing downstream ever acts on his eyes.
+    if (g.intimidMode === "scared") {
+      noteState(g, "heldup");
+      g.group.rotation.y = lerpAngle(g.group.rotation.y, Math.atan2(pdx, pdz), 1 - Math.pow(0.0006, dt));
+      animChar(g.char, 0, dt);
+      updateFlashlight(g, dt);
+      return;
     }
 
     if (g.approach) {
@@ -1136,10 +1151,11 @@
   // read like a prison instead of a pit: violence happens where the screws
   // aren't looking. Same geometry, same LOS raycast, same blind conditions.
   function guardSeesPoint(g, x, y, z, shrink) {
-    // dead, down, ASLEEP or bribed = blind. A sleeping man is the one sensor
-    // in this prison you beat by picking the hour, which is the whole reason
-    // time of day is the pillar.
-    if (g.dead || g.ko > 0 || g.asleep || g.bribed > 0) return false;
+    // dead, down, ASLEEP, bribed, held at gunpoint or tied = blind. A
+    // sleeping man is the one sensor in this prison you beat by picking the
+    // hour; a man staring down your muzzle (intimidate.js) or zip-tied on
+    // the floor is one you beat with your hands.
+    if (g.dead || g.ko > 0 || g.asleep || g.bribed > 0 || g.intimidMode === "scared" || g.tied) return false;
     if (g.corrupt && CBZ.game && (CBZ.game.racketProtectionT || 0) > 0) return false;
     const gx = g.group.position.x, gz = g.group.position.z;
     const dx = x - gx, dz = z - gz;

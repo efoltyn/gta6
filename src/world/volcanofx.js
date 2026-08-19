@@ -123,7 +123,11 @@
   if (CBZ.CONFIG.VOLCANO_V2 == null) CBZ.CONFIG.VOLCANO_V2 = true;
   if (CBZ.CONFIG.VOLCANO_PYRO == null) CBZ.CONFIG.VOLCANO_PYRO = true;
   if (CBZ.CONFIG.VOLCANO_LAHAR == null) CBZ.CONFIG.VOLCANO_LAHAR = true;
-  if (CBZ.CONFIG.VOLCANO_ASH_LOAD == null) CBZ.CONFIG.VOLCANO_ASH_LOAD = true;
+  /* OFF as of 2026-08-16. OWNER: "the ash covering the map is not needed...
+     idc if it's realistic". The blanket, the roof quads and the choke it fed
+     all hang off this one flag; ?cfg_VOLCANO_ASH_LOAD=1 brings the whole
+     ledger back intact. */
+  if (CBZ.CONFIG.VOLCANO_ASH_LOAD == null) CBZ.CONFIG.VOLCANO_ASH_LOAD = false;
 
   const V = {};
   // live census for CBZ.volcanoAudit() — measured, never counted in source
@@ -525,8 +529,10 @@
       // and along the way it necks and bellies on the two slow waves
       const lobe = 1 + 0.24 * Math.sin(i * 0.52 + wPh1) + 0.13 * Math.sin(i * 1.27 + wPh2);
       wProf[i] = (0.5 + 0.72 * Math.pow(u, 0.7)) * lobe * (0.9 + 0.2 * h01(p.x, p.z, salt + 11));
-      // temperature falls downstream — this is the whole colour story
-      hot0[i] = clamp(1.06 - 0.72 * u + (h01(p.x, p.z, salt + 37) - 0.5) * 0.16, 0.1, 1);
+      // temperature falls downstream — this is the whole colour story.
+      // Gentled from 0.72: the toe of an ACTIVE flow is still ~1000 C rock
+      // arriving from the vent, dull orange rather than near-black.
+      hot0[i] = clamp(1.06 - 0.6 * u + (h01(p.x, p.z, salt + 37) - 0.5) * 0.16, 0.1, 1);
       meander[i] = 0.13 * Math.sin(i * 0.44 + mPh) + 0.05 * Math.sin(i * 1.03 + mPh * 2);
     }
 
@@ -663,6 +669,19 @@
 
     let adv = Math.min(seg * 1.05, len);   // metres of flow laid down
     let age = 0, dead = false, lidT = 0, lastSt = -1;
+    /* THE QUENCH — what happens when the eruption stops feeding this flow.
+       quenchT < 0 is a live river. quench() starts the clock: over ~8 s the
+       front stalls, the advection phase winds down (a chilling surface stops
+       travelling), the melt dies to near-black rock with the last ember
+       seams in the deepest cracks, the haze and the pooled light fade out.
+       Fully settled, update() becomes a no-op and the flow just STANDS
+       there as dark crusted rock — which is the vulcanology (supply stops,
+       THEN it chills black) and the fix for the old endEruption pop, where
+       a glowing river vanished from the hillside in a single frame. phT
+       replaces `age` in the phase term so the wind-down actually slows the
+       lace instead of just dimming it. */
+    let quenchT = -1, phT = 0, settled = false;
+    const QUENCH_SECS = 8;
     const _v = new THREE.Vector3();
     /* THE SURFACE RUNS FASTER THAN THE FRONT. The nose is braked by the crust
        it is pushing; the melt behind it is not. ~2.4x is the ratio that reads
@@ -704,7 +723,9 @@
              lace    the travelling crack network — the term that MOVES
              flood   the vent apron: the first stretch has no lid at all */
         const across = 1 - Math.pow(amu, 2.6 + 2.1 * u01);
-        const open = 0.98 - 0.42 * u01;
+        // gentled with the 2026-08-19 rebalance below: the toe of a fed flow
+        // still MOVES, so it stays red — only stopping earns the black
+        const open = 0.98 - 0.22 * u01;
         /* THE LACE IS THE LOOK (the owner's reference close-up, 2026-08-15):
            a dark crusted surface with thin CONNECTED filaments of melt
            cracked through it, wrapping irregular black islands. lidField now
@@ -723,35 +744,81 @@
            inside it. `hot` keeps the handover from popping as a station
            cools. */
         const flood = clamp((0.21 - u01) * 4.5, 0, 1) * (0.5 + 0.5 * hot) * (0.6 + 0.4 * lace);
-        /* THE LID IS STILL THE DEFAULT, and the toe still glows along its
-           cracks. The -0.24 sets that balance: where the lace is thin the
-           lid wins outright and the surface is dark rock, but a cooling toe
-           keeps a dull red crack network in its seams instead of going flat
-           black — the reference close-up's margins exactly. */
-        let melt = clamp((0.08 + 1.1 * lace) * across * open * (0.42 + 0.85 * hot) - 0.24, 0, 1);
+        /* THE MELT IS THE DEFAULT WHILE THE RIVER RUNS. OWNER, 2026-08-19:
+           "isn't it usually red, and it has that red and bright [brilliance]
+           ... and then it should turn black. Right now it literally flows
+           down black — black stuff doesn't move. Black is when it's in one
+           place." He is right, and it re-balances the 2026-08-15 lace: a FED
+           channel's surface is mostly incandescent, so the moving flow now
+           reads predominantly red-orange with the lace surviving as brighter
+           veins through it, and thin dark skin shows only as sparse RAFTS
+           where the field runs deepest. The full black crust belongs to lava
+           that has STOPPED — which is exactly what the quench paints: hot
+           collapses and this same formula lands on dark rock whose last
+           ember seams fade in the deepest lace. Moving = red; parked =
+           black. */
+        let melt = clamp((0.62 + 0.5 * lace) * across * open * (0.35 + 0.75 * hot) - 0.12, 0, 1);
+        // the rafts: thin chilled plates riding the bright river — dim while
+        // the river is hot (skin, not rock), deepening to black as it stops
+        const raft = clamp((0.18 - lace) * 5, 0, 1);
+        melt *= 1 - raft * (0.3 + 0.42 * (1 - hot));
         melt = Math.max(melt, flood * across);
-        melt = melt * melt * (3 - 2 * melt);   // smoothstep: filaments get EDGES
-        ramp3(clamp(melt * (0.32 + 0.8 * hot), 0, 1), MELT_A, MELT_B, MELT_C, _c3);
-        // the lid itself is not black — it is dark rock still holding heat,
-        // warmest right beside a filament (a crack heats its own rim)
-        _c4.copy(_LID_D).lerp(_LID_W, clamp(hot * (0.3 + 0.7 * lace), 0, 1));
+        melt = melt * melt * (3 - 2 * melt);   // smoothstep: veins get EDGES
+        /* 0.24+0.56, down from 0.32+0.8: with the melt now covering most of
+           the river, the old drive parked the whole body at the ramp's gold
+           top — the "red and bright" the owner asked for lives a step down,
+           with the body on the red-orange stop and only the veins and the
+           vent flood reaching the bright end. */
+        ramp3(clamp(melt * (0.24 + 0.56 * hot), 0, 1), MELT_A, MELT_B, MELT_C, _c3);
+        /* the lid itself is not black — it is dark rock still holding heat,
+           warmest right beside a filament (a crack heats its own rim).
+           QUADRATIC in hot, and biased harder into the lace: the 2026-08-16
+           slow-cooling repair keeps `hot` high for the whole eruption, and a
+           lid warmth LINEAR in hot then painted every plate warm gold — the
+           dark-crust-vs-bright-lace contrast that IS the bible photo fell
+           over. hot*hot keeps the plates dark rock while the filaments and
+           their rims stay incandescent for just as long. */
+        _c4.copy(_LID_D).lerp(_LID_W, clamp(hot * hot * (0.22 + 0.78 * lace), 0, 1));
         _c4.lerp(_c3, melt);
         kCol[off] = _c4.r * grM; kCol[off + 1] = _c4.g * grM; kCol[off + 2] = _c4.b * grM;
       }
     }
 
+    /* HOW FAST DOES LAVA GO BLACK? Slower than this file thought. OWNER,
+       2026-08-16: "the magma turns black way too soon... research the magma
+       coming out of a volcano and when it becomes black to do it right."
+       The vulcanology: basalt erupts at ~1100-1200 C (yellow-orange) and
+       stays visibly incandescent all the way down to ~500 C. A STAGNANT skin
+       greys over in minutes — but a channel that is still BEING FED keeps
+       tearing its own skin open and reads orange for hours; flows only chill
+       black after the supply stops. Every flow here is fed for the whole
+       eruption, so at /26 the vent stations were "hours old" by second
+       twenty of a twenty-second event — that is the premature black. /90
+       means an eruption-length lifetime dims a station ~20%, and the floor
+       (0.42, was 0.28) keeps even the oldest surface at a dull-red crack
+       glow instead of flat black — which is what the seams of a real flow
+       margin do for days. */
     function stationThick(i) {
       const bornAt = i * seg / Math.max(0.001, speed);
-      const localAge = clamp(age - bornAt, 0, 40);
-      return { t: 0.18 + 0.5 * (localAge / (localAge + 6)) + 0.1 * wProf[i], cool: clamp(localAge / 26, 0, 1) };
+      const localAge = clamp(age - bornAt, 0, 120);
+      // the quench overrides the slow clock: with the supply cut, the whole
+      // run chills together over QUENCH_SECS instead of station by station
+      const qk = quenchT >= 0 ? Math.min(1, quenchT / QUENCH_SECS) : 0;
+      return {
+        t: 0.18 + 0.5 * (localAge / (localAge + 6)) + 0.1 * wProf[i],
+        cool: clamp(localAge / 90 + qk, 0, 1),
+        qk: qk,
+      };
     }
 
     function writeStations(from, to) {
-      const ph = age * skinV * LID_K;
+      const ph = phT * skinV * LID_K;
       for (let i = from; i <= to && i < N; i++) {
         const p = path.pts[i], st = stationThick(i);
+        // the second quench factor lands the settled flow at ~4% hot: black
+        // rock, with the last dull-red seams surviving in the deepest lace
         ring(i, p.x, p.y, p.z, nX[i], nZ[i], halfW * wProf[i], st.t,
-          hot0[i] * (1 - 0.72 * st.cool), i * seg, ph, cGY, mGY);
+          hot0[i] * (1 - 0.58 * st.cool) * (1 - 0.9 * st.qk), i * seg, ph, cGY, mGY);
       }
     }
 
@@ -790,7 +857,7 @@
       }
       const st = stationThick(i);
       ring(i, _v.x, _v.y, _v.z, nx, nz, hw, st.t * (0.55 + 0.45 * frac),
-        hot0[i] * (1 - 0.72 * st.cool), adv, age * skinV * LID_K, cGY, mGY);
+        hot0[i] * (1 - 0.58 * st.cool) * (1 - 0.9 * st.qk), adv, phT * skinV * LID_K, cGY, mGY);
       // put the station's own bed back — the nose borrowed those slots
       for (let c = 0; c < COLS; c++) {
         const k = i * COLS + c;
@@ -820,10 +887,16 @@
         return { x: _v.x, y: _v.y, z: _v.z };
       },
       update(dt) {
-        if (dead) return handle;
+        if (dead || settled) return handle;
         age += dt;
-        adv = Math.min(len, adv + speed * dt);
+        const qk = quenchT >= 0 ? Math.min(1, (quenchT += dt) / QUENCH_SECS) : 0;
+        // a chilling surface stops travelling: the phase winds down with the
+        // heat instead of the lace sliding under a dead crust forever
+        phT += dt * (1 - qk);
+        if (quenchT < 0) adv = Math.min(len, adv + speed * dt);
         // the front forks where a fork was armed — see BRANCHING above
+        // (a quenched flow is no longer fed, so it arms nothing new)
+        if (quenchT >= 0) branchPts.length = 0;
         for (let b = 0; b < branchPts.length; b++) {
           const bp = branchPts[b];
           if (bp.done || adv < bp.at) continue;
@@ -857,7 +930,9 @@
            that was the tapered nose gets its full width on the same frame it
            stops being the front. */
         lidT += dt;
-        if (st !== lastSt || lidT >= 0.033) {
+        // qk >= 1 forces one FINAL full write past the 30 Hz throttle, so the
+        // settled colours actually land before update() stops doing anything
+        if (st !== lastSt || lidT >= 0.033 || qk >= 1) {
           lidT = 0; lastSt = st;
           writeStations(0, Math.max(0, st - 1));
         }
@@ -879,12 +954,13 @@
         // per-vertex rewrite
         // capped at 1.04: over-driving vertex colours through the output
         // encoding is what bleached the melt toward white in the peek shots
-        const fl = 0.92 + 0.1 * Math.sin(age * 5.3) + Math.random() * 0.04;
+        // a dying surface stops breathing too — the flicker rides (1 - qk)
+        const fl = 0.96 + (0.06 * Math.sin(age * 5.3) + Math.random() * 0.04 - 0.04) * (1 - qk);
         chMat.color.setScalar(clamp(fl, 0.75, 1.04));
 
         for (let i = 0; i < haze.length; i++) {
           const H = haze[i], s = adv * H.u;
-          if (s < 0.5) { H.sp.visible = false; continue; }
+          if (s < 0.5 || qk >= 1) { H.sp.visible = false; continue; }
           pathAt(path, s, _v);
           H.sp.visible = true;
           H.sp.position.set(
@@ -892,21 +968,39 @@
             _v.y + 1.4 + 0.7 * Math.sin(age * 1.6 + H.ph),
             _v.z + Math.cos(age * 0.8 + H.ph) * width * 0.3
           );
-          const sc = width * (0.42 + 0.13 * Math.sin(age * 1.1 + H.ph));
-          H.sp.scale.set(sc, sc, 1);
+          // the convection dies with the heat under it
+          const sc = width * (0.42 + 0.13 * Math.sin(age * 1.1 + H.ph)) * (1 - qk);
+          H.sp.scale.set(Math.max(0.01, sc), Math.max(0.01, sc), 1);
         }
         if (light) {
           pathAt(path, adv * 0.82, _v);
           light.position.set(_v.x, _v.y + 2.2, _v.z);
-          light.intensity = 1.5 + 0.35 * Math.sin(age * 4.1);
+          light.intensity = (1.5 + 0.35 * Math.sin(age * 4.1)) * (1 - qk);
+        }
+        // fully chilled: one last frame just wrote the black-rock colours,
+        // so the scar can stop paying for updates it no longer shows
+        if (qk >= 1) { settled = true; chMat.color.setScalar(1); }
+        return handle;
+      },
+      /* the eruption stopped feeding this flow. It stalls, chills black over
+         QUENCH_SECS, and STAYS — the caller keeps it as a scar (the lahar's
+         harden() precedent) instead of deleting a glowing river mid-frame.
+         Children are branches of the same supply, so they die with it. */
+      quench() {
+        if (quenchT < 0) {
+          quenchT = 0;
+          for (let b = 0; b < children.length; b++) children[b].quench();
         }
         return handle;
       },
+      get quenched() { return quenchT >= 0; },
       // is (x,z) ON the flow? The lethal corridor IS the drawn ribbon —
       // the same wProf the geometry used, so what kills you is what glows.
       // A branch is part of the flow, so its ribbon kills through this same
       // call and no caller has to know the tree exists.
       hitTest(x, z) {
+        // cold rock is terrain, not a hazard — what kills you is what glows
+        if (quenchT >= 0) return false;
         const c = pathCoord(path, x, z, adv);
         if (c.s >= 0 && c.s <= adv) {
           const i = clamp(Math.round(c.s / seg), 0, N - 1);
@@ -947,11 +1041,25 @@
      Same construction as the pyroclastic current, because it is the same
      physics upside down: overlapping camera-facing sprites wearing the
      shared cauliflower alpha, sizes growing with height (a plume expands
-     as it entrains air), the whole column BUILDING over its first seconds
-     rather than appearing, churning in place, and bending downwind with
-     height squared (drag integrates). Dark tiers only — the photograph's
-     pillar is soot against sky; the rose light at its base is the separate
-     lit-underside cloud the director already owns.
+     as it entrains air), bending downwind with height squared (drag
+     integrates). Dark tiers only — the photograph's pillar is soot against
+     sky; the rose light at its base is the separate lit-underside cloud
+     the director already owns.
+
+     OWNER, 2026-08-16: "when smoke comes out of the volcano it looks like
+     flat bouncing circle ish things — look at the rpg explosion and how it
+     has shape." Both halves diagnosed the same build: every puff was a
+     PERMANENT FIXTURE parked at its own height and wobbled around that seat
+     by three sinusoids — position oscillation, which the eye reads exactly
+     as billboards bouncing. The RPG's smoke reads as a volume because every
+     puff has a LIFECYCLE: born small, growing as it rises, dying into the
+     plume. So the column is now an EMITTER. A puff is born just over the
+     vent, climbs the axis while it expands, decelerates into the head,
+     spreads sideways there (that crowd IS the cauliflower bulge), and is
+     recycled back to the vent inside the one part of the mass dense enough
+     to mask it. Nothing oscillates; all motion is travel. The churn comes
+     from the shared materials' slow rotation (the pyro current's trick) and
+     the whole mass slowly turning about its own axis.
 
      Materials are OWNED, not the pyro pool's: the pyro drives its shared
      materials' rotation every tick it is alive, and two systems steering
@@ -977,22 +1085,34 @@
         blending: THREE.NormalBlending, rotation: i * 1.7,
       }));
     }
-    const N = qi(14, 26);
+    // a few more than the fixture build had: an emitter always has part of
+    // its roster in transit, and the deleted 500-mote ash rain pays for it
+    const N = qi(18, 30);
     const grp = new THREE.Group();
     grp.frustumCulled = false;
     parent.add(grp);
+    /* the lifecycle, in seconds of climb. u = life/RISE: 0 birth at the
+       vent, 1 arrival at the head, then a HOLD to 1.35 spreading in the
+       cauliflower before the puff recycles. Births are staggered across one
+       full cycle so the column is a column, not a pulse — and so it STANDS
+       UP over its first seconds for free, led by its own leading puff.
+       6 s, not longer: the cycle time IS the birth rate (N puffs per
+       1.35 RISE), and the first cut at 7.5 s put nine puffs in the air by
+       the time the storyboard photographs the young column — a head on a
+       thread of beads, not a pillar. */
+    const RISE = 6;
     const puffs = [];
     for (let i = 0; i < N; i++) {
-      /* even column density with a crowd at the top: the head is where the
-         plume stops rising and spreads, so the highest band gets the extra
-         puffs and the extra size — that is the cauliflower bulge */
-      const h = i < N * 0.62 ? (i / Math.max(1, N * 0.62)) : (0.78 + Math.random() * 0.22);
-      const m = new THREE.Sprite(mats[Math.min(COL_TIERS.length - 1, (h * 3.2) | 0)]);
+      const m = new THREE.Sprite(mats[0]);
       m.renderOrder = 7;
+      m.visible = false;
       grp.add(m);
       puffs.push({
-        m: m, h: h, ph: Math.random() * 6.28,
-        lat: (Math.random() * 2 - 1), la2: (Math.random() * 2 - 1),
+        m: m, tier: 0,
+        life: -(i / N) * RISE * 1.35,
+        ang: Math.random() * 6.28,          // seat around the axis
+        rr: 0.2 + Math.random() * 0.8,      // seat across the column
+        ph: Math.random() * 6.28,
         sz: 0.8 + Math.random() * 0.5,
       });
     }
@@ -1002,24 +1122,51 @@
       update(dt, wx, wz) {
         if (dead) return handle;
         t += dt;
-        const build = Math.min(1, t / 9);          // the column STANDS UP
         const bx = wx || 0, bz = wz || 0;
+        // the slow boil, at zero position cost: the shared materials turn at
+        // their own rates, shuffled across the roster (the pyro's trick)
+        for (let i = 0; i < mats.length; i++) mats[i].rotation = i * 1.7 + t * (0.05 + i * 0.02);
         for (let i = 0; i < puffs.length; i++) {
           const P = puffs[i];
-          const hh = P.h * build;
-          // the plume widens as it climbs, and the head bulges hardest
-          const rad = r0 * (0.5 + 1.9 * hh) * (P.h > 0.78 ? 1.35 : 1);
-          const churn = Math.sin(t * 0.7 + P.ph);
+          P.life += dt;
+          if (P.life < 0) { P.m.visible = false; continue; }
+          let u = P.life / RISE;
+          if (u >= 1.35) {
+            // recycled inside the crowded head, the one place dense enough
+            // to mask a departure; reseeded so the column never loops
+            P.life = 0; u = 0;
+            P.ang = Math.random() * 6.28;
+            P.rr = 0.2 + Math.random() * 0.8;
+            P.ph = Math.random() * 6.28;
+          }
+          const climb = Math.min(1, u);
+          // fast off the vent, decelerating into the head — a plume climbing
+          // toward neutral buoyancy — then the head HOLDS and spreads.
+          // 0.8: enough curve to crowd the head, not so much that the stem
+          // empties (puff density goes as 1/climb-rate)
+          const hh = Math.pow(climb, 0.8);
+          const hold = Math.max(0, u - 1);
+          const rad = r0 * (0.5 + 1.9 * hh) * (1 + hold * 1.3);
           // downwind lean integrates with height — drag works on the WHOLE climb
           const lean = height * 0.3 * hh * hh;
+          const drift = P.ang + t * 0.16;     // the whole mass slowly turns
           P.m.position.set(
-            x + P.lat * rad * 0.55 + Math.sin(t * 0.5 + P.ph) * 1.6 + bx * lean,
-            baseY + hh * height + churn * 1.2,
-            z + P.la2 * rad * 0.55 + Math.cos(t * 0.45 + P.ph) * 1.6 + bz * lean
+            x + Math.cos(drift) * rad * P.rr * 0.62 + bx * lean,
+            baseY + (hh + hold * 0.12) * height,
+            z + Math.sin(drift) * rad * P.rr * 0.62 + bz * lean
           );
-          const sc = rad * P.sz * (1.55 + 0.14 * Math.sin(t * 0.8 + P.ph));
+          /* BORN SMALL, GROWS AS IT ENTRAINS AIR — the lifecycle is the
+             shape. Scale doubles as the fade: a puff pops in tiny inside the
+             dense base (behind the fountain and the lit underside cloud) and
+             has been swallowed by the head crowd before it recycles. */
+          const grow = Math.min(1, u * 5) * (0.68 + 0.32 * climb) * (1 + hold * 0.45);
+          const sc = rad * P.sz * 1.5 * grow * (1 + 0.05 * Math.sin(t * 0.8 + P.ph));
           P.m.scale.set(sc, sc * 0.94, 1);
-          P.m.visible = hh > 0.01;
+          P.m.visible = sc > 0.05;
+          // the tier IS the lighting (see the pyro note): re-seated as the
+          // puff climbs out of the column's own shadow into the lit crown
+          const tier = Math.min(COL_TIERS.length - 1, (hh * 3.2) | 0);
+          if (tier !== P.tier) { P.tier = tier; P.m.material = mats[tier]; }
         }
         return handle;
       },
@@ -1940,11 +2087,15 @@
      can see it.
      ============================================================ */
   CBZ.volcanoAudit = function () {
-    let lavaTransparent = 0, lavaMeshes = 0, lavaTris = 0;
-    const lavaTips = [], lavaMids = [];
+    let lavaTransparent = 0, lavaMeshes = 0, lavaTris = 0, lavaScars = 0;
+    const lavaTips = [], lavaMids = [], lavaScarTips = [], lavaScarMids = [];
     for (let i = 0; i < LIVE.lava.length; i++) {
       const f = LIVE.lava[i];
-      try { lavaTips.push(f.tip); lavaMids.push(f.mid); } catch (e) {}
+      // a quenched scar is not a front: cameras and threat maps aiming off
+      // lavaTips must frame the rivers that still run, not last event's rock
+      // — the scars publish their own pair for anything that wants the rock
+      if (f.quenched) { lavaScars++; try { lavaScarTips.push(f.tip); lavaScarMids.push(f.mid); } catch (e) {} }
+      else { try { lavaTips.push(f.tip); lavaMids.push(f.mid); } catch (e) {} }
       const ms = [f.mesh, f.channel];
       for (let k = 0; k < ms.length; k++) {
         const m = ms[k]; if (!m || !m.material) continue;
@@ -1966,7 +2117,10 @@
     }
     return {
       v2: CBZ.CONFIG.VOLCANO_V2 !== false,
-      lavaFlows: LIVE.lava.length,
+      // live rivers only; the kept black flows are lavaScars, so the two
+      // numbers stay comparable with builds that deleted flows at the end
+      lavaFlows: LIVE.lava.length - lavaScars,
+      lavaScars: lavaScars,
       lavaMeshes: lavaMeshes,
       lavaTransparent: lavaTransparent,        // MUST be 0
       lavaOpaque: lavaTransparent === 0,
@@ -1977,6 +2131,8 @@
       // line from the vent (it did not; that is what a fall line is for)
       lavaTips: lavaTips,
       lavaMids: lavaMids,
+      lavaScarTips: lavaScarTips,
+      lavaScarMids: lavaScarMids,
       // the fan: how many live flows are branch children, and the incandescent
       // vent apron count — the two 2026-08-15 reference-photo features as
       // numbers, so the ratchet can see them

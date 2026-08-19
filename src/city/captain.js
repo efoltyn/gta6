@@ -16,9 +16,13 @@
    black book), the chart table prop, the fenced prize hull, and the audit.
 
    Wired, never re-invented (the Block Law):
-     · the boat        — an EXISTING yachts.js working trawler (or boatyard's
-                         deliver() through the one owned-vehicle pipe). Never
-                         a second hull, never a second spawn path.
+     · the boat        — an EXISTING hull the world already floats (yachts.js
+                         AFLOAT), or boatyard's deliver() through the one
+                         owned-vehicle pipe. Never a second hull, never a
+                         second spawn path. WHICH hull is the player's pick
+                         off the title screen (origins.js cityOriginBoatKey),
+                         and every fitting below is solved from that hull's
+                         own registered dimensions — see section 0.
      · the helm        — CBZ.cityEnterVehicle + world/water_helm.js. The
                          captain drives exactly what a jacked boat drives.
      · the course-hold — piracy.js's CBZ.marineAutopilot: the ONE AI hand on
@@ -64,7 +68,8 @@
    DETERMINISM: the yard build path draws through CBZ.hash01 only. Voyage
    rolls are runtime (mode-reset side), like every contract generator here.
 
-   Exposes: CBZ.captainStart, CBZ.captainBoat, CBZ.captainAudit.
+   Exposes: CBZ.captainStart, CBZ.captainBoat, CBZ.captainAudit,
+            CBZ.captainFitAudit.
    =========================================================================== */
 (function () {
   "use strict";
@@ -81,7 +86,7 @@
   if (C.CAPTAIN_YARD == null) C.CAPTAIN_YARD = true;
 
   const ORG = "shipco";                  // seacrew.js's ladder — never a mirror
-  const FLAG_KEY = "trawler";            // the flagship hull row (yachts.js)
+  const DEFAULT_FLAG = "trawler";        // the hull this story has always named
   const START_SEC = 14;                  // give the fleet this long to exist
 
   function on() { return C.CAPTAIN_V1 !== false; }
@@ -141,6 +146,117 @@
   let boardPos = null;           // harbourmaster board point
 
   /* ==========================================================================
+     0. THE FLAGSHIP IS A CHOICE, AND EVERY FITTING IS THE HULL'S OWN NUMBERS.
+
+     OWNER (2026-08-12): "captain like pilot should let me select any boat in
+     start menu." The pick comes off the title screen through origins.js
+     (CBZ.cityOriginBoatKey — world/water_hulls.js's live registry, so the list
+     is the real fleet and a hull registered tomorrow is pickable with no edit
+     here). That is one line to read. What it COSTS is this block, because
+     every fitting in this file was a trawler measurement typed as a literal:
+     the fish hold's floor at deck 2.43 between bulwarks at x +-2.64, the chart
+     table at (0.95, 2.59, 2.35), three crew stations, the rail a deckhand
+     fishes from, the bench a fare sits on, the square a crate lands on, and
+     the patch of deck you are set down on when you hand over the wheel. Put a
+     man on the 4.5 m tender with those numbers and his crew stand in the air
+     two metres above the sea, and his chart table floats astern of the boat.
+
+     So they are DERIVED, from the four dimensions every registered hull
+     already carries (deriveSpec: loa, beam, deckY, sternOffset). The trawler's
+     authored numbers are the reference — each ratio below reproduces her to
+     the centimetre, which is the check that the proportions are real and not
+     invented — and every other hull gets the same proportions.
+
+     TWO THINGS ARE CAPPED RATHER THAN SCALED, because proportion is the wrong
+     model past a certain size: a hold the length of a 156 m yacht is not a
+     hold, it is a deck; and a chart table 20 m forward is in a different room
+     from the wheel. Both cap into the aft working space, which on that hull is
+     what the tender garage actually is.
+
+     CREW SCALES WITH THE BOAT. Three hands on a 4.5 m RIB is not a crew, it is
+     a clown car — the ROSTER is sliced by length, and the mate (the man who
+     can take the wheel, i.e. the whole point of having anybody) is first.
+     ========================================================================== */
+  let flagKey = null;            // the hull actually being sailed this run
+  let FIT = null;                // her fittings, solved from her own dimensions
+
+  function hullRec(key) {
+    return (CBZ.marineHulls && CBZ.marineHulls.get) ? CBZ.marineHulls.get(key) : null;
+  }
+  function solveFit(key) {
+    const hr = hullRec(key);
+    const h = (hr && (hr.hull || hr.spec)) || {};
+    const loa = num(h.loa, 18), beam = num(h.beam, 5.6);
+    const deck = num(h.deckY, 2.43);                  // the working sole
+    const stern = num(h.sternOffset, loa * 0.5);      // group origin -> transom
+    const holdW = Math.min(beam * 0.821, 7);          // trawler 4.60
+    const holdD = Math.min(stern * 0.910, 14);        // trawler 8.19
+    const chartZ = Math.min(loa * 0.130, 6);          // trawler 2.34
+    const chartX = Math.min(beam * 0.170, 1.6);       // trawler 0.95
+    return {
+      key: key, loa: loa, beam: beam, deck: deck, stern: stern,
+      label: (hr && (hr.label || hr.model)) || "Boat",
+      model: (hr && hr.model) || (hr && hr.label) || null,
+      price: Math.round(num(hr && hr.price, 690000)),
+      holdW: holdW, holdD: holdD,
+      holdZ: -(holdD * 0.5 + 0.1),                    // trawler -4.20
+      sillZ: -(holdD + 0.36),                         // trawler -8.55
+      wallX: holdW * 0.5 + 0.34,                      // trawler 2.64
+      bulwark: deck + 0.95,                           // trawler 3.38
+      breakwater: deck + 1.17,                        // trawler 3.60
+      rampW: holdW * 0.5,                             // trawler 2.30
+      rampLen: Math.min(1.7, holdD * 0.25),
+      chartX: chartX, chartY: deck + 0.16, chartZ: chartZ,
+      helmY: deck + 0.42, helmZ: chartZ + 0.70,       // trawler 2.85 / 3.04
+      railX: Math.min(beam * 0.330, 2.6),             // trawler 1.85
+      railZ: -holdD * 0.366,                          // trawler -3.00
+      railStep: Math.min(2.2, holdD * 0.27),
+      benchX: Math.min(beam * 0.214, 1.8),            // trawler 1.20
+      benchY: deck + 0.59,                            // the catch-crate top
+      crateX: Math.min(beam * 0.160, 1.2),            // trawler 0.90
+      crateStep: Math.min(1.2, holdD * 0.15),
+      // a hold needs a floor a man can stand on; below that the boat is an
+      // open boat and gets no cargo room rather than a fictional one
+      canHold: holdW >= 1.2 && holdD >= 2,
+      crewN: loa < 7 ? 1 : loa < 12 ? 2 : 3,
+    };
+  }
+  /* The flagship key, resolved ONCE per run and then remembered. THE ORDER IS
+     THE WHOLE RULE, and it is the repo's own (an explicit CBZ.MASS_CROWD beats
+     a derived headcount — overruling is a decision, not a drift):
+
+       1. a boat the player actually CLICKED at the title screen, if it still
+          resolves against the registry;
+       2. else the flagship he already owns — a returning skipper who never
+          touched the picker keeps the hull he has, and that record round-trips
+          through g.cityGarage where the session-side pick does not;
+       3. else the working trawler this story has always described.
+
+     Owned-beats-default and pick-beats-owned are different answers to
+     different questions, and getting them the other way round means either
+     "I chose the tender and got the trawler" or "I owned a sloop and the game
+     took it off me". */
+  function flag() {
+    if (flagKey) return flagKey;
+    const rows = CBZ.cityOriginBoats ? CBZ.cityOriginBoats() : [];
+    const want = CBZ.cityOriginBoat ? CBZ.cityOriginBoat() : null;
+    let pick = null;
+    if (want) for (const r of rows) if (r.id === want) { pick = want; break; }
+    if (!pick) { const o = ownedFlagRec(); if (o && o.key) pick = o.key; }
+    if (!pick) pick = (CBZ.cityOriginBoatKey ? CBZ.cityOriginBoatKey() : null) || DEFAULT_FLAG;
+    flagKey = pick;
+    FIT = solveFit(flagKey);
+    return flagKey;
+  }
+  function fit() { if (!FIT) flag(); return FIT; }
+  function ownedFlagRec() {
+    const gar = g.cityGarage;
+    if (!gar) return null;
+    for (const r of gar) if (r && r.marine && r.captFlag) return r;
+    return null;
+  }
+
+  /* ==========================================================================
      1. THE ORIGIN — CBZ.captainStart(), armed by origins.js's `voyage` verb.
 
      The pilot's own deferral pattern (origins.js pendingAir): the fleet and
@@ -151,6 +267,13 @@
   CBZ.captainStart = function () {
     if (!on() || C.CAPTAIN_ORIGIN === false) return false;
     pendingStart = { t: 0 };
+    // A NEW RUN RE-READS THE PICK. This is the only per-run entry point, so it
+    // is the only place the cached flagship may be dropped — otherwise picking
+    // the sloop, starting, going back to the title and picking the tender puts
+    // you on the sloop, because the key was resolved once and remembered.
+    // A captain who already OWNS a boat still keeps her: flag() asks the
+    // garage before it asks the title screen.
+    flagKey = null; FIT = null;
     // The rank is the story: you ARE the captain, so shipco's own gates
     // (accommodation decks, the sail verb, the harbourmaster's board) open on
     // the same ladder every NPC crewman is ranked on. force skips admission —
@@ -166,35 +289,58 @@
   // worldstate already round-trips g.cityGarage, so ownership persists free.
   function ensureRec() {
     g.cityGarage = g.cityGarage || [];
-    for (const r of g.cityGarage) if (r && r.marine && r.key === FLAG_KEY) return r;
-    const hr = (CBZ.marineHulls && CBZ.marineHulls.get) ? CBZ.marineHulls.get(FLAG_KEY) : null;
-    const h = hr && (hr.hull || hr.spec);
+    const key = flag(), F = fit();
+    // Already yours (a reload, or you bought this hull at the yard before the
+    // story started)? Adopt it and MARK it — the mark is what makes the choice
+    // survive a reload, since the title-screen pick is session state and
+    // g.cityGarage is not. Exactly ONE record may carry it, or a captain who
+    // changes boats between runs leaves a second flagship behind for flag()
+    // step 2 to find.
+    let mine = null;
+    for (const r of g.cityGarage) {
+      if (!r || !r.marine) continue;
+      if (r.key === key) { r.captFlag = true; mine = r; }
+      else if (r.captFlag) r.captFlag = false;
+    }
+    if (mine) return mine;
     const rec = {
-      name: (hr && hr.model) || "Bergen Fisher 60",
-      marine: true, key: FLAG_KEY,
-      label: (hr && hr.label) || "Bergen Fisher 60",
-      price: Math.round(num(hr && hr.price, 690000)),
-      loa: num(h && h.loa, 18), beam: num(h && h.beam, 5.6),
+      name: F.model || F.label,
+      marine: true, key: key,
+      label: F.label,
+      price: F.price,
+      loa: F.loa, beam: F.beam,
       berthId: null, boughtAt: 0, arrears: 0, granted: true,
+      captFlag: true,
     };
     g.cityGarage.push(rec);
     if (CBZ.cityWorldCommit) { try { CBZ.cityWorldCommit(); } catch (e) {} }
     return rec;
   }
 
-  // Adopt a REAL working trawler the world already floats (yachts.js AFLOAT),
-  // else deliver the owned record through boatyard's one pipe. Never a spawn
-  // of our own.
+  // Adopt a REAL hull the world already floats (yachts.js AFLOAT — which is
+  // also how a 156 m superyacht gets sailed: she is already at her outer
+  // roadstead and no berth in the marina could ever have taken her), else
+  // deliver the owned record through boatyard's one pipe. Never a spawn of
+  // our own.
   function findFlagship(rec) {
+    const key = flag();
     // already delivered this session?
-    if (CBZ.cityCars) for (const c of CBZ.cityCars) if (c && !c.dead && c._boatKey === FLAG_KEY) return c;
+    if (CBZ.cityCars) for (const c of CBZ.cityCars) if (c && !c.dead && c._boatKey === key) return c;
     const fleet = CBZ.yachtFleet ? CBZ.yachtFleet() : null;
     if (fleet) {
       let best = null, bd = Infinity;
       const P = CBZ.player;
       for (const f of fleet) {
         const c = f && f.car;
-        if (!c || f.key !== FLAG_KEY || c.dead || c.player || c.owned || c.stolen) continue;
+        if (!c || f.key !== key || c.dead || c.player || c.owned || c.stolen) continue;
+        /* A BOAT CARRIED BY ANOTHER BOAT IS NOT A BOAT YOU CAN SAIL, and the
+           picker is what made this reachable: measured, BOTH afloat Calanque
+           tenders are children of a superyacht's davits (yachts.js's "Launch
+           the tender"). Adopting one would set car.pos in WORLD coordinates on
+           a group whose transform is its PARENT's, so the captain's first
+           command would be issued from inside somebody else's tender garage.
+           Anything not parented straight to the scene is somebody's cargo. */
+        if (c.group && c.group.parent && c.group.parent !== CBZ.scene) continue;
         const d = P && P.pos ? Math.hypot(c.pos.x - P.pos.x, c.pos.z - P.pos.z) : 0;
         if (d < bd) { bd = d; best = c; }
       }
@@ -266,7 +412,10 @@
     crewBoat(car);
 
     big("THE CAPTAIN");
-    note("Your diesel, your crew, your water. The chart table in the wheelhouse has the work.", 4.2);
+    // the boat is a pick now, so she is NAMED — you should be told which hull
+    // the harbour actually gave you rather than a line about a diesel you may
+    // not be standing on
+    note(fit().label + ". Your crew, your water. The chart table has the work.", 4.2);
     if (C.CAPTAIN_VOYAGES !== false && CBZ.mission && CBZ.mission.start) {
       try {
         firstMission = CBZ.mission.start({
@@ -287,49 +436,58 @@
     fitChart(car);
   }
 
-  // ONE CALL, ONE ROOM (vehicle_hold's contract, verbatim shape). The
-  // trawler's working deck between the bulwarks becomes a walk-in cargo room
-  // with a stern gate: floor + walls stay solid at any heading, the gate gets
-  // its phased arc, its verb and its touch pill from vehicle_hold itself, and
-  // crates latched here ride the hull's live matrix while she rolls.
-  // Numbers are the hull's own (buildTrawler: SHEER 2.35, deck 2.43, bulwarks
-  // at x ±2.72 rising to 3.38, stern at z -9).
+  // ONE CALL, ONE ROOM (vehicle_hold's contract, verbatim shape). The working
+  // deck between the bulwarks becomes a walk-in cargo room with a stern gate:
+  // floor + walls stay solid at any heading, the gate gets its phased arc, its
+  // verb and its touch pill from vehicle_hold itself, and crates latched here
+  // ride the hull's live matrix while she rolls.
+  //
+  // AND IT IS ALSO THE DECK YOU STAND ON. That is why the open boats get one
+  // too where they can carry it: the floor rect vehicle_hold registers is a
+  // real collider, so a skiff whose registration declares no walkable deck is
+  // still a boat a man can cross. Below canHold there is genuinely nowhere to
+  // put a room, and an open boat with no cargo room is an honest open boat.
   function fitHold(car) {
     if (C.CAPTAIN_HOLD === false || hold || !CBZ.vehicleHold || !car || !car.group || !window.THREE) return;
+    const F = fit();
+    if (!F.canHold) return;
     const THREE = window.THREE;
     // the stern gate node — a real transom door where the net ramp is
     const gate = new THREE.Group();
-    gate.position.set(0, 2.43, -8.55);
-    const leaf = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.1, 1.7),
+    gate.position.set(0, F.deck, F.sillZ);
+    const leaf = new THREE.Mesh(new THREE.BoxGeometry(F.rampW, 0.1, F.rampLen),
       CBZ.cmat ? CBZ.cmat(0x6f5a3c) : new THREE.MeshLambertMaterial({ color: 0x6f5a3c }));
-    leaf.position.set(0, 0.05, -0.85);
+    leaf.position.set(0, 0.05, -F.rampLen * 0.5);
     gate.add(leaf);
     gate.userData.dynamic = true;
     car.group.add(gate);
     try {
       hold = CBZ.vehicleHold(car, {
-        id: "trawler-hold", label: "Fish Hold",
-        floor: { x: 0, z: -4.2, w: 4.6, d: 8.2, top: 2.43 },
+        id: "captain-hold", label: F.loa >= 12 ? "Fish Hold" : "Cargo Well",
+        floor: { x: 0, z: F.holdZ, w: F.holdW, d: F.holdD, top: F.deck },
         walls: [
-          { x: 2.64, z: -4.2, w: 0.16, d: 8.2, y0: 2.43, y1: 3.38 },
-          { x: -2.64, z: -4.2, w: 0.16, d: 8.2, y0: 2.43, y1: 3.38 },
-          { x: 0, z: 0.0, w: 4.6, d: 0.2, y0: 2.43, y1: 3.6 },
+          { x: F.wallX, z: F.holdZ, w: 0.16, d: F.holdD, y0: F.deck, y1: F.bulwark },
+          { x: -F.wallX, z: F.holdZ, w: 0.16, d: F.holdD, y0: F.deck, y1: F.bulwark },
+          { x: 0, z: 0.0, w: F.holdW, d: 0.2, y0: F.deck, y1: F.breakwater },
         ],
-        ramp: { node: gate, w: 2.3, len: 1.7, sillZ: -8.55, sillTop: 2.43, closedRx: 1.35, openRx: -0.30, dir: -1 },
+        ramp: { node: gate, w: F.rampW, len: F.rampLen, sillZ: F.sillZ, sillTop: F.deck,
+          closedRx: 1.35, openRx: -0.30, dir: -1 },
       });
       if (hold && hold.inert) hold = null;
     } catch (e) { hold = null; }
   }
 
   // THE CHART TABLE — a physical place to pick the next job (doors beat
-  // markers). Lives in the wheelhouse (a walkable deck water_hulls already
-  // rigs), chart face proud of its frame per the SCREEN law (>= 0.025).
+  // markers). Stands just forward of the working deck, to starboard of the
+  // wheel, on a sole the hull's own deckY names; chart face proud of its frame
+  // per the SCREEN law (>= 0.025).
   function fitChart(car) {
     if (C.CAPTAIN_VOYAGES === false || chartGrp || !car || !car.group || !window.THREE) return;
+    const F = fit();
     const THREE = window.THREE;
     const cm = CBZ.cmat || function (c) { return new THREE.MeshLambertMaterial({ color: c }); };
     const grp = new THREE.Group();
-    grp.position.set(0.95, 2.59, 2.35);                  // wheelhouse sole, stbd of the wheel
+    grp.position.set(F.chartX, F.chartY, F.chartZ);        // stbd of the wheel
     grp.userData.dynamic = true;                          // live prop — never batched
     const legs = new THREE.Mesh(new THREE.BoxGeometry(0.82, 0.78, 0.56), cm(0x4a3a26));
     legs.position.y = 0.39; grp.add(legs);
@@ -376,11 +534,23 @@
         ranked on seacrew's OWN field. If seacrew already crewed this hull,
         those bodies are adopted, never doubled.
      ========================================================================== */
-  const ROSTER = [
-    { job: "first mate", rank: "mate", sit: true, st: { x: -0.9, y: 2.85, z: 2.7, face: 0 }, outfit: 0x24354f, wealth: 0.5 },
-    { job: "net hand", rank: "deckhand", st: { x: 1.5, y: 2.43, z: -3.2, face: Math.PI * 0.5 }, outfit: 0xd8862c, wealth: 0.22 },
-    { job: "trawlerman", rank: "deckhand", st: { x: -1.5, y: 2.43, z: -5.2, face: -Math.PI * 0.5 }, outfit: 0x4a5232, wealth: 0.22 },
-  ];
+  /* THE SHIP'S COMPANY, SOLVED FOR THIS HULL. The mate is first because he is
+     the man who can take the wheel — on a boat too small for three hands the
+     one you keep is the one who lets you leave the helm and walk your deck.
+     Stations are the hull's own: the mate beside the wheel, the deckhands on
+     the working deck astern of the break. */
+  function roster(F) {
+    F = F || fit();
+    const all = [
+      { job: "first mate", rank: "mate", sit: true, wealth: 0.5, outfit: 0x24354f,
+        st: { x: -F.chartX * 0.95, y: F.helmY, z: F.chartZ + 0.36, face: 0 } },
+      { job: F.loa >= 12 ? "net hand" : "deckhand", rank: "deckhand", wealth: 0.22, outfit: 0xd8862c,
+        st: { x: F.railX * 0.81, y: F.deck, z: -F.holdD * 0.39, face: Math.PI * 0.5 } },
+      { job: F.loa >= 12 ? "trawlerman" : "boat hand", rank: "deckhand", wealth: 0.22, outfit: 0x4a5232,
+        st: { x: -F.railX * 0.81, y: F.deck, z: -F.holdD * 0.635, face: -Math.PI * 0.5 } },
+    ];
+    return all.slice(0, F.crewN);
+  }
   let postSeq = 0;
   function crewNode(car) {
     const THREE = window.THREE;
@@ -437,10 +607,10 @@
       // pushed off zero from inside this file.
       try { CBZ.cityStaffVenue("captain", { stations: 0, note: "the captain's own crew" }); venueDeclared = true; } catch (e) {}
     }
-    for (const r of ROSTER) {
+    for (const r of roster()) {
       const st = r.st;
       const p = CBZ.cityStaffPost({
-        venue: "captain", id: "captain:" + FLAG_KEY + ":" + (postSeq++),
+        venue: "captain", id: "captain:" + flag() + ":" + (postSeq++),
         job: r.job, archetype: "laborer",
         x: car.pos.x, z: car.pos.z, face: st.face || 0,
         at: function () { return car.pos; },
@@ -530,7 +700,9 @@
     if (castIt) {
       // to the rail: a real standing spot at the bulwark, line outboard
       const side = (p._captStation && p._captStation.x < 0) ? -1 : 1;
-      const st = { x: side * 1.85, y: 2.43, z: -3.0 - (crew.indexOf(p) % 2) * 2.2, face: side * Math.PI * 0.5 };
+      const F = fit();
+      const st = { x: side * F.railX, y: F.deck,
+        z: F.railZ - (crew.indexOf(p) % 2) * F.railStep, face: side * Math.PI * 0.5 };
       stationPed(p, st, false);
       p._captFishing = true;
       let rec = null;
@@ -540,7 +712,8 @@
     } else {
       p._captFishing = false;
       for (const r of fishRods) if (r.ped === p && r.mesh) r.mesh.visible = false;
-      const st = p._captStation || { x: 1.5, y: 2.43, z: -3.2, face: Math.PI * 0.5 };
+      const R = roster();
+      const st = p._captStation || R[R.length - 1].st;
       stationPed(p, st, !!p._captSit);
       note("Lines stowed.", 1.4);
     }
@@ -558,25 +731,25 @@
     // already standing wherever you chose to stand.
     const P = CBZ.player;
     if (wasDriving && P && P.pos && boat.group) {
-      const w = boatWorld(boat, -0.2, 1.4);
-      P.pos.set(w.x, boat.group.position.y + 2.59, w.z);
+      const w = boatWorld(boat, -fit().chartX * 0.21, fit().chartZ * 0.6);
+      P.pos.set(w.x, boat.group.position.y + fit().chartY, w.z);
       P.vy = 0; P.grounded = true;
       if (CBZ.playerChar) { CBZ.playerChar.group.position.copy(P.pos); CBZ.playerChar.group.visible = true; }
     }
     // the mate takes the wheel — a body at the helm, not a flag
-    stationPed(p, { x: 0, y: 2.85, z: 3.05, face: 0 }, true);
+    stationPed(p, { x: 0, y: fit().helmY, z: fit().helmZ, face: 0 }, true);
     const h = num(boat.heading, 0);
     helm = {
       ped: p,
       course: { x: boat.pos.x + Math.sin(h) * 600, z: boat.pos.z + Math.cos(h) * 600 },
       speed: num(S.cruiseMs, 4.5) * 0.8,
     };
-    note((p.name || "The mate") + " has the helm — she'll hold this heading. Walk your deck.", 2.6);
+    note((p.name || "The mate") + " has the helm, she'll hold this heading. Walk your deck.", 2.6);
   }
   function handBack(p) {
     helm = null;
     nOrders++;
-    const st = p._captStation || ROSTER[0].st;
+    const st = p._captStation || roster()[0].st;
     stationPed(p, st, !!p._captSit);
     note("You have the helm back the moment you step to the wheel.", 2.0);
   }
@@ -600,7 +773,7 @@
       if (CBZ.syncActorWeapon) { try { CBZ.syncActorWeapon(c); } catch (e) {} }
       n++;
     }
-    note(up ? ("All hands armed — " + n + " gun" + (n === 1 ? "" : "s") + " on deck.")
+    note(up ? ("All hands armed · " + n + " gun" + (n === 1 ? "" : "s") + " on deck.")
             : "Guns back in the locker.", 2.2);
   }
 
@@ -650,7 +823,7 @@
       try { CBZ.cityEcon.add(sp.fur, 1); } catch (e) { continue; }
       nCrewCatches++;
       if (voyage && voyage.kind === "fish") voyage.caught = (voyage.caught || 0) + 1;
-      if (nCrewCatches % 3 === 1) note("Thump on the deck — " + sp.name + " in the box.", 1.8);
+      if (nCrewCatches % 3 === 1) note("Thump on the deck · " + sp.name + " in the box.", 1.8);
     }
   }
 
@@ -851,8 +1024,10 @@
     for (const cr of kind.crates) {
       if (cr.in) continue;
       // the crate goes into the room and LATCHES — it now rides the hull
-      const w = hold.worldOf(((kind.loaded % 2) ? 0.9 : -0.9), 2.43 + 0.01, -3.0 - Math.floor(kind.loaded / 2) * 1.2);
-      cr.group.position.set(w.x, w.y != null ? w.y : boat.group.position.y + 2.44, w.z);
+      const F = fit();
+      const w = hold.worldOf(((kind.loaded % 2) ? F.crateX : -F.crateX), F.deck + 0.01,
+        F.railZ - Math.floor(kind.loaded / 2) * F.crateStep);
+      cr.group.position.set(w.x, w.y != null ? w.y : boat.group.position.y + F.deck + 0.01, w.z);
       cr.in = !!hold.latchCargo(cr);
       if (!cr.in) cr.in = true;                  // hold off: it still sits on the deck rect
       kind.loaded++;
@@ -886,13 +1061,13 @@
       giver: "The chart table", reward: 0,
       stages: [
         { id: "out", text: "Make " + off.at.name, goal: "reach", at: { x: off.at.x, z: off.at.z }, radius: 40 },
-        { id: "box", text: "Fill the box (" + off.want + " fish — order the hands to cast lines)", goal: "custom" },
+        { id: "box", text: "Fill the box (" + off.want + " fish, order the hands to cast lines)", goal: "custom" },
       ],
       onComplete: function () {
         nFishTrips++;
         const bonus = (kind.caught || 0) * 12;
         if (bonus && CBZ.city && CBZ.city.addCash) CBZ.city.addCash(bonus);
-        note("Box full — the fish are yours to sell, and the buyer tips " + money(bonus) + ".", 3);
+        note("Box full, the fish are yours to sell, and the buyer tips " + money(bonus) + ".", 3);
         endVoyage();
       },
       onFail: endVoyage,
@@ -913,7 +1088,7 @@
       onComplete: function () {
         nSalvage++;
         if (off.car) off.car._captSalvaged = true;
-        note("Stripped to the waterline — " + money(off.pay) + " in fittings.", 2.6);
+        note("Stripped to the waterline · " + money(off.pay) + " in fittings.", 2.6);
         endVoyage();
       },
       onFail: endVoyage,
@@ -932,11 +1107,11 @@
       giver: "Nobody. This one is yours.", reward: 0,
       stages: [
         { id: "close", text: "Run her down", goal: "reach", vehicle: off.car, radius: 30 },
-        { id: "take", text: "Take her — board, break her crew, or drive her", goal: "custom" },
+        { id: "take", text: "Take her, board, break her crew, or drive her", goal: "custom" },
       ],
       onComplete: function () {
         nRaids++;
-        note("She's yours. Her people are your problem now — or your payday.", 3.2);
+        note("She's yours. Her people are your problem now, or your payday.", 3.2);
         endVoyage();
       },
       onFail: endVoyage,
@@ -956,7 +1131,7 @@
       find: function (px, pz) {
         if (!on() || C.CAPTAIN_VOYAGES === false || !boat || !chartGrp) return null;
         if (CBZ.player && CBZ.player.driving) return null;
-        const w = boatWorld(boat, 0.95, 2.35);
+        const w = boatWorld(boat, fit().chartX, fit().chartZ);
         const dx = w.x - px, dz = w.z - pz;
         if (dx * dx + dz * dz > 2.6 * 2.6) return null;
         // fresh offers when you walk up (cheap; re-rolled at most every 8 s)
@@ -980,7 +1155,7 @@
           onSelect: function () { if (offers && offers.fish) startFish(offers.fish); } },
         { id: "cv-salvage", slot: "k",
           canShow: function () { return !voyage && offers && !!offers.salvage; },
-          label: function () { return "Salvage a derelict — " + money(offers.salvage.pay); },
+          label: function () { return "Salvage a derelict · " + money(offers.salvage.pay); },
           onSelect: function () { if (offers && offers.salvage) startSalvage(offers.salvage); } },
         { id: "cv-raid", slot: "l", bad: true,
           canShow: function () { return !voyage && offers && !!offers.raid; },
@@ -988,11 +1163,11 @@
           onSelect: function () { if (offers && offers.raid) startRaid(offers.raid); } },
         { id: "cv-none", slot: "e",
           canShow: function () { return !voyage && offers && !offers.charter && !offers.cargo && !offers.fish && !offers.salvage; },
-          label: function () { return "Nothing on the board — quiet water today"; },
+          label: function () { return "Nothing on the board"; },
           onSelect: function () { note("The sea will have work tomorrow.", 1.8); } },
         { id: "cv-live", slot: "e",
           canShow: function () { return !!voyage; },
-          label: function () { return "Voyage under way — see it through"; },
+          label: function () { return "Voyage under way"; },
           onSelect: function () {} },
       ],
     });
@@ -1020,7 +1195,7 @@
             // THE REWARD IS LEGIBLE THROUGH THE LOCKED DOOR (gun-room law):
             // anybody may read what the manifest pays; only a master takes it.
             const o = offersHM && offersHM.cargo;
-            return "Ticketed masters only — top manifest pays " + money(o ? o.pay : 2400);
+            return "Ticketed masters only, top manifest pays " + money(o ? o.pay : 2400);
           },
           onSelect: function () { note("The harbourmaster doesn't look up: \"Master's ticket, or off my quay.\"", 2.6); } },
         { id: "hm-cargo", slot: "e",
@@ -1036,7 +1211,7 @@
       ],
     });
     if (I.describe) I.describe("hmBoard", function () {
-      return { label: "Harbourmaster's board", note: playerIsCaptain() ? "The good contracts, master" : "The good contracts — behind the counter" };
+      return { label: "Harbourmaster's board", note: playerIsCaptain() ? "The good contracts, master" : "The good contracts, behind the counter" };
     });
 
     // load / unload verbs on the crate stack (a zone at the live dock)
@@ -1055,7 +1230,7 @@
       options: [{
         id: "crate-load", slot: "e",
         canShow: function () { return voyage && voyage.kind === "cargo" && voyage.m && voyage.m.stageId && voyage.m.stageId() === "load" && !!boat; },
-        label: function () { return "Heave a crate into the hold (" + voyage.loaded + "/" + voyage.n + ")"; },
+        label: function () { return "Load a crate (" + voyage.loaded + "/" + voyage.n + ")"; },
         onSelect: function () {
           if (!boat || Math.hypot(boat.pos.x - (CBZ.player ? CBZ.player.pos.x : 0), boat.pos.z - (CBZ.player ? CBZ.player.pos.z : 0)) > 40) { note("Bring her alongside first.", 1.8); return; }
           if (hold && hold.closed) { try { hold.openRamp(); } catch (e) {} }
@@ -1106,8 +1281,9 @@
         if (d < 26) {
           // they step aboard and take a seat on the catch crates amidships
           // (attach — the same call every seated body in this game rides; the
-          // crate top the trawler already draws is at 3.05)
-          if (stationPed(voyage.ped, { x: -1.2, y: 3.02, z: -2.6, face: Math.PI, cushion: 0.55 }, true)) {
+          // crate top the hull's own deck height puts them on)
+          if (stationPed(voyage.ped, { x: -fit().benchX, y: fit().benchY,
+            z: fit().railZ * 0.87, face: Math.PI, cushion: 0.55 }, true)) {
             voyage.ped._captPax = true;
             voyage.aboard = true;
             voyage.m.advance();
@@ -1292,7 +1468,7 @@
           canShow: function () { return !!yardGate && !yardOwned(); },
           label: function () {
             const e = prizeEntry();
-            return "Locked — the " + (e ? e.label : "Ravenna 41") + ". " + money(e ? e.price : 1450000) + " at the broker's desk";
+            return "Locked, the " + (e ? e.label : "Ravenna 41") + ". " + money(e ? e.price : 1450000) + " at the broker's desk";
           },
           onSelect: function () { note("Chain and padlock. The hull sits there where you can read her name. The broker sells the key.", 3); } },
         { id: "yg-open", slot: "e",
@@ -1308,7 +1484,7 @@
       ],
     });
     if (I.describe) I.describe("yardGate", function () {
-      return { label: "Cassaline hard stand", note: yardOwned() ? "Your hull on the cradle" : "The next boat up — locked" };
+      return { label: "Cassaline hard stand", note: yardOwned() ? "Your hull on the cradle" : "The next boat up, locked" };
     });
   }
   function yardOwned() {
@@ -1329,7 +1505,7 @@
       if (!cr || cr.target !== boat || pirateHitSeen[cr.id]) continue;
       pirateHitSeen[cr.id] = 1;
       nPirateHits++;
-      note("Skiffs on the quarter — that's not a fishing pattern. Arm the crew.", 3.4, { urgent: true });
+      note("Skiffs on the quarter, that's not a fishing pattern. Arm the crew.", 3.4, { urgent: true });
     }
   }
 
@@ -1350,7 +1526,7 @@
       // a reload / a redelivery through the boatyard: adopt the owned hull the
       // moment it exists again, and re-crew her.
       if (CBZ.cityCars) for (const c of CBZ.cityCars) {
-        if (c && !c.dead && c._boatKey === FLAG_KEY && c.owned) { boat = c; rigFlagship(c); crewBoat(c); break; }
+        if (c && !c.dead && c._boatKey === flag() && c.owned) { boat = c; rigFlagship(c); crewBoat(c); break; }
       }
     } else if (boat.dead || !boat.group || !boat.group.parent) {
       // vehicle_hold's own 9.4 housekeeping releases freight from a dead host;
@@ -1374,6 +1550,54 @@
   /* ==========================================================================
      9. THE AUDIT — CBZ.captainAudit(). The orchestrator runs it.
      ========================================================================== */
+  /* THE FITTINGS RATCHET. A picker that offers eleven hulls is eleven chances
+     to stand a man in the sea, and the fault is silent — nothing throws when a
+     crew station lands four metres off the transom, you just find a deckhand
+     treading water. So every station this file places is checked against the
+     hull's OWN envelope, for EVERY hull in the registry rather than the one
+     being sailed: `offHull` is answerable at boot, with no run and no origin.
+     0.62 x the moulded dimension is the bound — a little proud of the hull,
+     because a bulwark, a rubbing strake and a boarding platform all legally
+     sit outside the moulded beam and none of them is the sea. */
+  function fitFaults(key) {
+    const F = solveFit(key);
+    const halfB = F.beam * 0.62, halfL = F.loa * 0.62;
+    const pts = [
+      ["chart", F.chartX, F.chartZ], ["helm", 0, F.helmZ],
+      ["holdFwd", F.wallX, 0], ["holdAft", F.wallX, F.holdZ - F.holdD * 0.5],
+      ["sill", F.rampW * 0.5, F.sillZ],
+      ["bench", F.benchX, F.railZ * 0.87],
+      ["crate", F.crateX, F.railZ - F.crateStep],
+      ["rail", F.railX, F.railZ - F.railStep],
+    ];
+    const R = roster(F);
+    for (let i = 0; i < R.length; i++) pts.push(["crew:" + R[i].rank, R[i].st.x, R[i].st.z]);
+    const bad = [];
+    for (const p of pts) {
+      if (!isFinite(p[1]) || !isFinite(p[2]) || Math.abs(p[1]) > halfB || Math.abs(p[2]) > halfL) bad.push(key + "/" + p[0]);
+    }
+    return bad;
+  }
+  CBZ.captainFitAudit = function () {
+    const rows = CBZ.cityOriginBoats ? CBZ.cityOriginBoats() : [];
+    const keys = rows.length ? rows.map(function (r) { return r.id; }) : [DEFAULT_FLAG];
+    let off = [], holds = 0, hands = 0;
+    for (const k of keys) {
+      off = off.concat(fitFaults(k));
+      const F = solveFit(k);
+      if (F.canHold) holds++;
+      hands += F.crewN;
+    }
+    return {
+      hulls: keys.length,        // how many boats the start menu offers
+      offHull: off.length,       // PINNED AT 0 — a fitting placed outside its hull
+      where: off.slice(0, 8),
+      withHold: holds,           // boats big enough for a real cargo room
+      crewSeats: hands,          // total stations across the fleet (> 0 or nobody sails)
+      flag: flagKey, flagLabel: FIT ? FIT.label : null,
+    };
+  };
+
   CBZ.captainAudit = function () {
     const P = CBZ.player;
     const live = liveCrew();
@@ -1402,6 +1626,8 @@
     return {
       enabled: on(),
       boat: !!boat,
+      flag: flagKey, flagLabel: FIT ? FIT.label : null,
+      crewPlanned: FIT ? FIT.crewN : null,
       atHelm: !!(boat && P && P.driving && P._vehicle === boat),
       mateHasHelm: !!helm,
       crew: live.length,

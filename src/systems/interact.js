@@ -140,6 +140,14 @@
       if (CBZ.prisonRobTarget) CBZ.prisonRobTarget(a);
       return { ok: true, msg: "" };
     } },
+    // Tie a held-up man's wrists (intimidate.js validates range/state and
+    // spends the Bedsheet Rope). Silent either way: the sub-chip already
+    // says "needs rope" when the bag cannot pay, and a tied man slumping is
+    // the receipt when it can.
+    restrain: { label: "Tie him up",      fn: (a) => {
+      if (CBZ.prisonRestrainTarget) CBZ.prisonRestrainTarget(a);
+      return { ok: true, msg: "" };
+    } },
     release:  { label: "Let him go",      fn: (a) => {
       // Lowering the gun is the other half of holding it up. Ending the hold
       // here (rather than making the player walk away) means the panel can
@@ -151,12 +159,12 @@
 
   // one-line teaching text per verb; shown until the player has used it
   const DESC = {
-    insult:   "Talk trash — drops rep, may start a brawl",
-    fight:    "Throw hands — chain hits for a K.O. combo",
-    befriend: "Do favors, build rep — friends walk you free",
+    insult:   "Talk trash · drops rep, may start a brawl",
+    fight:    "Throw hands · chain hits for a K.O. combo",
+    befriend: "Do favors, build rep · friends walk you free",
     trade:    "Buy contraband with cigarettes",
     bribe:    "Spend cigs to make authority look away",
-    steal:    "Lift a key, a chain, or cigs — risky if seen",
+    steal:    "Lift a key, a chain, or cigs · risky if seen",
     payoff:   "Corrupt cop cleans up heat for a price",
     join:     "Join their gang for backup & protection",
     listen:   "Hear what they want",
@@ -174,6 +182,7 @@
     detain:   "Drop them without an arrest meter",
     search:   "Confiscate pocket loot",
     rob:      "Empty his pockets at gunpoint",
+    restrain: "Spend a bedsheet rope to tie him. He stays down",
     release:  "Lower the gun and let him go",
   };
   // TIPS ARE OFF UNTIL ASKED FOR (JAIL_SHOW_DONT_TELL, declared entities/ai.js).
@@ -242,7 +251,7 @@
     if (a.reportedPlayerT > 0) parts.push("still fresh");
     if (a.reportedPlayerSpread > 1) parts.push("word got round");
     if (a.reportedPlayerLastKnown && a.reportedPlayerLastKnown.type) parts.push(a.reportedPlayerLastKnown.type === "visual" ? "saw you himself" : "only heard it");
-    return `talks to the screws — ${base}${parts.length ? " · " + parts.join(" · ") : ""}`;
+    return `talks to the screws. ${base}${parts.length ? " · " + parts.join(" · ") : ""}`;
   }
   function cleanName(a) {
     return a && a.data && a.data.name ? a.data.name.replace(/^the |^a |^an /, "") : "someone";
@@ -352,7 +361,7 @@
        the same panel, the same four keys, different verbs — which is exactly
        what happens when a man walks up with an offer. Outranks every approach
        kind because a drawn gun outranks a conversation. */
-    if (a.intimidMode === "scared") return ["rob", "release"];
+    if (a.intimidMode === "scared") return ["rob", "restrain", "release"];
     if (a.approach && a.approach.t > 0) {
       if (a.approach.kind === "gangInvite") return ["listen", "accept", "refuse"];
       if (a.approach.kind === "gangJob") return ["listen", "accept", "refuse"];
@@ -448,6 +457,7 @@
     if (v === "paySilence") return CBZ.knownSnitchCost ? CBZ.knownSnitchCost(a) + "" : "";
     if (v === "haggle") return a.approach && a.approach.haggled ? "done" : ((a.playerTrust || 0) >= 6 ? "trust helps" : "");
     if (v === "threaten" || v === "threatenSnitch") return CBZ.playerArmed && CBZ.playerArmed() ? "armed" : "";
+    if (v === "restrain") return CBZ.econ && CBZ.econ.hasItem && CBZ.econ.hasItem("Bedsheet Rope") ? "" : "needs rope";
     if (v === "confrontReport") return a.reportedPlayerCred == null ? "" : (a.reportedPlayerCred > 0.78 ? "believed" : (a.reportedPlayerCred < 0.45 ? "doubted" : "heard"));
     if (v === "question") {
       if ((a.playerTrust || 0) >= 5) return "talks";
@@ -496,7 +506,7 @@
     const ap = a.approach || {};
     switch (ap.kind) {
       case "favor":      return `Do the favor (+${ap.gift || 3})`;
-      case "buyItem":    return `Buy it — ${ap.price || 0}`;
+      case "buyItem":    return `Buy it. ${ap.price || 0}`;
       case "copBribe":   return `Pocket the ${ap.price || 0}`;
       case "copTip":     return "Take the tip";
       case "copPlea":    return "Hear the plea out";
@@ -520,7 +530,7 @@
       case "insult":   return `Talk trash to ${nm}`;
       case "befriend": return (a.playerGrudge || 0) >= 6 ? `Square things with ${nm}` : ((a.rep || 0) >= 45 ? `Catch up with ${nm}` : `Chat up ${nm}`);
       case "fight":    return `Throw hands with ${nm}`;
-      case "trade":    { const o = a.data && a.data.offer; return o ? `Buy ${shortText(o.item, 16)} — ${o.price}` : "Browse their goods"; }
+      case "trade":    { const o = a.data && a.data.offer; return o ? `Buy ${shortText(o.item, 16)}. ${o.price}` : "Browse their goods"; }
       case "bribe":    { const c = CBZ.econ.bribeCost ? CBZ.econ.bribeCost(a) : (a.kind === "warden" ? 25 : (a.corrupt ? 5 : 10)); return `Slip ${c} to look away`; }
       case "payoff":   { const c = CBZ.econ.payoffCost ? CBZ.econ.payoffCost(a) : 6; return `Pay ${c} to clear your heat`; }
       case "steal":    return (a.kind === "guard" || a.kind === "warden") ? `Lift ${nm}'s keys` : `Pick ${nm}'s pocket`;
@@ -801,24 +811,32 @@
       esc(labelFor(a, v)) + '"><span class="pi-lab">' + esc(shortLabel(a, v)) + "</span>" +
       (sub ? '<span class="pi-sub">' + esc(shortText(sub, subMax || 12)) + "</span>" : "") + "</button>";
   }
-  // Tablet row: the left side says what the option actually does; the right
-  // side is the thumb target. The index is still the canonical doAction index.
-  // SAY IT ONCE (interactions.js's zip-tie law): a copy cell that would only
-  // repeat the button's own word — label === verb, no meter, no teaching line —
-  // is dropped entirely, and the button is the row.
+  /* Tablet row: A BUTTON, AND NOTHING BESIDE IT (owner, 2026-08-18: "there
+     should be almost no words next to a button. Almost none, if any.")
+
+     This rail used to print the authored line in a copy cell and a three-letter
+     verb on the button — "Slip 25 to look away" beside SLIP — which is the
+     same sentence-sawn-in-half the city card was doing. The whole line moves
+     ONTO the button now (it is a short line by construction: these labels are
+     built from a 14-char name and a verb), so the price is still on the thumb
+     target. Only a line too long for a button falls back to its verb head.
+     A pure STATUS chip (a meter word, "armed", "counting") rides along inside
+     the button, where it was always headed. */
+  const RAIL_BUTTON_MAX = 28;
+  function railButton(label, word) {
+    const s = String(label || "").trim().replace(/[?.!]+$/, "");
+    if (s && s.length <= RAIL_BUTTON_MAX) return s;
+    return word;
+  }
   function optChoice(idx, a, v) {
     const label = labelFor(a, v);
     const sub = subFor(a, v);
-    const desc = (CBZ.cityCampaignPrisonDesc && CBZ.cityCampaignPrisonDesc(a, v)) || DESC[v] || "";
-    const detail = [sub, (helpOn && !learned[v]) ? desc : ""].filter(Boolean).join(" · ");
-    const word = shortLabel(a, v).toUpperCase();
-    const dup = !detail && String(label).trim().toUpperCase() === word;
+    const word = railButton(label, shortLabel(a, v)).toUpperCase();
     return '<div class="pi-choice">' +
-      (dup ? "" :
-        '<span class="pi-copy"><span class="pi-choice-label">' + esc(label) + "</span>" +
-        (detail ? '<span class="pi-choice-detail">' + esc(detail) + "</span>" : "") + "</span>") +
       '<button type="button" class="pi-action" data-pi="' + idx + '" aria-label="' +
-      esc(label) + '">' + esc(word) + "</button></div>";
+      esc(label) + '">' + esc(word) +
+      (sub ? '<span class="pi-act-sub">' + esc(shortText(sub, 12)) + "</span>" : "") +
+      "</button></div>";
   }
 
   function renderTouch(a, core, rest, rawNote) {
@@ -845,8 +863,7 @@
       // PRISON_TIPS off (the default): no toggle row at all. The rail is verbs.
       if (tipsAllowed()) {
         pills = '<div class="pi-choice pi-tips-choice">' +
-          '<span class="pi-copy"><span class="pi-choice-label">Teaching tips</span>' +
-          '<span class="pi-choice-detail">Explain unfamiliar actions beside their buttons</span></span>' +
+          '<span class="pi-copy"><span class="pi-choice-label">Teaching tips</span></span>' +
           '<button type="button" class="pi-action pi-tips-action' + (helpOn ? " on" : "") +
           '" data-pi="tips" aria-label="Teaching tips ' + (helpOn ? "on" : "off") + '">' +
           (helpOn ? "TIPS ON" : "TIPS OFF") + "</button></div>";
@@ -977,18 +994,18 @@
       const sub = subFor(a, v);
       const desc = (CBZ.cityCampaignPrisonDesc && CBZ.cityCampaignPrisonDesc(a, v)) || DESC[v] || "";
       if (dockedTouch) {
-        const action = v === "campaign-spy" ? "ACCEPT"
+        // A BUTTON, AND NOTHING BESIDE IT — the same law as the live rail
+        // above (this is the PRISON_INTERACT_TOUCH=false fallback). The
+        // authored line rides ON the button when it fits; the status chip
+        // rides inside it; the teaching sentence is not a control and does
+        // not sit next to one.
+        const word = v === "campaign-spy" ? "ACCEPT"
           : v === "campaign-escape" ? "REFUSE"
           : String((VERB[v] && VERB[v].label) || v).toUpperCase();
-        const detail = (showTips && !learned[v] && desc) ? `<span class="idesc">${desc}</span>` : "";
-        // SAY IT ONCE, here too: this is the PRISON_INTERACT_TOUCH=false
-        // fallback, and it must obey the same law as the live rail above.
-        const dup = !sub && !detail && String(label).trim().toUpperCase() === action;
+        const action = railButton(label, word).toUpperCase();
         return `<div class="iopt tverb tyes" data-i="${i}">` +
-          (dup ? "" :
-            `<span class="itouch-copy"><span class="ilab">${label}</span>` +
-            `<span class="isub">${sub}</span>${detail}</span>`) +
-          `<button type="button" class="itouch-act">${action}</button></div>`;
+          `<button type="button" class="itouch-act">${action}` +
+          (sub ? `<span class="pi-act-sub">${sub}</span>` : "") + `</button></div>`;
       }
       const row = `<div class="iopt" data-i="${i}"><span class="ikey">${(OPT_KEYS[i] || "").toUpperCase()}</span>` +
         `<span class="ilab">${label}</span>` +
@@ -1015,7 +1032,7 @@
     pay: 74, detain: 72, listen: 70, search: 70, warn: 66, threaten: 64, respect: 60,
     question: 60, haggle: 50, insult: 40,
     // gunpoint pair — only ever offered together, so the cap never sees them
-    rob: 96, release: 94,
+    rob: 96, restrain: 95, release: 94,
   };
   function cap4(v) {
     if (v.length <= 4) return v;

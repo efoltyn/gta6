@@ -647,7 +647,7 @@
             nextEggT = (CBZ.now || 0) + 180000;        // ~3 min — a real coop refills slowly
             if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(12);
             if (CBZ.sfx) CBZ.sfx("coin");
-            if (CBZ.city && CBZ.city.note) CBZ.city.note("Collected a basket of eggs — sold for $12.", 2.0);
+            if (CBZ.city && CBZ.city.note) CBZ.city.note("Collected a basket of eggs, sold for $12.", 2.0);
           },
         }],
       });
@@ -667,7 +667,7 @@
     box(standX, 1.6, standZ, standW, 3.2, standD, M.woodLt, true);
     box(standX, 3.6, standZ, standW + 1.5, 0.4, standD + 1, M.barnRed, false);
     if (CBZ.makeLabelSprite) {
-      const s = CBZ.makeLabelSprite("FARM STAND — FRESH PRODUCE");
+      const s = CBZ.makeLabelSprite("FARM STAND · FRESH PRODUCE");
       if (s) { s.position.set(standX, 5.4, standZ); s.scale.set(9, 2.1, 1); root.add(s); }
     }
     (function farmStandVendor() {

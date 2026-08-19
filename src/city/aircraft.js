@@ -1751,7 +1751,7 @@
     // does. This is the whole reason the crew is real bodies in real seats
     // rather than mesh silhouettes.
     if (heli && !heli.downed && heli.phase !== "spool" && crewLost(heli, "Pilot")) {
-      if (CBZ.cityFlavor) CBZ.cityFlavor("The gunship's pilot is down — it's going in!", "#ff8b6b");
+      if (CBZ.cityFlavor) CBZ.cityFlavor("The gunship's pilot is down, it's going in!", "#ff8b6b");
       downHeli();
       fallHeli(dt);
       return;

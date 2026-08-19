@@ -2247,13 +2247,13 @@
           const sx = p.x(bx), sy = p.z(by);
           drawIcon(ctx, sx, sy, "sealed", { size: sealed ? 8 : 6, tier: sealed, color: sealed ? null : "rgba(220,232,240,.9)" });
           stats.icons++;
-          pickAdd(sx, sy, 9, "sealed", "Bridge", sealed ? "SEALED — roadblocks up" : "Mainland ↔ island crossing", bx, by);
+          pickAdd(sx, sy, 9, "sealed", "Bridge", sealed ? "SEALED · roadblocks up" : "Mainland ↔ island crossing", bx, by);
           // SEALED is the one bridge word that survives: it is a live obstruction
           // between you and your escape, not a place name you can go and read.
           if (sealed) mapLabel("SEALED", sx, sy - 14, { size: 10, fill: "#ff8b7a", force: true });
         } else {
           dot(bx, by, p, sealed ? "#ff5a4c" : "rgba(220,232,240,.72)", sealed ? 5 : 3);
-          text(sealed ? "BRIDGE — SEALED" : "BRIDGE", bx, by - 12 / p.sc, p,
+          text(sealed ? "BRIDGE · SEALED" : "BRIDGE", bx, by - 12 / p.sc, p,
             sealed ? "#ff8b7a" : "rgba(225,240,255,.58)", 10);
         }
       }

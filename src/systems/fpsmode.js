@@ -1857,15 +1857,25 @@
         if (!a || a.dead || a.ko > 0 || a.escaped || !a.group) continue;
         // per-actor radii: a protected actor gets the bare silhouette, so only
         // a literal ray through the real body registers. (See the block above.)
-        const bare = childUnaided(a);
-        if (bare) aimChildSkips++;
-        const hr = bare ? hrRaw : hrA, br = bare ? brRaw : brA;
+        // PERF (exact, and the predicate is still never cached): the bare radii
+        // are strictly CONTAINED in the assisted ones, so an actor the ray
+        // misses at ASSISTED size is missed at bare size too — the protection
+        // question only needs asking for an actor the ray could actually
+        // touch. The standing branch below tests assisted spheres first and
+        // asks childUnaided() only on a potential hit; the two seated branches
+        // (rare) ask it up front as before. This took the predicate from ~630
+        // calls/frame (every ped, every frame, from the hot reticle) to ~hits.
+        let bare = false, hr = hrA, br = brA;
         if (a.group.visible === false) {
           // SEATED OCCUPANT (hidden body, live vehicle): only LIVE riders whose
           // record links the actual car object. (AIM_VEHICLE_OCCUPANTS)
           if (CBZ.CONFIG.AIM_VEHICLE_OCCUPANTS === false) continue;
           const car = a.inCar;
           if (!car || typeof car !== "object" || !car.pos || car.dead) continue;
+          // an invisible ped is USUALLY just culled, so the protection question
+          // is asked only after the occupant checks prove there is a target here
+          bare = childUnaided(a);
+          if (bare) { aimChildSkips++; hr = hrRaw; br = brRaw; }
           const cy = car.pos.y || 0;
           // refresh the rider's dead-while-driving pos so anything reading it
           // (overhead tags, map dots) points at the car, not the sidewalk spot
@@ -1889,6 +1899,8 @@
           if (CBZ.CONFIG.CHAR_SEATED_HITTABLE === false) continue;
           const ap = a.pos;
           if (!ap) continue;
+          bare = childUnaided(a);
+          if (bare) { aimChildSkips++; hr = hrRaw; br = brRaw; }
           let hx = ap.x, hy = ap.y + 0.95, hz = ap.z;   // fallback: seated head guess
           const hm = a.char && a.char.head;
           if (hm && hm.getWorldPosition) { hm.getWorldPosition(occPoint); hx = occPoint.x; hy = occPoint.y; hz = occPoint.z; }
@@ -1902,12 +1914,21 @@
           continue;
         }
         const gp = a.group.position, gy = gp.y || 0;
+        // ASSISTED-radius pre-pass (superset of the bare spheres — see above)
+        let hd = sphereEntry(origin, dir, gp.x, gy + HEAD_Y, gp.z, hrA, maxT);
+        let td = sphereEntry(origin, dir, gp.x, gy + TORSO_Y, gp.z, brA, maxT);
+        let ld = sphereEntry(origin, dir, gp.x, gy + LEG_Y, gp.z, brA * 0.82, maxT);
+        if (!((hd >= 0 && hd < bestDist) || (td >= 0 && td < bestDist) || (ld >= 0 && ld < bestDist))) continue;
+        if (childUnaided(a)) {
+          aimChildSkips++;
+          // protected: re-test at the bare silhouette — only a literal hit counts
+          hd = sphereEntry(origin, dir, gp.x, gy + HEAD_Y, gp.z, hrRaw, maxT);
+          td = sphereEntry(origin, dir, gp.x, gy + TORSO_Y, gp.z, brRaw, maxT);
+          ld = sphereEntry(origin, dir, gp.x, gy + LEG_Y, gp.z, brRaw * 0.82, maxT);
+        }
         // HEAD first — small high sphere, takes priority
-        const hd = sphereEntry(origin, dir, gp.x, gy + HEAD_Y, gp.z, hr, maxT);
         if (hd >= 0 && hd < bestDist) { bestActor = a; bestDist = hd; bestHead = true; bestOcc = false; continue; }
         // BODY — torso + legs spheres
-        const td = sphereEntry(origin, dir, gp.x, gy + TORSO_Y, gp.z, br, maxT);
-        const ld = sphereEntry(origin, dir, gp.x, gy + LEG_Y, gp.z, br * 0.82, maxT);
         let bd = Math.min(td < 0 ? Infinity : td, ld < 0 ? Infinity : ld);
         if (bd < bestDist) { bestActor = a; bestDist = bd; bestHead = false; bestOcc = false; }
       }
@@ -3406,7 +3427,7 @@
     if (!it) return false;
     if (it.tag === "food" && CBZ.cityEat) return CBZ.cityEat(name);
     if (it.tag === "throwable" && CBZ.cityThrowFromInventory) { CBZ.cityThrowFromInventory(); return true; }
-    if (it.tag === "drug") { CBZ.city && CBZ.city.note("Sell " + name + " to a dealer — not for using.", 1.4); return false; }
+    if (it.tag === "drug") { CBZ.city && CBZ.city.note("Sell " + name + " to a dealer, not for using.", 1.4); return false; }
     return false;
   }
 

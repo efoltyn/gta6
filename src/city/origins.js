@@ -95,7 +95,7 @@
       copCount: 2,
       swatCount: 1,
       untouchableBarkCooldown: 2.5,
-      missedLotFeed: "The firm's tower is locked for the night — you ride the freight elevator down broke.",
+      missedLotFeed: "The firm's tower is locked for the night, you ride the freight elevator down broke.",
     },
     barfly: {
       startCash: 45,
@@ -109,12 +109,12 @@
       tossSpin: 2.4,
       shakeAmt: 0.5,
       returnSpeed: 1.7,            // m/s the doorman walks back to the door
-      missedLotFeed: "The bar's shuttered for the night — you wake up in the gutter anyway, $45 and a tab you'll never pay off.",
+      missedLotFeed: "The bar's shuttered for the night, you wake up in the gutter anyway, $45 and a tab you'll never pay off.",
     },
     tenant: {
       startCash: 12,
       startBank: 0,
-      missedLotFeed: "Your building's stairwell is roped off tonight — you crash on a friend's floor instead. One room, one way out, same as ever.",
+      missedLotFeed: "Your building's stairwell is roped off tonight, you crash on a friend's floor instead. One room, one way out, same as ever.",
     },
   };
 
@@ -763,14 +763,14 @@
         CBZ.cityPhoneNotify({
           app: "bank",
           from: "Apex Brokerage",
-          text: "MARGIN CALL — positions liquidated at the low. " + fmt$(lost) +
+          text: "MARGIN CALL, positions liquidated at the low. " + fmt$(lost) +
             " gone. Outstanding margin balance " + fmt$((T.marginDebt || 250000)) + " due immediately.",
         });
       } catch (e) {}
     }
     if (CBZ.city) {
       CBZ.city.big("−" + fmt$(lost));
-      CBZ.city.note("Phone buzzes. Brokerage. " + fmt$(lost) + " — gone. You just became the poorest man in a suit.", 3.2, { urgent: true });
+      CBZ.city.note("Phone buzzes. Brokerage. " + fmt$(lost) + " · gone. You just became the poorest man in a suit.", 3.2, { urgent: true });
     }
     if (CBZ.sfx) try { CBZ.sfx("empty"); } catch (e) {}
   }
@@ -811,8 +811,8 @@
     } catch (e) {}
 
     if (CBZ.city) CBZ.city.note(eo
-      ? "Marcus Sterling. Sterling Capital — floor 50 of the Spire, the tallest tower in the city. On paper — a god."
-      : "Marcus Sterling. Top floor. Suit, gold watch, shades. On paper — a god.", 3.2);
+      ? "Marcus Sterling. Sterling Capital, floor 50 of the Spire, the tallest tower in the city. On paper, a god."
+      : "Marcus Sterling. Top floor. Suit, gold watch, shades. On paper, a god.", 3.2);
 
     const T = ORIGIN_TUNING.exec;
     paintLaptop(g.cash != null ? g.cash : T.startCash, execBrokerage() || T.startBank, false);
@@ -865,7 +865,7 @@
         if (CBZ.city) {
           const hasLift = !!(s.lot && s.lot.building && s.lot.building.execOffice && s.lot.building.execOffice.lift);
           CBZ.city.note(hasLift
-            ? "Take the express lift by the core — or find your own way down. Get to level 1. The street doesn't care who you were."
+            ? "Take the express lift by the core, or find your own way down. Get to level 1. The street doesn't care who you were."
             : "Take the elevator or stairs. Get to level 1. The street doesn't care who you were.", 4.0, { urgent: true });
           if (CBZ.city.big) CBZ.city.big("↓ GROUND FLOOR");
         }
@@ -895,7 +895,7 @@
         s.phase = "street"; s.t = 0;
         if (CBZ.city) {
           CBZ.city.big("LEVEL 1");
-          CBZ.city.note("Broke. Suited. Dangerous only on paper. Make money or get cuffed — jail is still the game.", 4.2);
+          CBZ.city.note("Broke. Suited. Dangerous only on paper. Make money or get cuffed, jail is still the game.", 4.2);
         }
         // Soft heat: margin fraud flag as a story breadcrumb (1★ optional).
         // Not a full bust — you have to earn the jail the normal way.
@@ -997,7 +997,7 @@
       ph.vx = s.nx * T.tossSpeedXZ; ph.vz = s.nz * T.tossSpeedXZ;
       ph.vy = T.tossSpeedY; ph.spin = T.tossSpin;
       if (CBZ.shake) CBZ.shake(T.shakeAmt);
-      if (CBZ.city) { CBZ.city.big("“AND STAY OUT!”"); CBZ.city.note("Tossed out on your ass — $45 and a bar tab you'll never pay off.", 3); }
+      if (CBZ.city) { CBZ.city.big("“AND STAY OUT!”"); CBZ.city.note("Tossed out on your ass. $45 and a bar tab you'll never pay off.", 3); }
       if (s.bouncer && s.bouncer.group) s.bouncer.group.rotation.y = Math.atan2(-s.nx, -s.nz);
       return;
     }
@@ -1161,7 +1161,7 @@
       wick:    { name: "The Marked",    outfit: "suit",       title: "Open Contract", blurb: "every single person wants the money" },
       racer:   { name: "The Racer",     outfit: "coveralls",  title: "Rookie",        blurb: "a loaner, a back-row start, one way up" },
       president: { name: "The President", outfit: "suit",     title: "President",     blurb: "sworn in this morning; the country is yours" },
-      captain: { name: "The Captain",   outfit: "coveralls",  title: "Skipper",       blurb: "a diesel trawler, a crew of three, open water" },
+      captain: { name: "The Captain",   outfit: "coveralls",  title: "Skipper",       blurb: "your own hull, a crew, and open water" },
     },
 
     // ---- WHERE: a lot the CITY BUILT. Never a room this file authors. ----
@@ -1170,9 +1170,9 @@
     // already used, so a new story reuses proven lot searches instead of
     // inventing a seventh way to ask "where is a tall building".
     where: {
-      tower_top:  { find: findExecTower,   feed: "The firm's tower is locked for the night — you ride the freight elevator down broke." },
-      barfront:   { find: findBarLot,      feed: "The bar's shuttered — you wake up in the gutter anyway." },
-      unit:       { find: findTenantTower, feed: "Your building's stairwell is roped off — you crash on a friend's floor instead." },
+      tower_top:  { find: findExecTower,   feed: "The firm's tower is locked for the night, you ride the freight elevator down broke." },
+      barfront:   { find: findBarLot,      feed: "The bar's shuttered, you wake up in the gutter anyway." },
+      unit:       { find: findTenantTower, feed: "Your building's stairwell is roped off, you crash on a friend's floor instead." },
       airborne:   { find: null,            feed: "The field is fogged in. You start on the apron with the keys in your hand." },
       corner:     { find: null,            feed: "" },   // the street IS the place — never fails
       motel:      { find: findMotelLot,    feed: "No room at the motel. You slept in the stairwell." },
@@ -1375,6 +1375,56 @@
   // the world is built, and the pick is made before that.
   CBZ.setCityOriginPlane = function (name) { g.cityOriginPlane = name || null; };
   CBZ.cityOriginPlane = function () { return g.cityOriginPlane || null; };
+
+  /* ---- THE BOAT PICKER ---------------------------------------------------
+     OWNER (2026-08-12): "captain like pilot should let me select any boat in
+     start menu." Same law as the aircraft list above, and it does not keep a
+     list either — a hand-typed fleet goes stale the day somebody registers a
+     twelfth hull.
+
+     ONE DIFFERENCE, AND IT IS AN IMPROVEMENT. The aircraft list has to ship
+     FALLBACK_PLANES because militaryvehicles.js only registers once a world
+     exists, and the pick happens before that. world/water_hulls.js's registry
+     is filled at PARSE time — the four authored hulls plus every row
+     city/yachts.js queues ahead of it — so at the title screen this answers
+     with the REAL fleet, names, lengths and all. No fallback, nothing to drift.
+
+     Sorted by length, because a picker of boats is a picker of sizes. */
+  CBZ.cityOriginBoats = function () {
+    const R = CBZ.marineHulls;
+    if (!R || !R.list) return [];
+    const out = [];
+    try {
+      for (const rec of R.list()) {
+        const h = rec && (rec.hull || rec.spec);
+        if (!h || !isFinite(h.loa)) continue;
+        const name = rec.label || rec.model || rec.key;
+        out.push({ id: rec.key, name: name, loa: +h.loa,
+          label: name + " · " + Math.round(h.loa) + " m" });
+      }
+    } catch (e) { return out; }
+    out.sort(function (a, b) { return a.loa - b.loa; });
+    return out;
+  };
+  // A KEY, not a name — unlike the aircraft case the registry is live when the
+  // pick is made, so there is nothing to resolve later and nothing to mis-case.
+  CBZ.setCityOriginBoat = function (key) { g.cityOriginBoat = key || null; };
+  CBZ.cityOriginBoat = function () { return g.cityOriginBoat || null; };
+  /* THE PICK, RESOLVED — never null and never a key that is not registered.
+     The pick if it still resolves, else the working trawler this story has
+     always described, else anything that floats, because a build with
+     YACHT_FLEET off has no trawler and must still put the man to sea. This is
+     what the title screen LIGHTS UP; city/captain.js layers one more rule on
+     top of it (a captain who owns a boat and never touched the picker keeps
+     her — see flag() there), which is why that file reads the raw field too. */
+  CBZ.cityOriginBoatKey = function () {
+    const rows = CBZ.cityOriginBoats();
+    if (!rows.length) return g.cityOriginBoat || "trawler";
+    const want = g.cityOriginBoat;
+    for (let i = 0; i < rows.length; i++) if (rows[i].id === want) return want;
+    for (let i = 0; i < rows.length; i++) if (rows[i].id === "trawler") return "trawler";
+    return rows[0].id;
+  };
 
   /* ---- APPLYING A COMPOSITION -------------------------------------------
      One function replaces the six grant* functions a six-story registry would
@@ -1764,7 +1814,7 @@
     // to exactly the old hitman preset opening — nothing orphaned.
     const HITCOMP = PRESETS.hitman;
     ORIGINS.contract = {
-      meta: { icon: "", name: "The Hitman", blurb: "a motel, a silencer, one name — then the Director" },
+      meta: { icon: "", name: "The Hitman", blurb: "a motel, a silencer, one name" },
       get tuning() { return { missedLotFeed: (AXES.where[HITCOMP.where] || {}).feed || "" }; },
       findSpawn: function () { const f = (AXES.where[HITCOMP.where] || {}).find; return f ? f() : null; },
       grants: function (game) { applyGrants(HITCOMP, game); armHeat(game); },
@@ -1995,7 +2045,7 @@
       let status, dim = "";
       if (id === act) { status = "<span style='color:#7ed957'>YOU · " + moneyFmt(g.cash) + "</span>"; dim = "opacity:.55;pointer-events:none;"; }
       else if (v.chars[id]) status = "<span style='color:#ffd451'>" + moneyFmt(v.chars[id].cash) + "</span>";
-      else status = "<span style='color:#7fd0ff'>NEW — their story begins</span>";
+      else status = "<span style='color:#7fd0ff'>NEW, their story begins</span>";
       rows +=
         "<button data-char='" + id + "' style='" + dim + "display:flex;align-items:center;gap:10px;width:100%;margin:5px 0;" +
         "padding:9px 11px;border:1px solid #333c4b;border-radius:10px;background:#171b22;color:inherit;" +
@@ -2008,7 +2058,7 @@
       "<div style='display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px'>" +
       "<b style='letter-spacing:.6px'>SWITCH CHARACTER</b>" +
       "<span style='color:#8a93a3;font-size:12px'>[U] close</span></div>" + rows +
-      "<div style='margin-top:7px;color:#8a93a3;font-size:11px;font-weight:500'>Everyone keeps their own money, gear and record — the city is shared.</div>";
+      "<div style='margin-top:7px;color:#8a93a3;font-size:11px;font-weight:500'>Everyone keeps their own money, gear and record, the city is shared.</div>";
   }
 
   function wheelOpen() { return wheelEl && wheelEl.style.display === "block"; }
@@ -2026,11 +2076,11 @@
     if (CBZ.cityCaptivesHudOpen && CBZ.cityCaptivesHudOpen()) return;
     const P = CBZ.player;
     if (!P || P.dead || g.busted) return;
-    if (P.driving) { if (CBZ.city) CBZ.city.note("Park it first — no switching from the driver's seat.", 1.8); return; }
+    if (P.driving) { if (CBZ.city) CBZ.city.note("Park it first, no switching from the driver's seat.", 1.8); return; }
     if ((g.wanted | 0) > 0) { if (CBZ.city) CBZ.city.note("Can't switch while the heat's on.", 1.8); return; }
     // a live origin beat can't be walked out on — switching mid-crash would
     // let the exec keep the paper millions forever.
-    if (scene) { if (CBZ.city) CBZ.city.note("Not now — see it through.", 1.8); return; }
+    if (scene) { if (CBZ.city) CBZ.city.note("Not now, see it through.", 1.8); return; }
     if (CBZ.cityDrunk && CBZ.cityDrunk.blackout) return;   // nobody switches while unconscious
     ensureWheel(); renderWheel();
     wheelEl.style.display = "block";

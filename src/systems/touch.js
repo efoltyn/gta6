@@ -699,6 +699,29 @@
     if (/^[a-z]$/.test(key)) init.code = "Key" + key.toUpperCase();
     try { document.dispatchEvent(new KeyboardEvent(down ? "keydown" : "keyup", init)); } catch (e) {}
   };
+  // ---- ONE writer for every walk-up prompt chip ----------------------------
+  // city/elevators.js, city/roofloot.js, city/beach.js, city/adboard.js and
+  // city/inventory.js each grew their OWN copy of the same two lines
+  // (display:block + textContent), and therefore the same two touch bugs:
+  //   • textContent renders a pill as literal angle brackets, so no module
+  //     with a private chip could ever show a button, and
+  //   • nothing told the CSS whether the chip currently holds PROSE (a floor
+  //     ticker, a price line — keep the readable slab) or a bare BUTTON (drop
+  //     the slab; the pill is its own box).
+  // Both are settled here once. Modules keep their own node and their own
+  // change-diffing — this is the write, not the policy.
+  CBZ.touchPromptChip = function (el, html) {
+    if (!el) return;
+    el.style.display = "block";
+    el.innerHTML = html == null ? "" : String(html);
+    let outside = "";
+    for (const n of el.childNodes) {
+      if (n.nodeType === 1 && n.classList && n.classList.contains("tpill")) continue;
+      outside += n.textContent || "";
+    }
+    el.classList.toggle("haspill", !!el.querySelector(".tpill") && !outside.trim());
+  };
+
   // CAPTURE-phase so a pill tap fires exactly ONE action: several legacy
   // prompt divs are themselves click-wired (bank/pawn/jewelry/…), and letting
   // the tap bubble into them would fire the verb twice.
@@ -1762,6 +1785,23 @@
   // here are explosives.js's published handles — present iff the verb is real.
   CBZ.touchVerb("c4-plant", { ctx: "foot", key: "B tap", hook: "cityC4Plant" });
   CBZ.touchVerb("c4-detonate", { ctx: "foot/vehicle", key: "B hold", hook: "cityC4Detonate" });
+  // ELEVATOR CALL — the second one the ledger caught late, and it hid behind
+  // the generic "interact" row: city/elevators.js DID route its prompt through
+  // the [E] the world tap covers, but the prompt chip itself (#elevChip) was
+  // in css/city.css's live-world declutter list with no touch restore, so on a
+  // tablet the lift showed nothing and could not be called at all. Its own row
+  // now, because "interact is wired" was true while a whole vertical-traversal
+  // system was unreachable — a per-verb count is the only thing that catches
+  // a verb whose control is CSS-hidden rather than never drawn.
+  CBZ.touchVerb("elevator-call", { ctx: "foot", key: "E", hook: "cityElevators" });
+  // …and the four verbs that were dark for the SAME reason, found by asking
+  // what else lives in that declutter list. Every one is an [E] a keyboard
+  // player can still press blind while a thumb had nothing to press at all.
+  CBZ.touchVerb("roof-stash", { ctx: "foot", key: "E", hook: "cityRoofStashes" });
+  CBZ.touchVerb("beach-loot", { ctx: "foot", key: "E", hook: "cityBeachLoot" });
+  CBZ.touchVerb("adboard-lease", { ctx: "foot", key: "E", hook: null });
+  CBZ.touchVerb("chest-open", { ctx: "foot", key: "E", hook: null });
+  CBZ.touchVerb("fx-terminal", { ctx: "foot", key: "E", hook: null });
   // cam-recenter is DRAWN ONLY WHEN ITS FLAG IS ON (default off since
   // 2026-08-04). A skipped row carries its reason and cannot hide inside the
   // covered count; a wired row would be a lie once the button is not built.
@@ -1771,7 +1811,7 @@
     CBZ.touchVerb("cam-recenter", { ctx: "foot", key: "—", skip: "owner asked the recenter button off the iPad glass (TOUCH_RECENTER=0); the look drag still levels the view, it just takes a drag instead of a tap" });
   CBZ.touchVerb("cam-zoom", { ctx: "any", key: "wheel", hook: "camZoom" });
   // Declared and NOT drawn, each with the reason, so the count cannot launder them:
-  CBZ.touchVerb("front-view", { ctx: "foot", key: "B", skip: "outfit check — the FRONT VIEW hold is a look-at-yourself pose, and CAM_TP_V2 gates it on pointer lock; a thumb has the phone's wardrobe for this" });
+  CBZ.touchVerb("front-view", { ctx: "foot", key: "B", skip: "outfit check, the FRONT VIEW hold is a look-at-yourself pose, and CAM_TP_V2 gates it on pointer lock; a thumb has the phone's wardrobe for this" });
   CBZ.touchVerb("shoulder-swap", { ctx: "foot", key: "MMB", skip: "CBZ.camSetShoulder is one call away, but a 6th icon for a mirrored 0.68 m offset is not worth the corner" });
 
   CBZ.touchVerbWired("move", "#tstick");
@@ -1787,6 +1827,12 @@
   CBZ.touchVerbWired("view-toggle", "#tview");
   CBZ.touchVerbWired("homing", "#thoming");
   CBZ.touchVerbWired("interact", "world tap / .tpill");
+  CBZ.touchVerbWired("elevator-call", "#elevChip .tpill");
+  CBZ.touchVerbWired("roof-stash", "#roofStashChip .tpill");
+  CBZ.touchVerbWired("beach-loot", "#beachLootChip .tpill");
+  CBZ.touchVerbWired("adboard-lease", "#adChip .tpill");
+  CBZ.touchVerbWired("chest-open", "#ci2Chip .tpill");
+  CBZ.touchVerbWired("fx-terminal", "#fxPrompt (its own click handler)");
   CBZ.touchVerbWired("c4-plant", "#tbomb tap");
   CBZ.touchVerbWired("c4-detonate", "#tbomb hold / #tvBoom");
   if (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_RECENTER !== false) CBZ.touchVerbWired("cam-recenter", "#trecen");

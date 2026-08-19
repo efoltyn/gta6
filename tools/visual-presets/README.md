@@ -34,6 +34,23 @@ composes with `--before-params "cfg_X=0&k=v"` / `--after-params` for one-off
 experiments. `npm run visual:npc-tactics` is the working example: the NPC
 firing-position wave photographed against its own one-line revert.
 
+## Pacing changes — never wait a number of seconds
+
+If the thing under comparison is **how long something takes**, a wait written
+in seconds silently breaks the comparison. `tsunami-stages` had three beats
+that waited "6 s into the drawdown", "5 s into the flood", "2.2 s into the
+drain"; when the event was retimed, the same six seconds walked out of the
+drawdown into the wave and the inundation shot landed in the drain — two sides
+photographing different moments, captioned as if they were the same one.
+
+Wait on a **physical condition** instead, and where the beat lives inside a
+phase, on a **fraction of that phase** read back off live state: the phase
+name, where a front is, how far a level has fallen. Then both sides reach the
+identical picture and the clock becomes the answer rather than the question.
+Publish that clock as a metric (`eventT` in both tsunami presets) and the
+Measurements page reads directly as "the same beat, N seconds sooner".
+`tsunami-stages` and `city-tsunami-stages` are the worked examples.
+
 ## Film strips — motion photographed as stills
 
 A still cannot show "he stopped to shoot"; a row of frames can. A subject may

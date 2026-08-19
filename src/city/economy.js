@@ -150,6 +150,13 @@
     "Bearer Bonds":      { value: 500000,  tag: "valuable", luxe: true },
     "Art Piece":         { value: 200000,  tag: "valuable", luxe: true },
     // --- tools ---
+    // --- keys: things that open a specific door, and only that door. Tagged
+    //     `key` so NO shop ever stocks one: a key is found or taken, never
+    //     bought (owner, 2026-08-18: "a box doesn't open up for money, it
+    //     opens up with a key"). The seal comes off its plinth inside the
+    //     government strongroom (city/govcomplex.js) and is what the office
+    //     contract on the hitman wall reads.
+    "City Seal":   { value: 1500, tag: "key" },
     Lockpick:      { value: 90,   tag: "tool" },
     Crowbar:       { value: 70,   tag: "tool" },
     "Burner Phone":{ value: 60,   tag: "tool" },

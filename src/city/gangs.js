@@ -806,7 +806,7 @@
     const moraleHit = wasStrong ? 0.05 : 0.22;
     for (const m of live) disciplineHit(gang, m, moraleHit);
     if (nearPlayer(gang.center.x, gang.center.z, 160)) {
-      CBZ.city && CBZ.city.note("" + heir.name + " seized control of " + gang.name + (wasStrong ? "." : " — the crew's shaky."), 3);
+      CBZ.city && CBZ.city.note("" + heir.name + " seized control of " + gang.name + (wasStrong ? "." : " · the crew's shaky."), 3);
     }
   }
   CBZ.cityGangSucceed = succeedBoss;
@@ -2183,7 +2183,7 @@
     w.alarmed = Math.max(w.alarmed || 0, 9);
     if (gang.hq && w.target && w.target.set) { w.target.set(gang.hq.x, 0, gang.hq.z); w.finalGoal = null; }
     snitches.push(w);
-    if (CBZ.cityFlavor) CBZ.cityFlavor("" + (w.name || "One of theirs") + " saw it — he's running to tell the " + gang.name + ".", "#ffce7a");
+    if (CBZ.cityFlavor) CBZ.cityFlavor("" + (w.name || "One of theirs") + " saw it, he's running to tell the " + gang.name + ".", "#ffce7a");
   }
   function loyaltyBattle(gang, victim) {
     const PA = playerActor(); if (!PA) return;
@@ -2204,7 +2204,7 @@
     }
     avengers.victim = victim.name || "him";
     if (CBZ.cityFlavor) {
-      if (turned) CBZ.cityFlavor("" + turned + " of the crew ride for " + (victim.name || "him") + ". Loyalty against respect — settle it.", "#ffce7a");
+      if (turned) CBZ.cityFlavor("" + turned + " of the crew ride for " + (victim.name || "him") + ". Loyalty against respect, settle it.", "#ffce7a");
       else CBZ.cityFlavor("The crew looks away. " + (victim.name || "He") + " didn't have the love.", "#9aa6bd");
     }
   }
@@ -2485,10 +2485,10 @@
   //  raidT/homeGuard return infra restores every post we move.
   // ============================================================
   let shapeT = 0;
-  const BARK_CALL = ["Spread out — keep 'em boxed in!", "Push! Hold this line!", "On me — don't bunch up!", "Squeeze 'em from both sides!"];
-  const BARK_DRY = ["I'm dry!", "I'm out — cover me!", "Gun's empty!"];
-  const BARK_HIT = ["I'm hit — pulling back!", "I'm bleeding, I'm out!", "Can't stay up — falling back!"];
-  const BARK_BAG = ["Grab the iron before the law shows.", "Pick that piece up — it's ours now.", "Sweep the street, take it all."];
+  const BARK_CALL = ["Spread out, keep 'em boxed in!", "Push! Hold this line!", "On me, don't bunch up!", "Squeeze 'em from both sides!"];
+  const BARK_DRY = ["I'm dry!", "I'm out, cover me!", "Gun's empty!"];
+  const BARK_HIT = ["I'm hit, pulling back!", "I'm bleeding, I'm out!", "Can't stay up, falling back!"];
+  const BARK_BAG = ["Grab the iron before the law shows.", "Pick that piece up, it's ours now.", "Sweep the street, take it all."];
   function violentBar() { const ag = (CBZ.CITY && CBZ.CITY.aggro) || {}; return ag.violent || 0.88; }
 
   // a short, human line over a fighter's head — per-gang throttled, and only

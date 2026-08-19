@@ -412,7 +412,7 @@
     if (gx == null) {
       bm.gx = null; bm.gy = bm.level; bm.gz = null; bm.lastValid = null;
       hideAllGhosts();
-      setHint("[" + bm.kind.toUpperCase() + "] · rot T · level R/F (" + bm.level + ") · click/E place · X demolish · Z undo · N exit  —  no target");
+      setHint("[" + bm.kind.toUpperCase() + "] · rot T · level R/F (" + bm.level + ") · click/E place · X demolish · Z undo · N exit, no target");
       return;
     }
 
@@ -496,7 +496,6 @@
       const id = bm.placedStack.pop();
       if (CBZ.pieces.has(id)) {
         B.remove(id);
-        CBZ.flashHint && CBZ.flashHint("↩ Undid last piece", 1.0);
         updateTarget();
         return;
       }
@@ -528,7 +527,9 @@
     if (CBZ.game.mode === "city" && CBZ.cityHolster) CBZ.cityHolster(true);
     showUI();
     updateTarget();
-    CBZ.flashHint && CBZ.flashHint("Build mode", 1.0);
+    // no "Build mode" caption — showUI() just put the build strip on screen,
+    // which IS the announcement. Popups that narrate a deliberate action the
+    // player can already see are banned (owner, re: the grab hint).
   }
   function exitBuildMode() {
     bm.active = false;

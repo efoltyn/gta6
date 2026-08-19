@@ -135,7 +135,7 @@
   function rentBoard(b) {
     const per = priceOf(b);
     if (!(CBZ.city && CBZ.city.spend && CBZ.city.spend(per))) {
-      note("First week is " + money(per) + " cash — " + ownerOf(b) + " doesn't bill strangers.", 2.4);
+      note("First week is " + money(per) + " cash · " + ownerOf(b) + " doesn't bill strangers.", 2.4);
       return;
     }
     const brand = brandAd(b);
@@ -151,8 +151,8 @@
     glowNow(m);
     if (CBZ.city.addRespect) CBZ.city.addRespect(4);   // the block SEES the board go up
     if (CBZ.sfx) CBZ.sfx("coin");
-    if (brand.bizId) note("" + brand.bizName + " is on the board — its take climbs while this runs. " + money(per) + "/wk to " + ownerOf(b) + ".", 3);
-    else note("Your name is up over " + districtLabel(b) + ". " + money(per) + "/wk to " + ownerOf(b) + " — clout has a rate.", 3);
+    if (brand.bizId) note("" + brand.bizName + " is on the board, its take climbs while this runs. " + money(per) + "/wk to " + ownerOf(b) + ".", 3);
+    else note("Your name is up over " + districtLabel(b) + ". " + money(per) + "/wk to " + ownerOf(b) + " · clout has a rate.", 3);
   }
 
   function endLease(b, lapsed) {
@@ -161,7 +161,7 @@
     if (b.mat0) b.mesh.material = b.mat0;
     b.mesh.userData.adLease = false;
     if (b.mesh2) { if (b.mat0b) b.mesh2.material = b.mat0b; b.mesh2.userData.adLease = false; }
-    if (lapsed) note("" + ownerOf(b) + " pulled your board — the rent went unpaid.", 2.6);
+    if (lapsed) note("" + ownerOf(b) + " pulled your board, the rent went unpaid.", 2.6);
     else note("Board released back to " + ownerOf(b) + ".", 2);
   }
 
@@ -239,7 +239,8 @@
     dom(); if (!chip) return;
     _chipLast = t;
     if (!t) { chip.style.display = "none"; return; }
-    chip.style.display = "block"; chip.textContent = t;
+    if (CBZ.touchPromptChip) { CBZ.touchPromptChip(chip, t); return; }
+    chip.style.display = "block"; chip.innerHTML = t;
   }
 
   // is the player standing at an elevator pad? The lift's [E] outranks ours.
@@ -275,11 +276,26 @@
     const b = boardNear();
     if (!b) { chipText(null); return; }
     if (b.lease) {
-      chipText("[E] Pull your ad — " + (b.lease.bizName ? b.lease.bizName + " · " : "") + money(b.lease.per) + "/wk runs until you do");
+      chipText(lease("PULL YOUR AD", "[E] Pull your ad",
+        " — " + (b.lease.bizName ? b.lease.bizName + " · " : "") + money(b.lease.per) + "/wk runs until you do"));
     } else {
-      chipText("[E] Rent this board — " + money(priceOf(b)) + "/wk · " + ownerOf(b) + " (" + districtLabel(b) + ")");
+      chipText(lease("RENT THIS BOARD", "[E] Rent this board",
+        " — " + money(priceOf(b)) + "/wk · " + ownerOf(b) + " (" + districtLabel(b) + ")"));
     }
   });
+
+  // The board prompt: a verb and a PRICE. On touch the verb becomes a pill and
+  // the price stays prose beside it (the chip keeps its slab for exactly that
+  // reason) — desktop gets the byte-identical single string it always had.
+  // The tail is game data (a business name, a district) and the chip now
+  // writes innerHTML, so it is escaped on BOTH paths — a board named "R&D <b>"
+  // must render as its name, not as markup.
+  function lease(pill, key, tail) {
+    return (CBZ.touchActionPrompt ? CBZ.touchActionPrompt("e", pill, key) : key) + escText(tail);
+  }
+  function escText(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
 
   // [E] signs / ends the lease. DOCUMENT-level so stopPropagation beats
   // interact.js's window-level "[E] = eat" fallback (the elevator pattern).
@@ -297,4 +313,28 @@
     else rentBoard(b);
   }
   if (typeof document !== "undefined" && document.addEventListener) document.addEventListener("keydown", onKey);
+
+  /* THE VERB EXISTED ONLY ON A KEYBOARD (2026-08-18). This file hung its [E]
+     on a raw document keydown, which means the verb has no card, no button and
+     no existence at all on the tablet this game is played on. The registry is
+     what turns a proximity verb into a thumb target, and it costs one record:
+     the SAME finder, the SAME body. The keydown stays for the desktop. */
+  let zoned = false;
+  CBZ.onUpdate(99.62, function () {
+    if (zoned || !CBZ.interactions || !CBZ.interactions.registerZone) return;
+    zoned = true;
+    CBZ.interactions.describe("adboard", function () { return { label: "Ad board", note: "" }; });
+    CBZ.interactions.registerZone({
+      id: "zone-adboard", kind: "adboard", prio: 11,
+      find: function () {
+        if (g.mode !== "city" || liftNearby()) return null;
+        return boardNear();
+      },
+      options: [{
+        id: "adboard-lease", slot: "e",
+        label: function (b) { return b && b.lease ? "End the lease" : "Rent the board"; },
+        onSelect: function (b) { if (!b) return; if (b.lease) endLease(b, false); else rentBoard(b); },
+      }],
+    });
+  });
 })();

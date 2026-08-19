@@ -94,7 +94,7 @@
         { pip: "Regular",   grants: ["paddock"],          lvl: 16, locked: true,
           unlock: "The paddock gate opens for you." },
         { pip: "Contender", grants: ["pitbay", "crew"],   lvl: 28, locked: true,
-          unlock: "BAY 12 is yours — and a crew that takes orders." },
+          unlock: "BAY 12 is yours, and a crew that takes orders." },
         { pip: "Star",      grants: ["pinkslip"],         lvl: 44, locked: true,
           unlock: "Call PINK SLIPS on any named driver." },
         { pip: "APEX",      grants: ["champgarage"],      lvl: 68, locked: true,
@@ -260,8 +260,8 @@
     const d = declareDoor("paddock-gate", "paddock", G.x, G.z, function () {
       const s = stats();
       return "Gate steward: “License holders only. " +
-        (s.starts >= 1 ? "Your rank's coming through — hold on.”" :
-          "Run one race — Diamond or the streets — and this gate learns your name.”");
+        (s.starts >= 1 ? "Your rank's coming through, hold on.”" :
+          "Run one race. Diamond or the streets, and this gate learns your name.”");
     });
     // two sliding leaves (chain-mesh look: frame + crossbars)
     for (const sgn of [-1, 1]) {
@@ -315,7 +315,7 @@
     const dm = at(GF - 0.55, 0);
     const d = declareDoor("bay12-door", "pitbay", dm.x, dm.z, function () {
       const s = stats();
-      return "BAY 12 — RESERVED FOR CONTENDERS. A podium at Diamond lifts this door. (" +
+      return "BAY 12 · RESERVED FOR CONTENDERS. A podium at Diamond lifts this door. (" +
         s.podiums + " podium" + (s.podiums === 1 ? "" : "s") + ", " + s.starts + " starts)";
     });
     const doorMesh = box(grp, steel, dm.x, Y + (GH - 1.0) / 2, dm.z, 0.18, GH - 1.0, bayLen - 1.6, fm.heading);
@@ -433,7 +433,7 @@
     const pd = wpt(0, D2);
     const d = declareDoor("champ-door", "champgarage", pd.x, pd.z, function () {
       const s2 = stats();
-      return "THE CHAMPION'S GARAGE — one key exists: the APEX Night title. (" +
+      return "THE CHAMPION'S GARAGE, one key exists: the APEX Night title. (" +
         (s2.titles > 0 ? "It knows your name." : "Titles: 0.") + ")";
     });
     const doorMesh = box(grp, glass, 0, (H - 0.6) / 2, D2, doorW, H - 0.6, 0.12);
@@ -534,7 +534,7 @@
       CHAMP.padSolid = null;
     }
     CHAMP.minted = true;
-    big("THE AURUM GT-1 IS YOURS — ONE EXISTS.");
+    big("THE AURUM GT-1 IS YOURS · ONE EXISTS.");
     note("The champion's garage hands over its only key. The Aurum GT-1 sits on the pad.", 5.0);
   }
 
@@ -551,7 +551,7 @@
         if (open) {
           dropSolids(d.colliders);
           d.openN++;
-          if (d.verb === "paddock") note("The paddock gate reads your license — it slides open.", 3.2);
+          if (d.verb === "paddock") note("The paddock gate reads your license, it slides open.", 3.2);
           if (d.verb === "pitbay") note("BAY 12's shutter lifts. Your name is over the door.", 3.2);
           if (d.verb === "champgarage") note("The champion's garage glass parts for you.", 3.2);
         }
@@ -675,11 +675,11 @@
     return best;
   }
   function startOrder(kind, cost, apply, sayLine) {
-    if (CREW.order) { note("The crew is mid-job — let them finish.", 1.8); return; }
+    if (CREW.order) { note("The crew is mid-job, let them finish.", 1.8); return; }
     const car = carOnMarks();
     if (!car) { note("Crew chief: “Roll it onto the marks first.”", 2.2); return; }
     if (cost > 0 && !(CBZ.city && CBZ.city.spend && CBZ.city.spend(cost))) {
-      note("That work runs " + fmt$(cost) + " — you're short.", 2.0); return;
+      note("That work runs " + fmt$(cost) + " · you're short.", 2.0); return;
     }
     CREW.order = { kind: kind, t: 7.0, car: car, apply: apply };
     CREW.run++;
@@ -761,7 +761,7 @@
         const car = carOnMarks();
         return !!car && !car._leagueLivery;
       },
-      label: function () { return "Order: league livery — #99 ($400)"; },
+      label: function () { return "Order: league livery, #99 ($400)"; },
       onSelect: function () {
         startOrder("livery", 400, function (c2) {
           if (CBZ.cityApplyRaceLivery && c2.group) {
@@ -804,7 +804,7 @@
     const P = CBZ.player;
     const C = psCourse();
     if (!C || !CBZ.raceDrivers || !CBZ.raceKit) { note("The duel needs the Diamond oval.", 2.2); return; }
-    if (CBZ.speedwayRaceState && CBZ.speedwayRaceState().active) { note("The oval is live — wait for the flag.", 2.2); return; }
+    if (CBZ.speedwayRaceState && CBZ.speedwayRaceState().active) { note("The oval is live, wait for the flag.", 2.2); return; }
     if (CBZ.cityStreetRacing && CBZ.cityStreetRacing.state && CBZ.cityStreetRacing.state().active) { note("Finish the street race first.", 2.2); return; }
     const car = P && P.driving ? P._vehicle : null;
     if (!car || car.dead) { note("Pink slips means YOUR car on the line. Drive one you own to him.", 2.6); return; }
@@ -822,7 +822,7 @@
       lane0: 2.6, tag: "pinkslip", course: "speedway",
       playerProgress: function () { return PS.playerTotal; },
     });
-    if (!m) { note("His transporter's stuck — no duel tonight.", 2.2); return; }
+    if (!m) { note("His transporter's stuck, no duel tonight.", 2.2); return; }
     m.laps = -1; m._racer = racer;
     const py = CBZ.speedwaySurfaceY ? CBZ.speedwaySurfaceY(pSlot.x, pSlot.z) : 0;
     car.pos.x = pSlot.x; car.pos.z = pSlot.z; car.heading = pSlot.heading;
@@ -848,7 +848,7 @@
       ],
     });
     if (CBZ.raceHud) { CBZ.raceHud.show(); CBZ.raceHud.lights(0); }
-    big("PINK SLIPS — " + racer.name.toUpperCase());
+    big("PINK SLIPS · " + racer.name.toUpperCase());
     note(PS.laps + " laps. His " + psCarName(racer) + " against your ride. Nobody shakes on a maybe.", 3.6);
   }
   function psFinish(win, why) {
@@ -866,7 +866,7 @@
         PS.transfers++;
         racer.slips.lost++;
         big("YOU TOOK HIS CAR");
-        note(racer.name + " signs the slip. His " + psCarName(racer) + " — his number still on the doors — is YOURS, where it stopped.", 5.0);
+        note(racer.name + " signs the slip. His " + psCarName(racer) + " · his number still on the doors, is YOURS, where it stopped.", 5.0);
       } else if (RD) { RD.despawnAll("pinkslip"); }
     } else {
       if (RD) RD.despawnAll("pinkslip");
@@ -886,7 +886,7 @@
         PS.transfers++;
       }
       big("HE TOOK YOUR CAR");
-      note(racer.name + ": “" + (why === "bailed" ? "Walk home. I'll drive." : "Sweet ride. MY sweet ride.") + "” — his number is going on your doors.", 5.0);
+      note(racer.name + ": “" + (why === "bailed" ? "Walk home. I'll drive." : "Sweet ride. MY sweet ride.") + "”, his number is going on your doors.", 5.0);
     }
     if (CBZ.cityEvent) CBZ.cityEvent("race-finish", {
       race: "pinkslip", place: win ? 1 : 2, win: win, dnf: why === "bailed" || why === "wrecked",
@@ -899,7 +899,7 @@
         { pos: 1, name: win ? "YOU" : racer.name, number: win ? null : racer.number, color: win ? null : racer.teamColor, time: "", pts: null, purse: 0, you: win },
         { pos: 2, name: win ? racer.name : "YOU", number: win ? racer.number : null, color: win ? racer.teamColor : null, time: "", pts: null, purse: 0, you: !win },
       ], {
-        title: win ? "PINK SLIPS — THE CAR IS YOURS" : "PINK SLIPS — GONE",
+        title: win ? "PINK SLIPS · THE CAR IS YOURS" : "PINK SLIPS · GONE",
         sub: "Diamond Speedway · winner takes the machine",
         foot: win ? "It's parked where it stopped. Drive it home." : "Wins put your name back on a door.",
         touchFoot: win ? "It's parked where it stopped." : "Wins put your name back on a door.",
@@ -924,7 +924,7 @@
       PS.phase = "run"; PS.lightsT = 1.4;
       if (CBZ.raceHud) CBZ.raceHud.lights("go");
       if (CBZ.raceDrivers) CBZ.raceDrivers.setState("race", "pinkslip");
-      note("GREEN — for keeps!", 1.8);
+      note("GREEN, for keeps!", 1.8);
     }
     if (PS.lightsT > 0) { PS.lightsT -= dt; if (PS.lightsT <= 0 && CBZ.raceHud) CBZ.raceHud.lights(-1); }
     const pt = C.paramAt ? C.paramAt(car.pos.x, car.pos.z) : 0;
@@ -958,7 +958,7 @@
       },
       label: function (p) {
         const r = p._racer;
-        return "PINK SLIPS — your car vs his " + psCarName(r);
+        return "PINK SLIPS, your car vs his " + psCarName(r);
       },
       onSelect: function (p) { if (p._racer) psStart(p._racer); },
     });
@@ -1003,7 +1003,7 @@
         label: function (t) {
           const d = t && t._door;
           if (!d) return "Try the door";
-          return d.locked ? "Try the door — LOCKED" : "Door: open to you";
+          return d.locked ? "Try the door. LOCKED" : "Door: open to you";
         },
         onSelect: function (t) {
           const d = t && t._door;
@@ -1027,7 +1027,7 @@
         return { label: "Trophy shelf", note: TROPHY.cups + " cups · every one was a race" };
       });
       I.describe("racedoor", function () {
-        return { label: "League door", note: "Rank opens it — the door quotes its price" };
+        return { label: "League door", note: "Rank opens it" };
       });
     }
   }

@@ -534,7 +534,7 @@
     // (printing/shortfall resolution happens a day later — see checkPendingPrints)
     rec.treasury = (rec.treasury || 0) + sold;
     const rn = rec ? rec.name : id;
-    if (CBZ.cityFeed) CBZ.cityFeed("" + rn + " issues a $" + Math.round(face).toLocaleString() + " bond series at " + (coupon * 100).toFixed(1) + "% — " + (sold >= face - 0.5 ? "fully subscribed" : "$" + Math.round(face - sold).toLocaleString() + " still on the table"), "#ffd76a");
+    if (CBZ.cityFeed) CBZ.cityFeed("" + rn + " issues a $" + Math.round(face).toLocaleString() + " bond series at " + (coupon * 100).toFixed(1) + "% · " + (sold >= face - 0.5 ? "fully subscribed" : "$" + Math.round(face - sold).toLocaleString() + " still on the table"), "#ffd76a");
     return series;
   }
 
@@ -560,7 +560,7 @@
       }
       const stillShort = unsold - printed;
       if (stillShort > 0.5 && CBZ.cityFeed) {
-        CBZ.cityFeed("" + rec.name + "'s auction fails to place $" + Math.round(stillShort).toLocaleString() + " — the treasury stays short.", "#ff6a5e");
+        CBZ.cityFeed("" + rec.name + "'s auction fails to place $" + Math.round(stillShort).toLocaleString() + " · the treasury stays short.", "#ff6a5e");
       }
       // the print-check window has now closed for good (printDone latched
       // above): whatever stayed unfinanced never happened at all — it must
@@ -622,7 +622,7 @@
     if (CBZ.approvalShock) { try { CBZ.approvalShock(series.countryId, DEFAULT_APPROVAL); } catch (e) {} }
     const rn = rec ? rec.name : series.countryId;
     if (CBZ.city && CBZ.city.big) CBZ.city.big("" + rn.toUpperCase() + " DEFAULTS ON ITS DEBT");
-    if (CBZ.cityFeed) CBZ.cityFeed("" + rn + " defaults — bondholders take a " + Math.round((1 - RECOVERY_FRAC) * 100) + "% haircut.", "#ff3b3b");
+    if (CBZ.cityFeed) CBZ.cityFeed("" + rn + " defaults, bondholders take a " + Math.round((1 - RECOVERY_FRAC) * 100) + "% haircut.", "#ff3b3b");
   }
   function rollSeries(oldSeries, rec, st, day) {
     st.distressScar = (st.distressScar || 0) + ROLL_SCAR;
@@ -639,7 +639,7 @@
     oldSeries.holders = {};
     st.activeSeriesId = sid;
     const rn = rec ? rec.name : oldSeries.countryId;
-    if (CBZ.cityFeed) CBZ.cityFeed("" + rn + " can't repay at maturity — rolls $" + Math.round(newSeries.face).toLocaleString() + " into a fresh series at " + (coupon * 100).toFixed(1) + "%.", "#ff9e6b");
+    if (CBZ.cityFeed) CBZ.cityFeed("" + rn + " can't repay at maturity, rolls $" + Math.round(newSeries.face).toLocaleString() + " into a fresh series at " + (coupon * 100).toFixed(1) + "%.", "#ff9e6b");
   }
   function handleMaturity(series, rec, st, day) {
     const priv = privateShare(series.holders);

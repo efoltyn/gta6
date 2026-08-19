@@ -449,20 +449,6 @@
     }
     return v.toUpperCase();
   }
-  // The docked iPad row's left column is PROSE, so it keeps the author's own
-  // casing — sentence case reads as language where the button's ALL-CAPS reads
-  // as a control (and it is what the prison rail already speaks). Same
-  // 40-char word-boundary cut as verbText.
-  function copyText(r) {
-    let v = String(r.proposal || r.label || "").trim();
-    if (v.length > 40) {
-      v = v.slice(0, 39);
-      const sp = v.lastIndexOf(" ");
-      if (sp > 18) v = v.slice(0, sp);
-      v += "…";
-    }
-    return v;
-  }
   // THE BUTTON IS THE VERB — never "YES" (owner, 2026-08-04). A card that
   // printed "Mount the horse" beside a YES button was asking a question the
   // player had already answered by walking up; the word on the thumb target is
@@ -478,6 +464,45 @@
       v = sp > 5 ? v.slice(0, sp) : v.slice(0, 17) + "…";
     }
     return v || "Continue";
+  }
+
+  /* THE WORDS THAT EXPLAIN A THING NEVER SIT BESIDE THE THING'S BUTTON
+     (owner, 2026-08-18, holding a bank vault card: "look at how many words
+     there are next to that button... there should be almost no words next to
+     a button. Almost none, if any.")
+
+     What he was looking at: a nine-word slab, "The vault needs more than any
+     one…", parked beside a three-word button reading THE VAULT NEEDS — one
+     sentence sawn in half and printed twice, under a title plate that already
+     said The vault. `verbButton` is the whole answer to that. The row wears a
+     VERB and nothing else; a price rides along because "$340" is a number, not
+     words; anything longer is cut to its head. Whatever a door wants, what is
+     behind it, why it refuses, belongs on the card's own subtitle (describe()'s
+     note), which prints above the rows and is not a control. */
+  const BUTTON_MAX = 28;          // caps chars the 440px rail takes without becoming a bar
+  const FIGURE_MAX = 34;          // a little longer is allowed when the tail is a PRICE
+  const DASH = /\s*[—–-]\s+/;     // the authored "verb — price" / "verb — clause" connector
+  function verbButton(text) {
+    let s = String(text || "").trim().replace(/[?.!]+$/, "");
+    if (!s) return "Continue";
+    const cut = s.split(DASH);
+    const head = (cut[0] || "").trim();
+    const tail = cut.length > 1 ? cut.slice(1).join(" ").trim() : "";
+    // A FIGURE IS NOT WORDS. "$340", "4 crates", "20 min" is what the thumb is
+    // actually deciding on, so it rides the button; the em dash never does.
+    if (tail && tail.length <= 12 && /\d/.test(tail)) {
+      const joined = head + " " + tail;
+      if (joined.length <= FIGURE_MAX) return joined;
+      const short = verbHead(head) + " " + tail;
+      if (short.length <= FIGURE_MAX) return short;
+    }
+    // a SHORT tail that is the thing being chosen ("Lift - ground" vs "Lift -
+    // floor 50", "plating - HEAVY") is the difference between two buttons, so
+    // it survives whenever the whole row still fits on one.
+    if (tail && tail.length <= 12 && (head + " " + tail).length <= BUTTON_MAX) return head + " " + tail;
+    if (!tail && s.length <= BUTTON_MAX) return s;
+    if (head.length <= BUTTON_MAX) return head;
+    return verbHead(head);
   }
 
   /* ---- THE ONE ROW RENDERER (Block Law) ----------------------------------
@@ -506,24 +531,12 @@
         return `<div class="iopt tverb ${yes ? "tyes" : "tno"}" data-i="${i}">` +
           `<span class="ilab"${red(r)}>${verbText(r)}</span></div>`;
       }
-      // THE BUTTON IS THE WHOLE VERB WHENEVER THE VERB FITS ON A BUTTON.
-      // The prison rail splits every row into prose + a short verb because its
-      // rows are authored SENTENCES ("Pay 8 to keep Marcus quiet"). A city
-      // proposal is already a bare verb phrase by the grammar law above, so
-      // splitting "Mount the horse" into a bar plus a MOUNT button says it
-      // twice — the owner asked for "just a mount button". Only a phrase too
-      // long to be a thumb target (a hijack-the-airliner line) falls back to
-      // head-on-the-button, whole-line-in-the-bar. ACTION_MAX ≈ the widest
-      // 14px/800 caps string that still leaves the 440px rail room to breathe.
-      const prose = copyText(r);
-      const ACTION_MAX = 24;
-      const action = (prose && prose.length <= ACTION_MAX ? prose : verbHead(r.label || prose)).toUpperCase();
+      // THE DOCKED ROW IS A BUTTON, FULL STOP. The copy bar is DELETED (see
+      // verbButton above): there is no second half of the sentence to print,
+      // because the row is not a sentence.
+      const action = verbButton(r.proposal || r.label).toUpperCase();
       const aria = verbText(r).replace(/&/g, "&amp;").replace(/"/g, "&quot;");
-      // SAY IT ONCE (the zip-tie law): a copy bar that would only repeat the
-      // button's own words is dropped, and the button carries the row alone.
-      const dup = !prose || prose.toUpperCase() === action;
       return `<div class="iopt tverb ${yes ? "tyes" : "tno"}" data-i="${i}">` +
-        (dup ? "" : `<span class="itouch-copy"><span class="ilab"${red(r)}>${prose}</span></span>`) +
         `<button type="button" class="itouch-act${r.bad ? " ibad" : ""}" aria-label="${aria}">${action}</button></div>`;
     }).join("");
   }
@@ -716,7 +729,7 @@
     // / holstered approach, even if some gunpoint-flagged source slips through.
     if (pick.gunpoint && ctx.gunDrawn && CBZ.cityMarkGunpoint) CBZ.cityMarkGunpoint(t, 0.55);
 
-    const desc = (descs[pick.kind] && descs[pick.kind](t, ctx)) || { label: "—", note: "" };
+    const desc = (descs[pick.kind] && descs[pick.kind](t, ctx)) || { label: "", note: "" };
     // fingerprint = target + the resolved rows; rebuild DOM only on a real change
     let fp = pick.kind + ":" + (pick.gunpoint ? "G" : "") + (t && t.name || "") + "|" +
       (rows[0] && rows[0].proposal || "") + ":" + (rows[0] && rows[0].standing ? rows[0].standing.score : "") + "|";
@@ -733,6 +746,9 @@
       // A verb-card provider may still pin a SPOKEN LINE to the card
       // (rows.note — dialogue's "what they just said to you"). That line IS
       // content rather than a restated control, so it keeps the slot.
+      // describe()'s own note is NOT promoted into this slot: the answer to
+      // "too many words" is fewer words, not the same words moved up a line.
+      // What a door wants arrives when you PRESS it, in the note channel.
       noteEl.textContent = rows.note != null ? rows.note : "";
       noteEl.style.display = noteEl.textContent ? "" : "none";
     }
@@ -741,7 +757,7 @@
       // The verb card drops describe()'s "— HIJACKABLE" advertisement suffix:
       // the HIJACK row already says it, and the suffix broke the fourth wall.
       if (nameEl) nameEl.textContent = rows.dualRide
-        ? String(desc.label || "").replace(/\s*—\s*HIJACKABLE\s*$/i, "")
+        ? String(desc.label || "").replace(/\s*, \s*HIJACKABLE\s*$/i, "")
         : desc.label;
       // ONE doable verb per card (the airliner BOARD/HIJACK is the lone
       // two-ACTION exception — never a YES/NO). The proposition lives ON the

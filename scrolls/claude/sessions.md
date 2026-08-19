@@ -4142,3 +4142,340 @@ and govcomplex's countyjail work row commuted "security guard"s — both now
 cast "deputy sheriff"/"sheriff's deputy" → CAT.sheriff county khakis +
 campaign hat, still deliberately no cop flag. Verified live: castFit
 "sheriff" on the detail.
+
+## 2026-08-16 — the prison sat on air (SIT_PHYS_V1, branch claude/prison-game-sitting-physics-58xypq)
+
+Owner report: "guys can sit on air, like, close to a chair, but, like, not on
+the chair. They can just sit on nothing, fix the physics." Reproduced in one
+probe world, mode escape, seed 90210 — twelve bodies in the seated pose at the
+morning yard block, eleven of them nowhere near a seat. Four faults, one law
+(A SEATED BODY IS AT ITS SEAT), one flag:
+
+1. THE WING SAT HALF A METRE FROM ITS OWN BUNKS. Every bunk-posed cell
+   resident measured exactly 1.06 m from his bunk centre — latOut (0.56) +
+   body radius (0.5), the depenetration signature. cellblock.js's leash pins
+   the man to the mattress edge at order 22.6; actorcollide.js's wall clamp
+   (25) ran later and ejected him from the now-solid bunk frame every frame,
+   and the later writer wins. Ten men at once, seated on nothing at floor
+   level. Fix: furniture-held bodies (seat/bed/lie claim, seated/lying rig,
+   or a live prop arc) skip the separation+clamp roster — the rule peds.js's
+   own sit branch already states ("a seated body must not be shoved around by
+   the desk colliders"), closed for the prison's plain actors. Their
+   traversal sample stays stamped so standing up never reads as a sprint.
+2. A CLAIMED SITTER WAS DRAGGED 2.13 m OFF HIS STOOL, still posed seated —
+   the third actor shape had no pin. The player has propuse §3, a peds.js ped
+   re-pins itself from _deskAnchor at 34, a PLAIN actor had nobody, so the
+   muster's target-writes slid him across the yard. Fix: propuse's NPC hold
+   (42) pins seated occupants exactly as it always pinned lying ones — whole
+   transform, same order, wins the frame. For a ped it re-writes the values
+   its own branch just wrote (no-op); KO outranks the furniture.
+3. THE SIT ARC GLIDED. propSit's NPC commit latches char.sitting before the
+   arc (peds' state machine needs it) and the walk-in phase wrote no rig
+   state, so the seated pose owned animChar for the whole leg — a man sailing
+   to the bench folded into a chair shape, measured seated at 2.25 m out.
+   Fix: the walk phase writes absolute rig state like every other phase
+   (sitting/crouch false); the lower/perch beats re-raise the flag when the
+   hips actually land.
+4. THE PLAYER COULD NOT SIT IN HIS OWN PRISON. propuse §3's force-exit read
+   `g.mode !== "city"`, so the sit arc completed and stood him back up the
+   same frame — measured sat 0 of the 160 frames after the arc. Fix: the pin
+   honours the mode the sit began in (P._propMode, recorded by
+   propSit/propSleep; anything that never recorded one keeps the "city"
+   reading byte for byte).
+
+Ratchets, both measured before pinning: CBZ.cellblockAudit().seatDrift
+(bunk-posed men off their spot; was 10-11, pinned 0) and
+CBZ.propUseAudit().airSitters (claimed seats whose occupant sits >0.35 m off
+the anchor; was 1 within a minute of chow, pinned 0). Geometry only, no flag
+reads, so a revert run measures the defect instead of hiding it.
+
+New tool: tools/prison-sit-check.mjs (npm run test:prison-sit) — 12
+assertions on the fixed tree (wing seated with seatDrift 0, chow airSitters 0
+and worst offset 0 m, a live arc with glideFault 0 landing at 0 m, the player
+still seated three seconds on and released cleanly by propStand);
+`--revert` boots ?cfg_SIT_PHYS_V1=0 and asserts the OPPOSITE (seatDrift 11,
+player stood back up) — the two-sided shape mode-engine-check demands.
+Verified: default 12/12, revert 4/4, MATHGATE ok (400 ticks, det ok,
+errors baseline-only), city regression probe 37 seated peds offSeat=0.
+
+## 2026-08-17 — THE FRAME, NOT THE LOAD (react-doctor wave)
+
+Owner: run react-doctor on the game, then make it run much much faster —
+in-game feel, not load time. React Doctor (millionco, oxlint-based) scanned
+813 files: 372 warnings, zero of them React (this is IIFE + r128) and, on
+inspection, none on a hot path — its `indexOf`-in-loop hits are 3-element
+arrays in bounded scans. The real wave came from a CDP sampling profiler
+attached to the live probe world (scratchpad cdprofile.mjs pattern —
+Profiler.start → stepSim ×400 → aggregate self-hits by function). Calm
+street, seed 90210, all before/after on the same machine.
+
+**Sim tick 29.7 → 24.9 ms. Render-side updateMatrixWorld 10.8 → 6.9 ms/frame.**
+
+The finds, in guilt order:
+
+1. **The coastline was recomputed from noise for every water question**
+   (~9% of the tick): every cityWaterAt/isSurfaceWater — cars' overWater,
+   swim, gore, floods — funnels through waterfield's coastAt →
+   continent.js shoreField, an analytic field over noise2/pathBodyField/
+   inSolidRegion. Memoized on a 4m corner grid with bilinear blending
+   (exact at corners, <1m coastline shift, pure function of (x,z) so MP/
+   determinism-safe; worldgen calls shoreField DIRECTLY and is untouched).
+   Plus: overDeck ran a REGEX per region per call (isLink) — now cached on
+   the region object; plus a last-cell fast path. Continent fields left the
+   profile entirely.
+2. **pedinstance walked all ~700 rigs every frame** (a:96, 3.4→1.5ms;
+   clean A/B 2.37→0.86ms): far (>40m) rigs now walk on 1 of 3 frames
+   (`PED_SYNC_STAGGER`), phases spread by group.id; every same-frame
+   contract kept — park gates run every frame, sweepRig knows a held frame
+   from a missing part via r.skipStamp.
+3. **The renderer recomposed every matrix the instancer had ALREADY
+   composed** — 33k ped-rig + 9k car nodes of the 48k matrixAutoUpdate
+   set. New shared contract: loop.js bumps CBZ._matrixOwnStamp once per
+   frame; a system that provably left a subtree's world matrices correct
+   stamps the root; core/matrixskip.js skips the whole subtree on stamp
+   equality. Stamps expire next frame BY CONSTRUCTION (no teardown
+   bookkeeping, nothing can stay stale). Stampers: pedinstance walked+held
+   rigs (`PED_MATRIX_OWN`), vehicles far-stride skipped cars and settled
+   parked cars >60m (`CAR_MATRIX_HOLD`; parkSeat's own cache is the
+   "settled" oracle; near cars stay live for doors/entry). Coverage
+   measured: 116/622 rigs (the non-culled ones), 386/420 cars.
+4. **reactions.js ran its 300-line pose body for every calm ped**: added
+   the quiescent fast path — a complete enumeration of the three edge
+   detectors, every external pose input and every stored channel; any
+   nonzero falls through. Measured 98-99% skip on calm streets, and
+   CBZ.reactionsAudit() now reports quiet/full/firstBlock forever.
+5. **The hot reticle asked isProtectedActor for all ~630 peds every
+   frame** (2.6%): bare radii are strictly inside assisted radii, so
+   findActorHit now tests assisted spheres first and asks the predicate
+   only on a would-be hit (still never cached — childsafe's obligation
+   kept; also no longer asked for merely-culled invisible peds). Gone from
+   the profile.
+6. **queryCollidersNear deduped via Set hashing** for every steering ped +
+   crowd probe: now a query-id stamp on the collider (9.1→7.0%).
+
+GATE: MATHGATE ok (90210:329/182/207, 400 ticks, det ok, errors
+baseline-only) with everything default-ON. Reverts: ?cfg_PED_SYNC_STAGGER
+/ PED_MATRIX_OWN / CAR_MATRIX_HOLD = 0.
+
+Traps for the next wave: (a) probe-world measurements are only comparable
+within one boot — event spikes (an ambient craft crashing mid-burst made
+airtraffic read 3.1ms when its steady state is 0.26) and boot-state drift
+lie across boots; A/B a cfg flag live in ONE world. (b) probe.mjs --serve
+edits need a serve RESTART to load; two restarts racing leaves the
+lockfile pointing at the stale one — pgrep before trusting it. (c) The
+render walk's remaining 6.9ms is the 170k-node visit floor + ~15k unnamed
+live objects; the next real render-CPU win is object-count reduction
+(mid-play accretion measured at only ~13 obj/s net, so it's the standing
+count, not a leak). (d) 6.7M tris are mostly redhollow/backcountry/mercy
+nature megameshes — vertex-cost waste on paper, but NOT the bottleneck on
+Apple GPUs; don't chase it before draw/CPU.
+
+## 2026-08-18 — THE HITMAN HAD A BOX THAT OPENED FOR A NUMBER
+
+Owner, standing in the motel room with the card up on his screen: *"there's a
+box that opens because of rep. Don't do that. There's one currency for a
+hitman, that's money, and a box doesn't open up for money, it opens up with a
+key. Whole point of keys and rooms — we have vaults built, doors built, keys
+built, a prison game with multiple types of doors that open with keycards. Yet
+the Hitman game uses none of these great things. Hitman should use the keys,
+but this gearbox should just open."* And, on the card itself: *"remove the
+m-dash… it should just be read wall… I hate this over-verbosity, especially
+around buttons."*
+
+**REPUTATION IS GONE FROM `city/hitman.js`.** `w.reputation.hitman` had exactly
+one writer (this file) and zero readers anywhere in the repo — it was a number
+that existed only to lock two things in the one room that used it. Deleted:
+`rep()`, `TIERS[].need`, `tierUnlocked()`, the `hitman: repGain` field on the
+completion event, `REP n` on the board header, `LOCKED · REP 20` on the cards
+and `locked · REP 20` on the case line. `hitmanAudit().repGates` is pinned at 0
+in `tools/math-gate.mjs` so it cannot come back.
+
+- **THE GEAR CASE JUST OPENS.** One press, the whole kit (the long lens, the
+  threaded SMG, ammo), then it reads empty. Its gold "lock" fitting is a grey
+  latch now, because the mesh was advertising a lock that no longer exists.
+- **THE ONE LOCK LEFT IS A KEY, AND IT ALREADY EXISTED.** `govcomplex.js`'s
+  strongroom is the city's own keycard story: a steel leaf with a barred panel,
+  a brass key upstairs, the city seal on a lit plinth you can SEE before you can
+  reach it. The seal is now a real `key`-tagged economy row (`"City Seal"`,
+  `city/economy.js`) added to the bag by `srTakeSeal`, not only the
+  `g.cityGovWrit` boolean — so it can be carried, dropped and stashed like
+  anything else. The wall's THE OFFICE card reads `NEEDS THE CITY SEAL / City
+  Hall, behind steel` until you hold one. No shop stocks a `key`: keys are
+  found or taken, never bought.
+- **The other two rungs are not gated at all.** A harder name pays more and is
+  harder to reach, and that is the whole ladder. The board header prints
+  `$n PAID · n SETTLED` off a new `records.hitman.paid`.
+- **BUTTONS.** `The wall — take the next name` → **`Read wall`**;
+  `Gear case — locked (REP 20)` → **`Open the case`**. Both are under
+  interactions.js's 24-char ACTION_MAX, so each IS the button with no copy bar
+  restating it. The zones also `describe()` themselves now (`The wall`, `Gear
+  case`) — the bare `—` in the card title was the registry's own placeholder
+  for a kind nobody had named.
+- Same em-dash-and-verbosity pass over the rest of the hitman path:
+  `contracts.js` (`Field office — apply` → `Apply to the bureau`, `The drop —
+  <rank>` → `Read the drop`), `campaign.js` (`Take the deal — work as the
+  warden's spy` → `Spy for the warden`), `activities.js`, `origins.js`,
+  and the strongroom's own labels (`Strongroom — locked` → `Locked
+  strongroom`).
+
+GATE: MATHGATE ok (90210:329/182/207, 200 ticks, det ok, errors baseline-only).
+
+Trap for the next wave: `records.hitman.caseTier` is a dead legacy field kept
+only so a save from before this wave reads its case as already emptied
+(`caseOpened()` accepts `caseTier >= 2`). Do not build anything new on it.
+
+## 2026-08-18 (2) — THE WORDS BESIDE THE BUTTON ARE DELETED
+
+Owner, on a bank vault card reading **"The vault needs more than any one…"**
+next to a button reading **THE VAULT NEEDS**, under a title plate already
+reading **The vault**: *"Look at how many words there are next to that button…
+fix this instance, but also find other instances where there's so many fucking
+words next to a button. There should be almost no words next to a button.
+Almost none, if any."*
+
+**IT WAS ONE SENTENCE SAWN IN HALF AND PRINTED TWICE.** The docked card row was
+a grid of `[copy bar | button]`: the authored line went in the bar (cut at 40
+chars) and `verbHead()` of the same line went on the button. The COPY BAR IS
+DELETED, in both renderers that had one:
+
+- `city/interactions.js` — `rowsHTML`'s docked branch emits a `<button>` and
+  nothing else. New `verbButton()` decides what that button says: the whole
+  line under 28 caps chars; a line ending in a FIGURE keeps the figure and
+  drops the connective dash ("Order a drink — $12" → `ORDER A DRINK $12`, up to
+  34); a short disambiguating tail survives ("Lift — ground" → `LIFT GROUND`,
+  which is the only thing separating it from `LIFT FLOOR 50`); anything longer
+  falls back to its verb head. `copyText()` and the whole `.itouch-copy` CSS
+  block are gone.
+- `systems/interact.js` — the prison rail's `optChoice` and its
+  `PRISON_INTERACT_TOUCH=false` fallback did the same thing with `.pi-copy`.
+  Same law: `railButton()` puts the authored line ON the button (these labels
+  are short by construction: a 14-char name plus a verb), and the STATUS chip
+  (a meter word, "armed", "counting") rides inside the button as `.pi-act-sub`
+  instead of trailing a prose cell.
+
+**THE VAULT ITSELF.** `cityVaultLabel` returned the LOCK'S SENTENCE as a button
+label — that is where the nine words came from. It returns a verb now (`Open
+the vault` / `Make them open it` / `Try the vault`), and what the door wants is
+said ONCE, WHEN YOU PRESS IT, as a toast that comes and goes: `cityVaultWants`
+folds the lock line together with what is behind the steel. `describe()`'s note
+was NOT promoted onto the card to compensate — the answer to too many words is
+fewer words, not the same words moved up a line.
+
+**THE LOCK LINES THEMSELVES GOT SHORTER** (`city/loyalty.js`, the second time
+this exact complaint has landed on `cityLock` — see 2026-08-05's armory line).
+A refusing door now names ONE route, its cheapest, never `A, or B`: a card
+subtitle is one 11px line and a second clause is guaranteed to be cut mid-word.
+A door that holds keys names its key and stops.
+
+Authored labels that would still have printed a truncated sentence, fixed at
+the source: `Unload every bag here onto the racks` → `Unload the bags`, `Have
+them run it to the warehouse` → `Send it to the warehouse`, `Go through the
+drinks cabinet` → `Open the drinks cabinet`, `Heave a crate into the hold (n/m)`
+→ `Load a crate (n/m)`, `Take lift + snowboard from summit` → `Ride the lift
+up`, `Train — $60 (max HP 120)` → `Train — $60`, `Wire the racks to your
+account` → `Wire the racks out`, `Federal request: post the Guard` → `Post the
+Guard`, plus the captain's board rows.
+
+GATE: MATHGATE ok (90210:329/182/207, 200 ticks, det ok, errors baseline-only).
+
+Trap for the next wave: `describe()`'s `note` field is still authored all over
+the repo and is still not rendered anywhere. Do not "fix" that by printing it —
+it is a wall of standing text one line above a control, which is the thing this
+wave deleted. Either give a note a real home or delete the field.
+
+## 2026-08-18 (3) — THE BUTTON LAW, AND THE MENUS A THUMB COULD NOT PRESS
+
+Owner, after the vault card: *"Look for more things like it throughout the code
+base. Make this a huge thing. And figure out what sucks. surrounding buttons."*
+
+Two faults, and the second one is worse than the first.
+
+### FAULT 1 — WORDS AROUND CONTROLS
+
+A repo-wide scan of every authored `label:` / `sub:` / `desc:` string turned up
+**90 violations**: 30 controls carrying an em dash (which the renderers CUT on,
+which is how half a sentence lands on a button), and the rest simply too long
+to be a control. All fixed at the source. The worst was the **Gang Life Board**:
+twenty cards, each a button with a paragraph of dev-speak on it —
+*"Launch the disaster survival activity while writing deployment consequences
+to City"*, *"seed commute crowds and delay events"*, *"Route into the
+jail/prison activity"*. Every one is now a player-voice line under seven words
+(*"Fly out to the island and survive it"*, *"A fare across town"*, *"Walk in.
+The ledger keeps the record"*). Same for the **score board**, whose card descs
+restated the meta row underneath them (`"Low take, low heat (1-2★). No crew
+needed."` beside a row already printing ★ and crew) and whose bank tier carried
+a 245-character paragraph.
+
+### FAULT 2 — SIX MENUS WITH NO BUTTONS AT ALL
+
+`city/shops.js` printed `[X] qty`, `[V] haggle`, `[1-9]` buy, `[0]` sell,
+`[R]` rob, `[Esc] leave` — and registered exactly one listener: `keydown`.
+**Every shop and every civic desk in the game** (food, guns, pawn, barber,
+jewelry, gas, hardware, electronics, courthouse, DMV, library, post office,
+federal, city annex) was, on the tablet this game is played on, a wall of text
+with nothing to press. The owner could not buy a burger. Five more menus were
+in the same state: the **job board** (`careers.js`), the **mod garage**
+(`modshop.js`), the **car lot** (`empire.js`), the **realty desk**
+(`realestate.js`) and the **empire screen** (`wealth.js`) — whose action pills
+were *styled to look like buttons* and were plain `<span>`s.
+
+The fix is the same five lines in each: the keydown body becomes
+`pressKey(k)`, every row carries the key it already printed as `data-k`, and
+one delegated click calls the same dispatch. **One code path, two inputs** — a
+verb can never work on one and not the other. Rows get a 44px touch height and
+a real CLOSE control; the key legends (`"[1–6] accept · [Esc] close"`) stop
+printing on touch, where they teach controls the device does not have. Same
+reason the snowboard HUD stops printing `A/D carve · W tuck · Space ollie`.
+
+### THE RATCHET — `tools/button-gate.mjs` (`npm run test:buttons`)
+
+A one-second static scan, no browser, six rules, all pinned at the measured
+floor: label ≤ 34 chars, sub ≤ 44, tile desc ≤ 60, **no em dash in any of the
+three**, the copy bar stays deleted (`itouch-copy` = 0 files), and
+keyboard-only panels = 3 (the snowboard/swim/killstreak HUD overlays, which
+have no rows to press). Eight files carry a NAMED exemption for keys that are
+not player text (`occupy.js`'s design commentary, `wanted.js`'s crime names,
+`take.js`'s ledger sources). Every number may go DOWN and never up; the gate
+fails if you fix something and forget to lower it.
+
+GATE: MATHGATE ok (90210:329/182/207, 200 ticks, det ok, errors baseline-only)
+· BUTTONGATE ok (label 0/0 · sub 0/0 · desc 0/0 · copyBars 0 · keyboardOnly 3).
+
+Traps for the next wave: (a) the shop/job/lot/realty/empire panels now have TWO
+entry points into one dispatch — if you add a verb, add it to `pressKey`, never
+to the keydown listener, or it will work on a desktop and be invisible on the
+tablet. (b) `tools/button-gate.mjs` reads string LITERALS only, so a label
+built by concatenation (`"Charter: " + name + " — " + money(f)`) is invisible
+to it; the renderer's `verbButton()` is what catches those at display time.
+(c) Three files still hold unrendered `note:` annotations on data rows
+(`civic.js` service rows are the big one) — dead text shipped to the player's
+browser, worth deleting when someone is next in there.
+
+## 2026-08-18 (4) — THE LIFT, THE BEACH BAG, THE ROOF STASH AND THE AD BOARD
+
+Caught by `tools/button-gate.mjs` while merging the button-law wave into main:
+four features that had landed on main the same week hung their `[E]` on a raw
+`document.addEventListener("keydown")` and registered no interaction zone. A
+proximity verb with no zone has no card, no button and no existence on a
+tablet, so on the owner's iPad the ad board could not be rented, beach bags
+could not be rifled, roof stashes could not be pried, **no lift in the city
+could be called**, and a player sealed in an idle cab had no way to open the
+doors. Each fix is one `registerZone` record off the finder the keydown was
+already using (`boardNear` / `lootNear` / `stashNear` / a three-case
+`liftTarget` that mirrors the keydown's own order), with the keydown left in
+place for the desktop.
+
+The catch also exposed a flaw in the gate that caught it: rule 6 accepted only
+a delegated CLICK as proof a surface is reachable, when a registered ZONE is
+equally valid — a menu is reached one way, a world verb the other. The rule now
+accepts both, which is what let the ratchet drop to its true floor of **2**
+(the swim meter and the killstreak banner: HUD overlays with nothing to press).
+
+GATE: MATHGATE ok (90210:329/182/207, 200 ticks, det ok, errors baseline-only)
+· BUTTONGATE ok (label 0/0 · sub 0/0 · desc 0/0 · copyBars 0 · keyboardOnly 2).
+
+Trap for the next wave: a `[E]` verb on a raw keydown is the easiest way in
+this repo to ship something that works perfectly for the person who wrote it
+and does not exist for the person who plays it. If a verb fires off proximity,
+it belongs in `CBZ.interactions.registerZone` — the keydown is the ACCELERATOR,
+never the only door.

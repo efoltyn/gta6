@@ -3317,7 +3317,7 @@
     // scared here bolts sooner — the same contagion a gunshot produces. No
     // second "run from fire" brain, and no cost when nobody is nearby.
     if (COOKOFF() && CBZ.cityPanicRaise) { try { CBZ.cityPanicRaise(car.pos.x, car.pos.z, 0.8); } catch (e) {} }
-    if (!opts.quiet && CBZ.city && (car.player || nearCam(car, 60))) CBZ.city.note("The car's on fire — bail out!", 1.1);
+    if (!opts.quiet && CBZ.city && (car.player || nearCam(car, 60))) CBZ.city.note("The car's on fire, bail out!", 1.1);
   }
   /* THE FUEL LOAD IS THE PAYLOAD. A cook-off is a chemical event whose size is
      set by how much fuel the vehicle carries, and fuel capacity tracks vehicle
@@ -3786,7 +3786,7 @@
     if (CBZ.cityPromotePlayerCar) CBZ.cityPromotePlayerCar(car);
     if (CBZ.carAudio) CBZ.carAudio.start();   // the motor turns over the moment you're in
     const worth = car.model ? "  ·  " + car.model.name : "";   // value stays hidden until you chop it
-    CBZ.city && CBZ.city.note("Driving" + worth + " — [E] out  [C] car style", 1.8);
+    CBZ.city && CBZ.city.note("Driving" + worth + " · [E] out  [C] car style", 1.8);
     return true;
   };
   CBZ.cityExitVehicle = function () {
@@ -4738,7 +4738,7 @@
       }
       if (!car._agroundNoted) {
         car._agroundNoted = true;
-        CBZ.city && CBZ.city.note("Aground — back her off the beach.", 1.8);
+        CBZ.city && CBZ.city.note("Aground, back her off the beach.", 1.8);
       }
     } else if (car._agroundNoted) car._agroundNoted = false;
     // ---- CARS_NO_WATER: a road car is not a boat. Past a grace window (a
@@ -4764,7 +4764,7 @@
           car.dead = true;
           car.group.position.set(car.pos.x, sinkY, car.pos.z);
           CBZ.cityExitVehicle();
-          CBZ.city && CBZ.city.note("The car went under — swim!", 2.0);
+          CBZ.city && CBZ.city.note("The car went under, swim!", 2.0);
           return;
         }
       }
@@ -5353,7 +5353,23 @@
          the road when it moved. `_heldBy` is the hold's own back-pointer, so
          there is nothing to keep in sync. */
       if (c._heldBy) continue;
-      if (c.player || c.dead || !c.ai || !c.road) { if (!c.player && !c.dead) parkSeat(c); continue; }
+      if (c.player || c.dead || !c.ai || !c.road) {
+        if (!c.player && !c.dead) {
+          // settled = parkSeat's own cache says nothing moved since last frame.
+          // A settled parked car 60m+ from the camera is completely inert, so
+          // its ~20-node subtree keeps last frame's world matrices — stamp it
+          // and core/matrixskip.js skips the recompose (this was most of the
+          // car half of the render matrix walk: parked cars vastly outnumber
+          // traffic). Near cars stay live for door/entry/impact animation.
+          const settled = c._parkX === c.pos.x && c._parkZ === c.pos.z && c._parkH === c.heading;
+          parkSeat(c);
+          if (settled && CBZ.CONFIG.CAR_MATRIX_HOLD !== false && c.group) {
+            const pdx = c.pos.x - camx, pdz = c.pos.z - camz;
+            if (pdx * pdx + pdz * pdz > 3600) c.group._cbzMatrixOwnedFrame = CBZ._matrixOwnStamp;
+          }
+        }
+        continue;
+      }
       // off-screen, non-critical cars: skip 2 of every 3 frames, banking dt so
       // they still cover the same ground when they do tick.
       const _cdx = c.pos.x - camx, _cdz = c.pos.z - camz;
@@ -5368,7 +5384,16 @@
         // above, invisible traffic doesn't need per-frame simulation.
         const _q = CBZ.qualityLevel == null ? 4 : CBZ.qualityLevel;
         const farStride = _q === 0 ? 6 : _q === 1 ? 4 : 3;
-        if ((_vframe + c._vsl) % farStride !== 0) continue;     // skipped this frame
+        if ((_vframe + c._vsl) % farStride !== 0) {
+          // NOTHING about this car changes on a skipped frame — the stride
+          // above is the guarantee — so its ~20-node subtree's world matrices
+          // are still exactly right. Stamp it so core/matrixskip.js skips the
+          // recompose too (the stamp expires next frame by construction; the
+          // frame the car actually ticks it moves and is left unstamped).
+          // ?cfg_CAR_MATRIX_HOLD=0 reverts.
+          if (CBZ.CONFIG.CAR_MATRIX_HOLD !== false && c.group) c.group._cbzMatrixOwnedFrame = CBZ._matrixOwnStamp;
+          continue;     // skipped this frame
+        }
         dt = c._acc; c._acc = 0;                         // catch-up step
       }
       // DRIVER SHOT DEAD AT THE WHEEL (cops / gunfire): drop the body out and let

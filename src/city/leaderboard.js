@@ -136,7 +136,7 @@
       // "who's rich and killable NOW" first, history second — but still high
       // enough that a famous kill (high finalLoot/level) ranks above small fry.
       score: ((rec.finalLoot || 0) + (rec.finalLevel || 0) * 1100) * 0.35,
-      why: "DECEASED — " + title + (rec.killedAt ? ", killed" : ""), where: "city",
+      why: "DECEASED · " + title + (rec.killedAt ? ", killed" : ""), where: "city",
       protection: "none (dead)", you: false, dead: true,
     };
   }
@@ -158,7 +158,7 @@
           actor: null, name: racer.name, title: "Racer #" + racer.number, level: 0,
           loot: worth,
           score: worth * 0.35 + (racer.wins || 0) * 900 * 0.35,
-          why: "DECEASED — Racer #" + racer.number + " · " + (racer.wins || 0) + " career wins", where: "city",
+          why: "DECEASED. Racer #" + racer.number + " · " + (racer.wins || 0) + " career wins", where: "city",
           protection: "none (dead)", you: false, dead: true,
         });
       }
@@ -447,15 +447,31 @@
     const tier = CBZ.cityEcon && CBZ.cityEcon.wealthTier ? CBZ.cityEcon.wealthTier(me.score) : null;
     html += "<div style='font-size:11px;color:#6b7480;margin-top:8px;border-top:1px solid #2c3140;padding-top:6px;display:flex;justify-content:space-between;gap:10px'>" +
       "<span>You: Lv." + me.level + " " + esc(me.title) + " · " + money(me.score) + (tier ? " · " + esc(tier.name) : "") + "</span>" +
-      "<span>Tab / Esc close · Y jobs</span></div>";
+      (CBZ.touchMode ? "" : "<span>Tab / Esc close · Y jobs</span>") + "</div>";
+    // ONE DISPATCH, TWO INPUTS: this board was Esc-or-nothing, so on a tablet
+    // it opened and never closed (owner, 2026-08-18).
+    html += "<div class='lbFoot'><span class='lbBtn' data-lb='jobs'>JOBS</span>" +
+      "<span class='lbBtn' data-lb='close'>CLOSE</span></div>";
     el.innerHTML = html;
     fitToScreen(el);
   }
 
+  function wireTaps(elm) {
+    if (!elm || elm._lbTaps) return;
+    elm._lbTaps = true;
+    elm.addEventListener("click", function (e) {
+      const b = e.target && e.target.closest ? e.target.closest("[data-lb]") : null;
+      if (!b) return;
+      e.preventDefault(); e.stopPropagation();
+      const act = b.getAttribute("data-lb");
+      toggle(false);
+      if (act === "jobs" && CBZ.cityOpenActivities) CBZ.cityOpenActivities();
+    });
+  }
   let open = false;
   function toggle(force) {
     open = force != null ? force : !open;
-    if (open) { render(); boardEl().style.display = "block"; }
+    if (open) { render(); const b = boardEl(); wireTaps(b); b.style.display = "block"; }
     else if (board) board.style.display = "none";
   }
   CBZ.cityShowLeaderboard = toggle;

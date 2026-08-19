@@ -44,9 +44,10 @@
        spine are left completely clear. That USED to read "nothing this file
        builds sits at |x| < 11.7 south of z = -38" — which was a statement
        about the 23.4 m of empty aisle rows D and E now stand in. The live
-       statement is the CENTRE HALL x[-4.1,4.1], and the only things in it are
-       the two bolted day tables at |x| = 2.6 (their stools reach |x| = 1.29)
-       and, north of the rows, the officer desk at z = -42.6.
+       statement is the CENTRE HALL x[-4.1,4.1], and NOTHING this file builds
+       stands in it — the two bolted day tables that used to sit at |x| = 2.6
+       are gone (see section 7). The nearest fitting is the officer desk at
+       z = -42.6, north of the rows.
        CBZ.cellblockAudit().spineBlocked measures the x[-0.55,0.55] patrol
        lane over this file's own colliders and is pinned at 0.
 
@@ -102,13 +103,14 @@
    ceiling hatch (11.6,-36.4) still in the cross-aisle, doorGapBlocked and
    spineBlocked still 0.
 
-   THE TWO THINGS THAT DID MOVE ARE BOTH THIS FILE'S OWN. |x| = 6.6 is inside
-   row E now, so the day tables go to |x| = 2.6; and the two |x| = 7.5 cage
-   lamps, also inside row E, become four gallery lamps at |x| = 9.9.
+   THE ONE THING THAT DID MOVE IS THIS FILE'S OWN. The two |x| = 7.5 cage
+   lamps are inside row E now, so they become four gallery lamps at |x| = 9.9.
+   (The two day tables were the other one — they were shuffled 6.6 -> 2.6 by
+   the same collision and are now deleted outright; section 7 says why.)
 
    REVERT: CBZ.CONFIG.PRISON_CELL_ROWS_V3 = false (or ?cfg_PRISON_CELL_ROWS_V3=0)
    restores the 13-cell wing exactly — D and E are not built, B-5 is not
-   appended, and the tables and lamps go back to 6.6 and 7.5.
+   appended, and the lamps go back to 7.5.
 
    DRAW-CALL BUDGET. Partitions carry colliders + LOS refs, so core/batch.js
    spares them (~20 draw calls, unavoidable — they are walls). Everything
@@ -334,8 +336,8 @@
      can lie down or sit", and its two registrars take a coordinate and a top
      height — which this file has always computed and thrown away. So the
      existing geometry is registered rather than re-drawn: `bunkRig` already
-     returns its own mattress top, and `dayTable` already knows where its four
-     stools are.
+     returns its own mattress top, and the shower bench and the cell stool
+     already know where a body would sit on them.
 
      Degrade: no propuse.js → nothing registers and every mesh is exactly what
      it was. Counted on CBZ._prisonProps so one audit can answer for the whole
@@ -420,6 +422,35 @@
 
   function h01(x, z, salt) { return CBZ.hash01 ? CBZ.hash01(x, z, salt) : 0.5; }
   function pick(list, x, z, salt) { return list[(h01(x, z, salt) * list.length) | 0] || list[0]; }
+
+  /* A SOLID BOX MUST DECLARE HOW TALL IT IS. (OWNER: "as if there's an
+     invisible wall.")
+
+     world/materials.js:205 pushes a collider with no y0/y1 unless the caller
+     hands it one, and systems/physics.js's contract is that a band-less
+     collider blocks at EVERY height. So a `{ solid: true }` box drawn 10 cm
+     thick at knee height registers as a column of solid air from the floor to
+     the ceiling — invisible to the eye, invisible to tools/ghost-collider-
+     check.mjs (which measures FOOTPRINT, and the footprint is honestly drawn),
+     and visible only when something else reads the ledger and believes it.
+     systems/gore.js's wall-splat scan is that something else: it found a
+     wall-sized opaque face and painted a floor-to-head blood plane down the
+     side of a day table, which is how the owner found this at all.
+
+     `solidTo(y, hgt)` is that declaration, and it takes the SAME two numbers
+     the addBox/sbox call beside it already takes, so the band cannot drift
+     from the mesh the way a typed 0.79 would. It bands floor-up rather than to
+     the box's literal extent, because that is what this wing's furniture IS —
+     a shower bench is a plinth, not a plank floating at 0.42 with walkable air
+     underneath, and a rack shelf has a rack under it.
+
+     Pass it to every solid this file places that is SHORTER THAN A WALL.
+     Structure (partitions, the shell, the grille) keeps its full-height
+     collider: those boxes ARE their own height, and writing the band by hand
+     there would just be a second, driftable copy of CH. `on` carries the
+     caller's own solid gate through (the duty chair is solid only under
+     HONEST) so a flag-gated prop does not need a second spelling. */
+  function solidTo(y, hgt, on) { return { solid: on == null ? true : on, y0: 0, y1: y + hgt / 2 }; }
 
   // Every collider this file pushes, kept so CBZ.cellblockAudit() can judge
   // OUR work and never blame world/door.js or the yard for a blocked lane.
@@ -1268,13 +1299,13 @@
     addBox(cx, 0.05, cz + 0.6, 0.34, 0.05, 0.34, 0x5b6470, { cast: false });           // drain grating
     for (let i = 0; i < 2; i++) {
       const zz = cz - 1.5 + i * 2.6, rx = cx - w / 2 + 0.45;
-      addBox(rx, 1.14, zz, 0.12, 2.28, 0.12, C_STEEL_D, { solid: true });              // riser, floor to rose
+      addBox(rx, 1.14, zz, 0.12, 2.28, 0.12, C_STEEL_D, solidTo(1.14, 2.28));           // riser, floor to rose
       addBox(rx, 1.35, zz, 0.17, 0.17, 0.17, C_STEEL_D, { cast: false });              // mixer, on the riser
       addBox(rx, 2.36, zz, 0.40, 0.10, 0.30, C_STEEL, { cast: false });                // rose, over the riser
     }
     // the bench: a solid plinth with a seat anchor, not a plank in mid-air.
     const bz = cz - d / 2 + 0.45;
-    sbox(cx, 0.21, bz, w - 0.6, 0.42, 0.42, 0xb9a184, { solid: true });
+    sbox(cx, 0.21, bz, w - 0.6, 0.42, 0.42, 0xb9a184, solidTo(0.21, 0.42));
     useSeat(cx, bz, 0, 0.42);
   }
   /* THE LINEN STORE WAS 5 PROPS, 0 SOLID, 0 USED, 3.61 m3 — three cream planes
@@ -1288,14 +1319,14 @@
     if (!HONEST) {                                     // the shipped alcove, byte for byte
       for (let i = 0; i < 3; i++)
         addBox(cx, 0.7 + i * 0.72, cz - 0.7, w - 0.3, 0.07, d - 2.6, 0xb9a184, { cast: false });
-      sbox(cx, 1.35, cz - d / 2 + 0.25, w - 0.3, 2.7, 0.10, C_PART_D, { solid: true });
+      sbox(cx, 1.35, cz - d / 2 + 0.25, w - 0.3, 2.7, 0.10, C_PART_D, solidTo(1.35, 2.7));
       addBox(cx, 0.55, cz + d / 2 - 1.1, 1.3, 1.1, 1.5, 0xe2e2e2, { cast: false });
       addBox(cx, 1.12, cz + d / 2 - 1.1, 1.4, 0.12, 1.6, 0xd0d0d0, { cast: false });
       return;
     }
-    sbox(cx, 1.35, cz - d / 2 + 0.25, w - 0.3, 2.7, 0.10, C_PART_D, { solid: true }); // back rack frame
+    sbox(cx, 1.35, cz - d / 2 + 0.25, w - 0.3, 2.7, 0.10, C_PART_D, solidTo(1.35, 2.7));  // back rack frame
     for (let i = 0; i < 3; i++)
-      sbox(cx, 0.42 + i * 0.62, cz - d / 2 + 0.62, w - 0.3, 0.05, 0.62, 0xb9a184, { solid: true });
+      sbox(cx, 0.42 + i * 0.62, cz - d / 2 + 0.62, w - 0.3, 0.05, 0.62, 0xb9a184, solidTo(0.42 + i * 0.62, 0.05));
     const cartZ = cz + d / 2 - 1.1;
     const tub = addBox(cx, 0.55, cartZ, 1.3, 1.1, 1.5, 0xe2e2e2, { cast: false });
     const lip = addBox(cx, 1.12, cartZ, 1.4, 0.12, 1.6, 0xd0d0d0, { cast: false });
@@ -1324,7 +1355,7 @@
     } else {
       addBox(cx, 1.5, pz, w - 0.6, 3.0, 0.12, C_PART_D, { cast: false });               // back panel
     }
-    sbox(cx, 0.55, cz - d / 2 + 1.1, 3.4, 1.1, 0.9, 0x33200f, { solid: true });         // desk
+    sbox(cx, 0.55, cz - d / 2 + 1.1, 3.4, 1.1, 0.9, 0x33200f, solidTo(0.55, 1.1));      // desk
     addBox(cx, 1.16, cz - d / 2 + 1.1, 3.6, 0.12, 1.0, 0x4a3a22, { cast: false });
     addBox(cx - 0.9, 1.34, cz - d / 2 + 1.0, 0.7, 0.42, 0.06, 0x9fd6ff, { emissive: 0x2a6ea5, ei: 0.7, cast: false }); // monitor
     addBox(cx + 1.5, 1.75, cz - d / 2 + 0.42, 0.9, 1.1, 0.10, 0x2a2f38, { cast: false });   // key board
@@ -1334,7 +1365,7 @@
     // propuse seat now, so the post is somewhere a body sits and not a prop
     // shaped like one. `face` looks north at the desk.
     const chZ = cz - d / 2 + 2.0;
-    sbox(cx, 0.45, chZ, 0.6, 0.9, 0.6, C_DARK, { solid: HONEST });                     // chair
+    sbox(cx, 0.45, chZ, 0.6, 0.9, 0.6, C_DARK, solidTo(0.45, 0.9, HONEST));            // chair
     addBox(cx, 1.05, cz - d / 2 + 2.25, 0.6, 0.7, 0.1, C_DARK, { cast: false });       // back
     if (HONEST) useSeat(cx, chZ, Math.PI, 0.45);
     // WING SIGN — the block announces itself over the post.
@@ -1359,40 +1390,33 @@
         matter: the spine at x = 0 (guards.js patrol) and the south
         throat x[-3,3] at z = -8 (world/door.js).
      ========================================================== */
-  // The table is BOLTED (sbox → a real collider that never moves). The four
-  // stools are not: a day-room stool is a loose 9 kg pedestal and the block
-  // rearranges them all day, so each one is a pushable with its own collider
-  // and carries its propuse sit anchor with it when it slides.
-  function dayTable(x, z) {
-    sbox(x, 0.74, z, 2.2, 0.10, 1.0, 0x8a939d, { solid: true });
-    addBox(x, 0.37, z, 0.28, 0.74, 0.28, C_STEEL_D, { cast: false });
-    for (let i = -1; i <= 1; i += 2) for (const j of [1, -1]) {
-      const sx = x + i * 0.85, sz = z + j * 0.85;
-      const pad = addBox(sx, 0.44, sz, 0.42, 0.08, 0.42, 0x6b7480, { cast: false });
-      const post = addBox(sx, 0.22, sz, 0.14, 0.44, 0.14, C_STEEL_D, { cast: false });
-      if (CBZ.pushProp) CBZ.pushProp({
-        parts: [pad, post], x: sx, z: sz, hx: 0.21, hz: 0.21, y1: 0.48,
-        mass: 9, kind: "stool", solid: true, leash: 3.0, stand: true, mode: "escape", seat: { x: sx, z: sz },
-      });
-    }
-  }
-  /* THE TABLES MOVED, AND THAT IS THE ROWS' FAULT, NOT A RESTYLE. |x| = 6.6
-     is inside row E now, so the day room goes where a day room in a double
-     cell house goes: the CENTRE HALL, |x| = 2.6, cell fronts on both sides of
-     it. The inboard stool corner reaches |x| = 1.29 and the bolted top spans
-     |x| 1.50..3.70, so the x[-0.55,0.55] patrol lane guards.js walks is still
-     empty concrete and spineBlocked is still 0. Reverting the rows puts them
-     back on 6.6 exactly. */
-  const DTX = ROWS3 ? 2.6 : 6.6;
-  dayTable(-DTX, -26.0);
-  dayTable(DTX, -26.0);
-  // ...and its four stools are seats. The day room is where a block SITS; two
-  // tables with eight bolted stools nobody could use is the fake-prop fault in
-  // its purest form. Stool cushion is 0.48 (the 0.44-thick pad on a 0.22 post,
-  // matching dayTable's own numbers) and each looks at the table centre.
-  for (const tx of [-DTX, DTX]) for (const i of [-1, 1]) for (const j of [-1, 1]) {
-    useSeat(tx + i * 0.85, -26.0 + j * 0.85, Math.atan2(-i * 0.85, -j * 0.85), 0.48);
-  }
+  /* NO DINING FURNITURE IN THE CELL HOUSE. (OWNER, with the shot: "there prob
+     shouldn't be table and chairs in the cell room.")
+
+     Two bolted day tables and eight stools used to stand here. They were never
+     placed on purpose: they were authored at |x| = 6.6 back when that was open
+     floor, and when ROWS3 pushed row E out over 6.6 they were SHUFFLED inward
+     to |x| = 2.6 to keep them off the new cells — i.e. into the CENTRE HALL,
+     the one strip of this building that is a corridor between two facing tiers
+     of cell fronts. A mess table in the middle of a tier walkway is not a day
+     room, it is furniture parked in a fire lane, and it read exactly that way
+     down the barrel: a picnic table two metres from a locked door.
+
+     Deleted rather than re-sited, because the compound already owns the rooms
+     this furniture belongs in and both are dressed: world/cafeteria.js (the
+     chow hall's mess tables, 0.95 m banded colliders and real seats) and
+     world/lounge.js (the DAYROOM proper — round bolted table, four stools,
+     phone bank). Moving these two here as well would have made the wing's
+     walkway the third-best day room in a prison that has two good ones.
+
+     WHAT THE HALL IS FOR INSTEAD: nothing. The spine at x = 0 is guards.js's
+     patrol lane and the south throat x[-3,3] at z = -8 is world/door.js's; the
+     tables sat between them and now the whole centre hall is clear concrete,
+     which is what a tier walkway is. `spineBlocked` was 0 with them and is
+     still 0 without them. Eight seat anchors and two pushable-stool records go
+     with them — CBZ._prisonProps just counts fewer props in this file, and the
+     seats an inmate actually uses on this floor are the per-cell stool
+     (fitOutCell) and his own bunk. */
   // NO centre line down the spine. The dashed yellow one that lived here was
   // road grammar — from the air it joined the walkway and the track oval into
   // the owner's "yellow dotted road going through the middle of the jail".
@@ -1573,6 +1597,57 @@
     return r < 0.34 ? "bars" : (r < 0.72 ? "bunk" : "pace");
   }
   function barsSpot(c) { return facePoint(c, (c.oa + c.ob) / 2, -0.85); }
+
+  /* ---- THE PACING BOX, AND THE LAW THAT A POST MUST BE INSIDE IT ----------
+     THE FLICKER (owner, 2026-08-19, video from his own cell): "ai is flickering
+     like moving super fast front back while trying to run while in cell."
+
+     Two numbers in this file disagreed and nothing made them agree. The leash
+     confines a resident to a box — the cell inset by a body radius, minus the
+     bunk footprint — and separately sends him to a POST derived from the door
+     frame (`barsSpot`, the door's centreline). Half this wing's doors are
+     offset over the bunk, so on the shipped tree TWELVE of twenty residents
+     were being sent to a post their own leash forbids. The result is a frame
+     loop with no fixed point: entities/npc.js walks the man at the post at
+     order 22, the clamp here shoves him back off it at order 22.6, and neither
+     ever wins. Measured on the pre-fix tree: 1.4 m of travel per second, net
+     displacement zero, a body vibrating at 60 Hz — which is exactly what a
+     screenshot cannot show and a video can.
+
+     The box is the authority now: `postIn` clamps the pose spot into it, so a
+     post is by construction somewhere the man is allowed to stand. He walks
+     there once, gets inside the settle radius, and stops.
+
+     The BUNK pose is deliberately exempt from the bunk exclusion: that strip
+     is off-limits to a PACING body, not to the man sitting on the mattress —
+     his spot is the seat the SIT_PHYS_V1 ratchet measures (cellblockAudit's
+     seatDrift), and it must stay exactly on the rig. */
+  function paceBox(c, forBunk) {
+    let x0 = c.x - c.hx + 0.62, x1 = c.x + c.hx - 0.62;
+    const z0 = c.z - c.hz + 0.62, z1 = c.z + c.hz - 0.62;
+    // THE PACING LANE STOPS AT THE BED. Taken off the rig's own footprint, so
+    // it tracks the bunk if it moves.
+    if (c.bunk && !forBunk) {
+      const wide = (c.bunk.along === "z" ? c.bunk.latOut : c.bunk.lonOut) + BODY_R;
+      if (c.bunk.x < c.x) x0 = Math.max(x0, c.bunk.x + wide);
+      else x1 = Math.min(x1, c.bunk.x - wide);
+      if (x1 < x0) x1 = x0 = (x0 + x1) / 2;      // a cell too narrow to pace
+    }
+    return { x0: x0, x1: x1, z0: z0, z1: z1 };
+  }
+  function clampInto(b, v) {
+    if (v.x < b.x0) v.x = b.x0; else if (v.x > b.x1) v.x = b.x1;
+    if (v.z < b.z0) v.z = b.z0; else if (v.z > b.z1) v.z = b.z1;
+  }
+  // the post a resident of `c` is sent to, as a point he is ALLOWED to occupy
+  function postV2() { return !CBZ.CONFIG || CBZ.CONFIG.CELL_POST_V2 !== false; }
+  function postIn(c, pose) {
+    const b = paceBox(c, pose === "bunk");
+    const s = pose === "bars" ? barsSpot(c)
+      : (pose === "bunk" && c.bunk ? bunkSpot(c) : { x: c.x, z: c.z });
+    if (postV2()) clampInto(b, s);
+    return s;
+  }
   function bunkSpot(c) {
     // THE NEAR LONG EDGE OF THE BUNK — and it is always an X offset, because
     // every bunk in this wing is laid out ALONG Z (fitOutCell passes "z" for
@@ -1617,7 +1692,10 @@
       const c = cells[i];
       if (c.vacant || c.owner) continue;
       const pose = cellPose(c);
-      const seat = pose === "bars" ? barsSpot(c) : (pose === "bunk" ? bunkSpot(c) : { x: c.x, z: c.z });
+      // spawned ON his post, and the post is the leash's own answer — a man
+      // dealt onto a spot his leash forbids spends his first seconds being
+      // shoved off it (see postIn).
+      const seat = postIn(c, pose);
       const hh = h01(c.x, c.z, 6001);
       let n = null;
       try {
@@ -1644,9 +1722,11 @@
   }
 
   /* ==========================================================
-     10. THE LEASH + the door slide + the lamp mirror. One updater, and it
-         runs after entities/npc.js's order-22 movement so the clamp is the
-         last word on where a cell resident ended the frame.
+     10. THE LEASH + the door slide + the lamp mirror. The leash runs on BOTH
+         sides of entities/npc.js's order-22 mover: order 21.9 decides where a
+         resident is allowed to go, order 22.6 has the last word on where he
+         ended the frame. A clamp with no say before the mover can only ever
+         undo the step — which is a body vibrating, not a body in a cell.
      ========================================================== */
   const SLIDE_RATE = 4.2;
   let lampHex = -1, lampT = 0, lastElapsed = 0;
@@ -1661,6 +1741,74 @@
     if (was && CBZ.setCharPose) CBZ.setCharPose(n.char, "stand");
     if (was && c) stepClearOfBunk(c, n);
   }
+
+  /* One pass of the cell leash over every occupied cell. `pre` runs before the
+     mover and owns the DECISIONS (the post, the pause, the facing); the post-
+     mover pass only re-clamps a body that was pushed since. */
+  function leashPass(dt, pre) {
+    for (let i = 0; i < cells.length; i++) {
+      const c = cells[i], n = c.owner;
+      if (!n || n === "player") continue;
+      if (n.dead || n.escaped) { if (pre) unseat(n, c); continue; }
+      // A BODY IN ITS BUNK IS NOT A BODY TO BE CLAMPED. Once systems/
+      // prisonrest.js has put a man to bed (or a propuse arc is walking him
+      // to it) the transform belongs to that hold: propuse re-pins the lie
+      // spot at order 42, and an AABB clamp or a target write here would be
+      // two systems arguing over one Vector3 — the exact way a body vibrates
+      // in place that prisonschedule.js's herd() already warns about.
+      if (n._propLie || n._propBed || (CBZ.propArcActive && CBZ.propArcActive(n))) continue;
+      // A REAL BRAIN STATE OUTRANKS THE POST — the same precedence poses.js
+      // documents: hands-up, a KO or a hunt owns the rig, and the held pose
+      // must LET GO rather than freeze a seated body mid-fight. The box still
+      // holds: a fight inside a cell is a fight inside THAT cell.
+      const owned = n.ko > 0 || n.intimidMode || n.huntPlayer > 0
+        || n.aiState === "fight" || n.aiState === "flee";
+      const pose = owned ? "pace" : n._cellPose;
+      // A bunk too low for this rig is not this man's bunk — `seatFits`
+      // measures HIS body against the clearance the bunk PUBLISHES, so the
+      // overlap is unreachable rather than "fixed by being taller". The
+      // fallback is a pose this wing already has, not a special case.
+      if (pose === "bunk" && (!c.bunk || (n.char && !seatFits(n.char, c.bunk.headroom)))) {
+        n._cellPose = "bars"; unseat(n, c); continue;
+      }
+      const b = paceBox(c, pose === "bunk");
+      const p = n.group.position;
+      clampInto(b, p);
+      if (n.target) clampInto(b, n.target);
+      if (owned) { if (pre) unseat(n, c); continue; }
+      const s = postIn(c, pose);
+      if (pose === "bunk") {
+        p.x = s.x; p.z = s.z;
+        if (!pre) continue;
+        n.target.set(s.x, 0, s.z);
+        n.pause = Math.max(n.pause || 0, 0.6);
+        n.group.rotation.y = CBZ.lerpAngle(n.group.rotation.y, Math.atan2(c.dx, c.dz), 1 - Math.pow(0.02, dt));
+        if (n.char && CBZ.setCharPose) {
+          n.char.seatRef = n.char.seatRef || { cushion: c.bunk.top, floorBelow: 0 };
+          CBZ.setCharPose(n.char, "sit");
+        }
+      } else if (pose === "bars" && pre) {
+        n.target.set(s.x, 0, s.z);
+        // THE SETTLE RADIUS IS THE MOVER'S. entities/npc.js stops walking at
+        // 0.4 m of the target; a post that only counts as reached at a
+        // TIGHTER radius than that is a post nobody ever reaches, so the man
+        // paces the last handspan forever. Half a metre of Euclidean slack
+        // clears the mover's own stop distance with room to spare.
+        if (Math.hypot(p.x - s.x, p.z - s.z) < 0.5) {
+          n.pause = Math.max(n.pause || 0, 0.5);
+          n.group.rotation.y = CBZ.lerpAngle(n.group.rotation.y, Math.atan2(c.dx, c.dz), 1 - Math.pow(0.02, dt));
+        }
+      }
+    }
+  }
+
+  // pass one: BEFORE entities/npc.js's order-22 mover, so the step it takes is
+  // a step toward somewhere this file will let him stand.
+  CBZ.onUpdate(21.9, function (dt) {
+    const g = CBZ.game;
+    if (!g || g.mode !== "escape" || !cast || !postV2()) return;
+    leashPass(dt, true);
+  });
 
   CBZ.onUpdate(22.6, function (dt) {
     const g = CBZ.game;
@@ -1693,68 +1841,14 @@
     // ---- the leash. Whatever the 4995-line brain wanted, a cell resident
     //      ends the frame inside his own cell: this is what "in cell" means,
     //      and it costs one AABB clamp per occupant.
-    for (let i = 0; i < cells.length; i++) {
-      const c = cells[i], n = c.owner;
-      if (!n || n === "player") continue;
-      if (n.dead || n.escaped) { unseat(n, c); continue; }
-      // A BODY IN ITS BUNK IS NOT A BODY TO BE CLAMPED. Once systems/
-      // prisonrest.js has put a man to bed (or a propuse arc is walking him
-      // to it) the transform belongs to that hold: propuse re-pins the lie
-      // spot at order 42, and an AABB clamp or a target write here would be
-      // two systems arguing over one Vector3 — the exact way a body vibrates
-      // in place that prisonschedule.js's herd() already warns about.
-      if (n._propLie || n._propBed || (CBZ.propArcActive && CBZ.propArcActive(n))) continue;
-      const p = n.group.position;
-      let x0 = c.x - c.hx + 0.62, x1 = c.x + c.hx - 0.62;
-      const z0 = c.z - c.hz + 0.62, z1 = c.z + c.hz - 0.62;
-      // THE PACING LANE STOPS AT THE BED. The clamp box was the cell inset by
-      // one body radius and took no notice of the 1.25 m of furniture in it —
-      // fine while the bunk was walk-through, a body wedged in a collider now.
-      // Taken off the rig's own footprint, so it tracks the bunk if it moves.
-      if (c.bunk) {
-        const wide = (c.bunk.along === "z" ? c.bunk.latOut : c.bunk.lonOut) + BODY_R;
-        if (c.bunk.x < c.x) x0 = Math.max(x0, c.bunk.x + wide);
-        else x1 = Math.min(x1, c.bunk.x - wide);
-        if (x1 < x0) x1 = x0 = (x0 + x1) / 2;      // a cell too narrow to pace
-      }
-      if (p.x < x0) p.x = x0; else if (p.x > x1) p.x = x1;
-      if (p.z < z0) p.z = z0; else if (p.z > z1) p.z = z1;
-      if (n.target) {
-        if (n.target.x < x0) n.target.x = x0; else if (n.target.x > x1) n.target.x = x1;
-        if (n.target.z < z0) n.target.z = z0; else if (n.target.z > z1) n.target.z = z1;
-      }
-      // A REAL BRAIN STATE OUTRANKS THE POST — the same precedence poses.js
-      // documents: hands-up, a KO or a hunt owns the rig, and the held pose
-      // must LET GO rather than freeze a seated body mid-fight.
-      if (n.ko > 0 || n.intimidMode || n.huntPlayer > 0 || n.aiState === "fight" || n.aiState === "flee") { unseat(n, c); continue; }
-      if (n._cellPose === "bars") {
-        const s = barsSpot(c);
-        n.target.set(s.x, 0, s.z);
-        if (Math.abs(p.x - s.x) + Math.abs(p.z - s.z) < 0.55) {
-          n.pause = Math.max(n.pause || 0, 0.5);
-          n.group.rotation.y = CBZ.lerpAngle(n.group.rotation.y, Math.atan2(c.dx, c.dz), 1 - Math.pow(0.02, dt));
-        }
-      } else if (n._cellPose === "bunk") {
-        // THE POSE IS ASKED FOR, NOT ASSUMED. This branch used to sit the man
-        // down unconditionally, and the rack over his head was 0.37 m too low
-        // for the body doing it — the owner's screenshot, exactly. `seatFits`
-        // measures HIS rig against the clearance the bunk PUBLISHES, so the
-        // overlap is not "fixed by being taller", it is unreachable: a body
-        // that would not clear the deck never takes the pose, at any height.
-        // The fallback is a pose this wing already has, not a special case.
-        if (n.char && !seatFits(n.char, c.bunk.headroom)) { n._cellPose = "bars"; unseat(n, c); continue; }
-        const s = bunkSpot(c);
-        p.x = s.x; p.z = s.z;
-        n.target.set(s.x, 0, s.z);
-        n.pause = Math.max(n.pause || 0, 0.6);
-        n.group.rotation.y = CBZ.lerpAngle(n.group.rotation.y, Math.atan2(c.dx, c.dz), 1 - Math.pow(0.02, dt));
-        if (n.char && CBZ.setCharPose) {
-          n.char.seatRef = n.char.seatRef || { cushion: c.bunk.top, floorBelow: 0 };
-          CBZ.setCharPose(n.char, "sit");
-        }
-      }
-    }
-
+    //
+    //      IT RUNS TWICE, AND THE FIRST PASS IS THE ONE THAT MATTERS. A clamp
+    //      that only runs AFTER entities/npc.js (order 22) can never do better
+    //      than undo the step the mover just took — undoing a step every frame
+    //      forever is precisely the flicker. Pass one (order 21.9, `pre`)
+    //      settles where the man is ALLOWED to go before he is moved; pass two
+    //      (order 22.6) is the cheap safety net that catches the step itself.
+    leashPass(dt, !postV2());
     // ---- lamp mirror: interactions.js's breaker only knows about
     //      CBZ.ceilingLamp, so the rest of the wing follows it. Polled at
     //      4 Hz and written only on a change.
@@ -1943,6 +2037,21 @@
       if (c.minX < R && c.maxX > -R && c.minZ < -12 && c.maxZ > -40) spine++;
     }
     let occupied = 0, empty = 0, locked = 0;
+    /* seatDrift (SIT_PHYS_V1) — bunk-posed residents NOT at their bunk spot.
+       The leash pins a "bunk" man to bunkSpot every frame at order 22.6;
+       systems/actorcollide.js's clamp at order 25 used to depenetrate him
+       back out of the (now solid) frame — measured at latOut + body radius =
+       1.06 m into the room, ten men at once, each seated on air half a metre
+       clear of his own mattress. The number is the fault: geometry only, no
+       flag reads, so a revert run measures the defect and a fixed run pins 0.
+       Fight/flee/KO men are excluded — unseat() owns them, not the pin. */
+    let seatDrift = 0;
+    /* postDrift (CELL_POST_V2) — residents being walked at a post their own
+       leash forbids. Pure geometry: the man's live target measured against the
+       box this file clamps him to. A non-zero reading IS the flicker — the
+       mover spends every frame closing on a point the clamp spends every frame
+       taking back. Was 12 of 20 on the shipped wing; pinned at 0. */
+    let postDrift = 0;
     // cells per row, off the cells' OWN tags — so "how big is this wing"
     // cannot be answered by a number typed anywhere but the row tables.
     const rows = {};
@@ -1952,6 +2061,21 @@
       rows[r] = (rows[r] | 0) + 1;
       if (c.locked) locked++;
       if (c.owner && c.owner !== "player") occupied++; else empty++;
+      const n = c.owner;
+      if (n && n !== "player" && n.group && n.char && n.char.sitting
+          && n._cellPose === "bunk" && c.bunk
+          && !(n.ko > 0) && !n.intimidMode && !(n.huntPlayer > 0)
+          && n.aiState !== "fight" && n.aiState !== "flee"
+          && !(CBZ.propArcActive && CBZ.propArcActive(n))) {
+        const sp = bunkSpot(c), p = n.group.position;
+        if (Math.hypot(p.x - sp.x, p.z - sp.z) > 0.3) seatDrift++;
+      }
+      if (n && n !== "player" && n.target && !n.dead && !n.escaped && !(n.ko > 0)
+          && !n._propLie && !n._propBed && !(CBZ.propArcActive && CBZ.propArcActive(n))
+          && n.aiState !== "fight" && n.aiState !== "flee" && !n.intimidMode && !(n.huntPlayer > 0)) {
+        const bx = paceBox(c, n._cellPose === "bunk"), t = n.target;
+        if (t.x < bx.x0 - 1e-3 || t.x > bx.x1 + 1e-3 || t.z < bx.z0 - 1e-3 || t.z > bx.z1 + 1e-3) postDrift++;
+      }
     }
     const pc = playerCell;
     const margin = pc ? Math.min(pc.hx - Math.abs(s.x - pc.x), pc.hz - Math.abs(s.z - pc.z)) : 0;
@@ -1964,6 +2088,8 @@
       spawnBlocked: spawnBlocked,                            // MUST be 0
       doorGapBlocked: gap,                                   // MUST be 0
       spineBlocked: spine,                                   // MUST be 0
+      seatDrift: seatDrift,                                  // MUST be 0 (SIT_PHYS_V1)
+      postDrift: postDrift,                                  // MUST be 0 (CELL_POST_V2)
       colliders: mine.length,
       lamps: lamps.length + 1,
     };

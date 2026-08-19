@@ -99,7 +99,7 @@
   "use strict";
   var THREE = window.THREE;
   if (!THREE) {
-    console.warn("[three-legacy] window.THREE not found — compat shim skipped (three-r164 script tag missing or failed to load?).");
+    console.warn("[three-legacy] window.THREE not found, compat shim skipped (three-r164 script tag missing or failed to load?).");
     return;
   }
 
@@ -130,6 +130,6 @@
     }
     THREE.WebGLRenderer = LegacyWebGLRenderer;
   } else {
-    console.warn("[three-legacy] THREE.WebGLRenderer missing — cannot apply legacy lighting/colorspace defaults.");
+    console.warn("[three-legacy] THREE.WebGLRenderer missing, cannot apply legacy lighting/colorspace defaults.");
   }
 })();

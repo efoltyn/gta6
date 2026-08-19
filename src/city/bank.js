@@ -275,14 +275,14 @@
         // the reserve requirement fully binds — same refusal shape (approved:
         // false + a human reason) every other offer() decline already uses.
         o.approved = false; o.principal = 0; o.payment = 0;
-        o.reason = "credit ceiling reached — the central bank's reserve requirement is binding";
+        o.reason = "credit ceiling reached, the central bank's reserve requirement is binding";
         return o;
       }
       // partial room left: offer what the system can actually still lend,
       // same "approved up to X" UX the personal-capacity gate above uses.
       o.principal = Math.floor(headroom);
       o.payment = paymentFor(o.principal, o.rate, o.termTicks);
-      o.reason = "approved up to " + fmt$(o.principal) + " — bank credit ceiling binding";
+      o.reason = "approved up to " + fmt$(o.principal) + " · bank credit ceiling binding";
     }
     return o;
   }
@@ -381,7 +381,7 @@
         rec.paidTicks = num(rec.paidTicks, 0) + 1;
         if (paid < want && CBZ.player && !CBZ.player.dead && CBZ.city) {
           // a missed/partial note — surfaced quietly, once per cycle per loan
-          note("Short on your " + rec.kind + " payment — interest is compounding (" + fmt$(rec.balance) + " owed).", 2.2);
+          note("Short on your " + rec.kind + " payment, interest is compounding (" + fmt$(rec.balance) + " owed).", 2.2);
         }
         if (rec.balance <= 1) { closeLoan(rec); big("" + (rec.kind === "mortgage" ? "Mortgage" : rec.kind === "auto" ? "Auto loan" : "Loan") + " paid off!"); }
       }
@@ -517,7 +517,7 @@
       t.t = num(t.t, PAWN_TERM_SECS) - num(dt, 0);
       if (t.t <= 0) {
         T.splice(i, 1);
-        note("Pawn ticket lapsed — the broker kept your " + t.item + ".", 2.4);
+        note("Pawn ticket lapsed, the broker kept your " + t.item + ".", 2.4);
         if (CBZ.cityHudDirty) CBZ.cityHudDirty();
       }
     }
@@ -785,7 +785,7 @@
     if (c <= 0) { note("No cash on you to deposit.", 1.4); return; }
     g.cityBank = num(g.cityBank, 0) + c; g.cash = 0;
     if (CBZ.sfx) CBZ.sfx("coin");
-    note("Deposited " + fmt$(c) + " — insured account balance " + fmt$(g.cityBank) + ".", 2.2, { from: "Meridian Trust", app: "bank" });
+    note("Deposited " + fmt$(c) + " · insured account balance " + fmt$(g.cityBank) + ".", 2.2, { from: "Meridian Trust", app: "bank" });
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     if (CBZ.cityWorldCommit) CBZ.cityWorldCommit();
   }
@@ -848,14 +848,14 @@
   }
   function bribe() {
     const stars = num(g.wanted, 0) | 0;
-    if (stars <= 0) { note("You're clean — nothing to pay off.", 1.4); return; }
+    if (stars <= 0) { note("You're clean, nothing to pay off.", 1.4); return; }
     const base = (CBZ.CITY && CBZ.CITY.econ && CBZ.CITY.econ.bribeBase) || 150;
     const cost = base * stars;
     if (!(CBZ.city && CBZ.city.spend && CBZ.city.spend(cost))) { note("A bribe costs " + fmt$(cost) + " in cash right now.", 1.8); return; }
     const T = CBZ.CITY && CBZ.CITY.starHeat;
     if (T) g.heat = Math.max(0, T[Math.max(0, stars - 1)] - 1);
     if (CBZ.city && CBZ.city.addHeat) CBZ.city.addHeat(0);
-    note("Paid off the cops — down to " + (stars - 1) + "★ (" + fmt$(cost) + ").", 2.2);
+    note("Paid off the cops, down to " + (stars - 1) + "★ (" + fmt$(cost) + ").", 2.2);
     if (CBZ.sfx) CBZ.sfx("coin");
   }
 
@@ -915,7 +915,7 @@
       openRows += "</div>";
     }
     el.innerHTML =
-      "<div style='font-size:20px;font-weight:600;margin-bottom:2px'>Meridian Trust — Lending</div>" +
+      "<div style='font-size:20px;font-weight:600;margin-bottom:2px'>Meridian Trust. Lending</div>" +
       "<div style='color:#7f8794;font-size:13px;margin-bottom:14px'>Net worth " + fmt$(netWorth()) +
         " · unsecured credit up to <span style='color:#bcffd0'>" + fmt$(cap) + "</span></div>" +
       "<div style='display:flex;gap:8px;margin-bottom:14px'>" +
@@ -938,7 +938,7 @@
         "</div>" +
       "</div>" +
       "<div style='background:#161b22;border:1px solid #2a313c;border-radius:10px;padding:10px;font-size:13px;color:#9fb0c8'>" +
-        "<b style='color:#bcd0ff'>Mortgage pre-approval:</b> financing a home? The realtor desk or property market books it through us — 20% down, ~6% on the balance, auto-paid each cycle." +
+        "<b style='color:#bcd0ff'>Mortgage pre-approval:</b> financing a home? The realtor desk or property market books it through us. 20% down, ~6% on the balance, auto-paid each cycle." +
       "</div>" +
       openRows +
       "<div style='display:flex;justify-content:flex-end;gap:8px;margin-top:16px'>" +
@@ -954,12 +954,12 @@
   function takePersonal() {
     const amt = clampPersonalAmt(S.pAmt);
     const o = offer("personal", amt, {});
-    if (!o.approved || o.principal < MIN_PRINCIPAL) { note("Declined — " + (o.reason || "not approved") + ".", 2); return; }
+    if (!o.approved || o.principal < MIN_PRINCIPAL) { note("Declined · " + (o.reason || "not approved") + ".", 2); return; }
     o.purpose = "personal"; o.termTicks = S.pTerm; o.payment = paymentFor(o.principal, o.rate, S.pTerm);
     const id = take(o);
     if (id) {
-      big("Loan funded — " + fmt$(o.principal) + " in your pocket.");
-      note("Borrowed " + fmt$(o.principal) + " at " + Math.round(o.rate * 100) + "% — " + fmt$(o.payment) + "/cycle auto-paid.", 2.6);
+      big("Loan funded · " + fmt$(o.principal) + " in your pocket.");
+      note("Borrowed " + fmt$(o.principal) + " at " + Math.round(o.rate * 100) + "% · " + fmt$(o.payment) + "/cycle auto-paid.", 2.6);
       renderPanel();
     }
   }
@@ -1628,9 +1628,9 @@
           " — " + fmt$(moved) + " in bags. Carry it out.");
     } else if (moved > 0) {
       if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(moved);
-      big("VAULT OPEN — " + fmt$(moved) + ".");
+      big("VAULT OPEN · " + fmt$(moved) + ".");
     } else {
-      big("VAULT OPEN — and it's empty. Somebody got here first.");
+      big("VAULT OPEN, and it's empty. Somebody got here first.");
       note("They banked it. Come back when the branch has taken money in again.", 3);
     }
     // CONSEQUENCE. A blown vault door is the loudest thing that happens in a
@@ -1709,17 +1709,33 @@
     }
     return best;
   };
+  /* THE BUTTON IS A VERB, NEVER THE LOCK'S SENTENCE (owner, 2026-08-18, on a
+     card reading "The vault needs more than any one..." beside a THE VAULT
+     NEEDS button: "there should be almost no words next to a button"). The
+     card carries two words; what the door WANTS, and what is behind it, is
+     said once, out loud, WHEN YOU PRESS IT — a toast that comes and goes,
+     never a standing wall of text on the HUD. */
   CBZ.cityVaultLabel = function (v) {
     if (!v) return "";
     const L = vaultLock(v);
-    if (L.open) return L.insider ? "Make them open the vault" : "Open the vault";
-    return L.line || "The vault is locked";
+    if (L.open) return L.insider ? "Make them open it" : "Open the vault";
+    return "Try the vault";
+  };
+  // what the door is waiting for, plus the reason to want it. Spoken on the
+  // press (see cityVaultTry), which is the only place it is ever printed.
+  CBZ.cityVaultWants = function (v) {
+    if (!v) return "";
+    const L = vaultLock(v);
+    const holds = vaultHolds(v);
+    const behind = holds && holds.amount > 0 ? " $" + Math.round(holds.amount).toLocaleString() + " is behind it." : "";
+    if (L.open) return "";
+    return (L.line || "The vault is locked.") + behind;
   };
   CBZ.cityVaultCanOpen = function (v) { return !!(v && !v.open && vaultLock(v).open); };
   CBZ.cityVaultTry = function (v) {
     if (!v || v.open) return false;
     const L = vaultLock(v);
-    if (!L.open) { note(L.line || "The vault is locked. Blow it, or find somebody who can open it.", 2.6); return false; }
+    if (!L.open) { note(CBZ.cityVaultWants(v) || "The vault is locked.", 3); return false; }
     if (L.insider) {
       note("He works the timelock. It swings.", 2.0);
       // the man who opened it under a gun is a witness, and the room knows.

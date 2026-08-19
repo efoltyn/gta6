@@ -1122,9 +1122,38 @@
     return groundY(x, z) + 0.08 * scale;
   }
 
+  /* THE ROLL AXIS OF A CORPSE, AND WHY IT IS NOT rotation.z.
+
+     Every animal asset is authored nose toward +X (wildlife_rig's convention)
+     and THREE.Euler's default order is 'XYZ', which composes R = Rx·Ry·Rz —
+     Rz is applied FIRST, in model space. So `group.rotation.z` on one of these
+     bodies is the model-local PITCH: positive is NOSE UP. This tumble has
+     always eased `restRoll` (±1.4 rad, i.e. 80°) onto exactly that channel,
+     which does not lay a dead animal on its flank — it SITS IT UP, nose at the
+     sky. That is the owner complaint quadruped_ragdoll.js was written to
+     answer, quoted verbatim in its header; the solver fixed the bodies it
+     accepts and this fallback kept the bug for everything it declines — every
+     shark and snake (refused outright), every kill past the camera range gate,
+     every body over budget, and the whole of games/battle.html, which had no
+     solver loaded at all.
+
+     rotation.order = 'YXZ' composes R = Ry·Rx·Rz instead, which makes
+     rotation.x a roll about the body's own long axis AFTER the yaw — the axis
+     a four-legged corpse actually goes over. predator_anim.js states the same
+     rule in its r128 note ("a true long-axis roll needs rotation.order='YXZ'").
+     So the corpse switches order once, at death, and the tumble's roll/pitch
+     move to the channels that mean roll and pitch. Yaw is unchanged either way.
+     Angles are near zero at the moment of death, so re-interpreting the live
+     Euler under the new order moves nothing visible on the frame it happens. */
+  function corpseEuler(grp) {
+    if (grp.rotation.order !== "YXZ") grp.rotation.order = "YXZ";
+  }
+  CBZ.wildlifeCorpseEuler = corpseEuler;
+
   function wildlifeDeathTumble(a, dir, impulse, point) {
     if (!a || !a.group) return null;
     const grp = a.group, sp = a.species || {};
+    corpseEuler(grp);
     let dx = dir ? (+dir.x || 0) : 0;
     const dy = dir ? (+dir.y || 0) : 0;
     let dz = dir ? (+dir.z || 0) : 0;
@@ -1138,11 +1167,15 @@
     const side = point
       ? (Math.sign((point.x - grp.position.x) * -dz + (point.z - grp.position.z) * dx) || (Math.random() < 0.5 ? -1 : 1))
       : (Math.random() < 0.5 ? -1 : 1);
+    // wRoll/wPitch/wYaw are named for what they DO, not for the channel they
+    // used to land on: under 'YXZ' the roll rate drives rotation.x and the
+    // pitch rate drives rotation.z. The magnitudes are the ones this tumble
+    // was tuned with — only the axes were wrong.
     a._deathPhys = {
       vx: dx * imp, vy: Math.max(1.2, 1.6 + Math.max(-0.2, dy) * imp * 0.7), vz: dz * imp,
-      wx: (Math.random() - 0.5) * 2.1 + dy * 0.8,
-      wy: (Math.random() - 0.5) * 1.8,
-      wz: side * (2.7 + Math.random() * 1.9) + dx * 0.5,
+      wPitch: (Math.random() - 0.5) * 2.1 + dy * 0.8,
+      wYaw: (Math.random() - 0.5) * 1.8,
+      wRoll: side * (2.7 + Math.random() * 1.9) + dx * 0.5,
       restRoll: side * (1.38 + Math.random() * 0.14),
       restPitch: (Math.random() - 0.5) * 0.32,
       restYaw: grp.rotation.y + (Math.random() - 0.5) * 0.25,
@@ -1169,12 +1202,13 @@
     const scale = Math.max(0.35, (a.species && a.species.scale) || 1);
     ph.t += step;
     ph.vy -= 20.5 * step;
+    corpseEuler(grp);
     grp.position.x += ph.vx * step;
     grp.position.y += ph.vy * step;
     grp.position.z += ph.vz * step;
-    grp.rotation.x += ph.wx * step;
-    grp.rotation.y += ph.wy * step;
-    grp.rotation.z += ph.wz * step;
+    grp.rotation.x += ph.wRoll * step;    // 'YXZ': x is the long-axis ROLL
+    grp.rotation.y += ph.wYaw * step;
+    grp.rotation.z += ph.wPitch * step;   // ...and z is the model-local pitch
     const restY = carcassRestY(a, grp.position.x, grp.position.z, scale);
     if (grp.position.y <= restY && ph.vy < 0) {
       grp.position.y = restY;
@@ -1182,23 +1216,23 @@
       if (ph.bounces <= 1 && Math.abs(ph.vy) > 2.2) ph.vy = -ph.vy * 0.18;
       else ph.vy = 0;
       ph.vx *= 0.48; ph.vz *= 0.48;
-      ph.wx *= 0.28; ph.wy *= 0.38; ph.wz *= 0.3;
+      ph.wPitch *= 0.28; ph.wYaw *= 0.38; ph.wRoll *= 0.3;
       ph.groundT += step;
     } else ph.groundT = 0;
     const drag = Math.pow(0.3, step);
     ph.vx *= drag; ph.vz *= drag;
-    ph.wx *= Math.pow(0.24, step); ph.wy *= Math.pow(0.2, step); ph.wz *= Math.pow(0.24, step);
+    ph.wPitch *= Math.pow(0.24, step); ph.wYaw *= Math.pow(0.2, step); ph.wRoll *= Math.pow(0.24, step);
     if (ph.vy === 0 || ph.t > 1.55) {
       const settle = Math.min(1, step * (ph.t > 2.2 ? 10 : 4.2));
-      grp.rotation.x += (ph.restPitch - grp.rotation.x) * settle;
+      grp.rotation.x += (ph.restRoll - grp.rotation.x) * settle;
       grp.rotation.y += (ph.restYaw - grp.rotation.y) * settle;
-      grp.rotation.z += (ph.restRoll - grp.rotation.z) * settle;
+      grp.rotation.z += (ph.restPitch - grp.rotation.z) * settle;
     }
-    if ((ph.t > 2.7) || (ph.t > 1.45 && ph.vy === 0 && Math.hypot(ph.vx, ph.vz, ph.wx, ph.wy, ph.wz) < 0.45)) {
+    if ((ph.t > 2.7) || (ph.t > 1.45 && ph.vy === 0 && Math.hypot(ph.vx, ph.vz, ph.wPitch, ph.wYaw, ph.wRoll) < 0.45)) {
       grp.position.y = restY;
-      grp.rotation.x = ph.restPitch;
+      grp.rotation.x = ph.restRoll;
       grp.rotation.y = ph.restYaw;
-      grp.rotation.z = ph.restRoll;
+      grp.rotation.z = ph.restPitch;
       a._deathPhys = null;
       return false;
     }
@@ -1293,7 +1327,7 @@
     const by = (w && w.by) || null;
     if (killerIsPlayer(by)) {
       if (CBZ.city) {
-        if (a.legendary) { if (CBZ.city.note) CBZ.city.note("★ LEGENDARY " + a.species.name + " DOWN — skin it before it's gone!", 4, { urgent: true }); }
+        if (a.legendary) { if (CBZ.city.note) CBZ.city.note("★ LEGENDARY " + a.species.name + " DOWN, skin it before it's gone!", 4, { urgent: true }); }
         else if (CBZ.city.note) CBZ.city.note(a.species.name + " down · walk up & hold to skin", 2.4);
       }
       if (CBZ.cityKillFeed) { try { CBZ.cityKillFeed("You", a.species.name, "hunted"); } catch (e) {} }
@@ -1444,7 +1478,7 @@
     v.t = Math.max(v.t, sp.venom === true ? 6 : 4);   // refresh/extend
     v.dps = Math.max(v.dps, sp.venomDps || 5);
     v.name = sp.name;
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("VENOM — " + sp.name + " bit you! Find an antidote or ride it out.", 3.2, { urgent: true });
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("VENOM · " + sp.name + " bit you! Find an antidote or ride it out.", 3.2, { urgent: true });
   }
   function venomTick(dt) {
     const v = g._venom; if (!v || v.t <= 0) return;

@@ -388,7 +388,7 @@
     SCENE.kind = "shooter"; SCENE.actors = [shooter];
     SCENE.anchor = { x: sp.x, z: sp.z };
     SCENE.t = 0; SCENE.ttl = 28; SCENE.beatCD = 0.4;
-    feed("Gunfire reported — get clear!", "#ff7a5a");
+    feed("Gunfire reported, get clear!", "#ff7a5a");
     return true;
   }
 

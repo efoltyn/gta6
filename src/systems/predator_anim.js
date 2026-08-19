@@ -191,6 +191,9 @@
       mawK: 0, worK: 0, worPh: 0, cantK: 0, dipK: 0,
       rearK: 0, swK: 0, swSide: -1, swCol: null,
       flatK: 0, crouchK: 0, extK: 0, shudK: 0, shudPh: 0, coilK: 0,
+      // the knuckle-walker layers: both forearms hammering, both arms hoisting
+      // a load, and the chest beat (drumPh is a rectified 0..1 pound, not an angle)
+      slamK: 0, hoistK: 0, drumK: 0, drumPh: 0,
       // "is anything applied" latches so a resting actor costs nothing
       legsOn: 0, headOn: 0, bodyOn: 0, coilOn: 0, act: 0,
       cyc: 0, lp: 0,
@@ -328,6 +331,37 @@
       // EXTEND: mid-pounce — forelegs reach forward, hind legs trail back.
       if (rig.extK > 0) { ox += (isFront ? 1 : -1) * h * 0.45 * rig.extK; oy += h * 0.12 * rig.extK; }
 
+      /* ---- THE KNUCKLE-WALKER LAYERS. On an ape the FRONT columns are arms,
+         not legs — apes.js says so in its header and the discovery agrees
+         (a 1.26 m ground-planted forearm reads as a leg by exactly the test
+         that makes the gait work). Everything below is what arms do that legs
+         cannot, and all three drive BOTH front columns because two hands is
+         the whole difference from `swK`'s single paw. Derived, never tabled:
+         any species whose front columns are long enough to matter gets them. */
+      // SLAM: both forearms go up and hammer DOWN and forward together. 0..0.5
+      // of the weight is the raise, 0.5..1 is the fall — a triangle, so the
+      // caller's own strike envelope drives the whole arc with one number.
+      if (rig.slamK > 0 && isFront) {
+        _t = rig.slamK;
+        var up = _t < 0.5 ? (_t * 2) : (1 - (_t - 0.5) * 2);
+        oy += h * 0.95 * up;
+        ox += h * (0.15 * up + 0.55 * (_t > 0.5 ? (_t - 0.5) * 2 : 0));
+        rz += -0.9 * up + 0.5 * (_t > 0.5 ? (_t - 0.5) * 2 : 0);
+      }
+      // HOIST: both arms held HIGH and out — this is a body being carried at
+      // the end of them, and it is the pose the whole flail hangs off.
+      if (rig.hoistK > 0) {
+        if (isFront) { oy += h * 1.05 * rig.hoistK; ox += h * 0.42 * rig.hoistK; rz += -1.05 * rig.hoistK; }
+        else { oy += -h * 0.08 * rig.hoistK; }   // hind legs take the load and dig in
+      }
+      // DRUM: the chest beat. Elbows in, hands high and close, pounding — the
+      // frequency is the caller's (it rides drumK as a rectified oscillation).
+      if (rig.drumK > 0 && isFront) {
+        oy += h * (0.72 + 0.16 * rig.drumPh) * clamp01(rig.drumK);
+        ox += -h * 0.30 * clamp01(rig.drumK);
+        rz += (-0.55 - 0.35 * rig.drumPh) * clamp01(rig.drumK);
+      }
+
       for (var p = 0; p < col.parts.length; p++) {
         var b = col.parts[p];
         set(b, AX, ox); set(b, AY, oy); setR(b, AZ, rz);
@@ -335,7 +369,8 @@
     }
   }
   function applyLegs(rig) {
-    var live = (rig.rearK > 0 || rig.swK > 0 || rig.flatK > 0 || rig.crouchK > 0 || rig.extK > 0) ? 1 : 0;
+    var live = (rig.rearK > 0 || rig.swK > 0 || rig.flatK > 0 || rig.crouchK > 0 || rig.extK > 0 ||
+                rig.slamK > 0 || rig.hoistK > 0 || rig.drumK > 0) ? 1 : 0;
     if (!live && !rig.legsOn) return;          // resting: costs nothing
     rig.legsOn = live;
     applyCols(rig, rig.front, true);
@@ -377,14 +412,25 @@
   }
 
   function applyBody(rig) {
-    var live = (rig.rearK > 0 || rig.crouchK > 0 || rig.shudK > 0) ? 1 : 0;
+    // AN APE STANDS UP TO USE ITS HANDS, and that is the same rotation a bear's
+    // rear-up is — so hoist and drum feed the identical pitch/lift maths rather
+    // than a second, subtly different one. `rearE` is the EFFECTIVE rear the
+    // sagitta compensation must cancel; forgetting these two here is exactly the
+    // buried-hind-leg bug the note below records, in a new coat.
+    var rearE = rig.rearK + rig.hoistK * 0.62 + rig.drumK * 0.70;
+    var live = (rearE > 0 || rig.crouchK > 0 || rig.shudK > 0 || rig.slamK > 0) ? 1 : 0;
     if (!live && !rig.bodyOn) return;
     rig.bodyOn = live;
     var g = rig.gb.m;
     var sy = (g.scale && g.scale.y) ? g.scale.y : 1;
     // model-local pitch (see the r128 note at the top): +z lifts the nose.
-    var pitch = rig.rearK * REAR_PITCH - rig.crouchK * 0.12;
+    var pitch = rearE * REAR_PITCH - rig.crouchK * 0.12;
     if (rig.shudK > 0) pitch += Math.sin(rig.shudPh) * 0.02 * rig.shudK;
+    // the overhead hammer takes the whole trunk over with it: up on the raise,
+    // driven down past level on the fall (a triangle off the same slamK)
+    if (rig.slamK > 0) {
+      pitch += (rig.slamK < 0.5 ? rig.slamK * 2 : -(rig.slamK - 0.5) * 2) * 0.42;
+    }
     // Pitching about the model origin drives the HIND feet below the floor
     // (a point at -x rotates down), so lift the group by the sagitta of that
     // rotation. Child offsets are group-LOCAL but the group's y is WORLD, hence
@@ -399,7 +445,7 @@
     // Only while actually rearing: gaitAnimate's ordinary slope/sway pitch is
     // meant to follow the ground, and compensating THAT would hover the animal.
     var lift;
-    if (rig.rearK > 0) {
+    if (rearE > 0) {
       var curZ = rd(g.rotation, AZ);
       var baseZ = (curZ === rig.gb.rl[AZ]) ? curZ - rig.gb.ro[AZ] : curZ;
       var total = baseZ + pitch;
@@ -442,6 +488,7 @@
     if (!rig.act && !rig.legsOn && !rig.headOn && !rig.bodyOn && !rig.coilOn) return;
     rig.mawK = rig.worK = rig.cantK = rig.dipK = 0;
     rig.rearK = rig.swK = rig.flatK = rig.crouchK = rig.extK = rig.shudK = rig.coilK = 0;
+    rig.slamK = rig.hoistK = rig.drumK = rig.drumPh = 0;
     rig.swCol = null;
     applyLegs(rig); applyHead(rig); applyBody(rig); applyCoil(rig);
     // a delegated gape has to be shut here too, or a shark that let go keeps its
@@ -536,6 +583,7 @@
     // every layer starts at zero each frame; only the branch below raises them
     var maw = 0, wor = 0, cant = 0, dip = 0;
     var rear = 0, sw = 0, flat = 0, crouch = 0, ext = 0, shud = 0, coil = 0;
+    var slam = 0, hoist = 0, drum = 0, drumPh = 0;
     var t;
 
     switch (style) {
@@ -672,6 +720,83 @@
         maw = Math.max(0, Math.sin(p * Math.PI * 6)) * env(p);
         break;
 
+      /* ======================= THE APE FAMILY =============================
+         A knuckle-walker's front columns are ARMS, and these are the six
+         things arms do that no other land style in this file could ask for.
+         systems/ape_combat.js owns WHICH one is thrown and what it costs; this
+         owns what the body does while it happens. Every one of them composes
+         out of the layers above plus the three added for hands, so nothing
+         here is a species table — a chimpanzee, a mandrill and whatever ape
+         ships next all animate off the same six rows for free. */
+
+      // CHARGE — the quadrupedal rush. It stays DOWN: the whole point of a
+      // silverback charge is that it arrives on four limbs at speed and the
+      // rear-up (if any) is on the far side of contact.
+      case 'ape_charge':
+        if (p < STRIKE_AT) { crouch = windup(p) * 0.75; maw = 0.15 * windup(p); }
+        else {
+          t = ease(Math.min(1, ((p - STRIKE_AT) / (1 - STRIKE_AT)) * 1.9));
+          ext = t; crouch = 0.4 * (1 - t); maw = clamp01(env(p) * 1.2);
+        }
+        break;
+
+      // SMASH — both forearms up and over. `slam` is a triangle by construction
+      // (see applyCols), so it is handed the raw 0..1 progress and does the
+      // raise and the fall itself; the body pitch follows it in applyBody.
+      case 'ape_smash':
+        slam = clamp01(p);
+        maw = 0.25 + 0.55 * env(p);              // it roars into the blow
+        break;
+
+      // BACKHAND — the arm that swings is the one on the swing side, thrown
+      // out and across at full extension. The body's yaw is creature_combat's
+      // (a sweep IS the trunk turning); this is the arm on the end of it.
+      case 'ape_sweep':
+        t = env(p);
+        sw = t;                                   // one arm, the existing swat layer
+        ext = 0.35 * t;
+        maw = 0.2 + 0.4 * t;
+        break;
+
+      // GRAB — low and committed. The arm goes UNDER, so the body drops on the
+      // reach and then STANDS UP into the hoist as the load comes off the
+      // ground; that hand-over is the whole tell that he has got someone.
+      case 'ape_grab':
+        if (p < STRIKE_AT) { crouch = windup(p) * 0.8; ext = windup(p) * 0.7; maw = 0.3 * windup(p); }
+        else {
+          t = ease((p - STRIKE_AT) / (1 - STRIKE_AT));
+          crouch = 0.8 * (1 - t); ext = 0.7 * (1 - t * 0.5);
+          hoist = t * 0.55; maw = 0.55;
+        }
+        break;
+
+      // FLAIL — the hold itself. Arms locked high with the mass on the end,
+      // maw open the whole way round (it is screaming; a spinning silverback
+      // is not doing this quietly), and a small periodic surge as the weight
+      // comes past the front of the swing.
+      case 'ape_flail':
+        hoist = 0.85 + 0.15 * Math.sin(f * TAU);
+        maw = 0.55 + 0.35 * Math.max(0, Math.sin(f * TAU));
+        wor = 0.25;
+        break;
+
+      // BITE — the canines. Harder and shorter than the generic biter's gape:
+      // this mouth is a finisher.
+      case 'ape_bite':
+        maw = clamp01(env(p) * 1.75);
+        dip = 0.35 * env(p);
+        break;
+
+      // DRUM — the chest beat. Reared, planted, hands pounding at ~10 Hz. The
+      // rectified sine IS the pound; it deliberately produces no travel and no
+      // damage, and it is still the most recognisable thing a gorilla does.
+      case 'ape_drum':
+        t = Math.min(1, p * 2.8) * (1 - ease(Math.max(0, p - 0.74) / 0.26));
+        drum = t;
+        drumPh = Math.abs(Math.sin(p * Math.PI * 10));
+        maw = 0.45 * t;
+        break;
+
       // ---- ATTACK: bite (and anything unknown) — the mouth opens on the strike
       //      envelope and shuts on the far side. This is the line that finally
       //      gives every generic biter in the game a moving jaw.
@@ -696,6 +821,18 @@
     rig.shudK = clamp01(shud * k);
     rig.coilK = clamp01(coil * k);
     rig.swK = clamp01(sw * k);
+    // the hand layers. slamK is a PHASE, not a weight — it must reach 1.0 for
+    // the hammer to complete its fall — so it is scaled by k only enough to
+    // fade in and out, never enough to truncate the arc.
+    rig.slamK = (slam > 0) ? clamp01(slam) : 0;
+    rig.hoistK = clamp01(hoist * k);
+    rig.drumK = clamp01(drum * k);
+    rig.drumPh = drumPh;
+    // WHICH ARM. Normally the phase-wrap alternation above (left, right, left…).
+    // An ape's backhand is different: creature_combat turns the whole TRUNK for
+    // it off `_apeSide`, so the arm has to be the one that trunk is throwing or
+    // the body swings one way and the hand the other.
+    if (style === 'ape_sweep' && a._apeSide) side = a._apeSide;
     rig.swCol = (rig.swK > 0 && rig.front.length)
       ? (side < 0 ? rig.front[0] : rig.front[rig.front.length - 1]) : null;
     rig.swSide = side;

@@ -111,6 +111,16 @@
 
     visual.updateMatrix();
     g.userData.muzzle = new THREE.Vector3(0, 0.028, -0.553).applyMatrix4(visual.matrix);
+    // WHERE THE HANDS GO — see systems/gunhands.js. A taser is the one
+    // firearm-shaped thing in the game that is drawn ONE-HANDED (the other
+    // hand stays free for cuffs/radio), so it publishes no support grip and
+    // the off arm keeps its ordinary swing.
+    g.userData.grips = {
+      support: null,
+      mag: new THREE.Vector3(0, 0.028, -0.460).applyMatrix4(visual.matrix),  // spent cartridge
+      charge: null,
+      style: "mag",
+    };
     g.userData.taserContacts = [
       new THREE.Vector3(-0.046, 0.028, -0.553).applyMatrix4(visual.matrix),
       new THREE.Vector3(0.046, 0.028, -0.553).applyMatrix4(visual.matrix),

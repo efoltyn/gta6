@@ -1042,7 +1042,7 @@
     // the door racking shut behind you is the "holding cell" line. What a
     // player genuinely cannot see is WHEN THE VAN COMES — so a screw tells him,
     // out loud, once, standing there. Not a HUD card.
-    feed("Holding cell. Transport to the pen in " + Math.ceil(INM.transportT) + "s — " +
+    feed("Holding cell. Transport to the pen in " + Math.ceil(INM.transportT) + "s · " +
       INM.prison + "s to serve inside.", "#ffd166");
     feed("That plate's still loose. Last chance.", "#cfd6e6");
     say(anyGuard(), "\u201cVan's here in " + Math.ceil(INM.transportT) + ". Sit tight.\u201d", "#ffd27b", 3.0);
@@ -1107,11 +1107,11 @@
       // FOUR STARS AND EVERY SIREN IN THE CITY IS THE ANNOUNCEMENT. A banner
       // reading "OVER THE WALL — MANHUNT" over the top of a live manhunt is
       // exactly the caption the owner is describing.
-      big("OVER THE WALL — MANHUNT");
+      big("OVER THE WALL · MANHUNT");
       // YOUR GUNS ARE STILL IN THE PROPERTY ROOM. Breaking out does not open
       // the locker; you are loose, broke of hardware, and hunted.
       const held = CBZ.cityEvidenceHeld ? CBZ.cityEvidenceHeld() : null;
-      feed("You're out — and every cop in the city knows it. RUN." +
+      feed("You're out, and every cop in the city knows it. RUN." +
         (held && held.guns ? " (Your hardware's still in evidence.)" : ""), "#ff9a9a");
       if (CBZ.arrestCount) CBZ.arrestCount("escapes");
     }
@@ -1200,7 +1200,7 @@
     if (!INM) return;
     INM.phase = "held"; INM.prison += RECAP_PENALTY * PRISON_SCALE; INM.pry *= 0.5; INM._pryMark = 0;
     if (spot && spot.ped && CBZ.citySay) { try { CBZ.citySay(spot.ped, "“Step AWAY from the door!”", "#ffd27b", 2.2); } catch (e) {} }
-    feed((spot ? spot.name : "A guard") + " catches you at the door — the plate's hammered back. +" +
+    feed((spot ? spot.name : "A guard") + " catches you at the door, the plate's hammered back. +" +
       Math.round(RECAP_PENALTY * PRISON_SCALE) + "s inside.", "#ff9a9a");
   }
   function popDoor(how) {
@@ -1209,7 +1209,7 @@
     setDoor(V.cells[1], false);
     feed(how === "keys"
       ? "The keyring turns your lock. The gap's in the back corner. Mind their eyes."
-      : "The plate gives — the door swings loose. The gap's in the back corner. Mind their eyes.", "#cfe8b0");
+      : "The plate gives, the door swings loose. The gap's in the back corner. Mind their eyes.", "#cfe8b0");
   }
 
   /* ---- GUARD KEYS: the second physical means (owner doctrine — escape is
@@ -1257,10 +1257,10 @@
      ========================================================== */
   function startShift() {
     if (JOB && JOB.active) return;
-    if (INM) { feed("You're an inmate right now — you can't work the door."); return; }
+    if (INM) { feed("You're an inmate right now, you can't work the door."); return; }
     JOB = { active: true, caught: 0, wage: 0, escape: null, breakT: 14 + rng() * 10, t: 0 };
     const s = bag(); s.shifts++; save();
-    feed("On duty. Runners go for the back-corner gap — cuff them before they're over.", "#cfe8b0");
+    feed("On duty. Runners go for the back-corner gap, cuff them before they're over.", "#cfe8b0");
   }
 
   // a seeded inmate makes a break: un-pin one and march it to the gap.
@@ -1337,7 +1337,7 @@
     const s = bag();
     s.wagesEarned += JOB.wage; save();
     if (JOB.escape) homeInmate(JOB.escape.h);        // any live runner goes back inside
-    if (reason === "arrested") feed("Badge pulled — you're going in the cells yourself.", "#ff9a9a");
+    if (reason === "arrested") feed("Badge pulled, you're going in the cells yourself.", "#ff9a9a");
     else feed("Clocked off. Caught " + JOB.caught + " runner" + (JOB.caught === 1 ? "" : "s") + " · " + fmt(JOB.wage), "#cfe8b0");
     JOB = null; if (C) C.hud.closePanel(); panelMode = null; menuLock(false);
   }

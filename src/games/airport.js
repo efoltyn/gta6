@@ -195,7 +195,7 @@
 
   /* -------- jobs -------- */
   const JOB_NAMES_LEGIT = ["MAIL SACKS", "MEDICAL COOLERS", "ENGINE PARTS", "DIVE GEAR", "GENERATOR COILS"];
-  const JOB_NAMES_HOT = ["UNMARKED CRATES", "'FISH' — NO MANIFEST", "SEALED DRUMS", "QUIET BOXES", "SPARE PARTS (DON'T ASK)"];
+  const JOB_NAMES_HOT = ["UNMARKED CRATES", "'FISH' · NO MANIFEST", "SEALED DRUMS", "QUIET BOXES", "SPARE PARTS (DON'T ASK)"];
   const DEFECT_NAMES = ["OIL LEAK (nose)", "FUEL CAP OPEN (right wing)", "FLAP HINGE CRACK (left wing)", "ELEVATOR PLAY (tail)"];
   const STATION_NAMES = ["NOSE / ENGINE", "LEFT WING", "RIGHT WING", "TAIL"];
 
@@ -227,7 +227,7 @@
     const s = bag();
     if (s.ending) return s.strikes;
     s.strikes++;
-    note("STRIKE " + s.strikes + " / 3 — " + reason, 3.2);
+    note("STRIKE " + s.strikes + " / 3 · " + reason, 3.2);
     feed("Customs violation logged: " + reason + " (" + s.strikes + "/3)", "#ff9a9a");
     if (s.strikes >= 3) setEnding("LOSE", "License pulled: " + reason);
     save();
@@ -246,9 +246,9 @@
   function payDebt(n) {
     const s = bag();
     if (n <= 0) return;
-    if (!C.wallet.spend(n, "Paid down N407RD")) { note("You're short — payout a run first.", 2.2); return; }
+    if (!C.wallet.spend(n, "Paid down N407RD")) { note("You're short, payout a run first.", 2.2); return; }
     s.debt = Math.max(0, s.debt - n); s.spent += n; save();
-    note("Paid " + fmt$(n) + " on the note — " + fmt$(s.debt) + " to go.", 2.6);
+    note("Paid " + fmt$(n) + " on the note · " + fmt$(s.debt) + " to go.", 2.6);
     if (s.debt <= 0) setEnding("WIN", "You paid the plane off. She's yours, free and clear.");
     else openBoard();
   }
@@ -304,7 +304,7 @@
     C.wallet.give(pay, "REDEYE run: " + j.name);
     s.earned += pay; save();
     note("PAID " + fmt$(pay) + (land ? " (butter bonus)" : ""), 3.2);
-    feed("Delivered " + j.name + " — collected " + fmt$(pay) + ". Debt " + fmt$(s.debt), "#8ef0a8");
+    feed("Delivered " + j.name + " · collected " + fmt$(pay) + ". Debt " + fmt$(s.debt), "#8ef0a8");
     R.job = null; R.delivered = false; R.inspection = null; R.phase = "idle"; R.landingRating = null;
     rollBoard();
     openBoard();
@@ -338,7 +338,7 @@
       const craft = CBZ.citySpawnFlyableFromProp(rec);
       if (craft) {
         R.charterRec = rec;
-        note("Engine start. Cargo aboard — call it in and fly the run.", 2.6);
+        note("Engine start. Cargo aboard, call it in and fly the run.", 2.6);
         return;
       }
     }
@@ -358,11 +358,11 @@
       if (j.fixArmed) {
         if (!C.wallet.spend(ECON.FIX_DEFECT, "Fixed " + DEFECT_NAMES[i])) { note("Can't cover the repair right now.", 2.2); return; }
         j.defectFixed = true; j.stations[i] = true; j.fixArmed = false;
-        note("DEFECT FIXED — " + DEFECT_NAMES[i] + " squared away.", 2.4);
+        note("DEFECT FIXED · " + DEFECT_NAMES[i] + " squared away.", 2.4);
         return;
       }
       j.fixArmed = true;
-      note("FOUND: " + DEFECT_NAMES[i] + " — it WILL fail in the air. [E] again to fix for " + fmt$(ECON.FIX_DEFECT) + ".", 3.6);
+      note("FOUND: " + DEFECT_NAMES[i] + " · it WILL fail in the air. [E] again to fix for " + fmt$(ECON.FIX_DEFECT) + ".", 3.6);
       return;
     }
     j.stations[i] = true;
@@ -394,9 +394,9 @@
     // a returned run collects here first
     if (R.job && R.delivered) {
       const j = R.job;
-      C.hud.panel(head("REDEYE — CHARTER DESK", "collect"),
+      C.hud.panel(head("REDEYE · CHARTER DESK", "collect"),
         "<div style='margin:2px 0 8px;font-size:13px'>" + esc(j.name) + " is home. " +
-        (j.hot ? "<span style='color:#ff8a8a'>Hot cargo — customs may want a look.</span>" : "Paperwork's clean.") +
+        (j.hot ? "<span style='color:#ff8a8a'>Hot cargo, customs may want a look.</span>" : "Paperwork's clean.") +
         (R.landingRating ? " Landing graded <b style='color:#e8b64c'>" + R.landingRating.rating + "</b>." : "") + "</div>" +
         btn("collect", "COLLECT " + fmt$(j.payout), "#1c6b40") + btn("close", "Later", "#26343c"),
         { collect: collectRun, close: () => C.hud.closePanel() });
@@ -404,7 +404,7 @@
     }
     if (R.job) {
       const d = DESTS.find((k) => k.id === R.job.destId);
-      C.hud.panel(head("REDEYE — CHARTER DESK", "run in progress"),
+      C.hud.panel(head("REDEYE · CHARTER DESK", "run in progress"),
         "<div style='margin:2px 0 8px;font-size:13px'>Active: <b>" + esc(R.job.name) + "</b> → " + esc(d.name) +
         " · " + R.job.cargoKg + "kg · " + fmt$(R.job.payout) + (R.job.hot ? " <span style='color:#ff8a8a'>HOT</span>" : "") +
         "<br><span style='opacity:.75'>Walkaround the jet, then board and fly. Wind " + windStr() + ".</span></div>" +
@@ -425,7 +425,7 @@
     C.hud.panel(head("REDEYE INTERNATIONAL", "night charter"),
       "<div style='margin:2px 0 6px;font-size:13px'>Plane note <b style='color:#ff9a9a'>" + fmt$(s.debt) + "</b> · " +
       "cash <b style='color:#e8b64c'>" + fmt$(C.wallet.cash()) + "</b> · license " + strikeDots(s.strikes) + "</div>" + rows +
-      "<div style='font-size:11px;opacity:.7;margin-bottom:6px'>Legit pays honest money. Hot pays big — and customs runs the ramp on the way home.</div>" +
+      "<div style='font-size:11px;opacity:.7;margin-bottom:6px'>Legit pays honest money. Hot pays big, and customs runs the ramp on the way home.</div>" +
       btn("pay500", "PAY $500 ON THE NOTE", "#2a5c3a", C.wallet.cash() < 500) +
       btn("payall", "PAY " + fmt$(Math.min(s.debt, C.wallet.cash())), "#2a5c3a", C.wallet.cash() < 1) +
       btn("close", "Leave", "#26343c"),
@@ -449,7 +449,7 @@
     R.wind = rollWind();
     R.board = R.board.filter((k) => k !== j);
     const d = DESTS.find((k) => k.id === j.destId);
-    note("RUN ACCEPTED — " + j.name + " → " + d.name + ". Walkaround, then fly.", 3.0);
+    note("RUN ACCEPTED · " + j.name + " → " + d.name + ". Walkaround, then fly.", 3.0);
     if (j.hot) feed("No manifest on this one. You didn't get it from us.", "#ffd08a");
     C.hud.closePanel();
   }
@@ -464,9 +464,9 @@
     const j = R.job, ins = R.inspection; if (!j || !ins) return;
     if (CUSTOMS && CUSTOMS.say) CUSTOMS.say(moodLine(ins.mood), 3.2);
     const cost = bribeCostFor(j.payout), odds = bribeOdds(ins.mood);
-    C.hud.panel(head("CUSTOMS — INSPECTOR VANN", "ramp check"),
+    C.hud.panel(head("CUSTOMS · INSPECTOR VANN", "ramp check"),
       "<div style='margin:2px 0 8px;font-size:13px'>" + esc(moodLine(ins.mood)) +
-      "<br>In the back: <b>" + esc(j.name) + "</b>, " + j.cargoKg + "kg — " +
+      "<br>In the back: <b>" + esc(j.name) + "</b>, " + j.cargoKg + "kg · " +
       "<span style='color:#ff8a8a'>this will not survive a manifest check.</span></div>" +
       btn("bribe", "SLIP HIM " + fmt$(cost) + " (" + Math.round(odds * 100) + "% he pockets it)", "#8a6a1c") +
       btn("submit", "HAND OVER THE MANIFEST", "#7c1626"),
@@ -475,14 +475,14 @@
           const r = resolveBribe(ins.mood, j.payout);
           C.hud.closePanel();
           if (r.accepted) { note("He pockets it. “Wind must've blown that pallet in. Night.”", 3.0); finishPayout(0, false); }
-          else { note("BUSTED — cargo seized, fined " + fmt$(r.fine) + ".", 3.4); if (CUSTOMS) CUSTOMS.say("Hands where I can see 'em.", 2.4); finishPayout(0, true); }
+          else { note("BUSTED, cargo seized, fined " + fmt$(r.fine) + ".", 3.4); if (CUSTOMS) CUSTOMS.say("Hands where I can see 'em.", 2.4); finishPayout(0, true); }
         },
         submit: () => {
           C.hud.closePanel();
           const fine = fineFor(j.payout);
           C.wallet.spend(fine, "Customs fine"); bag().spent += fine; save();
-          strike("smuggling — hot cargo on the manifest");
-          note("BUSTED — cargo seized, fined " + fmt$(fine) + ".", 3.4);
+          strike("smuggling, hot cargo on the manifest");
+          note("BUSTED, cargo seized, fined " + fmt$(fine) + ".", 3.4);
           finishPayout(0, true);
         },
       });
@@ -571,8 +571,8 @@
         if (j.defect >= 0 && !j.defectFixed && !R.defectFired && R.airborneT > 15) {
           R.defectFired = true;
           const kind = DEFECT_NAMES[j.defect];
-          feed("MAYDAY-ish: " + kind + " — the defect you skipped just let go.", "#ff9a9a");
-          note("AIRFRAME FAILURE — " + kind, 3.4);
+          feed("MAYDAY-ish: " + kind + " · the defect you skipped just let go.", "#ff9a9a");
+          note("AIRFRAME FAILURE · " + kind, 3.4);
           // honest consequence: damage the REAL airframe (control authority sags)
           if (CBZ.cityPlayerAircraftDamage) { try { CBZ.cityPlayerAircraftDamage(48, craft.pos.x, craft.pos.z); } catch (e) {} }
         }
@@ -581,7 +581,7 @@
         if (!R.delivered && nearDest(craft)) {
           R.delivered = true; R.phase = "returning";
           const d = DESTS.find((k) => k.id === j.destId);
-          note("CARGO DROPPED at " + d.name + ". Fly it home to REDEYE — RWY 27, PAPI on the left.", 3.6);
+          note("CARGO DROPPED at " + d.name + ". Fly it home to REDEYE. RWY 27, PAPI on the left.", 3.6);
           feed("Delivered to " + d.name + ". Now get home clean.", "#8ef0a8");
         }
       } else {
@@ -617,7 +617,7 @@
     const s = bag();
     if (s.bestVs == null || sink < s.bestVs) { s.bestVs = sink; s.bestRating = r.rating; save(); }
     if (r.rating === "CRASH") {
-      note("CRASH LANDING — " + sink.toFixed(1) + " m/s. That's a strike.", 3.4);
+      note("CRASH LANDING · " + sink.toFixed(1) + " m/s. That's a strike.", 3.4);
       strike("crashed the aircraft on landing");
     } else {
       note((r.rating === "BUTTER" ? "BUTTER" : r.rating) + " — " + sink.toFixed(1) + " m/s" + (r.bonus ? " · +" + fmt$(r.bonus) + " handling bonus" : ""), 2.8);
@@ -730,19 +730,19 @@
     // ---- CAST (real peds via ctx.npc) — queued (arena root may lag a site
     //      venue) and drained on the first tick, exactly like racing.js. ----
     venue._cast = [
-      { role: "dispatcher", key: "DISPATCH", outfit: "worker", name: "Dispatch — Marla", at: [0, 1.0], face: Math.PI, post: "pinned", pose: "stand",
+      { role: "dispatcher", key: "DISPATCH", outfit: "worker", name: "Dispatch. Marla", at: [0, 1.0], face: Math.PI, post: "pinned", pose: "stand",
         dialogue: ["Board's fresh. Legit keeps the lights on; hot pays the note.", "Twelve grand on that plane, rook. The bank called twice.", "Walk the jet before you fly her. She's old."] },
       { role: "inspector", key: "CUSTOMS", outfit: "security", name: "Inspector Vann", at: [14, 1.6], face: -Math.PI / 2, post: "pinned", pose: "foldarms",
         dialogue: ["Keep it clean tonight.", "Manifest or a reason. Your choice.", "I remember faces. And tail numbers."] },
-      { role: "fueler", key: "FUEL", outfit: 0xffc81f, name: "Fueler — Bo", at: [-14, 1.3], face: 0, post: "pinned", pose: "stand",
-        dialogue: ["Topped her off. Didn't look in the back.", "Wind's up tonight — mind the sock on final.", "Vann's in a mood. Bring cash if you're dirty."] },
+      { role: "fueler", key: "FUEL", outfit: 0xffc81f, name: "Fueler. Bo", at: [-14, 1.3], face: 0, post: "pinned", pose: "stand",
+        dialogue: ["Topped her off. Didn't look in the back.", "Wind's up tonight, mind the sock on final.", "Vann's in a mood. Bring cash if you're dirty."] },
     ];
     venue._pendingCast = true;
     tryDrainCast(ctx, venue);
 
     // ---- ZONES (interactions) ----
     ctx.zone({ id: "desk", label: () => (R.job && R.delivered ? "Collect at the charter desk" : "REDEYE charter desk"), pos: [0, 1.6], r: 2.4, onUse: openBoard });
-    ctx.zone({ id: "fuel", label: "Fueler — wind & heat brief", pos: [-14, -3.4], r: 2.6, onUse: openFuelBrief });
+    ctx.zone({ id: "fuel", label: "Fueler", pos: [-14, -3.4], r: 2.6, onUse: openFuelBrief });
     ctx.zone({ id: "customs", label: "Customs booth", pos: [14, 1.4], r: 2.4, onUse: () => note("Inspector Vann only cares when you come home heavy.", 2.4) });
 
     // walkaround stations around the parked charter jet — only when a run is
@@ -763,15 +763,15 @@
   function openFuelBrief() {
     const s = bag();
     const j = R.job;
-    let heat = "No run loaded — take one at the desk.";
+    let heat = "No run loaded, take one at the desk.";
     if (j) {
       heat = "Wind " + windStr() + ". " + (j.hot
         ? "This one's HOT. Customs pull odds ~" + Math.round(inspectionChance(true) * 100) + "% on the ramp home. Bring the bribe money."
-        : "Clean cargo — customs won't blink.");
+        : "Clean cargo, customs won't blink.");
     }
-    C.hud.panel(head("FUELER — BO", "pre-flight brief"),
+    C.hud.panel(head("FUELER · BO", "pre-flight brief"),
       "<div style='margin:4px 0;font-size:13px'>" + esc(heat) + "</div>" +
-      "<div style='font-size:11px;opacity:.7'>She's fuelled and ready. Watch the sock on final — the crosswind will walk you off the centreline.</div>" +
+      "<div style='font-size:11px;opacity:.7'>She's fuelled and ready. Watch the sock on final, the crosswind will walk you off the centreline.</div>" +
       btn("close", "Thanks, Bo", "#26343c"), { close: () => C.hud.closePanel() });
   }
 

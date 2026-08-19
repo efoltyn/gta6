@@ -68,6 +68,13 @@ const MTN_OUT_SNOW_MAX = 60;   // backdrop-ring cells the audit reports on a cle
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const T0 = Date.now();
 const tmark = (l) => console.log(`[t+${((Date.now() - T0) / 1000).toFixed(1)}s] ${l}`);
+/* The per-feature status wall (25+ lines per seed, ×2 with the det rerun)
+   asserts NOTHING — every real check is a fails.push that prints on its own.
+   As a default message it buried the verdict, so it now only prints under
+   --verbose. Failures, errors, the world-built heartbeat, the headline
+   counts and the final MATHGATE line always print. */
+const VERBOSE = argv.includes("--verbose");
+const tinfo = (l) => { if (VERBOSE) tmark(l); };
 
 // disjoint port windows (smoke 9050+/10050+, audit 8400+/10350+, legacy lower)
 async function claimPort(lo, span, probe) {
@@ -510,8 +517,15 @@ const PASS = `(() => {
     // stops declaring things cannot pass. (No backticks in this block.)
     if (CBZ.hitmanAudit) {
       const ha = CBZ.hitmanAudit();
-      out.hitman = ha.cards + "card " + ha.pipes + "pipe tiers=" + ha.marksLadderTiers + " legacy=" + ha.legacyStreetHitmanSites + " room=" + (ha.room ? 1 : 0);
+      out.hitman = ha.cards + "card " + ha.pipes + "pipe tiers=" + ha.marksLadderTiers + " legacy=" + ha.legacyStreetHitmanSites + " room=" + (ha.room ? 1 : 0) +
+        " repGates=" + ha.repGates + " keyed=" + ha.keyedRungs;
       if (ha.legacyStreetHitmanSites !== 0) out.fails.push("LEGACY STREET-HITMAN SITES BACK: " + ha.legacyStreetHitmanSites);
+      // 2026-08-18 (owner): a hitman has ONE currency and it is money. Nothing
+      // in the hitman room may open for a reputation number again, and the
+      // rung that IS locked must be locked by a key you can carry.
+      if (ha.repGates !== 0) out.fails.push("HITMAN REPUTATION GATE IS BACK: " + ha.repGates);
+      if (ha.keyedRungs < 1) out.fails.push("hitman lost its keyed rung (the office job wants the city seal)");
+      if (ha.caseOpen === undefined) out.fails.push("hitman gear case audit field missing");
       if (ha.cards !== 1) out.fails.push("hitman title cards=" + ha.cards + " (the merge law: exactly one)");
       if (ha.marksLadderTiers < 3) out.fails.push("hitman mark ladder shrank to " + ha.marksLadderTiers);
     }
@@ -1123,39 +1137,39 @@ async function runSeed(seed, label) {
   if (r.newErrors.length) r.fails.push(r.newErrors.length + " console errors");
   tmark(`${label}: ${r.lots}/${r.shops}/${r.roads} lots/shops/roads | sim ${TICKS} ticks in ${r.simMs}ms | mtnOutSnow ${r.mtnOutSnow} cityOnMtn ${r.cityOnMtn} overlaps ${r.overlaps} | trees ${r.trees == null ? "-" : r.trees} | peds ${r.peds}`);
   // adoption/census evidence — printed, never asserted (see the PASS block)
-  tmark(`${label}: furnish ${r.furnish || "-"} | anchors ${r.anchors || "-"} | roads ${r.roadSegs == null ? "-" : r.roadSegs} | predator ${r.predator || "-"} | checkpoints ${r.checkpoints || "-"} | beach ${r.beachSeats || "-"}`);
+  tinfo(`${label}: furnish ${r.furnish || "-"} | anchors ${r.anchors || "-"} | roads ${r.roadSegs == null ? "-" : r.roadSegs} | predator ${r.predator || "-"} | checkpoints ${r.checkpoints || "-"} | beach ${r.beachSeats || "-"}`);
   // The evidence lines for this wave. Assertions already ran above and would
   // have failed the gate; this is so a passing run still SHOWS its numbers —
   // an audit whose output nobody can see is one nobody will notice regressing.
-  tmark(`${label}: traffic ${r.traffic || "-"} | motion ${r.motion || "-"}`);
-  tmark(`${label}: origins ${r.origins || "-"} | gov ${r.gov || "-"} | airside ${r.airside || "-"}`);
-  tmark(`${label}: raceTools ${r.raceTools || "-"} | racer ${r.racerCareer || "-"}`);
-  tmark(`${label}: hitman ${r.hitman || "-"} | raceLadder ${r.raceLadder || "-"}`);
-  tmark(`${label}: presidency ${r.presidency || "-"} | captain ${r.captain || "-"} | gungame ${r.gungame || "-"}`);
-  tmark(`${label}: loyalty ${r.loyalty || "-"}`);
-  tmark(`${label}: take ${r.take || "-"}`);
-  tmark(`${label}: till ${r.till || "-"}`);
-  tmark(`${label}: clearance ${r.clearance || "-"}`);
-  tmark(`${label}: airnet ${r.airnet || "-"}`);
-  tmark(`${label}: fxwarm ${r.fxwarm || "-"} | platGrid ${r.platGrid || "-"} | airspace ${r.airspace || "-"}`);
-  tmark(`${label}: holds ${r.holds || "-"}`);
-  tmark(`${label}: pedInst ${r.pedInst || "-"}`);
-  tmark(`${label}: venues ${r.venues || "-"} | fishing ${r.fishing || "-"} | ranks ${r.ranks || "-"}`);
-  if (r.ranksEmpty) tmark(`${label}: rank slots with nobody in them: ${r.ranksEmpty}`);
-  if (r.ranksVerbless) tmark(`${label}: rungs that unlock nothing: ${r.ranksVerbless}`);
-  tmark(`${label}: street ${r.street || "-"} | stunts ${r.stunts || "-"}`);
-  tmark(`${label}: ground ${r.ground || "-"} | backdrop ${r.backdrop || "-"} | peaks ${r.peaks || "-"} | swim ${r.swim || "-"} | waterShared ${r.waterShared || "-"}`);
-  tmark(`${label}: pools ${r.pools || "-"}`);
-  tmark(`${label}: forestLook ${r.forestLook || "-"} | forestRim ${r.forestRim || "-"} | backcountry ${r.backcountry || "-"}`);
-  tmark(`${label}: arena ${r.arena || "-"} | frontGlass ${r.frontGlass || "-"} | elevators ${r.elevators || "-"}`);
-  tmark(`${label}: map ${r.map || "-"} | crowdSpawn ${r.crowdSpawn || "-"} | platforms ${r.platforms == null ? "-" : r.platforms}`);
-  tmark(`${label}: cockpit ${r.cockpit || "-"} | wounds ${r.wounds || "-"} | cabin ${r.cabin || "-"} | power ${r.power || "-"}`);
+  tinfo(`${label}: traffic ${r.traffic || "-"} | motion ${r.motion || "-"}`);
+  tinfo(`${label}: origins ${r.origins || "-"} | gov ${r.gov || "-"} | airside ${r.airside || "-"}`);
+  tinfo(`${label}: raceTools ${r.raceTools || "-"} | racer ${r.racerCareer || "-"}`);
+  tinfo(`${label}: hitman ${r.hitman || "-"} | raceLadder ${r.raceLadder || "-"}`);
+  tinfo(`${label}: presidency ${r.presidency || "-"} | captain ${r.captain || "-"} | gungame ${r.gungame || "-"}`);
+  tinfo(`${label}: loyalty ${r.loyalty || "-"}`);
+  tinfo(`${label}: take ${r.take || "-"}`);
+  tinfo(`${label}: till ${r.till || "-"}`);
+  tinfo(`${label}: clearance ${r.clearance || "-"}`);
+  tinfo(`${label}: airnet ${r.airnet || "-"}`);
+  tinfo(`${label}: fxwarm ${r.fxwarm || "-"} | platGrid ${r.platGrid || "-"} | airspace ${r.airspace || "-"}`);
+  tinfo(`${label}: holds ${r.holds || "-"}`);
+  tinfo(`${label}: pedInst ${r.pedInst || "-"}`);
+  tinfo(`${label}: venues ${r.venues || "-"} | fishing ${r.fishing || "-"} | ranks ${r.ranks || "-"}`);
+  if (r.ranksEmpty) tinfo(`${label}: rank slots with nobody in them: ${r.ranksEmpty}`);
+  if (r.ranksVerbless) tinfo(`${label}: rungs that unlock nothing: ${r.ranksVerbless}`);
+  tinfo(`${label}: street ${r.street || "-"} | stunts ${r.stunts || "-"}`);
+  tinfo(`${label}: ground ${r.ground || "-"} | backdrop ${r.backdrop || "-"} | peaks ${r.peaks || "-"} | swim ${r.swim || "-"} | waterShared ${r.waterShared || "-"}`);
+  tinfo(`${label}: pools ${r.pools || "-"}`);
+  tinfo(`${label}: forestLook ${r.forestLook || "-"} | forestRim ${r.forestRim || "-"} | backcountry ${r.backcountry || "-"}`);
+  tinfo(`${label}: arena ${r.arena || "-"} | frontGlass ${r.frontGlass || "-"} | elevators ${r.elevators || "-"}`);
+  tinfo(`${label}: map ${r.map || "-"} | crowdSpawn ${r.crowdSpawn || "-"} | platforms ${r.platforms == null ? "-" : r.platforms}`);
+  tinfo(`${label}: cockpit ${r.cockpit || "-"} | wounds ${r.wounds || "-"} | cabin ${r.cabin || "-"} | power ${r.power || "-"}`);
   // BODIES AND WHAT THEY ARE WEARING. Both audits have asserted above for a
   // while and neither was ever printed — so a passing run showed no evidence
   // that anybody had checked whether people still have clothes on, which is
   // this printer's own stated reason for existing. outfits carries instHeld /
   // instHoles (entities/pedinstance.js's hide layer) as of 2026-08-04.
-  tmark(`${label}: outfits ${r.outfits || "-"} | armorFit ${r.armorFit || "-"}`);
+  tinfo(`${label}: outfits ${r.outfits || "-"} | armorFit ${r.armorFit || "-"}`);
   return r;
 }
 

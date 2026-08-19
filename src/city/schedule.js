@@ -404,7 +404,7 @@
     liveBy[best.sid] = ped; best.seen = t;
     // a regular reads as a regular — one street line, only for someone you KNOW
     if (best.known && CBZ.citySay && rng() < 0.3) {
-      CBZ.citySay(ped, best.k === "dealer" ? "“Same corner, same me.”" : "“Back at it — you know how it is.”", "#cfe6ff", 2.2);
+      CBZ.citySay(ped, best.k === "dealer" ? "“Same corner, same me.”" : "“Back at it, you know how it is.”", "#cfe6ff", 2.2);
     }
   };
 

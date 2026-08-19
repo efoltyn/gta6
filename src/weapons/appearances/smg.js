@@ -51,6 +51,13 @@
     // hand on the grip
     box(g, 0.150, 0.105, 0.135, mat.skin, 0, -0.15, -0.005, -0.10);
     g.userData.muzzle = new THREE.Vector3(0, 0.055, -0.78);
+    // WHERE THE HANDS GO — see systems/gunhands.js for the contract.
+    g.userData.grips = {
+      support: new THREE.Vector3(0, -0.080, -0.460),   // under the forward polymer handguard
+      mag: new THREE.Vector3(0, -0.235, -0.315),
+      charge: new THREE.Vector3(-0.058, 0.105, -0.500),// cocking knob, LEFT side (MP5 pattern)
+      style: "mag",
+    };
     return g;
   };
 })();

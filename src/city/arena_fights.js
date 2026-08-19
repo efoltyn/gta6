@@ -1706,10 +1706,10 @@ function recordWin(opp,box,ko,war,purse){
   if(war&&Math.random()<0.55){
     var bonus=Math.max(1500,Math.round(purse*0.45));
     if(CBZ.city&&CBZ.city.addCash)CBZ.city.addCash(bonus);
-    note("FIGHT OF THE NIGHT — bonus "+money(bonus),5,{urgent:true});
+    note("FIGHT OF THE NIGHT, bonus "+money(bonus),5,{urgent:true});
   }
   var newRank=rankLabel(c.fame);
-  if(newRank!==oldRank)note("Your name is growing — the papers call you a "+newRank.toUpperCase()+".",5,{urgent:true});
+  if(newRank!==oldRank)note("Your name is growing, the papers call you a "+newRank.toUpperCase()+".",5,{urgent:true});
   nextOpp[box?"box":"mma"]=null;
   commitCareer();
 }
@@ -1741,7 +1741,7 @@ function newBout(){
   resetFighter(redCh,RX-1.8); resetFighter(blueCh,RX+1.8);
   board("BOUT #"+bout.id,bout.red.name+"  vs  "+bout.blue.name,
         "RED @"+bout.oddsRed.toFixed(2)+"   ·   BLUE @"+bout.oddsBlue.toFixed(2));
-  if(nearRing)note("Next bout — RED "+bout.red.name+" @"+bout.oddsRed.toFixed(2)+
+  if(nearRing)note("Next bout. RED "+bout.red.name+" @"+bout.oddsRed.toFixed(2)+
     " vs BLUE "+bout.blue.name+" @"+bout.oddsBlue.toFixed(2)+"  [E] ringside to bet",6);
 }
 // The ring bound: derived from RING_HALF, never hand-typed. Fighters stay
@@ -1771,7 +1771,7 @@ function strike(b,A,D){
     b.state="ko"; b.t=3.5;
     var w0=(b.winner==="red")?b.red:b.blue;
     board("DOWN!",w0.name+" drops "+D.name,"the referee is counting");
-    if(nearRing)note("DOWN! "+w0.name+" drops "+D.name+" — the ref is counting...",3,{urgent:true});
+    if(nearRing)note("DOWN! "+w0.name+" drops "+D.name+" · the ref is counting...",3,{urgent:true});
   }
 }
 function settleRingBet(b){
@@ -1782,7 +1782,7 @@ function settleRingBet(b){
     if(CBZ.city&&CBZ.city.addCash)CBZ.city.addCash(pay);
     note("Bet cashed: +"+money(pay),4,{urgent:true});
   }else{
-    note("Bet lost — "+money(ringBet.stake)+" gone to the house.",4);
+    note("Bet lost · "+money(ringBet.stake)+" gone to the house.",4);
   }
   ringBet=null;
 }
@@ -1857,7 +1857,7 @@ function startBout(box){
   if(box){
     // the player takes over the RING: refund any live ringside bet, park the
     // house fighters out of sight, resume the card after.
-    if(ringBet&&bout&&ringBet.boutId===bout.id){ if(CBZ.city&&CBZ.city.addCash)CBZ.city.addCash(ringBet.stake); note("Card interrupted — your stake is refunded.",3); }
+    if(ringBet&&bout&&ringBet.boutId===bout.id){ if(CBZ.city&&CBZ.city.addCash)CBZ.city.addCash(ringBet.stake); note("Card interrupted, your stake is refunded.",3); }
     ringBet=null; bout=null; ringSuspended=true;
     if(redCh)redCh.group.visible=false; if(blueCh)blueCh.group.visible=false; if(refCh)refCh.group.visible=false;
   }
@@ -1877,7 +1877,7 @@ function startBout(box){
   board((box?"BOXING":"MMA")+(isTitle(c,box)?" TITLE BOUT":" BOUT"),
         "YOU  vs  "+card.name,"purse "+money(purse));
   note((box?"BOXING":"MMA")+(isTitle(c,box)?" TITLE":"")+" bout vs "+card.name+" ("+card.wins+"-"+card.losses+
-    ") — purse "+money(purse)+".",6,{urgent:true});
+    "), purse "+money(purse)+".",6,{urgent:true});
 }
 function startCageFight(){ startBout(false); }
 function startBoxMatch(){ startBout(true); }
@@ -1988,7 +1988,7 @@ function clampPitXZ(p){
   p.y=PITY;
 }
 function startWildPit(){
-  if(pitBout){ note("A pit bout is already running — watch the rail.",3); return; }
+  if(pitBout){ note("A pit bout is already running, watch the rail.",3); return; }
   if(!arenaRoot){ return; }
   var pool=speciesPool();
   if(pool.length<2){ note("No beasts in the holding pens tonight.",3); return; }
@@ -2002,7 +2002,7 @@ function startWildPit(){
         "both @1.88");
   note("PIT BOUT: "+prettySpecies(A.species)+" vs "+prettySpecies(B.species)+"!",4,{urgent:true});
   openBetOverlay({
-    title:"Beast Pit — place your money",
+    title:"Beast Pit, place your money",
     aLabel:prettySpecies(A.species), bLabel:prettySpecies(B.species),
     aOdds:1.88, bOdds:1.88,
     onPlace:function(side,stake,odds){
@@ -2057,7 +2057,7 @@ function finishPit(w,l){
       if(CBZ.city&&CBZ.city.addCash)CBZ.city.addCash(pay);
       note("Pit bet cashed: +"+money(pay),4,{urgent:true});
     }else{
-      note("Pit bet lost — "+money(pitBet.stake)+" gone.",4);
+      note("Pit bet lost · "+money(pitBet.stake)+" gone.",4);
     }
     pitBet=null;
   }
@@ -2100,18 +2100,18 @@ if(CFG.ARENA_FIGHTS&&CBZ.interactions&&typeof CBZ.interactions.registerZone==="f
       id:"arena_ring_bet", slot:"e",
       label:function(){
         if(!bout)return "Ringside betting";
-        if(bout.state==="ko"||bout.state==="reset")return "Bout ending — next matchup soon";
+        if(bout.state==="ko"||bout.state==="reset")return "Bout ending, next matchup soon";
         if(ringBet&&ringBet.boutId===bout.id)return "Bet down: "+money(ringBet.stake)+" on "+ringBet.side.toUpperCase();
         return "Bet: RED "+bout.red.name+" @"+bout.oddsRed.toFixed(2)+
                " / BLUE "+bout.blue.name+" @"+bout.oddsBlue.toFixed(2);
       },
       onSelect:function(){
         if(!bout){ note("No bout scheduled right now.",2); return; }
-        if(bout.state==="ko"||bout.state==="reset"){ note("Too late — wait for the next matchup.",2); return; }
+        if(bout.state==="ko"||bout.state==="reset"){ note("Too late, wait for the next matchup.",2); return; }
         if(ringBet&&ringBet.boutId===bout.id){ note("Your money's already down on this one.",2); return; }
         var b=bout;
         openBetOverlay({
-          title:"Ironjaw Ring — Bout #"+b.id,
+          title:"Ironjaw Ring. Bout #"+b.id,
           aLabel:"RED "+b.red.name, bLabel:"BLUE "+b.blue.name,
           aOdds:b.oddsRed, bOdds:b.oddsBlue,
           onPlace:function(side,stake,odds){
@@ -2167,12 +2167,12 @@ if(CFG.ARENA_FIGHTS&&CBZ.interactions&&typeof CBZ.interactions.registerZone==="f
     CBZ.interactions.describe("arena_ring",function(){
       var c=careerState();
       return {label:"Ironjaw Ring"+(c.beltBox?" · BOXING CHAMP":""),
-        note:c.wins+c.losses>0?("You: "+c.wins+"-"+c.losses+" ("+c.kos+" KO) · "+rankLabel(c.fame)):"Live bout — bet ringside"};
+        note:c.wins+c.losses>0?("You: "+c.wins+"-"+c.losses+" ("+c.kos+" KO) · "+rankLabel(c.fame)):"Live bout, bet ringside"};
     });
     CBZ.interactions.describe("arena_cage",function(){
       var c=careerState();
       return {label:"Ironjaw Cage"+(c.beltMMA?" · MMA CHAMP":""),
-        note:c.wins+c.losses>0?("You: "+c.wins+"-"+c.losses+" ("+c.kos+" KO) · "+rankLabel(c.fame)):"Open card — step in"};
+        note:c.wins+c.losses>0?("You: "+c.wins+"-"+c.losses+" ("+c.kos+" KO) · "+rankLabel(c.fame)):"Open card, step in"};
     });
     CBZ.interactions.describe("arena_pit",function(){return{label:"Beast Pit",note:"Where animals settle it"};});
   }
@@ -2412,7 +2412,7 @@ CBZ.onUpdate(40,function(dt){
       EVENT.active=on; EVENT.kind=kind||"dark"; EVENT.t=0;
       venue.crowdFill(on?FILL_ON:FILL_OFF,snap);
       setAudience(on?LIVE_ON:LIVE_OFF,true);
-      board(on?"TONIGHT — FIGHT NIGHT":"IRONJAW ARENA",
+      board(on?"TONIGHT · FIGHT NIGHT":"IRONJAW ARENA",
             on?"THE HOUSE IS IN":"DARK TONIGHT",
             on?"BOXING / MMA / BEAST PIT":"next card at dusk");
     }

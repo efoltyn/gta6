@@ -99,7 +99,7 @@
     // said nothing at all.
     if (bad || err) {
       try {
-        console.warn("[fxwarm] " + bad + " object(s) carry a non-Material `.material` (a raw colour?) — " +
+        console.warn("[fxwarm] " + bad + " object(s) carry a non-Material `.material` (a raw colour?) · " +
           "they were swapped for a dummy so the prewarm walk could finish" +
           (err ? "; compile still threw: " + (err && err.message) : ""));
       } catch (e2) {}

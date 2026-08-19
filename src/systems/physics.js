@@ -68,12 +68,16 @@
   // Broadphase query for systems that need to inspect nearby world geometry
   // without resolving a collision. Callers own/reuse `out`; results are the
   // same collider objects from CBZ.colliders, deduplicated across grid cells.
-  const colQuerySeen = new Set();
+  // Dedup across grid cells by stamping the collider with the query id — a
+  // property compare instead of a Set hash per candidate. Same results; this
+  // query runs for every steering ped and crowd agent every frame and the Set
+  // overhead alone profiled at several % of the sim tick.
+  let colQueryId = 0;
   CBZ.queryCollidersNear = function (x, z, radius, out) {
     if (colDirty || colCount !== CBZ.colliders.length) rebuildColliderGrid();
     out = out || [];
     out.length = 0;
-    colQuerySeen.clear();
+    const qid = ++colQueryId;
     // same mode gate as collide(): stamped city colliders are phantom walls
     // in the prison/survival coordinate space, so queries skip them there.
     const cityOn = !CBZ.game || CBZ.game.mode === "city";
@@ -85,8 +89,8 @@
       for (let i = 0; i < bucket.length; i++) {
         const c = bucket[i];
         if (c._city && !cityOn) continue;
-        if (colQuerySeen.has(c)) continue;
-        colQuerySeen.add(c);
+        if (c._qSeen === qid) continue;
+        c._qSeen = qid;
         out.push(c);
       }
     }
@@ -377,18 +381,208 @@
   const TRAV_LAND_PAD = 0.20;       // actor centre clears the far face before collision resumes
   const TRAV_TOP_INSET = 0.34;      // chest/hips arrive just inside a climbable top
   const TRAV_EPS = 0.015;
+  /* ---- ONE-LINE REVERT (doctrine.md's DEGRADE-SAFE point) -----------------
+     `CBZ.CONFIG.PARKOUR_V2 = false`, or `?cfg_PARKOUR_V2=0`, restores this
+     file's shipped traversal EXACTLY: no aperture move, smooth01 root motion
+     on its old fixed duration windows, no edge catch, no airborne pose and no
+     landing beat. Every addition below is behind one read of this flag, which
+     is also what makes tools/visual-presets/parkour-moves.mjs a real
+     before/after — the "before" side is this same checkout with the flag off,
+     so the two frames differ by the change and by nothing else. */
+  if (!CBZ.CONFIG) CBZ.CONFIG = {};
+  if (CBZ.CONFIG.PARKOUR_V2 == null) CBZ.CONFIG.PARKOUR_V2 = true;
+  function parkourV2() { return CBZ.CONFIG.PARKOUR_V2 !== false; }
+
+  /* ---- THE APERTURE: the "go THROUGH it" half of traversal ----------------
+     OWNER (2026-08-17): "if I go up to a building like the airport where
+     there's one floor and I break a window, I can't jump through after —
+     because I can jump OVER but I can't go THROUGH a space."
+
+     He is describing a real hole that the game already draws and already
+     opens. city/buildings.js's carveHole leaves an opening as THREE surviving
+     remnant boxes: a SILL course under it, a HEADER course above it, and full-
+     height FLANKS either side (addRemnant, ~line 1823). The passage between
+     sill and header is genuinely empty — the collider was spliced out.
+
+     Every one of those apertures was refused, and it was this file that
+     refused them. Measured against the shipped build, a running body at a
+     shot-out window:
+
+         sill 0.90 m, aperture 1.40 m  ->  REFUSED
+         sill 1.20 m, aperture 1.40 m  ->  REFUSED
+         C4 mousehole, aperture 1.00 m ->  REFUSED
+
+     The sill probes fine — waist-high, thin, a textbook speed vault. Then
+     buildTraversal validates the arc, the arc goes UP (that is what a vault
+     is), the head enters the HEADER's band, and the "low ceiling / second
+     wall" veto throws the whole traversal away. The move was never wrong; the
+     TRAJECTORY was, because the only trajectory this file knew was "over the
+     top". A window has a top you cannot go over — that is what makes it a
+     window.
+
+     So a third kind joins vault and mantle. `through` keeps the body LOW and
+     threads it between the sill and the header instead of arcing over the
+     sill into the header. Two silhouettes fall out of the measurement, not
+     out of taste:
+
+       "step"  headroom clears the standing body — stride through, tall.
+       "dive"  it does not — commit, go horizontal, arms first, land and roll.
+
+     A dive is not a smaller step. It is the move that exists precisely
+     because the hole is smaller than the person, which is the whole reason
+     mouse-holing (systems/breach.js) is a tactic and not a doorway. -------- */
+  const TRAV_GAP_MIN = 0.62;        // smallest hole a committed dive threads
+  const TRAV_GAP_DIVE_H = 0.58;     // a diving body is this tall, not BODY_H
+  /* A BODY GOING OVER SOMETHING IS FOLDED, NOT STANDING. This fraction is the
+     whole reason the aperture test can be strict without breaking ordinary
+     indoor vaults, and getting it wrong is measurable: the first draft asked
+     for full standing clearance above every obstacle, and four prison props
+     under the cell block's 2.4 m ceiling — stools and a bench that had always
+     been vaultable — became unvaultable in one line, because a 1.82 m standing
+     body plus a 0.24 m arc does not fit under 2.4 m while a folded one does
+     easily. Landing ON a top is the deliberate exception: you finish upright
+     up there, so that case still asks for the whole body. */
+  const TRAV_FOLD = 0.74;           // vaulting profile as a fraction of standing height
+  const TRAV_TOP_CLEAR = 0.26;      // arc clearance the trajectory takes over the top
+  const TRAV_GAP_STEP_SILL = 0.55;  // a lip this low is STRIDDEN over, not dived across
+  const TRAV_GAP_STEP_H = 0.78;     // …and needs this fraction of standing height to duck through
+  /* HOW DEEP AN OPENING STILL COUNTS AS ONE. A wall is thin — city facades run
+     0.4 m, the prison's heavy sections about 1 m, and breach.js's mousehole
+     rows go through the thickest of them. 1.6 m covers every real wall in the
+     game with margin and stops the move being offered for things that merely
+     have a gap in them lengthways: a 2.6 m-deep bunk approached along its
+     length, a stack of crates, a mess bench. Those are not doorways, and
+     threading one is a crawl, not a dive. */
+  const TRAV_GAP_DEPTH = 1.6;       // wall thickness one move can thread
+  const TRAV_GAP_SILL = 1.60;       // a "sill" taller than this is a wall with a hole ABOVE reach
+  const TRAV_GAP_TUCK = 0.72;       // a threading body's shell, as a fraction of its standing radius
+  /* ---- CATCHING THE EDGE --------------------------------------------------
+     The other half of the owner's list: "real parkour jumping, catching self,
+     landing, catching edge". A body in the air that comes up short at a roof
+     lip currently does exactly one thing — it keeps falling, because nothing
+     in the engine ever looks UP from a falling body. catchLedge does, and it
+     hands what it finds to the mantle that already exists. -------------- */
+  const TRAV_CATCH_LOW = 0.30;      // ledge must be at least this far above the feet to be a catch
+  const TRAV_CATCH_REACH = 1.05;    // how far in FRONT of the body the hands find a lip
+  const TRAV_CATCH_RISE = 0.9;      // and no faster than this UPWARD (a rising body has not fallen yet)
   const travQuery = [], travClearQuery = [];
   const travPoint = { x: 0, y: 0, z: 0 };
   const travBounds = window.THREE && window.THREE.Box3 ? new window.THREE.Box3() : null;
   const travDerivedBand = { y0: 0, y1: 0, authored: false, ref: null };
   const travAudit = {
-    probes: 0, starts: 0, vaults: 0, mantles: 0, cars: 0,
+    probes: 0, starts: 0, vaults: 0, mantles: 0, cars: 0, throughs: 0, catches: 0,
+    dives: 0, rolls: 0, gapRefused: 0,
     completed: 0, cancelled: 0, lastCancel: "",
   };
+  /* WHY A PROBE SAID NO. Same reason city/buildings.js publishes carveDbg: the
+     honest answer to "I walked up to it and nothing happened" was previously
+     another instrumented probe round, because every refusal in this file is a
+     bare `return null` inside a loop over a collider bucket. A counter per
+     reason turns that into one call. Costs one string-keyed increment on a
+     path that only runs on an explicit jump/probe event, never in a walking
+     frame. `travWhy` carries the nearest candidate's reason out to the audit. */
+  const travWhy = Object.create(null);
+  let travWhyLast = "";
+  function travNo(reason) {
+    travWhy[reason] = (travWhy[reason] || 0) + 1;
+    travWhyLast = reason;
+    return null;
+  }
 
   function smooth01(t) {
     t = t < 0 ? 0 : (t > 1 ? 1 : t);
     return t * t * (3 - 2 * t);
+  }
+
+  /* ---- WHY THE VAULT LOOKED GLITCHY, AND WHAT REPLACES smooth01 ------------
+     OWNER: "improving the current vault that looks glitchy".
+
+     smooth01 has ZERO DERIVATIVE AT BOTH ENDS. That is exactly what you want
+     for a pose blend and exactly what you must not use for the ROOT MOTION of
+     a body that is already moving: a man sprinting at 7 m/s reaches the wall,
+     his horizontal speed drops to zero for one frame, he floats over on a
+     bell curve, arrives at zero speed again, and the gait resumes at 7 m/s on
+     the next frame. Two velocity discontinuities per vault, one at each end,
+     and the eye reads both as dropped frames — the body visibly hitches at
+     the obstacle and again on the far side. Nothing was ever "glitching"; the
+     curve was authored as a fade, not as a move.
+
+     A cubic Hermite fixes it by construction, because it takes the END
+     TANGENTS as inputs: feed it the speed the body actually arrived with and
+     the motion is continuous through both seams. The pleasant part is that
+     when the duration is chosen as pathLength / speed (which buildTraversal
+     now does), the matched tangent is exactly 1 and the Hermite degenerates
+     to a straight constant-speed line — so a well-matched vault carries the
+     run straight through the obstacle with no easing artefact at all, and
+     only a MISmatched one (a slow body over a long span) eases, which is the
+     case where easing is the honest answer.
+
+     `m` is clamped to [0,3] because that is the monotonicity bound for this
+     basis with equal end tangents (p'(0.5) = 1.5 - 0.5m). Past it the curve
+     overshoots and walks BACKWARDS mid-vault, which would be a real glitch
+     rather than the imaginary one we are fixing. */
+  function hermite01(u, m) {
+    // p0=0, p1=1, both tangents = m. Expanded from the standard basis.
+    const u2 = u * u, u3 = u2 * u;
+    return m * (2 * u3 - 3 * u2 + u) + (3 * u2 - 2 * u3);
+  }
+
+  /* "AT WHAT FRACTION OF THE MOVE AM I THIS FAR ALONG THE PATH?" — the inverse
+     of the curve above, which the aperture needs because it must pin the root
+     height to the wall's real faces and those are known as DISTANCES, not as
+     time. Bisection rather than Newton: the clamp on `m` guarantees the curve
+     is monotonic, so bisection cannot diverge, and 18 halvings resolve to
+     ~4e-6 of the move — far finer than a frame. Runs once per traversal
+     START, never per frame. */
+  function hermiteInvert(target, m) {
+    if (!(target > 0)) return 0;
+    if (target >= 1) return 1;
+    let lo = 0, hi = 1;
+    for (let i = 0; i < 18; i++) {
+      const mid = (lo + hi) * 0.5;
+      if (hermite01(mid, m) < target) lo = mid; else hi = mid;
+    }
+    return (lo + hi) * 0.5;
+  }
+
+  /* THE LOWEST THING OVERHEAD along the crossing, or Infinity for open sky.
+     Scans the same collider bucket the probe already pulled and asks one
+     question per box: does it hang over the path between `t0` and `t1`, above
+     `floorY`? A header remnant answers yes and its y0 IS the aperture's
+     ceiling. Deliberately ignores the obstacle being crossed (`skip`), which
+     is the thing we are standing on, not a roof. */
+  function ceilingOver(ap, dirX, dirZ, t0, t1, floorY, radius, skip) {
+    const midT = (t0 + t1) * 0.5;
+    const mx = ap.x + dirX * midT, mz = ap.z + dirZ * midT;
+    const reach = Math.max(0.6, (t1 - t0) * 0.5 + radius + 0.3);
+    CBZ.queryCollidersNear(mx, mz, reach, travClearQuery);
+    let ceil = Infinity, ref = null;
+    for (let i = 0; i < travClearQuery.length; i++) {
+      const c = travClearQuery[i];
+      if (c === skip) continue;
+      const band = colliderVerticalBand(c);
+      // A heightless legacy collider is full-height by contract, so it is a
+      // solid wall rather than a header and cannot frame an aperture. Treat
+      // it as no ceiling here; the ordinary clearance sweep still vetoes it.
+      if (!band) continue;
+      if (band.y1 <= floorY + 0.02) continue;            // entirely below the sill: not overhead
+      if (band.y0 >= ceil) continue;                     // already have a lower ceiling
+      const hitRect = rayRect(ap.x, ap.z, dirX, dirZ,
+        c.minX - radius, c.maxX + radius, c.minZ - radius, c.maxZ + radius, 64);
+      if (!hitRect) continue;
+      if (hitRect.exit <= t0 + 0.02 || hitRect.enter >= t1 - 0.02) continue;   // not over this stretch
+      if (band.y0 <= floorY + 0.02) {
+        // It starts at or below the sill top AND continues above it: this is
+        // not a header over a hole, it is a solid wall in the way. Report a
+        // zero-height aperture so the caller refuses rather than diving into
+        // masonry.
+        ceil = floorY; ref = c;
+        break;
+      }
+      ceil = band.y0; ref = c;
+    }
+    ceilingOver.ref = ref;
+    return ceil;
   }
 
   // Ray vs XZ AABB. Direction is normalized, so returned t values are metres.
@@ -509,7 +703,7 @@
 
   function colliderCandidate(actor, rig, dirX, dirZ, opts, c, radius, height, reach) {
     if (!c) return null;
-    if (c.noVault || c.noClimb || c._noTraversal) return null;
+    if (c.noVault || c.noClimb || c._noTraversal) return travNo("opted-out");
     const band = colliderVerticalBand(c);
     if (!band) return null;
     const ap = travPos(actor);
@@ -517,18 +711,25 @@
     const feet = ap.y || 0;
     // A suspended rail/awning is not a ledge. The solid face has to begin at
     // (or just below) this body's feet so there is something to plant against.
-    if (band.y0 > feet + 0.38 || band.y1 <= feet + TRAV_MIN_RISE) return null;
-    const rise = band.y1 - feet;
+    if (band.y0 > feet + 0.38 || band.y1 <= feet + TRAV_MIN_RISE) return travNo("not-a-face");
+    // READ THE BAND OUT NOW. colliderVerticalBand hands back the SHARED
+    // travDerivedBand for any legacy heightless collider, and ceilingOver
+    // below calls it again for every box overhead — so a `band.y1` read after
+    // that point is whichever wall was scanned last, not this obstacle.
+    // (Found the honest way: the first draft kept the reference and a window
+    // header silently became the sill's own top.)
+    const bandY0 = band.y0, bandY1 = band.y1, bandAuthored = band.authored;
+    const rise = bandY1 - feet;
     const maxRise = height + Math.max(0.48, Math.min(0.72, height * 0.34));
-    if (rise > maxRise) return null;                         // hands cannot reach the top
+    if (rise > maxRise) return travNo("above-reach");        // hands cannot reach the top
 
     const expanded = rayRect(
       ap.x, ap.z, dirX, dirZ,
       c.minX - radius, c.maxX + radius, c.minZ - radius, c.maxZ + radius, 64);
-    if (!expanded || expanded.enter > reach) return null;
+    if (!expanded || expanded.enter > reach) return travNo("out-of-reach");
     const raw = rayRect(ap.x, ap.z, dirX, dirZ,
       c.minX, c.maxX, c.minZ, c.maxZ, 64);
-    if (!raw || raw.exit <= TRAV_EPS) return null;
+    if (!raw || raw.exit <= TRAV_EPS) return travNo("not-in-line");
     const span = Math.max(0.04, raw.exit - raw.enter);
     // NPC base speeds are deliberately human-scale and much lower than the
     // player tune, so callers may declare that this mover is already in its run
@@ -536,16 +737,75 @@
     // box into a slow two-handed climb instead of the flowing vault it deserves.
     const fast = opts.running === true ||
       (opts.speed || 0) > (((CBZ.TUNE && CBZ.TUNE.walkSpeed) || 2) * 0.82);
+
+    // ---- PLAN A: OVER THE TOP (the move this file has always made) --------
     let kind = rise <= TRAV_VAULT_RISE && span <= TRAV_VAULT_SPAN && fast ? "vault" : "mantle";
     let landOnTop = false;
+    let overOK = true;
     const overLimit = kind === "vault" ? TRAV_VAULT_SPAN : TRAV_MANTLE_SPAN;
     if (span > overLimit) {
       // Landing on top needs the ordinary collider resolver to understand that
       // vertical band on the next frame. A legacy heightless collider does not,
       // so it may be crossed when thin but never used as a sticky top surface.
-      if (!opts.allowTop || band.authored === false) return null;
-      landOnTop = true;
-      kind = "mantle";
+      if (!opts.allowTop || bandAuthored === false) overOK = false;
+      else { landOnTop = true; kind = "mantle"; }
+    }
+
+    /* ---- IS THERE A ROOF ON THIS THING? ----------------------------------
+       Everything above this line asked only "how high is the top and how wide
+       is the box" — the two questions you need in order to go OVER something.
+       Neither of them can tell a garden wall from a window sill, because the
+       difference is not in the sill at all: it is whether there is sky above
+       it. So ask, and let the answer choose between the two plans. */
+    const top = bandY1;
+    const v2 = parkourV2();
+    // FLAG OFF: never look up at all, and refuse a too-wide obstacle exactly
+    // where the shipped file refused it. That is the whole old behaviour.
+    if (!v2 && !overOK) return travNo("span-too-wide");
+    const ceilY = v2 ? ceilingOver(ap, dirX, dirZ, raw.enter, raw.exit, top, radius, c) : Infinity;
+    const headroom = ceilY - top;
+    const needOver = landOnTop ? height + 0.10 : TRAV_TOP_CLEAR + height * TRAV_FOLD;
+    if (v2 && (!overOK || headroom < needOver)) {
+      /* ---- PLAN B: THROUGH IT ------------------------------------------
+         Either there is no way over the top at all, or the ceiling will not
+         let a body be carried over one. If what is left between the top and
+         that ceiling is man-sized, thread it. */
+      if (opts.through === false) { travAudit.gapRefused++; return travNo("gap-not-allowed"); }
+      if (rise > TRAV_GAP_SILL) { travAudit.gapRefused++; return travNo("gap-sill-too-high"); }
+      if (span > TRAV_GAP_DEPTH) { travAudit.gapRefused++; return travNo("gap-too-deep"); }
+      if (headroom < TRAV_GAP_MIN) { travAudit.gapRefused++; return travNo("gap-too-short"); }
+      /* STRIDE vs COMMIT, and the deciding fact is the SILL, not the ceiling.
+         A blown doorway with an ankle-high lip is stepped through with a
+         ducked head no matter how tight the header is, because your legs can
+         still do the work. A waist-high window sill takes your legs out of it
+         — there is nothing to stride with — so the only way through is to go
+         horizontal and let your arms lead. That is why a dive is a different
+         move and not a smaller step. */
+      const gapStyle = (rise <= TRAV_GAP_STEP_SILL && headroom >= height * TRAV_GAP_STEP_H)
+        ? "step" : "dive";
+      const passH = gapStyle === "dive" ? TRAV_GAP_DIVE_H : height * TRAV_GAP_STEP_H;
+      const passY = top + 0.05;
+      if (passY + passH > ceilY + 0.02) { travAudit.gapRefused++; return travNo("gap-body-wont-fit"); }
+      /* A dive lands LONG and rolls out; a step puts a foot down just clear.
+         The extra metre is not decoration: the root is pinned at the sill line
+         until the whole body is past the far face (sampleTraversal's faceOutU),
+         so all of the descent has to happen in the stretch after it. Pad it too
+         tightly and a 0.95 m drop gets squeezed into ~0.09 s, which reads as
+         the body being yanked to the floor. Landing long spends that height
+         over roughly twice the time, and the roll then absorbs it. */
+      const gapEndT = expanded.exit + (gapStyle === "dive" ? 1.05 : TRAV_LAND_PAD);
+      const gx = ap.x + dirX * gapEndT, gz = ap.z + dirZ * gapEndT;
+      return {
+        kind: "through", gapStyle, car: null, collider: c, ceilRef: ceilingOver.ref,
+        // passH travels WITH the move: entities/character.js lays the body out
+        // inside this exact envelope, so the pose and the fit check can never
+        // disagree about how tall a threading body is.
+        rise, top, span, landOnTop: false, passY, passH, headroom,
+        enter: expanded.enter, exit: expanded.exit, faceT: raw.enter,
+        contactT: Math.max(0, raw.enter - Math.min(0.42, height * 0.22)),
+        endT: gapEndT, endY: groundAt(gx, gz, feet),
+        minX: c.minX, maxX: c.maxX, minZ: c.minZ, maxZ: c.maxZ,
+      };
     }
 
     let contactT = Math.max(0, expanded.enter + 0.03);
@@ -561,15 +821,15 @@
       // Expanded entry is one radius before the face. Move one radius plus a
       // small inset so the hips finish over the top rather than hanging outside.
       endT = Math.min(raw.exit - 0.10, expanded.enter + radius + TRAV_TOP_INSET);
-      if (endT <= raw.enter + 0.05) return null;             // top is too narrow to receive a body
-      endY = band.y1;
+      if (endT <= raw.enter + 0.05) return travNo("top-too-narrow");   // cannot receive a body
+      endY = bandY1;
     } else {
       endT = expanded.exit + TRAV_LAND_PAD;
       const ex = ap.x + dirX * endT, ez = ap.z + dirZ * endT;
       endY = groundAt(ex, ez, feet);
     }
     return {
-      kind, car: null, collider: c, rise, top: band.y1, span, landOnTop,
+      kind, car: null, collider: c, rise, top: bandY1, span, landOnTop,
       enter: expanded.enter, exit: expanded.exit, faceT: raw.enter,
       contactT, endT, endY,
       minX: c.minX, maxX: c.maxX, minZ: c.minZ, maxZ: c.maxZ,
@@ -654,14 +914,49 @@
   }
 
   function sampleTraversal(s, u, out) {
-    const ease = smooth01(u);
     if (s.kind === "vault") {
+      // Velocity-matched root motion (see hermite01). `s.tangent` is the
+      // approach speed expressed in path lengths per duration, so a vault
+      // timed at pathLength/speed rides straight through at run pace.
+      // tangent === null is the flag-off path: the shipped smooth01 fade.
+      const ease = s.tangent == null ? smooth01(u) : hermite01(u, s.tangent);
       out.x = s.startX + (s.endX - s.startX) * ease;
       out.z = s.startZ + (s.endZ - s.startZ) * ease;
       const base = s.startY + (s.endY - s.startY) * ease;
       const middle = (s.startY + s.endY) * 0.5;
       const lift = Math.max(0.52, s.top + 0.24 - middle);
       out.y = base + Math.sin(Math.PI * u) * lift;
+      return out;
+    }
+    if (s.kind === "through") {
+      /* THREADING A HOLE, in three beats and one constraint: between the
+         near face and the far face the root Y is PINNED to passY, because
+         that is the only band the body fits in. Outside the wall it is free
+         to rise off the ground and settle onto the landing. Ballistic-looking
+         curves are wrong here — an arc is exactly what the header rejects. */
+      const ease = hermite01(u, s.tangent != null ? s.tangent : 1);
+      out.x = s.startX + (s.endX - s.startX) * ease;
+      out.z = s.startZ + (s.endZ - s.startZ) * ease;
+      /* Defaulted rather than trusted. buildTraversal always sets both of these
+         for a `through` state, but the failure mode if it ever did not is
+         `u - undefined` = NaN written straight into the actor's position — a
+         body that vanishes to nowhere and takes the camera with it. A wrong
+         pin height is a cosmetic bug; a NaN root is not recoverable. */
+      const inU = s.faceInU != null ? s.faceInU : 0.30;
+      const outU = s.faceOutU != null ? s.faceOutU : 0.70;
+      if (u <= inU) {
+        // approach: lift the feet from the floor to the sill line
+        const q = smooth01(inU > 1e-4 ? u / inU : 1);
+        out.y = s.startY + (s.passY - s.startY) * q;
+      } else if (u < outU) {
+        out.y = s.passY;                       // inside the aperture: held flat
+      } else {
+        const q = smooth01((u - outU) / Math.max(1e-4, 1 - outU));
+        // A dive keeps its height a beat longer and drops late (it is still
+        // horizontal); a step puts a foot down straight away.
+        const drop = s.gapStyle === "dive" ? q * q : q;
+        out.y = s.passY + (s.endY - s.passY) * drop;
+      }
       return out;
     }
     if (u < 0.28) {
@@ -702,28 +997,78 @@
       : Math.max(hit.contactT, Math.min(hit.endT, (hit.enter + hit.exit) * 0.5));
     let style = "climb";
     let styleIndex = -1;
-    if (hit.kind === "vault") {
+    if (hit.kind === "through") {
+      style = hit.gapStyle || "dive";
+    } else if (hit.kind === "vault") {
       // Jump is always the traversal input. Sprint is an expressive modifier:
       // without it the actor still gets across using a controlled speed/kong
       // vault; with committed momentum the flashier spy spin enters the pool,
       // and a sprinting side-on car vault deliberately chooses it.
       const sprinting = opts.sprinting === true;
-      const styles = sprinting ? ["speed", "kong", "spin"] : ["speed", "kong"];
+      // A REVOLUTION NEEDS SOMETHING TO REVOLVE OVER. The spin keeps its full
+      // readable window below (that window is not negotiable — a 360 in a
+      // third of a second is the dropped-frame read it was slowed down to
+      // cure), which means it is the one move that deliberately SPENDS
+      // momentum. Over a car or a wall that trade reads as a flourish; over a
+      // 30 cm kerb it reads as the body stopping dead to pirouette. So
+      // momentum unlocks it and geometry still has to afford it.
+      const roomToSpin = sprinting && hit.span >= 0.80;
+      const styles = roomToSpin ? ["speed", "kong", "spin"] : ["speed", "kong"];
       const previous = actor._traverseStyle == null ? -1 : actor._traverseStyle;
       const n = (previous + 1) % styles.length;
-      style = hit.car && sprinting ? "spin" : styles[n];
+      style = hit.car && roomToSpin ? "spin" : styles[n];
       styleIndex = style === "speed" ? 0 : (style === "kong" ? 1 : 2);
     }
-    // A 360° roll in the old 0.6-0.8s vault window read as a dropped/glitched
-    // frame. Give it an anticipation, one readable revolution, and recovery.
-    const duration = hit.kind === "vault"
-      ? (style === "spin"
-          ? Math.min(1.30, 1.10 + hit.span * 0.08)
-          : Math.min(0.92, 0.68 + hit.span * 0.07))
-      : Math.min(1.36, 0.96 + hit.rise * 0.15);
+    /* ---- HOW LONG THE MOVE TAKES, AND WHY IT IS NOT A CONSTANT ------------
+       The shipped durations were fixed windows (0.68-0.92 s for a vault) and
+       that is the other half of the "glitchy vault". A body arrives at the
+       obstacle at anywhere from 2 to 9 m/s; giving all of them the same 0.8 s
+       to cross the same 2.5 m means the fast ones are held back to a float
+       and the slow ones are flung. Combined with smooth01's zero end
+       tangents, the fast case — which is the case you actually play — stalled
+       at the wall and then teleported off it.
+
+       So the vault and the aperture are timed at pathLength / approach speed,
+       which is what "keep running, the wall is just terrain" means, and the
+       tangent is then whatever ratio survives the clamps. A mantle keeps a
+       rise-scaled duration because hauling your own weight up IS slow and its
+       tempo has nothing to do with how fast you were walking. */
+    const pathLen = Math.max(0.35, Math.hypot(endX - p.x, endZ - p.z));
+    const approach = Math.max(1.6, hit.kind === "through" || hit.kind === "vault"
+      ? (opts.speed || 0) : 0);
+    let duration;
+    if (!parkourV2()) {
+      // The shipped windows, byte for byte, and sampleTraversal falls back to
+      // smooth01 because `tangent` is left null on the state.
+      duration = hit.kind === "vault"
+        ? (style === "spin"
+            ? Math.min(1.30, 1.10 + hit.span * 0.08)
+            : Math.min(0.92, 0.68 + hit.span * 0.07))
+        : Math.min(1.36, 0.96 + hit.rise * 0.15);
+    } else if (hit.kind === "mantle") {
+      duration = Math.min(1.36, 0.96 + hit.rise * 0.15);
+    } else if (style === "spin") {
+      // THE ONE MOVE THAT IS ALLOWED TO COST SPEED, and the reason the tangent
+      // clamp below matters. A spy vault genuinely decelerates through the
+      // rotation and re-accelerates out of it — that is what it looks like
+      // when a person does one. Keeping the readable window and letting the
+      // Hermite carry a tangent near its ceiling gives exactly that shape:
+      // enters at run pace, slows across the roll, leaves at run pace. What
+      // it no longer does is start and finish at a dead stop.
+      duration = Math.min(1.30, 1.10 + hit.span * 0.08);
+    } else {
+      duration = Math.max(0.26, Math.min(0.95, pathLen / approach));
+    }
+    // Tangent in path-lengths-per-duration; 1 is a perfectly matched, perfectly
+    // straight carry-through. 3 is the monotonicity ceiling for this basis.
+    const tangent = parkourV2()
+      ? Math.max(0, Math.min(3, (approach * duration) / pathLen))
+      : null;
     const s = {
       kind: hit.kind, style, car: hit.car, collider: hit.collider,
-      styleIndex,
+      styleIndex, tangent, pathLen,
+      gapStyle: hit.gapStyle || null, ceilRef: hit.ceilRef || null,
+      passY: hit.passY, passH: hit.passH, headroom: hit.headroom,
       landOnTop: hit.landOnTop, top: hit.top, rise: hit.rise, span: hit.span,
       minX: hit.minX, maxX: hit.maxX, minZ: hit.minZ, maxZ: hit.maxZ,
       startX: p.x, startY: p.y || 0, startZ: p.z,
@@ -746,19 +1091,52 @@
       wallStart: (CBZ.now != null ? CBZ.now : (typeof performance !== "undefined" ? performance.now() : 0)),
       sounded: false,
     };
+    if (hit.kind === "through") {
+      // WHERE THE WALL IS, AS A FRACTION OF THE MOVE. sampleTraversal pins the
+      // root height between these two, so they have to be the real faces
+      // solved back through the SAME Hermite the XZ uses — solving them off a
+      // linear u would pin the wrong stretch on any mismatched crossing and
+      // clip the body's feet through the sill.
+      s.faceInU = hermiteInvert(Math.max(0, hit.faceT - radius * 0.5) / hit.endT, tangent);
+      s.faceOutU = hermiteInvert(Math.min(1, (hit.exit + 0.05) / hit.endT), tangent);
+      if (s.faceOutU <= s.faceInU) s.faceOutU = Math.min(1, s.faceInU + 0.08);
+    }
     // Validate the destination and two body-sized samples over the obstacle.
-    if (!landingClear(hit, endX, endZ, hit.endY, height, radius)) return null;
-    const samples = [0.42, 0.66];
+    if (!landingClear(hit, endX, endZ, hit.endY, height, radius)) return travNo("landing-blocked");
+    /* A THREADING BODY IS NARROWER AND SHORTER THAN A STANDING ONE, and the
+       aperture's own frame is not an obstacle to it. Both facts have to reach
+       this sweep or it refuses every hole it was just written to find: the
+       header is by definition inside the head band (that is what made it a
+       header), and the standing radius is a hip clearance for someone walking
+       upright, which a diver is not. Everything ELSE — a flank, a pier, a
+       second wall a metre behind — still vetoes at full strictness, so the
+       exemption is exactly two boxes wide and cannot open a path through
+       masonry. */
+    const thru = hit.kind === "through";
+    // The profile here MUST be the same one colliderCandidate measured the
+    // ceiling against, or the two disagree and a move the candidate approved
+    // gets thrown away by its own validator — which is precisely how a window
+    // used to be refused. Folded for anything crossing an obstacle, full
+    // height only when the body is going to stand up on top of it.
+    const sweepH = !parkourV2() ? height
+      : (thru
+        ? (hit.gapStyle === "dive" ? TRAV_GAP_DIVE_H : height * TRAV_GAP_STEP_H)
+        : (hit.landOnTop ? height : height * TRAV_FOLD));
+    const sweepR = radius * (thru ? TRAV_GAP_TUCK : 0.82);
+    const samples = thru ? [0.30, 0.50, 0.70] : [0.42, 0.66];
     for (let i = 0; i < samples.length; i++) {
       sampleTraversal(s, samples[i], travPoint);
       CBZ.queryCollidersNear(travPoint.x, travPoint.z, radius + 0.05, travClearQuery);
       for (let j = 0; j < travClearQuery.length; j++) {
         const c = travClearQuery[j];
         if (c === hit.collider) continue;
-        const head = travPoint.y + height;
+        if (thru && c === hit.ceilRef) continue;           // the aperture's own header
+        const head = travPoint.y + sweepH;
         if (c.y0 != null && (head <= c.y0 || travPoint.y >= c.y1)) continue;
-        if (circleTouchesRect(travPoint.x, travPoint.z, radius * 0.82,
-          c.minX, c.maxX, c.minZ, c.maxZ)) return null;    // low ceiling / second wall
+        if (circleTouchesRect(travPoint.x, travPoint.z, sweepR,
+          c.minX, c.maxX, c.minZ, c.maxZ)) {
+          return travNo(thru ? "gap-path-blocked" : "path-blocked");   // second wall / low ceiling
+        }
       }
     }
     return s;
@@ -815,11 +1193,144 @@
       rig.traversePose = s;
     }
     travAudit.starts++;
-    if (s.kind === "vault") travAudit.vaults++; else travAudit.mantles++;
+    if (s.kind === "vault") travAudit.vaults++;
+    else if (s.kind === "through") { travAudit.throughs++; if (s.gapStyle === "dive") travAudit.dives++; }
+    else travAudit.mantles++;
     if (s.car) travAudit.cars++;
     if (actor === player && CBZ.sfx) CBZ.sfx("jump");
     return s;
   }
+
+  /* ---- CATCHING THE EDGE --------------------------------------------------
+     A body in the air, falling, with a lip in front of it at hand height.
+     Everything needed to finish that sentence already exists — the mantle
+     hauls a body from a hang onto a top, and `landOnTop` makes the collider
+     resolver understand the surface it arrives on. What was missing is
+     nobody ever LOOKED, because probeTraversal reads the obstacle band
+     against the FEET and a falling body's feet are below the ledge it is
+     about to miss.
+
+     So this is a second entry point, not a second mechanic: it finds the lip,
+     and hands the ordinary mantle a hit record describing it. Deliberately
+     narrow — it may only ever produce a landOnTop mantle onto a real authored
+     band, so the worst case of a false positive is a body standing on a
+     surface it could have vaulted onto anyway. */
+  function catchLedge(actor, rig, dirX, dirZ, opts) {
+    opts = opts || {};
+    if (!parkourV2()) return null;
+    const traverseOn = CBZ.modeHas ? CBZ.modeHas("traverse") : CBZ.game.mode === "city";
+    if (!actor || !rig || !traverseOn) return null;
+    if (actor._traversal || actor.dead || actor.driving || actor.inCar || actor.grounded) return null;
+    if (actor.noVault || actor._noTraversal) return null;
+    if ((actor.vy || 0) > TRAV_CATCH_RISE) return null;      // still going up: nothing has gone wrong yet
+    const ap = travPos(actor);
+    if (!ap) return null;
+    let dl = Math.hypot(dirX, dirZ);
+    if (dl < 0.35) return null;                              // no committed direction = no reach
+    dirX /= dl; dirZ /= dl;
+    const radius = opts.radius || actor.radius || 0.5;
+    const height = rigHeight(rig, opts);
+    const feet = ap.y || 0;
+    const reach = TRAV_CATCH_REACH + radius;
+    CBZ.queryCollidersNear(ap.x + dirX * reach * 0.5, ap.z + dirZ * reach * 0.5, reach + 1.0, travQuery);
+    let best = null, bestD = 1e9;
+    for (let i = 0; i < travQuery.length; i++) {
+      const c = travQuery[i];
+      if (!c || c.noVault || c.noClimb || c._noTraversal) continue;
+      // Authored band only: the hands are about to put the whole body's weight
+      // on this top, and a derived band is a picture's bounding box, not a
+      // surface groundAt will still be holding us up on next frame.
+      if (c.y0 == null || c.y1 == null || !isFinite(c.y1)) continue;
+      const lip = c.y1 - feet;
+      // The hands work between chest and a little over the head. Below that
+      // the body would have landed on it; above it, there is nothing to grab.
+      if (lip < TRAV_CATCH_LOW || lip > height * 0.95) continue;
+      const hitRect = rayRect(ap.x, ap.z, dirX, dirZ,
+        c.minX - radius, c.maxX + radius, c.minZ - radius, c.maxZ + radius, 64);
+      if (!hitRect || hitRect.enter > reach) continue;
+      const raw = rayRect(ap.x, ap.z, dirX, dirZ, c.minX, c.maxX, c.minZ, c.maxZ, 64);
+      if (!raw || raw.exit <= TRAV_EPS) continue;
+      // The top has to be able to RECEIVE a body — a 20 cm parapet cap is a
+      // handhold with nowhere to go, and pulling onto it would leave the
+      // actor standing on air the moment traversalSurfaceY stops matching.
+      const endT = Math.min(raw.exit - 0.10, hitRect.enter + radius + TRAV_TOP_INSET);
+      if (endT <= raw.enter + 0.05) continue;
+      if (hitRect.enter >= bestD) continue;
+      bestD = hitRect.enter;
+      best = {
+        kind: "mantle", car: null, collider: c, rise: lip, top: c.y1, span: raw.exit - raw.enter,
+        landOnTop: true, enter: hitRect.enter, exit: hitRect.exit, faceT: raw.enter,
+        contactT: Math.max(0, raw.enter - Math.min(0.58, height * 0.30)),
+        endT, endY: c.y1,
+        minX: c.minX, maxX: c.maxX, minZ: c.minZ, maxZ: c.maxZ,
+      };
+    }
+    if (!best) return null;
+    const s = buildTraversal(actor, rig, dirX, dirZ, opts, best);
+    if (!s) return null;
+    s.caught = true;
+    actor._traversal = s;
+    actor._traverseSurface = null;
+    actor.vy = 0;
+    actor._fallPeak = 0;         // the catch IS the save: no fall damage on arrival
+    if (actor.grounded != null) actor.grounded = false;
+    rig.slidePose = false; rig.pronePose = false; rig.crouch = false;
+    rig.traversePose = s;
+    travAudit.starts++; travAudit.mantles++; travAudit.catches++;
+    if (actor === player && CBZ.sfx) CBZ.sfx("hit");     // palms slapping the lip
+    return s;
+  }
+
+  /* ---- THE LANDING ---------------------------------------------------------
+     OWNER: "real parkour jumping, catching self, LANDING, catching edge".
+
+     Landing was the one beat the engine never had. A traversal ended by
+     nulling the pose on the frame the root reached its destination, and the
+     walk cycle resumed on the very next frame from a full tuck — so the body
+     went from horizontal to strolling with nothing in between. Same for an
+     ordinary fall: vy zeroed and you were simply walking again.
+
+     A landing is not a pose, it is a BUDGET: how much vertical energy has to
+     go somewhere. Under a step-down it is absorbed by the ankles and nobody
+     notices. Over it the knees fold. Past what the knees can take, a body
+     that is still MOVING FORWARD converts the drop into a roll — which is
+     the whole reason a roll exists in parkour and not a stylistic choice —
+     and a body that is not, takes the hit standing and stumbles.
+
+     This owns the ARMING only. entities/character.js owns the pose and runs
+     the clock, exactly the way `_traverseRecover` already works, so nothing
+     here needs a per-frame updater and an NPC with no landing animator pays
+     one property write. */
+  /* CALIBRATED AGAINST THIS GAME'S OWN NUMBERS, not against 9.8 m/s². TUNE
+     gravity is 22 and jumpVel is 8.2, so an ordinary jump lands at 8.2 m/s and
+     a step off the 0.45 m STEP_UP kerb arrives at 4.4. Those two facts set both
+     thresholds: 5.5 leaves every curb and stair silent while giving a plain
+     jump a small honest settle (hard ≈ 0.3), and the roll line is pinned to
+     FALL_SAFE — the exact speed at which cityFallLand starts charging for the
+     landing — so the move appears at the moment it becomes worth doing. */
+  const LAND_SOFT = 5.5;        // m/s — below this the ankles eat it, no pose at all
+  const LAND_ROLL = 11.0;       // m/s — == FALL_SAFE: you roll out of the fall that would hurt
+  const ROLL_CREDIT = 2.6;      // m/s of impact a completed roll dissipates
+  function armLanding(rig, impact, forwardSpeed, opts) {
+    if (!rig || !parkourV2()) return null;
+    const v = Math.max(0, impact || 0);
+    if (v < LAND_SOFT && !(opts && opts.force)) return null;
+    // Rolling out needs somewhere to roll TO. A body that lands stationary
+    // (dropped straight down, or ran into something) has no line for it and
+    // absorbs standing instead — trying to roll from a standstill is the
+    // "canned animation fires at the wrong moment" that reads as a bug.
+    const roll = v >= LAND_ROLL && (forwardSpeed || 0) > 2.4 && !(opts && opts.noRoll);
+    rig.landPose = {
+      t: 0,
+      // 0 = a knee-bend you barely see, 1 = everything the body has.
+      hard: Math.max(0, Math.min(1, (v - LAND_SOFT) / 9)),
+      roll,
+      dur: roll ? 0.62 : 0.34,
+    };
+    if (roll) travAudit.rolls++;
+    return rig.landPose;
+  }
+  CBZ.charArmLanding = armLanding;
 
   function clearTraversalPose(rig) {
     if (!rig) return;
@@ -883,6 +1394,23 @@
     if (rig.group.position !== ap) rig.group.position.copy(ap);
     actor.vy = 0;
     if (actor.grounded != null) actor.grounded = true;
+    /* THE MOVE PAYS FOR ITS OWN LANDING. A vault that drops the body a metre
+       onto the far side, and every dive through a window, arrive with real
+       downward energy that the old instant pose-clear simply deleted. Score
+       it off the geometry the trajectory already knows — the height given up
+       plus the pace carried — rather than off vy, which a scripted
+       trajectory never accumulates. A committed dive always earns the roll:
+       going horizontal through a hole is the half of the move that MAKES it a
+       dive, and coming out of one on your feet is not a thing bodies do. */
+    // A ledge you have just finished pulling onto must not be caught again on
+    // the next frame's fall — that loop is what makes an auto-grab feel sticky
+    // instead of generous. One beat of immunity is enough; the body is standing
+    // by then.
+    actor._noGrabT = 0.35;
+    const dropped = Math.max(0, (s.kind === "through" ? s.passY : s.top) - s.endY);
+    const landV = Math.sqrt(2 * 9.8 * dropped) + (s.style === "spin" ? 2.0 : 0);
+    armLanding(rig, s.gapStyle === "dive" ? Math.max(landV, LAND_ROLL) : landV,
+      s.speed, { noRoll: s.landOnTop });
     if (s.landOnTop && s.collider) {
       actor._traverseSurface = {
         collider: s.collider, top: s.top,
@@ -913,15 +1441,27 @@
     start: startTraversal,
     step: stepTraversal,
     cancel: cancelTraversal,
+    catchLedge: catchLedge,
+    land: armLanding,
     surfaceY: traversalSurfaceY,
     active: function (actor) { return !!(actor && actor._traversal); },
     stats: function () {
       return {
         probes: travAudit.probes, starts: travAudit.starts,
         vaults: travAudit.vaults, mantles: travAudit.mantles,
+        throughs: travAudit.throughs, dives: travAudit.dives,
+        catches: travAudit.catches, rolls: travAudit.rolls,
+        gapRefused: travAudit.gapRefused,
         cars: travAudit.cars, completed: travAudit.completed, cancelled: travAudit.cancelled,
         lastCancel: travAudit.lastCancel,
+        // WHY the refusals happened, by reason. See travNo.
+        why: Object.assign({}, travWhy), lastRefuse: travWhyLast,
       };
+    },
+    // Reset the refusal ledger so a tool can attribute one specific probe.
+    clearWhy: function () {
+      for (const k in travWhy) delete travWhy[k];
+      travWhyLast = "";
     },
   };
 
@@ -1035,8 +1575,34 @@
     };
   };
 
+  /* THE CEILING. Nothing in this engine has ever clamped ASCENT: collide()
+     resolves x/z only, and its y-band test (see the c.y0/c.y1 check above)
+     SKIPS a wall the body clears rather than stopping it. That was harmless
+     while the only thing overhead was sky. It stops being harmless the moment
+     the ground has a lid on it — a room under an intact street — because a jump
+     would put your head through the road. systems/solidground.js answers with
+     the underside of the nearest solid span above you, and Infinity when there
+     is none, which is every column in a world with no lids: this is a compare
+     and a branch that never fires until something is actually overhead. */
+  // stance-aware in spirit; the crouch cases pass their own headroom
+  function bodyHeight() { return 1.7; }
+  function clampCeiling(p, headroom) {
+    if (!CBZ.ceilAt) return false;
+    const c = CBZ.ceilAt(p.pos.x, p.pos.z, p.pos.y);
+    if (!(c < Infinity)) return false;
+    const head = p.pos.y + (headroom || bodyHeight());
+    if (head <= c) return false;
+    p.pos.y = c - (headroom || bodyHeight());
+    if (p.vy > 0) p.vy = 0;
+    return true;
+  }
+
   function groundAt(x, z, fromY) {
-    let best = CBZ.floorAt ? CBZ.floorAt(x, z) : 0;
+    /* fromY is passed through so the ground can answer with the surface you are
+       actually near, not just the topmost one: over an intact lid the street,
+       inside the room below it the room floor. With no carvings in the world
+       this is byte-identical — solidground.js's fast path ignores it. */
+    let best = CBZ.floorAt ? CBZ.floorAt(x, z, fromY) : 0;
     const plats = CBZ.platforms;
     if (plats.length) {
       const reach = (fromY != null ? fromY : best) + STEP_UP;
@@ -1188,6 +1754,28 @@
     let v = impactSpeed;
     if (player._fallPeak && player._fallPeak > v) v = player._fallPeak;
     player._fallPeak = 0;
+    /* ---- THE LANDING IS ENGINE; THE DAMAGE IS THE CITY'S -------------------
+       Everything below this block is gated to a mode (city charges for the
+       fall, survival routes it to the trauma ledger, escape does neither).
+       The BODY, though, lands the same way in all three — that is what makes
+       it a body — so the pose is armed here, before the first gate, off the
+       one number this function already holds. This is also the only place in
+       the file that knows the impact speed of an ordinary fall.
+
+       AND A ROLL IS WORTH SOMETHING. Converting a drop into a forward roll is
+       not decoration: it is the technique's entire purpose, and a game that
+       plays the animation and then charges full price for the landing has
+       taught the player that parkour is cosmetic. The credit is deliberately
+       a small FLAT subtraction off the impact rather than a fraction: at the
+       height where landing starts to hurt it wipes out most of the sting,
+       and at a tower fall 2.6 m/s is noise against 40 — so "a rooftop is
+       lethal, a tower is gibbing-certain" survives intact and you cannot roll
+       your way off a skyscraper. */
+    const landed = armLanding(playerChar, v, player.speed, null);
+    if (landed && landed.roll) {
+      if (CBZ.sfx) CBZ.sfx("whoosh");
+      v = Math.max(0, v - ROLL_CREDIT);
+    }
     // SURVIVAL: no fall DAMAGE (the disasters fling you constantly — charging
     // for every landing would decide rounds by physics noise), but a long drop
     // is one of the three things the owner named as having to draw blood, and
@@ -1421,7 +2009,7 @@
         if (player._traversal || player._traverseSurface) cancelTraversal(player, playerChar, false);
         ph.down -= dt;
         player.speed = 0; player.crouch = false; stanceReset();
-        player.vy -= T.gravity * dt; player.pos.y += player.vy * dt;
+        player.vy -= T.gravity * dt; player.pos.y += player.vy * dt; clampCeiling(player);
         const fl = groundAt(player.pos.x, player.pos.z, player.pos.y);
         if (player.pos.y <= fl) { player.pos.y = fl; player.vy = 0; }
         if (Math.abs(ph.kx) > 0.02 || Math.abs(ph.kz) > 0.02) { player.pos.x += ph.kx * dt; player.pos.z += ph.kz * dt; const d = Math.pow(0.0009, dt); ph.kx *= d; ph.kz *= d; }
@@ -1462,11 +2050,15 @@
 
     if (player.dead || player.ko > 0) {
       if (player._traversal || player._traverseSurface) cancelTraversal(player, playerChar, false);
+      // This branch owns the rig and returns, so the air/landing flags would
+      // otherwise stay set at whatever value the frame before the knockdown
+      // left them and fight the KO pose for the whole ragdoll.
+      playerChar.airPose = null; playerChar.landPose = null; player._airT = 0;
       if (!player.dead) player.ko = Math.max(0, (player.ko || 0) - dt);
       player.speed = 0;
       player.crouch = false; stanceReset();
       player.vy -= T.gravity * dt;
-      player.pos.y += player.vy * dt;
+      player.pos.y += player.vy * dt; clampCeiling(player, 0.6);
       const floorD = groundAt(player.pos.x, player.pos.z, player.pos.y) + 0.3;   // lying body rests ON the floor, not through it
       if (player.pos.y <= floorD) { player.pos.y = floorD; player.vy = 0; player.grounded = true; }
       playerChar.group.position.set(player.pos.x, player.pos.y, player.pos.z);
@@ -1665,18 +2257,80 @@
           // hand off to gravity so you actually fall instead of snapping down.
           player.grounded = false;
           player.vy -= T.gravity * subDt;
-          player.pos.y += player.vy * subDt;
+          player.pos.y += player.vy * subDt; clampCeiling(player);
           if (player.vy < 0 && -player.vy > (player._fallPeak || 0)) player._fallPeak = -player.vy;
           if (player.pos.y <= support) { player.pos.y = support; const ims = -player.vy; player.vy = 0; player.grounded = true; cityFallLand(ims); }
         }
       } else {
         player.vy -= T.gravity * subDt;
-        player.pos.y += player.vy * subDt;
+        player.pos.y += player.vy * subDt; clampCeiling(player);
         if (player.vy < 0 && -player.vy > (player._fallPeak || 0)) player._fallPeak = -player.vy;   // track peak downward speed this fall
         if (player.pos.y <= support && player.vy <= 0) { player.pos.y = support; const ims = -player.vy; player.vy = 0; player.grounded = true; cityFallLand(ims); } // landed
       }
 
       resolveCollisions();
+    }
+
+    /* ---- CATCHING YOURSELF --------------------------------------------------
+       OWNER: "real parkour jumping, CATCHING SELF, landing, CATCHING EDGE".
+
+       One frame per airborne frame, after the fall has already been integrated
+       — so the body has genuinely missed before anything tries to save it, and
+       a jump that clears the gap outright never enters this path at all.
+
+       Three gates keep it honest rather than sticky:
+       • it must be FALLING (catchLedge itself refuses a rising body), so the
+         lip you are jumping UP past is not grabbed on the way through;
+       • you must be HOLDING a direction into the wall, which is what makes it
+         an intent to catch and not a magnet;
+       • a short cooldown after any traversal or deliberate drop, so releasing
+         a ledge does not immediately re-grab the same ledge.
+       The move it produces is the ordinary landOnTop mantle, so the surface
+       you arrive on is one the collider resolver already understands. */
+    if (!player.grounded && !player._traversal && !player.prone && !mountedAnimal &&
+        !player._swim && !overview && !mapOpen && !cine &&
+        (player._noGrabT || 0) <= 0 && len > 0.15) {
+      catchLedge(player, playerChar, mx, mz, {
+        speed: Math.max(player.speed, moveSpeed),
+        radius: player.radius,
+        height: (playerChar.metric && playerChar.metric.height) || BODY_H,
+      });
+      if (player._traversal) {
+        // The catch owns the transform from here; step it this same frame so
+        // the hands are already on the lip in the frame the player sees.
+        stepTraversal(player, playerChar, fdt, true);
+        return;
+      }
+    }
+    if (player._noGrabT > 0) player._noGrabT -= fdt;
+
+    /* ---- WHAT YOU LOOK LIKE IN THE AIR -------------------------------------
+       OWNER: "…what I look like in air, etc etc."
+
+       And the answer, for the whole life of the game, was "exactly like
+       walking". animChar had no airborne branch at all: leave the ground and
+       the leg cycle keeps striding on nothing, arms swinging, until you land.
+       Every other full-body state in entities/character.js is driven by a
+       flag on the rig (slidePose, pronePose, traversePose), so this is the
+       fourth of the same kind and reads through the same door.
+
+       Physics publishes the FACTS — how fast up or down, how long since the
+       feet left, whether this was a jump or a step off an edge — and the
+       animator decides what a body does with them. `rise`/`fall` are
+       normalized against the jump this game actually has (jumpVel 8.2) so the
+       pose does not depend on the tune staying put. */
+    if (player.grounded || player._traversal || !parkourV2()) {
+      if (playerChar.airPose) playerChar.airPose = null;
+      player._airT = 0;
+    } else {
+      player._airT = (player._airT || 0) + fdt;
+      const jv = T.jumpVel || 8.2;
+      const ap = playerChar.airPose || (playerChar.airPose = { t: 0, rise: 0, fall: 0, vy: 0 });
+      ap.t = player._airT;
+      ap.vy = player.vy;
+      ap.rise = Math.max(0, Math.min(1, player.vy / jv));
+      ap.fall = Math.max(0, Math.min(1, -player.vy / (jv * 1.35)));
+      ap.moving = player.speed > 1.2;
     }
 
     // sync model. The PRESENTATION that should track the (now wall-clock) motion

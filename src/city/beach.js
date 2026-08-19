@@ -1103,7 +1103,7 @@
     const cash = 40 + ((Math.random() * 120) | 0) + (L.bag ? 30 : 0);
     CBZ.city.addCash(cash);
     if (CBZ.sfx) CBZ.sfx("coin");
-    CBZ.city.note("Rifled the " + (L.bag ? "beach bag" : "cooler") + " — $" + cash + ". Nobody locks up at the beach.", 2.2);
+    CBZ.city.note("Rifled the " + (L.bag ? "beach bag" : "cooler") + " · $" + cash + ". Nobody locks up at the beach.", 2.2);
     // petty theft: charged only if someone actually sees it (witness chokepoint)
     if (CBZ.cityCrime) CBZ.cityCrime(20, { type: "theft", x: L.x, z: L.z });
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
@@ -1125,7 +1125,18 @@
     if (!chip) return;
     _chipLast = t;
     if (!t) { chip.style.display = "none"; return; }
-    chip.style.display = "block"; chip.textContent = t;
+    if (CBZ.touchPromptChip) { CBZ.touchPromptChip(chip, t); return; }
+    chip.style.display = "block"; chip.innerHTML = t;
+  }
+
+  // Desktop keeps its exact string; touch gets the pill that fires this
+  // module's own [E] (city.css's declutter hides this chip during play, so on
+  // a tablet the cooler had no control at all until mobile.css restored it).
+  function riflePrompt(L) {
+    const desktop = L.bag ? "[E] Go through the beach bag" : "[E] Go through the cooler";
+    return CBZ.touchActionPrompt
+      ? CBZ.touchActionPrompt("e", L.bag ? "GO THROUGH THE BAG" : "GO THROUGH THE COOLER", desktop)
+      : desktop;
   }
 
   function lootNear() {
@@ -1202,7 +1213,7 @@
       if (_promptT >= 1 / 12) {
         _promptT = 0;
         const L = lootNear();
-        chipText(L ? (L.bag ? "[E] Go through the beach bag" : "[E] Go through the cooler") : null);
+        chipText(L ? riflePrompt(L) : null);
       }
     } else chipText(null);
   });
@@ -1220,6 +1231,27 @@
     rifling = { L, t: 0 };
   }
   if (typeof document !== "undefined" && document.addEventListener) document.addEventListener("keydown", onKey);
+
+  /* THE VERB EXISTED ONLY ON A KEYBOARD (2026-08-18). This file hung its [E]
+     on a raw document keydown, which means the verb has no card, no button and
+     no existence at all on the tablet this game is played on. The registry is
+     what turns a proximity verb into a thumb target, and it costs one record:
+     the SAME finder, the SAME body. The keydown stays for the desktop. */
+  let zoned = false;
+  CBZ.onUpdate(99.64, function () {
+    if (zoned || !CBZ.interactions || !CBZ.interactions.registerZone) return;
+    zoned = true;
+    CBZ.interactions.describe("beachbag", function () { return { label: "Somebody's things", note: "" }; });
+    CBZ.interactions.registerZone({
+      id: "zone-beachbag", kind: "beachbag", prio: 11,
+      find: function () { return (built && !rifling && g.mode === "city") ? lootNear() : null; },
+      options: [{
+        id: "beachbag-rifle", slot: "e", bad: true,
+        label: function () { return "Go through the bag"; },
+        onSelect: function (L) { if (L) rifling = { L: L, t: 0 }; },
+      }],
+    });
+  });
 
   // =====================================================================
   //  THE DOCK TICK — priority 9.4.

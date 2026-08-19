@@ -774,7 +774,7 @@
       // plausible length) but fails the tight fingerprint — flag it loudly so
       // drift in a caller we don't own doesn't silently drop the bridge visual.
       console.warn("[highways] suspension-bridge fingerprint near-miss (width=" + width +
-        ", len=" + totLen.toFixed(1) + ") — no dressing built. Pass opts.suspensionBridge " +
+        ", len=" + totLen.toFixed(1) + "), no dressing built. Pass opts.suspensionBridge " +
         "or tune CBZ.CONFIG.BRIDGE_FINGERPRINT if this span should get it.");
     }
 
