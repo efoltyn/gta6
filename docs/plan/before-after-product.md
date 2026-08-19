@@ -1,0 +1,229 @@
+# The before/after tool IS the product — extraction, the agent contract, the fleet harness
+
+> Written 2026-08-19 on `claude/before-after-tool-arch-i72lov`, in answer to:
+> games go private, the before/after tool stays public, a harness manages many
+> terminal windows of Claude Code / Codex / other CLIs, and one before/after
+> tool gets dogfooded by all of them. Verdict up front: **the instinct is
+> right, the extraction is small, and the order of operations matters more
+> than the code.** Two traps found while measuring (§5): flipping this repo
+> private kills the deployed site the tool uses as its default baseline, and
+> `custom.env` changes how the public tool repo must be born.
+
+## 1. What the tool actually is — measured, not remembered
+
+Three layers, and only one of them is game code:
+
+**The engine — `tools/visual-compare.mjs`, 1,074 lines, zero npm
+dependencies.** Node builtins plus the global `WebSocket` (Node ≥22) speaking
+raw CDP. It owns everything a comparison needs to be *trustworthy*: browser
+lifecycle, device frames with real identity (DPR, touch, UA — applied before
+navigation because pages decide their shape at boot), matched per-side
+viewports, baseline→after stage handoff (`referenceStage`, plus
+`transformReferenceStage` for deliberate reframes), compositor barriers so a
+screenshot cannot carry a stale WebGL camera, film strips over identical
+simulated seconds, declared-metrics collection, HTML contact sheet, PDF via a
+clean standalone Chrome (the capture browser's WebGL heap poisons CDP
+printing — learned, not guessed), and `metadata.json` as the machine-readable
+record of the run.
+
+**The wrapper — `tools/before-after.mjs`.** One argument, three decisions made
+for you (`--before` from the preset else deployed, `--keep-going`,
+`--no-open`), and the measurements table printed to stdout. Its own header
+names the two callers it exists for: *"a CI job and an agent, neither of which
+can open a PDF."* The tool already knows who its user is.
+
+**The presets — `tools/visual-presets/*.mjs`, 57 today.** 100% game-specific
+*by design*. A preset is the adapter: `readyExpression` (when is the page
+ready), `stage()` (serialize into either page, render one subject
+deterministically), `urlParams` (pin the world), `metrics` with a declared
+`better:` direction, `defaultBefore: "local"` + `beforeParams` for flag A/B.
+The engine never learned a single CBZ concept — the preset carries all of
+them across the wire as a function.
+
+And the fourth layer, which is not code and is the part worth the most: **the
+method**. Every change behind a `cfg_*` flag → flag A/B against this same
+checkout is the honest before → two-sided proof (the revert must bring the
+fault back) → metrics declared with a direction → the agent reads the table
+and decides whether to stop or go again. The emergent iterate loop the owner
+never instructed exists *because the tool closed the loop*: an agent that can
+see its own delta doesn't need to be told to iterate. That loop is the
+product. The screenshots are just its receipt.
+
+**The name for what this produces: a receipt.** Every agent task ends in a
+uniform artifact — here is what changed, photographed and measured, and here
+is the one switch that reverts it. No CLI agent vendor ships that contract.
+That is the moat; everything else in this plan is delivery mechanism.
+
+## 2. The extraction seam — the whole list
+
+Grepped, not estimated. Game-specific residue in the engine + wrapper:
+
+1. `DEPLOYED = "https://efoltyn.github.io/gta6/"` — the default `--before`
+   (`tools/before-after.mjs:46`; also comment examples in both files).
+2. The local "after" side spawns `python3 tools/devserver.py` serving the
+   repo root (`tools/visual-compare.mjs:282`). The one structural assumption:
+   *"this project is served by starting X and hitting Y."*
+3. Preset resolution pinned to `tools/visual-presets/`.
+4. Default preset name `wildlife-attachments`.
+5. Cosmetics: `CBZ_*` env var names (`CBZ_CHROME`, `CBZ_VISUAL_BEFORE`,
+   `CBZ_CHROME_ARGS`…), the `__cbzVisualCompare` in-page hook namespace, the
+   owner's-Mac Chrome fallback path.
+
+That is the entire seam. Five items, four of them defaults. Everything else
+already flows through the preset contract.
+
+## 3. The standalone tool
+
+**Repo `before-after`, public, MIT, fresh history (§5 says why fresh).**
+Binary `ba` — the muscle memory already exists (`npm run ba`). If the bare
+npm name is taken, scope it (`@efoltyn/before-after`); the binary stays `ba`.
+
+Ships four things:
+
+1. **The engine + wrapper as one CLI.** `ba` (list presets), `ba <preset>`,
+   `ba <preset> --json` for harnesses: the report path + the measurements as
+   JSON on stdout. Exit code 0 = ran and captured; nonzero = the run itself
+   failed. Deliberately *not* "regression ⇒ nonzero" in v1 — `better:` is a
+   direction, not a threshold. A ratchet field (`expect:`) can come later
+   when a real consumer wants CI gating; don't invent the contract before
+   the customer.
+
+2. **A per-project config** — the five seam items, nothing more:
+
+   ```js
+   // ba.config.mjs at the project root
+   export default {
+     presets: "./ba-presets",              // this project's adapter dir
+     baseline: "https://the-deployed.app/", // default --before
+     serve: "builtin",                      // static-serve the project root…
+     // serve: { command: "npm run preview -- --port {port}",
+     //          url: "http://127.0.0.1:{port}/" },  // …or any dev server
+     out: "artifacts/visual-comparisons",
+     browser: null,                         // BA_CHROME / autodetect
+   };
+   ```
+
+   `builtin` replaces `devserver.py` with a node static server (drops the
+   python dependency; keep the no-cache headers and the `.wasm` MIME pin —
+   both were paid for). Env vars rename `CBZ_*` → `BA_*`; the page hook
+   renames `__cbzVisualCompare` → `__ba` **and the engine reads both names
+   forever** — 57 working presets outrank a clean namespace.
+
+3. **The preset contract, v1 = today's contract, unchanged.** The current
+   `tools/visual-presets/README.md` becomes the tool repo's `PRESETS.md`
+   nearly verbatim — it is already written as a contract, with the worked
+   examples (pacing-as-condition-not-seconds, film strips, flag A/B,
+   `transformReferenceStage`). **Acceptance test for the extraction: all 57
+   gta6 presets green under the standalone with zero preset edits.** If one
+   needs an edit, the seam was drawn wrong — move the line, not the preset.
+
+4. **The method as docs — this is the multi-CLI strategy.** A CLI with a
+   stable stdout contract is the one interface every terminal agent already
+   shares; Claude Code, Codex, and whatever ships next all run shell
+   commands and read stdout. So "support many CLIs" is not N integrations —
+   it is one good CLI plus **a paste-in `AGENTS.md` / `CLAUDE.md` snippet**
+   the repo ships, teaching any agent the loop: *name the problem → build it
+   behind a flag → `ba <preset>` → read the table → iterate or stop → prove
+   the revert.* No MCP server in v1; that's a veneer to add the day a
+   non-terminal surface actually asks for it.
+
+**gta6 becomes consumer #1**: `visual-compare.mjs` + `before-after.mjs`
+deleted here, devDependency added, `ba.config.mjs` written, presets stay.
+(A public npm dep in a private repo is fine — that direction has no leak.)
+**The Bernard Financial web app becomes consumer #2, and is the real test of
+generality**: a preset there is "navigate to the route, stage the state,
+screenshot + DOM/perf metrics" — no WebGL, no sim. Where the tool fights
+that, the tool is wrong; that friction is exactly what the dogfooding is for.
+
+## 4. The fleet harness
+
+**What it is not: a terminal emulator.** tmux already multiplexes terminals
+perfectly and every CLI agent runs happily in a pane; rebuilding that is
+months of work to reach parity with a solved problem. What does not exist —
+and what before/after makes possible — is the **receipt loop across N
+agents**. The harness is thin glue over tmux + git worktrees + the `ba`
+metadata contract:
+
+- `<harness> new "<problem statement>"` — worktree + branch (this repo
+  already lives this pattern: `.claude/worktrees/` is in `.gitignore`), a
+  tmux window named by the problem, the chosen CLI (`claude`, `codex`, …)
+  launched with a templated prompt: the problem + the AGENTS.md loop from §3.
+  The problem statement is the unit of work — "I name a problem" is the API.
+- `<harness> ls` — the board: per task, branch / agent alive / last receipt,
+  parsed from `metadata.json` (preset, when, each metric with its ✓/✗).
+- `<harness> receipt <task>` — open the report.
+- `<harness> land <task>` — gate, merge, remove worktree.
+- `<harness> drop <task>` — kill the pane, delete the worktree. The "fully
+  safe to revert" promise made structural: a task *is* a worktree, so
+  dropping one is total and touches nothing else.
+
+Five commands, no daemon, no UI. v2 is one generated HTML index over the
+receipt directories — the engine already writes the hard part of that page.
+
+Honesty about the field: tmux session managers for coding agents exist
+(claude-squad et al.), and Anthropic's own cloud fleet is adjacent and will
+grow. Competing on window management is a losing race with commodity. The
+harness stays deliberately thin; the effort goes into the receipt, because a
+uniform, agent-agnostic, measured, one-switch-revertible proof of work is the
+thing none of them have and the thing every one of them makes more valuable.
+
+Naming is the owner's call; `warden` is suggested — it watches many cells,
+and this codebase earned the joke. (Avoid `fleet`: collides with JetBrains
+Fleet and Claude Code's own fleet features.)
+
+## 5. Order of operations — the two traps
+
+**Trap 1: flipping this repo private takes the game offline and breaks the
+tool's default baseline in the same motion.** GitHub Pages on a Free personal
+plan publishes from public repos only; make gta6 private and
+`efoltyn.github.io/gta6` goes down — which is the deploy ("pushing to main IS
+the deploy") *and* the tool's default `--before`. Three exits, pick one
+before touching visibility:
+  a. **GitHub Pro** (~$4/mo): Pages keeps publishing from the private repo;
+     the site itself stays public.
+  b. **Cloudflare Pages / Netlify** free tier: builds from a private GitHub
+     repo; `baseline` in `ba.config.mjs` points at the new URL. Most durable.
+  c. A public deploy-only repo that receives pushed builds; source goes dark.
+Note the tool itself doesn't care — `baseline` just needs to be *some* URL of
+the last-known-good build. Flag A/B presets (`defaultBefore: "local"`) never
+touch it at all.
+
+**Trap 2: `custom.env`.** The repo-root vocabulary file spells out every slur
+in plain text and is public today, under the owner's name, in history
+permanently (clones, forks, caches survive a later privacy flip). Two
+consequences, stated without drama: going private is *more* justified than
+the question assumed, and **the public tool repo must be born with fresh
+history — never a fork or filter of gta6.** Copy the three files, write the
+README, first commit is day one. (If gta6 is ever re-publicized, that needs
+history surgery — `git filter-repo` — noted here as a named debt, not done.)
+
+**The order:**
+1. Extract and publish `before-after` (fresh repo, MIT, the §3 acceptance
+   test green). gta6 consumes it. Nothing about visibility has changed yet;
+   nothing can break.
+2. Move the deploy (option b recommended) and repoint `baseline`. Verify one
+   `ba` run against the new URL.
+3. Flip the game repos private: `gta6`, `flatline-rider`
+   (`simpleswiftgames` already is). The game keeps deploying, the tool keeps
+   comparing, the public footprint is one repo that is *meant* to be read.
+4. Build the harness MVP (§4) against the published tool, with this game and
+   the Bernard app as the two dogfooding grounds.
+5. Later, when a second outside consumer exists: `expect:` ratchets in
+   presets, the receipt index page, MCP veneer if a surface demands it.
+
+## 6. What moves, exactly
+
+To the tool repo: `tools/visual-compare.mjs` (engine),
+`tools/before-after.mjs` (CLI), `tools/visual-presets/README.md` (as
+`PRESETS.md`), plus new: `ba.config.mjs` loader, builtin static server
+(ports `devserver.py`'s no-cache + wasm-MIME behavior to node), `--json`,
+the AGENTS.md snippet, README that teaches the loop.
+
+Stays in gta6: all 57 presets, `devserver.py` (other tools use it),
+everything else in `tools/` — the math gate, the probes, the checks are the
+*game's* instruments, not the product. The product is the engine, the
+contract, and the way of working.
+
+This session changed no code deliberately: the extraction is mechanical but
+it rewires the daily driver, and it belongs in a session that can create the
+new repo and run the 57-preset acceptance test in one sitting.
