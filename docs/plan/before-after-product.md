@@ -90,6 +90,45 @@ altitude for a machine that can address the app's own state directly. A
 preset is an artifact you keep; a session replay is an execution you hope
 went the same way twice.)
 
+**The empty loop — what agents hand back today is testimony, not evidence**
+(owner, 2026-08-19): *"the agents are telling you what they are doing in
+terminal crudely by reading their own work and saying what it tried to do —
+which is an empty loop."* Precisely: today's terminal agent ends its turn by
+narrating its own diff — the narrator and the worker are the same model with
+the same blind spots, so whatever misconception produced the bug produces
+the report, and **no new information enters the loop.** That is the formal
+difference between an empty loop and a closed one: a closed loop feeds back
+a measurement from *outside* the system; an empty loop feeds back the
+system's opinion of itself. The receipt closes the loop by routing the claim
+through the world — the browser renders what the code actually *does*, not
+what the model believes it does. The camera is the independent witness.
+
+The larger pattern this sits in: every technology's first phase imitates its
+predecessor (the horseless carriage, filmed stage plays). *"We are using
+agents to do what we used to do with the IDE — replacing work, not
+improving the process."* The work moved to agents; the acceptance artifacts
+are still IDE-era — diffs, PRs, self-narration. Before/after is
+**agent-native process**: an artifact that only makes sense because an agent
+did the work and a human must accept it without reading it.
+
+**And the field's money is aimed at the wrong layer.** The billions raised
+around agent harnesses (Lovable, Replit, Devin, et al.) sit on rented
+models, copyable orchestration, and *"very fragile system prompts really"*
+— the durable technical differentiator in that stack is the tools the agent
+runs, because tools accumulate scar tissue and everything else leaks. Be
+precise about what those products did and didn't solve: the preview-centric
+ones made the **output visible** (you watch the app run); none of them made
+the **delta legible** — no matched staging, no baseline handoff, no
+measurements, no artifact. Seeing the current state is not seeing the
+change. Nobody ships the diff of outputs; that is the exact empty space.
+And the build order here is the credibility: *"this tool was made before
+the product — the product is just a conveyor for the tool."* Everyone else
+built conveyors first and is now hunting for durable content to convey; a
+harness built first is a guess about a process, while a tool extracted from
+a year of daily use is a record of one. The annoyance it fixes is tiny —
+and it recurs at every iteration of every loop of every agent, which is
+what makes a tiny annoyance a large market: frequency is the multiplier.
+
 **The economics — the loop substitutes for capability** (owner, 2026-08-19):
 *"it took an amazing agent to make the before after tool. But now that the
 tool is made, I don't need the genius model every time running this loop.
