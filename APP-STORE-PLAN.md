@@ -2,17 +2,19 @@
 
 Owner's call (2026-08-19): **four games ship — NPC War, Prison Escape, Natural
 Disaster now, and Gang City (full open world) as the eventual flagship.** Gun
-Game does NOT ship as its own app; it stays a mode inside Gang City. Researched
-August 2026 against Apple's current rules (sources at the bottom).
+Game does NOT ship as its own app: its main map IS the jail (`src/modes/gungame.js`
+borrows `CBZ.prisonRoot` whole), so it ships INSIDE the Prison app — that app is
+**Escape Jail + Gun Game**, a two-mode game. Researched August 2026 against
+Apple's current rules (sources at the bottom).
 
 ## The waves
 
 | Wave | App | What it is in this repo | Why this order |
 |---|---|---|---|
 | 0 (first) | **NPC War** | `games/battle.html`, standalone | Real release AND the lowest-stakes pipeline guinea pig |
-| 1 | **Prison Escape** | `index.html` forced into `escape` mode | Complete game with an arc; the original |
+| 1 | **Prison Escape** (Escape Jail + Gun Game) | `index.html` limited to the `escape` + `gungame` cards | Complete game with an arc; gun game rides free on the jail map it already borrows |
 | 1 | **Natural Disaster** | `index.html` forced into `survival` mode | Distinct genre (BR survival), tamest rating |
-| 2 (later) | **Gang City** | `index.html` city mode — the whole world, gun game + co-op inside | Ships when the open world is ready; biggest app, worst perf case, needs the most polish |
+| 2 (later) | **Gang City** | `index.html` city mode — the whole world + co-op | Ships when the open world is ready; biggest app, worst perf case, needs the most polish |
 
 ### Why NPC War goes first
 It's a full release in its own right, and putting it first derisks everything
@@ -71,11 +73,12 @@ suspicious thing on the account.
 1. **Bundle the Fredoka font.** `index.html:8-10` pulls it from Google Fonts —
    the tree's only network dependency. Download woff2 → `assets/fonts/`, local
    `@font-face`. (Fallback stacks exist, but the UI font silently changes offline.)
-2. **Boot-mode flag** for the index.html-based apps: a `BOOT_MODE` config — the
-   `?cfg_*` URL-override plumbing already exists (`src/config.js:564`) and
-   `src/systems/state.js:19` owns the mode buttons. Auto-select the one mode,
-   hide the other cards and the city-only JOIN card (`src/net/netui.js`). Test in
-   a desktop browser as `?cfg_BOOT_MODE=escape` / `=survival` before any wrapping.
+2. **Boot-modes flag** for the index.html-based apps: a `BOOT_MODES` config (list
+   of allowed modes) — the `?cfg_*` URL-override plumbing already exists
+   (`src/config.js:564`) and `src/systems/state.js:19` owns the mode buttons.
+   Show ONLY the listed mode cards (auto-start when the list has one entry) and
+   hide the city-only JOIN card (`src/net/netui.js`). Test in a desktop browser
+   as `?cfg_BOOT_MODES=escape,gungame` / `=survival` before any wrapping.
 3. **Verify persistence under the Capacitor scheme** (`capacitor://localhost`):
    localStorage is fine; the sqlite-wasm worker uses fragile relative string paths
    (`src/net/sqlitedb.js` → `importScripts`) that Vite was specifically configured
@@ -90,12 +93,15 @@ suspicious thing on the account.
 ### Per app
 - **NPC War** (wave 0): touch buttons for pause / speed 1–5 / front cam
   (`games/battle.html:3818`); start page = `battle.html`; done.
-- **Prison Escape** (wave 1): `BOOT_MODE=escape`. Keep city casino/gambling
-  unreachable — it's not part of escape mode, verify nothing routes there
-  (matters for the age questionnaire).
-- **Natural Disaster** (wave 1): `BOOT_MODE=survival`. The disaster island builds
+- **Prison Escape** (wave 1): `BOOT_MODES=escape,gungame` — a two-mode app.
+  Gun Game's JAIL map borrows the prison world that already boots, so it's free;
+  its ISLAND map builds the disaster island through survival's own build — that
+  works standalone, keep it (more content, no extra code). Keep city
+  casino/gambling unreachable — not part of either mode, verify nothing routes
+  there (matters for the age questionnaire).
+- **Natural Disaster** (wave 1): `BOOT_MODES=survival`. The disaster island builds
   through survival's own build — already self-contained.
-- **Gang City** (wave 2): city mode as-is; gun game and every venue stay as modes
+- **Gang City** (wave 2): city mode as-is; every venue stays a mode/package
   inside it. Separate planning pass when the open world is ready.
 
 ## Phase 2 — Wrap: one Capacitor project per app
@@ -136,7 +142,7 @@ Create the app record (name, bundle ID, SKU), then:
   |---|---|---|
   | NPC War | stylized army-men battle deaths | **13+** |
   | Natural Disaster | disaster deaths, some combat | **13+** |
-  | Prison Escape | shanks, guns, blood/gore | **16+–18+** |
+  | Prison Escape (incl. Gun Game mode) | shanks, frequent gun combat, blood/gore | **16+–18+** |
   | Gang City (later) | all of it + casino | **16+–18+** |
 
   Hard rule: "prolonged graphic or sadistic realistic violence" is **unrateable**
