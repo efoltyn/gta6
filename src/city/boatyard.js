@@ -816,7 +816,7 @@
         actions.push({ label: (live ? "Locate " : "Bring out ") + (r.label || r.name), fn: function () { locate(r); } });
         actions.push({ label: "Sell " + (r.label || r.name) + " — " + money(Math.round(r.price * SELL_FRAC)), fn: function () { sell(r.key); } });
       }
-      if (totalArrears() > 0) actions.push({ label: "Pay back dues · " + money(totalArrears()), fn: payArrears });
+      if (totalArrears() > 0) actions.push({ label: "Pay dues " + money(totalArrears()), fn: payArrears });
     }
 
     if (CBZ.touchMode) {

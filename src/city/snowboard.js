@@ -86,7 +86,12 @@
     if (!state.mounted) return;
     const kph = Math.round(speed() * 3.6);
     const mode = state.grounded ? (Math.abs(state.steer) > 0.15 ? "CARVING" : "RIDING") : ("AIR " + state.airT.toFixed(1) + "s");
-    hudText.innerHTML = "" + mode + " &nbsp;·&nbsp; " + kph + " km/h &nbsp;·&nbsp; " + state.points + " pts<br><span style=\"font-weight:600;color:#bfe8ff\">A/D carve · W tuck · S brake · Space ollie · X dismount</span>";
+    // THE KEY LEGEND IS FOR A KEYBOARD. Printing "A/D carve · W tuck · Space
+    // ollie" to a tablet is teaching controls that are not on the device
+    // (owner, 2026-08-18). Touch gets the numbers and nothing else.
+    const legend = CBZ.touchMode ? "" :
+      "<br><span style=\"font-weight:600;color:#bfe8ff\">A/D carve · W tuck · S brake · Space ollie · X dismount</span>";
+    hudText.innerHTML = "" + mode + " &nbsp;·&nbsp; " + kph + " km/h &nbsp;·&nbsp; " + state.points + " pts" + legend;
   }
 
   function setFacing(dx, dz) {
@@ -298,7 +303,7 @@
         find: function (x, z) { return Math.hypot(x - target.x, z - target.z) <= 4.2 ? target : null; },
         options: [{
           id: "snowboard-lift-run", slot: "e",
-          label: function () { return state.mounted ? "Return snowboard" : "Take lift + snowboard from summit"; },
+          label: function () { return state.mounted ? "Return snowboard" : "Ride the lift up"; },
           onSelect: function () { if (state.mounted) dismount(false); else CBZ.startSnowboardRun(); },
         }],
       });

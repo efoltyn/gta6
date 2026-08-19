@@ -655,7 +655,7 @@
       });
     }
     // ---- BOOKMAKER zone (ctx service): the stand's [E] opens the book.
-    ctx.zone({ id: "book", label: "APEX bookmaker, side bets", pos: [bmAt.x, bmAt.z + 1.0], r: 2.6, onUse: function () { openBetPanel(true); } });
+    ctx.zone({ id: "book", label: "APEX bookmaker", pos: [bmAt.x, bmAt.z + 1.0], r: 2.6, onUse: function () { openBetPanel(true); } });
   }
   function paddockLabel() { return NIGHT.active ? "APEX NIGHT, continue" : "APEX NIGHT, enter the paddock"; }
 

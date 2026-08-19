@@ -108,6 +108,43 @@
     return shaft;
   };
 
+  /* THE PENETRATOR. Ordnance over the bunker threshold that lands on a lid does
+     not just dig the surface — it goes THROUGH. The room below and the crater
+     above become one column, because a breach is a second carving and spans
+     merge. Anything weaker cracks the street and stops, which is the whole point
+     of a hardened roof: the bunker buster is the only counter, and it has to
+     actually be one. */
+  CBZ.craterPenetrate = function (x, z, power, r) {
+    if (!CBZ.bunkerUnder || !CBZ.breachBunker) return null;
+    const b = CBZ.bunkerUnder(x, z);
+    if (!b || b.breached) return null;
+    // concrete-equivalent metres the round can defeat, against the lid it meets
+    const penCE = power * 2.4;
+    if (!(penCE >= (b.lidCE != null ? b.lidCE : 4))) { stats.byWhy.heldByLid = (stats.byWhy.heldByLid || 0) + 1; return null; }
+    const R = Math.max(3, r || 5);
+
+    /* THE CRATER MUST STOP HAVING A FLOOR. It was dug as a bowl, and a bowl's
+       dish is a solid earth surface — which, over a room, hangs INSIDE the room
+       it has just been punched into. So on a successful penetration the crater
+       is re-cut as a `through` hole of the same radius: same rim, same torn
+       lip, no floor, wall stopping at the roof line. One hole, one radius, and
+       the room below is what you see at the bottom of it. */
+    for (let i = 0; i < craters.length; i++) {
+      const c = craters[i];
+      if (!c.shaft || c.shaft._closed) continue;
+      if (Math.hypot(x - c.shaft.x, z - c.shaft.z) > c.shaft.r) continue;
+      const keep = { x: c.shaft.x, z: c.shaft.z, r: c.shaft.r, gy: c.shaft.gy, seed: c.shaft.seed };
+      c.shaft.dispose();
+      c.shaft = CBZ.groundShaft(keep.x, keep.z, {
+        r: keep.r, depth: Math.max(1.0, keep.gy - b.y1), gy: keep.gy,
+        seed: keep.seed, surface: c.surface, through: true,
+      });
+      if (c.shaft) { c.shaft.crater = true; c.shaft.penetrated = true; }
+      break;
+    }
+    return CBZ.breachBunker(b, x, z, R);
+  };
+
   CBZ.craterAudit = function () {
     let live = 0, widest = 0;
     for (let i = 0; i < craters.length; i++) {
@@ -141,7 +178,8 @@
           // an air burst 30 m up does not dig — the ground has to be what was hit
           const gy = CBZ.groundBaseAt ? CBZ.groundBaseAt(x, z) : 0;
           if (o.y == null || o.y <= gy + 6) {
-            CBZ.groundCrater(x, z, { power: o.power, radius: o.radius });
+            const dug = CBZ.groundCrater(x, z, { power: o.power, radius: o.radius });
+            CBZ.craterPenetrate(x, z, +o.power || 0, dug ? dug.r : null);
           }
         }
       } catch (e) {}

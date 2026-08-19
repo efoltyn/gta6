@@ -235,16 +235,23 @@
      outer edge (r * 1.06), not the removed floor: between the two lies the
      sliver of ground the wall stands behind, and on the island that sliver is
      where the sea was showing through as a blue crescent at the rim. */
+  // core/groundmask.js deals the slots for EVERY owner of holes now, so this
+  // file publishes its shafts and reads back which of them won one.
+  if (CBZ.groundMaskProvide) {
+    CBZ.groundMaskProvide(function () {
+      maskReq.length = 0;
+      for (let i = 0; i < live.length; i++) {
+        const h = live[i];
+        maskReq.push({ x: h.x, z: h.z, r: h.r * 1.06, y: h.gy, src: h });
+      }
+      return maskReq;
+    });
+  }
   function syncMask() {
     slotted.length = 0;
-    if (!CBZ.groundMaskApply) { for (let i = 0; i < live.length; i++) setDrawn(live[i], true); return; }
-    maskReq.length = 0;
-    for (let i = 0; i < live.length; i++) {
-      const h = live[i];
-      maskReq.push({ x: h.x, z: h.z, r: h.r * 1.06, y: h.gy, src: h });
-    }
-    const won = CBZ.groundMaskApply(maskReq);
-    for (let i = 0; i < won.length; i++) slotted.push(won[i]);
+    if (!CBZ.groundMaskSync) { for (let i = 0; i < live.length; i++) setDrawn(live[i], true); return; }
+    const w = CBZ.groundMaskSync();
+    for (let i = 0; i < w.length; i++) slotted.push(w[i]);
     for (let i = 0; i < live.length; i++) setDrawn(live[i], slotted.indexOf(live[i]) >= 0);
   }
 
@@ -278,6 +285,28 @@
     // undefined) answers TRUE, which is how the building rule above hid for so long
     if (!Number.isFinite(x) || !Number.isFinite(z)) return { ok: false, why: "badPoint", slope: slope };
     if (CBZ.cityWaterAt && !survMode() && CBZ.cityWaterAt(x, z)) return { ok: false, why: "water", slope: slope };
+    /* THE SURVIVAL ISLAND HAS BUILDINGS TOO, and this law never looked at them.
+       Everything below was gated to the city, so on the island only the SLOPE
+       rule applied and a hole could open straight through a house. It was
+       invisible for the sinkhole because systems/disasters.js does its own
+       avoid() pass over arena.fragile before calling here — a private second
+       copy of a rule that belongs in one place — and it surfaced the moment
+       something ELSE asked for ground: a dig site photographed sitting across a
+       row of houses. Same rule, same reason, now in the law itself so every
+       caller gets it. */
+    if (survMode() && CBZ.surv && CBZ.surv.arena) {
+      const B = CBZ.surv.arena.fragile || [];
+      for (let i = 0; i < B.length; i++) {
+        const b = B[i];
+        if (!b || b.fallen) continue;                  // rubble is ground, not a building
+        const bx = b.ox != null ? b.ox : b.x, bz = b.oz != null ? b.oz : b.z;
+        if (bx == null || bz == null) continue;
+        // the record carries w AND d; a circle on the larger one is the
+        // conservative read, and conservative is the right side to be wrong on
+        const half = Math.max(b.w || 8, b.d || b.w || 8) * 0.5;
+        if (Math.hypot(x - bx, z - bz) < r * 0.85 + half) return { ok: false, why: "building", slope: slope };
+      }
+    }
     if (!survMode() && CBZ.city && CBZ.city.arena) {
       const A = CBZ.city.arena;
       // never under a government complex: those regions are authored places
@@ -468,7 +497,13 @@
         const o = hits[i].object;
         if (!o || !o.isMesh || !o.visible || !o.material) continue;
         let p = o, mine = false;
-        while (p) { if (p.userData && p.userData.groundShaft) { mine = true; break; } p = p.parent; }
+        // anything this project DREW to replace ground is not the ground it
+        // replaced — a shaft's liner, and a dig site's soil, which is the one
+        // that made this worth publishing
+        while (p) {
+          if (p.userData && (p.userData.groundShaft || p.userData.digSite)) { mine = true; break; }
+          p = p.parent;
+        }
         if (mine) continue;
         // a canopy, a roof or a sign is not the ground; the ground is the
         // surface at the height the shaft's own rim was solved from
@@ -496,6 +531,14 @@
     } catch (e) { /* no answer is not a crash: the caller falls back to soil */ }
     return null;
   }
+  /* PUBLISHED, because a second thing needed it. systems/digsite.js was
+     painting its undisturbed surface a hardcoded olive, which is a fine guess
+     for grass and wrong everywhere else — photographed on the island it was a
+     34 m cream disc lying in green grass. It needs the answer this function
+     already works out (including the two things it learned the hard way: a
+     textured plate's material.color is a white TINT, not a colour, and a
+     vertexColors ground needs its face tint applied). One implementation. */
+  CBZ.groundColorAt = groundColorAt;
 
   // The strata ladder: topsoil → clay → silt → weathered rock → bedrock, with
   // the band edges jittered per shaft so no two read as the same wallpaper.
@@ -814,8 +857,12 @@
        diameter. A CRATER is the opposite shape and the same primitive: ordnance
        digs a wide shallow bowl, so `bowl` lifts the clamp rather than adding a
        second hole system to sit beside this one. */
-    const depth = opts.bowl ? Math.max(1.2, opts.depth || r * 0.55)
-                            : Math.max(r * 2.4, opts.depth || r * 4.2);
+    /* The deeper-than-wide clamp is the SINKHOLE's law. A crater is a wide
+       shallow bowl and a BREACH is a hole of exactly the thickness it has to get
+       through — forcing either to 2.4x its radius made a 3 m roof punch reach
+       16 m and drop the room's floor out from under itself. Both say so. */
+    const depth = (opts.bowl || opts.through) ? Math.max(1.2, opts.depth || r * 0.55)
+                                              : Math.max(r * 2.4, opts.depth || r * 4.2);
     const h = {
       x: x, z: z, r: r,
       mouth: r * 0.93,          // the floor is gone a hair inside the visible rim
@@ -826,13 +873,18 @@
       grp: new THREE.Group(),
       voids: [],
       bowl: !!opts.bowl,
+      /* A HOLE THROUGH. A shaft and a crater both END in a floor; a BREACH does
+         not — it opens into a room, and the room's floor is the floor. Building
+         one anyway put a dome of earth in the ceiling of the bunker it had just
+         opened, which is a plug, not a hole. */
+      through: !!opts.through,
       /* A CRATER IS A DISH AND A SHAFT IS A PIT, and they are opposite shapes.
          The talus cone is a rubble MOUND — highest in the middle, sloping down
          to the wall — which is right for a collapse and exactly backwards for
          ordnance: it put the deepest point of a bomb hole at its rim. So a bowl
          gets its own floor curve (`dish`, deepest at the centre, rising to meet
          the lip) and keeps only a small cone of loose spoil at the bottom. */
-      dish: opts.bowl ? { r: Math.max(0.5, r * 0.98), h: depth * 0.95 } : null,
+      dish: (opts.bowl && !opts.through) ? { r: Math.max(0.5, r * 0.98), h: depth * 0.95 } : null,
       coneR: opts.bowl ? r * 0.3 : r * 0.66,
       coneH: opts.bowl ? Math.min(0.5, depth * 0.12) : Math.min(4.2, depth * 0.11),
       stepN: 0, stepA0: 0, stepIn: r * 0.78,
@@ -857,14 +909,14 @@
     }
     const wall = buildWall(h);
     const lip = buildLip(h);
-    const rubble = buildFloorFurniture(h);
+    const rubble = h.through ? null : buildFloorFurniture(h);
     const dish = buildDish(h);
     const stair = buildStair(h);
     /* THE BLACK — a disc at the very bottom under the rubble, so a shaft you
        cannot see the bottom of reads as bottomless rather than as a gap. A
        CRATER is the opposite: you can see its floor, and painting a void under
        it made a 5 m dish read as a hole to nowhere. Bowls get earth instead. */
-    const dark = h.bowl ? null : new THREE.Mesh(new THREE.CircleGeometry(r * 0.95, 24),
+    const dark = (h.bowl || h.through) ? null : new THREE.Mesh(new THREE.CircleGeometry(r * 0.95, 24),
       new THREE.MeshBasicMaterial({ color: 0x05040a }));
     if (dark) { dark.rotation.x = -Math.PI / 2; dark.position.set(x, h.bottom - 0.2, z); }
     wall.position.set(x, 0, z);
@@ -1025,9 +1077,10 @@
     if (!CBZ.addCarving) return;
     h.carve = CBZ.addCarving({
       kind: "cyl", x: h.x, z: h.z, r: h.mouth,
-      y0: h.bottom, y1: h.gy + 60,        // open to the sky: no lid over a sinkhole
+      y0: h.through ? h.bottom - 0.05 : h.bottom, y1: h.gy + 60,   // open to the sky
+      floorFnSkip: !!h.through,
       open: true, dry: true, mode: h.mode, owner: "groundshaft",
-      floorFn: function (x, z) { const y = shaftFloor(h, x, z); return y == null ? h.bottom : y; },
+      floorFn: h.through ? null : function (x, z) { const y = shaftFloor(h, x, z); return y == null ? h.bottom : y; },
     });
   }
   function detachCarving(h) {

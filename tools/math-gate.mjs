@@ -517,8 +517,15 @@ const PASS = `(() => {
     // stops declaring things cannot pass. (No backticks in this block.)
     if (CBZ.hitmanAudit) {
       const ha = CBZ.hitmanAudit();
-      out.hitman = ha.cards + "card " + ha.pipes + "pipe tiers=" + ha.marksLadderTiers + " legacy=" + ha.legacyStreetHitmanSites + " room=" + (ha.room ? 1 : 0);
+      out.hitman = ha.cards + "card " + ha.pipes + "pipe tiers=" + ha.marksLadderTiers + " legacy=" + ha.legacyStreetHitmanSites + " room=" + (ha.room ? 1 : 0) +
+        " repGates=" + ha.repGates + " keyed=" + ha.keyedRungs;
       if (ha.legacyStreetHitmanSites !== 0) out.fails.push("LEGACY STREET-HITMAN SITES BACK: " + ha.legacyStreetHitmanSites);
+      // 2026-08-18 (owner): a hitman has ONE currency and it is money. Nothing
+      // in the hitman room may open for a reputation number again, and the
+      // rung that IS locked must be locked by a key you can carry.
+      if (ha.repGates !== 0) out.fails.push("HITMAN REPUTATION GATE IS BACK: " + ha.repGates);
+      if (ha.keyedRungs < 1) out.fails.push("hitman lost its keyed rung (the office job wants the city seal)");
+      if (ha.caseOpen === undefined) out.fails.push("hitman gear case audit field missing");
       if (ha.cards !== 1) out.fails.push("hitman title cards=" + ha.cards + " (the merge law: exactly one)");
       if (ha.marksLadderTiers < 3) out.fails.push("hitman mark ladder shrank to " + ha.marksLadderTiers);
     }

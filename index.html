@@ -17,7 +17,7 @@
 <link rel="stylesheet" href="css/dashboard.css?v=standing1">
 <link rel="stylesheet" href="css/inventory.css?v=bagless1">
 <link rel="stylesheet" href="css/city.css?v=contractcard1">
-<link rel="stylesheet" href="css/campaign.css?v=sasubtitle1">
+<link rel="stylesheet" href="css/campaign.css?v=markphoto1">
 <link rel="stylesheet" href="css/interact_touch.css?v=hudtidy1">
 </head>
 <body class="campaign-build">
@@ -481,6 +481,12 @@
 <script src="src/systems/solidground.js?v=solid1"></script>
 <!-- ORDNANCE LEAVES THE GROUND CHANGED: a bomb digs a carving. -->
 <script src="src/systems/craters.js?v=crater1"></script>
+<!-- A ROOM UNDER AN INTACT STREET: a hole with a lid on it. -->
+<script src="src/systems/bunkerspace.js?v=bunker1"></script>
+<!-- A TUNNEL IS A HOLE LYING DOWN: a swept carving with its lid intact. -->
+<script src="src/systems/tunnels.js?v=tunnel1"></script>
+<!-- GROUND YOU CAN TAKE AWAY A BUCKET AT A TIME (bare ground only). -->
+<script src="src/systems/digsite.js?v=dig1"></script>
 <script src="src/core/lights.js"></script>
 <script src="src/core/sky.js?v=neutralhaze2"></script>
 <script src="src/core/daynight.js?v=neutralhaze1"></script>
@@ -500,7 +506,7 @@
      completion detection + the g.cityJob HUD line + map waypoint + world beacon +
      phone card + payout. MUST precede every consumer: careers.js, activities.js,
      gigs.js, heists.js and core/packages.js (which reads CBZ.mission.NULL at parse). -->
-<script src="src/core/mission.js?v=nodash1"></script>
+<script src="src/core/mission.js?v=markphoto1"></script>
 <!-- Furniture kit: CBZ.furnish draws a piece AND registers its use-anchor in one
      call. After materials.js (resolves addBox at call time); before its consumers
      lounge.js / cafeteria.js / clutter.js. -->
@@ -1440,7 +1446,11 @@
 <!-- drinking/tipsy system (a sibling agent's file — provides CBZ.cityDrink;
      loads after shops.js/hud so it can hook the same HUD/economy surface) -->
 <script src="src/city/drinking.js?v=nodash1"></script>
-<script src="src/city/charpanel.js?v=nodash1"></script>
+<script src="src/city/charpanel.js?v=markphoto1"></script>
+<!-- THE PHOTO BOOTH: one offscreen rig that photographs any body in the
+     outfit it is ACTUALLY wearing (CBZ.cityMugshot). The hitman contract
+     card on the phone shows the mark instead of describing him. -->
+<script src="src/city/mugshot.js?v=markphoto1"></script>
 <!-- INVENTORY V2 (CBZ.CONFIG.INVENTORY_V2): the Minecraft-like city inventory —
      renders the interactive [I] slot grid into charpanel's overlay, owns world
      item-drop pickups + placeable storage chests, and wraps cityKillPlayer so
@@ -1468,10 +1478,10 @@
 <!-- The one hitman pipe + the motel room HQ (wall of marks, gear case, the
      tiered ladder of marks) — activities' Crime doors and the campaign's
      merged opening both route through it. -->
-<script src="src/city/hitman.js?v=nodash1"></script>
+<script src="src/city/hitman.js?v=markphoto1"></script>
 <!-- Canonical story layer: the diegetic phone mounts first, then the campaign
      director drives the rooftop arrest, prison choice and contract chain. -->
-<script src="src/city/campaign_ui.js?v=contractcard1"></script>
+<script src="src/city/campaign_ui.js?v=markphoto1"></script>
 <script src="src/city/campaign.js?v=nodash1"></script>
 <script src="src/city/cinematics.js?v=nodash1"></script>
 <script src="src/systems/humancontact.js?v=traversal1"></script>

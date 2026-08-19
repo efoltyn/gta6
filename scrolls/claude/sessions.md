@@ -4250,3 +4250,184 @@ live objects; the next real render-CPU win is object-count reduction
 count, not a leak). (d) 6.7M tris are mostly redhollow/backcountry/mercy
 nature megameshes — vertex-cost waste on paper, but NOT the bottleneck on
 Apple GPUs; don't chase it before draw/CPU.
+
+## 2026-08-18 — THE HITMAN HAD A BOX THAT OPENED FOR A NUMBER
+
+Owner, standing in the motel room with the card up on his screen: *"there's a
+box that opens because of rep. Don't do that. There's one currency for a
+hitman, that's money, and a box doesn't open up for money, it opens up with a
+key. Whole point of keys and rooms — we have vaults built, doors built, keys
+built, a prison game with multiple types of doors that open with keycards. Yet
+the Hitman game uses none of these great things. Hitman should use the keys,
+but this gearbox should just open."* And, on the card itself: *"remove the
+m-dash… it should just be read wall… I hate this over-verbosity, especially
+around buttons."*
+
+**REPUTATION IS GONE FROM `city/hitman.js`.** `w.reputation.hitman` had exactly
+one writer (this file) and zero readers anywhere in the repo — it was a number
+that existed only to lock two things in the one room that used it. Deleted:
+`rep()`, `TIERS[].need`, `tierUnlocked()`, the `hitman: repGain` field on the
+completion event, `REP n` on the board header, `LOCKED · REP 20` on the cards
+and `locked · REP 20` on the case line. `hitmanAudit().repGates` is pinned at 0
+in `tools/math-gate.mjs` so it cannot come back.
+
+- **THE GEAR CASE JUST OPENS.** One press, the whole kit (the long lens, the
+  threaded SMG, ammo), then it reads empty. Its gold "lock" fitting is a grey
+  latch now, because the mesh was advertising a lock that no longer exists.
+- **THE ONE LOCK LEFT IS A KEY, AND IT ALREADY EXISTED.** `govcomplex.js`'s
+  strongroom is the city's own keycard story: a steel leaf with a barred panel,
+  a brass key upstairs, the city seal on a lit plinth you can SEE before you can
+  reach it. The seal is now a real `key`-tagged economy row (`"City Seal"`,
+  `city/economy.js`) added to the bag by `srTakeSeal`, not only the
+  `g.cityGovWrit` boolean — so it can be carried, dropped and stashed like
+  anything else. The wall's THE OFFICE card reads `NEEDS THE CITY SEAL / City
+  Hall, behind steel` until you hold one. No shop stocks a `key`: keys are
+  found or taken, never bought.
+- **The other two rungs are not gated at all.** A harder name pays more and is
+  harder to reach, and that is the whole ladder. The board header prints
+  `$n PAID · n SETTLED` off a new `records.hitman.paid`.
+- **BUTTONS.** `The wall — take the next name` → **`Read wall`**;
+  `Gear case — locked (REP 20)` → **`Open the case`**. Both are under
+  interactions.js's 24-char ACTION_MAX, so each IS the button with no copy bar
+  restating it. The zones also `describe()` themselves now (`The wall`, `Gear
+  case`) — the bare `—` in the card title was the registry's own placeholder
+  for a kind nobody had named.
+- Same em-dash-and-verbosity pass over the rest of the hitman path:
+  `contracts.js` (`Field office — apply` → `Apply to the bureau`, `The drop —
+  <rank>` → `Read the drop`), `campaign.js` (`Take the deal — work as the
+  warden's spy` → `Spy for the warden`), `activities.js`, `origins.js`,
+  and the strongroom's own labels (`Strongroom — locked` → `Locked
+  strongroom`).
+
+GATE: MATHGATE ok (90210:329/182/207, 200 ticks, det ok, errors baseline-only).
+
+Trap for the next wave: `records.hitman.caseTier` is a dead legacy field kept
+only so a save from before this wave reads its case as already emptied
+(`caseOpened()` accepts `caseTier >= 2`). Do not build anything new on it.
+
+## 2026-08-18 (2) — THE WORDS BESIDE THE BUTTON ARE DELETED
+
+Owner, on a bank vault card reading **"The vault needs more than any one…"**
+next to a button reading **THE VAULT NEEDS**, under a title plate already
+reading **The vault**: *"Look at how many words there are next to that button…
+fix this instance, but also find other instances where there's so many fucking
+words next to a button. There should be almost no words next to a button.
+Almost none, if any."*
+
+**IT WAS ONE SENTENCE SAWN IN HALF AND PRINTED TWICE.** The docked card row was
+a grid of `[copy bar | button]`: the authored line went in the bar (cut at 40
+chars) and `verbHead()` of the same line went on the button. The COPY BAR IS
+DELETED, in both renderers that had one:
+
+- `city/interactions.js` — `rowsHTML`'s docked branch emits a `<button>` and
+  nothing else. New `verbButton()` decides what that button says: the whole
+  line under 28 caps chars; a line ending in a FIGURE keeps the figure and
+  drops the connective dash ("Order a drink — $12" → `ORDER A DRINK $12`, up to
+  34); a short disambiguating tail survives ("Lift — ground" → `LIFT GROUND`,
+  which is the only thing separating it from `LIFT FLOOR 50`); anything longer
+  falls back to its verb head. `copyText()` and the whole `.itouch-copy` CSS
+  block are gone.
+- `systems/interact.js` — the prison rail's `optChoice` and its
+  `PRISON_INTERACT_TOUCH=false` fallback did the same thing with `.pi-copy`.
+  Same law: `railButton()` puts the authored line ON the button (these labels
+  are short by construction: a 14-char name plus a verb), and the STATUS chip
+  (a meter word, "armed", "counting") rides inside the button as `.pi-act-sub`
+  instead of trailing a prose cell.
+
+**THE VAULT ITSELF.** `cityVaultLabel` returned the LOCK'S SENTENCE as a button
+label — that is where the nine words came from. It returns a verb now (`Open
+the vault` / `Make them open it` / `Try the vault`), and what the door wants is
+said ONCE, WHEN YOU PRESS IT, as a toast that comes and goes: `cityVaultWants`
+folds the lock line together with what is behind the steel. `describe()`'s note
+was NOT promoted onto the card to compensate — the answer to too many words is
+fewer words, not the same words moved up a line.
+
+**THE LOCK LINES THEMSELVES GOT SHORTER** (`city/loyalty.js`, the second time
+this exact complaint has landed on `cityLock` — see 2026-08-05's armory line).
+A refusing door now names ONE route, its cheapest, never `A, or B`: a card
+subtitle is one 11px line and a second clause is guaranteed to be cut mid-word.
+A door that holds keys names its key and stops.
+
+Authored labels that would still have printed a truncated sentence, fixed at
+the source: `Unload every bag here onto the racks` → `Unload the bags`, `Have
+them run it to the warehouse` → `Send it to the warehouse`, `Go through the
+drinks cabinet` → `Open the drinks cabinet`, `Heave a crate into the hold (n/m)`
+→ `Load a crate (n/m)`, `Take lift + snowboard from summit` → `Ride the lift
+up`, `Train — $60 (max HP 120)` → `Train — $60`, `Wire the racks to your
+account` → `Wire the racks out`, `Federal request: post the Guard` → `Post the
+Guard`, plus the captain's board rows.
+
+GATE: MATHGATE ok (90210:329/182/207, 200 ticks, det ok, errors baseline-only).
+
+Trap for the next wave: `describe()`'s `note` field is still authored all over
+the repo and is still not rendered anywhere. Do not "fix" that by printing it —
+it is a wall of standing text one line above a control, which is the thing this
+wave deleted. Either give a note a real home or delete the field.
+
+## 2026-08-18 (3) — THE BUTTON LAW, AND THE MENUS A THUMB COULD NOT PRESS
+
+Owner, after the vault card: *"Look for more things like it throughout the code
+base. Make this a huge thing. And figure out what sucks. surrounding buttons."*
+
+Two faults, and the second one is worse than the first.
+
+### FAULT 1 — WORDS AROUND CONTROLS
+
+A repo-wide scan of every authored `label:` / `sub:` / `desc:` string turned up
+**90 violations**: 30 controls carrying an em dash (which the renderers CUT on,
+which is how half a sentence lands on a button), and the rest simply too long
+to be a control. All fixed at the source. The worst was the **Gang Life Board**:
+twenty cards, each a button with a paragraph of dev-speak on it —
+*"Launch the disaster survival activity while writing deployment consequences
+to City"*, *"seed commute crowds and delay events"*, *"Route into the
+jail/prison activity"*. Every one is now a player-voice line under seven words
+(*"Fly out to the island and survive it"*, *"A fare across town"*, *"Walk in.
+The ledger keeps the record"*). Same for the **score board**, whose card descs
+restated the meta row underneath them (`"Low take, low heat (1-2★). No crew
+needed."` beside a row already printing ★ and crew) and whose bank tier carried
+a 245-character paragraph.
+
+### FAULT 2 — SIX MENUS WITH NO BUTTONS AT ALL
+
+`city/shops.js` printed `[X] qty`, `[V] haggle`, `[1-9]` buy, `[0]` sell,
+`[R]` rob, `[Esc] leave` — and registered exactly one listener: `keydown`.
+**Every shop and every civic desk in the game** (food, guns, pawn, barber,
+jewelry, gas, hardware, electronics, courthouse, DMV, library, post office,
+federal, city annex) was, on the tablet this game is played on, a wall of text
+with nothing to press. The owner could not buy a burger. Five more menus were
+in the same state: the **job board** (`careers.js`), the **mod garage**
+(`modshop.js`), the **car lot** (`empire.js`), the **realty desk**
+(`realestate.js`) and the **empire screen** (`wealth.js`) — whose action pills
+were *styled to look like buttons* and were plain `<span>`s.
+
+The fix is the same five lines in each: the keydown body becomes
+`pressKey(k)`, every row carries the key it already printed as `data-k`, and
+one delegated click calls the same dispatch. **One code path, two inputs** — a
+verb can never work on one and not the other. Rows get a 44px touch height and
+a real CLOSE control; the key legends (`"[1–6] accept · [Esc] close"`) stop
+printing on touch, where they teach controls the device does not have. Same
+reason the snowboard HUD stops printing `A/D carve · W tuck · Space ollie`.
+
+### THE RATCHET — `tools/button-gate.mjs` (`npm run test:buttons`)
+
+A one-second static scan, no browser, six rules, all pinned at the measured
+floor: label ≤ 34 chars, sub ≤ 44, tile desc ≤ 60, **no em dash in any of the
+three**, the copy bar stays deleted (`itouch-copy` = 0 files), and
+keyboard-only panels = 3 (the snowboard/swim/killstreak HUD overlays, which
+have no rows to press). Eight files carry a NAMED exemption for keys that are
+not player text (`occupy.js`'s design commentary, `wanted.js`'s crime names,
+`take.js`'s ledger sources). Every number may go DOWN and never up; the gate
+fails if you fix something and forget to lower it.
+
+GATE: MATHGATE ok (90210:329/182/207, 200 ticks, det ok, errors baseline-only)
+· BUTTONGATE ok (label 0/0 · sub 0/0 · desc 0/0 · copyBars 0 · keyboardOnly 3).
+
+Traps for the next wave: (a) the shop/job/lot/realty/empire panels now have TWO
+entry points into one dispatch — if you add a verb, add it to `pressKey`, never
+to the keydown listener, or it will work on a desktop and be invisible on the
+tablet. (b) `tools/button-gate.mjs` reads string LITERALS only, so a label
+built by concatenation (`"Charter: " + name + " — " + money(f)`) is invisible
+to it; the renderer's `verbButton()` is what catches those at display time.
+(c) Three files still hold unrendered `note:` annotations on data rows
+(`civic.js` service rows are the big one) — dead text shipped to the player's
+browser, worth deleting when someone is next in there.

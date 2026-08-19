@@ -1166,7 +1166,8 @@
         add("sq-bags", "GRAB THE BAGS, carry the money", "#ffd166");
       }
     }
-    html += "<div style='font-size:12px;color:#8a93a3;margin-top:10px'>[1–" + menuActs.length + "] choose · [O]/[Esc] close</div>";
+    html += CBZ.touchMode ? "<div class='oopt' data-act='close' style='margin-top:10px;padding:10px;border:1px solid #3a3140;border-radius:10px;text-align:center;font-weight:700;letter-spacing:.6px;cursor:pointer'>CLOSE</div>"
+      : "<div style='font-size:12px;color:#8a93a3;margin-top:10px'>[1–" + menuActs.length + "] choose · [O]/[Esc] close</div>";
     menuEl.innerHTML = html;
     menuEl.style.display = "block";
     CBZ.cityMenuOpen = true;

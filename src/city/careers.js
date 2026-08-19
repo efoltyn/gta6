@@ -665,14 +665,15 @@
     html += "<div style='font-size:12px;color:#ffd166;margin-bottom:8px'>You: " +
       (CBZ.cityRankName ? CBZ.cityRankName(c.rank) : c.rank) +
       " <span style='color:#8a93a3'>· finish jobs to climb the ranks</span></div>";
-    if (!gcOffered.length) html += "<div style='color:#8a93a3'>No work right now, check back after the heat dies down.</div>";
+    if (!gcOffered.length) html += "<div style='color:#8a93a3'>No work right now.</div>";
     gcOffered.forEach((j, i) => {
-      html += "<div style='padding:4px 0'><b style='color:#ffd166'>" + (i + 1) + "</b> " +
+      html += "<div class='jobRow' data-k='" + (i + 1) + "' style='padding:4px 0'><b style='color:#ffd166'>" + (i + 1) + "</b> " +
         (GC_ICON[j.type] || "•") + " " + j.desc +
         " <span style='color:#7ed957'>$" + j.reward + "</span>" +
         (j.respect ? " <span style='color:#c792ea'>+" + j.respect + " rep</span>" : "") + "</div>";
     });
-    html += "<div style='font-size:12px;color:#8a93a3;margin-top:8px'>[1–" + Math.max(1, gcOffered.length) + "] accept · [0] freelance hustles · [Esc] close</div>";
+    html += "<div class='jobFoot'><span class='jobRow jobBtn' data-k='0'>FREELANCE</span>" +
+      "<span class='jobRow jobBtn' data-k='escape'>CLOSE</span></div>";
     boardEl().innerHTML = html;
     board.style.display = "block";
     board._gang = true;
@@ -766,6 +767,12 @@
     board = document.createElement("div");
     board.id = "cityJobs";
     board.style.cssText = "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:49;display:none;min-width:340px;background:rgba(14,16,22,.96);border:2px solid #3a3140;border-radius:16px;padding:16px 18px;color:#e8eef7;font-family:Fredoka,system-ui,sans-serif;box-shadow:0 18px 50px rgba(0,0,0,.55);pointer-events:auto";
+    board.addEventListener("click", function (e) {
+      const row = e.target && e.target.closest ? e.target.closest("[data-k]") : null;
+      if (!row) return;
+      e.preventDefault(); e.stopPropagation();
+      pressKey(row.getAttribute("data-k"));
+    });
     document.body.appendChild(board);
     return board;
   }
@@ -783,8 +790,9 @@
     let html = "<div style='font-size:20px;font-weight:700;margin-bottom:2px'>Contract Board</div>";
     html += "<div style='font-size:12px;color:#ffd166;margin-bottom:8px'>Notoriety: " + r.name +
       (nxt ? " <span style='color:#8a93a3'>(" + (notoriety()) + "/" + nxt.xp + " → " + nxt.name + ", pay ×" + r.cut.toFixed(2) + ")</span>" : " <span style='color:#7ed957'>· MAX · pay ×" + r.cut.toFixed(2) + "</span>") + "</div>";
-    offered.forEach((j, i) => { html += "<div style='padding:4px 0'><b style='color:#ffd166'>" + (i + 1) + "</b> " + (ICON[j.type] || "•") + " " + j.desc + " <span style='color:#7ed957'>$" + j.reward + "</span></div>"; });
-    html += "<div style='font-size:12px;color:#8a93a3;margin-top:8px'>[1–" + offered.length + "] accept · [Esc] close</div>";
+    offered.forEach((j, i) => { html += "<div class='jobRow' data-k='" + (i + 1) + "' style='padding:4px 0'><b style='color:#ffd166'>" + (i + 1) + "</b> " + (ICON[j.type] || "•") + " " + j.desc + " <span style='color:#7ed957'>$" + j.reward + "</span></div>"; });
+    html += "<div class='jobFoot'>" + (myCrew() ? "<span class='jobRow jobBtn' data-k='0'>CREW</span>" : "") +
+      "<span class='jobRow jobBtn' data-k='escape'>CLOSE</span></div>";
     boardEl().innerHTML = html;
     board.style.display = "block";
     CBZ.cityMenuOpen = true;
@@ -820,22 +828,30 @@
     let html = "<div style='font-size:20px;font-weight:700;margin-bottom:2px'>Freelance Hustles</div>";
     html += "<div style='font-size:12px;color:#ffd166;margin-bottom:8px'>Notoriety: " + r.name +
       (nxt ? " <span style='color:#8a93a3'>(" + (notoriety()) + "/" + nxt.xp + " → " + nxt.name + ")</span>" : " <span style='color:#7ed957'>· MAX</span>") +
-      (myCrew() ? " <span style='color:#8a93a3'>· [0] crew contracts</span>" : "") + "</div>";
-    offered.forEach((j, i) => { html += "<div style='padding:4px 0'><b style='color:#ffd166'>" + (i + 1) + "</b> " + (ICON[j.type] || "•") + " " + j.desc + " <span style='color:#7ed957'>$" + j.reward + "</span></div>"; });
-    html += "<div style='font-size:12px;color:#8a93a3;margin-top:8px'>[1–" + offered.length + "] accept · [Esc] close</div>";
+      "</div>";
+    offered.forEach((j, i) => { html += "<div class='jobRow' data-k='" + (i + 1) + "' style='padding:4px 0'><b style='color:#ffd166'>" + (i + 1) + "</b> " + (ICON[j.type] || "•") + " " + j.desc + " <span style='color:#7ed957'>$" + j.reward + "</span></div>"; });
+    html += "<div class='jobFoot'>" + (myCrew() ? "<span class='jobRow jobBtn' data-k='0'>CREW</span>" : "") +
+      "<span class='jobRow jobBtn' data-k='escape'>CLOSE</span></div>";
     boardEl().innerHTML = html;
     board.style.display = "block";
     CBZ.cityMenuOpen = true;
   }
 
-  addEventListener("keydown", function (e) {
-    if (!board || board.style.display !== "block") return;
-    const k = e.key.toLowerCase();
-    if (k === "escape") { e.preventDefault(); closeBoard(); return; }
+  /* ONE DISPATCH, TWO INPUTS. This board printed "[1-6] accept · [Esc] close"
+     and listened only for a keydown, so on a tablet it was a list of jobs you
+     could not accept. Every row carries its own key as `data-k` now and one
+     delegated click runs the same dispatch. (owner, 2026-08-18: "figure out
+     what sucks around buttons") */
+  function pressKey(k) {
+    if (!board || board.style.display !== "block" || !k) return false;
+    k = String(k).toLowerCase();
+    if (k === "escape") { closeBoard(); return true; }
     // [0] toggles between the crew contract board and freelance hustles
-    if (k === "0" && myCrew()) { e.preventDefault(); if (board._gang) openFreelanceBoard(); else CBZ.cityGangContracts(); return; }
-    if (k >= "1" && k <= "9") { e.preventDefault(); accept(parseInt(k, 10) - 1); }
-  });
+    if (k === "0" && myCrew()) { if (board._gang) openFreelanceBoard(); else CBZ.cityGangContracts(); return true; }
+    if (k >= "1" && k <= "9") { accept(parseInt(k, 10) - 1); return true; }
+    return false;
+  }
+  addEventListener("keydown", function (e) { if (pressKey(e.key)) e.preventDefault(); });
 
   function finishJob(bonus) {
     const j = g.cityJob; if (!j) return;

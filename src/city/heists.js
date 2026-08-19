@@ -111,25 +111,25 @@
       id: "store", name: "Corner-Store Stick-Up", icon: "", tier: 1,
       take: 900, setup: 0, stars: 1, grabTime: 5, heatRate: 22, minCrew: 0, gun: false,
       kinds: ["food", "gas", "barber", "gym", "hardware"],
-      desc: "Quick register grab. Low take, low heat (1-2★). No crew needed.",
+      desc: "Register, bag, door.",
     },
     {
       id: "liquor", name: "Liquor / Pawn Smash-&-Grab", icon: "", tier: 2,
       take: 2600, setup: 120, stars: 2, grabTime: 7, heatRate: 30, minCrew: 1, gun: false,
       kinds: ["bar", "pawn", "drugs", "clothing", "electronics"],
-      desc: "Smash the cases, fill the bag. 2-3★. A second body speeds the grab.",
+      desc: "Break the cases, fill the bag.",
     },
     {
       id: "jewelry", name: "Jewelry-Store Heist", icon: "", tier: 3,
       take: 7500, setup: 400, stars: 3, grabTime: 10, heatRate: 40, minCrew: 2, gun: true,
       kinds: ["jewelry", "casino"],
-      desc: "Armed smash-and-grab on the cases. 3★, armed guards, crew strongly advised.",
+      desc: "Guns up, glass down.",
     },
     {
       id: "armored", name: "Armored-Truck Crack", icon: "", tier: 4,
       take: 14000, setup: 600, stars: 3, grabTime: 9, heatRate: 55, minCrew: 1, gun: true,
       kinds: null,            // spawns its own truck near you
-      desc: "Pop the cash truck. Any hit = instant 3★. Crack it, grab the cases, vanish.",
+      desc: "Crack the truck, take the cases.",
     },
     {
       id: "bank", name: "BANK JOB", icon: "", tier: 5,
@@ -157,7 +157,7 @@
       getaway: 14,                   // dye-pack/bait window: clear LOS this fast or it burns
       dyeFrac: [0.14, 0.26],         // fraction of the bag rigged to burn if you're caught slow
       guards: 2,                     // armed security inside who resist
-      desc: "The big score. Blow the vault door or make somebody open it, then carry the bags out yourself and beat the dye-pack clock. Silent alarm = cops already rolling; heavy 4★ response (5★ if you start dropping cops). Bring a crew and bring explosives.",
+      desc: "The vault, the bags, and the dye-pack clock.",
     },
   ];
   function tierById(id) { return TIERS.find((t) => t.id === id) || null; }
@@ -492,11 +492,10 @@
     }).join("");
     board.innerHTML =
       "<div style='display:flex;justify-content:space-between;align-items:flex-start'>" +
-      "<div><div style='font-size:18px;color:#ffd479'>SCORE BOARD</div>" +
-      "<div style='font-weight:500;color:#9fb0c6;font-size:12px;margin-top:2px'>Case a target, hit it, lose the heat, bank the bag.</div></div>" +
+      "<div style='font-size:18px;color:#ffd479'>SCORE BOARD</div>" +
       "<button class='hb-close' style='background:none;border:1px solid #2c3140;color:#aeb8c6;border-radius:8px;padding:6px 12px;cursor:pointer'>Close</button></div>" +
       "<div style='margin-top:6px;font-size:12px;color:#8a93a3'>Crew on hand: <b style='color:#7fd0ff'>" + crew + "</b>" +
-      (crew ? " (+" + Math.round((crewMul(crew) - 1) * 100) + "% take, " + Math.round((1 - cutForCrew(crew)) * 100) + "% goes to the crew)" : " · recruit a crew to pull the big scores") +
+      (crew ? " (+" + Math.round((crewMul(crew) - 1) * 100) + "% take, " + Math.round((1 - cutForCrew(crew)) * 100) + "% to the crew)" : "") +
       "</div>" + rows +
       "<div style='margin-top:12px;font-size:11px;color:#8a93a3;border-top:1px solid #2c3140;padding-top:8px'>" +
       "Lifetime scores: " + (h.completed || 0) + " · biggest take: " + fmt$(h.biggest || 0) + "</div>";
