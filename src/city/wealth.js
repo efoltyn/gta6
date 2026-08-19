@@ -670,6 +670,14 @@
       "width:min(680px,94vw);max-height:88vh;overflow-y:auto;background:linear-gradient(160deg,rgba(16,14,22,.985),rgba(20,16,12,.985));" +
       "border:2px solid #5a4a2a;border-radius:18px;padding:18px 20px;color:#f3ecd8;font-family:Fredoka,system-ui,sans-serif;" +
       "box-shadow:0 22px 70px rgba(0,0,0,.6),inset 0 0 60px rgba(120,90,30,.07);pointer-events:auto";
+    panel.addEventListener("click", function (ev) {
+      const t = ev.target && ev.target.closest ? ev.target.closest("[data-tab]") : null;
+      if (t) { ev.preventDefault(); ev.stopPropagation(); tab = t.getAttribute("data-tab"); render(); return; }
+      const row = ev.target && ev.target.closest ? ev.target.closest("[data-k]") : null;
+      if (!row) return;
+      ev.preventDefault(); ev.stopPropagation();
+      pressKey(row.getAttribute("data-k"));
+    });
     document.body.appendChild(panel);
     return panel;
   }
@@ -679,9 +687,16 @@
       "<div style='flex:1'><div>" + left + "</div>" + (sub ? "<div style='font-size:11px;color:#a99b78;margin-top:2px'>" + sub + "</div>" : "") + "</div>" +
       "<div style='text-align:right;white-space:nowrap'>" + right + "</div></div>";
   }
+  /* THESE PILLS LOOKED LIKE BUTTONS AND WERE NOT (owner, 2026-08-18: "figure
+     out what sucks around buttons"). Every action in this panel was a coloured
+     span with a key letter printed on it, and the only way to fire one was a
+     keyboard — on a tablet the whole empire screen was decoration with a
+     12-key legend at the bottom explaining controls that did not exist. The
+     pill now IS the control: it carries its key as `data-k`, one delegated
+     click runs the same dispatch, and the key letter comes off its face. */
   function btn(key, label, color) {
-    return "<span style='display:inline-block;margin-left:6px;padding:2px 8px;border-radius:7px;background:" + (color || "#3a3320") + ";" +
-      "border:1px solid rgba(255,255,255,.15);font-size:12px'><b style='color:#ffd166'>" + key + "</b> " + label + "</span>";
+    return "<span class='weRow' data-k='" + key.toLowerCase() + "' style='display:inline-block;margin-left:6px;padding:4px 10px;border-radius:7px;background:" + (color || "#3a3320") + ";" +
+      "border:1px solid rgba(255,255,255,.15);font-size:12px;cursor:pointer'>" + label + "</span>";
   }
   // visible row hotkey: rows 1–9 use their number; the 10th uses 0; beyond → ·
   function keyLabel(i) { return i <= 9 ? String(i) : i === 10 ? "0" : "·"; }
@@ -807,15 +822,16 @@
     let bar = "<div style='display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap'>";
     tabs.forEach((t) => {
       const on = tab === t[0];
-      bar += "<div style='padding:5px 11px;border-radius:9px;font-size:13px;cursor:default;" +
+      bar += "<div class='weRow' data-tab='" + t[0] + "' style='padding:5px 11px;border-radius:9px;font-size:13px;cursor:pointer;" +
         "background:" + (on ? "linear-gradient(90deg,#5a4a2a,#3a3320)" : "rgba(255,255,255,.04)") + ";" +
         "border:1px solid " + (on ? "#ffd166" : "rgba(255,255,255,.08)") + ";color:" + (on ? "#ffd166" : "#c9b98a") + "'>" +
         t[1] + "</div>";
     });
     bar += "</div>";
     let body = tab === "biz" ? renderBiz() : tab === "ops" ? renderOps() : renderPerks();
-    let foot = "<div style='font-size:11px;color:#8a7d5a;margin-top:12px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px'>" +
-      "<b>,</b>/<b>.</b> switch tab · number keys <b>1–9,0</b> act · <b>U</b> upgrade · <b>H</b> hire driver · <b>S</b> security · <b>I</b> IPO · <b>G</b> hire bodyguard (Status tab) · <b>C</b>/<b>L</b>/<b>P</b> · <b>Esc</b> close" + (flash_ ? " &nbsp;·&nbsp; <span style='color:#ffd166'>" + flash_ + "</span>" : "") + "</div>";
+    let foot = "<div style='margin-top:12px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px'>" +
+      (flash_ ? "<div style='font-size:11px;color:#ffd166;margin-bottom:6px'>" + flash_ + "</div>" : "") +
+      "<div class='weRow weClose' data-k='escape'>CLOSE</div></div>";
     el().innerHTML = head + bar + body + foot;
   }
 
@@ -851,35 +867,40 @@
     }
   }
 
-  addEventListener("keydown", function (e) {
-    if (g.mode !== "city" || g.state !== "playing") return;
-    const k = (e.key || "").toLowerCase();
-    if (open_) {
-      if (k === "escape") { e.preventDefault(); close(); return; }
+  function pressKey(k) {
+    if (!open_ || !k) return false;
+    k = String(k).toLowerCase();
+    {
+      if (k === "escape") { close(); return true; }
       // tabs: , / . cycle (both keys are unused elsewhere in the game)
-      if (k === "," ) { e.preventDefault(); switchTab(-1); return; }
-      if (k === "." ) { e.preventDefault(); switchTab(1); return; }
+      if (k === "," ) { switchTab(-1); return true; }
+      if (k === "." ) { switchTab(1); return true; }
       // biz action keys
       if (tab === "biz") {
-        if (k === "c") { e.preventDefault(); collectAll(); return; }
-        if (k === "l") { e.preventDefault(); launderAll(); return; }
-        if (k === "p") { e.preventDefault(); partySpend(); return; }
+        if (k === "c") { collectAll(); return true; }
+        if (k === "l") { launderAll(); return true; }
+        if (k === "p") { partySpend(); return true; }
         // KEY OWNERSHIP: [U] here is fully PANEL-GATED (this whole block only
         // runs `if (open_)`, wealth's own panel-open flag) — verified safe to
         // share with origins.js's character wheel and captives.js's custody
         // HUD, both of which stand down while any menu (incl. this one, via
         // CBZ.cityMenuOpen) is open. Left as-is.
-        if (k === "u") { e.preventDefault(); for (const b of BUSINESSES) { const r = rec(b.id); if (r && r.tier < b.maxTier) { upgradeBiz(b.id); break; } } return; }
-        if (k === "h") { e.preventDefault(); for (const b of BUSINESSES) { const r = rec(b.id); if (r && b.gig && workerCount(b.id) < WORKER_MAX) { hireWorker(b.id); break; } } return; }
-        if (k === "s") { e.preventDefault(); for (const b of BUSINESSES) { const r = rec(b.id); if (r && (r.secLevel | 0) < SEC_MAX) { upgradeSecurity(b.id); break; } } return; }
-        if (k === "i") { e.preventDefault(); for (const b of BUSINESSES) { if (ipoEligible(b.id)) { ipoBiz(b.id); break; } } return; }
+        if (k === "u") { for (const b of BUSINESSES) { const r = rec(b.id); if (r && r.tier < b.maxTier) { upgradeBiz(b.id); break; } } return true; }
+        if (k === "h") { for (const b of BUSINESSES) { const r = rec(b.id); if (r && b.gig && workerCount(b.id) < WORKER_MAX) { hireWorker(b.id); break; } } return true; }
+        if (k === "s") { for (const b of BUSINESSES) { const r = rec(b.id); if (r && (r.secLevel | 0) < SEC_MAX) { upgradeSecurity(b.id); break; } } return true; }
+        if (k === "i") { for (const b of BUSINESSES) { if (ipoEligible(b.id)) { ipoBiz(b.id); break; } } return true; }
       }
       // P5: hire the next SMG-tier security guard (perks tab only — see renderPerks)
-      if (tab === "perks" && k === "g" && CBZ.protection) { e.preventDefault(); CBZ.protection.hire(1); if (open_) render(); return; }
+      if (tab === "perks" && k === "g" && CBZ.protection) { CBZ.protection.hire(1); if (open_) render(); return true; }
       // number keys act on the visible list row (0 = the 10th row)
-      if (k >= "0" && k <= "9") { e.preventDefault(); actNum(parseInt(k, 10)); return; }
-      return;
+      if (k >= "0" && k <= "9") { actNum(parseInt(k, 10)); return true; }
     }
+    return false;
+  }
+  addEventListener("keydown", function (e) {
+    if (g.mode !== "city" || g.state !== "playing") return;
+    const k = (e.key || "").toLowerCase();
+    if (open_) { if (pressKey(k)) e.preventDefault(); return; }
     // OPEN: Shift+B (B solo is taken; this chord is unused elsewhere)
     if (k === "b" && e.shiftKey && !e.repeat && !CBZ.cityMenuOpen && !(CBZ.player && CBZ.player.driving)) {
       e.preventDefault(); open();

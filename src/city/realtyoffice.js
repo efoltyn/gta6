@@ -425,7 +425,7 @@
         + "<span>Page " + (S.page + 1) + "/" + pages + " · " + S.rows.length + " listings</span>"
         + "<button data-ract='page' data-ridx='1' style='" + pillCss() + "'>Next ›</button></div>";
     }
-    html += "<div style='font-size:11px;color:#6b7480;margin-top:9px'>[Esc] close · also on your phone at [Z]</div>";
+    if (!CBZ.touchMode) html += "<div style='font-size:11px;color:#6b7480;margin-top:9px'>[Esc] close · also on your phone at [Z]</div>";
     panelEl().innerHTML = html;
   }
   // teleport the player to a listing's front door so EVERY card is somewhere you

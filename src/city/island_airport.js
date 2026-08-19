@@ -4028,7 +4028,7 @@
         desk: {
           lx: (APRON_X - TERM_W / 2 + 20) - RWY_CX,
           lz: (TERM_Z + TERM_D / 2 - 5.2) - RWY_Z,
-          heading: 0, label: "Halloran Field. Check-in",
+          heading: 0, label: "Halloran Field",
         },
         bounds: { minX: A_MINX, maxX: A_MAXX, minZ: A_MINZ, maxZ: A_MAXZ },
       });

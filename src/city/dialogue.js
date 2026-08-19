@@ -419,7 +419,7 @@
       : (o.kind === "tribute")
         ? { label: "Keep your money", closer: "“…thanks? Okay.”", mem: function () { relShift(p, "greeted", 0.3); } }
         : (o.kind === "handout")
-          ? { label: "Keep it. I'm good", closer: "“Respect.”", mem: function () { relShift(p, "greeted", 0.5); } }
+          ? { label: "Keep it", closer: "“Respect.”", mem: function () { relShift(p, "greeted", 0.5); } }
           : { label: "Not today", closer: "“…yeah. Every day's not today.”", mem: function () { const mm = mem(p); mm.declines++; relShift(p, "snubbed", 0.15); } };
     return {
       id: "street", line: LINE[o.kind] || "“Got a second?”",
@@ -436,7 +436,7 @@
     return {
       id: "favor", line: line,
       a: {
-        label: "Here you go · " + money(ASK),
+        label: "Here you go " + money(ASK),
         closer: "“God bless. For real.”",
         run: function () {
           if (!spend(ASK)) { sayP(p, "“…you're broke too, huh. City's eating everybody.”", "#cfd6e6"); return; }

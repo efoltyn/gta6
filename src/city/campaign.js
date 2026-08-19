@@ -691,16 +691,16 @@
     setMission({
       id: "the-name",
       title: "THE NAME",
-      briefing: "The room came furnished: a wall, a locked case, and one photograph. " +
+      briefing: "The room came furnished: a wall, a packed case, and one photograph. " +
         (con.dossier ? con.dossier + " " : "") +
-        "Quiet is worth more than fast, a witnessed kill costs the margin.",
+        "Quiet pays more than fast. A witnessed kill costs the margin.",
       target: R.target.name,
       location: where || "A rented room",
       reward: 6500,
       status: "active",
       objectives: [{ id: "hit", text: "Eliminate " + (R.target.name || "the mark"), done: false }],
     });
-    notify("personal", "GHOSTLINE", "One name, half up front. The wall has his picture; the case stays shut until you matter.");
+    notify("personal", "GHOSTLINE", "One name, half up front. The wall has his picture, the case in the room is packed.");
     return true;
   }
 
@@ -1893,7 +1893,7 @@
         body: "The takeover is complete. The crews answer to you now, the contracts keep coming, but from tonight the city itself is yours.",
       });
     } else if (CBZ.flashToast && CBZ.flashToast._campaignOriginal) {
-      try { CBZ.flashToast._campaignOriginal("CITY BOSS · YOU OWN THE CITY"); } catch (e) {}
+      try { CBZ.flashToast._campaignOriginal("CITY BOSS: YOU OWN THE CITY"); } catch (e) {}
     }
     say(cHandler(), "The whole map answers to you now. That does not cancel the list.", 4.6);
   }
@@ -2038,8 +2038,8 @@
   };
   CBZ.cityCampaignPrisonLabel = function (actor, verb) {
     if (!actor || actor.kind !== "warden") return null;
-    if (verb === "campaign-spy") return "Take the deal, work as the warden's spy";
-    if (verb === "campaign-escape") return "Refuse him, escape on your own";
+    if (verb === "campaign-spy") return "Spy for the warden";
+    if (verb === "campaign-escape") return "Escape on your own";
     return null;
   };
   CBZ.cityCampaignPrisonSub = function (actor, verb) {

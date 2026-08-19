@@ -1057,6 +1057,15 @@
     d.style.cssText = "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:60;display:none;" +
       "background:rgba(13,16,21,.96);border:1px solid #4a5a3a;border-radius:16px;padding:18px 22px;color:#e8eef7;" +
       "font-family:Fredoka,system-ui,sans-serif;font-size:15px;min-width:360px;max-width:88vw;box-shadow:0 18px 60px rgba(0,0,0,.6)";
+    // ONE DISPATCH, TWO INPUTS: the panel printed "[1-7] tab · [a-d] buy" and
+    // listened only for a keydown, so on a tablet the mod garage was a price
+    // list you could not buy from. Rows carry their key; the click runs it.
+    d.addEventListener("click", function (e) {
+      const row = e.target && e.target.closest ? e.target.closest("[data-k]") : null;
+      if (!row) return;
+      e.preventDefault(); e.stopPropagation();
+      panelKey(row.getAttribute("data-k"));
+    });
     document.body.appendChild(d);
     S.panel = d;
     return d;
@@ -1102,9 +1111,9 @@
           action: function () { doRespray(car); } }];
       case "armor":
         return [
-          { label: "Black-shield plating. LIGHT", price: PRICE.armor.light, sub: "shrugs ~50% small-arms",
+          { label: "Light plating", price: PRICE.armor.light, sub: "shrugs ~50% small-arms",
             owned: m.armor === "light", action: function () { doMod(car, "armor", "light", PRICE.armor.light); } },
-          { label: "Black-shield plating. HEAVY", price: PRICE.armor.heavy, sub: "shrugs ~80% small-arms · RPG still kills",
+          { label: "Heavy plating", price: PRICE.armor.heavy, sub: "shrugs ~80% small-arms · RPG still kills",
             owned: m.armor === "heavy", action: function () { doMod(car, "armor", "heavy", PRICE.armor.heavy); } },
         ];
       case "booster":
@@ -1129,13 +1138,13 @@
         const cur = m.perf | 0;
         const sub = { 1: "faster · chrome exhaust", 2: "grippier · intercooler + vents", 3: "top stage · scoop + big wing" };
         return [1, 2, 3].map(function (t) {
-          return { label: "Performance. Stage " + t, price: PRICE.perf[t], sub: sub[t],
+          return { label: "Performance stage " + t, price: PRICE.perf[t], sub: sub[t],
             owned: cur >= t, action: function () { doMod(car, "perf", t, PRICE.perf[t]); } };
         });
       }
       case "glow":
         return Object.keys(GLOW_COLORS).map(function (name) {
-          return { label: "Underglow · " + name.toUpperCase(), price: PRICE.glow, sub: "neon kit · pulses",
+          return { label: "Underglow " + name.toLowerCase(), price: PRICE.glow, sub: "neon kit · pulses",
             owned: m.glow === name, action: function () { doMod(car, "glow", name, PRICE.glow); } };
         });
       default: return [];
@@ -1147,15 +1156,15 @@
     const car = liveCar();
     if (!car) { closePanel(); return; }
     let html = "<div style='font-weight:700;font-size:18px;margin-bottom:2px;color:#bfe39a'>Mod Garage</div>";
-    html += "<div style='color:#8a93a3;font-size:12px;margin-bottom:10px'>Keep the ride, build a war machine. " +
+    html += "<div style='color:#8a93a3;font-size:12px;margin-bottom:10px'>" +
       "<span style='color:#7ed957'>" + fmt$(cash()) + "</span> on hand</div>";
     // tab bar (keys [1]-[7])
     html += "<div style='display:flex;flex-wrap:wrap;gap:5px;margin-bottom:12px'>";
     TABS.forEach(function (t, i) {
       const on = S.tab === t[0];
-      html += "<span style='padding:3px 8px;border-radius:8px;font-size:12px;" +
+      html += "<span class='msRow' data-k='" + (i + 1) + "' style='padding:3px 8px;border-radius:8px;font-size:12px;cursor:pointer;" +
         (on ? "background:#3c5a2a;color:#dff5c8" : "background:#22262c;color:#9aa3ad") + "'>" +
-        "<b>" + (i + 1) + "</b> " + t[1] + "</span>";
+        t[1] + "</span>";
     });
     html += "</div>";
     const rows = rowsFor(car, S.tab);
@@ -1168,13 +1177,12 @@
         : owned ? "<span style='color:#7ed957'>✓ installed</span>"
         : (cash() >= r.price ? "<span style='color:#e7c84f'>" + fmt$(r.price) + "</span>"
                              : "<span style='color:#c46a6a'>" + fmt$(r.price) + "</span>");
-      html += "<div style='display:flex;justify-content:space-between;gap:16px;padding:5px 0;border-top:1px solid #262b22'>" +
-        "<span><b style='color:#bfe39a'>" + (i + 1 <= 9 ? "[" + String.fromCharCode(97 + i) + "]" : "") + "</b> " +
-        r.label + (r.sub ? "<span style='color:#7f8794'> · " + r.sub + "</span>" : "") + "</span>" +
+      html += "<div class='msRow' data-k='" + String.fromCharCode(97 + i) + "' style='display:flex;justify-content:space-between;gap:16px;padding:5px 0;border-top:1px solid #262b22;cursor:pointer'>" +
+        "<span>" + r.label + (r.sub ? "<span style='color:#7f8794'> · " + r.sub + "</span>" : "") + "</span>" +
         "<span>" + priceTxt + "</span></div>";
     });
     html += "<div style='border-top:1px solid #2a3122;margin:12px 0 4px'></div>";
-    html += "<div style='color:#8a93a3;font-size:12px'>[1-" + TABS.length + "] tab · [a-d] buy/select · [Esc]/[E] close</div>";
+    html += "<div class='msRow msClose' data-k='escape'>CLOSE</div>";
     d.innerHTML = html;
   }
 
@@ -1196,6 +1204,7 @@
   CBZ.cityModShopOpen = openPanel;   // headless / harness handle
 
   function panelKey(k) {
+    k = String(k || "").toLowerCase();
     if (k === "escape" || k === "e") { closePanel(); return; }
     const n = parseInt(k, 10);
     if (!isNaN(n) && n >= 1 && n <= TABS.length) { S.tab = TABS[n - 1][0]; renderPanel(); return; }
@@ -1209,7 +1218,7 @@
   // ---- shop actions ----------------------------------------------------------
   function doMod(car, modId, tier, price) {
     if (price > 0 && !(CBZ.city && CBZ.city.spend && CBZ.city.spend(price))) {
-      if (CBZ.city && CBZ.city.note) CBZ.city.note("That runs " + fmt$(price) + " · come back with the money.", 1.8);
+      if (CBZ.city && CBZ.city.note) CBZ.city.note("That runs " + fmt$(price) + ".", 1.8);
       return;
     }
     cityApplyCarMod(car, modId, tier);

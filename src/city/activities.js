@@ -27,33 +27,33 @@
   let active = null;
 
   const ACTIVITIES = [
-    { id: "legal-race", cat: "Racing", label: "Legal Circuit Race", cost: 50, time: 4, reward: 320, desc: "Closed-course race. Improves driver reputation without police heat." },
-    { id: "street-race", cat: "Racing", label: "Illegal Street Race", cost: 80, time: 4, reward: 620, desc: "DRIVE a real checkpoint course vs rivals. Side bets, crash risk, police witnesses." },
-    { id: "drag-race", cat: "Racing", label: "Drag Race", cost: 60, time: 3.2, reward: 420, desc: "Short illegal sprint. Strong link to car tuning and traffic enforcement." },
-    { id: "horse-bet", cat: "Racing", label: "Horse Race Bet", cost: 40, time: 3, reward: 190, desc: "Animal race sportsbook with odds, crowd money, and fixing rumors." },
-    { id: "greyhound-bet", cat: "Racing", label: "Greyhound Bet", cost: 30, time: 2.8, reward: 145, desc: "AI-only race participants, quick odds, and track spectators." },
+    { id: "legal-race", cat: "Racing", label: "Legal Circuit Race", cost: 50, time: 4, reward: 320, desc: "Clean laps, clean money. No heat." },
+    { id: "street-race", cat: "Racing", label: "Illegal Street Race", cost: 80, time: 4, reward: 620, desc: "Real course, real rivals, real cops." },
+    { id: "drag-race", cat: "Racing", label: "Drag Race", cost: 60, time: 3.2, reward: 420, desc: "Two cars, one straight, one shot." },
+    { id: "horse-bet", cat: "Racing", label: "Horse Race Bet", cost: 40, time: 3, reward: 190, desc: "Odds, crowd money, and a fixing rumour." },
+    { id: "greyhound-bet", cat: "Racing", label: "Greyhound Bet", cost: 30, time: 2.8, reward: 145, desc: "Fast dogs, faster odds." },
 
-    { id: "boxing", cat: "Combat", label: "Boxing Fight Night", cost: 20, time: 4, reward: 260, desc: "Bet then watch a live round-by-round bout: momentum, stamina, knockdowns, judges." },
-    { id: "mma", cat: "Combat", label: "UFC/MMA Fight Night", cost: 40, time: 4.5, reward: 420, desc: "Striking, takedowns, submissions, finishes, and arena reputation. Live bet card." },
-    { id: "paintball", cat: "Combat", label: "Paintball Match", cost: 35, time: 3.5, reward: 180, desc: "Nonlethal team shooting, cover, colored marks, scoring, and tactics." },
+    { id: "boxing", cat: "Combat", label: "Boxing Fight Night", cost: 20, time: 4, reward: 260, desc: "Bet it, then watch every round land." },
+    { id: "mma", cat: "Combat", label: "UFC/MMA Fight Night", cost: 40, time: 4.5, reward: 420, desc: "Strikes, takedowns, finishes. Live card." },
+    { id: "paintball", cat: "Combat", label: "Paintball Match", cost: 35, time: 3.5, reward: 180, desc: "Team shooting, no bodies." },
 
-    { id: "casino-table", cat: "Betting", label: "Casino Floor", cost: 0, time: 0, reward: 0, desc: "Walk the floor: Blackjack, European Roulette, and Slots on a live bankroll." },
-    { id: "sportsbook", cat: "Betting", label: "Sportsbook Parlay", cost: 0, time: 0, reward: 0, desc: "Build a multi-leg parlay across fights, races, horses, and greyhounds with real odds." },
+    { id: "casino-table", cat: "Betting", label: "Casino Floor", cost: 0, time: 0, reward: 0, desc: "Blackjack, roulette, slots." },
+    { id: "sportsbook", cat: "Betting", label: "Sportsbook Parlay", cost: 0, time: 0, reward: 0, desc: "Stack legs into one parlay." },
 
-    { id: "bus-route", cat: "Transit", label: "Ride Bus Route", cost: 3, time: 2.4, reward: 0, desc: "Pay a fare, move across the city, seed commute crowds and delay events." },
-    { id: "train-pass", cat: "Transit", label: "Buy Train Pass", cost: 120, time: 1.5, reward: 0, desc: "Persistent transit access for fast travel, getaways, and commuter economy." },
+    { id: "bus-route", cat: "Transit", label: "Ride Bus Route", cost: 3, time: 2.4, reward: 0, desc: "A fare across town." },
+    { id: "train-pass", cat: "Transit", label: "Buy Train Pass", cost: 120, time: 1.5, reward: 0, desc: "Ride free from here on." },
 
-    { id: "campaign", cat: "Civic", label: "Campaign Event", cost: 100, time: 3.4, reward: 0, desc: "Build political reputation through public events, supporters, and policy pressure." },
-    { id: "permit-deal", cat: "Civic", label: "Corrupt Permit Deal", cost: 0, time: 3, reward: 380, desc: "Dirty civic money that adds scandal, corruption, police pressure, and business hooks." },
+    { id: "campaign", cat: "Civic", label: "Campaign Event", cost: 100, time: 3.4, reward: 0, desc: "Shake hands, buy a name." },
+    { id: "permit-deal", cat: "Civic", label: "Corrupt Permit Deal", cost: 0, time: 3, reward: 380, desc: "Dirty paper, clean money." },
 
-    { id: "counterterror", cat: "Emergency", label: "Counterterror Response", cost: 0, time: 4, reward: 420, desc: "Fictional extremist faction pressure, public fear, police response, and transit security." },
-    { id: "war-sortie", cat: "Emergency", label: "War Sortie Contract", cost: 0, time: 4.5, reward: 700, desc: "Air vehicles, missiles, explosions, smoke, military escalation, and city damage." },
-    { id: "disaster", cat: "Emergency", label: "City Disaster Event", cost: 0, time: 4, reward: 260, desc: "Fire, flood, panic, evacuation, destruction, repairs, and emergency politics." },
-    { id: "survival-island", cat: "Emergency", label: "Deploy To Disaster Island", cost: 0, time: 0, reward: 0, desc: "Launch the disaster survival activity while writing deployment consequences to City." },
+    { id: "counterterror", cat: "Emergency", label: "Counterterror Response", cost: 0, time: 4, reward: 420, desc: "A cell moves. The city panics." },
+    { id: "war-sortie", cat: "Emergency", label: "War Sortie Contract", cost: 0, time: 4.5, reward: 700, desc: "Jets, missiles, and a bill for the damage." },
+    { id: "disaster", cat: "Emergency", label: "City Disaster Event", cost: 0, time: 4, reward: 260, desc: "Fire, flood, and whoever gets out." },
+    { id: "survival-island", cat: "Emergency", label: "Deploy To Disaster Island", cost: 0, time: 0, reward: 0, desc: "Fly out to the island and survive it." },
 
-    { id: "hitman", cat: "Crime", label: "Hitman Contract", cost: 0, time: 0, reward: 900, desc: "Take a name off the network. The mark is a person the city already runs, a job, a shift, a habit. Quiet pays more than loud." },
-    { id: "official-contract", cat: "Crime", label: "Protected Contract", cost: 0, time: 0, reward: 15000, desc: "The upper wall: protected principals and sitting officeholders. The network only hands these to a proven reputation." },
-    { id: "jail", cat: "Crime", label: "Turn Yourself In", cost: 0, time: 0, reward: 0, desc: "Route into the jail/prison activity. Your city ledger keeps the arrest history." },
+    { id: "hitman", cat: "Crime", label: "Hitman Contract", cost: 0, time: 0, reward: 900, desc: "One name off the wall. Quiet pays more." },
+    { id: "official-contract", cat: "Crime", label: "Protected Contract", cost: 0, time: 0, reward: 15000, desc: "Protected names, and the office itself." },
+    { id: "jail", cat: "Crime", label: "Turn Yourself In", cost: 0, time: 0, reward: 0, desc: "Walk in. The ledger keeps the record." },
   ];
 
   function chance(base, skill) { return clamp(base + (skill || 0) * 0.012 + (Math.random() - 0.5) * 0.18, 0.12, 0.9); }
@@ -96,7 +96,7 @@
       return "<button class='ca-card' data-id='" + a.id + "'><div class='ca-name'>" + a.label + "</div><div class='ca-desc'>" + a.desc + "</div><div class='ca-meta'><span>" + price + "</span><span>" + reward + "</span></div></button>";
     }).join("");
     panel.innerHTML =
-      "<div class='ca-head'><div><div class='ca-title'>Gang Life Board</div><div class='ca-sub'>Jobs, bets, contracts, jail handoffs, and city consequences.</div></div><button class='ca-close'>Close</button></div>" +
+      "<div class='ca-head'><div class='ca-title'>Gang Life Board</div><button class='ca-close'>Close</button></div>" +
       "<div class='ca-tabs'>" + tabs + "</div><div class='ca-body'>" + cards + "</div>";
   }
 

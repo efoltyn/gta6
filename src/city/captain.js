@@ -1163,11 +1163,11 @@
           onSelect: function () { if (offers && offers.raid) startRaid(offers.raid); } },
         { id: "cv-none", slot: "e",
           canShow: function () { return !voyage && offers && !offers.charter && !offers.cargo && !offers.fish && !offers.salvage; },
-          label: function () { return "Nothing on the board, quiet water today"; },
+          label: function () { return "Nothing on the board"; },
           onSelect: function () { note("The sea will have work tomorrow.", 1.8); } },
         { id: "cv-live", slot: "e",
           canShow: function () { return !!voyage; },
-          label: function () { return "Voyage under way, see it through"; },
+          label: function () { return "Voyage under way"; },
           onSelect: function () {} },
       ],
     });
@@ -1230,7 +1230,7 @@
       options: [{
         id: "crate-load", slot: "e",
         canShow: function () { return voyage && voyage.kind === "cargo" && voyage.m && voyage.m.stageId && voyage.m.stageId() === "load" && !!boat; },
-        label: function () { return "Heave a crate into the hold (" + voyage.loaded + "/" + voyage.n + ")"; },
+        label: function () { return "Load a crate (" + voyage.loaded + "/" + voyage.n + ")"; },
         onSelect: function () {
           if (!boat || Math.hypot(boat.pos.x - (CBZ.player ? CBZ.player.pos.x : 0), boat.pos.z - (CBZ.player ? CBZ.player.pos.z : 0)) > 40) { note("Bring her alongside first.", 1.8); return; }
           if (hold && hold.closed) { try { hold.openRamp(); } catch (e) {} }

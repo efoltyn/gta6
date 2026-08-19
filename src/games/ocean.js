@@ -465,9 +465,9 @@
     }
 
     // ---- ZONES: the charter board + sell salvage (at the kiosk) ----
-    ctx.zone({ id: "charter", label: "Charter board, role & supply [DEAD WATER]",
+    ctx.zone({ id: "charter", label: "Charter board",
       pos: [kx, kz], r: 2.4, onUse: openCharter });
-    ctx.zone({ id: "sell", label: "Sell salvage [DEAD WATER]",
+    ctx.zone({ id: "sell", label: "Sell salvage",
       pos: [kx + ux * 1.6, kz + uz * 1.6], r: 2.0,
       canShow: () => bag().cargo.length > 0, onUse: sellSalvage });
   }

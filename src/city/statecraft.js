@@ -1074,7 +1074,7 @@
       });
       if (CBZ.interactions.describe) {
         CBZ.interactions.describe("govcommand", function () {
-          return { label: "Command HQ", note: "Fort Brandt, the garrison takes orders here" };
+          return { label: "Command HQ", note: "Fort Brandt garrison" };
         });
       }
     } catch (e) {}
