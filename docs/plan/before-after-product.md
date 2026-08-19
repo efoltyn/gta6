@@ -240,6 +240,29 @@ read 0. "The volcano kills way too many people and randomly" became
 `killedThisBeat`, better: lower. The receipt answers the complaint in the
 complaint's own words, which is why the owner can judge it in seconds.
 
+**A first receipt, read by an agent** (this session, 2026-08-19, in the
+cloud container): `node tools/before-after.mjs tsunami-stages` — ten beats,
+both sides, HTML + PDF + metadata in **2 m 24 s**, flag A/B with only
+`TSU_PACE_V2` differing. Two experiences worth recording. First, an agent
+that had never once seen this game run judged the pacing change in under a
+minute: `Clock at beat` green on every row (36.0 → 22.0 s by the
+aftermath — the same physical moments reached ~40% sooner), the
+`refugesStanding` invariant 10/10 on both sides, and the costs honestly red
+(worst sim tick 29 → 56 ms on the crossing beat, draw calls up). The trade
+the change makes is legible to a stranger. Second — **the receipt caught a
+defect every number missed**: the after-side PEAK tripod stands behind a
+skyscraper, so the standing wave (the beat's entire subject, "the owner's
+reference frame") is a sliver at the frame's edge while all fifteen metric
+rows on that beat read green or neutral. The pictures and the numbers
+cross-check each other; that is why the receipt carries both. And the fix
+already exists one preset over — volcano-stages' "the tripod proves its own
+sightline" raycast audition — which turns into an extraction item: promote
+the sightline audition, and the ~80 lines of boot/step/overlay boilerplate
+tsunami and volcano each re-implement, into an optional **staging stdlib**
+the standalone tool ships (`until`/`step`, the caption overlay kit, the
+stand audition). The preset contract does not change; presets simply get to
+import what they currently copy.
+
 And the fourth layer, which is not code and is the part worth the most: **the
 method**. Every change behind a `cfg_*` flag → flag A/B against this same
 checkout is the honest before → two-sided proof (the revert must bring the
@@ -391,6 +414,27 @@ receipt archive per problem (outside the repo, or under a receipts branch
 or LFS — decide at build time), because a receipt history is something no
 repository has ever had — **a changelog a non-coder can read**, the story
 of the app told in deltas rather than diffs.
+
+**The drawer's screen: the receipt renders where the conversation is**
+(owner, 2026-08-19): *"I'm constantly telling my agents to physically open
+the before after pdf... right now I have a Preview tab with the before
+after pdf and then the agent somewhere as one of 20 terminal tabs."* Named
+precisely: today the **judgment surface** (the PDF in Preview) and the
+**conversation surface** (the agent's tab) are different windows in
+different apps, and the owner is the human window manager pairing them
+twenty times over — plus every open costs a spoken instruction and
+filesystem access the agent may not have. The requirement: **evidence and
+author in one frame.** A drawer shows the agent's session *and* its latest
+receipt together, so you talk to the agent while looking at its
+before/after. Mechanism, thin as everything else here: a `ba show
+[--watch]` verb that renders the newest receipt's images inline in the
+terminal — kitty/iTerm2/WezTerm/Ghostty inline-image protocols (tmux ≥3.3
+passes them through), sixel as the fallback, and a localhost `report.html`
+link when the terminal can't render images at all. The engine already
+writes the PNGs and the contact sheet; `show` is a small verb, and
+`--watch` re-renders when `metadata.json` changes so a drawer's receipt
+pane updates the moment its agent finishes a run. No more `open`, no more
+Preview, no more pairing by hand.
 
 **What it is not: a terminal emulator.** tmux already multiplexes terminals
 perfectly and every CLI agent runs happily in a pane; rebuilding that is
