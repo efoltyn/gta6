@@ -217,32 +217,6 @@
     }
   });
 
-  // ---- the tiny walk-up prompt chip (one DOM node, hidden when idle) -------
-  // Sits just under the elevator chip's slot so the two never overlap.
-  let chip = null;
-  function dom() {
-    if (chip || typeof document === "undefined" || !document.body) return;
-    try {
-      chip = document.createElement("div");
-      chip.id = "adChip";
-      chip.style.cssText = "position:fixed;left:50%;transform:translateX(-50%);bottom:214px;z-index:24;display:none;" +
-        "padding:6px 12px;border-radius:9px;background:rgba(20,14,4,.8);border:1px solid rgba(255,209,102,.35);" +
-        "color:#ffe2a0;font:600 13px/1.2 'Fredoka',system-ui,sans-serif;pointer-events:none;text-shadow:0 1px 2px #000";
-      document.body.appendChild(chip);
-    } catch (e) { chip = null; }
-  }
-  // PERF: skip the DOM writes unless the text changed — re-setting the same
-  // textContent/display at the 12 Hz tick still dirties the DOM for nothing.
-  let _chipLast;
-  function chipText(t) {
-    if (t === _chipLast) return;
-    dom(); if (!chip) return;
-    _chipLast = t;
-    if (!t) { chip.style.display = "none"; return; }
-    if (CBZ.touchPromptChip) { CBZ.touchPromptChip(chip, t); return; }
-    chip.style.display = "block"; chip.innerHTML = t;
-  }
-
   // is the player standing at an elevator pad? The lift's [E] outranks ours.
   function liftNearby() {
     const els = CBZ.cityElevators && CBZ.cityElevators(); if (!els) return false;
@@ -266,59 +240,15 @@
     return best;
   }
 
-  // ~12 Hz proximity prompt: owner + price up front, like any market here
-  let acc = 0;
-  CBZ.onUpdate(36.8, function (dt) {
-    if (g.mode !== "city") { chipText(null); return; }
-    acc += dt; if (acc < 1 / 12) return; acc = 0;
-    const P = CBZ.player;
-    if (g.state !== "playing" || !P || P.dead || P.driving || CBZ.cityMenuOpen || liftNearby()) { chipText(null); return; }
-    const b = boardNear();
-    if (!b) { chipText(null); return; }
-    if (b.lease) {
-      chipText(lease("PULL YOUR AD", "[E] Pull your ad",
-        " — " + (b.lease.bizName ? b.lease.bizName + " · " : "") + money(b.lease.per) + "/wk runs until you do"));
-    } else {
-      chipText(lease("RENT THIS BOARD", "[E] Rent this board",
-        " — " + money(priceOf(b)) + "/wk · " + ownerOf(b) + " (" + districtLabel(b) + ")"));
-    }
-  });
-
-  // The board prompt: a verb and a PRICE. On touch the verb becomes a pill and
-  // the price stays prose beside it (the chip keeps its slab for exactly that
-  // reason) — desktop gets the byte-identical single string it always had.
-  // The tail is game data (a business name, a district) and the chip now
-  // writes innerHTML, so it is escaped on BOTH paths — a board named "R&D <b>"
-  // must render as its name, not as markup.
-  function lease(pill, key, tail) {
-    return (CBZ.touchActionPrompt ? CBZ.touchActionPrompt("e", pill, key) : key) + escText(tail);
-  }
-  function escText(s) {
-    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  }
-
-  // [E] signs / ends the lease. DOCUMENT-level so stopPropagation beats
-  // interact.js's window-level "[E] = eat" fallback (the elevator pattern).
-  function onKey(e) {
-    if (g.mode !== "city" || g.state !== "playing" || CBZ.cityMenuOpen) return;
-    const P = CBZ.player;
-    if (!P || P.dead || P.driving) return;
-    if ((e.key || "").toLowerCase() !== "e") return;
-    if (liftNearby()) return;                       // the lift wins this spot
-    const b = boardNear();
-    if (!b) return;
-    e.preventDefault();
-    e.stopPropagation();
-    if (b.lease) endLease(b, false);
-    else rentBoard(b);
-  }
-  if (typeof document !== "undefined" && document.addEventListener) document.addEventListener("keydown", onKey);
-
-  /* THE VERB EXISTED ONLY ON A KEYBOARD (2026-08-18). This file hung its [E]
-     on a raw document keydown, which means the verb has no card, no button and
-     no existence at all on the tablet this game is played on. The registry is
-     what turns a proximity verb into a thumb target, and it costs one record:
-     the SAME finder, the SAME body. The keydown stays for the desktop. */
+  /* THE CARD IS THE WHOLE PROMPT. This file used to run a #adChip prompt div,
+     a chip pill and a raw document [E] keydown BESIDE this zone — two whole
+     surfaces for one verb, shipped by two sessions each fixing the same
+     "no button on a tablet" outage a day apart. All of it is deleted; the
+     registry renders the one card and dispatches the one [E]/tap. The weekly
+     PRICE rides the button (a figure is what the thumb is deciding on); the
+     owner, district and lease terms already arrive in the note channel when
+     the verb fires (rentBoard/endLease narrate them), so nothing the chip
+     printed is lost. */
   let zoned = false;
   CBZ.onUpdate(99.62, function () {
     if (zoned || !CBZ.interactions || !CBZ.interactions.registerZone) return;
@@ -332,7 +262,12 @@
       },
       options: [{
         id: "adboard-lease", slot: "e",
-        label: function (b) { return b && b.lease ? "End the lease" : "Rent the board"; },
+        label: function (b) {
+          if (!b) return "Rent the board";
+          return b.lease
+            ? "End the lease - " + money(b.lease.per) + "/wk"
+            : "Rent the board - " + money(priceOf(b)) + "/wk";
+        },
         onSelect: function (b) { if (!b) return; if (b.lease) endLease(b, false); else rentBoard(b); },
       }],
     });

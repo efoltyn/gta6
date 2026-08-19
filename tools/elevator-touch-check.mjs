@@ -1,27 +1,36 @@
 #!/usr/bin/env node
-/* tools/elevator-touch-check.mjs — CAN A THUMB CALL THE LIFT? (owner,
-   2026-08-18: "Elevators aren't working on touch in Gang City. There's no
-   button coming up.")
+/* tools/elevator-touch-check.mjs — ONE BUTTON PER VERB, ON EVERY INPUT.
 
-   They weren't, and it was two failures stacked:
-     1. css/city.css's LIVE-WORLD DECLUTTER hides #elevChip during city play.
-        Keyboard players lose only the prose — [E] still calls the lift blind.
-        A thumb has no [E], so the whole elevator system was unreachable.
-     2. Even unhidden, the chip printed "[E] Elevator — call" — a KEY GLYPH on
-        a device with no keys — as textContent, inside pointer-events:none.
+   History, because this probe used to assert the opposite: the lift (and the
+   roof stash, the beach bag, the ad board) once had NO control on a tablet,
+   and two different sessions fixed that same outage a day apart — one gave
+   each module's private chip a tappable pill (34ad5d9), the other registered
+   interaction zones (c844a7a). Both shipped. A player then stood at a lift
+   looking at an ELEVATOR UP pill NEXT TO a CALL THE LIFT card, two buttons
+   for one verb. The pills, the idle chip prompts and the modules' raw [E]
+   keydowns are deleted now; the interaction registry is the single surface —
+   the card, its [E] dispatch, and its tap — and the chips keep only status
+   prose (the ride ticker, "Prying it open…") that the card has no channel
+   for.
 
    So this probe measures the CONSEQUENCE, in the live city, through the real
-   CSS cascade and a real click on the real pill:
+   CSS cascade:
 
-     1. the chip is VISIBLY shown (computed display, not the inline style) when
-        a touch player stands on a lift pad,
-     2. it carries a worded .tpill and NOT a "[E]" glyph,
-     3. the pill is hit-testable (pointer-events:auto inside the inert chip),
-     4. CLICKING IT CALLS THE LIFT — the machine leaves idle and the doors
-        actually open, via elevators.js's own [E] handler,
-     5. the ride ticker keeps its readable slab (.haspill only on pill states),
-     6. DESKTOP IS UNCHANGED: the same prompt renders as the exact old string,
-     7. touchAudit reports elevator-call covered.
+     DESKTOP
+     1. on a lift pad the #interact card is live and offers the lift verb,
+     2. #elevChip shows NO idle prompt (the card is the only surface),
+     3. a real [E] keydown — dispatched, not short-circuited — calls the lift
+        through the registry (the raw capture-phase keydown is gone),
+     TOUCH
+     4. on a lift pad there is exactly ONE control: the card. No .tpill in
+        #elevChip, no second button,
+     5. clicking the card's row calls the lift — doors actually open,
+     6. the ride ticker still renders in #elevChip with its readable slab,
+     7. the SIBLING verbs (roof stash, beach bag, ad board) are also
+        single-surfaced: card offers the verb, chip carries no pill, #adChip
+        does not exist at all, and firing the row DOES the verb,
+     8. the chest keeps its pill (it has no zone — one surface is one surface),
+     9. touchAudit reports every walk-up verb covered.
 
    Usage: node tools/elevator-touch-check.mjs      Exit 0 = ok.              */
 import { spawn } from "node:child_process";
@@ -65,25 +74,47 @@ await send("Runtime.enable");
 await send("Page.enable");
 for (let i = 0; i < 900; i++) { if (await evl("!!window.CBZ && !!CBZ.bootComplete")) break; await sleep(500); }
 
-// ---- DESKTOP FIRST: the prompt must still be the byte-identical old string.
-// Measured BEFORE the touch layer arms, in the same session, so the two
-// grammars are compared against one code path rather than two builds.
+// ---- DESKTOP FIRST: the card is the surface, the chip is silent, and a real
+// [E] reaches the lift THROUGH THE REGISTRY (the raw keydown is deleted, so
+// if the zone dispatch broke, this press would do nothing).
 const DESKTOP = `(() => {
   const out = { fails: [] };
   const g = CBZ.game;
+  const step = (n) => { for (let i = 0; i < n; i++) CBZ.stepSim(1/60); };
   if (g.cityCampaign) g.cityCampaign.phase = "endless_contracts";
   CBZ.setMode("city"); CBZ.resetGame && CBZ.resetGame(); CBZ.setState && CBZ.setState("playing");
-  for (let i = 0; i < 60; i++) CBZ.stepSim(1/60);
+  step(60);
   const els = CBZ.cityElevators && CBZ.cityElevators();
   if (!els || !els.length) { out.fails.push("no elevators built in the city"); return out; }
   const el = els[0];
   CBZ.player.pos.set(el.groundPad.x, el.gFloor + 0.05, el.groundPad.z);
-  for (let i = 0; i < 30; i++) CBZ.stepSim(1/60);
+  step(30);
+  // 1. the card is live and it is the LIFT's card
+  const cur = CBZ.interactions && CBZ.interactions.current && CBZ.interactions.current();
+  out.cardKind = cur && cur.kind;
+  if (out.cardKind !== "lift") out.fails.push("the interact card is not offering the lift on its pad (kind=" + out.cardKind + ")");
+  const panel = document.getElementById("interact");
+  out.cardVisible = !!panel && getComputedStyle(panel).display !== "none";
+  if (!out.cardVisible) out.fails.push("#interact is not visible on a lift pad (the declutter exception is broken)");
+  // 2. the chip carries NO idle prompt — the card is the only surface
   const chip = document.getElementById("elevChip");
-  out.chipExists = !!chip;
-  out.html = chip ? chip.innerHTML : null;
-  out.expected = "[E] Elevator — call (ride to the roof)";
-  if (out.html !== out.expected) out.fails.push("desktop prompt changed: " + JSON.stringify(out.html));
+  out.chipIdle = !chip || getComputedStyle(chip).display === "none" || !chip.textContent.trim();
+  if (!out.chipIdle) out.fails.push("#elevChip still prints an idle call prompt beside the card: " + JSON.stringify(chip.textContent));
+  // 3. a REAL [E] keydown calls the lift via the registry dispatch
+  out.stBefore = el.m.st;
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "e", code: "KeyE", bubbles: true, cancelable: true }));
+  document.dispatchEvent(new KeyboardEvent("keyup", { key: "e", code: "KeyE", bubbles: true, cancelable: true }));
+  step(30);
+  out.stAfter = el.m.st;
+  out.doorsMoving = el.ground.target > 0 || el.ground.open > 0;
+  if (out.stAfter === "idle") out.fails.push("[E] did not call the lift through the registry (still idle)");
+  if (!out.doorsMoving) out.fails.push("[E] called the lift but the ground doors never opened");
+  // hand the machine back to idle for the touch half: step off the pad and let
+  // the un-boarded call time out (WAIT_OPEN 4s + the close), doors home again.
+  CBZ.player.pos.set(el.groundPad.x + 8, 0.2, el.groundPad.z + 8);
+  for (let i = 0; i < 600 && el.m.st !== "idle"; i++) CBZ.stepSim(1/60);
+  out.machineReset = el.m.st === "idle";
+  if (!out.machineReset) out.fails.push("the un-boarded call never timed out back to idle");
   return out;
 })()`;
 const desk = await evl(DESKTOP);
@@ -113,34 +144,26 @@ const PASS = `(() => {
   if (!els || !els.length) { out.fails.push("no elevators built in the city"); return out; }
   const el = els[0];
 
-  // ---- 1+2+3. stand on the ground pad: a VISIBLE, WORDED, TAPPABLE button --
+  // ---- 4. on the pad: ONE control — the card. No pill, no twin. -----------
   CBZ.player.pos.set(el.groundPad.x, el.gFloor + 0.05, el.groundPad.z);
   step(30);
+  const cur = CBZ.interactions && CBZ.interactions.current && CBZ.interactions.current();
+  out.cardKind = cur && cur.kind;
+  if (out.cardKind !== "lift") { out.fails.push("the interact card is not offering the lift (kind=" + out.cardKind + ")"); return out; }
+  const panel = document.getElementById("interact");
+  out.cardVisible = shown(panel);
+  if (!out.cardVisible) out.fails.push("#interact is hidden on touch on a lift pad — the verb has no control");
+  const row = panel && panel.querySelector("#interactOpts .iopt");
+  out.rowText = row ? row.textContent.trim() : null;
+  if (!row) { out.fails.push("the card has no tappable row"); return out; }
+  const rr = row.getBoundingClientRect();
+  out.rowBox = { w: Math.round(rr.width), h: Math.round(rr.height) };
+  if (rr.width < 44 || rr.height < 32) out.fails.push("the card row is too small for a thumb: " + JSON.stringify(out.rowBox));
   const chip = document.getElementById("elevChip");
-  out.chipExists = !!chip;
-  if (!chip) { out.fails.push("#elevChip was never built"); return out; }
-  out.chipVisible = shown(chip);
-  if (!out.chipVisible) out.fails.push("#elevChip computed display:none on a lift pad — the declutter still hides the only lift control on touch");
-  const pill = chip.querySelector(".tpill");
-  out.pillBuilt = !!pill;
-  if (!pill) { out.fails.push("no .tpill in the chip — touch still gets a key glyph: " + JSON.stringify(chip.innerHTML)); return out; }
-  out.pillLabel = pill.textContent;
-  out.noKeyGlyph = chip.textContent.indexOf("[E]") < 0;
-  if (!out.noKeyGlyph) out.fails.push("a keyboard glyph is on the glass: " + JSON.stringify(chip.textContent));
-  out.pillTappable = getComputedStyle(pill).pointerEvents === "auto";
-  if (!out.pillTappable) out.fails.push("the pill is not hit-testable (pointer-events " + getComputedStyle(pill).pointerEvents + ")");
-  const r = pill.getBoundingClientRect();
-  out.pillBox = { w: Math.round(r.width), h: Math.round(r.height), bottomGap: Math.round(innerHeight - r.bottom) };
-  if (r.width < 44 || r.height < 40) out.fails.push("pill too small for a thumb: " + JSON.stringify(out.pillBox));
-  out.pillOnScreen = r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth;
-  if (!out.pillOnScreen) out.fails.push("pill is off-screen: " + JSON.stringify(r));
-  // the topmost element at the pill's centre must BE the pill: nothing in the
-  // HUD stack may sit over the only button the lift has.
-  const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-  out.pillIsTopmost = hit === pill || (hit && pill.contains(hit));
-  if (!out.pillIsTopmost) out.fails.push("something covers the pill: #" + (hit && (hit.id || hit.className)));
-  out.flattened = chip.classList.contains("haspill") && getComputedStyle(chip).borderTopWidth === "0px";
-  if (!out.flattened) out.notes.push("pill state did not flatten the chip slab");
+  out.chipHasPill = !!(chip && chip.querySelector(".tpill"));
+  if (out.chipHasPill) out.fails.push("#elevChip renders a pill again — TWO buttons for one verb (the 2026-08-19 double)");
+  out.chipIdleSilent = !chip || getComputedStyle(chip).display === "none" || !chip.textContent.trim();
+  if (!out.chipIdleSilent) out.fails.push("#elevChip prints an idle prompt beside the card: " + JSON.stringify(chip && chip.textContent));
 
   window.__elev = el;                 // handed to the second half (after the shot)
   return out;
@@ -150,19 +173,21 @@ const PASS_B = `(() => {
   const g = CBZ.game;
   const step = (n) => { for (let i = 0; i < n; i++) CBZ.stepSim(1/60); };
   const el = window.__elev;
+  if (!el) { out.fails.push("first half never handed over a lift"); return out; }
+  const panel = document.getElementById("interact");
   const chip = document.getElementById("elevChip");
-  const pill = chip.querySelector(".tpill");
 
-  // ---- 4. THE TAP CALLS THE LIFT ------------------------------------------
+  // ---- 5. TAPPING THE CARD ROW CALLS THE LIFT -----------------------------
+  const row = panel && panel.querySelector("#interactOpts .iopt");
   out.stBefore = el.m.st;
-  pill.click();
+  if (row) row.click();
   step(30);
   out.stAfter = el.m.st;
   out.doorsMoving = el.ground.target > 0 || el.ground.open > 0;
-  if (out.stAfter === "idle") out.fails.push("tapping the pill did not call the lift (still idle)");
+  if (out.stAfter === "idle") out.fails.push("tapping the card row did not call the lift (still idle)");
   if (!out.doorsMoving) out.fails.push("the lift was called but the ground doors never opened");
 
-  // ---- 5. the ride ticker keeps its slab ----------------------------------
+  // ---- 6. the ride ticker keeps its slab ----------------------------------
   // ride the cab and read the chip mid-flight: a floor ticker is prose, and
   // prose over the skyline needs its backing box.
   for (let i = 0; i < 900 && el.m.st !== "ride"; i++) {
@@ -172,8 +197,10 @@ const PASS_B = `(() => {
   out.reachedRide = el.m.st === "ride";
   if (out.reachedRide) {
     step(10);
-    out.tickerText = chip.textContent;
-    out.tickerHasSlab = !chip.classList.contains("haspill") &&
+    out.tickerText = chip ? chip.textContent : null;
+    out.tickerShows = !!chip && getComputedStyle(chip).display !== "none" && !!chip.textContent.trim();
+    if (!out.tickerShows) out.fails.push("the ride ticker never rendered in #elevChip — the chip's one remaining job");
+    out.tickerHasSlab = !!chip && !chip.classList.contains("haspill") &&
       getComputedStyle(chip).backgroundColor !== "rgba(0, 0, 0, 0)";
     if (!out.tickerHasSlab) out.fails.push("the floor ticker lost its readable backing");
     for (let i = 0; i < 1800 && el.m.st === "ride"; i++) CBZ.stepSim(1/60);
@@ -182,56 +209,57 @@ const PASS_B = `(() => {
     if (!out.rodeUp) out.fails.push("the ride never lifted the player (y=" + out.arrivedFloorY + ")");
   } else out.notes.push("could not board within the door window — call+doors verified, ride half skipped");
 
-  // ---- 6. THE SIBLINGS ----------------------------------------------------
-  // The lift was one tenant of css/city.css's declutter list; four more verbs
-  // were dead on touch for exactly the same reason, and the roof stash is the
-  // place the lift RIDES YOU TO. Each gets the same three questions: is the
-  // chip actually on the glass, is its control a tappable pill rather than a
-  // key glyph, and does tapping it DO the verb.
+  // ---- 7. THE SIBLINGS: single-surfaced, and the row DOES the verb --------
+  // Each was double-buttoned by the same pair of sessions. Three questions
+  // now: does the CARD offer the verb, is the module chip pill-free, and does
+  // firing the row run the verb (the chips' surviving status prose may
+  // narrate it, which is exactly their one job).
   out.siblings = {};
   const P = CBZ.player;
-  const probe = (name, id, place, changed) => {
+  const probe = (name, kind, chipId, place, fire) => {
     const r = { placed: false };
     out.siblings[name] = r;
     try { if (!place()) { r.skip = "nothing of this kind in the world"; return; } } catch (e) { r.skip = "place threw: " + e; return; }
     r.placed = true;
     step(30);
-    const c = document.getElementById(id);
-    r.chipExists = !!c;
-    if (!c) { out.fails.push(name + ": #" + id + " was never built"); return; }
-    r.visible = getComputedStyle(c).display !== "none";
-    if (!r.visible) { out.fails.push(name + ": #" + id + " is display:none on touch — the verb has no control"); return; }
-    const pl = c.querySelector(".tpill");
-    r.pill = pl ? pl.textContent : null;
-    r.noKeyGlyph = c.textContent.indexOf("[E]") < 0;
-    if (!pl) { out.fails.push(name + ": no pill, touch still gets " + JSON.stringify(c.textContent)); return; }
-    if (!r.noKeyGlyph) out.fails.push(name + ": a keyboard glyph is on the glass: " + JSON.stringify(c.textContent));
-    const bb = pl.getBoundingClientRect();
-    r.box = { w: Math.round(bb.width), h: Math.round(bb.height) };
-    if (bb.width < 44 || bb.height < 40) out.fails.push(name + ": pill too small for a thumb " + JSON.stringify(r.box));
-    const hit = document.elementFromPoint(bb.left + bb.width / 2, bb.top + bb.height / 2);
-    r.topmost = hit === pl || (pl.contains(hit));
-    if (!r.topmost) out.fails.push(name + ": something covers the pill (#" + (hit && (hit.id || hit.className)) + ")");
-    const before = c.textContent;
-    pl.click();
-    step(45);
-    r.acted = changed(before, c);
-    if (!r.acted) out.fails.push(name + ": tapping the pill did nothing");
+    const cur = CBZ.interactions.current && CBZ.interactions.current();
+    r.cardKind = cur && cur.kind;
+    if (r.cardKind !== kind) { out.fails.push(name + ": the interact card is not offering the verb (kind=" + r.cardKind + ")"); return; }
+    const c = chipId ? document.getElementById(chipId) : null;
+    r.chipHasPill = !!(c && c.querySelector(".tpill"));
+    if (r.chipHasPill) out.fails.push(name + ": #" + chipId + " renders a pill again — two buttons for one verb");
+    r.chipIdleSilent = !c || getComputedStyle(c).display === "none" || !c.textContent.trim();
+    if (!r.chipIdleSilent) out.fails.push(name + ": #" + chipId + " prints an idle prompt beside the card");
+    const rw = panel && panel.querySelector("#interactOpts .iopt");
+    r.rowText = rw ? rw.textContent.trim() : null;
+    if (!rw) { out.fails.push(name + ": the card has no tappable row"); return; }
+    rw.click();
+    r.acted = !!fire(c);
+    if (!r.acted) out.fails.push(name + ": tapping the card row did nothing");
   };
 
-  probe("roof-stash", "roofStashChip", () => {
+  probe("roof-stash", "roofstash", "roofStashChip", () => {
     const st = (CBZ.cityRoofStashes && CBZ.cityRoofStashes() || []).filter((x) => !x.looted)[0];
     if (!st) return false;
     window.__st = st; P.pos.set(st.x, st.y + 0.1, st.z); return true;
-  }, (before, c) => window.__st.looted || c.textContent !== before);
+  }, (c) => {
+    step(10);
+    const prose = c && c.textContent;                 // "Prying it open…" — the chip's status job
+    step(120);                                        // CRACK_T=0.9s and change
+    window.__stProse = prose;
+    return !!window.__st.looted;
+  });
 
-  probe("beach-loot", "beachLootChip", () => {
+  probe("beach-loot", "beachbag", "beachLootChip", () => {
     const L = (CBZ.cityBeachLoot && CBZ.cityBeachLoot() || []).filter((x) => !x.looted)[0];
     if (!L) return false;
     window.__L = L; P.pos.set(L.x, 0.1, L.z); return true;
-  }, (before, c) => window.__L.looted || c.textContent !== before);
+  }, () => {
+    step(120);                                        // RIFLE_T=0.7s and change
+    return !!window.__L.looted;
+  });
 
-  probe("adboard-lease", "adChip", () => {
+  probe("adboard-lease", "adboard", null, () => {
     // boards register as props stream in, so come back to the ground and let
     // the world settle before deciding there are none.
     let b = (CBZ.cityAdBoards || []).filter((x) => !x.lease)[0];
@@ -239,52 +267,49 @@ const PASS_B = `(() => {
     if (!b) return false;
     g.cash = Math.max(g.cash || 0, 500000);
     window.__b = b; P.pos.set(b.x, (b.y || 0) < 2 ? 0.2 : b.y, b.z); return true;
-  }, (before, c) => !!window.__b.lease || c.textContent !== before);
+  }, () => {
+    step(30);
+    return !!window.__b.lease;
+  });
+  // the ad board's own chip is DELETED, not just silenced — a node coming back
+  // is the parallel prompt coming back.
+  out.adChipGone = !document.getElementById("adChip");
+  if (!out.adChipGone) out.fails.push("#adChip exists again — the parallel ad-board prompt is back");
 
-  // Ad boards stream with their props and a given seed may simply not have one
-  // in reach. The board is also the ONLY prompt that mixes a pill with prose
-  // (the verb is a button, the weekly price is text beside it), so when the
-  // world cannot supply one, assert that layout directly through the same
-  // writer the module uses — the restore and the kept slab are the two things
-  // that were broken, and both are testable without a billboard.
-  if (!out.siblings["adboard-lease"].placed) {
-    let ad = document.getElementById("adChip");
-    if (!ad) { ad = document.createElement("div"); ad.id = "adChip"; document.body.appendChild(ad); }
-    CBZ.touchPromptChip(ad, CBZ.touchActionPrompt("e", "RENT THIS BOARD", "[E] Rent this board") +
-      " — $1,250/wk · Vance Media (Downtown)");
-    const st = getComputedStyle(ad);
-    const apl = ad.querySelector(".tpill");
-    const r2 = out.siblings["adboard-lease"];
-    r2.domFallback = true;
-    r2.visible = st.display !== "none";
-    r2.pill = apl ? apl.textContent : null;
-    r2.proseKeptSlab = !ad.classList.contains("haspill") && st.backgroundColor !== "rgba(0, 0, 0, 0)";
-    r2.priceStillReadable = ad.textContent.indexOf("$1,250/wk") >= 0;
-    if (!r2.visible) out.fails.push("adboard-lease: #adChip still display:none on touch in the city");
-    if (!apl) out.fails.push("adboard-lease: the verb did not become a pill");
-    if (!r2.proseKeptSlab) out.fails.push("adboard-lease: a prompt that still carries prose lost its backing slab");
-    if (!r2.priceStillReadable) out.fails.push("adboard-lease: the weekly price fell out of the prompt");
-    ad.style.display = "none";
+  // ---- 8. the chest KEEPS its pill: it has no zone, the chip IS its verb --
+  {
+    const r = { placed: false };
+    out.siblings["chest-open"] = r;
+    const INV = CBZ.cityInventory;
+    if (INV && INV.placeChest) {
+      g.cash = Math.max(g.cash || 0, 50000);
+      let c = null;
+      for (let i = 0; i < 8 && !c; i++) {
+        P.pos.set(6 + i * 3, 0.2, 6 + i * 3); P.heading = i * 0.8;
+        step(4);
+        if (INV.placeChest({ buy: true })) c = INV.chests()[INV.chests().length - 1];
+      }
+      if (c) {
+        r.placed = true;
+        P.pos.set(c.x + 0.7, 0.2, c.z);
+        step(30);
+        const node = document.getElementById("ci2Chip");
+        const pl = node && node.querySelector(".tpill");
+        r.pill = pl ? pl.textContent : null;
+        if (!pl) out.fails.push("chest-open: the chest lost its pill — it has no zone, so it now has no control at all");
+        else {
+          const before = node.textContent;
+          pl.click();
+          step(45);
+          r.acted = !!CBZ.cityMenuOpen || !!CBZ.invOpen || node.textContent !== before;
+          if (!r.acted) out.fails.push("chest-open: tapping the pill did nothing");
+        }
+      } else r.skip = "could not place a chest";
+    } else r.skip = "no chest system";
   }
 
-  probe("chest-open", "ci2Chip", () => {
-    const INV = CBZ.cityInventory;
-    if (!INV || !INV.placeChest) return false;
-    g.cash = Math.max(g.cash || 0, 50000);
-    // placeChest drops it 1.6 m ahead of the player and refuses a blocked
-    // spot, so try a few headings from open ground rather than one.
-    let c = null;
-    for (let i = 0; i < 8 && !c; i++) {
-      P.pos.set(6 + i * 3, 0.2, 6 + i * 3); P.heading = i * 0.8;
-      step(4);
-      if (INV.placeChest({ buy: true })) c = INV.chests()[INV.chests().length - 1];
-    }
-    if (!c) return false;
-    window.__c = c; P.pos.set(c.x + 0.7, 0.2, c.z); return true;
-  }, (before, c) => !!CBZ.cityMenuOpen || !!CBZ.invOpen || c.textContent !== before);
-
   // #fxPrompt is click-wired already (sim/forex.js owns its own handler), so
-  // VISIBILITY was the whole of its bug — assert the restored cascade directly.
+  // VISIBILITY is the whole of its contract — assert the restored cascade.
   {
     let fx = document.getElementById("fxPrompt");
     if (!fx) { fx = document.createElement("div"); fx.id = "fxPrompt"; document.body.appendChild(fx); }
@@ -292,20 +317,22 @@ const PASS_B = `(() => {
     const vis = getComputedStyle(fx).display !== "none";
     out.siblings["fx-terminal"] = { visible: vis, cssOnly: true };
     if (!vis) out.fails.push("fx-terminal: #fxPrompt still display:none on touch in the city");
+    fx.style.display = "none";
   }
 
-  // ---- 7. the verb ledger says so -----------------------------------------
+  // ---- 9. the verb ledger says so -----------------------------------------
   const aud = CBZ.touchAudit();
   const rows = ["elevator-call", "roof-stash", "beach-loot", "adboard-lease", "chest-open", "fx-terminal"];
-  out.elevCovered = rows.every((id) => aud.uncovered.indexOf(id) < 0 && !aud.noHook.some((s) => s.indexOf(id + " ") === 0));
-  if (!out.elevCovered) out.fails.push("touchAudit does not report the walk-up verbs covered");
+  out.verbsCovered = rows.every((id) => aud.uncovered.indexOf(id) < 0 && !aud.noHook.some((s) => s.indexOf(id + " ") === 0));
+  if (!out.verbsCovered) out.fails.push("touchAudit does not report the walk-up verbs covered");
   out.audit = { verbs: aud.verbs, covered: aud.covered, uncovered: aud.uncovered, noHook: aud.noHook };
   return out;
 })()`;
 const res = await evl(PASS);
-// THE PICTURE: the owner's report was "there's no button coming up", so the
-// proof is a frame with the button in it. Taken between the two halves, while
-// the player stands on the pad and before the tap consumes the prompt.
+// THE PICTURE: the original report was "there's no button coming up"; the
+// regression this probe now guards is "there are TWO". The proof either way is
+// a frame with the pad in it — taken while the player stands there, before the
+// tap consumes the card.
 let shot = null;
 if (res && !res.fails.length) {
   const cap = await send("Page.captureScreenshot", { format: "png" });
