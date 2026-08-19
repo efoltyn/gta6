@@ -264,7 +264,7 @@
     const E = econ(); if (!E) return false;
     if (entry.kind === "item") { E.add(entry.name, count || entry.count); return true; }
     if (entry.melee) {
-      if (g.cityMeleeWeapon && g.cityMeleeWeapon !== entry.name) { note("Hands full — stash your " + g.cityMeleeWeapon + " first.", 1.8); return false; }
+      if (g.cityMeleeWeapon && g.cityMeleeWeapon !== entry.name) { note("Hands full, stash your " + g.cityMeleeWeapon + " first.", 1.8); return false; }
       g.cityMeleeWeapon = entry.name;
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
       return true;
@@ -814,13 +814,13 @@
     const h = P.heading || 0;
     const x = P.pos.x + Math.sin(h) * 1.6, z = P.pos.z + Math.cos(h) * 1.6;
     if (spotBlocked(x, z)) {
-      note("No room here — face an open spot.", 1.8);
+      note("No room here, face an open spot.", 1.8);
       if (paid) { g.cash += CHEST_COST; } else { E.add("Chest", 1); }
       return false;
     }
     const c = { id: "c" + Date.now().toString(36) + ((Math.random() * 1e4) | 0), x, z, slots: new Array(CHEST_N).fill(null), mesh: buildChestMesh(x, z) };
     chests.push(c);
-    note("Chest placed — walk up and press [E] to open it.", 2.4);
+    note("Chest placed, walk up and press [E] to open it.", 2.4);
     persistChests(); commit();
     return true;
   }
@@ -1226,6 +1226,16 @@
   }
   if (typeof document !== "undefined" && document.addEventListener) document.addEventListener("keydown", onChestKey);
 
+  // Your OWN chest, and on touch it could not be opened: the chip carrying the
+  // verb is in css/city.css's declutter list. Desktop string unchanged; touch
+  // gets the pill that fires the same [E] handler above.
+  function chestPrompt(c) {
+    const desktop = chestEmpty(c) ? "[E] Open chest (empty)" : "[E] Open chest";
+    return CBZ.touchActionPrompt
+      ? CBZ.touchActionPrompt("e", chestEmpty(c) ? "OPEN CHEST (EMPTY)" : "OPEN CHEST", desktop)
+      : desktop;
+  }
+
   // proximity chip
   let chip = null, _chipLast;
   function chipText(t) {
@@ -1238,7 +1248,8 @@
       document.body.appendChild(chip);
     }
     if (!t) { chip.style.display = "none"; return; }
-    chip.style.display = "block"; chip.textContent = t;
+    if (CBZ.touchPromptChip) { CBZ.touchPromptChip(chip, t); return; }
+    chip.style.display = "block"; chip.innerHTML = t;
   }
 
   // ============================================================
@@ -1348,7 +1359,7 @@
       const P = CBZ.player;
       if (playing() && P && !P.dead && !P.driving && !CBZ.cityMenuOpen && !CBZ.invOpen) {
         const c = chestNear(REACH);
-        chipText(c ? (chestEmpty(c) ? "[E] Open chest (empty)" : "[E] Open chest") : null);
+        chipText(c ? chestPrompt(c) : null);
       } else chipText(null);
     }
   });
@@ -1800,7 +1811,7 @@
 
   function bagPickup(bag) {
     if (!bagsOn() || !bag || bag.carried) return false;
-    if (_carried) { note("You've already got a bag on your shoulder — put it down first.", 1.8); return false; }
+    if (_carried) { note("You've already got a bag on your shoulder, put it down first.", 1.8); return false; }
     const P = CBZ.player; if (!P || P.dead) return false;
     // A MAN CANNOT SHOULDER A RIFLE AND A DUFFEL. Lower the gun first — an
     // action you can take, never a wall (see the header's soft-lock note).

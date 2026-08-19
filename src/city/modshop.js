@@ -658,7 +658,7 @@
     if (!CBZ.cityFireMissile) return;
     const m = car.mods && car.mods.launcher;
     if (!m || (m.ammo | 0) <= 0) {
-      if (CBZ.city && CBZ.city.note) CBZ.city.note("Rocket pods empty — resupply at the mod garage.", 1.6);
+      if (CBZ.city && CBZ.city.note) CBZ.city.note("Rocket pods empty, resupply at the mod garage.", 1.6);
       if (CBZ.sfx) CBZ.sfx("empty");
       return;
     }
@@ -678,7 +678,7 @@
       if (CBZ.sfx) CBZ.sfx("whoosh");
       if (CBZ.shake) CBZ.shake(0.5);
       if (CBZ.cityCrime) CBZ.cityCrime(TUNE.crimeShots + 40, { type: "shots-fired", x: car.pos.x, z: car.pos.z });
-      if (m.ammo <= 0 && CBZ.city && CBZ.city.note) CBZ.city.note("Last rocket away — pods empty.", 1.4);
+      if (m.ammo <= 0 && CBZ.city && CBZ.city.note) CBZ.city.note("Last rocket away, pods empty.", 1.4);
     }
   }
 
@@ -1222,7 +1222,7 @@
       return;
     }
     cityApplyCarMod(car, modId, tier);
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("Installed — your ride's meaner now.", 1.6);
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("Installed, your ride's meaner now.", 1.6);
   }
   function doResupply(car) {
     const m = car.mods && car.mods.launcher; if (!m) return;
@@ -1233,7 +1233,7 @@
     }
     m.ammo = TUNE.launcherAmmoMax;
     if (CBZ.sfx) CBZ.sfx("reload");
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("Rockets loaded — " + m.ammo + " ready.", 1.6);
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("Rockets loaded · " + m.ammo + " ready.", 1.6);
   }
   function doRespray(car) {
     if (!(CBZ.city && CBZ.city.spend && CBZ.city.spend(PRICE.respray))) {
@@ -1251,7 +1251,7 @@
     // a visual swap orphaned our attachments — re-dress.
     if (car.mods) applyMods(car);
     if (CBZ.sfx) CBZ.sfx("switch");
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("Fresh paint" + (restyled ? " + new lines" : "") + " — looks clean.", 1.8);
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("Fresh paint" + (restyled ? " + new lines" : "") + " · looks clean.", 1.8);
     renderPanelSafe();
   }
   function recolor(car, col) {

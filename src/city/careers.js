@@ -62,7 +62,7 @@
       // DELETES any note that neither matches its keyword list nor names a
       // sender, and this line matched nothing — the one moment the game tells
       // you your record just opened heavier work never reached the player.
-      CBZ.city.note("Word's getting around — heavier jobs hit the board now.", 2.2, { from: "Dispatch", app: "missions" });
+      CBZ.city.note("Word's getting around, heavier jobs hit the board now.", 2.2, { from: "Dispatch", app: "missions" });
     }
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
@@ -199,11 +199,11 @@
       // re-hire has to earn the rung again before it earns the gun again.
       if (secCan("carry") && CBZ.cityGiveWeapon) {
         try { CBZ.cityGiveWeapon("Pistol"); } catch (e) {}
-        CBZ.city.note("Promoted to " + r.pip + " — sidearm issued, and the new wage starts today.", 3, { from: "Payroll", app: "bank" });
+        CBZ.city.note("Promoted to " + r.pip + " · sidearm issued, and the new wage starts today.", 3, { from: "Payroll", app: "bank" });
         if (CBZ.cityHudDirty) CBZ.cityHudDirty();
         return;
       }
-      CBZ.city.note("Promoted to " + r.pip + " — the new wage starts today.", 2.4, { from: "Payroll", app: "bank" });
+      CBZ.city.note("Promoted to " + r.pip + " · the new wage starts today.", 2.4, { from: "Payroll", app: "bank" });
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     }
   }
@@ -513,7 +513,7 @@
         type: "gcHit", target: mark, lt: isLt, t: 150,
         reward: payout(isLt ? 1100 : 380, isLt ? 600 : 500),
         body: isLt ? 3 : 1, kick: isLt ? 0.30 : 0.22, respect: isLt ? 14 : 6,
-        desc: "Clip " + (mark.name || "a rival") + (isLt ? " — their lieutenant" : (mark.gang ? " — rival set" : "")),
+        desc: "Clip " + (mark.name || "a rival") + (isLt ? " · their lieutenant" : (mark.gang ? " · rival set" : "")),
       });
     }
 
@@ -525,7 +525,7 @@
       jobs.push({
         type: "gcCollect", target: debtor, owed: owed, t: 150,
         reward: payout(260, 300), kick: 0.35, respect: 5,
-        desc: "Lean on " + (debtor.name || "a debtor") + " — they owe $" + owed,
+        desc: "Lean on " + (debtor.name || "a debtor") + " · they owe $" + owed,
       });
     }
 
@@ -564,7 +564,7 @@
         jobs.push({
           type: "gcDefend", zoneId: z.id, x: z.cx, z: z.cz, t: 60, raided: false,
           reward: payout(900, 500), kick: 0.20, respect: 12,
-          desc: "Hold " + (z.name || "your block") + " — a raid is coming",
+          desc: "Hold " + (z.name || "your block") + " · a raid is coming",
         });
       }
     }
@@ -593,7 +593,7 @@
       makeBeacon(j.x, j.z, 0x7ed957);
       // muster your own crew on the block and call the raid in
       if (CBZ.cityPlayerGangDefendTurf) CBZ.cityPlayerGangDefendTurf(j.x, j.z);
-      CBZ.city.note("Get to the block and HOLD it — they're rolling up.", 2.8);
+      CBZ.city.note("Get to the block and HOLD it, they're rolling up.", 2.8);
     }
     if (CBZ.city.big) CBZ.city.big("CONTRACT · " + (c ? c.name : "the set"));
     // (no third toast — the big + the HUD job line already carry it)
@@ -609,7 +609,7 @@
     const total = j.reward + (bonus || 0);
     CBZ.city.addCash(total);
     if (j.respect) CBZ.city.addRespect(j.respect);
-    CBZ.city.note("Crew payout — $" + total + " received.", 2.4, { from: "Liberty Bank", app: "bank" });
+    CBZ.city.note("Crew payout. $" + total + " received.", 2.4, { from: "Liberty Bank", app: "bank" });
     // notoriety on the street still grows (your name carries)
     gainNotoriety(Math.round(j.reward * 0.45) + 30);
     // climb the crew ladder: bodies + cash kicked up = the promotion currency
@@ -643,7 +643,7 @@
   }
   function failGangContract(j, why) {
     if (!j) return;
-    CBZ.city.note("Crew job blown — " + (why || "you lost it") + ". The set won't be happy.", 2.6, { from: "The Set", app: "missions" });
+    CBZ.city.note("Crew job blown · " + (why || "you lost it") + ". The set won't be happy.", 2.6, { from: "The Set", app: "missions" });
     // a botched job sours the crew a touch (they trust you less)
     const c = myCrew();
     if (c && c.kind === "member" && c.memb) c.memb.loyalty = Math.max(0, (c.memb.loyalty || 0.6) - 0.06);
@@ -698,7 +698,7 @@
       if (multi) {
         const n = 2 + ((rng() * 2) | 0);
         const targets = []; for (let i = 0; i < n && i < civ.length; i++) targets.push(pick(civ));
-        jobs.push({ type: "hit", targets: targets.slice(), target: targets[0], reward: payout(900, 700), desc: "Take out " + targets.length + " marks — a clean sweep" });
+        jobs.push({ type: "hit", targets: targets.slice(), target: targets[0], reward: payout(900, 700), desc: "Take out " + targets.length + " marks, a clean sweep" });
       } else {
         const t = pick(civ);
         jobs.push({ type: "hit", target: t, reward: payout(300, 700), desc: "Clip " + t.name });
@@ -869,7 +869,7 @@
   }
   function failJob(why) {
     const j = g.cityJob; if (!j) return;
-    CBZ.city.note("Job blown — " + (why || "you lost it") + ".", 2.4, { from: "Dispatch", app: "missions" });
+    CBZ.city.note("Job blown · " + (why || "you lost it") + ".", 2.4, { from: "Dispatch", app: "missions" });
     endJobMission("fail", why);
     g.cityJob = null; clearBeacon();
   }
@@ -886,10 +886,10 @@
     g.career = kind;
     if (CBZ.cityCloseShop) CBZ.cityCloseShop();
     const msg = {
-      dealer: "You're slinging now. Cop wholesale at the trap house, then deal on the street — turn buyers into regulars, keep the heat off your back. · U buy · I deal",
-      security: "On the books as a " + securityRankInfo().pip + ". Keep your record clean (0 stars) for the salary — clean shifts earn a promotion (and a better wage).",
-      pimp: "You run the night crew now. Recruit earners — they kick up to you while you sleep. · K recruit",
-      gangster: "Putting a crew together. Recruit shooters — they ride with you and answer your orders. · K recruit · O orders",
+      dealer: "You're slinging now. Cop wholesale at the trap house, then deal on the street, turn buyers into regulars, keep the heat off your back. · U buy · I deal",
+      security: "On the books as a " + securityRankInfo().pip + ". Keep your record clean (0 stars) for the salary, clean shifts earn a promotion (and a better wage).",
+      pimp: "You run the night crew now. Recruit earners, they kick up to you while you sleep. · K recruit",
+      gangster: "Putting a crew together. Recruit shooters, they ride with you and answer your orders. · K recruit · O orders",
     }[kind] || ("Career: " + kind);
     CBZ.city.note(msg, 3.5);
   };
@@ -959,7 +959,7 @@
       ped.favDrug = drug;
       g.cityCustomers = (g.cityCustomers || 0) + 1;
       ped.tagColor = ped.tagColor || "#c792ea";
-      CBZ.city.note(ped.name + " is a regular now — they'll come back for more.", 2.0);
+      CBZ.city.note(ped.name + " is a regular now, they'll come back for more.", 2.0);
     } else {
       ped.loyalty = Math.min(1, (ped.loyalty || 0.1) + 0.08);
       if (drug) ped.favDrug = drug;
@@ -1004,14 +1004,14 @@
       const sev = 24 + (g.wanted | 0) * 8 + (turf.where === "rival" ? 16 : 0);
       CBZ.cityCrime && CBZ.cityCrime(sev, { x: ped.pos.x, z: ped.pos.z, type: "dealing" });
       if (ped.regular) { ped.loyalty = Math.max(0, (ped.loyalty || 0.1) - 0.2); }
-      CBZ.city.note(turf.where === "rival" ? ped.name + " is rival-affiliated — they call it in!" : ped.name + " is a narc — they call it in!", 2.0);
+      CBZ.city.note(turf.where === "rival" ? ped.name + " is rival-affiliated, they call it in!" : ped.name + " is a narc, they call it in!", 2.0);
       return;
     }
 
     // price: market street price × territory factor × loyalty premium
     let price = econ.streetPrice ? econ.streetPrice(drug) : Math.round(econ.ITEMS[drug].value * 2.2);
     price = Math.round(price * turf.mult * (ped.regular ? 1 + 0.25 * (ped.loyalty || 0.1) : 1));
-    if (!econ.take(drug, 1)) { CBZ.city.note(ped.name + " — you're out of that product.", 1.4); return; }   // only pay for a unit actually removed
+    if (!econ.take(drug, 1)) { CBZ.city.note(ped.name + " · you're out of that product.", 1.4); return; }   // only pay for a unit actually removed
     if (econ.recordSale) econ.recordSale(drug, 1);
     CBZ.city.addCash(price); CBZ.city.addRespect(1);
     g.cityDrugSales = (g.cityDrugSales || 0) + 1;
@@ -1053,13 +1053,13 @@
   // and the trade comes to you; the better your block's demand, the more buyers
   // drift over. (GTA San Andreas crack-corner / GTA Online street-dealer vibe.)
   CBZ.cityPostUp = function () {
-    if (g.career !== "dealer") { CBZ.city.note("Start dealing first — cop product at the trap house.", 2.0); return false; }
+    if (g.career !== "dealer") { CBZ.city.note("Start dealing first, cop product at the trap house.", 2.0); return false; }
     g.cityPostedUp = !g.cityPostedUp;
     if (g.cityPostedUp) {
       g.cityPostX = CBZ.player.pos.x; g.cityPostZ = CBZ.player.pos.z;
       const econ = CBZ.cityEcon;
       const dn = econ && econ.districtName ? econ.districtName(econ.playerDistrict ? econ.playerDistrict() : null) : "this block";
-      CBZ.city.note("Posted up on " + dn + ". Word's out — buyers will come to you. · I deal", 2.8);
+      CBZ.city.note("Posted up on " + dn + ". Word's out, buyers will come to you. · I deal", 2.8);
     } else {
       CBZ.city.note("Off the corner. You're moving again.", 1.6);
       // release any seekers so they get on with their own lives
@@ -1107,7 +1107,7 @@
        honest outcome and reads as one. Feature-detected, one call. */
     if (ped.kind === "crew" && CBZ.followerOrder && CBZ.player && CBZ.player.driving && CBZ.player._vehicle) {
       if (!CBZ.followerOrder(ped, "board", { veh: CBZ.player._vehicle, role: "crew", run: true })) {
-        CBZ.city.note("No seat for " + ped.name + " — he'll catch up.", 1.8);
+        CBZ.city.note("No seat for " + ped.name + " · he'll catch up.", 1.8);
       }
     }
   };
@@ -1148,12 +1148,12 @@
       if (!j.got) {
         if (Math.hypot(P.x - j.pickup.x, P.z - j.pickup.z) < 4) {
           j.got = true; makeBeacon(j.dest.x, j.dest.z, 0x7ed957);
-          CBZ.city.note("Product's on you. Run it to the drop — don't get hot.", 2.4);
+          CBZ.city.note("Product's on you. Run it to the drop, don't get hot.", 2.4);
         }
       } else {
         if ((g.wanted | 0) >= 4) { failGangContract(j, "you got too hot carrying the load"); }
         else if (Math.hypot(P.x - j.dest.x, P.z - j.dest.z) < 4) {
-          CBZ.city.note("Product dropped — clean run.", 1.6);
+          CBZ.city.note("Product dropped, clean run.", 1.6);
           finishGangContract(j, CBZ.player.driving && (g.wanted | 0) === 0 ? 150 : 0);
         }
       }
@@ -1164,7 +1164,7 @@
       if (j.held && rivals > 0) {
         // a rival corner: you have to run their bodies off before it flips
         j.plant = 0;
-        if (CBZ.now - (j._noteT || 0) > 4000) { j._noteT = CBZ.now; CBZ.city.note(rivals + " still holding the corner — run them off.", 1.6); }
+        if (CBZ.now - (j._noteT || 0) > 4000) { j._noteT = CBZ.now; CBZ.city.note(rivals + " still holding the corner, run them off.", 1.6); }
         return;
       }
       // corner is clear (or it was always neutral): plant the flag to claim it
@@ -1173,7 +1173,7 @@
         // a BOSS of his own set actually flips the zone to his colours; a member
         // taking it for an NPC crew just clears it for them (NPC turf is theirs).
         if (j.gangId === "player" && CBZ.cityPlayerGangClaimTurf) CBZ.cityPlayerGangClaimTurf(j.x, j.z);
-        CBZ.city.note("Block taken — it flies the colours now.", 2.0);
+        CBZ.city.note("Block taken, it flies the colours now.", 2.0);
         finishGangContract(j, 0);
       } else if (CBZ.now - (j._noteT || 0) > 2200) {
         j._noteT = CBZ.now; CBZ.city.note("Hold the corner… " + Math.ceil((j.held ? 2 : 3) - j.plant) + "s", 1.0);
@@ -1185,10 +1185,10 @@
       if (!j.raided && j.t < 50) {
         j.raided = true;
         if (CBZ.cityCrime) CBZ.cityCrime(60, { x: j.x, z: j.z, type: "robbery" });
-        CBZ.city.note("They're here — hold the block!", 2.0);
+        CBZ.city.note("They're here, hold the block!", 2.0);
       }
       if (!onBlock && CBZ.now - (j._noteT || 0) > 3000) {
-        j._noteT = CBZ.now; CBZ.city.note("Get back on the block — you can't defend it from across town!", 1.8);
+        j._noteT = CBZ.now; CBZ.city.note("Get back on the block, you can't defend it from across town!", 1.8);
       }
       // lost the block? (a rival flipped the zone) → fail
       if (j.zoneId != null && CBZ.cityZoneOwner && CBZ.cityZoneOwner(j.x, j.z) !== j.gangId) {
@@ -1210,12 +1210,12 @@
   // 4 stars and the deal is off (same heat rule the smuggle run lives by).
   function deadDropTick(j, P, dt) {
     const r = j.roof;
-    if ((g.wanted | 0) >= 4) { failJob("too hot — the fence called it off"); return; }
+    if ((g.wanted | 0) >= 4) { failJob("too hot, the fence called it off"); return; }
     if (j.stage === "foot") {
       if (Math.hypot(P.x - r.foot.x, P.z - r.foot.z) < 5) {
         j.stage = "roof";
         makeBeacon(r.drop.x, r.drop.z, 0xc792ea, r.drop.y);
-        CBZ.city.note((r.via === "lift" ? "Ride the lift up" : "Take the fire escape up") + " — the drop point's on the roof.", 2.4);
+        CBZ.city.note((r.via === "lift" ? "Ride the lift up" : "Take the fire escape up") + " · the drop point's on the roof.", 2.4);
       }
     } else if (j.stage === "roof") {
       const onSpot = Math.abs(CBZ.player.pos.y - r.drop.y) < 2.5 && Math.hypot(P.x - r.drop.x, P.z - r.drop.z) < 2.6;
@@ -1228,7 +1228,7 @@
         } else {
           j.stage = "fence"; j.work = 0;
           makeBeacon(j.fence.x, j.fence.z, 0x7ed957);
-          CBZ.city.note("Got the package — get back down and walk it to the fence.", 2.4);
+          CBZ.city.note("Got the package, get back down and walk it to the fence.", 2.4);
         }
       } else if (CBZ.now - (j._noteT || 0) > 900) {
         j._noteT = CBZ.now; CBZ.city.note("Working the drop… " + Math.ceil(1.2 - j.work) + "s", 0.9);
@@ -1281,12 +1281,12 @@
         if (!j.got) {
           if (Math.hypot(P.x - j.pickup.x, P.z - j.pickup.z) < 4) {
             j.got = true; makeBeacon(j.dest.x, j.dest.z, 0x7ed957);
-            CBZ.city.note("Stash secured. Run it to the drop — keep it clean.", 2.4);
+            CBZ.city.note("Stash secured. Run it to the drop, keep it clean.", 2.4);
           }
         } else {
           // wanted heat while carrying corrupts the load; lose it if it spikes
           if ((g.wanted | 0) >= 4) { failJob("the cops smelled the stash"); }
-          else if (Math.hypot(P.x - j.dest.x, P.z - j.dest.z) < 4) { CBZ.city.note("Stash dropped — clean run.", 1.6); finishJob(CBZ.player.driving && (g.wanted | 0) === 0 ? 120 : 0); }
+          else if (Math.hypot(P.x - j.dest.x, P.z - j.dest.z) < 4) { CBZ.city.note("Stash dropped, clean run.", 1.6); finishJob(CBZ.player.driving && (g.wanted | 0) === 0 ? 120 : 0); }
         }
       } else if (j.type === "getaway") {
         if (j.phase === "drive") {
@@ -1315,7 +1315,7 @@
             const ped = j.lot.building.vendor;
             if (ped) { ped.alarmed = 6; ped.fear = Math.min(10, (ped.fear || 0) + 4); }
             if (CBZ.cityCrime) CBZ.cityCrime(40, { x: d.x, z: d.z, type: "robbery" });
-            CBZ.city.note("They balked — lean harder (rob the place) to collect.", 2.6);
+            CBZ.city.note("They balked, lean harder (rob the place) to collect.", 2.6);
             j.type = "heist"; // resolve via the register being cleared
           } else {
             CBZ.city.note("Envelope collected. The boss is pleased.", 1.8);
@@ -1339,7 +1339,7 @@
       if (crew.length) {
         const wage = crew.length * (E.crewSalary || 14);
         if ((g.cash || 0) >= wage) { g.cash -= wage; if (CBZ.cityHudDirty) CBZ.cityHudDirty(); }
-        else { const q = crew[0]; q.companion = false; q.recruited = false; q.faction = null; if (q.gang === "player") q.gang = null; g.cityCrew = Math.max(0, (g.cityCrew || 0) - 1); CBZ.city.note("Couldn't make payroll — " + q.name + " walked off.", 2.6); }
+        else { const q = crew[0]; q.companion = false; q.recruited = false; q.faction = null; if (q.gang === "player") q.gang = null; g.cityCrew = Math.max(0, (g.cityCrew || 0) - 1); CBZ.city.note("Couldn't make payroll · " + q.name + " walked off.", 2.6); }
       }
       if (g.career === "security") {
         const stars = g.wanted | 0;
@@ -1357,11 +1357,11 @@
           // reset — the rung bought you the job, not the paycheque.
           if (!g._seccoNoticeT || (CBZ.now - g._seccoNoticeT) > 40000) {
             g._seccoNoticeT = CBZ.now;
-            CBZ.city.note("Heat on your name — no shift today. Don't make it two stars.", 2.6, { from: "Payroll", app: "bank" });
+            CBZ.city.note("Heat on your name, no shift today. Don't make it two stars.", 2.6, { from: "Payroll", app: "bank" });
           }
         } else {
           g.career = null; g.citySecurityShifts = 0;   // busted record — back to the bottom if rehired
-          CBZ.city.note("Security: you went wanted — you're FIRED.", 2.2);
+          CBZ.city.note("Security: you went wanted, you're FIRED.", 2.2);
         }
       }
       // CUSTOMER BASE + WALK-UP DEMAND: regulars who are due to re-up seek YOU

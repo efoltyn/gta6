@@ -731,8 +731,8 @@
     if (!R.target.dead) return;
     const quiet = (g.wanted | 0) === 0;
     notify("personal", "GHOSTLINE", quiet
-      ? "Clean. Full fee plus the quiet margin. The pilot is already up — payment handoff is on the Spire helipad."
-      : "Loud. The fee stands, the margin does not. The pilot is already up — payment handoff is on the Spire helipad.");
+      ? "Clean. Full fee plus the quiet margin. The pilot is already up, payment handoff is on the Spire helipad."
+      : "Loud. The fee stands, the margin does not. The pilot is already up, payment handoff is on the Spire helipad.");
     transition(PHASE.DROP, quiet ? 9000 : 6500, "The first name");
   }
 
@@ -763,7 +763,7 @@
       id: "drop-point",
       title: "THE HANDOFF",
       briefing: "The client's pilot has one instruction: step onto the tallest roof and collect the payment handoff.",
-      location: "The Spire — helipad",
+      location: "The Spire, helipad",
       status: "active",
       objectives: [{ id: "land", text: "Exit the helicopter", done: false }],
     });
@@ -808,7 +808,7 @@
       id: "drop-point",
       title: "DROP POINT",
       briefing: "The handoff was an arrest. There is no clean route off this roof.",
-      location: "The Spire — helipad",
+      location: "The Spire, helipad",
       status: "active",
       objectives: [
         { id: "land", text: "Exit the helicopter", done: true },
@@ -990,7 +990,7 @@
       id: "black-rotor",
       title: "BLACK ROTOR",
       briefing: "The warden's helicopter is inserting you behind Halloran's runway. This is surveillance work: recover the hidden flight manifest before the first contract.",
-      location: "Halloran Field — north infield",
+      location: "Halloran Field, north infield",
       status: "active",
       objectives: [{ id: "insert", text: "Complete the helicopter insertion", done: false }],
     });
@@ -1041,7 +1041,7 @@
       title: "QUIET CHANNEL",
       briefing: "A relay case beneath Halloran's taxiway beacon contains the production manifest. Stay at the relay while it copies the names without firing a shot.",
       target: "Production manifest",
-      location: "Halloran Field — taxiway relay",
+      location: "Halloran Field, taxiway relay",
       status: "active",
       objectives: [{ id: "intel", text: "Recover the manifest from the relay", done: false }],
     });
@@ -1327,7 +1327,7 @@
       location: "Halloran concourse",
       status: "active",
       progress: 0,
-      objectives: [{ id: "massacre", text: R.required ? "Carry out the order — 0/" + R.required : "Enter the staged concourse", done: false }],
+      objectives: [{ id: "massacre", text: R.required ? "Carry out the order. 0/" + R.required : "Enter the staged concourse", done: false }],
     });
   }
 
@@ -1353,7 +1353,7 @@
         location: "Halloran concourse",
         status: "active",
         progress: Math.min(1, dead / R.required),
-        objectives: [{ id: "massacre", text: "Carry out the order — " + dead + "/" + R.required, done: dead >= R.required }],
+        objectives: [{ id: "massacre", text: "Carry out the order · " + dead + "/" + R.required, done: dead >= R.required }],
       });
     }
     if (dead < R.required) return;
@@ -1497,7 +1497,7 @@
     ],
     highvalue: [
       "A heavily protected figure and his entire detail were found dead. The city's private-security rates doubled overnight.",
-      "Bodyguards, cameras, money — none of it mattered. Another name from the old production network is gone.",
+      "Bodyguards, cameras, money, none of it mattered. Another name from the old production network is gone.",
     ],
   };
 
@@ -1591,15 +1591,15 @@
   function missionForContract(con) {
     const objectives = [];
     if (con.type === "disguise" && con.outfit) {
-      objectives.push({ id: "dress", text: "Optional: take a " + disguiseName(con.outfit) + " uniform — the door crew waves staff through", done: !!con.dressed });
+      objectives.push({ id: "dress", text: "Optional: take a " + disguiseName(con.outfit) + " uniform, the door crew waves staff through", done: !!con.dressed });
     }
     if (con.type === "vehicle" && con.hadCar) {
-      objectives.push({ id: "stop", text: "Force the car to stop — box it, wreck it, or burn it", done: !!con.bailed || !!(R.target && R.target.dead) });
+      objectives.push({ id: "stop", text: "Force the car to stop, box it, wreck it, or burn it", done: !!con.bailed || !!(R.target && R.target.dead) });
     }
     objectives.push({
       id: "hit",
       text: (R.target ? "Eliminate " + con.name : "Recover " + con.name + "'s dossier") +
-        (con.type === "sniper" ? " — from beyond " + SNIPER_RANGE + "m for the bonus" : ""),
+        (con.type === "sniper" ? " · from beyond " + SNIPER_RANGE + "m for the bonus" : ""),
       done: false,
     });
     return {
@@ -1662,7 +1662,7 @@
 
     // ---- archetype dressing (existing systems only) ----
     if (con.type === "sniper") {
-      con.loc = "Open forecourt — long sightlines";
+      con.loc = "Open forecourt, long sightlines";
       target._campaignHold = true;   // the scripted outdoor position
       for (let i = 0; i < 2; i++) {
         const a = rGuard * 6.28 + i * 2.6;
@@ -1691,7 +1691,7 @@
       con.car = seatTargetInCar(target);
       if (con.car) {
         con.hadCar = true;
-        con.loc = "Mobile — tracked vehicle";
+        con.loc = "Mobile, tracked vehicle";
       } else {
         // no live traffic anywhere near the cast point — degrade to a guarded
         // street hit so the briefing never promises a car that does not exist
@@ -1721,22 +1721,22 @@
       (c.flags.familySaved ? "Your family is out of their hands. " : "The family loss remains part of every contract. ");
     if (con.type === "sniper") {
       con.brief = lore + con.name + " holds a forecourt mark behind armed watchers who clock every face inside forty meters. " +
-        "Take the kill from beyond " + SNIPER_RANGE + "m and the fee carries a fieldcraft bonus — a magnified optic from the gun bench makes the distance honest.";
+        "Take the kill from beyond " + SNIPER_RANGE + "m and the fee carries a fieldcraft bonus, a magnified optic from the gun bench makes the distance honest.";
     } else if (con.type === "disguise") {
       con.brief = lore + con.name + " hosts behind a door crew that pats down strangers. " + disguiseName(con.outfit) +
-        " walk straight past the rope — a steward on his smoke break beside the venue wears a set. Work close, keep it quiet: one loud mistake and the calm ends.";
+        " walk straight past the rope, a steward on his smoke break beside the venue wears a set. Work close, keep it quiet: one loud mistake and the calm ends.";
     } else if (con.type === "vehicle") {
-      con.brief = lore + con.name + " is rolling — a marked car threading live traffic. Box it in, wreck it, or burn it; a mark whose wheels stop will run, and a hard enough hit ends it at the wheel.";
+      con.brief = lore + con.name + " is rolling, a marked car threading live traffic. Box it in, wreck it, or burn it; a mark whose wheels stop will run, and a hard enough hit ends it at the wheel.";
     } else if (con.type === "highvalue") {
       con.brief = "DIRECTOR'S LIST. " + lore + con.name + " travels with a paid ring of professional guns, and they shoot first. " +
-        "You die once in this city — walk in with a plan or do not walk in.";
+        "You die once in this city, walk in with a plan or do not walk in.";
     } else {
       con.brief = lore + "This target is cast only when the assignment begins and the next contract is already waiting.";
     }
 
     setMission(missionForContract(con));
     notify("personal", cHandler(), (refused ? "Rook's list" : "The Halloran atonement list") +
-      " marks contract " + n + (con.type === "highvalue" ? " — a Director's List name. Bring everything." :
+      " marks contract " + n + (con.type === "highvalue" ? " · a Director's List name. Bring everything." :
         ". No empire building. No errands. Just the target."));
   }
 
@@ -1786,7 +1786,7 @@
       unseatContractCar(true);
       con.bailed = true;
       setMission(missionForContract(con));
-      notify("personal", cHandler(), con.name + " bailed out. On foot now — finish it.");
+      notify("personal", cHandler(), con.name + " bailed out. On foot now, finish it.");
       return;
     }
     // A bail needs DISTRESS, not a red light: a wrecked/beaten car with the
@@ -1835,7 +1835,7 @@
     award(pay, "Open contract " + n);
     const doneCount = n;
     const rankBefore = prestigeTitle(n - 1), rankAfter = prestigeTitle(doneCount);
-    notify("personal", cHandler(), "Contract " + n + " settled — $" + pay.toLocaleString() +
+    notify("personal", cHandler(), "Contract " + n + " settled. $" + pay.toLocaleString() +
       (con && con.bonus ? " (fieldcraft bonus included)" : "") + ". Standing: " + rankAfter + ".");
     if (rankAfter !== rankBefore) notify("personal", cHandler(), "The network has a new word for you: " + rankAfter.toUpperCase() + ". Rates follow reputation.");
     if (con) {
@@ -1890,7 +1890,7 @@
       ui.takeover({
         title: "CITY BOSS",
         sub: "EVERY BLOCK FLIES YOUR COLORS",
-        body: "The takeover is complete. The crews answer to you now — the contracts keep coming, but from tonight the city itself is yours.",
+        body: "The takeover is complete. The crews answer to you now, the contracts keep coming, but from tonight the city itself is yours.",
       });
     } else if (CBZ.flashToast && CBZ.flashToast._campaignOriginal) {
       try { CBZ.flashToast._campaignOriginal("CITY BOSS: YOU OWN THE CITY"); } catch (e) {}

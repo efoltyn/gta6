@@ -341,7 +341,7 @@
         run: function () {
           if (CBZ.cityOrders && CBZ.cityOrders.refresh) try { CBZ.cityOrders.refresh(); } catch (e) {}
           const started = (CBZ.mission && CBZ.mission.take) ? CBZ.mission.take(r.id) : null;
-          if (!started || started.inert) { sayP(p, "“Hold up — it fell through. Another time.”", "#cfd6e6"); return false; }
+          if (!started || started.inert) { sayP(p, "“Hold up, it fell through. Another time.”", "#cfd6e6"); return false; }
           routed++;
           contactAdd(p, "work", gv.org);
           return true;
@@ -360,7 +360,7 @@
     const LINES = {
       doctor: "“You look rough. Sit down, let me look at that.”",
       nurse: "“That needs cleaning before it needs anything else.”",
-      paramedic: "“Hey — you bleeding? Sit down a second.”",
+      paramedic: "“Hey, you bleeding? Sit down a second.”",
       bartender: "“Long day? I pour for long days.”",
       "line cook": "“Kitchen's hot and the plate's honest.”",
       "personal trainer": "“You move like you sit all day. I can fix that.”",
@@ -397,7 +397,7 @@
 
   function intentStreet(p, m, o) {
     const LINE = {
-      tribute: "“Whoa — easy. Take it. We're square, right?”",
+      tribute: "“Whoa, easy. Take it. We're square, right?”",
       tax: "“Toll's a toll. Everybody pays on this block.”",
       handout: "“You look like the floor's been winning. Here.”",
       charity: "“Spare something? Anything helps out here.”",
@@ -431,7 +431,7 @@
   function intentFavor(p, m) {
     const ASK = 8 + ((pedHash(p, 0xFA) * 10) | 0);
     const line = m.helped > 0
-      ? "“You again — you're one of the good ones. Anything spare?”"
+      ? "“You again, you're one of the good ones. Anything spare?”"
       : pick(["“Brother, anything helps. Even a few bucks.”", "“Haven't eaten since yesterday. Anything spare?”"]);
     return {
       id: "favor", line: line,
@@ -457,7 +457,7 @@
   function intentIntro(p, m, t) {
     return {
       id: "intro",
-      line: "“You move like you're looking for somebody. I know a guy — " + t.what + ".”",
+      line: "“You move like you're looking for somebody. I know a guy · " + t.what + ".”",
       a: {
         label: "Who?",
         closer: "“Ask for " + t.name + ". You didn't hear it from me.”",
@@ -535,7 +535,7 @@
   function intentBrushoff(p, m) {
     return {
       id: "brushoff", line: pick(["“The hell you want?”", "“Keep stepping. This ain't a meet-and-greet.”"]),
-      a: { label: pick(["Easy — wrong guy", "My mistake"]), closer: "“Then move.”", mem: function () { relShift(p, "greeted", 0.1); } },
+      a: { label: pick(["Easy, wrong guy", "My mistake"]), closer: "“Then move.”", mem: function () { relShift(p, "greeted", 0.1); } },
       b: {
         label: "Make it my problem", bad: true,
         closer: null,
@@ -875,7 +875,7 @@
       lastPingReal = nowSec(); pingsToday++; pinged++;
       const call = CBZ.hash01(rec.x, rec.z, 0xCA12 + dNow) < 0.3;
       const text = pend.kind === "job"
-        ? (call ? "Tried to call you. " : "") + "Got another one if you want it — " + pend.title.toLowerCase() + ", pays " + money(pend.pay) + ". Check your contacts."
+        ? (call ? "Tried to call you. " : "") + "Got another one if you want it · " + pend.title.toLowerCase() + ", pays " + money(pend.pay) + ". Check your contacts."
         : (call ? "Rang you twice. " : "") + "Been a minute. Meet me at " + pend.place + "? First round's mine.";
       phonePush(rec.name.toUpperCase(), text);
       return;                                 // one ping per pass, ever
@@ -899,7 +899,7 @@
       if (CBZ.mission && CBZ.mission.busy && CBZ.mission.busy()) { note("Finish what you're carrying first.", 2.2, rec.name.toUpperCase()); return false; }
       if (CBZ.cityOrders && CBZ.cityOrders.refresh) try { CBZ.cityOrders.refresh(); } catch (e) {}
       const started = (CBZ.mission && CBZ.mission.take) ? CBZ.mission.take(pend.id) : null;
-      if (!started || started.inert) { note("It fell through — " + rec.name + " will call again.", 2.2, rec.name.toUpperCase()); return false; }
+      if (!started || started.inert) { note("It fell through · " + rec.name + " will call again.", 2.2, rec.name.toUpperCase()); return false; }
       routed++;
       return true;
     }

@@ -401,8 +401,60 @@ body.touch.mode-city.state-playing #cityStoragePrompt[style*="display: block"],
 body.touch.mode-city.state-playing #pawnPrompt[style*="display: block"],
 body.touch.mode-city.state-playing #jewelryPrompt[style*="display: block"],
 body.touch.mode-city.state-playing #clothingPrompt[style*="display: block"],
-body.touch.mode-city.state-playing #gunstorePrompt[style*="display: block"] {
+body.touch.mode-city.state-playing #gunstorePrompt[style*="display: block"],
+/* #elevChip is the sixth, and it was the worst of the omissions: the other
+   five hide a shop you can still walk into, this one hid the ONLY control the
+   elevators have. On touch that meant no prompt, no button, no way to ride —
+   the lift simply did not exist on an iPad. It is also the one chip that is
+   not purely a prompt (it carries the ride's floor ticker), so it is restored
+   whole rather than only while it holds a pill.
+   Both campaign.css and city.css hide it with !important; these selectors out-
+   specify both (3 classes + attribute + id beats 2 classes + id) regardless of
+   mobile.css loading first. */
+body.touch.mode-city.state-playing #elevChip[style*="display: block"],
+body.touch.campaign-active.mode-city #elevChip[style*="display: block"],
+/* …and the four other verbs the declutter took away from a thumb. Every one of
+   these is an [E] a keyboard player can still press blind; on touch the chip
+   IS the control, so hiding it deleted the verb. Found while fixing the lift —
+   they are the same outage, not a second one:
+     #roofStashChip  the stash the lift RIDES YOU TO (roofloot.js)
+     #beachLootChip  coolers / beach bags (beach.js)
+     #ci2Chip        your own placed chest — your storage (inventory.js)
+     #adChip         renting / pulling an ad board (adboard.js)
+     #fxPrompt       the FX terminal (sim/forex.js; already click-wired, so
+                     visibility was the whole of its bug) */
+body.touch.mode-city.state-playing #roofStashChip[style*="display: block"],
+body.touch.mode-city.state-playing #beachLootChip[style*="display: block"],
+body.touch.mode-city.state-playing #ci2Chip[style*="display: block"],
+body.touch.mode-city.state-playing #adChip[style*="display: block"],
+body.touch.mode-city.state-playing #fxPrompt[style*="display: block"],
+body.touch.campaign-active.mode-city #roofStashChip[style*="display: block"],
+body.touch.campaign-active.mode-city #beachLootChip[style*="display: block"],
+body.touch.campaign-active.mode-city #adChip[style*="display: block"],
+body.touch.campaign-active.mode-city #fxPrompt[style*="display: block"] {
   display: block !important;
+}
+
+/* The proximity chips in the walk-up band: thumb-reachable, and the container
+   never eats the tap (only its pill does). Their desktop bottoms (214/252/278)
+   are stacked to keep prose lines apart; on touch each is a BUTTON and only
+   one verb is ever in reach at a time (adboard.js and roofloot.js both police
+   their zones against the lift), so they share the band like every other
+   walk-up prompt. */
+body.touch #elevChip, body.touch #roofStashChip, body.touch #beachLootChip,
+body.touch #ci2Chip, body.touch #adChip {
+  bottom: calc(168px + env(safe-area-inset-bottom, 0px)) !important;
+  z-index: 30; pointer-events: none; max-width: 78vw;
+}
+body.touch #fxPrompt { bottom: calc(168px + env(safe-area-inset-bottom, 0px)) !important; }
+/* .haspill is stamped by CBZ.touchPromptChip when a chip's content is JUST a
+   button: the pill is already its own box, so the chip's slab would draw a
+   second box hugging it (the #citySwimPrompt lesson). Prose — a floor ticker,
+   an ad board's weekly price — keeps the backing it needs to be read against
+   the skyline, pill beside it or not. */
+body.touch .haspill {
+  background: transparent !important; border: none !important; padding: 0 !important;
+  text-shadow: none !important;
 }
 
 /* ============================================================

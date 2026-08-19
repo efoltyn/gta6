@@ -216,14 +216,8 @@
   // CBZ.floorAt unconditionally (same reason city re-installs on reset).
   function mapFloor(x, z) { return curMap().floorAt(x, z); }
   function installFloor() {
-    if (CBZ.floorAt && CBZ.floorAt._gungame) return;
-    const base = CBZ.floorAt || null;
-    const f = function (x, z) {
-      if (g.mode === "gungame") return mapFloor(x, z);
-      return base && base !== f ? base(x, z) : 0;
-    };
-    f._gungame = true;
-    CBZ.floorAt = f;
+    // systems/solidground.js owns CBZ.floorAt; declare the map field and stop
+    CBZ.registerGroundBase("gungame", function (x, z) { return mapFloor(x, z); });
   }
 
   // ---- prison cast parking --------------------------------------------------
@@ -479,7 +473,7 @@
       const box = document.getElementById("survwin");
       if (box) {
         const logo = box.querySelector(".logo"); if (logo) logo.textContent = "LADDER COMPLETE";
-        const sub = box.querySelector(".sub"); if (sub) sub.textContent = "The fists finished it — every rung climbed";
+        const sub = box.querySelector(".sub"); if (sub) sub.textContent = "The fists finished it, every rung climbed";
       }
       setText("swPlace", "#1"); setText("swTotal", "of " + rows.length);
       setText("swTime", time); setLabelAfter("swTime", "Match time");
@@ -491,7 +485,7 @@
       if (box) {
         const logo = box.querySelector(".logo"); if (logo) logo.textContent = "OUTGUNNED";
         const sub = box.querySelector(".sub");
-        if (sub) sub.textContent = (gg.winner || "Somebody") + " finished the ladder — you reached rung " +
+        if (sub) sub.textContent = (gg.winner || "Somebody") + " finished the ladder, you reached rung " +
           (gg.playerRung + 1) + "/" + L + " (" + rungLabel(rungAt(gg.playerRung)) + ")";
       }
       setText("slPlace", "#" + place); setText("slTotal", "of " + rows.length);
@@ -902,7 +896,7 @@
     grantPlayerRung();
     if (CBZ.killstreakReset) CBZ.killstreakReset();
     if (CBZ.setObjective) {
-      CBZ.setObjective("GUN GAME on " + map.label + " — every kill advances the ladder; the final rung is bare fists. First through wins.");
+      CBZ.setObjective("GUN GAME on " + map.label + ". Every kill advances the ladder; the final rung is bare fists. First through wins.");
     }
   }
 
@@ -923,7 +917,7 @@
   CBZ.registerMode("gungame", {
     id: "gungame",
     label: "Gun Game",
-    objective: "Pick a map. Everyone starts on the same pistol; every kill advances the killer one rung down the weapon ladder. The final rung is bare fists — land that kill and the match is yours.",
+    objective: "Pick a map. Everyone starts on the same pistol; every kill advances the killer one rung down the weapon ladder. The final rung is bare fists, land that kill and the match is yours.",
     // build() is deliberately light: the jail exists at boot and the island is
     // only ensured at match start (reset), so clicking the mode button never
     // pays for a world the chosen map might not need.

@@ -664,7 +664,7 @@
   }
   function winLine(sub) {
     if (!on()) return sub;
-    return beaten === 0 ? sub : sub + " — out of " + TIERS[beaten].short;
+    return beaten === 0 ? sub : sub + " · out of " + TIERS[beaten].short;
   }
 
   /* ==========================================================

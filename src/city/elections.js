@@ -623,7 +623,7 @@
     race.candidates = candidates;
     race.pledged = false;                  // the pledge has been cashed into a real candidacy
     if (playerFiled || playerHolds) {
-      if (CBZ.city && CBZ.city.big) CBZ.city.big("YOU ARE ON THE BALLOT — " + title.toUpperCase() + " OF " + String(rec.name).toUpperCase());
+      if (CBZ.city && CBZ.city.big) CBZ.city.big("YOU ARE ON THE BALLOT · " + title.toUpperCase() + " OF " + String(rec.name).toUpperCase());
     }
     race.phase = "campaign";
     race.calledDay = day;
@@ -953,7 +953,7 @@
     opts = opts || {};
     const R = CBZ.cityRun;
     if (!R || typeof R.file !== "function") {
-      return { ok: false, why: "There is no campaign office open — city/candidacy.js is not loaded." };
+      return { ok: false, why: "There is no campaign office open, city/candidacy.js is not loaded." };
     }
     if (opts.officeId) return R.file(opts.officeId);
     const list = (typeof R.offices === "function") ? R.offices() : [];

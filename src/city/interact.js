@@ -235,7 +235,7 @@
       if (shakeBraveEnough(p) && pa) {
         // a hard mark squares up — now you've got a fight on your hands.
         p.rage = pa; p.state = "fight"; p.fear = 0;
-        CBZ.city.note((p.name || "They") + " won't be shaken down — and squares up!", 2);
+        CBZ.city.note((p.name || "They") + " won't be shaken down, and squares up!", 2);
       } else {
         // the timid bolt; a snitch makes a beeline for the cops.
         p.state = "flee"; p.target && p.target.set(p.pos.x, 0, p.pos.z);
@@ -315,7 +315,7 @@
       const line = "MUGGED" + (cash > 0 ? " + $" + cash : "") + (got.length ? " · " + got.join(", ") : "");
       if (CBZ.city.big) CBZ.city.big(line);
     } else {
-      CBZ.city.note((p.name || "They") + " had nothing worth taking — scraps.", 1.8);
+      CBZ.city.note((p.name || "They") + " had nothing worth taking, scraps.", 1.8);
     }
   }
   // PICKPOCKET — lift a SLICE of their cash (scaled to WHO they are: a billionaire's
@@ -344,7 +344,7 @@
         const name = vals.splice(idx, 1)[0];
         lifted = takeValuable(name, { head: "Lifted a " + name });
         if (!isLuxe(name) && itemVal(name) < 20000)
-          CBZ.city.note("Lifted a " + name + " " + pawnHint(name) + " — fence it at the pawn shop.", 2.6);
+          CBZ.city.note("Lifted a " + name + " " + pawnHint(name) + " · fence it at the pawn shop.", 2.6);
       }
       if (!lifted) { CBZ.city.note("Lifted $" + take + " unseen.", 1.6); }
       else if (take > 0) CBZ.city.note("…and $" + take + " in cash, clean.", 1.8);
@@ -367,7 +367,7 @@
   const SEARCH_COOLDOWN_MS = 90000;   // 90s before the same can/box is worth checking again
   function searchStreetProp(sp) {
     const now = (typeof CBZ.now === "number") ? CBZ.now : (Date.now ? Date.now() : 0);
-    if ((sp._searchT || 0) > now) { CBZ.city.note("Already picked through — nothing new.", 1.6); return; }
+    if ((sp._searchT || 0) > now) { CBZ.city.note("Already picked through, nothing new.", 1.6); return; }
     sp._searchT = now + SEARCH_COOLDOWN_MS;
     const r = propRng();
     if (r < 0.55) {
@@ -386,13 +386,13 @@
     const econ = CBZ.cityEcon;
     if (econ && econ.add && econ.ITEMS && econ.ITEMS["Hotdog"]) {
       econ.add("Hotdog", 1);
-      CBZ.city.note("Found a half-eaten Hotdog — still wrapped.", 1.8);
+      CBZ.city.note("Found a half-eaten Hotdog, still wrapped.", 1.8);
       return;
     }
     const cash = 15 + ((propRng() * 20) | 0);
     CBZ.city.addCash(cash);
     if (CBZ.sfx) CBZ.sfx("coin");
-    CBZ.city.note("Jackpot — someone dumped $" + cash + " in there.", 2);
+    CBZ.city.note("Jackpot, someone dumped $" + cash + " in there.", 2);
   }
   // PUBLIC: rummage ANY street-prop record on the bin/newsbox terms — the same
   // bounded roll, the same 90 s per-prop cooldown, the same city RNG. A second
@@ -419,7 +419,7 @@
   // with-Math.random-fallback searchStreetProp uses). Flag: PROPS_WIRED_V1.
   const MAIL_JUNK = [
     "Bills, coupons, and a pizza flyer. The usual.",
-    "A jury summons — addressed to someone who moved out.",
+    "A jury summons, addressed to someone who moved out.",
     "Somebody's tax refund check. Not yours, sadly.",
     "A postcard from nowhere: 'Wish you were here.'",
     "Nothing but takeout menus and debt collectors.",
@@ -442,9 +442,9 @@
       const dx = gg.center.x - x, dz = gg.center.z - z, d = dx * dx + dz * dz;
       if (d < gd) { gd = d; gang = gg.name; }
     }
-    if (shop && (!gang || sd <= gd)) return "A misdelivered invoice — " + shop + " is sitting on a fat week. Worth a look.";
+    if (shop && (!gang || sd <= gd)) return "A misdelivered invoice · " + shop + " is sitting on a fat week. Worth a look.";
     if (gang) return "A threat note meant for a neighbor: the " + gang + " are collecting on this block.";
-    return "A tip-off scrawled on a napkin — but the ink's too smeared to read.";
+    return "A tip-off scrawled on a napkin, but the ink's too smeared to read.";
   }
   function checkMailbox(sp) {
     const day = (typeof CBZ.dayCount === "function") ? CBZ.dayCount() : -1;
@@ -464,7 +464,7 @@
       const cash = 5 + ((propRng() * 36) | 0);       // $5–40
       CBZ.city.addCash(cash);
       if (CBZ.sfx) CBZ.sfx("coin");
-      CBZ.city.note("A cash envelope in the mail — $" + cash + " inside.", 1.9);
+      CBZ.city.note("A cash envelope in the mail. $" + cash + " inside.", 1.9);
       return;
     }
     // rare: a scrap of street intel (flavor feed line, no new system)
@@ -492,7 +492,7 @@
     const rec = gangRec(p && p.gang);
     if (myMemb()) {
       // already patched in: putting in work is a body kicked up — call out the path.
-      CBZ.city.note("Drop a rival — kicked-up work moves you up the ladder. · O", 3);
+      CBZ.city.note("Drop a rival, kicked-up work moves you up the ladder. · O", 3);
       return;
     }
     // not courting anyone yet (or not this crew) → start prospecting THIS crew.
@@ -503,7 +503,7 @@
     }
     // standing maxed → the initiation step lives on the [O] menu.
     if (myProspectStanding() >= 1) {
-      CBZ.city.note("They're ready to make you — get jumped in or put in work. · O", 2.6);
+      CBZ.city.note("They're ready to make you, get jumped in or put in work. · O", 2.6);
       return;
     }
     // courting + this member is befriendable → do them a FAVOR to earn standing.
@@ -522,7 +522,7 @@
   function copHunting(c) { return c.curTarget === CBZ.city.playerActor || (c.sees && (g.wanted | 0) >= 1); }
   function copNote(c) {
     const stars = g.wanted | 0;
-    if (copHunting(c)) return "Onto you — give up, talk fast, or run";
+    if (copHunting(c)) return "Onto you, give up, talk fast, or run";
     if (stars >= 1) return "On alert · " + "★".repeat(stars);
     return "Keeping the peace";
   }
@@ -576,9 +576,9 @@
   // the WHY line for a fit, read off what it buys you on the street
   function bodyFitNote(fit) {
     if (!fit) return "Their clothes could fit you";
-    if (fit.cop) return "A uniform — the law reads its own colors";
-    if (fit.gang) return "Their colors — that set would read you as kin";
-    if (fit.id === "tuxedo") return "A tuxedo — ropes open for cloth like this";
+    if (fit.cop) return "A uniform, the law reads its own colors";
+    if (fit.gang) return "Their colors, that set would read you as kin";
+    if (fit.id === "tuxedo") return "A tuxedo, ropes open for cloth like this";
     return "A clean change of clothes";
   }
 
@@ -605,7 +605,7 @@
     const drip = CBZ.cityPlayerDrip ? CBZ.cityPlayerDrip() : 0;
     const need = (CBZ.CITY && CBZ.CITY.CLUB_DRIP) || 30;
     if (drip >= need) CBZ.city.note("The bouncer sizes up your fit and unhooks the rope…", 2.2);
-    else CBZ.city.note("“Not in those rags.” The bouncer waves you off — come back sharper.", 2.6);
+    else CBZ.city.note("“Not in those rags.” The bouncer waves you off, come back sharper.", 2.6);
   }
   function clubNote() {
     const drip = CBZ.cityPlayerDrip ? CBZ.cityPlayerDrip() : 0;
@@ -1022,7 +1022,7 @@
         label: function (t) {
           const s = t.home ? CBZ.cashStore.homeStored(t.home.id) : CBZ.cashStore.stored();
           const net = s.value - Math.round(s.stained * CBZ.cashStore.STAINED_FEE);
-          return "Wire it to your account — $" + net.toLocaleString("en-US") + (s.stained ? " after the fence" : "");
+          return "Wire it to your account. $" + net.toLocaleString("en-US") + (s.stained ? " after the fence" : "");
         },
         canShow: function (t) {
           const s = t.home ? CBZ.cashStore.homeStored(t.home.id) : CBZ.cashStore.stored();
@@ -1037,7 +1037,7 @@
     const s = t.home ? CS.homeStored(t.home.id) : CS.stored();
     const owed = CS.crewDebt();
     return {
-      label: t.home ? (t.home.name + " — floor safe") : "The Freeport racks",
+      label: t.home ? (t.home.name + " · floor safe") : "The Freeport racks",
       note: s.bags + "/" + s.cap + " bags · $" + s.value.toLocaleString("en-US")
         + (s.stained ? " · $" + s.stained.toLocaleString("en-US") + " stained" : "")
         + (owed && !t.home ? " · crew owed $" + owed.toLocaleString("en-US") : ""),
@@ -1063,7 +1063,7 @@
       },
       { id: "freeport-close", slot: "e",
         canShow: function (t) { return !!t.sale; },
-        label: function () { return "Close the sale — $" + CBZ.cashStore.remaining().toLocaleString("en-US") + " from cash + bank"; },
+        label: function () { return "Close the sale. $" + CBZ.cashStore.remaining().toLocaleString("en-US") + " from cash + bank"; },
         onSelect: function () { CBZ.cashStore.buy(); },
       },
     ],
@@ -1201,7 +1201,7 @@
   I.describe("self", function () { return { label: "Your pockets", note: "what you're carrying" }; });
   const SEAT_NAMES = { stool: "Bar stool", bench: "Bench", sofa: "Couch", couch: "Couch", booth: "Booth", patio: "Patio chair", waiting: "Waiting chair", chair: "Chair" };
   I.describe("seat", function (s) { return { label: "" + (SEAT_NAMES[s.kind] || "Chair"), note: "Take a seat" }; });
-  I.describe("bed", function (b) { return { label: "" + (b.kind === "bedroll" ? "Bedroll" : "Bed"), note: b.kind === "bedroll" ? "A rough sleep — til morning" : "Sleep until morning" }; });
+  I.describe("bed", function (b) { return { label: "" + (b.kind === "bedroll" ? "Bedroll" : "Bed"), note: b.kind === "bedroll" ? "A rough sleep, til morning" : "Sleep until morning" }; });
   I.describe("wantedposter", function (p) { return { label: "Wanted poster", note: "Bounty $" + ((p && p.bounty) || 0).toLocaleString() }; });
   // INTERIOR_LOOT_V1 card header. The NOTE is the reward LADDER in one line —
   // it reads off rec.tier, so a drawer says "pocket change, if that" and the
@@ -1272,7 +1272,7 @@
     id: "ped-claim-crew", slot: "k", prio: 44,
     canShow: (p) => !!(p.gang && CBZ.cityGangById && CBZ.cityGangById(p.gang) && CBZ.cityGangById(p.gang).bossDead && CBZ.cityPlayerGangBossKilled),
     label: "Claim the crew",
-    onSelect: (p) => { const rec = CBZ.cityGangById(p.gang); CBZ.cityPlayerGangBossKilled(rec); CBZ.city.note("Their boss is gone — the crew's yours to claim. · O", 2.2); },
+    onSelect: (p) => { const rec = CBZ.cityGangById(p.gang); CBZ.cityPlayerGangBossKilled(rec); CBZ.city.note("Their boss is gone, the crew's yours to claim. · O", 2.2); },
   });
   // PROSPECT / JOIN this ped's crew — the PRIMARY progression path, ranked
   // above the generic recruit/flirt/talk verbs. The label walks the courtship:
@@ -1443,7 +1443,7 @@
       const took = CBZ.cityLootArmorFromCorpse(b);   // equips it onto the player + returns what was taken
       b._armorTaken = true;
       const nm = corpseArmorKitName(b) || "their armor";
-      if (CBZ.city && CBZ.city.note) CBZ.city.note(took === false ? "Nothing to strip." : "Stripped " + nm + " — armor equipped.", 1.8);
+      if (CBZ.city && CBZ.city.note) CBZ.city.note(took === false ? "Nothing to strip." : "Stripped " + nm + " · armor equipped.", 1.8);
     },
   });
 

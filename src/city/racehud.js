@@ -484,10 +484,10 @@
 
       setHTML(gapAEl, s.gapA && s.gapA.name
         ? "<span class='ahead'>▲</span> <span class='nm'>" + esc(s.gapA.name) + "</span> <b>+" + s.gapA.s.toFixed(1) + "s</b>"
-        : "<span class='none'>▲ —</span>");
+        : "<span class='none'>▲, </span>");
       setHTML(gapBEl, s.gapB && s.gapB.name
         ? "<span class='behind'>▼</span> <span class='nm'>" + esc(s.gapB.name) + "</span> <b>−" + s.gapB.s.toFixed(1) + "s</b>"
-        : "<span class='none'>▼ —</span>");
+        : "<span class='none'>▼, </span>");
 
       if (s.tower) renderTower(s.tower);
 
@@ -499,7 +499,7 @@
         let done = 0, h = "";
         for (let i = 0; i < s.sectors.length; i++) {
           const sc = s.sectors[i];
-          if (!sc) { h += "<span class='rSec'>S" + (i + 1) + " —</span>"; continue; }
+          if (!sc) { h += "<span class='rSec'>S" + (i + 1) + " · </span>"; continue; }
           done++;
           const cls = sc.purple ? "purple" : sc.delta == null ? "" : sc.delta <= 0 ? "good" : "bad";
           h += "<span class='rSec " + cls + "'>S" + (i + 1) + " " +

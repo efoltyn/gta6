@@ -89,9 +89,7 @@
                        city sinkhole is an EVENT the city runs, not ambient
                        chaos; the primitive is ready either way)
      SHAFT_SLOPE_MAX   the placement law's slope ceiling (rise/run)
-     SHAFT_MASK_SLOTS  how many holes the ground can be cut for at once (the
-                       GLSL array length; nearest the eye win, the rest are not
-                       drawn — see THE SLOTS ARE A LENS below)
+     (the mask's slot count moved to core/groundmask.js: GROUND_MASK_SLOTS)
      SHAFT_ESCAPE      the spiral of ledges (false = a pure sheer pit)
      SHAFT_BURIAL      the shifting-soil DOT at the bottom
 
@@ -107,7 +105,6 @@
   if (CBZ.CONFIG.GROUND_SHAFT == null) CBZ.CONFIG.GROUND_SHAFT = true;
   if (CBZ.CONFIG.CITY_SINKHOLES == null) CBZ.CONFIG.CITY_SINKHOLES = false;
   if (CBZ.CONFIG.SHAFT_SLOPE_MAX == null) CBZ.CONFIG.SHAFT_SLOPE_MAX = 0.14;
-  if (CBZ.CONFIG.SHAFT_MASK_SLOTS == null) CBZ.CONFIG.SHAFT_MASK_SLOTS = 8;
   if (CBZ.CONFIG.SHAFT_ESCAPE == null) CBZ.CONFIG.SHAFT_ESCAPE = true;
   if (CBZ.CONFIG.SHAFT_BURIAL == null) CBZ.CONFIG.SHAFT_BURIAL = true;
 
@@ -126,7 +123,7 @@
   const live = [];
   const chunks = [];          // falling rim/entrained debris (our own integrator)
   const seqs = [];            // running collapse sequences
-  const stats = { falls: 0, crushed: 0, buried: 0, voidSaves: 0, siteRejects: 0, cut: 0, reMasked: 0, reSweeps: 0 };
+  const stats = { falls: 0, crushed: 0, buried: 0, voidSaves: 0, siteRejects: 0, cut: 0 };
 
   // ---- host seams: the only three things a shaft needs from its world ----
   function survMode() { return CBZ.game && CBZ.game.mode === "survival" && CBZ.surv && CBZ.surv.arena; }
@@ -134,12 +131,13 @@
     if (survMode()) return CBZ.surv.arena.root;
     return CBZ.scene;
   }
-  // The ground WITHOUT any shaft subtracted — the terrain a new hole is cut in.
-  // Reading CBZ.floorAt here would let one shaft's floor be another's terrain.
-  let baseFloor = null;       // the city floorAt we wrapped (see installCityFloor)
+  /* The ground WITHOUT any hole subtracted — the terrain a new one is cut in.
+     Reading CBZ.floorAt here would let one shaft's floor become another's
+     terrain. solidground.js publishes the unsubtracted field directly, so this
+     no longer has to reach for a wrapper it captured earlier and hope. */
   function rawFloor(x, z) {
     if (survMode()) return CBZ.surv.arena.groundHeightAt(x, z);
-    if (baseFloor) { const y = +baseFloor(x, z); return Number.isFinite(y) ? y : 0; }
+    if (CBZ.groundBaseAt) { const y = +CBZ.groundBaseAt(x, z); return Number.isFinite(y) ? y : 0; }
     if (CBZ.floorAt) { const y = +CBZ.floorAt(x, z); return Number.isFinite(y) ? y : 0; }
     return 0;
   }
@@ -196,251 +194,65 @@
      recognise (a custom ShaderMaterial that is not the disaster water), it is
      left alone and the only cost is that one surface still draws over the hole.
      ============================================================ */
-  /* THE SLOTS ARE A LENS, NOT A LIMIT — AND THE NEAREST HOLE ALWAYS WINS ONE.
+  /* THE MASK IS NOT THIS FILE'S JOB ANY MORE — core/groundmask.js OWNS IT.
 
-     `uniform vec4 uShaftV[N]` is a GLSL array, so N is fixed at compile time
-     and the number of holes the ground can stop drawing for is CAPPED. That is
-     inherent to masking-instead-of-cutting and it is fine; what was NOT fine
-     was which N. The slots were filled with `live[0..3]` — creation order — so
-     once the island held four shafts the FIFTH one, the one that had just
-     opened under the player, was the one that got no slot. Its lip collar drew
-     on unbroken grass with the road running straight over it, while floorAt
-     (which has no cap and never had one) went on answering with the shaft
-     floor. You saw a ring, and then you fell through it. Sinkholes are
-     permanent by design and the arc repeats, so this was reached in any long
-     match, and it always struck the newest hole — the one being looked at.
+     What used to live here was ~230 lines of DISCOVERY: a downward raycast and
+     a footprint box sweep to find the ground surfaces to patch, a per-material
+     shader-string injection, a per-site swept-radius memo, a record of every
+     mesh taken so a healer could re-stamp materials that got swapped underneath
+     it, and a slot array. FOUR separate shipped bugs came out of that search,
+     and not one came out of the discard itself:
 
-     Two changes make the cap a level of detail instead of a cliff:
-       1. the slots are filled NEAREST-EYE-FIRST, so the hole you can walk into
-          is by definition the hole that is drawn (and a shaft mid-collapse,
-          which growTo() re-cuts to the back of `live` six times, keeps its slot
-          instead of losing it on the first widening);
-       2. a shaft that misses out is NOT DRAWN AT ALL — group hidden, and the
-          props its mouth swallowed put back. Untouched ground is a quiet lie
-          at 90 m; a ring lying on solid grass is a loud one at 2 m.
-     `ringsOnSolidGround` in shaftAudit() is the invariant, pinned at 0. */
-  const SHAFT_SLOTS = Math.max(1, Math.min(16, CBZ.CONFIG.SHAFT_MASK_SLOTS || 8));
-  const shaftV = [];
-  for (let i = 0; i < SHAFT_SLOTS; i++) shaftV.push(new THREE.Vector4(0, 0, 0, 0));
-  const uShaftV = { value: shaftV };
-  const maskedSites = [];
-  const slotted = [];        // this frame's winners, nearest eye first
-  const rank = [];           // scratch for the ranking — syncMask runs per frame
-  function eyeX() { return CBZ.camera ? CBZ.camera.position.x : (CBZ.player && CBZ.player.pos ? CBZ.player.pos.x : 0); }
-  function eyeZ() { return CBZ.camera ? CBZ.camera.position.z : (CBZ.player && CBZ.player.pos ? CBZ.player.pos.z : 0); }
-  /* WHAT A SLOT IS RANKED ON. Distance to the EYE is the visual answer, and it
-     is the camera that renders, so the camera leads. But the camera and the
-     player come apart — a death cam, a cinematic, a chase cam left behind a
-     car — and it is the PLAYER who falls, through a floor query that has no
-     slot limit. So the score is the nearer of the two, and a shaft with the
-     player actually inside it is pinned to a slot outright: "you are standing
-     in a hole that is not being drawn" is the one state this cap must never be
-     allowed to produce, rather than merely be unlikely to. */
-  function slotScore(h, ex, ez, px, pz) {
-    const de = (h.x - ex) * (h.x - ex) + (h.z - ez) * (h.z - ez);
-    if (px == null) return de;
-    const dp = (h.x - px) * (h.x - px) + (h.z - pz) * (h.z - pz);
-    // inside the mouth: rank ahead of everything, closest-first among them
-    if (dp < h.mouth * h.mouth) return -1e9 + dp;
-    return de < dp ? de : dp;
-  }
-  function syncMask() {
-    slotted.length = 0;
-    if (live.length <= SHAFT_SLOTS) {
-      for (let i = 0; i < live.length; i++) slotted.push(live[i]);
-    } else {
-      const ex = eyeX(), ez = eyeZ();
-      const pp = CBZ.player && CBZ.player.pos;
-      const px = pp ? pp.x : null, pz = pp ? pp.z : null;
-      rank.length = 0;
-      for (let i = 0; i < live.length; i++) rank.push(live[i]);
-      rank.sort(function (a, b) { return slotScore(a, ex, ez, px, pz) - slotScore(b, ex, ez, px, pz); });
-      for (let i = 0; i < SHAFT_SLOTS; i++) slotted.push(rank[i]);
-    }
-    for (let i = 0; i < SHAFT_SLOTS; i++) {
-      const h = slotted[i];
-      // the discard radius is the WALL's outer radius, not the removed-floor
-      // radius: between the two lies the sliver of ground the wall stands
-      // behind, and on the island that sliver is where the SEA was showing
-      // through as a blue crescent at the rim.
-      if (h) shaftV[i].set(h.x, h.z, h.r * 1.06, h.bottom);
-      else shaftV[i].set(0, 0, 0, 0);
-    }
-    for (let i = 0; i < live.length; i++) setDrawn(live[i], slotted.indexOf(live[i]) >= 0);
-  }
-  /* A shaft is drawn only while the ground above it is being discarded. The
-     props clearInside() swallowed come back with it, so an unslotted site
-     reads as ground nothing has happened to rather than as a hole with a lid. */
+       · the raycast threw on the city's Sprites and, sharing a try{} with the
+         sweep, silently killed it — every city shaft a ring on intact tarmac;
+       · a site was swept once at the first plug's HALF radius, so the annulus
+         of road meshes out to the final radius stayed a lid;
+       · slots were filled in creation order, so the newest hole — the one just
+         opened under the player — was the one that went unmasked;
+       · core/gfx.js swaps ground materials on a QUALITY TIER change, which
+         un-stamped the discard mid-disaster; invisible on a fixed-tier desktop,
+         reproducible on the owner's phone, and it needed a per-frame healer.
+
+     All four are the same bug: a search that can miss. The discard now lives in
+     THREE.ShaderChunk's fog chunks, which every fogged material in this game
+     includes, so it is in every ground shader by construction and a material
+     swapped at runtime arrives already carrying it. There is nothing to find,
+     nothing to re-stamp, and nothing to get wrong.
+
+     What stays here is what is genuinely this file's: WHICH holes are open, and
+     what a shaft that loses a slot should do about its own geometry. */
   function setDrawn(h, drawn) {
     if (h._drawn === drawn) return;
     h._drawn = drawn;
     if (h.grp) h.grp.visible = drawn;
     if (h.hidden) for (let i = 0; i < h.hidden.length; i++) h.hidden[i].visible = !drawn;
   }
-  const FRAG_HEAD = "uniform vec4 uShaftV[" + SHAFT_SLOTS + "];\n";
-  const FRAG_TEST = "\n  for (int si = 0; si < " + SHAFT_SLOTS + "; si++) { vec4 sh = uShaftV[si]; if (sh.z <= 0.0) break; if (distance(SHAFTWORLD.xz, sh.xy) < sh.z) discard; }\n";
-  function maskMaterial(mat) {
-    if (!mat || mat._shaftMasked) return;
-    mat._shaftMasked = true;
-    try {
-      if (mat.isShaderMaterial) {
-        // the disaster water publishes its own world position; anything else
-        // custom is left alone rather than guessed at
-        if (!mat.fragmentShader || mat.fragmentShader.indexOf("vDwWorld") < 0) return;
-        if (mat.fragmentShader.indexOf("uShaftV") >= 0) return;
-        mat.uniforms.uShaftV = uShaftV;
-        mat.fragmentShader = FRAG_HEAD + mat.fragmentShader.replace("void main() {", "void main() {" + FRAG_TEST.replace("SHAFTWORLD", "vDwWorld"));
-        mat.needsUpdate = true;
-        return;
+  const slotted = [];
+  const maskReq = [];
+  /* Publish every live shaft to the mask, take back the ones that won a slot,
+     and stop drawing the rest — a ring lying on solid grass is the loud lie;
+     untouched ground at 90 m is the quiet one. The DISCARD radius is the wall's
+     outer edge (r * 1.06), not the removed floor: between the two lies the
+     sliver of ground the wall stands behind, and on the island that sliver is
+     where the sea was showing through as a blue crescent at the rim. */
+  // core/groundmask.js deals the slots for EVERY owner of holes now, so this
+  // file publishes its shafts and reads back which of them won one.
+  if (CBZ.groundMaskProvide) {
+    CBZ.groundMaskProvide(function () {
+      maskReq.length = 0;
+      for (let i = 0; i < live.length; i++) {
+        const h = live[i];
+        maskReq.push({ x: h.x, z: h.z, r: h.r * 1.06, y: h.gy, src: h });
       }
-      const prev = mat.onBeforeCompile;
-      mat.onBeforeCompile = function (shader, renderer) {
-        if (prev) { try { prev.call(this, shader, renderer); } catch (e) {} }
-        if (shader.fragmentShader.indexOf("#include <clipping_planes_fragment>") < 0) return;
-        if (shader.vertexShader.indexOf("#include <project_vertex>") < 0) return;
-        shader.uniforms.uShaftV = uShaftV;
-        shader.vertexShader = "varying vec3 vShaftW;\n" + shader.vertexShader.replace(
-          "#include <project_vertex>", "#include <project_vertex>\n  vShaftW = (modelMatrix * vec4(transformed, 1.0)).xyz;");
-        shader.fragmentShader = "varying vec3 vShaftW;\n" + FRAG_HEAD + shader.fragmentShader.replace(
-          "#include <clipping_planes_fragment>", "#include <clipping_planes_fragment>" + FRAG_TEST.replace("SHAFTWORLD", "vShaftW"));
-      };
-      mat.needsUpdate = true;
-    } catch (e) { /* a material we cannot patch simply keeps drawing */ }
+      return maskReq;
+    });
   }
-  /* ============================================================
-     THE MASK FOLLOWS THE MESH, NOT THE MATERIAL OBJECT
-
-     THE FAULT: "on my phone it is a ring with the ground drawn over the hole,
-     but not in your screenshots." Both were true, and neither was the shader's
-     fault. `maskMaterial` stamps a discard onto the material OBJECT that a
-     ground mesh is wearing at the moment a shaft is cut. It is not the mesh's
-     property and nothing re-checks it — so anything that hands that mesh a
-     DIFFERENT material afterwards silently removes the hole's lid-remover and
-     the ground draws straight back over the mouth. The floor query has no such
-     dependency, so you still fall in: a ring you fall through, the exact
-     artefact this file has now produced three separate ways.
-
-     Two systems in this game replace ground materials at runtime, both in
-     core/gfx.js, and both are driven by the QUALITY TIER:
-
-       swapTree()      walks the whole scene and flips every cmat material to
-                       its `_cbzTwin` (Lambert ⇄ Standard) when tier().pbr
-                       changes — `o.material = m._cbzTwin`
-       promoteMerged() swaps the batcher's merged output between its source
-                       Lambert and a promoted Standard
-
-     Which is why this was invisible here and obvious on the owner's phone: a
-     desktop holds one tier for a whole session, while core/quality.js's auto
-     sampler drops tiers when the frame rate dips — and the frame rate dips
-     precisely during a disaster, which is the only time a sinkhole exists to
-     be covered up. Nothing about iOS, Safari, WebGL1 or GLSL precision: the
-     phone simply gets to the code path a fixed-tier desktop never reaches.
-
-     So the sweep now REMEMBERS THE MESHES it masked, and `healMask()` re-stamps
-     any whose material has been swapped since. It is an array scan with a
-     boolean early-out, cheap enough to run every frame a shaft is open, and it
-     is indifferent to WHY the material changed — a tier flip, a batch pass, a
-     mod, or the next system nobody has written yet. `shaftAudit().reMasked`
-     counts the saves. */
-  const maskedMeshes = [];
-  const REHEAL_SECS = 1.5;      // one shaft re-swept per this many seconds, round-robin
-  let healT = 0, healIdx = 0;
-  function takeMesh(o) {
-    if (!o || !o.material) return;
-    for (let p = o; p; p = p.parent) if (p.userData && p.userData.groundShaft) return;
-    if (Array.isArray(o.material)) { for (let k = 0; k < o.material.length; k++) maskMaterial(o.material[k]); }
-    else maskMaterial(o.material);
-    // recorded ONCE per mesh; the healer re-reads o.material every pass, so a
-    // mesh recorded while wearing its Lambert covers its Standard twin too
-    if (!o.userData._shaftSwept) { o.userData._shaftSwept = true; maskedMeshes.push(o); }
-  }
-  function healMask() {
-    for (let i = 0; i < maskedMeshes.length; i++) {
-      const o = maskedMeshes[i], m = o.material;
-      if (!m) continue;
-      if (Array.isArray(m)) {
-        for (let k = 0; k < m.length; k++) if (m[k] && !m[k]._shaftMasked) { maskMaterial(m[k]); stats.reMasked++; }
-      } else if (!m._shaftMasked) {
-        maskMaterial(m); stats.reMasked++;
-      }
-    }
-  }
-
-  /* ONE SWEEP PER SITE PER RADIUS — and the second half of that is the point.
-
-     A repeat visit used to be skipped outright, on the reasoning that the
-     materials are already masked and only the uniform moves. That holds on the
-     island, where ONE disc material is the entire ground, and fails in the city,
-     where a junction is dozens of separate meshes: road, lane paint, kerb, lot
-     slab. The growth phase cuts the first plug at HALF the final radius, so a
-     site swept once was swept at r/2 — and every road mesh sitting in the
-     annulus between r/2 and r kept drawing, leaving a partial lid of tarmac
-     over the void. Measured on a city junction: 124 flat surfaces over the
-     mouth, 48 masked.
-
-     So a site remembers the radius it was swept at and is swept AGAIN when the
-     hole outgrows it. Still bounded — six or seven re-cuts, each only touching
-     materials that are not masked yet, and `_shaftMasked` makes every repeat a
-     cheap early-out. */
-  function maskGroundAt(h, force) {
-    const R = h.mouth + 2;
-    let site = null;
-    for (let i = 0; i < maskedSites.length; i++) {
-      if (Math.hypot(maskedSites[i].x - h.x, maskedSites[i].z - h.z) < 4) { site = maskedSites[i]; break; }
-    }
-    if (site) {
-      if (R <= site.r && !force) return; // already swept this wide or wider
-      if (R > site.r) site.r = R;        // it has grown: sweep the new annulus
-    } else {
-      maskedSites.push({ x: h.x, z: h.z, r: R });
-    }
-    if (force) stats.reSweeps++;
-    const take = takeMesh;
-    /* TWO PHASES, TWO try/catches, AND THAT SEPARATION IS THE WHOLE CITY FIX.
-
-       These used to share one `try`, which quietly made the city sinkhole a
-       hole nothing was ever masked for. `root()` is the arena group in
-       survival but THE WHOLE SCENE in the city, and the scene contains
-       Sprites; r128's Sprite.raycast dereferences `raycaster.camera`, which a
-       bare `new THREE.Raycaster()` leaves null, so phase (a) threw on the
-       first sprite it reached — and took phase (b), the sweep that actually
-       finds the road, the kerb, the lot slab and the ground plate, down with
-       it. Every city shaft was therefore the exact fault this file exists to
-       have fixed: a lip ring on intact tarmac with a 40 m drop under it.
-
-       So: the raycaster is handed a camera (sprites answer instead of
-       throwing), and each phase now fails alone. Phase (b) is the
-       load-bearing one — it is a box test over the footprint and cannot
-       throw on somebody else's mesh — so the mask survives anything (a) hits. */
-    try {
-      // (a) what the sky sees through — catches the ground plate and the sea
-      const rc = new THREE.Raycaster(new THREE.Vector3(h.x, h.gy + 60, h.z), new THREE.Vector3(0, -1, 0), 0, 60 + h.depth + 40);
-      if (CBZ.camera) rc.camera = CBZ.camera;
-      const hits = rc.intersectObject(root(), true) || [];
-      for (let i = 0; i < hits.length; i++) take(hits[i].object);
-    } catch (e) { /* a scene we cannot ray is still swept by (b) below */ }
-    try {
-      /* (b) every FLAT surface overlapping the footprint. One ray down the
-         middle is not enough: a road, its lane paint, a kerb and a lot slab
-         are separate meshes at slightly different heights and a ray that
-         misses one by a metre leaves a strip of tarmac hanging over the void
-         — which is exactly what the first pass photographed. Flat-only
-         (under 3 m tall) so this never recompiles a building's shader for a
-         hole that, by the placement law, is not under a building anyway. */
-      const box = new THREE.Box3();
-      root().traverse(function (o) {
-        if (!o.isMesh || !o.geometry) return;
-        let p = o; while (p) { if (p.userData && p.userData.groundShaft) return; p = p.parent; }
-        if (o.material && o.material._shaftMasked) return;
-        if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
-        box.copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld);
-        if (box.max.y - box.min.y > 3) return;
-        if (box.max.y < h.bottom || box.min.y > h.gy + 2.5) return;
-        if (box.max.x < h.x - R || box.min.x > h.x + R) return;
-        if (box.max.z < h.z - R || box.min.z > h.z + R) return;
-        take(o);
-      });
-    } catch (e) {}
+  function syncMask() {
+    slotted.length = 0;
+    if (!CBZ.groundMaskSync) { for (let i = 0; i < live.length; i++) setDrawn(live[i], true); return; }
+    const w = CBZ.groundMaskSync();
+    for (let i = 0; i < w.length; i++) slotted.push(w[i]);
+    for (let i = 0; i < live.length; i++) setDrawn(live[i], slotted.indexOf(live[i]) >= 0);
   }
 
   /* ============================================================
@@ -469,7 +281,32 @@
   CBZ.groundShaftCanOpen = function (x, z, r) {
     const slope = CBZ.groundShaftSlope(x, z, r);
     if (slope > CBZ.CONFIG.SHAFT_SLOPE_MAX) return { ok: false, why: "slope", slope: slope };
+    // a non-finite probe point is a caller bug, not a lake: cityWaterAt(undefined,
+    // undefined) answers TRUE, which is how the building rule above hid for so long
+    if (!Number.isFinite(x) || !Number.isFinite(z)) return { ok: false, why: "badPoint", slope: slope };
     if (CBZ.cityWaterAt && !survMode() && CBZ.cityWaterAt(x, z)) return { ok: false, why: "water", slope: slope };
+    /* THE SURVIVAL ISLAND HAS BUILDINGS TOO, and this law never looked at them.
+       Everything below was gated to the city, so on the island only the SLOPE
+       rule applied and a hole could open straight through a house. It was
+       invisible for the sinkhole because systems/disasters.js does its own
+       avoid() pass over arena.fragile before calling here — a private second
+       copy of a rule that belongs in one place — and it surfaced the moment
+       something ELSE asked for ground: a dig site photographed sitting across a
+       row of houses. Same rule, same reason, now in the law itself so every
+       caller gets it. */
+    if (survMode() && CBZ.surv && CBZ.surv.arena) {
+      const B = CBZ.surv.arena.fragile || [];
+      for (let i = 0; i < B.length; i++) {
+        const b = B[i];
+        if (!b || b.fallen) continue;                  // rubble is ground, not a building
+        const bx = b.ox != null ? b.ox : b.x, bz = b.oz != null ? b.oz : b.z;
+        if (bx == null || bz == null) continue;
+        // the record carries w AND d; a circle on the larger one is the
+        // conservative read, and conservative is the right side to be wrong on
+        const half = Math.max(b.w || 8, b.d || b.w || 8) * 0.5;
+        if (Math.hypot(x - bx, z - bz) < r * 0.85 + half) return { ok: false, why: "building", slope: slope };
+      }
+    }
     if (!survMode() && CBZ.city && CBZ.city.arena) {
       const A = CBZ.city.arena;
       // never under a government complex: those regions are authored places
@@ -481,14 +318,29 @@
         const hx = (g.hw != null ? g.hw : (g.w || 0) / 2) + r, hz = (g.hh != null ? g.hh : (g.d || g.h || 0) / 2) + r;
         if (hx > 0 && hz > 0 && Math.abs(x - (g.x || 0)) < hx && Math.abs(z - (g.z || 0)) < hz) return { ok: false, why: "gov", slope: slope };
       }
-      // never straight through a building footprint — the reference photograph
-      // is a hole in an INTERSECTION with the buildings still standing
+      /* NEVER STRAIGHT THROUGH A BUILDING FOOTPRINT — the reference photograph
+         is a hole in an INTERSECTION with the buildings still standing, and this
+         engine's structural ledger has no concept of "undermined".
+
+         THIS RULE HAD NEVER ONCE FIRED. It read L.x / L.z; a city lot record
+         carries cx / cz (its building carries ox / oz), so both reads were
+         undefined, `Math.abs(x - undefined)` is NaN, and `NaN < hw` is false —
+         so every candidate passed the building test no matter where it was.
+         Measured: of 300 lots WITH buildings, zero were refused for "building".
+         A bomb crater or a city sinkhole could open straight under a tower and
+         leave it standing on air. Found by tools/crater-check.mjs failing to
+         locate a single lot the law would refuse. */
       const lots = A.lots || [];
       for (let i = 0; i < lots.length; i++) {
         const L = lots[i];
         if (!L || !L.building) continue;
-        const hw = (L.w || 0) / 2 + r * 0.55, hd = (L.d || L.h || 0) / 2 + r * 0.55;
-        if (Math.abs(x - L.x) < hw && Math.abs(z - L.z) < hd) return { ok: false, why: "building", slope: slope };
+        const B = L.building;
+        const lx = L.cx != null ? L.cx : (L.x != null ? L.x : (B.ox != null ? B.ox : null));
+        const lz = L.cz != null ? L.cz : (L.z != null ? L.z : (B.oz != null ? B.oz : null));
+        if (lx == null || lz == null) continue;
+        const bw = (B.w != null ? B.w : L.w) || 0, bd = (B.d != null ? B.d : (L.d || L.h)) || 0;
+        const hw = bw / 2 + r * 0.55, hd = bd / 2 + r * 0.55;
+        if (Math.abs(x - lx) < hw && Math.abs(z - lz) < hd) return { ok: false, why: "building", slope: slope };
       }
     }
     return { ok: true, slope: slope };
@@ -547,6 +399,13 @@
       wallMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, side: THREE.DoubleSide });
       rockMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
       lipMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, side: THREE.DoubleSide });
+      /* THE LINER LIVES INSIDE THE BAND ON PURPOSE. The mask discards a thin
+         slice about each hole's grade, and the wall's top, the torn lip and the
+         stair's top steps are all in it — they ARE the hole's edge. Opting out
+         is a #define, so it is exact and in the program cache key; it is the
+         inverse of the old search, which had to identify the ground and always
+         could be wrong about it. */
+      if (CBZ.groundMaskExempt) { CBZ.groundMaskExempt(wallMat); CBZ.groundMaskExempt(rockMat); CBZ.groundMaskExempt(lipMat); }
     }
   }
 
@@ -638,7 +497,13 @@
         const o = hits[i].object;
         if (!o || !o.isMesh || !o.visible || !o.material) continue;
         let p = o, mine = false;
-        while (p) { if (p.userData && p.userData.groundShaft) { mine = true; break; } p = p.parent; }
+        // anything this project DREW to replace ground is not the ground it
+        // replaced — a shaft's liner, and a dig site's soil, which is the one
+        // that made this worth publishing
+        while (p) {
+          if (p.userData && (p.userData.groundShaft || p.userData.digSite)) { mine = true; break; }
+          p = p.parent;
+        }
         if (mine) continue;
         // a canopy, a roof or a sign is not the ground; the ground is the
         // surface at the height the shaft's own rim was solved from
@@ -646,6 +511,16 @@
         if (py > gy + 2.5 || py < gy - 2.5) continue;
         const mat = Array.isArray(o.material) ? o.material[0] : o.material;
         if (!mat || !mat.color) continue;
+        /* A TEXTURED SURFACE DOES NOT KEEP ITS COLOUR IN material.color — that
+           field is a TINT of the map, and for the city's road and sidewalk
+           plates it is plain white. Reading it produced a WHITE lip collar
+           around every city hole: photographed on a bomb crater at a junction,
+           the ring of "torn asphalt" was brighter than the concrete beside it.
+           A tint is not an answer, so treat a mapped material as no answer and
+           let the caller fall back to the section colour, which is what the
+           collar always used to be. (The island, whose ground is flat untextured
+           colour, still samples exactly as before.) */
+        if (mat.map) continue;
         let r = mat.color.r, g = mat.color.g, b = mat.color.b;
         // a vertexColors ground (the island's beach ring is white × per-vertex
         // sand) would answer "white" from the material alone
@@ -656,6 +531,14 @@
     } catch (e) { /* no answer is not a crash: the caller falls back to soil */ }
     return null;
   }
+  /* PUBLISHED, because a second thing needed it. systems/digsite.js was
+     painting its undisturbed surface a hardcoded olive, which is a fine guess
+     for grass and wrong everywhere else — photographed on the island it was a
+     34 m cream disc lying in green grass. It needs the answer this function
+     already works out (including the two things it learned the hard way: a
+     textured plate's material.color is a white TINT, not a colour, and a
+     vertexColors ground needs its face tint applied). One implementation. */
+  CBZ.groundColorAt = groundColorAt;
 
   // The strata ladder: topsoil → clay → silt → weathered rock → bedrock, with
   // the band edges jittered per shaft so no two read as the same wallpaper.
@@ -723,6 +606,55 @@
       for (let i = 0; i < seg; i++) {
         const a = j * (seg + 1) + i, b = a + 1, d = a + (seg + 1), e = d + 1;
         idx.push(a, d, b, b, d, e);
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    return new THREE.Mesh(geo, wallMat);
+  }
+
+  /* THE DISH FLOOR — a crater's bottom is a SURFACE, not an absence.
+
+     A shaft can get away with a black disc down there: nothing reaches the
+     floor of a 46 m hole and "bottomless" is the honest read. A 5 m bomb crater
+     is the opposite — you can see every inch of its floor from the street — and
+     with the black disc suppressed and nothing in its place, the mask cut the
+     ground away and left the sky showing through the middle of the hole.
+
+     So a bowl builds the surface its own floor query already describes: the
+     same `dish` curve shaftFloor() answers with, meshed as a radial fan, so the
+     thing you see and the thing you stand on are one solve. Strata colour comes
+     from the shared ladder at the true depth of each ring, which is why the
+     floor meets the wall without a seam in value. */
+  function buildDish(h) {
+    if (!h.dish) return null;
+    const seg = 40, rings = 8;
+    const R = h.dish.r;
+    const pos = new Float32Array((seg + 1) * (rings + 1) * 3);
+    const col = new Float32Array((seg + 1) * (rings + 1) * 3);
+    const idx = [];
+    const c = [0, 0, 0];
+    let p = 0;
+    for (let j = 0; j <= rings; j++) {
+      const rr = (j / rings) * R;
+      const y = h.bottom + h.dish.h * (rr / R);
+      const t = Math.max(0, Math.min(1, (h.gy - y) / h.depth));
+      for (let i = 0; i <= seg; i++) {
+        const a = (i / seg) * TAU;
+        const wob = 1 + (hs(h, Math.cos(a) * 2.7 + j, Math.sin(a) * 2.7) - 0.5) * 0.06;
+        pos[p] = h.x + Math.cos(a) * rr * wob; pos[p + 1] = y; pos[p + 2] = h.z + Math.sin(a) * rr * wob;
+        strataColor(h, t, a, c);
+        col[p] = c[0]; col[p + 1] = c[1]; col[p + 2] = c[2];
+        p += 3;
+      }
+    }
+    for (let j = 0; j < rings; j++) {
+      for (let i = 0; i < seg; i++) {
+        const a = j * (seg + 1) + i, b = a + 1, d = a + (seg + 1), e = d + 1;
+        idx.push(a, b, d, b, e, d);
       }
     }
     const geo = new THREE.BufferGeometry();
@@ -851,6 +783,11 @@
   function buildFloorFurniture(h) {
     const B = BoxBuf();
     h.voids = [];
+    /* The wedged slabs exist to publish VOID POCKETS — the only thing that
+       stops the burial DOT at the bottom of a deep shaft. A bomb crater has
+       no burial and no wall to shelter against, so slabs the size of a car
+       leaning in a 5 m dish were just furniture in the wrong room. */
+    const wedges = h.bowl ? 0 : 3;
     // talus cone, as stacked broken plates (a cone primitive reads too clean)
     const cone = h.coneR;
     for (let i = 0; i < 26; i++) {
@@ -861,7 +798,7 @@
         hs(h, i, 7) * TAU, i % 3 === 0 ? h.surfaceColor : 0x4a4036, 0.16 + hs(h, i, 8) * 0.1);
     }
     // wedged slabs → the void spaces
-    const nV = 3;
+    const nV = wedges;
     for (let i = 0; i < nV; i++) {
       const a = (i / nV) * TAU + hs(h, i, 11) * 0.9;
       const rr = h.r * 0.72;
@@ -915,9 +852,17 @@
     mats();
     const gy = opts.gy != null ? opts.gy : rawFloor(x, z);
     const r = Math.max(2.5, opts.r || 8);
-    // DEEPER THAN WIDE, ALWAYS. The reference reads as a shaft, not a crater,
-    // and the ratio is the whole reason: default 2.1x the diameter.
-    const depth = Math.max(r * 2.4, opts.depth || r * 4.2);
+    /* DEEPER THAN WIDE, ALWAYS — for a SINKHOLE. The reference reads as a
+       shaft, not a crater, and the ratio is the whole reason: 2.1x the
+       diameter. A CRATER is the opposite shape and the same primitive: ordnance
+       digs a wide shallow bowl, so `bowl` lifts the clamp rather than adding a
+       second hole system to sit beside this one. */
+    /* The deeper-than-wide clamp is the SINKHOLE's law. A crater is a wide
+       shallow bowl and a BREACH is a hole of exactly the thickness it has to get
+       through — forcing either to 2.4x its radius made a 3 m roof punch reach
+       16 m and drop the room's floor out from under itself. Both say so. */
+    const depth = (opts.bowl || opts.through) ? Math.max(1.2, opts.depth || r * 0.55)
+                                              : Math.max(r * 2.4, opts.depth || r * 4.2);
     const h = {
       x: x, z: z, r: r,
       mouth: r * 0.93,          // the floor is gone a hair inside the visible rim
@@ -927,7 +872,21 @@
       mode: CBZ.game ? CBZ.game.mode : null,
       grp: new THREE.Group(),
       voids: [],
-      coneR: r * 0.66, coneH: Math.min(4.2, depth * 0.11),
+      bowl: !!opts.bowl,
+      /* A HOLE THROUGH. A shaft and a crater both END in a floor; a BREACH does
+         not — it opens into a room, and the room's floor is the floor. Building
+         one anyway put a dome of earth in the ceiling of the bunker it had just
+         opened, which is a plug, not a hole. */
+      through: !!opts.through,
+      /* A CRATER IS A DISH AND A SHAFT IS A PIT, and they are opposite shapes.
+         The talus cone is a rubble MOUND — highest in the middle, sloping down
+         to the wall — which is right for a collapse and exactly backwards for
+         ordnance: it put the deepest point of a bomb hole at its rim. So a bowl
+         gets its own floor curve (`dish`, deepest at the centre, rising to meet
+         the lip) and keeps only a small cone of loose spoil at the bottom. */
+      dish: (opts.bowl && !opts.through) ? { r: Math.max(0.5, r * 0.98), h: depth * 0.95 } : null,
+      coneR: opts.bowl ? r * 0.3 : r * 0.66,
+      coneH: opts.bowl ? Math.min(0.5, depth * 0.12) : Math.min(4.2, depth * 0.11),
       stepN: 0, stepA0: 0, stepIn: r * 0.78,
       born: CBZ.now || 0,
     };
@@ -943,27 +902,31 @@
        game the moment it finished opening — the colour was the sampled one,
        the flag had simply forgotten where it came from. */
     h.topSampled = opts.topSampled != null ? !!opts.topSampled : (top != null && opts.top == null);
-    if (CBZ.CONFIG.SHAFT_ESCAPE !== false) {
+    if (CBZ.CONFIG.SHAFT_ESCAPE !== false && !h.bowl) {
       h.stepN = Math.max(6, Math.min(34, Math.round(depth / 1.3)));
       h.stepA0 = (h.seed % 1) * TAU;
       h.stepIn = h.mouth * 0.78;
     }
     const wall = buildWall(h);
     const lip = buildLip(h);
-    const rubble = buildFloorFurniture(h);
+    const rubble = h.through ? null : buildFloorFurniture(h);
+    const dish = buildDish(h);
     const stair = buildStair(h);
-    // the black — a disc at the very bottom under the rubble, so a shaft you
-    // cannot see the bottom of still reads as bottomless rather than as a gap
-    const dark = new THREE.Mesh(new THREE.CircleGeometry(r * 0.95, 24),
+    /* THE BLACK — a disc at the very bottom under the rubble, so a shaft you
+       cannot see the bottom of reads as bottomless rather than as a gap. A
+       CRATER is the opposite: you can see its floor, and painting a void under
+       it made a 5 m dish read as a hole to nowhere. Bowls get earth instead. */
+    const dark = (h.bowl || h.through) ? null : new THREE.Mesh(new THREE.CircleGeometry(r * 0.95, 24),
       new THREE.MeshBasicMaterial({ color: 0x05040a }));
-    dark.rotation.x = -Math.PI / 2;
-    dark.position.set(x, h.bottom - 0.2, z);
+    if (dark) { dark.rotation.x = -Math.PI / 2; dark.position.set(x, h.bottom - 0.2, z); }
     wall.position.set(x, 0, z);
     lip.position.set(x, 0, z);
     // the collar is ground, so it takes ground's shadows too: an unshadowed
     // annulus inside a shadowed field is the ring again, drawn in light
     lip.receiveShadow = true;
-    h.grp.add(wall, lip, dark);
+    h.grp.add(wall, lip);
+    if (dark) h.grp.add(dark);
+    if (dish) h.grp.add(dish);
     if (rubble) h.grp.add(rubble);
     if (stair) h.grp.add(stair);
     h.grp.userData.groundShaft = true;
@@ -972,10 +935,9 @@
     live.push(h);
     if (pub.indexOf(h) < 0) pub.push(h);
     stats.cut++;
-    maskGroundAt(h);
     clearInside(h);
     syncMask();
-    installCityFloor();
+    attachCarving(h);
     return h;
   };
 
@@ -1025,6 +987,7 @@
       h.grp.traverse(function (o) { if (o.geometry) o.geometry.dispose(); if (o.material && o.material.dispose && !o.material.vertexColors) o.material.dispose(); });
       if (h.grp.parent) h.grp.parent.remove(h.grp);
     }
+    detachCarving(h);
     let i = live.indexOf(h); if (i >= 0) live.splice(i, 1);
     i = pub.indexOf(h); if (i >= 0) pub.splice(i, 1);
     syncMask();                 // the ground comes back the moment the record does not
@@ -1033,9 +996,6 @@
     for (let i = live.length - 1; i >= 0; i--) if (!mode || live[i].mode === mode) disposeShaft(live[i]);
     for (let i = seqs.length - 1; i >= 0; i--) seqs[i].dispose();
     clearChunks();
-    maskedSites.length = 0;
-    for (let i = 0; i < maskedMeshes.length; i++) if (maskedMeshes[i].userData) maskedMeshes[i].userData._shaftSwept = false;
-    maskedMeshes.length = 0;
   };
 
   /* ============================================================
@@ -1052,6 +1012,11 @@
       return h.bottom + (i + 1) * (h.depth / h.stepN);
     }
     const cone = d < h.coneR ? h.coneH * (1 - d / h.coneR) : 0;
+    if (h.dish) {
+      // rises from the centre out to the rim; the spoil cone sits on top of it
+      const t = Math.min(1, d / h.dish.r);
+      return h.bottom + Math.max(h.dish.h * t, cone);
+    }
     return h.bottom + cone;
   }
   // "am I over a hole" — the ONE containment answer (nothing re-derives it)
@@ -1102,26 +1067,25 @@
      heals itself across a mode switch. survivorbot.js calls CBZ.surv.floorAt
      DIRECTLY, so bots keep landing on the flat bottom — which is correct for
      them anyway: they are the one actor in this game that cannot climb. */
-  let cityFloorFn = null;
-  function installCityFloor() {
-    if (!CBZ.floorAt || CBZ.floorAt === cityFloorFn) return;
-    const prev = CBZ.floorAt;
-    // never wrap a wrapper of ours (an older install that survived a mode
-    // reset) — that is the recursion the _city marker exists to prevent
-    if (prev._shaft) { cityFloorFn = prev; return; }
-    baseFloor = prev;
-    cityFloorFn = function (x, z) {
-      if (live.length) {
-        for (let i = 0; i < live.length; i++) {
-          const y = shaftFloor(live[i], x, z);
-          if (y != null) return y;
-        }
-      }
-      return prev(x, z);
-    };
-    cityFloorFn._shaft = true;
-    if (prev._city) cityFloorFn._city = true;
-    CBZ.floorAt = cityFloorFn;
+  /* A SHAFT IS A CARVING. It used to be a WRAPPER around CBZ.floorAt — one more
+     link in a five-deep chain of mode wrappers, each marking itself so the next
+     reset would not capture itself and recurse. systems/solidground.js owns the
+     floor now, so a hole is a record handed to it: a cylinder of removed
+     material whose floor is shaped by this file's own stair-and-cone math,
+     which therefore still lives in exactly one place. */
+  function attachCarving(h) {
+    if (!CBZ.addCarving) return;
+    h.carve = CBZ.addCarving({
+      kind: "cyl", x: h.x, z: h.z, r: h.mouth,
+      y0: h.through ? h.bottom - 0.05 : h.bottom, y1: h.gy + 60,   // open to the sky
+      floorFnSkip: !!h.through,
+      open: true, dry: true, mode: h.mode, owner: "groundshaft",
+      floorFn: h.through ? null : function (x, z) { const y = shaftFloor(h, x, z); return y == null ? h.bottom : y; },
+    });
+  }
+  function detachCarving(h) {
+    if (h.carve && CBZ.removeCarving) CBZ.removeCarving(h.carve);
+    h.carve = null;
   }
 
   /* ============================================================
@@ -1495,32 +1459,12 @@
     for (let i = 0; i < live.length; i++) if (pub.indexOf(live[i]) < 0) pub.push(live[i]);
     // re-wrap in ANY mode if somebody re-installed a floor after us (a city
     // reset, a mode switch): the wrapper is what makes the stair walkable
-    if (live.length && CBZ.floorAt !== cityFloorFn) installCityFloor();
-    /* THE MASK IS MAINTAINED, NOT INSTALLED ONCE. Two passes, both bounded:
-       healMask() re-stamps meshes whose material was swapped out from under us
-       (an array scan with a boolean early-out — every frame is fine), and a
-       round-robin RE-SWEEP catches ground that did not exist at cut time at
-       all: a mesh built later, a batch merge, an LOD swap, a mod. One shaft
-       per REHEAL_SECS, so the traverse cost is the same whatever the hole
-       count, and `_shaftMasked` makes every already-correct mesh a boolean
-       test. This is deliberately blind to the CAUSE — the reported failure
-       reproduces on a phone and not on a desktop, and a fix that only knows
-       about the mechanisms I could name here would fix exactly the ones I
-       already checked. */
-    if (live.length) {
-      healMask();
-      healT += dt;
-      if (healT >= REHEAL_SECS) {
-        healT = 0;
-        healIdx = (healIdx + 1) % live.length;
-        const h = live[healIdx];
-        if (h && !h._closed) maskGroundAt(h, true);
-      }
-    }
-    // the slots follow the eye, so they have to be re-dealt as the eye moves.
-    // Only once there are more holes than slots — below that every shaft owns
-    // one permanently and the sort would be a per-frame no-op.
-    if (live.length > SHAFT_SLOTS) syncMask();
+    /* THE SLOTS FOLLOW THE EYE, so they are re-dealt every frame a hole is
+       open. core/groundmask.js only sorts when there are more holes than
+       slots; below that this is a handful of Vector4 writes. There is no
+       longer anything to heal or re-sweep — a material swapped by a quality
+       tier change arrives already carrying the discard. */
+    if (live.length) syncMask();
     for (let i = seqs.length - 1; i >= 0; i--) { const s = seqs[i]; if (!s.done) s.tick(dt); }
     tickChunks(dt);
     tickHazards(dt);
@@ -1561,7 +1505,7 @@
       dbgEl.textContent =
         "shafts " + a.shafts + "  LIDS " + a.lidsOverMouth + "  rings " + a.ringsOnSolidGround +
         "\nslots " + a.maskSlots + "/" + a.unslottedShafts + " unslotted  swept " + a.sweptMeshes +
-        "\nreMask " + a.reMasked + "  reSweep " + a.reSweeps + "  collar " + a.collarSampled +
+        "\ncollar " + a.collarSampled +
         "\nthroat " + a.throatShade + "  q" + (CBZ.qualityAutoStats ? CBZ.qualityAutoStats.level : "?") +
         "  pbr" + ((CBZ.gfxTier && CBZ.gfxTier.pbr) ? 1 : 0) +
         "\ngl" + (cap && cap.isWebGL2 ? 2 : 1) + " " + (cap ? cap.precision : "?");
@@ -1654,7 +1598,9 @@
           if (rigs.indexOf(p) >= 0) return;
         }
         const mat = Array.isArray(o.material) ? o.material[0] : o.material;
-        if (!mat || mat._shaftMasked) return;
+        // masked unless it opted out (#define) or has no fog chunks to carry it
+        if (!mat) return;
+        if (mat.fog !== false && !(mat.defines && mat.defines.CBZ_NOMASK)) return;
         if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
         box.copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld);
         if (box.max.y - box.min.y > 3) return;
@@ -1670,7 +1616,9 @@
   CBZ.shaftAudit = function () {
     let worst = 0, onSlope = 0, dow = 0, deepest = 0, priv = 0, rings = 0, nearUn = Infinity, inUn = 0;
     let lids = 0, sampled = 0, throat = 0, rim = 0;
-    const ex = eyeX(), ez = eyeZ();
+    const eye = CBZ.groundMaskEye ? CBZ.groundMaskEye()
+      : { x: CBZ.camera ? CBZ.camera.position.x : 0, z: CBZ.camera ? CBZ.camera.position.z : 0 };
+    const ex = eye.x, ez = eye.z;
     for (let i = 0; i < live.length; i++) {
       const h = live[i];
       const s = CBZ.groundShaftSlope(h.x, h.z, h.r);
@@ -1683,7 +1631,7 @@
       throat += throatShade(h);
       rim += skyOcc(h, 0);
       /* ONLY A SETTLED HOLE IS ASKED. A shaft still growing is re-cut six or
-         seven times and maskGroundAt sweeps the new annulus on each pass, so
+         seven times and the chunk mask covers every radius it passes through, so
          mid-collapse there are legitimately road and kerb meshes over the
          mouth that have not been reached yet — measured at 12 on the first
          drop, 0 by the time the radius stops. Counting those would make this
@@ -1703,7 +1651,8 @@
       shafts: live.length,
       published: pub.length,
       privateHoles: priv,
-      maskSlots: SHAFT_SLOTS,
+      maskSlots: CBZ.groundMaskSlots || 0,
+      maskInstalled: !!(CBZ.groundMaskAudit && CBZ.groundMaskAudit().installed),
       unslottedShafts: Math.max(0, live.length - slotted.length),
       ringsOnSolidGround: rings,
       playerInUnslotted: inUn,
@@ -1725,14 +1674,15 @@
       stepsPerShaft: live.length ? live[0].stepN : 0,
       escapeReady: CBZ.CONFIG.SHAFT_ESCAPE !== false,
       cityShaftReady: !!(CBZ.CONFIG.CITY_SINKHOLES && CBZ.roadJunctions && CBZ.city && CBZ.city.arena),
-      cityFloorWrapped: !!(CBZ.floorAt && CBZ.floorAt._shaft),
+      floorOwned: !!(CBZ.floorAt && CBZ.floorAt._solid),
+      carvings: (CBZ.carvings || []).length,
       sequences: seqs.length,
       chunks: chunks.length,
       cut: stats.cut, siteRejects: stats.siteRejects,
       // the self-heal's own record: how often a ground material had to be
       // re-stamped because something swapped it, and how many re-sweeps ran
-      reMasked: stats.reMasked, reSweeps: stats.reSweeps,
-      sweptMeshes: maskedMeshes.length,
+      // the discovery is gone: nothing is swept, so this is 0 by construction
+      sweptMeshes: 0,
       falls: stats.falls, crushed: stats.crushed, buried: stats.buried, voidSaves: stats.voidSaves,
     };
   };

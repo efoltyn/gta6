@@ -2,10 +2,12 @@
    systems/detection.js — the WANTED / HEAT system.
 
    You are NOT hunted by default. In the yard you're just another
-   inmate; guards glance at you and move on. Heat only builds when you
-   actually do something: brawl, get caught stealing, trespass in a
-   restricted area (armory, cops' lounge, the exit corridor), or make
-   an obvious break. Lay low and the heat cools right back down.
+   inmate; guards glance at you and move on. Heat only builds when the
+   word actually gets out: a witness reports a brawl or a theft, a
+   camera locks on, or a guard who caught you somewhere restricted
+   (armory, staff lounge, the exit corridor) gets his radio call off —
+   see THE RADIO WINDOW below. Lay low and the heat cools right back
+   down.
 
    Only when heat is up AND a guard can see you do they switch to a
    HUNT and chase you down (capture is handled in systems/capture.js).
@@ -26,6 +28,49 @@
   // position to nearby guards (entities/searchlight.js owns the beam +
   // CBZ.litBySearchlight; the visual red-flush lives there too).
   if (CBZ.CONFIG && CBZ.CONFIG.JAIL_SEARCHLIGHT_DETECT == null) CBZ.CONFIG.JAIL_SEARCHLIGHT_DETECT = true;
+
+  /* ---- THE RADIO WINDOW (JAIL_WITNESS_REPORT) -----------------------------
+     OWNER, 2026-08-18, on being seen in the armory: a guard "should lose his
+     mind" — but the WANTED level should only rise off the people (and lenses)
+     that actually get the word out. Kill him, knock him out, hold him up,
+     tie him, before the call lands: no heat. It's only the ones who report.
+
+     So a zone sighting stopped being heat and became a MAN MAKING A CALL:
+
+       SIGHTING   he shouts (prisonSay, in the world), turns and comes for
+                  you (hunt — capture.js's ladder is his personal answer),
+                  and his radioT window opens. NOTHING global has happened.
+       THE CALL   radioT runs out: ONE radio click from where he stands
+                  (worldSfx), his call line, RADIO_HEAT dumped, and the
+                  search machinery (dispatchSearch) gets your last known
+                  spot. From here he radios live — seeing you again is heat.
+       SILENCED   dead / ko / tied / bribed while the window is open: the
+                  call dies with him. A muzzle in his face (intimidate.js's
+                  hold-up, guard half) HOLDS the window — he has not
+                  forgotten, he just can't talk right now.
+
+     CAMERAS ARE THE CHANNEL YOU CANNOT INTIMIDATE — their lens-lock heat
+     (systems/interactions.js) is untouched; smashing the lens or cutting
+     the breaker stays their only silencer. Corrupt screws never open a
+     window (they were already priced separately, in cigarettes).
+
+     Flag false = the shipped behavior: sight of you in a zone pours heat
+     directly and the HUD names the zone the whole time you stand in it. */
+  if (CBZ.CONFIG && CBZ.CONFIG.JAIL_WITNESS_REPORT == null) CBZ.CONFIG.JAIL_WITNESS_REPORT = true;
+  const witnessReportOn = () => !!(CBZ.CONFIG && CBZ.CONFIG.JAIL_WITNESS_REPORT);
+  const RADIO_CALL_T = 4.0;   // seconds from the sighting to the call landing
+  const RADIO_HEAT = 35;      // what a landed call is worth
+  // Spoken in the world (prisonSay: 16 m, ranked, silent when he is down) —
+  // the window is audible, never printed on the HUD.
+  const SPOT_LINES = {
+    "the armory": ["You! Out of the gun room! Now!", "Inmate in the armory! Stand where you are!"],
+    "the staff lounge": ["This floor is staff. Turn around!", "You do not walk here, inmate. Move!"],
+    "the exit corridor": ["Stop! You are a long way past your block!", "He's in the corridor! Stop him!"],
+  };
+  const CALL_LINES = [
+    "Control, inmate where he should not be. All units.",
+    "Control, post calling it in. Get bodies over here.",
+  ];
 
   // the wanted meter only exists while it has a reading — see the long note at
   // the `wantedShown(...)` call at the foot of updateDetection. The class (not a
@@ -677,8 +722,28 @@
         seenByAnyone = true;
         const d = Math.hypot(player.pos.x - gd.group.position.x, player.pos.z - gd.group.position.z);
         nearestSeer = Math.min(nearestSeer, d);
-        // trespassing in plain sight builds heat fast
-        if (zone) CBZ.addHeat((gd.corrupt ? 8 : 18) * dt);
+        if (zone) {
+          if (!witnessReportOn()) {
+            CBZ.addHeat((gd.corrupt ? 8 : 18) * dt);   // legacy: sight itself is heat
+          } else if (!gd.corrupt) {
+            if (gd._radioed || g.detection > 18 || (g.witnessReportT || 0) > 0) {
+              // the block already knows — he radios your position live
+              CBZ.addHeat(18 * dt);
+            } else if (gd.radioT == null) {
+              // THE SIGHTING: he shouts, comes for you, reaches for the radio.
+              // Nothing global yet — the window is yours to close.
+              gd.radioT = RADIO_CALL_T;
+              gd.radioZone = zone;
+              gd.alert = 1.0;
+              gd.hunt = Math.max(gd.hunt || 0, 3.0);
+              gd.investigate = null;
+              const lines = SPOT_LINES[zone];
+              if (lines && CBZ.prisonSay) { try { CBZ.prisonSay(gd, lines[(gd.id || 0) % lines.length]); } catch (e) {} }
+            } else {
+              gd.hunt = Math.max(gd.hunt || 0, 2.2);   // still coming while he has eyes on you
+            }
+          }
+        }
         if ((g.witnessReportT || 0) > 0 && !gd.corrupt) CBZ.addHeat(8 * dt);
         // already wanted + spotted → this guard joins the hunt
         if ((g.detection > 18 || (g.witnessReportT || 0) > 0) && !gd.corrupt) {
@@ -687,6 +752,31 @@
         }
       }
       if (CBZ.updateGuardFlashlight) CBZ.updateGuardFlashlight(gd, dt);
+    }
+
+    // ---- pending calls tick whether or not he still has eyes on you: he SAW
+    // you, and the window is how long silencing him stays on the table.
+    if (witnessReportOn() && g.mode === "escape") {
+      let calm = g.detection <= 0.5 && (g.witnessReportT || 0) <= 0 && !(g.lastKnown && g.lastKnown.t > 0);
+      for (const gd of CBZ.guards) {
+        if (calm && gd._radioed && !(gd.hunt > 0)) gd._radioed = false;   // old calls go stale once the block cools
+        if (gd.radioT == null) continue;
+        if (gd.dead || gd.ko > 0 || gd.tied || gd.bribed > 0) { gd.radioT = null; continue; }   // silenced — the call never lands
+        if (gd.intimidMode === "scared") continue;   // a muzzle HOLDS the call; it does not erase it
+        gd.radioT -= dt;
+        if (gd.radioT > 0) continue;
+        // THE CALL LANDS. The search is named for the PLACE he called in
+        // ("Searching: armory"), not for him — the guards he summons are
+        // literally sent to it, and "Searching: Officer #1" read as a hunt
+        // FOR the officer.
+        gd.radioT = null; gd._radioed = true;
+        CBZ.addHeat(RADIO_HEAT);
+        g.witnessReportT = Math.max(g.witnessReportT || 0, 5);
+        dispatchSearch(14, { type: "trespass", lastKnown: { x: player.pos.x, z: player.pos.z, type: "trespass" } },
+          { data: { name: gd.radioZone || "the block" } }, gd);
+        if (CBZ.worldSfx) { try { CBZ.worldSfx("switch", gd.group.position.x, gd.group.position.z, { y: 1.6, ref: 6, volume: 0.5, gap: 0.4 }); } catch (e) {} }
+        if (CBZ.prisonSay) { try { CBZ.prisonSay(gd, CALL_LINES[(gd.id || 0) % CALL_LINES.length]); } catch (e) {} }
+      }
     }
 
     // ---- SEARCHLIGHTS ARE SENSORS (JAIL_SEARCHLIGHT_DETECT) ----
@@ -701,7 +791,7 @@
       CBZ.addHeat((player.crouch ? 16 : 30) * dt);
       // the beam is ON you and your shadow is thirty feet long. Saying so is
       // the definition of telling.
-      if (!litNow) tellHint("SEARCHLIGHT — you're lit up!", 1.5);
+      if (!litNow) tellHint("SEARCHLIGHT, you're lit up!", 1.5);
       litNow = true;
       if (litPingT <= 0) {
         litPingT = 3.0;
@@ -746,7 +836,12 @@
     }
     else if (csum && csum.heat > 10) { col = "#ffe14d"; label = (trace && trace.mode !== "clear") ? trace.label : `${caseLabel}: ${caseWho || csum.type}`; }
     else if (g.detection > 5) { col = "#ffe14d"; label = (trace && trace.mode !== "clear") ? trace.label : "Watched"; }
-    else if (zone) { col = "#ffe14d"; label = (trace && trace.mode !== "clear") ? trace.label : "Trespassing"; }
+    // JAIL_WITNESS_REPORT: standing somewhere restricted is not a reading.
+    // The player who stole the keycard knows where he is; the panel comes up
+    // when something is actually HAPPENING (a call landed, heat is climbing),
+    // and wantedBreakdown() still names the zone on it then. Flag off = the
+    // shipped always-on "Trespassing" wallpaper.
+    else if (zone && !witnessReportOn()) { col = "#ffe14d"; label = (trace && trace.mode !== "clear") ? trace.label : "Trespassing"; }
     el.bar.style.background = col;
     el.dstate.textContent = label;
     // ============================================================

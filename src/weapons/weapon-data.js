@@ -80,7 +80,7 @@
       recenter: 0.12, rampMax: 1.5, yawWeave: 0.45,
       shake: 0.26, heat: 44, knock: 1.35, flash: 0.34,
       sfx: "shoot_pistol", tracer: 0.018, auto: false,
-      real: { len: 0.204, ref: "Glock 17 — 204mm OAL (us.glock.com)" },
+      real: { len: 0.204, ref: "Glock 17. 204mm OAL (us.glock.com)" },
       hold: { heavy: 0.08, support: 0, stance: "pistol" },
     },
     {
@@ -94,7 +94,7 @@
       shake: 0.74, heat: 64, knock: 2.45, flash: 0.70,
       sfx: "shoot_shotgun", tracer: 0.014, shellReload: true, pump: true,
       auto: false,
-      real: { len: 0.978, ref: "Remington 870, 18.5in barrel — 38.5in OAL (thegunzone)" },
+      real: { len: 0.978, ref: "Remington 870, 18.5in barrel. 38.5in OAL (thegunzone)" },
       hold: { heavy: 0.38, support: 0.28, stance: "long" },
     },
     {
@@ -107,7 +107,7 @@
       recenter: 0.18, rampMax: 1.8, yawWeave: 1.0,
       shake: 0.20, heat: 39, knock: 1.08, flash: 0.42,
       sfx: "shoot_carbine", tracer: 0.012, auto: true,
-      real: { len: 0.838, ref: "Colt M4, stock extended — 33in/838mm OAL (Wikipedia)" },
+      real: { len: 0.838, ref: "Colt M4, stock extended. 33in/838mm OAL (Wikipedia)" },
       hold: { heavy: 0.26, support: 0.27, stance: "long" },
     },
     {
@@ -120,7 +120,7 @@
       recenter: 0.15, rampMax: 1.8, yawWeave: 1.4,
       shake: 0.17, heat: 34, knock: 0.90, flash: 0.36,
       sfx: "shoot_smg", tracer: 0.010, auto: true,
-      real: { len: 0.680, ref: "H&K MP5A2, fixed stock — 680mm OAL (Wikipedia)" },
+      real: { len: 0.680, ref: "H&K MP5A2, fixed stock. 680mm OAL (Wikipedia)" },
       hold: { heavy: 0.20, support: 0.19, stance: "compact" },
     },
     {
@@ -133,7 +133,7 @@
       recenter: 0.14, rampMax: 1.5, yawWeave: 0.4,
       shake: 0.5, heat: 52, knock: 2.4, flash: 0.5,
       sfx: "shoot_deagle", tracer: 0.02, auto: false,   // big-bore voice (real .45 recording)
-      real: { len: 0.292, ref: "Colt Python, 6in barrel — 11.5in OAL (colt.com/Wikipedia)" },
+      real: { len: 0.292, ref: "Colt Python, 6in barrel. 11.5in OAL (colt.com/Wikipedia)" },
       hold: { heavy: 0.24, support: 0, stance: "pistol" },
     },
     {
@@ -146,7 +146,7 @@
       recenter: 0.15, rampMax: 1.5, yawWeave: 0.4,
       shake: 0.56, heat: 56, knock: 2.7, flash: 0.56,
       sfx: "shoot_deagle", tracer: 0.022, auto: false,  // big-bore voice (real .45 recording)
-      real: { len: 0.273, ref: "Desert Eagle Mk XIX, 6in barrel — 10.75in OAL (magnumresearch)" },
+      real: { len: 0.273, ref: "Desert Eagle Mk XIX, 6in barrel. 10.75in OAL (magnumresearch)" },
       hold: { heavy: 0.34, support: 0, stance: "pistol" },
     },
     {
@@ -162,7 +162,7 @@
       recenter: 0.2, rampMax: 1.9, yawWeave: 1.1,
       shake: 0.28, heat: 46, knock: 1.4, flash: 0.5, equip: 0.5,
       sfx: "shoot_ak47", tracer: 0.013, auto: true,   // dedicated layered voice (audio.js) owns the pitch/weight
-      real: { len: 0.880, ref: "AK-47, fixed stock — 880mm OAL (Wikipedia)" },
+      real: { len: 0.880, ref: "AK-47, fixed stock. 880mm OAL (Wikipedia)" },
       hold: { heavy: 0.54, support: 0.31, stance: "long" },
     },
     {
@@ -175,7 +175,7 @@
       recenter: 0.15, rampMax: 1.8, yawWeave: 1.5,
       shake: 0.15, heat: 30, knock: 0.7, flash: 0.3,
       sfx: "shoot_smg", tracer: 0.009, auto: true,
-      real: { len: 0.267, ref: "IMI Micro Uzi, stock folded — 267mm OAL (dockeryarmory)" },
+      real: { len: 0.267, ref: "IMI Micro Uzi, stock folded. 267mm OAL (dockeryarmory)" },
       hold: { heavy: 0.12, support: 0.10, stance: "compact" },
     },
     {
@@ -196,7 +196,7 @@
       // fired — the "real flight" feel — without making the round an actual
       // simulated projectile other systems would need to track).
       sniperDrop: { start: 90, perM: 0.0095, maxDrop: 1.6, flightPerM: 0.0011 },
-      real: { len: 1.092, ref: "M24 SWS (Rem 700) — 43in/1092mm OAL (Wikipedia)" },
+      real: { len: 1.092, ref: "M24 SWS (Rem 700). 43in/1092mm OAL (Wikipedia)" },
       hold: { heavy: 0.6, support: 0.36, stance: "long" }, // long heavy barrel, support hand well forward
     },
     {
@@ -212,7 +212,7 @@
       // The legs in the model are hardware, not decoration: prone or braced
       // they carry the gun, and the body rests it on them.
       bipod: true,
-      real: { len: 1.035, ref: "FN M249 SAW, std barrel — 40.75in OAL (fnamerica.com)" },
+      real: { len: 1.035, ref: "FN M249 SAW, std barrel. 40.75in OAL (fnamerica.com)" },
       hold: { heavy: 1.0, support: 0.46, stance: "heavy" }, // 7.5 kg belt-fed — the heaviest carry in the game
     },
     {
@@ -268,7 +268,7 @@
       recenter: 0.12, rampMax: 1.0, yawWeave: 0.2,
       shake: 0.12, heat: 14, knock: 0.40, flash: 0.22,
       sfx: "shoot_taser", tracer: 0.006, auto: false, nonlethal: true,
-      real: { len: 0.185, ref: "Taser X26 with cartridge — 7.3in OAL (X26E spec sheet)" },
+      real: { len: 0.185, ref: "Taser X26 with cartridge. 7.3in OAL (X26E spec sheet)" },
       hold: { heavy: 0.04, support: 0, stance: "pistol" },
     },
     {
@@ -352,7 +352,7 @@
       dumbfire: true, projPlain: true,
       ammoTypes: [{ id: "standard", label: "40MM HE", homing: false, speed: 42 }],
       projSpeed: 42, projGravity: 24,
-      real: { len: 0.778, ref: "Milkor MGL/M32, stock extended — 778mm OAL (Wikipedia)" },
+      real: { len: 0.778, ref: "Milkor MGL/M32, stock extended. 778mm OAL (Wikipedia)" },
       hold: { heavy: 0.58, support: 0.29, stance: "long" },
     },
   ];

@@ -228,7 +228,7 @@
       if (CBZ.stocks && typeof CBZ.stocks.shock === "function") CBZ.stocks.shock(winTeam.sym, WIN_SHOCK);
       winCo.brandHeat = WIN_BRAND_HEAT;   // WIN ON SUNDAY, SELL ON MONDAY (decays daily — corporations.js)
       if (CBZ.market && typeof CBZ.market.recordBuy === "function") CBZ.market.recordBuy("luxury", 4);   // brand-demand bump
-      if (CBZ.cityFeed) CBZ.cityFeed("" + winTeam.sym + " wins the cup — showrooms buzzing", "#ffd76a");
+      if (CBZ.cityFeed) CBZ.cityFeed("" + winTeam.sym + " wins the cup, showrooms buzzing", "#ffd76a");
     }
     if (loseTeam) {
       const loseCo = CBZ.corps && CBZ.corps.get ? CBZ.corps.get(loseTeam.makerId) : null;
@@ -289,7 +289,7 @@
     const deadSid = t.drivers[hit.idx].sid;
     const driverName = ped.name || nameOf(deadSid);
     if (CBZ.stocks && typeof CBZ.stocks.shock === "function") CBZ.stocks.shock(t.sym, KILL_SHOCK);
-    if (CBZ.cityFeed) CBZ.cityFeed("" + driverName + " of " + t.name + " killed — the team scrambles for a replacement", "#ff6a5e");
+    if (CBZ.cityFeed) CBZ.cityFeed("" + driverName + " of " + t.name + " killed, the team scrambles for a replacement", "#ff6a5e");
     // TEAM SCRAMBLE: a freshly minted reserve takes the empty seat — ledger-
     // only, no family-tree wiring (comment: drivers are single this wave).
     const repl = mintDriver(t.name);

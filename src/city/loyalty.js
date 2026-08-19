@@ -777,7 +777,7 @@
     const out = [];
     for (let i = 0; i < B.length; i++) if (CBZ.citySurrender(B[i], { disarm: true, prisoner: true })) out.push(B[i]);
     if (out.length && CBZ.city && CBZ.city.note) {
-      CBZ.city.note(out.length + " " + plural(out.length, "man", "men") + " down arms — they are yours to take or turn loose.", 2.8);
+      CBZ.city.note(out.length + " " + plural(out.length, "man", "men") + " down arms, they are yours to take or turn loose.", 2.8);
     }
     return out;
   };
@@ -811,7 +811,7 @@
     ped.surrender = false; ped.surrenderT = 0; ped.poseHandsUp = false;
     if (ped.char) { ped.char.surrender = false; ped.char.handsUp = false; }
     ped.state = "flee"; ped.fear = 8; ped.rage = null;
-    note("Ransom paid — $" + pay.toLocaleString() + " for " + nm(ped) + ".", 2.4);
+    note("Ransom paid. $" + pay.toLocaleString() + " for " + nm(ped) + ".", 2.4);
     if (CBZ.sfx) { try { CBZ.sfx("coin"); } catch (e) {} }
     return true;
   };

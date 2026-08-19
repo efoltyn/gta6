@@ -344,7 +344,7 @@
     if (!g || !g.cityPelt) return false;
     g.cityPelt = null;
     unmount();
-    if (!silent && CBZ.city && CBZ.city.note) CBZ.city.note("Pelt off — it's back to a hide in your pocket.", 1.8);
+    if (!silent && CBZ.city && CBZ.city.note) CBZ.city.note("Pelt off, it's back to a hide in your pocket.", 1.8);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     return true;
   }
@@ -357,7 +357,7 @@
     if (!wearable(itemName)) return false;
     if (peltWorn() === itemName) { peltUnwear(); return true; }
     if (peltWear(itemName)) {
-      if (CBZ.city && CBZ.city.note) CBZ.city.note("Wearing the " + itemName + " — hood and mantle.", 2);
+      if (CBZ.city && CBZ.city.note) CBZ.city.note("Wearing the " + itemName + " · hood and mantle.", 2);
       if (CBZ.sfx) { try { CBZ.sfx("equip"); } catch (e) {} }
       return true;
     }
@@ -370,7 +370,7 @@
     if (!wearable(peltName)) return false;         // fish and food furs fall out
     if (peltWorn() === peltName) { mountPlayer(); return true; }   // fresh mount, same pelt
     if (!peltWear(peltName)) return false;
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("You pull the " + sp.name + " pelt on — hood up.", 2.4);
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("You pull the " + sp.name + " pelt on, hood up.", 2.4);
     if (CBZ.sfx) { try { CBZ.sfx("equip"); } catch (e) {} }
     return true;
   };
@@ -435,7 +435,7 @@
     const econ = CBZ.cityEcon;
     if (econ && econ.count && econ.count(st.item) <= 0) {
       peltUnwear(true);
-      if (CBZ.city && CBZ.city.note) CBZ.city.note("The " + st.item + " left your pocket — the pelt comes off.", 2);
+      if (CBZ.city && CBZ.city.note) CBZ.city.note("The " + st.item + " left your pocket, the pelt comes off.", 2);
       return;
     }
     if (_mountedOn !== playerRig()) mountPlayer();

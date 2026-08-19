@@ -757,7 +757,7 @@
       // The verb card drops describe()'s "— HIJACKABLE" advertisement suffix:
       // the HIJACK row already says it, and the suffix broke the fourth wall.
       if (nameEl) nameEl.textContent = rows.dualRide
-        ? String(desc.label || "").replace(/\s*—\s*HIJACKABLE\s*$/i, "")
+        ? String(desc.label || "").replace(/\s*, \s*HIJACKABLE\s*$/i, "")
         : desc.label;
       // ONE doable verb per card (the airliner BOARD/HIJACK is the lone
       // two-ACTION exception — never a YES/NO). The proposition lives ON the

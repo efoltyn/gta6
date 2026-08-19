@@ -1103,7 +1103,7 @@
     const cash = 40 + ((Math.random() * 120) | 0) + (L.bag ? 30 : 0);
     CBZ.city.addCash(cash);
     if (CBZ.sfx) CBZ.sfx("coin");
-    CBZ.city.note("Rifled the " + (L.bag ? "beach bag" : "cooler") + " — $" + cash + ". Nobody locks up at the beach.", 2.2);
+    CBZ.city.note("Rifled the " + (L.bag ? "beach bag" : "cooler") + " · $" + cash + ". Nobody locks up at the beach.", 2.2);
     // petty theft: charged only if someone actually sees it (witness chokepoint)
     if (CBZ.cityCrime) CBZ.cityCrime(20, { type: "theft", x: L.x, z: L.z });
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
@@ -1125,7 +1125,18 @@
     if (!chip) return;
     _chipLast = t;
     if (!t) { chip.style.display = "none"; return; }
-    chip.style.display = "block"; chip.textContent = t;
+    if (CBZ.touchPromptChip) { CBZ.touchPromptChip(chip, t); return; }
+    chip.style.display = "block"; chip.innerHTML = t;
+  }
+
+  // Desktop keeps its exact string; touch gets the pill that fires this
+  // module's own [E] (city.css's declutter hides this chip during play, so on
+  // a tablet the cooler had no control at all until mobile.css restored it).
+  function riflePrompt(L) {
+    const desktop = L.bag ? "[E] Go through the beach bag" : "[E] Go through the cooler";
+    return CBZ.touchActionPrompt
+      ? CBZ.touchActionPrompt("e", L.bag ? "GO THROUGH THE BAG" : "GO THROUGH THE COOLER", desktop)
+      : desktop;
   }
 
   function lootNear() {
@@ -1202,7 +1213,7 @@
       if (_promptT >= 1 / 12) {
         _promptT = 0;
         const L = lootNear();
-        chipText(L ? (L.bag ? "[E] Go through the beach bag" : "[E] Go through the cooler") : null);
+        chipText(L ? riflePrompt(L) : null);
       }
     } else chipText(null);
   });

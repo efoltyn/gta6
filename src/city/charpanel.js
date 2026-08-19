@@ -868,7 +868,7 @@
       const it = items && items[name];
       rows.push({ name, n, it, face: itemFace(name, it), val: (it && it.value) || 0 });
     }
-    if (!rows.length) { invGrid.innerHTML = "<div class='cpEmpty'>Empty — nothing carried.</div>"; return; }
+    if (!rows.length) { invGrid.innerHTML = "<div class='cpEmpty'>Empty, nothing carried.</div>"; return; }
     rows.sort((a, b) => (b.val - a.val) || (b.n - a.n));
     let html = "";
     for (let i = 0; i < rows.length; i++) {
@@ -1106,5 +1106,18 @@
     // Read-only harness seam: proves that the actual 0.94-wide structural mesh
     // is hidden for collarless looks, rather than merely recoloured.
     portraitRig: function () { return PORT.rig || null; },
+  };
+
+  // ONE GL CONTEXT FOR EVERY OFFSCREEN PORTRAIT IN THE GAME. This renderer is
+  // the expensive part (tools/perf-ab/LOG.md: building it cost a ~1.3s first-
+  // frame hitch, which is why it is prewarmed on the title screen) and a
+  // WebGLRenderer is scene-agnostic — it will draw anybody's scene. So
+  // city/mugshot.js's photo booth borrows THIS one instead of standing up a
+  // second context; it keeps its own scene/camera/rig and only asks us to
+  // render. Returns null before the portrait exists (mugshot then builds its
+  // own, exactly as it does when charpanel never loaded).
+  CBZ.cityPortraitRenderer = function (build) {
+    if (build !== false && !PORT.ready && !PORT.broken) buildPortrait();
+    return PORT.ready ? PORT.rend : null;
   };
 })();

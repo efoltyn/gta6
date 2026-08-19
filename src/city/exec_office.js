@@ -488,7 +488,7 @@
         onSelect: function () {
           const r = eo(); if (!r) return;
           rideBusyUntil = nowMs() + 1800;
-          relocate(r.e.lift.x, r.e.floorY, r.e.lift.z, "" + FIRM + " — the 50th floor.");
+          relocate(r.e.lift.x, r.e.floorY, r.e.lift.z, "" + FIRM + " · the 50th floor.");
         },
       }],
     });

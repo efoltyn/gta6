@@ -1010,7 +1010,7 @@
     }
     if (!n) {
       // nobody got a seat and somebody wanted one — say it once, quietly
-      for (let i = 0; i < s.length; i++) if (s[i].ped._cbzNoSeat > 0) { note("No room left — " + nameOf(s[i].ped) + " waits.", 1.6); break; }
+      for (let i = 0; i < s.length; i++) if (s[i].ped._cbzNoSeat > 0) { note("No room left · " + nameOf(s[i].ped) + " waits.", 1.6); break; }
     }
     return n;
   }
@@ -1427,7 +1427,7 @@
     const dest = (opts && opts.to && opts.to.x != null) ? opts.to : warehouseDest();
     if (!dest) {
       // DEGRADE HONESTLY: no property, no destination, no fake errand.
-      note("You've got nowhere to send it — buy a lockup first.", 2.2);
+      note("You've got nowhere to send it, buy a lockup first.", 2.2);
       return false;
     }
     const P = CBZ.player;
@@ -1450,7 +1450,7 @@
       ped.inCar = car;
       driving.push(rec);
       TALLY.npcDrives++;
-      note(nameOf(ped) + " takes the wheel — running it to " + dest.name + ".", 2.4);
+      note(nameOf(ped) + " takes the wheel, running it to " + dest.name + ".", 2.4);
       if (CBZ.cityRelShift) { try { CBZ.cityRelShift(ped, "ranWork", 1); } catch (e) {} }
     }
     if (ped._cbzSeat && ped._cbzSeat.id === "driver" && ped._cbzSeat.veh === car) { takeWheel(); return true; }

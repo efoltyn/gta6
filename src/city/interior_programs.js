@@ -1855,14 +1855,14 @@
           CBZ.cityEcon.add(n, 1);
           const half = Math.round(safeCash(rec) * 0.4);
           lootCash(half);
-          if (CBZ.city && CBZ.city.big) CBZ.city.big("THE SAFE — " + n + " + $" + half);
+          if (CBZ.city && CBZ.city.big) CBZ.city.big("THE SAFE · " + n + " + $" + half);
           if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(5);
           return true;
         }
       }
       const cash = safeCash(rec);
       lootCash(cash);
-      if (CBZ.city && CBZ.city.big) CBZ.city.big("THE SAFE — $" + cash);
+      if (CBZ.city && CBZ.city.big) CBZ.city.big("THE SAFE. $" + cash);
       if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(4);
       return true;
     }

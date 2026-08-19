@@ -1272,7 +1272,7 @@
             " <span style='color:#5c6675;font-size:11px'>" + esc(r.giver) + "</span></div>";
         } else {
           html += "<div style='padding:8px 0;color:#5c6675'>" +
-            "<b>·</b> " + esc(r.title) + " <span style='font-size:11px'>— " + esc(r.why) + "</span></div>";
+            "<b>·</b> " + esc(r.title) + " <span style='font-size:11px'> · " + esc(r.why) + "</span></div>";
         }
       }
       html += leaveHtml[id] || "";

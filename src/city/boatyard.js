@@ -406,7 +406,7 @@
     if (!entry) return false;
     if (owned(key)) { flash("You already own the " + entry.label + ".", "bad"); return false; }
     const bl = bankLoan();
-    if (!bl || !bl.offer || !bl.take) { flash("No marine finance desk today — cash sale only.", "bad"); return false; }
+    if (!bl || !bl.offer || !bl.take) { flash("No marine finance desk today, cash sale only.", "bad"); return false; }
     const modelName = bridgeModel(entry);
     if (!modelName) { flash("The yard can't put that hull in the water yet.", "bad"); return false; }
     const price = priceOf(entry);
@@ -416,7 +416,7 @@
     const offer = bl.offer("auto", principal, { kind: "auto", value: price, down: down, vessel: entry.key, loa: entry.loa });
     if (!offer || !offer.approved) {
       const why = (offer && offer.reason) ? offer.reason : "the bank declined the marine loan";
-      flash("Declined — " + why + ".", "bad"); note("Marine finance declined: " + why + ".", 2.4); sfx("empty");
+      flash("Declined · " + why + ".", "bad"); note("Marine finance declined: " + why + ".", 2.4); sfx("empty");
       if (open_) render(); return false;
     }
     if (!charge(down)) return false;
@@ -427,7 +427,7 @@
       // no silent lost cash.
       g.cash = (g.cash || 0) + down;
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-      flash("The note wouldn't book — your deposit is back.", "bad"); commit();
+      flash("The note wouldn't book, your deposit is back.", "bad"); commit();
       if (open_) render(); return false;
     }
     const rec = record(entry, modelName, down);
@@ -504,7 +504,7 @@
     if (owe <= 0) { note("You're square with the harbourmaster.", 1.8); return false; }
     if (!charge(owe)) { flash("Need " + money(owe) + " to clear the dues.", "bad"); sfx("empty"); return false; }
     for (const r of fleet()) r.arrears = 0;
-    flash("Back dues cleared — " + money(owe) + ".", "ok"); sfx("coin"); commit();
+    flash("Back dues cleared · " + money(owe) + ".", "ok"); sfx("coin"); commit();
     if (open_) render();
     return true;
   }
@@ -533,13 +533,13 @@
     if (car._anchor) {
       car._anchor = null;
       if (car._anchorLight) { if (car._anchorLight.parent) car._anchorLight.parent.remove(car._anchorLight); car._anchorLight = null; }
-      note("Anchor up — you have way on.", 1.8);
+      note("Anchor up, you have way on.", 1.8);
       return true;
     }
     const x = car.pos.x, z = car.pos.z;
     if (!(CBZ.cityWaterAt && CBZ.cityWaterAt(x, z))) { note("Nothing to anchor into here.", 1.6); return false; }
     const depth = CBZ.cityWaterDepthAt ? Math.max(1.2, CBZ.cityWaterDepthAt(x, z)) : 4;
-    if (depth > 45) { note("Too deep to anchor — you'd never get the rode back.", 2.2); return false; }
+    if (depth > 45) { note("Too deep to anchor, you'd never get the rode back.", 2.2); return false; }
     // rough water wants more scope. The swell amplitude is the cheapest proxy
     // we have for "how rough is it" and it costs one call.
     let rough = 0;
@@ -563,7 +563,7 @@
       L.position.set(0, 2.6, 0.2);
       car.group.add(L); car._anchorLight = L;
     }
-    note("Anchor down — " + Math.round(depth) + "m, " + scope + ":1 scope, " + Math.round(car._anchor.radius) + "m swing.", 3);
+    note("Anchor down · " + Math.round(depth) + "m, " + scope + ":1 scope, " + Math.round(car._anchor.radius) + "m swing.", 3);
     return true;
   }
 
@@ -618,7 +618,7 @@
           a.drags++;
           const m = setMag || 1;
           a.x += (cx / m) * 3.5; a.z += (cz / m) * 3.5;
-          if (a.drags === 1 || a.drags % 3 === 0) note("She's dragging — the anchor is walking.", 2.2);
+          if (a.drags === 1 || a.drags % 3 === 0) note("She's dragging, the anchor is walking.", 2.2);
         }
       }
       // player sync: the drive loop already wrote P.pos this frame, so mirror
@@ -728,8 +728,8 @@
       const manned = !brokerPost || !!brokerBody();
       return {
         label: "Cassaline Marine",
-        note: manned ? "Brokerage & yard — hulls in the water, sea trials on request"
-                     : "Desk unmanned — nobody left to sell you a boat",
+        note: manned ? "Brokerage & yard, hulls in the water, sea trials on request"
+                     : "Desk unmanned, nobody left to sell you a boat",
       };
     });
     // ANCHOR: the verb belongs to whoever is at the helm, jacked hull or not.
@@ -793,7 +793,7 @@
           ft(e.loa) + " LOA · " + e.beam.toFixed(1) + "m beam · " + kts(e.topKts) + "</span>";
         html += "<div style='font-size:12px;color:#ffd166'>" + money(p) + "</div>";
         html += "</div>";
-        if (have) actions.push({ label: e.label + " — OWNED (locate her)", fn: function () { locate(have); } });
+        if (have) actions.push({ label: e.label + " · OWNED (locate her)", fn: function () { locate(have); } });
         else {
           actions.push({ label: "Buy " + e.label + " — " + money(p), fn: function () { buy(e.key); } });
           if (bankLoan()) actions.push({ label: "Finance " + e.label + " — " + money(Math.round(p * DOWN_FRAC / 500) * 500) + " down", fn: function () { financeBuy(e.key); } });
@@ -830,7 +830,7 @@
   }
   function locate(rec) {
     const car = deliver(rec, { mark: true });
-    if (car) { car._boatRec = rec; note((rec.label || rec.name) + " is at her berth — waypoint set.", 2.6); }
+    if (car) { car._boatRec = rec; note((rec.label || rec.name) + " is at her berth, waypoint set.", 2.6); }
     else note("Couldn't find water to put her in.", 2.2);
     close();
   }

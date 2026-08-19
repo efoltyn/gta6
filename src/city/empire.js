@@ -130,7 +130,7 @@
     if (!owns && !CBZ.city.spend(RENT_DEPOSIT)) { CBZ.city.note("Renting a yard costs " + money(RENT_DEPOSIT) + ".", 2); return; }
     b.open = true; b.owned = !!owns; b.cap = owns ? OWN_CAP : RENT_CAP;
     CBZ.city.big("Car-resale yard is OPEN at Premium Autos");
-    CBZ.city.note(owns ? "You own the lot — bigger yard, better resale." : "Yard rented. Drive cars into the lot to stock it.", 3.2);
+    CBZ.city.note(owns ? "You own the lot, bigger yard, better resale." : "Yard rented. Drive cars into the lot to stock it.", 3.2);
     if (CBZ.sfx) CBZ.sfx("coin");
     CBZ.cityCarBizMenu();
   };
@@ -147,7 +147,7 @@
     if (car.group && car.group.parent) car.group.parent.remove(car.group);
     const idx = CBZ.cityCars.indexOf(car); if (idx >= 0) CBZ.cityCars.splice(idx, 1);
     const stocked = b.cars[b.cars.length - 1];
-    CBZ.city.note("Stocked " + model.name + " (" + condWord(cond) + ") — resale " + money(resaleOf(stocked)) +
+    CBZ.city.note("Stocked " + model.name + " (" + condWord(cond) + "), resale " + money(resaleOf(stocked)) +
       (hot ? " · hot" : "") + (isHot(model.name) ? " · in demand" : ""), 2.4);
     if (menuOpen) renderMenu();
   }
@@ -161,7 +161,7 @@
     const b = biz(); const car = b.cars[i]; if (!car) return;
     if ((car.cond || 1) >= 0.95) { CBZ.city.note(car.name + " is already in mint shape.", 1.4); return; }
     const cost = reconCost(car);
-    if (!CBZ.city.canAfford(cost)) { CBZ.city.note("Recondition costs " + money(cost) + " — short on cash.", 1.8); return; }
+    if (!CBZ.city.canAfford(cost)) { CBZ.city.note("Recondition costs " + money(cost) + " · short on cash.", 1.8); return; }
     const before = resaleOf(car);
     CBZ.city.spend(cost); car.cond = 1;
     const after = resaleOf(car);
@@ -190,7 +190,7 @@
     b.sold = (b.sold || 0) + 1;
     recordModelSale(car.name, 1);
     grantLaunderCredit(pay);
-    CBZ.city.big("SOLD " + car.name + " — +" + money(pay));
+    CBZ.city.big("SOLD " + car.name + " · +" + money(pay));
     if (CBZ.sfx) CBZ.sfx("coin");
     clampPage();
     renderMenu();
@@ -205,7 +205,7 @@
     grantLaunderCredit(pay);
     CBZ.city.addCash(pay); CBZ.city.addRespect(n);
     b.page = 0;
-    CBZ.city.big("SOLD " + n + " cars — +" + money(pay));
+    CBZ.city.big("SOLD " + n + " cars. +" + money(pay));
     if (CBZ.sfx) CBZ.sfx("coin");
     renderMenu();
   }
@@ -219,7 +219,7 @@
     const b = biz();
     const credit = Math.floor(b.launderCredit || 0);
     const dirty = g.cash || 0;
-    if (credit < 100) { CBZ.city.note("Sell cars first — resale volume is what lets you wash cash through the yard.", 2.4); return; }
+    if (credit < 100) { CBZ.city.note("Sell cars first, resale volume is what lets you wash cash through the yard.", 2.4); return; }
     if (dirty < 100) { CBZ.city.note("No real dirty cash on hand to wash.", 1.6); return; }
     const amount = Math.min(credit, dirty);
     if (CBZ.cityEcon && CBZ.cityEcon.launder) {
@@ -257,7 +257,7 @@
     if (CBZ.cityForceStars) CBZ.cityForceStars(Math.min(5, 3 + Math.floor(b.notoriety / 60)));
     b.raid = { t: RAID_DURATION, cops: cops };
     CBZ.city.big("POLICE RAID on your yard!");
-    CBZ.city.note("Hold them off or they'll seize your stock — defend the yard!", 3.2);
+    CBZ.city.note("Hold them off or they'll seize your stock, defend the yard!", 3.2);
   }
   function crewDefend(dt) {
     for (const m of CBZ.cityPeds) {
@@ -284,7 +284,7 @@
     if (repelled) {
       b.notoriety = Math.max(0, b.notoriety * 0.35 - 10);
       CBZ.city.addRespect(12);
-      CBZ.city.big("Raid repelled — yard secured!");
+      CBZ.city.big("Raid repelled, yard secured!");
     } else {
       b.notoriety = Math.max(0, b.notoriety * 0.5);
       if (b.cars.length) {
@@ -346,7 +346,7 @@
         const pick = CARS[(rng() * CARS.length) | 0];
         b.hotModel = pick.name; b.hotT = 25 + rng() * 30; b.hotBonus = 0.35 + rng() * 0.4;
         setMkt(pick.name, mktLevel(pick.name) + 0.3);
-        if (CBZ.city && CBZ.city.note) CBZ.city.note("Word from the auctions: " + pick.name + "s are HOT right now — flip yours.", 2.8);
+        if (CBZ.city && CBZ.city.note) CBZ.city.note("Word from the auctions: " + pick.name + "s are HOT right now, flip yours.", 2.8);
         if (menuOpen) renderMenu();
       } else { b.hotModel = null; }
     }
@@ -362,7 +362,7 @@
     const inZone = Math.hypot(P.pos.x - z.x, P.pos.z - z.z) < z.r;
     const vmag = Math.abs(car.v || 0);
     if (inZone && vmag < 2.2) {
-      if (b.cars.length >= effCap()) { car._yard = 0; CBZ.city.note("Yard full (" + effCap() + ") — sell some stock first.", 1.0); return; }
+      if (b.cars.length >= effCap()) { car._yard = 0; CBZ.city.note("Yard full (" + effCap() + "), sell some stock first.", 1.0); return; }
       car._yard = (car._yard || 0) + dt;
       if (car._yard >= INTAKE_DWELL) intake(car);
       else if (CBZ.city) CBZ.city.note("Parking the " + (car.model ? car.model.name : "car") + " in the yard…", 0.5);
@@ -417,7 +417,7 @@
     // notoriety / heat bar
     const pct = Math.min(100, Math.round((b.notoriety / (RAID_BASE * 1.4)) * 100));
     const col = pct > 75 ? "#e2574b" : pct > 45 ? "#ffb454" : "#7ed957";
-    html += "<div style='font-size:12px;color:#9fb0c6;margin-bottom:2px'>Police heat" + (b.raid ? " — <b style='color:#ff6b6b'>RAID IN PROGRESS</b>" : "") + "</div>";
+    html += "<div style='font-size:12px;color:#9fb0c6;margin-bottom:2px'>Police heat" + (b.raid ? " · <b style='color:#ff6b6b'>RAID IN PROGRESS</b>" : "") + "</div>";
     html += "<div style='height:7px;background:#222831;border-radius:5px;overflow:hidden;margin-bottom:8px'><div style='height:100%;width:" + pct + "%;background:" + col + "'></div></div>";
 
     // stock (paginated)

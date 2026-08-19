@@ -114,7 +114,7 @@
       // SHOW DON'T TELL: the grace IS the screws walking past your door
       // without stopping. Printing "they walk past" over the top of them
       // walking past is the caption track the owner asked us to delete.
-      if (grace) tellHint("Count time — stay in your cell and they walk past.", 2.2);
+      if (grace) tellHint("Count time, stay in your cell and they walk past.", 2.2);
     }
     for (const gd of CBZ.guards) {
       if (!able(gd)) continue;
@@ -407,7 +407,7 @@
       const fl = CBZ.el && CBZ.el.flash;
       if (fl) { fl.classList.remove("go"); void fl.offsetWidth; fl.classList.add("go"); }
     } catch (e) {}
-    if (CBZ.setObjective) try { CBZ.setObjective("LOCKDOWN — get out of sight and lay low to lift it."); } catch (e) {}
+    if (CBZ.setObjective) try { CBZ.setObjective("LOCKDOWN. Get out of sight and lay low to lift it."); } catch (e) {}
     // a BRIEF real siren burst as the block seals — then the guards take over
     // (whipped up to beat/bed inmates). No annoying sustained loop.
     if (CBZ.sfx) try { CBZ.sfx("lockdown"); } catch (e) {}

@@ -264,7 +264,7 @@
   function startNight() {
     if (NIGHT.active) return;
     if (CBZ.speedwayRaceState && CBZ.speedwayRaceState().active) { note("A race is already running on the oval.", 2.2); return; }
-    if (!C.wallet.canAfford(ECON.entry)) { note("Entry is " + fmtCash(ECON.entry) + " — you're short.", 2.4); return; }
+    if (!C.wallet.canAfford(ECON.entry)) { note("Entry is " + fmtCash(ECON.entry) + " · you're short.", 2.4); return; }
     if (!ensureCar()) { note("Bring a car to the paddock to qualify.", 2.4); return; }
     if (!C.wallet.spend(ECON.entry, "APEX NIGHT entry")) return;
     NIGHT.active = true; NIGHT.raceIx = 0; NIGHT.playerPts = 0; NIGHT.aiPts = {}; NIGHT.night$ = -ECON.entry;
@@ -283,7 +283,7 @@
     NIGHT.qualLast = paramAt(car.pos.x, car.pos.z);
     if (CBZ.raceHud) CBZ.raceHud.hide();
     towerDraw(["QUALIFY", "flying lap"], "RACE " + (NIGHT.raceIx + 1) + "/" + ECON.RACES);
-    note("QUALIFYING — one flying lap. Cross the line and give it everything!", 3.2);
+    note("QUALIFYING, one flying lap. Cross the line and give it everything!", 3.2);
     C.hud.closePanel();
   }
   function finishQualify(car) {
@@ -353,7 +353,7 @@
     NIGHT.kit = CBZ.raceKit ? CBZ.raceKit.create({ course: "speedway", laps: ECON.LAPS, entrants: entrants }) : null;
     if (CBZ.raceHud) { CBZ.raceHud.show(); CBZ.raceHud.lights(0); }
     setGantry(0, false);
-    note("RACE " + (NIGHT.raceIx + 1) + " — lights are coming on. Hold the brake!", 3.0);
+    note("RACE " + (NIGHT.raceIx + 1) + " · lights are coming on. Hold the brake!", 3.0);
     C.hud.closePanel();
   }
 
@@ -413,8 +413,8 @@
 
     // podium toast + checkered flag wave
     waveFlag(2);
-    if (place === 1 && !pRow.dnf) { C.hud.toast("P1 — CHECKERED FLAG!"); if (CBZ.sfx) CBZ.sfx("coin"); }
-    else C.hud.toast(pRow.dnf ? "DNF — out of the race" : "Finished P" + place);
+    if (place === 1 && !pRow.dnf) { C.hud.toast("P1 · CHECKERED FLAG!"); if (CBZ.sfx) CBZ.sfx("coin"); }
+    else C.hud.toast(pRow.dnf ? "DNF, out of the race" : "Finished P" + place);
 
     // tear the field down
     if (CBZ.raceDrivers && CBZ.raceDrivers.despawnAll) CBZ.raceDrivers.despawnAll("apex");
@@ -457,12 +457,12 @@
 
     if (NIGHT.phase === "qualify") {
       const car = playerCar();
-      if (!car || car.dead) { cancelNight("Qualifying scratched — you left the car."); return; }
+      if (!car || car.dead) { cancelNight("Qualifying scratched, you left the car."); return; }
       const pt = paramAt(car.pos.x, car.pos.z);
       if (NIGHT.qualArmed) NIGHT.qualT += dt;
       const crossed = NIGHT.qualLast > 0.85 && pt < 0.15;
       if (crossed) {
-        if (!NIGHT.qualArmed) { NIGHT.qualArmed = true; NIGHT.qualT = 0; note("Flying lap — GO!", 1.4); }
+        if (!NIGHT.qualArmed) { NIGHT.qualArmed = true; NIGHT.qualT = 0; note("Flying lap. GO!", 1.4); }
         else { NIGHT.qualTime = NIGHT.qualT; NIGHT.qualLast = pt; finishQualify(car); return; }
       }
       NIGHT.qualLast = pt;
@@ -473,7 +473,7 @@
 
     if (NIGHT.phase === "gridcount") {
       const car = playerCar();
-      if (!car || car.dead) { cancelNight("You left the grid — race scratched."); return; }
+      if (!car || car.dead) { cancelNight("You left the grid, race scratched."); return; }
       NIGHT.countT -= dt; NIGHT.settleT -= dt;
       const c = NIGHT.countT;
       // 5-stage red-light build then lights-out (raceHud shows 3 lamps, the
@@ -490,7 +490,7 @@
         setGantry(5, true); waveFlag(1);
         if (CBZ.raceHud) CBZ.raceHud.lights("go");
         if (NIGHT.useRD && CBZ.raceDrivers) CBZ.raceDrivers.setState("race", "apex");
-        note(NIGHT.jumped ? "GREEN — but you jumped it." : "GREEN GREEN GREEN!", 1.8);
+        note(NIGHT.jumped ? "GREEN, but you jumped it." : "GREEN GREEN GREEN!", 1.8);
         if (CBZ.sfx) CBZ.sfx("coin");
       }
       return;
@@ -628,10 +628,10 @@
     venue._cast = [];
     const marshalAt = localPt(0, -(TRACK_W / 2 + 3.0));
     venue._cast.push({ role: "marshal", outfit: 0xe8b64c, name: "Race Marshal", at: [marshalAt.x, marshalAt.z], face: HEAD + Math.PI, post: "pinned", pose: "stand",
-      dialogue: ["Green means go — jump it and the stewards add five.", "Checkered's mine to wave. Earn it.", "Grid up on my mark."] });
+      dialogue: ["Green means go, jump it and the stewards add five.", "Checkered's mine to wave. Earn it.", "Grid up on my mark."] });
     const bmAt = localPt(-26, 20.9);
     venue._cast.push({ role: "bookmaker", outfit: "banker", name: "The Bookmaker", at: [bmAt.x, bmAt.z], face: HEAD, post: "pinned", pose: "stand",
-      dialogue: ["Back yourself — the worse your grid, the fatter the odds.", "Only a win pays here. Second's a coaster.", "Stake's down the moment the lights go."] });
+      dialogue: ["Back yourself, the worse your grid, the fatter the odds.", "Only a win pays here. Second's a coaster.", "Stake's down the moment the lights go."] });
     [localPt(-20, 27), localPt(-30, 18.5)].forEach((p, i) => venue._cast.push({ role: "patron", at: [p.x, p.z], face: HEAD + (i ? 1 : -1), post: "ambient" }));
     venue._pendingCast = true;
     tryDrainCast(ctx, venue);
@@ -657,7 +657,7 @@
     // ---- BOOKMAKER zone (ctx service): the stand's [E] opens the book.
     ctx.zone({ id: "book", label: "APEX bookmaker", pos: [bmAt.x, bmAt.z + 1.0], r: 2.6, onUse: function () { openBetPanel(true); } });
   }
-  function paddockLabel() { return NIGHT.active ? "APEX NIGHT — continue" : "APEX NIGHT — enter the paddock"; }
+  function paddockLabel() { return NIGHT.active ? "APEX NIGHT, continue" : "APEX NIGHT, enter the paddock"; }
 
   // NPC cast draining (mirrors casino.js: real peds need the live arena; a
   // site venue usually mounts after the world is up, so this drains at once).
@@ -739,7 +739,7 @@
 
   function openHub() {
     if (!C) return;
-    if (NIGHT.active && NIGHT.phase !== "idle") { note("You're on track — finish the session.", 1.8); return; }
+    if (NIGHT.active && NIGHT.phase !== "idle") { note("You're on track, finish the session.", 1.8); return; }
     let body;
     if (!NIGHT.active) {
       body = "<div style='margin:2px 0 8px;font-size:13px'>Cash <b style='color:#e8b64c'>" + fmtCash(C.wallet.cash()) + "</b> · " +
@@ -763,14 +763,14 @@
     // standalone = opened from the bookmaker stand outside qualifying flow
     if (standalone && (!NIGHT.active || NIGHT.phase !== "bet" && NIGHT.grid == null)) {
       C.hud.panel(head("THE BOOKMAKER", "side bets") +
-        "<div style='margin:6px 0;font-size:13px'>Qualify first — your grid slot sets the odds. Back yourself to WIN; only P1 pays.</div>" + btn("close", "Close", "#26343c"),
+        "<div style='margin:6px 0;font-size:13px'>Qualify first, your grid slot sets the odds. Back yourself to WIN; only P1 pays.</div>" + btn("close", "Close", "#26343c"),
         { close: function () { C.hud.closePanel(); } });
       return;
     }
     NIGHT.phase = "bet";
     const odds = oddsForGrid(NIGHT.playerGrid);
     let body = "<div style='margin:2px 0 8px;font-size:13px'>Qualified <b style='color:#5ad1ff'>P" + NIGHT.playerGrid + "</b> · lap " + fmtT(NIGHT.qualTime) +
-      "<br>Back yourself to WIN at <b style='color:#e8b64c'>" + odds + "x</b> — only a win pays.</div>";
+      "<br>Back yourself to WIN at <b style='color:#e8b64c'>" + odds + "x</b>, only a win pays.</div>";
     body += ECON.stakes.map((s) => s === 0 ? btn("stake", "NO BET", "#26343c") : btn("stake", "$" + s + " → " + fmtCash(s * odds), "#16301f", C.wallet.cash() < s, { s: s })).join("");
     body += "<div style='margin-top:8px'>" + btn("grid", "GO TO THE GRID →", "#c98f22") + "</div>";
     C.hud.panel(head("THE BOOKMAKER", "grid P" + NIGHT.playerGrid + " · " + odds + "x") + body, {
@@ -800,7 +800,7 @@
         "<span style='text-align:right;color:#7ed957'>" + (r.dnf ? 0 : "+" + pointsFor(r.pos)) + "</span>";
     });
     tbl += "</div>";
-    let msg = dnf ? "DNF — no purse." : "Finished P" + place + " · purse " + fmtCash(purse);
+    let msg = dnf ? "DNF, no purse." : "Finished P" + place + " · purse " + fmtCash(purse);
     if (betMsg) msg += " · " + betMsg;
     if (NIGHT.jumped) msg += " (jump-start +" + ECON.JUMP_PENALTY + "s applied)";
     const last = NIGHT.raceIx >= ECON.RACES - 1;
@@ -820,7 +820,7 @@
     const vc = walked ? "#5ad1ff" : (isPlayer ? "#e8b64c" : "#ff9aa2");
     const st = bag();
     const body = "<div style='font-size:30px;font-weight:900;letter-spacing:3px;color:" + vc + ";margin:4px 0'>" + verdict + "</div>" +
-      "<div style='font-size:13px;margin:4px 0'>" + (isPlayer && !walked ? "You take APEX NIGHT — champion bonus " + fmtCash(bonus) + "." : "Champion: <b>" + esc(champ) + "</b>.") +
+      "<div style='font-size:13px;margin:4px 0'>" + (isPlayer && !walked ? "You take APEX NIGHT, champion bonus " + fmtCash(bonus) + "." : "Champion: <b>" + esc(champ) + "</b>.") +
       "<br>Night net <b style='color:" + (NIGHT.night$ >= 0 ? "#7ed957" : "#ff9aa2") + "'>" + (NIGHT.night$ >= 0 ? "+" : "−") + fmtCash(Math.abs(NIGHT.night$)).slice(1) + "</b> · " +
       "career: " + st.wins + " wins · " + st.titles + " titles</div>" +
       btn("close", "DONE", "#1c6b40");

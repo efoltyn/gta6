@@ -216,7 +216,7 @@
     var pool = A.pool(key, max);
     if (!pool.mesh) {
       console.warn('[assets] poolAcquire: "' + key + '" has no single ' +
-        'InstancedMesh (multi-mesh def or unknown key) — not recyclable');
+        'InstancedMesh (multi-mesh def or unknown key), not recyclable');
       return null;
     }
     var im = pool.mesh;

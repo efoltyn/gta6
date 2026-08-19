@@ -729,7 +729,7 @@
       if (piNow != null) c.appendChild(row("Inflation (π)", (piNow >= 0 ? "+" : "") + (piNow * 100).toFixed(1) + "%/yr", piNow > INFLATION_THRESHOLD ? "#ff6a5e" : "#8fe08a"));
       c.appendChild(row("Misery index (city-wide)", (CBZ.hunger && CBZ.hunger.miseryIndex ? (CBZ.hunger.miseryIndex() * 100).toFixed(0) + "%" : "—")));
     } else {
-      c.appendChild(el("div", "font:12px system-ui;color:#7e8aa3;margin-top:4px;", "Not simulated yet — no live EconState behind this jurisdiction."));
+      c.appendChild(el("div", "font:12px system-ui;color:#7e8aa3;margin-top:4px;", "Not simulated yet, no live EconState behind this jurisdiction."));
     }
     // X6: RELATIONS section — country cards only (city/relations.js's affinity
     // matrix is seeded/queried per-country this wave; see that file's header).

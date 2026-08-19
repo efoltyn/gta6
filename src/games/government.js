@@ -404,8 +404,8 @@
     switch (G.result) {
       case "win": return "rezoning passed";
       case "lose:indicted": return "you were indicted";
-      case "lose:scandal": return "vote postponed — scandal";
-      case "lose:tie": return "deadlocked — tie fails";
+      case "lose:scandal": return "vote postponed, scandal";
+      case "lose:tie": return "deadlocked, tie fails";
       case "lose:vote": return "rezoning failed";
       default: return "";
     }
@@ -436,7 +436,7 @@
     if (!G.active || G.result) return false;
     if (!playerChairsHere()) return false;
     const t = tallyOf(COUNCIL);
-    if (t.pass) { C.hud.feed("The room's already with you — just call the vote."); return false; }
+    if (t.pass) { C.hud.feed("The room's already with you, just call the vote."); return false; }
     const seat = playerSeat();
     // the whole cost, paid to the REAL simulation, before anything is gained.
     if (seat && seat.id && CBZ.approvalShock) {
@@ -445,7 +445,7 @@
     if (CBZ.gov && CBZ.gov.forceUsed) { try { CBZ.gov.forceUsed(CHAIR_OVERRIDE_TYRANNY, "gavelled a bill past the council"); } catch (e) {} }
     G.voted = true; G.active = false;
     G.result = "win";
-    C.wallet.give(WIN_PAYOUT, "Docklands rezoning — chair's prerogative");
+    C.wallet.give(WIN_PAYOUT, "Docklands rezoning, chair's prerogative");
     setCooldown(); redrawBoard();
     if (CBZ.city && CBZ.city.big) CBZ.city.big("REZONING GAVELLED THROUGH " + t.for + "–" + t.against + " AGAINST");
     if (CBZ.cityFeed) CBZ.cityFeed("The chair overrode the council on the Docklands rezoning. Two members walked out.", "#ff9a6a");
@@ -468,17 +468,17 @@
     if (!C) return;
     const t = tallyOf(COUNCIL);
     const chair = playerChairsHere();
-    let body = head("CITY HALL — DOCKLANDS REZONING", G.active ? clockStr() : (chair ? "you have the gavel" : "after dark"));
+    let body = head("CITY HALL · DOCKLANDS REZONING", G.active ? clockStr() : (chair ? "you have the gavel" : "after dark"));
     body += "<div style='margin:2px 0 8px;line-height:1.55'>";
-    body += "Tally: <b style='color:#5fd08a'>FOR " + t.for + "</b> · <b style='color:#ff6a5e'>AGAINST " + t.against + "</b> · <b style='color:#c9a24a'>UNDECIDED " + t.abstain + "</b> — need FOR &gt; AGAINST.<br>";
+    body += "Tally: <b style='color:#5fd08a'>FOR " + t.for + "</b> · <b style='color:#ff6a5e'>AGAINST " + t.against + "</b> · <b style='color:#c9a24a'>UNDECIDED " + t.abstain + "</b>, need FOR &gt; AGAINST.<br>";
     body += "Scandal <b style='color:" + (G.scandal >= SCANDAL_CAP * 0.6 ? "#ff6a5e" : "#9aa6bd") + "'>" + Math.min(100, Math.round(G.scandal)) + "%</b>/" + SCANDAL_CAP + " · Ledger <b>" + G.ledger.length + "</b> page(s) · Cash <b>" + fmt(C.wallet.cash()) + "</b>";
     body += "</div>";
     if (G.result) {
       body += "<div style='margin:6px 0;font-weight:800;color:" + (G.result === "win" ? "#5fd08a" : "#ff6a5e") + "'>" + resultLine().toUpperCase() + "</div>";
       body += btn("close", "Leave", "#26343c");
     } else if (!G.active) {
-      if (startable()) body += "<div style='opacity:.85;margin-bottom:6px'>Convene the session and flip the room before the gavel. Bribe, trade favors, dig the records, or lean on the press — just don't let the auditor read your ledger.</div>" + btn("start", "CONVENE THE SESSION", "#1c6b40");
-      else body += "<div style='opacity:.7'>The chamber is dark tonight — the clerk's locked up. Come back tomorrow.</div>";
+      if (startable()) body += "<div style='opacity:.85;margin-bottom:6px'>Convene the session and flip the room before the gavel. Bribe, trade favors, dig the records, or lean on the press, just don't let the auditor read your ledger.</div>" + btn("start", "CONVENE THE SESSION", "#1c6b40");
+      else body += "<div style='opacity:.7'>The chamber is dark tonight, the clerk's locked up. Come back tomorrow.</div>";
       body += " " + btn("close", "Leave", "#26343c");
     } else {
       body += "<div style='opacity:.8;font-size:12px;margin-bottom:6px'>Flip " + Math.max(0, shortfall()) + " more to carry it. Lobby councillors at their seats; the records room, the cabinets, the press and the shredder are down the halls.</div>";
@@ -489,7 +489,7 @@
       if (chair && !t.pass) {
         body += btn("override", "GAVEL IT THROUGH ANYWAY", "#7c1626");
         body += "<div style='opacity:.75;font-size:12px;margin:4px 0'>The chair can carry a bill the council rejected. It costs " +
-          CHAIR_OVERRIDE_APPROVAL + " points of your approval and it is remembered — the garrison reads that number before it obeys you.</div>";
+          CHAIR_OVERRIDE_APPROVAL + " points of your approval and it is remembered, the garrison reads that number before it obeys you.</div>";
       }
       body += btn("close", "Keep working", "#26343c");
     }
@@ -535,7 +535,7 @@
       const govs = (CBZ.regimeDoctrines && CBZ.regimeDoctrines()) || [];
       let dbody = "<div style='margin:2px 0 8px;padding:6px 0;border-top:1px solid #2c3140;line-height:1.5'>" +
         "You hold <b style='color:#8fe08a'>" + (seat.name || seat.id) + "</b>. A state can be REMADE by the person who holds it." +
-        (canD ? "" : "<br><span style='opacity:.75;font-size:12px'>Not yet — " + ((need && need.line) || "you need more behind you") + ".</span>") +
+        (canD ? "" : "<br><span style='opacity:.75;font-size:12px'>Not yet · " + ((need && need.line) || "you need more behind you") + ".</span>") +
         "</div>";
       for (let i = 0; i < govs.length; i++) {
         (function (gov, i) {
@@ -569,7 +569,7 @@
       return;
     }
     if (!list.length) {
-      body += "<div style='opacity:.75;line-height:1.5'>“Nothing's open. Terms run their course — come back when a seat's up, or when one comes up the hard way.”</div>";
+      body += "<div style='opacity:.75;line-height:1.5'>“Nothing's open. Terms run their course, come back when a seat's up, or when one comes up the hard way.”</div>";
       C.hud.panel(body + btn("close", "Leave", "#26343c"), Object.assign({ close: function () { C.hud.closePanel(); } }, doctH));
       return;
     }
@@ -630,9 +630,9 @@
 
   /* ================= THE LOBBY PRESS ===================================== */
   function openReporter() {
-    let body = head("THE LOBBY PRESS", "a leak flips a vote — and stains the room");
+    let body = head("THE LOBBY PRESS", "a leak flips a vote, and stains the room");
     if (!G.active) { C.hud.panel(head("THE LOBBY PRESS", "quiet") + "<div style='opacity:.7'>No session tonight.</div>" + btn("close", "Back", "#26343c"), { close: function () { C.hud.closePanel(); } }); return; }
-    body += "<div style='margin:2px 0 8px'>Scandal <b style='color:" + (G.scandal >= SCANDAL_CAP * 0.6 ? "#ff6a5e" : "#9aa6bd") + "'>" + Math.min(100, Math.round(G.scandal)) + "%</b> / " + SCANDAL_CAP + "% — at the cap the chair postpones the vote (you lose).</div>";
+    body += "<div style='margin:2px 0 8px'>Scandal <b style='color:" + (G.scandal >= SCANDAL_CAP * 0.6 ? "#ff6a5e" : "#9aa6bd") + "'>" + Math.min(100, Math.round(G.scandal)) + "%</b> / " + SCANDAL_CAP + "%, at the cap the chair postpones the vote (you lose).</div>";
     const h = { close: function () { C.hud.closePanel(); } };
     let any = false;
     for (let i = 0; i < COUNCIL.length; i++) {
@@ -654,7 +654,7 @@
     if (!C.wallet.spend(BRIBE_COST, "Envelope to " + shortName(m.name))) return false;
     G.ledger.push({ member: i, name: m.name, amount: BRIBE_COST, day: worldDayNow() });
     flip(i, "bribed");
-    C.hud.feed("" + shortName(m.name) + " pockets the envelope. It's on the ledger now — shred it before the auditor reads it.", "#ffd166");
+    C.hud.feed("" + shortName(m.name) + " pockets the envelope. It's on the ledger now, shred it before the auditor reads it.", "#ffd166");
     return true;
   }
   function tradeWant(i) {
@@ -669,7 +669,7 @@
   function blackmailMember(i) {
     if (!G.active) return false;
     const m = COUNCIL[i]; if (!m || m.stance === "for") return false;
-    if (!G.dirt[m.key]) { C.hud.feed("You've got nothing on " + shortName(m.name) + " yet — try the records room.", "#ff9aa2"); return false; }
+    if (!G.dirt[m.key]) { C.hud.feed("You've got nothing on " + shortName(m.name) + " yet, try the records room.", "#ff9aa2"); return false; }
     flip(i, "blackmailed");
     C.hud.feed("You slide the file across. " + shortName(m.name) + " won't cross you tonight.", "#8fe08a");
     return true;
@@ -679,7 +679,7 @@
     const m = COUNCIL[i]; if (!m || m.stance === "for") return false;
     flip(i, "pressured");
     G.scandal += SCANDAL_PER_LEAK;
-    C.hud.feed("The reporter runs with " + shortName(m.name) + "'s " + m.fear + ". They flip to AYE — but the room reeks.", "#e8c84a");
+    C.hud.feed("The reporter runs with " + shortName(m.name) + "'s " + m.fear + ". They flip to AYE, but the room reeks.", "#e8c84a");
     redrawBoard();
     if (G.scandal >= SCANDAL_CAP) postpone();
     return true;
@@ -700,7 +700,7 @@
     sh.searched = true;
     if (sh.member >= 0 && COUNCIL[sh.member]) {
       const m = COUNCIL[sh.member]; G.dirt[m.key] = true; m.dirtLine = sh.line;
-      C.hud.feed("Buried in the files: " + sh.line + " — on " + m.name + ".", "#ffd166");
+      C.hud.feed("Buried in the files: " + sh.line + " · on " + m.name + ".", "#ffd166");
       return true;
     }
     C.hud.feed("Dust, old zoning maps, nothing you can use.");
@@ -713,11 +713,11 @@
     const jam = Math.random() < JAM_CHANCE;              // runtime FX RNG is allowed
     if (jam) {
       G.scandal += JAM_SCANDAL; pullGuardToShredder();
-      C.hud.feed("The shredder JAMS — a horrible grinding shriek. The desk guard is coming over.", "#ff9aa2");
+      C.hud.feed("The shredder JAMS, a horrible grinding shriek. The desk guard is coming over.", "#ff9aa2");
       redrawBoard();
       if (G.active && G.scandal >= SCANDAL_CAP) postpone();
     } else {
-      C.hud.feed("" + n + " ledger page(s) shredded — clean and quiet.", "#8fe08a");
+      C.hud.feed("" + n + " ledger page(s) shredded, clean and quiet.", "#8fe08a");
     }
     return { cleared: true, jammed: jam };
   }
@@ -736,21 +736,21 @@
     if (!G || G.result) return;
     G.active = false; G.voted = true; G.result = "lose:indicted";
     setCooldown(); redrawBoard();
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("INDICTED — THE AUDITOR FOUND THE LEDGER");
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("INDICTED · THE AUDITOR FOUND THE LEDGER");
     C.hud.feed("The auditor photographs your ledger page. The rezoning is dead and so is your night.", "#ff6a5e");
   }
   function postpone() {
     if (!G || G.result) return;
     G.active = false; G.voted = true; G.result = "lose:scandal";
     setCooldown(); redrawBoard();
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("VOTE POSTPONED — SCANDAL ENGULFS THE CHAMBER");
-    C.hud.feed("Too much stink. The chair gavels the session closed — the rezoning is tabled indefinitely.", "#ff6a5e");
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("VOTE POSTPONED · SCANDAL ENGULFS THE CHAMBER");
+    C.hud.feed("Too much stink. The chair gavels the session closed, the rezoning is tabled indefinitely.", "#ff6a5e");
   }
   function win(t) {
     G.result = "win";
-    C.wallet.give(WIN_PAYOUT, "Docklands rezoning — developer kickback");
+    C.wallet.give(WIN_PAYOUT, "Docklands rezoning, developer kickback");
     if (CBZ.city && CBZ.city.big) CBZ.city.big("DOCKLANDS REZONING PASSES " + t.for + "–" + t.against);
-    C.hud.feed("The gavel falls. Rezoning carries " + t.for + "–" + t.against + " — the Docklands waterfront is your crew's turf now.", "#8fe08a");
+    C.hud.feed("The gavel falls. Rezoning carries " + t.for + "–" + t.against + " · the Docklands waterfront is your crew's turf now.", "#8fe08a");
     // A bill you carried on a clean majority while you hold the seat is the
     // one thing in this room that BUYS approval instead of spending it — and
     // only when the room genuinely voted for it. Real number, real system.
@@ -761,7 +761,7 @@
   function lose(t) {
     G.result = t.for === t.against ? "lose:tie" : "lose:vote";
     if (CBZ.city && CBZ.city.big) CBZ.city.big("REZONING FAILS " + t.for + "–" + t.against);
-    C.hud.feed("" + (t.for === t.against ? "Deadlocked " + t.for + "–" + t.against + " — a tie fails." : "Rezoning fails " + t.for + "–" + t.against + ".") + " The Docklands stay as they are.", "#ff6a5e");
+    C.hud.feed("" + (t.for === t.against ? "Deadlocked " + t.for + "–" + t.against + " · a tie fails." : "Rezoning fails " + t.for + "–" + t.against + ".") + " The Docklands stay as they are.", "#ff6a5e");
   }
   // the gavel: a dirty ledger indicts first; otherwise roll call → result.
   function gavel(trigger) {
@@ -779,10 +779,10 @@
     const lines = COUNCIL.map(function (m) { return { name: shortName(m.name), vote: m.stance === "for" ? "AYE" : m.stance === "against" ? "NAY" : "ABSTAIN" }; });
     let shown = 0;
     function render() {
-      let body = head("ROLL CALL — DOCKLANDS REZONING", "the gavel");
+      let body = head("ROLL CALL · DOCKLANDS REZONING", "the gavel");
       for (let i = 0; i < shown; i++) {
         const L = lines[i], col = L.vote === "AYE" ? "#5fd08a" : L.vote === "NAY" ? "#ff6a5e" : "#c9a24a";
-        body += "<div style='margin:2px 0'>" + (i + 1) + ". " + L.name + " — <b style='color:" + col + "'>" + L.vote + "</b></div>";
+        body += "<div style='margin:2px 0'>" + (i + 1) + ". " + L.name + " · <b style='color:" + col + "'>" + L.vote + "</b></div>";
       }
       if (shown >= lines.length) {
         body += "<div style='margin:8px 0;font-weight:800;color:" + (t.pass ? "#8fe08a" : "#ff6a5e") + "'>" + (t.pass ? "CARRIED " + t.for + "–" + t.against : "FAILED " + t.for + "–" + t.against) + "</div>" + btn("close", "Done", "#26343c");
@@ -804,7 +804,7 @@
     if (!C) return false;
     if (!ensureCouncil()) { C.hud.feed("The council hasn't taken their seats yet."); return false; }
     const force = opts && opts.force;
-    if (!force && !startable()) { C.hud.feed("Not tonight — the chamber's on cooldown."); return false; }
+    if (!force && !startable()) { C.hud.feed("Not tonight, the chamber's on cooldown."); return false; }
     for (let i = 0; i < COUNCIL.length; i++) { const m = COUNCIL[i]; m.stance = m.baseStance; m.flippedBy = null; m.dirtLine = null; }
     if (V.shelves) for (let i = 0; i < V.shelves.length; i++) V.shelves[i].searched = false;
     G = idleGame(); G.active = true; G.clockLeft = NIGHT_SECONDS;
@@ -821,8 +821,8 @@
     V.wpIdx = 0; V.guardAlertT = 0;
     redrawBoard();
     if (banked) C.hud.feed("You came in with " + banked + " file(s) out of the archives. Someone at that bench knows it.", "#ffd166");
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("CITY HALL AFTER DARK — PASS THE DOCKLANDS REZONING BY THE GAVEL");
-    C.hud.feed("Session convened. FOR must beat AGAINST when the gavel falls — flip " + Math.max(0, shortfall()) + " more. The auditor is on her rounds.", "#8fc1ff");
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("CITY HALL AFTER DARK · PASS THE DOCKLANDS REZONING BY THE GAVEL");
+    C.hud.feed("Session convened. FOR must beat AGAINST when the gavel falls, flip " + Math.max(0, shortfall()) + " more. The auditor is on her rounds.", "#8fc1ff");
     return true;
   }
 
@@ -961,7 +961,7 @@
     ctx.box(g, 0, 1.16, hz * 0.14, 1.15, 0.1, 0.82, ctx.mat(COL.brass));
     ctx.solid(-0.55, hz * 0.14 - 0.42, 0.55, hz * 0.14 + 0.42);
     ctx.zone({ id: "session", pos: [0, hz * 0.14 + 1.25], r: 2.0, onUse: openSession,
-      label: function () { return G.active ? "[E] The chair — call the vote" : (G.result ? "[E] The chamber (session over)" : "[E] Convene the Docklands session"); } });
+      label: function () { return G.active ? "[E] The chair, call the vote" : (G.result ? "[E] The chamber (session over)" : "[E] Convene the Docklands session"); } });
 
     // ---- lobby each councillor at their seat ----
     for (let i = 0; i < COUNCIL_N; i++) {
@@ -1028,10 +1028,10 @@
       onUse: openClerkWindow,
       label: function () {
         const st = runState();
-        if (st && st.filed) return "[E] The clerk's window — your filing";
+        if (st && st.filed) return "[E] The clerk's window, your filing";
         const seat = playerSeat();
-        if (seat) return "[E] The clerk's window — the ballot";
-        return "[E] The clerk's window — file for office";
+        if (seat) return "[E] The clerk's window, the ballot";
+        return "[E] The clerk's window, file for office";
       } });
 
     // ---- the lobby press (leak fears) ----
