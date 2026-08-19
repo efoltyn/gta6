@@ -63,6 +63,48 @@ altitude for a machine that can address the app's own state directly. A
 preset is an artifact you keep; a session replay is an execution you hope
 went the same way twice.)
 
+**The economics — the loop substitutes for capability** (owner, 2026-08-19):
+*"it took an amazing agent to make the before after tool. But now that the
+tool is made, I don't need the genius model every time running this loop.
+It's almost wasteful."* Generalized: before/after is a **verifier for
+qualities that never had one.** "Make the bed look good" has no unit test —
+so it used to demand a generator good enough to one-shot it. A cheap, honest
+verifier changes the trade everywhere it has ever been introduced: iteration
+substitutes for brilliance. Three consequences, in order of importance:
+
+1. **The required intelligence moves out of the generator and into the
+   instrument, where it is paid once and amortized across every future
+   loop.** Frontier models author the tool and the presets; cheaper models
+   run the loop. The genius builds the jig, the apprentice runs it — the
+   oldest industrial pattern there is, arriving in agent work.
+2. **The quality ceiling stops being the model and becomes what the receipt
+   can see.** A loop converges to what its verifier measures: a bed
+   photographed from one angle converges to a bed that looks good from that
+   angle. Preset quality *is* product quality — which is why authoring the
+   verifier is where the scarce intelligence belongs, and why the anti-lying
+   machinery below is the moat and not a footnote.
+3. **Comparable receipts make parallelism rational.** Once attempts carry
+   uniform receipts, "run three cheap agents at the same problem and keep
+   the best receipt" is a sane strategy instead of chaos. This is the true
+   origin of the harness: **the cabinet is derivative demand.** Managing
+   many agents is only worth doing because the loop made many cheap agents
+   productive; without the receipt, a cabinet files unlabeled folders —
+   which is exactly what twenty terminal tabs already are.
+
+Standing caveat, named: once the receipt is the objective, Goodhart applies.
+The loop optimizes the receipt, so the receipt has to keep deserving it —
+see the correction below.
+
+**And game dev was the hardest possible forge, so the generalization runs
+downhill.** A game is continuous, aesthetic, temporal, emergent — there is
+no assertion language for "the tsunami looks real," which is why this tool
+had to be invented here. A web app is the easy case by comparison: discrete
+states, deterministic routes, DOM to measure. The storyboard that
+photographs a tsunami's beats photographs a wizard's steps. And refactors
+get the neatest receipt of all: **before == after, pixel for pixel and
+metric for metric, is the proof that a refactor was invisible** — the one
+claim a diff can never make on its own.
+
 One correction to "ungameable," and it is the moat: a naive before/after is
 still gameable — wrong subject framed, cherry-picked camera, dishonest
 baseline, two sides photographing different moments and captioned as the
@@ -224,8 +266,21 @@ cabinet's unit is the **receipt**. A drawer is labeled with the problem
 statement; the front of the drawer is the before/after storyboard and the
 measurements table; the diff is one level deeper, for the rare descent —
 present, demoted. That inversion is the product decision every other design
-choice in this section serves. (It also makes "cabinet" a candidate name,
-and the owner's own coinage beats `warden` — his call.)
+choice in this section serves.
+
+**Naming, resolved** (the owner asked 2026-08-19 whether the product is
+called "cabinet," sensing the hierarchy was wrong — it was): **the tool owns
+the brand; the harness is an application of it.** Before/after is where the
+value lives (§0's economics: the cabinet is derivative demand), so it must
+not become a feature of a terminal manager's name. Strongest form of the
+recommendation: the harness gets **no second name at all** — it is what `ba`
+does when you hand it more than one problem. `ba new "<problem>"`,
+`ba ls`, `ba receipt`, `ba land`, `ba drop` are verbs of the same product
+whose core verb is `ba <preset>`. "The file cabinet" stays as the interior
+metaphor for the board's design (drawers labeled by problem, receipts on the
+front, diffs one level down), not as a brand. If the harness ever grows a
+real UI and earns a separate identity, it can earn it later — names are
+cheap to add and expensive to retract.
 
 **What it is not: a terminal emulator.** tmux already multiplexes terminals
 perfectly and every CLI agent runs happily in a pane; rebuilding that is
@@ -234,16 +289,16 @@ and what before/after makes possible — is the **receipt loop across N
 agents**. The harness is thin glue over tmux + git worktrees + the `ba`
 metadata contract:
 
-- `<harness> new "<problem statement>"` — worktree + branch (this repo
+- `ba new "<problem statement>"` — worktree + branch (this repo
   already lives this pattern: `.claude/worktrees/` is in `.gitignore`), a
   tmux window named by the problem, the chosen CLI (`claude`, `codex`, …)
   launched with a templated prompt: the problem + the AGENTS.md loop from §3.
   The problem statement is the unit of work — "I name a problem" is the API.
-- `<harness> ls` — the board: per task, branch / agent alive / last receipt,
+- `ba ls` — the board: per task, branch / agent alive / last receipt,
   parsed from `metadata.json` (preset, when, each metric with its ✓/✗).
-- `<harness> receipt <task>` — open the report.
-- `<harness> land <task>` — gate, merge, remove worktree.
-- `<harness> drop <task>` — kill the pane, delete the worktree. The "fully
+- `ba receipt <task>` — open the report.
+- `ba land <task>` — gate, merge, remove worktree.
+- `ba drop <task>` — kill the pane, delete the worktree. The "fully
   safe to revert" promise made structural: a task *is* a worktree, so
   dropping one is total and touches nothing else.
 
@@ -257,9 +312,6 @@ harness stays deliberately thin; the effort goes into the receipt, because a
 uniform, agent-agnostic, measured, one-switch-revertible proof of work is the
 thing none of them have and the thing every one of them makes more valuable.
 
-Naming is the owner's call; `warden` is suggested — it watches many cells,
-and this codebase earned the joke. (Avoid `fleet`: collides with JetBrains
-Fleet and Claude Code's own fleet features.)
 
 ## 5. Order of operations — the two traps
 
