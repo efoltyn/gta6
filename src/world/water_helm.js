@@ -261,7 +261,22 @@
     let throttle = 0;
     if (k["w"]) throttle += 1;
     if (k["s"]) throttle -= 1;
-    const backDown = !!k[" "];                        // SPACE = astern thrust
+    // SPACE, seated, is GET UP: the jump key stands you up out of the helm
+    // onto your own deck (city/boatwalk.js owns the feet; the owner ask —
+    // "jump button when seated is get up, that easy"). Edge-latched against a
+    // seat-session stamp so the held Space that just hauled you aboard
+    // (swim.js's climb-out is the same key) can never bounce you straight
+    // back over the side. Astern moved to CTRL; [S] is still reverse gear;
+    // with boatwalk absent or off, SPACE degrades to the old astern thrust.
+    const spaceDown = !!k[" "];
+    const canRise = !!(car.player && CBZ.boatStandUp && CFG.BOAT_WALK !== false);
+    const nowT = CBZ.now != null ? CBZ.now : Date.now();
+    const seatHeld = nowT - (car._helmT || 0) < 400;  // same seat session as last frame
+    car._helmT = nowT;
+    const rise = canRise && spaceDown && seatHeld && !car._helmSpace;
+    car._helmSpace = spaceDown;
+    if (rise && CBZ.boatStandUp(car)) return true;    // frame owned; you're on your feet
+    const backDown = !!k["control"] || (spaceDown && !canRise);   // crash stop / back down
     let steer = 0;
     if (k["a"]) steer += 1;                           // +1 = to PORT (+heading)
     if (k["d"]) steer -= 1;

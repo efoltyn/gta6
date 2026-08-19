@@ -1842,6 +1842,15 @@
      and before water_helm; every cross-read is feature-detected.
      Revert with ?cfg_CAPTAIN_V1=0. -->
 <script src="src/city/captain.js?v=nodash1"></script>
+<!-- BOAT WALK — the jump key at the wheel stands you up onto your own deck
+     (CBZ.boatStandUp, called by water_helm's Space edge and the touch GET UP
+     pill), and a "take the helm" walk-up card at every hull's helm station
+     (water_hulls spec.helm — the same point view.js's wheel view sits at), so
+     stepping back to the wheel re-takes her on ANY hull, including bridges
+     five metres off the hull centre the generic vehicle card can't reach.
+     Every cross-read (mpGroundAt, interactions, cityEnter/ExitVehicle,
+     marineHulls) is feature-detected. Revert with ?cfg_BOAT_WALK=0. -->
+<script src="src/city/boatwalk.js?v=boatwalk1"></script>
 
 <!-- SEATS OF POWER — the standalone complexes that do NOT fit inside a city
      block: the capitol, the executive mansion, the agency headquarters, the

@@ -16,7 +16,10 @@
                        interact registry's "Step out" verb calls)
               LOOK BACK = hold → CBZ.camLookBack(down) (camera agent's
                        feature-detected hook; button hides if absent)
-     BOAT     stick = steer/throttle (unchanged). BRAKE = Space astern.
+     BOAT     stick = steer/throttle (unchanged). ASTERN = hold → Ctrl
+              (water_helm's crash-stop; Space is the get-up now). GET UP =
+              tap → CBZ.boatStandUp (out of the seat, onto the deck).
+              VIEW = the [V] wheel view, same handler as the car's.
      HELI     stick = yaw/thrust (unchanged).
               UP     = hold  → CBZ.keys[" "]        (collective up)
               DOWN   = hold  → CBZ.keys["control"]  (collective down —
@@ -354,9 +357,14 @@
         "</div>";
       resetTiltCenter();
     } else if (next === "boat") {
-      // Boats keep the exact joystick helm the owner likes. Space is the
-      // water_helm crash-stop / astern path, not a road-car service brake.
-      html = pill("tvBrake", "ASTERN", "tv-big tv-warn") + LOOK_BTN + pill("tvExit", "EXIT", "tv-sm");
+      // Boats keep the exact joystick helm the owner likes. ASTERN is the
+      // water_helm crash-stop (it rides CTRL now — Space became the jump-key
+      // get-up, and a hold pill on Space would stand a thumb up mid-stop).
+      // GET UP is that jump verb: out of the seat, onto your own deck
+      // (city/boatwalk.js). VIEW joined the row when hulls learned first
+      // person ([V] — city/view.js helm eye).
+      html = pill("tvBrake", "ASTERN", "tv-big tv-warn") + pill("tvGetUp", "GET UP", "tv-sm") +
+        LOOK_BTN + VIEW_BTN + pill("tvExit", "EXIT", "tv-sm");
     } else if (next === "armor") {
       // A TANK IS A GUN ON TRACKS AND A TRUCK IS NOT. The FIRE button is built
       // only for the turreted hull — militaryvehicles.js's own fire path refuses
@@ -391,7 +399,16 @@
     btnWrap.innerHTML = html;
     const q = (id) => btnWrap.querySelector("#" + id);
     if (q("tvExit")) tapBtn(q("tvExit"), doExit);
-    if (q("tvBrake")) holdBtn(q("tvBrake"), " ");
+    // the boat's astern pill — CTRL, the same key water_helm's crash-stop
+    // polls on a keyboard (never Space: that key stands the driver up now)
+    if (q("tvBrake")) holdBtn(q("tvBrake"), "control");
+    // GET UP calls the verb directly rather than synthesising a Space tap —
+    // water_helm's stand-up latch is polled off CBZ.keys, and a same-tick
+    // keydown+keyup (touchKeyTap's shape) is exactly what a poll misses.
+    if (q("tvGetUp")) tapBtn(q("tvGetUp"), () => {
+      const P = CBZ.player;
+      if (P && P.driving && P._vehicle && CBZ.boatStandUp) CBZ.boatStandUp(P._vehicle);
+    });
     if (q("tvLeft")) holdBtn(q("tvLeft"), "a");
     if (q("tvRight")) holdBtn(q("tvRight"), "d");
     if (q("tvGas")) holdBtn(q("tvGas"), "w");

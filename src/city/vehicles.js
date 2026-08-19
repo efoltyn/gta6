@@ -3786,7 +3786,14 @@
     if (CBZ.cityPromotePlayerCar) CBZ.cityPromotePlayerCar(car);
     if (CBZ.carAudio) CBZ.carAudio.start();   // the motor turns over the moment you're in
     const worth = car.model ? "  ·  " + car.model.name : "";   // value stays hidden until you chop it
-    CBZ.city && CBZ.city.note("Driving" + worth + " · [E] out  [C] car style", 1.8);
+    // a hull's controls are not a car's: Space stands you up onto your own
+    // deck (city/boatwalk.js) and [V] is the wheel view, so the hint that
+    // teaches the seat must teach THAT seat
+    const helmHint = CBZ.isMarineHull && CBZ.isMarineHull(car) && CBZ.boatStandUp
+      && (!CBZ.CONFIG || CBZ.CONFIG.BOAT_WALK !== false);
+    CBZ.city && CBZ.city.note(helmHint
+      ? "At the helm" + worth + " · [SPACE] get up  [V] wheel view"
+      : "Driving" + worth + " · [E] out  [C] car style", 1.8);
     return true;
   };
   CBZ.cityExitVehicle = function () {
