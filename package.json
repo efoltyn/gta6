@@ -42,6 +42,7 @@
     "test:prison-sit": "node tools/prison-sit-check.mjs",
     "test:prison-jitter": "node tools/prison-jitter-check.mjs",
     "test:prison-nav": "node tools/prison-nav-check.mjs",
+    "test:city-nav": "node tools/city-nav-check.mjs",
     "test:prison-nav-revert": "node tools/prison-nav-check.mjs --revert",
     "test:prison-jitter-revert": "node tools/prison-jitter-check.mjs --revert",
     "test:prison-sit-revert": "node tools/prison-sit-check.mjs --revert",

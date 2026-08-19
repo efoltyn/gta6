@@ -5316,7 +5316,7 @@
   //      other instead of clumping/clipping (Reynolds steering, cheap version).
   //      Returns a small {x,z} steering offset to add to the desired heading. ----
   const _steer = { x: 0, z: 0, blocked: 0 };
-  function steering(ped, dx, dz, dist, active) {
+  function steering(ped, dx, dz, dist, active, routed) {
     _steer.x = 0; _steer.z = 0; _steer.blocked = 0;
     if (dist < 0.001) return _steer;
     const hx = dx / dist, hz = dz / dist;       // desired heading (unit)
@@ -5334,10 +5334,15 @@
     // the existing anti-tunnel step-cut keeps working.
     if (active && CBZ.cityNav && CBZ.cityNav.contextSteer) {
       const nbrCount = gatherNbrs(ped);
+      // A ROUTED BODY TRUSTS ITS ROUTE ABOUT WALLS. Its next leg was planned on
+      // a grid that grows every wall by a body radius and then line-tested; the
+      // danger map re-deciding that at 3.2 m is how a body ends up locked 90
+      // deg off a clear three-metre walk. Keep the neighbour half — a crowd is
+      // still a crowd — and scale the wall half right down.
       const out = CBZ.cityNav.contextSteer(
         ped.pos.x, ped.pos.z, hx, hz,
         _nbrBuf, nbrCount,
-        ped._prevSteerX, ped._prevSteerZ, _ctxOut);
+        ped._prevSteerX, ped._prevSteerZ, _ctxOut, routed ? 0.12 : 1);
       if (out && (out.x || out.z)) {
         ped._prevSteerX = out.x; ped._prevSteerZ = out.z;   // hysteresis for next frame
         const dot = out.x * hx + out.z * hz;                // how far the dir was bent
@@ -5965,6 +5970,14 @@
     if (ped._traverseProbeT > 0) ped._traverseProbeT -= dt; // running obstacle probe
     if (ped._rampT > 0) ped._rampT -= dt;      // rampager re-target / re-arm cadence
     if (ped._sfCD > 0) ped._sfCD -= dt;        // shoot-first re-check cadence (combat_iq)
+    /* HOW TO GET THERE, asked once everybody has finished saying WHERE.
+       think(), the routine goal picker, the flee solver and the raid router
+       have all written `target` by this line; city/pednav.js turns whatever it
+       says into the next step of a walk that exists — round the block, through
+       the door — and leaves it alone when the straight line is already clear.
+       It has to be HERE, not in an updater ahead of this one: everything above
+       writes `target` and this function integrates in the same breath. */
+    if (CBZ.pedNav) CBZ.pedNav.step(ped, dt);
     const dx = ped.target.x - ped.pos.x, dz = ped.target.z - ped.pos.z, dist = Math.hypot(dx, dz);
     if (ped.pause > 0) ped.pause -= dt;
     // SIT-DOWN (C3): an office worker routed to a CLAIMED desk (finalGoal.sitDesk,
@@ -6056,15 +6069,25 @@
     if (spd > 0 && dist > 0.5) {
       // blend the desired heading with local steering (look-ahead + separation)
       // so the crowd flows around walls and each other (no clumping/clipping).
+      const routed = !!(CBZ.pedNav && CBZ.pedNav.owns(ped));
       let mx = dx / dist, mz = dz / dist;
-      const s = steering(ped, dx, dz, dist, animate || dist > 3);
+      const s = steering(ped, dx, dz, dist, animate || dist > 3, routed);
       if (s.x || s.z) { mx += s.x; mz += s.z; const ml = Math.hypot(mx, mz) || 1; mx /= ml; mz /= ml; }
       // ANTI-TUNNEL: when the path straight ahead is a wall, the steer above turns
       // us toward the open side — but a fast step can still carry the body INTO the
       // corner before the turn finishes. Cut the forward step hard this frame so we
       // ease around the obstacle instead of punching through it (the multi-pass
       // collide below catches whatever overlap remains). Only bites when blocked.
-      const stepMul = s.blocked ? 0.25 : 1;
+      /* ...BUT NOT WHEN A ROUTE ALREADY WENT ROUND IT. The cut exists so a body
+         easing past a corner cannot punch through it, and `blocked` is raised
+         whenever context steering bends the heading hard — which, with a 3.2 m
+         wall sense, is most of a walk down a sidewalk. Measured: bodies with a
+         clear 47 m leg in front of them, following a route, moving at a
+         QUARTER of their own speed for ten seconds because the building beside
+         them kept the flag up. A body city/pednav.js is steering has a leg
+         that was checked against the walls when it was planned; ease it, do
+         not stall it. */
+      const stepMul = s.blocked ? (routed ? 0.72 : 0.25) : 1;
       // a wounded/limping leg actually slows the body (animChar publishes the
       // multiplier off the leg-injury state; a severed leg → 0 = can't walk)
       const limpMul = ped.char && ped.char.limpSpeedMul != null ? ped.char.limpSpeedMul : 1;
@@ -6120,7 +6143,10 @@
       const moved = Math.hypot(ped.pos.x - _px0, ped.pos.z - _pz0);
       if (moved < spd * dt * 0.4) {
         ped._stuck = (ped._stuck || 0) + dt;
-        if (ped._stuck > 0.45) {
+        // A BODY WALKING THE LONG WAY IS NOT STUCK. city/pednav.js owns this
+        // target while it walks him round the obstruction; the sidestep and
+        // the goal re-roll below would both fight the route it is following.
+        if (ped._stuck > 0.45 && !(CBZ.pedNav && CBZ.pedNav.owns(ped))) {
           ped._stuck = 0;
           /* A BODY ON AN ERRAND MAY ABANDON ITS GOAL. A BODY ON AN ORDER MAY NOT.
              `pickRoutineGoal` replaces `ped.target` with a random shop or

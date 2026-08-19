@@ -829,6 +829,25 @@
   // (stalled share of attempted movement). Flip false (?cfg_PRISON_NAV_V1=0)
   // for the straight line back.
   if (CBZ.CONFIG.PRISON_NAV_V1 == null) CBZ.CONFIG.PRISON_NAV_V1 = true;
+  // CITY_NAV_V1 — Gang City walks around buildings. Same root cause as the
+  // prison and the same grid (systems/navgrid.js), windowed 320 m around the
+  // player because the city is 8 km wide with 123k colliders. Measured before:
+  // 56% of the crowd's attempted movement was pressed into geometry, 37 bodies
+  // grinding at once, because city/peds.js answers "blocked" with a 0.45 s
+  // timer that sidesteps at random or throws the errand away. Ratchet:
+  // tools/city-nav-check.mjs. Flip false (?cfg_CITY_NAV_V1=0) to revert.
+  if (CBZ.CONFIG.CITY_NAV_V1 == null) CBZ.CONFIG.CITY_NAV_V1 = true;
+  // STEER_COMMIT_V1 — a body offered two equally good ways past an obstacle
+  // PICKS ONE. city/citynav.js's context-steer kernel damps a wobble by
+  // blending 0.3 of last frame's heading, which does nothing about a REVERSAL:
+  // blend (+1,0) with (-1,0) and you get (-1,0) back. Traced on a shipped
+  // street, a walking body flipped (-1,0)/(+1,0) on alternate frames and
+  // stepped 0.027 m sideways each time for a whole twenty-second sample, and
+  // 41% of the city's routed body-windows measured the same way: full speed,
+  // zero displacement. A reversal now loses to the heading already committed
+  // to, as long as that heading is still one of the safe ones. Shared by
+  // city/peds.js and city/crowd.js. Flip false (?cfg_STEER_COMMIT_V1=0).
+  if (CBZ.CONFIG.STEER_COMMIT_V1 == null) CBZ.CONFIG.STEER_COMMIT_V1 = true;
   // STREET TALK V2: every civilian is YES / NO / PUNCH. Offer math uses level
   // gap + max cash they can spare. Flip false to restore the crowded verb menu.
   if (CBZ.CONFIG.STREET_TALK_V2 == null) CBZ.CONFIG.STREET_TALK_V2 = true;

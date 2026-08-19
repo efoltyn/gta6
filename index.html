@@ -1493,7 +1493,13 @@
      to walk at curfew was a body pressed into geometry. This sits between the
      brain and the mover and answers HOW to get there — and it owns the one
      walkability grid + A* that navigation.js's escapeRoute now delegates to. -->
-<script src="src/systems/prisonnav.js?v=nav1"></script>
+<script src="src/systems/navgrid.js?v=nav2"></script>
+<script src="src/systems/prisonnav.js?v=nav2"></script>
+<!-- THE CITY'S SIDE OF THE SAME GRID. Measured on a calm street: 56% of every
+     metre 683 pedestrians tried to walk went into geometry, 37 of them grinding
+     for over 1.5 s at a time. The window is 320 m around the player (peds stop
+     drawing at 95 m), marked across frames so a rebuild is never a hitch. -->
+<script src="src/city/pednav.js?v=nav2"></script>
 <script src="src/systems/fullmap.js?v=nodash1"></script>
 
 <!-- cinematic death gore — shared by both games; loads before loop.js so its
