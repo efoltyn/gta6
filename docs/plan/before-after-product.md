@@ -37,6 +37,32 @@ first oversight channel to die at agentic scale; output judgment is the
 last. That is why "the final stage" is the right description and why the
 simplest tool is the durable one.
 
+**And it replaces a testing paradigm, not just a review step** (owner,
+2026-08-19): *"it's a much better way to test an app than trying to press
+buttons with Playwright... which is pretending to be human rather than
+testing much smarter."* The distinction, precisely: **imitate-and-assert vs.
+stage-and-photograph.** Session-replay testing has the agent improvise a
+human — click, wait, look, retry — which is slow, flaky, burns the agent's
+context on navigation noise, and worst of all runs a *different
+improvisation* on each side, so you never know whether a difference is the
+change or the session. A preset instead stages the moment declaratively —
+`stage()` is one function serialized into *both* pages, `referenceStage`
+hands the baseline's exact framing to the after side, film strips sample the
+identical simulated seconds — so the agent's context receives only the
+moments that matter, matched across sides. The tsunami presets are the
+worked example: a timestamped storyboard of the same physical beats
+(drawdown, wave, inundation, drain) on both builds, with the clock published
+as a metric so the report reads "the same beat, N seconds sooner." And it
+subsumes button-pressing rather than excluding it: a stage that fires the
+page's own click event and photographs what followed is still
+stage-and-photograph — the button press becomes a declared, reproducible
+moment instead of a hand pretending. (Honesty about plumbing: the engine
+drives Chromium over raw CDP, the same substrate Playwright wraps. The claim
+is not "browser automation bad" — it is that *imitating a user* is the wrong
+altitude for a machine that can address the app's own state directly. A
+preset is an artifact you keep; a session replay is an execution you hope
+went the same way twice.)
+
 One correction to "ungameable," and it is the moat: a naive before/after is
 still gameable — wrong subject framed, cherry-picked camera, dishonest
 baseline, two sides photographing different moments and captioned as the
@@ -185,7 +211,21 @@ generality**: a preset there is "navigate to the route, stage the state,
 screenshot + DOM/perf metrics" — no WebGL, no sim. Where the tool fights
 that, the tool is wrong; that friction is exactly what the dogfooding is for.
 
-## 4. The fleet harness
+## 4. The harness — a file cabinet for terminals
+
+The owner's own metaphor, and it is the right one: *"right now I open
+terminal and have 20 terminal tabs; I want all those in one place — and
+where other editors show you the diff, the diff doesn't matter to me, I
+want to see the delta in visible output."* That sentence is the entire
+positioning. Every agent-management surface being built today (IDE panes,
+Conductor-style dashboards, PR views) treats the **diff** as the unit of
+review, because the diff is what version control hands them for free. The
+cabinet's unit is the **receipt**. A drawer is labeled with the problem
+statement; the front of the drawer is the before/after storyboard and the
+measurements table; the diff is one level deeper, for the rare descent —
+present, demoted. That inversion is the product decision every other design
+choice in this section serves. (It also makes "cabinet" a candidate name,
+and the owner's own coinage beats `warden` — his call.)
 
 **What it is not: a terminal emulator.** tmux already multiplexes terminals
 perfectly and every CLI agent runs happily in a pane; rebuilding that is
