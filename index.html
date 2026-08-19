@@ -832,7 +832,7 @@
      scene; it wires itself to the bus lazily, in any script order. -->
 <script src="src/systems/lightningfx.js?v=bolt1"></script>
 <script src="src/world/disaster_arena.js?v=snowbury1"></script>
-<script src="src/systems/grapple.js?v=nodash1"></script>
+<script src="src/systems/grapple.js?v=nohint1"></script>
 <script src="src/entities/survivorbot.js?v=trauma2"></script>
 <script src="src/modes/survival.js?v=nodash1"></script>
 <!-- GUN GAME borrows worlds it never builds: the prison (escape), the disaster
@@ -992,7 +992,7 @@
      Loads right after building.js (needs CBZ.building.CATALOG/validate/
      place/remove) and after CBZ.camera/CBZ.pieces already exist (systems/
      camera.js, systems/pieces.js — both load earlier in this file). -->
-<script src="src/systems/buildmode.js?v=nodash1"></script>
+<script src="src/systems/buildmode.js?v=nohint1"></script>
 <!-- F7 — world/crates.js + world/props.js migrated onto CBZ.spawnPiece
      (moved from the "2. world geometry" wave above, right after
      towers.js): they now need spawnPiece to exist at parse time. -->

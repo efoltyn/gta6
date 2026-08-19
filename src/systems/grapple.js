@@ -798,7 +798,9 @@
     held = t; phys(t).heldBy = CBZ.player;
     phys(t).down = 0; phys(t).air = false;
     CBZ.sfx && CBZ.sfx("whoosh");
-    CBZ.flashHint && CBZ.flashHint("Holding " + (t.name || "survivor") + " · release or throw", 1.2);
+    // NO caption here (owner: "I know that I have grabbed"). The body in your
+    // arms is the feedback, and survival_interact.js already shows the verbs
+    // (Throw / Set down) the moment you're holding. Don't re-add a flashHint.
   }
   function release(thrown) {
     if (!held) return;
