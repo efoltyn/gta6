@@ -4460,3 +4460,41 @@ this repo to ship something that works perfectly for the person who wrote it
 and does not exist for the person who plays it. If a verb fires off proximity,
 it belongs in `CBZ.interactions.registerZone` — the keydown is the ACCELERATOR,
 never the only door.
+
+## 2026-08-19 — ONE WORD ON THE BUTTON (systems/interact.js)
+
+Owner, off the deployed warden card ("SLIP 25 TO LOOK AWAY" · "PAY 14 TO CLEAR
+YOUR HEAT" · "TALK TRASH TO WARDEN" · "LIFT WARDEN'S KEYS"): "buttons should be
+one word. Don't have a steal keycard button, have a steal button or rob etc…
+look how nat disaster buttons are fucking great." The reference is
+systems/survival_interact.js's #survVerbs dock — Throw / Grab / Punch / Shove,
+a verb and nothing else.
+
+The 2026-08-18 rail pass had moved the whole authored sentence ONTO the button
+whenever it fit (railButton, ≤28 chars), which stacks four lines of prose on
+the thumb. railButton is deleted. Every surface prints VERB[].label — ONE WORD
+— with the price/status chip riding inside the button: BRIBE 25 · PAYOFF 14 ·
+INSULT · STEAL. The authored sentence survives as the aria-label only, so a
+screen reader still hears "Slip 25 to look away".
+
+What the one-word law forced, and each was a latent fault:
+- subFor()'s early return blanked every priced verb's chip "because the price
+  lives in the label" — stranding the price-computing lines below it as DEAD
+  CODE. The return is gone and the dead code is the live code again:
+  bribe/payoff/pay/silence costs, the trade offer, accept's +N.
+- Five VERB labels were sentences hiding in the label slot ("Pay off",
+  "Join gang", "Pay silence", "Tie him up", "Let him go") → Payoff · Join ·
+  Silence · Tie · Release; detain's word is "Cuff" (the word labelFor already
+  used on the rail).
+- "RESPECT +respect" — the chip restating the button — is deleted.
+
+Desktop key-rows obey the same grammar (word + chip, no sentence), so the card
+and the rail can never disagree about what an option is called.
+
+Verified: emulated-iPad probe reads the live warden rail as BRIBE 25 /
+PAYOFF 14 / INSULT / STEAL, all one word, sentences intact in aria. GATE:
+MATHGATE ok (90210:329/182/207 | 400 ticks | det ok) · BUTTONGATE ok
+(label 0/0 · sub 0/0 · desc 0/0 · copyBars 0 · keyboardOnly 2).
+
+Open for the next talk: the owner also called the option SET dumb — WHICH
+verbs a warden offers is a design question this pass deliberately left alone.

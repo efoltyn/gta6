@@ -14,8 +14,9 @@
    walk out" win).
 
    ON TOUCH the whole card is REPLACED rather than restyled — on iPad,
-   every choice is a vertical row docked beside Reload with its full
-   explanation left and its action button right. Phones retain the compact
+   every choice is a vertical rail of buttons docked beside Reload, ONE
+   WORD per button with price/status as a small chip inside it (the
+   survival dock's Throw/Grab/Punch grammar). Phones retain the compact
    four-button/pill layout, and results use dialogue instead of a panel. See the
    PRISON_INTERACT_TOUCH block below and css/interact_touch.css.
 ============================================================ */
@@ -38,8 +39,8 @@
   //  fifth verb silently DROPPED by cap4 because there were only four keys to
   //  reach it with, and an "[H] Tips: ON" footer whose only affordance was a key
   //  no tablet has. On touch it becomes:
-  //    • iPad: every contextual verb in one vertical choice rail beside Reload,
-  //      full explanatory text left and a 52px+ action button right;
+  //    • iPad: every contextual verb in one vertical rail beside Reload, one
+  //      52px+ button per verb — a single WORD plus a status/price chip;
   //    • phone: four compact primary buttons plus overflow pills, so nothing the
   //      context offers is unreachable on the narrower surface;
   //    • the actor's name / read / ONE teaching line above the row in the
@@ -95,8 +96,8 @@
     } },
     bribe:    { label: "Bribe",           fn: (a) => CBZ.econ.bribe(a) },
     steal:    { label: "Steal",           fn: (a) => CBZ.econ.steal(a) },
-    payoff:   { label: "Pay off",         fn: (a) => CBZ.econ.payoff(a) },
-    join:     { label: "Join gang",       fn: (a) => CBZ.joinGang(a) },
+    payoff:   { label: "Payoff",          fn: (a) => CBZ.econ.payoff(a) },
+    join:     { label: "Join",            fn: (a) => CBZ.joinGang(a) },
     listen:   { label: "Listen",          fn: (a) => a.approach ? approachAction(a, "listen") : CBZ.econ.talk(a) },
     accept:   { label: "Accept",          fn: (a) => approachAction(a, "accept") },
     respect:  { label: "Respect",         fn: (a) => approachAction(a, "respect") },
@@ -105,11 +106,11 @@
     threaten: { label: "Threaten",        fn: (a) => approachAction(a, "threaten") },
     refuse:   { label: "Refuse",          fn: (a) => approachAction(a, "refuse") },
     confrontReport: { label: "Confront",  fn: (a) => CBZ.resolveKnownSnitch ? CBZ.resolveKnownSnitch(a, "confront") : { ok: false, msg: "" } },
-    paySilence: { label: "Pay silence",   fn: (a) => CBZ.resolveKnownSnitch ? CBZ.resolveKnownSnitch(a, "paySilence") : { ok: false, msg: "" } },
+    paySilence: { label: "Silence",       fn: (a) => CBZ.resolveKnownSnitch ? CBZ.resolveKnownSnitch(a, "paySilence") : { ok: false, msg: "" } },
     threatenSnitch: { label: "Threaten",  fn: (a) => CBZ.resolveKnownSnitch ? CBZ.resolveKnownSnitch(a, "threatenSnitch") : { ok: false, msg: "" } },
     question: { label: "Question",        fn: (a) => CBZ.econ.talk(a) },
     warn:     { label: "Warn",            fn: (a) => a.approach ? approachAction(a, "warn") : warnActor(a) },
-    detain:   { label: "Tackle",          fn: (a) => {
+    detain:   { label: "Cuff",            fn: (a) => {
       if (a.approach) return approachAction(a, "detain");
       const justified = CBZ.game.role === "cop" && (a.copMarked > 0 || a.huntPlayer > 0 || a.aiState === "fight");
       a.ko = Math.max(a.ko || 0, 5.5); a.hp = Math.max(a.hp || 0, 45); a.aiState = "flee"; a.foe = null;
@@ -144,11 +145,11 @@
     // spends the Bedsheet Rope). Silent either way: the sub-chip already
     // says "needs rope" when the bag cannot pay, and a tied man slumping is
     // the receipt when it can.
-    restrain: { label: "Tie him up",      fn: (a) => {
+    restrain: { label: "Tie",             fn: (a) => {
       if (CBZ.prisonRestrainTarget) CBZ.prisonRestrainTarget(a);
       return { ok: true, msg: "" };
     } },
-    release:  { label: "Let him go",      fn: (a) => {
+    release:  { label: "Release",         fn: (a) => {
       // Lowering the gun is the other half of holding it up. Ending the hold
       // here (rather than making the player walk away) means the panel can
       // always be closed by a decision instead of by distance.
@@ -415,10 +416,11 @@
       const authored = CBZ.cityCampaignPrisonSub(a, v);
       if (authored != null) return authored;
     }
-    // price / target info now lives in the label line itself — keep the sub
-    // for pure STATUS only (meters, "armed", "clean/risk"), never a price echo.
-    if (v === "accept" || v === "join" || v === "trade" || v === "bribe" ||
-        v === "payoff" || v === "pay" || v === "paySilence" || v === "respect") return "";
+    // THE BUTTON IS ONE WORD (owner, 2026-08-19: "buttons should be one
+    // word") — so the chip is where everything else lives: the PRICE on a
+    // priced verb, the offer on a trade, a status word ("armed", "counting")
+    // otherwise. This used to blank every priced verb because the price was
+    // written into a sentence label; the sentence is aria-only now.
     /* NO METERS ON A PERSON. `"" + Math.round(a.love)` and `"♥ " + a.rep` were
        the two floating numbers in this menu — a relationship printed as a
        percentage beside somebody's face. The state is unchanged and so are the
@@ -487,21 +489,22 @@
     if (v === "accept" && a.approach && a.approach.kind === "copBribe") return "+" + (a.approach.price || 0) + "";
     if (v === "accept" && a.approach && a.approach.kind === "copTip") return "intel";
     if (v === "accept" && a.approach && a.approach.kind === "copPlea") return "case";
-    if (v === "respect" && a.approach && a.approach.kind === "turfWarning") return "+respect";
-    if (v === "respect" && a.approach && a.approach.kind === "gangParley") return "+respect";
+    // "RESPECT +respect" would say it twice — respect carries no chip.
     if (v === "accept" && a.approach && a.approach.kind === "gangJob") return "+" + ((a.approach.job && a.approach.job.reward) || 5) + "";
     if (v === "accept" && a.approach && a.approach.kind === "gangParley") return a.approach.parleyMode || "terms";
     if (v === "accept" && a.approach && a.approach.kind === "crewBackup") return "backup";
     if (v === "accept" && a.approach && a.approach.kind === "coverStory") return "cover";
     if (v === "accept" && a.approach && a.approach.kind === "heatWarning") return "duck";
     if (v === "accept" && a.approach && a.approach.kind === "alibiDeal") return "alibi";
-    if (v === "accept" && a.approach && a.approach.kind === "gangInvite") return CBZ.GANG_NAMES ? CBZ.GANG_NAMES[a.gang] : "";
-    if (v === "join") return CBZ.GANG_NAMES ? CBZ.GANG_NAMES[a.gang] : "";
+    if (v === "accept" && a.approach && a.approach.kind === "gangInvite") return gangShort(a);
+    if (v === "join") return gangShort(a);
     return "";
   }
 
-  // The option label IS the action, written as a LINE ("Buy a Shiv — 8🚬"),
-  // not a bare category word ("Trade"). Contextual + deterministic (no flicker).
+  // The SPOKEN form of each option, written as a LINE ("Buy a Shiv — 8🚬").
+  // Since 2026-08-19 no button prints this sentence — the button is ONE WORD
+  // and this line survives as its aria-label, so a screen reader still hears
+  // the whole action. Contextual + deterministic (no flicker).
   function acceptLine(a) {
     const ap = a.approach || {};
     switch (ap.kind) {
@@ -811,30 +814,21 @@
       esc(labelFor(a, v)) + '"><span class="pi-lab">' + esc(shortLabel(a, v)) + "</span>" +
       (sub ? '<span class="pi-sub">' + esc(shortText(sub, subMax || 12)) + "</span>" : "") + "</button>";
   }
-  /* Tablet row: A BUTTON, AND NOTHING BESIDE IT (owner, 2026-08-18: "there
-     should be almost no words next to a button. Almost none, if any.")
+  /* Tablet row: ONE WORD ON THE BUTTON (owner, 2026-08-19: "buttons should
+     be one word... don't have a steal keycard button, have a steal button").
 
-     This rail used to print the authored line in a copy cell and a three-letter
-     verb on the button — "Slip 25 to look away" beside SLIP — which is the
-     same sentence-sawn-in-half the city card was doing. The whole line moves
-     ONTO the button now (it is a short line by construction: these labels are
-     built from a 14-char name and a verb), so the price is still on the thumb
-     target. Only a line too long for a button falls back to its verb head.
-     A pure STATUS chip (a meter word, "armed", "counting") rides along inside
-     the button, where it was always headed. */
-  const RAIL_BUTTON_MAX = 28;
-  function railButton(label, word) {
-    const s = String(label || "").trim().replace(/[?.!]+$/, "");
-    if (s && s.length <= RAIL_BUTTON_MAX) return s;
-    return word;
-  }
+     The last pass moved the whole authored sentence onto the button when it
+     fit — "SLIP 25 TO LOOK AWAY", "LIFT WARDEN'S KEYS" — which reads as four
+     lines of prose stacked on the thumb. The survival dock (systems/
+     survival_interact.js: Throw / Grab / Punch / Shove) is the reference:
+     the button is the VERB, full stop. The price or status rides inside it
+     as the small chip ("BRIBE 25"), and the full sentence lives on as the
+     aria-label so nothing is lost, only unprinted. */
   function optChoice(idx, a, v) {
-    const label = labelFor(a, v);
     const sub = subFor(a, v);
-    const word = railButton(label, shortLabel(a, v)).toUpperCase();
     return '<div class="pi-choice">' +
       '<button type="button" class="pi-action" data-pi="' + idx + '" aria-label="' +
-      esc(label) + '">' + esc(word) +
+      esc(labelFor(a, v)) + '">' + esc(shortLabel(a, v).toUpperCase()) +
       (sub ? '<span class="pi-act-sub">' + esc(shortText(sub, 12)) + "</span>" : "") +
       "</button></div>";
   }
@@ -994,22 +988,19 @@
       const sub = subFor(a, v);
       const desc = (CBZ.cityCampaignPrisonDesc && CBZ.cityCampaignPrisonDesc(a, v)) || DESC[v] || "";
       if (dockedTouch) {
-        // A BUTTON, AND NOTHING BESIDE IT — the same law as the live rail
-        // above (this is the PRISON_INTERACT_TOUCH=false fallback). The
-        // authored line rides ON the button when it fits; the status chip
-        // rides inside it; the teaching sentence is not a control and does
-        // not sit next to one.
-        const word = v === "campaign-spy" ? "ACCEPT"
-          : v === "campaign-escape" ? "REFUSE"
-          : String((VERB[v] && VERB[v].label) || v).toUpperCase();
-        const action = railButton(label, word).toUpperCase();
+        // ONE WORD ON THE BUTTON — the same law as the live rail above (this
+        // is the PRISON_INTERACT_TOUCH=false fallback). The status/price chip
+        // rides inside it; the authored sentence is the aria-label.
         return `<div class="iopt tverb tyes" data-i="${i}">` +
-          `<button type="button" class="itouch-act">${action}` +
-          (sub ? `<span class="pi-act-sub">${sub}</span>` : "") + `</button></div>`;
+          `<button type="button" class="itouch-act" aria-label="${esc(label)}">${esc(shortLabel(a, v).toUpperCase())}` +
+          (sub ? `<span class="pi-act-sub">${esc(shortText(sub, 12))}</span>` : "") + `</button></div>`;
       }
+      // Desktop rows obey the same grammar: the word is the option, the chip
+      // is the price/status. The sentence ("Slip 25 to look away") is gone
+      // from every printed surface, not just the touch ones.
       const row = `<div class="iopt" data-i="${i}"><span class="ikey">${(OPT_KEYS[i] || "").toUpperCase()}</span>` +
-        `<span class="ilab">${label}</span>` +
-        `<span class="isub">${sub}</span></div>`;
+        `<span class="ilab">${esc(shortLabel(a, v))}</span>` +
+        `<span class="isub">${esc(sub)}</span></div>`;
       // teach this button until it's been used at least once
       const tip = (showTips && !learned[v] && desc) ? `<div class="idesc">${desc}</div>` : "";
       return row + tip;
