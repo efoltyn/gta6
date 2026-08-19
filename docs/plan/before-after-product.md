@@ -436,6 +436,38 @@ writes the PNGs and the contact sheet; `show` is a small verb, and
 pane updates the moment its agent finishes a run. No more `open`, no more
 Preview, no more pairing by hand.
 
+**It hosts the stock CLIs, and that is a strategy** (owner, 2026-08-19):
+*"Claude Code and Codex will keep getting better at using the terminal —
+this doesn't change that, it just puts the terminal tabs all in one place…
+it's actual terminals, like how VS Code has a terminal."* Three
+consequences, each load-bearing:
+
+1. **Category.** The cabinet runs the unmodified vendor CLIs in real ptys,
+   interactively, under the subscriber's own hands — the same category as
+   VS Code's integrated terminal or tmux, which nobody's subscription
+   terms have a problem with. That means the owner's Claude subscription
+   and Codex subscription combine in one workspace on day one, no API
+   keys, no proxying, no per-vendor integration. The design constraint
+   that *keeps* it in this category is also the thesis-correct one: the
+   cabinet launches and arranges, it never puppets. Templating the initial
+   prompt is ordinary CLI usage; scripted multi-turn control of the agent
+   would both leave the safe category and betray the product's own loop —
+   the human is the judge, and the loop closes through the receipt, not
+   through a supervisor bot. The compliant shape and the right shape are
+   the same shape.
+2. **Exposure.** A harness that owns the agent loop (Devin et al.) is
+   *negatively* exposed to CLI progress — every capability Claude Code
+   ships is a feature they built for nothing. The cabinet owns the two
+   layers the labs don't: the workspace (tabs) and the acceptance
+   artifact (receipts). It is *positively* exposed — better agents mean
+   more parallel work worth housing and more receipts worth judging.
+   Every vendor release makes the cabinet more valuable at zero cost.
+3. **Durability.** The cabinet's two interfaces are a pty and files on
+   disk — the most stable contracts in computing. Vendor SDKs churn
+   quarterly; "spawn a process in a terminal" has held for fifty years,
+   and the receipt is a directory of PNGs and JSON. Nothing to keep up
+   with.
+
 **What it is not: a terminal emulator.** tmux already multiplexes terminals
 perfectly and every CLI agent runs happily in a pane; rebuilding that is
 months of work to reach parity with a solved problem. What does not exist —
