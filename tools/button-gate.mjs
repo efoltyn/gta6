@@ -110,12 +110,13 @@ for (const file of walk(path.join(ROOT, "src"))) {
   if (src.includes("itouch-copy")) copyBars.push(path.relative(ROOT, file).split(path.sep).join("/"));
 }
 
-/* ---- RULE 6: A PANEL A THUMB CANNOT PRESS -------------------------------
-   A file that builds a panel with innerHTML and listens ONLY for a keydown is
-   a menu that does not exist on a tablet: the shop counter, the job board, the
-   mod garage, the car lot, the realty desk and the empire screen were all in
-   this state until 2026-08-18. The three left are HUD overlays with no rows to
-   press (a snowboard readout, the swim meter, a killstreak banner). */
+/* ---- RULE 6: A VERB A THUMB CANNOT PRESS --------------------------------
+   A file that draws with innerHTML and listens ONLY for a keydown has no
+   existence on a tablet. There are exactly two ways to be reachable and this
+   accepts both: a delegated CLICK (a menu whose rows are tap targets) or a
+   registered INTERACTION ZONE (a proximity verb, which the registry turns
+   into a card with a button). Everything in this repo that failed on
+   2026-08-18 failed by having neither — six menus and four [E] verbs. */
 const keyboardOnly = [];
 for (const file of walk(path.join(ROOT, "src"))) {
   const src = readFileSync(file, "utf8");
@@ -123,22 +124,18 @@ for (const file of walk(path.join(ROOT, "src"))) {
   const panel = src.includes("innerHTML") && /createElement\("div"\)/.test(src);
   const keyed = src.includes('addEventListener("keydown"');
   const clicky = /addEventListener\("(click|pointerdown|mousedown|touchstart)"/.test(src);
-  if (panel && keyed && !clicky) keyboardOnly.push(rel);
+  const zoned = src.includes("registerZone");
+  if (panel && keyed && !clicky && !zoned) keyboardOnly.push(rel);
 }
 
 /* ---- THE RATCHET --------------------------------------------------------
    Measured 2026-08-18 after the sweep. These may only ever go DOWN. */
 const BUDGET = { label: 0, sub: 0, desc: 0 };
 const COPY_BARS = 0;        // rule 5: never again
-/* rule 6. Three of these are HUD overlays with no rows to press (snowboard
-   readout, swim meter, killstreak banner) and are fine. FOUR ARE DEBT, all
-   landed on main the same week: adboard.js, beach.js, elevators.js and
-   roofloot.js hang their [E] verb on a raw keydown instead of registering an
-   interaction zone, so the ad board, the beach loot, every lift and every roof
-   stash are unreachable on a tablet. Fixing one is ~6 lines (registerZone with
-   the same find/label/onSelect the keydown already implies); each fix LOWERS
-   this number. */
-const KEYBOARD_ONLY = 7;
+/* rule 6. The two left are HUD overlays with nothing to press: the swim meter
+   and a killstreak banner. Anything else appearing here is a verb or a menu
+   that a tablet cannot reach. */
+const KEYBOARD_ONLY = 2;
 
 const byKind = { label: 0, sub: 0, desc: 0 };
 for (const f of findings) byKind[f.kind]++;

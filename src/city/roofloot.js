@@ -364,6 +364,27 @@
   }
   if (typeof document !== "undefined" && document.addEventListener) document.addEventListener("keydown", onKey);
 
+  /* THE VERB EXISTED ONLY ON A KEYBOARD (2026-08-18). This file hung its [E]
+     on a raw document keydown, which means the verb has no card, no button and
+     no existence at all on the tablet this game is played on. The registry is
+     what turns a proximity verb into a thumb target, and it costs one record:
+     the SAME finder, the SAME body. The keydown stays for the desktop. */
+  let zoned = false;
+  CBZ.onUpdate(99.63, function () {
+    if (zoned || !CBZ.interactions || !CBZ.interactions.registerZone) return;
+    zoned = true;
+    CBZ.interactions.describe("roofstash", function () { return { label: "Roof stash", note: "" }; });
+    CBZ.interactions.registerZone({
+      id: "zone-roofstash", kind: "roofstash", prio: 11,
+      find: function () { return (built && !cracking && g.mode === "city") ? stashNear() : null; },
+      options: [{
+        id: "roofstash-pry", slot: "e", bad: true,
+        label: function () { return "Pry it open"; },
+        onSelect: function (st) { if (st) cracking = { st: st, t: 0 }; },
+      }],
+    });
+  });
+
   // ---- PUBLIC ---------------------------------------------------------------
   // live stash records — the map can mark known roofs ({x,z,y,rich,looted})
   CBZ.cityRoofStashes = function () { return stashes; };

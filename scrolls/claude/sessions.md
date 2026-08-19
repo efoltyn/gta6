@@ -4431,3 +4431,32 @@ to it; the renderer's `verbButton()` is what catches those at display time.
 (c) Three files still hold unrendered `note:` annotations on data rows
 (`civic.js` service rows are the big one) — dead text shipped to the player's
 browser, worth deleting when someone is next in there.
+
+## 2026-08-18 (4) — THE LIFT, THE BEACH BAG, THE ROOF STASH AND THE AD BOARD
+
+Caught by `tools/button-gate.mjs` while merging the button-law wave into main:
+four features that had landed on main the same week hung their `[E]` on a raw
+`document.addEventListener("keydown")` and registered no interaction zone. A
+proximity verb with no zone has no card, no button and no existence on a
+tablet, so on the owner's iPad the ad board could not be rented, beach bags
+could not be rifled, roof stashes could not be pried, **no lift in the city
+could be called**, and a player sealed in an idle cab had no way to open the
+doors. Each fix is one `registerZone` record off the finder the keydown was
+already using (`boardNear` / `lootNear` / `stashNear` / a three-case
+`liftTarget` that mirrors the keydown's own order), with the keydown left in
+place for the desktop.
+
+The catch also exposed a flaw in the gate that caught it: rule 6 accepted only
+a delegated CLICK as proof a surface is reachable, when a registered ZONE is
+equally valid — a menu is reached one way, a world verb the other. The rule now
+accepts both, which is what let the ratchet drop to its true floor of **2**
+(the swim meter and the killstreak banner: HUD overlays with nothing to press).
+
+GATE: MATHGATE ok (90210:329/182/207, 200 ticks, det ok, errors baseline-only)
+· BUTTONGATE ok (label 0/0 · sub 0/0 · desc 0/0 · copyBars 0 · keyboardOnly 2).
+
+Trap for the next wave: a `[E]` verb on a raw keydown is the easiest way in
+this repo to ship something that works perfectly for the person who wrote it
+and does not exist for the person who plays it. If a verb fires off proximity,
+it belongs in `CBZ.interactions.registerZone` — the keydown is the ACCELERATOR,
+never the only door.
