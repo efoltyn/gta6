@@ -137,7 +137,16 @@
     geo.setIndex(idx);
     geo.computeVertexNormals();
     g.add(new THREE.Mesh(geo, invertMat));
-    (CBZ.prisonRoot && CBZ.game && CBZ.game.mode === "prison" ? CBZ.prisonRoot : CBZ.scene).add(g);
+    /* THE PRISON MODE IS CALLED "escape". This read `=== "prison"`, which is
+       not a mode this game has — index.html's card is data-mode="escape" and
+       every other file in the tree compares to that — so the branch was dead
+       and a tunnel was ALWAYS parented to the scene. It looks fine (the tunnel
+       renders either way) right up until the arena is torn down and rebuilt,
+       at which point the tunnel outlives the prison it was dug under. Same
+       shape as the placement law that was gated to a mode it never matched:
+       a string compared against an id that does not exist answers false
+       forever and never says so. */
+    (CBZ.prisonRoot && CBZ.game && CBZ.game.mode === "escape" ? CBZ.prisonRoot : CBZ.scene).add(g);
     return g;
   }
 

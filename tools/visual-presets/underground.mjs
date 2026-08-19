@@ -31,7 +31,7 @@ const subjects = [
     act: { mode: "city", kind: "bunker", breach: true }, cam: { frame: "intobreach" } },
   { id: "tunnel", label: "A tunnel under the prison yard",
     focus: "The middle keeps its lid, so the yard above is intact; the mouth is a real shaft you climb down. A route you walk, not a trigger you touch.",
-    act: { mode: "prison", kind: "tunnel" }, cam: { frame: "mouth" } },
+    act: { mode: "escape", kind: "tunnel" }, cam: { frame: "mouth" } },
   { id: "digsite", label: "Ground taken away a bucket at a time",
     focus: "A dug pit with VERTICAL walls — a heightfield without side quads reads as a dent. The drawn surface and the walked surface are the same surface.",
     act: { mode: "survival", kind: "dig" }, cam: { frame: "oblique" } },

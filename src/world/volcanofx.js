@@ -723,7 +723,9 @@
              lace    the travelling crack network — the term that MOVES
              flood   the vent apron: the first stretch has no lid at all */
         const across = 1 - Math.pow(amu, 2.6 + 2.1 * u01);
-        const open = 0.98 - 0.42 * u01;
+        // gentled with the 2026-08-19 rebalance below: the toe of a fed flow
+        // still MOVES, so it stays red — only stopping earns the black
+        const open = 0.98 - 0.22 * u01;
         /* THE LACE IS THE LOOK (the owner's reference close-up, 2026-08-15):
            a dark crusted surface with thin CONNECTED filaments of melt
            cracked through it, wrapping irregular black islands. lidField now
@@ -742,15 +744,32 @@
            inside it. `hot` keeps the handover from popping as a station
            cools. */
         const flood = clamp((0.21 - u01) * 4.5, 0, 1) * (0.5 + 0.5 * hot) * (0.6 + 0.4 * lace);
-        /* THE LID IS STILL THE DEFAULT, and the toe still glows along its
-           cracks. The -0.24 sets that balance: where the lace is thin the
-           lid wins outright and the surface is dark rock, but a cooling toe
-           keeps a dull red crack network in its seams instead of going flat
-           black — the reference close-up's margins exactly. */
-        let melt = clamp((0.08 + 1.1 * lace) * across * open * (0.42 + 0.85 * hot) - 0.24, 0, 1);
+        /* THE MELT IS THE DEFAULT WHILE THE RIVER RUNS. OWNER, 2026-08-19:
+           "isn't it usually red, and it has that red and bright [brilliance]
+           ... and then it should turn black. Right now it literally flows
+           down black — black stuff doesn't move. Black is when it's in one
+           place." He is right, and it re-balances the 2026-08-15 lace: a FED
+           channel's surface is mostly incandescent, so the moving flow now
+           reads predominantly red-orange with the lace surviving as brighter
+           veins through it, and thin dark skin shows only as sparse RAFTS
+           where the field runs deepest. The full black crust belongs to lava
+           that has STOPPED — which is exactly what the quench paints: hot
+           collapses and this same formula lands on dark rock whose last
+           ember seams fade in the deepest lace. Moving = red; parked =
+           black. */
+        let melt = clamp((0.62 + 0.5 * lace) * across * open * (0.35 + 0.75 * hot) - 0.12, 0, 1);
+        // the rafts: thin chilled plates riding the bright river — dim while
+        // the river is hot (skin, not rock), deepening to black as it stops
+        const raft = clamp((0.18 - lace) * 5, 0, 1);
+        melt *= 1 - raft * (0.3 + 0.42 * (1 - hot));
         melt = Math.max(melt, flood * across);
-        melt = melt * melt * (3 - 2 * melt);   // smoothstep: filaments get EDGES
-        ramp3(clamp(melt * (0.32 + 0.8 * hot), 0, 1), MELT_A, MELT_B, MELT_C, _c3);
+        melt = melt * melt * (3 - 2 * melt);   // smoothstep: veins get EDGES
+        /* 0.24+0.56, down from 0.32+0.8: with the melt now covering most of
+           the river, the old drive parked the whole body at the ramp's gold
+           top — the "red and bright" the owner asked for lives a step down,
+           with the body on the red-orange stop and only the veins and the
+           vent flood reaching the bright end. */
+        ramp3(clamp(melt * (0.24 + 0.56 * hot), 0, 1), MELT_A, MELT_B, MELT_C, _c3);
         /* the lid itself is not black — it is dark rock still holding heat,
            warmest right beside a filament (a crack heats its own rim).
            QUADRATIC in hot, and biased harder into the lace: the 2026-08-16
