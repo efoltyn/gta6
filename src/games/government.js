@@ -284,17 +284,40 @@
       let sid = null;
       if (i < offs.length) { sid = offs[i].sid; name = offs[i].name; title = offs[i].title; real = true; key = "sid:" + sid; V.realCount++; }
       else { name = fillName(i); title = "Councilmember"; key = "fill:" + i; }
-      const handle = ctx.npc ? ctx.npc({
+      // THE WARDEN'S WAY IN: cast the ped standing, then commit it to the
+      // REGISTERED chair through CBZ.propSit({instant}) — adminwing.js's
+      // sitAtDesk pattern, the seating the owner points at as the good one.
+      // From there SIT_PHYS_V1 owns the body: the order-42 hold pins the whole
+      // transform every frame (nothing left to bob against), the chair solve
+      // reads the REGISTERED cushion/kind (legs fold to the dais, "throne"
+      // posture for a high-backed armchair), and the anchor seats the pelvis
+      // on the cushion centre, clear of the backrest. The pose+seatRef spec is
+      // kept ONLY as the degrade path for a build with no seat registry.
+      const rec = (V.seatRecs && V.seatRecs[i]) || null;
+      const canProp = !!(rec && CBZ.propSit);
+      const spec = {
         role: "councillor", name: name, outfit: { archetype: "exec" },
-        at: [seat.x, seat.z], face: 0, post: "pinned", pose: "sit",
-        // the chair stands on the dais. character.js's solve reads cushion
-        // RELATIVE TO THE SEAT'S OWN FOOT-FLOOR and floorBelow as how far that
-        // floor sits UNDER the rig's root (sink = cushion+0.10 − hipY −
-        // floorBelow) — a dais is that floor sitting ABOVE the root, i.e. a
-        // NEGATIVE floorBelow: butt lands on the raised cushion, soles land on
-        // the platform, and the linear solve needs no new field.
-        seatRef: { cushion: COUNCIL_SEAT_H, floorBelow: -DAIS_H },
-      }) : null;
+        at: [seat.x, seat.z], face: 0, post: "pinned",
+      };
+      if (!canProp) {
+        spec.pose = "sit";
+        // dais fallback: negative floorBelow raises the solve onto the
+        // platform (sink = cushion+0.10 − hipY − floorBelow).
+        spec.seatRef = { cushion: COUNCIL_SEAT_H, floorBelow: -DAIS_H };
+      }
+      const handle = ctx.npc ? ctx.npc(spec) : null;
+      if (canProp && handle && handle.ped && handle.ped.group) {
+        const p = handle.ped;
+        try {
+          // the SEAT has custody now, not the staff post — the post pin writes
+          // idle/pos every tick and would arm-wrestle the sit hold (the
+          // auditor above clears its post for the same reason).
+          p.staffPost = null;
+          p.group.position.set(rec.x, rec.y || 0, rec.z);
+          CBZ.propSit(p, rec, { instant: true });
+          p.group.rotation.y = rec.face;
+        } catch (e) {}
+      }
       COUNCIL.push({ i: i, key: key, sid: sid, name: name, title: title, real: real, handle: handle, want: meta.want, fear: meta.fear, baseStance: meta.baseStance, stance: meta.baseStance, flippedBy: null, dirtLine: null });
     }
     // the auditor — a controlled ped we drive along posted waypoints.
@@ -929,6 +952,18 @@
     // the rig's pelvis lands on the burgundy cushion and its feet reach the
     // dais top (every chair Y below rides DAIS_H — the chair is built on the
     // platform, and drainCast's seatRef says the same thing in numbers).
+    // …and each chair is a REGISTERED SEAT (owner, 2026-08-19: council sitting
+    // "SUCKS — overlap with back of chairs, legs off, constant lean forward
+    // and back … but warden sitting in a seat in prison [is good]"). The
+    // warden's chair goes through CBZ.propRegisterSeat + CBZ.propSit, which is
+    // what puts SIT_PHYS_V1's whole-transform hold and the real chair solve in
+    // charge of the body — no second writer left to fight, so no bob. The
+    // hand-rolled pose+seatRef this replaces was written against the OLD seat
+    // solve and aimed a body at furniture the physics had never heard of.
+    // Anchor ON the dais (y = DAIS_H — the chair's own floor), cushion
+    // COUNCIL_SEAT_H above it, kind "throne" (a high-backed armchair reads as
+    // the boss-chair posture family: spine upright, hands on the armrests).
+    V.seatRecs = [];
     for (let i = 0; i < COUNCIL_N; i++) {
       const s = V.seats[i];
       const legH = COUNCIL_SEAT_H - 0.12;
@@ -940,6 +975,14 @@
         ctx.box(g, s.x + dx * 0.38, DAIS_H + 0.69, s.z + 0.02, 0.08, 0.08, 0.52, ctx.mat(COL.woodD));
         ctx.box(g, s.x + dx * 0.38, DAIS_H + 0.56, s.z + 0.23, 0.08, 0.30, 0.08, ctx.mat(COL.woodD));
       }
+      let rec = null;
+      if (CBZ.propRegisterSeat) {
+        try {
+          rec = CBZ.propRegisterSeat(venue.origin.x + s.x, DAIS_H, venue.origin.z + s.z, 0,
+            "throne", venue.lot || null, { cushion: COUNCIL_SEAT_H, floorBelow: 0 });
+        } catch (e) { rec = null; }
+      }
+      V.seatRecs.push(rec);
     }
 
     // ---- the tally board on the wall behind the bench ----------------------

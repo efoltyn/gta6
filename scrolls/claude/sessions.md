@@ -4479,3 +4479,19 @@ this repo to ship something that works perfectly for the person who wrote it
 and does not exist for the person who plays it. If a verb fires off proximity,
 it belongs in `CBZ.interactions.registerZone` — the keydown is the ACCELERATOR,
 never the only door.
+
+**FOLLOW-UP 2 (2026-08-19):** owner: council sitting "SUCKS — overlap with
+back of chairs, legs off, constant lean forward and back … but warden
+sitting in a seat in prison [is good]". The hand-rolled pose+seatRef sit
+was written against the OLD chair solve and SIT_PHYS_V1 rewrote that solve
+underneath it the same day — furniture the physics had never heard of, and
+no owner for the transform. Fix is the warden's own path: each council
+chair is now a REGISTERED seat (propRegisterSeat, anchor on the dais,
+cushion COUNCIL_SEAT_H, kind "throne" → the boss-chair posture family) and
+drainCast commits the body through CBZ.propSit({instant}) — SIT_PHYS_V1's
+order-42 whole-transform hold + peds' sit-branch re-pin own it from there
+(staffPost cleared, the auditor's own precedent, so the post pin cannot
+arm-wrestle the seat). pose+seatRef survives only as the no-registry
+degrade path. Verified live: _propSeat true, registered seatRef
+(kind throne, hashed vary) driving the solve, head 1.71 (dais visibility
+kept), body centred in the chair clear of the backrest.
