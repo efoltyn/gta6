@@ -207,8 +207,14 @@
       if (n._tag) n._tag.visible = false;
     }
 
-    // dead: stay sprawled forever (flop into place)
-    if (n.dead) { n.group.rotation.z = CBZ.damp(n.group.rotation.z, Math.PI / 2, 9, dt); return; }
+    // dead: stay sprawled forever. systems/prisoncorpse.js owns the corpse —
+    // the clear lie direction, the wall depenetration, the sprawl — and this
+    // legacy flop is only the PRISON_CORPSE_V1=false fallback.
+    if (n.dead) {
+      if (!(CBZ.prisonCorpseTick && CBZ.prisonCorpseTick(n, dt)))
+        n.group.rotation.z = CBZ.damp(n.group.rotation.z, Math.PI / 2, 9, dt);
+      return;
+    }
 
     // ASLEEP IN A BUNK (systems/prisonrest.js → city/propuse.js). The same
     // shape as the KO branch below and for the same reason: another system

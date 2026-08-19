@@ -464,11 +464,13 @@
     return `${offer.item}·${p.price}${tag ? " " + tag : ""}`;
   }
   function payoffCost(actor) {
+    // GUARDS ONLY — the warden refuses cigarettes (see payoff()), so his old
+    // +14 premium priced a transaction that no longer exists.
     const heat = g.detection || 0;
     const complaints = g.complaints || 0;
     const jobCut = g.gangJob ? 4 : 0;
-    let cost = Math.ceil(heat / 8) + Math.ceil(complaints / 12) + jobCut + (actor && actor.kind === "warden" ? 14 : 5);
-    if (actor && (actor.corrupt || actor.kind === "warden")) {
+    let cost = Math.ceil(heat / 8) + Math.ceil(complaints / 12) + jobCut + 5;
+    if (actor && actor.corrupt) {
       const ledger = g.racketStanding || 0;
       cost += Math.ceil((g.racketDebt || 0) / 8);
       if (ledger > 8) cost -= Math.min(5, Math.floor(ledger / 10));
@@ -518,8 +520,36 @@
     guardPaid: ["I'm looking at the wall for the next while.",
                 "Never saw you. Keep it that way.",
                 "Two minutes of blind. Use them."],
-    wardenPaid: ["I have paperwork to be very absorbed in.",
-                 "My office is closed to what you do next."],
+    /* THE WARDEN'S VOICE IS AUTHORITY, NOT COMMERCE (owner, 2026-08-19: "he
+       should not accept cigs... he legit acted like an inmate"). Every warden
+       line below exists because the generic guard/inmate line was wrong in
+       his mouth. His one currency is NAMES — see snitch() below. */
+    wardenNoCigs: ["Cigarettes? I sign for this whole prison. Walk.",
+                   "Put them away. I'm not one of my officers.",
+                   "You can't afford me, and it isn't counted in smokes."],
+    wardenNoPaper: ["The sheet stays the sheet. Bring me something I can use.",
+                    "You don't buy paperwork in here. You earn it. With names."],
+    wardenNotBuying: ["You're not in enough trouble to need me. Keep it that way.",
+                      "Your sheet's thin. Nothing to trade. Go on."],
+    wardenHeardIt: ["I've heard enough out of you today.",
+                    "One name a block. That's the arrangement."],
+    wardenNoNames: ["Names. Real ones. Come back when you hold one.",
+                    "Your yard's gone quiet on you? Then we're done."],
+    wardenPaidName: ["That's worth some quiet. Your sheet just got thinner.",
+                     "Noted. My officers will take it from here.",
+                     "Good. Keep your ears open and your mouth this useful."],
+    wardenInsulted: ["Segregation has a bed with your name on it.",
+                     "Brave. My officers collect brave."],
+    wardenIgnores: ["Noted. Everything in here gets noted.",
+                    "Enjoy the yard while you still have yard."],
+    // the trespass ladder — world/adminwing.js speaks these when an inmate
+    // stands in his office or his quarters and stays there
+    wardenOut1: ["This is my office. Out.",
+                 "Wrong room, convict."],
+    wardenOut2: ["I will not say it twice. OUT.",
+                 "Last chance to walk."],
+    wardenOut3: ["Officers! Inmate in the admin wing!",
+                 "Control — my office, NOW."],
     guardCaught: ["Hand. Out. Of my belt.",
                   "You just bought yourself a shakedown.",
                   "Radio's already in my hand, boy."],
@@ -674,29 +704,41 @@
      till is a price that lies the moment loyalty moves it. One function. */
   function bribeCost(actor) {
     if (!actor) return 10;
-    const base = actor.kind === "warden" ? 25 : (actor.corrupt ? 5 : 10); // bent screws come cheap
+    // GUARDS ONLY — the warden refuses cigarettes outright (see bribe()), so
+    // he has no bribe price to print anywhere.
+    const base = actor.corrupt ? 5 : 10;                  // bent screws come cheap
     const l = loyaltyOf(actor);
     // up to 40% off a standing arrangement; a count makes everything dearer
     let cost = Math.round(base * (1 - Math.min(0.40, l / 250)));
-    if (counting()) cost += actor.kind === "warden" ? 8 : 4;
+    if (counting()) cost += 4;
     return Math.max(2, cost);
   }
 
   // ---------- BRIBE: pay cigarettes to make a guard look away ----------
   function bribe(actor) {
-    if (actor.kind === "guard" || actor.kind === "warden") {
+    /* THE WARDEN IS NOT FOR SALE IN CIGARETTES (owner, 2026-08-19: "he should
+       not accept cigs... he legit acted like an inmate"). He used to take 25
+       smokes for a look-away and cough up the Gun-Room Key half the time —
+       the bent-screw transaction with a bigger number on it. Refused now, at
+       the till, so every route (menu, campaign, scripts) hears the same no.
+       His price is a NAME — snitch() below. The key still moves the ways a
+       warden would actually lose it: lifted, beaten out of him, or looted. */
+    if (actor.kind === "warden") {
+      noteRead("heat", 3, nm(actor), 8);
+      return { ok: false, msg: pick(VOICE.wardenNoCigs) };
+    }
+    if (actor.kind === "guard") {
       // THE COUNT OUTRANKS MONEY. He is standing on a number with a clipboard
       // and a supervisor; there is no price at which he turns round right now.
-      if (counting() && !bought(actor)) return { ok: false, msg: pick(actor.kind === "warden" ? VOICE.wardenBusy : VOICE.guardBusy) };
+      if (counting() && !bought(actor)) return { ok: false, msg: pick(VOICE.guardBusy) };
       const cost = bribeCost(actor);
       if (g.cigs < cost) return { ok: false, msg: `${cost}. ${pick(VOICE.guardShort)}` };
       addCigs(-cost);
       // A BOUGHT MAN LOOKS AWAY LONGER. `bribed` stays what it always was —
       // seconds of blindness — and `loyalty` is the thing that persists, so a
       // second visit to the same officer buys more than the first did.
-      const hold = actor.kind === "warden" ? 22 : 14;
-      actor.bribed = Math.round(hold * (1 + loyaltyOf(actor) / 160));
-      addLoyalty(actor, actor.kind === "warden" ? 10 : 14);
+      actor.bribed = Math.round(14 * (1 + loyaltyOf(actor) / 160));
+      addLoyalty(actor, 14);
       actor.alert = 0;
       const who = nm(actor);
       if (actor.corrupt) {
@@ -707,19 +749,10 @@
         noteRead("badge", 8 + cost * 0.55, who, 15);
         if (CBZ.addCasePressure) CBZ.addCasePressure(4 + cost * 0.55, { type: "bribe", heardOnly: true }, actor, { corruptHold: true });
       } else {
-        noteRead("heat", actor.kind === "warden" ? 5 : 3, who, 11);
+        noteRead("heat", 3, who, 11);
       }
       CBZ.sfx("coin");
-      // A generous warden bribe coughs up the gun-room key. The KEY lands in
-      // the pickup feed like everything else you come away holding; the warden
-      // says a warden thing. He does not narrate his own hand.
-      if (actor.kind === "warden" && !hasItem("Gun-Room Key") && rng() < 0.5) {
-        addItem("Gun-Room Key", 1);
-        if (CBZ.pickupNote) CBZ.pickupNote("Gun-Room Key", { rare: true });
-        CBZ.sfx("key");
-        return { ok: true, msg: "You were never in my wing. Put that away before somebody sees it." };
-      }
-      return { ok: true, msg: pick(actor.kind === "warden" ? VOICE.wardenPaid : VOICE.guardPaid) };
+      return { ok: true, msg: pick(VOICE.guardPaid) };
     }
     // inmates: a small gift earns goodwill + sometimes a free item/tip
     const cost = 3;
@@ -741,10 +774,12 @@
 
   // ---------- PAYOFF: corrupt authority can clean up heat ----------
   function payoff(actor) {
-    const guardish = actor.kind === "guard" || actor.kind === "warden";
-    if (!guardish) return { ok: false, msg: "Do I look like I write the paperwork in here?" };
-    if (counting() && !bought(actor)) return { ok: false, msg: pick(actor.kind === "warden" ? VOICE.wardenBusy : VOICE.guardBusy) };
-    if (!actor.corrupt && actor.kind !== "warden") {
+    // The warden's sheet is not for sale either — his clean-up is bought with
+    // a NAME (snitch() below), never with cigarettes.
+    if (actor.kind === "warden") return { ok: false, msg: pick(VOICE.wardenNoPaper) };
+    if (actor.kind !== "guard") return { ok: false, msg: "Do I look like I write the paperwork in here?" };
+    if (counting() && !bought(actor)) return { ok: false, msg: pick(VOICE.guardBusy) };
+    if (!actor.corrupt) {
       if (CBZ.addHeat) CBZ.addHeat(6);
       actor.alert = Math.max(actor.alert || 0, 1.2);
       addLoyalty(actor, -6);        // you just offered a clean screw money
@@ -757,7 +792,7 @@
     if (g.cigs < cost) return { ok: false, msg: `${cost}. ${pick(VOICE.guardShort)}` };
 
     addCigs(-cost);
-    actor.bribed = Math.max(actor.bribed || 0, actor.kind === "warden" ? 28 : 20);
+    actor.bribed = Math.max(actor.bribed || 0, 20);
     actor.alert = 0;
     actor.hunt = 0;
     if (CBZ.addHeat) CBZ.addHeat(-(26 + heat * 0.45));
@@ -784,13 +819,99 @@
     CBZ.sfx("coin");
     // PAYING A MAN OFF IS THE PUREST FORM OF BUYING HIM. It is the one act in
     // the game that makes a screw yours for the rest of the run.
-    addLoyalty(actor, actor.kind === "warden" ? 16 : 22);
+    addLoyalty(actor, 22);
     return {
       ok: true,
       msg: g.role === "cop"
         ? "The complaint goes in the wrong drawer. Nobody reads that drawer."
         : "Your name comes off the sheet. It goes back on if you make me look stupid.",
     };
+  }
+
+  /* ---------- SNITCH: the warden's price is a NAME ----------
+     OWNER (2026-08-19): "he should not accept cigs" — so what DOES the top of
+     a prison trade in? Information. The game already runs a whole snitch
+     economy pointed AT the player (inmates report you, credibility, "talks to
+     the screws" reads); this is the same economy with the player on the
+     selling side, and every consequence goes through machinery that already
+     exists:
+       · the heat relief is payoff()'s own sweep, paid in risk instead of cigs
+       · the name is a REAL man — a rival crew's holder, found by what his
+         rolled loadout actually carries — and the nearest free officer
+         physically walks to him (guards.js's investigate beat)
+       · the risk is the yard finding out: provokeGang turns the burned crew
+         on you, and noteRead("snitch") drops you into the same block-gossip
+         channel that brands any other man who talks to the screws
+     One name a schedule block. A clean sheet has nothing to trade. */
+  const SNITCH_HEAT_MIN = 14;
+  // the gate, published so the menu chip and the act can never disagree:
+  // "" = he is buying · "count" | "later" | "clean" = why not
+  function snitchOffer(actor) {
+    if (!actor || actor.kind !== "warden") return "clean";
+    if (counting()) return "count";
+    const b = blockId();
+    if (b && g.wardenHeardBlock === b) return "later";
+    if ((g.detection || 0) < SNITCH_HEAT_MIN && (g.complaints || 0) < 25) return "clean";
+    return "";
+  }
+  function snitchMark() {
+    // a name worth money: a live rival-crew man, weighted by what he holds
+    let best = null, bs = -1;
+    for (const n of CBZ.npcs || []) {
+      if (!n || n.dead || n.escaped || (n.ko || 0) > 0 || !n.group) continue;
+      if (n.gang == null || n.gang < 0 || n.gang === CBZ.player.gang) continue;
+      const load = rollLoadout(n);
+      const s = (load.items ? load.items.length * 4 : 0) + (load.cigs || 0) * 0.3 + (n.isLeader ? 3 : 0);
+      if (s > bs) { bs = s; best = n; }
+    }
+    return best;
+  }
+  function snitch(actor) {
+    const why = snitchOffer(actor);
+    if (why === "count") return { ok: false, msg: pick(VOICE.wardenBusy) };
+    if (why === "later") return { ok: false, msg: pick(VOICE.wardenHeardIt) };
+    if (why === "clean") return { ok: false, msg: pick(VOICE.wardenNotBuying) };
+    const mark = snitchMark();
+    if (!mark) return { ok: false, msg: pick(VOICE.wardenNoNames) };
+    const heat = g.detection || 0, complaints = g.complaints || 0;
+    g.wardenHeardBlock = blockId() || "x";
+    if (CBZ.addHeat) CBZ.addHeat(-(22 + heat * 0.45));
+    if (CBZ.addComplaint) CBZ.addComplaint(-(12 + complaints * 0.3));
+    if (CBZ.reduceCasePressure) CBZ.reduceCasePressure(16, nm(actor));
+    g.witnessReportT = Math.max(0, (g.witnessReportT || 0) - 8);
+    if ((g.detection || 0) < 32) g.lastKnown = null;
+    // payoff()'s own stand-down sweep: the search cools because the office
+    // suddenly has a better name than yours
+    for (const gd of CBZ.guards || []) {
+      if ((g.detection || 0) < 28) {
+        gd.hunt = 0;
+        gd.alert = Math.min(gd.alert || 0, 0.2);
+        gd.investigate = null;
+      }
+    }
+    addLoyalty(actor, 12);                    // an informant is an asset
+    // THE NAME GETS ACTED ON: the nearest free officer walks to the man you
+    // sold. guards.js's investigate beat does the walking and the looking.
+    const mp = mark.group.position;
+    let officer = null, od = Infinity;
+    for (const gd of CBZ.guards || []) {
+      if (!gd || gd.dead || gd.ko > 0 || gd.kind === "warden" || gd.hunt > 0 || gd.asleep) continue;
+      const dx = gd.group.position.x - mp.x, dz = gd.group.position.z - mp.z, d2 = dx * dx + dz * dz;
+      if (d2 < od) { od = d2; officer = gd; }
+    }
+    if (officer) officer.investigate = { x: mp.x, z: mp.z, t: 16 };
+    // THE RISK. A yard is a small place: roughly one name in three comes back
+    // on you. The burned crew turns (the same verb an insult or a beating
+    // uses), and the block-gossip channel starts carrying "talks to the
+    // screws" about YOU — the exact read the game already prints on any
+    // other man who does this.
+    if (rng() < 0.35) {
+      if (CBZ.provokeGang) CBZ.provokeGang(mark, 11);
+      noteRead("snitch", 14, nm(mark), 22);
+      if (CBZ.prisonSay) CBZ.prisonSay(mark, "You went to the man. That's done now.", { rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
+    }
+    CBZ.sfx("coin");
+    return { ok: true, msg: pick(VOICE.wardenPaidName) };
   }
 
   /* ---------- STEAL: a hand in somebody else's pocket ----------
@@ -994,9 +1115,11 @@
     if (rng() < 0.5) {
       if (actor.kind === "guard" || actor.kind === "warden") { actor.hunt = 3; CBZ.addHeat(25); }
       else if (CBZ.provokeGang) CBZ.provokeGang(actor, 10);
-      return { ok: false, msg: pick(INSULT_BACK) };
+      // trash talk answered in the speaker's OWN register — the warden does
+      // not square up like an inmate, he files you somewhere cold
+      return { ok: false, msg: pick(actor.kind === "warden" ? VOICE.wardenInsulted : INSULT_BACK) };
     }
-    return { ok: true, msg: pick(INSULT_TAKEN) };
+    return { ok: true, msg: pick(actor.kind === "warden" ? VOICE.wardenIgnores : INSULT_TAKEN) };
   }
 
   // ---------- BEAT UP / FIGHT: knock an actor out (drives most quests) ----------
@@ -1432,7 +1555,7 @@
     };
   };
 
-  CBZ.econ = { talk, trade, bribe, payoff, steal, beat, insult, thiefTick, addCigs, addItem, hasItem, takeItem, itemStore, pickOffer, offerPrice, offerLine, payoffCost, bribeCost, rollLoadout, rollDrops, lootActor, resetLoadouts, mintLoadouts, lootAudit, announceLoot, isRare, ITEMS, SELLABLE, DRUGS, VALUABLES, rng, reseed,
+  CBZ.econ = { talk, trade, bribe, payoff, snitch, snitchOffer, steal, beat, insult, thiefTick, addCigs, addItem, hasItem, takeItem, itemStore, pickOffer, offerPrice, offerLine, payoffCost, bribeCost, rollLoadout, rollDrops, lootActor, resetLoadouts, mintLoadouts, lootAudit, announceLoot, isRare, ITEMS, SELLABLE, DRUGS, VALUABLES, rng, reseed,
     // the social layer — read these, never re-derive them
     socialRead, respectOf, loyaltyOf, addRespect, addLoyalty, guardPost, stealOdds, witnessRespect, voice: VOICE, pickLine: pick };
   CBZ.socialRead = socialRead;     // the one accessor other systems adopt

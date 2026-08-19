@@ -3688,6 +3688,10 @@
     CBZ.game.deaths = (CBZ.game.deaths || 0) + 1;
     if (victim.wedge) victim.wedge.visible = false;
     if (killer && killer.group && !opts.noKnock) knockback(victim, killer.group.position.x, killer.group.position.z, 1.1);
+    // AFTER the knockback, so the lie direction is picked from where the body
+    // actually ends up. systems/prisoncorpse.js finds the one direction this
+    // man can lie without a wall through him and owns the corpse from here.
+    if (CBZ.prisonCorpsePlace) CBZ.prisonCorpsePlace(victim, killer);
     if (killer === CBZ.player) addBuzz("fear", 25, actorName(victim));
     if (victim.gang >= 0 && killer && CBZ.playerChar && killer.group === CBZ.playerChar.group) {
       noteGangIncident(victim, "kill", victim.isLeader ? 18 : 13, { source: "killing" });
@@ -4461,13 +4465,14 @@
     for (const n of CBZ.npcs) {
       n.dead = false; n.escaped = false; n.group.visible = true; n.group.rotation.z = 0;
       n.group.position.y = 0; n._lvy = 0;
+      if (CBZ.prisonCorpseClear) CBZ.prisonCorpseClear(n);   // no sprawl in a revived man's shoulders
       n.snitchHeat = 0; n.snitchCop = false; n.snitchT = 0; n.snitchMeta = null;
       clearKnownReport(n);
       n.memory = null;
       n.copMarked = 0;
       n.isLeader = false; initActor(n);
     }
-    for (const g of CBZ.guards) { g.hp = null; g.dead = false; }
+    for (const g of CBZ.guards) { g.hp = null; g.dead = false; if (CBZ.prisonCorpseClear) CBZ.prisonCorpseClear(g); }
     for (const gang of [0, 1]) {
       const m = CBZ.npcs.find((n) => n.gang === gang && crewRole(n) === "shotcaller") || CBZ.npcs.find((n) => n.gang === gang);
       if (m) { m.isLeader = true; leaders[gang] = m; }

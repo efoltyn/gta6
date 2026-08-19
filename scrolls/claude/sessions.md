@@ -4495,3 +4495,107 @@ arm-wrestle the seat). pose+seatRef survives only as the no-registry
 degrade path. Verified live: _propSeat true, registered seatRef
 (kind throne, hashed vary) driving the solve, head 1.71 (dais visibility
 kept), body centred in the chair clear of the backrest.
+
+## 2026-08-19 — ONE WORD ON THE BUTTON (systems/interact.js)
+
+Owner, off the deployed warden card ("SLIP 25 TO LOOK AWAY" · "PAY 14 TO CLEAR
+YOUR HEAT" · "TALK TRASH TO WARDEN" · "LIFT WARDEN'S KEYS"): "buttons should be
+one word. Don't have a steal keycard button, have a steal button or rob etc…
+look how nat disaster buttons are fucking great." The reference is
+systems/survival_interact.js's #survVerbs dock — Throw / Grab / Punch / Shove,
+a verb and nothing else.
+
+The 2026-08-18 rail pass had moved the whole authored sentence ONTO the button
+whenever it fit (railButton, ≤28 chars), which stacks four lines of prose on
+the thumb. railButton is deleted. Every surface prints VERB[].label — ONE WORD
+— with the price/status chip riding inside the button: BRIBE 25 · PAYOFF 14 ·
+INSULT · STEAL. The authored sentence survives as the aria-label only, so a
+screen reader still hears "Slip 25 to look away".
+
+What the one-word law forced, and each was a latent fault:
+- subFor()'s early return blanked every priced verb's chip "because the price
+  lives in the label" — stranding the price-computing lines below it as DEAD
+  CODE. The return is gone and the dead code is the live code again:
+  bribe/payoff/pay/silence costs, the trade offer, accept's +N.
+- Five VERB labels were sentences hiding in the label slot ("Pay off",
+  "Join gang", "Pay silence", "Tie him up", "Let him go") → Payoff · Join ·
+  Silence · Tie · Release; detain's word is "Cuff" (the word labelFor already
+  used on the rail).
+- "RESPECT +respect" — the chip restating the button — is deleted.
+
+Desktop key-rows obey the same grammar (word + chip, no sentence), so the card
+and the rail can never disagree about what an option is called.
+
+Verified: emulated-iPad probe reads the live warden rail as BRIBE 25 /
+PAYOFF 14 / INSULT / STEAL, all one word, sentences intact in aria. GATE:
+MATHGATE ok (90210:329/182/207 | 400 ticks | det ok) · BUTTONGATE ok
+(label 0/0 · sub 0/0 · desc 0/0 · copyBars 0 · keyboardOnly 2).
+
+Open for the next talk: the owner also called the option SET dumb — WHICH
+verbs a warden offers is a design question this pass deliberately left alone.
+
+## 2026-08-19 (2) — THE WARDEN IS THE WARDEN, AND THE DEAD STAY OUT OF THE WALLS
+
+Three owner reports off one killed-warden screenshot, all shipped together:
+
+**1. CORPSES (systems/prisoncorpse.js, new).** "Bodies in jail game have no
+colliders so go thru ground and walls. fix. make realer dead." Measured: the
+whole death was `rotation.z → π/2` at the FEET pivot (npc.js:211,
+guards.js:982) — kill() knocks the body 1.1 u with no collision, the topple
+sweeps the torso through whatever the yaw points at, and actorcollide.js
+skips dead bodies by design, so nothing ever pushed one back out. The new
+file owns the corpse transform: place() picks the one direction the body can
+actually LIE (candidates fanned off away-from-killer, each tested down the
+body's length against CBZ.colliders), tick() flops toward it, rests the feet
+at floor+0.13 so limbs sit ON the lino, sprawls the four limb pivots
+(per-man, hashed off his name), and for 1.8 s keeps resolving BOTH ends of
+the body out of walls with CBZ.collide. A man killed in his chair dies OUT
+of it — the seated warden used to die floating at propuse's seat height
+(y 0.84), because THE DAY's dead-return kept him flagged _propSeat forever.
+Flag PRISON_CORPSE_V1; ratchet CBZ.prisonCorpseAudit().inWall pinned 0
+(probe: warden + three inmates killed against walls → 0).
+
+**2. THE ONE-WAY DOOR (world/adminwing.js).** "I legit followed the warden
+into his quarters — brilliant game logic that allowed it — but then door is
+one way, you can't get out." True, and worse: kill the warden inside and the
+run soft-locks, because the office door opens only for HIM and the pick beat
+assumed you were in the corridor. A LOCK KEEPS PEOPLE OUT, NOT IN: the staff
+door has a push bar on the admin side, the office door an inside thumb turn
+— proximity-open from within, no card, no pick. Getting IN still costs the
+card / the pick / the tailgate / the charge; LAW 3's hand-shut latch is
+honoured from both sides. PRISON-DOORS gate: 24/24 unchanged.
+
+**3. THE WARDEN'S OWN GAME (economy.js · interact.js · detection.js ·
+adminwing.js).** "He should not accept cigs... talking with warden just felt
+so slop." He ran the corrupt-guard script with bigger numbers — 25 smokes to
+look away, 14 to clear heat, gun-room key as a bribe perk. All refused now,
+at the till, with his own voice ("Cigarettes? I sign for this whole
+prison.") — bribeCost/payoffCost lost their dead warden premiums with it.
+His menu is SNITCH / INSULT / STEAL, and snitch() is the new trade: a NAME
+for the heat on you. It is the existing snitch economy with the player on
+the selling side — payoff's heat sweep paid in risk instead of cigs, the
+name is a real rival-crew holder (picked by his rolled loadout), the nearest
+free officer physically WALKS to him (the investigate beat), one name per
+schedule block, and ~1 in 3 comes back on you: provokeGang turns the burned
+crew, noteRead("snitch") drops you into the same block-gossip channel that
+brands any other man who talks to screws. Insult answered in his register
+(VOICE.wardenInsulted), not an inmate's.
+
+And HIS ROOMS ANSWER BACK: the admin wing is a restricted zone in
+detection.js's zoneOf (trespass heat when seen, same as the armory), and the
+warden personally runs a ladder at an inmate standing in his office or
+quarters — "This is my office. Out." → heat → "Officers! Inmate in the admin
+wing!" + two officers dispatched + him hunting. Asleep / tied / at gunpoint
+he says nothing (the 2 a.m. sneak survives), and while the campaign's spy
+offer is live you were summoned, so it holds its tongue.
+
+GATE: WARDEN-WAVE probe 14/14 (rail = SNITCH/INSULT/STEAL · both refusals
+keep your cigs · snitch 46→3 heat + "one name a block" · both doors
+inside-open, corridor still needs the pick · ladder reaches stage 3 with
+heat 18 · corpses 4/4 out of walls, warden flat at y 0.13) · PRISON-DOORS
+24/24 · BUTTONGATE ok · MATHGATE ok (det ok).
+
+Trap for the next wave: guards.js's KO branch still animChars a toppled body
+and a SEATED man KO'd keeps his seat flags — the corpse fix deliberately did
+not touch knockouts. If a KO'd-in-chair report comes in, prisoncorpse's
+release block is the recipe.

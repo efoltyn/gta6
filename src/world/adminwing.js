@@ -669,7 +669,8 @@
   }
 
   const V3 = function (p) { return new THREE.Vector3(p[0], 0, p[1]); };
-  const warden = { g: null, at: null, transit: 0, suited: false, dressT: 0, seat: null, seatTries: 0 };
+  const warden = { g: null, at: null, transit: 0, suited: false, dressT: 0, seat: null, seatTries: 0,
+    tresT: 0, tresStage: 0 };   // the trespass ladder — see wardenTerritory()
 
   /* ---- HIS CHAIR ---------------------------------------------------------
      Asked for, never typed. The office is furnished by CBZ.roomFurnish's
@@ -758,6 +759,66 @@
   }
   function offShift() { return warden.at === "quarters"; }
 
+  /* ---- HIS ROOMS ANSWER BACK (owner, 2026-08-19: "I legit followed the
+     warden into his quarters... he legit acted like an inmate, didn't
+     [react to me] following him in"). systems/detection.js now counts the
+     whole wing as restricted ground — the mechanical half. This is the
+     PERSONAL half: an inmate standing in his office or his quarters gets
+     the warden himself, on a ladder — an order, a warning with heat behind
+     it, and finally his officers — through the three channels everything
+     else already uses (CBZ.prisonSay, CBZ.addHeat, guards.js's investigate
+     beat). Asleep, tied, held at gunpoint or dead he says nothing, so the
+     2 a.m. sneak past his bunk is still a sneak; and while the campaign has
+     authored business between you (the spy offer), you were summoned, so
+     the ladder holds its tongue. He only reacts to what he can KNOW: same
+     room, or close enough to hear you through the quarters doorway. */
+  function sayWarden(w, group) {
+    const V = CBZ.econ && CBZ.econ.voice;
+    const line = V && V[group] && CBZ.econ.pickLine ? CBZ.econ.pickLine(V[group]) : "";
+    if (line && CBZ.prisonSay) CBZ.prisonSay(w, line, { rank: CBZ.PRISON_SAY ? CBZ.PRISON_SAY.act : 1 });
+  }
+  function wardenTerritory(w, dt, P) {
+    if (CBZ.game.role === "cop") return;
+    const inRooms = P.x > PX_B + 0.2 && P.x < IX1 && P.z > IZ0 && P.z < CORR_Z - 0.2;
+    const silent = w.asleep || w.tied || w.intimidMode === "scared";
+    const invited = !!(CBZ.cityCampaignPrisonVerbs && CBZ.cityCampaignPrisonVerbs(w));
+    let knows = false;
+    if (inRooms && !silent && !invited) {
+      const wp = w.group.position;
+      const pInOffice = P.z > QZ;
+      const wInOffice = wp.z > QZ - 0.2 && wp.z < CORR_Z + 1.6 && wp.x > PX_B - 1.5;
+      const wInQuarters = wp.z <= QZ - 0.2 && wp.z > IZ0 - 0.5 && wp.x > PX_B - 1.5;
+      knows = (pInOffice && wInOffice) || (!pInOffice && wInQuarters) ||
+        Math.hypot(wp.x - P.x, wp.z - P.z) < 6;
+    }
+    if (!knows) {
+      warden.tresT = Math.max(0, warden.tresT - dt * 0.6);
+      if (warden.tresT === 0) warden.tresStage = 0;
+      return;
+    }
+    warden.tresT += dt;
+    w.alert = Math.max(w.alert || 0, 0.8);          // he stops and faces you
+    if (warden.tresStage < 1 && warden.tresT > 0.5) {
+      warden.tresStage = 1;
+      sayWarden(w, "wardenOut1");
+    } else if (warden.tresStage < 2 && warden.tresT > 4.5) {
+      warden.tresStage = 2;
+      sayWarden(w, "wardenOut2");
+      if (CBZ.addHeat) CBZ.addHeat(8);
+    } else if (warden.tresStage < 3 && warden.tresT > 9) {
+      warden.tresStage = 3;
+      sayWarden(w, "wardenOut3");
+      if (CBZ.addHeat) CBZ.addHeat(18);
+      w.hunt = Math.max(w.hunt || 0, 3.5);
+      let sent = 0;
+      for (const gd of CBZ.guards || []) {
+        if (gd === w || gd.dead || gd.ko > 0 || gd.asleep || gd.hunt > 0) continue;
+        gd.investigate = { x: P.x, z: P.z, t: 15 };
+        if (++sent >= 2) break;
+      }
+    }
+  }
+
   /* ---- THE SUIT. city/clothes.js parses at index.html:821 — 280 tags after
        entities/guards.js — so this is a deferred first-tick call, the same
        deferral world/crates.js and world/cellblock.js use for their own
@@ -844,12 +905,24 @@
         // opening his own door is the routine this wing is legible by.
         const dx = P.x - staffDoor.x, dz = P.z - staffDoor.z;
         if (dx * dx + dz * dz < 5.2) {
-          const have = !!(g.hasKey || g.role === "cop");
-          const L = CBZ.cityLock
-            ? CBZ.cityLock({ id: "prison-admin-staff", verb: "press", label: "The staff door",
-                have: have, keys: ["Keycard"], orgs: ["police"], power: false })
-            : { open: have, line: "" };
-          if (L.open) staffDoor.setOpen(true);
+          /* A LOCK KEEPS PEOPLE OUT, NOT IN (owner, 2026-08-19: "followed
+             the warden into his quarters... but then door is one way, you
+             can't get out"). The reader is on the WING side; the admin side
+             has a push bar, because that is how a card door in a staffed
+             building is actually built — and because a tailgater sealed in
+             the wing with a dead warden was a soft-locked run. Getting IN
+             still costs the card, the pick, the tailgate or the charge;
+             getting OUT is a door handle. The hand-shut latch (LAW 3) is
+             honoured from both sides. */
+          if (P.z < SG.z - 0.35) staffDoor.setOpen(true);
+          else {
+            const have = !!(g.hasKey || g.role === "cop");
+            const L = CBZ.cityLock
+              ? CBZ.cityLock({ id: "prison-admin-staff", verb: "press", label: "The staff door",
+                  have: have, keys: ["Keycard"], orgs: ["police"], power: false })
+              : { open: have, line: "" };
+            if (L.open) staffDoor.setOpen(true);
+          }
         }
       }
     } else if (!staffDoor.blown) {
@@ -861,13 +934,22 @@
       if (staffDoor.shutT <= 0) staffDoor.setOpen(false);
     }
 
-    // ---- OFFICE DOOR: his own lock. He opens it; you pick it.
+    // ---- OFFICE DOOR: his own lock. He opens it; you pick it — from the
+    //      CORRIDOR. From inside the office it is a mortice with a thumb
+    //      turn, like every real office door: the pick ritual guards entry,
+    //      never exit (same one-way-lock law as the staff door above).
     if (!officeDoor.open) {
       const s = staffNear(officeDoor);
       if (s && s.kind === "warden") officeDoor.setOpen(true);
       else {
         const dx = P.x - officeDoor.x, dz = P.z - officeDoor.z;
-        if (dx * dx + dz * dz < 5.2) pickBeat(officeDoor, dt, "warden-office", officeDoor.pick);
+        const insideOffice = P.z < CORR_Z - 0.3 && P.x > PX_B + 0.2;
+        if (insideOffice) {
+          if (dx * dx + dz * dz < 5.2 &&
+              !(CBZ.prisonDoorLatched && CBZ.prisonDoorLatched("prison-warden-office"))) officeDoor.setOpen(true);
+          if (CBZ.prisonPromptClear) CBZ.prisonPromptClear("warden-office");
+        }
+        else if (dx * dx + dz * dz < 5.2) pickBeat(officeDoor, dt, "warden-office", officeDoor.pick);
         else if (CBZ.prisonPromptClear) CBZ.prisonPromptClear("warden-office");
       }
     } else if (!officeDoor.blown) {
@@ -895,6 +977,7 @@
     if (!w) return;
     if (!warden.suited) { warden.dressT += dt; if (warden.dressT > 0.4) dress(w); }
     if (w.dead || w.ko > 0) return;
+    wardenTerritory(w, dt, P);
     // transit finished → settle into the post cycle
     if (warden.transit && w.wi >= warden.transit) {
       w.waypoints = POST[warden.at].post.map(V3);
@@ -990,6 +1073,7 @@
     }
     SAFE.open = false; SAFE.picked = 0; SAFE.pivot.rotation.y = 0;
     keyLaid = false; lastBlock = null;
+    warden.tresT = 0; warden.tresStage = 0;
     if (warden.g) { warden.at = "check"; sendTo(warden.g, "check"); warden.transit = 0; }
   };
   if (CBZ.jailBoost && CBZ.jailBoost.onStateExit)
@@ -1031,6 +1115,7 @@
       offShift: offShift(),
       safeOpen: SAFE.open, keyOnHook: !!SAFE.fob.visible,
       staffOpen: staffDoor.open, officeOpen: officeDoor.open,
+      tres: { t: Math.round(warden.tresT * 10) / 10, stage: warden.tresStage },
       plans: {
         records: plans.records ? plans.records.pieces.length : 0,
         staff: plans.staff ? plans.staff.pieces.length : 0,
