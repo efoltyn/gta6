@@ -75,7 +75,7 @@
        city run. Flag off / an active campaign / the standalone CELL
        BLOCK Z escape mode still fall through to the original,
        byte-identical.
-     - PEDS: guards (role "guard" → Guard Blacks, NOT the cop flag) and
+     - PEDS: guards (role "guard" → sheriff khakis via "deputy sheriff", NOT the cop flag) and
        inmates are REAL city peds via ctx.npc — brain, wardrobe, gunpoint
        hands-up, cityKillPed death, collision. Guards WALK a real patrol
        ring between posts (derived motion, the restrain.js escort
@@ -404,15 +404,21 @@
     ctx.light(-8, 4.0, 0, 0xbfe0ff, 0.5, 9);           // cell block
 
     // ---- CAST (deferred: real peds want the live arena, casino/boxing pattern)
-    // 3 guards in GUARD BLACKS (role "guard" → security-guard fit, NOT cop).
+    // 3 deputies in SHERIFF KHAKIS (owner, 2026-08-16: "the officers don't
+    // have officer outfits" — a man named "Officer/Deputy/Sgt." at the County
+    // Sheriff's Detention Facility wearing anonymous private-security blacks
+    // read as undressed). "deputy sheriff" is a jobFit row → CAT.sheriff, the
+    // county khaki with the campaign hat — and STILL not the cop flag:
+    // outfits.js's own sheriff note ("khaki off a corpse is a look, not a
+    // skeleton key") is the same doctrine this cast always held.
     for (let i = 0; i < 3; i++) {
       const p = V.posts[i];
-      queue({ role: "guard", name: "Officer " + guardName(ctx, i), outfit: "security",
+      queue({ role: "guard", name: "Officer " + guardName(ctx, i), outfit: "deputy sheriff",
         at: [p.lx, p.lz], face: p.face, post: "pinned", pose: "stand",
         dialogue: ["Keep moving. Nothing to see.", "You do NOT want to be out here after lights-out.", "Wall's electrified. Don't be stupid."] }, "guard");
     }
     // the corrupt guard behind the gate desk (the bribe man / sign-on)
-    queue({ role: "guard", name: "Sgt. " + guardName(ctx, 9), outfit: "security",
+    queue({ role: "guard", name: "Sgt. " + guardName(ctx, 9), outfit: "deputy sheriff",
       at: [0, 6.0], face: 0, post: "pinned", pose: "stand",
       dialogue: ["Everything's for sale in here, friend.", "Doing a shift? Or doing time?"] }, "sarge");
     // inmate peds in the two flanking cells — seeded civvies in jail orange.
@@ -628,12 +634,12 @@
     // ---- CAST. Same roles, same dialogue, new posts. --------------------
     for (let i = 0; i < 3; i++) {
       const p = V.posts[i];
-      queue({ role: "guard", name: "Deputy " + guardName(ctx, i), outfit: "security",
+      queue({ role: "guard", name: "Deputy " + guardName(ctx, i), outfit: "deputy sheriff",
         at: [p.lx, p.lz], face: p.face, post: "pinned", pose: "stand",
         dialogue: ["Keep moving. Nothing to see.", "You do NOT want to be out in that yard after lights-out.", "Wall's forty feet of nothing. Don't be stupid."] }, "guard");
     }
     const sr = bl(3.9, z1 - 7.8);
-    queue({ role: "guard", name: "Sgt. " + guardName(ctx, 9), outfit: "security",
+    queue({ role: "guard", name: "Sgt. " + guardName(ctx, 9), outfit: "deputy sheriff",
       at: [sr.x, sr.z], face: 0, post: "pinned", pose: "stand",
       dialogue: ["Everything's for sale in here, friend.", "Doing a shift? Or doing time?"] }, "sarge");
     // an inmate in every cell but yours. Their mouths carry the escape hint.

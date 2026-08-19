@@ -4123,3 +4123,22 @@ determinism ok, wardrobe/yoke audits untouched.
 magnate detail, don/senator/star court, and the released party, with
 skinArmedInRow / armClash / minorsInRow / founderSidKept / skinArmsCity
 metrics on every plate.
+
+**FOLLOW-UP (same day):** owner: city hall councillors have "invisible
+outfits"; county jail officers lack officer outfits. The councillors were a
+NEW class — every audit and even material forensics called them healthy
+(painted suit atlases, opaque, correct charcoal) because the fault was
+ARITHMETIC, not paint: the bench box is 0.9 m + brass at 0.98 while a body
+on a 0.48 cushion carries shoulders at ~1.1-1.25 — ≤15 cm of suit could
+ever show, and bling's white shirt-front panel owns exactly that band, so
+the room saw bare heads on woodwork. Fix: a 0.34 m DAIS under the chairs
+(games/government.js — real chambers' own answer), chairs + seatRef ride
+it; character.js's seat solve takes the platform as NEGATIVE floorBelow
+(sink = cushion+0.10 − hipY − floorBelow — the linear form needed no new
+field). Verified: head 1.36 → 1.70, ~50 cm of tailoring above the rail on
+the re-shoot. The jail was wardrobe casting: games/jail.js dressed
+"Officer/Deputy/Sgt." peds via outfit "security" (anonymous Guard Blacks)
+and govcomplex's countyjail work row commuted "security guard"s — both now
+cast "deputy sheriff"/"sheriff's deputy" → CAT.sheriff county khakis +
+campaign hat, still deliberately no cop flag. Verified live: castFit
+"sheriff" on the detail.
