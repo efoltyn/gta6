@@ -9,6 +9,56 @@
 > private kills the deployed site the tool uses as its default baseline, and
 > `custom.env` changes how the public tool repo must be born.
 
+## 0. The thesis — why a screenshot tool is an agent-management strategy
+
+Owner, 2026-08-19, distilled from his own words: long-horizon agentic tasks
+fail at the definition of done. *"The conditions of the task being done are
+too gameable and too vague."* Before/after replaces the claim with the change
+itself — name the problem, make the change, show before against after. And
+the deeper half: *"we cannot watch it work anymore. We can't see the code
+that it's writing and understand. We can understand the output better than
+the AI... we need to see the output."*
+
+That is a precise statement of where oversight is moving. Two halves, one
+tool:
+
+- **Agent-facing:** the tool closes the loop. An agent that can see its own
+  delta iterates without being told to — the emergent behavior the owner
+  never instructed. The receipt is the agent's eyes.
+- **Human-facing:** verification asymmetry. Judging an output is easier than
+  auditing the process that produced it, and that asymmetry *survives* the
+  point where reading the diffs stops being possible. The unit of trust
+  stops being the diff and becomes the delta. The receipt is the human's
+  eyes too — the interface between "I name a problem" and "I accept the
+  solution," with no code-reading in between.
+
+This gets **more** true as models improve, not less: code review is the
+first oversight channel to die at agentic scale; output judgment is the
+last. That is why "the final stage" is the right description and why the
+simplest tool is the durable one.
+
+One correction to "ungameable," and it is the moat: a naive before/after is
+still gameable — wrong subject framed, cherry-picked camera, dishonest
+baseline, two sides photographing different moments and captioned as the
+same one. What makes *this* tool trustworthy is that nearly every feature in
+the engine exists because a comparison lied once and got caught: the
+compositor barrier (a screenshot once kept a stale WebGL camera after stage
+metadata had advanced), `referenceStage` camera handoff (an "after" once
+framed a different shot than its "before"), condition-based waits instead of
+seconds (a retimed event once made the two sides photograph different beats
+under the same caption), aimlib's `ok:false` (*"your screenshot would be a
+lie — fail the gate, don't shoot"*), the baseline column in the listing (you
+cannot tell from a preset's name whether its "before" is a flag-A/B against
+this checkout or a build forty commits old — so say it), and the two-sided
+revert rule (a fix nobody can turn off has not been measured). "Just a
+before/after tool" is the pitch. Roughly a thousand lines of accumulated
+distrust is the product — and it compounded precisely because it was
+dogfooded against the one adversary that matters: an agent grading its own
+work. The idea is copyable in an afternoon; the scar tissue is not.
+
+This section is the public repo's README opening, near-verbatim, when the
+extraction happens.
+
 ## 1. What the tool actually is — measured, not remembered
 
 Three layers, and only one of them is game code:
