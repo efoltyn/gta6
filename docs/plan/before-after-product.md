@@ -224,6 +224,22 @@ deterministically), `urlParams` (pin the world), `metrics` with a declared
 The engine never learned a single CBZ concept — the preset carries all of
 them across the wire as a function.
 
+Read the four presets the owner reaches for by name — `parachute-rig`,
+`volcano-stages`, `tsunami-stages`, `mounted-riders` — and the contract
+shows its two genres. **Studio presets** (parachute, riders) empty the page
+and build the subject from that page's *own* runtime: eighteen rider poses,
+seven canopy phases, matched pose against matched pose. **Storyboard
+presets** (tsunami, volcano) boot the real game, freeze the clock, force the
+event, and photograph beats polled on physical state — never wall clock. In
+both genres every subject carries a `focus` line stating what a good picture
+must show ("hips should sit on the back," "a DARK crusted surface with a
+bright connected LACE of melt cracked through it") — so a preset is really a
+**complaint ledger**: the owner's spoken complaints turned into named shots
+and directed numbers. "See-thru lava" became `vol_lavaTransparent`, must
+read 0. "The volcano kills way too many people and randomly" became
+`killedThisBeat`, better: lower. The receipt answers the complaint in the
+complaint's own words, which is why the owner can judge it in seconds.
+
 And the fourth layer, which is not code and is the part worth the most: **the
 method**. Every change behind a `cfg_*` flag → flag A/B against this same
 checkout is the honest before → two-sided proof (the revert must bring the
@@ -347,6 +363,34 @@ metaphor for the board's design (drawers labeled by problem, receipts on the
 front, diffs one level down), not as a brand. If the harness ever grows a
 real UI and earns a separate identity, it can earn it later — names are
 cheap to add and expensive to retract.
+
+**The product predates its own build** (owner, 2026-08-19). The daily
+protocol across twenty terminal tabs already *is* the product, run by hand:
+say the issue; append the standing instruction — *"use the before after
+tool, improve the before after tool for this use case, and present me the
+before/after result when you are done"*; switch to another tab. The receipt
+is what makes the tab-switch safe and the agent brand irrelevant — Codex
+and Claude Code are judged by the same artifact, so attention moves freely
+and multi-agent work is *"actually well judged by me."* Note the middle
+clause: the standing instruction includes **improving the instrument** on
+every task — the "every session leaves the shelf sharper" doctrine from
+`scrolls/claude/verification.md`, spoken as prompt — and the harness's
+templated prompt must carry it too. The harness automates exactly this
+protocol and nothing more: the tabs in one place, the instruction in every
+session's system prompt instead of typed each time, the receipts on the
+board. The pile of accumulated PDFs is the usage data: heavily tested
+without being built.
+
+**And receipts must become durable — proved by this session being unable
+to see any.** `artifacts/visual-comparisons/` is gitignored, so a fresh
+clone of a repo with a year of daily receipts contains zero of them; the
+entire evidentiary record of the tool's use lives on one machine and gets
+overwritten run by run. Today the product's core artifact is treated as
+disposable output. The cabinet's drawers must persist: an append-only
+receipt archive per problem (outside the repo, or under a receipts branch
+or LFS — decide at build time), because a receipt history is something no
+repository has ever had — **a changelog a non-coder can read**, the story
+of the app told in deltas rather than diffs.
 
 **What it is not: a terminal emulator.** tmux already multiplexes terminals
 perfectly and every CLI agent runs happily in a pane; rebuilding that is
