@@ -746,6 +746,12 @@
      the reason this exists) and the airliner cabin deck. -->
 <script src="src/systems/platforms_moving.js?v=mp2late"></script>
 <script src="src/systems/actorcollide.js?v=contact1"></script>
+<!-- A DEAD MAN LIES ON THE FLOOR, IN THE ROOM. Owns every prison corpse's
+     transform: clear lie direction, wall depenetration at both ends of the
+     body, limb sprawl. entities/npc.js + entities/guards.js call its tick
+     from their dead branches; ai.js kill() places. PRISON_CORPSE_V1=false
+     restores the legacy feet-pivot flop. -->
+<script src="src/systems/prisoncorpse.js?v=deadreal1"></script>
 <script src="src/entities/ambientstate.js?v=contact1"></script>
 <script src="src/entities/crowd.js?v=life4"></script>
 <script src="src/systems/simulation.js?v=scale8"></script>
@@ -832,7 +838,7 @@
      scene; it wires itself to the bus lazily, in any script order. -->
 <script src="src/systems/lightningfx.js?v=bolt1"></script>
 <script src="src/world/disaster_arena.js?v=snowbury1"></script>
-<script src="src/systems/grapple.js?v=nodash1"></script>
+<script src="src/systems/grapple.js?v=nohint1"></script>
 <script src="src/entities/survivorbot.js?v=trauma2"></script>
 <script src="src/modes/survival.js?v=nodash1"></script>
 <!-- GUN GAME borrows worlds it never builds: the prison (escape), the disaster
@@ -992,7 +998,7 @@
      Loads right after building.js (needs CBZ.building.CATALOG/validate/
      place/remove) and after CBZ.camera/CBZ.pieces already exist (systems/
      camera.js, systems/pieces.js — both load earlier in this file). -->
-<script src="src/systems/buildmode.js?v=nodash1"></script>
+<script src="src/systems/buildmode.js?v=nohint1"></script>
 <!-- F7 — world/crates.js + world/props.js migrated onto CBZ.spawnPiece
      (moved from the "2. world geometry" wave above, right after
      towers.js): they now need spawnPiece to exist at parse time. -->

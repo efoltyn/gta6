@@ -92,6 +92,13 @@
   function zoneOf(p) {
     if (p.x > 18.5 && p.x < 29.5 && p.z > -6.5 && p.z < 8.5) return "the armory";
     if (p.x > 18.5 && p.x < 29.5 && p.z > 29.5 && p.z < 44.5) return "the staff lounge";
+    // the admin wing behind the staff door — corridor, records, the warden's
+    // office and his quarters (world/adminwing.js, x ±20, z -64..-44). An
+    // inmate had free run of the warden's own rooms (owner, 2026-08-19:
+    // "I legit followed the warden into his quarters... he acted like an
+    // inmate [was allowed there]"). Catch him on his ROUNDS in the wing —
+    // that part of his day was always the legitimate audience.
+    if (p.x > -19.5 && p.x < 19.5 && p.z > -63.5 && p.z < -44.1) return "the admin wing";
     if (p.z > 47) return "the exit corridor";
     return null;
   }

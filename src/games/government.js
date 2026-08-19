@@ -88,7 +88,18 @@
 
   /* ---------------- tunables ---------------------------------------------- */
   const COUNCIL_N = 7;
-  const COUNCIL_SEAT_H = 0.48; // cushion top above the chamber floor
+  const COUNCIL_SEAT_H = 0.48; // cushion top above the CHAIR's own floor (the dais)
+  // THE DAIS (owner, 2026-08-16: "the councillors have invisible outfits").
+  // Arithmetic, not taste: the bench box is 0.9 m tall with the brass rail at
+  // 0.98, and a body seated on a 0.48 cushion carries its shoulders at
+  // ~1.1-1.25 — so at most ~15 cm of suit could EVER show above the bench,
+  // and that band is exactly where bling's white shirt-front panel sits. From
+  // the room the council read as bare heads floating on woodwork, whatever
+  // the wardrobe painted (the suits themselves probed healthy). Real chambers
+  // solve this with architecture: the bench stays at floor height and the
+  // members sit on a RAISED PLATFORM, so the upper body clears the rail.
+  // 0.34 m puts ~50 cm of tailoring above the brass.
+  const DAIS_H = 0.34;
   const NIGHT_SECONDS = 240;      // the evening, in gameplay seconds, to the gavel
   const BRIBE_COST = 5000;        // real city cash per envelope
   const WIN_PAYOUT = 60000;       // developer kickback on a passed rezoning
@@ -273,11 +284,40 @@
       let sid = null;
       if (i < offs.length) { sid = offs[i].sid; name = offs[i].name; title = offs[i].title; real = true; key = "sid:" + sid; V.realCount++; }
       else { name = fillName(i); title = "Councilmember"; key = "fill:" + i; }
-      const handle = ctx.npc ? ctx.npc({
+      // THE WARDEN'S WAY IN: cast the ped standing, then commit it to the
+      // REGISTERED chair through CBZ.propSit({instant}) — adminwing.js's
+      // sitAtDesk pattern, the seating the owner points at as the good one.
+      // From there SIT_PHYS_V1 owns the body: the order-42 hold pins the whole
+      // transform every frame (nothing left to bob against), the chair solve
+      // reads the REGISTERED cushion/kind (legs fold to the dais, "throne"
+      // posture for a high-backed armchair), and the anchor seats the pelvis
+      // on the cushion centre, clear of the backrest. The pose+seatRef spec is
+      // kept ONLY as the degrade path for a build with no seat registry.
+      const rec = (V.seatRecs && V.seatRecs[i]) || null;
+      const canProp = !!(rec && CBZ.propSit);
+      const spec = {
         role: "councillor", name: name, outfit: { archetype: "exec" },
-        at: [seat.x, seat.z], face: 0, post: "pinned", pose: "sit",
-        seatRef: { cushion: COUNCIL_SEAT_H, floorBelow: 0 },
-      }) : null;
+        at: [seat.x, seat.z], face: 0, post: "pinned",
+      };
+      if (!canProp) {
+        spec.pose = "sit";
+        // dais fallback: negative floorBelow raises the solve onto the
+        // platform (sink = cushion+0.10 − hipY − floorBelow).
+        spec.seatRef = { cushion: COUNCIL_SEAT_H, floorBelow: -DAIS_H };
+      }
+      const handle = ctx.npc ? ctx.npc(spec) : null;
+      if (canProp && handle && handle.ped && handle.ped.group) {
+        const p = handle.ped;
+        try {
+          // the SEAT has custody now, not the staff post — the post pin writes
+          // idle/pos every tick and would arm-wrestle the sit hold (the
+          // auditor above clears its post for the same reason).
+          p.staffPost = null;
+          p.group.position.set(rec.x, rec.y || 0, rec.z);
+          CBZ.propSit(p, rec, { instant: true });
+          p.group.rotation.y = rec.face;
+        } catch (e) {}
+      }
       COUNCIL.push({ i: i, key: key, sid: sid, name: name, title: title, real: real, handle: handle, want: meta.want, fear: meta.fear, baseStance: meta.baseStance, stance: meta.baseStance, flippedBy: null, dirtLine: null });
     }
     // the auditor — a controlled ped we drive along posted waypoints.
@@ -900,22 +940,49 @@
     ctx.box(g, 0, 0.5, -hz * 0.52, hx * 1.7, 0.9, 0.7, ctx.mat(COL.wood));
     ctx.box(g, 0, 0.98, -hz * 0.52 - 0.34, hx * 1.7, 0.16, 0.08, ctx.mat(COL.brass));
     ctx.solid(-hx * 0.85, -hz * 0.52 - 0.42, hx * 0.85, -hz * 0.52 + 0.42);
+    // THE DAIS under the chairs (see DAIS_H above): one platform spanning the
+    // seat row — from behind the chair backs to just past the front-most bowed
+    // cushion — so every chair leg and every seated foot lands ON it. The
+    // bench keeps the floor: it is the desk you lobby across, not the stage.
+    ctx.box(g, 0, DAIS_H / 2, -hz * 0.6 + 0.15, hx * 1.7, DAIS_H, 1.5, ctx.mat(COL.woodD));
     // Proper high-backed council chairs. The old chair was one 0.5 × 0.92 ×
     // 0.5 upright block, so it had neither a visible seat nor a truthful seat
     // height and forced every councillor into character.js's compressed legacy
     // squat. These dimensions and COUNCIL_SEAT_H above are the same contract:
-    // the rig's pelvis lands on the burgundy cushion and its feet reach floor.
+    // the rig's pelvis lands on the burgundy cushion and its feet reach the
+    // dais top (every chair Y below rides DAIS_H — the chair is built on the
+    // platform, and drainCast's seatRef says the same thing in numbers).
+    // …and each chair is a REGISTERED SEAT (owner, 2026-08-19: council sitting
+    // "SUCKS — overlap with back of chairs, legs off, constant lean forward
+    // and back … but warden sitting in a seat in prison [is good]"). The
+    // warden's chair goes through CBZ.propRegisterSeat + CBZ.propSit, which is
+    // what puts SIT_PHYS_V1's whole-transform hold and the real chair solve in
+    // charge of the body — no second writer left to fight, so no bob. The
+    // hand-rolled pose+seatRef this replaces was written against the OLD seat
+    // solve and aimed a body at furniture the physics had never heard of.
+    // Anchor ON the dais (y = DAIS_H — the chair's own floor), cushion
+    // COUNCIL_SEAT_H above it, kind "throne" (a high-backed armchair reads as
+    // the boss-chair posture family: spine upright, hands on the armrests).
+    V.seatRecs = [];
     for (let i = 0; i < COUNCIL_N; i++) {
       const s = V.seats[i];
       const legH = COUNCIL_SEAT_H - 0.12;
       for (let dx = -1; dx <= 1; dx += 2) for (let dz = -1; dz <= 1; dz += 2)
-        ctx.box(g, s.x + dx * 0.27, legH / 2, s.z + dz * 0.25, 0.08, legH, 0.08, ctx.mat(COL.woodD));
-      ctx.box(g, s.x, COUNCIL_SEAT_H - 0.06, s.z, 0.70, 0.12, 0.68, ctx.mat(COL.red));
-      ctx.box(g, s.x, COUNCIL_SEAT_H + 0.39, s.z - 0.29, 0.72, 0.78, 0.12, ctx.mat(COL.red));
+        ctx.box(g, s.x + dx * 0.27, DAIS_H + legH / 2, s.z + dz * 0.25, 0.08, legH, 0.08, ctx.mat(COL.woodD));
+      ctx.box(g, s.x, DAIS_H + COUNCIL_SEAT_H - 0.06, s.z, 0.70, 0.12, 0.68, ctx.mat(COL.red));
+      ctx.box(g, s.x, DAIS_H + COUNCIL_SEAT_H + 0.39, s.z - 0.29, 0.72, 0.78, 0.12, ctx.mat(COL.red));
       for (let dx = -1; dx <= 1; dx += 2) {
-        ctx.box(g, s.x + dx * 0.38, 0.69, s.z + 0.02, 0.08, 0.08, 0.52, ctx.mat(COL.woodD));
-        ctx.box(g, s.x + dx * 0.38, 0.56, s.z + 0.23, 0.08, 0.30, 0.08, ctx.mat(COL.woodD));
+        ctx.box(g, s.x + dx * 0.38, DAIS_H + 0.69, s.z + 0.02, 0.08, 0.08, 0.52, ctx.mat(COL.woodD));
+        ctx.box(g, s.x + dx * 0.38, DAIS_H + 0.56, s.z + 0.23, 0.08, 0.30, 0.08, ctx.mat(COL.woodD));
       }
+      let rec = null;
+      if (CBZ.propRegisterSeat) {
+        try {
+          rec = CBZ.propRegisterSeat(venue.origin.x + s.x, DAIS_H, venue.origin.z + s.z, 0,
+            "throne", venue.lot || null, { cushion: COUNCIL_SEAT_H, floorBelow: 0 });
+        } catch (e) { rec = null; }
+      }
+      V.seatRecs.push(rec);
     }
 
     // ---- the tally board on the wall behind the bench ----------------------

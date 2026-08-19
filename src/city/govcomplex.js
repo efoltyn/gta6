@@ -1472,8 +1472,12 @@
       // "police" → power.js's `presetFor` government preset → spawnCopGuard),
       // not a head-of-state ring.
       principal: { key: null, tier: 3, org: "police", lawful: true, role: "County Sheriff", job: "official", wealth: 0.55 },
-      // the people who commute HERE do a job, and it is not clerking
-      work: { kind: "security", role: "security guard", patrol: true },
+      // the people who commute HERE do a job, and it is not clerking — and it
+      // is the SHERIFF'S job: "sheriff's deputy" is a jobFit row (CAT.sheriff,
+      // county khaki + campaign hat), so the detail walking this yard reads as
+      // officers instead of anonymous rent-a-guards (owner, 2026-08-16). The
+      // khaki still carries no cop flag — a look, not a skeleton key.
+      work: { kind: "security", role: "sheriff's deputy", patrol: true },
       // FLOOR 0 IS DELIBERATELY "none": it is the cellblock and the booking
       // hall, and games/jail.js dresses it. dressShell skips a floor named
       // "none", so the two files cannot both furnish one plate. Floor 1 is the
