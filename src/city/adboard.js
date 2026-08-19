@@ -313,4 +313,28 @@
     else rentBoard(b);
   }
   if (typeof document !== "undefined" && document.addEventListener) document.addEventListener("keydown", onKey);
+
+  /* THE VERB EXISTED ONLY ON A KEYBOARD (2026-08-18). This file hung its [E]
+     on a raw document keydown, which means the verb has no card, no button and
+     no existence at all on the tablet this game is played on. The registry is
+     what turns a proximity verb into a thumb target, and it costs one record:
+     the SAME finder, the SAME body. The keydown stays for the desktop. */
+  let zoned = false;
+  CBZ.onUpdate(99.62, function () {
+    if (zoned || !CBZ.interactions || !CBZ.interactions.registerZone) return;
+    zoned = true;
+    CBZ.interactions.describe("adboard", function () { return { label: "Ad board", note: "" }; });
+    CBZ.interactions.registerZone({
+      id: "zone-adboard", kind: "adboard", prio: 11,
+      find: function () {
+        if (g.mode !== "city" || liftNearby()) return null;
+        return boardNear();
+      },
+      options: [{
+        id: "adboard-lease", slot: "e",
+        label: function (b) { return b && b.lease ? "End the lease" : "Rent the board"; },
+        onSelect: function (b) { if (!b) return; if (b.lease) endLease(b, false); else rentBoard(b); },
+      }],
+    });
+  });
 })();

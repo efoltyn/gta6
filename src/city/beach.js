@@ -1232,6 +1232,27 @@
   }
   if (typeof document !== "undefined" && document.addEventListener) document.addEventListener("keydown", onKey);
 
+  /* THE VERB EXISTED ONLY ON A KEYBOARD (2026-08-18). This file hung its [E]
+     on a raw document keydown, which means the verb has no card, no button and
+     no existence at all on the tablet this game is played on. The registry is
+     what turns a proximity verb into a thumb target, and it costs one record:
+     the SAME finder, the SAME body. The keydown stays for the desktop. */
+  let zoned = false;
+  CBZ.onUpdate(99.64, function () {
+    if (zoned || !CBZ.interactions || !CBZ.interactions.registerZone) return;
+    zoned = true;
+    CBZ.interactions.describe("beachbag", function () { return { label: "Somebody's things", note: "" }; });
+    CBZ.interactions.registerZone({
+      id: "zone-beachbag", kind: "beachbag", prio: 11,
+      find: function () { return (built && !rifling && g.mode === "city") ? lootNear() : null; },
+      options: [{
+        id: "beachbag-rifle", slot: "e", bad: true,
+        label: function () { return "Go through the bag"; },
+        onSelect: function (L) { if (L) rifling = { L: L, t: 0 }; },
+      }],
+    });
+  });
+
   // =====================================================================
   //  THE DOCK TICK — priority 9.4.
   //

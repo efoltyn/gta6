@@ -1050,6 +1050,54 @@
   }
   if (typeof document !== "undefined" && document.addEventListener) document.addEventListener("keydown", onKey, true);
 
+  /* THE LIFT EXISTED ONLY ON A KEYBOARD (2026-08-18). Its [E] hung on a raw
+     document keydown, so on a tablet no lift in the city could be called, and
+     a player sealed in an idle cab had no way to open the doors. The registry
+     is what turns a proximity verb into a thumb target; this is the SAME three
+     cases the keydown runs, in the order it runs them, off the SAME finders.
+     The keydown stays for the desktop. */
+  let zoned = false;
+  function liftTarget() {
+    if (!built || g.mode !== "city" || CBZ.cityMenuOpen) return null;
+    const P = CBZ.player;
+    if (!P || P.dead || P.driving) return null;
+    // 1. inside an open cab: close the doors and go
+    for (const el of elevators) {
+      if (el.m.st === "open" && insideCab(el, el.m.end, P) && !inDoorway(el, el.m.end, P)) {
+        return { x: P.pos.x, z: P.pos.z, kind: "lift", act: "close", el: el };
+      }
+    }
+    // 2. standing on a call pad
+    const near = padNear();
+    if (near) return { x: P.pos.x, z: P.pos.z, kind: "lift", act: "call", el: near.el, end: near.end };
+    // 3. sealed inside an idle cab: reopen this end
+    for (const el of elevators) {
+      if (el.m.st !== "idle") continue;
+      for (const end of ["g", "r"]) {
+        if (insideCab(el, end, P)) return { x: P.pos.x, z: P.pos.z, kind: "lift", act: "call", el: el, end: end };
+      }
+    }
+    return null;
+  }
+  CBZ.onUpdate(99.61, function () {
+    if (zoned || !CBZ.interactions || !CBZ.interactions.registerZone) return;
+    zoned = true;
+    CBZ.interactions.describe("lift", function () { return { label: "The lift", note: "" }; });
+    CBZ.interactions.registerZone({
+      id: "zone-lift", kind: "lift", prio: 13,
+      find: function () { return liftTarget(); },
+      options: [{
+        id: "lift-use", slot: "e",
+        label: function (t) { return t && t.act === "close" ? "Close the doors" : "Call the lift"; },
+        onSelect: function (t) {
+          if (!t) return;
+          if (t.act === "close") beginClose(t.el);
+          else callLift(t.el, t.end);
+        },
+      }],
+    });
+  });
+
   // ======================================================================
   //  THE INTERIOR STAIR CORE — CBZ.cityStairCore(lot, opts)
   //
