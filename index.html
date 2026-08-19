@@ -746,6 +746,12 @@
      the reason this exists) and the airliner cabin deck. -->
 <script src="src/systems/platforms_moving.js?v=mp2late"></script>
 <script src="src/systems/actorcollide.js?v=contact1"></script>
+<!-- A DEAD MAN LIES ON THE FLOOR, IN THE ROOM. Owns every prison corpse's
+     transform: clear lie direction, wall depenetration at both ends of the
+     body, limb sprawl. entities/npc.js + entities/guards.js call its tick
+     from their dead branches; ai.js kill() places. PRISON_CORPSE_V1=false
+     restores the legacy feet-pivot flop. -->
+<script src="src/systems/prisoncorpse.js?v=deadreal1"></script>
 <script src="src/entities/ambientstate.js?v=contact1"></script>
 <script src="src/entities/crowd.js?v=life4"></script>
 <script src="src/systems/simulation.js?v=scale8"></script>

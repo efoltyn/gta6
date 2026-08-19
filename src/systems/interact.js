@@ -8,10 +8,11 @@
        (Romance was the fourth and is DELETED — see economy.js)
 
    Merchants, the dealer and bent cops swap a row for Trade, guards for
-   Bribe / Pay off, a cop player for Question / Warn / Cuff / Search,
-   and an approaching NPC replaces the lot with its own offer. Befriend
-   routes through systems/quests.js (favors, rep, and the "they let you
-   walk out" win).
+   Bribe / Payoff, a cop player for Question / Warn / Cuff / Search,
+   and an approaching NPC replaces the lot with its own offer. THE WARDEN
+   trades in names, never cigarettes: Snitch / Insult / Steal
+   (economy.js's snitch()). Befriend routes through systems/quests.js
+   (favors, rep, and the "they let you walk out" win).
 
    ON TOUCH the whole card is REPLACED rather than restyled — on iPad,
    every choice is a vertical rail of buttons docked beside Reload, ONE
@@ -95,6 +96,7 @@
       return res;
     } },
     bribe:    { label: "Bribe",           fn: (a) => CBZ.econ.bribe(a) },
+    snitch:   { label: "Snitch",          fn: (a) => (CBZ.econ.snitch ? CBZ.econ.snitch(a) : { ok: false, msg: "" }) },
     steal:    { label: "Steal",           fn: (a) => CBZ.econ.steal(a) },
     payoff:   { label: "Payoff",          fn: (a) => CBZ.econ.payoff(a) },
     join:     { label: "Join",            fn: (a) => CBZ.joinGang(a) },
@@ -165,6 +167,7 @@
     befriend: "Do favors, build rep · friends walk you free",
     trade:    "Buy contraband with cigarettes",
     bribe:    "Spend cigs to make authority look away",
+    snitch:   "Trade a rival's name for the heat on you",
     steal:    "Lift a key, a chain, or cigs · risky if seen",
     payoff:   "Corrupt cop cleans up heat for a price",
     join:     "Join their gang for backup & protection",
@@ -278,10 +281,15 @@
   }
   function actorRead(a) {
     if (!a) return "";
-    if (a.kind === "guard" || a.kind === "warden") {
-      const guardBits = [];
-      if (a.kind === "warden") guardBits.push("warden leverage");
-      else guardBits.push(a.corrupt ? "bent cop" : "clean guard");
+    if (a.kind === "warden") {
+      // he cannot be bought or bent — the read is whether he is BUYING NAMES
+      const w = CBZ.econ && CBZ.econ.snitchOffer ? CBZ.econ.snitchOffer(a) : "";
+      const bits = [w === "" ? "buying names" : (w === "later" ? "heard enough today" : "runs the place")];
+      if (a.flashlightOn) bits.push("flashlight up");
+      return bits.join(" | ");
+    }
+    if (a.kind === "guard") {
+      const guardBits = [a.corrupt ? "bent cop" : "clean guard"];
       if (a.bribed > 0) guardBits.push("bought");
       else if (a.corrupt) guardBits.push("wants payoff");
       if (a.flashlightOn) guardBits.push("flashlight up");
@@ -398,8 +406,16 @@
     if (CBZ.game.role === "cop" && !(a.kind === "guard" || a.kind === "warden")) {
       return ["question", "warn", "detain", "search"];
     }
-    if (a.kind === "guard" || a.kind === "warden") {
-      const gverbs = (a.corrupt || a.kind === "warden") ? ["bribe", "payoff", "trade", "insult", "steal"] : ["bribe", "insult", "befriend", "steal"];
+    /* THE WARDEN IS NOT A BENT SCREW WITH A BIGGER PRICE (owner, 2026-08-19:
+       "he should not accept cigs and have options like [a guard's]... acted
+       like an inmate"). He ran the corrupt-guard menu — bribe/payoff/trade —
+       priced in cigarettes. His menu is now his office: SNITCH (a name for
+       the heat on you — economy.js's snitch(), the one thing an inmate can
+       actually sell the top of a prison), INSULT, and STEAL (the Gun-Room
+       Key hunt, unchanged). Campaign beats still outrank this above. */
+    if (a.kind === "warden") return ["snitch", "insult", "steal"];
+    if (a.kind === "guard") {
+      const gverbs = a.corrupt ? ["bribe", "payoff", "trade", "insult", "steal"] : ["bribe", "insult", "befriend", "steal"];
       if (!a.data || !a.data.offer) return gverbs.filter((v) => v !== "trade");
       return gverbs;
     }
@@ -453,7 +469,16 @@
     // LIES. economy.js's bribeCost is loyalty- and schedule-aware now (a man
     // you have already paid is cheaper; a man standing a count is dearer), so
     // the chip and the label both ask IT rather than re-deriving 25/5/10.
-    if (v === "bribe") return (CBZ.econ.bribeCost ? CBZ.econ.bribeCost(a) : (a.kind === "warden" ? 25 : (a.corrupt ? 5 : 10))) + "";
+    if (v === "bribe") return (CBZ.econ.bribeCost ? CBZ.econ.bribeCost(a) : (a.corrupt ? 5 : 10)) + "";
+    // snitch trades a name for heat — the chip is the warden's mood, straight
+    // off economy.js's own gate so the chip and the refusal can never disagree
+    if (v === "snitch") {
+      const w = CBZ.econ.snitchOffer ? CBZ.econ.snitchOffer(a) : "";
+      if (w === "count") return "counting";
+      if (w === "later") return "later";
+      if (w === "clean") return "no heat";
+      return "-heat";
+    }
     if (v === "payoff") return (CBZ.econ.payoffCost ? CBZ.econ.payoffCost(a) : Math.max(6, Math.ceil((CBZ.game.detection || 0) / 8) + Math.ceil((CBZ.game.complaints || 0) / 12) + (CBZ.game.gangJob ? 4 : 0) + (a.kind === "warden" ? 14 : 5))) + "";
     if (v === "pay") return a.approach && a.approach.cost ? a.approach.cost + "" : "";
     if (v === "paySilence") return CBZ.knownSnitchCost ? CBZ.knownSnitchCost(a) + "" : "";
@@ -534,7 +559,8 @@
       case "befriend": return (a.playerGrudge || 0) >= 6 ? `Square things with ${nm}` : ((a.rep || 0) >= 45 ? `Catch up with ${nm}` : `Chat up ${nm}`);
       case "fight":    return `Throw hands with ${nm}`;
       case "trade":    { const o = a.data && a.data.offer; return o ? `Buy ${shortText(o.item, 16)}. ${o.price}` : "Browse their goods"; }
-      case "bribe":    { const c = CBZ.econ.bribeCost ? CBZ.econ.bribeCost(a) : (a.kind === "warden" ? 25 : (a.corrupt ? 5 : 10)); return `Slip ${c} to look away`; }
+      case "bribe":    { const c = CBZ.econ.bribeCost ? CBZ.econ.bribeCost(a) : (a.corrupt ? 5 : 10); return `Slip ${c} to look away`; }
+      case "snitch":   return "Give the warden a name";
       case "payoff":   { const c = CBZ.econ.payoffCost ? CBZ.econ.payoffCost(a) : 6; return `Pay ${c} to clear your heat`; }
       case "steal":    return (a.kind === "guard" || a.kind === "warden") ? `Lift ${nm}'s keys` : `Pick ${nm}'s pocket`;
       case "join":     return `Run with the ${gangShort(a) || "crew"}`;
@@ -1019,7 +1045,7 @@
   // romance=win+progression). Selection is by priority; menu order preserved.
   const VERB_PRIORITY = {
     refuse: 100, accept: 92, trade: 88, steal: 86, befriend: 84, confrontReport: 84,
-    join: 82, paySilence: 80, bribe: 78, threatenSnitch: 78, payoff: 76,
+    join: 82, paySilence: 80, snitch: 80, bribe: 78, threatenSnitch: 78, payoff: 76,
     pay: 74, detain: 72, listen: 70, search: 70, warn: 66, threaten: 64, respect: 60,
     question: 60, haggle: 50, insult: 40,
     // gunpoint pair — only ever offered together, so the cap never sees them
