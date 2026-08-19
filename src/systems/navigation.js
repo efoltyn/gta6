@@ -77,8 +77,27 @@
     }
   }
 
-  // ---- prison: coarse walkability A* with grate/hatch portal edges ----
+  // ---- prison: walkability A* with grate/hatch portal edges ----
+  // THE GRID MOVED OUT (systems/prisonnav.js). This planner used to rebuild a
+  // coarse 2.15 m walkability grid FROM EVERY COLLIDER ON EVERY CALL, which is
+  // affordable exactly once per player action and not at all for a cast of
+  // NPCs — so when the prison AI needed routes, the answer was one cached
+  // 0.4 m grid both callers share, not a second pathfinder. The vents stay
+  // here: they are this route's business, and prisonNav.plan takes them as
+  // portal edges. The body below is the fallback for a build where that file
+  // is absent, and it is byte-identical to what shipped.
   function escapeRoute(from, to) {
+    const N = CBZ.prisonNav;
+    if (N && N.plan && N.ensure && N.ensure()) {
+      const portals = [];
+      for (const v of CBZ.vents || []) {
+        if (!v.dest) continue;
+        portals.push({ x: v.x, z: v.z, dx: v.dest.x, dz: v.dest.z, cost: 4, label: v.name || "maintenance route" });
+      }
+      const pts = N.plan(from, to, { portals: portals });
+      if (pts && pts.length) return finish("escape", [copyPoint(from)].concat(pts), to, "grid");
+      return direct("escape", from, to, "fallback");
+    }
     const B = CBZ.WORLD;
     if (!B) return direct("escape", from, to);
     const STEP = 2.15, PAD = 0.72;

@@ -158,7 +158,12 @@
       return speed;
     }
     n._lifeT = Math.max(0, (n._lifeT || 0) - dt);
-    const close = n.target ? Math.hypot(n.target.x - gp.x, n.target.z - gp.z) < 0.65 : true;
+    // A ROUTE IS NOT AN ARRIVAL. systems/prisonnav.js hands this mover one
+    // WAYPOINT at a time while it walks a man round a wall; reading a reached
+    // waypoint as "the walk is done" would re-roll his destination every few
+    // metres and he would never get anywhere on purpose.
+    const routed = !!(CBZ.prisonNav && CBZ.prisonNav.owns(n));
+    const close = routed ? false : (n.target ? Math.hypot(n.target.x - gp.x, n.target.z - gp.z) < 0.65 : true);
     if (!n._lifeActivity || n._lifeT <= 0 || (n._lifeActivity === "walk" && close)) chooseRoutine(n, gp);
     n.activityState = n._lifeActivity;
     if (n._lifeActivity === "stand" || n._lifeActivity === "activity") {
@@ -319,7 +324,20 @@
     }
 
     speed = purposefulRoutine(n, dt, speed, gp, imp, curfew);
-    recoverStuck(n, dt, speed, gp, curfew && V2 && !!(n._muster && n._muster.way));
+    // the stall recovery jiggles a man toward a fresh random spot; a body the
+    // navigator is walking round a corner is not stuck, he is going the long way
+    recoverStuck(n, dt, speed, gp, (curfew && V2 && !!(n._muster && n._muster.way))
+      || !!(CBZ.prisonNav && CBZ.prisonNav.owns(n)));
+
+    /* HOW TO GET THERE, asked once everybody has finished saying WHERE.
+       The brain (order 18), the cell leash (21.9), the night muster and the bed
+       above have all written `target` by this line; systems/prisonnav.js turns
+       whatever it says into the next step of a walk that exists — round the
+       wall, through the door — and leaves it alone when the straight line is
+       already clear. It has to be called HERE and not from its own updater:
+       the curfew branch twenty lines up writes `target` itself, so anything
+       decided before this point is overwritten by the time we integrate. */
+    if (CBZ.prisonNav) CBZ.prisonNav.step(n, dt);
 
     if (n.pause > 0) { n.pause -= dt; if (near) animChar(n.char, 0, dt); }
     else {

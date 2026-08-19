@@ -815,6 +815,20 @@
   // back-and-forth, both measured by tools/prison-jitter-check.mjs (--revert
   // proves the fault returns). Flip false (?cfg_CELL_POST_V2=0) to revert.
   if (CBZ.CONFIG.CELL_POST_V2 == null) CBZ.CONFIG.CELL_POST_V2 = true;
+  // PRISON_NAV_V1 — the prison cast walks to doors instead of into walls.
+  // entities/npc.js's mover is a straight line at `target` and nothing ever
+  // asked what happens when a wall is in the way. Measured on the shipped
+  // tree: 7% of attempted movement stalled in the morning yard, 24% at
+  // curfew, with twelve bodies grinding geometry at once and three of them
+  // walking at a wing door 80 m away through the whole cell block.
+  // systems/prisonnav.js plans on the wing's own colliders (an OPEN door is
+  // not a collider, so "find the door" is just the shortest path) and feeds
+  // the mover one waypoint at a time; when there is no route at all it falls
+  // back to city/citynav.js's context-steer so a sealed-in body searches the
+  // wall instead of pressing into it. Ratchet: tools/prison-nav-check.mjs
+  // (stalled share of attempted movement). Flip false (?cfg_PRISON_NAV_V1=0)
+  // for the straight line back.
+  if (CBZ.CONFIG.PRISON_NAV_V1 == null) CBZ.CONFIG.PRISON_NAV_V1 = true;
   // STREET TALK V2: every civilian is YES / NO / PUNCH. Offer math uses level
   // gap + max cash they can spare. Flip false to restore the crowded verb menu.
   if (CBZ.CONFIG.STREET_TALK_V2 == null) CBZ.CONFIG.STREET_TALK_V2 = true;
