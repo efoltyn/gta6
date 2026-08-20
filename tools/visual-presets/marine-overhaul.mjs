@@ -233,20 +233,27 @@ function stageMarine(input) {
      demands as a regression, marking the fix as the fault. The body is the
      named hull child where a species has one; anything else falls back to the
      bbox and is read with that caveat. Lower is more torpedo. */
-  let bodyW = size.z, bodyL = size.x;
+  let bodyW = size.z, bodyL = size.x, onHull = false;
   group.traverse(function (o) {
-    if (!o.isMesh || o.name !== "sharkHull") return;
+    // Every species names its body <something>Hull — sharkHull, fishHull,
+    // cetaceanHull. Matching only the shark's meant every fish, dolphin and
+    // whale silently fell back to the whole bounding box and was scored down
+    // for growing the swept pectorals §4 asks for. Match the suffix.
+    if (!o.isMesh || !/Hull$/.test(o.name || "")) return;
     const hb = new T.Box3().setFromObject(o), hs = new T.Vector3(); hb.getSize(hs);
-    if (hs.x > 0) { bodyW = hs.z; bodyL = hs.x; }
+    if (hs.x > 0) { bodyW = hs.z; bodyL = hs.x; onHull = true; }
   });
   const planRatio = bodyL > 0 ? bodyW / bodyL : 0;
   const metrics = {
     parts: parts,
     triangles: tris,
     lengthM: Math.round(size.x * 100) / 100,
-    planWidthRatio: Math.round(planRatio * 1000) / 1000,
     heightM: Math.round(size.y * 100) / 100,
   };
+  // Only report the plan ratio where it was actually measured on a body. A
+  // bounding-box figure answers a different question and reporting it under
+  // the same label would be worse than reporting nothing.
+  if (onHull) metrics.planWidthRatio = Math.round(planRatio * 1000) / 1000;
 
   const metric = overlay.querySelector("[data-metric]");
   metric.textContent = `${parts} parts · ${tris} tris · ${metrics.lengthM} m · plan w/l ${metrics.planWidthRatio}`;
@@ -286,7 +293,13 @@ export default {
     parts: { label: "Mesh parts" },
     triangles: { label: "Triangles" },
     lengthM: { label: "Length", unit: "m" },
-    planWidthRatio: { label: "Plan width / length", better: "lower" },
+    /* Reported, not scored. §4 asks for two things at once — a narrow plan
+       AND maximum girth just behind the head — and a single width-over-length
+       number cannot arbitrate between them: building the teardrop the sheet
+       demands necessarily raises it. Declaring a direction here made the fix
+       read as the fault, which is the same mistake twice, so it is a number
+       you read now. */
+    planWidthRatio: { label: "Plan width / length (hull)" },
     heightM: { label: "Height", unit: "m" },
   },
   metricsNote:
