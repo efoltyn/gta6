@@ -381,6 +381,24 @@ that, the tool is wrong; that friction is exactly what the dogfooding is for.
 
 ## 4. The harness — a file cabinet for terminals
 
+The whole build, in the owner's minimal statement (2026-08-20): *"I'm not
+making an AI. I'm making a place to sit my terminal tabs, give it a tool,
+and append a bit to its system prompt."* **A seat, a tool, a sentence.**
+All three sockets are official and stable: the seat is a pty (fifty years
+old), the tool is a CLI, and both vendors ship a *sanctioned* append point
+for the sentence — CLAUDE.md for Claude Code, AGENTS.md for Codex — so
+teaching the workflow needs no hack, just a file in the repo. Weigh the
+effort accordingly before building: the seat is commodity (~5%, tmux
+underneath); the sentence is short but it is the **methodology** — it
+carries the entire protocol, so version it and iterate it like source
+(~15%); the tool is the deep asset (~80%). The wrapper companies inverted
+that allocation — most of their engineering in the seat and the chrome —
+and it is what killed them. And note what the minimal statement implies
+about time-to-first-use: **v0 exists tonight with zero new code** — a tmux
+session, the existing tool, the snippet pasted into CLAUDE.md. Live in the
+crude version first and extract the product from its friction, exactly the
+way ba itself was made.
+
 The owner's own metaphor, and it is the right one: *"right now I open
 terminal and have 20 terminal tabs; I want all those in one place — and
 where other editors show you the diff, the diff doesn't matter to me, I
