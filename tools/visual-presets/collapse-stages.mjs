@@ -88,8 +88,8 @@ const subjects = [
     act: { settle: 4 },
     cam: { back: 2.7, up: 0.45, look: 0.14 } },
 
-  { id: "topple", label: "A different building does something different",
-    focus: "The most slender stack on the same block, condemned in exactly the same way — and it does not do what the first one did. Which motion a building gets is derived from what its facade grammar says it is MADE OF and how slender it is: a ductile frame pancakes, a brittle stack rotates about a hinge at its base under the real rigid-rod equation (d2th/dt2 = 3g/2L · sin th, which is why it starts imperceptibly and finishes shockingly fast), a wounded mid-rise shears along the hit, timber folds, adobe crumbles. The grammar this one actually resolved to is named in the readout top-right — it is read off the live engine, not asserted here.",
+  { id: "topple", label: "The same question, asked of a different building",
+    focus: "The most slender stack under sixteen storeys near the first subject, condemned in exactly the same way. It may or may not fall differently — that is the point, and it is not something this caption gets to decide. Which motion a building gets is derived from what its facade grammar says it is MADE OF and how slender it is: a ductile frame pancakes, a brittle stack rotates about a hinge at its base under the real rigid-rod equation (d2th/dt2 = 3g/2L · sin th, which is why it starts imperceptibly and finishes shockingly fast), a wounded mid-rise shears along the hit, timber folds, adobe crumbles. The grammar this one actually resolved to is named in the readout top-right — read off the live engine, not asserted here. At seed 90210 it comes out `shear` on stone rather than `topple`: the city\'s mid-rise stock is too squat to clear the topple grammar\'s slenderness threshold, so nothing in that height band hinges. That is a fact about this city, not a fault in the picture — and it is exactly the kind of thing a caption that named its own outcome would have hidden.",
     act: { second: true, phaseFrac: 0.6 },
     cam: { back: 3.1, up: 0.75, look: 0.45 } },
 ];
