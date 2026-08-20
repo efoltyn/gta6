@@ -2620,6 +2620,7 @@
     const vw = dw * 0.5, vh = dh * 0.32;
     const vision = new THREE.Mesh(new THREE.BoxGeometry(along ? slabT + 0.02 : vw, vh, along ? vw : slabT + 0.02), doorVisionMat());
     vision.position.set(leafOffX, dh * 0.18, leafOffZ); vision.renderOrder = 1; pivot.add(vision);
+    let railMesh = null;
     /* STILES AND RAILS on the outward face — the two uprights, the top, middle
        and bottom rails, and a kick plate. This is the whole difference between
        "a slab in a hole" and "a door": at any distance the eye reads the frame
@@ -2652,11 +2653,13 @@
         if (merged) {
           const m = new THREE.Mesh(merged, doorRailMat());
           m.castShadow = false; m.receiveShadow = true; pivot.add(m);
+          railMesh = m;
         }
       } else {
         for (const g of parts) {
           const m = new THREE.Mesh(g, doorRailMat());
           m.castShadow = false; m.receiveShadow = true; pivot.add(m);
+          railMesh = m;
         }
       }
     }
@@ -2684,6 +2687,7 @@
       pivot, col, wx, wz, t: 0, open: false, hold: 0,
       maxAng: openSign * 1.66, colIn: true,
       inx: nx, inz: nz,                            // inward normal (for proximity test)
+      leaf: leaf, rails: railMesh,                 // so a facade can paint this door
     };
     cityDoors.push(rec);
     return rec;
@@ -4270,6 +4274,26 @@
         hash: bhash,
         dbox: dbox,
         lbox: lbox,
+        /* PAINT THE DOOR. The shell hangs the leaf long before a facade runs,
+           and it has no idea what palette that facade is about to put on the
+           walls — so the door was left in one fixed tone for every grammar. A
+           facade knows its own colours, so it gets to pick one: this hands it
+           the leaf and its stiles/rails to tint. The materials are CLONED on
+           first use, because the untinted ones are shared singletons and
+           writing to them would repaint every door in the city. */
+        doorTint: function (leafHex, railHex) {
+          for (let i = 0; i < doorRecs.length; i++) {
+            const r = doorRecs[i];
+            if (r.leaf && leafHex != null) {
+              if (!r.leaf.userData.tinted) { r.leaf.material = r.leaf.material.clone(); r.leaf.userData.tinted = true; }
+              r.leaf.material.color.setHex(leafHex);
+            }
+            if (r.rails && railHex != null) {
+              if (!r.rails.userData.tinted) { r.rails.material = r.rails.material.clone(); r.rails.userData.tinted = true; }
+              r.rails.material.color.setHex(railHex);
+            }
+          }
+        },
         // building-local rect → a real walk PLATFORM (mirrored into b.platforms
         // so demolition can splice it back out). NO collider: a monumental
         // stair must never be able to seal a building's own front door.
