@@ -121,9 +121,54 @@
   // the real bathymetry by waterField.randomWaterPoint at the species' OWN
   // declared clearance, so widening the band can never put an animal on land —
   // it only gives the validator more sea to choose from.
-  const AQUATIC_R0 = 520;        // ocean band (from field centre) inner radius
-  const AQUATIC_R1 = 2200;       // ..outer radius (still inside the terrain ring)
-  const FIELD_CX = 0, FIELD_CZ = -700;   // matches terrain.js CX/CZ field centre
+  /* THE OCEAN BAND IS A PROPERTY OF THE ARENA, NOT OF THIS FILE.
+
+     These four numbers used to be module constants, and they were GANG CITY'S
+     ocean typed out by hand — which is why Natural Disaster mode, whose whole
+     headline event is a tsunami, had no wildlife in it at all: nothing was
+     stopping the sea life, the sea was simply somewhere else. Now they are
+     the DEFAULT for an arena that carries land regions (i.e. the city, whose
+     band stays exactly as tuned) and are DERIVED for anything that does not.
+
+     `deriveField` is the only writer and it runs once per arena at stock time,
+     so the per-frame cost is zero and the fallback for a lone unit-loaded
+     module is the same city band it always was. */
+  const CITY_BAND = { cx: 0, cz: -700, r0: 520, r1: 2200 };  // matches terrain.js CX/CZ
+  const FIELD = { cx: CITY_BAND.cx, cz: CITY_BAND.cz, r0: CITY_BAND.r0, r1: CITY_BAND.r1 };
+
+  /* An island in open water gets a RING of sea around it rather than a band
+     around a continent's shoulder: inside `r0` is the beach, and `r1` is far
+     enough out that a shark has somewhere to be that is not on top of you but
+     close enough that a tsunami can carry it into the streets. Both are
+     multiples of the arena's OWN radius, so a bigger island automatically gets
+     a bigger sea and nobody has to retune anything. */
+  const ISLE_R0 = 1.12, ISLE_R1 = 6.5;
+
+  function deriveField(A, opts) {
+    // 1. an explicit band always wins — a mode that knows its own water says so
+    const o = (opts && opts.ocean) || (A && A.oceanBand) || null;
+    if (o && o.r1 > 0) {
+      FIELD.cx = +o.cx || 0; FIELD.cz = +o.cz || 0;
+      FIELD.r0 = Math.max(0, +o.r0 || 0); FIELD.r1 = +o.r1;
+      return FIELD;
+    }
+    // 2. an arena with LAND REGIONS is a city: its band is the tuned one.
+    if (A && A.regions && A.regions.length) {
+      FIELD.cx = CITY_BAND.cx; FIELD.cz = CITY_BAND.cz;
+      FIELD.r0 = CITY_BAND.r0; FIELD.r1 = CITY_BAND.r1;
+      return FIELD;
+    }
+    // 3. anything else that knows where it is and how big it is — the disaster
+    //    island — gets a ring derived from its own footprint.
+    const c = (A && A.center) || null;
+    const R = A && +A.radius;
+    if (c && Number.isFinite(+c.x) && R > 0) {
+      FIELD.cx = +c.x; FIELD.cz = +c.z;
+      FIELD.r0 = R * ISLE_R0; FIELD.r1 = R * ISLE_R1;
+      return FIELD;
+    }
+    return FIELD;                                  // keep whatever we had
+  }
   const SKIN_REACH = 4.2;        // how close you must be to skin a carcass
   const CARCASS_LINGER = 150;    // s a skinned/ignored carcass stays before fading
   const BREED_EVERY = 26;        // s between breeding passes
@@ -145,7 +190,16 @@
   // live actor list — the hitscan hook in fpsmode.js scans this every shot.
   const animals = CBZ.cityWildlife = [];
   const carcasses = [];          // skinnable / fading remains
-  let root = null, built = false;
+  /* WHICH ARENA ARE WE STOCKED FOR? This was a bare `built` boolean, which is
+     the same city-bound assumption the ocean band carried: once Gang City had
+     built, no other mode could ever get wildlife, because the guard could not
+     tell "already done" from "done for somewhere else". It is the arena
+     reference now, so handing this file a DIFFERENT world restocks it and
+     handing it the same one twice is still free.
+     `wired` is separate on purpose: the pelt catalog, the interaction
+     registry, the gunshot/blast wraps and the update hook are GLOBAL and must
+     be installed exactly once however many worlds get stocked. */
+  let root = null, builtFor = null, wired = false;
   // The arena we were handed at build time. CRITICAL: during buildCity(),
   // `CBZ.city.arena` is NOT yet assigned (the assignment awaits buildCity's
   // return), so every region lookup MUST go through this stored reference, not
@@ -327,6 +381,14 @@
       const s = +CBZ.citySeaHeightAt(x, z, t);
       if (Number.isFinite(s)) return s;
     }
+    // NATURAL DISASTER has its own sea (world/disaster_arena.js), surge and
+    // all, and it is the whole reason a shark can end up in a flooded street.
+    // Asking for it here is what makes every marine body in this file — wander,
+    // hunt and death alike — sit at the right height in that mode too.
+    if (CBZ.survSeaHeightAt) {
+      const s = +CBZ.survSeaHeightAt(x, z, t);
+      if (Number.isFinite(s)) return s;
+    }
     if (CBZ.waterSeaY) { const s = +CBZ.waterSeaY(); if (Number.isFinite(s)) return s; }
     return CBZ.SEA_Y != null ? CBZ.SEA_Y : -0.48;
   }
@@ -345,6 +407,8 @@
       bed = s - col;
     } else if (CBZ.citySeaBedY) {
       bed = +CBZ.citySeaBedY(x, z, t);
+    } else if (CBZ.survSeaBedYAt) {
+      bed = +CBZ.survSeaBedYAt(x, z);            // the disaster island's bottom
     } else return -Infinity;
     if (!Number.isFinite(bed)) return -Infinity;
     return Math.min(bed + (lift || 0), s - Math.max(0, draft) * AGROUND_MIN_SUB);
@@ -377,19 +441,42 @@
     // water equivalent of navmesh random-point sampling: a radius candidate
     // is accepted only when its whole body has shoreline clearance.
     if (CBZ.waterField && CBZ.waterField.randomWaterPoint) {
-      return CBZ.waterField.randomWaterPoint(r, {
-        cx: FIELD_CX, cz: FIELD_CZ, r0: AQUATIC_R0, r1: AQUATIC_R1,
+      const p = CBZ.waterField.randomWaterPoint(r, {
+        cx: FIELD.cx, cz: FIELD.cz, r0: FIELD.r0, r1: FIELD.r1,
         clearance: aquaticClearance(sp),
       });
+      /* FALL THROUGH ON NULL, and that is not defensive noise — it is the
+         difference between Natural Disaster having sharks and not. waterfield
+         answers for GANG CITY's bathymetry; ask it about a disaster island and
+         it truthfully says "no water here", seedIndividuals bails on the null,
+         and the mode silently gets an empty sea. The ring sampler below is the
+         geometric answer for a world the city's field does not describe. */
+      if (p) return p;
     }
-    // Legacy fallback for isolated tests that omit waterfield.js.
-    for (let tries = 0; tries < 24; tries++) {
+    /* THE RING SAMPLER. Used for isolated unit loads and for any arena the
+       city water field does not cover. A candidate is rejected if it is on a
+       registered land region, and — where the mode publishes one — validated
+       against that mode's OWN water test, so an island's beaches and its
+       interior are excluded without this file knowing anything about them. */
+    const wet = CBZ.survWaterAt || null;
+    const ground = (ARENA() && ARENA().groundHeightAt) || null;
+    const clear = aquaticClearance(sp);
+    for (let tries = 0; tries < 40; tries++) {
       const a = r() * Math.PI * 2;
-      const rad = AQUATIC_R0 + r() * (AQUATIC_R1 - AQUATIC_R0);
-      const x = FIELD_CX + Math.cos(a) * rad, z = FIELD_CZ + Math.sin(a) * rad;
-      if (!CBZ.cityAnyRegion || !CBZ.cityAnyRegion(ARENA(), x, z, 30)) return { x, z };
+      const rad = FIELD.r0 + r() * (FIELD.r1 - FIELD.r0);
+      const x = FIELD.cx + Math.cos(a) * rad, z = FIELD.cz + Math.sin(a) * rad;
+      if (CBZ.cityAnyRegion && CBZ.cityAnyRegion(ARENA(), x, z, 30)) continue;
+      // deep enough for THIS animal: a whale does not spawn in the shallows a
+      // mackerel is happy in, and clearance is already the per-species number.
+      if (ground) {
+        const surf = aquaticSurfY(x, z, 0);
+        if (!(surf - ground(x, z) > Math.max(1.2, clear * 0.12))) continue;
+      } else if (wet) {
+        try { if (!wet(x, z)) continue; } catch (e) {}
+      }
+      return { x, z };
     }
-    return { x: FIELD_CX + 900, z: FIELD_CZ };
+    return { x: FIELD.cx + (FIELD.r0 + FIELD.r1) * 0.5, z: FIELD.cz };
   }
 
   function wetPointNear(x, z, sp, radius) {
@@ -990,13 +1077,20 @@
     return counts;
   }
 
+  /* HOW MANY ANIMALS THIS WORLD GETS, relative to Gang City's DENSITY. A
+     disaster island's ring of sea is a fraction of a 25 km coastline and would
+     otherwise be handed a continent's worth of fish; a mode says how much of
+     the budget it wants and everything downstream (per-biome share, per-species
+     plan, carrying capacity) follows automatically. 1 = the city. */
+  let densityK = 1;
+
   function spawnAll() {
     const S = CBZ.WILDLIFE_SPECIES || {};
     // bucket non-legendary species by biome
     const buckets = {};
     for (const id in S) { const sp = S[id]; if (sp.rarity === "legendary") continue; (buckets[sp.biome] || (buckets[sp.biome] = [])).push(sp); }
     for (const biome in buckets) {
-      const target = Math.round(DENSITY * (BIOME_SHARE[biome] || 0.15));
+      const target = Math.round(DENSITY * densityK * (BIOME_SHARE[biome] || 0.15));
       const counts = planBiome(buckets[biome], target);
       for (const sp of buckets[biome]) seedIndividuals(sp, counts[sp.id] || 1);
     }
@@ -3571,8 +3665,8 @@
           // Legacy radial-band fallback when this module is unit-loaded alone.
           const nx = grp.position.x + Math.cos(a.heading) * a.spd * hdA.spd * dt * 6;
           const nz = grp.position.z + Math.sin(a.heading) * a.spd * hdA.spd * dt * 6;
-          const rr = Math.hypot(nx - FIELD_CX, nz - FIELD_CZ);
-          if (rr < AQUATIC_R0 || rr > AQUATIC_R1) a.heading += Math.PI * 0.6;
+          const rr = Math.hypot(nx - FIELD.cx, nz - FIELD.cz);
+          if (rr < FIELD.r0 || rr > FIELD.r1) a.heading += Math.PI * 0.6;
           else { grp.position.x = nx; grp.position.z = nz; }
           // THE FLOATING SHARK (owner: "sharks go out of water, they float
           // OVER water instead of being under it — the fins look real but then
@@ -3735,34 +3829,98 @@
     }
   }
 
+  /* TEAR THE OLD WORLD'S ANIMALS OUT before stocking a new one. Without this,
+     switching modes would leave a Gang City elk herd standing in the middle of
+     a disaster island's sea — the actors are ticked off a module-level list,
+     not off the arena that spawned them. */
+  function despawnAll() {
+    for (let i = 0; i < animals.length; i++) {
+      const a = animals[i], g = a && a.group;
+      if (g && g.parent) g.parent.remove(g);
+      if (a) { a.dead = true; a.herd = null; }
+    }
+    animals.length = 0;
+    carcasses.length = 0;
+    herds.length = 0;
+    for (const k in CAPS) delete CAPS[k];   // carrying capacity is per WORLD
+  }
+
+  /* ============================================================
+      STOCK A WORLD WITH WILDLIFE — the ONE entry point, for any mode.
+
+      OWNER: "gang city too and nat disaster should all have these sharks."
+      Gang City had them because this file registered itself as a landmass and
+      buildCity runs the landmass chain. NATURAL DISASTER HAD NOTHING — not
+      because sea life was blocked there, but because nothing ever called this
+      file, and the ocean band it would have used was Gang City's coordinates
+      typed out as module constants. Both halves are fixed here: the band comes
+      off the arena (deriveField), and this function is callable directly by a
+      mode that builds its own world instead of going through buildCity.
+
+        CBZ.cityWildlifeStock(arena, opts)
+          arena — anything with `.root` (a THREE.Group to parent bodies into).
+                  `.regions` marks it as a city (land species can spawn and the
+                  tuned city band is used); `.center` + `.radius` marks it as an
+                  island and derives a ring of open sea around it, which is
+                  what modes/survival.js's CBZ.buildDisasterArena() returns.
+          opts  — optional { ocean: { cx, cz, r0, r1 } } to state the band
+                  outright when a mode knows its own water better than we do,
+                  and { density } to scale the population (1 = Gang City's).
+                  Unstated, density is derived from the band's own AREA.
+
+      An island with no `.regions` spawns ONLY aquatic species, and that falls
+      out for free: seedIndividuals returns early for a land species with no
+      biome regions to place it in. So the disaster arena gets its sea life and
+      no deer, without a single species row or a mode flag.
+     ============================================================ */
+  function stockWildlife(city, opts) {
+    if (CBZ.WILDLIFE === false) return null;
+    city = city || (CBZ.city && CBZ.city.arena);
+    if (!city || !city.root) return null;
+    if (builtFor === city) return null;           // idempotent per world
+    if (builtFor) despawnAll();                   // a different world: clear the old one
+    builtFor = city;
+    root = city.root;
+    arena = city;                 // stash the arena for region lookups during build
+    deriveField(city, opts);      // ..and take this world's ocean off it
+    densityK = (opts && +opts.density > 0) ? +opts.density
+      // Unstated: a city keeps the tuned budget; anything else is sized by how
+      // much sea it actually has, against Gang City's band as the unit. An
+      // island a tenth the area gets a tenth the fish and reads just as full.
+      : (city.regions && city.regions.length) ? 1
+      : Math.min(1.4, Math.max(0.12,
+          (FIELD.r1 * FIELD.r1 - FIELD.r0 * FIELD.r0) /
+          (CITY_BAND.r1 * CITY_BAND.r1 - CITY_BAND.r0 * CITY_BAND.r0)));
+
+    if (!wired) {
+      wired = true;
+      registerPelts();
+      registerInteractions();
+      installWraps();             // gunshot panic + blast damage (capture-and-wrap)
+      let breedAcc = 0;
+      CBZ.onUpdate(47.1, function (dt) {
+        tick(dt);
+        breedAcc += (dt && dt < 0.5 ? dt : 0.016);
+        if (breedAcc >= BREED_EVERY) { breedAcc = 0; breed(); }
+      });
+    }
+    spawnAll();
+    recordCaps();                 // each herd's seeded size = its carrying capacity
+    return arena;
+  }
+  CBZ.cityWildlifeStock = stockWildlife;
+  // ..and the ocean band this world ended up with, for anything that wants to
+  // put a boat, a chum slick or a tsunami where the fish actually are.
+  CBZ.cityWildlifeOcean = function () {
+    return { cx: FIELD.cx, cz: FIELD.cz, r0: FIELD.r0, r1: FIELD.r1 };
+  };
+
   // ============================================================
   //  BUILD — stock the world once, after every biome AND the order-97 signed
   //  continent shoreline exist. Aquatic spawn validation therefore reads the
   //  exact final coast, not an incomplete region list.
   // ============================================================
-  CBZ.addLandmass(function (city) {
-    if (CBZ.WILDLIFE === false) return null;
-    if (built) return null;
-    city = city || (CBZ.city && CBZ.city.arena);
-    if (!city || !city.root) return null;
-    built = true;
-    root = city.root;
-    arena = city;                 // stash the arena for region lookups during build
-
-    registerPelts();
-    registerInteractions();
-    installWraps();               // gunshot panic + blast damage (capture-and-wrap)
-    spawnAll();
-    recordCaps();                 // each herd's seeded size = its carrying capacity
-
-    let breedAcc = 0;
-    CBZ.onUpdate(47.1, function (dt) {
-      tick(dt);
-      breedAcc += (dt && dt < 0.5 ? dt : 0.016);
-      if (breedAcc >= BREED_EVERY) { breedAcc = 0; breed(); }
-    });
-    return null;
-  }, 98);
+  CBZ.addLandmass(function (city) { stockWildlife(city, null); return null; }, 98);
 
   // ============================================================
   //  CARS HIT ANIMALS (CBZ.CONFIG.WILDLIFE_CAR_IMPACT)

@@ -443,10 +443,17 @@ function stageGreatWhiteAnatomy(input) {
   // that looks reasonable in a modern build saturates a dark slate to white —
   // and the countershading contrast this preset exists to judge lives exactly
   // there. Keep the total under 1 so 0x53585a stays a dark grey.
-  scene.add(new T.HemisphereLight(0xcdeeff, 0x03121b, 0.40));
-  const key = new T.DirectionalLight(0xffffff, 0.72); key.position.set(5, 12, 10); scene.add(key);
-  const fill = new T.DirectionalLight(0xffa8a2, 0.22); fill.position.set(11, -1, 4); scene.add(fill);
-  const rim = new T.DirectionalLight(0x46c9ff, 0.30); rim.position.set(-9, 5, -9); scene.add(rim);
+  // TWO constraints, and the first run failed both. (1) r128 is PRE-physically
+  // correct: intensities simply SUM, so the brightest face must see a total
+  // under 1.0 or the white belly clips and takes the dark back up with it.
+  // (2) The hemisphere GROUND colour is what lights every downward face, so a
+  // near-black ground turns a white belly dark and inverts the very
+  // countershading this preset exists to judge. Sky+key = 0.82 caps the top;
+  // a lit ground plus an upward bounce carries the belly.
+  scene.add(new T.HemisphereLight(0xdaf2ff, 0x2a4d66, 0.40));
+  const key = new T.DirectionalLight(0xffffff, 0.42); key.position.set(5, 12, 10); scene.add(key);
+  const bounce = new T.DirectionalLight(0xbfe6f7, 0.50); bounce.position.set(3, -8, 5); scene.add(bounce);
+  const rim = new T.DirectionalLight(0x46c9ff, 0.18); rim.position.set(-9, 5, -9); scene.add(rim);
   scene.add(animal);
 
   if (subject.waterY != null) {

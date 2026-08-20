@@ -62,7 +62,7 @@ const subjects = [
     id: "deck-fin-cruise",
     label: "From The Rail — The Fin At 40 m",
     hull: "yacht", camEye: 4.0, side: 40, ahead: 6, aimDown: 0.22,
-    beat: "circle", depthK: 0.95, speed: 4.2,
+    beat: "circle", depthK: 0.95, speed: 4.2, fov: 34,
     focus: "The Jaws shot from a deck: a lone dorsal on open water. Concave scythe trailing edge, apex leaning back, pale along the trailing margin, and a wake you have to look for.",
     state: "DECK · 40 m",
     note: "A cruising shark's wake is a ripple. The white V belongs to the rush.",
@@ -98,7 +98,7 @@ const subjects = [
     id: "fin-handover-90m",
     label: "The Handover — Proxy Fin At 90 m",
     hull: "yacht", camEye: 4.0, side: 90, ahead: 12, aimDown: 0.12,
-    beat: "circle", depthK: 0.95, speed: 4.0, wantProxy: true,
+    beat: "circle", depthK: 0.95, speed: 4.0, wantProxy: true, fov: 24,
     focus: "Past ~68 u the hunt hides the body and the PROXY dorsal takes over. It has to be the same fin at the same height or the player watches it jump. And there must never be two.",
     state: "HUNT · LOD HANDOVER",
     note: "finHandoverErrM is the jump, in metres. The old proxy raised a fixed cone on a fade curve and never asked how deep the shark was.",
@@ -107,7 +107,7 @@ const subjects = [
     id: "banking-turn",
     label: "The Turn — The Fin Leans, And The Tail Shows",
     hull: "yacht", camEye: 4.0, side: 78, ahead: 10, aimDown: 0.14,
-    beat: "circle", depthK: 0.92, speed: 6.4, turn: 1.4, wantProxy: true,
+    beat: "circle", depthK: 0.92, speed: 6.4, turn: 1.4, wantProxy: true, fov: 20,
     focus: "A shark rolls into its turns, so the dorsal LEANS — from a deck that is how you read the turn before the wake does. And on a genuinely shallow cruise the upper caudal lobe cuts the surface a body-length astern: fin plus tail tip, which is a real two-fin read and NOT the double-dorsal bug.",
     state: "HUNT · HARD TURN",
     note: "The bank uses wildlife_rig.js's own roll law, so the blade cannot lean differently from the body it stands in for.",
@@ -339,7 +339,10 @@ async function stageDeck(input) {
       : [bx, surf - Number(subject.aimDown || 0.4) * 0.35, bz];
   }
   camera.aspect = input.width / input.height;
-  camera.fov = subject.topDown ? 60 : 48;
+  // A 0.7 m blade at 90 m is ten pixels at 48 degrees, which is not a
+  // photograph of anything. The long-range subjects declare a narrower field —
+  // the same thing a person on a deck does when they squint at a fin.
+  camera.fov = Number(subject.fov) || (subject.topDown ? 60 : 48);
   camera.near = 0.12; camera.far = 24000;
   camera.position.set(camPos[0], camPos[1], camPos[2]);
   camera.lookAt(camAim[0], camAim[1], camAim[2]);
@@ -427,7 +430,7 @@ export default {
   viewport: { width: 1100, height: 680 },
   readyExpression: "window.THREE && window.CBZ && CBZ.CONFIG",
   urlParams: { seed: 90210 },
-  stageTimeoutMs: 480000,
+  stageTimeoutMs: 900000,   // a full city boot under swiftshader, on a box that may be busy
   metrics: {
     surfaceDorsals: { label: "Separate dorsals cutting the surface (1 is correct)", unit: "", better: "lower" },
     finExposedM: { label: "Blade out of the water", unit: "m" },

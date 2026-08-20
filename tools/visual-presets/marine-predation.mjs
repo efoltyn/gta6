@@ -62,6 +62,11 @@
    the result — every driver in the chain (predatorHunt, creatureFight, the
    swim mover) integrates dt. */
 const RUN = 1 / 30;
+/* ...AND IT HAS TO BE DECLARED AGAIN INSIDE stage(). The stage function is
+   SERIALIZED and evaluated inside the page, so it carries no module scope with
+   it: every free identifier it names is a ReferenceError in the browser and
+   every frame of the pass fails with an empty picture. This is the one rule of
+   this tool and it costs a whole run to learn. */
 
 const subjects = [
   {
@@ -116,7 +121,7 @@ const subjects = [
   {
     id: "bait-ball",
     label: "A bait ball collapsing",
-    scenario: "bait", seconds: 15,
+    scenario: "bait", seconds: 17,
     focus: "A school with no teeth does not scatter when something comes for it — it BALLS, and the ball gets tighter and gets driven UP against the surface as more mouths arrive, because every attack comes from below and the only way out is up. Then it is eaten down and it breaks apart. One InstancedMesh, a couple of hundred bodies, one draw call. Look for the dense silver sphere pinned under the surface, the white water round it, and the gulls over the top.",
     state: "BAIT BALL · 3 FEEDING",
     shot: { dist: 26, height: 9, pitch: 0.34 },
@@ -136,6 +141,7 @@ const readyExpression = "window.THREE && window.CBZ && CBZ.CONFIG && CBZ.WILDLIF
 async function stageMarinePredation(input) {
   const CBZ = window.CBZ, T = window.THREE;
   if (!CBZ || !T) return { ok: false, missing: "CBZ/THREE" };
+  const RUN = 1 / 30;              // see the note above: no module scope in here
   const subject = input.subject;
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   const until = async (test, budgetMs, stepMs) => {
@@ -558,7 +564,12 @@ export default {
   urlParams: { seed: 90210 },
   beforeParams: { marine: "off" },
   viewport: { width: 1100, height: 680 },
-  stageTimeoutMs: 600000,
+  /* 25 MINUTES, and it is the FIRST subject that needs it. The stage caches
+     its booted city on window, so subject 1 pays for the whole boot (up to 14
+     minutes of its own `until` budgets) AND its 32 simulated seconds — about
+     a thousand full CBZ.stepSim calls over the entire city, which headless is
+     the expensive part. Ten minutes timed that frame out and cost a pass. */
+  stageTimeoutMs: 1500000,
   subjects,
   readyExpression,
   stage: stageMarinePredation,

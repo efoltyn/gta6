@@ -122,6 +122,7 @@
   const AUDIT = {
     blows: 0, spyhops: 0, breaches: 0, tailLobs: 0, porpoises: 0,
     grabs: 0, drags: 0, breakoffs: 0, commits: 0, formations: 0, calves: 0,
+    rams: 0, rolls: 0, kills: 0,
   };
 
   // ---- tiny maths (module scope: nothing below allocates per frame) --------
@@ -1290,6 +1291,7 @@
   const POD_SCAN = 0.9;       // s between sweeps, per actor
   const PROXY_R = 620;        // u — the surface read draws inside this
   const SIM_R = 900;          // u — beyond this an orca does not think at all
+  const FIGHT_R = 1500;       // ...unless it is already in a fight (see orcaBrain)
 
   function isOrca(a) {
     return !!(a && a.species && a.species.id === "orca" && a.group && !a.external);
@@ -1399,6 +1401,9 @@
       // hunt
       state: "cruise", owned: false, opts: null, look: 0, interest: 0, bored: 0, cool: 0,
       committed: false, chum: null, tick: 0,
+      // the mob (§7b) — only ever used when marine_predation.js is absent
+      quarry: null, mobT: 0, rolling: null, retreat: 0, ramOpts: null,
+      bodyLen: 0, mobNeed: 0, mobHave: 0,
       dive: a.swimDepth || 2.6, diveWant: (a.swimDepth || 2.6) * 1.4, dragT: 0, dragPh: 0,
       mover: null,
     };
@@ -1858,54 +1863,459 @@
   }
 
   // ============================================================
-  //  §7. THE MEGALODON TAKEDOWN — CONSUMED, NOT REBUILT.
+  //  §7. THE MEGALODON TAKEDOWN.
   //
-  //  city/marine_predation.js already solves "how many orcas beat a megalodon"
-  //  from the animals' own hp/bite/size, already runs the flank ram, and
-  //  already drives creature_combat's tonic roll-over as the finisher. Writing
-  //  a second answer here would be the exact duplication CLAUDE.md calls the
-  //  real danger — so this is a READ of that answer plus a degrade path for a
-  //  build where that file is absent or flagged off.
+  //  IT USED TO BE CONSUMED AND ONLY CONSUMED, and that was a real bug, found
+  //  by measurement rather than by reading: the NPC-war agent staged an
+  //  EIGHT-ORCA POD against a megalodon in games/battle.html and at t+52 s the
+  //  megalodon was still alive. Eight is double the threshold. The cause was
+  //  not the arithmetic — it was that the arithmetic was not there:
+  //  games/battle.html loads the `beasts`/`bestiary` studio packs, which carry
+  //  creature_combat.js and the bestiary but NOT city/marine_predation.js, so
+  //  every consume in this section returned null and the headline feature of
+  //  the whole block silently did not exist on that page.
   //
-  //  The degrade path is the same expression that file documents, because the
-  //  point of "derive it from the animals' own numbers" is that two independent
-  //  derivations agree: time-to-kill each way, with size on BOTH sides, so a
-  //  monster meg beats a pod that would kill an average one and a pod of big
-  //  bulls beats a meg a small pod could not.
+  //  "CONSUME IT IF PRESENT" IS ONLY HONEST IF THE ABSENT CASE ALSO WORKS.
+  //  So this section now carries the whole fight itself — pick the quarry,
+  //  hold a bearing, ram, stagger, unlock the finisher on the number, roll it
+  //  belly-up, hold it under, drown it — and STANDS DOWN COMPLETELY when
+  //  city/marine_predation.js is loaded (one check: CBZ.marineRelation). Two
+  //  implementations never run at once; the second one only exists so the
+  //  feature cannot vanish with a script tag.
+  //
+  //  THE NUMBERS ARE THE SAME NUMBERS. Both derivations solve time-to-kill
+  //  each way off hp/bite/scale with size on both sides, so a monster meg
+  //  beats a pod that would kill an average one and a pod of big bulls beats a
+  //  meg a small pod could not — and, for the authored rows, both say FOUR.
+  //
+  //  AND IT HAS TO RESOLVE ON A WATCHABLE TIMESCALE. A player who parks a boat
+  //  and watches a pod work a megalodon must see it END — tens of seconds, not
+  //  minutes. Two things buy that, and both are corrections of how a naive pod
+  //  behaves rather than damage inflation:
+  //
+  //    1. EVERY MEMBER ATTACKS. A pod that passes one commit token round is a
+  //       pod whose eight members do the damage of one; real orcas take turns
+  //       committing, but the others are not idling — they are harrying from
+  //       their own bearings. So the turn-taking here is a PHASE OFFSET on a
+  //       shared cadence, not a queue, and eight orcas genuinely hit eight
+  //       times as often as one.
+  //    2. THE FINISHER IS ONE-WAY. Once the roll begins it runs to the death;
+  //       it cannot re-enter its own first phase, which is the failure mode
+  //       that produces exactly the symptom above — constant pressure and no
+  //       death. `_orcaRoll` is set once, ticked from one place, and the last
+  //       frame of it is lethal.
+  //
+  //  CBZ.orcaTakedown() is the probe, and it does not assert any of this: it
+  //  runs the fight's OWN numbers forward on a fixed step and reports how many
+  //  seconds it takes and how many orcas die doing it. That is what the
+  //  before/after table prints.
   // ============================================================
-  function dpsGuess(a) {
-    const sp = a.species || {};
-    const k = (sp.bite || 30) * 0.8;
-    return Math.max(1, k) * Math.pow(scaleOf(a), 1.6);
-  }
+  const MOB = {
+    SCAN: 1.3,          // s between quarry re-scans, per orca
+    R: 300,             // u — a quarry further than this is not our problem
+    RAM_EVERY: 2.2,     // s — ONE member's ram cadence (they phase, not queue)
+    RAM_K: 2.0,         // ram damage = dpsAgainst x this
+    LAND: 0.62,         // fraction of ram attempts that actually connect
+    ROLL_HP: 0.35,      // quarry hp fraction that unlocks the finisher
+    ROLL_S: 4.6,        // s the roll-over takes, end to end
+    BREAK_HP: 0.50,     // below this and short-handed, a member leaves
+    MOB_MAX: 2.6,       // a pod's quarry may be at most this x its own scale
+  };
+
   function hpOf(a) { return Math.max(1, a.maxHp || (a.species && a.species.hp) || 100); }
-  function neededFallback(orca, quarry) {
-    const dA = dpsGuess(orca) / Math.pow(scaleOf(quarry), 2.2);
-    const dB = dpsGuess(quarry) / Math.pow(scaleOf(orca), 2.2);
-    const ttkA = hpOf(quarry) / Math.max(0.01, dA);
-    const ttkB = hpOf(orca) / Math.max(0.01, dB);
-    const ratio = ttkA / Math.max(0.01, ttkB);
-    return ratio >= 1 ? Math.ceil(ratio) + 1 : Math.max(1, Math.ceil(ratio));
-  }
-  function takedown(orca, quarry) {
-    if (!orca || !quarry) return null;
-    let needed = 0;
-    if (typeof CBZ.marinePodNeeded === "function") {
-      try { needed = +CBZ.marinePodNeeded(orca, quarry) || 0; } catch (e) { needed = 0; }
+  /* WHAT THIS ANIMAL DOES PER SECOND, from the shared kit when predator.js is
+     loaded and from the bestiary row when it is not — so the number is the
+     same one the strike driver will actually apply either way. */
+  function dpsOf(a) {
+    const sp = a.species || {};
+    if (typeof CBZ.predatorKit === "function") {
+      let k = null;
+      try { k = CBZ.predatorKit(a); } catch (e) { k = null; }
+      if (k && k.dmg > 0 && k.rate > 0) return k.dmg / k.rate;
     }
-    if (!(needed > 0)) needed = neededFallback(orca, quarry);
-    const s = ensure(orca);
-    const have = Math.max(1, s.podN || 1);
+    return (sp.bite || 10) / 1.4;
+  }
+  // THE ONE EXPRESSION IN WHICH SIZE MATTERS BOTH WAYS: a bigger attacker hits
+  // harder (^1.6, a linear-dimension bite force) and a bigger defender soaks
+  // more (^2.2, its mass). Individual size only — the species constant is
+  // already inside dpsOf and hpOf, and multiplying it in twice is the classic
+  // way this kind of ladder goes quietly wrong.
+  function dpsAgainst(att, def) {
+    return dpsOf(att) * Math.pow(sizeOf(att), 1.6) / Math.pow(sizeOf(def), 2.2);
+  }
+  /* HOW MANY DOES IT TAKE — closed form, no actor needed, no species name.
+     ratio = ttk(pod member -> quarry) / ttk(quarry -> pod member). One spare
+     over the break-even, because a fight is not an average. */
+  function neededFallback(orca, quarry) {
+    const ttkA = hpOf(quarry) / Math.max(0.01, dpsAgainst(orca, quarry));
+    const ttkB = hpOf(orca) / Math.max(0.01, dpsAgainst(quarry, orca));
+    const ratio = ttkA / Math.max(0.01, ttkB);
+    if (!isFinite(ratio) || ratio <= 0) return 12;
+    const n = ratio >= 1 ? Math.ceil(ratio) + 1 : Math.max(1, Math.ceil(ratio));
+    return clamp(n, 1, 12);
+  }
+  function neededFor(orca, quarry) {
+    if (typeof CBZ.marinePodNeeded === "function") {
+      try { const n = +CBZ.marinePodNeeded(orca, quarry); if (n > 0) return n; } catch (e) {}
+    }
+    return neededFallback(orca, quarry);
+  }
+
+  /* THE FORWARD SIM. Not a model of the fight — the fight's own numbers, on a
+     quarter-second step, with the quarry biting back and killing members as it
+     goes. It answers the only question that matters about this feature: DOES
+     IT END, and how long does the player have to watch. Pure arithmetic, no
+     actors moved, no allocation beyond one result object per call. */
+  function simulate(orca, quarry, n) {
+    const perRam = dpsAgainst(orca, quarry) * MOB.RAM_K;
+    const back = dpsAgainst(quarry, orca);
+    const floor = hpOf(quarry) * MOB.ROLL_HP;
+    const need = neededFor(orca, quarry);
+    const n0 = Math.max(1, n | 0);
+    let hpQ = hpOf(quarry), alive = n0, lost = 0, left = 0;
+    let hpMe = hpOf(orca), t = 0, rolled = false;
+    const STEP = 0.25, CAP = 240;
+    while (t < CAP) {
+      t += STEP;
+      let dmg = (alive * perRam * MOB.LAND / MOB.RAM_EVERY) * STEP;
+      // THE FLOOR IS THE STALEMATE, and it is what makes "three is a grinding
+      // draw" a rule rather than a hope: a pod short of the number can harry an
+      // apex, bleed it and hold it down to a third of its health, and can never
+      // do the last third — that is the roll-over's job and the roll-over is
+      // gated on numbers. Without this a big enough grind wins by attrition and
+      // the whole three-step curve collapses into "more is faster".
+      if (alive < need) dmg = Math.min(dmg, Math.max(0, hpQ - floor));
+      hpQ -= dmg;
+      if (hpQ <= floor + 1e-6 && alive >= need) { rolled = true; t += MOB.ROLL_S; hpQ = 0; break; }
+      if (hpQ <= 0) break;
+      // the quarry works ONE of them at a time
+      hpMe -= back * STEP;
+      if (hpMe <= 0) {
+        // short-handed, a member that is losing BREAKS OFF rather than dying —
+        // the owner's "one orca takes a bite, breaks off bleeding and retreats"
+        if (alive < need) left++; else lost++;
+        alive--; hpMe = hpOf(orca);
+      }
+      if (alive <= 0) break;
+    }
+    const killed = hpQ <= 0;
     let verdict;
-    if (have < Math.max(2, Math.ceil(needed * 0.45))) verdict = "loses";
-    else if (have < needed) verdict = "stalemate";
-    else verdict = "kills";
+    if (killed) verdict = "kills";
+    else if (n0 < Math.max(2, Math.ceil(need * 0.5))) verdict = "loses";
+    else verdict = "stalemate";
     return {
-      needed: needed, have: have, verdict: verdict,
-      source: typeof CBZ.marinePodNeeded === "function" ? "marine_predation" : "orca-fallback",
-      rollOver: typeof CBZ.creatureTonicRoll === "function",
-      ram: typeof CBZ.predatorStagger === "function",
+      seconds: Number(t.toFixed(1)), killed: killed, rolled: rolled,
+      casualties: lost, withdrew: left, survivors: Math.max(0, alive),
+      quarryHpPct: Number((100 * Math.max(0, hpQ) / hpOf(quarry)).toFixed(1)),
+      verdict: verdict,
     };
+  }
+
+  function takedown(orca, quarry, podOverride) {
+    if (!orca || !quarry) return null;
+    const needed = neededFor(orca, quarry);
+    const s = orca._orca || ensure(orca);
+    const have = Math.max(1, (podOverride | 0) || s.podN || 1);
+    const sim = simulate(orca, quarry, have);
+    // the STATED curve — one loses, two or three grind, enough kill — and the
+    // SIMULATED one, side by side, so a disagreement is visible rather than
+    // buried. `verdict` is the sim's, because the sim is what actually happens.
+    const stated = have >= needed ? "kills"
+      : (have >= Math.max(2, Math.ceil(needed * 0.5)) ? "stalemate" : "loses");
+    return {
+      needed: needed, have: have, verdict: sim.verdict, stated: stated,
+      seconds: sim.seconds, killed: sim.killed, rolled: sim.rolled,
+      casualties: sim.casualties, withdrew: sim.withdrew, survivors: sim.survivors,
+      quarryHpPct: sim.quarryHpPct,
+      source: typeof CBZ.marinePodNeeded === "function" ? "marine_predation" : "wildlife_orca",
+      driver: typeof CBZ.marineRelation === "function" ? "marine_predation" : "wildlife_orca",
+      rollOver: typeof CBZ.creatureTonicRoll === "function",
+      ram: typeof CBZ.creatureFight === "function",
+    };
+  }
+
+  // ============================================================
+  //  §7b. THE MOB ITSELF — the degrade path, and the reason the feature cannot
+  //  vanish with a script tag. Stands down entirely when marine_predation.js
+  //  is loaded; there is never a frame in which both drive the same animal.
+  // ============================================================
+  function mobOwnedElsewhere() { return typeof CBZ.marineRelation === "function"; }
+
+  function hurt(target, dmg, by, cause) {
+    if (!target || target.dead || !(dmg > 0)) return;
+    if (typeof CBZ.cityWildlifeHit === "function") {
+      _hit.head = false; _hit.point = null; _hit.dir = null; _hit.from = by || null;
+      try { CBZ.cityWildlifeHit(target, dmg, _hit, cause); return; } catch (e) {}
+    }
+    if (typeof CBZ.hurtWorldActor === "function") {
+      try { CBZ.hurtWorldActor(target, dmg, by); return; } catch (e) {}
+    }
+    // LAST RESORT, and it is a real one: in a studio page there may be no
+    // damage bus at all, and a takedown that cannot kill because nobody
+    // published a killer is exactly the failure this section was written for.
+    target.hp = (target.hp == null ? hpOf(target) : target.hp) - dmg;
+    if (target.hp <= 0 && !target.dead) {
+      target.hp = 0; target.dead = true;
+      if (typeof CBZ.wildlifeDeathTumble === "function") { try { CBZ.wildlifeDeathTumble(target); } catch (e) {} }
+    }
+  }
+  const _hit = { head: false, point: null, dir: null, from: null };
+
+  function mobbable(a, o) {
+    if (!o || o === a || o.dead || o.tamed || o.ridden) return false;
+    const sp = o.species;
+    if (!sp || !sp.aquatic || sp.id === "orca") return false;
+    if (!(sp.danger > 0) || !(sp.bite > 0)) return false;      // no teeth, no fight
+    const mine = (a.species && a.species.scale) || 1.55;
+    return (sp.scale || 1) <= mine * MOB.MOB_MAX;
+  }
+  function pickQuarry(a, s, dt) {
+    s.mobT -= dt;
+    if (s.quarry && !s.quarry.dead && s.quarry.group) {
+      const q = s.quarry.group.position, p = a.group.position;
+      if (Math.hypot(q.x - p.x, q.z - p.z) < MOB.R * 1.5) return s.quarry;
+    }
+    if (s.mobT > 0) return null;
+    s.mobT = MOB.SCAN;
+    const list = CBZ.cityWildlife;
+    if (!list) return (s.quarry = null);
+    const p = a.group.position;
+    let best = null, bd2 = MOB.R * MOB.R;
+    for (let i = 0; i < list.length; i++) {
+      const o = list[i];
+      if (!mobbable(a, o) || !o.group) continue;
+      const dx = o.group.position.x - p.x, dz = o.group.position.z - p.z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 < bd2) { bd2 = d2; best = o; }
+    }
+    return (s.quarry = best);
+  }
+
+  function ramOptsFor(a, s) {
+    if (s.ramOpts) return s.ramOpts;
+    const o = s.ramOpts = {
+      style: "ram_flank", seize: false, reach: 0, dmg: 0,
+      speed: (s.opts && s.opts.rushSpeed > 0) ? s.opts.rushSpeed * 0.85 : 12,
+      rate: MOB.RAM_EVERY,
+      onHit: function () {
+        const q = s.quarry;
+        if (!q || q.dead) return;
+        /* THE SAME FLOOR THE FORWARD SIM USES. A pod short of the number can
+           bleed an apex down to a third and no further; the last third is the
+           roll-over's, and the roll-over is gated on numbers. Two places would
+           be two answers, so both read MOB.ROLL_HP and neededFor(). */
+        let dmg = dpsAgainst(a, q) * MOB.RAM_K;
+        if ((s.mobHave || 1) < (s.mobNeed || 1)) {
+          dmg = Math.min(dmg, Math.max(0, (q.hp == null ? hpOf(q) : q.hp) - hpOf(q) * MOB.ROLL_HP));
+        }
+        hurt(q, dmg, a, "rammed by a pod of orcas");
+        if (typeof CBZ.predatorStagger === "function") {
+          try { CBZ.predatorStagger(q, 1.15); } catch (e) {}
+        }
+        if (typeof CBZ.creatureFlinch === "function") { try { CBZ.creatureFlinch(q); } catch (e) {} }
+        const qp = q.pos || (q.group && q.group.position);
+        if (qp) {
+          if (CBZ.waterSplashAt) {
+            try { CBZ.waterSplashAt(qp.x, surfaceAt(qp.x, qp.z, clock()), qp.z, 1.6 + scaleOf(a) * 0.6); } catch (e) {}
+          }
+          if (CBZ.goreBloom) { try { CBZ.goreBloom(qp.x, (qp.y || 0) + 0.4, qp.z, { amount: 0.7 }); } catch (e) {} }
+        }
+        AUDIT.rams = (AUDIT.rams || 0) + 1;
+      },
+    };
+    const mv = moveOf(a);
+    if (mv) o.move = mv;
+    return o;
+  }
+  function bodyLenOf(a) {
+    const s = a._orca;
+    if (s && s.bodyLen > 0) return s.bodyLen;
+    const L = PLAN_LEN * scaleOf(a) * (a.species && a.species.id === "orca" ? 1 : 1.0);
+    if (s) s.bodyLen = L;
+    return L;
+  }
+
+  /* THE ROLL-OVER. A shark held upside down goes into tonic immobility and
+     stops fighting; that is how a pod actually kills one, and it is the
+     animation that makes this feature.
+
+     IT IS ONE-WAY. `_orcaRoll` is written once, ticked from exactly one place,
+     and its last frame is lethal. A finisher that can re-enter its own first
+     phase produces constant pressure and no death — which is the precise
+     symptom the eight-orca measurement reported, so the guard is not
+     defensive tidiness, it is the bug. */
+  const ROLLING = [];
+  function beginRoll(a, q) {
+    if (q._orcaRoll || q._mpRoll) return false;
+    const s = a._orca;
+    q._orcaRoll = { by: a, t: 0, dur: MOB.ROLL_S, side: h01(homeOf(a).x, homeOf(a).z, 0x0CA1) > 0.5 ? 1 : -1 };
+    s.rolling = q;
+    if (ROLLING.indexOf(q) < 0 && ROLLING.length < 8) ROLLING.push(q);
+    AUDIT.rolls = (AUDIT.rolls || 0) + 1;
+    if (typeof CBZ.predatorStagger === "function") { try { CBZ.predatorStagger(q, MOB.ROLL_S + 1.5); } catch (e) {} }
+    if (typeof CBZ.creatureEndAttack === "function") { try { CBZ.creatureEndAttack(q); } catch (e) {} }
+    return true;
+  }
+  function stepRoll(a, s, dt) {
+    const q = s.rolling;
+    if (!q || q.dead || !q._orcaRoll || q._orcaRoll.by !== a) {
+      if (q && q._orcaRoll && q._orcaRoll.by === a) q._orcaRoll = null;
+      s.rolling = null;
+      return false;
+    }
+    const R = q._orcaRoll;
+    R.t += dt;
+    const p = clamp(R.t / R.dur, 0, 1);
+    // ride it over from the flank, jaws in
+    const hp = a.group.position, tp = q.group && q.group.position;
+    if (tp) {
+      const face = (q.heading != null) ? q.heading : -q.group.rotation.y;
+      const br = face + R.side * 1.35;
+      const rr = bodyLenOf(q) * 0.30 + bodyLenOf(a) * 0.22;
+      const k = Math.min(1, dt * 3.2);
+      hp.x += (tp.x + Math.cos(br) * rr - hp.x) * k;
+      hp.z += (tp.z + Math.sin(br) * rr - hp.z) * k;
+      hp.y += ((tp.y || 0) + 0.4 - hp.y) * k;
+      a.heading = Math.atan2(tp.z - hp.z, tp.x - hp.x);
+      if (CBZ.faceAnimalHeading) { try { CBZ.faceAnimalHeading(a.group, a.heading); } catch (e) {} }
+      if (CBZ.swimJaw) { try { CBZ.swimJaw(a, 0.7); } catch (e) {} }
+    }
+    hurt(q, dpsAgainst(a, q) * 2.4 * dt, a, "drowned by a pod of orcas");
+    if (p >= 1 || q.dead) {
+      // THE LAST FRAME IS LETHAL. Not "a lot of damage" — the kill, so the
+      // sequence cannot end with the animal alive and the pod starting over.
+      if (!q.dead) hurt(q, hpOf(q) * 2, a, "drowned by a pod of orcas");
+      q._orcaRoll = null; s.rolling = null;
+      AUDIT.kills = (AUDIT.kills || 0) + 1;
+      return false;
+    }
+    return true;
+  }
+  // the inversion itself, applied LAST (see the 47.2 pass): wildlife.js's
+  // animateSwim writes rotation.x every frame and would otherwise undo it on
+  // whichever iteration happened to come later.
+  function tonicPass(dt) {
+    for (let i = ROLLING.length - 1; i >= 0; i--) {
+      const q = ROLLING[i];
+      const R = q && q._orcaRoll;
+      if (!q || !R) {
+        // A DEAD ONE KEEPS THE POSE: it died belly-up, and putting it back the
+        // right way up on the frame it stops being rolled is the worst read
+        // this could produce.
+        if (q && !q.dead && typeof CBZ.creatureTonicClear === "function") {
+          try { CBZ.creatureTonicClear(q); } catch (e) {}
+        }
+        ROLLING.splice(i, 1);
+        continue;
+      }
+      if (typeof CBZ.creatureTonicRoll === "function") {
+        try { CBZ.creatureTonicRoll(q, clamp(R.t / R.dur, 0, 1), dt); } catch (e) {}
+      } else if (q.group) {
+        // no animation owner in this page: do the inversion plainly rather
+        // than silently not rolling anything over
+        q.group.rotation.x = Math.PI * clamp(R.t / R.dur, 0, 1);
+      }
+    }
+  }
+
+  /* ONE MEMBER'S FRAME OF THE MOB. Returns true when it owns the transform. */
+  function mobStep(a, s, dt, dist) {
+    if (mobOwnedElsewhere() || !POD()) return false;
+    if (s.rolling) { if (stepRoll(a, s, dt)) return true; }
+    if (a._orcaRoll) return false;                       // I am the one being rolled
+
+    // RETREATING: hurt and short-handed. "One orca loses. It should visibly
+    // lose: take a bite, break off bleeding, and retreat."
+    if (s.retreat > 0) {
+      s.retreat -= dt;
+      s.state = "disengage";
+      const q = s.quarry;
+      if (q && q.group) {
+        const away = Math.atan2(a.group.position.z - q.group.position.z,
+          a.group.position.x - q.group.position.x);
+        swim(a, away, (a._spd0 || a.spd || 3.4) * 2.6, dt);
+      } else swim(a, a.heading, (a._spd0 || a.spd || 3.4) * 2.2, dt);
+      if (!s.chum && typeof CBZ.goreChum === "function") {
+        try { s.chum = CBZ.goreChum(a.group.position.x, a.group.position.y, a.group.position.z, 1.0, 8); } catch (e) {}
+      }
+      if (s.retreat <= 0) { s.quarry = null; s.mobT = 8; }
+      return true;
+    }
+
+    const q = pickQuarry(a, s, dt);
+    if (!q || !q.group) return false;
+    const qp = q.group.position, p = a.group.position;
+    const d = Math.hypot(qp.x - p.x, qp.z - p.z);
+    if (d > MOB.R) return false;
+
+    const need = neededFor(a, q);
+    const have = Math.max(1, s.podN || 1);
+    s.mobNeed = need; s.mobHave = have;
+
+    // BREAK OFF DELIBERATELY when it is losing and short-handed.
+    if (a.hp != null && a.hp < hpOf(a) * MOB.BREAK_HP && have < need) {
+      s.retreat = 9;
+      AUDIT.breakoffs++;
+      return true;
+    }
+
+    // THE FINISHER, gated on the ONE comparison that decides the feature.
+    if ((q.hp || hpOf(q)) <= hpOf(q) * MOB.ROLL_HP && have >= need &&
+        !q._orcaRoll && !q._mpRoll && d < bodyLenOf(q) * 0.9 + bodyLenOf(a) * 0.6) {
+      if (beginRoll(a, s.quarry = q)) return true;
+    }
+
+    /* STATION, THEN RAM. The bearing slot comes from the pod sweep, so the
+       members genuinely surround it and it cannot face them all; the ram
+       cadence is creature_combat's own (opts.rate), phased per member off the
+       spawn hash so eight orcas hit eight times as often as one instead of
+       queueing behind a single commit token. */
+    const slot = s.slot | 0;
+    const bearing = (slot / Math.max(1, have)) * Math.PI * 2 +
+      h01(homeOf(a).x, homeOf(a).z, 0x0CA2) * 0.9;
+    const ring = bodyLenOf(q) * 0.62 + bodyLenOf(a) * 0.42;
+    const face = (q.heading != null) ? q.heading : -q.group.rotation.y;
+    const bx = qp.x + Math.cos(face + bearing) * ring;
+    const bz = qp.z + Math.sin(face + bearing) * ring;
+
+    const toMe = Math.atan2(p.z - qp.z, p.x - qp.x);
+    const onFlank = Math.abs(shortest(toMe - face)) > 0.85;
+    const inRange = d < ring * 1.9;
+    s.state = "mob";
+
+    /* AND THE QUARRY BITES BACK — which it otherwise would not, and that is
+       not a detail. In this path city/marine_predation.js is absent by
+       definition, so nothing in the game is driving the megalodon against an
+       ORCA: it is hunting the player, or it is wandering. A pod attacking a
+       punching bag always wins eventually, and the whole three-step curve the
+       owner asked for depends on the other side hurting somebody. So the
+       animal that is DRIVING this fight also resolves the quarry's answer to
+       it, on the quarry itself, focused on ONE member at a time — an apex that
+       divides its attention between eight is an apex that kills none of them,
+       and taking a bite is precisely how a lone orca is supposed to lose. */
+    q._orcaFocusT = (q._orcaFocusT || 0) - dt;
+    if (q._orcaFocusT <= 0 || !q._orcaFocus || q._orcaFocus.dead) {
+      q._orcaFocus = a; q._orcaFocusT = 2.2;
+    }
+    if (q._orcaFocus === a && inRange && !q._orcaRoll && !q.dead) {
+      hurt(a, dpsAgainst(q, a) * dt, q,
+        "killed by a " + String((q.species && (q.species.name || q.species.id)) || "shark").toLowerCase());
+      if (a.dead) return false;
+    }
+    if (typeof CBZ.creatureFight === "function" && onFlank && inRange) {
+      const o = ramOptsFor(a, s);
+      o.reach = bodyLenOf(q) * 0.55 + bodyLenOf(a) * 0.42;
+      o.dmg = dpsAgainst(a, q) * MOB.RAM_K;
+      try { CBZ.creatureFight(a, q, dt, o); } catch (e) {}
+      if (a._atkAnim >= 0) return true;                  // the swing owns the frame
+    }
+    // hold the bearing (or close on it)
+    const want = Math.atan2(bz - p.z, bx - p.x);
+    const gap = Math.hypot(bx - p.x, bz - p.z);
+    const cruise = (a._spd0 || a.spd || 3.4) * 2.2;
+    swim(a, gap > ring * 0.25 ? want : face, clamp(cruise * (0.6 + gap / (ring * 2)), cruise * 0.5, cruise * 3), dt);
+    s.diveWant = Math.max(0.4, (qp.y != null ? surfaceAt(p.x, p.z, clock()) - qp.y : (a.swimDepth || 2.6)));
+    return true;
   }
 
   // ============================================================
@@ -1921,7 +2331,11 @@
 
     // ---- THE DISTANCE GATE. Two hypots and out. -----------------------------
     const dist = P ? Math.hypot(g.position.x - P.x, g.position.z - P.z) : 1e9;
-    if (dist > SIM_R) return false;
+    // A FIGHT ALREADY RUNNING KEEPS RUNNING FURTHER OUT. Cutting a takedown
+    // off at the ordinary sim radius would leave a half-rolled megalodon
+    // frozen belly-up the moment the player's boat drifted 900 u away.
+    const busyFar = !!(a._orca && (a._orca.quarry || a._orca.rolling || a._orca.retreat > 0));
+    if (dist > (busyFar ? FIGHT_R : SIM_R)) return false;
 
     const s = ensure(a);
     applyIdentity(a, s);
@@ -1940,7 +2354,27 @@
       return false;
     }
 
-    /* THE PRIORITY LADDER, and the order is the whole design.
+    /* WHO IS AROUND ME. Throttled to POD_SCAN, and it has to run BEFORE the
+       mob: the finisher is gated on how many of us there are, so a pod that
+       has not counted itself yet would report one member and never unlock. */
+    if (POD()) podScan(a, s, dt);
+
+    /* THE MOB OUTRANKS EVERYTHING. A pod working a megalodon is the headline
+       of this whole feature; nothing about a boat, a breath or a formation is
+       allowed to interrupt it. It stands down instantly when
+       city/marine_predation.js is loaded — that file owns animal-vs-animal at
+       sea and this is only its degrade path (see §7b). */
+    if (mobStep(a, s, dt, dist)) {
+      if (s.act) endAct(s);
+      s.lift = 0; s.airborne = false; s.porp = false;
+      depth(a, s, dt, t);
+      if (CBZ.faceAnimalHeading) { try { CBZ.faceAnimalHeading(g, a.heading); } catch (e) {} }
+      s.owned = true;
+      proxy(a, s, dist, dt);
+      return true;
+    }
+
+    /* THE REST OF THE PRIORITY LADDER, and the order is the whole design.
 
        A COMMITTED ORCA DOES NOT BREACH. Once it has decided, the hunt owns the
        animal outright — an act firing over a rush would read as the animal
@@ -1989,7 +2423,6 @@
 
     // ---- POD TRAVEL (only when nothing more urgent owns the animal) ---------
     if (!owned && POD()) {
-      podScan(a, s, dt);
       s.formT -= dt;
       if (s.formT <= 0) {
         s.formT = 45 + h01(g.position.x, g.position.z, 0x0C90) * 60;
@@ -2083,6 +2516,7 @@
       if (!(dt > 0)) return;
       FRAME++;
       installWrap();
+      tonicPass(dt);
       const list = CBZ.cityWildlife;
       if (!list) return;
       const P = (CBZ.player && CBZ.player.pos) || null;

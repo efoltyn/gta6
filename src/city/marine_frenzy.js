@@ -392,7 +392,14 @@
   }
 
   function ensureFishMesh() {
-    if (fishMesh || !THREE || !CBZ.scene) return fishMesh;
+    // A CITY REBUILD REPLACES CBZ.scene. Re-parenting is one comparison and it
+    // is the difference between a bait ball and an invisible orphan in a scene
+    // graph nothing renders any more.
+    if (fishMesh) {
+      if (CBZ.scene && fishMesh.parent !== CBZ.scene) { try { CBZ.scene.add(fishMesh); } catch (e) {} }
+      return fishMesh;
+    }
+    if (!THREE || !CBZ.scene) return null;
     // A SLIVER, NOT A FISH. At the range a bait ball is read from, a body is
     // three pixels; what carries is the flash of a pale flank turning. So the
     // geometry is the cheapest thing that can flash, and there are 260 of them
@@ -476,7 +483,11 @@
   let gullMesh = null;
   const GULLS = [];
   function ensureGullMesh() {
-    if (gullMesh || !THREE || !CBZ.scene) return gullMesh;
+    if (gullMesh) {
+      if (CBZ.scene && gullMesh.parent !== CBZ.scene) { try { CBZ.scene.add(gullMesh); } catch (e) {} }
+      return gullMesh;
+    }
+    if (!THREE || !CBZ.scene) return null;
     const geo = new THREE.BufferGeometry();
     // nose, right tip, left tip, tail — two triangles, +X forward.
     const v = new Float32Array([
@@ -771,10 +782,35 @@
   }
   CBZ.marineScavengeStep = scavengeStep;
 
-  /* THE BAIT BALL'S OWN FEEDERS. A shark inside a ball is already being driven
-     at the school's anchor fish by marine_predation, so nothing has to steer
-     it — all this does is turn "a mouth is inside the ball" into mouthfuls,
-     which is what actually eats the school down and collapses it. */
+  /* THE SCHOOL IS THE HEALTH POOL, NOT THE FISH.
+
+     This is the fix for the flaw that would otherwise have made the whole
+     bait ball pointless. A sardine has 3 hp and a great white bites for forty,
+     so the FIRST hit killed the anchor, the ball collapsed four seconds after
+     it formed, and what the player actually saw was one dead sardine. Wrong on
+     its own terms too: a shark driving into a bait ball is not eating one fish,
+     it is eating the SCHOOL, and the school is the thing with the health.
+
+     So a hit landed on an animal that is anchoring a live ball is ABSORBED —
+     it becomes a mouthful out of the ball instead of damage to the individual,
+     and the individual only dies when the ball itself collapses. One function,
+     called from marine_predation's single damage path, and it is why the ball
+     lasts as long as there is a school left to eat. */
+  CBZ.marineFrenzyAbsorb = function (victim, dmg) {
+    if (!BALLS() || !victim || !(dmg > 0)) return false;
+    for (let i = 0; i < SITES.length; i++) {
+      const s = SITES[i];
+      if (!s.live || s.kind !== "bait" || s.collapse >= 0 || s.ref !== victim) continue;
+      takeBite(s, null);
+      return true;
+    }
+    return false;
+  };
+
+  /* AMBIENT NIBBLING. The absorb above carries the real bites; this is for the
+     mouths that are inside the ball without landing a creature_combat strike
+     this second, so a ball with three sharks in it is visibly going down even
+     between their attack cadences. Deliberately slower than a real bite. */
   function feedBalls(dt) {
     const list = CBZ.cityWildlife;
     if (!list) return;
@@ -783,7 +819,7 @@
       if (!s.live || s.kind !== "bait" || s.collapse >= 0 || !s.feeders) continue;
       s.eatT -= dt;
       if (s.eatT > 0) continue;
-      s.eatT = BITE_EVERY / Math.max(1, s.feeders);
+      s.eatT = (BITE_EVERY * 2) / Math.max(1, s.feeders);
       takeBite(s, nearestMouth(s));
     }
   }

@@ -781,11 +781,14 @@
     if (!a || !t) return false;
     return podCountNow(a, t) >= podNeeded(a, t);
   };
-  CBZ.marinePodRamReady = function (a, t) { return !!(a && t) && ramGate(a, t); };
-  CBZ.marinePodRam = function (a, t, dt) { return !!(a && t && dt > 0) && ramTick(a, t, dt); };
+  // Both gated on PODS() so CFG.MARINE_POD = false is a REAL revert for a
+  // consumer too — a species file spending these must not keep ramming after
+  // the flag that owns pod tactics has been turned off.
+  CBZ.marinePodRamReady = function (a, t) { return PODS() && !!(a && t) && ramGate(a, t); };
+  CBZ.marinePodRam = function (a, t, dt) { return PODS() && !!(a && t && dt > 0) && ramTick(a, t, dt); };
   CBZ.marinePodRollReady = function (a, t) { return !!(a && t) && rollReady(a, t, 0); };
   CBZ.marinePodRoll = function (a, t) {
-    if (!a || !t || t._mpRoll || t.dead) return false;
+    if (!PODS() || !a || !t || t._mpRoll || t.dead) return false;
     beginRoll(a, t);
     return true;
   };
@@ -856,6 +859,15 @@
   const MOB_FLOOR = ROLL_HP - 0.06;
   function hurt(victim, dmg, by, cause) {
     if (!victim || victim.dead || !(dmg > 0)) return;
+    /* A HIT ON A BALLED-UP SCHOOL EATS THE SCHOOL, NOT THE FISH. One guarded
+       call into city/marine_frenzy.js, which owns the ball and therefore owns
+       what its remaining mass is. Without it the anchor fish (3 hp) dies to the
+       first bite and the whole event is over before the player can see it. */
+    if (typeof CBZ.marineFrenzyAbsorb === "function") {
+      let ate = false;
+      try { ate = CBZ.marineFrenzyAbsorb(victim, dmg); } catch (e) { ate = false; }
+      if (ate) return;
+    }
     if (by && by.species && victim.species && !victim._mpRoll &&
         marineRelation(by.species, victim.species) === 2) {
       const floor = maxHpOf(victim) * MOB_FLOOR;
