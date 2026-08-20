@@ -114,6 +114,8 @@
 
   CBZ.registerFacade("brickhouse", {
     label: "Brick Colonial House",
+    // WHAT IT IS MADE OF (city/collapse.js MATERIALS) — a Georgian house is solid brick, two wythes deep.
+    structure: "brick",
     crownsRoof: true,
     // A Georgian grammar survives four storeys (that is a town mansion) and
     // dies instantly on a tower, so it declares a ceiling and no floor.

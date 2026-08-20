@@ -71,6 +71,8 @@
 
   CBZ.registerFacade("gothic", {
     label: "Gothic Revival",
+    // WHAT IT IS MADE OF (city/collapse.js MATERIALS) — gothic revival is unreinforced masonry with buttresses.
+    structure: "masonry",
     crownsRoof: true,
     build: function (ctx, F, spec) {
       const W = ctx.w, D = ctx.d, FH = ctx.FH, ST = Math.max(1, ctx.storeys);

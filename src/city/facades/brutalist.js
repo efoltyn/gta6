@@ -49,6 +49,8 @@
 
   CBZ.registerFacade("brutalist", {
     label: "Beton Brut",
+    // WHAT IT IS MADE OF (city/collapse.js MATERIALS) — beton brut IS the structure — cast in place.
+    structure: "concrete",
     crownsRoof: true,
     build: function (ctx, F, spec) {
       const FH = ctx.FH, rTop = ctx.rTop, ST = ctx.storeys;

@@ -80,6 +80,8 @@
 
   CBZ.registerFacade("faceted", {
     label: "Faceted Prism",
+    // WHAT IT IS MADE OF (city/collapse.js MATERIALS) — a faceted prism is a unitised curtain wall on a steel core.
+    structure: "glassbox",
     crownsRoof: true,
     minStoreys: 18,
     build: function (ctx, F, spec) {

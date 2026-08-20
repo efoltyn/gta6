@@ -83,6 +83,8 @@
 
   CBZ.registerFacade("stone", {
     label: "Ashlar Bank",
+    // WHAT IT IS MADE OF (city/collapse.js MATERIALS) — an ashlar bank is exactly what it says.
+    structure: "stone",
     crownsRoof: true,
     build: function (ctx, F, spec) {
       const FH = ctx.FH, H = ctx.rTop;

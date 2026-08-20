@@ -15,10 +15,11 @@
                   fire is what converts a survivable hit into a fatal one,
                   exactly as in the real sequence (NIST: fireproofing stripped
                   by the impact, steel softens, floors sag)
-     4 CRITICAL   load path failing — the tower visibly sags, sways and sheds
-                  its facade. The last beat where it is still standing.
-     5 COLLAPSING the catastrophe: pancake front descending at ~2/3 g, tilt,
-                  ejecta, and a dust curtain that swallows the block
+     4 CRITICAL   load path failing. Bare columns where a bay of cladding used
+                  to be, rebar out of the broken slabs, an apron of masonry on
+                  the pavement. The last beat where it is still standing.
+     5 COLLAPSING the catastrophe, choreographed by city/collapse.js in
+                  whatever grammar this building's material calls for
      6 RUBBLE     handed to city/demolition.js, which already owns the
                   aftermath calendar (rubble -> cleared -> scaffold -> rebuilt)
 
@@ -45,11 +46,13 @@
    • Teardown's author deliberately REFUSED global structural simulation
      because it takes control away from the player. We agree: a building only
      collapses when damage genuinely crosses its capacity, never ambiently.
-   • Battlefield/Frostbite + Control: the collapse itself is a PRE-AUTHORED
-     mesh swap hidden behind a dust curtain, not a rigid-body sim. This repo
-     has no rigid-body engine and does not want one. The real building is
-     batch-hidden at the exact frame the dust reaches full occlusion, and a
-     cheap proxy shell (<=10 boxes) performs the pancake.
+   • Battlefield/Frostbite + Control: the collapse itself is a mesh swap
+     hidden behind a dust curtain, not a rigid-body sim. This repo has no
+     rigid-body engine and does not want one. The real building is batch-hidden
+     at the exact frame the dust reaches full occlusion and a proxy performs
+     the fall. THE PROXY AND THE FALL ARE city/collapse.js's — see that file
+     for why the old one (ten flat grey boxes, one motion for every building
+     in the game) was the thing that made a well-timed collapse read as fake.
    • Far Cry 2's fire model: a coarse cell automaton (here: one cell per
      FLOOR), wind-biased spread, finite burn lifetime, and cumulative heat
      exposure that eventually flips a floor's load-bearing flag.
@@ -63,8 +66,10 @@
    • Concurrent collapses are hard-capped (CBZ.qScale 1..4). Over the cap, a
      condemned building SNAPS straight to rubble through demolition.js — the
      same end state, no animation. Nothing queues up unbounded.
-   • The proxy shell is <=10 boxes sharing cached materials; a whole district
-     coming down is bounded by the concurrency cap, not by district size.
+   • The proxy shell allocates no geometry at all (city/collapse.js scales one
+     shared unit box) and no materials (every colour is a CBZ.cmat cache hit);
+     a whole district coming down is bounded by the concurrency cap, not by
+     district size.
    • Every particle call routes into crashfx.js's already-pooled, already-
      capped systems. This file adds no new particle pool.
 
@@ -107,11 +112,16 @@
   // Stage thresholds as a fraction of capacity. Wide bands on purpose: most
   // hits should visibly move the building without condemning it.
   const T_SCARRED = 0.08, T_WOUNDED = 0.30, T_CRITICAL = 0.72;
-  // Free-fall is 9.81; NIST/Bazant put the observed collapse front at about
-  // two thirds of it, because the intact structure below still resists.
-  const COLLAPSE_G = 6.5;
-  const PRESHUDDER = 1.15;      // seconds of creak/sway/dust before anything moves
-  const SETTLE = 2.4;           // seconds of dust after the shell is gone
+  // THE TELL: seconds of creak, sway and dust before anything moves. The
+  // player gets this long to understand what is about to happen, which is what
+  // makes the collapse read as a consequence rather than as a cut. The city
+  // wants a full beat here; the disaster island passes ~0.3, because its quake
+  // has been shaking the world for ten seconds already.
+  const PRESHUDDER = 1.15;
+  // The fall itself — its acceleration, its duration, its settle — belongs to
+  // city/collapse.js now, along with the grammar that decides its SHAPE. This
+  // file kept only the number it actually owns: how long the building spends
+  // telling you.
   // Fire: one cell per floor. Far Cry 2 model — finite lifetime, neighbour
   // ignition, wind bias, cumulative structural exposure.
   const FIRE_TICK = 0.25;       // 4 Hz
@@ -876,6 +886,35 @@
   function stageBeat(rec, stage) {
     const b = rec.b, w = rec.wound;
     if (!w) return;
+    /* ---- THE STANDING BUILDING HAS TO LOOK HIT ---------------------------
+       "All stages of destruction." Every stage below COLLAPSING used to be
+       pure FX: a puff of debris, a sound, and then the building went back to
+       being a pristine box until the next hit. So an RPG produced a beautiful
+       explosion in front of an untouched wall, which is exactly the fault the
+       owner filmed — the blast looks real and its EFFECT does not.
+
+       collapse.js's damage skin is real geometry hung on the facade at the
+       wound: blown-out openings with the floor slab edges showing through
+       them, a panel left hanging off its top fixing, bare columns and rebar
+       at CRITICAL, and an apron of masonry on the pavement that grows with
+       the stage. It is rebuilt (never accumulated) on each transition, so it
+       cannot grow without bound, and it is keyed on the lot so a building
+       that is repaired by demolition.js's rebuild calendar loses it.
+
+       Nothing is painted ON the wall: the owner purged facade decals for a
+       real reason (soot does not adhere to a vertical pane), and this obeys
+       that — every piece of the skin is geometry that is genuinely missing
+       or genuinely hanging. */
+    if (CBZ.collapse && CBZ.collapse.skin) {
+      try {
+        CBZ.collapse.skin({
+          root: (arena() && arena().root) || CBZ.scene,
+          ox: b.ox, oz: b.oz, gy: 0, w: b.w, d: b.d,
+          h: b.h || (b.storeys * (b.FH || 3.2)), storeys: b.storeys, FH: b.FH || 3.2,
+          wall: b.wallColor, masonry: b.masonry, style: styleOf(b), key: rec.key,
+        }, stage, { nx: w.nx, nz: w.nz, floor: w.floor });
+      } catch (e) {}
+    }
     try {
       if (stage === STAGE.WOUNDED) {
         // the facade is genuinely open now — sheet debris down it and let the
@@ -1005,31 +1044,28 @@
   }
 
   /* ============================================================
-     THE COLLAPSE.
+     THE COLLAPSE — this file's half of it.
 
-     Beat sheet (research-derived, compressed to game pacing):
-       t=0.00  CONDEMNED. The building is still standing and still solid.
-               Creak + rising rumble + dust jets punching out of the wound.
-               This is the "tell" — the player gets ~1.1s to understand what
-               is about to happen, which is what makes it read as a
-               consequence rather than a cut.
-       t=1.15  THE SWAP. Dust reaches full occlusion at the base; the real
-               (batched) building is hidden through CBZ.batchHideGroup and a
-               proxy shell of storey bands takes its place in the same pose.
-               Colliders/platforms/LOS/doors unregister here — the block is
-               no longer solid, which is also when anyone still inside dies.
-       t=1.15..T  THE PANCAKE. A collapse front descends from the initiating
-               floor at ~2/3 g. Bands above the front compress and sink;
-               the shell tilts toward the wound (NIST observed ~25 degrees of
-               tilt before the drop). Each band the front passes ejects a dust
-               ring OUTWARD and a debris burst — the air jets that punch out
-               below the front in every real collapse.
-       t=T     IMPACT. Ground shock ring, the heaviest shake in the game short
-               of the nuke, and the shell is disposed. demolition.js lays its
-               deterministic rubble pile and starts its rebuild calendar.
-       t=T+2.4 SETTLE. The dust pall thins.
+     The beat sheet is city/collapse.js's now; what stays here is the three
+     things only the ledger can answer:
 
-     T = sqrt(2h / 6.5) — a 35 m block falls in ~3.3 s, a 100 m tower in ~5.5 s.
+       CONDEMNED   this function. The lot is committed, a concurrency slot is
+                   taken (or the teardown is queued if they are all busy), and
+                   the choreography is handed to the engine along with the
+                   wound it should fall out of.
+       THE SWAP    hideReal() — batch-hide the merged building, unregister its
+                   colliders, platforms, LOS blockers and doors, and kill what
+                   is standing inside it. Fired by the engine at the exact
+                   frame the dust reaches full occlusion.
+       IMPACT      finishCollapse() — the ground beat, the debris field on the
+                   street, the kill radius, the city event, and the handoff to
+                   demolition.js, which already owns the rubble pile and the
+                   in-game rebuild calendar.
+
+     Everything between those — how long the tell runs, what the shell looks
+     like, whether this building pancakes or hinges over or shears along the
+     hit, what it breaks into and where the pieces land — is the engine's, and
+     is the same code the disaster island's earthquake runs.
      ============================================================ */
   function beginCollapse(rec, initFloor) {
     if (rec.stage >= STAGE.COLLAPSING) return;
@@ -1047,7 +1083,8 @@
     // budget the old hand-rolled nuke used to enforce with its own "2 lots per
     // frame" loop before that loop was (correctly) deleted as duplication.
     // The budget belongs HERE, once, for every condemnation source.
-    if (!CBZ.CONFIG.STRUCT_COLLAPSE_V1 || collapsing.length >= maxCollapses()) {
+    if (!CBZ.CONFIG.STRUCT_COLLAPSE_V1 || !CBZ.collapse || !CBZ.CONFIG.COLLAPSE_V2
+        || collapsing.length >= maxCollapses()) {
       if (!condemnedSet.has(rec)) { condemnedSet.add(rec); condemned.push(rec); }
       return;
     }
@@ -1056,66 +1093,92 @@
        hit() documents (see the `Math.floor(...) || 0` note and why it exists).
        A lot whose building record carries NEITHER `h` NOR `storeys` — a stub
        from a mod, a partially-built record, a net-replayed lot — makes
-       `b.storeys * FH` NaN. NaN then travels: h -> initY -> tDown/tUp ->
-       job.fall, and `k = job.t / job.fall` is NaN, so the `k >= 1` test that
-       ENDS the fall (below, in stepCollapse) is never true. The job holds one
-       of the 1..4 concurrency slots FOREVER and the whole feature wedges after
-       a single malformed record — the identical failure mode that guard fixed.
-       12 m ~= a 4-storey block, the median of the city's lots.
-       NaN || 12 === 12; every real height passes straight through. */
+       `b.storeys * FH` NaN. NaN then travels into the choreography's clock and
+       the job holds one of the 1..4 concurrency slots FOREVER, wedging the
+       whole feature after a single malformed record.
+       12 m ~= a 4-storey block, the median of the city's lots. */
     const h = b.h || (b.storeys * (b.FH || 3.2)) || 12;
     const w = rec.wound || { nx: 1, nz: 0, floor: 0 };
-    /* ---- CRUSH-DOWN / CRUSH-UP -----------------------------------------
-       The collapse starts AT THE WOUND and eats the building both ways. This
-       is the two-phase model from the only full-scale observation there is:
 
-         CRUSH-DOWN  the block above the failed floor drops onto the floor
-                     below, overloads its connections, adds that floor's mass
-                     to itself, and repeats — a front descending under gravity.
-         CRUSH-UP    once enough momentum has accumulated, the columns above
-                     start buckling storey by storey too, chasing the mass
-                     down. Late in the sequence a storey goes in under a tenth
-                     of a second.
+    /* ---- THE CHOREOGRAPHY IS city/collapse.js's -------------------------
+       This file owns WHETHER a building comes down: the per-floor integrity
+       array, the load-path test, the fire that drains it and the seven-stage
+       ledger. It does NOT own what the fall looks like, and it used to, in
+       three hundred lines that produced ONE motion — a stack of flat grey
+       boxes scaling downward — for a steel tower, a brick walk-up and a
+       timber ranch house alike.
 
-       `initY` — where the plane went in — used to be COMPUTED AND THEN NEVER
-       READ: the old front started at the roof and swallowed the tower
-       uniformly downward, so every collapse looked identical no matter what
-       caused it or where. Now the two fronts open out of the hole, which means
-       a strike on floor 40 visibly drops the top forty floors THROUGH the
-       impact scar while the base stands for another second — the read that
-       makes the collapse legibly a consequence of the hit.
+       collapse.js derives the material from the building's own facade
+       grammar and picks a GRAMMAR to match: a frame pancakes, a slender
+       masonry stack hinges at its base and falls across the street, a
+       wounded mid-rise shears along the hit, timber folds, adobe crumbles.
+       The shell it raises is built from this building's real wall colour,
+       real storey height and real window rhythm, so the swap behind the dust
+       is a frame nobody can see — which was the actual reason the old
+       collapse read as fake however well it was timed.
 
-       Down runs at the observed ~2/3 g. Up runs slower (it is buckling, not
-       falling) but accelerates; 0.8 of the down rate lands the whole event
-       inside the 5-9 s window real collapses of this height occupy.
+       REVERT: ?cfg_COLLAPSE_V2=0 sends every condemnation down the same
+       queue an over-the-cap one already takes — demolition.js's instant
+       snap to rubble. That is the honest fallback: this file no longer
+       carries a second animator to fall back TO, and the old one is not
+       worth keeping alive as dead code to pretend otherwise. The disaster
+       island's own fallback (systems/disasters.js) IS its old ticker, which
+       still exists there.
+
+       The three seams below are the whole contract, and each one is a thing
+       only THIS file can do:
+         onSwap   — hide the batched building, pull its colliders, kill what
+                    is standing inside it
+         onGround — the ground beat, the debris field and the handoff to
+                    demolition.js's rubble + rebuild calendar
+         onDone   — free the concurrency slot
     --------------------------------------------------------------------- */
-    const initY = Math.max(0.5, Math.min(h - 0.5, (initFloor || 0) * (b.FH || 3.2)));
-    const tDown = Math.sqrt(2 * initY / COLLAPSE_G);
-    const tUp = Math.sqrt(2 * Math.max(0.5, h - initY) / (COLLAPSE_G * 0.8));
-    const job = {
-      rec: rec, lot: lot, b: b, t: 0,
-      phase: 0,                                     // 0 pre-shudder, 1 falling, 2 settling
-      fall: Math.max(2, Math.min(9, Math.max(tDown, tUp))),
-      top: h,
-      initY: initY,
-      front: initY,                                 // the descending collapse front
-      frontUp: initY,                               // the rising buckling front
-      tiltX: -w.nz * 0.30, tiltZ: w.nx * 0.30,      // tilt AWAY from the wound side
-      shell: null, bands: null, dustAcc: 0,
-    };
+    const job = CBZ.collapse.play({
+      root: (arena() && arena().root) || CBZ.scene,
+      ox: b.ox, oz: b.oz, gy: 0,
+      w: b.w, d: b.d, h: h, storeys: b.storeys, FH: b.FH || 3.2,
+      wall: b.wallColor, masonry: b.masonry, style: styleOf(b), key: rec.key,
+    }, {
+      wound: { nx: w.nx, nz: w.nz, floor: initFloor || 0 },
+      preShudder: PRESHUDDER,
+      onSwap: function () { hideReal(rec); },
+      onGround: function () { finishCollapse(rec, false); },
+      onDone: function () {
+        const i = collapsing.indexOf(job);
+        if (i >= 0) collapsing.splice(i, 1);
+      },
+    });
+    if (!job) {                                   // engine declined (flag off)
+      if (!condemnedSet.has(rec)) { condemnedSet.add(rec); condemned.push(rec); }
+      return;
+    }
+    job.rec = rec; job.lot = lot;
     collapsing.push(job);
 
-    // the tell: rumble, dust jets out of the wound, a groan of steel
+    // the wound itself keeps spitting debris while the tell runs
     try {
-      if (CBZ.shake) CBZ.shake(1.4);
-      if (CBZ.sfx) CBZ.sfx("rumble");
-      if (CBZ.cityDustKick) CBZ.cityDustKick(b.ox, 0.6, b.oz, 2.2);
       if (rec.wound && CBZ.cityChunk) {
         CBZ.cityChunk(rec.wound.x, rec.wound.y, rec.wound.z,
           { count: 8, force: 7, dirx: rec.wound.nx, dirz: rec.wound.nz });
       }
     } catch (e) {}
   }
+
+  /* WHICH FACADE GRAMMAR IS THIS BUILDING WEARING? collapse.js asks the
+     grammar what it is made of (city/facade_kit.js's `structure:` field), and
+     the grammar can only be asked if we can name it. buildings.js resolves it
+     the same two ways: an explicit {dress:{style}} at the call site, or the
+     city-wide position hash. Ask the kit rather than re-deriving it here, so
+     the building that COLLAPSES is made of what the building that was BUILT
+     is made of. */
+  function styleOf(b) {
+    if (!b) return null;
+    if (b.dress && b.dress.style) return b.dress.style;
+    if (b.facadeStyle) return b.facadeStyle;
+    if (!CBZ.facadePick) return null;
+    try { return CBZ.facadePick(b.ox, b.oz, b.storeys, b.dress || null); } catch (e) { return null; }
+  }
+
   S.forceCollapse = function (lot, opts) {
     if (!lot || !lot.building) return false;
     const rec = recFor(lot);
@@ -1139,33 +1202,13 @@
      standard one anyway: hide the real thing behind dust and animate a cheap
      stand-in (Frostbite/Control both ship exactly this).
   ------------------------------------------------------------------------ */
-  function buildShell(job) {
-    const b = job.b, A = arena();
-    if (!A || !A.root || typeof THREE === "undefined") return;
-    const g = new THREE.Group();
-    const nBand = Math.max(2, Math.min(b.storeys | 0, Math.round(CBZ.qScale ? CBZ.qScale(3, 9) : 8)));
-    const bandH = job.top / nBand;
-    const mat = CBZ.cmat ? CBZ.cmat(b.wallColor || 0x8b8f94) : new THREE.MeshLambertMaterial({ color: b.wallColor || 0x8b8f94 });
-    const bands = [];
-    for (let i = 0; i < nBand; i++) {
-      // a hair inset so the shell never z-fights the neighbours it replaces
-      const m = new THREE.Mesh(new THREE.BoxGeometry(b.w - 0.06, bandH, b.d - 0.06), mat);
-      m.position.set(0, bandH * (i + 0.5), 0);
-      m.castShadow = false; m.receiveShadow = true;
-      g.add(m);
-      bands.push({ mesh: m, y0: bandH * i, h: bandH, crushed: 0, blew: false });
-    }
-    g.position.set(b.ox, 0, b.oz);
-    A.root.add(g);
-    job.shell = g; job.bands = bands; job.bandH = bandH;
-  }
-
-  function disposeShell(job) {
-    if (!job.shell) return;
-    if (job.shell.parent) job.shell.parent.remove(job.shell);
-    job.shell.traverse(function (o) { if (o.isMesh && o.geometry) o.geometry.dispose(); });   // materials are the shared cmat cache — never dispose
-    job.shell = null; job.bands = null;
-  }
+  /* THE PROXY SHELL MOVED to city/collapse.js. It was <=10 flat boxes in one
+     grey; it is now built out of this building's own wall colour, storey
+     height, window rhythm, plinth and cornice, and it decomposes into face
+     panels and floor slabs so a grammar can peel one face off and expose the
+     slabs behind it. See that file's section 3 for why the proxy exists at
+     all (merged static buffers cannot be moved, so the industry-standard
+     hide-behind-dust swap is the only honest option in this engine). */
 
   /* ---- hide the real building (and kill what is inside) ----------------- */
   /* Remove every member of `set` from `arr`, IN PLACE, in one pass.
@@ -1263,97 +1306,11 @@
     } catch (e) {}
   }
 
-  /* ---- the per-frame choreography --------------------------------------- */
-  function stepCollapse(dt) {
-    if (!collapsing.length) return;
-    for (let i = collapsing.length - 1; i >= 0; i--) {
-      const job = collapsing[i];
-      job.t += dt;
-
-      // PHASE 0 — pre-shudder. Nothing moves yet; the world just knows.
-      if (job.phase === 0) {
-        job.dustAcc += dt;
-        if (job.dustAcc > 0.28) {
-          job.dustAcc = 0;
-          const b = job.b;
-          try {
-            if (CBZ.cityDustKick) CBZ.cityDustKick(b.ox + (Math.random() - 0.5) * b.w, 0.5, b.oz + (Math.random() - 0.5) * b.d, 1.4);
-            if (CBZ.shake) CBZ.shake(0.5);
-          } catch (e) {}
-        }
-        if (job.t >= PRESHUDDER) {
-          // THE SWAP — hidden behind the dust we have been building for 1.15s
-          hideReal(job.rec);
-          buildShell(job);
-          job.phase = 1; job.t = 0;
-          try { if (CBZ.sfx) CBZ.sfx("explosion"); if (CBZ.shake) CBZ.shake(2.6); } catch (e) {}
-        }
-        continue;
-      }
-
-      // PHASE 1 — the pancake.
-      if (job.phase === 1) {
-        const k = Math.min(1, job.t / job.fall);
-        // BOTH FRONTS OPEN OUT OF THE WOUND. Down under ~2/3 g (the observed
-        // collapse-front acceleration), up at 0.8 of that (buckling, not
-        // falling). Everything between them has already been consumed.
-        job.front = Math.max(0, job.initY - 0.5 * COLLAPSE_G * job.t * job.t);
-        job.frontUp = Math.min(job.top, job.initY + 0.5 * COLLAPSE_G * 0.8 * job.t * job.t);
-        // how far the surviving upper block has ridden down as the structure
-        // beneath it is eaten — this is what makes the top of the tower move
-        // as ONE MASS instead of every band squashing in place.
-        const sink = job.initY - job.front;
-        if (job.shell && job.bands) {
-          // tilt grows early then holds — real collapses lean, then drop
-          const tk = Math.min(1, job.t / (job.fall * 0.55));
-          job.shell.rotation.x = job.tiltX * tk;
-          job.shell.rotation.z = job.tiltZ * tk;
-          for (let bi = 0; bi < job.bands.length; bi++) {
-            const band = job.bands[bi];
-            if (band.y0 + band.h <= job.front) continue;      // still below the descending front: intact
-            if (band.y0 >= job.frontUp) {
-              // ABOVE the rising front: not yet buckling. It rides the
-              // collapse down as an intact block — the falling upper section.
-              band.mesh.position.y = Math.max(band.h * 0.5, band.y0 - sink + band.h * 0.5);
-              continue;
-            }
-            // this band is inside the consumed zone — crush it
-            band.crushed = Math.min(1, band.crushed + dt * 2.6);
-            const s = 1 - band.crushed * 0.94;
-            band.mesh.scale.y = s < 0.06 ? 0.06 : s;
-            const rest = Math.max(0, band.y0 - sink);
-            band.mesh.position.y = Math.max(band.h * 0.5 * band.mesh.scale.y,
-              job.front + (rest - job.front) * (1 - band.crushed) + band.h * 0.5 * band.mesh.scale.y);
-            // the AIR JET: each floor the front passes expels its air and
-            // contents OUTWARD, which is the dust puff you see punching out
-            // below the front in every real collapse. Once per band.
-            if (!band.blew && band.crushed > 0.25) {
-              band.blew = true;
-              const b = job.b;
-              const a = Math.random() * 6.2832;
-              try {
-                if (CBZ.cityDustKick) CBZ.cityDustKick(b.ox + Math.cos(a) * b.w * 0.5, band.y0, b.oz + Math.sin(a) * b.d * 0.5, 2.0);
-                if (CBZ.cityChunk) CBZ.cityChunk(b.ox + Math.cos(a) * b.w * 0.4, band.y0, b.oz + Math.sin(a) * b.d * 0.4,
-                  { count: 4, force: 6, dirx: Math.cos(a), dirz: Math.sin(a) });
-              } catch (e) {}
-            }
-          }
-        }
-        // rolling rumble the whole way down, at ~6 Hz so it reads as a roar
-        job.dustAcc += dt;
-        if (job.dustAcc > 0.16) { job.dustAcc = 0; try { if (CBZ.shake) CBZ.shake(1.5 * (1 - k * 0.4)); } catch (e) {} }
-        if (k >= 1) {
-          disposeShell(job);
-          finishCollapse(job.rec, false);
-          job.phase = 2; job.t = 0;
-        }
-        continue;
-      }
-
-      // PHASE 2 — settle. The pall thins; then the job retires.
-      if (job.t >= SETTLE) { collapsing.splice(i, 1); }
-    }
-  }
+  /* THE PER-FRAME CHOREOGRAPHY MOVED to city/collapse.js, which ticks its own
+     jobs at update order 34.46 (immediately behind this file's 34.45, so a
+     building condemned by a wave this frame starts falling the same frame).
+     This file kept the parts only it can own: the concurrency cap, the swap,
+     the aftermath handoff and the ledger. */
 
   /* ---- the ground impact + handoff to demolition.js ---------------------- */
   function finishCollapse(rec, snap) {
@@ -1418,6 +1375,9 @@
     }
 
     rec.stage = STAGE.RUBBLE;
+    // the wound dressing goes with the building it was hung on — demolition.js
+    // owns the picture from here (rubble → cleared → scaffold → rebuilt)
+    try { if (CBZ.collapse && CBZ.collapse.skinClear) CBZ.collapse.skinClear({ key: rec.key, ox: b.ox, oz: b.oz }); } catch (e) {}
     rec.fires.length = 0;
     rec.yield = null;
     burningRecs.delete(rec);
@@ -1551,7 +1511,6 @@
     if (!ledger.size && !collapsing.length && !condemned.length && !deferredSweepCount) return;
     const d = dt > 0.25 ? 0.25 : dt;
     if (deferredSweepCount) drainDeferredSweeps();
-    if (collapsing.length) stepCollapse(d);
     if (condemned.length) drainCondemned();
     stepYields(d);
     if (CBZ.CONFIG.STRUCT_FIRE) stepFires(d);
@@ -1604,7 +1563,8 @@
   S.reset = function () {
     for (let i = collapsing.length - 1; i >= 0; i--) {
       const job = collapsing[i];
-      disposeShell(job);
+      // collapse.js owns the shell; its own reset() (called just below) frees
+      // every shell and every fragment in flight in one pass.
       if (job.phase >= 1 && job.rec && job.rec.stage !== STAGE.RUBBLE) {
         try {
           if (CBZ.cityDemolition && CBZ.cityDemolition.destroy) CBZ.cityDemolition.destroy(job.lot, { quiet: true, silent: true });
@@ -1612,6 +1572,7 @@
       }
     }
     collapsing.length = 0;
+    try { if (CBZ.collapse) CBZ.collapse.reset(); } catch (e) {}
     // queued-but-untouched condemnations never ran hideReal, so they just drop
     condemned.length = 0;
     condemnedSet.clear();

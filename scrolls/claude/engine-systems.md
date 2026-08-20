@@ -24,6 +24,35 @@ Before building anything adjacent, wire into the existing system:
   `CBZ.waterSharedAudit().cityGated` already cured for the water oracle: an
   effect that was never city-specific, gated to the city because only the city
   could ANSWER for it.
+- **THE COLLAPSE ENGINE** — `src/city/collapse.js`. `CBZ.collapse.play(desc,
+  opts)` is the ONE answer to "what does a building look like while it is
+  being destroyed", and it is the only one left: `city/structural.js`'s band
+  stack and `systems/disasters.js`'s sink-the-group-into-the-island are both
+  gone, migrated onto it. The caller keeps what only it can own — the decision,
+  the kill rules, the aftermath — and hands over three seams (`onSwap`,
+  `onGround`, `onDone`).
+  **What a building is MADE OF is declared by its facade grammar**
+  (`structure:` in `CBZ.registerFacade`, one of the eight rows in
+  `collapse.js`'s MATERIALS table), never by a table of lot names here. From
+  that plus its slenderness the engine picks a GRAMMAR — pancake, topple,
+  shear, fold, crumble — and a new one is `CBZ.collapse.registerMode(id, def)`
+  from any file, never an edit to a switch. `CBZ.collapse.skin(desc, stage,
+  wound)` is the progressive damage dressing on a building that is still
+  standing (blown openings, exposed floor slabs, hanging panels, bare columns,
+  rebar, a rubble apron); `CBZ.collapse.debug()` publishes each live job's
+  grammar, phase and fall fraction so a tool waits on real state instead of on
+  a wall-clock second. Ratchet `CBZ.collapseAudit().hardcoded` — facade
+  grammars with no declared material — pinned at 0.
+  Reverts: `?cfg_COLLAPSE_V2=0` · `?cfg_COLLAPSE_FRAGMENTS=0` ·
+  `?cfg_COLLAPSE_SKIN=0`. Gate: `npm run test:collapse`. Before/after:
+  `npm run visual:collapse`.
+- **THE FACADE KIT IS ON IN THE CITY** — `CBZ.CONFIG.FACADE_KIT_CITY` defaults
+  TRUE since 2026-08-20. An undressed city lot gets a grammar by position hash
+  (filtered to its storey range, no rng draw), and every box it emits folds
+  into the host's merged deco buckets before `flushDeco()`, so a dressed
+  skyline is the same draw-call count as a bare one. `CBZ.facadePick(ox, oz,
+  storeys, dress)` answers "which grammar is this building wearing" for anyone
+  downstream — never re-derive it. Revert: `?cfg_FACADE_KIT_CITY=0`.
 - **THE BLAST vs THE BLAST CHAIN** — `CBZ.cityExplosion` is the head of a
   wrapper chain (buildings' structural ledger, bank vault doors,
   construction-site walls, wildlife panic, armored hulls, demolition, water

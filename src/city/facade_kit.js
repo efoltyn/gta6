@@ -82,11 +82,31 @@
     // building renders as the bare base building it already was, which is
     // exactly the "before" side of the comparison tool. One flag, one revert.
     if (CBZ.CONFIG.FACADE_KIT == null) CBZ.CONFIG.FACADE_KIT = true;
-    // FACADE_KIT_CITY — hand ordinary, undressed city buildings a facade by
-    // position hash. DEFAULT OFF: the kit ships inert on the live city so it
-    // cannot move a single shop, lot or math-gate number without being asked.
-    // Turn on with ?cfg_FACADE_KIT_CITY=1 to see the whole skyline wearing it.
-    if (CBZ.CONFIG.FACADE_KIT_CITY == null) CBZ.CONFIG.FACADE_KIT_CITY = false;
+    /* FACADE_KIT_CITY — hand ordinary, undressed city buildings a facade by
+       position hash.
+
+       DEFAULT ON (2026-08-20). It shipped OFF so the kit could not move a
+       single shop, lot or math-gate number without being asked, and that was
+       the right call while it was 31 grammars nobody had walked past. The
+       owner has now asked for the opposite, by name: "this also means adding
+       these facades to gang city". The disaster island has been wearing them
+       since it was built (world/disaster_arena.js dressIslandFacade) and the
+       city — the mode the kit was written for, off the president's Capitol —
+       was the one place still standing in bare boxes.
+
+       WHAT IT COSTS: nothing per building. Every box a grammar emits lands in
+       the host's merged deco buckets before flushDeco() and then in
+       core/batch.js's city-wide merge, so a dressed skyline is the same draw
+       call count as a bare one — that is property 4 in this file's header and
+       the reason the kit was built this way.
+
+       WHAT IT DOES NOT TOUCH: an explicit {dress:{style}} at a call site
+       always wins, undressed lots still get their style filtered by storey
+       range, and the pick is a pure position hash — no rng draw, so city
+       placement cannot desync.
+
+       One-line revert: ?cfg_FACADE_KIT_CITY=0. */
+    if (CBZ.CONFIG.FACADE_KIT_CITY == null) CBZ.CONFIG.FACADE_KIT_CITY = true;
   }
   function on(n) { return !(CBZ.CONFIG && CBZ.CONFIG[n] === false); }
 
@@ -111,7 +131,18 @@
       maxStoreys: def.maxStoreys || Infinity,
       // `ownDoor` tells the kit this grammar draws its own entrance, so the
       // automatic door surround is skipped rather than stacked on top of it.
-      ownDoor: !!def.ownDoor });
+      ownDoor: !!def.ownDoor,
+      // WHAT IS IT MADE OF. A key into city/collapse.js's MATERIALS table
+      // ("masonry" | "brick" | "adobe" | "stone" | "concrete" | "steel" |
+      // "glassbox" | "timber"). The grammar's AUTHOR knows this and nobody
+      // else does: adobe.js is adobe, megabrace.js is a braced steel tube,
+      // ranch.js is stick-built timber. Declaring it here is what lets the
+      // collapse engine decide whether this building pancakes, topples,
+      // shears, folds or crumbles WITHOUT carrying a table of facade names —
+      // which is the same reason `crownsRoof` and `minStoreys` live here.
+      // Omitted → collapse.js infers from storeys/plan/masonry, which is a
+      // defensible default and a worse answer than yours.
+      structure: def.structure || null });
   };
   CBZ.facadeList = function () { return Array.from(REG.values()).map((f) => ({ id: f.id, label: f.label })); };
   CBZ.facadeDef = function (id) { return REG.get(id) || null; };
@@ -388,6 +419,26 @@
     const def = REG.get(spec.style);
     return def ? { def: def, spec: spec } : null;
   }
+
+  /* WHICH GRAMMAR IS THIS BUILDING WEARING? Asked LONG AFTER it was built.
+
+     resolve() is the single source of truth for that question, and it was
+     private, so anybody downstream who needed the answer had to re-derive it
+     — and would get it wrong the moment the candidate pool, the storey filter
+     or the hash salt changed here. city/collapse.js needs it (a grammar
+     declares what it is MADE OF, which decides whether the building pancakes
+     or topples), and it is exactly the kind of question that must never be
+     answered twice.
+
+     Same two arguments the host passes: the building's world origin (which is
+     what the position hash is over) and its storey count. `dress` is the call
+     site's explicit spec when it had one. Returns the style id or null. */
+  CBZ.facadePick = function (ox, oz, storeys, dress) {
+    const r = resolve(dress || null,
+      function (salt) { return CBZ.hash01 ? CBZ.hash01(ox, oz, salt) : 0.42; },
+      storeys);
+    return r ? r.spec.style : null;
+  };
 
   // WILL THIS FACADE TAKE THE ROOF? Asked BEFORE the shell is built, because
   // buildings.js decides its own setback crown and corner finials hundreds of

@@ -47,6 +47,8 @@
 
   CBZ.registerFacade("artdeco", {
     label: "Deco Tower",
+    // WHAT IT IS MADE OF (city/collapse.js MATERIALS) — a 1920s deco tower is a riveted steel frame behind masonry cladding.
+    structure: "steel",
     crownsRoof: true,
     build: function (ctx, F, spec) {
       const W = ctx.w, D = ctx.d, FH = ctx.FH, ST = Math.max(1, ctx.storeys);

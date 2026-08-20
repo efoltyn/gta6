@@ -67,6 +67,8 @@
 
   CBZ.registerFacade("adobe", {
     label: "Pueblo Adobe",
+    // WHAT IT IS MADE OF (city/collapse.js MATERIALS) — a puddled-earth pueblo has no frame at all.
+    structure: "adobe",
     crownsRoof: true,
     build: function (ctx, F, spec) {
       spec = spec || {};

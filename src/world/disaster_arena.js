@@ -833,6 +833,10 @@
       const b = {
         group: bgroup, ox, oz, gy, x: ox, z: oz, w, d, h: storeys * FH, storeys,
         facadeStyle: style || null,        // so a tool can photograph "the pagoda one"
+        color: color,                      // the shell's real wall colour — city/collapse.js
+                                           // builds its proxy out of it, so the frame where
+                                           // the real building is swapped for the falling one
+                                           // is a frame nobody can see
         floorTop: gy + 0.08,               // the walkable ground-floor surface, published
                                            // so a probe can assert nothing grows through it
         colliders: cols, platforms: plats, glass: glassList, fallen: false,
@@ -925,7 +929,8 @@
       });
 
       const b = { group: g, ox, oz, gy, x: ox, z: oz, w, d, h: realH, storeys,
-        facadeStyle: style || null, colliders: cols, platforms: plats, glass: glassT, fallen: false };
+        facadeStyle: style || null, color: color,   // see makeBuilding: the collapse proxy is built from it
+        colliders: cols, platforms: plats, glass: glassT, fallen: false };
       fragile.push(b);
 
       // ---- the elevator car: a slab that rides the central shaft, gy → roof ----
@@ -1370,6 +1375,15 @@
         ocean.position.y = OCEAN_Y;
         if (CBZ.waterDriveDisasterSurface) CBZ.waterDriveDisasterSurface(ocean, arenaWave);
         if (CBZ.waterEventClear) CBZ.waterEventClear("survival-tsunami");
+        /* A MATCH CAN END MID-COLLAPSE. city/collapse.js holds the proxy
+           shells, the debris in flight and the wound dressing on every
+           damaged building; dropping its jobs here (rather than letting them
+           land on an island that is being rebuilt underneath them) is what
+           stops the next match starting with a grey slab falling through a
+           restored tower. Jobs that had not yet reached their swap never fire
+           it, so their building is left standing and solid — which is exactly
+           what the loop below is about to guarantee anyway. */
+        if (CBZ.collapse && CBZ.collapse.reset) CBZ.collapse.reset();
         for (const b of fragile) {
           // clear the shared structural ledger (systems/disasters.js) so a new
           // match starts on undamaged towers, not on last match's spalling

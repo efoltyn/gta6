@@ -105,6 +105,8 @@
 
   CBZ.registerFacade("spanish", {
     label: "Spanish Colonial Mansion",
+    // WHAT IT IS MADE OF (city/collapse.js MATERIALS) — Spanish colonial is adobe under lime stucco.
+    structure: "adobe",
     crownsRoof: true,
     maxStoreys: 4,
     build: function (ctx, F, spec) {

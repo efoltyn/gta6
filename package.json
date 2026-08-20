@@ -72,6 +72,8 @@
     "visual:prison-lightsout": "node tools/visual-compare.mjs --preset prison-lightsout --keep-going --before https://efoltyn.github.io/gta6/",
     "visual:prison-outfits": "node tools/visual-compare.mjs --preset prison-outfit-gallery --keep-going --before https://efoltyn.github.io/gta6/",
     "visual:disasters": "node tools/visual-compare.mjs --preset disaster-sequence --keep-going --before https://efoltyn.github.io/gta6/",
+    "test:collapse": "node tools/collapse-check.mjs",
+    "visual:collapse": "node tools/before-after.mjs collapse-stages",
     "visual:tsunami": "node tools/before-after.mjs tsunami-stages",
     "visual:city-tsunami": "node tools/before-after.mjs city-tsunami-stages",
     "visual:race-stadium": "node tools/visual-compare.mjs --preset race-stadium --before https://efoltyn.github.io/gta6/",

@@ -327,6 +327,14 @@
      ============================================================ */
   const STAGE_GLASS = 0.35, STAGE_SPALL = 0.7;
   let structHits = 0, structPrivate = 0;
+  // RATCHET (CBZ.disasterAudit().legacyFalls, pinned at 0). Every building the
+  // island brings down must go through the shared collapse engine
+  // (city/collapse.js). legacyFalls counts the ones that fell back to this
+  // file's own sink-into-the-ground ticker instead, which happens only when
+  // COLLAPSE_V2 is off — so a non-zero number in a normal run means the engine
+  // stopped loading or stopped accepting the island's descriptor, and the
+  // island has quietly gone back to having a second, worse collapse of its own.
+  let engineFalls = 0, legacyFalls = 0;
   function structureHit(b, amount, ctx, opts) {
     if (!b || b.fallen) return 0;
     opts = opts || {};
@@ -365,6 +373,23 @@
       // from across the island for the rest of the match
       b._lean = (rnd() - 0.5) * 0.06;
       if (b.group) { b.group.rotation.z = b._lean; b.group.rotation.x = b._lean * 0.5; }
+      // AND IT LOOKS SPALLED. The lean alone is a 3-degree tilt nobody reads
+      // at distance; the damage skin puts blown openings, exposed floor slabs,
+      // a hanging panel and an apron of masonry on the pavement — the same
+      // dressing a wounded city building gets, from the same file, so the two
+      // modes cannot drift.
+      if (CBZ.collapse && CBZ.collapse.skin) {
+        try {
+          CBZ.collapse.skin({
+            root: root(), ox: b.x, oz: b.z, gy: b.gy || 0,
+            w: b.w, d: b.d, h: b.h, storeys: b.storeys,
+            FH: b.h / Math.max(1, b.storeys || 1),
+            wall: b.color != null ? b.color : 0x8b9097, style: b.facadeStyle || null,
+            key: "isl:" + Math.round(b.x) + "," + Math.round(b.z),
+          }, 2, { nx: (opts && opts.dirx) || 1, nz: (opts && opts.dirz) || 0,
+                  floor: Math.max(0, Math.round((b.storeys || 2) * 0.4)) });
+        } catch (e) {}
+      }
       for (let i = 0; i < 7; i++) CBZ.fx.dropDebris({
         x: b.x + (rnd() - 0.5) * b.w, z: b.z + (rnd() - 0.5) * b.d,
         fromY: b.h * (0.4 + rnd() * 0.6), vy: -1 - rnd() * 2,
@@ -372,7 +397,7 @@
       });
       if (CBZ.shake && near({ x: b.x, z: b.z }, 45)) CBZ.shake(0.22);
     }
-    if (now >= 1) collapse(b, ctx);
+    if (now >= 1) collapse(b, ctx, opts);
     return b.fallen ? 3 : (now >= STAGE_SPALL ? 2 : (now >= STAGE_GLASS ? 1 : 0));
   }
   // the ANNULUS form — city/structural.js's sweep() shape: damage only what a
@@ -1513,7 +1538,12 @@
         });
         const A = ctx.arena;
         if (A.cars) for (let i = 0; i < A.cars.length; i++) { const car = A.cars[i]; if (!car.flung && car.x <= ctx.st.waveX + 2 && car.x >= ctx.st.waveX - 9 && floor(car.x, car.z) <= baseY + 7) flingCar(car, 1, 0, 16 + scale(7, ctx), 8); }
-        for (let i = 0; i < A.fragile.length; i++) { const b = A.fragile[i]; if (!b.fallen && b.x <= ctx.st.waveX + 2 && b.x >= ctx.st.waveX - 10 && floor(b.x, b.z) <= baseY + 9) collapse(b, ctx); }
+        // A BUILDING FALLS THE WAY THE WATER PUSHED IT. The wave travels +x,
+        // so the wound is on the seaward face and the collapse grammar hinges
+        // it inland — which is what every photograph of a tsunami-struck
+        // street shows, and it costs one argument. `preShudder: 0` because the
+        // wave is ALREADY on the building; there is nothing to telegraph.
+        for (let i = 0; i < A.fragile.length; i++) { const b = A.fragile[i]; if (!b.fallen && b.x <= ctx.st.waveX + 2 && b.x >= ctx.st.waveX - 10 && floor(b.x, b.z) <= baseY + 9) collapse(b, ctx, { dirx: 1, dirz: 0, preShudder: 0 }); }
         if (ctx.st.waveX > ctx.cx + ctx.R + 24) { ctx.st.passed = true; ctx.st.wave.visible = false; ctx.st.spray.setActive(0); }
       }
       ctx.st.y += (ctx.st.peak - ctx.st.y) * Math.min(1, dt * (ctx.st.passed ? 0.5 : 0.16));
@@ -3619,35 +3649,91 @@
      Three disasters used to reach in here directly with a coin flip; if you
      find yourself wanting to call this, you want structureHit() with an
      amount — that is what lets damage from two different disasters add up. */
-  function collapse(b, ctx) {
+  function collapse(b, ctx, opts) {
     if (!b || b.fallen) return; b.fallen = true;
     b._dmg = 1.2;
-    // yank ALL of this building's walls (colliders) and floors/stairs/roof
-    // (platforms) so survivors can run AND fall through the rubble
-    if (b.colliders) for (const c of b.colliders) { const i = CBZ.colliders.indexOf(c); if (i >= 0) CBZ.colliders.splice(i, 1); }
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
-    if (b.platforms) for (const p of b.platforms) { const i = CBZ.platforms.indexOf(p); if (i >= 0) CBZ.platforms.splice(i, 1); }
-    // crush anyone in the footprint
-    surv().hurtRadius(b.x, b.z, Math.max(b.w, b.d) * 0.62, 1e6);
-    // blow every window out of the building as it goes
-    if (CBZ.shatterGlass) CBZ.shatterGlass(b.x, b.z, Math.max(b.w, b.d) * 0.85);
-    // animate the whole structure crumbling as one piece — walls, every floor,
-    // AND the roof sink and tilt together (handled by the transient ticker)
-    fallingBuildings.push({ group: b.group, t: 0, h: b.h, tilt: (rnd() - 0.5) * 0.9 });
-    // a real rubble field that NEVER cleans up (keep:true) — lots of chunks of
-    // varied concrete tones piled across (and a touch beyond) the footprint.
-    const RUBBLE = [0x70757e, 0x8b9097, 0x5c6168, 0xb9bec6, 0x9aa0a8];
-    const n = 22 + (rnd() * 14 | 0) + (b.h > 24 ? 16 : 0);   // taller towers leave more
-    for (let i = 0; i < n; i++) {
-      CBZ.fx.dropDebris({
-        x: b.x + (rnd() - 0.5) * b.w * 1.4, z: b.z + (rnd() - 0.5) * b.d * 1.4,
-        fromY: b.h * (0.15 + rnd() * 0.85), vy: -1 - rnd() * 4,
-        size: 0.7 + rnd() * 2.2, color: RUBBLE[(rnd() * RUBBLE.length) | 0],
-        dmg: i < 6 && ctx ? scale(30, ctx) : 0, keep: true,
-      });
+    opts = opts || {};
+
+    /* ---- THE ISLAND USED TO SINK ITS BUILDINGS INTO THE GROUND -----------
+       The whole animation was three lines in the update loop: drop the group
+       at h*0.6 m/s, spin it by a random tilt, hide it at t > 1.8 s. Nothing
+       broke, nothing shed, nothing landed — a dressed tower with a Gothic or
+       a bundled-tube facade on it slid neatly into the island like a lift
+       going down, which is the single least convincing thing a building can
+       do. And it was a SECOND collapse system: the city had a choreographed
+       one and the island had this, so every improvement had to be written
+       twice or (in practice) once.
+
+       city/collapse.js is now the only collapse in the game. It reads what
+       the building is MADE OF from the facade grammar the arena dressed it
+       with (b.facadeStyle → the grammar's `structure:` field) and picks the
+       motion to match — the island's masonry blocks topple and crumble where
+       its glass towers pancake, and every one of them disintegrates into real
+       debris that lands and stays. Same engine, same quality, same fix, as
+       the city gets from an RPG or a plane.
+    --------------------------------------------------------------------- */
+    const yank = function () {
+      // yank ALL of this building's walls (colliders) and floors/stairs/roof
+      // (platforms) so survivors can run AND fall through the rubble
+      if (b.colliders) for (const c of b.colliders) { const i = CBZ.colliders.indexOf(c); if (i >= 0) CBZ.colliders.splice(i, 1); }
+      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+      if (b.platforms) for (const p of b.platforms) { const i = CBZ.platforms.indexOf(p); if (i >= 0) CBZ.platforms.splice(i, 1); }
+      // crush anyone in the footprint
+      surv().hurtRadius(b.x, b.z, Math.max(b.w, b.d) * 0.62, 1e6);
+      // blow every window out of the building as it goes
+      if (CBZ.shatterGlass) CBZ.shatterGlass(b.x, b.z, Math.max(b.w, b.d) * 0.85);
+      if (b.group) b.group.visible = false;
+      // the wound dressing (if it earned one at the spall stage) goes with it
+      if (CBZ.collapse && CBZ.collapse.skinClear) CBZ.collapse.skinClear({ ox: b.x, oz: b.z });
+    };
+    // THE PERMANENT FIELD. collapse.js's fragments are live physics and thin
+    // out after half a minute; this is the rubble that is still there at the
+    // end of the match, and it lands when the building does, not when it
+    // starts falling.
+    const layRubble = function () {
+      const RUBBLE = [0x70757e, 0x8b9097, 0x5c6168, 0xb9bec6, 0x9aa0a8];
+      const n = 22 + (rnd() * 14 | 0) + (b.h > 24 ? 16 : 0);   // taller towers leave more
+      for (let i = 0; i < n; i++) {
+        CBZ.fx.dropDebris({
+          x: b.x + (rnd() - 0.5) * b.w * 1.4, z: b.z + (rnd() - 0.5) * b.d * 1.4,
+          fromY: 1.2 + rnd() * 2.5, vy: -1 - rnd() * 2,
+          size: 0.7 + rnd() * 2.2, color: RUBBLE[(rnd() * RUBBLE.length) | 0],
+          dmg: i < 6 && ctx ? scale(30, ctx) : 0, keep: true,
+        });
+      }
+    };
+
+    const job = (CBZ.collapse && CBZ.CONFIG.COLLAPSE_V2) ? CBZ.collapse.play({
+      root: root(), ox: b.x, oz: b.z, gy: b.gy || 0,
+      w: b.w, d: b.d, h: b.h, storeys: b.storeys, FH: b.h / Math.max(1, b.storeys || 1),
+      wall: b.color != null ? b.color : (b.wallColor != null ? b.wallColor : 0x8b9097),
+      style: b.facadeStyle || null,
+      // the island is hills, a beach and a volcano skirt, so debris thrown
+      // clear of the footprint has to land on the ground that is actually
+      // there rather than on the height the building's own base sat at
+      groundAt: floor,
+      key: "isl:" + Math.round(b.x) + "," + Math.round(b.z),
+    }, {
+      wound: { nx: opts.dirx || (b._lean ? 1 : 0), nz: opts.dirz || 0, floor: opts.floor || 0 },
+      // the island has been shaking for ten seconds by the time anything
+      // comes down — it does not need the city's 1.15 s "something is about
+      // to happen" tell, it needs to get on with it
+      preShudder: opts.preShudder != null ? opts.preShudder : 0.35,
+      onSwap: yank,
+      onGround: layRubble,
+    }) : null;
+
+    if (job) engineFalls++;
+    else {                                        // engine off: the old behaviour
+      legacyFalls++;
+      yank(); layRubble();
+      fallingBuildings.push({ group: b.group, t: 0, h: b.h, tilt: (rnd() - 0.5) * 0.9 });
+      if (b.group) b.group.visible = true;        // the legacy ticker hides it itself
     }
     if (CBZ.shake) CBZ.shake(0.6); sound("collapse");
   }
+  // Only fed by the COLLAPSE_V2=false fallback above. Kept so the one-line
+  // revert restores the exact old picture rather than an empty screen.
   const fallingBuildings = [];
 
   // ---- a car ripped loose by the tsunami: pull its collider, hurl it in the
@@ -4582,6 +4668,10 @@
          privateSwim                0   — hand-rolled player-in-water solves
          privateWater               0   — water meshes this file owns
          privateCollapse            0   — binary collapses bypassing the ledger
+         legacyFalls                0   — buildings that came down on this
+                                          file's own sink-into-the-ground
+                                          ticker instead of on the shared
+                                          collapse engine (city/collapse.js)
          surgeDriven                true — the sea moved via waterSurgeSet
          weatherDriven              true while a weather disaster is live
          swimShared                 true — city/swim.js answers on the island
@@ -4697,6 +4787,10 @@
       breath: sw && sw.breath != null ? sw.breath : null,
       // ---- ONE STRUCTURE + ONE BLAST BUS ----
       privateCollapse: structPrivate,
+      // ---- ONE COLLAPSE (city/collapse.js) ----
+      legacyFalls: legacyFalls,
+      engineFalls: engineFalls,
+      collapseShared: !!(CBZ.collapse && CBZ.collapse.play && CBZ.CONFIG.COLLAPSE_V2 !== false),
       structureHits: structHits,
       detonateAdopted: detonateAdopted,
       blastLegacy: blastLegacy,

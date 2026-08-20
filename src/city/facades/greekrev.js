@@ -113,6 +113,8 @@
 
   CBZ.registerFacade("greekrev", {
     label: "Greek Revival Mansion",
+    // WHAT IT IS MADE OF (city/collapse.js MATERIALS) — a Greek Revival mansion is masonry with a timber portico.
+    structure: "masonry",
     crownsRoof: true,
     // This grammar builds its own doorcase — pilasters, sidelights, a transom
     // and a pair of panelled leaves — so the kit must not stack its generic

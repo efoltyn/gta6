@@ -83,6 +83,8 @@
 
   CBZ.registerFacade("desertmod", {
     label: "Desert Modern House",
+    // WHAT IT IS MADE OF (city/collapse.js MATERIALS) — post-and-beam with block walls and a concrete slab.
+    structure: "concrete",
     crownsRoof: true,
     maxStoreys: 3,
     build: function (ctx, F, spec) {

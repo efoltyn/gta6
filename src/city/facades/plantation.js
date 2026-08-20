@@ -131,6 +131,8 @@
 
   CBZ.registerFacade("plantation", {
     label: "Antebellum Plantation House",
+    // WHAT IT IS MADE OF (city/collapse.js MATERIALS) — an antebellum house is heavy timber frame on brick piers.
+    structure: "timber",
     crownsRoof: true,
     // A gallery house is 2 storeys, 3 at a stretch and 4 as a New Orleans
     // three-tier block. Past that the colossal order is nonsense, so the

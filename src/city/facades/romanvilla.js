@@ -92,6 +92,8 @@
 
   CBZ.registerFacade("romanvilla", {
     label: "Roman Villa",
+    // WHAT IT IS MADE OF (city/collapse.js MATERIALS) — opus caementicium and cut stone — no steel anywhere.
+    structure: "stone",
     crownsRoof: true,
     // A villa is a horizontal building. Three storeys is already a tall one;
     // past that the grammar would be a mansion block wearing a villa's hat, so

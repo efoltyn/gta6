@@ -68,6 +68,8 @@
 
   CBZ.registerFacade("neogothic", {
     label: "Cathedral of Commerce",
+    // WHAT IT IS MADE OF (city/collapse.js MATERIALS) — the Cathedral of Commerce is a steel frame in terracotta fancy dress.
+    structure: "steel",
     crownsRoof: true,
     minStoreys: 18,
     build: function (ctx, F, spec) {

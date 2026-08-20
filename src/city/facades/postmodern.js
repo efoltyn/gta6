@@ -52,6 +52,8 @@
 
   CBZ.registerFacade("postmodern", {
     label: "Broken Pediment",
+    // WHAT IT IS MADE OF (city/collapse.js MATERIALS) — a 1980s pomo block is a concrete frame in applied stone.
+    structure: "concrete",
     crownsRoof: true,
     minStoreys: 14,
     build: function (ctx, F, spec) {

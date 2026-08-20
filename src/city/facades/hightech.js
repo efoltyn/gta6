@@ -48,6 +48,8 @@
 
   CBZ.registerFacade("hightech", {
     label: "Exostructure",
+    // WHAT IT IS MADE OF (city/collapse.js MATERIALS) — the structure is on the OUTSIDE and it is steel.
+    structure: "steel",
     crownsRoof: true,
     build: function (ctx, F, spec) {
       const FH = ctx.FH, ST = Math.max(1, ctx.storeys | 0), rTop = ctx.rTop;
