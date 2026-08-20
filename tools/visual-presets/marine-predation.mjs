@@ -58,10 +58,14 @@
 
 /* A 30 Hz FIXED STEP, not 60. Every one of these frames is a full CBZ.stepSim
    over the whole city, and this page simulates about five minutes of fighting
-   across its eight subjects. 1/30 halves that bill and changes nothing about
-   the result — every driver in the chain (predatorHunt, creatureFight, the
-   swim mover) integrates dt. */
-const RUN = 1 / 30;
+   across its eight subjects, and headless-with-software-GL a single step of the
+   whole city costs a few hundred milliseconds. At 1/30 the first subject —
+   which also pays for the entire boot — did not fit in a twenty-five minute
+   stage budget and timed the pass out twice. 1/15 is the same simulated
+   seconds for less than half the steps, and it changes nothing about the
+   result: every driver in the chain (predatorHunt, creatureFight, the swim
+   mover, the chum poll) integrates dt. */
+const RUN = 1 / 15;
 /* ...AND IT HAS TO BE DECLARED AGAIN INSIDE stage(). The stage function is
    SERIALIZED and evaluated inside the page, so it carries no module scope with
    it: every free identifier it names is a ReferenceError in the browser and
@@ -73,7 +77,7 @@ const subjects = [
     id: "blood-in-the-water",
     label: "Blood in the water",
     scenario: "chum",
-    seconds: 32,
+    seconds: 20,
     focus: "A wounded dolphin trailing blood in open water with four great whites 210 m off. BEFORE: nothing in this game made a hurt animal bleed, so the sharks have no reason to come and do not. AFTER: the bleeder holds a goreChum handle whose position is a FUNCTION, so the plume follows it, and the sharks converge on it. Look for the red bloom on the surface and the fins turning toward it.",
     state: "CHUM · 4 GREAT WHITES @ 210 m",
     shot: { dist: 120, height: 46, pitch: 0.52 },
@@ -105,7 +109,7 @@ const subjects = [
   {
     id: "meg-ship-sinking",
     label: "Megalodon — the boat goes down",
-    scenario: "ship", seconds: 22,
+    scenario: "ship", seconds: 18,
     focus: "Engine gutted, the same intact hull is handed to water_float's wreck/flooding owner and goes down by the bow. This is reuse, not a new sinking system: the exact path a megalodon RIDDEN by the player already used.",
     state: "HOLED · FLOODING",
     shot: { dist: 28, height: 9, pitch: 0.42 },
@@ -113,7 +117,7 @@ const subjects = [
   {
     id: "meg-ship-men",
     label: "Men in the water",
-    scenario: "shipmen", seconds: 28,
+    scenario: "shipmen", seconds: 20,
     focus: "The occupants went over the side at the bite. In the water they are hurt, so they bleed, so they are chum, so the sharks come — three separate blocks composing with no code between them. That composition IS the feature.",
     state: "SURVIVORS · SHARKS INBOUND",
     shot: { dist: 44, height: 16, pitch: 0.5 },
@@ -129,7 +133,7 @@ const subjects = [
   {
     id: "carcass-crowd",
     label: "A carcass draws a crowd",
-    scenario: "carcass", seconds: 26,
+    scenario: "carcass", seconds: 22,
     focus: "A dead animal in the water is the strongest chum there is, and until now nothing in the game came for it. Now the sharks smell it, circle it and work it — ticked by CBZ.predatorHunt with the CORPSE as the quarry, which is exactly why they circle rather than charge — the body visibly shrinks as it is eaten, and the birds are up over it. No UI says any of this.",
     state: "CARCASS · SCAVENGERS INBOUND",
     shot: { dist: 40, height: 15, pitch: 0.44 },
@@ -141,7 +145,7 @@ const readyExpression = "window.THREE && window.CBZ && CBZ.CONFIG && CBZ.WILDLIF
 async function stageMarinePredation(input) {
   const CBZ = window.CBZ, T = window.THREE;
   if (!CBZ || !T) return { ok: false, missing: "CBZ/THREE" };
-  const RUN = 1 / 30;              // see the note above: no module scope in here
+  const RUN = 1 / 15;              // see the note above: no module scope in here
   const subject = input.subject;
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   const until = async (test, budgetMs, stepMs) => {
@@ -157,14 +161,14 @@ async function stageMarinePredation(input) {
   if (!S) {
     const booted = await until(
       () => CBZ.game && (CBZ.bootComplete || CBZ.game.state === "title") &&
-        CBZ.stepSim && document.getElementById("playBtn"), 420000);
+        CBZ.stepSim && document.getElementById("playBtn"), 900000);
     if (!booted) return { ok: false, err: "never booted" };
     if (CBZ.CONFIG) CBZ.CONFIG.CITY_HITMAN_CAMPAIGN = false;
     const playing = await until(() => {
       if (CBZ.game.state === "playing") return true;
       const b = document.getElementById("playBtn"); if (b) b.click();
       return CBZ.game.state === "playing";
-    }, 420000, 300);
+    }, 900000, 300);
     if (!playing) return { ok: false, err: "never reached playing" };
     if (CBZ.game.cityCampaign) CBZ.game.cityCampaign.phase = "endless_contracts";
     try { if (CBZ.setQualityLevel) CBZ.setQualityLevel(3); } catch (_) {}
@@ -584,7 +588,7 @@ export default {
      minutes of its own `until` budgets) AND its 32 simulated seconds — about
      a thousand full CBZ.stepSim calls over the entire city, which headless is
      the expensive part. Ten minutes timed that frame out and cost a pass. */
-  stageTimeoutMs: 1500000,
+  stageTimeoutMs: 2400000,
   subjects,
   readyExpression,
   stage: stageMarinePredation,
