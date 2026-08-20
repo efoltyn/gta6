@@ -80,11 +80,27 @@ await evl(`(() => {
   try { Object.defineProperty(document, "pointerLockElement", { configurable: true, get: () => document.body }); } catch (e) {}
   C.cam.locked = true;
   if (C.player) { C.player.dead = false; }
+  // FRAME COUNTER. Wall-clock sleeps are not a settle: headless throttles rAF
+  // hard enough that a 700 ms wait can straddle ZERO rendered frames, and a
+  // camera that never ticked reads as a camera that ignored your input. Every
+  // wait below is spent in FRAMES so a stalled tab costs time, not a verdict.
+  window.__frames = 0;
+  (function tick() { window.__frames++; requestAnimationFrame(tick); })();
   return true;
 })()`);
 
 const dirExpr = `(() => { const T = window.THREE, v = new T.Vector3(); window.CBZ.camera.getWorldDirection(v);
   return { x: +v.x.toFixed(5), y: +v.y.toFixed(5), z: +v.z.toFixed(5), pitch: +window.CBZ.cam.pitch.toFixed(5), yaw: +window.CBZ.cam.yaw.toFixed(5) }; })()`;
+
+async function waitFrames(n, maxMs = 30000) {
+  const start = await evl("window.__frames");
+  const t0 = Date.now();
+  while (Date.now() - t0 < maxMs) {
+    await sleep(120);
+    if ((await evl("window.__frames")) - start >= n) return true;
+  }
+  return false;
+}
 
 async function quiet(maxMs = 20000) {   // wait until the lens stops drifting on its own
   const t0 = Date.now();
@@ -111,7 +127,7 @@ async function drag(mx, my) {
     document.dispatchEvent(e);
     return true;
   })()`);
-  await sleep(700);
+  await waitFrames(30);          // the rig damps toward the new pose over frames
 }
 const headingOf = (d) => Math.atan2(d.x, d.z);
 const wrap = (a) => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; };
@@ -121,7 +137,7 @@ async function level() {
   // perfectly steady one — so re-assert `playing` here rather than trusting it.
   await evl(`(() => { const C = window.CBZ; if (C.game.state !== "playing") C.setState("playing");
     C.cam.locked = true; C.cam.pitch = 0; if (C.fps) C.fps.fp = 0; return true; })()`);
-  await sleep(700);
+  await waitFrames(30);
   await quiet(6000);
 }
 
@@ -153,9 +169,12 @@ async function measureOnce(label) {
 async function measure(label) {
   for (let attempt = 0; attempt < 3; attempt++) {
     const r = await measureOnce(label);
-    const inputLanded = Math.abs(r.dCamPitch) > 1e-4 || Math.abs(r.dCamYaw) > 1e-4;
-    const lensMoved = Math.abs(r.dViewY) > 1e-4 || Math.abs(r.dHead) > 1e-4;
-    if (lensMoved || !inputLanded) return r;
+    // PER AXIS. The two axes are two separate before/after pairs, so a stall
+    // can eat one and spare the other — which is how a dead pitch sample once
+    // slipped through a whole-measurement check that the live yaw satisfied.
+    const pitchStalled = Math.abs(r.dCamPitch) > 1e-4 && Math.abs(r.dViewY) < 1e-4;
+    const yawStalled = Math.abs(r.dCamYaw) > 1e-4 && Math.abs(r.dHead) < 1e-4;
+    if (!pitchStalled && !yawStalled) return r;
     console.log(`  (lens never moved though the input landed — stalled frame, re-measuring)`);
     await sleep(1500);
   }
@@ -164,13 +183,15 @@ async function measure(label) {
 }
 
 async function setFps(on) {
-  await evl(`(() => { const C = window.CBZ; const is = !!(C.fps && C.fps.active); if (is !== ${on}) C.setFPS(${on}); return true; })()`);
-  await sleep(900);
+  const ok = await evl(`(() => { const C = window.CBZ; if (!!(C.fps && C.fps.active) !== ${on}) C.setFPS(${on});
+    return !!(C.fps && C.fps.active) === ${on}; })()`);
+  if (!ok) { console.error(`FAIL: could not ${on ? "enter" : "leave"} first person`); done(1); }
+  await waitFrames(40);
   await quiet(6000);
 }
 async function setPin(on) {
   await evl(`(() => { window.CBZ.CONFIG.CAM_TP_FIXED_ANGLE = ${on}; return true; })()`);
-  await sleep(900);
+  await waitFrames(50);          // fixedK eases in/out; let the swing finish
   await quiet(8000);
 }
 
@@ -187,8 +208,30 @@ const fp = await measure("first-person       ");
 await setFps(false);
 await setPin(false);
 const tpFree = await measure("third-person free  ");
+
+// FRAMING INVARIANCE — the claim that lets the free orbit replace the pin.
+// The pin existed to stop pitching from RE-FRAMING the character. The pure
+// orbit already promises that: camAudit().frameTilt is the angle the pivot
+// sits below the view axis, and it must not move as the pitch sweeps. If it
+// holds, "looking up/down changes where you look, not where your character
+// sits in the picture" is a measured fact, not a preference.
+const tilts = [];
+for (const p of [-0.35, -0.15, 0, 0.15, 0.35]) {
+  await evl(`(() => { window.CBZ.cam.pitch = ${p}; return true; })()`);
+  await waitFrames(25);
+  const a = await evl("window.CBZ.camAudit()");
+  tilts.push({ pitch: p, tilt: a.frameTilt, viewPitch: a.viewPitch });
+}
+const tiltSpread = Math.max(...tilts.map((t) => t.tilt)) - Math.min(...tilts.map((t) => t.tilt));
+// view gain: d(viewPitch)/d(pitch) over the sweep — the pure orbit's "1"
+const gain = (tilts[tilts.length - 1].viewPitch - tilts[0].viewPitch) /
+             (tilts[tilts.length - 1].pitch - tilts[0].pitch);
+console.log(`third-person free   frameTilt spread over a 0.70 rad sweep: ${tiltSpread.toFixed(4)} rad` +
+            `   view gain: ${gain.toFixed(3)}`);
+
 await setPin(true);
-const tpPin = env.pinnedByDefault ? await measure("third-person pinned") : null;
+const tpPin = await measure("third-person pinned");
+await setPin(false);
 
 const fails = [];
 const EPS = 0.01;
@@ -199,11 +242,14 @@ if (!(Math.abs(fp.dHead) > EPS)) fails.push("first-person: dragging RIGHT moved 
 if (!(tpFree.dViewY < -EPS)) fails.push("third-person (free orbit): dragging DOWN did not lower the view — the pitch inversion is back");
 if (Math.sign(tpFree.dViewY) !== Math.sign(fp.dViewY)) fails.push("third-person (free orbit) pitches the opposite way from first person");
 if (Math.sign(tpFree.dHead) !== Math.sign(fp.dHead)) fails.push("third-person (free orbit) yaws the opposite way from first person");
-// --- pinned city third person: the lens is fixed BY DESIGN, so check the aim
-if (tpPin) {
-  if (!(tpPin.dCamPitch > EPS)) fails.push("third-person (pinned city): dragging DOWN did not aim DOWN (cam.pitch is down-positive, so it must grow)");
-  if (Math.sign(tpPin.dCamYaw) !== Math.sign(fp.dCamYaw)) fails.push("third-person (pinned city) yaws the opposite way from first person");
-}
+if (!(tiltSpread < 0.05)) fails.push(`third-person (free orbit): pitching RE-FRAMES the character — frameTilt moved ${tiltSpread.toFixed(4)} rad across the sweep`);
+if (!(gain > 0.85 && gain < 1.15)) fails.push(`third-person (free orbit): the orbit is not pure — view gain ${gain.toFixed(3)}, want ~1`);
+// --- the pin, when it is asked for: the lens is fixed BY DESIGN, so the aim
+// is the probe. This tier is opt-in now (CAM_TP_FIXED_ANGLE), but it still has
+// to answer the mouse in the right direction while it is switched on.
+if (!(tpPin.dCamPitch > EPS)) fails.push("third-person (pinned): dragging DOWN did not aim DOWN (cam.pitch is down-positive, so it must grow)");
+if (Math.sign(tpPin.dCamYaw) !== Math.sign(fp.dCamYaw)) fails.push("third-person (pinned) yaws the opposite way from first person");
+if (!(Math.abs(tpPin.dViewY) < 0.02)) fails.push("third-person (pinned): the lens moved — the pin is not holding the frame");
 
 if (fails.length) { console.error("FAIL:\n  " + fails.join("\n  ")); done(1); }
 console.log("PASS: every tier looks where you drag, with matching signs on both axes.");

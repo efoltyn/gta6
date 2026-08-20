@@ -117,6 +117,33 @@
   // "when I look around it isn't looking around only, it's also changing my
   // camera angle — make it a FIXED angle like the one I'm showing."
   //
+  // ==== DEFAULT OFF as of 2026-08-20. THE PIN WAS TREATING A SYMPTOM. ========
+  // Read that complaint again next to the bug found today: `cam.pitch` is
+  // DOWN-positive and the mouse handler SUBTRACTED the drag, so third-person
+  // vertical look was INVERTED. Dragging down swung the boom UP into a top-down
+  // stare; dragging up dropped it to your heels. That is precisely, and only,
+  // "it isn't looking around, it's changing my camera angle" — the owner was
+  // describing an inverted axis, and the answer shipped here was to stop the
+  // camera from pitching at all. It worked the way amputation works.
+  //
+  // The same owner said it again on 2026-08-20 ("on FPS the way I drag is the
+  // way the cam moves, on 3rd person it is opposite ... it changes angle not
+  // direction of looking") — a second report of one unfixed sign, and proof the
+  // pin never addressed it: under the pin vertical mouse moves NOTHING you can
+  // see, which is not "looking around" either. tools/camera-look-check.mjs
+  // measures exactly that: pinned, a 0.144 rad drag moves the lens 0.003.
+  //
+  // With the sign corrected the pure orbit already keeps the promise the pin
+  // was reaching for — `camAudit().frameTilt` is CONSTANT across a pitch sweep,
+  // so the character does not move in frame; only the view direction changes.
+  // That is the Fortnite behaviour the owner keeps citing, and it is what the
+  // RDR2 pass was built to deliver before the inversion masked it.
+  //
+  // The flag stays, whole: `CBZ.CONFIG.CAM_TP_FIXED_ANGLE = true` restores the
+  // pinned frame, the aim band, the sliding reticle and camAimDecoupled()
+  // exactly as they were. Nothing below this line changed.
+  // =========================================================================
+  //
   // The RDR2 pass above answered the OTHER half of this. It made the view pitch
   // 1:1 with the mouse and held the character's place in frame — but it did that
   // with a PURE ORBIT, so the lens itself still swings a whole boom's worth: a
@@ -141,7 +168,7 @@
   // exactly as the RDR2 pass made it (CAM_FIXED_ADS_FREE=0 pins that too).
   // FIRST PERSON IS SACRED, as everywhere else in this file: fps.active returns
   // long before the tier runs and tpFixedFrame() refuses outright.
-  if (CBZ.CONFIG.CAM_TP_FIXED_ANGLE == null) CBZ.CONFIG.CAM_TP_FIXED_ANGLE = true;
+  if (CBZ.CONFIG.CAM_TP_FIXED_ANGLE == null) CBZ.CONFIG.CAM_TP_FIXED_ANGLE = false;
   if (CBZ.CONFIG.CAM_FIXED_ADS_FREE == null) CBZ.CONFIG.CAM_FIXED_ADS_FREE = true;
   // The aim band. Vertical half-FOV is 30° (CITY_TP.FOV 60), and the reticle is
   // the PROJECTED impact point, so an aim of θ lands it tan θ / tan 30° of the
