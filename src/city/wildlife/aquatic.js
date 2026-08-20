@@ -26,9 +26,10 @@
                    deterministic raggedness — so the white kicks up behind the
                    pectoral and over the gills instead of running dead level.
        addSharkMouth() ONE mouth. Swept gum/lip bands (not boxes), three tooth
-                   rows merged into one mesh per jaw, a dark PINK-RED interior,
-                   and an upper jaw that SLIDES FORWARD AND DOWN while the
-                   rostrum lifts off it.
+                   rows merged into one mesh per jaw, a cavity that is a HOLE
+                   — an inside-out banded ellipsoid receding maroon-to-black
+                   (§6), never a convex pink mass — and an upper jaw that
+                   SLIDES FORWARD AND DOWN while the rostrum lifts off it.
 
      BUDGET. Everything is built through a module-scope geometry cache keyed on
      its own parameters, so a pack of three great whites — or a sixty-fish
@@ -759,6 +760,45 @@
     sh.tri(gRoot, cB, back[0], back[out.length - 1]);
   }
 
+  /* ---- THE CAVITY GEOMETRY (reference sheet §6) --------------------------
+     An ellipsoid with its winding REVERSED, so the visible surface is the
+     interior. A closed inside-out surface beats a cone/BackSide tube here
+     for one reason: there is no angle — three-quarter, head-on, from below —
+     at which a sightline through the gape can miss it, so the opening always
+     reads as a bounded dark hole and never as a gap in the mesh. Looking in,
+     the near wall self-culls and you see the far wall receding to the back
+     pole. Triangles go into four groups along the axis (front rim -> throat)
+     so the depth darkening is painted per-band, no vertex colours needed on
+     r128 Lambert. Unit-space and cached once: every shark in the file scales
+     the one geometry. */
+  const AQ_CAVITY_HOLE = true;    // false = the old convex ellipsoid, one-line revert
+  function cavityHoleGeom() {
+    return cachedGeom("cavityHole|v1", function () {
+      const sh = new Shell(), SEG = 14, ST = 8;
+      const rings = [];
+      for (let i = 0; i <= ST; i++) {
+        const ph = (i / ST) * Math.PI;           // front pole (+x) -> back pole (-x)
+        const x = Math.cos(ph), r = Math.sin(ph);
+        const row = [];
+        for (let j = 0; j < SEG; j++) {
+          const th = (j / SEG) * Math.PI * 2;
+          row.push(sh.v(x, Math.sin(th) * r, Math.cos(th) * r));
+        }
+        rings.push(row);
+      }
+      for (let i = 0; i < ST; i++) {
+        const grp = i < 2 ? 0 : (i < 4 ? 1 : (i < 6 ? 2 : 3));
+        for (let j = 0; j < SEG; j++) {
+          const nj = (j + 1) % SEG;
+          // wound inside-out: the visible face is the INTERIOR (the pole rows
+          // degenerate to triangles inside Shell.quad, which skips the rest)
+          sh.quad(grp, rings[i][j], rings[i + 1][j], rings[i + 1][nj], rings[i][nj]);
+        }
+      }
+      return sh.geom();
+    });
+  }
+
   function addSharkMouth(g, T_, m, o) {
     const hingeX = o.hingeX, hingeY = o.hingeY, len = o.length, width = o.width, gap = o.gap;
     const gumH = o.gumHeight || gap * 0.30;
@@ -873,11 +913,32 @@
       return { mesh: mesh, count: rows.reduce(function (s, r) { return s + r.n; }, 0) };
     }
     /* ---------------------------------------------------------------- build */
-    const cavity = new T.Mesh(
-      cachedGeom("cavity", function () { return new T.SphereGeometry(1, 12, 8); }), cavityMat);
+    /* §6: THE MOUTH IS A HOLE, NOT A LUMP. The cavity shipped as this same
+       ellipsoid wound OUTWARD — a convex pink object, so a wide gape framed
+       a bulging "pink rock" instead of an opening. Same footprint (proven to
+       hide inside every species' closed head), inverted: every sightline
+       through the gape now lands on the far INTERIOR wall, so the mouth
+       recedes from the money-shot angle and head-on alike. Depth is painted
+       in four bands front-to-back — maroon at the rim behind the teeth,
+       falling to near-black down the throat — and all the saturated pink
+       stays on the gum bands where §6 says it belongs. Its y-scale rides the
+       gape in applyGape below, so every driver (swimJaw, sharkJawProtrude,
+       the presets' direct posing) reveals it; at rest it is a hidden sliver.
+       One-line revert: AQ_CAVITY_HOLE = false at the top of this file. */
+    const cavity = AQ_CAVITY_HOLE
+      ? meshOf(cavityHoleGeom(), [cavityMat, m(o.cavityDeep || 0x47181c),
+        m(o.cavityThroat || 0x331216), m(o.cavityEnd || 0x241013)])
+      : new T.Mesh(
+        cachedGeom("cavity", function () { return new T.SphereGeometry(1, 12, 8); }), cavityMat);
     cavity.name = "sharkMouthCavity";
-    cavity.position.set(hingeX + len * 0.58, hingeY - gap * 0.04, 0);
-    cavity.scale.set(len * 0.74, gap * 0.10, width * 0.44);
+    // FOOTPRINT: the old ellipsoid ran from behind the hinge to PAST the lip
+    // (len*0.58 ± len*0.74) — poking out of the head, which is exactly what
+    // made it read as an object in the mouth. The hole stays INSIDE: front
+    // pole just behind the closed lip line, back pole just behind the hinge,
+    // seated a little low so the receding bore sits in the centre of the open
+    // gape rather than up against the palate.
+    cavity.position.set(hingeX + len * 0.42, hingeY - gap * 0.10, 0);
+    cavity.scale.set(len * 0.52, gap * 0.12, width * 0.42);
     g.add(cavity);
 
     const upper = new T.Group(); upper.name = "sharkUpperJaw";
@@ -973,9 +1034,16 @@
        and CBZ.sharkJawProtrude(group, openness) is there for one that would
        rather ask directly. */
     const baseX = upper.position.x, baseY = upper.position.y;
+    const cavityY0 = cavity.scale.y;
     function applyGape(k) {
       const oo = clamp(k, 0, 1);
       upper.rotation.z = -oo * upperRake;
+      // the hole is revealed with the gape: a mouth-line sliver at rest, the
+      // full dark bore at commitment. Same (1 + o*9) swimJaw writes, and this
+      // runs during the group's own matrix solve, so the two writers can never
+      // disagree within a frame — and drivers that bypass swimJaw (the report
+      // presets pose the contract directly) still get the reveal.
+      cavity.scale.y = cavityY0 * (1 + oo * 9);
       const rost = g.userData._sharkRostrum;
       if (rost) rost.rotation.z = oo * snoutLift;
     }

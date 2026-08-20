@@ -156,6 +156,29 @@
     return ease(1 - (p - STRIKE_AT) / (1 - STRIKE_AT));
   }
 
+  // ---- THE BITE CURVE (docs/SHARK-REFERENCE.md §6) --------------------------
+  // A real bite is ASYMMETRIC, and the asymmetry is most of what makes it read
+  // as a bite: the gape opens fast on the way in, HOLDS at full extension for a
+  // beat through contact (STRIKE_AT sits inside the hold), then SNAPS shut far
+  // faster than it opened — the close window is under half the open window and
+  // 1 - s*s accelerates all the way into the slam, so the jaws stop dead at
+  // maximum closing speed. The old symmetric strikeEnv gape was a puppet's
+  // mouth: equal-speed open and close, widest for exactly one frame.
+  // Shared on CBZ so EVERY biter inherits the grammar instead of each species
+  // shaping its own — the aquatic 'lunge' below uses it directly and
+  // predator_anim.js feeds it to the land biters' maw layer.
+  // One-line revert: CBZ.CONFIG.BITE_SNAP = false restores the old envelope.
+  var BITE_OPEN_AT = 0.10, BITE_FULL_AT = 0.38, BITE_HOLD_TO = 0.58, BITE_SHUT_AT = 0.70;
+  function biteCurve(p) {
+    if (CBZ.CONFIG && CBZ.CONFIG.BITE_SNAP === false) return Math.min(1, strikeEnv(p) * 1.45);
+    if (p <= BITE_OPEN_AT || p >= BITE_SHUT_AT) return 0;
+    if (p < BITE_FULL_AT) return ease((p - BITE_OPEN_AT) / (BITE_FULL_AT - BITE_OPEN_AT));
+    if (p < BITE_HOLD_TO) return 1;
+    var s = (p - BITE_HOLD_TO) / (BITE_SHUT_AT - BITE_HOLD_TO);
+    return 1 - s * s;
+  }
+  CBZ.biteCurve = biteCurve;
+
   function shortestAngle(a) {
     while (a > Math.PI) a -= Math.PI * 2;
     while (a < -Math.PI) a += Math.PI * 2;
@@ -428,9 +451,22 @@
           pitchZ = 0.5 * Math.sin(Math.min(1, up * 1.6) * Math.PI * 0.85);  // nose UP, then level
           roll = Math.sin(up * 9) * 0.12 * (1 - up);   // the body works as it drives
         }
-        // the gape rides the same envelope — the jaw is wide at contact and
-        // shuts on the far side. Owned by wildlife.js's shared swim rig.
-        if (CBZ.swimJaw) { try { CBZ.swimJaw(actor, Math.min(1, env * 1.45)); } catch (e) {} }
+        // THE GAPE IS THE BITE CURVE, not the strike envelope: fast open, a
+        // held beat through contact, then the SNAP shut (see biteCurve above —
+        // §6's "equal-speed open and close reads as a puppet's mouth"). Owned
+        // by wildlife.js's shared swim rig.
+        if (CBZ.swimJaw) { try { CBZ.swimJaw(actor, biteCurve(p)); } catch (e) {} }
+        // THE HEAD SHAKE ON CONTACT (§6: "the head shakes on contact"). As the
+        // jaws slam home the whole animal worries the hit — a decaying roll +
+        // yaw oscillation in the window right after the snap. Whole-group,
+        // exactly the transform pattern the file header documents; for a rigid
+        // +X-forward swimmer the group IS the head. Deterministic in p.
+        var shakeT = (p - BITE_HOLD_TO) / 0.30;
+        if (shakeT > 0 && shakeT < 1) {
+          var shakeK = (1 - shakeT) * (1 - shakeT);
+          roll += Math.sin(shakeT * 34) * 0.17 * shakeK;
+          yawOff += Math.sin(shakeT * 25 + 1.3) * 0.09 * shakeK;
+        }
         break;
       case 'ram_flank':
         /* THE FLANK RAM (city/marine_predation.js's orca pod). `lunge` is a

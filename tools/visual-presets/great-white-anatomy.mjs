@@ -62,6 +62,14 @@ const subjects = [
     state: "COMMIT · 100% GAPE",
   },
   {
+    id: "gape-head-on",
+    label: "Full Gape, Head On — Into The Hole",
+    open: 1, frame: 2.2, target: [2.70, 0.68, 0], cameraOffset: [8.0, -0.2, 1.1],
+    waterY: null,
+    focus: "Reference §6: read the bands outside-in — pale outer jaw skin, the bright wet gum RIM (all the strong pink lives here and only here), the white tooth ring, then a DARK CAVITY, maroon at the front falling to near-black down the throat. The centre of the frame must be a receding hole; nothing in the gape may read as convex.",
+    state: "COMMIT · 100% GAPE · HEAD ON",
+  },
+  {
     id: "head-on",
     label: "Head On At The Surface — The Wide Dome",
     open: 0.22, frame: 2.35, target: [2.55, 1.05, 0], cameraOffset: [9.0, 0.5, 0.30],

@@ -673,11 +673,48 @@
        contract wants a named lower group whose ORIGIN IS THE HINGE, so that is
        exactly what this is — and no upper jaw, because unlike a shark an orca
        does not protrude one. */
-    const cavity = new T.Mesh(
-      cached("orcaCavity", function () { return new T.SphereGeometry(1, 12, 8); }), pink);
+    /* THE CAVITY IS A HOLE, NOT A LUMP (docs/SHARK-REFERENCE.md §6 — owner:
+       "it's like there's a pink rock in the mouth"). This shipped as the same
+       convex pink SphereGeometry the sharks had, so an open mouth framed a
+       bulging pink object. Same footprint, wound INSIDE-OUT: every sightline
+       into the gape lands on the far interior wall, and four material bands
+       run warm pink at the rim (the only place the strong pink belongs — the
+       gum rail above carries the rest) to near-black down the throat. swimJaw
+       still owns the reveal: it expands scale.y with the gape exactly as
+       before, so at rest this is a hidden sliver on the mouth line.
+       One-line revert: ORCA_CAVITY_HOLE = false. */
+    const ORCA_CAVITY_HOLE = true;
+    const cavity = ORCA_CAVITY_HOLE
+      ? meshOf(cached("orcaCavityHole|v1", function () {
+        const sh = new Shell(), SEG = 14, ST = 8;
+        const rr = [];
+        for (let i = 0; i <= ST; i++) {
+          const ph = (i / ST) * Math.PI;         // front pole (+x) -> back pole (-x)
+          const x = Math.cos(ph), r = Math.sin(ph), row = [];
+          for (let j = 0; j < SEG; j++) {
+            const th = (j / SEG) * Math.PI * 2;
+            row.push(sh.v(x, Math.sin(th) * r, Math.cos(th) * r));
+          }
+          rr.push(row);
+        }
+        for (let i = 0; i < ST; i++) {
+          const grp = i < 2 ? 0 : (i < 4 ? 1 : (i < 6 ? 2 : 3));
+          for (let j = 0; j < SEG; j++) {
+            const nj = (j + 1) % SEG;
+            // wound inside-out so the visible face is the interior; the pole
+            // rows degenerate to triangles inside Shell.quad
+            sh.quad(grp, rr[i][j], rr[i + 1][j], rr[i + 1][nj], rr[i][nj]);
+          }
+        }
+        return sh.geom();
+      }), [pink, m(0x4a1c22), m(0x321318), m(0x230f12)])
+      : new T.Mesh(cached("orcaCavity", function () { return new T.SphereGeometry(1, 12, 8); }), pink);
     cavity.name = "orcaMouthCavity";
-    cavity.position.set(JAW_X + 0.82, JAW_Y + 0.10, 0);
-    cavity.scale.set(0.86, 0.035, 0.34);
+    // retracted from the old footprint (JAW_X+0.82 ± 0.86 reached the snout
+    // tip): front pole behind the tooth rows' end, back pole behind the hinge,
+    // so the hole lives entirely inside the closed head.
+    cavity.position.set(JAW_X + 0.72, JAW_Y + 0.10, 0);
+    cavity.scale.set(0.78, 0.035, 0.30);
     g.add(cavity);
 
     const lower = new T.Group();
