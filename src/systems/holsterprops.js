@@ -318,14 +318,37 @@
   const _hgMat = new THREE.Matrix4();
   const _hgWorldQ = new THREE.Quaternion(), _hgParentQ = new THREE.Quaternion();
   const _hgBodyQ = new THREE.Quaternion();
-  // low-ready barrel directions in BODY space (+Z = facing, +X = right):
-  // muzzle down-forward and OUT to the RIGHT so the barrel hangs past the right
-  // thigh/knee (the gun-hand now rides beside the right hip — character.js
-  // long-gun carry). The stock swings up-back-left toward the shoulder. Both
-  // ends break the torso silhouette from the rear chase cam (round-2 fix: the
-  // old across-the-body -X vector kept the whole rifle inside the torso box).
-  const LOWREADY_LONG = new THREE.Vector3(0.34, -0.82, 0.36).normalize();
-  const LOWREADY_PISTOL = new THREE.Vector3(0.20, -0.90, 0.38).normalize();  // hangs down the lowered arm beside the thigh, slight forward cant
+  // LOW-READY barrel direction, in BODY space (+Z = facing, +X = right): the
+  // muzzle rides forward-down and slightly OUT to the right, so both ends of
+  // the gun break the torso silhouette from the rear chase camera (the very
+  // first version pointed it across the body at -X, which kept the whole rifle
+  // inside the torso box).
+  // TUNABLE, because "can you see it" is a question the camera and the pose
+  // answer TOGETHER and neither one can be tuned blind — tools/tp-gun-view-
+  // check.mjs sweeps these live against the real chase camera and reports the
+  // fraction of the barrel that survives to the lens. Body space, +Z = facing,
+  // +X = the character's right; normalized on read, so authoring them by feel
+  // is fine.
+  CBZ.TP_LOWREADY = CBZ.TP_LOWREADY || {
+    // MEASURED, not guessed (tools/tp-gun-view-check.mjs --sweep --carry --pose).
+    // The obvious "fix" here is to raise the muzzle toward a modern low ready —
+    // and it is wrong, by a factor of three: at −0.42 (25° down) only 39% of the
+    // barrel survives to the lens and it spans 5.6% of the frame, because a
+    // raised barrel points along the camera's own axis and foreshortens into a
+    // stub tucked against the body. Left hanging at −0.82 it is BROADSIDE to a
+    // chase camera — 69% visible, 14% of the frame — which is why the earlier
+    // screenshot-diagnosed pose was right and the framing was what was wrong.
+    // The forward cant is the one thing worth adding: it lifts the muzzle out
+    // of the bottom edge (NDC −0.66 vs −0.75) and off the leg.
+    long: [0.32, -0.82, 0.55],
+    pistol: [0.20, -0.90, 0.44],   // same shape, a touch more cant than the old 0.38
+  };
+  const LOWREADY_LONG = new THREE.Vector3(), LOWREADY_PISTOL = new THREE.Vector3();
+  function lowReadyDir(long) {
+    const v = (CBZ.TP_LOWREADY && CBZ.TP_LOWREADY[long ? "long" : "pistol"]) ||
+      (long ? [0.32, -0.82, 0.55] : [0.20, -0.90, 0.44]);
+    return (long ? LOWREADY_LONG : LOWREADY_PISTOL).set(v[0], v[1], v[2]).normalize();
+  }
   /* ---- A BARREL MAY NOT POINT INTO THE GROUND ------------------------------
      OWNER: "when player is laying down and crouched make gun look right
      especially in third person — rn gun can go under ground."
@@ -521,7 +544,7 @@
         _hgDir.copy(PRONE_READY).applyAxisAngle(_hgUpAxis, (ch.group && ch.group.rotation.y) || 0);
       } else {
         ch.body.getWorldQuaternion(_hgBodyQ);
-        _hgDir.copy(hand.long ? LOWREADY_LONG : LOWREADY_PISTOL).applyQuaternion(_hgBodyQ);
+        _hgDir.copy(lowReadyDir(hand.long)).applyQuaternion(_hgBodyQ);
       }
       // (b) the muzzle stays above the floor, whatever the stance or the slope
       if (groundClear && hand.len > 0 && CBZ.weaponPhysics && CBZ.weaponPhysics.clearDirection) {
