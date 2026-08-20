@@ -155,6 +155,22 @@ show: the diff. Every other agent-management surface leads with it, because the
 diff is what version control hands them for free. Here the diff is one level
 down, for the rare descent, and the delta is on the front of the folder.
 
+**Adopting loose tabs.** Agents already running elsewhere can be pulled in
+without being restarted. `ba adopt <window>` takes a tmux window from anywhere on
+the server — by id, by `session:window`, or by name when the name is unique — and
+moves it into the cabinet as a drawer. The window id survives the move, so the
+board's liveness column keeps working, and the process inside is never touched:
+no send-keys, no relaunch, scrollback intact. A bare terminal tab is the harder
+case, and the honest answer is that its *process* cannot be moved at all — macOS
+has no cross-process window adoption and no `reptyr`, so nothing can re-parent a
+live pty into tmux. What can move is the conversation. `ba adopt --reborn
+"<problem>" --dir <path>` opens a cabinet window in that directory and asks the
+vendor CLI to resume its own most recent conversation there (`claude --continue`,
+`codex resume --last`); you close the old tab yourself. Because a resume is
+scoped to the directory it starts in, a reborn drawer keeps the loose agent's own
+directory as its worktree rather than creating a new one — `--worktree` opts into
+a branch, and says out loud that it is trading the conversation for it.
+
 ---
 
 Forged over a year inside a 470,000-line AI-written game, where it grew 67

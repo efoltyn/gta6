@@ -45,7 +45,7 @@ import { loadConfig, resolvePresetPath, CONFIG_FILENAME } from "../lib/config.mj
    receipt, list them, show one, land or drop it — and they are deliberately
    loaded on demand: `ba <preset>` must not pay to import a store it will not
    touch, and a build where one of them is missing must still run comparisons. */
-const SUBCOMMANDS = ["new", "ls", "show", "log", "land", "drop"];
+const SUBCOMMANDS = ["new", "adopt", "ls", "show", "log", "land", "drop"];
 
 const PKG_DIR = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const argv = process.argv.slice(2);
@@ -140,7 +140,8 @@ if (wantsHelp) {
     "  ba <preset> [flags]      run one comparison, print its measurements\n" +
     "  ba <preset> --help       every engine flag (devices, frames, reuse, labels)\n" +
     "  ba <preset> --json       machine-readable results on stdout\n" +
-    `  ba <${SUBCOMMANDS.join("|")}>   the receipt store\n\n` +
+    `  ba <${SUBCOMMANDS.join("|")}>   the receipt store\n` +
+    "  ba adopt <window|--reborn>  pull an agent already running loose into the cabinet\n\n" +
     `project: ${config.projectRoot}\n` +
     `config:  ${config.configPath || `(none — defaults; create ${CONFIG_FILENAME} to configure)`}\n` +
     `presets: ${config.presets}\n` +
