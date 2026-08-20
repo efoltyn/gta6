@@ -100,11 +100,18 @@ async function stageDoors(input) {
     CBZ.renderer.render = function () {};
     const scene = new T.Scene();
     scene.background = new T.Color(0xbcd2e8);
-    scene.add(new T.HemisphereLight(0xe8f2ff, 0x6b7480, 0.9));
+    /* EXPOSURE. The first runs of this sheet were lit like a product shot —
+       hemi 0.9 plus a 1.2 key plus a 0.5 fill — and a pale grammar (ashlar,
+       gothic, plain house) came back as a white silhouette with the door lost
+       inside it. A doorway is read from the SHADOW in its reveal, so the
+       lighting has to leave some range for that shadow to sit in: the ambient
+       is dropped to roughly half and the key just under 1, which keeps the
+       whitest limestone off the top of the curve. */
+    scene.add(new T.HemisphereLight(0xdbe6f2, 0x5f6a75, 0.52));
     // The key is aimed ACROSS the entrance face rather than down it: a doorway
     // is a hole, and a hole only reads if something is lighting one jamb and
     // shadowing the other.
-    const key = new T.DirectionalLight(0xfff2df, 1.2);
+    const key = new T.DirectionalLight(0xfff2df, 0.95);
     key.position.set(52, 60, 78);
     key.castShadow = true;
     key.shadow.mapSize.set(2048, 2048);
@@ -112,7 +119,7 @@ async function stageDoors(input) {
     key.shadow.camera.top = 70; key.shadow.camera.bottom = -70;
     key.shadow.camera.far = 260;
     scene.add(key);
-    const fill = new T.DirectionalLight(0xdde8ff, 0.5);
+    const fill = new T.DirectionalLight(0xdde8ff, 0.26);
     fill.position.set(-40, 26, 40);
     scene.add(fill);
     const ground = new T.Mesh(new T.CircleGeometry(150, 48),

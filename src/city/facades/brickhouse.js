@@ -115,6 +115,10 @@
   CBZ.registerFacade("brickhouse", {
     label: "Brick Colonial House",
     crownsRoof: true,
+    // This grammar builds its own entrance — a pedimented Georgian doorcase with pilasters, sidelights, a transom and a radiating fanlight — so the kit
+    // must not stack its generic reveal on top of it. The doorway is still
+    // CARVED either way; ownDoor only declines the extra surround.
+    ownDoor: true,
     // A Georgian grammar survives four storeys (that is a town mansion) and
     // dies instantly on a tower, so it declares a ceiling and no floor.
     maxStoreys: 4,

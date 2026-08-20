@@ -132,6 +132,10 @@
   CBZ.registerFacade("plantation", {
     label: "Antebellum Plantation House",
     crownsRoof: true,
+    // This grammar builds its own entrance — pilasters, sidelights, a stepped fanlight and a cornice with carriage lamps — so the kit
+    // must not stack its generic reveal on top of it. The doorway is still
+    // CARVED either way; ownDoor only declines the extra surround.
+    ownDoor: true,
     // A gallery house is 2 storeys, 3 at a stretch and 4 as a New Orleans
     // three-tier block. Past that the colossal order is nonsense, so the
     // city-wide auto-picker is not allowed to put this grammar on a tower.
