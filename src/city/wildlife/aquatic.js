@@ -256,7 +256,53 @@
     if (at) m.position.set(at[0], at[1], at[2]);
     return m;
   }
-  CBZ.aquaticFin = finMesh;     // shared so other marine builders match this grammar
+  /* ---- THE PUBLISHED SURFACE -------------------------------------------
+     Other marine builders (city/wildlife_orca.js, city/wildlife_shark.js's
+     surface proxy) must not grow a second fin grammar. Everything they need is
+     here, and CBZ.finBlade takes BOTH call shapes so a caller can ask for a
+     finished mesh or just the blade geometry:
+
+       CBZ.finBlade([mat, under, tip, pale], [x,y,z], shape)  -> T.Mesh
+       CBZ.finBlade(THREE, shape)                             -> BufferGeometry
+       CBZ.finBlade(shape)                                    -> BufferGeometry
+
+     `shape` is emitFin's option bag, and it also accepts the descriptive
+     spelling — {root:[x,y,z], tip:[x,y,z], chordRoot, chordTip, sweep,
+     concavity, thickRoot} — where root/tip give the origin, the span axis and
+     the span length in one, which is usually how you actually know a fin.
+     Geometry is cached on the shape, so a pack of six pays for one blade. */
+  function finShape(o) {
+    if (!o || (!o.root && !o.tip && o.thickRoot == null)) return o;
+    const s = {};
+    for (const k in o) if (Object.prototype.hasOwnProperty.call(o, k)) s[k] = o[k];
+    if (o.thickRoot != null && s.thick == null) s.thick = o.thickRoot;
+    if (o.root) s.origin = o.root;
+    if (o.root && o.tip) {
+      const d = [o.tip[0] - o.root[0], o.tip[1] - o.root[1], o.tip[2] - o.root[2]];
+      const l = Math.hypot(d[0], d[1], d[2]);
+      if (l > 1e-6) { s.span = l; s.spanDir = [d[0] / l, d[1] / l, d[2] / l]; }
+    }
+    delete s.root; delete s.tip; delete s.thickRoot; delete s.mat; delete s.tipMat;
+    return s;
+  }
+  function finBladeGeom(shape) {
+    const s = finShape(shape);
+    return cachedGeom("fin|" + JSON.stringify(s), function () {
+      const sh = new Shell(); emitFin(sh, s); return sh.geom();
+    });
+  }
+  CBZ.finBlade = function (a, b, c) {
+    if (Array.isArray(a)) return finMesh(a, b, finShape(c));   // (mats, at, shape)
+    if (a && a.BufferGeometry) return finBladeGeom(b);         // (THREE, shape)
+    return finBladeGeom(a);                                    // (shape)
+  };
+  CBZ.finBladeGeometry = finBladeGeom;
+  CBZ.aquaticFin = finMesh;     // the in-file spelling, kept: callers exist
+  CBZ.aquaticFins = finsMesh;   // several blades welded into ONE mesh (flukes)
+  // hull-from-rings, with the same shaped/ragged countershading the sharks use
+  CBZ.aquaticHull = function (mats, rings, o) { return hullMesh(mats, rings, o || {}); };
+  CBZ.aquaticHullGeometry = hullShell;
+  CBZ.aquaticBodyRings = bodyRings;
 
   /* ======================================================================
      THE HULL. Elliptical cross-sections with a SHAPED countershading line.
@@ -985,7 +1031,7 @@
       fin([finDark, finDark, finDark, finPale], [0.35, 1.36, 0], {
         span: 1.12, chordRoot: 1.00, chordTip: 0.16, sweep: 0.60, concavity: 0.30,
         leadBow: 0.07, rearTipH: 0.09, rearTipBack: 0.34, apexRound: 0.34,
-        thick: 0.14, spanSteps: 6, chordSteps: 5, paleBase: 0.18,
+        thick: 0.14, spanSteps: 6, chordSteps: 5, paleBase: 0.18, trailPale: 0.17,
         spanDir: [0, 1, 0], chordDir: [1, 0, 0],
       });
       fin([finDark], [-1.05, 1.12, 0], {
@@ -1114,7 +1160,7 @@
       fin([finDark, finDark, finDark, finPale], [0.20, 1.86, 0], {
         span: 1.95, chordRoot: 1.60, chordTip: 0.24, sweep: 0.58, concavity: 0.30,
         leadBow: 0.07, rearTipH: 0.09, rearTipBack: 0.55, apexRound: 0.30,
-        thick: 0.24, spanSteps: 6, chordSteps: 5, paleBase: 0.18,
+        thick: 0.24, spanSteps: 6, chordSteps: 5, paleBase: 0.18, trailPale: 0.17,
         spanDir: [0, 1, 0], chordDir: [1, 0, 0],
       });
       fin([finDark], [-1.35, 1.48, 0], {
@@ -1233,10 +1279,11 @@
         foldColor: 0x4a5356, skinSeed: 63,
       });
       // the scythe dorsal — taller and thinner than a great white's
-      fin([finDark], [0.20, 1.28, 0], {
+      fin([finDark, finDark, finDark, m(0x8d979b)], [0.20, 1.28, 0], {
         span: 1.55, chordRoot: 0.70, chordTip: 0.09, sweep: 0.42, concavity: 0.34,
         leadBow: 0.05, rearTipH: 0.08, rearTipBack: 0.28, apexRound: 0.10,
-        thick: 0.11, spanSteps: 6, chordSteps: 4, spanDir: [0, 1, 0], chordDir: [1, 0, 0],
+        thick: 0.11, spanSteps: 6, chordSteps: 5, paleBase: 0.16, trailPale: 0.18,
+        spanDir: [0, 1, 0], chordDir: [1, 0, 0],
       });
       fin([finDark], [-0.95, 1.16, 0], {
         span: 0.30, chordRoot: 0.28, chordTip: 0.04, sweep: 0.55, concavity: 0.28,
@@ -1349,7 +1396,7 @@
       fin([finDark, finDark, finDark, m(0x818a8e)], [0.25, 1.32, 0], {
         span: 0.98, chordRoot: 0.92, chordTip: 0.14, sweep: 0.60, concavity: 0.30,
         leadBow: 0.07, rearTipH: 0.09, rearTipBack: 0.30, apexRound: 0.30,
-        thick: 0.12, spanSteps: 6, chordSteps: 5, paleBase: 0.18,
+        thick: 0.12, spanSteps: 6, chordSteps: 5, paleBase: 0.18, trailPale: 0.17,
         spanDir: [0, 1, 0], chordDir: [1, 0, 0],
       });
       fin([finDark], [-0.85, 1.14, 0], {

@@ -823,7 +823,11 @@
   //  heading (recomputed once per frame, O(n) total, not O(n²)).
   // ============================================================
   const herds = [];
-  function newHerd(sp) { const hr = { sp: sp, members: [], cx: 0, cz: 0, heading: rng() * 6.283, n: 0, panic: 0, fleeHx: 0, fleeHz: 0 }; herds.push(hr); return hr; }
+  // `bunch` (0..1) is how hard a hungry predator nearby has packed this group
+  // in — raised by alarmFromPredator, decayed here, spent by the two cohesion
+  // blocks. It is deliberately NOT `panic`: a herd can be tight and calm (the
+  // wolf is only peckish) or scattered and terrified (a rifle shot).
+  function newHerd(sp) { const hr = { sp: sp, members: [], cx: 0, cz: 0, heading: rng() * 6.283, n: 0, panic: 0, bunch: 0, fleeHx: 0, fleeHz: 0 }; herds.push(hr); return hr; }
   function joinHerd(a, hr) { a.herd = hr; if (hr) hr.members.push(a); }
   function leaveHerd(a) {
     const hr = a.herd; if (!hr) return;
@@ -845,6 +849,9 @@
       hr.n = n;
       if (n) { hr.cx = sx / n; hr.cz = sz / n; if (hx || hz) hr.heading = Math.atan2(hz, hx); }
       hr.panic = Math.max(0, panic);
+      // the knot loosens over about eight seconds once the hunter has moved
+      // off, so a herd relaxing is something you can watch happen.
+      if (hr.bunch > 0) hr.bunch = Math.max(0, hr.bunch - dt * 0.12);
     }
   }
 
@@ -1424,6 +1431,17 @@
     carcasses.push(a);
     // score/notify — a kill is a kill, but only YOUR kill is news.
     const by = (w && w.by) || null;
+    /* THE UNIVERSAL MEAL HOOK, and it is here rather than in the food chain
+       for one reason: EVERY animal death in this game funnels through this
+       function, whoever landed it. The land food chain's own startFeed covers
+       a wolf and a deer, but a shark's kill resolves inside wildlife_shark.js
+       and a seize resolves inside systems/predator.js — files this change does
+       not own — and both of them route their damage back through
+       cityWildlifeHit, i.e. through here. So this one line is what makes a
+       great white that has just eaten actually FULL, which is precisely the
+       animal the owner named. mealFrom is receipted, so the wolf whose
+       startFeed fires a frame later does not get the meal twice. */
+    if (by && by.animal && !by.dead && by !== a && predSpecies(by.species)) mealFrom(by, a, 1);
     if (killerIsPlayer(by)) {
       if (CBZ.city) {
         if (a.legendary) { if (CBZ.city.note) CBZ.city.note("★ LEGENDARY " + a.species.name + " DOWN, skin it before it's gone!", 4, { urgent: true }); }
@@ -2299,6 +2317,11 @@
           if (CBZ.cityPanicRaise) { try { CBZ.cityPanicRaise(v.pos.x, v.pos.z, 1.4); } catch (e) {} }
           if (v.hp <= 0 && CBZ.cityKillPed && !v.dead) {
             try { CBZ.cityKillPed(v, { fromX: a.pos.x, fromZ: a.pos.z, force: 7, attacker: a, byPlayer: false }, preyCause(a)); } catch (e) {}
+            // A PERSON IS A MEAL TOO. The man-eater branch is already the
+            // rarest thing this file does; without this the one wolf in the
+            // county that took somebody stayed exactly as starving as before
+            // and went straight back out looking, which is not an animal.
+            mealFrom(a, v, 0.85);
           }
         },
         canReach: function (t) { return a._packGate !== false && !!t && !t.dead; },
@@ -2335,8 +2358,17 @@
   //      wall) with no second panic system anywhere.
   function alarmFromPredator(h, amt) {
     const hsp = h.species, hx = h.pos.x, hz = h.pos.z;
-    const R = 34 + SZ(h) * 12;
+    /* PREY READS THE PREDATOR'S HUNGER, and this is the half of the feature
+       that shows up on the animals you are ACTUALLY looking at. You rarely
+       have a wolf in frame; you very often have the deer. A fed wolf drifting
+       through the treeline barely lifts a head — the herd keeps grazing, and
+       that is a herd that has decided it is safe. A starving one moving the
+       same line empties the meadow from half again as far out and leaves the
+       herd packed into a knot. Nobody is told which wolf it was. */
+    const hd = DRIVE(h);
+    const R = (34 + SZ(h) * 12) * (0.62 + hd.bold * 0.42);
     const R2 = R * R;
+    const amtH = amt * (0.6 + hd.bold * 0.45);
     for (let i = 0; i < animals.length; i++) {
       const a = animals[i], sp = a.species;
       if (a === h || a.dead || a.tamed || a.ridden || a.external || !sp) continue;
@@ -2344,7 +2376,16 @@
       if ((sp.danger || 0) >= (hsp.danger || 0)) continue;          // peers do not flinch
       const dx = a.pos.x - hx, dz = a.pos.z - hz;
       if (dx * dx + dz * dz > R2) continue;
-      a.alarm = Math.max(a.alarm || 0, amt);
+      a.alarm = Math.max(a.alarm || 0, amtH);
+      /* BUNCHING. A frightened herd does not just run — it closes up, and a
+         bait ball is the same instinct with more zeroes. `bunch` rides on the
+         HERD (not the animal) so the whole group tightens as one, decays on
+         its own in updateHerds, and is spent by the two cohesion blocks that
+         already exist. A fed predator sets it to nearly nothing, so the
+         difference between a fed and a starving hunter is visible in the SHAPE
+         of the herd from a distance at which you cannot see either of them. */
+      const hr0 = a.herd;
+      if (hr0) { const b = hd.hunt; if (!(hr0.bunch > b)) hr0.bunch = b; }
       if (a.state === "wander" || a.state === "graze" || a.state === "idle") {
         a.state = "flee";
         // the QUARRY gets a shorter burst than the bystanders. It is the one
@@ -2382,21 +2423,85 @@
     a._prey = null;
   }
 
-  function startFeed(a, kill) {
+  /* ---- THE MEAL. ONE function, and it is the only place in the game hunger
+     ever goes DOWN by eating -------------------------------------------------
+
+     A MEAL IS AS BIG AS WHAT WAS EATEN, relative to the eater's own body: a
+     wolf that takes an elk is done for the afternoon, a fox that takes a
+     rabbit is hungry again within the hour, and that difference is the whole
+     reason the fox is the one you keep seeing hunt.
+
+     A CARCASS IS A FINITE THING. Each animal that eats from one takes a
+     smaller share than the last (`_eaten`), so the third scavenger onto a
+     kill leaves nearly as hungry as it arrived and goes back to hunting — the
+     alternative is a single deer feeding the entire county.
+
+     RECEIPTED ON THE EATER (`_ateFrom`), because there are now three separate
+     paths that can report the same mouthful: killAnimal (which catches EVERY
+     killer including the ones in files this change does not own — sharks,
+     orcas, the seize in predator.js), the food chain's own startFeed, and
+     scavenging. Without the receipt a wolf's kill would feed it twice and the
+     visible half of the feature — a fed predator that will not commit — would
+     switch on a second too early. */
+  function mealFrom(eater, kill, share) {
+    if (!TRAITS || !eater || !kill || eater === kill || eater._ateFrom === kill) return;
+    eater._ateFrom = kill;
+    const eaten = kill._eaten || 0;
+    kill._eaten = eaten + 1;
+    const bulk = SZ(kill) / Math.max(0.2, SZ(eater));
+    const meal = Math.min(1.15, 0.42 + 0.75 * bulk) *
+                 (share == null ? 1 : share) / (1 + eaten * 0.7);
+    TRAITS.feed(eater, meal);
+  }
+
+  function startFeed(a, kill, share) {
     a._feedOn = kill;
-    /* A MEAL IS AS BIG AS WHAT IT KILLED. This is the other half of hunger —
-       it drifts up on the clock and it comes down HERE, by how much animal
-       there was, relative to the hunter's own body. A wolf that takes an elk
-       is done for a long time; a fox that takes a rabbit is hungry again
-       within the hour, and that shows up as a fox that keeps hunting. */
-    if (TRAITS && kill) {
-      const meal = Math.min(1.15, 0.42 + 0.75 * (SZ(kill) / Math.max(0.2, SZ(a))));
-      TRAITS.feed(a, meal);
-    }
+    mealFrom(a, kill, share);
     a._feedT = FEED_MIN + Math.random() * FEED_RAND;
     a._feedPh = 0; a._feedGore = 0.4;
     a._prey = null;
     if (kill && kill._huntedBy === a) kill._huntedBy = null;
+  }
+
+  /* ---- SCAVENGING — the free meal beats the chase --------------------------
+     A starving predator that walks past a fresh carcass to go and chase a
+     healthy deer is a predator nobody believes in. This is the cheapest
+     believability in the whole food chain and it costs one timed scan of the
+     `carcasses` list (which is a handful of entries, not the animal list).
+
+     It is also the second visible read on hunger, and a better one than speed:
+     you shoot a deer, walk away, and the thing that comes out of the treeline
+     to stand over it is the animal that was hungry. A fed one never comes.
+
+     LAND ONLY, and that is a hard constraint rather than a taste: feedTick
+     walks the eater in with landWalk/slither, which put a body on the GROUND.
+     A shark scavenging through this seam would beach itself. The sea's own
+     scavenging belongs in wildlife_shark.js, which this change does not own. */
+  const SCAV_R = 58;             // how far a starving land predator smells carrion
+  const SCAV_RESCAN = 1.9;       // s between scans — carrion does not move
+  const SCAV_MAX_EATERS = 3;     // a carcass this picked-over is not worth crossing to
+  function pickCarcass(a, dt) {
+    a._scavT = (a._scavT || 0) - dt;
+    if (a._scavT > 0) return null;
+    a._scavT = SCAV_RESCAN * (0.7 + Math.random() * 0.6);
+    const d = DRIVE(a);
+    if (d.hunt <= 0) return null;                  // a fed animal walks past carrion
+    // Range is the hunger itself: a merely peckish wolf notices a kill it can
+    // nearly touch, a starving one crosses the meadow for it.
+    const R = SCAV_R * d.sense * (0.35 + 0.65 * d.hunt);
+    const sp = a.species, ax = a.pos.x, az = a.pos.z;
+    let best = null, bd = R * R;
+    for (let i = 0; i < carcasses.length; i++) {
+      const c = carcasses[i];
+      if (!c || c === a || !c.skinnable || !c.pos || !c.species) continue;
+      if (c.species === sp) continue;              // not its own kind
+      if (!!c.species.aquatic !== !!sp.aquatic) continue;
+      if (c._ateFrom === a || a._ateFrom === c) continue;      // already had this one
+      if ((c._eaten || 0) >= SCAV_MAX_EATERS) continue;
+      const dx = c.pos.x - ax, dz = c.pos.z - az, d2 = dx * dx + dz * dz;
+      if (d2 < bd) { bd = d2; best = c; }
+    }
+    return best;
   }
   function endFeed(a) {
     a._feedT = 0; a._feedOn = null;
@@ -3017,9 +3122,17 @@
       dx += Math.cos(hr.heading) * align; dz += Math.sin(hr.heading) * align;
       const toCx = hr.cx - grp.position.x, toCz = hr.cz - grp.position.z;
       const cd = Math.hypot(toCx, toCz) || 1;
-      const coh = Math.min(1.1, Math.max(0, cd - 5) / 14) * (a.state === "wander" ? 1 : 1.6);
+      /* BUNCHING, SPENT. A hungry predator in range does two things to the
+         shape of a herd and both are the same number: it pulls the cohesion up
+         (they crowd the centre, and from further out — the -5 slack that lets
+         a calm herd spread is what shrinks) and it pushes the personal-space
+         radius down (they will tolerate standing shoulder to shoulder). A
+         watcher on a hill sees a loose scatter of deer become a knot. */
+      const bn = hr.bunch || 0;
+      const coh = Math.min(1.1 + bn * 0.9, Math.max(0, cd - 5 * (1 - bn * 0.8)) / (14 - bn * 7)) *
+                  (a.state === "wander" ? 1 : 1.6);
       dx += (toCx / cd) * coh; dz += (toCz / cd) * coh;
-      const sepR = 2.2 + SZ(a) * 1.0;
+      const sepR = (2.2 + SZ(a) * 1.0) * (1 - bn * 0.45);
       let sx = 0, szz = 0;
       for (let m = 0; m < hr.members.length; m++) {
         const o2 = hr.members[m]; if (o2 === a || o2.dead) continue;
@@ -3490,10 +3603,15 @@
           // cohesion: pull toward the centre only once the herd spreads out
           const toCx = hr.cx - grp.position.x, toCz = hr.cz - grp.position.z;
           const cd = Math.hypot(toCx, toCz) || 1;
-          const coh = Math.min(1.1, Math.max(0, cd - 5) / 14) * (a.state === "wander" ? 1 : 1.6);
+          // ..and the same knot in the water, which is the one place it has a
+          // name: a BAIT BALL is a school that has bunched because something
+          // hungry is underneath it. Same scalar, same source, no second system.
+          const bn = hr.bunch || 0;
+          const coh = Math.min(1.1 + bn * 0.9, Math.max(0, cd - 5 * (1 - bn * 0.8)) / (14 - bn * 7)) *
+                      (a.state === "wander" ? 1 : 1.6);
           dx += (toCx / cd) * coh; dz += (toCz / cd) * coh;
           // separation: shove away from the closest herd-mate inside ~2.6u
-          const sepR = 2.2 + SZ(a) * 1.0;
+          const sepR = (2.2 + SZ(a) * 1.0) * (1 - bn * 0.45);
           let sx = 0, sz = 0;
           for (let m = 0; m < hr.members.length; m++) {
             const o = hr.members[m]; if (o === a || o.dead) continue;

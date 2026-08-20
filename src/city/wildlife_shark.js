@@ -72,11 +72,21 @@
   // SHARK_SHADOW_VIEW how deep you can see depends on where your eye is (a
   //                   boat deck sees in, a swimmer sees a mirror).
   //                                                       off -> fixed depth.
+  // SHARK_TAIL_TIP    the upper caudal lobe breaking the surface a body-length
+  //                   behind the dorsal on a shallow cruise. THIS IS NOT THE
+  //                   DOUBLE-FIN BUG — it is the real two-fin read, and it is
+  //                   the tell every fisherman uses to say "that one is right
+  //                   at the top". Off -> dorsal only.
+  // SHARK_SURFACE_LIFE the fin BANKING into its turns, spray peeling off the
+  //                   blade at speed, and the submerged mass swaying as it
+  //                   swims.                              off -> all static.
   if (CBZ.CONFIG) {
     if (CBZ.CONFIG.SHARK_FIN_V2 == null) CBZ.CONFIG.SHARK_FIN_V2 = true;
     if (CBZ.CONFIG.SHARK_WAKE_V2 == null) CBZ.CONFIG.SHARK_WAKE_V2 = true;
     if (CBZ.CONFIG.SHARK_SHADOW_V2 == null) CBZ.CONFIG.SHARK_SHADOW_V2 = true;
     if (CBZ.CONFIG.SHARK_SHADOW_VIEW == null) CBZ.CONFIG.SHARK_SHADOW_VIEW = true;
+    if (CBZ.CONFIG.SHARK_TAIL_TIP == null) CBZ.CONFIG.SHARK_TAIL_TIP = true;
+    if (CBZ.CONFIG.SHARK_SURFACE_LIFE == null) CBZ.CONFIG.SHARK_SURFACE_LIFE = true;
   }
 
   // ---- tuning ------------------------------------------------------------
@@ -153,8 +163,9 @@
   //  the owner's two photographs are the whole brief: a lone dorsal cutting a
   //  calm sea, and a drone shot of a shark in blue water seen from a boat.
   //
-  //  Five thin objects, in the SAME parent as the shark group but never inside
-  //  it, so the body can be hidden while the surface read carries on:
+  //  Seven thin objects (two of them only when they are earned), in the SAME
+  //  parent as the shark group but never inside it, so the body can be hidden
+  //  while the surface read carries on:
   //
   //    1. THE FIN     — a scythe BLADE: convex leading edge, rounded apex
   //                     leaning BACK, and a distinctly CONCAVE trailing edge.
@@ -168,7 +179,13 @@
   //    4. THE BODY    — the pale grey-brown torpedo you see through the water
   //                     from a deck. Shark-SHAPED (torpedo + swept pectorals +
   //                     crescent tail). An ellipse is not a shark.
-  //    5. THE SHADOW  — the darker mass under it, OFFSET away from the sun by
+  //    5. THE TAIL    — the upper caudal lobe, the SECOND thing that cuts the
+  //                     surface when a shark is genuinely shallow, a body
+  //                     length astern of the dorsal. Real, recognisable, and
+  //                     not to be confused with the double-DORSAL bug below.
+  //    6. THE SPRAY    — a torn sheet of white off the blade at speed, built
+  //                     the first time an animal is fast enough to need one.
+  //    7. THE SHADOW  — the darker mass under it, OFFSET away from the sun by
   //                     depth and softer/bigger the deeper it is. The double
   //                     read — pale body plus a separate darker shadow — is
   //                     what actually sells depth in the drone photograph.
@@ -213,10 +230,13 @@
   //  single soft ellipse), SHARK_SHADOW_VIEW=false (depth fade stops caring
   //  where the camera is). SHARK_SHADOW=false still removes it all.
   //
-  //  COST: 5 meshes and 5 draw calls per SURFACED shark (was 4), all sharing
-  //  module-wide geometry, three 128 kB-class canvas textures and one material
-  //  per species; two small materials per shark, because their opacity
-  //  animates with that one animal's depth. Nothing is allocated per frame.
+  //  COST: 5 meshes and 5 draw calls per SURFACED shark (was 4), plus a sixth
+  //  for the tail tip on species that actually have one standing above the
+  //  back line, plus a seventh built LAZILY the first time that animal breaks
+  //  4 m/s with a blade in the air. All share module-wide geometry, four
+  //  128 kB-class canvas textures and one material per species; three small
+  //  materials per shark, because their opacity animates with that one
+  //  animal's depth and speed. Nothing is allocated per frame.
   //  world/water_wake.js's audit wants this file's wake retired into
   //  CBZ.waterWakeFor: NOT DONE and not a one-liner — the ribbon it would draw
   //  is kind:"boat" only, claims one of 4-6 camera-ranked slots meant for
@@ -226,7 +246,7 @@
   // ============================================================
   let quadGeo = null, finGeo = null, finGeoV1 = null, shadowGeoV1 = null;
   let wakeMat = null, bowMat = null, finMatV1 = null;
-  let silTex = null, wakeTex = null, bowTex = null;
+  let silTex = null, wakeTex = null, bowTex = null, sprayTex = null;
   const finMats = new Map();            // species blade colour -> one material
   let BLADE_CONCAVITY = 0;              // measured off the built outline
   let SIL_FILL = 0.785;                 // measured off the silhouette texture
@@ -235,6 +255,8 @@
   function wake2() { return !(CBZ.CONFIG && CBZ.CONFIG.SHARK_WAKE_V2 === false); }
   function shadow2() { return !(CBZ.CONFIG && CBZ.CONFIG.SHARK_SHADOW_V2 === false); }
   function shadowView() { return !(CBZ.CONFIG && CBZ.CONFIG.SHARK_SHADOW_VIEW === false); }
+  function tailTip() { return fin2() && !(CBZ.CONFIG && CBZ.CONFIG.SHARK_TAIL_TIP === false); }
+  function surfLife() { return fin2() && !(CBZ.CONFIG && CBZ.CONFIG.SHARK_SURFACE_LIFE === false); }
 
   // Deterministic integer hash — the mottling has to be identical in every
   // build, on every machine, forever (this file's determinism law), so no
@@ -451,6 +473,39 @@
     }
     return c;
   }
+  /* ---- 3b. THE SPRAY ----------------------------------------------------
+     A blade travelling at 11 m/s does not slice the water silently — it throws
+     a torn sheet of white off its trailing edge. Deterministic blob cluster,
+     dense and opaque at the waterline, torn and transparent at the top, which
+     is the only thing that makes a sprite read as water rather than as smoke.
+     u = along the blade (u=0 astern), v = up (v=1 is the waterline). */
+  function makeSprayTexture() {
+    const S = 64;
+    const c = document.createElement("canvas");
+    c.width = S; c.height = S;
+    const ctx = c.getContext("2d");
+    for (let i = 0; i < 34; i++) {
+      const a = hash1(i * 3 + 1), b = hash1(i * 3 + 2), r = hash1(i * 3 + 3);
+      const x = S * (0.10 + a * 0.86);
+      // higher blobs sit further astern — a plume that leans back as it climbs
+      const lift = Math.pow(b, 1.5);
+      const y = S * (0.98 - lift * 0.92) + (a - 0.5) * S * 0.10;
+      const rad = S * (0.055 + r * 0.10) * (1 - lift * 0.45);
+      const g = ctx.createRadialGradient(x, y, 0, x, y, rad);
+      const al = (0.34 - lift * 0.26).toFixed(3);
+      g.addColorStop(0, "rgba(255,255,255," + al + ")");
+      g.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(x, y, rad, 0, Math.PI * 2); ctx.fill();
+    }
+    // the solid root of the sheet, right where the blade meets the water
+    const g2 = ctx.createLinearGradient(0, S, 0, S * 0.55);
+    g2.addColorStop(0, "rgba(255,255,255,0.55)");
+    g2.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = g2;
+    ctx.fillRect(0, S * 0.55, S, S * 0.45);
+    return c;
+  }
   function canvasTex(c) {
     const t = new THREE.CanvasTexture(c);
     if (THREE.sRGBEncoding != null) t.encoding = THREE.sRGBEncoding;   // r128-safe
@@ -468,6 +523,7 @@
     silTex = canvasTex(makeSilTexture());
     wakeTex = canvasTex(makeWakeTexture());
     bowTex = canvasTex(makeBowTexture());
+    sprayTex = canvasTex(makeSprayTexture());
     wakeMat = new THREE.MeshBasicMaterial({
       map: wakeTex, color: 0xe2edf2, transparent: true, opacity: 0.42,
       depthWrite: false, side: THREE.DoubleSide,
@@ -545,6 +601,24 @@
     }
     if (hull && hull.max.y > -1e8) backY = hull.max.y;
     if (backY < -1e8) backY = all.min.y + (all.max.y - all.min.y) * 0.55;
+    // THE TAIL TIP, measured exactly like the dorsal: the highest thing in the
+    // rear quarter of the animal that is not the dorsal. On a shark that is the
+    // upper caudal lobe, which stands nearly as tall as the dorsal and breaks
+    // the surface a body-length astern of it on a shallow cruise — the real
+    // two-fin read, and the reason this is measured and not typed. On a DOLPHIN
+    // the flukes are horizontal, so this comes back at (or under) the back line
+    // and the tail simply never shows. Nothing here says the word "dolphin".
+    const rearX = all.min.x + len * 0.24;
+    let tailTop = -1e9, tailCx = all.min.x + len * 0.10, tailChord = len * 0.18;
+    for (let i = 0; i < parts.length; i++) {
+      const q = parts[i];
+      if (q === dorsal || q.min.x > rearX) continue;
+      if (q.max.y <= tailTop) continue;
+      tailTop = q.max.y;
+      tailCx = Math.max(all.min.x, Math.min(rearX, (q.min.x + q.max.x) * 0.5));
+      tailChord = Math.max(len * 0.06, Math.min(len * 0.30, q.max.x - q.min.x));
+    }
+    if (tailTop < -1e8) tailTop = backY;
     // blade colour: whatever the authored dorsal is actually painted, so an
     // orca's proxy is BLACK without this file ever hearing the word "orca"
     let hex = (sp && sp.color) || 0x59636b;
@@ -558,6 +632,8 @@
       planLen: len, planBeam: beam,
       bodyCx: (all.min.x + all.max.x) * 0.5,
       thick: 0.50,
+      tailY: tailTop, tailX: tailCx, tailBase: tailChord,
+      tailH: Math.max(0, tailTop - backY),
     };
     if (declared) {
       if (declared.height > 0) p.finH = +declared.height;
@@ -568,6 +644,8 @@
       if (declared.thickness > 0) p.thick = +declared.thickness;
       if (declared.planLength > 0) p.planLen = +declared.planLength;
       if (declared.planBeam > 0) p.planBeam = +declared.planBeam;
+      if (declared.tailHeight >= 0) { p.tailH = +declared.tailHeight; p.tailY = p.backY + p.tailH; }
+      if (Number.isFinite(declared.tailX)) p.tailX = +declared.tailX;
       p.declared = true;
     }
     plans.set(key, p);
@@ -604,6 +682,18 @@
     fin.castShadow = false;
     if (!v2) fin.rotation.z = 0.2;                          // the pre-V2 rake
     root.add(fin);
+
+    // THE TAIL TIP — the same blade, smaller, raked hard back, standing a
+    // body-length astern. It has no fade of its own: the water either reaches
+    // over it or it does not, which is exactly how the real read works.
+    if (tailTip() && plan.tailH > 0.02) {
+      const tail = new THREE.Mesh(finGeo, finMatFor(plan.color));
+      tail.rotation.z = 0.42;                               // the caudal's rake
+      tail.castShadow = false;
+      tail.visible = false;
+      root.add(tail);
+      s.tail = tail;
+    }
 
     const wake = new THREE.Mesh(quadGeo, wakeMat);
     wake.rotation.x = -Math.PI / 2;                         // lie flat on the water
@@ -657,6 +747,23 @@
     return root;
   }
 
+  // THE SPRAY is built the first time an animal is actually fast enough to
+  // throw one, so a whole ocean of cruising sharks never pays for it. Its
+  // material is per-shark because the opacity rides that one animal's speed.
+  function ensureSpray(s) {
+    if (s.spray || !s.root) return s.spray;
+    s.sprayMat = new THREE.MeshBasicMaterial({
+      map: sprayTex, color: 0xf4fbff, transparent: true, opacity: 0,
+      depthWrite: false, side: THREE.DoubleSide,
+    });
+    const m = new THREE.Mesh(quadGeo, s.sprayMat);
+    m.renderOrder = 6;
+    m.castShadow = false;
+    s.root.add(m);
+    s.spray = m;
+    return m;
+  }
+
   // The proxy is driven from the actor's LIVE transform every frame no matter
   // who moved it — that is what keeps it independent of the body's LOD.
   function proxy(a, s, dist, dt) {
@@ -671,6 +778,11 @@
     s.px = grp.position.x; s.pz = grp.position.z;
     const spd = dt > 0 ? Math.sqrt(dx * dx + dz * dz) / dt : 0;
     s.spd += (spd - s.spd) * Math.min(1, dt * 4);
+    // TURN RATE, for the bank. Same trick as the speed: read the transform,
+    // never ask the driver, so the fin banks whoever is steering the animal.
+    const dh = s.ph == null ? 0 : shortest(a.heading - s.ph);
+    s.ph = a.heading;
+    s.yaw += ((dt > 0 ? dh / dt : 0) - s.yaw) * Math.min(1, dt * 5);
 
     if (!s.plan) { try { s.plan = speciesPlan(a.species || {}, grp); } catch (e) { return; } }
     const plan = s.plan;
@@ -715,8 +827,12 @@
       }
       reach *= 0.95 + 1.15 * sinE;
     }
-    const shWant = (shadowOn() && !a.dead && ON() && !hidden && dist < finR * 1.15 && dep > 0.3)
-      ? Math.max(0, Math.min(1, 1 - dep / reach)) : 0;
+    // ...and it fades in at the SHALLOW end too. Without the second ramp a
+    // shark rising through 0.3 m popped its whole silhouette on at 97% alpha,
+    // which is a flash exactly at the moment the player is looking hardest.
+    const shWant = (shadowOn() && !a.dead && ON() && !hidden && dist < finR * 1.15 && dep > 0.25)
+      ? Math.max(0, Math.min(1, 1 - dep / reach)) *
+        Math.max(0, Math.min(1, (dep - 0.25) / 0.55)) : 0;
     if (!want && s.finK <= 0.02 && !shWant && (s.shK || 0) <= 0.02) {   // fully down
       if (s.root && s.root.visible) s.root.visible = false;
       s.finK = 0; s.shK = 0;
@@ -759,6 +875,14 @@
           s.shadow.position.x += oX * cs + oZ * sn;
           s.shadow.position.z = -oX * sn + oZ * cs;
           s.shadowMat.opacity = SHADOW_ALPHA * sk * 0.92;
+          // IT IS SWIMMING. One sinusoid of yaw on a flat quad and the mass
+          // under the water stops being a decal — the whole silhouette sways
+          // the way a body does when the tail beats. Faster when it is.
+          const sway = surfLife()
+            ? (0.035 + 0.030 * Math.min(1, s.spd / 6)) *
+              Math.sin(t * (1.5 + Math.min(3.4, s.spd * 0.42)) + s.phase)
+            : 0;
+          s.shadow.rotation.z = sway * 0.75;
           if (s.bodySil) {
             // the animal itself, seen THROUGH the water: sharper, tighter, and
             // gone sooner with depth than its own shadow
@@ -766,6 +890,7 @@
             s.bodySil.visible = bk > 0.02;
             s.bodySil.scale.set(len * 1.10, plan.planBeam * sz * 1.14, 1);
             s.bodySil.position.x = plan.bodyCx * sz;
+            s.bodySil.rotation.z = sway;
             s.bodyMat.opacity = 0.55 * bk;
           }
         } else {
@@ -784,8 +909,16 @@
       // swell crosses it, which is the whole Jaws shot.
       s.fin.position.set(plan.finX * sz, backY - s.root.position.y - finH * (1 - k) * 0.85, 0);
       s.fin.scale.set(plan.finBase * sz, finH, plan.finBase * sz * plan.thick);
-      // a fin cutting water heels a little; deterministic, tied to the clock
+      // a fin cutting water rakes a little; deterministic, tied to the clock
       s.fin.rotation.z = 0.03 * Math.sin(t * 1.7 + plan.finX * 3.1);
+      // THE BANK. A shark turns by rolling into the turn, and from a deck the
+      // dorsal LEANING is how you read the turn before the wake shows it. The
+      // roll axis is the animal's own forward axis, which is the blade's local
+      // x — rolling it on z (the rake) would just make it lie down.
+      s.bank = surfLife()
+        ? Math.max(-0.55, Math.min(0.55, s.yaw * 0.80 * Math.min(1, s.spd / 2.2)))
+        : 0;
+      s.fin.rotation.x = s.bank;
       s.finExposed = Math.max(0, exposed);
     } else {
       const fh = 1.2 * sz * 1.15;
@@ -793,6 +926,58 @@
       s.fin.scale.set(sz, sz * 1.15, sz * 0.55);
       s.finExposed = Math.max(0, s.fin.position.y + fh * 0.5);
     }
+
+    // THE TAIL TIP — TWO FINS, AND ON PURPOSE. On a genuinely shallow cruise
+    // the upper caudal lobe cuts the surface a body-length astern of the
+    // dorsal, and everyone who has ever seen a shark from a boat knows that
+    // read. THIS IS NOT THE DOUBLE-FIN BUG, which was two DORSALS at the same
+    // station, one of them floating in the air: this one stands at the tail, at
+    // its own real height, and appears only when the water genuinely does not
+    // reach over it. It is also gated on k, so it can never be drawn while the
+    // authored body (which has its own caudal) is on screen.
+    s.tailExposed = 0;
+    if (s.tail) {
+      const tx = plan.tailX * sz;
+      const tSurf = surfaceAt(grp.position.x + Math.cos(a.heading) * tx,
+                              grp.position.z + Math.sin(a.heading) * tx, t);
+      const tH = plan.tailH * sz;
+      const tExp = (grp.position.y + plan.tailY * sz) - tSurf;
+      s.tail.visible = k > 0.02 && tExp > 0.02;
+      if (s.tail.visible) {
+        s.tailExposed = tExp;
+        s.tail.position.set(tx, grp.position.y + plan.tailY * sz - tH - s.root.position.y, 0);
+        s.tail.scale.set(plan.tailBase * sz, tH, plan.tailBase * sz * plan.thick * 0.7);
+        s.tail.rotation.x = s.bank * 0.7;                 // the tail rolls too
+      }
+    }
+
+    // SPRAY. A blade doing eleven metres a second tears a sheet of white off
+    // its own trailing edge; a cruising one does not. Needs both a real speed
+    // AND a real amount of blade out of the water, so a submerged rush is
+    // silent and a drifting fin is dry.
+    const sprayK = surfLife() && k > 0.2
+      ? Math.max(0, Math.min(1, (s.spd - 4.2) / 6.5)) *
+        Math.max(0, Math.min(1, s.finExposed / Math.max(0.05, finH * 0.30)))
+      : 0;
+    if (sprayK > 0.02) {
+      const m = ensureSpray(s);
+      if (m) {
+        m.visible = true;
+        const h = Math.max(0.30, s.finExposed * (1.05 + 0.35 * sprayK));
+        const w = h * 2.2;
+        m.scale.set(w, h, 1);
+        const base = surf - s.root.position.y;            // the waterline, local
+        m.position.set(plan.finX * sz - w * 0.34, base + h * 0.42, 0);
+        // face the camera: the sheet is a sprite, and edge-on it is nothing
+        const cam = CBZ.camera;
+        m.rotation.y = cam && cam.position
+          ? Math.atan2(cam.position.x - s.root.position.x,
+                       cam.position.z - s.root.position.z) + a.heading
+          : 0;
+        s.sprayMat.opacity = 0.70 * sprayK * k *
+          (0.82 + 0.18 * Math.sin(t * 11.3 + s.phase));   // torn, not a decal
+      }
+    } else if (s.spray) s.spray.visible = false;
 
     // THE WAKE. Small by law: a cruising fin leaves a ripple you have to look
     // for, and only the rush earns the white V. It also needs a surface to
@@ -829,7 +1014,9 @@
     // they are ours to dispose — everything else in the proxy is _shared.
     if (s.shadowMat && s.shadowMat.dispose) { try { s.shadowMat.dispose(); } catch (e) {} }
     if (s.bodyMat && s.bodyMat.dispose) { try { s.bodyMat.dispose(); } catch (e) {} }
+    if (s.sprayMat && s.sprayMat.dispose) { try { s.sprayMat.dispose(); } catch (e) {} }
     s.root = null; s.fin = null; s.wake = null; s.bow = null; s.finK = 0;
+    s.tail = null; s.spray = null; s.sprayMat = null; s.tailExposed = 0;
     s.shadow = null; s.shadowMat = null; s.bodySil = null; s.bodyMat = null; s.shK = 0;
   }
 
@@ -847,8 +1034,14 @@
       dive: a.swimDepth || 2.5, diveWant: (a.swimDepth || 2.5) * DIVE.cruise,
       state: "cruise", owned: false, stuck: 0, bail: 0,
       finK: 0, shK: 0, spd: 0, px: null, pz: null, wedged: 0,
+      yaw: 0, ph: null, bank: 0, tailExposed: 0,
       root: null, fin: null, wake: null, bow: null, sz: 1, finExposed: 0,
+      tail: null, spray: null, sprayMat: null,
       plan: null, shadow: null, shadowMat: null, bodySil: null, bodyMat: null,
+      // one deterministic phase per animal, so a pod does not sway in lockstep
+      // and the same world always sways the same way (the determinism law).
+      phase: hash1(Math.round((a.group ? a.group.position.x * 13.7 +
+        a.group.position.z * 7.3 : 0)) | 0) * 6.283185307,
     };
     // moveInWater writes into a caller-owned scratch object; without one it
     // allocates a fresh result EVERY frame. wildlife.js gives aquatic actors
@@ -1195,6 +1388,12 @@
       shadowOffsetM: shadowUp ? Math.hypot(s.shadow.position.x - (plan ? plan.bodyCx * sz : 0),
                                            s.shadow.position.z) : 0,
       bodySilUp: !!(s.bodySil && s.bodySil.visible),
+      // the tail tip is NOT a dorsal and is deliberately not counted as one —
+      // two dorsals is the bug, dorsal + caudal is the real shallow-cruise read
+      tailTipM: Number((s.tailExposed || 0).toFixed(3)),
+      finBankRad: Number((s.bank || 0).toFixed(3)),
+      sprayAlpha: s.spray && s.spray.visible && s.sprayMat
+        ? Number(s.sprayMat.opacity.toFixed(3)) : 0,
       planLenM: plan ? plan.planLen * sz : 0,
       planBeamM: plan ? plan.planBeam * sz : 0,
       wakeLenM: s.wake && s.wake.visible ? s.wake.scale.x : 0,

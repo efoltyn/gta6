@@ -93,16 +93,30 @@
 
    FLAGS (one-line reverts, declared here, never in config.js):
      CBZ.CONFIG.MARINE_PREDATION  the whole file
-     CBZ.CONFIG.ORCA_POD          pod tactics: bearings, ram, roll-over
+     CBZ.CONFIG.MARINE_POD        pod tactics: bearings, ram, roll-over
+                                  (CFG.ORCA_POD = false still reverts it too)
      CBZ.CONFIG.MEG_SHIP_BITE     a big shark taking a small boat
      CBZ.CONFIG.WATER_CHUM_ALL    the chum producers of §7
 
-   PUBLIC API
+   PUBLIC API — the graph
      CBZ.marineRelation(hunterSp, targetSp) -> 0 none | 1 prey | 2 mob
      CBZ.marinePodNeeded(hunter, target)    -> how many it takes
+     CBZ.marinePodNeededFor(hSp,tSp,hS,tS)  -> the same, off bestiary rows alone
      CBZ.marineGape(actor)                  -> metres its jaws can span
      CBZ.marineBiteableHull(actor, car)     -> can it take that boat
-     CBZ.marineAudit()                      -> the probe (no gameplay reads it)
+     CBZ.marineBleed(ref, severity)         -> put blood in the water (§7)
+
+   PUBLIC API — the pod primitives (§5b). A species file that wants its own
+   signature tactics SPENDS these; it does not re-implement them.
+     CBZ.marinePodRole(a,t,dt) commit/flank/hold   CBZ.marinePodMembers(a,t,out)
+     CBZ.marinePodCount(a,t)   CBZ.marinePodEnough(a,t)
+     CBZ.marinePodRamReady(a,t)   CBZ.marinePodRam(a,t,dt)
+     CBZ.marinePodRollReady(a,t)  CBZ.marinePodRoll(a,t)  CBZ.marinePodRolling(t)
+     CBZ.marinePodBreakOff(a,s)   CBZ.marinePodJoin(a,t)
+     CBZ.marineHurt(v,dmg,by,cause)  CBZ.marineDpsAgainst(a,b)
+     CBZ.marineBodyLen(a)            CBZ.marineSurfaceHit(x,z,power)
+
+   CBZ.marineAudit()                        -> the probe (no gameplay reads it)
 ============================================================ */
 (function () {
   "use strict";
@@ -113,11 +127,17 @@
 
   // ---- FLAGS ---------------------------------------------------------------
   if (CFG.MARINE_PREDATION == null) CFG.MARINE_PREDATION = true;
-  if (CFG.ORCA_POD == null) CFG.ORCA_POD = true;
+  /* MARINE_POD, not ORCA_POD. The mechanism is "a pod mobs something one of
+     them could not take", and naming the flag after the one species that
+     currently qualifies is how a general system quietly becomes a special
+     case. `ORCA_POD` is still honoured when somebody explicitly sets it false
+     so an older revert line keeps working. */
+  if (CFG.MARINE_POD == null) CFG.MARINE_POD = true;
   if (CFG.MEG_SHIP_BITE == null) CFG.MEG_SHIP_BITE = true;
   if (CFG.WATER_CHUM_ALL == null) CFG.WATER_CHUM_ALL = true;
+  if (CFG.MARINE_FRENZY == null) CFG.MARINE_FRENZY = true;
   function ON() { return CFG.MARINE_PREDATION !== false; }
-  function PODS() { return ON() && CFG.ORCA_POD !== false; }
+  function PODS() { return ON() && CFG.MARINE_POD !== false && CFG.ORCA_POD !== false; }
   function SHIPS() { return ON() && CFG.MEG_SHIP_BITE !== false; }
   function CHUMS() { return CFG.WATER_CHUM_ALL !== false; }
 
@@ -707,6 +727,104 @@
       try { CBZ.creatureTonicClear(t); } catch (e) {}
     }
   }
+
+  // ============================================================
+  //  §5b. THE PUBLISHED POD PRIMITIVES — the only reason §4 and §5 are not
+  //  private. Everything above is species-blind on purpose, and a file that
+  //  wants to give ONE species a signature move (city/wildlife_orca.js, which
+  //  owns the orca's own tactics) must be able to spend these rather than
+  //  grow a second copy of them. THIS is the seam: general mechanism here,
+  //  species flavour there, and orca-vs-megalodon stays a derived row of §2
+  //  rather than a special case in either file.
+  //
+  //  The whole vocabulary, and it is deliberately small:
+  //    marinePodRole(a,t,dt)      bearings + one commit token -> commit/flank/hold
+  //    marinePodMembers(a,t,out)  who else of my kind is on this quarry
+  //    marinePodCount(a,t)        how many of us there are   (live)
+  //    marinePodNeeded(a,t)       how many it takes           (the number)
+  //    marinePodEnough(a,t)       count >= needed             (the comparison)
+  //    marinePodRamReady(a,t)     am I off its nose and inside commit range
+  //    marinePodRam(a,t,dt)       take the pass; true while it owns the frame
+  //    marinePodRollReady(a,t)    is the finisher unlocked
+  //    marinePodRoll(a,t)         start it
+  //    marinePodRolling(t)        0..1 while it is going over, else -1
+  //    marinePodBreakOff(a,s)     leave, bleeding; re-forms on the next scan
+  //    marinePodJoin(a,t)         adopt a quarry explicitly -> 0/1/2
+  //    marineHurt(v,dmg,by,cause) the ONE damage path (never write .hp)
+  //  plus the three measurements callers keep needing: marineDpsAgainst,
+  //  marineBodyLen, marineSurfaceHit.
+  // ============================================================
+  CBZ.marinePodRole = function (a, t, dt) {
+    if (!a || !t) return "commit";
+    return podRole(a, t, dt || 0);
+  };
+  function podMembers(hunter, target, out) {
+    out = out || [];
+    out.length = 0;
+    const list = CBZ.cityWildlife;
+    const tp = actorPos(target);
+    if (!list || !tp || !hunter || !hunter.species) return out;
+    const sp = hunter.species;
+    for (let i = 0; i < list.length; i++) {
+      const o = list[i];
+      if (!alive(o) || o.species !== sp) continue;
+      const p = actorPos(o);
+      if (!p) continue;
+      _t0 = p.x - tp.x; _t1 = p.z - tp.z;
+      if (_t0 * _t0 + _t1 * _t1 <= POD_R * POD_R) out.push(o);
+    }
+    return out;
+  }
+  CBZ.marinePodMembers = podMembers;
+  CBZ.marinePodCount = function (a, t) { return (a && t) ? podCountNow(a, t) : 0; };
+  CBZ.marinePodEnough = function (a, t) {
+    if (!a || !t) return false;
+    return podCountNow(a, t) >= podNeeded(a, t);
+  };
+  CBZ.marinePodRamReady = function (a, t) { return !!(a && t) && ramGate(a, t); };
+  CBZ.marinePodRam = function (a, t, dt) { return !!(a && t && dt > 0) && ramTick(a, t, dt); };
+  CBZ.marinePodRollReady = function (a, t) { return !!(a && t) && rollReady(a, t, 0); };
+  CBZ.marinePodRoll = function (a, t) {
+    if (!a || !t || t._mpRoll || t.dead) return false;
+    beginRoll(a, t);
+    return true;
+  };
+  CBZ.marinePodRolling = function (t) {
+    const R = t && t._mpRoll;
+    return R ? clamp(R.t / R.dur, 0, 1) : -1;
+  };
+  /* BREAK OFF AND RE-FORM. Leaving is a real event — it bleeds, it spends
+     predator.js's own disengage timer, and it forgets the quarry — and
+     re-forming needs no API at all: the next §3 scan after the timer expires
+     picks the same quarry back up, which is exactly what a pod that has
+     regrouped looks like. */
+  CBZ.marinePodBreakOff = function (a, secs) {
+    if (!a) return false;
+    bleedInWater(a, 0.8);
+    if (typeof CBZ.predatorBreakOff === "function") {
+      try { CBZ.predatorBreakOff(a, secs > 0 ? secs : 12); } catch (e) {}
+    }
+    drop(a);
+    AUDIT.brokeOff++;
+    return true;
+  };
+  /* ADOPT A QUARRY. For a caller that has already decided who is fighting whom
+     (a scripted encounter, a stager, a species file with its own trigger) and
+     wants the shared drive to take it from there. Returns the §2 relation it
+     was accepted as, or 0 if the graph says these two do not fight. */
+  CBZ.marinePodJoin = function (a, t) {
+    if (!a || !t || !a.species || !t.species) return 0;
+    const rel = marineRelation(a.species, t.species);
+    if (!rel) return 0;
+    const m = mp(a);
+    m.target = t; m.kind = rel; m.scanT = RESCAN;
+    if (rel === 1) t._mpHuntedBy = a;
+    return rel;
+  };
+  CBZ.marineHurt = function (v, dmg, by, cause) { hurt(v, dmg, by, cause); };
+  CBZ.marineDpsAgainst = dpsAgainst;
+  CBZ.marineBodyLen = bodyLen;
+  CBZ.marineSurfaceHit = surfaceHit;
 
   // ============================================================
   //  DAMAGE goes through the ONE animal bus. cityWildlifeHit is what turns a
