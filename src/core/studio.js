@@ -544,10 +544,19 @@
          CBZ.hurtWorldActor) rather than one branch per host — without that
          pack a backhand has nobody to reach. */
       needs: ["look", "caps"],
-      files: ["city/wildlife_rig.js", "city/creature_combat.js", "systems/predator_anim.js",
+      /* wildlife_traits.js rides along and it is not a tax: it is pure
+         derivation (no update loop, no spawner, no landmass hook — grep it),
+         and without it every animal a page builds is EXACTLY its species scale
+         and has no hunger at all. "All wildlife including sharks should have
+         varying size and varying hunger" is the owner's ask, and a pack that
+         can make an animal fight but not be an individual hands every page it
+         serves forty identical mackerel. */
+      files: ["city/wildlife_rig.js", "city/wildlife_traits.js", "city/creature_combat.js",
+        "systems/predator_anim.js",
         "systems/quadruped_ragdoll.js", "systems/ape_combat.js"],
       publishes: ["wildlifeRig", "creatureFight", "faceAnimalHeading", "quadRagdoll",
-        "apeStep", "apeAudit", "buildSwimRig", "animateSwim", "swimJaw"],
+        "apeStep", "apeAudit", "buildSwimRig", "animateSwim", "swimJaw",
+        "wildlifeTraits", "wildlifeSize", "wildlifeScale", "wildlifeHunger"],
     },
 
     // ---- flight and weapons -------------------------------------------------

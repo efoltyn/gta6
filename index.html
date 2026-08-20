@@ -1064,7 +1064,12 @@
 <script src="src/city/wildlife/small_game.js?v=attach1"></script>
 <script src="src/city/wildlife/snakes.js?v=wild1"></script>
 <script src="src/city/wildlife/aquatic.js?v=sharkface1"></script>
-<script src="src/city/wildlife.js?v=nodash1"></script>
+<!-- EVERY ANIMAL IS AN INDIVIDUAL: the per-individual size draw and the
+     hunger scalar wildlife.js spends. Must load BEFORE the engine (it
+     binds CBZ.wildlifeTraits once, at load); absent, the engine falls
+     straight back to the species constant. -->
+<script src="src/city/wildlife_traits.js?v=indiv1"></script>
+<script src="src/city/wildlife.js?v=indiv1"></script>
 <script src="src/city/wildlife_tame.js?v=nodash1"></script>
 <script src="src/city/dogs.js?v=nodash1"></script>
 <!-- 4d-5. FIGHTING — shared creature-combat (animal fight anims), trait-driven
@@ -1550,6 +1555,16 @@
 <!-- The shark is thin on purpose: numbers, fin/wake proxy, locomotion. After
      predator.js AND wildlife.js so both seams exist. -->
 <script src="src/city/wildlife_shark.js?v=marinefix1"></script>
+<!-- THE SEA EATS ITSELF: the marine predation graph (who preys on whom, who
+     MOBS whom), the orca pod's bearings/ram/roll-over finisher, a big shark
+     taking a small boat, and the chum producers that had never existed — a
+     wounded or dead thing in the water finally bleeds and finally draws
+     something. AFTER wildlife_shark.js because it capture-and-wraps
+     CBZ.sharkBrain (a marine hunt gets first refusal on an actor and anything
+     it declines falls through to the shark's own player hunt), and after
+     predator.js + creature_combat.js whose drivers it ticks rather than
+     duplicating. Reverts whole with CBZ.CONFIG.MARINE_PREDATION = false. -->
+<script src="src/city/marine_predation.js?v=marinepred1"></script>
 <!-- CHILDREN ARE NOT TARGETS. Wraps the shared damage/kill/KO/crowd-kill/gore/
      lock-on/predator buses and seals child hp against the ~32 raw `.hp -=`
      sites that bypass every bus. Hooks are lazily retried for 10s, so exact

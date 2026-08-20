@@ -432,6 +432,38 @@
         // shuts on the far side. Owned by wildlife.js's shared swim rig.
         if (CBZ.swimJaw) { try { CBZ.swimJaw(actor, Math.min(1, env * 1.45)); } catch (e) {} }
         break;
+      case 'ram_flank':
+        /* THE FLANK RAM (city/marine_predation.js's orca pod). `lunge` is a
+           bite from below with the mouth open; this is the opposite blow and
+           it needed to be a separate silhouette or the pod read as four
+           sharks queueing. A pod member that is NOT the one committing comes
+           in ACROSS the quarry's beam with its mouth SHUT, banks hard into
+           the hit so the impact is shoulder-and-melon rather than teeth, and
+           carries straight through and out the far side.
+
+           Three things make it read as a body blow instead of a bite:
+             * the jaw stays closed for the whole pass (the swimJaw write is
+               an explicit 0 — without it the mouth holds whatever the last
+               style left it at);
+             * the bank is a real ROLL that peaks AT contact and unwinds on
+               the way out, which is the thing you actually see from a boat;
+             * there is almost no recovery — like `lunge`, it does not rear
+               back, it leaves. A ram that pulls up short reads as a bump. */
+        if (p < STRIKE_AT) {
+          lunge = -0.14 * sc * wind;                     // gather off the beam
+          roll = -0.30 * wind;                           // bank AWAY, winding up
+          pitchZ = -0.10 * wind;
+        } else {
+          var fp = (p - STRIKE_AT) / (1 - STRIKE_AT);    // 0..1 drive phase
+          var drive = Math.min(1, fp * fp * 2.8);        // same quadratic launch
+          lunge = reachHint * 1.15 * drive * (1 - ease(Math.max(0, fp - 0.7) / 0.3));
+          roll = 0.46 * Math.sin(Math.min(1, fp * 1.5) * Math.PI * 0.9);  // roll INTO it
+          pitchZ = 0.16 * Math.sin(Math.min(1, fp * 2) * Math.PI);
+          yOff = 0.18 * sc * Math.sin(Math.min(1, fp * 2.2) * Math.PI);
+          pulse = 1 + 0.035 * Math.sin(Math.min(fp * 3, 1) * Math.PI);
+        }
+        if (CBZ.swimJaw) { try { CBZ.swimJaw(actor, 0); } catch (e) {} }
+        break;
       case 'peck':
         // quick repeated forward head-jabs: high-frequency nudges
         _amt = Math.max(0, Math.sin(p * Math.PI * 6));
@@ -670,7 +702,10 @@
      without ever telling a species its own attack does not connect. */
   function jawReaches(attacker, target, style, tp, reach) {
     if (!CONTACT_ON()) return true;
-    if (style === 'stomp' || style === 'ram') return true;
+    // `ram_flank` joins them for the same reason: an orca's flank pass
+    // connects with the melon and the shoulder, and holding it to the
+    // muzzle would score a hit you can plainly see as a miss.
+    if (style === 'stomp' || style === 'ram' || style === 'ram_flank') return true;
     /* AN ARM IS NOT A JAW, and every ape style except the bite connects with
        one. The test below measures from the MOUTH — for a gorilla that is the
        nose, at model-local x = 1.48 — and asks whether the mark is within a
@@ -713,7 +748,7 @@
          bunch of times" applied to a wolf pack. It lives on the VICTIM as two
          numbers, decays, and costs nothing when nothing is biting.
      CBZ.CONFIG.CREATURE_BITE_BLOOD = false restores the decal-only behaviour. */
-  var BITE_SEV = { lunge: 1.0, maul: 0.85, gore: 0.8, ram: 0.75, pounce: 0.7, bite: 0.62, strike: 0.4, peck: 0.28, stomp: 0.5 };
+  var BITE_SEV = { lunge: 1.0, maul: 0.85, gore: 0.8, ram: 0.75, ram_flank: 0.55, pounce: 0.7, bite: 0.62, strike: 0.4, peck: 0.28, stomp: 0.5 };
   var LEDGER_DECAY = 0.09;      // units/s — a worrying counts, last minute's bite does not
   var LEDGER_MAX = 1.8;
   function biteBlood(attacker, target, style) {
@@ -997,7 +1032,7 @@
             // — flag off, no block loaded, refused (already holding someone) —
             // falls through to the ordinary strike exactly as before.
             if (style === 'bite' || style === 'maul' || style === 'strike' || style === 'lunge' ||
-                style === 'gore' || style === 'ram' || style === 'ape_bite') {
+                style === 'gore' || style === 'ram' || style === 'ram_flank' || style === 'ape_bite') {
               biteWound(attacker, target, style === 'ape_bite' ? 'maul' : style);
             }
             // ...and it BLEEDS. The decal above marks the skin; this is the
@@ -1125,6 +1160,118 @@
   CBZ.creatureBiteBlood = biteBlood;
   CBZ.creatureBiteWound = biteWound;    // mounted predators reuse the same paired wound owner
   CBZ.creatureRestY = restY;            // medium-aware rest height (land or water)
+
+  /* ==========================================================================
+     TONIC IMMOBILITY — the roll-over.
+     ==========================================================================
+     A shark held upside down goes limp. That is a real, well-documented
+     reflex, it is exactly how a pod of orcas kills a big one, and it is the
+     single animation that makes city/marine_predation.js's pod fight legible
+     from a boat 200 m away: the thing that has been fighting for a minute
+     turns white-belly-up and stops.
+
+     IT LIVES HERE and not in the pod file for the same reason every other
+     pose in this game lives here: this is the file that owns "what an animal's
+     body does", and a second module writing rotations onto a wildlife group
+     is the two-writers bug that produces an animal calmly swimming out of the
+     jaws holding it. The pod file supplies WHEN and WHO; this supplies the
+     motion.
+
+     THE AXIS. Our animals are authored nose at +X, so the body's own ROLL is
+     rotation.x and its PITCH is rotation.z — the opposite of the intuition,
+     and the exact mistake predator.js's BODY_AXIS_STYLE comment records. A
+     roll written to rotation.z would pitch the shark nose-down through the
+     seabed instead of turning it over. The euler order is switched to 'YXZ'
+     for the duration so the yaw still reads as a heading with a full 180
+     degrees of roll on it, and creatureTonicClear puts the original order and
+     rotations back — a body that is released half-inverted must not stay
+     that way.
+
+     THE SHAPE, in one progress value 0..1:
+       0.00-0.18  IT FIGHTS IT. Hard, fast, shrinking-amplitude thrash — the
+                  beat that says this is being DONE to it.
+       0.18-0.70  THE INVERSION. Eased, slow, monotone to belly-up. Slow is
+                  the whole point; a fast flip reads as a rotation glitch,
+                  which is the one failure mode this animation has.
+       0.70-1.00  LIMP. Held inverted, a long slow sway with no drive in it,
+                  nose drooping, sinking a little. Nothing twitches.
+
+     Allocation-free and idempotent: all state is three numbers on the victim.
+  ========================================================================== */
+  function tonicState(victim) {
+    var st = victim._tonic;
+    if (st) return st;
+    var g = victim.group;
+    st = victim._tonic = {
+      order: (g && g.rotation && g.rotation.order) || 'XYZ',
+      rx: g ? g.rotation.x : 0, ry: g ? g.rotation.y : 0, rz: g ? g.rotation.z : 0,
+      y0: g ? g.position.y : 0, ph: 0,
+    };
+    if (g && g.rotation && g.rotation.reorder) { try { g.rotation.reorder('YXZ'); } catch (e) {} }
+    return st;
+  }
+
+  // p: 0..1 progress through the roll. Call every frame while it runs.
+  function creatureTonicRoll(victim, p, dt) {
+    if (!victim || !victim.group) return false;
+    var g = victim.group;
+    var st = tonicState(victim);
+    if (!(dt > 0)) dt = 0;
+    p = p < 0 ? 0 : (p > 1 ? 1 : p);
+    st.ph += dt;
+    var sc = actorScale(victim);
+    var sq = Math.sqrt(Math.max(0.35, sc));           // big things move slower
+
+    var roll = 0, pitch = 0;
+    if (p < 0.18) {
+      // THE FIGHT. Amplitude falls as it loses, so the struggle visibly ends.
+      var f = p / 0.18;
+      roll = Math.sin(st.ph * (13 / sq)) * 0.55 * (1 - f);
+      pitch = Math.sin(st.ph * (9 / sq)) * 0.16 * (1 - f);
+    } else if (p < 0.70) {
+      var u = (p - 0.18) / 0.52;
+      var e = u * u * (3 - 2 * u);                    // smoothstep: no snap at either end
+      roll = Math.PI * e;
+      // it still twitches early in the turn, and stops well before the end
+      roll += Math.sin(st.ph * (10 / sq)) * 0.20 * Math.max(0, 1 - u * 2.2);
+      pitch = -0.12 * e;
+    } else {
+      var w = (p - 0.70) / 0.30;
+      roll = Math.PI + Math.sin(st.ph * (1.1 / sq)) * 0.09;   // a long dead sway
+      pitch = -0.12 - 0.16 * w;                               // nose droops
+    }
+    g.rotation.x = roll;
+    g.rotation.z = pitch;
+    // GOING DOWN, not through the floor: the medium's own rest line is the
+    // reference and it only ever drifts BELOW it, by a fraction of the body.
+    var rest = restY(victim, g.position.x, g.position.z);
+    var want = rest - (p > 0.70 ? (p - 0.70) / 0.30 : 0) * sc * 0.55;
+    g.position.y += (want - g.position.y) * Math.min(1, dt * 1.4);
+    // the mouth hangs open on a limp animal
+    if (CBZ.swimJaw && p > 0.55) { try { CBZ.swimJaw(victim, (p - 0.55) / 0.45 * 0.5); } catch (e) {} }
+    return true;
+  }
+
+  // Put the body back. Called when a roll is abandoned (the roller died, the
+  // pod broke off) — never after a kill, where the corpse owner takes over.
+  function creatureTonicClear(victim) {
+    var st = victim && victim._tonic;
+    if (!st) return false;
+    var g = victim.group;
+    if (g && g.rotation) {
+      g.rotation.x = st.rx; g.rotation.z = st.rz;
+      if (g.rotation.reorder) { try { g.rotation.reorder(st.order); } catch (e) {} }
+    }
+    victim._tonic = null;
+    return true;
+  }
+  CBZ.creatureTonicRoll = creatureTonicRoll;
+  CBZ.creatureTonicClear = creatureTonicClear;
+  // read-only, for the before/after probe: how far over is it, right now?
+  CBZ.creatureTonicAngle = function (victim) {
+    var g = victim && victim.group;
+    return (victim && victim._tonic && g) ? g.rotation.x : 0;
+  };
   // CANCEL A SWING IN FLIGHT, cleanly. Exported because this file is the only
   // one that can: it owns `_lungeAmt` (the un-applied forward offset), `_atkAnim`
   // and the predatorPose hand-back, and a caller that abandons an attacker

@@ -100,8 +100,14 @@
   //  SIZE
   // ============================================================
   // How wide a species' individuals spread, before any per-row override.
-  const RARITY_SPREAD = { common: 0.17, uncommon: 0.21, rare: 0.26, legendary: 0.24 };
-  const SPREAD_MIN = 0.07, SPREAD_MAX = 0.34;
+  const RARITY_SPREAD = { common: 0.19, uncommon: 0.22, rare: 0.27, legendary: 0.16 };
+  const SPREAD_MIN = 0.08, SPREAD_MAX = 0.34;
+  // How a species' natural GROUP SIZE tightens its spread, as a smooth curve
+  // rather than two thresholds. A step function put a whitetail herd (6-14)
+  // and a sardine school (20-60) in the same bucket, which is exactly the
+  // claim this feature must not make: a deer herd is varied and a bait ball
+  // is not, and the bestiary already knows the difference.
+  const GRP_K0 = 1.28, GRP_KL = 0.20, GRP_MIN = 0.50, GRP_MAX = 1.28;
   // THE BIG ONE: base odds per individual at the reference spread, scaled by
   // how variable the species is (a solitary apex rolls monsters more often
   // than a sardine does, which is also true of the real ocean).
@@ -115,14 +121,12 @@
   function sizeSpread(sp) {
     if (!sp) return 0.17;
     if (Number.isFinite(sp.sizeVary)) return clamp(+sp.sizeVary, 0, 0.45);
-    let s = RARITY_SPREAD[sp.rarity] || 0.18;
-    // SCHOOLING IS UNIFORMITY. herd is the natural group size the bestiary
-    // already declares; packs is how many groups get seeded and stands in for
-    // it when a row declares only that.
+    let s = RARITY_SPREAD[sp.rarity] || 0.19;
+    // SCHOOLING IS UNIFORMITY. `herd` is the natural group size the bestiary
+    // already declares; `packs` is how many groups get seeded and stands in
+    // for it when a row declares only that.
     const grp = (sp.herd && sp.herd[1]) || (sp.packs && sp.packs >= 6 ? 6 : 1);
-    if (grp >= 8) s *= 0.62;
-    else if (grp >= 3) s *= 0.84;
-    else s *= 1.22;
+    s *= clamp(GRP_K0 - GRP_KL * Math.log(Math.max(1, grp)), GRP_MIN, GRP_MAX);
     return clamp(s, SPREAD_MIN, SPREAD_MAX);
   }
 
@@ -138,8 +142,12 @@
     if (h01(x, z, 0xB16041) < BIG_ODDS * (spread / 0.2)) {
       k *= BIG_MIN + h01(x, z, 0xB16042) * BIG_RAND;
     }
-    // A legendary is THE specimen of its kind; it may not be born a runt.
-    if (sp && sp.rarity === "legendary" && k < 1.14) k = 1.14 + (1.14 - k) * 0.5;
+    // A legendary is THE specimen of its kind, so it may not be born a runt —
+    // but the floor is deliberately modest and does NOT reflect upward. There
+    // is exactly one of each in the world and they are already authored at
+    // their own scale; a fat floor here would quietly make the megalodon
+    // twenty-five per cent bigger than the number somebody tuned.
+    if (sp && sp.rarity === "legendary" && k < 1.05) k = 1.05;
     return clamp(k, K_MIN, K_MAX);
   }
 
@@ -155,8 +163,16 @@
   // burns slow (mass^0.75 metabolism, near enough), a rabbit is hungry again
   // by lunchtime — so the sea is never uniformly ravenous or uniformly bored.
   const FULL_TO_EMPTY = 430;
-  const GRAZE_RATE = 0.055;      // hunger/s a herbivore recovers with its head down
-  const DRIFT_RATE = 0.0065;     // hunger/s a fish recovers picking at the water column
+  // A GRAZE BOUT IS A SNACK, NOT A MEAL. cls.grazeT is three to nine seconds,
+  // so this is deliberately small: a herbivore has to put its head down
+  // repeatedly to work its hunger off, which is what keeps a herd spread
+  // across the range instead of every deer pinned at "fed" forever.
+  const GRAZE_RATE = 0.022;      // hunger/s a herbivore recovers with its head down
+  // A fish picks at the water column CONTINUOUSLY, so this only ever OFFSETS
+  // the drift — never beats it. If it beat it, every non-predator in the sea
+  // would settle at zero hunger and there would be no hungry fish at all,
+  // which is the same bug as having no hunger.
+  const DRIFT_RATE = 0.0022;     // hunger/s a fish claws back picking at the column
   const STEP = 0.02;             // recompute the behaviour scratch on this much change
 
   function metabolism(sizeEff) {
@@ -218,8 +234,8 @@
     // its head down and a mackerel picking at the column are both feeding, and
     // without this every herbivore in the world pins at starving inside ten
     // minutes and stays there — which would make "hungry" mean nothing.
-    if (opts === 1) h -= dt * (GRAZE_RATE + inv);          // head down, grazing
-    else if (opts === 2) h -= dt * (DRIFT_RATE + inv);     // aquatic, picking
+    if (opts === 1) h -= dt * (GRAZE_RATE + inv);          // head down: a real meal
+    else if (opts === 2) h -= dt * Math.min(DRIFT_RATE, inv * 0.62);  // picking: an offset
     a.hunger = h < 0 ? 0 : (h > 1 ? 1 : h);
   }
 
@@ -254,35 +270,49 @@
   const BELLY = 0.24;            // full girth swing across the whole hunger range
   const BELLY_STEP = 0.04;
 
+  // NAMED HULLS the authored aquatic builds expose. Checked by name through
+  // the whole subtree (not just the direct children) because a build is free
+  // to nest its body in a sub-group, and the day one does, a direct-children
+  // scan silently loses the cue on exactly the animal the owner named.
+  const HULL_NAMES = ["sharkHull", "hull", "body", "torso"];
+
+  function boxOf(m) {
+    const p = m.geometry && m.geometry.parameters;
+    if (p && p.width != null) return { w: p.width, h: p.height, d: p.depth };
+    const gm = m.geometry;
+    if (!gm) return null;
+    if (!gm.boundingBox) { try { gm.computeBoundingBox(); } catch (e) { return null; } }
+    const bb = gm.boundingBox;
+    if (!bb) return null;
+    return { w: bb.max.x - bb.min.x, h: bb.max.y - bb.min.y, d: bb.max.z - bb.min.z };
+  }
+
   function findBody(a) {
     if (a._bodyMesh !== undefined) return a._bodyMesh;
     a._bodyMesh = null;
     const grp = a && a.group;
-    if (!grp || !grp.children) return null;
-    const kids = grp.children;
-    let named = null, best = null, bestVol = 0;
-    for (let i = 0; i < kids.length; i++) {
-      const m = kids[i];
-      if (!m || !m.isMesh || !m.geometry) continue;
-      if (m.name === "sharkHull") { named = m; break; }
-      const p = m.geometry.parameters;
-      let w, hh, dd;
-      if (p && p.width != null) { w = p.width; hh = p.height; dd = p.depth; }
-      else {
-        if (!m.geometry.boundingBox) { try { m.geometry.computeBoundingBox(); } catch (e) {} }
-        const bb = m.geometry.boundingBox;
-        if (!bb) continue;
-        w = bb.max.x - bb.min.x; hh = bb.max.y - bb.min.y; dd = bb.max.z - bb.min.z;
-      }
-      if (!(w > 0 && hh > 0 && dd > 0)) continue;
-      // a LEG is tall and thin — the gait rig's own test, and the torso is
-      // never one. Skip them so a starving animal does not get thin shins.
-      if (hh >= w * 1.1 && hh >= dd * 1.1) continue;
-      const vol = w * hh * dd;
-      if (vol > bestVol) { bestVol = vol; best = m; }
+    if (!grp) return null;
+    let m = null;
+    for (let i = 0; i < HULL_NAMES.length && !m; i++) {
+      const o = grp.getObjectByName ? grp.getObjectByName(HULL_NAMES[i]) : null;
+      if (o && o.isMesh) m = o;
     }
-    const m = named || best;
-    if (!m) return null;
+    if (!m) {
+      // No name to go on: the body is the biggest mesh that is not a LEG (the
+      // gait rig's own tall-and-thin test), so a starving animal never ends up
+      // with thin shins. Whole subtree, largest wins, ties broken by order.
+      let best = null, bestVol = 0;
+      grp.traverse(function (o) {
+        if (!o || !o.isMesh || !o.geometry) return;
+        const b = boxOf(o);
+        if (!b || !(b.w > 0 && b.h > 0 && b.d > 0)) return;
+        if (b.h >= b.w * 1.1 && b.h >= b.d * 1.1) return;      // a leg
+        const vol = b.w * b.h * b.d;
+        if (vol > bestVol) { bestVol = vol; best = o; }
+      });
+      m = best;
+    }
+    if (!m) return null;                          // degrade: no cue, size still reads
     a._bodyMesh = m;
     a._bodyBY = m.scale.y; a._bodyBZ = m.scale.z;
     return m;
@@ -339,8 +369,13 @@
     if (kit.rate) kit.rate *= rs;
     if (kit.dmg) kit.dmg *= Math.pow(k, 1.35);
     if (kit.bumpDmg) kit.bumpDmg *= Math.pow(k, 1.35);
+    // The seize carries its OWN receipt, and that is not belt-and-braces: two
+    // bundles on one hunter (hunting YOU and hunting a deer) come out of the
+    // same predatorKit and can share this exact object, so a receipt only on
+    // the outer kit would scale the grab twice for anything that does both.
     const s = kit.seize;
-    if (s && typeof s === "object") {
+    if (s && typeof s === "object" && !s._szK) {
+      s._szK = k;
       if (s.dps) s.dps *= Math.pow(k, 1.35);
       if (s.hold) s.hold *= hs;
       if (s.escape) s.escape = clamp(s.escape * Math.pow(k, -0.9), 0.03, 0.95);
