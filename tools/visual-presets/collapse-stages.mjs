@@ -51,47 +51,47 @@
 const subjects = [
   { id: "skyline", label: "The block, standing",
     focus: "Gang city at street level. The AFTER side is wearing the facade kit — FACADE_KIT_CITY is on now, so an ordinary undressed lot gets a grammar by position hash and the skyline stops being a row of painted boxes. Nothing here is a new building: it is the same lot, the same footprint, the same colour, with its own architecture on it.",
-    cam: { back: 46, up: 12, look: 9 } },
+    cam: { back: 3.1, up: 0.75, look: 0.45 } },
 
   { id: "scar", label: "One rocket",
     focus: "A single RPG-class warhead into the facade, through the real ordnance bus. The explosion was already good — this is about what it LEAVES. Before: a fireball, and then a pristine wall. After: the wall around the impact is genuinely gone, opened to the floor behind it.",
     act: { hits: 1 },
-    cam: { back: 26, up: 6, look: 6 } },
+    cam: { back: 2.1, up: 0.50, look: 0.38 } },
 
   { id: "wounded", label: "WOUNDED — the facade is open",
     focus: "Three more. The damage skin is real geometry, not a decal: openings set INTO the wall, the floor slab edges showing through them, one panel left hanging off its top fixing, and the masonry that came off it lying on the pavement below. The owner purged painted marks on facades for a good reason and nothing here is painted.",
     act: { hits: 3, untilStage: 2 },
-    cam: { back: 24, up: 7, look: 7 } },
+    cam: { back: 2.1, up: 0.55, look: 0.42 } },
 
   { id: "critical", label: "CRITICAL — the load path is failing",
     focus: "The last stage where it is still standing. Bare columns where a whole bay of cladding used to be, rebar hanging out of the broken slabs, and an apron of debris twice the size. Compare the silhouette against the first frame: this building has visibly lost mass.",
     act: { untilStage: 4 },
-    cam: { back: 28, up: 9, look: 8 } },
+    cam: { back: 2.5, up: 0.62, look: 0.45 } },
 
   { id: "swap", label: "The swap — the proxy takes over",
     focus: "THE FRAME THE OLD BUILD GAVE ITSELF AWAY ON. The batched building has just been hidden and a proxy shell put in its place (merged static geometry cannot be animated; hiding the real thing behind dust and moving a stand-in is the only honest option in this engine, and is what Frostbite and Control both ship). The old shell was up to ten flat boxes in one grey. This one is built from this building's own wall colour, storey height, window rhythm, plinth and cornice — so this frame should look like the previous one.",
     act: { collapse: true, phase: 1, extra: 0.25 },
-    cam: { back: 34, up: 14, look: 10 } },
+    cam: { back: 2.9, up: 0.80, look: 0.50 } },
 
   { id: "midfall", label: "Mid-fall — it comes APART",
     focus: "The collapse front descending at the observed ~2/3 g, and the thing the rewrite is actually for: each floor the front passes stops existing and becomes real slabs travelling outward with real ballistics. The old collapse SCALED bands downward — a building that shrinks is a building being deleted.",
     act: { phaseFrac: 0.45 },
-    cam: { back: 38, up: 16, look: 12 } },
+    cam: { back: 3.1, up: 0.90, look: 0.50 } },
 
   { id: "impact", label: "Impact — the pall",
     focus: "The ground beat. The dust volume is many times the building's own footprint and rolls OUT along the streets, which is the signature that makes a collapse read from two hundred metres. Its volume is scaled by what the building was made of — a steel frame makes far less of it than a masonry block.",
     act: { phase: 2 },
-    cam: { back: 42, up: 14, look: 8 } },
+    cam: { back: 3.3, up: 0.70, look: 0.28 } },
 
   { id: "rubble", label: "Four seconds later",
     focus: "The debris field. Real pieces that fell, bounced once, and came to rest roughly flat where they landed — scattered past the footprint rather than stacked in a tidy cone under it. demolition.js's permanent pile and its rebuild calendar are underneath this, untouched.",
     act: { settle: 4 },
-    cam: { back: 30, up: 8, look: 4 } },
+    cam: { back: 2.7, up: 0.45, look: 0.14 } },
 
   { id: "topple", label: "A different building does something different",
-    focus: "The most slender masonry stack on the block, condemned exactly the same way — and it does not pancake. It rotates about a hinge at its base under the real rigid-rod equation (d2th/dt2 = 3g/2L · sin th, which is why it starts imperceptibly and finishes shockingly fast), comes apart from the top where the tangential speed is, and throws its debris clear across the street. Which motion a building gets is derived from what its facade grammar says it is MADE OF — never from its name, never from a table of lots.",
+    focus: "The most slender stack on the same block, condemned in exactly the same way — and it does not do what the first one did. Which motion a building gets is derived from what its facade grammar says it is MADE OF and how slender it is: a ductile frame pancakes, a brittle stack rotates about a hinge at its base under the real rigid-rod equation (d2th/dt2 = 3g/2L · sin th, which is why it starts imperceptibly and finishes shockingly fast), a wounded mid-rise shears along the hit, timber folds, adobe crumbles. The grammar this one actually resolved to is named in the readout top-right — it is read off the live engine, not asserted here.",
     act: { second: true, phaseFrac: 0.6 },
-    cam: { back: 34, up: 10, look: 9 } },
+    cam: { back: 3.1, up: 0.75, look: 0.45 } },
 ];
 
 async function stageCollapse(input) {
@@ -264,9 +264,18 @@ async function stageCollapse(input) {
       const mb = main.building;
       for (const L of lots) {
         const b = L.building;
-        if (!b || L === main || L.demolished || !(b.storeys >= 3)) continue;
+        if (!b || L === main || L.demolished || !(b.storeys >= 4)) continue;
         if (!Number.isFinite(b.ox) || !Number.isFinite(b.oz)) continue;
         if (Math.hypot(b.ox - mb.ox, b.oz - mb.oz) > 320) continue;
+        /* NOT THE FLAGSHIP. The unbounded version of this picked the
+           52-storey supertall — it is genuinely the most slender thing on the
+           block — and a supertall is steel, so it resolved to `pancake`,
+           which is the SAME family of motion as the main subject and the one
+           motion this beat exists not to show. It is also the subject that
+           wedged the baseline twice. Cap the height and the tower drops out;
+           what is left is the mid-rise masonry stack the topple grammar is
+           actually written for. */
+        if (b.storeys > 16) continue;
         const h = b.h || b.storeys * (b.FH || 3.2);
         const slender = h / Math.max(1, Math.min(b.w, b.d));
         if (slender > slimScore) { slimScore = slender; slim = L; }
@@ -376,9 +385,35 @@ async function stageCollapse(input) {
   if (act.settle) advance(act.settle);
   if (!act.hits && !act.untilStage && !act.collapse && !act.phase && !act.phaseFrac && !act.settle && !act.second) advance(0.35);
 
-  // ---- frame it ---------------------------------------------------------
-  const cam = input.subject.cam || { back: 34, up: 12, look: 9 };
-  const camX = b.ox + cam.back * 0.72, camZ = b.oz + cam.back * 0.72;
+  /* ---- frame it --------------------------------------------------------
+     FRAMING IS RELATIVE TO THE BUILDING, NOT IN METRES.
+
+     `back` used to be a distance in metres from the building's CENTRE, and
+     the camera was seated at (ox + back*0.72, oz + back*0.72) — a diagonal
+     whose true length is back*1.02. So "back: 28" put the eye 28 m from the
+     centre of a 30 m-wide block, i.e. about seven metres off its facade, and
+     the CRITICAL beat photographed a wall instead of a building. The numbers
+     were tuned when this preset expected a 52-storey tower; the moment the
+     subject became a mid-rise every one of them was wrong, and the captions
+     went on talking about a silhouette nobody could see.
+
+     Now the subject's `cam` fields are MULTIPLIERS on the building's own
+     size, so a corner shop and a supertall both fill the frame the same way:
+
+       back  distance as a multiple of the bounding radius (the half-diagonal
+             of the elevation, so it accounts for height and plan together)
+       up    eye height as a fraction of the building's height
+       look  aim height as a fraction of the building's height
+
+     The floor keeps a small building from being shot from inside the kerb.
+  --------------------------------------------------------------------- */
+  const cam = input.subject.cam || { back: 2.8, up: 0.7, look: 0.45 };
+  const bh = b.h || (b.storeys * (b.FH || 3.2)) || 12;
+  const radius = Math.hypot(Math.max(b.w, b.d) / 2, bh / 2);
+  const dist = Math.max(24, radius * cam.back);
+  // a corner view: it shows the wounded face (the hit comes in along +x) and
+  // one flank, so the depth of a wound reads instead of flattening out
+  const camX = b.ox + dist * 0.707, camZ = b.oz + dist * 0.707;
   const gy = (CBZ.floorAt && CBZ.floorAt(camX, camZ)) || 0;
   if (CBZ.player && CBZ.player.pos && CBZ.player.pos.set) {
     CBZ.player.pos.set(camX, gy + 1.1, camZ); CBZ.player.hp = 100;
@@ -386,8 +421,8 @@ async function stageCollapse(input) {
   const camera = CBZ.camera;
   camera.aspect = input.width / input.height;
   camera.fov = 55; camera.near = 0.5; camera.far = 6000;
-  camera.position.set(camX, gy + cam.up, camZ);
-  camera.lookAt(b.ox, gy + cam.look, b.oz);
+  camera.position.set(camX, gy + Math.max(2.2, bh * cam.up), camZ);
+  camera.lookAt(b.ox, gy + bh * cam.look, b.oz);
   camera.updateProjectionMatrix();
   if (typeof CBZ.skySync === "function") CBZ.skySync();
   hideHud();
