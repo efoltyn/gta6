@@ -482,7 +482,13 @@
   function wetPointNear(x, z, sp, radius) {
     const wf = CBZ.waterField;
     if (!wf || !wf.nearestWater) return { x: x, z: z };
-    return wf.nearestWater(x, z, aquaticClearance(sp), radius || 240);
+    const p = wf.nearestWater(x, z, aquaticClearance(sp), radius || 240);
+    /* NULL MEANS "not MY water", not "not water". In a mode whose sea the city
+       water field does not describe, every jittered herd position would come
+       back null and seedIndividuals would skip the whole school — the caller
+       has already validated the anchor through oceanPoint, so handing the
+       point straight back is the honest answer. */
+    return p || { x: x, z: z };
   }
 
   function makeActor(sp, x, z) {
