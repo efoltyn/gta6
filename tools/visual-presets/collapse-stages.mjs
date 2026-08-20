@@ -210,6 +210,31 @@ async function stageCollapse(input) {
 
        Scoring with a distance PENALTY picks the same downtown tower a sane
        radius would, and cannot return empty however the centroid lands. */
+    /* AIM FOR A MID-RISE, NOT FOR THE BIGGEST THING ON THE MAP.
+
+       The score used to be `storeys - distance`, i.e. maximise height, which
+       reliably picked the 52-storey flagship. Three reasons that is the wrong
+       subject, the first of them observed rather than reasoned:
+
+         1. THE BASELINE CANNOT FINISH IT. On the deployed build the "impact"
+            beat — six simulated seconds after that tower is condemned —
+            exhausted a 10-minute evaluate budget, and then a 15-minute one at
+            a third of the step count. The screenshot of the failed beat then
+            timed out too, which throws OUTSIDE --keep-going and took the whole
+            run down with it. Whether that is a true hang or merely cost I have
+            not established; either way a storyboard subject has to be
+            something BOTH sides can finish.
+         2. IT IS THE MOST EXPENSIVE SUBJECT IN THE GAME. An 8 s fall through
+            52 floors is the longest collapse the engine can produce, asked of
+            the side least able to afford it.
+         3. IT IS NOT REPRESENTATIVE. A supertall is the exotic case. The shear
+            grammar — the one the owner described, where a rocket takes out one
+            face and the rest follows — needs a mid-rise by construction, and a
+            mid-rise fits in frame whole.
+
+       So: prefer about eight storeys and penalise distance from downtown, and
+       let height fall out of the choice rather than drive it. */
+    const TARGET_STOREYS = 8;
     let main = null, mainScore = -1e9, slim = null, slimScore = -1e9;
     let candidates = 0;
     for (const L of lots) {
@@ -218,7 +243,7 @@ async function stageCollapse(input) {
       if (!Number.isFinite(b.ox) || !Number.isFinite(b.oz)) continue;
       candidates++;
       const d = Math.hypot(b.ox - gx, b.oz - gz);
-      const sc = b.storeys - d * 0.02;
+      const sc = -Math.abs(b.storeys - TARGET_STOREYS) - d * 0.02;
       if (sc > mainScore) { mainScore = sc; main = L; }
     }
     if (!main) {
