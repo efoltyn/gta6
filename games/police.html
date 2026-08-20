@@ -1535,7 +1535,16 @@ function updateCamera(dt){
   if(camOverride){ camera.position.lerp(camOverride.pos,1-Math.pow(0.0001,dt));
     camera.lookAt(camOverride.look); return; }
   const ty=P.pos.y+(P.sneak?1.1:1.5);
-  const cp=Math.cos(camPitch),sp=Math.sin(camPitch),dist=5.6;
+  // camPitch is DOWN-POSITIVE: the boom is `oy = sin(pitch)*dist`, so +pitch
+  // lifts the lens ABOVE the head and the view angles DOWN. (Same convention as
+  // the main game's systems/camera.js and games/ocean.html.)
+  const cp=Math.cos(camPitch),sp=Math.sin(camPitch);
+  // FLOOR-AWARE BOOM: looking up swings the arm DOWN, so a real up-look wants
+  // the lens under the pavement. Shorten the ARM radially instead of clamping
+  // its height — clamping the height keeps a 5.6 m boom with the lens at your
+  // shins and the view never actually points at the sky.
+  let dist=5.6;
+  if(sp<-1e-4) dist=Math.min(dist,Math.max(1.4,(ty-(P.pos.y+0.5))/-sp));
   let ox=Math.sin(camYaw)*cp*dist, oy=sp*dist, oz=Math.cos(camYaw)*cp*dist;
   let cx=P.pos.x+ox, cy=ty+oy, cz=P.pos.z+oz;
   _ro.set(P.pos.x,ty,P.pos.z); _rd.set(ox,oy,oz).normalize();
@@ -1566,8 +1575,15 @@ function requestLock(){ try{ const p=canvas.requestPointerLock&&canvas.requestPo
   if(p&&p.catch) p.catch(()=>{}); }catch(e){} }
 document.addEventListener('pointerlockchange',()=>{ pointerLocked=(document.pointerLockElement===canvas); });
 document.addEventListener('mousemove',e=>{ if(!pointerLocked) return;
-  camYaw-=e.movementX*0.0024; camPitch-=e.movementY*0.0024;
-  camPitch=Math.max(-0.1,Math.min(1.05,camPitch)); camOverride=null; });
+  // SIGN: camPitch is DOWN-positive (see updateCamera), so dragging the mouse
+  // DOWN — movementY > 0 — must ADD. Subtracting inverted the vertical look:
+  // a drag up threw the camera into a top-down stare and a drag down could
+  // barely raise your eyes past the old -0.1 floor. The up half of the envelope
+  // opens with it, now that the boom shortens instead of sinking through the
+  // ground. games/ocean.html has always had this pair right; this is now the
+  // same pair. Horizontal was never wrong.
+  camYaw-=e.movementX*0.0024; camPitch+=e.movementY*0.0024;
+  camPitch=Math.max(-0.55,Math.min(1.05,camPitch)); camOverride=null; });
 canvas.addEventListener('click',()=>{ if(state==='playing') requestLock(); });
 
 /* ---------- boards that redraw live ---------- */

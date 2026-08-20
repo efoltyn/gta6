@@ -2800,7 +2800,13 @@
       const longGun = !!ch.aimLong;
       const recoil = ch.aimRecoil || 0;
       const recoilSide = ch.aimRecoilSide || 0;
-      const pitch = (CBZ.cam && typeof CBZ.cam.pitch === "number") ? CBZ.cam.pitch : 0;
+      // SIGN: the arm terms below are UP-positive (a bigger `pitch` drives
+      // rotation.x more negative, i.e. the gun arm RAISES), but cam.pitch is
+      // DOWN-positive — see the convention note in systems/camera.js beside
+      // `const cam = {...}`. Negate once here rather than at both use sites, so
+      // the present-weapon pose follows the same aim fpsmode's aimForward()
+      // takes off cam.pitch instead of mirroring it.
+      const pitch = -((CBZ.cam && typeof CBZ.cam.pitch === "number") ? CBZ.cam.pitch : 0);
       const ar = 16;
       // WEIGHT IS THE WEAPON'S, THE POSE IS THE BODY'S (weapon-data.js `hold`,
       // published by fpsmode as aimHeavy/aimSupport). A 7.5 kg belt-fed gun is

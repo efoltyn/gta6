@@ -1240,9 +1240,14 @@
 
   // aim direction from the look (works in BOTH first-person and third-person):
   // yaw is the shared cam yaw; pitch is fps.fp while in FPS, else cam.pitch.
+  // SIGN: `pitch` below is UP-positive (it is spent as `y: sin(pitch)`), which
+  // fps.fp already is — but cam.pitch is DOWN-positive (convention note in
+  // systems/camera.js beside `const cam = {...}`), so the third-person branch
+  // has to flip. Without this, everything aimed through here (thrown ordnance,
+  // the melee/aim reach) went UP when you looked DOWN in third person.
   function aimVec() {
     const yaw = (CBZ.cam && CBZ.cam.yaw) || 0;
-    const pitch = (CBZ.fps && CBZ.fps.active) ? (CBZ.fps.fp || 0) : ((CBZ.cam && CBZ.cam.pitch) || 0);
+    const pitch = (CBZ.fps && CBZ.fps.active) ? (CBZ.fps.fp || 0) : -((CBZ.cam && CBZ.cam.pitch) || 0);
     const cp = Math.cos(pitch);
     return { x: -Math.sin(yaw) * cp, y: Math.sin(pitch), z: -Math.cos(yaw) * cp };
   }
