@@ -262,6 +262,23 @@
     });
     const m = meshOf(geo, mats);
     if (at) m.position.set(at[0], at[1], at[2]);
+    /* THE BLADE REMEMBERS ITS OWN RECIPE.
+
+       city/wildlife_shark.js draws the above-water dorsal itself, because the
+       body is LOD-hidden for most of an encounter and a fin has to keep
+       cutting the water after the shark stops being drawn. It had no way to
+       ask what the authored dorsal actually looks like, so it measured a
+       bounding box and re-guessed a blade — which means the fin you see at
+       forty metres and the fin you see at eight are two different shapes, and
+       the handover between them is a pop.
+
+       Recording the shape bag here closes that for every species at once, with
+       no naming convention to keep in sync: the proxy already finds the dorsal
+       geometrically, and can now read the exact options off the mesh it found
+       and hand them straight to CBZ.finBlade. One line, and the two fins
+       become the same fin. */
+    m.userData.finShape = shape;
+    if (at) m.userData.finAt = [at[0], at[1], at[2]];
     return m;
   }
   /* Several blades in ONE mesh. A cetacean fluke has to be a single object:
