@@ -312,7 +312,14 @@
       const dfK = courseAt(beamY);
       const dfP = proj[dfK];
       const postR = clamp(porch * 0.13, 0.10, 0.24);
-      const nPost = clamp(Math.round(portalW / clamp(FH * 0.95, 2.2, 3.4)), 1, 4) + 1;
+      /* AN EVEN NUMBER OF POSTS, ALWAYS. The posts are spread from one end of
+         the portal to the other, so an ODD count lands one at t = 0 — dead
+         centre, standing in the doorway — and the whole porch then reads as a
+         wall with a pole in front of the way in. An even count leaves the
+         centre as an intercolumniation, which is the classical answer and the
+         one stone.js already takes when a column would foul the entrance. */
+      let nPost = clamp(Math.round(portalW / clamp(FH * 0.95, 2.2, 3.4)), 1, 4) + 1;
+      if (nPost % 2) nPost += 1;
       const outD = df.halfN + porch - postR * 1.4;
 
       for (let i = 0; i < nPost; i++) {

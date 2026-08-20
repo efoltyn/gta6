@@ -108,7 +108,10 @@
       // explicit {dress:{style}} at a call site is always obeyed, because the
       // author who wrote it knows something the registry does not.
       minStoreys: def.minStoreys || 0,
-      maxStoreys: def.maxStoreys || Infinity });
+      maxStoreys: def.maxStoreys || Infinity,
+      // `ownDoor` tells the kit this grammar draws its own entrance, so the
+      // automatic door surround is skipped rather than stacked on top of it.
+      ownDoor: !!def.ownDoor });
   };
   CBZ.facadeList = function () { return Array.from(REG.values()).map((f) => ({ id: f.id, label: f.label })); };
   CBZ.facadeDef = function (id) { return REG.get(id) || null; };
@@ -284,6 +287,80 @@
     return Math.abs(t) > (e.gap + (wid || 0)) / 2;
   };
 
+  // ---- THE DOOR -----------------------------------------------
+  /* OWNER: "every single facade should have a door and not all do."
+
+     They all had one — buildings.js hangs a real swinging leaf at the centre
+     of ctx.doorSide on every shell — but on a lot of grammars you could not
+     SEE it: a pale grey leaf, flush in a pale wall, with no frame round it and
+     often standing at the back of a portico or a recessed portal. A door you
+     cannot pick out is not a door as far as a player running at a building is
+     concerned.
+
+     So the kit draws the SURROUND, and only the surround: jambs, a lintel, a
+     hood that throws a shadow across the head, and a threshold slab. The LEAF
+     is deliberately left alone — it is a mover (it swings when you open it),
+     and a facade that painted its own leaf over the top would leave a door
+     panel hanging in mid-air the moment somebody walked through.
+
+     Colours come off the host so this reads as part of whatever grammar drew
+     it, and every piece stands PROUD of the wall so cladding laid by the
+     facade cannot bury it.
+
+     A facade that wants its own entrance (a carved Spanish frontispiece, a
+     Greek Revival doorcase with sidelights and a fanlight) calls this itself
+     with its own colours, or declares `ownDoor: true` — either way the kit
+     will not draw a second one on top. Everything else gets this one
+     automatically, which is what makes the guarantee hold for facades nobody
+     has written yet.                                                        */
+  F.door = function (ctx, opts) {
+    opts = opts || {};
+    if (ctx.__kitDoor) return;                 // one door per building
+    ctx.__kitDoor = true;
+    const e = F.entrance(ctx);
+    if (e.driveIn) return;                     // a vehicle bay is its own opening
+    const f = e.f;
+    const W = opts.width || 1.62;              // buildings.js DOORW
+    const H = opts.height || 2.35;             // its door head
+    /* PROJECTION IS THE WHOLE TRICK. The first version stood 0.14 m proud and
+       vanished on the grammars that needed it most: an adobe's battered wall
+       and a pueblo porch are thicker than that, so the surround was emitted
+       inside the cladding and the building came back with no door at all. A
+       doorcase has to stand clear of ANYTHING a facade can lay on its wall,
+       and the kit cannot know what that is — so it projects like a real
+       doorcase, about half a metre, and reads as a designed entrance rather
+       than as a line drawn on a wall. */
+    const P = opts.proj || 0.42;
+    // Light frame against a dark reveal is what makes an opening read at
+    // distance; taking both tones off the host keeps it inside the palette.
+    const frame = opts.frame != null ? opts.frame : F.mix(ctx.TRIM, 0xfdfaf4, 0.35);
+    const dark = opts.dark != null ? opts.dark : F.shade(F.mix(ctx.color, 0x14181d, 0.72), 0.9);
+
+    /* THE REVEAL, drawn AROUND the opening and never across it. The first
+       version of this was a single dark box the width of the doorway, which
+       is not a reveal at all — it is a slab, and it bricked up every door in
+       the kit while looking, in a still, exactly like a nicely shadowed one.
+       (A distance probe found it: the first opaque thing on the door axis was
+       0.7 m proud of the wall on every grammar at once, which is not a
+       coincidence, it is a bug with a constant.) Merged axis-aligned boxes
+       cannot have holes cut in them, so the way to leave an opening is to
+       decline to draw over it: two returns down the sides, one band across
+       the head, nothing in between. */
+    for (const sg of [-1, 1]) {
+      F.rib(ctx, f, sg * (W / 2 + 0.08), 0, H + 0.02, 0.16, P * 0.7, dark, 0.01);
+    }
+    F.box(ctx, f, 0, H + 0.06, W + 0.32, 0.16, P * 0.7, dark, 0.01);
+    // jambs, standing the full depth of the case
+    for (const sg of [-1, 1]) {
+      F.rib(ctx, f, sg * (W / 2 + 0.22), 0, H + 0.30, 0.30, P, frame);
+    }
+    // lintel across the head, and the hood over it
+    F.box(ctx, f, 0, H + 0.17, W + 1.00, 0.28, P, frame);
+    F.box(ctx, f, 0, H + 0.40, W + 1.34, 0.16, P + 0.18, frame);
+    // threshold: a low slab you can see from an angle, well under STEP_UP
+    F.box(ctx, f, 0, 0.07, W + 1.10, 0.14, P + 0.30, frame);
+  };
+
   // ---- the roof -----------------------------------------------
   // Where a crown may stand without fouling rooftop gameplay. buildings.js
   // keeps roof loot, helipads and the elevator headhouse near the slab centre,
@@ -339,8 +416,61 @@
   CBZ.dressFacade = function (ctx) {
     const r = resolve(ctx.dress, ctx.hash, ctx.storeys);
     if (!r) return null;
+
+    /* HOW DEEP DOES THE DOORCASE HAVE TO STAND? The kit cannot know what a
+       grammar will lay on its entrance wall — an adobe batters its base half a
+       metre thick, a brutalist hangs window hoods, a manor jetties a whole
+       storey — and a doorcase emitted inside that cladding is a door nobody
+       can see. The first two attempts guessed a projection (0.14, then 0.42)
+       and the adobe swallowed both.
+       So it is measured instead: ctx.dbox is wrapped for the duration of
+       build(), and every box the facade puts on the entrance face within the
+       doorway's own tangent band and below its head is asked how far its
+       OUTER surface stands from the wall plane. The doorcase then projects
+       past the deepest of them. Self-maintaining: a facade written next year
+       that clads deeper gets a deeper doorcase without touching this file. */
+    let deepest = 0;
+    const face = F.face(ctx, ctx.doorSide);
+    const halfN = face.halfN, horiz = face.horiz, band = 2.2, head = 3.4;
+    const realDbox = ctx.dbox;
+    ctx.dbox = function (x, y, z, w, h, d, col) {
+      try {
+        if (y - h / 2 < head) {
+          const t = horiz ? x : z;                       // along the face
+          const n = horiz ? z : x;                       // across it
+          const nHalf = (horiz ? d : w) / 2;
+          if (Math.abs(t) < band + (horiz ? w : d) / 2) {
+            const out = face.out > 0 ? (n + nHalf) - halfN : -halfN - (n - nHalf);
+            // The ceiling here has to match the doorcase's own cap, or the
+            // measurement quietly throws away exactly the deep podium the cap
+            // was raised to cope with — which is how a 5.6 m collar kept
+            // winning after both were "fixed".
+            if (out > deepest && out < 6.5) deepest = out;
+          }
+        }
+      } catch (e) { /* measuring must never break drawing */ }
+      return realDbox.apply(this, arguments);
+    };
     try { r.def.build(ctx, F, r.spec); }
     catch (e) { if (window.console) console.warn("facade " + r.spec.style + ": " + e.message); }
+    ctx.dbox = realDbox;
+    /* The doorcase lands on the OUTERMOST thing the facade built at its
+       entrance, whatever that is — cladding, a porch back wall, a portal
+       reveal, or a six-metre podium collar. Several grammars run a solid band
+       across their own entrance (a podium wall, a portal ground, a batter),
+       and merged axis-aligned boxes cannot have a hole cut in them after the
+       fact, so a doorcase drawn at the wall behind one is a door nobody can
+       see. Landing on the outer face instead is also the honest reading: if a
+       tower's podium is what you walk up to, the podium's face is where its
+       door belongs. The cap only stops a measurement error putting a doorcase
+       out in the street. */
+    const doorProj = Math.max(0.30, Math.min(6.5, deepest + 0.16));
+    // THE DOOR GUARANTEE. Every dressed building ends up with a legible
+    // entrance whether or not its grammar thought about one: a facade that
+    // drew its own called F.door (which latches ctx.__kitDoor) or declared
+    // ownDoor, and everything else gets the kit's surround here. Emitted
+    // AFTER build so it lands on top of whatever cladding the facade laid.
+    if (!r.def.ownDoor) { try { F.door(ctx, { proj: doorProj }); } catch (e) {} }
     return r.def;
   };
 })();

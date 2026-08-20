@@ -114,6 +114,10 @@
   CBZ.registerFacade("greekrev", {
     label: "Greek Revival Mansion",
     crownsRoof: true,
+    // This grammar builds its own doorcase — pilasters, sidelights, a transom
+    // and a pair of panelled leaves — so the kit must not stack its generic
+    // surround on top of it.
+    ownDoor: true,
     maxStoreys: 4,
     build: function (ctx, F, spec) {
       const FH = ctx.FH, ST = Math.max(1, ctx.storeys | 0), H = ctx.rTop;

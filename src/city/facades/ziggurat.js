@@ -204,7 +204,19 @@
         const df = e.f;
         const pTop = Math.min(s.y1 - 0.9, e.head + 1.1);
         if (pTop > 1.2) {
-          F.box(ctx, df, 0, pTop / 2, e.gap + 1.8, pTop, proj + 0.05, F.shade(DARKB, 0.55), 0);
+          /* The portal's dark ground, drawn AROUND the opening. This was one
+             solid box the full width and height of the portal, standing 5.6 m
+             proud on the podium — which is not a reveal, it is a wall across
+             the front door, and it is what a ray fired at this tower's
+             entrance hit at every height. Merged boxes cannot have holes cut
+             in them, so the opening is left by declining to draw over it:
+             a jamb return each side and a head band above. */
+          const pw = e.gap + 1.8;
+          for (const sg of [-1, 1]) {
+            F.rib(ctx, df, sg * (e.gap / 2 + 0.65), 0, pTop, (pw - e.gap) / 2 - 0.2,
+              proj + 0.05, F.shade(DARKB, 0.55), 0);
+          }
+          F.box(ctx, df, 0, pTop - 0.45, pw, 0.9, proj + 0.05, F.shade(DARKB, 0.55), 0);
           const rise = Math.min(s.y1 - pTop - 0.5, (e.gap + 2.4) * 0.42);
           if (rise > 0.3) F.arch(ctx, df, 0, pTop, e.gap + 2.4, rise, 0.3, proj + 0.30, LIGHT, "round");
           for (const sg of [-1, 1]) F.rib(ctx, df, sg * (e.gap / 2 + 0.9 + 0.4), 0.2, pTop + 0.4, 0.9, proj + 0.28, LIGHT, 0);
