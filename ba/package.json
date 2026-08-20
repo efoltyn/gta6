@@ -1,0 +1,27 @@
+{
+  "name": "before-after",
+  "version": "0.1.0",
+  "description": "Receipts for agent work: matched before/after screenshots and declared metrics from two real browser builds.",
+  "type": "module",
+  "bin": {
+    "ba": "bin/ba.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "bin",
+    "lib",
+    "README.md",
+    "PRESETS.md",
+    "PROTOCOL.md"
+  ],
+  "keywords": [
+    "visual-regression",
+    "screenshots",
+    "before-after",
+    "cdp",
+    "agents"
+  ],
+  "license": "MIT"
+}
