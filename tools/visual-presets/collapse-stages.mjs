@@ -130,6 +130,29 @@ async function stageCollapse(input) {
     if (!playing) return { ok: false, err: "never reached playing" };
     try { if (CBZ.setQualityLevel) CBZ.setQualityLevel(3); } catch (_) {}
 
+    /* WAIT FOR THE CITY TO EXIST BEFORE STOPPING THE CLOCK.
+
+       `game.state === "playing"` is not, in general, "the world is built",
+       and once rAF is stubbed nothing that builds on rAF frames can finish —
+       CBZ.stepSim does not rescue it, because it runs the updater chain and
+       the lot build is not on that chain. Measured on both sides of this
+       comparison the lots are already there the moment the mode reports
+       playing, so this guard costs one evaluation and returns immediately;
+       it is here so that a slower host, a bigger seed or a future streamed
+       build cannot silently freeze a half-built city and photograph it.
+
+       It is NOT the fix for the empty-subject failure this preset hit on its
+       first run — see the radius note below for that. Do not delete one
+       believing it duplicates the other. */
+    const built = await until(() => {
+      const A = CBZ.city && (CBZ.city.arena || CBZ.city);
+      return A && A.lots && A.lots.length > 0;
+    }, 420000, 1000);
+    if (!built) return { ok: false, err: "the city never built any lots" };
+    // and let it settle a few more real frames, so the last lots' buildings
+    // are attached rather than half-registered
+    await wait(2500);
+
     // freeze the rAF loop — CBZ.stepSim is the only clock from here, so both
     // sides sample identical simulated seconds regardless of machine speed
     window.requestAnimationFrame = function () { return 0; };
@@ -150,19 +173,58 @@ async function stageCollapse(input) {
       if (Number.isFinite(x) && Number.isFinite(z)) { gx += x; gz += z; n++; }
     }
     gx = n ? gx / n : 0; gz = n ? gz / n : 0;
-    let main = null, mainScore = -1, slim = null, slimScore = -1;
+    /* THE RADIUS IS A PREFERENCE, NOT A FILTER — and this is the fix for the
+       failure that killed the first two-sided run.
+
+       This preset used to reject any candidate further than 190 m from the
+       lot centroid. MEASURED at seed 90210: the centroid lands at about
+       (2668, -367), roughly 2.7 km from the built-up core, because the lot
+       list includes far-flung expansion lots that drag the mean away from
+       downtown. All 42 buildings of three storeys or more were outside the
+       cut, so every one of the nine beats failed with "no collapsible
+       building" on a build that has 329 lots — and it failed on the DEPLOYED
+       side first, which made it read as a baseline problem rather than as
+       this preset's own arithmetic.
+
+       Scoring with a distance PENALTY picks the same downtown tower a sane
+       radius would, and cannot return empty however the centroid lands. */
+    let main = null, mainScore = -1e9, slim = null, slimScore = -1e9;
+    let candidates = 0;
     for (const L of lots) {
       const b = L.building;
       if (!b || L.demolished || !(b.storeys >= 3)) continue;
+      if (!Number.isFinite(b.ox) || !Number.isFinite(b.oz)) continue;
+      candidates++;
       const d = Math.hypot(b.ox - gx, b.oz - gz);
-      if (d > 190) continue;
-      const h = b.h || b.storeys * (b.FH || 3.2);
-      const slender = h / Math.max(1, Math.min(b.w, b.d));
       const sc = b.storeys - d * 0.02;
       if (sc > mainScore) { mainScore = sc; main = L; }
-      if (slender > slimScore) { slimScore = slender; slim = L; }
     }
-    if (!main) return { ok: false, err: "no collapsible building near the centroid" };
+    if (!main) {
+      // SAY WHAT WAS ACTUALLY THERE. "no collapsible building" with no numbers
+      // behind it is indistinguishable from "the world never built".
+      return { ok: false, err: "no building with >=3 storeys in " + lots.length +
+        " lots (" + candidates + " candidates, centroid " + gx.toFixed(0) + "," + gz.toFixed(0) + ")" };
+    }
+    /* THE TOPPLE SUBJECT IS PICKED RELATIVE TO THE MAIN ONE, not to the
+       centroid. Its caption promises "the most slender masonry stack ON THE
+       SAME BLOCK", and scoring it off the centroid — which in this world sits
+       ~2.7 km from the built-up core — makes every distance penalty swamp the
+       slenderness it is supposed to be selecting for, so the beat labelled
+       "a different building does something different" would photograph
+       whatever squat shop happened to be closest and pancake exactly like the
+       first one. Search the main subject's own neighbourhood instead. */
+    {
+      const mb = main.building;
+      for (const L of lots) {
+        const b = L.building;
+        if (!b || L === main || L.demolished || !(b.storeys >= 3)) continue;
+        if (!Number.isFinite(b.ox) || !Number.isFinite(b.oz)) continue;
+        if (Math.hypot(b.ox - mb.ox, b.oz - mb.oz) > 320) continue;
+        const h = b.h || b.storeys * (b.FH || 3.2);
+        const slender = h / Math.max(1, Math.min(b.w, b.d));
+        if (slender > slimScore) { slimScore = slender; slim = L; }
+      }
+    }
     if (slim === main) slim = null;
 
     const overlay = document.createElement("div");
