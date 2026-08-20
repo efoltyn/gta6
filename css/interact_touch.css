@@ -420,7 +420,8 @@ body.tveh-on #pinteract{ display: none !important; }
 body.touch{
   --pi-sub-line: clamp(16px, 2.35vh, 24px);
   /* 120 clears the #hotbar (bottom:16px, 50px tall). --pi-dock-h is the live
-     height of the verb stack, published by interact.js after every re-render
+     height of the whole dock — name plate and verb stack — as published by
+     interact.js after every re-render
      (0 on iPad, where the rail is a right-edge column that never reaches the
      centre band): on a phone the band rides above the buttons instead of
      through them. */

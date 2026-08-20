@@ -923,7 +923,9 @@
     // only knowable after layout, so publish it and let css/interact_touch.css
     // lift the band by it. The iPad rail is a right-edge column that never
     // crosses the centre band, so it publishes nothing to clear.
-    setDockHeight(docked ? 0 : piRoot.querySelector(".pi-row").getBoundingClientRect().height);
+    // the WHOLE block, name plate included — lifting the band over the buttons
+    // alone drops it straight onto "BLOODY MARCUS · wary".
+    setDockHeight(docked ? 0 : piRoot.getBoundingClientRect().height);
   }
 
   function setDockHeight(px) {
