@@ -44,6 +44,13 @@
          something does not bite and let go like a shark. It HOLDS, drags it
          under, thrashes it, and surfaces with it still in its mouth. That is
          predatorSeize's "drag" style plus a depth track this file drives.
+     §7  THE MEGALODON TAKEDOWN — the threshold, and a forward sim of the
+         fight's own numbers so "one loses, three grind, enough win" is a
+         measurement rather than a claim.
+     §7b THE MOB — the same fight, driven from here, for every page that does
+         not load marine_predation.js. It stands down completely when that file
+         IS loaded; see the note in §7 about the eight-orca measurement that
+         made this necessary.
 
    ORCAS ARE NOT SHARKS AND MUST NOT READ LIKE ONE. A shark is a lone stalker
    that commits. A pod is a hunting party that INVESTIGATES: it circles a boat
@@ -75,13 +82,20 @@
      CBZ.CONFIG.ORCA_HUNT     the investigate/commit brain.
 
    PUBLIC API
-     CBZ.orcaBrain(a, dt, P)        the tick (installed on CBZ.sharkBrain)
-     CBZ.orcaIdentity(a)            {sex, bull, cow, calf, dorsalSpan, ...}
-     CBZ.orcaSurfaceRead(a)         what is above the water, in metres
-     CBZ.orcaPodRead(a)             formation, station, matriarch, calf
-     CBZ.orcaTakedown(orca, quarry) {needed, have, verdict}
-     CBZ.orcaStage(a, act, arg)     force an act (staging/tests only)
-     CBZ.orcaAudit()                counters (no gameplay reads it)
+     CBZ.orcaBrain(a, dt, P)             the tick (installed on CBZ.sharkBrain,
+                                         and self-driven from the 47.2 pass on
+                                         any host that has no wildlife.js)
+     CBZ.orcaIdentity(a)                 {sex, bull, cow, calf, dorsalSpan, ...}
+     CBZ.orcaSurfaceRead(a)              what is above the water, in metres
+     CBZ.orcaPodRead(a)                  formation, station, matriarch, calf
+     CBZ.orcaTakedown(orca, quarry, n)   {needed, have, verdict, seconds,
+                                         killed, casualties, survivors} — the
+                                         fight's own numbers run forward
+     CBZ.orcaUseLegacyModel(on)          put aquatic.js's original orca back
+                                         (the before/after A/B seam)
+     CBZ.orcaStage(a, act, arg)          force a sex or an act (staging only)
+     CBZ.orcaFinDrop(a)                  tear the surface proxy down
+     CBZ.orcaAudit()                     counters (no gameplay reads it)
 ============================================================ */
 (function () {
   "use strict";
@@ -423,11 +437,24 @@
         }
         grid.push(row);
       }
+      /* WINDING, AND IT IS NOT A DETAIL — it is a bug the report caught and no
+         metric could have. Both branches used to be the other way round, so
+         every marking on this animal was BACK-FACED: the eye patch, the saddle
+         and the blowhole were all present in the geometry, all correctly
+         placed, and all invisible from the flank the camera was on, because the
+         host's materials are FrontSide. The close-up frame showed a bare head.
+
+         Work it out rather than guessing: on the +z flank the outward normal is
+         +z, and going round th CCW in the (x, angle) plane is x -> y, which is
+         CCW seen from +z, i.e. front-facing. Emitting (r,j) (r,nj) (r+1,nj)
+         (r+1,j) makes the second triangle run j -> nj -> j the wrong way; the
+         (r,j) (r+1,j) (r+1,nj) (r,nj) order is the CCW one. The -z flank is
+         mirrored and therefore takes the opposite order. */
       for (let r = 0; r < rad; r++) {
         for (let j = 0; j < seg; j++) {
           const nj = (j + 1) % seg;
-          if (flip > 0) sh.quad(0, grid[r][j], grid[r][nj], grid[r + 1][nj], grid[r + 1][j]);
-          else sh.quad(0, grid[r][j], grid[r + 1][j], grid[r + 1][nj], grid[r][nj]);
+          if (flip > 0) sh.quad(0, grid[r][j], grid[r + 1][j], grid[r + 1][nj], grid[r][nj]);
+          else sh.quad(0, grid[r][j], grid[r][nj], grid[r + 1][nj], grid[r + 1][j]);
         }
       }
     }
@@ -449,7 +476,16 @@
   const HX0 = -2.35, HX1 = 3.25, HY = 1.05, HLEN = HX1 - HX0;   // 5.60 model units
   const RY = [0.18, 0.44, 0.68, 0.85, 0.92, 0.92, 0.86, 0.72, 0.34];
   const RZ = [0.14, 0.38, 0.60, 0.75, 0.82, 0.82, 0.78, 0.66, 0.30];
-  const HULL_RINGS = 34, HULL_SIDES = 24;
+  /* HOW FINE THE SKIN IS, and it is the marking resolution, not a polish
+     number. At 34x24 the countershading boundary — which the reference sheet
+     calls a HARD, RAGGED, high-contrast line — snapped to whole columns and
+     came out as a flight of rectangular stairs down the flank: one angular
+     step is 0.26 rad, which is 0.21 of the sine the cut is written in, so a
+     jitter of +/-0.055 could not move the line by even a quarter of a step and
+     the "ragged" edge was perfectly regular. 48x36 puts the step at 0.09 and
+     the jitter below is scaled to actually cross it. ONE cached geometry for
+     every orca in the world, so the cost is 3.5k triangles once. */
+  const HULL_RINGS = 48, HULL_SIDES = 36;
   /* THE COUNTERSHADING LINE, as the sine of the ring angle below which a face
      is WHITE. Tail -> nose. The nose end goes POSITIVE: an orca's white chin
      and throat climb well up the lower head, which is why the animal reads
@@ -460,7 +496,7 @@
   const SADDLE_X = 0.05, SADDLE_AF = 1.17;    // behind and below the dorsal
   const DORSAL_X = 0.35, DORSAL_Y = 1.90;
   const BLOW_X = 2.05, BLOW_Y = 1.86;
-  const JAW_X = 1.52, JAW_Y = 0.60;
+  const JAW_X = 1.52, JAW_Y = 0.74;
 
   const BULL_DORSAL = {
     span: 1.62, chordRoot: 1.06, chordTip: 0.09, sweep: 0.09, concavity: 0.035,
@@ -486,8 +522,12 @@
           conforming meshes, because at 24 columns a painted oval is a
           staircase, and the eye patch is the identifying mark of the animal. */
   function orcaPaint(i, u, j, ang, af, s) {
-    const jit = (h01(j * 7 + 1, 0, 0x0C1) - 0.5) * 0.055
-      + (h01(j * 7 + 1, i * 13 + 3, 0x0C2) - 0.5) * 0.030;
+    // A WANDERING LINE DOWN THE FLANK (per column) plus a smaller per-ring
+    // wobble. Both hash-derived, so the same animal always tears the same way
+    // and the world stays byte-identical. Sized to be MORE than one angular
+    // step, which is the whole difference between ragged and stair-stepped.
+    const jit = (h01(j * 7 + 1, 0, 0x0C1) - 0.5) * 0.135
+      + (h01(j * 7 + 1, i * 13 + 3, 0x0C2) - 0.5) * 0.075;
     let cut = sample(CUT, u) + jit;
     const d = u - 0.255;
     const w = d < 0 ? 0.185 : 0.135;                 // skewed: it flares TAILWARD
@@ -520,7 +560,7 @@
     const patch = new T.Mesh(cached("orcaEyePatch|v1", function () {
       return patchGeom({
         rings: rings, x: PATCH_X, ang: PATCH_AF, rx: 0.34, rArc: 0.145,
-        tilt: 0.36, arcR: 0.74, lift: 0.012, seg: 22, rad: 3,
+        tilt: 0.36, arcR: 0.74, lift: 0.030, seg: 24, rad: 4,
       });
     }), white);
     patch.name = "orcaEyePatch"; g.add(patch);
@@ -531,7 +571,7 @@
     const sad = new T.Mesh(cached("orcaSaddle|v1", function () {
       return patchGeom({
         rings: rings, x: SADDLE_X, ang: SADDLE_AF, rx: 0.62, rArc: 0.34,
-        tilt: -0.10, arcR: 0.80, lift: 0.010, seg: 24, rad: 3,
+        tilt: -0.10, arcR: 0.80, lift: 0.026, seg: 26, rad: 4,
         radius: function (th) { return 1 - 0.42 * Math.max(0, Math.cos(th)); },
       });
     }), saddle);
@@ -556,7 +596,7 @@
     const blow = new T.Mesh(cached("orcaBlowhole|v1", function () {
       return patchGeom({
         rings: rings, x: BLOW_X, ang: Math.PI * 0.5, rx: 0.16, rArc: 0.11,
-        tilt: 0, arcR: 0.80, lift: 0.006, seg: 14, rad: 2,
+        tilt: 0, arcR: 0.80, lift: 0.020, seg: 16, rad: 2,
         radius: function (th) { return 0.72 + 0.28 * Math.abs(Math.sin(th)); },
       });
     }), eyeM);
@@ -577,11 +617,14 @@
        shark's swept blade. chordTip is over half the root chord and apexRound
        is 0.55: that is the difference between a paddle and a knife. */
     [1, -1].forEach(function (s2) {
-      const f = finOf([black], [1.30, 0.66, s2 * 0.52], {
-        span: 1.12, chordRoot: 1.00, chordTip: 0.60, sweep: 0.24, concavity: 0.02,
-        leadBow: 0.11, rearTipH: 0.20, rearTipBack: 0.12, apexRound: 0.55,
-        thick: 0.16, spanSteps: 5, chordSteps: 5,
-        spanDir: [-0.28, -0.30, s2 * 0.91], chordDir: [1, 0, s2 * 0.08],
+      // ROOTED ON THE SKIN, NOT INSIDE IT. The hull is ~0.81 half-wide at this
+      // station, so a root at 0.52 buried most of the blade and left a stub —
+      // the side view showed a dark lump under the belly instead of a paddle.
+      const f = finOf([black], [1.28, 0.60, s2 * 0.66], {
+        span: 1.52, chordRoot: 1.06, chordTip: 0.66, sweep: 0.26, concavity: 0.02,
+        leadBow: 0.12, rearTipH: 0.22, rearTipBack: 0.10, apexRound: 0.58,
+        thick: 0.17, spanSteps: 5, chordSteps: 5,
+        spanDir: [-0.24, -0.20, s2 * 0.95], chordDir: [1, 0, s2 * 0.08],
       }, "orcaPec|" + s2);
       f.name = "orcaPectoral";
       g.add(f);
@@ -672,15 +715,36 @@
     }
     const lt = toothRow(false); lt.name = "orcaLowerTeeth";
     lt.position.set(0, 0.055, 0); lower.add(lt);
+
+    /* AN UPPER JAW GROUP THAT DOES NOT MOVE, and it is not ceremony.
+
+       An orca does not protrude its upper jaw — a shark does, and it is the
+       great white's single most-missed anatomical fact — so this file first
+       published `upper: null` and declared protrude 0. Both buildSwimRig
+       implementations (city/wildlife.js and city/wildlife_rig.js) then read
+       `authoredMouth.upper.position.x` UNCONDITIONALLY the moment an authored
+       mouth exists, and every orca in the game threw on spawn. The report
+       caught it: thirteen black frames and one stack trace.
+
+       Neither of those files is mine to edit, and the right fix is on this
+       side anyway: the contract says "an authored mouth has an upper jaw", and
+       an orca does have one — it just never slides. So the upper tooth row and
+       its gum rail live in a real named group at the hinge, which is where
+       they anatomically belong, and protrude/upperDrop stay 0 so swimJaw's
+       translate is a no-op. The mouth opens on the mandible alone, correctly. */
+    const upper = new T.Group();
+    upper.name = "orcaUpperJaw";
+    upper.position.set(JAW_X, JAW_Y, 0);
+    g.add(upper);
     const ut = toothRow(true); ut.name = "orcaUpperTeeth";
-    ut.position.set(JAW_X, JAW_Y + 0.26, 0); g.add(ut);
+    ut.position.set(0, 0.26, 0); upper.add(ut);
     const gumRail = meshOf(cached("orcaGum|v1", function () {
       return hullGeom({
         rings: ringsOf(0.20, 1.66, 0, [0.035, 0.022], [0.30, 0.10], 6),
         sides: 8, paint: function () { return 0; },
       });
     }), [gum]);
-    gumRail.name = "orcaGum"; gumRail.position.set(JAW_X, JAW_Y + 0.245, 0); g.add(gumRail);
+    gumRail.name = "orcaGum"; gumRail.position.set(0, 0.245, 0); upper.add(gumRail);
 
     const REST_CLOSE = 0.03, MAX_OPEN = 0.52;
     lower.rotation.z = REST_CLOSE;
@@ -693,7 +757,7 @@
       upperTeeth: 22, lowerTeeth: 22, toothRows: 1,
     };
     g.userData.aquaticMouth = contract;
-    g._aquaticMouth = { lower: lower, upper: null, cavity: cavity, contract: contract };
+    g._aquaticMouth = { lower: lower, upper: upper, cavity: cavity, contract: contract };
 
     /* WHAT THIS ANIMAL PUBLISHES ABOUT ITSELF. wildlife_shark.js's proxy
        measures any species it is handed and honours a declared descriptor if it
@@ -2105,6 +2169,10 @@
     if (s.quarry && !s.quarry.dead && s.quarry.group) {
       const q = s.quarry.group.position, p = a.group.position;
       if (Math.hypot(q.x - p.x, q.z - p.z) < MOB.R * 1.5) return s.quarry;
+      // IT GOT AWAY. Dropping the reference matters beyond tidiness: orcaBrain
+      // widens its own sim radius to FIGHT_R while a quarry is held, so a stale
+      // pointer would keep this animal thinking at 1500 u forever.
+      s.quarry = null;
     }
     if (s.mobT > 0) return null;
     s.mobT = MOB.SCAN;

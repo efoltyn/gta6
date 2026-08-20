@@ -227,9 +227,19 @@ function stageMarine(input) {
     const idx = g.index ? g.index.count : (g.attributes && g.attributes.position ? g.attributes.position.count : 0);
     tris += Math.floor(idx / 3);
   });
-  // §4's claim, as a ratio: from above, a shark is a NARROW torpedo. Width
-  // over length, measured off the live bounding box — lower is more torpedo.
-  const planRatio = size.x > 0 ? size.z / size.x : 0;
+  /* §4's claim, as a ratio: from above the BODY is a narrow torpedo.
+     Measured off the HULL, not the whole bounding box — the first version of
+     this measured the bbox and so scored the long swept pectorals §4 also
+     demands as a regression, marking the fix as the fault. The body is the
+     named hull child where a species has one; anything else falls back to the
+     bbox and is read with that caveat. Lower is more torpedo. */
+  let bodyW = size.z, bodyL = size.x;
+  group.traverse(function (o) {
+    if (!o.isMesh || o.name !== "sharkHull") return;
+    const hb = new T.Box3().setFromObject(o), hs = new T.Vector3(); hb.getSize(hs);
+    if (hs.x > 0) { bodyW = hs.z; bodyL = hs.x; }
+  });
+  const planRatio = bodyL > 0 ? bodyW / bodyL : 0;
   const metrics = {
     parts: parts,
     triangles: tris,
@@ -269,8 +279,12 @@ export default {
   frames: [{ id: "custom", label: "custom", width: 1400, height: 860, deviceScaleFactor: 1 }],
   stageTimeoutMs: 90000,
   metrics: {
-    parts: { label: "Mesh parts", better: "higher" },
-    triangles: { label: "Triangles", better: "higher" },
+    // Neither of these has a "better" direction and claiming one lies. Fewer
+    // meshes for the same animal is a WIN (the great white went 103 -> 30);
+    // more meshes can equally mean more detail. They are here to catch a build
+    // that silently lost its geometry, which is a thing you read, not a score.
+    parts: { label: "Mesh parts" },
+    triangles: { label: "Triangles" },
     lengthM: { label: "Length", unit: "m" },
     planWidthRatio: { label: "Plan width / length", better: "lower" },
     heightM: { label: "Height", unit: "m" },

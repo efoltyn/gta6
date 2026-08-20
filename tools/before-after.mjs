@@ -184,6 +184,9 @@ async function printSummary(dir) {
       const up = r.after > r.before;
       mark = spec.better === "lower" ? (up ? "✗" : "✓") : spec.better === "higher" ? (up ? "✓" : "✗") : "·";
     }
+    if (mark === "✓") tally.better++;
+    else if (mark === "✗") tally.worse++;
+    else tally.flat++;
     process.stdout.write(
       `    ${mark} ${(spec.label || r.key).padEnd(wM)}  ` +
       `${fmt(r.before).padStart(8)} → ${fmt(r.after).padStart(8)}` +
