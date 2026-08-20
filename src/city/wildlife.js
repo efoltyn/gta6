@@ -466,11 +466,18 @@
       const rad = FIELD.r0 + r() * (FIELD.r1 - FIELD.r0);
       const x = FIELD.cx + Math.cos(a) * rad, z = FIELD.cz + Math.sin(a) * rad;
       if (CBZ.cityAnyRegion && CBZ.cityAnyRegion(ARENA(), x, z, 30)) continue;
-      // deep enough for THIS animal: a whale does not spawn in the shallows a
-      // mackerel is happy in, and clearance is already the per-species number.
-      if (ground) {
-        const surf = aquaticSurfY(x, z, 0);
-        if (!(surf - ground(x, z) > Math.max(1.2, clear * 0.12))) continue;
+      /* DEEP ENOUGH FOR THIS ANIMAL. A whale does not belong in the shallows a
+         mackerel is happy in, and `clearance` is already that per-species
+         number. Three tiers, most authoritative first, because falling through
+         from waterfield must not become a way to spawn a body somewhere
+         waterfield would have refused — that would be a Gang City regression
+         paid for with a Natural Disaster feature. */
+      const need = Math.max(1.2, clear * 0.12);
+      if (CBZ.citySeaBedDepth) {
+        const col = +CBZ.citySeaBedDepth(x, z);        // the city's own column
+        if (!(col > need)) continue;
+      } else if (ground) {
+        if (!(aquaticSurfY(x, z, 0) - ground(x, z) > need)) continue;
       } else if (wet) {
         try { if (!wet(x, z)) continue; } catch (e) {}
       }

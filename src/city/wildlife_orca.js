@@ -1293,6 +1293,31 @@
   const SIM_R = 900;          // u — beyond this an orca does not think at all
   const FIGHT_R = 1500;       // ...unless it is already in a fight (see orcaBrain)
 
+  /* WHERE THE ANIMALS ARE, and it is not always CBZ.cityWildlife. That list is
+     city/wildlife.js's, and city/wildlife.js is not in the studio packs the
+     smaller pages load — games/battle.html runs `beasts` + `bestiary` and has
+     no wildlife engine at all. A pod that can only find its packmates in one
+     host's private array is a pod that does not exist on any other page, which
+     is exactly how the eight-orca measurement came back with a live megalodon.
+     So the roster is resolved: wildlife.js's list first, then the capability
+     bus (systems/modecaps.js), which every registered game answers for its own
+     cast. Refreshed at most once per frame into ONE array that is never
+     reallocated. */
+  const _roster = [];
+  let _rosterF = -1;
+  function actorList() {
+    const wl = CBZ.cityWildlife;
+    if (wl && wl.length) return wl;
+    if (typeof CBZ.worldActors === "function") {
+      if (_rosterF !== FRAME) {
+        _rosterF = FRAME;
+        try { CBZ.worldActors(_roster); } catch (e) { _roster.length = 0; }
+      }
+      return _roster;
+    }
+    return wl || null;
+  }
+
   function isOrca(a) {
     return !!(a && a.species && a.species.id === "orca" && a.group && !a.external);
   }
@@ -1304,7 +1329,7 @@
     s.podT -= dt;
     if (s.podT > 0) return;
     s.podT = POD_SCAN;
-    const list = CBZ.cityWildlife;
+    const list = actorList();
     s.podN = 1; s.matriarch = null; s.mother = null; s.slot = 0;
     if (!list) return;
     const p = a.group.position;
@@ -2011,6 +2036,11 @@
     };
   }
 
+  /* THE PROBE. `podOverride` lets a stager ask "what would N of them do"
+     without assembling N animals; everything else is read off the two actors.
+     `enabled` is not decoration — with the block reverted this fight does not
+     happen at all, and a report that printed the arithmetic anyway would be
+     claiming a kill that no player would ever see. */
   function takedown(orca, quarry, podOverride) {
     if (!orca || !quarry) return null;
     const needed = neededFor(orca, quarry);
@@ -2027,6 +2057,7 @@
       seconds: sim.seconds, killed: sim.killed, rolled: sim.rolled,
       casualties: sim.casualties, withdrew: sim.withdrew, survivors: sim.survivors,
       quarryHpPct: sim.quarryHpPct,
+      enabled: POD(),
       source: typeof CBZ.marinePodNeeded === "function" ? "marine_predation" : "wildlife_orca",
       driver: typeof CBZ.marineRelation === "function" ? "marine_predation" : "wildlife_orca",
       rollOver: typeof CBZ.creatureTonicRoll === "function",
@@ -2077,7 +2108,7 @@
     }
     if (s.mobT > 0) return null;
     s.mobT = MOB.SCAN;
-    const list = CBZ.cityWildlife;
+    const list = actorList();
     if (!list) return (s.quarry = null);
     const p = a.group.position;
     let best = null, bd2 = MOB.R * MOB.R;
@@ -2517,7 +2548,7 @@
       FRAME++;
       installWrap();
       tonicPass(dt);
-      const list = CBZ.cityWildlife;
+      const list = actorList();
       if (!list) return;
       const P = (CBZ.player && CBZ.player.pos) || null;
       for (let i = 0; i < list.length; i++) {
@@ -2532,12 +2563,31 @@
           continue;
         }
         const st = s || ensure(a);
-        // STALE MEANS SOMEBODY ELSE OWNS IT — marine_predation took the actor
-        // for a fight, or wildlife.js's LOD skipped the brain. Either way the
-        // act is over: an unclaimed pose held forever is a stuck animal.
+        /* NOBODY TICKED THIS ORCA THIS FRAME. Two reasons, and they want
+           opposite answers:
+
+             marine_predation.js took the actor for a fight  -> stand down, and
+                drop any half-played act rather than freezing it (a whale stuck
+                at seventy degrees nose-up is the worst read in this file).
+             THE HOST HAS NO wildlife.js AT ALL          -> tick it HERE.
+
+           The second case is why the eight-orca pod in games/battle.html did
+           nothing: that page loads the bestiary and the combat driver but no
+           wildlife engine, so CBZ.sharkBrain — the seam this file wraps — is
+           never called by anybody and every behaviour in this file was dead
+           code on that page. A block that only works inside one host is a
+           block that silently does not ship. */
         if (st.tick !== FRAME - 1 && st.tick !== FRAME) {
-          if (st.act) endAct(st);
-          st.lift = 0; st.pitch = 0; st.roll = 0; st.airborne = false; st.porp = false;
+          let ticked = false;
+          if (!a._mpRoll && !a._seizedBy && typeof CBZ.sharkBrain !== "function") {
+            try { ticked = orcaBrain(a, dt, P); } catch (_e) { ticked = false; }
+          } else if (!a._mpRoll && !a._seizedBy && !CBZ.cityWildlife) {
+            try { ticked = orcaBrain(a, dt, P); } catch (_e2) { ticked = false; }
+          }
+          if (!ticked && st.tick !== FRAME) {
+            if (st.act) endAct(st);
+            st.lift = 0; st.pitch = 0; st.roll = 0; st.airborne = false; st.porp = false;
+          }
         }
         applyPose(a, st);
         if (!st.owned) proxy(a, st, d, dt);

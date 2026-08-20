@@ -512,8 +512,30 @@
         "city/wildlife/bigcats.js", "city/wildlife/megafauna.js",
         "city/wildlife/farm.js", "city/wildlife/snow_ungulates.js",
         "city/wildlife/small_game.js", "city/wildlife/snakes.js",
-        "city/wildlife/aquatic.js"],
-      publishes: ["WILDLIFE_SPECIES", "defineSpecies"],
+        "city/wildlife/aquatic.js",
+        /* THE ORCA'S OWN FILE RIDES WITH THE BESTIARY, and this is a fix, not a
+           tidy-up. city/wildlife_orca.js re-registers id:"orca" over
+           aquatic.js's build (defineSpecies is last-write-wins) — the eye
+           patch, the saddle, the flank flare, the blowhole and the two
+           sexually-dimorphic dorsal fins are ALL in that file — so a page that
+           loads `bestiary` without it builds the old dolphin-shaped animal and
+           there is no way to tell from the pack list.
+
+           It also carries the pod's own takedown, and that half was found by
+           measurement: an eight-orca pod staged against a megalodon in
+           games/battle.html left the megalodon alive, because the takedown
+           lived in city/marine_predation.js and THAT is in no pack at all. The
+           file stands its own fight up when marine_predation is absent and
+           stands down completely when it is present, so adding it here cannot
+           double-drive anything in the full game.
+
+           It costs a page that never builds an orca one guarded script: every
+           API it consumes (predatorHunt, creatureFight, waterField, the chum
+           bus, the wildlife roster) is probed at runtime and it degrades to
+           "just a species definition" when none of them are there. */
+        "city/wildlife_orca.js"],
+      publishes: ["WILDLIFE_SPECIES", "defineSpecies", "orcaBrain", "orcaIdentity",
+        "orcaSurfaceRead", "orcaPodRead", "orcaTakedown", "orcaStage", "orcaAudit"],
     },
     beasts: {
       gives: "animals that WALK, FIGHT and DIE without the full city: the " +
