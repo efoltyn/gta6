@@ -32,11 +32,16 @@
         real Speedboat hull to get its eye above the water and look at you.
      grab-drag   An orca does NOT bite and release like a shark. It holds, and
         it is photographed here with the prey still in its jaws.
-     takedown-1 / -3 / -6   THE MEGALODON. One orca, three, six, against the
-        same megalodon, with the pod-size verdict read live out of the game's
-        own solver (CBZ.orcaTakedown -> CBZ.marinePodNeeded) rather than typed
-        into this file. The last frame is the ROLL-OVER FINISHER: the meg held
-        belly-up in tonic immobility while the pod drowns it.
+     takedown-1 / -3 / -6 / -dead   THE MEGALODON, at four pod sizes, with the
+        verdict AND the seconds read live out of the game's own solver
+        (CBZ.orcaTakedown, which prefers city/marine_predation.js's threshold
+        and falls back to wildlife_orca.js's own when that file is not loaded)
+        rather than typed into this file. One loses and breaks off. Three
+        harry it to a standstill and cannot finish it. Six roll it. Eight
+        DROWN it — and that last frame exists because it did not before: an
+        eight-orca pod staged in games/battle.html left the megalodon alive,
+        which is the whole feature not happening, and a report with no frame of
+        the animal dying could never have caught it.
 
    THE PRESET STAGES; IT DOES NOT SIMULATE. Every pose here is written by this
    file, because a still photograph of a behaviour is the point — the behaviour
@@ -118,10 +123,17 @@ const subjects = [
   },
   {
     id: "takedown-6", label: "Six Orcas — The Roll-Over Finisher", sex: "bull",
-    meg: true, podSize: 6, roll: true,
-    focus: "Enough of them and the megalodon dies — rammed, stunned, then rolled BELLY-UP into tonic immobility and held there until it drowns.",
+    meg: true, podSize: 6, roll: 0.55,
+    focus: "Enough of them and the megalodon dies — rammed, stunned, then rolled BELLY-UP into tonic immobility and held there until it drowns. This is the roll, halfway over.",
     frame: 36, target: [0, 0.5, 0], cameraOffset: [4, 15, 32],
-    state: "POD 6 · TONIC ROLL · KILL",
+    state: "POD 6 · TONIC ROLL",
+  },
+  {
+    id: "takedown-dead", label: "Eight Orcas — The Megalodon Is Dead", sex: "bull",
+    meg: true, podSize: 8, roll: 1, megDead: true,
+    focus: "THE FRAME THE WHOLE FEATURE IS FOR. Fully inverted, drowned, sinking, with the pod still on it. Eight orcas against a megalodon has to END, and the number under the frame is the seconds the game's own solver says it takes.",
+    frame: 40, target: [0, -1.0, 0], cameraOffset: [5, 13, 34],
+    state: "POD 8 · DROWNED · KILL",
   },
 ];
 
@@ -284,7 +296,14 @@ function stageOrcaPod(input) {
     if (!meg) return { ok: false, missing: "megalodon" };
     meg.group.position.set(0, -2.0, 0);
     meg.group.rotation.y = 0.22;
-    if (subject.roll) meg.group.rotation.x = Math.PI;      // rolled BELLY-UP
+    // the inversion, as a FRACTION of the roll: 0.55 is halfway over (the
+    // finisher in progress), 1 is fully belly-up (drowned).
+    if (subject.roll) meg.group.rotation.x = Math.PI * Number(subject.roll);
+    if (subject.megDead) {
+      meg.dead = true; meg.hp = 0;
+      meg.group.position.y = -5.2;                          // sinking
+      meg.group.rotation.z = 0.22;                          // nose down, going
+    }
     scene.add(meg.group);
 
     // THE ORCAS, ON BEARINGS AROUND IT — the "it cannot face them all" read.
@@ -310,11 +329,18 @@ function stageOrcaPod(input) {
     if (typeof CBZ.orcaTakedown === "function") {
       try {
         if (typeof CBZ.orcaIdentity === "function") CBZ.orcaIdentity(orca);
-        if (orca._orca) orca._orca.podN = n;
-        const td = CBZ.orcaTakedown(orca, meg);
+        const td = CBZ.orcaTakedown(orca, meg, n);
         if (td) {
           read.needed = td.needed; read.verdict = td.verdict;
           read.rollOver = !!td.rollOver; read.source = td.source;
+          read.driver = td.driver;
+          // WITH THE BLOCK REVERTED THIS FIGHT DOES NOT HAPPEN, so the seconds
+          // are reported as zero rather than as arithmetic nobody would ever
+          // see play out. That is what makes the column honest.
+          read.seconds = td.enabled ? td.seconds : 0;
+          read.killed = td.enabled && td.killed ? 1 : 0;
+          read.casualties = td.enabled ? (td.casualties + (td.withdrew || 0)) : 0;
+          read.quarryHpPct = td.enabled ? td.quarryHpPct : 100;
         }
       } catch (_) {}
     }
@@ -445,7 +471,11 @@ function stageOrcaPod(input) {
     "patches " + m.markingMeshes + " · dorsals " + m.dorsalShapes +
     " · blowhole " + (m.blowhole ? "yes" : "no") +
     " · hull " + m.hullTris + " tris · white " + Math.round(m.whiteFrac * 100) + "%" +
-    (read.podSize ? "  |  pod " + read.podSize + (read.needed ? " / needs " + read.needed + " → " + read.verdict : "") : "");
+    (read.podSize
+      ? "  |  pod " + read.podSize + (read.needed ? " / needs " + read.needed + " → " + read.verdict : "") +
+        (read.seconds ? " in " + read.seconds + "s" : "") +
+        (read.driver ? " [" + read.driver + "]" : "")
+      : "");
   rd.style.cssText = "position:absolute;right:27px;bottom:22px;padding:7px 10px;border-radius:6px;background:rgba(2,17,27,.78);color:#bfeeff;font:11px ui-monospace,SFMono-Regular,Menlo,monospace";
   const source = overlay.querySelector("[data-source]");
   source.textContent = new URL(input.sourceUrl).host + new URL(input.sourceUrl).pathname;
@@ -472,6 +502,11 @@ function stageOrcaPod(input) {
     podStaged: read.podSize || 0,
     podNeeded: read.needed || 0,
     podVerdict: read.verdict || "",
+    takedownSeconds: read.seconds || 0,
+    megKilled: read.killed || 0,
+    podCasualties: read.casualties || 0,
+    megHpLeftPct: read.podSize ? (read.quarryHpPct == null ? 100 : read.quarryHpPct) : 0,
+    takedownDriver: read.driver || "",
     calfGapM: read.calfGap || 0,
     heldPrey: read.held ? 1 : 0,
     rollOverAvailable: read.rollOver ? 1 : 0,
@@ -540,6 +575,9 @@ export default {
     podStaged: { label: "Animals staged in the frame", unit: "orcas", better: "higher" },
     podNeeded: { label: "Orcas the solver says it takes to kill the meg", unit: "orcas", better: "higher" },
     rollOverAvailable: { label: "Tonic roll-over finisher reachable", unit: "0/1", better: "higher" },
+    megKilled: { label: "Does the megalodon actually die at this pod size", unit: "0/1", better: "higher" },
+    takedownSeconds: { label: "Seconds the takedown takes (0 = it never happens)", unit: "s", better: "higher" },
+    megHpLeftPct: { label: "Megalodon health left when the fight ends", unit: "%", better: "lower" },
     calfGapM: { label: "Calf's distance from its mother (slipstream)", unit: "m", better: "lower" },
   },
 };
