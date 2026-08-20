@@ -581,6 +581,59 @@
         "wildlifeTraits", "wildlifeSize", "wildlifeScale", "wildlifeHunger"],
     },
 
+    /* ---- the sea as a place things happen in ------------------------------
+
+       WHY THIS PACK EXISTS, AND WHY ITS ABSENCE WAS INVISIBLE. `bestiary`
+       gives a page the shark's BODY and `beasts` gives it a tail beat and a
+       jaw. Neither gives it a HUNT, a fin cutting the surface, blood in the
+       water, or anything to eat — those live in four files that were in no
+       pack at all, so a page could load a perfect great white that swam in a
+       straight line forever and there was no way to tell from the pack list.
+
+       That is not hypothetical. games/battle.html grew an open-water arena and
+       a marine roster and got exactly this: the new models, and none of the
+       systems. The same fault had already been caught once, in the other
+       direction — an eight-orca pod left a megalodon alive because the
+       takedown lived in city/marine_predation.js and nothing loaded it — and
+       it was fixed for the orca alone by moving that one animal's fight into
+       its own file. This is the general fix, and it is the reason a "publishes"
+       list is worth keeping honest: every name below was unreachable on any
+       page that did not boot the whole city.
+
+       systems/predator.js is the floor. It is the ONE shared "something is
+       hunting you and it commits" driver — the wolf pack, the big cat and the
+       shark all tick it — and without it wildlife_shark.js's fin never appears
+       because nothing ever enters a hunt state. It carries no marine
+       assumptions and would serve a land-only page just as well; it lives here
+       because here is where it was first needed, not because it is aquatic.
+
+       Everything below degrades on its own: each file probes what it consumes
+       at runtime and stands down when it is missing, which is why they could
+       go unloaded for so long without an error. */
+    marine: {
+      gives: "the sea with something IN it: the shared predator hunt driver, " +
+             "the shark's stalk (sense, circle, bump, rush, seize) and the " +
+             "DORSAL FIN and body shadow it draws on the surface independently " +
+             "of the body's LOD, blood in the water as a thing predators smell " +
+             "and come for, the megalodon's bite across a hull, the pod " +
+             "mechanics that let enough orcas take a megalodon, and the " +
+             "feeding frenzy that makes any of it legible from a distance " +
+             "— bait balls that tighten and get driven up against the surface, " +
+             "gulls working over a slick, and scavengers on a carcass",
+      /* waterfield rides along because every file here asks the same question
+         first — is this point water, and how deep. It is also in `marina`,
+         which is fine: the loader dedupes by path, and a venue that needs a
+         basin and a pack that needs a sea should each be able to say so. */
+      needs: ["bestiary", "beasts", "blood"],
+      files: ["city/waterfield.js", "systems/predator.js", "city/wildlife_shark.js",
+        "city/marine_predation.js", "city/marine_frenzy.js"],
+      publishes: ["predatorHunt", "predatorKit", "predatorSeize", "predatorStagger",
+        "predatorDisengage", "sharkBrain", "sharkSurfaceRead",
+        "marineRelation", "marinePodNeeded", "marinePodRole", "marinePodRam",
+        "marinePodRoll", "marineHurt", "marineBleed",
+        "marineFrenzy", "marineFrenzyAbsorb", "marineFrenzyAudit"],
+    },
+
     // ---- flight and weapons -------------------------------------------------
     air: {
       gives: "flight for a bomber, a fighter or a transport. Coefficients are " +

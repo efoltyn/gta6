@@ -475,6 +475,16 @@ const SWIM_PUNCH = Math.max(0, Math.min(1, parseFloat(Q.get("swimpunch") || "0.2
    13 points, sticks, joint limits, a ground clamp — writing back onto the same
    rig meshes, so the wounds and the dropped rifle ride along for free. */
 const NEED = ["caps", "people", "ragdoll", "fx", "damage", "sound", "batch", "bestiary", "beasts"];
+// ?marine=0 refuses the marine pack even on OPEN WATER (the revert). Its
+// absence is what shipped: models with no hunt, no fin, no blood, no prey.
+const MARINE_Q = Q.get("marine");
+// Is this roster entry a sea animal? Asked of the LIVE bestiary rather than a
+// name list, so a species added tomorrow pulls the pack without an edit here.
+function isWaterSpecies(u) {
+  if (!u || u === "men") return false;
+  const sp = CBZ.WILDLIFE_SPECIES && CBZ.WILDLIFE_SPECIES[u];
+  return !!(sp && (sp.aquatic || sp.biome === "water"));
+}
 const ARMOURY = [
   "weapons/weapon-data.js",
   "weapons/weapon-scale.js",   // real-dimension display sizing (math, not magic scalars)
@@ -855,6 +865,23 @@ CBZ.studio.need(NEED).then(function () {
     // default when gunfx already draws every impact. ?blood=0 refuses it even
     // for an animal army, which is the revert.
     if (BLOOD_Q !== "0" && (HAS_BEASTS || BLOOD_Q === "1")) p.push("blood");
+    /* AND THE SEA RIDES WITH THE SEA, for exactly the reason blood rides with
+       the animals — and this one was a real hole, not a tidy-up.
+
+       OPEN WATER and the marine roster shipped with the new models and NONE of
+       the systems that make them animals: no hunt, so a great white swam in a
+       straight line forever; no dorsal cutting the surface, which is the whole
+       above-water read; no blood in the water; no megalodon bite across a
+       hull; no bait ball to attack. Every one of those lives in a file that
+       was in no studio pack at all, so nothing errored and the pack list gave
+       no hint. The `marine` pack is where they live now.
+
+       Pulled when the venue is water OR either side is a sea animal, so a
+       battle of riflemen in a city costs precisely what it always did — the
+       same bargain `blood` strikes, measured by tools/battle-check.mjs.
+       ?marine=0 refuses it, which is the revert. */
+    const wetRoster = isWaterSpecies(SET.redU) || isWaterSpecies(SET.blueU);
+    if (MARINE_Q !== "0" && (MAPS[SET.map].ocean || wetRoster)) p.push("marine");
     return p;
   }
   // buying air is a decision that costs four packs; warm them on the change,
