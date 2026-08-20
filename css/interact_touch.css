@@ -1,79 +1,64 @@
 /* ============================================================
-   interact_touch.css — the prison interaction card on a TABLET
+   interact_touch.css — the prison interaction surface on TOUCH
    (systems/interact.js, flags PRISON_INTERACT_TOUCH /
    PRISON_INTERACT_SUBTITLE). Linked AFTER mobile.css.
 
-   OWNER correction: on iPad all interaction buttons form a VERTICAL
-   rail beginning beside Reload, with the full option text on the LEFT
-   of each button. The earlier horizontal row beside Eye remains only
-   as the compact phone fallback. Plus the
-   standing complaint this belongs to: "many things on iPad where a
-   pop will say press g or shift DUH i can't do that... like turning
-   tips off is a key I can't press."
+   OWNER, 2026-08-20: "the prison game buttons suck on iPhone but the
+   nat disaster buttons are PERFECT — switch the style."
+
+   They were right, and the repo's own before/after presets already said
+   so in writing: interaction-disaster.mjs calls #survVerbs "the best-
+   looking interaction surface in the repo", while interaction-prison.mjs
+   could only claim the TABLET rail was well-styled. The phone got four
+   58px squares with 9-pixel type, two-line word-clamped labels
+   ("Romanc/e"), plus a second row of differently-shaped overflow pills —
+   three button grammars on one screen, none of them thumb-sized.
+
+   So the phone now renders THE SURVIVAL DOCK, not a lookalike of it:
+   .svbtn is defined ONCE, here, and both surfaces wear it. (It used to
+   be a <style> string injected at runtime by systems/survival_interact.js,
+   which is why nothing in css/ could reuse it. That block is gone; the
+   rules moved here unchanged.)
 
    Three surfaces, and nothing here re-implements a control the touch
    layer already owns:
+     .svbtn     one 48px cyan-glass capsule. On a phone the prison verbs
+                stack in it beside the right thumb (#pinteract), exactly
+                where survival puts Grab/Punch/Shove (#survVerbs).
      #pverbs / #poptions
-               one explained vertical rail on iPad; compact primary
-               buttons and overflow pills on phones
+                display:contents on a phone — the split between "core
+                four" and "overflow" is a KEYBOARD fact (I J K L) and a
+                thumb should never see a seam because of it. On iPad
+                they become the explained vertical rail below.
      #pinteractWho / .pi-subtitle
-               the actor's name, read and one teaching line, and the
-               spoken result — both in hud.css's .world-subtitle
-               grammar (Fredoka 700 white, black stroke, NO box)
+                the actor's name, read and one teaching line, and the
+                spoken result — both in hud.css's .world-subtitle
+                grammar (Fredoka 700 white, black stroke, NO box)
 
    --------------------------------------------------------------------
-   WHERE THE ROW SITS — derived from mobile.css, not guessed.
+   WHERE THE DOCK SITS — copied from the thing being copied.
 
-   mobile.css lays #tbtns out as:
-       right:  calc(16px + safe-area-inset-right)
-       bottom: calc(22px + safe-area-inset-bottom)
-       display:flex; flex-direction:column-reverse; align-items:center; gap:12px
-
-   column-reverse puts the FIRST child at the bottom, so the flow stack
-   measured up from the cluster's own bottom edge is:
-
-       #tfire   .tbtn.tbig  84px ->    0 ..  84
-       (gap 12)
-       #tjump   .tbtn.tjump 72px ->   96 .. 168
-       (gap 12)
-       #tview   .tbtn.tsm   52px ->  180 .. 232   <- THE EYE ICON
-
-   #tswap / #treload / #thoming come AFTER #tview in that stack and are
-   the only ones the visibility pass hides, so #tview's slot is a
-   CONSTANT — armed or not, it never moves. #taim and #tscope leave the
-   flow entirely under .tslide (position:absolute), so they do not move
-   it either, and they only ever occupy the 38..154 band, well below it.
-
-       eye centre   = 22 + 180 + 26 = 228px above the safe-area floor
-       cluster width= the widest FLOW child = 84px (#tfire)
-       cluster left = 16 + 84 = 100px in from the right edge
-
-   So the verb row's right offset is 100 + one cluster gap (12) = 112px,
-   and its bottom is 228 - half a verb button, which centres the row on
-   the eye by construction. Change --pv-size and it stays centred.
-   (The brief's estimate of 96-100px assumed a 64px cluster; the widest
-   child is the 84px FIRE button, so 100px is the cluster's LEFT EDGE,
-   not the gap. Measured, not assumed.)
+   survival_interact.js seats #survVerbs at right:112px / bottom:34px:
+   mobile.css lays #tbtns out at right:16 + safe-area with an 84px FIRE
+   button as its widest flow child, so the cluster's left edge is 100px
+   in and 112 is that plus one 12px gap. Bottom 34 puts the first pill
+   level with the thumb rather than a third of the way up the screen,
+   which is where the old eye-button derivation had parked the prison
+   row. Same anchor, same numbers, one set of variables — if the cluster
+   ever moves, both docks move together.
 ============================================================ */
 
 :root{
-  /* verb-button geometry */
-  --pv-size: 64px;
-  --pv-gap: 10px;
-  /* #tbtns geometry, mirrored from mobile.css (see the derivation above) */
-  --pi-cluster-right: calc(16px + env(safe-area-inset-right, 0px));
-  --pi-cluster-w: 84px;
-  --pi-cluster-bottom: calc(22px + env(safe-area-inset-bottom, 0px));
-  --pi-eye-offset: 180px;   /* #tview's slot above the cluster floor */
-  --pi-eye-size: 52px;
-  /* the resulting anchor for the whole interaction block */
-  --pi-right: calc(var(--pi-cluster-right) + var(--pi-cluster-w) + 12px);
-  --pi-bottom: calc(var(--pi-cluster-bottom) + var(--pi-eye-offset)
-                    + (var(--pi-eye-size) - var(--pv-size)) / 2);
-  /* how much of the left edge belongs to the joystick and must stay clear:
-     mobile.css parks #tstick.tfixed at left:88px with a 168px disc, so the
-     stick ends 256px in. 272 = that plus a 16px margin. */
-  --pi-left-guard: 272px;
+  /* the dock, shared by #survVerbs and the phone #pinteract */
+  --sv-h: 48px;
+  --sv-gap: 10px;
+  --sv-right: calc(112px + env(safe-area-inset-right, 0px));
+  --sv-bottom: calc(34px + env(safe-area-inset-bottom, 0px));
+  /* how tall the prison stack may grow before it spills into a second
+     column to the LEFT. A prison context can offer seven verbs where
+     survival offers three, and a landscape phone is 390px tall. The
+     reserve is the name plate plus a top margin. */
+  --pi-stack-max: calc(100vh - var(--sv-bottom) - 128px);
 
   /* ---- the spoken line, mirroring hud.css's .world-subtitle band ------- */
   --pi-sub-line: clamp(21px, min(2.45vw, 4.2vh), 36px);
@@ -82,45 +67,94 @@
 @media (max-width:900px),(max-height:560px){
   :root{ --pi-sub-floor: calc(env(safe-area-inset-bottom, 0px) + 186px); }
 }
-/* ---- THE MIRROR HAS TO FOLLOW THE THING IT MIRRORS ------------------------
-   The derivation above is exact for the cluster mobile.css lays out on an iPad
-   — 84px FIRE, one column, #tview parked at a constant 180px. On a LANDSCAPE
-   PHONE that cluster is now a different object: mobile.css shrinks it (FIRE 70)
-   and lets it WRAP into a second column, because one column of full-size
-   roundels is taller than the screen and RELOAD was being drawn off the top
-   edge. So these constants have to change with it or this block anchors to a
-   cluster that is not there.
 
-   And on exactly these screens nothing corrects the mistake at runtime:
-   touch.js's syncInteractionDock() re-measures the real rects, but it is gated
-   on `innerWidth >= 700 && innerHeight >= 550`, so on a phone in landscape
-   (h ≈ 390) it never runs and THIS is the only geometry there is.
+/* ============================================================
+   1. THE CAPSULE — one button grammar for every touch verb
 
-     cluster width = col1 (FIRE 70) + gap 9 + col2 (a .tsm pill 46) = 125px
-     vertical      = the wrapped column's own mid-height, ~124px up from the
-                     cluster floor, since #tview is no longer a fixed slot
+   Moved verbatim out of systems/survival_interact.js's injected
+   stylesheet (cyan rim, deep glass, blur, 48px, Fredoka 600/16). The
+   only additions are the ones a shared class needs: it is a flex box so
+   a label can carry a price chip, and it declares the tap hygiene the
+   rest of this sheet already declares.
+============================================================ */
+.svbtn{
+  pointer-events: auto;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-width: 104px; height: var(--sv-h); padding: 0 18px;
+  border-radius: calc(var(--sv-h) / 2);
+  border: 1.5px solid rgba(127,231,255,.5);
+  background: rgba(10,20,32,.68); color: #eaf4ff;
+  font-family: Fredoka, system-ui, sans-serif;
+  font-weight: 600; font-size: 16px; letter-spacing: .6px; text-align: center;
+  -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
+  touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+  cursor: pointer;
+}
+.svbtn:active{ background: rgba(127,231,255,.28); }
+/* the prison's label + status chip inside that capsule. The chip is a
+   price or a meter word ("25", "armed"); the authored sentence stays on
+   the button as its aria-label, read out rather than printed. */
+.svbtn .pi-lab{
+  font: inherit; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.svbtn .pi-sub{
+  flex: 0 0 auto;
+  font: 700 12px/1 Fredoka, system-ui, sans-serif; letter-spacing: .3px;
+  color: #ffd451; opacity: .9; white-space: nowrap;
+}
+/* the "[H] Tips" footer — neutral rim so it never competes with a verb */
+.svbtn.po-tips{
+  border-color: rgba(255,255,255,.28); background: rgba(22,28,36,.78);
+  color: #c8d2de; opacity: .88; font-size: 13px; letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.svbtn.po-tips.on{ opacity: 1; }
+.svbtn.po-tips .pi-sub{ color: #8d9aa8; }
+.svbtn.po-tips.on .pi-sub{ color: #7de7ff; }
 
-   Height-only query: a phone in PORTRAIT keeps the tall single column and must
-   keep the original numbers with it. */
-@media (max-height: 560px){
-  :root{
-    --pi-cluster-w: 125px;
-    --pi-eye-offset: 124px;
-    --pi-eye-size: 46px;
-  }
+/* ============================================================
+   2. THE SURVIVAL DOCK — systems/survival_interact.js's own element
+
+   Positioning lives here now too, so the file that owns the verbs owns
+   only the verbs.
+============================================================ */
+#survVerbs{
+  position: fixed;
+  right: var(--sv-right);
+  bottom: var(--sv-bottom);
+  z-index: 23;
+  display: none; flex-direction: column-reverse; gap: var(--sv-gap);
+  pointer-events: none;
+}
+#survVerbs.show{ display: flex; }
+/* ON FOOT the dock is seated left of #tbtns, the on-foot icon cluster.
+   IN THE WATER that corner belongs to somebody else: touch_vehicle.js
+   hides #tbtns (body.tveh-on) and puts DIVE/RISE there instead, and those
+   are .tv-big pills — 128px wide off a right:14 edge, so they reach to
+   142 and the dock's own 112 would have landed on top of RISE. Same
+   grammar, one seat inboard, and lifted clear of the HEALTH/STAMINA bars
+   that run along the bottom centre in this mode. */
+#survVerbs.swim{
+  right: calc(156px + env(safe-area-inset-right, 0px));
+  bottom: calc(96px + env(safe-area-inset-bottom, 0px));
 }
 
 /* ============================================================
-   1. THE BLOCK — name/read/tip stacked over the button row
+   3. THE PRISON BLOCK — the same dock, with a name plate over it
 ============================================================ */
 #pinteract{
   position: fixed;
-  right: var(--pi-right);
-  bottom: var(--pi-bottom);
-  max-width: calc(100vw - var(--pi-right) - var(--pi-left-guard));
+  right: var(--sv-right);
+  bottom: var(--sv-bottom);
+  /* a phone has no left guard to give: touch.js tests inUI() BEFORE the
+     stick catch zone, so a pill that passes over the joystick's 35%
+     ring can never be read as a movement grab. Same trade mobile.css
+     already documents for the subtitle band. */
+  max-width: calc(100vw - var(--sv-right) - 12px);
   z-index: 26;                       /* over #touch (22) / #tveh (23),
                                         under #invScreen (29) and every modal */
-  display: flex; flex-direction: column; align-items: flex-end; gap: 7px;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
   /* the container never eats a touch — only its buttons do, so a finger that
      lands in a gap still reaches the world / the look-drag underneath. */
   pointer-events: none;
@@ -130,10 +164,21 @@
 #pinteract.show{ opacity: 1; transform: translateY(0); }
 #pinteract.show button{ pointer-events: auto; }
 
+/* ONE STACK, not a row of squares plus a row of pills. column-reverse
+   puts the first verb nearest the thumb; wrap-reverse spills a long
+   context into a second column to the LEFT, away from the thumb, which
+   is the only direction there is room on a landscape phone. */
 #pinteract .pi-row{
-  display: flex; flex-direction: row-reverse; align-items: flex-end;
-  gap: 12px; max-width: 100%;
+  display: flex;
+  flex-direction: column-reverse; flex-wrap: wrap-reverse;
+  align-content: flex-start;
+  gap: var(--sv-gap);
+  max-height: var(--pi-stack-max);
+  max-width: 100%;
 }
+/* the core-four / overflow split is a KEYBOARD fact (I J K L). A thumb
+   has no keys, so it must not see the seam. */
+#pverbs, #poptions{ display: contents; }
 
 /* ---- the quiet identity line (gang-city dialogue treatment, no box) ---- */
 #pinteractWho{
@@ -157,100 +202,10 @@
 #pinteractWho .piw-note{ font-size: 12px; font-weight: 600; letter-spacing: .2px; color: #ffd451; }
 #pinteractWho .piw-tip{ font-size: 11.5px; font-weight: 600; color: #d7e4f3; opacity: .92; }
 
-/* ============================================================
-   2. THE FOUR VERB BUTTONS — same material as .tbtn, squared off
-
-   .tbtn's language (2px rgba(255,255,255,.32) rim, rgba(20,30,46,.5)
-   fill, blur, a 4px hard drop) is reused verbatim so the row reads as
-   part of the same control surface. The SHAPE is the one deliberate
-   difference: the movement/combat cluster is circles, interaction is
-   squares — that is how a thumb tells "shoot" from "talk" without
-   reading. Words, never key glyphs (touch.js's verb-pill doctrine).
-============================================================ */
-#pverbs{ display: flex; flex-direction: row; gap: var(--pv-gap); flex: 0 0 auto; }
-#pverbs .pv-btn{
-  width: var(--pv-size); height: var(--pv-size); padding: 4px 3px;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
-  border-radius: 16px;
-  border: 2px solid rgba(255,255,255,.32);
-  background: rgba(20,30,46,.5); color: #fff;
-  -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
-  box-shadow: 0 4px 0 rgba(0,0,0,.3);
-  transition: transform .06s, background .1s;
-  touch-action: manipulation; -webkit-tap-highlight-color: transparent;
-  cursor: pointer; overflow: hidden;
-}
-#pverbs .pv-btn:active{
-  transform: translateY(3px); box-shadow: 0 1px 0 rgba(0,0,0,.3);
-  background: rgba(255,122,26,.62);
-}
-#pverbs .pv-btn .pi-lab{
-  font: 700 11.5px/1.05 Fredoka, "Arial Rounded MT Bold", "Trebuchet MS", system-ui, sans-serif;
-  letter-spacing: .2px; text-align: center; color: #fff;
-  text-shadow: 0 1px 2px rgba(0,0,0,.75);
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-  overflow: hidden; word-break: break-word;
-}
-#pverbs .pv-btn .pi-sub{
-  font: 700 9.5px/1 Fredoka, system-ui, sans-serif; letter-spacing: .3px;
-  color: #ffd451; opacity: .95; max-width: 100%;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-
-/* ============================================================
-   3. THE OPTION PILLS — everything else the context offers
-
-   Deliberately the same read as mobile.css's .tpill (the gang-city
-   verb pill: cyan rim, deep navy fill, worded label) WITHOUT reusing
-   that class, so a prison option and a city verb feel like the same
-   kind of thing while staying independently revertible.
-   row-reverse + wrap-reverse = pack right-to-left, spill UPWARD, so
-   the pills grow away from the thumb and never toward the joystick.
-============================================================ */
-#poptions{
-  display: flex; flex-direction: row-reverse; flex-wrap: wrap-reverse;
-  justify-content: flex-start; align-content: flex-start;
-  gap: 8px; flex: 0 1 auto; min-width: 0;
-}
-#poptions .po-pill{
-  display: inline-flex; align-items: center; gap: 7px;
-  min-height: 42px; padding: 8px 15px;
-  border-radius: 22px;
-  border: 2px solid rgba(125,231,255,.5);
-  background: rgba(13,26,40,.85); color: #eaf6ff;
-  -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
-  box-shadow: 0 4px 0 rgba(0,0,0,.35);
-  transition: transform .06s, background .1s;
-  touch-action: manipulation; -webkit-tap-highlight-color: transparent;
-  cursor: pointer; white-space: nowrap;
-}
-#poptions .po-pill:active{
-  transform: translateY(3px); box-shadow: 0 1px 0 rgba(0,0,0,.35);
-  background: rgba(35,90,130,.92);
-}
-#poptions .po-pill .pi-lab{
-  font: 700 13.5px/1.15 Fredoka, "Arial Rounded MT Bold", "Trebuchet MS", system-ui, sans-serif;
-  letter-spacing: .4px;
-}
-#poptions .po-pill .pi-sub{
-  font: 700 11px/1 Fredoka, system-ui, sans-serif; letter-spacing: .3px; color: #ffd451;
-}
-/* the "[H] Tips: ON/OFF" footer, as a thing a thumb can actually reach.
-   Neutral rim so it never competes with a real verb for attention. */
-#poptions .po-tips{
-  min-height: 38px; padding: 6px 13px;
-  border-color: rgba(255,255,255,.28); background: rgba(22,28,36,.78);
-  color: #c8d2de; opacity: .88;
-}
-#poptions .po-tips .pi-lab{ font-size: 12px; letter-spacing: 1px; text-transform: uppercase; }
-#poptions .po-tips .pi-sub{ color: #8d9aa8; }
-#poptions .po-tips.on{ opacity: 1; }
-#poptions .po-tips.on .pi-sub{ color: #7de7ff; }
-
 /* the 0.35 s post-action cooldown, made visible: interact.js refuses the
    input anyway, so this only stops the row from LOOKING live while it is not.
    Declared after .show so the pointer-events hand-back is unambiguous. */
-#pinteract.cool #pverbs, #pinteract.cool #poptions{ opacity: .45; }
+#pinteract.cool .pi-row{ opacity: .45; }
 #pinteract.cool button{ pointer-events: none; }
 
 /* ============================================================
@@ -320,50 +275,7 @@ body.sim-view .pi-subtitle,
 body.tveh-on #pinteract{ display: none !important; }
 
 /* ============================================================
-   6. SMALL SCREENS — a phone has no 286px of free right edge
-
-   Four 64px squares plus their gaps is 286px, which does not fit beside a
-   112px offset on a 390px handset. The buttons shrink instead of wrapping
-   (a wrapped "row of four" is no longer a row of four), and the joystick
-   guard is released: a pill may pass over the stick's 35%-opacity ring,
-   which is safe because touch.js tests inUI() BEFORE the stick catch zone,
-   so a tap on one of these buttons can never be read as a movement grab.
-   Same trade mobile.css already documents for the subtitle band.
-============================================================ */
-@media (max-width: 820px){
-  :root{ --pv-size: 54px; --pv-gap: 8px; --pi-left-guard: 96px; }
-  #pverbs .pv-btn .pi-lab{ font-size: 10px; }
-  #poptions .po-pill{ min-height: 38px; padding: 6px 12px; }
-  #poptions .po-pill .pi-lab{ font-size: 12.5px; }
-  #pinteractWho .piw-name{ font-size: 13.5px; }
-  #pinteractWho .piw-note, #pinteractWho .piw-tip{ font-size: 11px; }
-}
-@media (max-width: 520px){
-  /* 58, not 48: "Romance" at 9px is ~48px of type and a 48px button (46px of
-     inner width) broke it to "Romanc / e". Four 58s + three 6s = 250px, which
-     still clears the ~111px right cluster on a 393px handset. */
-  :root{ --pv-size: 58px; --pv-gap: 6px; --pi-left-guard: 12px; }
-  #pverbs .pv-btn{ border-radius: 13px; }
-  #pverbs .pv-btn .pi-lab{ font-size: 9px; }
-  #pverbs .pv-btn .pi-sub{ font-size: 8.5px; }
-  #poptions{ gap: 6px; }
-  #poptions .po-pill{ min-height: 34px; padding: 5px 10px; }
-  #poptions .po-pill .pi-lab{ font-size: 11.5px; }
-  /* ---- THE PILLS GET THEIR OWN LINE (phone screenshot, 2026-08-04).
-     `.pi-row` is row-reverse and #pverbs is `flex: 0 0 auto`, i.e. four
-     squares that refuse to shrink. Four 52px squares (=210px) plus one
-     overflow pill does not fit in the 269px this row actually has on a 393px
-     handset, and a row-reverse overflow spills off the LEFT EDGE: the fifth
-     verb was half off screen, unreadable and only half tappable.
-     wrap-reverse lets #poptions break onto its own line ABOVE the squares
-     (away from the thumb, the same direction the pills already spill), so a
-     context with five or six verbs stays whole. */
-  #pinteract .pi-row{ flex-wrap: wrap-reverse; justify-content: flex-start; }
-  #pinteract .pi-row > #poptions{ max-width: 100%; }
-}
-
-/* ============================================================
-   7. iPAD CORRECTION — vertical choices beside Reload
+   6. iPAD CORRECTION — vertical choices beside Reload
 
    touch.js writes --touch-interact-top/right from Reload's real live rect
    after the control visibility pass. The first action therefore begins on
@@ -393,11 +305,14 @@ body.tveh-on #pinteract{ display: none !important; }
   #pinteractWho .piw-tip{ display: none !important; }
   #pinteract .pi-row{
     display: flex;
-    flex-direction: column;
+    flex-direction: column;      /* not the phone's column-reverse: this rail
+                                    reads top-down beside Reload */
+    flex-wrap: nowrap;
     align-items: stretch;
     gap: 9px;
     width: 100%;
     max-width: none;
+    max-height: none;
   }
   #pverbs,
   #poptions{
@@ -496,12 +411,22 @@ body.tveh-on #pinteract{ display: none !important; }
    Identical reasoning to mobile.css's own .world-subtitle block: on a tablet
    the two thumb clusters are in the CORNERS, so the answer is a narrower
    centre column rather than a higher band — lifting dialogue over the
-   joystick would put it a third of the way up the screen. 120px clears the
-   #hotbar (bottom:16px, 50px tall) with room to spare, and the interaction
-   row above starts at 196px, so the two never share pixels. */
+   joystick would put it a third of the way up the screen.
+
+   THE 196px CLEARANCE THIS USED TO CLAIM IS GONE. It was true while the verb
+   row was parked level with the eye button; the row is a thumb dock now and
+   the band would have run straight through it. The clearance is measured
+   instead of asserted — see --pi-dock-h below. */
 body.touch{
   --pi-sub-line: clamp(16px, 2.35vh, 24px);
-  --pi-sub-floor: calc(120px + env(safe-area-inset-bottom, 0px));
+  /* 120 clears the #hotbar (bottom:16px, 50px tall). --pi-dock-h is the live
+     height of the whole dock — name plate and verb stack — as published by
+     interact.js after every re-render
+     (0 on iPad, where the rail is a right-edge column that never reaches the
+     centre band): on a phone the band rides above the buttons instead of
+     through them. */
+  --pi-sub-floor: max(calc(120px + env(safe-area-inset-bottom, 0px)),
+                      calc(var(--sv-bottom) + var(--pi-dock-h, 0px) + 14px));
 }
 body.touch .pi-subtitle{
   width: max(46vw, min(640px, calc(100vw - 512px)));

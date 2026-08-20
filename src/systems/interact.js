@@ -819,8 +819,8 @@
     return piRoot;
   }
 
-  // The square button and the pill carry a WORD — touch.js's doctrine is that
-  // interaction surfaces spell the verb out and never render a key. VERB[]
+  // The capsule carries a WORD — touch.js's doctrine is that interaction
+  // surfaces spell the verb out and never render a key. VERB[]
   // already owns that word; an AUTHORED campaign verb has none, so its full
   // sentence is cut at the first dash ("Take the deal — work as the warden's
   // spy" → "Take the deal") and the sentence itself lives on as the aria-label.
@@ -889,11 +889,16 @@
           (helpOn ? "TIPS ON" : "TIPS OFF") + "</button></div>";
       }
     } else {
-      for (let i = 0; i < core.length; i++) btns += optButton("pv-btn", i, a, core[i], 12);
-      for (let i = 0; i < rest.length; i++) pills += optButton("po-pill", core.length + i, a, rest[i], 18);
+      // ONE capsule for every verb — .svbtn, the survival dock's own class
+      // (owner: "the nat disaster buttons are PERFECT — switch the style").
+      // core and rest still render into their own containers because the
+      // KEYBOARD cares which four are bound to I J K L; css/interact_touch.css
+      // makes those containers display:contents so the thumb sees one stack.
+      for (let i = 0; i < core.length; i++) btns += optButton("svbtn", i, a, core[i], 12);
+      for (let i = 0; i < rest.length; i++) pills += optButton("svbtn", core.length + i, a, rest[i], 12);
       // the "[H] Tips: ON/OFF" footer, as a thing a thumb can actually reach
       if (tipsAllowed()) {
-        pills += '<button type="button" class="po-pill po-tips' + (helpOn ? " on" : "") +
+        pills += '<button type="button" class="svbtn po-tips' + (helpOn ? " on" : "") +
           '" data-pi="tips" aria-label="Teaching tips ' + (helpOn ? "on" : "off") +
           '"><span class="pi-lab">Tips</span><span class="pi-sub">' + (helpOn ? "ON" : "OFF") + "</span></button>";
       }
@@ -911,6 +916,20 @@
     piTip.style.display = tip ? "" : "none";
     piVerbs.innerHTML = btns;
     piOpts.innerHTML = pills;
+    // THE SPOKEN LINE HAS TO CLEAR THE DOCK. On a phone the verb stack now
+    // sits at the thumb (bottom 34, like survival's) and this mode's dialogue
+    // band is centred at 120 — on a 393pt screen those two share pixels. How
+    // tall the stack is depends on how many verbs this actor offers, which is
+    // only knowable after layout, so publish it and let css/interact_touch.css
+    // lift the band by it. The iPad rail is a right-edge column that never
+    // crosses the centre band, so it publishes nothing to clear.
+    // the WHOLE block, name plate included — lifting the band over the buttons
+    // alone drops it straight onto "BLOODY MARCUS · wary".
+    setDockHeight(docked ? 0 : piRoot.getBoundingClientRect().height);
+  }
+
+  function setDockHeight(px) {
+    document.documentElement.style.setProperty("--pi-dock-h", Math.round(px) + "px");
   }
 
   function showTouchUI(on) {
@@ -918,6 +937,7 @@
     if (on === piShown) return;
     piShown = on;
     if (piRoot) piRoot.classList.toggle("show", on);
+    if (!on) setDockHeight(0);        // nothing docked, nothing to lift over
   }
   // On touch the legacy card is replaced, not decorated: it stops rendering
   // rows entirely (so no [J]/[K]/[L]/[;] chip and no "[H]" footer can survive
@@ -991,7 +1011,8 @@
 
     if (touchUI()) {
       // TOUCH: on iPad every verb becomes a vertical explained row beside
-      // Reload; phones use four compact primaries plus overflow pills. NOTHING
+      // Reload; phones stack every verb in one .svbtn column at the thumb,
+      // in the survival dock's grammar (css/interact_touch.css). NOTHING
       // this context offers is thrown away. cap4 exists because there are only four keys —
       // a thumb has no fifth key, so on touch its overflow would be UNREACHABLE
       // rather than merely unlisted, which is a different (and worse) thing.
