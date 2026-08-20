@@ -116,6 +116,28 @@ async function stageCollapse(input) {
     }
   };
   const step = (n, dt) => { for (let i = 0; i < n; i++) { CBZ.hitstop = 0; CBZ.slowmo = 0; CBZ.stepSim(dt || 1 / 60); if (CBZ.player) CBZ.player.hp = 100; } };
+  /* ADVANCE BY SIMULATED SECONDS, AT A COARSE STEP.
+
+     The whole staging of one subject runs inside a SINGLE Runtime.evaluate,
+     so its total cost is bounded by stageTimeoutMs (15 min here) — and a
+     stepSim on a fully-built city that is on fire with a collapse running
+     costs well over a second under software WebGL. Pacing at 1/60 meant the
+     "impact" beat asked for 360 of them and blew the whole budget on the
+     deployed side, six beats into a run that takes a quarter of an hour to
+     reach that point.
+
+     Everything this preset waits for — the collapse front, the fire, the
+     dust — is integrated from dt, so the same simulated seconds at 1/20
+     produce the same picture for a third of the calls. Seconds are the unit
+     that matters; the step size is just what it costs to get there. */
+  const advance = (seconds, dt) => {
+    // 1/15 is the coarsest step that still resolves a collapse front cleanly
+    // (a 52-storey fall is ~8 s, so ~120 samples down its length) while
+    // keeping the CALL COUNT — which is what the stage budget actually pays
+    // for — inside what a software renderer can afford.
+    const d = dt || 1 / 15;
+    step(Math.max(1, Math.ceil(seconds / d)), d);
+  };
 
   let S = window.__collapseSeq;
   if (!S) {
@@ -236,7 +258,7 @@ async function stageCollapse(input) {
     S = window.__collapseSeq = { main, slim, overlay, t: 0 };
     window.__cbzVisualCompare = {
       render() { try { CBZ.renderer.render(CBZ.scene, CBZ.camera); } catch (_) {} },
-      advance(sec) { step(Math.max(1, Math.round(sec * 60))); S.t += sec; },
+      advance(sec) { advance(sec); S.t += sec; },
     };
   }
 
@@ -263,13 +285,13 @@ async function stageCollapse(input) {
       });
     } catch (_) {}
   };
-  if (act.hits) { for (let i = 0; i < act.hits; i++) { hit(0.09); step(14); } }
+  if (act.hits) { for (let i = 0; i < act.hits; i++) { hit(0.09); advance(0.25); } }
   if (act.untilStage) {
     // WAIT ON THE LEDGER'S OWN STAGE, not on a number of rockets.
     for (let i = 0; i < 60; i++) {
       const st = stateOf();
       if (st && st.stage >= act.untilStage) break;
-      hit(0.07); step(10);
+      hit(0.07); advance(0.2);
     }
   }
   if (act.collapse) {
@@ -299,23 +321,35 @@ async function stageCollapse(input) {
   };
   if (act.phase != null || act.phaseFrac != null) {
     if (!CBZ.collapse || !CBZ.collapse.debug) {
-      step(Math.round((act.phase === 2 ? 6 : act.phaseFrac ? 2.6 : 1.5) * 60));
+      // no engine on this build (the deployed baseline): there is no state to
+      // wait on, so advance the seconds its own collapse takes and photograph
+      // whatever it is doing at that moment. Honest, and bounded.
+      advance(act.phase === 2 ? 6 : act.phaseFrac ? 2.6 : 1.5);
     } else {
       const wantPhase = act.phase != null ? act.phase : 1;
       const wantFrac = act.phaseFrac || 0;
-      for (let i = 0; i < 1400; i++) {
+      // poll on the engine's own published state, but in real slices rather
+      // than single frames, and give up after more simulated time than the
+      // longest collapse in the game can possibly take (a 52-storey tower is
+      // ~8 s of fall plus a 1.15 s tell plus 2.4 s of settle)
+      // CAP is the longest collapse the game can produce, with margin: a
+      // 52-storey tower is a 1.15 s tell + ~8 s of fall + 2.4 s of settle.
+      // Worst case here is ~210 stepSim calls, which fits the budget; the
+      // normal case breaks out of the loop long before that.
+      const SLICE = 0.3, CAP = 14;
+      for (let t = 0; t < CAP; t += SLICE) {
         const j = liveJob();
         if (j) {
           if (wantFrac) { if (j.phase > 1 || (j.phase === 1 && j.frac >= wantFrac)) break; }
           else if (j.phase >= wantPhase) break;
-        } else if (i > 60 && wantPhase >= 2) break;
-        step(1);
+        } else if (t > 1.2 && wantPhase >= 2) break;
+        advance(SLICE);
       }
-      if (act.extra) step(Math.round(act.extra * 60));
+      if (act.extra) advance(act.extra);
     }
   }
-  if (act.settle) step(Math.round(act.settle * 60));
-  if (!act.hits && !act.untilStage && !act.collapse && !act.phase && !act.phaseFrac && !act.settle && !act.second) step(20);
+  if (act.settle) advance(act.settle);
+  if (!act.hits && !act.untilStage && !act.collapse && !act.phase && !act.phaseFrac && !act.settle && !act.second) advance(0.35);
 
   // ---- frame it ---------------------------------------------------------
   const cam = input.subject.cam || { back: 34, up: 12, look: 9 };
@@ -384,7 +418,7 @@ export default {
   viewport: { width: 1180, height: 700 },
   readyExpression: "document.getElementById('playBtn') && document.querySelector('.mode-btn[data-mode=\"city\"]')",
   urlParams: { seed: 90210 },
-  stageTimeoutMs: 600000,
+  stageTimeoutMs: 900000,
   pairNote: "Same seed · same lot chosen by the same live-world rule · same ordnance · same cameras",
   method: "The real city boots at seed 90210, the rAF clock is frozen and CBZ.stepSim becomes the only time. The subject building is CHOSEN FROM THE LIVE WORLD (tallest collapsible lot near the city centroid) rather than typed as a coordinate, and the topple subject is the most slender masonry stack on the same block. Damage is delivered through CBZ.structure.hit with an rpg row — the same path a real rocket takes — and each beat waits on the ledger's own stage or the collapse engine's own live-job and debris counts, so both builds photograph the same beat at whatever speed they run.",
   metricsNote: "debrisPieces counts the real fragments the collapse engine has in the world at the photographed frame — the old build has no such system, so its column reads zero at every beat and that zero IS the finding. woundSkins is how many buildings are wearing progressive damage dressing. drawCalls is there to prove the spectacle is not being bought with frame time.",
