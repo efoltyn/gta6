@@ -129,6 +129,27 @@ a year of daily use is a record of one. The annoyance it fixes is tiny —
 and it recurs at every iteration of every loop of every agent, which is
 what makes a tiny annoyance a large market: frequency is the multiplier.
 
+**And the history is already rotten** (owner, 2026-08-20): *"GitHub has
+become slop. Every GitHub commit I look at in my own thing makes very
+little sense to me... I can read the code, but I can't see the change."*
+The structural fact underneath: **git records what changed in the text and
+has never recorded what changed in the world.** That gap was always there;
+for twenty years two compensating mechanisms hid it — the author's memory
+and the reviewer's reading — and AI authorship killed both at once while
+multiplying the volume. What remains is what git always was: a perfect
+record of source and no record of consequence. A commit message is **the
+empty loop, fossilized** — the agent's self-report preserved as the
+official record — and this repo is the proof that better writing is not the
+fix: its commit log is unusually good prose and the owner still cannot
+reconstruct the changes from it. The textual record has hit its ceiling.
+The receipt is **version control for behavior**: not a replacement for git
+(git answers "what text changed," the receipt answers "what did that do,"
+and together they bound a change from both sides — a refactor's receipt
+being the degenerate case, before == after). The unit is the *problem*, not
+the commit: receipts per drawer, referenced from the commits they produced,
+browsable as `ba log` — a history where each entry is looked at rather than
+read, and the past keeps its own photographs.
+
 **The economics — the loop substitutes for capability** (owner, 2026-08-19):
 *"it took an amazing agent to make the before after tool. But now that the
 tool is made, I don't need the genius model every time running this loop.
@@ -467,6 +488,37 @@ consequences, each load-bearing:
    quarterly; "spawn a process in a terminal" has held for fifty years,
    and the receipt is a directory of PNGs and JSON. Nothing to keep up
    with.
+
+**The complement play, stated whole** (owner, 2026-08-20): *"I'm not
+replacing a single company. I am competing with the bullshit wrappers and
+I made glue... my product is ADDING."* The whole stack is kept and made
+more valuable: GitHub keeps the text record and gets receipts attached to
+its PRs and commits, which makes its histories legible again; the vendor
+CLIs keep the work and get their output made *trustable*, which is what
+lets a person dare to run twenty of them — the cabinet grows the vendors'
+subscription usage rather than threatening it; the terminal keeps the
+venue. The one layer displaced is the API wrapper, and the displacement
+argument is precise — the owner's "full recursiveness": a wrapper consumes
+the **model** through the API and must rebuild the harness itself,
+competing with the vendor's own harness team from behind, forever. The
+cabinet hosts the **finished agent**, so it inherits model × harness ×
+ecosystem improvements the day they ship. And the recursion runs twice: the
+vendor stack compounds into every drawer for free, and the agents
+themselves sharpen the instrument (the standing "improve the tool for this
+use case" clause) — a loop no wrapper's customers can run on the wrapper.
+
+Two cautions that make this durable rather than cute. **Glue alone is a
+commodity** — this glue is defensible because one of the glued parts is
+proprietary: the receipt format and its honesty machinery are a *standard*
+being carried, not an arrangement being rented. And the deep reason the
+receipt layer should stay independent of the vendors, upgrading
+cross-vendor from convenience to requirement: **the acceptance artifact
+must not be issued by the party being judged.** A vendor's receipt about
+its own agent is corporate testimony — the empty loop at company scale.
+Verification layers historically separate from production layers to stay
+credible (assay offices, referees, notaries), and that is the lane this
+product occupies: when intelligence is commoditized, the scarce complement
+is verification. When the mining is free, sell the assay office.
 
 **What it is not: a terminal emulator.** tmux already multiplexes terminals
 perfectly and every CLI agent runs happily in a pane; rebuilding that is
