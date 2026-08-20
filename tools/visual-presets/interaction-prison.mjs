@@ -4,17 +4,26 @@
   Two beats: standing at an inmate (insult/befriend/trade/steal + whatever the
   ledger adds) and standing at a guard (bribe/payoff register). The prison is
   the repo's best interaction engine (approach kinds, every exit writes state)
-  and its TOUCH surface (#pinteract: worded buttons, tablet rail) is the
-  well-styled variant — while desktop gets the plain #interact key-row list.
-  The matrix makes that split visible frame by frame.
+  and #pinteract dresses it three different ways depending on the screen, which
+  is what this matrix is for.
+
+  2026-08-20: the PHONE half of that split is gone. It used to be four 58px
+  squares plus a row of overflow pills — the thing this preset was built to
+  photograph, and the thing the owner finally called out ("the prison game
+  buttons suck on iPhone but the nat disaster buttons are PERFECT"). A phone
+  now renders the same .svbtn capsule interaction-disaster.mjs photographs,
+  from one shared definition in css/interact_touch.css. What is left to watch
+  here is the TABLET rail, which is still its own animal.
 
   HUD stays visible — the HUD is the subject. Camera is the player's own.
 
-  Staging facts (static read 2026-08-15):
+  Staging facts (static read 2026-08-20):
   - actors: CBZ.npcs (inmates + warden, pos on n.group.position), CBZ.guards
   - desktop card: #interact + .iopt rows (systems/interact.js render())
-  - touch card: #pinteract with #pverbs / #poptions (.pi-action / .tpill),
-    built lazily by buildTouchUI() — only exists under body.touch
+  - touch card: #pinteract with #pverbs / #poptions, built lazily by
+    buildTouchUI() — only exists under body.touch. Phone: .svbtn capsules in
+    one column (the containers are display:contents). Tablet: .pi-choice rows
+    with a .pi-action button, gated on CBZ.touchInteractionDocked() (700x550)
 */
 
 const FRAMES = [
@@ -59,6 +68,10 @@ export default {
     panelVisible: { label: "Options surface actually visible", unit: "1=yes", better: "higher" },
     verbCount: { label: "Options on screen", unit: "rows", better: "higher" },
     minTapPx: { label: "Smallest option target height", unit: "px", better: "higher" },
+    // HEIGHT ALONE LIES ABOUT A PILL. A 58x58 square scores better than a
+    // 48x127 capsule on that row and is a third of the thumb target. Report
+    // the area too, so a shape change cannot read as a regression it is not.
+    minTapArea: { label: "Smallest option target area", unit: "px²", better: "higher" },
     optionChars: { label: "Text the player must read in the options", unit: "chars", better: "lower" },
   },
   metricsNote:
@@ -94,6 +107,12 @@ export default {
         return CBZ.game.state === "playing";
       }, 180000, 300);
       if (!playing) return { ok: false, err: "never reached playing" };
+      // PUT THE LOADER AWAY. systems/bootprogress.js's card is a full-screen
+      // flex panel and it dismisses itself on a timer whose settle loop is
+      // rAF-driven — and the very next line freezes rAF. Every shot this
+      // preset took came back as "BUILDING THE WORLD 38%" over a live HUD:
+      // the measurements were real, the pictures were of the loading screen.
+      try { if (CBZ.bootMeter && CBZ.bootMeter.hide) CBZ.bootMeter.hide(); } catch (_) {}
       try { if (CBZ.setQualityLevel) CBZ.setQualityLevel(3); } catch (_) {}
       window.requestAnimationFrame = function () { return 0; };
       await wait(600);
@@ -155,6 +174,11 @@ export default {
     const panel = touchRows.length ? document.getElementById("pinteract") : document.getElementById("interact");
     const minTapPx = rows.length
       ? Math.min.apply(null, rows.map((r) => r.getBoundingClientRect().height)) : 0;
+    const minTapArea = rows.length
+      ? Math.round(Math.min.apply(null, rows.map((r) => {
+          const b = r.getBoundingClientRect();
+          return b.width * b.height;
+        }))) : 0;
     const optionChars = rows.reduce((s, r) => s + (r.innerText || "").replace(/\s+/g, "").length, 0);
 
     return {
@@ -168,6 +192,7 @@ export default {
         panelVisible: vis(panel) ? 1 : 0,
         verbCount: rows.length,
         minTapPx,
+        minTapArea,
         optionChars,
       },
     };
