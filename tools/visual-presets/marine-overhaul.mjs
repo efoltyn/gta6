@@ -259,6 +259,13 @@ export default {
   subtitle: "Owner photo reference, section by section: the gape, the head-on dome, the breach, the drone frame.",
   subjects,
   stage: stageMarine,
+  /* The gate the runner waits on before it stages anything. Deliberately the
+     minimum this preset actually needs — the species registry and a couple of
+     great whites' worth of catalogue — rather than a list of every id in
+     ROSTER. A roster entry that has not registered yet fails its own subject
+     with a readable `missing`, which is information; making it block the whole
+     run would turn one absent species into an empty report. */
+  readyExpression: "window.THREE && window.CBZ && CBZ.WILDLIFE_SPECIES && CBZ.WILDLIFE_SPECIES.great_white_shark && CBZ.WILDLIFE_SPECIES.megalodon && CBZ.WILDLIFE_SPECIES.orca",
   frames: [{ id: "custom", label: "custom", width: 1400, height: 860, deviceScaleFactor: 1 }],
   stageTimeoutMs: 90000,
   metrics: {
