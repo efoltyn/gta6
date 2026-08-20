@@ -67,6 +67,29 @@
 @media (max-width:900px),(max-height:560px){
   :root{ --pi-sub-floor: calc(env(safe-area-inset-bottom, 0px) + 186px); }
 }
+/* ---- THE FLOOR IS NOT EMPTY IN PORTRAIT ----------------------------------
+   34px seats the first pill level with the thumb, which is right, and was
+   measured against a bottom edge that had nothing else on it. Both games put
+   a wide readout at bottom CENTRE and in portrait it reaches far enough right
+   to run straight through that pill (393x852, measured):
+
+     survival  #survBars   x 55..338  y 786..828   (hud.css, bottom:24 + 42 tall)
+     prison    #hotbar     x 77..316  y 793..836   (inventory.css, bottom:16 + 50 cells)
+     both      first pill  x 177..281 y 770..818
+
+   — a 104x32 overlap in survival (the health bar is drawn across Grab) and a
+   120x25 one in prison as soon as the player is carrying anything. Landscape
+   is clear on both: the same furniture is centred in a screen twice as wide,
+   so it ends at x 606 / x 563 with the dock starting at 636. iPad portrait
+   collides too (a 24px sliver), which is why this keys on ORIENTATION and not
+   on a phone width.
+
+   66px is the tallest either readout reaches; 78 clears it with a 12px gap and
+   still leaves the dock inside thumb reach, one seat above the fire button
+   instead of beside it. */
+@media (orientation: portrait){
+  :root{ --sv-bottom: calc(78px + env(safe-area-inset-bottom, 0px)); }
+}
 
 /* ============================================================
    1. THE CAPSULE — one button grammar for every touch verb
