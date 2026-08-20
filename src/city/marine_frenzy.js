@@ -205,9 +205,16 @@
     s = freeSite();
     if (!s) return null;
     s.live = true; s.kind = "bait"; s.ref = ref || null;
-    s.x = x; s.z = z; s.y = seaY(x, z) - (ref && ref.swimDepth > 0 ? ref.swimDepth : 2.4);
-    s.depth = seaY(x, z) - s.y;
     s.r = s.r0 = r > 0 ? r : BALL_R0;
+    /* THE BALL'S DEPTH IS ITS OWN RADIUS, not the anchor fish's swim depth.
+       A sardine swims 0.55 m down; a five-metre ball centred there would have
+       half its bodies in the air. So it rests fully submerged and RISES under
+       pressure until its top grazes the surface — which is the correct read,
+       because a pressed bait ball genuinely does break the surface and that
+       is what makes the boil. */
+    s.x = x; s.z = z;
+    s.depth = s.r * 1.25 + 1;
+    s.y = seaY(x, z) - s.depth;
     s.fish0 = clamp(fish > 0 ? fish : 90, SCHOOL_MIN, 130);
     s.food = s.food0 = Math.max(8, Math.round(s.fish0 / FISH_PER_BITE));
     s.feeders = 0; s.press = 0; s.t = 0; s.collapse = -1; s.boilT = 0; s.eatT = 0; s.ttl = -1;
@@ -630,7 +637,7 @@
         const want = s.r0 * (1 - BALL_TIGHT * s.press);
         s.r += (want - s.r) * Math.min(1, dt * 1.2);
         const sy = seaY(s.x, s.z);
-        const wantY = sy - s.depth * (1 - s.press * 0.82) - 0.5;
+        const wantY = sy - (s.r * (1 - 0.42 * s.press) + 0.7);
         s.y += (wantY - s.y) * Math.min(1, dt * 0.8);
       }
 

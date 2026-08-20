@@ -568,7 +568,12 @@
         span: 1.34, chordRoot: 0.92, chordTip: 0.05, sweep: 0.60, concavity: 0.30,
         rearTipH: 0.10, rearTipBack: 0.24, apexRound: 0.05, thick: 0.12,
         spanSteps: 5, chordSteps: 4,
-        slot: 0, underSlot: s2 > 0 ? 1 : 1,
+        // WHICH FACE IS THE UNDERSIDE is a basis fact, not a name: spanDir is
+        // ±z, so w = chord x span puts the blade's local +z on world -s2·y.
+        // The lobe on the +z side therefore has its DOWN face in `slot` and the
+        // -z lobe has it in `underSlot`. Getting this backwards paints the
+        // flukes white side up, which is the one mistake nobody would miss.
+        slot: s2 > 0 ? 1 : 0, underSlot: s2 > 0 ? 0 : 1,
         spanDir: [0, 0, s2], chordDir: [1, 0, 0], origin: [0, 0, s2 * 0.085],
       };
     }), "orcaFluke|v1");
@@ -1240,7 +1245,7 @@
     s.podN = 1; s.matriarch = null; s.mother = null; s.slot = 0;
     if (!list) return;
     const p = a.group.position;
-    let best = null, bestK = -1, slot = 0, momD2 = 1e18;
+    let n = 0, best = null, bestK = -1, bestR = -1, slot = 0, momD2 = 1e18;
     const myK = scaleOf(a), myRank = h01(homeOf(a).x, homeOf(a).z, 0x0C71);
     for (let i = 0; i < list.length; i++) {
       const o = list[i];
@@ -1249,29 +1254,33 @@
       const ddx = q.x - p.x, ddz = q.z - p.z;
       const d2 = ddx * ddx + ddz * ddz;
       if (d2 > POD_R * POD_R) continue;
-      s.podN++;
+      n++;                                       // counts me too — I am in the pod
+      if (o === a) continue;
       const k = scaleOf(o);
-      // stable election: bigger wins, then the spawn hash, then never me
       const rank = h01(homeOf(o).x, homeOf(o).z, 0x0C71);
-      if (o !== a && (k > bestK + 1e-6 || (Math.abs(k - bestK) <= 1e-6 && rank > (best ? h01(homeOf(best).x, homeOf(best).z, 0x0C71) : -1)))) {
-        best = o; bestK = k;
+      // STABLE ELECTION, and it has to be stable: every member runs this sweep
+      // independently and they must all elect the SAME matriarch without ever
+      // talking to each other. Bigger wins; the spawn hash breaks the tie, and
+      // it is a property of the world rather than of the loop order.
+      if (k > bestK + 1e-6 || (Math.abs(k - bestK) <= 1e-6 && rank > bestR)) {
+        best = o; bestK = k; bestR = rank;
       }
-      if (o !== a && (k < myK || rank < myRank)) slot++;
+      // my station index: how many of them outrank me
+      if (k > myK + 1e-6 || (Math.abs(k - myK) <= 1e-6 && rank > myRank)) slot++;
       // A CALF SWIMS IN ITS MOTHER'S SLIPSTREAM. Its mother is the nearest
-      // adult cow — not the matriarch, not the bull.
-      if (s.calf && o !== a) {
-        const os = ensure(o);
-        if (os && os.cow && d2 < momD2) { momD2 = d2; s.mother = o; }
+      // adult cow — not the matriarch, and never the bull.
+      if (s.calf) {
+        const os = o._orca;
+        // if she has not ticked yet, size answers the same question: an adult
+        // that is not a bull. No ensure() call, so this sweep cannot recurse.
+        const isCow = os ? os.cow : (k >= 0.80 && h01(homeOf(o).x, homeOf(o).z, 0x0C4A) <= 0.74);
+        if (isCow && d2 < momD2) { momD2 = d2; s.mother = o; }
       }
     }
-    s.podN--;                                  // the sweep counted me
-    s.podN = Math.max(1, s.podN + 1);
-    // I am the matriarch if nobody in range beats me
-    if (best && (bestK > myK + 1e-6 || (Math.abs(bestK - myK) <= 1e-6 && h01(homeOf(best).x, homeOf(best).z, 0x0C71) > myRank))) {
-      s.matriarch = best;
-    } else {
-      s.matriarch = null;                       // that is me
-    }
+    s.podN = Math.max(1, n);
+    // I lead unless somebody in range beats me
+    s.matriarch = (best && (bestK > myK + 1e-6 ||
+      (Math.abs(bestK - myK) <= 1e-6 && bestR > myRank))) ? best : null;
     s.slot = slot;
     if (s.podN > 1) AUDIT.formations++;
   }
@@ -1392,57 +1401,78 @@
   }
 
   function startAct(a, s, act, dur) {
-    s.act = act; s.actT = dur; s.actK = 0; s.holdT = 0;
+    s.act = act; s.actT = dur; s.blown = false; s.splashed = false; s.lobbed = false;
     if (act === "spyhop") AUDIT.spyhops++;
     else if (act === "breach") AUDIT.breaches++;
     else if (act === "taillob") AUDIT.tailLobs++;
-    else if (act === "porpoise") AUDIT.porpoises++;
   }
+  function endAct(s) { s.act = ""; s.blown = false; s.splashed = false; s.lobbed = false; s.roll = 0; }
 
+  /* THE LIFT IS A DEPTH TARGET, NOT A POSITION WRITE, and that distinction is
+     load-bearing. An earlier shape of this added the act's lift to
+     group.position.y in the late pass — and depth() then read that raised y
+     back on the next frame and eased its target from it, so a spy-hop fed its
+     own height into the thing that was supposed to be holding it down and the
+     animal sank through its own act. Setting `s.diveWant` negative (i.e. "the
+     body belongs ABOVE the surface") means exactly one system owns y and there
+     is no loop to damp. `s.airborne` is what tells depth() to let go of the
+     submersion clamp for the duration. */
   function actTick(a, s, dt, dist) {
-    if (!ACTS()) { s.act = ""; return false; }
+    if (!ACTS()) { if (s.act) endAct(s); s.airborne = false; return false; }
     s.cool -= dt;
-    // ---- BREATHING. Not optional and not decorative: a pod that never breaks
-    // the surface to blow is missing its most legible behaviour, and the blow
-    // is visible from outside the radius at which the body draws.
     s.breathT -= dt;
     const g = a.group;
     const t = clock();
     const surf = surfaceAt(g.position.x, g.position.z, t);
     const dep = surf - g.position.y;
+    const draft = a.swimDepth || 2.6;
+
+    // ---- PORPOISING. Not a decision — a consequence of travelling fast, so it
+    // is a modifier on top of everything else rather than an act that has to
+    // start and end. It only runs when no act owns the animal.
+    if (!s.act && s.spd > 5.2 && dep < draft * 2.6) {
+      s.porpPh = (s.porpPh || 0) + dt * 1.35;
+      if (s.porpPh > 6.283185307) { s.porpPh -= 6.283185307; AUDIT.porpoises++; }
+      s.lift = Math.max(0, Math.sin(s.porpPh)) * draft * 1.5;
+      s.pitch = -Math.cos(s.porpPh) * 0.38;
+      s.airborne = s.lift > draft * 0.5;
+      s.porp = true;
+      s.diveWant = -s.lift;
+      return true;
+    }
+    s.porp = false;
+
+    // ---- BREATHING. Not optional and not decorative: a pod that never breaks
+    // the surface to blow is missing its most legible behaviour, and the blow
+    // is visible from well outside the radius at which the body draws.
     if (s.breathT <= 0 && !s.act) {
       startAct(a, s, "blow", 4.2);
       s.breathT = 26 + h01(g.position.x, g.position.z, 0x0C81) * 34;
     }
     if (!s.act) {
-      s.actT -= dt;
-      const near = playerBoatNear(a, dist);
-      if (s.cool <= 0 && near && dist < SPY_R && !s.calf) {
+      s.idleT -= dt;
+      if (s.cool <= 0 && playerBoatNear(a, dist) && dist < SPY_R && !s.calf) {
         // SPY-HOP: it rises vertically and LOOKS at you. Its own eye, above the
         // water, pointed at the boat — the moment in the owner's reference.
         startAct(a, s, "spyhop", 4.6); s.cool = ACT_COOL;
-      } else if (s.cool <= 0 && s.actT <= 0) {
+      } else if (s.cool <= 0 && s.idleT <= 0) {
         const r = h01(g.position.x * 0.37, g.position.z * 0.41, 0x0C82);
         if (r > 0.72) startAct(a, s, "breach", 2.9);
         else if (r > 0.45) startAct(a, s, "taillob", 3.1);
         else startAct(a, s, "blow", 3.4);
         s.cool = ACT_COOL * (0.7 + r * 0.9);
-        s.actT = 12 + r * 30;
-      } else if (s.spd > 5.2 && dep < (a.swimDepth || 2.6) * 2.2) {
-        // PORPOISING. Not a decision — a consequence of travelling fast.
-        if (!s.porpPh) s.porpPh = 0;
-        s.porpPh += dt * 1.35;
-        s.lift = Math.max(0, Math.sin(s.porpPh)) * (a.swimDepth || 2.6) * 1.5;
-        s.pitch = -Math.cos(s.porpPh) * 0.38;
-        s.act = "porpoise";
-        if (Math.sin(s.porpPh) > 0.98) AUDIT.porpoises++;
-        return true;
+        s.idleT = 12 + r * 30;
       }
     }
-    if (!s.act) { s.lift += (0 - s.lift) * Math.min(1, dt * 3); s.pitch += (0 - s.pitch) * Math.min(1, dt * 3); return false; }
+    if (!s.act) {
+      s.lift += (0 - s.lift) * Math.min(1, dt * 3);
+      s.pitch += (0 - s.pitch) * Math.min(1, dt * 3);
+      s.roll += (0 - s.roll) * Math.min(1, dt * 3);
+      s.airborne = false;
+      return false;
+    }
 
     s.actT -= dt;
-    const draft = a.swimDepth || 2.6;
     if (s.act === "blow") {
       // rise until the blowhole clears, vent, sink back
       const k = 1 - clamp(s.actT / 4.2, 0, 1);
