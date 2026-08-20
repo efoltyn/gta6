@@ -105,3 +105,41 @@ Ref: lone dorsal cutting a calm sea.
 Presets that stage these facts: `shark-bites`, `marine-surface`,
 `great-white-anatomy`, `shark-from-deck`. Each declares metrics so the run
 prints a table instead of asking you to open a PDF.
+
+---
+
+## 6. THE OPEN MOUTH IS A HOLE, NOT A LUMP (owner, 2026-08-20)
+
+Owner, looking at the shipped gape: **"it's like there's a pink rock in the
+mouth when they open it. It doesn't look like biting."**
+
+That is exactly right and it is the last big thing wrong with the hero shot.
+The mouth cavity is built as a convex ellipsoid, so opening the jaws reveals a
+BULGING PINK OBJECT filling the gape. Every reference photograph shows the
+opposite: an opening that RECEDES.
+
+Read the photographs from the outside in — this is the whole grammar, and it
+is four concentric bands, not one blob:
+
+1. **Pale outer jaw skin.** Off-white, slightly pink where it meets the gum.
+2. **The GUM RIM** — a bright, wet, saturated pink-red band following the U of
+   each jaw. This is where all the strong pink belongs, and only here. It is a
+   RIM, a few centimetres deep, not a mass.
+3. **The TOOTH RING** — white triangles standing on that rim, raked inward and
+   back, ringing the opening on both jaws.
+4. **THE CAVITY** — and it is DARK. Deep brownish-red / maroon at the front,
+   falling away to near-black down the throat. It reads as depth. In the
+   wide-gape photograph the whole centre of the frame is a dark hole; there is
+   nothing convex in it at all.
+
+So the fix is not a colour tweak. **The cavity must be concave** — an inward-
+facing surface (back faces, or a genuine receding tube/funnel) that darkens
+with depth, with the pink confined to the rim behind the teeth.
+
+**AND THE BITE MUST READ AS A BITE.** Owner: "it doesn't look like biting."
+A shark bite is not a slow symmetric hinge. In order: the snout LIFTS and the
+upper jaw slides forward and down (§1), the gape opens FAST, it holds open for
+a beat at full extension, then the jaws SNAP shut hard and fast — the closing
+is much quicker than the opening — and the head shakes on contact. Equal-speed
+open and close reads as a puppet's mouth. Asymmetric timing is most of what
+makes it read as a bite.
