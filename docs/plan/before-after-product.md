@@ -520,6 +520,26 @@ credible (assay offices, referees, notaries), and that is the lane this
 product occupies: when intelligence is commoditized, the scarce complement
 is verification. When the mining is free, sell the assay office.
 
+**Agents become comparable, and therefore interchangeable** (owner,
+2026-08-20): *"my software makes it so Codex and Claude Code are more
+similar — the funny thing is, in the terminal they already look nearly
+identical."* The identical look is evidence, not coincidence: the pty
+already commoditized the *interface* (two TUIs, a prompt, streaming text —
+convergent evolution under the same fifty-year-old constraint), so the
+vendors' real differences retreated to *outcomes*, which are invisible
+until something makes them comparable. The receipt is that something, and
+the design consequence falls out for free: the drawer treats the agent as
+a **parameter** — `ba new --agent claude` / `--agent codex` — so the
+bake-off is one command: the same problem statement in two drawers, judged
+by receipts. Before/after applied to the workers themselves. To be honest
+about what the layer does: it does not make agents equal, it makes their
+differences *visible* — "which agent do I trust" decays from brand loyalty
+into a per-task empirical question, which is how a market gets made, and
+is good news for exactly the vendor whose agent is actually better. And
+quietly, at any scale, the durable receipt archive becomes something no
+benchmark is: an eval of what buyers actually buy — real problems, real
+repos, judged by the human who paid for the work.
+
 **What it is not: a terminal emulator.** tmux already multiplexes terminals
 perfectly and every CLI agent runs happily in a pane; rebuilding that is
 months of work to reach parity with a solved problem. What does not exist —
