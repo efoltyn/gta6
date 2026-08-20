@@ -22,7 +22,15 @@
         rebuilt, not accumulated
      7. screenshots of a collapse mid-fall for the eye to check
 
-   Run: node tools/collapse-check.mjs   (npm run test:collapse) */
+   Run: node tools/collapse-check.mjs   (npm run test:collapse)
+
+   RUNTIME. Under software WebGL (SwiftShader, which is what a CI box and this
+   container have) a single Page.captureScreenshot of a 1280x800 city frame
+   costs minutes, not milliseconds — the screenshots dominate the whole run.
+   They are the evidence a person actually looks at, so they stay on by
+   default; set CBZ_COLLAPSE_NO_SHOTS=1 to skip every capture and get just the
+   assertions, which is what you want when you are iterating on the engine
+   rather than judging the picture. */
 import { spawn } from "node:child_process";
 import { rm, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
@@ -81,7 +89,9 @@ const evl = async (e) => {
   }
   return r.result && r.result.result && r.result.result.value;
 };
+const NO_SHOTS = process.env.CBZ_COLLAPSE_NO_SHOTS === "1";
 const shotRaw = async (f) => {
+  if (NO_SHOTS) { console.log("   shot skipped (CBZ_COLLAPSE_NO_SHOTS):", f); return; }
   const s = await send("Page.captureScreenshot", { format: "png" });
   await writeFile(path.join(OUTDIR, f), Buffer.from(s.result.data, "base64"));
   console.log("   shot:", "tools/shots/" + f);
@@ -100,6 +110,7 @@ const shot = async (f) => {
     return true;
   })()`).catch(() => {});
   await sleep(250);
+  if (NO_SHOTS) { console.log("   shot skipped (CBZ_COLLAPSE_NO_SHOTS):", f); return; }
   const s = await send("Page.captureScreenshot", { format: "png" });
   await writeFile(path.join(OUTDIR, f), Buffer.from(s.result.data, "base64"));
   console.log("   shot:", "tools/shots/" + f);
@@ -171,46 +182,64 @@ ok("FACADE_KIT_CITY is on in gang city", dressed && dressed.on === true);
 ok("city lots resolve a facade grammar", dressed && dressed.dressed > 0, dressed);
 ok("the skyline wears more than one grammar", dressed && dressed.distinct >= 4, dressed);
 
-/* ---- 4. A REAL BUILDING, BLOWN UP FOR REAL ------------------------------ */
-// pick a genuinely collapsible lot near the player, stand well clear, and
-// condemn it through the ledger's own public seam (never a private helper)
+/* ---- 4. A REAL BUILDING, BLOWN UP FOR REAL ------------------------------
+
+   DRIVEN ON A FROZEN CLOCK, IN ONE EVALUATE. The first version of this ran
+   the arc as forty CDP round trips against a live renderer, and against a
+   software rasterizer at ~1 fps every `Runtime.evaluate` queues behind a
+   multi-second frame — a four-second collapse took the better part of half an
+   hour to poll, and a run that was working looked identical to one that had
+   wedged. It is also not a measurement: what it samples depends on how fast
+   the machine happens to be.
+
+   So: stub requestAnimationFrame (the loop re-schedules itself every frame,
+   so this freezes it), make CBZ.stepSim the only clock, and run the whole
+   storyboard — four rockets, the condemnation, the fall, the settle — inside
+   ONE evaluate that returns the readings from every beat. Same technique the
+   visual presets use, for the same reason, and now both sides of the tool
+   agree about what "mid-fall" means.
+------------------------------------------------------------------------- */
+/* Pick the subject FROM THE LIVE WORLD, never from a typed coordinate: the
+   nearest genuinely collapsible building of a few storeys, which is what a
+   player would actually aim a rocket at. Park the player clear of it and aim
+   the camera, so the screenshots below photograph the subject rather than the
+   countryside behind it. */
 const setup = await evl(`(() => {
   const A = CBZ.city && (CBZ.city.arena || CBZ.city);
   const lots = (A && A.lots) || [];
   const P = CBZ.player;
-  let best = null, bd = 1e9;
+  /* A MID-RISE, not the flagship. "Nearest building of three storeys or more"
+     picks the 52-storey tower, whose collapse front takes eight simulated
+     seconds — about eleven hundred stepSim calls over a 329-lot city, which
+     is minutes of CPU for a run measuring the same code path a six-storey
+     block exercises in a quarter of the time. Prefer 3..8 storeys, and fall
+     back to anything collapsible if this block has none. */
+  let best = null, bd = 1e9, any = null, ad = 1e9;
   for (const L of lots) {
     const b = L.building; if (!b || L.demolished) continue;
     if (!(b.storeys >= 3)) continue;
     const d = Math.hypot(b.ox - P.pos.x, b.oz - P.pos.z);
+    if (d < ad) { ad = d; any = L; }
+    if (b.storeys > 8) continue;
     if (d < bd) { bd = d; best = L; }
   }
+  if (!best) best = any;
   if (!best) return { found: false };
   const b = best.building;
-  /* Park the player clear of the footprint AND POINT THE CAMERA AT IT. The
-     first version of this moved the player and left the camera on its own
-     yaw, so every screenshot in this gate photographed the countryside with
-     the subject clipped off the right-hand edge. CBZ.cam.yaw is the live
-     third-person orbit and the loop reads it every frame, so writing it here
-     aims the shot for the rest of the run. */
   /* STAND WELL CLEAR. finishCollapse()'s debris field reaches
      max(w,d)*0.6 + h*0.35 and kills the player inside it — and a dead player
      takes CBZ.game.state out of "playing", which stops the ENTIRE updater
-     chain, which stops the collapse this gate is trying to photograph. The
-     first version of this parked the camera at ~59 m from a 166 m tower whose
-     reach is 75 m, so the run wedged watching a frozen job and blamed the
-     engine. Stand outside the reach, and heal on every poll besides. */
+     chain, which stops the collapse this gate is trying to photograph. */
   const back = Math.max(120, (b.h || 40) * 1.1);
-  P.pos.x = b.ox + back * 0.72; P.pos.z = b.oz + back * 0.72;
+  P.pos.x = b.ox + back * 0.72; P.pos.z = b.oz + back * 0.72; P.hp = 100;
+  /* systems/camera.js: the chase FORWARD is (-sin yaw, -cos yaw), so aiming
+     at a target is atan2 of the NEGATED delta — the un-negated form points at
+     whatever is directly behind the subject. Pitch is sin()-scaled camera
+     HEIGHT (default 0.46, looking down); a small value stands the lens near
+     eye level to see up a tower. */
   if (CBZ.cam) {
-    // systems/camera.js: the chase FORWARD is (-sin yaw, -cos yaw) — so
-    // pointing at a target is atan2 of the NEGATED delta, and getting that
-    // sign wrong aims the shot at whatever is directly behind the subject,
-    // which is how this gate spent a run photographing the countryside.
-    // Pitch is sin()-scaled camera HEIGHT, default 0.46 (looking down); a
-    // small positive value stands the lens near eye level to see up a tower.
     CBZ.cam.yaw = Math.atan2(-(b.ox - P.pos.x), -(b.oz - P.pos.z));
-    CBZ.cam.pitch = 0.08;
+    CBZ.cam.pitch = 0.12;
   }
   window.__collapseTarget = best;
   return { found: true, ox: b.ox, oz: b.oz, storeys: b.storeys, w: b.w, d: b.d,
@@ -221,141 +250,119 @@ const setup = await evl(`(() => {
 })()`);
 console.log("   target:", JSON.stringify(setup));
 ok("found a collapsible city building", setup && setup.found);
+await sleep(1500);
+await shotRaw("collapse-0-skyline.png");
 
-/* …AND WHAT THE CITY LOOKS LIKE. A count of resolved grammars proves the
-   picker runs; it does not prove the skyline stopped being a row of painted
-   boxes. Framed on the SUBJECT BUILDING's own origin, from far enough back to
-   see its block — an averaged "city centroid" put the camera 3 km out in the
-   desert, because a lot's cx/cz are not the coordinates a building stands on.
-   Never average a coordinate you have not checked is the one you mean. */
-if (setup && setup.found) {
-  await evl(`(() => {
-    const b = window.__collapseTarget.building, P = CBZ.player;
-    P.pos.x = b.ox + 120; P.pos.z = b.oz + 120; P.hp = 100;
-    if (CBZ.cam) { CBZ.cam.yaw = Math.atan2(-(b.ox - P.pos.x), -(b.oz - P.pos.z)); CBZ.cam.pitch = 0.18; }
-    return true;
-  })()`);
-  await sleep(1600);
-  await shotRaw("collapse-0-skyline.png");
-}
+const arc = await evl(`(() => {
+  const L = window.__collapseTarget;
+  if (!L) return { err: "no target" };
+  const b = L.building;
+  const step = (n) => { for (let i = 0; i < n; i++) {
+    CBZ.hitstop = 0; CBZ.slowmo = 0;
+    CBZ.stepSim(1 / 60);
+    if (CBZ.player) CBZ.player.hp = 100;
+    // a dead player takes game.state out of "playing" and STOPS every
+    // updater — including the collapse this is measuring
+    if (CBZ.game && CBZ.game.state !== "playing") CBZ.game.state = "playing";
+  } };
+  window.requestAnimationFrame = function () { return 0; };
+  const out = { stages: [], skinPieces: 0 };
 
-if (setup && setup.found) {
-  /* WOUND IT FIRST, in stages, so the damage skin has to appear and escalate.
-     The AMOUNT is a fraction of the building's own capacity, not a constant:
-     capacityOf() is 12 + storeys*7 + plan/26, so a fixed "six damage" is four
-     rockets to a corner shop and a rounding error to the 52-storey flagship —
-     which is exactly how this probe first reported "damage raises no stage"
-     against a perfectly working ledger. Ask the ledger what the building can
-     take and hit it for a real share of that. */
-  const stages = [];
-  for (let k = 0; k < 4; k++) {
-    await evl(`(() => {
-      const st = CBZ.structure.state(window.__collapseTarget);
-      const amt = Math.max(4, st.cap * 0.11);
-      CBZ.structure.hit(${setup.ox}, 4.5, ${setup.oz}, amt, { kind: "rpg", lot: window.__collapseTarget, dirx: 1, dirz: 0, sudden: true });
-      return amt;
-    })()`);
-    await sleep(500);
-    stages.push(await evl(`(() => { const s = CBZ.structure.state(window.__collapseTarget); return { stage: s.stage, skins: CBZ.collapse.skinCount() }; })()`));
-  }
-  console.log("   staged damage:", JSON.stringify(stages));
-  ok("damage raises the ledger stage", stages.some((s) => s && s.stage >= 1), stages);
-  ok("damage ESCALATES through the stages (not one flat state)",
-    stages.length && stages[stages.length - 1].stage > stages[0].stage, stages);
-  ok("the damage skin appears while the building is still standing",
-    stages.some((s) => s && s.skins > 0), stages);
-  /* THE DRESSING HAS TO BE REAL GEOMETRY. Counting `skins` only proves the
-     ledger THINKS it dressed the building. Find the group the engine tagged
-     and count what is actually in it — the first version of this looked for
-     "a group near the building" and found the BUILDING (3,723 children), which
-     is a check that cannot fail and therefore proves nothing. */
-  const skinShape = await evl(`(() => {
+  const skinOf = () => {
     const A = CBZ.city && (CBZ.city.arena || CBZ.city);
     const root = (A && A.root) || CBZ.scene;
-    let found = null;
+    let found = 0;
     root.traverse(function (o) {
       if (found || !o.userData || !o.userData.cbzCollapseSkin) return;
-      let meshes = 0;
-      o.traverse(function (n) { if (n.isMesh) meshes++; });
-      found = { pieces: meshes, key: o.userData.cbzCollapseSkin };
+      let m = 0; o.traverse(function (n) { if (n.isMesh) m++; }); found = m;
     });
-    return found || { pieces: 0 };
-  })()`);
-  ok("the wound dressing is real geometry on the facade",
-    skinShape && skinShape.pieces > 3, skinShape);
-  ok("the skin is rebuilt, not accumulated (one per building)",
-    stages.every((s) => !s || s.skins <= 1), stages);
+    return found;
+  };
+
+  /* A ROCKET IS A SHARE OF THE BUILDING, NOT A CONSTANT. capacityOf() is
+     12 + storeys*7 + plan/26, so a fixed "six damage" is four rockets to a
+     corner shop and a rounding error to the 52-storey flagship — which is
+     how this probe first reported "damage raises no stage" against a
+     perfectly working ledger. */
+  for (let k = 0; k < 4; k++) {
+    const st0 = CBZ.structure.state(L);
+    CBZ.structure.hit(b.ox, 4.5, b.oz, Math.max(4, st0.cap * 0.11),
+      { kind: "rpg", lot: L, dirx: 1, dirz: 0, sudden: true });
+    step(20);
+    const st = CBZ.structure.state(L);
+    out.stages.push({ stage: st.stage, skins: CBZ.collapse.skinCount() });
+  }
+  out.skinPieces = skinOf();
+
+  /* NOT byPlayer — deliberately. Crediting the player posts the demolition to
+     the city event bus as a crime, and a five-star response shooting the
+     probe dead halts the updater chain mid-collapse. */
+  out.forced = CBZ.structure.forceCollapse(L, {});
+  step(6);
+  out.atCondemn = { active: CBZ.collapse.active(), collapsing: CBZ.structure.debug().collapsing };
+
+  // run to mid-fall on the ENGINE'S OWN reported progress, never on a count
+  // of seconds: a 52-storey front takes ~8 s and a corner shop under 2
+  let guard = 0;
+  while (guard++ < 3000) {
+    const j = CBZ.collapse.debug().jobs[0];
+    if (!j) break;
+    if (j.phase > 1 || (j.phase === 1 && j.frac >= 0.45)) break;
+    step(1);
+  }
+  const d = CBZ.collapse.debug();
+  out.mid = d.jobs[0] ? Object.assign({ frags: d.frags }, d.jobs[0]) : { frags: d.frags };
+
+  // …and on to the end of the whole arc
+  guard = 0;
+  while (guard++ < 4000 && CBZ.collapse.active()) step(1);
+  step(60);
+  out.after = {
+    active: CBZ.collapse.active(),
+    collapsing: CBZ.structure.debug().collapsing,
+    stage: CBZ.structure.state(L).stage,
+    demolished: !!L.demolished,
+    frags: CBZ.collapse.fragCount(),
+    settled: CBZ.collapse.debug().settled,
+  };
+  return out;
+})()`);
+console.log("   arc:", JSON.stringify(arc));
+
+if (arc && arc.stages) {
+  ok("damage raises the ledger stage", arc.stages.some((s) => s.stage >= 1), arc.stages);
+  ok("damage ESCALATES through the stages (not one flat state)",
+    arc.stages[arc.stages.length - 1].stage > arc.stages[0].stage, arc.stages);
+  ok("the damage skin appears while the building is still standing",
+    arc.stages.some((s) => s.skins > 0), arc.stages);
+  ok("the skin is one group per building, rebuilt not accumulated",
+    arc.stages.every((s) => s.skins <= 1), arc.stages);
+  ok("the wound dressing is real geometry on the facade", arc.skinPieces > 3, { pieces: arc.skinPieces });
   await shot("collapse-1-wounded.png");
 
-  // NOW BRING IT DOWN
-  /* NOT `byPlayer` — deliberately. Crediting the player for the demolition
-     posts it to the city event bus as a crime, and a five-star response
-     shooting the probe dead halts the updater chain (a dead player takes
-     CBZ.game.state out of "playing") in the middle of the collapse this gate
-     exists to measure. The engine cannot tell the difference; the police can. */
-  const forced = await evl(`CBZ.structure.forceCollapse(window.__collapseTarget, {})`);
-  ok("the ledger accepts the condemnation", forced === true, { forced });
-  await sleep(400);
-  const preSwap = await evl(`({ active: CBZ.collapse.active(), frags: CBZ.collapse.fragCount(), collapsing: CBZ.structure.debug().collapsing })`);
-  ok("a collapse job is live", preSwap && preSwap.active >= 1, preSwap);
-  ok("it holds a concurrency slot", preSwap && preSwap.collapsing >= 1, preSwap);
+  ok("the ledger accepts the condemnation", arc.forced === true, { forced: arc.forced });
+  ok("a collapse job is live and holds a concurrency slot",
+    arc.atCondemn && arc.atCondemn.active >= 1 && arc.atCondemn.collapsing >= 1, arc.atCondemn);
 
-  /* WAIT ON THE FALL, NOT ON A CLOCK. A 52-storey tower's collapse front
-     takes about eight seconds to reach the ground and a corner shop's takes
-     under two, so a fixed "1.4 s later" photographs a different moment of a
-     different building every time this runs — and reports "no debris" on the
-     tall one purely because it arrived early. The engine publishes how far
-     through its fall each live job is; wait for that. */
-  let midJob = null;
-  for (let i = 0; i < 90; i++) {
-    midJob = await evl(`(() => {
-      if (CBZ.player) CBZ.player.hp = 100;
-      if (CBZ.game && CBZ.game.state !== 'playing') CBZ.game.state = 'playing';
-      const d = CBZ.collapse.debug();
-      return d.jobs[0] ? Object.assign({ frags: d.frags }, d.jobs[0]) : null;
-    })()`);
-    if (midJob && (midJob.phase > 1 || (midJob.phase === 1 && midJob.frac >= 0.45))) break;
-    if (!midJob) break;
-    await sleep(200);
-  }
-  console.log("   at mid-fall:", JSON.stringify(midJob));
-  await shot("collapse-2-midfall.png");
-  const dbg = await evl("CBZ.collapse.debug()");
-  console.log("   engine:", JSON.stringify(dbg && dbg.jobs));
-  ok("the job reports a grammar and a shell", dbg && dbg.jobs.length > 0 && !!dbg.jobs[0].mode && dbg.jobs[0].bands > 0, dbg && dbg.jobs[0]);
+  ok("the job reports a grammar and a raised shell",
+    arc.mid && !!arc.mid.mode && arc.mid.bands > 0, arc.mid);
   ok("the shell is losing bands as the front eats it",
-    dbg && dbg.jobs.length > 0 && dbg.jobs[0].standing < dbg.jobs[0].bands, dbg && dbg.jobs[0]);
-  const mid = await evl(`({ active: CBZ.collapse.active(), frags: CBZ.collapse.fragCount() })`);
-  console.log("   mid-fall:", JSON.stringify(mid));
-  ok("the building disintegrates into real debris mid-fall", mid && mid.frags > 0, mid);
+    arc.mid && arc.mid.standing < arc.mid.bands, arc.mid);
+  ok("the building disintegrates into real debris mid-fall", arc.mid && arc.mid.frags > 0, arc.mid);
+  await shot("collapse-2-midfall.png");
 
-  await sleep(2600);
-  await shot("collapse-3-landing.png");
+  ok("the job retires", arc.after && arc.after.active === 0, arc.after);
+  ok("the concurrency slot is handed back", arc.after && arc.after.collapsing === 0, arc.after);
+  ok("the ledger reaches RUBBLE", arc.after && arc.after.stage === 6, arc.after);
+  ok("the lot is handed to demolition.js", arc.after && arc.after.demolished === true, arc.after);
+  ok("the debris came to rest on the ground", arc.after && arc.after.settled > 0, arc.after);
+  await shot("collapse-3-rubble.png");
 
-  // let the whole arc finish and check nothing leaked
-  let done = null;
-  for (let i = 0; i < 40; i++) {
-    done = await evl(`(() => { if (CBZ.player) CBZ.player.hp = 100;
-      if (CBZ.game && CBZ.game.state !== 'playing') CBZ.game.state = 'playing';
-      return ({ active: CBZ.collapse.active(), collapsing: CBZ.structure.debug().collapsing,
-                         stage: CBZ.structure.state(window.__collapseTarget).stage,
-                         demolished: !!window.__collapseTarget.demolished,
-                         frags: CBZ.collapse.fragCount() }); })()`);
-    if (done && done.active === 0) break;
-    await sleep(500);
-  }
-  console.log("   after:", JSON.stringify(done));
-  ok("the job retires", done && done.active === 0, done);
-  ok("the concurrency slot is handed back", done && done.collapsing === 0, done);
-  ok("the ledger reaches RUBBLE", done && done.stage === 6, done);
-  ok("the lot is handed to demolition.js", done && done.demolished === true, done);
-  ok("the rubble field is on the ground", done && done.frags > 0, done);
-  await shot("collapse-4-rubble.png");
-
-  // reset clears everything
-  const after = await evl(`(() => { CBZ.collapse.reset(); return { active: CBZ.collapse.active(), frags: CBZ.collapse.fragCount(), skins: CBZ.collapse.skinCount() }; })()`);
+  const cleared = await evl(`(() => { CBZ.collapse.reset(); return { active: CBZ.collapse.active(), frags: CBZ.collapse.fragCount(), skins: CBZ.collapse.skinCount() }; })()`);
   ok("reset() frees every shell, fragment and skin",
-    after && after.active === 0 && after.frags === 0 && after.skins === 0, after);
+    cleared && cleared.active === 0 && cleared.frags === 0 && cleared.skins === 0, cleared);
+} else {
+  ok("the collapse arc ran", false, arc);
 }
 
 /* ---- 5. THE DISASTER ISLAND RUNS THE SAME ENGINE -----------------------
@@ -392,24 +399,36 @@ if (islandPlaying) {
   ok("the island is wired to the shared collapse engine", before && before.shared === true, before);
   ok("the island has buildings to fell", before && before.fragile > 0, before);
 
-  // SHAKE IT APART. force("quake") drives the real director; then damage the
-  // fragile roster through the island's own ledger by running the quake for
-  // long enough that its mainshock condemns something. A quake that has not
-  // felled anything yet is not a failure of this change, so give it a real
-  // window and only judge what DID come down.
-  await evl(`(() => { if (CBZ.disasters && CBZ.disasters.force) CBZ.disasters.force("quake"); return true; })()`);
-  let fell = null;
-  for (let i = 0; i < 80; i++) {
-    await sleep(900);
-    fell = await evl(`(() => {
+  /* SHAKE IT APART, on a frozen clock, in one evaluate — same reason as the
+     city arc above. force("quake") drives the REAL director (warn phase,
+     mainshock, aftershocks); stepSim is then the only time, so the quake runs
+     at the machine's CPU speed instead of its frame rate and the whole event
+     takes seconds rather than the two real minutes it occupies in play. */
+  const fell = await evl(`(() => {
+    const step = (n) => { for (let i = 0; i < n; i++) {
+      CBZ.hitstop = 0; CBZ.slowmo = 0;
+      CBZ.stepSim(1 / 60);
+      if (CBZ.player) CBZ.player.hp = 100;
+      if (CBZ.game && CBZ.game.state !== "playing") CBZ.game.state = "playing";
+    } };
+    window.requestAnimationFrame = function () { return 0; };
+    if (!CBZ.disasters || !CBZ.disasters.force) return { err: "no CBZ.disasters.force" };
+    CBZ.disasters.force("quake");
+    const read = () => {
       const a = CBZ.disasterAudit();
-      return { legacy: a.legacyFalls, engine: a.engineFalls, frags: CBZ.collapse.fragCount(),
-               live: CBZ.collapse.active(), skins: CBZ.collapse.skinCount(),
+      return { legacy: a.legacyFalls, engine: a.engineFalls, shared: a.collapseShared,
+               frags: CBZ.collapse.fragCount(), live: CBZ.collapse.active(),
                fallen: CBZ.surv.arena.fragile.filter(function (b) { return b.fallen; }).length,
                state: CBZ.disasters.state(), cur: CBZ.disasters.current() };
-    })()`);
-    if (fell && fell.engine > 0 && fell.frags > 0) break;
-  }
+    };
+    // run the warn phase and the mainshock out; a quake that has not felled
+    // anything YET is not a failure of this change, so give it a real window
+    // and only judge what did come down
+    let g = 0;
+    while (g++ < 9000) { step(4); const r = read(); if (r.engine > 0 && r.frags > 0) break; }
+    step(120);                                        // let the fall play out
+    return read();
+  })()`);
   console.log("   island after:", JSON.stringify(fell));
   await shotRaw("collapse-5-island-quake.png");
   ok("the earthquake fells island buildings", fell && fell.fallen > 0, fell);
