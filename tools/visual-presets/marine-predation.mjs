@@ -36,9 +36,9 @@
 
    WHAT TO LOOK FOR is in each subject's `focus`. The claims the metrics test:
 
-     sharksNear      sharks that closed to within 90 u of the bleeding animal
-                     in 45 s. Before there is no chum at all and no marine
-                     hunt, so they wander.
+     sharksNear      sharks that closed to within 90 u of the staged anchor —
+                     the blood, the body or the ball. Before there is no chum
+                     at all and no marine hunt, so they wander.
      chumSources     live entries in CBZ.goreChumList(). This is the seam that
                      existed and had three producers in the whole game.
      feedLines       killfeed / phone-notify calls made during the fight,
@@ -426,6 +426,17 @@ async function stageMarinePredation(input) {
     // hold the boat still: a moored hull makes the bite geometry the variable
     if (boat && !boat.dead) { boat.v = 0; boat.vx = boat.vx || 0; }
     try { CBZ.stepSim(RUN); } catch (e) { /* one bad frame must not kill the run */ }
+    /* HOLD THE STAGED PROPS ON THE ANCHOR. Not the fight — the megalodon, the
+       sharks and the bait ball are free and are the whole point. Only the
+       three things that are supposed to be STILL: a moored boat, a corpse, and
+       an animal so badly hurt it is trailing blood. Without this the subject of
+       the shot drifts out of a camera that is (correctly) fixed. */
+    if (boat && boat.pos && !boat.dead) { boat.pos.x = A.x; boat.pos.z = A.z; }
+    if (carcass && carcass.pos) { carcass.pos.x = A.x; carcass.pos.z = A.z; }
+    if (bleeder && bleeder.pos && !bleeder.dead) {
+      bleeder.pos.x += (A.x - bleeder.pos.x) * 0.25;
+      bleeder.pos.z += (A.z - bleeder.pos.z) * 0.25;
+    }
     if (boat && boat.engineHp != null && boat.engineHp < hullMin) hullMin = boat.engineHp;
     // PEAKS, not end-states. A bait ball is at its most eaten just before it
     // collapses and then it is GONE, so a number read at the last frame would
@@ -450,19 +461,23 @@ async function stageMarinePredation(input) {
     }
     return n;
   }
-  let sharksNear = 0;
-  if (bleeder) sharksNear = nearCount(sharks, bleeder.pos.x, bleeder.pos.z, 90);
-  else if (sharks.length) sharksNear = nearCount(sharks, A.x, A.z, 110);
+  let sharksNear = nearCount(sharks, A.x, A.z, 90);
   const frenzy = (CBZ.marineFrenzyAudit && CBZ.marineFrenzyAudit()) || {};
-  // "did the crowd actually arrive" — sharks that closed on the carcass or the
-  // ball, measured off the thing they were supposed to come to.
-  if (carcass) sharksNear = nearCount(sharks, carcass.pos.x, carcass.pos.z, 70);
-  else if (bait.length) sharksNear = nearCount(sharks, A.x, A.z, 45);
 
-  // ---- the camera -----------------------------------------------------------
-  const focusOn = meg || bleeder || carcass || (boat && boat.pos) || { x: A.x, y: surf, z: A.z };
-  const fx = focusOn.pos ? focusOn.pos.x : (focusOn.x != null ? focusOn.x : A.x);
-  const fz = focusOn.pos ? focusOn.pos.z : (focusOn.z != null ? focusOn.z : A.z);
+  /* ---- THE CAMERA IS ON THE ANCHOR, NOT ON AN ANIMAL.
+
+     The first cut framed the shot on the megalodon, and the megalodon is the
+     one thing in the scene that is allowed to swim away. In the BEFORE column
+     there is no marine hunt at all, so it wandered — and because the AFTER
+     column deliberately REUSES the before column's camera (that is what makes
+     the pair a pair), both sides ended up framed on empty water with the boat
+     out of shot. The whole ship strip was unreadable.
+
+     So the camera is pinned to the deterministic water anchor every subject is
+     staged at. Everything that is supposed to be in the picture is staged
+     there or comes to it, and the two columns are framed identically by
+     construction rather than by luck. */
+  const fx = A.x, fz = A.z;
   const shot = subject.shot || { dist: 50, height: 20, pitch: 0.45 };
   let camPos, camAim;
   if (ref && ref.camera) { camPos = ref.camera.position.slice(); camAim = ref.camera.target.slice(); }

@@ -876,6 +876,9 @@
   CBZ.marineFrenzyReset = function () {
     for (let i = 0; i < SITES.length; i++) closeSite(SITES[i]);
     AUDIT.baitOpened = AUDIT.baitEaten = AUDIT.carcassOpened = AUDIT.scavengers = 0;
+    AUDIT.birds = 0; AUDIT.sites = 0;
+    if (fishMesh) fishMesh.count = 0;
+    if (gullMesh) gullMesh.count = 0;
   };
 
   // ============================================================
@@ -890,6 +893,11 @@
       if (!ON()) {
         if (fishMesh) fishMesh.count = 0;
         if (gullMesh) gullMesh.count = 0;
+        // AND ZERO THE PROBE. It reports what is on screen, and with the flag
+        // off nothing is — leaving the last live count sitting in it made a
+        // reverted column report thirteen gulls it was not drawing, which is
+        // exactly the kind of number that gets believed.
+        AUDIT.birds = 0;
         return;
       }
       poll(dt);

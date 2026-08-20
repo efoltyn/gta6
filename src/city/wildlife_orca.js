@@ -543,7 +543,11 @@
     // highest-contrast animal in the game and the contrast is the whole read,
     // so the black goes darker than any other hide in the bestiary and the
     // white goes brighter than the great white's belly.
-    const black = m(0x0a0c10), white = m(0xf7faf8), saddle = m(0x93a0a8);
+    // THE SADDLE HAS TO BE GREY, not white. At 0x93a0a8 under a bright key it
+    // rendered as a second eye patch on the back — a marking that does not read
+    // as its own colour is a marking that is not there. It sits between the jet
+    // and the white with clear daylight on both sides.
+    const black = m(0x0a0c10), white = m(0xf7faf8), saddle = m(0x717f88);
     const eyeM = m(0x04050a), pink = m(0x7a3a40), gum = m(0x8e4a50), tooth = m(0xf2ead6);
 
     const rings = ringsOf(HX0, HX1, HY, RY, RZ, HULL_RINGS);
