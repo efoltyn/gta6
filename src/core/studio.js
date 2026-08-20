@@ -524,7 +524,10 @@
              "quadruped on its flank with its legs splayed, and the ape move " +
              "set, a knuckle-walker charges, hammers, backhands, beats its " +
              "chest and PICKS A MAN UP and swings him, which the one generic " +
-             "maul could never be",
+             "maul could never be — and, since the swim rig moved out of the " +
+             "hunting engine into wildlife_rig.js, the TAIL BEAT and the JAW " +
+             "of anything that swims, so a shark in a water arena is an animal " +
+             "and not a rigid mesh sliding through the sea",
       /* THE SOLVER RIDES WITH THE FIGHT, and that is a correction, not a
          convenience. A pack that can make an animal attack but not die
          properly is a pack that hands every page it serves the exact death
@@ -544,7 +547,7 @@
       files: ["city/wildlife_rig.js", "city/creature_combat.js", "systems/predator_anim.js",
         "systems/quadruped_ragdoll.js", "systems/ape_combat.js"],
       publishes: ["wildlifeRig", "creatureFight", "faceAnimalHeading", "quadRagdoll",
-        "apeStep", "apeAudit"],
+        "apeStep", "apeAudit", "buildSwimRig", "animateSwim", "swimJaw"],
     },
 
     // ---- flight and weapons -------------------------------------------------

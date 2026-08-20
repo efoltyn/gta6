@@ -57,6 +57,36 @@
   if (!RIG) { console.error("[wildlife] city/wildlife_rig.js must load first"); return; }
   const faceAnimalHeading = CBZ.faceAnimalHeading;
 
+  /* ---- INDIVIDUALS (city/wildlife_traits.js) ---------------------------
+     OWNER: "all wildlife including sharks should have varying size (viable)
+     and varying hunger (visible behavior and movement)."
+
+     Every animal in this file used to be EXACTLY its species: one line,
+     `grp.scale.setScalar(sp.scale)`, and forty identical mackerel. The two
+     facts that fix it — a per-individual size drawn off the spawn position
+     and a hunger scalar that drifts and drops — live in wildlife_traits.js,
+     which owns the curves; this file owns SPENDING them.
+
+     SZ(a) is the single most important line in the change. Every `sp.scale`
+     read in this file meant "how big is this animal", and every one of them
+     was answering with "how big is this SPECIES". They all go through here
+     now, so hp, bite, reach, turn rate, ragdoll mass, herd spacing, LOD
+     radius, swim depth and the butchered meat yield are all the individual's.
+
+     Degrade-safe in both directions: no traits file (or the flag off) and SZ
+     collapses to sp.scale, HUNGER to a flat 0.5, and every multiplier below
+     multiplies by one. */
+  const TRAITS = CBZ.wildlifeTraits || null;
+  function SZ(a) {
+    const e = a && a._sizeEff;
+    return e > 0 ? e : ((a && a.species && a.species.scale) || 1);
+  }
+  function HUNGER(a) { return TRAITS ? TRAITS.hunger(a) : 0.5; }
+  // The behaviour scratch (speed / restlessness / loiter / sense / patience /
+  // boldness / will-it-hunt). One cached object per actor; see the traits file.
+  const CALM = { h: 0.5, spd: 1, restless: 1, loiter: 1, sense: 1, patience: 1, bold: 1, hunt: 1 };
+  function DRIVE(a) { return TRAITS ? TRAITS.drive(a) : CALM; }
+
   // ---- WILDLIFE_LIVE — the one-line revert for the living-wildlife overhaul.
   // ON (default): animal groups are tagged userData.dynamic so the static
   // batcher (core/batch.js) and matrix freezer (core/staticfreeze.js) leave
@@ -326,7 +356,14 @@
   // How far an animal's origin stands over the bed when it is aground. Derived
   // from its own scale, so a new species costs no row (the 0.9 factor is the
   // one wildlife_shark.js's bed clamp has always used).
-  function aquaticBedLift(sp) { return ((sp && sp.scale) || 1) * 0.9; }
+  // Takes a SPECIES or an ACTOR: `sp.scale` was only ever a stand-in for "how
+  // big is the body sitting on this bed", and with individual size that answer
+  // belongs to the animal, not the row. wildlife_shark.js and any other caller
+  // that still hands it a species keeps the old answer exactly.
+  function aquaticBedLift(sp) {
+    if (sp && sp.animal) return SZ(sp) * 0.9;
+    return ((sp && sp.scale) || 1) * 0.9;
+  }
   CBZ.cityAquaticBedRestY = aquaticBedRestY;
   CBZ.cityAquaticBodyY = aquaticBodyY;
   CBZ.cityAquaticBedLift = aquaticBedLift;
@@ -362,9 +399,18 @@
     try { grp = sp.build({ THREE: THREE, mat: mat, rng: rng }); }
     catch (e) { grp = fallbackMesh(sp); }
     if (!grp) grp = fallbackMesh(sp);
-    const s = sp.scale || 1;
+    /* ---- THIS ANIMAL'S OWN SIZE. Drawn from where it stands, never from the
+       seeded rng stream: hash01 is order-independent, so adding a species
+       tomorrow cannot resize the fish that spawned before it, and the same
+       world seed grows the same sea forever. */
+    const kSize = TRAITS ? TRAITS.sampleSize(sp, x, z) : 1;
+    const s = (sp.scale || 1) * kSize;
     grp.scale.setScalar(s);
-    const swimDepth = sp.aquatic ? aquaticBodyDepth(sp) : 0;
+    // creature_combat.js caches actor._baseScale off group.scale.x the first
+    // time anything attacks and then forces all three components back to it.
+    // Handing it the right number up front is what stops a strike from
+    // snapping a monster shark back to the species constant mid-bite.
+    const swimDepth = sp.aquatic ? aquaticBodyDepth(sp) * Math.pow(kSize, 0.9) : 0;
     const waterY = sp.aquatic && CBZ.citySeaHeightAt ? CBZ.citySeaHeightAt(x, z) - swimDepth : 0;
     grp.position.set(x, sp.aquatic ? waterY : groundY(x, z), z);
     const initialHeading = rng() * 6.283;
@@ -383,19 +429,41 @@
     // is the batcher's & freezer's own "leave this subtree alive" contract.
     if (LIVE()) grp.userData.dynamic = true;
     root.add(grp);
+    /* SIZE IS LOAD-BEARING, and this is where it becomes so. hp goes as k^2.1
+       (a monster takes nearly three times the killing), straight-line speed as
+       k^-0.18 (big things cruise slower; landWalk's turn clamp already made
+       them turn worse and now reads the individual too). Everything downstream
+       — bite, reach, sense radius, seize hold, ragdoll mass, car-impact mass —
+       reads SZ(a) rather than the species row. */
+    const hpK = Math.pow(kSize, 2.1);
+    const hp0 = Math.max(4, Math.round((sp.hp || 40) * hpK));
     const a = {
       species: sp, kind: "animal", animal: true,
       group: grp, pos: grp.position,      // fpsmode/interactions read .group.position and .pos
-      hp: sp.hp || 40, maxHp: sp.hp || 40, dead: false, ko: 0, escaped: false,
-      heading: initialHeading, faceH: initialHeading, turnT: rng() * 3, spd: sp.spd || 1.4,
+      hp: hp0, maxHp: hp0, dead: false, ko: 0, escaped: false,
+      heading: initialHeading, faceH: initialHeading, turnT: rng() * 3,
+      spd: (sp.spd || 1.4) * Math.pow(kSize, -0.18),
       state: "wander", alarm: 0, home: { x: x, z: z },
       bob: rng() * 6.283, hitCount: 0, cleanKill: false,
       stateT: 0,                          // seconds left in the current timed behavior
+      _sizeMul: kSize,                    // this individual's own multiplier
+      _sizeEff: s,                        // ..and its effective world scale (grow-aware)
+      _baseScale: s,                      // creature_combat's rest scale, seeded correctly
     };
+    // HUNGER starts spread across the population, deterministically, so the
+    // world does not begin with every animal on the same stomach — the ocean
+    // is meant to hold a fed shark drifting past a starving one on minute one.
+    if (TRAITS && TRAITS.HUNGER_ON()) {
+      a.hunger = 0.14 + (CBZ.hash01 ? CBZ.hash01(x, z, 0x8A79E4) : 0.5) * 0.72;
+    }
     if (sp.aquatic) {
-      a.waterClearance = aquaticClearance(sp);
+      // A bigger body needs more water under it and swims deeper; a runt will
+      // come into shallows the adult refuses. Both are the same k, at the
+      // exponents the clearance/depth ladders were already shaped for.
+      a.waterClearance = aquaticClearance(sp) * Math.pow(kSize, 0.7);
       a.swimDepth = swimDepth;
       a._waterMove = { x: x, z: z, heading: initialHeading, blocked: false, shore: -999 };
+      a._baseClear = a.waterClearance;    // hunger leans on this; never compound
     }
     // discover the rig ONCE: legs/head for walkers, tail/jaw for swimmers.
     // Each builder bails on the other's animals, so this is one line per actor.
@@ -414,6 +482,27 @@
     }
     animals.push(a);
     return a;
+  }
+
+  /* THE ONE PLACE AN ANIMAL'S SCALE IS WRITTEN. There were three (spawn, the
+     newborn in breed(), and the grow-up in tick()) and they each re-derived
+     `sp.scale * something`, which is precisely how the individual multiplier
+     would have been silently thrown away the first time a calf grew up.
+     `grow` is 0..1 how far along a newborn is (null = adult).
+
+     It also keeps creature_combat's _baseScale honest, which was a real latent
+     bug before this change: that file caches group.scale.x at the first strike
+     and forces the group back to it forever after, so a calf attacked while
+     small stayed calf-sized for the rest of its life. */
+  function applyScale(a, grow) {
+    const k = a._sizeMul > 0 ? a._sizeMul : 1;
+    const g = grow == null ? 1 : (0.4 + 0.6 * grow);
+    const s = ((a.species && a.species.scale) || 1) * k * g;
+    a._sizeEff = s;
+    a._baseScale = s;
+    a._hgInv = null;                     // metabolism follows the body it feeds
+    if (a.group) a.group.scale.setScalar(s);
+    return s;
   }
 
   function fallbackMesh(sp) {
@@ -776,7 +865,7 @@
         // a herd of 2+ trails a BABY (a tiny scaled-down copy — see grow logic).
         if (h === herd - 1 && herd >= 2 && rng() < 0.75) {
           a.grow = rng() * 0.4;
-          a.group.scale.setScalar((sp.scale || 1) * (0.4 + 0.6 * a.grow));
+          applyScale(a, a.grow);
         }
       }
     }
@@ -950,7 +1039,7 @@
         if (P && Math.hypot(nx - P.x, nz - P.z) < 50) continue;
         const kid = makeActor(sp, nx, nz);
         kid.grow = 0;                            // born tiny; grows up in tick()
-        kid.group.scale.setScalar((sp.scale || 1) * 0.4);   // small from frame one
+        applyScale(kid, 0);                      // small from frame one, at ITS OWN size
         kid.home = { x: parent.home.x, z: parent.home.z };
         joinHerd(kid, parent.herd);              // born into the parent's herd
       }
@@ -1160,7 +1249,7 @@
     let dl = Math.hypot(dx, dz);
     if (dl < 0.01) { const ah = Math.random() * Math.PI * 2; dx = Math.cos(ah); dz = Math.sin(ah); dl = 1; }
     dx /= dl; dz /= dl;
-    const scale = Math.max(0.35, sp.scale || 1);
+    const scale = Math.max(0.35, SZ(a));
     const mass = Math.max(0.75, scale * scale * 1.7);
     const raw = (impulse != null && isFinite(impulse) && impulse > 0) ? impulse : 5.9;
     const imp = Math.min(8.5, raw / Math.sqrt(mass));
@@ -1199,7 +1288,7 @@
     const grp = a.group;
     if (!grp) { a._deathPhys = null; return false; }
     const step = Math.min(0.04, dt);
-    const scale = Math.max(0.35, (a.species && a.species.scale) || 1);
+    const scale = Math.max(0.35, SZ(a));
     ph.t += step;
     ph.vy -= 20.5 * step;
     corpseEuler(grp);
@@ -1376,7 +1465,7 @@
     let dl = Math.hypot(dx, dz);
     if (dl < 0.01) { dx = Math.cos(a.heading || 0); dz = Math.sin(a.heading || 0); dl = 1; }
     dx /= dl; dz /= dl;
-    const scale = Math.max(1, sp.scale || 1);
+    const scale = Math.max(1, SZ(a));
     const charge = Math.max(1, sp.spd || 2.2);
     const horiz = Math.min(14.5, 7.2 + scale * 2.5 + charge * 0.8) * kf;
     const ph = P._phys = P._phys || {};
@@ -1763,7 +1852,7 @@
     if (a._huntSt && a._huntSt !== "cruise") { a._crowdT = 0; return false; }
     if ((a._crowdCd || 0) > 0) { a._crowdCd -= dt; a._crowdT = 0; return false; }
     const sp = a.species;
-    const personal = 4 + (sp.scale || 1) * 3.2;
+    const personal = 4 + SZ(a) * 3.2;
     if (nearP > personal * personal) { a._crowdT = 0; return false; }
     // the calf sweep is O(herd) so it runs on the crowd clock, not per frame
     a._crowdT = (a._crowdT || 0) + dt;
@@ -1800,7 +1889,7 @@
     if (!ATK2() || !defendEligible(a)) return false;
     if ((a._cornerCd || 0) > 0) return false;
     const sp = a.species;
-    const body = 1.6 + (sp.scale || 1) * 1.8;
+    const body = 1.6 + SZ(a) * 1.8;
     const b2 = body * body;
     let threat = null;
     const hb = a._huntedBy;
@@ -1856,7 +1945,10 @@
     let fd = a.heading - a.faceH;
     while (fd > Math.PI) fd -= 2 * Math.PI; while (fd < -Math.PI) fd += 2 * Math.PI;
     const panicTurn = a.state === "flee" || a.state === "charge";
-    const trMax = ((panicTurn ? 6.5 : 3.0) / (1 + (sp.scale || 1) * 0.3)) * dt;
+    // A BIG ONE TURNS WORSE, and a runt turns on a sixpence. The clamp always
+    // said so; it was reading the species row rather than the body it was
+    // steering, so every deer in the meadow arced identically.
+    const trMax = ((panicTurn ? 6.5 : 3.0) / (1 + SZ(a) * 0.3)) * dt;
     if (fd > trMax) fd = trMax; else if (fd < -trMax) fd = -trMax;
     a.faceH += fd;
     // integrate ALONG THE FACING + the home fence. A COMMITTED hunter (state
@@ -1878,7 +1970,7 @@
       }
     }
     grp.position.y = groundY(grp.position.x, grp.position.z);
-    if (a.state === "stalk") grp.position.y -= 0.09 * (sp.scale || 1);   // the crouch
+    if (a.state === "stalk") grp.position.y -= 0.09 * SZ(a);   // the crouch
     faceAnimalHeading(grp, a.faceH);
     return moved;
   }
@@ -2048,7 +2140,10 @@
     if (!sp || sp === hsp) return false;                    // never its own kind
     if (!!sp.aquatic !== !!hsp.aquatic) return false;       // medium must match
     if (sp.rarity === "legendary") return false;            // unique animals are not lunch
-    if ((sp.scale || 1) > (hsp.scale || 1) * PREY_MASS_MAX) return false;
+    // MASS IS THE INDIVIDUAL'S. A runt wolf genuinely cannot take the biggest
+    // elk in the herd, and the monster can — which is the food chain reading
+    // the same sizes the player can see.
+    if (SZ(a) > SZ(hunter) * PREY_MASS_MAX) return false;
     if ((sp.danger || 0) >= (hsp.danger || 0)) return false;
     return true;
   }
@@ -2058,7 +2153,7 @@
   //      snake, a fox or a coyote never qualifies; a wolf, a big cat or a bear
   //      does, at night, when you are on your own.
   function manEater(a, hsp) {
-    if ((hsp.scale || 1) < 0.85 || (hsp.danger || 0) < 0.6) return false;
+    if (SZ(a) < 0.85 || (hsp.danger || 0) < 0.6) return false;
     const style = CBZ.creatureStyleFor ? CBZ.creatureStyleFor(hsp) : "bite";
     if (style !== "maul" && style !== "pounce") return false;   // teeth and mass, not venom
     const night = (CBZ.nightAmount == null ? 0 : CBZ.nightAmount);
@@ -2201,7 +2296,7 @@
   //      wall) with no second panic system anywhere.
   function alarmFromPredator(h, amt) {
     const hsp = h.species, hx = h.pos.x, hz = h.pos.z;
-    const R = 34 + (hsp.scale || 1) * 12;
+    const R = 34 + SZ(h) * 12;
     const R2 = R * R;
     for (let i = 0; i < animals.length; i++) {
       const a = animals[i], sp = a.species;
@@ -2268,7 +2363,7 @@
     if (a._feedT <= 0) { endFeed(a); return false; }
     const dx = kill.pos.x - grp.position.x, dz = kill.pos.z - grp.position.z;
     const d = Math.hypot(dx, dz);
-    const reach = 1.1 + (a.species.scale || 1) * 0.9;
+    const reach = 1.1 + SZ(a) * 0.9;
     a.state = "graze";                 // markers.js reads a.state: a feeding animal is not a threat
     // the SAME locomotion seam the hunt uses — a constrictor feeds too, and it
     // has no legs to walk there on.
@@ -2283,7 +2378,7 @@
     if (CBZ.predatorPose) {
       // mass picks the beat exactly the way predatorKit picks a seize style —
       // the heavy ones tear with the whole body, the light ones worry at it.
-      const style = ((a.species.scale || 1) >= 1.15) ? "maul" : "worry";
+      const style = (SZ(a) >= 1.15) ? "maul" : "worry";
       try { CBZ.predatorPose(a, style, a._feedPh, 0.5, dt); } catch (e) {}
     }
     if (a.snake) snakeAnimate(a, dt); else gaitAnimate(a, dt);
@@ -2291,7 +2386,7 @@
     if (a._feedGore <= 0) {
       a._feedGore = 1.8 + Math.random() * 2.4;
       if (CBZ.gore) {
-        try { CBZ.gore(kill.pos.x, kill.pos.y + 0.2 * (kill.species.scale || 1), kill.pos.z, { amount: 0.26, player: false }); } catch (e) {}
+        try { CBZ.gore(kill.pos.x, kill.pos.y + 0.2 * SZ(kill), kill.pos.z, { amount: 0.26, player: false }); } catch (e) {}
       }
     }
     return true;
@@ -2758,7 +2853,7 @@
       if (a.state === "charge") {
         if (playerGone || nearP > sq(giveUp)) { a.state = "wander"; a.stateT = 2; a._burstT = null; }
         else {
-          const reach = 1.6 + (sp.scale || 1) + 0.5;
+          const reach = 1.6 + SZ(a) + 0.5;
           const engaged = a._atkAnim != null && a._atkAnim >= 0;  // mid-strike: let it finish
           if ((nearP <= sq(reach * 1.6) || engaged) && CBZ.creatureFight) {
             // hand the last stretch + the strike to creature_combat: it
@@ -2833,7 +2928,7 @@
       const cd = Math.hypot(toCx, toCz) || 1;
       const coh = Math.min(1.1, Math.max(0, cd - 5) / 14) * (a.state === "wander" ? 1 : 1.6);
       dx += (toCx / cd) * coh; dz += (toCz / cd) * coh;
-      const sepR = 2.2 + (sp.scale || 1) * 1.0;
+      const sepR = 2.2 + SZ(a) * 1.0;
       let sx = 0, szz = 0;
       for (let m = 0; m < hr.members.length; m++) {
         const o2 = hr.members[m]; if (o2 === a || o2.dead) continue;
@@ -3017,7 +3112,7 @@
       if (P) {
         const vdx = grp.position.x - P.x, vdz = grp.position.z - P.z;
         pd2 = vdx * vdx + vdz * vdz;
-        const vr = visR * ((sp.scale || 1) >= 1.3 ? 1.6 : 1);
+        const vr = visR * (SZ(a) >= 1.3 ? 1.6 : 1);
         grp.visible = a.ridden || a.tamed || pd2 < vr * vr;
       }
       // matrix LOD: hidden animals stop paying r128's per-frame matrix math
@@ -3052,8 +3147,8 @@
       //      is the point), full-grown in GROW_TIME ------------------------
       if (a.grow != null && a.grow < 1) {
         a.grow = Math.min(1, a.grow + dt / GROW_TIME);
-        grp.scale.setScalar((sp.scale || 1) * (0.4 + 0.6 * a.grow));
-        if (a.grow >= 1) a.grow = null;
+        applyScale(a, a.grow);
+        if (a.grow >= 1) { a.grow = null; applyScale(a, null); }
       }
       // ---- TAMED / RIDDEN animals are driven by wildlife_tame.js ----------
       // (their position is set elsewhere; the gait layer keys off distance
@@ -3131,7 +3226,7 @@
           // in the shallows without ever lifting it clear of the surface.
           grp.position.y = aquaticBodyY(grp.position.x, grp.position.z,
             (a.swimDepth || 1) - Math.sin(a.bob) * 0.055,
-            aquaticBedLift(sp), waterTime);
+            aquaticBedLift(a), waterTime);
         } else {
           // Legacy radial-band fallback when this module is unit-loaded alone.
           const nx = grp.position.x + Math.cos(a.heading) * a.spd * dt * 6;
@@ -3157,8 +3252,8 @@
           // so a shark is UNDER the sea by its own body depth wherever the sea
           // happens to be this frame, surge included.
           grp.position.y = aquaticBodyY(grp.position.x, grp.position.z,
-            (a.swimDepth || aquaticBodyDepth(sp)) - Math.sin(a.bob) * 0.12 * (sp.scale || 1),
-            aquaticBedLift(sp));
+            (a.swimDepth || aquaticBodyDepth(sp)) - Math.sin(a.bob) * 0.12 * SZ(a),
+            aquaticBedLift(a));
         }
         faceAnimalHeading(grp, a.heading);
         if (LIVE()) animateSwim(a, dt);               // the shared tail/fluke beat
@@ -3258,7 +3353,7 @@
           const coh = Math.min(1.1, Math.max(0, cd - 5) / 14) * (a.state === "wander" ? 1 : 1.6);
           dx += (toCx / cd) * coh; dz += (toCz / cd) * coh;
           // separation: shove away from the closest herd-mate inside ~2.6u
-          const sepR = 2.2 + (sp.scale || 1) * 1.0;
+          const sepR = 2.2 + SZ(a) * 1.0;
           let sx = 0, sz = 0;
           for (let m = 0; m < hr.members.length; m++) {
             const o = hr.members[m]; if (o === a || o.dead) continue;
@@ -3356,7 +3451,8 @@
     const sp = a.species || {};
     const v = Math.max(0, +opts.v || 0);
     if (v <= 0.5) return 0;
-    const mass = Math.max(0.12, (sp.scale || 1) * (sp.scale || 1));
+    const sz = SZ(a);
+    const mass = Math.max(0.12, sz * sz);
     const lethalV = Math.max(2.5, (opts.lethal || 14) * Math.sqrt(mass));
     const maxHp = a.maxHp || sp.hp || 40;
     const k = v / lethalV;
