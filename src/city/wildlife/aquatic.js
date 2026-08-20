@@ -177,6 +177,10 @@
     const ar = o.apexRound == null ? 0.16 : o.apexRound;
     const th0 = o.thick == null ? cr * 0.14 : o.thick;
     const nS = o.spanSteps || 5, nC = o.chordSteps || 4;
+    // How far the blade is buried below its root plane. This is the fix for
+    // "the fin is a slab bolted to the shark": the root cap ends up inside the
+    // hull, so what the camera sees is a blade coming OUT of the skin.
+    const emb = o.embed == null ? cr * 0.30 : o.embed;
     const tipDark = o.tipDark == null ? 2 : o.tipDark;      // >1 disables
     const paleBase = o.paleBase == null ? -1 : o.paleBase;  // <0 disables
     // Reference sheet §5: the above-water dorsal is "LIGHTER and slightly
@@ -212,12 +216,18 @@
     }
 
     const rows = [];
-    for (let i = 0; i <= nS; i++) {
-      const h = i / nS;
-      const xl = lead(h), xt = trail(h);
+    const hMin = span > 1e-6 ? -emb / span : 0;
+    const nRoot = emb > 1e-6 ? 1 : 0;          // one extra row for the buried stub
+    for (let i = -nRoot; i <= nS; i++) {
+      const h = i < 0 ? hMin : i / nS;
+      // Below the root plane the outline is PRISMATIC — the root section
+      // extruded straight into the body — so the buried stub cannot pinch,
+      // twist or poke back out through the far side of the hull.
+      const hc = h < 0 ? 0 : h;
+      const xl = lead(hc), xt = trail(hc);
       const mid = (xl + xt) * 0.5;
-      const half = Math.max(0.0008, (xl - xt) * 0.5) * wide(h);
-      const tk = th0 * Math.pow(1 - h, 1.25) + th0 * 0.04;
+      const half = Math.max(0.0008, (xl - xt) * 0.5) * wide(hc);
+      const tk = th0 * Math.pow(Math.min(1.3, 1 - h), 1.25) + th0 * 0.04;
       const top = [], bot = [];
       for (let j = 0; j <= nC; j++) {
         const s = j / nC;
@@ -229,8 +239,8 @@
       }
       rows.push([top, bot]);
     }
-    for (let i = 0; i < nS; i++) {
-      const hm = (i + 0.5) / nS;
+    for (let i = 0; i < nS + nRoot; i++) {
+      const hm = ((i - nRoot) + 0.5) / nS;
       const gT = hm >= tipDark ? 2 : (hm < paleBase ? 3 : 0);
       const gB = hm >= tipDark ? 2 : (under ? 1 : (hm < paleBase ? 3 : 0));
       for (let j = 0; j < nC; j++) {
@@ -723,9 +733,14 @@
 
     const gum = m(o.gum || 0x8e3b42), gumDark = m(o.gumDark || 0x5e2229);
     const enamel = m(o.tooth || 0xf2ead6), root = m(o.toothRoot || 0xd6a9a4);
-    const cavityMat = m(o.cavity || 0x431a20);
+    const cavityMat = m(o.cavity || 0x63262c);
     const skin = m(o.skin || 0xdfe4e6), upperSkin = m(o.upperSkin || o.skin || 0x6b7880);
 
+    // The jaw line is not level. It rises toward the corners so the whole arc
+    // follows the underside of the head — which is what actually seats the
+    // mouth inside the skull instead of hanging it off the chin.
+    const cornerRise = o.cornerRise == null ? gap * 0.42 : o.cornerRise;
+    function riseAt(a) { return cornerRise * Math.pow(Math.abs(a) / (A || 1), 1.7); }
     function arcPt(a) { return [cx + rad * Math.cos(a), hw * Math.sin(a)]; }
     function arcN(a) {   // outward normal in XZ
       const tx = -rad * Math.sin(a), tz = hw * Math.cos(a);
@@ -740,8 +755,9 @@
       for (let i = 0; i <= stations; i++) {
         const a = -A + (i / stations) * 2 * A;
         const p = arcPt(a), nn = arcN(a);
+        const yr = y + riseAt(a);
         const corner = function (dn, dy) {
-          return sh.v(p[0] + nn[0] * dn, y + dy, p[1] + nn[1] * dn);
+          return sh.v(p[0] + nn[0] * dn, yr + dy, p[1] + nn[1] * dn);
         };
         rows.push({
           a: a,
@@ -767,7 +783,7 @@
       return sh.geom();
     }
     function band(y, up, name, parent) {
-      const key = "jawband|" + [y, up, gumH, lipH, railIn, railOut, len, width, A].join(",");
+      const key = "jawband|" + [y, up, gumH, lipH, railIn, railOut, len, width, A, cornerRise].join(",");
       const geo = cachedGeom(key, function () { return bandGeom(y, up, 14); });
       const mesh = meshOf(geo, [gum, up ? upperSkin : skin, gumDark]);
       mesh.name = name;
@@ -783,7 +799,7 @@
         { n: rowTeeth, r: 0.86, size: 0.70, rake: 0.62 },
         { n: Math.max(5, (rowTeeth * 0.55) | 0), r: 0.72, size: 0.44, rake: 1.02 },
       ];
-      const key = "teeth|" + [up, len, width, toothH, toothW, A, JSON.stringify(rows)].join(",");
+      const key = "teeth|" + [up, len, width, toothH, toothW, A, cornerRise, JSON.stringify(rows)].join(",");
       const geo = cachedGeom(key, function () {
         const sh = new Shell();
         const sgn = up ? -1 : 1;                     // which way the crowns point
@@ -802,7 +818,7 @@
             const px = cx + (p[0] - cx) * row.r, pz = p[1] * row.r;
             const wDir = norm3([-rad * Math.sin(a), 0, hw * Math.cos(a)]);
             const hDir = norm3([-nn[0] * Math.sin(rk), sgn * Math.cos(rk), -nn[1] * Math.sin(rk)]);
-            emitTooth(sh, [px, baseY, pz], wDir, hDir, {
+            emitTooth(sh, [px, baseY + riseAt(a), pz], wDir, hDir, {
               w: toothW * sc, h: toothH * sc, thick: toothW * sc * 0.17,
               serr: r === 0 ? 0.055 : 0, curve: 0.10 + corner * 0.28,
               rootFrac: 0.30,
@@ -819,8 +835,8 @@
     const cavity = new T.Mesh(
       cachedGeom("cavity", function () { return new T.SphereGeometry(1, 12, 8); }), cavityMat);
     cavity.name = "sharkMouthCavity";
-    cavity.position.set(hingeX + len * 0.56, hingeY, 0);
-    cavity.scale.set(len * 0.60, gap * 0.075, width * 0.40);
+    cavity.position.set(hingeX + len * 0.58, hingeY - gap * 0.04, 0);
+    cavity.scale.set(len * 0.74, gap * 0.10, width * 0.44);
     g.add(cavity);
 
     const upper = new T.Group(); upper.name = "sharkUpperJaw";
@@ -833,7 +849,7 @@
     band(lowerY, false, "sharkLowerGum", lower);
     // the mandible: a slim seat under the lower gum. The hull is the chin — a
     // thick slab here is what used to read as a bolted-on box of dentures.
-    const mandKey = "mandible|" + [lowerY, gumH, railIn, railOut, len, width, A].join(",");
+    const mandKey = "mandible|" + [lowerY, gumH, railIn, railOut, len, width, A, cornerRise].join(",");
     const mand = meshOf(cachedGeom(mandKey, function () {
       const save = [gumH, lipH];
       void save;
@@ -842,7 +858,8 @@
       for (let i = 0; i <= 14; i++) {
         const a = -A + (i / 14) * 2 * A;
         const p = arcPt(a), nn = arcN(a);
-        const corner = function (dn, dy) { return sh.v(p[0] + nn[0] * dn, y + dy, p[1] + nn[1] * dn); };
+        const yr = y + riseAt(a);
+        const corner = function (dn, dy) { return sh.v(p[0] + nn[0] * dn, yr + dy, p[1] + nn[1] * dn); };
         rows.push([corner(-ri, h * 0.5), corner(-ri, -h * 0.4), corner(ro, -h * 0.5), corner(ro, h * 0.5)]);
       }
       for (let i = 0; i < 14; i++) {
@@ -1007,9 +1024,9 @@
       // the mouth goes in BEFORE the rostrum so the snout's matrix is solved
       // after the upper jaw has told it how far to lift this frame
       addSharkMouth(g, T, m, {
-        hingeX: 1.86, hingeY: 0.700, length: 0.66, width: 0.70, gap: 0.30,
-        toothHeight: 0.145, toothWidth: 0.125, rowTeeth: 17,
-        maxOpen: 1.05, skin: 0xf1f4f4, upperSkin: 0x53585a,
+        hingeX: 1.62, hingeY: 0.716, length: 0.90, width: 0.66, gap: 0.30,
+        toothHeight: 0.145, toothWidth: 0.118, rowTeeth: 19, cornerRise: 0.135,
+        maxOpen: 1.05, skin: 0xf1f4f4, upperSkin: 0x3d4347,
       });
       const snout = addSharkRostrum(g, [grey, white], GW_SNOUT, {
         pivotX: 1.95, pivotY: 0.950, sides: 16,
@@ -1079,10 +1096,11 @@
       // PEDUNCLE — a tapered sleeve over the hull's tail, so the swim rig has
       // a body section to carry the wave instead of a rectangular block.
       const ped = hullMesh([grey, white], [
+        { x: -0.502, y: 0.000, ry: 0.044, rz: 0.027 },
         { x: -0.28, y: 0.000, ry: 0.085, rz: 0.048 },
         { x: 0.10, y: 0.000, ry: 0.155, rz: 0.098 },
         { x: 0.46, y: 0.000, ry: 0.245, rz: 0.172 },
-      ], { sides: 12, bellyCut: [-0.34, -0.32, -0.30], ragged: 0.05, seed: 23 });
+      ], { sides: 12, bellyCut: [-0.36, -0.34, -0.32, -0.30], ragged: 0.05, seed: 23 });
       ped.position.set(-1.88, 0.860, 0);
       g.add(ped);
 
@@ -1139,9 +1157,9 @@
         ragged: 0.08, seed: 51, profile: "battering-ram",
       });
       addSharkMouth(g, T, m, {
-        hingeX: 2.72, hingeY: 0.780, length: 1.16, width: 1.26, gap: 0.56,
-        toothHeight: 0.30, toothWidth: 0.26, rowTeeth: 19,
-        maxOpen: 1.02, skin: 0xe6ebec, upperSkin: 0x41484d,
+        hingeX: 2.30, hingeY: 0.800, length: 1.58, width: 1.10, gap: 0.56,
+        toothHeight: 0.30, toothWidth: 0.245, rowTeeth: 21, cornerRise: 0.25,
+        maxOpen: 1.02, skin: 0xe6ebec, upperSkin: 0x30363b,
       });
       const snout = addSharkRostrum(g, [dark, white], MEG_SNOUT, {
         pivotX: 3.20, pivotY: 1.160, sides: 16,
@@ -1198,10 +1216,11 @@
         spanDir: [0, -1, 0], chordDir: [1, 0, 0],
       });
       const ped = hullMesh([dark, white], [
+        { x: -0.744, y: 0, ry: 0.068, rz: 0.042 },
         { x: -0.42, y: 0, ry: 0.13, rz: 0.075 },
         { x: 0.16, y: 0, ry: 0.25, rz: 0.16 },
         { x: 0.66, y: 0, ry: 0.38, rz: 0.27 },
-      ], { sides: 12, bellyCut: [-0.34, -0.32, -0.30], ragged: 0.05, seed: 53 });
+      ], { sides: 12, bellyCut: [-0.36, -0.34, -0.32, -0.30], ragged: 0.05, seed: 53 });
       ped.position.set(-2.46, 0.98, 0);
       g.add(ped);
       fin([dark, white], [-2.82, 1.02, 0], {
@@ -1246,9 +1265,9 @@
         ragged: 0.07, seed: 61, profile: "cephalofoil",
       });
       addSharkMouth(g, T, m, {
-        hingeX: 1.44, hingeY: 0.672, length: 0.56, width: 0.66, gap: 0.24,
-        toothHeight: 0.115, toothWidth: 0.10, rowTeeth: 15,
-        maxOpen: 0.94, skin: 0xe9edec, upperSkin: 0x6a7478,
+        hingeX: 1.26, hingeY: 0.688, length: 0.74, width: 0.56, gap: 0.24,
+        toothHeight: 0.115, toothWidth: 0.095, rowTeeth: 17, cornerRise: 0.115,
+        maxOpen: 0.94, skin: 0xe9edec, upperSkin: 0x4b5458,
       });
       // THE CEPHALOFOIL: a centre block plus two rounded-tip wings.
       const head = hullMesh([grey, pale], [
@@ -1320,10 +1339,11 @@
         spanDir: [0, -1, 0], chordDir: [1, 0, 0],
       });
       const ped = hullMesh([grey, pale], [
+        { x: -0.464, y: 0, ry: 0.039, rz: 0.024 },
         { x: -0.26, y: 0, ry: 0.075, rz: 0.042 },
         { x: 0.10, y: 0, ry: 0.140, rz: 0.090 },
         { x: 0.42, y: 0, ry: 0.215, rz: 0.150 },
-      ], { sides: 12, bellyCut: [-0.34, -0.32, -0.30], ragged: 0.05, seed: 64 });
+      ], { sides: 12, bellyCut: [-0.36, -0.34, -0.32, -0.30], ragged: 0.05, seed: 64 });
       ped.position.set(-1.76, 0.90, 0);
       g.add(ped);
       fin([grey, pale], [-1.98, 0.94, 0], {
@@ -1375,9 +1395,9 @@
         ragged: 0.075, seed: 71, profile: "stocky-blunt",
       });
       addSharkMouth(g, T, m, {
-        hingeX: 1.56, hingeY: 0.700, length: 0.58, width: 0.64, gap: 0.28,
-        toothHeight: 0.135, toothWidth: 0.115, rowTeeth: 15,
-        maxOpen: 1.00, skin: 0xf0f2f2, upperSkin: 0x6c757a,
+        hingeX: 1.36, hingeY: 0.716, length: 0.78, width: 0.56, gap: 0.28,
+        toothHeight: 0.135, toothWidth: 0.108, rowTeeth: 17, cornerRise: 0.12,
+        maxOpen: 1.00, skin: 0xf0f2f2, upperSkin: 0x4d5559,
       });
       const snout = addSharkRostrum(g, [grey, white], BULL_SNOUT, {
         pivotX: 1.66, pivotY: 0.980, sides: 14,
@@ -1434,10 +1454,11 @@
         spanDir: [0, -1, 0], chordDir: [1, 0, 0],
       });
       const ped = hullMesh([grey, white], [
+        { x: -0.432, y: 0, ry: 0.044, rz: 0.027 },
         { x: -0.24, y: 0, ry: 0.085, rz: 0.048 },
         { x: 0.10, y: 0, ry: 0.150, rz: 0.098 },
         { x: 0.40, y: 0, ry: 0.240, rz: 0.170 },
-      ], { sides: 12, bellyCut: [-0.34, -0.32, -0.30], ragged: 0.05, seed: 74 });
+      ], { sides: 12, bellyCut: [-0.36, -0.34, -0.32, -0.30], ragged: 0.05, seed: 74 });
       ped.position.set(-1.58, 0.88, 0);
       g.add(ped);
       fin([grey, white], [-1.78, 0.92, 0], {
@@ -1527,8 +1548,8 @@
           spanDir: [-0.2, -0.86, s2 * 0.47], chordDir: [1, 0, 0],
         });
       });
-      const ped = hullMesh([back, belly], bodyRings(-0.34, 0.10, 0,
-        [0.030, 0.075], [0.020, 0.048], 3),
+      const ped = hullMesh([back, belly], bodyRings(-0.472, 0.1, 0,
+        [0.015, 0.03, 0.075], [0.0108, 0.02, 0.048], 4),
         { sides: 10, bellyCut: [-0.28], ragged: 0.04, seed: 82 });
       ped.position.set(-0.92, 0.50, 0); g.add(ped);
       [1, -1].forEach(function (s2) {
@@ -1595,8 +1616,8 @@
           spanDir: [-0.45, -0.30, s2 * 0.84], chordDir: [1, 0, 0],
         });
       });
-      const ped = hullMesh([back, silver], bodyRings(-0.24, 0.06, 0,
-        [0.020, 0.050], [0.014, 0.030], 3),
+      const ped = hullMesh([back, silver], bodyRings(-0.33, 0.06, 0,
+        [0.01, 0.02, 0.05], [0.0076, 0.014, 0.03], 4),
         { sides: 8, bellyCut: [-0.24], ragged: 0.04, seed: 84 });
       ped.position.set(-0.66, 0.40, 0); g.add(ped);
       [1, -1].forEach(function (s2) {
@@ -1682,8 +1703,8 @@
         return sh.geom();
       }), [finlet]);
       g.add(finlets);
-      const ped = hullMesh([back, belly], bodyRings(-0.42, 0.14, 0,
-        [0.055, 0.135], [0.030, 0.085], 3),
+      const ped = hullMesh([back, belly], bodyRings(-0.588, 0.14, 0,
+        [0.0275, 0.055, 0.135], [0.0162, 0.03, 0.085], 4),
         { sides: 10, bellyCut: [-0.30], ragged: 0.04, seed: 86 });
       ped.position.set(-1.42, 0.78, 0); g.add(ped);
       [1, -1].forEach(function (s2) {
@@ -1764,8 +1785,8 @@
           spanDir: [-0.25, -0.92, s2 * 0.30], chordDir: [1, 0, 0],
         });
       });
-      const ped = hullMesh([back, belly], bodyRings(-0.46, 0.16, 0,
-        [0.055, 0.150], [0.030, 0.085], 3),
+      const ped = hullMesh([back, belly], bodyRings(-0.646, 0.16, 0,
+        [0.0275, 0.055, 0.15], [0.0162, 0.03, 0.085], 4),
         { sides: 10, bellyCut: [-0.32], ragged: 0.04, seed: 88 });
       ped.position.set(-1.74, 0.88, 0); g.add(ped);
       [1, -1].forEach(function (s2) {
@@ -1859,8 +1880,8 @@
           spanDir: [-0.2, -0.88, s2 * 0.43], chordDir: [1, 0, 0],
         });
       });
-      const ped = hullMesh([silver, belly], bodyRings(-0.34, 0.10, 0,
-        [0.035, 0.085], [0.024, 0.055], 3),
+      const ped = hullMesh([silver, belly], bodyRings(-0.472, 0.1, 0,
+        [0.0175, 0.035, 0.085], [0.013, 0.024, 0.055], 4),
         { sides: 10, bellyCut: [-0.30], ragged: 0.04, seed: 92 });
       ped.position.set(-1.34, 0.55, 0); g.add(ped);
       [1, -1].forEach(function (s2) {
@@ -1926,8 +1947,8 @@
           spanDir: [-0.36, -0.34, s2 * 0.87], chordDir: [1, 0, s2 * 0.1],
         });
       });
-      const ped = hullMesh([black, white], bodyRings(-0.72, 0.30, 0,
-        [0.16, 0.40], [0.10, 0.30], 4),
+      const ped = hullMesh([black, white], bodyRings(-1.026, 0.3, 0,
+        [0.08, 0.16, 0.4], [0.054, 0.1, 0.3], 5),
         { sides: 12, bellyCut: [-0.42], ragged: 0.04, seed: 96 });
       ped.position.set(-2.60, 1.00, 0); g.add(ped);
       const fluke = finsMesh([black, white], [-3.20, 1.00, 0], [1, -1].map(function (s2) {
@@ -1981,8 +2002,8 @@
           under: true, spanDir: [-0.42, -0.34, s2 * 0.84], chordDir: [1, 0, s2 * 0.1],
         });
       });
-      const ped = hullMesh([grey, pale], bodyRings(-0.42, 0.18, 0,
-        [0.075, 0.185], [0.055, 0.140], 3),
+      const ped = hullMesh([grey, pale], bodyRings(-0.6, 0.18, 0,
+        [0.0375, 0.075, 0.185], [0.0297, 0.055, 0.14], 4),
         { sides: 10, bellyCut: [-0.40], ragged: 0.04, seed: 99 });
       ped.position.set(-1.62, 0.82, 0); g.add(ped);
       const fluke = finsMesh([grey, pale], [-2.02, 0.82, 0], [1, -1].map(function (s2) {
@@ -2049,8 +2070,8 @@
           spanDir: [-0.30, -0.24, s2 * 0.92], chordDir: [1, 0, s2 * 0.1],
         });
       });
-      const ped = hullMesh([dark, white], bodyRings(-0.85, 0.35, 0,
-        [0.20, 0.50], [0.14, 0.36], 4),
+      const ped = hullMesh([dark, white], bodyRings(-1.21, 0.35, 0,
+        [0.1, 0.2, 0.5], [0.0756, 0.14, 0.36], 5),
         { sides: 12, bellyCut: [-0.44], ragged: 0.04, seed: 102 });
       ped.position.set(-3.45, 0.95, 0); g.add(ped);
       const fluke = finsMesh([dark, white], [-4.15, 0.95, 0], [1, -1].map(function (s2) {

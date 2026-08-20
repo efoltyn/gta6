@@ -104,6 +104,7 @@
   function DRAG() { return CFG.ORCA_DRAG !== false; }
   function HUNT() { return CFG.ORCA_HUNT !== false; }
 
+  let FRAME = 0;              // the late pass's own clock; nothing else reads it
   const AUDIT = {
     blows: 0, spyhops: 0, breaches: 0, tailLobs: 0, porpoises: 0,
     grabs: 0, drags: 0, breakoffs: 0, commits: 0, formations: 0, calves: 0,
@@ -339,6 +340,30 @@
   // wildlife_rig.js decides fish-vs-whale from the proportions of the rear-most
   // child, and two separate lobes each read as a tall narrow caudal fin — the
   // orca would then swim like a shark. aquatic.js documents the same trap.
+  /* THE RUNTIME PROBE, and it is a probe rather than an assumption because
+     city/wildlife/aquatic.js is being edited concurrently and may or may not
+     have published more of its kit by the time this loads.
+
+     CBZ.aquaticFin(mats, at, shape) is that file's SINGLE-blade builder and its
+     shape grammar is the one emitBlade above is a port of, so a single blade
+     is delegated to it whenever it exists — which keeps this animal's fins on
+     the same geometry cache as every other fin in the ocean and means one fix
+     there fixes an orca too. It is NOT used for the flukes: the two lobes have
+     to be ONE mesh (see bladeMesh) and no merged builder is published.
+
+     The HULL is deliberately not delegated even if a builder appears: that
+     file's hull takes a `bellyCut` scalar/array, and an orca's markings need a
+     per-face paint callback with a mirrored flank angle. Delegating to a
+     narrower contract would silently drop the flank flare. */
+  function finOf(mats, at, shape, key) {
+    if (typeof CBZ.aquaticFin === "function") {
+      try {
+        const m = CBZ.aquaticFin(mats, at, shape);
+        if (m && m.isMesh) return m;
+      } catch (e) {}
+    }
+    return bladeMesh(mats, at, shape, key);
+  }
   function bladeMesh(mats, at, shapes, key) {
     const list = Array.isArray(shapes) ? shapes : [shapes];
     const geo = cached("orcaBlade|" + (key || JSON.stringify(list)), function () {
@@ -528,16 +553,16 @@
        ocean, and one shape for both sexes is a bug — so BOTH are built and §2
        hides one per individual. Two meshes, one shared geometry each, and the
        cost of the hidden one is zero draw calls. */
-    const bull = bladeMesh([black], [DORSAL_X, DORSAL_Y, 0], BULL_DORSAL, "bullDorsal|v1");
+    const bull = finOf([black], [DORSAL_X, DORSAL_Y, 0], BULL_DORSAL, "bullDorsal|v1");
     bull.name = "orcaDorsalBull"; g.add(bull);
-    const cow = bladeMesh([black], [DORSAL_X, DORSAL_Y, 0], COW_DORSAL, "cowDorsal|v1");
+    const cow = finOf([black], [DORSAL_X, DORSAL_Y, 0], COW_DORSAL, "cowDorsal|v1");
     cow.name = "orcaDorsalCow"; cow.visible = false; g.add(cow);
 
     /* PECTORALS — broad ROUNDED PADDLES, much larger and blunter than a
        shark's swept blade. chordTip is over half the root chord and apexRound
        is 0.55: that is the difference between a paddle and a knife. */
     [1, -1].forEach(function (s2) {
-      const f = bladeMesh([black], [1.30, 0.66, s2 * 0.52], {
+      const f = finOf([black], [1.30, 0.66, s2 * 0.52], {
         span: 1.12, chordRoot: 1.00, chordTip: 0.60, sweep: 0.24, concavity: 0.02,
         leadBow: 0.11, rearTipH: 0.20, rearTipBack: 0.12, apexRound: 0.55,
         thick: 0.16, spanSteps: 5, chordSteps: 5,
@@ -709,11 +734,16 @@
   //  weighted to that, not to a coin flip, because a sea full of bulls is
   //  exactly as wrong as a sea full of cows.
   // ============================================================
+  // The spawn point is the seed for every per-individual draw in this file, so
+  // it is resolved ONCE and cached on the actor: podScan asks it for every
+  // packmate every sweep, and a fresh {x,z} per ask would be an allocation per
+  // orca per orca per second.
   function homeOf(a) {
     const h = a.home;
     if (h && isFinite(h.x)) return h;
+    if (a._orcaHome) return a._orcaHome;
     const p = a.pos || (a.group && a.group.position);
-    return p ? { x: p.x, z: p.z } : { x: 0, z: 0 };
+    return (a._orcaHome = p ? { x: p.x, z: p.z } : { x: 0, z: 0 });
   }
   function sizeOf(a) {
     if (typeof CBZ.wildlifeSize === "function") {
@@ -750,7 +780,7 @@
     // deterministic draw scales the saddle mesh a few percent per animal.
     s.markVar = 0.92 + h01(h.x, h.z, 0x0C4B) * 0.16;
     s.breathT = 6 + h01(h.x, h.z, 0x0C4C) * 34;   // spread the pod's breaths out
-    s.actT = 8 + h01(h.x, h.z, 0x0C4D) * 26;
+    s.idleT = 8 + h01(h.x, h.z, 0x0C4D) * 26;
     return s;
   }
 
@@ -1057,7 +1087,7 @@
     s.spoutT = 1.7;
     s.spout.visible = true;
     const g = a.group;
-    const sc = scaleOf(a);
+    const sc = s.sz = scaleOf(a);
     const ud = g && g.userData && g.userData.orca;
     const bx = ud ? ud.blow.x : BLOW_X, by = ud ? ud.blow.y : BLOW_Y;
     const c = Math.cos(a.heading), sn = Math.sin(a.heading);
@@ -1305,7 +1335,7 @@
       _st.x = -leadLen * (0.95 + 0.75 * s.slot);
       _st.z = side * leadLen * 0.16;
     } else if (mode === 2) {                       // fan, wings forward
-      _st.x = -leadLen * (0.45 + 0.32 * rank) + Math.abs(side) * 0;
+      _st.x = -leadLen * (0.45 + 0.32 * rank);
       _st.z = side * leadLen * (0.55 + 0.62 * rank);
     } else {                                       // abreast
       _st.x = -leadLen * (0.22 + 0.10 * rank);
@@ -1333,15 +1363,28 @@
       // pod
       podT: 0, podN: 1, matriarch: null, mother: null, slot: 0, formation: 0, formT: 0,
       // acts
-      act: "", actT: 0, actK: 0, breathT: 12, holdT: 0, pitch: 0, roll: 0, lift: 0,
+      act: "", actT: 0, idleT: 6, breathT: 12, pitch: 0, roll: 0, lift: 0,
+      porp: false, porpPh: 0, airborne: false, blown: false, splashed: false, lobbed: false,
       // hunt
       state: "cruise", owned: false, opts: null, look: 0, interest: 0, bored: 0, cool: 0,
+      committed: false, chum: null, tick: 0,
       dive: a.swimDepth || 2.6, diveWant: (a.swimDepth || 2.6) * 1.4, dragT: 0, dragPh: 0,
+      mover: null,
     };
     identify(a, s);
     applyIdentity(a, s);
     s.formation = (h01(homeOf(a).x, homeOf(a).z, 0x0C72) * 3) | 0;
     if (!a._waterMove) a._waterMove = { x: 0, z: 0, heading: 0, blocked: false, shore: -999 };
+    /* CAPTURE THE SHARK'S MOVER NOW, BEFORE optsFor() EVER RUNS, and this is
+       not a micro-optimisation — it is a recursion guard. predatorKit caches
+       ONE merged opts object per actor (`actor._predOpts`), so if this file
+       called predatorKit(a, seams) it would overwrite the very object
+       a._shark.opts points at, and moveOf() would then hand back this file's
+       own swim() as "the shark's mover" and call itself forever. §6 therefore
+       copies the kit's BASE instead of asking it to merge, and the one mover
+       there has ever been is grabbed here while it is still the shark's. */
+    const sh = a._shark;
+    if (sh && sh.opts && typeof sh.opts.move === "function") s.mover = sh.opts.move;
     return s;
   }
 
@@ -1353,8 +1396,12 @@
      If it is ever absent, the fallback is a straight-line integrate, which is
      wrong at a coastline and correct in the 99% of the ocean that is not one. */
   function moveOf(a) {
+    const s = a._orca;
+    if (s && typeof s.mover === "function") return s.mover;
     const sh = a._shark;
-    if (sh && sh.opts && typeof sh.opts.move === "function") return sh.opts.move;
+    // never hand back this file's own seam (see the recursion guard in ensure)
+    if (sh && sh.opts && typeof sh.opts.move === "function" &&
+        !(s && s.opts && sh.opts.move === s.opts.move)) return sh.opts.move;
     return null;
   }
   function swim(a, want, speed, dt) {
@@ -1391,13 +1438,21 @@
   const SPY_R = 95;           // u — a boat this close is worth looking at
   const ACT_COOL = 14;        // s minimum between acts, per animal
 
-  function playerBoatNear(a, dist) {
-    // "when the player's boat is near" — a boat first, the swimmer second.
+  /* WHEN IS THERE SOMETHING WORTH LOOKING AT. The repo has no one canonical
+     "is the player in a boat" predicate — inCar is a ped field and the boat
+     lane goes through several owners — so this asks the question it can
+     actually answer honestly: is a person close, and are they on top of the
+     water rather than in it. Somebody on a deck rates higher than a swimmer
+     only because a boat is the thing an orca comes over to inspect; both get
+     spy-hopped at, which is exactly what the reference photograph shows. */
+  function personNear(a, dist) {
     if (dist > SPY_R) return 0;
     const P = CBZ.player;
-    if (!P) return 0;
-    if (P.car || P.vehicle || P.inCar || P.boat) return 1.6;
-    return 1;
+    if (!P || P.dead) return 0;
+    let swimming = false;
+    if (typeof CBZ.citySwimming === "function") { try { swimming = !!CBZ.citySwimming(); } catch (e) {} }
+    if (P.inCar || P.vehicle || P.car) return 1.6;      // on/in something
+    return swimming ? 1 : 1.4;                          // dry = probably a deck
   }
 
   function startAct(a, s, act, dur) {
@@ -1451,7 +1506,7 @@
     }
     if (!s.act) {
       s.idleT -= dt;
-      if (s.cool <= 0 && playerBoatNear(a, dist) && dist < SPY_R && !s.calf) {
+      if (s.cool <= 0 && personNear(a, dist) && dist < SPY_R && !s.calf) {
         // SPY-HOP: it rises vertically and LOOKS at you. Its own eye, above the
         // water, pointed at the boat — the moment in the owner's reference.
         startAct(a, s, "spyhop", 4.6); s.cool = ACT_COOL;
@@ -1476,10 +1531,10 @@
     if (s.act === "blow") {
       // rise until the blowhole clears, vent, sink back
       const k = 1 - clamp(s.actT / 4.2, 0, 1);
-      s.lift = Math.sin(clamp(k, 0, 1) * Math.PI) * (dep + 0.55);
+      s.lift = Math.sin(clamp(k, 0, 1) * Math.PI) * (draft * 0.85);
       s.pitch = -Math.sin(k * Math.PI * 2) * 0.10;
       if (!s.blown && k > 0.42) { s.blown = true; fireSpout(a, s); }
-      if (s.actT <= 0) { s.act = ""; s.blown = false; }
+      if (s.actT <= 0) endAct(s);
     } else if (s.act === "spyhop") {
       /* RISE VERTICALLY, HOLD, SINK. The pitch goes to ~72 degrees nose-up and
          the animal turns its head to the boat while it is up there — an orca
@@ -1487,41 +1542,47 @@
          is a pose, not a behaviour. */
       const T0 = 4.6, e = clamp((T0 - s.actT) / T0, 0, 1);
       const up = e < 0.30 ? e / 0.30 : (e > 0.74 ? 1 - (e - 0.74) / 0.26 : 1);
-      s.lift = up * (dep + draft * 1.35);
-      s.pitch = -up * 1.26;
+      s.lift = up * draft * 2.1;
+      s.pitch = -up * 1.26;                          // ~72 degrees nose-up
       const P = CBZ.player;
       if (P && P.pos && up > 0.5) {
+        // AN ORCA SPY-HOPS IN ORDER TO SEE. One that does not turn its head to
+        // the thing it came to look at is a pose, not a behaviour.
         const want = Math.atan2(P.pos.z - g.position.z, P.pos.x - g.position.x);
         a.heading += shortest(want - a.heading) * Math.min(1, dt * 1.6);
       }
-      if (s.actT <= 0) s.act = "";
+      if (s.actT <= 0) endAct(s);
     } else if (s.act === "breach") {
       const T0 = 2.9, e = clamp((T0 - s.actT) / T0, 0, 1);
-      const arc = Math.sin(clamp(e / 0.72, 0, 1) * Math.PI);
-      s.lift = arc * (dep + draft * 3.4);
-      s.pitch = -Math.cos(clamp(e / 0.72, 0, 1) * Math.PI) * 0.85;
+      const f = clamp(e / 0.72, 0, 1);
+      s.lift = Math.sin(f * Math.PI) * draft * 4.2;
+      s.pitch = -Math.cos(f * Math.PI) * 0.85;
       s.roll = Math.sin(e * 4.2) * 0.30;
       if (!s.splashed && e > 0.80) {
         s.splashed = true;
         if (CBZ.waterSplashAt) {
-          try { CBZ.waterSplashAt(g.position.x, surf, g.position.z, 3.6 * s.sz); } catch (e2) {}
+          try { CBZ.waterSplashAt(g.position.x, surf, g.position.z, 3.6 * (s.sz || 1)); } catch (e2) {}
         }
       }
-      if (s.actT <= 0) { s.act = ""; s.splashed = false; s.roll = 0; }
+      if (s.actT <= 0) endAct(s);
     } else if (s.act === "taillob") {
       const T0 = 3.1, e = clamp((T0 - s.actT) / T0, 0, 1);
       const ph = Math.sin(clamp(e, 0, 1) * Math.PI * 3);
       s.pitch = ph * 0.55;                          // flukes up, then slammed down
-      s.lift = Math.max(0, Math.sin(e * Math.PI)) * (dep * 0.5);
+      s.lift = Math.max(0, Math.sin(e * Math.PI)) * draft * 0.45;
       if (!s.lobbed && ph < -0.9) {
         s.lobbed = true;
         if (CBZ.waterSplashAt) {
-          try { CBZ.waterSplashAt(g.position.x - Math.cos(a.heading) * 3 * s.sz, surf,
-            g.position.z - Math.sin(a.heading) * 3 * s.sz, 2.6 * s.sz); } catch (e3) {}
+          try {
+            CBZ.waterSplashAt(g.position.x - Math.cos(a.heading) * 3 * (s.sz || 1), surf,
+              g.position.z - Math.sin(a.heading) * 3 * (s.sz || 1), 2.6 * (s.sz || 1));
+          } catch (e3) {}
         }
       }
-      if (s.actT <= 0) { s.act = ""; s.lobbed = false; }
+      if (s.actT <= 0) endAct(s);
     }
+    s.airborne = s.lift > draft * 0.35;
+    s.diveWant = -s.lift;                            // "the body belongs up there"
     return true;
   }
 
@@ -1529,11 +1590,14 @@
   // the only ordering that survives wildlife.js's animateSwim, creature_combat's
   // strike poses and marine_predation's roll-over all wanting the same three
   // numbers. Additive on roll, absolute on pitch and lift.
-  function applyPose(a, s, dt) {
+  function applyPose(a, s) {
     const g = a.group;
     if (!g) return;
-    if (s.lift > 0.001 || s.pitch !== 0 || s.roll !== 0) {
-      g.position.y += s.lift;
+    // ABSOLUTE on pitch, ADDITIVE on roll. animateSwim assigns rotation.x and
+    // rotation.z outright every frame, so neither of these can accumulate; and
+    // the HEIGHT is not here at all — it is depth()'s, via s.diveWant. One
+    // system owns y, or the act fights the thing holding the animal down.
+    if (s.act || s.porp || Math.abs(s.pitch) > 0.001 || Math.abs(s.roll) > 0.001) {
       g.rotation.z = s.pitch;
       g.rotation.x += s.roll;
     }
@@ -1622,7 +1686,33 @@
         qteMax: 2,
       },
     };
-    const kit = (typeof CBZ.predatorKit === "function") ? CBZ.predatorKit(a, SEAMS) : null;
+    /* ASK THE KIT FOR ITS BASE AND COPY IT — never for a merge. predatorKit
+       caches one merged object per actor and wildlife_shark.js has already
+       claimed it; merging on top would silently rewrite the shark's opts (and,
+       through them, the mover marine_predation borrows). marine_predation does
+       the same copy for the same reason. */
+    let kit = null;
+    if (typeof CBZ.predatorKit === "function") {
+      let base = null;
+      try { base = CBZ.predatorKit(a); } catch (e) { base = null; }
+      if (base) {
+        kit = {};
+        for (const k in base) kit[k] = base[k];
+        if (base.seize && typeof base.seize === "object") {
+          const sz = kit.seize = {};
+          for (const j in base.seize) sz[j] = base.seize[j];
+        }
+        for (const k in SEAMS) { if (k !== "seize") kit[k] = SEAMS[k]; }
+        if (!kit.seize || typeof kit.seize !== "object") {
+          kit.seize = {
+            jaw: CBZ.creatureJawPoint ? CBZ.creatureJawPoint(a) : { x: 2.8, y: 0.75, z: 0 },
+            dps: 14 + (sp.bite || 42) * 0.42, hold: 4.6, escape: 0.16,
+            thrash: 1.25, medium: "water", qteMax: 2,
+          };
+        }
+        for (const j in SEAMS.seize) kit.seize[j] = SEAMS.seize[j];
+      }
+    }
     s.opts = kit || {
       // DEGRADE PATH ONLY (predator.js absent or its kit flagged off). These
       // are an orca's own numbers written out, so a flag-off build cannot
@@ -1719,16 +1809,21 @@
   function depth(a, s, dt, t) {
     const g = a.group;
     const surf = surfaceAt(g.position.x, g.position.z, t);
-    s.dive += (s.diveWant - s.dive) * Math.min(1, dt * 1.1);
+    // an ACT is a fast, deliberate move; ordinary depth is a slow drift
+    s.dive += (s.diveWant - s.dive) * Math.min(1, dt * (s.airborne || s.act ? 4.5 : 1.1));
     let y = surf - s.dive;
     const draft = a.swimDepth || 2.6;
-    if (y > surf - draft * 0.92) y = surf - draft * 0.92;
+    // THE SUBMERSION CLAMP IS LIFTED FOR AN ACT. A breach whose body may not
+    // leave the water is not a breach, and a spy-hop under the surface is a
+    // hovering whale. The seabed clamp below is NOT lifted — the bed always
+    // wins, which is wildlife_shark.js's order and its reasoning.
+    if (!s.airborne && y > surf - draft * 0.92) y = surf - draft * 0.92;
     if (CBZ.cityAquaticBedRestY) {
       const lift = CBZ.cityAquaticBedLift ? CBZ.cityAquaticBedLift(a.species) : scaleOf(a) * 0.9;
       const lo = CBZ.cityAquaticBedRestY(g.position.x, g.position.z, draft, lift, t, surf);
       if (y < lo) y = lo;
     }
-    g.position.y += (y - g.position.y) * Math.min(1, dt * 3.2);
+    g.position.y += (y - g.position.y) * Math.min(1, dt * (s.airborne || s.act ? 7 : 3.2));
   }
 
   // ============================================================
@@ -1800,13 +1895,31 @@
     const s = ensure(a);
     applyIdentity(a, s);
     s.owned = false;
+    s.tick = FRAME;
     const t = clock();
 
-    // A BODY BEING HELD, OR HOLDING SOMETHING, IS NOT TRAVELLING.
-    if (a._seizedBy || a._mpRoll) { proxy(a, s, dist, dt); return false; }
+    // A BODY BEING HELD, OR BEING ROLLED BELLY-UP BY marine_predation, IS NOT
+    // TRAVELLING AND IS NOT SPY-HOPPING. Drop the act rather than freezing it
+    // half-played — a whale stuck at 70 degrees nose-up is the worst read this
+    // file could produce.
+    if (a._seizedBy || a._mpRoll) {
+      if (s.act) endAct(s);
+      s.lift = 0; s.pitch = 0; s.roll = 0; s.airborne = false;
+      proxy(a, s, dist, dt);
+      return false;
+    }
 
-    // ---- the acts come first: a spy-hopping orca is not station-keeping -----
-    const acting = actTick(a, s, dt, dist);
+    /* THE PRIORITY LADDER, and the order is the whole design.
+
+       A COMMITTED ORCA DOES NOT BREACH. Once it has decided, the hunt owns the
+       animal outright — an act firing over a rush would read as the animal
+       forgetting what it was doing, which is precisely the "loses interest"
+       failure §6 exists to avoid. Everything SHORT of a commit is the opposite:
+       the acts run first, because an orca that comes over, spy-hops at your
+       boat and leaves is the behaviour, not an interruption of one. */
+    const busy = s.committed || s.state === "rush" || s.state === "seize";
+    const acting = busy ? false : actTick(a, s, dt, dist);
+    if (busy && (s.act || s.porp)) { endAct(s); s.lift = 0; s.airborne = false; s.porp = false; }
 
     // ---- THE HUNT (shared driver, orca gate) --------------------------------
     let owned = false;
@@ -1817,7 +1930,11 @@
       let st = null;
       try { st = hunt(a, player, dt, opts); } catch (e) { st = null; }
       if (st && st !== "cruise") {
-        if (st !== s.state && opts.onState) { try { opts.onState(st, s.state); } catch (e) {} }
+        // predatorHunt calls opts.onState itself on every transition — the
+        // SEAMS closure above is that callback, and it is the one place the
+        // dive target and the jaw are written. Calling it a second time from
+        // here would be the "two mirrored expressions that can disagree" bug
+        // wildlife_shark.js's header names.
         s.state = st;
         // MARKERS FOR FREE: systems/markers.js lights the HUD off a.state, and
         // an orca that is only LOOKING at you must not paint a threat blip —
@@ -1933,6 +2050,7 @@
   if (CBZ.onUpdate) {
     CBZ.onUpdate(47.2, function (dt) {
       if (!(dt > 0)) return;
+      FRAME++;
       installWrap();
       const list = CBZ.cityWildlife;
       if (!list) return;
@@ -1945,10 +2063,18 @@
         const d = P ? Math.hypot(a.group.position.x - P.x, a.group.position.z - P.z) : 1e9;
         if (d > PROXY_R * 1.2) {
           if (s && s.root && s.root.visible) s.root.visible = false;
+          if (s && s.spout && s.spout.visible) s.spout.visible = false;
           continue;
         }
         const st = s || ensure(a);
-        applyPose(a, st, dt);
+        // STALE MEANS SOMEBODY ELSE OWNS IT — marine_predation took the actor
+        // for a fight, or wildlife.js's LOD skipped the brain. Either way the
+        // act is over: an unclaimed pose held forever is a stuck animal.
+        if (st.tick !== FRAME - 1 && st.tick !== FRAME) {
+          if (st.act) endAct(st);
+          st.lift = 0; st.pitch = 0; st.roll = 0; st.airborne = false; st.porp = false;
+        }
+        applyPose(a, st);
         if (!st.owned) proxy(a, st, d, dt);
         st.owned = false;
       }
@@ -2053,7 +2179,7 @@
         wildlifeSize: typeof CBZ.wildlifeSize === "function",
         goreChum: typeof CBZ.goreChum === "function",
         aquaticFin: typeof CBZ.aquaticFin === "function",
-        sharkMover: true,
+        predatorStagger: typeof CBZ.predatorStagger === "function",
       },
       counters: AUDIT,
     };

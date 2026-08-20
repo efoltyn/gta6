@@ -1555,6 +1555,21 @@
 <!-- The shark is thin on purpose: numbers, fin/wake proxy, locomotion. After
      predator.js AND wildlife.js so both seams exist. -->
 <script src="src/city/wildlife_shark.js?v=marinefix1"></script>
+<!-- THE ORCA. Re-registers id:"orca" over city/wildlife/aquatic.js's build
+     (defineSpecies is last-write-wins) so the markings that actually identify
+     the animal exist: the white post-ocular eye patch, the grey saddle, the
+     flank flare, the white chin and fluke undersides, a blowhole that VENTS,
+     and a dorsal fin that is a bull's tower or a cow's falcate blade depending
+     on the individual. Adds pod TRAVEL (formation, matriarch, calf in the
+     slipstream), the surface acts no shark can do (blow, spy-hop, breach,
+     tail-lob, porpoising), the grab-and-drag, and a black-and-white surface
+     proxy. AFTER wildlife_shark.js: it borrows that file's ONE water mover and
+     capture-and-wraps CBZ.sharkBrain, and marine_predation.js wraps it in turn
+     one tag later — so the chain is marine -> orca -> shark. The megalodon
+     takedown is CONSUMED from marine_predation, not re-implemented.
+     Reverts whole with CBZ.CONFIG.ORCA_V1 / ORCA_POD / ORCA_SURFACE /
+     ORCA_ACTS / ORCA_DRAG / ORCA_HUNT. -->
+<script src="src/city/wildlife_orca.js?v=orca1"></script>
 <!-- THE SEA EATS ITSELF: the marine predation graph (who preys on whom, who
      MOBS whom), the orca pod's bearings/ram/roll-over finisher, a big shark
      taking a small boat, and the chum producers that had never existed — a
