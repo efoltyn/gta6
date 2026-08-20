@@ -537,18 +537,21 @@
               const a = side > 0 ? ang : Math.PI - ang;
               const sk = onSkin(rings, x - t * hgt * Math.sin(gAng), a, 0.005);
               const c = sk.p, hw = gw * 0.5;
-              const pf = [c[0] + hw, c[1], c[2]], pb = [c[0] - hw, c[1], c[2]];
-              prev.push({ n: sk.n, p: [pf, pb], v: [sh.v(pf[0], pf[1], pf[2]), sh.v(pb[0], pb[1], pb[2])] });
+              const P = function (dx) { return [c[0] + dx, c[1], c[2]]; };
+              const q = [P(hw), P(-hw), P(-hw - gw * 0.10), P(-hw - gw * 0.62)];
+              prev.push({ n: sk.n, p: q, v: q.map(function (r) { return sh.v(r[0], r[1], r[2]); }) });
               if (k > 0) {
                 const a0 = prev[k - 1], a1 = prev[k];
                 sh.quadN(0, a1.n, [a0.p[0], a1.p[0], a1.p[1], a0.p[1]],
-                  [a0.v[0], a1.v[0], a1.v[1], a0.v[1]]);
+                  [a0.v[0], a1.v[0], a1.v[1], a0.v[1]]);        // the pale slot
+                sh.quadN(1, a1.n, [a0.p[2], a1.p[2], a1.p[3], a0.p[3]],
+                  [a0.v[2], a1.v[2], a1.v[3], a0.v[3]]);        // its shadow line
               }
             }
           }
           return sh.geom();
         });
-        const gm = new T.Mesh(geo, pale);
+        const gm = meshOf(geo, [pale, m(o.gillDark || 0x1d2429)]);
         gm.name = "sharkGill";
         g.add(gm);
       });
@@ -607,12 +610,33 @@
         const sk = onSkin(rings, x, ang, 0.006);
         const tang = norm3(cross3(sk.n, [1, 0, 0]));
         const fwd = norm3(cross3(tang, sk.n));
+        void sk; void tang; void fwd;
         const len = (o.scarLen || 0.4) * (0.4 + h01(i, 9, seed) * 1.1);
         const rot = (h01(i, 13, seed) - 0.5) * 1.5;
-        const cs = Math.cos(rot), sn = Math.sin(rot);
-        const du = [fwd[0] * cs + tang[0] * sn, fwd[1] * cs + tang[1] * sn, fwd[2] * cs + tang[2] * sn];
-        const dv = [tang[0] * cs - fwd[0] * sn, tang[1] * cs - fwd[1] * sn, tang[2] * cs - fwd[2] * sn];
-        sh.plate(0, sk.p, du, dv, len, (o.scarWidth || 0.022) * (0.7 + h01(i, 21, seed) * 0.8), sk.n);
+        const hw = (o.scarWidth || 0.022) * (0.7 + h01(i, 21, seed) * 0.8) * 0.5;
+        const steps = 4;
+        const ry0 = Math.max(0.05, ringAt(rings, x).ry);
+        const dX = Math.cos(rot) * len, dA = Math.sin(rot) * len / ry0;
+        const st = [];
+        for (let k = 0; k <= steps; k++) {
+          const t = k / steps - 0.5;
+          st.push(onSkin(rings, clamp(x + dX * t, x0 + 0.03, x1 - 0.03), ang + dA * t, 0.006));
+        }
+        const side = [];
+        for (let k = 0; k <= steps; k++) {
+          const a = st[Math.max(0, k - 1)].p, b = st[Math.min(steps, k + 1)].p;
+          const dir = norm3([b[0] - a[0], b[1] - a[1], b[2] - a[2]]);
+          const tg = norm3(cross3(st[k].n, dir));
+          const q = st[k].p;
+          const p0 = [q[0] + tg[0] * hw, q[1] + tg[1] * hw, q[2] + tg[2] * hw];
+          const p1 = [q[0] - tg[0] * hw, q[1] - tg[1] * hw, q[2] - tg[2] * hw];
+          side.push({ n: st[k].n, p: [p0, p1], v: [sh.v(p0[0], p0[1], p0[2]), sh.v(p1[0], p1[1], p1[2])] });
+        }
+        for (let k = 1; k <= steps; k++) {
+          const a0 = side[k - 1], a1 = side[k];
+          sh.quadN(0, a1.n, [a0.p[0], a1.p[0], a1.p[1], a0.p[1]],
+            [a0.v[0], a1.v[0], a1.v[1], a0.v[1]]);
+        }
       }
       // WRINKLE FOLDS — long horizontal creases along the flank behind the
       // head. Cheap, and per the reference sheet enormously effective.
@@ -1011,11 +1035,11 @@
     id: "great_white_shark", name: "Great White Shark", biome: "water",
     rarity: "rare", hp: 140, fur: "Shark Fin", furValue: 260,
     meat: "Shark Meat", meatValue: 30, packs: 3, spd: 2.6, danger: 0.6,
-    bite: 30, aquatic: true, scale: 1.2, color: 0x53585a,
+    bite: 30, aquatic: true, scale: 1.2, color: 0x363c40,
     build: function (ctx) {
       const m = ctx.mat, g = new T.Group();
-      const grey = m(0x53585a), white = m(0xf1f4f4);
-      const finDark = m(0x474d50), finTip = m(0x2e3234), finPale = m(0x6d7478);
+      const grey = m(0x363c40), white = m(0xf1f4f4);
+      const finDark = m(0x2b3134), finTip = m(0x1b1f22), finPale = m(0x545c60);
 
       addSharkHull(g, {
         top: grey, belly: white, sides: 16, rings: GW_RINGS,
@@ -1026,7 +1050,7 @@
       addSharkMouth(g, T, m, {
         hingeX: 1.62, hingeY: 0.716, length: 0.90, width: 0.66, gap: 0.30,
         toothHeight: 0.145, toothWidth: 0.118, rowTeeth: 19, cornerRise: 0.135,
-        maxOpen: 1.05, skin: 0xf1f4f4, upperSkin: 0x3d4347,
+        maxOpen: 1.05, skin: 0xf1f4f4, upperSkin: 0x363c40,
       });
       const snout = addSharkRostrum(g, [grey, white], GW_SNOUT, {
         pivotX: 1.95, pivotY: 0.950, sides: 16,
@@ -1036,11 +1060,11 @@
         rings: GW_RINGS, snout: snout, snoutRings: GW_SNOUT,
         eyeX: 2.10, eyeY: 1.065, eyeZ: 0.335, eyeSize: 0.055, dark: 0x07090a,
         noseX: 2.36, noseY: 0.782, noseZ: 0.115, nostrilLen: 0.15, nostrilWidth: 0.026,
-        gillX: 1.56, gillY: 0.90, gillZ: 0, gills: 5, gillCenter: -0.16,
-        gillHeight: 0.40, gillStep: 0.115, gillWidth: 0.036, gillAngle: 0.24,
+        gillX: 1.56, gillY: 0.90, gillZ: 0, gills: 5, gillCenter: -0.11,
+        gillHeight: 0.33, gillStep: 0.115, gillWidth: 0.060, gillAngle: 0.24,
         gillColor: 0xc3cccd,
         pores: 52, poreSize: 0.019, poreX0: 1.98, poreX1: 2.58, poreSpread: 0.95,
-        poreSeed: 31, poreColor: 0x3a4145,
+        poreSeed: 31, poreColor: 0x252b2f,
       });
       addSharkSkin(g, m, {
         rings: GW_RINGS, scars: 11, scarLen: 0.42, scarWidth: 0.024, scarColor: 0xa8b1b3,
@@ -1069,7 +1093,7 @@
           span: 1.25, chordRoot: 0.66, chordTip: 0.05, sweep: 0.66, concavity: 0.24,
           leadBow: 0.06, rearTipH: 0.09, rearTipBack: 0.20, apexRound: 0.05,
           thick: 0.085, spanSteps: 6, chordSteps: 4, under: true, tipDark: 0.76,
-          spanDir: [-0.481, -0.276, s2 * 0.832], chordDir: [1, 0.06, s2 * 0.16],
+          spanDir: [-0.497, -0.200, s2 * 0.845], chordDir: [1, 0.06, s2 * 0.16],
         });
         // PELVICS — small, swept, white underneath. A shark seen from a boat
         // has these; the old model simply did not.
@@ -1146,11 +1170,11 @@
     id: "megalodon", name: "Megalodon", biome: "water", rarity: "legendary",
     hp: 1200, fur: "Legendary Megalodon Tooth", furValue: 3000, respawn: false,
     packs: 1, spd: 2.4, danger: 0.8, bite: 60, aquatic: true,
-    scale: 2.6, color: 0x41484d,
+    scale: 2.6, color: 0x2a3035,
     build: function (ctx) {
       const m = ctx.mat, g = new T.Group();
-      const dark = m(0x41484d), white = m(0xe6ebec);
-      const finDark = m(0x373d42), finTip = m(0x23282c), finPale = m(0x5c6469);
+      const dark = m(0x2a3035), white = m(0xe6ebec);
+      const finDark = m(0x232930), finTip = m(0x161a1e), finPale = m(0x474f55);
       addSharkHull(g, {
         top: dark, belly: white, sides: 16, rings: MEG_RINGS,
         bellyCut: [-0.40, -0.34, -0.24, -0.06, 0.18, 0.02, -0.18, -0.26],
@@ -1159,7 +1183,7 @@
       addSharkMouth(g, T, m, {
         hingeX: 2.30, hingeY: 0.800, length: 1.58, width: 1.10, gap: 0.56,
         toothHeight: 0.30, toothWidth: 0.245, rowTeeth: 21, cornerRise: 0.25,
-        maxOpen: 1.02, skin: 0xe6ebec, upperSkin: 0x30363b,
+        maxOpen: 1.02, skin: 0xe6ebec, upperSkin: 0x2a3035,
       });
       const snout = addSharkRostrum(g, [dark, white], MEG_SNOUT, {
         pivotX: 3.20, pivotY: 1.160, sides: 16,
@@ -1170,7 +1194,7 @@
         eyeX: 3.34, eyeY: 1.315, eyeZ: 0.505, eyeSize: 0.085, dark: 0x07090a,
         noseX: 3.72, noseY: 0.942, noseZ: 0.19, nostrilLen: 0.24, nostrilWidth: 0.042,
         gillX: 2.62, gillY: 1.0, gillZ: 0, gills: 5, gillCenter: -0.14,
-        gillHeight: 0.72, gillStep: 0.20, gillWidth: 0.055, gillAngle: 0.22,
+        gillHeight: 0.60, gillStep: 0.20, gillWidth: 0.105, gillAngle: 0.22,
         gillColor: 0xb4bec1,
         pores: 60, poreSize: 0.030, poreX0: 3.05, poreX1: 3.94, poreSpread: 0.95,
         poreSeed: 33, poreColor: 0x2f363a,
@@ -1197,7 +1221,7 @@
           span: 2.05, chordRoot: 1.10, chordTip: 0.08, sweep: 0.66, concavity: 0.24,
           leadBow: 0.06, rearTipH: 0.09, rearTipBack: 0.34, apexRound: 0.05,
           thick: 0.15, spanSteps: 6, chordSteps: 4, under: true, tipDark: 0.78,
-          spanDir: [-0.481, -0.276, s2 * 0.832], chordDir: [1, 0.06, s2 * 0.16],
+          spanDir: [-0.497, -0.200, s2 * 0.845], chordDir: [1, 0.06, s2 * 0.16],
         });
         fin([dark, white], [-0.80, 0.38, s2 * 0.33], {
           span: 0.68, chordRoot: 0.56, chordTip: 0.06, sweep: 0.55, concavity: 0.22,
@@ -1254,11 +1278,11 @@
     id: "hammerhead_shark", name: "Great Hammerhead", biome: "water",
     rarity: "rare", hp: 150, fur: "Shark Fin", furValue: 300,
     meat: "Shark Meat", meatValue: 30, spd: 2.5, danger: 0.5,
-    bite: 26, aquatic: true, scale: 1.25, color: 0x6a7478,
+    bite: 26, aquatic: true, scale: 1.25, color: 0x434c50,
     clearance: 40, swimDepth: 2.5,
     build: function (ctx) {
       const m = ctx.mat, g = new T.Group();
-      const grey = m(0x6a7478), pale = m(0xe9edec), finDark = m(0x596266), eye = m(0x07090a);
+      const grey = m(0x434c50), pale = m(0xe9edec), finDark = m(0x363e42), eye = m(0x07090a);
       addSharkHull(g, {
         top: grey, belly: pale, sides: 14, rings: HH_RINGS,
         bellyCut: [-0.36, -0.30, -0.12, 0.12, -0.06, -0.26],
@@ -1267,7 +1291,7 @@
       addSharkMouth(g, T, m, {
         hingeX: 1.26, hingeY: 0.688, length: 0.74, width: 0.56, gap: 0.24,
         toothHeight: 0.115, toothWidth: 0.095, rowTeeth: 17, cornerRise: 0.115,
-        maxOpen: 0.94, skin: 0xe9edec, upperSkin: 0x4b5458,
+        maxOpen: 0.94, skin: 0xe9edec, upperSkin: 0x434c50,
       });
       // THE CEPHALOFOIL: a centre block plus two rounded-tip wings.
       const head = hullMesh([grey, pale], [
@@ -1295,7 +1319,7 @@
         noseX: 2.02, noseY: 0.898, noseZ: 0.90, nostrilLen: 0.20, nostrilWidth: 0.028,
         nostrilYaw: 0.05,
         gillX: 1.30, gillY: 0.92, gillZ: 0, gills: 5, gillCenter: -0.14,
-        gillHeight: 0.30, gillStep: 0.10, gillWidth: 0.032, gillAngle: 0.22,
+        gillHeight: 0.26, gillStep: 0.10, gillWidth: 0.052, gillAngle: 0.22,
         gillColor: 0xc6cfcf, pores: 0,
       });
       addSharkSkin(g, m, {
@@ -1320,7 +1344,7 @@
           span: 1.05, chordRoot: 0.50, chordTip: 0.04, sweep: 0.68, concavity: 0.24,
           rearTipH: 0.09, rearTipBack: 0.17, apexRound: 0.05, thick: 0.06,
           spanSteps: 5, chordSteps: 4, under: true,
-          spanDir: [-0.481, -0.276, s2 * 0.832], chordDir: [1, 0.06, s2 * 0.16],
+          spanDir: [-0.497, -0.200, s2 * 0.845], chordDir: [1, 0.06, s2 * 0.16],
         });
         fin([grey, pale], [-0.55, 0.520, s2 * 0.16], {
           span: 0.32, chordRoot: 0.28, chordTip: 0.04, sweep: 0.55, concavity: 0.22,
@@ -1384,11 +1408,11 @@
     id: "bull_shark", name: "Bull Shark", biome: "water",
     rarity: "uncommon", hp: 110, fur: "Shark Fin", furValue: 190,
     meat: "Shark Meat", meatValue: 24, spd: 2.7, danger: 0.55,
-    bite: 24, aquatic: true, scale: 0.95, color: 0x6c757a,
+    bite: 24, aquatic: true, scale: 0.95, color: 0x464e52,
     clearance: 12, swimDepth: 1.5,
     build: function (ctx) {
       const m = ctx.mat, g = new T.Group();
-      const grey = m(0x6c757a), white = m(0xf0f2f2), finDark = m(0x5b6469), finTip = m(0x3a4145);
+      const grey = m(0x464e52), white = m(0xf0f2f2), finDark = m(0x394045), finTip = m(0x252b2f);
       addSharkHull(g, {
         top: grey, belly: white, sides: 14, rings: BULL_RINGS,
         bellyCut: [-0.36, -0.30, -0.14, 0.14, -0.02, -0.22, -0.30],
@@ -1397,7 +1421,7 @@
       addSharkMouth(g, T, m, {
         hingeX: 1.36, hingeY: 0.716, length: 0.78, width: 0.56, gap: 0.28,
         toothHeight: 0.135, toothWidth: 0.108, rowTeeth: 17, cornerRise: 0.12,
-        maxOpen: 1.00, skin: 0xf0f2f2, upperSkin: 0x4d5559,
+        maxOpen: 1.00, skin: 0xf0f2f2, upperSkin: 0x464e52,
       });
       const snout = addSharkRostrum(g, [grey, white], BULL_SNOUT, {
         pivotX: 1.66, pivotY: 0.980, sides: 14,
@@ -1408,7 +1432,7 @@
         eyeX: 1.80, eyeY: 1.150, eyeZ: 0.260, eyeSize: 0.048, dark: 0x07090a,
         noseX: 1.98, noseY: 0.806, noseZ: 0.105, nostrilLen: 0.13, nostrilWidth: 0.024,
         gillX: 1.28, gillY: 0.90, gillZ: 0, gills: 5, gillCenter: -0.14,
-        gillHeight: 0.34, gillStep: 0.10, gillWidth: 0.033, gillAngle: 0.22,
+        gillHeight: 0.29, gillStep: 0.10, gillWidth: 0.055, gillAngle: 0.22,
         gillColor: 0xc3cccd,
         pores: 40, poreSize: 0.017, poreX0: 1.70, poreX1: 2.12, poreSpread: 0.95,
         poreSeed: 34, poreColor: 0x424a4e,
@@ -1419,7 +1443,7 @@
         foldColor: 0x4f585c, skinSeed: 73,
       });
       function fin(mats, at, shape) { const f = finMesh(mats, at, shape); g.add(f); return f; }
-      fin([finDark, finDark, finDark, m(0x818a8e)], [0.25, 1.32, 0], {
+      fin([finDark, finDark, finDark, m(0x5f686c)], [0.25, 1.32, 0], {
         span: 0.98, chordRoot: 0.92, chordTip: 0.14, sweep: 0.60, concavity: 0.30,
         leadBow: 0.07, rearTipH: 0.09, rearTipBack: 0.30, apexRound: 0.30,
         thick: 0.12, spanSteps: 6, chordSteps: 5, paleBase: 0.18, trailPale: 0.17,
@@ -1435,7 +1459,7 @@
           span: 1.02, chordRoot: 0.58, chordTip: 0.05, sweep: 0.66, concavity: 0.24,
           rearTipH: 0.09, rearTipBack: 0.18, apexRound: 0.05, thick: 0.075,
           spanSteps: 6, chordSteps: 4, under: true, tipDark: 0.78,
-          spanDir: [-0.481, -0.276, s2 * 0.832], chordDir: [1, 0.06, s2 * 0.16],
+          spanDir: [-0.497, -0.200, s2 * 0.845], chordDir: [1, 0.06, s2 * 0.16],
         });
         fin([grey, white], [-0.52, 0.470, s2 * 0.20], {
           span: 0.36, chordRoot: 0.32, chordTip: 0.04, sweep: 0.55, concavity: 0.22,
@@ -1969,10 +1993,10 @@
   S({
     id: "dolphin", name: "Dolphin", biome: "water", rarity: "common",
     hp: 40, fur: "Dolphin Hide", furValue: 70, packs: 3, herd: [4, 8],
-    spd: 3.0, danger: 0, aquatic: true, scale: 0.9, color: 0x77848f,
+    spd: 3.0, danger: 0, aquatic: true, scale: 0.9, color: 0x5c6873,
     build: function (ctx) {
       const m = ctx.mat, g = new T.Group();
-      const grey = m(0x77848f), pale = m(0xd6dde1), eye = m(0x0d1013);
+      const grey = m(0x5c6873), pale = m(0xd6dde1), eye = m(0x0d1013);
       const rings = bodyRings(-1.45, 2.10, 0.82,
         [0.13, 0.36, 0.46, 0.47, 0.42, 0.30, 0.14],
         [0.11, 0.32, 0.41, 0.42, 0.37, 0.26, 0.12], 12);

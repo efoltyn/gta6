@@ -97,6 +97,20 @@
   if (CFG.ORCA_ACTS == null) CFG.ORCA_ACTS = true;
   if (CFG.ORCA_DRAG == null) CFG.ORCA_DRAG = true;
   if (CFG.ORCA_HUNT == null) CFG.ORCA_HUNT = true;
+  /* ?orca=off — the whole block, from the URL, so the before/after tool (and
+     anyone debugging) can revert this file without editing a line. Read at
+     LOAD, before the species registration, because a build is baked at
+     registration and cannot be flipped later (see CBZ.orcaUseLegacyModel).
+     ORCA_POD is shared with city/marine_predation.js's tactical layer on
+     purpose: "orca=off" means no orca concept anywhere, not half of one. */
+  try {
+    if (typeof location !== "undefined" && location.search &&
+        /(^|[?&])orca=off(&|$)/.test(location.search)) {
+      CFG.ORCA_V1 = false; CFG.ORCA_POD = false; CFG.ORCA_SURFACE = false;
+      CFG.ORCA_ACTS = false; CFG.ORCA_DRAG = false; CFG.ORCA_HUNT = false;
+    }
+  } catch (e) {}
+
   function MODEL() { return CFG.ORCA_V1 !== false; }
   function POD() { return CFG.ORCA_POD !== false; }
   function SURF() { return CFG.ORCA_SURFACE !== false; }
@@ -714,15 +728,32 @@
      it rather than asserting it). A model pass is not the place to move a
      balance number by accident. What DID change: packs 2 -> 3, because a pod
      you never meet cannot be frightening. */
-  if (MODEL() && typeof CBZ.defineSpecies === "function") {
-    CBZ.defineSpecies({
-      id: "orca", name: "Orca", biome: "water", rarity: "rare",
-      hp: 620, fur: "Orca Hide", furValue: 520, meat: "Whale Meat", meatValue: 44,
-      herd: [3, 6], packs: 3, spd: 3.4, danger: 0.5, bite: 42, aquatic: true,
-      scale: 1.55, color: 0x0a0c10, clearance: 110, swimDepth: 2.6,
-      build: build,
-    });
-  }
+  const LEGACY_SPECIES = (CBZ.WILDLIFE_SPECIES && CBZ.WILDLIFE_SPECIES.orca) || null;
+  const ORCA_SPECIES = {
+    id: "orca", name: "Orca", biome: "water", rarity: "rare",
+    hp: 620, fur: "Orca Hide", furValue: 520, meat: "Whale Meat", meatValue: 44,
+    herd: [3, 6], packs: 3, spd: 3.4, danger: 0.5, bite: 42, aquatic: true,
+    scale: 1.55, color: 0x0a0c10, clearance: 110, swimDepth: 2.6,
+    build: build,
+  };
+  if (MODEL() && typeof CBZ.defineSpecies === "function") CBZ.defineSpecies(ORCA_SPECIES);
+
+  /* A REVERT YOU CAN ACTUALLY PHOTOGRAPH. Every other switch in this file is
+     read LIVE, so flipping it mid-run is the whole "before" — but a species
+     BUILD is baked at registration, so a flag alone cannot put the old animal
+     back. The definition this file displaced is therefore kept, and handing it
+     back to defineSpecies restores city/wildlife/aquatic.js's orca exactly.
+     That is what makes tools/visual-presets/orca-pod.mjs a true A/B of the
+     same checkout against itself rather than a comparison with a deployment.
+     Returns true when the requested build is the live one. */
+  CBZ.orcaUseLegacyModel = function (on) {
+    if (typeof CBZ.defineSpecies !== "function") return false;
+    const want = on ? LEGACY_SPECIES : ORCA_SPECIES;
+    if (!want) return false;
+    CBZ.defineSpecies(want);
+    return CBZ.WILDLIFE_SPECIES.orca === want;
+  };
+  CBZ.orcaLegacySpecies = LEGACY_SPECIES;
 
   // ============================================================
   //  §2. THE INDIVIDUAL. Sex, dorsal shape, and how big this one is, drawn

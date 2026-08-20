@@ -300,13 +300,31 @@ async function stageDeck(input) {
   }
   for (const k of Object.keys(S.hulls)) S.hulls[k].visible = (k === hullKey);
   let deckTop = surf + (Number(subject.camEye) || 3);
+  let railZ = bz + sideD - Math.min(3.2, sideD * 0.35);
   if (hull) {
-    // lie alongside, parallel to the shark, at the declared range
-    hull.position.set(bx - Number(subject.ahead || 0), surf, bz + sideD);
+    // Lie alongside, FORE-AND-AFT along the shark's own axis, positioned so the
+    // NEAR RAIL — not the centreline — is the declared range off the animal.
+    // "Eight metres off the rail" has to mean the rail or the label is a lie.
+    hull.position.set(0, 0, 0);
     hull.rotation.set(0, 0, 0);
     hull.updateMatrixWorld(true);
-    const hb = new T.Box3().setFromObject(hull);
+    let hb = new T.Box3().setFromObject(hull);
+    if ((hb.max.z - hb.min.z) > (hb.max.x - hb.min.x)) {
+      hull.rotation.y = Math.PI / 2;                 // this hull is beam-on to +x
+      hull.updateMatrixWorld(true);
+      hb = new T.Box3().setFromObject(hull);
+    }
+    const halfBeam = (hb.max.z - hb.min.z) * 0.5;
+    hull.position.set(bx - Number(subject.ahead || 0), surf, bz + sideD + halfBeam);
+    hull.updateMatrixWorld(true);
+    hb = new T.Box3().setFromObject(hull);
     deckTop = hb.max.y;
+    // AT THE RAIL, NOT IN THE SALOON. The camera used to stand a flat 3.2 m
+    // inboard of the hull's CENTRELINE, which on a 34 m yacht is inside the
+    // superstructure: three of these frames photographed a doorway and a
+    // banquette instead of a shark, and no metric in the table could say so.
+    // It stands at the near rail now, measured off the hull that is there.
+    railZ = hb.min.z + 0.45;
   }
 
   // ---- camera: standing at the rail ---------------------------------------
@@ -315,8 +333,6 @@ async function stageDeck(input) {
   if (ref && ref.camera) { camPos = ref.camera.position.slice(); camAim = ref.camera.target.slice(); }
   else {
     const eye = surf + (Number(subject.camEye) || 3);
-    // inboard of the rail on the shark's side of the boat
-    const railZ = bz + sideD - Math.min(3.2, sideD * 0.35);
     camPos = [bx - Number(subject.ahead || 0), eye, railZ];
     camAim = subject.topDown
       ? [bx, surf - Number(subject.aimDown || 1), bz]
