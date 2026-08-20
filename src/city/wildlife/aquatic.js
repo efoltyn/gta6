@@ -815,7 +815,7 @@
     const gum = m(o.gum || 0x8e3b42), gumDark = m(o.gumDark || 0x5e2229);
     const enamel = m(o.tooth || 0xf2ead6), root = m(o.toothRoot || 0xd6a9a4);
     const cavityMat = m(o.cavity || 0x63262c);
-    const skin = m(o.skin || 0xdfe4e6), upperSkin = m(o.upperSkin || o.skin || 0x6b7880);
+    const skin = m(o.skin || 0xdfe4e6);
 
     // The jaw line is not level. It rises toward the corners so the whole arc
     // follows the underside of the head — which is what actually seats the
@@ -840,10 +840,18 @@
         const corner = function (dn, dy) {
           return sh.v(p[0] + nn[0] * dn, yr + dy, p[1] + nn[1] * dn);
         };
+        // THE UPPER BAND IS A LIP, NOT A BUMPER. The protruded palatoquadrate
+        // in the reference photographs is a THIN pale wrap around the tooth
+        // row; built at the lower jaw's cross-section it read as a rigid grey
+        // roll bar across the mouth and, head-on at full rake, as a helmet
+        // over the snout. So the upper jaw takes a much slimmer section:
+        // shallower rails and under half the lip height.
+        const kIn = up ? 0.75 : 1, kOut = up ? 0.50 : 1;
+        const kGum = up ? 0.80 : 1, kLip = up ? 0.21 : 0.45;
         rows.push({
           a: a,
-          c: [corner(-railIn, gumH * 0.5), corner(-railIn, -gumH * 0.5),
-            corner(railOut, -lipH * 0.45), corner(railOut, lipH * 0.45)],
+          c: [corner(-railIn * kIn, gumH * 0.5 * kGum), corner(-railIn * kIn, -gumH * 0.5 * kGum),
+            corner(railOut * kOut, -lipH * kLip), corner(railOut * kOut, lipH * kLip)],
         });
       }
       // face 0 inner, 1 bottom, 2 outer, 3 top.  The mouth-facing pair is the
@@ -864,9 +872,13 @@
       return sh.geom();
     }
     function band(y, up, name, parent) {
-      const key = "jawband|" + [y, up, gumH, lipH, railIn, railOut, len, width, A, cornerRise].join(",");
+      const key = "jawband2|" + [y, up, gumH, lipH, railIn, railOut, len, width, A, cornerRise].join(",");
       const geo = cachedGeom(key, function () { return bandGeom(y, up, 14); });
-      const mesh = meshOf(geo, [gum, up ? upperSkin : skin, gumDark]);
+      // both jaws' world-facing faces are the PALE jaw skin: in the
+      // photographs the protruded upper jaw is whitish-pink, and painting it
+      // the dark dorsal colour is exactly what made it read as a bolted-on
+      // grey object instead of the animal's own lip.
+      const mesh = meshOf(geo, [gum, skin, gumDark]);
       mesh.name = name;
       parent.add(mesh);
       return mesh;
@@ -986,8 +998,8 @@
     const lipGeom = cachedGeom("liptip|" + [len, lipH, width].join(","), function () {
       return new T.BoxGeometry(len * 0.13, lipH, width * 0.20);
     });
-    const ul = new T.Mesh(lipGeom, upperSkin); ul.name = "sharkUpperLip";
-    ul.position.set(cx + rad * 1.0, upperY, 0); upper.add(ul);
+    const ul = new T.Mesh(lipGeom, skin); ul.name = "sharkUpperLip";
+    ul.position.set(cx + rad * 1.0, upperY, 0); ul.scale.y = 0.55; upper.add(ul);
     const ll = new T.Mesh(lipGeom, skin); ll.name = "sharkLowerLip";
     ll.position.set(cx + rad * 1.0, lowerY, 0); lower.add(ll);
 
@@ -1135,7 +1147,7 @@
       addSharkMouth(g, T, m, {
         hingeX: 1.62, hingeY: 0.716, length: 0.90, width: 0.66, gap: 0.30,
         toothHeight: 0.145, toothWidth: 0.118, rowTeeth: 19, cornerRise: 0.135,
-        maxOpen: 1.05, skin: 0xf1f4f4, upperSkin: 0x363c40,
+        maxOpen: 1.05, skin: 0xf1f4f4,
       });
       const snout = addSharkRostrum(g, [grey, white], GW_SNOUT, {
         pivotX: 1.95, pivotY: 0.950, sides: 16,
@@ -1268,7 +1280,7 @@
       addSharkMouth(g, T, m, {
         hingeX: 2.30, hingeY: 0.800, length: 1.58, width: 1.10, gap: 0.56,
         toothHeight: 0.30, toothWidth: 0.245, rowTeeth: 21, cornerRise: 0.25,
-        maxOpen: 1.02, skin: 0xe6ebec, upperSkin: 0x2a3035,
+        maxOpen: 1.02, skin: 0xe6ebec,
       });
       const snout = addSharkRostrum(g, [dark, white], MEG_SNOUT, {
         pivotX: 3.20, pivotY: 1.160, sides: 16,
@@ -1376,7 +1388,7 @@
       addSharkMouth(g, T, m, {
         hingeX: 1.26, hingeY: 0.688, length: 0.74, width: 0.56, gap: 0.24,
         toothHeight: 0.115, toothWidth: 0.095, rowTeeth: 17, cornerRise: 0.115,
-        maxOpen: 0.94, skin: 0xe9edec, upperSkin: 0x434c50,
+        maxOpen: 0.94, skin: 0xe9edec,
       });
       // THE CEPHALOFOIL: a centre block plus two rounded-tip wings.
       const head = hullMesh([grey, pale], [
@@ -1506,7 +1518,7 @@
       addSharkMouth(g, T, m, {
         hingeX: 1.36, hingeY: 0.716, length: 0.78, width: 0.56, gap: 0.28,
         toothHeight: 0.135, toothWidth: 0.108, rowTeeth: 17, cornerRise: 0.12,
-        maxOpen: 1.00, skin: 0xf0f2f2, upperSkin: 0x464e52,
+        maxOpen: 1.00, skin: 0xf0f2f2,
       });
       const snout = addSharkRostrum(g, [grey, white], BULL_SNOUT, {
         pivotX: 1.66, pivotY: 0.980, sides: 14,
