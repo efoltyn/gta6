@@ -1012,6 +1012,14 @@
     // 5. THE MEN GO IN THE WATER, where §7 makes them bleed and the sea does
     //    the rest. Never our own damage path: cityKillPed / the ped bus owns it.
     throwOccupants(car, bx, bz, nx, nz);
+    /* 6. AND THE BIRDS COME UP. A sinking boat with men in the water is a
+       frenzy site by any definition, and city/marine_frenzy.js already owns
+       "white water and gulls over a point in the sea" — so this is one guarded
+       call rather than a second copy of it. It is also the only thing in this
+       sequence that is visible from the far side of the bay. */
+    if (typeof CBZ.marineFrenzyAt === "function") {
+      try { CBZ.marineFrenzyAt(bx, bz, { boil: true, seconds: 40, press: 0.9 }); } catch (e) {}
+    }
     car._mpBites = (car._mpBites || 0) + 1;
     m.shipT = 1.4;
     AUDIT.shipBites++;
@@ -1324,7 +1332,19 @@
 
     // ---- ordinary marine predation -----------------------------------------
     const target = pickTarget(a, dt);
-    if (!target) return false;                          // the player hunt gets it
+    if (!target) {
+      /* NOTHING LIVING TO HUNT — BUT A CARCASS IS STILL FOOD. One seam, and it
+         is a seam rather than code here because city/marine_frenzy.js owns the
+         carcass sites and drives a scavenger through the SAME CBZ.predatorHunt
+         this function does. Guarded: without that file the actor falls through
+         to the shark's own player hunt exactly as before. */
+      if (typeof CBZ.marineScavengeStep === "function") {
+        let ate = false;
+        try { ate = CBZ.marineScavengeStep(a, dt); } catch (e) { ate = false; }
+        if (ate) { a.state = "wander"; show(a, pd2); return true; }
+      }
+      return false;                                     // the player hunt gets it
+    }
 
     // A POD MEMBER THAT IS LOSING LEAVES, AND IT LEAVES BLEEDING. That is what
     // makes one orca against a megalodon a visible defeat rather than a draw.

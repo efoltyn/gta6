@@ -65,6 +65,38 @@
    Somebody watching one patch of water for thirty seconds can tell which is
    which without being told. That is the whole specification.
 
+   ---- 3. WHAT HUNGER IS THE SPINE OF ---------------------------------------
+   Hunger is not a per-animal stat that happens to move a speed multiplier; it
+   is the one number the whole food web hangs off, and wildlife.js spends it in
+   six places that are each visible from outside without a single word of UI:
+
+     * SCAVENGING. A hungry land predator that smells a carcass takes the free
+       meal instead of chasing. Shoot a deer, walk away, and the thing that
+       comes out of the treeline to stand over it was hungry. A fed one never
+       comes, and never even runs the scan.
+     * THE HERD BUNCHES. A hungry hunter in range packs a herd into a knot
+       (`herd.bunch`, decayed over ~8s) — tighter cohesion, smaller personal
+       space. In the water that has a name: a bait ball. You read the predator's
+       hunger off the SHAPE of the prey, from a distance at which you cannot
+       see the predator at all.
+     * PREY SPOOKS HARDER. The alarm ripple's radius and amplitude both scale
+       with the hunter's drive, so a fed wolf drifts through a grazing meadow
+       and a starving one empties it from half again as far out.
+     * IT HUNTS OUT OF RANGE. The biome fence opens for an animal that is both
+       starving AND holding a claim, and closes again the frame the hunt ends.
+     * THE FISH RIDES HIGH. Swim depth leans shallow with hunger: a starving
+       shark cruises where its fin shows and where the swimmers are, a fed one
+       hangs down in blue water.
+     * THE EYES. A starving predator's aggro eyes are lit while it is merely
+       cruising, not only while it stalks. It carries at night and over water.
+
+   And it goes DOWN in exactly one function (wildlife.js's `mealFrom`), paid on
+   ARRIVAL at the body rather than on the decision to go, receipted per
+   (eater, carcass) so the three paths that can report one mouthful — the
+   universal hook in killAnimal, the food chain's startFeed, and scavenging —
+   can never feed an animal twice. A carcass gives a smaller share to each
+   successive eater, so one deer does not feed a county.
+
    ---- BUDGET ----------------------------------------------------------------
    This ticks for every animal in a 25 km sea, so it is allocation-free per
    frame in the same discipline creature_combat.js's header describes: every
@@ -201,7 +233,16 @@
   */
   const HUNT_FLOOR = 0.34;       // below this a predator is not shopping at all
 
+  /* THE OFF SWITCH IS A REAL OFF SWITCH. With WILDLIFE_HUNGER off every
+     multiplier below must be EXACTLY 1 and `hunt` must be 1 (an animal that
+     always shops), or the "one-line revert" quietly ships a different world
+     than the one it claims to restore — and the flag A/B that verifies this
+     feature would be measuring a third thing. Frozen and shared: nobody
+     writes to a drive scratch. */
+  const OFF = { h: 0.5, spd: 1, restless: 1, loiter: 1, sense: 1, patience: 1, bold: 1, hunt: 1 };
+
   function drive(a) {
+    if (!HUNGER_ON() || !a) return OFF;
     let d = a._hgDrive;
     if (!d) {
       d = a._hgDrive = { h: -9, spd: 1, restless: 1, loiter: 1, sense: 1, patience: 1, bold: 1, hunt: 1 };

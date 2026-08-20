@@ -86,6 +86,10 @@
   // boldness / will-it-hunt). One cached object per actor; see the traits file.
   const CALM = { h: 0.5, spd: 1, restless: 1, loiter: 1, sense: 1, patience: 1, bold: 1, hunt: 1 };
   function DRIVE(a) { return TRAITS ? TRAITS.drive(a) : CALM; }
+  // Is hunger switched on at all? The behaviours hunger ADDS (scavenging, herd
+  // bunching) are gated on this rather than on a drive multiplier, because a
+  // multiplier can only scale something that already existed.
+  function HGON() { return !!(TRAITS && TRAITS.HUNGER_ON()); }
 
   // ---- WILDLIFE_LIVE — the one-line revert for the living-wildlife overhaul.
   // ON (default): animal groups are tagged userData.dynamic so the static
@@ -472,6 +476,7 @@
       // exponents the clearance/depth ladders were already shaped for.
       a.waterClearance = aquaticClearance(sp) * Math.pow(kSize, 0.7);
       a.swimDepth = swimDepth;
+      a._swimDepth0 = swimDepth;          // hunger leans on this; never compound
       a._waterMove = { x: x, z: z, heading: initialHeading, blocked: false, shore: -999 };
       a._baseClear = a.waterClearance;    // hunger leans on this; never compound
     }
@@ -573,6 +578,20 @@
     }
     return eyes;
   }
+  /* THE EYES ARE A HUNGER READ TOO. Charging and stalking light them as they
+     always did; on top of that a predator that is genuinely STARVING carries
+     them lit while it is merely cruising, so the shape moving along the
+     treeline at night tells you what it wants before it has decided who. A
+     fed one is dark, which is the whole difference. Costs nothing:
+     setAggroEyes early-returns unless the mode actually changed, and the
+     hunger drive behind it is a cached scratch re-derived every few seconds. */
+  const EYE_STARVED = 0.82;
+  function eyeMode(a) {
+    if (a.state === "charge") return 2;
+    if (a.state === "stalk") return 1;
+    return (HUNGER(a) >= EYE_STARVED && a.species && predSpecies(a.species)) ? 1 : 0;
+  }
+
   function setAggroEyes(a, mode) {   // 0 off · 1 stalking (lit) · 2 charging (lit + swollen)
     if (a._eyeMode === mode) return;
     a._eyeMode = mode;
@@ -1441,7 +1460,7 @@
        great white that has just eaten actually FULL, which is precisely the
        animal the owner named. mealFrom is receipted, so the wolf whose
        startFeed fires a frame later does not get the meal twice. */
-    if (by && by.animal && !by.dead && by !== a && predSpecies(by.species)) mealFrom(by, a, 1);
+    if (by && by.animal && !by.dead && by !== a && by.species && predSpecies(by.species)) mealFrom(by, a, 1);
     if (killerIsPlayer(by)) {
       if (CBZ.city) {
         if (a.legendary) { if (CBZ.city.note) CBZ.city.note("★ LEGENDARY " + a.species.name + " DOWN, skin it before it's gone!", 4, { urgent: true }); }
@@ -2001,7 +2020,20 @@
       const nz = grp.position.z + Math.sin(a.faceH) * speed * dt;
       const reg = CBZ.cityNearestRegion && CBZ.cityNearestRegion(ARENA(), nx, nz, 40);
       const onHome = reg && (reg.biome === sp.biome) && CBZ.cityRegionHit(reg, nx, nz, 6);
-      if (!onHome && a.state !== "charge") {
+      /* A STARVING PREDATOR HUNTS OUTSIDE ITS RANGE. The fence is what stops a
+         biome slowly draining of its wolves over a long session, and it stays
+         exactly as it was for every animal that is not both hungry AND
+         committed. But an animal that is starving with something already in
+         its sights follows it over the ridge — that is what starving means,
+         and it is how you end up meeting a predator somewhere there is not
+         supposed to be one.
+
+         Scoped so it cannot cause the drain the fence was written to prevent:
+         it needs a LIVE CLAIM (prey, or a carcass it is walking to), so the
+         frame the hunt ends the fence closes again and the steer-home line
+         below carries it back. No timer, nothing to leak. */
+      const starvedOut = !onHome && (a._prey || a._feedOn) && DRIVE(a).hunt > 0.55;
+      if (!onHome && a.state !== "charge" && !starvedOut) {
         a.heading = Math.atan2(a.home.z - grp.position.z, a.home.x - grp.position.x) + (Math.random() - 0.5) * 0.6;
       } else {
         grp.position.x = nx; grp.position.z = nz; moved = true;
@@ -2366,9 +2398,11 @@
        same line empties the meadow from half again as far out and leaves the
        herd packed into a knot. Nobody is told which wolf it was. */
     const hd = DRIVE(h);
-    const R = (34 + SZ(h) * 12) * (0.62 + hd.bold * 0.42);
+    // both coefficients are written so bold == 1 (hunger off, or an animal at
+    // dead-centre hunger) reproduces the old numbers EXACTLY.
+    const R = (34 + SZ(h) * 12) * (0.58 + hd.bold * 0.42);
     const R2 = R * R;
-    const amtH = amt * (0.6 + hd.bold * 0.45);
+    const amtH = amt * (0.55 + hd.bold * 0.45);
     for (let i = 0; i < animals.length; i++) {
       const a = animals[i], sp = a.species;
       if (a === h || a.dead || a.tamed || a.ridden || a.external || !sp) continue;
@@ -2384,7 +2418,7 @@
          already exist. A fed predator sets it to nearly nothing, so the
          difference between a fed and a starving hunter is visible in the SHAPE
          of the herd from a distance at which you cannot see either of them. */
-      const hr0 = a.herd;
+      const hr0 = HGON() ? a.herd : null;
       if (hr0) { const b = hd.hunt; if (!(hr0.bunch > b)) hr0.bunch = b; }
       if (a.state === "wander" || a.state === "graze" || a.state === "idle") {
         a.state = "flee";
@@ -2454,9 +2488,15 @@
     TRAITS.feed(eater, meal);
   }
 
+  /* THE MEAL IS PAID ON ARRIVAL, NOT ON THE DECISION — feedTick calls
+     mealFrom the frame the eater's mouth reaches the body. It matters because
+     a scavenger can be sixty metres from the carcass when it sets off, and an
+     animal that behaved FED for the whole walk over would be the feature
+     lying to the person watching it. (A hunter's own kill is already paid by
+     killAnimal, standing over the body; mealFrom's receipt keeps that to one.) */
   function startFeed(a, kill, share) {
     a._feedOn = kill;
-    mealFrom(a, kill, share);
+    a._mealShare = share == null ? 1 : share;
     a._feedT = FEED_MIN + Math.random() * FEED_RAND;
     a._feedPh = 0; a._feedGore = 0.4;
     a._prey = null;
@@ -2508,7 +2548,9 @@
     // the binary clock stays (it is what freezes a fed predator into scenery),
     // but it is now as long as the meal was big — a small kill buys a short
     // rest, which is exactly what makes a hungry world feel busier.
-    a._satT = (SAT_MIN + Math.random() * SAT_RAND) * (1 - HUNGER(a) * 0.55);
+    // ..centred on 0.5 so a world with the flag off gets the ORIGINAL clock and
+    // not a quietly shortened one: 0.5 -> 1.0x, starving -> 0.45x, fed -> 1.55x.
+    a._satT = (SAT_MIN + Math.random() * SAT_RAND) * (1 - (HUNGER(a) - 0.5) * 1.1);
     if (CBZ.predatorPose) { try { CBZ.predatorPose(a, "maul", 0, 0, 0); } catch (e) {} }
   }
   function feedTick(a, dt) {
@@ -2530,6 +2572,7 @@
       return true;
     }
     walk(a, Math.atan2(dz, dx), 0, dt);
+    mealFrom(a, kill, a._mealShare);       // receipted: one meal, however many frames
     a._feedPh += dt * 0.55;
     if (CBZ.predatorPose) {
       // mass picks the beat exactly the way predatorKit picks a seize style —
@@ -2587,6 +2630,33 @@
         startFeed(a, a._prey);
         if (feedTick(a, dt)) return true;
       } else releasePrey(a);
+    }
+
+    /* ---- CARRION BEATS THE CHASE ------------------------------------------
+       Before this hunter goes looking for something to run down, it checks
+       whether somebody has already left it a meal. A hungry animal takes the
+       free one every time; a fed one does not even look, so it never runs the
+       scan. This is the reason the thing that walks out of the treeline to
+       stand over the deer you shot and left is always a hungry one — and the
+       player never gets told that, which is the entire point.
+
+       Gated on there being no live claim, so it can never steal a hunter off
+       an animal it is already in the middle of taking. */
+    const hsp0 = a.species;
+    if (CHAIN() && HGON() && hsp0 && !hsp0.aquatic && !a._prey && (a._feedT || 0) <= 0 &&
+        (a._satT || 0) <= 0 && predSpecies(hsp0)) {
+      const carrion = pickCarcass(a, dt);
+      // a scavenged share is worth less than a fresh kill — somebody else's
+      // work, already opened, and mealFrom divides it again per previous eater.
+      if (carrion) {
+        startFeed(a, carrion, 0.72);
+        // the WALK is on top of the meal, not instead of it: a carcass across
+        // the meadow would otherwise time out before the scavenger arrived and
+        // the whole behaviour would read as an animal changing its mind.
+        const cdx = carrion.pos.x - grp.position.x, cdz = carrion.pos.z - grp.position.z;
+        a._feedT += Math.min(30, Math.hypot(cdx, cdz) / Math.max(0.6, (hsp0.spd || 1.4) * 0.85));
+        if (feedTick(a, dt)) return true;
+      }
     }
 
     // ---- WHOM IS THIS HUNT FOR? -------------------------------------------
@@ -2793,8 +2863,10 @@
       snakeAnimate(a, dt);
     } else {
       // the Minecraft read: hunting eyes glow red. predatorHunt has just
-      // written a.state, so this is the same frame, not one behind.
-      setAggroEyes(a, a.state === "charge" ? 2 : (a.state === "stalk" ? 1 : 0));
+      // written a.state, so this is the same frame, not one behind — and a
+      // STARVING predator's are lit before it has picked anything, which is
+      // the one hunger cue that carries at night and across water.
+      setAggroEyes(a, eyeMode(a));
       // settle any leftover strike pitch between swings, or a bear that
       // swung once keeps its nose in the dirt for the rest of the encounter.
       if (grp.rotation.x !== 0 && (a._atkAnim == null || a._atkAnim < 0)) grp.rotation.x *= Math.max(0, 1 - dt * 6);
@@ -2913,7 +2985,7 @@
     const sp = a.species, grp = a.group, cls = classify(sp);
     // the Minecraft read: hunting eyes glow red (BEFORE the flinch return, so
     // a shot wolf lights up on the very frame it turns on you).
-    setAggroEyes(a, a.state === "charge" ? 2 : (a.state === "stalk" ? 1 : 0));
+    setAggroEyes(a, eyeMode(a));
     // hit recoil owns the transform while it lasts; the state resumes after.
     if ((a._flinchT || 0) > 0) { if (CBZ.creatureAnimateFlinch) CBZ.creatureAnimateFlinch(a, dt); return; }
     if (a.alarm > 0) a.alarm -= dt;
@@ -3400,6 +3472,21 @@
       if (a.snake) { snakeTick(a, dt, P); continue; }
       // ---- aquatic: water-mask navigation + synced wave/depth lanes -------
       if (sp.aquatic) {
+        /* A HUNGRY FISH RIDES HIGH. This is the strongest hunger read the sea
+           has, and it costs one multiply: swim depth leans SHALLOW with hunger
+           and DEEP with fullness. A starving shark cruises just under the
+           surface — where its fin proxy actually shows and where the seals and
+           the swimmers are — and a fed one hangs down in blue water where you
+           will never see it unless you go looking. Written off the spawn-time
+           base every frame rather than accumulated, so it can never drift, and
+           placed BEFORE the shark brain so it applies to the animal the owner
+           named as much as to the mackerel.
+
+           Behind the LOD gate on purpose? No — deliberately in front of it: a
+           shark's fin proxy is drawn from beyond the visible radius, so the
+           depth that decides whether you can see a fin at all has to be right
+           on the frames where the body is not being ticked. */
+        if (a._swimDepth0 > 0) a.swimDepth = a._swimDepth0 * (1.44 - DRIVE(a).bold * 0.44);
         // APEX PREDATORS think before the LOD gate: a stalking shark hunts from
         // BEYOND the visible radius (its fin proxy is what you see, not its
         // body — city/wildlife_shark.js), so it must keep running while hidden.
@@ -3846,6 +3933,14 @@
     let n = 0, sMin = Infinity, sMax = -Infinity, sSum = 0, sSq = 0, big = 0;
     let hN = 0, hMin = Infinity, hMax = -Infinity, hSum = 0, hSq = 0;
     let starving = 0, fed = 0, spdMin = Infinity, spdMax = -Infinity, hpMin = Infinity, hpMax = -Infinity;
+    // the FOOD WEB half: how many are at a body right now, and how hard the
+    // tightest herd in the world is packed. Both are structurally zero with
+    // WILDLIFE_HUNGER off, which is the same ratchet law the size numbers obey.
+    let feeding = 0, bunchMax = 0;
+    for (let h = 0; h < herds.length; h++) {
+      const b = herds[h] && herds[h].bunch;
+      if (b > bunchMax && (!id || (herds[h].sp && herds[h].sp.id === id))) bunchMax = b;
+    }
     for (let i = 0; i < animals.length; i++) {
       const a = animals[i];
       if (!a || a.dead || a.external) continue;
@@ -3858,6 +3953,7 @@
       if (sp0 < spdMin) spdMin = sp0; if (sp0 > spdMax) spdMax = sp0;
       const mh = a.maxHp || 0;
       if (mh < hpMin) hpMin = mh; if (mh > hpMax) hpMax = mh;
+      if ((a._feedT || 0) > 0) feeding++;
       if (Number.isFinite(a.hunger)) {
         hN++; hSum += a.hunger; hSq += a.hunger * a.hunger;
         if (a.hunger < hMin) hMin = a.hunger; if (a.hunger > hMax) hMax = a.hunger;
@@ -3876,7 +3972,7 @@
       hungerN: hN, hungerMin: r3(hN ? hMin : 0), hungerMax: r3(hN ? hMax : 0),
       hungerMean: r3(hMean),
       hungerStd: r3(hN ? Math.sqrt(Math.max(0, hSq / hN - hMean * hMean)) : 0),
-      starving: starving, fed: fed,
+      starving: starving, fed: fed, feeding: feeding, bunchMax: r3(bunchMax),
       sizeOn: !!(TRAITS && TRAITS.SIZE_ON()), hungerOn: !!(TRAITS && TRAITS.HUNGER_ON()),
     };
   };

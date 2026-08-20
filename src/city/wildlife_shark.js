@@ -912,12 +912,24 @@
       // a fin cutting water rakes a little; deterministic, tied to the clock
       s.fin.rotation.z = 0.03 * Math.sin(t * 1.7 + plan.finX * 3.1);
       // THE BANK. A shark turns by rolling into the turn, and from a deck the
-      // dorsal LEANING is how you read the turn before the wake shows it. The
-      // roll axis is the animal's own forward axis, which is the blade's local
-      // x — rolling it on z (the rake) would just make it lie down.
-      s.bank = surfLife()
-        ? Math.max(-0.55, Math.min(0.55, s.yaw * 0.80 * Math.min(1, s.spd / 2.2)))
-        : 0;
+      // dorsal LEANING is how you read the turn a second before the wake shows
+      // it. The roll axis is the animal's own forward axis, which is the
+      // blade's local x — rolling it on z (the rake) would just lay it down.
+      //
+      // THE NUMBER IS NOT INVENTED HERE. wildlife_rig.js's animateSwim already
+      // banks the authored body (grp.rotation.x = clamp(turnRate * 0.25, 0.45)),
+      // so the proxy uses that animal's OWN roll when the rig is awake and
+      // otherwise solves the identical curve itself. A blade that leaned by a
+      // different law than the body it stands in for would jump at the LOD
+      // handover exactly the way its HEIGHT used to.
+      if (!surfLife()) s.bank = 0;
+      else if (a.swim && a.swim.roll != null && grp.visible !== false) s.bank = a.swim.roll;
+      else {
+        // animateSwim early-returns on a hidden body, so its roll goes stale
+        // in precisely the band where the proxy fin is the only fin there is.
+        const wantB = Math.max(-0.45, Math.min(0.45, s.yaw * 0.25));
+        s.bank += (wantB - s.bank) * Math.min(1, dt * 3.2);
+      }
       s.fin.rotation.x = s.bank;
       s.finExposed = Math.max(0, exposed);
     } else {
@@ -955,7 +967,14 @@
     // its own trailing edge; a cruising one does not. Needs both a real speed
     // AND a real amount of blade out of the water, so a submerged rush is
     // silent and a drifting fin is dry.
-    const sprayK = surfLife() && k > 0.2
+    //
+    // NOT GATED ON THE PROXY FIN, and that is deliberate: spray is water, not
+    // anatomy. The one frame the player most wants it — a rush from ten metres
+    // off the rail — is exactly the frame where the AUTHORED dorsal is on
+    // screen and the proxy blade is not, so keying it to k would have made it
+    // literally impossible to see. It keys off `exposed`, which is the real
+    // blade against the real swell whoever is drawing it.
+    const sprayK = surfLife()
       ? Math.max(0, Math.min(1, (s.spd - 4.2) / 6.5)) *
         Math.max(0, Math.min(1, s.finExposed / Math.max(0.05, finH * 0.30)))
       : 0;
@@ -974,7 +993,7 @@
           ? Math.atan2(cam.position.x - s.root.position.x,
                        cam.position.z - s.root.position.z) + a.heading
           : 0;
-        s.sprayMat.opacity = 0.70 * sprayK * k *
+        s.sprayMat.opacity = 0.70 * sprayK *
           (0.82 + 0.18 * Math.sin(t * 11.3 + s.phase));   // torn, not a decal
       }
     } else if (s.spray) s.spray.visible = false;

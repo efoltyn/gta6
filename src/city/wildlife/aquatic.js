@@ -96,17 +96,28 @@
     (this.g[g] || (this.g[g] = [])).push(a, b, c);
   };
   Shell.prototype.quad = function (g, a, b, c, d) { this.tri(g, a, b, c); this.tri(g, a, c, d); };
+  // quad, wound to face `nrm`. p* are the four positions in order, v* the
+  // interned indices for the same points.
+  Shell.prototype.quadN = function (g, nrm, p, v) {
+    const ux = p[1][0] - p[0][0], uy = p[1][1] - p[0][1], uz = p[1][2] - p[0][2];
+    const wx = p[3][0] - p[0][0], wy = p[3][1] - p[0][1], wz = p[3][2] - p[0][2];
+    const nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
+    if (nx * nrm[0] + ny * nrm[1] + nz * nrm[2] >= 0) this.quad(g, v[0], v[1], v[2], v[3]);
+    else this.quad(g, v[3], v[2], v[1], v[0]);
+  };
   // an axis-aligned plate lying in the (u,v) plane at `c`, used for scars,
   // pores and skin folds so dozens of marks cost ONE mesh.
-  Shell.prototype.plate = function (g, c, u, v, w, h) {
+  Shell.prototype.plate = function (g, c, u, v, w, h, n) {
     const hu = [u[0] * w * 0.5, u[1] * w * 0.5, u[2] * w * 0.5];
     const hv = [v[0] * h * 0.5, v[1] * h * 0.5, v[2] * h * 0.5];
     const p = function (su, sv) {
       return [c[0] + hu[0] * su + hv[0] * sv, c[1] + hu[1] * su + hv[1] * sv, c[2] + hu[2] * su + hv[2] * sv];
     };
-    const a = this.v.apply(this, p(-1, -1)), b = this.v.apply(this, p(1, -1));
-    const d = this.v.apply(this, p(1, 1)), e = this.v.apply(this, p(-1, 1));
-    this.quad(g, a, b, d, e);
+    const pa = p(-1, -1), pb = p(1, -1), pd = p(1, 1), pe = p(-1, 1);
+    const a = this.v.apply(this, pa), b = this.v.apply(this, pb);
+    const d = this.v.apply(this, pd), e = this.v.apply(this, pe);
+    const nrm = n || cross3(u, v);
+    this.quadN(g, nrm, [pa, pb, pd, pe], [a, b, d, e]);
   };
   Shell.prototype.geom = function () {
     const idx = [], groups = [];
@@ -514,18 +525,14 @@
               const t = k / steps - 0.5;
               const ang = (o.gillCenter == null ? 0 : o.gillCenter) + side * 0 + t * (hgt / Math.max(0.05, ringAt(rings, x).ry));
               const a = side > 0 ? ang : Math.PI - ang;
-              const sk = onSkin(rings, x - t * hgt * Math.sin(gAng), a, 0.004);
-              const fwd = [1, 0, 0];
-              const c = sk.p;
-              const hw = gw * 0.5;
-              prev.push([
-                sh.v(c[0] + fwd[0] * hw, c[1] + fwd[1] * hw, c[2] + fwd[2] * hw),
-                sh.v(c[0] - fwd[0] * hw, c[1] - fwd[1] * hw, c[2] - fwd[2] * hw),
-              ]);
+              const sk = onSkin(rings, x - t * hgt * Math.sin(gAng), a, 0.005);
+              const c = sk.p, hw = gw * 0.5;
+              const pf = [c[0] + hw, c[1], c[2]], pb = [c[0] - hw, c[1], c[2]];
+              prev.push({ n: sk.n, p: [pf, pb], v: [sh.v(pf[0], pf[1], pf[2]), sh.v(pb[0], pb[1], pb[2])] });
               if (k > 0) {
                 const a0 = prev[k - 1], a1 = prev[k];
-                sh.quad(0, a0[0], a1[0], a1[1], a0[1]);
-                sh.quad(0, a0[1], a1[1], a1[0], a0[0]);
+                sh.quadN(0, a1.n, [a0.p[0], a1.p[0], a1.p[1], a0.p[1]],
+                  [a0.v[0], a1.v[0], a1.v[1], a0.v[1]]);
               }
             }
           }
@@ -556,7 +563,7 @@
           const tang = norm3(cross3(sk.n, [1, 0, 0]));
           const fwd = norm3(cross3(tang, sk.n));
           const s2 = pr * (0.65 + h01(i, 3, 9) * 0.7);
-          sh.plate(0, sk.p, fwd, tang, s2, s2);
+          sh.plate(0, sk.p, fwd, tang, s2, s2, sk.n);
         }
         return sh.geom();
       });
@@ -595,7 +602,7 @@
         const cs = Math.cos(rot), sn = Math.sin(rot);
         const du = [fwd[0] * cs + tang[0] * sn, fwd[1] * cs + tang[1] * sn, fwd[2] * cs + tang[2] * sn];
         const dv = [tang[0] * cs - fwd[0] * sn, tang[1] * cs - fwd[1] * sn, tang[2] * cs - fwd[2] * sn];
-        sh.plate(0, sk.p, du, dv, len, (o.scarWidth || 0.022) * (0.7 + h01(i, 21, seed) * 0.8));
+        sh.plate(0, sk.p, du, dv, len, (o.scarWidth || 0.022) * (0.7 + h01(i, 21, seed) * 0.8), sk.n);
       }
       // WRINKLE FOLDS — long horizontal creases along the flank behind the
       // head. Cheap, and per the reference sheet enormously effective.
@@ -607,17 +614,16 @@
           for (let k = 0; k <= steps; k++) {
             const t = k / steps;
             const ang = side > 0 ? lerp(-0.25, 0.75, t) : Math.PI - lerp(-0.25, 0.75, t);
-            const sk = onSkin(rings, x - t * span * 0.28, ang, 0.005);
+            const sk = onSkin(rings, x - t * span * 0.28, ang, 0.004);
             const tang = norm3(cross3(sk.n, [1, 0, 0]));
             const hw = (o.foldWidth || 0.03) * 0.5;
-            prev.push([
-              sh.v(sk.p[0] + tang[0] * hw, sk.p[1] + tang[1] * hw, sk.p[2] + tang[2] * hw),
-              sh.v(sk.p[0] - tang[0] * hw, sk.p[1] - tang[1] * hw, sk.p[2] - tang[2] * hw),
-            ]);
+            const pf = [sk.p[0] + tang[0] * hw, sk.p[1] + tang[1] * hw, sk.p[2] + tang[2] * hw];
+            const pb = [sk.p[0] - tang[0] * hw, sk.p[1] - tang[1] * hw, sk.p[2] - tang[2] * hw];
+            prev.push({ n: sk.n, p: [pf, pb], v: [sh.v(pf[0], pf[1], pf[2]), sh.v(pb[0], pb[1], pb[2])] });
             if (k > 0) {
               const a0 = prev[k - 1], a1 = prev[k];
-              sh.quad(1, a0[0], a1[0], a1[1], a0[1]);
-              sh.quad(1, a0[1], a1[1], a1[0], a0[0]);
+              sh.quadN(1, a1.n, [a0.p[0], a1.p[0], a1.p[1], a0.p[1]],
+                [a0.v[0], a1.v[0], a1.v[1], a0.v[1]]);
             }
           }
         }
@@ -1486,6 +1492,13 @@
         },
       });
       hull.name = "fishHull"; g.add(hull);
+      [0.085, -0.085].forEach(function (z) {
+        const e = new T.Mesh(cachedGeom("eye|0.038", function () {
+          return new T.SphereGeometry(0.038, 6, 5);
+        }), m(0x0d1114));
+        e.name = "fishEye";
+        e.position.set(1.03, 0.545, z); e.scale.set(0.85, 1, 0.7); g.add(e);
+      });
       function fin(mats, at, shape) { const f = finMesh(mats, at, shape); g.add(f); return f; }
       fin([back], [0.30, 0.72, 0], {
         span: 0.24, chordRoot: 0.26, chordTip: 0.03, sweep: 0.42, concavity: 0.22,
@@ -1557,6 +1570,13 @@
       const hull = hullMesh([back, silver], rings,
         { sides: 10, bellyCut: [-0.24, -0.14, -0.16, -0.30], ragged: 0.10, seed: 83 });
       hull.name = "fishHull"; g.add(hull);
+      [0.055, -0.055].forEach(function (z) {
+        const e = new T.Mesh(cachedGeom("eye|0.026", function () {
+          return new T.SphereGeometry(0.026, 6, 4);
+        }), m(0x0e1216));
+        e.name = "fishEye";
+        e.position.set(0.68, 0.425, z); e.scale.set(0.85, 1, 0.7); g.add(e);
+      });
       function fin(mats, at, shape) { const f = finMesh(mats, at, shape); g.add(f); return f; }
       fin([back], [0.10, 0.55, 0], {
         span: 0.15, chordRoot: 0.17, chordTip: 0.02, sweep: 0.40, concavity: 0.22,
@@ -1655,8 +1675,8 @@
           const r = ringAt(rings, x);
           for (let sgn = -1; sgn <= 1; sgn += 2) {
             const y = r.y + sgn * r.ry * 0.94;
-            sh.plate(0, [x, y + sgn * 0.045, 0], [1, 0, 0], [0, sgn, 0], 0.075, 0.09);
-            sh.plate(0, [x, y + sgn * 0.045, 0], [0, sgn, 0], [1, 0, 0], 0.09, 0.075);
+            sh.plate(0, [x, y + sgn * 0.045, 0.0022], [1, 0, 0], [0, sgn, 0], 0.075, 0.09, [0, 0, 1]);
+            sh.plate(0, [x, y + sgn * 0.045, -0.0022], [1, 0, 0], [0, sgn, 0], 0.075, 0.09, [0, 0, -1]);
           }
         }
         return sh.geom();
@@ -2009,7 +2029,7 @@
           const sk = onSkin(rings, x, ang, 0.02);
           const tg = norm3(cross3(sk.n, [1, 0, 0]));
           const fw = norm3(cross3(tg, sk.n));
-          sh.plate(0, sk.p, fw, tg, 0.15, 0.15);
+          sh.plate(0, sk.p, fw, tg, 0.15, 0.15, sk.n);
         }
         return sh.geom();
       }), [knob]);
@@ -2082,10 +2102,32 @@
         }), eye);
         e.position.set(0.98, 0.605, s2 * 0.60); g.add(e);
       });
-      const mouth = new T.Mesh(cachedGeom("manta-mouth", function () {
-        return new T.BoxGeometry(0.20, 0.10, 0.86);
-      }), slit);
-      mouth.position.set(1.06, 0.505, 0); g.add(mouth);
+      // THE MOUTH — a wide terminal SLOT, bowed forward in the middle, with a
+      // pale lip above and below. It was a BoxGeometry laid across the face,
+      // which is the last primitive that read as a brick in this animal.
+      const mouth = meshOf(cachedGeom("manta-mouth2", function () {
+        const sh = new Shell(), n = 12, cols = [];
+        for (let i = 0; i <= n; i++) {
+          const t = i / n - 0.5;
+          const z = t * 0.92;
+          const x = 1.13 - t * t * 0.46;                 // bowed forward
+          cols.push({
+            a: sh.v(x, 0.575, z),                        // upper lip, outer
+            b: sh.v(x - 0.055, 0.528, z),                // slot, upper
+            c: sh.v(x - 0.070, 0.489, z),                // slot, lower
+            d: sh.v(x - 0.010, 0.446, z),                // lower lip, outer
+          });
+        }
+        for (let i = 0; i < n; i++) {
+          const p0 = cols[i], p1 = cols[i + 1];
+          sh.quad(1, p0.a, p1.a, p1.b, p0.b);            // upper lip
+          sh.quad(0, p0.b, p1.b, p1.c, p0.c);            // the dark slot
+          sh.quad(1, p0.c, p1.c, p1.d, p0.d);            // lower lip
+        }
+        return sh.geom();
+      }), [slit, m(0x8f9498)]);
+      mouth.name = "mantaMouth";
+      g.add(mouth);
       const gills = meshOf(cachedGeom("manta-gills", function () {
         const sh = new Shell();
         for (let s2 = -1; s2 <= 1; s2 += 2) {

@@ -48,7 +48,7 @@ const subjects = [
   {
     id: "closed-side",
     label: "Closed Mouth, Side On — The Silhouette",
-    open: 0, frame: 4.4, target: [-0.2, 1.25, 0], cameraOffset: [0, 0.05, 14],
+    open: 0, frame: 4.6, target: [-0.15, 1.35, 0], cameraOffset: [0, 0.05, 15],
     waterY: null,
     focus: "Reference §3: the whole animal is a TEARDROP — max girth just behind the head at the pectoral line, then a long taper to a narrow peduncle. Count the fins: first dorsal, second dorsal, pectorals, pelvics, anal, caudal keel, and a caudal whose upper lobe is clearly longer.",
     state: "REST · SIDE ON",
@@ -56,7 +56,7 @@ const subjects = [
   {
     id: "full-gape",
     label: "Full Gape, Three-Quarter — The Money Shot",
-    open: 1, frame: 2.05, target: [2.55, 0.82, 0], cameraOffset: [2.4, 0.75, 4.6],
+    open: 1, frame: 2.4, target: [2.80, 0.80, 0], cameraOffset: [2.6, 0.8, 5.0],
     waterY: null,
     focus: "Reference §1: the palatoquadrate SLIDES FORWARD AND DOWN out from under the snout and the snout LIFTS off it, so the upper tooth row ends up in front of the closed-mouth rostrum tip. Gums a thick wet dark red-pink band, interior dark pink-red (never black), multiple tooth rows raked further back.",
     state: "COMMIT · 100% GAPE",
@@ -64,23 +64,23 @@ const subjects = [
   {
     id: "head-on",
     label: "Head On At The Surface — The Wide Dome",
-    open: 0.22, frame: 2.15, target: [2.35, 1.02, 0], cameraOffset: [8.5, 0.55, 0.35],
-    waterY: 1.02,
+    open: 0.22, frame: 2.35, target: [2.55, 1.05, 0], cameraOffset: [9.0, 0.5, 0.30],
+    waterY: 1.06,
     focus: "Reference §2: the head is a WIDE DOME, markedly wider than it is tall. The countershading boundary is a hard, RAGGED, high-contrast line that runs low across the cheek and kicks up above the gills — not a soft gradient and not a straight edge. Ampullae pores speckle the white underside; the nostrils are curved slits, not spheres.",
     state: "SURFACE · HEAD ON",
   },
   {
     id: "breach",
     label: "The Breach — 45° Out Of The Water",
-    open: 0.78, frame: 5.6, target: [1.1, 2.05, 0], cameraOffset: [-1.2, 0.2, 14],
-    animalPitch: 0.80, animal: [0, -0.55, 0], waterY: 1.05,
+    open: 0.78, frame: 7.2, target: [0.6, 2.10, 0], cameraOffset: [-0.9, 0.2, 16],
+    animalPitch: 0.80, animal: [0, -0.60, 0], waterY: 1.05,
     focus: "Reference §3: pitched up ~45°, head and pectorals clear of the water. Dorsal a broad triangle with a ROUNDED apex and a concave trailing edge, dark outside and paler at the base; pectoral broad, swept back and DARK-TIPPED; five pale gill slits sitting on the countershading transition.",
     state: "BREACH · 45°",
   },
   {
     id: "plan-view",
     label: "Straight Down — What You See From A Ship",
-    open: 0, frame: 5.0, planView: true, target: [-0.2, 1.05, 0],
+    open: 0, frame: 7.4, planView: true, target: [-0.15, 1.05, 0],
     waterY: null,
     focus: "Reference §4, the drone shot, and literally the owner's question. From directly above the body must be a NARROW torpedo, widest at the pectoral line, with the pectorals swept back about 30° from the body axis and the tail a tall crescent whose upper lobe is clearly longer. The dorsal from overhead is a thin sliver, almost nothing.",
     state: "PLAN VIEW · FROM THE DECK",
@@ -327,24 +327,36 @@ function stageGreatWhiteAnatomy(input) {
     if (!gg || !gg.attributes || !gg.attributes.position) return 0;
     const pos = gg.attributes.position, n = pos.count;
     if (n < 8) return 0;
-    // local plane: x = chord, y = span for every fin this file builds
-    let apex = null, rear = null, minX = Infinity;
+    // Local frame: +x is the chord (leading edge forward), +y the span. So the
+    // TRAILING outline is, in each spanwise band, the smallest x.
+    let apex = null, rear = null, minX = Infinity, maxY = -Infinity;
     for (let i = 0; i < n; i++) {
       const x = pos.getX(i), y = pos.getY(i);
-      if (!apex || y > apex[1] + 1e-6 || (Math.abs(y - apex[1]) < 1e-6 && x > apex[0])) apex = [x, y];
+      if (y > maxY + 1e-6) { maxY = y; apex = [x, y]; }
+      else if (Math.abs(y - maxY) <= 1e-6 && apex && x < apex[0]) apex = [x, y];
       if (x < minX) { minX = x; rear = [x, y]; }
     }
     if (!apex || !rear) return 0;
     const cx = apex[0] - rear[0], cy = apex[1] - rear[1];
     const clen = Math.hypot(cx, cy);
-    if (clen < 1e-5) return 0;
-    // signed distance from the chord, taking the deepest point on the REAR side
-    let deepest = 0;
+    if (clen < 1e-5 || Math.abs(cy) < 1e-5) return 0;
+    // bin the trailing outline by span, then take its deepest excursion from
+    // the straight rear-tip -> apex chord. A cone or a triangle gives 0.
+    const BINS = 24, bin = new Array(BINS).fill(null);
     for (let i = 0; i < n; i++) {
-      const dx = pos.getX(i) - rear[0], dy = pos.getY(i) - rear[1];
+      const x = pos.getX(i), y = pos.getY(i);
+      const t = (y - rear[1]) / cy;
+      if (t < 0 || t > 1) continue;
+      const b = Math.min(BINS - 1, Math.max(0, Math.floor(t * BINS)));
+      if (bin[b] === null || x < bin[b][0]) bin[b] = [x, y];
+    }
+    let deepest = 0;
+    for (let b = 0; b < BINS; b++) {
+      if (!bin[b]) continue;
+      const dx = bin[b][0] - rear[0], dy = bin[b][1] - rear[1];
       const t = (dx * cx + dy * cy) / (clen * clen);
-      if (t < 0.06 || t > 0.94) continue;
-      const d = (dx * cy - dy * cx) / clen;      // >0 is BEHIND the chord
+      if (t < 0.10 || t > 0.90) continue;
+      const d = (dx * cy - dy * cx) / clen;      // > 0 = cut IN toward the leading edge
       if (d > deepest) deepest = d;
     }
     return deepest / clen;
@@ -353,27 +365,26 @@ function stageGreatWhiteAnatomy(input) {
   function findDorsal(root) {
     let best = null, bestTop = -Infinity;
     meshList(root).forEach(function (mesh) {
-      if (!mesh.geometry || !mesh.geometry.boundingBox) {
-        if (mesh.geometry) mesh.geometry.computeBoundingBox();
-      }
-      const bb = mesh.geometry && mesh.geometry.boundingBox;
-      if (!bb) return;
-      box3.setFromObject(mesh);
-      const wide = Math.abs(bb.max.z - bb.min.z), tall = Math.abs(bb.max.y - bb.min.y);
-      if (tall < 0.35 || wide > tall * 0.8) return;   // fins are thin and tall
+      if (NOT_A_FIN.test(mesh.name || "")) return;
+      box3.setFromObject(mesh);                    // WORLD, so mesh.scale counts
+      const sz = box3.getSize(new T.Vector3());
+      if (sz.y < 0.5 || sz.z > sz.y * 0.55) return;   // a dorsal is thin and tall
       if (box3.max.y > bestTop) { bestTop = box3.max.y; best = mesh; }
     });
     return best;
   }
 
+  // Face and mouth parts are not fins; naming them out keeps the count honest.
+  const NOT_A_FIN = /gill|eye|nostril|gum|lip|mandible|tooth|cavity|pore|skin/i;
   const allMeshes = meshList(animal);
   let triangles = 0, boxFins = 0;
   allMeshes.forEach(function (mesh) {
     triangles += triCount(mesh);
+    if (NOT_A_FIN.test(mesh.name || "")) return;
     box3.setFromObject(mesh);
     const sz = box3.getSize(new T.Vector3());
-    const thin = Math.min(sz.x, sz.y, sz.z) < 0.28 * Math.max(sz.x, sz.y, sz.z);
-    if (thin && isBoxOrCone(mesh) && Math.max(sz.x, sz.y, sz.z) > 0.3) boxFins++;
+    const big = Math.max(sz.x, sz.y, sz.z), small = Math.min(sz.x, sz.y, sz.z);
+    if (big > 0.4 && small < 0.28 * big && isBoxOrCone(mesh)) boxFins++;
   });
   const dorsal = findDorsal(animal);
   const dorsalConcavity = dorsal ? trailingConcavity(dorsal) : 0;
@@ -418,16 +429,24 @@ function stageGreatWhiteAnatomy(input) {
 
   const shape = (animal.userData && animal.userData.sharkShape) || {};
   const bbox = new T.Box3().setFromObject(animal);
-  const planLen = bbox.max.x - bbox.min.x, planWid = bbox.max.z - bbox.min.z;
+  // §4 is about the BODY ("far narrower than the side view implies"), not the
+  // fin span — the same sheet demands LONG pectorals swept back 30 degrees, so
+  // a whole-bbox width would score the fix as a regression. Hull over length.
+  const planLen = bbox.max.x - bbox.min.x;
+  const planWid = (Number(shape.hullWidth) || (bbox.max.z - bbox.min.z)) * (Number(species.scale) || 1);
 
   /* ---- scene ----------------------------------------------------------- */
   const scene = new T.Scene();
   scene.background = new T.Color(0x06202e);
   scene.fog = new T.Fog(0x06202e, 26, 70);
-  scene.add(new T.HemisphereLight(0xcdeeff, 0x03121b, 1.05));
-  const key = new T.DirectionalLight(0xffffff, 1.5); key.position.set(5, 12, 10); scene.add(key);
-  const fill = new T.DirectionalLight(0xffa8a2, 0.55); fill.position.set(11, -1, 4); scene.add(fill);
-  const rim = new T.DirectionalLight(0x46c9ff, 0.8); rim.position.set(-9, 5, -9); scene.add(rim);
+  // r128 is PRE-physically-correct-lights: intensities simply sum, so a stack
+  // that looks reasonable in a modern build saturates a dark slate to white —
+  // and the countershading contrast this preset exists to judge lives exactly
+  // there. Keep the total under 1 so 0x53585a stays a dark grey.
+  scene.add(new T.HemisphereLight(0xcdeeff, 0x03121b, 0.40));
+  const key = new T.DirectionalLight(0xffffff, 0.72); key.position.set(5, 12, 10); scene.add(key);
+  const fill = new T.DirectionalLight(0xffa8a2, 0.22); fill.position.set(11, -1, 4); scene.add(fill);
+  const rim = new T.DirectionalLight(0x46c9ff, 0.30); rim.position.set(-9, 5, -9); scene.add(rim);
   scene.add(animal);
 
   if (subject.waterY != null) {
@@ -537,7 +556,7 @@ export default {
     poreCount: { label: "Ampullae of Lorenzini pores", unit: "", better: "higher" },
     scarCount: { label: "Rake scars on the dorsal skin", unit: "", better: "higher" },
     foldCount: { label: "Flank wrinkle folds behind the head", unit: "", better: "higher" },
-    planWidthRatio: { label: "Width over length from directly above (a narrow torpedo is small)", unit: "×", better: "lower" },
+    planWidthRatio: { label: "Hull width over body length from directly above (a narrow torpedo is small)", unit: "×", better: "lower" },
     meshes: { label: "Meshes in the animal (draw calls before batching)", unit: "", better: "lower" },
     triangles: { label: "Triangles in the animal", unit: "" },
   },

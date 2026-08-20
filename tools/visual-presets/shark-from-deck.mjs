@@ -35,6 +35,13 @@
                       over to the proxy at ~68 u. Zero is invisible.
      finConcavity     the trailing edge's deepest excursion from the apex->tip
                       chord, over that chord. A cone — the old proxy — is 0.
+     tailTipM         metres of upper CAUDAL lobe out of the water. This is a
+                      second fin and it is CORRECT — dorsal plus tail tip is
+                      the real shallow-cruise read. It is deliberately not
+                      counted in surfaceDorsals, which is about the bug.
+     finBankRad       how far the blade rolls into a turn, on wildlife_rig.js's
+                      own roll law so the proxy cannot lean differently from
+                      the body it stands in for.
      shadowShapeFill  the fraction of its own bounding box the underwater mass
                       covers. A filled ellipse is pi/4 = 0.785 however it is
                       stretched; a shark with a waist, swept pectorals and a
@@ -95,6 +102,15 @@ const subjects = [
     focus: "Past ~68 u the hunt hides the body and the PROXY dorsal takes over. It has to be the same fin at the same height or the player watches it jump. And there must never be two.",
     state: "HUNT · LOD HANDOVER",
     note: "finHandoverErrM is the jump, in metres. The old proxy raised a fixed cone on a fade curve and never asked how deep the shark was.",
+  },
+  {
+    id: "banking-turn",
+    label: "The Turn — The Fin Leans, And The Tail Shows",
+    hull: "yacht", camEye: 4.0, side: 78, ahead: 10, aimDown: 0.14,
+    beat: "circle", depthK: 0.92, speed: 6.4, turn: 1.4, wantProxy: true,
+    focus: "A shark rolls into its turns, so the dorsal LEANS — from a deck that is how you read the turn before the wake does. And on a genuinely shallow cruise the upper caudal lobe cuts the surface a body-length astern: fin plus tail tip, which is a real two-fin read and NOT the double-dorsal bug.",
+    state: "HUNT · HARD TURN",
+    note: "The bank uses wildlife_rig.js's own roll law, so the blade cannot lean differently from the body it stands in for.",
   },
 ];
 
@@ -232,19 +248,38 @@ async function stageDeck(input) {
       s.state = String(subject.beat || "circle");
       s.diveWant = draft * Number(subject.depthK || 0.92);
       const spd = Number(subject.speed) || 3;
+      const turn = Number(subject.turn || 0);
       for (let i = 0; i < 260; i++) {
-        actor.heading = heading;
-        s.opts.move(actor, heading, spd, 1 / 60);
-        // keep the framing fixed but leave the DISPLACEMENT intact for one
-        // frame at a time, so the wake sees a real speed
-        if (i < 259) pin();
+        if (!turn) actor.heading = heading;
+        s.opts.move(actor, turn ? actor.heading + turn : heading, spd, 1 / 60);
+        pin();
       }
+      // THE LAST HALF SECOND, UNPINNED AND TICKED. The proxy measures speed
+      // and turn rate off the transform between its OWN ticks, and smooths
+      // both (a wake that snapped would be worse than no wake) — so a run that
+      // pins the animal to one spot and then reads it once photographs a shark
+      // moving at a twentieth of its real speed, with no bank and no spray.
+      // These frames let it genuinely swim and tick the production proxy on
+      // every one of them. predatorHunt is stubbed to the DECLARED beat for
+      // the duration — the hunt is not what is being photographed here, and
+      // stubbing it is what makes both builds photograph the same instant.
+      const realHunt = CBZ.predatorHunt;
+      CBZ.predatorHunt = function () { return String(subject.beat || "circle"); };
+      try {
+        for (let i = 0; i < 42; i++) {
+          if (!turn) actor.heading = heading;
+          s.diveWant = draft * Number(subject.depthK || 0.92);
+          s.opts.move(actor, turn ? actor.heading + turn : heading, spd, 1 / 60);
+          if (CBZ.player) CBZ.player.hp = 100;
+          try { CBZ.sharkBrain(actor, 1 / 60, P); } catch (_) {}
+        }
+      } finally { CBZ.predatorHunt = realHunt; }
       s.state = String(subject.beat || "circle");
       s.diveWant = draft * Number(subject.depthK || 0.92);
+    } else {
+      // one brain tick so the proxy is solved against the final body transform
+      try { CBZ.sharkBrain(actor, 1 / 60, P); } catch (_) {}
     }
-    // one brain tick so the proxy is solved against the final body transform,
-    // exactly as it would be in play
-    try { CBZ.sharkBrain(actor, 1 / 60, P); } catch (_) {}
     const st = CBZ.sharkState ? CBZ.sharkState(actor) : null;
     huntState = st && st.state;
   }
@@ -321,7 +356,8 @@ async function stageDeck(input) {
   put("read",
     `dorsals ${R.dorsals} · fin ${(R.finM || 0).toFixed(2)}m (proxy ${(R.proxyFinM || 0).toFixed(2)} / body ${(R.authoredM || 0).toFixed(2)})` +
     `\ndepth ${(R.depthM || 0).toFixed(2)}m · shadow ${(R.shadowAreaM2 || 0).toFixed(1)}m2 off ${(R.shadowOffsetM || 0).toFixed(2)}m · wake ${(R.wakeLenM || 0).toFixed(1)}m` +
-    `\nconcavity ${(R.concavity || 0).toFixed(3)} · fill ${(R.shapeFill || 0).toFixed(3)} · meshes ${R.meshes || 0}`,
+    `\nconcavity ${(R.concavity || 0).toFixed(3)} · fill ${(R.shapeFill || 0).toFixed(3)} · meshes ${R.meshes || 0}` +
+    `\ntail ${(R.tailTipM || 0).toFixed(2)}m · bank ${(R.finBankRad || 0).toFixed(2)}rad · spray ${(R.sprayAlpha || 0).toFixed(2)}`,
     `position:absolute;right:26px;top:52px;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre;text-align:right;color:${R.dorsals === 1 ? "#9fe8c3" : "#ff9c9c"}`);
   put("note", subject.note, "position:absolute;right:26px;bottom:20px;padding:7px 10px;border-radius:6px;background:rgba(3,18,28,.72);color:#bfe9ff;font:11px ui-monospace,SFMono-Regular,Menlo,monospace;max-width:520px");
   put("source", new URL(input.sourceUrl).host + new URL(input.sourceUrl).pathname,
@@ -345,6 +381,9 @@ async function stageDeck(input) {
       shadowOffsetM: Number((R.shadowOffsetM || 0).toFixed(3)),
       shadowAlpha: Number((R.shadowAlpha || 0).toFixed(3)),
       wakeLenM: Number((R.wakeLenM || 0).toFixed(2)),
+      tailTipM: Number((R.tailTipM || 0).toFixed(3)),
+      finBankRad: Number(Math.abs(R.finBankRad || 0).toFixed(3)),
+      sprayAlpha: Number((R.sprayAlpha || 0).toFixed(3)),
       bodyDrawn: R.bodyOnScreen ? 1 : 0,
       subjectDistM: Number(distM.toFixed(1)),
       proxyMeshes: R.meshes || 0,
@@ -355,13 +394,15 @@ async function stageDeck(input) {
 export default {
   id: "shark-from-deck",
   title: "From A Boat Deck — The Fin, The Wake And The Shadow",
-  description: "Six frames from the real game world (seed 90210) put a hunting great white alongside a real production hull — a 34 m yacht and a 14 m cruiser — and photograph it from the deck: a closed pass at 8 m, a lone fin at 40 m, straight down from the flybridge, a shark passing under the keel, a rush breaking the surface, and the LOD handover at 90 m where the authored dorsal gives way to the proxy. The before side is this same checkout with SHARK_FIN_V2 / SHARK_WAKE_V2 / SHARK_SHADOW_V2 / SHARK_SHADOW_VIEW off: a flat cone raised on a fade curve, an oversized white V and one soft ellipse. The after side reads the owner's photographs — a scythe blade whose exposure follows the animal's real depth in the live swell, a wake small enough to have to look for, and a shark-SHAPED mass with its own sun-offset shadow.",
+  description: "Seven frames from the real game world (seed 90210) put a hunting great white alongside a real production hull — a 34 m yacht and a 14 m cruiser — and photograph it from the deck: a closed pass at 8 m, a lone fin at 40 m, straight down from the flybridge, a shark passing under the keel, a rush breaking the surface, the LOD handover at 90 m where the authored dorsal gives way to the proxy, and a hard turn where the blade banks and the upper caudal lobe shows. The before side is this same checkout with SHARK_FIN_V2 / SHARK_WAKE_V2 / SHARK_SHADOW_V2 / SHARK_SHADOW_VIEW off: a flat cone raised on a fade curve, an oversized white V and one soft ellipse. The after side reads the owner's photographs — a scythe blade whose exposure follows the animal's real depth in the live swell, a wake small enough to have to look for, and a shark-SHAPED mass with its own sun-offset shadow.",
   defaultBefore: "local",
   beforeParams: {
     cfg_SHARK_FIN_V2: 0,
     cfg_SHARK_WAKE_V2: 0,
     cfg_SHARK_SHADOW_V2: 0,
     cfg_SHARK_SHADOW_VIEW: 0,
+    cfg_SHARK_TAIL_TIP: 0,
+    cfg_SHARK_SURFACE_LIFE: 0,
   },
   beforeLabel: "BEFORE · FLAGS OFF",
   afterLabel: "AFTER · LOCAL",
@@ -381,6 +422,9 @@ export default {
     shadowOffsetM: { label: "Shadow offset from the body, away from the sun", unit: "m", better: "higher" },
     shadowAlpha: { label: "Underwater mass opacity at this depth and view angle", unit: "" },
     wakeLenM: { label: "Wake length", unit: "m", better: "lower" },
+    tailTipM: { label: "Upper caudal lobe out of the water (NOT a second dorsal)", unit: "m", better: "higher" },
+    finBankRad: { label: "Blade roll into the turn", unit: "rad", better: "higher" },
+    sprayAlpha: { label: "Spray off the blade", unit: "", better: "higher" },
     bodyDrawn: { label: "Authored body on screen", unit: "0/1" },
     subjectDistM: { label: "Camera to shark", unit: "m" },
     proxyMeshes: { label: "Meshes in the surface proxy", unit: "" },

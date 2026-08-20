@@ -1063,7 +1063,7 @@
 <script src="src/city/wildlife/snow_ungulates.js?v=attach1"></script>
 <script src="src/city/wildlife/small_game.js?v=attach1"></script>
 <script src="src/city/wildlife/snakes.js?v=wild1"></script>
-<script src="src/city/wildlife/aquatic.js?v=sharkface1"></script>
+<script src="src/city/wildlife/aquatic.js?v=finblade1"></script>
 <!-- EVERY ANIMAL IS AN INDIVIDUAL: the per-individual size draw and the
      hunger scalar wildlife.js spends. Must load BEFORE the engine (it
      binds CBZ.wildlifeTraits once, at load); absent, the engine falls
@@ -1565,6 +1565,15 @@
      predator.js + creature_combat.js whose drivers it ticks rather than
      duplicating. Reverts whole with CBZ.CONFIG.MARINE_PREDATION = false. -->
 <script src="src/city/marine_predation.js?v=marinepred1"></script>
+<!-- WHAT A KILL LOOKS LIKE FROM A MILE AWAY: the bait ball that tightens, is
+     driven up against the surface and collapses as it is eaten; the gulls
+     working it (the only part of a marine kill visible ABOVE the water, and
+     therefore the long-range read that makes you turn the boat); the surface
+     boil; and a carcass drawing a crowd of scavengers — ticked by the same
+     CBZ.predatorHunt as every other hunter, never a private loop. AFTER
+     marine_predation.js, whose chum producer and damage bus it spends.
+     Reverts whole with CBZ.CONFIG.MARINE_FRENZY = false. -->
+<script src="src/city/marine_frenzy.js?v=marinefrenzy1"></script>
 <!-- CHILDREN ARE NOT TARGETS. Wraps the shared damage/kill/KO/crowd-kill/gore/
      lock-on/predator buses and seals child hp against the ~32 raw `.hp -=`
      sites that bypass every bus. Hooks are lazily retried for 10s, so exact

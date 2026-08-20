@@ -651,7 +651,14 @@ CBZ.studio.need(NEED).then(function () {
       .filter(function (id) {
         const sp = SP[id];
         if (!sp || !sp.build || sp.snake) return false;
-        return water ? !!sp.aquatic : !sp.aquatic;
+        /* A ROW IS AQUATIC IF IT SAYS SO EITHER WAY. `aquatic` is the flag
+           wildlife.js itself branches on and the one every shipped water row
+           sets; `biome === "water"` is the column the bestiary sorts by. A new
+           species that declares only one of them is a species this menu would
+           silently drop, and a shark missing from the roster is exactly the
+           drift a derived list exists to prevent. */
+        const wet = !!sp.aquatic || sp.biome === "water";
+        return water ? wet : !wet;
       })
       .sort(function (a, b) { return (SP[b].danger || 0) - (SP[a].danger || 0) || (a < b ? -1 : 1); });
   }
@@ -766,6 +773,14 @@ CBZ.studio.need(NEED).then(function () {
       b: { u: "bull_shark|hammerhead_shark", n: 26 } },
     { label: "THE REEF, ALIVE", map: "water", r: { u: "tuna|barracuda", n: 90 },
       b: { u: "sardine|fish", n: 300 } },
+    /* THE TEST BED, AS A BUTTON. "A lightweight test arena, great for
+       animation" is a claim about a SHOT, not about a fight: one of each shark
+       swimming in open water with something to chase, so the STUDY camera (V,
+       and [ ] to walk the roster) can hold each of them still and you can
+       watch one tail beat finish. Small enough to boot in a blink. */
+    { label: "THE SHARK LINE-UP", map: "water",
+      r: { u: "great_white_shark|hammerhead_shark|bull_shark|orca", n: 8 },
+      b: { u: "sardine", n: 120 } },
   ];
   const muEl = el("matchups");
   MATCHUPS.forEach(function (mu) {
@@ -1216,7 +1231,11 @@ CBZ.studio.need(NEED).then(function () {
      INSIDE one another and spent the opening seconds of the battle shoving
      itself apart. Each claim carries the radius that took it, so a pair only
      has to clear what the two of them actually occupy. */
+  /* SPAWN CLAIMS BELONG TO ONE ROSTER. Cleared at buildMap, and again by
+     __battle.restage() below — four hundred sardine claims left standing would
+     push the next matchup out into open water for no reason anybody could see. */
   const _claim = [];
+  function clearClaims() { _claim.length = 0; }
   const CLAIM_R = 0.575;         // a man's half of the old 1.15 m pair
   function crowdedAt(x, z, r) {
     for (let i = 0; i < _claim.length; i++) {
@@ -1921,6 +1940,10 @@ CBZ.studio.need(NEED).then(function () {
       } catch (e) {}
     }
     m.armed = false;
+    // AND THE PAGE LOOKS AT IT. A 15 m animal going down is the moment this
+    // arena exists for and it used to happen in three frames somewhere off
+    // camera; killCam refuses politely on every path that would make it a lie.
+    killCam(m);
     corpses.push(m);
     if (corpses.length > (DEATH_OLD ? 260 : CORPSE_MAX)) retireOldestCorpse();
     if (camDist2(m.pos) < 120 * 120 || aliveCount("red") + aliveCount("blue") < 40) {
@@ -3688,6 +3711,7 @@ CBZ.studio.need(NEED).then(function () {
     wFocus: V(), wYaw: 0.9, wPitch: 0.62, wDist: 64,
     followM: null, cutAt: 0, shot: "crane", craneSpin: 0.05,
     followTeam: "red", holdT: 0, reptT: 0,
+    waveLock: false, waveY: 0.3,
   };
   /* THE CAMERA DOES NOT GO THROUGH A WALL.
 
@@ -3702,14 +3726,25 @@ CBZ.studio.need(NEED).then(function () {
      than a jump) and eases back out, which is the ordinary third-person
      answer and the reason a pillar does not make the shot pump. */
   let camOccl = 1;
+  /* HOW LOW THE LENS MAY LOOK FROM. Everywhere else the ground is opaque, so a
+     camera below its own focus is a camera inside a hill and the arm has always
+     been clamped to +0.12 rad. In OPEN WATER the sea is NOT a wall — the shot
+     that shows a shark best is the one taken from under it, looking up at a
+     bright surface — so the clamp goes negative exactly there and nowhere else.
+     (?swim=old restores the flat clamp with everything else in that wave.) */
+  function pitchLo() { return (MAP && MAP.water && !SWIM_OLD) ? -1.15 : 0.12; }
   function camApply(dt) {
+    // THE LENS AT WAVE HEIGHT is a property of the SHOT, so it is read here
+    // rather than written by three different framing functions that would each
+    // have to remember to clear it.
+    cam.waveLock = cam.mode === "surface" && SEA.on && !SWIM_OLD;
     const k = 1 - Math.pow(0.002, dt);
     cam.focus.lerp(cam.wFocus, k);
     cam.yaw += (cam.wYaw - cam.yaw) * k;
     cam.pitch += (cam.wPitch - cam.pitch) * k;
     cam.dist += (cam.wDist - cam.dist) * k;
     const c = CBZ.camera;
-    const cp = Math.max(0.12, Math.min(1.42, cam.pitch));
+    const cp = Math.max(pitchLo(), Math.min(1.42, cam.pitch));
     const sx = Math.sin(cam.yaw) * Math.cos(cp), sz = Math.cos(cam.yaw) * Math.cos(cp), sy = Math.sin(cp);
     const fy = cam.focus.y + 1.2;
     let want = 1;
@@ -3731,6 +3766,12 @@ CBZ.studio.need(NEED).then(function () {
     let y = cam.focus.y + sy * dist;
     const g = MAP.camFloor(x, z);
     if (y < g) y = g;
+    /* AND THE ONE SHOT WHOSE HEIGHT IS NOT THE ARM'S TO DECIDE. A lens riding
+       the swell has to be ON the swell — at the water under ITSELF, not at the
+       water under the animal it is watching — so the crests between the two
+       rise past the glass and a dorsal fin cuts the frame at eye level. It is
+       the same swellAt() every body in the sea floats on, read one more time. */
+    if (cam.waveLock) y = swellAt(x, z) + (cam.waveY == null ? 0.3 : cam.waveY);
     c.position.set(x, y, z);
     c.lookAt(cam.focus.x, fy, cam.focus.z);
   }
@@ -3906,6 +3947,200 @@ CBZ.studio.need(NEED).then(function () {
     }
     if (cam.holdT > 0) cam.holdT -= dt;
   }
+
+  /* ============================================================ THE STUDY DESK
+     AN ARENA YOU CANNOT STAND STILL IN IS NOT A TEST BED.
+
+     The owner's brief for OPEN WATER was "a lightweight test arena, great for
+     animation" — and every camera this page had was built for the opposite
+     job. AUTO cuts every eight seconds by design, FOLLOW rides a rifleman's
+     shoulder, FREE is a pair of hands. None of them will hold one shark in
+     frame long enough to watch a single tail beat finish, which is the only
+     thing an animation test bed is for.
+
+     So: three more postures, each of them ABOUT one body or about the water it
+     is in, and none of them ever cuts.
+
+       study    LOCKED ON ONE ANIMAL, orbiting it at a range taken off the
+                BODY'S OWN measured length — noseR, the half-length this page
+                already measures off the bounding box at spawn — so a sardine
+                and a megalodon fill the same fraction of the frame and you
+                never have to touch the wheel. [ and ] walk the roster. With
+                the sim clock at a quarter (key 5) and the frame step (.), that
+                is the whole test bed the brief asked for.
+       under    THE SEAT NOBODY HAD. Below the swell looking UP, the animal a
+                silhouette against a bright surface. This shot was not merely
+                missing, it was IMPOSSIBLE: the arm's pitch clamped at +0.12
+                rad, so the lens could never get below the thing it was
+                pointing at. See pitchLo().
+       surface  THE LENS AT WAVE HEIGHT — y is the swell itself, at the
+                camera's own position, so crests roll between you and the fish
+                and a dorsal fin cuts the frame at eye level.
+
+     STUDY.m is a REFERENCE to a live body, so it can go stale exactly once (a
+     corpse), and every framing function revalidates before it reads. */
+  const STUDY = { m: null, idx: 0, orbit: 0.9, spin: 0.28 };
+  function studyList() {
+    const out = [];
+    for (let i = 0; i < men.length; i++) if (!men[i].dead && men[i].beast) out.push(men[i]);
+    // a battle with no animals in it still deserves a locked lens
+    if (!out.length) for (let i = 0; i < men.length; i++) if (!men[i].dead) out.push(men[i]);
+    return out;
+  }
+  // no argument: the BIGGEST thing alive, because that is what you came to
+  // look at and because it is stable across two runs of the same war.
+  // +/-1: walk the roster from wherever the lens already was.
+  function studyPick(delta) {
+    const list = studyList();
+    if (!list.length) { STUDY.m = null; return null; }
+    if (delta == null) {
+      let bi = 0;
+      for (let i = 1; i < list.length; i++) {
+        if ((list[i].noseR || list[i].rad || 0) > (list[bi].noseR || list[bi].rad || 0)) bi = i;
+      }
+      STUDY.idx = bi;
+    } else {
+      const cur = STUDY.m ? list.indexOf(STUDY.m) : -1;
+      const from = cur >= 0 ? cur : STUDY.idx;
+      STUDY.idx = ((from + delta) % list.length + list.length) % list.length;
+    }
+    STUDY.m = list[STUDY.idx];
+    return STUDY.m;
+  }
+  // a tool asks for a body by species id or by index; a person never does
+  function studyPickBy(sel) {
+    const list = studyList();
+    if (!list.length) { STUDY.m = null; return null; }
+    let idx = -1;
+    if (typeof sel === "number") idx = ((sel | 0) % list.length + list.length) % list.length;
+    else if (typeof sel === "string") {
+      for (let i = 0; i < list.length; i++) {
+        if (list[i].beast && list[i].species && list[i].species.id === sel) { idx = i; break; }
+      }
+      if (idx < 0) return studyPick(null);
+    }
+    if (idx < 0) return studyPick(null);
+    STUDY.idx = idx; STUDY.m = list[idx];
+    return STUDY.m;
+  }
+  /* HOW FAR BACK THE LENS SITS, and it is the body that answers. A constant
+     distance is the reason a shot of a sardine and a shot of a megalodon are
+     the same picture of nothing: 2.4 body lengths puts the whole animal in
+     frame with room for the water it is moving through, at 0.6 m and at 18 m
+     alike. Bounded so a bait fish is not photographed from inside its own gills
+     and a whale is not photographed from orbit. */
+  function studyRange(m) {
+    const len = Math.max(0.6, (m.noseR || m.rad || 0.5) * 2);
+    return Math.max(3.2, Math.min(140, len * 2.4 + 1.5));
+  }
+  function studyBody() {
+    let m = STUDY.m;
+    if (!m || m.dead) m = studyPick(null);
+    return m;
+  }
+  function studyHold(m) {
+    cam.followM = m;              // the card names whatever the lens is on
+    cam.shot = "study";
+  }
+  function frameStudy(dt) {
+    const m = studyBody();
+    if (!m) { cam.wFocus.set(MAP.cx, MAP.groundAt(MAP.cx, MAP.cz), MAP.cz); cam.wDist = 60; return; }
+    STUDY.orbit += STUDY.spin * dt;
+    cam.wFocus.set(m.pos.x, m.pos.y + (m.eyeH || 1) * 0.3, m.pos.z);
+    cam.wYaw = (m.faceH == null ? 0 : m.faceH) + STUDY.orbit;
+    cam.wPitch = 0.22;
+    cam.wDist = studyRange(m);
+    studyHold(m);
+  }
+  function frameUnder(dt) {
+    const m = studyBody();
+    STUDY.orbit += STUDY.spin * 0.5 * dt;
+    const hs = m ? { x: m.pos.x, z: m.pos.z } : (hotspot() || { x: MAP.cx, z: MAP.cz });
+    const y = m ? m.pos.y
+      : (MAP.water ? swellAt(hs.x, hs.z) - 3 : MAP.groundAt(hs.x, hs.z) + 1);
+    cam.wFocus.set(hs.x, y, hs.z);
+    cam.wYaw = STUDY.orbit;
+    cam.wPitch = -0.46;                       // below the body, looking up at it
+    cam.wDist = m ? Math.max(7, studyRange(m) * 0.85) : 26;
+    studyHold(m);
+  }
+  function frameWave(dt) {
+    const m = studyBody();
+    STUDY.orbit += STUDY.spin * 0.4 * dt;
+    const hs = m ? { x: m.pos.x, z: m.pos.z } : (hotspot() || { x: MAP.cx, z: MAP.cz });
+    cam.wFocus.set(hs.x, MAP.water ? swellAt(hs.x, hs.z) : MAP.groundAt(hs.x, hs.z) + 0.6, hs.z);
+    cam.wYaw = STUDY.orbit;
+    cam.wPitch = 0.02;                        // dead level: the horizon is the shot
+    cam.wDist = m ? Math.max(9, studyRange(m) * 1.15) : 30;
+    studyHold(m);
+  }
+
+  /* ============================================================ THE KILL CAM
+     A TAKEDOWN IS OVER IN ABOUT A FIFTH OF A SECOND.
+
+     creature_combat's strike lands, quadruped_ragdoll takes the body, and at
+     SPEED 1 the whole event is three frames — which is exactly why "eight
+     orcas kill a megalodon" reads as a health bar emptying rather than as a
+     kill. The page already owns a sim clock that can go to a quarter and a
+     camera that can be pointed at a body; the kill cam is those two things
+     fired by the death itself.
+
+     WALL-CLOCKED, NOT SIM-CLOCKED, and that is not a detail: this is a piece
+     of DIRECTION, not part of the battle, so a two-second beat measured on the
+     clock it just slowed would take eight seconds to play. It restores the
+     speed it found, never the dial's default.
+
+     It refuses in three situations, all of them for the same reason — the shot
+     would be a lie or a cost:
+       · during a benchmark (the benchmark exists to report frames, and an
+         unannounced camera cut and a speed change are two variables in it);
+       · while a person is driving the camera by hand (FREE means free);
+       · for a body that is not in the shot, or a man (a rifleman falling is
+         the ordinary texture of this page; a 15 m animal going down is not).
+     ?killcam=0 is the revert. */
+  const KILLCAM = Q.get("killcam") !== "0";
+  const KILL = { t: 0, cool: 0, m: null, speed: 1, mode: null, shot: null, n: 0 };
+  function killCam(m) {
+    if (!KILLCAM || bench || over || !started) return;
+    if (!m || !m.beast || KILL.t > 0 || KILL.cool > 0) return;
+    if (cam.mode === "free" || cam.mode === "kill") return;
+    if (camDist2(m.pos) > 110 * 110) return;
+    KILL.t = 2.1; KILL.cool = 7; KILL.n++;
+    KILL.m = m; KILL.speed = speed > 0 ? speed : lastSpeed;
+    KILL.mode = cam.mode; KILL.shot = cam.shot;
+    setSpeed(0.25);
+    cam.mode = "kill";
+    cam.wYaw = (m.faceH == null ? 0 : m.faceH) + 1.35;
+    cam.wPitch = 0.18;
+    cam.wDist = Math.max(4.5, studyRange(m) * 0.6);
+    // SNAP the arm in rather than easing: a two-second beat spent flying the
+    // camera across the map from wherever the director was is a beat that
+    // photographs the journey and misses the death.
+    cam.dist = cam.wDist; cam.yaw = cam.wYaw; cam.pitch = cam.wPitch;
+    cam.wFocus.set(m.pos.x, m.pos.y + (m.eyeH || 1) * 0.4, m.pos.z);
+    cam.focus.copy(cam.wFocus);
+    studyHold(m);
+    STUDY.m = m;
+  }
+  function stepKill(dt) {
+    if (KILL.cool > 0) KILL.cool -= dt;
+    if (KILL.t <= 0) return;
+    KILL.t -= dt;
+    const m = KILL.m;
+    if (m) {
+      // the body keeps solving under the lens — follow it down
+      cam.wFocus.set(m.pos.x, m.pos.y + (m.eyeH || 1) * 0.4, m.pos.z);
+      cam.wYaw += dt * 0.55;
+    }
+    if (KILL.t <= 0) {
+      setSpeed(KILL.speed);
+      cam.mode = KILL.mode || "auto";
+      cam.shot = KILL.shot || "crane";
+      cam.cutAt = simT;                    // and the director takes a fresh shot
+      KILL.m = null;
+    }
+  }
+
   function stepCamera(dt) {
     const IN = CBZ.micro.input;
     if (simT - POINT.at > 0.5) updatePoint();
@@ -3947,6 +4182,14 @@ CBZ.studio.need(NEED).then(function () {
         }
       }
       if (cam.followM) frameSubject(cam.followM, dt);
+    } else if (cam.mode === "kill") {
+      // stepKill owns the targets this frame; nothing else may touch them
+    } else if (cam.mode === "study") {
+      frameStudy(dt);
+    } else if (cam.mode === "under") {
+      frameUnder(dt);
+    } else if (cam.mode === "surface") {
+      frameWave(dt);
     } else if (IN) {
       const fwd = 46 * dt * (cam.dist / 60 + 0.4);
       const mx = IN.axis("KeyA", "KeyD"), mz = IN.axis("KeyS", "KeyW");
@@ -3970,7 +4213,8 @@ CBZ.studio.need(NEED).then(function () {
      when nothing has changed. */
   const whoC = { n: "", g: "", a: "", k: "", hp: -1, mag: -1, rl: null, on: null, down: null };
   function stepWho() {
-    const m = (cam.mode === "follow" || cam.shot === "point" || cam.shot === "push")
+    const m = (cam.mode === "follow" || cam.shot === "point" ||
+      cam.shot === "push" || cam.shot === "study" || cam.shot === "kill")
       ? cam.followM : null;
     const on = !!m;
     if (on !== whoC.on) { whoC.on = on; el("who").style.display = on ? "block" : "none"; }
@@ -4014,26 +4258,44 @@ CBZ.studio.need(NEED).then(function () {
     if (k !== whoC.k) { whoC.k = k; el("whoK").innerHTML = k; }
   }
 
+  const CAM_LABEL = { auto: "AUTO CAM", study: "STUDY", under: "UNDER", surface: "WAVE", free: "FREE CAM" };
   function setCamMode(mode, team) {
+    // a kill-cam beat in flight must not be left holding the old speed
+    if (cam.mode === "kill" && mode !== "kill" && KILL.t > 0) {
+      KILL.t = 0; KILL.m = null; setSpeed(KILL.speed);
+    }
     cam.mode = mode;
     if (team) cam.followTeam = team;
-    el("cCam").textContent = mode === "auto" ? "AUTO CAM"
-      : mode === "follow" ? "FOLLOW " + TEAMS[cam.followTeam].name : "FREE CAM";
-    el("cCam").classList.toggle("on", mode === "auto");
+    el("cCam").textContent = mode === "follow"
+      ? "FOLLOW " + TEAMS[cam.followTeam].name : (CAM_LABEL[mode] || "FREE CAM");
+    el("cCam").classList.toggle("on", mode !== "free");
     if (mode === "follow") {
       updatePoint();
       cam.followM = subjectFor(cam.followTeam) || hottestMan();
       cam.holdT = 0; cam.reptT = simT + 3;
       cam.shot = "point";          // else a stale AUTO framing rides along
+    } else if (mode === "study" || mode === "under" || mode === "surface") {
+      if (!STUDY.m || STUDY.m.dead) studyPick(null);
+      cam.shot = "study";
     }
   }
-  // AUTO -> FOLLOW RED -> FOLLOW BLUE -> FREE. Both armies have a front, and
-  // which one you want to ride is the whole question a spectator has.
+  /* AUTO -> FOLLOW RED -> FOLLOW BLUE -> STUDY -> (the water postures) -> FREE.
+     Both armies have a front and which one you ride is the question a
+     spectator has; which ANIMAL you are looking at is the question this map
+     was built to answer, so STUDY is in the ring for every venue. UNDER and
+     WAVE are only in it where there is a waterline to be on the wrong side
+     of — offering "look up through the sea" on the kill box is a control that
+     does nothing, which is worse than no control. */
   function cycleCam() {
-    if (cam.mode === "auto") setCamMode("follow", "red");
-    else if (cam.mode === "follow" && cam.followTeam === "red") setCamMode("follow", "blue");
-    else if (cam.mode === "follow") setCamMode("free");
-    else setCamMode("auto");
+    const wet = !!(MAP && MAP.water && !SWIM_OLD);
+    const ring = ["auto", "followRed", "followBlue", "study"]
+      .concat(wet ? ["under", "surface"] : []).concat(["free"]);
+    const now = cam.mode === "follow" ? "follow" + (cam.followTeam === "red" ? "Red" : "Blue") : cam.mode;
+    let i = ring.indexOf(now);
+    const next = ring[(i + 1) % ring.length];
+    if (next === "followRed") setCamMode("follow", "red");
+    else if (next === "followBlue") setCamMode("follow", "blue");
+    else setCamMode(next);
   }
   // manual orbit: pointers on the page, ignored while the UI owns them
   let drag = null;
@@ -4056,7 +4318,7 @@ CBZ.studio.need(NEED).then(function () {
       cam.wFocus.z += (Math.sin(cam.yaw) * -dx + Math.cos(cam.yaw) * -dy) * s;
     } else {
       cam.wYaw -= dx * 0.0052;
-      cam.wPitch = Math.max(0.12, Math.min(1.42, cam.wPitch + dy * 0.004));
+      cam.wPitch = Math.max(pitchLo(), Math.min(1.42, cam.wPitch + dy * 0.004));
     }
   });
   window.addEventListener("pointerup", function () { drag = null; pinch.d = 0; });
@@ -4125,6 +4387,46 @@ CBZ.studio.need(NEED).then(function () {
      is exact; every few seconds the measured frame rate decides whether two
      more platoons walk on. When it dips under 30 twice, the last size that
      held is the machine's number. */
+  /* HOW BIG A STEP THE BENCHMARK TAKES, AND WHY IT IS NOT ALWAYS THIRTY.
+
+     "Two more platoons" is the right increment for men and nonsense for the
+     sea. Thirty more megalodons is a step from forty to seventy of the most
+     expensive body in the game — the run overshoots the machine's real number
+     on its first growth and reports the floor of a huge bracket. Thirty more
+     sardines is not a step at all: a shoal that costs almost nothing takes
+     twenty growths to find its edge and the run never finishes.
+
+     So the roster's own SCALE sets it, read off the live registry like
+     everything else on this page. Men answer exactly 30 by construction, so a
+     benchmark of riflemen returns the number it always returned and the saved
+     `cbz-npcwar-max` keeps meaning what it meant. There is still NO CAP —
+     this only changes how fast the count walks toward the frame rate's verdict,
+     which is the only thing allowed to end the run. */
+  function benchScale() {
+    const SP = CBZ.WILDLIFE_SPECIES || {};
+    let k = 0;
+    [SET.redU, SET.blueU].forEach(function (u) {
+      String(u).split("|").forEach(function (id) {
+        const sc = id === "men" ? 1 : ((SP[id] || {}).scale || 1);
+        if (sc > k) k = sc;
+      });
+    });
+    return k || 1;
+  }
+  function benchStepFor() {
+    return Math.max(2, Math.min(160, Math.round(30 / Math.max(0.35, benchScale()))));
+  }
+  // what the number is COUNTING, so "MAX 220" is not silently a number about
+  // sardines being read as a number about men
+  function benchUnit() {
+    const same = SET.redU === SET.blueU;
+    return (SET.redU === "men" && same) ? "PER SIDE"
+      : (same ? kindLabel(SET.redU) : "BODIES") + " PER SIDE";
+  }
+  function benchKey() {
+    return SET.redU === "men" && SET.blueU === "men"
+      ? "cbz-npcwar-max" : "cbz-npcwar-max-" + SET.redU + "-v-" + SET.blueU;
+  }
   function stepBench(dt) {
     const B = bench;
     B.t += dt;
@@ -4132,7 +4434,7 @@ CBZ.studio.need(NEED).then(function () {
     if (B.t < B.nextAt) return;
     const fps = CBZ.micro.fps || 0;
     B.t = 0; B.nextAt = 3.2;
-    hud.note("BENCH " + aliveCount("red") + " PER SIDE  " + fps + " FPS");
+    hud.note("BENCH " + aliveCount("red") + " " + benchUnit() + "  " + fps + " FPS");
     if (fps >= 33 && spawnQueue.length === 0) {
       B.lastGood = aliveCount("red");
       B.dips = 0;
@@ -4142,9 +4444,9 @@ CBZ.studio.need(NEED).then(function () {
       B.dips++;
       if (B.dips >= 2) {
         const n = B.lastGood || aliveCount("red");
-        try { localStorage.setItem("cbz-npcwar-max", String(n)); } catch (e) {}
-        banner("MAX " + n + " PER SIDE", "AT 30 FPS ON THIS MACHINE");
-        hud.note("BENCH DONE  " + n + " PER SIDE");
+        try { localStorage.setItem(benchKey(), String(n)); } catch (e) {}
+        banner("MAX " + n + " " + benchUnit(), "AT 30 FPS ON THIS MACHINE");
+        hud.note("BENCH DONE  " + n + " " + benchUnit());
         bench = { done: true, n: n, t: 0, nextAt: 1e9, fpsAcc: 0, fpsN: 0, step: 0, grown: B.grown, lastGood: n, dips: 0 };
       }
     } else B.dips = 0;
@@ -4302,8 +4604,12 @@ CBZ.studio.need(NEED).then(function () {
       CBZ.ordnance.init({ scene: CBZ.scene, groundAt: MAP.groundAt });
     }
     if (asBench) {
-      bench = { t: 0, nextAt: 3.2, step: 30, lastGood: 0, dips: 0, grown: 0, fpsAcc: 0, fpsN: 0 };
-      SET.redN = SET.blueN = 40;
+      const step = benchStepFor();
+      bench = { t: 0, nextAt: 3.2, step: step, lastGood: 0, dips: 0, grown: 0, fpsAcc: 0, fpsN: 0,
+        unit: benchUnit(), scale: Math.round(benchScale() * 100) / 100 };
+      // the opening size is one step plus a little, so the first measurement is
+      // taken on a field that is already doing something. Men: 40, as always.
+      SET.redN = SET.blueN = Math.max(4, Math.min(400, step + 10));
       SET.redW = SET.blueW = (SET.redW === "everything" || SET.redW === "mixed") ? "ak47" : SET.redW;
     }
 
@@ -4334,7 +4640,9 @@ CBZ.studio.need(NEED).then(function () {
     el("ctl").style.display = "flex";
     if (!COARSE) {
       el("hint").style.display = "block";
-      el("hint").innerHTML = "DRAG ORBIT &middot; WHEEL ZOOM &middot; WASD PAN<br>SPACE PAUSE &middot; 1-5 SPEED &middot; F FRONT CAM";
+      el("hint").innerHTML = "DRAG ORBIT &middot; WHEEL ZOOM &middot; WASD PAN<br>" +
+        "SPACE PAUSE &middot; 1-5 SPEED &middot; . STEP &middot; F FRONT CAM &middot; V STUDY &middot; [ ] PICK" +
+        (MAP.water ? "<br>U UNDERWATER &middot; B AT WAVE HEIGHT" : "");
     }
     setSpeed(1);
     setCamMode(asBench ? "free" : "auto");
@@ -4367,6 +4675,7 @@ CBZ.studio.need(NEED).then(function () {
      Read once and cleared, so a missed frame can never silently double a step.
      Driven only by __battle.advance(); play never touches it. */
   let injectDt = 0;
+  let stepPulse = 0;             // one hand-cranked frame, from the `.` key
   function frame(dt) {
     if (!started) return;
     // THE SIM CLOCK IS WALL TIME, NOT RENDER TIME. microboot clamps its dt
@@ -4399,12 +4708,29 @@ CBZ.studio.need(NEED).then(function () {
         setCamMode("follow", cam.mode === "follow" && cam.followTeam === "red" ? "blue" : "red");
       }
       if (IN.pressed("KeyC")) setCamMode(cam.mode === "auto" ? "free" : "auto");
+      /* THE TEST BED'S OWN KEYS. V locks the lens on one animal, [ and ] walk
+         the roster, U drops it under the swell and B sits it on the waterline.
+         Each is a toggle back to FREE, so the same finger that took the shot
+         gives the camera back. */
+      if (IN.pressed("KeyV")) setCamMode(cam.mode === "study" ? "free" : "study");
+      if (IN.pressed("KeyU")) setCamMode(cam.mode === "under" ? "free" : "under");
+      if (IN.pressed("KeyB")) setCamMode(cam.mode === "surface" ? "free" : "surface");
+      if (IN.pressed("BracketLeft")) { studyPick(-1); if (cam.mode === "free") setCamMode("study"); }
+      if (IN.pressed("BracketRight")) { studyPick(1); if (cam.mode === "free") setCamMode("study"); }
+      /* THE FRAME STEP. A quarter-speed clock is still a clock; "does the tail
+         cross the centre line before the jaw opens" is a question you can only
+         answer by stopping and nudging. `.` pauses if it has to and then hands
+         the next frame exactly one thirtieth of a second — the same injected-dt
+         seam the headless probe uses, so a person and a tool step this battle
+         through the identical code path. */
+      if (IN.pressed("Period")) { if (speed !== 0) setSpeed(0); stepPulse = 1 / 30; }
     }
 
     // ---- SIM at the dialled speed, sub-stepped so 8x stays solid. The
     // sub-step cap means a machine that cannot COMPUTE eight seconds per
     // second degrades to what it can; effSpeed below is the HUD admitting it.
     let simDt = realDt * speed;
+    if (stepPulse > 0) { simDt = stepPulse; stepPulse = 0; }   // one frame, by hand
     const simBefore = simT;
     if (simDt > 0) {
       const sub = Math.min(8, Math.max(1, Math.ceil(simDt / 0.055)));
@@ -4555,6 +4881,7 @@ CBZ.studio.need(NEED).then(function () {
         if (m._weaponProp.visible !== showGun) m._weaponProp.visible = showGun;
       }
     }
+    stepKill(realDt);                     // ...on WALL time: see THE KILL CAM
     stepCamera(dt);
     if (SEA.on) seaUnderwater();          // after the camera moved, before the draw
     stepRes(dt);
@@ -4895,10 +5222,28 @@ CBZ.studio.need(NEED).then(function () {
             // front of the group, 0 = the back rank the old camera rode
             ahead = tot ? Math.round((1 - n / tot) * 100) / 100 : null;
           }
+          /* THE LOCKED LENS, STATED. A preset that says "photograph the
+             megalodon" has to be able to prove the lens was on a megalodon and
+             at a range derived from that body rather than from a constant, or
+             the picture is an assertion. `underwater` is the sea's own read
+             (SEA.under), so a shot claiming to be taken below the swell can be
+             checked against the frame it produced. */
+          const sm = STUDY.m && !STUDY.m.dead ? STUDY.m : null;
           return { mode: cam.mode, shot: cam.shot, team: cam.followTeam,
             on: m ? m.id : null, onDead: m ? !!m.dead : null, frontness: ahead,
             kills: m ? (m.kills || 0) : null, mag: m ? m.mag : null,
-            reloads: m ? (m.reloads || 0) : null };
+            reloads: m ? (m.reloads || 0) : null,
+            pitch: Math.round(cam.pitch * 100) / 100,
+            y: Math.round(CBZ.camera.position.y * 100) / 100,
+            underwater: !!SEA.under,
+            waveLock: !!cam.waveLock,
+            study: sm ? {
+              id: sm.id, species: sm.beast ? sm.species.id : "men",
+              len: Math.round((sm.noseR || sm.rad || 0.5) * 2 * 100) / 100,
+              range: Math.round(studyRange(sm) * 10) / 10,
+              size: Math.round((sm._sizeMul || 1) * 100) / 100,
+            } : null,
+            killcam: { on: KILL.t > 0, fired: KILL.n } };
         })(),
         caps: CBZ.modeHas ? { blast: CBZ.modeHas("blast"), blastActors: CBZ.modeHas("blastActors") } : null,
         unrouted: CBZ.modeCapsAudit ? CBZ.modeCapsAudit().unrouted : null,
@@ -4990,6 +5335,111 @@ CBZ.studio.need(NEED).then(function () {
       cam.wPitch = cam.pitch = pitch == null ? 0.4 : pitch;
       if (yaw != null) cam.wYaw = cam.yaw = yaw;
       return hs;
+    },
+    /* ---- THE STUDY DESK, FROM A TOOL --------------------------------------
+       camMode(mode, pick, yaw) puts the page into one of the locked postures
+       and, optionally, on a NAMED body — `pick` is a species id ("megalodon")
+       or an index into the living roster. `yaw` states the orbit angle and
+       STOPS the orbit, because a photograph taken while the lens is drifting
+       is a photograph of a different bearing on each side of a comparison.
+       Returns what the lens ended up on, so a preset can assert it. */
+    camMode: function (mode, pick, yaw) {
+      if (pick != null) studyPickBy(pick);
+      if (yaw != null) { STUDY.orbit = +yaw || 0; STUDY.spin = 0; }
+      setCamMode(mode);
+      // one framing pass now, so the caller does not have to advance the world
+      // by a frame just to find out where the camera went
+      if (mode === "study") frameStudy(0);
+      else if (mode === "under") frameUnder(0);
+      else if (mode === "surface") frameWave(0);
+      cam.focus.copy(cam.wFocus); cam.yaw = cam.wYaw;
+      cam.pitch = cam.wPitch; cam.dist = cam.wDist;
+      camApply(1);
+      const m = STUDY.m;
+      return m ? { id: m.id, species: m.beast ? m.species.id : "men",
+        range: Math.round(studyRange(m) * 10) / 10,
+        x: Math.round(m.pos.x * 100) / 100, y: Math.round(m.pos.y * 100) / 100,
+        z: Math.round(m.pos.z * 100) / 100 } : null;
+    },
+    // every living animal the study desk can be pointed at, in its own order
+    swimmers: function () {
+      return studyList().map(function (m) {
+        return { id: m.id, team: m.team, species: m.beast ? m.species.id : "men",
+          len: Math.round((m.noseR || m.rad || 0.5) * 2 * 100) / 100,
+          hp: Math.round(m.hp), depth: Math.round((m.swimD || 0) * 100) / 100,
+          x: Math.round(m.pos.x * 100) / 100, y: Math.round(m.pos.y * 100) / 100,
+          z: Math.round(m.pos.z * 100) / 100 };
+      });
+    },
+    /* ---- RESTAGE: ANOTHER MATCHUP, THE SAME OCEAN -----------------------
+       A TEST BED YOU HAVE TO RELOAD IS NOT A TEST BED.
+
+       Every other way of changing what is fighting here goes back through the
+       war room and a full boot — the studio, the packs, the swell, the reef,
+       the navmesh — which costs seconds and, worse, hands you a DIFFERENT
+       ocean to judge the second fight in. This clears the field and streams a
+       new roster onto the same water: the same swell, the reef where it was,
+       so "eight orcas" and "one great white in a bait ball" are two shots of
+       one place rather than two pages that happen to both be blue.
+
+       It clears exactly what a death clears, through the same calls — the two
+       corpse solvers get their slots handed back, every group leaves through
+       studio.drop, the ordnance registry loses its targets, and the spawn
+       claims go with the roster that made them. Anything it forgot would show
+       up as a body standing in the water with nothing driving it, which is a
+       thing you can see rather than a thing you have to trust.
+
+       Drive-only: nothing on the page reaches it and no key is bound to it. */
+    restage: function (o) {
+      o = o || {};
+      for (let i = 0; i < men.length; i++) {
+        const m = men[i];
+        if (m.ordTgt && CBZ.ordnance && CBZ.ordnance.removeTarget) {
+          try { CBZ.ordnance.removeTarget(m.ordTgt); } catch (e) {}
+        }
+        m.ordTgt = null;
+        if (CBZ.quadRagdollDrop) { try { CBZ.quadRagdollDrop(m); } catch (e) {} }
+        if (CBZ.ragdollDrop) { try { CBZ.ragdollDrop(m); } catch (e) {} }
+        if (m.group) { try { CBZ.studio.drop(m.group); } catch (e) {} }
+      }
+      for (let i = 0; i < sinking.length; i++) { try { CBZ.studio.drop(sinking[i].g); } catch (e) {} }
+      for (let i = 0; i < dropGuns.length; i++) {
+        const g = dropGuns[i];
+        if (g && g.parent) g.parent.remove(g);
+      }
+      men.length = 0; corpses.length = 0; sinking.length = 0;
+      dropGuns.length = 0; rockets.length = 0; spawnQueue.length = 0;
+      squads.red.length = 0; squads.blue.length = 0;
+      deadSolving = 0;
+      clearClaims();
+      cam.followM = null; STUDY.m = null; STUDY.idx = 0;
+      KILL.t = 0; KILL.m = null; KILL.cool = 0;
+      over = false; winner = null;
+      el("end").style.display = "none";
+      stats.red.kills = stats.red.shots = stats.red.hits = 0;
+      stats.blue.kills = stats.blue.shots = stats.blue.hits = 0;
+      if (o.ru) SET.redU = o.ru;
+      if (o.bu) SET.blueU = o.bu;
+      if (o.rw) SET.redW = o.rw;
+      if (o.bw) SET.blueW = o.bw;
+      if (o.rt) SET.redT = o.rt;
+      if (o.bt) SET.blueT = o.bt;
+      // ZERO IS A ROSTER. "The arena with nothing in it" is the first thing a
+      // test bed has to be able to show — it is the shot that proves the water
+      // is water before anything is swimming in it.
+      SET.redN = o.rn == null ? SET.redN : Math.max(0, o.rn | 0);
+      SET.blueN = o.bn == null ? SET.blueN : Math.max(0, o.bn | 0);
+      HAS_BEASTS = SET.redU !== "men" || SET.blueU !== "men";
+      spawnCount.red = SET.redN; spawnCount.blue = SET.blueN;
+      spawnTotal = SET.redN + SET.blueN;
+      for (let i = 0; i < Math.max(SET.redN, SET.blueN); i++) {
+        if (i < SET.redN) spawnQueue.push(["red", i]);
+        if (i < SET.blueN) spawnQueue.push(["blue", i]);
+      }
+      // all of them, now: a tool that asked for a matchup wants the matchup,
+      // not ten of it per frame for the next four seconds
+      if (o.now !== false) { let g = 0; while (spawnQueue.length && g++ < 4000) drainSpawns(); }
+      return { red: SET.redN, blue: SET.blueN, ru: SET.redU, bu: SET.blueU, bodies: men.length };
     },
     reinforce: function (n) { queueMen(n || 10); },
     /* THE LIVE CAST, BY REFERENCE. Every probe above answers a question about

@@ -1,16 +1,23 @@
-/* MARINE PREDATION — blood in the water, a megalodon taking a boat, and a pod
-   of orcas killing a megalodon.
+/* MARINE PREDATION — blood in the water, a megalodon taking a boat, and the
+   sea eating itself where you can see it.
 
-   OWNER, three asks, verbatim:
+   OWNER, verbatim:
      1. "bleeding in the water should attract sharks — not show up on HUD but
          just show in game"
      2. "how megalodon eating small ship looks"
-     3. "how orcas attacking a megladon and enough orcas should beat a megladon"
+     3. a general animal-vs-animal predation table at sea, legible with no UI
+
+   NO ORCA SUBJECTS. The pod primitives this block publishes (marinePodRole /
+   marinePodRam / marinePodRollReady / marinePodEnough — §5b of
+   city/marine_predation.js) are the GENERAL mechanism; the orca's own tactics
+   live in city/wildlife_orca.js and are photographed by that file's preset.
+   Staging them here would photograph one consumer of a general system and
+   call it the system.
 
    IT IS A FLAG A/B, NOT A DEPLOY DIFF. Both columns are THIS checkout and the
-   only difference is `?marine=off`, which turns MARINE_PREDATION, ORCA_POD,
-   MEG_SHIP_BITE and WATER_CHUM_ALL off — the block's own one-line reverts.
-   Nothing else can move between the columns.
+   only difference is `?marine=off`, which turns MARINE_PREDATION, MARINE_POD,
+   MEG_SHIP_BITE, WATER_CHUM_ALL and MARINE_FRENZY off — the blocks' own
+   one-line reverts. Nothing else can move between the columns.
 
    IT IS A STUDIO BUILT OUT OF THE GAME'S OWN PARTS, NOT A GALLERY. Each frame
    boots the real city at seed 90210, freezes the rAF loop so CBZ.stepSim is
@@ -40,19 +47,20 @@
      hullEngine      the boat's remaining engine health after the bite. 0 = the
                      hull is holed and vehicles.js has handed it to
                      water_float's flooding/sinking owner.
-     megHpPct        what is left of the megalodon after the engagement.
-     timeToKillS     how long the pod took. -1 = it never killed it.
-     orcaDeaths      what the pod paid.
-     rams / rolls    flank rams landed, and roll-over finishers started.
-     podNeeded       the block's OWN derived answer to "how many does it take"
-                     — solved from hp/bite/size, never typed in.
+     baitEaten       mouthfuls taken out of a bait ball. The school is eaten
+                     DOWN and then collapses; the number is the eating.
+     birds           gulls drawn to the surface over blood or a kill — the
+                     long-range read, and the only part of a marine kill that
+                     is visible above the water.
+     scavengers      frames in which an animal was working a carcass, driven by
+                     the same CBZ.predatorHunt every other hunter spends.
 */
 
 /* A 30 Hz FIXED STEP, not 60. Every one of these frames is a full CBZ.stepSim
    over the whole city, and this page simulates about five minutes of fighting
-   across its eleven subjects. 1/30 halves that bill and changes nothing about
+   across its eight subjects. 1/30 halves that bill and changes nothing about
    the result — every driver in the chain (predatorHunt, creatureFight, the
-   swim mover, the tonic roll) integrates dt. */
+   swim mover) integrates dt. */
 const RUN = 1 / 30;
 
 const subjects = [
@@ -106,44 +114,20 @@ const subjects = [
     shot: { dist: 44, height: 16, pitch: 0.5 },
   },
   {
-    id: "orca-one",
-    label: "One orca against a megalodon",
-    scenario: "pod", pod: 1, seconds: 45,
-    focus: "It loses, and it has to visibly lose. One orca cannot unlock the roll-over (the block's own podNeeded says four), so it harries, takes a bite, and breaks off bleeding — which chums the water and draws sharks to it. Watch the megalodon's health barely move.",
-    state: "POD 1 · THE ORCA LOSES",
-    shot: { dist: 60, height: 26, pitch: 0.5 },
+    id: "bait-ball",
+    label: "A bait ball collapsing",
+    scenario: "bait", seconds: 15,
+    focus: "A school with no teeth does not scatter when something comes for it — it BALLS, and the ball gets tighter and gets driven UP against the surface as more mouths arrive, because every attack comes from below and the only way out is up. Then it is eaten down and it breaks apart. One InstancedMesh, a couple of hundred bodies, one draw call. Look for the dense silver sphere pinned under the surface, the white water round it, and the gulls over the top.",
+    state: "BAIT BALL · 3 FEEDING",
+    shot: { dist: 26, height: 9, pitch: 0.34 },
   },
   {
-    id: "orca-three",
-    label: "Three orcas — a stalemate",
-    scenario: "pod", pod: 3, seconds: 48,
-    focus: "Three is a real fight and nobody wins it. They take bearings, they ram the flank, the megalodon is staggered and loses its facing — but three is still one short of what the numbers say it takes, so the finisher never unlocks and it grinds.",
-    state: "POD 3 · NEITHER SIDE WINS",
-    shot: { dist: 62, height: 28, pitch: 0.5 },
-  },
-  {
-    id: "orca-pod-kill",
-    label: "The pod — enough orcas",
-    scenario: "pod", pod: 5, seconds: 48,
-    focus: "Five. Past the derived threshold, so the roll-over unlocks and the megalodon dies. The tactics are the point: they harry it from several bearings at once so it cannot face them all, and the staggers from the flank rams overlap.",
-    state: "POD 5 · THE MEGALODON DIES",
-    shot: { dist: 62, height: 28, pitch: 0.48 },
-  },
-  {
-    id: "orca-roll-over",
-    label: "The roll-over finisher",
-    scenario: "pod", pod: 5, seconds: 48, holdRoll: true,
-    focus: "Tonic immobility, and it is the animation that makes this feature. The megalodon is turned belly-up and stops fighting. It must read as a slow, deliberate INVERSION with a struggle at the front of it — a fast flip reads as a rotation glitch, which is the one failure mode this shot exists to catch. White belly at the surface.",
-    state: "FINISHER · BELLY-UP",
-    shot: { dist: 30, height: 10, pitch: 0.26 },
-  },
-  {
-    id: "big-meg-small-pod",
-    label: "Control — a monster megalodon against the same pod",
-    scenario: "pod", pod: 5, megSize: 1.5, seconds: 48,
-    focus: "The control that proves size is in the expression on BOTH sides, not decoration. The same five orcas against a megalodon half again as big: podNeeded goes from four to eleven, so the finisher never unlocks and the pod that just won loses. If this frame looks like the one before it, the size term is doing nothing.",
-    state: "MONSTER MEG · THE POD LOSES",
-    shot: { dist: 68, height: 30, pitch: 0.5 },
+    id: "carcass-crowd",
+    label: "A carcass draws a crowd",
+    scenario: "carcass", seconds: 26,
+    focus: "A dead animal in the water is the strongest chum there is, and until now nothing in the game came for it. Now the sharks smell it, circle it and work it — ticked by CBZ.predatorHunt with the CORPSE as the quarry, which is exactly why they circle rather than charge — the body visibly shrinks as it is eaten, and the birds are up over it. No UI says any of this.",
+    state: "CARCASS · SCAVENGERS INBOUND",
+    shot: { dist: 40, height: 15, pitch: 0.44 },
   },
 ];
 
@@ -208,10 +192,12 @@ async function stageMarinePredation(input) {
   // is the whole "before" — no reload, no second build, nothing else can move.
   const OFF = new URLSearchParams(location.search).get("marine") === "off";
   CBZ.CONFIG.MARINE_PREDATION = !OFF;
-  CBZ.CONFIG.ORCA_POD = !OFF;
+  CBZ.CONFIG.MARINE_POD = !OFF;
   CBZ.CONFIG.MEG_SHIP_BITE = !OFF;
   CBZ.CONFIG.WATER_CHUM_ALL = !OFF;
+  CBZ.CONFIG.MARINE_FRENZY = !OFF;
   if (CBZ.marineAuditReset) CBZ.marineAuditReset();
+  if (CBZ.marineFrenzyReset) CBZ.marineFrenzyReset();
 
   const wf = CBZ.waterField;
   if (!wf) return { ok: false, missing: "waterField" };
@@ -322,8 +308,8 @@ async function stageMarinePredation(input) {
   }
 
   // ---- build the scenario ---------------------------------------------------
-  let meg = null, bleeder = null, boat = null;
-  const orcas = [], sharks = [];
+  let meg = null, bleeder = null, boat = null, carcass = null;
+  const sharks = [], bait = [];
   const A = anchor;
 
   if (subject.scenario === "chum") {
@@ -371,23 +357,39 @@ async function stageMarinePredation(input) {
       }
     }
     parkPlayer(A.x + 30, A.z + 30);
-  } else {
-    meg = spawnAnimal("megalodon", A.x, A.z, 0, subject.megSize || 1);
-    if (!meg) return { ok: false, missing: "megalodon" };
-    const n = subject.pod || 1;
-    for (let i = 0; i < n; i++) {
-      const ang = (i / n) * Math.PI * 2;
-      const o = spawnAnimal("orca", A.x + Math.cos(ang) * 46, A.z + Math.sin(ang) * 46, ang + Math.PI);
-      if (o) orcas.push(o);
+  } else if (subject.scenario === "bait") {
+    /* THREE SCHOOLS AND THREE MOUTHS. One sardine per shark, four metres
+       apart, because the predation graph deliberately refuses to put two
+       loners on one snack — so three anchors is how you get three feeders
+       into the same few metres of water, which is what a frenzy IS. The ball
+       itself is opened by marine_frenzy's own 2 Hz poll the moment a toothed
+       animal is inside 130 m of a school; nothing here calls it. */
+    for (let i = 0; i < 3; i++) {
+      const ang = (i / 3) * Math.PI * 2;
+      const f = spawnAnimal("sardine", A.x + Math.cos(ang) * 4, A.z + Math.sin(ang) * 4, ang);
+      if (f) bait.push(f);
     }
-    parkPlayer(A.x + 34, A.z + 34);
-  }
-
-  // The block's own derived answer, read BEFORE the fight so the picture and
-  // the threshold describe the same pairing.
-  let podNeeded = 0;
-  if (CBZ.marinePodNeeded && orcas.length && meg) {
-    try { podNeeded = CBZ.marinePodNeeded(orcas[0], meg); } catch (e) { podNeeded = 0; }
+    if (!bait.length) return { ok: false, missing: "sardine" };
+    for (let i = 0; i < 3; i++) {
+      const ang = (i / 3) * Math.PI * 2 + 0.5;
+      const sh = spawnAnimal("great_white_shark", A.x + Math.cos(ang) * 52, A.z + Math.sin(ang) * 52, ang + Math.PI);
+      if (sh) sharks.push(sh);
+    }
+    parkPlayer(A.x + 22, A.z + 22);
+  } else {
+    /* A CARCASS. Spawned already dead, which is the state marine_predation's
+       chum poll and marine_frenzy's site poll both key off — no special path
+       and no preset-owned corpse. The sharks are 140 m out with nothing alive
+       to hunt, so what brings them in is the body. */
+    carcass = spawnAnimal("dolphin", A.x, A.z, 0.4);
+    if (!carcass) return { ok: false, missing: "dolphin" };
+    carcass.hp = 0; carcass.dead = true; carcass.skinnable = true;
+    for (let i = 0; i < 4; i++) {
+      const ang = (i / 4) * Math.PI * 2 + 0.25;
+      const sh = spawnAnimal("great_white_shark", A.x + Math.cos(ang) * 140, A.z + Math.sin(ang) * 140, ang + Math.PI);
+      if (sh) sharks.push(sh);
+    }
+    parkPlayer(A.x + 26, A.z + 26);
   }
 
   /* ---- THE NO-HUD MEASUREMENT, and it has to be a measurement.
@@ -411,24 +413,22 @@ async function stageMarinePredation(input) {
 
   // ---- RUN IT. The page's own frame, in fixed steps. ------------------------
   const steps = Math.round((subject.seconds || 20) / RUN);
-  let megDeadAt = -1, rollSeenAt = -1, holdFrame = -1;
-  const megHp0 = meg ? meg.hp : 0;
   let hullMin = boat ? (boat.engineHp == null ? 100 : boat.engineHp) : -1;
+  let ballPeak = 0, birdPeak = 0;
   for (let i = 0; i < steps; i++) {
     CBZ.hitstop = 0; CBZ.slowmo = 0;
     // hold the boat still: a moored hull makes the bite geometry the variable
     if (boat && !boat.dead) { boat.v = 0; boat.vx = boat.vx || 0; }
     try { CBZ.stepSim(RUN); } catch (e) { /* one bad frame must not kill the run */ }
-    if (meg && meg.dead && megDeadAt < 0) megDeadAt = i * RUN;
-    if (meg && meg._mpRoll && rollSeenAt < 0) rollSeenAt = i * RUN;
-    // THE ROLL-OVER FRAME. Photographed at the moment the inversion is deepest
-    // rather than wherever the clock happened to land.
-    if (subject.holdRoll && meg && meg._mpRoll) {
-      const p = meg._mpRoll.t / meg._mpRoll.dur;
-      if (p > 0.82 && holdFrame < 0) { holdFrame = i; break; }
-    }
     if (boat && boat.engineHp != null && boat.engineHp < hullMin) hullMin = boat.engineHp;
-    if (!subject.holdRoll && meg && meg.dead && (i * RUN) > megDeadAt + 3) break;
+    // PEAKS, not end-states. A bait ball is at its most eaten just before it
+    // collapses and then it is GONE, so a number read at the last frame would
+    // report zero for the frame that worked.
+    if (CBZ.marineFrenzyAudit) {
+      const f = CBZ.marineFrenzyAudit();
+      if (f.fishDrawn > ballPeak) ballPeak = f.fishDrawn;
+      if (f.birds > birdPeak) birdPeak = f.birds;
+    }
   }
 
   if (typeof origFeed === "function") CBZ.cityKillFeed = origFeed;
@@ -447,13 +447,14 @@ async function stageMarinePredation(input) {
   let sharksNear = 0;
   if (bleeder) sharksNear = nearCount(sharks, bleeder.pos.x, bleeder.pos.z, 90);
   else if (sharks.length) sharksNear = nearCount(sharks, A.x, A.z, 110);
-  let orcaDeaths = 0;
-  for (const o of orcas) if (o.dead) orcaDeaths++;
-  const megHpPct = meg ? Math.max(0, Math.round((meg.hp / (meg.maxHp || megHp0 || 1)) * 100)) : -1;
-  const tonic = (CBZ.creatureTonicAngle && meg) ? CBZ.creatureTonicAngle(meg) : 0;
+  const frenzy = (CBZ.marineFrenzyAudit && CBZ.marineFrenzyAudit()) || {};
+  // "did the crowd actually arrive" — sharks that closed on the carcass or the
+  // ball, measured off the thing they were supposed to come to.
+  if (carcass) sharksNear = nearCount(sharks, carcass.pos.x, carcass.pos.z, 70);
+  else if (bait.length) sharksNear = nearCount(sharks, A.x, A.z, 45);
 
   // ---- the camera -----------------------------------------------------------
-  const focusOn = meg || bleeder || (boat && boat.pos) || { x: A.x, y: surf, z: A.z };
+  const focusOn = meg || bleeder || carcass || (boat && boat.pos) || { x: A.x, y: surf, z: A.z };
   const fx = focusOn.pos ? focusOn.pos.x : (focusOn.x != null ? focusOn.x : A.x);
   const fz = focusOn.pos ? focusOn.pos.z : (focusOn.z != null ? focusOn.z : A.z);
   const shot = subject.shot || { dist: 50, height: 20, pitch: 0.45 };
@@ -496,9 +497,9 @@ async function stageMarinePredation(input) {
   label("focus", subject.focus, "position:absolute;top:100px;left:28px;color:#c3d4de;font-size:13px;font-weight:550;max-width:740px;line-height:1.35");
   label("state", subject.state, `position:absolute;right:26px;top:25px;color:${before ? "#ffb0b0" : "#7ff0bb"};font-size:11px;font-weight:900;letter-spacing:.1em`);
   label("read",
-    `chum ${audit.chumSources || 0} · sharks@90m ${sharksNear} · rams ${audit.rams || 0} · rolls ${audit.rolls || 0}` +
-    `\nmeg ${megHpPct}% · orca deaths ${orcaDeaths} · needs ${podNeeded}` +
-    `\nhull ${hullMin} · feed lines ${feedLines}`,
+    `chum ${audit.chumSources || 0} · sharks near ${sharksNear} · bites ${audit.shipBites || 0}` +
+    `\nbait eaten ${frenzy.baitEaten || 0} · fish drawn ${ballPeak} · birds ${birdPeak}` +
+    `\nscavenging ${frenzy.scavengerFrames || 0} · hull ${hullMin} · feed lines ${feedLines}`,
     "position:absolute;right:26px;top:52px;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:#9fe8c3;white-space:pre;text-align:right");
   label("source", new URL(input.sourceUrl).host + new URL(input.sourceUrl).pathname,
     "position:absolute;bottom:20px;left:26px;color:#9cb0bf;font:11px ui-monospace,SFMono-Regular,Menlo,monospace");
@@ -508,24 +509,21 @@ async function stageMarinePredation(input) {
     anchor,
     camera: { position: camPos.slice(), target: camAim.slice() },
     stage: {
-      scenario: subject.scenario, pod: orcas.length,
-      megDeadAt: Number(megDeadAt.toFixed(2)),
-      rollSeenAt: Number(rollSeenAt.toFixed(2)),
-      tonicRad: Number(tonic.toFixed(3)),
+      scenario: subject.scenario,
+      baitBalls: frenzy.baitOpened || 0,
+      carcasses: frenzy.carcassOpened || 0,
       wrapped: !!audit.wrapped,
     },
     metrics: {
       sharksNear: sharksNear,
       chumSources: audit.chumSources || 0,
       chumOpened: audit.chumOpened || 0,
-      rams: audit.rams || 0,
-      rolls: audit.rolls || 0,
-      megHpPct: megHpPct,
-      timeToKillS: megDeadAt < 0 ? -1 : Number(megDeadAt.toFixed(1)),
-      orcaDeaths: orcaDeaths,
-      podNeeded: podNeeded,
       hullEngine: hullMin,
       shipBites: audit.shipBites || 0,
+      baitEaten: frenzy.baitEaten || 0,
+      fishDrawn: ballPeak,
+      birds: birdPeak,
+      scavengers: frenzy.scavengerFrames || 0,
       feedLines: feedLines,
     },
   };
@@ -533,17 +531,19 @@ async function stageMarinePredation(input) {
 
 export default {
   id: "marine-predation",
-  title: "Marine predation — blood in the water, a megalodon on a boat, and a pod on a megalodon",
+  title: "Marine predation — blood in the water, a megalodon on a boat, and the sea eating itself",
   description:
-    "Eleven simulated engagements in the real game world at seed 90210, photographed against this same " +
-    "checkout with the block's own reverts off (?marine=off). BEFORE: nothing in the ocean hunts anything " +
+    "Eight simulated engagements in the real game world at seed 90210, photographed against this same " +
+    "checkout with the blocks' own reverts off (?marine=off). BEFORE: nothing in the ocean hunts anything " +
     "but the player, a wounded or dead thing in the water bleeds into nowhere because the chum seam had " +
-    "three producers in the whole game, and a megalodon swims past a speedboat. AFTER: one predation graph " +
-    "derived from the bestiary's own numbers decides who eats whom and who MOBS whom, a pod of orcas takes " +
-    "bearings, rams the flank, staggers the megalodon and rolls it belly-up — but only once there are " +
-    "enough of them, a number solved from hp/bite/size rather than typed in — and a megalodon closes its " +
-    "jaws across a speedboat's beam, crushes the hull, throws the crew in the water and leaves them " +
-    "bleeding for the sharks it just drew. No HUD anywhere: the owner asked twice.",
+    "three producers in the whole game, a megalodon swims past a speedboat, and a kill at sea looks like " +
+    "nothing at all. AFTER: one predation graph derived from the bestiary's own numbers decides who eats " +
+    "whom and who MOBS whom; a megalodon closes its jaws across a speedboat's beam, crushes the hull, " +
+    "throws the crew in the water and leaves them bleeding for the sharks it just drew; a school balls up " +
+    "under attack and collapses as it is eaten; a carcass draws a crowd; and gulls over the boil are the " +
+    "long-range read that makes you turn the boat. No HUD anywhere: the owner asked twice. " +
+    "Orca pod tactics are a CONSUMER of this block's published pod primitives and are photographed by " +
+    "city/wildlife_orca.js's own preset, not here.",
   defaultBefore: "local",
   beforeLabel: "BEFORE — ?marine=off (this checkout, block reverted)",
   afterLabel: "AFTER — this checkout",
@@ -563,25 +563,24 @@ export default {
   readyExpression,
   stage: stageMarinePredation,
   metricsNote:
-    "Every number is read at the end of the same simulated seconds the picture was taken in: the block's " +
-    "own probe (CBZ.marineAudit) for chum, rams, rolls and ship bites, and direct reads of the actors' " +
-    "health and the boat's engine for the rest. `podNeeded` is the block's DERIVED answer to 'how many " +
-    "does it take' (solved from hp, bite and size — never a constant), so the 5-orca and monster-meg " +
-    "frames can be read against it. `timeToKillS` of -1 means the megalodon survived. `feedLines` is the " +
-    "no-HUD promise measured from OUTSIDE the block, by wrapping the two things in this game that can " +
-    "put text on the screen.",
+    "Every number is read over the same simulated seconds the picture was taken in: the blocks' own probes " +
+    "(CBZ.marineAudit, CBZ.marineFrenzyAudit) for chum, ship bites, mouthfuls, fish and gulls, and direct " +
+    "reads of the actors and the boat's engine for the rest. `fishDrawn` and `birds` are PEAKS across the " +
+    "run rather than end-states, because a bait ball is at its most eaten one frame before it collapses " +
+    "and is then gone — an end-of-run read would report zero for the frame that worked. `feedLines` is the " +
+    "no-HUD promise measured from OUTSIDE the blocks, by wrapping the two things in this game that can " +
+    "put text on the screen; it must stay zero in both columns. THE PICTURES ARE THE TEST — these numbers " +
+    "only say whether the thing in the picture happened at all.",
   metrics: {
-    sharksNear: { label: "Sharks that closed on the bleeder", unit: "animals", better: "higher" },
+    sharksNear: { label: "Sharks that closed on the blood / the body", unit: "animals", better: "higher" },
     chumSources: { label: "Live blood trails in the water", unit: "sources", better: "higher" },
     chumOpened: { label: "Chum handles opened during the run", unit: "handles", better: "higher" },
-    rams: { label: "Flank rams landed", unit: "strikes", better: "higher" },
-    rolls: { label: "Roll-over finishers started", unit: "events", better: "higher" },
-    megHpPct: { label: "Megalodon health left", unit: "%", better: "lower" },
-    timeToKillS: { label: "Time for the pod to kill it (-1 = survived)", unit: "s", better: "lower" },
-    orcaDeaths: { label: "Orcas the pod lost", unit: "animals", better: "lower" },
-    podNeeded: { label: "Pod size the block derives as sufficient", unit: "orcas", better: "lower" },
     hullEngine: { label: "Boat structure left after the bite", unit: "hp", better: "lower" },
     shipBites: { label: "Bites landed on the hull", unit: "bites", better: "higher" },
-    feedLines: { label: "HUD feed lines the fight produced (must stay zero)", unit: "lines", better: "lower" },
+    baitEaten: { label: "Mouthfuls taken out of the bait ball", unit: "bites", better: "higher" },
+    fishDrawn: { label: "Bait fish on screen at the ball's peak", unit: "fish", better: "higher" },
+    birds: { label: "Gulls working the surface at the peak", unit: "birds", better: "higher" },
+    scavengers: { label: "Frames an animal spent working a carcass", unit: "frames", better: "higher" },
+    feedLines: { label: "HUD feed lines the event produced (must stay zero)", unit: "lines", better: "lower" },
   },
 };
