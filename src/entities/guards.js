@@ -495,7 +495,7 @@
           addRacketStanding(1);
           CBZ.sfx && CBZ.sfx("coin");
           clearGuardApproach(g);
-          return { ok: true, msg: `It was ${nameOf(snitch)}. Do what you like with that — I never said it.` };
+          return { ok: true, msg: `It was ${nameOf(snitch)}. Do what you like with that. I never said it.` };
         }
         if (CBZ.addHeat) CBZ.addHeat(-3);
         addRacketStanding(1);
@@ -979,9 +979,14 @@
     if (g.dead) {
       noteState(g, "dead");
       g.hunt = 0; g.alert = 0; g.approach = null; g.investigate = null;
-      g.group.rotation.z = CBZ.damp(g.group.rotation.z, Math.PI / 2, 11, dt);
+      // systems/prisoncorpse.js owns the body — lie direction, walls, sprawl.
+      // While it does, animChar must NOT run: the idle pose would fight the
+      // sprawl for the same four pivots every frame. Legacy flop = flag off.
+      if (!(CBZ.prisonCorpseTick && CBZ.prisonCorpseTick(g, dt))) {
+        g.group.rotation.z = CBZ.damp(g.group.rotation.z, Math.PI / 2, 11, dt);
+        animChar(g.char, 0, dt);
+      }
       updateFlashlight(g, dt);
-      animChar(g.char, 0, dt);
       return;
     }
 

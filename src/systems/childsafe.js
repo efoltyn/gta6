@@ -670,29 +670,29 @@
      =============================================================== */
   const OPEN = [
     // --- the ambient instanced crowd: index-addressed, no age signal ---
-    "src/city/crowd.js:2083 cityCrowdKill(i) — agents are typed-array indices; " +
+    "src/city/crowd.js:2083 cityCrowdKill(i), agents are typed-array indices; " +
       "no per-agent age/band exists and no read exposes one. CLOSE BY: exporting " +
-      "CBZ.cityCrowdChild(i) (or an age field on cityCrowdAgent(i)) — the wrapper " +
+      "CBZ.cityCrowdChild(i) (or an age field on cityCrowdAgent(i)), the wrapper " +
       "in this file already consults both.",
-    "src/city/crowd.js:2070 cityCrowdRayHit — the bullet TARGET picker for the " +
+    "src/city/crowd.js:2070 cityCrowdRayHit, the bullet TARGET picker for the " +
       "ambient crowd. A crowd child is a hittable sphere. CLOSE BY: the same " +
       "cityCrowdChild(i) seam, consulted in shootable(i).",
-    "src/city/crowd.js:2103 cityCrowdCircleKill — car-mowing / blast sweep over " +
+    "src/city/crowd.js:2103 cityCrowdCircleKill, car-mowing / blast sweep over " +
       "the crowd. Routes through cityCrowdKill (so it inherits any fix) but is " +
       "its own public entry and is listed so the census is complete.",
     // --- multiplayer: the host is authoritative, a local veto is a desync ---
-    "src/net/networld.js:308 a.hp -= m.dmg — remote damage applied to a net actor " +
+    "src/net/networld.js:308 a.hp -= m.dmg, remote damage applied to a net actor " +
       "record that may never have passed through CBZ.cityMakePed, so the hp seal " +
       "was never installed. CLOSE BY: calling CBZ.childSafeSeal(a) where " +
       "net/netactors.js mints a puppet.",
-    "src/net/networld.js:489,540 P.dead = true — the host's snapshot flips death " +
+    "src/net/networld.js:489,540 P.dead = true, the host's snapshot flips death " +
       "directly, by design (\"the host's word is law\"). A client-side veto here " +
       "would desync. CLOSE BY: enforcing this on the HOST's damage path, not the " +
       "client's.",
     // (fpsmode.js findActorHit / the aim-assist stack was here and is CLOSED —
     //  see the CLOSED list below. 7 -> 6.)
     // --- the feed's name-only entry ---
-    "src/city/killfeed.js:112 cityLogDeath(name, cause) — takes a NAME STRING. A " +
+    "src/city/killfeed.js:112 cityLogDeath(name, cause), takes a NAME STRING. A " +
       "caller that logs a child's death without passing the record cannot be " +
       "detected. Unreachable in practice (children never die) but not provably " +
       "closed. CLOSE BY: threading the victim record through opts at the two " +
@@ -702,15 +702,15 @@
   // Closed IN this change, kept as prose so the next agent can see what a
   // closure looks like without a git archaeology session (damage.js's idiom).
   const CLOSED = [
-    "CBZ.damage — the whole migrated bus, one wrap",
-    "CBZ.cityKillPed — every kill site in the tree (runover, blast, melee, fall, gunfire)",
-    "CBZ.cityKOPed — taser / light-melee takedown",
-    "32x raw `.hp -=` on ped records — the hp seal, no per-site change",
-    "CBZ.bodyWound / bodyBite / goreSever — wounds + dismemberment",
-    "CBZ.cityRagdoll / cityCorpseHit / ragdollPin — corpse physics",
-    "CBZ.gore(opts.actor) — explicit-victim gore",
-    "CBZ.lockonFireTarget / lockonMissileSeek — guided-weapon lock",
-    "CBZ.predatorHunt / predatorSeize — the stalk and the grab",
+    "CBZ.damage, the whole migrated bus, one wrap",
+    "CBZ.cityKillPed, every kill site in the tree (runover, blast, melee, fall, gunfire)",
+    "CBZ.cityKOPed, taser / light-melee takedown",
+    "32x raw `.hp -=` on ped records, the hp seal, no per-site change",
+    "CBZ.bodyWound / bodyBite / goreSever, wounds + dismemberment",
+    "CBZ.cityRagdoll / cityCorpseHit / ragdollPin, corpse physics",
+    "CBZ.gore(opts.actor), explicit-victim gore",
+    "CBZ.lockonFireTarget / lockonMissileSeek, guided-weapon lock",
+    "CBZ.predatorHunt / predatorSeize, the stalk and the grab",
     // Closed from the OTHER side, which is the pattern worth copying when a
     // path is module-private: fpsmode.js consumes CBZ.isProtectedActor itself
     // rather than this file trying to reach in. Under AIM_CHILD_NO_ASSIST a
@@ -722,7 +722,7 @@
     // and this file's own doctrine is that the shot still cracks and the impact
     // still lands. So the bullet stays physical and only the ASSISTANCE is
     // withdrawn. Audit: CBZ.aimAssistAudit().
-    "fpsmode.js findActorHit + lockValid + hot reticle — the aim-assist/crosshair " +
+    "fpsmode.js findActorHit + lockValid + hot reticle, the aim-assist/crosshair " +
       "magnetism stack (targeting, not damage)",
   ];
 

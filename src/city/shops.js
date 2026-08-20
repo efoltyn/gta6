@@ -116,6 +116,12 @@
     panel = document.createElement("div");
     panel.id = "cityShop";
     panel.style.cssText = "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:48;display:none;min-width:340px;max-width:460px;background:rgba(16,18,24,.94);border:2px solid #2c3140;border-radius:16px;padding:16px 18px;color:#e8eef7;font-family:Fredoka,system-ui,sans-serif;box-shadow:0 18px 50px rgba(0,0,0,.5);pointer-events:auto;max-height:88vh;overflow-y:auto";
+    panel.addEventListener("click", function (e) {
+      const row = e.target && e.target.closest ? e.target.closest("[data-k]") : null;
+      if (!row) return;
+      e.preventDefault(); e.stopPropagation();
+      pressKey(row.getAttribute("data-k"));
+    });
     document.body.appendChild(panel);
     return panel;
   }
@@ -189,7 +195,7 @@
   function renderCloset() {
     const it = CBZ.cityEcon.ITEMS;
     const SLOTS = (CBZ.cityOutfitSlots && CBZ.cityOutfitSlots()) || ["hat", "top", "outer", "bottom", "shoes", "glasses", "chain", "watch", "ring"];
-    let html = "<div style='font-size:12px;color:#9fb0c6;margin:6px 0 2px'>YOUR CLOSET <span style='color:#7f8794'>· number = wear it · <b style='color:#ff9e6b'>[0]</b> strip everything</span></div>";
+    let html = "<div style='font-size:12px;color:#9fb0c6;margin:6px 0 2px'>YOUR CLOSET <span class='shopRow' data-k='0' style='color:#7f8794'><b style='color:#ff9e6b'>strip everything</b></span></div>";
     // CURRENTLY WORN, head-to-toe (so you can see the full fit at a glance)
     const o = (CBZ.cityEcon.outfit ? CBZ.cityEcon.outfit() : (g.cityOutfit || {}));
     const wornAny = SLOTS.some((s) => o[s]);
@@ -199,19 +205,19 @@
         "<span style='display:inline-block;margin:1px 6px 1px 0'>" +
         "<span style='color:#7f8794'>" + s + ":</span> <span style='color:#7ed957'>" + o[s] + "</span> <span style='color:#7f8794'>+" + (it[o[s]].drip || 0) + "</span></span>"
       ).join("");
-    } else html += "<span style='color:#7f8794'>plain clothes — nothing equipped.</span>";
+    } else html += "<span style='color:#7f8794'>plain clothes, nothing equipped.</span>";
     html += "</div>";
     // OWNED pieces you can put on (number keys). Worn ones marked ✓.
     closetItems = ownedWearables().slice(0, 9);
     if (!closetItems.length) {
-      html += "<div style='font-size:12px;color:#7f8794;margin-top:4px'>You don't own any wearables yet — buy a fit to build drip.</div>";
+      html += "<div style='font-size:12px;color:#7f8794;margin-top:4px'>You don't own any wearables yet, buy a fit to build drip.</div>";
       return html;
     }
-    html += "<div style='font-size:12px;color:#9fb0c6;margin:6px 0 2px'>OWN — press the number to wear</div>";
+    html += "<div style='font-size:12px;color:#9fb0c6;margin:6px 0 2px'>OWN, press the number to wear</div>";
     closetItems.forEach((nm, i) => {
       const m = it[nm], worn = isWorn(nm), slot = slotOf(nm);
       const after = dripAfter(nm), cur = playerDrip();
-      html += "<div style='display:flex;justify-content:space-between;padding:2px 0'><span><b style='color:#ffd166'>" + (i + 1) + "</b> " + nm +
+      html += "<div class='shopRow' data-k='" + (i + 1) + "' style='display:flex;justify-content:space-between;padding:2px 0'><span><b style='color:#ffd166'>" + (i + 1) + "</b> " + nm +
         " <span style='color:#7f8794;font-size:11px'>(" + (slot ? slot + " · " : "") + "+" + (m.drip || 0) + " drip)</span>" +
         (worn ? " <span style='color:#7ed957;font-size:11px'>✓worn</span>"
           : " <span style='color:#ffd166;font-size:11px'>DRIP " + cur + "→" + after + "</span>") +
@@ -227,7 +233,7 @@
     const before = playerDrip();
     if (equipItem(nm)) {
       const after = playerDrip();
-      CBZ.city.note("Put on " + nm + " — sharper already.", 1.6);
+      CBZ.city.note("Put on " + nm + " · sharper already.", 1.6);
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     }
     render();
@@ -241,7 +247,7 @@
     const before = playerDrip();
     SLOTS.forEach((s) => { if (o[s]) unequipItem(s); });
     const after = playerDrip();
-    CBZ.city.note("Stripped down — back to basics.", 1.6);
+    CBZ.city.note("Stripped down, back to basics.", 1.6);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     render();
   }
@@ -274,11 +280,12 @@
     }
     html += "<div style='font-size:12px;color:#8a93a3;margin-bottom:6px'>Cash " + fmt$(g.cash) + " · " +
       (g.cityBank ? "Bank " + fmt$(g.cityBank) + " · " : "") +
-      dripBadge + " · [Esc]/[E] leave</div>";
+      dripBadge + "</div>";
+    html += "<div class='shopRow shopLeave' data-k='escape'>LEAVE</div>";
 
     // the walk-in routing line: the WALL sells the guns, the counter the rest.
     if (wallLive) {
-      html += "<div style='font-size:12px;color:#9fb0c6;margin:2px 0 6px'>The pieces are <b style='color:#ffd166'>on the wall</b> — " +
+      html += "<div style='font-size:12px;color:#9fb0c6;margin:2px 0 6px'>The pieces are <b style='color:#ffd166'>on the wall</b> · " +
         "walk up to one and press <b style='color:#ffd166'>E</b> to take it off the rack. The counter's got the ammo.</div>";
     }
 
@@ -288,8 +295,8 @@
     // light-touch outfit manager (the buy-equips-it path stays the core).
     const ck = closetKey(kind);
     if (isBoutique(kind) && ck) {
-      html += "<div style='font-size:11px;color:#7f8794;margin-bottom:4px'><b style='color:#7fd0ff'>[" + ck.toUpperCase() + "]</b> " +
-        (closetOpen ? "back to the store" : "open your closet (change clothes)") + "</div>";
+      html += "<div class='shopRow' data-k='" + ck + "' style='font-size:11px;color:#7f8794;margin-bottom:4px'><b style='color:#7fd0ff'>[" + ck.toUpperCase() + "]</b> " +
+        (closetOpen ? "back to the store" : "your closet") + "</div>";
     }
     if (closetOpen && isBoutique(kind)) {
       html += renderCloset();
@@ -300,9 +307,9 @@
     // BUY CONTROLS: bulk multiplier + haggle (only show where there's stock)
     if (listItems.length) {
       html += "<div style='font-size:11px;color:#7f8794;margin-bottom:6px;display:flex;gap:10px;flex-wrap:wrap'>" +
-        "<span><b style='color:#7fd0ff'>[X]</b> qty ×" + qty + "</span>" +
+        "<span class='shopRow' data-k='x'><b style='color:#7fd0ff'>[X]</b> qty ×" + qty + "</span>" +
         (haggleTried ? "<span style='color:#9fb0c6'>[V] haggled" + (haggle > 0 ? " −" + Math.round(haggle * 100) + "%" : " (no luck)") + "</span>"
-          : "<span><b style='color:#7fd0ff'>[V]</b> haggle</span>") +
+          : "<span class='shopRow' data-k='v'><b style='color:#7fd0ff'>[V]</b> haggle</span>") +
         (disc > 0 ? "<span style='color:#7ed957'>deal −" + Math.round(disc * 100) + "%</span>" : "") +
         "</div>";
       html += "<div style='font-size:12px;color:#9fb0c6;margin:4px 0'>BUY</div>";
@@ -338,7 +345,7 @@
           dripHint = " <span style='color:#ffd166;font-size:11px'>DRIP " + cur + "→" + after + "</span>" +
             (cur2 ? " <span style='color:#7f8794;font-size:11px'>(replaces " + cur2 + ")</span>" : "");
         }
-        html += "<div style='display:flex;justify-content:space-between;padding:3px 0'><span><b style='color:#ffd166'>" + (i + 1) + "</b> " + it +
+        html += "<div class='shopRow' data-k='" + (i + 1) + "' style='display:flex;justify-content:space-between;padding:3px 0'><span><b style='color:#ffd166'>" + (i + 1) + "</b> " + it +
           " <span style='color:#7f8794;font-size:11px'>(" + tagN + ")</span>" +
           (worn ? " <span style='color:#7ed957;font-size:11px'>✓worn</span>" : dripHint) +
           "</span><span style='color:#7ed957'>" + line + trendGlyph + "</span></div>";
@@ -365,7 +372,7 @@
         const owned = isFit && !!ownedFits[s.id];
         const tag = isFit ? "+" + s.swag + " drip" : "+" + s.swag + " swagger";
         const price = wornNow ? "" : (owned ? "<span style='color:#7fd0ff'>owned · wear</span>" : "<span style='color:#7ed957'>" + fmt$(s.cost) + "</span>");
-        html += "<div style='display:flex;justify-content:space-between;padding:2px 0'><span><b style='color:#7fd0ff'>" + letter.toUpperCase() + "</b> " +
+        html += "<div class='shopRow' data-k='" + letter + "' style='display:flex;justify-content:space-between;padding:2px 0'><span><b style='color:#7fd0ff'>" + letter.toUpperCase() + "</b> " +
           s.name + " <span style='color:#7f8794;font-size:11px'>(" + tag + ")</span>" +
           (wornNow ? " <span style='color:#7ed957;font-size:11px'>✓worn</span>" : "") +
           "</span><span>" + price + "</span></div>";
@@ -375,12 +382,12 @@
     const svc = services(kind);
     if (svc.length) {
       html += "<div style='font-size:12px;color:#9fb0c6;margin:8px 0 2px'>SERVICES</div>";
-      svc.forEach((s) => { html += "<div style='padding:2px 0'><b style='color:#7fd0ff'>" + s.key.toUpperCase() + "</b> " + s.label + "</div>"; });
+      svc.forEach((s) => { html += "<div class='shopRow' data-k='" + s.key + "' style='padding:2px 0'><b style='color:#7fd0ff'>" + s.key.toUpperCase() + "</b> " + s.label + "</div>"; });
     }
     // sellables you hold
     const sell = sellable(kind);
     if (sell.length) {
-      html += "<div style='font-size:12px;color:#9fb0c6;margin:8px 0 2px'>SELL — press <b style='color:#ff9e6b'>0</b> to sell all (" + fmt$(sellTotal(kind)) + ")</div>";
+      html += "<div class='shopRow' data-k='0' style='font-size:12px;color:#9fb0c6;margin:8px 0 2px'>SELL EVERYTHING <b style='color:#ff9e6b'>" + fmt$(sellTotal(kind)) + "</b></div>";
       // show what each lot fences for so a luxe piece's JACKPOT value is obvious.
       html += "<div style='font-size:12px;color:#aeb8c6'>" + sell.map((s) => {
         const ea = econ.sellPrice(s.name, kind);
@@ -399,11 +406,10 @@
       // it. That difference is the whole reason to move through the world.
       const held = tillEstimate(openLot);
       const hits = CBZ.cityTill.hits(openLot);
-      html += "<div style='font-size:12px;color:#ff7a7a;margin:10px 0 0;border-top:1px solid #2c3140;padding-top:6px'>" +
-        "<b style='color:#ff9e6b'>[R]</b> Rob the till <span style='color:#7f8794'>(" +
-        (held > 0 ? fmt$(held) + " in the drawer" : "drawer's empty right now") +
-        ", and the heat that comes with it)</span>" +
-        (hits >= 1 ? "<div style='color:#7f8794'>They've been hit before — the drawer's being dropped every " +
+      html += "<div class='shopRow' data-k='r' style='font-size:12px;color:#ff7a7a;margin:10px 0 0;border-top:1px solid #2c3140;padding-top:6px'>" +
+        "<b style='color:#ff9e6b'>[R]</b> Rob the till <span style='color:#7f8794'>" +
+        (held > 0 ? fmt$(held) + " in the drawer" : "drawer's empty") + "</span>" +
+        (hits >= 1 ? "<div style='color:#7f8794'>Hit before. The drawer is dropped every " +
           Math.round(60 * (2 / (1 + hits))) + " min now.</div>" : "") + "</div>";
     }
     el().innerHTML = html;
@@ -539,8 +545,8 @@
       // JACKPOT FENCE: a single piece pawning for a real fortune gets a headline
       // — pawning a Patek/ring/bonds should FEEL like the score it is.
       if (jackpotItem && jackpotEach >= 50000 && CBZ.city.big) {
-        CBZ.city.note(fmt$(jackpotEach) + " received — pawn sale: " + jackpotItem + ".", 2.4, { from: "Liberty Bank", app: "bank" });
-        if (n > 1) CBZ.city.note("…plus the rest of the haul — " + fmt$(got) + " total.", 2);
+        CBZ.city.note(fmt$(jackpotEach) + " received, pawn sale: " + jackpotItem + ".", 2.4, { from: "Liberty Bank", app: "bank" });
+        if (n > 1) CBZ.city.note("…plus the rest of the haul · " + fmt$(got) + " total.", 2);
       } else {
         CBZ.city.note("Sold " + n + " for " + fmt$(got), 1.8);
       }
@@ -620,9 +626,9 @@
     const CLUB = (CBZ.CITY && CBZ.CITY.CLUB_DRIP) || 30, VIP = (CBZ.CITY && CBZ.CITY.VIP_DRIP) || 70;
     // crossing a threshold by buying this piece is a moment — headline it.
     if (before < CLUB && after >= CLUB && after < VIP && CBZ.city.big) {
-      CBZ.city.big("That fit turns heads — the Velvet's rope would open for you.");
+      CBZ.city.big("That fit turns heads, the Velvet's rope would open for you.");
     } else if (before < VIP && after >= VIP && CBZ.city.big) {
-      CBZ.city.big("✦ Dressed like money — the Velvet's elite lounge would wave you up.");
+      CBZ.city.big("✦ Dressed like money, the Velvet's elite lounge would wave you up.");
     } else {
       CBZ.city.note("Now wearing " + name + (replaced ? " (over " + replaced + ")" : "") + ".", 1.8);
     }
@@ -644,7 +650,7 @@
       CBZ.city.note("Talked them down −" + Math.round(haggle * 100) + "% on the whole counter.", 2);
     } else if (roll > 0.93 && rep < 40) {
       haggle = 0;
-      CBZ.city.note("The clerk's insulted — no deal today.", 1.8);
+      CBZ.city.note("The clerk's insulted, no deal today.", 1.8);
     } else {
       haggle = 0;
       CBZ.city.note("They won't budge on price.", 1.6);
@@ -1219,7 +1225,7 @@
     out.of = Math.round(amt);
     out.amount = Math.max(0, Math.round(amt - s[key]));
     if (!(out.amount > 0)) {
-      out.why = (src.kind && shopShutSoft(src)) ? "shut — the drawer's dropped for the night" : "already emptied";
+      out.why = (src.kind && shopShutSoft(src)) ? "shut, the drawer's dropped for the night" : "already emptied";
     }
     return out;
   }
@@ -1659,7 +1665,7 @@
     const r = CBZ.cityTill.take(openLot, { point: "register", frac: resisted ? (0.3 + Math.random() * 0.3) : 1, by: "player", rob: true });
     const take = r.taken;
     if (!(take > 0)) {
-      CBZ.city.note(r.why === "empty" ? "Drawer's empty — they've already dropped it." : ("Nothing in " + (r.name || "the register") + " — " + (r.why || "empty") + "."), 2.2);
+      CBZ.city.note(r.why === "empty" ? "Drawer's empty, they've already dropped it." : ("Nothing in " + (r.name || "the register") + " — " + (r.why || "empty") + "."), 2.2);
       // it is still an armed robbery even when the score is nothing, and the
       // clerk still screams: fall through to the crime/alarm/panic beats.
     } else CBZ.city.addCash(take);
@@ -1677,8 +1683,8 @@
       CBZ.citySpawnCop(sx, sz, false);
       if (CBZ.sfxAt) CBZ.sfxAt("siren", sx, sz);
     }
-    if (resisted) CBZ.city.big("Clerk resisted! Grabbed " + fmt$(take) + " — cops rolling!");
-    else CBZ.city.big("Robbed the till: " + fmt$(take) + " — WANTED!");
+    if (resisted) CBZ.city.big("Clerk resisted! Grabbed " + fmt$(take) + " · cops rolling!");
+    else CBZ.city.big("Robbed the till: " + fmt$(take) + " · WANTED!");
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     // the store kicks you out after a stick-up
     close();
@@ -1729,7 +1735,7 @@
     if (CBZ.sfx) CBZ.sfx("coin");
     for (const m of toBuy) econ.add(m, 1);
     for (const m of set) if (!isWorn(m)) equip(m);          // wear the whole set
-    CBZ.city.big("ICED OUT — full set" + (price > 0 ? " for " + fmt$(price) : "") + "!");
+    CBZ.city.big("ICED OUT, full set" + (price > 0 ? " for " + fmt$(price) : "") + "!");
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     render();
   }
@@ -1740,15 +1746,15 @@
   function withdraw() { const amt = Math.min(500, g.cityBank || 0); if (amt <= 0) { CBZ.city.note("Bank empty.", 1.2); return; } g.cityBank -= amt; CBZ.city.addCash(amt); CBZ.city.note("Withdrew " + fmt$(amt), 1.6); render(); }
   function bribe() {
     const stars = g.wanted | 0;
-    if (stars <= 0) { CBZ.city.note("You're clean — nothing to pay off.", 1.4); return; }
+    if (stars <= 0) { CBZ.city.note("You're clean, nothing to pay off.", 1.4); return; }
     const cost = ((CBZ.CITY.econ && CBZ.CITY.econ.bribeBase) || 150) * stars;
     if (!CBZ.city.spend(cost)) { CBZ.city.note("A bribe costs " + fmt$(cost) + " right now.", 1.8); return; }
     const T = CBZ.CITY.starHeat; g.heat = Math.max(0, T[Math.max(0, stars - 1)] - 1);
     if (CBZ.city.addHeat) CBZ.city.addHeat(0);
-    CBZ.city.note("Paid off the cops — down to " + (stars - 1) + "★ (" + fmt$(cost) + ")", 2.2);
+    CBZ.city.note("Paid off the cops, down to " + (stars - 1) + "★ (" + fmt$(cost) + ")", 2.2);
     if (CBZ.sfx) CBZ.sfx("coin"); render();
   }
-  function train() { if ((CBZ.player.maxHp || 100) >= 240) { CBZ.city.note("You're maxed out — the gym can't take you further.", 1.8); return; } if (CBZ.city.spend(100)) { CBZ.player.maxHp = Math.min(240, (CBZ.player.maxHp || 100) + 10); CBZ.player.hp = CBZ.player.maxHp; CBZ.city.addRespect(1); CBZ.city.note("Trained — max HP " + CBZ.player.maxHp, 1.8); render(); } }
+  function train() { if ((CBZ.player.maxHp || 100) >= 240) { CBZ.city.note("You're maxed out, the gym can't take you further.", 1.8); return; } if (CBZ.city.spend(100)) { CBZ.player.maxHp = Math.min(240, (CBZ.player.maxHp || 100) + 10); CBZ.player.hp = CBZ.player.maxHp; CBZ.city.addRespect(1); CBZ.city.note("Trained, max HP " + CBZ.player.maxHp, 1.8); render(); } }
   // BAR — buy a round. The bar's verb promises "drinks" but it has no stock and
   // the food heal path is kind-gated; this is the drink. Loosens you up: tops a
   // little hunger, a short stamina boost, and a small patch-up (mirrors the
@@ -1764,7 +1770,7 @@
     CBZ.player._boost = 12;
     if (CBZ.player.hp != null && CBZ.player.maxHp) CBZ.player.hp = Math.min(CBZ.player.maxHp, CBZ.player.hp + 8);
     if (CBZ.cityDrink) CBZ.cityDrink(1);
-    CBZ.city.note("Drink — loosened up. That's gonna add up...", 1.8);
+    CBZ.city.note("Drink, loosened up. That's gonna add up...", 1.8);
     render();
   }
   const MAKER_CORP_ID = { KAI: "kaido", VLT: "volante" };   // economy.js CARS .maker -> sim/corporations.js id
@@ -1815,40 +1821,53 @@
   CBZ.cityShopRender = function () { if (openLot) render(); };
   CBZ.cityShopLot = function () { return openLot; };
 
-  addEventListener("keydown", function (e) {
-    if (!openLot) return;
-    const k = e.key.toLowerCase();
-    if (k === "escape" || k === "e") { e.preventDefault(); close(); return; }
+  /* THE COUNTER HAD NO BUTTONS (owner, 2026-08-18: "figure out what sucks
+     around buttons"). Every shop and every civic desk in the game printed
+     [X] / [V] / [0-9] / [R] key hints and listened ONLY for a keydown — on a
+     tablet, where this game is actually played, that is a wall of text you
+     cannot press. Nothing about the rows changes: each one already named its
+     own key, so it now carries that key as `data-k` and a single delegated
+     click runs the SAME dispatch the keyboard runs. One code path, two inputs;
+     a shop verb can never work on one and not the other. */
+  function pressKey(k) {
+    if (!openLot || !k) return false;
+    k = String(k).toLowerCase();
+    if (k === "escape" || k === "e") { close(); return true; }
     // the closet toggle (boutique change-clothes view) — its key is chosen to
     // dodge restyle letters & service keys, so it never steals an existing verb.
     const ck = closetKey(openLot.kind);
-    if (ck && k === ck) { e.preventDefault(); closetOpen = !closetOpen; render(); return; }
+    if (ck && k === ck) { closetOpen = !closetOpen; render(); return true; }
     // while the closet is up, number keys EQUIP owned pieces and [0] strips all
     if (closetOpen && isBoutique(openLot.kind)) {
-      if (k >= "1" && k <= "9") { e.preventDefault(); closetEquip(parseInt(k, 10) - 1); return; }
-      if (k === "0") { e.preventDefault(); closetStripAll(); return; }
-      // fall through for nothing else: closet view owns the keys while it's open
-      return;
+      if (k >= "1" && k <= "9") { closetEquip(parseInt(k, 10) - 1); return true; }
+      if (k === "0") { closetStripAll(); return true; }
+      // nothing else: the closet view owns the keys while it is open
+      return false;
     }
-    if (k >= "1" && k <= "9") { e.preventDefault(); buy(parseInt(k, 10) - 1); return; }
-    if (k === "0") { e.preventDefault(); sellAll(openLot.kind); return; }
+    if (k >= "1" && k <= "9") { buy(parseInt(k, 10) - 1); return true; }
+    if (k === "0") { sellAll(openLot.kind); return true; }
     // bulk-quantity toggle (1 → 5 → 10 → 1)
-    if (k === "x") { e.preventDefault(); qty = qty === 1 ? 5 : qty === 5 ? 10 : 1; render(); return; }
+    if (k === "x") { qty = qty === 1 ? 5 : qty === 5 ? 10 : 1; render(); return true; }
     // haggle (one attempt this visit)
-    if (k === "v") { e.preventDefault(); tryHaggle(); return; }
+    if (k === "v") { tryHaggle(); return true; }
     // rob the till
     if (k === "r" && canRobTill(openLot.kind) && !services(openLot.kind).some((s) => s.key === "r")) {
-      e.preventDefault(); robTill(); return;
+      robTill(); return true;
     }
     // barber / clothing restyle — letters come from styleLetters(), which
     // already skips service keys + the closet key, so they can't collide.
     const styles = styleMenu(openLot.kind);
     if (styles.length && k >= "a" && k <= "z") {
       const idx = styleLetters(openLot.kind).indexOf(k);
-      if (idx >= 0 && idx < styles.length) { e.preventDefault(); restyle(openLot.kind, idx); return; }
+      if (idx >= 0 && idx < styles.length) { restyle(openLot.kind, idx); return true; }
     }
     const svc = services(openLot.kind).find((s) => s.key === k);
-    if (svc) { e.preventDefault(); svc.fn(); }
+    if (svc) { svc.fn(); return true; }
+    return false;
+  }
+  addEventListener("keydown", function (e) {
+    if (!openLot) return;
+    if (pressKey(e.key)) e.preventDefault();
   });
 
   // ---- BREAKING & ENTERING through a shot-out window. buildings.js only
@@ -1931,13 +1950,13 @@
     const r = CBZ.cityTill.take(lot, { point: "register", frac: 0.45 + Math.random() * 0.35, by: "player", rob: true });
     const d = lot.building && lot.building.door;
     if (!(r.taken > 0)) {
-      CBZ.city.note("Drawer's empty — nothing in it to take.", 1.8);
+      CBZ.city.note("Drawer's empty, nothing in it to take.", 1.8);
       return;
     }
     CBZ.city.addCash(r.taken);
     if (CBZ.sfx) CBZ.sfx("coin");
     if (CBZ.cityCrime) CBZ.cityCrime(40, { x: d ? d.x : CBZ.player.pos.x, z: d ? d.z : CBZ.player.pos.z, type: "till grab" });
-    CBZ.city.note("Cleaned the drawer — " + fmt$(r.taken) + ". Nobody watching.", 2);
+    CBZ.city.note("Cleaned the drawer · " + fmt$(r.taken) + ". Nobody watching.", 2);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
   // …and the SAFE behind the counter, which is the whole gradient: a drawer is
@@ -2001,7 +2020,7 @@
     p.cash = (p.cash | 0) + fare;
     P.pos.x = it.x + 2; P.pos.z = it.z + 2;
     if (P.vel) { P.vel.x = 0; P.vel.z = 0; }
-    CBZ.city.note("Dropped across town — " + fmt$(fare) + " on the meter.", 2.2);
+    CBZ.city.note("Dropped across town · " + fmt$(fare) + " on the meter.", 2.2);
   }
   // A CAB IS A FARE, AND A FARE IS NOT A CAB DRIVER. The crosstown drop above
   // is the only "somebody drives you" effect in the game; a chauffeur standing
@@ -2071,7 +2090,7 @@
       const v = t.lot.building && t.lot.building.vendor;
       return {
         label: (t.lot.building && t.lot.building.name) || "Counter",
-        note: v && v.dead ? "Register's open — nobody left to watch it" : "Register's open — nobody's watching",
+        note: v && v.dead ? "Register's open, nobody left to watch it" : "Register's open, nobody's watching",
       };
     });
 
@@ -2081,7 +2100,7 @@
     I.register("ped:vendor", {
       id: "vendor-shut", slot: "e", prio: 20,
       canShow: (v) => !!v.vendor && shopShut(v.vendor),
-      label: (v) => "Locked up for the night — knock anyway",
+      label: (v) => "Locked up for the night, knock anyway",
       onSelect: (v) => {
         if (CBZ.citySay) CBZ.citySay(v, "“We're closed. Sunup.”", "#cfe6ff", 2.2);
         else CBZ.city.note("“We're closed. Sunup.”", 1.6);
@@ -2093,7 +2112,7 @@
     I.register("ped:vendor", {
       id: "vendor-hotmeal", slot: "k", prio: 10,
       canShow: (v) => !!v.vendor && v.vendor.kind === "food",
-      label: () => "Hot plate — $15 (a real meal)",
+      label: () => "Hot plate. $15 (a real meal)",
       onSelect: () => {
         if (!CBZ.city.spend(15)) { CBZ.city.note("A plate runs $15.", 1.4); return; }
         g.hunger = Math.min(100, (g.hunger || 0) + 50);
@@ -2107,20 +2126,20 @@
     I.register("ped:vendor", {
       id: "vendor-lineup", slot: "k", prio: 10,
       canShow: (v) => !!v.vendor && v.vendor.kind === "barber" && !shopShut(v.vendor),
-      label: () => "Quick lineup — $25",
+      label: () => "Quick lineup. $25",
       onSelect: () => {
         if (!CBZ.city.spend(25)) { CBZ.city.note("The chair runs $25.", 1.4); return; }
         const lk = look(); lk.swagger = (lk.swagger || 0) + 1;
         CBZ.city.addRespect(1);
         if (CBZ.sfx) CBZ.sfx("coin");
-        CBZ.city.note("Edges cleaned up — sharper already.", 1.6);
+        CBZ.city.note("Edges cleaned up, sharper already.", 1.6);
       },
     });
     // the hardware counter: the working TOOL BAG, bundled under list price
     I.register("ped:vendor", {
       id: "vendor-toolbag", slot: "k", prio: 10,
       canShow: (v) => !!v.vendor && v.vendor.kind === "hardware",
-      label: () => "Tool bag — " + fmt$(toolbagPrice()) + " (crowbar · picks · medkit)",
+      label: () => "Tool bag · " + fmt$(toolbagPrice()) + " (crowbar · picks · medkit)",
       onSelect: () => {
         const price = toolbagPrice();
         if (!CBZ.city.spend(price)) { CBZ.city.note("The bag runs " + fmt$(price) + ".", 1.6); return; }
@@ -2131,7 +2150,7 @@
           if (m && (m.melee || m.gun) && CBZ.cityGiveWeapon) CBZ.cityGiveWeapon(n);
         }
         if (CBZ.sfx) CBZ.sfx("coin");
-        CBZ.city.note("Tool bag over the counter — ready to work.", 1.8);
+        CBZ.city.note("Tool bag over the counter, ready to work.", 1.8);
       },
     });
     // the pawnbroker: one press fences the whole haul (the haggle's built into
@@ -2139,7 +2158,7 @@
     I.register("ped:vendor", {
       id: "vendor-fence", slot: "k", prio: 10,
       canShow: (v) => !!v.vendor && v.vendor.kind === "pawn" && sellTotal("pawn") > 0,
-      label: () => "Fence the lot — " + fmt$(sellTotal("pawn")),
+      label: () => "Fence the lot · " + fmt$(sellTotal("pawn")),
       onSelect: () => sellAll("pawn"),
     });
     // YOUR trade pays at the counter too: a player working security collects a
@@ -2157,7 +2176,7 @@
       id: "vendor-retainer", slot: "l", prio: 12, role: "security",
       canShow: (v) => !!v.vendor && !v.dead && _sNow() > (v._retainerT || 0) &&
                       CBZ.cityTill.holds(v.vendor, { point: "register" }).amount >= RETAINER,
-      label: () => "Collect the watch retainer — " + fmt$(RETAINER),
+      label: () => "Collect the watch retainer · " + fmt$(RETAINER),
       onSelect: (v) => {
         const paid = CBZ.cityTill.take(v.vendor, { point: "register", max: RETAINER, by: "player" });
         if (!(paid.taken > 0)) {
@@ -2177,16 +2196,16 @@
     I.register("ped:civ", {
       id: "ped-mechanic-fix", slot: "k", prio: 44,
       canShow: (p, ctx) => !ctx.driving && !p.dead && /mechanic/i.test(_jobOf(p)) && !!fixableCar(p),
-      label: (p) => { const c = fixableCar(p); return "Fix ride — " + fmt$(c ? fixPrice(c) : 0); },
+      label: (p) => { const c = fixableCar(p); return "Fix ride · " + fmt$(c ? fixPrice(c) : 0); },
       onSelect: (p) => {
         const c = fixableCar(p); if (!c) return;
         const price = fixPrice(c);
-        if (!CBZ.city.spend(price)) { CBZ.city.note("Repairs run " + fmt$(price) + " — you're short.", 1.6); return; }
+        if (!CBZ.city.spend(price)) { CBZ.city.note("Repairs run " + fmt$(price) + " · you're short.", 1.6); return; }
         c.engineHp = 100; c._smoking = false;
         p.cash = (p.cash | 0) + price;
         if (CBZ.sfx) CBZ.sfx("coin");
         if (CBZ.citySay) CBZ.citySay(p, "“Runs better than it looks. We're square.”", "#cfe6ff", 2.2);
-        CBZ.city.note("Engine patched — she'll run.", 1.8);
+        CBZ.city.note("Engine patched, she'll run.", 1.8);
       },
     });
     // a cab driver takes a fare across town (they won't carry a hot one)
@@ -2194,14 +2213,14 @@
       id: "ped-cab-ride", slot: "k", prio: 43,
       canShow: (p, ctx) => !ctx.driving && !p.dead && !p.rage && p.state !== "flee" &&
         _jobOf(p) === "cab driver" && (ctx.wanted | 0) < 2,
-      label: () => "Flag a cab — " + fmt$(cabFare()),
+      label: () => "Flag a cab · " + fmt$(cabFare()),
       onSelect: (p) => cabRide(p),
     });
     // a cart vendor sells off the cart — cheap calories without a counter
     I.register("ped:civ", {
       id: "ped-cart-bite", slot: "k", prio: 41,
       canShow: (p) => !p.dead && !p.rage && p.state !== "flee" && _jobOf(p) === "street vendor",
-      label: "Buy a bite — $8",
+      label: "Buy a bite $8",
       onSelect: (p) => {
         if (!CBZ.city.spend(8)) { CBZ.city.note("Even the cart wants $8.", 1.4); return; }
         g.hunger = Math.min(100, (g.hunger || 0) + 30);

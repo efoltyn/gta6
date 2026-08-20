@@ -492,7 +492,7 @@
       if (def.onComplete) { try { def.onComplete(m, paid); } catch (e) { console.error("[mission:" + m.id + "] onComplete", e); } }
     } else {
       m._why = why;
-      announce(m, def.failText || ((def.title || "Job") + " failed — " + why));
+      announce(m, def.failText || ((def.title || "Job") + " failed · " + why));
       factionEvent("onMissionFail", def.faction, { mission: m, id: m.id, why: why });
       if (def.onFail) { try { def.onFail(m, why); } catch (e) { console.error("[mission:" + m.id + "] onFail", e); } }
     }
@@ -520,6 +520,12 @@
   function campaignOwns() {
     return !!(CBZ.cityCampaignOwnsMission && CBZ.cityCampaignOwnsMission());
   }
+  function locationLabel(m) {
+    const loc = m.def.locationName || (m.stage() && m.stage().label) || "";
+    const tgt = m.def.targetName || "";
+    if (loc && tgt && String(loc).toLowerCase() === String(tgt).toLowerCase()) return "";
+    return loc;
+  }
   function pushCard(m, status) {
     if (!CBZ.CONFIG.MISSION_PHONE || campaignOwns()) return;
     if (!CBZ.campaignUI || !CBZ.campaignUI.setMission) return;
@@ -532,8 +538,20 @@
       CBZ.campaignUI.setMission({
         id: m.id, title: m.def.title || "Job",
         briefing: m._brief || (m.stage() ? m.stage().brief : ""),
+        // A JOB CAN CARRY A PICTURE. city/mugshot.js photographs the actual
+        // body in the outfit the city cast onto it, so a contract shows the
+        // mark instead of describing him — and the paragraph that used to do
+        // that job collapses into `facts` rows the card lays out beside it.
+        // Both are optional and pass straight through; a def without them
+        // renders exactly as before.
+        photo: m.def.photo || "",
+        facts: m.def.facts || null,
         target: m.def.targetName || "",
-        location: m.def.locationName || (m.stage() && m.stage().label) || "",
+        // A STAGE LABEL IS NOT ALWAYS A PLACE. A "kill" leg labels itself with
+        // the mark's name, so this printed a LOCATION chip reading MR. CALLOWAY
+        // right under the target's own photograph. When the label is just the
+        // target again, there is no location to show.
+        location: locationLabel(m),
         // campaign_ui.js renders a NUMBER as "$n" and anything else via
         // String(). `cash || def.reward` fell through to the raw object for an
         // unpaid job (the Cause's tryout pays 0 cash), printing

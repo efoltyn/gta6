@@ -163,14 +163,14 @@
   //   picksWeak preference for only fighting weaker targets (0..1)
   //   guts      general boldness, used for flavour/sorting
   CBZ.BEHAVIORS = {
-    pacifist:     { label: "Pacifist",    emoji: "", init: 0.00, retaliate: 0.05, fleeHurt: 0.92, picksWeak: 0.0, guts: 0.08, desc: "Won't throw a punch — runs from any trouble." },
-    defensive:    { label: "Defensive",   emoji: "", init: 0.02, retaliate: 0.97, fleeHurt: 0.20, picksWeak: 0.0, guts: 0.70, desc: "Never starts it — but finishes whoever does." },
+    pacifist:     { label: "Pacifist",    emoji: "", init: 0.00, retaliate: 0.05, fleeHurt: 0.92, picksWeak: 0.0, guts: 0.08, desc: "Won't throw a punch, runs from any trouble." },
+    defensive:    { label: "Defensive",   emoji: "", init: 0.02, retaliate: 0.97, fleeHurt: 0.20, picksWeak: 0.0, guts: 0.70, desc: "Never starts it, but finishes whoever does." },
     protector:    { label: "Protector",   emoji: "", init: 0.07, retaliate: 0.95, fleeHurt: 0.12, picksWeak: 0.0, guts: 0.85, desc: "Wades in to defend friends and underdogs." },
     opportunist:  { label: "Opportunist", emoji: "", init: 0.12, retaliate: 0.62, fleeHurt: 0.55, picksWeak: 0.95, guts: 0.40, desc: "Only swings when the fight's already won." },
     hothead:      { label: "Hothead",     emoji: "", init: 0.30, retaliate: 0.92, fleeHurt: 0.18, picksWeak: 0.15, guts: 0.78, desc: "Quick to rage, slow to think it through." },
     bully:        { label: "Bully",       emoji: "", init: 0.24, retaliate: 0.55, fleeHurt: 0.60, picksWeak: 1.0, guts: 0.45, desc: "Hunts the weak, folds against the strong." },
     predator:     { label: "Predator",    emoji: "", init: 0.42, retaliate: 0.97, fleeHurt: 0.05, picksWeak: 0.55, guts: 0.96, desc: "Looks for a fight and rarely backs down." },
-    unpredictable:{ label: "Wildcard",    emoji: "", init: 0.18, retaliate: 0.60, fleeHurt: 0.40, picksWeak: 0.30, guts: 0.50, desc: "Nobody — including them — knows what's next." },
+    unpredictable:{ label: "Wildcard",    emoji: "", init: 0.18, retaliate: 0.60, fleeHurt: 0.40, picksWeak: 0.30, guts: 0.50, desc: "Nobody, including them, knows what's next." },
   };
   CBZ.BEHAVIOR_KEYS = Object.keys(CBZ.BEHAVIORS);
 
@@ -450,7 +450,7 @@
       { id: "studio",    name: "The Studio",         rent: 0,  price: 2500,   sqft: 450,   garage: 0, tier: 1, blurb: "One room, one window, everything in reach. A real start." },
       { id: "flat",      name: "Open-Plan Flat",     rent: 0,  price: 12000,  sqft: 950,   garage: 1, tier: 2, blurb: "Room to breathe and a single bay for the car." },
       { id: "loft",      name: "Warehouse Loft",     rent: 0,  price: 32000,  sqft: 2200,  garage: 2, tier: 3, blurb: "High ceilings, raw concrete, your whole life in one big open space." },
-      { id: "sky",       name: "Skyline Aerie",      rent: 0,  price: 80000,  sqft: 4200,  garage: 3, tier: 4, blurb: "A glass perch over downtown — the city laid out below you." },
+      { id: "sky",       name: "Skyline Aerie",      rent: 0,  price: 80000,  sqft: 4200,  garage: 3, tier: 4, blurb: "A glass perch over downtown, the city laid out below you." },
       { id: "spire",     name: "The Spire",          rent: 0,  price: 180000, sqft: 11000, garage: 6, tier: 5, elevator: true, blurb: "A tower yours top to bottom: a wraparound parking deck on the ground, glass on every wall, and one colossal loft filling the sky." },
       // ---- TASK 1: the apex home. The mega-tower PENTHOUSE — the most expensive,
       // flagship address in the city. It isn't just a place to sleep: a missile
@@ -460,7 +460,7 @@
       // flagship) onto lot.building.home; realestate.js + zillow.js sell it and
       // set g.cityOwnsPenthouse / g.cityOwnsHeli on the buy. The hangar is a
       // separate big-ticket add-on (priced below; charged in realestate.js).
-      { id: "penthouse", name: "The Apex Penthouse", rent: 0,  price: 750000, sqft: 24000, garage: 8, tier: 6, elevator: true, flagship: true, helipad: true, hangarPrice: 1200000, blurb: "The crown of the skyline: the city's tallest mega-tower, yours alone. A wraparound sky-deck garage, a glass loft that floats above downtown, and your own rooftop HELIPAD — a missile helicopter parked and ready. Buy the deck HANGAR to base a fighter jet." },
+      { id: "penthouse", name: "The Apex Penthouse", rent: 0,  price: 750000, sqft: 24000, garage: 8, tier: 6, elevator: true, flagship: true, helipad: true, hangarPrice: 1200000, blurb: "The crown of the skyline: the city's tallest mega-tower, yours alone. A wraparound sky-deck garage, a glass loft that floats above downtown, and your own rooftop HELIPAD, a missile helicopter parked and ready. Buy the deck HANGAR to base a fighter jet." },
     ],
     rentTick: 90,          // seconds between rent / property-tax charges
     taxRate: 0.0008,       // owned-home tax per tick as a fraction of its price
@@ -801,6 +801,53 @@
   // 0 — both measured by tools/prison-sit-check.mjs (--revert proves the
   // fault returns). Flip false (?cfg_SIT_PHYS_V1=0) for a one-line revert.
   if (CBZ.CONFIG.SIT_PHYS_V1 == null) CBZ.CONFIG.SIT_PHYS_V1 = true;
+  // CELL_POST_V2 — A POST A MAN CAN ACTUALLY STAND ON. world/cellblock.js
+  // confines a cell resident to a box (the cell inset by a body radius, minus
+  // the bunk footprint) and separately sends him to a pose spot off the door
+  // centreline. Nothing made the two agree: measured on the shipped wing,
+  // TWELVE of twenty residents were posted to a spot their own leash forbids,
+  // so entities/npc.js walked them at it (order 22) and the clamp shoved them
+  // back off it (order 22.6) every frame — the owner's "flickering like moving
+  // super fast front back while trying to run while in cell", 1.4 m/s of
+  // travel going nowhere. The post is clamped into the box now, and the leash
+  // runs once BEFORE the mover so the step it takes is a step it keeps.
+  // Ratchet: CBZ.cellblockAudit().postDrift 0 and no actor above 0.35 m/s of
+  // back-and-forth, both measured by tools/prison-jitter-check.mjs (--revert
+  // proves the fault returns). Flip false (?cfg_CELL_POST_V2=0) to revert.
+  if (CBZ.CONFIG.CELL_POST_V2 == null) CBZ.CONFIG.CELL_POST_V2 = true;
+  // PRISON_NAV_V1 — the prison cast walks to doors instead of into walls.
+  // entities/npc.js's mover is a straight line at `target` and nothing ever
+  // asked what happens when a wall is in the way. Measured on the shipped
+  // tree: 7% of attempted movement stalled in the morning yard, 24% at
+  // curfew, with twelve bodies grinding geometry at once and three of them
+  // walking at a wing door 80 m away through the whole cell block.
+  // systems/prisonnav.js plans on the wing's own colliders (an OPEN door is
+  // not a collider, so "find the door" is just the shortest path) and feeds
+  // the mover one waypoint at a time; when there is no route at all it falls
+  // back to city/citynav.js's context-steer so a sealed-in body searches the
+  // wall instead of pressing into it. Ratchet: tools/prison-nav-check.mjs
+  // (stalled share of attempted movement). Flip false (?cfg_PRISON_NAV_V1=0)
+  // for the straight line back.
+  if (CBZ.CONFIG.PRISON_NAV_V1 == null) CBZ.CONFIG.PRISON_NAV_V1 = true;
+  // CITY_NAV_V1 — Gang City walks around buildings. Same root cause as the
+  // prison and the same grid (systems/navgrid.js), windowed 320 m around the
+  // player because the city is 8 km wide with 123k colliders. Measured before:
+  // 56% of the crowd's attempted movement was pressed into geometry, 37 bodies
+  // grinding at once, because city/peds.js answers "blocked" with a 0.45 s
+  // timer that sidesteps at random or throws the errand away. Ratchet:
+  // tools/city-nav-check.mjs. Flip false (?cfg_CITY_NAV_V1=0) to revert.
+  if (CBZ.CONFIG.CITY_NAV_V1 == null) CBZ.CONFIG.CITY_NAV_V1 = true;
+  // STEER_COMMIT_V1 — a body offered two equally good ways past an obstacle
+  // PICKS ONE. city/citynav.js's context-steer kernel damps a wobble by
+  // blending 0.3 of last frame's heading, which does nothing about a REVERSAL:
+  // blend (+1,0) with (-1,0) and you get (-1,0) back. Traced on a shipped
+  // street, a walking body flipped (-1,0)/(+1,0) on alternate frames and
+  // stepped 0.027 m sideways each time for a whole twenty-second sample, and
+  // 41% of the city's routed body-windows measured the same way: full speed,
+  // zero displacement. A reversal now loses to the heading already committed
+  // to, as long as that heading is still one of the safe ones. Shared by
+  // city/peds.js and city/crowd.js. Flip false (?cfg_STEER_COMMIT_V1=0).
+  if (CBZ.CONFIG.STEER_COMMIT_V1 == null) CBZ.CONFIG.STEER_COMMIT_V1 = true;
   // STREET TALK V2: every civilian is YES / NO / PUNCH. Offer math uses level
   // gap + max cash they can spare. Flip false to restore the crowded verb menu.
   if (CBZ.CONFIG.STREET_TALK_V2 == null) CBZ.CONFIG.STREET_TALK_V2 = true;

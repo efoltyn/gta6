@@ -361,7 +361,7 @@
     // elections.js clamps the same constant on its own writer (addMomentum) so
     // both doors to this number agree.
     st.momentum = clamp(-MOMENTUM_CAP, MOMENTUM_CAP, Math.round((st.momentum + n) * 100) / 100);
-    if (why) note((n > 0 ? "+" : "") + (Math.round(n * 10) / 10) + " momentum — " + why + ".", "Campaign", "news");
+    if (why) note((n > 0 ? "+" : "") + (Math.round(n * 10) / 10) + " momentum · " + why + ".", "Campaign", "news");
     return st.momentum;
   }
 
@@ -435,7 +435,7 @@
         const other = polity() ? polity().get(st.officeId) : null;
         canFile = false; why = "You are already running for " + titleOf(other) + " of " + ((other && other.name) || "another seat") + ".";
       } else if (o.phase === "campaign") {
-        canFile = false; why = "The ballot is printed — the campaign has already started.";
+        canFile = false; why = "The ballot is printed, the campaign has already started.";
       } else if (o.phase !== "snap" && !(o.callDay != null && o.callDay > day)) {
         canFile = false; why = "Nomination has closed for this term.";
       } else if (!CBZ.city || !CBZ.city.canAfford || !CBZ.city.canAfford(fee)) {
@@ -455,7 +455,7 @@
   // ============================================================
   function file(officeId) {
     if (!CFG.GOV_CANDIDACY) return { ok: false, why: "Candidacy is switched off." };
-    if (!elections()) return { ok: false, why: "There is no returning officer — city/elections.js is not loaded." };
+    if (!elections()) return { ok: false, why: "There is no returning officer, city/elections.js is not loaded." };
     const rows = offices();
     let row = null;
     for (let i = 0; i < rows.length; i++) if (rows[i].id === officeId) { row = rows[i]; break; }
@@ -493,7 +493,7 @@
     if (!E.pledge(st.officeId, true)) return false;
     st.certified = true;
     const rec = polity() ? polity().get(st.officeId) : null;
-    feed(playerName() + " qualifies for the ballot — " + titleOf(rec) + " of " + ((rec && rec.name) || "the city") + ".", "#8fe08a");
+    feed(playerName() + " qualifies for the ballot · " + titleOf(rec) + " of " + ((rec && rec.name) || "the city") + ".", "#8fe08a");
     note("Certified. You are on the ballot.", "City Clerk", "messages");
     return true;
   }
@@ -823,7 +823,7 @@
       let why = blocked;
       if (!why && have) why = "They already back you.";
       if (!why && !live()) why = "File for something first.";
-      if (!why && myTier() < TIER_SEEK) why = "Organizer and up — you have nobody to send.";
+      if (!why && myTier() < TIER_SEEK) why = "Organizer and up, you have nobody to send.";
       if (!why && hookOn(b)) why = "You have something on them. Half price.";
       out.push({
         id: b.id, ref: b.ref, kind: b.kind, name: b.name,
@@ -1318,7 +1318,7 @@
         return {
           title: "Lean on a backer", targetName: who, locationName: "the street",
           brief: who + " is handing out flyers for the other side. Make him stop. "
-            + "Frighten him, do not bury him — a body is not a message, it is a headline.",
+            + "Frighten him, do not bury him, a body is not a message, it is a headline.",
           reward: { cash: 0, respect: 10, notoriety: 60 }, color: 0xff6a5e, limit: 600,
           stages: [
             { id: "lean", goal: "custom", label: String(who).toUpperCase(), text: "Make " + who + " fold",
@@ -1330,7 +1330,7 @@
                 return !!(r && r.fear >= 40);
               } },
           ],
-          failIf: function () { return (p && p.dead) ? "you killed him — that is a body, not a message" : null; },
+          failIf: function () { return (p && p.dead) ? "you killed him, that is a body, not a message" : null; },
           doneText: "He will not be handing out flyers again.",
           failText: "Badly done.",
           onComplete: function () {
@@ -1537,7 +1537,7 @@
       real: function () { return tallyLive() && !!(CBZ.city && CBZ.city.spend); } },
     { id: "hook", needsElections: false, writes: "the bloc price in priceOf(), and momentum on a file about your rival",
       real: function () { return true; } },
-    { id: "donate", needsElections: false, writes: "warChest — whose ONLY exits are seek() and rig()",
+    { id: "donate", needsElections: false, writes: "warChest, whose ONLY exits are seek() and rig()",
       real: function () { return !!(CBZ.city && CBZ.city.spend); } },
     { id: "rig", needsElections: true, writes: "fraud -> scoreCandidate(), plus real heat and real scandal via cityEvent",
       real: function () { return tallyLive() && typeof CBZ.cityEvent === "function"; } },

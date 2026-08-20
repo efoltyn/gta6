@@ -74,9 +74,28 @@
   };
 
   // island/biome modules register a builder here at load time.
+  //
+  // bootKey: the loading meter (systems/bootprogress.js) reports one
+  // checkpoint per builder and weights each one by what it cost on this
+  // machine last run — so it needs a STABLE NAME per builder. Registration
+  // happens during the module's own top-level execution, so
+  // document.currentScript is that module's tag: the key is literally the
+  // file that owns the builder ("lm:biome_snow.js"), and a file that
+  // registers more than one gets a #2, #3 suffix.
+  const bootKeyCount = Object.create(null);
   CBZ.addLandmass = function (fn, order) {
     if (typeof fn !== "function") return;
-    CBZ._landmassBuilders.push({ fn, order: order == null ? 50 : order });
+    let file = "";
+    try {
+      const cs = document.currentScript;
+      if (cs && cs.src) file = cs.src.replace(/[?#].*$/, "").split("/").pop();
+    } catch (e) { file = ""; }
+    if (!file) file = fn.name || ("builder" + CBZ._landmassBuilders.length);
+    const n = (bootKeyCount[file] = (bootKeyCount[file] || 0) + 1);
+    CBZ._landmassBuilders.push({
+      fn, order: order == null ? 50 : order,
+      bootKey: "lm:" + file + (n > 1 ? "#" + n : ""),
+    });
   };
 
   // -----------------------------------------------------------------------
@@ -623,7 +642,11 @@
       if (CBZ.placement.seedFromColliders) CBZ.placement.seedFromColliders();
     }
     const list = CBZ._landmassBuilders.slice().sort((a, b) => a.order - b.order);
-    for (const b of list) { try { b.fn(city); } catch (e) { console.error("[landmass]", e); } }
+    const boot = CBZ.bootStep;
+    for (const b of list) {
+      if (boot) boot(b.bootKey);          // the loading meter's per-builder tick
+      try { b.fn(city); } catch (e) { console.error("[landmass]", e); }
+    }
     // ---- FOG-RATE HARMONY SWEEP (owner, from the air: "city areas look
     // bright and rendered while the ground around them is grayer… the same
     // with mountains — computer generated and dumb") ------------------------
@@ -665,7 +688,7 @@
         const hits = CBZ.worldLayout.mapAudit();
         for (const h of hits) {
           console.warn("[map-reserve] " + h.tier + " overlap: " + h.a + " (" + h.aKind + ") x " +
-            h.b + " (" + h.bKind + ") — " + h.area + " m2, " + h.contain + "% of smaller @ (" +
+            h.b + " (" + h.bKind + ") · " + h.area + " m2, " + h.contain + "% of smaller @ (" +
             h.at.x + "," + h.at.z + ")");
         }
       } catch (e) { console.error("[map-reserve]", e); }

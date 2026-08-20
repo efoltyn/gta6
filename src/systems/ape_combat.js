@@ -125,7 +125,7 @@
   var GRAV = 21;            // m/s² — matches CBZ.TUNE.gravity's default register
   var GRAB_CD = 2.6;        // s — an ape does not grab twice in a row
   var MAX_HOLDS = 3;        // concurrent flails; a troop of apes must not thrash
-  var APE_TEMPO = 0.5;      // multiplier on the caller's between-blow cooldown
+  var APE_TEMPO = 0.28;     // multiplier on the caller's between-blow cooldown
 
   // ---- module scratch (never allocated in a frame) ------------------------
   var HOLDS = [];           // live { ape, victim, phase, ... }
@@ -136,7 +136,7 @@
   // `picks` counts every time the driver asked for a move. It exists because
   // "the repertoire never fired" and "the driver only ever asked once" look
   // identical in the other counters and have completely different causes.
-  var STATS = { picks: 0, grabs: 0, spins: 0, clubHits: 0, throws: 0, slams: 0, drops: 0, sweeps: 0, smashes: 0, charges: 0, drums: 0, bites: 0 };
+  var STATS = { picks: 0, fanHits: 0, grabs: 0, spins: 0, clubHits: 0, throws: 0, slams: 0, drops: 0, sweeps: 0, smashes: 0, charges: 0, drums: 0, bites: 0 };
 
   function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
   function ease(t) { return t <= 0 ? 0 : (t >= 1 ? 1 : t * t * (3 - 2 * t)); }
@@ -226,6 +226,28 @@
     return os <= scaleOf(ape) * 1.35;
   }
 
+  /* WHOEVER IS ACTUALLY GRABBABLE, not just the mark the driver named. This
+     exists because the down-timer created a self-defeating loop the moment it
+     landed: the ape's own previous backhand knocks its current target off its
+     feet, an airborne body is correctly refused by grabbable(), and so the
+     grab was declined on the very swing the mob was thickest. Measured: six to
+     eight battles in ten finishing with no grab at all while three or four men
+     stood upright a metre away. An animal reaching into a crowd takes hold of
+     someone standing, not of the one it just sent flying. */
+  function nearestGrabbable(ape, r) {
+    var p = posOf(ape); if (!p) return null;
+    var list = roster(), best = null, bestD = r * r;
+    for (var i = 0; i < list.length; i++) {
+      var o = list[i];
+      if (!grabbable(ape, o)) continue;
+      var q = posOf(o); if (!q) continue;
+      var dx = q.x - p.x, dz = q.z - p.z;
+      var d2 = dx * dx + dz * dz;
+      if (d2 < bestD) { bestD = d2; best = o; }
+    }
+    return best;
+  }
+
   function hurt(a, dmg, imp) {
     if (!(dmg > 0) || !a || a.dead) return false;
     if (typeof CBZ.hurtWorldActor === 'function') {
@@ -297,7 +319,7 @@
       v: o, vx: vx, vy: vy, vz: vz, t: 0,
       spin: (vx * vx + vz * vz > 40 ? 9 : 5) * (Math.random() < 0.5 ? -1 : 1),
       by: by || null, dmg: landDmg || 0, cause: cause || 'thrown by a gorilla',
-      hit: 0,
+      hit: 0, down: null,
     });
   }
 
@@ -370,14 +392,37 @@
        grabbed on FIRST contact, which is also the honest read: a silverback
        that wades into a mob does not trade jabs first.
 
-       And the frequency is a feature requirement, not a taste: measured at the
-       old gate, FIVE OF TEN battles finished without a single grab, which is
-       the owner reporting he never saw the thing the work was for. */
-    else if (FLAIL_ON() && HOLDS.length < MAX_HOLDS && crowd >= 2 &&
-             (swings >= 2 || crowd >= 4) &&
+       FREQUENCY IS A FEATURE REQUIREMENT, NOT A TASTE, and it is bounded on
+       BOTH sides by two owner reports that pull against each other:
+         "I didn't see the gorilla spinning around"   — five of ten battles
+             finished without a single grab. Too rare is not shipped.
+         "that isn't gorillas only move but it should be a move"  — chasing the
+             first note took it to half of every blow the animal threw. Too
+             common is not a move set, it is a default with decoration.
+       The two trade directly, because a gorilla lives for about three blows
+       and every point of probability is BOTH its share of the repertoire and
+       its chance of appearing at all. So this is a RHYTHM rather than a flat
+       roll: it is never the opening blow, it wants a real mob (three or more
+       inside the arms), and from the second swing on it is a coin. That lands
+       it at roughly a third of the blows thrown and in seven or eight battles
+       out of ten — one move among six, and one you actually see. Both bounds
+       are asserted in tools/ape-check.mjs so neither can drift back. */
+    else if (FLAIL_ON() && HOLDS.length < MAX_HOLDS && crowd >= 3 &&
+             (swings >= 2 || crowd >= 5) &&
+             /* THE CEILING IS STRUCTURAL, NOT STATISTICAL. Probability alone
+                cannot hold this: it is simultaneously the grab's share of the
+                move set and its chance of ever appearing, and tuning one moved
+                the other every time — three sweeps at the same number measured
+                31%, 33% and 50% of all blows. So the spacing is a rule instead.
+                Two ordinary blows must land between grabs, which caps it at one
+                blow in three BY CONSTRUCTION however the dice fall, and leaves
+                the probability free to do the only job it is good at: making
+                sure the thing shows up at all. */
+             (swings - (attacker._apeGrabSwing || -99)) >= 3 &&
              (attacker._apeGrabT || -99) < now - GRAB_CD &&
-             grabbable(attacker, target) && roll() < (crowd >= 4 ? 0.68 : 0.32)) {
+             nearestGrabbable(attacker, reach * 1.35) && roll() < 0.72) {
       style = 'ape_grab';
+      attacker._apeGrabSwing = swings;
     }
     /* THE CHARGE IS THE ARRIVAL. Authored as "throw it when the target is out
        of reach" and measured at exactly zero across eight battles, for a
@@ -454,9 +499,12 @@
       return drum(attacker, reach);
     }
     if (style === 'ape_grab') {
-      if (FLAIL_ON() && grabbable(attacker, target) && HOLDS.length < MAX_HOLDS) {
+      // the driver's mark first (that is who it committed to), then anyone else
+      // standing inside the arms — see nearestGrabbable
+      var take = grabbable(attacker, target) ? target : nearestGrabbable(attacker, reach * 1.35);
+      if (FLAIL_ON() && take && HOLDS.length < MAX_HOLDS) {
         STATS.grabs++;
-        beginHold(attacker, target, dmg, opts);
+        beginHold(attacker, take, dmg, opts);
         return 0;                                    // the hold bills the damage
       }
       // refused (he died in the windup, the target is the player, something
@@ -523,6 +571,7 @@
       var near = 1 - 0.35 * (d / rng);
       var pay = dmg * near;
       dealt += pay;
+      STATS.fanHits++;
       // a SMASH drives you into the ground, a SWEEP and a CHARGE throw you clear
       var upK = (style === 'ape_smash') ? 1.1 : 3.4;
       launch(attacker, o, dx / d, dz / d, mv.push * near, upK * near, pay,
@@ -850,12 +899,36 @@
     }
     if (ny <= gy) {
       p.x = nx; p.z = nz; p.y = gy;
-      if (v.group) {
-        v.group.rotation.x = 0; v.group.rotation.z = 0;
-        if (v.group.position !== p) v.group.position.set(nx, gy, nz);
-      }
+      if (v.group && v.group.position !== p) v.group.position.set(nx, gy, nz);
       if (f.dmg > 0) hurt(v, f.dmg, impOf(f.by, f.cause, 0));
       if (v.dead && v.char && CBZ.deathPose) { try { CBZ.deathPose(v.char, v._apeSeed || 2.1); } catch (e) {} }
+      /* AND YOU DO NOT GET STRAIGHT BACK UP. This is the difference between an
+         arc move that WOUNDS and one that CHANGES THE FIGHT, and it was the
+         whole reason the repertoire was starved: a backhand caught 7.9 men at
+         a stroke, each of them lost half their health, and every one of them
+         was punching again a heartbeat later — so the ape still faced sixty
+         men, still died in four and a half seconds, and still only ever got
+         two or three blows in its life to show six moves with. Measured plainly
+         in the sweep: battles where the grab happened killed 10-11 men,
+         battles without it killed 0-1, because nothing else the animal did
+         removed anybody from the fight even briefly.
+
+         A man hit hard enough to leave the ground gets up in his own time. The
+         flag that carries him through the air is simply held a little longer,
+         so every consumer that already stands down for it — battle.html's
+         stepMan and its separation pass, the pose write — keeps standing down
+         while he is on the floor. Nothing new to respect. */
+      if (f.down == null) {
+        var hard = Math.hypot(f.vx, f.vz) + Math.abs(f.vy);
+        f.down = (hard > 6) ? (1.0 + Math.min(1.4, hard * 0.08)) : 0;
+      }
+      if (f.down > 0 && !v.dead) {
+        f.down -= dt;
+        f.vx = f.vz = f.vy = 0;
+        if (v.group) { v.group.rotation.x = -1.35; v.group.rotation.z = 0.22; }
+        if (f.down > 0) return true;      // still on the floor
+      }
+      if (v.group) { v.group.rotation.x = 0; v.group.rotation.z = 0; }
       v._apeFlying = 0;
       return false;
     }
@@ -915,7 +988,9 @@
     var t = ((CBZ.now || 0) / 1000) * 9 + s;
     // a man held by one ankle is not limp — he is fighting it, hard, and that
     // is the difference between a body and a prop
-    var a = v._apeHeld ? 1 : 0.55;
+    // held = fighting the grip hard; airborne = flailing; DOWN (on the floor,
+    // rotation already laid him out) = pushing himself back up, not thrashing
+    var a = v._apeHeld ? 1 : (v.group && v.group.rotation.x < -1) ? 0.22 : 0.55;
     if (ch.body) ch.body.rotation.set(-0.22 * a, Math.sin(t * 0.7) * 0.2 * a, Math.sin(t * 1.1) * 0.18 * a);
     if (ch.neck) ch.neck.rotation.set(0.3 * a, Math.sin(t * 1.3) * 0.3 * a, 0);
     if (P.la) P.la.rotation.set(-1.5 + Math.sin(t) * 0.55 * a, 0, 0.6 + Math.sin(t * 1.7) * 0.3 * a);
@@ -960,7 +1035,7 @@
     return {
       on: ON(), flail: FLAIL_ON(),
       holds: HOLDS.length, flying: FLYING.length,
-      picks: STATS.picks, grabs: STATS.grabs, spins: STATS.spins, clubHits: STATS.clubHits,
+      picks: STATS.picks, fanHits: STATS.fanHits, grabs: STATS.grabs, spins: STATS.spins, clubHits: STATS.clubHits,
       throws: STATS.throws, slams: STATS.slams, drops: STATS.drops,
       sweeps: STATS.sweeps, smashes: STATS.smashes, charges: STATS.charges,
       drums: STATS.drums, bites: STATS.bites,

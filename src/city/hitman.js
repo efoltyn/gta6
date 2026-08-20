@@ -25,28 +25,48 @@
      death popup                       -> killfeed.js (the only one)
      quiet-vs-loud pricing             -> the existing witness/heat path:
                                           the bonus reads g.wanted at the kill
-     reputation                        -> w.reputation.hitman, the EXISTING
-                                          worldstate scalar, moved through the
-                                          EXISTING cityEvent("hitman-*")
-                                          channel. No new scalar (ratchet 34).
+     the money                         -> core/mission.js pays the fee; the
+                                          quiet margin rides the EXISTING
+                                          cityEvent("hitman-*") channel.
+     the one lock                      -> the CITY SEAL item + g.cityGovWrit,
+                                          both authored by govcomplex.js's
+                                          strongroom. No second key system.
 
-   THE LADDER OF MARKS (gun-room grammar — categorical, not numeric):
-     tier 0  STREET     a nobody with a real job and a real shift  (always)
-     tier 1  PROTECTED  a power.js principal — beating his RING    (rep >= 20)
-     tier 2  THE OFFICE the sitting officeholder — contracts.js's
-                        own header line 5 made this promise        (rep >= 45)
+   THE LADDER OF MARKS (categorical, not numeric):
+     tier 0  STREET     a nobody with a real job and a real shift
+     tier 1  PROTECTED  a power.js principal, and beating his RING
+     tier 2  THE OFFICE the sitting officeholder, and the one rung with
+                        a LOCK on it: the CITY SEAL, a physical key on a lit
+                        plinth behind a steel door in City Hall.
    If the world cannot supply a tier's mark, that tier is NOT OFFERED.
+
+   NO REPUTATION NUMBER LIVES IN THIS FILE (owner, 2026-08-18: "there's one
+   currency for a hitman, that's money, and a box doesn't open up for money,
+   it opens up with a key"). A bigger name pays more and is harder to reach:
+   that IS the ladder. The only lock left is a key you can carry, drop, stash
+   in a chest and SEE through a barred panel before you own it.
 
    THE ROOM IS THE MENU (doors beat markers): a small annex room staged on
    the motel lot — a WALL OF MARKS (ctx.canvasTexLive board; completed marks
-   cross out, locked tiers hang as dark cards with their rep price showing,
-   which is the locked-door-with-the-thing-visible rule) and a GEAR CASE that
-   stays physically in the room, locked, until the rep rung opens it. Walking
-   to the wall is how you browse; walking to the case is how you gear up.
+   cross out, and the office card hangs dark naming the KEY it wants, which is
+   the locked-door-with-the-thing-visible rule) and a GEAR CASE with no lock
+   on it at all. Walking to the wall is how you browse; walking to the case is
+   how you gear up. One button each: READ WALL, OPEN THE CASE.
+
+   THE CARD IS A PHOTOGRAPH (2026-08-18). A contract used to arrive on the
+   phone as a paragraph — "works as a line cook, clocks in at the diner, shift
+   9-17, beds down in Riverside" — four facts you cannot see. The city dresses
+   every body through ONE wardrobe (outfits.js casting -> clothes.js painted
+   atlas), so the mark's clothes are the thing you actually scan a street for.
+   city/mugshot.js photographs him in them (CBZ.cityMugshot, taken once at bind
+   time) and the prose collapses into labelled `facts` rows beside the picture
+   — WEARING among them. The wall of marks pins the same photo while the
+   contract is live. No mugshot module = no photo, and the rows stand alone.
 
    FLAGS (owning-file null-check, one-line revert each):
      HITMAN_PIPE   — the freelance pipe (hitmanStart/hitmanBind).
      HITMAN_BOARD  — the motel room + wall + case.
+     CITY_MUGSHOT  — the photograph (city/mugshot.js owns the flag).
    Ratchet: CBZ.hitmanAudit() — cards must read 1, pipes 1,
    legacyStreetHitmanSites 0.
 ============================================================ */
@@ -68,12 +88,8 @@
     const w = world();
     if (!w) return null;
     w.records = w.records || {};
-    w.records.hitman = w.records.hitman || { contracts: 0, completed: 0, failed: 0, highValue: 0, heat: 0 };
+    w.records.hitman = w.records.hitman || { contracts: 0, completed: 0, failed: 0, highValue: 0, heat: 0, paid: 0 };
     return w.records.hitman;
-  }
-  function rep() {
-    const w = world();
-    return (w && w.reputation && w.reputation.hitman) || 0;
   }
   function floorY(x, z) {
     try { return CBZ.floorAt ? (CBZ.floorAt(x, z) || 0) : 0; } catch (e) { return 0; }
@@ -83,20 +99,34 @@
   function campaignOwns() { return !!(CBZ.cityCampaignOwnsMission && CBZ.cityCampaignOwnsMission()); }
 
   /* ---------------- THE LADDER ------------------------------------------ */
-  // Rungs gate the CATEGORY of the mark, not a payout multiplier. `need` is
-  // read against w.reputation.hitman — the one existing scalar; nothing here
-  // stores a second number.
+  // Rungs gate the CATEGORY of the mark. Two of them are not gated at all:
+  // money is the only currency a contract has, so a harder name simply pays
+  // more. The office rung carries the one real lock, and it is a KEY: the
+  // city seal, taken off its plinth inside govcomplex.js's strongroom.
+  // (owner, 2026-08-18: "there's one currency for a hitman, that's money, and
+  // a box doesn't open up for money, it opens up with a key")
+  const SEAL = "City Seal";
   const TIERS = [
-    { id: "street", need: 0, label: "A STREET NAME", pay: 900 },
-    { id: "protected", need: 20, label: "A PROTECTED NAME", pay: 4600 },
-    { id: "office", need: 45, label: "THE OFFICE", pay: 15000 },
+    { id: "street", label: "A STREET NAME", pay: 900 },
+    { id: "protected", label: "A PROTECTED NAME", pay: 4600 },
+    { id: "office", label: "THE OFFICE", pay: 15000, key: SEAL },
   ];
-  function tierUnlocked(t) { return rep() >= TIERS[t].need; }
+  // the key in your bag (cityEcon row) or the writ taking it already granted
+  // you (govcomplex sets g.cityGovWrit off the same plinth).
+  function haveSeal() {
+    const e = CBZ.cityEcon;
+    try { if (e && e.count && e.count(SEAL) > 0) return true; } catch (err) {}
+    return !!g.cityGovWrit;
+  }
+  function tierOpen(t) { return !TIERS[t].key || haveSeal(); }
+  function keyLine(t) {
+    if (!TIERS[t] || !TIERS[t].key) return "No names today.";
+    return "That name needs the city seal. It is behind the steel door in City Hall.";
+  }
   CBZ.hitmanTier = function () {
-    const r = rep();
     let t = 0;
-    for (let i = 0; i < TIERS.length; i++) if (r >= TIERS[i].need) t = i;
-    return { rep: r, tier: t, next: t < TIERS.length - 1 ? TIERS[t + 1].need : null };
+    for (let i = 0; i < TIERS.length; i++) if (tierOpen(i)) t = i;
+    return { tier: t, seal: haveSeal(), key: SEAL };
   };
 
   /* ---------------- WORLD BINDERS (never spawn a target) ---------------- */
@@ -135,20 +165,34 @@
     const day = CBZ.dayCount ? CBZ.dayCount() : 0;
     const r = CBZ.hash01 ? CBZ.hash01(day, ((recs() || {}).completed | 0) + ((opts && opts.salt) | 0), 0x417) : Math.random();
     const ped = from[Math.min(from.length - 1, (r * from.length) | 0)];
-    return { tier: 0, ped: ped, name: ped.name || "the mark", dossier: streetDossier(ped), pay: TIERS[0].pay };
+    return { tier: 0, ped: ped, name: ped.name || "the mark", facts: streetFacts(ped), pay: TIERS[0].pay };
   }
-  function streetDossier(p) {
-    const bits = [];
+  function try_(fn, dflt) { try { return fn(); } catch (e) { return dflt; } }
+  function hh(n) { n = ((n | 0) % 24 + 24) % 24; return (n < 10 ? "0" : "") + n + ":00"; }
+  // FACTS, NOT PROSE. Every one of these used to be welded into a sentence
+  // ("works as a line cook · clocks in at the diner · shift 9:00-17:00 · beds
+  // down in Riverside.") that the phone printed as a paragraph. Same reads,
+  // handed over as labelled rows the card can lay out beside the photograph —
+  // and the ones you can SEE (what he is wearing) are the photo's job now.
+  function streetFacts(p) {
+    const f = [];
     const jt = (CBZ.cityJobTitle && p.job) ? CBZ.cityJobTitle(p.job) : null;
     const J = (CBZ.cityJobs && p.job) ? CBZ.cityJobs[p.job] : null;
-    if (jt) bits.push("works as a " + String(jt).toLowerCase());
-    if (J && J.lots && J.lots.length) bits.push("clocks in at the " + J.lots[0]);
-    else if (J && J.anchor) bits.push("works the " + J.anchor);
-    if (J && J.hours) bits.push("shift " + J.hours[0] + ":00-" + J.hours[1] + ":00");
+    if (jt) f.push({ k: "WORK", v: String(jt) });
+    if (J && J.lots && J.lots.length) f.push({ k: "CLOCKS IN", v: String(J.lots[0]) });
+    else if (J && J.anchor) f.push({ k: "CLOCKS IN", v: String(J.anchor) });
+    if (J && J.hours) f.push({ k: "SHIFT", v: hh(J.hours[0]) + "-" + hh(J.hours[1]) });
     let home = null;
     try { home = CBZ.cityHomeOf ? CBZ.cityHomeOf(p) : null; } catch (e) { home = null; }
-    if (home && home.district) bits.push("beds down in " + home.district);
-    return bits.length ? "Dossier: " + bits.join(" · ") + "." : "No paper trail. A face, a name, a habit of walking the same streets.";
+    // home.district is economy.js's district KEY, not a name — printing it raw
+    // put "BEDS DOWN: 8" on the card. Ask the one namer the whole city uses.
+    if (home && home.district != null) {
+      const E = CBZ.cityEcon;
+      const dn = (E && E.districtName) ? try_(function () { return E.districtName(home.district); }, null) : null;
+      if (dn && dn !== "the city") f.push({ k: "BEDS DOWN", v: String(dn) });
+    }
+    if (!f.length) f.push({ k: "PAPER TRAIL", v: "none" });
+    return f;
   }
 
   // tier 1 — a protected principal: killing him means beating the RING
@@ -171,10 +215,11 @@
     try { guards = CBZ.powerGuardsOf ? CBZ.powerGuardsOf(ped).length : 0; } catch (e) {}
     try { org = CBZ.powerOrgOf ? CBZ.powerOrgOf(ped) : null; } catch (e) {}
     const role = CBZ.cityTitle ? CBZ.cityTitle(ped) : (ped.job || "principal");
-    const doss = "Dossier: " + role + (org ? ", " + org : "") +
-      ". Moves with " + (guards || "a") + " gun" + (guards === 1 ? "" : "s") + " on him at all times. " +
-      "The ring reads strangers — a worker's cloth or a taken uniform walks closer than your own face does.";
-    return { tier: 1, ped: ped, name: ped.name || "the principal", dossier: doss, pay: TIERS[1].pay };
+    const f = [{ k: "ROLE", v: String(role) }];
+    if (org) f.push({ k: "ORG", v: String(org) });
+    f.push({ k: "RING", v: (guards || "a") + " gun" + (guards === 1 ? "" : "s") + ", always" });
+    f.push({ k: "APPROACH", v: "borrowed cloth walks closer than your face" });
+    return { tier: 1, ped: ped, name: ped.name || "the principal", facts: f, pay: TIERS[1].pay };
   }
 
   // tier 2 — the sitting officeholder. Bound through contracts.js's OWN
@@ -198,9 +243,39 @@
     const o = (CBZ.cityOrders && CBZ.cityOrders._official) ? CBZ.cityOrders._official() : null;
     if (!o) return null;
     subOfficialDeath();
-    const doss = "Dossier: " + o.title + " " + o.name +
-      ". City hall 09:00-17:00, a public face after. He moves with a real detail, and the whole city hears this one land.";
-    return { tier: 2, official: o, name: o.title + " " + o.name, dossier: doss, pay: TIERS[2].pay };
+    const f = [
+      { k: "OFFICE", v: String(o.title) },
+      { k: "DESK", v: "City Hall, 09:00-17:00" },
+      { k: "AFTER", v: "a public face" },
+      { k: "RING", v: "a real detail" },
+    ];
+    return { tier: 2, official: o, name: o.title + " " + o.name, facts: f, pay: TIERS[2].pay };
+  }
+
+  /* ---------------- THE PICTURE ------------------------------------------
+     The single biggest read on a contract card is not a sentence, it is the
+     man. city/mugshot.js photographs the ACTUAL body — the rig, the skin, the
+     hair, and above all the OUTFIT the city cast onto him — so the card can
+     show him instead of describing him, and so "the chef" is something you
+     recognise across a parking lot rather than something you re-read.
+
+     Taken ONCE, at bind time: a mark can change clothes later (corpse swap,
+     the hour recast), and the photo is deliberately the one on file. Degrade-
+     safe — no mugshot module, no photo, and every surface falls back to words. */
+  function markPed(con) {
+    if (!con) return null;
+    if (con.ped) return con.ped;
+    return con.official ? officialPed(con.official.sid) : null;
+  }
+  function shootMark(con) {
+    const ped = markPed(con);
+    if (!ped || !CBZ.cityMugshot) return con;
+    try {
+      con.photo = CBZ.cityMugshot({ ped: ped }) || null;
+      con.photoCanvas = CBZ.cityMugshotCanvas ? CBZ.cityMugshotCanvas({ ped: ped }) : null;
+      con.wearing = CBZ.cityMugshotWearing ? CBZ.cityMugshotWearing({ ped: ped }) : null;
+    } catch (e) { con.photo = null; con.photoCanvas = null; con.wearing = null; }
+    return con;
   }
 
   CBZ.hitmanBind = function (tier, opts) {
@@ -210,11 +285,13 @@
     try {
       con = tier === 2 ? bindOffice() : tier === 1 ? bindProtected() : bindStreet(opts || {});
     } catch (e) { con = null; }
-    return con;
+    return con ? shootMark(con) : null;
   };
 
   /* ---------------- THE PIPE (one mission, through the block) ----------- */
   let serial = 0;
+  // the contract currently on the wire — the wall of marks pins its FACE.
+  let liveCon = null;
   function escapeStage() {
     let from = null;
     return {
@@ -235,20 +312,21 @@
     const st = m.stages && m.stages.length ? m.stages[m.stages.length - 1] : null;
     const quiet = !!(st && st._quiet);
     const bonus = quiet ? Math.round(con.pay * 0.4 / 50) * 50 : 0;
-    const repGain = (con.tier === 2 ? 10 : con.tier === 1 ? 6 : 3) + (quiet ? 2 : 0);
+    const R0 = recs();
+    if (R0) R0.paid = (R0.paid | 0) + con.pay + bonus;    // the wall keeps one number, and it is money
     if (CBZ.cityEvent) {
       try {
         CBZ.cityEvent(con.tier === 2 ? "assassination" : "hitman-complete", {
-          cash: bonus, hitman: repGain, respect: con.tier === 2 ? 12 : con.tier === 1 ? 6 : 3,
+          cash: bonus, respect: con.tier === 2 ? 12 : con.tier === 1 ? 6 : 3,
           panic: quiet ? 0 : (con.tier === 2 ? 12 : 4), political: con.tier === 2 ? -6 : 0,
           heat: quiet ? 1 : 4,
-          label: "Contract: " + con.name, message: quiet ? "Clean. The quiet margin cleared." : "Loud. The fee stands; the margin does not.",
+          label: "Contract: " + con.name, message: quiet ? "Clean. The quiet margin cleared." : "Loud. The fee stands, the margin does not.",
         });
       } catch (e) {}
     }
     note(quiet
-      ? "Clean work. Fee plus the quiet margin" + (st && st._dressed ? " — the uniform walked you out." : ".")
-      : "It made the scanner. The fee stands; the quiet margin does not.", 3.2);
+      ? "Clean. Fee plus the quiet margin" + (st && st._dressed ? ", and the uniform walked you out." : ".")
+      : "It made the scanner. Fee only.", 3);
     paintBoard(true);
   }
   function releaseMark(con) {
@@ -295,7 +373,22 @@
       id: "hit-" + TIERS[con.tier].id + "-" + n,
       title: "CONTRACT: " + con.name,
       targetName: con.name,
-      brief: con.dossier + " Quiet is worth more than fast — a witnessed kill burns the margin (and any borrowed cloth).",
+      // THE LEGS WERE BUILT AND THEN THROWN AWAY. This array is filled in
+      // above (the kill leg, goal "kill" bound to the real ped or the
+      // officeholder's death broadcast, and escapeStage) and the def never
+      // carried it, so core/mission.js fell through to its single-leg
+      // shorthand: ONE stage, goal "manual", its text the briefing. That is
+      // why a contract showed the briefing as its own objective, why the
+      // kill never advanced anything, and why settle()'s quiet margin could
+      // never pay: it reads `_quiet` off the last stage, which escapeStage's
+      // onEnter is the only thing that sets. Found while giving the card a
+      // photograph; it has nothing to do with the photograph.
+      stages: stages,
+      // ONE LINE. The rest of what this card used to say in prose is now the
+      // photograph (who he is, what he is wearing) and the `facts` rows below.
+      brief: "Quiet pays. A witnessed kill burns the margin.",
+      photo: con.photo || "",
+      facts: (con.facts || []).concat(con.wearing ? [{ k: "WEARING", v: con.wearing }] : []),
       reward: { cash: con.pay, notoriety: con.tier === 2 ? 160 : con.tier === 1 ? 60 : 20 },
       color: con.tier === 2 ? 0xff4d4d : 0xffc766,
       limit: con.tier === 2 ? 1200 : 900,
@@ -306,9 +399,10 @@
       } : null,
       doneText: "Contract settled.",
       failText: "Contract lost.",
-      onComplete: function (m) { settle(m, con); releaseMark(con); },
+      onComplete: function (m) { settle(m, con); releaseMark(con); if (liveCon === con) liveCon = null; },
       onFail: function () {
         releaseMark(con);
+        if (liveCon === con) liveCon = null;
         const R0 = recs(); if (R0) R0.failed++;
         paintBoard(true);
       },
@@ -328,19 +422,17 @@
     if (!M || !M.start) { note("No network here.", 2); return null; }
     if (M.busy && M.busy()) { note("Finish what you're carrying first.", 2.2); return null; }
     const min = opts.min | 0;
-    if (min > 0 && !tierUnlocked(min)) {
-      note("The network does not hand protected names to strangers. REP " + TIERS[min].need + " opens that wall.", 3);
-      return null;
-    }
+    if (min > 0 && !tierOpen(min)) { note(keyLine(min), 3); return null; }
     let con = null;
     for (let t = TIERS.length - 1; t >= min; t--) {
-      if (!tierUnlocked(t)) continue;
+      if (!tierOpen(t)) continue;
       con = CBZ.hitmanBind(t, opts);
       if (con) break;
     }
-    if (!con) { note("Nothing on the wire today. The city could not supply a name.", 2.6); return null; }
+    if (!con) { note("No names today.", 2.2); return null; }
     const m = M.start(buildDef(con));
     if (!m || m.inert) { releaseMark(con); return null; }
+    liveCon = con;
     const R0 = recs();
     if (CBZ.cityEvent) {
       try { CBZ.cityEvent("hitman-contract", { highValue: con.tier === 2, hitman: 1, label: "Contract: " + con.name, message: "Contract accepted: " + con.name + "." }, { silent: true }); } catch (e) {}
@@ -529,12 +621,14 @@
   CBZ.hitmanRoom = ensureRoom;
 
   /* ---------------- the board painting ----------------------------------- */
-  function caseTier() { const R0 = recs(); return R0 ? (R0.caseTier | 0) : 0; }
+  // legacy saves carried a two-drawer `caseTier`; anything past the first
+  // drawer means the case was already emptied under the old lock.
+  function caseOpened() { const R0 = recs(); return !!(R0 && (R0.caseOpen || (R0.caseTier | 0) >= 2)); }
   function boardKey() {
     const R0 = recs() || {};
-    const T = CBZ.hitmanTier();
     const camp = g.cityCampaign ? (g.cityCampaign.phase + ":" + (g.cityCampaign.contractNo | 0)) : "";
-    return [R0.completed | 0, R0.failed | 0, T.tier, Math.round(T.rep), caseTier(), camp].join("|");
+    const face = (liveCon && liveHit()) ? (liveCon.name || "?") : "";
+    return [R0.completed | 0, R0.failed | 0, R0.paid | 0, haveSeal() ? 1 : 0, caseOpened() ? 1 : 0, camp, face].join("|");
   }
   function card(cc, x, y, w, h, tone) {
     cc.save();
@@ -555,8 +649,7 @@
     if (!force && key === built.key) return;
     built.key = key;
     const b = built.live, cc = b.cc;
-    const R0 = recs() || { completed: 0 };
-    const T = CBZ.hitmanTier();
+    const R0 = recs() || { completed: 0, paid: 0 };
     let marks = 0;
 
     cc.fillStyle = "#6b563c"; cc.fillRect(0, 0, b.w, b.h);           // cork
@@ -564,26 +657,66 @@
     cc.fillStyle = "#f0e6cf"; cc.font = "700 20px monospace";
     cc.fillText("MARKS", 14, 24);
     cc.font = "600 13px monospace";
-    cc.fillText("REP " + Math.round(T.rep) + "  ·  " + (R0.completed | 0) + " SETTLED", 110, 23);
-    const hub = { x: 52, y: 62 };
+    cc.fillText("$" + (R0.paid | 0).toLocaleString() + " PAID  ·  " + (R0.completed | 0) + " SETTLED", 110, 23);
+    // the string hub sits in the strip between the header and the first card,
+    // so no card is ever pinned on top of it (it used to be buried under the
+    // settled-marks grid, and the live polaroid below would bury it deeper).
+    const hub = { x: 52, y: 41 };
     pin(cc, hub.x, hub.y);
 
-    // settled marks — small crossed polaroids, capped at 8
-    const doneN = Math.min(8, R0.completed | 0);
-    for (let i = 0; i < doneN; i++) {
-      const x = 16 + (i % 4) * 56, y = 52 + ((i / 4) | 0) * 62;
-      card(cc, x, y, 46, 52, "#cfc7b4");
-      cc.strokeStyle = "#8a2f28"; cc.lineWidth = 3;
-      cc.beginPath(); cc.moveTo(x + 6, y + 8); cc.lineTo(x + 40, y + 46);
-      cc.moveTo(x + 40, y + 8); cc.lineTo(x + 6, y + 46); cc.stroke();
+    // THE LEFT COLUMN IS WHOEVER IS ON THE WIRE. A wall of marks that shows
+    // eight identical crosses tells you nothing; the ONE thing a working
+    // hitman's wall is for is the face he is hunting right now. So while a
+    // contract is live the column is his polaroid — the same photograph the
+    // phone is holding (city/mugshot.js, taken at bind time), the same read:
+    // the man, in the clothes he is wearing. With nothing on the wire it goes
+    // back to the settled crosses — the ledger of what is done.
+    const liveFace = (liveCon && liveHit()) ? liveCon : null;
+    if (liveFace) {
+      const x = 16, y = 46, w = 112, h = 164;
+      card(cc, x, y, w, h, "#efe9db");
+      pin(cc, x + w / 2, y + 5);
+      stringTo(cc, hub.x, hub.y, x + w / 2, y + 5);
+      // 3:4, the mugshot's own aspect — a stretched face is a wrong face
+      const px = x + 14, py = y + 10, pw = 84, ph = 112;
+      cc.fillStyle = "#141a20"; cc.fillRect(px, py, pw, ph);
+      if (liveFace.photoCanvas) {
+        try { cc.drawImage(liveFace.photoCanvas, px, py, pw, ph); } catch (e) {}
+      }
+      cc.fillStyle = "#241d16"; cc.font = "700 11px monospace";
+      cc.fillText(String(liveFace.name || "the mark").slice(0, 15).toUpperCase(), x + 8, y + h - 30);
+      cc.fillStyle = "#7a4b3a"; cc.font = "600 10px monospace";
+      cc.fillText(String(liveFace.wearing || TIERS[liveFace.tier].label).slice(0, 19), x + 8, y + h - 13);
       marks++;
+      // the facts that are NOT in the picture, stacked beside it
+      const F = liveFace.facts || [];
+      cc.font = "600 11px monospace";
+      for (let i = 0; i < Math.min(4, F.length); i++) {
+        const fy = y + 22 + i * 30;
+        cc.fillStyle = "#c4b696";
+        cc.fillText(String(F[i].k), 140, fy);
+        cc.fillStyle = "#f0e6cf";
+        cc.fillText(String(F[i].v).slice(0, 15), 140, fy + 13);
+      }
+    } else {
+      // settled marks — small crossed polaroids, capped at 8
+      const doneN = Math.min(8, R0.completed | 0);
+      for (let i = 0; i < doneN; i++) {
+        const x = 16 + (i % 4) * 56, y = 52 + ((i / 4) | 0) * 62;
+        card(cc, x, y, 46, 52, "#cfc7b4");
+        cc.strokeStyle = "#8a2f28"; cc.lineWidth = 3;
+        cc.beginPath(); cc.moveTo(x + 6, y + 8); cc.lineTo(x + 40, y + 46);
+        cc.moveTo(x + 40, y + 8); cc.lineTo(x + 6, y + 46); cc.stroke();
+        marks++;
+      }
     }
 
-    // the ladder — one card per tier, locked tiers hang dark with the price
-    // showing (the locked door with the gun room visible through it)
+    // the ladder — one card per tier. The one card that can hang dark names
+    // the KEY it wants and where that key is lying (the locked door with the
+    // gun room visible through it).
     for (let t = 0; t < TIERS.length; t++) {
       const x = 262, y = 46 + t * 92, w = 228, h = 78;
-      const open = T.rep >= TIERS[t].need;
+      const open = tierOpen(t);
       card(cc, x, y, w, h, open ? "#e8e2d4" : "#2c2723");
       pin(cc, x + w / 2, y + 4);
       stringTo(cc, hub.x, hub.y, x + w / 2, y + 4);
@@ -596,16 +729,16 @@
         cc.fillStyle = "#3f6b46";
         cc.fillText(t === 2 ? "a real officeholder" : t === 1 ? "beat the ring" : "a name with a shift", x + 12, y + 64);
       } else {
-        cc.fillText("LOCKED · REP " + TIERS[t].need, x + 12, y + 46);
+        cc.fillText("NEEDS THE " + String(TIERS[t].key).toUpperCase(), x + 12, y + 46);
         cc.fillStyle = "#6d6355";
-        cc.fillText(t === 2 ? "the office is watching" : "the ring is watching", x + 12, y + 64);
+        cc.fillText("City Hall, behind steel", x + 12, y + 64);
       }
       marks++;
     }
 
     // the Director's thread — the authored campaign is the same wall
     if (g.cityCampaign && (g.cityOrigin === "contract" || g.cityOrigin === "hitman")) {
-      const x = 16, y = 196, w = 228, h = 58;
+      const x = 16, y = 216, w = 228, h = 56;   // clears the live mark's polaroid
       card(cc, x, y, w, h, "#1d222b");
       pin(cc, x + w / 2, y + 4);
       stringTo(cc, hub.x, hub.y, x + w / 2, y + 4);
@@ -613,15 +746,14 @@
       cc.fillText("THE DIRECTOR", x + 12, y + 24);
       cc.fillStyle = "#8a93a3"; cc.font = "600 12px monospace";
       const c = g.cityCampaign;
-      cc.fillText(c.phase === "endless_contracts" ? ("open contract #" + Math.max(1, c.contractNo | 0)) : "the story is still running", x + 12, y + 44);
+      cc.fillText(c.phase === "endless_contracts" ? ("contract #" + Math.max(1, c.contractNo | 0)) : "still running", x + 12, y + 44);
       marks++;
     }
 
-    // the case line
+    // the case line: one word, because the case is one press
     cc.fillStyle = "rgba(0,0,0,.3)"; cc.fillRect(0, b.h - 28, b.w, 28);
     cc.fillStyle = "#d8c9a3"; cc.font = "600 12px monospace";
-    const ct = caseTier();
-    cc.fillText("CASE: " + (ct >= 2 ? "emptied" : ct >= 1 ? "one drawer left · REP 45" : "locked · REP 20"), 14, b.h - 9);
+    cc.fillText("CASE: " + (caseOpened() ? "empty" : "packed"), 14, b.h - 9);
 
     built.marks = marks;
     b.paint();
@@ -638,6 +770,15 @@
   function wireZones() {
     if (zonesWired || !CBZ.interactions || !CBZ.interactions.registerZone) return;
     zonesWired = true;
+    // CARD TITLES. Without these the registry prints its "—" placeholder as
+    // the card's title, which is where a bare dash on the owner's screen came
+    // from. A title is a NAME; the button under it is the verb.
+    if (CBZ.interactions.describe) {
+      try {
+        CBZ.interactions.describe("hitboard", function () { return { label: "The wall", note: "Names, fees, and what is settled" }; });
+        CBZ.interactions.describe("hitcase", function () { return { label: "Gear case", note: caseOpened() ? "Empty" : "Packed" }; });
+      } catch (e) {}
+    }
     const bTok = { x: 0, z: 0, kind: "hitboard" };
     CBZ.interactions.registerZone({
       id: "hitman-board", kind: "hitboard", radius: 2.6, prio: 14,
@@ -649,17 +790,15 @@
       },
       options: [{
         id: "hitman-board-read", slot: "e",
-        label: function () {
-          if (campaignOwns()) return "The wall — the Director's list";
-          const m = liveHit();
-          if (m) return "The wall — working: " + (m.def.targetName || "a name");
-          return "The wall — take the next name";
-        },
+        // THE BUTTON IS THE VERB (interactions.js's own law): a label under
+        // the button budget IS the button, with no copy bar repeating it. You
+        // walk to a wall, you read it. Nothing else needs saying.
+        label: function () { return "Read wall"; },
         onSelect: function () {
           paintBoard(true);
           if (campaignOwns()) { if (CBZ.campaignUI && CBZ.campaignUI.open) { try { CBZ.campaignUI.open("missions"); } catch (e) {} } return; }
           const m = liveHit();
-          if (m) { note("Finish " + (m.def.targetName || "the open name") + " first. The wall keeps score, not company.", 2.6); return; }
+          if (m) { note("Finish " + (m.def.targetName || "the open name") + " first.", 2.4); return; }
           CBZ.hitmanStart();
         },
       }],
@@ -675,33 +814,22 @@
       },
       options: [{
         id: "hitman-case-open", slot: "e",
-        label: function () {
-          const ct = caseTier(), T = CBZ.hitmanTier();
-          if (ct >= 2) return "Gear case — emptied";
-          const want = ct + 1;
-          if (T.rep >= TIERS[want].need) return "Open the case — " + (want === 1 ? "the long lens" : "the quiet room-clearer");
-          return "Gear case — locked (REP " + TIERS[want].need + ")";
-        },
+        label: function () { return caseOpened() ? "Empty case" : "Open the case"; },
+        // NO LOCK (owner, 2026-08-18: "this gearbox should just open"). It is
+        // your case in your room; the kit comes out in one press.
         onSelect: function () {
           const R0 = recs(); if (!R0) return;
-          const ct = R0.caseTier | 0, T = CBZ.hitmanTier();
-          if (ct >= 2) { note("Empty. You carry everything it held.", 2); return; }
-          const want = ct + 1;
-          if (T.rep < TIERS[want].need) { note("The lock reads reputation, not keys. REP " + TIERS[want].need + ".", 2.6); return; }
-          R0.caseTier = want;
-          if (want === 1) {
-            if (CBZ.cityGiveWeapon) CBZ.cityGiveWeapon("Sniper");
-            if (CBZ.fpsAddAmmo) { try { CBZ.fpsAddAmmo(20, "sniper"); } catch (e) {} }
-            note("The long lens. Protected names stop being protected at 200 meters.", 3);
-          } else {
-            if (CBZ.cityGiveWeapon) CBZ.cityGiveWeapon("SMG");
-            g.cityGunMods = g.cityGunMods || {};
-            const cur = g.cityGunMods.smg || { scope: null, mag: null, muzzle: null, under: null };
-            cur.muzzle = "suppressor";
-            g.cityGunMods.smg = cur;
-            if (CBZ.gunModsDressAll) { try { CBZ.gunModsDressAll(); } catch (e) {} }
-            note("The quiet room-clearer, threaded. The office job wants it.", 3);
-          }
+          if (caseOpened()) { note("Empty. You carry everything it held.", 2); return; }
+          R0.caseOpen = true;
+          R0.caseTier = 2;                                  // legacy field, pinned so an old save reads empty too
+          if (CBZ.cityGiveWeapon) { CBZ.cityGiveWeapon("Sniper"); CBZ.cityGiveWeapon("SMG"); }
+          if (CBZ.fpsAddAmmo) { try { CBZ.fpsAddAmmo(20, "sniper"); } catch (e) {} }
+          g.cityGunMods = g.cityGunMods || {};
+          const cur = g.cityGunMods.smg || { scope: null, mag: null, muzzle: null, under: null };
+          cur.muzzle = "suppressor";
+          g.cityGunMods.smg = cur;
+          if (CBZ.gunModsDressAll) { try { CBZ.gunModsDressAll(); } catch (e) {} }
+          note("The long lens and a threaded SMG. That is everything the case held.", 3);
           if (CBZ.cityWorldCommit) { try { CBZ.cityWorldCommit(); } catch (e) {} }
           paintBoard(true);
         },
@@ -741,8 +869,10 @@
         (typeof CBZ.cityOutfitGet === "function" ? 1 : 0),
       legacyStreetHitmanSites: legacy,
       room: !!built,
-      caseTier: caseTier(),
-      rep: Math.round(T.rep), tier: T.tier,
+      caseOpen: caseOpened(),
+      repGates: 0,                       // no rung and no box in this file reads a reputation number
+      keyedRungs: TIERS.filter(function (t) { return !!t.key; }).length,
+      seal: T.seal, tier: T.tier,
     };
   };
 })();

@@ -72,29 +72,13 @@
   //      reach across the screen for. Fixed spot + fixed order = muscle
   //      memory. Desktop keeps the #interact card unchanged. ----
   let dock = null, dockMode = "";        // "" hidden · "free" · "held"
+  // The dock's LOOK is css/interact_touch.css (#survVerbs / .svbtn). It used
+  // to be a <style> string injected from right here, which meant the best
+  // button in the repo was invisible to every stylesheet and the prison could
+  // only imitate it by hand. Now both wear the same class. This file builds
+  // the element and nothing else.
   function ensureDock() {
     if (dock) return;
-    const style = document.createElement("style");
-    style.textContent =
-      "#survVerbs{position:fixed;right:calc(112px + env(safe-area-inset-right,0px));" +
-      "bottom:calc(34px + env(safe-area-inset-bottom,0px));z-index:23;display:none;" +
-      "flex-direction:column-reverse;gap:10px;pointer-events:none;}" +
-      "#survVerbs.show{display:flex;}" +
-      // ON FOOT the dock is seated left of #tbtns, the on-foot icon cluster.
-      // IN THE WATER that corner belongs to somebody else: touch_vehicle.js
-      // hides #tbtns (body.tveh-on) and puts DIVE/RISE there instead, and those
-      // are .tv-big pills — 128px wide off a right:14 edge, so they reach to
-      // 142 and the dock's own 112 would have landed on top of RISE. Same
-      // grammar, one seat inboard, and lifted clear of the HEALTH/STAMINA bars
-      // that run along the bottom centre in this mode.
-      "#survVerbs.swim{right:calc(156px + env(safe-area-inset-right,0px));" +
-      "bottom:calc(96px + env(safe-area-inset-bottom,0px));}" +
-      ".svbtn{pointer-events:auto;min-width:104px;height:48px;border-radius:24px;padding:0 18px;" +
-      "border:1.5px solid rgba(127,231,255,.5);background:rgba(10,20,32,.68);color:#eaf4ff;" +
-      "font-family:Fredoka,system-ui,sans-serif;font-weight:600;font-size:16px;letter-spacing:.6px;" +
-      "text-align:center;-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);}" +
-      ".svbtn:active{background:rgba(127,231,255,.28);}";
-    document.head.appendChild(style);
     dock = document.createElement("div");
     dock.id = "survVerbs";
     document.body.appendChild(dock);

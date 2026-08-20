@@ -430,7 +430,7 @@
       CBZ.stocks.shock(sym, -(DEATH_SHOCK_MIN + rng() * DEATH_SHOCK_SPAN));
     }
     if (CBZ.city && CBZ.city.big) {
-      CBZ.city.big("" + victimName + ", founder of " + coName + ", assassinated — " + sym + " plunges");
+      CBZ.city.big("" + victimName + ", founder of " + coName + ", assassinated · " + sym + " plunges");
     }
     if (heir) {
       // SUCCESSION: shares move to the heir, who becomes founder-of-record.
@@ -448,7 +448,7 @@
       // shock than the succession case.
       if (co) co.founderSid = null;
       if (CBZ.stocks && typeof CBZ.stocks.shock === "function") CBZ.stocks.shock(sym, -NO_HEIR_SHOCK);
-      if (CBZ.cityFeed) CBZ.cityFeed("" + sym + " in chaos — founder dies without heir", "#ff6a5e");
+      if (CBZ.cityFeed) CBZ.cityFeed("" + sym + " in chaos, founder dies without heir", "#ff6a5e");
       const list = ensureState().founders;
       const idx = list.indexOf(rec);
       if (idx >= 0) list.splice(idx, 1);

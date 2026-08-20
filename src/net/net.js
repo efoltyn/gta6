@@ -146,7 +146,7 @@
       net.serverWorld = null;
       net.players.clear();
       emit(net._handlers, "_offline", {});
-      if (was && CBZ.city && CBZ.city.note) CBZ.city.note("Disconnected from server — world is now local", 4);
+      if (was && CBZ.city && CBZ.city.note) CBZ.city.note("Disconnected from server, world is now local", 4);
     };
     net.ws.onerror = function () { opts.onError && opts.onError("Connection failed."); };
   };

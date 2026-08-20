@@ -1103,7 +1103,7 @@
     const cash = 40 + ((Math.random() * 120) | 0) + (L.bag ? 30 : 0);
     CBZ.city.addCash(cash);
     if (CBZ.sfx) CBZ.sfx("coin");
-    CBZ.city.note("Rifled the " + (L.bag ? "beach bag" : "cooler") + " — $" + cash + ". Nobody locks up at the beach.", 2.2);
+    CBZ.city.note("Rifled the " + (L.bag ? "beach bag" : "cooler") + " · $" + cash + ". Nobody locks up at the beach.", 2.2);
     // petty theft: charged only if someone actually sees it (witness chokepoint)
     if (CBZ.cityCrime) CBZ.cityCrime(20, { type: "theft", x: L.x, z: L.z });
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
@@ -1127,16 +1127,6 @@
     if (!t) { chip.style.display = "none"; return; }
     if (CBZ.touchPromptChip) { CBZ.touchPromptChip(chip, t); return; }
     chip.style.display = "block"; chip.innerHTML = t;
-  }
-
-  // Desktop keeps its exact string; touch gets the pill that fires this
-  // module's own [E] (city.css's declutter hides this chip during play, so on
-  // a tablet the cooler had no control at all until mobile.css restored it).
-  function riflePrompt(L) {
-    const desktop = L.bag ? "[E] Go through the beach bag" : "[E] Go through the cooler";
-    return CBZ.touchActionPrompt
-      ? CBZ.touchActionPrompt("e", L.bag ? "GO THROUGH THE BAG" : "GO THROUGH THE COOLER", desktop)
-      : desktop;
   }
 
   function lootNear() {
@@ -1190,7 +1180,6 @@
   }
 
   let rifling = null;          // { L, t }
-  let _promptT = 0;
   CBZ.onUpdate(36.9, function (dt) {
     if (g.mode !== "city" || !built) { rifling = null; chipText(null); return; }
     populate();
@@ -1208,29 +1197,31 @@
       if (rifling.t >= RIFLE_T) { rifle(L); rifling = null; chipText(null); }
       return;
     }
-    _promptT += dt;
-    if (g.state === "playing" && P && !P.dead && !P.driving && !CBZ.cityMenuOpen) {
-      if (_promptT >= 1 / 12) {
-        _promptT = 0;
-        const L = lootNear();
-        chipText(L ? riflePrompt(L) : null);
-      }
-    } else chipText(null);
+    // not rifling: the chip has nothing to say. The walk-up prompt is the
+    // interaction card's job (zone-beachbag below) — the raw [E] keydown and
+    // the chip pill that used to double it are deleted; the registry is the
+    // one surface. The chip keeps the rifling-progress prose above, which the
+    // card has no channel for.
+    chipText(null);
   });
 
-  function onKey(e) {
-    if (!built || g.mode !== "city" || g.state !== "playing" || rifling) return;
-    if (CBZ.cityMenuOpen) return;
-    const P = CBZ.player;
-    if (!P || P.dead || P.driving) return;
-    if ((e.key || "").toLowerCase() !== "e") return;
-    const L = lootNear();
-    if (!L) return;
-    e.preventDefault();
-    e.stopPropagation();
-    rifling = { L, t: 0 };
-  }
-  if (typeof document !== "undefined" && document.addEventListener) document.addEventListener("keydown", onKey);
+  let zoned = false;
+  CBZ.onUpdate(99.64, function () {
+    if (zoned || !CBZ.interactions || !CBZ.interactions.registerZone) return;
+    zoned = true;
+    CBZ.interactions.describe("beachbag", function () { return { label: "Somebody's things", note: "" }; });
+    CBZ.interactions.registerZone({
+      id: "zone-beachbag", kind: "beachbag", prio: 11,
+      find: function () { return (built && !rifling && g.mode === "city") ? lootNear() : null; },
+      options: [{
+        id: "beachbag-rifle", slot: "e", bad: true,
+        // the button names what you are actually rifling (the deleted pill
+        // distinguished bag from cooler; the one surviving surface keeps that)
+        label: function (L) { return L && L.bag ? "Go through the bag" : "Go through the cooler"; },
+        onSelect: function (L) { if (L) rifling = { L: L, t: 0 }; },
+      }],
+    });
+  });
 
   // =====================================================================
   //  THE DOCK TICK — priority 9.4.

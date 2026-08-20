@@ -75,7 +75,7 @@
        city run. Flag off / an active campaign / the standalone CELL
        BLOCK Z escape mode still fall through to the original,
        byte-identical.
-     - PEDS: guards (role "guard" → Guard Blacks, NOT the cop flag) and
+     - PEDS: guards (role "guard" → sheriff khakis via "deputy sheriff", NOT the cop flag) and
        inmates are REAL city peds via ctx.npc — brain, wardrobe, gunpoint
        hands-up, cityKillPed death, collision. Guards WALK a real patrol
        ring between posts (derived motion, the restrain.js escort
@@ -404,15 +404,21 @@
     ctx.light(-8, 4.0, 0, 0xbfe0ff, 0.5, 9);           // cell block
 
     // ---- CAST (deferred: real peds want the live arena, casino/boxing pattern)
-    // 3 guards in GUARD BLACKS (role "guard" → security-guard fit, NOT cop).
+    // 3 deputies in SHERIFF KHAKIS (owner, 2026-08-16: "the officers don't
+    // have officer outfits" — a man named "Officer/Deputy/Sgt." at the County
+    // Sheriff's Detention Facility wearing anonymous private-security blacks
+    // read as undressed). "deputy sheriff" is a jobFit row → CAT.sheriff, the
+    // county khaki with the campaign hat — and STILL not the cop flag:
+    // outfits.js's own sheriff note ("khaki off a corpse is a look, not a
+    // skeleton key") is the same doctrine this cast always held.
     for (let i = 0; i < 3; i++) {
       const p = V.posts[i];
-      queue({ role: "guard", name: "Officer " + guardName(ctx, i), outfit: "security",
+      queue({ role: "guard", name: "Officer " + guardName(ctx, i), outfit: "deputy sheriff",
         at: [p.lx, p.lz], face: p.face, post: "pinned", pose: "stand",
         dialogue: ["Keep moving. Nothing to see.", "You do NOT want to be out here after lights-out.", "Wall's electrified. Don't be stupid."] }, "guard");
     }
     // the corrupt guard behind the gate desk (the bribe man / sign-on)
-    queue({ role: "guard", name: "Sgt. " + guardName(ctx, 9), outfit: "security",
+    queue({ role: "guard", name: "Sgt. " + guardName(ctx, 9), outfit: "deputy sheriff",
       at: [0, 6.0], face: 0, post: "pinned", pose: "stand",
       dialogue: ["Everything's for sale in here, friend.", "Doing a shift? Or doing time?"] }, "sarge");
     // inmate peds in the two flanking cells — seeded civvies in jail orange.
@@ -628,12 +634,12 @@
     // ---- CAST. Same roles, same dialogue, new posts. --------------------
     for (let i = 0; i < 3; i++) {
       const p = V.posts[i];
-      queue({ role: "guard", name: "Deputy " + guardName(ctx, i), outfit: "security",
+      queue({ role: "guard", name: "Deputy " + guardName(ctx, i), outfit: "deputy sheriff",
         at: [p.lx, p.lz], face: p.face, post: "pinned", pose: "stand",
         dialogue: ["Keep moving. Nothing to see.", "You do NOT want to be out in that yard after lights-out.", "Wall's forty feet of nothing. Don't be stupid."] }, "guard");
     }
     const sr = bl(3.9, z1 - 7.8);
-    queue({ role: "guard", name: "Sgt. " + guardName(ctx, 9), outfit: "security",
+    queue({ role: "guard", name: "Sgt. " + guardName(ctx, 9), outfit: "deputy sheriff",
       at: [sr.x, sr.z], face: 0, post: "pinned", pose: "stand",
       dialogue: ["Everything's for sale in here, friend.", "Doing a shift? Or doing time?"] }, "sarge");
     // an inmate in every cell but yours. Their mouths carry the escape hint.
@@ -1036,7 +1042,7 @@
     // the door racking shut behind you is the "holding cell" line. What a
     // player genuinely cannot see is WHEN THE VAN COMES — so a screw tells him,
     // out loud, once, standing there. Not a HUD card.
-    feed("Holding cell. Transport to the pen in " + Math.ceil(INM.transportT) + "s — " +
+    feed("Holding cell. Transport to the pen in " + Math.ceil(INM.transportT) + "s · " +
       INM.prison + "s to serve inside.", "#ffd166");
     feed("That plate's still loose. Last chance.", "#cfd6e6");
     say(anyGuard(), "\u201cVan's here in " + Math.ceil(INM.transportT) + ". Sit tight.\u201d", "#ffd27b", 3.0);
@@ -1101,11 +1107,11 @@
       // FOUR STARS AND EVERY SIREN IN THE CITY IS THE ANNOUNCEMENT. A banner
       // reading "OVER THE WALL — MANHUNT" over the top of a live manhunt is
       // exactly the caption the owner is describing.
-      big("OVER THE WALL — MANHUNT");
+      big("OVER THE WALL · MANHUNT");
       // YOUR GUNS ARE STILL IN THE PROPERTY ROOM. Breaking out does not open
       // the locker; you are loose, broke of hardware, and hunted.
       const held = CBZ.cityEvidenceHeld ? CBZ.cityEvidenceHeld() : null;
-      feed("You're out — and every cop in the city knows it. RUN." +
+      feed("You're out, and every cop in the city knows it. RUN." +
         (held && held.guns ? " (Your hardware's still in evidence.)" : ""), "#ff9a9a");
       if (CBZ.arrestCount) CBZ.arrestCount("escapes");
     }
@@ -1194,7 +1200,7 @@
     if (!INM) return;
     INM.phase = "held"; INM.prison += RECAP_PENALTY * PRISON_SCALE; INM.pry *= 0.5; INM._pryMark = 0;
     if (spot && spot.ped && CBZ.citySay) { try { CBZ.citySay(spot.ped, "“Step AWAY from the door!”", "#ffd27b", 2.2); } catch (e) {} }
-    feed((spot ? spot.name : "A guard") + " catches you at the door — the plate's hammered back. +" +
+    feed((spot ? spot.name : "A guard") + " catches you at the door, the plate's hammered back. +" +
       Math.round(RECAP_PENALTY * PRISON_SCALE) + "s inside.", "#ff9a9a");
   }
   function popDoor(how) {
@@ -1203,7 +1209,7 @@
     setDoor(V.cells[1], false);
     feed(how === "keys"
       ? "The keyring turns your lock. The gap's in the back corner. Mind their eyes."
-      : "The plate gives — the door swings loose. The gap's in the back corner. Mind their eyes.", "#cfe8b0");
+      : "The plate gives, the door swings loose. The gap's in the back corner. Mind their eyes.", "#cfe8b0");
   }
 
   /* ---- GUARD KEYS: the second physical means (owner doctrine — escape is
@@ -1251,10 +1257,10 @@
      ========================================================== */
   function startShift() {
     if (JOB && JOB.active) return;
-    if (INM) { feed("You're an inmate right now — you can't work the door."); return; }
+    if (INM) { feed("You're an inmate right now, you can't work the door."); return; }
     JOB = { active: true, caught: 0, wage: 0, escape: null, breakT: 14 + rng() * 10, t: 0 };
     const s = bag(); s.shifts++; save();
-    feed("On duty. Runners go for the back-corner gap — cuff them before they're over.", "#cfe8b0");
+    feed("On duty. Runners go for the back-corner gap, cuff them before they're over.", "#cfe8b0");
   }
 
   // a seeded inmate makes a break: un-pin one and march it to the gap.
@@ -1331,7 +1337,7 @@
     const s = bag();
     s.wagesEarned += JOB.wage; save();
     if (JOB.escape) homeInmate(JOB.escape.h);        // any live runner goes back inside
-    if (reason === "arrested") feed("Badge pulled — you're going in the cells yourself.", "#ff9a9a");
+    if (reason === "arrested") feed("Badge pulled, you're going in the cells yourself.", "#ff9a9a");
     else feed("Clocked off. Caught " + JOB.caught + " runner" + (JOB.caught === 1 ? "" : "s") + " · " + fmt(JOB.wage), "#cfe8b0");
     JOB = null; if (C) C.hud.closePanel(); panelMode = null; menuLock(false);
   }

@@ -239,6 +239,29 @@
     });
   }
 
+  // A CARD CAN CARRY A PICTURE AND A FACT SHEET. `photo` is a data: URL from
+  // city/mugshot.js (the mark, in the outfit he is actually wearing); `facts`
+  // are short labelled rows that replaced the briefing paragraph. Both are
+  // optional — a mission without them renders exactly as it always did.
+  function normalizeFacts(list) {
+    if (!Array.isArray(list)) return [];
+    const out = [];
+    for (let i = 0; i < list.length && out.length < 6; i++) {
+      const f = list[i];
+      if (!f) continue;
+      const k = textOf(f.k || f.label || f.key, "");
+      const v = textOf(f.v || f.value, "");
+      if (k && v) out.push({ k: k, v: v });
+    }
+    return out;
+  }
+  // only a data: image is ever accepted here — the phone renders whatever a
+  // caller hands it, and this is the one field that becomes a live URL.
+  function safePhoto(url) {
+    const s = typeof url === "string" ? url.trim() : "";
+    return /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(s) ? s : "";
+  }
+
   function normalizeMission(def) {
     def = def || {};
     const reward = def.reward != null ? def.reward : def.pay;
@@ -249,6 +272,8 @@
       id: textOf(def.id, "mission-" + (++serial)),
       title: textOf(def.title || def.name, "Current Mission"),
       briefing: textOf(def.briefing || def.body || def.description || def.desc || def.objective, ""),
+      photo: safePhoto(def.photo),
+      facts: normalizeFacts(def.facts),
       target: textOf(def.targetName || (def.target && def.target.name) || def.target, ""),
       location: textOf(def.locationName || def.location, ""),
       prestige: textOf(def.prestige, ""),
@@ -358,10 +383,47 @@
       const eyebrow = make("div", "campaign-eyebrow", mission.status === "active" ? "ACTIVE CONTRACT" : mission.status.toUpperCase());
       card.appendChild(eyebrow);
       card.appendChild(make("h2", "campaign-title campaign-mission-title", mission.title));
+
+      // THE PHOTOGRAPH. When the job knows what its mark looks like, the card
+      // leads with him: the picture on the left, his name and the handful of
+      // facts worth reading on the right. Showing the outfit is the point —
+      // that is what you scan a street for — so the TARGET chip below is
+      // dropped when the plate already names him.
+      const hasPlate = !!(mission.photo || mission.facts.length);
+      if (hasPlate) {
+        const plate = make("div", "campaign-mission-plate");
+        if (mission.photo) {
+          const frame = make("div", "campaign-mission-mug");
+          const img = document.createElement("img");
+          img.src = mission.photo;
+          img.alt = mission.target ? ("Photograph of " + mission.target) : "Photograph of the mark";
+          img.decoding = "async";
+          frame.appendChild(img);
+          plate.appendChild(frame);
+        }
+        const side = make("div", "campaign-mission-plate-side");
+        // don't print the name twice. A contract's headline is already
+        // "CONTRACT: <name>", so the plate names him only when the headline
+        // doesn't — otherwise the space goes to facts, which is the point.
+        const titled = !!(mission.target && mission.title.toLowerCase().indexOf(mission.target.toLowerCase()) >= 0);
+        if (mission.target && !titled) {
+          side.appendChild(make("div", "campaign-plate-label", "TARGET"));
+          side.appendChild(make("b", "campaign-plate-name", mission.target));
+        }
+        mission.facts.forEach(function (f) {
+          const row = make("div", "campaign-plate-fact");
+          row.appendChild(make("span", "", f.k));
+          row.appendChild(make("b", "", f.v));
+          side.appendChild(row);
+        });
+        plate.appendChild(side);
+        card.appendChild(plate);
+      }
+
       if (mission.briefing) card.appendChild(make("p", "campaign-mission-brief", mission.briefing));
 
       const chips = make("div", "campaign-info-grid");
-      if (mission.target) chips.appendChild(infoChip("TARGET", mission.target));
+      if (mission.target && !hasPlate) chips.appendChild(infoChip("TARGET", mission.target));
       if (mission.location) chips.appendChild(infoChip("LOCATION", mission.location));
       if (mission.reward) chips.appendChild(infoChip("PAY", mission.reward));
       if (mission.prestige) chips.appendChild(infoChip("STANDING", mission.prestige));

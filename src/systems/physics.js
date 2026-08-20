@@ -1575,6 +1575,28 @@
     };
   };
 
+  /* THE CEILING. Nothing in this engine has ever clamped ASCENT: collide()
+     resolves x/z only, and its y-band test (see the c.y0/c.y1 check above)
+     SKIPS a wall the body clears rather than stopping it. That was harmless
+     while the only thing overhead was sky. It stops being harmless the moment
+     the ground has a lid on it — a room under an intact street — because a jump
+     would put your head through the road. systems/solidground.js answers with
+     the underside of the nearest solid span above you, and Infinity when there
+     is none, which is every column in a world with no lids: this is a compare
+     and a branch that never fires until something is actually overhead. */
+  // stance-aware in spirit; the crouch cases pass their own headroom
+  function bodyHeight() { return 1.7; }
+  function clampCeiling(p, headroom) {
+    if (!CBZ.ceilAt) return false;
+    const c = CBZ.ceilAt(p.pos.x, p.pos.z, p.pos.y);
+    if (!(c < Infinity)) return false;
+    const head = p.pos.y + (headroom || bodyHeight());
+    if (head <= c) return false;
+    p.pos.y = c - (headroom || bodyHeight());
+    if (p.vy > 0) p.vy = 0;
+    return true;
+  }
+
   function groundAt(x, z, fromY) {
     /* fromY is passed through so the ground can answer with the surface you are
        actually near, not just the topmost one: over an intact lid the street,
@@ -1987,7 +2009,7 @@
         if (player._traversal || player._traverseSurface) cancelTraversal(player, playerChar, false);
         ph.down -= dt;
         player.speed = 0; player.crouch = false; stanceReset();
-        player.vy -= T.gravity * dt; player.pos.y += player.vy * dt;
+        player.vy -= T.gravity * dt; player.pos.y += player.vy * dt; clampCeiling(player);
         const fl = groundAt(player.pos.x, player.pos.z, player.pos.y);
         if (player.pos.y <= fl) { player.pos.y = fl; player.vy = 0; }
         if (Math.abs(ph.kx) > 0.02 || Math.abs(ph.kz) > 0.02) { player.pos.x += ph.kx * dt; player.pos.z += ph.kz * dt; const d = Math.pow(0.0009, dt); ph.kx *= d; ph.kz *= d; }
@@ -2036,7 +2058,7 @@
       player.speed = 0;
       player.crouch = false; stanceReset();
       player.vy -= T.gravity * dt;
-      player.pos.y += player.vy * dt;
+      player.pos.y += player.vy * dt; clampCeiling(player, 0.6);
       const floorD = groundAt(player.pos.x, player.pos.z, player.pos.y) + 0.3;   // lying body rests ON the floor, not through it
       if (player.pos.y <= floorD) { player.pos.y = floorD; player.vy = 0; player.grounded = true; }
       playerChar.group.position.set(player.pos.x, player.pos.y, player.pos.z);
@@ -2235,13 +2257,13 @@
           // hand off to gravity so you actually fall instead of snapping down.
           player.grounded = false;
           player.vy -= T.gravity * subDt;
-          player.pos.y += player.vy * subDt;
+          player.pos.y += player.vy * subDt; clampCeiling(player);
           if (player.vy < 0 && -player.vy > (player._fallPeak || 0)) player._fallPeak = -player.vy;
           if (player.pos.y <= support) { player.pos.y = support; const ims = -player.vy; player.vy = 0; player.grounded = true; cityFallLand(ims); }
         }
       } else {
         player.vy -= T.gravity * subDt;
-        player.pos.y += player.vy * subDt;
+        player.pos.y += player.vy * subDt; clampCeiling(player);
         if (player.vy < 0 && -player.vy > (player._fallPeak || 0)) player._fallPeak = -player.vy;   // track peak downward speed this fall
         if (player.pos.y <= support && player.vy <= 0) { player.pos.y = support; const ims = -player.vy; player.vy = 0; player.grounded = true; cityFallLand(ims); } // landed
       }

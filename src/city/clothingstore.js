@@ -609,7 +609,7 @@
     put(group, box(fw, 1.8, fd, m.mirror), mx - inx * 0.05, 1.05, mz - inz * 0.05);
     if (alcove) buildFittingRoom(group, cs, mlat, mdepth, wall);
     S._alcove = !!alcove;
-    const mtag = tagSprite("Fitting Mirror — [E] Wardrobe", "#f0d9ff", 2.1, 0.48);
+    const mtag = tagSprite("Fitting Mirror. [E] Wardrobe", "#f0d9ff", 2.1, 0.48);
     if (mtag) { mtag.position.set(mx - inx * 0.1, 2.25, mz - inz * 0.1); group.add(mtag); }
     S.slots.push({ kind: "mirror", x: mx - inx * 0.6, y: 1.2, z: mz - inz * 0.6,
                    reach: RACK_REACH + 0.4, dot: 0.45, tux: tux });
@@ -693,7 +693,7 @@
     }
     const price = e_buy(name);
     if (!CBZ.city.spend(price)) {
-      note("The " + (label || name) + " runs " + fmt$(price) + " — come back with the money.", 2);
+      note("The " + (label || name) + " runs " + fmt$(price) + " · come back with the money.", 2);
       return;
     }
     if (CBZ.cityGrantItem) CBZ.cityGrantItem(visualId);
@@ -701,7 +701,7 @@
     if (CBZ.sfx) CBZ.sfx("coin");
     const drip = (CBZ.cityComposableSpec && CBZ.cityComposableSpec(visualId) || {}).drip || 0;
     if (CBZ.city.addRespect) CBZ.city.addRespect(price >= 600 ? 3 : 1);
-    if (price >= 600 && CBZ.city.big) CBZ.city.big("" + (label || name) + " — fresh fit off the rack!");
+    if (price >= 600 && CBZ.city.big) CBZ.city.big("" + (label || name) + " · fresh fit off the rack!");
     note("Bought the " + (label || name) + " for " + fmt$(price) + (drip ? " (+" + drip + " drip)." : "."), 2.2);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
@@ -729,8 +729,8 @@
       return "<b style='color:#e2c2f4'>[E]</b> Open wardrobe <span style='color:#7f8794'>· mix your fits" + (S.tux ? " · or the tuxedo" : "") + "</span>";
     const owned = CBZ.cityOwnsItem && CBZ.cityOwnsItem(s.visualId);
     if (owned)
-      return "<b style='color:#9fe0ff'>[E]</b> Owned — wear the " + s.label + " <span style='color:#7f8794'>· +" + (s.drip || 0) + " drip</span>";
-    return "<b style='color:#e2c2f4'>[E]</b> Buy the " + s.label + " — <span style='color:#d9a8ee'>" + fmt$(e_buy(s.name)) + "</span> <span style='color:#7f8794'>· +" + (s.drip || 0) + " drip</span>";
+      return "<b style='color:#9fe0ff'>[E]</b> Owned, wear the " + s.label + " <span style='color:#7f8794'>· +" + (s.drip || 0) + " drip</span>";
+    return "<b style='color:#e2c2f4'>[E]</b> Buy the " + s.label + " · <span style='color:#d9a8ee'>" + fmt$(e_buy(s.name)) + "</span> <span style='color:#7f8794'>· +" + (s.drip || 0) + " drip</span>";
   }
 
   function promptEl() {
@@ -798,10 +798,10 @@
     const d = panelEl(); if (!d) return;
     const rows = ownedRows();
     let html = "<div style='font-weight:700;font-size:18px;margin-bottom:6px;color:#e2c2f4'>Your Wardrobe</div>";
-    html += "<div style='color:#8a93a3;font-size:12px;margin-bottom:12px'>Mix what you own — tap a number to wear it, the letter to take it off.</div>";
+    html += "<div style='color:#8a93a3;font-size:12px;margin-bottom:12px'>Mix what you own, tap a number to wear it, the letter to take it off.</div>";
     S._panelRows = rows;
     if (!rows.length) {
-      html += "<div style='color:#9aa0a6;margin-bottom:10px'>Nothing owned yet — buy a shirt or blazer off the racks first.</div>";
+      html += "<div style='color:#9aa0a6;margin-bottom:10px'>Nothing owned yet, buy a shirt or blazer off the racks first.</div>";
     } else {
       rows.forEach((r, i) => {
         const mark = r.worn ? "<span style='color:#7ed957'> ✓ worn</span>" : "";
@@ -819,7 +819,7 @@
         "<span style='color:#d9a8ee'>" + (owned ? "wear it" : fmt$(e_buy(S.tux.name))) + "</span></div>";
     }
     html += "<div style='border-top:1px solid #3a3140;margin:12px 0 4px'></div>";
-    html += "<div style='color:#8a93a3;font-size:12px'>[Esc] / [E] close</div>";
+    if (!CBZ.touchMode) html += "<div style='color:#8a93a3;font-size:12px'>[Esc] / [E] close</div>";
     d.innerHTML = html;
   }
   function openPanel() {

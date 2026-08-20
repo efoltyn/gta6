@@ -1811,7 +1811,7 @@
     CBZ.touchVerb("cam-recenter", { ctx: "foot", key: "—", skip: "owner asked the recenter button off the iPad glass (TOUCH_RECENTER=0); the look drag still levels the view, it just takes a drag instead of a tap" });
   CBZ.touchVerb("cam-zoom", { ctx: "any", key: "wheel", hook: "camZoom" });
   // Declared and NOT drawn, each with the reason, so the count cannot launder them:
-  CBZ.touchVerb("front-view", { ctx: "foot", key: "B", skip: "outfit check — the FRONT VIEW hold is a look-at-yourself pose, and CAM_TP_V2 gates it on pointer lock; a thumb has the phone's wardrobe for this" });
+  CBZ.touchVerb("front-view", { ctx: "foot", key: "B", skip: "outfit check, the FRONT VIEW hold is a look-at-yourself pose, and CAM_TP_V2 gates it on pointer lock; a thumb has the phone's wardrobe for this" });
   CBZ.touchVerb("shoulder-swap", { ctx: "foot", key: "MMB", skip: "CBZ.camSetShoulder is one call away, but a 6th icon for a mirrored 0.68 m offset is not worth the corner" });
 
   CBZ.touchVerbWired("move", "#tstick");
@@ -1827,10 +1827,15 @@
   CBZ.touchVerbWired("view-toggle", "#tview");
   CBZ.touchVerbWired("homing", "#thoming");
   CBZ.touchVerbWired("interact", "world tap / .tpill");
-  CBZ.touchVerbWired("elevator-call", "#elevChip .tpill");
-  CBZ.touchVerbWired("roof-stash", "#roofStashChip .tpill");
-  CBZ.touchVerbWired("beach-loot", "#beachLootChip .tpill");
-  CBZ.touchVerbWired("adboard-lease", "#adChip .tpill");
+  // The four walk-up verbs below ride the interaction card (#interact), which
+  // is tappable on touch and carries the [E] badge on desktop. Each used to be
+  // wired to its own chip pill AS WELL — two buttons on the glass for one verb
+  // (an ELEVATOR UP pill beside a CALL THE LIFT card); the pills are deleted
+  // and the registry zone is the one control on every input.
+  CBZ.touchVerbWired("elevator-call", "#interact zone-lift");
+  CBZ.touchVerbWired("roof-stash", "#interact zone-roofstash");
+  CBZ.touchVerbWired("beach-loot", "#interact zone-beachbag");
+  CBZ.touchVerbWired("adboard-lease", "#interact zone-adboard");
   CBZ.touchVerbWired("chest-open", "#ci2Chip .tpill");
   CBZ.touchVerbWired("fx-terminal", "#fxPrompt (its own click handler)");
   CBZ.touchVerbWired("c4-plant", "#tbomb tap");

@@ -1472,8 +1472,12 @@
       // "police" → power.js's `presetFor` government preset → spawnCopGuard),
       // not a head-of-state ring.
       principal: { key: null, tier: 3, org: "police", lawful: true, role: "County Sheriff", job: "official", wealth: 0.55 },
-      // the people who commute HERE do a job, and it is not clerking
-      work: { kind: "security", role: "security guard", patrol: true },
+      // the people who commute HERE do a job, and it is not clerking — and it
+      // is the SHERIFF'S job: "sheriff's deputy" is a jobFit row (CAT.sheriff,
+      // county khaki + campaign hat), so the detail walking this yard reads as
+      // officers instead of anonymous rent-a-guards (owner, 2026-08-16). The
+      // khaki still carries no cop flag — a look, not a skeleton key.
+      work: { kind: "security", role: "sheriff's deputy", patrol: true },
       // FLOOR 0 IS DELIBERATELY "none": it is the cellblock and the booking
       // hall, and games/jail.js dresses it. dressShell skips a floor named
       // "none", so the two files cannot both furnish one plate. Floor 1 is the
@@ -2962,9 +2966,9 @@
           if (!t) return "";
           const v = t.v;
           if (t.what === "key") return "Take " + (v.spec.key || "the key");
-          if (t.what === "rack") return "Take a weapon off the rack";
-          if (t.what === "seal") return "Take the city seal";
-          return v.key ? "Unlock the strongroom" : "Strongroom — locked";
+          if (t.what === "rack") return "Take a gun";
+          if (t.what === "seal") return "Take the seal";
+          return v.key ? "Unlock strongroom" : "Locked strongroom";
         },
         // deliberately NOT `bad`: that field is a static truthy in this registry
         // (interactions.js:363 subtracts 240 from the target score for it), so
@@ -2986,7 +2990,7 @@
           }
           if (t.what === "door") {
             if (!v.key) {
-              srNote("Steel, and the reader wants a card nobody down here carries. The key is upstairs.", 2.8);
+              srNote("Steel, and the reader wants a card. The key is upstairs.", 2.6);
               return;
             }
             srOpen(v);
@@ -3021,7 +3025,7 @@
     if (name && CBZ.cityGiveWeapon) { try { CBZ.cityGiveWeapon(name); } catch (e) {} }
     if (CBZ.cityAddAmmo) { try { CBZ.cityAddAmmo(60); } catch (e) {} }
     if (econ && econ.add) { try { econ.add("Body Armor", 1); } catch (e) {} }
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("CONFISCATED ARMS — " + (name || "the rack") + " + plates");
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("CONFISCATED ARMS: " + (name || "the rack") + " + plates");
     else srNote("You take " + (name || "what is on the rack") + " off the rack.", 2.4);
   }
 
@@ -3035,6 +3039,11 @@
   function srTakeSeal(v) {
     if (v.sealMesh) v.sealMesh.visible = false;
     if (CBZ.game) CBZ.game.cityGovWrit = true;
+    // THE SEAL IS AN OBJECT, not only a boolean: it goes in the bag as a real
+    // `key`-tagged row (city/economy.js), so it can be carried, dropped and
+    // stashed like anything else, and any door that wants it can simply ask
+    // whether you have one. city/hitman.js's office contract is the first.
+    if (CBZ.cityEcon && CBZ.cityEcon.add) { try { CBZ.cityEcon.add("City Seal", 1); } catch (e) {} }
     srGrantAll();
     if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(2400);
     if (CBZ.city && CBZ.city.addRespect) { try { CBZ.city.addRespect(6); } catch (e) {} }
@@ -3042,8 +3051,8 @@
       if (CBZ.city && CBZ.city.big) CBZ.city.big("THE CITY SEAL");
       return;
     }
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("THE CITY SEAL — you sign for yourself now");
-    srNote("The seal of the city, in your pocket. No government door in this state is closed to you.", 3.4);
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("THE CITY SEAL");
+    srNote("The seal is in your pocket. No government door in this state is closed to you, and the wall will take the office job now.", 3.4);
   }
   // idempotent, one line per complex — occupy.js stores the pass on the actor,
   // never a mirror here (the parallel-bookkeeping trap).

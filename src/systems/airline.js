@@ -187,7 +187,7 @@
     if (s.gate && s.gate.occupant === s.rec) s.gate.occupant = null;
     if (s.rec) { s.rec._airlineGate = null; s.rec._airlineShuttle = null; }
     if (ticket && ticket.shuttle === s) {
-      note("Flight " + s.id.toUpperCase() + " cancelled — " + why + ". Your fare is refunded.", 4);
+      note("Flight " + s.id.toUpperCase() + " cancelled · " + why + ". Your fare is refunded.", 4);
       if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(ticket.price);
       ticket = null; CBZ.airlineTicket = null;
     }
@@ -288,7 +288,7 @@
         if (s.t >= TURN_S) {
           s.t = 0; s.hold = 0; s.phase = "boarding";
           if (ticket && ticket.shuttle === s) {
-            note("Now boarding " + s.id.toUpperCase() + " to " + s.to.name + " — stand " + (s.gate ? s.gate.id : "?") + ".", 4);
+            note("Now boarding " + s.id.toUpperCase() + " to " + s.to.name + " · stand " + (s.gate ? s.gate.id : "?") + ".", 4);
           }
         }
         break;
@@ -313,7 +313,7 @@
           if (s.gate && s.gate.occupant === rec) s.gate.occupant = null;
           routeOut(s);
           s.phase = "taxiOut"; s.t = 0;
-          if (s.playerAboard) note("Doors closed. " + s.at.code + " to " + s.to.code + " — taxiing to runway " + s.depEnd.name + ".", 4);
+          if (s.playerAboard) note("Doors closed. " + s.at.code + " to " + s.to.code + " · taxiing to runway " + s.depEnd.name + ".", 4);
         }
         break;
       }

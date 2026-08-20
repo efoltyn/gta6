@@ -88,7 +88,18 @@
 
   /* ---------------- tunables ---------------------------------------------- */
   const COUNCIL_N = 7;
-  const COUNCIL_SEAT_H = 0.48; // cushion top above the chamber floor
+  const COUNCIL_SEAT_H = 0.48; // cushion top above the CHAIR's own floor (the dais)
+  // THE DAIS (owner, 2026-08-16: "the councillors have invisible outfits").
+  // Arithmetic, not taste: the bench box is 0.9 m tall with the brass rail at
+  // 0.98, and a body seated on a 0.48 cushion carries its shoulders at
+  // ~1.1-1.25 — so at most ~15 cm of suit could EVER show above the bench,
+  // and that band is exactly where bling's white shirt-front panel sits. From
+  // the room the council read as bare heads floating on woodwork, whatever
+  // the wardrobe painted (the suits themselves probed healthy). Real chambers
+  // solve this with architecture: the bench stays at floor height and the
+  // members sit on a RAISED PLATFORM, so the upper body clears the rail.
+  // 0.34 m puts ~50 cm of tailoring above the brass.
+  const DAIS_H = 0.34;
   const NIGHT_SECONDS = 240;      // the evening, in gameplay seconds, to the gavel
   const BRIBE_COST = 5000;        // real city cash per envelope
   const WIN_PAYOUT = 60000;       // developer kickback on a passed rezoning
@@ -273,11 +284,40 @@
       let sid = null;
       if (i < offs.length) { sid = offs[i].sid; name = offs[i].name; title = offs[i].title; real = true; key = "sid:" + sid; V.realCount++; }
       else { name = fillName(i); title = "Councilmember"; key = "fill:" + i; }
-      const handle = ctx.npc ? ctx.npc({
+      // THE WARDEN'S WAY IN: cast the ped standing, then commit it to the
+      // REGISTERED chair through CBZ.propSit({instant}) — adminwing.js's
+      // sitAtDesk pattern, the seating the owner points at as the good one.
+      // From there SIT_PHYS_V1 owns the body: the order-42 hold pins the whole
+      // transform every frame (nothing left to bob against), the chair solve
+      // reads the REGISTERED cushion/kind (legs fold to the dais, "throne"
+      // posture for a high-backed armchair), and the anchor seats the pelvis
+      // on the cushion centre, clear of the backrest. The pose+seatRef spec is
+      // kept ONLY as the degrade path for a build with no seat registry.
+      const rec = (V.seatRecs && V.seatRecs[i]) || null;
+      const canProp = !!(rec && CBZ.propSit);
+      const spec = {
         role: "councillor", name: name, outfit: { archetype: "exec" },
-        at: [seat.x, seat.z], face: 0, post: "pinned", pose: "sit",
-        seatRef: { cushion: COUNCIL_SEAT_H, floorBelow: 0 },
-      }) : null;
+        at: [seat.x, seat.z], face: 0, post: "pinned",
+      };
+      if (!canProp) {
+        spec.pose = "sit";
+        // dais fallback: negative floorBelow raises the solve onto the
+        // platform (sink = cushion+0.10 − hipY − floorBelow).
+        spec.seatRef = { cushion: COUNCIL_SEAT_H, floorBelow: -DAIS_H };
+      }
+      const handle = ctx.npc ? ctx.npc(spec) : null;
+      if (canProp && handle && handle.ped && handle.ped.group) {
+        const p = handle.ped;
+        try {
+          // the SEAT has custody now, not the staff post — the post pin writes
+          // idle/pos every tick and would arm-wrestle the sit hold (the
+          // auditor above clears its post for the same reason).
+          p.staffPost = null;
+          p.group.position.set(rec.x, rec.y || 0, rec.z);
+          CBZ.propSit(p, rec, { instant: true });
+          p.group.rotation.y = rec.face;
+        } catch (e) {}
+      }
       COUNCIL.push({ i: i, key: key, sid: sid, name: name, title: title, real: real, handle: handle, want: meta.want, fear: meta.fear, baseStance: meta.baseStance, stance: meta.baseStance, flippedBy: null, dirtLine: null });
     }
     // the auditor — a controlled ped we drive along posted waypoints.
@@ -404,8 +444,8 @@
     switch (G.result) {
       case "win": return "rezoning passed";
       case "lose:indicted": return "you were indicted";
-      case "lose:scandal": return "vote postponed — scandal";
-      case "lose:tie": return "deadlocked — tie fails";
+      case "lose:scandal": return "vote postponed, scandal";
+      case "lose:tie": return "deadlocked, tie fails";
       case "lose:vote": return "rezoning failed";
       default: return "";
     }
@@ -436,7 +476,7 @@
     if (!G.active || G.result) return false;
     if (!playerChairsHere()) return false;
     const t = tallyOf(COUNCIL);
-    if (t.pass) { C.hud.feed("The room's already with you — just call the vote."); return false; }
+    if (t.pass) { C.hud.feed("The room's already with you, just call the vote."); return false; }
     const seat = playerSeat();
     // the whole cost, paid to the REAL simulation, before anything is gained.
     if (seat && seat.id && CBZ.approvalShock) {
@@ -445,7 +485,7 @@
     if (CBZ.gov && CBZ.gov.forceUsed) { try { CBZ.gov.forceUsed(CHAIR_OVERRIDE_TYRANNY, "gavelled a bill past the council"); } catch (e) {} }
     G.voted = true; G.active = false;
     G.result = "win";
-    C.wallet.give(WIN_PAYOUT, "Docklands rezoning — chair's prerogative");
+    C.wallet.give(WIN_PAYOUT, "Docklands rezoning, chair's prerogative");
     setCooldown(); redrawBoard();
     if (CBZ.city && CBZ.city.big) CBZ.city.big("REZONING GAVELLED THROUGH " + t.for + "–" + t.against + " AGAINST");
     if (CBZ.cityFeed) CBZ.cityFeed("The chair overrode the council on the Docklands rezoning. Two members walked out.", "#ff9a6a");
@@ -468,17 +508,17 @@
     if (!C) return;
     const t = tallyOf(COUNCIL);
     const chair = playerChairsHere();
-    let body = head("CITY HALL — DOCKLANDS REZONING", G.active ? clockStr() : (chair ? "you have the gavel" : "after dark"));
+    let body = head("CITY HALL · DOCKLANDS REZONING", G.active ? clockStr() : (chair ? "you have the gavel" : "after dark"));
     body += "<div style='margin:2px 0 8px;line-height:1.55'>";
-    body += "Tally: <b style='color:#5fd08a'>FOR " + t.for + "</b> · <b style='color:#ff6a5e'>AGAINST " + t.against + "</b> · <b style='color:#c9a24a'>UNDECIDED " + t.abstain + "</b> — need FOR &gt; AGAINST.<br>";
+    body += "Tally: <b style='color:#5fd08a'>FOR " + t.for + "</b> · <b style='color:#ff6a5e'>AGAINST " + t.against + "</b> · <b style='color:#c9a24a'>UNDECIDED " + t.abstain + "</b>, need FOR &gt; AGAINST.<br>";
     body += "Scandal <b style='color:" + (G.scandal >= SCANDAL_CAP * 0.6 ? "#ff6a5e" : "#9aa6bd") + "'>" + Math.min(100, Math.round(G.scandal)) + "%</b>/" + SCANDAL_CAP + " · Ledger <b>" + G.ledger.length + "</b> page(s) · Cash <b>" + fmt(C.wallet.cash()) + "</b>";
     body += "</div>";
     if (G.result) {
       body += "<div style='margin:6px 0;font-weight:800;color:" + (G.result === "win" ? "#5fd08a" : "#ff6a5e") + "'>" + resultLine().toUpperCase() + "</div>";
       body += btn("close", "Leave", "#26343c");
     } else if (!G.active) {
-      if (startable()) body += "<div style='opacity:.85;margin-bottom:6px'>Convene the session and flip the room before the gavel. Bribe, trade favors, dig the records, or lean on the press — just don't let the auditor read your ledger.</div>" + btn("start", "CONVENE THE SESSION", "#1c6b40");
-      else body += "<div style='opacity:.7'>The chamber is dark tonight — the clerk's locked up. Come back tomorrow.</div>";
+      if (startable()) body += "<div style='opacity:.85;margin-bottom:6px'>Convene the session and flip the room before the gavel. Bribe, trade favors, dig the records, or lean on the press, just don't let the auditor read your ledger.</div>" + btn("start", "CONVENE THE SESSION", "#1c6b40");
+      else body += "<div style='opacity:.7'>The chamber is dark tonight, the clerk's locked up. Come back tomorrow.</div>";
       body += " " + btn("close", "Leave", "#26343c");
     } else {
       body += "<div style='opacity:.8;font-size:12px;margin-bottom:6px'>Flip " + Math.max(0, shortfall()) + " more to carry it. Lobby councillors at their seats; the records room, the cabinets, the press and the shredder are down the halls.</div>";
@@ -489,7 +529,7 @@
       if (chair && !t.pass) {
         body += btn("override", "GAVEL IT THROUGH ANYWAY", "#7c1626");
         body += "<div style='opacity:.75;font-size:12px;margin:4px 0'>The chair can carry a bill the council rejected. It costs " +
-          CHAIR_OVERRIDE_APPROVAL + " points of your approval and it is remembered — the garrison reads that number before it obeys you.</div>";
+          CHAIR_OVERRIDE_APPROVAL + " points of your approval and it is remembered, the garrison reads that number before it obeys you.</div>";
       }
       body += btn("close", "Keep working", "#26343c");
     }
@@ -535,7 +575,7 @@
       const govs = (CBZ.regimeDoctrines && CBZ.regimeDoctrines()) || [];
       let dbody = "<div style='margin:2px 0 8px;padding:6px 0;border-top:1px solid #2c3140;line-height:1.5'>" +
         "You hold <b style='color:#8fe08a'>" + (seat.name || seat.id) + "</b>. A state can be REMADE by the person who holds it." +
-        (canD ? "" : "<br><span style='opacity:.75;font-size:12px'>Not yet — " + ((need && need.line) || "you need more behind you") + ".</span>") +
+        (canD ? "" : "<br><span style='opacity:.75;font-size:12px'>Not yet · " + ((need && need.line) || "you need more behind you") + ".</span>") +
         "</div>";
       for (let i = 0; i < govs.length; i++) {
         (function (gov, i) {
@@ -569,7 +609,7 @@
       return;
     }
     if (!list.length) {
-      body += "<div style='opacity:.75;line-height:1.5'>“Nothing's open. Terms run their course — come back when a seat's up, or when one comes up the hard way.”</div>";
+      body += "<div style='opacity:.75;line-height:1.5'>“Nothing's open. Terms run their course, come back when a seat's up, or when one comes up the hard way.”</div>";
       C.hud.panel(body + btn("close", "Leave", "#26343c"), Object.assign({ close: function () { C.hud.closePanel(); } }, doctH));
       return;
     }
@@ -630,9 +670,9 @@
 
   /* ================= THE LOBBY PRESS ===================================== */
   function openReporter() {
-    let body = head("THE LOBBY PRESS", "a leak flips a vote — and stains the room");
+    let body = head("THE LOBBY PRESS", "a leak flips a vote, and stains the room");
     if (!G.active) { C.hud.panel(head("THE LOBBY PRESS", "quiet") + "<div style='opacity:.7'>No session tonight.</div>" + btn("close", "Back", "#26343c"), { close: function () { C.hud.closePanel(); } }); return; }
-    body += "<div style='margin:2px 0 8px'>Scandal <b style='color:" + (G.scandal >= SCANDAL_CAP * 0.6 ? "#ff6a5e" : "#9aa6bd") + "'>" + Math.min(100, Math.round(G.scandal)) + "%</b> / " + SCANDAL_CAP + "% — at the cap the chair postpones the vote (you lose).</div>";
+    body += "<div style='margin:2px 0 8px'>Scandal <b style='color:" + (G.scandal >= SCANDAL_CAP * 0.6 ? "#ff6a5e" : "#9aa6bd") + "'>" + Math.min(100, Math.round(G.scandal)) + "%</b> / " + SCANDAL_CAP + "%, at the cap the chair postpones the vote (you lose).</div>";
     const h = { close: function () { C.hud.closePanel(); } };
     let any = false;
     for (let i = 0; i < COUNCIL.length; i++) {
@@ -654,7 +694,7 @@
     if (!C.wallet.spend(BRIBE_COST, "Envelope to " + shortName(m.name))) return false;
     G.ledger.push({ member: i, name: m.name, amount: BRIBE_COST, day: worldDayNow() });
     flip(i, "bribed");
-    C.hud.feed("" + shortName(m.name) + " pockets the envelope. It's on the ledger now — shred it before the auditor reads it.", "#ffd166");
+    C.hud.feed("" + shortName(m.name) + " pockets the envelope. It's on the ledger now, shred it before the auditor reads it.", "#ffd166");
     return true;
   }
   function tradeWant(i) {
@@ -669,7 +709,7 @@
   function blackmailMember(i) {
     if (!G.active) return false;
     const m = COUNCIL[i]; if (!m || m.stance === "for") return false;
-    if (!G.dirt[m.key]) { C.hud.feed("You've got nothing on " + shortName(m.name) + " yet — try the records room.", "#ff9aa2"); return false; }
+    if (!G.dirt[m.key]) { C.hud.feed("You've got nothing on " + shortName(m.name) + " yet, try the records room.", "#ff9aa2"); return false; }
     flip(i, "blackmailed");
     C.hud.feed("You slide the file across. " + shortName(m.name) + " won't cross you tonight.", "#8fe08a");
     return true;
@@ -679,7 +719,7 @@
     const m = COUNCIL[i]; if (!m || m.stance === "for") return false;
     flip(i, "pressured");
     G.scandal += SCANDAL_PER_LEAK;
-    C.hud.feed("The reporter runs with " + shortName(m.name) + "'s " + m.fear + ". They flip to AYE — but the room reeks.", "#e8c84a");
+    C.hud.feed("The reporter runs with " + shortName(m.name) + "'s " + m.fear + ". They flip to AYE, but the room reeks.", "#e8c84a");
     redrawBoard();
     if (G.scandal >= SCANDAL_CAP) postpone();
     return true;
@@ -700,7 +740,7 @@
     sh.searched = true;
     if (sh.member >= 0 && COUNCIL[sh.member]) {
       const m = COUNCIL[sh.member]; G.dirt[m.key] = true; m.dirtLine = sh.line;
-      C.hud.feed("Buried in the files: " + sh.line + " — on " + m.name + ".", "#ffd166");
+      C.hud.feed("Buried in the files: " + sh.line + " · on " + m.name + ".", "#ffd166");
       return true;
     }
     C.hud.feed("Dust, old zoning maps, nothing you can use.");
@@ -713,11 +753,11 @@
     const jam = Math.random() < JAM_CHANCE;              // runtime FX RNG is allowed
     if (jam) {
       G.scandal += JAM_SCANDAL; pullGuardToShredder();
-      C.hud.feed("The shredder JAMS — a horrible grinding shriek. The desk guard is coming over.", "#ff9aa2");
+      C.hud.feed("The shredder JAMS, a horrible grinding shriek. The desk guard is coming over.", "#ff9aa2");
       redrawBoard();
       if (G.active && G.scandal >= SCANDAL_CAP) postpone();
     } else {
-      C.hud.feed("" + n + " ledger page(s) shredded — clean and quiet.", "#8fe08a");
+      C.hud.feed("" + n + " ledger page(s) shredded, clean and quiet.", "#8fe08a");
     }
     return { cleared: true, jammed: jam };
   }
@@ -736,21 +776,21 @@
     if (!G || G.result) return;
     G.active = false; G.voted = true; G.result = "lose:indicted";
     setCooldown(); redrawBoard();
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("INDICTED — THE AUDITOR FOUND THE LEDGER");
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("INDICTED · THE AUDITOR FOUND THE LEDGER");
     C.hud.feed("The auditor photographs your ledger page. The rezoning is dead and so is your night.", "#ff6a5e");
   }
   function postpone() {
     if (!G || G.result) return;
     G.active = false; G.voted = true; G.result = "lose:scandal";
     setCooldown(); redrawBoard();
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("VOTE POSTPONED — SCANDAL ENGULFS THE CHAMBER");
-    C.hud.feed("Too much stink. The chair gavels the session closed — the rezoning is tabled indefinitely.", "#ff6a5e");
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("VOTE POSTPONED · SCANDAL ENGULFS THE CHAMBER");
+    C.hud.feed("Too much stink. The chair gavels the session closed, the rezoning is tabled indefinitely.", "#ff6a5e");
   }
   function win(t) {
     G.result = "win";
-    C.wallet.give(WIN_PAYOUT, "Docklands rezoning — developer kickback");
+    C.wallet.give(WIN_PAYOUT, "Docklands rezoning, developer kickback");
     if (CBZ.city && CBZ.city.big) CBZ.city.big("DOCKLANDS REZONING PASSES " + t.for + "–" + t.against);
-    C.hud.feed("The gavel falls. Rezoning carries " + t.for + "–" + t.against + " — the Docklands waterfront is your crew's turf now.", "#8fe08a");
+    C.hud.feed("The gavel falls. Rezoning carries " + t.for + "–" + t.against + " · the Docklands waterfront is your crew's turf now.", "#8fe08a");
     // A bill you carried on a clean majority while you hold the seat is the
     // one thing in this room that BUYS approval instead of spending it — and
     // only when the room genuinely voted for it. Real number, real system.
@@ -761,7 +801,7 @@
   function lose(t) {
     G.result = t.for === t.against ? "lose:tie" : "lose:vote";
     if (CBZ.city && CBZ.city.big) CBZ.city.big("REZONING FAILS " + t.for + "–" + t.against);
-    C.hud.feed("" + (t.for === t.against ? "Deadlocked " + t.for + "–" + t.against + " — a tie fails." : "Rezoning fails " + t.for + "–" + t.against + ".") + " The Docklands stay as they are.", "#ff6a5e");
+    C.hud.feed("" + (t.for === t.against ? "Deadlocked " + t.for + "–" + t.against + " · a tie fails." : "Rezoning fails " + t.for + "–" + t.against + ".") + " The Docklands stay as they are.", "#ff6a5e");
   }
   // the gavel: a dirty ledger indicts first; otherwise roll call → result.
   function gavel(trigger) {
@@ -779,10 +819,10 @@
     const lines = COUNCIL.map(function (m) { return { name: shortName(m.name), vote: m.stance === "for" ? "AYE" : m.stance === "against" ? "NAY" : "ABSTAIN" }; });
     let shown = 0;
     function render() {
-      let body = head("ROLL CALL — DOCKLANDS REZONING", "the gavel");
+      let body = head("ROLL CALL · DOCKLANDS REZONING", "the gavel");
       for (let i = 0; i < shown; i++) {
         const L = lines[i], col = L.vote === "AYE" ? "#5fd08a" : L.vote === "NAY" ? "#ff6a5e" : "#c9a24a";
-        body += "<div style='margin:2px 0'>" + (i + 1) + ". " + L.name + " — <b style='color:" + col + "'>" + L.vote + "</b></div>";
+        body += "<div style='margin:2px 0'>" + (i + 1) + ". " + L.name + " · <b style='color:" + col + "'>" + L.vote + "</b></div>";
       }
       if (shown >= lines.length) {
         body += "<div style='margin:8px 0;font-weight:800;color:" + (t.pass ? "#8fe08a" : "#ff6a5e") + "'>" + (t.pass ? "CARRIED " + t.for + "–" + t.against : "FAILED " + t.for + "–" + t.against) + "</div>" + btn("close", "Done", "#26343c");
@@ -804,7 +844,7 @@
     if (!C) return false;
     if (!ensureCouncil()) { C.hud.feed("The council hasn't taken their seats yet."); return false; }
     const force = opts && opts.force;
-    if (!force && !startable()) { C.hud.feed("Not tonight — the chamber's on cooldown."); return false; }
+    if (!force && !startable()) { C.hud.feed("Not tonight, the chamber's on cooldown."); return false; }
     for (let i = 0; i < COUNCIL.length; i++) { const m = COUNCIL[i]; m.stance = m.baseStance; m.flippedBy = null; m.dirtLine = null; }
     if (V.shelves) for (let i = 0; i < V.shelves.length; i++) V.shelves[i].searched = false;
     G = idleGame(); G.active = true; G.clockLeft = NIGHT_SECONDS;
@@ -821,8 +861,8 @@
     V.wpIdx = 0; V.guardAlertT = 0;
     redrawBoard();
     if (banked) C.hud.feed("You came in with " + banked + " file(s) out of the archives. Someone at that bench knows it.", "#ffd166");
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("CITY HALL AFTER DARK — PASS THE DOCKLANDS REZONING BY THE GAVEL");
-    C.hud.feed("Session convened. FOR must beat AGAINST when the gavel falls — flip " + Math.max(0, shortfall()) + " more. The auditor is on her rounds.", "#8fc1ff");
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("CITY HALL AFTER DARK · PASS THE DOCKLANDS REZONING BY THE GAVEL");
+    C.hud.feed("Session convened. FOR must beat AGAINST when the gavel falls, flip " + Math.max(0, shortfall()) + " more. The auditor is on her rounds.", "#8fc1ff");
     return true;
   }
 
@@ -900,22 +940,49 @@
     ctx.box(g, 0, 0.5, -hz * 0.52, hx * 1.7, 0.9, 0.7, ctx.mat(COL.wood));
     ctx.box(g, 0, 0.98, -hz * 0.52 - 0.34, hx * 1.7, 0.16, 0.08, ctx.mat(COL.brass));
     ctx.solid(-hx * 0.85, -hz * 0.52 - 0.42, hx * 0.85, -hz * 0.52 + 0.42);
+    // THE DAIS under the chairs (see DAIS_H above): one platform spanning the
+    // seat row — from behind the chair backs to just past the front-most bowed
+    // cushion — so every chair leg and every seated foot lands ON it. The
+    // bench keeps the floor: it is the desk you lobby across, not the stage.
+    ctx.box(g, 0, DAIS_H / 2, -hz * 0.6 + 0.15, hx * 1.7, DAIS_H, 1.5, ctx.mat(COL.woodD));
     // Proper high-backed council chairs. The old chair was one 0.5 × 0.92 ×
     // 0.5 upright block, so it had neither a visible seat nor a truthful seat
     // height and forced every councillor into character.js's compressed legacy
     // squat. These dimensions and COUNCIL_SEAT_H above are the same contract:
-    // the rig's pelvis lands on the burgundy cushion and its feet reach floor.
+    // the rig's pelvis lands on the burgundy cushion and its feet reach the
+    // dais top (every chair Y below rides DAIS_H — the chair is built on the
+    // platform, and drainCast's seatRef says the same thing in numbers).
+    // …and each chair is a REGISTERED SEAT (owner, 2026-08-19: council sitting
+    // "SUCKS — overlap with back of chairs, legs off, constant lean forward
+    // and back … but warden sitting in a seat in prison [is good]"). The
+    // warden's chair goes through CBZ.propRegisterSeat + CBZ.propSit, which is
+    // what puts SIT_PHYS_V1's whole-transform hold and the real chair solve in
+    // charge of the body — no second writer left to fight, so no bob. The
+    // hand-rolled pose+seatRef this replaces was written against the OLD seat
+    // solve and aimed a body at furniture the physics had never heard of.
+    // Anchor ON the dais (y = DAIS_H — the chair's own floor), cushion
+    // COUNCIL_SEAT_H above it, kind "throne" (a high-backed armchair reads as
+    // the boss-chair posture family: spine upright, hands on the armrests).
+    V.seatRecs = [];
     for (let i = 0; i < COUNCIL_N; i++) {
       const s = V.seats[i];
       const legH = COUNCIL_SEAT_H - 0.12;
       for (let dx = -1; dx <= 1; dx += 2) for (let dz = -1; dz <= 1; dz += 2)
-        ctx.box(g, s.x + dx * 0.27, legH / 2, s.z + dz * 0.25, 0.08, legH, 0.08, ctx.mat(COL.woodD));
-      ctx.box(g, s.x, COUNCIL_SEAT_H - 0.06, s.z, 0.70, 0.12, 0.68, ctx.mat(COL.red));
-      ctx.box(g, s.x, COUNCIL_SEAT_H + 0.39, s.z - 0.29, 0.72, 0.78, 0.12, ctx.mat(COL.red));
+        ctx.box(g, s.x + dx * 0.27, DAIS_H + legH / 2, s.z + dz * 0.25, 0.08, legH, 0.08, ctx.mat(COL.woodD));
+      ctx.box(g, s.x, DAIS_H + COUNCIL_SEAT_H - 0.06, s.z, 0.70, 0.12, 0.68, ctx.mat(COL.red));
+      ctx.box(g, s.x, DAIS_H + COUNCIL_SEAT_H + 0.39, s.z - 0.29, 0.72, 0.78, 0.12, ctx.mat(COL.red));
       for (let dx = -1; dx <= 1; dx += 2) {
-        ctx.box(g, s.x + dx * 0.38, 0.69, s.z + 0.02, 0.08, 0.08, 0.52, ctx.mat(COL.woodD));
-        ctx.box(g, s.x + dx * 0.38, 0.56, s.z + 0.23, 0.08, 0.30, 0.08, ctx.mat(COL.woodD));
+        ctx.box(g, s.x + dx * 0.38, DAIS_H + 0.69, s.z + 0.02, 0.08, 0.08, 0.52, ctx.mat(COL.woodD));
+        ctx.box(g, s.x + dx * 0.38, DAIS_H + 0.56, s.z + 0.23, 0.08, 0.30, 0.08, ctx.mat(COL.woodD));
       }
+      let rec = null;
+      if (CBZ.propRegisterSeat) {
+        try {
+          rec = CBZ.propRegisterSeat(venue.origin.x + s.x, DAIS_H, venue.origin.z + s.z, 0,
+            "throne", venue.lot || null, { cushion: COUNCIL_SEAT_H, floorBelow: 0 });
+        } catch (e) { rec = null; }
+      }
+      V.seatRecs.push(rec);
     }
 
     // ---- the tally board on the wall behind the bench ----------------------
@@ -961,7 +1028,7 @@
     ctx.box(g, 0, 1.16, hz * 0.14, 1.15, 0.1, 0.82, ctx.mat(COL.brass));
     ctx.solid(-0.55, hz * 0.14 - 0.42, 0.55, hz * 0.14 + 0.42);
     ctx.zone({ id: "session", pos: [0, hz * 0.14 + 1.25], r: 2.0, onUse: openSession,
-      label: function () { return G.active ? "[E] The chair — call the vote" : (G.result ? "[E] The chamber (session over)" : "[E] Convene the Docklands session"); } });
+      label: function () { return G.active ? "[E] The chair, call the vote" : (G.result ? "[E] The chamber (session over)" : "[E] Convene the Docklands session"); } });
 
     // ---- lobby each councillor at their seat ----
     for (let i = 0; i < COUNCIL_N; i++) {
@@ -1028,17 +1095,17 @@
       onUse: openClerkWindow,
       label: function () {
         const st = runState();
-        if (st && st.filed) return "[E] The clerk's window — your filing";
+        if (st && st.filed) return "[E] The clerk's window, your filing";
         const seat = playerSeat();
-        if (seat) return "[E] The clerk's window — the ballot";
-        return "[E] The clerk's window — file for office";
+        if (seat) return "[E] The clerk's window, the ballot";
+        return "[E] The clerk's window, file for office";
       } });
 
     // ---- the lobby press (leak fears) ----
     V.reporterPost = { x: hx * 0.35, z: hz * 0.62, face: Math.PI };
     ctx.box(g, hx * 0.35, 0.5, hz * 0.72, 1.6, 1.0, 0.5, ctx.mat(COL.woodD));   // press table
     ctx.solid(hx * 0.35 - 0.85, hz * 0.72 - 0.3, hx * 0.35 + 0.85, hz * 0.72 + 0.3);
-    ctx.zone({ id: "reporter", pos: [hx * 0.35, hz * 0.5], r: 1.4, onUse: openReporter, label: "[E] The lobby reporter — leak a secret" });
+    ctx.zone({ id: "reporter", pos: [hx * 0.35, hz * 0.5], r: 1.4, onUse: openReporter, label: "[E] Leak to the reporter" });
 
     // ---- security desk + guard (the jam responder) ----
     V.guardPost = { x: hx * 0.82, z: -hz * 0.08, face: -Math.PI / 2 };

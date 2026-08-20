@@ -157,7 +157,6 @@ body.mode-city.state-playing #beachLootChip,
 body.mode-city.state-playing #clothingPrompt,
 body.mode-city.state-playing #gunstorePrompt,
 body.mode-city.state-playing #elevChip,
-body.mode-city.state-playing #adChip,
 body.mode-city.state-playing #realtyPrompt,
 body.mode-city.state-playing #pawnPrompt,
 body.mode-city.state-playing #jewelryPrompt,
@@ -323,3 +322,85 @@ body:not(.state-playing) #cityHud,
 body:not(.state-playing) #cpPanel,
 body:not(.state-playing) #cTurfMeta,
 body:not(.state-playing) #cKillFeed { display: none !important; }
+
+/* ---- THE COUNTER IS TAPPABLE (2026-08-18) --------------------------------
+   city/shops.js used to print [X] / [V] / [0-9] / [R] and listen only for a
+   keydown, so on a tablet every shop and civic desk in the game was a wall of
+   text with no controls on it at all. Each row now carries its own key as
+   `data-k` and one delegated click runs the keyboard's dispatch. These rules
+   are what makes a row LOOK like the control it always was. */
+#cityShop .shopRow {
+  cursor: pointer;
+  border-radius: 8px;
+  padding-left: 6px;
+  padding-right: 6px;
+  -webkit-tap-highlight-color: transparent;
+}
+#cityShop .shopRow:hover { background: rgba(127,208,255,.10); }
+#cityShop .shopRow:active { background: rgba(127,208,255,.20); }
+#cityShop .shopLeave {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #39424f;
+  border-radius: 10px;
+  color: #cdd6e3;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .6px;
+  text-align: center;
+}
+/* a thumb needs a real target: on touch the rows grow to 44px of height and
+   the leave control becomes a proper pill. */
+body.touch #cityShop { min-width: 320px; max-width: min(520px, 94vw); }
+body.touch #cityShop .shopRow { min-height: 44px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; margin: 3px 0; border: 1px solid rgba(232,236,242,.14); background: rgba(255,255,255,.05); }
+body.touch #cityShop .shopLeave { min-height: 52px; justify-content: center; background: rgba(255,255,255,.07); }
+
+/* the job board (city/careers.js) — same story as the counter: it printed
+   "[1-6] accept" and listened only for a keydown. */
+#cityJobs .jobRow { cursor: pointer; border-radius: 8px; padding-left: 6px; padding-right: 6px; -webkit-tap-highlight-color: transparent; }
+#cityJobs .jobRow:hover { background: rgba(255,209,102,.10); }
+#cityJobs .jobRow:active { background: rgba(255,209,102,.20); }
+#cityJobs .jobFoot { display: flex; gap: 10px; margin-top: 12px; }
+#cityJobs .jobBtn { flex: 1; padding: 9px 12px; border: 1px solid #3a3140; border-radius: 10px; color: #cdd6e3; font-size: 13px; font-weight: 700; letter-spacing: .6px; text-align: center; }
+body.touch #cityJobs { min-width: 320px; max-width: min(520px, 94vw); }
+body.touch #cityJobs .jobRow { min-height: 44px; display: flex; align-items: center; gap: 8px; padding: 8px 10px; margin: 3px 0; border: 1px solid rgba(232,236,242,.14); background: rgba(255,255,255,.05); }
+body.touch #cityJobs .jobBtn { min-height: 52px; justify-content: center; background: rgba(255,255,255,.07); }
+
+/* the mod garage (city/modshop.js) */
+#modshopPanel .msRow { border-radius: 8px; -webkit-tap-highlight-color: transparent; }
+#modshopPanel .msRow:hover { background: rgba(191,227,154,.10); }
+#modshopPanel .msRow:active { background: rgba(191,227,154,.20); }
+#modshopPanel .msClose { margin-top: 10px; padding: 9px 12px; border: 1px solid #4a5a3a; color: #cdd6e3; font-size: 13px; font-weight: 700; letter-spacing: .6px; text-align: center; cursor: pointer; }
+body.touch #modshopPanel .msRow { min-height: 44px; align-items: center; padding: 8px 10px; margin: 3px 0; }
+body.touch #modshopPanel .msClose { min-height: 52px; background: rgba(255,255,255,.07); }
+
+/* the car lot (city/empire.js) */
+#cityCarBiz .ebRow { cursor: pointer; border-radius: 8px; padding-left: 6px; padding-right: 6px; -webkit-tap-highlight-color: transparent; }
+#cityCarBiz .ebRow:hover { background: rgba(255,209,102,.10); }
+#cityCarBiz .ebRow:active { background: rgba(255,209,102,.20); }
+#cityCarBiz .ebFoot { display: flex; gap: 8px; margin: 6px 0; }
+#cityCarBiz .ebBtn { flex: 1; padding: 8px 10px; border: 1px solid #3a3140; border-radius: 10px; color: #cdd6e3; font-size: 12px; font-weight: 700; letter-spacing: .5px; text-align: center; }
+body.touch #cityCarBiz .ebRow { min-height: 44px; display: flex; align-items: center; padding: 8px 10px; margin: 3px 0; }
+body.touch #cityCarBiz .ebBtn { min-height: 48px; justify-content: center; background: rgba(255,255,255,.07); }
+
+/* the realty menu (city/realestate.js) */
+#cityRealty .reRow { cursor: pointer; border-radius: 8px; padding-left: 6px; padding-right: 6px; -webkit-tap-highlight-color: transparent; }
+#cityRealty .reRow:hover { background: rgba(255,209,102,.10); }
+#cityRealty .reRow:active { background: rgba(255,209,102,.20); }
+#cityRealty .reBtn { margin-top: 10px; padding: 9px 12px; border: 1px solid #2f3a44; color: #cdd6e3; font-size: 13px; font-weight: 700; letter-spacing: .6px; text-align: center; }
+body.touch #cityRealty .reRow { min-height: 44px; display: flex; align-items: center; padding: 8px 10px; margin: 3px 0; }
+body.touch #cityRealty .reBtn { min-height: 52px; justify-content: center; background: rgba(255,255,255,.07); }
+
+/* the empire panel (city/wealth.js) — its action pills were spans */
+#cityEmpire .weRow { -webkit-tap-highlight-color: transparent; }
+#cityEmpire .weRow:hover { filter: brightness(1.25); }
+#cityEmpire .weRow:active { filter: brightness(.85); }
+#cityEmpire .weClose { padding: 9px 12px; border: 1px solid #5a4a2a; border-radius: 10px; color: #c9b98a; font-size: 13px; font-weight: 700; letter-spacing: .6px; text-align: center; cursor: pointer; }
+body.touch #cityEmpire .weRow { min-height: 38px; display: inline-flex; align-items: center; }
+body.touch #cityEmpire .weClose { min-height: 52px; justify-content: center; background: rgba(255,255,255,.07); }
+
+/* the power board (city/leaderboard.js) */
+#cityBoard .lbFoot, .lbFoot { display: flex; gap: 10px; margin-top: 10px; }
+.lbBtn { flex: 1; padding: 9px 12px; border: 1px solid #2c3140; border-radius: 10px; color: #cdd6e3; font-size: 13px; font-weight: 700; letter-spacing: .6px; text-align: center; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.lbBtn:hover { background: rgba(255,255,255,.07); }
+body.touch .lbBtn { min-height: 52px; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,.07); }

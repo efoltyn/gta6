@@ -140,7 +140,11 @@ if (reuseBeforeDir) {
   }
 }
 const beforeUrlRaw = String(args.before || process.env.CBZ_VISUAL_BEFORE || reuseMetadata?.before?.final || preset.defaultBefore || "");
-if (!beforeUrlRaw) throw new Error("--before URL is required (or preset.defaultBefore; the value \"local\" runs a same-checkout flag-A/B — see --before-params)");
+// --print-only reprints a report that already exists on disk: it opens no
+// browser, serves nothing and navigates nowhere, so demanding a baseline URL
+// from it is a guard firing at the wrong caller. (It rejected the one command
+// you reach for when a run finished with --no-pdf and you now want the PDF.)
+if (!beforeUrlRaw && !args["print-only"]) throw new Error("--before URL is required (or preset.defaultBefore; the value \"local\" runs a same-checkout flag-A/B — see --before-params)");
 function makeFrame(deviceId, orientation) {
   const device = DEVICE_FRAMES[deviceId];
   if (!device) throw new Error(`Unknown device "${deviceId}". Known: ${Object.keys(DEVICE_FRAMES).join(", ")}`);

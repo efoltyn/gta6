@@ -468,7 +468,7 @@
       refreshSlotVisual(slot);
       CBZ.sfx("pickup");
       if (CBZ.pickupNote) { try { CBZ.pickupNote(slot.name + " ×" + (slot.grant || 1), { rare: true }); } catch (e) {} }
-      else tellHint("Took " + (slot.grant || 1) + " charges — [B] plants, hold [B] fires.", 2.2);
+      else tellHint("Took " + (slot.grant || 1) + " charges. [B] plants, hold [B] fires.", 2.2);
       return;
     }
     const owned = CBZ.hasWeapon && CBZ.hasWeapon(slot.id);
@@ -485,7 +485,7 @@
     // (fallback only — pickupNote owns this normally.) "Q/wheel" is a keyboard
     // and a mouse; a thumb has the swap button, which the hotbar already shows.
     else tellHint((first ? "Picked up " : "Equipped ") + slot.name +
-      (CBZ.touchMode ? "." : " — Q/wheel swaps."), 1.8);
+      (CBZ.touchMode ? "." : " · Q/wheel swaps."), 1.8);
   }
 
   // ==================================================================
@@ -924,7 +924,7 @@
         if (L.open) {
           armory.setOpen(true);
           // the cage swinging open in front of you is the line.
-          tellHint("The armory rack's open — take what you need.", 2.6);
+          tellHint("The armory rack's open, take what you need.", 2.6);
         } else {
           // KEPT, and it is the one hint in this file that earns its place: a
           // locked door's REASON is not visible from outside it, and this is
@@ -987,7 +987,7 @@
                   inner.sawed = true;
                   inner.setOpen(true);
                   // the shackle falling off the hasp is the event.
-                  tellHint("The padlock drops. The blade's finished — worth it.", 2.6);
+                  tellHint("The padlock drops. The blade's finished, worth it.", 2.6);
                 }
               } else {
                 inner.saw = Math.max(0, inner.saw - dt * 2);
@@ -1007,7 +1007,7 @@
                   tellHint(saw
                     ? (pilled ? "Padlocked. That blade will go through it."
                               : "Padlocked. Hold [E] to saw through it.")
-                    : "Padlocked — the Warden has that key. Or find something that cuts.", 1.5);
+                    : "Padlocked, the Warden has that key. Or find something that cuts.", 1.5);
                 }
               }
             }

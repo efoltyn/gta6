@@ -390,6 +390,32 @@ body.campaign-phone-open .campaign-phone-peek { display: none !important; }
 .campaign-eyebrow { color: var(--campaign-red); font-size: 9px; font-weight: 700; letter-spacing: .18em; }
 .campaign-mission-title { margin-top: 6px; color: var(--campaign-ink); font-size: 22px; }
 .campaign-mission-brief { margin: 11px 0 0; color: #c9d3d9; font-size: 13px; line-height: 1.46; }
+
+/* ---------- THE MARK: the photograph beats the paragraph ---------- */
+.campaign-mission-plate { display: flex; gap: 11px; margin-top: 12px; }
+.campaign-mission-mug {
+  flex: 0 0 92px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: 10px;
+  background: #141a20;
+  box-shadow: 0 5px 14px rgba(0, 0, 0, .34);
+}
+.campaign-mission-mug img { display: block; width: 100%; height: auto; }
+.campaign-mission-plate-side { display: flex; min-width: 0; flex: 1; flex-direction: column; justify-content: center; gap: 4px; }
+.campaign-plate-label { color: var(--campaign-muted); font-size: 8px; font-weight: 700; letter-spacing: .15em; }
+.campaign-plate-name {
+  overflow: hidden;
+  margin-bottom: 3px;
+  color: var(--campaign-ink);
+  font-size: 15px;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.campaign-plate-fact { display: flex; align-items: baseline; gap: 8px; justify-content: space-between; padding: 2px 0; border-top: 1px solid rgba(255, 255, 255, .055); font-size: 10.5px; line-height: 1.3; }
+.campaign-plate-fact span { flex: none; color: var(--campaign-muted); font-size: 8px; font-weight: 700; letter-spacing: .11em; }
+.campaign-plate-fact b { min-width: 0; overflow: hidden; color: var(--campaign-amber); font-weight: 600; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .campaign-info-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin-top: 13px; }
 .campaign-info-chip { min-width: 0; padding: 8px 9px; border: 1px solid rgba(255, 255, 255, .07); border-radius: 11px; background: rgba(0, 0, 0, .17); }
 .campaign-info-label { display: block; color: var(--campaign-muted); font-size: 8px; font-weight: 700; letter-spacing: .13em; }
@@ -568,7 +594,6 @@ body.campaign-active.mode-city #clothingPrompt,
 body.campaign-active.mode-city #pawnPrompt,
 body.campaign-active.mode-city #jewelryPrompt,
 body.campaign-active.mode-city #realtyPrompt,
-body.campaign-active.mode-city #adChip,
 body.campaign-active.mode-city #elevChip,
 body.campaign-active.mode-city #roofStashChip,
 body.campaign-active.mode-city #beachLootChip,

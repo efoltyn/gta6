@@ -158,7 +158,12 @@
       return speed;
     }
     n._lifeT = Math.max(0, (n._lifeT || 0) - dt);
-    const close = n.target ? Math.hypot(n.target.x - gp.x, n.target.z - gp.z) < 0.65 : true;
+    // A ROUTE IS NOT AN ARRIVAL. systems/prisonnav.js hands this mover one
+    // WAYPOINT at a time while it walks a man round a wall; reading a reached
+    // waypoint as "the walk is done" would re-roll his destination every few
+    // metres and he would never get anywhere on purpose.
+    const routed = !!(CBZ.prisonNav && CBZ.prisonNav.owns(n));
+    const close = routed ? false : (n.target ? Math.hypot(n.target.x - gp.x, n.target.z - gp.z) < 0.65 : true);
     if (!n._lifeActivity || n._lifeT <= 0 || (n._lifeActivity === "walk" && close)) chooseRoutine(n, gp);
     n.activityState = n._lifeActivity;
     if (n._lifeActivity === "stand" || n._lifeActivity === "activity") {
@@ -202,8 +207,14 @@
       if (n._tag) n._tag.visible = false;
     }
 
-    // dead: stay sprawled forever (flop into place)
-    if (n.dead) { n.group.rotation.z = CBZ.damp(n.group.rotation.z, Math.PI / 2, 9, dt); return; }
+    // dead: stay sprawled forever. systems/prisoncorpse.js owns the corpse —
+    // the clear lie direction, the wall depenetration, the sprawl — and this
+    // legacy flop is only the PRISON_CORPSE_V1=false fallback.
+    if (n.dead) {
+      if (!(CBZ.prisonCorpseTick && CBZ.prisonCorpseTick(n, dt)))
+        n.group.rotation.z = CBZ.damp(n.group.rotation.z, Math.PI / 2, 9, dt);
+      return;
+    }
 
     // ASLEEP IN A BUNK (systems/prisonrest.js → city/propuse.js). The same
     // shape as the KO branch below and for the same reason: another system
@@ -319,7 +330,20 @@
     }
 
     speed = purposefulRoutine(n, dt, speed, gp, imp, curfew);
-    recoverStuck(n, dt, speed, gp, curfew && V2 && !!(n._muster && n._muster.way));
+    // the stall recovery jiggles a man toward a fresh random spot; a body the
+    // navigator is walking round a corner is not stuck, he is going the long way
+    recoverStuck(n, dt, speed, gp, (curfew && V2 && !!(n._muster && n._muster.way))
+      || !!(CBZ.prisonNav && CBZ.prisonNav.owns(n)));
+
+    /* HOW TO GET THERE, asked once everybody has finished saying WHERE.
+       The brain (order 18), the cell leash (21.9), the night muster and the bed
+       above have all written `target` by this line; systems/prisonnav.js turns
+       whatever it says into the next step of a walk that exists — round the
+       wall, through the door — and leaves it alone when the straight line is
+       already clear. It has to be called HERE and not from its own updater:
+       the curfew branch twenty lines up writes `target` itself, so anything
+       decided before this point is overwritten by the time we integrate. */
+    if (CBZ.prisonNav) CBZ.prisonNav.step(n, dt);
 
     if (n.pause > 0) { n.pause -= dt; if (near) animChar(n.char, 0, dt); }
     else {
@@ -358,7 +382,7 @@
     skin: { legs: 0xff7a1a, torso: 0xff7a1a, collar: 0xff9747, arms: 0xff7a1a, skin: 0xe8c39a, hair: 0xdedede, stripes: 0xc85c00, shoes: 0x2b2b2b },
     data: {
       name: "the Old Timer", pool: "goods", offer: econ.pickOffer("goods"),
-      tip: "Psst — guards go blind in the searchlight glare. Use it.",
+      tip: "Psst, guards go blind in the searchlight glare. Use it.",
       talk: ["Been here 30 years, kid. I've got everything.",
              "Cigs talk. Everything else walks.",
              "Ramen's worth more than gold in here now, believe it."],
@@ -489,7 +513,7 @@
       talk: ["Peace, brother. Always peace.", "Even in here, grace finds a way."] },
     { name: "Deacon", tag: "Chapel", color: "#e7d8ff", pos: [37, 73], box: [28, 42, 62, 80], role: "inmate", neutral: true, speed: 1.7,
       behavior: "defensive", ratings: { fighting: 66, toughness: 72 }, skin: jump(0x8a5a3a, 0x2a2018),
-      talk: ["I keep the peace in the pews.", "Turn the other cheek — once."] },
+      talk: ["I keep the peace in the pews.", "Turn the other cheek, once."] },
     { name: "Solomon", tag: "Chapel", color: "#e7d8ff", pos: [30, 76], box: [25, 40, 66, 80], role: "inmate", neutral: true, speed: 1.4,
       behavior: "pacifist", ratings: { fighting: 30, toughness: 50, cunning: 70 }, skin: jump(0xe8c39a, 0x4a3526),
       talk: ["Let it go, son.", "Not here. Not in here."] },
@@ -523,7 +547,7 @@
       talk: ["Put 'em up! Let's GO!", "I been waitin' all day for this."] },
     { name: "Glass Jaw", tag: "Brawler", color: "#ffc07a", pos: [8, 100], box: [-6, 18, 86, 116], role: "inmate", neutral: true, speed: 2.3,
       behavior: "bully", ratings: { fighting: 82, toughness: 28, speed: 58 }, skin: jump(0xe8c39a, 0x4a3526),
-      talk: ["I hit like a truck — just don't hit back.", "Easy pickings, easy pickings."] },
+      talk: ["I hit like a truck, just don't hit back.", "Easy pickings, easy pickings."] },
     { name: "The Wall", tag: "Immovable", color: "#cfe9ff", pos: [-12, 110], box: [-20, 2, 100, 120], role: "inmate", neutral: true, speed: 1.3,
       behavior: "defensive", ratings: { fighting: 52, toughness: 98, speed: 22 }, skin: jump(0x8a5a3a, 0x1a120c),
       talk: ["You'll tire before I move.", "Go around."] },

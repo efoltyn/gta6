@@ -173,7 +173,7 @@
     const score = held + "/" + ctrl.total + " districts";
     const col = hex6(gangColorOf(newId));
     const line = you
-      ? z.name.toUpperCase() + " is YOURS — " + score
+      ? z.name.toUpperCase() + " is YOURS · " + score
       : z.name.toUpperCase() + " falls to the " + nm + " — " + score;
     const notice = { app: "news", from: "City Desk", text: line };
     if (typeof CBZ.cityPhoneNotify === "function") CBZ.cityPhoneNotify(notice);
@@ -582,7 +582,7 @@
     if (launched && (nearPlayer(leadGang.center.x, leadGang.center.z, 240) ||
         nearPlayer((CBZ.player && CBZ.player.pos && CBZ.player.pos.x) || 0, (CBZ.player && CBZ.player.pos && CBZ.player.pos.z) || 0, 1))) {
       CBZ.city && CBZ.city.note("The other crews are uniting against " + ldr.name + ".", 3.0);
-      if (CBZ.cityFlavor) { try { CBZ.cityFlavor("" + ldr.name + " is running away with the city — the others are uniting against them.", "#ff9b6b"); } catch (e) {} }
+      if (CBZ.cityFlavor) { try { CBZ.cityFlavor("" + ldr.name + " is running away with the city, the others are uniting against them.", "#ff9b6b"); } catch (e) {} }
     } else if (launched && CBZ.cityFeed) {
       try { CBZ.cityFlavor && CBZ.cityFlavor("The crews are uniting against " + ldr.name + ".", "#ff9b6b"); } catch (e) {}
     }
@@ -782,7 +782,7 @@
     if (!z) { CBZ.city && CBZ.city.note("No district at your location.", 1.6, { from: "Maps", app: "system" }); return false; }
     if (z.owner === "player") { CBZ.city && CBZ.city.note(z.name + " already flies our colors, boss.", 1.8, { from: "Crew" }); return false; }
     if (z.owner && CBZ.cityGangById(z.owner) && CBZ.cityGangById(z.owner).isPlayer) return false;
-    if (z.strength > 0.7) { CBZ.city && CBZ.city.note(z.name + " is too strongly held to buy — take it by force.", 2.4); return false; }
+    if (z.strength > 0.7) { CBZ.city && CBZ.city.note(z.name + " is too strongly held to buy, take it by force.", 2.4); return false; }
     const owner = z.owner ? CBZ.cityGangById(z.owner) : null;
     const cost = 1500 + z.heldStr * 400;
     if (!CBZ.cityPlayerGangExists || !CBZ.cityPlayerGangExists()) { CBZ.city && CBZ.city.note("Found a gang first ([O]).", 2); return false; }
@@ -820,7 +820,7 @@
     const rec = CBZ.cityGangById(gangId);
     if (!rec || rec.isPlayer || rec.absorbed) return false;
     if (CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists()) {
-      CBZ.city && CBZ.city.note("You run your own crew — you don't defect, you conquer.", 2.4);
+      CBZ.city && CBZ.city.note("You run your own crew, you don't defect, you conquer.", 2.4);
       return false;
     }
     const prev = g.cityMembership && g.cityMembership.gangId;

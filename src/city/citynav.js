@@ -453,8 +453,20 @@
     if (skirt > _danger[halfK2]) _danger[halfK2] = skirt;
   }
 
-  CBZ.cityNav.contextSteer = function (px, pz, goalDirX, goalDirZ, nbrs, nbrCount, prevX, prevZ, out) {
+  /* `wallScale` (optional, default 1) — HOW MUCH THE WALLS ARE ALLOWED TO
+     ARGUE. The danger map senses geometry 3.2 m out, which in open city blocks
+     is exactly right and in a dense street means a body refuses to walk NEAR a
+     wall at all. Measured on a shipped street: a pedestrian two metres from a
+     shop front, goal three metres along it, with _prevSteer locked at 90 deg
+     to its own heading — moving at full speed, going nowhere, for the whole
+     sample. Bodies whose next leg came from a PLANNED route (city/pednav.js)
+     already have a line that was tested against these same walls with a body
+     radius of clearance, so they pass a small scale here and keep only the
+     neighbour half of the kernel. Nothing else passes anything: omit it and
+     the behaviour is byte-identical to what shipped. */
+  CBZ.cityNav.contextSteer = function (px, pz, goalDirX, goalDirZ, nbrs, nbrCount, prevX, prevZ, out, wallScale) {
     out = out || _out;
+    const wScale = wallScale == null ? 1 : wallScale;
     // normalise the goal dir (callers pass toward-waypoint; may be unnormalised)
     let gl = Math.sqrt(goalDirX * goalDirX + goalDirZ * goalDirZ);
     if (gl < 1e-5) {
@@ -474,9 +486,9 @@
     // ---- DANGER (a): nearest wall AABBs in CBZ.colliders ----
     // Find the 2-4 closest boxes and write closest-point danger. Null-safe:
     // if colliders are absent we skip walls entirely (open-field steering).
-    const cols = CBZ.queryCollidersNear
+    const cols = wScale <= 0 ? null : (CBZ.queryCollidersNear
       ? CBZ.queryCollidersNear(px, pz, WALL_SENSE + PED_R, _nearCols)
-      : CBZ.colliders;
+      : CBZ.colliders);
     if (cols && cols.length) {
       // We don't keep our own broadphase here (the caller owns neighbour
       // gathering, not wall gathering). The collider list at city scale is a
@@ -507,7 +519,7 @@
         } else { wx /= dist; wz /= dist; }
         // danger faces FROM the wall toward us reversed: we want to AVOID the
         // wall, so danger is high in the direction TOWARD the wall (-w).
-        const mag = 1 - dist / WALL_SENSE;       // 0 at sense edge, ->1 at contact
+        const mag = (1 - dist / WALL_SENSE) * wScale;   // 0 at sense edge, ->1 at contact
         spreadDanger(-wx, -wz, mag * mag);       // squared falloff = sharper near
       }
     }
@@ -572,11 +584,38 @@
       dirX = _slotX[bestK]; dirZ = _slotZ[bestK];
     }
 
-    // ---- HYSTERESIS: blend ~0.3 toward last frame's chosen dir, renorm ----
+    /* ---- HYSTERESIS, AND THE ONE CASE A BLEND CANNOT FIX ----------------
+       Blending 0.7 of the new dir with 0.3 of the last one damps a wobble.
+       It does NOTHING about a REVERSAL: blend (+1,0) with (-1,0) and you get
+       (-0.4,0), which normalises straight back to (-1,0), so a body offered
+       two equally good opposite ways past an obstacle takes the left one this
+       frame, the right one the next, and both of them forever.
+
+       That is not a hypothetical. Traced on a shipped street, frame by frame:
+       a walking body with its goal 1.7 m away, steer flipping (-1,0), (+1,0),
+       (-1,0) on consecutive frames, stepping 0.027 m each time at right angles
+       to where it wanted to go, for the entire twenty-second sample. Forty-one
+       per cent of all routed body-windows in the city measured like this —
+       moving at full speed, net displacement zero. It is the single biggest
+       reason a Gang City pedestrian looks stupid.
+
+       So: a reversal loses to the direction already committed to, as long as
+       that direction is still one of the safe ones. Pick a side and go. */
     if ((prevX || prevZ)) {
       const pl = Math.sqrt(prevX * prevX + prevZ * prevZ) || 1;
-      dirX = dirX * 0.7 + (prevX / pl) * 0.3;
-      dirZ = dirZ * 0.7 + (prevZ / pl) * 0.3;
+      const nprevX = prevX / pl, nprevZ = prevZ / pl;
+      const commit = !CBZ.CONFIG || CBZ.CONFIG.STEER_COMMIT_V1 !== false;
+      if (commit && dirX * nprevX + dirZ * nprevZ < -0.3) {
+        // which slot is the committed dir in, and is it still allowed?
+        let pk = 0, pd = -Infinity;
+        for (let k = 0; k < SLOTS; k++) {
+          const d = _slotX[k] * nprevX + _slotZ[k] * nprevZ;
+          if (d > pd) { pd = d; pk = k; }
+        }
+        if (_danger[pk] <= maskCut) { dirX = nprevX; dirZ = nprevZ; }
+      }
+      dirX = dirX * 0.7 + nprevX * 0.3;
+      dirZ = dirZ * 0.7 + nprevZ * 0.3;
     }
     const ol = Math.sqrt(dirX * dirX + dirZ * dirZ);
     if (ol > 1e-5) { out.x = dirX / ol; out.z = dirZ / ol; }

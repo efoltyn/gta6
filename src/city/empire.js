@@ -130,7 +130,7 @@
     if (!owns && !CBZ.city.spend(RENT_DEPOSIT)) { CBZ.city.note("Renting a yard costs " + money(RENT_DEPOSIT) + ".", 2); return; }
     b.open = true; b.owned = !!owns; b.cap = owns ? OWN_CAP : RENT_CAP;
     CBZ.city.big("Car-resale yard is OPEN at Premium Autos");
-    CBZ.city.note(owns ? "You own the lot — bigger yard, better resale." : "Yard rented. Drive cars into the lot to stock it.", 3.2);
+    CBZ.city.note(owns ? "You own the lot, bigger yard, better resale." : "Yard rented. Drive cars into the lot to stock it.", 3.2);
     if (CBZ.sfx) CBZ.sfx("coin");
     CBZ.cityCarBizMenu();
   };
@@ -147,7 +147,7 @@
     if (car.group && car.group.parent) car.group.parent.remove(car.group);
     const idx = CBZ.cityCars.indexOf(car); if (idx >= 0) CBZ.cityCars.splice(idx, 1);
     const stocked = b.cars[b.cars.length - 1];
-    CBZ.city.note("Stocked " + model.name + " (" + condWord(cond) + ") — resale " + money(resaleOf(stocked)) +
+    CBZ.city.note("Stocked " + model.name + " (" + condWord(cond) + "), resale " + money(resaleOf(stocked)) +
       (hot ? " · hot" : "") + (isHot(model.name) ? " · in demand" : ""), 2.4);
     if (menuOpen) renderMenu();
   }
@@ -161,7 +161,7 @@
     const b = biz(); const car = b.cars[i]; if (!car) return;
     if ((car.cond || 1) >= 0.95) { CBZ.city.note(car.name + " is already in mint shape.", 1.4); return; }
     const cost = reconCost(car);
-    if (!CBZ.city.canAfford(cost)) { CBZ.city.note("Recondition costs " + money(cost) + " — short on cash.", 1.8); return; }
+    if (!CBZ.city.canAfford(cost)) { CBZ.city.note("Recondition costs " + money(cost) + " · short on cash.", 1.8); return; }
     const before = resaleOf(car);
     CBZ.city.spend(cost); car.cond = 1;
     const after = resaleOf(car);
@@ -190,7 +190,7 @@
     b.sold = (b.sold || 0) + 1;
     recordModelSale(car.name, 1);
     grantLaunderCredit(pay);
-    CBZ.city.big("SOLD " + car.name + " — +" + money(pay));
+    CBZ.city.big("SOLD " + car.name + " · +" + money(pay));
     if (CBZ.sfx) CBZ.sfx("coin");
     clampPage();
     renderMenu();
@@ -205,7 +205,7 @@
     grantLaunderCredit(pay);
     CBZ.city.addCash(pay); CBZ.city.addRespect(n);
     b.page = 0;
-    CBZ.city.big("SOLD " + n + " cars — +" + money(pay));
+    CBZ.city.big("SOLD " + n + " cars. +" + money(pay));
     if (CBZ.sfx) CBZ.sfx("coin");
     renderMenu();
   }
@@ -219,7 +219,7 @@
     const b = biz();
     const credit = Math.floor(b.launderCredit || 0);
     const dirty = g.cash || 0;
-    if (credit < 100) { CBZ.city.note("Sell cars first — resale volume is what lets you wash cash through the yard.", 2.4); return; }
+    if (credit < 100) { CBZ.city.note("Sell cars first, resale volume is what lets you wash cash through the yard.", 2.4); return; }
     if (dirty < 100) { CBZ.city.note("No real dirty cash on hand to wash.", 1.6); return; }
     const amount = Math.min(credit, dirty);
     if (CBZ.cityEcon && CBZ.cityEcon.launder) {
@@ -257,7 +257,7 @@
     if (CBZ.cityForceStars) CBZ.cityForceStars(Math.min(5, 3 + Math.floor(b.notoriety / 60)));
     b.raid = { t: RAID_DURATION, cops: cops };
     CBZ.city.big("POLICE RAID on your yard!");
-    CBZ.city.note("Hold them off or they'll seize your stock — defend the yard!", 3.2);
+    CBZ.city.note("Hold them off or they'll seize your stock, defend the yard!", 3.2);
   }
   function crewDefend(dt) {
     for (const m of CBZ.cityPeds) {
@@ -284,7 +284,7 @@
     if (repelled) {
       b.notoriety = Math.max(0, b.notoriety * 0.35 - 10);
       CBZ.city.addRespect(12);
-      CBZ.city.big("Raid repelled — yard secured!");
+      CBZ.city.big("Raid repelled, yard secured!");
     } else {
       b.notoriety = Math.max(0, b.notoriety * 0.5);
       if (b.cars.length) {
@@ -346,7 +346,7 @@
         const pick = CARS[(rng() * CARS.length) | 0];
         b.hotModel = pick.name; b.hotT = 25 + rng() * 30; b.hotBonus = 0.35 + rng() * 0.4;
         setMkt(pick.name, mktLevel(pick.name) + 0.3);
-        if (CBZ.city && CBZ.city.note) CBZ.city.note("Word from the auctions: " + pick.name + "s are HOT right now — flip yours.", 2.8);
+        if (CBZ.city && CBZ.city.note) CBZ.city.note("Word from the auctions: " + pick.name + "s are HOT right now, flip yours.", 2.8);
         if (menuOpen) renderMenu();
       } else { b.hotModel = null; }
     }
@@ -362,7 +362,7 @@
     const inZone = Math.hypot(P.pos.x - z.x, P.pos.z - z.z) < z.r;
     const vmag = Math.abs(car.v || 0);
     if (inZone && vmag < 2.2) {
-      if (b.cars.length >= effCap()) { car._yard = 0; CBZ.city.note("Yard full (" + effCap() + ") — sell some stock first.", 1.0); return; }
+      if (b.cars.length >= effCap()) { car._yard = 0; CBZ.city.note("Yard full (" + effCap() + "), sell some stock first.", 1.0); return; }
       car._yard = (car._yard || 0) + dt;
       if (car._yard >= INTAKE_DWELL) intake(car);
       else if (CBZ.city) CBZ.city.note("Parking the " + (car.model ? car.model.name : "car") + " in the yard…", 0.5);
@@ -394,6 +394,12 @@
     menu = document.createElement("div");
     menu.id = "cityCarBiz";
     menu.style.cssText = "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:48;display:none;min-width:380px;max-width:460px;background:rgba(14,16,22,.96);border:2px solid #3a3140;border-radius:16px;padding:15px 18px;color:#e8eef7;font-family:Fredoka,system-ui,sans-serif;box-shadow:0 18px 50px rgba(0,0,0,.55);pointer-events:auto";
+    menu.addEventListener("click", function (e) {
+      const row = e.target && e.target.closest ? e.target.closest("[data-k]") : null;
+      if (!row) return;
+      e.preventDefault(); e.stopPropagation();
+      pressKey(row.getAttribute("data-k"));
+    });
     document.body.appendChild(menu);
     return menu;
   }
@@ -411,36 +417,37 @@
     // notoriety / heat bar
     const pct = Math.min(100, Math.round((b.notoriety / (RAID_BASE * 1.4)) * 100));
     const col = pct > 75 ? "#e2574b" : pct > 45 ? "#ffb454" : "#7ed957";
-    html += "<div style='font-size:12px;color:#9fb0c6;margin-bottom:2px'>Police heat" + (b.raid ? " — <b style='color:#ff6b6b'>RAID IN PROGRESS</b>" : "") + "</div>";
+    html += "<div style='font-size:12px;color:#9fb0c6;margin-bottom:2px'>Police heat" + (b.raid ? " · <b style='color:#ff6b6b'>RAID IN PROGRESS</b>" : "") + "</div>";
     html += "<div style='height:7px;background:#222831;border-radius:5px;overflow:hidden;margin-bottom:8px'><div style='height:100%;width:" + pct + "%;background:" + col + "'></div></div>";
 
     // stock (paginated)
     if (b.cars.length) {
       const np = pages(), pg = b.page || 0, start = pg * PAGE;
       const slice = b.cars.slice(start, start + PAGE);
-      html += "<div style='font-size:12px;color:#9fb0c6;margin-bottom:3px'>STOCK · " +
-        "[1–" + slice.length + "] sell · <b style='color:#79c0ff'>F</b>+# recondition · <b style='color:#ff9e6b'>0</b> sell all (" + money(stockValue()) + ")</div>";
+      html += "<div style='font-size:12px;color:#9fb0c6;margin-bottom:3px'>STOCK</div>" +
+        "<div class='ebFoot'><span class='ebRow ebBtn' data-k='f'>RECONDITION</span>" +
+        "<span class='ebRow ebBtn' data-k='0'>SELL ALL " + money(stockValue()) + "</span></div>";
       slice.forEach((c, k) => {
         const i = start + k;
         const cond = c.cond == null ? 1 : c.cond;
-        html += "<div style='display:flex;justify-content:space-between;align-items:center;padding:2px 0;font-size:14px'>" +
+        html += "<div class='ebRow' data-k='" + (k + 1) + "' style='display:flex;justify-content:space-between;align-items:center;padding:2px 0;font-size:14px'>" +
           "<span><b style='color:#ffd166'>" + (k + 1) + "</b> " + c.name +
           " <span style='color:" + condColor(cond) + ";font-size:11px'>" + condWord(cond) + "</span>" +
           (c.hot ? " <span style='color:#ff8a7a;font-size:10px'>hot</span>" : "") +
           (isHot(c.name) ? " <span style='color:#ffb454;font-size:10px'></span>" : "") +
           "</span><span style='color:#7ed957'>" + money(resaleOf(c)) + "</span></div>";
       });
-      if (np > 1) html += "<div style='font-size:11px;color:#8a93a3;text-align:center;margin-top:3px'>◀ <b style='color:#cdd6e0'>[ ]</b> ▶ page " + (pg + 1) + "/" + np + (b.cars.length > start + PAGE ? " · +" + (b.cars.length - start - slice.length) + " more" : "") + "</div>";
+      if (np > 1) html += "<div class='ebFoot'><span class='ebRow ebBtn' data-k='['>◀</span>" +
+        "<span style='flex:1;text-align:center;font-size:11px;color:#8a93a3;align-self:center'>page " + (pg + 1) + "/" + np + "</span>" +
+        "<span class='ebRow ebBtn' data-k=']'>▶</span></div>";
     } else {
-      html += "<div style='color:#7f8794;padding:6px 0;font-size:13px'>Empty. Steal a car (F) and drive it into the lot out front. Beaters flip cheap — recondition + flip a HOT model for the spread.</div>";
+      html += "<div style='color:#7f8794;padding:6px 0;font-size:13px'>Empty. Drive a car into the lot out front.</div>";
     }
 
     // laundering front line
     const credit = Math.floor(b.launderCredit || 0);
-    html += "<div style='font-size:12px;margin-top:8px;color:#cdb8ff'>Launder front · <b style='color:#cdd6e0'>L</b> wash dirty cash — capacity " + money(credit) +
-      (credit < 100 ? " <span style='color:#8a93a3'>(sell cars to build it)</span>" : "") + "</div>";
-
-    html += "<div style='font-size:11px;color:#6b7480;margin-top:8px'>Recruit a crew ([K] near a person) — they fight cops in a raid. [Esc] close</div>";
+    html += "<div class='ebRow ebBtn' data-k='l' style='margin-top:8px;color:#cdb8ff'>WASH CASH " + money(credit) + "</div>";
+    html += "<div class='ebRow ebBtn' data-k='escape' style='margin-top:8px'>CLOSE</div>";
     menuEl().innerHTML = html;
   }
   CBZ.cityCarBizMenu = function () {
@@ -464,22 +471,27 @@
 
   // keyboard: stock rows are PAGE-relative; recondition is F+row while menu open.
   let reconMode = false;
-  addEventListener("keydown", function (e) {
-    if (!menuOpen) return;
-    const k = (e.key || "").toLowerCase();
-    if (k === "escape") { e.preventDefault(); reconMode = false; closeMenu(); return; }
+  /* ONE DISPATCH, TWO INPUTS (owner, 2026-08-18). The lot menu printed
+     "[1-9] sell · F+# recondition · 0 sell all · [Esc] close" and listened
+     only for a keydown: on a tablet, a car lot you could not sell a car at.
+     Rows carry their own key; one delegated click runs the same dispatch. */
+  function pressKey(k) {
+    if (!menuOpen || !k) return false;
+    k = String(k).toLowerCase();
+    if (k === "escape") { reconMode = false; closeMenu(); return true; }
     const b = biz();
-    if (k === "f") { e.preventDefault(); reconMode = true; CBZ.city && CBZ.city.note("Recondition which? press its number.", 1.0); return; }
-    if (k === "[" || k === "arrowleft") { e.preventDefault(); b.page = Math.max(0, (b.page || 0) - 1); renderMenu(); return; }
-    if (k === "]" || k === "arrowright") { e.preventDefault(); b.page = Math.min(pages() - 1, (b.page || 0) + 1); renderMenu(); return; }
-    if (k === "l") { e.preventDefault(); launderHere(); return; }
+    if (k === "f") { reconMode = true; CBZ.city && CBZ.city.note("Recondition which? Tap its row.", 1.2); return true; }
+    if (k === "[" || k === "arrowleft") { b.page = Math.max(0, (b.page || 0) - 1); renderMenu(); return true; }
+    if (k === "]" || k === "arrowright") { b.page = Math.min(pages() - 1, (b.page || 0) + 1); renderMenu(); return true; }
+    if (k === "l") { launderHere(); return true; }
     if (k >= "1" && k <= "9") {
-      e.preventDefault();
       const idx = (b.page || 0) * PAGE + (parseInt(k, 10) - 1);
       if (reconMode) { reconMode = false; recondition(idx); } else sell(idx);
-      return;
+      return true;
     }
-    if (k === "0") { e.preventDefault(); reconMode = false; sellAll(); return; }
+    if (k === "0") { reconMode = false; sellAll(); return true; }
     reconMode = false;
-  });
+    return false;
+  }
+  addEventListener("keydown", function (e) { if (pressKey(e.key)) e.preventDefault(); });
 })();

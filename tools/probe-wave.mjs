@@ -153,7 +153,10 @@ const R = await evl(`(() => {
       for (let i = 0; i < 300; i++) CBZ.stepSim(1 / 60);
       const st = CBZ.cityTsunamiState();
       out.tsunami = st ? { phase: st.phase, surge: +st.surge.toFixed(2) } : null;
-      if (!st) out.fails.push("tsunami ended within 5s (it should run ~78s)");
+      // the arc is ~37 s at normal pace (TSU_PACE_V2) and ~78 s with the
+      // flag off; 5 s of stepping is inside either, and the assertion is
+      // only that the event is still alive and stepping without throwing
+      if (!st) out.fails.push("tsunami ended within 5s (the arc is ~37s)");
       CBZ.cityTsunamiStop();
       if (Math.abs(CBZ.waterSurge()) > 1e-6) out.fails.push("stop left a surge standing");
     }

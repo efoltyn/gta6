@@ -627,7 +627,7 @@
   }
   function killerStateText(k) {
     if (!k) return "";
-    if (k.dead) return "Down — dropped right after they got you";
+    if (k.dead) return "Down, dropped right after they got you";
     if (k.rampage) return "On a rampage";
     if (k.state === "fight" || k.rage) return "In a firefight";
     if (k.state === "flee") return "On the run";
