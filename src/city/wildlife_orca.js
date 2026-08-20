@@ -2158,12 +2158,15 @@
     if (mv) o.move = mv;
     return o;
   }
+  // HOW LONG IS THIS ANIMAL, in world metres, cached on the actor (the quarry
+  // has no _orca scratch of its own). Only ever used for spacing — the bearing
+  // ring and the ram's contact reach — so a proportional estimate off the
+  // species' authored scale is the right cost. An exact bounding-box measure
+  // would be a Box3 per actor and this is called from a per-frame path.
   function bodyLenOf(a) {
-    const s = a._orca;
-    if (s && s.bodyLen > 0) return s.bodyLen;
-    const L = PLAN_LEN * scaleOf(a) * (a.species && a.species.id === "orca" ? 1 : 1.0);
-    if (s) s.bodyLen = L;
-    return L;
+    if (a._orcaLen > 0) return a._orcaLen;
+    const orcaLike = !!(a.species && a.species.id === "orca");
+    return (a._orcaLen = (orcaLike ? PLAN_LEN : 4.4) * scaleOf(a));
   }
 
   /* THE ROLL-OVER. A shark held upside down goes into tonic immobility and
