@@ -117,12 +117,15 @@ const headingOf = (d) => Math.atan2(d.x, d.z);
 const wrap = (a) => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; };
 
 async function level() {
-  await evl(`(() => { const C = window.CBZ; C.cam.pitch = 0; if (C.fps) C.fps.fp = 0; return true; })()`);
+  // A paused game freezes every camera writer, and a frozen lens reads as a
+  // perfectly steady one — so re-assert `playing` here rather than trusting it.
+  await evl(`(() => { const C = window.CBZ; if (C.game.state !== "playing") C.setState("playing");
+    C.cam.locked = true; C.cam.pitch = 0; if (C.fps) C.fps.fp = 0; return true; })()`);
   await sleep(700);
   await quiet(6000);
 }
 
-async function measure(label) {
+async function measureOnce(label) {
   await level();
   const a = await evl(dirExpr);
   await drag(0, DRAG);                       // DRAG DOWN
@@ -140,6 +143,24 @@ async function measure(label) {
   console.log(`${label}  drag-down: viewY ${r.dViewY.toFixed(4)} / cam.pitch ${r.dCamPitch >= 0 ? "+" : ""}${r.dCamPitch.toFixed(4)}` +
               `   drag-right: heading ${r.dHead >= 0 ? "+" : ""}${r.dHead.toFixed(4)} / cam.yaw ${r.dCamYaw.toFixed(4)}`);
   return r;
+}
+
+// A DEAD LENS IS NOT A MEASUREMENT. cam.yaw/pitch are written by the handler
+// under test, but the LENS is written by the per-frame rig — and headless does
+// occasionally stall a frame long enough that the lens reads identical either
+// side of a drag. Zero movement on BOTH axes while the input clearly landed is
+// that stall, never a sign error, so re-measure instead of failing on it.
+async function measure(label) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const r = await measureOnce(label);
+    const inputLanded = Math.abs(r.dCamPitch) > 1e-4 || Math.abs(r.dCamYaw) > 1e-4;
+    const lensMoved = Math.abs(r.dViewY) > 1e-4 || Math.abs(r.dHead) > 1e-4;
+    if (lensMoved || !inputLanded) return r;
+    console.log(`  (lens never moved though the input landed — stalled frame, re-measuring)`);
+    await sleep(1500);
+  }
+  console.error("FAIL: the lens never responded, after three attempts");
+  done(1);
 }
 
 async function setFps(on) {

@@ -330,10 +330,6 @@
   //  positive" comment and negates. They are the ones that got it right.)
   const cam = { yaw: 0, pitch: DEFAULT_PITCH, locked: false };
   CBZ.cam = cam;
-  // Convenience for the UP-positive readers above: the view pitch in the same
-  // sense as fps.fp. Feature-detected by its consumers so an old build degrades
-  // to its own inline negation.
-  CBZ.camLookPitch = function () { return -cam.pitch; };
 
   // ============================================================
   //  CAMERA POLISH state + public hooks (the CAM_* flags above).
