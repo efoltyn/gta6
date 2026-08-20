@@ -6,8 +6,8 @@ tools/camera-look-check.mjs measured, and lays them out as one document.
 
 The comparison is honest by construction: `cam.pitch` is a single scalar, and
 the old and new mouse handlers differ ONLY in the sign of what they add to it.
-So the same 0.55 rad drag produces pitch = rest - 0.55 under the old handler and
-pitch = rest + 0.55 under the new one, and those are the two frames shown. No
+So the same 0.38 rad drag produces pitch = rest - 0.38 under the old handler and
+pitch = rest + 0.38 under the new one, and those are the two frames shown. No
 staging beyond that: one spot, one yaw, one clock, one session per frame.
 
 Usage: python3 tools/camera-look-report.py [out.pdf]
@@ -21,6 +21,7 @@ from reportlab.lib.enums import TA_LEFT
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
+from reportlab.lib.utils import ImageReader
 from reportlab.platypus import (Image, PageBreak, Paragraph, SimpleDocTemplate,
                                 Spacer, Table, TableStyle)
 
@@ -58,14 +59,26 @@ MONO = st("MONO", fontName="Courier", fontSize=8.4, leading=11.4)
 
 
 def shot(name, width):
-    """One rendered frame, scaled to `width`, or a placeholder if it is missing."""
+    """One rendered frame, scaled to `width`, boxed so its extent is visible.
+
+    The frames are 1280x528 and several of them are legitimately dominated by
+    one flat surface — look up and this game's sky is near-white, look down and
+    the lit ground is too. Without a border those read as a missing image
+    instead of as the answer, so every frame gets a hairline box.
+    """
     p = os.path.join(SHOTS, name + ".png")
     if not os.path.exists(p):
         return Paragraph("<i>missing frame: %s</i>" % name, SMALL)
-    img = Image(p)
-    img.drawWidth = width
-    img.drawHeight = width * (img.imageHeight / float(img.imageWidth))
-    return img
+    reader = ImageReader(p)
+    iw, ih = reader.getSize()
+    img = Image(p, width=width, height=width * ih / float(iw))
+    box = Table([[img]], colWidths=[width], rowHeights=[width * ih / float(iw)])
+    box.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 0.6, RULE),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    return box
 
 
 def meta():
@@ -123,7 +136,7 @@ def data_table(rows, widths, header=True):
 story = []
 CONTENT_W = PW - 2 * MARGIN
 HALF = (CONTENT_W - 10 * mm) / 2.0
-THIRD = (CONTENT_W - 14 * mm) / 3.0
+THIRD = (CONTENT_W - 8 * mm) / 3.0
 
 # ============================ 1. THE DIAGNOSIS ==============================
 story += [
@@ -179,20 +192,20 @@ story += [
     Paragraph("Third person &mdash; the same drag, before and after", H1),
     Paragraph(
         "Free-orbit third person: what the prison and survival tiers have always run, and what the "
-        "city runs now. Both columns are the identical 0.55&nbsp;rad drag &mdash; the old handler "
+        "city runs now. Both columns are the identical 0.38&nbsp;rad drag &mdash; the old handler "
         "moved <font face=\"Courier\">cam.pitch</font> one way, the new one moves it the other. "
         "Same spot, same yaw, same clock.", SMALL),
     Spacer(1, 4 * mm),
     grid([[
         panel("BEFORE &nbsp;&mdash;&nbsp; drag DOWN", CAP_BAD, "free-pitch-up",
-              "cam.pitch %s &middot; the view climbs into the sky" % num("free-pitch-up", "camPitch"), HALF),
+              "cam.pitch %s &middot; the horizon DROPS: the view climbed into the sky" % num("free-pitch-up", "camPitch"), HALF),
         panel("AFTER &nbsp;&mdash;&nbsp; drag DOWN", CAP_GOOD, "free-pitch-down",
-              "cam.pitch %s &middot; the view drops to the pavement" % num("free-pitch-down", "camPitch"), HALF),
+              "cam.pitch %s &middot; the horizon RISES: the view dropped to the ground" % num("free-pitch-down", "camPitch"), HALF),
     ]], [HALF + 5 * mm, HALF + 5 * mm]),
     Spacer(1, 3 * mm),
     grid([[
         panel("BEFORE &nbsp;&mdash;&nbsp; drag UP", CAP_BAD, "free-pitch-down",
-              "the two frames are simply swapped: one sign, one scalar", HALF),
+              "the same two frames, simply swapped &mdash; one sign, one scalar", HALF),
         panel("AFTER &nbsp;&mdash;&nbsp; drag UP", CAP_GOOD, "free-pitch-up",
               "you look where your hand went", HALF),
     ]], [HALF + 5 * mm, HALF + 5 * mm]),
@@ -206,8 +219,9 @@ story += [
         "The resting frame, and the two ends of the sweep. "
         "<font face=\"Courier\">camAudit().frameTilt</font> is the angle the character sits below "
         "the view axis &mdash; if pitching moved the character in the picture, this number would "
-        "move with it. Measured across a 0.70&nbsp;rad sweep it moves 0.013&nbsp;rad (0.7&deg;), "
-        "and the view gain is 0.991 against a target of 1. Looking up and down changes where you "
+        "move with it. Across the 0.76&nbsp;rad sweep below it moves 0.013&nbsp;rad (0.7&deg;) "
+        "while the view tracks the input at a gain of 0.997; the gate, sweeping its own slightly "
+        "different range, measures 0.013 and 0.991. Looking up and down changes where you "
         "<i>look</i>, not where your character sits in frame.", SMALL),
     Spacer(1, 4 * mm),
     grid([[
@@ -220,7 +234,21 @@ story += [
         panel("look DOWN", BODY, "free-pitch-down",
               "cam.pitch %s &middot; viewPitch %s &middot; frameTilt %s"
               % (num("free-pitch-down", "camPitch"), num("free-pitch-down", "viewPitch"), num("free-pitch-down", "frameTilt")), THIRD),
-    ]], [THIRD + 7 * mm, THIRD + 7 * mm, THIRD + 7 * mm]),
+    ]], [THIRD + 4 * mm, THIRD + 4 * mm, THIRD + 4 * mm]),
+    Spacer(1, 6 * mm),
+    data_table([
+        ["frame", "cam.pitch (the input)", "viewPitch (where the lens points)", "frameTilt (where the character sits)"],
+        ["look UP", num("free-pitch-up", "camPitch"), num("free-pitch-up", "viewPitch"), num("free-pitch-up", "frameTilt")],
+        ["resting", num("free-level", "camPitch"), num("free-level", "viewPitch"), num("free-level", "frameTilt")],
+        ["look DOWN", num("free-pitch-down", "camPitch"), num("free-pitch-down", "viewPitch"), num("free-pitch-down", "frameTilt")],
+        ["swing", "0.760 rad", "0.758 rad  (gain 0.997)", "0.013 rad  (0.7 degrees)"],
+    ], [40 * mm, 52 * mm, 62 * mm, CONTENT_W - 154 * mm]),
+    Spacer(1, 3 * mm),
+    Paragraph(
+        "The input swings 0.760&nbsp;rad and the view swings 0.758 of it &mdash; the orbit is pure. "
+        "Over the same swing the character's place in frame moves 0.013&nbsp;rad. That is the "
+        "difference between changing where you look and changing your camera angle, as two "
+        "numbers.", SMALL),
     PageBreak(),
 ]
 
@@ -244,7 +272,19 @@ story += [
               "cam.pitch %s &middot; viewPitch %s" % (num("pinned-level", "camPitch"), num("pinned-level", "viewPitch")), THIRD),
         panel("PINNED &mdash; drag DOWN", BODY, "pinned-aim-down",
               "cam.pitch %s &middot; viewPitch %s" % (num("pinned-aim-down", "camPitch"), num("pinned-aim-down", "viewPitch")), THIRD),
-    ]], [THIRD + 7 * mm, THIRD + 7 * mm, THIRD + 7 * mm]),
+    ]], [THIRD + 4 * mm, THIRD + 4 * mm, THIRD + 4 * mm]),
+    Spacer(1, 6 * mm),
+    data_table([
+        ["frame", "cam.pitch (the input)", "viewPitch (where the lens points)", "PNG size"],
+        ["drag UP", num("pinned-aim-up", "camPitch"), num("pinned-aim-up", "viewPitch"), "%s bytes" % num("pinned-aim-up", "bytes", "%d")],
+        ["resting", num("pinned-level", "camPitch"), num("pinned-level", "viewPitch"), "%s bytes" % num("pinned-level", "bytes", "%d")],
+        ["drag DOWN", num("pinned-aim-down", "camPitch"), num("pinned-aim-down", "viewPitch"), "%s bytes" % num("pinned-aim-down", "bytes", "%d")],
+    ], [40 * mm, 52 * mm, 62 * mm, CONTENT_W - 154 * mm]),
+    Spacer(1, 3 * mm),
+    Paragraph(
+        "0.66&nbsp;rad of input, and viewPitch does not move a thousandth. The three PNGs land "
+        "within 0.3% of the same size because they are, to the eye, the same photograph. What "
+        "moves is the reticle &mdash; real feedback, but not looking around.", SMALL),
     PageBreak(),
 ]
 
@@ -258,10 +298,21 @@ story += [
         "radian on both axes.", SMALL),
     Spacer(1, 4 * mm),
     grid([[
-        panel("drag DOWN", BODY, "fps-look-down", "fps.fp -0.550", THIRD),
+        panel("drag DOWN", BODY, "fps-look-down", "fps.fp -0.380 &middot; the horizon rises", THIRD),
         panel("resting", BODY, "fps-level", "fps.fp 0.000", THIRD),
-        panel("drag UP", BODY, "fps-look-up", "fps.fp +0.550", THIRD),
-    ]], [THIRD + 7 * mm, THIRD + 7 * mm, THIRD + 7 * mm]),
+        panel("drag UP", BODY, "fps-look-up", "fps.fp +0.380 &middot; the horizon drops", THIRD),
+    ]], [THIRD + 4 * mm, THIRD + 4 * mm, THIRD + 4 * mm]),
+    Spacer(1, 6 * mm),
+    data_table([
+        ["frame", "fps.fp (UP-positive)", "what the frame shows"],
+        ["drag DOWN", "-0.380", "the horizon rises — you are looking at the ground"],
+        ["resting", "0.000", "the horizon sits across the middle"],
+        ["drag UP", "+0.380", "the horizon drops — you are looking at the sky"],
+    ], [40 * mm, 52 * mm, CONTENT_W - 92 * mm]),
+    Spacer(1, 3 * mm),
+    Paragraph(
+        "Put this page next to page 2. Before the fix these two tiers answered the same drag with "
+        "opposite frames; after it, they answer with the same one.", SMALL),
     PageBreak(),
 ]
 
