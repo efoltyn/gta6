@@ -545,15 +545,57 @@ async function stageSizeHunger(input) {
   const kits = [kitOf(hunters[0]), kitOf(hunters[1])];
   const r2 = (v) => (Number.isFinite(v) ? Number(v.toFixed(2)) : 0);
 
-  // ---- the camera: straight down over both lanes, so the two geometries are
-  // one picture. Both lanes started on the same mark with the same gap ahead.
+  /* ---- the camera.
+
+     Both lanes in one picture is the right composition and the first version
+     got it by going straight up and looking straight down. That produced two
+     frames that photographed nothing, and for two different reasons — which is
+     worth writing down, because the metrics were correct in both cases and
+     only the PICTURES were empty. A preset whose numbers pass while its frames
+     show canopy is worse than useless: it reports success on a claim nobody
+     can check.
+
+     IN THE WATER the sea is OPAQUE — it depth-writes, there is no transparency
+     budget on a 16 km disc, and city/wildlife_shark.js exists precisely because
+     a body under the surface cannot be seen from above it. A camera in the air
+     over two swimming sharks is therefore a camera pointed at a blue plane. So
+     the aquatic shot goes UNDER, sitting below the swell and looking along the
+     lanes, which is also the angle a player actually meets a shark from.
+
+     ON LAND the lanes are in forest, because that is where a wolf lives, and
+     an overhead camera photographs the tops of trees. Dropping the camera does
+     not fix it (two lanes 40 m apart need the altitude); the trees have to go.
+     They are hidden for the shot and restored immediately after — staging
+     only, nothing in the world is changed. */
   const midX = anchor.x + gap * 0.35;
+  const groundY = CBZ.floorAt ? CBZ.floorAt(midX, anchor.z) : 0;
   const up = Math.max(48, subject.lane * 1.5 + gap * 0.9);
-  const camPos = (ref && ref.camera) ? ref.camera.position.slice()
-    : [midX - up * 0.42, (sp.aquatic ? surf : (CBZ.floorAt ? CBZ.floorAt(midX, anchor.z) : 0)) + up, anchor.z];
-  const camAim = (ref && ref.camera) ? ref.camera.target.slice()
-    : [midX, sp.aquatic ? surf - 2 : (CBZ.floorAt ? CBZ.floorAt(midX, anchor.z) : 0), anchor.z];
-  shoot(camPos, camAim);
+
+  let camPos, camAim;
+  if (ref && ref.camera) { camPos = ref.camera.position.slice(); camAim = ref.camera.target.slice(); }
+  else if (sp.aquatic) {
+    // below the swell, back along -X, looking down-lane at both sharks
+    const eye = surf - Math.max(6, subject.lane * 0.22);
+    camPos = [anchor.x - Math.max(30, gap * 0.85), eye, anchor.z];
+    camAim = [anchor.x + gap * 0.55, surf - Math.max(3, subject.lane * 0.12), anchor.z];
+  } else {
+    camPos = [midX - up * 0.42, groundY + up, anchor.z];
+    camAim = [midX, groundY, anchor.z];
+  }
+
+  /* Hide anything between an overhead land camera and the ground. Matched by
+     NAME rather than by class, and restored in a finally-shaped pair, so a
+     throw in the render cannot leave the world's trees turned off. */
+  const hidden = [];
+  if (!sp.aquatic && CBZ.scene && CBZ.scene.traverse) {
+    const FOLIAGE = /tree|canopy|foliage|leaf|leaves|branch|shrub|bush|frond|pine|palm/i;
+    CBZ.scene.traverse(function (o) {
+      if (!o || !o.visible || !FOLIAGE.test(o.name || "")) return;
+      hidden.push(o); o.visible = false;
+    });
+  }
+  try { shoot(camPos, camAim); }
+  finally { for (const o of hidden) o.visible = true; }
 
   const metrics = {
     starvingTravelM: r2(travel[0]), fedTravelM: r2(travel[1]),
