@@ -103,7 +103,10 @@
 .svbtn{
   pointer-events: auto;
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-  min-width: 104px; height: var(--sv-h); padding: 0 18px;
+  /* the cap is the column's, not the button's: these stretch to their widest
+     member, so one long string is the whole rail's width. 190 is the most a
+     393pt handset can give up before the stack reaches the joystick. */
+  min-width: 104px; max-width: 190px; height: var(--sv-h); padding: 0 18px;
   border-radius: calc(var(--sv-h) / 2);
   border: 1.5px solid rgba(127,231,255,.5);
   background: rgba(10,20,32,.68); color: #eaf4ff;
@@ -121,10 +124,13 @@
   font: inherit; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+/* the chip YIELDS FIRST. A verb the thumb cannot read is a broken control; a
+   price that ellipsises is merely a shorter price. */
 .svbtn .pi-sub{
-  flex: 0 0 auto;
+  flex: 0 1 auto; min-width: 0;
   font: 700 12px/1 Fredoka, system-ui, sans-serif; letter-spacing: .3px;
-  color: #ffd451; opacity: .9; white-space: nowrap;
+  color: #ffd451; opacity: .9;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 /* the "[H] Tips" footer — neutral rim so it never competes with a verb */
 .svbtn.po-tips{

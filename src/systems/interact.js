@@ -464,7 +464,26 @@
       if ((a.playerFear || 0) >= 7) return "scared";
       return CBZ.econ.hasItem("Shiv") ? "armed" : "";
     }
-    if (v === "trade") return a.data.offer ? (CBZ.econ.offerLine ? CBZ.econ.offerLine(a) : `${a.data.offer.item}·${a.data.offer.price}`) : "";
+    /* THE TRADE CHIP IS A PRICE, like every other priced verb's.
+
+       It used to be econ.offerLine() — "Burner Phone·14 fair", an ITEM NAME
+       followed by the number — and every surface that renders it cuts at 12
+       characters, so what actually reached the button was "Burner Phon…":
+       the price gone, the item unreadable, and the widest string in the menu.
+       On the phone dock that one chip sized the whole column (199px against
+       the guard register's 120px, measured at 393x852) because a column of
+       stretch pills is only ever as narrow as its fattest member.
+
+       The item is not lost — labelFor() already says "Buy Burner Phone. 14"
+       and that is the row on desktop and the aria-label on every button. The
+       priceTag reasons go, and they were never legible: two of them join to
+       "heat tax, search risk", which cut to "heat tax, s…". */
+    if (v === "trade") {
+      const o = a.data && a.data.offer;
+      if (!o) return "";
+      const p = CBZ.econ.offerPrice ? CBZ.econ.offerPrice(a) : null;
+      return String(p ? p.price : o.price);
+    }
     // A PRICE THE MENU COMPUTES SEPARATELY FROM THE TILL IS A PRICE THAT
     // LIES. economy.js's bribeCost is loyalty- and schedule-aware now (a man
     // you have already paid is cheaper; a man standing a count is dearer), so
