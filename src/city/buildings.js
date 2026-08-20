@@ -2560,7 +2560,17 @@
   // (opacity 0.97) with only a small clear VISION WINDOW inset, a clear dark
   // FRAME, and a bright push-BAR — the unambiguous closed/open states the door
   // literature (Liz England's "door problem") calls for.
-  function doorLeafMat() { return _doorLeafMat || (_doorLeafMat = new THREE.MeshLambertMaterial({ color: 0x9aa6b4, emissive: 0x1a2026, emissiveIntensity: 0.18, transparent: true, opacity: 0.97 })); }
+  /* THE LEAF. Owner, looking at a facade sheet: "where's the door tho, it's a
+     hole and frame." The door was always there — this leaf, on its pivot, with
+     the open/lock logic already written against it — but it did not READ as one:
+     a pale blue-grey slab at 97% opacity, flat, with no panelling, which under
+     any bright light washes out into the wall behind it. It is now a door
+     COLOUR (a painted timber tone, dark enough to hold its own against pale
+     stucco and pale stone alike) and fully opaque, because 3% transparency
+     bought nothing and cost sorting and raycast correctness. */
+  function doorLeafMat() { return _doorLeafMat || (_doorLeafMat = new THREE.MeshLambertMaterial({ color: 0x4a5560, emissive: 0x10161c, emissiveIntensity: 0.16 })); }
+  let _doorRailMat = null;
+  function doorRailMat() { return _doorRailMat || (_doorRailMat = new THREE.MeshLambertMaterial({ color: 0x6a7683 })); }
   function doorVisionMat() { return _doorVisionMat || (_doorVisionMat = new THREE.MeshLambertMaterial({ color: 0xbfe9f7, emissive: 0x2f6f86, emissiveIntensity: 0.4, transparent: true, opacity: 0.55 })); }
   function doorFrameMat() { return _doorFrameMat || (_doorFrameMat = new THREE.MeshLambertMaterial({ color: 0x21262d })); }
   function doorBarMat() { return _doorBarMat || (_doorBarMat = new THREE.MeshLambertMaterial({ color: 0xc8ccd2, emissive: 0x44484e, emissiveIntensity: 0.3 })); }
@@ -2610,6 +2620,46 @@
     const vw = dw * 0.5, vh = dh * 0.32;
     const vision = new THREE.Mesh(new THREE.BoxGeometry(along ? slabT + 0.02 : vw, vh, along ? vw : slabT + 0.02), doorVisionMat());
     vision.position.set(leafOffX, dh * 0.18, leafOffZ); vision.renderOrder = 1; pivot.add(vision);
+    /* STILES AND RAILS on the outward face — the two uprights, the top, middle
+       and bottom rails, and a kick plate. This is the whole difference between
+       "a slab in a hole" and "a door": at any distance the eye reads the frame
+       pattern long before it can see hardware. They are merged into ONE mesh,
+       because a door is per-building and the city has hundreds of them — five
+       loose boxes each would be five hundred draw calls for panelling.
+       Everything hangs off the pivot, so it swings with the leaf. */
+    {
+      const outSgn = -1;                              // nx/nz is the INWARD normal
+      const pt = 0.025;                               // how proud a rail stands
+      const zo = slabT / 2 + pt / 2;
+      const parts = [];
+      const addPart = function (wid, hei, lat, yy) {
+        const g = new THREE.BoxGeometry(along ? pt : wid, hei, along ? wid : pt);
+        g.translate(leafOffX + tx * lat + nx * outSgn * zo, yy,
+          leafOffZ + tz * lat + nz * outSgn * zo);
+        parts.push(g);
+      };
+      const stile = Math.min(0.17, dw * 0.13), rail = Math.min(0.19, dh * 0.10);
+      addPart(stile, dh, -(dw / 2 - stile / 2), 0);           // hinge stile
+      addPart(stile, dh, (dw / 2 - stile / 2), 0);            // latch stile
+      addPart(dw, rail, 0, dh / 2 - rail / 2);                // top rail
+      addPart(dw, rail, 0, -(dh / 2 - rail / 2));             // bottom rail
+      addPart(dw, rail * 0.85, 0, -dh * 0.06);                // lock rail
+      addPart(dw - stile * 2, dh * 0.13, 0, -(dh / 2 - rail - dh * 0.075));  // kick plate
+      const BGU = THREE.BufferGeometryUtils;
+      if (BGU && BGU.mergeBufferGeometries && parts.length > 1) {
+        const merged = BGU.mergeBufferGeometries(parts);
+        for (const g of parts) g.dispose();
+        if (merged) {
+          const m = new THREE.Mesh(merged, doorRailMat());
+          m.castShadow = false; m.receiveShadow = true; pivot.add(m);
+        }
+      } else {
+        for (const g of parts) {
+          const m = new THREE.Mesh(g, doorRailMat());
+          m.castShadow = false; m.receiveShadow = true; pivot.add(m);
+        }
+      }
+    }
     // a vertical PUSH-BAR / pull handle on the free-edge side, proud of the leaf
     const handleLat = -(dw / 2 - 0.18) * hingeSign;  // toward the free (latch) edge
     const bar = new THREE.Mesh(new THREE.BoxGeometry(0.07, dh * 0.55, 0.07), doorBarMat());
