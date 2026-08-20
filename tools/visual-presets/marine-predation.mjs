@@ -77,55 +77,15 @@ const subjects = [
     id: "blood-in-the-water",
     label: "Blood in the water",
     scenario: "chum",
-    seconds: 20,
+    seconds: 13,
     focus: "A wounded dolphin trailing blood in open water with four great whites 210 m off. BEFORE: nothing in this game made a hurt animal bleed, so the sharks have no reason to come and do not. AFTER: the bleeder holds a goreChum handle whose position is a FUNCTION, so the plume follows it, and the sharks converge on it. Look for the red bloom on the surface and the fins turning toward it.",
     state: "CHUM · 4 GREAT WHITES @ 210 m",
     shot: { dist: 120, height: 46, pitch: 0.52 },
   },
   {
-    id: "meg-ship-approach",
-    label: "Megalodon — the approach, from below and behind",
-    scenario: "ship", seconds: 4.5,
-    focus: "A shark taking a surface target comes up from below and behind. The approach bearing is the boat's own stern quarter and the dive target is deep until the last moment — so what you should see is a big dark shape rising astern, not a fish swimming at a boat on the level.",
-    state: "APPROACH · STERN QUARTER",
-    shot: { dist: 34, height: 11, pitch: 0.34 },
-  },
-  {
-    id: "meg-ship-jaws",
-    label: "Megalodon — jaws across the beam",
-    scenario: "ship", seconds: 7.2,
-    focus: "The bite is not a nose-bump. The jaws are wide and they close ACROSS the beam of the hull, and the contact test is the boat's version of creature_combat's jawReaches — the animal's own tooth ring taken into the hull's frame and tested against the real LOA x beam box, so a short bite MISSES.",
-    state: "CONTACT · JAWS ON THE HULL",
-    shot: { dist: 26, height: 7, pitch: 0.22 },
-  },
-  {
-    id: "meg-ship-crushed",
-    label: "Megalodon — the hull crushes",
-    scenario: "ship", seconds: 9.5,
-    focus: "At the bite line the hull caves and splinters: crashdeform's own crater loop (which had boats excluded, and now takes them when a caller declares a structural bite) plus crashfx's directed ejecta cone for the debris. The boat is lifted and shaken. No fireball — a shark's mouth does not explode a boat.",
-    state: "STRUCTURE FAILS · DEBRIS",
-    shot: { dist: 24, height: 8, pitch: 0.3 },
-  },
-  {
-    id: "meg-ship-sinking",
-    label: "Megalodon — the boat goes down",
-    scenario: "ship", seconds: 18,
-    focus: "Engine gutted, the same intact hull is handed to water_float's wreck/flooding owner and goes down by the bow. This is reuse, not a new sinking system: the exact path a megalodon RIDDEN by the player already used.",
-    state: "HOLED · FLOODING",
-    shot: { dist: 28, height: 9, pitch: 0.42 },
-  },
-  {
-    id: "meg-ship-men",
-    label: "Men in the water",
-    scenario: "shipmen", seconds: 20,
-    focus: "The occupants went over the side at the bite. In the water they are hurt, so they bleed, so they are chum, so the sharks come — three separate blocks composing with no code between them. That composition IS the feature.",
-    state: "SURVIVORS · SHARKS INBOUND",
-    shot: { dist: 44, height: 16, pitch: 0.5 },
-  },
-  {
     id: "bait-ball",
     label: "A bait ball collapsing",
-    scenario: "bait", seconds: 17,
+    scenario: "bait", seconds: 15,
     focus: "A school with no teeth does not scatter when something comes for it — it BALLS, and the ball gets tighter and gets driven UP against the surface as more mouths arrive, because every attack comes from below and the only way out is up. Then it is eaten down and it breaks apart. One InstancedMesh, a couple of hundred bodies, one draw call. Look for the dense silver sphere pinned under the surface, the white water round it, and the gulls over the top.",
     state: "BAIT BALL · 3 FEEDING",
     shot: { dist: 26, height: 9, pitch: 0.34 },
@@ -133,10 +93,50 @@ const subjects = [
   {
     id: "carcass-crowd",
     label: "A carcass draws a crowd",
-    scenario: "carcass", seconds: 22,
+    scenario: "carcass", seconds: 16,
     focus: "A dead animal in the water is the strongest chum there is, and until now nothing in the game came for it. Now the sharks smell it, circle it and work it — ticked by CBZ.predatorHunt with the CORPSE as the quarry, which is exactly why they circle rather than charge — the body visibly shrinks as it is eaten, and the birds are up over it. No UI says any of this.",
     state: "CARCASS · SCAVENGERS INBOUND",
     shot: { dist: 40, height: 15, pitch: 0.44 },
+  },
+  {
+    id: "meg-ship-jaws",
+    label: "Megalodon — jaws across the beam",
+    scenario: "ship", seconds: 6.5,
+    focus: "The bite is not a nose-bump. The jaws are wide and they close ACROSS the beam of the hull, and the contact test is the boat's version of creature_combat's jawReaches — the animal's own tooth ring taken into the hull's frame and tested against the real LOA x beam box, so a short bite MISSES.",
+    state: "CONTACT · JAWS ON THE HULL",
+    shot: { dist: 26, height: 7, pitch: 0.22 },
+  },
+  {
+    id: "meg-ship-crushed",
+    label: "Megalodon — the hull crushes",
+    scenario: "ship", seconds: 8.5,
+    focus: "At the bite line the hull caves and splinters: crashdeform's own crater loop (which had boats excluded, and now takes them when a caller declares a structural bite) plus crashfx's directed ejecta cone for the debris. The boat is lifted and shaken. No fireball — a shark's mouth does not explode a boat.",
+    state: "STRUCTURE FAILS · DEBRIS",
+    shot: { dist: 24, height: 8, pitch: 0.3 },
+  },
+  {
+    id: "meg-ship-approach",
+    label: "Megalodon — the approach, from below and behind",
+    scenario: "ship", seconds: 4,
+    focus: "A shark taking a surface target comes up from below and behind. The approach bearing is the boat's own stern quarter and the dive target is deep until the last moment — so what you should see is a big dark shape rising astern, not a fish swimming at a boat on the level.",
+    state: "APPROACH · STERN QUARTER",
+    shot: { dist: 34, height: 11, pitch: 0.34 },
+  },
+  {
+    id: "meg-ship-sinking",
+    label: "Megalodon — the boat goes down",
+    scenario: "ship", seconds: 14,
+    focus: "Engine gutted, the same intact hull is handed to water_float's wreck/flooding owner and goes down by the bow. This is reuse, not a new sinking system: the exact path a megalodon RIDDEN by the player already used.",
+    state: "HOLED · FLOODING",
+    shot: { dist: 28, height: 9, pitch: 0.42 },
+  },
+  {
+    id: "meg-ship-men",
+    label: "Men in the water",
+    scenario: "shipmen", seconds: 14,
+    focus: "The occupants went over the side at the bite. In the water they are hurt, so they bleed, so they are chum, so the sharks come — three separate blocks composing with no code between them. That composition IS the feature.",
+    state: "SURVIVORS · SHARKS INBOUND",
+    shot: { dist: 44, height: 16, pitch: 0.5 },
   },
 ];
 
@@ -161,14 +161,24 @@ async function stageMarinePredation(input) {
   if (!S) {
     const booted = await until(
       () => CBZ.game && (CBZ.bootComplete || CBZ.game.state === "title") &&
-        CBZ.stepSim && document.getElementById("playBtn"), 900000);
+        CBZ.stepSim && document.getElementById("playBtn"), 420000);
     if (!booted) return { ok: false, err: "never booted" };
     if (CBZ.CONFIG) CBZ.CONFIG.CITY_HITMAN_CAMPAIGN = false;
-    const playing = await until(() => {
-      if (CBZ.game.state === "playing") return true;
-      const b = document.getElementById("playBtn"); if (b) b.click();
-      return CBZ.game.state === "playing";
-    }, 900000, 300);
+    /* CLICK PLAY ONCE. THEN WAIT.
+
+       This loop used to click #playBtn on EVERY poll, and that is a hang, not
+       a retry. Pressing play runs the city build — a single long SYNCHRONOUS
+       task — so the click does not return until the whole city has been built;
+       the poll then finds the state has not flipped yet and clicks again,
+       building the entire city a second time, and a third. The main thread
+       never comes up for air, CDP evaluate windows expire, and the pass dies
+       having photographed nothing. It cost three runs to find because it only
+       misbehaves when the build is slower than the poll interval.
+
+       So: one click, then a patient wait that touches nothing. */
+    const btn = document.getElementById("playBtn");
+    if (btn && CBZ.game.state !== "playing") btn.click();
+    const playing = await until(() => CBZ.game.state === "playing", 300000, 1000);
     if (!playing) return { ok: false, err: "never reached playing" };
     if (CBZ.game.cityCampaign) CBZ.game.cityCampaign.phase = "endless_contracts";
     try { if (CBZ.setQualityLevel) CBZ.setQualityLevel(3); } catch (_) {}
@@ -184,14 +194,14 @@ async function stageMarinePredation(input) {
       seed = (seed * 1664525 + 1013904223) >>> 0;
       return seed / 4294967296;
     };
-    for (let i = 0; i < 90; i++) { CBZ.hitstop = 0; CBZ.slowmo = 0; CBZ.stepSim(RUN); }
+    for (let i = 0; i < 24; i++) { CBZ.hitstop = 0; CBZ.slowmo = 0; CBZ.stepSim(RUN); }
 
     const overlay = document.createElement("div");
     overlay.id = "__marinePredOverlay";
     overlay.style.cssText = "position:fixed;inset:0;pointer-events:none;color:#f2f8fc;text-shadow:0 2px 9px #001019;z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif";
     overlay.innerHTML = "<div data-side></div><div data-name></div><div data-focus></div><div data-state></div><div data-read></div><div data-source></div>";
     document.body.appendChild(overlay);
-    S = window.__marinePredStage = { overlay, spawned: [], cars: [], men: [] };
+    S = window.__marinePredStage = { overlay, spawned: [], cars: [], men: [], anchor: null };
     window.__cbzVisualCompare = {
       render() { try { CBZ.renderer.render(CBZ.scene, CBZ.camera); } catch (_) {} },
     };
@@ -237,10 +247,18 @@ async function stageMarinePredation(input) {
 
   // ---- a deterministic patch of open sea ------------------------------------
   const ref = input.referenceStage || null;
+  /* THE SEARCH IS COARSE AND IT IS CACHED, and both of those are load-bearing.
+
+     At 40 u steps and 96 bearings this walked up to nineteen thousand
+     shoreAt + isSurfaceWater probes — one synchronous block big enough to
+     expire a CDP evaluate window on a contended box — and it did it AGAIN for
+     every subject, even though every subject stages at the same point. 200 u
+     steps and 32 bearings is thirteen hundred probes for the same answer (the
+     sea is not 40 u wide), and the answer is then kept on the cached stage. */
   function findWater(minShore, maxShore, from) {
-    for (let r = Number(from) || 900; r <= 9000; r += 40) {
-      for (let i = 0; i < 96; i++) {
-        const ang = (i / 96) * Math.PI * 2;
+    for (let r = Number(from) || 900; r <= 9000; r += 200) {
+      for (let i = 0; i < 32; i++) {
+        const ang = (i / 32) * Math.PI * 2;
         const x = Math.cos(ang) * r, z = Math.sin(ang) * r;
         const sh = wf.shoreAt(x, z);
         if (!(sh <= maxShore && sh >= minShore)) continue;
@@ -250,7 +268,7 @@ async function stageMarinePredation(input) {
     }
     return null;
   }
-  const anchor = (ref && ref.anchor) || findWater(-6000, -700, 1100);
+  const anchor = (ref && ref.anchor) || S.anchor || (S.anchor = findWater(-6000, -700, 1100));
   if (!anchor) return { ok: false, err: "no deep water found" };
   const surf = CBZ.citySeaHeightAt(anchor.x, anchor.z);
 
