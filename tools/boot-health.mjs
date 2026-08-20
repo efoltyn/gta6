@@ -38,6 +38,7 @@
 
      node tools/boot-health.mjs
      node tools/boot-health.mjs --page games/battle.html
+     node tools/boot-health.mjs --page games/x.html --entry "#launch"
      node tools/boot-health.mjs --wait 180     # slower box, longer build budget
 
    Exit codes are meant for CI and agents: 0 boots, 1 the script chain is
@@ -52,6 +53,14 @@ const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const argv = process.argv.slice(2);
 const opt = (n, d) => { const i = argv.indexOf(n); return i >= 0 && argv[i + 1] != null ? argv[i + 1] : d; };
 const PAGE = opt("--page", "index.html");
+/* WHICH CONTROL STARTS THIS PAGE. index.html boots through core/microboot.js
+   behind #playBtn, but the games/ pages each have their own front door —
+   battle.html's is #start ("START THE WAR"). Hard-coding #playBtn made this
+   tool report a healthy page as a broken script chain, which is the one thing
+   a health check must never do: a false FAIL sends someone hunting a bug that
+   is in the checker. Default covers the common pages; --entry names anything
+   else. */
+const ENTRY = opt("--entry", "#playBtn, #start, #play, [data-boot-entry]");
 const WAIT = Math.max(20, Number(opt("--wait", 120)) || 120);
 const PORT = Number(opt("--port", 9788));
 const DBG = PORT + 1;
@@ -138,8 +147,10 @@ await sleep(9000);
    most of the engine is injected on PLAY rather than present in the markup;
    the honest pre-PLAY test is therefore "is the entry point there and did
    nothing throw", not a count of <script> tags. */
-const entry = await ev("!!document.getElementById('playBtn')");
-log(`  entry point: ${entry ? "present" : "MISSING"}`);
+const entrySel = JSON.stringify(ENTRY);
+const entry = await ev(`!!document.querySelector(${entrySel})`);
+const entryWhich = entry ? await ev(`(function(){var e=document.querySelector(${entrySel});return e.id||e.tagName.toLowerCase();})()`) : null;
+log(`  entry point: ${entry ? "present (" + entryWhich + ")" : "MISSING — try --entry '<css selector>'"}`);
 dump("script-chain errors");
 if (!entry || errors.some((e) => /SyntaxError|is not defined|Unexpected token/i.test(String(e)))) {
   finish(1, "FAIL: script chain is broken — fix this before looking anywhere else");
@@ -150,7 +161,7 @@ if (!entry || errors.some((e) => /SyntaxError|is not defined|Unexpected token/i.
 errors.length = 0;
 log(`  pressing PLAY (build budget ${WAIT}s)…`);
 const t0 = Date.now();
-await ev("document.getElementById('playBtn').click()");
+await ev(`document.querySelector(${entrySel}).click()`);
 let booted = false;
 for (let i = 0; i < Math.ceil(WAIT / 2); i++) {
   await sleep(2000);

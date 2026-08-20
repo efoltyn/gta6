@@ -627,11 +627,23 @@
       needs: ["bestiary", "beasts", "blood"],
       files: ["city/waterfield.js", "systems/predator.js", "city/wildlife_shark.js",
         "city/marine_predation.js", "city/marine_frenzy.js"],
-      publishes: ["predatorHunt", "predatorKit", "predatorSeize", "predatorStagger",
-        "predatorDisengage", "sharkBrain", "sharkSurfaceRead",
-        "marineRelation", "marinePodNeeded", "marinePodRole", "marinePodRam",
-        "marinePodRoll", "marineHurt", "marineBleed",
-        "marineFrenzy", "marineFrenzyAbsorb", "marineFrenzyAudit"],
+      /* Every name below was read off the files, not remembered. The first
+         draft of this list said "marineFrenzy", which does not exist — the
+         frenzy's entry point is marineFrenzyAt — and a wrong name here is the
+         same class of fault as the missing pack itself: a claim about what a
+         page can reach that nothing checks. */
+      publishes: ["predatorHunt", "predatorKit", "predatorSeize", "predatorRelease",
+        "predatorStagger", "predatorDisengage", "predatorPack", "predatorEats",
+        "predatorDefends", "predatorMedium", "predatorAudit",
+        "sharkBrain", "sharkState", "sharkSurfaceRead", "sharkFinDrop",
+        "marineRelation", "marinePodNeeded", "marinePodNeededFor", "marinePodRole",
+        "marinePodMembers", "marinePodEnough", "marinePodRam", "marinePodRamReady",
+        "marinePodRoll", "marinePodRollReady", "marinePodRolling", "marinePodJoin",
+        "marinePodBreakOff", "marineHurt", "marineBleed", "marineGape",
+        "marineBiteableHull", "marineDpsAgainst", "marineBodyLen",
+        "marineSurfaceHit", "marineAudit",
+        "marineFrenzyAt", "marineFrenzySites", "marineFrenzyAbsorb",
+        "marineFrenzyAudit", "marineFrenzyReset", "marineScavengeStep"],
     },
 
     // ---- flight and weapons -------------------------------------------------

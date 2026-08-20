@@ -53,7 +53,13 @@ const arg = (f, d) => { const i = argv.indexOf(f); return i >= 0 && argv[i + 1] 
    And the guard is the other half of that: a name this list does not know is
    now a FAILURE rather than a silent extra helping of downtown, so the next
    typo announces itself instead of quietly shrinking the sweep. */
-const KNOWN = ["city", "island", "field", "gov", "harbor", "marina", "speedway", "dunes", "arena"];
+/* Every map battle.html offers. It is a hand-kept list and that is the known
+   cost: OPEN WATER shipped and this harness went on testing nine maps and
+   reporting ok, which is how a new venue gets no coverage at all without
+   anyone noticing. `water` is the interesting one to hold, because it is the
+   only venue with NO GROUND — the spawn, the ground query and the corpse
+   solver all have a floor to fall back on everywhere else. */
+const KNOWN = ["city", "island", "field", "gov", "harbor", "marina", "speedway", "dunes", "arena", "water"];
 const MAPS = arg("--map", KNOWN.join(",")).split(",");
 {
   const bad = MAPS.filter((m) => !KNOWN.includes(m));
