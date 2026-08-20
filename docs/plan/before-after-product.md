@@ -454,6 +454,22 @@ or LFS — decide at build time), because a receipt history is something no
 repository has ever had — **a changelog a non-coder can read**, the story
 of the app told in deltas rather than diffs.
 
+**Law: the tool never needs the cabinet** (owner, 2026-08-20: *"the
+beauty is you can use before after tool without using our whole
+software"*). `ba <preset>` alone — in a bare terminal, in VS Code's
+terminal, in CI with `--json` — is the complete product for a tool-only
+user: no tmux, no `.ba/`, no drawers, no workflow change. That is the
+adoption wedge (dev tools that demand a lifestyle change die; dev tools
+that add one command spread), the risk hedge (the tool stands without the
+cabinet; the reverse is not true), and the funnel in one binary: receipts
+make agents safe to trust → the user runs more agents → hits the
+twenty-tab problem → the cabinet is already installed as a subcommand of
+the thing they use daily. No second install, no second decision. The
+build enforces this today — the dispatcher's default path is the tool and
+cabinet verbs are lazy-loaded, `.ba/` appears only when a cabinet verb
+runs — and every future change must keep it true: no run-path feature may
+ever require cabinet state.
+
 **The drawer's screen: the receipt renders where the conversation is**
 (owner, 2026-08-19): *"I'm constantly telling my agents to physically open
 the before after pdf... right now I have a Preview tab with the before
