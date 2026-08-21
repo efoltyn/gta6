@@ -149,10 +149,27 @@ function stageMouth(input) {
      midriff, so the aim point is the FRONT of whatever was built. */
   const aspect = input.width / input.height;
   const ref = input.referenceStage && input.referenceStage.camera;
-  const span = Math.max(size.x, size.y, size.z) || 1;
-  const aim = group
-    ? [centre.x + size.x * 0.34, centre.y + size.y * 0.02, centre.z]
-    : [0, 0, 0];
+  const span = Math.min(3.5, Math.max(size.x, size.y, size.z) || 1);
+  /* AIM AT THE MOUTH BY FINDING IT, not by guessing an offset from the middle.
+     The first version aimed a fraction of the bounding box forward of centre,
+     which put our 6 m shark's jaw off the bottom edge of the frame — the one
+     thing this report exists to photograph. Ours names its parts, so ask: the
+     cavity, else the lower jaw, else the tooth rows. Theirs is a bare mouth
+     whose whole bounding box IS the subject, so the fallback is its centre. */
+  let aim = group ? [centre.x, centre.y, centre.z] : [0, 0, 0];
+  if (group) {
+    const NAMES = ["sharkMouthCavity", "sharkLowerJaw", "sharkUpperJaw", "sharkMandible"];
+    let found = null;
+    for (const n of NAMES) {
+      group.traverse(function (o) { if (!found && o.name === n) found = o; });
+      if (found) break;
+    }
+    if (found) {
+      const fb = new T.Box3().setFromObject(found), fc = new T.Vector3();
+      fb.getCenter(fc);
+      if (isFinite(fc.x)) aim = [fc.x, fc.y, fc.z];
+    }
+  }
   const dist = span * 3 + 4;
   const d = new T.Vector3().fromArray(subject.dir).normalize().multiplyScalar(dist);
   const framed = Number(subject.frame) || 2;
