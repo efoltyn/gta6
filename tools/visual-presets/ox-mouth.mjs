@@ -35,16 +35,16 @@ oxSource = oxSource.replace(/^\s*```[a-zA-Z]*\s*$/gm, "").trim();
 
 const ANGLES = [
   { id: "head-on", label: "Head-On Into The Gape", gape: 1,
-    dir: [1, 0.05, 0.03], frame: 1.7,
+    dir: [1, 0.05, 0.03], frame: 2.3,
     focus: "The centre of the frame must be a receding hole: pale jaw skin, a wet gum RIM, the tooth ring, then dark falling to near-black. Nothing in the opening may read as convex." },
   { id: "gape-3q", label: "Full Gape, Three-Quarter", gape: 1,
-    dir: [0.85, 0.20, 0.55], frame: 1.9,
+    dir: [0.85, 0.20, 0.55], frame: 2.4,
     focus: "The money shot. The upper jaw should have slid FORWARD and DOWN out from under the snout, so the upper tooth row sits ahead of the closed-mouth rostrum tip." },
   { id: "half", label: "Half Gape", gape: 0.5,
-    dir: [0.8, 0.16, 0.62], frame: 1.9,
+    dir: [0.8, 0.16, 0.62], frame: 2.4,
     focus: "Mid-opening. The protrusion should be underway, not switched on at the end — and the cavity should already be dark." },
   { id: "closed", label: "Closed", gape: 0,
-    dir: [0.35, 0.12, 1], frame: 2.1,
+    dir: [0.35, 0.12, 1], frame: 2.6,
     focus: "Shut, from the side. The mouth must read as a dark closed seam under the snout, with nothing of the cavity or the gums poking through." },
 ];
 
