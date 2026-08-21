@@ -236,3 +236,13 @@ before column, plus a `commit-rush` subject that drives the REAL
 as a number (staged pass: 1.9 m rammed through → 0.7 m tooth grip; live FSM
 commit: 2.15 m — the nose at the megalodon's centreline — → 1.3 m);
 `jawOpenPct` is the headbutt as a number (0 → 100 at contact).
+
+**THE ACCEPTANCE RULE, in the owner's words (2026-08-21): "the only overlap
+form above should be when the thing is physically in the mouth."** From a
+drone, two fighting bodies may overlap ONLY where a mouth encloses flesh:
+the tooth-grip the lunge cap allows (jaw at the surface, ~half a metre of
+head pressed into the flank), a seized prey riding the jaw point, the
+roll-over's jaws on the pectoral. That overlap is correct — do not "fix" it
+to zero, a bite that never encloses anything is a boop. Every other
+silhouette overlap (a body inside a body, a nose past a centreline, a fin
+emerging from a quarry's flank) is the bug this section exists to kill.
