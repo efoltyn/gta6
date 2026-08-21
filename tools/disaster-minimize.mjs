@@ -52,8 +52,34 @@ let drop = new Set(manifest.drop || []);
    the manifest so a --resume run never re-tests them. */
 const needed = new Set(manifest.needed || []);
 
+/* PINNED — files the search may NOT drop, whatever the oracle says.
+
+   This list exists because the search worked exactly as asked and the question
+   was too small. Left alone it took the build to 51 files, and the reason is
+   worth writing down: a test can only defend what it looks at. It asserted the
+   island boots, all eleven disasters run and every censused system is on CBZ —
+   so it happily dropped systems/physics.js (the census had `stepSim`, which
+   core/loop.js publishes), systems/survivalhud.js (the census had the #survBars
+   DOM element, which is in the HTML either way), systems/bootprogress.js (the
+   loading meter — nothing simulated needs it), core/batch.js (a frame-rate
+   system: nothing FAILS without it, the phone just melts), and every
+   city/facades/*.js style, leaving the island's town undressed.
+
+   Some of those holes are now real census rows (facadeStyles, CBZ.collide,
+   CBZ.survHud, CBZ.bootStep…). But the general case cannot be tested away: a
+   headless run has no frame budget, no thumbs and no eyes, so anything whose
+   whole job is performance, input or presentation has to be declared. That is
+   what this list is. Every entry is here because a player would notice, not
+   because a test would.
+
+   Adding to it costs bytes; removing from it means proving the loss another
+   way. Say which when you edit it. */
+const pin = new Set(manifest.pin || []);
+for (const p of pin) { drop.delete(p); needed.delete(p); }
+
 function save() {
-  manifest.drop = ORDER.filter((p) => drop.has(p));
+  manifest.drop = ORDER.filter((p) => drop.has(p) && !pin.has(p));
+  manifest.pin = [...pin].sort();
   manifest.needed = [...needed].sort();
   manifest.keptBytes = bytes(ORDER.filter((p) => !drop.has(p)));
   manifest.droppedBytes = bytes(manifest.drop);
@@ -143,7 +169,7 @@ const t0 = Date.now();
   const r = await repair("--quick");
   console.log(r.ok ? "base ok" : "base STILL failing: " + r.fails.join("; "));
 }
-let candidates = ORDER.filter((p) => !drop.has(p) && !needed.has(p));
+let candidates = ORDER.filter((p) => !drop.has(p) && !needed.has(p) && !pin.has(p));
 console.log(`start: ${ORDER.length - drop.size} scripts, ${mb(bytes(ORDER.filter((p) => !drop.has(p))))} · ` +
   `${candidates.length} untested candidates · ${JOBS} jobs`);
 

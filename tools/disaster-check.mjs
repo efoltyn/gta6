@@ -79,13 +79,42 @@ const CENSUS = [
   ["detonate", "CBZ.detonate"],
   ["character", "CBZ.playerChar && CBZ.playerChar.group"],
   ["bots", "CBZ.spawnSurvivorBots"],
-  ["physics", "CBZ.stepSim"],
+  /* THE ROWS BELOW ARE THE ONES THE SEARCH TAUGHT US TO WRITE PROPERLY.
+
+     Every one of these used to name something that survived without its file:
+     `stepSim` is published by core/loop.js, not by systems/physics.js, so the
+     search dropped the collision system and this row still passed. `#survBars`
+     is in the HTML whether or not systems/survivalhud.js is loaded. A census
+     row has to name what the FILE publishes, or it is not a census row — it is
+     a coincidence. */
+  ["physics", "CBZ.collide && CBZ.queryCollidersNear"],
+  ["traverse", "CBZ.characterTraversal"],
+  /* THE CAPABILITY BUS. Without systems/modecaps.js every consumer falls back
+     to `mode === "city"`, so on this island nobody vaults and a blast reaches
+     nobody — a silent loss of two systems the mode was explicitly given. */
+  ["modecaps", "CBZ.modeHas && CBZ.modeHas('traverse')"],
+  ["ragdoll", "CBZ.body && CBZ.body.hit"],
   ["camera", "CBZ.cam"],
   ["touch", "CBZ.touchAudit"],
   ["audio", "CBZ.sfx || CBZ.audio || CBZ.playSound"],
-  ["hud", "document.getElementById('survBars')"],
+  ["hud", "CBZ.survHud"],
+  ["bootmeter", "CBZ.bootStep && CBZ.bootMeter"],
+  /* The settings panel injects its own button next to Resume — it publishes no
+     symbol until it is opened, so the BUTTON is what proves the file ran. */
+  ["settings", "document.getElementById('settingsOpenBtn')"],
+  ["map", "CBZ.fullMap"],
+  ["prio", "CBZ.PRIO"],
+  ["batch", "CBZ.batchStaticUnder"],
+  ["quality", "CBZ.onQualityChange || CBZ.qualityAuto"],
+  ["fixedstep", "CBZ.fixedStep && CBZ.fixedStep.on"],
+  ["survnet", "CBZ.survNet && CBZ.survNet.snapshot"],
+  ["glguard", "CBZ.glContextAudit"],
   ["interact", "CBZ._prisonPromptSites && CBZ._prisonPromptSites.length"],
   ["facades", "CBZ.dressFacade"],
+  /* NINE GRAMMARS, NOT JUST THE KIT. SURV_FACADES is on by default — this
+     island is the facade kit's showroom — and the kit with no styles
+     registered dresses nothing at all. */
+  ["facadeStyles", "CBZ.facadeStyles && CBZ.facadeStyles() >= 9"],
   ["spectate", "CBZ.spectate || CBZ.clearSpectate"],
 ];
 
@@ -196,6 +225,35 @@ try {
     fail(bundleFailed.length + " bundled files threw at load (" + bundleFailed[0] + ")");
   }
   if (report.loadErrors.length) fail(report.loadErrors.length + " errors during page load (" + report.loadErrors[0] + ")");
+
+  /* CAN THE PLAYER ACTUALLY MOVE?
+
+     Everything else this tool asserts happens TO the player. Nothing asked
+     whether the game answers a key — so a build with no movement, no collision
+     and no ground under the feet passed every check, which is how the search
+     came to drop systems/physics.js. This holds W for a second and asserts
+     three things a player would notice in that second: the body travelled, it
+     is still on the ground, and it did not walk through the island.
+
+     Input goes through CBZ.keys, which is what systems/input.js writes and what
+     every movement path reads — the same door the touch stick and the gamepad
+     use, so this covers all three. */
+  const moved = await rig.evl(`(async () => {
+    const p = CBZ.player, A = CBZ.surv.arena;
+    const x0 = p.pos.x, z0 = p.pos.z;
+    CBZ.keys = CBZ.keys || {};
+    CBZ.keys.w = CBZ.keys.W = CBZ.keys.ArrowUp = true;
+    for (let i = 0; i < 90; i++) { CBZ.stepSim(1 / 60); if (i % 30 === 0) await new Promise(r => setTimeout(r, 0)); }
+    CBZ.keys.w = CBZ.keys.W = CBZ.keys.ArrowUp = false;
+    const d = Math.hypot(p.pos.x - x0, p.pos.z - z0);
+    const ground = A.groundHeightAt(p.pos.x, p.pos.z);
+    return { travelled: Math.round(d * 100) / 100, offGround: Math.round((p.pos.y - ground) * 100) / 100,
+             inside: Math.hypot(p.pos.x - A.center.x, p.pos.z - A.center.z) < A.radius * 1.6 };
+  })()`, true);
+  report.measures.movement = moved;
+  if (!(moved.travelled > 0.5)) fail("the player does not move when the key is held (" + moved.travelled + " m in 1.5 s)");
+  if (Math.abs(moved.offGround) > 2.5) fail("the player is not standing on the ground (" + moved.offGround + " m off it)");
+  if (!moved.inside) fail("the player walked off the island");
 
   // ---- 2. every disaster runs ---------------------------------------------
   rig.clearErrors();

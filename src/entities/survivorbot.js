@@ -107,6 +107,16 @@
     }
   };
 
+  /* WHAT THE CROWD'S SCHEDULE IS DOING. Both numbers are match state that no
+     one outside this file could see, and both have already been a divergence:
+     `frame` decides which bots think on which tick, and `matchNo` names the
+     seeded stream they wander on. tools/determinism-check.mjs reads them, so a
+     drift between two clients names itself instead of showing up as ninety-nine
+     bodies in the wrong places. */
+  CBZ.survBotAudit = function () {
+    return { frame: frame, matchNo: matchNo, bots: CBZ.bots.length, seeded: !!botRng };
+  };
+
   CBZ.clearSurvivorBots = function () {
     for (const b of CBZ.bots) {
       if (b.group) {

@@ -4,7 +4,7 @@
 
        node tools/build-disaster-page.mjs
 
-     Natural Disaster Survival, standing alone: index.html minus the 281
+     Natural Disaster Survival, standing alone: index.html minus the 473
      script tags this game never runs, opening straight onto the island. This
      is the page the iOS build ships (tools/build-ios.mjs bundles it).
 ============================================================ -->
@@ -412,8 +412,8 @@
   } catch (e) {}
 </script>
 <!-- THE WHOLE GAME, IN ONE FILE. tools/build-ios.mjs concatenated the
-     273 script tags disaster.html lists, in that order, into bundle.js.
-     A phone pays for one fetch and one compile instead of 273 of each. -->
+     83 script tags disaster.html lists, in that order, into bundle.js.
+     A phone pays for one fetch and one compile instead of 83 of each. -->
 <script src="bundle.js"></script>
 <!-- THE MODE CAPABILITY BUS (CBZ.modeHas / worldActors / blastWorldActors).
      Turns "is this the city?" into "may I vault / may I blow up here?", so the
@@ -671,6 +671,13 @@
      for the context back if it has not returned. AFTER state.js (it pauses
      through CBZ.setState, so there is exactly one kind of paused).
      ?cfg_GL_CONTEXT_GUARD=0 reverts. -->
+<!-- THE SIM ADVANCES IN WHOLE TICKS (survival only, by default). core/loop.js
+     measures TIME, which is right for one player and is the reason two machines
+     can never run the same match — a phone at 47 fps and a laptop at 60 take
+     different steps through the same second and drift apart from an identical
+     seed. This turns the frame delta into whole 1/60 ticks. MUST load before
+     core/loop.js, which reads CBZ.fixedStep every frame. ?cfg_FIXED_STEP_V1=0
+     puts survival back on the variable step, live. -->
 <!-- Xbox / gamepad support (GTA-style scheme). Loads before loop.js so its
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
@@ -700,6 +707,13 @@
 <!-- THE QUAKE IS SHARED: systems/quake.js owns facade shedding, drop-cover,
      gas fires and downed lines for BOTH worlds (CITY_QUAKE for the city).
      Must precede systems/disasters.js so the roster finds CBZ.quake. -->
+<!-- THE SEAM A TRANSPORT PLUGS INTO. Not multiplayer — the three things that
+     have to be true before a transport is worth writing: every actor carries a
+     stable id, the whole match serialises to one ArrayBuffer and back
+     (2.5 KB at 100 bots), and there is one fingerprint two clients can compare.
+     tools/determinism-check.mjs is what compares it. AFTER survival.js and
+     systems/disasters.js — it reads their public surfaces and publishes
+     nothing they need. ?cfg_SURVNET_V1=0 makes it inert. -->
 <!-- GUN GAME ladder HUD (mode-gated; shares #survBars with survival) -->
 
 <!-- 4d. CITY — open-world GTA-style mode (a third game mode). Additive:

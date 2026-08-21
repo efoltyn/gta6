@@ -102,6 +102,10 @@ const RUN = (ticks, bots) => `(async () => {
       bodies: b.map(a => [Math.round(a.pos.x * 1000), Math.round(a.pos.y * 1000),
                           Math.round(a.pos.z * 1000), Math.round(a.hp * 100), a.dead ? 1 : 0]),
       player: [Math.round(p.pos.x * 1000), Math.round(p.pos.y * 1000), Math.round(p.pos.z * 1000)],
+      /* The crowd's own schedule state. When two clients disagree about which
+         bots thought on which tick, this is the number that says so. */
+      sched: CBZ.survBotAudit ? [CBZ.survBotAudit().frame, CBZ.survBotAudit().matchNo,
+                                 CBZ.survBotAudit().seeded ? 1 : 0] : null,
     };
   };
   tape.push(Object.assign({ t: 0 }, fp()));
@@ -147,6 +151,12 @@ for (let i = 0; i < Math.min(a.length, b.length); i++) {
   }
   for (let f = 0; f < 3; f++) {
     if (a[i].player[f] !== b[i].player[f]) who.push(`player.${AX[f]} ${a[i].player[f]} vs ${b[i].player[f]}`);
+  }
+  const SC = ["frame", "matchNo", "seeded"];
+  if (a[i].sched && b[i].sched) {
+    for (let f = 0; f < 3; f++) {
+      if (a[i].sched[f] !== b[i].sched[f]) who.unshift(`sched.${SC[f]} ${a[i].sched[f]} vs ${b[i].sched[f]}`);
+    }
   }
   out.detail = {
     tick: a[i].t,

@@ -89,8 +89,6 @@
   function round() {
     const D = CBZ.disasters;
     if (!D) return { idx: 0, phase: 0, t: 0, intensity: 0, surge: 0 };
-    const a = D.audit ? null : null;   // (audit is expensive; the public reads are enough)
-    void a;
     return {
       idx: Math.max(0, ROSTER.indexOf(D.currentId ? D.currentId() : null)) & 255,
       phase: PHASE[D.state()] || 0,
