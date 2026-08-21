@@ -45,6 +45,12 @@ const subjects = [
     frame: 10, target: [1.4, 0.3, -2.0], cameraOffset: [-11, 2.6, -1.0],
     state: "SNAP · 80%",
   },
+  {
+    id: "commit-rush", label: "The Live Commit — predatorHunt's Own Rush", p: 0.56, fsm: true,
+    focus: "Not a staged strike: CBZ.predatorCommit plus the production predatorHunt FSM drive the whole run-in. BEFORE: the rush closes on a CENTRE distance and parks the orca inside the megalodon before the swing even starts. AFTER: §R stops the drive where the teeth meet the measured flank, and the fight driver takes over out there.",
+    frame: 11, target: [1.2, 0.3, -2.4], cameraOffset: [-11, 2.6, -1.0],
+    state: "FSM RUSH · 56%",
+  },
 ];
 
 function stageOrcaBite(input) {
@@ -133,11 +139,34 @@ function stageOrcaBite(input) {
   };
 
   // ---- run the production driver to the subject's phase -------------------
+  // Two modes. Plain subjects hand the pass straight to creatureFight with
+  // marine_predation's numbers (the flanker's path). `fsm: true` subjects run
+  // the ACTUAL predatorHunt commit — CBZ.predatorCommit skips the tease, then
+  // the production FSM owns the whole run-in, so §R's surface stop and the
+  // reach floor are exercised exactly as a live pod fight exercises them.
+  const useFSM = !!subject.fsm;
+  let fsmOpts = null;
+  if (useFSM) {
+    if (typeof CBZ.predatorHunt !== "function" || typeof CBZ.predatorCommit !== "function") {
+      return { ok: false, missing: "predatorHunt/predatorCommit" };
+    }
+    fsmOpts = {
+      medium: "water", seize: false, rate: 2.6, dmg: 1,
+      onHit: function () {},
+      move: opts.move,
+    };
+    orca.group.position.set(1.5, -1, -14);
+    try { CBZ.predatorCommit(orca, meg); }
+    catch (e) { return { ok: false, missing: "predatorCommit threw: " + (e && e.message) }; }
+  }
   orca._atkT = 0;                            // no random cadence seed
   const dt = 1 / 60;
   let nosePen = 0, steps = 0;
-  while (steps++ < 1200) {
-    CBZ.creatureFight(orca, meg, dt, opts);
+  while (steps++ < 1800) {
+    if (useFSM) {
+      try { CBZ.predatorHunt(orca, meg, dt, fsmOpts); }
+      catch (e) { return { ok: false, missing: "predatorHunt threw: " + (e && e.message) }; }
+    } else CBZ.creatureFight(orca, meg, dt, opts);
     // track the deepest the orca's NOSE has been inside the megalodon's HULL
     const h = orca.heading;
     const nx = orca.group.position.x + Math.cos(h) * orcaM.maxX;

@@ -218,8 +218,21 @@ Two laws, both in `city/creature_combat.js` and both reverted by
   because the whole-group box counts pectoral fins and calls a megalodon
   13 m wide — else the old scale guess.
 
+- **The hunt FSM obeys the same law** (`systems/predator.js` §R): `bump` and
+  `rush` closed on CENTRE distances, so predatorHunt's own commit parked an
+  orca inside the megalodon before the swing even began — the last live
+  headbutt path. Both states now floor their stop at the hunter's jaw
+  distance plus the quarry's measured half-beam (and the fight hand-off's
+  reach is floored to match, or the swing would deadlock in its own
+  approach); a water hunter with an authored mouth no longer throws the
+  shut-mouth investigatory bump at an ANIMAL at all — that beat is the
+  player's dread cue, and against a quarry it commits (a bite) instead.
+  Player hunts are untouched.
+
 **Verified by** `node tools/before-after.mjs orca-bite` — the production
 `creatureFight` loop frozen at matched swing phases, `?bitepass=off` as the
-before column. `nosePenM` is the overlap as a number (deepest the orca's
-nose gets inside the megalodon's hull: 1.9 m rammed through → 0.7 m tooth
-grip); `jawOpenPct` is the headbutt as a number (0 → 100 at contact).
+before column, plus a `commit-rush` subject that drives the REAL
+`predatorCommit` + `predatorHunt` FSM end to end. `nosePenM` is the overlap
+as a number (staged pass: 1.9 m rammed through → 0.7 m tooth grip; live FSM
+commit: 2.15 m — the nose at the megalodon's centreline — → 1.3 m);
+`jawOpenPct` is the headbutt as a number (0 → 100 at contact).

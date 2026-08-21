@@ -844,6 +844,9 @@
   // the flag that owns pod tactics has been turned off.
   CBZ.marinePodRamReady = function (a, t) { return PODS() && !!(a && t) && ramGate(a, t); };
   CBZ.marinePodRam = function (a, t, dt) { return PODS() && !!(a && t && dt > 0) && ramTick(a, t, dt); };
+  // the measured half-beam's owner — systems/predator.js asks for it so a
+  // committed rush can stop at the SURFACE of a body this file has measured
+  CBZ.marineBodyBeam = bodyBeam;
   CBZ.marinePodRollReady = function (a, t) { return !!(a && t) && rollReady(a, t, 0); };
   CBZ.marinePodRoll = function (a, t) {
     if (!PODS() || !a || !t || t._mpRoll || t.dead) return false;
