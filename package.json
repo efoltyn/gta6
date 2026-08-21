@@ -47,6 +47,7 @@
     "test:prison-jitter-revert": "node tools/prison-jitter-check.mjs --revert",
     "test:prison-sit-revert": "node tools/prison-sit-check.mjs --revert",
     "test:bailout-presentation": "node tools/test-bailout-presentation-browser.mjs",
+    "test:boot-health": "node tools/boot-health.mjs",
     "ba": "node tools/before-after.mjs",
     "visual:beach": "node tools/before-after.mjs beach-shores",
     "visual:beast-deaths": "node tools/before-after.mjs beast-deaths",

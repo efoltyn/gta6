@@ -424,6 +424,28 @@
        the bots, which call it directly and are the one actor that cannot
        climb out. Handing it in here would subtract every hole twice. */
     CBZ.registerGroundBase("survival", function (x, z) { return surv.arena.groundHeightAt(x, z); });
+    /* THE SEA AROUND THIS ISLAND IS ALIVE.
+
+       OWNER: "gang city too and nat disaster should all have these sharks."
+       Gang City had them for a reason that had nothing to do with Gang City:
+       city/wildlife.js registers itself as a landmass and buildCity runs the
+       landmass chain. This mode builds its own world, so that chain never
+       fires and Natural Disaster had NO wildlife at all — not one fish, not
+       one shark, in a game mode whose signature disaster is a tsunami.
+
+       One call fixes it, because wildlife.js grew the entry point to take an
+       arena instead of assuming Gang City's. buildDisasterArena() already
+       returns { root, center, radius }, which is exactly what it wants: the
+       ocean band is derived as a ring around this island's own radius rather
+       than read off Gang City's hardcoded coordinates, and the population is
+       sized from that band's area, so a small island gets a small island's
+       worth of sea life instead of a continent's.
+
+       Land species need no exclusion here. The arena has no `.regions`, and
+       seeding returns early for a land species with no biome regions to place
+       it in — so the island gets its sharks and no deer, without a species
+       row or a mode flag. */
+    if (CBZ.cityWildlifeStock) { try { CBZ.cityWildlifeStock(surv.arena); } catch (e) {} }
     surv.built = true;
   }
 

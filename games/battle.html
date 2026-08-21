@@ -352,6 +352,21 @@ if (DEATH_OLD) {
 const MASS_OLD = Q.get("mass") === "old";
 if (MASS_OLD) CBZ.CONFIG.BODY_MASS = false;
 
+/* ?swim=old — THE SAME SHAPE OF SWITCH FOR THE WATER WAVE, and for the same
+   reason: a fix nobody can turn off has not been measured. It restores, all at
+   once, the ocean this page WOULD have had if the sea had only ever been a
+   height:
+     • NO SWIM RIG — every aquatic body a rigid mesh sliding through the water
+       with its jaw welded shut, which is literally what the `beasts` pack
+       shipped before the rig moved out of the hunting engine;
+     • NO DEPTH — every body pinned to the surface plane, so a shark and a bait
+       ball fight in two dimensions and "dive" is a word;
+     • NO UNDERWATER CAMERA — the lens stops at the waterline and the fog above
+       it never changes, so a shot from below does not exist.
+   One switch, because the three shipped as one wave and a before/after has to
+   be able to photograph the whole of it against itself. */
+const SWIM_OLD = Q.get("swim") === "old";
+
 /* ============================================================ THE GROUND
    FOUR OF THESE ARE PLACES IN GANG CITY, AT THEIR OWN COORDINATES.
 
@@ -396,6 +411,21 @@ const MAPS = {
   marina:   { label: "THE MARINA", note: "basin, pontoons, moored boats", packs: ["marina"], raise: ["marina"], sea: true },
   speedway: { label: "THE SPEEDWAY", note: "banked oval. a ground that is NOT flat", packs: ["speedway"], raise: ["speedway"], sea: true },
   dunes:    { label: "OPEN DUNES", note: "rolling sand. crests hide men", packs: ["desert"] },
+  /* OPEN WATER — the one venue with NO GROUND IN IT.
+
+     Every other row above raises a place. This one raises nothing, on purpose:
+     the owner asked for "a lightweight test arena, great for animation", and
+     the cheapest venue in the file is the one that builds a swell function, a
+     seabed, one reef and stops. `packs: []` is the whole cost statement — no
+     citycore, no towers, no roads, no heightfield raycast — which is why it is
+     also the map you boot when you want to WATCH one animal rather than count
+     three hundred. The sea itself is under THE SEA below.
+
+     `sea` is deliberately FALSE here even though this is the ocean: that flag
+     lays the flat -9 m deep plate the raised island venues sit in, and this map
+     builds its own seabed forty metres further down. Two plates would fight for
+     the depth buffer, which is the exact bug the seaPlate comment records. */
+  water:    { label: "OPEN WATER", note: "real ocean. swell, depth, no land", packs: [], ocean: true },
   arena:    { label: "KILL BOX", note: "flat yard. crates. walls", packs: [] },
 };
 if (!MAPS[SET.map]) SET.map = "city";
@@ -428,6 +458,7 @@ const MIX_RIFLES = ["ak47", "carbine", "lmg", "smg", "shotgun", "sniper"];
    men vs the gorilla" is a supported army and not a special case. Punch damage
    by training: a SWAT officer hits harder than a clerk. */
 const PUNCH = { civ: 6, thug: 8, pro: 10, elite: 12, swat: 14 };
+const SWIM_PUNCH = Math.max(0, Math.min(1, parseFloat(Q.get("swimpunch") || "0.25")));
 
 /* ============================================================ LOAD
    Base packs first; the armoury after, in dependency order. Every file in
@@ -444,6 +475,16 @@ const PUNCH = { civ: 6, thug: 8, pro: 10, elite: 12, swat: 14 };
    13 points, sticks, joint limits, a ground clamp — writing back onto the same
    rig meshes, so the wounds and the dropped rifle ride along for free. */
 const NEED = ["caps", "people", "ragdoll", "fx", "damage", "sound", "batch", "bestiary", "beasts"];
+// ?marine=0 refuses the marine pack even on OPEN WATER (the revert). Its
+// absence is what shipped: models with no hunt, no fin, no blood, no prey.
+const MARINE_Q = Q.get("marine");
+// Is this roster entry a sea animal? Asked of the LIVE bestiary rather than a
+// name list, so a species added tomorrow pulls the pack without an edit here.
+function isWaterSpecies(u) {
+  if (!u || u === "men") return false;
+  const sp = CBZ.WILDLIFE_SPECIES && CBZ.WILDLIFE_SPECIES[u];
+  return !!(sp && (sp.aquatic || sp.biome === "water"));
+}
 const ARMOURY = [
   "weapons/weapon-data.js",
   "weapons/weapon-scale.js",   // real-dimension display sizing (math, not magic scalars)
@@ -574,6 +615,7 @@ CBZ.studio.need(NEED).then(function () {
      not a download. Hover counts too, on anything with a pointer: by the time
      the finger arrives the city is already in the cache. */
   const mapsEl = el("maps");
+  const pickMap = {};                     // id -> select this ground (matchups use it)
   Object.keys(MAPS).forEach(function (id) {
     const b = document.createElement("button");
     b.innerHTML = "<b>" + MAPS[id].label + "</b><i>" + MAPS[id].note + "</i>";
@@ -584,6 +626,7 @@ CBZ.studio.need(NEED).then(function () {
       b.className = "on";
       CBZ.studio.prefetch(MAPS[id].packs);
     };
+    pickMap[id] = pick;
     b.addEventListener("click", pick);
     b.addEventListener("pointerenter", function () { CBZ.studio.prefetch(MAPS[id].packs); });
     mapsEl.appendChild(b);
@@ -601,33 +644,88 @@ CBZ.studio.need(NEED).then(function () {
     h += "<option value=\"fists\"" + (cur === "fists" ? " selected" : "") + ">FISTS (UNARMED)</option>";
     sel.innerHTML = h;
   }
-  /* WHO FIGHTS — men, or any land species straight out of the bestiary the
-     mainland hunts. The list is READ, not copied: a species added to Gang
-     City appears here on the next load. Aquatics and snakes wait for the
-     water battles; everything that walks is in, fighters first. */
-  function landSpecies() {
+  /* WHO FIGHTS — men, or ANY species straight out of the bestiary the mainland
+     hunts, land or water. The list is READ, not copied: a species added to Gang
+     City appears here on the next load, which is why "add a tiger shark" is a
+     change to city/wildlife/aquatic.js and nothing at all to this page. Snakes
+     still wait (they have no gait and no bite driver out here); everything that
+     walks or swims is in, fighters first.
+
+     THE WATER HALF IS THE OWNER'S ASK. "add water arena and water animal
+     options" — so the aquatics get their own group in the list rather than
+     being mixed into one flat forty-row menu, and the group is derived from
+     `sp.aquatic` exactly the way the land group is derived from its absence. */
+  function speciesIn(water) {
     const SP = CBZ.WILDLIFE_SPECIES || {};
     return Object.keys(SP)
-      .filter(function (id) { const s = SP[id]; return s && !s.aquatic && !s.snake && s.build; })
+      .filter(function (id) {
+        const sp = SP[id];
+        if (!sp || !sp.build || sp.snake) return false;
+        /* A ROW IS AQUATIC IF IT SAYS SO EITHER WAY. `aquatic` is the flag
+           wildlife.js itself branches on and the one every shipped water row
+           sets; `biome === "water"` is the column the bestiary sorts by. A new
+           species that declares only one of them is a species this menu would
+           silently drop, and a shark missing from the roster is exactly the
+           drift a derived list exists to prevent. */
+        const wet = !!sp.aquatic || sp.biome === "water";
+        return water ? wet : !wet;
+      })
       .sort(function (a, b) { return (SP[b].danger || 0) - (SP[a].danger || 0) || (a < b ? -1 : 1); });
+  }
+  /* A SIDE CAN BE TWO THINGS. `?ru=men|great_white_shark` is a mixed roster —
+     swimmers with sharks in among them — and it is one string rather than a
+     second unit select per team because the alternative is two more controls on
+     the form for one kind of fight. Alternating by spawn index keeps the split
+     even and deterministic; drainSpawns resolves it per body. */
+  function kindAt(u, i) {
+    const p = String(u).split("|");
+    return p.length < 2 ? p[0] : p[i % p.length];
+  }
+  function kindLabel(u) {
+    const SP = CBZ.WILDLIFE_SPECIES || {};
+    return String(u).split("|").map(function (k) {
+      return k === "men" ? "MEN" : String((SP[k] || {}).name || k).toUpperCase();
+    }).join(" + ");
   }
   function fillKind(sel, cur) {
     const SP = CBZ.WILDLIFE_SPECIES || {};
-    let h = "<option value=\"men\"" + (cur === "men" ? " selected" : "") + ">MEN</option>";
-    landSpecies().forEach(function (id) {
-      h += "<option value=\"" + id + "\"" + (cur === id ? " selected" : "") + ">" +
-        String(SP[id].name || id).toUpperCase() + "</option>";
-    });
+    const opt = function (id, label) {
+      return "<option value=\"" + id + "\"" + (cur === id ? " selected" : "") + ">" + label + "</option>";
+    };
+    let h = opt("men", "MEN");
+    const grp = function (title, ids) {
+      if (!ids.length) return "";
+      return "<optgroup label=\"" + title + "\">" + ids.map(function (id) {
+        return opt(id, String(SP[id].name || id).toUpperCase());
+      }).join("") + "</optgroup>";
+    };
+    h += grp("THE WATER", speciesIn(true));
+    h += grp("THE LAND", speciesIn(false));
     sel.innerHTML = h;
+    setKind(sel, cur);
+  }
+  /* A MATCHUP MAY HAND THIS A ROSTER THE LIST DOES NOT OFFER (a mixed side, or
+     a species a pack has not loaded yet). A select silently showing the wrong
+     row is how a one-tap button quietly starts the wrong war, so the value is
+     ADDED rather than dropped. */
+  function setKind(sel, value) {
+    if (value == null) return;
+    sel.value = value;
+    if (sel.value === value) return;
+    const o = document.createElement("option");
+    o.value = value; o.textContent = kindLabel(value);
+    sel.insertBefore(o, sel.firstChild);
+    sel.value = value;
   }
   // a beast army has no rifle and no drill sergeant: its gun/training rows
-  // grey out rather than lie
+  // grey out rather than lie. A MIXED side still has men in it, so it keeps
+  // both — the men in the water are the ones carrying the rifles.
   function kindRows(team) {
-    const beast = el(team + "U").value !== "men";
-    el(team + "W").disabled = beast;
-    el(team + "T").disabled = beast;
-    el(team + "W").style.opacity = beast ? 0.35 : 1;
-    el(team + "T").style.opacity = beast ? 0.35 : 1;
+    const noMen = String(el(team + "U").value).split("|").indexOf("men") < 0;
+    el(team + "W").disabled = noMen;
+    el(team + "T").disabled = noMen;
+    el(team + "W").style.opacity = noMen ? 0.35 : 1;
+    el(team + "T").style.opacity = noMen ? 0.35 : 1;
   }
   function fillTraining(sel, cur) {
     sel.innerHTML = TRAININGS.map(function (t) {
@@ -650,21 +748,59 @@ CBZ.studio.need(NEED).then(function () {
   el("redN").value = SET.redN; el("blueN").value = SET.blueN;
   /* THE MATCHUPS — the fights people argue about, one tap each. A button only
      fills the form (kind, count, weapon, training); START is still yours. */
+  /* A ROW MAY NAME ITS OWN GROUND. Every matchup before this one was a land
+     fight and the map was whatever you last chose; "8 ORCAS v 1 MEGALODON" on
+     the kill box is not a matchup, it is a bug. `map` makes the button choose
+     the venue too — and prefetches it, so the ground is in the cache before
+     the finger reaches START. */
   const MATCHUPS = [
     { label: "100 MEN v GORILLA", r: { u: "men", n: 100, w: "fists", t: "civ" }, b: { u: "gorilla", n: 1 } },
     { label: "LIONS v 1000 DOGS", r: { u: "lion", n: 100 }, b: { u: "dog", n: 1000 } },
     { label: "WOLVES v THE GUARD", r: { u: "gray_wolf", n: 60 }, b: { u: "men", n: 30, w: "ak47", t: "elite" } },
     { label: "BEARS v BARE HANDS", r: { u: "brown_bear", n: 12 }, b: { u: "men", n: 120, w: "fists", t: "thug" } },
     { label: "THE STAMPEDE", r: { u: "bison", n: 200 }, b: { u: "men", n: 60, w: "ak47", t: "pro" } },
+    /* ---- THE WATER. The owner's whole point about the sea is that enough
+       orcas beat a megalodon, and this page is where you SEE it: it has to be
+       a button, not something you assemble by hand from two dropdowns and a
+       number pad. The pod sizes below are the argument — 8 is the pod that
+       wins on the shipped rows, 4 is the pod that does not (measured; see
+       tools/visual-presets/water-arena.mjs). ---- */
+    { label: "8 ORCAS v 1 MEGALODON", map: "water", r: { u: "orca", n: 8 }, b: { u: "megalodon", n: 1 } },
+    { label: "4 ORCAS v 1 MEGALODON", map: "water", r: { u: "orca", n: 4 }, b: { u: "megalodon", n: 1 } },
+    /* A FLEET IS A CREW, NOT A BATTALION. Measured at 48 riflemen the
+       megalodon died in nineteen seconds and never reached a hull — bullets
+       are deliberately outside the body-mass model (a round does not care how
+       big you are), so forty-eight rifles kill anything in the game. Twenty
+       men off six boats with shotguns is a fishing fleet, and it is a fight. */
+    { label: "MEG v A FLEET", map: "water", r: { u: "megalodon", n: 1 },
+      b: { u: "men", n: 20, w: "shotgun", t: "civ" } },
+    { label: "GREAT WHITE v A BAIT BALL", map: "water", r: { u: "great_white_shark", n: 1 },
+      b: { u: "sardine", n: 400 } },
+    { label: "SHARK v SWIMMERS", map: "water", r: { u: "great_white_shark", n: 4 },
+      b: { u: "men", n: 30, w: "fists", t: "civ" } },
+    { label: "DIVERS + DOLPHINS v SHARKS", map: "water",
+      r: { u: "men|dolphin", n: 40, w: "sidearm", t: "pro" },
+      b: { u: "bull_shark|hammerhead_shark", n: 26 } },
+    { label: "THE REEF, ALIVE", map: "water", r: { u: "tuna|barracuda", n: 90 },
+      b: { u: "sardine|fish", n: 300 } },
+    /* THE TEST BED, AS A BUTTON. "A lightweight test arena, great for
+       animation" is a claim about a SHOT, not about a fight: one of each shark
+       swimming in open water with something to chase, so the STUDY camera (V,
+       and [ ] to walk the roster) can hold each of them still and you can
+       watch one tail beat finish. Small enough to boot in a blink. */
+    { label: "THE SHARK LINE-UP", map: "water",
+      r: { u: "great_white_shark|hammerhead_shark|bull_shark|orca", n: 8 },
+      b: { u: "sardine", n: 120 } },
   ];
   const muEl = el("matchups");
   MATCHUPS.forEach(function (mu) {
     const b = document.createElement("button");
     b.textContent = mu.label;
     b.addEventListener("click", function () {
+      if (mu.map && pickMap[mu.map]) pickMap[mu.map]();
       [["red", mu.r], ["blue", mu.b]].forEach(function (row) {
         const t = row[0], v = row[1];
-        el(t + "U").value = v.u;
+        setKind(el(t + "U"), v.u);
         el(t + "N").value = v.n;
         if (v.w) el(t + "W").value = v.w;
         if (v.t) el(t + "T").value = v.t;
@@ -729,6 +865,23 @@ CBZ.studio.need(NEED).then(function () {
     // default when gunfx already draws every impact. ?blood=0 refuses it even
     // for an animal army, which is the revert.
     if (BLOOD_Q !== "0" && (HAS_BEASTS || BLOOD_Q === "1")) p.push("blood");
+    /* AND THE SEA RIDES WITH THE SEA, for exactly the reason blood rides with
+       the animals — and this one was a real hole, not a tidy-up.
+
+       OPEN WATER and the marine roster shipped with the new models and NONE of
+       the systems that make them animals: no hunt, so a great white swam in a
+       straight line forever; no dorsal cutting the surface, which is the whole
+       above-water read; no blood in the water; no megalodon bite across a
+       hull; no bait ball to attack. Every one of those lives in a file that
+       was in no studio pack at all, so nothing errored and the pack list gave
+       no hint. The `marine` pack is where they live now.
+
+       Pulled when the venue is water OR either side is a sea animal, so a
+       battle of riflemen in a city costs precisely what it always did — the
+       same bargain `blood` strikes, measured by tools/battle-check.mjs.
+       ?marine=0 refuses it, which is the revert. */
+    const wetRoster = isWaterSpecies(SET.redU) || isWaterSpecies(SET.blueU);
+    if (MARINE_Q !== "0" && (MAPS[SET.map].ocean || wetRoster)) p.push("marine");
     return p;
   }
   // buying air is a decision that costs four packs; warm them on the change,
@@ -779,6 +932,12 @@ CBZ.studio.need(NEED).then(function () {
   const squads = { red: [], blue: [] };
   const AIR = { on: false, nuke: false, nukeAt: 42 };   // nukeAt rescaled at begin: it must land ON a battle, not after one
   let started = false, over = false, simT = 0, speed = 1, lastSpeed = 1;
+  /* HOW LONG UNTIL THIS PAGE SHOWED YOU SOMETHING. The water arena's whole
+     claim is that it is CHEAP — "a lightweight test arena" — and a claim about
+     cost that nobody measured is a claim about nothing. performance.now() in a
+     page context counts from navigation start, so stamping it on the first
+     frame IS time-to-first-frame, load included, with no clock to keep. */
+  let firstFrameAt = 0, winner = null;
   let bench = null;
   const stats = { red: { kills: 0, shots: 0, hits: 0 }, blue: { kills: 0, shots: 0, hits: 0 } };
   /* THE LEDGER, PER MAN AND PER GUN. The team totals above answer "who won";
@@ -851,6 +1010,223 @@ CBZ.studio.need(NEED).then(function () {
     CBZ.scene.add(m);
   }
 
+
+  /* ============================================================ THE SEA
+     OPEN WATER, and the reason it is thirty lines and not a water engine.
+
+     Everything on this page asks the MAP for a height: the men, the animals,
+     the rockets, the bombers, the camera arm and the director all call
+     groundAt(x,z). So the sea does not need to be a shader — it needs to be a
+     FUNCTION, because a vertex shader can only tell the GPU where the water is
+     and half this file needs the same answer on the CPU in the same frame.
+     Three sine trains, seeded off sWorld so the swell is the same swell on
+     every reload of the same URL, and one mesh that reads the function.
+
+     WHAT IS DELIBERATELY NOT HERE: world/water_spec.js's real ocean, the
+     waterfield, buoyancy, wakes, foam. All of it exists and all of it belongs
+     to the mainland; pulling it in would cost this venue its entire reason for
+     existing, which is that it boots in a fraction of the city's time. When
+     this arena needs a wake it should ask for the world's, not grow one. */
+  const SEA = {
+    on: false, t: 0, y0: 0,
+    seabed: -46,                 // where the bottom is. deep enough to READ as depth
+    trains: [], surf: null, pos: null, seg: 0, span: 0, cx: 0, cz: 0,
+    boats: [], fogSurface: null, under: null,
+  };
+  /* THE SWELL. Amplitudes and wavelengths are a real short-period ocean swell
+     (0.35-0.8 m at 40-95 m), not "some sines that looked wet": the whole point
+     of a test arena is that a shark's body has something honestly sized to
+     move through. Deterministic — sWorld, never Math.random. */
+  function seaBuildSwell() {
+    SEA.trains.length = 0;
+    for (let i = 0; i < 3; i++) {
+      const dir = sWorld() * Math.PI * 2;
+      const len = 40 + i * 28 + sWorld() * 22;          // m between crests
+      const k = (Math.PI * 2) / len;
+      SEA.trains.push({
+        a: 0.78 - i * 0.22,
+        kx: Math.cos(dir) * k, kz: Math.sin(dir) * k,
+        w: Math.sqrt(9.81 * k) * 0.42,                  // deep-water dispersion, slowed to read
+        p: sWorld() * Math.PI * 2,
+      });
+    }
+  }
+  function swellAt(x, z) {
+    let y = SEA.y0;
+    for (let i = 0; i < SEA.trains.length; i++) {
+      const s = SEA.trains[i];
+      y += s.a * Math.sin(x * s.kx + z * s.kz + SEA.t * s.w + s.p);
+    }
+    return y;
+  }
+  /* THE SURFACE, IN TWO PIECES. A live grid over the fight (the only part
+     anybody is close enough to see move) and one flat quad out to the fog so
+     the horizon is ocean rather than the inside of the sky dome. Same material,
+     so the seam between them is a colour match at 280 m through haze.
+
+     transparent + depthWrite:false is the whole trick that makes this venue
+     work: r128 draws opaque first, so every animal UNDER the water is already
+     in the buffer when the surface blends over it. That is why you can stand
+     above the swell and watch a shark's shape move beneath it. */
+  function seaSurface(cx, cz) {
+    const span = 620, seg = 64;
+    const mat = new THREE.MeshLambertMaterial({
+      color: 0x1f5f80, transparent: true, opacity: 0.76,
+      depthWrite: false, side: THREE.DoubleSide,
+    });
+    const g = new THREE.PlaneGeometry(span, span, seg, seg);
+    g.rotateX(-Math.PI / 2);
+    const m = new THREE.Mesh(g, mat);
+    m.position.set(cx, 0, cz);
+    m.renderOrder = 4;
+    CBZ.scene.add(m);
+    SEA.surf = m; SEA.pos = g.attributes.position; SEA.seg = seg; SEA.span = span;
+    SEA.cx = cx; SEA.cz = cz;
+    const far = new THREE.PlaneGeometry(26000, 26000);
+    far.rotateX(-Math.PI / 2);
+    const fm = new THREE.Mesh(far, mat);
+    fm.position.set(cx, 0, cz);
+    fm.renderOrder = 3;
+    fm.matrixAutoUpdate = false; fm.updateMatrix();
+    CBZ.scene.add(fm);
+  }
+  /* the live grid, once per FRAME (never per sub-step — the swell is scenery,
+     and 4 225 vertices x 3 sines is a real number). Only y moves. */
+  function seaStep(dt) {
+    if (!SEA.on) return;
+    SEA.t += dt;
+    const p = SEA.pos; if (!p) return;
+    const a = p.array, n = a.length / 3, cx = SEA.cx, cz = SEA.cz;
+    for (let i = 0; i < n; i++) {
+      const j = i * 3;
+      a[j + 1] = swellAt(a[j] + cx, a[j + 2] + cz);
+    }
+    p.needsUpdate = true;
+    for (let i = 0; i < SEA.boats.length; i++) {
+      const b = SEA.boats[i];
+      const y = swellAt(b.position.x, b.position.z);
+      b.position.y = y + b.userData.freeboard;
+      // a hull sits on the water it is on: pitch and roll come from the swell's
+      // own gradient across the boat's length and beam, measured, not faked
+      const dfx = swellAt(b.position.x + 5, b.position.z) - swellAt(b.position.x - 5, b.position.z);
+      const dfz = swellAt(b.position.x, b.position.z + 3) - swellAt(b.position.x, b.position.z - 3);
+      b.rotation.z = -dfx * 0.09;
+      b.rotation.x = dfz * 0.14;
+    }
+  }
+  /* THE REEF. "No land, or a single small reef/wreck for scale" — and scale is
+     the operative word: an ocean with nothing in it has no size at all, and a
+     megalodon looks exactly like a great white until something 40 m tall is
+     standing next to it. One pinnacle off the fight axis, rising from the bed
+     to just under the surface, with a broken hull across its shoulder. Seven
+     meshes, seven colliders, and it is the only thing on this map that can
+     block a line of sight. */
+  function seaReef(cx, cz) {
+    const rock = CBZ.cmat(0x36463f), rock2 = CBZ.cmat(0x2c3a36), steel = CBZ.cmat(0x4a4038);
+    const rx = cx, rz = cz + 96;
+    const put = function (mat, w, h, d, x, y, z, ry) {
+      const m = new THREE.Mesh(CBZ.boxGeom(w, h, d), mat);
+      m.position.set(x, y, z); m.rotation.y = ry || 0;
+      m.castShadow = false; m.receiveShadow = true;
+      CBZ.scene.add(m);
+      CBZ.micro.addBoxCollider(x, y, z, w, h, d);
+      return m;
+    };
+    const bed = SEA.seabed;
+    put(rock2, 46, 16, 40, rx, bed + 8, rz, 0.3);
+    put(rock, 30, 16, 26, rx + 3, bed + 22, rz - 3, -0.2);
+    put(rock, 17, 14, 15, rx - 2, bed + 36, rz + 2, 0.6);
+    put(rock, 9, 9, 8, rx + 1, bed + 45, rz - 1, 0.15);
+    // the wreck: a hull broken across the pinnacle's shoulder, keel to the sky
+    const wy = bed + 26;
+    put(steel, 34, 4.6, 8, rx - 19, wy, rz + 10, 0.42);
+    put(steel, 12, 3.2, 6.4, rx - 33, wy - 3.4, rz + 16, 0.42);
+    put(steel, 2, 13, 2, rx - 21, wy + 8, rz + 11, 0.42);
+  }
+  /* THE FLEET. Men on this map are SWIMMERS — there is no boat-crew unit and
+     inventing one would be a second kind of actor for one matchup. What there
+     is instead is the surface they came off: anchored hulls riding the swell
+     over the men's own start line, which is what makes "MEG v A FLEET" a
+     picture instead of a label. Scenery, not units: nothing shoots from them
+     and nothing can sink them. */
+  function seaFleet(cx, cz, side, n) {
+    const hull = CBZ.cmat(0xb9b3a4), deck = CBZ.cmat(0x6f4c33), cab = CBZ.cmat(0xd8d2c4);
+    for (let i = 0; i < n; i++) {
+      const g = new THREE.Group();
+      const L = 9 + sWorld() * 5, W = 3 + sWorld() * 1.4;
+      const h = new THREE.Mesh(CBZ.boxGeom(L, 2.1, W), hull); h.position.y = 0; g.add(h);
+      const d = new THREE.Mesh(CBZ.boxGeom(L * 0.94, 0.3, W * 0.9), deck); d.position.y = 1.1; g.add(d);
+      const c = new THREE.Mesh(CBZ.boxGeom(L * 0.3, 1.7, W * 0.66), cab);
+      c.position.set(-L * 0.18, 2.0, 0); g.add(c);
+      const a = i * 2.399963229728653;
+      g.position.set(cx + side * (34 + sWorld() * 26) + Math.cos(a) * 16,
+                     0, cz + Math.sin(a) * 26 + (sWorld() - 0.5) * 30);
+      g.rotation.y = sWorld() * Math.PI * 2;
+      g.userData.freeboard = 0.55;
+      CBZ.scene.add(g);
+      SEA.boats.push(g);
+    }
+  }
+  /* HOW DEEP A BODY SWIMS, and the bestiary already answered it. aquatic.js
+     declares `swimDepth` per row — how far the model origin rides below the
+     surface — because the alternative was a hard-coded name table in two files
+     (its own comment says so). A sardine shoal at 0.55 m, a bull shark at 1.5,
+     an orca at 2.6: read the row, never a list in this page. A man is a
+     swimmer, submerged to the shoulders. Anything that walked in here wades. */
+  function cruiseDepth(m) {
+    if (!m || SWIM_OLD) return 0;          // the revert: everything on the plane
+    if (!m.beast) return 1.3;
+    const sp = m.species || {};
+    if (!sp.aquatic) return 0.55;
+    return sp.swimDepth != null ? sp.swimDepth : Math.max(0.6, (sp.scale || 1) * 1.4);
+  }
+  /* AND IT CONVERGES ON THE FIGHT. Two animals holding their own cruise depths
+     never meet: a great white at 2.5 m and a sardine ball at 0.55 would pass
+     each other with two metres of clear water between the teeth and the fish,
+     and every strike would be a miss the bite gate correctly refused. Inside
+     the closing range a body rises or dives onto its target's line, rate-
+     limited, which is also just what a hunt in water looks like. */
+  const DIVE_RATE = 2.4;         // m/s a body can change depth by
+  function stepDepth(m, sdt) {
+    let want = cruiseDepth(m);
+    const t = m.tgt;
+    if (t && !t.dead) {
+      const d = Math.hypot(t.pos.x - m.pos.x, t.pos.z - m.pos.z);
+      const k = Math.max(0, Math.min(1, (30 - d) / 20));
+      want += ((t.swimD == null ? cruiseDepth(t) : t.swimD) - want) * k;
+    }
+    // and nothing hovers dead still in the sea
+    want += Math.sin(simT * 0.7 + m.i * 1.7) * 0.16;
+    if (want < 0.2) want = 0.2;
+    if (m.swimD == null) { m.swimD = want; m.swimDepth = want; return; }
+    const dd = want - m.swimD, lim = DIVE_RATE * sdt;
+    m.swimD += dd > lim ? lim : (dd < -lim ? -lim : dd);
+    m.swimDepth = m.swimD;               // creature_combat's restY reads this name
+  }
+  /* UNDER. The camera is allowed below the waterline on this map (see camFloor)
+     and the moment it goes there the scene has to stop pretending: fog closes
+     to a hundred metres of green-blue, the sky dome comes off, and the clear
+     colour becomes water. One boolean, flipped on a crossing, so it costs
+     nothing on every other map and nothing on the frames either side of it. */
+  function seaUnderwater() {
+    if (!SEA.on || SWIM_OLD || !CBZ.scene.fog) return;
+    const c = CBZ.camera.position;
+    const under = c.y < swellAt(c.x, c.z) - 0.2;
+    if (under === SEA.under) return;
+    SEA.under = under;
+    const fog = CBZ.scene.fog;
+    if (under) {
+      if (!SEA.fogSurface) SEA.fogSurface = { hex: fog.color.getHex(), near: fog.near, far: fog.far };
+      fog.color.setHex(0x0d3245); fog.near = 3; fog.far = 130;
+      CBZ.scene.background = new THREE.Color(0x0b2a3c);
+      if (CBZ.micro.skyDome) CBZ.micro.skyDome.visible = false;
+    } else if (SEA.fogSurface) {
+      fog.color.setHex(SEA.fogSurface.hex); fog.near = SEA.fogSurface.near; fog.far = SEA.fogSurface.far;
+      CBZ.scene.background = null;
+      if (CBZ.micro.skyDome) CBZ.micro.skyDome.visible = true;
+    }
+  }
+
   /* NOBODY SPAWNS INSIDE A BUILDING. The desert maps could get away without
      this — a dune has nothing in it — but the moment the ground is a real
      downtown, a ranked column drawn on paper puts a third of an army inside
@@ -882,7 +1258,11 @@ CBZ.studio.need(NEED).then(function () {
      INSIDE one another and spent the opening seconds of the battle shoving
      itself apart. Each claim carries the radius that took it, so a pair only
      has to clear what the two of them actually occupy. */
+  /* SPAWN CLAIMS BELONG TO ONE ROSTER. Cleared at buildMap, and again by
+     __battle.restage() below — four hundred sardine claims left standing would
+     push the next matchup out into open water for no reason anybody could see. */
   const _claim = [];
+  function clearClaims() { _claim.length = 0; }
   const CLAIM_R = 0.575;         // a man's half of the old 1.15 m pair
   function crowdedAt(x, z, r) {
     for (let i = 0; i < _claim.length; i++) {
@@ -955,7 +1335,12 @@ CBZ.studio.need(NEED).then(function () {
        three-block approach now that still has to be fought through. */
     const M = MAPS[id] || MAPS.arena;
     _claim.length = 0;          // spawn claims belong to ONE build
-    let gap = { city: 170, island: 175, field: 180, dunes: 150, arena: 120 }[id] || 150;
+    /* ...and OPEN WATER is the shortest of them, measured the same way the
+       others were. Water has no cover, no walls to path around and no crest to
+       climb: closure there is a straight line at the animals' own charge speed
+       (an orca's works out at 6.7 m/s, so 110 m of no-man's land is ~8 s of
+       swimming before contact) and there is nothing to look at on the way. */
+    let gap = { city: 170, island: 175, field: 180, dunes: 150, arena: 120, water: 110 }[id] || 150;
     let gapOverride = 0;      // measured venues size their own no-man's land
     let groundAt = function () { return 0; };
     let cx = 0, cz = 0, spawners = null;
@@ -973,6 +1358,47 @@ CBZ.studio.need(NEED).then(function () {
         crate(x, z, 2.4 + sWorld() * 4.4, tall ? 1.9 + sWorld() * 0.6 : 1.15,
           1.6 + sWorld() * 2.6, sWorld() < 0.5 ? 0x7a5f43 : 0x5d6a70);
       }
+    } else if (id === "water") {
+      /* OPEN WATER. No world() call, no raise(), no town(): a swell function,
+         a seabed, a reef, and whatever fleet the roster earns. This branch is
+         the map's cost, and it is deliberately the shortest one in the file. */
+      SEA.on = true; SEA.t = 0; SEA.boats.length = 0; SEA.under = null; SEA.fogSurface = null;
+      /* the fourth shim, same pattern as queryCollidersNear/floorAt/collide up
+         top: creature_combat's restY() resolves an aquatic body to
+         CBZ.citySeaHeightAt(x,z) minus its own swimDepth, so without these two
+         names the shared strike driver would rest a shark at CBZ.SEA_Y and
+         fight this page's own depth every frame. Route the name, never fork
+         the file. (stepDepth keeps actor.swimDepth in step with actor.swimD.) */
+      CBZ.citySeaHeightAt = function (x, z) { return swellAt(x, z); };
+      cx = 0; cz = 0;
+      seaBuildSwell();
+      // the bed first, so the surface blends over something and not over sky
+      seaPlate(SEA.seabed);
+      seaSurface(cx, cz);
+      if (Q.get("reef") !== "0") seaReef(cx, cz);
+      groundAt = function (x, z) { return swellAt(x, z); };
+      // a side of MEN is a side that came off boats — see seaFleet
+      if (Q.get("fleet") !== "0") {
+        if (SET.redU === "men") seaFleet(cx, cz, -1, Math.max(1, Math.min(9, Math.ceil(SET.redN / 8))));
+        if (SET.blueU === "men") seaFleet(cx, cz, 1, Math.max(1, Math.min(9, Math.ceil(SET.blueN / 8))));
+      }
+      /* AND A SHOAL IS NOT A COLUMN. The ranked grid below is right for men
+         walking up a street and wrong for four hundred sardines: water has no
+         ranks, so each side forms a golden-angle disc around its own start
+         point, sized by how many of it there are. Deterministic (sWorld), and
+         it feeds the same freeSpot() claim pass everything else uses. */
+      spawners = (function () {
+        const mk = function (side, n) {
+          const r = Math.max(9, Math.sqrt(Math.max(1, n)) * 3.4);
+          return function (i) {
+            const a = i * 2.399963229728653;
+            const d = Math.sqrt((i + 0.5) / Math.max(1, n)) * r;
+            return { x: cx + side * gap * 0.5 + Math.cos(a) * d + (sWorld() - 0.5) * 2,
+                     z: cz + Math.sin(a) * d * 1.35 + (sWorld() - 0.5) * 2 };
+          };
+        };
+        return { red: mk(-1, SET.redN), blue: mk(1, SET.blueN) };
+      })();
     } else if (id === "dunes") {
       world = CBZ.studio.world("desert", { seed: "npcwar" });
       groundAt = (world && world.heightAt) || groundAt;
@@ -1112,8 +1538,26 @@ CBZ.studio.need(NEED).then(function () {
       const z = cz + (row - 4.5) * 3.4 + (col % 2) * 1.7 + (sWorld() - 0.5) * 1.8;
       return { x: x, z: z };
     };
+    /* WHERE A BODY ACTUALLY SITS, which on every other map is the ground and
+       on OPEN WATER is not. groundAt answers "where is the surface" — the
+       camera, the rockets, the bombers and the director all still want that —
+       and bodyY answers "where is THIS body", which is the surface minus its
+       own swim depth. Two questions that used to be one because on land they
+       always had the same answer. */
+    const water = id === "water";
+    const bodyY = water
+      ? function (m, x, z) { return swellAt(x, z) - (m && m.swimD != null ? m.swimD : cruiseDepth(m)); }
+      : function (m, x, z) { return groundAt(x, z); };
+    /* AND HOW LOW THE CAMERA MAY GO. Everywhere else the lens stops 1.6 m over
+       the ground because the ground is opaque. Here the whole point is that you
+       can put the lens UNDER the swell and watch a shark come at it, so the
+       floor is the seabed instead — the sea is not a wall. */
+    const camFloor = (water && !SWIM_OLD)
+      ? function () { return SEA.seabed + 2.2; }
+      : function (x, z) { return groundAt(x, z) + 1.6; };
     return {
       id: id, gap: gap, cx: cx, cz: cz, groundAt: groundAt, relief: relief,
+      water: water, bodyY: bodyY, camFloor: camFloor,
       /* TERRAIN JOINS THE SIGHT LINE — but only where groundAt is genuinely
          TERRAIN. The dunes map's height function is the desert's own analytic
          surface, so a sample along the eye line is sand and nothing else. A
@@ -1166,7 +1610,15 @@ CBZ.studio.need(NEED).then(function () {
       yaw: group.rotation.y, speed: 0,
       hp: bench ? 1e9 : tr.hp, maxHp: bench ? 1e9 : tr.hp,
       armed: !fists, weapon: fists ? null : GUN_NAME[wid], wid: wid,
-      fists: fists, punch: PUNCH[tr.id] || 8, rad: 0.45,
+      /* AND NOBODY THROWS A HOOK WHILE TREADING WATER. A punch delivers a
+         fixed impulse THROUGH THE GROUND — that is what bracing is — and a
+         swimmer has no ground to push against. Without this a bare-handed
+         crowd in the open sea arithmetics a great white to death exactly the
+         way a hundred men used to arithmetic a gorilla, which is the fight
+         systems/bodymass.js exists to have stopped. A quarter is a judgement,
+         not a measurement, and ?swimpunch=N is the dial. */
+      fists: fists, rad: 0.45,
+      punch: (PUNCH[tr.id] || 8) * (MAP.water ? SWIM_PUNCH : 1),
       launcher: !!(w && w.explosive),
       mag: w ? (w.magSize || w.mag || 30) : 0, magSize: w ? (w.magSize || w.mag || 30) : 0,
       cool: 0.4 + lcg() * 1.2, reloadT: 0,
@@ -1194,6 +1646,7 @@ CBZ.studio.need(NEED).then(function () {
     else if (tr.id === "pro") man.kind = "guard";
     else if (tr.id === "thug") man.aggr = 0.92;
     if (!fists && CBZ.syncActorWeapon) CBZ.syncActorWeapon(man);
+    if (MAP.water) { man.swimD = cruiseDepth(man); man.pos.y = MAP.bodyY(man, at.x, at.z); }
     return man;
   }
 
@@ -1228,15 +1681,32 @@ CBZ.studio.need(NEED).then(function () {
     };
     return b;
   }
-  function makeBeast(teamId, i) {
-    const spId = teamId === "red" ? SET.redU : SET.blueU;
+  function makeBeast(teamId, i, spIdIn) {
+    const spId = spIdIn || kindAt(teamId === "red" ? SET.redU : SET.blueU, i);
     const sp = (CBZ.WILDLIFE_SPECIES || {})[spId];
     if (!sp || !sp.build) return null;
     const T = TEAMS[teamId];
     let group = null;
     try { group = sp.build({ THREE: THREE, mat: CBZ.cmat, rng: lcg }); } catch (e) { console.warn("[war] species build failed:", spId, e); }
     if (!group) return null;
-    const s = sp.scale || 1;
+    /* EVERY ANIMAL IS AN INDIVIDUAL, if a neighbour publishes the draw.
+       city/wildlife_traits.js gives each body its own multiplier off a position
+       hash — most of a shoal near the species norm, the extremes earned, and
+       roughly one in a few hundred off the monster tail. Read GUARDED, so this
+       page behaves exactly as it always did when that file is not loaded.
+
+       The hash argument is the spawn INDEX rather than the spawn point, and
+       deliberately: the point is not known until after the body is measured,
+       and (i, team) is just as order-independent, which is the property the
+       traits file actually needs. */
+    let sizeMul = 1;
+    if (CBZ.wildlifeTraits && CBZ.wildlifeTraits.sampleSize) {
+      try {
+        const v = +CBZ.wildlifeTraits.sampleSize(sp, (teamId === "red" ? -1 : 1) * (i + 1) * 3.7, (i + 1) * 2.3);
+        if (v > 0.05 && v < 4) sizeMul = v;
+      } catch (e) {}
+    }
+    const s = (sp.scale || 1) * sizeMul;
     group.scale.setScalar(s);
     // measure the body once: separation radius, aim heights, the collar seat
     const bb = new THREE.Box3().setFromObject(group);
@@ -1253,6 +1723,26 @@ CBZ.studio.need(NEED).then(function () {
     const spanX = Math.max(0.3, bb.max.x - bb.min.x);     // nose to tail (+X authored)
     const spanZ = Math.max(0.3, bb.max.z - bb.min.z);     // across the shoulders
     const rad = Math.min(3.4, Math.max(0.45, (spanX + spanZ) * 0.28));
+    /* ...AND WHERE ITS TEETH ARE, WHICH IS NOT THE SAME NUMBER AND ON A LONG
+       ANIMAL IS NOT EVEN CLOSE.
+
+       `rad` is a circle standing in for a body that can face any way, and it is
+       CAPPED at 3.4 m because an uncapped one would have a herd of elephants
+       spawning a bus apart. creature_combat's tooth-contact gate does not care
+       about that circle at all: it asks whether the attacker's own JAW POINT —
+       out at the front of the model — landed inside the victim. For a lion
+       those two numbers are within a body's breadth of each other and nobody
+       ever noticed. For a MEGALODON the nose is ~10 m in front of the centre
+       and the cap holds the centre 3.9 m off the mark, so the jaws close eleven
+       metres BEYOND the man being bitten: MEASURED, one megalodon against
+       twenty men landed 0 bites in 45 s and missed 12. It was not a balance
+       problem; the animal was physically unable to reach anything.
+
+       So the nose gets measured too, and both the strike range and the
+       stand-off below are stated in terms of it. Man-sized animals answer
+       exactly what they always did — the max() only bites when the body is
+       genuinely longer than it is wide. */
+    const noseR = Math.max(0.2, bb.max.x);
     noteBodyRadius(rad);
     // the coat stays the animal's own — a thin team collar says whose side,
     // seated on the neck line the box measured rather than a guessed height
@@ -1269,7 +1759,15 @@ CBZ.studio.need(NEED).then(function () {
       group: group, pos: group.position, target: V(),
       heading: teamId === "red" ? 0 : Math.PI, faceH: teamId === "red" ? 0 : Math.PI,
       yaw: 0, speed: 0, state: "wander",           // gait's flee-bound reads .state
-      hp: bench ? 1e9 : sp.hp || 40, maxHp: bench ? 1e9 : sp.hp || 40,
+      /* SIZE IS LOAD-BEARING, NOT COSMETIC — the traits file's own words. The
+         exponent is that file's too (sizeKit: dmg *= k^1.35), used on BOTH the
+         bite and the body so a fight between two average individuals of the
+         same species is numerically identical and only the MISMATCHES move.
+         Exactly 1.0 when no size draw landed, so a page without
+         wildlife_traits is byte-for-byte what it always was. */
+      hp: bench ? 1e9 : Math.round((sp.hp || 40) * Math.pow(sizeMul, 1.35)),
+      maxHp: bench ? 1e9 : Math.round((sp.hp || 40) * Math.pow(sizeMul, 1.35)),
+      _sizeMul: sizeMul, _sizeEff: s,
       armed: false, weapon: null, launcher: false, mag: 0, magSize: 0,
       cool: 0, reloadT: 0,
       rad: rad,
@@ -1280,7 +1778,8 @@ CBZ.studio.need(NEED).then(function () {
          strike gate) AND, now that bodies keep their real footprints, a
          second animal of its own kind. Two lions holding 2.6 m apart with a
          2.47 m reach would have circled each other forever. */
-      reach: Math.max(1.2 + s * 1.1, rad * 2 + 0.55),
+      reach: Math.max(1.2 + s * 1.1, rad * 2 + 0.55, noseR * 0.95),
+      noseR: noseR,
       eyeH: Math.max(0.5, H * 0.8), losY: Math.max(0.35, H * 0.55),
       aimY: Math.max(0.3, H * 0.5), headY: Math.max(0.45, H * 0.8),
       tgt: null, losBadT: 0, slot: "hold", thinkAt: simT + lcg() * 0.3, lastThink: simT,
@@ -1289,7 +1788,16 @@ CBZ.studio.need(NEED).then(function () {
       kills: 0, shotsF: 0, hitsF: 0, reloads: 0,
     };
     CBZ.faceAnimalHeading(m, m.heading);
-    if (CBZ.wildlifeRig) CBZ.wildlifeRig.buildGait(m);
+    /* THE BODY THAT SWIMS GETS THE RIG THAT SWIMS. buildGait bails on an
+       aquatic species by construction (a shark has no leg columns), so before
+       the swim rig moved out of the hunting engine into wildlife_rig.js this
+       page could put a megalodon on the field and it would slide through the
+       sea as one rigid mesh with its jaw welded shut. Same discovery pass, same
+       file, same pack — creature_combat's lunge already reaches for CBZ.swimJaw
+       and now finds something on the other end of it. */
+    if (CBZ.buildSwimRig && !SWIM_OLD) { try { CBZ.buildSwimRig(m); } catch (e) {} }
+    if (!m.swim && CBZ.wildlifeRig) CBZ.wildlifeRig.buildGait(m);
+    if (MAP.water) { m.swimD = cruiseDepth(m); m.pos.y = MAP.bodyY(m, at.x, at.z); }
     m.target.set(at.x, 0, at.z);
     (squads[teamId][m.sq] = squads[teamId][m.sq] || []).push(m);
     if (AIR.on && CBZ.ordnance && CBZ.ordnance.addTarget) {
@@ -1325,14 +1833,18 @@ CBZ.studio.need(NEED).then(function () {
     if (t && !t.dead) {
       const cx = t.pos.x - a.pos.x, cz = t.pos.z - a.pos.z;
       const d = Math.hypot(cx, cz);
-      const keep = (a.rad || 0.5) + (t.rad || 0.45);
+      /* AND IT STOPS WHERE ITS MOUTH ARRIVES, not where its middle does — see
+         noseR in makeBeast. A body whose nose is well in front of its centre
+         has to hold FURTHER OFF, or the jaws close past the thing they are
+         biting. Man-sized animals take the first term, exactly as before. */
+      const keep = Math.max((a.rad || 0.5) + (t.rad || 0.45), (a.noseR || 0) * 0.86);
       if (d - step < keep) step = Math.max(0, d - keep);
     }
     if (step <= 0) return;
     a.pos.x += dx * step;
     a.pos.z += dz * step;
     CBZ.micro.resolveCircle(a.pos, a.rad || 0.6, a.pos.y, 1.8);
-    a.pos.y = MAP.groundAt(a.pos.x, a.pos.z);
+    a.pos.y = MAP.bodyY(a, a.pos.x, a.pos.z);
   }
   function beastFight(m, tgt, sdt) {
     let o = m._bf;
@@ -1359,6 +1871,18 @@ CBZ.studio.need(NEED).then(function () {
       };
     }
     o.speed = m.tn.chase * 0.9;
+    /* WHAT AN INDIVIDUAL BRINGS TO THE STRIKE, both read GUARDED and both 1.0
+       when the neighbour that publishes them is not loaded:
+         size    a bigger animal bites harder (^1.6, a linear-dimension bite
+                 force — city/marine_predation.js's exponent, not a new one);
+         hunger  a starving predator commits faster and a fed one dawdles.
+                 wildlife_traits states that as visible behaviour; this is the
+                 one line that makes it visible in a battle. */
+    const k = m._sizeMul || 1;
+    let hgM = 1;
+    if (CBZ.wildlifeHunger) { try { hgM = 0.78 + (1 - CBZ.wildlifeHunger(m)) * 0.44; } catch (e) {} }
+    o.dmg = m.tn.dmg * (k === 1 ? 1 : Math.pow(k, 1.35));
+    o.rate = m.tn.rate * (k === 1 ? 1 : Math.sqrt(k)) * hgM;
     m.speed = 2;                       // close-quarters footwork, for the sprint-target test
     const res = CBZ.creatureFight(m, tgt, sdt, o);
     /* THE TEETH, COUNTED. creature_combat now lands a strike on real jaw
@@ -1443,6 +1967,10 @@ CBZ.studio.need(NEED).then(function () {
       } catch (e) {}
     }
     m.armed = false;
+    // AND THE PAGE LOOKS AT IT. A 15 m animal going down is the moment this
+    // arena exists for and it used to happen in three frames somewhere off
+    // camera; killCam refuses politely on every path that would make it a lie.
+    killCam(m);
     corpses.push(m);
     if (corpses.length > (DEATH_OLD ? 260 : CORPSE_MAX)) retireOldestCorpse();
     if (camDist2(m.pos) < 120 * 120 || aliveCount("red") + aliveCount("blue") < 40) {
@@ -2742,6 +3270,35 @@ CBZ.studio.need(NEED).then(function () {
   // strike itself is creature_combat's, in the bubble stepMan owns.
   function thinkBeast(m, tgt, thinkDt) {
     const tn = m.tn;
+    /* AN ANIMAL DOES NOT CHASE ONE MARK ACROSS THE WHOLE MAP WHILE SOMETHING
+       ELSE IS BITING ITS FLANK.
+
+       Targets are sticky until the mark dies, which is right on land: a lion
+       runs a deer down, terrain corners it, and the fight ends. In OPEN WATER
+       it never ends — two animals of similar speed in a stern chase are a
+       conga line, and MEASURED, eight orcas and a megalodon spent seventy
+       simulated seconds in one with nobody so much as bleeding out, because the
+       megalodon had latched onto the one orca that broke off at 64 m while
+       seven more were inside ten.
+
+       So a beast that is FAR from its mark re-asks, on a slow cadence, and only
+       switches for something genuinely nearer (0.6x). Cheap (one grid query a
+       second per far-off animal), and it is a fix for land packs too — a wolf
+       should take the man in front of it, not the one it first saw. */
+    if (tgt && !tgt.dead) {
+      const far = Math.hypot(tgt.pos.x - m.pos.x, tgt.pos.z - m.pos.z);
+      if (far > 16) {
+        m.repickT = (m.repickT || 0) - thinkDt;
+        if (m.repickT <= 0) {
+          m.repickT = 0.9 + (m.i % 5) * 0.13;      // staggered, never a whole pod at once
+          const o = pickTarget(m, far);
+          if (o && o !== tgt &&
+              Math.hypot(o.pos.x - m.pos.x, o.pos.z - m.pos.z) < far * 0.6) {
+            m.tgt = o; tgt = o; m.losBadT = 0;
+          }
+        }
+      }
+    }
     // a mauled animal that is not one of the brave ones quits and runs — and
     // is run down or lives by the same chase-and-retreat physics the men
     // already play by. Prey species skip straight to flight.
@@ -3065,7 +3622,8 @@ CBZ.studio.need(NEED).then(function () {
       }
     }
     m.speed = spd;
-    m.pos.y = MAP.groundAt(m.pos.x, m.pos.z);
+    if (MAP.water) stepDepth(m, sdt);
+    m.pos.y = MAP.bodyY(m, m.pos.x, m.pos.z);
 
     // face the fight when there is one, else the walk
     const tgt = m.tgt;
@@ -3180,6 +3738,7 @@ CBZ.studio.need(NEED).then(function () {
     wFocus: V(), wYaw: 0.9, wPitch: 0.62, wDist: 64,
     followM: null, cutAt: 0, shot: "crane", craneSpin: 0.05,
     followTeam: "red", holdT: 0, reptT: 0,
+    waveLock: false, waveY: 0.3,
   };
   /* THE CAMERA DOES NOT GO THROUGH A WALL.
 
@@ -3194,14 +3753,25 @@ CBZ.studio.need(NEED).then(function () {
      than a jump) and eases back out, which is the ordinary third-person
      answer and the reason a pillar does not make the shot pump. */
   let camOccl = 1;
+  /* HOW LOW THE LENS MAY LOOK FROM. Everywhere else the ground is opaque, so a
+     camera below its own focus is a camera inside a hill and the arm has always
+     been clamped to +0.12 rad. In OPEN WATER the sea is NOT a wall — the shot
+     that shows a shark best is the one taken from under it, looking up at a
+     bright surface — so the clamp goes negative exactly there and nowhere else.
+     (?swim=old restores the flat clamp with everything else in that wave.) */
+  function pitchLo() { return (MAP && MAP.water && !SWIM_OLD) ? -1.15 : 0.12; }
   function camApply(dt) {
+    // THE LENS AT WAVE HEIGHT is a property of the SHOT, so it is read here
+    // rather than written by three different framing functions that would each
+    // have to remember to clear it.
+    cam.waveLock = cam.mode === "surface" && SEA.on && !SWIM_OLD;
     const k = 1 - Math.pow(0.002, dt);
     cam.focus.lerp(cam.wFocus, k);
     cam.yaw += (cam.wYaw - cam.yaw) * k;
     cam.pitch += (cam.wPitch - cam.pitch) * k;
     cam.dist += (cam.wDist - cam.dist) * k;
     const c = CBZ.camera;
-    const cp = Math.max(0.12, Math.min(1.42, cam.pitch));
+    const cp = Math.max(pitchLo(), Math.min(1.42, cam.pitch));
     const sx = Math.sin(cam.yaw) * Math.cos(cp), sz = Math.cos(cam.yaw) * Math.cos(cp), sy = Math.sin(cp);
     const fy = cam.focus.y + 1.2;
     let want = 1;
@@ -3210,7 +3780,7 @@ CBZ.studio.need(NEED).then(function () {
         const d = cam.dist * want;
         const px = cam.focus.x + sx * d, pz = cam.focus.z + sz * d;
         let py = cam.focus.y + sy * d;
-        const g = MAP.groundAt(px, pz) + 1.6;
+        const g = MAP.camFloor(px, pz);
         if (py < g) py = g;
         if (!CBZ.micro.segmentBlocked(cam.focus.x, fy, cam.focus.z, px, py, pz)) break;
         want *= 0.62;
@@ -3221,8 +3791,14 @@ CBZ.studio.need(NEED).then(function () {
     const dist = cam.dist * camOccl;
     const x = cam.focus.x + sx * dist, z = cam.focus.z + sz * dist;
     let y = cam.focus.y + sy * dist;
-    const g = MAP.groundAt(x, z) + 1.6;
+    const g = MAP.camFloor(x, z);
     if (y < g) y = g;
+    /* AND THE ONE SHOT WHOSE HEIGHT IS NOT THE ARM'S TO DECIDE. A lens riding
+       the swell has to be ON the swell — at the water under ITSELF, not at the
+       water under the animal it is watching — so the crests between the two
+       rise past the glass and a dorsal fin cuts the frame at eye level. It is
+       the same swellAt() every body in the sea floats on, read one more time. */
+    if (cam.waveLock) y = swellAt(x, z) + (cam.waveY == null ? 0.3 : cam.waveY);
     c.position.set(x, y, z);
     c.lookAt(cam.focus.x, fy, cam.focus.z);
   }
@@ -3335,7 +3911,7 @@ CBZ.studio.need(NEED).then(function () {
     for (let i = 0; i < tries.length; i++) {
       const y = want + tries[i];
       const px = fx + Math.sin(y) * dist * 0.86, pz = fz + Math.cos(y) * dist * 0.86;
-      const py = Math.max(MAP.groundAt(px, pz) + 1.6, fy + dist * 0.4);
+      const py = Math.max(MAP.camFloor(px, pz), fy + dist * 0.4);
       if (!CBZ.micro.segmentBlocked || !CBZ.micro.segmentBlocked(fx, fy, fz, px, py, pz)) return y;
     }
     return want;
@@ -3398,6 +3974,200 @@ CBZ.studio.need(NEED).then(function () {
     }
     if (cam.holdT > 0) cam.holdT -= dt;
   }
+
+  /* ============================================================ THE STUDY DESK
+     AN ARENA YOU CANNOT STAND STILL IN IS NOT A TEST BED.
+
+     The owner's brief for OPEN WATER was "a lightweight test arena, great for
+     animation" — and every camera this page had was built for the opposite
+     job. AUTO cuts every eight seconds by design, FOLLOW rides a rifleman's
+     shoulder, FREE is a pair of hands. None of them will hold one shark in
+     frame long enough to watch a single tail beat finish, which is the only
+     thing an animation test bed is for.
+
+     So: three more postures, each of them ABOUT one body or about the water it
+     is in, and none of them ever cuts.
+
+       study    LOCKED ON ONE ANIMAL, orbiting it at a range taken off the
+                BODY'S OWN measured length — noseR, the half-length this page
+                already measures off the bounding box at spawn — so a sardine
+                and a megalodon fill the same fraction of the frame and you
+                never have to touch the wheel. [ and ] walk the roster. With
+                the sim clock at a quarter (key 5) and the frame step (.), that
+                is the whole test bed the brief asked for.
+       under    THE SEAT NOBODY HAD. Below the swell looking UP, the animal a
+                silhouette against a bright surface. This shot was not merely
+                missing, it was IMPOSSIBLE: the arm's pitch clamped at +0.12
+                rad, so the lens could never get below the thing it was
+                pointing at. See pitchLo().
+       surface  THE LENS AT WAVE HEIGHT — y is the swell itself, at the
+                camera's own position, so crests roll between you and the fish
+                and a dorsal fin cuts the frame at eye level.
+
+     STUDY.m is a REFERENCE to a live body, so it can go stale exactly once (a
+     corpse), and every framing function revalidates before it reads. */
+  const STUDY = { m: null, idx: 0, orbit: 0.9, spin: 0.28 };
+  function studyList() {
+    const out = [];
+    for (let i = 0; i < men.length; i++) if (!men[i].dead && men[i].beast) out.push(men[i]);
+    // a battle with no animals in it still deserves a locked lens
+    if (!out.length) for (let i = 0; i < men.length; i++) if (!men[i].dead) out.push(men[i]);
+    return out;
+  }
+  // no argument: the BIGGEST thing alive, because that is what you came to
+  // look at and because it is stable across two runs of the same war.
+  // +/-1: walk the roster from wherever the lens already was.
+  function studyPick(delta) {
+    const list = studyList();
+    if (!list.length) { STUDY.m = null; return null; }
+    if (delta == null) {
+      let bi = 0;
+      for (let i = 1; i < list.length; i++) {
+        if ((list[i].noseR || list[i].rad || 0) > (list[bi].noseR || list[bi].rad || 0)) bi = i;
+      }
+      STUDY.idx = bi;
+    } else {
+      const cur = STUDY.m ? list.indexOf(STUDY.m) : -1;
+      const from = cur >= 0 ? cur : STUDY.idx;
+      STUDY.idx = ((from + delta) % list.length + list.length) % list.length;
+    }
+    STUDY.m = list[STUDY.idx];
+    return STUDY.m;
+  }
+  // a tool asks for a body by species id or by index; a person never does
+  function studyPickBy(sel) {
+    const list = studyList();
+    if (!list.length) { STUDY.m = null; return null; }
+    let idx = -1;
+    if (typeof sel === "number") idx = ((sel | 0) % list.length + list.length) % list.length;
+    else if (typeof sel === "string") {
+      for (let i = 0; i < list.length; i++) {
+        if (list[i].beast && list[i].species && list[i].species.id === sel) { idx = i; break; }
+      }
+      if (idx < 0) return studyPick(null);
+    }
+    if (idx < 0) return studyPick(null);
+    STUDY.idx = idx; STUDY.m = list[idx];
+    return STUDY.m;
+  }
+  /* HOW FAR BACK THE LENS SITS, and it is the body that answers. A constant
+     distance is the reason a shot of a sardine and a shot of a megalodon are
+     the same picture of nothing: 2.4 body lengths puts the whole animal in
+     frame with room for the water it is moving through, at 0.6 m and at 18 m
+     alike. Bounded so a bait fish is not photographed from inside its own gills
+     and a whale is not photographed from orbit. */
+  function studyRange(m) {
+    const len = Math.max(0.6, (m.noseR || m.rad || 0.5) * 2);
+    return Math.max(3.2, Math.min(140, len * 2.4 + 1.5));
+  }
+  function studyBody() {
+    let m = STUDY.m;
+    if (!m || m.dead) m = studyPick(null);
+    return m;
+  }
+  function studyHold(m) {
+    cam.followM = m;              // the card names whatever the lens is on
+    cam.shot = "study";
+  }
+  function frameStudy(dt) {
+    const m = studyBody();
+    if (!m) { cam.wFocus.set(MAP.cx, MAP.groundAt(MAP.cx, MAP.cz), MAP.cz); cam.wDist = 60; return; }
+    STUDY.orbit += STUDY.spin * dt;
+    cam.wFocus.set(m.pos.x, m.pos.y + (m.eyeH || 1) * 0.3, m.pos.z);
+    cam.wYaw = (m.faceH == null ? 0 : m.faceH) + STUDY.orbit;
+    cam.wPitch = 0.22;
+    cam.wDist = studyRange(m);
+    studyHold(m);
+  }
+  function frameUnder(dt) {
+    const m = studyBody();
+    STUDY.orbit += STUDY.spin * 0.5 * dt;
+    const hs = m ? { x: m.pos.x, z: m.pos.z } : (hotspot() || { x: MAP.cx, z: MAP.cz });
+    const y = m ? m.pos.y
+      : (MAP.water ? swellAt(hs.x, hs.z) - 3 : MAP.groundAt(hs.x, hs.z) + 1);
+    cam.wFocus.set(hs.x, y, hs.z);
+    cam.wYaw = STUDY.orbit;
+    cam.wPitch = -0.46;                       // below the body, looking up at it
+    cam.wDist = m ? Math.max(7, studyRange(m) * 0.85) : 26;
+    studyHold(m);
+  }
+  function frameWave(dt) {
+    const m = studyBody();
+    STUDY.orbit += STUDY.spin * 0.4 * dt;
+    const hs = m ? { x: m.pos.x, z: m.pos.z } : (hotspot() || { x: MAP.cx, z: MAP.cz });
+    cam.wFocus.set(hs.x, MAP.water ? swellAt(hs.x, hs.z) : MAP.groundAt(hs.x, hs.z) + 0.6, hs.z);
+    cam.wYaw = STUDY.orbit;
+    cam.wPitch = 0.02;                        // dead level: the horizon is the shot
+    cam.wDist = m ? Math.max(9, studyRange(m) * 1.15) : 30;
+    studyHold(m);
+  }
+
+  /* ============================================================ THE KILL CAM
+     A TAKEDOWN IS OVER IN ABOUT A FIFTH OF A SECOND.
+
+     creature_combat's strike lands, quadruped_ragdoll takes the body, and at
+     SPEED 1 the whole event is three frames — which is exactly why "eight
+     orcas kill a megalodon" reads as a health bar emptying rather than as a
+     kill. The page already owns a sim clock that can go to a quarter and a
+     camera that can be pointed at a body; the kill cam is those two things
+     fired by the death itself.
+
+     WALL-CLOCKED, NOT SIM-CLOCKED, and that is not a detail: this is a piece
+     of DIRECTION, not part of the battle, so a two-second beat measured on the
+     clock it just slowed would take eight seconds to play. It restores the
+     speed it found, never the dial's default.
+
+     It refuses in three situations, all of them for the same reason — the shot
+     would be a lie or a cost:
+       · during a benchmark (the benchmark exists to report frames, and an
+         unannounced camera cut and a speed change are two variables in it);
+       · while a person is driving the camera by hand (FREE means free);
+       · for a body that is not in the shot, or a man (a rifleman falling is
+         the ordinary texture of this page; a 15 m animal going down is not).
+     ?killcam=0 is the revert. */
+  const KILLCAM = Q.get("killcam") !== "0";
+  const KILL = { t: 0, cool: 0, m: null, speed: 1, mode: null, shot: null, n: 0 };
+  function killCam(m) {
+    if (!KILLCAM || bench || over || !started) return;
+    if (!m || !m.beast || KILL.t > 0 || KILL.cool > 0) return;
+    if (cam.mode === "free" || cam.mode === "kill") return;
+    if (camDist2(m.pos) > 110 * 110) return;
+    KILL.t = 2.1; KILL.cool = 7; KILL.n++;
+    KILL.m = m; KILL.speed = speed > 0 ? speed : lastSpeed;
+    KILL.mode = cam.mode; KILL.shot = cam.shot;
+    setSpeed(0.25);
+    cam.mode = "kill";
+    cam.wYaw = (m.faceH == null ? 0 : m.faceH) + 1.35;
+    cam.wPitch = 0.18;
+    cam.wDist = Math.max(4.5, studyRange(m) * 0.6);
+    // SNAP the arm in rather than easing: a two-second beat spent flying the
+    // camera across the map from wherever the director was is a beat that
+    // photographs the journey and misses the death.
+    cam.dist = cam.wDist; cam.yaw = cam.wYaw; cam.pitch = cam.wPitch;
+    cam.wFocus.set(m.pos.x, m.pos.y + (m.eyeH || 1) * 0.4, m.pos.z);
+    cam.focus.copy(cam.wFocus);
+    studyHold(m);
+    STUDY.m = m;
+  }
+  function stepKill(dt) {
+    if (KILL.cool > 0) KILL.cool -= dt;
+    if (KILL.t <= 0) return;
+    KILL.t -= dt;
+    const m = KILL.m;
+    if (m) {
+      // the body keeps solving under the lens — follow it down
+      cam.wFocus.set(m.pos.x, m.pos.y + (m.eyeH || 1) * 0.4, m.pos.z);
+      cam.wYaw += dt * 0.55;
+    }
+    if (KILL.t <= 0) {
+      setSpeed(KILL.speed);
+      cam.mode = KILL.mode || "auto";
+      cam.shot = KILL.shot || "crane";
+      cam.cutAt = simT;                    // and the director takes a fresh shot
+      KILL.m = null;
+    }
+  }
+
   function stepCamera(dt) {
     const IN = CBZ.micro.input;
     if (simT - POINT.at > 0.5) updatePoint();
@@ -3439,6 +4209,14 @@ CBZ.studio.need(NEED).then(function () {
         }
       }
       if (cam.followM) frameSubject(cam.followM, dt);
+    } else if (cam.mode === "kill") {
+      // stepKill owns the targets this frame; nothing else may touch them
+    } else if (cam.mode === "study") {
+      frameStudy(dt);
+    } else if (cam.mode === "under") {
+      frameUnder(dt);
+    } else if (cam.mode === "surface") {
+      frameWave(dt);
     } else if (IN) {
       const fwd = 46 * dt * (cam.dist / 60 + 0.4);
       const mx = IN.axis("KeyA", "KeyD"), mz = IN.axis("KeyS", "KeyW");
@@ -3462,7 +4240,8 @@ CBZ.studio.need(NEED).then(function () {
      when nothing has changed. */
   const whoC = { n: "", g: "", a: "", k: "", hp: -1, mag: -1, rl: null, on: null, down: null };
   function stepWho() {
-    const m = (cam.mode === "follow" || cam.shot === "point" || cam.shot === "push")
+    const m = (cam.mode === "follow" || cam.shot === "point" ||
+      cam.shot === "push" || cam.shot === "study" || cam.shot === "kill")
       ? cam.followM : null;
     const on = !!m;
     if (on !== whoC.on) { whoC.on = on; el("who").style.display = on ? "block" : "none"; }
@@ -3506,26 +4285,44 @@ CBZ.studio.need(NEED).then(function () {
     if (k !== whoC.k) { whoC.k = k; el("whoK").innerHTML = k; }
   }
 
+  const CAM_LABEL = { auto: "AUTO CAM", study: "STUDY", under: "UNDER", surface: "WAVE", free: "FREE CAM" };
   function setCamMode(mode, team) {
+    // a kill-cam beat in flight must not be left holding the old speed
+    if (cam.mode === "kill" && mode !== "kill" && KILL.t > 0) {
+      KILL.t = 0; KILL.m = null; setSpeed(KILL.speed);
+    }
     cam.mode = mode;
     if (team) cam.followTeam = team;
-    el("cCam").textContent = mode === "auto" ? "AUTO CAM"
-      : mode === "follow" ? "FOLLOW " + TEAMS[cam.followTeam].name : "FREE CAM";
-    el("cCam").classList.toggle("on", mode === "auto");
+    el("cCam").textContent = mode === "follow"
+      ? "FOLLOW " + TEAMS[cam.followTeam].name : (CAM_LABEL[mode] || "FREE CAM");
+    el("cCam").classList.toggle("on", mode !== "free");
     if (mode === "follow") {
       updatePoint();
       cam.followM = subjectFor(cam.followTeam) || hottestMan();
       cam.holdT = 0; cam.reptT = simT + 3;
       cam.shot = "point";          // else a stale AUTO framing rides along
+    } else if (mode === "study" || mode === "under" || mode === "surface") {
+      if (!STUDY.m || STUDY.m.dead) studyPick(null);
+      cam.shot = "study";
     }
   }
-  // AUTO -> FOLLOW RED -> FOLLOW BLUE -> FREE. Both armies have a front, and
-  // which one you want to ride is the whole question a spectator has.
+  /* AUTO -> FOLLOW RED -> FOLLOW BLUE -> STUDY -> (the water postures) -> FREE.
+     Both armies have a front and which one you ride is the question a
+     spectator has; which ANIMAL you are looking at is the question this map
+     was built to answer, so STUDY is in the ring for every venue. UNDER and
+     WAVE are only in it where there is a waterline to be on the wrong side
+     of — offering "look up through the sea" on the kill box is a control that
+     does nothing, which is worse than no control. */
   function cycleCam() {
-    if (cam.mode === "auto") setCamMode("follow", "red");
-    else if (cam.mode === "follow" && cam.followTeam === "red") setCamMode("follow", "blue");
-    else if (cam.mode === "follow") setCamMode("free");
-    else setCamMode("auto");
+    const wet = !!(MAP && MAP.water && !SWIM_OLD);
+    const ring = ["auto", "followRed", "followBlue", "study"]
+      .concat(wet ? ["under", "surface"] : []).concat(["free"]);
+    const now = cam.mode === "follow" ? "follow" + (cam.followTeam === "red" ? "Red" : "Blue") : cam.mode;
+    let i = ring.indexOf(now);
+    const next = ring[(i + 1) % ring.length];
+    if (next === "followRed") setCamMode("follow", "red");
+    else if (next === "followBlue") setCamMode("follow", "blue");
+    else setCamMode(next);
   }
   // manual orbit: pointers on the page, ignored while the UI owns them
   let drag = null;
@@ -3548,7 +4345,7 @@ CBZ.studio.need(NEED).then(function () {
       cam.wFocus.z += (Math.sin(cam.yaw) * -dx + Math.cos(cam.yaw) * -dy) * s;
     } else {
       cam.wYaw -= dx * 0.0052;
-      cam.wPitch = Math.max(0.12, Math.min(1.42, cam.wPitch + dy * 0.004));
+      cam.wPitch = Math.max(pitchLo(), Math.min(1.42, cam.wPitch + dy * 0.004));
     }
   });
   window.addEventListener("pointerup", function () { drag = null; pinch.d = 0; });
@@ -3617,6 +4414,46 @@ CBZ.studio.need(NEED).then(function () {
      is exact; every few seconds the measured frame rate decides whether two
      more platoons walk on. When it dips under 30 twice, the last size that
      held is the machine's number. */
+  /* HOW BIG A STEP THE BENCHMARK TAKES, AND WHY IT IS NOT ALWAYS THIRTY.
+
+     "Two more platoons" is the right increment for men and nonsense for the
+     sea. Thirty more megalodons is a step from forty to seventy of the most
+     expensive body in the game — the run overshoots the machine's real number
+     on its first growth and reports the floor of a huge bracket. Thirty more
+     sardines is not a step at all: a shoal that costs almost nothing takes
+     twenty growths to find its edge and the run never finishes.
+
+     So the roster's own SCALE sets it, read off the live registry like
+     everything else on this page. Men answer exactly 30 by construction, so a
+     benchmark of riflemen returns the number it always returned and the saved
+     `cbz-npcwar-max` keeps meaning what it meant. There is still NO CAP —
+     this only changes how fast the count walks toward the frame rate's verdict,
+     which is the only thing allowed to end the run. */
+  function benchScale() {
+    const SP = CBZ.WILDLIFE_SPECIES || {};
+    let k = 0;
+    [SET.redU, SET.blueU].forEach(function (u) {
+      String(u).split("|").forEach(function (id) {
+        const sc = id === "men" ? 1 : ((SP[id] || {}).scale || 1);
+        if (sc > k) k = sc;
+      });
+    });
+    return k || 1;
+  }
+  function benchStepFor() {
+    return Math.max(2, Math.min(160, Math.round(30 / Math.max(0.35, benchScale()))));
+  }
+  // what the number is COUNTING, so "MAX 220" is not silently a number about
+  // sardines being read as a number about men
+  function benchUnit() {
+    const same = SET.redU === SET.blueU;
+    return (SET.redU === "men" && same) ? "PER SIDE"
+      : (same ? kindLabel(SET.redU) : "BODIES") + " PER SIDE";
+  }
+  function benchKey() {
+    return SET.redU === "men" && SET.blueU === "men"
+      ? "cbz-npcwar-max" : "cbz-npcwar-max-" + SET.redU + "-v-" + SET.blueU;
+  }
   function stepBench(dt) {
     const B = bench;
     B.t += dt;
@@ -3624,7 +4461,7 @@ CBZ.studio.need(NEED).then(function () {
     if (B.t < B.nextAt) return;
     const fps = CBZ.micro.fps || 0;
     B.t = 0; B.nextAt = 3.2;
-    hud.note("BENCH " + aliveCount("red") + " PER SIDE  " + fps + " FPS");
+    hud.note("BENCH " + aliveCount("red") + " " + benchUnit() + "  " + fps + " FPS");
     if (fps >= 33 && spawnQueue.length === 0) {
       B.lastGood = aliveCount("red");
       B.dips = 0;
@@ -3634,9 +4471,9 @@ CBZ.studio.need(NEED).then(function () {
       B.dips++;
       if (B.dips >= 2) {
         const n = B.lastGood || aliveCount("red");
-        try { localStorage.setItem("cbz-npcwar-max", String(n)); } catch (e) {}
-        banner("MAX " + n + " PER SIDE", "AT 30 FPS ON THIS MACHINE");
-        hud.note("BENCH DONE  " + n + " PER SIDE");
+        try { localStorage.setItem(benchKey(), String(n)); } catch (e) {}
+        banner("MAX " + n + " " + benchUnit(), "AT 30 FPS ON THIS MACHINE");
+        hud.note("BENCH DONE  " + n + " " + benchUnit());
         bench = { done: true, n: n, t: 0, nextAt: 1e9, fpsAcc: 0, fpsN: 0, step: 0, grown: B.grown, lastGood: n, dips: 0 };
       }
     } else B.dips = 0;
@@ -3656,8 +4493,8 @@ CBZ.studio.need(NEED).then(function () {
     let n = 0;
     while (spawnQueue.length && n < 10) {
       const s = spawnQueue.shift();
-      const kind = s[0] === "red" ? SET.redU : SET.blueU;
-      const m = kind === "men" ? makeMan(s[0], s[1]) : makeBeast(s[0], s[1]);
+      const kind = kindAt(s[0] === "red" ? SET.redU : SET.blueU, s[1]);
+      const m = kind === "men" ? makeMan(s[0], s[1]) : makeBeast(s[0], s[1], kind);
       if (m) men.push(m);
       n++;
     }
@@ -3682,8 +4519,9 @@ CBZ.studio.need(NEED).then(function () {
     if (wid === "fists") return "FISTS";
     return ((CBZ.weaponById(wid) || {}).label || wid || "").toUpperCase();
   }
-  function endWar(winner) {
+  function endWar(won) {
     over = true;
+    winner = won;
     const rows = [
       ["DURATION", clockText()],
       ["RED KILLS", stats.red.kills], ["BLUE KILLS", stats.blue.kills],
@@ -3711,7 +4549,7 @@ CBZ.studio.need(NEED).then(function () {
     };
     if (wids.length > 1) wids.slice(0, 5).forEach(function (wid) { rows.push(gunRow(wid)); });
     else if (wids.length === 1) rows.push(gunRow(wids[0]));
-    el("endT").textContent = winner ? TEAMS[winner].name + " TAKE IT" : "NOBODY LEFT";
+    el("endT").textContent = won ? TEAMS[won].name + " TAKE IT" : "NOBODY LEFT";
     el("endTable").innerHTML = rows.map(function (r) {
       return "<tr><td>" + r[0] + "</td><td>" + r[1] + "</td></tr>";
     }).join("");
@@ -3761,6 +4599,16 @@ CBZ.studio.need(NEED).then(function () {
            ambience is the sand's own bounce: warm. */
         lights: { sun: 0.84, hemi: 0.42, shadowSpan: 620, skyColor: 0xcfc2a4, groundColor: 0x8f7850 },
       },
+      /* OPEN WATER. A maritime sun high enough to put caustic-bright tops on
+         the swell, a short fog so the horizon is haze and not a hard rim on a
+         26 km plate, and a GROUND colour for the hemisphere light that is the
+         sea itself — bounce off water is blue-green, and lighting a shark with
+         a tan desert bounce is what made the first draft read as a toy. */
+      water: {
+        fov: 70, far: 9000, exposure: 0.88,
+        sky: { top: 0x1b4c80, bottom: 0x9dc0d4, fogNear: 240, fogFar: 2400, radius: 7000 },
+        lights: { sun: 0.95, hemi: 0.62, shadowSpan: 240, skyColor: 0xc4dced, groundColor: 0x1d4258 },
+      },
     };
     SKY.island = SKY.field = SKY.city;
     CBZ.micro.boot(SKY[SET.map] || SKY.dunes);
@@ -3775,7 +4623,7 @@ CBZ.studio.need(NEED).then(function () {
     // men and the aircraft stay animated through it.
     if (Q.get("settle") !== "0") CBZ.studio.settle(CBZ.scene);
     // the walkable map, once, off the colliders the ground just registered
-    navBuild(MAP.cx, MAP.cz, { city: 330, island: 340, field: 540, arena: 150, dunes: 220 }[SET.map] || 260);
+    navBuild(MAP.cx, MAP.cz, { city: 330, island: 340, field: 540, arena: 150, dunes: 220, water: 200 }[SET.map] || 260);
     AIR.on = SET.redS !== "none" || SET.blueS !== "none";
     // a small war is short: the warhead arms early enough to matter
     AIR.nukeAt = 20 + Math.min(22, (SET.redN + SET.blueN) / 36);
@@ -3783,8 +4631,12 @@ CBZ.studio.need(NEED).then(function () {
       CBZ.ordnance.init({ scene: CBZ.scene, groundAt: MAP.groundAt });
     }
     if (asBench) {
-      bench = { t: 0, nextAt: 3.2, step: 30, lastGood: 0, dips: 0, grown: 0, fpsAcc: 0, fpsN: 0 };
-      SET.redN = SET.blueN = 40;
+      const step = benchStepFor();
+      bench = { t: 0, nextAt: 3.2, step: step, lastGood: 0, dips: 0, grown: 0, fpsAcc: 0, fpsN: 0,
+        unit: benchUnit(), scale: Math.round(benchScale() * 100) / 100 };
+      // the opening size is one step plus a little, so the first measurement is
+      // taken on a field that is already doing something. Men: 40, as always.
+      SET.redN = SET.blueN = Math.max(4, Math.min(400, step + 10));
       SET.redW = SET.blueW = (SET.redW === "everything" || SET.redW === "mixed") ? "ak47" : SET.redW;
     }
 
@@ -3815,7 +4667,9 @@ CBZ.studio.need(NEED).then(function () {
     el("ctl").style.display = "flex";
     if (!COARSE) {
       el("hint").style.display = "block";
-      el("hint").innerHTML = "DRAG ORBIT &middot; WHEEL ZOOM &middot; WASD PAN<br>SPACE PAUSE &middot; 1-5 SPEED &middot; F FRONT CAM";
+      el("hint").innerHTML = "DRAG ORBIT &middot; WHEEL ZOOM &middot; WASD PAN<br>" +
+        "SPACE PAUSE &middot; 1-5 SPEED &middot; . STEP &middot; F FRONT CAM &middot; V STUDY &middot; [ ] PICK" +
+        (MAP.water ? "<br>U UNDERWATER &middot; B AT WAVE HEIGHT" : "");
     }
     setSpeed(1);
     setCamMode(asBench ? "free" : "auto");
@@ -3824,8 +4678,7 @@ CBZ.studio.need(NEED).then(function () {
     started = true;
     const armyName = function (team) {
       const u = team === "red" ? SET.redU : SET.blueU;
-      const sp = u !== "men" && (CBZ.WILDLIFE_SPECIES || {})[u];
-      return sp ? String(sp.name).toUpperCase() + "S" : TEAMS[team].name;
+      return u === "men" ? TEAMS[team].name : kindLabel(u);
     };
     banner(MAPS[SET.map].label, armyName("red") + " " + SET.redN + "   V   " + armyName("blue") + " " + SET.blueN);
     if (AIR.on) spawnPlanes();
@@ -3849,6 +4702,7 @@ CBZ.studio.need(NEED).then(function () {
      Read once and cleared, so a missed frame can never silently double a step.
      Driven only by __battle.advance(); play never touches it. */
   let injectDt = 0;
+  let stepPulse = 0;             // one hand-cranked frame, from the `.` key
   function frame(dt) {
     if (!started) return;
     // THE SIM CLOCK IS WALL TIME, NOT RENDER TIME. microboot clamps its dt
@@ -3862,6 +4716,7 @@ CBZ.studio.need(NEED).then(function () {
     if (injectDt > 0) { realDt = injectDt; injectDt = 0; }   // the probe's clock
 
     dt = realDt;                      // gait, camera and timers follow the same clock
+    if (!firstFrameAt) firstFrameAt = Math.round(performance.now());
     dbgWall += realDt; dbgN++;
     fxBudget = 0;
     drainSpawns();
@@ -3880,12 +4735,29 @@ CBZ.studio.need(NEED).then(function () {
         setCamMode("follow", cam.mode === "follow" && cam.followTeam === "red" ? "blue" : "red");
       }
       if (IN.pressed("KeyC")) setCamMode(cam.mode === "auto" ? "free" : "auto");
+      /* THE TEST BED'S OWN KEYS. V locks the lens on one animal, [ and ] walk
+         the roster, U drops it under the swell and B sits it on the waterline.
+         Each is a toggle back to FREE, so the same finger that took the shot
+         gives the camera back. */
+      if (IN.pressed("KeyV")) setCamMode(cam.mode === "study" ? "free" : "study");
+      if (IN.pressed("KeyU")) setCamMode(cam.mode === "under" ? "free" : "under");
+      if (IN.pressed("KeyB")) setCamMode(cam.mode === "surface" ? "free" : "surface");
+      if (IN.pressed("BracketLeft")) { studyPick(-1); if (cam.mode === "free") setCamMode("study"); }
+      if (IN.pressed("BracketRight")) { studyPick(1); if (cam.mode === "free") setCamMode("study"); }
+      /* THE FRAME STEP. A quarter-speed clock is still a clock; "does the tail
+         cross the centre line before the jaw opens" is a question you can only
+         answer by stopping and nudging. `.` pauses if it has to and then hands
+         the next frame exactly one thirtieth of a second — the same injected-dt
+         seam the headless probe uses, so a person and a tool step this battle
+         through the identical code path. */
+      if (IN.pressed("Period")) { if (speed !== 0) setSpeed(0); stepPulse = 1 / 30; }
     }
 
     // ---- SIM at the dialled speed, sub-stepped so 8x stays solid. The
     // sub-step cap means a machine that cannot COMPUTE eight seconds per
     // second degrades to what it can; effSpeed below is the HUD admitting it.
     let simDt = realDt * speed;
+    if (stepPulse > 0) { simDt = stepPulse; stepPulse = 0; }   // one frame, by hand
     const simBefore = simT;
     if (simDt > 0) {
       const sub = Math.min(8, Math.max(1, Math.ceil(simDt / 0.055)));
@@ -3967,6 +4839,13 @@ CBZ.studio.need(NEED).then(function () {
     // the retired bodies sink out on WALL time on purpose: they are no longer
     // part of the battle, and a paused page should still finish tidying up.
     if (sinking.length) stepSinking(realDt);
+    /* THE SEA IS SCENERY AND MOVES ON THE SIM CLOCK. On the sim clock, because
+       the swell is what the bodies float on and a paused battle with a heaving
+       ocean under it is the page arguing with itself — the same argument the
+       corpse solver settled. Once per FRAME, never per sub-step: 4 225 vertices
+       times three sines is a real number and the swell does not need eight of
+       them a frame to look like water. */
+    if (SEA.on) seaStep(simT - simBefore);
     const camP = CBZ.camera.position;
     for (let i = 0; i < men.length; i++) {
       const m = men[i];
@@ -3988,8 +4867,13 @@ CBZ.studio.need(NEED).then(function () {
         // the species walks on the shared rig — legs swing by distance
         // actually moved, so the charge, the march and the rout all animate
         // off the same law. LOD-skipped exactly like the men's gait.
-        if ((m.animF % every) === 0 && CBZ.wildlifeRig) {
-          try { CBZ.wildlifeRig.animateGait(m, dt * every); } catch (e) {}
+        /* ...and a body that SWIMS beats its tail instead. Same LOD skip,
+           same distance-moved law; the rig picked itself at spawn (buildSwimRig
+           on an aquatic species, buildGait on anything with legs), so this is
+           one test and not a species table. */
+        if ((m.animF % every) === 0) {
+          if (m.swim) { if (CBZ.animateSwim) { try { CBZ.animateSwim(m, dt * every); } catch (e) {} } }
+          else if (CBZ.wildlifeRig) { try { CBZ.wildlifeRig.animateGait(m, dt * every); } catch (e) {} }
         }
         continue;
       }
@@ -4024,7 +4908,9 @@ CBZ.studio.need(NEED).then(function () {
         if (m._weaponProp.visible !== showGun) m._weaponProp.visible = showGun;
       }
     }
+    stepKill(realDt);                     // ...on WALL time: see THE KILL CAM
     stepCamera(dt);
+    if (SEA.on) seaUnderwater();          // after the camera moved, before the draw
     stepRes(dt);
     effSpeed += ((realDt > 0 ? (simT - simBefore) / realDt : speed) - effSpeed) * Math.min(1, dt * 2);
 
@@ -4238,10 +5124,60 @@ CBZ.studio.need(NEED).then(function () {
     audit: function () {
       return {
         clock: { frames: dbgN, wallSum: Math.round(dbgWall * 100) / 100 },
-        map: SET.map, started: started, over: over,
+        map: SET.map, started: started, over: over, winner: winner,
+        // the lightweight claim, measured: navigation start -> first frame
+        ttff: firstFrameAt || null,
         kinds: { red: SET.redU, blue: SET.blueU },
+        /* WHO IS STILL IN THE WATER, BY NAME. The red/blue counters answer
+           "who is winning"; they cannot answer "did the pod finish the
+           megalodon", which on a 8-v-1 is the only question being asked. One
+           pass over the live roster, keyed by the species' own id. */
+        alive: (function () {
+          const o = {};
+          for (let i = 0; i < men.length; i++) {
+            const m = men[i]; if (m.dead) continue;
+            const k = m.beast ? m.species.id : "men";
+            o[k] = (o[k] || 0) + 1;
+          }
+          return o;
+        })(),
+        /* THE SEA, CHECKABLE. `rigged` is the one that matters: an aquatic body
+           with no swim rig is the rigid-mesh-sliding-through-the-ocean bug, and
+           it is invisible in a still frame at the wrong moment. */
+        sea: SEA.on ? {
+          surfaceY: Math.round(swellAt(MAP ? MAP.cx : 0, MAP ? MAP.cz : 0) * 100) / 100,
+          seabed: SEA.seabed, trains: SEA.trains.length, boats: SEA.boats.length,
+          underwater: !!SEA.under,
+          rigged: (function () { let n = 0; for (let i = 0; i < men.length; i++) if (men[i].swim) n++; return n; })(),
+          /* THE PREDICTION, WHEN THE SEA'S OWN MODEL IS IN THE ROOM.
+             city/marine_predation.js solves "how many does it take" off the
+             two time-to-kills (CBZ.marinePodNeeded) rather than typing a five
+             into a file. This page is where that number gets to be WRONG in
+             public: it states the prediction next to the roster that is
+             actually in the water, so a preset can put the two in one column.
+             Guarded — the pack does not carry that file, so it is null here
+             until somebody puts it in one. */
+          podNeeded: (function () {
+            if (!CBZ.marinePodNeeded) return null;
+            let hunter = null, quarry = null;
+            for (let i = 0; i < men.length; i++) {
+              const m = men[i];
+              if (!m.beast || m.dead) continue;
+              if (!hunter && m.team === "red") hunter = m;
+              if (!quarry && m.team === "blue") quarry = m;
+            }
+            if (!hunter || !quarry) return null;
+            try { return CBZ.marinePodNeeded(hunter, quarry); } catch (e) { return null; }
+          })(),
+          deepest: (function () {
+            let d = 0;
+            for (let i = 0; i < men.length; i++) if (!men[i].dead && (men[i].swimD || 0) > d) d = men[i].swimD;
+            return Math.round(d * 100) / 100;
+          })(),
+        } : null,
         beasts: (function () { let n = 0; for (let i = 0; i < men.length; i++) if (men[i].beast && !men[i].dead) n++; return n; })(),
         steer: STEER_OLD ? "old" : "walls",
+        swimMode: SWIM_OLD ? "old" : "rig",
         // the ground, as MEASURED off the raised venue (null for the maps that
         // author their own: city, dunes, arena). A checker can finally assert
         // that the surface men stand on is the surface that got built.
@@ -4313,10 +5249,28 @@ CBZ.studio.need(NEED).then(function () {
             // front of the group, 0 = the back rank the old camera rode
             ahead = tot ? Math.round((1 - n / tot) * 100) / 100 : null;
           }
+          /* THE LOCKED LENS, STATED. A preset that says "photograph the
+             megalodon" has to be able to prove the lens was on a megalodon and
+             at a range derived from that body rather than from a constant, or
+             the picture is an assertion. `underwater` is the sea's own read
+             (SEA.under), so a shot claiming to be taken below the swell can be
+             checked against the frame it produced. */
+          const sm = STUDY.m && !STUDY.m.dead ? STUDY.m : null;
           return { mode: cam.mode, shot: cam.shot, team: cam.followTeam,
             on: m ? m.id : null, onDead: m ? !!m.dead : null, frontness: ahead,
             kills: m ? (m.kills || 0) : null, mag: m ? m.mag : null,
-            reloads: m ? (m.reloads || 0) : null };
+            reloads: m ? (m.reloads || 0) : null,
+            pitch: Math.round(cam.pitch * 100) / 100,
+            y: Math.round(CBZ.camera.position.y * 100) / 100,
+            underwater: !!SEA.under,
+            waveLock: !!cam.waveLock,
+            study: sm ? {
+              id: sm.id, species: sm.beast ? sm.species.id : "men",
+              len: Math.round((sm.noseR || sm.rad || 0.5) * 2 * 100) / 100,
+              range: Math.round(studyRange(sm) * 10) / 10,
+              size: Math.round((sm._sizeMul || 1) * 100) / 100,
+            } : null,
+            killcam: { on: KILL.t > 0, fired: KILL.n } };
         })(),
         caps: CBZ.modeHas ? { blast: CBZ.modeHas("blast"), blastActors: CBZ.modeHas("blastActors") } : null,
         unrouted: CBZ.modeCapsAudit ? CBZ.modeCapsAudit().unrouted : null,
@@ -4409,6 +5363,111 @@ CBZ.studio.need(NEED).then(function () {
       if (yaw != null) cam.wYaw = cam.yaw = yaw;
       return hs;
     },
+    /* ---- THE STUDY DESK, FROM A TOOL --------------------------------------
+       camMode(mode, pick, yaw) puts the page into one of the locked postures
+       and, optionally, on a NAMED body — `pick` is a species id ("megalodon")
+       or an index into the living roster. `yaw` states the orbit angle and
+       STOPS the orbit, because a photograph taken while the lens is drifting
+       is a photograph of a different bearing on each side of a comparison.
+       Returns what the lens ended up on, so a preset can assert it. */
+    camMode: function (mode, pick, yaw) {
+      if (pick != null) studyPickBy(pick);
+      if (yaw != null) { STUDY.orbit = +yaw || 0; STUDY.spin = 0; }
+      setCamMode(mode);
+      // one framing pass now, so the caller does not have to advance the world
+      // by a frame just to find out where the camera went
+      if (mode === "study") frameStudy(0);
+      else if (mode === "under") frameUnder(0);
+      else if (mode === "surface") frameWave(0);
+      cam.focus.copy(cam.wFocus); cam.yaw = cam.wYaw;
+      cam.pitch = cam.wPitch; cam.dist = cam.wDist;
+      camApply(1);
+      const m = STUDY.m;
+      return m ? { id: m.id, species: m.beast ? m.species.id : "men",
+        range: Math.round(studyRange(m) * 10) / 10,
+        x: Math.round(m.pos.x * 100) / 100, y: Math.round(m.pos.y * 100) / 100,
+        z: Math.round(m.pos.z * 100) / 100 } : null;
+    },
+    // every living animal the study desk can be pointed at, in its own order
+    swimmers: function () {
+      return studyList().map(function (m) {
+        return { id: m.id, team: m.team, species: m.beast ? m.species.id : "men",
+          len: Math.round((m.noseR || m.rad || 0.5) * 2 * 100) / 100,
+          hp: Math.round(m.hp), depth: Math.round((m.swimD || 0) * 100) / 100,
+          x: Math.round(m.pos.x * 100) / 100, y: Math.round(m.pos.y * 100) / 100,
+          z: Math.round(m.pos.z * 100) / 100 };
+      });
+    },
+    /* ---- RESTAGE: ANOTHER MATCHUP, THE SAME OCEAN -----------------------
+       A TEST BED YOU HAVE TO RELOAD IS NOT A TEST BED.
+
+       Every other way of changing what is fighting here goes back through the
+       war room and a full boot — the studio, the packs, the swell, the reef,
+       the navmesh — which costs seconds and, worse, hands you a DIFFERENT
+       ocean to judge the second fight in. This clears the field and streams a
+       new roster onto the same water: the same swell, the reef where it was,
+       so "eight orcas" and "one great white in a bait ball" are two shots of
+       one place rather than two pages that happen to both be blue.
+
+       It clears exactly what a death clears, through the same calls — the two
+       corpse solvers get their slots handed back, every group leaves through
+       studio.drop, the ordnance registry loses its targets, and the spawn
+       claims go with the roster that made them. Anything it forgot would show
+       up as a body standing in the water with nothing driving it, which is a
+       thing you can see rather than a thing you have to trust.
+
+       Drive-only: nothing on the page reaches it and no key is bound to it. */
+    restage: function (o) {
+      o = o || {};
+      for (let i = 0; i < men.length; i++) {
+        const m = men[i];
+        if (m.ordTgt && CBZ.ordnance && CBZ.ordnance.removeTarget) {
+          try { CBZ.ordnance.removeTarget(m.ordTgt); } catch (e) {}
+        }
+        m.ordTgt = null;
+        if (CBZ.quadRagdollDrop) { try { CBZ.quadRagdollDrop(m); } catch (e) {} }
+        if (CBZ.ragdollDrop) { try { CBZ.ragdollDrop(m); } catch (e) {} }
+        if (m.group) { try { CBZ.studio.drop(m.group); } catch (e) {} }
+      }
+      for (let i = 0; i < sinking.length; i++) { try { CBZ.studio.drop(sinking[i].g); } catch (e) {} }
+      for (let i = 0; i < dropGuns.length; i++) {
+        const g = dropGuns[i];
+        if (g && g.parent) g.parent.remove(g);
+      }
+      men.length = 0; corpses.length = 0; sinking.length = 0;
+      dropGuns.length = 0; rockets.length = 0; spawnQueue.length = 0;
+      squads.red.length = 0; squads.blue.length = 0;
+      deadSolving = 0;
+      clearClaims();
+      cam.followM = null; STUDY.m = null; STUDY.idx = 0;
+      KILL.t = 0; KILL.m = null; KILL.cool = 0;
+      over = false; winner = null;
+      el("end").style.display = "none";
+      stats.red.kills = stats.red.shots = stats.red.hits = 0;
+      stats.blue.kills = stats.blue.shots = stats.blue.hits = 0;
+      if (o.ru) SET.redU = o.ru;
+      if (o.bu) SET.blueU = o.bu;
+      if (o.rw) SET.redW = o.rw;
+      if (o.bw) SET.blueW = o.bw;
+      if (o.rt) SET.redT = o.rt;
+      if (o.bt) SET.blueT = o.bt;
+      // ZERO IS A ROSTER. "The arena with nothing in it" is the first thing a
+      // test bed has to be able to show — it is the shot that proves the water
+      // is water before anything is swimming in it.
+      SET.redN = o.rn == null ? SET.redN : Math.max(0, o.rn | 0);
+      SET.blueN = o.bn == null ? SET.blueN : Math.max(0, o.bn | 0);
+      HAS_BEASTS = SET.redU !== "men" || SET.blueU !== "men";
+      spawnCount.red = SET.redN; spawnCount.blue = SET.blueN;
+      spawnTotal = SET.redN + SET.blueN;
+      for (let i = 0; i < Math.max(SET.redN, SET.blueN); i++) {
+        if (i < SET.redN) spawnQueue.push(["red", i]);
+        if (i < SET.blueN) spawnQueue.push(["blue", i]);
+      }
+      // all of them, now: a tool that asked for a matchup wants the matchup,
+      // not ten of it per frame for the next four seconds
+      if (o.now !== false) { let g = 0; while (spawnQueue.length && g++ < 4000) drainSpawns(); }
+      return { red: SET.redN, blue: SET.blueN, ru: SET.redU, bu: SET.blueU, bodies: men.length };
+    },
     reinforce: function (n) { queueMen(n || 10); },
     /* THE LIVE CAST, BY REFERENCE. Every probe above answers a question about
        the ARMY (how many, how far apart, how many rounds); tools/ape-check.mjs
@@ -4463,6 +5522,9 @@ CBZ.studio.need(NEED).then(function () {
         // is or is not striking instead of inferring it from the scoreboard
         if (m.beast) {
           row.beast = m.species.id; row.reach = Math.round(m.reach * 100) / 100;
+          row.nose = Math.round((m.noseR || 0) * 100) / 100;
+          row.rad = Math.round((m.rad || 0) * 100) / 100;
+          row.k = Math.round((m._sizeMul || 1) * 100) / 100;
           row.atkT = m._atkT == null ? null : Math.round(m._atkT * 100) / 100;
           row.anim = m._atkAnim == null ? null : Math.round(m._atkAnim * 100) / 100;
           row.hp = Math.round(m.hp);

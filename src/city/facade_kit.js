@@ -434,6 +434,11 @@
        most. The widest box the carve cuts through IS the wall at the door, so
        its colour is what the returns are shaded from. */
     let wallCol = null, wallSpan = 0;
+    /* THE FACADE'S OWN PALETTE, gathered as it paints. Every colour it lays on
+       the entrance face is weighted by the area it covers, so the door can be
+       painted in a colour that is genuinely OFF THIS BUILDING rather than in
+       one tone shared by all 31 grammars. */
+    const palette = new Map();
     const realDbox = ctx.dbox;
     ctx.dbox = function (x, y, z, w, h, d, col) {
       const tC = horiz ? x : z, tH = (horiz ? w : d) / 2;      // along the face
@@ -442,6 +447,9 @@
       // how far this box's outer surface stands proud of the wall plane
       const proud = out > 0 ? (nC + nH) - halfN : -halfN - (nC - nH);
       const onFace = proud > -0.02;
+      if (onFace && h > 0.12 && tH > 0.06) {
+        palette.set(col, (palette.get(col) || 0) + tH * 2 * h);
+      }
       if (!onFace || y0 > HH || y1 < 0 ||
           tC - tH > HW || tC + tH < -HW) {
         if (onFace && proud > deepest && proud < 6.5 &&
@@ -470,6 +478,41 @@
     ctx.dbox = realDbox;                       // the carve is build-time only
 
     const doorProj = Math.max(0.30, Math.min(6.5, deepest + 0.16));
+
+    /* PAINT THE DOOR IN ONE OF THIS BUILDING'S OWN COLOURS.
+       OWNER: "now door gets to match building colour somehow — beauty is it
+       doesn't have to be perfect colour of building, just A colour from the
+       building."
+       That is the right instinct and an easier target than matching: the door
+       wants to belong to the building, not to disappear into it. So the
+       candidates are the colours the facade actually painted, weighted by how
+       much wall each covers; anything too close in tone to the wall AT the
+       door is dropped (a door the same value as its surround is the invisible
+       slab we started with); and which of the survivors gets used is a
+       position hash, so two brick lofts on one street do not have the same
+       door and each one is the same on every boot. The stiles and rails take a
+       lifted shade of whatever was picked, so the panelling still reads. */
+    if (ctx.doorTint) {
+      const lum = function (c) {
+        return (((c >> 16) & 255) * 0.299 + ((c >> 8) & 255) * 0.587 + (c & 255) * 0.114) / 255;
+      };
+      const wallL = lum(wallCol != null ? wallCol : ctx.color);
+      const cands = [];
+      palette.forEach(function (weight, col) {
+        if (weight < 0.8) return;                       // a sliver, not a colour
+        if (Math.abs(lum(col) - wallL) < 0.13) return;  // too close to the wall
+        cands.push({ col: col, w: weight });
+      });
+      cands.sort(function (a, b) { return b.w - a.w; });
+      const pool = cands.slice(0, 6);
+      let leafHex;
+      if (pool.length) leafHex = pool[Math.min(pool.length - 1, (ctx.hash(0xd0af) * pool.length) | 0)].col;
+      else leafHex = F.shade(wallCol != null ? wallCol : ctx.color, 0.55);
+      // keep it a door and not a light box: never brighter than its own wall
+      if (lum(leafHex) > wallL + 0.10) leafHex = F.shade(leafHex, 0.72);
+      const railHex = lum(leafHex) < 0.42 ? F.mix(leafHex, 0xffffff, 0.22) : F.shade(leafHex, 0.78);
+      try { ctx.doorTint(leafHex, railHex); } catch (e) {}
+    }
     // THE DOOR GUARANTEE. Every dressed building ends up with a legible
     // entrance whether or not its grammar thought about one: a facade that
     // drew its own called F.door (which latches ctx.__kitDoor) or declared

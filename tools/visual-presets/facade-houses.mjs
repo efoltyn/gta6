@@ -221,10 +221,15 @@ async function stageFacadeHouses(input) {
     const scene = new T.Scene();
     scene.background = new T.Color(0xbcd2e8);
     scene.fog = null;
-    scene.add(new T.HemisphereLight(0xe8f2ff, 0x6b7480, 0.85));
-    // One hard key light. Relief is the subject — an eave that casts nothing
-    // has not been proved to overhang — so shadows stay on.
-    const key = new T.DirectionalLight(0xfff2df, 1.25);
+    /* EXPOSURE. Relief is the subject here, and relief is read from shadow —
+       so the lighting has to leave range for shadow to sit in. The first runs
+       were lit like a product shot and the palest grammars (Greek Revival,
+       plantation, plain house) came back as white silhouettes with their own
+       mouldings washed off them. Ambient roughly halved, key just under 1. */
+    scene.add(new T.HemisphereLight(0xdbe6f2, 0x5f6a75, 0.5));
+    // One hard key light. An eave that casts nothing has not been proved to
+    // overhang, so shadows stay on.
+    const key = new T.DirectionalLight(0xfff2df, 0.98);
     key.position.set(48, 72, 40);
     key.castShadow = true;
     key.shadow.mapSize.set(2048, 2048);
@@ -232,7 +237,7 @@ async function stageFacadeHouses(input) {
     key.shadow.camera.top = 70; key.shadow.camera.bottom = -70;
     key.shadow.camera.far = 260;
     scene.add(key);
-    const fill = new T.DirectionalLight(0xdde8ff, 0.42);
+    const fill = new T.DirectionalLight(0xdde8ff, 0.24);
     fill.position.set(-52, 34, -46);
     scene.add(fill);
     const ground = new T.Mesh(new T.CircleGeometry(150, 56),
