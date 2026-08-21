@@ -45,6 +45,8 @@
     "test:c4-touch": "node tools/c4-touch-check.mjs",
     "test:elevator-touch": "node tools/elevator-touch-check.mjs",
     "test:gunhands": "node tools/gunhands-check.mjs",
+    "test:tp-gun": "node tools/tp-gun-view-check.mjs",
+    "test:tp-gun-shots": "node tools/tp-gun-view-check.mjs --shots",
     "test:battle-revert": "node tools/battle-check.mjs --revert",
     "test:prison-sit": "node tools/prison-sit-check.mjs",
     "test:prison-jitter": "node tools/prison-jitter-check.mjs",

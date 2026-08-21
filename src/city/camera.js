@@ -34,52 +34,109 @@
      (it loads FIRST). THIS file loads later and is the authoritative tuning
      surface — edit HERE, never the fallback, or your change is overwritten. */
   CBZ.CITY_TP = {
-    // FORTNITE reference (owner-supplied screenshots, 2026-07-05): NOT scoping
+    // FORTNITE reference (owner-supplied screenshots, 2026-07-05): NOT armed
     // = the wide default frame — camera ~4m back, a SUBTLE right offset (the
     // character reads just left of centre, not pinned to the edge), slightly
     // above the head with a mild down-gaze, character ~half the frame tall.
-    // Carrying a gun does NOT change the camera — only RMB (scoping) punches
-    // to the tight over-shoulder. That's why the AIM_BASE tier below equals
-    // this relaxed frame instead of being its own third framing.
     HEIGHT: 1.7,       // rig pivot above feet — a touch above the head so the street reads ahead
     DIST: 4.35,        // three-pivot follow boom: readable body without crowding the weapon
-    SIDE: 0.68,        // explicit right-shoulder offset; the body no longer masks the gun hand
+    SIDE: 0.68,        // explicit right-shoulder offset
     PITCH: 0.10,       // default orbit pitch on city entry — mild down-gaze, horizon high
     LOOK_Y: 1.52,      // look-target height above feet — with the mild pitch this centres the char vertically
     LEAD: 4.6,         // forward look-ahead — breathing room down-street
-    DAMP_POS: 0.18,    // position SmoothDamp time — the lazy settle; bigger = floatier follow (0.16→0.18: calmer default walk now that merely-armed no longer forces the tight 0.07 aim damp)
+    DAMP_POS: 0.18,    // position SmoothDamp time — the lazy settle; bigger = floatier follow
     DAMP_YAW: 9.0,     // yaw chase rate (1-exp(-k*dt)) — the camera trails your mouse turn slightly
-    DAMP_YAW_AIM: 26,  // yaw chase while PRESENTING (RMB/ADS, firing, or the ~0.9s post-shot settle — CBZ.tpPresenting) — near-rigid so aiming never feels mushy. Merely carrying a gun stays on DAMP_YAW.
+    DAMP_YAW_AIM: 26,  // yaw chase while PRESENTING (RMB/ADS, firing, or the ~0.9s post-shot settle — CBZ.tpPresenting) — near-rigid so aiming never feels mushy
     FOV: 60,           // base FOV
-    // ---- PRESENTING / ADS tier (read EVERY frame by systems/camera.js via
-    //      its `tpPresent` boolean = CBZ.tpPresenting(), NOT merely-armed;
-    //      the getters below switch on CBZ.isADS()). ----
-    // NOT scoping (armed base) = the SAME frame as relaxed above — per the
-    // owner's Fortnite reference, holding a weapon leaves the camera alone.
-    // Scoping (RMB/ADS) = the image-2 frame: ~2m over the RIGHT shoulder at
-    // shoulder height, character waist-up on the left third, gun on the
-    // crosshair, a real (moderate) lens zoom. SmoothDamp eases the punch-in.
-    DIST_AIM_BASE: 4.35, DIST_AIM_ADS: 2.65,  // stable boom, then a deliberate ADS shoulder push
-    SIDE_AIM_BASE: 0.68, SIDE_AIM_ADS: 1.12,  // clear the firing-side shoulder and expose the carried weapon
+
+    // ================= THE ARMED TIERS (CAM_TP_GUN_VISIBLE) =================
+    // Owner, 2026-08-20, with a third-person shooter clip: "in our third person
+    // when holding gun you can't see the gun — fix the angle so we can see the
+    // gun better when shooting." He is right, and it was measurable: with the
+    // shipped framing, ZERO percent of the drawn weapon's barrel reached the
+    // lens while firing (tools/tp-gun-view-check.mjs, which walks the bore in
+    // screen space and ray-tests each point against the player's own body).
+    // The gun spent the whole gunfight behind its owner's shoulder.
+    //
+    // What actually moves that number, in order (all measured, not guessed —
+    // `--sweep` walks the grid and prints it):
+    //   1. THE AIM LEAD, by a mile. It is spent in systems/camera.js, not here,
+    //      but it is why these constants look the way they do: leading the look
+    //      target 12 m down-range grows the pure orbit's derived FRAME_TILT to
+    //      ~0.17 rad, which drops the character low in frame and silhouettes
+    //      the weapon against what it is aimed at. ADS always had it; firing
+    //      did not. 0% → 78%.
+    //   2. THE SHOULDER OFFSET, which pays MUCH better than it used to, and the
+    //      reason is worth writing down. 0.68 m at a 4.35 m boom is 9° of frame:
+    //      the sight line to a gun ~0.25 m right of centre and ~0.6 m forward
+    //      crosses the body plane 3 cm outside a torso that is 25 cm wide, i.e.
+    //      inside the firing arm. It used to stop paying past ~1.1 m, because
+    //      the barrel was locked parallel to the LENS while presenting — move
+    //      the lens sideways and the gun swings with it, staying pointed into
+    //      the screen. Now that the barrel follows the AIM instead (the fix in
+    //      systems/holsterprops.js), moving the lens sideways buys real
+    //      parallax: measured 62% / 77% / 85% of the barrel at 1.0 / 1.3 / 1.6 m
+    //      of offset, monotone, with the on-screen length going 6% → 14% of the
+    //      frame. 1.50 is that curve minus a safety margin for the collision
+    //      clamp in a tight street.
+    //   3. THE BOOM, last and least — worth about a third of what the offset is
+    //      worth, and every metre of it costs readability of the street.
+    //
+    // Three tiers, picked per frame by CBZ.tpArmTier():
+    //   CARRY   gun out, walking — and this one is a NEGATIVE result, kept
+    //           because it cost four measured runs to learn. Tightening the
+    //           carry frame the way the present frame wants makes the carried
+    //           weapon LESS visible, not more: a 1.1 m rifle from a hand 0.85 m
+    //           off the ground is stood near-vertical by the muzzle-clearance
+    //           solver (systems/holsterprops.js), so it hangs flat against the
+    //           thigh — and every centimetre the lens moves toward that side
+    //           puts more hip in front of it. 0.68 m/4.35 m measures 54% of the
+    //           barrel; 1.12 m/2.85 m measures 0%. And it is a knife edge: the
+    //           barrel hangs exactly along the leg's silhouette, so the gate
+    //           reports 54% and 0% for the SAME constants in the same run,
+    //           depending only on where the idle breath has the arm. A tier that
+    //           can only make it worse should not move it at all, so CARRY ships
+    //           byte-identical to the relaxed frame. Making a CARRIED long gun read
+    //           needs the hand at chest height (port arms), which is a pose
+    //           change, not a camera change, and is not what was asked for here.
+    //   PRESENT trigger down / firing / the ~0.9 s post-shot settle. The ADS
+    //           frame at the hip-fire lens: same offset and pivot, a slightly
+    //           longer boom, and the same 12 m lead. This is the tier the
+    //           owner's reference shot is of, and the one this pass exists for.
+    //   ADS     RMB. Unchanged from what shipped — it was already the one armed
+    //           frame you could see the gun in, and this pass must not spend
+    //           that. Only the lens (FOV_AIM) is still ADS-only.
+    // Each is a FIXED target; no wheel zoom, no speed zoom. Holster and you are
+    // back on DIST/SIDE above, untouched.
+    DIST_CARRY:   4.35, DIST_PRESENT:   2.20, DIST_ADS:   2.65,  // boom (CARRY === DIST above, deliberately)
+    SIDE_CARRY:   0.68, SIDE_PRESENT:   1.50, SIDE_ADS:   1.12,  // right-shoulder offset (CARRY === SIDE)
+    HEIGHT_CARRY: 1.70, HEIGHT_PRESENT: 1.55, HEIGHT_ADS: 1.58,  // rig pivot above the feet (CARRY === HEIGHT)
+
+    // ---- LEGACY armed tier (CAM_TP_GUN_VISIBLE = false) ----
+    // The pre-2026-08-20 framing, kept as the one-line revert: armed-at-rest was
+    // byte-identical to the relaxed chase and only ADS moved the camera or led
+    // the look target.
+    DIST_AIM_BASE: 4.35, DIST_AIM_ADS: 2.65,
+    SIDE_AIM_BASE: 0.68, SIDE_AIM_ADS: 1.12,
     FOV_AIM_BASE: 60,    FOV_AIM_ADS: 50,     // armed = default lens; RMB = moderate zoom toward the aim
-    // HEIGHT_AIM: rig-pivot height while armed. ADS sits at shoulder height so
-    // the raised gun + crosshair line up (image 2: camera level with the head).
     HEIGHT_AIM_BASE: 1.7, HEIGHT_AIM_ADS: 1.58,
+
     // PITCH_LOOK: how strongly the armed 3PS LOOK target follows the player's
     // pitch (systems/camera.js drops/raises the look point by this * camDist).
     // WHY (FIX 1 root cause): the old TP look target was pitch-BLIND (fixed
     // LOOK_Y, flat forward) while the camera's orbit height used sin(pitch)*dist —
     // so pitching up ballooned the camera UP and tilted the view top-down, and you
-    // could not aim vertically in 3PS. With the look target tracking pitch, the
-    // camera looks where you point and the framing stays a stable over-shoulder
-    // shot through the whole pitch range. Engages only while PRESENTING
-    // (CBZ.tpPresenting) — the merely-armed relaxed chase stays pitch-blind
-    // like unarmed, so walking around with a gun never reshapes the frame.
+    // could not aim vertically in 3PS.
     PITCH_LOOK: 1.0,
-    get DIST_AIM() { return (CBZ.isADS && CBZ.isADS()) ? this.DIST_AIM_ADS : this.DIST_AIM_BASE; },
-    get SIDE_AIM() { return (CBZ.isADS && CBZ.isADS()) ? this.SIDE_AIM_ADS : this.SIDE_AIM_BASE; },
-    get FOV_AIM()  { return (CBZ.isADS && CBZ.isADS()) ? this.FOV_AIM_ADS  : this.FOV_AIM_BASE; },
-    get HEIGHT_AIM() { return (CBZ.isADS && CBZ.isADS()) ? this.HEIGHT_AIM_ADS : this.HEIGHT_AIM_BASE; },
+
+    // ---- the tier switch. One helper (CBZ.tpArmTier, systems/camera.js) picks
+    // 0/1/2; these getters are what systems/camera.js reads every frame. ----
+    _gv() { return CBZ.CONFIG.CAM_TP_GUN_VISIBLE !== false; },
+    _tier() { return CBZ.tpArmTier ? CBZ.tpArmTier() : ((CBZ.isADS && CBZ.isADS()) ? 2 : 0); },
+    get DIST_AIM()   { const t = this._tier(); return this._gv() ? [this.DIST_CARRY, this.DIST_PRESENT, this.DIST_ADS][t]          : (t === 2 ? this.DIST_AIM_ADS   : this.DIST_AIM_BASE); },
+    get SIDE_AIM()   { const t = this._tier(); return this._gv() ? [this.SIDE_CARRY, this.SIDE_PRESENT, this.SIDE_ADS][t]          : (t === 2 ? this.SIDE_AIM_ADS   : this.SIDE_AIM_BASE); },
+    get HEIGHT_AIM() { const t = this._tier(); return this._gv() ? [this.HEIGHT_CARRY, this.HEIGHT_PRESENT, this.HEIGHT_ADS][t]    : (t === 2 ? this.HEIGHT_AIM_ADS : this.HEIGHT_AIM_BASE); },
+    get FOV_AIM()    { return (CBZ.isADS && CBZ.isADS()) ? this.FOV_AIM_ADS : this.FOV_AIM_BASE; },
   };
 
   CBZ.cityCam = CBZ.cityCam || { fp: false, death: null };
