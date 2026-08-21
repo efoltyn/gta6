@@ -48,6 +48,8 @@
     "test:prison-sit-revert": "node tools/prison-sit-check.mjs --revert",
     "test:bailout-presentation": "node tools/test-bailout-presentation-browser.mjs",
     "test:boot-health": "node tools/boot-health.mjs",
+    "test:racer": "node tools/racer-story-check.mjs",
+    "visual:racer-opening": "node tools/before-after.mjs racer-opening",
     "ba": "node tools/before-after.mjs",
     "visual:beach": "node tools/before-after.mjs beach-shores",
     "visual:beast-deaths": "node tools/before-after.mjs beast-deaths",

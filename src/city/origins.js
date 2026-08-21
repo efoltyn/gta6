@@ -1599,16 +1599,32 @@
      The verb is NOT re-armed here (unlike tryAirborne, which double-fires it):
      runComposition already called startVerb the moment the placement returned,
      and racing.js's own 0.8 s career tick re-arms the card for any racer whose
-     story is unfinished — so a second start would only race that singleton. */
+     story is unfinished — so a second start would only race that singleton.
+
+     RETRYING IS FREE NOW, AND IT WAS NOT. Every frame of the deferral used to
+     call cityRaceStart, which BUILT A LOANER CAR before it discovered it could
+     not race yet and then returned null with the car still standing on the
+     grid. Six seconds of that laid down one primer-grey car per frame — the
+     twenty-car scrapyard the owner saw. The speedway now publishes
+     CBZ.cityRaceReady(), a pure predicate, and this asks THAT every frame and
+     only spends a car when the answer is yes. The attempt is also capped: an
+     ask that answers "ready" and still fails is a real fault, not a timing
+     one, and repeating it is how one leak becomes twenty. */
   const PENDING_RACE_SEC = 6;
+  const PENDING_RACE_TRIES = 3;
   let pendingRace = null;
 
   function tryRace() {
     if (!pendingRace || !CBZ.cityRaceStart) return false;
+    // the world cannot answer yet — say so for free, spend nothing
+    if (CBZ.cityRaceReady && !CBZ.cityRaceReady()) return false;
+    if (pendingRace.tries >= PENDING_RACE_TRIES) return false;
+    pendingRace.tries++;
     const car = CBZ.cityRaceStart({ style: "muscle", number: 99 });
     if (!car) return false;
     pendingRace = null;
-    if (CBZ.city) CBZ.city.note("A loaner, the back of the grid, and the championship in front of you.", 3.4);
+    if (CBZ.cityRacerStory && CBZ.cityRacerStory.open) CBZ.cityRacerStory.open();
+    else if (CBZ.city) CBZ.city.note("A loaner, the back of the grid, and the championship in front of you.", 3.4);
     return true;
   }
 
@@ -1616,6 +1632,9 @@
     if (!pendingRace) return;
     pendingRace.t += dt;
     if (tryRace()) return;
+    // every allowed attempt has been spent and none took — stop waiting on a
+    // clock that will not change the answer, fall through to the gate now.
+    if (pendingRace.tries >= PENDING_RACE_TRIES) pendingRace.t = PENDING_RACE_SEC + 1;
     if (pendingRace.t > PENDING_RACE_SEC) {
       pendingRace = null;
       // The world could not put a race together this seed. Fall back to the
@@ -1665,7 +1684,7 @@
     // standings and the car catalog, neither guaranteed up at reset.
     if (comp.where === "speedway") {
       genericSafeSpawn();
-      pendingRace = { comp: comp, t: 0 };
+      pendingRace = { comp: comp, t: 0, tries: 0 };
       if (!tryRace()) return { compact: false, onGrid: true, pending: true };
       return { compact: false, onGrid: true };
     }

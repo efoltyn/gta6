@@ -232,12 +232,37 @@
   CBZ.cityRacing = cityRacing;
 
   // ============================================================
-  //  PLAYER RACER CAREER — story made from engine facts.
+  //  THE RACER STORY — five chapters, and every chapter is a DOOR the
+  //  ladder already owns.
   //
-  //  No private race state lives here. The career reads worldstate.js's
-  //  durable race records, which are written by the legal speedway, APEX and
-  //  street-race event emitters. Adding a future race therefore costs one
-  //  `cityEvent("race-finish", ...)`, not another career integration.
+  //  WHAT WAS HERE, AND WHY IT WAS NOT A STORY. Five stages, no cast, no
+  //  stake, and only two prices between the five of them:
+  //
+  //    report        walk to the paddock — except the racer opens ON THE
+  //                  GRID with the lights counting down, so beat one of the
+  //                  story was "drive 29 metres away from the race you are
+  //                  already in", and it cleared itself in the first corner.
+  //    legal-finish   take one flag. Fine.
+  //    apex-podium   ┐ all three read `records.races.apex`, and the ONLY
+  //    apex-win      ├ writer of an `apex` record in the whole repo is
+  //    apex-title    ┘ games/racing.js — the APEX NIGHT package. So the
+  //                  middle of the story asked for the finale three times
+  //                  and skipped everything in between.
+  //
+  //  Meanwhile city/racecareer.js had already built the actual story and
+  //  nobody had written it down: five RUNGS, each one a real locked door
+  //  with a real room behind it (the paddock gate, BAY 12 and its crew,
+  //  pink slips, the champion's garage), each priced in the same durable
+  //  ledger. Two career systems standing side by side, one of them with all
+  //  the drama in it and no words. So the chapters ARE the rungs now — the
+  //  text names the door you are about to open and the price the door
+  //  itself quotes — and there is a CAST: the reigning champion, a real
+  //  roster driver who walks the city, races the field harder once he has
+  //  noticed you, and whose car you can take off him in chapter four.
+  //
+  //  Still no private career store: every `done` below is a read of
+  //  worldstate.js's race records, so a race added tomorrow moves the story
+  //  by emitting `cityEvent("race-finish", …)` and nothing else.
   // ============================================================
   let careerMission = null, careerCheckT = 0;
   const CAREER_ID = "origin_racer_career";
@@ -257,18 +282,199 @@
     }
     return { x: SPEED.cx, z: SPEED.cz };
   }
-  function careerComplete() { return (careerRecord("apex").titles || 0) >= 1; }
+  /* THE SAME ARITHMETIC THE LADDER PRICES ITS DOORS IN. racecareer.js's
+     stats() sums starts/wins/podiums across every race KIND (legal, apex,
+     street, pinkslip) — so "a win and two podiums" means a win and two
+     podiums anywhere, and a street-race podium counts toward the Star rung.
+     The chapters below quote those exact prices, so the objective line and
+     the refusal you get at the door can never disagree. Read the ladder's
+     own numbers when it is loaded; the local sum is the degrade path. */
+  function careerStats() {
+    if (CBZ.raceLadder && CBZ.raceLadder.stats) {
+      try { return CBZ.raceLadder.stats(); } catch (e) { /* fall through */ }
+    }
+    const kinds = ["legal", "apex", "street", "pinkslip"];
+    const out = { starts: 0, wins: 0, podiums: 0, titles: 0 };
+    for (let i = 0; i < kinds.length; i++) {
+      const r = careerRecord(kinds[i]);
+      out.starts += r.starts | 0; out.wins += r.wins | 0; out.podiums += r.podiums | 0;
+    }
+    out.titles = careerRecord("apex").titles | 0;
+    return out;
+  }
+
+  /* ---- THE ANTAGONIST -----------------------------------------------------
+     The reigning champion: the highest-seeded driver still on the grid. Not
+     the current standings leader, because that is YOU by chapter three and a
+     rival who changes every round is not a rival — he is a column. purseSeed
+     is the roster's own "how big is this name" number, it never moves, and
+     when the champion dies permanently (identity.js retires him and promotes
+     a rookie) the next-biggest name inherits the grudge instead of the story
+     pointing at a corpse. Derived, so nothing new is persisted. */
+  function storyRival() {
+    const list = cityRacing.racers || [];
+    let best = null;
+    for (let i = 0; i < list.length; i++) {
+      const r = list[i];
+      if (!r || r.retired) continue;
+      if (!best || (r.purseSeed || 0) > (best.purseSeed || 0)) best = r;
+    }
+    return best || (cityRacing.standings ? cityRacing.standings()[0] : null) || null;
+  }
+  function rivalName() { const r = storyRival(); return r ? r.name : "the champion"; }
+  function rivalTag() { const r = storyRival(); return r ? (r.name + " #" + r.number) : "the champion"; }
+  /* Where the story points you. Chapters that are about RACING point at the
+     start/finish line; chapter four is about a PERSON, so it points at his
+     body if the walking-racer maintainer below has him cast right now, and
+     falls back to the track when it does not (he is drafted and released as
+     you move around the city — a waypoint on a body that has been recycled
+     would be a lie, and mission.js resolves this live every frame). */
+  function rivalPos() {
+    const riv = storyRival();
+    if (riv) {
+      for (let i = 0; i < R.list.length; i++) {
+        const e = R.list[i];
+        if (e && e.racer === riv && e.ped && !e.ped.dead && e.ped.pos) return { x: e.ped.pos.x, z: e.ped.pos.z };
+      }
+    }
+    return careerTarget();
+  }
+
+  /* ---- THE STAKE ----------------------------------------------------------
+     You open in a car that is not yours. island_speedway's loaner is primer
+     grey on purpose and racecareer.js REFUSES to let you stake a `_loaner`
+     in a pink slip ("That's not yours to stake"), so chapter four is locked
+     by the car itself until the team signs it over — which is what taking
+     your first flag buys. One flag turns a borrowed shell into the first
+     thing you own in this game, and the same flag is what makes chapter four
+     possible at all. The mechanic IS the beat; nothing here is decoration. */
+  function signOverLoaner() {
+    const cars = CBZ.cityCars || [];
+    let n = 0;
+    for (let i = 0; i < cars.length; i++) {
+      const c = cars[i];
+      if (!c || !c._loaner) continue;
+      c._loaner = false; c.owned = true; c._loanerClaimed = true;
+      if (c.model) c.model = Object.assign({}, c.model, { name: (c.model.name || "Racer") + " (No. 99)" });
+      n++;
+    }
+    return n;
+  }
+
+  function big(t) { if (CBZ.city && CBZ.city.big) { try { CBZ.city.big(t); return; } catch (e) {} } note(t, 4.0); }
+  function chapter(title, line) { big(title); if (line) note(line, 4.6); }
+
+  /* The five chapters, in order. Each one's `done` is the PRICE of the ladder
+     rung it buys (racecareer.js's NEED table), so the objective line and the
+     refusal you get at that rung's door can never ask for different things:
+       loaner   → Regular   · one start          · the paddock gate opens
+       podium   → Contender · a podium, or four  · BAY 12 + a crew
+       win      → Star      · a win + 2 podiums  · you may call pink slips
+       pinkslip → (the duel Star just unlocked)  · his machine on your keys
+       apex     → APEX      · the Night title    · the champion's garage */
+  function chapters() {
+    return [
+      {
+        id: "loaner", price: "one start",
+        text: "Get your first Diamond Speedway start on the board",
+        card: "CHAPTER ONE · THE LOANER",
+        line: function () {
+          return "Somebody else's car, somebody else's number, the back row. " +
+            rivalTag() + " is on pole and does not know your name.";
+        },
+        done: function () { return careerStats().starts >= 1; },
+        /* `loud` is false while the mission is CATCHING UP through chapters
+           the ledger already shows as done — a reload mid-arc replays the
+           whole arc through finishStage in a handful of frames, and without
+           this every banner in the story fires at once. The world effect
+           (signing the car over) still runs either way, because it is
+           idempotent and a resumed save must end in the same state. */
+        onDone: function (loud) {
+          const n = signOverLoaner();
+          if (!loud) return true;
+          chapter("THE LOANER IS YOURS",
+            n ? "The team signs the grey car over. It is the first thing in this city with your name on it — and the only car you are allowed to stake."
+              : "The paddock gate knows your name now.");
+          if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(3);
+          return true;
+        },
+      },
+      {
+        id: "podium", price: "a podium, or four starts",
+        text: "Stand on a podium — or grind out four starts",
+        card: "CHAPTER TWO · A NAME ON THE BOARD",
+        line: function () {
+          return "One finish is a fee. A podium is a NAME — and BAY 12 only lifts its door for a name.";
+        },
+        // the Contender rung's own price, quoted verbatim so the objective and
+        // the roller door can never ask for different things
+        done: function () { const s = careerStats(); return s.podiums >= 1 || s.starts >= 4; },
+        onDone: function (loud) {
+          if (loud) chapter("BAY 12 IS YOURS",
+            rivalName() + " watched that one from the pit wall. He will not leave the racing line for you again.");
+          return true;
+        },
+      },
+      {
+        id: "win", price: "a win and two podiums",
+        text: "Win a race, and take a second podium",
+        card: "CHAPTER THREE · WHAT A WIN BUYS",
+        line: function () {
+          return "A win and two podiums is the price of STAR — and Star is the only rank allowed to call pink slips.";
+        },
+        done: function () { const s = careerStats(); return s.wins >= 1 && s.podiums >= 2; },
+        onDone: function (loud) {
+          if (loud) chapter("STAR · YOU MAY CALL PINK SLIPS",
+            "Find " + rivalTag() + " and put your car on the line against his.");
+          return true;
+        },
+      },
+      {
+        id: "pinkslip", price: "a pink-slip win",
+        text: function () { return "Take " + rivalTag() + "'s car off him in a pink-slip duel"; },
+        at: rivalPos,                       // the mark is a MAN, not a corner
+        card: "CHAPTER FOUR · PINK SLIPS",
+        line: function () {
+          return "His machine against yours, one race, the loser walks home. He has never had to walk home.";
+        },
+        done: function () { return (careerRecord("pinkslip").wins || 0) >= 1; },
+        onDone: function (loud) {
+          if (loud) chapter("HIS CAR, YOUR GARAGE",
+            "There is one door left on this island and one key that opens it: the APEX Night title.");
+          return true;
+        },
+      },
+      {
+        id: "apex", price: "the APEX Night title",
+        text: "Win the three-race APEX Night title",
+        card: "CHAPTER FIVE · APEX NIGHT",
+        line: function () {
+          return "Three races, one night, most points takes it. The champion's garage is glass-fronted so the whole island can see who is standing in it.";
+        },
+        done: function () { return careerStats().titles >= 1; },
+      },
+    ];
+  }
+
+  function careerComplete() { return careerStats().titles >= 1; }
   function careerSnapshot() {
-    const legal = careerRecord("legal"), apex = careerRecord("apex");
+    const s = careerStats(), legal = careerRecord("legal"), apex = careerRecord("apex");
+    const stage = careerMission && careerMission.alive && careerMission.alive() ? careerMission.stageId() : null;
+    const ids = chapters().map(function (c) { return c.id; });
     return {
+      starts: s.starts, wins: s.wins, podiums: s.podiums, titles: s.titles,
       legalStarts: legal.starts || 0,
       legalPodiums: legal.podiums || 0,
       apexStarts: apex.starts || 0,
       apexPodiums: apex.podiums || 0,
       apexWins: apex.wins || 0,
       apexTitles: apex.titles || 0,
+      pinkslipWins: careerRecord("pinkslip").wins || 0,
+      rival: rivalTag(),
+      chapters: ids.length,
+      chapter: stage ? ids.indexOf(stage) + 1 : 0,
       complete: careerComplete(),
-      stage: careerMission && careerMission.alive && careerMission.alive() ? careerMission.stageId() : null,
+      stage: stage,
     };
   }
   function startRacerCareer(force) {
@@ -276,48 +482,107 @@
     if (careerComplete()) return null;
     if (careerMission && careerMission.alive && careerMission.alive()) return careerMission;
     if (!force && (!g || g.cityOrigin !== "racer")) return null;
+    const CH = chapters();
+    /* WHERE THIS CHARACTER ACTUALLY IS. mission.js always opens a mission on
+       stage 0 and advances a leg per frame while `done()` keeps answering
+       true, so a story resumed mid-arc replays every chapter you have already
+       lived inside about five frames. Without this the reload would fire
+       three banners at once and re-announce a car you signed for last
+       session. `resumeAt` is the first chapter the ledger says is NOT done;
+       everything before it replays SILENTLY (world effects still run — they
+       are idempotent and the resumed save has to land in the same state),
+       and the narration starts where the player actually is. */
+    let resumeAt = 0;
+    while (resumeAt < CH.length) {
+      let d = false;
+      try { d = !!CH[resumeAt].done(); } catch (e) { d = false; }
+      if (!d) break;
+      resumeAt++;
+    }
     careerMission = CBZ.mission.start({
       id: CAREER_ID,
       title: "Rookie to APEX Champion",
-      giver: "Diamond Speedway",
-      brief: "Earn the right to the paddock, then take the whole night.",
+      giver: "Diamond Racing League",
+      brief: "Five doors. Every one of them has a price the league will quote you.",
       reward: { respect: 20 },
-      doneText: "APEX CHAMPION, you arrived as a rookie and own the night.",
-      stages: [
-        {
-          id: "report", goal: "reach", text: "Report to the Diamond Speedway paddock",
-          at: careerTarget, radius: 28,
-        },
-        {
-          id: "legal-finish", goal: "custom", text: "Finish a legal Diamond Speedway race",
-          done: function () { return (careerRecord("legal").starts || 0) >= 1; },
-        },
-        {
-          id: "apex-podium", goal: "custom", text: "Finish on the APEX Night podium",
-          done: function () { return (careerRecord("apex").podiums || 0) >= 1; },
-        },
-        {
-          id: "apex-win", goal: "custom", text: "Win an APEX Night race",
-          done: function () { return (careerRecord("apex").wins || 0) >= 1; },
-        },
-        {
-          id: "apex-title", goal: "custom", text: "Win the three-race APEX Night title",
-          done: function () { return (careerRecord("apex").titles || 0) >= 1; },
-        },
-      ],
+      doneText: "APEX CHAMPION. You arrived in a borrowed car and you own the night.",
+      stages: CH.map(function (c, i) {
+        const loud = i >= resumeAt;
+        return {
+          id: c.id, goal: "custom",
+          text: typeof c.text === "function" ? c.text() : c.text,
+          done: c.done,
+          /* EVERY chapter points somewhere. mission.js resolves `at` for the
+             beacon, the map waypoint and the HUD distance line whatever the
+             goal is — only the OLD first stage ever set one, so four fifths
+             of the story was an instruction with no direction attached. */
+          at: c.at || careerTarget,
+          /* The chapter card fires on ENTER, so it announces where you ARE
+             rather than what you just left. Chapter one's card is the opening
+             card (see open() below) and is not repeated here. */
+          onEnter: (i === 0 || !loud) ? null : function () { chapter(c.card, c.line ? c.line() : ""); },
+          onDone: c.onDone ? function () { return c.onDone(loud); } : null,
+        };
+      }),
       onComplete: function () { careerMission = null; },
     });
     return careerMission;
   }
+
+  /* The opening beat, called by city/origins.js the moment the grid start
+     actually took. It lives HERE because it names the cast and the arc, and
+     origins.js should not have to know either. */
+  function openStory() {
+    const CH = chapters()[0];
+    chapter(CH.card, CH.line());
+    note("Loaner No. 99 · lights out · five doors between you and the champion's garage.", 4.2);
+  }
+
   CBZ.cityRacerCareer = {
     start: function () { return startRacerCareer(true); },
     target: careerTarget,
     state: careerSnapshot,
     complete: careerComplete,
   };
+  /* The story's public face. island_speedway reads rival() to give the
+     champion teeth once he has noticed you; origins.js calls open(). */
+  CBZ.cityRacerStory = {
+    open: openStory,
+    rival: storyRival,
+    rivalName: rivalName,
+    chapters: function () {
+      return chapters().map(function (c) {
+        return {
+          id: c.id, card: c.card,
+          text: typeof c.text === "function" ? c.text() : c.text,
+          done: !!c.done(),
+        };
+      });
+    },
+    // Is the rival racing YOU rather than the championship? He notices you
+    // the moment you have stood on a podium — chapter two's own beat.
+    grudge: function () { return careerStats().podiums >= 1 && !careerComplete(); },
+    state: careerSnapshot,
+  };
   CBZ.racerCareerAudit = function () {
     const s = careerSnapshot();
-    return { stages: 5, persistentSources: 2, privateRaceState: 0, complete: s.complete, stage: s.stage };
+    const CH = chapters();
+    /* ONE BEAT, ONE PRICE. The old arc had five stages and TWO prices: one
+       Diamond start, and then `records.races.apex` three times over — the
+       same record, asked for as a podium, a win and a title, with every rung
+       of the ladder in between skipped entirely. Counting DISTINCT prices is
+       the honest measure of whether this is an arc or a repeat, and it is
+       derived from the chapter table rather than typed, so a future chapter
+       that duplicates an existing price drops this number and trips the pin
+       in tools/math-gate.mjs. */
+    const prices = {};
+    for (let i = 0; i < CH.length; i++) prices[CH[i].price || CH[i].id] = 1;
+    return {
+      stages: CH.length, persistentSources: 2, privateRaceState: 0,
+      distinctPrices: Object.keys(prices).length,
+      rival: s.rival, chapter: s.chapter,
+      complete: s.complete, stage: s.stage,
+    };
   };
   // Resume the story for this character after reload/swap. If the player
   // changes character, retire the old foreground card instead of leaking it
@@ -529,13 +794,23 @@
     p._drip = null; p._dripKey = null;
     p.baseSpeed = 1.7; p.snitch = 0.3;
     paintFit(p, racer.teamColor);
-    // FAME IS A POWER GRADIENT (owner Law 2): the reigning champion — the
-    // standings leader with wins — walks as a power.js PRINCIPAL: a small
-    // entourage, the Lv pill, a detail that answers for him. One declaration;
-    // power.js does all the work. Dissolved on release/death below.
-    if (CBZ.powerPrincipal && (racer.wins | 0) > 0) {
+    /* FAME IS A POWER GRADIENT (owner Law 2): the champion walks as a power.js
+       PRINCIPAL — a small entourage, the Lv pill, a detail that answers for
+       him. One declaration; power.js does all the work. Dissolved on release/
+       death below.
+
+       TWO WAYS TO BE THE CHAMPION, and only the second one existed. The old
+       test was "standings leader AND has wins", which is a SEASON reading: on
+       a fresh world nobody has won anything yet, so the man the story sends
+       you to find — the name on every board on the island — walked the
+       concourse as an anonymous socialite until the AI field happened to give
+       him a victory. The reigning champion (storyRival: the biggest name still
+       on the grid) carries the detail from day one; the in-season leader still
+       earns it the moment he wins one. */
+    if (CBZ.powerPrincipal) {
       const lead = cityRacing.standings()[0];
-      if (lead === racer) {
+      const isChamp = racer === storyRival() || (lead === racer && (racer.wins | 0) > 0);
+      if (isChamp) {
         try { p._racerPrincipal = CBZ.powerPrincipal(p, { tier: 2, org: "racing", role: "Racing Champion" }); }
         catch (e) { p._racerPrincipal = null; }
       }
@@ -570,7 +845,14 @@
 
   // pick the next roster racer to put on the street that ISN'T already walking.
   function nextUnclaimedRacer() {
-    // prefer the TOP of the championship (the stars people want to see/take out)
+    /* THE STORY'S RIVAL WALKS FIRST. Chapters three and four send you to find
+       the champion in person — to call pink slips you have to stand in front
+       of him — and until this line he was just another name in a standings
+       sort, so the one driver the story insists you meet was as likely to be
+       absent from the city as any of the other eleven. */
+    const riv = storyRival();
+    if (riv && !riv.retired && !R.claimed.has(riv.number)) return riv;
+    // then the TOP of the championship (the stars people want to see/take out)
     // — standings() already excludes retired/deceased racers, so a permanently
     // dead driver can never be re-picked here (the racing-permanence fix).
     const s = cityRacing.standings();
@@ -620,7 +902,19 @@
         const slip = r.slips && (r.slips.won || r.slips.lost)
           ? (r.slips.won > r.slips.lost ? " Holds YOUR pink slip." : " You hold HIS pink slip.")
           : "";
-        note("" + r.name + " · P" + pos + " in the championship, " + r.wins + " wins (#" + r.number + ")." + slip, 3.2);
+        /* THE MAN THE STORY IS ABOUT SHOULD READ AS HIM. Sizing up the
+           reigning champion printed the same anonymous standings row as
+           sizing up the twelfth-placed rookie, so the one face the racer arc
+           keeps naming was indistinguishable in the street from anybody
+           else's. One clause, drawn from the same published story face the
+           grid and the waypoint read. */
+        let mark = "";
+        if (CBZ.cityRacerStory && CBZ.cityRacerStory.rival && CBZ.cityRacerStory.rival() === r) {
+          mark = CBZ.cityRacerStory.grudge()
+            ? " He knows exactly who you are now."
+            : " The reigning champion. He does not know your name yet.";
+        }
+        note("" + r.name + " · P" + pos + " in the championship, " + r.wins + " wins (#" + r.number + ")." + slip + mark, 3.6);
       },
     });
     // challenge to a street race → route to the speedway join flow if it exists,

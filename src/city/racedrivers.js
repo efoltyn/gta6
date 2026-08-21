@@ -300,24 +300,17 @@
     return dh / ds;
   }
 
+  // Take a driver's car back out of the world. The four lines that used to
+  // live here (splice the record, detach the group, walk it disposing
+  // anything not flagged _shared) are vehicles.js's CBZ.cityScrapCar now —
+  // the ONE way a single car leaves the fleet. See the note there: the
+  // copies of this block that other callers never wrote are how the speedway
+  // ended up with a grid full of orphaned loaners.
   function despawn(m) {
     const i = D.list.indexOf(m);
     if (i >= 0) D.list.splice(i, 1);
-    const car = m.car;
-    if (!car) return;
-    const ci = CBZ.cityCars ? CBZ.cityCars.indexOf(car) : -1;
-    if (ci >= 0) CBZ.cityCars.splice(ci, 1);
-    car.dead = true;
-    if (car.group) {
-      if (car.group.parent) car.group.parent.remove(car.group);
-      car.group.traverse(function (o) {
-        if (o.isSprite) return;
-        if (o.geometry && !o.geometry._shared && o.geometry.dispose) { try { o.geometry.dispose(); } catch (e) {} }
-        const mm = o.material;
-        if (Array.isArray(mm)) mm.forEach((x) => { if (x && !x._shared && x.dispose) x.dispose(); });
-        else if (mm && !mm._shared && mm.dispose) { try { mm.dispose(); } catch (e) {} }
-      });
-    }
+    if (m.car && CBZ.cityScrapCar) CBZ.cityScrapCar(m.car);
+    else if (m.car) m.car.dead = true;
   }
   function despawnAll(tag) {
     for (let i = D.list.length - 1; i >= 0; i--) {

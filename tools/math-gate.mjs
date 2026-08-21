@@ -500,13 +500,19 @@ const PASS = `(() => {
     } else out.fails.push("raceToolAudit missing");
     // The Racer story is an event/ledger consumer, not a second championship
     // save. Five beats are authored; durable truth has exactly two owners:
-    // legal and APEX records in worldstate.
+    // legal and APEX records in worldstate. unreachableStages is the pin
+    // added after three of the five beats were found to read the APEX race
+    // record, which ONLY games/racing.js writes — the middle of the story
+    // asked for the finale three times and could not be played through in
+    // Gang City at all. A chapter nobody can reach is not a chapter.
     if (CBZ.racerCareerAudit) {
       const rc = CBZ.racerCareerAudit();
-      out.racerCareer = rc.stages + " stages sources=" + rc.persistentSources + " private=" + rc.privateRaceState;
-      if (rc.stages !== 5 || rc.persistentSources !== 2 || rc.privateRaceState !== 0) {
+      out.racerCareer = rc.stages + " stages sources=" + rc.persistentSources + " private=" + rc.privateRaceState +
+        " prices=" + rc.distinctPrices + " rival=" + rc.rival;
+      if (rc.stages !== 5 || rc.persistentSources !== 2 || rc.privateRaceState !== 0 || rc.distinctPrices !== 5) {
         out.fails.push("RACER CAREER CONTRACT DRIFT: " + JSON.stringify(rc));
       }
+      if (!rc.rival || rc.rival === "the champion") out.fails.push("the racer story has no named rival");
     } else out.fails.push("racerCareerAudit missing");
     // THE 2026-08-04 MODES WAVE (one hitman card / race ladder of locked
     // places / the presidency / the captain / gun game). Every pin below was

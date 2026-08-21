@@ -1967,6 +1967,40 @@
   }
   CBZ.clearCityCars = clearCars;
 
+  /* ---- SCRAP ONE CAR ------------------------------------------------------
+     clearCars() tears down the WHOLE fleet, and until this existed there was
+     no supported way to take a single record back out of the world again.
+     Everywhere that needed one wrote its own four lines — racedrivers.js's
+     despawn(), the chop-shop payout, the arena-root purges — and every place
+     that FORGOT to write them leaked a car: a group welded to the arena root
+     with a live record in CBZ.cityCars and nothing left holding a reference.
+     island_speedway's loaner was exactly that bug, twenty times over on one
+     grid. One entry point now, and it is idempotent: scrapping a car twice,
+     or a car that was never registered, is a no-op rather than a double
+     dispose of shared geometry. */
+  CBZ.cityScrapCar = function (car) {
+    if (!car || car._scrapped) return false;
+    car._scrapped = true;
+    // never scrap the car under the player — hand the seat back first
+    if (car.player && CBZ.cityExitVehicle) { try { CBZ.cityExitVehicle(); } catch (e) {} }
+    if (CBZ.cityDemotePlayerCar) { try { CBZ.cityDemotePlayerCar(car); } catch (e) {} }
+    if (car._heldBy && CBZ.vehicleHoldRelease) { try { CBZ.vehicleHoldRelease(car); } catch (e) {} }
+    const i = CBZ.cityCars.indexOf(car);
+    if (i >= 0) CBZ.cityCars.splice(i, 1);
+    car.dead = true;
+    if (car.group) {
+      if (car.group.parent) car.group.parent.remove(car.group);
+      car.group.traverse(function (o) {
+        if (o.isSprite) return;
+        if (o.geometry && !o.geometry._shared && o.geometry.dispose) { try { o.geometry.dispose(); } catch (e) {} }
+        const m = o.material;
+        if (Array.isArray(m)) m.forEach((x) => { if (x && !x._shared && x.dispose) { try { x.dispose(); } catch (e) {} } });
+        else if (m && !m._shared && m.dispose) { try { m.dispose(); } catch (e) {} }
+      });
+    }
+    return true;
+  };
+
   // ---- CUSTOM-VISUAL VEHICLE REGISTRATION ---------------------------------
   // Turn an already-built THREE.Group (emergency truck, farm tractor) into a
   // first-class CBZ.cityCars record: enterable via the interaction system
