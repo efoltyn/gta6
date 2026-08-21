@@ -143,3 +143,106 @@ a beat at full extension, then the jaws SNAP shut hard and fast — the closing
 is much quicker than the opening — and the head shakes on contact. Equal-speed
 open and close reads as a puppet's mouth. Asymmetric timing is most of what
 makes it read as a bite.
+
+---
+
+## 7. THE MOUTH IS THE BODY SPLITTING, NOT A CLAMP (owner, 2026-08-21)
+
+Owner, with an open-mouthed orca photograph on the table: the shark's mouth
+"is a clamp detached from the shape of the shark … the orca is a great one
+where it's really animating the shape … we just need those black white parts
+to separate like this image and make a real mouth." And: **no tongue** — "the
+tongue for sharks was dumb af."
+
+Read the orca photograph: nothing is bolted on. The HEAD ITSELF is in two
+halves — the black upper half (snout, eye, melon) rotated up, the white lower
+half (chin, throat) dropped down — and both halves are continuations of the
+body's own mass, teeth rimming each, a dark hole between them. The
+countershading boundary IS the mouth line.
+
+So the law, as implemented in `src/city/wildlife/aquatic.js`
+(`SHARK_MOUTH_SPLIT`, revert with `?sharkmouth=off`). Owner, second pass:
+"I want the mouth INSIDE the geometry and prying open the geometry — the
+colors already show the part that needs to split — and this also will
+improve the dumb shark nose tip." So the mouth is not parts attached to the
+head any more; the head's front IS two jaws:
+
+- **The hull hands over the whole head front.** For every species with a
+  snout (`MOUTH.snoutShell`), the hull ends just past the jaw corner, closed
+  by a cap painted as throat. Everything forward is the two jaw shells.
+- **The upper jaw is the body's dark half** (`addSnoutShell`): each
+  cross-section runs seam → crown → seam, cut from the same rings and
+  painted with the same ragged countershade cut, closing underneath with a
+  dark palate. The EYES, nostrils and ampullae ride it, so a bite rotates
+  the whole dark top of the head — eye and all — like the photograph. And
+  the nose finally tapers into a real, slightly upturned TIP point instead
+  of the old sawn-off end cap.
+- **The lower jaw IS the body's white half.** `sharkChin` is a hull-shaped
+  wedge cut from the species' own rings — same belly line, same beam less a
+  crease — hinged at the jaw corner inside the `sharkLowerJaw` group.
+- **The teeth live INSIDE.** Gum bands and tooth rows sit between palate and
+  chin deck, inside the closed head; they exist to the eye only when the
+  body pries open. §1's palatoquadrate slide is unchanged on top (the tooth
+  ring still travels out past the rostrum tip); snout lift is 0.30 rad.
+- **The hammerhead keeps its cephalofoil** as the static upper head (its
+  famously small mouth opens beneath it): notch + chin, no snout shell.
+- **Verified by** `node tools/before-after.mjs shark-bites` — a self A/B
+  against `?sharkmouth=off`. Its `staticVsJawM` metric is the owner's
+  complaint as a number: static underside minus moving-jaw underside at rest.
+  Negative = a closed chin the bite cannot move (the clamp shipped at ‑0.07
+  to ‑0.11); the split mouth scores +0.2 to +1.1.
+
+---
+
+## 8. AN ORCA ATTACK IS A BITE, NOT A HEADBUTT (owner, 2026-08-21)
+
+Owner: "orca attack is legit just head butting and it overlaps instead of
+colliding with shape of sharks."
+
+Two laws, both in `city/creature_combat.js` and both reverted by
+`?bitepass=off` / `CBZ.CONFIG.MARINE_BITE_PASS = false`:
+
+- **The pod's flank pass is `bite_flank`**: same cross-the-beam silhouette
+  as the old ram, but the jaws ride `biteCurve` (fast open, held through
+  contact, hard snap, the worry after), and the pass only scores when
+  `jawReaches` says the teeth arrived. marine_predation and wildlife_orca's
+  degrade mob both choose it; the roll-over hold now stations at the orca's
+  own bite point plus the quarry's measured half-beam, jaws half-open on the
+  pectoral.
+- **The body stops at the body** (`setLungeCap` + the approach cap): the
+  committed water styles (`lunge`, `ram_flank`, `bite_flank`) can no longer
+  carry an attacker through its target — the drive is capped where the
+  attacker's own jaw point meets the victim's surface (a tooth-grip of
+  penetration is the hold). The surface is `opts.targetRad` when the caller
+  measured it — marine_predation's `bodyBeam()` reads the named hull mesh,
+  because the whole-group box counts pectoral fins and calls a megalodon
+  13 m wide — else the old scale guess.
+
+- **The hunt FSM obeys the same law** (`systems/predator.js` §R): `bump` and
+  `rush` closed on CENTRE distances, so predatorHunt's own commit parked an
+  orca inside the megalodon before the swing even began — the last live
+  headbutt path. Both states now floor their stop at the hunter's jaw
+  distance plus the quarry's measured half-beam (and the fight hand-off's
+  reach is floored to match, or the swing would deadlock in its own
+  approach); a water hunter with an authored mouth no longer throws the
+  shut-mouth investigatory bump at an ANIMAL at all — that beat is the
+  player's dread cue, and against a quarry it commits (a bite) instead.
+  Player hunts are untouched.
+
+**Verified by** `node tools/before-after.mjs orca-bite` — the production
+`creatureFight` loop frozen at matched swing phases, `?bitepass=off` as the
+before column, plus a `commit-rush` subject that drives the REAL
+`predatorCommit` + `predatorHunt` FSM end to end. `nosePenM` is the overlap
+as a number (staged pass: 1.9 m rammed through → 0.7 m tooth grip; live FSM
+commit: 2.15 m — the nose at the megalodon's centreline — → 1.3 m);
+`jawOpenPct` is the headbutt as a number (0 → 100 at contact).
+
+**THE ACCEPTANCE RULE, in the owner's words (2026-08-21): "the only overlap
+form above should be when the thing is physically in the mouth."** From a
+drone, two fighting bodies may overlap ONLY where a mouth encloses flesh:
+the tooth-grip the lunge cap allows (jaw at the surface, ~half a metre of
+head pressed into the flank), a seized prey riding the jaw point, the
+roll-over's jaws on the pectoral. That overlap is correct — do not "fix" it
+to zero, a bite that never encloses anything is a boop. Every other
+silhouette overlap (a body inside a body, a nose past a centreline, a fin
+emerging from a quarry's flank) is the bug this section exists to kill.

@@ -468,6 +468,39 @@
           yawOff += Math.sin(shakeT * 25 + 1.3) * 0.09 * shakeK;
         }
         break;
+      case 'bite_flank':
+        /* THE FLANK BITE (the orca pod's pass, owner 2026-08-21: "it doesn't
+           bite, it headbutts"). Same silhouette family as ram_flank — a pod
+           member leaves its bearing, comes in ACROSS the quarry's beam and
+           carries straight through — but the weapon is the MOUTH: the jaws
+           ride the bite curve (fast open, held through contact, hard snap),
+           the bank is halved so the gape faces the flank instead of the sky,
+           and the head worries the hit after the snap exactly like `lunge`.
+           Contact honesty comes free: this style is NOT in jawReaches()'s
+           exempt list, so the pass only scores when the teeth actually
+           arrive, and setLungeCap() holds the drive so the teeth stop AT the
+           quarry's surface instead of the two bodies passing through each
+           other. */
+        if (p < STRIKE_AT) {
+          lunge = -0.16 * sc * wind;                     // gather off the beam
+          roll = -0.14 * wind;                           // a shallow wind-up bank
+          pitchZ = -0.08 * wind;
+        } else {
+          var bp = (p - STRIKE_AT) / (1 - STRIKE_AT);    // 0..1 drive phase
+          var bdrive = Math.min(1, bp * bp * 2.8);       // same quadratic launch
+          lunge = reachHint * 1.15 * bdrive * (1 - ease(Math.max(0, bp - 0.7) / 0.3));
+          roll = 0.20 * Math.sin(Math.min(1, bp * 1.5) * Math.PI * 0.9);
+          pitchZ = 0.10 * Math.sin(Math.min(1, bp * 2) * Math.PI);
+          yOff = 0.12 * sc * Math.sin(Math.min(1, bp * 2.2) * Math.PI);
+        }
+        if (CBZ.swimJaw) { try { CBZ.swimJaw(actor, biteCurve(p)); } catch (e) {} }
+        var bShakeT = (p - BITE_HOLD_TO) / 0.30;
+        if (bShakeT > 0 && bShakeT < 1) {
+          var bShakeK = (1 - bShakeT) * (1 - bShakeT);
+          roll += Math.sin(bShakeT * 34) * 0.15 * bShakeK;
+          yawOff += Math.sin(bShakeT * 25 + 1.3) * 0.08 * bShakeK;
+        }
+        break;
       case 'ram_flank':
         /* THE FLANK RAM (city/marine_predation.js's orca pod). `lunge` is a
            bite from below with the mouth open; this is the opposite blow and
@@ -600,7 +633,10 @@
         break;
     }
 
-    // apply lunge as a delta so position never drifts
+    // apply lunge as a delta so position never drifts. _lungeCap is
+    // setLungeCap()'s body-stops-at-body limit for the committed water
+    // styles; null everywhere else.
+    if (actor._lungeCap != null && lunge > actor._lungeCap) lunge = actor._lungeCap;
     var dL = lunge - prevL;
     g.position.x += cs * dL;
     g.position.z += sn * dL;
@@ -703,6 +739,46 @@
   function bodyRadius(t) {
     if (t && typeof t.rad === 'number' && t.rad > 0) return t.rad;
     return 0.42 + actorScale(t) * 0.45;
+  }
+
+  /* THE BODY STOPS AT THE BODY (owner, 2026-08-21: the orca "overlaps instead
+     of colliding with the shape of sharks"). The committed water styles carry
+     the whole animal forward by up to 1.3x reach; on land-sized reaches that
+     was centimetres, but a 7 m orca driving at an 11 m megalodon buried
+     itself to the dorsal fin inside the thing it was hitting. The cap holds
+     the pose so the attacker's own TEETH stop a shade inside the victim's
+     surface — a tooth's worth of penetration is the grip — and everything
+     behind the teeth therefore stays outside the body. Same law during the
+     run-in (the approach branch below). Reverts with the bite-pass flag,
+     because the before/after preset's BEFORE column has to be able to
+     reproduce the old drive-through. */
+  function bitePassOn() {
+    if (typeof location !== 'undefined' && location.search &&
+        /(^|[?&])bitepass=off(&|$)/.test(location.search)) return false;
+    return !(CBZ.CONFIG && CBZ.CONFIG.MARINE_BITE_PASS === false);
+  }
+  function marineCommitted(style) {
+    return style === 'lunge' || style === 'ram_flank' || style === 'bite_flank';
+  }
+  // The victim's surface, as the caller measured it. bodyRadius()'s scale
+  // guess is fine for a man or a wolf and off by a metre on a megalodon —
+  // whose real half-beam the marine callers have measured off the named hull
+  // mesh — so a caller that knows better says so in opts.targetRad.
+  function targetRadFor(target, opts) {
+    if (opts && opts.targetRad > 0) return opts.targetRad;
+    return bodyRadius(target);
+  }
+  function setLungeCap(attacker, target, style, tp, opts) {
+    if (marineCommitted(style) && bitePassOn()) {
+      var J = jawWorld(attacker);
+      if (J) {
+        var jx = tp.x - J.x, jz = tp.z - J.z;
+        attacker._lungeCap = Math.max(0, (attacker._lungeAmt || 0) +
+          Math.sqrt(jx * jx + jz * jz) - targetRadFor(target, opts));
+        return;
+      }
+    }
+    attacker._lungeCap = null;
   }
 
   /* DID THE BITE REACH? — the tooth-contact gate.
@@ -916,6 +992,7 @@
     // a swing abandoned mid-arc must not leave the body permanently turned
     if (g && actor._yawOff) { g.rotation.y -= actor._yawOff; actor._yawOff = 0; }
     actor._lungeAmt = 0;
+    actor._lungeCap = null;
     actor._atkAnim = -1;
     // back to the shared clock, the shared weight and the caller's own style:
     // a per-move override lives for exactly one swing
@@ -1068,7 +1145,8 @@
             // — flag off, no block loaded, refused (already holding someone) —
             // falls through to the ordinary strike exactly as before.
             if (style === 'bite' || style === 'maul' || style === 'strike' || style === 'lunge' ||
-                style === 'gore' || style === 'ram' || style === 'ram_flank' || style === 'ape_bite') {
+                style === 'gore' || style === 'ram' || style === 'ram_flank' ||
+                style === 'bite_flank' || style === 'ape_bite') {
               biteWound(attacker, target, style === 'ape_bite' ? 'maul' : style);
             }
             // ...and it BLEEDS. The decal above marks the skin; this is the
@@ -1095,6 +1173,7 @@
           restPose(attacker, dt);
         } else {
           attacker._atkAnim = _p;
+          setLungeCap(attacker, target, style, tp, opts);
           animateAttack(attacker, style, _p, _h, Math.min(reach, _dist), dt);
         }
         return RES;
@@ -1120,6 +1199,16 @@
         // creature in the game is on that path and is unchanged.
         var step = speed * dt;
         if (step > _dist - reach * 0.7) step = _dist - reach * 0.7;
+        // the body-stops-at-body law during the run-in too: a marine
+        // attacker's teeth never cross the quarry's surface just by closing
+        if (marineCommitted(style) && bitePassOn()) {
+          var Ja = jawWorld(attacker);
+          if (Ja) {
+            var ajx = tp.x - Ja.x, ajz = tp.z - Ja.z;
+            var alim = Math.sqrt(ajx * ajx + ajz * ajz) - targetRadFor(target, opts) * 1.05;
+            if (step > alim) step = alim;
+          }
+        }
         var hasMove = (typeof opts.move === 'function');
         if (step > 0 && _dist > 0.001) {
           if (hasMove) {
@@ -1182,6 +1271,7 @@
 
   // ---- expose --------------------------------------------------------------
   CBZ.creatureFight = creatureFight;
+  CBZ.creatureBitePass = bitePassOn;   // one flag, one reader — marine callers ask here
   CBZ.creatureFlinch = creatureFlinch;
   CBZ.creatureAnimateFlinch = creatureAnimateFlinch;
   CBZ.creatureStyleFor = creatureStyleFor;
