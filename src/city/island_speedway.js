@@ -3201,7 +3201,10 @@
     if (CBZ.touchMode) return true;
     try {
       if (document.body && document.body.classList.contains("touch")) return true;
-      return !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+      // Fallback for the frame before systems/touch.js has stamped body.touch.
+      // CBZ.isTouchDevice (config.js) — not a bare `pointer: coarse`, which an
+      // iPad with a trackpad attached answers "fine" to.
+      return CBZ.isTouchDevice();
     } catch (e) { return false; }
   }
   function standingsFoot() {

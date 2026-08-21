@@ -8,6 +8,40 @@
 
   const CBZ = (window.CBZ = window.CBZ || {});
 
+  // ---- IS THIS A TOUCH DEVICE? ----------------------------------------
+  // ONE answer, because five files had four different ones and the two
+  // shortest were both wrong on an iPad:
+  //
+  //   `(pointer: coarse)` alone   — asks about the PRIMARY pointer. Attach a
+  //       Magic Keyboard or any trackpad to an iPad and the primary pointer
+  //       is the trackpad, so a device with a 13" touchscreen answers "fine"
+  //       and the whole touch layer stays off.
+  //   UA sniffing                 — WKWebView on iPad defaults to DESKTOP
+  //       content mode and claims to be a Mac.
+  //
+  // `any-pointer: coarse` asks whether ANY attached pointer is a finger,
+  // which is the question this game actually has; maxTouchPoints is the
+  // belt-and-braces read that survives both of the above. Cached, because
+  // this gets asked from per-frame code paths and matchMedia is not free.
+  //
+  // NOTE FOR CSS: stylesheets can't read maxTouchPoints, so `@media (pointer:
+  // coarse)` blocks have the same blind spot. systems/touch.js puts `body.touch`
+  // on the document when this returns true — key mobile rules off THAT class,
+  // not off a bare pointer media query.
+  let _touchDev = null;
+  CBZ.isTouchDevice = function () {
+    if (_touchDev !== null) return _touchDev;
+    try {
+      const mm = window.matchMedia;
+      _touchDev = !!(
+        (mm && (mm("(any-pointer: coarse)").matches || mm("(pointer: coarse)").matches)) ||
+        "ontouchstart" in window ||
+        (navigator.maxTouchPoints || 0) > 0
+      );
+    } catch (e) { _touchDev = false; }
+    return _touchDev;
+  };
+
   // ---- shared mutable buses (filled in by other modules) ----
   CBZ.colliders = [];      // {minX,maxX,minZ,maxZ, ref, [y0,y1]} — y0/y1 = a
                            // height-gated wall (window/doorway/floor), checked

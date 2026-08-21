@@ -1,0 +1,55 @@
+/* ============================================================
+   css/fonts.css — Fredoka, SELF-HOSTED.
+
+   WHY THIS FILE EXISTS: the game used to pull Fredoka from
+   fonts.googleapis.com at boot. That is fine for a web page and WRONG for a
+   shipped app. Inside a native iOS shell (Capacitor/WKWebView) the game runs
+   from file:// — a plane-mode launch, a dead hotel wifi, or Apple's own
+   review device behind a flaky proxy would render the entire HUD in the
+   fallback stack, and every button/pill in this game is sized against
+   Fredoka's metrics. It was also the LAST outbound request the game made:
+   with this file, the app boots with zero network access and nothing
+   user-identifying leaves the device on launch (which is also what the App
+   Store privacy questionnaire wants to be able to say).
+
+   Only the LATIN subset is shipped (4 weights, ~64 KB total). The game's UI
+   is English; the Hebrew/latin-ext subsets Google serves were dead weight.
+   Refresh with: node tools/fetch-fonts.mjs
+============================================================ */
+
+@font-face {
+  font-family: 'Fredoka';
+  font-style: normal;
+  font-weight: 400;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url(../assets/fonts/fredoka-400.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Fredoka';
+  font-style: normal;
+  font-weight: 500;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url(../assets/fonts/fredoka-500.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Fredoka';
+  font-style: normal;
+  font-weight: 600;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url(../assets/fonts/fredoka-600.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Fredoka';
+  font-style: normal;
+  font-weight: 700;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url(../assets/fonts/fredoka-700.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}

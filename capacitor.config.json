@@ -1,0 +1,17 @@
+{
+  "appId": "com.efoltyn.ganglife",
+  "appName": "Gang Life",
+  "webDir": "dist",
+  "loggingBehavior": "production",
+  "ios": {
+    "contentInset": "never",
+    "scrollEnabled": false,
+    "backgroundColor": "#0b1622",
+    "preferredContentMode": "mobile",
+    "limitsNavigationsToAppBoundDomains": false,
+    "handleApplicationNotifications": false
+  },
+  "server": {
+    "iosScheme": "capacitor"
+  }
+}

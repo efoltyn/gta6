@@ -1602,8 +1602,21 @@
     if (document.visibilityState !== "visible") clearAllTouchState();
   });
 
-  // coarse-pointer device (phone/tablet): turn it on right away
-  if (window.matchMedia && window.matchMedia("(pointer: coarse)").matches) enable();
+  // TOUCH-CAPABLE DEVICE (phone/tablet): turn it on right away.
+  //
+  // This used to ask ONLY `(pointer: coarse)`, and that test loses an iPad in
+  // two ways that both matter for a shipped app:
+  //   • an iPad with a Magic Keyboard or any trackpad attached reports
+  //     `pointer: fine` — the PRIMARY pointer is the trackpad — so the entire
+  //     touch layer stayed off on the exact hardware a lot of iPads live in;
+  //   • WKWebView on iPad defaults to DESKTOP content mode, where the UA and
+  //     the media queries both claim to be a Mac. (The Capacitor shell pins
+  //     `preferredContentMode: "mobile"` to avoid that, but a plain Safari
+  //     visit still hits it.)
+  // `any-pointer: coarse` and maxTouchPoints both survive an attached
+  // trackpad, and this is the same three-way test core/microboot.js already
+  // used — touch.js was simply the copy that never got it.
+  if (CBZ.isTouchDevice()) enable();
 
   // controls only show while actually playing; weapon buttons only while armed
   CBZ.onAlways(98, function () {

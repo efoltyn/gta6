@@ -48,6 +48,15 @@
     "test:prison-sit-revert": "node tools/prison-sit-check.mjs --revert",
     "test:bailout-presentation": "node tools/test-bailout-presentation-browser.mjs",
     "test:boot-health": "node tools/boot-health.mjs",
+    "test:subtitles": "node tools/subtitle-dedupe-check.mjs",
+    "test:verbs": "node tools/interact-verbs-check.mjs",
+    "test:ipad-boot": "node tools/ipad-boot-check.mjs",
+    "test:ui": "node tools/subtitle-dedupe-check.mjs && node tools/interact-verbs-check.mjs && node tools/button-gate.mjs",
+    "test:ship": "npm run test:ui && node tools/ipad-boot-check.mjs",
+    "ios:build": "npm run build && npx cap copy ios",
+    "ios:sync": "npm run build && npx cap sync ios",
+    "ios:open": "npx cap open ios",
+    "fonts": "node tools/fetch-fonts.mjs",
     "ba": "node tools/before-after.mjs",
     "visual:beach": "node tools/before-after.mjs beach-shores",
     "visual:beast-deaths": "node tools/before-after.mjs beast-deaths",
@@ -89,6 +98,9 @@
     "visual:npc-tactics": "node tools/visual-compare.mjs --preset npc-tactics --subjects cops-standoff,firefight,stop-profile,hide-break --no-open"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.0",
+    "@capacitor/core": "^8.5.0",
+    "@capacitor/ios": "^8.5.0",
     "three": "^0.164.1",
     "vite": "^5.4.0"
   }

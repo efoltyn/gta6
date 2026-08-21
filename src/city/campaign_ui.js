@@ -1035,6 +1035,7 @@
     choiceResolve = null;
     if (dialogueEl) dialogueEl.classList.remove("show");
     document.body.classList.remove("campaign-dialogue-active");
+    if (CBZ.subtitles) CBZ.subtitles.release("campaignDialogue");
     if (runCallback && pending && result && result.onSelect) {
       try { result.onSelect(result.value, result); } catch (e) { setTimeout(function () { throw e; }, 0); }
     }
@@ -1072,6 +1073,17 @@
       dialogueEl.classList.add("show");
     }
     document.body.classList.add("campaign-dialogue-active");
+    /* ONE LINE, ONE SURFACE (systems/subtitlebus.js). Authored dialogue is the
+       TOP rank, so this claim is never refused — it is here to EVICT: if a ped
+       bark, a verb result or a HUD hint is already carrying this same sentence
+       (campaign.js:213 fixed one such path by hand; there are others), the
+       duplicate goes dark instead of being laddered a slot above this card.
+       No expiry to speak of — an authored line ends when finishDialogue says
+       it does, which is where the release lives. */
+    if (CBZ.subtitles) {
+      CBZ.subtitles.claim("campaignDialogue", "campaign", state.dialogue.text, 600,
+        state.dialogue.speaker, function () { finishDialogue(null, false); });
+    }
     return new Promise(function (resolve) { choiceResolve = resolve; });
   }
 
