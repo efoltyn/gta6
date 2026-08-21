@@ -150,7 +150,16 @@ try {
   else if (!(drew.frames > 0)) fail("the renderer has never drawn a frame");
   else if (!(drew.triangles > 0)) fail("frames drew, but zero triangles — the world is not in the scene");
   try {
-    const shot = await rig.send("Page.captureScreenshot", { format: "jpeg", quality: 70 });
+    /* WITH A FUSE. Page.captureScreenshot waits for the compositor to hand it a
+       frame, and this tool caps requestAnimationFrame — so on a page that has
+       spent its budget the call simply never returns, and a minimizer trial
+       sits there until its own kill timer fires seven minutes later. Measured:
+       it cost a search most of an hour. The screenshot is a second opinion, so
+       not getting one is not a failure. */
+    const shot = await Promise.race([
+      rig.send("Page.captureScreenshot", { format: "jpeg", quality: 70 }),
+      new Promise((r) => setTimeout(() => r(null), 8000)),
+    ]);
     const bytes = shot && shot.result && shot.result.data ? Math.round(shot.result.data.length * 0.75) : 0;
     report.measures.render.screenshotBytes = bytes;
     if (bytes > 0 && bytes < 3000) fail("the screen looks blank (" + bytes + "-byte frame)");

@@ -4001,6 +4001,7 @@
   "src/city/assets.js",
   "src/city/placement.js",
   "src/city/official_assets.js",
+  "src/systems/building.js",
   "src/systems/structdamage.js",
   "src/world/props.js",
   "src/city/settlements.js",
@@ -4077,6 +4078,7 @@
   "src/systems/custom_dialogue.js",
   "src/city/street_talk.js",
   "src/city/interactions_rich.js",
+  "src/city/dialogue.js",
   "src/city/millionaires.js",
   "src/city/regionlife.js",
   "src/city/modshop.js",
@@ -4092,7 +4094,9 @@
   "src/city/mugshot.js",
   "src/city/phone.js",
   "src/city/morgue.js",
+  "src/city/campaign_ui.js",
   "src/systems/navigation.js",
+  "src/systems/navgrid.js",
   "src/systems/prisonnav.js",
   "src/systems/wounds.js",
   "src/systems/predator_anim.js",
@@ -4176,7 +4180,7 @@
   "src/world/roombuild.js",
   "src/world/water_buoyancy.js"
  ],
- "keptBytes": 15574092,
- "droppedBytes": 10696689,
- "updatedAt": "2026-08-21T06:27:38.081Z"
+ "keptBytes": 15392205,
+ "droppedBytes": 10879833,
+ "updatedAt": "2026-08-21T06:36:57.629Z"
 }
