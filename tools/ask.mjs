@@ -78,11 +78,20 @@ if (has("--models")) {
 // A cheap, capable default: this key has a dollar on it, and the common use is
 // a short judgement about a picture, not a long generation.
 const MODEL = opt("--model", "google/gemini-2.5-flash");
-/* The ceiling is 32k, not 4k, and that was learned the hard way: a reasoning
-   model on this endpoint spent an entire 4000-token budget thinking and
-   returned EMPTY content with a full bill. The cap exists to stop a typo
-   costing real money, not to stop a model finishing its answer. */
-const MAXTOK = Math.min(32000, Number(opt("--max-tokens", 900)) || 900);
+/* NO CEILING. There was one — 4k, then 32k — and it was mine, not the API's,
+   and it was wrong both times: a reasoning model spent the entire budget
+   thinking and returned an empty string with a full bill, twice. A cap that
+   truncates the answer you asked for is not a safety feature, it is the tool
+   deciding it knows better than the caller. Pass --max-tokens when you
+   actually want a limit; otherwise the model stops when it is finished.
+
+   STREAMING, for the same reason. One blocking request against a model that
+   thinks for ten minutes is all-or-nothing, and the harness killing it at its
+   own timeout threw away the whole answer once already. Streaming writes each
+   token as it arrives, so a run that dies at minute nine still leaves nine
+   minutes of answer on disk. Default on; --no-stream for a single shot. */
+const MAXTOK = argv.includes("--max-tokens") ? (Number(opt("--max-tokens", 0)) || undefined) : undefined;
+const STREAM = !has("--no-stream");
 
 const images = [];
 for (let i = 0; i < argv.length; i++) {
@@ -117,41 +126,53 @@ const content = images.length
      ...images.map((url) => ({ type: "image_url", image_url: { url } }))]
   : prompt;
 
+const payload = { model: MODEL, messages: [{ role: "user", content }], stream: STREAM };
+if (MAXTOK) payload.max_tokens = MAXTOK;
+
 const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-  method: "POST",
-  headers: HEAD,
-  body: JSON.stringify({
-    model: MODEL,
-    max_tokens: MAXTOK,
-    messages: [{ role: "user", content }],
-  }),
+  method: "POST", headers: HEAD, body: JSON.stringify(payload),
 });
-const body = await res.json();
-if (!res.ok || body.error) {
-  process.stderr.write(`OpenRouter ${res.status}: ${JSON.stringify(body.error || body).slice(0, 500)}\n`);
+if (!res.ok) {
+  process.stderr.write(`OpenRouter ${res.status}: ${(await res.text()).slice(0, 600)}\n`);
   process.exit(1);
 }
-const choice = body.choices && body.choices[0];
-const msg = (choice && choice.message) || {};
-/* REASONING MODELS CAN SPEND THE WHOLE BUDGET AND SAY NOTHING. Some models on
-   this endpoint put their chain of thought in `reasoning` and the answer in
-   `content`; if max_tokens runs out mid-thought, `content` comes back empty
-   while the usage bill is full. Printing "(empty reply)" there is a lie by
-   omission — the model DID answer, it just never got to the part it shows you.
-   So: print the content when there is content, fall back to the reasoning when
-   there is not, and say which one you are looking at and why it was cut. */
-let out = typeof msg.content === "string" ? msg.content : "";
-if (!out && msg.reasoning) {
-  process.stderr.write(`[no content — showing reasoning; finish_reason=${choice.finish_reason || "?"}` +
-    (choice.finish_reason === "length" ? ", raise --max-tokens" : "") + "]\n");
-  out = msg.reasoning;
-} else if (!out) {
-  out = `(empty reply; finish_reason=${choice && choice.finish_reason})`;
-}
-process.stdout.write(out + "\n");
 
-// Say what it cost, every time. A tool that spends money should not make you
-// go and look somewhere else to find out how much.
-const u = body.usage || {};
-process.stderr.write(`\n[${body.model || MODEL}] ${u.prompt_tokens || 0} in / ${u.completion_tokens || 0} out` +
-  (u.cost != null ? ` · $${Number(u.cost).toFixed(5)}` : "") + "\n");
+if (!STREAM) {
+  const body = await res.json();
+  if (body.error) { process.stderr.write(`OpenRouter: ${JSON.stringify(body.error).slice(0,500)}\n`); process.exit(1); }
+  const ch = (body.choices && body.choices[0]) || {}, msg = ch.message || {};
+  let out = typeof msg.content === "string" ? msg.content : "";
+  if (!out && msg.reasoning) { process.stderr.write(`[reasoning only; finish=${ch.finish_reason}]\n`); out = msg.reasoning; }
+  process.stdout.write((out || `(empty; finish=${ch.finish_reason})`) + "\n");
+  const u = body.usage || {};
+  process.stderr.write(`\n[${body.model || MODEL}] ${u.prompt_tokens||0} in / ${u.completion_tokens||0} out\n`);
+  process.exit(0);
+}
+
+/* Reasoning to stderr, the ANSWER to stdout — so `ask ... > mouth.js` captures
+   exactly the code while the thinking stays watchable and out of the file. */
+let usage = null, finish = null, sawContent = false, reasonChars = 0;
+const decoder = new TextDecoder();
+let buf = "";
+for await (const chunk of res.body) {
+  buf += decoder.decode(chunk, { stream: true });
+  let nl;
+  while ((nl = buf.indexOf("\n")) >= 0) {
+    const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
+    if (!line.startsWith("data:")) continue;
+    const data = line.slice(5).trim();
+    if (data === "[DONE]") continue;
+    let ev; try { ev = JSON.parse(data); } catch (_) { continue; }
+    if (ev.error) { process.stderr.write(`\nOpenRouter: ${JSON.stringify(ev.error).slice(0,400)}\n`); process.exit(1); }
+    if (ev.usage) usage = ev.usage;
+    const d = ev.choices && ev.choices[0]; if (!d) continue;
+    if (d.finish_reason) finish = d.finish_reason;
+    const delta = d.delta || {};
+    if (delta.reasoning) { reasonChars += delta.reasoning.length; process.stderr.write(delta.reasoning); }
+    if (delta.content) { sawContent = true; process.stdout.write(delta.content); }
+  }
+}
+process.stdout.write("\n");
+if (!sawContent && reasonChars) process.stderr.write(`\n[reasoning only, ${reasonChars} chars; finish=${finish}]\n`);
+const u = usage || {};
+process.stderr.write(`\n[${MODEL}] ${u.prompt_tokens||0} in / ${u.completion_tokens||0} out · finish=${finish}\n`);
