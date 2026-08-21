@@ -57,6 +57,40 @@
   if (!RIG) { console.error("[wildlife] city/wildlife_rig.js must load first"); return; }
   const faceAnimalHeading = CBZ.faceAnimalHeading;
 
+  /* ---- INDIVIDUALS (city/wildlife_traits.js) ---------------------------
+     OWNER: "all wildlife including sharks should have varying size (viable)
+     and varying hunger (visible behavior and movement)."
+
+     Every animal in this file used to be EXACTLY its species: one line,
+     `grp.scale.setScalar(sp.scale)`, and forty identical mackerel. The two
+     facts that fix it — a per-individual size drawn off the spawn position
+     and a hunger scalar that drifts and drops — live in wildlife_traits.js,
+     which owns the curves; this file owns SPENDING them.
+
+     SZ(a) is the single most important line in the change. Every `sp.scale`
+     read in this file meant "how big is this animal", and every one of them
+     was answering with "how big is this SPECIES". They all go through here
+     now, so hp, bite, reach, turn rate, ragdoll mass, herd spacing, LOD
+     radius, swim depth and the butchered meat yield are all the individual's.
+
+     Degrade-safe in both directions: no traits file (or the flag off) and SZ
+     collapses to sp.scale, HUNGER to a flat 0.5, and every multiplier below
+     multiplies by one. */
+  const TRAITS = CBZ.wildlifeTraits || null;
+  function SZ(a) {
+    const e = a && a._sizeEff;
+    return e > 0 ? e : ((a && a.species && a.species.scale) || 1);
+  }
+  function HUNGER(a) { return TRAITS ? TRAITS.hunger(a) : 0.5; }
+  // The behaviour scratch (speed / restlessness / loiter / sense / patience /
+  // boldness / will-it-hunt). One cached object per actor; see the traits file.
+  const CALM = { h: 0.5, spd: 1, restless: 1, loiter: 1, sense: 1, patience: 1, bold: 1, hunt: 1 };
+  function DRIVE(a) { return TRAITS ? TRAITS.drive(a) : CALM; }
+  // Is hunger switched on at all? The behaviours hunger ADDS (scavenging, herd
+  // bunching) are gated on this rather than on a drive multiplier, because a
+  // multiplier can only scale something that already existed.
+  function HGON() { return !!(TRAITS && TRAITS.HUNGER_ON()); }
+
   // ---- WILDLIFE_LIVE — the one-line revert for the living-wildlife overhaul.
   // ON (default): animal groups are tagged userData.dynamic so the static
   // batcher (core/batch.js) and matrix freezer (core/staticfreeze.js) leave
@@ -87,9 +121,54 @@
   // the real bathymetry by waterField.randomWaterPoint at the species' OWN
   // declared clearance, so widening the band can never put an animal on land —
   // it only gives the validator more sea to choose from.
-  const AQUATIC_R0 = 520;        // ocean band (from field centre) inner radius
-  const AQUATIC_R1 = 2200;       // ..outer radius (still inside the terrain ring)
-  const FIELD_CX = 0, FIELD_CZ = -700;   // matches terrain.js CX/CZ field centre
+  /* THE OCEAN BAND IS A PROPERTY OF THE ARENA, NOT OF THIS FILE.
+
+     These four numbers used to be module constants, and they were GANG CITY'S
+     ocean typed out by hand — which is why Natural Disaster mode, whose whole
+     headline event is a tsunami, had no wildlife in it at all: nothing was
+     stopping the sea life, the sea was simply somewhere else. Now they are
+     the DEFAULT for an arena that carries land regions (i.e. the city, whose
+     band stays exactly as tuned) and are DERIVED for anything that does not.
+
+     `deriveField` is the only writer and it runs once per arena at stock time,
+     so the per-frame cost is zero and the fallback for a lone unit-loaded
+     module is the same city band it always was. */
+  const CITY_BAND = { cx: 0, cz: -700, r0: 520, r1: 2200 };  // matches terrain.js CX/CZ
+  const FIELD = { cx: CITY_BAND.cx, cz: CITY_BAND.cz, r0: CITY_BAND.r0, r1: CITY_BAND.r1 };
+
+  /* An island in open water gets a RING of sea around it rather than a band
+     around a continent's shoulder: inside `r0` is the beach, and `r1` is far
+     enough out that a shark has somewhere to be that is not on top of you but
+     close enough that a tsunami can carry it into the streets. Both are
+     multiples of the arena's OWN radius, so a bigger island automatically gets
+     a bigger sea and nobody has to retune anything. */
+  const ISLE_R0 = 1.12, ISLE_R1 = 6.5;
+
+  function deriveField(A, opts) {
+    // 1. an explicit band always wins — a mode that knows its own water says so
+    const o = (opts && opts.ocean) || (A && A.oceanBand) || null;
+    if (o && o.r1 > 0) {
+      FIELD.cx = +o.cx || 0; FIELD.cz = +o.cz || 0;
+      FIELD.r0 = Math.max(0, +o.r0 || 0); FIELD.r1 = +o.r1;
+      return FIELD;
+    }
+    // 2. an arena with LAND REGIONS is a city: its band is the tuned one.
+    if (A && A.regions && A.regions.length) {
+      FIELD.cx = CITY_BAND.cx; FIELD.cz = CITY_BAND.cz;
+      FIELD.r0 = CITY_BAND.r0; FIELD.r1 = CITY_BAND.r1;
+      return FIELD;
+    }
+    // 3. anything else that knows where it is and how big it is — the disaster
+    //    island — gets a ring derived from its own footprint.
+    const c = (A && A.center) || null;
+    const R = A && +A.radius;
+    if (c && Number.isFinite(+c.x) && R > 0) {
+      FIELD.cx = +c.x; FIELD.cz = +c.z;
+      FIELD.r0 = R * ISLE_R0; FIELD.r1 = R * ISLE_R1;
+      return FIELD;
+    }
+    return FIELD;                                  // keep whatever we had
+  }
   const SKIN_REACH = 4.2;        // how close you must be to skin a carcass
   const CARCASS_LINGER = 150;    // s a skinned/ignored carcass stays before fading
   const BREED_EVERY = 26;        // s between breeding passes
@@ -111,7 +190,16 @@
   // live actor list — the hitscan hook in fpsmode.js scans this every shot.
   const animals = CBZ.cityWildlife = [];
   const carcasses = [];          // skinnable / fading remains
-  let root = null, built = false;
+  /* WHICH ARENA ARE WE STOCKED FOR? This was a bare `built` boolean, which is
+     the same city-bound assumption the ocean band carried: once Gang City had
+     built, no other mode could ever get wildlife, because the guard could not
+     tell "already done" from "done for somewhere else". It is the arena
+     reference now, so handing this file a DIFFERENT world restocks it and
+     handing it the same one twice is still free.
+     `wired` is separate on purpose: the pelt catalog, the interaction
+     registry, the gunshot/blast wraps and the update hook are GLOBAL and must
+     be installed exactly once however many worlds get stocked. */
+  let root = null, builtFor = null, wired = false;
   // The arena we were handed at build time. CRITICAL: during buildCity(),
   // `CBZ.city.arena` is NOT yet assigned (the assignment awaits buildCity's
   // return), so every region lookup MUST go through this stored reference, not
@@ -293,6 +381,14 @@
       const s = +CBZ.citySeaHeightAt(x, z, t);
       if (Number.isFinite(s)) return s;
     }
+    // NATURAL DISASTER has its own sea (world/disaster_arena.js), surge and
+    // all, and it is the whole reason a shark can end up in a flooded street.
+    // Asking for it here is what makes every marine body in this file — wander,
+    // hunt and death alike — sit at the right height in that mode too.
+    if (CBZ.survSeaHeightAt) {
+      const s = +CBZ.survSeaHeightAt(x, z, t);
+      if (Number.isFinite(s)) return s;
+    }
     if (CBZ.waterSeaY) { const s = +CBZ.waterSeaY(); if (Number.isFinite(s)) return s; }
     return CBZ.SEA_Y != null ? CBZ.SEA_Y : -0.48;
   }
@@ -311,6 +407,8 @@
       bed = s - col;
     } else if (CBZ.citySeaBedY) {
       bed = +CBZ.citySeaBedY(x, z, t);
+    } else if (CBZ.survSeaBedYAt) {
+      bed = +CBZ.survSeaBedYAt(x, z);            // the disaster island's bottom
     } else return -Infinity;
     if (!Number.isFinite(bed)) return -Infinity;
     return Math.min(bed + (lift || 0), s - Math.max(0, draft) * AGROUND_MIN_SUB);
@@ -326,7 +424,14 @@
   // How far an animal's origin stands over the bed when it is aground. Derived
   // from its own scale, so a new species costs no row (the 0.9 factor is the
   // one wildlife_shark.js's bed clamp has always used).
-  function aquaticBedLift(sp) { return ((sp && sp.scale) || 1) * 0.9; }
+  // Takes a SPECIES or an ACTOR: `sp.scale` was only ever a stand-in for "how
+  // big is the body sitting on this bed", and with individual size that answer
+  // belongs to the animal, not the row. wildlife_shark.js and any other caller
+  // that still hands it a species keeps the old answer exactly.
+  function aquaticBedLift(sp) {
+    if (sp && sp.animal) return SZ(sp) * 0.9;
+    return ((sp && sp.scale) || 1) * 0.9;
+  }
   CBZ.cityAquaticBedRestY = aquaticBedRestY;
   CBZ.cityAquaticBodyY = aquaticBodyY;
   CBZ.cityAquaticBedLift = aquaticBedLift;
@@ -336,25 +441,61 @@
     // water equivalent of navmesh random-point sampling: a radius candidate
     // is accepted only when its whole body has shoreline clearance.
     if (CBZ.waterField && CBZ.waterField.randomWaterPoint) {
-      return CBZ.waterField.randomWaterPoint(r, {
-        cx: FIELD_CX, cz: FIELD_CZ, r0: AQUATIC_R0, r1: AQUATIC_R1,
+      const p = CBZ.waterField.randomWaterPoint(r, {
+        cx: FIELD.cx, cz: FIELD.cz, r0: FIELD.r0, r1: FIELD.r1,
         clearance: aquaticClearance(sp),
       });
+      /* FALL THROUGH ON NULL, and that is not defensive noise — it is the
+         difference between Natural Disaster having sharks and not. waterfield
+         answers for GANG CITY's bathymetry; ask it about a disaster island and
+         it truthfully says "no water here", seedIndividuals bails on the null,
+         and the mode silently gets an empty sea. The ring sampler below is the
+         geometric answer for a world the city's field does not describe. */
+      if (p) return p;
     }
-    // Legacy fallback for isolated tests that omit waterfield.js.
-    for (let tries = 0; tries < 24; tries++) {
+    /* THE RING SAMPLER. Used for isolated unit loads and for any arena the
+       city water field does not cover. A candidate is rejected if it is on a
+       registered land region, and — where the mode publishes one — validated
+       against that mode's OWN water test, so an island's beaches and its
+       interior are excluded without this file knowing anything about them. */
+    const wet = CBZ.survWaterAt || null;
+    const ground = (ARENA() && ARENA().groundHeightAt) || null;
+    const clear = aquaticClearance(sp);
+    for (let tries = 0; tries < 40; tries++) {
       const a = r() * Math.PI * 2;
-      const rad = AQUATIC_R0 + r() * (AQUATIC_R1 - AQUATIC_R0);
-      const x = FIELD_CX + Math.cos(a) * rad, z = FIELD_CZ + Math.sin(a) * rad;
-      if (!CBZ.cityAnyRegion || !CBZ.cityAnyRegion(ARENA(), x, z, 30)) return { x, z };
+      const rad = FIELD.r0 + r() * (FIELD.r1 - FIELD.r0);
+      const x = FIELD.cx + Math.cos(a) * rad, z = FIELD.cz + Math.sin(a) * rad;
+      if (CBZ.cityAnyRegion && CBZ.cityAnyRegion(ARENA(), x, z, 30)) continue;
+      /* DEEP ENOUGH FOR THIS ANIMAL. A whale does not belong in the shallows a
+         mackerel is happy in, and `clearance` is already that per-species
+         number. Three tiers, most authoritative first, because falling through
+         from waterfield must not become a way to spawn a body somewhere
+         waterfield would have refused — that would be a Gang City regression
+         paid for with a Natural Disaster feature. */
+      const need = Math.max(1.2, clear * 0.12);
+      if (CBZ.citySeaBedDepth) {
+        const col = +CBZ.citySeaBedDepth(x, z);        // the city's own column
+        if (!(col > need)) continue;
+      } else if (ground) {
+        if (!(aquaticSurfY(x, z, 0) - ground(x, z) > need)) continue;
+      } else if (wet) {
+        try { if (!wet(x, z)) continue; } catch (e) {}
+      }
+      return { x, z };
     }
-    return { x: FIELD_CX + 900, z: FIELD_CZ };
+    return { x: FIELD.cx + (FIELD.r0 + FIELD.r1) * 0.5, z: FIELD.cz };
   }
 
   function wetPointNear(x, z, sp, radius) {
     const wf = CBZ.waterField;
     if (!wf || !wf.nearestWater) return { x: x, z: z };
-    return wf.nearestWater(x, z, aquaticClearance(sp), radius || 240);
+    const p = wf.nearestWater(x, z, aquaticClearance(sp), radius || 240);
+    /* NULL MEANS "not MY water", not "not water". In a mode whose sea the city
+       water field does not describe, every jittered herd position would come
+       back null and seedIndividuals would skip the whole school — the caller
+       has already validated the anchor through oceanPoint, so handing the
+       point straight back is the honest answer. */
+    return p || { x: x, z: z };
   }
 
   function makeActor(sp, x, z) {
@@ -362,9 +503,18 @@
     try { grp = sp.build({ THREE: THREE, mat: mat, rng: rng }); }
     catch (e) { grp = fallbackMesh(sp); }
     if (!grp) grp = fallbackMesh(sp);
-    const s = sp.scale || 1;
+    /* ---- THIS ANIMAL'S OWN SIZE. Drawn from where it stands, never from the
+       seeded rng stream: hash01 is order-independent, so adding a species
+       tomorrow cannot resize the fish that spawned before it, and the same
+       world seed grows the same sea forever. */
+    const kSize = TRAITS ? TRAITS.sampleSize(sp, x, z) : 1;
+    const s = (sp.scale || 1) * kSize;
     grp.scale.setScalar(s);
-    const swimDepth = sp.aquatic ? aquaticBodyDepth(sp) : 0;
+    // creature_combat.js caches actor._baseScale off group.scale.x the first
+    // time anything attacks and then forces all three components back to it.
+    // Handing it the right number up front is what stops a strike from
+    // snapping a monster shark back to the species constant mid-bite.
+    const swimDepth = sp.aquatic ? aquaticBodyDepth(sp) * Math.pow(kSize, 0.9) : 0;
     const waterY = sp.aquatic && CBZ.citySeaHeightAt ? CBZ.citySeaHeightAt(x, z) - swimDepth : 0;
     grp.position.set(x, sp.aquatic ? waterY : groundY(x, z), z);
     const initialHeading = rng() * 6.283;
@@ -383,19 +533,52 @@
     // is the batcher's & freezer's own "leave this subtree alive" contract.
     if (LIVE()) grp.userData.dynamic = true;
     root.add(grp);
+    /* SIZE IS LOAD-BEARING, and this is where it becomes so. hp goes as k^2.1
+       (a monster takes nearly three times the killing), straight-line speed as
+       k^-0.18 (big things cruise slower; landWalk's turn clamp already made
+       them turn worse and now reads the individual too). Everything downstream
+       — bite, reach, sense radius, seize hold, ragdoll mass, car-impact mass —
+       reads SZ(a) rather than the species row. */
+    const hpK = Math.pow(kSize, 2.1);
+    const hp0 = Math.max(4, Math.round((sp.hp || 40) * hpK));
+    // BASE0 is this individual's own cruise speed. Every `(sp.spd || 1.4) * k`
+    // in this file meant "how fast is this animal" and answered with the
+    // species row; they all read it now, so a monster is genuinely slower in a
+    // straight line and a runt is genuinely faster, in every state.
+    const spd0 = (sp.spd || 1.4) * Math.pow(kSize, -0.18);
     const a = {
       species: sp, kind: "animal", animal: true,
       group: grp, pos: grp.position,      // fpsmode/interactions read .group.position and .pos
-      hp: sp.hp || 40, maxHp: sp.hp || 40, dead: false, ko: 0, escaped: false,
-      heading: initialHeading, faceH: initialHeading, turnT: rng() * 3, spd: sp.spd || 1.4,
+      hp: hp0, maxHp: hp0, dead: false, ko: 0, escaped: false,
+      heading: initialHeading, faceH: initialHeading, turnT: rng() * 3,
+      spd: spd0, _spd0: spd0,
       state: "wander", alarm: 0, home: { x: x, z: z },
       bob: rng() * 6.283, hitCount: 0, cleanKill: false,
       stateT: 0,                          // seconds left in the current timed behavior
+      _sizeMul: kSize,                    // this individual's own multiplier
+      _sizeEff: s,                        // ..and its effective world scale (grow-aware)
+      // DID IT COME OFF THE MONSTER TAIL? Stamped rather than inferred from a
+      // threshold: a wide-spread species reaches 1.4 on its ordinary
+      // distribution, so "k >= 1.3" would report a perfectly normal big shark
+      // as a legend and the ratchet would be measuring nothing.
+      _bigOne: !!(TRAITS && TRAITS.isBigOne(sp, x, z)),
+      _baseScale: s,                      // creature_combat's rest scale, seeded correctly
     };
+    // HUNGER starts spread across the population, deterministically, so the
+    // world does not begin with every animal on the same stomach — the ocean
+    // is meant to hold a fed shark drifting past a starving one on minute one.
+    if (TRAITS && TRAITS.HUNGER_ON()) {
+      a.hunger = 0.14 + (CBZ.hash01 ? CBZ.hash01(x, z, 0x8A79E4) : 0.5) * 0.72;
+    }
     if (sp.aquatic) {
-      a.waterClearance = aquaticClearance(sp);
+      // A bigger body needs more water under it and swims deeper; a runt will
+      // come into shallows the adult refuses. Both are the same k, at the
+      // exponents the clearance/depth ladders were already shaped for.
+      a.waterClearance = aquaticClearance(sp) * Math.pow(kSize, 0.7);
       a.swimDepth = swimDepth;
+      a._swimDepth0 = swimDepth;          // hunger leans on this; never compound
       a._waterMove = { x: x, z: z, heading: initialHeading, blocked: false, shore: -999 };
+      a._baseClear = a.waterClearance;    // hunger leans on this; never compound
     }
     // discover the rig ONCE: legs/head for walkers, tail/jaw for swimmers.
     // Each builder bails on the other's animals, so this is one line per actor.
@@ -414,6 +597,27 @@
     }
     animals.push(a);
     return a;
+  }
+
+  /* THE ONE PLACE AN ANIMAL'S SCALE IS WRITTEN. There were three (spawn, the
+     newborn in breed(), and the grow-up in tick()) and they each re-derived
+     `sp.scale * something`, which is precisely how the individual multiplier
+     would have been silently thrown away the first time a calf grew up.
+     `grow` is 0..1 how far along a newborn is (null = adult).
+
+     It also keeps creature_combat's _baseScale honest, which was a real latent
+     bug before this change: that file caches group.scale.x at the first strike
+     and forces the group back to it forever after, so a calf attacked while
+     small stayed calf-sized for the rest of its life. */
+  function applyScale(a, grow) {
+    const k = a._sizeMul > 0 ? a._sizeMul : 1;
+    const g = grow == null ? 1 : (0.4 + 0.6 * grow);
+    const s = ((a.species && a.species.scale) || 1) * k * g;
+    a._sizeEff = s;
+    a._baseScale = s;
+    a._hgInv = null;                     // metabolism follows the body it feeds
+    if (a.group) a.group.scale.setScalar(s);
+    return s;
   }
 
   function fallbackMesh(sp) {
@@ -474,6 +678,20 @@
     }
     return eyes;
   }
+  /* THE EYES ARE A HUNGER READ TOO. Charging and stalking light them as they
+     always did; on top of that a predator that is genuinely STARVING carries
+     them lit while it is merely cruising, so the shape moving along the
+     treeline at night tells you what it wants before it has decided who. A
+     fed one is dark, which is the whole difference. Costs nothing:
+     setAggroEyes early-returns unless the mode actually changed, and the
+     hunger drive behind it is a cached scratch re-derived every few seconds. */
+  const EYE_STARVED = 0.82;
+  function eyeMode(a) {
+    if (a.state === "charge") return 2;
+    if (a.state === "stalk") return 1;
+    return (HUNGER(a) >= EYE_STARVED && a.species && predSpecies(a.species)) ? 1 : 0;
+  }
+
   function setAggroEyes(a, mode) {   // 0 off · 1 stalking (lit) · 2 charging (lit + swollen)
     if (a._eyeMode === mode) return;
     a._eyeMode = mode;
@@ -724,7 +942,11 @@
   //  heading (recomputed once per frame, O(n) total, not O(n²)).
   // ============================================================
   const herds = [];
-  function newHerd(sp) { const hr = { sp: sp, members: [], cx: 0, cz: 0, heading: rng() * 6.283, n: 0, panic: 0, fleeHx: 0, fleeHz: 0 }; herds.push(hr); return hr; }
+  // `bunch` (0..1) is how hard a hungry predator nearby has packed this group
+  // in — raised by alarmFromPredator, decayed here, spent by the two cohesion
+  // blocks. It is deliberately NOT `panic`: a herd can be tight and calm (the
+  // wolf is only peckish) or scattered and terrified (a rifle shot).
+  function newHerd(sp) { const hr = { sp: sp, members: [], cx: 0, cz: 0, heading: rng() * 6.283, n: 0, panic: 0, bunch: 0, fleeHx: 0, fleeHz: 0 }; herds.push(hr); return hr; }
   function joinHerd(a, hr) { a.herd = hr; if (hr) hr.members.push(a); }
   function leaveHerd(a) {
     const hr = a.herd; if (!hr) return;
@@ -746,6 +968,9 @@
       hr.n = n;
       if (n) { hr.cx = sx / n; hr.cz = sz / n; if (hx || hz) hr.heading = Math.atan2(hz, hx); }
       hr.panic = Math.max(0, panic);
+      // the knot loosens over about eight seconds once the hunter has moved
+      // off, so a herd relaxing is something you can watch happen.
+      if (hr.bunch > 0) hr.bunch = Math.max(0, hr.bunch - dt * 0.12);
     }
   }
 
@@ -776,7 +1001,7 @@
         // a herd of 2+ trails a BABY (a tiny scaled-down copy — see grow logic).
         if (h === herd - 1 && herd >= 2 && rng() < 0.75) {
           a.grow = rng() * 0.4;
-          a.group.scale.setScalar((sp.scale || 1) * (0.4 + 0.6 * a.grow));
+          applyScale(a, a.grow);
         }
       }
     }
@@ -865,13 +1090,20 @@
     return counts;
   }
 
+  /* HOW MANY ANIMALS THIS WORLD GETS, relative to Gang City's DENSITY. A
+     disaster island's ring of sea is a fraction of a 25 km coastline and would
+     otherwise be handed a continent's worth of fish; a mode says how much of
+     the budget it wants and everything downstream (per-biome share, per-species
+     plan, carrying capacity) follows automatically. 1 = the city. */
+  let densityK = 1;
+
   function spawnAll() {
     const S = CBZ.WILDLIFE_SPECIES || {};
     // bucket non-legendary species by biome
     const buckets = {};
     for (const id in S) { const sp = S[id]; if (sp.rarity === "legendary") continue; (buckets[sp.biome] || (buckets[sp.biome] = [])).push(sp); }
     for (const biome in buckets) {
-      const target = Math.round(DENSITY * (BIOME_SHARE[biome] || 0.15));
+      const target = Math.round(DENSITY * densityK * (BIOME_SHARE[biome] || 0.15));
       const counts = planBiome(buckets[biome], target);
       for (const sp of buckets[biome]) seedIndividuals(sp, counts[sp.id] || 1);
     }
@@ -950,7 +1182,7 @@
         if (P && Math.hypot(nx - P.x, nz - P.z) < 50) continue;
         const kid = makeActor(sp, nx, nz);
         kid.grow = 0;                            // born tiny; grows up in tick()
-        kid.group.scale.setScalar((sp.scale || 1) * 0.4);   // small from frame one
+        applyScale(kid, 0);                      // small from frame one, at ITS OWN size
         kid.home = { x: parent.home.x, z: parent.home.z };
         joinHerd(kid, parent.herd);              // born into the parent's herd
       }
@@ -1060,10 +1292,10 @@
       else {
         a.state = "flee"; a.stateT = (cls.fleeT || 4) + 2;
         if (P) a.heading = Math.atan2(a.pos.z - P.z, a.pos.x - P.x);
-        a.spd = (a.species.spd || 1.4) * 2.2;
+        a.spd = (a._spd0 || 1.4) * 2.2;
       }
     } else if (a.species.danger > 0.15 && P) { a.state = "charge"; }
-    else { a.state = "flee"; if (P) { a.heading = Math.atan2(a.pos.z - P.z, a.pos.x - P.x); } a.spd = (a.species.spd || 1.4) * 2.2; }
+    else { a.state = "flee"; if (P) { a.heading = Math.atan2(a.pos.z - P.z, a.pos.x - P.x); } a.spd = (a._spd0 || 1.4) * 2.2; }
     return { head: !!(hit && hit.head), down: false, dmg: dmg };
   };
 
@@ -1160,7 +1392,7 @@
     let dl = Math.hypot(dx, dz);
     if (dl < 0.01) { const ah = Math.random() * Math.PI * 2; dx = Math.cos(ah); dz = Math.sin(ah); dl = 1; }
     dx /= dl; dz /= dl;
-    const scale = Math.max(0.35, sp.scale || 1);
+    const scale = Math.max(0.35, SZ(a));
     const mass = Math.max(0.75, scale * scale * 1.7);
     const raw = (impulse != null && isFinite(impulse) && impulse > 0) ? impulse : 5.9;
     const imp = Math.min(8.5, raw / Math.sqrt(mass));
@@ -1199,7 +1431,7 @@
     const grp = a.group;
     if (!grp) { a._deathPhys = null; return false; }
     const step = Math.min(0.04, dt);
-    const scale = Math.max(0.35, (a.species && a.species.scale) || 1);
+    const scale = Math.max(0.35, SZ(a));
     ph.t += step;
     ph.vy -= 20.5 * step;
     corpseEuler(grp);
@@ -1325,6 +1557,17 @@
     carcasses.push(a);
     // score/notify — a kill is a kill, but only YOUR kill is news.
     const by = (w && w.by) || null;
+    /* THE UNIVERSAL MEAL HOOK, and it is here rather than in the food chain
+       for one reason: EVERY animal death in this game funnels through this
+       function, whoever landed it. The land food chain's own startFeed covers
+       a wolf and a deer, but a shark's kill resolves inside wildlife_shark.js
+       and a seize resolves inside systems/predator.js — files this change does
+       not own — and both of them route their damage back through
+       cityWildlifeHit, i.e. through here. So this one line is what makes a
+       great white that has just eaten actually FULL, which is precisely the
+       animal the owner named. mealFrom is receipted, so the wolf whose
+       startFeed fires a frame later does not get the meal twice. */
+    if (by && by.animal && !by.dead && by !== a && by.species && predSpecies(by.species)) mealFrom(by, a, 1);
     if (killerIsPlayer(by)) {
       if (CBZ.city) {
         if (a.legendary) { if (CBZ.city.note) CBZ.city.note("★ LEGENDARY " + a.species.name + " DOWN, skin it before it's gone!", 4, { urgent: true }); }
@@ -1376,8 +1619,8 @@
     let dl = Math.hypot(dx, dz);
     if (dl < 0.01) { dx = Math.cos(a.heading || 0); dz = Math.sin(a.heading || 0); dl = 1; }
     dx /= dl; dz /= dl;
-    const scale = Math.max(1, sp.scale || 1);
-    const charge = Math.max(1, sp.spd || 2.2);
+    const scale = Math.max(1, SZ(a));
+    const charge = Math.max(1, a._spd0 || 2.2);
     const horiz = Math.min(14.5, 7.2 + scale * 2.5 + charge * 0.8) * kf;
     const ph = P._phys = P._phys || {};
     ph.air = true; ph.down = 0; ph.kx = ph.kz = 0;
@@ -1407,10 +1650,20 @@
     let meatGot = 0;
     if (econ && econ.add) {
       econ.add(peltName, 1);
-      if (sp.meat) { meatGot = 1 + ((Math.random() * (sp.meatYield || 1)) | 0); econ.add(sp.meat, meatGot); }
+      // A BIG ANIMAL YIELDS A BIG CUT. The item catalog is per-species (a hide
+      // is a hide), so the individual's size shows up where it can: in HOW
+      // MANY portions the carcass gives up. Shooting the monster of the herd
+      // is worth walking for, and that is the whole point of a size tail.
+      if (sp.meat) {
+        const bulk = Math.pow(SZ(a) / ((sp.scale || 1) || 1), 1.8);
+        meatGot = Math.max(1, Math.round((1 + ((Math.random() * (sp.meatYield || 1)) | 0)) * bulk));
+        econ.add(sp.meat, meatGot);
+      }
     }
-    // a small on-the-spot field bounty on top of the sellable pelt.
-    const bounty = Math.round((sp.furValue || 20) * (pristine ? 0.35 : 0.2) * (sp.rarity === "legendary" ? 3 : 1));
+    // a small on-the-spot field bounty on top of the sellable pelt (a bigger
+    // hide is worth more, by the same body-mass exponent the meal fill uses).
+    const bounty = Math.round((sp.furValue || 20) * (pristine ? 0.35 : 0.2) *
+      (sp.rarity === "legendary" ? 3 : 1) * Math.pow(SZ(a) / ((sp.scale || 1) || 1), 0.45));
     if (CBZ.city && CBZ.city.addCash && bounty > 0) CBZ.city.addCash(bounty);
     if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(sp.rarity === "legendary" ? 8 : 1);
     // toast the haul — the HIDE is what it sells for, the MEAT is what it feeds
@@ -1704,7 +1957,7 @@
       a.state = "flee";
       a.stateT = (cls.fleeT || 4) * 1.5;
       a.alarm = Math.max(a.alarm || 0, 7);
-      a.spd = (sp.spd || 1.4) * (cls.fleeM || 2.2) * 1.1;
+      a.spd = (a._spd0 || 1.4) * (cls.fleeM || 2.2) * 1.1;
       if (ox != null) a.heading = Math.atan2(a.pos.z - oz, a.pos.x - ox);
       a._pinT = 0;
     }
@@ -1723,7 +1976,7 @@
     a.state = "flee";
     a.stateT = (cls.fleeT || 4) * 1.8;
     a.alarm = Math.max(a.alarm || 0, 9);
-    a.spd = (sp.spd || 1.4) * (cls.fleeM || 2.2) * 1.15;
+    a.spd = (a._spd0 || 1.4) * (cls.fleeM || 2.2) * 1.15;
     if (fx != null && fz != null) a.heading = Math.atan2(a.pos.z - fz, a.pos.x - fx);
     DEF.routs++;
   }
@@ -1763,7 +2016,7 @@
     if (a._huntSt && a._huntSt !== "cruise") { a._crowdT = 0; return false; }
     if ((a._crowdCd || 0) > 0) { a._crowdCd -= dt; a._crowdT = 0; return false; }
     const sp = a.species;
-    const personal = 4 + (sp.scale || 1) * 3.2;
+    const personal = 4 + SZ(a) * 3.2;
     if (nearP > personal * personal) { a._crowdT = 0; return false; }
     // the calf sweep is O(herd) so it runs on the crowd clock, not per frame
     a._crowdT = (a._crowdT || 0) + dt;
@@ -1800,7 +2053,7 @@
     if (!ATK2() || !defendEligible(a)) return false;
     if ((a._cornerCd || 0) > 0) return false;
     const sp = a.species;
-    const body = 1.6 + (sp.scale || 1) * 1.8;
+    const body = 1.6 + SZ(a) * 1.8;
     const b2 = body * body;
     let threat = null;
     const hb = a._huntedBy;
@@ -1856,7 +2109,10 @@
     let fd = a.heading - a.faceH;
     while (fd > Math.PI) fd -= 2 * Math.PI; while (fd < -Math.PI) fd += 2 * Math.PI;
     const panicTurn = a.state === "flee" || a.state === "charge";
-    const trMax = ((panicTurn ? 6.5 : 3.0) / (1 + (sp.scale || 1) * 0.3)) * dt;
+    // A BIG ONE TURNS WORSE, and a runt turns on a sixpence. The clamp always
+    // said so; it was reading the species row rather than the body it was
+    // steering, so every deer in the meadow arced identically.
+    const trMax = ((panicTurn ? 6.5 : 3.0) / (1 + SZ(a) * 0.3)) * dt;
     if (fd > trMax) fd = trMax; else if (fd < -trMax) fd = -trMax;
     a.faceH += fd;
     // integrate ALONG THE FACING + the home fence. A COMMITTED hunter (state
@@ -1871,14 +2127,27 @@
       const nz = grp.position.z + Math.sin(a.faceH) * speed * dt;
       const reg = CBZ.cityNearestRegion && CBZ.cityNearestRegion(ARENA(), nx, nz, 40);
       const onHome = reg && (reg.biome === sp.biome) && CBZ.cityRegionHit(reg, nx, nz, 6);
-      if (!onHome && a.state !== "charge") {
+      /* A STARVING PREDATOR HUNTS OUTSIDE ITS RANGE. The fence is what stops a
+         biome slowly draining of its wolves over a long session, and it stays
+         exactly as it was for every animal that is not both hungry AND
+         committed. But an animal that is starving with something already in
+         its sights follows it over the ridge — that is what starving means,
+         and it is how you end up meeting a predator somewhere there is not
+         supposed to be one.
+
+         Scoped so it cannot cause the drain the fence was written to prevent:
+         it needs a LIVE CLAIM (prey, or a carcass it is walking to), so the
+         frame the hunt ends the fence closes again and the steer-home line
+         below carries it back. No timer, nothing to leak. */
+      const starvedOut = !onHome && (a._prey || a._feedOn) && DRIVE(a).hunt > 0.55;
+      if (!onHome && a.state !== "charge" && !starvedOut) {
         a.heading = Math.atan2(a.home.z - grp.position.z, a.home.x - grp.position.x) + (Math.random() - 0.5) * 0.6;
       } else {
         grp.position.x = nx; grp.position.z = nz; moved = true;
       }
     }
     grp.position.y = groundY(grp.position.x, grp.position.z);
-    if (a.state === "stalk") grp.position.y -= 0.09 * (sp.scale || 1);   // the crouch
+    if (a.state === "stalk") grp.position.y -= 0.09 * SZ(a);   // the crouch
     faceAnimalHeading(grp, a.faceH);
     return moved;
   }
@@ -1969,6 +2238,14 @@
     // override is needed — if one ever does, override rather than let the
     // multiply happen twice.
     a._landHunt = CBZ.predatorKit(a, over) || null;
+    /* THE INDIVIDUAL, INTO THE SHARED BUNDLE. predatorKit derives the whole
+       hunt from a.species.scale — a SPECIES constant — so without this the
+       runt wolf and the monster wolf reach the same distance, bite for the
+       same damage and hold you for the same seconds. Applied once, here,
+       using predator.js's own published exponents, and idempotent by receipt.
+       (The proper fix is two lines inside predator.js; see this file's report.
+        This is the version that does not edit a file another change owns.) */
+    if (TRAITS && a._landHunt) TRAITS.sizeKit(a._landHunt, a._sizeMul || 1);
     return a._landHunt;
   }
 
@@ -2048,7 +2325,10 @@
     if (!sp || sp === hsp) return false;                    // never its own kind
     if (!!sp.aquatic !== !!hsp.aquatic) return false;       // medium must match
     if (sp.rarity === "legendary") return false;            // unique animals are not lunch
-    if ((sp.scale || 1) > (hsp.scale || 1) * PREY_MASS_MAX) return false;
+    // MASS IS THE INDIVIDUAL'S. A runt wolf genuinely cannot take the biggest
+    // elk in the herd, and the monster can — which is the food chain reading
+    // the same sizes the player can see.
+    if (SZ(a) > SZ(hunter) * PREY_MASS_MAX) return false;
     if ((sp.danger || 0) >= (hsp.danger || 0)) return false;
     return true;
   }
@@ -2058,7 +2338,7 @@
   //      snake, a fox or a coyote never qualifies; a wolf, a big cat or a bear
   //      does, at night, when you are on your own.
   function manEater(a, hsp) {
-    if ((hsp.scale || 1) < 0.85 || (hsp.danger || 0) < 0.6) return false;
+    if (SZ(a) < 0.85 || (hsp.danger || 0) < 0.6) return false;
     const style = CBZ.creatureStyleFor ? CBZ.creatureStyleFor(hsp) : "bite";
     if (style !== "maul" && style !== "pounce") return false;   // teeth and mass, not venom
     const night = (CBZ.nightAmount == null ? 0 : CBZ.nightAmount);
@@ -2100,8 +2380,16 @@
     if (a._preyT > 0) return null;
     a._preyT = PREY_RESCAN * (0.7 + Math.random() * 0.6);
     if ((a._satT || 0) > 0) return null;
+    /* A FED ANIMAL IGNORES PREY THAT SWIMS PAST. The satiation clock above is
+       binary and expires; hunger is the continuous half of the same idea, and
+       it is what makes "will not commit" readable — you watch a mackerel pass
+       under a shark's nose and nothing happens. Below the floor it does not
+       even run the O(animals) sweep, so a well-fed world is CHEAPER. */
+    const hd = DRIVE(a);
+    if (hd.hunt <= 0) return null;
     const hsp = a.species, hx = a.pos.x, hz = a.pos.z;
-    const R = Math.max(18, senseR);
+    // ..and a hungry one commits from further out.
+    const R = Math.max(18, senseR * hd.sense);
     let best = null, bd = R * R;
     for (let i = 0; i < animals.length; i++) {
       const o = animals[i];
@@ -2168,6 +2456,11 @@
           if (CBZ.cityPanicRaise) { try { CBZ.cityPanicRaise(v.pos.x, v.pos.z, 1.4); } catch (e) {} }
           if (v.hp <= 0 && CBZ.cityKillPed && !v.dead) {
             try { CBZ.cityKillPed(v, { fromX: a.pos.x, fromZ: a.pos.z, force: 7, attacker: a, byPlayer: false }, preyCause(a)); } catch (e) {}
+            // A PERSON IS A MEAL TOO. The man-eater branch is already the
+            // rarest thing this file does; without this the one wolf in the
+            // county that took somebody stayed exactly as starving as before
+            // and went straight back out looking, which is not an animal.
+            mealFrom(a, v, 0.85);
           }
         },
         canReach: function (t) { return a._packGate !== false && !!t && !t.dead; },
@@ -2186,6 +2479,9 @@
     const out = {};
     for (const k in base) out[k] = base[k];
     for (const k in over) out[k] = over[k];
+    // the merge copies the kit's numbers into a FRESH object, so the size fold
+    // has to happen again on this one (its own receipt keeps it to once).
+    if (TRAITS) TRAITS.sizeKit(out, a._sizeMul || 1);
     a._preyHunt = out;
     return out;
   }
@@ -2201,8 +2497,19 @@
   //      wall) with no second panic system anywhere.
   function alarmFromPredator(h, amt) {
     const hsp = h.species, hx = h.pos.x, hz = h.pos.z;
-    const R = 34 + (hsp.scale || 1) * 12;
+    /* PREY READS THE PREDATOR'S HUNGER, and this is the half of the feature
+       that shows up on the animals you are ACTUALLY looking at. You rarely
+       have a wolf in frame; you very often have the deer. A fed wolf drifting
+       through the treeline barely lifts a head — the herd keeps grazing, and
+       that is a herd that has decided it is safe. A starving one moving the
+       same line empties the meadow from half again as far out and leaves the
+       herd packed into a knot. Nobody is told which wolf it was. */
+    const hd = DRIVE(h);
+    // both coefficients are written so bold == 1 (hunger off, or an animal at
+    // dead-centre hunger) reproduces the old numbers EXACTLY.
+    const R = (34 + SZ(h) * 12) * (0.58 + hd.bold * 0.42);
     const R2 = R * R;
+    const amtH = amt * (0.55 + hd.bold * 0.45);
     for (let i = 0; i < animals.length; i++) {
       const a = animals[i], sp = a.species;
       if (a === h || a.dead || a.tamed || a.ridden || a.external || !sp) continue;
@@ -2210,7 +2517,16 @@
       if ((sp.danger || 0) >= (hsp.danger || 0)) continue;          // peers do not flinch
       const dx = a.pos.x - hx, dz = a.pos.z - hz;
       if (dx * dx + dz * dz > R2) continue;
-      a.alarm = Math.max(a.alarm || 0, amt);
+      a.alarm = Math.max(a.alarm || 0, amtH);
+      /* BUNCHING. A frightened herd does not just run — it closes up, and a
+         bait ball is the same instinct with more zeroes. `bunch` rides on the
+         HERD (not the animal) so the whole group tightens as one, decays on
+         its own in updateHerds, and is spent by the two cohesion blocks that
+         already exist. A fed predator sets it to nearly nothing, so the
+         difference between a fed and a starving hunter is visible in the SHAPE
+         of the herd from a distance at which you cannot see either of them. */
+      const hr0 = HGON() ? a.herd : null;
+      if (hr0) { const b = hd.hunt; if (!(hr0.bunch > b)) hr0.bunch = b; }
       if (a.state === "wander" || a.state === "graze" || a.state === "idle") {
         a.state = "flee";
         // the QUARRY gets a shorter burst than the bystanders. It is the one
@@ -2218,7 +2534,7 @@
         // that should read as a wall going the other way.
         a.stateT = (a === h._prey ? 1.6 : ((classify(sp).fleeT || 4) + 1.5));
         a.heading = Math.atan2(dz, dx);                             // straight away from it
-        a.spd = (sp.spd || 1.4) * 2.0;
+        a.spd = (a._spd0 || 1.4) * 2.0;
       }
     }
     // People scatter too, and they do it through peds.js's OWN decision —
@@ -2248,16 +2564,100 @@
     a._prey = null;
   }
 
-  function startFeed(a, kill) {
+  /* ---- THE MEAL. ONE function, and it is the only place in the game hunger
+     ever goes DOWN by eating -------------------------------------------------
+
+     A MEAL IS AS BIG AS WHAT WAS EATEN, relative to the eater's own body: a
+     wolf that takes an elk is done for the afternoon, a fox that takes a
+     rabbit is hungry again within the hour, and that difference is the whole
+     reason the fox is the one you keep seeing hunt.
+
+     A CARCASS IS A FINITE THING. Each animal that eats from one takes a
+     smaller share than the last (`_eaten`), so the third scavenger onto a
+     kill leaves nearly as hungry as it arrived and goes back to hunting — the
+     alternative is a single deer feeding the entire county.
+
+     RECEIPTED ON THE EATER (`_ateFrom`), because there are now three separate
+     paths that can report the same mouthful: killAnimal (which catches EVERY
+     killer including the ones in files this change does not own — sharks,
+     orcas, the seize in predator.js), the food chain's own startFeed, and
+     scavenging. Without the receipt a wolf's kill would feed it twice and the
+     visible half of the feature — a fed predator that will not commit — would
+     switch on a second too early. */
+  function mealFrom(eater, kill, share) {
+    if (!TRAITS || !eater || !kill || eater === kill || eater._ateFrom === kill) return;
+    eater._ateFrom = kill;
+    const eaten = kill._eaten || 0;
+    kill._eaten = eaten + 1;
+    const bulk = SZ(kill) / Math.max(0.2, SZ(eater));
+    const meal = Math.min(1.15, 0.42 + 0.75 * bulk) *
+                 (share == null ? 1 : share) / (1 + eaten * 0.7);
+    TRAITS.feed(eater, meal);
+  }
+
+  /* THE MEAL IS PAID ON ARRIVAL, NOT ON THE DECISION — feedTick calls
+     mealFrom the frame the eater's mouth reaches the body. It matters because
+     a scavenger can be sixty metres from the carcass when it sets off, and an
+     animal that behaved FED for the whole walk over would be the feature
+     lying to the person watching it. (A hunter's own kill is already paid by
+     killAnimal, standing over the body; mealFrom's receipt keeps that to one.) */
+  function startFeed(a, kill, share) {
     a._feedOn = kill;
+    a._mealShare = share == null ? 1 : share;
     a._feedT = FEED_MIN + Math.random() * FEED_RAND;
     a._feedPh = 0; a._feedGore = 0.4;
     a._prey = null;
     if (kill && kill._huntedBy === a) kill._huntedBy = null;
   }
+
+  /* ---- SCAVENGING — the free meal beats the chase --------------------------
+     A starving predator that walks past a fresh carcass to go and chase a
+     healthy deer is a predator nobody believes in. This is the cheapest
+     believability in the whole food chain and it costs one timed scan of the
+     `carcasses` list (which is a handful of entries, not the animal list).
+
+     It is also the second visible read on hunger, and a better one than speed:
+     you shoot a deer, walk away, and the thing that comes out of the treeline
+     to stand over it is the animal that was hungry. A fed one never comes.
+
+     LAND ONLY, and that is a hard constraint rather than a taste: feedTick
+     walks the eater in with landWalk/slither, which put a body on the GROUND.
+     A shark scavenging through this seam would beach itself. The sea's own
+     scavenging belongs in wildlife_shark.js, which this change does not own. */
+  const SCAV_R = 58;             // how far a starving land predator smells carrion
+  const SCAV_RESCAN = 1.9;       // s between scans — carrion does not move
+  const SCAV_MAX_EATERS = 3;     // a carcass this picked-over is not worth crossing to
+  function pickCarcass(a, dt) {
+    a._scavT = (a._scavT || 0) - dt;
+    if (a._scavT > 0) return null;
+    a._scavT = SCAV_RESCAN * (0.7 + Math.random() * 0.6);
+    const d = DRIVE(a);
+    if (d.hunt <= 0) return null;                  // a fed animal walks past carrion
+    // Range is the hunger itself: a merely peckish wolf notices a kill it can
+    // nearly touch, a starving one crosses the meadow for it.
+    const R = SCAV_R * d.sense * (0.35 + 0.65 * d.hunt);
+    const sp = a.species, ax = a.pos.x, az = a.pos.z;
+    let best = null, bd = R * R;
+    for (let i = 0; i < carcasses.length; i++) {
+      const c = carcasses[i];
+      if (!c || c === a || !c.skinnable || !c.pos || !c.species) continue;
+      if (c.species === sp) continue;              // not its own kind
+      if (!!c.species.aquatic !== !!sp.aquatic) continue;
+      if (c._ateFrom === a || a._ateFrom === c) continue;      // already had this one
+      if ((c._eaten || 0) >= SCAV_MAX_EATERS) continue;
+      const dx = c.pos.x - ax, dz = c.pos.z - az, d2 = dx * dx + dz * dz;
+      if (d2 < bd) { bd = d2; best = c; }
+    }
+    return best;
+  }
   function endFeed(a) {
     a._feedT = 0; a._feedOn = null;
-    a._satT = SAT_MIN + Math.random() * SAT_RAND;
+    // the binary clock stays (it is what freezes a fed predator into scenery),
+    // but it is now as long as the meal was big — a small kill buys a short
+    // rest, which is exactly what makes a hungry world feel busier.
+    // ..centred on 0.5 so a world with the flag off gets the ORIGINAL clock and
+    // not a quietly shortened one: 0.5 -> 1.0x, starving -> 0.45x, fed -> 1.55x.
+    a._satT = (SAT_MIN + Math.random() * SAT_RAND) * (1 - (HUNGER(a) - 0.5) * 1.1);
     if (CBZ.predatorPose) { try { CBZ.predatorPose(a, "maul", 0, 0, 0); } catch (e) {} }
   }
   function feedTick(a, dt) {
@@ -2268,7 +2668,7 @@
     if (a._feedT <= 0) { endFeed(a); return false; }
     const dx = kill.pos.x - grp.position.x, dz = kill.pos.z - grp.position.z;
     const d = Math.hypot(dx, dz);
-    const reach = 1.1 + (a.species.scale || 1) * 0.9;
+    const reach = 1.1 + SZ(a) * 0.9;
     a.state = "graze";                 // markers.js reads a.state: a feeding animal is not a threat
     // the SAME locomotion seam the hunt uses — a constrictor feeds too, and it
     // has no legs to walk there on.
@@ -2279,11 +2679,12 @@
       return true;
     }
     walk(a, Math.atan2(dz, dx), 0, dt);
+    mealFrom(a, kill, a._mealShare);       // receipted: one meal, however many frames
     a._feedPh += dt * 0.55;
     if (CBZ.predatorPose) {
       // mass picks the beat exactly the way predatorKit picks a seize style —
       // the heavy ones tear with the whole body, the light ones worry at it.
-      const style = ((a.species.scale || 1) >= 1.15) ? "maul" : "worry";
+      const style = (SZ(a) >= 1.15) ? "maul" : "worry";
       try { CBZ.predatorPose(a, style, a._feedPh, 0.5, dt); } catch (e) {}
     }
     if (a.snake) snakeAnimate(a, dt); else gaitAnimate(a, dt);
@@ -2291,7 +2692,7 @@
     if (a._feedGore <= 0) {
       a._feedGore = 1.8 + Math.random() * 2.4;
       if (CBZ.gore) {
-        try { CBZ.gore(kill.pos.x, kill.pos.y + 0.2 * (kill.species.scale || 1), kill.pos.z, { amount: 0.26, player: false }); } catch (e) {}
+        try { CBZ.gore(kill.pos.x, kill.pos.y + 0.2 * SZ(kill), kill.pos.z, { amount: 0.26, player: false }); } catch (e) {}
       }
     }
     return true;
@@ -2338,6 +2739,33 @@
       } else releasePrey(a);
     }
 
+    /* ---- CARRION BEATS THE CHASE ------------------------------------------
+       Before this hunter goes looking for something to run down, it checks
+       whether somebody has already left it a meal. A hungry animal takes the
+       free one every time; a fed one does not even look, so it never runs the
+       scan. This is the reason the thing that walks out of the treeline to
+       stand over the deer you shot and left is always a hungry one — and the
+       player never gets told that, which is the entire point.
+
+       Gated on there being no live claim, so it can never steal a hunter off
+       an animal it is already in the middle of taking. */
+    const hsp0 = a.species;
+    if (CHAIN() && HGON() && hsp0 && !hsp0.aquatic && !a._prey && (a._feedT || 0) <= 0 &&
+        (a._satT || 0) <= 0 && predSpecies(hsp0)) {
+      const carrion = pickCarcass(a, dt);
+      // a scavenged share is worth less than a fresh kill — somebody else's
+      // work, already opened, and mealFrom divides it again per previous eater.
+      if (carrion) {
+        startFeed(a, carrion, 0.72);
+        // the WALK is on top of the meal, not instead of it: a carcass across
+        // the meadow would otherwise time out before the scavenger arrived and
+        // the whole behaviour would read as an animal changing its mind.
+        const cdx = carrion.pos.x - grp.position.x, cdz = carrion.pos.z - grp.position.z;
+        a._feedT += Math.min(30, Math.hypot(cdx, cdz) / Math.max(0.6, (hsp0.spd || 1.4) * 0.85));
+        if (feedTick(a, dt)) return true;
+      }
+    }
+
     // ---- WHOM IS THIS HUNT FOR? -------------------------------------------
     // ONE predatorHunt call per hunter per frame, ALWAYS. The FSM keeps a single
     // scratch per hunter (menace, commits, the circle clock), so calling it
@@ -2350,8 +2778,16 @@
     //   * Otherwise a hungry predator looks for an animal it can take, and very
     //     rarely for a person on their own.
     const o0 = huntOpts(a);
+    /* HUNGER INTO THE DRIVER'S WILLINGNESS. predatorHunt reads senseR / chumR
+       / circleT / cruiseSpeed off this bundle every frame, so a hungry animal
+       committing sooner and from further out is four number rewrites on an
+       object that already exists — done only when hunger has moved a step,
+       never per frame, and never an allocation. This is the seam that would
+       be one line inside predator.js if this change owned that file. */
+    if (TRAITS && o0) TRAITS.hungerKit(o0, a);
     let o = o0, target = player, preyMode = false;
     const senseR = (o0 && o0.senseR) || 40;
+    const hdrv = DRIVE(a);
     let dpl = Infinity;
     if (P && player && !player.dead) dpl = Math.hypot(grp.position.x - P.x, grp.position.z - P.z);
     // A DEFENDER FIGHTS WHAT HURT IT. The player-outranks-everything rule below
@@ -2377,8 +2813,13 @@
       if (pv) {
         const pdx = pv.pos ? pv.pos.x - grp.position.x : 1e9;
         const pdz = pv.pos ? pv.pos.z - grp.position.z : 1e9;
+        // ..AND IT ABANDONS A HUNT LESS READILY WHEN IT IS HUNGRY. The claim
+        // radius is the one number that decides whether a stalk survives the
+        // quarry getting a head start; a starving animal walks a long way for
+        // a meal and a fed one shrugs at forty metres.
+        const claimR = senseR * 2.2 * hdrv.bold;
         if (pv.dead || pv.inCar || pv.tamed || pv.ridden ||
-            (pdx * pdx + pdz * pdz) > (senseR * 2.2) * (senseR * 2.2)) releasePrey(a);
+            (pdx * pdx + pdz * pdz) > claimR * claimR) releasePrey(a);
       }
       const st0 = a._huntSt;
       // never re-pick mid-grab: the seize already owns this animal's mouth, and
@@ -2529,8 +2970,10 @@
       snakeAnimate(a, dt);
     } else {
       // the Minecraft read: hunting eyes glow red. predatorHunt has just
-      // written a.state, so this is the same frame, not one behind.
-      setAggroEyes(a, a.state === "charge" ? 2 : (a.state === "stalk" ? 1 : 0));
+      // written a.state, so this is the same frame, not one behind — and a
+      // STARVING predator's are lit before it has picked anything, which is
+      // the one hunger cue that carries at night and across water.
+      setAggroEyes(a, eyeMode(a));
       // settle any leftover strike pitch between swings, or a bear that
       // swung once keeps its nose in the dirt for the rest of the encounter.
       if (grp.rotation.x !== 0 && (a._atkAnim == null || a._atkAnim < 0)) grp.rotation.x *= Math.max(0, 1 - dt * 6);
@@ -2598,7 +3041,7 @@
         // the gap, then a bare contact tick on the grabT cooldown.
         if (nearP < strikeR * strikeR) {
           if (a.grabT <= 0) { animalStrikePlayer(a, sp.bite || 20, "constrict"); a.grabT = 0.9; }
-        } else { a.heading = towardP; spd = (sp.spd || 1.4) * 1.6; a.moving = true; a.state = "hunt"; }
+        } else { a.heading = towardP; spd = (a._spd0 || 1.4) * 1.6; a.moving = true; a.state = "hunt"; }
       } else if (sp.venom || sp.danger >= 0.4) {
         // VIPER / COBRA / MAMBA — warn, then STRIKE (venom on the bite).
         if (nearP < strikeR * strikeR) {
@@ -2609,17 +3052,17 @@
             if (sp.venom) applyVenom(sp);
           }
         } else if ((sp.spd || 0) >= 3 && nearP > (strikeR + 3) * (strikeR + 3)) {
-          a.state = "flee"; a.heading = towardP + Math.PI; spd = (sp.spd || 3) * 1.4; a.moving = true;   // mamba bolts
+          a.state = "flee"; a.heading = towardP + Math.PI; spd = (a._spd0 || 3) * 1.4; a.moving = true;   // mamba bolts
         } else { a.reared = !!a.rear; a.heading = towardP; a.alarm = Math.max(a.alarm, 2); }             // rear & hold ground
       } else {
-        a.state = "flee"; a.heading = towardP + Math.PI + (Math.random() - 0.5) * 0.6; spd = (sp.spd || 1.4) * 1.8; a.moving = true;  // garter flees
+        a.state = "flee"; a.heading = towardP + Math.PI + (Math.random() - 0.5) * 0.6; spd = (a._spd0 || 1.4) * 1.8; a.moving = true;  // garter flees
       }
     } else {
       // wander: a slow, near-constant slither with the odd pause + turn
       a.state = "wander";
       a.turnT -= dt;
       if (a.turnT <= 0) { a.heading += (Math.random() - 0.5) * 1.2; a.turnT = 3 + Math.random() * 4; }
-      spd = (sp.spd || 1.4) * 0.6; a.moving = true;
+      spd = (a._spd0 || 1.4) * 0.6 * DRIVE(a).spd; a.moving = true;
     }
 
     // ONE integrator, shared with the hunt (predatorHunt drives this exact
@@ -2649,7 +3092,7 @@
     const sp = a.species, grp = a.group, cls = classify(sp);
     // the Minecraft read: hunting eyes glow red (BEFORE the flinch return, so
     // a shot wolf lights up on the very frame it turns on you).
-    setAggroEyes(a, a.state === "charge" ? 2 : (a.state === "stalk" ? 1 : 0));
+    setAggroEyes(a, eyeMode(a));
     // hit recoil owns the transform while it lasts; the state resumes after.
     if ((a._flinchT || 0) > 0) { if (CBZ.creatureAnimateFlinch) CBZ.creatureAnimateFlinch(a, dt); return; }
     if (a.alarm > 0) a.alarm -= dt;
@@ -2700,7 +3143,12 @@
     if (!playerGone && !shared && crowdCheck(a, dt, P, nearP)) return;
 
     if (!playerGone && (a.state === "wander" || a.state === "graze" || a.state === "idle")) {
-      const spookR = sp.spook || 26;
+      /* HUNGER BUYS NERVE. A well-fed deer has nothing to gain by standing its
+         ground and bolts at forty metres; a starving one lets you get close
+         because the meadow it is eating is worth the risk. Same scalar, other
+         direction, as the predator's willingness to commit — and it is why
+         the animals you can actually walk up to are the hungry ones. */
+      const spookR = (sp.spook || 26) * (2 - DRIVE(a).bold);
       // `!shared` is new and it matters: an animal on a wound licence sits in a
       // post-commit cooldown for several seconds at a time, during which
       // predatorHunt returns cruise and this branch would flip it to flee — a
@@ -2728,7 +3176,7 @@
       }
       if (a.stateT <= 0) { a._idleTurned = false; a.state = "wander"; a.stateT = 1.5 + Math.random() * 2.5; }
     } else if (a.state === "flee") {
-      spd = (sp.spd || 1.4) * cls.fleeM;
+      spd = (a._spd0 || 1.4) * cls.fleeM;
       // TRIGGER 3 (see corneredCheck): nowhere left to run. The one frame where
       // prey stops being prey.
       if (corneredCheck(a, dt, P, nearP)) return;
@@ -2744,7 +3192,7 @@
       if (playerGone || nearP > sq((st.trig || cls.stalk || 55) * 1.25)) { a.state = "wander"; a.stateT = 2; }
       else if (nearP < sq(st.burst || cls.burst || 18)) { a.state = "charge"; a.alarm = 6; a._burstT = st.burstT || 3.5; }
       else {
-        spd = (sp.spd || 1.4) * (cls.crouch || 0.35);
+        spd = (a._spd0 || 1.4) * (cls.crouch || 0.35);
         a.heading = Math.atan2(-dpz, -dpx);   // the faceH turn clamp below arcs it in
       }
     } else if (a.state === "charge") {
@@ -2758,7 +3206,7 @@
       if (a.state === "charge") {
         if (playerGone || nearP > sq(giveUp)) { a.state = "wander"; a.stateT = 2; a._burstT = null; }
         else {
-          const reach = 1.6 + (sp.scale || 1) + 0.5;
+          const reach = 1.6 + SZ(a) + 0.5;
           const engaged = a._atkAnim != null && a._atkAnim >= 0;  // mid-strike: let it finish
           if ((nearP <= sq(reach * 1.6) || engaged) && CBZ.creatureFight) {
             // hand the last stretch + the strike to creature_combat: it
@@ -2769,8 +3217,12 @@
             if (!o) {
               const style = CBZ.creatureStyleFor ? CBZ.creatureStyleFor(sp) : null;
               o = a._atkOpts = {
-                reach: reach, rate: 1.1, dmg: sp.bite || 12,
-                speed: (sp.spd || 1.4) * (cls.atkM || 2.0),
+                // dmg/rate/speed are the INDIVIDUAL's: a monster hits hard and
+                // slow, a runt hits fast and light, off the same exponents
+                // predator.js publishes for the shared kit.
+                reach: reach, rate: 1.1 * Math.sqrt(SZ(a) / ((sp.scale || 1) || 1)),
+                dmg: Math.max(1, Math.round((sp.bite || 12) * Math.pow(SZ(a) / ((sp.scale || 1) || 1), 1.35))),
+                speed: (a._spd0 || 1.4) * (cls.atkM || 2.0),
                 style: style,
                 onHit: function (d2) { animalStrikePlayer(a, d2, style); },
               };
@@ -2789,7 +3241,7 @@
             a.faceH = a.heading;                       // it steers facing itself — stay in sync
             return;                                    // creatureFight owns the transform this frame
           }
-          spd = (sp.spd || 1.4) * (cls.atkM || 2.0) * (a._burstT != null ? 1.2 : 1);
+          spd = (a._spd0 || 1.4) * (cls.atkM || 2.0) * (a._burstT != null ? 1.2 : 1);
           a.heading = Math.atan2(-dpz, -dpx);
           // fallback contact strike if creature_combat isn't around.
           if (!CBZ.creatureFight && nearP < 3.2 * 3.2 && CBZ.cityHurtPlayer && (a._biteT || 0) <= 0) {
@@ -2804,20 +3256,38 @@
     if (a.state === "wander") {
       spd = a.spd;
       if (a.stateT <= 0) {
+        /* HUNGER, IN THE PATHING. This is where "you can SEE it" is either
+           true or it is a claim: a starving animal barely stops, re-aims often
+           and covers ground; a fed one stands about, turns lazily and drifts.
+           `hd` is the shared behaviour scratch (wildlife_traits.js) — one
+           cached object per actor, re-derived only when hunger has moved ~2%.
+
+           A HERBIVORE EATS BY GRAZING, so hunger PUSHES the head down and the
+           idle away: a hungry deer grazes MORE and loiters LESS, and grazing
+           is what feeds it back down again. A predator grazes at a carcass
+           instead, so its graze roll simply falls with hunger like its idle. */
+        const hd = DRIVE(a);
+        const eats = predSpecies(sp);
+        const grazeP = Math.min(0.9, cls.grazeP * (eats ? hd.loiter : (2 - hd.loiter)));
+        const idleP = Math.min(0.98, grazeP + 0.18 * hd.loiter);
         const stopRoll = Math.random();
-        if (stopRoll < cls.grazeP && (!hr || hr.panic <= 0.3) && a.alarm <= 0) {
+        if (stopRoll < grazeP && (!hr || hr.panic <= 0.3) && a.alarm <= 0) {
           a.state = "graze";                           // stop & put the head down
-          a.stateT = cls.grazeT[0] + Math.random() * (cls.grazeT[1] - cls.grazeT[0]);
+          a.stateT = (cls.grazeT[0] + Math.random() * (cls.grazeT[1] - cls.grazeT[0])) *
+                     (eats ? hd.loiter : 1);
           spd = 0;
-        } else if (stopRoll < Math.min(0.92, cls.grazeP + 0.18) && (!hr || hr.panic <= 0.3) && a.alarm <= 0) {
+        } else if (stopRoll < idleP && (!hr || hr.panic <= 0.3) && a.alarm <= 0) {
           a.state = "idle";                            // stand, listen, turn, then continue
-          a.stateT = 1.4 + Math.random() * 3.2;
+          a.stateT = (1.4 + Math.random() * 3.2) * hd.loiter;
           a._idleTurned = false;
           spd = 0;
         } else {
-          a.stateT = 2 + Math.random() * 4;
-          a.heading += (hr && hr.n > 1 ? 0.3 : 1.5) * (Math.random() - 0.5);
-          a.spd = (sp.spd || 1.4) * cls.wanderM * (0.7 + Math.random() * 0.6);
+          // RESTLESS. A hungry animal re-aims twice as often and swings its
+          // heading further, which is a bigger effective wander radius without
+          // a second radius anywhere: the home fence in landWalk is unchanged.
+          a.stateT = (2 + Math.random() * 4) / hd.restless;
+          a.heading += (hr && hr.n > 1 ? 0.3 : 1.5) * (Math.random() - 0.5) * hd.restless;
+          a.spd = (a._spd0 || 1.4) * cls.wanderM * (0.7 + Math.random() * 0.6) * hd.spd;
           spd = a.spd;
         }
       }
@@ -2831,9 +3301,17 @@
       dx += Math.cos(hr.heading) * align; dz += Math.sin(hr.heading) * align;
       const toCx = hr.cx - grp.position.x, toCz = hr.cz - grp.position.z;
       const cd = Math.hypot(toCx, toCz) || 1;
-      const coh = Math.min(1.1, Math.max(0, cd - 5) / 14) * (a.state === "wander" ? 1 : 1.6);
+      /* BUNCHING, SPENT. A hungry predator in range does two things to the
+         shape of a herd and both are the same number: it pulls the cohesion up
+         (they crowd the centre, and from further out — the -5 slack that lets
+         a calm herd spread is what shrinks) and it pushes the personal-space
+         radius down (they will tolerate standing shoulder to shoulder). A
+         watcher on a hill sees a loose scatter of deer become a knot. */
+      const bn = hr.bunch || 0;
+      const coh = Math.min(1.1 + bn * 0.9, Math.max(0, cd - 5 * (1 - bn * 0.8)) / (14 - bn * 7)) *
+                  (a.state === "wander" ? 1 : 1.6);
       dx += (toCx / cd) * coh; dz += (toCz / cd) * coh;
-      const sepR = 2.2 + (sp.scale || 1) * 1.0;
+      const sepR = (2.2 + SZ(a) * 1.0) * (1 - bn * 0.45);
       let sx = 0, szz = 0;
       for (let m = 0; m < hr.members.length; m++) {
         const o2 = hr.members[m]; if (o2 === a || o2.dead) continue;
@@ -3012,17 +3490,39 @@
       // actor, which is the cheapest thing in this loop.
       if (a._routT > 0) a._routT -= dt;
       if (a._cornerCd > 0) a._cornerCd -= dt;
+      /* HUNGER RUNS EVERYWHERE, and it runs HERE for the same reason the
+         satiation clock does: an animal that can only get hungry inside your
+         LOD radius would mean the sea is only ever hungry where you are
+         standing. Two arithmetic ops on a frozen actor — the cheapest thing in
+         this loop — and the behaviour scratch it feeds is only re-derived when
+         the value has actually moved ~2%, i.e. every several seconds.
+           mode 1 = head down grazing (a herbivore is EATING, not just idle)
+           mode 2 = a fish picking at the water column
+         Feeding at a carcass is not here: it is a real event and drops hunger
+         outright through startFeed/endFeed. */
+      if (TRAITS && !a.dead) {
+        const grazing = (a.state === "graze" && (a._feedT || 0) <= 0 && !predSpecies(sp));
+        TRAITS.tick(a, dt, grazing ? 1 : (sp.aquatic && !predSpecies(sp) ? 2 : 0));
+      }
       if (a._prey && !a._prey.animal) npcHunts++;   // the global predator-vs-person cap
       let pd2 = 0;
       if (P) {
         const vdx = grp.position.x - P.x, vdz = grp.position.z - P.z;
         pd2 = vdx * vdx + vdz * vdz;
-        const vr = visR * ((sp.scale || 1) >= 1.3 ? 1.6 : 1);
+        const vr = visR * (SZ(a) >= 1.3 ? 1.6 : 1);
         grp.visible = a.ridden || a.tamed || pd2 < vr * vr;
       }
       // matrix LOD: hidden animals stop paying r128's per-frame matrix math
       // (the saving staticfreeze.js was after) and thaw the moment they show.
       if (LIVE()) setLiveMats(a, grp.visible !== false);
+      /* THE BODY CUE — gaunt vs full-bellied, and the ONLY place hunger is
+         ever shown. No HUD, no icon, no toast, no marker: you read it off the
+         animal or you do not read it at all. A modest non-uniform scale on the
+         discovered body/hull child (never the group — creature_combat forces
+         the group's three components back to uniform between swings), and it
+         composes with the size multiplier that lives on the group.
+         Visible animals only, and only when the girth has moved a step. */
+      if (TRAITS && grp.visible !== false && !a.dead) TRAITS.bodyCue(a);
       if (a.dead) {
         // Killing impulse drives a short, damped rigid-body tumble. It can slide,
         // bounce once and rotate on every axis before friction settles it onto a
@@ -3052,8 +3552,8 @@
       //      is the point), full-grown in GROW_TIME ------------------------
       if (a.grow != null && a.grow < 1) {
         a.grow = Math.min(1, a.grow + dt / GROW_TIME);
-        grp.scale.setScalar((sp.scale || 1) * (0.4 + 0.6 * a.grow));
-        if (a.grow >= 1) a.grow = null;
+        applyScale(a, a.grow);
+        if (a.grow >= 1) { a.grow = null; applyScale(a, null); }
       }
       // ---- TAMED / RIDDEN animals are driven by wildlife_tame.js ----------
       // (their position is set elsewhere; the gait layer keys off distance
@@ -3079,11 +3579,40 @@
       if (a.snake) { snakeTick(a, dt, P); continue; }
       // ---- aquatic: water-mask navigation + synced wave/depth lanes -------
       if (sp.aquatic) {
+        /* A HUNGRY FISH RIDES HIGH. This is the strongest hunger read the sea
+           has, and it costs one multiply: swim depth leans SHALLOW with hunger
+           and DEEP with fullness. A starving shark cruises just under the
+           surface — where its fin proxy actually shows and where the seals and
+           the swimmers are — and a fed one hangs down in blue water where you
+           will never see it unless you go looking. Written off the spawn-time
+           base every frame rather than accumulated, so it can never drift, and
+           placed BEFORE the shark brain so it applies to the animal the owner
+           named as much as to the mackerel.
+
+           Behind the LOD gate on purpose? No — deliberately in front of it: a
+           shark's fin proxy is drawn from beyond the visible radius, so the
+           depth that decides whether you can see a fin at all has to be right
+           on the frames where the body is not being ticked. */
+        if (a._swimDepth0 > 0) a.swimDepth = a._swimDepth0 * (1.44 - DRIVE(a).bold * 0.44);
         // APEX PREDATORS think before the LOD gate: a stalking shark hunts from
         // BEYOND the visible radius (its fin proxy is what you see, not its
         // body — city/wildlife_shark.js), so it must keep running while hidden.
         // Everything else in the sea still idles when it is out of sight.
         if (CBZ.sharkBrain && (sp.danger || 0) >= 0.5 && !a.tamed && !a.dead) {
+          /* THE SHARK'S OWN BUNDLE, SIZED AND STARVED — from out here, because
+             wildlife_shark.js builds it and this file does not own that file.
+             `s.opts` is a plain object it caches on the actor and predatorHunt
+             reads every frame, so folding the individual's size into it once
+             (predator.js's own exponents) and its live hunger into four of its
+             numbers on each hunger step is all it takes for a big shark to
+             genuinely hit harder and a starving one to circle less before it
+             commits. No allocation per frame, no edit to either file.
+             sizeKit is idempotent by its own receipt; hungerKit snapshots its
+             base once so it can never compound. */
+          if (TRAITS && a._shark && a._shark.opts) {
+            TRAITS.sizeKit(a._shark.opts, a._sizeMul || 1);
+            TRAITS.hungerKit(a._shark.opts, a);
+          }
           if (CBZ.sharkBrain(a, dt, P)) {
             faceAnimalHeading(grp, a.heading);
             if (LIVE()) animateSwim(a, dt);
@@ -3091,9 +3620,22 @@
           }
         }
         if (grp.visible === false) continue;          // far sea life idles (no sim)
+        /* HUNGER IN THE WATER. Same three reads as the land wander, and they
+           are the whole difference a person watching the sea for thirty
+           seconds is meant to see: a fed fish DRIFTS (0.7x, long straight
+           glides), a starving one quarters the water restlessly at 1.3x and
+           comes into shallows it would otherwise keep out of. The clearance
+           lean is what puts a hungry shark in the surf beside you and keeps a
+           fed one in blue water; it is rewritten off _baseClear so it can
+           never compound frame to frame. */
+        const hdA = DRIVE(a);
+        if (a._baseClear > 0) a.waterClearance = a._baseClear * (1.5 - hdA.bold * 0.5);
         a.bob += dt * (1.2 + a.spd * 0.2);
         a.turnT -= dt;
-        if (a.turnT <= 0) { a.heading += (Math.random() - 0.5) * 0.8; a.turnT = 3 + Math.random() * 4; }
+        if (a.turnT <= 0) {
+          a.heading += (Math.random() - 0.5) * 0.8 * hdA.restless;
+          a.turnT = (3 + Math.random() * 4) / hdA.restless;
+        }
         // TAMED sea life (ANIMALS_ALL_CONTROLLABLE): your dolphin swims WITH
         // you — heading steers toward wherever you are (the water nav below
         // still owns shoreline clearance, so it holds just offshore when you
@@ -3119,7 +3661,7 @@
             if (wet) { grp.position.x = wet.x; grp.position.z = wet.z; a.home.x = wet.x; a.home.z = wet.z; }
           }
           const nav = wf.moveInWater(
-            grp.position.x, grp.position.z, a.heading, a.spd * dt * 6,
+            grp.position.x, grp.position.z, a.heading, a.spd * hdA.spd * dt * 6,
             a.waterClearance || 12, waterTime, a._waterMove
           );
           a.heading = nav.heading;
@@ -3131,13 +3673,13 @@
           // in the shallows without ever lifting it clear of the surface.
           grp.position.y = aquaticBodyY(grp.position.x, grp.position.z,
             (a.swimDepth || 1) - Math.sin(a.bob) * 0.055,
-            aquaticBedLift(sp), waterTime);
+            aquaticBedLift(a), waterTime);
         } else {
           // Legacy radial-band fallback when this module is unit-loaded alone.
-          const nx = grp.position.x + Math.cos(a.heading) * a.spd * dt * 6;
-          const nz = grp.position.z + Math.sin(a.heading) * a.spd * dt * 6;
-          const rr = Math.hypot(nx - FIELD_CX, nz - FIELD_CZ);
-          if (rr < AQUATIC_R0 || rr > AQUATIC_R1) a.heading += Math.PI * 0.6;
+          const nx = grp.position.x + Math.cos(a.heading) * a.spd * hdA.spd * dt * 6;
+          const nz = grp.position.z + Math.sin(a.heading) * a.spd * hdA.spd * dt * 6;
+          const rr = Math.hypot(nx - FIELD.cx, nz - FIELD.cz);
+          if (rr < FIELD.r0 || rr > FIELD.r1) a.heading += Math.PI * 0.6;
           else { grp.position.x = nx; grp.position.z = nz; }
           // THE FLOATING SHARK (owner: "sharks go out of water, they float
           // OVER water instead of being under it — the fins look real but then
@@ -3157,8 +3699,8 @@
           // so a shark is UNDER the sea by its own body depth wherever the sea
           // happens to be this frame, surge included.
           grp.position.y = aquaticBodyY(grp.position.x, grp.position.z,
-            (a.swimDepth || aquaticBodyDepth(sp)) - Math.sin(a.bob) * 0.12 * (sp.scale || 1),
-            aquaticBedLift(sp));
+            (a.swimDepth || aquaticBodyDepth(sp)) - Math.sin(a.bob) * 0.12 * SZ(a),
+            aquaticBedLift(a));
         }
         faceAnimalHeading(grp, a.heading);
         if (LIVE()) animateSwim(a, dt);               // the shared tail/fluke beat
@@ -3228,8 +3770,8 @@
       }
       // pick speed by state
       let spd = a.spd;
-      if (a.state === "flee") spd = (sp.spd || 1.4) * 2.4;
-      else if (a.state === "charge") spd = (sp.spd || 1.4) * 2.0;
+      if (a.state === "flee") spd = (a._spd0 || 1.4) * 2.4;
+      else if (a.state === "charge") spd = (a._spd0 || 1.4) * 2.0;
       // heading logic
       a.turnT -= dt;
       if (a.state === "charge" && P) {
@@ -3255,10 +3797,15 @@
           // cohesion: pull toward the centre only once the herd spreads out
           const toCx = hr.cx - grp.position.x, toCz = hr.cz - grp.position.z;
           const cd = Math.hypot(toCx, toCz) || 1;
-          const coh = Math.min(1.1, Math.max(0, cd - 5) / 14) * (a.state === "wander" ? 1 : 1.6);
+          // ..and the same knot in the water, which is the one place it has a
+          // name: a BAIT BALL is a school that has bunched because something
+          // hungry is underneath it. Same scalar, same source, no second system.
+          const bn = hr.bunch || 0;
+          const coh = Math.min(1.1 + bn * 0.9, Math.max(0, cd - 5 * (1 - bn * 0.8)) / (14 - bn * 7)) *
+                      (a.state === "wander" ? 1 : 1.6);
           dx += (toCx / cd) * coh; dz += (toCz / cd) * coh;
           // separation: shove away from the closest herd-mate inside ~2.6u
-          const sepR = 2.2 + (sp.scale || 1) * 1.0;
+          const sepR = (2.2 + SZ(a) * 1.0) * (1 - bn * 0.45);
           let sx = 0, sz = 0;
           for (let m = 0; m < hr.members.length; m++) {
             const o = hr.members[m]; if (o === a || o.dead) continue;
@@ -3276,7 +3823,7 @@
         // occasional idle jitter + a fresh grazing speed (loners & flavour)
         if (a.turnT <= 0) {
           a.turnT = 2 + Math.random() * 4;
-          if (a.state === "wander") { a.heading += (hr && hr.n > 1 ? 0.3 : 1.5) * (Math.random() - 0.5); a.spd = (sp.spd || 1.4) * (0.6 + Math.random() * 0.8); }
+          if (a.state === "wander") { a.heading += (hr && hr.n > 1 ? 0.3 : 1.5) * (Math.random() - 0.5); a.spd = (a._spd0 || 1.4) * (0.6 + Math.random() * 0.8); }
         }
       }
       // integrate + keep inside the home region (turn back at the fence)
@@ -3295,34 +3842,98 @@
     }
   }
 
+  /* TEAR THE OLD WORLD'S ANIMALS OUT before stocking a new one. Without this,
+     switching modes would leave a Gang City elk herd standing in the middle of
+     a disaster island's sea — the actors are ticked off a module-level list,
+     not off the arena that spawned them. */
+  function despawnAll() {
+    for (let i = 0; i < animals.length; i++) {
+      const a = animals[i], g = a && a.group;
+      if (g && g.parent) g.parent.remove(g);
+      if (a) { a.dead = true; a.herd = null; }
+    }
+    animals.length = 0;
+    carcasses.length = 0;
+    herds.length = 0;
+    for (const k in CAPS) delete CAPS[k];   // carrying capacity is per WORLD
+  }
+
+  /* ============================================================
+      STOCK A WORLD WITH WILDLIFE — the ONE entry point, for any mode.
+
+      OWNER: "gang city too and nat disaster should all have these sharks."
+      Gang City had them because this file registered itself as a landmass and
+      buildCity runs the landmass chain. NATURAL DISASTER HAD NOTHING — not
+      because sea life was blocked there, but because nothing ever called this
+      file, and the ocean band it would have used was Gang City's coordinates
+      typed out as module constants. Both halves are fixed here: the band comes
+      off the arena (deriveField), and this function is callable directly by a
+      mode that builds its own world instead of going through buildCity.
+
+        CBZ.cityWildlifeStock(arena, opts)
+          arena — anything with `.root` (a THREE.Group to parent bodies into).
+                  `.regions` marks it as a city (land species can spawn and the
+                  tuned city band is used); `.center` + `.radius` marks it as an
+                  island and derives a ring of open sea around it, which is
+                  what modes/survival.js's CBZ.buildDisasterArena() returns.
+          opts  — optional { ocean: { cx, cz, r0, r1 } } to state the band
+                  outright when a mode knows its own water better than we do,
+                  and { density } to scale the population (1 = Gang City's).
+                  Unstated, density is derived from the band's own AREA.
+
+      An island with no `.regions` spawns ONLY aquatic species, and that falls
+      out for free: seedIndividuals returns early for a land species with no
+      biome regions to place it in. So the disaster arena gets its sea life and
+      no deer, without a single species row or a mode flag.
+     ============================================================ */
+  function stockWildlife(city, opts) {
+    if (CBZ.WILDLIFE === false) return null;
+    city = city || (CBZ.city && CBZ.city.arena);
+    if (!city || !city.root) return null;
+    if (builtFor === city) return null;           // idempotent per world
+    if (builtFor) despawnAll();                   // a different world: clear the old one
+    builtFor = city;
+    root = city.root;
+    arena = city;                 // stash the arena for region lookups during build
+    deriveField(city, opts);      // ..and take this world's ocean off it
+    densityK = (opts && +opts.density > 0) ? +opts.density
+      // Unstated: a city keeps the tuned budget; anything else is sized by how
+      // much sea it actually has, against Gang City's band as the unit. An
+      // island a tenth the area gets a tenth the fish and reads just as full.
+      : (city.regions && city.regions.length) ? 1
+      : Math.min(1.4, Math.max(0.12,
+          (FIELD.r1 * FIELD.r1 - FIELD.r0 * FIELD.r0) /
+          (CITY_BAND.r1 * CITY_BAND.r1 - CITY_BAND.r0 * CITY_BAND.r0)));
+
+    if (!wired) {
+      wired = true;
+      registerPelts();
+      registerInteractions();
+      installWraps();             // gunshot panic + blast damage (capture-and-wrap)
+      let breedAcc = 0;
+      CBZ.onUpdate(47.1, function (dt) {
+        tick(dt);
+        breedAcc += (dt && dt < 0.5 ? dt : 0.016);
+        if (breedAcc >= BREED_EVERY) { breedAcc = 0; breed(); }
+      });
+    }
+    spawnAll();
+    recordCaps();                 // each herd's seeded size = its carrying capacity
+    return arena;
+  }
+  CBZ.cityWildlifeStock = stockWildlife;
+  // ..and the ocean band this world ended up with, for anything that wants to
+  // put a boat, a chum slick or a tsunami where the fish actually are.
+  CBZ.cityWildlifeOcean = function () {
+    return { cx: FIELD.cx, cz: FIELD.cz, r0: FIELD.r0, r1: FIELD.r1 };
+  };
+
   // ============================================================
   //  BUILD — stock the world once, after every biome AND the order-97 signed
   //  continent shoreline exist. Aquatic spawn validation therefore reads the
   //  exact final coast, not an incomplete region list.
   // ============================================================
-  CBZ.addLandmass(function (city) {
-    if (CBZ.WILDLIFE === false) return null;
-    if (built) return null;
-    city = city || (CBZ.city && CBZ.city.arena);
-    if (!city || !city.root) return null;
-    built = true;
-    root = city.root;
-    arena = city;                 // stash the arena for region lookups during build
-
-    registerPelts();
-    registerInteractions();
-    installWraps();               // gunshot panic + blast damage (capture-and-wrap)
-    spawnAll();
-    recordCaps();                 // each herd's seeded size = its carrying capacity
-
-    let breedAcc = 0;
-    CBZ.onUpdate(47.1, function (dt) {
-      tick(dt);
-      breedAcc += (dt && dt < 0.5 ? dt : 0.016);
-      if (breedAcc >= BREED_EVERY) { breedAcc = 0; breed(); }
-    });
-    return null;
-  }, 98);
+  CBZ.addLandmass(function (city) { stockWildlife(city, null); return null; }, 98);
 
   // ============================================================
   //  CARS HIT ANIMALS (CBZ.CONFIG.WILDLIFE_CAR_IMPACT)
@@ -3356,7 +3967,8 @@
     const sp = a.species || {};
     const v = Math.max(0, +opts.v || 0);
     if (v <= 0.5) return 0;
-    const mass = Math.max(0.12, (sp.scale || 1) * (sp.scale || 1));
+    const sz = SZ(a);
+    const mass = Math.max(0.12, sz * sz);
     const lethalV = Math.max(2.5, (opts.lethal || 14) * Math.sqrt(mass));
     const maxHp = a.maxHp || sp.hp || 40;
     const k = v / lethalV;
@@ -3470,6 +4082,69 @@
       sharkKitAdopted: !!CBZ.sharkKitAdopted,
       legacyAggroPaths: legacy, live: live,
       predator: CBZ.predatorAudit ? CBZ.predatorAudit() : null,
+    };
+  };
+
+  /* ============================================================
+      THE RATCHET (BLOCK LAW #5) — ARE THEY ACTUALLY INDIVIDUALS?
+
+      `sizeStd` is the one that may only go UP and is structurally ZERO with
+      WILDLIFE_SIZE_VARY off: it is the population standard deviation of the
+      individual multiplier. A shoal where every fish is 1.00 scores 0, which
+      is precisely the bug the owner reported, so a "fix" that quietly stops
+      varying anything cannot pass. `sizeMin`/`sizeMax`/`bigOnes` say the tail
+      is real rather than declared, and `hungerStd` does the same job for the
+      other half — a world where everything is equally hungry is a world with
+      no hunger in it.
+
+      Optional `id` restricts the read to one species, which is how the
+      before/after preset measures a line-up rather than the whole world.
+     ============================================================ */
+  CBZ.wildlifeTraitAudit = function (id) {
+    let n = 0, sMin = Infinity, sMax = -Infinity, sSum = 0, sSq = 0, big = 0;
+    let hN = 0, hMin = Infinity, hMax = -Infinity, hSum = 0, hSq = 0;
+    let starving = 0, fed = 0, spdMin = Infinity, spdMax = -Infinity, hpMin = Infinity, hpMax = -Infinity;
+    // the FOOD WEB half: how many are at a body right now, and how hard the
+    // tightest herd in the world is packed. Both are structurally zero with
+    // WILDLIFE_HUNGER off, which is the same ratchet law the size numbers obey.
+    let feeding = 0, bunchMax = 0;
+    for (let h = 0; h < herds.length; h++) {
+      const b = herds[h] && herds[h].bunch;
+      if (b > bunchMax && (!id || (herds[h].sp && herds[h].sp.id === id))) bunchMax = b;
+    }
+    for (let i = 0; i < animals.length; i++) {
+      const a = animals[i];
+      if (!a || a.dead || a.external) continue;
+      if (id && (!a.species || a.species.id !== id)) continue;
+      const k = a._sizeMul > 0 ? a._sizeMul : 1;
+      n++; sSum += k; sSq += k * k;
+      if (k < sMin) sMin = k; if (k > sMax) sMax = k;
+      if (a._bigOne) big++;
+      const sp0 = a._spd0 || 0;
+      if (sp0 < spdMin) spdMin = sp0; if (sp0 > spdMax) spdMax = sp0;
+      const mh = a.maxHp || 0;
+      if (mh < hpMin) hpMin = mh; if (mh > hpMax) hpMax = mh;
+      if ((a._feedT || 0) > 0) feeding++;
+      if (Number.isFinite(a.hunger)) {
+        hN++; hSum += a.hunger; hSq += a.hunger * a.hunger;
+        if (a.hunger < hMin) hMin = a.hunger; if (a.hunger > hMax) hMax = a.hunger;
+        if (a.hunger > 0.72) starving++; else if (a.hunger < 0.28) fed++;
+      }
+    }
+    const r3 = function (v) { return Number.isFinite(v) ? Number(v.toFixed(3)) : 0; };
+    const sMean = n ? sSum / n : 0, hMean = hN ? hSum / hN : 0;
+    return {
+      n: n,
+      sizeMin: r3(n ? sMin : 0), sizeMax: r3(n ? sMax : 0), sizeMean: r3(sMean),
+      sizeStd: r3(n ? Math.sqrt(Math.max(0, sSq / n - sMean * sMean)) : 0),
+      sizeRange: r3(n ? sMax - sMin : 0), bigOnes: big,
+      hpMin: Math.round(n ? hpMin : 0), hpMax: Math.round(n ? hpMax : 0),
+      spdMin: r3(n ? spdMin : 0), spdMax: r3(n ? spdMax : 0),
+      hungerN: hN, hungerMin: r3(hN ? hMin : 0), hungerMax: r3(hN ? hMax : 0),
+      hungerMean: r3(hMean),
+      hungerStd: r3(hN ? Math.sqrt(Math.max(0, hSq / hN - hMean * hMean)) : 0),
+      starving: starving, fed: fed, feeding: feeding, bunchMax: r3(bunchMax),
+      sizeOn: !!(TRAITS && TRAITS.SIZE_ON()), hungerOn: !!(TRAITS && TRAITS.HUNGER_ON()),
     };
   };
 

@@ -117,6 +117,33 @@
   // "when I look around it isn't looking around only, it's also changing my
   // camera angle — make it a FIXED angle like the one I'm showing."
   //
+  // ==== DEFAULT OFF as of 2026-08-20. THE PIN WAS TREATING A SYMPTOM. ========
+  // Read that complaint again next to the bug found today: `cam.pitch` is
+  // DOWN-positive and the mouse handler SUBTRACTED the drag, so third-person
+  // vertical look was INVERTED. Dragging down swung the boom UP into a top-down
+  // stare; dragging up dropped it to your heels. That is precisely, and only,
+  // "it isn't looking around, it's changing my camera angle" — the owner was
+  // describing an inverted axis, and the answer shipped here was to stop the
+  // camera from pitching at all. It worked the way amputation works.
+  //
+  // The same owner said it again on 2026-08-20 ("on FPS the way I drag is the
+  // way the cam moves, on 3rd person it is opposite ... it changes angle not
+  // direction of looking") — a second report of one unfixed sign, and proof the
+  // pin never addressed it: under the pin vertical mouse moves NOTHING you can
+  // see, which is not "looking around" either. tools/camera-look-check.mjs
+  // measures exactly that: pinned, a 0.144 rad drag moves the lens 0.003.
+  //
+  // With the sign corrected the pure orbit already keeps the promise the pin
+  // was reaching for — `camAudit().frameTilt` is CONSTANT across a pitch sweep,
+  // so the character does not move in frame; only the view direction changes.
+  // That is the Fortnite behaviour the owner keeps citing, and it is what the
+  // RDR2 pass was built to deliver before the inversion masked it.
+  //
+  // The flag stays, whole: `CBZ.CONFIG.CAM_TP_FIXED_ANGLE = true` restores the
+  // pinned frame, the aim band, the sliding reticle and camAimDecoupled()
+  // exactly as they were. Nothing below this line changed.
+  // =========================================================================
+  //
   // The RDR2 pass above answered the OTHER half of this. It made the view pitch
   // 1:1 with the mouse and held the character's place in frame — but it did that
   // with a PURE ORBIT, so the lens itself still swings a whole boom's worth: a
@@ -141,7 +168,7 @@
   // exactly as the RDR2 pass made it (CAM_FIXED_ADS_FREE=0 pins that too).
   // FIRST PERSON IS SACRED, as everywhere else in this file: fps.active returns
   // long before the tier runs and tpFixedFrame() refuses outright.
-  if (CBZ.CONFIG.CAM_TP_FIXED_ANGLE == null) CBZ.CONFIG.CAM_TP_FIXED_ANGLE = true;
+  if (CBZ.CONFIG.CAM_TP_FIXED_ANGLE == null) CBZ.CONFIG.CAM_TP_FIXED_ANGLE = false;
   // ---- YOU CAN SEE THE GUN (2026-08-20) — owner, with a clip of a third-person
   // shooter as the reference: "in our third person when holding gun you can't
   // see the gun. Fix the angle so we can see the gun better when shooting."
@@ -181,6 +208,20 @@
   // Presenting is not a new signal: systems/fpsmode.js has published
   // CBZ.tpPresenting for the yaw and damp switches all along; framing was the
   // one consumer still ignoring it. Flip false for the old hidden-gun framing.
+  //
+  // MEASURED UNDER THE PIN, AND IT SURVIVES WITHOUT IT (merge note, same day).
+  // Those numbers were taken while CAM_TP_FIXED_ANGLE defaulted TRUE. It now
+  // defaults FALSE — the inverted-look fix above made the pin unnecessary — so
+  // the lens pitches with your mouse again. Two consequences, both checked
+  // rather than assumed:
+  //   · the FRAMING numbers are unchanged, because they are measured at the
+  //     tier's resting pitch and the boom/offset/lead arithmetic never read the
+  //     pin;
+  //   · the sibling barrel fix in systems/holsterprops.js (aim the gun along
+  //     CBZ.playerAimDir, not the lens quaternion) becomes a NO-OP by identity:
+  //     with the pin off, camAimDecoupled() is false and playerAimDir returns
+  //     the lens direction. It stays because the flag is still there — turn the
+  //     pin back on and the barrel must not go back to pointing at the horizon.
   if (CBZ.CONFIG.CAM_TP_GUN_VISIBLE == null) CBZ.CONFIG.CAM_TP_GUN_VISIBLE = true;
   if (CBZ.CONFIG.CAM_FIXED_ADS_FREE == null) CBZ.CONFIG.CAM_FIXED_ADS_FREE = true;
   // The aim band. Vertical half-FOV is 30° (CITY_TP.FOV 60), and the reticle is
@@ -383,6 +424,35 @@
   CBZ.camPitchRange = pitchLimits;
   const DEFAULT_PITCH = 0.46;   // lower angle — less of a top-down "high" view
   CBZ.CAM_DEFAULT_PITCH = DEFAULT_PITCH;
+  // ============================================================
+  //  cam.pitch IS DOWN-POSITIVE. READ THIS BEFORE YOU TOUCH IT.
+  // ============================================================
+  //  +pitch  = lens ABOVE the pivot, view angled DOWN   (CITY_TP.PITCH 0.10 is
+  //            described in its own comment as a "mild down-gaze"; every spawn
+  //            preset in the repo — 0.12 / 0.28 / 0.34 / 0.4 / 0.52 — is a
+  //            camera sitting above the shoulder looking down)
+  //  -pitch  = lens BELOW the pivot, view angled UP     (the RDR2 sky look that
+  //            drops the boom to your heels)
+  //  The orbit IS the definition: `oy = sin(pitch)·dist`, and the view basis
+  //  built from it is `vY = -sin(pitch)`.
+  //
+  //  This is the OPPOSITE of `CBZ.fps.fp`, which is UP-positive (fpsmode's
+  //  `forward()` is `y: +sin(fp)`). The two conventions have been mixed for a
+  //  long time and every mix was a real bug:
+  //    · the three raw input writers (mouse here, touch.js applyLookDelta,
+  //      gamepad.js) subtracted the drag like fps.fp does → inverted TP look;
+  //    · fpsmode's leave-FP handoff copied fps.fp straight across → flipping
+  //      your view vertically the instant you pressed [V];
+  //    · city/view.js and city/cockpit_view.js feed cam.pitch to a three.js
+  //      Euler X (UP-positive) → inverted look in the driver's seat / cockpit;
+  //    · city/combat.js's aimVec used `y: sin(cam.pitch)` → thrown/aimed
+  //      trajectories went the opposite way in third person;
+  //    · entities/character.js posed the aiming arms off +cam.pitch.
+  //  All of those now convert explicitly and cite this note. If you add a
+  //  reader, convert here — do NOT add a second convention.
+  //  (fpsmode's recoil kick, its soft-lock, and touch.js's aim magnetism were
+  //  already correct: each carries its own "third-person cam.pitch is DOWN-
+  //  positive" comment and negates. They are the ones that got it right.)
   const cam = { yaw: 0, pitch: DEFAULT_PITCH, locked: false };
   CBZ.cam = cam;
 
@@ -563,7 +633,20 @@
     // scoped look is proportionally finer (systems/lockon.js real sniper scope)
     const sensMul = CBZ.fpsLookSensMul ? CBZ.fpsLookSensMul() : 1;
     cam.yaw -= e.movementX * SENS * sensMul;
-    cam.pitch -= e.movementY * SENS * sensMul;
+    // ---- SIGN (THE THIRD-PERSON LOOK INVERSION) --------------------------
+    // cam.pitch is DOWN-POSITIVE — see the convention note at its declaration.
+    // Dragging the mouse DOWN is movementY > 0 and must look DOWN, so it ADDS.
+    // This line SUBTRACTED, which is the first-person `fps.fp -= movementY`
+    // convention pasted onto the opposite convention: third-person vertical
+    // look has been inverted the whole time. It hid for years because the
+    // legacy look target was effectively pitch-BLIND (measured gain ~0.03 —
+    // see the CORRECTED note at the pure-orbit solve), so all you could see was
+    // the boom swinging the wrong way: the owner's "it changes the ANGLE, not
+    // the direction of looking". CAM_RDR2_ORBIT made the view pitch 1:1 with
+    // cam.pitch and turned that faint wrongness into a flat inversion.
+    // Horizontal was never wrong: both tiers share fwd = (-sin yaw, -cos yaw),
+    // so `yaw -= movementX` turns the view right in FP and TP alike.
+    cam.pitch += e.movementY * SENS * sensMul;
     // driving/flying: a deliberate mouse glance suspends the behind-the-vehicle
     // auto-recenter for a beat (CAM_VEHICLE_FREELOOK), so you can actually look
     // sideways at speed; it decays back to the chase ~0.8s after you stop.

@@ -119,6 +119,13 @@
   if (CFG.PREDATOR_KIT == null) CFG.PREDATOR_KIT = true;         // derived opts bundles
   if (CFG.PREDATOR_PACK == null) CFG.PREDATOR_PACK = true;       // one-committer packs
   if (CFG.PREDATOR_AMBUSH == null) CFG.PREDATOR_AMBUSH = true;   // lie-in-wait hunters
+  // §Q. STAGGER. A hunter that has just been rammed hard cannot commit for a
+  // beat — it wallows, it loses its facing, and something else gets a free
+  // pass at it. Written for city/marine_predation.js's orca pod (the whole
+  // point of a flank ram is that it takes the quarry's nose away), but it is
+  // the shared driver's concept, not the pod's: any caller with a blow heavy
+  // enough to interrupt a bout can spend it.
+  if (CFG.PREDATOR_STAGGER == null) CFG.PREDATOR_STAGGER = true;
   // panic tax: mashing break-free OUTSIDE its window feeds the thing holding
   // you. This is the ONE change in this wave that alters an existing shark
   // seize, so it gets its own revert.
@@ -2258,6 +2265,16 @@
   // ordinary land-attack pacing (the 0.9-1.15x rate re-arm after a swing) is
   // owner-tuned and deliberately untouched.
   function enterCommit(hunter, h, opts, stinger) {
+    // §Q. IT CANNOT COMMIT WHILE IT IS WALLOWING. The circle roll, the wheel
+    // and predatorCommit() all arrive here, so this is the one place the veto
+    // has to live. It does NOT spend the pass or the menace — the animal will
+    // try again the moment its head is straight, which is exactly the read a
+    // ram is supposed to produce.
+    if (staggered(hunter)) {
+      h.circleDur = circleTime(opts);
+      setState(hunter, h, "circle", opts);
+      return;
+    }
     h.dropped = false;
     h.commits++;
     h.stillT = 0; h.passes = 0; h.struck = false;
@@ -2395,6 +2412,41 @@
   }
   CBZ.predatorBreakOff = predatorBreakOff;
 
+  /* §Q. STAGGER — "that blow took the fight out of it for a second".
+
+     THE PROBLEM IT SOLVES, and it is the only thing predator.js could not
+     already express about a pack: predatorPack hands out bearings and one
+     commit token, which is most of what a coursing pack does. What it has no
+     word for is the pack member who is NOT committing landing a blow that
+     costs the quarry its NEXT action — and that single mechanic is why
+     numbers win a fight rather than merely arriving faster. Orcas ramming a
+     shark's flank so it cannot face the next one is the textbook case; a wolf
+     hamstringing an elk is the same idea on land.
+
+     Deliberately an ABSOLUTE EXPIRY on the actor rather than a countdown in a
+     list: nothing has to tick it, so a staggered animal that stops being
+     driven (LOD, a mode change, its hunter dying) cannot be left staggered
+     forever, and the whole feature costs one number and one comparison.
+
+     While it is live the hunter moves at STAGGER_SPD of its own speed and may
+     not enter a commit; a rush already in flight is spent immediately. It
+     never touches menace or the pass count — a stagger is a lost beat, not a
+     lost bout. */
+  const STAGGER_SPD = 0.34;        // fraction of its own speed while wallowing
+  const STAGGER_MAX = 6;           // s — no single blow may pin anything longer
+  function predatorStagger(actor, secs) {
+    if (!actor || CFG.PREDATOR_STAGGER === false) return false;
+    const t = nowS() + clamp(+secs || 0, 0.1, STAGGER_MAX);
+    if (!(actor._staggerUntil > t)) actor._staggerUntil = t;
+    return true;
+  }
+  CBZ.predatorStagger = predatorStagger;
+  function staggered(actor) {
+    if (CFG.PREDATOR_STAGGER === false) return false;
+    return !!(actor && actor._staggerUntil > nowS());
+  }
+  CBZ.predatorStaggered = staggered;
+
   // §N. HOW FAST THE THING BEING HUNTED CAN RUN. Read live from the player's own
   // movement constants so a movement tune can never leave the bestiary behind;
   // the literal is a fallback for a build where physics.js has not published
@@ -2468,8 +2520,13 @@
     const chumR = opts.chumR != null ? opts.chumR : D_CHUM_R;
     const circleR = opts.circleR != null ? opts.circleR : D_CIRCLE_R;
     const orbitR = opts.orbitR != null ? opts.orbitR : D_ORBIT_R;
-    const cruiseSpd = opts.cruiseSpeed != null ? opts.cruiseSpeed : D_CRUISE_SPD;
-    const rushSpd = opts.rushSpeed != null ? opts.rushSpeed : D_RUSH_SPD;
+    // §Q. A STAGGERED HUNTER WALLOWS. Both speeds are cut at source rather
+    // than at the nine move() sites, so every state — the circle, the bump,
+    // the rush, the withdrawal — inherits it from one expression.
+    const stag = staggered(hunter);
+    const spdK = stag ? STAGGER_SPD : 1;
+    const cruiseSpd = (opts.cruiseSpeed != null ? opts.cruiseSpeed : D_CRUISE_SPD) * spdK;
+    const rushSpd = (opts.rushSpeed != null ? opts.rushSpeed : D_RUSH_SPD) * spdK;
     const medium = opts.medium || predatorMedium(hp.x, hp.y != null ? hp.y : 0, hp.z);
     const reach = opts.reach != null ? opts.reach : (1.6 + actorScale(hunter) + actorScale(target));
     const move = typeof opts.move === "function" ? opts.move : defaultMove;
@@ -2732,6 +2789,10 @@
         dreadFor(hunter, 0.9 + clamp(1 - dist / Math.max(1, circleR), 0, 1) * 0.1,
           dreadOptsFor(hunter, dist, sub));
         if (!reachable) { endCommit(hunter, h, opts, false); break; }
+        // §Q. A charge that gets hit in the flank does not arrive. Ending the
+        // commit here (rather than letting it grind out RUSH_TIMEOUT at a
+        // third speed) is what makes a ram read as an interruption.
+        if (stag) { endCommit(hunter, h, opts, false); break; }
         // §P. THE FOLLOW-THROUGH, and it is a bug fix before it is a feature.
         // `h.struck` is set from INSIDE creature_combat's strike callback — i.e.
         // at p ~= 0.45 of a 0.4 s animation — and the old code left the rush on

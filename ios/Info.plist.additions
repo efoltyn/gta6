@@ -1,0 +1,59 @@
+<!--
+  ios/Info.plist.additions — the keys to merge into App/App/Info.plist after
+  `npx cap add ios` generates it. Capacitor's template gets the app running;
+  these are the ones that decide how the game FEELS and whether the upload is
+  accepted.
+
+  Merge them by hand (or with tools/patch-ios-plist.mjs, which does exactly
+  this and is idempotent). Every key below has a reason.
+-->
+
+<!-- LANDSCAPE, BOTH WAYS, AND NOTHING ELSE. This is a third-person 3D game with
+     a virtual stick in the bottom-left and the camera on the right thumb; in
+     portrait the stick and the look area overlap and the horizon sits in the
+     middle of the screen. iPhone honours the first entry as the launch
+     orientation. -->
+<key>UISupportedInterfaceOrientations</key>
+<array>
+  <string>UIInterfaceOrientationLandscapeRight</string>
+  <string>UIInterfaceOrientationLandscapeLeft</string>
+</array>
+<key>UISupportedInterfaceOrientations~ipad</key>
+<array>
+  <string>UIInterfaceOrientationLandscapeRight</string>
+  <string>UIInterfaceOrientationLandscapeLeft</string>
+  <string>UIInterfaceOrientationPortrait</string>
+  <string>UIInterfaceOrientationPortraitUpsideDown</string>
+</array>
+
+<!-- FULL SCREEN. No status bar over the HUD, and the home indicator dims and
+     gets out of the way instead of sitting on the sprint button. -->
+<key>UIStatusBarHidden</key>
+<true/>
+<key>UIViewControllerBasedStatusBarAppearance</key>
+<false/>
+<key>UIRequiresFullScreen</key>
+<true/>
+
+<!-- The game runs its own audio through WebAudio and nothing else; declaring no
+     background modes is deliberate. Silent-switch behaviour is Capacitor's
+     default (respect the switch), which is right for a game with no music the
+     player chose. -->
+
+<!-- ENCRYPTION. No cryptography beyond what iOS itself provides, so the export
+     compliance question is answered once here instead of on every upload. -->
+<key>ITSAppUsesNonExemptEncryption</key>
+<false/>
+
+<!-- NO NETWORK AT ALL. The app is fully offline: every asset ships in the
+     bundle (that is what tools/build-ios.mjs guarantees, and why the Draco
+     decoder and the UI font were vendored). Leaving ATS at its strict default
+     with no exception dictionary is the honest declaration of that. -->
+
+<!-- Metal/WebGL wants a real GPU; this keeps the app off devices that cannot
+     run it rather than shipping them a black screen. -->
+<key>UIRequiredDeviceCapabilities</key>
+<array>
+  <string>arm64</string>
+  <string>metal</string>
+</array>

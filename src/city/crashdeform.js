@@ -648,7 +648,15 @@
     if (dead || !car || car.dead || !car.group || !point || !dir) return;
     const grp = car.group;
     const style = grp.userData && grp.userData.carStyle;
-    if (style && /motorcycle|helicopter|boat/.test(style)) return;   // open frames / rotors / rider — caving reads wrong
+    // OPEN FRAMES / ROTORS / RIDER — caving reads wrong on those, which is
+    // why boats were excluded here. `opts.hull` is the ONE declared exception:
+    // a caller saying "this is a structural bite through the hull, not a
+    // fender-bender" — city/marine_predation.js's megalodon closing its jaws
+    // across a speedboat's beam, where a crushed trough at the bite line IS
+    // the read the exclusion was protecting against elsewhere. Nothing that
+    // does not ask for it changes.
+    if (style && /motorcycle|helicopter/.test(style)) return;
+    if (style && /boat/.test(style) && !(opts && opts.hull)) return;
     energy = Math.max(0, Math.min(40, energy || 0));
     if (energy < 1.2) return;
     if (!ensureScratch()) return;

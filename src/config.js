@@ -78,6 +78,29 @@
     watcherDirectorT: 0,     // cooldown for NPCs deciding to tail/watch the player
   };
 
+  /* ---- WHICH GAME THIS PAGE IS -------------------------------------------
+     index.html is the whole release and opens on the city. disaster.html is
+     ONE game — Natural Disaster Survival, the build that goes to the App
+     Store — and it opens on the island, because a page that boots into the
+     city has already paid for a world nobody asked for.
+
+     Two doors, and nothing downstream needs to know there are two entry
+     points: a page declares it before this file loads
+
+         <script>window.CBZ = { START_MODE: "survival" };</script>
+
+     or a URL asks for it (?mode=survival). systems/state.js already starts
+     with `setMode(g.mode || "escape")`, so this is the whole mechanism. An
+     unknown value is ignored rather than guessed at. */
+  const MODES = { city: 1, escape: 1, survival: 1, gungame: 1 };
+  let startMode = CBZ.START_MODE;
+  try {
+    const q = typeof location !== "undefined" && location.search
+      && new URLSearchParams(location.search).get("mode");
+    if (q) startMode = q;
+  } catch (e) {}
+  if (startMode && MODES[startMode]) CBZ.game.mode = startMode;
+
   // ---- colour palette (Roblox-bright, beveled feel) ----
   CBZ.COL = {
     WALL: 0x9aa3ad,

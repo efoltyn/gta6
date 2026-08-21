@@ -112,6 +112,13 @@
     return p < STRIKE_AT ? ease(p / STRIKE_AT) : ease(1 - (p - STRIKE_AT) / (1 - STRIKE_AT));
   }
   function windup(p) { return p < STRIKE_AT ? ease(p / STRIKE_AT) : 0; }
+  // THE SHARED BITE CURVE (creature_combat.js owns it, SHARK-REFERENCE §6):
+  // fast open, a held beat through contact, then a snap shut far faster than
+  // the opening. Every mouth-led attack maw below rides this instead of the
+  // symmetric envelope, so a wolf's bite and a cat's pounce-bite snap exactly
+  // like the shark's — one grammar, no per-species curves. Fallback keeps the
+  // old envelope if creature_combat is absent.
+  function bite(p) { return CBZ.biteCurve ? clamp01(CBZ.biteCurve(p)) : clamp01(env(p) * 1.5); }
 
   // ---- the two write disciplines ------------------------------------------
   function rd(v, ax) { return ax === AX ? v.x : (ax === AY ? v.y : v.z); }
@@ -666,7 +673,7 @@
         if (p < STRIKE_AT) { t = windup(p); crouch = t; maw = 0.2 * t; }
         else {
           t = ease(Math.min(1, ((p - STRIKE_AT) / (1 - STRIKE_AT)) * 1.6));
-          ext = t; crouch = 0; maw = clamp01(env(p) * 1.4);
+          ext = t; crouch = 0; maw = bite(p);
         }
         break;
 
@@ -783,7 +790,7 @@
       // BITE — the canines. Harder and shorter than the generic biter's gape:
       // this mouth is a finisher.
       case 'ape_bite':
-        maw = clamp01(env(p) * 1.75);
+        maw = bite(p);
         dip = 0.35 * env(p);
         break;
 
@@ -797,11 +804,12 @@
         maw = 0.45 * t;
         break;
 
-      // ---- ATTACK: bite (and anything unknown) — the mouth opens on the strike
-      //      envelope and shuts on the far side. This is the line that finally
-      //      gives every generic biter in the game a moving jaw.
+      // ---- ATTACK: bite (and anything unknown) — the mouth rides the shared
+      //      asymmetric bite curve: open fast, hold through contact, SNAP shut.
+      //      This is the line that gives every generic biter in the game a
+      //      moving jaw that closes like a bite instead of a symmetric hinge.
       default:
-        maw = clamp01(env(p) * 1.5);
+        maw = bite(p);
         break;
     }
 

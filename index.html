@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
 <title>Gang Life</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23111923'/%3E%3Cpath d='M12 48V28h12v20zm16 0V12h24v36z' fill='%23ffd451'/%3E%3C/svg%3E">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet">
+<!-- The UI typeface is BUNDLED (css/fonts.css) — no CDN on the critical path,
+     and the game looks the same with no network at all. -->
+<link rel="stylesheet" href="css/fonts.css">
 
 <!-- styles, split by concern -->
 <link rel="stylesheet" href="css/base.css">
@@ -811,6 +811,24 @@
      shows it, and before the city modules that call CBZ.bootStep(). -->
 <script src="src/systems/bootprogress.js?v=meter1"></script>
 <script src="src/systems/state.js?v=nodash1"></script>
+<!-- AN APP GETS INTERRUPTED AND A TAB DOES NOT. WKWebView drops the WebGL
+     context under memory pressure and hands it back later; three.js rebuilds
+     its own GL resources, but nothing told the GAME, so a hundred survivors
+     and eleven disasters kept running behind a black screen and the player came
+     back to a death they never saw. Pauses the match on context loss and on
+     losing the foreground, resumes the audio graph on the way back in, and asks
+     for the context back if it has not returned. AFTER state.js (it pauses
+     through CBZ.setState, so there is exactly one kind of paused).
+     ?cfg_GL_CONTEXT_GUARD=0 reverts. -->
+<script src="src/systems/glcontext.js?v=glguard1"></script>
+<!-- THE SIM ADVANCES IN WHOLE TICKS (survival only, by default). core/loop.js
+     measures TIME, which is right for one player and is the reason two machines
+     can never run the same match — a phone at 47 fps and a laptop at 60 take
+     different steps through the same second and drift apart from an identical
+     seed. This turns the frame delta into whole 1/60 ticks. MUST load before
+     core/loop.js, which reads CBZ.fixedStep every frame. ?cfg_FIXED_STEP_V1=0
+     puts survival back on the variable step, live. -->
+<script src="src/systems/fixedstep.js?v=fixed1"></script>
 <script src="src/systems/save.js"></script>
 <script src="src/systems/runstats.js"></script>
 <script src="src/systems/touch.js?v=onecall1"></script>
@@ -861,6 +879,14 @@
 <script src="src/systems/disasters.js?v=nodash1"></script>
 <script src="src/systems/survival_interact.js?v=climbdock1"></script>
 <script src="src/systems/survivalhud.js?v=nozone1"></script>
+<!-- THE SEAM A TRANSPORT PLUGS INTO. Not multiplayer — the three things that
+     have to be true before a transport is worth writing: every actor carries a
+     stable id, the whole match serialises to one ArrayBuffer and back
+     (2.5 KB at 100 bots), and there is one fingerprint two clients can compare.
+     tools/determinism-check.mjs is what compares it. AFTER survival.js and
+     systems/disasters.js — it reads their public surfaces and publishes
+     nothing they need. ?cfg_SURVNET_V1=0 makes it inert. -->
+<script src="src/net/survnet.js?v=survnet1"></script>
 <!-- GUN GAME ladder HUD (mode-gated; shares #survBars with survival) -->
 <script src="src/systems/gungamehud.js?v=nodash1"></script>
 
@@ -1063,8 +1089,13 @@
 <script src="src/city/wildlife/snow_ungulates.js?v=attach1"></script>
 <script src="src/city/wildlife/small_game.js?v=attach1"></script>
 <script src="src/city/wildlife/snakes.js?v=wild1"></script>
-<script src="src/city/wildlife/aquatic.js?v=sharkface1"></script>
-<script src="src/city/wildlife.js?v=nodash1"></script>
+<script src="src/city/wildlife/aquatic.js?v=finblade1"></script>
+<!-- EVERY ANIMAL IS AN INDIVIDUAL: the per-individual size draw and the
+     hunger scalar wildlife.js spends. Must load BEFORE the engine (it
+     binds CBZ.wildlifeTraits once, at load); absent, the engine falls
+     straight back to the species constant. -->
+<script src="src/city/wildlife_traits.js?v=indiv1"></script>
+<script src="src/city/wildlife.js?v=indiv1"></script>
 <script src="src/city/wildlife_tame.js?v=nodash1"></script>
 <script src="src/city/dogs.js?v=nodash1"></script>
 <!-- 4d-5. FIGHTING — shared creature-combat (animal fight anims), trait-driven
@@ -1550,6 +1581,40 @@
 <!-- The shark is thin on purpose: numbers, fin/wake proxy, locomotion. After
      predator.js AND wildlife.js so both seams exist. -->
 <script src="src/city/wildlife_shark.js?v=marinefix1"></script>
+<!-- THE ORCA. Re-registers id:"orca" over city/wildlife/aquatic.js's build
+     (defineSpecies is last-write-wins) so the markings that actually identify
+     the animal exist: the white post-ocular eye patch, the grey saddle, the
+     flank flare, the white chin and fluke undersides, a blowhole that VENTS,
+     and a dorsal fin that is a bull's tower or a cow's falcate blade depending
+     on the individual. Adds pod TRAVEL (formation, matriarch, calf in the
+     slipstream), the surface acts no shark can do (blow, spy-hop, breach,
+     tail-lob, porpoising), the grab-and-drag, and a black-and-white surface
+     proxy. AFTER wildlife_shark.js: it borrows that file's ONE water mover and
+     capture-and-wraps CBZ.sharkBrain, and marine_predation.js wraps it in turn
+     one tag later — so the chain is marine -> orca -> shark. The megalodon
+     takedown is CONSUMED from marine_predation, not re-implemented.
+     Reverts whole with CBZ.CONFIG.ORCA_V1 / ORCA_POD / ORCA_SURFACE /
+     ORCA_ACTS / ORCA_DRAG / ORCA_HUNT. -->
+<script src="src/city/wildlife_orca.js?v=orca1"></script>
+<!-- THE SEA EATS ITSELF: the marine predation graph (who preys on whom, who
+     MOBS whom), the orca pod's bearings/ram/roll-over finisher, a big shark
+     taking a small boat, and the chum producers that had never existed — a
+     wounded or dead thing in the water finally bleeds and finally draws
+     something. AFTER wildlife_shark.js because it capture-and-wraps
+     CBZ.sharkBrain (a marine hunt gets first refusal on an actor and anything
+     it declines falls through to the shark's own player hunt), and after
+     predator.js + creature_combat.js whose drivers it ticks rather than
+     duplicating. Reverts whole with CBZ.CONFIG.MARINE_PREDATION = false. -->
+<script src="src/city/marine_predation.js?v=marinepred1"></script>
+<!-- WHAT A KILL LOOKS LIKE FROM A MILE AWAY: the bait ball that tightens, is
+     driven up against the surface and collapses as it is eaten; the gulls
+     working it (the only part of a marine kill visible ABOVE the water, and
+     therefore the long-range read that makes you turn the boat); the surface
+     boil; and a carcass drawing a crowd of scavengers — ticked by the same
+     CBZ.predatorHunt as every other hunter, never a private loop. AFTER
+     marine_predation.js, whose chum producer and damage bus it spends.
+     Reverts whole with CBZ.CONFIG.MARINE_FRENZY = false. -->
+<script src="src/city/marine_frenzy.js?v=marinefrenzy1"></script>
 <!-- CHILDREN ARE NOT TARGETS. Wraps the shared damage/kill/KO/crowd-kill/gore/
      lock-on/predator buses and seals child hp against the ~32 raw `.hp -=`
      sites that bypass every bus. Hooks are lazily retried for 10s, so exact

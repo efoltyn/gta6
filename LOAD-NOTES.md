@@ -276,3 +276,62 @@ Two things the instrument found on the way:
 
 Reverts: `?cfg_BOOT_METER=0` (no meter), `?cfg_CITY_BOOT_SCREEN=0` (no card at
 all — the buttons call `startRun()` raw, exactly like a tool does).
+
+---
+
+## The App Store build (2026-08-21) — one game, one file, no network
+
+The question this file has always asked is "why is the city slow". The answer
+for the DISASTER game turned out to be different in kind: it is not slow, it is
+**paying for five games it does not run**. `index.html` is the whole release —
+the prison, the city, the campaign, the casino, the aircraft, the elections —
+and Natural Disaster Survival was loading all 553 tags and 25 MB of it before it
+could draw an island.
+
+So the App Store build takes a different door. Same source, three tools:
+
+| | web (`index.html`) | app (`dist-ios/www`) |
+|---|---|---|
+| games on the page | six | **one** |
+| script tags | 553 | **1** (`bundle.js`) |
+| JS shipped | 25.0 MB | **5.5 MB** (minified from 14.8) |
+| first world built | the city | **the island** |
+| network at runtime | Google Fonts + a CDN Draco decoder | **none at all** |
+| total payload | — | 24.9 MB |
+
+- **`tools/build-disaster-page.mjs`** writes `disaster.html` from `index.html`:
+  drop the scripts in the manifest, declare the start mode (`src/config.js`
+  reads `START_MODE`, so the page opens on the island and never stands up the
+  city), retitle, cut the MORE GAMES strip. Generated rather than hand-written
+  so the HUD markup and boot order keep one source of truth; `--check` fails
+  when it is stale.
+- **`tools/disaster-minimize.mjs`** produced the manifest by MEASUREMENT —
+  delta debugging by bytes, dropping groups and asking
+  `tools/disaster-check.mjs` whether the game still boots, still runs all
+  eleven disasters, and still has every named system on `CBZ`. Two things that
+  search taught us are worth more than the megabytes: an oracle that clears its
+  error log before asserting will happily drop a file that throws at load, and
+  an oracle that only drives `CBZ.stepSim` will happily drop `core/renderer.js`,
+  because the headless update path never draws. Both are asserted now.
+- **`tools/build-ios.mjs`** concatenates the kept scripts in page order into one
+  `bundle.js`. Two things concatenation breaks, both handled: files that resolve
+  a path from `document.currentScript` (a stand-in is set per block) and the
+  failure isolation of a script tag (each block is wrapped, and a block that
+  throws is reported through `window.__cbzBundleFailed`, which the oracle
+  asserts is empty).
+
+**The web deploy is untouched.** Pushing to main is still the deploy, `index.html`
+still has no build step, and every tool in `tools/` still points at it. The app
+is a separate artifact that is compiled and signed anyway.
+
+**The island now reports its own progress.** Every `CBZ.bootStep` checkpoint in
+the repo was written for the city, so PLAY on the disaster game froze behind a
+one-segment bar. `world/disaster_arena.js` has six now (ground, mountains,
+towers, streets, trees, rocks) and the meter learns their real cost on the
+player's own device.
+
+Re-measure any of it:
+
+    npm run build:ios && npm run check:ios     # build the bundle, then boot it
+    node tools/disaster-check.mjs --url disaster.html
+    node tools/disaster-minimize.mjs --verify

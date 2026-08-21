@@ -2,11 +2,18 @@
   "name": "cell-block-z",
   "private": true,
   "version": "0.1.0",
-  "description": "Vite dev/build harness for the legacy IIFE game (O1 — MASTER-PLAN Part II OSS/Vite bridge). Legacy game files are untouched and keep working with a dumb static server; `npm run dev`/`npm run build` add a parallel module world via src/bootstrap.js.",
+  "description": "Vite dev/build harness for the legacy IIFE game (O1 \u2014 MASTER-PLAN Part II OSS/Vite bridge). Legacy game files are untouched and keep working with a dumb static server; `npm run dev`/`npm run build` add a parallel module world via src/bootstrap.js.",
   "engines": {
     "node": ">=22"
   },
   "scripts": {
+    "build:disaster": "node tools/build-disaster-page.mjs",
+    "build:ios": "node tools/build-ios.mjs",
+    "check:disaster": "node tools/disaster-check.mjs --url disaster.html",
+    "check:ios": "node tools/build-ios.mjs && node tools/disaster-check.mjs --url dist-ios/www/index.html --fast",
+    "check:determinism": "node tools/determinism-check.mjs --url disaster.html",
+    "art:ios": "node tools/make-app-art.mjs",
+    "setup:ios": "node tools/setup-ios.mjs",
     "test:buttons": "node tools/button-gate.mjs",
     "test:traversal": "node tools/test-character-traversal.mjs",
     "test:traversal-browser": "node tools/test-character-traversal-browser.mjs",
@@ -49,6 +56,7 @@
     "test:prison-jitter-revert": "node tools/prison-jitter-check.mjs --revert",
     "test:prison-sit-revert": "node tools/prison-sit-check.mjs --revert",
     "test:bailout-presentation": "node tools/test-bailout-presentation-browser.mjs",
+    "test:boot-health": "node tools/boot-health.mjs",
     "ba": "node tools/before-after.mjs",
     "visual:beach": "node tools/before-after.mjs beach-shores",
     "visual:beast-deaths": "node tools/before-after.mjs beast-deaths",
@@ -87,9 +95,15 @@
     "visual:prison-wing-props": "node tools/visual-compare.mjs --preset prison-wing-props --keep-going --before https://efoltyn.github.io/gta6/",
     "visual:prison-yard-props": "node tools/visual-compare.mjs --preset prison-yard-props --keep-going --before https://efoltyn.github.io/gta6/",
     "test:tactics": "node tools/tactics-check.mjs",
+    "test:camera-look": "node tools/camera-look-check.mjs",
+    "visual:camera-look": "node tools/camera-look-shots.mjs && python3 tools/camera-look-report.py",
     "visual:npc-tactics": "node tools/visual-compare.mjs --preset npc-tactics --subjects cops-standoff,firefight,stop-profile,hide-break --no-open"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.0",
+    "@capacitor/core": "^8.5.0",
+    "@capacitor/ios": "^8.5.0",
+    "esbuild": "^0.28.2",
     "three": "^0.164.1",
     "vite": "^5.4.0"
   }
