@@ -143,3 +143,41 @@ a beat at full extension, then the jaws SNAP shut hard and fast — the closing
 is much quicker than the opening — and the head shakes on contact. Equal-speed
 open and close reads as a puppet's mouth. Asymmetric timing is most of what
 makes it read as a bite.
+
+---
+
+## 7. THE MOUTH IS THE BODY SPLITTING, NOT A CLAMP (owner, 2026-08-21)
+
+Owner, with an open-mouthed orca photograph on the table: the shark's mouth
+"is a clamp detached from the shape of the shark … the orca is a great one
+where it's really animating the shape … we just need those black white parts
+to separate like this image and make a real mouth." And: **no tongue** — "the
+tongue for sharks was dumb af."
+
+Read the orca photograph: nothing is bolted on. The HEAD ITSELF is in two
+halves — the black upper half (snout, eye, melon) rotated up, the white lower
+half (chin, throat) dropped down — and both halves are continuations of the
+body's own mass, teeth rimming each, a dark hole between them. The
+countershading boundary IS the mouth line.
+
+So the law, as implemented in `src/city/wildlife/aquatic.js`
+(`SHARK_MOUTH_SPLIT`, revert with `?sharkmouth=off`):
+
+- **The lower jaw IS the body.** `sharkChin` is a hull-shaped wedge cut from
+  the species' own rings — same belly line, same beam less a crease — hinged
+  at the jaw corner inside the `sharkLowerJaw` group. When the mouth opens,
+  the white underside of the head is what drops.
+- **Nothing static stays closed behind the jaw.** The hull and the rostrum
+  are NOTCHED along the mouth seam (`mouthSeamY`): every vertex that used to
+  form a chin that never moved is lifted onto the seam and painted
+  mouth-interior dark. Open the jaw and you see the dark roof of the mouth,
+  not a second chin.
+- **The upper half visibly rotates.** Snout lift is 0.30 rad at full gape
+  (§1's protrusion is unchanged on top of it), and the upper gum band runs
+  TALL up under the rostrum so the slid-out tooth row connects to the lifted
+  snout instead of floating with daylight behind it.
+- **Verified by** `node tools/before-after.mjs shark-bites` — a self A/B
+  against `?sharkmouth=off`. Its `staticVsJawM` metric is the owner's
+  complaint as a number: static underside minus moving-jaw underside at rest.
+  Negative = a closed chin the bite cannot move (the clamp shipped at ‑0.07
+  to ‑0.11); the split mouth scores +0.2 to +1.1.

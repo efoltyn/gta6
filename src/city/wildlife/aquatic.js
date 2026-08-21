@@ -28,8 +28,12 @@
        addSharkMouth() ONE mouth. Swept gum/lip bands (not boxes), three tooth
                    rows merged into one mesh per jaw, a cavity that is a HOLE
                    — an inside-out banded ellipsoid receding maroon-to-black
-                   (§6), never a convex pink mass — and an upper jaw that
-                   SLIDES FORWARD AND DOWN while the rostrum lifts off it.
+                   (§6), never a convex pink mass — an upper jaw that SLIDES
+                   FORWARD AND DOWN while the rostrum lifts off it, and (§7)
+                   a lower jaw that IS the body: a chin cut from the species'
+                   own rings, dropping out of a hull notched along the seam,
+                   so a bite splits the head into its dark and white halves
+                   instead of swinging a clamp under a closed one.
 
      BUDGET. Everything is built through a module-scope geometry cache keyed on
      its own parameters, so a pack of three great whites — or a sixty-fish
@@ -77,6 +81,36 @@
     let g = GEOM.get(key);
     if (!g) { g = make(); g._shared = true; GEOM.set(key, g); }
     return g;
+  }
+
+  /* ---- THE SPLIT-BODY MOUTH SWITCH ---------------------------------------
+     Owner, with the orca photograph on the table (2026-08-21): the shark's
+     mouth "is a clamp detached from the shape of the shark". The orca is the
+     brief — when its mouth opens, the HEAD ITSELF splits: the black upper
+     half lifts, the white lower half drops, and both halves are continuations
+     of the body's own mass. So the sharks now open the same way: the lower
+     jaw is a hull-shaped white CHIN cut from the species' own body rings, and
+     the static hull is NOTCHED along the mouth seam so nothing stays closed
+     behind the dropped jaw. ?sharkmouth=off (or CBZ.CONFIG.SHARK_MOUTH_SPLIT
+     = false) reverts to the old band-clamp mouth — that is what the
+     before/after preset's BEFORE column renders. */
+  function mouthSplitOn() {
+    if (typeof location !== "undefined" && location.search &&
+        /(^|[?&])sharkmouth=off(&|$)/.test(location.search)) return false;
+    return !(CBZ.CONFIG && CBZ.CONFIG.SHARK_MOUTH_SPLIT === false);
+  }
+  /* The SEAM — the closed-mouth line on the side of the head, y as a function
+     of x. It follows the gum arc: level at the front lip, rising toward the
+     jaw corner exactly like addSharkMouth's riseAt, so the hull notch, the
+     rostrum notch and the chin rim all land on the same line and the closed
+     head stays sealed. mo is the same options object addSharkMouth takes. */
+  function mouthSeamY(mo, x) {
+    const len = mo.length, A = mo.arcSpan == null ? Math.PI * 0.49 : mo.arcSpan;
+    const rise0 = mo.cornerRise == null ? mo.gap * 0.42 : mo.cornerRise;
+    const cx = len * 0.18, rad = len * 0.82;
+    const ca = clamp((x - mo.hingeX - cx) / rad, -1, 1);
+    const a = Math.min(A, Math.acos(ca));
+    return mo.hingeY - mo.gap * 0.27 + rise0 * Math.pow(a / (A || 1), 1.7);
   }
 
   /* ---- indexed shell builder -------------------------------------------
@@ -366,16 +400,53 @@
         ? function (i, u) { return sample(cutRaw, n > 1 ? i / (n - 1) : 0); }
         : function () { return cutRaw; });
     const paint = o.paint || null;
+    /* THE MOUTH NOTCH (split-body mouth). o.mouth carries the addSharkMouth
+       options (plus optional xOff/yOff for a shell built in a pivot-local
+       frame, and `lift` metres above the seam). Any vertex forward of the jaw
+       corner that would fall BELOW the seam line is raised onto it — so the
+       hull simply has no chin of its own in the mouth region. The raised
+       floor tucks inward in proportion to how far the vertex travelled, which
+       keeps the cheek wall flush above the seam while the palate hides inside
+       the dropping chin. Faces that got cut are painted with the interior
+       material (slot 2): when the jaws open, what you see up there is the
+       dark roof of the mouth, not a second, static chin. */
+    const mo = o.mouth || null;
+    const moX = mo ? (mo.xOff || 0) : 0, moY = mo ? (mo.yOff || 0) : 0;
+    const moLift = mo ? (mo.lift || 0) : 0;
+    const moFrom = mo ? mo.hingeX + mo.length * 0.05 - moX : 0;
+    const notched = mo ? [] : null;
     const sh = new Shell(), id = [];
     for (let i = 0; i < n; i++) {
-      const r = rings[i], row = [];
+      const r = rings[i], row = [], cutRow = [];
+      let roof = -1e9;
+      if (mo && r.x > moFrom) roof = mouthSeamY(mo, r.x + moX) + moLift - moY;
       for (let j = 0; j < sides; j++) {
         const a = (j / sides) * Math.PI * 2;
-        row.push(sh.v(r.x, r.y + Math.sin(a) * r.ry, Math.cos(a) * r.rz));
+        let y = r.y + Math.sin(a) * r.ry, z = Math.cos(a) * r.rz;
+        const cut = y < roof;
+        if (cut) {
+          const deep = Math.min(1, (roof - y) / Math.max(0.05, r.ry));
+          y = roof;
+          z *= 1 - 0.30 * deep;
+        }
+        cutRow.push(cut);
+        row.push(sh.v(r.x, y, z));
       }
       id.push(row);
+      if (notched) notched.push(cutRow);
     }
     function bucket(i, j) {
+      const nj = (j + 1) % sides;
+      if (notched) {
+        // interior-dark only when the quad lies fully inside the notch. The
+        // half-in transition quads (an intact ring on one side, a clamped one
+        // on the other) keep their skin paint: they are the tissue fold at
+        // the jaw corner, they slope INTO the mouth, and painting them dark
+        // put maroon patches on the outside of a closed head.
+        const r0 = notched[i], r1 = notched[i + 1];
+        const in0 = r0 && (r0[j] || r0[nj]), in1 = r1 && (r1[j] || r1[nj]);
+        if (r0 && r1 ? (in0 && in1) : (in0 || in1)) return 2;
+      }
       const a0 = (j / sides) * Math.PI * 2, a1 = ((j + 1) / sides) * Math.PI * 2;
       const s = (Math.sin(a0) + Math.sin(a1)) * 0.5;
       // ragged: a per-column offset (a wandering line down the flank) plus a
@@ -411,12 +482,13 @@
     o = o || {};
     const shape = {
       rings: rings, sides: o.sides, bellyCut: o.bellyCut, ragged: o.ragged, seed: o.seed,
+      mouth: o.mouth || 0,
     };
     const key = "hull|" + JSON.stringify(shape) + "|" + (o.paintKey || "");
     const geo = cachedGeom(key, function () {
       return hullShell({
         rings: rings, sides: o.sides, bellyCut: o.bellyCut, ragged: o.ragged,
-        seed: o.seed, paint: o.paint,
+        seed: o.seed, paint: o.paint, mouth: o.mouth,
       });
     });
     return meshOf(geo, mats);
@@ -448,8 +520,13 @@
   function addSharkHull(g, o) {
     const rings = o.rings || [];
     if (rings.length < 2) return null;
-    const hull = hullMesh([o.top, o.belly || o.top], rings, {
+    // the split-body mouth notches the hull along the seam; the third material
+    // is the mouth-interior dark those cut faces take. Flag off -> the old
+    // closed hull, byte-identical.
+    const mo = (o.mouth && mouthSplitOn()) ? o.mouth : null;
+    const hull = hullMesh([o.top, o.belly || o.top, o.interior || o.top], rings, {
       sides: o.sides, bellyCut: o.bellyCut, ragged: o.ragged, seed: o.seed,
+      mouth: mo,
     });
     hull.name = "sharkHull";
     g.add(hull);
@@ -845,13 +922,20 @@
         // row; built at the lower jaw's cross-section it read as a rigid grey
         // roll bar across the mouth and, head-on at full rake, as a helmet
         // over the snout. So the upper jaw takes a much slimmer section:
-        // shallower rails and under half the lip height.
+        // shallower rails and under half the lip height — downward. UPWARD,
+        // in the split-body mouth, the outer face reaches tall: that is the
+        // pale membrane connecting the slid-out tooth row to the lifted
+        // snout, and it is what stopped the upper jaw reading as a floating
+        // denture ring with daylight behind it. At rest the tall part lives
+        // inside the rostrum shell, invisible.
+        const split = mouthSplitOn();
         const kIn = up ? 0.75 : 1, kOut = up ? 0.50 : 1;
-        const kGum = up ? 0.80 : 1, kLip = up ? 0.21 : 0.45;
+        const kGum = up ? 0.80 : 1, kLipDn = up ? 0.21 : 0.45;
+        const kLipUp = up ? (split ? 1.05 : 0.21) : 0.45;
         rows.push({
           a: a,
           c: [corner(-railIn * kIn, gumH * 0.5 * kGum), corner(-railIn * kIn, -gumH * 0.5 * kGum),
-            corner(railOut * kOut, -lipH * kLip), corner(railOut * kOut, lipH * kLip)],
+            corner(railOut * kOut, -lipH * kLipDn), corner(railOut * kOut, lipH * kLipUp)],
         });
       }
       // face 0 inner, 1 bottom, 2 outer, 3 top.  The mouth-facing pair is the
@@ -872,7 +956,8 @@
       return sh.geom();
     }
     function band(y, up, name, parent) {
-      const key = "jawband2|" + [y, up, gumH, lipH, railIn, railOut, len, width, A, cornerRise].join(",");
+      const key = "jawband3|" + mouthSplitOn() + "|" +
+        [y, up, gumH, lipH, railIn, railOut, len, width, A, cornerRise].join(",");
       const geo = cachedGeom(key, function () { return bandGeom(y, up, 14); });
       // both jaws' world-facing faces are the PALE jaw skin: in the
       // photographs the protruded upper jaw is whitish-pink, and painting it
@@ -961,10 +1046,103 @@
 
     band(upperY, true, "sharkUpperGum", upper);
     band(lowerY, false, "sharkLowerGum", lower);
-    // the mandible: a slim seat under the lower gum. The hull is the chin — a
-    // thick slab here is what used to read as a bolted-on box of dentures.
+
+    /* THE CHIN — the orca move, and the whole point of the split-body mouth.
+       The lower jaw used to be an arc of bands and a slab: a clamp, hanging
+       under a hull whose own white underside NEVER MOVED, so a bite read as
+       dentures swinging below a closed head. This is the body's actual front
+       underside, rebuilt from the species' own rings — the belly line is the
+       hull's belly line, the beam is the hull's beam pulled in a whisker so
+       the jaw seam reads as a crease — and parented at the hinge. When the
+       jaw drops, the white half of the head is what drops, and the notched
+       hull above shows the dark mouth roof: the black-over-white separation
+       of the reference photograph. The deck along its top is recessed and
+       painted interior-dark; the gum band and tooth row stand proud of it. */
+    function chinMesh() {
+      const rings = o.rings;
+      const key = "sharkchin|" + [hingeX, hingeY, len, width, gap, cornerRise, A].join(",") +
+        "|" + JSON.stringify(rings);
+      const geo = cachedGeom(key, function () {
+        const sh = new Shell();
+        const N = 10, ARCP = 9;
+        const xB = -len * 0.30, xF = len * 1.04;
+        const lastX = rings[rings.length - 1].x;
+        const deckDrop = gap * 0.12;
+        const st = [];
+        for (let i = 0; i < N; i++) {
+          const t = i / (N - 1);
+          const lx = lerp(xB, xF, t);
+          const wx = hingeX + lx;
+          const b = ringAt(rings, Math.min(wx, lastX));
+          const ca = clamp((lx - cx) / rad, -1, 1);
+          const aA = Math.min(A, Math.acos(ca));
+          const rise = cornerRise * Math.pow(aA / (A || 1), 1.7);
+          // the rim rides the seam; at the very corner it reaches a little
+          // higher still, up behind the notched hull edge, so no sightline
+          // finds daylight between cheek and chin on a closed head
+          const rim = lowerY - gumH * 0.12 + rise + gap * 0.10 * Math.pow(aA / (A || 1), 6);
+          let bot = Math.min((b.y - b.ry) - hingeY, rim - gap * 0.36);
+          let rz = Math.min(b.rz * 0.96, hw * 1.30);
+          if (wx > lastX) {
+            // past the hull's front cap: round the jaw off toward the lip
+            const f = clamp((wx - lastX) / Math.max(0.05, hingeX + xF - lastX), 0, 1);
+            rz = lerp(rz, width * 0.34, f * f);
+            bot = lerp(bot, rim - gap * 0.42, f * 0.55);
+          }
+          if (i === 0) { rz *= 0.72; bot = lerp(rim - gap * 0.30, bot, 0.45); }
+          bot += 0.006;      // a hair above the intact hull belly it duplicates
+          const dep = Math.max(gap * 0.10, rim - bot);
+          const pts = [], v = [];
+          for (let k = 0; k < ARCP; k++) {
+            let p;
+            if (k <= 6) {                        // rim +z, around the belly, rim -z
+              const ph = (k / 6) * Math.PI;
+              p = [lx, rim - dep * Math.pow(Math.sin(ph), 0.8), Math.cos(ph) * rz];
+            } else if (k === 7) p = [lx, rim - deckDrop, -rz * 0.55];
+            else p = [lx, rim - deckDrop, rz * 0.55];
+            pts.push(p); v.push(sh.v(p[0], p[1], p[2]));
+          }
+          st.push({ pts: pts, v: v, lx: lx, rim: rim, dep: dep });
+        }
+        for (let i = 0; i < N - 1; i++) {
+          const A0 = st[i], A1 = st[i + 1];
+          for (let k = 0; k < ARCP; k++) {
+            const k2 = (k + 1) % ARCP;
+            let nrm, grp;
+            if (k < 6) {                         // the white skin
+              grp = 0;
+              const my = (A0.pts[k][1] + A0.pts[k2][1]) * 0.5 - (A0.rim - A0.dep * 0.4);
+              const mz = (A0.pts[k][2] + A0.pts[k2][2]) * 0.5;
+              nrm = [0, my, mz];
+              if (Math.abs(nrm[1]) + Math.abs(nrm[2]) < 1e-4) nrm = [0, -1, 0];
+            } else if (k === 7) { grp = 1; nrm = [0, 1, 0]; }          // the deck
+            else { grp = 1; nrm = [0, 0.35, k === 6 ? 1 : -1]; }       // deck walls
+            sh.quadN(grp, nrm,
+              [A0.pts[k], A0.pts[k2], A1.pts[k2], A1.pts[k]],
+              [A0.v[k], A0.v[k2], A1.v[k2], A1.v[k]]);
+          }
+        }
+        // caps: the visible jaw tip forward, the buried root aft
+        const F = st[N - 1], B = st[0];
+        const tip = [F.lx + len * 0.03, F.rim - F.dep * 0.45, 0];
+        const vt = sh.v(tip[0], tip[1], tip[2]);
+        const root = [B.lx - len * 0.02, B.rim - B.dep * 0.5, 0];
+        const vr = sh.v(root[0], root[1], root[2]);
+        for (let k = 0; k < ARCP; k++) {
+          const k2 = (k + 1) % ARCP;
+          const g2 = k < 6 ? 0 : 1;
+          sh.quadN(g2, [1, 0, 0], [F.pts[k], F.pts[k2], tip, tip], [F.v[k], F.v[k2], vt, vt]);
+          sh.quadN(0, [-1, 0, 0], [B.pts[k], B.pts[k2], root, root], [B.v[k], B.v[k2], vr, vr]);
+        }
+        return sh.geom();
+      });
+      return meshOf(geo, [skin, m(o.chinDeck || 0x45191d)]);
+    }
+
+    // the mandible: a slim seat under the lower gum — the pre-split clamp
+    // look, kept whole behind the flag so ?sharkmouth=off is a real revert.
     const mandKey = "mandible|" + [lowerY, gumH, railIn, railOut, len, width, A, cornerRise].join(",");
-    const mand = meshOf(cachedGeom(mandKey, function () {
+    const buildMandible = function () { return meshOf(cachedGeom(mandKey, function () {
       const save = [gumH, lipH];
       void save;
       const sh = new Shell(), rows = [];
@@ -985,8 +1163,11 @@
       sh.quad(0, rows[0][3], rows[0][2], rows[0][1], rows[0][0]);
       sh.quad(0, rows[14][0], rows[14][1], rows[14][2], rows[14][3]);
       return sh.geom();
-    }), [skin]);
-    mand.name = "sharkMandible";
+    }), [skin]); };
+
+    const bodySplit = mouthSplitOn() && !!(o.rings && o.rings.length > 1);
+    const mand = bodySplit ? chinMesh() : buildMandible();
+    mand.name = bodySplit ? "sharkChin" : "sharkMandible";
     lower.add(mand);
 
     const ut = toothField(true), lt = toothField(false);
@@ -1009,7 +1190,10 @@
     const protrude = o.protrude == null ? len * 0.42 : o.protrude;
     const upperDrop = o.upperDrop == null ? gap * 0.34 : o.upperDrop;
     const upperRake = o.upperRake == null ? 0.30 : o.upperRake;
-    const snoutLift = o.snoutLift == null ? 0.11 : o.snoutLift;
+    // split-body mouths lift the snout harder: the dark upper half visibly
+    // rotating away from the white lower half is the orca-photo read, and at
+    // 0.11 rad the head silhouette barely changed during a bite.
+    const snoutLift = o.snoutLift == null ? (bodySplit ? 0.30 : 0.11) : o.snoutLift;
 
     const contract = {
       version: 3,
@@ -1030,6 +1214,9 @@
       toothRows: (o.toothRows || [0, 0, 0]).length,
       upperTeeth: ut.count,
       lowerTeeth: lt.count,
+      // the lower jaw is the body's own white underside (see THE CHIN above),
+      // and the hull/rostrum are notched along the seam to make room for it
+      bodySplit: bodySplit,
       // the fact the reference sheet is really asking for: how far past the
       // closed rostrum tip the upper tooth row travels
       upperReachX: hingeX + len + protrude,
@@ -1091,8 +1278,17 @@
     const local = rings.map(function (r) {
       return { x: r.x - px, y: r.y - py, ry: r.ry * (r.x < px ? (o.tuck || 0.97) : 1), rz: r.rz * (r.x < px ? (o.tuck || 0.97) : 1) };
     });
+    // The rostrum is the mouth's other body-half: it, too, loses everything
+    // under the seam (lifted to palate height, one gum-band above the chin's
+    // rim) so the lifted snout shows a dark mouth roof, not a round pale belly
+    // hanging into the gape. Same frame trick as the rings above: the shell
+    // lives in pivot-local coordinates, so the seam is offset to match.
+    const mo = (o.mouth && mouthSplitOn())
+      ? Object.assign({}, o.mouth, { xOff: px, yOff: py, lift: o.mouth.gap * 0.26 })
+      : null;
     const mesh = hullMesh(mats, local, {
       sides: o.sides, bellyCut: o.bellyCut, ragged: o.ragged, seed: o.seed,
+      mouth: mo,
     });
     mesh.name = "sharkRostrum";
     mesh.position.set(px, py, 0);
@@ -1138,20 +1334,26 @@
       const grey = m(0x363c40), white = m(0xf1f4f4);
       const finDark = m(0x2b3134), finTip = m(0x1b1f22), finPale = m(0x545c60);
 
+      // ONE mouth definition drives three shells: the notch cut into the
+      // hull, the notch cut into the rostrum, and the chin the lower jaw
+      // actually is. They must share numbers or the closed head leaks.
+      const MOUTH = { hingeX: 1.62, hingeY: 0.716, length: 0.90, width: 0.66, gap: 0.30, cornerRise: 0.135 };
       addSharkHull(g, {
         top: grey, belly: white, sides: 16, rings: GW_RINGS,
         bellyCut: GW_BELLY, ragged: 0.075, seed: 21, profile: "torpedo-wedge",
+        mouth: MOUTH, interior: m(0x3a1518),
       });
       // the mouth goes in BEFORE the rostrum so the snout's matrix is solved
       // after the upper jaw has told it how far to lift this frame
-      addSharkMouth(g, T, m, {
-        hingeX: 1.62, hingeY: 0.716, length: 0.90, width: 0.66, gap: 0.30,
-        toothHeight: 0.145, toothWidth: 0.118, rowTeeth: 19, cornerRise: 0.135,
+      addSharkMouth(g, T, m, Object.assign({}, MOUTH, {
+        rings: GW_RINGS,
+        toothHeight: 0.145, toothWidth: 0.118, rowTeeth: 19,
         maxOpen: 1.05, skin: 0xf1f4f4,
-      });
-      const snout = addSharkRostrum(g, [grey, white], GW_SNOUT, {
+      }));
+      const snout = addSharkRostrum(g, [grey, white, m(0x421a1e)], GW_SNOUT, {
         pivotX: 1.95, pivotY: 0.950, sides: 16,
         bellyCut: GW_SNOUT_BELLY, ragged: 0.055, seed: 22, tuck: 0.90,
+        mouth: MOUTH,
       });
       addSharkFaceDetails(g, T, m, {
         rings: GW_RINGS, snout: snout, snoutRings: GW_SNOUT,
@@ -1272,19 +1474,22 @@
       const m = ctx.mat, g = new T.Group();
       const dark = m(0x2a3035), white = m(0xe6ebec);
       const finDark = m(0x232930), finTip = m(0x161a1e), finPale = m(0x474f55);
+      const MOUTH = { hingeX: 2.30, hingeY: 0.800, length: 1.58, width: 1.10, gap: 0.56, cornerRise: 0.25 };
       addSharkHull(g, {
         top: dark, belly: white, sides: 16, rings: MEG_RINGS,
         bellyCut: [-0.40, -0.34, -0.24, -0.06, 0.18, 0.02, -0.18, -0.26],
         ragged: 0.08, seed: 51, profile: "battering-ram",
+        mouth: MOUTH, interior: m(0x33131a),
       });
-      addSharkMouth(g, T, m, {
-        hingeX: 2.30, hingeY: 0.800, length: 1.58, width: 1.10, gap: 0.56,
-        toothHeight: 0.30, toothWidth: 0.245, rowTeeth: 21, cornerRise: 0.25,
+      addSharkMouth(g, T, m, Object.assign({}, MOUTH, {
+        rings: MEG_RINGS,
+        toothHeight: 0.30, toothWidth: 0.245, rowTeeth: 21,
         maxOpen: 1.02, skin: 0xe6ebec,
-      });
-      const snout = addSharkRostrum(g, [dark, white], MEG_SNOUT, {
+      }));
+      const snout = addSharkRostrum(g, [dark, white, m(0x3c171d)], MEG_SNOUT, {
         pivotX: 3.20, pivotY: 1.160, sides: 16,
         bellyCut: [-0.12, -0.20, -0.36, -0.46], ragged: 0.06, seed: 52, tuck: 0.90,
+        mouth: MOUTH,
       });
       addSharkFaceDetails(g, T, m, {
         rings: MEG_RINGS, snout: snout, snoutRings: MEG_SNOUT,
@@ -1380,16 +1585,18 @@
     build: function (ctx) {
       const m = ctx.mat, g = new T.Group();
       const grey = m(0x434c50), pale = m(0xe9edec), finDark = m(0x363e42), eye = m(0x07090a);
+      const MOUTH = { hingeX: 1.26, hingeY: 0.688, length: 0.74, width: 0.56, gap: 0.24, cornerRise: 0.115 };
       addSharkHull(g, {
         top: grey, belly: pale, sides: 14, rings: HH_RINGS,
         bellyCut: [-0.36, -0.30, -0.12, 0.12, -0.06, -0.26],
         ragged: 0.07, seed: 61, profile: "cephalofoil",
+        mouth: MOUTH, interior: m(0x371519),
       });
-      addSharkMouth(g, T, m, {
-        hingeX: 1.26, hingeY: 0.688, length: 0.74, width: 0.56, gap: 0.24,
-        toothHeight: 0.115, toothWidth: 0.095, rowTeeth: 17, cornerRise: 0.115,
+      addSharkMouth(g, T, m, Object.assign({}, MOUTH, {
+        rings: HH_RINGS,
+        toothHeight: 0.115, toothWidth: 0.095, rowTeeth: 17,
         maxOpen: 0.94, skin: 0xe9edec,
-      });
+      }));
       // THE CEPHALOFOIL: a centre block plus two rounded-tip wings.
       const head = hullMesh([grey, pale], [
         { x: -0.28, y: 0, ry: 0.245, rz: 0.215 },
@@ -1510,19 +1717,22 @@
     build: function (ctx) {
       const m = ctx.mat, g = new T.Group();
       const grey = m(0x464e52), white = m(0xf0f2f2), finDark = m(0x394045), finTip = m(0x252b2f);
+      const MOUTH = { hingeX: 1.36, hingeY: 0.716, length: 0.78, width: 0.56, gap: 0.28, cornerRise: 0.12 };
       addSharkHull(g, {
         top: grey, belly: white, sides: 14, rings: BULL_RINGS,
         bellyCut: [-0.36, -0.30, -0.14, 0.14, -0.02, -0.22, -0.30],
         ragged: 0.075, seed: 71, profile: "stocky-blunt",
+        mouth: MOUTH, interior: m(0x3a1518),
       });
-      addSharkMouth(g, T, m, {
-        hingeX: 1.36, hingeY: 0.716, length: 0.78, width: 0.56, gap: 0.28,
-        toothHeight: 0.135, toothWidth: 0.108, rowTeeth: 17, cornerRise: 0.12,
+      addSharkMouth(g, T, m, Object.assign({}, MOUTH, {
+        rings: BULL_RINGS,
+        toothHeight: 0.135, toothWidth: 0.108, rowTeeth: 17,
         maxOpen: 1.00, skin: 0xf0f2f2,
-      });
-      const snout = addSharkRostrum(g, [grey, white], BULL_SNOUT, {
+      }));
+      const snout = addSharkRostrum(g, [grey, white, m(0x421a1e)], BULL_SNOUT, {
         pivotX: 1.66, pivotY: 0.980, sides: 14,
         bellyCut: [-0.14, -0.20, -0.36, -0.46], ragged: 0.055, seed: 72, tuck: 0.90,
+        mouth: MOUTH,
       });
       addSharkFaceDetails(g, T, m, {
         rings: BULL_RINGS, snout: snout, snoutRings: BULL_SNOUT,

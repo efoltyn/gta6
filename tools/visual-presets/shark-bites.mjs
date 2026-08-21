@@ -1,17 +1,22 @@
 /* Shark-mouth and bite-action comparison for tools/visual-compare.mjs.
 
-   Every frame is staged by the page being photographed. The deployed URL
-   therefore builds its old solid jaw, while localhost builds the current
-   hinged mouth. The runner then copies the deployed camera byte-for-byte into
-   the local capture. Open amounts, animal roots, prey, hull, waterline, light,
-   and viewport stay matched so anatomy and contact are the only variables. */
+   A SELF A/B on this checkout. The BEFORE column carries ?sharkmouth=off,
+   which src/city/wildlife/aquatic.js reads at load: the mouth reverts to the
+   band-clamp grammar (gum arcs + a mandible slab swinging under a hull whose
+   own chin never moves). The AFTER column is the split-body mouth: the lower
+   jaw IS the body's white underside, cut from the species' own rings, and the
+   hull/rostrum are notched along the seam so the black upper half and the
+   white lower half separate the way an orca's do. The runner copies the
+   before camera byte-for-byte into the after capture; open amounts, animal
+   roots, prey, hull, waterline, light and viewport stay matched so the mouth
+   is the only variable. */
 
 const subjects = [
   {
     id: "great-white-rest", label: "Great White — Closed Mouth", species: "great_white_shark", open: 0,
-    focus: "At rest, the mouth should read as a dark closed seam connected beneath the snout—not a grey block.",
+    focus: "At rest the silhouette must not change: the white chin now IS the front underside of the body, sealed against the notched hull along the same seam.",
     frame: 3.0, target: [2.55, 0.78, 0], cameraOffset: [1.7, 1.0, 8],
-    state: "REST · CLOSED", metric: "One recessed cavity · one attached mandible",
+    state: "REST · CLOSED", metric: "Chin = the body's own underside · seam sealed",
   },
   {
     id: "great-white-windup", label: "Great White — Bite Wind-up", species: "great_white_shark", open: 0.48,
@@ -21,9 +26,9 @@ const subjects = [
   },
   {
     id: "great-white-full-gape", label: "Great White — Full Gape", species: "great_white_shark", open: 1,
-    focus: "Full gape should reveal a dark mouth cavity and a continuous U-shaped ring of front and side teeth.",
+    focus: "The bite must split the body, orca-style: the dark snout lifts, the WHITE CHIN drops as one continuation of the belly, and above it is the dark mouth roof — no closed underside left behind, no denture arc floating in front.",
     frame: 3.65, target: [2.45, 0.45, 0], cameraOffset: [2.1, 1.2, 8],
-    state: "COMMIT · FULL GAPE", metric: "15 upper + 15 lower teeth · connected components: 1 + 1",
+    state: "COMMIT · FULL GAPE", metric: "Black top lifts · white chin drops · teeth ring both",
   },
   {
     id: "great-white-tuna-contact", label: "Great White — Tuna Contact", species: "great_white_shark", open: 0.82,
@@ -47,9 +52,9 @@ const subjects = [
   {
     id: "megalodon-rest", label: "Megalodon — Closed Mouth", species: "megalodon", open: 0,
     animal: [0, -1.80, 0],
-    focus: "At legendary scale, the lower mouth must still meet the head; this is where the old pink board was most obvious.",
+    focus: "At legendary scale, the closed jaw must still be the body: the chin is cut from the megalodon's own rings, so the head seals along the seam instead of resting on a slab.",
     frame: 7.0, target: [8.9, 0.05, 0], cameraOffset: [5.5, 2.6, 18],
-    state: "REST · MANDIBLE ATTACHED", metric: "Hinge embedded in head volume · reset drift: 0",
+    state: "REST · CHIN SEALED", metric: "Hinge embedded in head volume · reset drift: 0",
   },
   {
     id: "megalodon-full-gape", label: "Megalodon — Full Gape", species: "megalodon", open: 1,
@@ -199,24 +204,85 @@ function stageSharkBite(input) {
   const mouth = animal.userData && animal.userData.aquaticMouth;
   const jaw = actor.swim;
   const hinge = jaw.jawGroup ? jaw.jawGroup.getWorldPosition(new T.Vector3()) : null;
+
+  // ---- measured, not asserted --------------------------------------------
+  // staticVsJawM: the lowest STATIC vertex in the mouth span (hull, rostrum —
+  // anything that does not move with the bite, cavity excluded) minus the
+  // moving lower jaw's lowest vertex at rest. The clamp mouth scores NEGATIVE:
+  // the hull's own closed chin hangs below the jaw it is supposed to be, so a
+  // bite swings dentures under a shut head. The split-body mouth scores
+  // positive: the underside of the head IS the jaw, and the only static thing
+  // left up there is the dark mouth roof.
+  // mouthOpeningM: the vertical size of the hole at this frame's gape — the
+  // static roof down to the moving jaw's lowest point. The clamp mouth's roof
+  // was a closed chin at skin level, so however far its dentures swung, the
+  // opening into the head stayed shallow.
+  let staticVsJawM = null, mouthOpeningM = null;
+  if (mouth && jaw.jawGroup) {
+    const sc = animal.scale.x || 1;
+    const spanLen = mouth.upperReachX
+      ? mouth.upperReachX - (mouth.protrude || 0) - mouth.hinge.x : 1;
+    const wx0 = animal.position.x + (mouth.hinge.x + spanLen * 0.25) * sc;
+    const wx1 = animal.position.x + (mouth.hinge.x + spanLen * 1.12) * sc;
+    const v = new T.Vector3();
+    const lowestIn = function (root, x0, x1, skipJaws) {
+      let low = Infinity;
+      root.traverse(function (o2) {
+        if (!o2.isMesh || !o2.geometry || !o2.geometry.attributes.position) return;
+        if (o2 === jaw.jawCavity) return;
+        if (skipJaws) {
+          for (let p = o2; p; p = p.parent) if (p === jaw.jawGroup || p === jaw.jawUpper) return;
+        }
+        const pos = o2.geometry.attributes.position;
+        for (let i2 = 0; i2 < pos.count; i2++) {
+          v.fromBufferAttribute(pos, i2).applyMatrix4(o2.matrixWorld);
+          if (v.x >= x0 && v.x <= x1 && v.y < low) low = v.y;
+        }
+      });
+      return low;
+    };
+    animal.updateMatrixWorld(true);
+    const staticFloor = lowestIn(animal, wx0, wx1, true);
+    const posedLow = lowestIn(jaw.jawGroup, -Infinity, Infinity, false);
+    CBZ.swimJaw(actor, 0); animal.updateMatrixWorld(true);
+    const restLow = lowestIn(jaw.jawGroup, -Infinity, Infinity, false);
+    CBZ.swimJaw(actor, Number(subject.open) || 0); animal.updateMatrixWorld(true);
+    if (isFinite(staticFloor) && isFinite(restLow)) staticVsJawM = Number((staticFloor - restLow).toFixed(3));
+    if (isFinite(staticFloor) && isFinite(posedLow)) mouthOpeningM = Number((staticFloor - posedLow).toFixed(3));
+  }
+
   return {
     ok: true, species: actor.species.id, openness: subject.open,
     authoredMouth: !!mouth, upperTeeth: mouth && mouth.upperTeeth, lowerTeeth: mouth && mouth.lowerTeeth,
+    bodySplitMouth: !!(mouth && mouth.bodySplit),
     lowerJawGroup: !!jaw.jawGroup, legacyLooseParts: jaw.jaw ? jaw.jaw.length : 0,
     hinge: hinge && hinge.toArray().map(v => Number(v.toFixed(3))),
     prey: targetActor && targetActor.species.id, realSpeedboat: !!ship,
+    metrics: { staticVsJawM: staticVsJawM, mouthOpeningM: mouthOpeningM },
     camera: { framedHeight, position: cameraPosition.slice(), target: cameraTarget.slice(), up: cameraUp.slice() },
   };
 }
 
 export default {
   id: "shark-bites",
-  title: "Shark and Megalodon Mouths — Anatomy Through Contact",
-  description: "Ten matched frames compare the deployed shark mouths with the current repair across rest, wind-up, full gape, prey contact, ship contact, and clamp. Four species now share one authored U-jaw contract: a rear hinge embedded in the head, a recessed cavity, front-and-side tooth rows, and the same visible socket used by damage. The last pages combine the megalodon with the real Speedboat to show the full bite-to-sinking handoff.",
-  beforeLabel: "BEFORE · DEPLOYED",
-  afterLabel: "AFTER · HINGED MOUTHS",
-  pairNote: "Same source asset · jaw phase · target · camera · water · light · viewport",
-  method: "Each source page builds its own registered shark, opens it through that page's production CBZ.swimJaw, and adds the same prey or Speedboat asset where applicable. The runner copies the deployed camera into the local capture. These are matched action-state frames, not hand-retouched images.",
+  title: "Shark Mouths — The Body Splits, Not a Clamp",
+  description: "Ten matched frames compare the band-clamp mouth (?sharkmouth=off, this same checkout) with the split-body mouth across rest, wind-up, full gape, prey contact, ship contact, and clamp. The lower jaw is now the shark's own white chin cut from its body rings; the hull and rostrum are notched along the mouth seam so nothing stays closed behind the dropped jaw — a bite separates the dark upper half of the head from the white lower half, orca-style. The metrics table proves it: the static underside of the mouth region (the chin that never moved) is gone.",
+  beforeLabel: "BEFORE — ?sharkmouth=off (the clamp)",
+  afterLabel: "AFTER · SPLIT-BODY MOUTHS",
+  pairNote: "Same checkout · jaw phase · target · camera · water · light · viewport",
+  method: "Both columns load this same checkout; the BEFORE side carries ?sharkmouth=off, which aquatic.js reads at load to build the old band-clamp mouth. Each page builds its own registered shark, opens it through production CBZ.swimJaw, and adds the same prey or Speedboat asset where applicable. The runner copies the before camera into the after capture. These are matched action-state frames, not hand-retouched images.",
+  defaultBefore: "local",
+  beforeParams: { sharkmouth: "off" },
+  metrics: {
+    staticVsJawM: {
+      label: "Static underside minus moving-jaw underside at rest (negative = a closed chin the bite cannot move)",
+      unit: "m", better: "higher",
+    },
+    mouthOpeningM: {
+      label: "Vertical opening at this frame's gape, roof of the hole down to the dropped jaw",
+      unit: "m", better: "higher",
+    },
+  },
   viewport: { width: 1100, height: 680 },
   readyExpression: "window.THREE && window.CBZ && CBZ.buildSwimRig && CBZ.swimJaw && CBZ.cityBuildAmbientCarVisual && CBZ.WILDLIFE_SPECIES && CBZ.WILDLIFE_SPECIES.great_white_shark && CBZ.WILDLIFE_SPECIES.hammerhead_shark && CBZ.WILDLIFE_SPECIES.bull_shark && CBZ.WILDLIFE_SPECIES.megalodon",
   subjects,
