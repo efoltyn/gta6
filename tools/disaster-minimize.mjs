@@ -72,7 +72,12 @@ function trial(dropSet, slot, mode) {
     const p = spawn("node", args, { cwd: ROOT, stdio: ["ignore", "pipe", "ignore"] });
     let out = "";
     p.stdout.on("data", (d) => { out += d; });
+    /* A trial that hangs is a trial that FAILED — the oracle already gives a
+       broken page a short fuse, so anything past this is a wedged browser, and
+       waiting on it is how a search loses an hour. */
+    const kill = setTimeout(() => { try { p.kill("SIGKILL"); } catch (_) {} }, +arg("--trial-timeout", "420000"));
     p.on("close", () => {
+      clearTimeout(kill);
       trials++;
       let ok = false, fails = [];
       try { const r = JSON.parse(out); ok = r.ok; fails = r.fails || []; } catch (_) { fails = ["oracle produced no JSON"]; }

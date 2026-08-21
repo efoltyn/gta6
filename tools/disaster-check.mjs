@@ -45,6 +45,12 @@ const QUICK = has("--quick");
    makes the minimizer safe while costing a quarter of the ticks. */
 const FAST = has("--fast");
 const HOLD = FAST ? 240 : 5400;
+/* PATIENCE. A page that is going to boot boots; a page the minimizer just
+   broke hangs, and waiting five minutes for each of those is most of what a
+   search costs. The bulk passes (--quick / --fast) get a short fuse; a plain
+   run keeps the long one, because a cold first boot of index.html on a busy
+   machine legitimately takes a while. */
+const PATIENCE = (QUICK || FAST) ? { engine: 60000, play: 100000 } : { engine: 150000, play: 300000 };
 const JSON_OUT = has("--json");
 const say = (m) => { if (!JSON_OUT) console.log(m); };
 
@@ -94,7 +100,7 @@ try {
   const t0 = Date.now();
   await rig.open(URL_REL, `seed=${SEED}` + (BOTS ? `&surv_bots=${BOTS}` : ""));
 
-  if (!await rig.wait("window.CBZ && CBZ.game", 120000)) {
+  if (!await rig.wait("window.CBZ && CBZ.game", PATIENCE.engine)) {
     fail("page never published window.CBZ"); throw new Error("no engine");
   }
   report.measures.msToEngine = Date.now() - t0;
@@ -105,7 +111,7 @@ try {
     const mb = document.querySelector('.mode-btn[data-mode="survival"]'); if (mb) mb.click();
     const pb = document.getElementById('playBtn'); if (pb) pb.click();
     return CBZ.game.state === 'playing' && CBZ.game.mode === 'survival';
-  })()`, 300000, 250);
+  })()`, PATIENCE.play, 250);
   if (!playing) { fail("never entered a survival match"); throw new Error("no match"); }
   report.measures.msToPlayable = Date.now() - t0;
   say(`playable in ${report.measures.msToPlayable} ms`);

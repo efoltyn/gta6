@@ -89,6 +89,10 @@
     "visual:npc-tactics": "node tools/visual-compare.mjs --preset npc-tactics --subjects cops-standoff,firefight,stop-profile,hide-break --no-open"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.0",
+    "@capacitor/core": "^8.5.0",
+    "@capacitor/ios": "^8.5.0",
+    "esbuild": "^0.28.2",
     "three": "^0.164.1",
     "vite": "^5.4.0"
   }
