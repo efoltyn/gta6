@@ -93,6 +93,8 @@
     "visual:prison-wing-props": "node tools/visual-compare.mjs --preset prison-wing-props --keep-going --before https://efoltyn.github.io/gta6/",
     "visual:prison-yard-props": "node tools/visual-compare.mjs --preset prison-yard-props --keep-going --before https://efoltyn.github.io/gta6/",
     "test:tactics": "node tools/tactics-check.mjs",
+    "test:camera-look": "node tools/camera-look-check.mjs",
+    "visual:camera-look": "node tools/camera-look-shots.mjs && python3 tools/camera-look-report.py",
     "visual:npc-tactics": "node tools/visual-compare.mjs --preset npc-tactics --subjects cops-standoff,firefight,stop-profile,hide-break --no-open"
   },
   "devDependencies": {

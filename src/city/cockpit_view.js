@@ -382,7 +382,10 @@
       while (d > Math.PI) d -= Math.PI * 2;
       while (d < -Math.PI) d += Math.PI * 2;
       hy = clamp(d, -2.30, 2.30);              // ~132° each way: you can check your six
-      hp = clamp(fin(CBZ.cam.pitch, 0), -0.95, 0.95);
+      // SIGN: same as the driver's seat — hp is a three.js Euler X (UP-
+      // positive) and cam.pitch is DOWN-positive (convention note in
+      // systems/camera.js beside `const cam = {...}`).
+      hp = clamp(-fin(CBZ.cam.pitch, 0), -0.95, 0.95);
     }
     hy += head.yawX;
     // THE HALF TURN. A three.js camera looks down its own LOCAL -Z, but the
