@@ -107,8 +107,42 @@ if (has("--verify")) {
   process.exit(r.ok ? 0 : 1);
 }
 
+/* REPAIR — put files back until the set passes again.
+
+   Needed when the ORACLE gets stricter between runs (it did: it now fails on a
+   file that throws during page load, which it used to throw away), so a
+   manifest proved under the old question can be wrong under the new one. A
+   broken base is worth finding before the search starts, because every trial
+   measured against it fails and the search learns nothing.
+
+   Bisection over the dropped set: put half back, ask again, and keep the half
+   that fixes it. log2(n) trials to find the file, not n. */
+async function repair(mode) {
+  let r = await trial(drop, "base", mode);
+  let rounds = 0;
+  while (!r.ok && drop.size && rounds++ < 24) {
+    console.log(`  base fails: ${r.fails.join("; ")}`);
+    const list = [...drop];
+    let lo = [], hi = list;
+    while (hi.length > 1) {
+      const half = Math.ceil(hi.length / 2);
+      const a = hi.slice(0, half), b = hi.slice(half);
+      const t = await trial(new Set([...lo, ...a]), "r", mode);
+      if (t.ok) { lo = lo.concat(a); hi = b; } else hi = a;
+    }
+    for (const f of hi) { drop.delete(f); needed.add(f); console.log("  restored " + f); }
+    save();
+    r = await trial(drop, "base", mode);
+  }
+  return r;
+}
+
 // ---- the search ------------------------------------------------------------
 const t0 = Date.now();
+{
+  const r = await repair("--quick");
+  console.log(r.ok ? "base ok" : "base STILL failing: " + r.fails.join("; "));
+}
 let candidates = ORDER.filter((p) => !drop.has(p) && !needed.has(p));
 console.log(`start: ${ORDER.length - drop.size} scripts, ${mb(bytes(ORDER.filter((p) => !drop.has(p))))} · ` +
   `${candidates.length} untested candidates · ${JOBS} jobs`);
@@ -165,24 +199,10 @@ console.log(`\nsearch done: ${kept.length} scripts, ${mb(bytes(kept))} ` +
   `(from ${ORDER.length}, ${mb(bytes(ORDER))}) in ${trials} trials`);
 
 // ---- the real gate: every disaster, end to end -----------------------------
+// --quick never ran the volcano; anything it let go that the full roster needs
+// gets bisected back by the same repair pass the base check uses.
 console.log("verifying the full roster…");
-let r = await trial(drop, "verify", "--fast");
-while (!r.ok && drop.size) {
-  console.log("  full check failed: " + r.fails.join("; "));
-  /* REPAIR BY BISECTION. --quick never ran the volcano; if something it let go
-     turns out to matter, put half the drop set back and find which half. */
-  const list = [...drop];
-  let lo = [], hi = list;
-  while (hi.length > 1) {
-    const half = Math.ceil(hi.length / 2);
-    const a = hi.slice(0, half), b = hi.slice(half);
-    const t = await trial(new Set([...lo, ...a]), "r", "--fast");
-    if (t.ok) { lo = [...lo, ...a]; hi = b; } else hi = a;
-  }
-  for (const f of hi) { drop.delete(f); needed.add(f); console.log("  restored " + f); }
-  save();
-  r = await trial(drop, "verify", "--fast");
-}
+const r = await repair("--fast");
 const { html } = buildPage(INDEX, drop);
 writeFileSync(path.join(ROOT, "disaster.html"), html);
 save();

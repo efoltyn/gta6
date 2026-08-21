@@ -1,0 +1,406 @@
+/* ============================================================
+   css/city.css — title-screen section switching for the CITY mode,
+   plus hiding the prison/survival HUD while city mode is active (the
+   city draws its own overlay in src/city/hud.js).
+
+   TOKEN PASS: the city panels consume the shared HUD tokens from
+   css/hud.css (:root) — money-green is cash ONLY, gold is value/rank
+   accents, --hud-ink instead of pure #fff — so the marketplace chrome
+   and the in-world HUD read as one product. Fallbacks keep every rule
+   safe if the token sheet ever loads late.
+============================================================ */
+
+/* title-screen mode sections */
+.mode-city-only { display: none; }
+body.mode-city .mode-city-only { display: block; }
+body.mode-city .mode-escape-only,
+body.mode-city .mode-survival-only { display: none; }
+
+/* CITY: character-origin picker (3 opening scenes — src/city/origins.js).
+   Mirrors the .role-btn look (css/screens.css) so it reads like the same
+   product; stacked full-width rows since each card carries a name + blurb. */
+.origin-label {
+  margin: 14px 0 6px; font-size: 12px; font-weight: 700; letter-spacing: 1.5px;
+  text-transform: uppercase; color: #7c5a3a; text-align: center;
+}
+/* TWELVE ROLES, NAMED AND NOTHING ELSE (owner, 2026-08-14: "a hitman role
+   speaks for itself"). The blurbs are gone, and with them the reason a card
+   had to be 210px wide and two lines tall — a name fits in half of that.
+
+   THE COLUMN COUNT IS CHOSEN, NOT LEFT TO FIT (owner, 2026-08-15: the layout
+   was "fucking dumb"). `auto-fit` fitted as many 136px cards as the row would
+   take, which on a laptop was SEVEN — so the roster printed 7 then 5, a ragged
+   row with a hole punched in the right-hand end of it. Twelve divides by 2, 3,
+   4 and 6, and every count below is one of those, so the picker is always a
+   full rectangle. A thirteenth story would leave a short last row at any width;
+   that is a layout decision to make then, not something a `minmax` can hide. */
+.origin-select {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px; width: 100%; margin: 0 auto 4px;
+}
+@media (min-width: 480px) { .origin-select { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (min-width: 700px) { .origin-select { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.origin-btn {
+  pointer-events: auto; cursor: pointer; font-family: inherit; text-align: center;
+  border: 2px solid #2a2622; border-bottom-width: 5px; border-radius: 12px;
+  background: #fff; color: #2a2622; padding: 10px 10px 9px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  transition: transform .08s, border-color .12s, box-shadow .12s, background .12s;
+}
+.origin-btn b { font-size: 14px; letter-spacing: .3px; }
+/* The one surviving line of card copy is WRITTEN, not authored: state.js:467
+   fills #originRollLine with the life the dice actually rolled. It is feedback
+   after a choice, not a description before one, so it starts empty and an
+   empty span must not reserve a second line in every other card. */
+.origin-btn span { color: #7c5a3a; font-weight: 600; font-size: 11.5px; line-height: 1.25; }
+.origin-btn span:empty { display: none; }
+/* the generated story reads as the odd one out on purpose */
+.origin-btn-roll { border-style: dashed; }
+.origin-btn-roll.active { border-style: solid; }
+/* THE CONTRACT — the one authored story on the shelf: dark card, gold ink,
+   so the campaign is legible as a different kind of thing than a sandbox
+   start without shouting over the picker. */
+.origin-btn-contract { background: #201c18; border-color: #4a3c26; color: #f2e2bc; }
+.origin-btn-contract span { color: #b99a5e; }
+.origin-btn-contract.active {
+  border-color: #d9a63f; box-shadow: 0 0 0 3px rgba(217,166,63,.25);
+  background: linear-gradient(180deg,#2a241c,#201c18); color: #ffe9b3;
+}
+
+/* PILOT sub-select: the airframe list, filled at runtime from the LIVE
+   aircraft registry (CBZ.cityOriginPlanes) — never a hand-kept list. Compact
+   chips rather than cards, because the only thing to say is the name. */
+.origin-sublabel { margin-top: 10px; font-size: 11px; }
+.origin-plane-wrap { width: min(560px, 100%); margin: 0 auto; }
+.origin-plane-select {
+  display: flex; flex-wrap: wrap; gap: 6px; justify-content: center;
+}
+.origin-plane-btn {
+  pointer-events: auto; cursor: pointer; font-family: inherit;
+  border: 2px solid #2a2622; border-bottom-width: 4px; border-radius: 9px;
+  background: #fff; color: #2a2622; padding: 5px 10px 4px;
+  font-size: 12px; font-weight: 700; letter-spacing: .2px;
+  transition: transform .08s, border-color .12s, box-shadow .12s, background .12s;
+}
+.origin-plane-btn.active {
+  border-color: var(--orange-d); box-shadow: 0 0 0 3px rgba(255,122,26,.2);
+  background: linear-gradient(180deg,#fff6ee,#ffe9d6);
+}
+.origin-plane-btn:active { transform: translateY(2px); border-bottom-width: 2px; }
+.origin-btn.active {
+  border-color: var(--orange-d); box-shadow: 0 0 0 3px rgba(255,122,26,.2);
+  background: linear-gradient(180deg,#fff6ee,#ffe9d6);
+}
+.origin-btn:active { transform: translateY(3px); border-bottom-width: 2px; }
+/* .origin-hint is gone with the blurbs. Everything it said — YES / NO / PUNCH,
+   and U to switch life — is a row in the Controls list two elements below it,
+   and it was also the only thing putting a [U] key cap on a phone's title
+   screen, on a device with no U to press. */
+
+/* Destructive by meaning, secondary by placement: PLAY stays the dominant
+   action. The two-line copy makes it impossible to mistake this for another
+   story preset, and the confirm in systems/newlife.js is the second guard. */
+body.mode-city .new-life-btn {
+  display: inline-flex; flex-direction: column; align-items: center; gap: 1px;
+  pointer-events: auto; cursor: pointer; margin: 13px auto 0; padding: 8px 16px 7px;
+  border: 2px solid #8d3131; border-bottom-width: 4px; border-radius: 10px;
+  background: #fff8f5; color: #742626; font-family: inherit;
+  transition: transform .08s, background .12s, box-shadow .12s;
+}
+.new-life-btn span {
+  font-size: 12px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase;
+}
+.new-life-btn small { color: #9a6860; font-size: 10px; font-weight: 600; }
+.new-life-btn:hover { background: #ffe9e3; box-shadow: 0 0 0 3px rgba(141,49,49,.1); }
+.new-life-btn:active { transform: translateY(2px); border-bottom-width: 2px; }
+.new-life-btn:disabled { cursor: wait; opacity: .65; transform: none; }
+
+/* hide the prison + survival HUD panels in the city (city has its own) */
+body.mode-city #objective,
+body.mode-city #topright,
+body.mode-city #keycard,
+body.mode-city #inventory,
+body.mode-city #detectWrap,
+body.mode-city #gangHud,
+body.mode-city #compass,
+body.mode-city #minimap,
+body.mode-city #simHud,
+body.mode-city #dashBtn,
+body.mode-city #weaponStrip,
+body.mode-city #ammo,
+body.mode-city #survTop,
+body.mode-city #survStatus,
+body.mode-city #survBars,
+body.mode-city #hotbar,
+body.mode-city #invScreen,
+body.mode-city #disasterBanner { display: none !important; }
+
+/* the contextual interact panel is reused by the city — keep it readable */
+body.mode-city #interact { display: none; }
+
+/* ============================================================
+   CITY LIVE-WORLD DECLUTTER
+
+   The world keeps instruments (reticle, map, vitals, wanted stars, money,
+   population and numeric route/ammo state), but it is not a tutorial panel.
+   These are passive walk-up/control chips owned by otherwise independent
+   modules.  Most of them write display:block inline every frame, hence the
+   deliberate !important at this single policy boundary.  Their keyboard/click
+   handlers stay installed, so hiding the prose never disables the action.
+============================================================ */
+body.mode-city.state-playing #hint,
+body.mode-city.state-playing #toast,
+body.mode-city.state-playing #interact,
+body.mode-city.state-playing #cityStoragePrompt,
+body.mode-city.state-playing #roofStashChip,
+body.mode-city.state-playing #beachLootChip,
+body.mode-city.state-playing #clothingPrompt,
+body.mode-city.state-playing #gunstorePrompt,
+body.mode-city.state-playing #elevChip,
+body.mode-city.state-playing #realtyPrompt,
+body.mode-city.state-playing #pawnPrompt,
+body.mode-city.state-playing #jewelryPrompt,
+body.mode-city.state-playing #ci2Chip,
+body.mode-city.state-playing #fxPrompt,
+body.mode-city.state-playing #modshopHud,
+body.mode-city.state-playing #cityOrders,
+body.mode-city.state-playing #cityHeistHud,
+body.mode-city.state-playing #invHotbar,
+body.mode-city.state-playing #cFeed,
+body.mode-city.state-playing #cKill,
+body.mode-city.state-playing #cKillFeed,
+body.mode-city.state-playing #cRel,
+body.mode-city.state-playing #cMemb,
+body.mode-city.state-playing #cTurfMeta,
+body.mode-city.state-playing #streakHud,
+body.mode-city.state-playing #streakMeter,
+body.mode-city.state-playing > .panel[style*="bottom: 78px"],
+body.mode-city.state-playing > .panel[style*="bottom:78px"],
+body.mode-city.state-playing > div[style*="bottom: 132px"][style*="z-index: 15"],
+body.mode-city.state-playing > div[style*="bottom:132px"][style*="z-index:15"] {
+  display: none !important;
+}
+
+/* The one exception to the declutter policy: #interact is not passive prose,
+   it is the verb card itself — the dialogue's two answers, the gun-stop
+   stand-off, the walk-up rows. Hiding it left keyboard players acting blind
+   (touch always had its own restore in mobile.css:410). Same contract as
+   touch: visible only while the interaction system marks it live. */
+body.mode-city.state-playing #interact.show { display: block !important; }
+
+/* Route guidance remains useful while moving, but only as direction + range.
+   The destination sentence and the old "[M] map" legend belong on the map. */
+body.mode-city.state-playing #waypointLabel,
+body.mode-city.state-playing #waypointGuide .waypoint-mapkey {
+  display: none !important;
+}
+
+/* Posture is a physical meter.  Names, YOU/OPEN captions are narration. */
+body.mode-city.state-playing #cPost .lbl { display: none !important; }
+
+/* Race telemetry is still present as numbers, lamps and arrows. */
+body.mode-city.state-playing #raceHud .rLab,
+body.mode-city.state-playing #raceHud .rGap .nm,
+body.mode-city.state-playing #raceLights .go { display: none !important; }
+
+/* ============================================================
+   Zillow — the city property + business marketplace ([Z])
+============================================================ */
+#cityZillow.zwrap {
+  position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  z-index: 60; display: none; flex-direction: column;
+  width: min(920px, 96vw); height: min(78vh, 700px);
+  background: rgba(13, 16, 20, .97); border: 2px solid #303841; border-radius: 8px;
+  color: var(--hud-ink, #e8ecf2); font-family: Fredoka, system-ui, sans-serif;
+  box-shadow: 0 22px 60px rgba(0, 0, 0, .6); pointer-events: auto; overflow: hidden;
+}
+#cityZillow .zhead { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px 6px; }
+#cityZillow .ztitle { font-size: 20px; font-weight: 700; }
+#cityZillow .ztag { font-size: 12px; font-weight: 500; color: #8a93a3; margin-left: 8px; }
+#cityZillow .zx { background: none; border: none; color: #8a93a3; font-size: 19px; cursor: pointer; padding: 2px 8px; border-radius: 8px; }
+#cityZillow .zx:hover { color: #fff; background: rgba(255, 255, 255, .08); }
+#cityZillow .zstats { display: flex; flex-wrap: wrap; gap: 12px; padding: 0 16px 7px; font-size: 12px; color: var(--hud-dim, #9fb0c6); }
+#cityZillow .zstats b { color: var(--gold, #ffd166); font-variant-numeric: tabular-nums; }
+#cityZillow .zflash { margin: 0 14px 7px; padding: 6px 10px; border-radius: 8px; font-size: 12px; font-weight: 500; }
+#cityZillow .zflash-ok { background: rgba(46, 158, 79, .16); color: #9be8b4; border: 1px solid rgba(46, 158, 79, .4); }
+#cityZillow .zflash-bad { background: rgba(226, 87, 75, .14); color: #ff9e90; border: 1px solid rgba(226, 87, 75, .4); }
+#cityZillow .ztabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; padding: 4px 14px 8px; border-bottom: 1px solid #232b34; }
+#cityZillow .ztab { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; background: rgba(255, 255, 255, .04); border: 1px solid #2a323c; color: #aeb8c6;
+  padding: 7px 9px; border-radius: 8px; font-family: inherit; font-size: 13px; cursor: pointer; transition: .12s; }
+#cityZillow .ztab b { color: #ffd166; font-size: 11px; font-weight: 700; }
+#cityZillow .ztab:hover { background: rgba(255, 255, 255, .09); color: #e8eef7; }
+#cityZillow .ztab.on { background: #2f6fed; border-color: #4f8bff; color: #fff; font-weight: 600; }
+#cityZillow .ztab.on b { color: #fff; }
+#cityZillow .ztools { display: grid; grid-template-columns: minmax(190px, 1fr) 130px 132px auto; gap: 8px; padding: 8px 14px 6px; border-bottom: 1px solid #232b34; }
+#cityZillow .zsearch,
+#cityZillow .zselect { min-width: 0; height: 32px; border-radius: 8px; border: 1px solid #313b45; background: rgba(255,255,255,.055); color: #e8eef7; font: inherit; font-size: 12px; padding: 0 10px; }
+#cityZillow .zsearch::placeholder { color: #737d8a; }
+#cityZillow .zselect { color: #cdd6e2; }
+#cityZillow .zclear { height: 32px; background: #343c46; color: #d6dee9; padding: 0 12px; }
+#cityZillow .zlist { flex: 1; overflow: hidden; padding: 8px 14px 10px; display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+#cityZillow .zempty { color: #7f8794; text-align: center; padding: 40px 10px; }
+
+#cityZillow .zcard { display: flex; gap: 10px; align-items: center; min-height: 52px;
+  background: rgba(255, 255, 255, .035); border: 1px solid #28313b; border-radius: 8px; padding: 7px 10px; }
+#cityZillow .zcard:hover { border-color: #3a4654; background: rgba(255, 255, 255, .06); }
+#cityZillow .zicon { flex: 0 0 32px; width: 32px; height: 30px; display: flex; align-items: center; justify-content: center; border: 1px solid #384552; border-radius: 6px; color: #ffd166; font-size: 11px; font-weight: 800; }
+#cityZillow .zmeta { flex: 1; min-width: 0; }
+#cityZillow .zname { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#cityZillow .ztier { font-size: 10px; font-weight: 800; }
+#cityZillow .zaddr { font-size: 11px; color: #9fb0c6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#cityZillow .zsub { font-size: 11px; color: #7f8794; margin-top: 1px; text-transform: capitalize; }
+#cityZillow .zright { display: grid; grid-template-columns: 112px minmax(88px, 120px) minmax(156px, auto); align-items: center; justify-items: end; gap: 8px; min-width: 360px; }
+#cityZillow .zval { font-size: 15px; font-weight: 700; color: var(--money, #7ed957); font-variant-numeric: tabular-nums; }
+#cityZillow .zincome { font-size: 11px; white-space: nowrap; }
+#cityZillow .zincome.up { color: #9be8b4; }
+#cityZillow .zincome.down { color: #ff9e90; }
+#cityZillow .zincome.muted { color: #7f8794; }
+#cityZillow .zacts { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+#cityZillow .zacts-inline { flex-direction: row; flex-wrap: wrap; justify-content: flex-end; margin-top: 0; }
+#cityZillow .zbtn { border: none; border-radius: 8px; padding: 5px 9px; font-family: inherit; font-size: 11.5px; font-weight: 700; cursor: pointer; transition: .12s; white-space: nowrap; }
+#cityZillow .zbtn-buy { background: #2f9e4f; color: #fff; }
+#cityZillow .zbtn-buy:hover { background: #38b85c; }
+#cityZillow .zbtn-sell { background: #b8553a; color: #fff; }
+#cityZillow .zbtn-sell:hover { background: #d0653f; }
+#cityZillow .zbtn-home { background: #3a4658; color: #cfe0f5; }
+#cityZillow .zbtn-home:hover { background: #47566b; }
+#cityZillow .zbtn-neutral { background: #343c46; color: #d6dee9; }
+#cityZillow .zbtn-neutral:hover { background: #414b57; color: #fff; }
+#cityZillow .zbtn-warn { background: #8a3f4d; color: #fff; }
+#cityZillow .zbtn-disabled { background: #252b33; color: #6f7884; cursor: default; }
+#cityZillow .znope { font-size: 11px; color: #7f8794; font-style: italic; }
+
+#cityZillow .zbadge { font-size: 10px; font-weight: 700; letter-spacing: .4px; padding: 2px 7px; border-radius: 999px; }
+#cityZillow .zb-sale { background: rgba(46, 158, 79, .2); color: #7ed957; }
+#cityZillow .zb-own { background: rgba(91, 139, 255, .22); color: #8fb6ff; }
+#cityZillow .zb-illegal { background: rgba(226, 87, 75, .2); color: #ff8a7a; }
+
+#cityZillow .zpager { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 4px 0 0; font-size: 12px; color: #9fb0c6; }
+#cityZillow .zpager b { color: #ffd166; }
+
+@media (max-width: 640px) {
+  #cityZillow.zwrap { width: 98vw; height: 88vh; }
+  #cityZillow .zhead { padding: 10px 12px 5px; }
+  #cityZillow .ztag { display: block; margin-left: 0; margin-top: 2px; }
+  #cityZillow .zstats { gap: 8px; padding: 0 12px 6px; }
+  #cityZillow .ztools { grid-template-columns: 1fr 1fr; padding: 8px 10px 6px; }
+  #cityZillow .zsearch { grid-column: 1 / -1; }
+  #cityZillow .zcard { gap: 8px; padding: 7px; align-items: flex-start; }
+  #cityZillow .zicon { flex-basis: 28px; width: 28px; height: 28px; }
+  #cityZillow .zname { flex-wrap: wrap; gap: 4px; white-space: normal; }
+  #cityZillow .zright { grid-template-columns: 1fr; justify-items: end; min-width: 96px; gap: 2px; }
+  #cityZillow .zbtn { padding: 5px 8px; }
+}
+
+/* ============================================================
+   City activity directory ([Y])
+============================================================ */
+#cityActivities {
+  position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  z-index: 62; display: none; width: min(760px, 94vw); max-height: min(82vh, 760px);
+  background: rgba(13, 16, 22, .97); border: 2px solid #2f3a44; border-radius: 14px;
+  color: var(--hud-ink, #e8ecf2); font-family: Fredoka, system-ui, sans-serif;
+  box-shadow: 0 22px 60px rgba(0, 0, 0, .62); pointer-events: auto; overflow: hidden;
+}
+#cityActivities .ca-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 16px 8px; }
+#cityActivities .ca-title { font-size: 22px; font-weight: 700; }
+#cityActivities .ca-sub { font-size: 12px; color: #8a93a3; margin-top: 2px; }
+#cityActivities .ca-close { border: 0; background: rgba(255,255,255,.06); color: #aeb8c6; border-radius: 8px; padding: 6px 10px; cursor: pointer; font: inherit; }
+#cityActivities .ca-tabs { display: flex; gap: 6px; padding: 0 14px 10px; border-bottom: 1px solid #26313a; overflow-x: auto; }
+#cityActivities .ca-tab { flex: 0 0 auto; border: 1px solid #2d3843; background: rgba(255,255,255,.04); color: #aeb8c6; border-radius: 8px; padding: 7px 10px; cursor: pointer; font: inherit; font-size: 12px; }
+#cityActivities .ca-tab.on { background: #2f6fed; border-color: #4f8bff; color: #fff; font-weight: 700; }
+#cityActivities .ca-body { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 9px; padding: 12px 14px 14px; overflow-y: auto; max-height: 58vh; }
+#cityActivities .ca-card { text-align: left; border: 1px solid #28313b; background: rgba(255,255,255,.04); color: #e8eef7; border-radius: 10px; padding: 10px 11px; cursor: pointer; font: inherit; }
+#cityActivities .ca-card:hover { border-color: #4f8bff; background: rgba(79,139,255,.12); }
+#cityActivities .ca-name { font-size: 15px; font-weight: 700; }
+#cityActivities .ca-desc { font-size: 12px; color: #9fb0c6; margin: 2px 0 7px; line-height: 1.25; }
+#cityActivities .ca-meta { display: flex; justify-content: space-between; gap: 10px; font-size: 11.5px; color: var(--money, #7ed957); font-variant-numeric: tabular-nums; }
+
+/* Pausing is a clean break in the world view. City overlays used to keep
+   drawing through the pause card (including the portrait in screenshot #1). */
+body:not(.state-playing) #cityHud,
+body:not(.state-playing) #cpPanel,
+body:not(.state-playing) #cTurfMeta,
+body:not(.state-playing) #cKillFeed { display: none !important; }
+
+/* ---- THE COUNTER IS TAPPABLE (2026-08-18) --------------------------------
+   city/shops.js used to print [X] / [V] / [0-9] / [R] and listen only for a
+   keydown, so on a tablet every shop and civic desk in the game was a wall of
+   text with no controls on it at all. Each row now carries its own key as
+   `data-k` and one delegated click runs the keyboard's dispatch. These rules
+   are what makes a row LOOK like the control it always was. */
+#cityShop .shopRow {
+  cursor: pointer;
+  border-radius: 8px;
+  padding-left: 6px;
+  padding-right: 6px;
+  -webkit-tap-highlight-color: transparent;
+}
+#cityShop .shopRow:hover { background: rgba(127,208,255,.10); }
+#cityShop .shopRow:active { background: rgba(127,208,255,.20); }
+#cityShop .shopLeave {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #39424f;
+  border-radius: 10px;
+  color: #cdd6e3;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .6px;
+  text-align: center;
+}
+/* a thumb needs a real target: on touch the rows grow to 44px of height and
+   the leave control becomes a proper pill. */
+body.touch #cityShop { min-width: 320px; max-width: min(520px, 94vw); }
+body.touch #cityShop .shopRow { min-height: 44px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; margin: 3px 0; border: 1px solid rgba(232,236,242,.14); background: rgba(255,255,255,.05); }
+body.touch #cityShop .shopLeave { min-height: 52px; justify-content: center; background: rgba(255,255,255,.07); }
+
+/* the job board (city/careers.js) — same story as the counter: it printed
+   "[1-6] accept" and listened only for a keydown. */
+#cityJobs .jobRow { cursor: pointer; border-radius: 8px; padding-left: 6px; padding-right: 6px; -webkit-tap-highlight-color: transparent; }
+#cityJobs .jobRow:hover { background: rgba(255,209,102,.10); }
+#cityJobs .jobRow:active { background: rgba(255,209,102,.20); }
+#cityJobs .jobFoot { display: flex; gap: 10px; margin-top: 12px; }
+#cityJobs .jobBtn { flex: 1; padding: 9px 12px; border: 1px solid #3a3140; border-radius: 10px; color: #cdd6e3; font-size: 13px; font-weight: 700; letter-spacing: .6px; text-align: center; }
+body.touch #cityJobs { min-width: 320px; max-width: min(520px, 94vw); }
+body.touch #cityJobs .jobRow { min-height: 44px; display: flex; align-items: center; gap: 8px; padding: 8px 10px; margin: 3px 0; border: 1px solid rgba(232,236,242,.14); background: rgba(255,255,255,.05); }
+body.touch #cityJobs .jobBtn { min-height: 52px; justify-content: center; background: rgba(255,255,255,.07); }
+
+/* the mod garage (city/modshop.js) */
+#modshopPanel .msRow { border-radius: 8px; -webkit-tap-highlight-color: transparent; }
+#modshopPanel .msRow:hover { background: rgba(191,227,154,.10); }
+#modshopPanel .msRow:active { background: rgba(191,227,154,.20); }
+#modshopPanel .msClose { margin-top: 10px; padding: 9px 12px; border: 1px solid #4a5a3a; color: #cdd6e3; font-size: 13px; font-weight: 700; letter-spacing: .6px; text-align: center; cursor: pointer; }
+body.touch #modshopPanel .msRow { min-height: 44px; align-items: center; padding: 8px 10px; margin: 3px 0; }
+body.touch #modshopPanel .msClose { min-height: 52px; background: rgba(255,255,255,.07); }
+
+/* the car lot (city/empire.js) */
+#cityCarBiz .ebRow { cursor: pointer; border-radius: 8px; padding-left: 6px; padding-right: 6px; -webkit-tap-highlight-color: transparent; }
+#cityCarBiz .ebRow:hover { background: rgba(255,209,102,.10); }
+#cityCarBiz .ebRow:active { background: rgba(255,209,102,.20); }
+#cityCarBiz .ebFoot { display: flex; gap: 8px; margin: 6px 0; }
+#cityCarBiz .ebBtn { flex: 1; padding: 8px 10px; border: 1px solid #3a3140; border-radius: 10px; color: #cdd6e3; font-size: 12px; font-weight: 700; letter-spacing: .5px; text-align: center; }
+body.touch #cityCarBiz .ebRow { min-height: 44px; display: flex; align-items: center; padding: 8px 10px; margin: 3px 0; }
+body.touch #cityCarBiz .ebBtn { min-height: 48px; justify-content: center; background: rgba(255,255,255,.07); }
+
+/* the realty menu (city/realestate.js) */
+#cityRealty .reRow { cursor: pointer; border-radius: 8px; padding-left: 6px; padding-right: 6px; -webkit-tap-highlight-color: transparent; }
+#cityRealty .reRow:hover { background: rgba(255,209,102,.10); }
+#cityRealty .reRow:active { background: rgba(255,209,102,.20); }
+#cityRealty .reBtn { margin-top: 10px; padding: 9px 12px; border: 1px solid #2f3a44; color: #cdd6e3; font-size: 13px; font-weight: 700; letter-spacing: .6px; text-align: center; }
+body.touch #cityRealty .reRow { min-height: 44px; display: flex; align-items: center; padding: 8px 10px; margin: 3px 0; }
+body.touch #cityRealty .reBtn { min-height: 52px; justify-content: center; background: rgba(255,255,255,.07); }
+
+/* the empire panel (city/wealth.js) — its action pills were spans */
+#cityEmpire .weRow { -webkit-tap-highlight-color: transparent; }
+#cityEmpire .weRow:hover { filter: brightness(1.25); }
+#cityEmpire .weRow:active { filter: brightness(.85); }
+#cityEmpire .weClose { padding: 9px 12px; border: 1px solid #5a4a2a; border-radius: 10px; color: #c9b98a; font-size: 13px; font-weight: 700; letter-spacing: .6px; text-align: center; cursor: pointer; }
+body.touch #cityEmpire .weRow { min-height: 38px; display: inline-flex; align-items: center; }
+body.touch #cityEmpire .weClose { min-height: 52px; justify-content: center; background: rgba(255,255,255,.07); }
+
+/* the power board (city/leaderboard.js) */
+#cityBoard .lbFoot, .lbFoot { display: flex; gap: 10px; margin-top: 10px; }
+.lbBtn { flex: 1; padding: 9px 12px; border: 1px solid #2c3140; border-radius: 10px; color: #cdd6e3; font-size: 13px; font-weight: 700; letter-spacing: .6px; text-align: center; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.lbBtn:hover { background: rgba(255,255,255,.07); }
+body.touch .lbBtn { min-height: 52px; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,.07); }

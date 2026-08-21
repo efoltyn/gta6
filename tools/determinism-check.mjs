@@ -1,0 +1,139 @@
+#!/usr/bin/env node
+/* tools/determinism-check.mjs — TWO CLIENTS, ONE SEED, THE SAME MATCH?
+
+   Multiplayer is not a transport problem first. It is a DETERMINISM problem:
+   before two machines can share a match of Natural Disaster Survival, the same
+   seed and the same sequence of ticks have to produce the same island, the same
+   disaster arc, the same wave and the same hundred bodies on both of them.
+   Otherwise every design above it — lockstep, rollback, server-authoritative
+   with client prediction — is building on sand, and the bug does not show up
+   until two people are playing.
+
+   This tool measures exactly that, and nothing else. It boots the game TWICE in
+   two separate browser contexts, drives an IDENTICAL scripted match in each
+   (same seed, same forced disaster order, same number of fixed-size ticks, no
+   input), and fingerprints the world every FP_EVERY ticks:
+
+     the player, every bot's position/hp/dead, the director's phase and
+     intensity, the sea surge, which buildings have fallen, where the holes are
+
+   Then it compares the two tapes and reports the FIRST tick where they differ
+   and what differed. A divergence is a `Math.random()` in the world path (this
+   repo's determinism law forbids it and core/seed.js is what to use instead),
+   an iteration over an unordered set, or a system reading wall-clock time.
+
+     node tools/determinism-check.mjs
+     node tools/determinism-check.mjs --url disaster.html --ticks 3600
+     node tools/determinism-check.mjs --json
+
+   IT IS A MEASUREMENT, NOT A GATE, until it reads clean. Ratchet the number
+   down; do not pretend it is zero. */
+import { launch } from "./lib/cdp.mjs";
+
+const argv = process.argv.slice(2);
+const arg = (f, d) => { const i = argv.indexOf(f); return i >= 0 && argv[i + 1] != null ? argv[i + 1] : d; };
+const has = (f) => argv.includes(f);
+
+const URL_REL = arg("--url", "disaster.html");
+const SEED = arg("--seed", "90210");
+const TICKS = +arg("--ticks", "2400");
+const BOTS = arg("--bots", "24");
+const FP_EVERY = 60;
+const JSON_OUT = has("--json");
+
+/* THE SCRIPTED MATCH. Everything that could differ between two runs is pinned:
+   the seed comes from the URL, the bot count is set before the reset, the
+   disaster order is forced rather than shuffled, and the step is a fixed
+   1/60 — the same contract a lockstep client would run under. */
+const RUN = (ticks, bots) => `(async () => {
+  CBZ.SURV_BOTS = ${bots};
+  CBZ.modes.survival.reset(CBZ.game);
+  CBZ.disasters.force("quake");
+  const tape = [];
+  const fp = () => {
+    const p = CBZ.player, A = CBZ.surv.arena;
+    let h = 2166136261 >>> 0;
+    const mix = (v) => {
+      const n = (Math.round((v || 0) * 1000) | 0) >>> 0;
+      h ^= n & 255; h = Math.imul(h, 16777619) >>> 0;
+      h ^= (n >>> 8) & 255; h = Math.imul(h, 16777619) >>> 0;
+      h ^= (n >>> 16) & 255; h = Math.imul(h, 16777619) >>> 0;
+    };
+    mix(p.pos.x); mix(p.pos.y); mix(p.pos.z); mix(p.hp); mix(p.dead ? 1 : 0);
+    const b = CBZ.bots || [];
+    for (let i = 0; i < b.length; i++) {
+      const a = b[i];
+      mix(a.pos ? a.pos.x : 0); mix(a.pos ? a.pos.y : 0); mix(a.pos ? a.pos.z : 0);
+      mix(a.hp); mix(a.dead ? 1 : 0);
+    }
+    mix(CBZ.waterSurge ? CBZ.waterSurge() : 0);
+    const A2 = A && A.fragile ? A.fragile : [];
+    let fallen = 0; for (let i = 0; i < A2.length; i++) if (A2[i].fallen) fallen++;
+    mix(fallen);
+    mix((CBZ.survHoles || []).length);
+    return {
+      h: h >>> 0,
+      state: CBZ.disasters.state(), cur: CBZ.disasters.current(),
+      px: Math.round(p.pos.x * 100) / 100, pz: Math.round(p.pos.z * 100) / 100,
+      live: b.filter(a => !a.dead).length, fallen,
+      surge: Math.round((CBZ.waterSurge ? CBZ.waterSurge() : 0) * 1000) / 1000,
+    };
+  };
+  tape.push(Object.assign({ t: 0 }, fp()));
+  for (let i = 1; i <= ${ticks}; i++) {
+    CBZ.stepSim(1 / 60);
+    if (i % ${FP_EVERY} === 0) tape.push(Object.assign({ t: i }, fp()));
+    if (i % 180 === 0) await new Promise(r => setTimeout(r, 0));
+  }
+  return tape;
+})()`;
+
+async function runOnce(label) {
+  const rig = await launch({ rafBudget: 1200 });
+  try {
+    await rig.open(URL_REL, `seed=${SEED}`);
+    if (!await rig.wait("window.CBZ && CBZ.game && CBZ.stepSim", 120000)) throw new Error("engine never came up");
+    const playing = await rig.wait(`(() => {
+      if (CBZ.game.state === 'playing' && CBZ.game.mode === 'survival') return true;
+      const mb = document.querySelector('.mode-btn[data-mode="survival"]'); if (mb) mb.click();
+      const pb = document.getElementById('playBtn'); if (pb) pb.click();
+      return CBZ.game.state === 'playing' && CBZ.game.mode === 'survival';
+    })()`, 200000, 250);
+    if (!playing) throw new Error("never entered a survival match");
+    const tape = await rig.evl(RUN(TICKS, BOTS), true);
+    if (!JSON_OUT) console.log(`  run ${label}: ${tape.length} samples over ${TICKS} ticks`);
+    return tape;
+  } finally { await rig.close(); }
+}
+
+const a = await runOnce("A");
+const b = await runOnce("B");
+
+const out = { url: URL_REL, seed: SEED, ticks: TICKS, samples: a.length, firstDivergence: null, matching: 0, detail: null };
+for (let i = 0; i < Math.min(a.length, b.length); i++) {
+  if (a[i].h === b[i].h) { out.matching++; continue; }
+  out.firstDivergence = a[i].t;
+  out.detail = {
+    tick: a[i].t,
+    A: a[i], B: b[i],
+    what: Object.keys(a[i]).filter((k) => k !== "h" && JSON.stringify(a[i][k]) !== JSON.stringify(b[i][k])),
+  };
+  break;
+}
+out.deterministicThrough = out.firstDivergence == null ? TICKS : out.firstDivergence - FP_EVERY;
+
+if (JSON_OUT) console.log(JSON.stringify(out, null, 1));
+else {
+  console.log("");
+  console.log("  page              " + out.url + "  (seed " + out.seed + ", " + BOTS + " bots)");
+  console.log("  identical for     " + out.deterministicThrough + " / " + TICKS + " ticks" +
+    "  (" + (out.deterministicThrough / 60).toFixed(1) + " s of match)");
+  if (out.firstDivergence == null) console.log("\n  DETERMINISM: two clients on this seed run the same match.");
+  else {
+    console.log("  first divergence  tick " + out.firstDivergence + " — " + (out.detail.what.join(", ") || "positions only"));
+    console.log("    A " + JSON.stringify(out.detail.A));
+    console.log("    B " + JSON.stringify(out.detail.B));
+    console.log("\n  DETERMINISM: NOT YET. Something in the world path is not seeded.");
+  }
+}
+process.exit(0);

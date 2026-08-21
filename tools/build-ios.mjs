@@ -80,9 +80,19 @@ for (const s of scripts) {
   if (!existsSync(file)) { console.error("  missing: " + rel); continue; }
   const code = readFileSync(file, "utf8");
   rawBytes += code.length;
-  parts.push(`\n;window.__cbzBundleAt(${JSON.stringify(s)});\n/* ==== ${rel} ==== */\n`);
+  /* ONE FILE, ONE FAILURE DOMAIN — the other thing concatenation breaks.
+     A <script src> that throws at load kills ITSELF and the browser runs the
+     next tag; that is why this game survives a module that finds something it
+     needed missing. Concatenated raw, the same throw aborts every file after
+     it, and the page dies at the first one. Caught this exactly: world/
+     cellblock.js throws harmlessly in the slice (the prison file it takes
+     roomShell from is not in this build), and the unbundled page did not care.
+     Every block therefore gets the same isolation a script tag has. Safe
+     because all 273 files are IIFEs — nothing declares a top-level binding
+     another file reads, so the try block cannot hide anything. */
+  parts.push(`\n;window.__cbzBundleAt(${JSON.stringify(s)});\n/* ==== ${rel} ==== */\ntry {\n`);
   parts.push(code);
-  parts.push("\n");
+  parts.push(`\n} catch (e) { (window.__cbzBundleFailed || (window.__cbzBundleFailed = [])).push(${JSON.stringify(rel)}); console.error("[bundle] " + ${JSON.stringify(rel)} + " threw at load", e); }\n`);
 }
 parts.push(`\n;window.__cbzBundleAt(null);\n`);
 const bundlePath = path.join(OUT, "bundle.js");
@@ -160,14 +170,30 @@ function copyTree(rel) {
   return n;
 }
 
-// css always; the rest is what the scan found, collapsed to its shallowest dirs
+/* WHAT COUNTS AS A REFERENCE. Every .js file the page lists is already INSIDE
+   bundle.js, so copying it again would double the app for nothing — and the
+   naive rule did exactly that, shipping 17 MB of source next to the 5.5 MB
+   bundle because "src/city/wildlife.js" appears in a comment. A src/ path is
+   only copied when something FETCHES it at run time, which is three cases and
+   no others:
+
+     src/workers/*        new Worker(path) — a worker is loaded by URL, always
+     src/vendor/draco/*   DRACOLoader fetches its decoder when a compressed
+                          mesh arrives
+     any non-.js file     wasm, json, textures, models
+
+   assets/ is the opposite case: paths there are built by concatenation at run
+   time (assets/audio/ + name + ".m4a"), so only the prefix is visible in the
+   code and the directory is copied whole. */
 const copy = new Set(cssFiles);
 for (const w of wanted) {
-  const parts2 = w.split("/");
-  if (parts2[0] === "assets") copy.add(parts2.slice(0, Math.min(2, parts2.length)).join("/"));
-  else if (parts2[0] === "src" && /\.(js|wasm|json|bin|glb|png|jpg|m4a|mp3|ogg)$/.test(w)) copy.add(w);
-  else if (parts2[0] === "src" && parts2[1] === "workers") copy.add("src/workers");
-  else if (parts2[0] === "src" && parts2[1] === "vendor") copy.add(w);
+  const seg = w.split("/");
+  if (seg[0] === "assets") { copy.add(seg.slice(0, Math.min(2, seg.length)).join("/")); continue; }
+  if (seg[0] !== "src") continue;
+  if (seg[1] === "workers") copy.add("src/workers");
+  else if (seg[1] === "vendor" && seg[2] === "draco") copy.add("src/vendor/draco");
+  else if (seg[1] === "vendor" && seg[2] === "sqlite-wasm") copy.add("src/vendor/sqlite-wasm");
+  else if (!/\.js$/.test(w) && /\.[a-z0-9]+$/i.test(w)) copy.add(w);
 }
 let assetBytes = 0;
 for (const c of [...copy].sort()) assetBytes += copyTree(c);

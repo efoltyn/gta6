@@ -155,7 +155,7 @@
       /* iOS suspends the WebAudio graph with the app. systems/audio.js resumes
          on the next sound it plays, which is a frame too late and only if a
          sound happens — so resume it here, on the way back in. */
-      const ctx = CBZ.audioCtx || (CBZ.audio && CBZ.audio.ctx) || CBZ.sfxCtx;
+      const ctx = CBZ.getAudioCtx ? CBZ.getAudioCtx() : null;
       if (ctx && ctx.state === "suspended" && ctx.resume) {
         A.audioResumes++;
         try { ctx.resume(); } catch (e) {}

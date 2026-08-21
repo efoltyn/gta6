@@ -140,6 +140,23 @@ try {
   const missing = Object.keys(report.census).filter((k) => !report.census[k]);
   if (missing.length) fail("census missing: " + missing.join(", "));
 
+  /* WHAT THREW ON THE WAY IN. This used to be thrown away — clearErrors() ran
+     before the sweep so the roster's errors would be clean, and every
+     load-time throw went with it. That is exactly how a slice missing a
+     dependency passed: world/cellblock.js threw `roomShell is not a function`
+     at load, the browser shrugged (a script tag that throws kills only itself)
+     and the game ran anyway. It only became visible when the same files were
+     concatenated for the app, where the throw took the next two hundred with
+     it. A file that cannot load is a broken build whether or not the game
+     limps on afterwards. */
+  report.loadErrors = rig.errors.slice(0, 20);
+  const bundleFailed = await rig.evl("window.__cbzBundleFailed || []");
+  if (bundleFailed && bundleFailed.length) {
+    report.bundleFailed = bundleFailed;
+    fail(bundleFailed.length + " bundled files threw at load (" + bundleFailed[0] + ")");
+  }
+  if (report.loadErrors.length) fail(report.loadErrors.length + " errors during page load (" + report.loadErrors[0] + ")");
+
   // ---- 2. every disaster runs ---------------------------------------------
   rig.clearErrors();
   const sweep = { ran: [], neverActive: [], ticks: 0 };
