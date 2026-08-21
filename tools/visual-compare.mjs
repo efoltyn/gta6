@@ -111,6 +111,10 @@ if (args.help) {
     `  --dsf N              force a device pixel ratio for every frame\n` +
     `  --only before|after  capture one side only, skip the report (fast look iteration)\n` +
     `  --no-pdf            write screenshots/HTML/metadata but skip Chrome PDF printing\n` +
+    `  --cdp-timeout MS     ceiling on every CDP call (default 60000). Raise it for a\n` +
+    `                       preset that simulates real world-seconds, or a slow box:\n` +
+    `                       a frozen main thread cannot answer a poll, and the\n` +
+    `                       timeout looks exactly like a hang. CBZ_CDP_TIMEOUT too.\n` +
     `  --print-only        reprint an existing report.html in --out without recapturing\n` +
     `  --before-label S     override the BEFORE banner/caption (for flag-A/B runs\n` +
     `                       where --before is the same local build with ?cfg_X=0)\n` +
@@ -360,7 +364,26 @@ function recordBrowserMessage(type, value) {
   browserMessages.push(rec);
 }
 
-function send(method, params = {}, timeoutMs = 60000) {
+/* HOW LONG TO WAIT ON A FROZEN MAIN THREAD.
+
+   Every CDP call here had a hard-wired 60 s ceiling, and for years that was
+   plenty. It stopped being plenty the day a preset started simulating real
+   world-seconds: the world build is ONE synchronous task and a stage that
+   steps sixteen seconds of a 25 km sea is another, and while either is running
+   the page cannot answer a readiness poll — so the transport gives up on a
+   page that is working perfectly. The failure surfaces as
+   "Runtime.evaluate timed out", which reads like a hang and sent several
+   people hunting a boot regression that did not exist.
+
+   `preset.stageTimeoutMs` already covered the stage call. This covers
+   everything else — navigation, readiness, screenshots — and is one knob:
+   --cdp-timeout <ms>, or CBZ_CDP_TIMEOUT. It is not a fix for slowness; it is
+   the difference between "this machine needs longer" and "this is broken",
+   which are the two diagnoses that keep being confused. */
+const CDP_TIMEOUT = Math.max(15000,
+  Number(args["cdp-timeout"] || process.env.CBZ_CDP_TIMEOUT) || 60000);
+
+function send(method, params = {}, timeoutMs = CDP_TIMEOUT) {
   return new Promise((resolve, reject) => {
     const id = sequence++;
     const timer = setTimeout(() => {
@@ -373,7 +396,7 @@ function send(method, params = {}, timeoutMs = 60000) {
   });
 }
 
-async function evaluate(expression, timeoutMs = 60000) {
+async function evaluate(expression, timeoutMs = CDP_TIMEOUT) {
   const message = await send("Runtime.evaluate", {
     expression,
     returnByValue: true,
@@ -465,8 +488,9 @@ function cacheBusted(url, side) {
 async function navigate(url, side) {
   activeSide = side;
   const requested = cacheBusted(url, side);
-  await send("Page.navigate", { url: requested }, 90000);
-  const deadline = Date.now() + 90000;
+  const navBudget = Math.max(90000, CDP_TIMEOUT * 1.5);
+  await send("Page.navigate", { url: requested }, navBudget);
+  const deadline = Date.now() + navBudget;
   let lastState = "loading";
   while (Date.now() < deadline) {
     try {

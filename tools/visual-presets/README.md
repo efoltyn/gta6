@@ -144,3 +144,33 @@ The core deliberately owns navigation, fresh browser state, matched viewport,
 baseline-stage handoff, compositing barriers, file naming, screenshots, report
 layout, PDF printing, and opening the result.
 New visual domains only need to describe their subjects and staging recipe.
+
+## Reading the answer back (the wrapper)
+
+`node tools/before-after.mjs <preset>` (`npm run ba -- <preset>`) is how these
+are actually run. The engine's HTML/PDF report is the output for a person with
+a screen; the wrapper exists because the two most frequent callers — a CI job
+and an agent — cannot open either one. It prints three things when a run
+finishes:
+
+- **the measurements table** — your declared `metrics`, before against after,
+  with the delta marked against your `better` direction. `--no-summary` off.
+- **a VERDICT line** — how many metrics moved the right way vs the wrong way.
+  `--gate` turns that into the exit status (2 on any regression), so a preset
+  becomes a check you can run rather than a report you have to read.
+- **the pairs** — every subject stitched into ONE labelled side-by-side PNG
+  under `<report>/pairs/`, with absolute paths printed. `--no-pairs` off.
+
+That last one is not a convenience, it is the point. **Declare metrics, but
+never trust them alone.** A metric can only ever check the thing you already
+thought to declare when you wrote the preset. "The pectoral fin is a
+rectangle", "the wake reads as a speedboat's", "the roll-over looks like a
+rotation glitch" are all fatal and none of them is a number anybody declared.
+Open the pair image and look at it — that is what the pairs exist for, and for
+an agent it is the difference between checking the work and guessing at it.
+
+So a good preset does both jobs at once: it declares numbers precise enough to
+gate on, AND it frames each subject so a single glance at the stitched image
+says whether the thing is right. If a subject's picture cannot be judged by
+eye, the camera is in the wrong place — fix the staging, don't add a metric to
+cover for it.

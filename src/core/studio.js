@@ -512,8 +512,30 @@
         "city/wildlife/bigcats.js", "city/wildlife/megafauna.js",
         "city/wildlife/farm.js", "city/wildlife/snow_ungulates.js",
         "city/wildlife/small_game.js", "city/wildlife/snakes.js",
-        "city/wildlife/aquatic.js"],
-      publishes: ["WILDLIFE_SPECIES", "defineSpecies"],
+        "city/wildlife/aquatic.js",
+        /* THE ORCA'S OWN FILE RIDES WITH THE BESTIARY, and this is a fix, not a
+           tidy-up. city/wildlife_orca.js re-registers id:"orca" over
+           aquatic.js's build (defineSpecies is last-write-wins) — the eye
+           patch, the saddle, the flank flare, the blowhole and the two
+           sexually-dimorphic dorsal fins are ALL in that file — so a page that
+           loads `bestiary` without it builds the old dolphin-shaped animal and
+           there is no way to tell from the pack list.
+
+           It also carries the pod's own takedown, and that half was found by
+           measurement: an eight-orca pod staged against a megalodon in
+           games/battle.html left the megalodon alive, because the takedown
+           lived in city/marine_predation.js and THAT is in no pack at all. The
+           file stands its own fight up when marine_predation is absent and
+           stands down completely when it is present, so adding it here cannot
+           double-drive anything in the full game.
+
+           It costs a page that never builds an orca one guarded script: every
+           API it consumes (predatorHunt, creatureFight, waterField, the chum
+           bus, the wildlife roster) is probed at runtime and it degrades to
+           "just a species definition" when none of them are there. */
+        "city/wildlife_orca.js"],
+      publishes: ["WILDLIFE_SPECIES", "defineSpecies", "orcaBrain", "orcaIdentity",
+        "orcaSurfaceRead", "orcaPodRead", "orcaTakedown", "orcaStage", "orcaAudit"],
     },
     beasts: {
       gives: "animals that WALK, FIGHT and DIE without the full city: the " +
@@ -524,7 +546,10 @@
              "quadruped on its flank with its legs splayed, and the ape move " +
              "set, a knuckle-walker charges, hammers, backhands, beats its " +
              "chest and PICKS A MAN UP and swings him, which the one generic " +
-             "maul could never be",
+             "maul could never be — and, since the swim rig moved out of the " +
+             "hunting engine into wildlife_rig.js, the TAIL BEAT and the JAW " +
+             "of anything that swims, so a shark in a water arena is an animal " +
+             "and not a rigid mesh sliding through the sea",
       /* THE SOLVER RIDES WITH THE FIGHT, and that is a correction, not a
          convenience. A pack that can make an animal attack but not die
          properly is a pack that hands every page it serves the exact death
@@ -541,10 +566,84 @@
          CBZ.hurtWorldActor) rather than one branch per host — without that
          pack a backhand has nobody to reach. */
       needs: ["look", "caps"],
-      files: ["city/wildlife_rig.js", "city/creature_combat.js", "systems/predator_anim.js",
+      /* wildlife_traits.js rides along and it is not a tax: it is pure
+         derivation (no update loop, no spawner, no landmass hook — grep it),
+         and without it every animal a page builds is EXACTLY its species scale
+         and has no hunger at all. "All wildlife including sharks should have
+         varying size and varying hunger" is the owner's ask, and a pack that
+         can make an animal fight but not be an individual hands every page it
+         serves forty identical mackerel. */
+      files: ["city/wildlife_rig.js", "city/wildlife_traits.js", "city/creature_combat.js",
+        "systems/predator_anim.js",
         "systems/quadruped_ragdoll.js", "systems/ape_combat.js"],
       publishes: ["wildlifeRig", "creatureFight", "faceAnimalHeading", "quadRagdoll",
-        "apeStep", "apeAudit"],
+        "apeStep", "apeAudit", "buildSwimRig", "animateSwim", "swimJaw",
+        "wildlifeTraits", "wildlifeSize", "wildlifeScale", "wildlifeHunger"],
+    },
+
+    /* ---- the sea as a place things happen in ------------------------------
+
+       WHY THIS PACK EXISTS, AND WHY ITS ABSENCE WAS INVISIBLE. `bestiary`
+       gives a page the shark's BODY and `beasts` gives it a tail beat and a
+       jaw. Neither gives it a HUNT, a fin cutting the surface, blood in the
+       water, or anything to eat — those live in four files that were in no
+       pack at all, so a page could load a perfect great white that swam in a
+       straight line forever and there was no way to tell from the pack list.
+
+       That is not hypothetical. games/battle.html grew an open-water arena and
+       a marine roster and got exactly this: the new models, and none of the
+       systems. The same fault had already been caught once, in the other
+       direction — an eight-orca pod left a megalodon alive because the
+       takedown lived in city/marine_predation.js and nothing loaded it — and
+       it was fixed for the orca alone by moving that one animal's fight into
+       its own file. This is the general fix, and it is the reason a "publishes"
+       list is worth keeping honest: every name below was unreachable on any
+       page that did not boot the whole city.
+
+       systems/predator.js is the floor. It is the ONE shared "something is
+       hunting you and it commits" driver — the wolf pack, the big cat and the
+       shark all tick it — and without it wildlife_shark.js's fin never appears
+       because nothing ever enters a hunt state. It carries no marine
+       assumptions and would serve a land-only page just as well; it lives here
+       because here is where it was first needed, not because it is aquatic.
+
+       Everything below degrades on its own: each file probes what it consumes
+       at runtime and stands down when it is missing, which is why they could
+       go unloaded for so long without an error. */
+    marine: {
+      gives: "the sea with something IN it: the shared predator hunt driver, " +
+             "the shark's stalk (sense, circle, bump, rush, seize) and the " +
+             "DORSAL FIN and body shadow it draws on the surface independently " +
+             "of the body's LOD, blood in the water as a thing predators smell " +
+             "and come for, the megalodon's bite across a hull, the pod " +
+             "mechanics that let enough orcas take a megalodon, and the " +
+             "feeding frenzy that makes any of it legible from a distance " +
+             "— bait balls that tighten and get driven up against the surface, " +
+             "gulls working over a slick, and scavengers on a carcass",
+      /* waterfield rides along because every file here asks the same question
+         first — is this point water, and how deep. It is also in `marina`,
+         which is fine: the loader dedupes by path, and a venue that needs a
+         basin and a pack that needs a sea should each be able to say so. */
+      needs: ["bestiary", "beasts", "blood"],
+      files: ["city/waterfield.js", "systems/predator.js", "city/wildlife_shark.js",
+        "city/marine_predation.js", "city/marine_frenzy.js"],
+      /* Every name below was read off the files, not remembered. The first
+         draft of this list said "marineFrenzy", which does not exist — the
+         frenzy's entry point is marineFrenzyAt — and a wrong name here is the
+         same class of fault as the missing pack itself: a claim about what a
+         page can reach that nothing checks. */
+      publishes: ["predatorHunt", "predatorKit", "predatorSeize", "predatorRelease",
+        "predatorStagger", "predatorDisengage", "predatorPack", "predatorEats",
+        "predatorDefends", "predatorMedium", "predatorAudit",
+        "sharkBrain", "sharkState", "sharkSurfaceRead", "sharkFinDrop",
+        "marineRelation", "marinePodNeeded", "marinePodNeededFor", "marinePodRole",
+        "marinePodMembers", "marinePodEnough", "marinePodRam", "marinePodRamReady",
+        "marinePodRoll", "marinePodRollReady", "marinePodRolling", "marinePodJoin",
+        "marinePodBreakOff", "marineHurt", "marineBleed", "marineGape",
+        "marineBiteableHull", "marineDpsAgainst", "marineBodyLen",
+        "marineSurfaceHit", "marineAudit",
+        "marineFrenzyAt", "marineFrenzySites", "marineFrenzyAbsorb",
+        "marineFrenzyAudit", "marineFrenzyReset", "marineScavengeStep"],
     },
 
     // ---- flight and weapons -------------------------------------------------

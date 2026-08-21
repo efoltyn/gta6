@@ -22,6 +22,9 @@
 
    `isSurfaceWater` excludes bridge decks (cars/people stand on them).
    `isNavigableWater` deliberately does not, so sea life can pass underneath.
+   That deck rule is now the ONLY difference between the two: both read the
+   same coast + rainwater + surge run-up field, so a flooded street is water
+   for a shark on exactly the terms it is water for a swimmer.
    No external runtime is needed and every query is allocation-free except the
    high-level helpers used for spawn/recovery.
 ============================================================ */
@@ -154,9 +157,50 @@
     return fallbackWater(A, x, z, true) ? -24 : 24;
   }
 
+  /* ---- THE FLOOD IS WATER FOR THE THINGS THAT LIVE IN IT ------------------
+     OWNER: "gang city too and nat disaster should all have these sharks" — and
+     a flooded Gang City street with a bull shark in it, and a tsunami that
+     carries sharks inland, are the two pictures that sentence describes.
+
+     NEITHER COULD HAPPEN, and the reason was inside this file. Two functions
+     here answer "is there water at this point", and they were answering off
+     DIFFERENT DATA:
+
+       isSurfaceWater()    shoreAt() + floodReach() — the coast, PLUS standing
+                           rainwater, PLUS how far a surge has pushed the
+                           waterline inland. This is the one the player, the
+                           swim/drown clock, buoyancy, the boats, the gore
+                           medium and the underwater view all read, which is
+                           why a tsunami floods a street for a PERSON.
+       isNavigableWater()  coastAt(), and nothing else. The raw STATIC signed
+                           shoreline. Surge-blind and rain-blind, by omission.
+
+     city/tsunami.js's own header states the consequence as if it were already
+     true — "the sharks read it too, and their reach is a water test, so deep
+     water coming inland means what deep water coming inland means". It was not
+     true. The sea rose over the seawall, the swimmer drowned in the street, and
+     the shark's navigation still believed that street was dry land: wildlife.js
+     tests isNavigableWater every frame and PROJECTS a body that fails it back
+     to the nearest valid water, so a shark carried inland was actively teleported
+     back out to sea. The file whose header promises "ONE WATER TRUTH FOR
+     RENDERING + GAMEPLAY" was holding two.
+
+     The fix is the same expression, not a second flood model. Navigable water is
+     the surface field minus exactly one thing — the bridge-deck exclusion, which
+     is the documented and deliberate difference between these two tests (sea
+     life passes UNDER a deck; a person stands ON it).
+
+     A species' own `clearance` still gates it, so nothing here decides which
+     animals go inland: a bull shark (24 m of shore clearance) rides a surge up a
+     flooded avenue and a megalodon (88 m) never leaves the deep, and neither of
+     those is a rule anybody had to type.
+
+     REVERT: CBZ.CONFIG.MARINE_FLOOD_NAV = false (?cfg_MARINE_FLOOD_NAV=0)
+     restores the static-coast test verbatim. */
   function isNavigableWater(x, z, clearance) {
     clearance = Math.max(0, +clearance || 0);
-    return coastAt(x, z) < -clearance;
+    if (CBZ.CONFIG && CBZ.CONFIG.MARINE_FLOOD_NAV === false) return coastAt(x, z) < -clearance;
+    return shoreAt(x, z) < -clearance + floodReach();
   }
 
   /* ============================================================
