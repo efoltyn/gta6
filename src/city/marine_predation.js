@@ -249,6 +249,35 @@
     return (m.len = L);
   }
 
+  /* HOW WIDE IS THE BODY ITSELF. The whole-group box is the wrong answer by
+     a factor of three — a megalodon's PECTORAL FINS span ~13 m of z — so the
+     beam is measured off the named hull mesh alone (sharkHull / cetaceanHull
+     / fishHull, the marine-overhaul naming convention), rotation zeroed,
+     once. This is the surface the bite pass is capped at: teeth stop AT the
+     flank, not at the fin tips and not at the centre line. */
+  function bodyBeam(a) {
+    const m = mp(a);
+    if (m.beam > 0) return m.beam;
+    let B = 0;
+    const g = a && a.group;
+    if (g && _box) {
+      let hull = null;
+      g.traverse(function (o) { if (!hull && o.isMesh && /hull$/i.test(o.name || "")) hull = o; });
+      if (hull) {
+        const rx = g.rotation.x, ry = g.rotation.y, rz = g.rotation.z;
+        try {
+          g.rotation.set(0, 0, 0); g.updateMatrixWorld(true);
+          _box.setFromObject(hull);
+          if (isFinite(_box.max.z) && isFinite(_box.min.z)) B = _box.max.z - _box.min.z;
+        } catch (e) { B = 0; }
+        g.rotation.set(rx, ry, rz);
+        try { g.updateMatrixWorld(true); } catch (e) {}
+      }
+    }
+    if (!(B > 0)) B = bodyLen(a) * 0.19;
+    return (m.beam = B);
+  }
+
   /* HOW WIDE CAN IT OPEN. The authored aquatic mouth publishes its hinge and
      its bite point, so the jaw LENGTH is a fact; a shark's tooth ring is a U
      about as wide as it is long, hence the 1.15. This is the number the ship
@@ -502,30 +531,39 @@
     return role;
   }
 
-  /* THE RAM. A committed pass that is NOT a bite: it lands with the melon and
-     the shoulder, it hurts a little, and what it really does is STAGGER the
-     quarry — take its facing away for a beat so the next orca is free to come
-     in. That is the whole of "they harry it from multiple bearings so it
-     cannot face them all", and staggers stacking on top of each other is
-     exactly why more of them wins.
+  /* THE FLANK PASS, AND IT IS A BITE (owner, 2026-08-21: "orca attack is
+     legit just head butting … it doesn't bite, it headbutts"). The pass
+     itself is unchanged pod grammar — leave the bearing, drive in across the
+     quarry's beam, carry through, rejoin — and what it does mechanically is
+     still the STAGGER: take the quarry's facing away for a beat so the next
+     orca is free to come in. But the blow lands with the MOUTH now: jaws
+     riding the bite curve, teeth arriving at the flank, and the whole drive
+     capped by creature_combat's body-stops-at-body law so the two animals
+     COLLIDE at their surfaces instead of passing through each other.
 
      IT IS A creatureFight STRIKE, not a private animation. The shared combat
      driver already owns the facing, the cadence, the strike window, the
      damage frame, the blood from the contact point and the pose hand-back;
-     the only thing it did not have was this silhouette, so `ram_flank` was
-     added THERE (creature_combat.js) and this file supplies the numbers.
+     `bite_flank` lives THERE (creature_combat.js) and this file supplies the
+     numbers. ?bitepass=off (CBZ.CONFIG.MARINE_BITE_PASS=false) reverts to
+     the old shut-mouth ram_flank, drive-through and all — that is the
+     before/after preset's BEFORE column.
 
-     THE GATE IS A BEARING. Coming in on the quarry's nose is a bite, not a
-     ram, and it is the bearing that gets an orca killed — so a flanker will
-     not throw one until it is more than ~50 degrees off the quarry's heading.
-     That single test is what makes the pod LOOK like a pod: they slide around
-     it and hit it from the sides while it turns. */
+     THE GATE IS A BEARING. Coming in on the quarry's nose gets an orca
+     killed — so a flanker will not commit until it is more than ~50 degrees
+     off the quarry's heading. That single test is what makes the pod LOOK
+     like a pod: they slide around it and hit it from the sides while it
+     turns. */
+  function bitePassOn() {
+    return typeof CBZ.creatureBitePass === "function" ? !!CBZ.creatureBitePass() : true;
+  }
   function ramOpts(a) {
     const m = mp(a);
     if (m.ram) return m.ram;
     const k = kitOf(a);
+    const bite = bitePassOn();
     const o = m.ram = {
-      style: "ram_flank",
+      style: bite ? "bite_flank" : "ram_flank",
       seize: false,
       speed: (k && k.rushSpeed > 0) ? k.rushSpeed * 0.8 : 10,
       rate: RAM_EVERY * Math.sqrt(sizeOf(a)),
@@ -534,7 +572,8 @@
       onHit: function () {
         const t = mp(a).target;
         if (!t || t.dead) return;
-        hurt(t, dpsAgainst(a, t) * 1.6, a, "rammed by a " + label(a));
+        hurt(t, dpsAgainst(a, t) * 1.6, a,
+          (bite ? "bitten by a " : "rammed by a ") + label(a));
         if (typeof CBZ.predatorStagger === "function") {
           try { CBZ.predatorStagger(t, STAGGER_S * clamp(sizeOf(a), 0.5, 2)); } catch (e) {}
         }
@@ -559,6 +598,18 @@
   // Contact range for the blow itself: the two bodies' own measured lengths.
   function ramReach(a, target) {
     return bodyLen(a) * 0.55 + bodyLen(target) * 0.42;
+  }
+  // The attacker's teeth, forward of its group origin, in world metres — the
+  // authored mouth's own bite point when there is one. This is the standoff
+  // the roll-over hold is measured from, so the jaws ride ON the quarry
+  // instead of the two bodies sharing the same water.
+  function jawFwdOf(a) {
+    const g = a && a.group;
+    const mouth = g && g.userData && g.userData.aquaticMouth;
+    if (mouth && mouth.bite && mouth.bite.x > 0) {
+      return mouth.bite.x * ((g.scale && g.scale.x > 0) ? g.scale.x : 1);
+    }
+    return bodyLen(a) * 0.5;
   }
 
   /* WHEN DOES A FLANKER DECIDE TO MAKE A PASS.
@@ -610,6 +661,7 @@
     }
     const o = ramOpts(a);
     o.reach = ramReach(a, target);
+    o.targetRad = bodyBeam(target) * 0.5;      // teeth stop at the measured flank
     o.dmg = dpsAgainst(a, target) * 1.6;
     try { CBZ.creatureFight(a, target, dt, o); } catch (e) {}
     if (a._atkAnim >= 0) { m.ramRun = 0; return true; }   // committed: the swing owns it
@@ -673,19 +725,24 @@
     R.t += dt;
     const p = clamp(R.t / R.dur, 0, 1);
     // (the inversion itself is written by tonicPass() at 47.15 — see ROLLING)
-    // hold the attacker on the flank, jaws in, riding it over
+    // hold the attacker on the flank, jaws ON the pectoral, riding it over.
+    // The station is measured from the TEETH: the orca's own bite point plus
+    // a fraction of the quarry's beam, so the mouth grips the fin line and
+    // the body stays outside the body it is rolling.
     const hp = actorPos(a), tp = actorPos(t);
     if (hp && tp) {
       const face = (t.heading != null) ? t.heading : -t.group.rotation.y;
       const side = (R.side || (R.side = (Math.random() < 0.5 ? 1 : -1)));
       const br = face + side * 1.35;
-      const rr = bodyLen(t) * 0.3 + bodyLen(a) * 0.22;
+      const rr = jawFwdOf(a) + bodyBeam(t) * 0.45;
       const wx = tp.x + Math.cos(br) * rr, wz = tp.z + Math.sin(br) * rr;
       const k = Math.min(1, dt * 3.2);
       hp.x += (wx - hp.x) * k; hp.z += (wz - hp.z) * k;
       hp.y += ((tp.y || 0) + 0.4 - (hp.y || 0)) * k;
       a.heading = Math.atan2(tp.z - hp.z, tp.x - hp.x);
       if (CBZ.faceAnimalHeading) { try { CBZ.faceAnimalHeading(a.group, a.heading); } catch (e) {} }
+      // the grip is a mouth: half-open on the fin for the whole ride
+      if (CBZ.swimJaw) { try { CBZ.swimJaw(a, 0.5); } catch (e) {} }
     }
     // the bleed while it is being worked: this is a chum source, and the whole
     // point of §7 is that other sharks come to it.
@@ -697,6 +754,7 @@
     if (p >= 1 || t.dead) {
       if (!t.dead) hurt(t, maxHpOf(t), a, "drowned by a pod of " + label(a) + "s");
       t._mpRoll = null; m.rolling = null; m.rollT = -1;
+      if (CBZ.swimJaw) { try { CBZ.swimJaw(a, 0); } catch (e) {} }   // let go
       return false;                       // hurt() books the kill, once
     }
     return true;

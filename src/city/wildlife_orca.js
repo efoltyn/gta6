@@ -2233,8 +2233,13 @@
 
   function ramOptsFor(a, s) {
     if (s.ramOpts) return s.ramOpts;
+    // the pass is a BITE now (creature_combat's bite_flank: jaws on the bite
+    // curve, drive capped at the quarry's surface); ?bitepass=off restores
+    // the old shut-mouth ram. Same numbers either way — the stagger is the
+    // mechanic, the mouth is the read.
+    const bite = typeof CBZ.creatureBitePass === "function" ? !!CBZ.creatureBitePass() : true;
     const o = s.ramOpts = {
-      style: "ram_flank", seize: false, reach: 0, dmg: 0,
+      style: bite ? "bite_flank" : "ram_flank", seize: false, reach: 0, dmg: 0,
       speed: (s.opts && s.opts.rushSpeed > 0) ? s.opts.rushSpeed * 0.85 : 12,
       rate: MOB.RAM_EVERY,
       onHit: function () {
@@ -2248,7 +2253,7 @@
         if ((s.mobHave || 1) < (s.mobNeed || 1)) {
           dmg = Math.min(dmg, Math.max(0, (q.hp == null ? hpOf(q) : q.hp) - hpOf(q) * MOB.ROLL_HP));
         }
-        hurt(q, dmg, a, "rammed by a pod of orcas");
+        hurt(q, dmg, a, (bite ? "bitten" : "rammed") + " by a pod of orcas");
         if (typeof CBZ.predatorStagger === "function") {
           try { CBZ.predatorStagger(q, 1.15); } catch (e) {}
         }
@@ -2309,12 +2314,18 @@
     const R = q._orcaRoll;
     R.t += dt;
     const p = clamp(R.t / R.dur, 0, 1);
-    // ride it over from the flank, jaws in
+    // ride it over from the flank, jaws ON the pectoral: the station is the
+    // orca's own bite point plus a slice of the quarry's beam, so the mouth
+    // grips the fin line and the two bodies never share the same water
     const hp = a.group.position, tp = q.group && q.group.position;
     if (tp) {
       const face = (q.heading != null) ? q.heading : -q.group.rotation.y;
       const br = face + R.side * 1.35;
-      const rr = bodyLenOf(q) * 0.30 + bodyLenOf(a) * 0.22;
+      const mouth = a.group.userData && a.group.userData.aquaticMouth;
+      const jawFwd = (mouth && mouth.bite && mouth.bite.x > 0)
+        ? mouth.bite.x * ((a.group.scale && a.group.scale.x) || 1)
+        : bodyLenOf(a) * 0.5;
+      const rr = jawFwd + bodyLenOf(q) * 0.09;
       const k = Math.min(1, dt * 3.2);
       hp.x += (tp.x + Math.cos(br) * rr - hp.x) * k;
       hp.z += (tp.z + Math.sin(br) * rr - hp.z) * k;
@@ -2330,6 +2341,7 @@
       if (!q.dead) hurt(q, hpOf(q) * 2, a, "drowned by a pod of orcas");
       q._orcaRoll = null; s.rolling = null;
       AUDIT.kills = (AUDIT.kills || 0) + 1;
+      if (CBZ.swimJaw) { try { CBZ.swimJaw(a, 0); } catch (e) {} }   // let go
       return false;
     }
     return true;
@@ -2448,6 +2460,7 @@
     if (typeof CBZ.creatureFight === "function" && onFlank && inRange) {
       const o = ramOptsFor(a, s);
       o.reach = bodyLenOf(q) * 0.55 + bodyLenOf(a) * 0.42;
+      o.targetRad = bodyLenOf(q) * 0.095;   // ≈ the hull's half-beam off its length
       o.dmg = dpsAgainst(a, q) * MOB.RAM_K;
       try { CBZ.creatureFight(a, q, dt, o); } catch (e) {}
       if (a._atkAnim >= 0) return true;                  // the swing owns the frame
