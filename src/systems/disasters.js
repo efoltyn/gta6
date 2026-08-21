@@ -152,6 +152,14 @@
     hazardRng = CBZ.seedStream ? CBZ.seedStream("surv-hazards-" + runNo) : null;
   }
   reseedHazards(0);
+  /* THE SHARED DRAW. systems/quake.js is a second file that decides who a
+     disaster kills (facade shedding, gas fires, downed lines) and it had its
+     own `Math.random`, with a header explaining that a runtime event does not
+     need a seed. That was true right up until two machines had to agree on who
+     died. Rather than give it a second stream to keep in step with this one,
+     it draws from THIS one while a survival match is running: same sequence,
+     same order, one place to reason about. */
+  CBZ.survRnd = rnd;
   function camPos() { return CBZ.camera.position; }
   function root() { return CBZ.surv.arena.root; }
   function floor(x, z) { return CBZ.surv.arena.groundHeightAt(x, z); }

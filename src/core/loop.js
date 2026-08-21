@@ -61,7 +61,13 @@
                           // honour an owner-set value (don't clobber a toggle)
 
   function loop(t) {
-    CBZ.now = t;
+    /* WHO OWNS THE CLOCK. Under the variable step, CBZ.now IS the rAF
+       timestamp — unchanged, and right for a single player. Under the fixed
+       step it is advanced one whole tick at a time down in the update block,
+       so that every client's cooldowns and phases move by the same amount per
+       tick instead of by however long that machine's last frame took. */
+    const fixed = (CBZ.fixedStep && CBZ.fixedStep.on()) ? CBZ.fixedStep : null;
+    if (!fixed) CBZ.now = t;
     let dt = (t - last) / 1000;
     let realDt = Math.max(0, dt); // untouched wall-clock delta (pre-clamp)
     last = t;
@@ -106,16 +112,24 @@
 
        The variable path below is untouched and is still what the city and the
        prison run. FIXED_STEP_V1=false puts survival back on it too, live. */
-    const fixed = (CBZ.fixedStep && CBZ.fixedStep.on()) ? CBZ.fixedStep : null;
     // updaters are wrapped so a single throw can NEVER freeze the loop
     if (g.state === "playing" && fixed) {
       const n = fixed.consume(realDt);
-      const fdt = (1 / fixed.hz()) * scale;
+      const step = 1 / fixed.hz();
+      const fdt = step * scale;
       for (let k = 0; k < n; k++) {
         if (k) CBZ._matrixOwnStamp++;      // each tick is its own frame to the skip cache
         g.elapsed += fdt;
         fixed.tick++;
         CBZ.survNetTick = fixed.tick;      // what a snapshot is stamped with
+        /* THE CLOCK ADVANCES BY THE TICK, NOT BY THE WALL. CBZ.now was the rAF
+           timestamp, so every cooldown and phase in the game moved by however
+           long the last frame happened to take — the same drift the step itself
+           was fixed to remove, one level down. It stays MONOTONIC (it advances
+           from wherever it already was, never jumps back, so nothing holding a
+           deadline sees time reverse); what is now identical between clients is
+           the INCREMENT, which is what a deadline is measured in. */
+        CBZ.now += step * 1000;
         for (const u of CBZ.updaters) {
           try { u.fn(fdt); } catch (err) { console.error("[updater]", err); }
         }

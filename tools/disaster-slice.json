@@ -3898,7 +3898,6 @@
   "src/world/graffiti.js",
   "src/world/towers.js",
   "src/world/clutter.js",
-  "src/world/door.js",
   "src/world/exit.js",
   "src/systems/bodymass.js",
   "src/entities/poses.js",
@@ -3918,7 +3917,6 @@
   "src/weapons/appearances/lmg.js",
   "src/weapons/appearances/shank.js",
   "src/city/weapon_thumbnails.js",
-  "src/world/roombuild.js",
   "src/world/lounge.js",
   "src/world/ventilation.js",
   "src/world/southblock.js",
@@ -4054,7 +4052,6 @@
   "src/city/gunmods.js",
   "src/city/scopeview.js",
   "src/city/heists.js",
-  "src/city/interactions.js",
   "src/city/checkpoints.js",
   "src/city/roleverbs.js",
   "src/city/explosives.js",
@@ -4137,7 +4134,6 @@
   "src/city/piracy.js",
   "src/city/presidency.js",
   "src/net/sqlitedb.js",
-  "src/core/packages.js",
   "src/games/ocean.js",
   "src/games/racing.js",
   "src/games/boxing.js",
@@ -4161,11 +4157,13 @@
   "src/city/cctv.js"
  ],
  "needed": [
+  "src/city/interactions.js",
   "src/city/structural.js",
   "src/city/stuntjumps.js",
   "src/city/swim.js",
   "src/city/wildlife_species.js",
   "src/core/lights.js",
+  "src/core/packages.js",
   "src/core/renderer.js",
   "src/core/scene.js",
   "src/entities/character.js",
@@ -4174,9 +4172,11 @@
   "src/systems/solidground.js",
   "src/vendor/three.r128.min.js",
   "src/world/cellblock.js",
+  "src/world/door.js",
+  "src/world/roombuild.js",
   "src/world/water_buoyancy.js"
  ],
- "keptBytes": 15395314,
- "droppedBytes": 10848898,
- "updatedAt": "2026-08-21T06:12:19.919Z"
+ "keptBytes": 15574092,
+ "droppedBytes": 10696689,
+ "updatedAt": "2026-08-21T06:27:38.081Z"
 }

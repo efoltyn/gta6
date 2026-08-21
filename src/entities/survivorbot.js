@@ -86,6 +86,17 @@
     CBZ.clearSurvivorBots();
     const arena = CBZ.buildDisasterArena();
     botRng = CBZ.seedStream ? CBZ.seedStream("surv-crowd-" + (++matchNo)) : null;
+    /* THE THINK SCHEDULE STARTS AT THE MATCH, NOT AT THE PAGE.
+
+       `frame` is what decides which bots think on which tick
+       ((frame + b.slice) % stride), and it counted every update since the page
+       loaded — so which bots thought on tick 1 of a match depended on how many
+       frames the TITLE SCREEN had rendered first. Two clients that took
+       different times to boot ran different crowds from the first tick, which
+       is what tools/determinism-check.mjs kept catching and why the answer
+       moved between runs. Zeroed with the crowd it schedules. */
+    frame = 0;
+    if (CBZ.fixedStep) CBZ.fixedStep.tick = 0;
     let s = 7 + n;
     const rr = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
     for (let i = 0; i < n; i++) {
@@ -216,7 +227,8 @@
   CBZ.onUpdate(23, function (dt) {
     if (CBZ.game.mode !== "survival") return;
     frame++;
-    const camx = CBZ.camera.position.x, camz = CBZ.camera.position.z;
+    const camx = CBZ.camera.position.x, camz = CBZ.camera.position.z;   // VIEW: animation + corpse LOD
+    const px = CBZ.player.pos.x, pz = CBZ.player.pos.z;                 // SIM: think cadence (see below)
     const bots = CBZ.bots;
     lingering = 0;                                   // recounted in the pass below
     for (let i = 0; i < bots.length; i++) {
@@ -259,8 +271,21 @@
       if (b.tag) b.tag.visible = false;                  // identity stays in interaction UI, not over the head
       if (CBZ.body && CBZ.body.busy(b)) continue;       // thrown / knocked down / held → body owns it
       const near = dist2 < ANIM_DIST2;
-      // think: near bots every 3rd frame, far every 7th (round-robin by index)
-      const stride = near ? 3 : 7;
+      /* HOW OFTEN A BOT THINKS IS A SIM DECISION. HOW OFTEN IT ANIMATES IS NOT.
+
+         Both used to be `near`, measured from the CAMERA — so a bot's decision
+         cadence depended on where the local player happened to be looking. On
+         one machine that is invisible. On two it is fatal: tools/determinism-
+         check.mjs found exactly this, three bots out of eight drifting apart
+         within four seconds of an identical seed, because two cameras put the
+         same bot on opposite sides of the LOD boundary and it thought every
+         3rd frame on one client and every 7th on the other.
+
+         The stride is measured from the PLAYER now — a body in the world, at
+         the same place on every client. `near` (the camera) still decides
+         animation, which is a view decision and is allowed to differ. */
+      const sdx = b.pos.x - px, sdz = b.pos.z - pz;
+      const stride = (sdx * sdx + sdz * sdz) < ANIM_DIST2 ? 3 : 7;
       if ((frame + b.slice) % stride === 0) think(b);
       move(b, dt, near);
     }

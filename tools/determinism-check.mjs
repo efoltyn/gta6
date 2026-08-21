@@ -38,7 +38,7 @@ const URL_REL = arg("--url", "disaster.html");
 const SEED = arg("--seed", "90210");
 const TICKS = +arg("--ticks", "2400");
 const BOTS = arg("--bots", "24");
-const FP_EVERY = 60;
+const FP_EVERY = +arg("--every", "60");
 const JSON_OUT = has("--json");
 
 /* THE SCRIPTED MATCH. Everything that could differ between two runs is pinned:
@@ -46,8 +46,27 @@ const JSON_OUT = has("--json");
    disaster order is forced rather than shuffled, and the step is a fixed
    1/60 — the same contract a lockstep client would run under. */
 const RUN = (ticks, bots) => `(async () => {
+  /* STOP THE RENDER LOOP FIRST. The scripted match yields to the event loop
+     every 180 ticks so the browser stays responsive — and every one of those
+     yields let a real animation frame run, which drove the whole updater chain
+     AGAIN with a wall-clock delta. So the two runs were being fed a different
+     number of extra, differently-sized ticks depending on how fast each machine
+     happened to be, and the tool was measuring its own harness. This is what
+     made the answer jump between 60 and 360 ticks on identical code. */
+  if (window.__stopRaf) window.__stopRaf();
+  await new Promise(r => setTimeout(r, 250));
   CBZ.SURV_BOTS = ${bots};
   CBZ.modes.survival.reset(CBZ.game);
+  /* PIN THE CLOCK. CBZ.now is seeded from performance.now(), so it carries how
+     long the PAGE took to boot — a number that differs on every machine and
+     every run. Anything keyed to absolute time (a think-slice phase, a sine on
+     the clock) therefore diverges immediately even with every draw seeded. A
+     lockstep client would run the sim off the tick counter, not the wall, so
+     the scripted match pins the clock to the same value on both sides and
+     measures what is left. What this exposes is real: whatever still differs
+     after this is a draw that is not seeded. */
+  CBZ.now = 1000000;
+  if (CBZ.fixedStep) CBZ.fixedStep.tick = 0;
   CBZ.disasters.force("quake");
   const tape = [];
   const fp = () => {
@@ -77,6 +96,12 @@ const RUN = (ticks, bots) => `(async () => {
       px: Math.round(p.pos.x * 100) / 100, pz: Math.round(p.pos.z * 100) / 100,
       live: b.filter(a => !a.dead).length, fallen,
       surge: Math.round((CBZ.waterSurge ? CBZ.waterSurge() : 0) * 1000) / 1000,
+      /* EVERY BODY, to the millimetre, so a divergence NAMES the actor and the
+         axis instead of being a hash that differs. Cheap at the bot counts this
+         tool runs; the hash above is what a hundred-bot match would compare. */
+      bodies: b.map(a => [Math.round(a.pos.x * 1000), Math.round(a.pos.y * 1000),
+                          Math.round(a.pos.z * 1000), Math.round(a.hp * 100), a.dead ? 1 : 0]),
+      player: [Math.round(p.pos.x * 1000), Math.round(p.pos.y * 1000), Math.round(p.pos.z * 1000)],
     };
   };
   tape.push(Object.assign({ t: 0 }, fp()));
@@ -113,10 +138,21 @@ const out = { url: URL_REL, seed: SEED, ticks: TICKS, samples: a.length, firstDi
 for (let i = 0; i < Math.min(a.length, b.length); i++) {
   if (a[i].h === b[i].h) { out.matching++; continue; }
   out.firstDivergence = a[i].t;
+  const AX = ["x", "y", "z", "hp", "dead"];
+  const who = [];
+  const ab = a[i].bodies || [], bb = b[i].bodies || [];
+  for (let k = 0; k < Math.max(ab.length, bb.length); k++) {
+    const x = ab[k] || [], y = bb[k] || [];
+    for (let f = 0; f < 5; f++) if (x[f] !== y[f]) who.push(`bot${k}.${AX[f]} ${x[f]} vs ${y[f]}`);
+  }
+  for (let f = 0; f < 3; f++) {
+    if (a[i].player[f] !== b[i].player[f]) who.push(`player.${AX[f]} ${a[i].player[f]} vs ${b[i].player[f]}`);
+  }
   out.detail = {
     tick: a[i].t,
-    A: a[i], B: b[i],
-    what: Object.keys(a[i]).filter((k) => k !== "h" && JSON.stringify(a[i][k]) !== JSON.stringify(b[i][k])),
+    what: Object.keys(a[i]).filter((k) => k !== "h" && k !== "bodies" && k !== "player" &&
+      JSON.stringify(a[i][k]) !== JSON.stringify(b[i][k])),
+    who: who.slice(0, 12), diverged: who.length,
   };
   break;
 }
@@ -130,9 +166,10 @@ else {
     "  (" + (out.deterministicThrough / 60).toFixed(1) + " s of match)");
   if (out.firstDivergence == null) console.log("\n  DETERMINISM: two clients on this seed run the same match.");
   else {
-    console.log("  first divergence  tick " + out.firstDivergence + " — " + (out.detail.what.join(", ") || "positions only"));
-    console.log("    A " + JSON.stringify(out.detail.A));
-    console.log("    B " + JSON.stringify(out.detail.B));
+    console.log("  first divergence  tick " + out.firstDivergence +
+      (out.detail.what.length ? " — " + out.detail.what.join(", ") : "") +
+      "  (" + out.detail.diverged + " values differ)");
+    for (const w of out.detail.who) console.log("    " + w);
     console.log("\n  DETERMINISM: NOT YET. Something in the world path is not seeded.");
   }
 }
