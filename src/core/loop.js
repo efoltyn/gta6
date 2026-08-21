@@ -94,8 +94,35 @@
     // skips recomposing it. Bumped here so a stamp is only ever good for ONE
     // frame — any system that stops stamping hands its subtrees straight back.
     CBZ._matrixOwnStamp = (CBZ._matrixOwnStamp || 0) + 1;
+    /* THE FIXED STEP (systems/fixedstep.js, survival only by default).
+
+       Everything above measures TIME, which is right for one player on one
+       machine and is the reason two machines can never run the same match: a
+       phone at 47 fps and a laptop at 60 take different numbers of steps of
+       different sizes through the same second, and their integrations drift
+       apart within seconds of an identical seed. When the fixed step is on,
+       the frame's real delta goes into an accumulator and whole 1/60 ticks
+       come out — so tick N means the same world state everywhere.
+
+       The variable path below is untouched and is still what the city and the
+       prison run. FIXED_STEP_V1=false puts survival back on it too, live. */
+    const fixed = (CBZ.fixedStep && CBZ.fixedStep.on()) ? CBZ.fixedStep : null;
     // updaters are wrapped so a single throw can NEVER freeze the loop
-    if (g.state === "playing") {
+    if (g.state === "playing" && fixed) {
+      const n = fixed.consume(realDt);
+      const fdt = (1 / fixed.hz()) * scale;
+      for (let k = 0; k < n; k++) {
+        if (k) CBZ._matrixOwnStamp++;      // each tick is its own frame to the skip cache
+        g.elapsed += fdt;
+        fixed.tick++;
+        CBZ.survNetTick = fixed.tick;      // what a snapshot is stamped with
+        for (const u of CBZ.updaters) {
+          try { u.fn(fdt); } catch (err) { console.error("[updater]", err); }
+        }
+      }
+      const ts0 = CBZ.fmtTime(g.elapsed);
+      if (ts0 !== lastTimer) { CBZ.el.timer.textContent = ts0; lastTimer = ts0; }
+    } else if (g.state === "playing") {
       g.elapsed += dt;
       for (const u of CBZ.updaters) {
         try { u.fn(dt); } catch (err) { console.error("[updater]", err); }
@@ -137,6 +164,7 @@
     CBZ.feelDt = CBZ.feelMotion ? Math.min(dt, (g.mode === "city") ? FEEL_MAX_CITY : FEEL_MAX_OTHER) * scale : sdt;
     if (g.state === "playing") {
       g.elapsed += sdt;
+      if (CBZ.fixedStep) { CBZ.fixedStep.tick++; CBZ.survNetTick = CBZ.fixedStep.tick; }
       for (const u of CBZ.updaters) {
         try { u.fn(sdt); } catch (err) { console.error("[updater]", err); }
       }

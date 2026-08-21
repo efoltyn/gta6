@@ -125,6 +125,37 @@ try {
       bots: CBZ.bots ? CBZ.bots.length : 0, hp: p.hp, dead: !!p.dead,
       py: p.pos.y, objects: n, dirState: CBZ.disasters ? CBZ.disasters.state() : null };
   })()`);
+  /* DID A FRAME ACTUALLY DRAW?
+
+     The search dropped core/renderer.js and this check passed, which is the
+     most useful failure the oracle has had. Everything it asserts runs through
+     CBZ.stepSim — the headless update path, which deliberately touches nothing
+     GPU-side — so a page that boots, simulates a hundred bots and kills them
+     with a tsunami while rendering NOTHING AT ALL looked identical to a working
+     game. renderer.info is three.js's own count of what it drew, and it cannot
+     be faked by a page that has no renderer.
+
+     The screenshot is the second opinion: a real frame of an island under a
+     storm compresses to tens of kilobytes, a black rectangle to about two. It
+     is a signal, not an assertion — SwiftShader in headless is allowed to look
+     however it looks. */
+  const drew = await rig.evl(`(() => {
+    const r = CBZ.renderer, i = r && r.info && r.info.render;
+    return { hasRenderer: !!r, frames: i ? i.frame : -1, calls: i ? i.calls : -1,
+             triangles: i ? i.triangles : -1,
+             canvas: !!(r && r.domElement && r.domElement.width > 1) };
+  })()`);
+  report.measures.render = drew;
+  if (!drew.hasRenderer) fail("no CBZ.renderer — nothing on this page can draw");
+  else if (!(drew.frames > 0)) fail("the renderer has never drawn a frame");
+  else if (!(drew.triangles > 0)) fail("frames drew, but zero triangles — the world is not in the scene");
+  try {
+    const shot = await rig.send("Page.captureScreenshot", { format: "jpeg", quality: 70 });
+    const bytes = shot && shot.result && shot.result.data ? Math.round(shot.result.data.length * 0.75) : 0;
+    report.measures.render.screenshotBytes = bytes;
+    if (bytes > 0 && bytes < 3000) fail("the screen looks blank (" + bytes + "-byte frame)");
+  } catch (_) {}
+
   report.measures.world = world;
   if (!world.arena) fail("no disaster arena after entering the match");
   if (!(world.radius > 50)) fail("arena radius looks wrong: " + world.radius);

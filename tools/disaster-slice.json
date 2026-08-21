@@ -3885,7 +3885,6 @@
   "src/systems/modecaps.js",
   "src/world/forestlook.js",
   "src/core/matrixskip.js",
-  "src/core/renderer.js",
   "src/core/groundmask.js",
   "src/systems/craters.js",
   "src/systems/bunkerspace.js",
@@ -4167,6 +4166,7 @@
   "src/city/swim.js",
   "src/city/wildlife_species.js",
   "src/core/lights.js",
+  "src/core/renderer.js",
   "src/core/scene.js",
   "src/entities/character.js",
   "src/entities/survivorbot.js",
@@ -4176,7 +4176,7 @@
   "src/world/cellblock.js",
   "src/world/water_buoyancy.js"
  ],
- "keptBytes": 15360184,
- "droppedBytes": 10875777,
- "updatedAt": "2026-08-21T06:05:02.078Z"
+ "keptBytes": 15395314,
+ "droppedBytes": 10848898,
+ "updatedAt": "2026-08-21T06:12:19.919Z"
 }

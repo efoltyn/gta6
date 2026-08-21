@@ -72,9 +72,20 @@
     return b;
   }
 
+  /* THE CROWD'S OWN STREAM. Every draw a bot makes after it exists — where it
+     wanders, how long it stands still — comes from here, reseeded once per
+     match so two clients on one seed watch the same hundred people. The bots
+     are ticked in array order every tick, so the sequence is the same on both
+     ends. (Their APPEARANCE still comes from the spawn LCG below, which was
+     already deterministic.) */
+  let botRng = null;
+  function brnd() { return botRng ? botRng() : Math.random(); }
+  let matchNo = 0;
+
   CBZ.spawnSurvivorBots = function (n) {
     CBZ.clearSurvivorBots();
     const arena = CBZ.buildDisasterArena();
+    botRng = CBZ.seedStream ? CBZ.seedStream("surv-crowd-" + (++matchNo)) : null;
     let s = 7 + n;
     const rr = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
     for (let i = 0; i < n; i++) {
@@ -127,9 +138,13 @@
       b.urg = 0;
       if (b.pause <= 0) {
         const arena = CBZ.surv.arena;
-        const a = Math.random() * 6.28, d = Math.random() * arena.radius * 0.6;
+        /* SEEDED, because where ninety-nine people wander is match state, not
+           decoration: on Math.random two clients on the same seed had a
+           different crowd within one second of the drop. brnd() is the match's
+           own stream, reseeded in spawnSurvivorBots. */
+        const a = brnd() * 6.28, d = brnd() * arena.radius * 0.6;
         b.target.set(arena.center.x + Math.cos(a) * d, 0, arena.center.z + Math.sin(a) * d);
-        b.pause = 0.6 + Math.random() * 2.2;
+        b.pause = 0.6 + brnd() * 2.2;
       }
     }
   }

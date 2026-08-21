@@ -821,6 +821,14 @@
      through CBZ.setState, so there is exactly one kind of paused).
      ?cfg_GL_CONTEXT_GUARD=0 reverts. -->
 <script src="src/systems/glcontext.js?v=glguard1"></script>
+<!-- THE SIM ADVANCES IN WHOLE TICKS (survival only, by default). core/loop.js
+     measures TIME, which is right for one player and is the reason two machines
+     can never run the same match — a phone at 47 fps and a laptop at 60 take
+     different steps through the same second and drift apart from an identical
+     seed. This turns the frame delta into whole 1/60 ticks. MUST load before
+     core/loop.js, which reads CBZ.fixedStep every frame. ?cfg_FIXED_STEP_V1=0
+     puts survival back on the variable step, live. -->
+<script src="src/systems/fixedstep.js?v=fixed1"></script>
 <script src="src/systems/save.js"></script>
 <script src="src/systems/runstats.js"></script>
 <script src="src/systems/touch.js?v=onecall1"></script>
@@ -871,6 +879,14 @@
 <script src="src/systems/disasters.js?v=nodash1"></script>
 <script src="src/systems/survival_interact.js?v=climbdock1"></script>
 <script src="src/systems/survivalhud.js?v=nozone1"></script>
+<!-- THE SEAM A TRANSPORT PLUGS INTO. Not multiplayer — the three things that
+     have to be true before a transport is worth writing: every actor carries a
+     stable id, the whole match serialises to one ArrayBuffer and back
+     (2.5 KB at 100 bots), and there is one fingerprint two clients can compare.
+     tools/determinism-check.mjs is what compares it. AFTER survival.js and
+     systems/disasters.js — it reads their public surfaces and publishes
+     nothing they need. ?cfg_SURVNET_V1=0 makes it inert. -->
+<script src="src/net/survnet.js?v=survnet1"></script>
 <!-- GUN GAME ladder HUD (mode-gated; shares #survBars with survival) -->
 <script src="src/systems/gungamehud.js?v=nodash1"></script>
 
