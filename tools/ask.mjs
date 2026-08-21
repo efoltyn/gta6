@@ -23,10 +23,11 @@
    auto-revoked within minutes, which breaks the thing it was added for.
    OPENROUTER_API_KEY in the real environment wins if it is set.
 
-   SPEND IS REAL AND SMALL. The key on this repo carries a $1 cap, so the
-   default is a cheap model, --max-tokens is capped, and every reply prints the
-   token count and OpenRouter's own reported cost. A tool that spends money
-   should say so out loud rather than let you discover it later.
+   SPEND IS REAL. Every reply prints the token count and OpenRouter's own
+   reported cost to stderr. A tool that spends money should say so out loud
+   rather than let you discover it later on somebody else's dashboard. There is
+   no token ceiling — see the note further down for why the one I added was
+   wrong twice.
 ============================================================ */
 import { readFile } from "node:fs/promises";
 import path from "node:path";
