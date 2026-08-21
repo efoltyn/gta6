@@ -39,6 +39,12 @@ const URL_REL = arg("--url", "index.html");
 const SEED = arg("--seed", "90210");
 const BOTS = arg("--bots", "");          // fewer bots = a faster minimizer loop
 const QUICK = has("--quick");
+/* --fast: still every disaster, but only into the first seconds of its active
+   phase instead of all the way through it. warn() and the opening of active()
+   are where a def touches everything it owns, so this keeps the assertion that
+   makes the minimizer safe while costing a quarter of the ticks. */
+const FAST = has("--fast");
+const HOLD = FAST ? 240 : 5400;
 const JSON_OUT = has("--json");
 const say = (m) => { if (!JSON_OUT) console.log(m); };
 
@@ -147,7 +153,7 @@ try {
           CBZ.stepSim(1 / 60); ticks++;
           const st = CBZ.disasters.state();
           if (st === 'warn') warned++;
-          else if (st === 'active') active++;
+          else if (st === 'active') { active++; if (active >= ${HOLD}) ended = true; }
           else if (active > 0) ended = true;              // it ran, and it is over
           if (i % 150 === 0) await new Promise(r => setTimeout(r, 0));
         }

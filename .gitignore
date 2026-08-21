@@ -34,3 +34,4 @@ treesMODELCODE.js
 # A committed key gets scanned and auto-revoked within minutes, which breaks the
 # thing it was added for — so this file is ignored and never committed.
 .env.local
+disaster.candidate-*.html
