@@ -202,6 +202,10 @@ export default {
   subtitle: "Same brief, same cameras, same gape values. Left is the shipped shark, right is what another model wrote when shown it.",
   subjects,
   stage: stageMouth,
+  /* The left column poses the REAL registered species, so the page has to be
+     far enough up to have a bestiary — not just a DOM. Same readiness the
+     other species presets wait on. */
+  readyExpression: "window.CBZ && window.THREE && CBZ.WILDLIFE_SPECIES && CBZ.WILDLIFE_SPECIES.great_white_shark",
   defaultBefore: "local",
   frames: [{ id: "custom", label: "custom", width: 1200, height: 780, deviceScaleFactor: 1 }],
   stageTimeoutMs: 120000,
