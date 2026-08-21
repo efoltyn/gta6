@@ -102,7 +102,20 @@
     coverAnchors: 0, coverSaves: 0, ducked: 0, kitTables: 0, kitPoles: 0,
   };
 
-  function rnd() { return Math.random(); }
+  /* THE DRAW, AND WHO OWNS IT. The header above says a runtime event does not
+     need a seed, and for one player that was true. It stops being true the
+     moment two machines have to agree on who a quake kills: the facade pieces
+     it sheds, the gas fires it lights and the lines it drops are all decided
+     here, and all of them kill.
+
+     On the island this draws from the disaster director's own seeded stream
+     (systems/disasters.js publishes it), so the quake's decisions sit in the
+     same sequence as every other hazard's and two clients running the same
+     ticks make the same ones. In the city — a single-player world with no such
+     stream — nothing changes. */
+  function rnd() {
+    return (inSurv() && CBZ.survRnd) ? CBZ.survRnd() : Math.random();
+  }
   function now() { return CBZ.now || 0; }
   function inCity() { return CBZ.game && CBZ.game.mode === "city"; }
   function inSurv() { return CBZ.game && CBZ.game.mode === "survival"; }

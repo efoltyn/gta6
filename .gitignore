@@ -34,3 +34,10 @@ treesMODELCODE.js
 # A committed key gets scanned and auto-revoked within minutes, which breaks the
 # thing it was added for — so this file is ignored and never committed.
 .env.local
+disaster.candidate-*.html
+
+# The iOS web bundle is a BUILD ARTIFACT — 19 MB of copied assets and a
+# concatenation of files that are already in this repo. `npm run build:ios`
+# regenerates it in a second, and Capacitor copies it into the app at sync
+# time; nothing needs the committed copy.
+dist-ios/

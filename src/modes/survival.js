@@ -35,6 +35,19 @@
 
   function liveBots() { let n = 0; const b = CBZ.bots; for (let i = 0; i < b.length; i++) if (!b[i].dead) n++; return n; }
 
+  /* WHERE A BODY LANDS IS MATCH STATE. The ragdoll launch on a generic
+     disaster death used Math.random, so two clients on the same seed ended a
+     tsunami with the dead in different places — and this island's whole read
+     is where the bodies are. One named stream, reseeded per match by reset().
+     The DEBRIS puffs above it are left on Math.random deliberately: they are
+     particles nobody else can see. */
+  let deathRng = null;
+  function deathRnd() { return deathRng ? deathRng() : Math.random(); }
+  let matchNo = 0;
+  function reseedDeaths() {
+    deathRng = CBZ.seedStream ? CBZ.seedStream("surv-deaths-" + (++matchNo)) : null;
+  }
+
   // a quick impact poof where a body hits — dust ring + a couple of clods
   function deathBurst(x, z) {
     if (!CBZ.fx) return;
@@ -315,9 +328,11 @@
           // killed by a directional force (blast/throw/wave) → fling that way
           CBZ.body.hit(b, { fromX: imp.fromX, fromZ: imp.fromZ, dir: imp.dir, force: imp.force || 7, fling: imp.fling || 5 });
         } else {
-          // generic disaster death → a dramatic upward ragdoll launch + spin
-          const a = Math.random() * 6.28;
-          CBZ.body.hit(b, { dir: { x: Math.cos(a), z: Math.sin(a) }, force: 2.5 + Math.random() * 3, fling: 5 + Math.random() * 4 });
+          /* generic disaster death → a dramatic upward ragdoll launch + spin.
+             SEEDED: this decides where a body ENDS UP, which is a position
+             every client has to agree on, not a particle effect. */
+          const a = deathRnd() * 6.28;
+          CBZ.body.hit(b, { dir: { x: Math.cos(a), z: Math.sin(a) }, force: 2.5 + deathRnd() * 3, fling: 5 + deathRnd() * 4 });
         }
       }
       reportDeath(b, cause != null ? cause : ((imp && imp.cause) || surv._cause), imp);
@@ -459,6 +474,7 @@
       if (CBZ.fx) CBZ.fx.clear();
       if (CBZ.clearGore) CBZ.clearGore();
       surv._cause = null; surv._lastImp = null; surv._deathCause = null; surv._runRecorded = false;
+      reseedDeaths();
       const A = surv.arena;
       A.root.visible = true;
       if (A.reset) A.reset();   // restore buildings/trees/craters from a prior match

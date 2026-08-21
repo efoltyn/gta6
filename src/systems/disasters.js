@@ -125,7 +125,41 @@
   // ONE damage ledger for arena buildings + CBZ.detonate for blasts.
   if (CBZ.CONFIG.SURV_SHARED_STRUCTURE == null) CBZ.CONFIG.SURV_SHARED_STRUCTURE = true;
 
-  function rnd() { return Math.random(); }
+  /* ---- THE ONE DRAW EVERY DISASTER MAKES ---------------------------------
+     Every def in this file gets its randomness from rnd(): where the lightning
+     lands, which way the tsunami comes in, where the meteors fall, which
+     buildings the quake takes, where the ground opens. It was `Math.random()`,
+     which core/seed.js's determinism law forbids for exactly the reason that
+     matters here — two machines running the same seed got two different
+     matches, so no multiplayer design above this file could ever have worked,
+     and no replay or bug report could be reproduced either.
+
+     It is now a NAMED SEEDED STREAM, reseeded per run in start() from the world
+     seed and the run counter, exactly like the arc order already was. Same
+     match on every client, a different match every round. The Math.random
+     fallback is for a page that somehow loads this file without core/seed.js;
+     nothing in the shipped game takes it.
+
+     What is NOT converted, deliberately: the per-particle jitter in
+     world/volcanofx.js and systems/tornado.js. Those are runtime FX — smoke
+     seats, ember lifetimes, debris spin — that no other client can see and no
+     rule reads. Seeding them would cost draws in the shared sequence for
+     nothing. The line is: if it moves a body, decides damage, or places a
+     hazard, it comes from here. */
+  let hazardRng = null;
+  function rnd() { return hazardRng ? hazardRng() : Math.random(); }
+  function reseedHazards(runNo) {
+    hazardRng = CBZ.seedStream ? CBZ.seedStream("surv-hazards-" + runNo) : null;
+  }
+  reseedHazards(0);
+  /* THE SHARED DRAW. systems/quake.js is a second file that decides who a
+     disaster kills (facade shedding, gas fires, downed lines) and it had its
+     own `Math.random`, with a header explaining that a runtime event does not
+     need a seed. That was true right up until two machines had to agree on who
+     died. Rather than give it a second stream to keep in step with this one,
+     it draws from THIS one while a survival match is running: same sequence,
+     same order, one place to reason about. */
+  CBZ.survRnd = rnd;
   function camPos() { return CBZ.camera.position; }
   function root() { return CBZ.surv.arena.root; }
   function floor(x, z) { return CBZ.surv.arena.groundHeightAt(x, z); }
@@ -4400,6 +4434,7 @@
       // match order for every client, a different order every match
       runNo++;
       orderRng = CBZ.seedStream ? CBZ.seedStream("surv-sequence-" + runNo) : null;
+      reseedHazards(runNo);      // the hazards themselves, same seed, same run
       order = buildOrder();
       dir.state = "idle"; dir.t = 7; dir.cur = null; dir.curId = null; dir.st = {}; dir.idx = 0; dir.occ = 0; dir.intensity = 0.2; dir.overT = 0; dir.overName = null; curCtx = null; fallingBuildings.length = 0; flungCars.length = 0;
     },
@@ -4422,6 +4457,12 @@
       return { x: sd.x / m, z: sd.z / m, w: t };
     },
     current() { return dir.cur ? dir.cur.name : null; },
+    /* The two reads a snapshot needs and a name cannot give: WHICH def (by the
+       roster id, which is stable across builds and localisations) and how hard
+       this occurrence is hitting. net/survnet.js writes both into the wire
+       format; nothing else in the game reads them. */
+    currentId() { return dir.curId; },
+    intensity() { return dir.intensity; },
     state() { return dir.state; },
     timeLeft() { return Math.max(0, dir.t); },
     /* THE TSUNAMI'S EVIDENCE. Field NAMES and expected VALUES are unchanged
