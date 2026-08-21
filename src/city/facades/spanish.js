@@ -106,6 +106,10 @@
   CBZ.registerFacade("spanish", {
     label: "Spanish Colonial Mansion",
     crownsRoof: true,
+    // This grammar builds its own entrance — a carved frontispiece with spiral pilasters and a scalloped shell over a recessed alcove — so the kit
+    // must not stack its generic reveal on top of it. The doorway is still
+    // CARVED either way; ownDoor only declines the extra surround.
+    ownDoor: true,
     maxStoreys: 4,
     build: function (ctx, F, spec) {
       spec = spec || {};

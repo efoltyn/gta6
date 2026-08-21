@@ -56,6 +56,7 @@
     "visual:facade-houses": "node tools/visual-compare.mjs --preset facade-houses --no-open --keep-going",
     "visual:facade-island": "node tools/visual-compare.mjs --preset facade-island --no-open --keep-going",
     "test:facade-island": "node tools/facade-island-check.mjs",
+    "visual:facade-doors": "node tools/visual-compare.mjs --preset facade-doors --no-open --keep-going",
     "visual:wildlife": "node tools/visual-compare.mjs --preset wildlife-attachments --before https://efoltyn.github.io/gta6/",
     "visual:mounted-riders": "node tools/visual-compare.mjs --preset mounted-riders --before https://efoltyn.github.io/gta6/",
     "visual:sea-mounts": "node tools/visual-compare.mjs --preset sea-mounts --before https://efoltyn.github.io/gta6/",
