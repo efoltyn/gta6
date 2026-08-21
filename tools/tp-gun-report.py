@@ -54,8 +54,13 @@ CAP = style("cap", fontSize=7.8, leading=10)
 CAPM = style("capm", fontSize=7.4, leading=9.5, textColor=MUTE)
 MONO = style("mono", fontName="Courier", fontSize=8, leading=11)
 
-def crop_plate(p, wfrac=0.30, hfrac=0.66):
-    """Crop around the player↔muzzle midpoint the probe measured."""
+def crop_plate(p, wfrac=None, hfrac=None):
+    """Crop around the player↔muzzle midpoint the probe measured.
+
+    The window SCALES WITH THE BOOM, because the plates do not share a scale:
+    at 4.35 m the character is a third of the frame and wants a tight crop; at
+    2.20 m they already fill it and the same crop would be a portrait of an ear.
+    """
     src = os.path.join(ROOT, p["file"])
     if not os.path.exists(src):
         return None
@@ -69,8 +74,18 @@ def crop_plate(p, wfrac=0.30, hfrac=0.66):
         cy = (1 - (pn[1] + mn[1]) / 2.0) / 2 * H
     else:
         cx, cy = W * 0.42, H * 0.55
+    if wfrac is None:
+        d = p.get("dist") or 4.35
+        wfrac = max(0.28, min(0.62, 0.28 * (4.35 / max(1.2, d))))
+    if hfrac is None:
+        hfrac = min(1.0, wfrac * 1.81)      # keeps the crop near 4:3
     cw, ch = W * wfrac, H * hfrac
+    # keep the left HUD furniture (the character card, the minimap) out of the
+    # crop where the window allows it — it is the same in every plate and it is
+    # not what the reader is being shown.
     x0 = max(0, min(W - cw, cx - cw / 2))
+    if cw < W - 150:
+        x0 = max(150, x0)
     y0 = max(0, min(H - ch, cy - ch / 2))
     im = im.crop((int(x0), int(y0), int(x0 + cw), int(y0 + ch)))
     dst = os.path.join(CROPDIR, os.path.basename(p["file"]))
@@ -252,17 +267,22 @@ st += [
          "natural disaster — it has no trigger at all"],
     ], [0.85 * inch, 3.3 * inch, W - 4.15 * inch]),
     Paragraph("The verdict, mode by mode", H2),
+    Paragraph('Four separate changes went in. A mode gets the ones its own code path can reach:', SMALL),
+    Spacer(1, 4),
     table([
-        ["mode", "gets the tier<br/>table + lead", "gets the tighter<br/>armed boom", "gets the low-<br/>ready pose tweak", "net effect"],
-        ["<b>City</b> (on foot)", "yes", "n/a", "yes", "the full change — this is what the shots in this PDF are"],
-        ["<b>Gang war</b>", "yes", "n/a", "yes", "not a mode: gangs, turf, civil war and police war are city systems, so a gang fight <i>is</i> city mode"],
-        ["<b>Prison</b> (escape)", "no", "yes, while firing", "yes", "the boom comes in from 7.6 m to 5.0 m while you present; it already had the 12 m lead"],
-        ["<b>Natural disaster</b>", "no", "no", "no", "no combat in that mode — nothing can set the presenting signal"],
-        ["<b>Gun game</b>", "no", "yes, while firing", "no", "same as prison for the camera; its gun is drawn by the older prop path"],
-        ["<b>NPC war</b> (battle page)", "no", "no", "no", "separate page, no player gun, no chase camera at all"],
-        ["<b>First person</b> (any mode)", "no", "no", "no", "the armed tier requires third person, by construction"],
-        ["<b>Driving / flying / boats</b>", "no", "no", "no", "the vehicle chase owns the camera; the held gun is hidden"],
-    ], [1.35 * inch, 0.78 * inch, 0.82 * inch, 0.82 * inch, W - 3.77 * inch]),
+        ["mode", "barrel follows<br/>your aim", "tier table +<br/>12 m lead", "tighter boom<br/>while firing", "carry<br/>pose", "net effect"],
+        ["<b>City</b> (on foot)", "yes", "yes", "n/a", "yes", "the whole change — every plate in this PDF"],
+        ["<b>Gang war</b>", "yes", "yes", "n/a", "yes", "not a mode: gangs, turf, civil war and police war are city systems, so a gang fight <i>is</i> city mode"],
+        ["<b>Prison</b> (escape)", "no*", "no", "yes", "yes", "boom comes in 7.6 → 5.0 m while you present; it already had the 12 m lead"],
+        ["<b>Natural disaster</b>", "no*", "no", "no", "no", "no combat in that mode — nothing can raise the presenting signal"],
+        ["<b>Gun game</b>", "no*", "no", "yes", "no", "camera as prison; its gun is drawn by the older prop path"],
+        ["<b>NPC war</b> (battle page)", "no", "no", "no", "no", "separate page, no player gun, no chase camera at all"],
+        ["<b>First person</b>", "no", "no", "no", "no", "the armed tier requires third person, by construction"],
+        ["<b>Driving / flying / boats</b>", "no", "no", "no", "no", "the vehicle chase owns the camera; the held gun is hidden"],
+    ], [1.15 * inch, 0.72 * inch, 0.68 * inch, 0.72 * inch, 0.62 * inch, W - 3.89 * inch]),
+    Paragraph('* not “skipped” — <i>already correct</i>. The barrel was only ever wrong where the camera is '
+              'pinned away from the aim, and that pin is city-on-foot only. Everywhere else the aim vector and '
+              'the lens are the same vector, so the fix is a no-op by identity rather than by exclusion.', SMALL),
     Paragraph("Why each “no” is a no", H2),
     Paragraph(
         '<b>Natural disaster is the interesting one.</b> Its own header says it: “No combat: just survive longer '
@@ -374,7 +394,7 @@ st += [
               'prints what each combination measures', BODY),
     Paragraph("Turning it off", H2),
     Paragraph('<font face="Courier">CBZ.CONFIG.CAM_TP_GUN_VISIBLE = false</font> in the console restores the old '
-              'framing on the next frame, in every mode listed on page 2, with no reload.', BODY),
+              'framing on the next frame, in every mode listed on the mode page, with no reload.', BODY),
     Paragraph("What is deliberately still open", H2),
     Paragraph(
         '<b>Carrying a long gun.</b> The carry tier is unchanged on purpose, and it is the one place the camera '
