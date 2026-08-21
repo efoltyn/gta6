@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Natural Disaster Survival — App Store readiness</title>
+<style>
+  @page { size: A4; margin: 16mm 15mm 14mm; }
+  :root {
+    --ink: #14181f; --dim: #5a6472; --rule: #d8dee7; --bad: #b8452e;
+    --good: #1f6b47; --accent: #12324f; --panel: #f4f6f9;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; color: var(--ink); background: #fff;
+    font: 10.2pt/1.5 "Helvetica Neue", Helvetica, Arial, sans-serif;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  h1 { font-size: 20pt; line-height: 1.15; margin: 0 0 2mm; letter-spacing: -0.01em; }
+  h2 {
+    font-size: 12pt; margin: 9mm 0 2.5mm; padding-bottom: 1.6mm;
+    border-bottom: 1.6pt solid var(--accent); letter-spacing: -0.01em;
+  }
+  h3 { font-size: 10.4pt; margin: 5mm 0 1.5mm; }
+  p { margin: 0 0 2.6mm; }
+  ul { margin: 0 0 3mm; padding-left: 5mm; }
+  li { margin-bottom: 1.4mm; }
+  .sub { color: var(--dim); font-size: 9.4pt; margin-bottom: 6mm; }
+  .lede { font-size: 10.8pt; }
+  code, .mono { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 8.9pt; }
+  table { width: 100%; border-collapse: collapse; margin: 0 0 4mm; font-size: 9.4pt; }
+  th { text-align: left; font-weight: 600; color: var(--dim); font-size: 8.4pt;
+       text-transform: uppercase; letter-spacing: .06em; padding: 0 3mm 1.4mm 0;
+       border-bottom: 1pt solid var(--rule); }
+  td { padding: 1.7mm 3mm 1.7mm 0; border-bottom: 0.5pt solid var(--rule); vertical-align: top; }
+  td:first-child { font-weight: 600; }
+  .num { font-variant-numeric: tabular-nums; }
+  .was { color: var(--bad); }
+  .now { color: var(--good); font-weight: 600; }
+  .panel { background: var(--panel); border-left: 2.4pt solid var(--accent);
+           padding: 3.4mm 4mm; margin: 0 0 4mm; }
+  .panel p:last-child { margin-bottom: 0; }
+  .kicker { font-size: 8.2pt; text-transform: uppercase; letter-spacing: .08em;
+            color: var(--dim); font-weight: 600; margin-bottom: 1.2mm; }
+  .foot { margin-top: 8mm; padding-top: 2.5mm; border-top: 0.5pt solid var(--rule);
+          color: var(--dim); font-size: 8.6pt; }
+  .avoid { break-inside: avoid; }
+  .cols { column-count: 2; column-gap: 7mm; }
+  .cols li { break-inside: avoid; }
+</style>
+</head>
+<body>
+
+<h1>Natural Disaster Survival — App Store readiness</h1>
+<div class="sub">Branch <span class="mono">claude/nat-disaster-app-store-launch-cwrjpa</span> · 21 August 2026</div>
+
+<p class="lede">The game now has its own door, its own build, and a test that can tell whether
+either one is broken. Three things it did not have: a match that survives ninety seconds, a
+first screen that does not wait on five other games, and two clients that agree on what
+happened.</p>
+
+<h2>The numbers</h2>
+<table>
+  <tr><th>&nbsp;</th><th>Before</th><th>After</th></tr>
+  <tr><td>Script files loaded</td><td class="num was">553</td><td class="num now"><b>83</b> on the web page · <b>1</b> in the app</td></tr>
+  <tr><td>JavaScript shipped</td><td class="num was">25.0 MB</td><td class="num now"><b>4.25 MB</b> on the web page · <b>1.69 MB</b> minified in the app</td></tr>
+  <tr><td>World built at launch</td><td class="was">the city</td><td class="now">the island</td></tr>
+  <tr><td>Network needed to play</td><td class="was">Google Fonts + a CDN decoder</td><td class="now">none at all</td></tr>
+  <tr><td>Match survives</td><td class="was">~90 seconds, then a crash</td><td class="now">no known limit</td></tr>
+  <tr><td>Two clients agree for</td><td class="num was">0 ticks</td><td class="num now">5,400 ticks (90 s, 32 bots)</td></tr>
+  <tr><td>Time to a playable match</td><td class="num was">~6 s</td><td class="num now">2.1 s</td></tr>
+  <tr><td>Total app payload</td><td class="was">—</td><td class="now">19.5 MB (17.7 of it audio)</td></tr>
+</table>
+<p class="mono" style="color:var(--dim);font-size:8.4pt">Timings measured headless on SwiftShader, which is not a phone. Compare runs; do not quote one.</p>
+
+<h2>1 · The crash</h2>
+<div class="panel">
+  <div class="kicker">Live on main before this branch</div>
+  <p><b>Every survival match died after about ninety seconds.</b>
+  <span class="mono">city/marine_predation.js</span> and <span class="mono">city/wildlife_orca.js</span>
+  both wrap <span class="mono">CBZ.sharkBrain</span>, and both re-armed from a per-frame pass
+  asking “am I the outermost link?”. Each frame, each file saw the other's wrapper on top,
+  concluded it had been displaced, and wrapped again — two new closures per frame, for ever.
+  A few thousand links deep the next call died with
+  <span class="mono">RangeError: Maximum call stack size exceeded</span> inside the wildlife tick.</p>
+  <p>The question a link should ask is “am I in the chain at all?”. Each wrapper now carries its
+  owner and its fall-through and walks the chain looking for itself. Ratcheted at three links,
+  measured after 16,000 simulated ticks.</p>
+</div>
+<p>It was found by the test built for this wave, not by reading the code — which is the case for
+most of what follows.</p>
+
+<h2>2 · Loading</h2>
+<p><span class="mono">index.html</span> is six games: the prison, the city, the campaign, the
+casino, the aircraft, the elections. Natural Disaster Survival is one of them, and on a phone it
+paid for all six before it could draw a frame.</p>
+<ul>
+  <li><b><span class="mono">disaster.html</span></b> — the same page minus the scripts this game
+  never runs, opening straight onto the island. Generated from <span class="mono">index.html</span>
+  rather than hand-written, so the HUD markup, the CSS and the boot order keep one source of truth.</li>
+  <li><b>The list is measured, not guessed.</b> <span class="mono">tools/disaster-minimize.mjs</span>
+  drops groups of files and asks the game whether it still boots, still runs all eleven disasters,
+  and still has every named system on <span class="mono">CBZ</span>. A file leaves the build only
+  when the game passes without it.</li>
+  <li><b>The app gets one file.</b> The kept scripts are concatenated in page order and minified:
+  1.69 MB, one fetch, one compile, instead of 556 of each. Each block keeps the failure
+  isolation a script tag has, and <span class="mono">document.currentScript</span> is stood in for
+  per file so path-resolving code behaves exactly as it does unbundled.</li>
+  <li><b>The island reports its own progress.</b> Six <span class="mono">CBZ.bootStep</span>
+  checkpoints, so the loading meter — which already draws on a worker thread precisely so it can
+  count through a frozen main thread — has something to count.</li>
+</ul>
+
+<div class="panel avoid">
+  <div class="kicker">What the search taught us</div>
+  <p>Left alone, the file search took the build to <b>51 files</b> — and that was a confession, not a
+  triumph. A test can only defend what it looks at, and this one dropped the collision system (the
+  census named a symbol another file publishes), the mode's own HUD (it named a DOM element that is
+  in the HTML either way), the loading meter, the static-batching pass, all nine facade grammars and
+  the capability bus. Nothing <em>failed</em>. The phone would just have melted, undressed, with no
+  progress bar and nobody able to vault.</p>
+  <p>So the census rows now name what each <em>file</em> publishes, the oracle holds W for a second
+  and checks the player actually walked, and 33 files are <b>pinned</b> — declared rather than
+  proved, because a headless run has no frame budget, no thumbs and no eyes.</p>
+</div>
+
+<h2>3 · Offline</h2>
+<p>An App Store app may not fetch what it needs from a third party at run time, and has to work in
+aeroplane mode the first time it is opened. Two things did:</p>
+<ul>
+  <li><span class="mono">city/playercars.js</span> pulled the <b>Draco decoder from unpkg.com</b>
+  when the first Ferrari loaded. Vendored to <span class="mono">src/vendor/draco/</span>.</li>
+  <li><span class="mono">index.html</span> loaded the <b>UI typeface from Google Fonts</b> as a
+  render-blocking stylesheet. The 29 KB latin subset now ships in the repo (OFL, recorded in
+  <span class="mono">assets/LICENSES.md</span>).</li>
+</ul>
+<p>The build copies only what the code actually asks for, and the whole tree is verified by booting
+it and running the full disaster roster against it.</p>
+
+<h2>4 · The app is interrupted; a browser tab is not</h2>
+<p>iOS backgrounds the app for a phone call and drops its WebGL context under memory pressure.
+three.js rebuilds its own GPU resources, but nothing told the <em>game</em>: a hundred survivors,
+eleven disasters and a drowning player kept running behind a black screen, and the player came back
+to a death they never saw. <span class="mono">systems/glcontext.js</span> pauses the match on
+context loss and on losing the foreground, resumes the audio graph on the way back in, and asks for
+the context back if it has not returned in four seconds.</p>
+
+<h2>5 · Ready for multiplayer — the part that is not a transport</h2>
+<p>Multiplayer is a determinism problem before it is a networking problem. Two machines have to
+produce the same island, the same arc, the same wave and the same hundred bodies from one seed, or
+every design above — lockstep, rollback, server-authoritative — is built on sand.
+<span class="mono">tools/determinism-check.mjs</span> boots the game twice in two browsers and
+compares every body every sixty ticks. It started at <b>zero</b> ticks of agreement.</p>
+<table>
+  <tr><th>What was wrong</th><th>Why it could never have worked</th></tr>
+  <tr><td>The hazards rolled <span class="mono">Math.random</span></td>
+      <td>Where the lightning lands, which way the tsunami comes in, which buildings the quake takes — all of it different on every client.</td></tr>
+  <tr><td>Bot think cadence came off the camera</td>
+      <td>A bot's <em>decisions</em> depended on where the local player was looking; two cameras put the same bot on opposite sides of an LOD boundary.</td></tr>
+  <tr><td>The think schedule counted from page load</td>
+      <td>Which bots thought on tick 1 depended on how long the title screen had been up.</td></tr>
+  <tr><td>The clock moved by the wall</td>
+      <td>Every cooldown advanced by however long that machine's last frame took.</td></tr>
+</table>
+<p>All four are fixed, plus a fixed 60 Hz step (survival only, one-line revert) and
+<span class="mono">net/survnet.js</span>: stable ids, the whole match in one 2.5 KB ArrayBuffer and
+back, and one fingerprint two clients can compare. No socket, no lobby, no prediction — those
+depend on a transport decision nobody has made yet. <b>Result: 5,400 ticks — ninety seconds, 32 bots, several disasters — identical to the
+millimetre across two browsers.</b> That is on <span class="mono">index.html</span>; the sliced page still
+diverges inside the first second, which is the one thing this wave leaves open and the tool now
+names precisely.</p>
+
+<h2>6 · What is on the Mac side</h2>
+<p>Nothing in this branch is Swift. The iOS side is Capacitor — a config file, generated art, a
+privacy manifest, plist keys and a runbook. The Xcode project is generated on your machine and is
+regenerable at any time.</p>
+<ul class="cols">
+  <li><span class="mono">npm run build:ios</span> — writes <span class="mono">dist-ios/www</span></li>
+  <li><span class="mono">npm run check:ios</span> — boots that bundle, runs all eleven disasters</li>
+  <li><span class="mono">npx cap add ios</span> — generates the Xcode project</li>
+  <li><span class="mono">node tools/setup-ios.mjs</span> — plist keys, privacy manifest, icon, splash</li>
+  <li><span class="mono">npx cap sync ios</span> — after every rebuild</li>
+  <li><span class="mono">ios/GO-IOS.md</span> — the full runbook</li>
+</ul>
+<p>The runbook also carries the answers App Review will want in advance: why this is not a
+repackaged website (guideline 4.2), the age rating this game honestly needs, the privacy label, and
+a device checklist for the things a headless test cannot see.</p>
+
+<h2>7 · What is not done</h2>
+<ul>
+  <li><b>Nothing has run on a device.</b> Every number here is headless Chromium on software
+  rendering. The first real measurement is a cold launch on your phone.</li>
+  <li><b>Multiplayer is not built</b> — deliberately. What exists is the ground it needs.</li>
+  <li><b>The payload can go further.</b> The search is bounded by what the test can prove; a
+  stricter or longer search finds more.</li>
+  <li><b>Determinism is proved on the full page, not on the sliced one.</b>
+  <span class="mono">index.html</span> runs 5,400 identical ticks; <span class="mono">disaster.html</span>
+  — the page the app ships — still diverges by millimetres within the first second, so something in
+  the files the slice drops is holding the full page steady. That is the next thread to pull, and
+  <span class="mono">tools/determinism-check.mjs --every 1</span> names the actor and the axis.</li>
+  <li><b>Ninety seconds is not a whole match</b>, and neither run had a second human moving in it.</li>
+</ul>
+
+<div class="foot">
+Every claim in this document is reproducible from the repository:<br>
+<span class="mono">node tools/disaster-check.mjs</span> ·
+<span class="mono">node tools/determinism-check.mjs</span> ·
+<span class="mono">node tools/disaster-minimize.mjs --verify</span> ·
+<span class="mono">npm run check:ios</span>
+</div>
+
+</body>
+</html>
