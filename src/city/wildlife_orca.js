@@ -2632,15 +2632,29 @@
   //  with dt = 0, which is a pure ensure: it builds a._shark (and with it the
   //  ONE water mover this file borrows) and moves nothing.
   // ============================================================
+  /* AM I IN THE CHAIN, NOT AM I ON TOP. This test used to be
+     `CBZ.sharkBrain === wrapped`, and city/marine_predation.js asks the same
+     question from its own per-frame pass at 47.15 — so each file saw the
+     other's wrapper on top, concluded it had been displaced, and wrapped
+     again. Two closures per frame, forever, until the call stack ran out
+     mid-match. See the long note in marine_predation.js:1507. Each link now
+     carries its owner and its fall-through, and installWrap walks the chain
+     looking for itself; a genuinely new CBZ.sharkBrain (wildlife_shark.js
+     re-publishing) still re-arms it exactly once. */
+  const BRAIN_LINK = "wildlife_orca";
   let orig = null, wrapped = null;
   function installWrap() {
-    if (CBZ.sharkBrain === wrapped) return;
+    for (let f = CBZ.sharkBrain, n = 0; typeof f === "function" && n < 64; f = f._brainNext, n++) {
+      if (f._brainLink === BRAIN_LINK) return;
+    }
     orig = (typeof CBZ.sharkBrain === "function") ? CBZ.sharkBrain : null;
     wrapped = function (a, dt, P) {
       if (!isOrca(a)) return orig ? orig(a, dt, P) : false;
       if (orig && !a._shark) { try { orig(a, 0, P); } catch (e) {} }
       try { return orcaBrain(a, dt, P); } catch (e) { return false; }
     };
+    wrapped._brainLink = BRAIN_LINK;
+    wrapped._brainNext = orig;
     CBZ.sharkBrain = wrapped;
   }
   installWrap();
@@ -2795,7 +2809,8 @@
     return {
       model: MODEL(), pod: POD(), surface: SURF(), acts: ACTS(),
       drag: DRAG(), hunt: HUNT(),
-      wrapped: CBZ.sharkBrain === wrapped,
+      wrapped: (function () { for (let f = CBZ.sharkBrain, n = 0; typeof f === "function" && n < 64; f = f._brainNext, n++) if (f._brainLink === BRAIN_LINK) return true; return false; })(),
+      brainChain: (function () { let n = 0; for (let f = CBZ.sharkBrain; typeof f === "function" && n < 64; f = f._brainNext) n++; return n; })(),
       consumes: {
         predatorHunt: typeof CBZ.predatorHunt === "function",
         predatorKit: typeof CBZ.predatorKit === "function",

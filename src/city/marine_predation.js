@@ -1513,10 +1513,34 @@
   //  Re-armed lazily because script order is not ours to depend on: if
   //  wildlife_shark.js has not loaded yet we install anyway and pick up the
   //  original the first time it exists.
+  //
+  //  THE PING-PONG, AND WHY THE CHAIN IS TAGGED (2026-08-21). The re-arm test
+  //  used to be `CBZ.sharkBrain === wrapped` — "am I the OUTERMOST link?" —
+  //  and wildlife_orca.js asks the same question from its own per-frame pass
+  //  at 47.2. So every single frame each file decided the other had displaced
+  //  it and wrapped again: two new closures per frame, forever, each holding
+  //  the last as its `orig`. Ninety seconds into any match with sea life the
+  //  chain was ~11,000 links deep and the next call died with
+  //  `RangeError: Maximum call stack size exceeded` inside the wildlife tick —
+  //  which is exactly what tools/disaster-check.mjs caught on the island.
+  //
+  //  The question a link should ask is not "am I on top?" but "am I in the
+  //  chain AT ALL?", so each wrapper carries who owns it (`_brainLink`) and
+  //  what it falls through to (`_brainNext`), and installWrap walks the chain
+  //  looking for itself. Re-arming still works the moment it should: when
+  //  wildlife_shark.js publishes a fresh CBZ.sharkBrain, our link is no longer
+  //  in the chain and we install exactly once more.
   // ============================================================
+  const BRAIN_LINK = "marine_predation";
   let orig = null, wrapped = null;
+  function inChain() {
+    for (let f = CBZ.sharkBrain, n = 0; typeof f === "function" && n < 64; f = f._brainNext, n++) {
+      if (f._brainLink === BRAIN_LINK) return true;
+    }
+    return false;
+  }
   function installWrap() {
-    if (CBZ.sharkBrain === wrapped) return;
+    if (inChain()) return;
     orig = (typeof CBZ.sharkBrain === "function") ? CBZ.sharkBrain : null;
     wrapped = function (a, dt, P) {
       // let wildlife_shark.js build its own per-actor state (and, with it, the
@@ -1529,6 +1553,8 @@
       if (owned) return true;
       return orig ? orig(a, dt, P) : false;
     };
+    wrapped._brainLink = BRAIN_LINK;
+    wrapped._brainNext = orig;
     CBZ.sharkBrain = wrapped;
   }
   installWrap();
@@ -1562,7 +1588,12 @@
       chumOpened: AUDIT.chumOpened, chumLive: liveSlots(),
       chumSources: (typeof CBZ.goreChumList === "function" && CBZ.goreChumList()) ? CBZ.goreChumList().length : 0,
       hudWrites: AUDIT.hudWrites,
-      wrapped: CBZ.sharkBrain === wrapped,
+      wrapped: inChain(),
+      // THE RATCHET (see the wrap note above): how many links deep the shark
+      // brain chain is. Two files wrap it, so this is 3 with wildlife_shark.js
+      // loaded and it MAY NOT GROW — a per-frame re-wrap regression pushes it
+      // up every frame until the stack overflows.
+      brainChain: (function () { let n = 0; for (let f = CBZ.sharkBrain; typeof f === "function" && n < 64; f = f._brainNext) n++; return n; })(),
     };
   };
   CBZ.marineAuditReset = function () {
