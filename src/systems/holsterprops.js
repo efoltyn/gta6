@@ -504,7 +504,17 @@
       // at the crosshair ray's far point (parallax-correct from the gun's own
       // position) — the same technique fpsmode.js validated.
       hand.prop.getWorldPosition(_hgPos);          // r128: refreshes parent matrices itself
-      _hgDir.set(0, 0, -1).applyQuaternion(CBZ.camera.quaternion);
+      // THE AIM, NOT THE LENS. These are the same vector right up until the
+      // third-person frame is PINNED (CAM_TP_FIXED_ANGLE, systems/camera.js),
+      // where the camera deliberately holds its resting angle and vertical look
+      // drives the GUN instead. Reading the lens quaternion there locks the
+      // barrel to the horizon while the rounds, the acquire cone and the
+      // reticle all follow cam.pitch — a man firing level at a helicopter above
+      // his head. fpsmode's legacy carried-gun path has taken aimForward() for
+      // exactly this reason and left this one, which is the prop you actually
+      // see in the city and the prison, still on the lens.
+      if (CBZ.playerAimDir) CBZ.playerAimDir(_hgDir);
+      else _hgDir.set(0, 0, -1).applyQuaternion(CBZ.camera.quaternion);
       _hgTarget.copy(CBZ.camera.position).addScaledVector(_hgDir, 120);
       _hgDir.copy(_hgTarget).sub(_hgPos).normalize();
       reloadAimBlend(rl, ch, _hgDir);   // …unless it is being reloaded

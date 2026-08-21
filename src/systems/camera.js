@@ -228,9 +228,9 @@
     DAMP_YAW_AIM: 26,  // yaw chase while armed — near-rigid so aiming never feels mushy
     FOV: 60,           // base FOV
     // GUN-VISIBLE armed tiers (CAM_TP_GUN_VISIBLE) — see city/camera.js.
-    DIST_CARRY: 4.35, DIST_PRESENT: 2.75, DIST_ADS: 2.65,
-    SIDE_CARRY: 0.68, SIDE_PRESENT: 1.12, SIDE_ADS: 1.12,
-    HEIGHT_CARRY: 1.70, HEIGHT_PRESENT: 1.58, HEIGHT_ADS: 1.58,
+    DIST_CARRY: 4.35, DIST_PRESENT: 2.20, DIST_ADS: 2.65,
+    SIDE_CARRY: 0.68, SIDE_PRESENT: 1.50, SIDE_ADS: 1.12,
+    HEIGHT_CARRY: 1.70, HEIGHT_PRESENT: 1.55, HEIGHT_ADS: 1.58,
     // LEGACY tier (CAM_TP_GUN_VISIBLE=false): armed-at-rest = the SAME frame as
     // relaxed, only RMB/ADS punched in — the framing that hid the gun.
     DIST_AIM_BASE: 4.35, DIST_AIM_ADS: 2.65,
@@ -337,13 +337,27 @@
   CBZ.camAimDecoupled = tpFixedFrame;
 
   // CAM_TP_GUN_VISIBLE, read live so a console flip re-frames the next frame.
-  // The city tiers spend it inside CITY_TP's getters; the jail/survival boom
-  // (TP === null — a different rig with its own constants) spends it here.
-  // That rig ALREADY leads its look target 12 m while armed, which the city
-  // measurements say is the half that matters — it was just standing 7.6 m back
-  // to use it. Reasoned across from those numbers rather than measured on its
-  // own stage: tp-gun-view-check only boots the city.
   function gunVis() { return CBZ.CONFIG.CAM_TP_GUN_VISIBLE !== false; }
+  // ---- THE SAME RULE, FOR THE MODES THAT ARE NOT THE CITY ------------------
+  // The city tiers spend the flag inside CITY_TP's getters. Jail (escape),
+  // the disaster island (survival) and gun game run the OTHER rig — TP === null,
+  // its own constants — and they were left out of the first pass entirely, which
+  // was wrong: they are where most of the shooting happens. They already lead
+  // the look target 12 m while armed, which the city measurements say is the
+  // half that matters; they were just standing 7.6 m back to use it.
+  //
+  // But the gate has to be PRESENTING, not merely-armed, or this would import
+  // the city's measured mistake instead of its fix. The city sweep is emphatic:
+  // a tighter boom with a wider offset HIDES a carried weapon, because a
+  // low-ready long gun hangs flat along the thigh and every centimetre the lens
+  // moves that way puts more hip in front of it. Jail runs the same hanging
+  // low-ready pose (holsterprops is city+escape), so carrying there keeps the
+  // frame it always had, and only the trigger changes the shot.
+  // Reasoned across from the city numbers, not measured on their own stages:
+  // tp-gun-view-check only boots the city.
+  function nonTpPresent() {
+    return gunVis() && !!(CBZ.tpPresenting && CBZ.tpPresenting());
+  }
   CBZ.camFixedFrameK = function () { return fixedK; };
   function pitchLimits() {
     if (CBZ.CONFIG.CAM_RDR2_ORBIT === false) return [MIN_PITCH, MAX_PITCH];
@@ -1415,7 +1429,7 @@
           // ease below is the whole ADS punch-in). Wheel + melee zoom are out.
           ? (shoulder ? TP.DIST_AIM : TP.DIST) * tpZoomK
           : (shoulder ? TP.DIST_AIM : (meleeFocus ? TP.DIST * 0.85 : TP.DIST * (zoomTarget / DEF))))
-      : (driving ? Math.max(zoomTarget, 11) : (shoulder ? Math.min(zoomTarget, gunVis() ? 5.0 : 7.6) : (meleeFocus ? Math.min(zoomTarget, 7.0) : zoomTarget)));
+      : (driving ? Math.max(zoomTarget, 11) : (shoulder ? Math.min(zoomTarget, nonTpPresent() ? 5.0 : 7.6) : (meleeFocus ? Math.min(zoomTarget, 7.0) : zoomTarget)));
     // ---- ROOM-AWARE BOOM (CAM_ROOM_BOOM). `encK` is the damped enclosure, so
     // the doorway is a ~0.3s blend rather than a step, and the existing collision
     // clamp below stays exactly what it was: the LAST resort, not the mechanism.
@@ -1547,8 +1561,8 @@
     // SHOULDER SWAP (CAM_SHOULDER_SWAP): shoulderK eases -1↔1 through centre,
     // flipping the whole side-offset family (framing AND aim offsets together
     // so the ADS punch-in lands over whichever shoulder is active).
-    const targetSide = (chuteState ? 0 : (TP ? (shoulder ? TP.SIDE_AIM * 0.22 : TP.SIDE * 0.25) : (shoulder ? (gunVis() ? 0.30 : 0.26) : (meleeFocus ? 0.12 : 0)))) * sK * armK;
-    const camSide = (chuteState ? 0 : (TP ? (shoulder ? TP.SIDE_AIM : TP.SIDE) : (shoulder ? (gunVis() ? 1.05 : 0.86) : (meleeFocus ? 0.32 : 0)))) * sK * armK;
+    const targetSide = (chuteState ? 0 : (TP ? (shoulder ? TP.SIDE_AIM * 0.22 : TP.SIDE * 0.25) : (shoulder ? (nonTpPresent() ? 0.30 : 0.26) : (meleeFocus ? 0.12 : 0)))) * sK * armK;
+    const camSide = (chuteState ? 0 : (TP ? (shoulder ? TP.SIDE_AIM : TP.SIDE) : (shoulder ? (nonTpPresent() ? 1.05 : 0.86) : (meleeFocus ? 0.32 : 0)))) * sK * armK;
     const baseX = tx + rightX * targetSide;
     const baseZ = tz + rightZ * targetSide;
     const ox = Math.sin(yaw) * cp * orbitDist;

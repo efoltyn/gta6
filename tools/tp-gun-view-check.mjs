@@ -22,7 +22,7 @@
 
    Usage: node tools/tp-gun-view-check.mjs [--json] [--shots]   Exit 0 = ok. */
 import { spawn } from "node:child_process";
-import { rm, mkdir, writeFile } from "node:fs/promises";
+import { rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -122,6 +122,11 @@ const tick = (n) => evl(`(()=>{ for (let i=0;i<${n};i++) {
   CBZ.hitstop = 0; CBZ.slowmo = 0;
   if (CBZ.cineBusy && CBZ.cineBusy() && CBZ.cineAbort) CBZ.cineAbort();
   if (CBZ.game) CBZ.game.cityHolstered = false;
+  // NOON, pinned. The sky clock runs while the gate does, so a contact sheet
+  // captured over fifteen minutes of software rendering drifts from morning
+  // into night and the last plates are unreadable next to the first. t=0.25 is
+  // sun height sin(2*pi*t) = 1 (core/daynight.js).
+  if (CBZ.dayPhase) CBZ.dayPhase(0.25);
   // …and no heat. Standing in the open with a rifle out IS a crime here: an
   // earlier run of this gate got the player ARRESTED mid-sample, and a booking
   // screen takes the weapon into evidence, which is how rows started coming
@@ -449,6 +454,146 @@ async function triggerSignalCheck() {
   await tick(20);                        // still inside the 0.9 s post-shot linger
   const after = JSON.parse(await evl("JSON.stringify(window.__tpGun())"));
   return { before, held, after };
+}
+
+// ---- --matrix: THE CONTACT SHEET ------------------------------------------
+// The gate answers "is it visible" in one number from one stage. This answers
+// "show me", across the things that actually vary in play: every weapon
+// silhouette in the game, carried and presented; the whole vertical aim band;
+// both shoulders; crouch and prone; and a gun pointed at a person, which is
+// the only shot that shows the frame doing its real job. Each plate is
+// captured from the live rig with its measured numbers beside it, so the
+// contact sheet and the gate cannot drift apart.
+if (process.argv.includes("--matrix")) {
+  await mkdir(SHOTDIR, { recursive: true });
+  // a partial re-shoot MERGES into the existing sheet (--only-groups), so one
+  // bad section does not cost the other thirty plates.
+  let plates = [];
+  try { plates = JSON.parse(await readFile(path.join(SHOTDIR, "matrix.json"), "utf8")); } catch (_) {}
+  async function plate(id, caption, group) {
+    const r = await measure(3, 6);
+    await draw();
+    const shot = await send("Page.captureScreenshot", { format: "png" });
+    const data = shot.result && shot.result.data;
+    const f = path.join(SHOTDIR, `matrix-${id}.png`);
+    if (data) await writeFile(f, Buffer.from(data, "base64"));
+    const row = {
+      id, caption, group, file: path.relative(ROOT, f),
+      vis: r.vis, visSpan: r.visSpan, muzVisible: r.muzVisible, muzNdc: r.muzNdc,
+      playerNdc: r.playerNdc, dist: r.dist, weapon: r.weapon, tier: r.tier, err: r.err || null,
+    };
+    const at = plates.findIndex((p) => p.id === id);
+    if (at >= 0) plates[at] = row; else plates.push(row);
+    log(`  plate ${id} — vis ${((r.vis || 0) * 100) | 0}% span ${((r.visSpan || 0) * 100).toFixed(1)}%${r.err ? " ERR " + r.err : ""}`);
+    // written after EVERY plate, not at the end: a contact sheet is a quarter of
+    // an hour of software rendering, and a run that dies at plate 30 should not
+    // take the other 29 with it.
+    await writeFile(path.join(SHOTDIR, "matrix.json"), JSON.stringify(plates, null, 2));
+  }
+  // enter a tier without firing (same technique the sweep uses, and the gate
+  // proves the real trigger reaches the same signals)
+  const setTier = (t) => evl(`(()=>{
+    if (CBZ.fpsSetAim) CBZ.fpsSetAim(${t === "ads"});
+    CBZ.CONFIG.CITY_TP_LOWREADY = ${t === "carry"};
+    CBZ.tpPresenting = () => ${t !== "carry"};
+    CBZ.shake = function () {};
+    return true; })()`);
+  const arm = async (w) => {
+    await evl(`window.__tpSetup(${JSON.stringify(w)})`);
+    await tick(170);
+  };
+
+  await evl("(()=>{ CBZ.CONFIG.CAM_TP_GUN_VISIBLE = true; return true; })()");
+
+  // 1. every silhouette in the game, carried and presented
+  const ga = process.argv.indexOf("--only-groups");
+  const ONLY = ga > 0 ? String(process.argv[ga + 1]).split(",") : null;
+  const want = (g) => !ONLY || ONLY.includes(g);
+  const GUNS = ["sidearm", "revolver", "deagle", "uzi", "smg", "carbine", "ak47",
+                "shotgun", "sniper", "lmg", "glauncher", "bazooka"];
+  if (want("weapons")) for (const w of GUNS) {
+    for (const t of ["carry", "present"]) {
+      await arm(w); await setTier(t); await tick(110);
+      await plate(`gun-${w}-${t}`, `${w} — ${t === "carry" ? "carried (gun down)" : "presenting (trigger down)"}`, "weapons");
+    }
+  }
+
+  // 2. the vertical aim band, presenting, on a rifle. Under CAM_TP_FIXED_ANGLE
+  //    the BOOM does not tilt with these — the gun does, and the frame holds.
+  //    Everything else you own is drawn SLUNG (back/hip mounts), and a rocket
+  //    launcher across the shoulder is the loudest thing in a plate that is
+  //    about a rifle — so carry exactly one gun for the rest of the sheet.
+  await evl(`(()=>{
+    if (CBZ.weaponInventory) CBZ.weaponInventory.length = 0;
+    return true; })()`);
+  await arm("carbine"); await setTier("present"); await tick(90);
+  if (want("angles")) for (const p of [-0.40, -0.20, 0.0, 0.18, 0.36]) {
+    await evl(`(()=>{ CBZ.cam.pitch = ${p}; return true; })()`);
+    await tick(80);
+    await plate(`aim-pitch-${String(p).replace(/[.-]/g, "_")}`,
+      `aim pitch ${p >= 0 ? "+" : ""}${p} rad (${(p * 57.3).toFixed(0)}° ${p < 0 ? "up" : "down"})`, "angles");
+  }
+  await evl("(()=>{ CBZ.cam.pitch = 0.05; return true; })()");
+
+  // 3. both shoulders
+  if (want("angles")) for (const side of [-1, 1]) {
+    await evl(`(()=>{ if (CBZ.camSetShoulder) CBZ.camSetShoulder(${side}); return true; })()`);
+    await tick(120);
+    await plate(`shoulder-${side < 0 ? "left" : "right"}`, `${side < 0 ? "left" : "right"} shoulder (MMB swaps)`, "angles");
+  }
+
+  // 4. (stances were here and are gone: CBZ.player.crouch is re-derived from
+  //    the input every tick, so setting it from outside produced two more
+  //    standing plates with a crouch label on them. A stance sheet needs the
+  //    key held through the sim, which is a bigger harness than this.)
+
+  // 5. POINTED AT SOMEONE. The shot that matters: the frame has to hold the
+  //    weapon AND the person it is aimed at, or it has not done its job.
+  const aimed = want("target") ? await evl(`(() => {
+    const P = CBZ.player, list = (CBZ.cityPeds || []).concat(CBZ.cityCops || []);
+    let best = null, bd = 1e9;
+    for (const a of list) {
+      if (!a || a.dead || !a.pos) continue;
+      const d = Math.hypot(a.pos.x - P.pos.x, a.pos.z - P.pos.z);
+      if (d > 4 && d < bd) { bd = d; best = a; }
+    }
+    if (!best) return null;
+    // stand off at a readable distance and face them
+    const dx = best.pos.x - P.pos.x, dz = best.pos.z - P.pos.z, d = Math.hypot(dx, dz) || 1;
+    const stand = 7.5;
+    P.pos.x = best.pos.x - dx / d * stand;
+    P.pos.z = best.pos.z - dz / d * stand;
+    if (CBZ.floorAt) P.pos.y = CBZ.floorAt(P.pos.x, P.pos.z);
+    if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.position.set(P.pos.x, P.pos.y, P.pos.z);
+    const yaw = Math.atan2(-dx, -dz);
+    P.yaw = yaw; if (CBZ.cam) { CBZ.cam.yaw = yaw; CBZ.cam.pitch = 0.04; }
+    return JSON.stringify({ kind: best.kind || "ped", dist: +bd.toFixed(1) });
+  })()`) : null;
+  if (aimed) {
+    await tick(150);
+    await plate("aimed-at-person", `pointed at a ${JSON.parse(aimed).kind} ~7.5 m away — presenting`, "target");
+    await setTier("ads");
+    await tick(130);
+    await plate("aimed-at-person-ads", "same target, scoped (RMB)", "target");
+    await setTier("carry");
+    await tick(130);
+    await plate("aimed-at-person-carry", "same target, gun carried (not presenting)", "target");
+  } else log("  (no ped nearby to point at)");
+
+  // 6. the before/after pair, same stage, flag off
+  if (want("before-after")) await evl("(()=>{ CBZ.CONFIG.CAM_TP_GUN_VISIBLE = false; return true; })()");
+  if (want("before-after")) for (const w of ["carbine", "sidearm"]) {
+    await arm(w); await setTier("present"); await tick(140);
+    await plate(`before-${w}-present`, `${w}, presenting — OLD framing (flag off)`, "before-after");
+  }
+  await evl("(()=>{ CBZ.CONFIG.CAM_TP_GUN_VISIBLE = true; return true; })()");
+  if (want("before-after")) for (const w of ["carbine", "sidearm"]) {
+    await arm(w); await setTier("present"); await tick(140);
+    await plate(`after-${w}-present`, `${w}, presenting — NEW framing`, "before-after");
+  }
+
+  console.log(`\n  ${plates.length} plates → ${path.relative(ROOT, SHOTDIR)}/matrix-*.png (+ matrix.json)`);
+  done(0);
 }
 
 // ---- --sweep: WHERE IS THE BEST FRAME, measured instead of guessed --------

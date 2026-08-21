@@ -66,13 +66,19 @@
     //      ~0.17 rad, which drops the character low in frame and silhouettes
     //      the weapon against what it is aimed at. ADS always had it; firing
     //      did not. 0% → 78%.
-    //   2. THE SHOULDER OFFSET. 0.68 m at a 4.35 m boom is 9° of frame — the
-    //      sight line to a gun ~0.25 m right of centre and ~0.6 m forward
+    //   2. THE SHOULDER OFFSET, which pays MUCH better than it used to, and the
+    //      reason is worth writing down. 0.68 m at a 4.35 m boom is 9° of frame:
+    //      the sight line to a gun ~0.25 m right of centre and ~0.6 m forward
     //      crosses the body plane 3 cm outside a torso that is 25 cm wide, i.e.
-    //      inside the firing arm. Past ~1.1 m it stops paying: the barrel is
-    //      locked parallel to the view axis while you present (holsterprops
-    //      aims it at the crosshair's far point), so a lens far out to the side
-    //      just foreshortens it.
+    //      inside the firing arm. It used to stop paying past ~1.1 m, because
+    //      the barrel was locked parallel to the LENS while presenting — move
+    //      the lens sideways and the gun swings with it, staying pointed into
+    //      the screen. Now that the barrel follows the AIM instead (the fix in
+    //      systems/holsterprops.js), moving the lens sideways buys real
+    //      parallax: measured 62% / 77% / 85% of the barrel at 1.0 / 1.3 / 1.6 m
+    //      of offset, monotone, with the on-screen length going 6% → 14% of the
+    //      frame. 1.50 is that curve minus a safety margin for the collision
+    //      clamp in a tight street.
     //   3. THE BOOM, last and least — worth about a third of what the offset is
     //      worth, and every metre of it costs readability of the street.
     //
@@ -102,9 +108,9 @@
     //           that. Only the lens (FOV_AIM) is still ADS-only.
     // Each is a FIXED target; no wheel zoom, no speed zoom. Holster and you are
     // back on DIST/SIDE above, untouched.
-    DIST_CARRY:   4.35, DIST_PRESENT:   2.75, DIST_ADS:   2.65,  // boom (CARRY === DIST above, deliberately)
-    SIDE_CARRY:   0.68, SIDE_PRESENT:   1.12, SIDE_ADS:   1.12,  // right-shoulder offset (CARRY === SIDE)
-    HEIGHT_CARRY: 1.70, HEIGHT_PRESENT: 1.58, HEIGHT_ADS: 1.58,  // rig pivot above the feet (CARRY === HEIGHT)
+    DIST_CARRY:   4.35, DIST_PRESENT:   2.20, DIST_ADS:   2.65,  // boom (CARRY === DIST above, deliberately)
+    SIDE_CARRY:   0.68, SIDE_PRESENT:   1.50, SIDE_ADS:   1.12,  // right-shoulder offset (CARRY === SIDE)
+    HEIGHT_CARRY: 1.70, HEIGHT_PRESENT: 1.55, HEIGHT_ADS: 1.58,  // rig pivot above the feet (CARRY === HEIGHT)
 
     // ---- LEGACY armed tier (CAM_TP_GUN_VISIBLE = false) ----
     // The pre-2026-08-20 framing, kept as the one-line revert: armed-at-rest was
