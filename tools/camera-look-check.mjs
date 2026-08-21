@@ -166,13 +166,21 @@ async function measureOnce(label) {
 // occasionally stall a frame long enough that the lens reads identical either
 // side of a drag. Zero movement on BOTH axes while the input clearly landed is
 // that stall, never a sign error, so re-measure instead of failing on it.
-async function measure(label) {
+async function measure(label, opts) {
+  // …EXCEPT WHERE A DEAD LENS IS THE WHOLE POINT. Under the pin, cam.pitch
+  // moving while the lens does NOT is not a stalled frame — it is the pinned
+  // frame doing its one job, and the assertion twenty lines down demands
+  // exactly that (|dViewY| < 0.02). Without this the pinned row could never
+  // return: it re-measured three times and killed the run on the very
+  // behaviour it was there to check, so the gate failed on a build where
+  // nothing was wrong.
+  const pinned = !!(opts && opts.pinned);
   for (let attempt = 0; attempt < 3; attempt++) {
     const r = await measureOnce(label);
     // PER AXIS. The two axes are two separate before/after pairs, so a stall
     // can eat one and spare the other — which is how a dead pitch sample once
     // slipped through a whole-measurement check that the live yaw satisfied.
-    const pitchStalled = Math.abs(r.dCamPitch) > 1e-4 && Math.abs(r.dViewY) < 1e-4;
+    const pitchStalled = !pinned && Math.abs(r.dCamPitch) > 1e-4 && Math.abs(r.dViewY) < 1e-4;
     const yawStalled = Math.abs(r.dCamYaw) > 1e-4 && Math.abs(r.dHead) < 1e-4;
     if (!pitchStalled && !yawStalled) return r;
     console.log(`  (lens never moved though the input landed — stalled frame, re-measuring)`);
@@ -230,7 +238,7 @@ console.log(`third-person free   frameTilt spread over a 0.70 rad sweep: ${tiltS
             `   view gain: ${gain.toFixed(3)}`);
 
 await setPin(true);
-const tpPin = await measure("third-person pinned");
+const tpPin = await measure("third-person pinned", { pinned: true });
 await setPin(false);
 
 const fails = [];
