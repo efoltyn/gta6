@@ -164,7 +164,7 @@ const chrome = spawn(CHROME, [
   "--headless=new", "--no-sandbox", "--disable-dev-shm-usage",
   "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
   "--enable-webgl", "--mute-audio", "--window-size=1024,640",
-  `--remote-debugging-port=${DBG}`, `--user-data-dir=/tmp/cbz-racerstory-${DBG}`, "about:blank",
+  `--remote-debugging-port=${DBG}`, `--user-data-dir=/tmp/cbz-racerstory-${DBG}-${Date.now()}`, "about:blank",
 ], { stdio: "ignore" });
 
 const bye = (code, msg) => {
@@ -218,6 +218,8 @@ const J = async (body, ms) => {
   try { return JSON.parse(s); } catch (e) { return { ERR: "unparseable: " + s }; }
 };
 const shot = async (name) => {
+  // the page is booted with drawing off — ask for exactly one frame first
+  await ev("window.CBZ && CBZ.renderFrame ? CBZ.renderFrame() : false", 120000);
   const s = await send("Page.captureScreenshot", { format: "png" });
   if (s.result && s.result.data) {
     const p = path.join(SHOTS, name);
@@ -229,9 +231,53 @@ await send("Runtime.enable");
 await send("Page.enable");
 
 /* ---- boot the racer origin ---------------------------------------------- */
+/* EVERY LEG BOOTS WITH DRAWING OFF. This gate asserts on world STATE — car
+   counts, records, mission stages — and none of that needs a pixel. Gang
+   City's CPU build is ~30 s and finishes fine; what used to make this tool
+   un-runnable on a modest box is the FIRST FRAMES after it, where three.js
+   compiles a program per material across a 25 km scene on a software
+   rasterizer. ?cfg_RENDER_FRAMES=0 (core/loop.js) removes that entirely, and
+   the one screenshot at the end asks for a single frame explicitly through
+   CBZ.renderFrame(). Use tools/boot-trace.mjs if a boot ever hangs again: it
+   beacons every checkpoint from inside the frozen thread and tells you
+   whether you are looking at the build or at the renderer. */
+/* WILDLIFE OFF TOO, and this one is not a nicety. tools/boot-trace.mjs --deep
+   traced a built Gang City into its per-frame chain and named the updater that
+   never returns: city/wildlife.js's onUpdate(47.1). With animals on, this box
+   completed 2 loop passes in five minutes; with ?cfg_WILDLIFE=0 it completed
+   1166 in under three, median 0.09 s. Nothing in the racer origin involves an
+   animal, so the gate boots without them and the racing it is actually
+   measuring is identical. */
+const HEADLESS_PARAMS = "cfg_RENDER_FRAMES=0&cfg_WILDLIFE=0";
 async function boot(query) {
   errors = [];
-  await send("Page.navigate", { url: `http://127.0.0.1:${PORT}/index.html${query || ""}` });
+  const q = query ? query.replace(/^\?/, "") + "&" + HEADLESS_PARAMS : HEADLESS_PARAMS;
+  /* EVERY LEG IS A NEW PLAYER, and forgetting this reads as a game bug.
+     city/origins.js keeps a per-character ledger in localStorage and does NOT
+     replay a story's opening for someone who has already lived it — so the
+     second boot in one browser profile (and the first, if an earlier run of
+     this tool left a ledger behind) resumes the racer instead of putting him
+     on the grid, and the opening checks below fail for a reason that is
+     entirely the harness's. Same trap tools/boot-origin-check.mjs documents.
+     Cleared from a same-origin page with no engine on it, so nothing is
+     mid-write when the key disappears. */
+  const url = `http://127.0.0.1:${PORT}/index.html?${q}`;
+  await send("Page.navigate", { url: url });
+  // WAIT FOR THE REAL PAGE BEFORE CLEARING. An earlier version navigated to a
+  // 404 and cleared 250 ms later — but the navigation had not committed, so
+  // the clear ran against about:blank, whose storage is an OPAQUE origin: it
+  // succeeds, clears nothing, and the next load resumes the ledger a previous
+  // run of this tool left behind. The gate then reported "the story does not
+  // open on the grid" for a character the engine was correctly RESUMING.
+  // Load the page, clear from inside it, load it again.
+  for (let i = 0; i < 200; i++) {
+    if (await ev("!!(window.CBZ && CBZ.bootComplete)") === true) break;
+    await sleep(400);
+  }
+  log("  storage before clear: " + await ev("(function(){try{return location.origin+' keys='+localStorage.length}catch(e){return 'ERR '+e}})()", 10000));
+  await ev("try { localStorage.clear(); sessionStorage.clear(); } catch (e) {} true", 10000);
+  log("  storage after clear:  " + await ev("(function(){try{return 'keys='+localStorage.length}catch(e){return 'ERR '+e}})()", 10000));
+  await send("Page.navigate", { url: url });
   // CBZ.bootComplete is main.js's LAST line, so it means "the script chain
   // parsed" — the title screen is live and setCityOrigin exists. It does NOT
   // mean the world is built; that only starts when PLAY is pressed.
@@ -241,6 +287,7 @@ async function boot(query) {
     if (!title) await sleep(400);
   }
   if (!title) return "title never came up";
+  log("  ledger at title: " + await ev("(function(){try{var w=CBZ.cityWorldEnsure?CBZ.cityWorldEnsure():null;return 'keys='+localStorage.length+' played='+(w&&w.originPlayed)+' origin='+(w&&w.origin)}catch(e){return 'ERR '+e}})()", 20000));
   await ev(`(function(){
     CBZ.setCityOrigin("racer");
     var b = document.querySelector('.origin-btn[data-origin="racer"]'); if (b) b.click();
@@ -280,6 +327,79 @@ check("the story opens IN the car, not on the grass", open.driving === true);
 check("exactly one loaner exists after the opening", open.loaners === 1, open.loaners + " loaner(s)");
 check("the opening race is live with a field", open.active === true && open.field >= 3,
   "active=" + open.active + " field=" + open.field);
+
+/* ---- A1b. WHEN THE OPENING DID NOT HAPPEN, SAY WHY --------------------
+   The leak was only ever the SYMPTOM. Twenty grey cars appear because the
+   deferred grid start is failing and being retried, so a gate that proves
+   the litter is gone and stops there has proved the quiet half of the bug.
+   This runs the same call the origin makes, in the open, and reports which
+   gate refused it. */
+if (!open.active) {
+  const why = await J(`
+    /* READ THE BOOT REFUSAL FIRST. cityRaceStart clears it on success, and
+       this probe calls cityRaceStart — so asking afterwards reports the
+       health of the probe's own call and throws away the reason the ORIGIN
+       failed, which is the only thing worth knowing here. */
+    var out = { atBoot: CBZ.cityRaceRefusal ? CBZ.cityRaceRefusal() : "(engine does not say)" };
+    out.deferral = CBZ.cityOriginRaceDebug ? CBZ.cityOriginRaceDebug() : "(no debug)";
+    out.originWhy = CBZ.cityOriginWhy ? CBZ.cityOriginWhy() : "(no log)";
+    out.cash = CBZ.game.cash;                    // the racer origin grants $350
+    out.introActive = CBZ.cityOriginIntroActive ? CBZ.cityOriginIntroActive() : null;
+    out.ready = !!(CBZ.cityRaceReady && CBZ.cityRaceReady());
+    out.arena   = !!(CBZ.city && CBZ.city.arena && CBZ.city.arena.root);
+    out.makeCar = !!CBZ.cityMakeCar;
+    out.enter   = !!CBZ.cityEnterVehicle;
+    out.cars    = ((CBZ.cityEcon && CBZ.cityEcon.CARS) || []).length;
+    out.drivers = !!(CBZ.raceDrivers && CBZ.raceDrivers.enabled && CBZ.raceDrivers.enabled());
+    out.kit     = !!CBZ.raceKit;
+    out.len     = CBZ.speedwayTrackLen ? Math.round(CBZ.speedwayTrackLen()) : -1;
+    out.standings = (CBZ.cityRacing && CBZ.cityRacing.standings) ? CBZ.cityRacing.standings().length : -1;
+    out.course  = !!(CBZ.raceKit && CBZ.raceKit.course && CBZ.raceKit.course("speedway"));
+    out.pinkSlipHolding = !!(CBZ.raceLadder && CBZ.raceLadder.pinkSlip && CBZ.raceLadder.pinkSlip().active);
+    // now actually try it, for real, and watch every field the dispatcher reads
+    var n0 = CBZ.cityCars.length;
+    var car = CBZ.cityRaceStart({ style: "muscle", number: 99 });
+    var R = CBZ.speedwayRaceState();
+    out.tryGot   = !!car;
+    out.tryAdded = CBZ.cityCars.length - n0;
+    out.driving  = !!(CBZ.player && CBZ.player.driving);
+    out.refusal  = CBZ.cityRaceRefusal ? CBZ.cityRaceRefusal() : "(engine does not say)";
+    out.race     = { active: R.active, rd: R.rd, phase: R.phase, drivers: R.drivers.length, legacy: R.racers.length, broken: !!R._rdBroken };
+    /* AND THE ONE CALL WITH A SWALLOWING CATCH AROUND IT. island_speedway's
+       loanerCar() wraps cityMakeCar in a try/catch that returns null — so if
+       the car cannot be built, every caller upstream sees a polite
+       null and the reason is thrown away. Reproduce the call here with the
+       error kept, and scrap anything it manages to build so the probe cannot
+       become the litter it is investigating. */
+    var CARS = (CBZ.cityEcon && CBZ.cityEcon.CARS) || [];
+    var base = null;
+    for (var i = 0; i < CARS.length; i++) { if (CARS[i].detailStyle === "muscle") { base = CARS[i]; break; } }
+    if (!base) base = CARS[0];
+    out.base = base ? base.name : null;
+    if (base) {
+      var m = Object.assign({}, base, { color: 0x9aa4b2, value: 3500 });
+      try {
+        var probe = CBZ.cityMakeCar(0, 0, 0, false, m, 0.3);
+        out.makeCarOk = !!probe;
+        /* AND THE SEAT. cityRaceStart's own refusal says driving=false at the
+           moment startRace() looks, which can only mean the enter call did not
+           take — so exercise that call on its own and watch the flag. */
+        if (probe) {
+          probe.owned = true;
+          out.drivingBefore = !!CBZ.player.driving;
+          out.enterReturned = !!CBZ.cityEnterVehicle(probe);
+          out.drivingAfter = !!CBZ.player.driving;
+          out.vehicleIsProbe = CBZ.player._vehicle === probe;
+          if (CBZ.player.driving && CBZ.cityExitVehicle) CBZ.cityExitVehicle();
+        }
+        if (probe && CBZ.cityScrapCar) CBZ.cityScrapCar(probe);
+      } catch (e) { out.makeCarOk = false; out.makeCarErr = String(e && (e.stack || e.message || e)).replace(/\s+/g, " ").slice(0, 300); }
+    }
+    return out;`);
+  log("  why-not: " + JSON.stringify(why));
+  check("cityRaceStart works on a finished world", why && why.tryGot === true,
+    "the origin's own call still refuses — see why-not above");
+}
 
 /* ---- A2. THE LEAK, forced ------------------------------------------------
    Refuse the seat and ask for twenty starts. Every one of them builds a car

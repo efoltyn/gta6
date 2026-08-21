@@ -1613,16 +1613,25 @@
   const PENDING_RACE_SEC = 6;
   const PENDING_RACE_TRIES = 3;
   let pendingRace = null;
+  /* A DEFERRED START THAT NEVER FIRES LEAVES NO TRACE ANYWHERE, which is how
+     the racer origin could quietly stop opening on the grid and the only
+     symptom anyone ever saw was a player standing at a gate (and, before the
+     litter fix, twenty grey cars). These four counters are the whole history
+     of the deferral, and CBZ.cityOriginRaceDebug() hands them to a probe. */
+  const raceDbg = { armed: 0, ticks: 0, notReady: 0, tried: 0, started: 0, gaveUp: 0 };
+  CBZ.cityOriginRaceDebug = function () {
+    return Object.assign({ pending: !!pendingRace, t: pendingRace ? pendingRace.t : null }, raceDbg);
+  };
 
   function tryRace() {
     if (!pendingRace || !CBZ.cityRaceStart) return false;
     // the world cannot answer yet — say so for free, spend nothing
-    if (CBZ.cityRaceReady && !CBZ.cityRaceReady()) return false;
+    if (CBZ.cityRaceReady && !CBZ.cityRaceReady()) { raceDbg.notReady++; return false; }
     if (pendingRace.tries >= PENDING_RACE_TRIES) return false;
-    pendingRace.tries++;
+    pendingRace.tries++; raceDbg.tried++;
     const car = CBZ.cityRaceStart({ style: "muscle", number: 99 });
     if (!car) return false;
-    pendingRace = null;
+    pendingRace = null; raceDbg.started++;
     if (CBZ.cityRacerStory && CBZ.cityRacerStory.open) CBZ.cityRacerStory.open();
     else if (CBZ.city) CBZ.city.note("A loaner, the back of the grid, and the championship in front of you.", 3.4);
     return true;
@@ -1630,13 +1639,14 @@
 
   function tickRace(dt) {
     if (!pendingRace) return;
+    raceDbg.ticks++;
     pendingRace.t += dt;
     if (tryRace()) return;
     // every allowed attempt has been spent and none took — stop waiting on a
     // clock that will not change the answer, fall through to the gate now.
     if (pendingRace.tries >= PENDING_RACE_TRIES) pendingRace.t = PENDING_RACE_SEC + 1;
     if (pendingRace.t > PENDING_RACE_SEC) {
-      pendingRace = null;
+      pendingRace = null; raceDbg.gaveUp++;
       // The world could not put a race together this seed. Fall back to the
       // ORIGINAL opening — on foot at the gate — rather than hanging, and say
       // so, because a silent fallback is how the old one went unnoticed.
@@ -1655,6 +1665,8 @@
   /* WHERE, made real. Returns the intro opts the camera wants, or null so the
      caller falls back to the street exactly as the originals do. */
   function placeComposition(comp, game) {
+    raceDbg.placed = (raceDbg.placed || 0) + 1;
+    raceDbg.where = comp && comp.where;          // the branch this run actually took
     const WH = AXES.where[comp.where] || AXES.where.corner;
 
     // AIRBORNE — the owner's headline: "you literally start the game in air in
@@ -1684,7 +1696,7 @@
     // standings and the car catalog, neither guaranteed up at reset.
     if (comp.where === "speedway") {
       genericSafeSpawn();
-      pendingRace = { comp: comp, t: 0, tries: 0 };
+      pendingRace = { comp: comp, t: 0, tries: 0 }; raceDbg.armed++;
       if (!tryRace()) return { compact: false, onGrid: true, pending: true };
       return { compact: false, onGrid: true };
     }
@@ -1892,6 +1904,16 @@
     return opts;
   }
 
+  /* WHICH BRANCH DID THIS RUN TAKE? cityOriginApply has five exits and four
+     of them are silent, so "my story did not play" has four indistinguishable
+     causes: resumed a stamped ledger, silently adopted a legacy save, switched
+     characters, or actually played. Every exit records itself here — one push
+     per mode reset — and CBZ.cityOriginWhy() hands the list to a probe. This
+     is what turned "the racer origin does not open on the grid" from a guess
+     into a one-line answer. */
+  const applyLog = [];
+  CBZ.cityOriginWhy = function () { return applyLog.slice(-6); };
+
   CBZ.cityOriginApply = function (game) {
     introActiveFlag = false; introOptsCache = null;
     clearScene();
@@ -1942,6 +1964,7 @@
         if (!picked) {
           w.origin = selected; w.originPlayed = true;
           if (CBZ.cityWorldCommit) CBZ.cityWorldCommit();
+          applyLog.push({ branch: "adopt-legacy", selected: selected, picked: picked });
           return { introActive: false };
         }
         parkPreviousLife(w);
@@ -1984,9 +2007,11 @@
           if (CBZ.setCityOrigin) CBZ.setCityOrigin(w.origin);
         }
         restorePos(w);                                      // resume them where they were
+        applyLog.push({ branch: "resume", selected: selected, on: w.origin, picked: picked });
         return { introActive: false };
       }
 
+      applyLog.push({ branch: "play", selected: selected, picked: picked });
       const opts = applyOrigin(selected, game);
       if (opts) {
         w.origin = selected;

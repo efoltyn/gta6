@@ -2624,8 +2624,34 @@
   // Returns the player's car, or null if the world cannot supply a race — in
   // which case the caller stands the player up and prints its own feed line.
   const LOANER_COLOR = 0x9aa4b2;      // primer grey: a lent car, not a livery
+
+  /* ---- A REFUSAL THAT SAYS WHY --------------------------------------------
+     Everything below used to answer `null` and nothing else, and one of those
+     nulls came out of `catch (e) { return null; }` around cityMakeCar — so
+     when the racer origin stopped opening on the grid, the ONLY evidence
+     anywhere in the engine was a player standing at a gate. The fault was
+     invisible in exactly the way the twenty grey cars were loud: the litter
+     was the symptom, this was the disease, and the litter is what got
+     reported because the disease had been silenced.
+
+     Every exit now records its reason. CBZ.cityRaceRefusal() hands the last
+     one back, so a probe, a gate or a console can ask the engine what it
+     objected to instead of bisecting it. Costs one string assignment on a
+     path that runs a handful of times per run. */
+  let lastRefusal = null, startCalls = 0, startOk = 0, lastCancel = null;
+  function refuse(why) { lastRefusal = why; return null; }
+  /* Not just the last reason — the COUNTS too. "Nothing is recorded" is
+     ambiguous between "the start was never attempted" and "it was attempted
+     and it worked", and those want completely different fixes. A cancel
+     reason is here as well, because a race that starts and is scratched a
+     frame later looks from the outside exactly like one that never started. */
+  CBZ.cityRaceRefusal = function () {
+    return { last: lastRefusal, calls: startCalls, ok: startOk, cancelled: lastCancel };
+  };
+
   function loanerCar(opts) {
-    if (!CBZ.cityMakeCar || !CBZ.city || !CBZ.city.arena) return null;
+    if (!CBZ.cityMakeCar) return refuse("no cityMakeCar");
+    if (!CBZ.city || !CBZ.city.arena) return refuse("no arena");
     const back = opts.slot != null ? opts.slot : (useRD() ? FIELD_RD : FIELD_N);
     const slot = gridSlot(back);
     // Same model lookup racedrivers.js's modelForStyle uses, so the loaner is
@@ -2635,7 +2661,7 @@
     let base = null;
     for (const c of CARS) { if (c.detailStyle === (opts.style || "muscle")) { base = c; break; } }
     if (!base && CARS.length) base = CARS[0];
-    if (!base) return null;
+    if (!base) return refuse("the car catalog is empty (" + CARS.length + " models)");
     // Clone, never mutate the catalog. The clone also carries a TOKEN value:
     // `owned` below is what stops the opening frame being filed as Grand Theft
     // Auto, but vehicles.js pays the OWNED chop fraction (0.85 vs 0.42), so a
@@ -2646,8 +2672,9 @@
       value: Math.min(base.value || 0, 3500),
     });
     let car = null;
-    try { car = CBZ.cityMakeCar(slot.x, slot.z, slot.heading, false, model, 0.3); } catch (e) { return null; }
-    if (!car) return null;
+    try { car = CBZ.cityMakeCar(slot.x, slot.z, slot.heading, false, model, 0.3); }
+    catch (e) { return refuse("cityMakeCar threw: " + (e && (e.message || e))); }
+    if (!car) return refuse("cityMakeCar returned nothing for " + (base.name || "?"));
     // A LOANER IS LENT, NOT STOLEN. Without this, cityEnterVehicle files the
     // opening frame of the story as Grand Theft Auto and hands the rookie a
     // wanted level before the lights have gone out.
@@ -2735,8 +2762,9 @@
   CBZ.cityRaceStart = function (opts) {
     opts = opts || {};
     const P = CBZ.player;
+    startCalls++;
     if (RACE.active) return (P && P._vehicle) || null;   // already racing: idempotent
-    if (!raceReady()) return null;                       // free refusal — costs no car
+    if (!raceReady()) return refuse("the world cannot hold a race yet");   // free — costs no car
 
     // Race the car you are in if you are in one; otherwise you are lent one.
     let car = (P.driving && P._vehicle && !P._vehicle.dead) ? P._vehicle : null;
@@ -2760,9 +2788,21 @@
     try {
       if (!car) {
         car = loanerCar(opts);
-        if (!car) return null;                           // nothing built, nothing to clean
+        if (!car) return null;                           // loanerCar already said why
         lent = car;
-        if (!CBZ.cityEnterVehicle(car)) return fail();
+        /* INSTANT, because startRace() reads P.driving on the very next line.
+           city/boarding.js wraps cityEnterVehicle with a door-opening arc that
+           returns true ~1.5 s BEFORE the player is actually in the seat — see
+           the long note on that wrapper. Without this flag the dispatcher
+           below finds P.driving false every single time and refuses, which is
+           why the racer origin never opened on the grid and instead left a
+           loaner on the asphalt once per retry. The assert is not paranoia:
+           it is the contract this call now depends on, stated out loud. */
+        if (!CBZ.cityEnterVehicle(car, { instant: true })) { refuse("cityEnterVehicle refused the loaner"); return fail(); }
+        if (!P.driving || P._vehicle !== car) {
+          refuse("the seat did not take synchronously — something is wrapping cityEnterVehicle without honouring { instant: true }");
+          return fail();
+        }
       }
 
       // startRaceRD re-seats the player on the back row itself; the LEGACY field
@@ -2783,11 +2823,17 @@
       startRace();
       // The dispatcher refused (no drivers, no kit, a broken RD rig that also
       // failed legacy). Hand the loaner back rather than leaving an orphan.
-      if (!RACE.active) return fail();
+      if (!RACE.active) {
+        refuse("startRace() did not go green (rd=" + RACE.rd + " drivers=" + RACE.drivers.length +
+          " legacy=" + RACE.racers.length + " broken=" + !!RACE._rdBroken + " driving=" + !!P.driving + ")");
+        return fail();
+      }
       // it made it to the grid — from here it is the player's car, not litter
       if (lent) lent._loanerClaimed = true;
+      lastRefusal = null; startOk++;                     // it went green; nothing to explain
       return car;
     } catch (e) {
+      refuse("threw: " + (e && (e.stack || e.message || e)));
       if (window.console) console.error("[speedway] race start failed", e);
       return fail();
     }
@@ -3010,6 +3056,7 @@
 
   // race scratched before the green — no result, no round burned.
   function cancelRD(msg) {
+    lastCancel = msg || "(no reason given)";
     CBZ.raceDrivers.despawnAll("speedway");
     RACE.active = false; RACE.rd = false; RACE.phase = "idle";
     RACE.drivers = []; RACE.kit = null;

@@ -615,6 +615,13 @@
   // hard 25 s cap so a genuinely slow GPU still gets its game back.
   function waitForCheapFrames(done) {
     if (CBZ.bootStep) CBZ.bootStep("boot:frames");
+    /* NOTHING IS BEING DRAWN, SO THERE ARE NO FRAMES TO GET CHEAP. With
+       ?cfg_RENDER_FRAMES=0 (core/loop.js) the page produces no frames at all,
+       and requestAnimationFrame is scheduled against frame production — the
+       tick below would simply never be called again and the card would sit
+       there until its 25 s deadline, which cannot be reached either because
+       reaching it also needs a callback. Hand over immediately instead. */
+    if (CBZ.CONFIG.RENDER_FRAMES === false) { done(); return; }
     let cheap = 0, n = 0, prev = performance.now();
     const deadline = prev + 25000;
     (function tick() {

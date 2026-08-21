@@ -265,7 +265,14 @@ export default {
   afterLabel: "AFTER · GUARDED GRID START",
   viewport: { width: 1120, height: 690 },
   readyExpression: "window.THREE && window.CBZ && CBZ.CONFIG",
-  urlParams: { seed: 90210 },
+  /* WILDLIFE OFF ON BOTH SIDES. This preset has to DRAW, so it cannot use the
+     no-render lever — and with animals on, a built Gang City spends so long in
+     city/wildlife.js's per-frame tick (onUpdate 47.1) that the stage times out
+     before it can pose a camera. Measured with tools/boot-trace.mjs --deep:
+     2 loop passes in five minutes with animals, 1166 in under three without.
+     It is a controlled variable, identical in both columns, and there is not
+     an animal in any of these four shots. */
+  urlParams: { seed: 90210, cfg_WILDLIFE: 0 },
   stageTimeoutMs: 600000,
   metrics: {
     strayLoaners: { label: "Stray grey cars on the venue", better: "lower" },

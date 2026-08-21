@@ -110,11 +110,62 @@
       try { a.fn(dt); } catch (err) { console.error("[always]", err); }
     }
 
-    CBZ.renderer.render(CBZ.scene, CBZ.camera);
-    requestAnimationFrame(loop);
+    /* ---- THE ONE DRAW, AND THE ONE WAY TO TURN IT OFF -------------------
+       RENDER_FRAMES=false (?cfg_RENDER_FRAMES=0) runs the whole game with no
+       draw call: same updater chain, same always chain, same clock, nothing
+       handed to the rasterizer.
+
+       WHY THIS EXISTS. Measured with tools/boot-trace.mjs, which beacons every
+       boot checkpoint out through the browser process so a frozen main thread
+       can still be watched: Gang City's CPU build is ~30 s and completes
+       cleanly. What made the mode untestable headless is everything AFTER it —
+       the first frames, where three.js compiles a program per material the
+       first time it is drawn, across a 25 km scene, on a software rasterizer.
+       Prison Escape builds in ~1 s and then draws steadily at ~3 fps on the
+       same box, which is exactly why every gate aimed at that mode works and
+       the Gang City ones time out. This switch removes the drawing from any
+       tool that does not actually need pixels.
+
+       WHO SHOULD USE IT: every headless gate that asserts on WORLD STATE —
+       counts, records, positions, audits.
+       WHO SHOULD NOT: anything that photographs the game. Those want frames
+       and should pay for them — or call CBZ.renderFrame() to draw exactly
+       one, which is the supported way to take a picture from a page booted
+       with drawing off. */
+    const drawing = !CBZ.CONFIG || CBZ.CONFIG.RENDER_FRAMES !== false;
+    if (drawing) CBZ.renderer.render(CBZ.scene, CBZ.camera);
+    schedule();
   }
 
-  CBZ.startLoop = function () { requestAnimationFrame(loop); };
+  /* ---- WHAT PUMPS THE LOOP, AND WHY IT IS NOT ALWAYS rAF ------------------
+     MEASURED THE HARD WAY. The first version of the no-draw switch above kept
+     `requestAnimationFrame(loop)` as the pump and the game stopped dead: the
+     boot trace showed the build finishing in 27.5 s and then TWO loop passes
+     in the next five minutes. requestAnimationFrame is not a timer — the
+     browser schedules it against frame PRODUCTION, and a page that never
+     draws anything gives the compositor no reason to produce a frame, so the
+     callbacks simply stop arriving. Turning the renderer off had turned the
+     clock off with it, which looks identical from the outside to the hang it
+     was meant to cure.
+
+     So the pump follows the drawing: rAF while there are frames (correct for
+     players — vsync-aligned, throttled in background tabs), a timer when
+     there are not. `performance.now()` is passed by hand because rAF supplies
+     the timestamp and setTimeout does not; without it `t` is undefined and
+     every dt in the engine becomes NaN. */
+  function schedule() {
+    if (!CBZ.CONFIG || CBZ.CONFIG.RENDER_FRAMES !== false) { requestAnimationFrame(loop); return; }
+    setTimeout(function () { loop(performance.now()); }, 0);
+  }
+
+  // Draw exactly one frame, whatever RENDER_FRAMES says. The seam a probe or
+  // a screenshot tool uses on a page that is otherwise not drawing.
+  CBZ.renderFrame = function () {
+    try { CBZ.renderer.render(CBZ.scene, CBZ.camera); return true; }
+    catch (e) { console.error("[renderFrame]", e); return false; }
+  };
+
+  CBZ.startLoop = function () { schedule(); };
 
   // ---- HEADLESS SIM STEP (tools only — inert in normal play) --------------
   // Drives ONE update tick with a fixed dt and NO render: the whole updater +

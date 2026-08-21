@@ -3887,7 +3887,17 @@
       no deer, without a single species row or a mode flag.
      ============================================================ */
   function stockWildlife(city, opts) {
+    /* TWO WAYS TO SAY NO, because only one of them was reachable. CBZ.WILDLIFE
+       has always been the master switch and there is no URL path to it — it is
+       not a CONFIG key, so `?cfg_...` cannot set it and every headless tool
+       had to boot the full menagerie whether it cared about animals or not.
+       CBZ.CONFIG.WILDLIFE is the same switch through the door the rest of the
+       engine uses (?cfg_WILDLIFE=0), which matters because the per-frame
+       wildlife tick (onUpdate 47.1, below) is by a wide margin the most
+       expensive thing in a built Gang City — see the note on that registration
+       and tools/boot-trace.mjs --deep, which is how it was found. */
     if (CBZ.WILDLIFE === false) return null;
+    if (CBZ.CONFIG && CBZ.CONFIG.WILDLIFE === false) return null;
     city = city || (CBZ.city && CBZ.city.arena);
     if (!city || !city.root) return null;
     if (builtFor === city) return null;           // idempotent per world

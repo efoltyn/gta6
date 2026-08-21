@@ -157,7 +157,24 @@ if (!entry || errors.some((e) => /SyntaxError|is not defined|Unexpected token/i.
 }
 
 /* PHASE 2 — the world build. One synchronous 20-30 s task; nothing repaints
-   during it, which is why this polls rather than awaits. */
+   during it, which is why this polls rather than awaits.
+
+   THIS CHECK USED TO PASS ON A PAGE THAT HAD BUILT NOTHING. The readiness test
+   was `CBZ.bootComplete || state === 'playing'`, and `CBZ.bootComplete` is set
+   by main.js's LAST line at PARSE time — it means "the script chain finished",
+   which is Phase 1's question, and it is already true before PLAY is pressed.
+   So the first poll after the click answered true, and this printed "world
+   build: COMPLETE in 7.0s" for a title screen with no world behind it. A false
+   PASS from a health checker is worse than no checker: it sends the next
+   person hunting a bug somewhere else. `state === 'playing'` alone is the
+   honest signal — startRun() sets it AFTER resetGame() has run the build.
+
+   And note what this measures even when it is right: the CPU build ONLY. The
+   world is built and NOT YET DRAWN when this goes green; the first frames then
+   compile ~107 shader programs, which on a software rasterizer can cost many
+   times the build itself. If the page is unresponsive AFTER this passes, that
+   is the renderer, not the build — `node tools/boot-trace.mjs` separates the
+   two and names the phase. */
 errors.length = 0;
 log(`  pressing PLAY (build budget ${WAIT}s)…`);
 const t0 = Date.now();
@@ -166,11 +183,11 @@ let booted = false;
 for (let i = 0; i < Math.ceil(WAIT / 2); i++) {
   await sleep(2000);
   try {
-    if (await ev("!!(window.CBZ && (CBZ.bootComplete || (CBZ.game && CBZ.game.state === 'playing')))")) { booted = true; break; }
+    if (await ev("!!(window.CBZ && CBZ.game && CBZ.game.state === 'playing')")) { booted = true; break; }
   } catch (_) { /* the main thread is frozen mid-build; that is expected */ }
 }
 const secs = ((Date.now() - t0) / 1000).toFixed(1);
-log(`  world build: ${booted ? "COMPLETE" : "DID NOT FINISH"} in ${secs}s`);
+log(`  world build: ${booted ? "COMPLETE" : "DID NOT FINISH"} in ${secs}s (CPU build only — frames come after)`);
 
 if (booted) {
   const species = await ev("window.CBZ && CBZ.WILDLIFE_SPECIES ? Object.keys(CBZ.WILDLIFE_SPECIES).length : -1");

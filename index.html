@@ -427,7 +427,7 @@
   } catch (e) {}
 </script>
 <!-- 0. namespace + constants -->
-<script src="src/config.js?v=nodash1"></script>
+<script src="src/config.js?v=racerstory1"></script>
 <script src="src/core/seed.js"></script>
 <!-- THE MODE CAPABILITY BUS (CBZ.modeHas / worldActors / blastWorldActors).
      Turns "is this the city?" into "may I vault / may I blow up here?", so the
@@ -810,7 +810,7 @@
      thread cannot repaint during that). Must load BEFORE state.js, which
      shows it, and before the city modules that call CBZ.bootStep(). -->
 <script src="src/systems/bootprogress.js?v=meter1"></script>
-<script src="src/systems/state.js?v=nodash1"></script>
+<script src="src/systems/state.js?v=racerstory1"></script>
 <script src="src/systems/save.js"></script>
 <script src="src/systems/runstats.js"></script>
 <script src="src/systems/touch.js?v=onecall1"></script>
@@ -1200,7 +1200,7 @@
      Reverts: ?cfg_COMPANION_BOARDING_V1=0 (the arcs) ·
      ?cfg_FOLLOWER_ORDERS_V1=0 (the verbs) · ?cfg_CAR_DOOR_ARC=0 (just the
      player's own car door beat, leaving companions boarding). -->
-<script src="src/city/boarding.js?v=nodash1"></script>
+<script src="src/city/boarding.js?v=racerstory1"></script>
 <!-- ambient civilian air traffic (GA prop planes + a light heli orbiting the
      city, banking into their turns) — pure atmosphere, deterministic, gated by
      CBZ.CONFIG.AIR_TRAFFIC_AMBIENT -->
@@ -1892,7 +1892,7 @@
      marina hard stand. Loads after piracy.js (marineAutopilot, pirateProvoke)
      and before water_helm; every cross-read is feature-detected.
      Revert with ?cfg_CAPTAIN_V1=0. -->
-<script src="src/city/captain.js?v=nodash1"></script>
+<script src="src/city/captain.js?v=racerstory1"></script>
 
 <!-- SEATS OF POWER — the standalone complexes that do NOT fit inside a city
      block: the capitol, the executive mansion, the agency headquarters, the
@@ -1946,7 +1946,7 @@
 <script src="src/core/packages.js?v=pkg8"></script>
 <script src="src/games/casino.js?v=nodash1"></script>
 <script src="src/games/ocean.js?v=nodash1"></script>
-<script src="src/games/racing.js?v=nodash1"></script>
+<script src="src/games/racing.js?v=racerstory1"></script>
 <!-- games/warband.js DELETED 2026-07-29. OWNER: "the whole war band code — it
      was a dumb idea, but it's really what this whole game's point is: get
      enough people recruited, or get enough money, or enough guns, or somehow
@@ -2032,7 +2032,7 @@
 <script src="src/core/gfx.js?v=gfx1"></script>
 <script src="src/city/localinst.js?v=li2"></script>
 <script src="src/core/profile.js"></script>
-<script src="src/core/fxwarm.js?v=nodash1"></script>
+<script src="src/core/fxwarm.js?v=racerstory1"></script>
 <script src="src/city/cctv.js?v=cctv2"></script>
 <script src="src/core/loop.js?v=scale1"></script>
 <script src="src/main.js"></script>
