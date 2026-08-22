@@ -103,7 +103,7 @@ Ref: lone dorsal cutting a calm sea.
 
 `node tools/before-after.mjs <preset>` — never "it looks better to me".
 Presets that stage these facts: `shark-bites`, `marine-surface`,
-`great-white-anatomy`, `shark-from-deck`. Each declares metrics so the run
+`great-white-anatomy`, `shark-from-deck`, `predator-mouth-envelope`. Each declares metrics so the run
 prints a table instead of asking you to open a PDF.
 
 ---
@@ -182,8 +182,11 @@ head any more; the head's front IS two jaws:
   crease — hinged at the jaw corner inside the `sharkLowerJaw` group.
 - **The teeth live INSIDE.** Gum bands and tooth rows sit between palate and
   chin deck, inside the closed head; they exist to the eye only when the
-  body pries open. §1's palatoquadrate slide is unchanged on top (the tooth
-  ring still travels out past the rostrum tip); snout lift is 0.30 rad.
+  body pries open. The outer crown now carries the shared protrusion and a
+  0.16 rad lift, so the real rostrum advances with the tooth row. A species
+  may add a small nested palatoquadrate slide, but the default is zero: the
+  previous large dental-only slide was anatomically motivated but visually
+  recreated the floating U-shaped prosthesis.
 - **The hammerhead keeps its cephalofoil** as the static upper head (its
   famously small mouth opens beneath it): notch + chin, no snout shell.
 - **Verified by** `node tools/before-after.mjs shark-bites` — a self A/B
@@ -246,3 +249,43 @@ roll-over's jaws on the pectoral. That overlap is correct — do not "fix" it
 to zero, a bite that never encloses anything is a boop. Every other
 silhouette overlap (a body inside a body, a nose past a centreline, a fin
 emerging from a quarry's flank) is the bug this section exists to kill.
+
+---
+
+## 9. RESEARCH-DERIVED MOUTH ENVELOPE CONTRACT (2026-08-21)
+
+The photo sheet remains the pixel reference; these sources decide what the
+shared geometry and animation are allowed to do:
+
+- [Motta et al., *Eating without hands or tongue*](https://pmc.ncbi.nlm.nih.gov/articles/PMC1617152/)
+  identifies upper-jaw protrusion as fundamental to shark feeding and describes
+  the palatoquadrate and Meckel's cartilage projecting during the bite. In code,
+  that means a shark may translate/lift its upper envelope; it does **not** mean
+  a naked tooth hoop may travel independently of visible head tissue.
+- [Wroe et al., *Mechanics of biting in great white and sandtiger sharks*](https://pubmed.ncbi.nlm.nih.gov/21129747/)
+  models the great white across gape angles and supports a mechanically capable
+  bite throughout the opening arc. The production driver therefore owns one
+  continuous 0→1 gape, with body shells, cavity and teeth following that same
+  scalar instead of separate cosmetic animation paths.
+- [NOAA Ocean Today, Killer Whale Anatomy](https://oceantoday.noaa.gov/killerwhaleanatomy/)
+  places 40–56 interlocking conical teeth inside the rostrum. The orca keeps its
+  upper rostrum fixed, rotates one hull-shaped white mandible, and uses paired
+  converging gum rails rather than a solid centre capsule.
+- [NOAA, *Status Review of Southern Resident Killer Whales*](https://repository.library.noaa.gov/view/noaa/3332/noaa_3332_DS1.pdf)
+  records 10–12 teeth per row and roughly two-thirds of each tooth embedded in
+  the alveolus. The builder exposes 22 short crowns per jaw, publishes
+  `embeddedToothFraction: 0.67`, and hides the roots behind the sealed body seam.
+
+The cross-species contract is `aquaticMouth.version === 4`:
+
+1. `lowerShell` is visible body/chin geometry parented to the physical hinge.
+2. Sharks with a rostrum publish a moving `upperShell`; cetaceans publish a
+   fixed upper hull and zero protrusion.
+3. Teeth and gum are descendants of their anatomical envelope, never parallel
+   world-space animation.
+4. The cavity is recessed and revealed by the same production `swimJaw` value.
+5. Closing to zero restores one sealed silhouette and hides the dental roots.
+
+Run `npm run visual:predator-mouth-envelope` for the locked 12-state sheet and
+`npm run test:predator-mouth-envelope` for the real-Chrome hierarchy/motion
+contract.

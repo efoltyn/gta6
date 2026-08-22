@@ -258,13 +258,23 @@
      aquatic.js's bellyCut number. */
   function hullGeom(o) {
     const rings = o.rings, n = rings.length, sides = Math.max(8, o.sides || 20);
-    const paint = o.paint;
+    const paint = o.paint, mouth = o.mouth || null;
     const sh = new Shell(), id = [];
     for (let i = 0; i < n; i++) {
       const r = rings[i], row = [];
       for (let j = 0; j < sides; j++) {
         const a = (j / sides) * Math.PI * 2;
-        row.push(sh.v(r.x, r.y + Math.sin(a) * r.ry, Math.cos(a) * r.rz));
+        let y = r.y + Math.sin(a) * r.ry;
+        // An authored mouth removes the static chin from the front of the
+        // hull.  Vertices below the mouth roof collapse onto an interior
+        // palate; the real lower-body surface is rebuilt in the hinged lower
+        // envelope below.  This is deliberately geometry, not a black decal:
+        // when the mandible opens there is no intact whale face behind it.
+        if (mouth && r.x >= mouth.startX) {
+          const seam = mouth.seamY(r.x);
+          if (y < seam) y = seam;
+        }
+        row.push(sh.v(r.x, y, Math.cos(a) * r.rz));
       }
       id.push(row);
     }
@@ -274,6 +284,15 @@
       const s = Math.sin(am);
       const af = Math.atan2(s, Math.abs(Math.cos(am)));      // folded onto one flank
       const u = n > 1 ? i / (n - 1) : 0;
+      if (mouth) {
+        const r0 = rings[Math.min(i, n - 1)], r1 = rings[Math.min(i + 1, n - 1)];
+        const x = (r0.x + r1.x) * 0.5;
+        if (x >= mouth.startX) {
+          const cy = (r0.y + r1.y) * 0.5;
+          const ry = (r0.ry + r1.ry) * 0.5;
+          if (cy + s * ry < mouth.seamY(x) + 1e-5) return mouth.interiorSlot == null ? 2 : mouth.interiorSlot;
+        }
+      }
       return paint ? paint(i, u, j, am, af, s) : 0;
     }
     for (let i = 0; i < n - 1; i++) {
@@ -289,6 +308,63 @@
       sh.tri(slot(0, j), rear, id[0][j], id[0][nj]);
       sh.tri(slot(n - 1, j), front, id[n - 1][nj], id[n - 1][j]);
     }
+    return sh.geom();
+  }
+
+  /* THE LOWER BODY ENVELOPE.  A cetacean mandible is not a narrow cigar hung
+     below a complete whale hull: the visible white chin and throat ARE the
+     mandible's outer surface.  This shell samples the same body rings as the
+     hull, follows their exact underside and beam, closes on an interior-dark
+     deck, and lives in hinge-local space so the shared swim rig can rotate it
+     without translating its root.  The same descriptor shape is intentionally
+     usable by any future toothed whale builder. */
+  function lowerEnvelopeGeom(o) {
+    const sh = new Shell(), N = o.stations || 14, ARC = o.arcSteps || 10;
+    const rows = [];
+    for (let i = 0; i < N; i++) {
+      const t = i / (N - 1), x = lerp(o.x0, o.x1, t), r = ringAt(o.rings, x);
+      const rimWorld = o.rimY(x), rim = rimWorld - o.hingeY;
+      const bottom = r.y - r.ry - o.hingeY;
+      const depth = Math.max(0.05, rim - bottom);
+      const rel = clamp((rimWorld - r.y) / Math.max(0.02, r.ry), -0.96, 0.96);
+      let halfW = r.rz * Math.sqrt(Math.max(0.02, 1 - rel * rel));
+      // The buried root tapers in beam, not depth: at rest it must still fill
+      // the body's entire lower silhouette.  The rounded nose tapers too,
+      // while the middle keeps the actual hull beam.  No slab, no capsule.
+      halfW *= (i === 0 ? 0.42 : (i === 1 ? 0.72 : 1)) * (i === N - 1 ? 0.62 : 1);
+      const pts = [], ids = [];
+      for (let k = 0; k <= ARC; k++) {
+        const ph = (k / ARC) * Math.PI;
+        const p = [x - o.hingeX,
+          rim - depth * Math.pow(Math.sin(ph), 0.84),
+          Math.cos(ph) * halfW];
+        pts.push(p); ids.push(sh.v(p[0], p[1], p[2]));
+      }
+      const deckDrop = o.deckDrop == null ? 0.035 : o.deckDrop;
+      [[-halfW * 0.72, 0], [halfW * 0.72, 0]].forEach(function (q) {
+        const p = [x - o.hingeX, rim - deckDrop, q[0]];
+        pts.push(p); ids.push(sh.v(p[0], p[1], p[2]));
+      });
+      rows.push({ pts: pts, ids: ids, rim: rim, depth: depth });
+    }
+    const M = ARC + 3;
+    for (let i = 0; i < N - 1; i++) {
+      const a = rows[i], b = rows[i + 1];
+      for (let k = 0; k < M; k++) {
+        const k2 = (k + 1) % M;
+        sh.quad(k <= ARC - 1 ? 0 : 1, a.ids[k], b.ids[k], b.ids[k2], a.ids[k2]);
+      }
+    }
+    const cap = function (row, forward) {
+      const c = sh.v(row.pts[0][0] + (forward ? 0.018 : -0.018),
+        row.rim - row.depth * 0.48, 0);
+      for (let k = 0; k < M; k++) {
+        const k2 = (k + 1) % M;
+        if (forward) sh.tri(k <= ARC - 1 ? 0 : 1, row.ids[k], c, row.ids[k2]);
+        else sh.tri(k <= ARC - 1 ? 0 : 1, row.ids[k2], c, row.ids[k]);
+      }
+    };
+    cap(rows[0], false); cap(rows[rows.length - 1], true);
     return sh.geom();
   }
 
@@ -497,6 +573,17 @@
   const DORSAL_X = 0.35, DORSAL_Y = 1.90;
   const BLOW_X = 2.05, BLOW_Y = 1.86;
   const JAW_X = 1.52, JAW_Y = 0.74;
+  // The roof and the white chin share one closure curve.  Teeth interlock
+  // behind that outer seam; leaving a visible vertical gap for them made the
+  // resting animal look permanently open.  The curve still tapers with the
+  // blunt nose instead of drawing a ruler-straight cut through the melon.
+  function orcaRoofY(x) {
+    const t = clamp((x - JAW_X) / Math.max(0.01, HX1 - JAW_X), 0, 1);
+    return lerp(0.93, 0.89, t * t);
+  }
+  function orcaChinRimY(x) {
+    return orcaRoofY(x);
+  }
 
   const BULL_DORSAL = {
     span: 1.62, chordRoot: 1.06, chordTip: 0.09, sweep: 0.09, concavity: 0.035,
@@ -535,7 +622,7 @@
     return s < cut ? 1 : 0;
   }
 
-  const HULL_KEY = "orcaHull|v1|" + HULL_RINGS + "x" + HULL_SIDES;
+  const HULL_KEY = "orcaHull|mouth-envelope-v3|" + HULL_RINGS + "x" + HULL_SIDES;
 
   function build(ctx) {
     const m = ctx.mat, g = new T.Group();
@@ -548,12 +635,16 @@
     // as its own colour is a marking that is not there. It sits between the jet
     // and the white with clear daylight on both sides.
     const black = m(0x0a0c10), white = m(0xf7faf8), saddle = m(0x717f88);
-    const eyeM = m(0x04050a), pink = m(0x7a3a40), gum = m(0x8e4a50), tooth = m(0xf2ead6);
+    const eyeM = m(0x04050a), pink = m(0x7a3a40), gum = m(0x6f353b), tooth = m(0xf2ead6);
+    const mouthDark = m(0x100609), deckGum = m(0x32171c);
 
     const rings = ringsOf(HX0, HX1, HY, RY, RZ, HULL_RINGS);
     const hull = meshOf(cached(HULL_KEY, function () {
-      return hullGeom({ rings: rings, sides: HULL_SIDES, paint: orcaPaint });
-    }), [black, white]);
+      return hullGeom({
+        rings: rings, sides: HULL_SIDES, paint: orcaPaint,
+        mouth: { startX: JAW_X - 0.12, seamY: orcaRoofY, interiorSlot: 2 },
+      });
+    }), [black, white, mouthDark]);
     hull.name = "cetaceanHull";            // the name aquatic.js's cetaceans use
     g.add(hull);
 
@@ -685,7 +776,7 @@
        One-line revert: ORCA_CAVITY_HOLE = false. */
     const ORCA_CAVITY_HOLE = true;
     const cavity = ORCA_CAVITY_HOLE
-      ? meshOf(cached("orcaCavityHole|v1", function () {
+      ? meshOf(cached("orcaCavityHole|v2", function () {
         const sh = new Shell(), SEG = 14, ST = 8;
         const rr = [];
         for (let i = 0; i <= ST; i++) {
@@ -707,30 +798,30 @@
           }
         }
         return sh.geom();
-      }), [pink, m(0x4a1c22), m(0x321318), m(0x230f12)])
+      }), [mouthDark, mouthDark, mouthDark, m(0x080305)])
       : new T.Mesh(cached("orcaCavity", function () { return new T.SphereGeometry(1, 12, 8); }), pink);
     cavity.name = "orcaMouthCavity";
     // retracted from the old footprint (JAW_X+0.82 ± 0.86 reached the snout
     // tip): front pole behind the tooth rows' end, back pole behind the hinge,
     // so the hole lives entirely inside the closed head.
     cavity.position.set(JAW_X + 0.72, JAW_Y + 0.10, 0);
-    cavity.scale.set(0.78, 0.035, 0.30);
+    // At rest this is a black-red seam, not a pink stripe pasted along the
+    // whale's face.  The shared rig expands it tenfold during a gape.
+    cavity.scale.set(0.78, 0.018, 0.28);
     g.add(cavity);
 
     const lower = new T.Group();
     lower.name = "orcaLowerJaw";
     lower.position.set(JAW_X, JAW_Y, 0);
     g.add(lower);
-    const mand = meshOf(cached("orcaMandible|v1", function () {
-      return hullGeom({
-        rings: ringsOf(0.02, 1.72, 0, [0.20, 0.085], [0.30, 0.115], 7),
-        sides: 12,
-        // white chin: the underside of the mandible is the front of the white
-        // throat, so it has to carry the same paint the hull does
-        paint: function (i, u, j, ang, af, s) { return s < -0.08 ? 1 : 0; },
+    const mand = meshOf(cached("orcaLowerEnvelope|v3", function () {
+      return lowerEnvelopeGeom({
+        rings: rings, hingeX: JAW_X, hingeY: JAW_Y,
+        x0: JAW_X - 0.12, x1: HX1 - 0.08, rimY: orcaChinRimY,
+        stations: 16, arcSteps: 12, deckDrop: 0.024,
       });
-    }), [black, white]);
-    mand.name = "orcaMandible"; lower.add(mand);
+    }), [white, deckGum]);
+    mand.name = "orcaLowerEnvelope"; lower.add(mand);
 
     function toothRow(up) {
       return meshOf(cached("orcaTeeth|" + (up ? "u" : "l"), function () {
@@ -741,7 +832,11 @@
             const t = i / (N - 1);
             const x = lerp(0.20, 1.62, t);
             const z = side * lerp(0.26, 0.075, t);
-            const hgt = lerp(0.13, 0.075, t) * (up ? -1 : 1);
+            // NOAA's status review records roughly two-thirds of an orca tooth
+            // inside the maxillary/mandibular alveolus.  The gum rails below
+            // cover the root two-thirds; only this short interlocking crown is
+            // allowed out into the gape.
+            const hgt = lerp(0.075, 0.044, t) * (up ? -1 : 1);
             const w = lerp(0.055, 0.032, t);
             const y0 = up ? 0 : 0;
             const a = sh.v(x - w, y0, z - w), b = sh.v(x + w, y0, z - w);
@@ -754,51 +849,89 @@
         return sh.geom();
       }), [tooth]);
     }
+
+    // Two alveolar rails, one under each tooth row.  The former gum mesh was
+    // one solid capsule down the centre of the mouth; when the mandible opened
+    // head-on, that capsule projected as a broad pink tongue/plank and put the
+    // denture silhouette back inside otherwise-correct body geometry.  These
+    // narrow rails converge with the teeth and leave real dark volume between.
+    function gumRails() {
+      return meshOf(cached("orcaPairedGumRails|v1", function () {
+        const sh = new Shell(), N = 9, SIDES = 8;
+        for (let side = -1; side <= 1; side += 2) {
+          const rings2 = [];
+          for (let i = 0; i < N; i++) {
+            const t = i / (N - 1), x = lerp(0.16, 1.66, t);
+            const z = side * lerp(0.26, 0.075, t);
+            const ry = lerp(0.034, 0.021, t), rz = lerp(0.050, 0.030, t);
+            const row = [];
+            for (let j = 0; j < SIDES; j++) {
+              const a = (j / SIDES) * Math.PI * 2;
+              row.push(sh.v(x, Math.sin(a) * ry, z + Math.cos(a) * rz));
+            }
+            rings2.push(row);
+          }
+          for (let i = 0; i < N - 1; i++) {
+            for (let j = 0; j < SIDES; j++) {
+              const nj = (j + 1) % SIDES;
+              sh.quad(0, rings2[i][j], rings2[i + 1][j], rings2[i + 1][nj], rings2[i][nj]);
+            }
+          }
+          const rear = sh.v(0.16, 0, side * 0.26);
+          const front = sh.v(1.66, 0, side * 0.075);
+          for (let j = 0; j < SIDES; j++) {
+            const nj = (j + 1) % SIDES;
+            sh.tri(0, rear, rings2[0][nj], rings2[0][j]);
+            sh.tri(0, front, rings2[N - 1][j], rings2[N - 1][nj]);
+          }
+        }
+        return sh.geom();
+      }), [gum]);
+    }
     const lt = toothRow(false); lt.name = "orcaLowerTeeth";
-    lt.position.set(0, 0.055, 0); lower.add(lt);
+    lt.position.set(0, 0.145, 0); lower.add(lt);
+    const lowerGum = gumRails();
+    lowerGum.name = "orcaLowerGum"; lowerGum.position.set(0, 0.135, 0); lower.add(lowerGum);
 
     /* AN UPPER JAW GROUP THAT DOES NOT MOVE, and it is not ceremony.
 
        An orca does not protrude its upper jaw — a shark does, and it is the
        great white's single most-missed anatomical fact — so this file first
-       published `upper: null` and declared protrude 0. Both buildSwimRig
-       implementations (city/wildlife.js and city/wildlife_rig.js) then read
-       `authoredMouth.upper.position.x` UNCONDITIONALLY the moment an authored
-       mouth exists, and every orca in the game threw on spawn. The report
-       caught it: thirteen black frames and one stack trace.
+       published `upper: null` and declared protrude 0. The canonical shared
+       rig requires an authored upper group because it snapshots that group's
+       rest transform alongside the lower hinge.
 
-       Neither of those files is mine to edit, and the right fix is on this
-       side anyway: the contract says "an authored mouth has an upper jaw", and
-       an orca does have one — it just never slides. So the upper tooth row and
-       its gum rail live in a real named group at the hinge, which is where
-       they anatomically belong, and protrude/upperDrop stay 0 so swimJaw's
-       translate is a no-op. The mouth opens on the mandible alone, correctly. */
+       The contract therefore publishes the orca's real upper jaw as a fixed
+       named group. Its tooth row and paired gum rails live at the hinge where
+       they anatomically belong, while protrude/upperDrop stay 0 and the actual
+       white mandible opens alone. */
     const upper = new T.Group();
     upper.name = "orcaUpperJaw";
     upper.position.set(JAW_X, JAW_Y, 0);
     g.add(upper);
     const ut = toothRow(true); ut.name = "orcaUpperTeeth";
-    ut.position.set(0, 0.26, 0); upper.add(ut);
-    const gumRail = meshOf(cached("orcaGum|v1", function () {
-      return hullGeom({
-        rings: ringsOf(0.20, 1.66, 0, [0.035, 0.022], [0.30, 0.10], 6),
-        sides: 8, paint: function () { return 0; },
-      });
-    }), [gum]);
-    gumRail.name = "orcaGum"; gumRail.position.set(0, 0.245, 0); upper.add(gumRail);
+    ut.position.set(0, 0.205, 0); upper.add(ut);
+    const gumRail = gumRails();
+    gumRail.name = "orcaUpperGum"; gumRail.position.set(0, 0.235, 0); upper.add(gumRail);
 
-    const REST_CLOSE = 0.03, MAX_OPEN = 0.52;
+    const REST_CLOSE = 0, MAX_OPEN = 0.52;
     lower.rotation.z = REST_CLOSE;
     const contract = {
-      version: 1, shape: "conical-straight",
+      version: 4, shape: "articulated-body-envelope",
       hinge: { x: JAW_X, y: JAW_Y, z: 0 },
       bite: { x: JAW_X + 1.30, y: JAW_Y + 0.16, z: 0 },
       maxOpen: MAX_OPEN, travel: MAX_OPEN + REST_CLOSE, restClose: REST_CLOSE,
       protrude: 0, upperDrop: 0,                        // an orca protrudes nothing
       upperTeeth: 22, lowerTeeth: 22, toothRows: 1,
+      bodySplit: true, articulatedEnvelope: true,
+      upperShell: "cetaceanHull", lowerShell: "orcaLowerEnvelope",
+      embeddedToothFraction: 0.67,
     };
     g.userData.aquaticMouth = contract;
-    g._aquaticMouth = { lower: lower, upper: upper, cavity: cavity, contract: contract };
+    g._aquaticMouth = {
+      lower: lower, upper: upper, lowerShell: mand, upperShell: hull,
+      cavity: cavity, contract: contract,
+    };
 
     /* WHAT THIS ANIMAL PUBLISHES ABOUT ITSELF. wildlife_shark.js's proxy
        measures any species it is handed and honours a declared descriptor if it

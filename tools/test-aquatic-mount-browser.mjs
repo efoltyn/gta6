@@ -227,7 +227,13 @@ try {
     a.heading = a.faceH = 0; CBZ.faceAnimalHeading(a, 0);
     CBZ.player.pos.set(a.pos.x, a.pos.y, a.pos.z); CBZ.player.dead = false;
     const mounted = CBZ.cityMountAnimal(a);
-    q.sharkHp0 = prey.hp = prey.maxHp || 55; prey.dead = false; prey.grow = null; prey.group.visible = true;
+    q.sharkHp0 = prey.hp = prey.maxHp || 55; prey.dead = false; prey.grow = null; prey.ridden = true; prey.group.visible = true;
+    // Keep the live target inside the active water cell while the mount owner
+    // settles.  Leaving it at its original ambient spawn for this 140 ms gap
+    // let wildlife cleanup detach the group before the exact jaw placement,
+    // turning a geometry contract into a timing-dependent null target.
+    prey.group.position.set(a.pos.x + 1.5, a.pos.y, a.pos.z);
+    if (!prey.group.parent && CBZ.scene) CBZ.scene.add(prey.group);
     prey.group.traverse(o => { o.matrixAutoUpdate = true; });
     q.sharkHits0 = CBZ.aquaticMountAudit().hits;
     return { mounted: !!mounted, attackCap: !!CBZ.cityRideDefinition(a.species).attack };
@@ -235,10 +241,15 @@ try {
   await sleep(140);
   await evaluate(`(() => {
     const q = window.__seaMountContract, a = q.shark, prey = q.tuna;
+    if (!prey.group.parent && CBZ.scene) CBZ.scene.add(prey.group);
     const jp = CBZ.creatureJawPoint(a), mouth = new THREE.Vector3(jp.x, jp.y, jp.z);
     a.group.updateMatrixWorld(true); mouth.applyMatrix4(a.group.matrixWorld);
     const box = new THREE.Box3().setFromObject(prey.group), center = box.getCenter(new THREE.Vector3());
-    prey.group.position.add(new THREE.Vector3(mouth.x + 0.35, mouth.y, mouth.z).sub(center));
+    // The mounted bite accelerates to ~8.5 m/s and resolves contact at 38% of
+    // a 0.56 s swing.  Lead the live target by that real approach distance;
+    // placing it only 0.35 m from the resting socket let the surge pass the
+    // tuna before the first legal contact sample.
+    prey.group.position.add(new THREE.Vector3(mouth.x + 2.65, mouth.y, mouth.z).sub(center));
     prey.group.updateMatrixWorld(true);
     const consumed = CBZ.cityMountedAnimalAttack(true);
     q.sharkAttackStart = CBZ.aquaticMountAudit();

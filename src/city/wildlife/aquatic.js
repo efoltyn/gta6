@@ -580,9 +580,15 @@
     // those details lift with the upper jaw instead of floating in place.
     const snoutOf = function (mesh) {
       if (!o.snout) { g.add(mesh); return; }
-      mesh.position.x -= o.snout.position.x;
-      mesh.position.y -= o.snout.position.y;
-      mesh.position.z -= o.snout.position.z;
+      // Split-body snouts are children of the authored upper-envelope group,
+      // so their local position is no longer their root-space origin.  Keep the
+      // original builder-space origin on the shell and use it for every eye,
+      // nostril and pore.  Otherwise reparenting the real head geometry would
+      // leave its face details one hinge-length in front of it.
+      const origin = o.snout.userData && o.snout.userData._rootOrigin;
+      mesh.position.x -= origin ? origin.x : o.snout.position.x;
+      mesh.position.y -= origin ? origin.y : o.snout.position.y;
+      mesh.position.z -= origin ? origin.z : o.snout.position.z;
       o.snout.add(mesh);
     };
     if (o.eyeSize !== 0) {
@@ -804,11 +810,10 @@
      1. THE UPPER JAW PROTRUDES. A great white does not hinge a lid; the
         palatoquadrate SLIDES FORWARD AND DOWN out from under the snout and
         the snout LIFTS off it. At full gape the upper tooth row ends up in
-        FRONT of the closed-mouth rostrum tip. wildlife.js's swimJaw already
-        reads `protrude`/`upperDrop` off the contract, so the numbers below
-        reach the shipping driver for free; the extra rake of the tooth row and
-        the rostrum lift ride an updateMatrix hook on the upper-jaw group (and
-        CBZ.sharkJawProtrude, for any driver that wants to call it directly).
+        FRONT of the closed-mouth rostrum tip. The shared swim rig reads the
+        authored mouth contract and advances the real upper-head envelope; a
+        builder callback adds the rostrum lift and any small, species-authored
+        relative dental motion without creating a second animation owner.
      2. The gape ROUNDS OUT — the corner pulls back, it is not a wedge.
      3. Gums are a thick, wet, dark RED-PINK band, darkening in the corners.
      4. The interior is dark PINK-RED. A near-black void reads as a hole in the
@@ -906,8 +911,12 @@
 
   function addSharkMouth(g, T_, m, o) {
     const hingeX = o.hingeX, hingeY = o.hingeY, len = o.length, width = o.width, gap = o.gap;
-    const gumH = o.gumHeight || gap * 0.30;
-    const lipH = gumH + gap * 0.09;
+    // Keep gingiva inside the moving head envelope.  A tall exposed band may
+    // technically connect teeth to skull, but in profile it is still a pink
+    // prosthetic rail.  The outer lip is a narrow skin fold; the roots and the
+    // bulk of the gum live behind it.
+    const gumH = o.gumHeight || gap * 0.18;
+    const lipH = gumH + gap * 0.035;
     const railIn = o.railIn || width * 0.11;
     const railOut = o.railOut || width * 0.10;
     const toothH = o.toothHeight || gap * 0.48;
@@ -966,15 +975,18 @@
             corner(railOut * kOut, -lipH * kLipDn), corner(railOut * kOut, lipH * kLipUp)],
         });
       }
-      // face 0 inner, 1 bottom, 2 outer, 3 top.  The mouth-facing pair is the
-      // gum; the pair facing the world is skin.
-      const gumFaces = up ? { 0: 1, 1: 1, 2: 0, 3: 0 } : { 0: 1, 1: 0, 2: 0, 3: 1 };
+      // face 0 inner, 1 bottom, 2 outer, 3 top.  Gingiva belongs on the wet
+      // inner/bottom faces; the world-facing upper lip is the same pale skin
+      // as the rostrum around it.  This is what visually joins the dental row
+      // to the moving crown instead of drawing a long pink bar under it.
+      const faceGroup = up ? [0, 0, 1, 1] : [0, 1, 1, 0];
       for (let i = 0; i < stations; i++) {
         const am = (rows[i].a + rows[i + 1].a) * 0.5;
         const corner = Math.abs(am) > A * 0.60;
         for (let k = 0; k < 4; k++) {
           const k2 = (k + 1) % 4;
-          const grp = gumFaces[k] ? (corner ? 2 : 0) : 1;
+          let grp = faceGroup[k];
+          if (corner && (grp === 0 || grp === 2)) grp = 2;
           sh.quad(grp, rows[i].c[k], rows[i].c[k2], rows[i + 1].c[k2], rows[i + 1].c[k]);
         }
       }
@@ -1066,13 +1078,20 @@
     cavity.scale.set(len * 0.52, gap * 0.12, width * 0.42);
     g.add(cavity);
 
-    const upper = new T.Group(); upper.name = "sharkUpperJaw";
+    // THE UPPER ENVELOPE is the real head, not the teeth.  `upper` is the
+    // articulation root that will also receive addSnoutShell's crown/rostrum;
+    // `dental` is the palatoquadrate nested inside it.  Sharks protrude that
+    // tooth-bearing cartilage relative to the lifting head, but because both
+    // start in one envelope the teeth cannot become a free denture hoop.
+    const upper = new T.Group(); upper.name = "sharkUpperEnvelope";
+    const dental = new T.Group(); dental.name = "sharkUpperJaw";
     const lower = new T.Group(); lower.name = "sharkLowerJaw";
     upper.position.set(hingeX, hingeY, 0);
     lower.position.set(hingeX, hingeY, 0);   // this origin IS the physical hinge
+    upper.add(dental);
     g.add(upper); g.add(lower);
 
-    band(upperY, true, "sharkUpperGum", upper);
+    band(upperY, true, "sharkUpperGum", dental);
     band(lowerY, false, "sharkLowerGum", lower);
 
     /* THE CHIN — the orca move, and the whole point of the split-body mouth.
@@ -1199,7 +1218,7 @@
     lower.add(mand);
 
     const ut = toothField(true), lt = toothField(false);
-    upper.add(ut.mesh); lower.add(lt.mesh);
+    dental.add(ut.mesh); lower.add(lt.mesh);
 
     // The front lip lobes stay their own small meshes: they are the visible
     // front of the mouth line AND the pair every mouth test measures the gape
@@ -1207,25 +1226,30 @@
     const lipGeom = cachedGeom("liptip|" + [len, lipH, width].join(","), function () {
       return new T.BoxGeometry(len * 0.13, lipH, width * 0.20);
     });
-    const ul = new T.Mesh(lipGeom, skin); ul.name = "sharkUpperLip";
-    ul.position.set(cx + rad * 1.0, upperY, 0); ul.scale.y = 0.55; upper.add(ul);
+    const ul = new T.Mesh(lipGeom, gum); ul.name = "sharkUpperLip";
+    ul.position.set(cx + rad * 1.0, upperY, 0); ul.scale.y = 0.16; dental.add(ul);
     const ll = new T.Mesh(lipGeom, skin); ll.name = "sharkLowerLip";
     ll.position.set(cx + rad * 1.0, lowerY, 0); lower.add(ll);
 
     const restClose = 0.04;
     lower.rotation.z = restClose;
 
-    const protrude = o.protrude == null ? len * 0.42 : o.protrude;
-    const upperDrop = o.upperDrop == null ? gap * 0.34 : o.upperDrop;
-    const upperRake = o.upperRake == null ? 0.30 : o.upperRake;
-    // split-body mouths lift the snout harder: the dark upper half visibly
-    // rotating away from the white lower half is the orca-photo read, and at
-    // 0.11 rad the head silhouette barely changed during a bite.
-    const snoutLift = o.snoutLift == null ? (bodySplit ? 0.30 : 0.11) : o.snoutLift;
+    // Two nested anatomical parts, one visually continuous envelope.  The
+    // crown carries almost all of the protrusion so the actual head advances
+    // with the teeth.  Builders may opt into a small relative palatoquadrate
+    // slide, but the shared default is zero: a large dental-only translation
+    // simply recreates the detached-denture failure under a moving snout.
+    const hasUpperEnvelope = bodySplit && !!o.snoutShell;
+    const protrude = o.envelopeProtrude == null ? (hasUpperEnvelope ? len * 0.22 : 0) : o.envelopeProtrude;
+    const upperDrop = o.envelopeDrop == null ? (hasUpperEnvelope ? gap * 0.035 : 0) : o.envelopeDrop;
+    const dentalProtrude = o.dentalProtrude == null ? 0 : o.dentalProtrude;
+    const dentalDrop = o.dentalDrop == null ? 0 : o.dentalDrop;
+    const dentalRake = o.dentalRake == null ? 0 : o.dentalRake;
+    const snoutLift = o.snoutLift == null ? (hasUpperEnvelope ? 0.16 : 0) : o.snoutLift;
 
     const contract = {
-      version: 3,
-      shape: "arched-underside",
+      version: 4,
+      shape: "articulated-body-envelope",
       hinge: { x: hingeX, y: hingeY, z: 0 },
       // THE DAMAGE SOCKET follows the mouth DOWN. The upper jaw now drops and
       // rakes as it protrudes, so a socket pinned to the hinge height ends up
@@ -1237,7 +1261,9 @@
       restClose: restClose,
       protrude: protrude,
       upperDrop: upperDrop,
-      upperRake: upperRake,
+      dentalProtrude: dentalProtrude,
+      dentalDrop: dentalDrop,
+      dentalRake: dentalRake,
       snoutLift: snoutLift,
       toothRows: (o.toothRows || [0, 0, 0]).length,
       upperTeeth: ut.count,
@@ -1245,41 +1271,42 @@
       // the lower jaw is the body's own white underside (see THE CHIN above),
       // and the hull/rostrum are notched along the seam to make room for it
       bodySplit: bodySplit,
+      articulatedEnvelope: hasUpperEnvelope,
+      lowerShell: mand.name,
       // the fact the reference sheet is really asking for: how far past the
       // closed rostrum tip the upper tooth row travels
-      upperReachX: hingeX + len + protrude,
+      upperReachX: hingeX + len + protrude + dentalProtrude,
     };
     g.userData.aquaticMouth = contract;
-    g._aquaticMouth = { lower: lower, upper: upper, cavity: cavity, contract: contract };
+    g._aquaticMouth = {
+      lower: lower, upper: upper, dental: dental, lowerShell: mand, cavity: cavity,
+      contract: contract, applyGape: null,
+    };
 
     /* ---- THE PROTRUSION DRIVE ------------------------------------------
-       wildlife.js's swimJaw translates the named upper-jaw group by
-       `protrude`/`upperDrop`. That is already the whole slide; what it cannot
-       do without knowing about sharks is RAKE the tooth row over and LIFT the
-       rostrum. Both hang off the group's own updateMatrix, so any driver that
-       moves the named group at all — the shipping one does — gets them free,
-       and CBZ.sharkJawProtrude(group, openness) is there for one that would
-       rather ask directly. */
-    const baseX = upper.position.x, baseY = upper.position.y;
+       The shared rig advances the named upper-envelope group by the contract's
+       `protrude`/`upperDrop`. This builder callback adds the shark-specific
+       rostrum lift and optional relative dental rake while preserving that one
+       openness owner. CBZ.sharkJawProtrude exposes the same callback for tools
+       that deliberately pose an authored animal outside the runtime loop. */
     const cavityY0 = cavity.scale.y;
     function applyGape(k) {
       const oo = clamp(k, 0, 1);
-      upper.rotation.z = -oo * upperRake;
+      // The CROWN and the teeth now share this moving envelope.  The crown
+      // lifts and advances with its nested tooth-bearing jaw. Any optional
+      // species-authored relative dental motion remains inside that envelope
+      // and defaults to zero, so no daylight can open behind a naked hoop.
+      upper.rotation.z = oo * snoutLift;
+      dental.position.x = oo * dentalProtrude;
+      dental.position.y = -oo * dentalDrop;
+      dental.rotation.z = -oo * dentalRake;
       // the hole is revealed with the gape: a mouth-line sliver at rest, the
       // full dark bore at commitment. Same (1 + o*9) swimJaw writes, and this
       // runs during the group's own matrix solve, so the two writers can never
       // disagree within a frame — and drivers that bypass swimJaw (the report
       // presets pose the contract directly) still get the reveal.
       cavity.scale.y = cavityY0 * (1 + oo * 9);
-      const rost = g.userData._sharkRostrum;
-      if (rost) rost.rotation.z = oo * snoutLift;
     }
-    upper.updateMatrix = function () {
-      const k = protrude > 1e-6 ? (this.position.x - baseX) / protrude
-        : (upperDrop > 1e-6 ? (baseY - this.position.y) / upperDrop : 0);
-      applyGape(k);
-      T.Object3D.prototype.updateMatrix.call(this);
-    };
     g._aquaticMouth.applyGape = applyGape;
     return g._aquaticMouth;
   }
@@ -1403,16 +1430,30 @@
     const mesh = meshOf(geo, mats);
     mesh.name = "sharkRostrum";
     mesh.userData._splitShell = true;   // face details put the EYES on this one
-    mesh.position.set(px, py, 0);
-    g.add(mesh);
+    mesh.userData._rootOrigin = { x: px, y: py, z: 0 };
+    const authored = g._aquaticMouth;
+    if (authored && authored.upper && authored.contract && authored.contract.articulatedEnvelope) {
+      // This is the decisive ownership change: the visible crown/rostrum is a
+      // child of the mouth's upper articulation root.  Its geometry remains in
+      // the exact same rest-space location, but every production CBZ.swimJaw
+      // call now lifts REAL HEAD VERTICES together with the embedded dentition.
+      mesh.position.set(px - authored.contract.hinge.x, py - authored.contract.hinge.y, 0);
+      authored.upper.add(mesh);
+      authored.upperShell = mesh;
+      authored.contract.upperShell = "sharkRostrum";
+    } else {
+      mesh.position.set(px, py, 0);
+      g.add(mesh);
+    }
     g.userData._sharkRostrum = mesh;
     return mesh;
   }
 
   /* The lifting snout. The hull is one static mesh, so the rostrum forward of
-     the jaw hinge is built as its OWN shell that overlaps back into the head —
-     it pivots up out of the way as the palatoquadrate slides out from under
-     it, and at rest it is simply the front of the animal. */
+     the jaw hinge is built as its OWN shell that overlaps back into the head.
+     It lifts and advances with the tooth-bearing upper envelope; at rest it is
+     simply the front of the animal, and at full gape no dental hoop can leave
+     it behind as a separate prosthesis. */
   function addSharkRostrum(g, mats, rings, o) {
     if (o.mouth && o.mouth.snoutShell && mouthSplitOn()) {
       return addSnoutShell(g, mats, rings, o);

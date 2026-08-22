@@ -79,7 +79,7 @@ const subjects = [
   },
 ];
 
-function stageSharkBite(input) {
+export function stagePredatorMouth(input) {
   const T = window.THREE, CBZ = window.CBZ, subject = input.subject;
   if (!T || !CBZ || !CBZ.WILDLIFE_SPECIES || !CBZ.buildSwimRig || !CBZ.swimJaw) {
     return { ok: false, missing: "shark mouth staging APIs" };
@@ -213,11 +213,12 @@ function stageSharkBite(input) {
   // bite swings dentures under a shut head. The split-body mouth scores
   // positive: the underside of the head IS the jaw, and the only static thing
   // left up there is the dark mouth roof.
-  // mouthOpeningM: the vertical size of the hole at this frame's gape — the
-  // static roof down to the moving jaw's lowest point. The clamp mouth's roof
-  // was a closed chin at skin level, so however far its dentures swung, the
-  // opening into the head stayed shallow.
+  // mouthOpeningM: centre-to-centre separation of the authored front lips.
+  // Measuring the farthest shell vertex used to confuse rostrum travel with
+  // gape (and could claim a larger opening on a closed mouth); the named lips
+  // are the actual boundary the player sees.
   let staticVsJawM = null, mouthOpeningM = null;
+  let staticChinDepthM = null, upperEnvelopeTravelM = null, lowerEnvelopeTravelM = null;
   if (mouth && jaw.jawGroup) {
     const sc = animal.scale.x || 1;
     const spanLen = mouth.upperReachX
@@ -241,14 +242,53 @@ function stageSharkBite(input) {
       });
       return low;
     };
+    const authored = animal._aquaticMouth || null;
+    function namedMesh(name) {
+      let found = null;
+      if (!name) return null;
+      animal.traverse(function (o2) { if (!found && o2.isMesh && o2.name === name) found = o2; });
+      return found;
+    }
+    const upperShell = (authored && authored.upperShell) || namedMesh(mouth.upperShell);
+    const lowerShell = (authored && authored.lowerShell) || namedMesh(mouth.lowerShell) || namedMesh("sharkChin");
+    const upperLip = namedMesh("sharkUpperLip") || namedMesh("orcaUpperGum");
+    const lowerLip = namedMesh("sharkLowerLip") || namedMesh("orcaLowerGum");
+    function frontPoint(mesh) {
+      if (!mesh || !mesh.geometry || !mesh.geometry.attributes.position) return null;
+      const pos = mesh.geometry.attributes.position, p = new T.Vector3(), best = new T.Vector3();
+      let maxX = -Infinity;
+      for (let q = 0; q < pos.count; q++) {
+        p.fromBufferAttribute(pos, q).applyMatrix4(mesh.matrixWorld);
+        if (p.x > maxX) { maxX = p.x; best.copy(p); }
+      }
+      return isFinite(maxX) ? best : null;
+    }
+    function worldCenter(mesh) {
+      if (!mesh) return null;
+      const box = new T.Box3().setFromObject(mesh);
+      return box.isEmpty() ? null : box.getCenter(new T.Vector3());
+    }
     animal.updateMatrixWorld(true);
+    const posedUpper = frontPoint(upperShell), posedLower = frontPoint(lowerShell);
+    const posedUpperLip = worldCenter(upperLip), posedLowerLip = worldCenter(lowerLip);
     const staticFloor = lowestIn(animal, wx0, wx1, true);
     const posedLow = lowestIn(jaw.jawGroup, -Infinity, Infinity, false);
     CBZ.swimJaw(actor, 0); animal.updateMatrixWorld(true);
     const restLow = lowestIn(jaw.jawGroup, -Infinity, Infinity, false);
+    const restUpper = frontPoint(upperShell), restLower = frontPoint(lowerShell);
     CBZ.swimJaw(actor, Number(subject.open) || 0); animal.updateMatrixWorld(true);
-    if (isFinite(staticFloor) && isFinite(restLow)) staticVsJawM = Number((staticFloor - restLow).toFixed(3));
-    if (isFinite(staticFloor) && isFinite(posedLow)) mouthOpeningM = Number((staticFloor - posedLow).toFixed(3));
+    // No static vertex in the mouth span is the strongest possible result: the
+    // builder handed the entire visible envelope to the jaws.  Report zero
+    // residual chin rather than a blank cell.
+    if (isFinite(restLow)) {
+      staticVsJawM = isFinite(staticFloor) ? Number((staticFloor - restLow).toFixed(3)) : 0;
+      staticChinDepthM = isFinite(staticFloor) ? Number(Math.max(0, restLow - staticFloor).toFixed(3)) : 0;
+    }
+    if (posedUpperLip && posedLowerLip) {
+      mouthOpeningM = Number(Math.abs(posedUpperLip.y - posedLowerLip.y).toFixed(3));
+    }
+    if (posedUpper && restUpper) upperEnvelopeTravelM = Number(posedUpper.distanceTo(restUpper).toFixed(3));
+    if (posedLower && restLower) lowerEnvelopeTravelM = Number(posedLower.distanceTo(restLower).toFixed(3));
   }
 
   return {
@@ -258,7 +298,15 @@ function stageSharkBite(input) {
     lowerJawGroup: !!jaw.jawGroup, legacyLooseParts: jaw.jaw ? jaw.jaw.length : 0,
     hinge: hinge && hinge.toArray().map(v => Number(v.toFixed(3))),
     prey: targetActor && targetActor.species.id, realSpeedboat: !!ship,
-    metrics: { staticVsJawM: staticVsJawM, mouthOpeningM: mouthOpeningM },
+    articulatedEnvelope: !!(mouth && mouth.articulatedEnvelope),
+    upperShell: mouth && mouth.upperShell, lowerShell: mouth && mouth.lowerShell,
+    embeddedToothFraction: mouth && mouth.embeddedToothFraction,
+    metrics: {
+      staticVsJawM: staticVsJawM, mouthOpeningM: mouthOpeningM,
+      staticChinDepthM: staticChinDepthM,
+      upperEnvelopeTravelM: upperEnvelopeTravelM,
+      lowerEnvelopeTravelM: lowerEnvelopeTravelM,
+    },
     camera: { framedHeight, position: cameraPosition.slice(), target: cameraTarget.slice(), up: cameraUp.slice() },
   };
 }
@@ -286,5 +334,5 @@ export default {
   viewport: { width: 1100, height: 680 },
   readyExpression: "window.THREE && window.CBZ && CBZ.buildSwimRig && CBZ.swimJaw && CBZ.cityBuildAmbientCarVisual && CBZ.WILDLIFE_SPECIES && CBZ.WILDLIFE_SPECIES.great_white_shark && CBZ.WILDLIFE_SPECIES.hammerhead_shark && CBZ.WILDLIFE_SPECIES.bull_shark && CBZ.WILDLIFE_SPECIES.megalodon",
   subjects,
-  stage: stageSharkBite,
+  stage: stagePredatorMouth,
 };
