@@ -299,9 +299,16 @@ async function stageSharkSim(input) {
       },
     };
     window.__cbzVisualCompare = {
-      render() {
+      /* Awaited by the comparator before every capture. The wait is the
+         point: under SwiftShader the compositor takes over a second to
+         PRESENT a rendered canvas, and the comparator's own 180 ms fallback
+         barrier captured the PREVIOUS composite — every frame carried a
+         fresh DOM HUD over sometimes-stale 3D, which is exactly the class of
+         bug that made three runs of tripod shots look haunted. */
+      async render() {
         if (CBZ.bootMeter && CBZ.bootMeter.hide) { try { CBZ.bootMeter.hide(); } catch (e) {} }
         if (CBZ.renderer) CBZ.renderer.render(CBZ.scene, CBZ.camera);
+        await new Promise((r) => setTimeout(r, 1400));
       },
       advance(sec) { D.sec(sec); },        // film strips step the real match
     };
