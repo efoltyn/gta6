@@ -471,6 +471,15 @@
     build,
     reset(game) {
       build();
+      /* LATE SCRIPTS STILL GET A SEA. The buttons are interactive while the
+         page is still streaming scripts, so PLAY can land before wildlife.js
+         has parsed — build() then skips the stock guard above and latched
+         surv.built means it never runs again: an island with no sea life for
+         the whole session. Stocking is idempotent per world (builtFor), so
+         healing it here costs one truthy check per match. */
+      if (surv.built && CBZ.cityWildlifeStock && !(CBZ.cityWildlife && CBZ.cityWildlife.length)) {
+        try { CBZ.cityWildlifeStock(surv.arena); } catch (e) {}
+      }
       if (CBZ.fx) CBZ.fx.clear();
       if (CBZ.clearGore) CBZ.clearGore();
       surv._cause = null; surv._lastImp = null; surv._deathCause = null; surv._runRecorded = false;

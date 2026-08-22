@@ -3711,6 +3711,18 @@
   CBZ.cityWildlifeOcean = function () {
     return { cx: FIELD.cx, cz: FIELD.cz, r0: FIELD.r0, r1: FIELD.r1 };
   };
+  /* ONE ANIMAL, WHERE A MODE SAYS. The shark sim's evolutions and pod
+     top-ups need single spawns at stated points; a second spawner over
+     there would be exactly the parallel-system drift this file exists to
+     prevent, so this is a door to makeActor and nothing else. The animal
+     comes out fully native — traits, rig, roster, dynamic tag — so combat,
+     predation and the mount system cannot tell it from a seeded one. Bulk
+     stocking stays cityWildlifeStock; this is one body at a time. */
+  CBZ.cityWildlifeSpawnAt = function (id, x, z) {
+    const sp = (CBZ.WILDLIFE_SPECIES || {})[id];
+    if (!sp || !root) return null;
+    return makeActor(sp, x, z);
+  };
 
   // ============================================================
   //  BUILD — stock the world once, after every biome AND the order-97 signed

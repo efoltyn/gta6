@@ -417,8 +417,13 @@
   //  §3. WHO IS FIGHTING WHOM — target selection, throttled and gated.
   // ============================================================
   function alive(a) {
-    return !!a && !a.dead && !a.tamed && !a.ridden && !a.external &&
-      !!a.species && !!a.species.aquatic && !!a.group;
+    if (!a || a.dead || a.external || !a.species || !a.species.aquatic || !a.group) return false;
+    // A tamed or ridden animal is the player's and the sea leaves it alone —
+    // EXCEPT when it says otherwise: modes/shark_sim.js marks the player's
+    // own shark `huntable`, because being mobbed by the pod is that game's
+    // whole threat curve. Nothing else sets the flag.
+    if ((a.tamed || a.ridden) && !a.huntable) return false;
+    return true;
   }
 
   // how many live packmates of `hunter`'s own species are inside POD_R of the

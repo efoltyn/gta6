@@ -304,6 +304,13 @@
               data-href="games/battle.html">
         <span>NPC War</span><small>two armies · any size · the real city · bombers, nukes · you hold the clock</small>
       </button>
+      <!-- SHARK SIM rides the disaster island rather than standing on its own
+           page: same build, same door mechanism (data-href navigates), one
+           URL flag flips survival into the shark game (modes/shark_sim.js). -->
+      <button class="mode-btn mode-launch" type="button" data-mode="sharksim"
+              data-href="index.html?mode=survival&amp;shark=1">
+        <span>Shark Sim</span><small>you ARE the shark · eat swimmers, dodge the orca pod, become the MEGALODON</small>
+      </button>
     </div>
 
     <div class="smallnote mode-escape-only">Lay low and guards ignore you. Cause trouble and they hunt.</div>
@@ -859,6 +866,7 @@
 <script src="src/systems/grapple.js?v=nohint1"></script>
 <script src="src/entities/survivorbot.js?v=trauma2"></script>
 <script src="src/modes/survival.js?v=nodash1"></script>
+<script src="src/modes/shark_sim.js?v=1"></script>
 <!-- GUN GAME borrows worlds it never builds: the prison (escape), the disaster
      island (survival). Loads AFTER both so their builders exist. -->
 <script src="src/modes/gungame.js?v=nodash1"></script>

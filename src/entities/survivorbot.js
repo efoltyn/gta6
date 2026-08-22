@@ -117,6 +117,20 @@
     return { frame: frame, matchNo: matchNo, bots: CBZ.bots.length, seeded: !!botRng };
   };
 
+  /* THE SHARK SIM'S LARDER: one bot, at a stated point, mid-match. It joins
+     the same array, the same wander stream and the same think schedule as
+     the drop's own crowd — makeBot IS the spawner, this is just a door to
+     it for a mode that restocks what gets eaten. stats.total keeps the
+     spectate line honest about how many people this match has seen. */
+  CBZ.spawnSurvivorBotAt = function (x, z) {
+    const arena = CBZ.buildDisasterArena();
+    const b = makeBot(x, z, brnd);
+    arena.root.add(b.group);
+    CBZ.bots.push(b);
+    if (CBZ.surv && CBZ.surv.stats) CBZ.surv.stats.total++;
+    return b;
+  };
+
   CBZ.clearSurvivorBots = function () {
     for (const b of CBZ.bots) {
       if (b.group) {
@@ -162,9 +176,18 @@
         /* SEEDED, because where ninety-nine people wander is match state, not
            decoration: on Math.random two clients on the same seed had a
            different crowd within one second of the drop. brnd() is the match's
-           own stream, reseeded in spawnSurvivorBots. */
-        const a = brnd() * 6.28, d = brnd() * arena.radius * 0.6;
-        b.target.set(arena.center.x + Math.cos(a) * d, 0, arena.center.z + Math.sin(a) * d);
+           own stream, reseeded in spawnSurvivorBots. The shark-sim ring below
+           draws the same two numbers from the same stream, so flipping the
+           mode never desyncs a seed. */
+        const ring = CBZ.sharkSimShoreRing;   // shark sim: the crowd lives on the sand
+        const a = brnd() * 6.28;
+        if (ring) {
+          const d = ring.r0 + brnd() * (ring.r1 - ring.r0);
+          b.target.set(ring.cx + Math.cos(a) * d, 0, ring.cz + Math.sin(a) * d);
+        } else {
+          const d = brnd() * arena.radius * 0.6;
+          b.target.set(arena.center.x + Math.cos(a) * d, 0, arena.center.z + Math.sin(a) * d);
+        }
         b.pause = 0.6 + brnd() * 2.2;
       }
     }
