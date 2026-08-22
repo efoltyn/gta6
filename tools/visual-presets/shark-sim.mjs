@@ -247,17 +247,39 @@ async function stageSharkSim(input) {
       /* The full-body portrait: a ¾ tripod above the surface, distance and
          height scaled to the species so a bull and a megalodon both fill the
          frame instead of the chase camera sitting inside the bigger hulls.
-         The HUD is DOM — pill, banner, killfeed and bars ride every shot. */
+         ADAPTIVE steepness: a body AT the surface (dorsal out) gets the low
+         cinematic angle; a SUBMERGED body gets a steep look-down, because at
+         a shallow angle the surface haze simply hides it — the first run's
+         bull shark was a banner over apparently empty water. The HUD is DOM —
+         pill, banner, killfeed and bars ride every shot. */
       bodyShot(S) {
         const s = Math.max(1, (S.species && S.species.scale) || 1);
         const h = S.heading || 0, ang = h + 2.35;
-        const dist = 6.5 + 5.5 * s;
+        const D0 = 6.5 + 5.5 * s;
         const sy = CBZ.citySeaHeightAt ? CBZ.citySeaHeightAt(S.pos.x, S.pos.z) : -0.8;
+        const submerged = (sy - S.pos.y) > 0.6;
+        const horiz = submerged ? D0 * 0.6 : D0;
+        const camY = submerged ? S.pos.y + D0 * 0.85
+          : Math.max(sy + 1.8 + 1.5 * s, S.pos.y + 2.2 + 1.4 * s);
         D.tripod(
-          S.pos.x + Math.cos(ang) * dist,
-          Math.max(sy + 1.8 + 1.5 * s, S.pos.y + 2.2 + 1.4 * s),
-          S.pos.z + Math.sin(ang) * dist,
+          S.pos.x + Math.cos(ang) * horiz, camY, S.pos.z + Math.sin(ang) * horiz,
           S.pos.x, S.pos.y + 0.3 * s, S.pos.z);
+      },
+      /* The on-foot SURVIVOR verb panel is honest UI — but it belongs to the
+         beat about the crowd, not to a wildlife portrait it happens to
+         photobomb because the player is still standing among the waders. */
+      decrowd() {
+        const P = CBZ.player;
+        for (const b of CBZ.bots) {
+          if (b.dead) continue;
+          const d = Math.hypot(b.pos.x - P.pos.x, b.pos.z - P.pos.z);
+          if (d < 7) {
+            b.pos.x += 16; b.pos.z += 6;
+            b.pos.y = CBZ.surv.floorAt(b.pos.x, b.pos.z);
+            b.target.set(b.pos.x, 0, b.pos.z);
+          }
+        }
+        D.step(2);                       // let the panel notice its target left
       },
       async replay() {
         // the presented restart eases its boot card on REAL frames — lend the
@@ -435,10 +457,11 @@ async function stageSharkSim(input) {
     async function hammerhead() { D.wildShot("hammerhead_shark"); },
     async function greatWhite() { D.wildShot("great_white_shark"); },
     async function podHunt() {
+      D.decrowd();
       const o = D.wildOrSpawn("orca");
       if (!o) throw new Error("no orca to photograph");
       D.sec(1);
-      D.tripod(o.pos.x - 14, o.pos.y + 6, o.pos.z - 9, o.pos.x, o.pos.y, o.pos.z);
+      D.bodyShot(o);
       out.podNearestM = D.podNearest();
     },
     async function megalodon() { D.wildShot("megalodon"); },
@@ -454,19 +477,15 @@ async function stageSharkSim(input) {
       D.sec(2.6);
     },
   ];
-  // the wild-body tripod shared by the before column's species chapters —
-  // held ABOVE the surface so the shot reads down through clear water
-  // instead of from inside the underwater fog
+  // the wild-body portrait shared by the before column's species chapters —
+  // the same adaptive tripod the after column uses, so the pairing is the
+  // species itself, not two different camera grammars
   D.wildShot = D.wildShot || function (id) {
+    D.decrowd();
     const a = D.wildOrSpawn(id);
     if (!a) throw new Error("no wild " + id);
     D.sec(1.2);
-    const s = Math.max(1, (a.species.scale || 1));
-    const sy = CBZ.citySeaHeightAt ? CBZ.citySeaHeightAt(a.pos.x, a.pos.z) : -0.8;
-    D.tripod(
-      a.pos.x - (6.5 + 5.5 * s) * 0.8, Math.max(sy + 1.8 + 1.5 * s, a.pos.y + 2.5),
-      a.pos.z - (6.5 + 5.5 * s) * 0.6,
-      a.pos.x, a.pos.y + 0.3 * s, a.pos.z);
+    D.bodyShot(a);
   };
 
   while (D.chapter < sub.ch) {
@@ -497,8 +516,14 @@ export default {
   pairNote: "Same checkout · same island · same seed · the game's own camera and HUD",
   method: "Both sides boot index.html?mode=survival with a pinned seed and click PLAY exactly like a player. A per-page driver advances the real match with CBZ.stepSim (the page's own frame loop is frozen after boot so captures cannot race the renderer), stages each beat with engine APIs only — no studio scenes — and photographs the full page, HUD, banners, killfeed and end cards included. The film-strip subject steps the identical simulated seconds on both sides.",
   defaultBefore: "local",
-  beforeParams: { mode: "survival", shark: "0", seed: "90210" },
-  afterParams: { mode: "survival", shark: "1", seed: "90210" },
+  /* cfg_BOOT_METER=0: the presented start eases its boot card on a RAF chain,
+     and this preset freezes the page's frame loop after boot — one dead frame
+     in that chain leaves state.js's bootBusy latched and every Play Again a
+     silent no-op (the death beat could never restage). With the meter off,
+     startRunPresented falls through to the synchronous startRun and the whole
+     run needs no frame loop at all. */
+  beforeParams: { mode: "survival", shark: "0", seed: "90210", cfg_BOOT_METER: "0" },
+  afterParams: { mode: "survival", shark: "1", seed: "90210", cfg_BOOT_METER: "0" },
   stageTimeoutMs: 300000,
   metrics: {
     shoreCrowdPct: { label: "Live crowd on the beach/surf band", unit: "%", better: "higher" },
