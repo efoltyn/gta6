@@ -99,12 +99,22 @@ async function stageSharkSim(input) {
         /* From here the match advances ONLY when a subject steps it. Killing
            the page's own frame loop is what lets a detached camera survive to
            the capture; the comparator's own barrier falls back to a timer,
-           and its render hook (below) draws each frame explicitly. The
-           original is kept: the play-again flow (startRunPresented) rides
-           real frames, so replay() lends it back for the restart. */
+           and its render hook (below) draws each frame explicitly. */
         D._rafOrig = window.requestAnimationFrame;
-        window.requestAnimationFrame = function () { return 0; };
+        await D.killFrames();
         return true;
+      },
+      /* Stub the frame loop AND drain the one already-queued loop callback
+         in a frame we control. Left alone, that straggler fires at some
+         arbitrary later compositor tick: it re-stamps the camera (caught
+         red-handed by a position spy — updateCamera ← loop()) and presents
+         its own frame over a staged capture; queued first, it even runs
+         ahead of our render inside a borrowed frame. Draining it here means
+         its re-arm hits the stub and the chain is dead for good. */
+      async killFrames() {
+        const orig = D._rafOrig || window.requestAnimationFrame;
+        window.requestAnimationFrame = function () { return 0; };
+        await new Promise((res) => orig.call(window, () => res()));
       },
       rafOff() { window.requestAnimationFrame = function () { return 0; }; },
       armed() {
@@ -259,8 +269,12 @@ async function stageSharkSim(input) {
         const h = S.heading || 0, ang = h + 2.35;
         const D0 = 6.5 + 5.5 * s;
         const sy = CBZ.citySeaHeightAt ? CBZ.citySeaHeightAt(S.pos.x, S.pos.z) : -0.8;
-        if (sy - S.pos.y > 0.45 * s + 0.2) {
-          S.group.position.y = sy - 0.38 * s;
+        if (sy - S.pos.y > 0.25 * s) {
+          // AWASH, not "just submerged": measured on the live page, a bull
+          // 0.4 m under this sea is invisible from any angle — the surface
+          // haze is effectively opaque. The portrait rides the body with its
+          // back out of the water, the frame the hammerhead proved.
+          S.group.position.y = sy - 0.08 * s;
           S.group.updateMatrixWorld(true);
         }
         D.tripod(
@@ -284,8 +298,9 @@ async function stageSharkSim(input) {
         D.step(2);                       // let the panel notice its target left
       },
       async replay() {
-        // the presented restart eases its boot card on REAL frames — lend the
-        // page its frame loop back for the transition, then take it again
+        // with the boot meter off the restart is synchronous; RAF is lent
+        // back anyway in case anything in the flow schedules a frame, and
+        // killFrames() drains whatever got queued before taking it again
         if (D._rafOrig) window.requestAnimationFrame = D._rafOrig;
         const btn = document.getElementById("survAgainBtn");
         if (btn) btn.click();
@@ -294,7 +309,7 @@ async function stageSharkSim(input) {
           ok = CBZ.game.state === "playing" && (!D.after || D.armed());
           if (!ok) { D.step(8); await sleep(250); }
         }
-        D.rafOff();
+        await D.killFrames();
         return ok;
       },
     };
@@ -307,8 +322,24 @@ async function stageSharkSim(input) {
          bug that made three runs of tripod shots look haunted. */
       async render() {
         if (CBZ.bootMeter && CBZ.bootMeter.hide) { try { CBZ.bootMeter.hide(); } catch (e) {} }
-        if (CBZ.renderer) CBZ.renderer.render(CBZ.scene, CBZ.camera);
-        await new Promise((r) => setTimeout(r, 1400));
+        if (!CBZ.renderer) return;
+        /* THE PRESENT IS THE PRODUCT. With the page's frame loop dead, a
+           canvas rendered outside an animation frame is never PRESENTED —
+           the compositor keeps serving the last pre-kill frame, so every
+           screenshot photographed a frozen surface while the backbuffer
+           (proved via toDataURL) held the correct staged image the whole
+           time. Render inside ONE real animation frame — the game loop's
+           own chain is already broken, so lending RAF back for a single
+           callback cannot restart it — then wait out SwiftShader's
+           compositor before the comparator captures. */
+        const raf = D._rafOrig;
+        if (raf) {
+          await new Promise((res) => raf.call(window, () => {
+            CBZ.renderer.render(CBZ.scene, CBZ.camera);
+            res();
+          }));
+        } else CBZ.renderer.render(CBZ.scene, CBZ.camera);
+        await new Promise((r) => setTimeout(r, 1200));
       },
       advance(sec) { D.sec(sec); },        // film strips step the real match
     };
