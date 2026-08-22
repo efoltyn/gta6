@@ -328,10 +328,12 @@
       const depth = Math.max(0.05, rim - bottom);
       const rel = clamp((rimWorld - r.y) / Math.max(0.02, r.ry), -0.96, 0.96);
       let halfW = r.rz * Math.sqrt(Math.max(0.02, 1 - rel * rel));
-      // The buried root tapers in beam, not depth: at rest it must still fill
-      // the body's entire lower silhouette.  The rounded nose tapers too,
-      // while the middle keeps the actual hull beam.  No slab, no capsule.
-      halfW *= (i === 0 ? 0.42 : (i === 1 ? 0.72 : 1)) * (i === N - 1 ? 0.62 : 1);
+      // The root and nose taper only a WHISKER. The shipped 0.42/0.72 root
+      // taper left the dark palate exposed in the gap between hull flank and
+      // chin from below — a maroon ring on a closed whale. At rest this
+      // surface IS the body's lower silhouette, so it keeps the hull's beam
+      // to within a crease everywhere it can be seen.
+      halfW *= (i === 0 ? 0.96 : (i === 1 ? 0.99 : 1)) * (i === N - 1 ? 0.55 : 1);
       const pts = [], ids = [];
       for (let k = 0; k <= ARC; k++) {
         const ph = (k / ARC) * Math.PI;
@@ -348,11 +350,21 @@
       rows.push({ pts: pts, ids: ids, rim: rim, depth: depth });
     }
     const M = ARC + 3;
+    /* THE WINDING IS THE CHIN (owner, 2026-08-22: "underside of orca like
+       chin is see thru even before mouth gaps, it's like a missing orca
+       chunk"). The strip below shipped wound the other way round, which put
+       the outer skin's normals INSIDE the jaw: r128 culls back faces, so
+       from below and ahead the whole white underside vanished and the camera
+       looked straight through the culled keel onto the dark deck — a hole in
+       a closed whale. This order faces the keel arc OUT/DOWN (the visible
+       chin) and the deck UP (the mouth floor you see when the jaw drops).
+       Verified from underneath by orca-pod's markings-under frame, which is
+       exactly the angle that caught it. */
     for (let i = 0; i < N - 1; i++) {
       const a = rows[i], b = rows[i + 1];
       for (let k = 0; k < M; k++) {
         const k2 = (k + 1) % M;
-        sh.quad(k <= ARC - 1 ? 0 : 1, a.ids[k], b.ids[k], b.ids[k2], a.ids[k2]);
+        sh.quad(k <= ARC - 1 ? 0 : 1, a.ids[k2], b.ids[k2], b.ids[k], a.ids[k]);
       }
     }
     const cap = function (row, forward) {
@@ -360,8 +372,8 @@
         row.rim - row.depth * 0.48, 0);
       for (let k = 0; k < M; k++) {
         const k2 = (k + 1) % M;
-        if (forward) sh.tri(k <= ARC - 1 ? 0 : 1, row.ids[k], c, row.ids[k2]);
-        else sh.tri(k <= ARC - 1 ? 0 : 1, row.ids[k2], c, row.ids[k]);
+        if (forward) sh.tri(k <= ARC - 1 ? 0 : 1, row.ids[k2], c, row.ids[k]);
+        else sh.tri(k <= ARC - 1 ? 0 : 1, row.ids[k], c, row.ids[k2]);
       }
     };
     cap(rows[0], false); cap(rows[rows.length - 1], true);
@@ -814,10 +826,10 @@
     lower.name = "orcaLowerJaw";
     lower.position.set(JAW_X, JAW_Y, 0);
     g.add(lower);
-    const mand = meshOf(cached("orcaLowerEnvelope|v3", function () {
+    const mand = meshOf(cached("orcaLowerEnvelope|v4", function () {
       return lowerEnvelopeGeom({
         rings: rings, hingeX: JAW_X, hingeY: JAW_Y,
-        x0: JAW_X - 0.12, x1: HX1 - 0.08, rimY: orcaChinRimY,
+        x0: JAW_X - 0.12, x1: HX1 - 0.03, rimY: orcaChinRimY,
         stations: 16, arcSteps: 12, deckDrop: 0.024,
       });
     }), [white, deckGum]);
