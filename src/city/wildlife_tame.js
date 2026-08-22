@@ -1196,8 +1196,18 @@
     if (!a || !R || !R.aquatic || !R.attack || ride.attackCd > 0 || ride.attackT > 0) return false;
     const pick = selectBiteTarget(a, R);
     ride.target = pick.target; ride.targetKind = pick.kind;
-    ride.attackT = 0.0001; ride.attackDur = R.shipBite ? 0.72 : 0.56;
-    ride.attackHit = false; ride.attackHitP = -1; ride.attackCd = R.shipBite ? 0.85 : 0.62;
+    // The mounted animal and the wild predator now use creature_combat's one
+    // aquatic bite clock. The old 0.56 s chomp (0.72 for every megalodon
+    // target) could open and clamp between two readable frames; cooldown also
+    // expired during the swing, leaving only ~60 ms before the next chomp.
+    // Preserve target-sensitive mass — an actual hull takes longer — then
+    // leave a visible recovery beat after the mouth has returned to rest.
+    ride.attackT = 0.0001;
+    ride.attackDur = CBZ.aquaticBiteDuration
+      ? CBZ.aquaticBiteDuration(a, pick.kind)
+      : (R.shipBite ? 0.72 : 0.56);
+    ride.attackHit = false; ride.attackHitP = -1;
+    ride.attackCd = ride.attackDur + (pick.kind === "ship" ? 0.55 : 0.42);
     a._atkAnim = 0;
     if (ride.water) {
       // Lunge TO the meal, not through it. The fixed cruise-fraction burst
@@ -1254,17 +1264,12 @@
       ride.attackHit = damageBiteTarget(a, ride.target, ride.targetKind);
       if (ride.attackHit) ride.attackHitP = p;
     }
-    // Open through the approach, then snap shut immediately AFTER real contact.
-    // Previously damage could resolve at p=.18 while the jaw stayed wide until
-    // p=.64, so the target was already hurt while the shark visibly held its
-    // mouth open through it. A miss still performs a full gape and recovery;
-    // a hit turns the geometry result into the clench trigger.
-    let open = p < 0.30 ? ease(p / 0.30) : 1;
-    if (ride.attackHit && ride.attackHitP >= 0) {
-      open = Math.max(0.08, 1 - ease((p - ride.attackHitP) / 0.16) * 0.92);
-    } else if (p > 0.70) {
-      open = 1 - ease((p - 0.70) / 0.30);
-    }
+    // The same normalized production curve now drives mounted and wild jaws.
+    // Contact is still geometry-owned above, but no longer collapses the next
+    // 9% of a second into an unreadable instant clamp: full gape carries the
+    // target into compression, then the body closes and visibly recovers.
+    let open = CBZ.biteCurve ? CBZ.biteCurve(p)
+      : (p < 0.30 ? ease(p / 0.30) : (p > 0.70 ? 1 - ease((p - 0.70) / 0.30) : 1));
     if (CBZ.swimJaw) CBZ.swimJaw(a, open);
     if (p >= 1) {
       ride.attackT = 0; ride.target = null; ride.targetKind = null;
@@ -1630,6 +1635,11 @@
       speed: W ? +(W.v || 0).toFixed(2) : 0,
       verticalSpeed: W ? +(W.vy || 0).toFixed(2) : 0,
       airborne: !!(W && W.airborne), attacking: ride.attackT > 0,
+      attackProgress: ride.attackT > 0 && ride.attackDur > 0
+        ? +Math.min(1, ride.attackT / ride.attackDur).toFixed(3) : 0,
+      attackDuration: +(ride.attackDur || 0).toFixed(3),
+      attackCooldown: +(ride.attackCd || 0).toFixed(3),
+      jawOpen: a && a.swim ? +Math.max(0, a.swim.jawK || 0).toFixed(3) : 0,
       attackTarget: ride.targetKind,
       attackTargetDistance: a && ride.target && ride.target.group
         ? +biteDistance(ride.target, jawWorld(a)).toFixed(2) : null,

@@ -8,7 +8,9 @@
 //
 // HOW THE ANIMATION WORKS: our animals are simple low-poly THREE.Groups with
 // NO named skeleton, so there is nothing to key. Instead every attack is a
-// stylized transform of the WHOLE group over a short (~0.4s) strike window,
+// stylized transform of the WHOLE group over a short strike window (0.4 s for
+// the legacy land/default grammar; aquatic bites use the longer measured
+// expansion/compression/recovery cadence published below),
 // driven by a normalized progress p in 0..1 (windup -> strike -> recover):
 //   - position offset along the attacker's facing (lunge/thrust/jab)
 //   - a sin() arc on y (pounce leap, stomp slam)
@@ -157,18 +159,18 @@
   }
 
   // ---- THE BITE CURVE (docs/SHARK-REFERENCE.md §6) --------------------------
-  // A real bite is ASYMMETRIC, and the asymmetry is most of what makes it read
-  // as a bite: the gape opens fast on the way in, HOLDS at full extension for a
-  // beat through contact (STRIKE_AT sits inside the hold), then SNAPS shut far
-  // faster than it opened — the close window is under half the open window and
-  // 1 - s*s accelerates all the way into the slam, so the jaws stop dead at
-  // maximum closing speed. The old symmetric strikeEnv gape was a puppet's
-  // mouth: equal-speed open and close, widest for exactly one frame.
+  // A real bite is ASYMMETRIC, but it is still a SEQUENCE somebody can read:
+  // expansion, a held full gape through contact, compression, then recovery.
+  // The previous 0.10/.38/.58/.70 curve spent only 12% of the swing closing;
+  // on the mounted shark's 0.56 s clock that was 67 ms, effectively one snap.
+  // High-speed shark kinematics put peak gape, prey seizure, jaw closure and
+  // recovery in distinct beats. Keep those beats distinct here too.
   // Shared on CBZ so EVERY biter inherits the grammar instead of each species
   // shaping its own — the aquatic 'lunge' below uses it directly and
   // predator_anim.js feeds it to the land biters' maw layer.
   // One-line revert: CBZ.CONFIG.BITE_SNAP = false restores the old envelope.
-  var BITE_OPEN_AT = 0.10, BITE_FULL_AT = 0.38, BITE_HOLD_TO = 0.58, BITE_SHUT_AT = 0.70;
+  var BITE_OPEN_AT = 0.08, BITE_FULL_AT = 0.36, BITE_HOLD_TO = 0.56, BITE_SHUT_AT = 0.82;
+  var AQUATIC_BITE_BASE_S = 0.86;
   function biteCurve(p) {
     if (CBZ.CONFIG && CBZ.CONFIG.BITE_SNAP === false) return Math.min(1, strikeEnv(p) * 1.45);
     if (p <= BITE_OPEN_AT || p >= BITE_SHUT_AT) return 0;
@@ -178,6 +180,29 @@
     return 1 - s * s;
   }
   CBZ.biteCurve = biteCurve;
+
+  /* ONE AQUATIC BITE CLOCK. Wild sharks, Shark Sim's mounted animal, tamed
+     aquatics and pod combat already share the same jaw and contact owners; the
+     last duplicate was duration. Scale adds only a restrained amount of mass
+     to the beat, while an actual ship bite gets another tenth of a second.
+     This is not a species table: any authored aquatic biter inherits it. */
+  function aquaticBiteDuration(actor, targetKind) {
+    var sc = actorScale(actor);
+    var d = AQUATIC_BITE_BASE_S + Math.max(-0.04, Math.min(0.14, (sc - 1) * 0.08));
+    if (targetKind === 'ship') d += 0.10;
+    return Math.max(0.82, Math.min(1.10, d));
+  }
+  CBZ.aquaticBiteDuration = aquaticBiteDuration;
+  // Tooling and tests read the same declared beats the runtime uses; no copied
+  // timing constants in a visual preset can quietly drift from production.
+  CBZ.biteTimeline = {
+    version: 2,
+    openAt: BITE_OPEN_AT,
+    fullAt: BITE_FULL_AT,
+    holdTo: BITE_HOLD_TO,
+    shutAt: BITE_SHUT_AT,
+    aquaticBaseS: AQUATIC_BITE_BASE_S,
+  };
 
   function shortestAngle(a) {
     while (a > Math.PI) a -= Math.PI * 2;
@@ -451,8 +476,8 @@
           pitchZ = 0.5 * Math.sin(Math.min(1, up * 1.6) * Math.PI * 0.85);  // nose UP, then level
           roll = Math.sin(up * 9) * 0.12 * (1 - up);   // the body works as it drives
         }
-        // THE GAPE IS THE BITE CURVE, not the strike envelope: fast open, a
-        // held beat through contact, then the SNAP shut (see biteCurve above —
+        // THE GAPE IS THE BITE CURVE, not the strike envelope: readable
+        // expansion, a held beat through contact, then compression (see biteCurve above —
         // §6's "equal-speed open and close reads as a puppet's mouth"). Owned
         // by wildlife.js's shared swim rig.
         if (CBZ.swimJaw) { try { CBZ.swimJaw(actor, biteCurve(p)); } catch (e) {} }
@@ -473,7 +498,7 @@
            bite, it headbutts"). Same silhouette family as ram_flank — a pod
            member leaves its bearing, comes in ACROSS the quarry's beam and
            carries straight through — but the weapon is the MOUTH: the jaws
-           ride the bite curve (fast open, held through contact, hard snap),
+           ride the bite curve (readable expansion, held contact, compression),
            the bank is halved so the gape faces the flank instead of the sky,
            and the head worries the hit after the snap exactly like `lunge`.
            Contact honesty comes free: this style is NOT in jawReaches()'s
@@ -1088,13 +1113,14 @@
       if (animating) {
         // advance strike animation
         RES.inRange = _dist <= reach * 1.5;
-        /* PER-MOVE STRIKE CLOCK. 0.4 s is a bite's arc and it always was; a
-           two-handed overhead needs air under it and a chest-beat display is
-           four seconds of theatre compressed to one. `_atkDur` is set by
-           whatever chose the move (ape_combat's picker today) and read only
-           here — unset, this is the flat STRIKE_DUR every existing style has
-           always run on. */
-        var sdur = (attacker._atkDur > 0) ? attacker._atkDur : STRIKE_DUR;
+        /* PER-MOVE STRIKE CLOCK. `_atkDur` remains the explicit move override
+           (ape_combat's repertoire uses it). Unset aquatic mouth attacks take
+           the shared expansion/compression/recovery duration; every other
+           existing style keeps the flat 0.4 s legacy clock. */
+        var aquaticMouthStyle = !!(sp && sp.aquatic &&
+          (style === 'lunge' || style === 'bite_flank'));
+        var sdur = (attacker._atkDur > 0) ? attacker._atkDur
+          : (aquaticMouthStyle ? aquaticBiteDuration(attacker, null) : STRIKE_DUR);
         _p = attacker._atkAnim + dt / sdur;
         // strike moment: crossed STRIKE_AT this frame -> deal damage
         if (attacker._atkAnim < STRIKE_AT && _p >= STRIKE_AT && _dist <= reach * 1.6) {

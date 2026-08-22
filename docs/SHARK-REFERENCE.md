@@ -137,12 +137,12 @@ facing surface (back faces, or a genuine receding tube/funnel) that darkens
 with depth, with the pink confined to the rim behind the teeth.
 
 **AND THE BITE MUST READ AS A BITE.** Owner: "it doesn't look like biting."
-A shark bite is not a slow symmetric hinge. In order: the snout LIFTS and the
-upper jaw slides forward and down (§1), the gape opens FAST, it holds open for
-a beat at full extension, then the jaws SNAP shut hard and fast — the closing
-is much quicker than the opening — and the head shakes on contact. Equal-speed
-open and close reads as a puppet's mouth. Asymmetric timing is most of what
-makes it read as a bite.
+A shark bite is not a symmetric hinge and it is not an on/off flash. In order:
+the snout LIFTS and the upper jaw slides forward and down (§1), the gape has a
+readable expansion, holds through prey contact, visibly compresses, returns to
+the exact closed seam, then leaves a recovery beat before another attack. The
+close is decisive, but it must have screen time; the former 0.56 s mounted
+chomp reduced contact-to-clench to roughly 90 ms and felt machine-gunned.
 
 ---
 
@@ -206,8 +206,8 @@ Two laws, both in `city/creature_combat.js` and both reverted by
 `?bitepass=off` / `CBZ.CONFIG.MARINE_BITE_PASS = false`:
 
 - **The pod's flank pass is `bite_flank`**: same cross-the-beam silhouette
-  as the old ram, but the jaws ride `biteCurve` (fast open, held through
-  contact, hard snap, the worry after), and the pass only scores when
+  as the old ram, but the jaws ride `biteCurve` (readable expansion, held
+  contact, visible compression, the worry after), and the pass only scores when
   `jawReaches` says the teeth arrived. marine_predation and wildlife_orca's
   degrade mob both choose it; the roll-over hold now stations at the orca's
   own bite point plus the quarry's measured half-beam, jaws half-open on the
@@ -289,3 +289,45 @@ The cross-species contract is `aquaticMouth.version === 4`:
 Run `npm run visual:predator-mouth-envelope` for the locked 12-state sheet and
 `npm run test:predator-mouth-envelope` for the real-Chrome hierarchy/motion
 contract.
+
+---
+
+## 10. RECESSED LABIAL MARGIN + ONE READABLE BITE CLOCK (2026-08-22)
+
+Owner: biting "feels fast" and the sharks' lips look "too protruding."
+
+Two shared laws answer that observation rather than tuning one hero species:
+
+- **The mouth margin is inside the face.** The old front lip cuboids were
+  centred on the oral arc and put half their 13%-of-jaw depth in open water.
+  `sharkUpperLip` and `sharkLowerLip` are now one short swept arc behind that
+  line, joined into the cheek bands; the moving chin also terminates at the
+  oral arc instead of extending another 7% into a white lower beak. The mouth
+  contract publishes `lipProfile: "recessed-arc-seal"`, and tooling measures
+  lip tissue proud of the arc directly.
+- **Wild, mounted, Shark Sim and pod bites share one clock.** The canonical
+  duration is 0.82–1.10 s with restrained scale/ship weight. Normalized phases
+  are preparation through .08, expansion to .36, held gape to .56,
+  compression to .82, then exact reset/recovery. A completed animal bite has
+  another .42 s before the next attack; a hull bite has .55 s. Target probing
+  still begins immediately, so readability does not add input lag.
+
+The timing follows high-speed feeding studies rather than a cinematic guess:
+
+- [McNeil et al., sixgill shark feeding kinematics](https://pmc.ncbi.nlm.nih.gov/articles/PMC4887027/)
+  separates peak gape, prey seizure, full mandibular elevation, labial
+  retraction and recovery into successive measured events.
+- [Wilga et al., lemon shark feeding mechanism](https://pubmed.ncbi.nlm.nih.gov/9326502/)
+  describes expansive, compressive and recovery phases and reports individual
+  variation in duration rather than one instantaneous snap.
+- [Klimpfinger and Kriwet, CT survey of shark labial cartilages](https://pmc.ncbi.nlm.nih.gov/articles/PMC10741050/)
+  finds well-developed labial cartilages associated with suction feeding,
+  while high-trophic ram/pure-biting sharks tend toward absent or small
+  remnants. That supports a subtle recessed margin on this apex-shark family,
+  not a conspicuous bumper.
+
+Run `npm run visual:shark-bite-cadence -- --gate` for the locked real-time
+rest/tell/expansion/contact/compression/clench/recovery sheet. Run
+`npm run test:shark-bite-cadence`, `npm run test:aquatic-mount`, and
+`node tools/shark-sim-check.mjs --quick` for geometry, mounted contact and
+autonomous-hunt contracts.

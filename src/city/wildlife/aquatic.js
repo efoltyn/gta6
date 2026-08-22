@@ -917,6 +917,13 @@
     // bulk of the gum live behind it.
     const gumH = o.gumHeight || gap * 0.18;
     const lipH = gumH + gap * 0.035;
+    // The oral margin belongs just INSIDE the head silhouette. The previous
+    // front boxes were centred on the arc's furthest point and extended another
+    // 6.5% of jaw length into open water — the pink/white tusk-like lips the
+    // player could see in profile. Seat the shared band and its front seal
+    // behind the arc instead; pure-biting apex sharks have only subtle labial
+    // supports compared with suction feeders' conspicuous lip cartilages.
+    const lipRecess = o.lipRecess == null ? len * 0.035 : o.lipRecess;
     const railIn = o.railIn || width * 0.11;
     const railOut = o.railOut || width * 0.10;
     const toothH = o.toothHeight || gap * 0.48;
@@ -951,8 +958,14 @@
         const a = -A + (i / stations) * 2 * A;
         const p = arcPt(a), nn = arcN(a);
         const yr = y + riseAt(a);
+        // Taper the world-facing rail inward only around the front bite line.
+        // The cheek/corner tissue keeps its full section and therefore stays
+        // joined to the head; the centre no longer grows a bumper beyond it.
+        const front = Math.pow(Math.max(0, 1 - Math.abs(a) / (A * 0.46)), 1.7);
+        const seat = lipRecess * front;
         const corner = function (dn, dy) {
-          return sh.v(p[0] + nn[0] * dn, yr + dy, p[1] + nn[1] * dn);
+          const d = dn - seat;
+          return sh.v(p[0] + nn[0] * d, yr + dy, p[1] + nn[1] * d);
         };
         // THE UPPER BAND IS A LIP, NOT A BUMPER. The protruded palatoquadrate
         // in the reference photographs is a THIN pale wrap around the tooth
@@ -966,7 +979,7 @@
         // denture ring with daylight behind it. At rest the tall part lives
         // inside the rostrum shell, invisible.
         const split = mouthSplitOn();
-        const kIn = up ? 0.75 : 1, kOut = up ? 0.50 : 1;
+        const kIn = up ? 0.75 : 1, kOut = (up ? 0.50 : 1) * (1 - front * 0.82);
         const kGum = up ? 0.80 : 1, kLipDn = up ? 0.21 : 0.45;
         const kLipUp = up ? (split ? 1.05 : 0.21) : 0.45;
         rows.push({
@@ -997,7 +1010,7 @@
     }
     function band(y, up, name, parent) {
       const key = "jawband3|" + mouthSplitOn() + "|" +
-        [y, up, gumH, lipH, railIn, railOut, len, width, A, cornerRise].join(",");
+        [y, up, gumH, lipH, lipRecess, railIn, railOut, len, width, A, cornerRise].join(",");
       const geo = cachedGeom(key, function () { return bandGeom(y, up, 14); });
       // both jaws' world-facing faces are the PALE jaw skin: in the
       // photographs the protruded upper jaw is whitish-pink, and painting it
@@ -1112,7 +1125,10 @@
       const geo = cachedGeom(key, function () {
         const sh = new Shell();
         const N = 10, ARCP = 9;
-        const xB = -len * 0.30, xF = len * 1.04;
+        // End the moving chin at the authored oral arc. Its former 1.04len
+        // station plus 0.03len cap recreated the old front lip's 6.5% beak,
+        // even after the soft seal itself was recessed.
+        const xB = -len * 0.30, xF = len * 0.99;
         const lastX = rings[rings.length - 1].x;
         const deckDrop = gap * 0.12;
         const st = [];
@@ -1171,14 +1187,18 @@
         }
         // caps: the visible jaw tip forward, the buried root aft
         const F = st[N - 1], B = st[0];
-        const tip = [F.lx + len * 0.03, F.rim - F.dep * 0.45, 0];
+        const tip = [F.lx + len * 0.01, F.rim - F.dep * 0.45, 0];
         const vt = sh.v(tip[0], tip[1], tip[2]);
         const root = [B.lx - len * 0.02, B.rim - B.dep * 0.5, 0];
         const vr = sh.v(root[0], root[1], root[2]);
         for (let k = 0; k < ARCP; k++) {
           const k2 = (k + 1) % ARCP;
-          const g2 = k < 6 ? 0 : 1;
-          sh.quadN(g2, [1, 0, 0], [F.pts[k], F.pts[k2], tip, tip], [F.v[k], F.v[k2], vt, vt]);
+          // The forward cap is exposed outer anatomy from every profile angle.
+          // Painting its two deck wedges with the recessed interior material
+          // left a small pink rectangle at the chin tip that still read as a
+          // protruding lip. Keep the deck behind it dark, but close this cap
+          // entirely in the shark's pale skin.
+          sh.quadN(0, [1, 0, 0], [F.pts[k], F.pts[k2], tip, tip], [F.v[k], F.v[k2], vt, vt]);
           sh.quadN(0, [-1, 0, 0], [B.pts[k], B.pts[k2], root, root], [B.v[k], B.v[k2], vr, vr]);
         }
         return sh.geom();
@@ -1220,16 +1240,63 @@
     const ut = toothField(true), lt = toothField(false);
     dental.add(ut.mesh); lower.add(lt.mesh);
 
-    // The front lip lobes stay their own small meshes: they are the visible
-    // front of the mouth line AND the pair every mouth test measures the gape
-    // between, which a merged ring cannot answer for.
-    const lipGeom = cachedGeom("liptip|" + [len, lipH, width].join(","), function () {
-      return new T.BoxGeometry(len * 0.13, lipH, width * 0.20);
-    });
-    const ul = new T.Mesh(lipGeom, gum); ul.name = "sharkUpperLip";
-    ul.position.set(cx + rad * 1.0, upperY, 0); ul.scale.y = 0.16; dental.add(ul);
-    const ll = new T.Mesh(lipGeom, skin); ll.name = "sharkLowerLip";
-    ll.position.set(cx + rad * 1.0, lowerY, 0); lower.add(ll);
+    /* THE FRONT SEAL IS AN ARC, NOT TWO BOXES. The old `liptip` cuboids were
+       centred at x=len, 13% of len deep, so half of each block projected past
+       the jaw and read as a pink upper tusk plus a white lower beak. This short
+       swept seal follows the same oral curve as the gums, overlaps that band
+       behind the front line, and never reaches the theoretical arc tip. It
+       remains a named mesh because visual/physics contracts need a precise
+       boundary from which to measure gape. */
+    function frontLipGeom(y, up) {
+      const sh = new Shell(), rows = [], ST = 6, span = A * 0.20;
+      // Recessed does not mean paper-thin: let the two soft margins overlap the
+      // closed seam vertically while keeping their entire volume behind the
+      // head outline. This hides tooth roots at rest without rebuilding the
+      // protruding bumper silhouette.
+      const halfH = gap * (up ? 0.055 : 0.075);
+      const depth = Math.max(gap * 0.10, len * 0.040);
+      for (let i = 0; i <= ST; i++) {
+        const a = -span + (i / ST) * span * 2;
+        const p = arcPt(a), nn = arcN(a);
+        const yr = y + riseAt(a) + (up ? -gap * 0.035 : gap * 0.035);
+        // Both faces are behind the arc. The inner face reaches back into the
+        // full gum band so the seal is one connected piece of mouth tissue.
+        const outer = -lipRecess * 0.82;
+        const inner = outer - depth;
+        const q = function (dn, dy) {
+          return sh.v(p[0] + nn[0] * dn, yr + dy, p[1] + nn[1] * dn);
+        };
+        rows.push([
+          q(inner, halfH), q(inner, -halfH),
+          q(outer, -halfH * 0.72), q(outer, halfH * 0.72),
+        ]);
+      }
+      for (let i = 0; i < ST; i++) {
+        for (let k = 0; k < 4; k++) {
+          const k2 = (k + 1) % 4;
+          // The world-facing outer/top faces are body skin. Group 1 is kept
+          // for topology diagnostics, but the finished seal paints both
+          // groups as skin: the full gum band immediately behind it already
+          // supplies the wet oral margin without a pink tab at the snout.
+          const grp = (k === 0 || k === 1) ? 1 : 0;
+          sh.quad(grp, rows[i][k], rows[i][k2], rows[i + 1][k2], rows[i + 1][k]);
+        }
+      }
+      // These lateral caps are exposed in a profile/three-quarter view. They
+      // are outer lip skin, not a cross-section of bright gingiva; painting
+      // them wet-dark recreated a little pink tab at each mouth corner.
+      sh.quad(0, rows[0][3], rows[0][2], rows[0][1], rows[0][0]);
+      const L = rows[ST]; sh.quad(0, L[0], L[1], L[2], L[3]);
+      return sh.geom();
+    }
+    function frontLip(y, up, name, parent) {
+      const key = "frontLipArc|v1|" +
+        [y, up, gap, len, width, A, cornerRise, lipRecess].join(",");
+      const mesh = meshOf(cachedGeom(key, function () { return frontLipGeom(y, up); }), [skin, skin]);
+      mesh.name = name; parent.add(mesh); return mesh;
+    }
+    frontLip(upperY, true, "sharkUpperLip", dental);
+    frontLip(lowerY, false, "sharkLowerLip", lower);
 
     const restClose = 0.04;
     lower.rotation.z = restClose;
@@ -1265,6 +1332,8 @@
       dentalDrop: dentalDrop,
       dentalRake: dentalRake,
       snoutLift: snoutLift,
+      lipProfile: "recessed-arc-seal",
+      lipRecess: lipRecess,
       toothRows: (o.toothRows || [0, 0, 0]).length,
       upperTeeth: ut.count,
       lowerTeeth: lt.count,

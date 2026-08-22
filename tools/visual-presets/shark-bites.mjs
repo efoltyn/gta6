@@ -80,7 +80,11 @@ const subjects = [
 ];
 
 export function stagePredatorMouth(input) {
-  const T = window.THREE, CBZ = window.CBZ, subject = input.subject;
+  const T = window.THREE, CBZ = window.CBZ;
+  // A cadence sheet derives `open` from real elapsed seconds. Clone the preset
+  // subject because the comparator reuses its descriptor across before/after;
+  // mutating it would leak one side's production timing into the other.
+  const subject = Object.assign({}, input.subject);
   if (!T || !CBZ || !CBZ.WILDLIFE_SPECIES || !CBZ.buildSwimRig || !CBZ.swimJaw) {
     return { ok: false, missing: "shark mouth staging APIs" };
   }
@@ -124,6 +128,50 @@ export function stagePredatorMouth(input) {
 
   const actor = makeAnimal(subject.species);
   if (!actor || !actor.swim) return { ok: false, missing: subject.species };
+  let biteTiming = null;
+  if (Number.isFinite(subject.elapsedS)) {
+    const isNewCadence = !!(CBZ.biteTimeline && CBZ.biteTimeline.version >= 2 &&
+      CBZ.aquaticBiteDuration && CBZ.biteCurve);
+    const oldHeavy = subject.species === "megalodon";
+    const targetKind = subject.ship ? "ship" : (subject.targetSpecies ? "animal" : null);
+    const duration = isNewCadence
+      ? CBZ.aquaticBiteDuration(actor, targetKind)
+      : (oldHeavy ? 0.72 : 0.56);
+    const p = Math.max(0, Math.min(1, subject.elapsedS / duration));
+    const smooth = t => {
+      const k = Math.max(0, Math.min(1, t));
+      return k * k * (3 - 2 * k);
+    };
+    let open;
+    if (isNewCadence) open = CBZ.biteCurve(p);
+    else {
+      // Byte-for-byte shape of the deployed mounted bite. A real hit latched
+      // at the first legal p=.38 sample and collapsed the next .16 of progress;
+      // a miss held until .70 and recovered across the final .30.
+      open = p < 0.30 ? smooth(p / 0.30) : 1;
+      if (subject.contact && p >= 0.38) {
+        open = Math.max(0.08, 1 - smooth((p - 0.38) / 0.16) * 0.92);
+      } else if (p > 0.70) open = 1 - smooth((p - 0.70) / 0.30);
+      if (p >= 1) open = 0;
+    }
+    const timeline = isNewCadence ? CBZ.biteTimeline : {
+      // The timing metric describes the deployed hit path even on rest/tell
+      // pages. A miss used its longer recovery branch, but it is not the
+      // contact-to-clench behavior this comparison is measuring.
+      fullAt: 0.30, holdTo: 0.38, shutAt: 0.54,
+    };
+    subject.open = open;
+    biteTiming = {
+      elapsedS: subject.elapsedS,
+      progress: p,
+      durationS: duration,
+      fullGapeAtS: duration * timeline.fullAt,
+      compressionS: duration * (timeline.shutAt - timeline.holdTo),
+      recoveryGapS: isNewCadence ? (targetKind === "ship" ? 0.55 : 0.42)
+        : (oldHeavy ? 0.13 : 0.06),
+      newCadence: isNewCadence,
+    };
+  }
   const animal = actor.group;
   animal.position.fromArray(subject.animal || [0, 0, 0]);
   animal.rotation.y = subject.animalYaw || -0.04;
@@ -194,7 +242,10 @@ export function stagePredatorMouth(input) {
   focus.style.cssText = "position:absolute;top:105px;left:29px;color:#c2d5df;font-size:13px;font-weight:550;max-width:760px;line-height:1.35";
   const state = overlay.querySelector("[data-state]"); state.textContent = subject.state;
   state.style.cssText = `position:absolute;right:27px;top:26px;color:${after ? "#7df0b8" : "#ffaaaa"};font-size:11px;font-weight:900;letter-spacing:.1em`;
-  const phase = overlay.querySelector("[data-phase]"); phase.textContent = `JAW  ${Math.round(subject.open * 100)}%`;
+  const phase = overlay.querySelector("[data-phase]");
+  phase.textContent = biteTiming
+    ? `T + ${biteTiming.elapsedS.toFixed(2)} s  ·  JAW ${Math.round(subject.open * 100)}%`
+    : `JAW  ${Math.round(subject.open * 100)}%`;
   phase.style.cssText = "position:absolute;right:28px;top:54px;color:#d7eef8;font:12px ui-monospace,SFMono-Regular,Menlo,monospace";
   const metric = overlay.querySelector("[data-metric]"); metric.textContent = subject.metric;
   metric.style.cssText = "position:absolute;right:27px;bottom:22px;padding:7px 10px;border-radius:6px;background:rgba(3,18,28,.76);color:#bfeeff;font:11px ui-monospace,SFMono-Regular,Menlo,monospace";
@@ -219,6 +270,7 @@ export function stagePredatorMouth(input) {
   // are the actual boundary the player sees.
   let staticVsJawM = null, mouthOpeningM = null;
   let staticChinDepthM = null, upperEnvelopeTravelM = null, lowerEnvelopeTravelM = null;
+  let lipProudM = null;
   if (mouth && jaw.jawGroup) {
     const sc = animal.scale.x || 1;
     const spanLen = mouth.upperReachX
@@ -268,6 +320,17 @@ export function stagePredatorMouth(input) {
       const box = new T.Box3().setFromObject(mesh);
       return box.isEmpty() ? null : box.getCenter(new T.Vector3());
     }
+    function localFrontX(mesh) {
+      if (!mesh || !mesh.geometry || !mesh.geometry.attributes.position) return null;
+      const inv = new T.Matrix4().copy(animal.matrixWorld).invert();
+      const pos = mesh.geometry.attributes.position, p = new T.Vector3();
+      let maxX = -Infinity;
+      for (let q = 0; q < pos.count; q++) {
+        p.fromBufferAttribute(pos, q).applyMatrix4(mesh.matrixWorld).applyMatrix4(inv);
+        if (p.x > maxX) maxX = p.x;
+      }
+      return isFinite(maxX) ? maxX : null;
+    }
     animal.updateMatrixWorld(true);
     const posedUpper = frontPoint(upperShell), posedLower = frontPoint(lowerShell);
     const posedUpperLip = worldCenter(upperLip), posedLowerLip = worldCenter(lowerLip);
@@ -276,6 +339,15 @@ export function stagePredatorMouth(input) {
     CBZ.swimJaw(actor, 0); animal.updateMatrixWorld(true);
     const restLow = lowestIn(jaw.jawGroup, -Infinity, Infinity, false);
     const restUpper = frontPoint(upperShell), restLower = frontPoint(lowerShell);
+    if (mouth.upperReachX != null && upperLip && lowerLip) {
+      // `upperReachX` includes the animated protrusion. Remove that travel to
+      // recover the authored closed-mouth arc: any named lip vertex beyond it
+      // is literal tissue sticking into open water. Measure at rest regardless
+      // of the photographed phase so every cadence frame reports one truth.
+      const arcX = mouth.upperReachX - (mouth.protrude || 0) - (mouth.dentalProtrude || 0);
+      const uf = localFrontX(upperLip), lf = localFrontX(lowerLip);
+      if (uf != null && lf != null) lipProudM = Number((Math.max(0, uf - arcX, lf - arcX) * sc).toFixed(3));
+    }
     CBZ.swimJaw(actor, Number(subject.open) || 0); animal.updateMatrixWorld(true);
     // No static vertex in the mouth span is the strongest possible result: the
     // builder handed the entire visible envelope to the jaws.  Report zero
@@ -306,6 +378,12 @@ export function stagePredatorMouth(input) {
       staticChinDepthM: staticChinDepthM,
       upperEnvelopeTravelM: upperEnvelopeTravelM,
       lowerEnvelopeTravelM: lowerEnvelopeTravelM,
+      lipProudM: lipProudM,
+      biteCycleS: biteTiming ? Number(biteTiming.durationS.toFixed(3)) : null,
+      fullGapeAtS: biteTiming ? Number(biteTiming.fullGapeAtS.toFixed(3)) : null,
+      compressionS: biteTiming ? Number(biteTiming.compressionS.toFixed(3)) : null,
+      recoveryGapS: biteTiming ? Number(biteTiming.recoveryGapS.toFixed(3)) : null,
+      jawOpenPct: biteTiming ? Number((subject.open * 100).toFixed(1)) : null,
     },
     camera: { framedHeight, position: cameraPosition.slice(), target: cameraTarget.slice(), up: cameraUp.slice() },
   };

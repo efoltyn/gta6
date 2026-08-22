@@ -100,7 +100,8 @@ try {
 
   const ready = await poll(`!!(window.CBZ && window.THREE && CBZ.WILDLIFE_SPECIES &&
     CBZ.WILDLIFE_SPECIES.orca && CBZ.orcaIdentity &&
-    CBZ.buildSwimRig && CBZ.swimJaw && CBZ.creatureJawPoint)`, 45000, 250);
+    CBZ.buildSwimRig && CBZ.swimJaw && CBZ.creatureJawPoint && CBZ.biteCurve &&
+    CBZ.biteTimeline && CBZ.aquaticBiteDuration)`, 45000, 250);
   if (!ready) throw new Error("predator-mouth APIs did not load");
 
   const report = await json(`(() => {
@@ -149,6 +150,17 @@ try {
     function worldCenter(mesh) {
       return mesh ? new THREE.Box3().setFromObject(mesh).getCenter(new THREE.Vector3()) : null;
     }
+    function localFrontX(mesh, root) {
+      if (!mesh || !root || !mesh.geometry || !mesh.geometry.attributes.position) return null;
+      const inv = new THREE.Matrix4().copy(root.matrixWorld).invert();
+      const pos = mesh.geometry.attributes.position, p = new THREE.Vector3();
+      let x = -Infinity;
+      for (let i = 0; i < pos.count; i++) {
+        p.fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld).applyMatrix4(inv);
+        if (p.x > x) x = p.x;
+      }
+      return Number.isFinite(x) ? x : null;
+    }
     function verticalGap(upper, lower) {
       if (!upper || !lower) return Infinity;
       const ub = new THREE.Box3().setFromObject(upper);
@@ -177,6 +189,11 @@ try {
       const upperLip = frontNamed(rig.jawUpper, "sharkUpperLip") || frontNamed(rig.jawUpper, "orcaUpperGum");
       const lowerLip = frontNamed(rig.jawGroup, "sharkLowerLip") || frontNamed(rig.jawGroup, "orcaLowerGum");
       const restLipGap = verticalGap(upperLip, lowerLip);
+      const arcX = contract.upperReachX == null ? null
+        : contract.upperReachX - (contract.protrude || 0) - (contract.dentalProtrude || 0);
+      const uf = localFrontX(upperLip, group), lf = localFrontX(lowerLip, group);
+      const lipProud = arcX == null || uf == null || lf == null ? null
+        : Math.max(0, uf - arcX, lf - arcX) * (sp.scale || 1);
       const upperShell = named(group, contract.upperShell);
       const lowerShell = named(group, contract.lowerShell);
       const upperShell0 = worldCenter(upperShell), lowerShell0 = worldCenter(lowerShell);
@@ -215,6 +232,7 @@ try {
 
       CBZ.swimJaw(actor, 0); group.updateMatrixWorld(true);
       const hingeReset = rig.jawGroup.getWorldPosition(new THREE.Vector3());
+      const tl = CBZ.biteTimeline, biteDur = CBZ.aquaticBiteDuration(actor, null);
       return {
         id, scale: sp.scale || 1, authored: contract.version >= 4,
         envelope: {
@@ -224,6 +242,7 @@ try {
           upperNested: upperShell ? nestedIn(upperShell, rig.jawUpper) : null,
           lowerNested: lowerShell ? nestedIn(lowerShell, rig.jawGroup) : false,
           upperShouldMove: !!(upperShell && contract.protrude > 0),
+          lipProfile: contract.lipProfile || null,
         },
         teeth: { upper: contract.upperTeeth, lower: contract.lowerTeeth },
         connected: { upper: upperClosed, lower: lowerClosed },
@@ -232,8 +251,20 @@ try {
         motion: { lowerAngle: round(open.lowerAngle), expectedAngle: round(open.expectedAngle),
           upperTravel: round(open.upperTravel), cavityReveal: round(open.cavityReveal),
           restLipGap: round(restLipGap), openLipGap: round(open.lipGap),
+          lipProud: lipProud == null ? null : round(lipProud),
           upperShellTravel: open.upperShellTravel == null ? null : round(open.upperShellTravel),
           lowerShellTravel: open.lowerShellTravel == null ? null : round(open.lowerShellTravel) },
+        cadence: {
+          version: tl.version, duration: round(biteDur),
+          expansionS: round((tl.fullAt - tl.openAt) * biteDur),
+          holdS: round((tl.holdTo - tl.fullAt) * biteDur),
+          compressionS: round((tl.shutAt - tl.holdTo) * biteDur),
+          recoveryS: round((1 - tl.shutAt) * biteDur),
+          atOpen: round(CBZ.biteCurve(tl.openAt)),
+          atFull: round(CBZ.biteCurve(tl.fullAt)),
+          atHold: round(CBZ.biteCurve(tl.holdTo)),
+          atShut: round(CBZ.biteCurve(tl.shutAt)),
+        },
         contact: { contractError: round(biteContractError), toothRingGap: round(open.biteRingGap),
           point: [round(localBite.x), round(localBite.y), round(localBite.z || 0)] },
         reset: { lowerAngle: round(Math.abs(rig.jawGroup.rotation.z - rig.jawLowerRz)),
@@ -248,6 +279,7 @@ try {
     if (r.missing || r.missingRig || !r.authored) failures.push(`${r.id}: missing authored hinged mouth`);
     if (!r.envelope || r.envelope.shape !== "articulated-body-envelope" || !r.envelope.bodySplit || !r.envelope.lowerNested) failures.push(`${r.id}: visible lower body shell is not owned by the jaw hinge`);
     if (r.envelope && r.envelope.upperShouldMove && !r.envelope.upperNested) failures.push(`${r.id}: moving upper body shell is not owned by the upper envelope`);
+    if ((/shark/.test(r.id) || r.id === "megalodon") && (!r.envelope || r.envelope.lipProfile !== "recessed-arc-seal" || !r.motion || r.motion.lipProud > 0.001)) failures.push(`${r.id}: lip tissue protrudes beyond the authored oral arc`);
     if (!r.teeth || r.teeth.upper < 12 || r.teeth.lower < 12) failures.push(`${r.id}: incomplete front-and-side tooth ring`);
     if (!r.connected || r.connected.upper.components !== 1 || r.connected.lower.components !== 1) failures.push(`${r.id}: floating/disconnected mouth component`);
     if (!r.hinge || r.hinge.bodyGap > 0.01 || r.hinge.openDrift > 0.00001 || r.hinge.resetDrift > 0.00001) failures.push(`${r.id}: lower-jaw hinge detached or drifted`);
@@ -255,6 +287,7 @@ try {
     if (r.motion && r.envelope.upperShouldMove && (r.motion.upperTravel <= 0 || r.motion.upperShellTravel <= 0.01 * r.scale)) failures.push(`${r.id}: upper body envelope did not travel with the bite`);
     if (r.motion && !r.envelope.upperShouldMove && r.motion.upperShellTravel != null && r.motion.upperShellTravel > 0.00001) failures.push(`${r.id}: fixed upper body moved unexpectedly`);
     if (!r.motion || r.motion.restLipGap > 0.19 * r.scale || r.motion.openLipGap < r.motion.restLipGap + 0.08 * r.scale) failures.push(`${r.id}: rest mouth is open or full gape is unreadable`);
+    if (!r.cadence || r.cadence.version < 2 || r.cadence.duration < 0.82 || r.cadence.duration > 1.10 || r.cadence.expansionS < 0.20 || r.cadence.holdS < 0.15 || r.cadence.compressionS < 0.20 || r.cadence.recoveryS < 0.14 || r.cadence.atOpen !== 0 || r.cadence.atFull !== 1 || r.cadence.atHold !== 1 || r.cadence.atShut !== 0) failures.push(`${r.id}: aquatic bite cadence is incomplete or too fast to read`);
     if (!r.contact || r.contact.contractError > 0.00001 || r.contact.toothRingGap > 0.01) failures.push(`${r.id}: damage socket is outside visible tooth ring`);
     if (!r.reset || r.reset.lowerAngle > 0.00001 || r.reset.upperTravel > 0.00001 || Math.abs(r.reset.cavityScale - r.reset.expectedCavityScale) > 0.00001) failures.push(`${r.id}: mouth did not close back to authored rest`);
   }
