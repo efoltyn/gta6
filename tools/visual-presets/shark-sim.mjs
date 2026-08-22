@@ -99,10 +99,14 @@ async function stageSharkSim(input) {
         /* From here the match advances ONLY when a subject steps it. Killing
            the page's own frame loop is what lets a detached camera survive to
            the capture; the comparator's own barrier falls back to a timer,
-           and its render hook (below) draws each frame explicitly. */
+           and its render hook (below) draws each frame explicitly. The
+           original is kept: the play-again flow (startRunPresented) rides
+           real frames, so replay() lends it back for the restart. */
+        D._rafOrig = window.requestAnimationFrame;
         window.requestAnimationFrame = function () { return 0; };
         return true;
       },
+      rafOff() { window.requestAnimationFrame = function () { return 0; }; },
       armed() {
         return !!(CBZ.sharkSim && CBZ.sharkSim.on && CBZ.sharkSim.shark &&
           CBZ.cityMountedAnimal && CBZ.cityMountedAnimal() === CBZ.sharkSim.shark);
@@ -234,15 +238,40 @@ async function stageSharkSim(input) {
         const f = document.getElementById("sharkflash");
         if (f) { f.style.transition = "none"; f.style.opacity = "1"; }
       },
+      clearBanner() {
+        // a beat that is not ABOUT the banner must not be photobombed by the
+        // previous beat's (sim time between captures is short by design)
+        const f = document.getElementById("sharkflash");
+        if (f) { f.style.transition = "none"; f.style.opacity = "0"; }
+      },
+      /* The full-body portrait: a ¾ tripod above the surface, distance and
+         height scaled to the species so a bull and a megalodon both fill the
+         frame instead of the chase camera sitting inside the bigger hulls.
+         The HUD is DOM — pill, banner, killfeed and bars ride every shot. */
+      bodyShot(S) {
+        const s = Math.max(1, (S.species && S.species.scale) || 1);
+        const h = S.heading || 0, ang = h + 2.35;
+        const dist = 6.5 + 5.5 * s;
+        const sy = CBZ.citySeaHeightAt ? CBZ.citySeaHeightAt(S.pos.x, S.pos.z) : -0.8;
+        D.tripod(
+          S.pos.x + Math.cos(ang) * dist,
+          Math.max(sy + 1.8 + 1.5 * s, S.pos.y + 2.2 + 1.4 * s),
+          S.pos.z + Math.sin(ang) * dist,
+          S.pos.x, S.pos.y + 0.3 * s, S.pos.z);
+      },
       async replay() {
+        // the presented restart eases its boot card on REAL frames — lend the
+        // page its frame loop back for the transition, then take it again
+        if (D._rafOrig) window.requestAnimationFrame = D._rafOrig;
         const btn = document.getElementById("survAgainBtn");
         if (btn) btn.click();
-        for (let t = 0; t < 120; t++) {
-          const ok = CBZ.game.state === "playing" && (!D.after || D.armed());
-          if (ok) return true;
-          D.step(10); await sleep(50);
+        let ok = false;
+        for (let t = 0; t < 240 && !ok; t++) {
+          ok = CBZ.game.state === "playing" && (!D.after || D.armed());
+          if (!ok) { D.step(8); await sleep(250); }
         }
-        return false;
+        D.rafOff();
+        return ok;
       },
     };
     window.__cbzVisualCompare = {
@@ -260,12 +289,13 @@ async function stageSharkSim(input) {
     async function start() {
       if (!await D.boot()) throw new Error("no match / sim never armed");
       D.peace();
-      const S = CBZ.sharkSim.shark;
-      D.playerCam((S.heading || 0), 0.24);
+      D.step(2);
+      D.bodyShot(CBZ.sharkSim.shark);
       D.banner("YOU ARE THE SHARK", "eat fish and swimmers · avoid the pod · become the MEGALODON");
       out.shoreCrowdPct = D.shorePct();
     },
     async function beach() {
+      D.clearBanner();
       const ang = D.playerAngle() + 0.5;
       const at = D.ringPoint(ang, D.waterline - 6);          // the sand
       const from = D.ringPoint(ang - 0.22, D.waterline + 26); // just offshore
@@ -274,6 +304,7 @@ async function stageSharkSim(input) {
       out.shoreCrowdPct = D.shorePct();
     },
     async function firstBlood() {
+      D.clearBanner();
       D.peace(); D.shallow(2); D.step(8);
       const S = CBZ.sharkSim.shark;
       D.bait(1, 8.5);                                        // a wader, two seconds out
@@ -285,17 +316,20 @@ async function stageSharkSim(input) {
     async function hammerhead() {
       CBZ.keys.w = false;
       if (!D.feedToTier(1)) throw new Error("never evolved to hammerhead");
-      D.playerCam(CBZ.sharkSim.shark.heading || 0, 0.3);
+      D.step(4);
+      D.bodyShot(CBZ.sharkSim.shark);
       D.banner("YOU ARE THE GREAT HAMMERHEAD", "Next: GREAT WHITE");
       out.eaten = CBZ.sharkSim.eaten;
     },
     async function greatWhite() {
       if (!D.feedToTier(2)) throw new Error("never evolved to great white");
-      D.playerCam(CBZ.sharkSim.shark.heading || 0, 0.3);
+      D.step(4);
+      D.bodyShot(CBZ.sharkSim.shark);
       D.banner("YOU ARE THE GREAT WHITE", "Next: MEGALODON");
       out.eaten = CBZ.sharkSim.eaten;
     },
     async function podHunt() {
+      D.clearBanner();
       const S = CBZ.sharkSim.shark, P = CBZ.player;
       D.shallow(24); D.step(6);
       let placed = 0;
@@ -304,34 +338,35 @@ async function stageSharkSim(input) {
                           : (CBZ.cityWildlifeSpawnAt && CBZ.cityWildlifeSpawnAt("orca", P.pos.x + 30 + i * 6, P.pos.z + (i - 1) * 10));
         if (!o) continue;
         const side = (i - 1) * 0.55;
-        o.pos.x = P.pos.x + Math.cos((S.heading || 0) + Math.PI + side) * (26 + i * 5);
-        o.pos.z = P.pos.z + Math.sin((S.heading || 0) + Math.PI + side) * (26 + i * 5);
+        o.pos.x = P.pos.x + Math.cos((S.heading || 0) + Math.PI + side) * (18 + i * 4);
+        o.pos.z = P.pos.z + Math.sin((S.heading || 0) + Math.PI + side) * (18 + i * 4);
         o.pos.y = P.pos.y - 0.5;
         o.hunger = 1;
         if (o._waterMove) { o._waterMove.x = o.pos.x; o._waterMove.z = o.pos.z; }
         placed++;
       }
       if (!placed) throw new Error("no orcas for the hunt");
-      D.sec(2.2);                                            // they commit and close
-      // look back over the tail at the pod
+      D.sec(1.4);                                            // they commit and close
+      // the shot: over your own shark's back, the pod bearing down
       let nearest = null, nd = 1e9;
       for (const a of CBZ.cityWildlife) {
         if (a.dead || !a.species || a.species.id !== "orca") continue;
         const d = Math.hypot(a.pos.x - P.pos.x, a.pos.z - P.pos.z);
         if (d < nd) { nd = d; nearest = a; }
       }
-      if (nearest && CBZ.cam) {
-        const h = Math.atan2(nearest.pos.z - P.pos.z, nearest.pos.x - P.pos.x);
-        CBZ.cam.yaw = D.camYawAlong(h); CBZ.cam.pitch = 0.22;
-      }
-      D.step(2);
+      if (!nearest) throw new Error("the pod vanished");
+      const toPod = Math.atan2(nearest.pos.z - P.pos.z, nearest.pos.x - P.pos.x);
+      const sy = CBZ.citySeaHeightAt ? CBZ.citySeaHeightAt(P.pos.x, P.pos.z) : -0.8;
+      D.tripod(
+        P.pos.x - Math.cos(toPod) * 13, Math.max(sy + 4.2, P.pos.y + 4), P.pos.z - Math.sin(toPod) * 13,
+        nearest.pos.x, nearest.pos.y + 0.5, nearest.pos.z);
       out.podNearestM = D.podNearest();
     },
     async function megalodon() {
       D.peace();
       if (!D.feedToTier(3)) throw new Error("never evolved to megalodon");
       D.shallow(2); D.sec(1.2);                              // ride the bed, dorsal out
-      D.playerCam(CBZ.sharkSim.shark.heading || 0, 0.36);
+      D.bodyShot(CBZ.sharkSim.shark);
       D.banner("YOU ARE THE MEGALODON", "Now eat an orca.");
       out.eaten = CBZ.sharkSim.eaten;
     },
@@ -354,10 +389,11 @@ async function stageSharkSim(input) {
     },
     async function eaten() {
       if (!await D.replay()) throw new Error("play-again never re-armed");
+      D.clearBanner();                                       // the fresh match re-flashed the spawn banner
       const S = CBZ.sharkSim.shark;
-      D.playerCam(S.heading || 0, 0.3);
       S.hp = 0; S.dead = true;
-      D.sec(2.6);                                            // deathcam beat, then the banner
+      D.sec(2.6);                                            // deathcam beat, then ELIMINATED lands
+      D.clearBanner();
     },
   ] : [
     async function start() {
@@ -378,21 +414,22 @@ async function stageSharkSim(input) {
       out.shoreCrowdPct = D.shorePct();
     },
     async function firstBlood() {
-      // you, standing IN the crowd, in the same surf — and nothing hunts anyone
-      const P = CBZ.player, p = D.ringPoint(D.playerAngle() + 0.5, D.waterline + 1.5);
+      // you, standing IN the crowd, in the same surf — and nothing hunts
+      // anyone. ONE angle for player, waders and camera: recomputing
+      // playerAngle after the teleport drifted the crowd out of frame.
+      const P = CBZ.player, ang = D.playerAngle() + 0.5;
+      const p = D.ringPoint(ang, D.waterline + 1.5);
       P.pos.x = p.x; P.pos.z = p.z;
       P.pos.y = CBZ.surv.floorAt(p.x, p.z);
       let placed = 0;
       for (const b of CBZ.bots) {
         if (b.dead || placed >= 3) continue;
-        const a2 = D.playerAngle() + 0.5 + (placed - 1) * 0.035;
-        const bp = D.ringPoint(a2, D.waterline + 0.5 + placed);
+        const bp = D.ringPoint(ang + (placed - 1) * 0.02, D.waterline + 0.5 + placed * 1.4);
         b.pos.x = bp.x; b.pos.z = bp.z; b.pos.y = CBZ.surv.floorAt(bp.x, bp.z);
         b.target.set(bp.x, 0, bp.z); b.pause = 40;
         placed++;
       }
-      const h = D.playerAngle() + 0.5;
-      if (CBZ.cam) { CBZ.cam.yaw = D.camYawAlong(h); CBZ.cam.pitch = 0.24; }
+      if (CBZ.cam) { CBZ.cam.yaw = D.camYawAlong(ang); CBZ.cam.pitch = 0.24; }
       D.step(2);
     },
     async function hammerhead() { D.wildShot("hammerhead_shark"); },
@@ -417,13 +454,19 @@ async function stageSharkSim(input) {
       D.sec(2.6);
     },
   ];
-  // the wild-body tripod shared by the before column's species chapters
+  // the wild-body tripod shared by the before column's species chapters —
+  // held ABOVE the surface so the shot reads down through clear water
+  // instead of from inside the underwater fog
   D.wildShot = D.wildShot || function (id) {
     const a = D.wildOrSpawn(id);
     if (!a) throw new Error("no wild " + id);
     D.sec(1.2);
     const s = Math.max(1, (a.species.scale || 1));
-    D.tripod(a.pos.x - 8 * s, a.pos.y + 3.4 * s, a.pos.z - 6 * s, a.pos.x, a.pos.y, a.pos.z);
+    const sy = CBZ.citySeaHeightAt ? CBZ.citySeaHeightAt(a.pos.x, a.pos.z) : -0.8;
+    D.tripod(
+      a.pos.x - (6.5 + 5.5 * s) * 0.8, Math.max(sy + 1.8 + 1.5 * s, a.pos.y + 2.5),
+      a.pos.z - (6.5 + 5.5 * s) * 0.6,
+      a.pos.x, a.pos.y + 0.3 * s, a.pos.z);
   };
 
   while (D.chapter < sub.ch) {
