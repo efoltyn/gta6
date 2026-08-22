@@ -247,23 +247,25 @@ async function stageSharkSim(input) {
       /* The full-body portrait: a ¾ tripod above the surface, distance and
          height scaled to the species so a bull and a megalodon both fill the
          frame instead of the chase camera sitting inside the bigger hulls.
-         ADAPTIVE steepness: a body AT the surface (dorsal out) gets the low
-         cinematic angle; a SUBMERGED body gets a steep look-down, because at
-         a shallow angle the surface haze simply hides it — the first run's
-         bull shark was a banner over apparently empty water. The HUD is DOM —
-         pill, banner, killfeed and bars ride every shot. */
+         SURFACE THE BODY FIRST: this sea reads opaque from any height (a
+         submerged hull photographs as empty water — two runs of banners over
+         nothing proved it), so a deep body is lifted to just under the
+         waterline for its portrait, dorsal out, exactly the frame the
+         surfaced hammerhead and megalodon shots already showed works. No sim
+         steps run between the lift and the capture, so nothing re-clamps it.
+         The HUD is DOM — pill, banner, killfeed and bars ride every shot. */
       bodyShot(S) {
         const s = Math.max(1, (S.species && S.species.scale) || 1);
         const h = S.heading || 0, ang = h + 2.35;
         const D0 = 6.5 + 5.5 * s;
         const sy = CBZ.citySeaHeightAt ? CBZ.citySeaHeightAt(S.pos.x, S.pos.z) : -0.8;
-        const submerged = (sy - S.pos.y) > 0.6;
-        const horiz = submerged ? D0 * 0.6 : D0;
-        const camY = submerged ? S.pos.y + D0 * 0.85
-          : Math.max(sy + 1.8 + 1.5 * s, S.pos.y + 2.2 + 1.4 * s);
+        if (sy - S.pos.y > 0.45 * s + 0.2) {
+          S.group.position.y = sy - 0.38 * s;
+          S.group.updateMatrixWorld(true);
+        }
         D.tripod(
-          S.pos.x + Math.cos(ang) * horiz, camY, S.pos.z + Math.sin(ang) * horiz,
-          S.pos.x, S.pos.y + 0.3 * s, S.pos.z);
+          S.pos.x + Math.cos(ang) * D0 * 0.8, sy + 1.1 + 1.1 * s, S.pos.z + Math.sin(ang) * D0 * 0.8,
+          S.pos.x, S.pos.y + 0.2 * s, S.pos.z);
       },
       /* The on-foot SURVIVOR verb panel is honest UI — but it belongs to the
          beat about the crowd, not to a wildlife portrait it happens to
