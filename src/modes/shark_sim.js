@@ -72,6 +72,7 @@
   };
   CBZ.sharkSim = sim;
   CBZ.sharkSimShoreRing = null;   // read by entities/survivorbot.js's wander
+  sim.banner = function (big, small) { flash(big, small); };   // tooling seam: the before/after preset re-shows a beat's banner at capture time
 
   function depthMean(x, z) {
     return CBZ.survFloodDepthMeanAt ? Math.max(0, CBZ.survFloodDepthMeanAt(x, z)) : 0;
@@ -338,6 +339,7 @@
     hud.appendChild(hudLine1); hud.appendChild(barWrap); hud.appendChild(hudLine2);
     document.body.appendChild(hud);
     flashEl = document.createElement("div");
+    flashEl.id = "sharkflash";
     flashEl.style.cssText = "position:fixed;left:0;right:0;top:26vh;z-index:46;pointer-events:none;text-align:center;" +
       "font-family:Fredoka,system-ui,sans-serif;font-weight:700;font-size:clamp(30px,6vw,54px);color:#9fe870;" +
       "letter-spacing:2px;text-shadow:0 4px 0 #14532d,0 8px 18px rgba(0,0,0,.55);opacity:0;transition:opacity .5s ease";
@@ -356,6 +358,12 @@
     flashTimer = 2.8;
   }
   function hudNow() { sim.hudT = 0; }
+  /* ONE pill, one voice. The species name, the progress to the next form,
+     and one status line that only ever says something worth reading: the
+     opening hint for a few seconds, or the pod when it is genuinely close
+     (with hysteresis so it cannot flicker at the threshold). The shark's
+     health is NOT repeated here — the bottom health bar already mirrors it,
+     and a HUD that says the same number twice is a HUD shouting. */
   function hudTick(dt) {
     if (!hud) return;
     if (flashTimer > 0) { flashTimer -= dt; if (flashTimer <= 0) flashEl.style.opacity = "0"; }
@@ -363,8 +371,7 @@
     if (sim.hudT > 0) return;
     sim.hudT = 0.25;
     const S = sim.shark; if (!S) return;
-    const hpPct = Math.max(0, Math.round(100 * S.hp / (S.maxHp || 1)));
-    hudLine1.textContent = "🦈 " + LADDER[sim.tier].name + " · ❤ " + hpPct + "%";
+    hudLine1.textContent = LADDER[sim.tier].name;
     const next = LADDER[sim.tier + 1];
     if (next) {
       const prev = LADDER[sim.tier].need;
@@ -372,15 +379,21 @@
       hudLine2.textContent = "eat " + Math.max(0, next.need - sim.mass) + " more → " + next.name;
     } else {
       hudBar.style.width = "100%";
-      hudLine2.textContent = "EAT AN ORCA.";
+      hudLine2.textContent = "eat an orca";
     }
-    // the pod warning owns the line whenever death is actually nearby
+    hudLine2.style.color = "#bcd0e2";
     if (sim.tier < 3) {
       const P = CBZ.player;
       let near = 1e9;
       orcas(function (a) { const d = Math.hypot(a.pos.x - P.pos.x, a.pos.z - P.pos.z); if (d < near) near = d; });
-      if (near < 70) hudLine2.textContent = "⚠ THE POD IS HUNTING YOU";
-    }
+      // enter at 55 m, let go at 75 — a warning that flickers is a warning ignored
+      sim._podClose = near < (sim._podClose ? 75 : 55);
+      if (sim._podClose) {
+        hudLine2.textContent = "the pod has your scent";
+        hudLine2.style.color = "#ffd06b";
+        sim.hintT = 0;
+      }
+    } else sim._podClose = false;
     if (sim.hintT > 0) hudLine2.textContent = "point your mouth at food — the bite is automatic";
   }
   function hideHud() {
@@ -396,7 +409,8 @@
     sim.shark = null;
     sim.tier = 0; sim.mass = 0; sim.eaten = 0;
     sim.ended = false; sim.apex = false;
-    sim.biteT = 0; sim.podT = 2; sim.stockT = 3; sim.strandT = 0; sim.hudT = 0; sim.hintT = 7;
+    sim.biteT = 0; sim.podT = 2; sim.stockT = 3; sim.strandT = 0; sim.hudT = 0; sim.hintT = 5;
+    sim._podClose = false;
     sim.waterline = measureWaterline();
     relocateBots();
     // heal a boot race: PLAY clicked before wildlife.js parsed leaves the
