@@ -82,8 +82,18 @@
   // hash01(x, z, salt) → [0,1). Quantizes world coords to decimetres so
   // float dust can't flip a value; distinct salts give independent channels.
   CBZ.hashN = hashN;
+  // The three squirrel rounds are written out rather than routed through
+  // hashN: this is the single hottest function in the world build (~6% of
+  // the whole 20-30 s freeze is spent in this file), and the arguments-object
+  // fold was pure overhead on a call with a fixed arity. BIT-IDENTICAL to
+  // hashN(round(x*10), round(z*10), salt|0) — same rounds, same order, same
+  // seed — so every world it generates is byte-for-byte the world it
+  // generated before (the determinism gate agrees).
   CBZ.hash01 = function (x, z, salt) {
-    return hashN(Math.round(x * 10), Math.round(z * 10), salt | 0) / 4294967296;
+    let h = squirrel(Math.round(x * 10) | 0, CBZ.WORLD_SEED >>> 0);
+    h = squirrel(Math.round(z * 10) | 0, h);
+    h = squirrel(salt | 0, h);
+    return h / 4294967296;
   };
   // hashPick(list, x, z, salt) — order-independent weighted/plain pick
   CBZ.hashPick = function (list, x, z, salt) {
