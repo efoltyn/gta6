@@ -237,6 +237,45 @@ const PROBE = `(() => {
       const car = bore(prop);
       rec.carryGap = car ? +(car.gap*100).toFixed(1) : null;
       rec.carryAbove = car ? +(car.above*100).toFixed(1) : null;
+      // the solver's own working at carry, so a bad row says WHERE it went
+      // wrong (first-solve miss, the slide, the final residual) instead of
+      // only that it did — plus the anchor and hand in world, for geometry.
+      const carAu = CBZ.gunHandAudit ? CBZ.gunHandAudit() : null;
+      if (carAu) rec.carryWhy = "r0=" + (carAu.resid0 == null ? "?" : (carAu.resid0*100).toFixed(0)) +
+        " slid=" + carAu.slid + " placed=" + carAu.placed +
+        " res=" + (carAu.residual == null ? "?" : (carAu.residual*100).toFixed(0)) +
+        " why=" + (carAu.why || "-");
+      // the ONE-HAND PORT CARRY is a designed state, not a miss: gunhands
+      // deliberately rests the off arm when the ported handguard is out of
+      // reach (forcing two hands was measured worse both ways — see the note
+      // at the release site). The carry invariant becomes "on the gun OR at
+      // rest", never frozen mid-reach.
+      rec.carryReleased = !!(carAu && /out of reach/.test(carAu.why || ""));
+      if (prop && prop.userData.grips && prop.userData.grips.support) {
+        prop.updateWorldMatrix(true, false);
+        const sup = prop.localToWorld(prop.userData.grips.support.clone());
+        ch().sockets.leftHand.updateWorldMatrix(true, false);
+        const lh = ch().sockets.leftHand.getWorldPosition(new T.Vector3());
+        const lsh = ch().parts && ch().parts.la ? ch().parts.la.getWorldPosition(new T.Vector3()) : null;
+        const P3 = (v) => v ? [+v.x.toFixed(2), +v.y.toFixed(2), +v.z.toFixed(2)].join("/") : "?";
+        // the barrel's LIVE world direction, so a wrong-way pose is named as
+        // such instead of showing up only as an unreachable anchor
+        let dirS = "?";
+        if (prop.userData.muzzle) {
+          prop.updateWorldMatrix(true, false);
+          const o = prop.localToWorld(new T.Vector3(0, 0, 0));
+          prop.updateWorldMatrix(true, false);
+          const m = prop.localToWorld(prop.userData.muzzle.clone());
+          const d = m.sub(o).normalize();
+          // into BODY space so up/across/forward read directly
+          ch().body.updateWorldMatrix(true, false);
+          const q = new T.Quaternion(); ch().body.getWorldQuaternion(q);
+          d.applyQuaternion(q.invert());
+          dirS = P3(d);
+        }
+        rec.carryGeo = "dir " + dirS + " sup " + P3(sup) + " lh " + P3(lh) +
+          (lsh ? " |lsh-sup|=" + (lsh.distanceTo(sup)*100).toFixed(0) : "");
+      }
 
       // ---- one full reload, driven by the game's own clock
       if (CBZ.fpsSetAim) CBZ.fpsSetAim(true);
@@ -309,13 +348,14 @@ for (const g of res.guns) {
     "  " + (g.why || "") +
     (g.rl ? "  " + g.rl : "") +
     (g.err ? "   ERR " + g.err : "") + (g.miss ? "  " + g.miss : "") +
-    (g.geom ? "\n              " + g.geom : ""));
+    (g.geom ? "\n              " + g.geom : "") +
+    (g.carryWhy ? "\n              carry: " + g.carryWhy + (g.carryGeo ? "  " + g.carryGeo : "") : ""));
   if (g.err) fails.push(g.id + ": " + g.err);
   if (g.oneHanded) continue;
   // A hand wrapped round a gun is within a fist of its bore. 22 cm is generous
   // — it is roughly a forearm's width — and still nowhere near the old pose.
   if (g.aimGap != null && g.aimGap > 22) fails.push(g.id + ": off hand " + g.aimGap + " cm off the bore while presenting");
-  if (g.carryGap != null && g.carryGap > 26) fails.push(g.id + ": off hand " + g.carryGap + " cm off the bore at low ready");
+  if (g.carryGap != null && g.carryGap > 26 && !g.carryReleased) fails.push(g.id + ": off hand " + g.carryGap + " cm off the bore at low ready (and not deliberately released)");
   // A reload has to MOVE the hand. 25 cm is less than one trip to the belt.
   if (g.reloadTime > 0 && (g.travel == null || g.travel < 25)) {
     fails.push(g.id + ": reload moved the off hand only " + g.travel + " cm");

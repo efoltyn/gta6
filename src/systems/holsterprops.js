@@ -342,10 +342,22 @@
     // of the bottom edge (NDC −0.66 vs −0.75) and off the leg.
     long: [0.32, -0.82, 0.55],
     pistol: [0.20, -0.90, 0.44],   // same shape, a touch more cant than the old 0.38
+    // PORT ARMS (CHAR_PORT_ARMS_CARRY, the default long-gun carry): muzzle
+    // diagonally UP and ACROSS the body toward the left shoulder, hand at the
+    // lower chest (entities/character.js raises the arm). This escapes the
+    // measured dead end above — the hanging barrel is only broadside until the
+    // camera frames the character at all tightly, at which point it is inside
+    // the leg's silhouette and 0% of it survives. A diagonal across the TORSO
+    // is broadside at every framing the tiers actually use, and the muzzle
+    // rides at shoulder height where nothing occludes it.
+    portLong: [-0.42, 0.74, 0.34],
   };
   const LOWREADY_LONG = new THREE.Vector3(), LOWREADY_PISTOL = new THREE.Vector3();
   function lowReadyDir(long) {
-    const v = (CBZ.TP_LOWREADY && CBZ.TP_LOWREADY[long ? "long" : "pistol"]) ||
+    const key = long
+      ? (CBZ.CONFIG.CHAR_PORT_ARMS_CARRY !== false ? "portLong" : "long")
+      : "pistol";
+    const v = (CBZ.TP_LOWREADY && CBZ.TP_LOWREADY[key]) ||
       (long ? [0.32, -0.82, 0.55] : [0.20, -0.90, 0.44]);
     return (long ? LOWREADY_LONG : LOWREADY_PISTOL).set(v[0], v[1], v[2]).normalize();
   }
