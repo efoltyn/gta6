@@ -4599,3 +4599,70 @@ Trap for the next wave: guards.js's KO branch still animChars a toppled body
 and a SEATED man KO'd keeps his seat flags — the corpse fix deliberately did
 not touch knockouts. If a KO'd-in-chair report comes in, prisoncorpse's
 release block is the recipe.
+
+## 2026-08-23 — THE CAR IS HOLLOW AND THE STORM HAS AN EDGE
+
+Owner, with two photographs through his own windscreen (a dashboard, and the
+edge of a real storm): **"fix the interior of cars because rn cars are a block
+not a hollow block so it looks like the passengers are merged with the car …
+improve storms and sky and end of storm … use before after really make
+improvements."**
+
+**THE CABIN WAS A ROOM FILLED WITH ONE COLOUR** (`CAR_CABIN_V3`,
+`city/playercars.js` / `city/vehicles.js` / `city/carparts.js`). The
+before/after plates (vehicle-views, six subjects) showed it exactly: every
+soft surface wore the one pale `interior-lite` tone, so the parcel shelf,
+bench, seats and headliner fused into a flat mass pressed against the glass.
+Through the backlight — the surface the chase camera looks at all game — the
+car read as a body-coloured SOLID, and a rear passenger's head cube poked
+through the raked backlight, merged with the tail. Five changes, all
+measured on the same plates re-run:
+
+- seats/bench/headrests get their own `interior-seat` tone (one extra merged
+  bucket per enclosed car); the parcel shelf joins the DARK structure — the
+  tail goes hollow at the price of zero draw calls;
+- A/B/C pillars lean with the tumblehome (`atan2((cabW-roofW)/2, peakY)`), so
+  they lie ON the glass edge instead of touching it at one height and
+  floating everywhere else — the SUV's A-pillars visibly ended in mid-air;
+- a near-black DLO trim line where glass meets body, `noSeal` so sealSeams
+  cannot skirt it 0.45 m down the doors;
+- `dressCabin` publishes `zRoofRear` and `addOccupants` clamps a rear body's
+  scale under the backlight rake plane — the merged-head fault at the root;
+- the Voltra LED brow was authored 0.055 m and shipped 0.095 m: sealSeams
+  inflates any box axis ≤0.09, and a LAMP is authored at its exact size. It
+  and the tail blade are deep-buried + `noSeal` now, so the fat white tube
+  across every oncoming nose is a slim strip again.
+
+**THE STORM WAS A DIMMER SWITCH** (`SKY_STORM_EDGE`, `core/sky.js`;
+`WEATHER_SLOW_CLEAR`, `systems/weather.js`; preset
+`tools/visual-presets/storm-edge.mjs`). The deck's coverage was one alpha
+over all 360° of azimuth — a storm arrived as a uniform grey film fading in
+everywhere at once, which is precisely what the owner's photograph is not.
+The deck now owns an azimuthal SECTOR, latched where the wind came from when
+the storm first showed: dense from minute one (`min(1, k·1.8)`), edges
+sweeping as coverage grows and shrinks, a skew so the shelf overhangs its own
+edge aloft, and daylight burning along the boundary on the clear side. The
+sun disc, halo, veiling glare and sunset burn ask `stormSectorAt(azimuth)`
+instead of raw coverage — the sun blazes beside an advancing shelf and dies
+only when the deck reaches it. At ≥0.985 coverage the classic full-dome
+painter runs byte-identically (the parity beat in the preset proves it), and
+`weather.js` now lets a lapsed storm's deck decay at τ≈17 s instead of 1.8 s,
+so the end of a storm is the back edge visibly sweeping off the sky.
+Measured (storm-edge preset, flag A/B against self, five beats):
+
+    front active                 0 → 1   on every beat
+    clearing, sunCovered      0.449 → 0  (coverage still 0.449 — the sun's
+                                          side of the sky is already clear)
+    closed-sky parity        sunCovered 0.97 vs 1.0 — same ceiling
+    coverage (the shared overcast scalar)   identical both sides, every beat
+
+Known preset debt: the `sun-beside-front` tripod chases `CBZ.sunAngle` at
+stage time, and by the third beat the staged sim minutes had sunk the sun —
+both sides photograph rooftops equally, so the A/B stays honest, but the
+plate wastes its slot. Pin the day phase per-beat next time it runs.
+
+**AND THE HOTTEST BUILD FUNCTION GOT 34% CHEAPER FOR FREE** (`core/seed.js`).
+`hash01` routed a fixed-arity call through `hashN`'s arguments-object fold;
+the three squirrel rounds are written out now — proven bit-identical over 2M
+random + edge inputs (sums equal), so every world is byte-for-byte the world
+it was. ~6% of the 20–30 s city build freeze is this file's self time.
