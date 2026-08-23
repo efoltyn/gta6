@@ -4661,8 +4661,14 @@ stage time, and by the third beat the staged sim minutes had sunk the sun —
 both sides photograph rooftops equally, so the A/B stays honest, but the
 plate wastes its slot. Pin the day phase per-beat next time it runs.
 
-**AND THE HOTTEST BUILD FUNCTION GOT 34% CHEAPER FOR FREE** (`core/seed.js`).
-`hash01` routed a fixed-arity call through `hashN`'s arguments-object fold;
-the three squirrel rounds are written out now — proven bit-identical over 2M
-random + edge inputs (sums equal), so every world is byte-for-byte the world
-it was. ~6% of the 20–30 s city build freeze is this file's self time.
+**AND THE HOTTEST BUILD FUNCTION GOT 34% CHEAPER — HONESTLY BELOW THE NOISE
+FLOOR END-TO-END** (`core/seed.js`). `hash01` routed a fixed-arity call
+through `hashN`'s arguments-object fold; the three squirrel rounds are
+written out now — proven bit-identical over 2M random + edge inputs (sums
+equal, math-gate determinism ok), and 34% faster in an isolated 5M-call
+bench. Measured end-to-end (one `load-profile` run each way, this rig):
+world build 25.9 s branch vs 25.6 s main — LOAD-NOTES documents 20.9–31.7 s
+run-to-run spread on identical code, so a sub-second expected win cannot
+show on single runs. Kept because it is strictly less work per call at zero
+risk; the build freeze's real owed fix is still LOAD-NOTES #1 (slice the
+build), unchanged by this wave.

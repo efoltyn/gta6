@@ -335,3 +335,16 @@ Re-measure any of it:
     npm run build:ios && npm run check:ios     # build the bundle, then boot it
     node tools/disaster-check.mjs --url disaster.html
     node tools/disaster-minimize.mjs --verify
+
+---
+
+## 2026-08-23 — hash01 specialization (branch `claude/car-interiors-storm-visuals-riea1j`)
+
+`core/seed.js` `hash01` no longer routes through `hashN`'s arguments-object
+fold; the three squirrel rounds are written out. Bit-identical (2M random +
+edge inputs, and the math gate's two-build determinism pass agrees), 34%
+faster in an isolated 5M-call bench. End-to-end on this rig, ONE run each
+way: world build 25.9 s (branch) vs 25.6 s (main) — inside this file's own
+documented 20.9–31.7 s run spread, so treat the function-level number as the
+claim and the end-to-end delta as unmeasured. The owed list above is
+unchanged: #1 (slice the build) is still the headline.
