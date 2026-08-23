@@ -241,13 +241,14 @@ await send("Page.enable");
    CBZ.renderFrame(). Use tools/boot-trace.mjs if a boot ever hangs again: it
    beacons every checkpoint from inside the frozen thread and tells you
    whether you are looking at the build or at the renderer. */
-/* WILDLIFE OFF TOO, and this one is not a nicety. tools/boot-trace.mjs --deep
-   traced a built Gang City into its per-frame chain and named the updater that
-   never returns: city/wildlife.js's onUpdate(47.1). With animals on, this box
-   completed 2 loop passes in five minutes; with ?cfg_WILDLIFE=0 it completed
-   1166 in under three, median 0.09 s. Nothing in the racer origin involves an
-   animal, so the gate boots without them and the racing it is actually
-   measuring is identical. */
+/* WILDLIFE OFF TOO — as a controlled variable, not a rescue. An early
+   beacon-based trace blamed the wildlife tick for the slow loop; the in-page
+   profiler (tools/boot-trace.mjs --prof) later measured it at ~1.4 ms for the
+   whole 985-animal menagerie — the real per-frame thief was cctv.js's hidden
+   render-to-texture, which now honours RENDER_FRAMES=0. Animals stay off here
+   anyway: nothing in the racer origin involves one, ~1000 fewer actors is
+   ~1000 fewer ways for an unrelated regression to shake this gate, and the
+   racing being measured is identical either way. */
 const HEADLESS_PARAMS = "cfg_RENDER_FRAMES=0&cfg_WILDLIFE=0";
 async function boot(query) {
   errors = [];

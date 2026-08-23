@@ -622,6 +622,19 @@
     if (camRoot) camRoot.visible = true;                     // camera props are cheap — always on in the city
 
     // ---- everything below is the FEED; gate it hard ----
+    /* A PAGE THAT DRAWS NOTHING MUST NOT DRAW THE FEED EITHER. The rAF-beat
+       guard below is meant to catch exactly that ("headless stepSim → no
+       render"), but its heartbeat is CCTV's own requestAnimationFrame chain,
+       and HUD/DOM writes keep the compositor producing just enough frames to
+       keep that beat alive on a page booted with ?cfg_RENDER_FRAMES=0
+       (core/loop.js's no-draw lever). Measured by the in-page updater
+       profiler: on such a page this tick still ran renderFeed, and its FIRST
+       call compiled every not-yet-compiled shader program through the RT —
+       6.7 s in one call on a software rasterizer, then a full scene raster
+       every other frame, forever, on a page that had promised "no draw
+       calls". The flag is the authoritative form of the same question the
+       beat guard asks, so it gates the same line. */
+    if (CBZ.CONFIG.RENDER_FRAMES === false) { deactivate(); return; }
     if (perfNow() - lastRealFrame > 40) { deactivate(); return; }        // headless stepSim → no render
     const tier = CBZ.getQualityLevel ? CBZ.getQualityLevel() : 4;
     if (tier < 2) { deactivate(); return; }                              // off at tiers 0-1 (like the backdrop)
