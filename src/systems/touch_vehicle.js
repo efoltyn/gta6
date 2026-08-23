@@ -6,7 +6,8 @@
    The owner's grammar: while you're IN something, the on-foot icon
    cluster disappears and a per-state set of labeled hold-buttons
    appears — buttons that SAY what they do — plus a real racing-game
-   dial speedometer (km/h) instead of a floating text readout.
+   dial speedometer (units per CBZ.speedRead — MPH by default, the same
+   one conversion every other gauge reads) instead of a floating text.
 
      DRIVING  LEFT / RIGHT = steering; GAS / BRAKE = W / S through the
               existing car model (BRAKE slows first, then reverses at rest).
@@ -587,7 +588,8 @@
   }
 
   // ---- the dial (canvas 2D, retina-doubled) ---------------------------------
-  // A real racing dial: 270° sweep, tick ring, needle, big centered km/h.
+  // A real racing dial: 270° sweep, tick ring, needle, big centered speed in
+  // whatever unit CBZ.speedRead serves (MPH by default).
   // Aircraft reuse the same instrument with airspeed + an ALT sub-line.
   const A0 = Math.PI * 0.75, A1 = Math.PI * 2.25;   // sweep angles
   function drawDial(speed, max, unit, sub, warn) {
@@ -849,20 +851,40 @@
         drawDial(agl, 400, "AGL m", sub, warn);
       }
     } else if (mode === "drive" || mode === "boat") {
+      /* THE TOUCH DIAL READS THE SAME SPEEDOMETER AS EVERY OTHER GAUGE.
+         OWNER: "Touch still shows km/hr." It did, and it was the exact fault
+         vehicles.js's CBZ.speedRead was built to end (owner 2026-08-15, "the
+         normal cars show km/h... not mph"): this file had typed its own
+         private conversion — v * 4.8, derived from hud.js's since-retracted
+         guessed x3 — so the dial was mislabelled AND overstated even honest
+         km/h by 33% (a metre-unit world is x3.6 km/h, x2.237 mph). Every
+         desktop gauge was converted to the one shared read in that fix; the
+         touch layer was the site everybody forgot. It asks now, so the dial
+         shows MPH by default and follows ?cfg_CAR_SPEED_UNIT=kmh like the
+         instrument cluster does — the two can never disagree again. The cap
+         is unit-aware so the needle sweep is identical either way. */
       const car = P._vehicle;
-      const kmh = Math.abs((car && car.v) || 0) * 4.8;   // hud.js mph≈v*3 → km/h≈v*4.8
-      const key = Math.round(kmh);
-      if (key !== lastSpeed) { lastSpeed = key; drawDial(kmh, 240, "km/h", "", false); }
+      const read = CBZ.speedRead ? CBZ.speedRead(car && car.v)
+        : { n: Math.round(Math.abs((car && car.v) || 0) * 2.2369), unit: "MPH" };
+      if (read.n !== lastSpeed || read.unit !== lastSub) {
+        lastSpeed = read.n; lastSub = read.unit;
+        drawDial(read.n, read.unit === "KM/H" ? 260 : 160, read.unit, "", false);
+      }
     } else if (mode === "armor") {
       // Same instrument, honest SCALE: armorTuning tops a tank at 14 m/s and a
-      // truck at 20 (≈67 / 96 km/h), so the car dial's 240 cap would pin the
-      // needle in the first eighth and read as a broken gauge. 120 lets a tank
-      // actually sweep. The sub-line names the hull, which is also how you can
-      // tell at a glance why there is (or is not) a FIRE button.
+      // truck at 20 (≈31/45 mph, 50/72 km/h), so the car dial's cap would pin
+      // the needle in the first eighth and read as a broken gauge. The lower
+      // cap lets a tank actually sweep. The sub-line names the hull, which is
+      // also how you can tell at a glance why there is (or is not) a FIRE
+      // button. Unit and number come from the same shared read as the cars.
       const rec = armorRec();
-      const kmh = Math.abs((rec && rec.v) || 0) * 4.8;
-      const key = Math.round(kmh), sub = isTank() ? "TANK" : "ARMOR";
-      if (key !== lastSpeed || sub !== lastSub) { lastSpeed = key; lastSub = sub; drawDial(kmh, 120, "km/h", sub, false); }
+      const read = CBZ.speedRead ? CBZ.speedRead(rec && rec.v)
+        : { n: Math.round(Math.abs((rec && rec.v) || 0) * 2.2369), unit: "MPH" };
+      const sub = isTank() ? "TANK" : "ARMOR";
+      if (read.n !== lastSpeed || sub !== lastSub) {
+        lastSpeed = read.n; lastSub = sub;
+        drawDial(read.n, read.unit === "KM/H" ? 120 : 75, read.unit, sub, false);
+      }
     } else if (mode === "swim") {
       // Survival's swimmer reads its air off the bar, not off a gauge. Re-checked
       // here as well as at layout() because the match mode can change under a
