@@ -145,6 +145,9 @@ export default {
       if (!playing) return { ok: false, err: "never reached playing" };
       if (CBZ.game.cityCampaign) CBZ.game.cityCampaign.phase = "endless_contracts";
       try { if (CBZ.setQualityLevel) CBZ.setQualityLevel(3); } catch (_) {}
+      // HOLSTER: the default loadout's shouldered launcher tracks the camera,
+      // and the first cut of this preset photographed the sky past an RPG.
+      try { if (CBZ.playerHolster) CBZ.playerHolster(true); } catch (_) {}
       // late morning: the storm edge is a DAYLIGHT drama — the clear side has
       // to be bright for the boundary to mean anything.
       try { if (CBZ.dayPhase) CBZ.dayPhase(0.40); } catch (_) {}
