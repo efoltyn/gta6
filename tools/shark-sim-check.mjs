@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /* tools/shark-sim-check.mjs — THE ORACLE for Shark Sim.
 
-   Boots index.html?mode=survival&shark=1 exactly like the MORE GAMES tile
-   does, then plays the whole game the way a player would — pilot with the
+   Boots index.html?mode=sharksim exactly like the Shark Sim tile does,
+   then plays the whole game the way a player would — pilot with the
    move keys, let the automatic bite feed, climb every rung of the ladder,
    win as the megalodon — asserting each stage against the live engine.
 
@@ -148,16 +148,16 @@ const PEACE = `(() => {
 
 async function bootIntoMatch(label) {
   const t0 = Date.now();
-  await rig.open("index.html", `mode=survival&shark=1&seed=${SEED}`);
+  await rig.open("index.html", `mode=sharksim&seed=${SEED}`);
   if (!await rig.wait("window.CBZ && CBZ.game", 150000)) { fail(label + ": page never published CBZ"); return false; }
   await rig.evl(`CBZ.SURV_BOTS = ${BOTS}`);
   const playing = await rig.wait(`(() => {
-    if (CBZ.game.state === 'playing' && CBZ.game.mode === 'survival') return true;
+    if (CBZ.game.state === 'playing' && CBZ.game.mode === 'sharksim') return true;
     // don't press PLAY until the engine has fully streamed in — clicking
     // early is a legitimate user race (healed in survival.reset), but this
     // tool is asserting the game, not the race
     if (!CBZ.cityWildlifeStock || !CBZ.spawnSurvivorBotAt || !CBZ.cityMountAnimal || !CBZ.stepSim) return false;
-    const mb = document.querySelector('.mode-btn[data-mode="survival"]'); if (mb) mb.click();
+    const mb = document.querySelector('.mode-btn[data-mode="sharksim"]'); if (mb) mb.click();
     const pb = document.getElementById('playBtn'); if (pb) pb.click();
     return false;
   })()`, 240000, 300);

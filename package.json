@@ -10,6 +10,7 @@
     "build:disaster": "node tools/build-disaster-page.mjs",
     "build:ios": "node tools/build-ios.mjs",
     "check:disaster": "node tools/disaster-check.mjs --url disaster.html",
+    "check:sharksim": "node tools/shark-sim-check.mjs",
     "check:ios": "node tools/build-ios.mjs && node tools/disaster-check.mjs --url dist-ios/www/index.html --fast",
     "check:determinism": "node tools/determinism-check.mjs --url disaster.html",
     "art:ios": "node tools/make-app-art.mjs",

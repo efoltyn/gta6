@@ -4672,3 +4672,61 @@ run-to-run spread on identical code, so a sub-second expected win cannot
 show on single runs. Kept because it is strictly less work per call at zero
 risk; the build freeze's real owed fix is still LOAD-NOTES #1 (slice the
 build), unchanged by this wave.
+
+## 2026-08-23 — THE SHARK GETS ITS OWN DOOR, THE ISLAND GETS ITS GAME BACK
+
+The 08-22 Shark Sim wave never got a session entry, and this section is
+partly the bill for that: nobody re-read how it shipped, so nobody noticed
+what it shipped AS. Three compounding accidents, one refactor to undo them.
+
+**What was wrong.**
+1. The Shark Sim tile was a self-navigation no-op: `data-href` pointed back
+   at index.html (`?mode=survival&shark=1`), a ~25 MB reload that landed on
+   the identical title card with the DISASTER tile highlighted, because
+   `sharksim` was never a mode id and nothing autostarts from a URL.
+2. The game itself was a flag-gated parasite inside survival: `?shark=1`
+   hijacked the next survival run one frame after spawn (teleport onto a
+   bull shark, rider hidden, per-frame remount, hp mirrored, bots herded to
+   the beach, `CBZ.modes.survival` mutated in place) — and the flag STUCK in
+   the URL, so every later "Disaster Survival" run in that tab was secretly
+   the shark game. That is the "nat disaster is now swimming around the
+   island" complaint, verbatim.
+3. Two behavioural walls kept the shark off its own beach: `strandedFix`
+   triggered at 0.30 m of depth — a conveyor ring 2.75 m (9 ft) outside the
+   waterline pushing seaward at 4.5 m/s forever — and the mount nav's
+   species clearance blocked the bull at ~4.5 m offshore (hammerhead ~16 m,
+   megalodon ~21 m) while the buffet stood ON the sand.
+4. The App Store page carried the corpse: shark_sim.js rode into
+   disaster.html at the 08-23 regen (the drop manifest predates the shark;
+   the generator keeps by default) with every dependency sliced out — plus
+   the page was stale, missing five rebuilt disaster modules, and its sea
+   was EMPTY because the 20 s slice measurement never saw the wildlife.
+
+**What changed.** `sharksim` is a registered mode: plain tile in the main
+grid, own wordmark, `?mode=sharksim` door, descriptor delegating build/reset
+to survival's (gungame's island pattern), own ground base, modecaps funnels
+declared on the descriptor, survival's descriptor untouched. The `?shark`
+flag and `START_SHARK_SIM` are gone. `CBZ.islandModeOn` (config.js, door-held
+in studio.js for slice pages) now answers "does this mode live on the
+disaster island" at ~30 world-plumbing sites — including three the first
+pass missed: the I-key prison stash, prison-graph routing and the prison
+fullmap all answered in shark mode. strandedFix fires only in the true swash
+(< 0.10 m, reachable only by beaching a breach leap) and stops at 0.50 m;
+the RIDDEN mount's clearance caps at scale×12, so the bull hunts ~0.45 m
+water while the megalodon stays ~15 m out — its meal is the orca. The
+manifest drops shark_sim.js and un-drops the three species-body files
+(+0.35 MB): disaster.html is 93 scripts, fresh, shark-free, sea alive,
+oracle green (11/11 disasters, census ok). shark-sim-check + the visual
+preset open `?mode=sharksim`; `npm run check:sharksim` exists now.
+
+**Decisions someone may want to revisit.** Disasters do NOT fire in shark
+mode (the director is gated `g.mode === "survival"`; the hijack-era game
+implicitly had them). Shark wins/losses stay out of the persistent disaster
+record. The ridden-clearance cap applies on the city coast too. The
+megalodon deliberately cannot reach the sand.
+
+**The standing lesson.** tools/disaster-slice.json is an OPT-OUT list: any
+new script tag in index.html ships to the App Store build unless somebody
+adds it to `drop` or re-measures. A new module that is not for the disaster
+game needs a manifest line in the same commit — that is the whole takeover,
+in one sentence.

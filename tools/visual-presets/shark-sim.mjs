@@ -1,10 +1,11 @@
 /* Shark Sim, before/after — EVERY SCREEN OF THE GAME, on the live build.
 
    Both columns boot the SAME checkout of index.html on the disaster island
-   (?mode=survival, pinned seed). The BEFORE column carries ?shark=0 — plain
-   Natural Disaster Survival, the game that was already there. The AFTER
-   column carries ?shark=1 — the door the MORE GAMES tile opens — and plays
-   Shark Sim through its whole arc with the production engine: the real
+   (pinned seed). The BEFORE column opens ?mode=survival — plain Natural
+   Disaster Survival, the game that was already there. The AFTER column
+   opens ?mode=sharksim — the registered mode the Shark Sim tile now
+   selects — and plays Shark Sim through its whole arc with the production
+   engine: the real
    mount, the real automatic bite, the real killfeed, the real win and death
    cards. Nothing is posed in a studio; every capture is the actual screen a
    player sees, HUD included, driven forward with CBZ.stepSim so the
@@ -80,8 +81,9 @@ async function stageSharkSim(input) {
       sec(s) { D.step(Math.max(1, Math.round(s * 30))); },
 
       async boot() {
-        for (let t = 0; t < 600 && !(CBZ.game.state === "playing" && CBZ.game.mode === "survival"); t++) {
-          const mb = document.querySelector('.mode-btn[data-mode="survival"]');
+        const wantMode = D.after ? "sharksim" : "survival";
+        for (let t = 0; t < 600 && !(CBZ.game.state === "playing" && CBZ.game.mode === wantMode); t++) {
+          const mb = document.querySelector('.mode-btn[data-mode="' + wantMode + '"]');
           if (mb) mb.click();
           const pb = document.getElementById("playBtn");
           if (pb) pb.click();
@@ -550,11 +552,11 @@ async function stageSharkSim(input) {
 export default {
   id: "shark-sim",
   title: "Shark Sim — The Island Before, The Food Chain After",
-  description: "Nine beats of the disaster island, photographed in both of its games. BEFORE (?shark=0): plain Natural Disaster Survival — the crowd inland, the sharks as wildlife, the standard win and death cards. AFTER (?shark=1, the MORE GAMES tile): Shark Sim — you ARE the shark; the crowd lines the surf, the automatic bite feeds, the ladder climbs bull → hammerhead → great white → MEGALODON, the pod hunts you, and the same two end cards read APEX PREDATOR and EATEN BY THE POD. Every capture is the live game's own screen, HUD and killfeed included, advanced with CBZ.stepSim.",
-  beforeLabel: "BEFORE · ?shark=0 (Natural Disaster Survival)",
-  afterLabel: "AFTER · ?shark=1 (SHARK SIM)",
+  description: "Nine beats of the disaster island, photographed in both of its games. BEFORE (?mode=survival): plain Natural Disaster Survival — the crowd inland, the sharks as wildlife, the standard win and death cards. AFTER (?mode=sharksim, the Shark Sim tile): Shark Sim — you ARE the shark; the crowd lines the surf, the automatic bite feeds, the ladder climbs bull → hammerhead → great white → MEGALODON, the pod hunts you, and the same two end cards read APEX PREDATOR and EATEN BY THE POD. Every capture is the live game's own screen, HUD and killfeed included, advanced with CBZ.stepSim.",
+  beforeLabel: "BEFORE · ?mode=survival (Natural Disaster Survival)",
+  afterLabel: "AFTER · ?mode=sharksim (SHARK SIM)",
   pairNote: "Same checkout · same island · same seed · the game's own camera and HUD",
-  method: "Both sides boot index.html?mode=survival with a pinned seed and click PLAY exactly like a player. A per-page driver advances the real match with CBZ.stepSim (the page's own frame loop is frozen after boot so captures cannot race the renderer), stages each beat with engine APIs only — no studio scenes — and photographs the full page, HUD, banners, killfeed and end cards included. The film-strip subject steps the identical simulated seconds on both sides.",
+  method: "Each side boots index.html into its own mode (?mode=survival / ?mode=sharksim) with a pinned seed and clicks its tile + PLAY exactly like a player. A per-page driver advances the real match with CBZ.stepSim (the page's own frame loop is frozen after boot so captures cannot race the renderer), stages each beat with engine APIs only — no studio scenes — and photographs the full page, HUD, banners, killfeed and end cards included. The film-strip subject steps the identical simulated seconds on both sides.",
   defaultBefore: "local",
   /* cfg_BOOT_METER=0: the presented start eases its boot card on a RAF chain,
      and this preset freezes the page's frame loop after boot — one dead frame

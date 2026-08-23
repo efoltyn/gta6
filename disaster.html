@@ -426,7 +426,7 @@
   } catch (e) {}
 </script>
 <!-- 0. namespace + constants -->
-<script src="src/config.js?v=racerstory1"></script>
+<script src="src/config.js?v=sharkmode1"></script>
 <!-- THE MODE CAPABILITY BUS (CBZ.modeHas / worldActors / blastWorldActors).
      Turns "is this the city?" into "may I vault / may I blow up here?", so the
      prison, gun game and the disaster island reuse Gang City's engine instead
@@ -657,8 +657,8 @@
 <!-- 4b. remaining systems -->
 <script src="src/systems/input.js"></script>
 <script src="src/systems/spatialgrid.js?v=scale3"></script>
-<script src="src/systems/camera.js?v=survdeathcam1"></script>
-<script src="src/systems/physics.js?v=trauma2"></script>
+<script src="src/systems/camera.js?v=sharkmode1"></script>
+<script src="src/systems/physics.js?v=sharkmode1"></script>
 <!-- THE MOVING-PLATFORM PRIMITIVE. Nothing in this engine could carry a
      standing actor on a surface that moves — 30+ CBZ.platforms sites, none
      re-centring on a moving parent. CBZ.movingPlatform(parent, spec) carries
@@ -719,7 +719,7 @@
      thread cannot repaint during that). Must load BEFORE state.js, which
      shows it, and before the city modules that call CBZ.bootStep(). -->
 <script src="src/systems/bootprogress.js?v=meter1"></script>
-<script src="src/systems/state.js?v=racerstory1"></script>
+<script src="src/systems/state.js?v=sharkmode1"></script>
 <!-- AN APP GETS INTERRUPTED AND A TAB DOES NOT. WKWebView drops the WebGL
      context under memory pressure and hands it back later; three.js rebuilds
      its own GL resources, but nothing told the GAME, so a hundred survivors
@@ -738,7 +738,7 @@
      core/loop.js, which reads CBZ.fixedStep every frame. ?cfg_FIXED_STEP_V1=0
      puts survival back on the variable step, live. -->
 <script src="src/systems/fixedstep.js?v=fixed1"></script>
-<script src="src/systems/touch.js?v=onecall1"></script>
+<script src="src/systems/touch.js?v=sharkmode1"></script>
 <!-- Xbox / gamepad support (GTA-style scheme). Loads before loop.js so its
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
@@ -748,7 +748,7 @@
      Additive: registers its own updaters (gated by game.mode) and builds
      its world lazily, so the prison game above is untouched. Must load
      BEFORE loop.js so its frame-work is included in the sort. -->
-<script src="src/systems/fx.js?v=glass1"></script>
+<script src="src/systems/fx.js?v=sharkmode1"></script>
 <!-- REAL LIGHTNING. Registers a `lightning` row + FX composer on the impact
      bus, so a cloud-to-ground strike draws a forked channel with return
      strokes, ground flashover, steam and a burn scar instead of falling
@@ -758,10 +758,10 @@
      page still runs; it just looks like an RPG again. Needs only config.js +
      scene; it wires itself to the bus lazily, in any script order. -->
 <script src="src/systems/lightningfx.js?v=bolt1"></script>
-<script src="src/world/disaster_arena.js?v=snowbury1"></script>
+<script src="src/world/disaster_arena.js?v=sharkmode1"></script>
 <script src="src/systems/grapple.js?v=nohint1"></script>
-<script src="src/entities/survivorbot.js?v=trauma2"></script>
-<script src="src/modes/survival.js?v=nodash1"></script>
+<script src="src/entities/survivorbot.js?v=sharkmode1"></script>
+<script src="src/modes/survival.js?v=sharkmode1"></script>
 <!-- GUN GAME borrows worlds it never builds: the prison (escape), the disaster
      island (survival). Loads AFTER both so their builders exist. -->
 <!-- THE SHAFT IS SHARED: world/groundshaft.js owns every hole in the ground
@@ -815,7 +815,7 @@
 <!-- ==== END PER-DISASTER MODULE SEAM ==================================== -->
 <script src="src/systems/disasters.js?v=nodash1"></script>
 <script src="src/systems/survival_interact.js?v=climbdock1"></script>
-<script src="src/systems/survivalhud.js?v=nozone1"></script>
+<script src="src/systems/survivalhud.js?v=sharkmode1"></script>
 <!-- THE SEAM A TRANSPORT PLUGS INTO. Not multiplayer — the three things that
      have to be true before a transport is worth writing: every actor carries a
      stable id, the whole match serialises to one ArrayBuffer and back
@@ -1123,7 +1123,7 @@
      its one live organ, the mode-aware item store, moved to
      CBZ.econ.itemStore in systems/economy.js.) -->
 <!-- why-chain storefronts (walk-in, contextual prompts; loaded after their econ/clothes/zillow deps, before core/loop.js + main.js) -->
-<script src="src/city/swim.js?v=nodash1"></script>
+<script src="src/city/swim.js?v=sharkmode1"></script>
 <!-- TSUNAMI. The whole event is one number — the sea-level surge in
      world/water_spec.js — because everything that cares about water in this
      game already reads sea level. It authors no water mesh, no flood damage
@@ -1198,7 +1198,7 @@
      item-drop pickups + placeable storage chests, and wraps cityKillPlayer so
      the player's guns drop on death. Needs economy/worldstate/combat/fpsmode/
      death.js/charpanel.js, all loaded above. -->
-<script src="src/city/killfeed.js?v=survfeedtop1"></script>
+<script src="src/city/killfeed.js?v=sharkmode1"></script>
 <!-- THE MORGUE (DEATH_DROPS_V2 / CORPSE_PERSIST / EMS_RESPONSE): what a death
      leaves behind and who comes for it. Wraps cityKillPed + cityHurtCop the
      same way killfeed.js does — so it loads AFTER killfeed, leaving the feed
@@ -1229,11 +1229,11 @@
      metre 683 pedestrians tried to walk went into geometry, 37 of them grinding
      for over 1.5 s at a time. The window is 320 m around the player (peds stop
      drawing at 95 m), marked across frames so a rebuild is never a hitch. -->
-<script src="src/systems/fullmap.js?v=nodash1"></script>
+<script src="src/systems/fullmap.js?v=sharkmode1"></script>
 
 <!-- cinematic death gore — shared by both games; loads before loop.js so its
      always-updater is in the sort -->
-<script src="src/systems/gore.js?v=snowbury1"></script>
+<script src="src/systems/gore.js?v=sharkmode1"></script>
 <!-- BLOOD IS EARNED — the disaster island's trauma ledger + cause table.
      Owner-filmed: gore fired on EVERY survival death (a man who FROZE SOLID
      sprayed arterial red) and never for the violent, physical, player-caused
@@ -1242,7 +1242,7 @@
      nothing itself. After gore.js + wounds.js (routes through CBZ.goreImpact,
      CBZ.gore and CBZ.bodyWound), before core/loop.js so its clock makes the
      boot sort. Consumers: grapple.js, physics.js, modes/survival.js. -->
-<script src="src/systems/trauma.js?v=trauma2"></script>
+<script src="src/systems/trauma.js?v=sharkmode1"></script>
 <!-- PREDATOR GRAMMAR — the shared answer to "a thing hunts you and takes you":
      predatorHunt (stalking FSM w/ menace gauge), predatorSeize (the grab),
      predatorDread (tension bus). Medium-agnostic, so a shark and a bear run the
@@ -1656,6 +1656,6 @@
      finished before it promotes materials. -->
 <script src="src/core/gfx.js?v=gfx1"></script>
 <script src="src/core/loop.js?v=scale1"></script>
-<script src="src/main.js"></script>
+<script src="src/main.js?v=sharkmode1"></script>
 </body>
 </html>
