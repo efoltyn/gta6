@@ -593,7 +593,25 @@
 
   // screen shake — punches/KOs call CBZ.shake(magnitude)
   let shakeAmt = 0;
-  CBZ.shake = function (m) { shakeAmt = Math.max(shakeAmt, m); };
+  /* CLAMPED, AND NON-FINITE IS REFUSED OUTRIGHT. This used to be
+     `shakeAmt = Math.max(shakeAmt, m)` — no ceiling, no finite check — while
+     core/microboot.js's stand-in for the very same function has always done
+     `Math.min(3.5, m || 0)`. Two implementations of one verb disagreeing is
+     how this bit: city/crashfx.js's airstrike hands us 13.2, which walks the
+     camera thirteen metres per frame in a random direction, and a meteor
+     shower fires a lot of airbursts. The camera position degenerates, altY
+     goes non-finite, core/sky.js computes a NaN gradient stop, and
+     createLinearGradient throws EVERY FRAME for the rest of the match — the
+     whole sky stops painting because somebody asked for a big bang.
+
+     A caller cannot be trusted not to hand this a NaN either (any `force`
+     that divided by a zero distance arrives here as one), and `Math.max`
+     propagates NaN silently and permanently. So: refuse non-finite, and take
+     microboot's ceiling as the real one. 3.5 is already a violent shake. */
+  CBZ.shake = function (m) {
+    if (!Number.isFinite(m)) return;
+    shakeAmt = Math.max(shakeAmt, Math.min(3.5, m));
+  };
 
   CBZ.requestLock = function () {
     if (CBZ.touchMode) return; // phones drive the camera via on-screen look-pad
