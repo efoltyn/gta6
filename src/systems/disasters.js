@@ -727,9 +727,18 @@
           if (h < lo) { lo = h; la = a; }
         }
         ctx.st.wx = Math.cos(la); ctx.st.wz = Math.sin(la);
-        // deliberately UNDER the smallest hill's peak (7) and every building
-        // floor slab: the flood takes the streets, never the refuges
-        ctx.st.peak = Math.min(5.6, 3.5 + scale(2.2, ctx));
+        /* V2 (systems/flashflood.js): the sea stays a COASTAL detail. The old
+           3.5-5.6 m surge put the whole island under the ocean plane — a
+           regional sea flood wearing the flash flood's name, and it visually
+           erased the channel front this def computes (measured 2026-08-23:
+           the "lake" frame was open sea with a cone poking out). The flash
+           flood is the RAIN's water — the groundwater field, which runs the
+           channel, carries the front and takes the mud — so V2 gives the sea
+           only the modest rise a coast really sees in a cloudburst. */
+        const v2 = CBZ.CONFIG.FLASHFLOOD_V2 !== false && CBZ.flashflood;
+        // (legacy: deliberately UNDER the smallest hill's peak (7) and every
+        // building floor slab — the flood takes the streets, never the refuges)
+        ctx.st.peak = v2 ? Math.min(1.6, 0.7 + scale(0.45, ctx)) : Math.min(5.6, 3.5 + scale(2.2, ctx));
         // metres of standing water in the channel at the height of it: well
         // over two feet, so cars float and the low streets genuinely swim
         ctx.st.pool = Math.min(2.4, 1.15 + scale(0.62, ctx));
@@ -748,6 +757,10 @@
         // looking DOWN — which is exactly where the danger is about to be.
         weather({ rain: 0.25 + k * 0.72, wind: 4 + k * 5, windDir: { x: ctx.st.wx, z: ctx.st.wz },
           fog: k * 0.5, fogColor: 0x59636b, pool: 0.02 + k * 0.16 });
+        // the gutters BROWN as they fill — runoff carries sediment before it
+        // carries anything else, and it is the honest half of the telegraph
+        if (CBZ.CONFIG.FLASHFLOOD_V2 !== false && CBZ.weatherFloodLook)
+          CBZ.weatherFloodLook({ mud: 0.35 * k, crest: 0, band: 0, flow: 0 });
         if (rnd() < dt * 3 * k) sound("water");
       },
       start(ctx) {
@@ -782,11 +795,38 @@
           ctx.st.frontS += ctx.st.frontV * dt;
           // past the halfway mark the wall has done its work and the event is
           // a lake: dropping the front lets the level stand everywhere
-          if (u > 0.55 || ctx.st.frontS > ctx.R + 60) CBZ.groundWaterFrontSet(null);
-          else CBZ.groundWaterFrontSet({
+          const v2 = CBZ.CONFIG.FLASHFLOOD_V2 !== false && CBZ.flashflood;
+          const frontLive = !(u > 0.55 || ctx.st.frontS > ctx.R + 60);
+          const front = frontLive ? {
             x: ctx.cx, z: ctx.cz, dx: ctx.st.wx, dz: ctx.st.wz,
-            s: ctx.st.frontS, width: 15, crest: 0.6, speed: ctx.st.frontV,
-          });
+            // V2 stands the crest visibly proud of the water behind it — the
+            // "wall" is a real term in the shared depth field, never a mesh
+            s: ctx.st.frontS, width: 15, crest: v2 ? 0.95 : 0.6, speed: ctx.st.frontV,
+          } : null;
+          CBZ.groundWaterFrontSet(front);
+          /* THE FRONT'S FACE — systems/flashflood.js: the churn spray thrown
+             off the crest, the entrained debris tumbling behind it, the mud
+             that makes the water opaque and the roar that places the wall by
+             ear. All read the SAME front descriptor and the SAME depth field;
+             none of it is a water plane. Degrade-safe: without the file (or
+             with FLASHFLOOD_V2=0) this def plays the flood it always played. */
+          if (v2) CBZ.flashflood.drive(front, { dt: dt, pool: pk, u: u });
+          /* THE SEA TAKES THE SAME MUD. The runoff that browned the streets
+             discharges at the coast, and the ocean shader already owns a
+             sediment palette (world/water_spec.js's turbid block, the
+             tsunami's landfall soup) driven off the arena's own wave record —
+             so the flooded shoreline cannot render clean holiday blue beside
+             a chocolate street. Same lever the tsunami uses, nothing new. */
+          if (v2) {
+            const W = CBZ.survSeaWave ? CBZ.survSeaWave() : null;
+            if (W) {
+              W.sediment = Math.min(1, 0.55 + pk * 0.3);
+              W.frontC = [ctx.cx, ctx.cz];
+              W.frontDir = [ctx.st.wx, ctx.st.wz];
+              W.frontS = frontLive ? ctx.st.frontS : ctx.R * 2;
+              W.frontRun = 130;
+            }
+          }
         }
         // a real downhill current in the inundation, published on the ONE
         // water-event descriptor so the swimmer and the debris both feel it
@@ -807,8 +847,11 @@
       end(ctx) {
         weatherOff(); surgeSet(0);
         if (CBZ.groundWaterFrontSet) CBZ.groundWaterFrontSet(null);
+        if (CBZ.flashflood) CBZ.flashflood.clear();
         const W = CBZ.survSeaWave ? CBZ.survSeaWave() : null;
-        if (W) { W.amp = 0.86; W.chop = 0.72; W.foam = 0.34; }   // the sea settles back down
+        // the sea settles back down — and the sediment goes with it (one
+        // match's soup must never tint the next event's clean water)
+        if (W) { W.amp = 0.86; W.chop = 0.72; W.foam = 0.34; W.sediment = 0; }
         if (CBZ.waterEventClear) CBZ.waterEventClear("survival-flood");
       },
       threat(x, z, ctx) {
@@ -5026,9 +5069,15 @@
       } else if (id === "nuke") {
         if (st.gx != null) out.push(!st.r ? { x: st.gx, z: st.gz, r: 9 } : { x: st.gx, z: st.gz, r: st.r, fill: false });
       } else if (id === "flashflood") {
-        // no front any more — the flood is a LEVEL, so the map marks the low
-        // ground that is already under. One ring per drowned hollow beats a
-        // line pretending there is a wall.
+        // the def RUNS a front down the channel (CBZ.groundWaterFrontSet) —
+        // while that wall is live the map marks it as the travelling line it
+        // is, exactly like the tsunami's. The old comment here claimed "no
+        // front any more"; it was describing a build two rewrites ago.
+        if (!warn && CBZ.CONFIG.FLASHFLOOD_V2 !== false && CBZ.groundWaterFront) {
+          const F = CBZ.groundWaterFront();
+          if (F) out.push({ line: true, x: F.x + F.dx * F.s, z: F.z + F.dz * F.s, dx: F.dx, dz: F.dz });
+        }
+        // ...and the low ground that is already under stays ringed
         if (!warn) for (let i = 0; i < A.hills.length; i++) {
           const h = A.hills[i];
           if (h.peak < (st.peak || 0) + 1) out.push({ x: h.x, z: h.z, r: h.r, fill: false });
@@ -5115,6 +5164,11 @@
       surgeDriven: surgeWrites > 0,
       surgeWrites: surgeWrites,
       surge: CBZ.waterSurge ? +CBZ.waterSurge().toFixed(3) : 0,
+      // ---- THE FLASH FLOOD'S FRONT (systems/flashflood.js) ----
+      // live evidence the wall has a face: churn spray in the air, entrained
+      // debris riding the depth field, mud opacity on the coat — and still
+      // zero private water planes, which groundWaterAudit checks separately.
+      flashflood: CBZ.flashflood ? CBZ.flashflood.audit() : null,
       // ---- ONE SWIM ----
       privateSwim: privateSwim,
       /* ---- THE STORM'S BOLTS. `boltStrokes / boltStrikes` is the whole

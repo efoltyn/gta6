@@ -898,7 +898,10 @@
 <!-- seam:earthquake     — systems/quake.js, tagged above (predates this block) -->
 <!-- seam:lightning      — systems/lightningfx.js, tagged above -->
 <!-- seam:tsunami        — city/tsunami.js, tagged with the city systems -->
-<!-- seam:flashflood -->
+<!-- seam:flashflood — systems/flashflood.js owns the churn spray, the entrained
+     debris and the roar. Two draw calls and no water planes: the flood itself
+     is still a term in the ONE shared depth field, never a mesh. -->
+<script src="src/systems/flashflood.js?v=flood1"></script>
 <!-- seam:hurricane — a cyclone, not a wind number: systems/hurricane.js owns the
      tracking eye, the eyewall field, the surge curve and the advected debris. -->
 <script src="src/systems/hurricane.js?v=hur1"></script>
