@@ -229,13 +229,15 @@
     let winner = null;
     if (liveBots() === 1) { const b = CBZ.bots; for (let i = 0; i < b.length; i++) if (!b[i].dead) { winner = b[i].name; break; } }
     clearSpectate();
-    recordSurvRun(surv.stats.placement || (liveBots() + 1));
+    // Only DISASTER rounds land in the persistent survival record (and show
+    // its lifetime line) — a shark-sim death is a different game's loss.
+    if (g.mode === "survival") recordSurvRun(surv.stats.placement || (liveBots() + 1));
     const sub = document.querySelector("#survlose .sub");
     if (sub) {
       const s = CBZ.survStats();
       const bits = ["You were " + (surv._deathCause || "eliminated")];
       if (winner) bits.push(winner + " outlasted everyone");
-      if (s.runs) bits.push("Wins " + s.wins + "/" + s.runs + (s.bestPlacement ? " · best #" + s.bestPlacement : ""));
+      if (g.mode === "survival" && s.runs) bits.push("Wins " + s.wins + "/" + s.runs + (s.bestPlacement ? " · best #" + s.bestPlacement : ""));
       sub.textContent = bits.join("  ·  ");
     }
     if (CBZ.loseGame) CBZ.loseGame(surv._deathCause || "eliminated");

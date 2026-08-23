@@ -13,6 +13,13 @@
   // stomps back to the title screen. startRun refuses to start until this is
   // set (the 83-lot/57-lot partial-world anomalies were exactly this race).
   CBZ.bootComplete = true;
+  // A ?mode= naming a game THIS PAGE does not carry (its scripts are sliced
+  // out of disaster.html) must not strand the player in a ghost mode whose
+  // world can never build. The check lives here because main.js is the one
+  // script that runs after every mode has had its chance to register.
+  if (CBZ.game.mode !== "escape" && !CBZ.modes[CBZ.game.mode]) {
+    CBZ.setMode(CBZ.START_MODE && CBZ.modes[CBZ.START_MODE] ? CBZ.START_MODE : "escape");
+  }
   CBZ.setState("title");
   CBZ.startLoop();
 })();

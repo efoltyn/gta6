@@ -126,7 +126,7 @@
      or a URL asks for it (?mode=survival). systems/state.js already starts
      with `setMode(g.mode || "escape")`, so this is the whole mechanism. An
      unknown value is ignored rather than guessed at. */
-  const MODES = { city: 1, escape: 1, survival: 1, gungame: 1 };
+  const MODES = { city: 1, escape: 1, survival: 1, gungame: 1, sharksim: 1 };
   let startMode = CBZ.START_MODE;
   try {
     const q = typeof location !== "undefined" && location.search
@@ -134,6 +134,13 @@
     if (q) startMode = q;
   } catch (e) {}
   if (startMode && MODES[startMode]) CBZ.game.mode = startMode;
+
+  /* ONE ISLAND, TWO GAMES. survival and sharksim share the disaster island's
+     WORLD plumbing — ground, water, swim, bots, HUD, camera — and the systems
+     gating that support ask this predicate. The disaster DIRECTOR itself is
+     survival's alone and keeps asking g.mode === "survival". */
+  CBZ.ISLAND_MODES = { survival: 1, sharksim: 1 };
+  CBZ.islandModeOn = function (m) { return !!CBZ.ISLAND_MODES[m || (CBZ.game && CBZ.game.mode)]; };
 
   // ---- colour palette (Roblox-bright, beveled feel) ----
   CBZ.COL = {

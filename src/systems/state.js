@@ -24,7 +24,7 @@
     // the ARENA modes (survival + gungame) share one pair of result cards
     // (#survwin/#survlose); each fills/relabels them at show time. escape
     // keeps its own #win card.
-    const arena = g.mode === "survival" || g.mode === "gungame";
+    const arena = g.mode === "survival" || g.mode === "sharksim" || g.mode === "gungame";
     screens.title.classList.toggle("hidden", s !== "title");
     screens.pause.classList.toggle("hidden", s !== "paused");
     screens.win.classList.toggle("hidden", !(s === "won" && !arena));
@@ -48,7 +48,11 @@
     // like the pre-mode stub did.
     g.mode = id === "survival" ? "survival"
       : (id === "city" ? "city"
-      : (id === "gungame" && CBZ.modes.gungame ? "gungame" : "escape"));
+      // sharksim is string-matched like survival, never registry-checked:
+      // this file parses (and boot calls setMode) before modes/shark_sim.js
+      // has had the chance to register its descriptor.
+      : (id === "sharksim" ? "sharksim"
+      : (id === "gungame" && CBZ.modes.gungame ? "gungame" : "escape")));
     // leaving GUN GAME must scrub everything it borrowed: bots out of the
     // shared npc/bot lists, the prison cast un-hidden, rung weapons wiped.
     // Runs BEFORE the root-visibility lines below so they settle the final
@@ -56,17 +60,20 @@
     if (prev === "gungame" && g.mode !== "gungame" && CBZ.gungameExit) { try { CBZ.gungameExit(); } catch (e) { console.error("[gungame exit]", e); } }
     if (g.mode !== "escape" && CBZ.setSimulationView) CBZ.setSimulationView(false);
     modeButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.mode === g.mode));
-    document.body.classList.toggle("mode-survival", g.mode === "survival");
+    // sharksim keeps the island HUD family: body carries BOTH mode-survival
+    // (what hud.css keys the island chrome on) and its own mode-sharksim.
+    document.body.classList.toggle("mode-survival", CBZ.islandModeOn(g.mode));
+    document.body.classList.toggle("mode-sharksim", g.mode === "sharksim");
     document.body.classList.toggle("mode-city", g.mode === "city");
     document.body.classList.toggle("mode-gungame", g.mode === "gungame");
     const m = CBZ.modes[g.mode];
-    if ((g.mode === "survival" || g.mode === "city" || g.mode === "gungame") && m && m.build) { try { m.build(); } catch (e) { console.error("[mode build]", e); } }
+    if ((g.mode === "survival" || g.mode === "sharksim" || g.mode === "city" || g.mode === "gungame") && m && m.build) { try { m.build(); } catch (e) { console.error("[mode build]", e); } }
     // GUN GAME borrows worlds it never builds: the prison stays visible when
     // its JAIL map is chosen, the disaster island when ISLAND is (the match
     // reset re-applies this per the picker; CBZ.gungameWorlds is the truth).
     const ggw = g.mode === "gungame" && CBZ.gungameWorlds ? CBZ.gungameWorlds() : null;
     if (CBZ.prisonRoot) CBZ.prisonRoot.visible = g.mode === "escape" || !!(ggw && ggw.jail);
-    if (g.mode !== "survival" && CBZ.surv && CBZ.surv.arena) CBZ.surv.arena.root.visible = !!(ggw && ggw.island);
+    if (!CBZ.islandModeOn(g.mode) && CBZ.surv && CBZ.surv.arena) CBZ.surv.arena.root.visible = !!(ggw && ggw.island);
     if (g.mode !== "city" && CBZ.city && CBZ.city.arena) CBZ.city.arena.root.visible = false;
     // leaving city cleanly cancels any in-progress WASTED/spectate state so the
     // kill-cam HUD + global respawn listeners can't leak into another mode.
@@ -78,11 +85,12 @@
     if (CBZ.bootStep) CBZ.bootStep("boot:reset");
     CBZ.hitstop = 0;
     CBZ.slowmo = 0;
-    const mode = g.mode === "survival" ? "survival" : (g.mode === "city" ? "city" : (g.mode === "gungame" ? "gungame" : "escape"));
+    const mode = g.mode === "survival" ? "survival" : (g.mode === "sharksim" ? "sharksim" : (g.mode === "city" ? "city" : (g.mode === "gungame" ? "gungame" : "escape")));
     if (CBZ.setSimulationView) CBZ.setSimulationView(false);
     if (CBZ.clearGore) CBZ.clearGore();   // wipe blood/gibs from the prior match
     g.detection = 0; g.invuln = 0; g.elapsed = 0;
-    document.body.classList.toggle("mode-survival", mode === "survival");
+    document.body.classList.toggle("mode-survival", CBZ.islandModeOn(mode));
+    document.body.classList.toggle("mode-sharksim", mode === "sharksim");
     document.body.classList.toggle("mode-city", mode === "city");
     document.body.classList.toggle("mode-gungame", mode === "gungame");
     if (mode === "escape") {
@@ -296,7 +304,9 @@
   function winGame(reason, actor) {
     if (g.state === "won") return;
     setState("won"); CBZ.sfx("win");
-    if (g.mode === "survival") { fillSurvResult(true); if (CBZ.recordSurvWin) CBZ.recordSurvWin(); return; }
+    // sharksim shares the island's win card, but only DISASTER wins land in
+    // the persistent disaster record — an apex-predator run is its own game.
+    if (g.mode === "survival" || g.mode === "sharksim") { fillSurvResult(true); if (g.mode === "survival" && CBZ.recordSurvWin) CBZ.recordSurvWin(); return; }
     // GUN GAME: the player landed the final rung's kill — the shared win card
     // shows the ladder result (gungame.js owns the fill).
     if (g.mode === "gungame") { if (CBZ.gungameFillResult) CBZ.gungameFillResult(true); return; }
