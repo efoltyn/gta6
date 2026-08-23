@@ -825,11 +825,25 @@
   // on sea level) is what keeps the sky around you and the sun on the real
   // horizon at any altitude. See section 0a.
   let altY = 0;
+  // a number somebody else owns, made safe to paint with
+  function fin(v, d) { return (v == null || !Number.isFinite(v)) ? d : v; }
   function syncRig() {
     const cam = CBZ.camera.position;
     const hi = !!CBZ.CONFIG.SKY_ALTITUDE;
-    rig.position.set(cam.x, hi ? cam.y : 0, cam.z);
-    altY = hi ? Math.max(0, cam.y) : 0;   // metres above mean sea level
+    /* A NON-FINITE CAMERA MUST NOT TAKE THE SKY WITH IT. `Math.max(0, NaN)`
+       is NaN, and altY feeds frame.hazeK, which feeds `fadeTop`, which is a
+       createLinearGradient stop — so ONE degenerate camera frame throws, and
+       because the camera stays degenerate it throws EVERY FRAME for the rest
+       of the match and the sky simply stops painting. Anything upstream can
+       do this: a blast impulse that divided by a zero distance, an unclamped
+       shake, a physics step that overflowed. The sky is the last consumer in
+       that chain and it is the wrong place to find out about it, so it
+       defends itself and leaves the camera bug to the camera. */
+    const cx = Number.isFinite(cam.x) ? cam.x : 0;
+    const cy = Number.isFinite(cam.y) ? cam.y : 0;
+    const cz = Number.isFinite(cam.z) ? cam.z : 0;
+    rig.position.set(cx, hi ? cy : 0, cz);
+    altY = hi ? Math.max(0, cy) : 0;   // metres above mean sea level
   }
 
   function skyFrame(dt) {
@@ -841,11 +855,16 @@
     if (tint.equals(_tintWrote)) tint.copy(_tintBase);
     _tintBase.copy(tint);
 
-    const night = CBZ.nightAmount == null ? 0 : CBZ.nightAmount;
-    const dayness = CBZ.dayness == null ? 1 : CBZ.dayness;
-    const duskness = CBZ.duskness == null ? 0 : CBZ.duskness;
-    const a = CBZ.sunAngle == null ? 1.1 : CBZ.sunAngle;
-    const up = CBZ.sunHeight == null ? Math.sin(a) : CBZ.sunHeight; // signed sun height
+    /* Same defence, one layer out: every one of these is written by somebody
+       else (the day cycle, a disaster's weather drive), a `== null` test says
+       nothing about NaN, and each of them reaches a gradient stop. Read them
+       through `fin()` so a bad writer costs one wrong-looking frame instead
+       of the sky for the rest of the run. */
+    const night = fin(CBZ.nightAmount, 0);
+    const dayness = fin(CBZ.dayness, 1);
+    const duskness = fin(CBZ.duskness, 0);
+    const a = fin(CBZ.sunAngle, 1.1);
+    const up = fin(CBZ.sunHeight, Math.sin(a)); // signed sun height
 
     // ---- frame palette: blend the keyframe tables -------------------
     const kDay = clamp01(up * 2.2 + 0.05);   // full daytime sky by mid-morning
