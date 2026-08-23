@@ -884,6 +884,30 @@
      gas fires and downed lines for BOTH worlds (CITY_QUAKE for the city).
      Must precede systems/disasters.js so the roster finds CBZ.quake. -->
 <script src="src/systems/quake.js?v=quake1"></script>
+<!-- ==== PER-DISASTER MODULE SEAM ==========================================
+     One line per disaster in the survival roster, each owned by exactly that
+     disaster and nobody else. A disaster whose behaviour outgrows its entry in
+     systems/disasters.js moves that behaviour into its OWN file and claims its
+     line here; the ones still living entirely inside the roster leave theirs a
+     comment. Everything in this block loads BEFORE systems/disasters.js so the
+     roster finds the module's public surface (CBZ.<thing>) at definition time.
+
+     Why a block of one-line slots instead of "add a script tag wherever":
+     twelve disasters get worked on in parallel, and a shared insertion point
+     is a merge conflict every single time. A slot per disaster is not. -->
+<!-- seam:earthquake     — systems/quake.js, tagged above (predates this block) -->
+<!-- seam:lightning      — systems/lightningfx.js, tagged above -->
+<!-- seam:tsunami        — city/tsunami.js, tagged with the city systems -->
+<!-- seam:flashflood -->
+<!-- seam:hurricane -->
+<!-- seam:wildfire -->
+<!-- seam:tornado        — systems/tornado.js, tagged with the city systems -->
+<!-- seam:volcano        — world/volcanofx.js, tagged above -->
+<!-- seam:blizzard -->
+<!-- seam:meteor -->
+<!-- seam:sinkhole       — world/groundshaft.js, tagged above -->
+<!-- seam:nuke           — city/nukefx.js, tagged with the city systems -->
+<!-- ==== END PER-DISASTER MODULE SEAM ==================================== -->
 <script src="src/systems/disasters.js?v=nodash1"></script>
 <script src="src/systems/survival_interact.js?v=climbdock1"></script>
 <script src="src/systems/survivalhud.js?v=nozone1"></script>
