@@ -203,8 +203,8 @@ st += [
     Paragraph(
         'Measured before anything was touched: while firing, <b>0% of the drawn weapon’s barrel reached the '
         'lens</b>. Not “a bit small” — none of it. The gun spent every gunfight behind the shoulder of the '
-        'person holding it. There turned out to be <b>two</b> causes, one of which was a plain bug, and the '
-        'end state is <b>78% of the barrel visible at five times the on-screen size</b>.', BODY),
+        'person holding it. Three passes later — a framing table, a plain aim bug, and a new carry pose — '
+        '<b>firing shows 77% of the barrel and carrying shows 92%</b>, measured, not eyeballed.', BODY),
     Spacer(1, 4),
     gate_pair(),
     Paragraph(
@@ -217,14 +217,23 @@ st += [
         'armed state you could see your own gun in — and <i>firing did not</i>. To the camera, shooting was '
         'indistinguishable from walking.', BODY),
     Paragraph(
-        '<b>And a plain bug underneath it.</b> While the third-person frame is pinned (an earlier decision: '
-        'vertical look moves the gun, not the camera), the drawn weapon’s barrel was still being aimed along the '
-        '<i>lens</i> rather than along your actual aim. So the gun pointed wherever the camera rested while the '
-        'bullets, the reticle and the target-acquire cone all went somewhere else — a man firing level at a '
-        'helicopter above his head. The engine’s other weapon-drawing path had already been fixed for exactly '
-        'this reason and left a comment saying so; the path that draws the gun you actually see in the city and '
-        'the prison had not. It now takes the same aim vector the bullets take. That change alone is worth '
-        '0% → 68%, and it is why the aim-band plates further on show the barrel sweeping through the frame.', BODY),
+        '<b>A plain bug underneath it.</b> While the third-person frame was pinned, the drawn weapon’s barrel '
+        'was aimed along the <i>lens</i> rather than along your actual aim — the gun pointed wherever the camera '
+        'rested while the bullets, the reticle and the acquire cone went somewhere else. The path that draws the '
+        'gun you actually see now takes the same aim vector the bullets take. (The pin itself has since been '
+        'retired on main — vertical look moves the camera again — which makes this fix a no-op by identity '
+        'today; it stays because the pin is still one console flag away, and turning it back on must not send '
+        'the barrel back to the horizon.)', BODY),
+    Paragraph(
+        '<b>And the carry needed the hand, not the lens.</b> The first pass proved a thigh-hung rifle cannot be '
+        'framed into view: it lies exactly along the leg’s silhouette, so the same constants measured 54% or 0% '
+        'depending on where the idle breath had the arm, and every centimetre of camera offset made it worse. So '
+        'the carry changed the <b>pose</b>: long guns are now carried at <b>port arms</b> — hand at the lower '
+        'chest, barrel diagonally up across the body — which is broadside to the camera at every framing, '
+        'measures 92% visible at 15% of frame height, and is robust where the hang was a knife edge (every '
+        'direction in the sweep grid clears 92%). The support hand follows automatically: it is IK-solved onto '
+        'the handguard wherever the handguard is, and the reload animation still runs through the same anchors '
+        '(the off-hand gate passes on every weapon).', BODY),
     Paragraph(
         'So armed framing now reads a three-tier table — <b>carry</b> (gun out), <b>present</b> (trigger down, '
         'firing, or the 0.9 s settle after a shot), <b>ADS</b> (scoped) — and the present tier takes the frame '
@@ -232,12 +241,13 @@ st += [
         'damping all along; framing was the last consumer still ignoring it.', BODY),
     Spacer(1, 2),
     table([
-        ["while firing", "barrel reaching the lens", "size on screen", ""],
-        ["what shipped", "0%", "—", "the gun is behind its owner"],
-        ["with the aim fix only", "68%", "2.1% of frame height", "visible, but a distant sliver"],
-        ["<b>with both</b>", "<b>78%</b>", "<b>10.6% of frame height</b>", "readable — five times the size"],
-        ["(scoping, for scale)", "77%", "8.0%", "unchanged; it always worked"],
-    ], [1.5 * inch, 1.35 * inch, 1.5 * inch, W - 4.35 * inch]),
+        ["state", "barrel reaching the lens", "size on screen", ""],
+        ["firing, before", "0%", "—", "the gun is behind its owner"],
+        ["<b>firing, after</b>", "<b>77%</b>", "<b>10% of frame height</b>", "framing table + the aim-bug fix"],
+        ["carrying, before", "54% on a knife edge", "0–5%", "a thigh-hung rifle inside the leg’s silhouette"],
+        ["<b>carrying, after</b>", "<b>92%</b>", "<b>15% of frame height</b>", "port arms — a pose fix, not a camera fix"],
+        ["scoping (for scale)", "77%", "8%", "unchanged; it always worked"],
+    ], [1.35 * inch, 1.5 * inch, 1.45 * inch, W - 4.3 * inch]),
     Paragraph('Measured on the airport apron, carbine, same spot, same moment of the trigger pull, by '
               '<font face="Courier">npm run test:tp-gun</font>.', SMALL),
     PageBreak(),
@@ -273,7 +283,7 @@ st += [
         ["mode", "barrel follows<br/>your aim", "tier table +<br/>12 m lead", "tighter boom<br/>while firing", "carry<br/>pose", "net effect"],
         ["<b>City</b> (on foot)", "yes", "yes", "n/a", "yes", "the whole change — every plate in this PDF"],
         ["<b>Gang war</b>", "yes", "yes", "n/a", "yes", "not a mode: gangs, turf, civil war and police war are city systems, so a gang fight <i>is</i> city mode"],
-        ["<b>Prison</b> (escape)", "no*", "no", "yes", "yes", "boom comes in 7.6 → 5.0 m while you present; it already had the 12 m lead"],
+        ["<b>Prison</b> (escape)", "no*", "no", "yes", "yes", "boom comes in 7.6 → 5.0 m while you present, and long guns port-carry there too"],
         ["<b>Natural disaster</b>", "no*", "no", "no", "no", "no combat in that mode — nothing can raise the presenting signal"],
         ["<b>Gun game</b>", "no*", "no", "yes", "no", "camera as prison; its gun is drawn by the older prop path"],
         ["<b>NPC war</b> (battle page)", "no", "no", "no", "no", "separate page, no player gun, no chase camera at all"],
@@ -317,13 +327,13 @@ st += [
 GUNS = [p["id"].split("-")[1] for p in PLATES if p["id"].startswith("gun-") and p["id"].endswith("-carry")]
 st += [
     Paragraph("Every gun in the game, carried and presented", H1),
-    Paragraph("left column: gun out, walking (unchanged by this work) · right column: trigger down", SUB),
+    Paragraph("left column: gun out, walking (now port arms for long guns) · right column: trigger down", SUB),
     Paragraph(
-        'The tier is tuned around a long gun, and the contact sheet is honest about what that means: rifles, '
-        'shotguns, the sniper and the LMG read clearly the moment you present them. <b>Pistols read worse</b> — a '
-        'sidearm is a third the length of a carbine and is held close in, so a camera that silhouettes a rifle '
-        'still puts a revolver largely behind the forearm. That is a pose problem, not a framing one, and it is '
-        'named as future work rather than papered over here.', BODY),
+        'Long guns are carried at port arms — up across the body, both hands on — and read clearly in both '
+        'columns; presenting swings the same weapon down onto the crosshair. <b>Pistols still read worst</b>: a '
+        'sidearm is a third the length of a carbine and hangs beside the thigh, so its carry column is honest '
+        'about a few dark pixels at the hip. That remains a pose question (a chest-high pistol carry reads as '
+        'aiming), and it is left open rather than papered over.', BODY),
     Spacer(1, 2),
 ]
 for i, g in enumerate(GUNS):
@@ -339,10 +349,11 @@ st += [
     Paragraph("Angles", H1),
     Paragraph("the whole vertical aim band, both shoulders, and the low stances — all presenting, carbine", SUB),
     Paragraph(
-        'Vertical aim in this game does <b>not</b> tilt the camera: the frame is pinned at its resting angle and '
-        'the aim moves the gun and the crosshair instead (that is a deliberate earlier decision — a full look-up '
-        'used to drop the lens to your heels). So the plates below are the same shot with the weapon swinging '
-        'through it, which is exactly what you want to be able to see, and now can.', BODY),
+        'Vertical aim pitches the camera 1:1 with the mouse (the fixed-angle pin that used to hold the frame '
+        'was retired on main once the inverted-look bug behind it was fixed), and the barrel tracks the same '
+        'aim vector the bullets use — so the weapon stays on the crosshair through the whole band instead of '
+        'freezing at the horizon. The character holds their place in frame across the sweep; only the view '
+        'direction changes.', BODY),
     Spacer(1, 2),
     grid(ANG, cols=2, width=W),
     PageBreak(),
@@ -397,16 +408,14 @@ st += [
               'framing on the next frame, in every mode listed on the mode page, with no reload.', BODY),
     Paragraph("What is deliberately still open", H2),
     Paragraph(
-        '<b>Carrying a long gun.</b> The carry tier is unchanged on purpose, and it is the one place the camera '
-        'cannot help. A 1.1 m rifle held from a hand 0.85 m off the ground gets stood near-vertical by the '
-        'muzzle-clearance solver, so it hangs flat along the thigh — and every centimetre the lens moves toward '
-        'that side puts more hip in front of it. The sweep is blunt about it: 0.68 m at 4.35 m measures 54% of the '
-        'barrel, 1.12 m at 2.85 m measures 0%. It is a knife edge, too — the same constants report 54% and 0% '
-        'depending on where the idle breath has the arm. Making a carried long gun read properly means putting the '
-        'hand at chest height (port arms), which is a pose change, not a camera change.', BODY),
+        '<b>Pistols.</b> Better than before while presenting, and honestly small while carried — a thigh-hung '
+        'sidearm is a few dark pixels at the hip. The long-gun answer (port arms) does not transfer: a pistol '
+        'held at chest height reads as aiming, not carrying. If it ever matters, the lever is again the hand, '
+        'not the lens.', BODY),
     Paragraph(
-        '<b>Pistols while presenting.</b> Better than before, still the weakest silhouette in the game — same '
-        'answer: the hand, not the lens.', BODY),
+        '<b>The left shoulder.</b> The swap (MMB) keeps the weapon on your right side, so the left-shoulder '
+        'frame shows less of it by construction. Mirroring the pose with the swap would fix it and is a bigger '
+        'bite than this pass.', BODY),
     Paragraph(
         '<b>Prison and gun game are reasoned, not measured.</b> The gate only boots the city. Their change is the '
         'boom trim while presenting, ported from the city numbers.', BODY),
