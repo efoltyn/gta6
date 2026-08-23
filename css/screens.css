@@ -98,17 +98,24 @@
   margin-top:22px; padding-top:16px;
   border-top:2px dashed rgba(124,90,58,.28);
 }
-/* SIX TILES, SIX EQUAL CELLS. Until 2026-08-15 this was `auto-fit` over six
-   things of two different shapes, and it came out lopsided at every desktop
-   width: the four mode tiles fitted four of the eight columns a 1100px card
-   offered and stopped two-thirds of the way across, while the two launchers
-   spanned the whole rule as 90px-tall bars holding one line of 12px type. Six
-   divides by 2 and 3; the grid uses those, and every tile is the same cell. */
+/* EQUAL CELLS, WHATEVER THE COUNT. Until 2026-08-15 this was `auto-fit` over
+   six things of two different shapes, and it came out lopsided at every
+   desktop width: the four mode tiles fitted four of the eight columns a
+   1100px card offered and stopped two-thirds of the way across, while the two
+   launchers spanned the whole rule as 90px-tall bars holding one line of 12px
+   type. Fixed 2/3 columns keep every tile the same cell; when the count
+   leaves an orphan on the last row (seven tiles today: five modes + two
+   launchers), the orphan stretches across the row instead of dangling. */
 .mode-select{
   display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px;
   width:100%; margin:0 auto;
 }
-@media (min-width:760px){ .mode-select{ grid-template-columns:repeat(3,minmax(0,1fr)); } }
+.mode-select > .mode-btn:last-child:nth-child(odd){grid-column:1 / -1;}
+@media (min-width:760px){
+  .mode-select{ grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .mode-select > .mode-btn:last-child{grid-column:auto;}
+  .mode-select > .mode-btn:last-child:nth-child(3n+1){grid-column:1 / -1;}
+}
 /* A launcher still reads as a different KIND of tile — warm fill and a trailing
    arrow say it leaves the page — it just no longer says so by being enormous. */
 .mode-launch{ background:linear-gradient(180deg,#fff,#ffeede); }
@@ -195,6 +202,7 @@
   #title .card-box > div.mode-city-only:not(.smallnote),
   #title .card-box > div.mode-escape-only:not(.smallnote),
   #title .card-box > div.mode-survival-only:not(.smallnote),
+  #title .card-box > div.mode-sharksim-only:not(.smallnote),
   #title .card-box > div.mode-gungame-only:not(.smallnote){grid-column:1; grid-row:1;}
   /* The rail is ONE grid item, so it stretches to the roster's height and can
      lay itself out inside: presets at the top, PLAY pushed to the bottom by
@@ -247,6 +255,17 @@ body.mode-gungame .mode-gungame-only{display:block;}
 /* the campaign's canonical title shows ONLY the city block (campaign.css
    hides escape/survival the same way) — keep gungame out of it too */
 body.campaign-canonical-title #title .mode-gungame-only{display:none !important;}
+
+/* SHARK SIM title copy — same pattern, with one wrinkle: in sharksim the
+   body carries BOTH mode-survival (the island HUD family hud.css keys on)
+   and mode-sharksim. These rules sit AFTER the survival block so the
+   equal-specificity tie breaks toward sharksim and the DISASTER wordmark
+   yields to the shark's. */
+.mode-sharksim-only{display:none;}
+body.mode-sharksim .mode-escape-only{display:none;}
+body.mode-sharksim .mode-survival-only{display:none;}
+body.mode-sharksim .mode-sharksim-only{display:block;}
+body.campaign-canonical-title #title .mode-sharksim-only{display:none !important;}
 
 /* ============================================================
    settings panel (src/systems/settings.js) — pause-screen overlay with

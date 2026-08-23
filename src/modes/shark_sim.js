@@ -1,5 +1,5 @@
 /* ============================================================
-   modes/shark_sim.js — SHARK SIM (a game riding inside survival).
+   modes/shark_sim.js — SHARK SIM (a real mode on the disaster island).
 
    THE PITCH (owner): "you upgrade types of shark as you eat fish and npcs
    and orcas can kill you till megladon … put it on full nat disaster island
@@ -9,7 +9,10 @@
    pilot, it works all devices like nat disaster and prison game."
 
    So this file is deliberately thin. It BUILDS NOTHING physical:
-     • the world is the disaster island (modes/survival.js), disasters on;
+     • the world is the disaster island — build()/reset() DELEGATE to
+       modes/survival.js's descriptor, the exact shape gungame's ISLAND
+       map already ships, so one island serves two games and survival's
+       own descriptor is never touched;
      • the sea is already stocked (CBZ.cityWildlifeStock — fish, sharks,
        orca pods all live around this island since the wildlife seam);
      • the body is a native wildlife actor, ridden through the existing
@@ -31,23 +34,19 @@
    survival's last-one-standing check stays dormant), and the win: as the
    megalodon, eat the thing that eats sharks.
 
-   DOOR: index.html?mode=survival&shark=1 (the MORE GAMES tile), or a page
-   that sets window.CBZ.START_SHARK_SIM before this file loads. Without the
-   flag this module installs NOTHING — plain survival is byte-identical.
+   DOOR: the Shark Sim tile on the title card, or ?mode=sharksim — a
+   registered mode like any other in-build game. (The old door, a ?shark=1
+   flag that hijacked whatever survival run it touched and then stuck in
+   the URL so every later "Disaster Survival" run was secretly this game,
+   is gone.) The disasters DIRECTOR is gated g.mode === "survival"
+   (systems/disasters.js), so no disaster fires here: the island is calm
+   and the pod is the whole threat curve.
 ============================================================ */
 (function () {
   "use strict";
   const CBZ = window.CBZ;
   if (!CBZ || !window.THREE) return;
   const g = CBZ.game;
-
-  let WANT = !!CBZ.START_SHARK_SIM;
-  try {
-    const q = typeof location !== "undefined" && location.search &&
-      new URLSearchParams(location.search).get("shark");
-    if (q != null) WANT = q !== "0" && q !== "false";
-  } catch (e) {}
-  if (!WANT) return;
 
   /* ---- THE LADDER. `need` is total mass eaten; mass comes off the meal's
      own hit points (massOf), so a mackerel is a snack and a human is a
@@ -111,7 +110,7 @@
       const b = CBZ.bots[i];
       if (!b || b.dead) continue;
       const roll = h01(i * 1.71 + 3, sim.match);
-      if (roll > 0.86) continue;                       // a few stay inland for the disasters
+      if (roll > 0.86) continue;                       // a few stay inland
       const a = h01(i * 2.13 + 9, sim.match) * 6.283;
       const wade = roll > 0.62;                        // ~a quarter of the crowd is IN the water
       const r = wade ? (WL - 1 + h01(i, sim.match + 7) * 5)
@@ -272,7 +271,7 @@
     restoreRider();
     hideHud();                           // the win card owns the screen now
     if (CBZ.surv && CBZ.surv.stats) CBZ.surv.stats.placement = 1;
-    if (CBZ.winGame) CBZ.winGame("survival");
+    if (CBZ.winGame) CBZ.winGame("apex");
     const sub = document.querySelector("#survwin .sub");
     if (sub) sub.textContent = "APEX PREDATOR — you ate the thing that eats sharks";
   }
@@ -422,7 +421,7 @@
     let S = findWild("bull_shark");
     sim.lastSetup = S ? "wild" : "spawn";
     if (!S && CBZ.cityWildlifeSpawnAt) S = CBZ.cityWildlifeSpawnAt("bull_shark", A.center.x + sim.waterline + 26, A.center.z);
-    if (!S) { sim.lastSetup = "no-shark"; return; }   // wildlife absent (flag off?) — stay plain survival
+    if (!S) { sim.lastSetup = "no-shark"; return; }   // wildlife absent — no shark to be; retry next frame
     placeShark(S);
     claim(S);
     sim.shark = S;
@@ -453,11 +452,10 @@
     // Floor at 1 so nothing else mistakes the mirror for a death; the only
     // way to die is the shark dying, and that path is explicit above.
     P.hp = Math.max(1, Math.round(100 * S.hp / (S.maxHp || 1)));
-    // ..and the rider is not separately killable: a lightning bolt or meteor
-    // splash at sea was killing the HUMAN off the shark's back mid-game.
-    // Disasters still rule the island (they kill the beach crowd, they move
-    // the sea); the shark's own death is the one mortality, via onSharkDead,
-    // which drops this shield first.
+    // ..and the rider is not separately killable: the shark's own death is
+    // the ONE mortality in this game (onSharkDead, which drops this shield
+    // first). Anything that would kill the HUMAN off the shark's back — a
+    // stray blast, an animal that targets the rider — lands on the mirror.
     if ((g.invuln || 0) < 2) g.invuln = 2;
     if (!P.dead) {
       mountShark();                          // E/dismount is not a control in this game
@@ -480,7 +478,7 @@
 
   CBZ.onAlways(94, function (dt) {
     if (!dt || dt > 0.5) dt = 0.05;
-    if (g.mode !== "survival") { if (sim.on) teardown(); return; }
+    if (g.mode !== "sharksim") { if (sim.on) teardown(); return; }
     const st = g.state;
     if (st !== "playing") {
       if (sim.on && st === "title") teardown();
@@ -491,18 +489,56 @@
     else step(dt);
   });
 
-  // ---- the mode's face: same island, different game ----------------------
-  const desc = CBZ.modes && CBZ.modes.survival;
-  if (desc) {
-    desc.objective = "YOU ARE THE SHARK. Swim with your move keys (sprint to lunge) — the bite is automatic when prey is in front of your mouth. Eat fish and the people off the beach, grow through HAMMERHEAD and GREAT WHITE, and stay away from the orca pod until you are the MEGALODON. Then eat an orca.";
-    const baseStats = desc.winStats;
-    desc.winStats = function (game) {
-      if (sim.apex) return [
-        { label: "Final Form", value: "MEGALODON" },
-        { label: "Things Eaten", value: sim.eaten },
-        { label: "Time", value: CBZ.fmtTime ? CBZ.fmtTime(game.elapsed) : "-" },
-      ];
-      return baseStats ? baseStats(game) : [];
-    };
-  }
+  /* ---- the mode's face: same island, different game ----------------------
+     Registered like every other in-build game (config.js CBZ.registerMode),
+     standing the island up by DELEGATING to survival's descriptor — the
+     exact shape gungame's ISLAND map ships (modes/gungame.js
+     MAPS.island.ensure). Survival's own descriptor is never touched.
+
+     Ground height dispatches on the exact mode string
+     (systems/solidground.js), so sharksim declares the island's field under
+     its own key — lazily, because the arena may not exist until first build. */
+  CBZ.registerGroundBase("sharksim", function (x, z) {
+    const A = CBZ.surv && CBZ.surv.arena;
+    return A ? A.groundHeightAt(x, z) : 0;
+  });
+  CBZ.registerMode("sharksim", {
+    id: "sharksim",
+    label: "Shark Sim",
+    objective: "YOU ARE THE SHARK. Swim with your move keys (sprint to lunge) — the bite is automatic when prey is in front of your mouth. Eat fish and the people off the beach, grow through HAMMERHEAD and GREAT WHITE, and stay away from the orca pod until you are the MEGALODON. Then eat an orca.",
+    build() {
+      const m = CBZ.modes.survival;
+      if (m && m.build) { try { m.build(); } catch (e) { console.error("[sharksim build]", e); } }
+    },
+    reset(game) {
+      /* survival's reset stands the WHOLE island up: arena visible + reset,
+         the bot crowd, the player spawn, the env baseline, the killfeed. It
+         also arms CBZ.disasters.start() — harmless here, the director's tick
+         is gated g.mode === "survival" (systems/disasters.js), so no
+         disaster ever fires in this mode. The shark side of the match stands
+         up one frame later, in the onAlways(94) hook's setup(). */
+      const m = CBZ.modes.survival;
+      if (m && m.reset) m.reset(game);
+    },
+    /* The capability declaration systems/modecaps.js reads off this
+       descriptor: same island verbs as survival, every funnel routed to
+       survival's own buses — this game's people ARE the island's crowd. */
+    caps: { traverse: 1, stepLedge: 1, blast: 1, blastActors: 1, breach: 1 },
+    actors(out) {
+      const b = CBZ.bots || [];
+      for (let i = 0; i < b.length; i++) out.push(b[i]);
+      return out;
+    },
+    hurt(a, dmg, imp) {
+      if (!CBZ.surv || !CBZ.surv.hurt) return false;
+      CBZ.surv.hurt(a, dmg, imp);
+      return true;
+    },
+    hurtPlayer(dmg, x, z, cause) {
+      if (!CBZ.surv || !CBZ.surv.hurt) return false;
+      CBZ.surv.hurt(CBZ.surv.playerActor, dmg, { fromX: x, fromZ: z, fling: 4, cause: cause });
+      return true;
+    },
+    route: "surv.hurt (survival's island buses)",
+  });
 })();

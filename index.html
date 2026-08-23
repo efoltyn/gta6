@@ -176,6 +176,21 @@
       </details>
     </div>
 
+    <!-- SHARK SIM mode -->
+    <div class="mode-sharksim-only">
+      <div class="logo">SHARK <span class="z">SIM</span></div>
+      <div class="sub">You Are The Shark</div>
+      <details class="controls">
+        <summary>Controls</summary>
+        <div class="keys">
+          <div class="row"><span class="keycol"><span class="kbd">WASD</span></span><span class="lab">Swim</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">Shift</span></span><span class="lab">Lunge</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">Space</span> <span class="kbd">C</span></span><span class="lab">Rise · dive</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">Mouth</span></span><span class="lab">Bite is automatic — point it at food</span></div>
+        </div>
+      </details>
+    </div>
+
     <!-- GUN GAME mode (map buttons are built by src/modes/gungame.js from its
          own MAPS registry — the registry is the truth, the markup is a slot) -->
     <div class="mode-gungame-only">
@@ -288,6 +303,7 @@
       <button class="mode-btn" type="button" data-mode="escape"><span>Prison Escape</span><small>Stealth &amp; survival</small></button>
       <button class="mode-btn" type="button" data-mode="survival"><span>Disaster Survival</span><small>100 players · last alive</small></button>
       <button class="mode-btn" type="button" data-mode="gungame"><span>Gun Game</span><small>Pick a map · climb the ladder</small></button>
+      <button class="mode-btn" type="button" data-mode="sharksim"><span>Shark Sim</span><small>you ARE the shark · eat the beach crowd · become the MEGALODON</small></button>
       <!-- BOMB SURVIVOR is not a mode of this build — it is another game on the
            release, standing on its own page (one studio tag boots the engine
            without the city). So the tile NAVIGATES rather than calling setMode:
@@ -307,19 +323,13 @@
               data-href="games/battle.html">
         <span>NPC War</span><small>two armies · any size · the real city · bombers, nukes · you hold the clock</small>
       </button>
-      <!-- SHARK SIM rides the disaster island rather than standing on its own
-           page: same build, same door mechanism (data-href navigates), one
-           URL flag flips survival into the shark game (modes/shark_sim.js). -->
-      <button class="mode-btn mode-launch" type="button" data-mode="sharksim"
-              data-href="index.html?mode=survival&amp;shark=1">
-        <span>Shark Sim</span><small>you ARE the shark · eat swimmers, dodge the orca pod, become the MEGALODON</small>
-      </button>
     </div>
 
     <div class="smallnote mode-escape-only">Lay low and guards ignore you. Cause trouble and they hunt.</div>
     <div class="smallnote mode-city-only">Make money any way you can. Cops escalate to 5 stars. Get cuffed and it's the jail game.</div>
     <div class="smallnote mode-escape-only" id="bestStat"></div>
     <div class="smallnote mode-survival-only">Reach high ground before the water does.</div>
+    <div class="smallnote mode-sharksim-only">Point your mouth at food — the bite is automatic. Dodge the pod until you are the MEGALODON.</div>
   </div>
 </div>
 
