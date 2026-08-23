@@ -61,6 +61,7 @@
 
   const sim = {
     on: false,          // a match is live and the player has a shark
+    needsTeardown: false, // mount/rider/ring state is out; teardown() owes a restore
     ended: false,       // this match resolved (died or won) — stop driving
     apex: false,        // won as the megalodon
     match: 0,
@@ -435,15 +436,23 @@
     hudNow();
     flash("YOU ARE THE SHARK", "eat fish and swimmers · avoid the pod · become the MEGALODON");
     sim.on = true;
+    sim.needsTeardown = true;
   }
 
   function teardown() {
+    // The mount must not outlive the game: a stale ride binding keeps
+    // P._mountedAnimal pointing at a shark in another mode's sea and holds
+    // survival's own verb panel suppressed. Dismount only OUR shark — a pet
+    // the player mounted elsewhere is none of this file's business.
+    const cur = CBZ.cityMountedAnimal && CBZ.cityMountedAnimal();
+    if (cur && cur === sim.shark && CBZ.cityDismount) { try { CBZ.cityDismount(); } catch (e) {} }
     restoreRider();
     hideHud();
     g.invuln = 0;                        // never leak the rider shield into another mode
     CBZ.sharkSimShoreRing = null;
     if (sim.shark) { sim.shark.huntable = false; }   // whatever survives goes back to being a pet
     sim.on = false;
+    sim.needsTeardown = false;
   }
 
   function step(dt) {
@@ -483,10 +492,14 @@
 
   CBZ.onAlways(94, function (dt) {
     if (!dt || dt > 0.5) dt = 0.05;
-    if (g.mode !== "sharksim") { if (sim.on) teardown(); return; }
+    // needsTeardown, not sim.on, is the restore trigger: after a win/loss
+    // sim.on is already false (the card owns the screen, the megalodon stays
+    // visible under it) but the mount, the rider state and the shore ring
+    // are still out — leaving this mode by ANY route must put them back.
+    if (g.mode !== "sharksim") { if (sim.needsTeardown) teardown(); return; }
     const st = g.state;
     if (st !== "playing") {
-      if (sim.on && st === "title") teardown();
+      if (sim.needsTeardown && st === "title") teardown();
       else if (sim.on && (st === "won" || st === "lost")) { restoreRider(); hideHud(); sim.on = false; }
       return;
     }
