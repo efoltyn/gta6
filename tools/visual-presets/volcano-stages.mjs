@@ -4,6 +4,17 @@
    the rAF loop, forces the director to the volcano, and photographs the same
    simulated seconds of the same seeded eruption on both sides.
 
+   FLAG A/B AS OF 2026-08-23: both sides are THIS checkout; the before side
+   boots with ?cfg_VOLCANO_V3=0. (The deployed build stopped answering the
+   harness's readiness probe, and a before that cannot boot is not a
+   baseline.) VOLCANO_V3 is the eruption's SKY wave — the ~180 m fog-exempt
+   column, the ash ledger back on as a downwind WEDGE instead of the
+   island-wide blanket that got it switched off on 2026-08-16, and the sun
+   dimming toward darkness-at-noon as the deposit builds. The lava, the
+   pyroclastic current and the lahar are identical on both sides, so their
+   beats double as regression controls: any drift there is a bug, not a
+   feature.
+
    VOLCANO ONLY (owner, 2026-08-15: "I just wanted the volcano to be more
    real... I never mentioned nuke"). The four nuke-finale beats this preset
    used to end on are gone with the finale itself — the island's arc is
@@ -60,28 +71,32 @@
    stage its own subject is not a beat. */
 const subjects = [
   { id: "warn-lane", label: "Warning — the lane announces itself", hud: false,
-    focus: "Warn phase, no words. The crater glows and ROCK is already coming down the corridor the pyroclastic flow will take. Before-side: the same telegraph buried under a grey ash rain (owner, 2026-08-16: gone) and a heavier haze.",
+    focus: "CONTROL. The warn telegraph is untouched by V3: crater glow, rock trickling down the corridor the flow will take, the crowd clearing it. The two sides must be near-identical — drift here is a regression.",
     act: { force: "volcano", untilState: "warn", extraSecs: 4.2 },
     cam: { lane: true, ahead: 60, side: 26, alt: 26, fallback: { x: 108, y: 46, z: 672, ax: 0, ay: 20, az: 600 } } },
 
-  { id: "column", label: "The eruption column", hud: false,
-    focus: "OWNER, 2026-08-16: the smoke 'looks like flat bouncing circle ish things'. It did — every puff was a fixture bobbing on three sinusoids. The column is now an emitter (the RPG-smoke lifecycle): puffs born small over the vent, growing as they climb, spreading into the cauliflower head, so the pillar visibly RISES instead of jittering in place.",
+  { id: "column", label: "The eruption column — the silhouette", hud: false,
+    focus: "THE V3 MONEY SHOT. An eruption column is the most dramatic silhouette in nature; the before side's is ~60 m — barely twice the mountain — and the eruption's own 380 m fog wall eats its head. After: ~180 m of fog-exempt soot standing over the island, cauliflower head leaning downwind. Same emitter, same sprite count, zero extra draw calls.",
     /* force: this beat used to inherit whatever disaster the director
        happened to be on — run alone (`--subjects column`) it photographed a
        LIGHTNING STORM and reported ok:true, the exact order-dependence the
-       header note above forbids. The nuke-wide/landmark beats are the ONLY
-       deliberate inheritors (they continue nuke-fireball's cloud, and
-       re-forcing would reset its age). */
-    act: { force: "volcano", untilState: "active", extraSecs: 3.2 },
-    cam: { x: 118, y: 40, z: 686, ax: 0, ay: 30, az: 600 } },
+       header note above forbids. */
+    /* pinWind perpendicular to the tripod's sightline, so the column leans
+       in PROFILE — a lean toward or away from the lens reads as nothing. */
+    act: { force: "volcano", untilState: "active", extraSecs: 6, pinWind: [0.7, -0.7] },
+    /* the tripod stands ~205 m offshore so a 55° lens can hold the full
+       pillar: at that distance the vertical half-field is ~105 m, which is
+       the after column's head with margin — and the same frame is what
+       shows the before column barely clearing the peak. */
+    cam: { x: 150, y: 55, z: 745, ax: 0, ay: 85, az: 600 } },
 
   { id: "lava-day", label: "Lava close-up — opaque crust", hud: false,
-    focus: "THE BIBLE SHOT (owner's Etna close-up, 2026-08-15): a DARK crusted surface with a bright connected LACE of melt cracked through it — thin filaments wrapping irregular black islands, meandering between the levees. Before-side: one smooth bright band of even orange, the 'glowing road'. Organic, never geometric. vol_lavaTransparent must read 0.",
+    focus: "CONTROL — THE BIBLE SHOT (owner's Etna close-up, 2026-08-15): a DARK crusted surface with a bright connected LACE of melt cracked through it. V3 does not touch the lava; the two sides must match. vol_lavaTransparent must read 0 on both.",
     act: { force: "volcano", untilState: "active", extraSecs: 12 },
     cam: { lava: true, frame: 0.55, out: 22, alt: 11, behind: 3, fallback: { x: 26, y: 12, z: 626, ax: 4, ay: 4, az: 606 } } },
 
   { id: "lava-front", label: "The advancing nose — does it FLOW?", hud: false,
-    focus: "The leading edge at close range. It must nose forward continuously, the lace must travel downstream, and — new with the 2026-08-15 bible — the run should FORK: vol_lavaBranches counts the children a stem has grown, and a fan of lobed noses is what 'organic' means here. Before-side: one uniform ribbon, no forks, smooth even glow.",
+    focus: "CONTROL. The leading edge at close range: it noses forward continuously, the lace travels downstream, the run forks (vol_lavaBranches). Identical machinery on both sides.",
     /* behind 6 (was -5): stand UP-flow of the nose, above it, looking down
        the descent. Down-flow of a nose on a cone means below its own ridge
        line, and the peek run photographed the ridge instead of the rock. */
@@ -89,12 +104,12 @@ const subjects = [
     cam: { lava: true, frame: 1, out: 13, alt: 9, behind: 6, fallback: { x: 22, y: 9, z: 620, ax: 4, ay: 3, az: 604 } } },
 
   { id: "pyroclastic", label: "Pyroclastic flow — mid-descent", hud: false,
-    focus: "THE KILLER. A ground-hugging avalanche of 600 C rock and gas boiling down the fall line at 6x sprinting speed, engulfing its lane. Opaque overlapping billows with an incandescent basal fringe — not translucent orange rocks. Before-side has no such hazard at all.",
+    focus: "CONTROL — THE KILLER. A ground-hugging avalanche of 600 C rock and gas boiling down the fall line at 6x sprinting speed. V3 leaves the current alone; the only after-side difference in frame should be the taller column and the greyer downwind air behind it.",
     act: { force: "volcano", untilState: "active", extraSecs: 5.4, needLine: true },
     cam: { lane: true, ahead: 44, side: 15, alt: 34, fallback: { x: 96, y: 34, z: 664, ax: 0, ay: 16, az: 604 } } },
 
   { id: "pyro-close", label: "The cloud at reading distance", hud: false,
-    focus: "OWNER: 'there's big rocks looking of smoke — smoke doesn't look like big bouncing boulders'. Close enough that INDIVIDUAL elements are legible, which is exactly where the before-side falls apart: lit low-poly icosahedra up to ~21 m across, visibly tumbling on their own axes. It has to read as a churning ash cloud with soft irregular edges, not as a rockslide.",
+    focus: "CONTROL. The cloud close enough that individual elements are legible: it must read as churning ash with soft irregular edges on BOTH sides — V3 does not touch the current's sprites.",
     act: { force: "volcano", untilState: "active", extraSecs: 4.3, needLine: true },
     cam: { lane: true, ahead: 20, side: 30, alt: 13, fallback: { x: 74, y: 22, z: 646, ax: 10, ay: 12, az: 610 } } },
 
@@ -103,10 +118,15 @@ const subjects = [
     act: { force: "volcano", untilState: "active", extraSecs: 11.5 },
     cam: { lahar: true, ahead: 34, side: 22, alt: 24, fallback: { x: 62, y: 20, z: 660, ax: 0, ay: 6, az: 612 } } },
 
-  { id: "ash-street", label: "The town late in the eruption — no blanket", hud: false,
-    focus: "OWNER, 2026-08-16: 'the ash covering the map is not needed... the ash covers everything in a dumb way.' Before-side: the downwind town greyed over by the quad blanket, deep in fog. After: the blanket, the ash rain and the choke are gone — the town keeps its own colour for the whole event and the eruption reads on the mountain, not as a map-wide grey filter.",
-    act: { force: "volcano", untilState: "active", extraSecs: 17.5 },
-    cam: { x: 46, y: 15, z: 662, ax: -6, ay: 3, az: 618 } },
+  { id: "ash-wedge", label: "The wedge — ash with an outside", hud: false,
+    focus: "THE FLAG'S EARN-BACK. VOLCANO_ASH_LOAD went default-off on 2026-08-16 because spread 0.16 greyed the WHOLE island at once — a screen filter, not a place. V3 refits the fall as a downwind wedge (spread 0.05, lobe^3.2): mid-eruption the downwind ground is visibly greying while the upwind side keeps its colour. Before-side: no ash anywhere — and no roof loads, no choke, no indoors tension either.",
+    act: { day: true, force: "volcano", untilState: "active", extraSecs: 10, pinWind: [0.6, 0.8] },
+    cam: { wedge: true, along: 0.72, side: 0.5, alt: 34, fallback: { x: 46, y: 26, z: 662, ax: 0, ay: 8, az: 600 } } },
+
+  { id: "dark-noon", label: "Darkness at noon — the ash blots the sun", hud: false,
+    focus: "Late in the event, staged at MIDDAY, shot wide from upwind. After: the deposit is deep downwind, the sun is choked to a fraction (metrics record sunIntensity), the fog wall has closed in with a visible cause, roofs are failing under the load through the one structural ledger (audit_ashRoofCollapses). Before: bright noon over a clean island for the whole event.",
+    act: { day: true, force: "volcano", untilState: "active", extraSecs: 17.5, pinWind: [0.6, 0.8] },
+    cam: { wedge: true, upwind: true, along: 0.55, side: 0.15, alt: 42, lookY: 40, fallback: { x: -120, y: 44, z: 540, ax: 30, ay: 40, az: 620 } } },
 
   { id: "lava-night", label: "Lava at night — it lights the hill", hud: false,
     focus: "The wide bible photo's regime: a BLACK cone wearing a branching incandescent fan, the lace unchanged from noon (unlit IS incandescent), the vent apron the brightest thing in frame, pooled lights painting the hillside. Both sides now stage REAL night — the old staging set the clock before stepping 40 simulated seconds and photographed dawn.",
@@ -119,7 +139,7 @@ const subjects = [
     cam: { lava: true, frame: 0.55, out: 22, alt: 11, behind: 3, fallback: { x: 26, y: 12, z: 626, ax: 4, ay: 4, az: 606 } } },
 
   { id: "cooled", label: "When the eruption ends — the flow dies where it stands", hud: false,
-    focus: "The supply stops, so the river stalls and chills BLACK in place: crusted dark rock, the last ember seams fading in the deepest cracks, kept on the cone as a scar (the lahar's precedent). Before-side: the glowing flows are DELETED the frame the eruption ends — the strip photographs a bare hillside three times. The strip is the proof: the after row dims across the same simulated seconds.",
+    focus: "CONTROL. The supply stops, so the river stalls and chills BLACK in place: crusted dark rock, ember seams fading, kept on the cone as a scar. Identical quench on both sides; the strip should dim the same way in both rows.",
     act: { force: "volcano", untilState: "active", extraSecs: 21 },
     strip: { frames: 3, stepSec: 2.6 },
     cam: { lava: true, scar: true, frame: 0.5, out: 24, alt: 12, behind: 2, fallback: { x: 26, y: 12, z: 626, ax: 4, ay: 4, az: 606 } } },
@@ -144,8 +164,11 @@ async function stageVolcano(input) {
     for (const child of Array.from(document.body.children)) {
       if (child === canvas || (canvas && child.contains && child.contains(canvas))) continue;
       if (child.id === "__volcanoOverlay") continue;
-      // the whiteout sheet is the SUBJECT of nuke-pov — never hide it
-      if (child.id === "nukeFlash") continue;
+      /* #nukeFlash is HIDDEN with the rest of the HUD. The exception that
+         used to live here served the deleted nuke-pov beat; with it gone,
+         all it did was whitewash whichever side's healed player happened to
+         be standing in the pyroclastic lane at capture time — a dark-noon
+         before frame shipped at ~90% white that way. */
       child.style.visibility = visible ? "" : "hidden";
     }
   };
@@ -260,6 +283,26 @@ async function stageVolcano(input) {
   const aliveOf = () => { try { return CBZ.surv.aliveCount(); } catch (_) { return -1; } };
   const aliveBefore = aliveOf();
 
+  /* PIN THE WIND. The eruption takes its plume bearing from the live weather
+     wind when one is blowing (startEruption's windVec() branch), and the
+     seeded hazard stream DIVERGES between the two sides long before the ash
+     beats run — kill counts differ, quake.js draws differ, so by beat eight
+     the same rnd() call hands each side a different bearing and the "same"
+     wedge falls on two different towns. act.pinWind wraps CBZ.weatherWind
+     with a fixed vector BEFORE the force, so both sides drop their ash — and
+     lean their columns — over the same streets, and the wind-aimed tripod
+     stands on the same ground in both frames. The wrap persists for the rest
+     of the page on purpose: every later eruption on both sides stays pinned,
+     which is the consistency the comparison needs. */
+  if (act.pinWind && CBZ.weatherWind) {
+    const l = Math.hypot(act.pinWind[0], act.pinWind[1]) || 1;
+    window.__volcanoWindPin = { x: act.pinWind[0] / l, z: act.pinWind[1] / l, speed: 8 };
+    if (!window.__volcanoWindWrapped) {
+      window.__volcanoWindWrapped = true;
+      const orig = CBZ.weatherWind;
+      CBZ.weatherWind = () => window.__volcanoWindPin || orig();
+    }
+  }
   if (act.force) { CBZ.disasters.force(act.force); step(0.1); }
   if (act.untilState) stepUntilState(act.untilState, 30);
   if (act.extraSecs) step(act.extraSecs);
@@ -425,6 +468,37 @@ async function stageVolcano(input) {
         aimNote = "lava flank";
       }
     } catch (_) {}
+  } else if (cam.wedge) {
+    /* THE WIND AIMS THE CAMERA. The ash wedge has no hazards() entry — it is
+       ground, not a front — but its axis IS the weather's wind vector, which
+       both sides drove identically from the same seed during warn. Stand
+       down-wind (or up-wind with cam.upwind, for the wide darkness shot),
+       offset sideways so the mountain and the wedge share the frame, and
+       look at the mid-wedge ground. On the before side the identical tripod
+       photographs the same ground staying green, which is the comparison. */
+    try {
+      const hill = (CBZ.surv && CBZ.surv.arena) ? CBZ.surv.arena.hills[0] : { x: 0, z: 600 };
+      const R = (CBZ.SURV && CBZ.SURV.arena && CBZ.SURV.arena.radius) || 120;
+      const w = CBZ.weatherWind ? CBZ.weatherWind() : null;
+      let wx = 1, wz = 0;
+      if (w && Math.hypot(w.x || 0, w.z || 0) > 0.01) {
+        const l = Math.hypot(w.x, w.z); wx = w.x / l; wz = w.z / l;
+      }
+      const sgn = cam.upwind ? -1 : 1;
+      const px = -wz, pz = wx;
+      const dist = R * (cam.along != null ? cam.along : 0.7);
+      const sx = hill.x + sgn * wx * dist + px * R * (cam.side != null ? cam.side : 0.35);
+      const sz = hill.z + sgn * wz * dist + pz * R * (cam.side != null ? cam.side : 0.35);
+      const gAtW = (x, z) => (CBZ.surv && CBZ.surv.arena ? CBZ.surv.arena.groundHeightAt(x, z) : 0);
+      const lx = hill.x + wx * R * 0.4, lz = hill.z + wz * R * 0.4;
+      aimed = {
+        x: sx, y: Math.max(gAtW(sx, sz), 0) + (cam.alt || 30), z: sz,
+        // lookY tilts the frame up so a tall column can share it with the
+        // ground — the dark-noon beat's subject is BOTH at once
+        ax: lx, ay: gAtW(lx, lz) + (cam.lookY != null ? cam.lookY : 6), az: lz,
+      };
+      aimNote = cam.upwind ? "upwind wide" : "downwind wedge";
+    } catch (_) {}
   }
   if (!aimed && cam.fallback) { aimed = cam.fallback; aimNote = "fallback tripod"; }
   if (act.needLine && !lineHazard()) {
@@ -540,9 +614,11 @@ async function stageVolcano(input) {
 export default {
   id: "volcano-stages",
   title: "The Stratovolcano",
-  description: "One seeded survival match per build, the director forced through the volcano's beats and stepped to identical simulated seconds. The travelling beats aim themselves off CBZ.disasters.hazards() so the camera stands on the flank of the ACTUAL flow rather than a guessed hillside, and the lava tripod raycasts its own sightline. vol_lavaTransparent is the owner's 'see thru' complaint as a number and must read 0.",
-  beforeLabel: "BEFORE · DEPLOYED",
-  afterLabel: "AFTER · LOCAL",
+  description: "Flag A/B on this checkout: the before side boots with cfg_VOLCANO_V3=0. V3 is the eruption's sky — the ~180 m fog-exempt column, ashfall back as a downwind WEDGE (the 2026-08-16 island-wide blanket was a spread-parameter bug, not a reason to delete the hazard), roof loads and the choke back with it, and the sun dimming toward darkness-at-noon as the deposit builds. Lava/pyro/lahar beats are regression controls. The travelling beats aim themselves off CBZ.disasters.hazards(); the ash beats aim off the weather's own wind vector.",
+  defaultBefore: "local",
+  beforeParams: { cfg_VOLCANO_V3: 0 },
+  beforeLabel: "BEFORE · VOLCANO_V3=0",
+  afterLabel: "AFTER · VOLCANO_V3=1",
   viewport: { width: 1100, height: 680 },
   readyExpression: "window.THREE && window.CBZ && CBZ.CONFIG",
   urlParams: { seed: 90210 },
@@ -567,12 +643,14 @@ export default {
     vol_ventGlows: { label: "Incandescent vent aprons", better: "higher" },
     vol_ashColumns: { label: "Sprite ash columns", better: "higher" },
     vol_pyroLive: { label: "Pyroclastic flows live", better: "higher" },
-    /* The ash blanket was deliberately REMOVED on 2026-08-16 (owner: "the
-       ash covering the map is not needed"), so its old higher-is-better
-       rows would paint the fix red. The depth stays printed — reading 0 on
-       the after side IS the feature — and the roof-collapse row goes with
-       the mechanic that fed it. */
-    vol_ashPeakDepth: { label: "Ash covering the map (removed)", unit: "m", better: "lower" },
+    /* V3 brings the ash LEDGER back as a downwind wedge (see the flag note
+       in world/volcanofx.js), so depth is a feature again — on the axis,
+       where the wedge is, never map-wide. The roof-collapse row returns
+       with the mechanic: roofs failing under load inside one event is the
+       indoors-tension the 2026-08-16 removal threw out with the blanket. */
+    vol_ashPeakDepth: { label: "Downwind ash deposited", unit: "m", better: "higher" },
+    audit_ashRoofCollapses: { label: "Roofs lost to ash load", better: "higher" },
+    sunIntensity: { label: "Sun at capture (ash blots it)", better: "lower" },
     audit_pyroRuns: { label: "Pyroclastic runs", better: "higher" },
     audit_laharRuns: { label: "Lahar runs", better: "higher" },
     tickAvgMs: { label: "Sim tick avg", unit: "ms", better: "lower" },

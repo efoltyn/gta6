@@ -2988,9 +2988,18 @@
        the pyroclastic current's mass); the flag revert keeps the old dotted
        Points cloud verbatim. */
     if (V && V.ashColumn) {
+      /* V3: THE COLUMN IS THE SILHOUETTE. At 52-68 m the pillar was barely
+         twice the 26 m mountain — a smudge that scene fog then ate. A real
+         eruption column is the most dramatic shape in nature, and on a 240 m
+         island a ~180 m fog-exempt pillar is what reads as that from every
+         beach. Same sprite count as before — the emitter's puffs scale with
+         `height`/`r`, so the drama costs zero extra draw calls. */
+      const V3 = CBZ.CONFIG.VOLCANO_V3 !== false;
       ctx.st.erColumn = V.ashColumn({
         x: h.x, z: h.z, y: h.peak + 3,
-        height: 52 + 16 * ctx.intensity, r: 6.5 + 2.5 * ctx.intensity,
+        height: V3 ? 150 + 55 * ctx.intensity : 52 + 16 * ctx.intensity,
+        r: V3 ? 11 + 4 * ctx.intensity : 6.5 + 2.5 * ctx.intensity,
+        fogless: V3,
         parent: root(),
       });
       ctx.st.erSmoke = null;
@@ -3154,15 +3163,25 @@
        under which the lava's own light is supposed to be the thing you see.
        dayK() is the sun's own elevation off core/daynight.js. */
     const dk = dayK();
-    ctx.env.fog = lerpHex(0x120b08, 0x2e211c, dk); ctx.env.fogNear = 55; ctx.env.fogFar = 380;
+    /* V3: ASH BLOTS THE SUN. The one thing every eyewitness account of a real
+       ashfall agrees on is darkness at noon — and the fixed 0.5 sun above
+       could never say it. ashK follows the DEPOSIT (the field's own peak
+       depth), so the sky darkens exactly as fast as the ground greys and a
+       revert of the ash flag reverts the darkness with it. The fog wall
+       tightens with it — 380 → ~290 at full load, still twice the 2026-08-16
+       "island-wide grey-out" distance, and now it has a visible cause. */
+    const ashK = (CBZ.CONFIG.VOLCANO_V3 !== false && ctx.st.erAshLoad)
+      ? Math.min(1, ctx.st.erAshLoad.peakDepth / 0.3) : 0;
+    ctx.env.fog = lerpHex(0x120b08, lerpHex(0x2e211c, 0x181310, ashK), dk);
+    ctx.env.fogNear = 55; ctx.env.fogFar = 380 - 90 * ashK;
     /* AND IT MUST NOT PAINT THE ISLAND PEACH. 0xff6a3a is a fully saturated
        orange; run through every diffuse surface on the map it turned grey ash,
        grey concrete and green grass into one warm pastel, which is the
        opposite of the reference photograph the owner sent — that mountain is
        DARK. An ash-shrouded eruption sky is a dirty brown, not a sodium lamp,
        so the sun keeps its warmth and loses most of its saturation. */
-    ctx.env.sunInt = 0.5 * dk; ctx.env.sunColor = 0xd9714a;
-    ctx.env.hemiInt = 0.14 + 0.42 * dk; ctx.env.hemiColor = 0x9c7461;
+    ctx.env.sunInt = 0.5 * dk * (1 - 0.78 * ashK); ctx.env.sunColor = 0xd9714a;
+    ctx.env.hemiInt = (0.14 + 0.42 * dk) * (1 - 0.55 * ashK); ctx.env.hemiColor = 0x9c7461;
     ctx.st.erFountain.update(dt, h.x, h.peak, h.z);
     if (ctx.st.erSmoke) ctx.st.erSmoke.update(dt, h.x + (ctx.st.erWindX || 0) * 14, h.peak + 6, h.z + (ctx.st.erWindZ || 0) * 14);
     // the sprite pillar leans with the same wind the ash falls on
@@ -3173,7 +3192,9 @@
     if (ctx.st.erCrater) ctx.st.erCrater.material.opacity = 0.7 + 0.25 * (0.5 + 0.5 * Math.sin(CBZ.now * 0.012));
     // the eruption is still weather — a dimmed sun and a downwind haze — but
     // a light one now the ash is gone: 0.55 fog was the island-wide grey-out
-    weather({ rain: 0, wind: 7, windDir: { x: ctx.st.erWindX || 1, z: ctx.st.erWindZ || 0 }, fog: 0.3, fogColor: 0x2e211c });
+    // the ash thickens the air it is falling through (V3: ashK rides the
+    // deposit; pre-V3 ashK is 0 and this is the old constant 0.3)
+    weather({ rain: 0, wind: 7, windDir: { x: ctx.st.erWindX || 1, z: ctx.st.erWindZ || 0 }, fog: 0.3 + 0.2 * ashK, fogColor: 0x2e211c });
     if (rnd() < dt * 1.6) sound("rumble");
 
     // ---------------- LAVA ----------------
@@ -3306,7 +3327,16 @@
            makes the wedge readable at all. */
         rate: 0.014 + 0.024 * ctx.intensity,
         windX: ctx.st.erWindX, windZ: ctx.st.erWindZ,
-        srcX: h.x, srcZ: h.z, spread: 0.16,
+        /* V3: A WEDGE, NOT A BLANKET. spread 0.16 put a sixth of the axis
+           rate on every cell — the whole island greyed at once, which is
+           precisely the "covers everything in a dumb way" that got the
+           entire ash ledger switched off on 2026-08-16. At 0.05/lobe 3.2
+           the fall is a sector: the downwind town greys, chokes and loses
+           roofs while the upwind beach stays green — a hazard with an
+           outside, which is what makes it a hazard at all. */
+        srcX: h.x, srcZ: h.z,
+        spread: CBZ.CONFIG.VOLCANO_V3 !== false ? 0.05 : 0.16,
+        lobe: CBZ.CONFIG.VOLCANO_V3 !== false ? 3.2 : 2.2,
       });
       // ROOFS FAIL UNDER THE LOAD, through the ONE ledger. Wet ash is ~1000
       // kg/m3: a quarter-metre on a flat roof is a quarter of a tonne per
@@ -3400,13 +3430,13 @@
         }
       }
       /* 5) ASHFALL — glass in the lungs, and a roof is a real answer to it.
-         THE ASH FIELD IS THE ONLY AUTHORITY ON WHERE THERE IS ASH — and
-         with VOLCANO_ASH_LOAD now defaulting OFF (owner, 2026-08-16) there
-         is usually no ash at all, so there is usually no choke. The old
-         geometric downwind wedge that stood in when the field was absent is
-         deleted rather than resurrected: it choked people with nothing on
-         screen to explain it, which is exactly the death-by-arithmetic the
-         owner reported. No picture, no damage. */
+         THE ASH FIELD IS THE ONLY AUTHORITY ON WHERE THERE IS ASH. V3
+         (2026-08-23) turned the field back on as a downwind WEDGE — the
+         2026-08-16 default-off was aimed at the island-wide blanket, and
+         world/volcanofx.js's flag note carries that investigation. The rule
+         survives unchanged either way: the choke reads depthAt() off the
+         drawn field, so no picture, no damage — the geometric stand-in
+         wedge that once choked people over clean ground stays deleted. */
       if (!sheltered(a)) {
         let choke = 0;
         /* AND IT IS A GRADIENT, NOT A SWITCH. The measurement that found this:
@@ -3545,8 +3575,11 @@
     /* A SCAR IS A MEMORY, NOT A LEAK. Two eruptions can legitimately happen
        in one match (the volcano, plus the earthquake's surprise one), and a
        third would only be stacking a second full ash field on top of an
-       identical one. Oldest out at four. */
-    while (volScars.length > 4) { const old = volScars.shift(); try { old.dispose(); } catch (e) {} }
+       identical one. With the ash ledger back on (V3) one eruption leaves
+       THREE scars — lava composite, set lahar, ash field — so the old cap
+       of four evicted the first eruption's lava the moment the second one
+       ended. Six holds exactly the two legitimate eruptions' full memory. */
+    while (volScars.length > 6) { const old = volScars.shift(); try { old.dispose(); } catch (e) {} }
     ctx.st.erRoofs = null;
     ctx.st.erWindX = ctx.st.erWindZ = null;
     ctx.st.erupting = false;
@@ -3630,9 +3663,17 @@
       if (P.r > 0.7) { const d = Math.hypot(x - P.m.position.x, z - P.m.position.z); if (d < P.r + 3) t = Math.max(t, Math.min(0.95, 1 - (d - P.r * 0.85) / 3)); }
     });
     if (ctx.st.lahar && ctx.st.lahar.hitTest(x, z)) t = Math.max(t, 0.8);
-    // no downwind-wedge term any more: with the ash gone (2026-08-16) there
-    // is nothing there to flee, and bots emptying a visibly clean half of the
-    // island read as broken pathing
+    /* THE ASH IS BACK, SO THE FLEEING READS AGAIN. The 2026-08-16 build cut
+       this term because bots emptying a visibly clean half of the island
+       looked like broken pathing — correct, WITH the field deleted. V3's
+       field is a visible grey wedge, so the term returns as a gradient read
+       off the same depthAt() the choke uses: bots drift out of exactly the
+       ground the player can see greying over. Capped at 0.5 — leaving the
+       wedge must never outrank fleeing the flow, the melt or the mud. */
+    if (CBZ.CONFIG.VOLCANO_V3 !== false && ctx.st.erAshLoad) {
+      const ad = ctx.st.erAshLoad.depthAt(x, z);
+      if (ad > ASH_DOT_DEPTH) t = Math.max(t, Math.min(0.5, (ad - ASH_DOT_DEPTH) / 0.35));
+    }
     return t;
   }
 
