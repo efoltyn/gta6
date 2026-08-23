@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- ============================================================
+     PrivacyInfo.xcprivacy — the app's privacy manifest.
+
+     Apple has required one of these since spring 2024, and an upload without
+     it (or with one that contradicts the App Store Connect privacy answers)
+     gets an ITMS-91053 email back within minutes of the upload.
+
+     What this file says is the literal truth about this build: the game runs
+     entirely on-device from the bundled web assets, collects nothing, tracks
+     nothing, and makes no outbound request at all (the last one, a Google
+     Fonts stylesheet, was self-hosted into css/fonts.css for exactly this
+     reason). So:
+
+       • NSPrivacyTracking            = false  → no tracking, no ATT prompt
+       • NSPrivacyTrackingDomains     = []     → nothing to declare
+       • NSPrivacyCollectedDataTypes  = []     → answer "Data Not Collected"
+                                                 in App Store Connect to match
+       • NSPrivacyAccessedAPITypes    = UserDefaults, reason CA92.1
+
+     CA92.1 is "access info from same app, per documentation" — WKWebView
+     stores the web view's own state (and the game's localStorage saves) in
+     the app's own UserDefaults container. It never leaves the app. Nothing
+     here is read for device fingerprinting, which is what the required-reason
+     rule is actually policing.
+============================================================ -->
+<plist version="1.0">
+<dict>
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

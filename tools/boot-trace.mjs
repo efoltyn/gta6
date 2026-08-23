@@ -45,6 +45,8 @@
      node tools/boot-trace.mjs --mode survival
      node tools/boot-trace.mjs --all              # all three, one browser
      node tools/boot-trace.mjs --budget 900       # give it 15 minutes
+     node tools/boot-trace.mjs --prof             # per-system ms table (in-page,
+                                                  # beacon-free — the precise one)
 
    Exit codes: 0 built, 3 still running when the budget expired (the report
    names the step it was inside), 1 the page never came up.
@@ -65,6 +67,7 @@ const MODES = has("--all") ? ["escape", "survival", "city"] : [opt("--mode", "ci
    build finished and I can ask questions" and "the rasterizer owns this tab". */
 const PARAMS = opt("--params", "");
 const deep = has("--deep");
+const prof = has("--prof");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (s) => process.stdout.write(s + "\n");
 
@@ -193,10 +196,17 @@ const INSTALL = (mode) => `(function(){
      phase trace has nothing left to say — every checkpoint has fired and the
      thread is inside the per-frame chain. This wraps every registered updater
      and always-runner so each one pings BEFORE it runs: whatever the last
-     ping names is the function that did not return. It is ~200 beacons a
-     frame, which is fine for the two or three frames it takes to catch a
-     hang, and it arms itself at the LAST build checkpoint so the build trace
-     stays readable. (No backticks in this block.) */
+     ping names is the function that did not return. It arms itself at the
+     LAST build checkpoint so the build trace stays readable.
+
+     TRUST THE BUILD BEACONS, DOUBT THE PER-FRAME ONES. sendBeacon delivery is
+     best-effort, and at hundreds of pings per frame it demonstrably drops and
+     stalls under load: an early --deep run of this tool pointed at the
+     wildlife tick as a 175-second hang, and the in-page profiler (--prof)
+     then measured that same tick at 1.4 ms — the beacons had simply stopped
+     arriving mid-frame. Build checkpoints fire a few dozen times a MINUTE and
+     have never lied; anything per-frame here is a hint that says WHERE to aim
+     --prof, never a verdict. (No backticks in this block.) */
   if (${deep} && !window.__deepArmed) {
     window.__deepArmed = true;
     var armDeep = function () {
@@ -215,6 +225,36 @@ const INSTALL = (mode) => `(function(){
     };
     var bs = CBZ.bootStep;
     CBZ.bootStep = function (key) { var r = bs.apply(this, arguments); if (key === "boot:frames") armDeep(); return r; };
+  }
+  /* --prof: THE PRECISE INSTRUMENT. No beacons at all — every updater and
+     always-runner is wrapped with a performance.now() accumulator into an
+     in-page table (count, total ms, worst call), and the tool reads the table
+     over CDP between frames. This is what settles an argument --deep can only
+     start: it is immune to beacon loss, it survives any frame rate, and its
+     numbers are the function's own wall time. It re-wraps every second so
+     late registrations are caught too. (No backticks in this block.) */
+  if (${prof} && !window.__profArmed) {
+    window.__profArmed = true;
+    window.__prof = { rows: Object.create(null) };
+    var wrapProf = function (list, kind) {
+      for (var i = 0; i < list.length; i++) (function (u) {
+        if (u.__prof) return; u.__prof = true;
+        var key = kind + "@" + u.order + " (" + (u.source || "?") + ")";
+        var f = u.fn;
+        u.fn = function (dt) {
+          var s = performance.now();
+          try { return f.call(this, dt); }
+          finally {
+            var ms = performance.now() - s;
+            var r = __prof.rows[key] || (__prof.rows[key] = { n: 0, ms: 0, max: 0 });
+            r.n++; r.ms += ms; if (ms > r.max) r.max = ms;
+          }
+        };
+      })(list[i]);
+    };
+    var rewrapProf = function () { wrapProf(CBZ.updaters || [], "upd"); wrapProf(CBZ.always || [], "alw"); };
+    rewrapProf();
+    setInterval(rewrapProf, 1000);
   }
   ping("phase/armed:${mode}");
   return true;
@@ -294,6 +334,21 @@ for (const mode of MODES) {
     }
   }
   const total = (Date.now() - t0) / 1000;
+  if (prof) {
+    const table = await ev(`JSON.stringify((function(){
+      if (!window.__prof) return null;
+      var rows = Object.keys(__prof.rows).map(function(k){ var r=__prof.rows[k]; return { k:k, ms:Math.round(r.ms), n:r.n, max:Math.round(r.max*10)/10 }; });
+      rows.sort(function(a,b){ return b.ms - a.ms; });
+      return rows.slice(0, 14);
+    })())`, 30000);
+    log("");
+    log("  PROFILE — total ms per system since play (max = worst single call):");
+    try {
+      for (const r of JSON.parse(table) || []) {
+        log(`    ${String(r.ms).padStart(8)}ms  n=${String(r.n).padStart(6)}  max=${String(r.max).padStart(8)}ms  ${r.k}`);
+      }
+    } catch (_) { log("    (profile table unreadable: " + String(table).slice(0, 80) + ")"); }
+  }
   log("");
   if (done) {
     log(`  BUILT in ${total.toFixed(1)}s over ${rows.length} checkpoints`);

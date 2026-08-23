@@ -41,3 +41,8 @@ disaster.candidate-*.html
 # regenerates it in a second, and Capacitor copies it into the app at sync
 # time; nothing needs the committed copy.
 dist-ios/
+
+# Natural Disaster Survival's Xcode project — GENERATED on the Mac
+# (cd apps/disaster-ios && npx cap add ios), then patched by tools/setup-ios.mjs.
+# Gang Life's project at ios/App is the opposite: committed, hand-tuned, tracked.
+apps/disaster-ios/ios/

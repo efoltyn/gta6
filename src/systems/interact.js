@@ -1,18 +1,25 @@
 /* ============================================================
    systems/interact.js — Red Dead-style contextual prompt. Walk up to
-   anyone and the options fade in beside them. Four social verbs on the
-   home-row cluster (the numbers belong to the inventory hotbar):
+   anyone and the options fade in beside them. THREE social verbs, never
+   more, on the home-row cluster (numbers belong to the inventory hotbar):
 
-       [J] Insult   [K] Befriend   [;] Steal
+       [J] the headline — what this man IS (Trade / Join / Befriend,
+           or Insult when he is nobody in particular)
+       [K] Talk   [L] Steal
        (fight is left-click / the touch trigger, never a menu row)
-       (Romance was the fourth and is DELETED — see economy.js)
+       (Romance was a fourth and is DELETED — see economy.js)
 
    Merchants, the dealer and bent cops swap a row for Trade, guards for
-   Bribe / Payoff, a cop player for Question / Warn / Cuff / Search,
-   and an approaching NPC replaces the lot with its own offer. THE WARDEN
-   trades in names, never cigarettes: Snitch / Insult / Steal
-   (economy.js's snitch()). Befriend routes through systems/quests.js
-   (favors, rep, and the "they let you walk out" win).
+   Bribe or Payoff, a cop player for Question / Search / Cuff, and an
+   approaching NPC replaces the lot with its own offer — always the same
+   triad: take it, push back, walk away. THE WARDEN trades in names, never
+   cigarettes: Snitch / Insult / Steal (economy.js's snitch()).
+
+   TALK routes through systems/quests.js (favors, rep, and the "they let
+   you walk out" win). It used to be called BEFRIEND and be on every
+   inmate in the prison; friendship is now something an NPC OFFERS you
+   after you've earned it, and systems/prisonfriends.js owns that — see
+   the VERB table for the whole argument.
 
    ON TOUCH the whole card is REPLACED rather than restyled — on iPad,
    every choice is a vertical rail of buttons docked beside Reload, ONE
@@ -36,14 +43,12 @@
   //  say press g or shift DUH i can't do that... like turning tips off is a key
   //  I can't press."
   //
-  //  This card was a keyboard artefact end to end: four [J][K][L][;] chips, a
-  //  fifth verb silently DROPPED by cap4 because there were only four keys to
-  //  reach it with, and an "[H] Tips: ON" footer whose only affordance was a key
-  //  no tablet has. On touch it becomes:
-  //    • iPad: every contextual verb in one vertical rail beside Reload, one
+  //  This card was a keyboard artefact end to end: four [J][K][L][;] chips and
+  //  an "[H] Tips: ON" footer whose only affordance was a key no tablet has.
+  //  On touch it becomes:
+  //    • iPad: the contextual verbs in one vertical rail beside Reload, one
   //      52px+ button per verb — a single WORD plus a status/price chip;
-  //    • phone: four compact primary buttons plus overflow pills, so nothing the
-  //      context offers is unreachable on the narrower surface;
+  //    • phone: the same verbs stacked in one .svbtn column at the thumb;
   //    • the actor's name / read / ONE teaching line above the row in the
   //      gang-city dialogue treatment (white Fredoka 700, black stroke, no box)
   //      instead of a panel of prose beside the NPC;
@@ -86,7 +91,28 @@
   const VERB = {
     insult:   { label: "Insult",          fn: (a) => CBZ.econ.insult(a) },
     fight:    { label: "Fight",           fn: (a) => (CBZ.punch ? CBZ.punch(a) : CBZ.econ.beat(a)) },
-    befriend: { label: "Befriend",        fn: (a) => (CBZ.quests ? CBZ.quests.onTalk(a) : CBZ.econ.talk(a)) },
+    /* TALK IS THE FAVOUR LOOP. IT USED TO BE CALLED "BEFRIEND", AND THAT WAS
+       THE LIE (owner, 2026-08-21: "BEFRIEND, almost entirely taken out of
+       game").
+
+       This button never made a friend. It routes to systems/quests.js's
+       onTalk: ask what a man needs, come back when it's done, collect 34 rep.
+       Calling that "Befriend" put a relationship word on a chore button and
+       stamped it onto EVERY inmate and every clean guard in the prison — the
+       single biggest contributor to the verb count the owner is complaining
+       about, and a promise the button could not keep. Same function, same rep
+       ledger, same "walk you out" ending; it is now named after what it does.
+       Friendship is what happens at the END of doing this a few times, and it
+       is the verb below. */
+    talk:     { label: "Talk",            fn: (a) => (CBZ.quests ? CBZ.quests.onTalk(a) : CBZ.econ.talk(a)) },
+    /* BEFRIEND IS NOW OFFERED, NEVER BROWSED. It appears only when the man in
+       front of you has decided he owes you one — because you pulled someone
+       off him, because you've been buying from him for weeks, or because
+       you've run his favours to the end (systems/prisonfriends.js decides,
+       and verbsFor gates on it). Taking it makes him CREW: he walks with you,
+       runs off snitches and swings at whoever is hunting you. */
+    befriend: { label: "Befriend",        fn: (a) => (CBZ.prisonFriendAccept ? CBZ.prisonFriendAccept(a)
+                                                : (CBZ.quests ? CBZ.quests.onTalk(a) : CBZ.econ.talk(a))) },
     trade:    { label: "Trade",           fn: (a) => {
       const res = CBZ.econ.trade(a);
       if (res && res.ok && a.approach && a.approach.kind === "deal") {
@@ -164,7 +190,8 @@
   const DESC = {
     insult:   "Talk trash · drops rep, may start a brawl",
     fight:    "Throw hands · chain hits for a K.O. combo",
-    befriend: "Do favors, build rep · friends walk you free",
+    talk:     "Ask what they need · running favors builds rep",
+    befriend: "They're offering · take it and they run with you",
     trade:    "Buy contraband with cigarettes",
     bribe:    "Spend cigs to make authority look away",
     snitch:   "Trade a rival's name for the heat on you",
@@ -372,26 +399,38 @@
        kind because a drawn gun outranks a conversation. */
     if (a.intimidMode === "scared") return ["rob", "restrain", "release"];
     if (a.approach && a.approach.t > 0) {
-      if (a.approach.kind === "gangInvite") return ["listen", "accept", "refuse"];
-      if (a.approach.kind === "gangJob") return ["listen", "accept", "refuse"];
-      if (a.approach.kind === "gangParley") return a.approach.cost > 0 ? ["listen", "pay", "respect", "threaten", "refuse"] : ["listen", "accept", "respect", "threaten", "refuse"];
-      if (a.approach.kind === "crewBackup") return ["listen", "accept", "threaten", "refuse"];
-      if (a.approach.kind === "crewDues") return ["listen", "pay", "haggle", "threaten", "refuse"];
-      if (a.approach.kind === "stickUp") return ["listen", "pay", "haggle", "threaten", "refuse"];
-      if (a.approach.kind === "coverStory") return ["listen", "accept", "threaten", "refuse"];
-      if (a.approach.kind === "heatWarning") return ["listen", "accept", "threaten", "refuse"];
-      if (a.approach.kind === "alibiDeal") return ["listen", "pay", "haggle", "threaten", "refuse"];
-      if (a.approach.kind === "witnessFix") return ["listen", "pay", "haggle", "threaten", "refuse"];
-      if (a.approach.kind === "recantOffer") return ["listen", "pay", "haggle", "threaten", "refuse"];
-      if (a.approach.kind === "favor") return ["listen", "accept", "refuse"];
-      if (a.approach.kind === "buyItem") return ["listen", "accept", "haggle", "refuse"];
-      if (a.approach.kind === "copBribe") return ["listen", "accept", "warn", "detain", "refuse"];
-      if (a.approach.kind === "copTip" || a.approach.kind === "copPlea") return ["listen", "accept", "refuse"];
-      if (a.approach.kind === "copTaunt") return ["listen", "warn", "detain", "refuse"];
-      if (a.approach.kind === "turfWarning") return ["listen", "respect", "threaten", "refuse"];
-      if (a.approach.cost > 0) return ["listen", "pay", "haggle", "threaten", "refuse"];
-      if (a.approach.kind === "deal" && a.data && a.data.offer) return ["listen", "trade", "refuse"];
-      return ["listen", "refuse"];
+      /* THREE BUTTONS, AND "LISTEN" IS NOT ONE OF THEM (owner, 2026-08-21: "I
+         like 3 interaction buttons max at a time... more than 3 interaction
+         buttons showing at once looks bad").
+
+         Every menu below used to open with LISTEN, and most ran to five. Two
+         separate things were wrong with that. LISTEN is a button that asks a
+         man who has WALKED UP TO YOU to please start talking — and the pitch
+         is already printed on the card (panelNote reads a.approach.msg) while
+         the long version was one press away. So it is gone as a verb and the
+         long version is now SPOKEN the moment the card opens (autoListen(),
+         below): the NPC talks to you, which is what he came over to do.
+
+         That leaves the decision, which was always the same triad wearing
+         different words — TAKE IT · PUSH BACK · WALK AWAY. THREATEN and
+         HAGGLE are both the middle rung, so a menu never carries both: which
+         one you get depends on whether this man is more afraid of you than he
+         is attached to his price (pressureVerb). Nothing was deleted — every
+         verb below is still reachable, on the read where it makes sense. */
+      const k = a.approach.kind;
+      const press = pressureVerb(a);                      // "haggle" or "threaten"
+      if (k === "gangInvite" || k === "gangJob" || k === "favor") return ["accept", "refuse"];
+      if (k === "copTip" || k === "copPlea") return ["accept", "refuse"];
+      if (k === "gangParley") return [a.approach.cost > 0 ? "pay" : "accept", "respect", "refuse"];
+      if (k === "crewBackup" || k === "coverStory" || k === "heatWarning") return ["accept", "threaten", "refuse"];
+      if (k === "crewDues" || k === "stickUp" || k === "alibiDeal" || k === "witnessFix" || k === "recantOffer") return ["pay", press, "refuse"];
+      if (k === "buyItem") return ["accept", "haggle", "refuse"];
+      if (k === "copBribe") return ["accept", "detain", "refuse"];
+      if (k === "copTaunt") return ["warn", "detain", "refuse"];
+      if (k === "turfWarning") return ["respect", "threaten", "refuse"];
+      if (a.approach.cost > 0) return ["pay", press, "refuse"];
+      if (k === "deal" && a.data && a.data.offer) return ["trade", "refuse"];
+      return ["refuse"];
     }
     // A SNITCH YOU HAVE NOT MADE IS JUST ANOTHER INMATE (JAIL_SNITCH_KNOWLEDGE,
     // entities/ai.js). These three verbs used to appear on ANY reporter, which
@@ -403,8 +442,13 @@
     if (CBZ.game.role !== "cop" && knowsRat) {
       return ["confrontReport", "paySilence", "threatenSnitch"];   // fight = left-click
     }
+    // A COP'S THREE: ask, toss, cuff. WARN was the fourth and it is the one a
+    // badge doesn't need — Cuff already ends the conversation, and warnActor's
+    // "back off" is what Question gets you anyway on anyone who isn't marked.
+    // It stays live on the copTaunt approach, where scattering somebody IS the
+    // decision.
     if (CBZ.game.role === "cop" && !(a.kind === "guard" || a.kind === "warden")) {
-      return ["question", "warn", "detain", "search"];
+      return ["question", "search", "detain"];
     }
     /* THE WARDEN IS NOT A BENT SCREW WITH A BIGGER PRICE (owner, 2026-08-19:
        "he should not accept cigs and have options like [a guard's]... acted
@@ -415,17 +459,69 @@
        Key hunt, unchanged). Campaign beats still outrank this above. */
     if (a.kind === "warden") return ["snitch", "insult", "steal"];
     if (a.kind === "guard") {
-      const gverbs = a.corrupt ? ["bribe", "payoff", "trade", "insult", "steal"] : ["bribe", "insult", "befriend", "steal"];
-      if (!a.data || !a.data.offer) return gverbs.filter((v) => v !== "trade");
-      return gverbs;
+      /* THE BENT SCREW RAN FIVE (bribe/payoff/trade/insult/steal) — the exact
+         menu the owner pointed at ("trading also has like 5"). Two of those
+         five were the same gesture: BRIBE buys this moment, PAYOFF buys the
+         heat off your file. You are never weighing them at once — which one
+         you want is decided by whether you're carrying heat — so the slot
+         shows the one that applies. INSULT leaves a uniform's menu entirely:
+         it's a rep-losing joke with a man who can put you in the hole, and
+         swinging on him is still a left-click away. */
+      const money = (a.corrupt && guardPayoffWorthIt(a)) ? "payoff" : "bribe";
+      const merch = !!(a.data && a.data.offer);
+      if (a.corrupt) return merch ? [money, "trade", "steal"] : [money, "talk", "steal"];
+      return merch ? ["bribe", "trade", "steal"] : ["bribe", "talk", "steal"];
     }
     // FLIRT IS GONE (see economy.js). A relationship that was a rising
     // counter with dialogue rungs is not a relationship.
-    const base = ["insult", "befriend"];              // fight = left-click
-    if (a.data && a.data.offer) base.push("trade");                       // merchants/bent cops
-    base.push("steal");                                                   // pickpocket ANYONE — lift cigs, a chain, even a key
-    if (a.gang >= 0 && CBZ.player.gang == null && (a.rep || 0) >= 40) base.push("join"); // recruit you
-    return base;
+    //
+    /* THE STREET MENU: ONE HEADLINE, THEN TALK, THEN STEAL. Exactly three,
+       by construction rather than by capping.
+
+       The first draft of this pushed every applicable verb into a list and let
+       capVerbs sort it out. tools/interact-verbs-check.mjs immediately caught
+       what is wrong with that: a man who sells, recruits AND has offered you
+       his hand produces six, and the priority ladder keeps the three RAREST —
+       so the cap silently took TALK (the entire favour loop) and STEAL off
+       him. A cap is a backstop against arithmetic, not a way to design a menu.
+
+       So the last two slots are fixed — ask him something, take something,
+       the two things you can do to anybody — and the first is whatever this
+       particular man IS, ordered by how fleeting it is:
+
+         BEFRIEND  he has decided he owes you. One time, and it lapses if you
+                   give him a reason (prisonfriends.js re-reads it every frame).
+         JOIN      his crew is open to you. Also one time, and it disappears
+                   the moment you are in a gang.
+         TRADE     he has a stall. Repeatable, so it yields to the two above —
+                   and it comes back the moment they resolve, which they do.
+         INSULT    he is nobody in particular, and trash talk is exactly the
+                   verb for a man you have nothing else to do with.
+
+       Fighting is left-click and never a row. */
+    const offering = !!(CBZ.prisonFriendOffered && CBZ.prisonFriendOffered(a));
+    const recruiting = a.gang >= 0 && CBZ.player.gang == null && (a.rep || 0) >= 40;
+    const head = offering ? "befriend"
+      : recruiting ? "join"
+      : (a.data && a.data.offer) ? "trade"
+      : "insult";
+    return [head, "talk", "steal"];
+  }
+  /* Which pressure verb this man responds to. HAGGLE and THREATEN are the same
+     rung of the same triad — the middle path between paying and walking — so a
+     menu never shows both. If he is already more afraid of you than he is
+     attached to his number, leaning on him IS the negotiation; otherwise it is
+     a price conversation. econ's fear ledger, not a die. */
+  function pressureVerb(a) {
+    const fear = a.playerFear || 0, grudge = a.playerGrudge || 0;
+    return (fear >= 6 && fear > grudge) ? "threaten" : "haggle";
+  }
+  // A payoff cleans HEAT; a bribe buys this moment. Offering the first when
+  // there is nothing on your file is a button that spends cigs on nothing.
+  function guardPayoffWorthIt(a) {
+    const g = CBZ.game || {};
+    const heat = g.heat != null ? g.heat : (g.detect != null ? g.detect : 0);
+    return heat > 0 || (a.racketDebt || 0) > 0 || (g.wanted || 0) > 0;
   }
   function subFor(a, v) {
     if (CBZ.cityCampaignPrisonSub) {
@@ -443,7 +539,10 @@
        thresholds; what the chip shows is now the WORD for where you stand, out
        of economy.js's one social accessor so the chip and the dialogue can
        never disagree about the same person. */
-    if (v === "befriend") {
+    // TALK carries the standing chip the old Befriend button carried — it is
+    // the same ledger, and where you stand is the thing worth knowing before
+    // you ask a man for work.
+    if (v === "talk") {
       if ((a.playerGrudge || 0) >= 6) return "repair";
       const S = CBZ.econ && CBZ.econ.socialRead ? CBZ.econ.socialRead(a) : null;
       if (S) {
@@ -454,6 +553,10 @@
       if ((a.playerTrust || 0) >= 6) return "trust+";
       return "";
     }
+    // BEFRIEND's chip is WHY he is offering — the deed he is answering. It only
+    // ever renders on a man who has already decided, so a standing word here
+    // would be telling the player something the button itself just said.
+    if (v === "befriend") return CBZ.prisonFriendReason ? CBZ.prisonFriendReason(a) : "";
     if (v === "insult") {
       if ((a.playerGrudge || 0) >= 6) return "bad blood";
       if ((a.playerFear || 0) >= 6) return "fear";
@@ -575,7 +678,8 @@
     const nm = shortText(cleanName(a), 14);
     switch (v) {
       case "insult":   return `Talk trash to ${nm}`;
-      case "befriend": return (a.playerGrudge || 0) >= 6 ? `Square things with ${nm}` : ((a.rep || 0) >= 45 ? `Catch up with ${nm}` : `Chat up ${nm}`);
+      case "talk":     return (a.playerGrudge || 0) >= 6 ? `Square things with ${nm}` : ((a.rep || 0) >= 45 ? `Catch up with ${nm}` : `Chat up ${nm}`);
+      case "befriend": return `Take ${nm} up on it — he runs with you`;
       case "fight":    return `Throw hands with ${nm}`;
       case "trade":    { const o = a.data && a.data.offer; return o ? `Buy ${shortText(o.item, 16)}. ${o.price}` : "Browse their goods"; }
       case "bribe":    { const c = CBZ.econ.bribeCost ? CBZ.econ.bribeCost(a) : (a.corrupt ? 5 : 10); return `Slip ${c} to look away`; }
@@ -696,6 +800,11 @@
     const line = speechText(who, msg);
     if (!line) return;                 // a result with nothing to SAY says nothing
     if (!subtitleOn()) { if (CBZ.flashHint) CBZ.flashHint(line, secs || 2.8); return; }
+    // ONE LINE, ONE SURFACE (systems/subtitlebus.js). This band and #citySpeech
+    // resolve to the same 120px touch floor, and #hint wears the same skin on
+    // touch — so the answer to the player's own verb outranks both and takes
+    // the sentence off them rather than printing a second copy a slot away.
+    if (CBZ.subtitles && !CBZ.subtitles.claim("pinteractSay", "interact", line, secs || 2.8, who, saySilence)) return;
     ensureSay();
     sayRank = rank != null ? rank : SAY_ANSWER;
     saySpeaker.textContent = who || "";
@@ -712,6 +821,7 @@
     sayT = 0; sayRank = 0;
     if (sayEl) sayEl.classList.remove("show");
     document.body.classList.remove("interact-subtitle-active");
+    if (CBZ.subtitles) CBZ.subtitles.release("pinteractSay");
   }
   function tickSay(dt) {
     if (sayT <= 0) return;
@@ -1029,23 +1139,23 @@
     el.interactNote.textContent = note;
 
     if (touchUI()) {
-      // TOUCH: on iPad every verb becomes a vertical explained row beside
-      // Reload; phones stack every verb in one .svbtn column at the thumb,
-      // in the survival dock's grammar (css/interact_touch.css). NOTHING
-      // this context offers is thrown away. cap4 exists because there are only four keys —
-      // a thumb has no fifth key, so on touch its overflow would be UNREACHABLE
-      // rather than merely unlisted, which is a different (and worse) thing.
-      // _verbs keeps the four core verbs at indices 0-3, so J/K/L/; and every
-      // existing doAction caller still mean exactly what they meant.
-      const all = verbsFor(a);
-      const core = cap4(all);
-      const rest = all.filter((v) => core.indexOf(v) < 0);
-      a._verbs = core.concat(rest);
-      renderTouch(a, core, rest, note);
+      // TOUCH: on iPad the verbs become a vertical explained rail beside
+      // Reload; phones stack them in one .svbtn column at the thumb, in the
+      // survival dock's grammar (css/interact_touch.css).
+      //
+      // THE OVERFLOW RAIL IS GONE. This used to render cap4's four AND a
+      // second `rest` row of everything cap4 dropped — so touch, the surface
+      // this game is actually played on, was the one place with no cap. Both
+      // rows now render the SAME capped three; `rest` stays in the signature
+      // because renderTouch's phone/iPad split still reads two containers, and
+      // it is now always empty.
+      const verbs = capVerbs(verbsFor(a));
+      a._verbs = verbs;
+      renderTouch(a, verbs, [], note);
       return;
     }
 
-    const verbs = cap4(verbsFor(a));
+    const verbs = capVerbs(verbsFor(a));
     a._verbs = verbs;
     const showTips = helpOn;
     const dockedTouch = !!(CBZ.touchInteractionDocked && CBZ.touchInteractionDocked());
@@ -1076,29 +1186,76 @@
   }
 
   // Interaction options live on a home-row cluster (numbers are reserved for
-  // the hotbar, and I is the invariant Prison stash key). Exactly four slots:
-  // J K L ;. Touch buttons retain their direct doAction indices.
-  const OPT_KEYS = ["j", "k", "l", ";"];
-  // contexts can offer more verbs than four slots — when they overflow, keep
-  // the FOUR most important and never silently strand a game-critical verb
-  // (refuse=decline, steal=lift keys/loot, trade=commerce, befriend/join/
-  // romance=win+progression). Selection is by priority; menu order preserved.
+  // the hotbar, and I is the invariant Prison stash key). Exactly THREE slots:
+  // J K L. The fourth used to be `;` — it went with the fourth verb, because a
+  // key with nothing behind it is just a key that does nothing. Touch buttons
+  // retain their direct doAction indices.
+  const OPT_KEYS = ["j", "k", "l"];
+  /* THREE. NOT FOUR, AND NOT "FOUR PLUS THE OVERFLOW" (owner, 2026-08-21).
+
+     This used to be cap4, and cap4 only ever ran on DESKTOP: the touch path
+     rendered the four it returned AND every verb it dropped, on the reasoning
+     that a thumb has no fifth key so hiding one would strand it. True as far
+     as it went, and it meant the surface the owner actually plays on was the
+     one place with no cap at all — a bent guard's stall put five buttons under
+     his thumb. The answer is not a longer rail, it is a shorter menu:
+     verbsFor above now curates every context down to three by hand, and this
+     is the backstop that catches the combinations (merchant + gang recruiter +
+     a standing offer of friendship) that arithmetic can still push past it.
+
+     It is a BACKSTOP and nothing else — verbsFor curates every context to
+     three by hand, and tools/interact-verbs-check.mjs fails the build if any
+     of them arrives here needing a cut. That test is why: the first draft let
+     the ladder design the street menu, and on a man who sells AND recruits AND
+     has offered you his hand it kept the three RAREST verbs and silently took
+     TALK — the whole favour loop — off him. A cap that fires is a verb the
+     player lost without being told.
+
+     Order is therefore "what would hurt most to lose if arithmetic ever does
+     beat the curation": ending a conversation, then the two things you can do
+     to anybody (ask, take), then the rare offers, then the priced verbs, and
+     INSULT — a rep-losing joke with a punch already bound to left-click — last
+     out. Menu order is preserved after the cut, so the buttons never reshuffle
+     under a thumb that is already moving. */
+  const MAX_VERBS = 3;
   const VERB_PRIORITY = {
-    refuse: 100, accept: 92, trade: 88, steal: 86, befriend: 84, confrontReport: 84,
-    join: 82, paySilence: 80, snitch: 80, bribe: 78, threatenSnitch: 78, payoff: 76,
-    pay: 74, detain: 72, listen: 70, search: 70, warn: 66, threaten: 64, respect: 60,
-    question: 60, haggle: 50, insult: 40,
-    // gunpoint pair — only ever offered together, so the cap never sees them
+    refuse: 100, talk: 90, steal: 87, befriend: 86, join: 85, accept: 92, trade: 88,
+    confrontReport: 84, paySilence: 80, snitch: 80, bribe: 78, threatenSnitch: 78,
+    payoff: 76, pay: 74, detain: 72, search: 70, warn: 66, threaten: 64,
+    respect: 60, question: 60, haggle: 50, insult: 40,
+    // gunpoint trio — only ever offered together, so the cap never sees them
     rob: 96, restrain: 95, release: 94,
   };
-  function cap4(v) {
-    if (v.length <= 4) return v;
+  function capVerbs(v) {
+    if (v.length <= MAX_VERBS) return v;
     const score = (x) => (VERB_PRIORITY[x] != null ? VERB_PRIORITY[x] : 55);
-    const keep = v.slice().sort((a, b) => score(b) - score(a)).slice(0, 4);
+    const keep = v.slice().sort((a, b) => score(b) - score(a)).slice(0, MAX_VERBS);
     return v.filter((x) => keep.indexOf(x) >= 0);   // back to original menu order
   }
   // Exposed so touch/controller surfaces can tell when context is live.
   CBZ.interactionMenuOpen = function () { return !!(el.interact.classList.contains("show") && CBZ.game.state === "playing"); };
+
+  /* THE MAN TALKS TO YOU. This is what used to be the LISTEN button.
+     Somebody who has crossed a yard to make you an offer does not need to be
+     asked to speak, and asking cost a whole slot out of three. So the first
+     time the card opens on a live approach, his pitch — the LONG one, the one
+     that names the price, the gang and what he'll do for it, straight out of
+     ai.js's resolveNpcApproach("listen") — is SPOKEN, through the same
+     subtitle mouth every verb result uses.
+
+     Once per approach, not once per frame: `a.approach.greeted` is the flag
+     resolveNpcApproach itself sets, and it deliberately does NOT count as a
+     player response (ai.js skips rememberPlayerResponse for a listen that has
+     already been greeted), so hearing a man out still costs you nothing with
+     him. Walking away and coming back re-reads the same flag, so he doesn't
+     repeat himself either. */
+  function autoListen(a) {
+    if (!a || !a.approach || !(a.approach.t > 0) || a.approach.greeted) return;
+    if (!CBZ.resolveNpcApproach) return;
+    let res = null;
+    try { res = approachAction(a, "listen"); } catch (e) { return; }
+    if (res && res.ok && res.msg) sayResult(cleanName(a), res.msg, 3.4, SAY_ANSWER);
+  }
 
   function update(dt) {
     syncQuiet();
@@ -1111,7 +1268,7 @@
     const a = nearest();
     if (a !== current) {
       current = a;
-      if (a) { renderPanel(a); el.interact.classList.add("show"); }
+      if (a) { autoListen(a); renderPanel(a); el.interact.classList.add("show"); }
       else el.interact.classList.remove("show");
     } else if (a) renderPanel(a);
     // ONE visibility decision per frame (showTouchUI is a no-op when it does
@@ -1123,7 +1280,7 @@
 
   function doAction(idx) {
     if (!current || cooldown > 0 || CBZ.game.state !== "playing") return;
-    const verbs = current._verbs || cap4(verbsFor(current));
+    const verbs = current._verbs || capVerbs(verbsFor(current));
     if (!(idx >= 0) || idx >= verbs.length) return;
     cooldown = 0.35;
     const v = verbs[idx];

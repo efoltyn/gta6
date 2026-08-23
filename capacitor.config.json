@@ -1,18 +1,17 @@
 {
-  "appId": "com.efoltyn.naturaldisastersurvival",
-  "appName": "Natural Disaster Survival",
-  "webDir": "dist-ios/www",
-  "bundledWebRuntime": false,
-  "loggingBehavior": "none",
+  "appId": "com.efoltyn.ganglife",
+  "appName": "Gang Life",
+  "webDir": "dist",
+  "loggingBehavior": "production",
   "ios": {
     "contentInset": "never",
     "scrollEnabled": false,
-    "limitsNavigationsToAppBoundDomains": true,
-    "backgroundColor": "#070d18",
-    "preferredContentMode": "mobile"
+    "backgroundColor": "#0b1622",
+    "preferredContentMode": "mobile",
+    "limitsNavigationsToAppBoundDomains": false,
+    "handleApplicationNotifications": false
   },
   "server": {
-    "iosScheme": "capacitor",
-    "androidScheme": "https"
+    "iosScheme": "capacitor"
   }
 }

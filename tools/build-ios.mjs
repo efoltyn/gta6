@@ -213,4 +213,4 @@ console.log(`  bundle.js   ${mb(statSync(bundlePath).size)}${minified ? " (minif
 console.log(`  assets      ${mb(assetBytes)} in ${copy.size} paths`);
 console.log(`  TOTAL       ${mb(total)}`);
 console.log(`\nverify:  node tools/disaster-check.mjs --url dist-ios/www/index.html --fast`);
-console.log(`ship:    npx cap sync ios && open ios/App/App.xcworkspace`);
+console.log(`ship:    (cd apps/disaster-ios && npx cap sync ios) && open apps/disaster-ios/ios/App/App.xcworkspace`);

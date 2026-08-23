@@ -56,6 +56,9 @@
      CHAR_HEAVY_CARRY — weapon-data.js `hold.heavy` blending in the low-ready
      and present poses. Off → every gun is carried identically, as before. */
   if (CBZ.CONFIG.CHAR_PRONE_GUN_POSE == null) CBZ.CONFIG.CHAR_PRONE_GUN_POSE = true;
+  // PORT ARMS long-gun carry (see the LONG-GUN carry note in animChar); false
+  // = the round-2 thigh-hang pose and holsterprops' hanging barrel direction.
+  if (CBZ.CONFIG.CHAR_PORT_ARMS_CARRY == null) CBZ.CONFIG.CHAR_PORT_ARMS_CARRY = true;
   if (CBZ.CONFIG.CHAR_GUN_GROUND_REST == null) CBZ.CONFIG.CHAR_GUN_GROUND_REST = true;
   if (CBZ.CONFIG.CHAR_HEAVY_CARRY == null) CBZ.CONFIG.CHAR_HEAVY_CARRY = true;
 
@@ -2866,23 +2869,49 @@
         ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -0.16, cr, dt);  // out from the actual right thigh
         setElbow(J.ra, -0.12, cr);
       } else {
-        // LONG-GUN carry (screenshot-diagnosed, round 2): the old tuck-across-
-        // the-hip (rotation.z -0.14) parked the gun-hand at the body's CENTRE,
-        // so the whole rifle's AABB fell INSIDE the torso box and rendered as
-        // nothing from the chase cam (owner: "can't see the drawn gun in hand").
-        // Push the gun-hand OUT beside the right thigh — same fix that made the
-        // pistol carry read — so the rifle's mass clears the torso silhouette;
-        // holsterprops.js then hangs the barrel down-forward-right past the leg.
-        // HEAVY (weapon-data.js hold.heavy): the mass hangs, so the firing arm
-        // straightens toward the vertical and the gun rides LOWER beside the
-        // thigh instead of being held out in front of the hip like a carbine.
-        ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -0.30 + 0.15 * hvC + carryBob * 0.7, cr, dt);
-        ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -0.20 - 0.05 * hvC, cr, dt);   // OUT from the actual right thigh
-        setElbow(J.ra, -0.34 + 0.16 * hvC, cr);          // forearm angles the gun down-forward
+        // LONG-GUN carry. Two generations of this pose, and the second exists
+        // because the camera work measured the first into a corner:
+        //
+        // ROUND 2 (kept as the CHAR_PORT_ARMS_CARRY=false revert): hand beside
+        // the right thigh, barrel hung down-forward past the leg. It cleared
+        // the torso box — but tools/tp-gun-view-check.mjs later measured that
+        // from the chase camera a thigh-hung rifle is a knife edge: 54% or 0%
+        // of the barrel visible depending on where the idle breath has the arm,
+        // because the gun lies exactly along the leg's silhouette, and NO
+        // camera framing fixes it (every centimetre of lens offset puts more
+        // hip in front of it — the sweep in src/city/camera.js's CARRY note).
+        //
+        // PORT ARMS (default): the answer the camera note called for. The gun
+        // hand rises to the lower chest and the barrel runs diagonally UP and
+        // ACROSS the body (holsterprops.js TP_LOWREADY.portLong), the way a
+        // rifle is actually carried ready — so the weapon crosses the torso
+        // silhouette instead of hiding inside the leg's, and both ends break
+        // free of the body from the rear chase camera. The support hand needs
+        // no work here: systems/gunhands.js IK-solves it onto the handguard
+        // wherever the handguard is.
+        // HEAVY (weapon-data.js hold.heavy): the mass still hangs — a belt-fed
+        // gun ports lower and flatter than a carbine (same hvC scaling, gentler
+        // raise), which also keeps its bulk from parking in front of the face.
+        if (CBZ.CONFIG.CHAR_PORT_ARMS_CARRY !== false) {
+          ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -0.62 + 0.20 * hvC + carryBob * 0.4, cr, dt);
+          ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -0.10 - 0.04 * hvC, cr, dt);
+          setElbow(J.ra, -0.80 + 0.24 * hvC, cr);        // forearm folds up-across
+        } else {
+          ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -0.30 + 0.15 * hvC + carryBob * 0.7, cr, dt);
+          ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -0.20 - 0.05 * hvC, cr, dt);   // OUT from the actual right thigh
+          setElbow(J.ra, -0.34 + 0.16 * hvC, cr);        // forearm angles the gun down-forward
+        }
       }
-      if (ch.aimLong === true) {
-        // Rifles and shotguns remain two-hand objects even at low ready: the
-        // support forearm stays under the handguard instead of swinging loose.
+      if (ch.aimLong === true && CBZ.CONFIG.CHAR_PORT_ARMS_CARRY === false) {
+        // (Legacy thigh-hang carry only.) Rifles and shotguns remain two-hand
+        // objects at the old low ready: the support forearm stays under the
+        // handguard instead of swinging loose. At PORT ARMS this base pose is
+        // wrong twice over — the handguard is up the diagonal, not across the
+        // waist, and for the longer guns it is out of the off arm's reach
+        // entirely, where systems/gunhands.js now RELEASES the arm rather than
+        // stretch it. So port arms takes the relaxed counter-swing base below;
+        // whenever the handguard IS reachable the IK lands on it anyway
+        // (gunhands runs after this and overrides).
         // …and the heavier it is, the LOWER that hand has to go: a carbine's
         // handguard rides at chest height, a belt-fed gun's hangs beside the
         // thigh because the gun does. The shipped -0.72/-0.82 pair puts the
@@ -2946,7 +2975,7 @@
       setElbow(J.ra, -(elbBase + foldR + gd * 0.55), armRate - 2);
     }
     if (!ch.aimingPose) {
-      if (!(ch.carryPose && ch.aimLong === true)) {
+      if (!(ch.carryPose && ch.aimLong === true && CBZ.CONFIG.CHAR_PORT_ARMS_CARRY === false)) {
         ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, 0, 10, dt);
         ch.parts.la.position.z = damp(ch.parts.la.position.z, 0, 12, dt);
       }

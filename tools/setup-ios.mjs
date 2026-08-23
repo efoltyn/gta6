@@ -1,5 +1,14 @@
 #!/usr/bin/env node
-/* tools/setup-ios.mjs — everything `npx cap add ios` leaves for you to do.
+/* tools/setup-ios.mjs — everything `npx cap add ios` leaves for you to do,
+   for the NATURAL DISASTER SURVIVAL app.
+
+   This repo ships TWO iOS apps and they must never touch each other's shell:
+     · Gang Life (the full game) — repo-root capacitor.config.json, with its
+       Xcode project COMMITTED at ios/App. docs/APP-STORE.md is its runbook.
+       This tool must never write into it.
+     · Natural Disaster Survival — apps/disaster-ios/, whose Xcode project is
+       GENERATED on the Mac (cd apps/disaster-ios && npx cap add ios) and is
+       gitignored. That generated project is the only thing this tool edits.
 
    Capacitor generates a working Xcode project and stops there: a default icon,
    a portrait-and-landscape app, a visible status bar, no privacy manifest. This
@@ -9,11 +18,11 @@
 
      node tools/setup-ios.mjs
 
-   1. Info.plist gets the keys in ios/Info.plist.additions (landscape only on
+   1. Info.plist gets the keys in apps/disaster-ios/Info.plist.additions (landscape only on
       iPhone, full screen, no status bar, encryption declared, Metal required).
-   2. ios/PrivacyInfo.xcprivacy is copied in beside it.
-   3. The app icon from ios/art/AppIcon-1024.png becomes the AppIcon set.
-   4. The launch image from ios/art/Splash-2732.png becomes the Splash set.
+   2. apps/disaster-ios/PrivacyInfo.xcprivacy is copied in beside it.
+   3. The app icon from apps/disaster-ios/art/AppIcon-1024.png becomes the AppIcon set.
+   4. The launch image from apps/disaster-ios/art/Splash-2732.png becomes the Splash set.
 
    It edits the plist as TEXT rather than parsing it, because the file is
    Xcode's and round-tripping a plist through a parser reorders and reformats
@@ -24,18 +33,19 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const APP = path.join(ROOT, "ios/App/App");
+const DISASTER = path.join(ROOT, "apps/disaster-ios");
+const APP = path.join(DISASTER, "ios/App/App");
 const PLIST = path.join(APP, "Info.plist");
 
 if (!existsSync(PLIST)) {
   console.error(`No ${path.relative(ROOT, PLIST)} yet.\n` +
     `Generate the Xcode project first (on the Mac):\n\n` +
-    `    npm run build:ios\n    npx cap add ios\n    node tools/setup-ios.mjs\n`);
+    `    npm run build:ios\n    (cd apps/disaster-ios && npx cap add ios)\n    node tools/setup-ios.mjs\n`);
   process.exit(1);
 }
 
 /* ---- 1. the plist keys -------------------------------------------------- */
-const additions = readFileSync(path.join(ROOT, "ios/Info.plist.additions"), "utf8");
+const additions = readFileSync(path.join(DISASTER, "Info.plist.additions"), "utf8");
 /* Pull <key>…</key> + its value out of the additions file. A value is either a
    self-closing element (<true/>) or an element with a matching close tag. */
 const KEYS = [];
@@ -61,7 +71,7 @@ writeFileSync(PLIST, plist);
 console.log(`Info.plist: ${changed.length ? changed.join(", ") : "already current"}`);
 
 /* ---- 2. the privacy manifest -------------------------------------------- */
-copyFileSync(path.join(ROOT, "ios/PrivacyInfo.xcprivacy"), path.join(APP, "PrivacyInfo.xcprivacy"));
+copyFileSync(path.join(DISASTER, "PrivacyInfo.xcprivacy"), path.join(APP, "PrivacyInfo.xcprivacy"));
 console.log("PrivacyInfo.xcprivacy: copied " +
   "(add it to the App target in Xcode once — File ▸ Add Files, or drag it in)");
 
@@ -72,9 +82,9 @@ function imageSet(dir, contents, from, to) {
   copyFileSync(from, path.join(dir, to));
 }
 
-const art = path.join(ROOT, "ios/art");
+const art = path.join(DISASTER, "art");
 if (!existsSync(path.join(art, "AppIcon-1024.png"))) {
-  console.error("ios/art is empty — run: node tools/make-app-art.mjs");
+  console.error("apps/disaster-ios/art is empty — run: node tools/make-app-art.mjs");
   process.exit(1);
 }
 
@@ -96,5 +106,5 @@ imageSet(path.join(APP, "Assets.xcassets/Splash.imageset"), {
 }, path.join(art, "Splash-2732.png"), "Splash-2732.png");
 console.log("Assets.xcassets: AppIcon + Splash written");
 
-console.log(`\nNext:\n  npx cap sync ios\n  open ios/App/App.xcworkspace\n` +
-  `See ios/GO-IOS.md for the rest of the submission.`);
+console.log(`\nNext:\n  (cd apps/disaster-ios && npx cap sync ios)\n  open apps/disaster-ios/ios/App/App.xcworkspace\n` +
+  `See apps/disaster-ios/GO-IOS.md for the rest of the submission.`);

@@ -3676,10 +3676,19 @@
        not a CONFIG key, so `?cfg_...` cannot set it and every headless tool
        had to boot the full menagerie whether it cared about animals or not.
        CBZ.CONFIG.WILDLIFE is the same switch through the door the rest of the
-       engine uses (?cfg_WILDLIFE=0), which matters because the per-frame
-       wildlife tick (onUpdate 47.1, below) is by a wide margin the most
-       expensive thing in a built Gang City — see the note on that registration
-       and tools/boot-trace.mjs --deep, which is how it was found. */
+       engine uses (?cfg_WILDLIFE=0).
+
+       AND A CORRECTION, for the record, because a wrong verdict left in a
+       comment outlives the argument: an early beacon-based trace fingered
+       this file's per-frame tick (onUpdate 47.1) as the thing that owns a
+       built Gang City's frame. The precise instrument disagreed. Measured
+       in-page (tools/boot-trace.mjs --prof, no beacons): 985 animals tick in
+       ~1.4 ms, no hang, no non-finite state — the tick is one of the CHEAP
+       systems. The frame was actually going to a hidden render-to-texture
+       (cctv.js, see the gate there) and one-time UI warm-up builds. Keep the
+       flag: a tool that does not need animals should not pay for them, and a
+       controlled variable is worth having. But the tick is not the villain
+       this comment's first draft said it was. */
     if (CBZ.WILDLIFE === false) return null;
     if (CBZ.CONFIG && CBZ.CONFIG.WILDLIFE === false) return null;
     city = city || (CBZ.city && CBZ.city.arena);

@@ -7,7 +7,7 @@
    design file to lose, and the palette comes straight off the game's own
    CBZ.COL. Change a number, run the tool, look at the PNG.
 
-     node tools/make-app-art.mjs               # write ios/art/*.png
+     node tools/make-app-art.mjs               # write apps/disaster-ios/art/*.png
      node tools/make-app-art.mjs --preview     # + a 256px copy to eyeball
 
    WHAT IT DRAWS, and why this and not a logo: an app icon is read at 60 px on
@@ -23,7 +23,7 @@ import { fileURLToPath } from "node:url";
 import { writePng } from "./lib/png.mjs";
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const OUT = path.join(ROOT, "ios/art");
+const OUT = path.join(ROOT, "apps/disaster-ios/art");
 mkdirSync(OUT, { recursive: true });
 const has = (f) => process.argv.slice(2).includes(f);
 

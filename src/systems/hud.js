@@ -66,13 +66,29 @@
   // at boot, because CBZ.touchMode latches on the first touch, after this file
   // has loaded. Flag false = the boxed panel, byte-identical.
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_HINT_SUBTITLE == null) CBZ.CONFIG.TOUCH_HINT_SUBTITLE = true;
-  function showHint(t) {
+  // Declared up here (rather than beside flashHint, where it used to live)
+  // because hideHint now zeroes it — a `let` below its own reader is a temporal
+  // dead zone waiting for the first caller that runs during boot.
+  let _hintT = 0;
+  function showHint(t, secs) {
     if (routeCityText(t, "messages", "City Desk")) { hideHint(); return; }
+    /* THE HINT IS THE LOWEST-RANKED MOUTH IN THE GAME (systems/subtitlebus.js).
+       It matters most HERE, because `.hint-sub` below is the single reason this
+       bug is touch-only: on desktop #hint is a boxed panel and an echo of a
+       subtitle reads as a different kind of object; on touch it adopts the very
+       same white-Fredoka/no-box skin one ladder slot away, and the echo becomes
+       the owner's "2 layers of text, slightly offset". If a real subtitle
+       surface is already saying this sentence, the hint stays shut. */
+    if (CBZ.subtitles && !CBZ.subtitles.claim("hint", "hint", t, secs || 1.6, "", hideHint)) return;
     el.hint.classList.toggle("hint-sub",
       !!(CBZ.touchMode && (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_HINT_SUBTITLE !== false)));
     el.hint.textContent = t; el.hint.classList.add("show");
   }
-  function hideHint() { el.hint.classList.remove("show"); }
+  function hideHint() {
+    el.hint.classList.remove("show");
+    _hintT = 0;
+    if (CBZ.subtitles) CBZ.subtitles.release("hint");
+  }
 
   // ---- survival KILL FEED: the objective panel becomes a running list of
   //      who just died and how ("Nova47 — struck by lightning"). Lines age
@@ -125,9 +141,10 @@
     }
   });
 
-  // auto-hiding hint: shows for `secs` seconds, ticked in the always loop
-  let _hintT = 0;
-  function flashHint(t, secs) { showHint(t); _hintT = secs || 1.6; }
+  // auto-hiding hint: shows for `secs` seconds, ticked in the always loop.
+  // The duration is handed to showHint too so the subtitle desk knows how long
+  // this claim on the line actually lasts.
+  function flashHint(t, secs) { showHint(t, secs || 1.6); _hintT = secs || 1.6; }
   CBZ.onAlways(95, function (dt) {
     if (_hintT > 0) { _hintT -= dt; if (_hintT <= 0) hideHint(); }
   });

@@ -679,19 +679,27 @@ if (process.argv.includes("--sweep")) {
         T.HEIGHT_CARRY = ${JSON.stringify(best.height)}; T.PITCH_CARRY = ${JSON.stringify(best.pitch)};
         return true; })()`);
       await tick(60);
-      console.log(`\n  CARRY low-ready pose sweep at dist ${best.dist} side ${best.side} height ${best.height} pitch ${best.pitch}`);
-      console.log("  dir(x,y,z)          VIS   BEST  SPAN    muzNDC");
-      for (const y of [-0.82, -0.62, -0.42, -0.25])
-        for (const z of [0.36, 0.62, 0.86]) {
-          await evl(`(()=>{ CBZ.TP_LOWREADY.long = [0.30, ${y}, ${z}]; return true; })()`);
-          await tick(40);
-          const r = await measure(4, 6);
-          console.log("  " + `[0.30, ${y}, ${z}]`.padEnd(20) +
-            String(((r.vis || 0) * 100).toFixed(0) + "%").padEnd(6) +
-            String(((r.visBest || 0) * 100).toFixed(0) + "%").padEnd(6) +
-            String(((r.visSpan || 0) * 100).toFixed(1) + "%").padEnd(8) +
-            `[${r.muzNdc}]` + (r.muzVisible ? "" : "   muzzle off/behind"));
-        }
+      // The sweep drives whichever direction key is LIVE: port arms reads
+      // portLong (up-across candidates), the legacy hang reads long (downward).
+      const portArms = await evl("CBZ.CONFIG.CHAR_PORT_ARMS_CARRY !== false");
+      const key = portArms ? "portLong" : "long";
+      const dirs = portArms
+        ? [[-0.55, 0.74, 0.34], [-0.42, 0.74, 0.34], [-0.42, 0.60, 0.34], [-0.42, 0.86, 0.24],
+           [-0.28, 0.74, 0.34], [-0.42, 0.74, 0.55], [-0.20, 0.60, 0.55], [-0.60, 0.55, 0.30]]
+        : [[0.30, -0.82, 0.36], [0.30, -0.82, 0.62], [0.30, -0.62, 0.36], [0.30, -0.62, 0.62],
+           [0.30, -0.42, 0.36], [0.30, -0.42, 0.62], [0.30, -0.25, 0.36], [0.30, -0.25, 0.62]];
+      console.log(`\n  CARRY pose sweep (${key}) at dist ${best.dist} side ${best.side} height ${best.height} pitch ${best.pitch}`);
+      console.log("  dir(x,y,z)             VIS   BEST  SPAN    muzNDC");
+      for (const d of dirs) {
+        await evl(`(()=>{ CBZ.TP_LOWREADY.${key} = ${JSON.stringify(d)}; return true; })()`);
+        await tick(40);
+        const r = await measure(4, 6);
+        console.log("  " + JSON.stringify(d).padEnd(23) +
+          String(((r.vis || 0) * 100).toFixed(0) + "%").padEnd(6) +
+          String(((r.visBest || 0) * 100).toFixed(0) + "%").padEnd(6) +
+          String(((r.visSpan || 0) * 100).toFixed(1) + "%").padEnd(8) +
+          `[${r.muzNdc}]` + (r.muzVisible ? "" : "   muzzle off/behind"));
+      }
     }
   }
   done(0);

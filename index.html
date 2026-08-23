@@ -6,7 +6,10 @@
 <title>Gang Life</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23111923'/%3E%3Cpath d='M12 48V28h12v20zm16 0V12h24v36z' fill='%23ffd451'/%3E%3C/svg%3E">
 <!-- The UI typeface is BUNDLED (css/fonts.css) — no CDN on the critical path,
-     and the game looks the same with no network at all. -->
+     and the game looks the same with no network at all. Both App Store shells
+     (Gang Life at the repo root, the disaster app in apps/disaster-ios/) run
+     from local files where a webfont fetch would fail, and the HUD is laid
+     out against Fredoka's metrics — a missing face reflows every pill. -->
 <link rel="stylesheet" href="css/fonts.css">
 
 <!-- styles, split by concern -->
@@ -442,6 +445,14 @@
      of being refused by a mode enum. Loads before every consumer; flag
      MODE_CAPS_V1=false restores the old city-only answers everywhere at once. -->
 <script src="src/systems/modecaps.js?v=caps1"></script>
+<!-- ONE LINE, ONE SURFACE. Four DOM layers render speech into the same
+     bottom-centre band (#campaignDialogue / #pinteractSay / #citySpeech /
+     #hint), and hud.css's ladder OFFSETS a collision rather than suppressing
+     it — which on touch, where #hint wears the subtitle skin and every floor
+     collapses to the same 120px, is the "two layers of text slightly offset"
+     bug. This is the claim desk that decides which surface owns a sentence.
+     Must precede all four of them. ?cfg_SUBTITLE_DEDUPE=0 reverts. -->
+<script src="src/systems/subtitlebus.js?v=onemouth1"></script>
 <!-- THE CHARGE TABLE: real US Army urban-breaching arithmetic (2 lb mousehole /
      5 lb one man / 7 lb two abreast) plus the CONTACT-vs-STANDOFF law, published
      once so the prison door, the bank vault and every wall price themselves in
@@ -797,7 +808,17 @@
 <script src="src/systems/dashboard.js?v=nodash1"></script>
 <script src="src/systems/combat.js?v=phys1"></script>
 <script src="src/systems/killstreaks.js"></script>
-<script src="src/systems/interact.js?v=nodash1"></script>
+<script src="src/systems/interact.js?v=threeverb1"></script>
+<!-- FRIENDSHIP IS OFFERED, NOT BROWSED. BEFRIEND used to sit on every inmate's
+     card as a permanent button that actually opened the FAVOUR loop (it is
+     called TALK now, which is what it does). This owns the real thing: an NPC
+     decides he owes you — you pulled someone off him, you've been buying from
+     him for weeks, or his favour ladder ran out — and OFFERS. Take it and he
+     walks at your shoulder and swings at whoever is hunting you (ai.js's
+     shadowPlayer, off its rental timer). Loads after interact.js (which reads
+     CBZ.prisonFriendOffered), economy.js and killstreaks.js (it wraps both).
+     ?cfg_PRISON_FRIENDS=0 → nobody ever offers and the verb never appears. -->
+<script src="src/systems/prisonfriends.js?v=crew1"></script>
 <script src="src/systems/interactions.js?v=onebar1"></script>
 <!-- WHAT A THING IN YOUR BAG LOOKS LIKE: one real 3D object per item KIND,
      which city/itemicons.js photographs for the slot and city/inventory.js
@@ -2067,7 +2088,7 @@
 <script src="src/city/localinst.js?v=li2"></script>
 <script src="src/core/profile.js"></script>
 <script src="src/core/fxwarm.js?v=racerstory1"></script>
-<script src="src/city/cctv.js?v=cctv2"></script>
+<script src="src/city/cctv.js?v=nodraw1"></script>
 <script src="src/core/loop.js?v=scale1"></script>
 <script src="src/main.js"></script>
 </body>
