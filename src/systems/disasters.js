@@ -1086,14 +1086,31 @@
       },
     },
 
-    // ---- WILDFIRE: fire spreads tree to tree, burns on contact ----
+    // ---- WILDFIRE: DELEGATED to systems/wildfire.js (CBZ.wildfire) --------
+    //      The fire itself — the wind/slope spread wave, ember spotting ahead
+    //      of the front, the choking plume that kills more than the flame
+    //      does, the persistent burn scar, and the crosswind escape advice —
+    //      lives in that file behind WILDFIRE_V2 (declared there, default
+    //      on). This def keeps what is genuinely director-specific: pacing,
+    //      env tint, the weatherDrive call (the fire's bearing IS the
+    //      weather's bearing), and the complete legacy fire as the
+    //      WILDFIRE_V2=false / missing-module revert path. The legacy path's
+    //      camera-centred ember/smoke clouds, 13 m coin-flip spread and
+    //      flame-only casualties are exactly what the module exists to
+    //      replace — see its header for the argument.
     wildfire: {
       name: "WILDFIRE", emoji: "", warnSecs: 5, activeSecs: 18, gap: 6, cause: "burned alive in the wildfire", tint: 0x4a2814,
+      v2() { return !!(CBZ.wildfire && CBZ.CONFIG.WILDFIRE_V2 !== false); },
       // ONE TREE LIGHTS AND ITS SMOKE STANDS UP. That is how you actually learn
       // a wildfire is coming, and it also gives the fire a real ORIGIN you can
       // put your back to instead of a hazard that materialises everywhere.
       warn(ctx) {
         narrate("hint", "Wildfire spreading, don't get cornered!", 2.6); sound("fire");
+        if (this.v2()) {
+          CBZ.wildfire.beginWarn(ctx);
+          const w = CBZ.wildfire.wind(); ctx.st.wx = w.x; ctx.st.wz = w.z;
+          return;
+        }
         const tr = ctx.arena.flammable;
         const seedTree = tr[(rnd() * tr.length) | 0];
         if (seedTree && !seedTree.burnt) { ignite(seedTree); ctx.st.seed = seedTree; }
@@ -1102,22 +1119,33 @@
       },
       warnTick(dt, ctx) {
         const k = 1 - dir.t / (this.warnSecs || 1);
+        if (this.v2()) {
+          const w = CBZ.wildfire.wind(); ctx.st.wx = w.x; ctx.st.wz = w.z;
+          weather({ rain: 0, wind: 3 + k * 7, windDir: { x: w.x, z: w.z }, fog: k * 0.3, fogColor: 0x6a4a30 });
+          CBZ.wildfire.tick(dt, ctx, true); // the seed torches; its smoke column stands up
+          ctx.env.sunColor = lerpHex(ctx.env.sunColor, 0xff9a50, 0.4 * k);
+          if (rnd() < dt * 1.2) sound("fire");
+          return;
+        }
         weather({ rain: 0, wind: 3 + k * 7, windDir: { x: ctx.st.wx, z: ctx.st.wz }, fog: k * 0.3, fogColor: 0x6a4a30 });
         if (ctx.st.seed) { ctx.st.seed.burning = Math.max(ctx.st.seed.burning, 1); flickerTreeFire(ctx.st.seed); }
         ctx.env.sunColor = lerpHex(ctx.env.sunColor, 0xff9a50, 0.4 * k);
         if (rnd() < dt * 1.2) sound("fire");
       },
       warnThreat(x, z, ctx) {
+        if (this.v2()) return CBZ.wildfire.threat(x, z);
         const s = ctx.st.seed; if (!s) return 0;
         const d = Math.hypot(x - s.x, z - s.z);
         return d < 16 ? 0.7 * (1 - d / 16) : 0;
       },
       warnSafeDir(x, z, ctx) {
+        if (this.v2()) return CBZ.wildfire.safeDir(x, z);
         const s = ctx.st.seed; if (!s) return null;
         const dx = x - s.x, dz = z - s.z, d = Math.hypot(dx, dz) || 1;
         return { x: dx / d, z: dz / d };
       },
       start(ctx) {
+        if (this.v2()) { CBZ.wildfire.begin(ctx); return; }
         ctx.st.embers = CBZ.fx.particleCloud({ mode: "rise", color: 0xff7a1a, count: 320, radius: 28, top: 16, size: 0.26, opacity: 0.7, vMin: 5, vMax: 12, drift: 6 });
         ctx.st.embers.setActive(0.9);
         // a heavy rolling smoke pall above the flames
@@ -1136,6 +1164,19 @@
       active(dt, ctx) {
         // smoke-choked, fire-lit sky: dim orange sun, low red-brown haze
         ctx.env.fog = 0x4a2814; ctx.env.fogNear = 16; ctx.env.fogFar = 145; ctx.env.sunInt = 0.5; ctx.env.sunColor = 0xff7320; ctx.env.hemiColor = 0xff8a3a; ctx.env.hemiInt = 0.62;
+        if (this.v2()) {
+          const w = CBZ.wildfire.wind(); ctx.st.wx = w.x; ctx.st.wz = w.z;
+          // fire runs DOWNWIND — the same wind everything else in the game reads
+          weather({ rain: 0, wind: 9 + 4 * ctx.intensity, windDir: { x: w.x, z: w.z }, fog: 0.45, fogColor: 0x4a2814 });
+          CBZ.wildfire.tick(dt, ctx);
+          // the sky YOU are under: standing in the plume closes the world in —
+          // the smoke is a place, not a colour grade
+          const p = CBZ.player && CBZ.player.group ? CBZ.player.group.position : camPos();
+          const s = Math.min(1, CBZ.wildfire.smokeAt(p.x, p.z));
+          if (s > 0.15) { ctx.env.fogNear = 16 - 11 * s; ctx.env.fogFar = 145 - 100 * s; ctx.env.sunInt = 0.5 - 0.25 * s; }
+          if (rnd() < dt * 3) sound("fire");
+          return;
+        }
         // fire runs DOWNWIND — the same wind everything else in the game reads
         weather({ rain: 0, wind: 9 + 4 * ctx.intensity, windDir: { x: ctx.st.wx, z: ctx.st.wz }, fog: 0.45, fogColor: 0x4a2814 });
         ctx.st.embers.update(dt, camPos().x, 2, camPos().z);
@@ -1169,9 +1210,19 @@
         }
         if (rnd() < dt * 3) sound("fire");
       },
-      end(ctx) { weatherOff(); if (ctx.st.embers) ctx.st.embers.dispose(); if (ctx.st.smoke) ctx.st.smoke.dispose(); ctx.arena.flammable.forEach((t) => { if (t.fire) removeTreeFire(t); }); },
-      threat(x, z, ctx) { let t = 0; const tr = ctx.arena.flammable; for (let i = 0; i < tr.length; i++) if (tr[i].burning) { const d = Math.hypot(x - tr[i].x, z - tr[i].z); if (d < 7) t = Math.max(t, 1 - d / 7); } return t; },
-      safeDir(x, z, ctx) { let bx = 0, bz = 0; const tr = ctx.arena.flammable; for (let i = 0; i < tr.length; i++) if (tr[i].burning) { const dx = x - tr[i].x, dz = z - tr[i].z, d = Math.hypot(dx, dz); if (d < 9 && d > 0.1) { bx += dx / d / d; bz += dz / d / d; } } return (bx || bz) ? { x: bx, z: bz } : null; },
+      end(ctx) {
+        weatherOff();
+        if (this.v2()) { CBZ.wildfire.stop(); return; }   // the burnt trees and the scar STAY
+        if (ctx.st.embers) ctx.st.embers.dispose(); if (ctx.st.smoke) ctx.st.smoke.dispose(); ctx.arena.flammable.forEach((t) => { if (t.fire) removeTreeFire(t); });
+      },
+      threat(x, z, ctx) {
+        if (this.v2()) return CBZ.wildfire.threat(x, z);
+        let t = 0; const tr = ctx.arena.flammable; for (let i = 0; i < tr.length; i++) if (tr[i].burning) { const d = Math.hypot(x - tr[i].x, z - tr[i].z); if (d < 7) t = Math.max(t, 1 - d / 7); } return t;
+      },
+      safeDir(x, z, ctx) {
+        if (this.v2()) return CBZ.wildfire.safeDir(x, z);
+        let bx = 0, bz = 0; const tr = ctx.arena.flammable; for (let i = 0; i < tr.length; i++) if (tr[i].burning) { const dx = x - tr[i].x, dz = z - tr[i].z, d = Math.hypot(dx, dz); if (d < 9 && d > 0.1) { bx += dx / d / d; bz += dz / d / d; } } return (bx || bz) ? { x: bx, z: bz } : null;
+      },
     },
 
     // ---- TORNADO: DELEGATED to systems/tornado.js (CBZ.tornado) ----------
@@ -5108,6 +5159,12 @@
       meteorLegacyStreakDirs: dir.curId === "meteor" && st.streaks
         ? st.streaks.map(function (s) { return { x: +s.vx.toFixed(2), z: +s.vz.toFixed(2) }; })
         : null,
+      /* ---- THE WILDFIRE — delegated to systems/wildfire.js, whose audit is
+         live-measured off the same tree records the legacy path mutates, so
+         `wildfire.v2:false` (the revert) still reports honest burn counts and
+         zeros for the mechanisms only the module has (spotting, smoke
+         deaths, the persistent scar). */
+      wildfire: CBZ.wildfireAudit ? CBZ.wildfireAudit() : null,
       /* ---- THE TSUNAMI'S FOUR: what the water was carrying, what it hit
          with, how dirty it was and how hard it pulled on the way out. Zero
          unless a tsunami is actually running, which is the point.
