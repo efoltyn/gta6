@@ -49,7 +49,7 @@
   /* THE BODY RIG LIVES IN city/wildlife_rig.js NOW (the BLOCK LAW: battle
      armies and the beast pit walk the same animals, so the gait could not
      stay private to the hunting engine). This file binds the shared names —
-     faceAnimalHeading, CLASSES, classify, meshDims, buildGaitRig,
+     faceAnimalHeading, CLASSES, classify, buildGaitRig,
      gaitAnimate — and behaves exactly as it always did. The rig file loads
      one line above this one in index.html; without it there is no wildlife,
      said out loud rather than half-working. */
@@ -644,9 +644,15 @@
   function sq(v) { return v * v; }
 
   // GAIT RIG discovery + the per-frame gait live in city/wildlife_rig.js.
-  const meshDims = RIG.meshDims;
   const buildGaitRig = RIG.buildGait;
   const gaitAnimate = RIG.animateGait;
+  // Aquatic articulation has the same single owner.  Keeping a second copy in
+  // this hunting engine meant a new authored-mouth field could work in Battle
+  // (wildlife_rig) and silently disappear in Gang City (this file overwrote the
+  // globals later).  Use the shared functions directly so one mouth contract
+  // reaches every game and every visual preset.
+  const buildSwimRig = RIG.buildSwim;
+  const animateSwim = RIG.animateSwim;
 
   // ============================================================
   //  AGGRO EYES — the Minecraft-wolf moment: the eyes of a hunting predator
@@ -702,228 +708,6 @@
       eyes[i].scale.setScalar(mode === 2 ? 1.5 : 1);
     }
   }
-
-  // ============================================================
-  //  SWIM RIG — the aquatic half of the SAME discovery system. buildGaitRig
-  //  bailed on sp.aquatic, so every water species in the game (mackerel,
-  //  dolphin, humpback, great white, megalodon) was a rigid mesh SLIDING
-  //  through the sea: five species, zero animation. This is one rig, not a
-  //  shark animator — fixing it here fixes all five and every future one.
-  //
-  //  DISCOVERY (no declarations, same law as the leg columns): the models are
-  //  authored nose-toward +X, so children behind the origin are the tail. The
-  //  ones in the rear half BEHIND the body mass become the tail cluster, with a
-  //  weight t that grows to 1 at the tip; the tip's own proportions decide the
-  //  swim PLANE — a fin taller than it is wide (shark, mackerel) undulates
-  //  LATERALLY, a horizontal fluke (dolphin, humpback) undulates VERTICALLY,
-  //  which is the actual difference between a fish and a cetacean.
-  //
-  //  The travelling-wave-down-the-tail trick is ported from games/ocean.js
-  //  (proven there for years) and applied in place — no reparenting, exactly
-  //  like snakeAnimate's segment chain, so nothing that indexes group.children
-  //  can be surprised.
-  //
-  //  Phase rides DISTANCE ACTUALLY MOVED (gaitAnimate's law), so a wander, a
-  //  tamed follow, a stalk and a shark's rush all animate for free.
-  // ============================================================
-  function tipHorizontal(m) {
-    // horizontal fluke (cetacean) vs vertical caudal fin (fish/shark)
-    const p = m && m.geometry && m.geometry.parameters;
-    if (p && p.depth != null && p.height != null) return p.depth > p.height * 1.25;
-    const d = m ? meshDims(m) : null;
-    return !!(d && d.w > d.h * 1.6);
-  }
-  function buildSwimRig(a) {
-    const sp = a.species, grp = a.group;
-    if (!sp.aquatic || sp.snake) return;
-    const kids = grp.children;
-    let minX = 0, maxX = 0;
-    for (let i = 0; i < kids.length; i++) {
-      const m = kids[i]; if (!m || !m.isMesh) continue;
-      if (m.position.x < minX) minX = m.position.x;
-      if (m.position.x > maxX) maxX = m.position.x;
-    }
-    if (minX > -0.3) return;                       // nothing behind the origin: no tail to swing
-    const cut = minX * 0.5;                        // the rear half behind the body mass
-    const span = minX - cut;
-    const parts = [];
-    let tip = null, tipX = 1e9;
-    for (let i = 0; i < kids.length; i++) {
-      const m = kids[i]; if (!m || !m.isMesh) continue;
-      if (m.position.x > cut) continue;
-      parts.push({
-        m: m, bx: m.position.x, by: m.position.y, bz: m.position.z,
-        ry: m.rotation.y, rz: m.rotation.z,
-        t: Math.max(0, Math.min(1, (m.position.x - cut) / (span || -1))),
-      });
-      if (m.position.x < tipX) { tipX = m.position.x; tip = m; }
-    }
-    if (!parts.length) return;
-    parts.sort(function (p, q) { return p.t - q.t; });   // base -> tip, so the wave travels
-    // JAW: newly authored sharks expose one lower-jaw Group whose origin is the
-    // physical hinge. Older aquatics keep the geometric fallback below, so the
-    // shared animator remains backward-compatible and species-agnostic.
-    const authoredMouth = grp._aquaticMouth && grp._aquaticMouth.lower
-      ? grp._aquaticMouth : null;
-    // FALLBACK JAW: far-forward children that hang BELOW the mean of the head
-    // cluster — i.e. the lower jaw and its tooth row, never the skull.
-    const jawCut = maxX * 0.6;
-    let sumY = 0, nY = 0;
-    for (let i = 0; i < kids.length; i++) {
-      const m = kids[i]; if (!m || !m.isMesh || m.position.x < jawCut) continue;
-      sumY += m.position.y; nY++;
-    }
-    const jaw = [];
-    let jawBase = null, jawBaseScore = -1;
-    if (!authoredMouth && nY >= 3) {
-      const meanY = sumY / nY;
-      for (let i = 0; i < kids.length && jaw.length < 14; i++) {
-        const m = kids[i]; if (!m || !m.isMesh || m.position.x < jawCut) continue;
-        if (m.position.y < meanY - 0.05) {
-          const part = { m: m, bx: m.position.x, by: m.position.y, rz: m.rotation.z };
-          jaw.push(part);
-          // The mouth slab is the largest discovered lower-head part. Its actual
-          // rear/top edge is the physical jaw hinge. The old `maxX * .62`
-          // approximation sat well behind that edge: opening a great white was
-          // tolerable, but scaling the same error to a megalodon made the whole
-          // lower jaw orbit away like a detached pink board. This geometry solve
-          // works for every current/future flat aquatic build without species IDs.
-          if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
-          if (m.geometry.boundingBox) {
-            m.updateMatrix();
-            const jb = new THREE.Box3().copy(m.geometry.boundingBox).applyMatrix4(m.matrix);
-            const jdx = jb.max.x - jb.min.x, jdy = jb.max.y - jb.min.y, jdz = jb.max.z - jb.min.z;
-            const score = jdx * jdy * jdz;
-            if (score > jawBaseScore) {
-              jawBaseScore = score;
-              jawBase = { x: jb.min.x, y: jb.max.y };
-            }
-          }
-        }
-      }
-    }
-    const len = Math.max(0.5, maxX - minX);
-    a.swim = {
-      parts: parts, vert: tipHorizontal(tip),
-      amp: len * 0.065,                            // sweep at the tip, in local u
-      yaw: 0.42,                                   // fin angle-of-attack at the tip
-      freq: Math.max(0.8, Math.min(8, 6 / len)),   // radians of beat per unit travelled
-      // DETERMINISM: the seeded rng() is a shared, order-fragile stream — a new
-      // draw here would shift every later spawn and break the byte-identical
-      // world build. Position-hash instead (no stream state at all).
-      ph: (CBZ.hash01 ? CBZ.hash01(grp.position.x, grp.position.z, 71) : 0) * 6.283,
-      k: 0,
-      jaw: jaw.length ? jaw : null,
-      jawX: jawBase ? jawBase.x : maxX * 0.62,
-      jawY: jawBase ? jawBase.y : 0,
-      jawGroup: authoredMouth ? authoredMouth.lower : null,
-      jawUpper: authoredMouth ? authoredMouth.upper : null,
-      jawCavity: authoredMouth ? authoredMouth.cavity : null,
-      jawContract: authoredMouth ? authoredMouth.contract : null,
-      jawLowerRz: authoredMouth ? authoredMouth.lower.rotation.z : 0,
-      jawUpperX: authoredMouth ? authoredMouth.upper.position.x : 0,
-      jawUpperY: authoredMouth ? authoredMouth.upper.position.y : 0,
-      jawCavityScaleY: authoredMouth ? authoredMouth.cavity.scale.y : 1,
-      jawK: -1,
-      px: null, pz: null, py: null, ph0: a.heading,
-      roll: 0, pitch: 0,
-    };
-    // hinge height for the gape = the mean y of the jaw parts
-    if (jaw.length && !jawBase) {
-      let s = 0;
-      for (let i = 0; i < jaw.length; i++) s += jaw[i].by;
-      a.swim.jawY = s / jaw.length;
-    }
-  }
-
-  // openness 0..1 — the gape. Called by creature_combat's "lunge" strike and by
-  // the seize, so a shark's mouth actually opens on the thing it is biting.
-  function swimJaw(actor, openness) {
-    const rig = actor && actor.swim;
-    if (!rig || (!rig.jaw && !rig.jawGroup)) return;
-    let o = openness > 0 ? (openness > 1 ? 1 : openness) : 0;
-    if (rig.jawK >= 0 && Math.abs(o - rig.jawK) < 0.01) return;   // nothing changed
-    rig.jawK = o;
-    if (rig.jawGroup) {
-      const contract = rig.jawContract || {};
-      // The group origin never translates: its world position is therefore a
-      // testable invariant and the mandible cannot become floating physics.
-      rig.jawGroup.rotation.z = rig.jawLowerRz - o * (contract.travel || contract.maxOpen || 0.58);
-      if (rig.jawUpper) {
-        // Sharks protrude the upper jaw as they commit to a bite. The travel is
-        // deliberately small; the lower hinge remains the dominant motion.
-        rig.jawUpper.position.x = rig.jawUpperX + o * (contract.protrude || 0);
-        rig.jawUpper.position.y = rig.jawUpperY - o * (contract.upperDrop || 0);
-      }
-      if (rig.jawCavity) {
-        // Reveal the recessed dark cavity with the gape; at rest it remains a
-        // narrow mouth line instead of a coloured box stuck under the snout.
-        rig.jawCavity.scale.y = rig.jawCavityScaleY * (1 + o * 9);
-      }
-      return;
-    }
-    const th = -o * 0.62;                       // drop the lower jaw about the hinge
-    const c = Math.cos(th), s = Math.sin(th);
-    for (let i = 0; i < rig.jaw.length; i++) {
-      const p = rig.jaw[i];
-      const dx = p.bx - rig.jawX, dy = p.by - rig.jawY;
-      p.m.position.x = rig.jawX + dx * c - dy * s;
-      p.m.position.y = rig.jawY + dx * s + dy * c;
-      p.m.rotation.z = p.rz + th;
-    }
-  }
-
-  function animateSwim(a, dt) {
-    const rig = a.swim; if (!rig) return;
-    const grp = a.group;
-    if (grp.visible === false) return;            // out of the LOD radius: no mesh work
-    const mx = grp.position.x, mz = grp.position.z, my = grp.position.y;
-    const mdx = rig.px == null ? 0 : mx - rig.px;
-    const mdz = rig.pz == null ? 0 : mz - rig.pz;
-    const moved = Math.sqrt(mdx * mdx + mdz * mdz);
-    const vy = (rig.py == null || dt <= 0) ? 0 : (my - rig.py) / dt;
-    rig.px = mx; rig.pz = mz; rig.py = my;
-    // beat rides distance moved (same law as the gait) + a small idle flick, so
-    // a hovering fish still lives and a sprinting shark thrashes. Capped so a
-    // teleport/recovery jump can never spin the tail into a blur.
-    rig.ph += Math.min(Math.min(moved, 1.5) * rig.freq, dt * 24) + dt * 0.9;
-    if (rig.ph > 1e6) rig.ph -= 1e6;
-    const swing = moved > 0.002 ? 1 : 0.4;
-    rig.k += (swing - rig.k) * Math.min(1, dt * 4);
-    const amp = rig.amp * rig.k, yaw = rig.yaw * rig.k;
-    const parts = rig.parts;
-    for (let i = 0; i < parts.length; i++) {
-      const p = parts[i];
-      const ang = rig.ph - p.t * 1.55;            // lag down the body = a travelling wave
-      const sw = Math.sin(ang) * p.t, lead = Math.cos(ang) * p.t;
-      if (rig.vert) {                             // cetacean: up/down flukes
-        p.m.position.y = p.by + sw * amp;
-        p.m.rotation.z = p.rz + lead * yaw;
-      } else {                                    // fish/shark: side to side
-        p.m.position.z = p.bz + sw * amp;
-        p.m.rotation.y = p.ry + lead * yaw;
-      }
-    }
-    // BODY: bank into the turn (rotation.x rolls a +X-forward body) and pitch
-    // with vertical speed (rotation.z) — a diving shark noses down. Yielded
-    // whenever a flinch or a creature_combat strike owns the transform.
-    if ((a._flinchT || 0) <= 0 && (a._atkAnim == null || a._atkAnim < 0)) {
-      let dh = a.heading - rig.ph0;
-      while (dh > Math.PI) dh -= 6.283185307; while (dh < -Math.PI) dh += 6.283185307;
-      const turn = dt > 0 ? dh / dt : 0;
-      const wantRoll = Math.max(-0.45, Math.min(0.45, turn * 0.25));
-      const wantPitch = Math.max(-0.5, Math.min(0.5, vy * 0.11));
-      const e = Math.min(1, dt * 3.2);
-      rig.roll += (wantRoll - rig.roll) * e;
-      rig.pitch += (wantPitch - rig.pitch) * e;
-      grp.rotation.x = rig.roll;
-      grp.rotation.z = rig.pitch;
-    }
-    rig.ph0 = a.heading;
-  }
-  CBZ.buildSwimRig = buildSwimRig;
-  CBZ.animateSwim = animateSwim;
-  CBZ.swimJaw = swimJaw;
 
   // ---- matrix LOD: a hidden animal's subtree stops paying r128's per-frame
   //      updateMatrix() tax (the whole point of core/staticfreeze.js — we keep
@@ -3887,7 +3671,26 @@
       no deer, without a single species row or a mode flag.
      ============================================================ */
   function stockWildlife(city, opts) {
+    /* TWO WAYS TO SAY NO, because only one of them was reachable. CBZ.WILDLIFE
+       has always been the master switch and there is no URL path to it — it is
+       not a CONFIG key, so `?cfg_...` cannot set it and every headless tool
+       had to boot the full menagerie whether it cared about animals or not.
+       CBZ.CONFIG.WILDLIFE is the same switch through the door the rest of the
+       engine uses (?cfg_WILDLIFE=0).
+
+       AND A CORRECTION, for the record, because a wrong verdict left in a
+       comment outlives the argument: an early beacon-based trace fingered
+       this file's per-frame tick (onUpdate 47.1) as the thing that owns a
+       built Gang City's frame. The precise instrument disagreed. Measured
+       in-page (tools/boot-trace.mjs --prof, no beacons): 985 animals tick in
+       ~1.4 ms, no hang, no non-finite state — the tick is one of the CHEAP
+       systems. The frame was actually going to a hidden render-to-texture
+       (cctv.js, see the gate there) and one-time UI warm-up builds. Keep the
+       flag: a tool that does not need animals should not pay for them, and a
+       controlled variable is worth having. But the tick is not the villain
+       this comment's first draft said it was. */
     if (CBZ.WILDLIFE === false) return null;
+    if (CBZ.CONFIG && CBZ.CONFIG.WILDLIFE === false) return null;
     city = city || (CBZ.city && CBZ.city.arena);
     if (!city || !city.root) return null;
     if (builtFor === city) return null;           // idempotent per world
@@ -3926,6 +3729,18 @@
   // put a boat, a chum slick or a tsunami where the fish actually are.
   CBZ.cityWildlifeOcean = function () {
     return { cx: FIELD.cx, cz: FIELD.cz, r0: FIELD.r0, r1: FIELD.r1 };
+  };
+  /* ONE ANIMAL, WHERE A MODE SAYS. The shark sim's evolutions and pod
+     top-ups need single spawns at stated points; a second spawner over
+     there would be exactly the parallel-system drift this file exists to
+     prevent, so this is a door to makeActor and nothing else. The animal
+     comes out fully native — traits, rig, roster, dynamic tag — so combat,
+     predation and the mount system cannot tell it from a seeded one. Bulk
+     stocking stays cityWildlifeStock; this is one body at a time. */
+  CBZ.cityWildlifeSpawnAt = function (id, x, z) {
+    const sp = (CBZ.WILDLIFE_SPECIES || {})[id];
+    if (!sp || !root) return null;
+    return makeActor(sp, x, z);
   };
 
   // ============================================================

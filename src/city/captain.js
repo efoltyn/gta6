@@ -402,7 +402,10 @@
 
     // THE HELM HANDOFF IS THE EXISTING ONE. cityEnterVehicle is the one
     // enter path (it zeroes v), water_helm.js owns every driven frame after.
-    CBZ.cityEnterVehicle(car);
+    // instant: the captain origin hands over the helm and reads the result on
+    // the next line; boarding.js's door arc would return true before the seat
+    // was taken. (Same trap that stopped the racer origin opening on the grid.)
+    CBZ.cityEnterVehicle(car, { instant: true });
     const cruise = num(S && S.cruiseMs, 4.5);
     car.v = cruise * 0.6;
     car.vx = Math.sin(h) * car.v; car.vz = Math.cos(h) * car.v;

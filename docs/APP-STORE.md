@@ -1,7 +1,22 @@
 # APP STORE — shipping Gang Life on iPhone and iPad
 
-The runbook. Everything in here is accurate to THIS repo as of 2026-08-21 and
+The runbook. Everything in here is accurate to THIS repo as of 2026-08-23 and
 was set up by reading the code, not from a template.
+
+> **Two apps live in this repo**, built the same day in different sessions and
+> reconciled on merge:
+>
+> | | Gang Life (this file) | Natural Disaster Survival |
+> |---|---|---|
+> | what ships | the whole game (`index.html`) | the disaster mini-game (`disaster.html`) |
+> | Capacitor root | repo root | `apps/disaster-ios/` |
+> | Xcode project | **committed** at `ios/App` | **generated** on the Mac, gitignored |
+> | web payload | `dist/` (copy-through) | `dist-ios/www` (bundled + minified) |
+> | runbook | this file | `apps/disaster-ios/GO-IOS.md` |
+>
+> Neither pipeline may write into the other's shell: `tools/setup-ios.mjs`,
+> `tools/make-app-art.mjs` and `tools/build-ios.mjs` belong to the disaster
+> app; `npm run ios:*` belongs to this one.
 
 > **The one thing to understand:** the game is unchanged. There is no port and
 > no rewrite. `ios/` is a thin native shell — a WKWebView that loads the exact
@@ -37,7 +52,7 @@ ios/App/App/PrivacyInfo.xcprivacy   the privacy manifest (required since 2024)
 ios/App/App/Assets.xcassets    app icon (1024) + launch image, baked from the game's own mark
 ios/App/App/public/            THE GAME. Generated, gitignored, replaced by ios:build
 tools/ios-art.mjs              regenerates the icon + launch image
-tools/fetch-fonts.mjs          re-bakes assets/fonts/ from Google Fonts
+assets/fonts/fredoka-latin-var.woff2   the bundled UI typeface (SIL OFL)
 ```
 
 `ios/App/App/public` is a copy of `dist/`, which is a copy of the tracked tree
@@ -56,8 +71,10 @@ These were real, and each one is either a rejection or a bad first launch.
 `capacitor://` with no network guarantee — a plane, a dead hotel wifi, or a
 review device behind a slow proxy — and every pill and button in this HUD is
 sized against Fredoka's metrics, so a missing webfont reflows the whole
-screen. The latin subset of all four weights (~64 KB) is now in
-`assets/fonts/` and declared in `css/fonts.css`. **The app now makes no
+screen. Fredoka now ships in the repo — both App Store sessions fixed this
+independently the same day, and the merge kept the better half: one variable
+`assets/fonts/fredoka-latin-var.woff2` (29 KB, weights 300-700, SIL OFL —
+see `assets/LICENSES.md`) declared in `css/fonts.css`. **The app now makes no
 outbound request at all**, which is also what lets the privacy manifest and the
 App Store Connect answers say "Data Not Collected" and be true.
 
@@ -155,7 +172,8 @@ by anything but reading:
 npm run ios:build      # game -> dist/ -> ios/App/App/public   (do this before every archive)
 npm run ios:sync       # the above, plus re-resolving native deps
 node tools/ios-art.mjs # app icon + launch image
-node tools/fetch-fonts.mjs   # assets/fonts/*.woff2 from Google Fonts
+# The font is a checked-in file (assets/fonts/fredoka-latin-var.woff2, SIL OFL);
+# to refresh it, download Google Fonts' Fredoka variable latin woff2 and replace it.
 ```
 
 ## Bumping a version

@@ -35,6 +35,14 @@
     const key = g.mode || "?";
     if (key === warmed) return;
     warmed = key;                  // one attempt per mode entry, success or not
+    /* A PAGE THAT IS NOT DRAWING HAS NOTHING TO PRE-COMPILE. With
+       ?cfg_RENDER_FRAMES=0 (core/loop.js) no draw call is ever made, so every
+       program this would build is dead work — and on a software rasterizer
+       walking a 25 km scene compiling on the order of a hundred programs is
+       minutes of it, which is exactly the wall that made headless Gang City
+       untestable. Skipping it is not a behaviour change for players: the flag
+       only exists for tools. */
+    if (CBZ.CONFIG && CBZ.CONFIG.RENDER_FRAMES === false) return;
     const r = CBZ.renderer, sc = CBZ.scene, cam = CBZ.camera;
     if (!r || typeof r.compile !== "function" || !sc || !cam) return;
     warm(r, sc, cam);

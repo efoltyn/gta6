@@ -121,7 +121,108 @@
         return survOn() && CBZ.survSeaBedYAt ? CBZ.survSeaBedYAt(x, z) : cityBedY(x, z);
       };
     }
+    if (typeof CBZ.cityWaterDepthAt === "function") {
+      const cityDepth = CBZ.cityWaterDepthAt;
+      CBZ.cityWaterDepthAt = function (x, z) {
+        return survOn() && CBZ.survFloodDepthMeanAt
+          ? Math.max(0, CBZ.survFloodDepthMeanAt(x, z)) : cityDepth(x, z);
+      };
+    }
+    installNav();
     return true;
+  }
+
+  /* ---- THE NAV HALF: THE MOUNT'S STEERING WHEEL ---------------------------
+     wildlife_tame.js's aquatic mount does not only ask "how high is the
+     water" — it hands its whole horizontal step to waterField.moveInWater,
+     the city's shore-following navigator, and slides its dismounting rider
+     through waterField.isNavigableWater. Both run on coastAt, an analytic
+     field over the BUILT CITY CONTINENT — and in survival mode the city is
+     never built, so coastAt answers its no-terrain fallback (+24, "dry
+     land") at every island coordinate and a ridden shark cannot move a
+     metre. (The WILD swimmers never noticed: wildlife.js steers them on its
+     own ocean band, so this only ever bit a mount — which is why the shark
+     sim is what surfaced it.)
+
+     The island's stand-in for the signed shore distance is derived from
+     DEPTH, which the arena answers analytically everywhere: the foreshore
+     drops ~1.9 m over the 26 m beach (world/disaster_arena.js), so
+     depth/0.073 IS metres-from-the-waterline on the slope the species
+     clearance numbers were tuned for — a bull shark's 12 puts it in the
+     same waist-deep surf here as on the city coast. The second term walls
+     the swimmable ring from the outside at radius+150, comfortably inside
+     the rendered sea (seabed ring ends at radius+170), so a mount cannot be
+     piloted off the edge of the world. Because depth reads the LIVE mean
+     sea (surge included), a tsunami genuinely opens the island to a ridden
+     shark and closes it again as the water leaves. */
+  function islandShore(x, z) {
+    const A = CBZ.surv.arena;
+    const rr = Math.hypot(x - A.center.x, z - A.center.z);
+    const depth = CBZ.survFloodDepthMeanAt ? Math.max(0, CBZ.survFloodDepthMeanAt(x, z)) : 0;
+    return Math.max(-depth / 0.073, rr - (A.radius + 150));
+  }
+  function angleDelta(a, b) {
+    let d = b - a;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    return d;
+  }
+  /* Same contract and steering shape as waterfield.js's moveInWater (probe
+     ahead, prefer the clearer flank, blend along the shore tangent, capped
+     turn rate, {x,z,heading,blocked,shore} out) — on the island's ring,
+     where the safe direction is always radial: seaward off the beach,
+     inward off the outer fence. */
+  function islandMove(x, z, heading, distance, clearance, t, out) {
+    distance = Math.max(0, +distance || 0);
+    clearance = Math.max(2, +clearance || 8);
+    const A = CBZ.surv.arena;
+    const probe = Math.max(10, Math.min(44, distance * 6 + clearance * 1.4));
+    const hx = Math.cos(heading), hz = Math.sin(heading);
+    let desired = heading;
+    const frontS = islandShore(x + hx * probe, z + hz * probe);
+    if (frontS >= -clearance) {
+      const dx = x - A.center.x, dz = z - A.center.z;
+      const rr = Math.hypot(dx, dz) || 1;
+      const rx = dx / rr, rz = dz / rr;
+      const depth = CBZ.survFloodDepthMeanAt ? Math.max(0, CBZ.survFloodDepthMeanAt(x, z)) : 0;
+      const atFence = (rr - (A.radius + 150)) > -depth / 0.073;
+      const ax = atFence ? -rx : rx, az = atFence ? -rz : rz;   // the safe radial
+      const tx1 = -az, tz1 = ax, tx2 = az, tz2 = -ax;
+      const useFirst = tx1 * hx + tz1 * hz >= tx2 * hx + tz2 * hz;
+      const tx = useFirst ? tx1 : tx2, tz = useFirst ? tz1 : tz2;
+      desired = Math.atan2(az * 0.82 + tz * 0.58, ax * 0.82 + tx * 0.58);
+    } else {
+      const leftA = heading - 0.72, rightA = heading + 0.72;
+      const leftS = islandShore(x + Math.cos(leftA) * probe * 0.82, z + Math.sin(leftA) * probe * 0.82);
+      const rightS = islandShore(x + Math.cos(rightA) * probe * 0.82, z + Math.sin(rightA) * probe * 0.82);
+      if (leftS >= -clearance && rightS < leftS) desired = rightA;
+      else if (rightS >= -clearance && leftS < rightS) desired = leftA;
+    }
+    heading += Math.max(-0.34, Math.min(0.34, angleDelta(heading, desired)));
+    let nx = x + Math.cos(heading) * distance;
+    let nz = z + Math.sin(heading) * distance;
+    const blocked = islandShore(nx, nz) >= -clearance * 0.55;
+    if (blocked) { nx = x; nz = z; }
+    out = out || {};
+    out.x = nx; out.z = nz; out.heading = heading; out.blocked = blocked; out.shore = frontS;
+    return out;
+  }
+  function installNav() {
+    const wf = CBZ.waterField;
+    if (!wf || wf._survNavWrapped || typeof wf.moveInWater !== "function") return;
+    wf._survNavWrapped = true;
+    const cityMove = wf.moveInWater;
+    wf.moveInWater = function (x, z, heading, distance, clearance, t, out) {
+      return survOn() ? islandMove(x, z, heading, distance, clearance, t, out)
+        : cityMove(x, z, heading, distance, clearance, t, out);
+    };
+    if (typeof wf.isNavigableWater === "function") {
+      const cityNav = wf.isNavigableWater;
+      wf.isNavigableWater = function (x, z, clearance) {
+        return survOn() ? islandShore(x, z) < -Math.max(0, +clearance || 0)
+          : cityNav(x, z, clearance);
+      };
+    }
   }
 
   // Try at load; if the publishers are not up yet, retry on the update bus
@@ -142,6 +243,7 @@
     return {
       on: CFG.SURV_SHARED_WATER_FX !== false,
       wrapped: !!CBZ._survWaterWrapped,
+      navWrapped: !!(CBZ.waterField && CBZ.waterField._survNavWrapped),
       bedWrapped: typeof CBZ.citySeaBedYAt === "function",
       survLive: survOn(),
       modeOn: CBZ.waterModeOn(),

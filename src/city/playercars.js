@@ -8,6 +8,15 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
+  /* Where src/ is, derived from this file's own URL (the idiom core/studio.js
+     uses) so a page in games/ and a page at the repo root both resolve the
+     vendored Draco decoder correctly. Captured at LOAD — document.currentScript
+     is null by the time preloadFerrari() runs. */
+  const SRC_ROOT = (function () {
+    const u = (document.currentScript && document.currentScript.src) || "";
+    const cut = u.indexOf("city/playercars.js");
+    return cut >= 0 ? u.slice(0, cut) : "src/";
+  })();
   if (!CBZ || !window.THREE) return;
   const THREE = window.THREE;
   const CFG = (CBZ.CONFIG = CBZ.CONFIG || {});
@@ -2554,7 +2563,14 @@
     const loader = new THREE.GLTFLoader();
     if (THREE.DRACOLoader) {
       const draco = new THREE.DRACOLoader();
-      draco.setDecoderPath("https://unpkg.com/three@0.128.0/examples/js/libs/draco/gltf/");
+      /* VENDORED, NOT FETCHED. This used to pull the Draco decoder off
+         unpkg.com at runtime — a CDN round trip on the critical path of the
+         first Ferrari, a hard failure with no network, and code downloaded
+         from a third party at run time, which is the one thing an App Store
+         build may not do. The decoder now lives in src/vendor/draco/gltf/
+         (three r128's own copy, 0.8 MB, still lazy: DRACOLoader fetches it
+         only when a Draco-compressed mesh actually arrives). */
+      draco.setDecoderPath(SRC_ROOT + "vendor/draco/gltf/");
       loader.setDRACOLoader(draco);
     }
     loader.load("assets/cars/ferrari.glb", function (gltf) {

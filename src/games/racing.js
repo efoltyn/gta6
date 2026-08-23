@@ -239,7 +239,9 @@
     try { car = CBZ.cityMakeCar(spot.x, spot.z, spot.heading, false, model, 0.2); } catch (e) { return null; }
     if (!car) return null;
     car.owned = true; car.ai = false; NIGHT.loaner = car;
-    try { CBZ.cityEnterVehicle(car); } catch (e) { return null; }
+    // instant: the paddock hands you a loaner and grids it immediately — a
+    // door arc here returns true before you are in it (see boarding.js).
+    try { CBZ.cityEnterVehicle(car, { instant: true }); } catch (e) { return null; }
     return car;
   }
   function clearLoaner() {

@@ -1,17 +1,22 @@
 /* Shark-mouth and bite-action comparison for tools/visual-compare.mjs.
 
-   Every frame is staged by the page being photographed. The deployed URL
-   therefore builds its old solid jaw, while localhost builds the current
-   hinged mouth. The runner then copies the deployed camera byte-for-byte into
-   the local capture. Open amounts, animal roots, prey, hull, waterline, light,
-   and viewport stay matched so anatomy and contact are the only variables. */
+   A SELF A/B on this checkout. The BEFORE column carries ?sharkmouth=off,
+   which src/city/wildlife/aquatic.js reads at load: the mouth reverts to the
+   band-clamp grammar (gum arcs + a mandible slab swinging under a hull whose
+   own chin never moves). The AFTER column is the split-body mouth: the lower
+   jaw IS the body's white underside, cut from the species' own rings, and the
+   hull/rostrum are notched along the seam so the black upper half and the
+   white lower half separate the way an orca's do. The runner copies the
+   before camera byte-for-byte into the after capture; open amounts, animal
+   roots, prey, hull, waterline, light and viewport stay matched so the mouth
+   is the only variable. */
 
 const subjects = [
   {
     id: "great-white-rest", label: "Great White — Closed Mouth", species: "great_white_shark", open: 0,
-    focus: "At rest, the mouth should read as a dark closed seam connected beneath the snout—not a grey block.",
+    focus: "At rest the silhouette must not change: the white chin now IS the front underside of the body, sealed against the notched hull along the same seam.",
     frame: 3.0, target: [2.55, 0.78, 0], cameraOffset: [1.7, 1.0, 8],
-    state: "REST · CLOSED", metric: "One recessed cavity · one attached mandible",
+    state: "REST · CLOSED", metric: "Chin = the body's own underside · seam sealed",
   },
   {
     id: "great-white-windup", label: "Great White — Bite Wind-up", species: "great_white_shark", open: 0.48,
@@ -21,9 +26,9 @@ const subjects = [
   },
   {
     id: "great-white-full-gape", label: "Great White — Full Gape", species: "great_white_shark", open: 1,
-    focus: "Full gape should reveal a dark mouth cavity and a continuous U-shaped ring of front and side teeth.",
+    focus: "The bite must split the body, orca-style: the dark snout lifts, the WHITE CHIN drops as one continuation of the belly, and above it is the dark mouth roof — no closed underside left behind, no denture arc floating in front.",
     frame: 3.65, target: [2.45, 0.45, 0], cameraOffset: [2.1, 1.2, 8],
-    state: "COMMIT · FULL GAPE", metric: "15 upper + 15 lower teeth · connected components: 1 + 1",
+    state: "COMMIT · FULL GAPE", metric: "Black top lifts · white chin drops · teeth ring both",
   },
   {
     id: "great-white-tuna-contact", label: "Great White — Tuna Contact", species: "great_white_shark", open: 0.82,
@@ -47,9 +52,9 @@ const subjects = [
   {
     id: "megalodon-rest", label: "Megalodon — Closed Mouth", species: "megalodon", open: 0,
     animal: [0, -1.80, 0],
-    focus: "At legendary scale, the lower mouth must still meet the head; this is where the old pink board was most obvious.",
+    focus: "At legendary scale, the closed jaw must still be the body: the chin is cut from the megalodon's own rings, so the head seals along the seam instead of resting on a slab.",
     frame: 7.0, target: [8.9, 0.05, 0], cameraOffset: [5.5, 2.6, 18],
-    state: "REST · MANDIBLE ATTACHED", metric: "Hinge embedded in head volume · reset drift: 0",
+    state: "REST · CHIN SEALED", metric: "Hinge embedded in head volume · reset drift: 0",
   },
   {
     id: "megalodon-full-gape", label: "Megalodon — Full Gape", species: "megalodon", open: 1,
@@ -74,8 +79,12 @@ const subjects = [
   },
 ];
 
-function stageSharkBite(input) {
-  const T = window.THREE, CBZ = window.CBZ, subject = input.subject;
+export function stagePredatorMouth(input) {
+  const T = window.THREE, CBZ = window.CBZ;
+  // A cadence sheet derives `open` from real elapsed seconds. Clone the preset
+  // subject because the comparator reuses its descriptor across before/after;
+  // mutating it would leak one side's production timing into the other.
+  const subject = Object.assign({}, input.subject);
   if (!T || !CBZ || !CBZ.WILDLIFE_SPECIES || !CBZ.buildSwimRig || !CBZ.swimJaw) {
     return { ok: false, missing: "shark mouth staging APIs" };
   }
@@ -119,6 +128,50 @@ function stageSharkBite(input) {
 
   const actor = makeAnimal(subject.species);
   if (!actor || !actor.swim) return { ok: false, missing: subject.species };
+  let biteTiming = null;
+  if (Number.isFinite(subject.elapsedS)) {
+    const isNewCadence = !!(CBZ.biteTimeline && CBZ.biteTimeline.version >= 2 &&
+      CBZ.aquaticBiteDuration && CBZ.biteCurve);
+    const oldHeavy = subject.species === "megalodon";
+    const targetKind = subject.ship ? "ship" : (subject.targetSpecies ? "animal" : null);
+    const duration = isNewCadence
+      ? CBZ.aquaticBiteDuration(actor, targetKind)
+      : (oldHeavy ? 0.72 : 0.56);
+    const p = Math.max(0, Math.min(1, subject.elapsedS / duration));
+    const smooth = t => {
+      const k = Math.max(0, Math.min(1, t));
+      return k * k * (3 - 2 * k);
+    };
+    let open;
+    if (isNewCadence) open = CBZ.biteCurve(p);
+    else {
+      // Byte-for-byte shape of the deployed mounted bite. A real hit latched
+      // at the first legal p=.38 sample and collapsed the next .16 of progress;
+      // a miss held until .70 and recovered across the final .30.
+      open = p < 0.30 ? smooth(p / 0.30) : 1;
+      if (subject.contact && p >= 0.38) {
+        open = Math.max(0.08, 1 - smooth((p - 0.38) / 0.16) * 0.92);
+      } else if (p > 0.70) open = 1 - smooth((p - 0.70) / 0.30);
+      if (p >= 1) open = 0;
+    }
+    const timeline = isNewCadence ? CBZ.biteTimeline : {
+      // The timing metric describes the deployed hit path even on rest/tell
+      // pages. A miss used its longer recovery branch, but it is not the
+      // contact-to-clench behavior this comparison is measuring.
+      fullAt: 0.30, holdTo: 0.38, shutAt: 0.54,
+    };
+    subject.open = open;
+    biteTiming = {
+      elapsedS: subject.elapsedS,
+      progress: p,
+      durationS: duration,
+      fullGapeAtS: duration * timeline.fullAt,
+      compressionS: duration * (timeline.shutAt - timeline.holdTo),
+      recoveryGapS: isNewCadence ? (targetKind === "ship" ? 0.55 : 0.42)
+        : (oldHeavy ? 0.13 : 0.06),
+      newCadence: isNewCadence,
+    };
+  }
   const animal = actor.group;
   animal.position.fromArray(subject.animal || [0, 0, 0]);
   animal.rotation.y = subject.animalYaw || -0.04;
@@ -189,7 +242,10 @@ function stageSharkBite(input) {
   focus.style.cssText = "position:absolute;top:105px;left:29px;color:#c2d5df;font-size:13px;font-weight:550;max-width:760px;line-height:1.35";
   const state = overlay.querySelector("[data-state]"); state.textContent = subject.state;
   state.style.cssText = `position:absolute;right:27px;top:26px;color:${after ? "#7df0b8" : "#ffaaaa"};font-size:11px;font-weight:900;letter-spacing:.1em`;
-  const phase = overlay.querySelector("[data-phase]"); phase.textContent = `JAW  ${Math.round(subject.open * 100)}%`;
+  const phase = overlay.querySelector("[data-phase]");
+  phase.textContent = biteTiming
+    ? `T + ${biteTiming.elapsedS.toFixed(2)} s  ·  JAW ${Math.round(subject.open * 100)}%`
+    : `JAW  ${Math.round(subject.open * 100)}%`;
   phase.style.cssText = "position:absolute;right:28px;top:54px;color:#d7eef8;font:12px ui-monospace,SFMono-Regular,Menlo,monospace";
   const metric = overlay.querySelector("[data-metric]"); metric.textContent = subject.metric;
   metric.style.cssText = "position:absolute;right:27px;bottom:22px;padding:7px 10px;border-radius:6px;background:rgba(3,18,28,.76);color:#bfeeff;font:11px ui-monospace,SFMono-Regular,Menlo,monospace";
@@ -199,26 +255,162 @@ function stageSharkBite(input) {
   const mouth = animal.userData && animal.userData.aquaticMouth;
   const jaw = actor.swim;
   const hinge = jaw.jawGroup ? jaw.jawGroup.getWorldPosition(new T.Vector3()) : null;
+
+  // ---- measured, not asserted --------------------------------------------
+  // staticVsJawM: the lowest STATIC vertex in the mouth span (hull, rostrum —
+  // anything that does not move with the bite, cavity excluded) minus the
+  // moving lower jaw's lowest vertex at rest. The clamp mouth scores NEGATIVE:
+  // the hull's own closed chin hangs below the jaw it is supposed to be, so a
+  // bite swings dentures under a shut head. The split-body mouth scores
+  // positive: the underside of the head IS the jaw, and the only static thing
+  // left up there is the dark mouth roof.
+  // mouthOpeningM: centre-to-centre separation of the authored front lips.
+  // Measuring the farthest shell vertex used to confuse rostrum travel with
+  // gape (and could claim a larger opening on a closed mouth); the named lips
+  // are the actual boundary the player sees.
+  let staticVsJawM = null, mouthOpeningM = null;
+  let staticChinDepthM = null, upperEnvelopeTravelM = null, lowerEnvelopeTravelM = null;
+  let lipProudM = null;
+  if (mouth && jaw.jawGroup) {
+    const sc = animal.scale.x || 1;
+    const spanLen = mouth.upperReachX
+      ? mouth.upperReachX - (mouth.protrude || 0) - mouth.hinge.x : 1;
+    const wx0 = animal.position.x + (mouth.hinge.x + spanLen * 0.25) * sc;
+    const wx1 = animal.position.x + (mouth.hinge.x + spanLen * 1.12) * sc;
+    const v = new T.Vector3();
+    const lowestIn = function (root, x0, x1, skipJaws) {
+      let low = Infinity;
+      root.traverse(function (o2) {
+        if (!o2.isMesh || !o2.geometry || !o2.geometry.attributes.position) return;
+        if (o2 === jaw.jawCavity) return;
+        if (skipJaws) {
+          for (let p = o2; p; p = p.parent) if (p === jaw.jawGroup || p === jaw.jawUpper) return;
+        }
+        const pos = o2.geometry.attributes.position;
+        for (let i2 = 0; i2 < pos.count; i2++) {
+          v.fromBufferAttribute(pos, i2).applyMatrix4(o2.matrixWorld);
+          if (v.x >= x0 && v.x <= x1 && v.y < low) low = v.y;
+        }
+      });
+      return low;
+    };
+    const authored = animal._aquaticMouth || null;
+    function namedMesh(name) {
+      let found = null;
+      if (!name) return null;
+      animal.traverse(function (o2) { if (!found && o2.isMesh && o2.name === name) found = o2; });
+      return found;
+    }
+    const upperShell = (authored && authored.upperShell) || namedMesh(mouth.upperShell);
+    const lowerShell = (authored && authored.lowerShell) || namedMesh(mouth.lowerShell) || namedMesh("sharkChin");
+    const upperLip = namedMesh("sharkUpperLip") || namedMesh("orcaUpperGum");
+    const lowerLip = namedMesh("sharkLowerLip") || namedMesh("orcaLowerGum");
+    function frontPoint(mesh) {
+      if (!mesh || !mesh.geometry || !mesh.geometry.attributes.position) return null;
+      const pos = mesh.geometry.attributes.position, p = new T.Vector3(), best = new T.Vector3();
+      let maxX = -Infinity;
+      for (let q = 0; q < pos.count; q++) {
+        p.fromBufferAttribute(pos, q).applyMatrix4(mesh.matrixWorld);
+        if (p.x > maxX) { maxX = p.x; best.copy(p); }
+      }
+      return isFinite(maxX) ? best : null;
+    }
+    function worldCenter(mesh) {
+      if (!mesh) return null;
+      const box = new T.Box3().setFromObject(mesh);
+      return box.isEmpty() ? null : box.getCenter(new T.Vector3());
+    }
+    function localFrontX(mesh) {
+      if (!mesh || !mesh.geometry || !mesh.geometry.attributes.position) return null;
+      const inv = new T.Matrix4().copy(animal.matrixWorld).invert();
+      const pos = mesh.geometry.attributes.position, p = new T.Vector3();
+      let maxX = -Infinity;
+      for (let q = 0; q < pos.count; q++) {
+        p.fromBufferAttribute(pos, q).applyMatrix4(mesh.matrixWorld).applyMatrix4(inv);
+        if (p.x > maxX) maxX = p.x;
+      }
+      return isFinite(maxX) ? maxX : null;
+    }
+    animal.updateMatrixWorld(true);
+    const posedUpper = frontPoint(upperShell), posedLower = frontPoint(lowerShell);
+    const posedUpperLip = worldCenter(upperLip), posedLowerLip = worldCenter(lowerLip);
+    const staticFloor = lowestIn(animal, wx0, wx1, true);
+    const posedLow = lowestIn(jaw.jawGroup, -Infinity, Infinity, false);
+    CBZ.swimJaw(actor, 0); animal.updateMatrixWorld(true);
+    const restLow = lowestIn(jaw.jawGroup, -Infinity, Infinity, false);
+    const restUpper = frontPoint(upperShell), restLower = frontPoint(lowerShell);
+    if (mouth.upperReachX != null && upperLip && lowerLip) {
+      // `upperReachX` includes the animated protrusion. Remove that travel to
+      // recover the authored closed-mouth arc: any named lip vertex beyond it
+      // is literal tissue sticking into open water. Measure at rest regardless
+      // of the photographed phase so every cadence frame reports one truth.
+      const arcX = mouth.upperReachX - (mouth.protrude || 0) - (mouth.dentalProtrude || 0);
+      const uf = localFrontX(upperLip), lf = localFrontX(lowerLip);
+      if (uf != null && lf != null) lipProudM = Number((Math.max(0, uf - arcX, lf - arcX) * sc).toFixed(3));
+    }
+    CBZ.swimJaw(actor, Number(subject.open) || 0); animal.updateMatrixWorld(true);
+    // No static vertex in the mouth span is the strongest possible result: the
+    // builder handed the entire visible envelope to the jaws.  Report zero
+    // residual chin rather than a blank cell.
+    if (isFinite(restLow)) {
+      staticVsJawM = isFinite(staticFloor) ? Number((staticFloor - restLow).toFixed(3)) : 0;
+      staticChinDepthM = isFinite(staticFloor) ? Number(Math.max(0, restLow - staticFloor).toFixed(3)) : 0;
+    }
+    if (posedUpperLip && posedLowerLip) {
+      mouthOpeningM = Number(Math.abs(posedUpperLip.y - posedLowerLip.y).toFixed(3));
+    }
+    if (posedUpper && restUpper) upperEnvelopeTravelM = Number(posedUpper.distanceTo(restUpper).toFixed(3));
+    if (posedLower && restLower) lowerEnvelopeTravelM = Number(posedLower.distanceTo(restLower).toFixed(3));
+  }
+
   return {
     ok: true, species: actor.species.id, openness: subject.open,
     authoredMouth: !!mouth, upperTeeth: mouth && mouth.upperTeeth, lowerTeeth: mouth && mouth.lowerTeeth,
+    bodySplitMouth: !!(mouth && mouth.bodySplit),
     lowerJawGroup: !!jaw.jawGroup, legacyLooseParts: jaw.jaw ? jaw.jaw.length : 0,
     hinge: hinge && hinge.toArray().map(v => Number(v.toFixed(3))),
     prey: targetActor && targetActor.species.id, realSpeedboat: !!ship,
+    articulatedEnvelope: !!(mouth && mouth.articulatedEnvelope),
+    upperShell: mouth && mouth.upperShell, lowerShell: mouth && mouth.lowerShell,
+    embeddedToothFraction: mouth && mouth.embeddedToothFraction,
+    metrics: {
+      staticVsJawM: staticVsJawM, mouthOpeningM: mouthOpeningM,
+      staticChinDepthM: staticChinDepthM,
+      upperEnvelopeTravelM: upperEnvelopeTravelM,
+      lowerEnvelopeTravelM: lowerEnvelopeTravelM,
+      lipProudM: lipProudM,
+      biteCycleS: biteTiming ? Number(biteTiming.durationS.toFixed(3)) : null,
+      fullGapeAtS: biteTiming ? Number(biteTiming.fullGapeAtS.toFixed(3)) : null,
+      compressionS: biteTiming ? Number(biteTiming.compressionS.toFixed(3)) : null,
+      recoveryGapS: biteTiming ? Number(biteTiming.recoveryGapS.toFixed(3)) : null,
+      jawOpenPct: biteTiming ? Number((subject.open * 100).toFixed(1)) : null,
+    },
     camera: { framedHeight, position: cameraPosition.slice(), target: cameraTarget.slice(), up: cameraUp.slice() },
   };
 }
 
 export default {
   id: "shark-bites",
-  title: "Shark and Megalodon Mouths — Anatomy Through Contact",
-  description: "Ten matched frames compare the deployed shark mouths with the current repair across rest, wind-up, full gape, prey contact, ship contact, and clamp. Four species now share one authored U-jaw contract: a rear hinge embedded in the head, a recessed cavity, front-and-side tooth rows, and the same visible socket used by damage. The last pages combine the megalodon with the real Speedboat to show the full bite-to-sinking handoff.",
-  beforeLabel: "BEFORE · DEPLOYED",
-  afterLabel: "AFTER · HINGED MOUTHS",
-  pairNote: "Same source asset · jaw phase · target · camera · water · light · viewport",
-  method: "Each source page builds its own registered shark, opens it through that page's production CBZ.swimJaw, and adds the same prey or Speedboat asset where applicable. The runner copies the deployed camera into the local capture. These are matched action-state frames, not hand-retouched images.",
+  title: "Shark Mouths — The Body Splits, Not a Clamp",
+  description: "Ten matched frames compare the band-clamp mouth (?sharkmouth=off, this same checkout) with the split-body mouth across rest, wind-up, full gape, prey contact, ship contact, and clamp. The lower jaw is now the shark's own white chin cut from its body rings; the hull and rostrum are notched along the mouth seam so nothing stays closed behind the dropped jaw — a bite separates the dark upper half of the head from the white lower half, orca-style. The metrics table proves it: the static underside of the mouth region (the chin that never moved) is gone.",
+  beforeLabel: "BEFORE — ?sharkmouth=off (the clamp)",
+  afterLabel: "AFTER · SPLIT-BODY MOUTHS",
+  pairNote: "Same checkout · jaw phase · target · camera · water · light · viewport",
+  method: "Both columns load this same checkout; the BEFORE side carries ?sharkmouth=off, which aquatic.js reads at load to build the old band-clamp mouth. Each page builds its own registered shark, opens it through production CBZ.swimJaw, and adds the same prey or Speedboat asset where applicable. The runner copies the before camera into the after capture. These are matched action-state frames, not hand-retouched images.",
+  defaultBefore: "local",
+  beforeParams: { sharkmouth: "off" },
+  metrics: {
+    staticVsJawM: {
+      label: "Static underside minus moving-jaw underside at rest (negative = a closed chin the bite cannot move)",
+      unit: "m", better: "higher",
+    },
+    mouthOpeningM: {
+      label: "Vertical opening at this frame's gape, roof of the hole down to the dropped jaw",
+      unit: "m", better: "higher",
+    },
+  },
   viewport: { width: 1100, height: 680 },
   readyExpression: "window.THREE && window.CBZ && CBZ.buildSwimRig && CBZ.swimJaw && CBZ.cityBuildAmbientCarVisual && CBZ.WILDLIFE_SPECIES && CBZ.WILDLIFE_SPECIES.great_white_shark && CBZ.WILDLIFE_SPECIES.hammerhead_shark && CBZ.WILDLIFE_SPECIES.bull_shark && CBZ.WILDLIFE_SPECIES.megalodon",
   subjects,
-  stage: stageSharkBite,
+  stage: stagePredatorMouth,
 };

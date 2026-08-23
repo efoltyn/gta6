@@ -172,12 +172,16 @@
       if (aiming && CBZ.cityScopeHigh && CBZ.cityScopeHigh()) mul *= 0.4;   // magnified optic → very fine
       CBZ.cam.yaw -= curve(rx) * LOOK_YAW * mul * dt;
       const dpitch = curve(ry) * LOOK_PITCH * mul * dt * (INVERT_Y ? -1 : 1);
-      // both conventions subtract the same delta (matches mouse + touch.js): a
-      // right-stick pull DOWN tilts the view down in third AND first person.
+      // The two conventions are OPPOSITE, so they cannot share a sign — this
+      // block used to subtract for both and claim in its own comment that a
+      // stick pull down tilted the view down "in third AND first person". It
+      // did so only in first person. cam.pitch is DOWN-POSITIVE (see the
+      // convention note in systems/camera.js beside `const cam = {...}`), so a
+      // downward stick ADDS there; fps.fp is UP-positive and still subtracts.
       // systems/camera.js owns the pitch envelope — a hand-typed copy here would
       // stop the stick short of where a mouse can already look.
       const r = CBZ.camPitchRange ? CBZ.camPitchRange() : [-1.0, 0.9];
-      CBZ.cam.pitch = Math.max(r[0], Math.min(r[1], CBZ.cam.pitch - dpitch));
+      CBZ.cam.pitch = Math.max(r[0], Math.min(r[1], CBZ.cam.pitch + dpitch));
       if (CBZ.fps && CBZ.fps.active) CBZ.fps.fp = Math.max(-1.3, Math.min(1.3, CBZ.fps.fp - dpitch));
     }
 

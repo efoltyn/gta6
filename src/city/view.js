@@ -266,7 +266,12 @@
       hy = clamp(d, -2.30, 2.30);        // ~132° each way: you can check your blind spot
       // tighter than the cockpit's ±0.95: a seated driver cannot put his chin
       // on his chest, and a pitch that steep just aims the lens at the footwell
-      hp = clamp(CBZ.cam.pitch || 0, -0.62, 0.72);
+      // SIGN: hp is a three.js Euler X — UP-positive — but cam.pitch is
+      // DOWN-positive (see the convention note in systems/camera.js beside
+      // `const cam = {...}`). Reading it raw made the driver's head pitch the
+      // wrong way against the mouse. The clamp stays in the UP-positive sense
+      // it was authored in: -0.62 chin-down, 0.72 up.
+      hp = clamp(-(CBZ.cam.pitch || 0), -0.62, 0.72);
     }
     // THE HALF TURN. A three.js camera looks down its own local -Z; the car's
     // +Z is the nose. Without the PI you are seated facing the back seats.

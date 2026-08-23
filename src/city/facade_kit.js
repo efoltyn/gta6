@@ -94,6 +94,13 @@
   //  1. THE REGISTRY
   // ============================================================
   const REG = new Map();
+  /* HOW MANY GRAMMARS ARE ACTUALLY LOADED. The registry is a Map that fills
+     from city/facades/*.js, one file per style, and until now nothing could
+     ask it how full it was — so a build that shipped the kit and none of its
+     styles looked identical from the outside to one that shipped all nine, and
+     the island's town (SURV_FACADES is ON: this island is the kit's showroom)
+     quietly came out undressed. tools/disaster-check.mjs counts them. */
+  CBZ.facadeStyles = function () { return REG.size; };
   CBZ.registerFacade = function (id, def) {
     if (!id || !def || typeof def.build !== "function") return;
     REG.set(id, { id: id, label: def.label || id, build: def.build,

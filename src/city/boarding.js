@@ -1146,7 +1146,34 @@
     if (typeof CBZ.cityEnterVehicle !== "function") return false;
     if (CBZ.cityEnterVehicle._boardWrapped) return true;
     const orig = CBZ.cityEnterVehicle;
-    const wrapped = function (car) {
+    const wrapped = function (car, opts) {
+      /* ---- THE INSTANT SEAT, AND WHY IT HAD TO EXIST -------------------
+         THIS WRAPPER CHANGED cityEnterVehicle's CONTRACT AND NOTHING WAS
+         TOLD. The unwrapped call is synchronous: it returns true and the
+         player IS driving on the next line. With the door arc on, it returns
+         true and the player is driving ~1.5 s LATER, when the animation's
+         commit fires. A human pressing E cannot tell the difference — that
+         is the whole point of the arc — but every SCRIPTED caller is written
+         against the old contract, and each one is now quietly broken:
+
+           island_speedway cityRaceStart  the racer origin's grid start
+           captain.js                     taking the helm
+           games/racing.js                the APEX paddock loaner
+           militaryvehicles / yachts / swim
+
+         The racer origin is where it showed. It seats the player, calls
+         startRace() on the very next line, startRace reads `P.driving`,
+         finds it false, and refuses — so the story never opened on the grid
+         and, before the fix in that file, abandoned its primer-grey loaner
+         on the asphalt and tried again next frame. Twenty grey cars on the
+         start straight, and the actual cause was a door animation.
+
+         A scripted start is not somebody walking up to a car: there is no
+         door to watch, usually no camera on the player yet, and the caller
+         needs the seat NOW. `{ instant: true }` says exactly that and takes
+         the original synchronous path. The arc is untouched for every human
+         press, which is every call that does not pass the flag. */
+      if (opts && opts.instant) return orig.apply(this, arguments);
       if (!carArcOn() || !car || car.player) return orig.apply(this, arguments);
       if (pArc) return true;                    // arc already playing: swallow the re-press
       const self = this, args = arguments;

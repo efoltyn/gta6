@@ -117,6 +117,33 @@
   // "when I look around it isn't looking around only, it's also changing my
   // camera angle — make it a FIXED angle like the one I'm showing."
   //
+  // ==== DEFAULT OFF as of 2026-08-20. THE PIN WAS TREATING A SYMPTOM. ========
+  // Read that complaint again next to the bug found today: `cam.pitch` is
+  // DOWN-positive and the mouse handler SUBTRACTED the drag, so third-person
+  // vertical look was INVERTED. Dragging down swung the boom UP into a top-down
+  // stare; dragging up dropped it to your heels. That is precisely, and only,
+  // "it isn't looking around, it's changing my camera angle" — the owner was
+  // describing an inverted axis, and the answer shipped here was to stop the
+  // camera from pitching at all. It worked the way amputation works.
+  //
+  // The same owner said it again on 2026-08-20 ("on FPS the way I drag is the
+  // way the cam moves, on 3rd person it is opposite ... it changes angle not
+  // direction of looking") — a second report of one unfixed sign, and proof the
+  // pin never addressed it: under the pin vertical mouse moves NOTHING you can
+  // see, which is not "looking around" either. tools/camera-look-check.mjs
+  // measures exactly that: pinned, a 0.144 rad drag moves the lens 0.003.
+  //
+  // With the sign corrected the pure orbit already keeps the promise the pin
+  // was reaching for — `camAudit().frameTilt` is CONSTANT across a pitch sweep,
+  // so the character does not move in frame; only the view direction changes.
+  // That is the Fortnite behaviour the owner keeps citing, and it is what the
+  // RDR2 pass was built to deliver before the inversion masked it.
+  //
+  // The flag stays, whole: `CBZ.CONFIG.CAM_TP_FIXED_ANGLE = true` restores the
+  // pinned frame, the aim band, the sliding reticle and camAimDecoupled()
+  // exactly as they were. Nothing below this line changed.
+  // =========================================================================
+  //
   // The RDR2 pass above answered the OTHER half of this. It made the view pitch
   // 1:1 with the mouse and held the character's place in frame — but it did that
   // with a PURE ORBIT, so the lens itself still swings a whole boom's worth: a
@@ -141,7 +168,61 @@
   // exactly as the RDR2 pass made it (CAM_FIXED_ADS_FREE=0 pins that too).
   // FIRST PERSON IS SACRED, as everywhere else in this file: fps.active returns
   // long before the tier runs and tpFixedFrame() refuses outright.
-  if (CBZ.CONFIG.CAM_TP_FIXED_ANGLE == null) CBZ.CONFIG.CAM_TP_FIXED_ANGLE = true;
+  if (CBZ.CONFIG.CAM_TP_FIXED_ANGLE == null) CBZ.CONFIG.CAM_TP_FIXED_ANGLE = false;
+  // ---- YOU CAN SEE THE GUN (2026-08-20) — owner, with a clip of a third-person
+  // shooter as the reference: "in our third person when holding gun you can't
+  // see the gun. Fix the angle so we can see the gun better when shooting."
+  //
+  // He is right, and it was measurable rather than a matter of taste: with the
+  // shipped framing, ZERO percent of the drawn weapon's barrel reached the lens
+  // while firing. tools/tp-gun-view-check.mjs is the number — it boots the real
+  // city, walks the drawn gun's own bore in screen space and ray-tests every
+  // point against the player's own body, then reports what survives, with the
+  // fix on and off, from the same stage.
+  //
+  // WHY it was zero, and it is not the obvious reason. A 2026-07 Fortnite pass
+  // decided that holding a weapon must not move the camera, so armed-at-rest
+  // ran the relaxed 4.35 m boom with a 0.68 m shoulder offset and ONLY RMB
+  // changed anything. The offset is the part people reach for first and it is
+  // the weaker lever: at 4.35 m, 0.68 m is 9° of frame, and doubling it buys
+  // about 6 cm of clearance past a torso the firing arm is standing in front of
+  // anyway. The lever that actually decides it is the LOOK LEAD. Leading the
+  // look target 12 m down-range grows the pure orbit's derived FRAME_TILT to
+  // ~0.17 rad, which settles the character low in frame and silhouettes the
+  // weapon against the thing it is pointed at. ADS had that lead all along —
+  // which is exactly why scoping was the one armed state you could see your own
+  // gun in — and firing did not. So "when shooting" looked no different from
+  // walking, because for the camera it WAS no different.
+  //
+  // What this flag turns on, then:
+  //   · framing reads a THREE-TIER table (CBZ.tpArmTier → CITY_TP): carry,
+  //     present (trigger down / firing / the ~0.9 s post-shot settle), ADS;
+  //   · presenting takes ADS's long look lead and shoulder framing, at the
+  //     hip-fire lens (the FOV punch stays ADS-only).
+  // Measured on the airport apron, carbine, same spot, fix off → on:
+  //     firing   0% of the barrel visible  →  77%,  muzzle off the shoulder → on
+  //     scoping 81%                        →  77%   (same constants; noise)
+  //     carrying 54%                       →  54%   (deliberately unchanged —
+  //                                                  see the CARRY note in
+  //                                                  src/city/camera.js)
+  // Presenting is not a new signal: systems/fpsmode.js has published
+  // CBZ.tpPresenting for the yaw and damp switches all along; framing was the
+  // one consumer still ignoring it. Flip false for the old hidden-gun framing.
+  //
+  // MEASURED UNDER THE PIN, AND IT SURVIVES WITHOUT IT (merge note, same day).
+  // Those numbers were taken while CAM_TP_FIXED_ANGLE defaulted TRUE. It now
+  // defaults FALSE — the inverted-look fix above made the pin unnecessary — so
+  // the lens pitches with your mouse again. Two consequences, both checked
+  // rather than assumed:
+  //   · the FRAMING numbers are unchanged, because they are measured at the
+  //     tier's resting pitch and the boom/offset/lead arithmetic never read the
+  //     pin;
+  //   · the sibling barrel fix in systems/holsterprops.js (aim the gun along
+  //     CBZ.playerAimDir, not the lens quaternion) becomes a NO-OP by identity:
+  //     with the pin off, camAimDecoupled() is false and playerAimDir returns
+  //     the lens direction. It stays because the flag is still there — turn the
+  //     pin back on and the barrel must not go back to pointing at the horizon.
+  if (CBZ.CONFIG.CAM_TP_GUN_VISIBLE == null) CBZ.CONFIG.CAM_TP_GUN_VISIBLE = true;
   if (CBZ.CONFIG.CAM_FIXED_ADS_FREE == null) CBZ.CONFIG.CAM_FIXED_ADS_FREE = true;
   // The aim band. Vertical half-FOV is 30° (CITY_TP.FOV 60), and the reticle is
   // the PROJECTED impact point, so an aim of θ lands it tan θ / tan 30° of the
@@ -153,6 +234,21 @@
   const FIX_BLEND = 7.5;      // 1/s — pin↔free ease when AIM is pressed/released
   let fixedK = 0;             // 0 = free orbit (the RDR2 rig), 1 = pinned frame
   let _rigPitch = 0;          // the angle the boom actually flew at last frame
+
+  // ---- WHICH ARMED TIER IS THE FRAME IN RIGHT NOW? -------------------------
+  // ONE definition, shared by this file's guarded fallback and the authoritative
+  // CITY_TP in src/city/camera.js, so the two copies can never disagree about
+  // what "presenting" means:
+  //     0 = CARRY    gun out, not pointed at anything (walking the street)
+  //     1 = PRESENT  trigger down, firing, or the ~0.9s post-shot settle
+  //     2 = ADS      RMB/scoping
+  // Presenting is systems/fpsmode.js's signal (CBZ.tpPresenting), which is the
+  // same one the damps already ride on — the framing just stopped ignoring it.
+  CBZ.tpArmTier = function () {
+    if (CBZ.isADS && CBZ.isADS()) return 2;
+    if (CBZ.tpPresenting && CBZ.tpPresenting()) return 1;
+    return 0;
+  };
 
   // ---- CITY THIRD-PERSON FRAMING (Fortnite over-shoulder) — guarded FALLBACK ----
   // src/city/camera.js IS loaded by index.html (later than this file) and is the
@@ -172,17 +268,23 @@
     DAMP_YAW: 9.0,     // relaxed yaw chase rate
     DAMP_YAW_AIM: 26,  // yaw chase while armed — near-rigid so aiming never feels mushy
     FOV: 60,           // base FOV
-    // ARMED / ADS tier: armed-at-rest = the SAME frame as relaxed (holding a gun
-    // doesn't move the camera); only RMB/ADS punches to the tight over-shoulder.
+    // GUN-VISIBLE armed tiers (CAM_TP_GUN_VISIBLE) — see city/camera.js.
+    DIST_CARRY: 4.35, DIST_PRESENT: 2.20, DIST_ADS: 2.65,
+    SIDE_CARRY: 0.68, SIDE_PRESENT: 1.50, SIDE_ADS: 1.12,
+    HEIGHT_CARRY: 1.70, HEIGHT_PRESENT: 1.55, HEIGHT_ADS: 1.58,
+    // LEGACY tier (CAM_TP_GUN_VISIBLE=false): armed-at-rest = the SAME frame as
+    // relaxed, only RMB/ADS punched in — the framing that hid the gun.
     DIST_AIM_BASE: 4.35, DIST_AIM_ADS: 2.65,
     SIDE_AIM_BASE: 0.68, SIDE_AIM_ADS: 1.12,
     FOV_AIM_BASE: 60,    FOV_AIM_ADS: 50,
     HEIGHT_AIM_BASE: 1.7, HEIGHT_AIM_ADS: 1.58,
     PITCH_LOOK: 1.0,   // how strongly the armed look target follows player pitch (FIX 1: aim vertically + stable framing)
-    get DIST_AIM() { return (CBZ.isADS && CBZ.isADS()) ? this.DIST_AIM_ADS : this.DIST_AIM_BASE; },
-    get SIDE_AIM() { return (CBZ.isADS && CBZ.isADS()) ? this.SIDE_AIM_ADS : this.SIDE_AIM_BASE; },
+    _gv() { return CBZ.CONFIG.CAM_TP_GUN_VISIBLE !== false; },
+    _tier() { return CBZ.tpArmTier ? CBZ.tpArmTier() : ((CBZ.isADS && CBZ.isADS()) ? 2 : 0); },
+    get DIST_AIM() { const t = this._tier(); return this._gv() ? [this.DIST_CARRY, this.DIST_PRESENT, this.DIST_ADS][t] : (t === 2 ? this.DIST_AIM_ADS : this.DIST_AIM_BASE); },
+    get SIDE_AIM() { const t = this._tier(); return this._gv() ? [this.SIDE_CARRY, this.SIDE_PRESENT, this.SIDE_ADS][t] : (t === 2 ? this.SIDE_AIM_ADS : this.SIDE_AIM_BASE); },
+    get HEIGHT_AIM() { const t = this._tier(); return this._gv() ? [this.HEIGHT_CARRY, this.HEIGHT_PRESENT, this.HEIGHT_ADS][t] : (t === 2 ? this.HEIGHT_AIM_ADS : this.HEIGHT_AIM_BASE); },
     get FOV_AIM()  { return (CBZ.isADS && CBZ.isADS()) ? this.FOV_AIM_ADS  : this.FOV_AIM_BASE; },
-    get HEIGHT_AIM() { return (CBZ.isADS && CBZ.isADS()) ? this.HEIGHT_AIM_ADS : this.HEIGHT_AIM_BASE; },
   };
 
   // ---- zoom (scroll wheel / pinch). default sits wide; clamps in [MIN,MAX] ----
@@ -274,6 +376,29 @@
   // the lens. When the frame is pinned the lens is no longer the aim, so a
   // getWorldDirection() there would nail every round to the resting pitch.
   CBZ.camAimDecoupled = tpFixedFrame;
+
+  // CAM_TP_GUN_VISIBLE, read live so a console flip re-frames the next frame.
+  function gunVis() { return CBZ.CONFIG.CAM_TP_GUN_VISIBLE !== false; }
+  // ---- THE SAME RULE, FOR THE MODES THAT ARE NOT THE CITY ------------------
+  // The city tiers spend the flag inside CITY_TP's getters. Jail (escape),
+  // the disaster island (survival) and gun game run the OTHER rig — TP === null,
+  // its own constants — and they were left out of the first pass entirely, which
+  // was wrong: they are where most of the shooting happens. They already lead
+  // the look target 12 m while armed, which the city measurements say is the
+  // half that matters; they were just standing 7.6 m back to use it.
+  //
+  // But the gate has to be PRESENTING, not merely-armed, or this would import
+  // the city's measured mistake instead of its fix. The city sweep is emphatic:
+  // a tighter boom with a wider offset HIDES a carried weapon, because a
+  // low-ready long gun hangs flat along the thigh and every centimetre the lens
+  // moves that way puts more hip in front of it. Jail runs the same hanging
+  // low-ready pose (holsterprops is city+escape), so carrying there keeps the
+  // frame it always had, and only the trigger changes the shot.
+  // Reasoned across from the city numbers, not measured on their own stages:
+  // tp-gun-view-check only boots the city.
+  function nonTpPresent() {
+    return gunVis() && !!(CBZ.tpPresenting && CBZ.tpPresenting());
+  }
   CBZ.camFixedFrameK = function () { return fixedK; };
   function pitchLimits() {
     if (CBZ.CONFIG.CAM_RDR2_ORBIT === false) return [MIN_PITCH, MAX_PITCH];
@@ -299,6 +424,35 @@
   CBZ.camPitchRange = pitchLimits;
   const DEFAULT_PITCH = 0.46;   // lower angle — less of a top-down "high" view
   CBZ.CAM_DEFAULT_PITCH = DEFAULT_PITCH;
+  // ============================================================
+  //  cam.pitch IS DOWN-POSITIVE. READ THIS BEFORE YOU TOUCH IT.
+  // ============================================================
+  //  +pitch  = lens ABOVE the pivot, view angled DOWN   (CITY_TP.PITCH 0.10 is
+  //            described in its own comment as a "mild down-gaze"; every spawn
+  //            preset in the repo — 0.12 / 0.28 / 0.34 / 0.4 / 0.52 — is a
+  //            camera sitting above the shoulder looking down)
+  //  -pitch  = lens BELOW the pivot, view angled UP     (the RDR2 sky look that
+  //            drops the boom to your heels)
+  //  The orbit IS the definition: `oy = sin(pitch)·dist`, and the view basis
+  //  built from it is `vY = -sin(pitch)`.
+  //
+  //  This is the OPPOSITE of `CBZ.fps.fp`, which is UP-positive (fpsmode's
+  //  `forward()` is `y: +sin(fp)`). The two conventions have been mixed for a
+  //  long time and every mix was a real bug:
+  //    · the three raw input writers (mouse here, touch.js applyLookDelta,
+  //      gamepad.js) subtracted the drag like fps.fp does → inverted TP look;
+  //    · fpsmode's leave-FP handoff copied fps.fp straight across → flipping
+  //      your view vertically the instant you pressed [V];
+  //    · city/view.js and city/cockpit_view.js feed cam.pitch to a three.js
+  //      Euler X (UP-positive) → inverted look in the driver's seat / cockpit;
+  //    · city/combat.js's aimVec used `y: sin(cam.pitch)` → thrown/aimed
+  //      trajectories went the opposite way in third person;
+  //    · entities/character.js posed the aiming arms off +cam.pitch.
+  //  All of those now convert explicitly and cite this note. If you add a
+  //  reader, convert here — do NOT add a second convention.
+  //  (fpsmode's recoil kick, its soft-lock, and touch.js's aim magnetism were
+  //  already correct: each carries its own "third-person cam.pitch is DOWN-
+  //  positive" comment and negates. They are the ones that got it right.)
   const cam = { yaw: 0, pitch: DEFAULT_PITCH, locked: false };
   CBZ.cam = cam;
 
@@ -479,7 +633,20 @@
     // scoped look is proportionally finer (systems/lockon.js real sniper scope)
     const sensMul = CBZ.fpsLookSensMul ? CBZ.fpsLookSensMul() : 1;
     cam.yaw -= e.movementX * SENS * sensMul;
-    cam.pitch -= e.movementY * SENS * sensMul;
+    // ---- SIGN (THE THIRD-PERSON LOOK INVERSION) --------------------------
+    // cam.pitch is DOWN-POSITIVE — see the convention note at its declaration.
+    // Dragging the mouse DOWN is movementY > 0 and must look DOWN, so it ADDS.
+    // This line SUBTRACTED, which is the first-person `fps.fp -= movementY`
+    // convention pasted onto the opposite convention: third-person vertical
+    // look has been inverted the whole time. It hid for years because the
+    // legacy look target was effectively pitch-BLIND (measured gain ~0.03 —
+    // see the CORRECTED note at the pure-orbit solve), so all you could see was
+    // the boom swinging the wrong way: the owner's "it changes the ANGLE, not
+    // the direction of looking". CAM_RDR2_ORBIT made the view pitch 1:1 with
+    // cam.pitch and turned that faint wrongness into a flat inversion.
+    // Horizontal was never wrong: both tiers share fwd = (-sin yaw, -cos yaw),
+    // so `yaw -= movementX` turns the view right in FP and TP alike.
+    cam.pitch += e.movementY * SENS * sensMul;
     // driving/flying: a deliberate mouse glance suspends the behind-the-vehicle
     // auto-recenter for a beat (CAM_VEHICLE_FREELOOK), so you can actually look
     // sideways at speed; it decays back to the chase ~0.8s after you stop.
@@ -1345,7 +1512,7 @@
           // ease below is the whole ADS punch-in). Wheel + melee zoom are out.
           ? (shoulder ? TP.DIST_AIM : TP.DIST) * tpZoomK
           : (shoulder ? TP.DIST_AIM : (meleeFocus ? TP.DIST * 0.85 : TP.DIST * (zoomTarget / DEF))))
-      : (driving ? Math.max(zoomTarget, 11) : (shoulder ? Math.min(zoomTarget, 7.6) : (meleeFocus ? Math.min(zoomTarget, 7.0) : zoomTarget)));
+      : (driving ? Math.max(zoomTarget, 11) : (shoulder ? Math.min(zoomTarget, nonTpPresent() ? 5.0 : 7.6) : (meleeFocus ? Math.min(zoomTarget, 7.0) : zoomTarget)));
     // ---- ROOM-AWARE BOOM (CAM_ROOM_BOOM). `encK` is the damped enclosure, so
     // the doorway is a ~0.3s blend rather than a step, and the existing collision
     // clamp below stays exactly what it was: the LAST resort, not the mechanism.
@@ -1477,8 +1644,8 @@
     // SHOULDER SWAP (CAM_SHOULDER_SWAP): shoulderK eases -1↔1 through centre,
     // flipping the whole side-offset family (framing AND aim offsets together
     // so the ADS punch-in lands over whichever shoulder is active).
-    const targetSide = (chuteState ? 0 : (TP ? (shoulder ? TP.SIDE_AIM * 0.22 : TP.SIDE * 0.25) : (shoulder ? 0.26 : (meleeFocus ? 0.12 : 0)))) * sK * armK;
-    const camSide = (chuteState ? 0 : (TP ? (shoulder ? TP.SIDE_AIM : TP.SIDE) : (shoulder ? 0.86 : (meleeFocus ? 0.32 : 0)))) * sK * armK;
+    const targetSide = (chuteState ? 0 : (TP ? (shoulder ? TP.SIDE_AIM * 0.22 : TP.SIDE * 0.25) : (shoulder ? (nonTpPresent() ? 0.30 : 0.26) : (meleeFocus ? 0.12 : 0)))) * sK * armK;
+    const camSide = (chuteState ? 0 : (TP ? (shoulder ? TP.SIDE_AIM : TP.SIDE) : (shoulder ? (nonTpPresent() ? 1.05 : 0.86) : (meleeFocus ? 0.32 : 0)))) * sK * armK;
     const baseX = tx + rightX * targetSide;
     const baseZ = tz + rightZ * targetSide;
     const ox = Math.sin(yaw) * cp * orbitDist;
@@ -1564,18 +1731,32 @@
     // ease the forward lead (a long lead drops the player low in frame when
     // sprinting) and raise the look height so you sit centred, not bottom-third.
     const lead = shoulder ? 0.05 : (meleeFocus ? 0.08 : 0.08);
-    // FORTNITE parity (owner reference shots): merely HOLDING a weapon must not
-    // reshape the frame — the long 12m aim lead (and the shoulder look height
-    // below) apply only while actually scoping (RMB/ADS). Armed-at-rest in the
-    // city uses the same LEAD/LOOK_Y as the relaxed chase, so equipping a gun
-    // leaves the camera exactly where it was. Jail/survival shoulder (no TP)
-    // keeps the old constants.
+    // FORTNITE parity (owner reference shots): merely CARRYING a weapon must not
+    // reshape the frame — armed-at-rest in the city keeps the relaxed chase's
+    // LEAD/LOOK_Y, so equipping a gun leaves the camera where it was. That half
+    // stands. What changed on 2026-08-20 is where the line is drawn: it used to
+    // sit at SCOPING, which left the frame unchanged while you were actually
+    // shooting, and a gun you cannot see is not parity with anything (see
+    // CAM_TP_GUN_VISIBLE at the top of this file). Jail/survival shoulder
+    // (no TP) keeps the old constants.
     const tpADS = !!(TP && shoulder && CBZ.isADS && CBZ.isADS());
+    // ---- THE LEAD IS THE FRAMING (CAM_TP_GUN_VISIBLE) -----------------------
+    // Measured, and it is the biggest single lever on whether the weapon is
+    // visible at all: with the 12 m aim lead the look target sits far
+    // down-range, the pure orbit's derived FRAME_TILT grows to ~0.17 rad, and
+    // the character settles low in frame with the gun silhouetted against the
+    // world it is pointed at (78-85% of the barrel reaches the lens). With the
+    // relaxed 4.6 m LEAD the tilt is ~0.08, the character rides high, and the
+    // barrel — which holsterprops locks parallel to the view axis while you
+    // present — foreshortens into a stub behind their own shoulder (0%).
+    // ADS already had the long lead. Firing did not, which is precisely why
+    // "when shooting" looked no different from walking. One boolean.
+    const tpLongLead = tpADS || (TP && shoulder && tpPresent && gunVis());
     // front view: the forward look-lead collapses with frontK so the camera
     // settles looking AT the character (LOOK_Y height), not past them.
     const aimLead = (chuteState ? 0.35
       : driving ? 8.5
-      : shoulder ? (TP ? (tpADS ? 12.0 : TP.LEAD) : 12.0)
+      : shoulder ? (TP ? (tpLongLead ? 12.0 : TP.LEAD) : 12.0)
       : meleeFocus ? 2.2
       : TP ? TP.LEAD
       : surv ? 2.4 : 3.6) * (1 - frontK);
@@ -1622,7 +1803,7 @@
     // the tier's pitch-BLIND look height — still the authored framing number,
     // now used as the input to the tilt solve rather than as the answer.
     const lookYFlat = player.pos.y + (chuteState ? (chuteCanopy ? 3.45 : 0.92)
-      : (player.prone ? 0.62 : (player.crouch ? (TP ? 1.18 : 1.24) : (driving ? 1.9 : (shoulder ? (TP ? (tpADS ? 1.72 : TP.LOOK_Y) : 1.72) : (meleeFocus ? 1.52 : (TP ? TP.LOOK_Y : (surv ? 2.06 : 1.88))))))));
+      : (player.prone ? 0.62 : (player.crouch ? (TP ? 1.18 : 1.24) : (driving ? 1.9 : (shoulder ? (TP ? (tpLongLead ? 1.72 : TP.LOOK_Y) : 1.72) : (meleeFocus ? 1.52 : (TP ? TP.LOOK_Y : (surv ? 2.06 : 1.88))))))));
     let ltx, lty, ltz;
     if (CBZ.CONFIG.CAM_RDR2_ORBIT !== false && !chuteState) {
       // ================= PURE ORBIT (the RDR2 answer) =====================

@@ -168,7 +168,11 @@
   CBZ.onUpdate(46, function (dt) {
     if (cd > 0) cd -= dt;
     if (CBZ.game.mode !== "survival") return;
-    const live = CBZ.game.state === "playing" && !CBZ.player.dead;
+    // A MOUNT OWNS THE BODY. grapple.js aims these verbs from a standing
+    // human; a player riding an animal (the shark sim's whole game) has no
+    // hands free and no ground cone — the panel popping "SURVIVOR · Grab"
+    // over a shark closing on a swimmer was pure HUD noise.
+    const live = CBZ.game.state === "playing" && !CBZ.player.dead && !CBZ.player._mountedAnimal;
     // THE WATER TAKES PRECEDENCE, and it costs nothing to give it: you cannot
     // grab, punch or shove while you are swimming (grapple.js aims along the
     // ground cone from a body the water owns), so the dock is free, and the one

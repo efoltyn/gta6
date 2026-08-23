@@ -61,7 +61,13 @@
                           // honour an owner-set value (don't clobber a toggle)
 
   function loop(t) {
-    CBZ.now = t;
+    /* WHO OWNS THE CLOCK. Under the variable step, CBZ.now IS the rAF
+       timestamp — unchanged, and right for a single player. Under the fixed
+       step it is advanced one whole tick at a time down in the update block,
+       so that every client's cooldowns and phases move by the same amount per
+       tick instead of by however long that machine's last frame took. */
+    const fixed = (CBZ.fixedStep && CBZ.fixedStep.on()) ? CBZ.fixedStep : null;
+    if (!fixed) CBZ.now = t;
     let dt = (t - last) / 1000;
     let realDt = Math.max(0, dt); // untouched wall-clock delta (pre-clamp)
     last = t;
@@ -94,8 +100,43 @@
     // skips recomposing it. Bumped here so a stamp is only ever good for ONE
     // frame — any system that stops stamping hands its subtrees straight back.
     CBZ._matrixOwnStamp = (CBZ._matrixOwnStamp || 0) + 1;
+    /* THE FIXED STEP (systems/fixedstep.js, survival only by default).
+
+       Everything above measures TIME, which is right for one player on one
+       machine and is the reason two machines can never run the same match: a
+       phone at 47 fps and a laptop at 60 take different numbers of steps of
+       different sizes through the same second, and their integrations drift
+       apart within seconds of an identical seed. When the fixed step is on,
+       the frame's real delta goes into an accumulator and whole 1/60 ticks
+       come out — so tick N means the same world state everywhere.
+
+       The variable path below is untouched and is still what the city and the
+       prison run. FIXED_STEP_V1=false puts survival back on it too, live. */
     // updaters are wrapped so a single throw can NEVER freeze the loop
-    if (g.state === "playing") {
+    if (g.state === "playing" && fixed) {
+      const n = fixed.consume(realDt);
+      const step = 1 / fixed.hz();
+      const fdt = step * scale;
+      for (let k = 0; k < n; k++) {
+        if (k) CBZ._matrixOwnStamp++;      // each tick is its own frame to the skip cache
+        g.elapsed += fdt;
+        fixed.tick++;
+        CBZ.survNetTick = fixed.tick;      // what a snapshot is stamped with
+        /* THE CLOCK ADVANCES BY THE TICK, NOT BY THE WALL. CBZ.now was the rAF
+           timestamp, so every cooldown and phase in the game moved by however
+           long the last frame happened to take — the same drift the step itself
+           was fixed to remove, one level down. It stays MONOTONIC (it advances
+           from wherever it already was, never jumps back, so nothing holding a
+           deadline sees time reverse); what is now identical between clients is
+           the INCREMENT, which is what a deadline is measured in. */
+        CBZ.now += step * 1000;
+        for (const u of CBZ.updaters) {
+          try { u.fn(fdt); } catch (err) { console.error("[updater]", err); }
+        }
+      }
+      const ts0 = CBZ.fmtTime(g.elapsed);
+      if (ts0 !== lastTimer) { CBZ.el.timer.textContent = ts0; lastTimer = ts0; }
+    } else if (g.state === "playing") {
       g.elapsed += dt;
       for (const u of CBZ.updaters) {
         try { u.fn(dt); } catch (err) { console.error("[updater]", err); }
@@ -110,11 +151,62 @@
       try { a.fn(dt); } catch (err) { console.error("[always]", err); }
     }
 
-    CBZ.renderer.render(CBZ.scene, CBZ.camera);
-    requestAnimationFrame(loop);
+    /* ---- THE ONE DRAW, AND THE ONE WAY TO TURN IT OFF -------------------
+       RENDER_FRAMES=false (?cfg_RENDER_FRAMES=0) runs the whole game with no
+       draw call: same updater chain, same always chain, same clock, nothing
+       handed to the rasterizer.
+
+       WHY THIS EXISTS. Measured with tools/boot-trace.mjs, which beacons every
+       boot checkpoint out through the browser process so a frozen main thread
+       can still be watched: Gang City's CPU build is ~30 s and completes
+       cleanly. What made the mode untestable headless is everything AFTER it —
+       the first frames, where three.js compiles a program per material the
+       first time it is drawn, across a 25 km scene, on a software rasterizer.
+       Prison Escape builds in ~1 s and then draws steadily at ~3 fps on the
+       same box, which is exactly why every gate aimed at that mode works and
+       the Gang City ones time out. This switch removes the drawing from any
+       tool that does not actually need pixels.
+
+       WHO SHOULD USE IT: every headless gate that asserts on WORLD STATE —
+       counts, records, positions, audits.
+       WHO SHOULD NOT: anything that photographs the game. Those want frames
+       and should pay for them — or call CBZ.renderFrame() to draw exactly
+       one, which is the supported way to take a picture from a page booted
+       with drawing off. */
+    const drawing = !CBZ.CONFIG || CBZ.CONFIG.RENDER_FRAMES !== false;
+    if (drawing) CBZ.renderer.render(CBZ.scene, CBZ.camera);
+    schedule();
   }
 
-  CBZ.startLoop = function () { requestAnimationFrame(loop); };
+  /* ---- WHAT PUMPS THE LOOP, AND WHY IT IS NOT ALWAYS rAF ------------------
+     MEASURED THE HARD WAY. The first version of the no-draw switch above kept
+     `requestAnimationFrame(loop)` as the pump and the game stopped dead: the
+     boot trace showed the build finishing in 27.5 s and then TWO loop passes
+     in the next five minutes. requestAnimationFrame is not a timer — the
+     browser schedules it against frame PRODUCTION, and a page that never
+     draws anything gives the compositor no reason to produce a frame, so the
+     callbacks simply stop arriving. Turning the renderer off had turned the
+     clock off with it, which looks identical from the outside to the hang it
+     was meant to cure.
+
+     So the pump follows the drawing: rAF while there are frames (correct for
+     players — vsync-aligned, throttled in background tabs), a timer when
+     there are not. `performance.now()` is passed by hand because rAF supplies
+     the timestamp and setTimeout does not; without it `t` is undefined and
+     every dt in the engine becomes NaN. */
+  function schedule() {
+    if (!CBZ.CONFIG || CBZ.CONFIG.RENDER_FRAMES !== false) { requestAnimationFrame(loop); return; }
+    setTimeout(function () { loop(performance.now()); }, 0);
+  }
+
+  // Draw exactly one frame, whatever RENDER_FRAMES says. The seam a probe or
+  // a screenshot tool uses on a page that is otherwise not drawing.
+  CBZ.renderFrame = function () {
+    try { CBZ.renderer.render(CBZ.scene, CBZ.camera); return true; }
+    catch (e) { console.error("[renderFrame]", e); return false; }
+  };
+
+  CBZ.startLoop = function () { schedule(); };
 
   // ---- HEADLESS SIM STEP (tools only — inert in normal play) --------------
   // Drives ONE update tick with a fixed dt and NO render: the whole updater +
@@ -137,6 +229,7 @@
     CBZ.feelDt = CBZ.feelMotion ? Math.min(dt, (g.mode === "city") ? FEEL_MAX_CITY : FEEL_MAX_OTHER) * scale : sdt;
     if (g.state === "playing") {
       g.elapsed += sdt;
+      if (CBZ.fixedStep) { CBZ.fixedStep.tick++; CBZ.survNetTick = CBZ.fixedStep.tick; }
       for (const u of CBZ.updaters) {
         try { u.fn(sdt); } catch (err) { console.error("[updater]", err); }
       }

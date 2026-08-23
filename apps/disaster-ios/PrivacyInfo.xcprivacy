@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  ios/PrivacyInfo.xcprivacy — the privacy manifest Apple has required on every
+  new submission since spring 2024. Copy it into the Xcode project (see
+  ios/GO-IOS.md step 4); it belongs at App/App/PrivacyInfo.xcprivacy and must be
+  a member of the App target.
+
+  The declarations are short because the app is: it collects nothing, sends
+  nothing, and has no network code path at all. The one required-reason API is
+  UserDefaults, which WKWebView and Capacitor's own bridge use internally —
+  CA92.1 is the "access info from the app itself" reason, which is exactly the
+  case here. If you later add a plugin, re-check this file: the required-reason
+  list is per-binary, not per-line-you-wrote.
+-->
+<plist version="1.0">
+<dict>
+  <key>NSPrivacyTracking</key>
+  <false/>
+  <key>NSPrivacyTrackingDomains</key>
+  <array/>
+  <key>NSPrivacyCollectedDataTypes</key>
+  <array/>
+  <key>NSPrivacyAccessedAPITypes</key>
+  <array>
+    <dict>
+      <key>NSPrivacyAccessedAPIType</key>
+      <string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+      <key>NSPrivacyAccessedAPITypeReasons</key>
+      <array>
+        <string>CA92.1</string>
+      </array>
+    </dict>
+  </array>
+</dict>
+</plist>

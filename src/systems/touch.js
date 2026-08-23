@@ -910,7 +910,13 @@
     const nc = nearestAimCand();
     if (nc && nc.r < AIM_FRICTION_NDC) fMul = AIM_FRICTION_MIN + (1 - AIM_FRICTION_MIN) * (nc.r / AIM_FRICTION_NDC);
     CBZ.cam.yaw -= dx * SENS * sMul * fMul;
-    CBZ.cam.pitch -= dy * SENS * sMul * fMul;
+    // SIGN: cam.pitch is DOWN-POSITIVE (see the convention note in
+    // systems/camera.js beside `const cam = {...}`). A thumb dragging DOWN is
+    // dy > 0 and must look DOWN, so it ADDS. This subtracted — the same
+    // fps.fp-convention paste as the mouse handler — so third-person vertical
+    // look was inverted on touch exactly as it was on desktop. The fps.fp line
+    // below keeps its minus because fps.fp really is UP-positive.
+    CBZ.cam.pitch += dy * SENS * sMul * fMul;
     // third-person pitch range: the camera agent's hook decides (it knows
     // the collision-safe envelope); fallback still allows a REAL look-up —
     // the old -0.18 floor meant an iPad could barely raise its eyes.

@@ -99,7 +99,8 @@ try {
 
   const ready = await poll(`!!(window.CBZ && CBZ.bootComplete && CBZ.resetGame &&
     CBZ.cityTapWorld && CBZ.cityMountAnimal && CBZ.cityAquaticMountStep &&
-    CBZ.cityMountedAnimalAttack && CBZ.aquaticMountAudit && CBZ.waterField)`, 45000, 250);
+    CBZ.cityMountedAnimalAttack && CBZ.aquaticMountAudit && CBZ.waterField &&
+    CBZ.aquaticBiteDuration && CBZ.biteTimeline && CBZ.biteTimeline.version >= 2)`, 45000, 250);
   if (!ready) throw new Error("aquatic-mount APIs did not load");
 
   await evaluate(`(() => {
@@ -227,7 +228,13 @@ try {
     a.heading = a.faceH = 0; CBZ.faceAnimalHeading(a, 0);
     CBZ.player.pos.set(a.pos.x, a.pos.y, a.pos.z); CBZ.player.dead = false;
     const mounted = CBZ.cityMountAnimal(a);
-    q.sharkHp0 = prey.hp = prey.maxHp || 55; prey.dead = false; prey.grow = null; prey.group.visible = true;
+    q.sharkHp0 = prey.hp = prey.maxHp || 55; prey.dead = false; prey.grow = null; prey.ridden = true; prey.group.visible = true;
+    // Keep the live target inside the active water cell while the mount owner
+    // settles.  Leaving it at its original ambient spawn for this 140 ms gap
+    // let wildlife cleanup detach the group before the exact jaw placement,
+    // turning a geometry contract into a timing-dependent null target.
+    prey.group.position.set(a.pos.x + 1.5, a.pos.y, a.pos.z);
+    if (!prey.group.parent && CBZ.scene) CBZ.scene.add(prey.group);
     prey.group.traverse(o => { o.matrixAutoUpdate = true; });
     q.sharkHits0 = CBZ.aquaticMountAudit().hits;
     return { mounted: !!mounted, attackCap: !!CBZ.cityRideDefinition(a.species).attack };
@@ -235,10 +242,15 @@ try {
   await sleep(140);
   await evaluate(`(() => {
     const q = window.__seaMountContract, a = q.shark, prey = q.tuna;
+    if (!prey.group.parent && CBZ.scene) CBZ.scene.add(prey.group);
     const jp = CBZ.creatureJawPoint(a), mouth = new THREE.Vector3(jp.x, jp.y, jp.z);
     a.group.updateMatrixWorld(true); mouth.applyMatrix4(a.group.matrixWorld);
     const box = new THREE.Box3().setFromObject(prey.group), center = box.getCenter(new THREE.Vector3());
-    prey.group.position.add(new THREE.Vector3(mouth.x + 0.35, mouth.y, mouth.z).sub(center));
+    // The mounted bite accelerates to ~8.5 m/s and resolves contact inside the
+    // shared 0.82–1.10 s aquatic cadence. Lead the live target by the measured
+    // approach distance; placing it only 0.35 m from the resting socket let
+    // the surge pass the tuna before the first legal contact sample.
+    prey.group.position.add(new THREE.Vector3(mouth.x + 2.65, mouth.y, mouth.z).sub(center));
     prey.group.updateMatrixWorld(true);
     const consumed = CBZ.cityMountedAnimalAttack(true);
     q.sharkAttackStart = CBZ.aquaticMountAudit();
@@ -317,7 +329,9 @@ try {
   if (!dolphin.breached || !dolphin.reentered || dolphin.rise < 4.0) failures.push("dolphin did not complete a huge ballistic breach and re-entry");
   if (dolphin.socketError > 0.08 || !dolphin.stillMounted || !dolphin.riderAquaticPose) failures.push("rider detached from the dolphin during the breach loop");
   if (!dolphin.swimHandoff.swimming || !dolphin.swimHandoff.playerSwim || dolphin.swimHandoff.mounted || dolphin.swimHandoff.aquaticMount) failures.push("dismount did not hand ownership back to swimming");
+  if (!shark.attackStart || shark.attackStart.attackDuration < 0.82 || shark.attackStart.attackDuration > 1.10 || shark.attackStart.attackCooldown - shark.attackStart.attackDuration < 0.40) failures.push("mounted great white bypassed the shared bite cadence or recovery beat");
   if (!sharkStart.mounted || !sharkStart.attackCap || !shark.hit || shark.damage <= 0 || !shark.clenchedAfterContact || shark.target !== "animal" || !shark.stillMounted) failures.push("mounted great white did not visibly clamp after biting a live target");
+  if (!megalodon.attackStart || megalodon.attackStart.attackDuration < 0.92 || megalodon.attackStart.attackDuration > 1.10 || megalodon.attackStart.attackCooldown - megalodon.attackStart.attackDuration < 0.53) failures.push("mounted megalodon bypassed the hull-bite cadence or recovery beat");
   if (!megStart.mounted || !megStart.shipBiteCap || !megStart.marine || !megalodon.hit || megalodon.engineHp > 0 || !megalodon.dead || megalodon.exploded || !megalodon.sinkingOwned || !megalodon.clenchedAfterContact || megalodon.target !== "ship" || !megalodon.stillMounted) failures.push("megalodon did not clamp and hand a ship to sinking physics without an explosion");
   const contractErrors = browserErrors.filter(e => !e.url || !/\/systems\/camera\.js(?:\?|$)/.test(e.url));
   const unrelatedBrowserErrors = browserErrors.filter(e => !contractErrors.includes(e));

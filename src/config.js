@@ -112,6 +112,29 @@
     watcherDirectorT: 0,     // cooldown for NPCs deciding to tail/watch the player
   };
 
+  /* ---- WHICH GAME THIS PAGE IS -------------------------------------------
+     index.html is the whole release and opens on the city. disaster.html is
+     ONE game — Natural Disaster Survival, the build that goes to the App
+     Store — and it opens on the island, because a page that boots into the
+     city has already paid for a world nobody asked for.
+
+     Two doors, and nothing downstream needs to know there are two entry
+     points: a page declares it before this file loads
+
+         <script>window.CBZ = { START_MODE: "survival" };</script>
+
+     or a URL asks for it (?mode=survival). systems/state.js already starts
+     with `setMode(g.mode || "escape")`, so this is the whole mechanism. An
+     unknown value is ignored rather than guessed at. */
+  const MODES = { city: 1, escape: 1, survival: 1, gungame: 1 };
+  let startMode = CBZ.START_MODE;
+  try {
+    const q = typeof location !== "undefined" && location.search
+      && new URLSearchParams(location.search).get("mode");
+    if (q) startMode = q;
+  } catch (e) {}
+  if (startMode && MODES[startMode]) CBZ.game.mode = startMode;
+
   // ---- colour palette (Roblox-bright, beveled feel) ----
   CBZ.COL = {
     WALL: 0x9aa3ad,
@@ -613,6 +636,23 @@
   // core/quality.js:applyQuality so it composes with the tier without dropping it.
   // Shadows are the #2 GPU cost; this isolates them. URL: ?cfg_CITY_SHADOW_MODE=off
   if (CBZ.CONFIG.CITY_SHADOW_MODE == null) CBZ.CONFIG.CITY_SHADOW_MODE = "auto";
+  /* RENDER_FRAMES — the TOOL switch, not a player one. false (?cfg_RENDER_FRAMES=0)
+     runs the whole game with no draw call at all: core/loop.js skips its single
+     renderer.render, and core/fxwarm.js skips the play-start program prewarm
+     that only exists to pay for drawing.
+
+     WHY IT IS HERE. Measured with tools/boot-trace.mjs, which beacons every
+     boot checkpoint from inside the frozen main thread: Gang City's CPU build
+     is ~32 s and finishes cleanly. What makes the mode untestable headless is
+     everything AFTER the build — the first frames, where three.js compiles a
+     program per material the first time it is drawn, on a software rasterizer,
+     across a 25 km scene. Prison Escape builds in ~1 s and draws at ~3 fps on
+     the same box, which is why every gate that targets those modes works and
+     the Gang City ones time out. This flag deletes that asymmetry for any
+     tool that asserts on world STATE rather than pixels; drive time with
+     CBZ.stepSim(dt) and take a picture, if you need one, with
+     CBZ.renderFrame(). Never ship it on: with no frames there is no game. */
+  if (CBZ.CONFIG.RENDER_FRAMES == null) CBZ.CONFIG.RENDER_FRAMES = true;
   // LOCAL_INSTANCING: per-chunk InstancedMesh pooling of repeated static props in
   // the block around the player (the ~99%-of-draw-calls bottleneck). This is the
   // biggest lever but also the one prior rounds REGRESSED on (batch.js already

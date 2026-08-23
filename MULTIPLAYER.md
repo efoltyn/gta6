@@ -182,3 +182,59 @@ interaction hardening with fake mics, 7 checks) · `node tools/harness.js`
 - Per-player wanted levels are shared server heat, not individual stars.
 - Voice is one proximity profile (no whisper/shout ranges or radio channels yet).
 - Player-driven cars push apart visually but don't exchange crash damage.
+
+---
+
+## Natural Disaster Survival — what a shared match needs, and where it stands
+
+**2026-08-21.** The city's multiplayer above is a networked RP server. The
+disaster island is a different problem: a hundred bodies and eleven hazards on
+one map, where every client has to reach the same answer or nobody's death
+means anything. That is a DETERMINISM problem before it is a transport problem,
+and the transport is not the part that was missing.
+
+`tools/determinism-check.mjs` is the measurement. It boots the game twice in two
+separate browsers, drives an identical scripted match in each — same seed, same
+forced disaster order, same fixed 1/60 ticks, no input — and compares every
+body's position, health and death every sixty ticks.
+
+**It started at zero ticks of agreement.** Four causes, and only one was a
+missing seed:
+
+| | |
+|---|---|
+| `systems/disasters.js` drew from `Math.random` | Where the lightning lands, which way the tsunami comes in, which buildings the quake takes. Now a named stream, reseeded per run from the world seed. Same for `systems/quake.js` (who a quake kills), the crowd's wander and where a body lands. |
+| Bot think cadence came off the CAMERA | A bot's decisions depended on where the local player was looking. Measured from the player now; the camera still decides animation, which is a view decision and may differ. |
+| The think schedule counted from PAGE LOAD | Which bots thought on tick 1 depended on how long the title screen had been up. |
+| The clock moved by the WALL | Every cooldown advanced by however long that machine's last frame took. Under the fixed step `CBZ.now` advances exactly one tick per tick. |
+
+**Where it stands:** `index.html` runs **5,400 ticks — ninety seconds, 32 bots,
+several disasters — bit-identical across two browsers**, verified twice.
+
+**The open item, stated plainly:** the sliced page (`disaster.html`, which is
+what the app ships) still diverges, within the first second, by millimetres on a
+handful of bots. Same code, fewer files — so something in the ~470 files the
+slice drops is holding the full page steady, and the slice is where the next
+session should look. `node tools/determinism-check.mjs --url disaster.html
+--ticks 300 --every 1` names the actor and the axis.
+
+### The seam, when a transport does arrive
+
+`src/net/survnet.js`. Not multiplayer — the three things every multiplayer
+design needs identically, so the day someone opens a socket it is plumbing:
+
+- **stable ids** on every actor, surviving a frame, a death and a reset;
+- **the match as one struct** — `snapshot()` writes it to an ArrayBuffer,
+  `apply()` puts it back, matched by id and never by index. 100 bots is 2.5 KB,
+  i.e. 40 kbit/s at 20 Hz. Testable today with no network: snapshot, disturb the
+  world, apply, compare fingerprints;
+- **one fingerprint** two clients can compare, quantised so the wire format
+  cannot manufacture a disagreement.
+
+No socket, no lobby, no prediction, no remote-player actor: each of those
+depends on a decision (peer-to-peer or authoritative, lockstep or snapshot)
+nobody has made yet, and writing them now would be guessing in public.
+
+`systems/fixedstep.js` is the other half — the sim advances in whole 1/60 ticks
+in survival, capped at four per frame so a long frame cannot spiral.
+`?cfg_FIXED_STEP_V1=0` puts it back on the variable step, live.

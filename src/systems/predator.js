@@ -2240,6 +2240,43 @@
     } catch (e) { return true; }
   }
 
+  // §R. THE BODY STOPS AT THE BODY (owner, 2026-08-21: the orca "overlaps
+  // instead of colliding with the shape of sharks"). Every contact distance
+  // in this machine is CENTRE-to-centre, and against a quarry as beamy as a
+  // megalodon that parks a committed hunter with its whole head inside the
+  // thing it is hitting: an orca's nose is 5 m in front of its origin and a
+  // megalodon's flank is 2 m from its centreline, while `reach` says 4.5.
+  // So water states that drive at an ANIMAL floor their stop at the hunter's
+  // own jaw distance plus the quarry's measured half-beam — the teeth arrive
+  // at the SURFACE. The player is thin and player hunts are untouched; the
+  // whole law reverts with creature_combat's bite-pass flag (?bitepass=off).
+  const _surf = { stop: 0, rad: 0 };            // reused: nothing per frame
+  function surfaceStop(hunter, target, isP, medium) {
+    _surf.stop = 0; _surf.rad = 0;
+    if (isP || medium !== "water" || !target || !target.group) return _surf;
+    if (typeof CBZ.creatureBitePass === "function" && !CBZ.creatureBitePass()) return _surf;
+    let jaw = 0;
+    if (typeof CBZ.creatureJawPoint === "function") {
+      try {
+        const j = CBZ.creatureJawPoint(hunter);
+        const sc = (hunter.group && hunter.group.scale && hunter.group.scale.x) || 1;
+        if (j && j.x > 0) jaw = j.x * sc;
+      } catch (e) { jaw = 0; }
+    }
+    if (!(jaw > 0)) return _surf;
+    let rad = 0;
+    if (typeof CBZ.marineBodyBeam === "function") {
+      try { rad = CBZ.marineBodyBeam(target) * 0.5; } catch (e) { rad = 0; }
+    }
+    if (!(rad > 0)) {
+      const ts = (target.group.scale && target.group.scale.x) || 1;
+      rad = 0.42 + ts * 0.45;
+    }
+    _surf.rad = rad;
+    _surf.stop = jaw + rad * 0.92;
+    return _surf;
+  }
+
   // HOW LONG IT CIRCLES. opts.circleT is the caller's BASE (a great white sets
   // 6.5s, a megalodon 11.05s — "circles roughly twice as long" is most of what
   // makes a megalodon read as a megalodon), and the jitter rides on top of it
@@ -2699,10 +2736,18 @@
           // again would just turn a wounded animal's second pass into a coin
           // flip. The recommit is certain; the number of them is the ration.
           const r = h.recommit ? 1 : Math.max(0, Math.random() - bias);
+          // §R: A WATER HUNTER WITH A REAL MOUTH DOES NOT NUDGE ANOTHER
+          // ANIMAL — the shut-mouth investigatory bump is the player-dread
+          // beat, and thrown at a megalodon it is exactly the owner's "it
+          // doesn't bite, it headbutts". An animal quarry gets the commit
+          // (a bite) instead. Player hunts keep the bump untouched.
+          const noBump = !isP && medium === "water" &&
+            hunter.group && hunter.group.userData && hunter.group.userData.aquaticMouth &&
+            !(typeof CBZ.creatureBitePass === "function" && !CBZ.creatureBitePass());
           if (r < P_CIRCLE_VANISH) {
             h.vanishDur = VANISH_MIN + Math.random() * VANISH_RAND;
             setState(hunter, h, "vanish", opts);
-          } else if (r < P_CIRCLE_VANISH + P_CIRCLE_BUMP) {
+          } else if (r < P_CIRCLE_VANISH + P_CIRCLE_BUMP && !noBump) {
             setState(hunter, h, "bump", opts);
           } else {
             enterCommit(hunter, h, opts, stinger);
@@ -2715,8 +2760,12 @@
         // ONE investigatory shoulder-nudge, then it VEERS OFF. A fake-out that
         // is also real animal behaviour, and it teaches the tell for free.
         dreadFor(hunter, 0.7, dreadOptsFor(hunter, dist, sub));
-        move(hunter, toT, rushSpd * 0.72, dt);
-        if (dist <= reach * 1.15) {
+        // §R: the nudge lands on the quarry's SURFACE, not on its centreline
+        const ssB = surfaceStop(hunter, target, isP, medium);
+        let spdB = rushSpd * 0.72;
+        if (ssB.stop > 0) spdB = Math.min(spdB, Math.max(0, dist - ssB.stop) / Math.max(dt, 1e-3));
+        move(hunter, toT, spdB, dt);
+        if (dist <= Math.max(reach * 1.15, ssB.stop * 1.04)) {
           const dmg = opts.bumpDmg != null ? opts.bumpDmg : D_BUMP_DMG;
           if (isP && CBZ.cityHurtPlayer && !(CBZ.player && CBZ.player.dead)) {
             try {
@@ -2812,15 +2861,25 @@
         // ever, because the only thing that ticks the animation is the driver
         // we would have stopped calling. It advances the swing and NOTHING
         // else: no move(), so the body coasts on the animation's own lunge.
+        // §R: against an animal, the commit stops where the TEETH meet its
+        // measured surface, and the fight driver's reach is floored to match
+        // so the swing actually begins out there instead of deadlocking in
+        // its own approach branch.
+        const ssR = surfaceStop(hunter, target, isP, medium);
         if (h.struck && CFG.PREDATOR_FOLLOW_THROUGH !== false) {
           if (hunter._atkAnim >= 0 && CBZ.creatureFight) {
             const soF = seizeOptsFor(hunter, h, opts, medium);
-            try { CBZ.creatureFight(hunter, target, dt, fightOptsFor(hunter, h, opts, soF, medium)); } catch (e) {}
+            const foF = fightOptsFor(hunter, h, opts, soF, medium);
+            if (ssR.stop > 0 && !(foF.reach >= ssR.stop * 1.05)) foF.reach = ssR.stop * 1.05;
+            foF.targetRad = ssR.rad;
+            try { CBZ.creatureFight(hunter, target, dt, foF); } catch (e) {}
           }
           if (!(hunter._atkAnim >= 0)) { h.struck = false; endCommit(hunter, h, opts, true); }
           break;
         }
-        move(hunter, toT, rushSpd, dt);
+        let spdR = rushSpd;
+        if (ssR.stop > 0) spdR = Math.min(spdR, Math.max(0, dist - ssR.stop) / Math.max(dt, 1e-3));
+        move(hunter, toT, spdR, dt);
         // THE DROP-OUT, timed off closing speed rather than a fixed radius.
         if (!h.dropped && dist <= rushSpd * DROP_LEAD + reach) {
           h.dropped = true;
@@ -2831,7 +2890,7 @@
         // dist > reach), so for the last frame or two of a rush BOTH movers ran
         // and the closing speed doubled — a visible pop right on the bite.
         // One owner per metre.
-        if (dist <= reach) {
+        if (dist <= Math.max(reach, ssR.stop * 1.18)) {
           // NOT EVERYTHING CARRIES YOU OFF. A rhino, a bison, a moose and a
           // kicking elk commit exactly as hard as a bear does, but the commit
           // ENDS at the impact — they hit you and they are past you and
@@ -2845,6 +2904,8 @@
             // strike choreography. If it understands opts.seize it seizes; if
             // it does not, our onHit does it instead. Degrade-safe both ways.
             const fo = fightOptsFor(hunter, h, opts, so, medium);
+            if (ssR.stop > 0 && !(fo.reach >= ssR.stop * 1.05)) fo.reach = ssR.stop * 1.05;
+            fo.targetRad = ssR.rad;
             try { CBZ.creatureFight(hunter, target, dt, fo); } catch (e) {}
             if (hunter._seizing) { h.seizeWait = true; setState(hunter, h, "seize", opts); }
             // a non-grabbing archetype has spent A PASS the moment it connects.

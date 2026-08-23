@@ -1109,6 +1109,13 @@
     for (let i = 0; i < peds.length; i++) considerBiteTarget(peds[i], "ped", mouth, best.d, best);
     const cops = CBZ.cityCops || [];
     for (let i = 0; i < cops.length; i++) considerBiteTarget(cops[i], "cop", mouth, best.d, best);
+    // SURVIVAL: the island's crowd rides its own bus (CBZ.bots, not
+    // cityPeds), so a mounted shark's mouth has to be told it exists —
+    // this is what makes the shark sim's beach a buffet.
+    if (g.mode === "survival" && CBZ.bots) {
+      const bots = CBZ.bots;
+      for (let i = 0; i < bots.length; i++) considerBiteTarget(bots[i], "survivor", mouth, best.d, best);
+    }
     if (R.shipBite) {
       const cars = CBZ.cityCars || [];
       for (let i = 0; i < cars.length; i++) if (marineCar(cars[i])) considerBiteTarget(cars[i], "ship", mouth, best.d, best);
@@ -1149,6 +1156,17 @@
       } else if (CBZ.body && CBZ.body.hit) {
         CBZ.body.hit(target, { fromX: a.pos.x, fromZ: a.pos.z, force: 4 + scale * 2, knockdown: 1.1 });
       }
+    } else if (kind === "survivor") {
+      // through the island's own damage bus, so the kill hits the killfeed
+      // ("Mia R. was eaten by a bull shark"), the ragdoll fling, the gore
+      // table — everything a disaster death already gets. x5 because a
+      // shark bite on a person is a resolution, not a health tax.
+      if (!CBZ.surv || !CBZ.surv.hurt) return false;
+      if (CBZ.creatureBiteWound) CBZ.creatureBiteWound(a, target, "lunge");
+      CBZ.surv.hurt(target, damage * 5, {
+        fromX: a.pos.x, fromZ: a.pos.z, force: 5 + scale * 2, fling: 2 + scale,
+        cause: "eaten by a " + String(sp.name || sp.id).toLowerCase(),
+      });
     } else if (kind === "ship") {
       if (!CBZ.cityDamageCar) return false;
       const shipDamage = Math.max(145, Math.round(damage * 2.5));
@@ -1167,6 +1185,9 @@
     if (CBZ.shake) CBZ.shake(Math.min(0.85, 0.18 + scale * 0.18));
     AQUATIC_AUDIT.hits++;
     AQUATIC_AUDIT.lastTarget = kind;
+    // the shark sim's meal ledger: told about every LANDED mounted bite,
+    // after the damage has fully resolved (so target.dead is honest here)
+    if (CBZ.sharkSimBite) { try { CBZ.sharkSimBite(kind, target, a); } catch (e) {} }
     return true;
   }
 
@@ -1175,10 +1196,30 @@
     if (!a || !R || !R.aquatic || !R.attack || ride.attackCd > 0 || ride.attackT > 0) return false;
     const pick = selectBiteTarget(a, R);
     ride.target = pick.target; ride.targetKind = pick.kind;
-    ride.attackT = 0.0001; ride.attackDur = R.shipBite ? 0.72 : 0.56;
-    ride.attackHit = false; ride.attackHitP = -1; ride.attackCd = R.shipBite ? 0.85 : 0.62;
+    // The mounted animal and the wild predator now use creature_combat's one
+    // aquatic bite clock. The old 0.56 s chomp (0.72 for every megalodon
+    // target) could open and clamp between two readable frames; cooldown also
+    // expired during the swing, leaving only ~60 ms before the next chomp.
+    // Preserve target-sensitive mass — an actual hull takes longer — then
+    // leave a visible recovery beat after the mouth has returned to rest.
+    ride.attackT = 0.0001;
+    ride.attackDur = CBZ.aquaticBiteDuration
+      ? CBZ.aquaticBiteDuration(a, pick.kind)
+      : (R.shipBite ? 0.72 : 0.56);
+    ride.attackHit = false; ride.attackHitP = -1;
+    ride.attackCd = ride.attackDur + (pick.kind === "ship" ? 0.55 : 0.42);
     a._atkAnim = 0;
-    if (ride.water) ride.water.v = Math.max(ride.water.v || 0, (R.cruise || 8) * 0.82);
+    if (ride.water) {
+      // Lunge TO the meal, not through it. The fixed cruise-fraction burst
+      // overshot anything closer than ~2.5 m: the mouth was already past the
+      // body before the contact window opened, so a point-blank bite whiffed.
+      // pick.d is the real gap — arrive around the shut of the jaws and let
+      // the window land it; with no target, keep the old full-send gape.
+      const boost = ride.target
+        ? Math.max((R.cruise || 8) * 0.35, Math.min((R.cruise || 8) * 0.82, pick.d / (R.shipBite ? 0.4 : 0.3)))
+        : (R.cruise || 8) * 0.82;
+      ride.water.v = Math.max(ride.water.v || 0, boost);
+    }
     AQUATIC_AUDIT.attacks++;
     return true;
   }
@@ -1188,11 +1229,22 @@
     if (down !== false && R.attack) startAquaticAttack();
     return true;                                      // mounted animal owns the trigger
   };
+  // Is there anything to bite RIGHT NOW? The shark sim's auto-bite asks this
+  // before pulling the trigger, so the mount only chomps when the chomp can
+  // land — it is the exact selection the attack itself will run, exported
+  // read-only, and null while an attack or its cooldown is still in flight.
+  CBZ.cityAquaticBiteProbe = function () {
+    const a = ride.mount, R = a && rideDef(a.species);
+    if (!a || !R || !R.aquatic || !R.attack || ride.attackCd > 0 || ride.attackT > 0) return null;
+    const pick = selectBiteTarget(a, R);
+    return pick.target ? pick : null;
+  };
 
   function tickAquaticAttack(a, dt) {
     if (ride.attackCd > 0) ride.attackCd = Math.max(0, ride.attackCd - dt);
     ride.attackPitch = 0; ride.attackRoll = 0;
     if (!(ride.attackT > 0)) return;
+    const pPrev = Math.min(1, ride.attackT / ride.attackDur);
     ride.attackT += dt;
     const p = Math.min(1, ride.attackT / ride.attackDur);
     a._atkAnim = p;
@@ -1205,21 +1257,19 @@
     // Contact is a WINDOW, not one magic animation frame. A fast shark can
     // cross an entire target between two 60 Hz samples; retry while the jaw is
     // open and let the geometry distance/front test decide the first real hit.
-    if (!ride.attackHit && p >= 0.38 && p <= 0.72) {
+    // The window itself is tested as a CROSSING (pPrev), because on a stalled
+    // frame — a 2 fps thermal dip, a headless tool — p can jump straight from
+    // wind-up to recovery and a sampled-only test never lands a single bite.
+    if (!ride.attackHit && p >= 0.38 && pPrev <= 0.72) {
       ride.attackHit = damageBiteTarget(a, ride.target, ride.targetKind);
       if (ride.attackHit) ride.attackHitP = p;
     }
-    // Open through the approach, then snap shut immediately AFTER real contact.
-    // Previously damage could resolve at p=.18 while the jaw stayed wide until
-    // p=.64, so the target was already hurt while the shark visibly held its
-    // mouth open through it. A miss still performs a full gape and recovery;
-    // a hit turns the geometry result into the clench trigger.
-    let open = p < 0.30 ? ease(p / 0.30) : 1;
-    if (ride.attackHit && ride.attackHitP >= 0) {
-      open = Math.max(0.08, 1 - ease((p - ride.attackHitP) / 0.16) * 0.92);
-    } else if (p > 0.70) {
-      open = 1 - ease((p - 0.70) / 0.30);
-    }
+    // The same normalized production curve now drives mounted and wild jaws.
+    // Contact is still geometry-owned above, but no longer collapses the next
+    // 9% of a second into an unreadable instant clamp: full gape carries the
+    // target into compression, then the body closes and visibly recovers.
+    let open = CBZ.biteCurve ? CBZ.biteCurve(p)
+      : (p < 0.30 ? ease(p / 0.30) : (p > 0.70 ? 1 - ease((p - 0.70) / 0.30) : 1));
     if (CBZ.swimJaw) CBZ.swimJaw(a, open);
     if (p >= 1) {
       ride.attackT = 0; ride.target = null; ride.targetKind = null;
@@ -1310,8 +1360,13 @@
       W.y += W.vy * fdt;
       const bedY = surf - depth + Math.max(0.35, (a.species.scale || 1) * 0.32);
       const topY = surf - Math.max(0.28, (a.swimDepth || 1) * (R.breach ? 0.36 : 0.72));
+      // Water shallower than the body's cruise depth crosses the clamps —
+      // a megalodon (swimDepth ~8) in 3 m of surf had topY UNDER the seabed
+      // and got wedged into the ground. The honest posture is riding the
+      // bed, dorsal out of the water.
+      const effTop = Math.max(topY, bedY);
       if (W.y < bedY) { W.y = bedY; if (W.vy < 0) W.vy = 0; }
-      if (W.y > topY) { W.y = topY; if (W.vy > 0) W.vy *= 0.42; }
+      if (W.y > effTop) { W.y = effTop; if (W.vy > 0) W.vy *= 0.42; }
       W.pitch += (Math.max(-0.62, Math.min(0.72, W.vy * 0.115)) - W.pitch) * Math.min(1, fdt * 4.2);
       if (R.breach && sprint && vin > 0 && W.breachCd <= 0 && W.vy > 1.2 && W.y >= topY - 0.08) {
         W.airborne = true; W.vy = R.breachVel || 15.5;
@@ -1580,6 +1635,11 @@
       speed: W ? +(W.v || 0).toFixed(2) : 0,
       verticalSpeed: W ? +(W.vy || 0).toFixed(2) : 0,
       airborne: !!(W && W.airborne), attacking: ride.attackT > 0,
+      attackProgress: ride.attackT > 0 && ride.attackDur > 0
+        ? +Math.min(1, ride.attackT / ride.attackDur).toFixed(3) : 0,
+      attackDuration: +(ride.attackDur || 0).toFixed(3),
+      attackCooldown: +(ride.attackCd || 0).toFixed(3),
+      jawOpen: a && a.swim ? +Math.max(0, a.swim.jawK || 0).toFixed(3) : 0,
       attackTarget: ride.targetKind,
       attackTargetDistance: a && ride.target && ride.target.group
         ? +biteDistance(ride.target, jawWorld(a)).toFixed(2) : null,
