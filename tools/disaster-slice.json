@@ -4351,7 +4351,8 @@
   "src/city/localinst.js",
   "src/core/profile.js",
   "src/core/fxwarm.js",
-  "src/city/cctv.js"
+  "src/city/cctv.js",
+  "src/modes/shark_sim.js"
  ],
  "needed": [
   "src/city/facade_kit.js",

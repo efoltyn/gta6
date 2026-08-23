@@ -4,7 +4,7 @@
 
        node tools/build-disaster-page.mjs
 
-     Natural Disaster Survival, standing alone: index.html minus the 473
+     Natural Disaster Survival, standing alone: index.html minus the 474
      script tags this game never runs, opening straight onto the island. This
      is the page the iOS build ships (tools/build-ios.mjs bundles it).
 ============================================================ -->
@@ -185,6 +185,21 @@
       </details>
     </div>
 
+    <!-- SHARK SIM mode -->
+    <div class="mode-sharksim-only">
+      <div class="logo">SHARK <span class="z">SIM</span></div>
+      <div class="sub">You Are The Shark</div>
+      <details class="controls">
+        <summary>Controls</summary>
+        <div class="keys">
+          <div class="row"><span class="keycol"><span class="kbd">WASD</span></span><span class="lab">Swim</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">Shift</span></span><span class="lab">Lunge</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">Space</span> <span class="kbd">C</span></span><span class="lab">Rise · dive</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">Mouth</span></span><span class="lab">Bite is automatic — point it at food</span></div>
+        </div>
+      </details>
+    </div>
+
     <!-- GUN GAME mode (map buttons are built by src/modes/gungame.js from its
          own MAPS registry — the registry is the truth, the markup is a slot) -->
     <div class="mode-gungame-only">
@@ -302,6 +317,7 @@
     <div class="smallnote mode-city-only">Make money any way you can. Cops escalate to 5 stars. Get cuffed and it's the jail game.</div>
     <div class="smallnote mode-escape-only" id="bestStat"></div>
     <div class="smallnote mode-survival-only">Reach high ground before the water does.</div>
+    <div class="smallnote mode-sharksim-only">Point your mouth at food — the bite is automatic. Dodge the pod until you are the MEGALODON.</div>
   </div>
 </div>
 
@@ -746,7 +762,6 @@
 <script src="src/systems/grapple.js?v=nohint1"></script>
 <script src="src/entities/survivorbot.js?v=trauma2"></script>
 <script src="src/modes/survival.js?v=nodash1"></script>
-<script src="src/modes/shark_sim.js?v=1"></script>
 <!-- GUN GAME borrows worlds it never builds: the prison (escape), the disaster
      island (survival). Loads AFTER both so their builders exist. -->
 <!-- THE SHAFT IS SHARED: world/groundshaft.js owns every hole in the ground
@@ -763,6 +778,41 @@
      gas fires and downed lines for BOTH worlds (CITY_QUAKE for the city).
      Must precede systems/disasters.js so the roster finds CBZ.quake. -->
 <script src="src/systems/quake.js?v=quake1"></script>
+<!-- ==== PER-DISASTER MODULE SEAM ==========================================
+     One line per disaster in the survival roster, each owned by exactly that
+     disaster and nobody else. A disaster whose behaviour outgrows its entry in
+     systems/disasters.js moves that behaviour into its OWN file and claims its
+     line here; the ones still living entirely inside the roster leave theirs a
+     comment. Everything in this block loads BEFORE systems/disasters.js so the
+     roster finds the module's public surface (CBZ.<thing>) at definition time.
+
+     Why a block of one-line slots instead of "add a script tag wherever":
+     twelve disasters get worked on in parallel, and a shared insertion point
+     is a merge conflict every single time. A slot per disaster is not. -->
+<!-- seam:earthquake     — systems/quake.js, tagged above (predates this block) -->
+<!-- seam:lightning      — systems/lightningfx.js, tagged above -->
+<!-- seam:tsunami        — city/tsunami.js, tagged with the city systems -->
+<!-- seam:flashflood — systems/flashflood.js owns the churn spray, the entrained
+     debris and the roar. Two draw calls and no water planes: the flood itself
+     is still a term in the ONE shared depth field, never a mesh. -->
+<script src="src/systems/flashflood.js?v=flood1"></script>
+<!-- seam:hurricane — a cyclone, not a wind number: systems/hurricane.js owns the
+     tracking eye, the eyewall field, the surge curve and the advected debris. -->
+<script src="src/systems/hurricane.js?v=hur1"></script>
+<!-- seam:wildfire — systems/wildfire.js owns the wind/slope-driven front, the
+     killing smoke plume, the ember spotting and the persistent burn scar. -->
+<script src="src/systems/wildfire.js?v=fire1"></script>
+<!-- seam:tornado        — systems/tornado.js, tagged with the city systems -->
+<!-- seam:volcano        — world/volcanofx.js, tagged above -->
+<!-- seam:blizzard — systems/blizzard.js owns the windchill clock, the windbreak
+     query, the gusting whiteout, the lee-side drifts and the burial. -->
+<script src="src/systems/blizzard.js?v=snow1"></script>
+<!-- seam:meteor — systems/meteor.js owns the radiant, the bolides and their smoke
+     trains, the airbursts, the delayed-sound queue and the crater digs. -->
+<script src="src/systems/meteor.js?v=meteor1"></script>
+<!-- seam:sinkhole       — world/groundshaft.js, tagged above -->
+<!-- seam:nuke           — city/nukefx.js, tagged with the city systems -->
+<!-- ==== END PER-DISASTER MODULE SEAM ==================================== -->
 <script src="src/systems/disasters.js?v=nodash1"></script>
 <script src="src/systems/survival_interact.js?v=climbdock1"></script>
 <script src="src/systems/survivalhud.js?v=nozone1"></script>
