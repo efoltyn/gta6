@@ -1037,6 +1037,22 @@
           // no `by`: nobody is credited for the weather (see tornado.js's
           // note — a non-null `by` makes structural.js blame the player)
           bounds: { x: ctx.cx, z: ctx.cz, r: ctx.R - 6 },   // bounce off the island edge
+          /* THE ARENA BRIDGE (TORNADO_V2, declared in tornado.js). The vortex
+             file owns the wind field and the timing; what it cannot own is the
+             island's machinery, so this def LENDS it: bites land in THE
+             structural ledger above (glass → lean → collapse, shared with the
+             quake and the wave), thrown cars ride the one flingCar ticker the
+             flood uses, and shelter is surv's own physical underRoof test.
+             The vortex keeps no structural state; the island keeps one ledger. */
+          arena: (CBZ.CONFIG.TORNADO_V2 !== false) ? {
+            fragile: function () { return ctx.arena.fragile || []; },
+            cars: function () { return ctx.arena.cars || []; },
+            hitBuilding: function (b, amount, dirx, dirz) {
+              return structureHit(b, amount, ctx, { kind: "tornado", dirx: dirx, dirz: dirz });
+            },
+            flingCar: function (car, dx, dz, force, up) { flingCar(car, dx, dz, force, up); },
+            sheltered: function (a) { return sheltered(a); },
+          } : null,
         }) : null;
       },
       active(dt, ctx) {
@@ -1044,7 +1060,11 @@
         // All this def does is mirror the live position for the minimap and
         // keep the parent storm blowing (the funnel already biases off
         // CBZ.weather's wind, so this is the only wind either of us sets).
-        weather({ rain: 0.55, wind: 12, windDir: { x: ctx.st.wx, z: ctx.st.wz }, fog: 0.45, fogColor: 0x6a6f7a });
+        // V2 thins the active-phase fog: at 0.45 the whole column washed to
+        // the fog colour and the funnel read as weather haze, not a tornado.
+        // The dark condensation funnel + wall cloud need the contrast.
+        weather({ rain: 0.55, wind: 12, windDir: { x: ctx.st.wx, z: ctx.st.wz },
+          fog: CBZ.CONFIG.TORNADO_V2 !== false ? 0.28 : 0.45, fogColor: 0x6a6f7a });
         const a = CBZ.tornado && CBZ.tornado.active()[0];
         if (a) { ctx.st.x = a.x; ctx.st.z = a.z; }
       },
